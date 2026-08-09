@@ -1,0 +1,15 @@
+flowchart TD
+  A["detect(ctx)"] --> B{"ctx.config.blindRobust<br/>enabled?"}
+  B -- "否 / 未配置" --> L["legacy 逻辑：baseMean<br/>固定阈值 + 多数投票"] --> Z["return result"]
+  B -- "是" --> C["基线采样 baselineSamples 次<br/>originalValue → 计时 baselineElapsed[]"]
+  C --> D["μ = mean(baselineElapsed)<br/>σ = std(baselineElapsed)"]
+  D --> E["threshold = effectiveThreshold(μ,σ,z,absFloor)<br/>= σ>0 ? μ+z·σ : μ+absFloor"]
+  E --> F["注入采样 timeBlindSamples 次<br/>send payload (timeoutMs)"]
+  F --> G["elapsed 计时<br/>成功且 elapsed ≥ threshold → stableHits++"]
+  G --> H{"还有采样次数?"}
+  H -- "是" --> F
+  H -- "否" --> I["stableRatio = stableHits / timeBlindSamples"]
+  I --> J{"stableRatio ≥ minStableRatio?"}
+  J -- "是" --> M["vulnerable=true<br/>evidence μ/σ/z/threshold"]
+  J -- "否" --> Z
+  M --> Z

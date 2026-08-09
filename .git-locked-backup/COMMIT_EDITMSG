@@ -1,0 +1,7 @@
+fix: 扫描级 requestDelayMs/keepAlive 经 withScanOverrides 包装注入，不再污染全局 httpClient 单例
+
+- ScanManager 不再直改 this.httpClient.requestDelayMs/keepAlive（并发扫描互不覆盖）
+- 新增 withScanOverrides：无覆盖配置零包装；仅 keepAlive=false 才注入
+- 一阶流水线与二阶趟均走扫描级包装
+- 新增 scanOverrides.test.js 7 用例（含并发隔离回归）
+- 后端测试 476/476 全绿

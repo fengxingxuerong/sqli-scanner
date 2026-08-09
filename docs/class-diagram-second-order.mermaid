@@ -1,0 +1,103 @@
+classDiagram
+    class ScanConfig {
+        +number concurrency
+        +number timeoutMs
+        +number retry
+        +number timeThresholdMs
+        +number ratePerSec
+        +boolean enableExtract
+        +object proxy
+        +object auth
+        +object wafEvasion
+        +object oob
+        +boolean crawlForms
+        +SecondOrderConfig secondOrder
+    }
+    class SecondOrderConfig {
+        +boolean enabled
+        +string[] triggerUrls
+        +boolean refreshCsrf
+        +boolean negativeControl
+        +boolean oobTrigger
+    }
+    class Target {
+        +string id
+        +string baseUrl
+        +string method
+        +object bodyParams
+        +object cookieParams
+        +object headerParams
+        +ScanConfig config
+    }
+    class InjectionPoint {
+        +string id
+        +enum location
+        +string param
+        +string originalValue
+        +boolean confirmed
+        +string technique
+        +string dbms
+        +string formMethod
+        +string actionUrl
+        +object formValues
+        +string csrfTokenName
+        +boolean isStorePoint
+        +string storeKind
+    }
+    class DetectionResult {
+        +string pointId
+        +enum technique
+        +boolean vulnerable
+        +string dbms
+        +string evidence
+        +string[] payloads
+    }
+    class Detector {
+        <<interface>>
+        +enum technique
+        +detect(ctx) Promise~DetectionResult~
+    }
+    class SecondOrderDetector {
+        +detect(ctx) Promise~DetectionResult~
+        -_buildProbe(ctx, dbms) string
+        -_store(httpClient, ctx, value) Promise
+        -_trigger(httpClient, ctx, url) Promise~string~
+        -_refreshCsrf(ctx) Promise
+    }
+    class ScanManager {
+        +start(target) Promise~string~
+        +stop(scanId) void
+        +getReport(scanId) ReportModel
+        +exportReport(scanId, format) string
+        -_run(scanId) void
+        -_runSecondOrder(scanId, target, points, dbms) void
+        -Detector[] detectors
+        -SecondOrderDetector secondOrderDetector
+    }
+    class TargetParser {
+        +discover(target) InjectionPoint[]
+        -_crawlForms(target, points) void
+    }
+    class ReportGenerator {
+        +build(...) ReportModel
+        +riskOf(vulns, data) enum
+        +toJSON(report) string
+        +toHTML(report) string
+    }
+    class EventBus {
+        +emit(scanId, type, payload) void
+    }
+    class HttpClient {
+        +request(opts) Promise~Response~
+    }
+
+    ScanConfig *-- SecondOrderConfig : 含二阶配置
+    Target "1" *-- "0..*" InjectionPoint : 发现
+    Detector <|.. SecondOrderDetector
+    ScanManager *-- TargetParser
+    ScanManager ..> SecondOrderDetector : 二阶补充趟(独立实例,不在 detectors 数组)
+    ScanManager ..> ReportGenerator : 风险纳管
+    ScanManager ..> EventBus : 进度事件
+    SecondOrderDetector ..> HttpClient : 存储/触发请求
+    TargetParser ..> InjectionPoint : 标记 isStorePoint/storeKind
+    SecondOrderDetector ..> ERROR_SIG : 触发页判定

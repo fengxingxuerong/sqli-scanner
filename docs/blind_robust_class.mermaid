@@ -1,0 +1,30 @@
+classDiagram
+  class StatsHelper {
+    <<module>>
+    +mean(arr: number[]): number
+    +std(arr: number[]): number
+    +ratioTrue(flags: boolean[]): number
+    +similarityRate(responses: string[], similarFn: (b: string)=>boolean, expected: boolean): number
+    +effectiveThreshold(mu: number, sigma: number, z: number, absFloor: number): number
+  }
+  class Detector {
+    +detect(ctx)
+    +buildRequest(target, point, value): object
+    +obfuscateValue(ctx, value): string
+    +send(httpClient, ctx, req, opts): Promise
+  }
+  class BooleanBlindDetector {
+    +detect(ctx): DetectionResult
+    -_robustDetect(ctx, result, templates): DetectionResult
+    -_isMeaningfulDiff(a, b): boolean
+    -_similarToBaseline(body, baselines): boolean
+    -_similar(a, b): boolean
+  }
+  class TimeBlindDetector {
+    +detect(ctx): DetectionResult
+    -_robustDetect(ctx, result, templates, payload, timeoutMs): DetectionResult
+  }
+  Detector <|-- BooleanBlindDetector
+  Detector <|-- TimeBlindDetector
+  BooleanBlindDetector ..> StatsHelper : uses
+  TimeBlindDetector ..> StatsHelper : uses

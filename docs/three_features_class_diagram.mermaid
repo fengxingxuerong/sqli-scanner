@@ -1,0 +1,105 @@
+classDiagram
+    class TamperPlugin {
+        <<interface>>
+        +string name
+        +string description
+        +transform(payload, ctx) string
+    }
+    class space2comment
+    class randomcase
+    class charencode
+    class equaltolike
+    class keywordSplit
+    class comments
+    class base64encode
+    class TamperRegistry {
+        +register(plugin)
+        +registerMany(plugins)
+        +get(name) TamperPlugin
+        +list() object[]
+        +resolve(names) TamperPlugin[]
+    }
+    class applyTampers {
+        +applyTampers(payload, ctx, names) string
+        +obfuscateWithConfig(value, ctx) string
+    }
+    class OobReceiver {
+        +start(oobConfig)
+        +receive(token)
+        +waitForToken(token, timeoutMs) Promise~boolean~
+        +isStarted() boolean
+        +stop()
+    }
+    class OobDetector {
+        +detect(ctx) Promise~DetectionResult~
+    }
+    class InjectionPoint {
+        +string id
+        +enum location
+        +string param
+        +string originalValue
+        +boolean confirmed
+        +string technique
+        +string dbms
+        +string formMethod
+        +string actionUrl
+        +object formValues
+        +string csrfTokenName
+    }
+    class ScanConfig {
+        +wafEvasion.tamper {enabled, plugins}
+        +oob {enabled, callbackBase, httpPort, timeoutMs}
+        +boolean crawlForms
+    }
+    class payloads {
+        +TECHNIQUE_TYPES[] 含 'oob'
+        +OOB_PAYLOADS[dbms]
+        +SUPPORTED[dbms].oob
+        +MariaDB 区分
+    }
+    class Detector {
+        <<interface>>
+        +enum technique
+        +detect(ctx) Promise~DetectionResult~
+        +obfuscateValue(ctx, v) string
+        +buildRequest(target, point, v) object
+    }
+    class ScanManager {
+        +detectors[] 含 OobDetector(末位)
+        +_run(scanId)
+    }
+    class HttpClient {
+        +request(opts) Promise~Response~
+    }
+    class httpClient {
+        <<singleton>>
+    }
+    class oobReceiver {
+        <<singleton>>
+    }
+    class tamperRegistry {
+        <<singleton>>
+    }
+
+    TamperPlugin <|.. space2comment
+    TamperPlugin <|.. randomcase
+    TamperPlugin <|.. charencode
+    TamperPlugin <|.. equaltolike
+    TamperPlugin <|.. keywordSplit
+    class comments
+    class base64encode
+    TamperPlugin <|.. comments
+    TamperPlugin <|.. base64encode
+    TamperRegistry "1" *-- "0..*" TamperPlugin : 注册
+    applyTampers ..> TamperRegistry : resolve
+    Detector <|.. OobDetector
+    OobDetector ..> oobReceiver : waitForToken
+    OobDetector ..> payloads : OOB_PAYLOADS
+    ScanManager *-- OobDetector
+    ScanManager ..> oobReceiver : start(on demand)
+    Detector ..> applyTampers : obfuscateWithConfig
+    Detector ..> HttpClient : 发请求
+    HttpClient ..> httpClient : 单例
+    applyTampers ..> tamperRegistry : 解析插件
+    ScanConfig .. payloads : SUPPORTED/TECHNIQUE_TYPES
+    InjectionPoint "0..*" -- "1" ScanConfig : 由 target.config 携带

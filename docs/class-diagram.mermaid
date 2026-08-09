@@ -1,0 +1,140 @@
+classDiagram
+    class ScanConfig {
+        +number concurrency
+        +number timeoutMs
+        +number retry
+        +number timeThresholdMs
+        +number ratePerSec
+        +boolean enableExtract
+        +string proxy
+        +object auth
+    }
+    class Target {
+        +string id
+        +string baseUrl
+        +string method
+        +object bodyParams
+        +object cookieParams
+        +object headerParams
+        +ScanConfig config
+    }
+    class InjectionPoint {
+        +string id
+        +enum location
+        +string param
+        +string originalValue
+        +boolean confirmed
+        +string technique
+        +string dbms
+    }
+    class DetectionResult {
+        +string pointId
+        +enum technique
+        +boolean vulnerable
+        +string dbms
+        +string evidence
+        +string[] payloads
+    }
+    class Vulnerability {
+        +string id
+        +string pointId
+        +enum technique
+        +string dbms
+        +enum riskLevel
+        +string[] payloads
+        +string description
+    }
+    class ExtractedData {
+        +string[] databases
+        +map~string,string[]~ tables
+        +map~string,string[]~ columns
+        +map~string,object[]~ rows
+    }
+    class ReportModel {
+        +string scanId
+        +Target target
+        +Date startedAt
+        +Date finishedAt
+        +string dbms
+        +InjectionPoint[] points
+        +Vulnerability[] vulns
+        +ExtractedData data
+        +enum riskLevel
+        +object summary
+    }
+    class Detector {
+        <<interface>>
+        +enum technique
+        +detect(ctx) Promise~DetectionResult~
+    }
+    class UnionDetector
+    class ErrorDetector
+    class BooleanBlindDetector
+    class TimeBlindDetector
+    class DBFingerprinter {
+        +fingerprint(ctx) Promise~string~
+    }
+    class Extractor {
+        +enumerateDatabases(ctx)
+        +enumerateTables(ctx, db)
+        +enumerateColumns(ctx, db, table)
+        +dumpData(ctx, db, table, cols, limit)
+    }
+    class ColumnTypeEnumerator {
+        +enumerate(ctx, db, table, cols) Promise~object~
+    }
+    class ScanManager {
+        +start(target) Promise~string~
+        +stop(scanId) void
+        +getReport(scanId) ReportModel
+        +exportReport(scanId, format) string
+        -TargetParser parser
+        -Detector[] detectors
+        -DBFingerprinter fp
+        -Extractor extractor
+        -EventBus bus
+    }
+    class Scheduler {
+        +run(items, worker) Promise
+        -number concurrency
+        -number ratePerSec
+    }
+    class EventBus {
+        +create(scanId) Emitter
+        +emit(scanId, type, payload) void
+        +toSSE(scanId, res) void
+    }
+    class HttpClient {
+        +request(opts) Promise~Response~
+        -number timeoutMs
+        -number retry
+        -TokenBucket bucket
+    }
+    class ReportGenerator {
+        +build(scanId, target, points, vulns, data) ReportModel
+        +toJSON(report) string
+        +toHTML(report) string
+        +riskOf(vulns) enum
+    }
+    class TargetParser {
+        +discover(target) InjectionPoint[]
+    }
+
+    Detector <|.. UnionDetector
+    Detector <|.. ErrorDetector
+    Detector <|.. BooleanBlindDetector
+    Detector <|.. TimeBlindDetector
+    ScanManager *-- TargetParser
+    ScanManager *-- Detector
+    ScanManager *-- DBFingerprinter
+    ScanManager *-- Extractor
+    ScanManager *-- EventBus
+    ScanManager ..> Scheduler : 调度检测
+    ScanManager ..> ReportGenerator : 生成报告
+    Extractor ..> ColumnTypeEnumerator : 枚举列类型
+    Detector ..> HttpClient : 发请求
+    DBFingerprinter ..> HttpClient : 发请求
+    Extractor ..> HttpClient : 发请求
+    ReportModel *-- ExtractedData
+    ReportModel *-- Vulnerability
+    Target "1" *-- "0..*" InjectionPoint : 发现

@@ -1,0 +1,53 @@
+%% ===== 时序图 1：配置拉取 → 编排 → 透传 → 引擎消费 → 报告标注 =====
+sequenceDiagram
+    actor U as 用户
+    participant P as WafTamperPanel(前端)
+    participant A as apiClient
+    participant TR as tamperRoutes(后端)
+    participant S as ScanManager
+    participant D as Detector
+    participant O as obfuscateWithConfig/TamperRegistry
+    participant R as Report(summary)
+
+    U->>P: 打开扫描配置（WAF 区）
+    P->>A: GET /api/tampers
+    A->>TR: GET /api/tampers
+    TR-->>A: tamperRegistry.list() → [{name,description}×62]
+    A-->>P: 渲染 tamper 多选清单
+    U->>P: 勾选 plugins + 选强度 + 调顺序 + 开 enabled
+    P->>P: config.wafEvasion.tamper = {enabled,plugins,intensity}
+    U->>S: POST /api/scan/start(config)
+    S->>D: per-point detect(ctx)
+    D->>O: obfuscateValue(ctx,value) → obfuscateWithConfig
+    alt tamper.enabled
+        O->>O: applyTampers(value,ctx,plugins) 按序链式
+    else obfuscate(legacy)
+        O->>O: obfuscatePayload(value)
+    else 全关
+        O-->>D: 原样返回
+    end
+    O-->>D: 变换后 payload
+    D-->>S: DetectionResult
+    S->>R: summary.wafEvasion.tamper = {enabled,plugins,intensity}
+    R-->>U: 报告标注所用 tamper 组合
+
+%% ===== 时序图 2：指纹阶段 → WAF 识别 → 推荐 → 前端建议（零额外发包）=====
+sequenceDiagram
+    participant S as ScanManager
+    participant F as DBFingerprinter
+    participant W as WafIdentifier
+    participant Rec as WafRecommend
+    participant E as EventBus(SSE)
+    participant UI as ScanPage / WafTamperPanel
+
+    S->>F: fingerprint(ctx)
+    F->>F: baseline = sendInjection(良性请求)  ← 已抓取，复用，零额外发包
+    F-->>S: { dbms, baseline }
+    S->>W: identify({status,headers,body})
+    W-->>S: [{vendor,confidence,evidence}]
+    S->>Rec: recommend(vendors)
+    Rec-->>S: [{vendor,plugins[],intensity?}]
+    S->>E: emit('waf_detected', {vendors,suggestions})
+    E-->>UI: SSE waf_detected
+    UI->>UI: 展示「检测到 X，推荐组合… [一键应用]」
+    UI->>UI: 应用 → config.wafEvasion.tamper.plugins = 推荐（enabled 仍由用户开启）

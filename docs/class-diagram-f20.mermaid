@@ -1,0 +1,75 @@
+classDiagram
+    %% ── 前端类型（src/shared/types.ts）──
+    class WafEvasionConfig {
+        +boolean randomUA
+        +number jitterMs
+        +boolean obfuscate
+        +TamperConfig tamper
+    }
+    class TamperConfig {
+        +boolean enabled
+        +string[] plugins
+        +'low'|'medium'|'high' intensity
+    }
+    class TamperInfo {
+        +string name
+        +string description
+    }
+    class WafCandidate {
+        +string vendor
+        +number confidence
+        +string evidence
+    }
+    class WafSuggestion {
+        +string vendor
+        +string[] plugins
+        +string intensity
+    }
+
+    %% ── 后端既有（复用，不重写）──
+    class TamperRegistry {
+        +list() TamperInfo[]
+        +resolve(names) plugins[]
+    }
+    class obfuscateWithConfig {
+        +obfuscateWithConfig(value, ctx) string
+    }
+
+    %% ── 后端新增（core/waf/*）──
+    class WafIdentifier {
+        +identify(response) WafCandidate[]
+    }
+    class WafRecommend {
+        +recommend(vendors) WafSuggestion[]
+    }
+    class WAF_RULES {
+        +Cloudflare / ModSecurity / AWS_WAF ...
+    }
+
+    %% ── 后端修改 ──
+    class DBFingerprinter {
+        +fingerprint(ctx) dbms, baseline
+    }
+    class ScanManager {
+        -wafIdentifier
+        -wafRecommend
+        +_run(scanId)
+    }
+    class scanRoutes {
+        +sanitizeStart(body)
+    }
+    class tamperRoutes {
+        +GET /tampers
+    }
+
+    %% ── 关系 ──
+    WafEvasionConfig *-- TamperConfig : contains
+    ScanManager ..> WafIdentifier : uses(identify)
+    ScanManager ..> WafRecommend : uses(recommend)
+    ScanManager ..> DBFingerprinter : uses(fingerprint)
+    DBFingerprinter ..> WafIdentifier : reuse baseline(零额外发包)
+    tamperRoutes ..> TamperRegistry : list()
+    scanRoutes ..> TamperConfig : normalize(cfg.wafEvasion.tamper)
+    WafIdentifier ..> WAF_RULES : matches
+    WafRecommend ..> WAF_RECOMMEND_MAP : maps vendor→plugins
+    obfuscateWithConfig ..> TamperRegistry : resolve(plugins)

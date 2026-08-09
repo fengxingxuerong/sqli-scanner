@@ -1,0 +1,41 @@
+%% ===== WAF-v2 新增子系统：mock-WAF 实验室 + e2e 夹具 + 启动期断言（复用 F-20 既有模块）=====
+classDiagram
+    %% 新增模块（验证面）
+    class LabServer {
+        +createLabApp() app
+        +WAF_SIGNATURES
+        +/vuln (sqli-labs 注入点)
+        +/benign (基线)
+        +/__stats (拦截计数)
+        +/__reset (清零)
+    }
+    class CompareE2E {
+        +run(): 起 lab → configA/B 扫描 → 算指标 → 写产物
+    }
+    class Metrics {
+        +computeMetrics(...) 检出率/拦截率
+    }
+    class AssertRecommendNames {
+        +assertRecommendNames(registry?) boolean
+    }
+
+    %% 既有模块（复用，不改动）
+    class ScanManager {
+        +start(input)
+        +getReport(id)
+    }
+    class TamperRegistry {
+        +list() name,description[]
+    }
+    class WafRecommend {
+        +WAF_RECOMMEND_MAP
+        +recommend(vendors)
+    }
+
+    CompareE2E ..> LabServer : 起/调实验室
+    CompareE2E ..> ScanManager : 驱动两次扫描
+    CompareE2E ..> Metrics : 算指标
+    LabServer ..> WAF_SIGNATURES : 拦截判定
+    AssertRecommendNames ..> WafRecommend : 遍历 WAF_RECOMMEND_MAP
+    AssertRecommendNames ..> TamperRegistry : 校验名 ∈ list()
+    WafRecommend ..> AssertRecommendNames : 模块加载期执行

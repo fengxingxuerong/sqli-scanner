@@ -1,0 +1,54 @@
+// Tauri 桥接：Web 版为 no-op；Tauri 版通过 @tauri-apps/api 与系统交互。
+// 业务组件不感知差异，统一经本模块调用引擎启停与文件保存。
+
+let tauriAvailable = false;
+try {
+  // 仅在 Tauri 运行时（window 挂载 __TAURI_INTERNALS__）置为可用
+  tauriAvailable =
+    typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+} catch {
+  tauriAvailable = false;
+}
+
+export const tauriBridge = {
+  isTauri: tauriAvailable,
+
+  // 启动本地引擎（Tauri 由 Rust 侧 sidecar 自动拉起；Web 版无需操作）
+  async startEngine(): Promise<void> {
+    if (!tauriAvailable) return;
+    const { invoke } = await import('@tauri-apps/api/core');
+    await invoke('start_engine').catch(() => undefined);
+  },
+
+  // 停止本地引擎
+  async stopEngine(): Promise<void> {
+    if (!tauriAvailable) return;
+    const { invoke } = await import('@tauri-apps/api/core');
+    await invoke('stop_engine').catch(() => undefined);
+  },
+
+  // 保存文件（导出报告）。Web 版用浏览器下载；Tauri 版用 dialog 选择路径落盘
+  async saveFile(name: string, content: string, mime: string): Promise<void> {
+    if (!tauriAvailable) {
+      const blob = new Blob([content], { type: mime });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = name;
+      a.click();
+      URL.revokeObjectURL(a.href);
+      return;
+    }
+    // 桌面版：选择路径并写入
+    // 使用变量形式的动态导入，避免 Web 构建时解析未安装的 Tauri 插件模块
+    const dialogSpec = '@tauri-apps/plugin-dialog';
+    const dialog = await import(dialogSpec);
+    const path = await (dialog as any).save({ defaultPath: name });
+    if (path) {
+      const fsSpec = '@tauri-apps/plugin-fs';
+      const fs = await import(fsSpec);
+      await (fs as any).writeTextFile(path, content);
+    }
+  },
+};
+
+export default tauriBridge;

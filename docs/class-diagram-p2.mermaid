@@ -1,0 +1,79 @@
+classDiagram
+    class ScanConfig {
+        +number concurrency
+        +number timeoutMs
+        +number retry
+        +number timeThresholdMs
+        +number ratePerSec
+        +boolean enableExtract
+        +string proxy
+        +AuthConfig auth
+        +WafEvasionConfig wafEvasion
+    }
+    class AuthConfig {
+        +BasicCred basic
+        +string cookie
+        +object headers
+    }
+    class BasicCred {
+        +string username
+        +string password
+    }
+    class WafEvasionConfig {
+        +boolean randomUA
+        +number jitterMs
+        +boolean obfuscate
+    }
+    class HttpClient {
+        +request(opts) Promise~Response~
+        -buildProxyAgent(proxyUrl) object
+        -mergeAuthHeaders(headers, auth) object
+        -applyJitter(wafEvasion) Promise~void~
+        -pickRandomUA() string
+        -UA_POOL string[]
+    }
+    class Payloads {
+        +obfuscatePayload(p) string
+    }
+    class Detector {
+        +send(httpClient, ctx, req, opts) Promise~Response~
+    }
+    class Extractor {
+        +_send(ctx, value, opts) Promise~Response~
+    }
+    class DBFingerprinter {
+        +_send(ctx, req, opts) Promise~Response~
+    }
+    class ScanManager {
+        +_run(scanId)
+    }
+    class HistoryRecord {
+        +number schemaVersion
+        +string scanId
+        +string target
+        +string riskLevel
+        +string finishedAt
+        +ReportModel report
+    }
+    class ScanStore {
+        +history HistoryRecord[]
+        +saveScanToHistory(report) void
+        +removeHistory(scanId) void
+    }
+    class ThemeModeProvider {
+        +mode light|system|dark
+        +effectiveMode
+        +setMode(m) void
+    }
+
+    ScanConfig *-- AuthConfig
+    ScanConfig *-- WafEvasionConfig
+    AuthConfig *-- BasicCred
+    Detector ..> HttpClient : 透传 proxy/auth/wafEvasion
+    Extractor ..> HttpClient : 透传 proxy/auth/wafEvasion
+    DBFingerprinter ..> HttpClient : 透传 proxy/auth/wafEvasion
+    ScanManager ..> Detector
+    ScanManager ..> Extractor
+    ScanManager ..> DBFingerprinter
+    Detector ..> Payloads : obfuscatePayload(启用时)
+    ScanStore o-- HistoryRecord

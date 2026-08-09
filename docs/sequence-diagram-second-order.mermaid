@@ -1,0 +1,64 @@
+sequenceDiagram
+    participant TP as TargetParser
+    participant SM as ScanManager
+    participant BUS as EventBus
+    participant SOD as SecondOrderDetector
+    participant HC as HttpClient
+    participant Store as 存储点(表单POST)
+    participant Trig as 触发页(triggerUrl)
+    participant RG as ReportGenerator
+
+    Note over TP: crawlForms 开启时发现表单点
+    TP->>TP: _crawlForms 解析 <form>
+    TP->>TP: POST 表单点置 isStorePoint=true<br/>storeKind 启发式标记
+    TP-->>SM: InjectionPoint[](含 isStorePoint)
+
+    Note over SM: 一阶流水线(既有)完成 → 进入二阶补充趟
+    SM->>SM: _runSecondOrder(scanId, target, points, dbms)
+    alt secondOrder.enabled && triggerUrls>0 && 存在 store 点
+        loop 每个 isStorePoint 表单点
+            loop 每个 config.secondOrder.triggerUrls
+                Note over SOD: ① 基线(只读触发页,不写)
+                SOD->>HC: GET triggerUrl
+                HC->>Trig: 请求触发页
+                Trig-->>HC: 响应
+                HC-->>SOD: baselineBody(记录 baselineErr)
+
+                Note over SOD: ② 存储阶段(真实写,opt-in)
+                SOD->>SOD: _buildProbe(ctx, dbms) 经 obfuscateValue
+                opt refreshCsrf
+                    SOD->>HC: GET actionUrl 重抓 CSRF
+                    HC-->>SOD: 新 token
+                end
+                SOD->>HC: POST 存储点(探针值)
+                HC->>Store: 提交表单(真实写)
+                Store-->>HC: 存储成功
+                HC-->>SOD: 存储确认
+
+                Note over SOD: ③ 触发阶段
+                SOD->>HC: GET triggerUrl
+                HC->>Trig: 读取并回显存储值
+                Trig-->>HC: 含报错特征?
+                HC-->>SOD: expBody(记录 expErr)
+
+                Note over SOD: ④ 阴性对照(可选)
+                SOD->>HC: POST 存储点(良性值)
+                HC->>Store: 覆盖为良性值
+                SOD->>HC: GET triggerUrl
+                Trig-->>SOD: negBody(记录 negErr)
+
+                SOD->>SOD: 判定 !baselineErr && expErr && !negErr
+                alt 命中二阶注入
+                    SOD-->>SM: DetectionResult{vulnerable:true, technique:'second_order'}
+                    SM->>BUS: emit(detection_found)
+                    BUS-->>UI: SSE detection_found
+                else 未命中
+                    SOD-->>SM: DetectionResult{vulnerable:false}
+                end
+            end
+        end
+        SM->>SM: 合并入 foundByPoint → 既有聚合/去重
+        SM->>RG: riskOf(含 second_order) → High
+    else 未开启/无候选触发页
+        SM->>SM: 跳过二阶趟(对目标零写)
+    end

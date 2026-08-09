@@ -1,0 +1,25 @@
+node_modules
+dist
+server/node_modules
+src-tauri/target
+src-tauri/binaries
+src-tauri/externalBin
+*.log
+.env
+.env.local
+.DS_Store
+
+# scratch / debug artifacts leaked into project dir during dev
+/nul
+debug-target.mjs
+live-scan-demo.mjs
+.mock/
+*.bak*
+
+# server 内散落的本地包缓存与运行时产物
+server/*.tgz
+server/engine.log
+server/logs/
+
+# vitest/vite 配置转换临时产物
+*.timestamp-*.mjs

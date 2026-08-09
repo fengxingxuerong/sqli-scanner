@@ -1,0 +1,31 @@
+sequenceDiagram
+    actor User
+    participant UI as React 前端
+    participant SM as ScanManager
+    participant D as Detector/Extractor/FP
+    participant HC as HttpClient
+    participant AX as axios(+代理 Agent)
+
+    User->>UI: 填写目标/配置(含 proxy/auth/wafEvasion)
+    UI->>SM: POST /api/scan/start {target, config}
+    SM->>SM: createTarget → config 含 proxy/auth/wafEvasion
+    SM->>D: detect/fingerprint/extract(ctx{config})
+    D->>HC: request({headers, proxy, auth, wafEvasion})
+    HC->>HC: mergeAuthHeaders → 翻译 Authorization/Cookie/自定义头
+    HC->>HC: randomUA? 覆盖 User-Agent
+    HC->>HC: buildProxyAgent → axios proxy 或 SocksProxyAgent
+    HC->>HC: applyJitter → sleep(rand(0,jitterMs))
+    HC->>AX: instance.request(...代理配置)
+    AX-->>D: 响应(经上游代理)
+    D-->>SM: DetectionResult(命中则 payload 经 obfuscatePayload)
+
+    Note over UI,SM: 历史持久化
+    SM-->>UI: SSE scan_completed(report)
+    UI->>UI: useEvents → saveScanToHistory(report)
+    UI->>UI: localStorage['sqli_scan_history_v1'] 写入快照
+
+    Note over User,UI: 暗色主题
+    User->>UI: 顶栏切换 浅色/跟随系统/暗色
+    UI->>UI: setMode → localStorage['sqli_theme']
+    UI->>UI: effective=system?matchMedia:mode
+    UI->>UI: createTheme({palette.mode}) 重渲染全站

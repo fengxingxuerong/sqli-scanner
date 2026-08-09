@@ -1,0 +1,17 @@
+flowchart TD
+  A["detect(ctx)"] --> B{"ctx.config.blindRobust<br/>enabled?"}
+  B -- "否 / 未配置" --> L["legacy 逻辑：基线2次<br/>每对1次 三态判定"] --> Z["return result"]
+  B -- "是" --> C["基线采样 baselineSamples 次<br/>originalValue → baselines[]"]
+  C --> D{"遍历 pairs [[0,2],[1,3]]<br/>命中即 break"}
+  D --> E["当前对重复 booleanSamples 次"]
+  E --> F["send truePayload → tBody<br/>send falsePayload → fBody"]
+  F --> G["tSim=_similarToBaseline(tBody)<br/>fSim=_similarToBaseline(fBody)<br/>mDiff=_isMeaningfulDiff(tBody,fBody)"]
+  G --> H["累加 trueSimilarHits /<br/>falseDissimilarHits / meaningfulHits"]
+  H --> I{"还有采样次数?"}
+  I -- "是" --> E
+  I -- "否" --> J["三一致率 = hits / booleanSamples"]
+  J --> K{"三一致率 均 ≥ minStableRatio?"}
+  K -- "是" --> M["vulnerable=true<br/>evidence / payloads / break"]
+  K -- "否" --> D
+  M --> Z
+  D -- "遍历完无命中" --> Z

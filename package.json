@@ -1,0 +1,51 @@
+{
+  "name": "sqli-scanner",
+  "version": "1.0.0",
+  "description": "SQL 注入检测工具（Web 全栈 + Tauri 桌面壳，一份代码双形态）",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "server": "cd server && node index.js",
+    "waf-lab": "node e2e/waf-lab/lab-server.js",
+    "waf-e2e": "node e2e/waf-lab/compare.e2e.js",
+    "tauri": "tauri",
+    "build:engine": "echo \"将 server/ 用 pkg 或 esbuild 打成单文件可执行，放入 src-tauri/binaries/（预留脚本位）\"",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@dagrejs/dagre": "^3.1.0",
+    "@emotion/react": "^11.11.4",
+    "@emotion/styled": "^11.11.5",
+    "@mui/icons-material": "^5.15.20",
+    "@mui/material": "^5.15.20",
+    "@tauri-apps/api": "^2.0.0",
+    "@xyflow/react": "^12.11.2",
+    "axios": "^1.7.2",
+    "esbuild": "^0.21.5",
+    "html-to-image": "^1.11.13",
+    "jspdf": "^4.2.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.24.0",
+    "zustand": "^4.5.2"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.0.0",
+    "@testing-library/react": "^16.1.0",
+    "@types/node": "^20.14.0",
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.1",
+    "autoprefixer": "^10.4.19",
+    "jsdom": "^25.0.1",
+    "postcss": "^8.4.39",
+    "tailwindcss": "^3.4.4",
+    "typescript": "^5.4.5",
+    "vite": "^5.3.1",
+    "vitest": "^2.1.8"
+  }
+}

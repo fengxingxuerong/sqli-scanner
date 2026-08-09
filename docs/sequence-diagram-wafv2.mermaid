@@ -1,0 +1,24 @@
+%% ===== WAF-v2 e2e 对比夹具驱动流程（新增交互：e2e 夹具 ↔ ScanManager ↔ 实验室）=====
+sequenceDiagram
+    participant E as compare.e2e.js(独立脚本)
+    participant L as lab-server(createLabApp @8099)
+    participant S as ScanManager(直接 import)
+    participant M as metrics.computeMetrics
+    participant F as 文件系统(results/)
+
+    E->>L: createLabApp().listen(8099)
+    E->>L: POST /__reset (清空拦截计数)
+    E->>S: start(configA: tamper.enabled=false)
+    S->>L: GET /vuln?id=<payload> (含 SQLi 特征)
+    L-->>S: 403 Forbidden (被拦截 → 0 检出)
+    S-->>E: 扫描完成(reportA: vulns 少)
+    E->>L: GET /__stats → blockedReqA
+    E->>L: POST /__reset
+    E->>S: start(configB: tamper.enabled=true, plugins=medium预设)
+    S->>L: GET /vuln?id=UNION/**/SELECT...(space2comment 绕过)
+    L-->>S: 200 (放行 → 检出)
+    S-->>E: 扫描完成(reportB: vulns 多)
+    E->>L: GET /__stats → blockedReqB
+    E->>M: computeMetrics(reportA,reportB,blockedA,blockedB)
+    M-->>E: {detectRateA,detectRateB,blockRateA,blockRateB}
+    E->>F: 写 compare.json + compare.md (关 vs 开对照表)

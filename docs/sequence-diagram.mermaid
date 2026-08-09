@@ -1,0 +1,55 @@
+sequenceDiagram
+    actor User
+    participant UI as React 前端 (ScanPage)
+    participant API as Express 引擎 (scanRoutes)
+    participant SM as ScanManager
+    participant TP as TargetParser
+    participant FP as DBFingerprinter
+    participant D as Detectors(Union/Error/Boolean/Time)
+    participant EX as Extractor
+    participant SCH as Scheduler
+    participant BUS as EventBus
+    participant RG as ReportGenerator
+
+    User->>UI: 填写 URL/参数/配置，点"开始扫描"
+    UI->>API: POST /api/scan/start {target, config}
+    API->>SM: start(target)
+    SM->>BUS: emit(scan_started)
+    API-->>UI: 200 {code:0, data:{scanId}}
+    UI->>API: GET /api/scan/:id/events (SSE)
+    API->>BUS: 订阅 scanId 命名空间
+    BUS-->>UI: SSE scan_started
+
+    SM->>TP: discover(target)
+    TP-->>SM: InjectionPoint[]
+    SM->>BUS: emit(point_discovered, points)
+    BUS-->>UI: SSE point_discovered
+
+    SM->>SCH: run(points, detectPoint)
+    loop 每个注入点（并发≤4，限速≤3/s，重试2）
+        SCH->>FP: fingerprint(point)
+        FP-->>SCH: dbms
+        SCH->>D: detect(point, dbms)
+        D->>BUS: emit(point_testing, {point, technique})
+        BUS-->>UI: SSE point_testing
+        D-->>SCH: DetectionResult
+        alt 确认注入
+            SM->>BUS: emit(detection_found, result)
+            BUS-->>UI: SSE detection_found
+            SM->>EX: extract(point, dbms)
+            EX->>BUS: emit(extraction_progress, {db,table,count})
+            BUS-->>UI: SSE extraction_progress
+            EX-->>SM: ExtractedData
+        end
+    end
+    SCH-->>SM: 全部完成
+    SM->>RG: build(scanId, target, points, vulns, data)
+    RG-->>SM: ReportModel
+    SM->>BUS: emit(scan_completed, report)
+    BUS-->>UI: SSE scan_completed
+    UI->>API: GET /api/scan/:id/report
+    API-->>UI: ReportModel JSON
+    UI->>UI: 渲染报告(漏洞/Payload/风险/拖库树)
+    User->>UI: 点"导出"
+    UI->>API: GET /api/scan/:id/report/export?format=html
+    API-->>UI: 文件流（下载）

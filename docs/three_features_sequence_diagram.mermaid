@@ -1,0 +1,75 @@
+sequenceDiagram
+    autonumber
+    participant SM as ScanManager
+    participant R as oobReceiver(单例)
+    participant O as OobDetector
+    participant DB as 目标 DBMS
+    participant H as HttpClient
+
+    Note over SM,R: 启动阶段：oob 选中且 enabled
+    SM->>R: R.start(config.oob)  // 独立 HTTP 端口，幂等
+    R-->>SM: 监听 GET /oob/:id
+
+    Note over SM,O: 调度阶段：detectors 末位，前面均未命中才到达
+    SM->>O: detect(ctx)  // ctx.dbms 可能已知
+    O->>O: 生成 token(nanoid)
+    O->>O: callback = config.oob.callbackBase + "/oob/" + token
+    O->>O: 选 OOB_PAYLOADS[dbms] 填 {CALLBACK}（不做 tamper）
+    O->>H: 注入触发带外 payload（经 HttpClient）
+    H->>DB: 目标执行 → 尝试回连 callbackBase
+    O->>R: waitForToken(token, config.oob.timeoutMs)
+    alt 目标回连 / 测试直接调 R.receive(token)
+        DB-->>R: GET /oob/:token
+        R-->>O: 收到 → waitForToken 返回 true
+        O-->>SM: DetectionResult{vulnerable:true, technique:'oob', dbms}
+    else 超时
+        R-->>O: 返回 false
+        O-->>SM: DetectionResult{vulnerable:false}
+    end
+
+---
+
+sequenceDiagram
+    autonumber
+    participant D as Detector / Extractor
+    participant O as obfuscateWithConfig
+    participant Reg as TamperRegistry
+    participant H as HttpClient
+
+    D->>O: obfuscateWithConfig(payload, ctx)
+    alt config.wafEvasion.tamper.enabled
+        O->>Reg: resolve(plugins) → 有序插件数组
+        Reg-->>O: 插件链
+        loop 链式 transform
+            O->>O: p = plugin.transform(p, ctx)
+        end
+        O-->>D: 混淆后 payload
+    else config.wafEvasion.obfuscate (legacy)
+        O->>O: obfuscatePayload(payload)  // 现状行为，向后兼容
+        O-->>D: 混淆后 payload
+    else 均未开
+        O-->>D: 原样 payload
+    end
+    D->>H: send(request)
+
+---
+
+sequenceDiagram
+    autonumber
+    participant SM as ScanManager
+    participant TP as TargetParser(httpClient)
+    participant H as HttpClient
+    participant TG as 目标页 / action 页
+
+    SM->>TP: await parser.discover(target)  // 改为 async
+    TP->>TP: 原有 4 类参数发现(url/body/cookie/header) 不变
+    alt config.crawlForms === true
+        TP->>H: GET baseUrl
+        H->>TG: 请求页面
+        TG-->>TP: HTML
+        TP->>TP: 解析 <form>，提取 input(含 hidden/CSRF)
+        TP->>H: GET action 指向页(如有)
+        TP->>TP: 生成 body 位置表单点(独立 action=独立点)
+        Note over TP: csrfTokenName 命中正则则记录；formValues 全量保留
+    end
+    TP-->>SM: InjectionPoint[]（含表单点）

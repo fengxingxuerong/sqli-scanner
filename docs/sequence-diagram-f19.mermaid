@@ -1,0 +1,39 @@
+sequenceDiagram
+    actor User
+    participant UI as ScanConfigPanel/ScanPage
+    participant API as scanRoutes
+    participant SM as ScanManager
+    participant FP as DBFingerprinter
+    participant D as ActiveDetectors(按 techniques 过滤)
+    participant SD as StackedDetector
+    participant RG as ReportGenerator
+    participant BUS as EventBus
+
+    User->>UI: "检测技术"多选组勾选（默认 union/error/boolean/time 选，stacked 不选）
+    UI->>UI: config.techniques = [已选]（空选→[]）
+    User->>UI: 点"开始扫描"
+    UI->>API: POST /api/scan/start {target, config{techniques}}
+    API->>SM: start(target) —— createTarget 合并 defaults.techniques
+    SM->>BUS: emit(scan_started)
+    loop 每个注入点
+        SM->>FP: fingerprint(ctx) → dbms
+        SM->>SM: activeDetectors = detectors.filter(d=>techniques.includes(d.technique))
+        Note over SM: techniques 空/未定义 → 全部 5 个
+        SM->>D: 依次 detect（注册序 union→error→boolean→time→stacked）
+        alt 经典技术命中 且 stacked 未选
+            D-->>SM: 命中 → break（维持原行为）
+        else 经典技术命中 且 stacked 已选
+            D-->>SM: 命中 → 不 break（继续跑 stacked）
+        end
+        SM->>SD: detect(ctx)（末位；dbms=Oracle 直接返回未命中）
+        SD->>SD: 注入 "; SLEEP/WAITFOR/pg_sleep" 延迟语句，采样稳定判定
+        SD-->>SM: DetectionResult(vulnerable, technique='stacked')
+    end
+    SM->>SM: dedupeByStacked：同点 stacked 命中→同点经典记录移入 summary.stackedCorroborations，仅留 1 条 stacked(Critical)
+    SM->>RG: riskOf(vulns) —— 含 stacked→Critical（置顶）
+    RG-->>SM: report.riskLevel
+    SM->>BUS: emit(scan_completed, report)
+    BUS-->>UI: SSE → VulnList/VulnDetail 经 TECHNIQUE_LABEL 显示"堆叠注入" + 风险 Chip Critical(红)
+    User->>UI: 导出报告
+    UI->>API: GET /report/export?format=html
+    API-->>UI: HTML（stacked 行 .critical 红色，技术列"堆叠注入"）

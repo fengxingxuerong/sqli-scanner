@@ -1,0 +1,77 @@
+classDiagram
+    class TechniqueType {
+        <<enumeration>>
+        union
+        error
+        boolean
+        time
+        stacked
+    }
+    class ScanConfig {
+        +number concurrency
+        +number timeoutMs
+        +number retry
+        +number timeThresholdMs
+        +number ratePerSec
+        +boolean enableExtract
+        +string proxy
+        +object auth
+        +object wafEvasion
+        +TechniqueType[] techniques
+    }
+    class Detector {
+        <<interface>>
+        +TechniqueType technique
+        +detect(ctx) Promise~DetectionResult~
+        +obfuscateValue(ctx, value) string
+        +send(httpClient, ctx, req, opts) Promise~Response~
+    }
+    class StackedDetector {
+        +technique = 'stacked'
+        +detect(ctx) Promise~DetectionResult~
+    }
+    class UnionDetector
+    class ErrorDetector
+    class BooleanBlindDetector
+    class TimeBlindDetector
+    class ScanManager {
+        +Detector[] detectors
+        -activeDetectors(config) Detector[]
+        -dedupeByStacked(found) object
+    }
+    class ReportGenerator {
+        +riskOf(vulns, data) enum
+        +toJSON(report) string
+        +toHTML(report) string
+    }
+    class ReportModel {
+        +Vulnerability[] vulns
+        +enum riskLevel
+        +object summary
+    }
+    class Vulnerability {
+        +string pointId
+        +TechniqueType technique
+        +enum riskLevel
+        +string[] payloads
+        +string description
+    }
+    class StackedCorroboration {
+        +string pointId
+        +TechniqueType technique
+        +string dbms
+    }
+
+    Detector <|.. UnionDetector
+    Detector <|.. ErrorDetector
+    Detector <|.. BooleanBlindDetector
+    Detector <|.. TimeBlindDetector
+    Detector <|.. StackedDetector
+    ScanManager *-- Detector
+    ScanManager ..> StackedDetector : 注册末位
+    ScanManager ..> ReportGenerator : riskOf/生成
+    ReportGenerator ..> Vulnerability : stacked→Critical 置顶
+    ReportModel *-- Vulnerability
+    ReportModel *-- StackedCorroboration : summary.stackedCorroborations
+    TechniqueType <.. ScanConfig : techniques
+    TechniqueType <.. StackedDetector : technique

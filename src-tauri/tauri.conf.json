@@ -1,0 +1,44 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "SQL注入检测工具",
+  "version": "1.0.0",
+  "identifier": "com.sqli.scanner",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:5173",
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "SQL 注入检测工具",
+        "width": 1200,
+        "height": 800,
+        "resizable": true,
+        "fullscreen": false
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "externalBin": ["binaries/sqli-engine"],
+    "icon": ["icons/icon.png"]
+  },
+  "plugins": {
+    "shell": {
+      "externalBin": ["binaries/sqli-engine"]
+    }
+  },
+  "permissions": [
+    "core:default",
+    "shell:allow-execute",
+    "shell:allow-spawn",
+    "dialog:default",
+    "fs:default"
+  ]
+}
