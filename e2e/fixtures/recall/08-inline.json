@@ -1,0 +1,11 @@
+{
+  "name": "inline",
+  "description": "内联查询（标量子查询随响应回显）",
+  "target": { "type": "mock", "endpoint": "num", "param": "id", "value": "1" },
+  "config": { "techniques": ["inline"] },
+  "expected": {
+    "vulnerable": true,
+    "techniques": { "must": ["inline"], "nice": [] },
+    "requestCount": { "max": 40 }
+  }
+}

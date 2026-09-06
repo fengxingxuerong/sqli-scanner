@@ -1,0 +1,11 @@
+{
+  "name": "num",
+  "description": "数值型上下文（id=1，无引号）",
+  "target": { "type": "mock", "endpoint": "num", "param": "id", "value": "1" },
+  "config": { "techniques": ["union", "error", "boolean"] },
+  "expected": {
+    "vulnerable": true,
+    "techniques": { "must": ["union", "error", "boolean"], "nice": [] },
+    "requestCount": { "max": 80 }
+  }
+}

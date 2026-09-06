@@ -1,0 +1,12 @@
+{
+  "name": "union_extract",
+  "description": "UNION 提取链（版本值经 __S__..__E__ 回显可拖库）",
+  "target": { "type": "mock", "endpoint": "num", "param": "id", "value": "1" },
+  "config": { "techniques": ["union"], "enableExtract": true },
+  "expected": {
+    "vulnerable": true,
+    "techniques": { "must": ["union"], "nice": [] },
+    "requestCount": { "max": 120 },
+    "extracted": { "databases": "non-empty", "tables": "non-empty" }
+  }
+}

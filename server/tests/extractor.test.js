@@ -2,7 +2,7 @@
 // 使用"布尔预言机" mock httpClient 模拟已知 secret 的数据库，验证二分逐字符逻辑。
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { Extractor } from '../src/engine/Extractor.js';
+import { Extractor, _colGuessCache } from '../src/engine/Extractor.js';
 import { ColumnTypeEnumerator } from '../src/engine/ColumnTypeEnumerator.js';
 
 // 从请求中取出注入值（detector/extractor 把注入值放到 url query / body / cookie）
@@ -109,7 +109,7 @@ test('guessColumns 线性探测返回列数', async () => {
 
 test('ColumnTypeEnumerator 通过 extractor 枚举列类型', async () => {
   const localEx = new Extractor();
-  localEx.extractScalar = async () => 'int,varchar,text';
+  localEx.extractScalar = async () => 'id=int,name=varchar,bio=text';
   localEx.guessColumns = async () => 3;
   const cte = new ColumnTypeEnumerator();
   const ctx = { dbms: 'MySQL', extractor: localEx, target: {}, point: {}, config: {} };
@@ -157,7 +157,8 @@ test('guessColumns 二分探测返回列数（与线性等价）', async () => {
 
 // v7：dumpData 分页续拉（MySQL 支持 LIMIT/OFFSET，自动续拉到全量）
 function makePager(totalRows) {
-  const rows = Array.from({ length: totalRows }, (_, i) => `${i + 1}|user${i + 1}`);
+  const unit = String.fromCharCode(0x1f);
+  const rows = Array.from({ length: totalRows }, (_, i) => `${i + 1}${unit}user${i + 1}`);
   return {
     async request(opts) {
       const q = extractQuery(opts);
@@ -167,7 +168,7 @@ function makePager(totalRows) {
         const limM = q.match(/LIMIT (\d+)/);
         const lim = limM ? Number(limM[1]) : 100;
         const page = rows.slice(offset, offset + lim);
-        return { data: `__S__${page.join('||')}__E__`, status: 200 };
+        return { data: `__S__${page.join(String.fromCharCode(0x1e))}__E__`, status: 200 };
       }
       if (/ORDER BY (\d+)/.test(q)) {
         const n = Number(q.match(/ORDER BY (\d+)/)[1]);
@@ -191,7 +192,7 @@ test('dumpData Oracle 单页（ROWNUM 限制，不续拉）', async () => {
   const mock = {
     async request(opts) {
       const q = extractQuery(opts);
-      if (/__S__/.test(q)) return { data: '__S__1|user1||2|user2__E__', status: 200 };
+      if (/__S__/.test(q)) return { data: `__S__1${String.fromCharCode(0x1f)}user1${String.fromCharCode(0x1e)}2${String.fromCharCode(0x1f)}user2__E__`, status: 200 };
       return { data: 'baseline', status: 200 };
     },
   };
@@ -203,6 +204,8 @@ test('dumpData Oracle 单页（ROWNUM 限制，不续拉）', async () => {
 
 test('_guessColumnsCached 缓存列数，避免重复 ORDER BY 二分探测', async () => {
   let orderByCount = 0;
+  // 清空模块级猜列缓存，避免其他测试干扰
+  for (const [k] of _colGuessCache) { _colGuessCache.delete(k); }
   const mock = {
     async request(opts) {
       const q = extractQuery(opts);
@@ -223,10 +226,11 @@ test('_guessColumnsCached 缓存列数，避免重复 ORDER BY 二分探测', as
 });
 
 function makeMultiTable() {
+  const unit = String.fromCharCode(0x1f);
   const tableRows = {
-    t1: ['r1a|r1b', 'r2a|r2b'],
-    t2: ['s1a|s1b'],
-    t3: ['u1a|u1b', 'u2a|u2b', 'u3a|u3b'],
+    t1: [`r1a${unit}r1b`, `r2a${unit}r2b`],
+    t2: [`s1a${unit}s1b`],
+    t3: [`u1a${unit}u1b`, `u2a${unit}u2b`, `u3a${unit}u3b`],
   };
   let inFlight = 0;
   let peak = 0;
@@ -242,7 +246,7 @@ function makeMultiTable() {
         if (/GROUP_CONCAT\(column_name/.test(q)) return { data: '__S__a,b__E__', status: 200 };
         if (/FROM `testdb`\.`(\w+)`/.test(q)) {
           const t = q.match(/FROM `testdb`\.`(\w+)`/)[1];
-          return { data: `__S__${(tableRows[t] || []).join('||')}__E__`, status: 200 };
+          return { data: `__S__${(tableRows[t] || []).join(String.fromCharCode(0x1e))}__E__`, status: 200 };
         }
         return { data: 'baseline', status: 200 };
       } finally {

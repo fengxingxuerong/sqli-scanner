@@ -1,0 +1,17 @@
+{
+  "name": "extract_mock_values",
+  "description": "UNION 提取链验证：提取的数据库/表名与 mock lab 已知值匹配（golden output 对比）",
+  "target": { "type": "mock", "endpoint": "num", "param": "id", "value": "1" },
+  "config": { "techniques": ["union"], "enableExtract": true },
+  "expected": {
+    "vulnerable": true,
+    "techniques": { "must": ["union"], "nice": [] },
+    "requestCount": { "max": 150 },
+    "extracted": {
+      "databases": "non-empty",
+      "tables": "non-empty",
+      "databaseContains": "labdb",
+      "tableContains": "users"
+    }
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "name": "search_like",
+  "description": "搜索型注入（LIKE %{v}% 上下文，需 % 与 ' 双闭合）",
+  "target": { "type": "mock", "endpoint": "search", "param": "q", "value": "alice" },
+  "config": { "techniques": ["boolean"] },
+  "expected": {
+    "vulnerable": true,
+    "techniques": { "must": ["boolean"], "nice": [] },
+    "requestCount": { "max": 60 }
+  }
+}

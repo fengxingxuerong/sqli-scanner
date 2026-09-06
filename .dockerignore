@@ -1,0 +1,20 @@
+node_modules/
+dist/
+server/node_modules/
+server/sessions/
+.git/
+*.log
+# 密钥/环境文件绝不进构建上下文（builder 层可被按层还原）
+.env*
+**/.env*
+!.env.example
+
+# 构建上下文瘦身：测试/脚本/文档/CI 均不需要进镜像构建上下文
+scripts/
+server/tests/
+tests/
+*.md
+.github/
+docker-compose*.yml
+.DS_Store
+coverage/

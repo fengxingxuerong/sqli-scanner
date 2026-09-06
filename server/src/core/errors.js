@@ -21,6 +21,8 @@ export const ErrorCode = {
   SECOND_ORDER_DISABLED: 6004,
   // 利用操作（sql-shell/file-read/file-write/os-shell）未显式声明已授权
   EXPLOIT_UNAUTHORIZED: 6005,
+  RATE_LIMITED: 4290, // 限速（AI 报告等高频接口）
+  AI_REPORT_DISABLED: 6006, // AI 报告未启用（未显式设置 AI_REPORT_API_BASE，拒绝默认外发）
 };
 
 // 统一错误：携带 code 便于路由层映射响应

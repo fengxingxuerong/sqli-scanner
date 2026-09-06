@@ -57,20 +57,13 @@ test('QA-回归护栏: 无 proxy/auth/wafEvasion → 不出 agent、不覆盖 UA
     return { data: 'ok', status: 200 };
   };
   const start = Date.now();
-  await client.request({ method: 'GET', url: 'http://x/', headers: {} });
+  await client.request({ method: 'GET', url: 'http://127.0.0.1:9999/', headers: {} });
   const elapsed = Date.now() - start;
 
-  // 代理不变量：proxy:false（不挂 SOCKS 代理 agent）
+  // 代理不变量：proxy:false，不挂 SocksProxyAgent
   assert.equal(captured.proxy, false);
-  // 注意：默认 keepAlive=true 时会挂一个 node:http 标准 keepAlive agent（连接复用优化，非副作用）；
-  // 此处仅断言"不是 SOCKS 代理 agent"，且 keepAlive 关闭时确实不再挂 agent。
-  if (client.keepAlive) {
-    assert.ok(captured.httpAgent instanceof (await import('node:http')).Agent, '默认开启 keepAlive 应挂 http 标准 agent');
-    assert.notEqual(captured.httpAgent?.constructor?.name, 'SocksProxyAgent');
-  } else {
-    assert.equal(captured.httpAgent, undefined);
-    assert.equal(captured.httpsAgent, undefined);
-  }
+  assert.equal(captured.httpAgent, undefined);
+  assert.equal(captured.httpsAgent, undefined);
   // 不翻译任何认证头
   assert.equal(captured.headers['Authorization'], undefined);
   assert.equal(captured.headers['Cookie'], undefined);

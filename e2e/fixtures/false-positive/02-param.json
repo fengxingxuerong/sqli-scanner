@@ -1,0 +1,11 @@
+{
+  "name": "fp_param",
+  "description": "参数化查询语义（无注入面）",
+  "target": { "type": "safe", "endpoint": "param", "param": "q", "value": "test" },
+  "config": { "techniques": ["union", "error", "boolean", "time"] },
+  "expected": {
+    "vulnerable": false,
+    "techniques": { "must": [], "nice": [] },
+    "requestCount": { "max": 250 }
+  }
+}

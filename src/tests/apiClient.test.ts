@@ -2,15 +2,19 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import * as axios from 'axios';
 import { apiClient } from '../shared/apiClient';
 
-// 用桩替换 axios：create 返回固定实例，并暴露实例与响应拦截处理器供断言
+// 用桩替换 axios：create 返回固定实例，并暴露实例与拦截处理器供断言
 vi.mock('axios', () => {
-  const handlers: any[] = [];
+  const reqHandlers: any[] = [];
+  const resHandlers: any[] = [];
   const instance = {
-    interceptors: { response: { use: (fn: any) => handlers.push(fn) } },
+    interceptors: {
+      request: { use: (fn: any) => reqHandlers.push(fn) },
+      response: { use: (fn: any) => resHandlers.push(fn) },
+    },
     get: vi.fn(),
     post: vi.fn(),
   };
-  return { default: { create: () => instance }, __instance: instance, __handlers: handlers };
+  return { default: { create: () => instance }, __instance: instance, __resHandlers: resHandlers, __reqHandlers: reqHandlers };
 });
 
 const mocked = axios as any;
@@ -37,12 +41,20 @@ describe('apiClient 响应解包与拦截', () => {
 
   it('拦截器对 code!==0 抛错（统一错误体系）', async () => {
     const fake = { data: { code: 2001, data: null, message: '未找到' } };
-    await expect(mocked.__handlers[0](fake)).rejects.toThrow('未找到');
+    await expect(mocked.__resHandlers[0](fake)).rejects.toThrow('未找到');
   });
 
   it('拦截器对 code===0 透传响应', async () => {
     const fake = { data: { code: 0, data: 'D', message: 'ok' } };
-    const res = await mocked.__handlers[0](fake);
+    const res = await mocked.__resHandlers[0](fake);
     expect(res).toBe(fake);
+  });
+
+  it('请求拦截器注入 x-api-token（localStorage 有值）', async () => {
+    localStorage.setItem('scanApiToken', 'test-token-123');
+    const config = { headers: {} };
+    const result = mocked.__reqHandlers[0](config);
+    expect(result.headers['x-api-token']).toBe('test-token-123');
+    localStorage.removeItem('scanApiToken');
   });
 });

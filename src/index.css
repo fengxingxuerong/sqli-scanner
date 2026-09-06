@@ -2,20 +2,106 @@
 @tailwind components;
 @tailwind utilities;
 
-html,
-body,
-#root {
-  height: 100%;
+/* 字体改由 index.html <link> 预连接加载（CSS @import 位置违规产生构建警告，且串行阻塞 CSS 解析） */
+
+html, body, #root { height: 100%; }
+body { margin: 0; }
+
+/* ── 等宽字体 ── */
+pre.payload, .mono, .terminal {
+  font-family: 'JetBrains Mono', 'Fira Code', 'SFMono-Regular', Consolas, Menlo, monospace;
 }
 
-body {
-  margin: 0;
-  /* 背景色交由 MUI CssBaseline 按主题（浅色/暗色）统一着色，避免硬编码亮底 */
+/* ── 跳过导航 ── */
+.skip-link {
+  position: absolute; top: -100%; left: 0; z-index: 9999;
+  padding: 8px 16px; background: #00d4ff; color: #0a0e16;
+  text-decoration: none; font-size: 14px; font-weight: 700; border-radius: 0 0 4px 0;
+}
+.skip-link:focus { top: 0; }
+
+/* ── 毛玻璃通用 ── */
+.glass {
+  background: rgba(17, 24, 39, 0.6);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(0, 212, 255, 0.1);
+}
+.glass-light {
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(0, 0, 0, 0.05);
 }
 
-/* 等宽字体用于 Payload 展示 */
-pre.payload {
-  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
-  white-space: pre-wrap;
-  word-break: break-all;
+/* ── 背景点阵 ── */
+.dot-grid {
+  position: fixed; inset: 0; z-index: -1; pointer-events: none;
+  background-image: radial-gradient(rgba(0, 212, 255, 0.08) 1px, transparent 1px);
+  background-size: 24px 24px;
 }
+
+/* ── 霓虹发光边框 ── */
+.neon-border {
+  border: 1px solid rgba(0, 212, 255, 0.12);
+  transition: border-color 0.3s, box-shadow 0.3s;
+}
+.neon-border:hover {
+  border-color: rgba(0, 212, 255, 0.3);
+  box-shadow: 0 0 16px rgba(0, 212, 255, 0.1);
+}
+
+/* ── 扫描线动画 ── */
+@keyframes scanline {
+  0% { transform: translateY(-100%); }
+  100% { transform: translateY(100vh); }
+}
+.scanline-active::after {
+  content: ''; position: fixed; left: 0; right: 0; top: 0; height: 2px;
+  background: linear-gradient(90deg, transparent, #00d4ff, transparent);
+  box-shadow: 0 0 12px #00d4ff;
+  animation: scanline 3s linear infinite; z-index: 9999; pointer-events: none;
+}
+
+/* ── 风险脉冲 ── */
+@keyframes pulse-red {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.5); }
+  50% { box-shadow: 0 0 0 6px rgba(239, 68, 68, 0); }
+}
+.pulse-critical { animation: pulse-red 2s ease-in-out infinite; }
+
+/* ── 渐变文字 ── */
+.gradient-text {
+  background: linear-gradient(135deg, #00d4ff 0%, #8b5cf6 100%);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+}
+
+/* ── 终端输出块 ── */
+.terminal-block {
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(0, 212, 255, 0.1);
+  border-radius: 8px;
+  padding: 12px 16px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  line-height: 1.6;
+  overflow-x: auto;
+}
+
+/* ── 淡入动画 ── */
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-in {
+  animation: fadeInUp 0.5s ease-out both;
+}
+
+/* ── 自定义滚动条 ── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: rgba(0, 212, 255, 0.15);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover { background: rgba(0, 212, 255, 0.3); }

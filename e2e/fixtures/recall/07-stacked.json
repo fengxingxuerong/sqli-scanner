@@ -1,0 +1,11 @@
+{
+  "name": "stacked",
+  "description": "堆叠注入（; 第二条语句 sleep）",
+  "target": { "type": "mock", "endpoint": "stacked", "param": "i", "value": "1" },
+  "config": { "techniques": ["stacked"], "timeBlindSleepSec": 1, "timeThresholdMs": 800, "timeBlindSamples": 3 },
+  "expected": {
+    "vulnerable": true,
+    "techniques": { "must": ["stacked"], "nice": [] },
+    "requestCount": { "max": 60 }
+  }
+}

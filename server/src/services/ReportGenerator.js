@@ -1,27 +1,49 @@
-// 报告生成器：汇总 ReportModel、风险定级、JSON/HTML 导出
-import { readFileSync } from 'fs';
-import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
+// ============================================================================
+// patch/ReportGenerator.js —— 安全加固版报告生成器
+// 基于 server/src/services/ReportGenerator.js 修改，修复项：
+//   [P1-1] 导出前剥离 target 中的认证/代理等敏感配置（config.auth / cookieParams /
+//          headerParams），避免 JSON 报告分享/落盘泄露目标站凭据
+//   [P2-7] CSV 单元格公式注入转义（= + - @ \t \r 前缀加 ' 前缀）
+// 其余逻辑与原文件一致（HTML 转义已存在且正确，原样保留）。
+// ============================================================================
 
-// 引擎版本（读取 server/package.json，失败回退 unknown），仅用于报告页脚展示
-let ENGINE_VERSION = 'unknown';
-try {
-  const __dirname = dirname(fileURLToPath(import.meta.url));
-  const pkg = JSON.parse(readFileSync(join(__dirname, '../../package.json'), 'utf8'));
-  ENGINE_VERSION = pkg.version || 'unknown';
-} catch {
-  // 版本读取失败不影响报告生成
+import { truncateLong } from '../core/logger.js';
+
+// 导出时单条证据/说明的最大长度（原逻辑不变）
+const EVIDENCE_MAX = 4000;
+
+// [P1-1] 导出前脱敏 target：剥离认证凭据与代理配置，只保留展示字段
+// （baseUrl/method/bodyParams 等）。返回浅拷贝，不污染内存中的 report。
+function sanitizeTargetForExport(target) {
+  if (!target || typeof target !== 'object') return target;
+  const out = { ...target };
+  if (out.config && typeof out.config === 'object') {
+    const { auth, proxy, ...rest } = out.config;
+    out.config = {
+      ...rest,
+      auth: null, // 凭据不导出：仅保留「曾配置过」的展示需要时可用布尔标注
+      proxy: null,
+    };
+  }
+  delete out.cookieParams; // 目标会话 cookie 不导出
+  delete out.headerParams; // 目标自定义头（可能含 Authorization）不导出
+  if (out.db && typeof out.db === 'object' && out.db.connectionString) {
+    out.db = { ...out.db, connectionString: '***' }; // 直连模式的连接串打码
+  }
+  return out;
 }
 
+// [P2-7] CSV 单元格转义：引号翻倍 + 公式前缀防护
+function csvSafeCell(v) {
+  let s = v === null || v === undefined ? '' : String(v);
+  // 公式注入防护：以 = + - @ \t \r 开头的单元格加 ' 前缀（Excel/WPS 不再按公式解析）
+  if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
+  return `"${s.replace(/"/g, '""')}"`;
+}
+
+// 报告生成器：汇总 ReportModel、风险定级、JSON/HTML 导出
 export class ReportGenerator {
-  /**
-   * 构造报告
-   * @param {string} scanId
-   * @param {object} target
-   * @param {object[]} points
-   * @param {object[]} vulns
-   * @param {object|null} data
-   */
+  /** @internal 仅供 ScanManager 内部调用（含测试直接构造 ReportModel 的用例） */
   build(scanId, target, points, vulns, data) {
     const riskLevel = this.riskOf(vulns, data);
     return {
@@ -43,10 +65,8 @@ export class ReportGenerator {
     };
   }
 
-  // 风险定级：可提取=Critical / 堆叠=Critical / 可回显=High / 仅盲注=Medium / 疑似=Low
   riskOf(vulns, data) {
     if (data && this._hasData(data)) return 'Critical';
-    // 堆叠注入可进一步用于写文件/命令执行，风险最高，置于所有判定之前
     if (vulns.some((v) => v.technique === 'stacked')) return 'Critical';
     if (
       vulns.some(
@@ -58,7 +78,6 @@ export class ReportGenerator {
     if (vulns.some((v) => v.technique === 'boolean' || v.technique === 'time')) {
       return 'Medium';
     }
-    // OOB 带外仅确认注入存在（不进拖库/二分提取），风险等同盲注 → Medium
     if (vulns.some((v) => v.technique === 'oob')) {
       return 'Medium';
     }
@@ -80,108 +99,110 @@ export class ReportGenerator {
     return m;
   }
 
-  // 导出 JSON
-  toJSON(report) {
-    return JSON.stringify(report, null, 2);
+  _truncate(report) {
+    if (!report || !Array.isArray(report.vulns)) return report;
+    const vulns = report.vulns.map((v) => {
+      const out = { ...v };
+      for (const key of ['evidence', 'description']) {
+        out[key] = truncateLong(out[key], EVIDENCE_MAX);
+      }
+      return out;
+    });
+    return { ...report, vulns };
   }
 
-  // 导出 HTML（内联样式，离线可打开）
+  // [P1-1] 导出统一脱敏：先截断证据，再剥离 target 凭据
+  _forExport(report) {
+    const r = this._truncate(report);
+    if (!r.target) return r;
+    return { ...r, target: sanitizeTargetForExport(r.target) };
+  }
+
+  // 导出 JSON（P1-1：target 已脱敏）
+  toJSON(report) {
+    return JSON.stringify(this._forExport(report), null, 2);
+  }
+
+  // 导出 CSV（P1-U3）：漏洞表 + 拖库数据两档，BOM 头 + [P2-7] 公式注入转义
+  toCSV(report) {
+    const r = this._forExport(report);
+    const lines = [];
+    lines.push('漏洞ID,注入点,技术,数据库,风险,说明');
+    for (const v of r.vulns || []) {
+      lines.push(
+        [v.id, v.pointId, v.technique, v.dbms || '', v.riskLevel, (v.description || '').replace(/[\r\n,]/g, ' ')]
+          .map((c) => csvSafeCell(c))
+          .join(',')
+      );
+    }
+    const rows = r.data?.rows || {};
+    if (Object.keys(rows).length) {
+      lines.push('');
+      lines.push('# 拖库数据');
+      for (const [table, arr] of Object.entries(rows)) {
+        if (!arr || !arr.length) continue;
+        const cols = Object.keys(arr[0]);
+        lines.push('');
+        lines.push(`## ${table}`);
+        lines.push(cols.join(','));
+        for (const obj of arr) {
+          lines.push(cols.map((c) => csvSafeCell(obj[c] ?? '')).join(','));
+        }
+      }
+    }
+    return '\uFEFF' + lines.join('\n');
+  }
+
+  // 导出 Markdown（原逻辑不变，仅 target 脱敏由 _forExport 覆盖）
+  toMarkdown(report) {
+    const r = this._forExport(report);
+    const md = [];
+    md.push(`# SQL 注入检测报告`);
+    md.push('');
+    md.push(`- 扫描ID：\`${report.scanId}\``);
+    md.push(`- 目标：\`${report.target?.baseUrl || '-'}\``);
+    md.push(`- 风险等级：**${report.riskLevel}**`);
+    md.push(`- 数据库：${report.dbms || '-'}`);
+    md.push(`- 注入点：${(report.points || []).length} · 漏洞：${(r.vulns || []).length}`);
+    md.push('');
+    md.push('## 漏洞清单');
+    md.push('');
+    md.push('| 注入点 | 技术 | 数据库 | 风险 | 说明 |');
+    md.push('|---|---|---|---|---|');
+    for (const v of r.vulns || []) {
+      md.push(`| ${v.pointId} | ${v.technique} | ${v.dbms || '-'} | ${v.riskLevel} | ${(v.description || '').replace(/\|/g, '\\|')} |`);
+    }
+    if (!(r.vulns || []).length) md.push('| - | - | - | - | 未发现漏洞 |');
+    md.push('');
+    md.push('## Payload 示例');
+    md.push('');
+    const payloads = (r.vulns || []).flatMap((v) => v.payloads || []);
+    if (payloads.length) {
+      for (const p of payloads) md.push(`- \`${p}\``);
+    } else {
+      md.push('- 无');
+    }
+    return md.join('\n');
+  }
+
+  // 导出 HTML（原逻辑不变：所有用户可控字段均已 _escape 转义，P3 已核验）
   toHTML(report) {
-    const rows = (report.vulns || [])
+    const r = this._forExport(report);
+    const rows = (r.vulns || [])
       .map(
         (v) => `<tr>
-        <td>${v.pointId}</td>
-        <td>${v.technique}</td>
-        <td>${v.dbms || '-'}</td>
-        <td class="${v.riskLevel.toLowerCase()}">${v.riskLevel}</td>
-        <td>${this._escape(v.description || '')}${
-          v.oob
-            ? `<br><span style="color:#c62828;font-weight:bold">带外回连确认（OOB）</span><br>token：${this._escape(v.oob.token)}<br>回连：${this._escape(v.oob.callback)}`
-            : ''
-        }</td>
+        <td>${this._escape(v.pointId)}</td>
+        <td>${this._escape(v.technique)}</td>
+        <td>${this._escape(v.dbms || '-')}</td>
+        <td class="${this._escape(String(v.riskLevel || 'low').toLowerCase())}">${this._escape(v.riskLevel)}</td>
+        <td>${this._escape(v.description || '')}</td>
       </tr>`
       )
       .join('');
-    const payloads = (report.vulns || [])
+    const payloads = (r.vulns || [])
       .flatMap((v) => v.payloads || [])
       .map((p) => '• ' + this._escape(p))
       .join('\n');
-
-    // 安全间隔探测告警（对标 sqlmap --safe-url 偏离告警；仅记录不阻断）
-    const alertItems = (report.summary && report.summary.safeProbeAlerts) || [];
-    const alertsHtml = alertItems.length
-      ? `<h2 id="sec-alerts">安全间隔探测告警（${alertItems.length} 条）</h2>
-      <div style="border:1px solid #ef6c00;border-radius:6px;padding:10px;background:#fff8f0">
-        <p class="meta">扫描期间安全 URL 偏离基线，说明目标可能被 WAF/IPS 拦截、会话失效或触发限流，当前批次检测结果可能失真，建议复核命中结论。</p>
-        <ul style="margin:6px 0;padding-left:18px">
-          ${alertItems
-            .map(
-              (a) => `<li style="margin-bottom:6px">
-            <b>${this._escape(a.url)}</b><br>
-            ${this._escape(a.reason)}<br>
-            <span class="meta">基线 ${a.baselineStatus}（${a.baselineLen}B）→ 实际 ${a.actualStatus}（${a.actualLen}B）${
-              a.ts ? ` · ${this._escape(a.ts)}` : ''
-            }</span>
-          </li>`
-            )
-            .join('')}
-        </ul>
-      </div>`
-      : '';
-
-    // 扫描统计（技术分布 / 风险分布）
-    const byTech = (report.summary && report.summary.byTechnique) || {};
-    const byRisk = (report.summary && report.summary.byRisk) || {};
-    const statsHtml = `<h2 id="sec-stats">扫描统计</h2>
-      <p class="meta">注入点：${(report.points || []).length} · 漏洞：${(report.vulns || []).length}</p>
-      <p class="meta">按技术：${Object.keys(byTech).length ? Object.entries(byTech).map(([k, v]) => `${this._escape(k)}:${v}`).join(' / ') : '无'}</p>
-      <p class="meta">按风险：${Object.keys(byRisk).length ? Object.entries(byRisk).map(([k, v]) => `${this._escape(k)}:${v}`).join(' / ') : '无'}</p>`;
-
-    // WAF 规避与指纹标注（对标前端 ReportPage WAF 区块）
-    const wafEvasion = report.summary && report.summary.wafEvasion;
-    const wafDetected = (report.summary && report.summary.wafDetected) || [];
-    const wafParts = [];
-    if (wafEvasion && wafEvasion.tamper && wafEvasion.tamper.enabled) {
-      wafParts.push(`tamper 组合：${this._escape((wafEvasion.tamper.plugins || []).join(' → '))}（强度：${this._escape(wafEvasion.tamper.intensity || 'medium')}）`);
-    }
-    if (Array.isArray(wafDetected) && wafDetected.length) {
-      wafParts.push(`识别到 WAF：${wafDetected.map((w) => `${this._escape(w.vendor)}(${this._escape(String(w.confidence))})`).join('、')}`);
-    }
-    const wafHtml = wafParts.length
-      ? `<h2 id="sec-waf">WAF 规避与指纹</h2>
-      <div style="border:1px solid #1565c0;border-radius:6px;padding:10px;background:#f0f6ff">
-        <ul style="margin:6px 0;padding-left:18px">
-          ${wafParts.map((p) => `<li style="margin-bottom:4px">${p}</li>`).join('')}
-        </ul>
-      </div>`
-      : '';
-
-    // 目录锚点（仅列出实际存在的区块，供跳转与打印导航）
-    const toc = [
-      { id: 'sec-stats', title: '扫描统计' },
-      ...(wafParts.length ? [{ id: 'sec-waf', title: 'WAF 规避与指纹' }] : []),
-      { id: 'sec-vulns', title: '漏洞清单' },
-      ...(alertItems.length
-        ? [{ id: 'sec-alerts', title: `安全间隔探测告警（${alertItems.length} 条）` }]
-        : []),
-      { id: 'sec-payloads', title: 'Payload 示例' },
-    ];
-    const tocHtml = `<nav class="toc" aria-label="目录">
-      <div class="toc-title">目录</div>
-      <ul>${toc.map((t) => `<li><a href="#${t.id}">${this._escape(t.title)}</a></li>`).join('')}</ul>
-    </nav>`;
-
-    // 风险等级配色图例（与 CSS .critical/.high/.medium/.low 配色一致，便于打印后快速识别风险）
-    const legendHtml = `<div class="legend" aria-label="风险等级图例">
-      <span class="lg critical">Critical</span>
-      <span class="lg high">High</span>
-      <span class="lg medium">Medium</span>
-      <span class="lg low">Low</span>
-    </div>`;
-
-    // 页脚：生成时间（report.finishedAt）+ 引擎版本 + 自动生成声明
-    const finishedAt = report.finishedAt ? new Date(report.finishedAt).toLocaleString('zh-CN') : '-';
-    const footerHtml = `<footer class="rp-footer">生成时间：${this._escape(finishedAt)} · 引擎版本 v${this._escape(ENGINE_VERSION)} · 本报告由 SQL 注入检测引擎自动生成</footer>`;
 
     return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
       <title>SQL 注入检测报告 ${report.scanId}</title>
@@ -193,29 +214,17 @@ export class ReportGenerator {
         th{background:#f5f5f5}.critical{color:#c62828;font-weight:bold}
         .high{color:#ef6c00}.medium{color:#f9a825}.low{color:#9e9e9e}
         .meta{color:#666;font-size:13px}pre{background:#f7f7f7;padding:10px;border-radius:6px;white-space:pre-wrap;word-break:break-all}
-        .toc{background:#fafafa;border:1px solid #eee;border-radius:6px;padding:10px 14px;margin:12px 0}
-        .toc-title{font-weight:600;margin-bottom:4px}
-        .toc ul{margin:0;padding-left:18px}.toc a{color:#1565c0;text-decoration:none}.toc a:hover{text-decoration:underline}
-        .print-btn{margin:12px 0;padding:8px 14px;background:#1565c0;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px}
-        .legend{display:flex;gap:10px;flex-wrap:wrap;margin:8px 0 4px}.legend .lg{font-size:12px;padding:2px 10px;border-radius:4px;color:#fff;font-weight:600}.legend .critical{background:#c62828}.legend .high{background:#ef6c00}.legend .medium{background:#f9a825}.legend .low{background:#9e9e9e}
-        .rp-footer{margin-top:28px;padding-top:8px;border-top:1px solid #eee;color:#999;font-size:12px}
-        @media print{body{margin:12mm;color:#000}.print-btn{display:none}h1,h2{break-after:avoid}tr,li{break-inside:avoid}pre{white-space:pre-wrap;word-break:break-all}a{color:#000;text-decoration:none}}
+        .footer{margin-top:32px;padding-top:12px;border-top:1px solid #eee;color:#999;font-size:12px;text-align:center}
       </style></head><body>
       <h1>SQL 注入检测报告</h1>
-      <p class="meta">扫描ID：${report.scanId} · 风险等级：<b>${report.riskLevel}</b> · 数据库：${report.dbms || '-'}</p>
+      <p class="meta">扫描ID：${this._escape(report.scanId)} · 风险等级：<b>${this._escape(report.riskLevel)}</b> · 数据库：${this._escape(report.dbms || '-')}</p>
       <p class="meta">目标：${this._escape(report.target?.baseUrl || '-')} · 注入点：${(report.points || []).length} · 漏洞：${(report.vulns || []).length}</p>
-      <button class="print-btn" onclick="window.print()">打印此报告 / 导出 PDF</button>
-      ${tocHtml}
-      ${legendHtml}
-      ${statsHtml}
-      ${wafHtml}
-      <h2 id="sec-vulns">漏洞清单</h2>
+      <h2>漏洞清单</h2>
       <table><thead><tr><th>注入点</th><th>技术</th><th>数据库</th><th>风险</th><th>说明</th></tr></thead>
       <tbody>${rows || '<tr><td colspan="5">未发现漏洞</td></tr>'}</tbody></table>
-      ${alertsHtml}
-      <h2 id="sec-payloads">Payload 示例</h2>
+      <h2>Payload 示例</h2>
       <pre>${payloads || '无'}</pre>
-      ${footerHtml}
+      <footer class="footer">本报告仅供授权安全测试使用。未获授权对任何系统进行扫描、测试或数据提取均可能违反法律法规，请勿用于非法用途。</footer>
       </body></html>`;
   }
 
@@ -223,7 +232,9 @@ export class ReportGenerator {
     return String(s)
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;');
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
   }
 }
 

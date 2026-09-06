@@ -1,414 +1,409 @@
-import { useEffect, useRef, useState } from 'react';
+// 可视化报告页：风险仪表盘风格
+// 大号风险等级卡片 + 漏洞列表 + 提取数据 + 一键操作
+// P1-U1 增强：sqlmap 模式（report.engine==='sqlmap'）时，漏洞列表改用 report.sqlmap.vulns 渲染，
+// 并新增「sqlmap 日志」Tab 回放原始输出——修复 sqlmap 命中即显示「未发现漏洞」的语义缺陷。
+
+import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
-  Box,
-  Container,
-  Paper,
-  Grid,
-  Typography,
-  Chip,
-  Button,
-  Alert,
-  IconButton,
-  InputAdornment,
-  TextField,
-  Accordion,
-  AccordionSummary,
-  AccordionDetails,
-  Skeleton,
+  Box, Container, Paper, Button, Stack, Typography, Chip,
+  Alert, Card, CardContent, Divider, LinearProgress, Tab, Tabs
 } from '@mui/material';
-import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
-import FileDownloadIcon from '@mui/icons-material/FileDownload';
-import ClearIcon from '@mui/icons-material/Clear';
+import { ArrowBack, Refresh, PlayArrow } from '@mui/icons-material';
 import { useScan } from '../hooks/useScan';
 import { useScanStore } from '../store/scanStore';
-import VulnList from '../components/VulnList';
+import i18n from '../i18n';
+import ReportExport from '../components/ReportExport';
 import VulnDetail from '../components/VulnDetail';
 import DbTree from '../components/DbTree';
-import ReportExport from '../components/ReportExport';
-import SecondOrderGraph, { type GraphHandle as SecondHandle } from '../components/SecondOrderGraph';
-import InjectionTopologyGraph, { type GraphHandle as InjectHandle } from '../components/InjectionTopologyGraph';
-import { RISK_LABEL, TECHNIQUE_LABEL } from '../shared/constants';
-import type { Vulnerability } from '../shared/types';
+import ReportSummarySection, { RISK_COLORS, TECHNIQUE_COLORS } from '../components/ReportSummarySection';
+import type { Vulnerability, SqlmapVulnEntry } from '../shared/types';
 
-// 漏洞是否命中搜索词（按 id/pointId/DBMS/描述/风险/技术/payload 模糊匹配）
-function vulnMatches(v: Vulnerability, q: string): boolean {
-  if (!q) return true;
-  const hay = [
-    v.id,
-    v.pointId,
-    v.dbms ?? '',
-    v.description,
-    RISK_LABEL[v.riskLevel] ?? v.riskLevel,
-    TECHNIQUE_LABEL[v.technique] ?? v.technique,
-    (v.payloads || []).join(' '),
-  ]
-    .join(' ')
-    .toLowerCase();
-  return hay.includes(q);
+// sqlmap 日志级别 → 颜色（与 ProgressView 同源，避免重复定义漂移）
+const SQLMAP_LOG_COLOR: Record<string, string> = {
+  error: '#d32f2f',
+  success: '#43a047',
+  info: '#1565c0',
+  debug: '#9e9e9e',
+  warn: '#f57c00',
+  output: '#374151',
+};
+
+// [P1-FIX] 日期格式化兜底：缺失/非法时间戳渲染 '-'（原实现直接 new Date(undefined) → "Invalid Date"）
+function fmtDate(iso?: string | null): string {
+  if (!iso) return '-';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '-';
+  return d.toLocaleString(i18n.language.startsWith('zh') ? 'zh-CN' : 'en-US');
 }
 
-// 目录锚点区块（与导出 HTML 的 TOC、PDF 栅格化排除规则保持一致）
-const TOC_SECTIONS = [
-  { id: 'sec-vulns', label: '漏洞列表' },
-  { id: 'sec-detail', label: '漏洞详情' },
-  { id: 'sec-data', label: '拖库数据' },
-  { id: 'sec-export', label: '导出' },
-];
+// sqlmap 命中行 → 漏洞卡片（param / technique / raw 原文）
+function SqlmapVulnCard({ v }: { v: SqlmapVulnEntry }) {
+  const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+  return (
+    <Card
+      variant="outlined"
+      className="cursor-pointer"
+      sx={{ borderLeft: '4px solid #d32f2f' }}
+      onClick={() => setOpen(!open)}
+      aria-expanded={open}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          setOpen(!open);
+        }
+      }}
+    >
+      <CardContent className="py-3">
+        <Stack direction="row" justifyContent="space-between" alignItems="center">
+          <Box>
+            <Typography variant="subtitle2" fontWeight={600}>
+              {v.param ? t('report.sqlmapVuln.param', { param: v.param }) : t('report.sqlmapVuln.unknownParam')}
+            </Typography>
+            <Typography variant="caption" color="text.secondary">{t('report.sqlmapVuln.confirmedInjection')}</Typography>
+          </Box>
+          <Stack direction="row" spacing={1} alignItems="center">
+            <Chip label={v.technique} size="small" sx={{ backgroundColor: '#1565c0', color: '#fff' }} />
+            <Chip label={t('risk.critical')} size="small" sx={{ backgroundColor: '#d32f2f', color: '#fff' }} />
+          </Stack>
+        </Stack>
+        {open && (
+          <Box className="mt-3 pt-3 border-t border-gray-200">
+            <Typography variant="caption" color="text.secondary">{t('report.sqlmapVuln.rawHitLine')}</Typography>
+            <Box
+              component="pre"
+              className="mt-1 p-2 rounded overflow-x-auto"
+              sx={{ backgroundColor: '#f5f5f5', fontSize: '0.75rem', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}
+            >
+              {v.raw}
+            </Box>
+          </Box>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
 
-// 报告页：漏洞列表 + 详情 + 拖库树 + 导出
+// TECHNIQUE_COLORS 已由 ReportSummarySection 导出（单一事实源），此处不再重复定义（防漂移）。
+
+function TabPanel({ children, value, index }: { children: React.ReactNode; value: number; index: number }) {
+  return value === index ? (
+    <Box
+      className="py-4"
+      role="tabpanel"
+      id={`report-tabpanel-${index}`}
+      aria-labelledby={`report-tab-${index}`}
+    >
+      {children}
+    </Box>
+  ) : null;
+}
+
 export default function ReportPage() {
+  const { t } = useTranslation();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { getReport } = useScan();
-  const { report } = useScanStore();
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  // 报告页全局搜索：联动过滤漏洞列表（VulnList）+ 拖库数据树（DbTree）
-  const [query, setQuery] = useState('');
-  const searchRef = useRef<HTMLInputElement>(null);
-  // 快捷键：按 / 聚焦全局搜索框（类 GitHub/Linear；输入框聚焦时不触发）
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const el = e.target as HTMLElement | null;
-      const typing = !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable);
-      if (e.key === '/' && !typing) {
-        e.preventDefault();
-        searchRef.current?.focus();
-      }
-    };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, []);
-  // 目录当前高亮区块（scrollspy）：默认首项，滚动时由 IntersectionObserver 更新
-  const [activeSec, setActiveSec] = useState<string>(TOC_SECTIONS[0].id);
-  // 报告内容根 ref：PDF 导出时栅格化此节点（不含顶部工具栏；目录栏/导出区经 data-pdf-exclude 排除）
-  const contentRef = useRef<HTMLDivElement>(null);
-  // 拓扑图便捷导出入口：持 ref 调子组件 exportImage；按钮在 rp-no-print 工具栏，不进 PDF
-  const injectGraphRef = useRef<InjectHandle>(null);
-  const secondOrderRef = useRef<SecondHandle>(null);
+  const { getReport, startScan } = useScan();
+  const report = useScanStore((s) => s.report);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [selectedVuln, setSelectedVuln] = useState<Vulnerability | null>(null);
+  const [tab, setTab] = useState(0);
+  const [resumeError, setResumeError] = useState('');
+  const [chartCollapsed, setChartCollapsed] = useState(false);
 
   useEffect(() => {
-    if (id) getReport(id);
-  }, [id]);
+    if (!id) {
+      setLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    setError('');
+    getReport(id)
+      .then(() => { if (!cancelled) setLoading(false); })
+      .catch((e) => { if (!cancelled) { setError(e.message || t('report.loadError')); setLoading(false); } });
+    return () => { cancelled = true; };
+  }, [id, getReport, t]);
 
-  // 滚动高亮（scrollspy）：观察四个区块，取最靠上的可见区块设为 active。
-  // jsdom/SSR 无 IntersectionObserver 时跳过，避免报错（默认高亮首项即可）。
-  useEffect(() => {
-    if (typeof IntersectionObserver === 'undefined' || !report) return;
-    const observer = new IntersectionObserver(
-      (entries) => {
-        const visible = entries
-          .filter((e) => e.isIntersecting)
-          .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
-        if (visible.length > 0) {
-          setActiveSec((visible[0].target as HTMLElement).id);
-        }
-      },
-      { rootMargin: '-72px 0px -55% 0px', threshold: 0 },
+  if (loading) {
+    return (
+      <Container maxWidth="md" className="py-6">
+        <Box className="text-center py-10">
+          <LinearProgress className="mb-4" />
+          <Typography color="text.secondary">{t('report.loading')}</Typography>
+        </Box>
+      </Container>
     );
-    TOC_SECTIONS.forEach((s) => {
-      const el = document.getElementById(s.id);
-      if (el) observer.observe(el);
-    });
-    return () => observer.disconnect();
-  }, [report]);
+  }
 
-  const q = query.trim().toLowerCase();
-  const filteredVulns = report ? report.vulns.filter((v) => vulnMatches(v, q)) : [];
-  const selectedVuln: Vulnerability | null =
-    filteredVulns.find((v) => v.id === selectedId) || filteredVulns[0] || null;
+  if (error) {
+    return (
+      <Container maxWidth="md" className="py-6">
+        <Alert severity="error" className="mb-4">{error}</Alert>
+        <Button startIcon={<ArrowBack />} onClick={() => navigate('/')}>{t('report.backToHome')}</Button>
+      </Container>
+    );
+  }
 
-  // 拓扑图是否实际渲染（决定顶部便捷导出按钮的可用态）
-  const hasInjectionGraph = !!(report?.points && report.points.length > 0);
-  const disc = report?.summary?.secondOrderDiscovery;
-  const storePoints = (report?.points || []).filter((p) => p.isStorePoint);
-  const hasSecondOrderGraph = !!(disc || storePoints.length > 0);
+  if (!report) {
+    return (
+      <Container maxWidth="md" className="py-6">
+        <Alert severity="warning">{t('report.notFound')}</Alert>
+        <Button startIcon={<ArrowBack />} onClick={() => navigate('/')} className="mt-4">{t('report.backToHome')}</Button>
+      </Container>
+    );
+  }
+
+  const vulns = report.vulns || [];
+  const data = report.data;
+  // sqlmap 模式：漏洞来自 sqlmap.vulns（内置引擎报告无此字段）
+  const isSqlmap = report.engine === 'sqlmap';
+  const sqlmapVulns: SqlmapVulnEntry[] = (report.sqlmap?.vulns || []).filter((v) => !!v && !!v.raw);
+  const sqlmapLogs = report.sqlmap?.logs || [];
+  // [P1-FIX] sqlmap 日志无界渲染：超大日志（数千行）全量挂 DOM 会冻结页面，仅渲染最近 500 行
+  const VISIBLE_LOG_TAIL = 500;
+  const visibleSqlmapLogs = sqlmapLogs.length > VISIBLE_LOG_TAIL
+    ? sqlmapLogs.slice(-VISIBLE_LOG_TAIL)
+    : sqlmapLogs;
+  const effectiveVulnCount = isSqlmap ? sqlmapVulns.length : vulns.length;
+
+  // 续跑（P1-U5 补充）：复用 HistoryPage 判定——仅 builtin + 有会话配置时可续跑
+  const resumeCfg = report.target?.config;
+  const canResumeHere =
+    !isSqlmap && !!resumeCfg && !!(resumeCfg.sessionFile || resumeCfg.sessionDefault);
+  const handleResumeHere = async () => {
+    if (!report.target) return;
+    try {
+      await startScan({
+        engine: 'builtin',
+        url: report.target.baseUrl,
+        method: report.target.method,
+        bodyParams: report.target.bodyParams,
+        cookieParams: report.target.cookieParams,
+        headerParams: report.target.headerParams,
+        config: {
+          ...resumeCfg,
+          sessionFile:
+            resumeCfg.sessionFile || (resumeCfg.sessionDefault ? 'sqli-session-latest.json' : undefined),
+          sessionDefault: resumeCfg.sessionDefault,
+        },
+      });
+      navigate('/scan');
+    } catch (e: unknown) {
+      setResumeError(e instanceof Error ? e.message : t('history.resumeFailed'));
+    }
+  };
+
+  // 可视化数据计算已下沉至 ReportSummarySection（单一事实源，本页仅透传折叠态）
 
   return (
     <Container maxWidth="lg" className="py-6">
-      <Box className="flex items-center justify-between mb-4 rp-no-print">
-        <Typography variant="h5" fontWeight={700}>
-          检测报告
-        </Typography>
-        <Box className="flex gap-2">
-          <Chip
-            label={`风险：${report ? RISK_LABEL[report.riskLevel] : '-'}`}
-            color={report?.riskLevel === 'Critical' ? 'error' : 'default'}
-          />
-          <Button variant="outlined" onClick={() => window.print()}>
-            打印报告
-          </Button>
-          <Button variant="text" onClick={() => navigate('/history')}>
-            历史
-          </Button>
-        </Box>
-      </Box>
-      {/* 打印时隐藏顶部工具栏（风险标签/打印/历史按钮），让报告内容干净输出 */}
-      <Box component="style">{`@media print { .rp-no-print { display: none !important } }`}</Box>
-
-      {/* 报告页全局搜索（不进 PDF）：联动过滤漏洞列表 + 拖库数据树 */}
-      <Box className="rp-no-print mb-3">
-        <TextField
+      {/* 鎿嶄綔鏍?*/}
+      <Stack direction="row" spacing={2} className="mb-4" alignItems="center">
+        <Button startIcon={<ArrowBack />} onClick={() => navigate('/')} size="small">{t('report.back')}</Button>
+        <Button
+          startIcon={<Refresh />}
+          onClick={() => { if (id) getReport(id, { force: true }); }}
           size="small"
-          fullWidth
-          label="搜索漏洞 / 数据库 / 表 / 列 / 值"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Escape') setQuery('');
-          }}
-          inputRef={searchRef}
-          InputProps={{
-            endAdornment: query ? (
-              <InputAdornment position="end">
-                <IconButton
-                  aria-label="清除搜索"
-                  size="small"
-                  edge="end"
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => setQuery('')}
+        >
+          {t('report.refresh')}
+        </Button>
+        {canResumeHere && (
+          <Button
+            startIcon={<PlayArrow />}
+            onClick={handleResumeHere}
+            size="small"
+            color="primary"
+            variant="outlined"
+          >
+            {t('history.resume')}
+          </Button>
+        )}
+        {resumeError && (
+          <Typography variant="caption" color="error">{resumeError}</Typography>
+        )}
+        <Box className="ml-auto">
+          <ReportExport />
+        </Box>
+      </Stack>
+
+      {/* 报告摘要区：风险卡片 + 统计卡片 + 可视化图表（独立组件，本页仅透传折叠态） */}
+      <ReportSummarySection
+        report={report}
+        isSqlmap={isSqlmap}
+        effectiveVulnCount={effectiveVulnCount}
+        chartCollapsed={chartCollapsed}
+        onToggleCharts={() => setChartCollapsed((c) => !c)}
+      />
+
+
+      {/* 标签页 */}
+      <Paper variant="outlined" className="mb-4">
+        <Tabs value={tab} onChange={(_, v) => setTab(v)} aria-label={t('report.title')}>
+          <Tab label={t('report.vulnListTab', { count: effectiveVulnCount })} id="report-tab-0" aria-controls="report-tabpanel-0" />
+          <Tab label={t('report.extractedDataTab', { count: data?.databases?.length || 0 })} id="report-tab-1" aria-controls="report-tabpanel-1" />
+          <Tab label={t('report.summary')} id="report-tab-2" aria-controls="report-tabpanel-2" />
+          {isSqlmap && <Tab label={t('report.sqlmapLogsTab', { count: sqlmapLogs.length })} id="report-tab-3" aria-controls="report-tabpanel-3" />}
+        </Tabs>
+
+        {/* 漏洞列表：sqlmap 模式从 sqlmap.vulns 渲染，内置引擎走 vulns */}
+        <TabPanel value={tab} index={0}>
+          {isSqlmap ? (
+            sqlmapVulns.length === 0 ? (
+              <Alert severity="success" variant="outlined">{t('report.sqlmapNoInjection')}</Alert>
+            ) : (
+              <Stack spacing={2}>
+                {sqlmapVulns.map((v, i) => <SqlmapVulnCard key={i} v={v} />)}
+              </Stack>
+            )
+          ) : vulns.length === 0 ? (
+            <Alert severity="success" variant="outlined">{t('report.noVulns')}</Alert>
+          ) : (
+            <Stack spacing={2}>
+              {vulns.map((vuln) => (
+                <Card
+                  key={vuln.id}
+                  variant="outlined"
+                  className="cursor-pointer"
+                  sx={{ borderLeft: `4px solid ${RISK_COLORS[vuln.riskLevel] || '#888'}` }}
+                  onClick={() => setSelectedVuln(selectedVuln?.id === vuln.id ? null : vuln)}
+                  aria-expanded={selectedVuln?.id === vuln.id}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      setSelectedVuln(selectedVuln?.id === vuln.id ? null : vuln);
+                    }
+                  }}
                 >
-                  <ClearIcon fontSize="small" />
-                </IconButton>
-              </InputAdornment>
-            ) : undefined,
-          }}
-        />
-      </Box>
-
-      {/* 拓扑图便捷导出入口（不进 PDF）：图未渲染（无对应数据）时禁用 */}
-      <Box className="rp-no-print flex flex-wrap gap-2 mb-3">
-        <Button
-          size="small"
-          variant="outlined"
-          startIcon={<FileDownloadIcon />}
-          disabled={!hasInjectionGraph}
-          onClick={() => injectGraphRef.current?.exportImage('png')}
-        >
-          导出注入拓扑图 (PNG)
-        </Button>
-        <Button
-          size="small"
-          variant="outlined"
-          startIcon={<FileDownloadIcon />}
-          disabled={!hasSecondOrderGraph}
-          onClick={() => secondOrderRef.current?.exportImage('png')}
-        >
-          导出二阶链路 (PNG)
-        </Button>
-      </Box>
-
-      {!report && (
-        <Box className="space-y-3" aria-busy="true">
-          <Skeleton variant="text" width="45%" height={40} />
-          <Skeleton variant="rectangular" height={96} />
-          <Grid container spacing={2}>
-            <Grid item xs={12} md={4}>
-              <Skeleton variant="rectangular" height={300} />
-            </Grid>
-            <Grid item xs={12} md={8}>
-              <Skeleton variant="rectangular" height={300} />
-            </Grid>
-          </Grid>
-          <Skeleton variant="rectangular" height={360} />
-        </Box>
-      )}
-
-      {report && (
-        <div ref={contentRef}>
-          {/* WAF 规避标注 + 指纹识别汇总（来自 summary.wafEvasion.tamper / summary.wafDetected） */}
-          {(report.summary?.wafEvasion?.tamper?.enabled ||
-            (Array.isArray(report.summary?.wafDetected) && report.summary.wafDetected.length > 0)) && (
-            <Box className="mb-3" sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-              {report.summary.wafEvasion?.tamper?.enabled && (
-                <Alert severity="info" variant="outlined">
-                  tamper 组合：{report.summary.wafEvasion.tamper.plugins.join(' → ')}（强度：
-                  {report.summary.wafEvasion.tamper.intensity}）
-                </Alert>
-              )}
-              {Array.isArray(report.summary.wafDetected) && report.summary.wafDetected.length > 0 && (
-                <Alert severity="warning" variant="outlined">
-                  识别到 WAF：
-                  {report.summary.wafDetected.map((w) => `${w.vendor}(${w.confidence})`).join('、')}
-                </Alert>
-              )}
-            </Box>
-          )}
-
-          {/* 安全间隔探测告警（来自 summary.safeProbeAlerts，对标 sqlmap --safe-url 偏离告警；仅展示不阻断，可折叠） */}
-          {(report.summary.safeProbeAlerts?.length ?? 0) > 0 && (
-            <Accordion className="mb-3" defaultExpanded={false} disableGutters>
-              <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-                <Box className="flex items-center gap-2">
-                  <Chip
-                    size="small"
-                    color="warning"
-                    label={`${report.summary.safeProbeAlerts!.length} 条`}
-                  />
-                  <Typography fontWeight={600}>安全间隔探测告警</Typography>
-                </Box>
-              </AccordionSummary>
-              <AccordionDetails>
-                <Alert severity="warning" variant="outlined">
-                  <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-                    扫描期间安全 URL 偏离基线，说明目标可能被 WAF/IPS 拦截、会话失效或触发限流，
-                    当前批次检测结果可能失真，建议复核命中结论。
-                  </Typography>
-                  <Box component="ul" sx={{ m: 0, pl: 2 }}>
-                    {(report.summary.safeProbeAlerts || []).map((a, i) => (
-                      <Box component="li" key={`${a.url}-${i}`} sx={{ mb: 1 }}>
-                        <Typography variant="body2" fontWeight={600}>{a.url}</Typography>
-                        <Typography variant="body2">{a.reason}</Typography>
+                  <CardContent className="py-3">
+                    <Stack direction="row" justifyContent="space-between" alignItems="center">
+                      <Box>
+                        <Typography variant="subtitle2" fontWeight={600}>
+                          {vuln.pointId}
+                        </Typography>
                         <Typography variant="caption" color="text.secondary">
-                          基线 {a.baselineStatus}（{a.baselineLen}B）→ 实际 {a.actualStatus}（{a.actualLen}B）
-                          {a.ts ? ` · ${new Date(a.ts).toLocaleString()}` : ''}
+                          {vuln.description || t('report.techniqueInjection', { technique: vuln.technique })}
                         </Typography>
                       </Box>
-                    ))}
-                  </Box>
-                </Alert>
-              </AccordionDetails>
-            </Accordion>
-          )}
-
-          {/* 二阶自动发现（方向 1）：展示自动发现的触发页与识别到的存储点；来自 summary.secondOrderDiscovery + report.points */}
-          {(() => {
-            const disc = report.summary?.secondOrderDiscovery;
-            const storePoints = (report.points || []).filter((p) => p.isStorePoint);
-            const storeKinds: Record<string, number> = {};
-            for (const p of storePoints) {
-              const k = p.storeKind || 'unknown';
-              storeKinds[k] = (storeKinds[k] || 0) + 1;
-            }
-            if (!disc && storePoints.length === 0) return null;
-            return (
-              <Box className="mb-3" sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-                <Typography variant="subtitle2" fontWeight={700}>二阶自动发现</Typography>
-                {disc && (
-                  <Alert severity="info" variant="outlined">
-                    <Typography variant="body2">
-                      触发页自动发现：从 {disc.candidates.length} 个候选链接中确认 {disc.confirmed.length} 个会回显存储内容的触发页。
-                    </Typography>
-                    {disc.confirmed.length > 0 && (
-                      <Box component="ul" sx={{ m: 0, pl: 2, mt: 1 }}>
-                        {disc.confirmed.map((u, i) => (
-                          <Box component="li" key={`${u}-${i}`}>
-                            <Typography variant="body2" sx={{ wordBreak: 'break-all' }}>{u}</Typography>
-                          </Box>
-                        ))}
+                      <Stack direction="row" spacing={1} alignItems="center">
+                        <Chip
+                          label={vuln.technique}
+                          size="small"
+                          sx={{ backgroundColor: TECHNIQUE_COLORS[vuln.technique] || '#888', color: '#fff' }}
+                        />
+                        <Chip
+                          label={vuln.riskLevel}
+                          size="small"
+                          sx={{ backgroundColor: RISK_COLORS[vuln.riskLevel] || '#888', color: '#fff' }}
+                        />
+                        {vuln.dbms && <Chip label={vuln.dbms} size="small" variant="outlined" />}
+                      </Stack>
+                    </Stack>
+                    {selectedVuln?.id === vuln.id && (
+                      <Box className="mt-3 pt-3 border-t border-gray-200">
+                        <VulnDetail vuln={vuln} />
                       </Box>
                     )}
-                  </Alert>
-                )}
-                {storePoints.length > 0 && (
-                  <Alert severity="info" variant="outlined">
-                    已识别存储点 {storePoints.length} 个（
-                    {Object.entries(storeKinds).map(([k, n]) => `${k}:${n}`).join('、')}
-                    ），将作为二阶存储端发起真实写请求。
-                  </Alert>
-                )}
-                <SecondOrderGraph
-                  ref={secondOrderRef}
-                  candidates={disc?.candidates || []}
-                  confirmed={disc?.confirmed || []}
-                  storePoints={storePoints.map((p) => ({ param: p.param, storeKind: p.storeKind }))}
-                  height={Math.max(260, 20 + Math.max(storePoints.length, disc?.candidates.length || 0) * 96)}
-                />
-              </Box>
-            );
-          })()}
-
-          {/* 全局注入拓扑图（全部注入点分布 + 二阶回显） */}
-          {report.points && report.points.length > 0 && (() => {
-            const disc = report.summary?.secondOrderDiscovery;
-            const storePointsLite = (report.points.filter((p) => p.isStorePoint)).map((p) => ({
-              param: p.param,
-              storeKind: p.storeKind,
-            }));
-            return (
-              <Box className="mb-3">
-                <Typography variant="subtitle2" fontWeight={700}>注入点全景拓扑</Typography>
-                <InjectionTopologyGraph
-                  ref={injectGraphRef}
-                  points={report.points}
-                  baseUrl={report.target.baseUrl}
-                  secondOrder={disc ? { confirmed: disc.confirmed, storePoints: storePointsLite } : undefined}
-                  highlightPointIds={report.vulns.map((v) => v.pointId)}
-                  height={Math.max(360, 20 + report.points.length * 56 + (disc?.confirmed.length || 0) * 40)}
-                />
-              </Box>
-            );
-          })()}
-
-          {/* 目录锚点侧栏（与导出 HTML 的 TOC 对齐；打印时随顶部工具栏隐藏；PDF 导出时经 data-pdf-exclude 排除）
-              吸顶 + 响应式：桌面端换行铺开，移动端横向滚动；scrollspy 高亮当前区块 */}
-          <Box
-            className="rp-no-print mb-3"
-            data-pdf-exclude="true"
-            sx={{
-              position: 'sticky',
-              top: 8,
-              zIndex: 2,
-              bgcolor: 'background.paper',
-              py: 1,
-              px: 0.5,
-              borderRadius: 1,
-              display: 'flex',
-              alignItems: 'center',
-              gap: 1,
-              flexWrap: { xs: 'nowrap', md: 'wrap' },
-              boxShadow: { xs: 1, md: 0 },
-            }}
-          >
-            <Typography variant="subtitle2" sx={{ mr: 1, whiteSpace: 'nowrap', flexShrink: 0 }}>目录</Typography>
-            <Box sx={{ display: 'flex', gap: 1, flexWrap: { xs: 'nowrap', md: 'wrap' }, overflowX: { xs: 'auto', md: 'visible' } }}>
-              {TOC_SECTIONS.map((t) => (
-                <Button
-                  key={t.id}
-                  size="small"
-                  variant={activeSec === t.id ? 'contained' : 'outlined'}
-                  color={activeSec === t.id ? 'primary' : 'inherit'}
-                  component="a"
-                  href={`#${t.id}`}
-                  aria-current={activeSec === t.id ? 'true' : undefined}
-                  sx={{ whiteSpace: 'nowrap', flexShrink: 0 }}
-                >
-                  {t.label}
-                </Button>
+                  </CardContent>
+                </Card>
               ))}
-            </Box>
-          </Box>
+            </Stack>
+          )}
+        </TabPanel>
 
-          <Grid container spacing={2}>
-          <Grid item xs={12} md={4}>
-            <Paper id="sec-vulns" className="p-3" variant="outlined">
-              {q && (
-                <Typography variant="caption" color="text.secondary" className="block mb-1">
-                  命中 {filteredVulns.length} / {report!.vulns.length} 条漏洞
-                </Typography>
-              )}
-              <VulnList
-                vulns={filteredVulns}
-                selectedId={selectedVuln?.id || null}
-                onSelect={setSelectedId}
-                search={query}
-              />
-            </Paper>
-          </Grid>
-          <Grid item xs={12} md={8} className="space-y-3">
-            <Paper id="sec-detail" className="p-3" variant="outlined">
-              <VulnDetail vuln={selectedVuln} />
-            </Paper>
-            <Paper id="sec-data" className="p-3" variant="outlined">
-              <DbTree data={report.data} search={query} />
-            </Paper>
-            <Paper id="sec-export" className="p-3" variant="outlined" data-pdf-exclude="true">
-              <ReportExport contentRef={contentRef} />
-            </Paper>
-          </Grid>
-        </Grid>
-        </div>
-      )}
+        {/* 提取数据 */}
+        <TabPanel value={tab} index={1}>
+          {data && data.databases && data.databases.length > 0 ? (
+            <DbTree data={data} />
+          ) : (
+            <Alert severity="info" variant="outlined">
+              {t('report.noExtractedData')}
+            </Alert>
+          )}
+        </TabPanel>
+
+        {/* 检测摘要 */}
+        <TabPanel value={tab} index={2}>
+          <Stack spacing={2}>
+            <Box>
+              <Typography variant="subtitle2" fontWeight={600}>{t('report.scanTarget')}</Typography>
+              <Typography variant="body2" color="text.secondary">
+                {report.target?.baseUrl || '-'}
+              </Typography>
+            </Box>
+            <Divider />
+            <Box>
+              <Typography variant="subtitle2" fontWeight={600}>{t('report.scanDbms')}</Typography>
+              <Typography variant="body2" color="text.secondary">
+                {report.dbms || t('report.dbmsUnidentified')}
+              </Typography>
+            </Box>
+            <Divider />
+            <Box>
+              <Typography variant="subtitle2" fontWeight={600}>{t('report.injectionPointCountLabel')}</Typography>
+              <Typography variant="body2" color="text.secondary">
+                {t('report.itemCount', { count: report.points?.length || 0 })}
+              </Typography>
+            </Box>
+            <Divider />
+            <Box>
+              <Typography variant="subtitle2" fontWeight={600}>{t('report.scanTime')}</Typography>
+              <Typography variant="body2" color="text.secondary">
+                {fmtDate(report.startedAt)}
+                {report.finishedAt ? ` → ${fmtDate(report.finishedAt)}` : ''}
+              </Typography>
+            </Box>
+            {report.summary?.wafDetected && report.summary.wafDetected.length > 0 && (
+              <>
+                <Divider />
+                <Box>
+                  <Typography variant="subtitle2" fontWeight={600}>{t('report.wafDetection')}</Typography>
+                  <Stack direction="row" spacing={1} className="mt-1">
+                    {report.summary.wafDetected.map((w, i) => (
+                      <Chip key={i} label={`${w.vendor} (${Math.round(w.confidence * 100)}%)`} size="small" color="warning" variant="outlined" />
+                    ))}
+                  </Stack>
+                </Box>
+              </>
+            )}
+          </Stack>
+        </TabPanel>
+
+        {/* sqlmap 日志 Tab（仅 sqlmap 模式渲染） */}
+        {isSqlmap && (
+          <TabPanel value={tab} index={3}>
+            {sqlmapLogs.length === 0 ? (
+              <Alert severity="info" variant="outlined">{t('report.noSqlmapLogs')}</Alert>
+            ) : (
+              <>
+                {sqlmapLogs.length > VISIBLE_LOG_TAIL && (
+                  <Alert severity="info" variant="outlined" className="mb-2" sx={{ py: 0.5 }}>
+                    {t('report.logTruncated', { total: sqlmapLogs.length, shown: VISIBLE_LOG_TAIL })}
+                  </Alert>
+                )}
+                <Box
+                  component="pre"
+                  className="p-3 rounded overflow-x-auto"
+                  sx={{ backgroundColor: '#1e1e1e', color: '#e0e0e0', fontSize: '0.72rem', lineHeight: 1.5, maxHeight: 480, overflowY: 'auto' }}
+                >
+                  {visibleSqlmapLogs.map((l, i) => (
+                    <Box key={i} component="span" sx={{ display: 'block', color: SQLMAP_LOG_COLOR[l.level] || '#e0e0e0' }}>
+                      [{typeof l.ts === 'string' ? l.ts.slice(11, 19) : ''}] {l.text}
+                    </Box>
+                  ))}
+                </Box>
+              </>
+            )}
+          </TabPanel>
+        )}
+      </Paper>
     </Container>
   );
 }

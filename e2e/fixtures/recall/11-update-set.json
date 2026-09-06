@@ -1,0 +1,11 @@
+{
+  "name": "update_set",
+  "description": "UPDATE SET 注入（name='...' 赋值上下文，引号闭合后逗号拼接赋值）",
+  "target": { "type": "mock", "endpoint": "update", "params": { "id": "1", "name": "alice" } },
+  "config": { "techniques": ["boolean"] },
+  "expected": {
+    "vulnerable": true,
+    "techniques": { "must": ["boolean"], "nice": [] },
+    "requestCount": { "max": 100 }
+  }
+}

@@ -53,11 +53,11 @@ test('模拟回连 → vulnerable=true 且标记注入点', async () => {
   // 与现有检测器一致：同步标记注入点
   assert.equal(ctx.point.confirmed, true);
   assert.equal(ctx.point.technique, 'oob');
-  oobReceiver.stop();
+  await oobReceiver.stop();
 });
 
 test('接收端未启动 → 抛 OOB_DISABLED', async () => {
-  oobReceiver.stop(); // 确保未启动
+  await oobReceiver.stop(); // 确保未启动
   const d = new OobDetector();
   const ctx = makeCtx(makeSilentMock(), 'MySQL');
   await assert.rejects(
@@ -73,7 +73,7 @@ test('已启动但目标未回连 → vulnerable=false', async () => {
   const res = await d.detect(ctx);
   assert.equal(res.vulnerable, false);
   assert.equal(ctx.point.confirmed, false);
-  oobReceiver.stop();
+  await oobReceiver.stop();
 });
 
 test('未知 dbms 时遍历支持库仍可被回连确认', async () => {
@@ -83,5 +83,5 @@ test('未知 dbms 时遍历支持库仍可被回连确认', async () => {
   const res = await d.detect(ctx);
   assert.equal(res.vulnerable, true);
   assert.equal(res.technique, 'oob');
-  oobReceiver.stop();
+  await oobReceiver.stop();
 });

@@ -1,0 +1,11 @@
+{
+  "name": "paren",
+  "description": "括号包裹上下文(('...')，需 ') 闭合)",
+  "target": { "type": "mock", "endpoint": "paren", "param": "id", "value": "1" },
+  "config": { "techniques": ["union", "error", "boolean"] },
+  "expected": {
+    "vulnerable": true,
+    "techniques": { "must": ["boolean"], "nice": ["error", "union"] },
+    "requestCount": { "max": 80 }
+  }
+}

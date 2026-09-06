@@ -1,0 +1,11 @@
+{
+  "name": "fp_escape",
+  "description": "单引号转义（'' 无法闭合）",
+  "target": { "type": "safe", "endpoint": "escape", "param": "name", "value": "alice" },
+  "config": { "techniques": ["union", "error", "boolean", "time"] },
+  "expected": {
+    "vulnerable": false,
+    "techniques": { "must": [], "nice": [] },
+    "requestCount": { "max": 250 }
+  }
+}

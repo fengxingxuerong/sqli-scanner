@@ -14,7 +14,6 @@ const BASE_PROPS = {
 describe('TargetForm 组件', () => {
   it('渲染目标录入区与 URL 录入控件', () => {
     render(<TargetForm {...BASE_PROPS} />);
-    expect(screen.getByText('目标录入')).toBeTruthy();
     // 用 placeholder 定位 URL 输入框，避开 MUI label 关联歧义
     expect(screen.getByPlaceholderText('http://example.com/item.php?id=1')).toBeTruthy();
   });
@@ -27,11 +26,14 @@ describe('TargetForm 组件', () => {
     expect(onChange).toHaveBeenCalledWith({ url: 'http://x/a.php?id=1' });
   });
 
-  it('请求方法下拉可展开并含 POST 选项', async () => {
+  it('请求方法下拉可展开并含全部方法选项', async () => {
     render(<TargetForm {...BASE_PROPS} />);
-    // 默认选中 GET；点开下拉后出现 POST 选项
+    // 默认选中 GET；点开下拉后出现全部选项（GET/POST/PUT/PATCH/DELETE）
     expect(screen.getByText('GET')).toBeTruthy();
     fireEvent.mouseDown(screen.getByText('GET'));
     expect(await screen.findByText('POST')).toBeTruthy();
+    expect(await screen.findByText('PUT')).toBeTruthy();
+    expect(await screen.findByText('PATCH')).toBeTruthy();
+    expect(await screen.findByText('DELETE')).toBeTruthy();
   });
 });

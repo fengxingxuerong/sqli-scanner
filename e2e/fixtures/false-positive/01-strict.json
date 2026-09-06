@@ -1,0 +1,11 @@
+{
+  "name": "fp_strict",
+  "description": "数字白名单（非法即 400）",
+  "target": { "type": "safe", "endpoint": "strict", "param": "id", "value": "1" },
+  "config": { "techniques": ["union", "error", "boolean", "time"] },
+  "expected": {
+    "vulnerable": false,
+    "techniques": { "must": [], "nice": [] },
+    "requestCount": { "max": 250 }
+  }
+}

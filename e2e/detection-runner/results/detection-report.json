@@ -1,0 +1,598 @@
+{
+  "generatedAt": "2026-09-04T15:37:13.912Z",
+  "stats": {
+    "pass": 19,
+    "fail": 0,
+    "skip": 0,
+    "warn": 0
+  },
+  "rows": [
+    {
+      "name": "extract_mock_values",
+      "description": "UNION 提取链验证：提取的数据库/表名与 mock lab 已知值匹配（golden output 对比）",
+      "category": "extraction",
+      "result": "PASS",
+      "found": [
+        "union"
+      ],
+      "checks": [
+        {
+          "name": "vulnerable=true",
+          "ok": true,
+          "detail": "检出 1 个漏洞"
+        },
+        {
+          "name": "must=[union]",
+          "ok": true,
+          "detail": "全部命中"
+        },
+        {
+          "name": "requests<=150",
+          "ok": true,
+          "detail": "实际 30",
+          "severity": "pass"
+        },
+        {
+          "name": "extracted.databases non-empty",
+          "ok": true,
+          "detail": "提取 1 个库"
+        },
+        {
+          "name": "extracted.tables non-empty",
+          "ok": true,
+          "detail": "提取 1 个库的表"
+        },
+        {
+          "name": "extracted.databases contains \"labdb\"",
+          "ok": true,
+          "detail": "找到"
+        },
+        {
+          "name": "extracted.tables contains \"users\"",
+          "ok": true,
+          "detail": "找到"
+        }
+      ],
+      "requestCount": 30,
+      "elapsedMs": 70,
+      "vulnCount": 1
+    },
+    {
+      "name": "extract_no_false_positive",
+      "description": "安全目标提取验证：无注入时不产生提取数据（golden output 对比）",
+      "category": "extraction",
+      "result": "PASS",
+      "found": [],
+      "checks": [
+        {
+          "name": "vulnerable=false",
+          "ok": true,
+          "detail": "检出 0 个漏洞（期望 0）"
+        },
+        {
+          "name": "requests<=100",
+          "ok": true,
+          "detail": "实际 63",
+          "severity": "pass"
+        },
+        {
+          "name": "extracted.databases empty",
+          "ok": true,
+          "detail": "无提取（正确）"
+        },
+        {
+          "name": "extracted.tables empty",
+          "ok": true,
+          "detail": "无提取（正确）"
+        }
+      ],
+      "requestCount": 63,
+      "elapsedMs": 269,
+      "vulnCount": 0
+    },
+    {
+      "name": "fp_strict",
+      "description": "数字白名单（非法即 400）",
+      "category": "false-positive",
+      "result": "PASS",
+      "found": [],
+      "checks": [
+        {
+          "name": "vulnerable=false",
+          "ok": true,
+          "detail": "检出 0 个漏洞（期望 0）"
+        },
+        {
+          "name": "requests<=250",
+          "ok": true,
+          "detail": "实际 186",
+          "severity": "pass"
+        }
+      ],
+      "requestCount": 186,
+      "elapsedMs": 2748,
+      "vulnCount": 0
+    },
+    {
+      "name": "fp_param",
+      "description": "参数化查询语义（无注入面）",
+      "category": "false-positive",
+      "result": "PASS",
+      "found": [],
+      "checks": [
+        {
+          "name": "vulnerable=false",
+          "ok": true,
+          "detail": "检出 0 个漏洞（期望 0）"
+        },
+        {
+          "name": "requests<=250",
+          "ok": true,
+          "detail": "实际 57",
+          "severity": "pass"
+        }
+      ],
+      "requestCount": 57,
+      "elapsedMs": 151,
+      "vulnCount": 0
+    },
+    {
+      "name": "fp_escape",
+      "description": "单引号转义（'' 无法闭合）",
+      "category": "false-positive",
+      "result": "PASS",
+      "found": [],
+      "checks": [
+        {
+          "name": "vulnerable=false",
+          "ok": true,
+          "detail": "检出 0 个漏洞（期望 0）"
+        },
+        {
+          "name": "requests<=250",
+          "ok": true,
+          "detail": "实际 63",
+          "severity": "pass"
+        }
+      ],
+      "requestCount": 63,
+      "elapsedMs": 267,
+      "vulnCount": 0
+    },
+    {
+      "name": "fp_noecho",
+      "description": "无回显（输入不进入响应）",
+      "category": "false-positive",
+      "result": "PASS",
+      "found": [],
+      "checks": [
+        {
+          "name": "vulnerable=false",
+          "ok": true,
+          "detail": "检出 0 个漏洞（期望 0）"
+        },
+        {
+          "name": "requests<=250",
+          "ok": true,
+          "detail": "实际 186",
+          "severity": "pass"
+        }
+      ],
+      "requestCount": 186,
+      "elapsedMs": 2744,
+      "vulnCount": 0
+    },
+    {
+      "name": "fp_json",
+      "description": "JSON API（数值型回显）",
+      "category": "false-positive",
+      "result": "PASS",
+      "found": [],
+      "checks": [
+        {
+          "name": "vulnerable=false",
+          "ok": true,
+          "detail": "检出 0 个漏洞（期望 0）"
+        },
+        {
+          "name": "requests<=250",
+          "ok": true,
+          "detail": "实际 186",
+          "severity": "pass"
+        }
+      ],
+      "requestCount": 186,
+      "elapsedMs": 2732,
+      "vulnCount": 0
+    },
+    {
+      "name": "num",
+      "description": "数值型上下文（id=1，无引号）",
+      "category": "recall",
+      "result": "PASS",
+      "found": [
+        "union",
+        "error",
+        "boolean"
+      ],
+      "checks": [
+        {
+          "name": "vulnerable=true",
+          "ok": true,
+          "detail": "检出 3 个漏洞"
+        },
+        {
+          "name": "must=[union,error,boolean]",
+          "ok": true,
+          "detail": "全部命中"
+        },
+        {
+          "name": "requests<=80",
+          "ok": true,
+          "detail": "实际 43",
+          "severity": "pass"
+        }
+      ],
+      "requestCount": 43,
+      "elapsedMs": 42,
+      "vulnCount": 3
+    },
+    {
+      "name": "str",
+      "description": "单引号字符串上下文（name='foo'，需 ' 闭合）",
+      "category": "recall",
+      "result": "PASS",
+      "found": [
+        "error",
+        "boolean"
+      ],
+      "checks": [
+        {
+          "name": "vulnerable=true",
+          "ok": true,
+          "detail": "检出 2 个漏洞"
+        },
+        {
+          "name": "must=[boolean,error]",
+          "ok": true,
+          "detail": "全部命中"
+        },
+        {
+          "name": "nice=[union]",
+          "ok": true,
+          "detail": "命中: 无（不计失败）"
+        },
+        {
+          "name": "requests<=80",
+          "ok": true,
+          "detail": "实际 34",
+          "severity": "pass"
+        }
+      ],
+      "requestCount": 34,
+      "elapsedMs": 22,
+      "vulnCount": 2
+    },
+    {
+      "name": "paren",
+      "description": "括号包裹上下文(('...')，需 ') 闭合)",
+      "category": "recall",
+      "result": "PASS",
+      "found": [
+        "error",
+        "boolean"
+      ],
+      "checks": [
+        {
+          "name": "vulnerable=true",
+          "ok": true,
+          "detail": "检出 2 个漏洞"
+        },
+        {
+          "name": "must=[boolean]",
+          "ok": true,
+          "detail": "全部命中"
+        },
+        {
+          "name": "nice=[error,union]",
+          "ok": true,
+          "detail": "命中: error（不计失败）"
+        },
+        {
+          "name": "requests<=80",
+          "ok": true,
+          "detail": "实际 38",
+          "severity": "pass"
+        }
+      ],
+      "requestCount": 38,
+      "elapsedMs": 44,
+      "vulnCount": 2
+    },
+    {
+      "name": "orderby",
+      "description": "ORDER BY 位置注入（逗号型子句 payload，level=2）",
+      "category": "recall",
+      "result": "PASS",
+      "found": [
+        "boolean"
+      ],
+      "checks": [
+        {
+          "name": "vulnerable=true",
+          "ok": true,
+          "detail": "检出 1 个漏洞"
+        },
+        {
+          "name": "must=[boolean]",
+          "ok": true,
+          "detail": "全部命中"
+        },
+        {
+          "name": "nice=[time]",
+          "ok": true,
+          "detail": "命中: 无（不计失败）"
+        },
+        {
+          "name": "requests<=120",
+          "ok": true,
+          "detail": "实际 48",
+          "severity": "pass"
+        }
+      ],
+      "requestCount": 48,
+      "elapsedMs": 41,
+      "vulnCount": 1
+    },
+    {
+      "name": "bool_only",
+      "description": "仅布尔差异（无回显/无报错/无延迟）",
+      "category": "recall",
+      "result": "PASS",
+      "found": [
+        "boolean"
+      ],
+      "checks": [
+        {
+          "name": "vulnerable=true",
+          "ok": true,
+          "detail": "检出 1 个漏洞"
+        },
+        {
+          "name": "must=[boolean]",
+          "ok": true,
+          "detail": "全部命中"
+        },
+        {
+          "name": "requests<=40",
+          "ok": true,
+          "detail": "实际 38",
+          "severity": "pass"
+        }
+      ],
+      "requestCount": 38,
+      "elapsedMs": 45,
+      "vulnCount": 1
+    },
+    {
+      "name": "time_only",
+      "description": "仅时间通道（内容恒定，sleep 生效）",
+      "category": "recall",
+      "result": "PASS",
+      "found": [
+        "time"
+      ],
+      "checks": [
+        {
+          "name": "vulnerable=true",
+          "ok": true,
+          "detail": "检出 1 个漏洞"
+        },
+        {
+          "name": "must=[time]",
+          "ok": true,
+          "detail": "全部命中"
+        },
+        {
+          "name": "requests<=60",
+          "ok": true,
+          "detail": "实际 24",
+          "severity": "pass"
+        }
+      ],
+      "requestCount": 24,
+      "elapsedMs": 1031,
+      "vulnCount": 1
+    },
+    {
+      "name": "stacked",
+      "description": "堆叠注入（; 第二条语句 sleep）",
+      "category": "recall",
+      "result": "PASS",
+      "found": [
+        "stacked"
+      ],
+      "checks": [
+        {
+          "name": "vulnerable=true",
+          "ok": true,
+          "detail": "检出 1 个漏洞"
+        },
+        {
+          "name": "must=[stacked]",
+          "ok": true,
+          "detail": "全部命中"
+        },
+        {
+          "name": "requests<=60",
+          "ok": true,
+          "detail": "实际 20",
+          "severity": "pass"
+        }
+      ],
+      "requestCount": 20,
+      "elapsedMs": 6029,
+      "vulnCount": 1
+    },
+    {
+      "name": "inline",
+      "description": "内联查询（标量子查询随响应回显）",
+      "category": "recall",
+      "result": "PASS",
+      "found": [
+        "inline"
+      ],
+      "checks": [
+        {
+          "name": "vulnerable=true",
+          "ok": true,
+          "detail": "检出 1 个漏洞"
+        },
+        {
+          "name": "must=[inline]",
+          "ok": true,
+          "detail": "全部命中"
+        },
+        {
+          "name": "requests<=40",
+          "ok": true,
+          "detail": "实际 13",
+          "severity": "pass"
+        }
+      ],
+      "requestCount": 13,
+      "elapsedMs": 24,
+      "vulnCount": 1
+    },
+    {
+      "name": "union_extract",
+      "description": "UNION 提取链（版本值经 __S__..__E__ 回显可拖库）",
+      "category": "recall",
+      "result": "PASS",
+      "found": [
+        "union"
+      ],
+      "checks": [
+        {
+          "name": "vulnerable=true",
+          "ok": true,
+          "detail": "检出 1 个漏洞"
+        },
+        {
+          "name": "must=[union]",
+          "ok": true,
+          "detail": "全部命中"
+        },
+        {
+          "name": "requests<=120",
+          "ok": true,
+          "detail": "实际 25",
+          "severity": "pass"
+        },
+        {
+          "name": "extracted.databases non-empty",
+          "ok": true,
+          "detail": "提取 1 个库"
+        },
+        {
+          "name": "extracted.tables non-empty",
+          "ok": true,
+          "detail": "提取 1 个库的表"
+        }
+      ],
+      "requestCount": 25,
+      "elapsedMs": 21,
+      "vulnCount": 1
+    },
+    {
+      "name": "search_like",
+      "description": "搜索型注入（LIKE %{v}% 上下文，需 % 与 ' 双闭合）",
+      "category": "recall",
+      "result": "PASS",
+      "found": [
+        "boolean"
+      ],
+      "checks": [
+        {
+          "name": "vulnerable=true",
+          "ok": true,
+          "detail": "检出 1 个漏洞"
+        },
+        {
+          "name": "must=[boolean]",
+          "ok": true,
+          "detail": "全部命中"
+        },
+        {
+          "name": "requests<=60",
+          "ok": true,
+          "detail": "实际 26",
+          "severity": "pass"
+        }
+      ],
+      "requestCount": 26,
+      "elapsedMs": 22,
+      "vulnCount": 1
+    },
+    {
+      "name": "update_set",
+      "description": "UPDATE SET 注入（name='...' 赋值上下文，引号闭合后逗号拼接赋值）",
+      "category": "recall",
+      "result": "PASS",
+      "found": [
+        "boolean"
+      ],
+      "checks": [
+        {
+          "name": "vulnerable=true",
+          "ok": true,
+          "detail": "检出 1 个漏洞"
+        },
+        {
+          "name": "must=[boolean]",
+          "ok": true,
+          "detail": "全部命中"
+        },
+        {
+          "name": "requests<=100",
+          "ok": true,
+          "detail": "实际 33",
+          "severity": "pass"
+        }
+      ],
+      "requestCount": 33,
+      "elapsedMs": 156,
+      "vulnCount": 1
+    },
+    {
+      "name": "second_order_store",
+      "description": "二阶注入：payload 经 POST 表单存储到 /store，在 GET /profile 拼入 SQL 执行产生报错",
+      "category": "second-order",
+      "result": "PASS",
+      "found": [
+        "second_order"
+      ],
+      "checks": [
+        {
+          "name": "vulnerable=true",
+          "ok": true,
+          "detail": "检出 1 个漏洞"
+        },
+        {
+          "name": "must=[second_order]",
+          "ok": true,
+          "detail": "全部命中"
+        },
+        {
+          "name": "requests<=200",
+          "ok": true,
+          "detail": "实际 5",
+          "severity": "pass"
+        }
+      ],
+      "requestCount": 5,
+      "elapsedMs": 33,
+      "vulnCount": 1
+    }
+  ]
+}

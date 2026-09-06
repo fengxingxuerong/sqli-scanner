@@ -2,7 +2,7 @@
 export const sleep2pg = {
   name: 'sleep2pg',
   description: '将 SLEEP(n) 改写为 PostgreSQL 的 PG_SLEEP(n)',
-  compat: { dbms: ['PostgreSQL'] },
+  dbms: ['PostgreSQL'], // [P1-FIX] 方言限定：异构库下无效，运行时告警
   transform(payload) {
     return payload.replace(/SLEEP\((\d+)\)/gi, 'PG_SLEEP($1)');
   },

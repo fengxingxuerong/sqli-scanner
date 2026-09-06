@@ -1,9 +1,35 @@
 import axios from 'axios';
 import type { ApiResponse, ExploitTarget, ExploitResult, ExploitCapabilities, TamperInfo } from './types';
 
+/**
+ * 携带后端错误码的异常类。
+ * 替代直接抛 `new Error(message)`，确保 ApiResponse.code 在拦截器中不丢失，
+ * 前端 catch 块可通过 `e.code` 判断错误类型以决定行为（重试 vs 提示 vs 跳转）。
+ */
+export class ApiError extends Error {
+  code: number;
+  constructor(code: number, message: string) {
+    super(message);
+    this.name = 'ApiError';
+    this.code = code;
+  }
+}
+
 // 前端 API base：Web 版为 /api（同源代理），Tauri 版为 http://127.0.0.1:4567
 export const API_BASE: string =
   (import.meta.env.VITE_API_BASE as string | undefined) ?? '/api';
+
+// Token 来源：编译期 env（VITE_SCAN_API_TOKEN）或运行期 localStorage（用户设置页输入）
+// 后端设置 SCAN_API_TOKEN 后，前端需携带此 token 否则全 401。
+function getApiToken(): string {
+  const envToken = import.meta.env.VITE_SCAN_API_TOKEN as string | undefined;
+  if (envToken) return envToken;
+  try {
+    return localStorage.getItem('scanApiToken') || '';
+  } catch {
+    return '';
+  }
+}
 
 // axios 实例：统一超时与响应解包
 const http = axios.create({
@@ -12,19 +38,34 @@ const http = axios.create({
   headers: { 'Content-Type': 'application/json' },
 });
 
-// 响应拦截：统一解包 {code,data,message}，非 0 抛错
+// 请求拦截：注入 API Token（对标后端 SCAN_API_TOKEN 中间件）
+http.interceptors.request.use((config) => {
+  const token = getApiToken();
+  if (token) {
+    config.headers = config.headers || {};
+    config.headers['x-api-token'] = token;
+  }
+  return config;
+});
+
+// 响应拦截：统一解包 {code,data,message}，非 0 抛 ApiError（保留 code 供前端决策）
 http.interceptors.response.use(
   (response) => {
     const body = response.data as ApiResponse<unknown>;
     if (body && typeof body.code === 'number' && body.code !== 0) {
-      return Promise.reject(new Error(body.message || '请求失败'));
+      return Promise.reject(new ApiError(body.code, body.message || '请求失败'));
     }
     return response;
   },
   (error) => {
-    const msg =
-      error?.response?.data?.message || error?.message || '网络错误';
-    return Promise.reject(new Error(msg));
+    // 优先从响应体提取 code + message（后端统一 { code, data, message } 包装）
+    const body = error?.response?.data;
+    if (body && typeof body.code === 'number') {
+      return Promise.reject(new ApiError(body.code, body.message || '请求失败'));
+    }
+    // 网络层错误（无响应体）—— code=-1 表示非业务错误码
+    const msg = body?.message || error?.message || '网络错误';
+    return Promise.reject(new ApiError(-1, msg));
   }
 );
 
@@ -40,6 +81,17 @@ export const apiClient = {
   },
   // tamper 清单（GET /api/tampers，单一事实源，与 TamperRegistry.list() 一致）
   tampers: () => apiClient.get<TamperInfo[]>('/tampers'),
+  // AI 报告生成
+  report: {
+    /** 生成 AI 漏洞分析报告（POST /api/scan/:id/report/ai） */
+    ai: (scanId: string, config?: { keyIndex?: number; modelIndex?: number }) =>
+      apiClient.post<{ success: boolean; model: string; content: string; usage?: object }>(
+        `/scan/${scanId}/report/ai`, config || {}),
+    /** 列出可用 AI 模型组合（GET /api/scan/:id/report/ai/configs） */
+    aiConfigs: (scanId: string) =>
+      apiClient.get<{ keyIndex: number; modelIndex: number; label: string; model: string }[]>(
+        `/scan/${scanId}/report/ai/configs`),
+  },
 };
 
 // 利用端点客户端（sql-shell / file-read / file-write / os-shell / capabilities）
@@ -53,6 +105,15 @@ export const exploitClient = {
     apiClient.post<ExploitResult>('/exploit/file-write', req),
   osShell: (req: ExploitTarget & { cmd: string }) =>
     apiClient.post<ExploitResult>('/exploit/os-shell', req),
+};
+
+// sqlmap 高级模式客户端（P1-U1：status 预检）
+export interface SqlmapStatus {
+  available: boolean;
+  maxConcurrent: number;
+}
+export const sqlmapClient = {
+  status: () => apiClient.get<SqlmapStatus>('/sqlmap/status'),
 };
 
 export default apiClient;

@@ -54,7 +54,7 @@ test('DBMS_LIST 含 MariaDB；SUPPORTED.MariaDB 各技术为真、SQLite oob 为
 test('TECHNIQUE_TYPES 含 oob 与 second_order 且共 7 项', () => {
   assert.ok(TECHNIQUE_TYPES.includes('oob'));
   assert.ok(TECHNIQUE_TYPES.includes('second_order'));
-  assert.equal(TECHNIQUE_TYPES.length, 7);
+  assert.equal(TECHNIQUE_TYPES.length, 8);
 });
 
 test('OOB_PAYLOADS 各支持库非空、SQLite 为空', () => {

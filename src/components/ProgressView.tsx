@@ -1,251 +1,174 @@
-import { Box, Typography, LinearProgress, List, ListItem, ListItemText, Chip, Grid, Paper, Button } from '@mui/material';
+// ProgressView -- 可视化进度面板：进度条 + 事件时间线 + 实时统计
+// 拆分为 6 个子组件 + progressUtils 工具模块（⑱：原 439 行 -> 主组件仅状态管理 + 渲染编排）
+
+import { useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import {
+  Box, Typography, LinearProgress, Chip, Stack, Divider,
+} from '@mui/material';
 import { useScanStore } from '../store/scanStore';
-import { useScan } from '../hooks/useScan';
-import type { ScanStatus, ScanEvent } from '../shared/types';
+import { tauriBridge } from '../shared/tauriBridge';
+import { STATUS_COLOR } from './progress/progressUtils';
+import {
+  computeStageTimings, computeBadges, formatEvents, copyText,
+} from './progress/progressUtils';
+import PhaseAlert from './progress/PhaseAlert';
+import StageTimingBar from './progress/StageTimingBar';
+import EventBadges from './progress/EventBadges';
+import StatCardGroup from './progress/StatCardGroup';
+import LogActions from './progress/LogActions';
+import EventTimeline from './progress/EventTimeline';
+import type { ScanStatus } from '../shared/types';
 
-// 毫秒时长格式化为可读字符串（s / m s / h m）
-export function formatDuration(ms: number): string {
-  if (!Number.isFinite(ms) || ms < 0) return '0s';
-  const s = Math.floor(ms / 1000);
-  if (s < 60) return `${s}s`;
-  const m = Math.floor(s / 60);
-  const rs = s % 60;
-  if (m < 60) return `${m}m ${rs}s`;
-  const h = Math.floor(m / 60);
-  const rm = m % 60;
-  return `${h}h ${rm}m`;
-}
-
-// 由事件时间戳与当前阶段百分比线性外推耗时 / 预计剩余（估算，非精确）
-export function estimateRemaining(
-  events: ScanEvent[],
-  percent: number,
-): { elapsedMs: number; remainingMs: number | null } {
-  if (events.length < 2) return { elapsedMs: 0, remainingMs: null };
-  const first = Date.parse(events[0].ts);
-  const last = Date.parse(events[events.length - 1].ts);
-  if (!Number.isFinite(first) || !Number.isFinite(last)) return { elapsedMs: 0, remainingMs: null };
-  const elapsedMs = last - first;
-  if (elapsedMs <= 0) return { elapsedMs: 0, remainingMs: null };
-  if (percent <= 0 || percent >= 100) return { elapsedMs, remainingMs: null };
-  const remainingMs = (elapsedMs / percent) * (100 - percent);
-  return { elapsedMs, remainingMs };
-}
-
-const STATUS_LABEL: Record<ScanStatus, string> = {
-  pending: '待开始',
-  running: '扫描中',
-  completed: '已完成',
-  stopped: '已停止',
-  error: '出错',
-};
-
-// SSE 实时连接状态 → 指示文案与颜色（绿=已连接 / 蓝=连接中 / 琥珀=重连中 / 灰=未连接）
-const SSE_STATUS: Record<'idle' | 'connecting' | 'open' | 'reconnecting', { label: string; color: string }> = {
-  idle: { label: '未连接', color: '#9e9e9e' },
-  connecting: { label: '连接中…', color: '#1565c0' },
-  open: { label: '实时已连接', color: '#2e7d32' },
-  reconnecting: { label: '重连中…', color: '#ed6c02' },
-};
-
-const STATUS_COLOR: Record<ScanStatus, 'default' | 'info' | 'success' | 'warning' | 'error'> = {
-  pending: 'default',
-  running: 'info',
-  completed: 'success',
-  stopped: 'warning',
-  error: 'error',
-};
-
-// sqlmap 输出级别 → 颜色
-const LOG_COLOR: Record<string, string> = {
-  success: '#2e7d32',
-  error: '#d32f2f',
-  info: '#1565c0',
-  warn: '#ed6c02',
-  debug: '#9e9e9e',
-  output: '#374151',
-};
-
-// 按事件类型渲染 secondary 内容（sqlmap 输出做着色/高亮）
-function renderSecondary(e: ScanEvent) {
-  if (e.type === 'sqlmap_log') {
-    const p = e.payload as { level?: string; text?: string };
-    const color = LOG_COLOR[p.level ?? 'output'] || '#374151';
-    return (
-      <span style={{ color, fontFamily: 'monospace', fontSize: 12, whiteSpace: 'pre-wrap' }}>
-        {p.text}
-      </span>
-    );
-  }
-  if (e.type === 'sqlmap_vuln') {
-    const v = e.payload as { param?: string; technique?: string };
-    return (
-      <span>
-        发现注入点：参数 <b>{v.param}</b> · 技术 <b>{v.technique}</b>
-      </span>
-    );
-  }
-  return typeof e.payload === 'object' ? JSON.stringify(e.payload) : String(e.payload);
-}
-
-// 从 status + 事件推导扫描阶段与百分比（纯函数，便于测试与复用）
-export interface ProgressInfo {
-  percent: number;
-  stage: string;
-}
-export function deriveProgress(status: ScanStatus, events: ScanEvent[]): ProgressInfo {
-  if (status === 'pending') return { percent: 0, stage: '待开始' };
-  if (status === 'completed') return { percent: 100, stage: '已完成' };
-  if (status === 'stopped') return { percent: 100, stage: '已停止' };
-  if (status === 'error') return { percent: 100, stage: '出错' };
-  // running：按事件先后顺序判断当前所处阶段
-  const hasDiscovered = events.some((e) => e.type === 'point_discovered');
-  const hasSecondOrder = events.some((e) => e.type === 'second_order_discovery');
-  const hasFound = events.some((e) => e.type === 'detection_found' || e.type === 'sqlmap_vuln');
-  if (hasFound) return { percent: 80, stage: '确认漏洞' };
-  if (hasSecondOrder) return { percent: 60, stage: '二阶发现' };
-  if (hasDiscovered) return { percent: 35, stage: '探测注入点' };
-  if (events.length > 0) return { percent: 20, stage: '主动探测' };
-  return { percent: 5, stage: '初始化' };
-}
-
-// 实时进度区：阶段进度条 + 指标面板 + 事件流
 export default function ProgressView() {
-  const { status, events, discoveredPoints, confirmedVulnPointIds, secondOrderDiscovery, scanConcurrency, sseStatus, engine, scanId, targetUrl } =
-    useScanStore();
-  const { stopScan } = useScan();
+  const { t } = useTranslation();
+  const status = useScanStore((s) => s.status) as ScanStatus;
+  const events = useScanStore((s) => s.events);
+  const scanId = useScanStore((s) => s.scanId);
+  // H2：进度聚合改为消费 store 增量维护值（不再从 events 滑窗重算，
+  // 长扫描中早期 point_discovered 被截断后进度条不会归零/回退）
+  const progressTotal = useScanStore((s) => s.progressTotal);
+  // [P1-FIX] 订阅增量数字而非 processedPointIds 对象（对象每事件新引用触发整组件重渲染）
+  const processedCount = useScanStore((s) => s.processedCount);
+  const [downloadError, setDownloadError] = useState('');
   const running = status === 'running';
-  const info = deriveProgress(status, events);
-  // 耗时 / 预计剩余：基于事件时间戳线性外推（估算）
-  const { elapsedMs, remainingMs } = estimateRemaining(events, info.percent);
+  const total = progressTotal;
+  const processed = processedCount;
+  const pct = total > 0 ? Math.round((processed / total) * 100) : null;
+  const progressValue = pct == null ? undefined : Math.min(100, pct);
 
-  // 实时指标（从 store 派生，不解析事件 payload，稳定可靠）
-  const secondConfirmed = secondOrderDiscovery?.confirmed.length ?? 0;
-  const secondCandidates = secondOrderDiscovery?.candidates.length ?? 0;
-  const metrics: { label: string; value: string | number; tone: 'info' | 'error' | 'warning' | false }[] = [
-    { label: '注入点', value: discoveredPoints.length, tone: 'info' },
-    { label: '已确认漏洞', value: confirmedVulnPointIds.length, tone: 'error' },
-    { label: '二阶确认', value: `${secondConfirmed}/${secondCandidates}`, tone: 'warning' },
-    { label: '事件总数', value: events.length, tone: false },
-    { label: '已耗时', value: elapsedMs > 0 ? formatDuration(elapsedMs) : '—', tone: false },
-    { label: '并发度', value: scanConcurrency ?? '—', tone: false },
-  ];
+  // 阶段耗时统计条
+  const stageTimings = useMemo(() => computeStageTimings(events), [events]);
+  const maxStage = stageTimings.length > 0 ? Math.max(...stageTimings.map((s) => s.seconds)) : 0;
+
+  // 事件类型计数徽章
+  const badges = useMemo(() => computeBadges(events), [events]);
+
+  // 实时速率指示器：每 5 秒重算一次（events / 已用秒数）
+  const [rateTick, setRateTick] = useState(0);
+  useEffect(() => {
+    if (!running) return;
+    const id = setInterval(() => setRateTick((n) => n + 1), 5000);
+    return () => clearInterval(id);
+  }, [running]);
+  const reqRate = useMemo(() => {
+    if (events.length < 1) return null;
+    const start = new Date(events[0].ts).getTime();
+    if (Number.isNaN(start)) return null;
+    const end = running ? Date.now() : new Date(events[events.length - 1].ts).getTime();
+    if (Number.isNaN(end)) return null;
+    const secs = (end - start) / 1000;
+    if (secs <= 0) return null;
+    return events.length / secs;
+  }, [events, running, rateTick]); // eslint-disable-line react-hooks/exhaustive-deps -- rateTick 仅作定时刷新信号
+
+  // 统计信息
+  const vulnFound = useMemo(() => events.filter(e => e.type === 'detection_found').length, [events]);
+  const wafDetected = useMemo(() => events.filter(e => e.type === 'waf_detected').length, [events]);
+  const pointsTested = useMemo(() => events.filter(e => e.type === 'point_testing').length, [events]);
+  // 当前阶段提示：从最新 scan_phase 事件取 message
+  const currentPhase = useMemo(() => {
+    if (!running) return null;
+    const phases = events.filter(e => e.type === 'scan_phase');
+    if (phases.length === 0) {
+      // 无 scan_phase 事件时从其他事件推断
+      if (events.some(e => e.type === 'extraction_progress')) return t('progress.phaseExtracting');
+      if (pointsTested > 0) return t('progress.phaseDetecting', { count: pointsTested });
+      if (events.length > 0) return t('progress.phaseInitializing');
+      return t('progress.phaseStarting');
+    }
+    const last = phases[phases.length - 1];
+    return (last.payload as { message?: string })?.message || t('progress.phaseScanning');
+  }, [events, running, pointsTested, t]);
+  const elapsed = useMemo(() => {
+    if (events.length < 2) return '';
+    const first = new Date(events[0].ts).getTime();
+    const last = new Date(events[events.length - 1].ts).getTime();
+    if (Number.isNaN(first) || Number.isNaN(last)) return '';
+    const diff = Math.max(0, last - first);
+    if (diff < 1000) return '< 1s';
+    if (diff < 60000) return `${Math.round(diff / 1000)}s`;
+    const min = Math.floor(diff / 60000);
+    const sec = Math.round((diff % 60000) / 1000);
+    return `${min}m ${sec}s`;
+  }, [events]);
+
+  const handleCopyLogs = async () => {
+    if (!events.length) return;
+    try { await copyText(formatEvents(events)); } catch { /* silent */ }
+  };
+
+  const handleDownloadLogs = () => {
+    if (!events.length) return;
+    setDownloadError('');
+    const name = `scan_logs_${scanId || 'unknown'}.log`;
+    tauriBridge.saveFile(name, formatEvents(events), 'text/plain; charset=utf-8')
+      .catch((err) => setDownloadError(t('progress.downloadFailed', { detail: err?.message || t('progress.unknownError') })));
+  };
+
+  // 最近 50 条事件（倒序，最新的在前）
+  const recentEvents = useMemo(() => {
+    const reversed = [...events].reverse();
+    return reversed.slice(0, 50);
+  }, [events]);
 
   return (
     <Box className="space-y-3">
-      {/* 扫描任务卡：当前任务概览 + 醒目停止控制（复用 store 字段与 useScan.stopScan） */}
-      <Paper variant="outlined" className="p-3">
-        <Box className="flex items-center justify-between mb-2">
-          <Typography variant="subtitle2" fontWeight={700}>扫描任务</Typography>
-          <Chip size="small" label={STATUS_LABEL[status]} color={STATUS_COLOR[status]} />
-        </Box>
-        <Typography variant="body2" sx={{ wordBreak: 'break-all' }} className="mb-1">
-          <b>目标地址：</b>
-          {targetUrl || '—'}
-        </Typography>
-        <Box className="flex flex-wrap gap-x-4 gap-y-1">
-          <Typography variant="caption" color="text.secondary">
-            引擎：{engine === 'sqlmap' ? 'sqlmap 高级' : '自带引擎'}
-          </Typography>
-          <Typography variant="caption" color="text.secondary">
-            并发：{scanConcurrency ?? '—'}
-          </Typography>
-          <Typography variant="caption" color="text.secondary">
-            用时：{elapsedMs > 0 ? formatDuration(elapsedMs) : '—'}
-          </Typography>
-        </Box>
-        <Box className="mt-2">
-          <Button
-            variant="contained"
-            color="error"
-            size="small"
-            disabled={status !== 'running' || !scanId}
-            onClick={() => scanId && stopScan(scanId)}
-          >
-            停止扫描
-          </Button>
-        </Box>
-      </Paper>
+      {/* 当前阶段提示 */}
+      <PhaseAlert running={running} currentPhase={currentPhase} pct={pct} />
 
-      <Box className="flex items-center justify-between">
-        <Typography variant="subtitle1" fontWeight={600}>
-          实时进度
-        </Typography>
-        <Box className="flex items-center gap-2">
-          {/* SSE 实时连接状态指示：让用户直观看到进度是否在实时推送 */}
-          <Box className="flex items-center gap-1" title="实时事件流连接状态">
-            <Box
-              component="span"
-              className="inline-block rounded-full"
-              sx={{ width: 8, height: 8, bgcolor: SSE_STATUS[sseStatus].color }}
-            />
-            <Typography variant="caption" color="text.secondary">
-              {SSE_STATUS[sseStatus].label}
-            </Typography>
-          </Box>
-          <Chip label={STATUS_LABEL[status]} color={STATUS_COLOR[status]} size="small" />
-        </Box>
-      </Box>
-
-      {/* 阶段进度条：从 status + 事件推导 determinate 百分比，替代纯不确定条 */}
-      <Box className="flex items-center gap-2 mb-1">
-        <Typography variant="body2" color="text.secondary">阶段</Typography>
-        <Chip size="small" label={info.stage} color={running ? 'info' : 'default'} />
-        <Typography variant="body2" color="text.secondary">{info.percent}%</Typography>
-      </Box>
+      {/* 进度条 + 统计 */}
+      <Stack direction="row" justifyContent="space-between" alignItems="center">
+        <Typography variant="subtitle1" fontWeight={600}>{t('scan.progress')}</Typography>
+        <Chip label={t(`status.${status}`)} color={STATUS_COLOR[status]} size="small" />
+      </Stack>
       <LinearProgress
-        variant="determinate"
-        value={info.percent}
-        color={status === 'error' ? 'error' : status === 'completed' ? 'success' : 'primary'}
+        variant={!running ? 'determinate' : pct == null ? 'indeterminate' : 'determinate'}
+        value={!running ? 100 : pct == null ? undefined : progressValue}
+        sx={{ height: 8, borderRadius: 4 }}
       />
-
-      {/* 预计剩余时间（仅扫描中显示；基于事件时间戳线性外推，标注「估算」避免误读为精确值） */}
-      {running && (
-        <Box className="flex items-center gap-2 mt-1 mb-1">
-          <Typography variant="body2" color="text.secondary">预计剩余</Typography>
-          <Chip
-            size="small"
-            color="warning"
-            label={remainingMs != null ? `约 ${formatDuration(remainingMs)}（估算）` : '估算中…'}
-          />
-        </Box>
+      {running && pct != null && (
+        <Typography variant="caption" color="text.secondary">
+          {t('scan.pointsProcessed', { processed, total, pct: progressValue })}
+        </Typography>
       )}
 
-      {/* 实时指标面板 */}
-      <Grid container spacing={1} className="mt-1">
-        {metrics.map((m) => (
-          <Grid item xs={6} sm={4} md={2} key={m.label}>
-            <Box className="rounded border border-gray-200 p-2 text-center">
-              <Typography variant="h6" fontWeight={700} color={m.tone || undefined} className="leading-none">
-                {m.value}
-              </Typography>
-              <Typography variant="caption" color="text.secondary">
-                {m.label}
-              </Typography>
-            </Box>
-          </Grid>
-        ))}
-      </Grid>
+      {/* 阶段耗时统计条 + 事件类型计数徽章 */}
+      {(stageTimings.length > 0 || badges.length > 0) && (
+        <Stack
+          direction={{ xs: 'column', sm: 'row' }}
+          spacing={1.5}
+          alignItems="stretch"
+          useFlexGap
+          sx={{ mt: 0.5 }}
+        >
+          <StageTimingBar stageTimings={stageTimings} maxStage={maxStage} />
+          <EventBadges badges={badges} reqRate={reqRate} />
+        </Stack>
+      )}
 
-      <List dense className="max-h-72 overflow-auto rounded border border-gray-200 mt-1">
-        {events.length === 0 && (
-          <ListItem>
-            <ListItemText primary="暂无事件，开始扫描后这里会实时显示进度" />
-          </ListItem>
-        )}
-        {events.map((e, i) => (
-          <ListItem key={i} divider>
-            <ListItemText
-              primary={
-                <span className="font-mono text-xs text-gray-400">
-                  [{e.type}] {e.ts}
-                </span>
-              }
-              secondary={renderSecondary(e)}
-            />
-          </ListItem>
-        ))}
-      </List>
+      {/* 统计卡片 */}
+      <StatCardGroup
+        total={total}
+        pointsTested={pointsTested}
+        vulnFound={vulnFound}
+        wafDetected={wafDetected}
+        elapsed={elapsed}
+        running={running}
+      />
+
+      {/* 操作按钮 */}
+      <LogActions
+        eventsLength={events.length}
+        onCopyLogs={handleCopyLogs}
+        onDownloadLogs={handleDownloadLogs}
+        downloadError={downloadError}
+      />
+
+      <Divider />
+
+      {/* 事件时间线 */}
+      <EventTimeline events={events} recentEvents={recentEvents} />
     </Box>
   );
 }

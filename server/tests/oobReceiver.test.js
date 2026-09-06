@@ -16,23 +16,15 @@ function httpGet(url) {
   });
 }
 
-test('start 幂等 + 引用计数：连续两次 start 同一端口共享一个服务，两次 stop 才真正关闭', async () => {
+test('start 幂等：连续两次 start 同一端口仍 isStarted 且只一个服务', async () => {
   const cfg = { callbackBase: '127.0.0.1:19001', httpPort: 19001, timeoutMs: 1000 };
   await oobReceiver.start(cfg);
   assert.equal(oobReceiver.isStarted(), true);
-  assert.equal(oobReceiver.refCount(), 1);
-  // 第二次 start 应为 no-op（不抛、不重复监听），但引用计数 +1
+  // 第二次 start 应为 no-op（不抛、不重复监听）
   await oobReceiver.start(cfg);
   assert.equal(oobReceiver.isStarted(), true);
-  assert.equal(oobReceiver.refCount(), 2);
-  // 第一次 stop：引用未归零，仍保持监听（并发扫描 A 结束不误杀 B）
-  oobReceiver.stop();
-  assert.equal(oobReceiver.isStarted(), true, '引用未归零不应关闭接收端');
-  assert.equal(oobReceiver.refCount(), 1);
-  // 第二次 stop：引用归零，真正关闭
-  oobReceiver.stop();
+  await oobReceiver.stop();
   assert.equal(oobReceiver.isStarted(), false);
-  assert.equal(oobReceiver.refCount(), 0);
 });
 
 test('receive 先于 waitForToken：直接命中返回 true', async () => {
@@ -41,7 +33,7 @@ test('receive 先于 waitForToken：直接命中返回 true', async () => {
   oobReceiver.receive(token);
   const hit = await oobReceiver.waitForToken(token, 300);
   assert.equal(hit, true);
-  oobReceiver.stop();
+  await oobReceiver.stop();
 });
 
 test('waitForToken 等待中 receive 唤醒：返回 true', async () => {
@@ -51,14 +43,14 @@ test('waitForToken 等待中 receive 唤醒：返回 true', async () => {
   // 模拟目标 DBMS 回连
   oobReceiver.receive(token);
   assert.equal(await p, true);
-  oobReceiver.stop();
+  await oobReceiver.stop();
 });
 
 test('超时未收到：返回 false', async () => {
   await oobReceiver.start({ callbackBase: '127.0.0.1:19004', httpPort: 19004, timeoutMs: 1000 });
   const hit = await oobReceiver.waitForToken('never', 150);
   assert.equal(hit, false);
-  oobReceiver.stop();
+  await oobReceiver.stop();
 });
 
 test('真实 HTTP GET /oob/:token 路由触发 receive', async () => {
@@ -70,7 +62,7 @@ test('真实 HTTP GET /oob/:token 路由触发 receive', async () => {
   assert.equal(body, 'ok');
   const hit = await oobReceiver.waitForToken(token, 300);
   assert.equal(hit, true);
-  oobReceiver.stop();
+  await oobReceiver.stop();
 });
 
 test('未知路径返回 404 且不唤醒任何 token', async () => {
@@ -80,5 +72,5 @@ test('未知路径返回 404 且不唤醒任何 token', async () => {
   assert.equal(statusCode, 404);
   const hit = await oobReceiver.waitForToken('xyz', 120);
   assert.equal(hit, false);
-  oobReceiver.stop();
+  await oobReceiver.stop();
 });

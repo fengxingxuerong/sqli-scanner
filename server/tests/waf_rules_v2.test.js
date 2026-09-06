@@ -12,10 +12,10 @@ test('启动期静态断言：所有推荐名均已在注册表（不抛错）',
   assert.throws(() => assertRecommendNames(new Set(['space2comment'])));
 });
 
-test('WAF_RULES 数量护栏：>= 28（扩库到约 43）', () => {
+test('WAF_RULES 数量护栏：>= 60（WAF-v3 扩库到 62）', () => {
   const n = Object.keys(WAF_RULES).length;
-  assert.ok(n >= 28, `当前 ${n} 条，应 >= 28`);
-  assert.ok(n <= 45, `当前 ${n} 条，不应超过 45`);
+  assert.ok(n >= 60, `当前 ${n} 条，应 >= 60`);
+  assert.ok(n <= 70, `当前 ${n} 条，不应超过 70`);
 });
 
 test('抽样新 vendor 识别准确（Imperva_Incapsula / F5_BIG_IP / FortiWeb）', () => {

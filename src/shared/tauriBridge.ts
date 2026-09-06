@@ -13,6 +13,20 @@ try {
 export const tauriBridge = {
   isTauri: tauriAvailable,
 
+  // 监听引擎退出事件（Tauri 桌面版：Rust 侧 emit('engine-exit')）
+  // Web 版为 no-op；Tauri 版注册监听器返回取消函数
+  onEngineExit(callback: (payload: { code: number | null; signal: string | null }) => void): (() => void) | null {
+    if (!tauriAvailable) return null;
+    let unlisten: (() => void) | null = null;
+    import('@tauri-apps/api/event')
+      .then(({ listen }) => listen<{ code: number | null; signal: string | null }>('engine-exit', (event) => {
+        callback(event.payload);
+      }))
+      .then((fn) => { unlisten = fn; })
+      .catch(() => undefined);
+    return () => { if (unlisten) unlisten(); };
+  },
+
   // 启动本地引擎（Tauri 由 Rust 侧 sidecar 自动拉起；Web 版无需操作）
   async startEngine(): Promise<void> {
     if (!tauriAvailable) return;
@@ -48,6 +62,39 @@ export const tauriBridge = {
       const fs = await import(fsSpec);
       await (fs as any).writeTextFile(path, content);
     }
+  },
+
+  // 打开文本文件（对标 sqlmap -r 的请求文件导入）。
+  // Web 版：隐藏 <input type=file> + FileReader；Tauri 版：dialog 选择 + fs 读取。
+  // 返回文件文本内容；用户取消或无文件返回 null。
+  async openTextFile(accept = '.txt,.req,.http'): Promise<string | null> {
+    if (!tauriAvailable) {
+      return await new Promise((resolve) => {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = accept;
+        input.onchange = () => {
+          const file = input.files && input.files[0];
+          if (!file) return resolve(null);
+          const reader = new FileReader();
+          reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : null);
+          reader.onerror = () => resolve(null);
+          reader.readAsText(file);
+        };
+        input.click();
+      });
+    }
+    // 桌面版：dialog 选文件 + fs 读文本
+    const dialogSpec = '@tauri-apps/plugin-dialog';
+    const dialog = await import(dialogSpec);
+    const path = await (dialog as any).open({
+      multiple: false,
+      filters: [{ name: 'HTTP Request', extensions: ['txt', 'req', 'http'] }],
+    });
+    if (typeof path !== 'string') return null;
+    const fsSpec = '@tauri-apps/plugin-fs';
+    const fs = await import(fsSpec);
+    return await (fs as any).readTextFile(path);
   },
 };
 

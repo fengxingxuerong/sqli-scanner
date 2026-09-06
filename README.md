@@ -1,139 +1,128 @@
-# SQL 注入检测工具（SQLi Scanner）
+# sqli-scanner
 
-一份代码、双形态（Web 全栈 + Tauri 桌面壳）的 SQL 注入自动化检测工具。
-前端用 React + MUI + Tailwind，检测引擎用 Node/Express，检测能力以**策略模式**组织，支持
-**联合查询 / 报错 / 布尔盲注 / 时间盲注**四类注入检测，以及数据库指纹、列类型枚举与数据提取（拖库）。
+[![CI](https://img.shields.io/github/actions/workflow/status/OWNER/REPO/ci.yml?branch=main&label=CI)](https://github.com/OWNER/REPO/actions)
+[![ Tests](https://img.shields.io/badge/tests-1440%20passing-brightgreen)](#测试)
 
-> 仅用于**授权环境下的安全测试与学习**，禁止用于未授权目标。
-
----
-
-## 架构概览
-
-```
-React 前端（Web / Tauri 共用）
-        │  VITE_API_BASE 切换：Web=/api，Tauri=http://127.0.0.1:4567
-        ▼
-Express 引擎（:4567）  ── SSE 实时进度 ──▶ 前端 EventSource
-        │
-        ├─ ScanManager（门面：发现→指纹→检测→提取→报告）
-        ├─ Detector×4（策略模式：Union / Error / Boolean / Time）
-        ├─ DBFingerprinter / Extractor / ColumnTypeEnumerator
-        └─ Scheduler（并发池 + 令牌桶限速 + 重试）
-```
-
-- **Web 版**：`npm run dev` 启动 Vite（:5173），`npm run server` 启动引擎（:4567），Vite 代理 `/api` → 引擎。
-- **Tauri 版**：Rust 壳以 **sidecar** 拉起引擎进程（:4567），前端 `VITE_API_BASE` 指向 `http://127.0.0.1:4567`，业务代码零改动。
-
----
-
-## 目录结构
-
-```
-sqli-scanner/
-├── src/                # React 前端（shared/types、hooks、store、pages、components）
-├── server/             # Node/Express 检测引擎（config/core/engine/services/api）
-├── src-tauri/          # Tauri 桌面壳（sidecar 拉起引擎）
-├── package.json        # 根脚本（dev/server/tauri/build）
-└── vite.config.ts      # /api 代理到 :4567
-```
-
----
+一键式 SQL 注入检测工具。无需记忆命令行参数，打开浏览器即可使用。
 
 ## 快速开始
 
-### 1. 安装依赖
-
 ```bash
-# 前端依赖
+# 安装依赖
 npm install
-
-# 引擎依赖
 cd server && npm install && cd ..
-```
 
-### 2. 启动（Web 版）
-
-```bash
-# 终端 A：启动检测引擎
+# 启动后端（终端 1）
 npm run server
-# 或 cd server && node index.js
 
-# 终端 B：启动前端
+# 启动前端（终端 2，新开终端）
 npm run dev
+
+# 浏览器打开
+http://localhost:5173
 ```
 
-打开 http://localhost:5173 ，填入目标 URL 即可扫描。
-
-### 3. 构建生产前端
+### Docker 一键部署
 
 ```bash
-npm run build      # 产物在 dist/，可由 Express 静态托管或与引擎同域部署
-npm run preview
+docker compose up -d
+# 浏览器打开 http://localhost:4567（前后端同端口，Express 直接托管前端静态文件）
+# 后端 API http://localhost:4567
 ```
 
-### 4. 桌面版（Tauri，可选）
+## 功能
+
+| 功能 | 说明 |
+|------|------|
+| **一键扫描** | 输入 URL → 点击开始 → 查看报告 |
+| **9 种检测技术** | union / error / boolean / time / stacked / oob / second_order / inline / nosql |
+| **18 种数据库** | MySQL / PostgreSQL / SQL Server / Oracle / SQLite / MariaDB / TiDB / DM8 / ClickHouse / DB2 / Sybase / Firebird / Informix / H2 / Access / HSQLDB / Derby / MonetDB | 3 种真实验证，15 种最小适配 |
+
+> 数据库支持说明：**MySQL / PostgreSQL / SQLite 经 recall-lab 18 场景真实引擎验证**（SQLite WASM、PGlite、MariaDB 便携）。其余 15 种有检测/提取模板但未经真实 DBMS 验证，方言可能有偏差。|
+| **1870+ 条 payload 模板** | 含注释/编码/子句/嵌套闭合变体（1779 主库 + 82 子句 + 14 OOB）+ 672 条声明式注册表 |
+| **225 个 tamper 插件** | WAF 绕过，覆盖 sqlmap 官方 tamper 全集（84/84） |
+| **62 WAF 指纹** | 自动识别 WAF 类型并推荐 tamper 组合 |
+| **可视化报告** | 风险环形图 + 技术分布条形图 + 漏洞列表 + 数据提取树 + 检测摘要 |
+| **深度提取** | 分页聚合数据提取，绕过 UNION 限制 |
+| **AI 漏洞报告** | 3 角色流水线（分析师→撰写→审阅），支持多 key 容灾，自动生成专业中文安全分析报告 |
+| **利用工具** | SQL Shell / 文件读写 / OS 命令执行（需授权） |
+| **CLI 55+ 参数** | 对标 sqlmap：--dbs/--tables/--dump/-D/-T/-C/--search/--users/--passwords/--prefix/--suffix/--time-sec/-r/--mobile/--parse-errors/--safe-url/--safe-freq/--csrf-url/--csrf-token/--delay/--eval/--current-user/--current-db/--hostname/--is-dba/--identify-waf/--skip-urlencode/--skip-static/--keep-alive/--null-connection/--predict-output 等 |
+| **-r 请求文件** | 从 Burp/curl 请求文本导入 URL/method/headers/body |
+| **中英双语** | 全界面 i18n 支持中英切换 |
+| **历史记录** | 扫描历史卡片式展示，支持续跑/删除 |
+| **真实 DBMS 验证** | SQLite + PostgreSQL + MySQL 三库真实执行验证 |
+
+## 命令
 
 ```bash
-# 先将 server/ 用 pkg/esbuild 打成单文件可执行放入 src-tauri/binaries/sqli-engine
-npm run build:engine
-# 启动桌面壳（需安装 Rust 工具链）
-npm run tauri dev
+npm run dev          # 启动前端开发服务器
+npm run server       # 启动后端服务器
+npm run build        # 构建前端
+npm test             # 运行前端测试
+npm run tamper-matrix   # 生成 tamper 绕过矩阵
+npm run waf-validate    # HTTP 实测验证 WAF 绕过
+npm run waf-e2e         # 运行 WAF e2e 对比测试
 ```
 
----
+## 后端 API
 
-## 默认参数
-
-| 参数 | 默认值 | 说明 |
-|------|--------|------|
-| concurrency | 4 | 并发检测线程数 |
-| timeoutMs | 10000 | 单请求超时（ms） |
-| retry | 2 | 失败重试次数 |
-| timeThresholdMs | 1500 | 时间盲注判定阈值（ms） |
-| ratePerSec | 3 | 限速（请求/秒，令牌桶） |
-| enableExtract | true | 拖库开关（UI 二次确认） |
-| port | 4567 | 引擎监听端口 |
-
----
-
-## API 端点（契约）
-
-| 方法 | 路径 | 说明 |
+| 端点 | 方法 | 说明 |
 |------|------|------|
-| POST | `/api/scan/start` | 启动扫描，返回 `{ scanId }` |
-| GET | `/api/scan/:id` | 获取实时报告快照 |
-| GET | `/api/scan/:id/events` | SSE 实时进度流 |
-| POST | `/api/scan/:id/stop` | 停止扫描 |
-| GET | `/api/scan/:id/report` | 获取完整报告 |
-| GET | `/api/scan/:id/report/export?format=json\|html` | 导出报告 |
-| GET | `/api/health` | 健康检查 |
-| GET | `/api/payloads?dbms=&technique=` | 查看只读 Payload 模板 |
+| `/api/health` | GET | 健康检查 |
+| `/api/scan/start` | POST | 启动扫描 |
+| `/api/scan/stop` | POST | 停止扫描 |
+| `/api/scan/:id/report` | GET | 获取报告 |
+| `/api/scan/:id/report/export` | GET | 导出报告 |
+| `/api/tampers` | GET | tamper 插件清单 |
+| `/api/exploit/capabilities` | GET | 利用能力查询 |
+| `/api/exploit/sql` | POST | SQL 执行 |
+| `/api/exploit/file-read` | POST | 文件读取 |
+| `/api/exploit/file-write` | POST | 文件写入 |
+| `/api/exploit/os-shell` | POST | OS 命令执行 |
 
-统一响应包：`{ "code": 0, "data": <任意>, "message": "ok" }`。
+## 环境变量
 
----
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `HOST` | `127.0.0.1` | 监听地址 |
+| `PORT` | `4567` | 监听端口 |
+| `SCAN_API_TOKEN` | 无 | API 认证 Token |
+| `EXPLOIT_ENABLED` | `0` | 开启利用能力（=1 启用） |
+| `ALLOWED_ORIGINS` | `http://localhost:5173` | 跨域白名单 |
 
-## 风险定级
+## 架构
 
-- **Critical**：可完成数据提取（UNION 回显或盲注二分拖库成功）
-- **High**：确认可回显注入（UNION / 报错）
-- **Medium**：仅盲注确认但提取受限（布尔 / 时间）
-- **Low**：单点疑似证据不足
+```
+frontend/ ← React + TypeScript + MUI + Vite
+    ↓ REST API
+backend/  ← Express + Node.js
+    ├── engine/     # 检测引擎（9 种检测器 + Extractor + Exploiter）
+    ├── core/       # 核心模块（tamper / WAF / DB 驱动 / OOB 接收）
+    └── api/        # API 路由（scan / exploit / tamper / health）
+```
 
----
+## 测试
 
-## 技术栈
+```bash
+# 前端测试（191 个用例）
+npm test
 
-前端：React 18 · MUI 5 · Tailwind 3 · react-router-dom 6 · zustand 4 · axios · Vite 5 · TypeScript 5
-引擎：Node.js · Express 4 · axios · winston · nanoid
-桌面：Tauri 2 · Rust · tauri-plugin-shell（sidecar）
+# 服务端测试（1249 个用例）
+cd server && npm test
 
----
+# 全部测试
+npm run test:all
+```
 
-## 说明与边界
+## 项目状态
 
-- 代理/认证**已实现**：`httpClient` 支持 HTTP/SOCKS5 代理与 Basic/Cookie/自定义头认证；引擎默认仅监听 `127.0.0.1`，CORS 仅放行可信前端源，可选 `SCAN_API_TOKEN` 纵深防御（详见 `server/index.js`）。
-- 时间盲注以「延迟 ≥ 基线 + 阈值且稳定多次」为判定，排除本身较慢的目标误报；布尔/报错注入均补了基线对照与二次确认。
-- 单次拖库默认单表上限 100 行（可在 `defaults.js` 调整），UI 二次确认。
-- Tauri sidecar 的 Node 二进制由 `build:engine` 脚本产出，本仓库不锁定打包工具。
+- TypeScript: 零错误
+- 前端测试: 191/191 通过
+- 服务端测试: 1249/1249 通过
+- Tamper 插件: 225 个（含 v24 增量 20 个，对齐 sqlmap 官方 tamper 全集，含官方 CRS/libinjection 实测组合 uniontable+odbcbrace）
+- WAF 绕过能力: 200+ 插件链式组合，覆盖 62 个 WAF 厂商指纹识别 + 推荐
+- 直连模式（对标 sqlmap -d）：支持 SQLite 直连（sql.js）+ 真实驱动注册接口（mysql2/pg/mssql/oracle 等需用户自备）
+
+## 贡献
+
+详见 [CONTRIBUTING.md](CONTRIBUTING.md) — 包含项目结构、开发环境、代码规范、引擎架构要点和提交规范。

@@ -62,19 +62,21 @@ test('按 confidence 降序排序', () => {
 test('推荐映射：Cloudflare → 对应 plugins', () => {
   const sug = recommend([{ vendor: 'Cloudflare', confidence: 0.9, evidence: 'x' }]);
   assert.equal(sug.length, 1);
-  assert.deepEqual(sug[0].plugins, ['space2comment', 'randomcase', 'charencode']);
+  // [P0-FIX] 差异化后 Cloudflare 推荐：space2comment, charencode, randomcase
+  assert.deepEqual(sug[0].plugins, ['space2comment', 'charencode', 'randomcase']);
 });
 
-test('推荐映射：过滤无命中 vendor（仅保留非空）', () => {
+test('推荐映射：无命中 vendor 走 _default fallback（仍返回非空推荐）', () => {
   const sug = recommend([
     { vendor: 'UnknownVendor', confidence: 0.9, evidence: 'x' },
     { vendor: 'AWS_WAF', confidence: 0.9, evidence: 'x' },
   ]);
-  assert.equal(sug.length, 1);
-  assert.equal(sug[0].vendor, 'AWS_WAF');
+  // _default fallback 使 UnknownVendor 也返回非空推荐
+  assert.equal(sug.length, 2);
+  assert.ok(sug.some((s) => s.vendor === 'AWS_WAF'));
 });
 
-test('WAF_RULES 覆盖约 30 类常见 WAF（WAF-v2 扩库 7→~30）', () => {
-  // 坑 B：扩库后原 ===7 断言必红，改为数量护栏 >= 28（允许 28–32）
-  assert.ok(Object.keys(WAF_RULES).length >= 28, `当前 ${Object.keys(WAF_RULES).length} 条，应 >= 28`);
+test('WAF_RULES 覆盖 60+ 类常见 WAF（WAF-v3 扩库 30→62）', () => {
+  // 坑 B：扩库后原 ===7 断言必红，改为数量护栏 >= 60（允许 60–70）
+  assert.ok(Object.keys(WAF_RULES).length >= 60, `当前 ${Object.keys(WAF_RULES).length} 条，应 >= 60`);
 });

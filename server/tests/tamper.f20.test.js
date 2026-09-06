@@ -105,7 +105,7 @@ test('仅 legacy obfuscate 开启 → 走 obfuscatePayload（向后兼容）', (
 });
 
 // ── 2) tamper 只读端点 ──────────────────────────────────────────────────────
-test('GET /api/tampers 返回 64 项 tamper 清单（name+description）', async () => {
+test('GET /api/tampers 返回 225 项 tamper 清单（name+description）', async () => {
   const app = express();
   app.use('/api', tamperRoutes);
   const server = app.listen(0);
@@ -113,7 +113,7 @@ test('GET /api/tampers 返回 64 项 tamper 清单（name+description）', async
   try {
     const { json } = await getJson(`http://127.0.0.1:${port}/api/tampers`);
     assert.equal(json.code, 0);
-    assert.equal(json.data.length, 64);
+    assert.equal(json.data.length, 225);
     assert.ok(json.data.every((t) => typeof t.name === 'string' && typeof t.description === 'string'));
   } finally {
     server.close();
@@ -121,7 +121,7 @@ test('GET /api/tampers 返回 64 项 tamper 清单（name+description）', async
 });
 
 test('tamperRegistry 单例与端点数据一致', () => {
-  assert.equal(tamperRegistry.list().length, 64);
+  assert.equal(tamperRegistry.list().length, 225);
 });
 
 // ── 3) ScanManager 报告标注（tamper + WAF 识别）──────────────────────────────

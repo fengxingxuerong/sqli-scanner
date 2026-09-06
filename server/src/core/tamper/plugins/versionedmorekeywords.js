@@ -7,7 +7,7 @@ const RE = new RegExp(`\\b(${KW})\\b`, 'gi');
 export const versionedmorekeywords = {
   name: 'versionedmorekeywords',
   description: '用 /*! KEYWORD */ 包裹每个关键字，绕过基于关键字的 WAF（MySQL 执行注释内语法）',
-  compat: { dbms: ['MySQL', 'MariaDB'] },
+  dbms: ['MySQL'], // [P1-FIX] 方言限定：异构库下无效，运行时告警
   transform(payload) {
     return payload.replace(RE, '/*! $1 */');
   },

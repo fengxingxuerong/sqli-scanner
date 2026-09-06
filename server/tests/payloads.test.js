@@ -35,23 +35,27 @@ test('每个注入 payload 都包含 {ORIG} 占位符', () => {
 test('time payload 包含对应数据库延迟关键字', () => {
   // Oracle 的时间盲注在 SUPPORTED.Oracle.time=false 下被禁用，其 time 模板为占位空操作，
   // 故仅校验其余 4 库的真实延迟关键字。
+  // SQLite 无原生 SLEEP：sqlite_master 重查询 或 LIKE(HEX(RANDOMBLOB)) 重运算均为合法延迟向量
   const sleepKw = {
     MySQL: 'SLEEP',
     PostgreSQL: 'pg_sleep',
     'SQL Server': 'WAITFOR',
-    SQLite: 'sqlite_master',
   };
   for (const dbms of Object.keys(sleepKw)) {
     for (const p of PAYLOADS[dbms].time) {
       assert.ok(p.includes(sleepKw[dbms]), `${dbms} time payload 缺少 ${sleepKw[dbms]}: ${p}`);
     }
   }
+  for (const p of PAYLOADS.SQLite.time) {
+    assert.ok(p.includes('sqlite_master') || p.includes('RANDOMBLOB') || p.includes('LIKE('), `SQLite time 缺延迟向量: ${p}`);
+  }
 });
 
-test('各库 UNION payload 使用 -- - 注释并含 UNION SELECT', () => {
+test('各库 UNION payload 使用 -- - 注释并含 UNION SELECT / UNION ALL SELECT', () => {
   for (const dbms of DBMS_LIST) {
     for (const p of PAYLOADS[dbms].union) {
-      assert.ok(p.includes('UNION SELECT'), `${dbms} union payload 缺 UNION SELECT: ${p}`);
+      // 兼容 UNION ALL SELECT 变体（对标 sqlmap：UNION ALL 可绕过部分 WAF 去重）
+      assert.ok(p.includes('UNION SELECT') || p.includes('UNION ALL SELECT'), `${dbms} union payload 缺 UNION: ${p}`);
       assert.ok(p.includes('-- -'), `${dbms} union payload 缺 -- - 注释: ${p}`);
     }
   }
@@ -83,6 +87,16 @@ test('fillPayload 缺省值：orig 空、num 随机、sleep 为 1、sep 为 -- -
   const out = fillPayload('{ORIG} {NUM} {SLEEP} {SEP}');
   const m = out.match(/^ (\d{4}) 1 -- -$/);
   assert.ok(m, `缺省值输出不符合预期: ${JSON.stringify(out)}`);
+});
+
+test('boolean 模板含 OR-based 变体（[6,7]，对标 sqlmap risk>=2 投放）', () => {
+  for (const dbms of DBMS_LIST) {
+    const b = PAYLOADS[dbms].boolean;
+    // MySQL 深度扩容后 >8（其余库仍为 8）；前 8 项结构约束不变（[6,7] 仍为 OR 变体）
+    assert.ok(b.length >= 8, `${dbms} boolean 模板应 ≥ 8 条（6 条 AND + 2 条 OR + 深度扩容）`);
+    assert.ok(b[6].includes("OR '1'='1"), `${dbms} boolean[6] 应为 OR 真条件: ${b[6]}`);
+    assert.ok(b[7].includes("OR '1'='2"), `${dbms} boolean[7] 应为 OR 假条件: ${b[7]}`);
+  }
 });
 
 test('nullSequence 生成正确数量的 NULL', () => {

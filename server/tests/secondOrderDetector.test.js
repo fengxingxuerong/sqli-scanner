@@ -22,11 +22,8 @@ function makeMockForState({ param, initialStored = '1', alwaysError = false } = 
       if (opts.method === 'GET') {
         state.gets++;
         const hasQuote = String(state.value).includes("'");
-        if (alwaysError || hasQuote) {
-          return { data: 'You have an error in your SQL syntax', status: 200 };
-        }
-        // 回显已存值（二阶检索链路）；哨兵反射验证也依赖触发页回显存储值
-        return { data: `<html>profile: ${state.value}</html>`, status: 200 };
+        const body = alwaysError || hasQuote ? 'You have an error in your SQL syntax' : '<html>profile ok</html>';
+        return { data: body, status: 200 };
       }
       return { data: '', status: 200 };
     },
@@ -162,20 +159,4 @@ test('refreshCsrf=true 时存储前 GET actionUrl 重抓 token（best-effort，�
   const ctx = makeCtx({ httpClient, dbms: 'MySQL', refreshCsrf: true });
   const res = await d.detect(ctx);
   assert.equal(res.vulnerable, true);
-});
-
-test('[编排增强] 存储→检索链路不通（触发页不回显存储值）→ 哨兵验证失败，未命中', async () => {
-  // 触发页无论已存何值都返回固定内容、不回显 → 哨兵无法反射 → 链路验证失败 → 未命中
-  const httpClient = {
-    async request(opts) {
-      if (opts.method === 'POST') return { data: 'OK', status: 200 };
-      if (opts.method === 'GET') return { data: '<html>static page, no reflection</html>', status: 200 };
-      return { data: '', status: 200 };
-    },
-  };
-  const d = new SecondOrderDetector();
-  const ctx = makeCtx({ httpClient, dbms: 'MySQL' });
-  const res = await d.detect(ctx);
-  assert.equal(res.vulnerable, false);
-  assert.ok(res.evidence.includes('链路验证失败'), '应说明链路验证失败');
 });

@@ -163,8 +163,9 @@ test('API 契约：GET /api/payloads?dbms=MySQL&technique=union', async () => {
   const r = await getJson(`${ENGINE_BASE}/api/payloads?dbms=MySQL&technique=union`);
   assert.equal(r.code, 0);
   assert.ok(Array.isArray(r.data), 'data 应为数组');
-  assert.equal(r.data.length, 3);
-  assert.ok(r.data.every((p) => p.includes('UNION SELECT')));
+  // 深度扩充后 union 变体 >=8（对标 sqlmap 深度）；兼容 UNION ALL SELECT 变体
+  assert.ok(r.data.length >= 8, `MySQL union 变体应 >=8，实际 ${r.data.length}`);
+  assert.ok(r.data.every((p) => p.includes('UNION SELECT') || p.includes('UNION ALL SELECT')));
 });
 
 test('API 契约：GET /api/payloads?dbms=PostgreSQL 返回全部技术', async () => {

@@ -96,3 +96,13 @@ test('toHTML 含风险等级且转义危险字符', () => {
   // 尖括号被转义，不应原样出现
   assert.ok(!html.includes('<a>'));
 });
+
+test('toHTML 合规页脚（S19）：含授权声明且位于 </body> 之前', () => {
+  const html = rg.toHTML(rg.build('s1', { baseUrl: 'http://x' }, [], [], null));
+  assert.match(html, /本报告仅供授权安全测试使用/);
+  assert.match(html, /未获授权对任何系统进行扫描、测试或数据提取均可能违反法律法规/);
+  // 页脚在闭合 body 之前（声明位于 HTML 文档末尾，而非正文中间）
+  const footerIdx = html.indexOf('本报告仅供授权安全测试使用');
+  const bodyCloseIdx = html.lastIndexOf('</body>');
+  assert.ok(footerIdx > 0 && footerIdx < bodyCloseIdx);
+});

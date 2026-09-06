@@ -92,7 +92,6 @@ test('dedupeByStacked: 同点 stacked+time 命中 → 仅 1 条 stacked(Critical
   const sm = makeScanManager({});
   // 模拟 _run 聚合部分
   const point = { id: 'p1' };
-  const ctx = {};
   const found = [
     { technique: 'time', result: { pointId: 'p1', technique: 'time', vulnerable: true, dbms: 'SQL Server', evidence: 't', payloads: ['tp'] } },
     { technique: 'stacked', result: { pointId: 'p1', technique: 'stacked', vulnerable: true, dbms: 'SQL Server', evidence: 's', payloads: ['sp'] } },

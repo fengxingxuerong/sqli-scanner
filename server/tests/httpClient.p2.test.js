@@ -38,6 +38,31 @@ test('buildProxyAgent: https 代理解析协议/主机/端口', () => {
   assert.equal(conf.proxy.port, 3128);
 });
 
+test('buildProxyAgent: http 代理 URL 内嵌凭据不再丢失（user:pass@）', () => {
+  const conf = buildProxyAgent('http://alice:s3cr3t@127.0.0.1:8080');
+  assert.equal(conf.proxy.protocol, 'http');
+  assert.equal(conf.proxy.host, '127.0.0.1');
+  assert.equal(conf.proxy.port, 8080);
+  // 关键断言：凭据解析为 axios proxy.auth（旧实现直接丢弃 → 407）
+  assert.deepEqual(conf.proxy.auth, { username: 'alice', password: 's3cr3t' });
+});
+
+test('buildProxyAgent: http 代理凭据中的 URL 编码字符被解码', () => {
+  const conf = buildProxyAgent('http://user%40corp:p%40ss%3Awrd@proxy.example.com:3128');
+  assert.equal(conf.proxy.host, 'proxy.example.com');
+  assert.deepEqual(conf.proxy.auth, { username: 'user@corp', password: 'p@ss:wrd' });
+});
+
+test('buildProxyAgent: http 代理仅用户名无密码时 password 为空串', () => {
+  const conf = buildProxyAgent('http://bob@127.0.0.1:8080');
+  assert.deepEqual(conf.proxy.auth, { username: 'bob', password: '' });
+});
+
+test('buildProxyAgent: 无凭据 http 代理不产生 auth 字段（回归护栏）', () => {
+  const conf = buildProxyAgent('http://127.0.0.1:8080');
+  assert.equal(conf.proxy.auth, undefined);
+});
+
 // ===== mergeAuthHeaders =====
 test('mergeAuthHeaders: 空 auth 原样返回', () => {
   assert.deepEqual(mergeAuthHeaders({ a: '1' }, null), { a: '1' });
@@ -74,21 +99,14 @@ test('request 无代理/无认证/无 WAF 时行为不变', async () => {
     return { data: 'ok', status: 200 };
   };
   const start = Date.now();
-  const res = await client.request({ method: 'GET', url: 'http://x/', headers: {} });
+  const res = await client.request({ method: 'GET', url: 'http://127.0.0.1:9999/', headers: {} });
   const elapsed = Date.now() - start;
 
   assert.ok(res && res.data === 'ok');
-  // 代理不变量：proxy:false（不挂 SocksProxyAgent 等原生代理 agent）
+  // 代理不变量：proxy:false，不挂 SocksProxyAgent
   assert.equal(captured.proxy, false);
-  // 注意：默认 keepAlive=true 时会挂一个 node:http 标准 keepAlive agent（连接复用优化，非副作用）；
-  // 这里只断言"不是 SOCKS 代理 agent"，且 keepAlive 关闭时确实不再挂 agent。
-  if (client.keepAlive) {
-    assert.ok(captured.httpAgent instanceof (await import('node:http')).Agent, '默认开启 keepAlive 应挂 http 标准 agent');
-    assert.equal(captured.httpAgent.constructor.name, 'Agent');
-  } else {
-    assert.equal(captured.httpAgent, undefined);
-    assert.equal(captured.httpsAgent, undefined);
-  }
+  assert.equal(captured.httpAgent, undefined);
+  assert.equal(captured.httpsAgent, undefined);
   // 不翻译任何认证头
   assert.equal(captured.headers['Authorization'], undefined);
   assert.equal(captured.headers['Cookie'], undefined);
@@ -107,12 +125,35 @@ test('request 开启 randomUA 时覆盖 User-Agent', async () => {
   };
   await client.request({
     method: 'GET',
-    url: 'http://x/',
+    url: 'http://127.0.0.1/',
     headers: {},
     wafEvasion: { randomUA: true, jitterMs: 0, obfuscate: false },
   });
   assert.equal(typeof captured.headers['User-Agent'], 'string');
   assert.ok(captured.headers['User-Agent'].length > 0);
+});
+
+// --mobile（wafEvasion.randomUA='mobile'）必须只从移动端池取 UA（回归：曾误用全池含桌面 UA）
+test('request randomUA=mobile 时 User-Agent 恒为移动端', async () => {
+  const client = new HttpClient();
+  let captured = null;
+  client.instance.request = async (cfg) => {
+    captured = cfg;
+    return { data: '', status: 200 };
+  };
+  for (let i = 0; i < 20; i++) {
+    await client.request({
+      method: 'GET',
+      url: 'http://127.0.0.1/',
+      headers: {},
+      wafEvasion: { randomUA: 'mobile', jitterMs: 0, obfuscate: false },
+    });
+    const ua = captured.headers['User-Agent'];
+    assert.ok(
+      /iPhone|Android|iPad|Mobile/.test(ua),
+      `应命中移动端池，实际：${ua}`
+    );
+  }
 });
 
 test('request 透传 proxy/auth 参数', async () => {
@@ -124,7 +165,7 @@ test('request 透传 proxy/auth 参数', async () => {
   };
   await client.request({
     method: 'GET',
-    url: 'http://x/',
+    url: 'http://127.0.0.1/',
     headers: { 'X-T': '1' },
     proxy: 'http://127.0.0.1:8080',
     auth: { basic: { username: 'u', password: 'p' } },

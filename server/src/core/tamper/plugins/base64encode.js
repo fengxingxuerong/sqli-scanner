@@ -6,11 +6,15 @@ import { Buffer } from 'node:buffer';
 export const base64encode = {
   name: 'base64encode',
   description: '整条 payload 做 BASE64 编码（需目标侧配套解码触发）',
+  doctests: [
+    { input: 'abc', output: 'YWJj' },
+  ],
   /**
    * @param {string} payload
    * @param {object} ctx
    * @returns {string}
    */
+  terminal: true, // [P1-FIX] 输出形态固定：其后 tamper 均空转，链上自动截断
   transform(payload, ctx) {
     return Buffer.from(payload, 'utf8').toString('base64');
   },

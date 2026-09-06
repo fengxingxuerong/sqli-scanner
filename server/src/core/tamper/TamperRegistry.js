@@ -48,58 +48,103 @@ export class TamperRegistry {
 
   /**
    * 列出全部插件元信息（不含 transform，便于序列化展示）
-   * @returns {Array<{name:string, description:string}>}
+   * @returns {Array<{name:string, description:string, dbms?:string[], terminal?:boolean}>}
    */
   list() {
     return [...this._plugins.values()].map((p) => ({
       name: p.name,
       description: p.description || '',
+      ...(Array.isArray(p.dbms) && p.dbms.length ? { dbms: [...p.dbms] } : {}),
+      ...(p.terminal ? { terminal: true } : {}),
     }));
   }
 
   /**
-   * 按名数组解析成有序插件数组（未知名跳过并告警，保证链式顺序由数组顺序决定）
-   * 兼容性元数据（对标 sqlmap 各 tamper 的 dbms/dependencies 约束）：
-   *   - plugin.compat.dbms：声明该插件适用的 DBMS 键（如 ['MySQL','MariaDB']）；
-   *     当传入 ctx.dbms 且不在作用域内 → 跳过并告警（避免 MySQL-only tamper 误用到 SQLite/PG 静默失效）。
-   *   - plugin.compat.conflicts：声明与之冲突的插件名（如 space 类互相改写）；存在冲突 → 告警（保留两者，由操作员裁决）。
-   * 向后兼容：不传 ctx（或 ctx.dbms 未知）时退化为原行为（仅按名解析，不加 dbms 过滤）。
-   * @param {string[]} names 有序插件名
-   * @param {object|null} ctx 检测上下文（含 dbms）；可不传
-   * @returns {Array} 有序插件对象数组
+   * 列出全部插件原始对象（含 transform / doctests，供快照回归与组合演练）
+   * @returns {Array}
    */
-  resolve(names = [], ctx = null) {
+  all() {
+    return [...this._plugins.values()];
+  }
+
+  /**
+   * 按名数组解析成有序插件数组（未知名跳过并告警，保证链式顺序由数组顺序决定）
+   *
+   * [P1-FIX 2026-09-05] 串联静态校验（消费插件可选元数据）：
+   *   - `dbms: ['MySQL',...]`：目标 dbms 已知且不在列表 → 跳过该插件并告警
+   *     （防 dollarquote(仅 PG)/sleep2getlock(仅 MySQL)/percentage(仅 ASP) 被套到异构库
+   *      静默产出无效 payload——sqlmap 官方 tamper 自带 dbms 声明）；
+   *   - `terminal: true`：该插件输出形态固定（如 base64encode/charencode 全编码），
+   *     其后所有插件全部空转 → 截断并告警（修复 base64encode→space2comment 静默空转）。
+   * ctx.dbms 未提供时不做 dbms 过滤（保守，不影响既有调用方）。
+   * @param {string[]} names
+   * @param {{dbms?:string}} [ctx] 检测上下文（dbms 可选）
+   * @returns {Array}
+   */
+  resolve(names = [], ctx = {}) {
     const resolved = [];
-    const dbms = ctx && ctx.dbms;
+    let truncated = false;
     for (const n of names || []) {
       const p = this._plugins.get(n);
       if (!p) {
         logger.warn(`tamper 插件未找到：${n}（已跳过）`);
         continue;
       }
-      // dbms 作用域过滤：插件声明了 compat.dbms 且当前 ctx.dbms 已知且不在作用域内 → 跳过
-      const compat = p.compat || {};
-      if (dbms && Array.isArray(compat.dbms) && compat.dbms.length > 0) {
-        if (!compat.dbms.includes(dbms)) {
-          logger.warn(
-            `tamper 插件 ${n} 声明仅适用于 [${compat.dbms.join(',')}]，当前 DBMS=${dbms}，已跳过`
-          );
-          continue;
-        }
+      if (truncated) {
+        logger.warn(`tamper 链已因 ${resolved[resolved.length - 1]?.name}（terminal）截断，跳过：${n}`);
+        continue;
       }
-      // 冲突检测：与已入选插件存在 conflicts 关系 → 告警（保留两者，由操作员裁决顺序）
-      const cc = compat.conflicts || [];
-      for (const prev of resolved) {
-        const prevCc = (prev.compat || {}).conflicts || [];
-        if (cc.includes(prev.name) || prevCc.includes(p.name)) {
-          logger.warn(
-            `tamper 插件冲突：${prev.name} 与 ${p.name} 可能互相干扰（space/comment 类重复改写），建议二选一`
-          );
+      if (Array.isArray(p.dbms) && p.dbms.length && ctx.dbms) {
+        const target = String(ctx.dbms).toLowerCase();
+        const hit = p.dbms.some((d) => {
+          const dNorm = String(d).toLowerCase();
+          return target === dNorm || (dNorm === 'mssql' && target === 'sql server');
+        });
+        if (!hit) {
+          // 对齐 sqlmap：dbms 限定不符仅告警不截断（保留用户显式意志，打破"静默产出无效 payload"）
+          logger.warn(`tamper ${n} 仅适用于 [${p.dbms.join(',')}]，目标 ${ctx.dbms} 不匹配（仍然应用）`);
         }
       }
       resolved.push(p);
+      if (p.terminal) truncated = true;
     }
     return resolved;
+  }
+
+  /**
+   * 静态链校验（不发请求，供 UI/API 在用户选链时预检）
+   * @param {string[]} names
+   * @param {{dbms?:string}} [ctx]
+   * @returns {{ok:boolean, warnings:string[], plugins:string[]}}
+   */
+  validateChain(names = [], ctx = {}) {
+    const warnings = [];
+    const kept = [];
+    let truncated = false;
+    for (const n of names || []) {
+      const p = this._plugins.get(n);
+      if (!p) {
+        warnings.push(`未注册的插件：${n}`);
+        continue;
+      }
+      if (truncated) {
+        warnings.push(`${n} 位于 terminal 插件之后，将被截断（输出形态已固定，后续变换无效）`);
+        continue;
+      }
+      if (Array.isArray(p.dbms) && p.dbms.length && ctx.dbms) {
+        const target = String(ctx.dbms).toLowerCase();
+        const hit = p.dbms.some((d) => {
+          const dNorm = String(d).toLowerCase();
+          return target === dNorm || (dNorm === 'mssql' && target === 'sql server');
+        });
+        if (!hit) {
+          warnings.push(`${n} 仅适用于 [${p.dbms.join(',')}]，目标 ${ctx.dbms} 不匹配（仍将应用，建议确认）`);
+        }
+      }
+      kept.push(n);
+      if (p.terminal) truncated = true;
+    }
+    return { ok: warnings.length === 0 && kept.length > 0, warnings, plugins: kept };
   }
 }
 

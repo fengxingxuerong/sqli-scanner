@@ -5,7 +5,7 @@ const RE = new RegExp(`\\b(${KW})\\b`, 'gi');
 export const modsecurityversioned = {
   name: 'modsecurityversioned',
   description: '用 /*! KEYWORD */ 包裹关键字，绕过 ModSecurity 类 WAF 的关键字检测',
-  compat: { dbms: ['MySQL', 'MariaDB'] },
+  dbms: ['MySQL'], // [P1-FIX] 方言限定：异构库下无效，运行时告警
   transform(payload) {
     return payload.replace(RE, '/*! $1 */');
   },

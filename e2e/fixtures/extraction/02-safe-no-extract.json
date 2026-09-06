@@ -1,0 +1,15 @@
+{
+  "name": "extract_no_false_positive",
+  "description": "安全目标提取验证：无注入时不产生提取数据（golden output 对比）",
+  "target": { "type": "safe", "endpoint": "param", "param": "q", "value": "test" },
+  "config": { "techniques": ["union", "error", "boolean"], "enableExtract": true },
+  "expected": {
+    "vulnerable": false,
+    "techniques": { "must": [], "nice": [] },
+    "requestCount": { "max": 100 },
+    "extracted": {
+      "databases": "empty",
+      "tables": "empty"
+    }
+  }
+}

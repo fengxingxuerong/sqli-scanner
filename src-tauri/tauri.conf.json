@@ -6,12 +6,12 @@
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:5173",
-    "beforeDevCommand": "npm run dev",
-    "beforeBuildCommand": "npm run build"
+    "beforeDevCommand": "npm run dev"
   },
   "app": {
     "windows": [
       {
+        "label": "main",
         "title": "SQL 注入检测工具",
         "width": 1200,
         "height": 800,
@@ -20,25 +20,18 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' http://127.0.0.1:4567"
     }
   },
   "bundle": {
     "active": true,
     "targets": "all",
-    "externalBin": ["binaries/sqli-engine"],
-    "icon": ["icons/icon.png"]
-  },
-  "plugins": {
-    "shell": {
-      "externalBin": ["binaries/sqli-engine"]
-    }
-  },
-  "permissions": [
-    "core:default",
-    "shell:allow-execute",
-    "shell:allow-spawn",
-    "dialog:default",
-    "fs:default"
-  ]
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  }
 }

@@ -2,6 +2,9 @@
 export const concat2concatws = {
   name: 'concat2concatws',
   description: '将 CONCAT(...) 改写为 CONCAT_WS(CHAR(32), ...)，变换函数形态',
+  doctests: [
+    { input: 'CONCAT(a,b)', output: 'CONCAT_WS(CHAR(32),a,b)' },
+  ],
   transform(payload) {
     return payload.replace(/CONCAT\(/gi, 'CONCAT_WS(CHAR(32),');
   },

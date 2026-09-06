@@ -64,7 +64,7 @@ function makeTimeMock(variant) {
       const q = extractInjected(opts);
       const isSleep = /SLEEP\(|pg_sleep|WAITFOR DELAY/i.test(q);
       if (variant === 'hit') {
-        if (isSleep) await sleep(2000); // 注入生效：额外延迟 2s（≥ 默认 sleep=2 派生下限 1.5s）
+        if (isSleep) await sleep(1200); // 注入生效：额外延迟 1.2s
         return { data: '', status: 200 };
       }
       if (variant === 'slowNoInject') {

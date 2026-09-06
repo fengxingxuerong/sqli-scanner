@@ -45,6 +45,42 @@ describe('scanStore', () => {
     expect(s.history).toEqual([]);
   });
 
+  // H2：进度聚合增量维护 —— events 滑窗截断后聚合值仍存活，进度条不归零
+  it('addEvent 增量维护进度聚合；滑窗截断早期事件后聚合不丢失', () => {
+    // 先重置聚合（beforeEach 未覆盖新字段）
+    useScanStore.setState({ events: [], progressTotal: 0, processedPointIds: {} });
+    const { addEvent } = useScanStore.getState();
+    addEvent({
+      type: 'point_discovered', scanId: 's1', ts: '',
+      payload: { points: [{ id: 'p1' }, { id: 'p2' }, { id: 'p3' }] },
+    } as never);
+    addEvent({ type: 'point_testing', scanId: 's1', ts: '', payload: { pointId: 'p1' } } as never);
+    addEvent({ type: 'detection_found', scanId: 's1', ts: '', payload: { pointId: 'p2' } } as never);
+    // 重复 pointId 不重复计数
+    addEvent({ type: 'point_skipped', scanId: 's1', ts: '', payload: { pointId: 'p2' } } as never);
+
+    let s = useScanStore.getState();
+    expect(s.progressTotal).toBe(3);
+    expect(Object.keys(s.processedPointIds).sort()).toEqual(['p1', 'p2']);
+
+    // 灌满滑窗触发截断（>300 条），早期 point_discovered 被挤出
+    for (let i = 0; i < 320; i++) {
+      addEvent({ type: 'http_request', scanId: 's1', ts: '', payload: {} } as never);
+    }
+    s = useScanStore.getState();
+    expect(s.events.length).toBe(300);
+    expect(s.events.some((e) => e.type === 'point_discovered')).toBe(false);
+    // 聚合不受滑窗影响
+    expect(s.progressTotal).toBe(3);
+    expect(Object.keys(s.processedPointIds).length).toBe(2);
+
+    // clearEvents 归零
+    useScanStore.getState().clearEvents();
+    s = useScanStore.getState();
+    expect(s.progressTotal).toBe(0);
+    expect(s.processedPointIds).toEqual({});
+  });
+
   it('setScanId / setStatus / setReport 生效', () => {
     const { setScanId, setStatus, setReport } = useScanStore.getState();
     setScanId('abc');
@@ -103,20 +139,5 @@ describe('scanStore', () => {
     expect(s.scanId).toBeNull();
     expect(s.events).toEqual([]);
     expect(s.report).toBeNull();
-  });
-
-  it('setScanConcurrency 写入并发度快照', () => {
-    const { setScanConcurrency } = useScanStore.getState();
-    setScanConcurrency(5);
-    expect(useScanStore.getState().scanConcurrency).toBe(5);
-    setScanConcurrency(null);
-    expect(useScanStore.getState().scanConcurrency).toBeNull();
-  });
-
-  it('reset 同时清空 scanConcurrency', () => {
-    const { setScanConcurrency, reset } = useScanStore.getState();
-    setScanConcurrency(8);
-    reset();
-    expect(useScanStore.getState().scanConcurrency).toBeNull();
   });
 });

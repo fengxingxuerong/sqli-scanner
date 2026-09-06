@@ -1,22 +1,22 @@
 // 前后端共享类型定义（镜像后端 schema，保持契约一致）
 
 /** 请求方法 */
-export type MethodType = 'GET' | 'POST';
+export type MethodType = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 
 /** 注入点位置 */
 export type InjectionLocation = 'url' | 'body' | 'cookie' | 'header';
 
 /** 检测技术 */
-export type TechniqueType = 'union' | 'error' | 'boolean' | 'time' | 'stacked' | 'oob';
+export type TechniqueType = 'union' | 'error' | 'boolean' | 'time' | 'stacked' | 'oob' | 'inline' | 'second_order';
 
 /** 支持的数据库 */
-export type DbmsType = 'MySQL' | 'PostgreSQL' | 'SQLite' | 'SQL Server' | 'Oracle';
+export type DbmsType = 'MySQL' | 'PostgreSQL' | 'SQLite' | 'SQL Server' | 'Oracle' | 'TiDB' | 'DM8' | 'ClickHouse' | 'DB2' | 'Sybase' | 'Firebird' | 'Informix' | 'H2';
 
 /** 风险等级 */
 export type RiskLevel = 'Critical' | 'High' | 'Medium' | 'Low';
 
 /** 扫描状态 */
-export type ScanStatus = 'pending' | 'running' | 'completed' | 'stopped' | 'error';
+export type ScanStatus = 'pending' | 'running' | 'paused' | 'completed' | 'stopped' | 'error';
 
 /** 扫描引擎 */
 export type EngineType = 'builtin' | 'sqlmap';
@@ -32,6 +32,26 @@ export interface SqlmapConfig {
   dump: boolean; // 拖库（破坏性，需确认）
   osShell: boolean; // OS Shell（破坏性，需确认）
   fileRead: string | null; // 读文件（破坏性，需确认）
+  // ── 请求控制（P0-U2 新增，透传给 sqlmap 桥，与 buildArgs 契约对齐）──
+  proxy: string | null; // 代理地址（http/https/socks5://host:port），透传 --proxy；留空直连
+  timeoutMs: number; // 单请求超时（毫秒），透传 --timeout；sqlmap 模式复用内置面板同单位语义
+  retry: number; // 请求重试次数，透传 --retries（0 表示不重试）
+  randomUA: boolean; // 随机 User-Agent 池，透传 --random-agent
+  // ── 对标 sqlmap 高级参数 ──
+  flushSession?: boolean; // 清会话缓存重测（--flush-session）
+  freshQueries?: boolean; // 绕过查询结果缓存（--fresh-queries）
+  unionCols?: string | null; // UNION 探测列数范围（--union-cols，如 "1-15"）
+  unionChar?: string | null; // UNION SELECT 占位字符（--union-char，单字符 A-Za-z0-9）
+  unionFrom?: string | null; // UNION SELECT 的 FROM 表（--union-from，表名，最多 128 字符）
+  smart?: boolean; // 智能启发式（--smart，跳过非注入参数，默认 false）
+  timeSec?: number | null; // 时间盲注秒数（--time-sec，1-60）
+  ignoreCode?: number | null; // 忽略某 HTTP 状态码（--ignore-code）
+  excludeSysdbs?: boolean; // 排除系统库（--exclude-sysdbs，默认 true）
+  verbose?: number | null; // 日志详细度 0-6（-v）
+  // ── 低优先级 WAF 规避参数 ──
+  noCast?: boolean; // 禁止 CAST 包裹（--no-cast，防 CAST 触发 WAF）
+  hex?: boolean; // 十六进制编码提取（--hex，盲注用 hex 替代字符二分）
+  noEscape?: boolean; // 禁止字符串转义（--no-escape，payload 原样注入）
 }
 
 /** tamper 变换配置（对齐后端 wafEvasion.tamper） */
@@ -67,25 +87,24 @@ export interface WafDetectedPayload {
   suggestions: WafSuggestion[]; // 推荐 tamper 组合（仅建议，不自动套用）
 }
 
-/** point_discovered 事件载荷（解析目标后回传的全部注入点，供扫描页实时全局拓扑） */
-export interface PointDiscoveredPayload {
-  points: InjectionPoint[];
-}
-
 /** SSE 事件类型 */
 export type EventType =
   | 'scan_started'
-  | 'point_discovered' // payload: { points: InjectionPoint[] }（解析目标后回传的全部注入点）
+  | 'scan_phase' // 阶段提示（payload: { phase: string, message: string }）
+  | 'http_request' // 请求日志（payload: { method, url, status, ms }）
+  | 'point_discovered'
   | 'point_testing'
+  | 'point_skipped' // resume 模式跳过已完成注入点（payload: { pointId, reason }）
   | 'detection_found'
   | 'extraction_progress'
   | 'scan_completed'
   | 'scan_stopped'
+  | 'scan_paused' // [P0-FIX] 扫描暂停（payload: { scanId }）
+  | 'scan_resumed' // 扫描恢复（payload: { scanId }）
   | 'scan_error'
   | 'sqlmap_log' // sqlmap 原始输出行（按级别着色）
   | 'sqlmap_vuln' // sqlmap 确认的注入点
-  | 'waf_detected' // payload: { vendors: WafCandidate[]; suggestions: WafSuggestion[] }
-  | 'second_order_discovery'; // payload: { candidates: string[]; confirmed: string[] }
+  | 'waf_detected'; // payload: { vendors: WafCandidate[]; suggestions: WafSuggestion[] }
 
 /** 基础认证凭据（Basic Auth） */
 export interface BasicCred {
@@ -106,41 +125,6 @@ export interface WafEvasionConfig {
   jitterMs: number; // 请求间随机延时（毫秒），0 表示不延时
   obfuscate: boolean; // Payload 混淆（legacy，已被 tamper 体系取代）
   tamper: TamperConfig; // 可插拔 tamper 链式体系（对标 sqlmap --tamper）
-}
-
-/** 自定义检测判定锚点（对标 sqlmap --string / --not-string / --regexp / --code） */
-export interface DetectMatchConfig {
-  string?: string; // TRUE 响应应含、FALSE 响应应不含的串
-  notString?: string; // TRUE 响应应不含、FALSE 响应应含的串
-  regexp?: string; // TRUE 响应应匹配、FALSE 响应应不匹配的正则（字符串）
-  code?: number; // TRUE 响应 HTTP 状态码应 ===、FALSE 应 !== 的数字
-}
-
-/** 安全间隔探测配置（对标 sqlmap --safe-url / --safe-urls / --safe-freq / --safe-order） */
-export interface SafeProbeConfig {
-  url?: string; // 单安全 URL（向后兼容）
-  urls?: string[]; // 多安全 URL（逗号分隔合并去重），随机轮询
-  freq?: number; // 每 N 次真实请求穿插一次安全探测
-  randomize?: boolean; // 默认 true 随机轮询；false=顺序（--safe-order）
-}
-
-/** 二阶注入配置（对标 sqlmap --second-order）：开启后向目标发起真实写请求，需明确授权 */
-export interface SecondOrderConfig {
-  enabled: boolean; // 总开关
-  triggerUrls: string[]; // 触发页 URL（确信会回显存储内容的页面）
-  autoDiscover?: boolean; // 触发页自动发现：enabled 且未手填 triggerUrls 时，从目标页链接发现并经哨兵回显确认（默认 false）
-  refreshCsrf?: boolean; // 每次触发前刷新 CSRF 令牌（默认 true）
-  negativeControl?: boolean; // 用负控制页验证"非存储点不触发"（默认 true）
-  oobTrigger?: boolean; // 触发页经 OOB 通道回传（需外部 OOB 监听，默认 false）
-  manualStorePoints?: string[]; // 手动指定存储点参数名列表（逗号/换行分隔经 UI 解析）；与启发式 isStorePoint 取并集，命中点的 isStorePoint 运行时置真
-}
-
-/** OOB 带外注入配置：启用独立接收端，目标 DBMS 回连确认无回显注入（对标 sqlmap 带外通道） */
-export interface OobConfig {
-  enabled: boolean; // 总开关（即使 techniques 含 oob，也需此处开启接收端才启动）
-  callbackBase?: string; // 接收端可达地址（如 your.domain 或 127.0.0.1:8899），目标 DBMS 回连此地址
-  httpPort?: number; // 接收端独立监听端口（非引擎 4567），默认 8899
-  timeoutMs?: number; // 轮询等待回连上限（毫秒），默认 5000
 }
 
 /** 历史记录（持久化到 localStorage） */
@@ -165,17 +149,24 @@ export interface ScanConfig {
   auth: AuthConfig | null;
   wafEvasion: WafEvasionConfig;
   techniques: TechniqueType[];
-  // ── 对标 sqlmap 的高级检测选项（仅 builtin 引擎消费）──
-  level: number; // 检测等级 1-5（控制测哪些注入位置：1=URL/Body；2=+Cookie；3=+Header/UA/Referer）
-  risk: number; // 风险等级 1-3（二阶/堆叠/OOB 门控，过低则拦截高风险技术）
-  detectMatch?: DetectMatchConfig; // 自定义判定锚点（--string/--not-string/--regexp/--code）
-  timeSec?: number; // 时间盲注 SLEEP 触发秒数（--time-sec，默认 2）
-  safeProbe?: SafeProbeConfig; // 安全间隔探测（--safe-url/--safe-urls/--safe-freq/--safe-order）
-  requestDelayMs?: number; // 固定请求间延时毫秒（--delay，默认 0）
-  hpp?: boolean; // HTTP 参数污染（--hpp，默认 false）
-  keepAlive?: boolean; // 连接复用（--keep-alive/--no-keep-alive，默认 true；false=每次新连接）
-  secondOrder?: SecondOrderConfig; // 二阶注入（--second-order）：开启对目标发起真实写请求，需授权
-  oob?: OobConfig; // OOB 带外注入：启用接收端 + 需 techniques 含 oob 且 risk>=3
+  level?: number; // 检测等级 1-5
+  risk?: number; // 风险等级 1-3
+  // payload 前缀/后缀（对标 sqlmap --prefix / --suffix）：注入点原值前拼接 prefix、
+  // payload 后拼接 suffix，用于闭合引号/括号再注释尾部。空串 = 不拼接。
+  prefix?: string;
+  suffix?: string;
+  // 会话持久化 / 断点续跑（对标 sqlmap --session / --resume，P2-S11）：
+  // sessionFile = 显式会话文件名（后端白名单校验后落盘，下次续跑复用）；
+  // sessionDefault = 自动用固定文件名 sqli-session-latest.json 落盘（同 URL 自动 resume）。
+  sessionFile?: string;
+  sessionDefault?: boolean;
+  // 非 SQL 注入检测配置（NoSQL/GraphQL/SSTI），opt-in 独立趟，默认关闭
+  noSql?: {
+    enabled: boolean;
+    kinds?: Array<'nosql' | 'graphql' | 'ssti'>;
+  };
+  // 站内链接爬取深度（对标 sqlmap --crawl=<depth>）：0=关闭，1-3=深度
+  crawlDepth?: number;
 }
 
 /** 扫描目标 */
@@ -198,9 +189,6 @@ export interface InjectionPoint {
   confirmed: boolean;
   technique: TechniqueType | null;
   dbms: DbmsType | null;
-  // —— 二阶注入相关（与后端 createInjectionPoint 对齐；一阶非表单点通常为 undefined）——
-  isStorePoint?: boolean; // 是否为潜在"存储型参数点"（候选二阶存储端）
-  storeKind?: string | null; // 启发式分类：'registration'|'profile'|'comment'|'unknown'|null
 }
 
 /** 盲注判定采样点（时间线基础单元） */
@@ -272,8 +260,8 @@ export interface Vulnerability {
   riskLevel: RiskLevel;
   payloads: string[];
   description: string;
+  evidence?: string; // 检测器原始证据（P1-U2 新增，供详情页单独展示）
   trace?: BlindTrace | null;
-  oob?: { token: string; callback: string }; // OOB 带外回连确认的结构化元数据（仅 OOB 命中时存在）
 }
 
 /** 提取数据 */
@@ -285,11 +273,6 @@ export interface ExtractedData {
 }
 
 /** 报告模型 */
-/** 轻量存储点（用于二阶链路图等展示场景，不含完整注入点信息） */
-export interface StorePointLite {
-  param: string;
-  storeKind?: string | null;
-}
 /** 报告摘要（引擎在 _run 末尾写入；字段多为可选，向后兼容老报告） */
 export interface ReportSummary {
   stackedEnabled?: boolean;
@@ -303,25 +286,6 @@ export interface ReportSummary {
   };
   // F-20 新增：WAF 指纹识别汇总（来自指纹基线，零额外发包）
   wafDetected?: WafCandidate[];
-  // 安全间隔探测告警汇总（对标 sqlmap --safe-url 偏离告警；仅记录不阻断主扫描）
-  safeProbeAlerts?: SafeProbeAlert[];
-  // 二阶触发页自动发现结果（方向 1）：扫描时若开启 autoDiscover，记录候选链接与经哨兵回显确认的触发页
-  secondOrderDiscovery?: {
-    candidates: string[]; // 从目标页发现的候选触发页 URL
-    confirmed: string[]; // 经"存哨兵→读触发页→断言回显"确认会回显存储值的触发页 URL
-    storePoints?: StorePointLite[]; // 发现期识别到的存储点（供实时链路图绘制完整拓扑；可能为空）
-  };
-}
-
-// 安全间隔探测单条告警（SafeProbeClient.onAnomaly → ScanManager 收集）
-export interface SafeProbeAlert {
-  url: string;
-  reason: string;
-  baselineStatus: number | null;
-  baselineLen: number | null;
-  actualStatus: number | null;
-  actualLen: number | null;
-  ts: string;
 }
 
 export interface ReportModel {
@@ -335,15 +299,63 @@ export interface ReportModel {
   data: ExtractedData | null;
   riskLevel: RiskLevel;
   summary: ReportSummary;
+  // ── sqlmap 高级模式附加（P0-U1 新增，仅 engine=sqlmap 的报告存在）──
+  engine?: EngineType; // 报告来源引擎（内置引擎报告缺省为 builtin 语义，sqlmap 报告显式标注）
+  sqlmap?: SqlmapReportData; // sqlmap 原始 {logs, vulns} 包装数据（内置引擎报告无此字段）
 }
 
-/** SSE 事件 */
-export interface ScanEvent {
-  type: EventType;
-  scanId: string;
+/** sqlmap 输出日志行（GET /sqlmap/:id/report 返回 logs 元素，与 sqlmapBridge 契约一致） */
+export interface SqlmapLogEntry {
+  level: 'error' | 'success' | 'info' | 'debug' | 'warn' | 'output';
+  text: string;
   ts: string;
-  payload: any;
 }
+
+/** sqlmap 确认注入点（GET /sqlmap/:id/report 返回 vulns 元素，与 sqlmapBridge 契约一致） */
+export interface SqlmapVulnEntry {
+  param: string | null;
+  technique: string;
+  raw: string;
+}
+
+/** sqlmap 模式报告附加数据（桥 getReport 返回 {logs,vulns} 的包装） */
+export interface SqlmapReportData {
+  status: string; // completed / stopped / error / killed / running
+  logs: SqlmapLogEntry[];
+  vulns: SqlmapVulnEntry[];
+}
+
+/** SSE 事件载荷类型映射（按 EventType 分发，消除 any） */
+interface ScanEventPayloads {
+  scan_started: { scanId: string; target: { url: string; method: MethodType } };
+  scan_phase: { phase: string; message: string };
+  http_request: { method: string; url: string; status: number; ms?: number };
+  point_discovered: { points: InjectionPoint[] };
+  point_testing: { pointId: string; technique: string; tamperRetry?: boolean };
+  point_skipped: { pointId: string; reason: string };
+  detection_found: DetectionResult & { riskLevel: RiskLevel };
+  extraction_progress: { db: string; table: string | null; count: number };
+  scan_completed: ReportModel;
+  scan_stopped: { scanId: string };
+  scan_paused: { scanId: string };
+  scan_resumed: { scanId: string };
+  scan_error: { message: string; code?: number };
+  sqlmap_log: SqlmapLogEntry;
+  sqlmap_vuln: SqlmapVulnEntry;
+  waf_detected: WafDetectedPayload;
+}
+
+/** SSE 事件（判别联合：按 type 分发 payload 类型，消除 any） */
+export type ScanEvent = {
+  [K in EventType]: {
+    type: K;
+    scanId: string;
+    ts: string;
+    /** 服务端单调递增序号，用于断线重连 lastEventId 续传（旧后端/测试构造的事件可缺省） */
+    seq?: number;
+    payload: ScanEventPayloads[K];
+  };
+}[EventType];
 
 /** 统一响应包 */
 export interface ApiResponse<T> {
@@ -351,6 +363,32 @@ export interface ApiResponse<T> {
   data: T;
   message: string;
 }
+
+/**
+ * 错误码枚举（镜像后端 server/src/core/errors.js 的 ErrorCode，保持前后端契约一致）。
+ * 前端通过此枚举判断错误类型以决定行为（重试 vs 提示），而非匹配中文 message 字符串。
+ */
+export const ErrorCode = {
+  OK: 0,
+  INVALID_TARGET: 1001, // 无效目标
+  UNSUPPORTED_METHOD: 1002, // 不支持的请求方法
+  INVALID_PARAM: 1003, // 入参非法
+  SCAN_NOT_FOUND: 2001, // 扫描不存在/已结束
+  ENGINE_BUSY: 2002, // 引擎忙
+  HTTP_TIMEOUT: 3001, // HTTP 超时
+  HTTP_ERROR: 3002, // HTTP 错误
+  DETECT_FAILED: 4001, // 检测失败
+  EXTRACT_FAILED: 5001, // 提取失败
+  UNKNOWN: 9001, // 未知错误
+  OOB_RECEIVER_START_FAILED: 6001, // 接收端启动失败
+  OOB_DISABLED: 6002, // OOB 未启用
+  TAMPER_INVALID_NAME: 6003, // tamper 插件缺唯一 name
+  SECOND_ORDER_DISABLED: 6004, // 二阶检测未启用
+  EXPLOIT_UNAUTHORIZED: 6005, // 利用操作未授权
+  RATE_LIMITED: 4290, // 限速
+} as const;
+
+export type ErrorCodeValue = (typeof ErrorCode)[keyof typeof ErrorCode];
 
 /** 利用目标上下文（注入点 + DBMS + 授权声明），对应后端 /exploit/* 入参 */
 export interface ExploitTarget {

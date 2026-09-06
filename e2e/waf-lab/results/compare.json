@@ -5,27 +5,28 @@
     "detectedB": 1,
     "detectRateA": 0,
     "detectRateB": 100,
-    "blockedReqA": 26,
-    "blockedReqB": 12,
-    "blockRateA": 74.3,
-    "blockRateB": 75
+    "blockedReqA": 44,
+    "blockedReqB": 8,
+    "blockRateA": 51.8,
+    "blockRateB": 32
   },
   "configA": {
     "tamper": "off",
     "detected": 0,
     "totalPoints": 1,
-    "blockedReq": 26,
-    "totalReq": 35
+    "blockedReq": 44,
+    "totalReq": 85
   },
   "configB": {
     "tamper": "on",
     "plugins": [
       "space2comment",
+      "commentbeforeparentheses",
       "charencode"
     ],
     "detected": 1,
     "totalPoints": 1,
-    "blockedReq": 12,
-    "totalReq": 16
+    "blockedReq": 8,
+    "totalReq": 25
   }
 }

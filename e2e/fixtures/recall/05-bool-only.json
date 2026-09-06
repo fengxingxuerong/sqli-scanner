@@ -1,0 +1,11 @@
+{
+  "name": "bool_only",
+  "description": "仅布尔差异（无回显/无报错/无延迟）",
+  "target": { "type": "mock", "endpoint": "bool", "param": "uid", "value": "1" },
+  "config": { "techniques": ["boolean"] },
+  "expected": {
+    "vulnerable": true,
+    "techniques": { "must": ["boolean"], "nice": [] },
+    "requestCount": { "max": 40 }
+  }
+}

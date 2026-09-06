@@ -1,0 +1,190 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  # [修复] schedule/workflow_dispatch 是 workflow 级触发器，只能放在顶层 on: 下，
+  # 原先写在 job 级属于非法键。schedule 触发时其余 job 通过 `if: github.event_name != 'schedule'` 跳过，
+  # 仅运行 tamper-waf-matrix（周度矩阵）；workflow_dispatch 允许手动触发任意 job。
+  schedule:
+    - cron: '0 3 * * 1'
+  workflow_dispatch:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    if: github.event_name != 'schedule'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Cache frontend node_modules
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: ${{ runner.os }}-frontend-${{ hashFiles('package-lock.json') }}
+      - name: Cache server node_modules
+        uses: actions/cache@v4
+        with:
+          path: server/node_modules
+          key: ${{ runner.os }}-server-${{ hashFiles('server/package-lock.json') }}
+      - run: npm ci
+      - run: cd server && npm ci
+      - run: npx tsc --noEmit
+        name: TypeScript check
+      - run: npx eslint .
+        name: ESLint
+      # [P0-FIX] Rust 门禁：Tauri 壳此前无任何 lint 检查。新增 cargo fmt --check + clippy
+      # （eslint 的 ignores 排除 src-tauri/**，需独立门禁；cargo 缓存加速重复构建）
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - run: cd src-tauri && cargo fmt --check
+        name: Rust fmt check
+      - run: cd src-tauri && cargo clippy -- -D warnings
+        name: Rust clippy
+
+  test-frontend:
+    runs-on: ubuntu-latest
+    if: github.event_name != 'schedule'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Cache frontend node_modules
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: ${{ runner.os }}-frontend-${{ hashFiles('package-lock.json') }}
+      - run: npm ci
+      # [修复] 加 --coverage 使 vitest.config.ts 的 thresholds(78/68/56/78) 真正在 CI 生效
+      - run: npx vitest run --coverage --reporter=verbose
+        name: Frontend tests (with coverage gate)
+      - run: npx vite build
+        name: Frontend build
+
+  test-server:
+    runs-on: ubuntu-latest
+    if: github.event_name != 'schedule'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Cache server node_modules
+        uses: actions/cache@v4
+        with:
+          path: server/node_modules
+          key: ${{ runner.os }}-server-${{ hashFiles('server/package-lock.json') }}
+      - run: cd server && npm ci
+      - run: cd server && npm test
+        name: Server tests
+        timeout-minutes: 10
+      - run: cd server && npm run test:coverage:report
+        name: Server coverage baseline (report-only)
+        timeout-minutes: 15
+        continue-on-error: true
+      - run: cd server && npm run test:coverage
+        name: Server coverage gate (core modules)
+        timeout-minutes: 10
+
+  test-matrix:
+    strategy:
+      matrix:
+        # [P1-5] ubuntu 已由 lint/test-frontend/test-server 覆盖，矩阵仅跑跨平台增量（windows/macos）
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    needs: [lint, test-frontend, test-server]
+    if: github.event_name != 'schedule'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm ci
+        name: Install frontend
+      - run: cd server && npm ci
+        name: Install server
+      - run: npx tsc --noEmit
+        name: TypeScript check
+      - run: npx vitest run
+        name: Frontend tests
+      - run: cd server && npm test
+        name: Server tests
+        timeout-minutes: 10
+
+  recall-lab:
+    runs-on: ubuntu-latest
+    needs: [test-server]
+    if: github.event_name != 'schedule'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: cd server && npm ci
+      - run: node e2e/recall-lab/recall.e2e.js
+        name: Recall-lab e2e (18 scenarios)
+        timeout-minutes: 5
+
+  tamper-waf-matrix:
+    runs-on: ubuntu-latest
+    # [修复] 原 job 级 schedule:/workflow_dispatch: 为非法键（只能放顶层 on:），已移至顶层。
+    # 注意不能用 needs:[test-server]：schedule 触发时 test-server 被 if 跳过会连带跳过本 job，
+    # 周度矩阵永远不跑。改为仅由 schedule / 手动 dispatch 触发（与原 schedule-only 语义一致），
+    # 实验性矩阵带 continue-on-error，不阻塞正常 CI 流水线。
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: cd server && npm ci
+      - run: node e2e/tamper-matrix/run.js
+        name: Tamper effect matrix
+        timeout-minutes: 10
+        continue-on-error: true
+      - run: node e2e/waf-lab/run.js
+        name: WAF rule lab
+        timeout-minutes: 10
+        continue-on-error: true
+
+  docker:
+    runs-on: ubuntu-latest
+    needs: [test-frontend, test-server]
+    if: (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master') && github.event_name != 'schedule'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Docker image
+        run: docker build -t sqli-scanner .
+      - name: Smoke test
+        run: |
+          docker run -d --name sqli-test -p 4567:4567 sqli-scanner
+          sleep 8
+          curl -f http://127.0.0.1:4567/api/health || exit 1
+          echo "--- Backend health OK ---"
+          curl -f -o /dev/null -w "Frontend HTTP %{http_code}\n" http://127.0.0.1:4567/ || exit 1
+          echo "--- Frontend reachable OK ---"
+          docker stop sqli-test
+          docker rm sqli-test
+
+  # [P0-FIX] 依赖安全扫描：CI 中缺少 npm audit 步骤，无法拦截传递依赖中的已知漏洞
+  audit:
+    runs-on: ubuntu-latest
+    if: github.event_name != 'schedule'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm audit --omit=dev --audit-level=high
+        name: Frontend npm audit (high+)
+      - run: cd server && npm audit --audit-level=high
+        name: Server npm audit (high+)

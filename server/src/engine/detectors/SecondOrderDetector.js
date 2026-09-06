@@ -1,7 +1,11 @@
+import { nanoid } from 'nanoid';
 import { Detector } from '../Detector.js';
 import { createDetectionResult } from '../models.js';
-import { PAYLOADS, SECOND_ORDER_PROBES, ERROR_SIG, fillPayload } from '../payloads.js';
+import { PAYLOADS, SECOND_ORDER_PROBES, SECOND_ORDER_OOB_PROBES, ERROR_SIG, fillPayload } from '../payloads.js';
+import { oobReceiver } from '../../core/oobReceiver.js';
 import { ErrorCode, AppError } from '../../core/errors.js';
+// P1-11 收敛：表单/标签属性解析与 TargetParser/crawler 共用单一事实源（含正则缓存）
+import { attrValue } from '../crawler.js';
 
 // 二阶注入检测器（Second-order / Stored SQLi）
 // 策略模式与现有 Detector 子类一致：detect(ctx) 返回 createDetectionResult 形状。
@@ -25,7 +29,7 @@ export class SecondOrderDetector extends Detector {
    * @returns {Promise<import('../models.js').DetectionResult>}
    */
   async detect(ctx) {
-    const { httpClient, target, point, dbms, config, triggerUrl } = ctx;
+    const { httpClient, point, dbms, config, triggerUrl } = ctx;
     const result = createDetectionResult(point.id, 'second_order');
 
     // 无触发页 → 无法判定，直接未命中（不发起任何请求）
@@ -37,25 +41,18 @@ export class SecondOrderDetector extends Detector {
       throw new AppError(ErrorCode.SECOND_ORDER_DISABLED, '二阶检测未启用');
     }
 
+    // OOB 触发分支：仅当显式开启 oobTrigger 且 oob 启用时走带外判定（触发页无回显场景）；
+    // 否则走下方报错回显老路径（向后兼容，行为与现状完全一致）。
+    const oobEnabled = !!(config && config.oob && config.oob.enabled);
+    if (so.oobTrigger === true && oobEnabled) {
+      return this._detectOob(ctx, result, so);
+    }
+
     // 1) 基线：只读触发页，记录是否本就含报错特征（不写）
     const baselineBody = await this._trigger(httpClient, ctx, triggerUrl);
     const baselineErr = ERROR_SIG.test(baselineBody);
 
-    // 2) [编排增强] 存储→检索链路验证：先存一个唯一哨兵值，读触发页，断言哨兵被回显。
-    //    这证明"该存储点写入的值确实被触发页读出并拼入响应"——二阶注入成立的前提。
-    //    若哨兵未回显，说明存储点与触发页之间没有检索链路（或触发页并非读取该字段），
-    //    后续存储报错探针的"触发页报错"无法归因于二阶，直接判定未命中，避免误报。
-    const sentinel = `__so_${Math.random().toString(36).slice(2, 10)}__`;
-    await this._store(httpClient, ctx, sentinel);
-    const sentinelBody = await this._trigger(httpClient, ctx, triggerUrl);
-    if (!String(sentinelBody).includes(sentinel)) {
-      result.evidence =
-        `二阶链路验证失败：存储哨兵 ${sentinel} 未在触发页 ${triggerUrl} 回显，` +
-        `存储点→触发页的检索链路不通，跳过该点（避免误报）`;
-      return result; // vulnerable 仍为 false
-    }
-
-    // 3) 存储阶段（真实写）：构造报错探针 → 可选刷新 CSRF → POST 表单点
+    // 2) 存储阶段（真实写）：构造报错探针 → 可选刷新 CSRF → POST 表单点
     const probe = this._buildProbe(ctx, dbms);
     if (so.refreshCsrf) {
       await this._refreshCsrf(httpClient, ctx); // GET actionUrl 重抓 token 覆盖 formValues（best-effort）
@@ -111,6 +108,100 @@ export class SecondOrderDetector extends Detector {
   }
 
   /**
+   * 二阶 OOB 触发判定：当触发页无回显时，存储探针改为嵌入"数据库带外回调"语句（OOB 外带）。
+   * 触发页若执行了该 SQL，会向接收端发起 DNS/HTTP 回连，从而确认二阶注入。
+   * 复用一阶 OOB 的标记生成 + 轮询机制（receiver.waitForToken），收到含该标记的回调即判定命中。
+   * @param {object} ctx 检测上下文（含 config.oob / triggerUrl，可经 ctx.oobReceiver 注入假接收端供测试）
+   * @param {object} result 未命中初始态 DetectionResult
+   * @param {object} so config.secondOrder
+   * @returns {Promise<import('../models.js').DetectionResult>}
+   */
+  async _detectOob(ctx, result, so) {
+    const { httpClient, point, dbms, config, triggerUrl } = ctx;
+    const oobCfg = (config && config.oob) || {};
+    // P2-13: 未显式配置 callbackBase 时按接收端 httpPort 派生，避免回连打到旧端口
+    const httpPort = Number(oobCfg.httpPort);
+    const callbackBase =
+      (typeof oobCfg.callbackBase === 'string' && oobCfg.callbackBase.trim() !== ''
+        ? oobCfg.callbackBase
+        : Number.isFinite(httpPort) && httpPort > 0
+          ? `127.0.0.1:${httpPort}`
+          : '127.0.0.1:8899');
+    const timeoutMs = Number.isFinite(oobCfg.timeoutMs) ? oobCfg.timeoutMs : 5000;
+    // 接收端：测试可经 ctx.oobReceiver 注入假接收端；生产用全局单例（与一阶 OobDetector 一致）
+    const receiver = ctx.oobReceiver || oobReceiver;
+    if (receiver === oobReceiver && !oobReceiver.isStarted()) {
+      throw new AppError(ErrorCode.OOB_DISABLED, 'oob 接收端未启动（二阶 OOB 触发需 oob 启用且接收端就绪）');
+    }
+
+    // 唯一标记：scanId + pointId + 时间戳哈希 + 随机段，避免跨扫描/跨点误判
+    const token = this._buildOobToken(ctx);
+    const callback = `${callbackBase}/oob/${token}`;
+
+    // 候选库：已知 dbms 且有二阶 OOB 探针 → 仅该库；否则遍历所有支持库逐一尝试
+    const candidates = this._oobCandidates(dbms);
+
+    // 存储前可选刷新 CSRF（与报错路径一致，best-effort）
+    if (so.refreshCsrf) {
+      await this._refreshCsrf(httpClient, ctx);
+    }
+
+    const stored = [];
+    for (const cdb of candidates) {
+      for (const tpl of SECOND_ORDER_OOB_PROBES[cdb] || []) {
+        // OOB 探针不做 tamper（会破坏回调地址导致回连失败，与一阶 OobDetector 一致）
+        const probe = fillPayload(tpl, { orig: point.originalValue || '1' }).replaceAll('{CALLBACK}', callback);
+        await this._store(httpClient, ctx, probe);
+        stored.push(probe);
+        // 触发页读取出最新存储值并执行（若命中则向接收端回连）
+        await this._trigger(httpClient, ctx, triggerUrl);
+      }
+    }
+
+    // 轮询等待带外回连（迟到/重复回调亦判定命中）
+    const hit = await receiver.waitForToken(token, timeoutMs);
+    if (hit) {
+      result.vulnerable = true;
+      result.dbms = dbms || null;
+      result.evidence =
+        `二阶注入确认（OOB 外带）：存储探针后被触发页 ${triggerUrl} 读出并执行，数据库经带外通道回连 ` +
+        `接收端 ${callbackBase}（token=${token}），确认存储点 ${point.param}@${point.actionUrl} 存在二阶注入`;
+      result.payloads = stored;
+      point.confirmed = true;
+      point.technique = 'second_order';
+      point.dbms = dbms || point.dbms;
+    }
+    return result;
+  }
+
+  /**
+   * 生成二阶 OOB 唯一标记：scanId + pointId + 时间戳哈希 + 随机段，避免跨扫描/跨点误判。
+   * 标记仅含 [A-Za-z0-9_-]（URL 路径安全，便于测试与回连匹配）。
+   * @param {object} ctx 检测上下文（含 scanId / point.id）
+   * @returns {string} 唯一标记
+   */
+  _buildOobToken(ctx) {
+    const scanId = String(ctx.scanId || 'noscan').replace(/[^A-Za-z0-9_-]/g, '');
+    const pointId = String((ctx.point && ctx.point.id) || 'nopoint').replace(/[^A-Za-z0-9_-]/g, '');
+    const ts = Date.now().toString(36); // 时间戳哈希（36 进制）
+    return `${scanId}_${pointId}_${ts}_${nanoid(10)}`;
+  }
+
+  /**
+   * 二阶 OOB 候选库：已知 dbms 且有探针 → 仅该库；否则返回全部含探针的库（顺序即优先级）。
+   * @param {string} dbms 已知数据库类型（可空）
+   * @returns {string[]}
+   */
+  _oobCandidates(dbms) {
+    if (dbms && Array.isArray(SECOND_ORDER_OOB_PROBES[dbms]) && SECOND_ORDER_OOB_PROBES[dbms].length) {
+      return [dbms];
+    }
+    return Object.keys(SECOND_ORDER_OOB_PROBES).filter(
+      (k) => Array.isArray(SECOND_ORDER_OOB_PROBES[k]) && SECOND_ORDER_OOB_PROBES[k].length > 0
+    );
+  }
+
+  /**
    * 存储阶段：构造表单 POST 请求（含 CSRF 等全部字段）并经统一 HttpClient 发送（真实写）。
    * @param {object} httpClient 统一 HttpClient
    * @param {object} ctx 检测上下文（含 target / point）
@@ -123,18 +214,25 @@ export class SecondOrderDetector extends Detector {
   }
 
   /**
-   * 触发阶段：GET 触发页，返回响应体字符串（经统一 HttpClient）。
+   * 触发阶段：读取触发页，返回响应体字符串（经统一 HttpClient）。
+   * [sqlmap 对标] --second-url：当 config.secondOrder.secondUrl 非空时，读取请求发往
+   * secondUrl（而非传入的 url），使用 secondMethod / secondData 构造请求。
+   * secondUrl 为空时沿用传入 url（保持现有行为）。
    * @param {object} httpClient 统一 HttpClient
-   * @param {object} ctx 检测上下文（含 target）
-   * @param {string} url 触发页 URL
+   * @param {object} ctx 检测上下文（含 target / config）
+   * @param {string} url 触发页 URL（secondUrl 为空时的回退）
    * @returns {Promise<string>}
    */
   async _trigger(httpClient, ctx, url) {
+    const so = (ctx.config && ctx.config.secondOrder) || {};
+    // --second-url：读写分离场景，读取发往独立的 secondUrl
+    const readUrl = so.secondUrl || url;
+    const method = so.secondMethod || 'GET';
     const req = {
-      method: 'GET',
-      url,
+      method,
+      url: readUrl,
       params: {},
-      data: {},
+      data: so.secondData != null ? so.secondData : {},
       headers: { ...(ctx.target.headerParams || {}) },
     };
     const res = await this.send(httpClient, ctx, req);
@@ -196,11 +294,9 @@ export class SecondOrderDetector extends Detector {
   }
 
   // 从标签字符串中取某属性值（兼容双引号/单引号/无引号）
+  // P1-11 收敛：委托 crawler.attrValue（与 TargetParser 共用单一事实源），消除逐字拷贝。
   _attr(tag, name) {
-    const re = new RegExp(`${name}\\s*=\\s*("([^"]*)"|'([^']*)'|([^\\s>]*))`, 'i');
-    const m = tag.match(re);
-    if (!m) return '';
-    return m[2] !== undefined ? m[2] : m[3] !== undefined ? m[3] : m[4] !== undefined ? m[4] : '';
+    return attrValue(tag, name);
   }
 }
 

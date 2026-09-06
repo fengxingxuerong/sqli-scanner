@@ -1,8 +1,7 @@
 // WAF-v2 推荐映射护栏测试（T-WAFv2-2）：扩库后 recommend() 返回合法插件 + 过滤无映射 vendor
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { recommend } from '../src/core/waf/wafRecommend.js';
-import { WAF_RECOMMEND_MAP } from '../src/core/waf/wafRecommend.js';
+import { recommend, WAF_RECOMMEND_MAP, WAF_VENDORS } from '../src/core/waf/wafRecommend.js';
 import { tamperRegistry } from '../src/core/tamper/index.js';
 
 const REGISTERED = new Set(tamperRegistry.list().map((t) => t.name));
@@ -23,19 +22,24 @@ test('新增 vendor 推荐：返回 {vendor,plugins}[] 且 plugins 全合法', (
   for (const p of sug[0].plugins) assert.ok(REGISTERED.has(p), `未注册插件 ${p}`);
 });
 
-test('无映射 vendor 被过滤（仅保留非空）', () => {
+test('无映射 vendor 走 _default fallback（仍返回非空推荐）', () => {
   const sug = recommend([
     { vendor: 'UnknownVendor', confidence: 0.9, evidence: 'x' },
     { vendor: 'AWS_WAF', confidence: 0.9, evidence: 'x' },
   ]);
-  assert.equal(sug.length, 1);
-  assert.equal(sug[0].vendor, 'AWS_WAF');
+  // _default fallback 使 UnknownVendor 也返回非空推荐
+  assert.equal(sug.length, 2);
+  assert.ok(sug.some((s) => s.vendor === 'AWS_WAF'));
+  assert.ok(sug.some((s) => s.vendor === 'UnknownVendor'));
+  for (const s of sug) {
+    assert.ok(s.plugins.length > 0);
+  }
 });
 
 test('遍历全部 vendor：recommend 均返回非空且合法', () => {
-  const input = Object.keys(WAF_RECOMMEND_MAP).map((v) => ({ vendor: v, confidence: 0.9, evidence: 'x' }));
+  const input = WAF_VENDORS.map((v) => ({ vendor: v, confidence: 0.9, evidence: 'x' }));
   const sug = recommend(input);
-  assert.equal(sug.length, Object.keys(WAF_RECOMMEND_MAP).length, '全部 vendor 都应被推荐');
+  assert.equal(sug.length, WAF_VENDORS.length, '全部 vendor 都应被推荐');
   for (const s of sug) {
     assert.ok(s.plugins.length > 0);
     for (const p of s.plugins) assert.ok(REGISTERED.has(p));

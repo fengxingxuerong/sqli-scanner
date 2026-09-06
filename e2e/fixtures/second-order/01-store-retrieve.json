@@ -1,0 +1,24 @@
+{
+  "name": "second_order_store",
+  "description": "二阶注入：payload 经 POST 表单存储到 /store，在 GET /profile 拼入 SQL 执行产生报错",
+  "target": {
+    "type": "second-order",
+    "url": "http://127.0.0.1:8125/store"
+  },
+  "config": {
+    "techniques": ["second_order"],
+    "level": 5,
+    "crawlForms": true,
+    "secondOrder": {
+      "enabled": true,
+      "triggerUrls": ["http://127.0.0.1:8125/profile"]
+    }
+  },
+  "expected": {
+    "vulnerable": true,
+    "techniques": { "must": ["second_order"], "nice": [] },
+    "requestCount": { "max": 200 }
+  },
+  "skip": false,
+  "skipReason": ""
+}

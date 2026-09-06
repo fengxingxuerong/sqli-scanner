@@ -1,0 +1,11 @@
+{
+  "name": "str",
+  "description": "单引号字符串上下文（name='foo'，需 ' 闭合）",
+  "target": { "type": "mock", "endpoint": "str", "param": "name", "value": "foo" },
+  "config": { "techniques": ["union", "error", "boolean"] },
+  "expected": {
+    "vulnerable": true,
+    "techniques": { "must": ["boolean", "error"], "nice": ["union"] },
+    "requestCount": { "max": 80 }
+  }
+}

@@ -1,2 +1,0 @@
-0000000000000000000000000000000000000000 d4232a3d60898e191bbfce638a2e706905b5e1d2 feixue-rong <feixue.rong@local> 1786246086 +0800	commit (initial): baseline: sqli-scanner 完整工程基线（Web 全栈 + Tauri 桌面壳）
-d4232a3d60898e191bbfce638a2e706905b5e1d2 b902c018408d7b5d5bd8b2b1e2885109e68de30b feixue-rong <feixue.rong@local> 1786250180 +0800	commit: fix: 扫描级 requestDelayMs/keepAlive 经 withScanOverrides 包装注入，不再污染全局 httpClient 单例

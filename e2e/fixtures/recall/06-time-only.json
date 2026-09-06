@@ -1,0 +1,11 @@
+{
+  "name": "time_only",
+  "description": "仅时间通道（内容恒定，sleep 生效）",
+  "target": { "type": "mock", "endpoint": "time", "param": "tid", "value": "1" },
+  "config": { "techniques": ["time"], "timeBlindSleepSec": 1, "timeThresholdMs": 800, "timeBlindSamples": 3 },
+  "expected": {
+    "vulnerable": true,
+    "techniques": { "must": ["time"], "nice": [] },
+    "requestCount": { "max": 60 }
+  }
+}

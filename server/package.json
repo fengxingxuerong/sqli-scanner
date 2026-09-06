@@ -4,20 +4,33 @@
   "description": "SQL 注入检测引擎（Node/Express）",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
   "main": "index.js",
+  "bin": {
+    "sqli-scan": "bin/cli.js"
+  },
   "scripts": {
     "start": "node index.js",
     "dev": "node --watch index.js",
-    "cli": "node cli.js",
-    "test": "node --test"
+    "cli": "node bin/cli.js",
+    "test": "node --env-file=.env.test --import=./tests/_setup.mjs --test --test-concurrency=3",
+    "test:coverage": "node --env-file=.env.test --import=./tests/_setup.mjs --experimental-test-coverage --test --test-coverage-include=src/**/*.js --test-coverage-lines=80 --test-coverage-branches=70 --test-coverage-functions=65 --test-concurrency=3",
+    "test:coverage:core": "node --env-file=.env.test --import=./tests/_setup.mjs --experimental-test-coverage --test --test-coverage-include=src/core/httpClient.js --test-coverage-include=src/engine/Detector.js --test-coverage-include=src/engine/ScanManager.js --test-coverage-lines=80 --test-coverage-branches=70 --test-coverage-functions=75 --test-concurrency=3",
+    "test:coverage:report": "node --env-file=.env.test --import=./tests/_setup.mjs --experimental-test-coverage --test --test-coverage-include=src/**/*.js --test-concurrency=3"
   },
   "dependencies": {
-    "axios": "^1.7.2",
+    "@electric-sql/pglite": "^0.5.5",
+    "axios": "^1.18.1",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
+    "mysql2": "^3.23.3",
     "nanoid": "^5.0.7",
     "socks-proxy-agent": "^8.0.2",
+    "sql.js": "^1.14.1",
+    "undici": "^7.29.0",
     "winston": "^3.13.0"
   }
 }

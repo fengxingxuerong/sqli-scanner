@@ -3,6 +3,9 @@
 export const space2plus = {
   name: 'space2plus',
   description: '将空格替换为 +（部分 WAF/参数解析会还原为空格）',
+  doctests: [
+    { input: 'a AND b', output: 'a+AND+b' },
+  ],
   transform(payload) {
     return payload.replace(/ /g, '+');
   },

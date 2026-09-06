@@ -33,13 +33,17 @@ function scrambleMarkerCase(s) {
   );
 }
 
-// 模拟易受 UNION 注入的目标：ORDER BY 报 ERR；其余把请求原样回显，
-// 但其中 SQLISCANNER 标记的大小写被打乱（模拟 tamper 副作用）。
+// 模拟易受 UNION 注入的目标：AND 1=2 恒假（空结果）、ORDER BY 超列报 ERR；
+// UNION SELECT 标记回显于响应，但其中 SQLISCANNER 标记的大小写被打乱（模拟 tamper 副作用）。
 function makeCaseScrambledUnionMock() {
   return {
     async request(opts) {
       const q = extractInjected(opts);
-      if (/ORDER BY/i.test(q)) return { data: 'ERR', status: 200 };
+      if (/AND 1=2/.test(q) || /'1'='2/.test(q)) return { data: 'NO_RESULTS', status: 200 };
+      if (/ORDER BY \d+/.test(q)) {
+        const n = Number(q.match(/ORDER BY (\d+)/)[1]);
+        return n > 3 ? { data: 'ERR', status: 200 } : { data: 'normal', status: 200 };
+      }
       return { data: `echo:${scrambleMarkerCase(q)}`, status: 200 };
     },
   };
@@ -50,7 +54,11 @@ function makePlainUnionMock() {
   return {
     async request(opts) {
       const q = extractInjected(opts);
-      if (/ORDER BY/i.test(q)) return { data: 'ERR', status: 200 };
+      if (/AND 1=2/.test(q) || /'1'='2/.test(q)) return { data: 'NO_RESULTS', status: 200 };
+      if (/ORDER BY \d+/.test(q)) {
+        const n = Number(q.match(/ORDER BY (\d+)/)[1]);
+        return n > 3 ? { data: 'ERR', status: 200 } : { data: 'normal', status: 200 };
+      }
       return { data: `echo:${q}`, status: 200 };
     },
   };

@@ -1,0 +1,28 @@
+# [P0-FIX] 删除废弃的顶层 version 字段：Compose v2 已忽略并在部分版本产生 warning，
+# 无 version 字段时 Compose 仍按最高 schema 解析。
+services:
+  sqli-scanner:
+    build: .
+    # [P0-FIX] 仅绑定 127.0.0.1：避免将扫描引擎无鉴权暴露到所有网络接口
+    # 生产部署时改为 "4567:4567" 并务必设置 SCAN_API_TOKEN + SSRF_STRICT=1
+    ports:
+      - "127.0.0.1:4567:4567"
+    environment:
+      - NODE_ENV=production
+      - HOST=127.0.0.1
+      - PORT=4567
+      - EXPLOIT_ENABLED=0
+      - ALLOWED_ORIGINS=http://localhost:4567,http://127.0.0.1:4567
+      # [P0-FIX] 必须设置 SCAN_API_TOKEN 才能启用鉴权；留空 = 无鉴权（仅本地开发）
+      - SCAN_API_TOKEN=
+    volumes:
+      - sqli-sessions:/app/server/sessions
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:4567/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+volumes:
+  sqli-sessions:

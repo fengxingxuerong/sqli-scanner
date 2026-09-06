@@ -38,45 +38,38 @@ test('发现 POST body 注入点', async () => {
   assert.ok(points.every((p) => p.location === 'body'));
 });
 
-test('发现 Cookie 注入点（level>=2）', async () => {
-  // 默认 level=1 不测 Cookie；需显式 level>=2 才扩展 Cookie 注入点
+test('发现 Cookie 注入点', async () => {
   const target = createTarget({
     url: 'http://example.com',
-    config: { level: 2 },
     cookieParams: { session: 'abc', track: '1' },
+    config: { level: 2 },
   });
   const points = await parser.discover(target);
   const params = points.map((p) => p.param).sort();
   assert.deepEqual(params, ['session', 'track']);
   assert.ok(points.every((p) => p.location === 'cookie'));
-  // level=2 不应自动注入 UA/Referer 头
-  assert.ok(!points.some((p) => /^user-agent$/i.test(p.param)));
 });
 
-test('发现 Header 注入点（level>=3）', async () => {
+test('发现 Header 注入点', async () => {
   const target = createTarget({
     url: 'http://example.com',
-    config: { level: 3 },
     headerParams: { 'X-Forwarded-For': '1.2.3.4' },
+    config: { level: 4 },
   });
   const points = await parser.discover(target);
-  const xff = points.find((p) => p.param === 'X-Forwarded-For');
-  assert.ok(xff, '显式 Header 注入点被发现');
-  assert.equal(xff.location, 'header');
-  // level>=3 自动注入常见请求头 User-Agent / Referer（未被显式列举时）
-  const params = points.map((p) => p.param.toLowerCase());
-  assert.ok(params.includes('user-agent'), '自动注入 User-Agent 头');
-  assert.ok(params.includes('referer'), '自动注入 Referer 头');
+  assert.equal(points.length, 1);
+  assert.equal(points[0].location, 'header');
+  assert.equal(points[0].param, 'X-Forwarded-For');
 });
 
-test('多位置注入点可同时发现（level>=3）', async () => {
+test('多位置注入点可同时发现', async () => {
   const target = createTarget({
     url: 'http://example.com/search?q=hi',
     method: 'POST',
-    config: { level: 3 },
     bodyParams: { category: 'book' },
     cookieParams: { cid: '9' },
     headerParams: { Referer: 'x' },
+    config: { level: 3 },
   });
   const points = await parser.discover(target);
   const byLoc = {};
@@ -84,10 +77,7 @@ test('多位置注入点可同时发现（level>=3）', async () => {
   assert.equal(byLoc.url, 1);
   assert.equal(byLoc.body, 1);
   assert.equal(byLoc.cookie, 1);
-  // header：显式 Referer + 自动 User-Agent（Referer 已显式提供不再叠加）
-  assert.ok(byLoc.header >= 1, 'header 注入点至少 1 个（显式 Referer + 自动 User-Agent）');
-  assert.ok(points.some((p) => p.param === 'Referer'), '显式 Referer 命中');
-  assert.ok(points.some((p) => p.param === 'User-Agent'), '自动 User-Agent 命中');
+  assert.equal(byLoc.header, 1);
 });
 
 test('非法 URL 不抛出，仅跳过 URL 参数', async () => {
@@ -108,9 +98,16 @@ test('createTarget 校验：缺少 url 抛 INVALID_TARGET', () => {
 
 test('createTarget 校验：非法 method 抛 UNSUPPORTED_METHOD', () => {
   assert.throws(
-    () => createTarget({ url: 'http://x', method: 'DELETE' }),
+    () => createTarget({ url: 'http://x', method: 'TRACE' }),
     (e) => e.code === ErrorCode.UNSUPPORTED_METHOD
   );
+});
+
+test('createTarget 支持 PUT/PATCH/DELETE 方法（P2-A5）', () => {
+  for (const m of ['PUT', 'PATCH', 'DELETE']) {
+    const t = createTarget({ url: 'http://x', method: m });
+    assert.equal(t.method, m);
+  }
 });
 
 test('createTarget 默认 method 为 GET 且合并 config', () => {
@@ -169,6 +166,17 @@ test('emptyExtractedData 结构', () => {
     tables: {},
     columns: {},
     rows: {},
+    hostname: undefined,
+    isDba: undefined,
+    schemas: {},
+    userPrivs: undefined,
+    roles: undefined,
+    currentDb: undefined,
+    currentUser: undefined,
+    users: undefined,
+    passwords: undefined,
+    counts: {},
+    search: undefined,
   });
 });
 

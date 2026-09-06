@@ -16,7 +16,10 @@
 import { fileURLToPath } from 'url';
 import path from 'path';
 import fs from 'fs';
-import { createLabApp } from './lab-server.js';
+// [FIX] 使用 v2 靶场（3-profile 规则库，与报告标题 "WAF-v2 e2e" 一致）：
+// 原实现误引 v1 lab-server.js 的宽签名集（WAF_SIGNATURES），tampered 形态全被拦截，
+// 造成 tamper 开/关双 0 检出、A/B 判据恒失败的遗留问题。
+import { createLabApp } from './lab-server-v2.js';
 import { computeMetrics } from './metrics.js';
 import { ScanManager } from '../../server/src/engine/ScanManager.js';
 
@@ -24,8 +27,15 @@ const LAB_PORT = Number(process.env.WAF_LAB_PORT) || 8099;
 const TARGET = `http://localhost:${LAB_PORT}/vuln?id=1`;
 const WAIT_TIMEOUT_MS = 180000;
 
-// configB 实际使用的 tamper 组合（见文件头注释：space2comment 是绕过本实验室的关键）。
-const CONFIG_B_TAMPER = ['space2comment', 'charencode'];
+// configB 实际使用的 tamper 组合：
+//   space2comment —— 绕过空格锚定规则（union\s+select 等）；注意其引号状态机会把
+//     闭合引号（如 `1'`）后的整段视为字符串字面量而跳过空格替换，不能单独依赖；
+//   commentbeforeparentheses —— 在 `(` 前插 `/**/`：绕过 extractvalue/updatexml
+//     等 `\s*\(` 锚定的报错函数规则（ERROR_SIG 只匹配函数名关键词，检测不受影响）；
+//   charencode —— 对空格/符号做 URL 编码：把 `-- -` 变 `--%20-` 绕过 `--\s*$`
+//     行尾注释规则（randomcase 因会打乱回显标记 `SQLISCANNER0` 大小写导致 union
+//     检测失效，故不纳入）。
+const CONFIG_B_TAMPER = ['space2comment', 'commentbeforeparentheses', 'charencode'];
 
 function buildConfig(tamperOn) {
   const tamper = tamperOn
@@ -33,6 +43,7 @@ function buildConfig(tamperOn) {
     : { enabled: false, plugins: [], intensity: 'medium' };
   return {
     techniques: ['union', 'error', 'boolean'],
+    dbms: 'MySQL', // 已知库时固定方言：报错模板集确定（extractvalue），不被 tampered 探测的指纹噪声带偏
     enableExtract: false, // 关掉拖库，聚焦"是否检出"，更快更确定
     maxColumnsGuess: 3, // 缩小 ORDER BY 列数探测，加速
     ratePerSec: 20,

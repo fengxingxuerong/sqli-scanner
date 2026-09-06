@@ -1,4 +1,5 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   Box,
   Typography,
@@ -15,16 +16,12 @@ import {
   Stack,
   CircularProgress,
   Divider,
-  TextField,
-  InputAdornment,
 } from '@mui/material';
 import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward';
 import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward';
 import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
-import SearchIcon from '@mui/icons-material/Search';
-import ClearIcon from '@mui/icons-material/Clear';
 import type { TamperConfig, TamperInfo, WafSuggestion } from '../shared/types';
-import { TAMPER_INTENSITY_PRESETS, TAMPER_INTENSITY_LABEL } from '../shared/constants';
+import { TAMPER_INTENSITY_PRESETS } from '../shared/constants';
 import { apiClient } from '../shared/apiClient';
 
 interface Props {
@@ -39,24 +36,10 @@ const INTENSITIES: Array<'low' | 'medium' | 'high'> = ['low', 'medium', 'high'];
 // 清单来自 GET /api/tampers（TamperRegistry.list() 单一事实源，非硬编码）。
 // 默认全关、全不选；勾选/强度/顺序均写入 value.plugins（顺序即链式顺序）。
 export default function WafTamperPanel({ value, onChange, suggestion }: Props) {
+  const { t } = useTranslation();
   const [infos, setInfos] = useState<TamperInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
-  const [search, setSearch] = useState('');
-  const searchRef = useRef<HTMLInputElement>(null);
-  // 快捷键：按 / 聚焦搜索框
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const el = e.target as HTMLElement | null;
-      const typing = !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable);
-      if (e.key === '/' && !typing) {
-        e.preventDefault();
-        searchRef.current?.focus();
-      }
-    };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, []);
 
   // 拉取 tamper 清单（单一事实源）
   useEffect(() => {
@@ -71,7 +54,7 @@ export default function WafTamperPanel({ value, onChange, suggestion }: Props) {
         }
       })
       .catch((e) => {
-        if (alive) setLoadError(e?.message || '加载 tamper 清单失败');
+        if (alive) setLoadError(e?.message || t('wafTamper.loadFailed'));
       })
       .finally(() => {
         if (alive) setLoading(false);
@@ -79,7 +62,7 @@ export default function WafTamperPanel({ value, onChange, suggestion }: Props) {
     return () => {
       alive = false;
     };
-  }, []);
+  }, [t]);
 
   const plugins = value.plugins || [];
   const enabled = !!value.enabled;
@@ -118,27 +101,18 @@ export default function WafTamperPanel({ value, onChange, suggestion }: Props) {
 
   const hasSuggestion = Array.isArray(suggestion) && suggestion.length > 0;
 
-  // 清单搜索：按名称 + 说明过滤（忽略大小写与首尾空格）
-  const q = search.trim().toLowerCase();
-  const filtered = q
-    ? infos.filter(
-        (i) =>
-          i.name.toLowerCase().includes(q) || (i.description || '').toLowerCase().includes(q),
-      )
-    : infos;
-
   return (
     <Box className="space-y-2">
       {/* 总开关 */}
       <FormControlLabel
         control={<Switch checked={enabled} onChange={(e) => update({ enabled: e.target.checked })} />}
-        label="启用 tamper 变换（改变请求形态，请按需开启；开启后报告会标注）"
+        label={t('wafTamper.enableLabel')}
       />
 
       {/* 强度三档 */}
       <Box>
         <Typography variant="caption" color="text.secondary">
-          强度预设（选择即按预设填充下方组合，可再微调）
+          {t('wafTamper.intensityTitle')}
         </Typography>
         <RadioGroup
           row
@@ -150,7 +124,7 @@ export default function WafTamperPanel({ value, onChange, suggestion }: Props) {
               key={it}
               value={it}
               control={<Radio size="small" />}
-              label={TAMPER_INTENSITY_LABEL[it]}
+              label={t(`wafTamper.intensity.${it}`)}
             />
           ))}
         </RadioGroup>
@@ -159,11 +133,11 @@ export default function WafTamperPanel({ value, onChange, suggestion }: Props) {
       {/* 已选有序组合（顺序 = 链式顺序）+ 上移/下移/删除 */}
       <Box>
         <Typography variant="caption" color="text.secondary">
-          已选组合（顺序 = 链式顺序，自上而下执行）
+          {t('wafTamper.selectedTitle')}
         </Typography>
         {plugins.length === 0 ? (
           <Typography variant="body2" color="text.secondary">
-            未选择任何 tamper
+            {t('wafTamper.noSelection')}
           </Typography>
         ) : (
           <Stack spacing={0.5} className="mt-1">
@@ -173,7 +147,7 @@ export default function WafTamperPanel({ value, onChange, suggestion }: Props) {
                   size="small"
                   disabled={idx === 0}
                   onClick={() => move(idx, -1)}
-                  aria-label="上移"
+                  aria-label={t('wafTamper.moveUp')}
                 >
                   <ArrowUpwardIcon fontSize="small" />
                 </IconButton>
@@ -181,7 +155,7 @@ export default function WafTamperPanel({ value, onChange, suggestion }: Props) {
                   size="small"
                   disabled={idx === plugins.length - 1}
                   onClick={() => move(idx, 1)}
-                  aria-label="下移"
+                  aria-label={t('wafTamper.moveDown')}
                 >
                   <ArrowDownwardIcon fontSize="small" />
                 </IconButton>
@@ -200,7 +174,7 @@ export default function WafTamperPanel({ value, onChange, suggestion }: Props) {
       {/* 总开关关但已选：提示需启用 */}
       {!enabled && plugins.length > 0 && (
         <Alert severity="warning" variant="outlined">
-          已选择 tamper 但未启用总开关；启用后才会对出站 payload 生效。
+          {t('wafTamper.notEnabledWarning')}
         </Alert>
       )}
 
@@ -208,49 +182,7 @@ export default function WafTamperPanel({ value, onChange, suggestion }: Props) {
 
       {/* 多选清单（来自 /api/tampers，非硬编码） */}
       <Typography variant="caption" color="text.secondary">
-        tamper 清单
-      </Typography>
-      {!loading && !loadError && (
-        <TextField
-          size="small"
-          fullWidth
-          variant="outlined"
-        placeholder="搜索名称 / 说明"
-        value={search}
-        onChange={(e) => setSearch(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === 'Escape') setSearch('');
-        }}
-        className="mt-1"
-        inputRef={searchRef}
-        InputProps={{
-            startAdornment: (
-              <InputAdornment position="start">
-                <SearchIcon fontSize="small" />
-              </InputAdornment>
-            ),
-            endAdornment: search ? (
-              <InputAdornment position="end">
-                <IconButton
-                  aria-label="清除搜索"
-                  size="small"
-                  edge="end"
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => setSearch('')}
-                >
-                  <ClearIcon fontSize="small" />
-                </IconButton>
-              </InputAdornment>
-            ) : undefined,
-          }}
-        />
-      )}
-      <Typography variant="caption" color="text.secondary">
-        {loading
-          ? '加载中…'
-          : q
-            ? `命中 ${filtered.length} / 共 ${infos.length} 项（已过滤）`
-            : `${infos.length} 项，来自后端 TamperRegistry`}
+        {t('wafTamper.listLabel')}（{loading ? t('wafTamper.loading') : t('wafTamper.listCount', { count: infos.length })}）
       </Typography>
       {loading && <CircularProgress size={18} />}
       {loadError && (
@@ -259,9 +191,9 @@ export default function WafTamperPanel({ value, onChange, suggestion }: Props) {
         </Alert>
       )}
       {!loading && !loadError && (
-        <FormControl component="fieldset" data-testid="tamper-list" className="mt-1" sx={{ maxHeight: 240, overflow: 'auto', width: '100%' }}>
+        <FormControl component="fieldset" className="mt-1" sx={{ maxHeight: 240, overflow: 'auto', width: '100%' }}>
           <FormGroup>
-            {filtered.map((info) => (
+            {infos.map((info) => (
               <FormControlLabel
                 key={info.name}
                 control={
@@ -286,7 +218,7 @@ export default function WafTamperPanel({ value, onChange, suggestion }: Props) {
       {hasSuggestion && (
         <Box className="mt-2">
           <Typography variant="caption" color="text.secondary">
-            WAF 识别推荐组合（仅推荐，点击「一键应用」只写入插件，需手动开启总开关）
+            {t('wafTamper.suggestionTitle')}
           </Typography>
           <Stack spacing={1} className="mt-1">
             {suggestion!.map((s) => (
@@ -299,13 +231,13 @@ export default function WafTamperPanel({ value, onChange, suggestion }: Props) {
                     color="primary"
                     size="small"
                     onClick={() => applySuggestion(s)}
-                    aria-label={`应用 ${s.vendor} 推荐`}
+                    aria-label={t('wafTamper.applyFor', { vendor: s.vendor })}
                   >
                     <AutoFixHighIcon fontSize="small" />
                   </IconButton>
                 }
               >
-                <b>{s.vendor}</b>：{s.plugins.join(' + ')}
+                <b>{s.vendor}</b>{t('wafTamper.suggestionColon')}{s.plugins.join(' + ')}
               </Alert>
             ))}
           </Stack>

@@ -3,6 +3,10 @@
 export const versionedkeywords = {
   name: 'versionedkeywords',
   description: '将 SQL 关键字用 /*!...*/ 包裹（MySQL 版本条件注释，仅 MySQL 解析内联）',
+  doctests: [
+    { input: 'UNION SELECT', output: '/*! UNION */ /*! SELECT */' },
+  ],
+  dbms: ['MySQL'], // [P1-FIX] 方言限定：异构库下无效，运行时告警
   transform(payload) {
     return payload.replace(
       /\b(UNION|SELECT|FROM|WHERE|AND|OR|ORDER BY|HAVING|LIMIT|INSERT|UPDATE|DELETE|NOT|NULL|LIKE|IN|BETWEEN|GROUP BY|ASC|DESC)\b/gi,

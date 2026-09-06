@@ -1,0 +1,11 @@
+{
+  "name": "orderby",
+  "description": "ORDER BY 位置注入（逗号型子句 payload，level=2）",
+  "target": { "type": "mock", "endpoint": "orderby", "param": "sort", "value": "id" },
+  "config": { "techniques": ["boolean", "time"], "level": 2, "timeBlindSleepSec": 1, "timeThresholdMs": 800, "timeBlindSamples": 3 },
+  "expected": {
+    "vulnerable": true,
+    "techniques": { "must": ["boolean"], "nice": ["time"] },
+    "requestCount": { "max": 120 }
+  }
+}
