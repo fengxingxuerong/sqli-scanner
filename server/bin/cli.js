@@ -76,6 +76,7 @@ function parseArgs(argv) {
     osCmd: null, sqlShell: null, fileRead: null, fileWrite: null, fileDest: null,
     // —— 强制 DBMS / 二阶触发页 / 授权声明 ——
     dbms: null, secondOrderUrl: null, authorized: false,
+    dumpAll: false, identifyWaf: false, commonTables: null, commonColumns: null,
     // 内部：从请求文件解析出的 header 对象（buildAuth 直接使用）
     headerObj: null,
   };
@@ -128,6 +129,14 @@ function parseArgs(argv) {
     else if (a === '--test-path') args.testPath = true;
     else if (a === '--use-registry') args.useRegistry = true;
     else if (a === '--dump') args.dump = true;
+    // [对标 sqlmap --dump-all] 全库拖库（枚举所有库 → 逐库逐表拖）
+    else if (a === '--dump-all') args.dumpAll = true;
+    // [对标 sqlmap --identify-waf] 主动识别 WAF 厂商并给出推荐 tamper 链（不触发注入检测）
+    else if (a === '--identify-waf') args.identifyWaf = true;
+    // [对标 sqlmap --common-tables / --common-columns] 字典爆破表名/列名
+    //   （information_schema 被 WAF 拦 / 权限不足 / 非 MySQL 时的唯一出路）
+    else if (a === '--common-tables') args.commonTables = '1';
+    else if (a === '--common-columns') args.commonColumns = '1';
     else if (a === '--tamper') args.tamper = next();
     else if (a === '--proxy') args.proxy = next();
     else if (a === '--scope') args.scope = next();
@@ -248,6 +257,11 @@ function printHelp() {
                              （默认关闭：保持现有行为。服务端按 path 段取值拼 SQL 的场景必须开启才能检出）
   --use-registry             启用声明式 payload 注册表（检测器改用 PAYLOAD_REGISTRY 筛选，受 level/risk/test-filter/test-skip 控制）
   --dump                     启用数据提取（拖库，默认关闭对标 sqlmap 显式 opt-in）
+  --dump-all                 全库拖库（对标 sqlmap --dump-all）：枚举所有库后逐库逐表拖，
+                             忽略 -D/-T；默认排除系统库（--no-exclude-sysdbs 关闭）
+  --common-tables            字典爆破表名（对标 sqlmap --common-tables）：
+                             information_schema 被 WAF 拦 / 权限不足 / 非 MySQL 时的枚举出路
+  --common-columns           字典爆破列名（对标 sqlmap --common-columns）：配合 -D/-T 使用
   --dbs                      枚举数据库（对标 sqlmap --dbs，自动排除系统库，--no-exclude-sysdbs 关闭）
   --tables -D <db>           枚举指定库的表（对标 sqlmap --tables -D）
   --columns -D <db> -T <t>  枚举指定表列（对标 sqlmap --columns -D -T）
@@ -274,6 +288,8 @@ function printHelp() {
   -T, --table <tablename>   表（枚举目标）
   -C, --columns-list <c1,c2>  列子集（配合 --dump -T）
   --tamper <name,name>       tamper 插件链（逗号分隔，对标 sqlmap --tamper）；传 .js 文件路径可加载自定义插件
+  --identify-waf             仅识别 WAF 厂商并给出推荐 tamper 链，不发起注入检测
+                             （对标 sqlmap --identify-waf；用于扫描前先摸清对面是什么 WAF）
   --smart                    智能启发式（别名，等价 prefilter: true，跳过非注入参数）
   --proxy <url>              代理（http://host:port 或 socks5://host:port）
   --scope <cidr/域名,...>    授权范围硬约束（[P0-SEC] 如 10.0.0.0/24,target.example.com）：
@@ -822,7 +838,8 @@ function buildConfig(args) {
 
 // 是否处于枚举模式（任一枚举开关开启）
 function isEnumMode(args) {
-  return !!(args.dbs || args.tables || args.columns || args.currentDb || args.currentUser || args.count || args.users || args.passwords || args.hostname || args.isDba || args.schema || args.privileges || args.roles || !!args.search);
+  return !!(args.dbs || args.tables || args.columns || args.currentDb || args.currentUser || args.count || args.users || args.passwords || args.hostname || args.isDba || args.schema || args.privileges || args.roles || !!args.search
+    || args.dumpAll || args.commonTables || args.commonColumns);
 }
 
 // 构造 extractScope（对标 sqlmap 枚举模式）：
@@ -843,6 +860,12 @@ function isEnumMode(args) {
 // 无枚举开关返回 undefined（--dump 走既有全量拖库分支）
 function buildExtractScope(args) {
   const ex = scope => ({ excludeSysdbs: args.excludeSysdbs !== false, ...scope });
+  // 全库拖库优先（对标 sqlmap --dump-all：忽略 -D/-T，直接枚举全部库并拖）
+  if (args.dumpAll) return ex({ mode: 'dumpAll' });
+  // 字典爆破：表名/列名（对标 sqlmap --common-tables / --common-columns）
+  // information_schema 不可用时（WAF 拦截 / 权限不足 / 非 MySQL）继续推进枚举的唯一路径。
+  if (args.commonTables) return ex({ mode: 'commonTables', dbs: args.db ? [args.db] : [] });
+  if (args.commonColumns) return ex({ mode: 'commonColumns', dbs: args.db ? [args.db] : [], tables: args.table ? [args.table] : [] });
   if (args.search) return ex({ mode: 'search', keyword: args.search });
   if (args.dbs) return ex({ mode: 'dbs' });
   if (args.tables) return ex({ mode: 'tables', dbs: args.db ? [args.db] : (args.excludeSysdbs ? [] : []) });
@@ -1107,6 +1130,69 @@ async function runShellRepl(kind, ctx, exploiter) {
   }
 }
 
+// [对标 sqlmap --identify-waf] 只做 WAF 指纹识别 + 推荐 tamper 链：
+//   ① 被动：抓一次基线响应，用响应头/体匹配 62 个 WAF 指纹（零额外发包）
+//   ② 主动：发 WAF 触发 payload 观察拦截响应（被动无果时的兜底）
+// 全程不发起注入检测，对目标零检出副作用；用于扫描前「先摸清对面是什么 WAF」。
+async function runIdentifyWaf(args) {
+  const { WafIdentifier } = await import('../src/core/waf/WafIdentifier.js');
+  const { recommend } = await import('../src/core/waf/wafRecommend.js');
+  const { buildEgressOpts } = await import('../src/engine/egressOpts.js');
+  const waf = new WafIdentifier();
+  const vendors = new Map();
+
+  // ① 被动识别（基线响应）
+  try {
+    const res = await httpClient.request(
+      buildEgressOpts({}, {
+        method: 'GET',
+        url: args.url,
+        headers: args.headers ? parseHeaders(args.headers) : {},
+      })
+    );
+    const cands = waf.identify({ status: res?.status, headers: res?.headers || {}, body: String(res?.data ?? '') });
+    for (const c of cands) {
+      if (c && c.vendor) vendors.set(c.vendor, c);
+    }
+  } catch (e) {
+    console.error(`[identify-waf] 基线请求失败：${e.message}`);
+  }
+
+  // ② 主动探测（仅在无厂商命中时才有意义，但这里保留：多一路证据不亏）
+  try {
+    const probe = await waf.activeProbe({ baseUrl: args.url, url: args.url, config: {} }, httpClient);
+    if (probe && probe.detected) {
+      const v = probe.vendor || 'unknown';
+      const prev = vendors.get(v);
+      if (!prev || (probe.confidence || 0) > (prev.confidence || 0)) {
+        vendors.set(v, { vendor: v, confidence: probe.confidence, evidence: 'active probe' });
+      }
+    }
+  } catch (e) {
+    console.error(`[identify-waf] 主动探测失败：${e.message}`);
+  }
+
+  const list = [...vendors.values()].sort((a, b) => (b.confidence || 0) - (a.confidence || 0));
+  if (!list.length) {
+    console.log(JSON.stringify({
+      target: args.url,
+      waf: { detected: false },
+      note: '未识别到已知 WAF 指纹：可能是自研/未收录设备，或当前请求未触发拦截（可加 --proxy 或指定路径重试）',
+    }, null, 2));
+    return;
+  }
+  const rec = recommend(list.map((v) => ({ vendor: v.vendor })));
+  console.log(JSON.stringify({
+    target: args.url,
+    waf: {
+      detected: true,
+      vendors: list.map((v) => ({ vendor: v.vendor, confidence: v.confidence, evidence: v.evidence || null })),
+      best: list[0].vendor,
+    },
+    recommendedTamper: rec,
+  }, null, 2));
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   // 对标 sqlmap -r：请求文件优先于 -u，先应用再校验目标参数
@@ -1128,6 +1214,12 @@ async function main() {
       process.exit(1);
     }
     if (!(await checkTor(proxy))) process.exit(1);
+  }
+
+  // [对标 sqlmap --identify-waf] 识别完成即退出，不进入扫描流程
+  if (args.identifyWaf) {
+    await runIdentifyWaf(args);
+    process.exit(0);
   }
 
   // 枚举参数组合校验（对标 sqlmap 用法约束）

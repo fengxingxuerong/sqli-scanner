@@ -17,6 +17,8 @@ import { defaults } from '../config/defaults.js';
 import { logger } from '../core/logger.js';
 import { isSafeSessionPath } from '../core/sessionStore.js';
 import { assertSafeHttpTarget } from '../core/httpClient.js';
+// [交付场景] 两次扫描差异对比（纯函数，便于单测；见 tests/scanDiff.test.js）
+import { diffReports } from '../engine/scanDiff.js';
 // [P0-SEC 2026-09-08] 授权范围（scope）硬约束 + 逐跳登记
 import { parseScope, assertInScope, filterInScope, registerScanScope, releaseScanScope } from '../core/scopeGuard.js';
 
@@ -751,6 +753,24 @@ export function createRoutes({ scanManager, eventBus: bus = eventBus, reportToke
       if (typeof sm.reportGen?.attachPoc === 'function') data = sm.reportGen.attachPoc(report);
     } catch { /* PoC 是增强项，失败不影响报告主体 */ }
     res.json({ code: 0, data, message: 'ok' });
+  });
+
+  // [交付场景] 两次扫描差异对比：修完漏洞后要能证明「确实修好了」。
+  // GET /api/scan/:id/diff?base=<scanId>
+  //   比对键 = location:param:technique（不用 pointId——每次扫描的 pointId 都是新生成的，
+  //   用它比对会把「同一个注入点」算成新增+已修复各一条，结果毫无意义）。
+  //   输出三组：fixed（基线有、本次无）/ new（本次有、基线无）/ remaining（两次都有）。
+  router.get('/scan/:id/diff', requireReport, (req, res) => {
+    const baseId = String(req.query.base || '').trim();
+    if (!baseId) {
+      return res.json({ code: ErrorCode.INVALID_ARGUMENT ?? 1, data: null, message: '缺少 base 参数（基线扫描 id）：/api/scan/<id>/diff?base=<scanId>' });
+    }
+    const cur = sm.getReport(req.params.id);
+    const base = sm.getReport(baseId);
+    if (!cur) return res.json({ code: ErrorCode.SCAN_NOT_FOUND, data: null, message: '当前扫描不存在' });
+    if (!base) return res.json({ code: ErrorCode.SCAN_NOT_FOUND, data: null, message: '基线扫描不存在' });
+
+    res.json({ code: 0, data: diffReports(base, cur), message: 'ok' });
   });
 
   router.get('/scan/:id/report/export', requireReport, (req, res) => {

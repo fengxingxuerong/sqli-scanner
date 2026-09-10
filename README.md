@@ -58,9 +58,13 @@ docker compose up -d
 | **62 WAF 指纹** | 自动识别 WAF 类型并推荐 tamper 组合 |
 | **可视化报告** | 风险环形图 + 技术分布条形图 + 漏洞列表 + 数据提取树 + 检测摘要 |
 | **深度提取** | 分页聚合数据提取，绕过 UNION 限制 |
+| **全库拖库** | `--dump-all`：枚举所有库后逐库逐表拖（对标 sqlmap --dump-all） |
+| **字典爆破**（information_schema 不可用时的出路） | `--common-tables` / `--common-columns`：WAF 拦 information_schema、账号权限不足、或目标库无该视图时，用内置常见表/列名字典逐个做存在性探针（130+ 表名 / 140+ 列名，含「通道自检 + 不存在对照名」防假阴性）。实测在 WAF 拦 information_schema 的目标上仍能定位表与列 |
+| **WAF 识别接口** | `--identify-waf`：仅识别 WAF 厂商并输出推荐 tamper 链，不发起注入检测（对标 sqlmap --identify-waf） |
 | **AI 漏洞报告** | 3 角色流水线（分析师→撰写→审阅），支持多 key 容灾，自动生成专业中文安全分析报告 |
 | **利用工具** | SQL Shell / 文件读写 / OS 命令执行（需授权）。⚠️ 验证状态见下文「利用能力实测口径」：**fileRead 已跑通真实闭环**，其余仍为 mock 单测 |
-| **CLI 55+ 参数** | 对标 sqlmap：--dbs/--tables/--dump/-D/-T/-C/--search/--users/--passwords/--prefix/--suffix/--time-sec/-r/--mobile/--parse-errors/--safe-url/--safe-freq/--csrf-url/--csrf-token/--delay/--eval/--current-user/--current-db/--hostname/--is-dba/--identify-waf/--skip-urlencode/--skip-static/--keep-alive/--null-connection/--predict-output 等 |
+| **CLI 100+ 参数（原生引擎）** | 对标 sqlmap：--dbs/--tables/--dump/**--dump-all**/**--common-tables**/**--common-columns**/-D/-T/-C/--search/--users/--passwords/--prefix/--suffix/--time-sec/-r/--mobile/--parse-errors/--safe-url/--safe-freq/--delay/--current-user/--current-db/--hostname/--is-dba/**--identify-waf**/--skip-static/--predict-output/--test-headers/--test-path 等（`node bin/cli.js --help` 为准） |
+| **sqlmap 桥接参数（非原生）** | `--csrf-url` / `--csrf-token` / `--eval` / `--skip-urlencode` / `--keep-alive` / `--null-connection`：**仅当转交外部 sqlmap 进程（sqlmapBridge）时才会被传递**，本项目自有引擎不消费这些键。请勿把上表与本节混用 |
 | **-r 请求文件** | 从 Burp/curl 请求文本导入 URL/method/headers/body |
 | **中英双语** | 全界面 i18n 支持中英切换 |
 | **历史记录** | 扫描历史卡片式展示，支持续跑/删除 |

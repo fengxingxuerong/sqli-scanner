@@ -147,6 +147,55 @@ export async function extractByScope(sm, scanId, ctx, scope) {
         }
         break;
       }
+      // [对标 sqlmap --dump-all] 全库拖库：枚举全部库 → dumpAllDatabases 统一并发治理
+      // （复用既有 unconfirmedEmpty 通道：0 行且未确认的表必须在报告里可见，不能当空表）
+      case 'dumpAll': {
+        const dbs = filterDbs(await sm.extractor.enumerateDatabases(ctx));
+        if (!dbs.length) {
+          logger.warn('全库拖库：未枚举到任何数据库（可能是权限不足或 information_schema 被拦）');
+          break;
+        }
+        const dumped = await sm.extractor.dumpAllDatabases(ctx, dbs, {
+          onUnconfirmedEmpty: (db, t) =>
+            logger.warn(`全库拖库：${db}.${t} 返回 0 行且未确认（空表 / 无权限 / 被拦截）`),
+        });
+        data.databases = dumped.databases;
+        data.tables = dumped.tables;
+        data.columns = dumped.columns;
+        data.rows = dumped.rows;
+        if (dumped.meta) data.meta = dumped.meta;
+        break;
+      }
+      // [对标 sqlmap --common-tables] 字典爆破表名：information_schema 不可用时的唯一出路
+      case 'commonTables': {
+        const dbs = (scope.dbs && scope.dbs.length)
+          ? scope.dbs
+          : filterDbs(await sm.extractor.enumerateDatabases(ctx));
+        if (!dbs.length) { logger.warn('common-tables：无可爆破的数据库（-D 未指定且枚举为空）'); break; }
+        for (const db of dbs) {
+          const found = await sm.extractor.findCommonTables(ctx, db);
+          data.tables[db] = found.tables;
+          if (found.tried) data.meta = { ...(data.meta || {}), commonTables: { ...((data.meta || {}).commonTables || {}), [db]: { tried: found.tried, found: found.tables.length } } };
+        }
+        break;
+      }
+      // [对标 sqlmap --common-columns] 字典爆破列名（需先有表名：-T 指定或 commonTables 结果）
+      case 'commonColumns': {
+        const dbs = (scope.dbs && scope.dbs.length)
+          ? scope.dbs
+          : filterDbs(await sm.extractor.enumerateDatabases(ctx));
+        for (const db of dbs) {
+          const tbls = (scope.tables && scope.tables.length)
+            ? scope.tables
+            : await sm.extractor.findCommonTables(ctx, db).then((r) => r.tables);
+          data.tables[db] = tbls;
+          for (const t of tbls) {
+            const found = await sm.extractor.findCommonColumns(ctx, db, t);
+            data.columns[`${db}.${t}`] = found.columns;
+          }
+        }
+        break;
+      }
       case 'dump': {
         const wanted = (scope.dbs && scope.dbs.length)
           ? scope.dbs
