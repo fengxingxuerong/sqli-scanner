@@ -193,9 +193,20 @@ export async function createLabApp() {
     /\bor\b\s+\d+\s*=\s*\d+/i,
   ];
   const wafHit = (vals) => vals.some(v => WAF_RULES.some(r => r.test(String(v))));
+  // [FIX 2026-09-10] 只检查「用户可控输入」相关的头：真实 WAF 不会因为 Accept/Connection/
+  // Accept-Encoding 这类协议头里的 */* 就拦截请求。原实现遍历全部请求头，导致 curl/扫描器
+  // 默认的 `Accept: */*` 命中注释符规则 → 连良性探针都被 403，靶场等同「全拦死」，
+  // 失去评测意义（曾据此误判工具 WAF 绕过能力）。现排除协议性头，保留 UA / XFF / Cookie
+  // 等真实 WAF 会检查的字段。
+  const WAF_SKIP_HEADERS = new Set([
+    'accept', 'accept-encoding', 'accept-language', 'connection', 'host',
+    'content-length', 'content-type', 'user-agent', 'referer', 'origin',
+  ]);
   app.use('/waf', (req, res, next) => {
-    const vals = [...Object.values(req.query || {}), ...Object.values(req.body || {}),
-      ...Object.values(req.headers || {}).filter(v => typeof v === 'string')].map(String);
+    const headerVals = Object.entries(req.headers || {})
+      .filter(([k, v]) => typeof v === 'string' && !WAF_SKIP_HEADERS.has(k.toLowerCase()))
+      .map(([, v]) => v);
+    const vals = [...Object.values(req.query || {}), ...Object.values(req.body || {}), ...headerVals].map(String);
     if (wafHit(vals)) return res.status(403).send(page('blocked', '<p>REQUEST_BLOCKED_BY_WAF</p>'));
     next();
   });

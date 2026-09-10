@@ -4,7 +4,7 @@
     "url": "http://127.0.0.1:8231/shop/item?id=1",
     "round": "r2",
     "exit": 2,
-    "ms": 1200,
+    "ms": 1033,
     "hit": true,
     "techs": "union+error+boolean",
     "dbms": "MySQL",
@@ -13,9 +13,9 @@
     "verdict": "no_vulnerability_detected",
     "err": "",
     "raw": {
-      "scanId": "wuJpJ6uYiO9D",
+      "scanId": "OJoGXWA8P_HG",
       "target": {
-        "id": "JBcRnUDoE4",
+        "id": "b01ryp_ckC",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/shop/item?id=1",
         "method": "GET",
@@ -155,8 +155,8 @@
           }
         }
       },
-      "startedAt": "2026-09-10T15:49:27.640Z",
-      "finishedAt": "2026-09-10T15:49:27.913Z",
+      "startedAt": "2026-09-10T16:00:51.257Z",
+      "finishedAt": "2026-09-10T16:00:51.524Z",
       "dbms": "MySQL",
       "points": [
         {
@@ -191,7 +191,7 @@
       ],
       "vulns": [
         {
-          "id": "_fvqaDXi",
+          "id": "3rlTx4yl",
           "pointId": "283e732d",
           "technique": "union",
           "dbms": "MySQL",
@@ -205,7 +205,7 @@
           "trace": null
         },
         {
-          "id": "T94bDS2P",
+          "id": "gGQgnfIO",
           "pointId": "283e732d",
           "technique": "error",
           "dbms": "MySQL",
@@ -218,7 +218,7 @@
           "trace": null
         },
         {
-          "id": "lU6ED8a6",
+          "id": "_xtLq40O",
           "pointId": "283e732d",
           "technique": "boolean",
           "dbms": "MySQL",
@@ -549,7 +549,7 @@
     "url": "http://127.0.0.1:8231/shop/search?name=alice",
     "round": "r2",
     "exit": 2,
-    "ms": 1017,
+    "ms": 851,
     "hit": true,
     "techs": "union+error+boolean",
     "dbms": "MySQL",
@@ -558,9 +558,9 @@
     "verdict": "no_vulnerability_detected",
     "err": "",
     "raw": {
-      "scanId": "B4kdlZQsbeWW",
+      "scanId": "rVYZSJSiCJ9r",
       "target": {
-        "id": "_0p55ZCfoC",
+        "id": "qcMt74Csfa",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/shop/search?name=alice",
         "method": "GET",
@@ -700,8 +700,8 @@
           }
         }
       },
-      "startedAt": "2026-09-10T15:49:28.874Z",
-      "finishedAt": "2026-09-10T15:49:29.072Z",
+      "startedAt": "2026-09-10T16:00:52.311Z",
+      "finishedAt": "2026-09-10T16:00:52.514Z",
       "dbms": "MySQL",
       "points": [
         {
@@ -710,7 +710,7 @@
           "param": "name",
           "originalValue": "alice",
           "confirmed": true,
-          "technique": "boolean",
+          "technique": "union",
           "dbms": "MySQL",
           "formMethod": null,
           "actionUrl": null,
@@ -736,7 +736,7 @@
       ],
       "vulns": [
         {
-          "id": "oupmQbxF",
+          "id": "YKcv4Ftk",
           "pointId": "de9d0cb9",
           "technique": "union",
           "dbms": "MySQL",
@@ -750,7 +750,7 @@
           "trace": null
         },
         {
-          "id": "OK0iDqDR",
+          "id": "W9kNy4pk",
           "pointId": "de9d0cb9",
           "technique": "error",
           "dbms": "MySQL",
@@ -763,7 +763,7 @@
           "trace": null
         },
         {
-          "id": "auFBvA3P",
+          "id": "LlPuGzbl",
           "pointId": "de9d0cb9",
           "technique": "boolean",
           "dbms": "MySQL",
@@ -956,7 +956,7 @@
     "url": "http://127.0.0.1:8231/shop/find?q=a",
     "round": "r2",
     "exit": 2,
-    "ms": 1042,
+    "ms": 841,
     "hit": true,
     "techs": "union+error+boolean",
     "dbms": "MySQL",
@@ -965,9 +965,9 @@
     "verdict": "no_vulnerability_detected",
     "err": "",
     "raw": {
-      "scanId": "IBMkYc_PiVvq",
+      "scanId": "sD4hY3r-DIb0",
       "target": {
-        "id": "Ni2TRKlzjR",
+        "id": "UtQ7GXCAhR",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/shop/find?q=a",
         "method": "GET",
@@ -1107,8 +1107,8 @@
           }
         }
       },
-      "startedAt": "2026-09-10T15:49:29.921Z",
-      "finishedAt": "2026-09-10T15:49:30.114Z",
+      "startedAt": "2026-09-10T16:00:53.156Z",
+      "finishedAt": "2026-09-10T16:00:53.337Z",
       "dbms": "MySQL",
       "points": [
         {
@@ -1142,7 +1142,7 @@
       ],
       "vulns": [
         {
-          "id": "SwjTx-3I",
+          "id": "BI8Ebrs3",
           "pointId": "dec9ec92",
           "technique": "union",
           "dbms": "MySQL",
@@ -1156,7 +1156,7 @@
           "trace": null
         },
         {
-          "id": "kuf-0-Z0",
+          "id": "8knnhWJ9",
           "pointId": "dec9ec92",
           "technique": "error",
           "dbms": "MySQL",
@@ -1169,7 +1169,7 @@
           "trace": null
         },
         {
-          "id": "arAohaK1",
+          "id": "SeJsnb4v",
           "pointId": "dec9ec92",
           "technique": "boolean",
           "dbms": "MySQL",
@@ -1362,7 +1362,7 @@
     "url": "http://127.0.0.1:8231/shop/sort?by=id",
     "round": "r2",
     "exit": 2,
-    "ms": 1590,
+    "ms": 1480,
     "hit": true,
     "techs": "error+boolean",
     "dbms": "MySQL",
@@ -1371,9 +1371,9 @@
     "verdict": "no_vulnerability_detected",
     "err": "",
     "raw": {
-      "scanId": "YTO1oMbEw-oQ",
+      "scanId": "Bnds-wUxQGcq",
       "target": {
-        "id": "aNxtd5BZlz",
+        "id": "W4O63vVLED",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/shop/sort?by=id",
         "method": "GET",
@@ -1513,8 +1513,8 @@
           }
         }
       },
-      "startedAt": "2026-09-10T15:49:30.892Z",
-      "finishedAt": "2026-09-10T15:49:31.539Z",
+      "startedAt": "2026-09-10T16:00:54.031Z",
+      "finishedAt": "2026-09-10T16:00:54.671Z",
       "dbms": "MySQL",
       "points": [
         {
@@ -1538,7 +1538,7 @@
       ],
       "vulns": [
         {
-          "id": "Hn-KrZbB",
+          "id": "3cli7uys",
           "pointId": "97ad129c",
           "technique": "error",
           "dbms": "MySQL",
@@ -1551,7 +1551,7 @@
           "trace": null
         },
         {
-          "id": "hdeMp-Rh",
+          "id": "97xASHEX",
           "pointId": "97ad129c",
           "technique": "boolean",
           "dbms": "MySQL",
@@ -2020,7 +2020,7 @@
     "url": "http://127.0.0.1:8231/shop/detail?id=1&cat=0",
     "round": "r2",
     "exit": 2,
-    "ms": 1203,
+    "ms": 1088,
     "hit": true,
     "techs": "union+error+boolean",
     "dbms": "MySQL",
@@ -2029,9 +2029,9 @@
     "verdict": "no_vulnerability_detected",
     "err": "",
     "raw": {
-      "scanId": "Af9M2KE6I9Uw",
+      "scanId": "045pHUcnGeei",
       "target": {
-        "id": "wzvp3-NPdZ",
+        "id": "TgZRM5uhqj",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/shop/detail?id=1&cat=0",
         "method": "GET",
@@ -2171,8 +2171,8 @@
           }
         }
       },
-      "startedAt": "2026-09-10T15:49:32.509Z",
-      "finishedAt": "2026-09-10T15:49:32.789Z",
+      "startedAt": "2026-09-10T16:00:55.529Z",
+      "finishedAt": "2026-09-10T16:00:55.811Z",
       "dbms": "MySQL",
       "points": [
         {
@@ -2223,7 +2223,7 @@
       ],
       "vulns": [
         {
-          "id": "OzkJw5lP",
+          "id": "1dYZoXFJ",
           "pointId": "283e732d",
           "technique": "union",
           "dbms": "MySQL",
@@ -2237,7 +2237,7 @@
           "trace": null
         },
         {
-          "id": "dtvZQ02k",
+          "id": "uxBHCD0g",
           "pointId": "283e732d",
           "technique": "error",
           "dbms": "MySQL",
@@ -2250,7 +2250,7 @@
           "trace": null
         },
         {
-          "id": "bOFbq7_t",
+          "id": "9ZkDZXH0",
           "pointId": "283e732d",
           "technique": "boolean",
           "dbms": "MySQL",
@@ -2587,7 +2587,7 @@
     "url": "http://127.0.0.1:8231/shop/err?id=1",
     "round": "r2",
     "exit": 2,
-    "ms": 1211,
+    "ms": 875,
     "hit": true,
     "techs": "union+error+boolean",
     "dbms": "MySQL",
@@ -2596,9 +2596,9 @@
     "verdict": "no_vulnerability_detected",
     "err": "",
     "raw": {
-      "scanId": "po4RpYCD_x_t",
+      "scanId": "8n3loZq8e_tq",
       "target": {
-        "id": "mtZTpQMRXk",
+        "id": "hI0Mc7XVfQ",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/shop/err?id=1",
         "method": "GET",
@@ -2738,8 +2738,8 @@
           }
         }
       },
-      "startedAt": "2026-09-10T15:49:33.714Z",
-      "finishedAt": "2026-09-10T15:49:33.929Z",
+      "startedAt": "2026-09-10T16:00:56.603Z",
+      "finishedAt": "2026-09-10T16:00:56.798Z",
       "dbms": "MySQL",
       "points": [
         {
@@ -2774,7 +2774,7 @@
       ],
       "vulns": [
         {
-          "id": "sjvrRQKQ",
+          "id": "HhdEziM_",
           "pointId": "283e732d",
           "technique": "union",
           "dbms": "MySQL",
@@ -2788,7 +2788,7 @@
           "trace": null
         },
         {
-          "id": "kdcNdGxY",
+          "id": "uVugyGnP",
           "pointId": "283e732d",
           "technique": "error",
           "dbms": "MySQL",
@@ -2801,7 +2801,7 @@
           "trace": null
         },
         {
-          "id": "mXNis72u",
+          "id": "1fx5m8_T",
           "pointId": "283e732d",
           "technique": "boolean",
           "dbms": "MySQL",
@@ -3132,7 +3132,7 @@
     "url": "http://127.0.0.1:8231/shop/blind?id=1",
     "round": "r2",
     "exit": 0,
-    "ms": 5944,
+    "ms": 5767,
     "hit": true,
     "techs": "boolean",
     "dbms": "MySQL",
@@ -3141,9 +3141,9 @@
     "verdict": "no_vulnerability_detected",
     "err": "",
     "raw": {
-      "scanId": "b3STAjhCRJS2",
+      "scanId": "7WFD4V-QPKpf",
       "target": {
-        "id": "1wV0DpzwE_",
+        "id": "A53GwvPdFw",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/shop/blind?id=1",
         "method": "GET",
@@ -3283,8 +3283,8 @@
           }
         }
       },
-      "startedAt": "2026-09-10T15:49:34.981Z",
-      "finishedAt": "2026-09-10T15:49:39.996Z",
+      "startedAt": "2026-09-10T16:00:57.457Z",
+      "finishedAt": "2026-09-10T16:01:02.445Z",
       "dbms": "MySQL",
       "points": [
         {
@@ -3308,7 +3308,7 @@
       ],
       "vulns": [
         {
-          "id": "eyPND8Bv",
+          "id": "F9lgbCmV",
           "pointId": "283e732d",
           "technique": "boolean",
           "dbms": "MySQL",
@@ -3645,7 +3645,7 @@
     "url": "http://127.0.0.1:8231/shop/time?id=1",
     "round": "r2",
     "exit": 0,
-    "ms": 10498,
+    "ms": 10435,
     "hit": true,
     "techs": "time",
     "dbms": "MySQL",
@@ -3654,9 +3654,9 @@
     "verdict": "no_vulnerability_detected",
     "err": "",
     "raw": {
-      "scanId": "VudeeE4QOOi9",
+      "scanId": "SikJYQ-o6o0R",
       "target": {
-        "id": "yrNotCvltu",
+        "id": "5whI1ZEZAy",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/shop/time?id=1",
         "method": "GET",
@@ -3796,8 +3796,8 @@
           }
         }
       },
-      "startedAt": "2026-09-10T15:49:40.841Z",
-      "finishedAt": "2026-09-10T15:49:50.507Z",
+      "startedAt": "2026-09-10T16:01:03.233Z",
+      "finishedAt": "2026-09-10T16:01:12.900Z",
       "dbms": "MySQL",
       "points": [
         {
@@ -3821,7 +3821,7 @@
       ],
       "vulns": [
         {
-          "id": "7epG5Kwq",
+          "id": "yl5u8MWw",
           "pointId": "283e732d",
           "technique": "time",
           "dbms": "MySQL",
@@ -3829,30 +3829,30 @@
           "payloads": [
             "1 AND SLEEP(2)-- -"
           ],
-          "description": "时间盲注确认(统计·自适应): μ=0.06s σ=0.03s z=2 阈值=1.61s 自适应下限=1.56s 稳定率1.00",
-          "evidence": "时间盲注确认(统计·自适应): μ=0.06s σ=0.03s z=2 阈值=1.61s 自适应下限=1.56s 稳定率1.00",
+          "description": "时间盲注确认(统计·自适应): μ=0.05s σ=0.02s z=2 阈值=1.60s 自适应下限=1.55s 稳定率1.00",
+          "evidence": "时间盲注确认(统计·自适应): μ=0.05s σ=0.02s z=2 阈值=1.60s 自适应下限=1.55s 稳定率1.00",
           "trace": {
             "technique": "time",
             "adaptive": true,
             "baselineNoiseRate": null,
-            "mu": 0.05900000000000001,
-            "sigma": 0.027676705006196095,
-            "threshold": 1.6143534100123922,
-            "floor": 1.5553534100123922,
+            "mu": 0.0494,
+            "sigma": 0.023854559312634558,
+            "threshold": 1.5971091186252693,
+            "floor": 1.5477091186252692,
             "baselineSamples": [
               {
                 "idx": 0,
-                "ms": 0.014,
+                "ms": 0.017,
                 "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>time</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-c"
               },
               {
                 "idx": 1,
-                "ms": 0.046,
+                "ms": 0.03,
                 "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>time</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-c"
               },
               {
                 "idx": 2,
-                "ms": 0.063,
+                "ms": 0.048,
                 "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>time</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-c"
               },
               {
@@ -3862,38 +3862,38 @@
               },
               {
                 "idx": 4,
-                "ms": 0.095,
+                "ms": 0.075,
                 "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>time</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-c"
               }
             ],
             "injectSamples": [
               {
                 "idx": 0,
-                "ms": 2.01,
+                "ms": 2.026,
                 "delayed": true,
                 "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>time</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-c"
               },
               {
                 "idx": 1,
-                "ms": 2.041,
-                "delayed": true,
-                "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>time</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-c"
-              },
-              {
-                "idx": 2,
                 "ms": 2.057,
                 "delayed": true,
                 "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>time</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-c"
               },
               {
+                "idx": 2,
+                "ms": 2.074,
+                "delayed": true,
+                "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>time</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-c"
+              },
+              {
                 "idx": 3,
-                "ms": 2.087,
+                "ms": 2.089,
                 "delayed": true,
                 "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>time</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-c"
               },
               {
                 "idx": 4,
-                "ms": 2.017,
+                "ms": 2.016,
                 "delayed": true,
                 "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>time</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-c"
               }
@@ -3973,7 +3973,7 @@
     "url": "http://127.0.0.1:8231/login",
     "round": "r2",
     "exit": 2,
-    "ms": 7267,
+    "ms": 7218,
     "hit": true,
     "techs": "union+error+boolean",
     "dbms": "MySQL",
@@ -3982,9 +3982,9 @@
     "verdict": "no_vulnerability_detected",
     "err": "",
     "raw": {
-      "scanId": "XYKnTs_GmeYv",
+      "scanId": "B2lCSbmRZ_-j",
       "target": {
-        "id": "W2fjmo10Yj",
+        "id": "7dVWVoSSQ9",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/login",
         "method": "POST",
@@ -4127,8 +4127,8 @@
           }
         }
       },
-      "startedAt": "2026-09-10T15:49:51.325Z",
-      "finishedAt": "2026-09-10T15:49:57.695Z",
+      "startedAt": "2026-09-10T16:01:13.723Z",
+      "finishedAt": "2026-09-10T16:01:20.087Z",
       "dbms": "MySQL",
       "points": [
         {
@@ -4176,7 +4176,7 @@
       ],
       "vulns": [
         {
-          "id": "iqFmpNak",
+          "id": "6IeIBgzG",
           "pointId": "590739db",
           "technique": "union",
           "dbms": "MySQL",
@@ -4190,7 +4190,7 @@
           "trace": null
         },
         {
-          "id": "dt7xs1Ae",
+          "id": "jxgZ-iAP",
           "pointId": "590739db",
           "technique": "error",
           "dbms": "MySQL",
@@ -4203,7 +4203,7 @@
           "trace": null
         },
         {
-          "id": "bF_urFyp",
+          "id": "6DOgU33H",
           "pointId": "590739db",
           "technique": "boolean",
           "dbms": "MySQL",
@@ -4671,7 +4671,7 @@
           }
         },
         {
-          "id": "Ug-SgS3A",
+          "id": "B7CDhbRt",
           "pointId": "92d712fc",
           "technique": "error",
           "dbms": "MySQL",
@@ -4773,7 +4773,7 @@
     "url": "http://127.0.0.1:8231/api/profile",
     "round": "r2",
     "exit": 2,
-    "ms": 1385,
+    "ms": 837,
     "hit": true,
     "techs": "union+error+boolean",
     "dbms": "MySQL",
@@ -4782,9 +4782,9 @@
     "verdict": "no_vulnerability_detected",
     "err": "",
     "raw": {
-      "scanId": "Dk9mBfVTYms0",
+      "scanId": "8Tj6zL9Zek7k",
       "target": {
-        "id": "kdr3qwVURq",
+        "id": "eEaw1fcKgM",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/api/profile",
         "method": "POST",
@@ -4926,8 +4926,8 @@
           }
         }
       },
-      "startedAt": "2026-09-10T15:49:58.816Z",
-      "finishedAt": "2026-09-10T15:49:59.030Z",
+      "startedAt": "2026-09-10T16:01:20.865Z",
+      "finishedAt": "2026-09-10T16:01:21.041Z",
       "dbms": "MySQL",
       "points": [
         {
@@ -4962,7 +4962,7 @@
       ],
       "vulns": [
         {
-          "id": "4eRW7jr8",
+          "id": "GvGvOGCg",
           "pointId": "845293ee",
           "technique": "union",
           "dbms": "MySQL",
@@ -4976,7 +4976,7 @@
           "trace": null
         },
         {
-          "id": "ipeHQIG6",
+          "id": "DDNvzouu",
           "pointId": "845293ee",
           "technique": "error",
           "dbms": "MySQL",
@@ -4989,7 +4989,7 @@
           "trace": null
         },
         {
-          "id": "QTlINMIS",
+          "id": "mKwmdFQm",
           "pointId": "845293ee",
           "technique": "boolean",
           "dbms": "MySQL",
@@ -5320,7 +5320,7 @@
     "url": "http://127.0.0.1:8231/shop/cookie",
     "round": "r2",
     "exit": 2,
-    "ms": 972,
+    "ms": 964,
     "hit": true,
     "techs": "union+error+boolean",
     "dbms": "MySQL",
@@ -5329,9 +5329,9 @@
     "verdict": "no_vulnerability_detected",
     "err": "",
     "raw": {
-      "scanId": "uwUjRtM045pB",
+      "scanId": "PiNIvGirA22F",
       "target": {
-        "id": "Z-L3GrrnSw",
+        "id": "PQNGNHF3MH",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/shop/cookie",
         "method": "GET",
@@ -5474,8 +5474,8 @@
           "testHeaders": true
         }
       },
-      "startedAt": "2026-09-10T15:49:59.999Z",
-      "finishedAt": "2026-09-10T15:50:00.207Z",
+      "startedAt": "2026-09-10T16:01:21.829Z",
+      "finishedAt": "2026-09-10T16:01:22.026Z",
       "dbms": "MySQL",
       "points": [
         {
@@ -5510,7 +5510,7 @@
       ],
       "vulns": [
         {
-          "id": "vbdHGQPV",
+          "id": "CE5CtWpn",
           "pointId": "5c5e110e",
           "technique": "union",
           "dbms": "MySQL",
@@ -5524,7 +5524,7 @@
           "trace": null
         },
         {
-          "id": "7LG9B9sg",
+          "id": "YcIDtqg7",
           "pointId": "5c5e110e",
           "technique": "error",
           "dbms": "MySQL",
@@ -5537,7 +5537,7 @@
           "trace": null
         },
         {
-          "id": "OrlgdL9y",
+          "id": "uUCHrt5R",
           "pointId": "5c5e110e",
           "technique": "boolean",
           "dbms": "MySQL",
@@ -5868,7 +5868,7 @@
     "url": "http://127.0.0.1:8231/shop/ip",
     "round": "r2",
     "exit": 2,
-    "ms": 971,
+    "ms": 924,
     "hit": true,
     "techs": "union+error+boolean",
     "dbms": "MySQL",
@@ -5877,9 +5877,9 @@
     "verdict": "no_vulnerability_detected",
     "err": "",
     "raw": {
-      "scanId": "PrQV4it5ys4u",
+      "scanId": "Ju8KqrkisLhR",
       "target": {
-        "id": "sZgCRqBIcC",
+        "id": "l7IKYIoibA",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/shop/ip",
         "method": "GET",
@@ -6022,8 +6022,8 @@
           "testHeaders": true
         }
       },
-      "startedAt": "2026-09-10T15:50:00.970Z",
-      "finishedAt": "2026-09-10T15:50:01.151Z",
+      "startedAt": "2026-09-10T16:01:22.760Z",
+      "finishedAt": "2026-09-10T16:01:22.955Z",
       "dbms": "MySQL",
       "points": [
         {
@@ -6058,7 +6058,7 @@
       ],
       "vulns": [
         {
-          "id": "KHwUQc1J",
+          "id": "xQ5nwKrw",
           "pointId": "a7471d66",
           "technique": "union",
           "dbms": "MySQL",
@@ -6072,7 +6072,7 @@
           "trace": null
         },
         {
-          "id": "k7AclcER",
+          "id": "1vZWf2jA",
           "pointId": "a7471d66",
           "technique": "error",
           "dbms": "MySQL",
@@ -6085,7 +6085,7 @@
           "trace": null
         },
         {
-          "id": "d7r5c13j",
+          "id": "_U2AoKsM",
           "pointId": "a7471d66",
           "technique": "boolean",
           "dbms": "MySQL",
@@ -6416,7 +6416,7 @@
     "url": "http://127.0.0.1:8231/shop/user/1",
     "round": "r2",
     "exit": 2,
-    "ms": 967,
+    "ms": 871,
     "hit": true,
     "techs": "union+error+boolean",
     "dbms": "MySQL",
@@ -6425,9 +6425,9 @@
     "verdict": "no_vulnerability_detected",
     "err": "",
     "raw": {
-      "scanId": "kEvye2nbdkhQ",
+      "scanId": "DNcfmUt3bRcQ",
       "target": {
-        "id": "ZnhFQEsrtf",
+        "id": "iSqL2ZVfgp",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/shop/user/1",
         "method": "GET",
@@ -6568,8 +6568,8 @@
           "testPath": true
         }
       },
-      "startedAt": "2026-09-10T15:50:01.938Z",
-      "finishedAt": "2026-09-10T15:50:02.116Z",
+      "startedAt": "2026-09-10T16:01:23.633Z",
+      "finishedAt": "2026-09-10T16:01:23.813Z",
       "dbms": "MySQL",
       "points": [
         {
@@ -6605,7 +6605,7 @@
       ],
       "vulns": [
         {
-          "id": "wjduGOPI",
+          "id": "JockXlBv",
           "pointId": "86d7dabd",
           "technique": "union",
           "dbms": "MySQL",
@@ -6619,7 +6619,7 @@
           "trace": null
         },
         {
-          "id": "Ls_4wZiK",
+          "id": "lqeiV7Cc",
           "pointId": "86d7dabd",
           "technique": "error",
           "dbms": "MySQL",
@@ -6632,7 +6632,7 @@
           "trace": null
         },
         {
-          "id": "ZtX_e_09",
+          "id": "xlLJQGzO",
           "pointId": "86d7dabd",
           "technique": "boolean",
           "dbms": "MySQL",
@@ -6963,7 +6963,7 @@
     "url": "http://127.0.0.1:8231/shop/b64?id=MQ",
     "round": "r2",
     "exit": 2,
-    "ms": 2988,
+    "ms": 2910,
     "hit": true,
     "techs": "error",
     "dbms": "MySQL",
@@ -6972,9 +6972,9 @@
     "verdict": "no_vulnerability_detected",
     "err": "",
     "raw": {
-      "scanId": "ScUido0NLKgO",
+      "scanId": "MmtCaARItRS-",
       "target": {
-        "id": "IrJxrPZuDj",
+        "id": "JXaYWTs_lO",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/shop/b64?id=MQ",
         "method": "GET",
@@ -7114,8 +7114,8 @@
           }
         }
       },
-      "startedAt": "2026-09-10T15:50:02.887Z",
-      "finishedAt": "2026-09-10T15:50:05.061Z",
+      "startedAt": "2026-09-10T16:01:24.507Z",
+      "finishedAt": "2026-09-10T16:01:26.679Z",
       "dbms": "MySQL",
       "points": [
         {
@@ -7139,7 +7139,7 @@
       ],
       "vulns": [
         {
-          "id": "FafgNkx7",
+          "id": "13PPkZq1",
           "pointId": "283e732d",
           "technique": "error",
           "dbms": "MySQL",
@@ -7241,7 +7241,7 @@
     "url": "http://127.0.0.1:8231/account/update",
     "round": "r2",
     "exit": 2,
-    "ms": 934,
+    "ms": 823,
     "hit": true,
     "techs": "second_order",
     "dbms": "",
@@ -7250,9 +7250,9 @@
     "verdict": "no_vulnerability_detected",
     "err": "",
     "raw": {
-      "scanId": "xFjeAjDfkQhq",
+      "scanId": "9haDJVtx8i6Z",
       "target": {
-        "id": "zgEymIfX0o",
+        "id": "k3YtYjc-MG",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/account/update",
         "method": "POST",
@@ -7261,7 +7261,7 @@
         },
         "jsonBody": null,
         "cookieParams": {
-          "sid": "rtmtvpdfxc"
+          "sid": "rtmtvps3jb"
         },
         "headerParams": {},
         "config": {
@@ -7392,8 +7392,8 @@
           "testHeaders": true
         }
       },
-      "startedAt": "2026-09-10T15:50:05.859Z",
-      "finishedAt": "2026-09-10T15:50:05.912Z",
+      "startedAt": "2026-09-10T16:01:27.368Z",
+      "finishedAt": "2026-09-10T16:01:27.415Z",
       "dbms": null,
       "points": [
         {
@@ -7416,7 +7416,7 @@
           "id": "e30960cf",
           "location": "cookie",
           "param": "sid",
-          "originalValue": "rtmtvpdfxc",
+          "originalValue": "rtmtvps3jb",
           "confirmed": false,
           "technique": null,
           "dbms": null,
@@ -7431,7 +7431,7 @@
       ],
       "vulns": [
         {
-          "id": "dvXeSeQ-",
+          "id": "nxsDdmLS",
           "pointId": "0e86acf3",
           "technique": "second_order",
           "dbms": null,
@@ -7508,7 +7508,7 @@
     "url": "http://127.0.0.1:8231/shop/stack?id=1",
     "round": "r2",
     "exit": 2,
-    "ms": 933,
+    "ms": 888,
     "hit": true,
     "techs": "union+error+boolean",
     "dbms": "MySQL",
@@ -7517,9 +7517,9 @@
     "verdict": "no_vulnerability_detected",
     "err": "",
     "raw": {
-      "scanId": "S5yhlW_B3GVA",
+      "scanId": "mli1iDlvV6ZO",
       "target": {
-        "id": "LReSXl3uUE",
+        "id": "LtBD2fhrYq",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/shop/stack?id=1",
         "method": "GET",
@@ -7659,8 +7659,8 @@
           }
         }
       },
-      "startedAt": "2026-09-10T15:50:06.791Z",
-      "finishedAt": "2026-09-10T15:50:06.986Z",
+      "startedAt": "2026-09-10T16:01:28.245Z",
+      "finishedAt": "2026-09-10T16:01:28.441Z",
       "dbms": "MySQL",
       "points": [
         {
@@ -7694,7 +7694,7 @@
       ],
       "vulns": [
         {
-          "id": "wWh1S9id",
+          "id": "Wnx1dz1v",
           "pointId": "283e732d",
           "technique": "union",
           "dbms": "MySQL",
@@ -7708,7 +7708,7 @@
           "trace": null
         },
         {
-          "id": "yDUJhqqa",
+          "id": "TrLZhaD5",
           "pointId": "283e732d",
           "technique": "error",
           "dbms": "MySQL",
@@ -7721,7 +7721,7 @@
           "trace": null
         },
         {
-          "id": "KBElcKov",
+          "id": "UFyMhKdH",
           "pointId": "283e732d",
           "technique": "boolean",
           "dbms": "MySQL",
@@ -8057,19 +8057,19 @@
     "id": "E17-waf-guarded",
     "url": "http://127.0.0.1:8231/waf/item?id=1",
     "round": "r2",
-    "exit": 0,
-    "ms": 2961,
-    "hit": false,
-    "techs": "",
-    "dbms": "",
-    "risk": "Low",
-    "reqs": 149,
-    "verdict": "inconclusive",
+    "exit": 2,
+    "ms": 1702,
+    "hit": true,
+    "techs": "error+boolean",
+    "dbms": "MySQL",
+    "risk": "High",
+    "reqs": 95,
+    "verdict": "no_vulnerability_detected",
     "err": "",
     "raw": {
-      "scanId": "vlwyFl9U0elo",
+      "scanId": "rvkyS3d_mqhU",
       "target": {
-        "id": "I7gBHdCZzD",
+        "id": "MJBv4lIZda",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/waf/item?id=1",
         "method": "GET",
@@ -8209,18 +8209,18 @@
           }
         }
       },
-      "startedAt": "2026-09-10T15:50:07.729Z",
-      "finishedAt": "2026-09-10T15:50:09.906Z",
-      "dbms": null,
+      "startedAt": "2026-09-10T16:01:29.135Z",
+      "finishedAt": "2026-09-10T16:01:30.109Z",
+      "dbms": "MySQL",
       "points": [
         {
           "id": "283e732d",
           "location": "url",
           "param": "id",
           "originalValue": "1",
-          "confirmed": false,
-          "technique": null,
-          "dbms": null,
+          "confirmed": true,
+          "technique": "error",
+          "dbms": "MySQL",
           "formMethod": null,
           "actionUrl": null,
           "formValues": null,
@@ -8228,13 +8228,288 @@
           "isStorePoint": false,
           "storeKind": null,
           "boundaryProbed": true,
-          "_baselineTitle": "blocked",
+          "_baselineTitle": "waf-item",
           "boundary": ""
         }
       ],
-      "vulns": [],
+      "vulns": [
+        {
+          "id": "Ux2SKvtg",
+          "pointId": "283e732d",
+          "technique": "error",
+          "dbms": "MySQL",
+          "riskLevel": "High",
+          "payloads": [
+            "1' AND EXP(~(SELECT * FROM (SELECT version())a))#"
+          ],
+          "description": "数据库报错回显：SQL syntax（识别为 MySQL）",
+          "evidence": "数据库报错回显：SQL syntax（识别为 MySQL）",
+          "trace": null
+        },
+        {
+          "id": "2JkeiUVp",
+          "pointId": "283e732d",
+          "technique": "boolean",
+          "dbms": "MySQL",
+          "riskLevel": "Medium",
+          "payloads": [
+            "1 AND 1=1",
+            "1 AND 1=2"
+          ],
+          "description": "布尔注入确认(统计·自适应): 真≈基线1.00、假≠基线1.00、差异1.00、基线噪声0.00、门槛0.66、z=2.83(显著)",
+          "evidence": "布尔注入确认(统计·自适应): 真≈基线1.00、假≠基线1.00、差异1.00、基线噪声0.00、门槛0.66、z=2.83(显著)",
+          "trace": {
+            "technique": "boolean",
+            "adaptive": true,
+            "baselineNoiseRate": 0,
+            "minStable": 0.66,
+            "baselineSamples": [
+              {
+                "idx": 0,
+                "len": 380,
+                "likeBaseline": true,
+                "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>waf-item</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{bord"
+              },
+              {
+                "idx": 1,
+                "len": 380,
+                "likeBaseline": true,
+                "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>waf-item</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{bord"
+              },
+              {
+                "idx": 2,
+                "len": 380,
+                "likeBaseline": true,
+                "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>waf-item</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{bord"
+              },
+              {
+                "idx": 3,
+                "len": 380,
+                "likeBaseline": true,
+                "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>waf-item</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{bord"
+              },
+              {
+                "idx": 4,
+                "len": 380,
+                "likeBaseline": true,
+                "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>waf-item</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{bord"
+              }
+            ],
+            "pairs": [
+              {
+                "ti": 0,
+                "fi": 2,
+                "trueSamples": [
+                  {
+                    "idx": 0,
+                    "len": 491,
+                    "likeBaseline": false,
+                    "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>waf-item</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{bord"
+                  },
+                  {
+                    "idx": 1,
+                    "len": 491,
+                    "likeBaseline": false,
+                    "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>waf-item</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{bord"
+                  },
+                  {
+                    "idx": 2,
+                    "len": 491,
+                    "likeBaseline": false,
+                    "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>waf-item</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{bord"
+                  }
+                ],
+                "falseSamples": [
+                  {
+                    "idx": 0,
+                    "len": 491,
+                    "likeBaseline": false,
+                    "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>waf-item</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{bord"
+                  },
+                  {
+                    "idx": 1,
+                    "len": 491,
+                    "likeBaseline": false,
+                    "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>waf-item</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{bord"
+                  },
+                  {
+                    "idx": 2,
+                    "len": 491,
+                    "likeBaseline": false,
+                    "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>waf-item</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{bord"
+                  }
+                ],
+                "trueRatio": 0,
+                "falseRatio": 1,
+                "meaningfulRatio": 1,
+                "z": 2.82842712474619,
+                "significant": true,
+                "diffs": [
+                  {
+                    "idx": 0,
+                    "lenDelta": 0,
+                    "firstDiffOffset": 453,
+                    "changedSnippet": "se near '' AND '1'='2' at line 1</pre></div></body></html>"
+                  },
+                  {
+                    "idx": 1,
+                    "lenDelta": 0,
+                    "firstDiffOffset": 453,
+                    "changedSnippet": "se near '' AND '1'='2' at line 1</pre></div></body></html>"
+                  },
+                  {
+                    "idx": 2,
+                    "lenDelta": 0,
+                    "firstDiffOffset": 453,
+                    "changedSnippet": "se near '' AND '1'='2' at line 1</pre></div></body></html>"
+                  }
+                ]
+              },
+              {
+                "ti": 1,
+                "fi": 3,
+                "trueSamples": [
+                  {
+                    "idx": 0,
+                    "len": 491,
+                    "likeBaseline": false,
+                    "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>waf-item</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{bord"
+                  },
+                  {
+                    "idx": 1,
+                    "len": 491,
+                    "likeBaseline": false,
+                    "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>waf-item</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{bord"
+                  },
+                  {
+                    "idx": 2,
+                    "len": 491,
+                    "likeBaseline": false,
+                    "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>waf-item</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{bord"
+                  }
+                ],
+                "falseSamples": [
+                  {
+                    "idx": 0,
+                    "len": 491,
+                    "likeBaseline": false,
+                    "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>waf-item</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{bord"
+                  },
+                  {
+                    "idx": 1,
+                    "len": 491,
+                    "likeBaseline": false,
+                    "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>waf-item</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{bord"
+                  },
+                  {
+                    "idx": 2,
+                    "len": 491,
+                    "likeBaseline": false,
+                    "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>waf-item</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{bord"
+                  }
+                ],
+                "trueRatio": 0,
+                "falseRatio": 1,
+                "meaningfulRatio": 1,
+                "z": 2.82842712474619,
+                "significant": true,
+                "diffs": [
+                  {
+                    "idx": 0,
+                    "lenDelta": 0,
+                    "firstDiffOffset": 453,
+                    "changedSnippet": "se near '\" AND \"1\"=\"2' at line 1</pre></div></body></html>"
+                  },
+                  {
+                    "idx": 1,
+                    "lenDelta": 0,
+                    "firstDiffOffset": 453,
+                    "changedSnippet": "se near '\" AND \"1\"=\"2' at line 1</pre></div></body></html>"
+                  },
+                  {
+                    "idx": 2,
+                    "lenDelta": 0,
+                    "firstDiffOffset": 453,
+                    "changedSnippet": "se near '\" AND \"1\"=\"2' at line 1</pre></div></body></html>"
+                  }
+                ]
+              },
+              {
+                "ti": 4,
+                "fi": 5,
+                "trueSamples": [
+                  {
+                    "idx": 0,
+                    "len": 380,
+                    "likeBaseline": true,
+                    "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>waf-item</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{bord"
+                  },
+                  {
+                    "idx": 1,
+                    "len": 380,
+                    "likeBaseline": true,
+                    "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>waf-item</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{bord"
+                  },
+                  {
+                    "idx": 2,
+                    "len": 380,
+                    "likeBaseline": true,
+                    "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>waf-item</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{bord"
+                  }
+                ],
+                "falseSamples": [
+                  {
+                    "idx": 0,
+                    "len": 325,
+                    "likeBaseline": false,
+                    "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>waf-item</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{bord"
+                  },
+                  {
+                    "idx": 1,
+                    "len": 325,
+                    "likeBaseline": false,
+                    "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>waf-item</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{bord"
+                  },
+                  {
+                    "idx": 2,
+                    "len": 325,
+                    "likeBaseline": false,
+                    "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>waf-item</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{bord"
+                  }
+                ],
+                "trueRatio": 1,
+                "falseRatio": 1,
+                "meaningfulRatio": 1,
+                "z": 2.82842712474619,
+                "significant": true,
+                "diffs": [
+                  {
+                    "idx": 0,
+                    "lenDelta": -55,
+                    "firstDiffOffset": 292,
+                    "changedSnippet": "><div id=\"content\"><p>NO_ROWS</p></div></body></html>"
+                  },
+                  {
+                    "idx": 1,
+                    "lenDelta": -55,
+                    "firstDiffOffset": 292,
+                    "changedSnippet": "><div id=\"content\"><p>NO_ROWS</p></div></body></html>"
+                  },
+                  {
+                    "idx": 2,
+                    "lenDelta": -55,
+                    "firstDiffOffset": 292,
+                    "changedSnippet": "><div id=\"content\"><p>NO_ROWS</p></div></body></html>"
+                  }
+                ]
+              }
+            ],
+            "decision": "vulnerable"
+          }
+        }
+      ],
       "data": null,
-      "riskLevel": "Low",
+      "riskLevel": "High",
       "summary": {
         "constraints": [
           "高危 payload 池（写文件/RCE/重运算类，本配置下候选 1 条）已抑制：productionMode=true 且未 confirmDestructive=true。确需在已授权目标上投放时显式设 confirmDestructive=true；靶场/演练环境可整体关护栏（productionMode=false）"
@@ -8244,42 +8519,37 @@
         "validity": {
           "status": "blocked",
           "reliable": false,
-          "reason": "近 40 次请求中拦截特征 8 次（403/406/429/503 或拦截页文案），窗口拦截占比 1",
+          "reason": "近 40 次请求中拦截特征 8 次（403/406/429/503 或拦截页文案），窗口拦截占比 0.8",
           "counts": {
-            "total": 149,
+            "total": 95,
             "failStreak": 0,
             "blockHits": 8,
-            "serverErr": 0,
-            "injection5xx": 0,
+            "serverErr": 1,
+            "injection5xx": 11,
             "authLostHits": 0,
             "netErrPoints": 0
           },
-          "blockRatio": 1,
+          "blockRatio": 0.8,
           "suggestBackoffMs": null,
           "inconclusivePoints": [],
           "advice": "疑似 WAF/封 IP：降速并加抖动（ratePerSec≤1、jitterMs>0）、套用 tamper 规避链；申请把扫描源 IP 加入 WAF 白名单或换时段复扫；被拦请求对应的点应视为未测"
         },
-        "verdict": "inconclusive",
-        "verdictNote": "未检出漏洞 ≠ 无漏洞：本次扫描 近 40 次请求中拦截特征 8 次（403/406/429/503 或拦截页文案），窗口拦截占比 1；0 个注入点未完成有效检测，阴性结论不成立，需按建议处置后复扫（疑似 WAF/封 IP：降速并加抖动（ratePerSec≤1、jitterMs>0）、套用 tamper 规避链；申请把扫描源 IP 加入 WAF 白名单或换时段复扫；被拦请求对应的点应视为未测）",
-        "wafDetected": [
-          {
-            "vendor": "generic_block",
-            "confidence": 0.55,
-            "evidence": "status=403; generic_block: gs-en-deny-word",
-            "source": "generic_block",
-            "hint": "英文拒绝文案（403/406 常见）",
-            "family": "generic"
-          }
-        ],
+        "verdict": "no_vulnerability_detected",
+        "verdictNote": "本次扫描检出 2 条漏洞；verdict 仅描述「未检出」类阴性结论的可信度，命中详情见 vulns",
+        "dbmsEvidence": {
+          "dbms": "MySQL",
+          "level": "verified",
+          "levelText": "真实引擎验证",
+          "evidence": "e2e/real-mysql-lab（真实 8.0.28 / 8.0.37）+ e2e/waf-real",
+          "caveat": null,
+          "all": [
+            "MySQL:verified"
+          ]
+        },
         "blockPolicy": {
-          "action": "preferTamper",
-          "reason": "命中通用拦截页（generic_block family=generic，confidence=0.55）：建议按推荐链发包",
-          "tamperHint": [
-            "symboliclogical",
-            "equaltorlike",
-            "space2comment",
-            "randomcase"
-          ],
+          "action": "none",
+          "reason": "无拦截证据，保持当前发包形态",
+          "tamperHint": [],
           "backoffMs": null
         },
         "wafAdaptive": {
@@ -8307,17 +8577,17 @@
       "validity": {
         "status": "blocked",
         "reliable": false,
-        "reason": "近 40 次请求中拦截特征 8 次（403/406/429/503 或拦截页文案），窗口拦截占比 1",
+        "reason": "近 40 次请求中拦截特征 8 次（403/406/429/503 或拦截页文案），窗口拦截占比 0.8",
         "counts": {
-          "total": 149,
+          "total": 95,
           "failStreak": 0,
           "blockHits": 8,
-          "serverErr": 0,
-          "injection5xx": 0,
+          "serverErr": 1,
+          "injection5xx": 11,
           "authLostHits": 0,
           "netErrPoints": 0
         },
-        "blockRatio": 1,
+        "blockRatio": 0.8,
         "suggestBackoffMs": null,
         "inconclusivePoints": [],
         "advice": "疑似 WAF/封 IP：降速并加抖动（ratePerSec≤1、jitterMs>0）、套用 tamper 规避链；申请把扫描源 IP 加入 WAF 白名单或换时段复扫；被拦请求对应的点应视为未测"
@@ -8329,7 +8599,7 @@
     "url": "http://127.0.0.1:8231/safe/item?id=1",
     "round": "r2",
     "exit": 0,
-    "ms": 4824,
+    "ms": 4780,
     "hit": false,
     "techs": "",
     "dbms": "",
@@ -8338,9 +8608,9 @@
     "verdict": "no_vulnerability_detected",
     "err": "",
     "raw": {
-      "scanId": "bL-HzX5Vb3UN",
+      "scanId": "nKYlXm0wDXq-",
       "target": {
-        "id": "pEigTZd8Te",
+        "id": "etXzfNk3t5",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/safe/item?id=1",
         "method": "GET",
@@ -8480,8 +8750,8 @@
           }
         }
       },
-      "startedAt": "2026-09-10T15:50:10.699Z",
-      "finishedAt": "2026-09-10T15:50:14.720Z",
+      "startedAt": "2026-09-10T16:01:30.870Z",
+      "finishedAt": "2026-09-10T16:01:34.901Z",
       "dbms": null,
       "points": [
         {
@@ -8564,7 +8834,7 @@
     "url": "http://127.0.0.1:8231/safe/search?q=a",
     "round": "r2",
     "exit": 0,
-    "ms": 4580,
+    "ms": 4664,
     "hit": false,
     "techs": "",
     "dbms": "",
@@ -8573,9 +8843,9 @@
     "verdict": "no_vulnerability_detected",
     "err": "",
     "raw": {
-      "scanId": "kkW953yh8g9s",
+      "scanId": "zatjzD3FR7p_",
       "target": {
-        "id": "jxQUoITNPF",
+        "id": "BTOw_iQlfT",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/safe/search?q=a",
         "method": "GET",
@@ -8715,8 +8985,8 @@
           }
         }
       },
-      "startedAt": "2026-09-10T15:50:15.509Z",
-      "finishedAt": "2026-09-10T15:50:19.364Z",
+      "startedAt": "2026-09-10T16:01:35.711Z",
+      "finishedAt": "2026-09-10T16:01:39.569Z",
       "dbms": null,
       "points": [
         {
@@ -8799,18 +9069,18 @@
     "url": "http://127.0.0.1:8231/safe/rand?x=1",
     "round": "r2",
     "exit": 0,
-    "ms": 4639,
+    "ms": 6864,
     "hit": false,
     "techs": "",
     "dbms": "",
     "risk": "Low",
-    "reqs": 242,
+    "reqs": 346,
     "verdict": "no_vulnerability_detected",
     "err": "",
     "raw": {
-      "scanId": "o22XUzQYPz4H",
+      "scanId": "Hs1CmHkqtc1g",
       "target": {
-        "id": "L8h-eluzxf",
+        "id": "O5Y9C_eb0S",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/safe/rand?x=1",
         "method": "GET",
@@ -8950,8 +9220,8 @@
           }
         }
       },
-      "startedAt": "2026-09-10T15:50:20.133Z",
-      "finishedAt": "2026-09-10T15:50:23.996Z",
+      "startedAt": "2026-09-10T16:01:40.357Z",
+      "finishedAt": "2026-09-10T16:01:46.289Z",
       "dbms": null,
       "points": [
         {
@@ -8985,9 +9255,9 @@
         "validity": {
           "status": "ok",
           "reliable": true,
-          "reason": "目标可达性与会话状态正常：累计 242 次请求，无连续失败/拦截/会话失效/持续 5xx 迹象",
+          "reason": "目标可达性与会话状态正常：累计 346 次请求，无连续失败/拦截/会话失效/持续 5xx 迹象",
           "counts": {
-            "total": 242,
+            "total": 346,
             "failStreak": 0,
             "blockHits": 0,
             "serverErr": 0,
@@ -9012,9 +9282,9 @@
       "validity": {
         "status": "ok",
         "reliable": true,
-        "reason": "目标可达性与会话状态正常：累计 242 次请求，无连续失败/拦截/会话失效/持续 5xx 迹象",
+        "reason": "目标可达性与会话状态正常：累计 346 次请求，无连续失败/拦截/会话失效/持续 5xx 迹象",
         "counts": {
-          "total": 242,
+          "total": 346,
           "failStreak": 0,
           "blockHits": 0,
           "serverErr": 0,
@@ -9034,7 +9304,7 @@
     "url": "http://127.0.0.1:8231/safe/boom?id=1",
     "round": "r2",
     "exit": 0,
-    "ms": 2743,
+    "ms": 2787,
     "hit": false,
     "techs": "",
     "dbms": "",
@@ -9043,9 +9313,9 @@
     "verdict": "inconclusive",
     "err": "",
     "raw": {
-      "scanId": "CgsPKWhs_yoy",
+      "scanId": "qfrp0x_04DmY",
       "target": {
-        "id": "WSmZsYTgt0",
+        "id": "FRImEkHizh",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/safe/boom?id=1",
         "method": "GET",
@@ -9185,8 +9455,8 @@
           }
         }
       },
-      "startedAt": "2026-09-10T15:50:24.709Z",
-      "finishedAt": "2026-09-10T15:50:26.692Z",
+      "startedAt": "2026-09-10T16:01:47.209Z",
+      "finishedAt": "2026-09-10T16:01:49.189Z",
       "dbms": null,
       "points": [
         {
@@ -9269,7 +9539,7 @@
     "url": "http://127.0.0.1:8231/safe/blocked?id=1",
     "round": "r2",
     "exit": 0,
-    "ms": 2973,
+    "ms": 3028,
     "hit": false,
     "techs": "",
     "dbms": "",
@@ -9278,9 +9548,9 @@
     "verdict": "inconclusive",
     "err": "",
     "raw": {
-      "scanId": "7qpnFpO-IsQR",
+      "scanId": "isLPDs8R2yJa",
       "target": {
-        "id": "ZWEy9dERDx",
+        "id": "Ewq19YrlAA",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/safe/blocked?id=1",
         "method": "GET",
@@ -9420,8 +9690,8 @@
           }
         }
       },
-      "startedAt": "2026-09-10T15:50:27.491Z",
-      "finishedAt": "2026-09-10T15:50:29.666Z",
+      "startedAt": "2026-09-10T16:01:50.026Z",
+      "finishedAt": "2026-09-10T16:01:52.198Z",
       "dbms": null,
       "points": [
         {
@@ -9540,7 +9810,7 @@
     "url": "http://127.0.0.1:8231/safe/redirect?id=1",
     "round": "r2",
     "exit": 0,
-    "ms": 4825,
+    "ms": 4784,
     "hit": false,
     "techs": "",
     "dbms": "",
@@ -9549,9 +9819,9 @@
     "verdict": "no_vulnerability_detected",
     "err": "",
     "raw": {
-      "scanId": "MgzoivrcfE8S",
+      "scanId": "Z7PavWZSPrqy",
       "target": {
-        "id": "u-GY6gvSHi",
+        "id": "NsKwpGBf-m",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/safe/redirect?id=1",
         "method": "GET",
@@ -9691,8 +9961,8 @@
           }
         }
       },
-      "startedAt": "2026-09-10T15:50:30.493Z",
-      "finishedAt": "2026-09-10T15:50:34.524Z",
+      "startedAt": "2026-09-10T16:01:53.007Z",
+      "finishedAt": "2026-09-10T16:01:57.034Z",
       "dbms": null,
       "points": [
         {
@@ -9775,7 +10045,7 @@
     "url": "http://127.0.0.1:8231/safe/static?id=1",
     "round": "r2",
     "exit": 0,
-    "ms": 4822,
+    "ms": 4816,
     "hit": false,
     "techs": "",
     "dbms": "",
@@ -9784,9 +10054,9 @@
     "verdict": "no_vulnerability_detected",
     "err": "",
     "raw": {
-      "scanId": "24WsUTCkzxWk",
+      "scanId": "bDFTqBQeOBzt",
       "target": {
-        "id": "mQjrzCMgMc",
+        "id": "st6T6uEjxN",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/safe/static?id=1",
         "method": "GET",
@@ -9926,8 +10196,8 @@
           }
         }
       },
-      "startedAt": "2026-09-10T15:50:35.283Z",
-      "finishedAt": "2026-09-10T15:50:39.296Z",
+      "startedAt": "2026-09-10T16:01:57.816Z",
+      "finishedAt": "2026-09-10T16:02:01.832Z",
       "dbms": null,
       "points": [
         {

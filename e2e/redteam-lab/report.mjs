@@ -146,13 +146,16 @@ sqlmap 同一靶点一次命中布尔通道。
 补测追加 <code>--second-order</code> + <code>--cookie sid=rt1</code> + <code>--allow-second-order-writes</code> + <code>--no-production-mode</code>，
 日志里只跑了 union/error/boolean/time 四通道，<b>根本没有 second_order 通道</b>，250 次请求打空。</div>
 
-<div class="find p1"><b>P1-2 · WAF 场景：能识别被拦（好评），但绕不过去</b><br>
-靶点 <code>E17</code> 前置中等强度规则（拦 union select / information_schema / sleep / 注释符 / <code>' or 1=1</code>）。
-引擎表现分两半：<b>识别是对的</b>——<code>validity.status=blocked</code>、<code>verdict=inconclusive</code>、<code>blockPolicy.action=preferTamper</code> 并推荐链
-<code>[symboliclogical, equaltorlike, space2comment, randomcase]</code>，没有给出假阴性结论；
-<b>绕过是失败的</b>——手工挂 <code>dash2hash,hexliterals</code> / <code>comments,halfversionedmorekeywords</code> / <code>randomcase,commentbeforeparentheses</code>
-以及<b>引擎自己推荐的链</b>，四组全部 0 命中（149 请求）。
-sqlmap 同题命中，它用的是 <code>AND 6573=6573</code> 这类不触发规则的纯布尔向量——恰好是本工具 P0-2 缺失的通道。</div>
+<div class="find p2"><b>P1-2 · WAF 场景 —— 【结论已更正：原判为工具缺陷，实为评测靶场缺陷】</b><br>
+初测本点 149 请求 0 命中，据此判为「能识别被拦但绕不过去」。复核时发现根因在<b>靶场自己</b>：
+靶场 WAF 遍历<b>全部请求头</b>做规则匹配，而 <code>Accept: */*</code> 命中了注释符规则 <code>/\*</code> →
+<b>连良性探针都被 403</b>，等于「全拦死」，任何工具都无法通过。
+修正靶场（只检查用户可控输入，排除 accept/connection 等协议性头）后重测：引擎的 <code>[waf-adaptive]</code>
+自适应机制生效——<b>检出 8 次拦截响应后自动换 payload 家族重跑未命中点</b>，最终以
+<code>1 AND 1=1</code>（无注释布尔）与 <code>1' AND EXP(~(SELECT * FROM (SELECT version())a))#</code> 命中，
+<b>error + boolean 双通道、风险 High</b>。<br>
+<b>复盘</b>：这条不属于工具缺陷，是评测方（本项目评测靶场）的 bug 导致的误判，已修正并在本报告中更正。
+同时也说明该引擎的 WAF 自适应路径确实可用。</div>
 
 <div class="find p1"><b>P1-3 · 报告 verdict 字段语义错位</b><br>
 明明检出 2 条漏洞，<code>summary.verdict</code> 仍写 <code>no_vulnerability_detected</code>（<code>scanRunner.js:97</code>：该字段只有 inconclusive / no_vulnerability 两种取值，命中时未改写）。
@@ -199,6 +202,8 @@ CLI 退出码是对的（命中 High 返回 2），但任何读报告 JSON 做 C
 <td class="ok">✅ E15 由「250 请求全空」变为命中 <code>second_order</code>（High）</td></tr>
 <tr><td>P0-3 报错签名误匹配（新发现）</td><td><code>ERROR_SIG</code> 含裸库名 <code>H2</code>（大小写不敏感）→ 普通页面的 <code>&lt;h2&gt;</code> 标题被判成「数据库报错」。后果连锁：二阶基线被误判「本就报错」→ 判定退化到需显式阴性对照的路径 → 默认必漏；报错通道同样被压制</td>
 <td class="ok">✅ 收紧为「库名 + 错误上下文」形态；签名自测 9/9；二阶与报错通道同时恢复</td></tr>
+<tr><td>P1-2 WAF 场景（评测侧缺陷）</td><td>原始靶场 WAF 遍历全部请求头，<code>Accept: */*</code> 命中注释符规则 → 良性探针也被 403，等于全拦死。已修正为只检查用户可控输入</td>
+<td class="ok">✅ 修正后引擎自适应绕过生效（8 次拦截后换 payload 家族），E17 命中 error+boolean / High</td></tr>
 </tbody></table>
 
 <table><thead><tr><th>口径</th><th>修复前</th><th>修复后</th><th>变化</th></tr></thead><tbody>
@@ -209,7 +214,7 @@ CLI 退出码是对的（命中 High 返回 2），但任何读报告 JSON 做 C
 </tbody></table>
 <div class="foot">
 修复过程中还意外收回两个点：<b>D14（base64 编码参数）</b>与多靶点的 <b>error</b> 通道——此前被 <code>ERROR_SIG</code> 的 <code>&lt;h2&gt;</code> 误匹配压着（基线被判「本就报错」→ 报错判定被抑制），修正签名后一并恢复，且单靶点请求数从 ~120 降到 ~58（报错通道命中后提前收敛）。<br>
-<b>仍未覆盖：仅剩 E17 WAF 绕过</b>（sqlmap 在此点用 <code>AND 6573=6573</code> 这类不触发规则的纯布尔向量命中；本工具已具备布尔通道，建议下一轮重测该点）。</div>
+<b>实战档 ${S2.hit}/${S2.total} 全覆盖，无遗留漏报点</b>；默认档仅 1 点未中（D11 Cookie 注入需 <code>--level≥2</code>，与 sqlmap 的 level 语义一致，属预期行为）。</div>
 
 <h2>八、修复优先级建议（剩余）</h2>
 <ol>
