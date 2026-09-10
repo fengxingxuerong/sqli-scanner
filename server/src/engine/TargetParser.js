@@ -1,5 +1,7 @@
 import { URL } from 'url';
 import { createInjectionPoint } from './models.js';
+// [编码参数] base64 / 0x-hex 参数值识别（payload 需按同样编码发送）
+import { detectParamEncoding } from './paramEncoding.js';
 import { httpClient as defaultHttpClient } from '../core/httpClient.js';
 import { LinkCrawler, attrValue } from './crawler.js';
 
@@ -68,7 +70,7 @@ export class TargetParser {
     if (target.baseUrl) {
       try {
         const u = new URL(target.baseUrl);
-        for (const [k, v] of u.searchParams.entries()) {
+        for (const [k, v] of this._queryEntries(u, config)) {
           points.push(createInjectionPoint('url', k, v));
         }
       } catch {
@@ -165,6 +167,27 @@ export class TargetParser {
     const crawlDepth = Number(config.crawlDepth) || 0;
     if (level >= 5 && crawlDepth > 0) {
       await this._crawlLinks(target, points, crawlDepth);
+    }
+
+    // 6.8) 编码参数识别（base64 / 0x-hex）—— 必须在所有注入点生成之后统一打标，
+    //   否则 cookie/header/path/爬取点位会漏识别。参数值经编码传输时（SPA/移动端 API
+    //   常见：?id=MQ==），直接投 payload 无效——服务端解码后才拼 SQL；
+    //   打标后由 buildInjectionRequest 按同一规则编码 payload 再发。
+    //   判定刻意保守（见 paramEncoding.js）：误标会把正常注入点搞成"打不动"。
+    //   注意 originalValue 必须换成**解码后的语义值**：payload 是基于参数语义构造的
+    //   （`1' AND '1'='1`），而不是基于线上形态（`MQ==`）。若沿用原值，会拼出
+    //   `MQ==' AND '1'='1` 这种语义错误的 payload，服务端解码后直接语法错 →
+    //   真/假值响应相同 → 布尔判定只能靠响应噪声"碰运气"命中（实测发现该误报）。
+    //   线上原值保留在 rawValue 里（报告展示/排查用）；发送时统一由 encodeForPoint 编码。
+    for (const p of points) {
+      if (p.encoding) continue;
+      const enc = detectParamEncoding(p.originalValue);
+      if (enc) {
+        p.encoding = enc.encoding;
+        p.rawValue = p.originalValue; // 线上原值（如 MQ==）
+        p.originalValue = enc.decoded; // 语义值（如 1）——payload 基于它构造
+        p.decodedValue = enc.decoded;
+      }
     }
 
     // 7) 精确注入点标记（P1-U4，对标 sqlmap -p / `*`）：任一参数值以 `*` 结尾 → 仅保留该参数。
@@ -335,6 +358,28 @@ export class TargetParser {
         );
       }
     }
+  }
+
+  /**
+   * [对标 sqlmap --param-del] 取 URL 查询参数（支持自定义分隔符）。
+   *
+   * 标准 URLSearchParams 只认 `&`：遇到 `?a=1;b=2` 这类站点会把整个 "a=1;b=2"
+   * 当成**一个**参数的值 → 注入点发现退化（少一个点，且值切错）。
+   * config.paramDel 存在且 query 里确实出现该分隔符时，按它手工切分；
+   * 否则完全走原路径（默认行为零变化）。
+   */
+  _queryEntries(u, config) {
+    const del = config && config.paramDel;
+    const raw = u.search.startsWith('?') ? u.search.slice(1) : u.search;
+    if (!del || !raw.includes(del)) return [...u.searchParams.entries()];
+    const dec = (s) => { try { return decodeURIComponent(s); } catch { return s; } };
+    return raw
+      .split(del)
+      .map((pair) => {
+        const i = pair.indexOf('=');
+        return i < 0 ? [dec(pair), ''] : [dec(pair.slice(0, i)), dec(pair.slice(i + 1))];
+      })
+      .filter(([k]) => k !== '');
   }
 
   // 注入点去重 key（同 URL+参数不重复加）：

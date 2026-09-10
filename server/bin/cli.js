@@ -77,6 +77,7 @@ function parseArgs(argv) {
     // —— 强制 DBMS / 二阶触发页 / 授权声明 ——
     dbms: null, secondOrderUrl: null, authorized: false,
     dumpAll: false, identifyWaf: false, commonTables: null, commonColumns: null,
+    randomAgent: false, where: null, paramDel: null,
     // 内部：从请求文件解析出的 header 对象（buildAuth 直接使用）
     headerObj: null,
   };
@@ -137,6 +138,12 @@ function parseArgs(argv) {
     //   （information_schema 被 WAF 拦 / 权限不足 / 非 MySQL 时的唯一出路）
     else if (a === '--common-tables') args.commonTables = '1';
     else if (a === '--common-columns') args.commonColumns = '1';
+    // [对标 sqlmap --random-agent] 每次请求从 UA 池随机取（含桌面 + 移动端）
+    else if (a === '--random-agent') args.randomAgent = true;
+    // [对标 sqlmap --where] 拖库条件过滤（仅 --dump / --dump-all 生效）
+    else if (a === '--where') args.where = next();
+    // [对标 sqlmap --param-del] 自定义参数分隔符（默认 &，用于 a=1;b=2 这类非标准站点）
+    else if (a === '--param-del') args.paramDel = next();
     else if (a === '--tamper') args.tamper = next();
     else if (a === '--proxy') args.proxy = next();
     else if (a === '--scope') args.scope = next();
@@ -262,6 +269,8 @@ function printHelp() {
   --common-tables            字典爆破表名（对标 sqlmap --common-tables）：
                              information_schema 被 WAF 拦 / 权限不足 / 非 MySQL 时的枚举出路
   --common-columns           字典爆破列名（对标 sqlmap --common-columns）：配合 -D/-T 使用
+  --where <cond>             拖库条件过滤（对标 sqlmap --where）：如 --dump -D db -T t --where "id>100"
+                             仅 --dump / --dump-all 生效；条件原样拼入 SQL，不做转义（与 sqlmap 一致）
   --dbs                      枚举数据库（对标 sqlmap --dbs，自动排除系统库，--no-exclude-sysdbs 关闭）
   --tables -D <db>           枚举指定库的表（对标 sqlmap --tables -D）
   --columns -D <db> -T <t>  枚举指定表列（对标 sqlmap --columns -D -T）
@@ -349,6 +358,8 @@ function printHelp() {
   --tor                     走 Tor（默认 socks5://127.0.0.1:9050）
   --check-tor               先校验 Tor 出口（请求 check.torproject.org 确认匿名化生效）再扫描
   --mobile                  随机移动端 UA 池（对标 sqlmap --mobile）
+  --random-agent            每次请求随机 UA（桌面 + 移动全池，对标 sqlmap --random-agent）
+  --param-del <c>           自定义参数分隔符（对标 sqlmap --param-del）：默认 &，用于 a=1;b=2 这类站点
   --force-ssl              目标 http:// 强制升级 https（对标 sqlmap --force-ssl）
   --ignore-redirects        不跟随 3xx 跳转，直接返回跳转响应（对标 sqlmap --ignore-redirects）
   --hpp                     注入参数双份提交（query+body 同名，WAF 绕过，对标 sqlmap --hpp）
@@ -810,6 +821,12 @@ function buildConfig(args) {
   if (args.tor && !config.proxy) config.proxy = 'socks5://127.0.0.1:9050';
   // --mobile：随机移动端 UA 池
   if (args.mobile) config.wafEvasion = { ...(config.wafEvasion || {}), randomUA: 'mobile' };
+  // [对标 sqlmap --random-agent] 随机桌面/移动 UA（--mobile 更窄，两者都给时 --mobile 优先）
+  if (args.randomAgent && !args.mobile) config.wafEvasion = { ...(config.wafEvasion || {}), randomUA: 'desktop' };
+  // [对标 sqlmap --where] 拖库条件过滤（透传 extractScope → dumpData opts.where）
+  if (args.where) config.dumpWhere = String(args.where);
+  // [对标 sqlmap --param-del] 自定义参数分隔符（TargetParser 按该分隔符切 query）
+  if (args.paramDel) config.paramDel = String(args.paramDel).slice(0, 1);
   // —— HTTP 协议层（对标 sqlmap --force-ssl / --ignore-redirects / --hpp）——
   // forceSsl：目标 http:// 强制升级 https（对标 sqlmap --force-ssl，httpClient.request 消费）
   if (args.forceSsl) config.forceSsl = true;

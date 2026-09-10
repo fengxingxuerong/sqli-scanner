@@ -156,6 +156,8 @@ export async function extractByScope(sm, scanId, ctx, scope) {
           break;
         }
         const dumped = await sm.extractor.dumpAllDatabases(ctx, dbs, {
+          // [对标 sqlmap --where] 全库拖库同样支持条件过滤
+          where: ctx.config?.dumpWhere || null,
           onUnconfirmedEmpty: (db, t) =>
             logger.warn(`全库拖库：${db}.${t} 返回 0 行且未确认（空表 / 无权限 / 被拦截）`),
         });
@@ -212,7 +214,10 @@ export async function extractByScope(sm, scanId, ctx, scope) {
             try {
               const cols = colsList || (await sm.extractor.enumerateColumns(ctx, db, t));
               data.columns[`${db}.${t}`] = cols;
-              data.rows[`${db}.${t}`] = await sm.extractor.dumpData(ctx, db, t, cols);
+              // [对标 sqlmap --where] 条件过滤透传（条件原样进 SQL，与 sqlmap 行为一致）
+              data.rows[`${db}.${t}`] = await sm.extractor.dumpData(ctx, db, t, cols, undefined, {
+                where: ctx.config?.dumpWhere || null,
+              });
             } catch (e) {
               logger.warn(`拖库失败 ${db}.${t}：${e.message}`);
               data.rows[`${db}.${t}`] = [];

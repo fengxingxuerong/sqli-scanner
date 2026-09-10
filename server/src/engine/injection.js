@@ -5,6 +5,8 @@ import { resolveDbms, resolveFromClause, commentSuffix } from './DialectSqlBuild
 // [P0-FIX 2026-09-09] 出口选项同源 + 失败响应结构（见 egressOpts.js 顶部三起事故）
 import { buildEgressOpts, mustRethrowSendError, netFailureResponse } from './egressOpts.js';
 import { unionDebug } from './unionDebug.js';
+// [编码参数] payload 需按参数自身的传输编码（base64 / 0x-hex）编码后再发
+import { encodeForPoint } from './paramEncoding.js';
 
 // [P1 批次 2026-09-08] JSON 点路径段 → 真实键匹配（buildInjectionRequest JSON 分支用）。
 // 三向匹配（与 TargetParser._discoverJsonLeaves 的路径生成互逆）：
@@ -83,7 +85,10 @@ export function applyPrefixSuffix(target, point, value) {
 // 与 Detector.buildRequest / Extractor._build / DBFingerprinter._build 行为一致，集中维护避免三处漂移。
 export function buildInjectionRequest(target, point, value) {
   // 先包裹 prefix/suffix（对标 sqlmap --prefix/--suffix），再按注入点位置拼入请求
-  const injected = applyPrefixSuffix(target, point, value);
+  const wrapped = applyPrefixSuffix(target, point, value);
+  // [编码参数] 参数值本身是 base64 / 0x-hex 传输时，payload 必须先编码成同样形态再发：
+  // 服务端解码后才拼进 SQL，直接发原始 payload 是无效的（实测 D14 靶点只能靠报错碰运气）。
+  const injected = encodeForPoint(wrapped, point && point.encoding);
   // 直连模式：把 value（注入 payload）拼进 SQL 模板的 {INJECT} 标记处，产出 req.sql（由 DirectConnector 执行）。
   if (target && target.mode === 'direct') {
     const tpl = (point && point.sqlTemplate) || (target && target.sqlTemplate);
@@ -130,7 +135,25 @@ export function buildInjectionRequest(target, point, value) {
         preEncoded = false; // 非法序列（如 '%a%'）→ 未编码
       }
     }
-    if (preEncoded) {
+    // [对标 sqlmap --param-del] 自定义分隔符：searchParams 只认 '&'，用它重建会把
+    // `a=1;b=2` 整体写成一个参数值 → 注入请求畸形。此处按用户分隔符手工重建 query。
+    const paramDel = (target.config && target.config.paramDel) || null;
+    if (paramDel) {
+      const rawQ = u.search.startsWith('?') ? u.search.slice(1) : u.search;
+      const val = preEncoded ? injected : encodeURIComponent(injected);
+      let hit = false;
+      const parts = rawQ.split(paramDel).filter(Boolean).map((pair) => {
+        const i = pair.indexOf('=');
+        const k = i < 0 ? pair : pair.slice(0, i);
+        if (k === point.param) {
+          hit = true;
+          return `${k}=${val}`;
+        }
+        return pair;
+      });
+      if (!hit) parts.push(`${encodeURIComponent(point.param)}=${val}`);
+      req.url = `${u.origin}${u.pathname}?${parts.join(paramDel)}`;
+    } else if (preEncoded) {
       // 手工拼 query：先移除同名旧参数，injected 已是编码形态仅编码参数名
       u.searchParams.delete(point.param);
       const rest = u.searchParams.toString();

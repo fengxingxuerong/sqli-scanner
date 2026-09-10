@@ -155,6 +155,21 @@ export async function createLabApp() {
     return rowsHtml(await q(`SELECT id,name,email FROM users WHERE id=${id}`));
   }));
 
+  // D15 自定义参数分隔符（; ）——模拟只认分号的站点。
+  // Express 默认按 & 解析会把 `a=1;id=1` 整体塞进 a 的值，所以这里从 originalUrl 手工切。
+  app.get('/shop/semi', (req, res) => run(res, 'semi', async () => {
+    const qs = String(req.originalUrl).split('?')[1] || '';
+    const map = {};
+    for (const part of qs.split(';')) {
+      if (!part) continue;
+      const i = part.indexOf('=');
+      if (i < 0) { map[decodeURIComponent(part)] = ''; continue; }
+      map[decodeURIComponent(part.slice(0, i))] = decodeURIComponent(part.slice(i + 1));
+    }
+    const id = map.id ?? '1';
+    return rowsHtml(await q(`SELECT id,name,email FROM users WHERE id=${id}`));
+  }));
+
   // ───────────────────────── E. 高阶场景 ─────────────────────────
   // E15 二阶注入：POST 存储 → GET 触发（触发页需会话，无 cookie 401）
   const store = new Map();

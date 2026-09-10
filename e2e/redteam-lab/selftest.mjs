@@ -44,6 +44,8 @@ const TARGETS = [
   { id: 'D12-xff-header', kind: 'vuln', tech: 'union', call: () => get('/shop/ip', { 'x-forwarded-for': '-1 UNION SELECT 1,user(),database()' }), prove: (r) => /root@/.test(r.text) },
   { id: 'D13-path', kind: 'vuln', tech: 'union', call: () => get(`/shop/user/${enc('-1 UNION SELECT 1,user(),database()')}`), prove: (r) => /root@/.test(r.text) },
   { id: 'D14-base64', kind: 'vuln', tech: 'union', call: () => get(`/shop/b64?id=${Buffer.from('-1 UNION SELECT 1,user(),database()').toString('base64')}`), prove: (r) => /root@/.test(r.text) },
+  // D15 自定义参数分隔符（; ）：query 按分号切分，id 处拼接 SQL
+  { id: 'D15-param-del', kind: 'vuln', tech: 'union', call: () => get(`/shop/semi?a=1;id=${enc('-1 UNION SELECT 1,user(),database()-- ')}`), prove: (r) => /root@/.test(r.text) },
   {
     id: 'E15-second-order', kind: 'vuln', tech: 'second_order',
     call: async () => {
