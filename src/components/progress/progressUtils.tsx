@@ -8,7 +8,9 @@ import InfoIcon from '@mui/icons-material/Info';
 import WarningIcon from '@mui/icons-material/Warning';
 import BugReportIcon from '@mui/icons-material/BugReport';
 import SecurityIcon from '@mui/icons-material/Security';
-import type { ScanStatus, ScanEvent } from '../../shared/types';
+import GppBadIcon from '@mui/icons-material/GppBad';
+import HourglassBottomIcon from '@mui/icons-material/HourglassBottom';
+import type { ScanStatus, ScanEvent, ScanValidity } from '../../shared/types';
 
 export const STATUS_COLOR: Record<ScanStatus, 'default' | 'info' | 'success' | 'warning' | 'error'> = {
   pending: 'default', running: 'info', paused: 'warning', completed: 'success', stopped: 'warning', error: 'error',
@@ -33,6 +35,10 @@ export const EVENT_STYLE: Record<string, { icon: ReactNode; color: string }> = {
   scan_resumed: { icon: <InfoIcon fontSize="small" />, color: '#1565c0' },
   scan_error: { icon: <ErrorIcon fontSize="small" />, color: '#d32f2f' },
   waf_detected: { icon: <WarningIcon fontSize="small" />, color: '#dc2626' },
+  // [P0-FIX 2026-09-09] 结论可信度守卫事件：扫描中实时看到「已被封/目标挂了/会话失效」
+  scan_validity: { icon: <WarningIcon fontSize="small" />, color: '#f59e0b' },
+  scan_validity_abort: { icon: <GppBadIcon fontSize="small" />, color: '#d32f2f' },
+  waf_block_policy: { icon: <HourglassBottomIcon fontSize="small" />, color: '#ed6c02' },
   sqlmap_log: { icon: <InfoIcon fontSize="small" />, color: '#374151' },
   sqlmap_vuln: { icon: <CheckCircleIcon fontSize="small" />, color: '#2e7d32' },
 };
@@ -48,6 +54,30 @@ export const LOG_COLOR: Record<string, string> = {
 };
 
 type TFunc = ReturnType<typeof useTranslation>['t'];
+
+// 可信度状态 → 中文短标签（与 ValidityBanner 同一组 i18n 键，防漂移）
+const VALIDITY_STATUS_KEY: Record<string, string> = {
+  ok: 'report.validity.status.ok',
+  blocked: 'report.validity.status.blocked',
+  unreachable: 'report.validity.status.unreachable',
+  session_expired: 'report.validity.status.session_expired',
+  target_error: 'report.validity.status.target_error',
+};
+
+// scan_validity / scan_validity_abort 共用渲染：状态标签 + 实测原因（+ 中止时的未完成点数）
+function renderValidity(p: ScanValidity & { scanId?: string }, t: TFunc, aborted: boolean) {
+  const label = t(VALIDITY_STATUS_KEY[p.status] || 'report.validity.status.ok');
+  return (
+    <span>
+      <b>{aborted ? t('progress.scanValidityAbort') : t('progress.scanValidity')}</b>
+      {' · '}{label}
+      {p.reason ? `：${p.reason}` : ''}
+      {aborted && p.inconclusivePoints?.length
+        ? ` · ${t('progress.validityInconclusivePoints', { count: p.inconclusivePoints.length })}`
+        : ''}
+    </span>
+  );
+}
 
 export function renderSecondary(e: ScanEvent, t: TFunc) {
   if (e.type === 'http_request') {
@@ -79,6 +109,35 @@ export function renderSecondary(e: ScanEvent, t: TFunc) {
   if (e.type === 'point_discovered') {
     const p = e.payload as { points?: unknown[] };
     return <span>{t('progress.pointsDiscovered', { count: p.points?.length || 0 })}</span>;
+  }
+  // [P0-FIX 2026-09-09] 可信度守卫：扫描中实时提示「已被封/目标挂了/会话失效」
+  if (e.type === 'scan_validity') {
+    return renderValidity(e.payload as ScanValidity, t, false);
+  }
+  if (e.type === 'scan_validity_abort') {
+    return renderValidity(e.payload as ScanValidity & { scanId?: string }, t, true);
+  }
+  // WAF 拦截策略变更（action/退避/推荐 tamper 链，仅提示不自动套用）
+  if (e.type === 'waf_block_policy') {
+    const p = e.payload as { action?: string; backoffMs?: number | null; tamperHint?: string[]; reason?: string };
+    return (
+      <span>
+        {t('progress.wafBlockPolicy', { action: p.action ?? '-' })}
+        {p.backoffMs != null ? ` · ${t('progress.wafBlockBackoff', { ms: p.backoffMs })}` : ''}
+        {p.tamperHint?.length ? ` · ${p.tamperHint.join(' → ')}` : ''}
+        {p.reason ? `：${p.reason}` : ''}
+      </span>
+    );
+  }
+  // 注入点跳过：既有事件新增可选 note（预筛/输入校验/静态），展示原因供审计
+  if (e.type === 'point_skipped') {
+    const p = e.payload as { pointId?: string; reason?: string; note?: string };
+    return (
+      <span>
+        {t('progress.pointSkipped', { pointId: p.pointId ?? '-', reason: p.reason ?? '-' })}
+        {p.note ? `：${p.note}` : ''}
+      </span>
+    );
   }
   return typeof e.payload === 'object' ? JSON.stringify(e.payload) : String(e.payload);
 }

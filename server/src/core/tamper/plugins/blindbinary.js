@@ -73,6 +73,9 @@ const SET_TAIL = /\s*,\s*(\d+)\s*,\s*1\)\)\s+IN\s*\(([\d,\s]+)\)/;
 export const blindbinary = {
   name: 'blindbinary',
   description: '盲注单字符读取改写为 RIGHT(LEFT()) 字节序比较（消除 ORD/MID/SUBSTRING 函数名记分）',
+  // [P0 2026-09-09] 幂等性声明（tamper.idempotency.test.js 守卫强制 f(f(x))===f(x)）：
+  // 改写后的输出不再含 ORD(MID(/UNICODE(SUBSTRING( 触发模式，二次应用是空操作
+  idempotent: true,
   doctests: [
     {
       input: '1 AND ORD(MID((SELECT 1),1,1))>0',

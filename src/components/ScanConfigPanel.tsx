@@ -20,7 +20,8 @@ import {
 } from '@mui/material';
 import { ExpandMore, ExpandLess, Settings } from '@mui/icons-material';
 import type { ScanConfig, EngineType, WafSuggestion, TechniqueType } from '../shared/types';
-import { TECHNIQUES } from '../shared/constants';
+import { TECHNIQUES, BUILTIN_DBMS_OPTIONS } from '../shared/constants';
+import { parseScopeList } from '../shared/scanConfig';
 import WafTamperPanel from './WafTamperPanel';
 
 interface ScanConfigPanelProps {
@@ -40,6 +41,21 @@ export default function ScanConfigPanel({ config, mode, onChange, wafSuggestion 
 
   const handleNumber = (key: keyof ScanConfig) => (_: Event, val: number | number[]) => {
     onChange({ [key]: val as number });
+  };
+
+  // [P0-FIX 2026-09-09] 字符串型配置键统一走这里（matchString / notString / testFilter / testSkip）。
+  // 这些键在后端是**字符串**（Detector.matchAnchors 用 text.includes()、payloadRegistry 用子串匹配），
+  // 用布尔开关表达 = 勾了但传了错的类型，引擎侧静默按「真页含 'true'」这种荒谬规则跑。
+  // 空串 → undefined：关闭态在请求体里干脆地没这个键，而不是发个 '' 让后端去猜。
+  const handleText = (key: keyof ScanConfig) => (e: React.ChangeEvent<HTMLInputElement>) => {
+    const v = e.target.value.trim();
+    onChange({ [key]: v === '' ? undefined : v } as Partial<ScanConfig>);
+  };
+
+  // 授权范围：多行/逗号（或分号）分隔 → string[]；留空 = 不启用（发 undefined，后端零行为变化）
+  const handleScopeChange = (raw: string) => {
+    const list = parseScopeList(raw);
+    onChange({ scope: list.length ? list : undefined });
   };
 
   return (
@@ -276,6 +292,155 @@ export default function ScanConfigPanel({ config, mode, onChange, wafSuggestion 
               </Box>
             </Stack>
           </Box>
+
+          {mode === 'builtin' && (
+            <>
+              <Divider />
+              {/* ── 授权范围与传输安全（[P0-SEC] scope 硬约束 + insecureTls；仅内置引擎透传）── */}
+              <Box>
+                <Typography variant="subtitle2" fontWeight={600} className="mb-3">{t('scanConfig.scopeSecurity')}</Typography>
+                <Stack spacing={2}>
+                  <Box>
+                    <Typography variant="caption" color="text.secondary">{t('scanConfig.scopeLabel')}</Typography>
+                    <textarea
+                      className="mt-1 w-full px-3 py-2 border rounded text-sm"
+                      style={{ minHeight: 56, resize: 'vertical' }}
+                      placeholder={t('scanConfig.scopePlaceholder')}
+                      aria-label={t('scanConfig.scopeLabel')}
+                      value={(config.scope ?? []).join('\n')}
+                      onChange={(e) => handleScopeChange(e.target.value)}
+                    />
+                    <Typography variant="caption" color="text.disabled">
+                      {t('scanConfig.scopeHint')}
+                    </Typography>
+                  </Box>
+                  <FormControlLabel
+                    control={<Switch checked={config.insecureTls ?? false} onChange={handleToggle('insecureTls')} />}
+                    label={t('scanConfig.insecureTlsLabel')}
+                  />
+                  {config.insecureTls && (
+                    <Alert severity="warning" variant="outlined">
+                      {t('scanConfig.insecureTlsWarning')}
+                    </Alert>
+                  )}
+                  <FormControlLabel
+                    control={<Switch checked={config.validationSkip !== false} onChange={handleToggle('validationSkip')} />}
+                    label={t('scanConfig.validationSkipLabel')}
+                  />
+                  <Typography variant="caption" color="text.disabled">
+                    {t('scanConfig.validationSkipHint')}
+                  </Typography>
+                </Stack>
+              </Box>
+            </>
+          )}
+
+          {mode === 'builtin' && (
+            <>
+              <Divider />
+              {/* ── payload 与响应判定调优（[P0-FIX 2026-09-09] 后端已支持、UI 补接的开关）──
+                  这些键以前在面板上根本不存在（或只写 store 不进 startScan），后果分两种：
+                  · 预筛/静态跳过的预算控制勾不到 → 对大目标多发几倍无用请求；
+                  · matchString/notString 无入口 → 强动态页面的布尔盲注只能靠相似度比对，误报/漏报无法人工锺定。 */}
+              <Box>
+                <Typography variant="subtitle2" fontWeight={600} className="mb-3">{t('scanConfig.payloadTuning')}</Typography>
+                <Stack spacing={2}>
+                  <FormControlLabel
+                    control={<Switch checked={config.prefilter !== false} onChange={handleToggle('prefilter')} />}
+                    label={t('scanConfig.prefilterLabel')}
+                  />
+                  <Typography variant="caption" color="text.disabled">
+                    {t('scanConfig.prefilterHint')}
+                  </Typography>
+                  <FormControlLabel
+                    control={<Switch checked={config.prefilterSinglePoint ?? false} onChange={handleToggle('prefilterSinglePoint')} />}
+                    label={t('scanConfig.prefilterSingleLabel')}
+                  />
+                  <FormControlLabel
+                    control={<Switch checked={config.skipStatic ?? false} onChange={handleToggle('skipStatic')} />}
+                    label={t('scanConfig.skipStaticLabel')}
+                  />
+
+                  <Divider />
+
+                  <FormControlLabel
+                    control={<Switch checked={config.useRegistry ?? false} onChange={handleToggle('useRegistry')} />}
+                    label={t('scanConfig.useRegistryLabel')}
+                  />
+                  <Box>
+                    <Typography variant="caption" color="text.secondary">{t('scanConfig.testFilterLabel')}</Typography>
+                    <input
+                      className="mt-1 w-full px-3 py-2 border rounded text-sm"
+                      placeholder={t('scanConfig.testFilterPlaceholder')}
+                      aria-label={t('scanConfig.testFilterLabel')}
+                      value={config.testFilter ?? ''}
+                      onChange={handleText('testFilter')}
+                    />
+                  </Box>
+                  <Box>
+                    <Typography variant="caption" color="text.secondary">{t('scanConfig.testSkipLabel')}</Typography>
+                    <input
+                      className="mt-1 w-full px-3 py-2 border rounded text-sm"
+                      placeholder={t('scanConfig.testSkipPlaceholder')}
+                      aria-label={t('scanConfig.testSkipLabel')}
+                      value={config.testSkip ?? ''}
+                      onChange={handleText('testSkip')}
+                    />
+                  </Box>
+                  {!config.useRegistry && (
+                    <Alert severity="info" variant="outlined">
+                      {t('scanConfig.useRegistryGate')}
+                    </Alert>
+                  )}
+
+                  <Divider />
+
+                  <FormControl size="small" fullWidth>
+                    <InputLabel>{t('scanConfig.dbmsLabel')}</InputLabel>
+                    <Select
+                      value={config.dbms ?? ''}
+                      label={t('scanConfig.dbmsLabel')}
+                      onChange={(e) => onChange({ dbms: e.target.value || null })}
+                    >
+                      <MenuItem value="">{t('scanConfig.dbmsAuto')}</MenuItem>
+                      {BUILTIN_DBMS_OPTIONS.map((o) => (
+                        <MenuItem key={o.value} value={o.value}>{o.label}</MenuItem>
+                      ))}
+                    </Select>
+                    <Typography variant="caption" color="text.disabled">
+                      {t('scanConfig.dbmsHint')}
+                    </Typography>
+                  </FormControl>
+
+                  <Divider />
+
+                  <Box>
+                    <Typography variant="caption" color="text.secondary">{t('scanConfig.matchStringLabel')}</Typography>
+                    <input
+                      className="mt-1 w-full px-3 py-2 border rounded text-sm"
+                      placeholder={t('scanConfig.matchStringPlaceholder')}
+                      aria-label={t('scanConfig.matchStringLabel')}
+                      value={config.matchString ?? ''}
+                      onChange={handleText('matchString')}
+                    />
+                  </Box>
+                  <Box>
+                    <Typography variant="caption" color="text.secondary">{t('scanConfig.notStringLabel')}</Typography>
+                    <input
+                      className="mt-1 w-full px-3 py-2 border rounded text-sm"
+                      placeholder={t('scanConfig.notStringPlaceholder')}
+                      aria-label={t('scanConfig.notStringLabel')}
+                      value={config.notString ?? ''}
+                      onChange={handleText('notString')}
+                    />
+                  </Box>
+                  <Typography variant="caption" color="text.disabled">
+                    {t('scanConfig.anchorHint')}
+                  </Typography>
+                </Stack>
+              </Box>
+            </>
+          )}
 
           {mode === 'builtin' && (
             <>

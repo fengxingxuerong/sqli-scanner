@@ -1,5 +1,9 @@
 import { nanoid } from 'nanoid';
 import { Detector } from '../Detector.js';
+// [P0-FIX 2026-09-09] 二阶方法白名单 + 出口选项同源
+import { resolveSecondOrderMethod } from '../secondOrderMethod.js';
+import { buildEgressOpts } from '../egressOpts.js';
+import { logger } from '../../core/logger.js';
 import { createDetectionResult } from '../models.js';
 import { PAYLOADS, SECOND_ORDER_PROBES, SECOND_ORDER_OOB_PROBES, ERROR_SIG, fillPayload } from '../payloads.js';
 import { oobReceiver } from '../../core/oobReceiver.js';
@@ -48,9 +52,12 @@ export class SecondOrderDetector extends Detector {
       return this._detectOob(ctx, result, so);
     }
 
-    // 1) 基线：只读触发页，记录是否本就含报错特征（不写）
+    // 1) 基线：只读触发页，记录是否本就含报错特征（不写）。
+    //    记录报错指纹（命中的具体文本）而非仅布尔：触发页可能自带固有报错
+    //    （如空参数语法错误），此时需对比「报错内容是否因存储探针而变化」。
     const baselineBody = await this._trigger(httpClient, ctx, triggerUrl);
-    const baselineErr = ERROR_SIG.test(baselineBody);
+    const baseMatch = baselineBody.match(ERROR_SIG);
+    const baselineErr = !!baseMatch;
 
     // 2) 存储阶段（真实写）：构造报错探针 → 可选刷新 CSRF → POST 表单点
     const probe = this._buildProbe(ctx, dbms);
@@ -61,24 +68,45 @@ export class SecondOrderDetector extends Detector {
 
     // 3) 触发阶段：读触发页，看是否回显报错
     const expBody = await this._trigger(httpClient, ctx, triggerUrl);
-    const expErr = ERROR_SIG.test(expBody);
+    const expMatch = expBody.match(ERROR_SIG);
+    const expErr = !!expMatch;
 
     // 4) 阴性对照（可选）：存良性值 → 读触发页应无报错（提高判定置信）
     let negErr = false;
+    let negMatch = null;
     if (so.negativeControl) {
       const benign = point.originalValue && String(point.originalValue).trim() ? point.originalValue : 'benign';
       await this._store(httpClient, ctx, benign);
       const negBody = await this._trigger(httpClient, ctx, triggerUrl);
-      negErr = ERROR_SIG.test(negBody);
+      negMatch = negBody.match(ERROR_SIG);
+      negErr = !!negMatch;
     }
 
-    // 5) 判定：基线无 / 实验有 / 阴性无 → 二阶注入确认
+    // 5) 判定（双路径）：
+    //    路径 A（基线干净，原三态）：基线无报错 && 实验有报错 && 阴性无报错。
+    //    路径 B（基线即报错，[P1-FIX 2026-09-07]）：触发页自带固有报错（空参数语法错误、
+    //      上游故障等真实场景常见），此时以「报错指纹」判定——存储探针后报错内容变化
+    //      （expMatch ≠ baseMatch）说明存储值确实改写了被拼入的 SQL；阴性对照存良性值后
+    //      报错恢复基线指纹（negMatch === baseMatch）排除环境噪声。阴性对照未开启时
+    //      不判定（保守：无法区分固有噪声与注入信号，宁可漏报不误报）。
+    let hit = false;
     if (!baselineErr && expErr && !negErr) {
+      hit = true;
+    } else if (baselineErr && expErr) {
+      hit =
+        so.negativeControl === true &&
+        expMatch[0] !== baseMatch[0] &&
+        negMatch != null &&
+        negMatch[0] === baseMatch[0];
+    }
+    if (hit) {
       result.vulnerable = true;
       result.dbms = dbms || null;
-      result.evidence =
-        `二阶注入确认：存储探针后在触发页 ${triggerUrl} 回显数据库报错（基线无、实验有、阴性无），` +
-        `存储点 ${point.param}@${point.actionUrl} 的数据被读出后重新拼入查询触发注入`;
+      result.evidence = !baselineErr
+        ? `二阶注入确认：存储探针后在触发页 ${triggerUrl} 回显数据库报错（基线无、实验有、阴性无），` +
+          `存储点 ${point.param}@${point.actionUrl} 的数据被读出后重新拼入查询触发注入`
+        : `二阶注入确认（基线噪声路径）：触发页 ${triggerUrl} 固有报错「${baseMatch[0]}」，存储探针后报错变化为「${expMatch[0]}」，` +
+          `阴性对照恢复基线报错——存储点 ${point.param}@${point.actionUrl} 的数据被读出后改写了查询行为`;
       result.payloads = [probe];
       point.confirmed = true;
       point.technique = 'second_order';
@@ -227,13 +255,40 @@ export class SecondOrderDetector extends Detector {
     const so = (ctx.config && ctx.config.secondOrder) || {};
     // --second-url：读写分离场景，读取发往独立的 secondUrl
     const readUrl = so.secondUrl || url;
-    const method = so.secondMethod || 'GET';
+    // [P0-FIX 2026-09-09] 触发读请求的方法必须过白名单与幂等门。旧写法 `so.secondMethod || 'GET'`
+    // 把用户字符串直送 HTTP 层（TRACE/CONNECT/含 CRLF 均照发）；而「只读复核」在 productionMode 下
+    // 只对 GET/HEAD 成立——非幂等方法必须 secondOrder.allowWrites=true 才放行。
+    const trig = resolveSecondOrderMethod(so.secondMethod, {
+      productionMode: ctx.config?.productionMode,
+      allowWrites: so.allowWrites,
+    });
+    if (trig.skipped) {
+      logger.warn(`二阶触发读请求已抑制：${trig.reason}`);
+      return '';
+    }
+    if (trig.reason) logger.warn(`二阶配置修正：${trig.reason}`);
+    const method = trig.method;
+    // [P0-FIX 2026-09-06] 触发页请求带上 target.cookieParams 会话：触发页常为 requireAuth
+    // 页面（如 /panel），不带会话 → 401 未登录页 → 永远无报错回显 → 二阶必漏（real-world-lab 实测）。
+    // 用户显式 headerParams 的 Cookie 优先（同名不覆盖），会话 cookie 合并补充。
+    const headers = { ...(ctx.target.headerParams || {}) };
+    const sessCookies = ctx.target.cookieParams || {};
+    if (Object.keys(sessCookies).length) {
+      const existing = Object.keys(headers).find((k) => k.toLowerCase() === 'cookie');
+      if (existing) {
+        const names = new Set(String(headers[existing]).split(';').map((p) => p.split('=')[0].trim()));
+        const extra = Object.entries(sessCookies).filter(([k]) => !names.has(k)).map(([k, v]) => `${k}=${v}`);
+        if (extra.length) headers[existing] = `${headers[existing]}; ${extra.join('; ')}`;
+      } else {
+        headers['Cookie'] = Object.entries(sessCookies).map(([k, v]) => `${k}=${v}`).join('; ');
+      }
+    }
     const req = {
       method,
       url: readUrl,
       params: {},
       data: so.secondData != null ? so.secondData : {},
-      headers: { ...(ctx.target.headerParams || {}) },
+      headers,
     };
     const res = await this.send(httpClient, ctx, req);
     return String(res?.data ?? '');
@@ -249,15 +304,12 @@ export class SecondOrderDetector extends Detector {
     const point = ctx.point;
     if (!point.actionUrl || !point.csrfTokenName) return; // 无 action / 无 token 则跳过
     try {
-      const res = await httpClient.request({
-        method: 'GET',
-        url: point.actionUrl,
-        timeoutMs: ctx.config?.timeoutMs,
-        retry: ctx.config?.retry,
-        proxy: ctx.config?.proxy ?? false,
-        auth: ctx.config?.auth ?? null,
-        wafEvasion: ctx.config?.wafEvasion ?? null,
-      });
+      // [P0-FIX 2026-09-09] 不再手拄出口选项（这里是第四份副本）：漏一个键就是「重抓 CSRF 时
+      // 不看会话 / 不走代理 / 不理 cookieJar」，而 CSRF 刷新失败会让后面每个存储请求都 403，
+      // 现场只看到「二阶无回显」，极难归因。
+      const res = await httpClient.request(
+        buildEgressOpts(ctx.config || {}, { method: 'GET', url: point.actionUrl })
+      );
       const html = String(res?.data ?? '');
       const forms = this._parseFormsForToken(html, point.actionUrl);
       const token = forms.length ? forms[0][point.csrfTokenName] : null;

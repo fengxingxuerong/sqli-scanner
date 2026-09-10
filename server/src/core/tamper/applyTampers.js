@@ -7,6 +7,7 @@ import { randomcase } from './plugins/randomcase.js';
 import { charencode } from './plugins/charencode.js';
 import { equaltolike } from './plugins/equaltolike.js';
 import { keywordSplit } from './plugins/keywordSplit.js';
+import { hexliterals } from './plugins/hexliterals.js';
 import { comments } from './plugins/comments.js';
 import { base64encode } from './plugins/base64encode.js';
 // v3 新增高频 WAF 绕过插件（覆盖 sqlmap 常见 tamper 的子集）
@@ -16,6 +17,7 @@ import { multiplespaces } from './plugins/multiplespaces.js';
 import { versionedkeywords } from './plugins/versionedkeywords.js';
 import { charunicodeencode } from './plugins/charunicodeencode.js';
 import { nonrecursivereplace } from './plugins/nonrecursivereplace.js';
+import { keywordinterleave } from './plugins/keywordinterleave.js';
 import { lowercase } from './plugins/lowercase.js';
 import { uppercase } from './plugins/uppercase.js';
 import { percentage } from './plugins/percentage.js';
@@ -244,6 +246,7 @@ import { sleep2hex } from './plugins/sleep2hex.js';
 import { uniontable } from './plugins/uniontable.js';
 import { unionvalues } from './plugins/unionvalues.js';
 import { unionvaluesrow } from './plugins/unionvaluesrow.js';
+import { dash2hash } from './plugins/dash2hash.js';
 
 // 导入即注册内置插件（幂等：重复导入不会重复注册，Map 以 name 去重）
 tamperRegistry.registerMany([
@@ -252,6 +255,11 @@ tamperRegistry.registerMany([
   charencode,
   equaltolike,
   keywordSplit,
+  // CRS v4 针对性变体（2026-09-09 CRS v4.1.0 全量 228 插件静态扫描 + 动态 A/B 产出）
+  // 经实测淘汰两个变体，勿回退：
+  //   · mysqlversioncomment（/*!50000KW*/）→ CRS 942500 专为此形态设规则，反而多命中一条
+  //   · logicalops（AND→&&）→ 与 symboliclogical 完全重复，且 942120 直接检测 && / ||
+  hexliterals,
   comments,
   base64encode,
   // v3 新增
@@ -261,6 +269,9 @@ tamperRegistry.registerMany([
   versionedkeywords,
   charunicodeencode,
   nonrecursivereplace,
+  // [P1-FIX 2026-09-10 实战实测] 插入式双写：ANDAND 只能扛「删一次」的过滤，
+  // 全局删除型（replace(/and/gi,'')）需 ANANDD；两种下插入式都成立，故为严格更优解
+  keywordinterleave,
   lowercase,
   uppercase,
   percentage,
@@ -489,6 +500,7 @@ tamperRegistry.registerMany([
   uniontable,
   unionvalues,
   unionvaluesrow,
+  dash2hash,
 ]);
 
 /**
@@ -553,6 +565,15 @@ export function applyTampers(payload, ctx, pluginNames = []) {
   // [P1-FIX 2026-09-05] resolve 透传 ctx：消费插件元数据（dbms 限定告警 / terminal 截断）
   const plugins = tamperRegistry.resolve(pluginNames || [], ctx || {});
   if (plugins.length === 0) return payload;
+
+  // [CRS-FIX 2026-09-09] markerSafe 通道
+  // 占位保护是"防止编码类 tamper 破坏提取标记"的兜底，但它同时挡住了**语义等价**的标记变形：
+  // 'SQLISCANNER0' → 0x53514c49... 回显完全一致，却因占位符是纯数字而永远无法被变形。
+  // 代价是实的：CRS 942511/942200 以「引号」为锚点，UNION 列探测在 CRS 下 100% 被拦
+  // （waf-real 动态实测 5 场景 union 检出 0，全靠 boolean 兜底）。
+  // 故为插件提供 markerSafe 声明：变换对标记语义无损时整链跳过占位保护。
+  // 保守策略：仅当链上**全部**插件都声明 markerSafe 才走无保护通道，混合链仍走既有保护逻辑。
+  if (plugins.every((p) => p.markerSafe === true)) return _runChain(payload, plugins, ctx);
 
   // --- 占位暂存 ---
   const placeholders = [];

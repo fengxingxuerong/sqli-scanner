@@ -105,7 +105,12 @@ test('仅 legacy obfuscate 开启 → 走 obfuscatePayload（向后兼容）', (
 });
 
 // ── 2) tamper 只读端点 ──────────────────────────────────────────────────────
-test('GET /api/tampers 返回 225 项 tamper 清单（name+description）', async () => {
+// 计数沿革：225 → 227（logicalops / mysqlversioncomment）→ 228（dash2hash）→ 227 → 228（keywordinterleave）
+// [P2-FIX 2026-09-09] 227 → 228：新增 dash2hash（尾部 -- - → #，严格 CRS 942460 绕过）。
+// [CRS-FIX 2026-09-09] 228 → 227：移除 logicalops（与 symboliclogical 逐字节重复，&& 被 CRS
+//   942120 定点检测）与 mysqlversioncomment（/*!50000KW*/ 被 CRS 942500 定点检测），
+//   新增 hexliterals（'abc' → 0x616263，消除引号锚点以绕开 CRS 942511 / 942200 / 942370）。
+test('GET /api/tampers 返回 228 项 tamper 清单（name+description）', async () => {
   const app = express();
   app.use('/api', tamperRoutes);
   const server = app.listen(0);
@@ -113,7 +118,7 @@ test('GET /api/tampers 返回 225 项 tamper 清单（name+description）', asyn
   try {
     const { json } = await getJson(`http://127.0.0.1:${port}/api/tampers`);
     assert.equal(json.code, 0);
-    assert.equal(json.data.length, 225);
+    assert.equal(json.data.length, 228);
     assert.ok(json.data.every((t) => typeof t.name === 'string' && typeof t.description === 'string'));
   } finally {
     server.close();
@@ -121,7 +126,7 @@ test('GET /api/tampers 返回 225 项 tamper 清单（name+description）', asyn
 });
 
 test('tamperRegistry 单例与端点数据一致', () => {
-  assert.equal(tamperRegistry.list().length, 225);
+  assert.equal(tamperRegistry.list().length, 228);
 });
 
 // ── 3) ScanManager 报告标注（tamper + WAF 识别）──────────────────────────────

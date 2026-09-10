@@ -110,8 +110,9 @@ test('T1：DBFingerprinter 时间向量定库（PostgreSQL pg_sleep 延迟命中
   const res = await fp.fingerprint(fpCtx(mock, { fingerprintTimeThresholdMs: 40, fingerprintSleepSec: 1 }));
   assert.equal(res.dbms, 'PostgreSQL');
   // 命中即停：时间向量只应探测到 pg_sleep（MySQL SLEEP 在前，未延迟即跳过）
+  // [OPT-FIX 2026-09-08] 命中后追加 1 次串行复验（防瞬时耗时毛刺误判库），pg_sleep 共 2 次
   const timeCalls = calls.filter((c) => /pg_sleep|SLEEP|WAITFOR|DBMS_PIPE|LIKE/.test(c));
-  assert.deepEqual(timeCalls.filter((c) => /pg_sleep/.test(c)).length, 1);
+  assert.deepEqual(timeCalls.filter((c) => /pg_sleep/.test(c)).length, 2);
   assert.ok(!calls.some((c) => /WAITFOR|DBMS_PIPE|LIKE/.test(c)), '命中后不应继续探测后续库');
 });
 

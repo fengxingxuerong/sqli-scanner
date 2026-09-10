@@ -109,6 +109,7 @@ export class TimeBlindDetector extends Detector {
    */
   _resolveTimeTemplates(ctx, dbms) {
     const cfg = ctx.config || {};
+    let list = null;
     if (cfg.useRegistry !== false) {
       const level = Number(cfg.level) > 0 ? Number(cfg.level) : undefined;
       const risk = Number(cfg.risk) > 0 ? Number(cfg.risk) : undefined;
@@ -116,11 +117,31 @@ export class TimeBlindDetector extends Detector {
       const testSkip = cfg.testSkip || undefined;
       const entries = selectPayloads({ dbms, technique: 'time', level, risk, testFilter, testSkip });
       if (entries.length > 0) {
-        return entries.map((p) => p.template);
+        list = entries.map((p) => p.template);
       }
       // 注册表无该 dbms 的 time 条目（ClickHouse/Sybase/H2/MonetDB 等）→ 回退 legacy 路径
     }
-    return PAYLOADS[dbms] && PAYLOADS[dbms].time;
+    if (!list) list = PAYLOADS[dbms] && PAYLOADS[dbms].time;
+    // [real-MySQL FIX 2026-09-07] 上下文选族重排：templates[0] 须匹配注入点闭合上下文。
+    // 数值上下文（boundary 无引号且原值为纯数字）须用裸拼接族（{ORIG} AND SLEEP...）——
+    // 引号族在数值上下文是语法错误（真实 MySQL 立即 1064、零延迟 → 漏检）；字符串上下文
+    // 反之用引号族。mock 靶场按正则匹配放行任意族，掩盖了选族错配；真实 MySQL 8.0 首次
+    // 暴露（time 场景漏检根因）。与 StackedDetector [B2-FIX] 的 pickTemplate 同一思路。
+    if (list && list.length > 1 && ctx.point) {
+      const arr = Array.isArray(list) ? [...list] : [list];
+      const origStr = String(ctx.point.originalValue || '1');
+      const quoted = /['"]/.test(String(ctx.point.boundary || '')) || !/^[\d.]+$/.test(origStr);
+      const want = quoted
+        ? (t) => /^\{ORIG\}['"]/.test(t)
+        : (t) => /^\{ORIG\}[\s;,]/.test(t) && !/^\{ORIG\}['")]/.test(t);
+      const idx = arr.findIndex(want);
+      if (idx > 0) {
+        const [t] = arr.splice(idx, 1);
+        arr.unshift(t);
+      }
+      return arr;
+    }
+    return list;
   }
 
   // 探测阶段 sleep（P2-P8）：timeProbeSleepSec 显式配置时用较短时长（如 1s）压低检测墙钟；
@@ -141,6 +162,14 @@ export class TimeBlindDetector extends Detector {
     const timeoutMs = (ctx.config?.timeoutMs ?? defaults.timeoutMs) + sleep * 1000;
     const baseRes = await this.send(httpClient, ctx, this.buildRequest(target, point, orig), ctx);
     const injectRes = await this.send(httpClient, ctx, this.buildRequest(target, point, payload), { timeoutMs });
+    // [P0-FIX 2026-09-09] 任一侧不可用（发送失败 / 响应被截断）→ 本对判定作废，
+    // 绝不能记成「无延迟 → 不可注入」：时延类结论只能建立在「确实拿到了完整响应」上。
+    const why = this.unusableOf(baseRes) || this.unusableOf(injectRes);
+    if (why) {
+      result.inconclusive = true;
+      result.inconclusiveReason = `时间盲注多指标对照不可用：${why}`;
+      return result;
+    }
     const signal = this.matchMetrics(baseRes, injectRes, ctx.config);
     if (signal === true) {
       result.vulnerable = true;

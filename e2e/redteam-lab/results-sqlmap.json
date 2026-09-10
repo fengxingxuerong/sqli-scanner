@@ -1,0 +1,110 @@
+[
+  {
+    "id": "A1-int-union",
+    "hit": true,
+    "ms": 23241,
+    "note": "parameter 'id' is vulnerable. Do you want to keep testing the others (if any)? [y/N] N\r"
+  },
+  {
+    "id": "A2-str-union",
+    "hit": true,
+    "ms": 23285,
+    "note": "parameter 'name' is vulnerable. Do you want to keep testing the others (if any)? [y/N] N\r"
+  },
+  {
+    "id": "A3-like",
+    "hit": true,
+    "ms": 23373,
+    "note": "parameter 'q' is vulnerable. Do you want to keep testing the others (if any)? [y/N] N\r"
+  },
+  {
+    "id": "A4-orderby",
+    "hit": true,
+    "ms": 24679,
+    "note": "parameter 'by' is vulnerable. Do you want to keep testing the others (if any)? [y/N] N\r"
+  },
+  {
+    "id": "A5-dual-param",
+    "hit": true,
+    "ms": 23396,
+    "note": "parameter 'id' is vulnerable. Do you want to keep testing the others (if any)? [y/N] N\r"
+  },
+  {
+    "id": "B6-error",
+    "hit": true,
+    "ms": 23394,
+    "note": "parameter 'id' is vulnerable. Do you want to keep testing the others (if any)? [y/N] N\r"
+  },
+  {
+    "id": "F18-safe-item",
+    "hit": false,
+    "ms": 2466,
+    "note": ""
+  },
+  {
+    "id": "F20-safe-rand",
+    "hit": false,
+    "ms": 2489,
+    "note": ""
+  },
+  {
+    "id": "F21-safe-500",
+    "hit": false,
+    "ms": 2413,
+    "note": ""
+  },
+  {
+    "id": "F22-safe-403",
+    "hit": false,
+    "ms": 2140,
+    "note": ""
+  },
+  {
+    "id": "C7-boolean",
+    "hit": true,
+    "ms": 23088,
+    "note": "parameter 'id' is vulnerable. Do you want to keep testing the others (if any)? [y/N] N\r"
+  },
+  {
+    "id": "C8-time",
+    "hit": true,
+    "ms": 31905,
+    "note": "parameter 'id' is vulnerable. Do you want to keep testing the others (if any)? [y/N] N\r"
+  },
+  {
+    "id": "D9-post-form",
+    "hit": true,
+    "ms": 22912,
+    "note": "parameter 'username' is vulnerable. Do you want to keep testing the others (if any)? [y/N] N\r"
+  },
+  {
+    "id": "D10-json",
+    "hit": true,
+    "ms": 22565,
+    "note": "parameter 'JSON uid' is vulnerable. Do you want to keep testing the others (if any)? [y/N] N\r"
+  },
+  {
+    "id": "D12-xff-header",
+    "hit": false,
+    "ms": 757,
+    "note": ""
+  },
+  {
+    "id": "D13-path",
+    "hit": true,
+    "ms": 22462,
+    "note": "parameter '#1*' is vulnerable. Do you want to keep testing the others (if any)? [y/N] N\r"
+  },
+  {
+    "id": "E16-stacked",
+    "hit": true,
+    "ms": 22402,
+    "note": "parameter 'id' is vulnerable. Do you want to keep testing the others (if any)? [y/N] N\r"
+  },
+  {
+    "id": "E17-waf-guarded",
+    "hit": true,
+    "ms": 2156,
+    "note": ""
+  }
+]

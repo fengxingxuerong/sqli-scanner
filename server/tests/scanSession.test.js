@@ -17,6 +17,12 @@ function rmTmp(p) { try { fs.unlinkSync(p); } catch {} }
 // 构造桩 ScanManager：检测器按 plan 命中，discover 返回固定点
 function makeManager(plan, points = [{ id: 'p1', location: 'url', param: 'v', originalValue: '1' }]) {
   const sm = new ScanManager();
+  // [P0-FIX 2026-09-08] 注入可用 httpClient 桩：本文件原靠「真发 http://x/ 必失败」跑扫描（桩检测器
+  // 不碰网络，所以一直没人发现）。现在结论可信度守卫会在「目标连续无有效响应」时熔断剩余点，
+  // 被跳过的点**故意不写 session**（写 done 等于让 resume 把「根本没测」当成「测过且无洞」），
+  // 于是本用例在全量并发跑时受真 DNS 健健性影响（libuv 线程池耗尽会变 ENOTFOUND）而飘红。
+  // 本测考的是会话落盘与 resume，不是死目标行为 → 把 HTTP 补成可用，让用例与 DNS 解耦。
+  sm.httpClient = { async request() { return { status: 200, data: '<html>ok</html>', headers: {} }; } };
   sm.detectors = TECHNIQUE_TYPES.map((t) => ({
     technique: t,
     async detect(ctx) {

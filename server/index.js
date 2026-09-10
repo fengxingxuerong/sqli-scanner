@@ -83,8 +83,61 @@ export function createApp() {
     })
   );
 
-  app.use(express.json({ limit: '2mb' }));
+  // ── [P0-SEC 2026-09-09] 变更类请求的跨站驱动防护 ────────────────────────────────
+  // 为什么必须自己拦而不能靠 cors：`cors` 在 Origin 不在白名单时只是「不发 Access-Control-* 头」，
+  // 请求本身照样进 handler —— 浏览器读不到响应，但**写操作已经执行完了**。诱导受害浏览器
+  // 「点一下就把扫描器的目标改掉 / 停掉正在跑的扫描 / 触发一次拖库」这条路今天是通的；
+  // 现在没炸只是因为 express.json 不解析非 JSON body（侥幸 ≠ 防护）。
+  // 同时本服务默认监听 127.0.0.1：浏览器能直接打到回环端口，SSRF 式「借工具打内网」也靠这条路。
+  const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+  // [P1 2026-09-09] 统一错误响应可见性（两步走第一步）：所有含数字 code 字段的 JSON 错误响应
+  // 自动携带 `X-Error-Code` 响应头。HTTP 状态码暂不变（前端已依赖 200+code 形态），
+  // 但监控/网关/代理/curl -f 现在能看到失败率；第二步（灰度切状态码）待前端侧改造后单独做。
+  // 必须在一切可能写错误响应的中间件（逆 CSRF/token/路由）之前安装，零业务行为变化。
+  app.use((req, res, next) => {
+    const origJson = res.json.bind(res);
+    res.json = (body) => {
+      // 约定：code=0 为成功（health 等）；非 0 整数 code 视为业务/HTTP 错误 → 携带 X-Error-Code。
+      // 覆盖「HTTP 200 + code」形态（前端已依赖），并自然覆盖原生 4xx/5xx。
+      if (body && typeof body === 'object' && body !== null && Number.isInteger(body.code) && body.code !== 0) {
+        res.setHeader('X-Error-Code', String(body.code));
+      }
+      return origJson(body);
+    };
+    next();
+  });
+  app.use((req, res, next) => {
+    if (!MUTATING_METHODS.has(req.method)) return next();
+    const origin = String(req.headers.origin || '');
+    if (origin) {
+      const host = String(req.headers.host || '');
+      // 同源（含 Tauri/静态托管同 host:port）直接放行：不要求把每个部署端口都写进 ALLOWED_ORIGINS
+      const sameOrigin = !!host && (origin === `http://${host}` || origin === `https://${host}`);
+      if (!sameOrigin && !ALLOWED_ORIGINS.includes(origin)) {
+        logger.warn(`拒绝跨站变更请求：origin=${origin} path=${req.path}`);
+        return res
+          .status(403)
+          .json({ code: 403, data: null, message: 'Origin 不在允许列表内（防止跨站驱动扫描器），如确需请设 ALLOWED_ORIGINS' });
+      }
+    } else if (String(req.headers['sec-fetch-site'] || '').toLowerCase() === 'cross-site') {
+      // 浏览器发跨站请求一定会带 Origin；「无 Origin 却自称 cross-site」只能是刻意剥离，一律拒
+      return res
+        .status(403)
+        .json({ code: 403, data: null, message: 'Sec-Fetch-Site=cross-site 且无 Origin，已拒绝' });
+    }
+    // 请求体类型守卫：本服务只接受 application/json。带 body 却是别的类型（form / text/plain / multipart）
+    // 只可能是浏览器自动发出的简单请求 → 明确 415，而不是留给 express.json 静默丢 body 后报「参数缺失」。
+    const ct = String(req.headers['content-type'] || '');
+    const mayHaveBody = req.headers['content-length'] !== undefined && Number(req.headers['content-length']) > 0;
+    if (mayHaveBody && ct && !/^application\/json\b/i.test(ct)) {
+      return res
+        .status(415)
+        .json({ code: 415, data: null, message: `仅接受 application/json 请求体（收到 ${ct}）` });
+    }
+    return next();
+  });
 
+  app.use(express.json({ limit: '2mb' }));
   // P1: 安全响应头（CSP 收紧 + 防点击劫持 + 防 MIME 嗅探）
   app.use((req, res, next) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');

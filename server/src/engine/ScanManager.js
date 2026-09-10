@@ -17,7 +17,9 @@ import { WafIdentifier } from '../core/waf/WafIdentifier.js';
 import { recommend } from '../core/waf/wafRecommend.js';
 import { ReportGenerator } from '../services/ReportGenerator.js';
 import { createTarget, createReport, createVulnerability } from './models.js';
-import { TECHNIQUE_TYPES } from './payloads.js';
+// [P0-FIX 2026-09-09] 生产护栏：扫描级高危池策略通过 AsyncLocalStorage 下发给 selectPayloads
+import { runWithDestructivePolicy, countDestructiveCandidates } from './payloadRegistry.js';
+import { TECHNIQUE_TYPES, ERROR_SIG } from './payloads.js';
 import { defaults } from '../config/defaults.js';
 import * as eventBus from '../core/eventBus.js';
 import { withSafeUrl } from '../core/safeUrlKeeper.js';
@@ -26,6 +28,15 @@ import { DirectConnector } from '../core/directConnector.js';
 import { oobReceiver } from '../core/oobReceiver.js';
 import { logger } from '../core/logger.js';
 import { buildInjectionRequest, sendInjection, applyPrefixSuffix } from './injection.js';
+// [P0-FIX 2026-09-09] 预筛/静态跳过/输入校验短路都是「探到异常才保留」的保守判定：
+// 它们过去用 `res == null` 表示「探测没拿到结果 → 不跳」。sendInjection 现在把失败降级成
+// 带 __netErr 的对象（不再是 null），若继续用 null 判断，两次失败的探测会被看成
+// 「两侧同构 → 该点无信号 → 跳过完整检测」——那是直接新增假阴性。统一改用 isUnusableResponse。
+import { isUnusableResponse } from './egressOpts.js';
+// [P0-SEC 2026-09-08] 扫描级 scope 登记：放在 ScanManager 而不是只放在 REST 路由里——
+// CLI（server/bin/cli.js）与测试/复用型调用不进路由，只放路由会造成「Web 有范围约束、
+// CLI 没有」的双标（而 CLI 才是渗透现场的主入口）。
+import { parseScope, registerScanScope, releaseScanScope } from '../core/scopeGuard.js';
 import { runScanLoop } from './scanRunner.js';
 import { extractAll, extractByScope } from './extractScope.js';
 
@@ -84,6 +95,17 @@ export class ScanManager {
     const target = createTarget(input);
     const scanId = nanoid(12);
     const report = createReport(scanId, target);
+    // [P0-FIX 2026-09-09] 把「本次被抑制的能力」写进报告：抑制本身是对的，**不可见才是问题**。
+    // 否则使用者只能靠猜「risk=3 到底投了没有」，而交付文档里一句「已按最高风险等级测试」
+    // 就是错的——这类不实陈述在复盘里是要命的。
+    try {
+      report.summary = report.summary || {};
+      report.summary.constraints = collectCapabilityConstraints(target.config);
+    } catch { /* 约束标注失败不影响扫描 */ }
+    // 授权范围登记（未配置 scope 时为 no-op，零行为变化）：HttpClient 在每一跳重定向前取用。
+    try {
+      registerScanScope(scanId, parseScope(target.config && target.config.scope));
+    } catch { /* 登记失败不阻断扫描（入口侧已校过一次） */ }
     this.scans.set(scanId, { target, report, status: 'running', cancelled: false, createdAt: Date.now(), abortController: new AbortController() });
     eventBus.create(scanId);
     // [MERGED: security] 事件脱敏：SSE 不再携带 target 凭据（auth/cookie/header）
@@ -190,6 +212,12 @@ export class ScanManager {
   _selectedTechs(config) {
     const sel = config && config.techniques;
     let techs = sel && sel.length ? sel : TECHNIQUE_TYPES;
+    // [P0 2026-09-09] knownPoint.techniques：已知注入点的技术位白名单（扫描级过滤，
+    // 与 config.techniques 取交集）——手工确认 union 注入后不再全技术位扫
+    const kpTechs = config && config.knownPoint && Array.isArray(config.knownPoint.techniques)
+      ? config.knownPoint.techniques
+      : null;
+    if (kpTechs && kpTechs.length) techs = techs.filter((t) => kpTechs.includes(t));
     // risk 门控
     const risk = (config && config.risk) != null ? config.risk : 2;
     if (risk < 2) {
@@ -244,7 +272,20 @@ export class ScanManager {
       // ignoreRedirects：不跟随 3xx（httpClient.request 消费跳转上限 0）。
       // 在 forScan 视图之上再包一层，Detector/Extractor/二阶/NoSQL/WAF 全路径统一生效，
       // 且不影响未配协议策略的存量扫描（无配置时 view 原样返回零开销）。
-      const proto = cfg.forceSsl === true || cfg.ignoreRedirects === true ? {} : null;
+      // [P1-FIX 2026-09-08 接线补齐] 出口层三键走同一个注入点：
+      //   insecureTls / trustProxyEnv / ssrfViaProxy 此前只能靠 defaults 或环境变量——
+      //   Detector.send 等 7 个调用点只透传 `proxy/auth`，per-scan config 到不了 HttpClient，
+      //   于是「UI 勾了忽略自签证书」对实际发包无效（引擎已实现能力在 API 层不可达）。
+      //   在扫描级视图统一注入后，新增出口类配置只需改 defaults + 白名单 + 这一处，不再漏接线。
+      const egressPatch = {};
+      if (cfg.insecureTls === true) egressPatch.insecureTls = true;
+      if (cfg.trustProxyEnv !== undefined) egressPatch.trustProxyEnv = cfg.trustProxyEnv !== false;
+      if (cfg.ssrfViaProxy !== undefined) egressPatch.ssrfViaProxy = cfg.ssrfViaProxy;
+      const proto =
+        cfg.forceSsl === true || cfg.ignoreRedirects === true || Object.keys(egressPatch).length > 0
+          ? egressPatch
+          : null;
+      const baseHead = typeof view.headRequest === 'function' ? view.headRequest.bind(view) : null;
       if (proto) {
         const baseRequest = view.request.bind(view);
         view = {
@@ -253,7 +294,22 @@ export class ScanManager {
             ...opts,
             ...(cfg.forceSsl === true ? { forceSsl: true } : {}),
             ...(cfg.ignoreRedirects === true ? { ignoreRedirects: true } : {}),
+            ...egressPatch,
           }),
+          // [P0-FIX 2026-09-09] headRequest（--null-connection）必须走同一层包装：
+          // 它不经过 view.request，以前只包 request 等于「HEAD 一路看不到 insecureTls/代理/scope 以外的出口语义」。
+          // 实战表现：自签目标上 GET 能扫、开了 --null-connection 就全量失败，现场极难归因。
+          ...(baseHead
+            ? {
+                headRequest: (url, opts = {}) =>
+                  baseHead(url, {
+                    ...opts,
+                    ...(cfg.forceSsl === true ? { forceSsl: true } : {}),
+                    ...(cfg.ignoreRedirects === true ? { ignoreRedirects: true } : {}),
+                    ...egressPatch,
+                  }),
+              }
+            : {}),
         };
       }
       this._scanClients.set(scanId, view);
@@ -293,6 +349,8 @@ export class ScanManager {
 
   // 立即清理某次扫描的全部上下文（TTL 到期 / 超限淘汰）
   _disposeScan(scanId) {
+    // [P0-SEC] 同步回收 scope 登记（防同 id 复用旧范围，也防 Map 无界增长）
+    releaseScanScope(scanId);
     const rec = this.scans.get(scanId);
     this.scans.delete(scanId);
     eventBus.dispose(scanId);
@@ -325,10 +383,19 @@ export class ScanManager {
     }
     if (victim) this._disposeScan(victim);
   }
-
   // 扫描流水线
   async _run(scanId) {
-    return runScanLoop(this, scanId);
+    // [P0-FIX 2026-09-09] 把生产护栏策略放进本次扫描的异步上下文：所有经 selectPayloads 的筛选
+    // 自动读到，不需要每个检测器手工透传（又一个「某个阶段漏一个键」的坑位就此消失）。
+    const s = this.scans.get(scanId);
+    const cfg = (s && s.target && s.target.config) || {};
+    return runWithDestructivePolicy(
+      {
+        productionMode: cfg.productionMode !== false,
+        confirmDestructive: cfg.confirmDestructive === true,
+      },
+      () => runScanLoop(this, scanId)
+    );
   }
   // [B-perf] skip-static 参数预筛选（对标 sqlmap --skip-static，opt-in）：
   // 返回「需完整检测」的点集合；被判静态（同值重复 / 哨兵探测无差异）的点被过滤。
@@ -387,7 +454,7 @@ export class ScanManager {
             getBaseline(point),
             sendInjection(httpClient, ctx, sentReq, { retry: 0 }),
           ]);
-          if (!baseRes || !sentRes) return; // 基线/哨兵任一失败 → 无法判定 → 保守保留
+          if (!baseRes || !sentRes || isUnusableResponse(baseRes) || isUnusableResponse(sentRes)) return; // 基线/哨兵任一失败 → 无法判定 → 保守保留
           // ① 状态码必须一致
           if ((baseRes.status ?? null) !== (sentRes.status ?? null)) return;
           const baseBody = String(baseRes.data ?? '');
@@ -439,6 +506,12 @@ export class ScanManager {
     const cfg = ctxBase.config || {};
     if (target.mode === 'direct' || !points || points.length === 0) return points || [];
     const httpClient = ctxBase.httpClient;
+    // [P0 2026-09-09] knownPoint 直通点不参与预筛选（手工确认的可注入点不需要
+    // 「有没有迹象」判定；探针反而可能因闭合形态未给全而误判无信号），
+    // 但必须原样并入返回集（调用方以返回集作为「进入完整检测」的点集合）
+    const knownPoints = points.filter((p) => p.knownPoint);
+    points = points.filter((p) => !p.knownPoint);
+    if (points.length === 0) return knownPoints;
     const skipIds = new Set();
     const prefilterCtx = { ...ctxBase, target };
     const sleepSec = cfg.timeBlindSleepSec ?? defaults.timeBlindSleepSec ?? 2;
@@ -453,7 +526,7 @@ export class ScanManager {
       const rtt = await this._probeBaselineRttMs(httpClient, prefilterCtx, target, points[0]);
       if (rtt == null) {
         logger.info('预筛选基线测量失败（目标不可达/超时），跳过预筛选，保守保留全部注入点');
-        return points;
+        return [...knownPoints, ...points];
       }
       budgetMs = Math.min(2000, Math.max(300, Math.round(rtt * 3 + 150)));
     }
@@ -475,7 +548,7 @@ export class ScanManager {
       logger.info(
         `预筛选预算不足（${points.length} 点 × 3 探测 = ${totalProbes} 请求 > 限速 ${ratePerSec}/s × ~${(budgetMs / 1000).toFixed(2)}s 可放行 ${Math.floor(servableInBudget)}），跳过预筛选避免白费请求`
       );
-      return points;
+      return [...knownPoints, ...points];
     }
     // 点级并发限 4（12 个并发探测）：与调度并发对齐，避免 points×3 无上限并发
     await this._mapPool(
@@ -501,14 +574,46 @@ export class ScanManager {
           if (!trio) return; // 预算超时：无法判定 → 保守保留
           const [base, quote, ...timed] = trio;
           // 保守：任一探测失败（网络错误/超时）→ 保留做完整检测，绝不因探测失败漏检
-          if (!base || base.res == null || !quote || quote.res == null) return;
-          if (timed.some((t) => !t || t.res == null)) return;
+          if (!base || base.res == null || isUnusableResponse(base.res) || !quote || quote.res == null || isUnusableResponse(quote.res)) return;
+          if (timed.some((t) => !t || t.res == null || isUnusableResponse(t.res))) return;
           // 探测① 单引号报错：闭合破坏 → 报错/空页/500 → 响应明显偏离基线 → 可疑保留
           const baseBody = String(base.res?.data ?? '');
           const baseStatus = base.res?.status ?? null;
           const quoteBody = String(quote.res?.data ?? '');
           const quoteStatus = quote.res?.status ?? null;
-          if (!this._prefilterSimilar(baseBody, baseStatus, quoteBody, quoteStatus)) return;
+          if (!this._prefilterSimilar(baseBody, baseStatus, quoteBody, quoteStatus)) {
+            // [OPT-FIX 2026-09-08] 输入校验甄别（fp_strict 类 205 请求削减）：单引号探针报错后，
+            // 追加 1 个「良性非法值」探针（zz9qx0，无任何 SQL 特征）：
+            //   · 良性探针响应与单引号探针同构（状态码+正文指纹一致）→ 是输入白名单/校验报错
+            //     而非 SQL 报错 → 该点注入面无效 → 安全跳过（实测 205 请求 → ~7 请求）；
+            //   · 任一差异 → 真实 SQL 报错信号 → 保守保留完整检测（不漏检）；
+            //   · 良性探针失败/超时 → 保守保留。
+            // [OPT-FIX 2026-09-08] 输入校验甄别（fp_strict 类 205 请求削减）：单引号探针报错后，
+            // 追加 1 个「良性非法值」探针（zz9qx0，无任何 SQL 特征）：
+            //   · 良性探针响应与单引号探针同构（状态码+正文指纹一致）→ 是输入白名单/校验报错
+            //     而非 SQL 报错 → 该点注入面无效 → 安全跳过（实测 205 请求 → ~6 请求）；
+            //   · 任一差异 → 真实 SQL 报错信号 → 保守保留完整检测（不漏检）；
+            //   · 良性探针失败/超时 → 保守保留。
+            // [OPT-FIX 2026-09-08#2] 甄别仅适用于「报错状态码」响应（status>=400）：无报错状态
+            // 的空结果页（200 "No results found"）在真注入点（布尔差异型，如 sqli-labs L04）上
+            // 与良性非法值天然同构——若不限定状态码会把布尔差异型注入点误跳过（实测漏检）。
+            // 200 空结果页不受影响（走正常信号判定保留完整检测），仅牺牲 200 自定义错误页
+            // 目标的削减收益（保守换取零漏检）。
+            if (quoteStatus != null && quoteStatus >= 400) {
+              try {
+                const benign = await probe(`${orig}zz9qx0`);
+                if (benign && benign.res != null) {
+                  const bBody = String(benign.res?.data ?? '');
+                  const bStatus = benign.res?.status ?? null;
+                  if (this._prefilterSimilar(quoteBody, quoteStatus, bBody, bStatus)) {
+                    skipIds.add(point.id);
+                    return;
+                  }
+                }
+              } catch { /* 甄别失败 → 保守保留 */ }
+            }
+            return;
+          }
           // 探测② 时间向量：任一族探针耗时明显高于绝对下限 → 触发延迟 → 保留
           if (timed.some((t) => t.elapsed >= timeFloorMs)) return;
           // 两探皆无信号 → 判为无注入迹象，跳过完整检测
@@ -519,7 +624,7 @@ export class ScanManager {
       },
       4 // [MERGED: perf] 点级并发上限
     );
-    return points.filter((p) => !skipIds.has(p.id));
+    return [...knownPoints, ...points.filter((p) => !skipIds.has(p.id))];
   }
 
   // [P1-FIX 2026-09-05] 基线 RTT 实测（预筛选共享 1 次）：注入原值的单次请求耗时。
@@ -531,7 +636,7 @@ export class ScanManager {
       const t0 = Date.now();
       const req = buildInjectionRequest(target, point, point.originalValue || '1');
       const res = await sendInjection(httpClient, prefilterCtx, req, { timeoutMs: 2000, retry: 0 });
-      if (res == null) return null;
+      if (res == null || isUnusableResponse(res)) return null;
       const elapsed = Date.now() - t0;
       return Number.isFinite(elapsed) && elapsed >= 0 ? elapsed : null;
     } catch {
@@ -560,6 +665,106 @@ export class ScanManager {
       default:
         return [`' AND SLEEP(${s})-- -`, `' AND pg_sleep(${s}) IS NULL-- -`];
     }
+  }
+
+  // [P1-PERF 2026-09-08 实战批次] 输入校验型目标的「可证安全跳过」判定（单参数目标专用）。
+  // 背景（实测）：作战中最费时间的往往不是「有注入」，而是「参数在进 SQL 之前就被白名单拦死」——
+  // ?id=1' 与 ?id=1zz9qx0 返回同一张 400 页。多参数目标有 _prefilterPoints 兜住，但单参数目标被
+  // 刻意排除在预筛之外（scanRunner.js:199：怕在唯一的点上误剪导致漏检），于是这类目标仍要打满
+  // 200+ 请求（e2e fp_strict 实测 211）：既慢，又在 WAF/风控上刷出一堆无效攻击特征——真实项目里
+  // 这就足够让出口 IP 被临时封禁，把后面几个真正值得打的系统一起拖死。
+  // 判定比「报错页相同」强一档，能排除最危险的反例「目标真有洞但异常被统一吞掉」：
+  //   ① 基线为正常页（<400），单引号探针偏离基线且为 >=400；
+  //   ② 良性非法值（zz9qx0，无任何 SQL 特征）与单引号响应同构 → 疑似输入校验而非 SQL 报错；
+  //   ③ 恒真串探针必须同样被拒（字符串上下文 `' OR '1'='1` 与数字上下文 ` OR 1=1`）：
+  //      SQL 若真被执行，恒真条件会返回正常页（差异即信号）→ 说明「同构」只是异常被吞 → 保留；
+  //   ④ 四路响应体任一含 SQL 报错签名（ERROR_SIG）→ 保留。
+  // 请求成本：每点 5 个（基线 → 单引号 → 剩下三路并行，墙钟≈2-3 RTT；串行前两步是为了
+  // 在基线/单引号不满足形状时立即放弃，不多花那 3 个），换掉 200+ 请求的完整检测预算。
+  // 保守红线：任一探测失败/超时/判定不成立 → 保留完整检测，本方法绝不「判不出就跳过」。
+  async _validationGuardedSkipPoints(ctxBase, target, points) {
+    const cfg = ctxBase.config || {};
+    if (target.mode === 'direct' || !Array.isArray(points) || points.length === 0) {
+      return { candidate: points || [], skipped: [] };
+    }
+    const httpClient = ctxBase.httpClient;
+    const prefilterCtx = { ...ctxBase, target };
+    // 单探针超时：与预筛选同量级（不可达目标快速放弃 → 保守保留），可被 prefilterBudgetMs 覆盖
+    const budgetMs =
+      Number.isFinite(cfg.prefilterBudgetMs) && cfg.prefilterBudgetMs > 0 ? cfg.prefilterBudgetMs : 1500;
+    const skip = new Map();
+
+    await mapPool(points, async (point) => {
+      const orig = point.originalValue || '1';
+      // 每路响应只剔「自己那次注入的值」（部分目标错误页会原样回显非法输入，不剔则永远不同构）。
+      // 不剔 orig 本身：短数字（如 '1'）在正文里无处不在，剔了会把一切变得相同（假跳过 → 漏检）。
+      const st = (r) => r?.res?.status ?? null;
+      const rawBody = (r) => String(r?.res?.data ?? '');
+      const norm = (r, value) => this._normEcho(rawBody(r), value);
+      const probe = (value) => {
+        const req = buildInjectionRequest(target, point, value);
+        return sendInjection(httpClient, prefilterCtx, req, { timeoutMs: budgetMs, retry: 0 })
+          .then((res) => ({ res, value }))
+          .catch(() => null);
+      };
+      try {
+        const base = await probe(orig);
+        if (!base || base.res == null || isUnusableResponse(base.res)) return;
+        const baseStatus = st(base);
+        // ① 基线必须是正常页（基线本身就 4xx/5xx 的目标形态不明，不判）
+        if (baseStatus == null || baseStatus >= 400) return;
+        const quote = await probe(`${orig}'`);
+        if (!quote || quote.res == null || isUnusableResponse(quote.res)) return;
+        const quoteStatus = st(quote);
+        // 单引号探针必须是报错状态码（200 自定义错误页与真注入天然同构，不可判）
+        if (quoteStatus == null || quoteStatus < 400) return;
+        const quoteBody = norm(quote, `${orig}'`);
+        // ② 单引号必须偏离基线（与基线同构说明连报错都没有，交给常规流程）
+        if (this._prefilterSimilar(rawBody(base), baseStatus, quoteBody, quoteStatus)) return;
+        const rest = await Promise.all([
+          probe(`${orig}zz9qx0`),
+          probe(`${orig}' OR '1'='1`),
+          probe(`${orig} OR 1=1`),
+        ]);
+        // 任一探测失败（网络错误/超时/返回空）→ 无法判定 → 保守保留
+        if (rest.some((r) => !r || r.res == null || isUnusableResponse(r.res))) return;
+        // ④ 任一回包含 SQL 报错签名 → 明确保留（error 技术有活可干）
+        if (ERROR_SIG.test(rawBody(quote))) return;
+        for (const r of rest) if (ERROR_SIG.test(rawBody(r))) return;
+        // ②+③ 良性非法值与两个恒真串探针必须与单引号响应同构且均为 >=400：
+        // SQL 真被执行时恒真条件会返回正常页，任一路差异 → 不跳过（防「异常被吞」型漏检）。
+        for (const r of rest) {
+          const rs = st(r);
+          if (rs == null || rs < 400) return;
+          if (!this._prefilterSimilar(quoteBody, quoteStatus, norm(r, r.value), rs)) return;
+        }
+        skip.set(point.id, {
+          pointId: point.id,
+          reason: 'input_validation',
+          note: `基线 ${baseStatus}，单引号/良性非法值/恒真串四路探针均同构于 ${quoteStatus} 且无 SQL 报错签名 → 判定为输入校验拦截而非 SQL 报错`,
+        });
+      } catch {
+        // 探测异常 → 保守保留
+      }
+    }, 4);
+
+    if (skip.size === 0) return { candidate: points, skipped: [] };
+    return { candidate: points.filter((p) => !skip.has(p.id)), skipped: [...skip.values()] };
+  }
+
+  // [P1-PERF 2026-09-08] 回显剥离：把本次注入值（原样 / URL 编码 / HTML 实体）从正文剔掉后再比对，
+  // 使「错误页回显了非法输入」的目标（很常见：`Invalid id: 1'`）也能得到同构判定。
+  // 只用于跳过判定的比对侧，不改变任何检测器看到的原始响应；短于 2 字符的值不剔（防误剔）。
+  _normEcho(body, value) {
+    let s = String(body ?? '');
+    const raw = String(value ?? '');
+    if (!s || raw.length < 2) return s;
+    const variants = new Set([raw, encodeURIComponent(raw), raw.replace(/'/g, '&#39;'), raw.replace(/"/g, '&#34;')]);
+    for (const variant of variants) {
+      if (variant.length < 2) continue;
+      s = s.split(variant).join('');
+    }
+    return s;
   }
 
   // 预筛选相似判定（与 Detector._boundarySimilar 同思路的轻量内联，避免跨模块耦合）：
@@ -604,37 +809,52 @@ export class ScanManager {
     }
 
     const collected = [];
-    const ctxBase = { httpClient: this._wrapWithSignal(scanId, this.getScanClient(scanId, target)), config: target.config };
+    // [P0-FIX 2026-09-06] ctxBase 补 dbms：缺失时 SecondOrderDetector._buildProbe 走
+    // SECOND_ORDER_PROBES[0]（单引号裸探针）而非该库报错模板 → 探针退化必漏（real-world-lab 实测）
+    const ctxBase = { httpClient: this._wrapWithSignal(scanId, this.getScanClient(scanId, target)), config: target.config, dbms };
+    // [P1-FIX 2026-09-07] 按「存储目标」分组调度：同一 actionUrl（同一张表单）的字段共享
+    // 同一份存储——并发检测时 A 点刚写入的探针会被 B 点的写入覆盖（实测 body 点探针被
+    // item_id 点阴性对照覆盖 → 触发页读到良性值 → 恒漏检）。故同组内严格串行，
+    // 不同 actionUrl（不同表单/不同存储）之间仍可并行。
+    const storeGroups = new Map();
+    for (const p of storePoints) {
+      const key = String(p.actionUrl || p.id);
+      if (!storeGroups.has(key)) storeGroups.set(key, []);
+      storeGroups.get(key).push(p);
+    }
+    const groups = [...storeGroups.values()];
     // [MERGED: perf] 并发治理：旧实现双层 for 全串行（storePoints × triggerUrls 逐对 await），
-    // 10 存储点 × 3 触发页 = 30 次检测墙钟线性累加。现按「存储点」并行（_mapPool 限并发，
-    // 默认 2；同一存储点内触发页仍串行，避免并发写同一存储点相互污染读回判定）。
-    const concurrency = Math.max(1, Math.min(Number(so.concurrency) || 2, storePoints.length));
+    // 10 存储点 × 3 触发页 = 30 次检测墙钟线性累加。现按「存储组」并行（_mapPool 限并发，
+    // 默认 2；组内存储点与触发页均串行——同一存储内并发写会相互污染读回判定）。
+    const concurrency = Math.max(1, Math.min(Number(so.concurrency) || 2, groups.length));
     await this._mapPool(
-      storePoints,
-      async (point) => {
-        const pointDbms = dbms || point.dbms; // 复用一阶已识别的 dbms（若有时）
-        for (const triggerUrl of triggerUrls) {
-          const ctx = { ...ctxBase, target, point, dbms: pointDbms, triggerUrl, scanId };
-          try {
-            const result = await this.secondOrderDetector.detect(ctx);
-            if (result.vulnerable) {
-              // 复用既有聚合/风险纳管通道：先经 ReportGenerator.riskOf 定级（second_order → High）
-              const risk = this.reportGen.riskOf([
-                createVulnerability(point.id, 'second_order', 'Medium', result.payloads, result.evidence),
-              ]);
-              const vuln = createVulnerability(
-                point.id,
-                'second_order',
-                risk,
-                result.payloads,
-                result.evidence
-              );
-              vuln.dbms = result.dbms;
-              collected.push(vuln);
-              eventBus.emit(scanId, 'detection_found', { ...result, riskLevel: risk });
+      groups,
+      async (group) => {
+        for (const point of group) {
+          const pointDbms = dbms || point.dbms; // 复用一阶已识别的 dbms（若有时）
+          for (const triggerUrl of triggerUrls) {
+            const ctx = { ...ctxBase, target, point, dbms: pointDbms, triggerUrl, scanId };
+            try {
+              const result = await this.secondOrderDetector.detect(ctx);
+              if (result.vulnerable) {
+                // 复用既有聚合/风险纳管通道：先经 ReportGenerator.riskOf 定级（second_order → High）
+                const risk = this.reportGen.riskOf([
+                  createVulnerability(point.id, 'second_order', 'Medium', result.payloads, result.evidence),
+                ]);
+                const vuln = createVulnerability(
+                  point.id,
+                  'second_order',
+                  risk,
+                  result.payloads,
+                  result.evidence
+                );
+                vuln.dbms = result.dbms;
+                collected.push(vuln);
+                eventBus.emit(scanId, 'detection_found', { ...result, riskLevel: risk });
+              }
+            } catch (e) {
+              logger.warn(`二阶检测失败（点 ${point.id} / 触发页 ${triggerUrl}）：${e.message}`);
             }
-          } catch (e) {
-            logger.warn(`二阶检测失败（点 ${point.id} / 触发页 ${triggerUrl}）：${e.message}`);
           }
         }
       },
@@ -719,6 +939,64 @@ export class ScanManager {
   async _extractByScope(scanId, ctx, scope) {
     return extractByScope(this, scanId, ctx, scope);
   }
+}
+
+
+/**
+ * [P0-FIX 2026-09-09] 汇总「本次扫描被抑住了什么能力」，写进 report.summary.constraints。
+ *
+ * 为什么需要：本项目反复出现同一类缺陷——开关存在、引擎支持、中间断链，而用户以为生效了。
+ * 把「没做」显式写出来，质控与交付时才能回答「你到底测了什么」；一句「已按最高风险等级测试」
+ * 在没投放高危池时就是不实陈述。仅记真实可抑制项：当前 level/risk 本来就投不到高危模板时不记，
+ * 免得给人一条假线索去改无关开关。
+ *
+ * @param {object} config 扫描配置（target.config）
+ * @returns {string[]} 可读说明（空数组 = 本次无任何能力被抑制）
+ */
+export function collectCapabilityConstraints(config = {}) {
+  const out = [];
+  const productionMode = config.productionMode !== false;
+  const confirmDestructive = config.confirmDestructive === true;
+  const risk = Number(config.risk) || Number(defaults.risk) || 2;
+  const level = Number(config.level) || Number(defaults.level) || 1;
+  const useRegistry = config.useRegistry === true;
+
+  if (productionMode && !confirmDestructive) {
+    let n = 0;
+    try {
+      n = countDestructiveCandidates({ level, risk, testFilter: config.testFilter, testSkip: config.testSkip });
+    } catch {
+      n = 0;
+    }
+    if (n > 0) {
+      out.push(
+        `高危 payload 池（写文件/RCE/重运算类，本配置下候选 ${n} 条）已抑制：` +
+          'productionMode=true 且未 confirmDestructive=true。确需在已授权目标上投放时显式设 confirmDestructive=true；' +
+          '靶场/演练环境可整体关护栏（productionMode=false）'
+      );
+    }
+  }
+  if (!useRegistry && risk >= 3) {
+    out.push(
+      '扁平 payload 路径（useRegistry=false）不经过注册表高危池门控：REST/UI 下高危向量根本不会投放'
+        + '（只允许 CLI 的 --risk 3 + --confirm-destructive 显式合并到进程级 payload 池）。' +
+        '要真正拿到 risk=3 语义请用 useRegistry=true（受本护栏约束）或走 CLI 双开关'
+    );
+  }
+  const so = config.secondOrder && typeof config.secondOrder === 'object' ? config.secondOrder : {};
+  if (so.enabled === true && productionMode && so.allowWrites !== true) {
+    out.push(
+      '二阶非幂等写请求（POST/PUT/PATCH/DELETE）已抑制：productionMode=true 时需 secondOrder.allowWrites=true。' +
+        '未放行时只跑幂等方法（GET/HEAD/OPTIONS），存储型写路径可能测不到'
+    );
+  }
+  if (config.enableExtract === true) {
+    out.push(
+      '本次开启拖库（enableExtract）：提取阶段会向目标发出大量读请求（受限速与行数上限约束）。' +
+        '生产环境建议控制行数并避开业务高峰'
+    );
+  }
+  return out;
 }
 
 export default ScanManager;

@@ -185,6 +185,26 @@ function testBypass(payload, rules) {
   return { blocked: false };
 }
 
+// [P0-FIX 2026-09-06] 双视角判定：真实 WAF 普遍会 URL 解码后再匹配规则（CrS/云 WAF 均如此）。
+// 只在 tampered 原始输出上测正则会高估编码类 tamper（charencode 输出 %55%4E... 不含明文
+// UNION → 判"绕过"，但服务器解码一次后是明文 → 实际被拦）。decoded 视角 = 服务器
+// 单次解码后的形态（与 preEncoded 修复后的真实链路一致）。
+function decodeOnce(s) {
+  try {
+    const d = decodeURIComponent(s);
+    return d !== s ? d : null;
+  } catch {
+    return null; // 非法 % 序列（如裸 %）→ 无有效解码
+  }
+}
+
+function testBypassDual(payload, rules) {
+  const raw = testBypass(payload, rules);
+  const decodedStr = decodeOnce(payload);
+  const decoded = decodedStr != null ? testBypass(decodedStr, rules) : raw; // 无有效解码 → 视角等价
+  return { raw, decoded };
+}
+
 // 获取所有注册的 tamper 插件名
 const allPlugins = tamperRegistry.list().map(t => t.name);
 console.log(`[tamper-matrix] 已注册 ${allPlugins.length} 个 tamper 插件`);
@@ -204,28 +224,34 @@ for (const pluginName of allPlugins) {
     for (const payload of category.testPayloads) {
       // 原始 payload 是否被拦截
       const original = testBypass(payload, category.rules);
-      // 应用 tamper 后是否被拦截
+      // 应用 tamper 后是否被拦截（双视角：raw=不解码 WAF，decoded=解码型 WAF）
       let transformed = payload;
       try {
         transformed = applyTampers(payload, {}, [pluginName]);
       } catch (e) {
         transformed = `[ERROR: ${e.message}]`;
       }
-      const after = testBypass(transformed, category.rules);
+      const after = testBypassDual(transformed, category.rules);
       catResults.push({
         payload: payload.substring(0, 60),
         originalBlocked: original.blocked,
-        afterBlocked: after.blocked,
-        bypassed: original.blocked && !after.blocked,
+        afterBlockedRaw: after.raw.blocked,
+        afterBlockedDecoded: after.decoded.blocked,
+        bypassed: original.blocked && !after.raw.blocked,
+        bypassedDecoded: original.blocked && !after.decoded.blocked,
         transformed: transformed.substring(0, 80),
       });
     }
     const bypassCount = catResults.filter(r => r.bypassed).length;
     const totalBlocked = catResults.filter(r => r.originalBlocked).length;
+    const bypassCountDecoded = catResults.filter(r => r.bypassedDecoded).length;
     pluginResults[category.id] = {
       name: category.name,
       bypassRate: totalBlocked > 0 ? Math.round((bypassCount / totalBlocked) * 100) : 0,
       bypassCount,
+      // 解码型 WAF 视角（真实主流）：编码类 tamper 在此视角下无效是预期
+      bypassRateDecoded: totalBlocked > 0 ? Math.round((bypassCountDecoded / totalBlocked) * 100) : 0,
+      bypassCountDecoded,
       totalBlocked,
       details: catResults,
     };
@@ -236,7 +262,7 @@ for (const pluginName of allPlugins) {
 // ── 生成汇总矩阵 ──
 const byCategory = {};
 for (const cat of WAF_RULE_CATEGORIES) {
-  byCategory[cat.id] = { name: cat.name, effectivePlugins: [] };
+  byCategory[cat.id] = { name: cat.name, effectivePlugins: [], effectivePluginsDecoded: [] };
 }
 
 for (const [pluginName, catResults] of Object.entries(results.plugins)) {
@@ -250,12 +276,22 @@ for (const [pluginName, catResults] of Object.entries(results.plugins)) {
         totalBlocked: r.totalBlocked,
       });
     }
+    // 解码型 WAF 视角（真实主流：CrS/云 WAF 均先 URL 解码再匹配）
+    if (r.bypassCountDecoded > 0 && r.totalBlocked > 0) {
+      byCategory[cat.id].effectivePluginsDecoded.push({
+        name: pluginName,
+        bypassRate: r.bypassRateDecoded,
+        bypassCount: r.bypassCountDecoded,
+        totalBlocked: r.totalBlocked,
+      });
+    }
   }
 }
 
 // 按绕过率排序
 for (const cat of Object.values(byCategory)) {
   cat.effectivePlugins.sort((a, b) => b.bypassRate - a.bypassRate || b.bypassCount - a.bypassCount);
+  cat.effectivePluginsDecoded.sort((a, b) => b.bypassRate - a.bypassRate || b.bypassCount - a.bypassCount);
 }
 
 // ── 输出 ──
@@ -284,6 +320,26 @@ for (const cat of WAF_RULE_CATEGORIES) {
   const e = byCategory[cat.id];
   const top5 = e.effectivePlugins.slice(0, 5).map(p => `${p.name}(${p.bypassRate}%)`).join(', ') || '-';
   md += `| ${cat.name} | ${e.effectivePlugins.length} | ${top5} |\n`;
+}
+
+// [P0-FIX 2026-09-06] 解码型 WAF 视角汇总（真实主流）：编码类 tamper 在此视角下
+// 大概率无效——这是与 raw 视角的本质区别，单视角矩阵会严重高估编码类 tamper。
+md += `
+---
+
+## 汇总：解码型 WAF 视角（服务器 URL 解码后匹配规则 —— 真实主流）
+
+> raw 视角仅对"不解码的弱 WAF"有效。编码类 tamper（charencode/base64encode 等）
+> 在解码型 WAF 下输出被还原为明文 → 多数无效；结构变形类（注释/等价语法/大小写）仍有效。
+
+| WAF 规则类别 | 解码视角有效插件数 | Top-5 最有效插件 |
+|-------------|------------------|-----------------|
+`;
+
+for (const cat of WAF_RULE_CATEGORIES) {
+  const e = byCategory[cat.id];
+  const top5 = e.effectivePluginsDecoded.slice(0, 5).map(p => `${p.name}(${p.bypassRate}%)`).join(', ') || '-';
+  md += `| ${cat.name} | ${e.effectivePluginsDecoded.length} | ${top5} |\n`;
 }
 
 md += `

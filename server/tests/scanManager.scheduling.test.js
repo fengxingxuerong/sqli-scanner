@@ -11,12 +11,17 @@ import { TECHNIQUE_TYPES } from '../src/engine/payloads.js';
 function makeManager(plan) {
   const called = [];
   const sm = new ScanManager();
+  // 记录每个检测器的在飞区间，用于断言「并行调度」本身（而不是墙钟阈值）。
+  sm._spans = [];
   sm.detectors = TECHNIQUE_TYPES.map((t) => ({
     technique: t,
     async detect(ctx) {
       called.push(t);
+      const span = { technique: t, start: Date.now(), end: 0 };
+      sm._spans.push(span);
       const spec = plan[t] || {};
       if (spec.delay) await new Promise((r) => setTimeout(r, spec.delay));
+      span.end = Date.now();
       const vulnerable = !!(spec && spec.vulnerable);
       return {
         pointId: ctx.point.id,
@@ -49,13 +54,34 @@ async function runScan(sm, config) {
   return scanId;
 }
 
-test('快速层并发：union/error/boolean 同时跑（墙钟≈单检测耗时，非 3 倍线性）', async () => {
-  const sm = makeManager({ union: { vulnerable: false }, error: { vulnerable: false }, boolean: { vulnerable: false, delay: 80 } });
-  const t0 = Date.now();
+// 并发峰值：把在飞区间按时间扫一遍，取同时处于在飞状态的最大个数。
+// 用它代替「墙钟 < N ms」阀值：后者在 CI/并发负载下会假红（本机跑其他测试时实测飘到 1.6s），
+// 而「三个快速层是否真的同时在飞」才是本测试要钉的语义，与机器忙不忙无关。
+function maxInFlight(spans) {
+  const events = [];
+  for (const s of spans) {
+    if (!s.end) continue;
+    events.push([s.start, 1], [s.end, -1]);
+  }
+  events.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  let cur = 0;
+  let peak = 0;
+  for (const [, d] of events) {
+    cur += d;
+    if (cur > peak) peak = cur;
+  }
+  return peak;
+}
+
+test('快速层并发：union/error/boolean 同时在飞（并行而非串行）', async () => {
+  const sm = makeManager({ union: { vulnerable: false, delay: 80 }, error: { vulnerable: false, delay: 80 }, boolean: { vulnerable: false, delay: 80 } });
   await runScan(sm, { techniques: ['union', 'error', 'boolean'] });
-  const wall = Date.now() - t0;
-  // 三个快速检测并行 → 墙钟应 < 200ms（若串行则为 ~240ms+）。宽松阈值防 CI 抖动。
-  assert.ok(wall < 220, `期望快速层并发墙钟<220ms，实际=${wall}ms`);
+  const fast = sm._spans.filter((s) => ['union', 'error', 'boolean'].includes(s.technique));
+  assert.equal(fast.length, 3, '三个快速层检测器都应被调用');
+  assert.ok(
+    maxInFlight(fast) >= 3,
+    `期望快速层三者同时在飞（串行时峰值=1），实际峰值=${maxInFlight(fast)}`
+  );
   assert.deepEqual([...sm._called].sort(), ['boolean', 'error', 'union']);
 });
 

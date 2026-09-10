@@ -105,3 +105,55 @@ test('applyPrefixSuffix：直连模式始终原样返回', () => {
   const p = { location: 'direct', param: 'id', originalValue: '1' };
   assert.equal(applyPrefixSuffix(t, p, 'payload'), 'payload');
 });
+
+// ============ [P0-FIX 2026-09-07] cookieParams 会话无条件携带 ============
+
+test('url 注入点：cookieParams 会话自动写入 Cookie 头（此前 0 携带）', () => {
+  const t = baseTarget();
+  const p = { location: 'url', param: 'id', originalValue: '1' };
+  const req = buildInjectionRequest(t, p, "1' AND 1=1-- -");
+  assert.equal(req.headers['Cookie'], 'session=abc');
+});
+
+test('body 注入点：cookieParams 会话同样携带', () => {
+  const t = baseTarget({ method: 'POST' });
+  const p = { location: 'body', param: 'user', originalValue: '1', formValues: { user: '1' } };
+  const req = buildInjectionRequest(t, p, "1' OR '1'='1");
+  assert.equal(req.headers['Cookie'], 'session=abc');
+});
+
+test('header 注入点：cookieParams 会话同样携带', () => {
+  const t = baseTarget();
+  const p = { location: 'header', param: 'X-Forwarded-For', originalValue: '1.1.1.1' };
+  const req = buildInjectionRequest(t, p, "1.1.1.1' OR '1'='1");
+  assert.equal(req.headers['Cookie'], 'session=abc');
+});
+
+test('用户显式 headerParams.Cookie 优先，不被自动会话覆盖', () => {
+  const t = baseTarget({ headerParams: { Cookie: 'sid=manual' } });
+  const p = { location: 'url', param: 'id', originalValue: '1' };
+  const req = buildInjectionRequest(t, p, '1 AND 1=1');
+  assert.equal(req.headers['Cookie'], 'sid=manual');
+});
+
+test('cookie 注入点：注入值覆盖会话值，其他会话键保留', () => {
+  const t = baseTarget({ cookieParams: { session: 'abc', theme: 'dark' } });
+  const p = { location: 'cookie', param: 'session', originalValue: 'abc' };
+  const req = buildInjectionRequest(t, p, "abc' UNION SELECT 1-- -");
+  assert.match(req.headers['Cookie'], /session=abc' UNION SELECT 1-- -/);
+  assert.match(req.headers['Cookie'], /theme=dark/);
+});
+
+test('无 cookieParams 时不产生 Cookie 头（零回归）', () => {
+  const t = baseTarget({ cookieParams: {} });
+  const p = { location: 'url', param: 'id', originalValue: '1' };
+  const req = buildInjectionRequest(t, p, '1 AND 1=1');
+  assert.equal(req.headers['Cookie'], undefined);
+});
+
+test('直连模式不受影响（无 HTTP 头语义）', () => {
+  const t = { mode: 'direct', sqlTemplate: 'SELECT {INJECT}', cookieParams: { session: 'abc' }, config: {} };
+  const p = { location: 'direct', param: 'id', originalValue: '1', sqlTemplate: 'SELECT {INJECT}' };
+  const req = buildInjectionRequest(t, p, '1');
+  assert.equal(req.headers.Cookie, undefined);
+});

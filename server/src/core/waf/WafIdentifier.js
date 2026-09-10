@@ -1,4 +1,5 @@
 import { WAF_RULES } from './wafRules.js';
+import { detectGenericBlock } from './blockSignatures.js';
 
 // 高置信 WAF 阈值：置信度 >= 此值才允许自动 tamper 重跑（防低置信/单特征误触发导致请求爆炸）。
 export const WAF_HIGH_CONFIDENCE = 0.8;
@@ -51,8 +52,11 @@ export class WafIdentifier {
 
   /**
    * 识别响应中的 WAF 厂商。
+   * 两层判据：① wafRules.js 的 62 家厂商签名（高置信，可驱动 autoRetry）；
+   *           ② blockSignatures.js 的通用拦截页特征（vendor='generic_block'，置信度封顶 0.6，
+   *              只说明「被拦了」，不说明「被谁拦」）。
    * @param {{status:number, headers:object, body:string}} response 指纹阶段基线响应
-   * @returns {Array<{vendor:string, confidence:number, evidence:string}>} 按 confidence 降序；无特征返回 []
+   * @returns {Array<{vendor:string, confidence:number, evidence:string, source?:string, alsoMatched?:string[]}>} 按 confidence 降序；无任何特征返回 []
    */
   identify(response) {
     const resp = response || {};
@@ -74,6 +78,30 @@ export class WafIdentifier {
     }
     // 按置信度降序
     candidates.sort((a, b) => b.confidence - a.confidence);
+
+    // —— 通用拦截页识别：接在厂商签名之后、unknown 兜底之前（同样复用基线响应，零额外发包）——
+    // 为什么必须补这一层：62 家厂商签名是静态快照，国产云 WAF 月更页面 / CDN 透传规则 /
+    // 自建 ModSecurity 改写过的拒绝页必然漏；「识别不出」过去被当成「不存在」，引擎于是
+    // 继续用裸 payload 撞同一面墙。通用签名至少能把「本站在拦截我们」这件事说出口。
+    const generic = detectGenericBlock(resp);
+    if (generic) {
+      if (candidates.length > 0) {
+        // 厂商优先：已能命名厂商时，通用命中只作为该条的附注（alsoMatched = 命中的通用特征 id），
+        // 不新增候选条目——避免同一结论以 0.55 的低置信重复出现在排序/聚合里去干扰展示与门控。
+        candidates[0].alsoMatched = generic.matchedIds;
+      } else {
+        // 无厂商可命名：以 generic_block 候选返回，evidence 写明 status + 命中的特征 id（可复核）。
+        // confidence ≤ 0.6 < WAF_HIGH_CONFIDENCE(0.8)，故永不触发 autoRetry 的整站 tamper 重跑。
+        candidates.push({
+          vendor: generic.vendor,
+          confidence: generic.confidence,
+          evidence: generic.evidence,
+          source: 'generic_block',
+          hint: generic.hint,
+          family: generic.family,
+        });
+      }
+    }
     return candidates;
   }
 
@@ -108,7 +136,8 @@ export class WafIdentifier {
    *   3) GET /?id=1' OR '1'='1（WAF 触发）→ 观察拦截
    *   4) 比较：良性请求成功但触发请求被拦截（403/406/503）→ WAF 存在
    *   5) 在被拦截响应上复用 wafRules.js 匹配器识别厂商
-   *   6) 无厂商匹配但行为差异显著（body 长度缩减 >50%）→ 标记 "unknown WAF"
+   *   6) 无厂商匹配但行为差异显著（body 长度缩减 >50%）→ 标记 "unknown WAF"（confidence 0.5 不变，
+   *      但额外标注 source:'none'：无任何签名证据；调用侧据此在 blockPolicy 里一票否决发包形态变更）
    *
    * @param {object} target 目标对象（含 baseUrl 或 url）
    * @param {object} httpClient 统一 HttpClient 实例
@@ -169,11 +198,14 @@ export class WafIdentifier {
           const candidates = this.identify(toResponse(triggerRes));
           if (candidates.length > 0) {
             const best = candidates[0];
-            return { detected: true, vendor: best.vendor, confidence: best.confidence };
+            // source 透传：让调用方能区分「厂商签名命中」与「仅通用拦截页命中」（generic_block）。
+            // 注意本分支只在被动识别为空时才跑，此时 identify() 已含通用层→ 不会再把有证据的拦截
+            // 降级成无名的 'unknown'。
+            return { detected: true, vendor: best.vendor, confidence: best.confidence, source: best.source || 'wafRules' };
           }
         }
-        // 6) 被拦截但无厂商匹配 → unknown WAF
-        return { detected: true, vendor: null, confidence: 0.6 };
+        // 6) 被拦截但无厂商匹配 → unknown WAF（有硬证据：触发请求被拦而良性请求没被拦）
+        return { detected: true, vendor: null, confidence: 0.6, source: 'behavior' };
       }
 
       // 行为兜底：无显式拦截但 body 长度缩减 > 50% → 疑似 WAF
@@ -182,7 +214,13 @@ export class WafIdentifier {
         if (!triggerRes) continue;
         const triggerLen = String(triggerRes.data ?? '').length;
         if (benignLen > 0 && triggerLen < benignLen * 0.5) {
-          return { detected: true, vendor: null, confidence: 0.5 };
+          // 裸 unknown 兜底：只有「正文变短了」这一条间接线索，没有任何拦截状态码/文案证据。
+          // 置信度维持 0.5 不变（既有语义，autoRetry 门控本就要求 >= 0.8，0.5 不会触发重跑；
+          // 降值无收益反而会让「行为差异」与「无信号」失去可比性）。真正需要防的是另一条路径：
+          // 调用侧 `probeResult.vendor || 'unknown'` 会把无厂商结论写成 vendor='unknown'，若那时被
+          // 当成可信任命中就会拿 wafRecommend 的 _default 链重跑全站。为此显式标注 source:'none'，
+          // 并把否决权固化到 blockPolicy.decideBlockPolicy（vendor==='unknown' → action 只能 'none'）。
+          return { detected: true, vendor: null, confidence: 0.5, source: 'none', evidence: 'behavior-only: body length shrunk >50%, no block status' };
         }
       }
 

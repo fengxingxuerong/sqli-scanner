@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-04T15:37:13.912Z",
+  "generatedAt": "2026-09-10T12:36:07.660Z",
   "stats": {
     "pass": 19,
     "fail": 0,
@@ -29,7 +29,7 @@
         {
           "name": "requests<=150",
           "ok": true,
-          "detail": "实际 30",
+          "detail": "实际 40",
           "severity": "pass"
         },
         {
@@ -53,8 +53,8 @@
           "detail": "找到"
         }
       ],
-      "requestCount": 30,
-      "elapsedMs": 70,
+      "requestCount": 40,
+      "elapsedMs": 118,
       "vulnCount": 1
     },
     {
@@ -72,7 +72,7 @@
         {
           "name": "requests<=100",
           "ok": true,
-          "detail": "实际 63",
+          "detail": "实际 76",
           "severity": "pass"
         },
         {
@@ -86,8 +86,8 @@
           "detail": "无提取（正确）"
         }
       ],
-      "requestCount": 63,
-      "elapsedMs": 269,
+      "requestCount": 76,
+      "elapsedMs": 559,
       "vulnCount": 0
     },
     {
@@ -105,12 +105,12 @@
         {
           "name": "requests<=250",
           "ok": true,
-          "detail": "实际 186",
+          "detail": "实际 5",
           "severity": "pass"
         }
       ],
-      "requestCount": 186,
-      "elapsedMs": 2748,
+      "requestCount": 5,
+      "elapsedMs": 31,
       "vulnCount": 0
     },
     {
@@ -128,12 +128,12 @@
         {
           "name": "requests<=250",
           "ok": true,
-          "detail": "实际 57",
+          "detail": "实际 70",
           "severity": "pass"
         }
       ],
-      "requestCount": 57,
-      "elapsedMs": 151,
+      "requestCount": 70,
+      "elapsedMs": 435,
       "vulnCount": 0
     },
     {
@@ -151,12 +151,12 @@
         {
           "name": "requests<=250",
           "ok": true,
-          "detail": "实际 63",
+          "detail": "实际 76",
           "severity": "pass"
         }
       ],
-      "requestCount": 63,
-      "elapsedMs": 267,
+      "requestCount": 76,
+      "elapsedMs": 560,
       "vulnCount": 0
     },
     {
@@ -174,12 +174,12 @@
         {
           "name": "requests<=250",
           "ok": true,
-          "detail": "实际 186",
+          "detail": "实际 5",
           "severity": "pass"
         }
       ],
-      "requestCount": 186,
-      "elapsedMs": 2744,
+      "requestCount": 5,
+      "elapsedMs": 33,
       "vulnCount": 0
     },
     {
@@ -197,12 +197,12 @@
         {
           "name": "requests<=250",
           "ok": true,
-          "detail": "实际 186",
+          "detail": "实际 79",
           "severity": "pass"
         }
       ],
-      "requestCount": 186,
-      "elapsedMs": 2732,
+      "requestCount": 79,
+      "elapsedMs": 621,
       "vulnCount": 0
     },
     {
@@ -229,12 +229,12 @@
         {
           "name": "requests<=80",
           "ok": true,
-          "detail": "实际 43",
+          "detail": "实际 53",
           "severity": "pass"
         }
       ],
-      "requestCount": 43,
-      "elapsedMs": 42,
+      "requestCount": 53,
+      "elapsedMs": 94,
       "vulnCount": 3
     },
     {
@@ -243,6 +243,7 @@
       "category": "recall",
       "result": "PASS",
       "found": [
+        "union",
         "error",
         "boolean"
       ],
@@ -250,7 +251,7 @@
         {
           "name": "vulnerable=true",
           "ok": true,
-          "detail": "检出 2 个漏洞"
+          "detail": "检出 3 个漏洞"
         },
         {
           "name": "must=[boolean,error]",
@@ -260,18 +261,18 @@
         {
           "name": "nice=[union]",
           "ok": true,
-          "detail": "命中: 无（不计失败）"
+          "detail": "命中: union（不计失败）"
         },
         {
           "name": "requests<=80",
           "ok": true,
-          "detail": "实际 34",
+          "detail": "实际 46",
           "severity": "pass"
         }
       ],
-      "requestCount": 34,
-      "elapsedMs": 22,
-      "vulnCount": 2
+      "requestCount": 46,
+      "elapsedMs": 92,
+      "vulnCount": 3
     },
     {
       "name": "paren",
@@ -279,6 +280,7 @@
       "category": "recall",
       "result": "PASS",
       "found": [
+        "union",
         "error",
         "boolean"
       ],
@@ -286,7 +288,7 @@
         {
           "name": "vulnerable=true",
           "ok": true,
-          "detail": "检出 2 个漏洞"
+          "detail": "检出 3 个漏洞"
         },
         {
           "name": "must=[boolean]",
@@ -296,18 +298,18 @@
         {
           "name": "nice=[error,union]",
           "ok": true,
-          "detail": "命中: error（不计失败）"
+          "detail": "命中: error,union（不计失败）"
         },
         {
-          "name": "requests<=80",
+          "name": "requests<=90",
           "ok": true,
-          "detail": "实际 38",
+          "detail": "实际 50",
           "severity": "pass"
         }
       ],
-      "requestCount": 38,
-      "elapsedMs": 44,
-      "vulnCount": 2
+      "requestCount": 50,
+      "elapsedMs": 109,
+      "vulnCount": 3
     },
     {
       "name": "orderby",
@@ -336,12 +338,12 @@
         {
           "name": "requests<=120",
           "ok": true,
-          "detail": "实际 48",
+          "detail": "实际 84",
           "severity": "pass"
         }
       ],
-      "requestCount": 48,
-      "elapsedMs": 41,
+      "requestCount": 84,
+      "elapsedMs": 2189,
       "vulnCount": 1
     },
     {
@@ -364,14 +366,14 @@
           "detail": "全部命中"
         },
         {
-          "name": "requests<=40",
+          "name": "requests<=120",
           "ok": true,
-          "detail": "实际 38",
+          "detail": "实际 74",
           "severity": "pass"
         }
       ],
-      "requestCount": 38,
-      "elapsedMs": 45,
+      "requestCount": 74,
+      "elapsedMs": 2150,
       "vulnCount": 1
     },
     {
@@ -394,14 +396,14 @@
           "detail": "全部命中"
         },
         {
-          "name": "requests<=60",
+          "name": "requests<=170",
           "ok": true,
-          "detail": "实际 24",
+          "detail": "实际 154",
           "severity": "pass"
         }
       ],
-      "requestCount": 24,
-      "elapsedMs": 1031,
+      "requestCount": 154,
+      "elapsedMs": 4970,
       "vulnCount": 1
     },
     {
@@ -424,14 +426,14 @@
           "detail": "全部命中"
         },
         {
-          "name": "requests<=60",
+          "name": "requests<=170",
           "ok": true,
-          "detail": "实际 20",
+          "detail": "实际 158",
           "severity": "pass"
         }
       ],
-      "requestCount": 20,
-      "elapsedMs": 6029,
+      "requestCount": 158,
+      "elapsedMs": 6194,
       "vulnCount": 1
     },
     {
@@ -456,12 +458,12 @@
         {
           "name": "requests<=40",
           "ok": true,
-          "detail": "实际 13",
+          "detail": "实际 23",
           "severity": "pass"
         }
       ],
-      "requestCount": 13,
-      "elapsedMs": 24,
+      "requestCount": 23,
+      "elapsedMs": 48,
       "vulnCount": 1
     },
     {
@@ -484,9 +486,9 @@
           "detail": "全部命中"
         },
         {
-          "name": "requests<=120",
+          "name": "requests<=150",
           "ok": true,
-          "detail": "实际 25",
+          "detail": "实际 35",
           "severity": "pass"
         },
         {
@@ -500,8 +502,8 @@
           "detail": "提取 1 个库的表"
         }
       ],
-      "requestCount": 25,
-      "elapsedMs": 21,
+      "requestCount": 35,
+      "elapsedMs": 48,
       "vulnCount": 1
     },
     {
@@ -526,12 +528,12 @@
         {
           "name": "requests<=60",
           "ok": true,
-          "detail": "实际 26",
+          "detail": "实际 39",
           "severity": "pass"
         }
       ],
-      "requestCount": 26,
-      "elapsedMs": 22,
+      "requestCount": 39,
+      "elapsedMs": 40,
       "vulnCount": 1
     },
     {
@@ -554,14 +556,14 @@
           "detail": "全部命中"
         },
         {
-          "name": "requests<=100",
+          "name": "requests<=170",
           "ok": true,
-          "detail": "实际 33",
+          "detail": "实际 147",
           "severity": "pass"
         }
       ],
-      "requestCount": 33,
-      "elapsedMs": 156,
+      "requestCount": 147,
+      "elapsedMs": 2115,
       "vulnCount": 1
     },
     {
@@ -591,7 +593,7 @@
         }
       ],
       "requestCount": 5,
-      "elapsedMs": 33,
+      "elapsedMs": 46,
       "vulnCount": 1
     }
   ]

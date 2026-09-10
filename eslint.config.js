@@ -24,6 +24,8 @@ export default [
       'src-tauri/**',
       '**/*.d.ts',
       '**/.trash/**',
+      // 一次性排障脚本（e2e/diag）：不入库也不参与 lint，否则 `eslint .` 永远带 7 条噪声 error
+      'e2e/diag/**',
       'logs/**',
       'server/logs/**',
       '*.log',

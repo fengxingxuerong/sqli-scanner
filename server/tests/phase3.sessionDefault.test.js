@@ -43,6 +43,11 @@ function rmQuiet(p) {
 function makeManager(plan) {
   const detectCalls = [];
   const sm = new ScanManager();
+  // [P0-FIX 2026-09-08] 注入可用 httpClient 桩：本文件原靠「真发 http://x/ 必失败」跑扫描，
+  // 而新的结论可信度守卫（scanValidityGuard）会在「目标连续无有效响应」时熔断剩余注入点，
+  // 被跳过的点**故意不写 session**（写 done 会让 resume 把「根本没测」永久当成「测过且无洞」）。
+  // 本用例考的是会话落盘与 resume，不是死目标行为，因此把 HTTP 补成可用（真实扫描里目标本就可达）。
+  sm.httpClient = { async request() { return { status: 200, data: '<html>ok</html>', headers: {} }; } };
   sm.detectors = TECHNIQUE_TYPES.map((t) => ({
     technique: t,
     async detect(ctx) {

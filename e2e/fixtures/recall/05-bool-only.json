@@ -1,11 +1,28 @@
 {
   "name": "bool_only",
   "description": "仅布尔差异（无回显/无报错/无延迟）",
-  "target": { "type": "mock", "endpoint": "bool", "param": "uid", "value": "1" },
-  "config": { "techniques": ["boolean"] },
+  "target": {
+    "type": "mock",
+    "endpoint": "bool",
+    "param": "uid",
+    "value": "1"
+  },
+  "config": {
+    "techniques": [
+      "boolean"
+    ]
+  },
   "expected": {
     "vulnerable": true,
-    "techniques": { "must": ["boolean"], "nice": [] },
-    "requestCount": { "max": 40 }
+    "techniques": {
+      "must": [
+        "boolean"
+      ],
+      "nice": []
+    },
+    "requestCount": {
+      "max": 120,
+      "note": "语言级响应头特征移除（php/asp.net 不证明后端数据库）后，未知 DBMS 走诚实报错/时间向量遍历，阈值按 2026-09-08 新基线校准"
+    }
   }
 }

@@ -18,6 +18,7 @@ import ReportExport from '../components/ReportExport';
 import VulnDetail from '../components/VulnDetail';
 import DbTree from '../components/DbTree';
 import ReportSummarySection, { RISK_COLORS, TECHNIQUE_COLORS } from '../components/ReportSummarySection';
+import { resolveValidityMode } from '../components/ValidityBanner';
 import type { Vulnerability, SqlmapVulnEntry } from '../shared/types';
 
 // sqlmap 日志级别 → 颜色（与 ProgressView 同源，避免重复定义漂移）
@@ -262,7 +263,15 @@ export default function ReportPage() {
               </Stack>
             )
           ) : vulns.length === 0 ? (
-            <Alert severity="success" variant="outlined">{t('report.noVulns')}</Alert>
+            /* [P0-FIX 2026-09-09] 按 verdict 分支：旧实现无条件渲染绿色「未发现漏洞」，
+               会把「目标挂了/被封/会话失效」误读成「安全」。旧报告（无 verdict）保留原文案。 */
+            resolveValidityMode(report) === 'inconclusive' ? (
+              <Alert severity="warning" variant="outlined">{t('report.noVulnsInconclusive')}</Alert>
+            ) : resolveValidityMode(report) === 'negative' ? (
+              <Alert severity="info" variant="outlined">{t('report.noVulnsReliable')}</Alert>
+            ) : (
+              <Alert severity="success" variant="outlined">{t('report.noVulns')}</Alert>
+            )
           ) : (
             <Stack spacing={2}>
               {vulns.map((vuln) => (
@@ -352,6 +361,34 @@ export default function ReportPage() {
                 {t('report.itemCount', { count: report.points?.length || 0 })}
               </Typography>
             </Box>
+            {/* [P0-FIX] C 项：注入点明细——带 skipReason 的点显式标注「为什么没测」，
+                避免「预筛/校验/静态跳过」被误读成「测了且无漏洞」；title 挂引擎给的 skipNote */}
+            {(report.points?.length ?? 0) > 0 && (
+              <>
+                <Divider />
+                <Box>
+                  <Typography variant="subtitle2" fontWeight={600}>{t('report.pointList')}</Typography>
+                  <Stack spacing={0.5} className="mt-1">
+                    {(report.points ?? []).map((p) => (
+                      <Stack key={p.id} direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
+                        <Typography variant="body2" sx={{ fontFamily: 'monospace', wordBreak: 'break-all' }}>
+                          {p.location}.{p.param}
+                        </Typography>
+                        {p.skipReason && (
+                          <Chip
+                            size="small"
+                            variant="outlined"
+                            color="warning"
+                            title={p.skipNote || undefined}
+                            label={t(`pointSkip.${p.skipReason}`)}
+                          />
+                        )}
+                      </Stack>
+                    ))}
+                  </Stack>
+                </Box>
+              </>
+            )}
             <Divider />
             <Box>
               <Typography variant="subtitle2" fontWeight={600}>{t('report.scanTime')}</Typography>

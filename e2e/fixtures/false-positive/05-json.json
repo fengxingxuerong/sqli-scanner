@@ -1,11 +1,29 @@
 {
   "name": "fp_json",
   "description": "JSON API（数值型回显）",
-  "target": { "type": "safe", "endpoint": "json", "param": "key", "value": "test" },
-  "config": { "techniques": ["union", "error", "boolean", "time"] },
+  "target": {
+    "type": "safe",
+    "endpoint": "json",
+    "param": "key",
+    "value": "test"
+  },
+  "config": {
+    "techniques": [
+      "union",
+      "error",
+      "boolean",
+      "time"
+    ],
+    "prefilterSinglePoint": true
+  },
   "expected": {
     "vulnerable": false,
-    "techniques": { "must": [], "nice": [] },
-    "requestCount": { "max": 250 }
+    "techniques": {
+      "must": [],
+      "nice": []
+    },
+    "requestCount": {
+      "max": 250
+    }
   }
 }

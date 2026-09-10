@@ -104,7 +104,50 @@ export type EventType =
   | 'scan_error'
   | 'sqlmap_log' // sqlmap 原始输出行（按级别着色）
   | 'sqlmap_vuln' // sqlmap 确认的注入点
-  | 'waf_detected'; // payload: { vendors: WafCandidate[]; suggestions: WafSuggestion[] }
+  | 'waf_detected' // payload: { vendors: WafCandidate[]; suggestions: WafSuggestion[] }
+  // ── [P0-FIX 2026-09-09] 结论可信度守卫（前端仅消费，不改引擎）──
+  | 'scan_validity' // status!=='ok' 时推送的可信度摘要（payload 同 ScanValidity）
+  | 'scan_validity_abort' // 守卫中止剩余注入点检测（payload: ScanValidity & { scanId }）
+  | 'waf_block_policy'; // 拦截策略变更（payload: WafBlockPolicyPayload）
+
+/** 结论可信度摘要（report.validity / report.summary.validity / scan_validity* 事件同构） */
+export interface ScanValidity {
+  status: 'ok' | 'blocked' | 'unreachable' | 'session_expired' | 'target_error';
+  reliable: boolean; // false = 阴性结论（未检出）不成立，UI 必须显式提示
+  reason: string; // 后端给出的一句话原因（中文，含实测数字）
+  counts: {
+    total: number; // 累计请求数
+    failStreak: number; // 连续失败峰值（unreachable 判定依据）
+    blockHits: number; // 窗口内拦截特征命中次数
+    serverErr: number; // 窗口内 5xx 次数
+    authLostHits: number; // 会话失效命中次数
+  };
+  blockRatio: number; // 拦截占比（0~1）
+  suggestBackoffMs: number | null; // Retry-After 实测值（无则 null）
+  inconclusivePoints: string[]; // 未完成有效检测的注入点 id
+  advice: string; // 中文处置建议
+}
+
+/** waf_block_policy 事件载荷（拦截策略变更，仅提示不自动套用） */
+export interface WafBlockPolicyPayload {
+  action: 'none' | 'preferTamper' | 'pause';
+  backoffMs: number | null;
+  tamperHint: string[]; // 建议的 tamper 链（有序）
+  reason: string; // 决策依据（中文）
+}
+
+/** 导出报告挂载的可复现 PoC 证据（仅导出路径生成；UI 拿不到时优雅降级） */
+export interface VulnPoc {
+  method: string;
+  url: string;
+  headers: Record<string, string>;
+  body: string;
+  payload: string;
+  curl: string; // 单行 curl（复制即跑）
+  raw: string; // 原始 HTTP 报文（Burp / sqlmap -r 可导入）
+  note: string;
+  generatedAt: string;
+}
 
 /** 基础认证凭据（Basic Auth） */
 export interface BasicCred {
@@ -167,6 +210,45 @@ export interface ScanConfig {
   };
   // 站内链接爬取深度（对标 sqlmap --crawl=<depth>）：0=关闭，1-3=深度
   crawlDepth?: number;
+  // 授权范围（[P0-SEC] scope 硬约束）：CIDR/域名/URL 前缀列表；空/缺省 = 不启用。
+  // 启用后目标与每一跳重定向都必须落在范围内，越界直接拒发（后端 scopeGuard 消费）。
+  scope?: string[];
+  // 忽略自签/内网 CA 证书（insecureTls=true：关闭证书校验，失去中间人防护，报告须注明）。
+  insecureTls?: boolean;
+  // 输入校验跳过（默认开）：参数被白名单拦死时跳过 200+ 无效请求；false 可强制完整检测。
+  validationSkip?: boolean;
+  // ── [P0-FIX 2026-09-09] 后端已支持、UI 此前无入口的调优键 ──
+  // 键名与 server/src/api/scanRoutes.js 的 KNOWN_CFG_KEYS 严格一致：白名单外的键被后端
+  // `logger.debug` 静默丢弃（既不报错也不生效），所以任何新增键都必须同时登记进
+  // src/shared/constants.ts 的 SCAN_CONFIG_KEYS，由契约测试钉住「面板有 → 请求体有」。
+  // 参数预筛选总开关（scanRunner 消费）：默认开；关闭 = 每个点都跑完整检测（审计/对照场景，
+  // 代价是请求量放大数倍）。prefilter=false 会让 prefilterSinglePoint / validationSkip 失效。
+  prefilter?: boolean;
+  // 静态参数跳过（对标 sqlmap --skip-static，opt-in）：多参数目标每点 1 请求做哨兵探测，
+  // 响应与基线完全一致且哨兵值未回显的参数判为静态并跳过（换掉 46+ 请求/点的完整检测预算）。
+  skipStatic?: boolean;
+  // 单点目标也走廉价预筛（默认关）：唯一注入点时「探针无信号」不足以判定干净，误杀风险高，
+  // 只在赶时间的全量复扫里开。
+  prefilterSinglePoint?: boolean;
+  // 声明式 payload 注册表（对标 sqlmap XML <test>）：false = 用扁平 payloads/*.js（零回归）；
+  // true = 走 PAYLOAD_REGISTRY 按 level/risk/dbms/testFilter/testSkip 精确筛选。
+  // ★ testFilter / testSkip 只有在本键为 true 时才生效——面板必须把这条依赖讲清楚。
+  useRegistry?: boolean;
+  // payload 白名单（对标 --test-filter）：逗号分隔的注册表 id 子串，大小写不敏感；空 = 不过滤。
+  testFilter?: string;
+  // payload 黑名单（对标 --test-skip）：逗号分隔的 id 子串，命中即排除；空 = 不跳过。
+  testSkip?: string;
+  // 强制指定 DBMS（对标 --dbms）：跳过指纹识别（省 8-9 请求/点，payload/提取语句语义确定）。
+  // ★ 内置引擎按**引擎规范名精确匹配**（'MySQL' / 'PostgreSQL' / 'SQL Server'…，区分大小写），
+  //   与 sqlmap CLI 的 'mysql' / 'microsoft sql server' 拼写不同——拼错等于零 payload 命中。
+  //   null / 缺省 = 自动指纹识别（保持现状）。
+  dbms?: string | null;
+  // 盲注响应锚点（对标 sqlmap --string / --not-string）：真页面必含 / 假页面必含的文本。
+  // ★ 后端是**字符串**（Detector.matchAnchors 走 text.includes(String(ms))），不是布尔开关：
+  //   把它当开关传 true，判定就变成「真页必须包含字符 'true'」——强动态页面上直接静默失效。
+  //   因此 UI 给文本输入框，关闭态省略该键（不发空串、不发布尔）。
+  matchString?: string;
+  notString?: string;
 }
 
 /** 扫描目标 */
@@ -189,6 +271,9 @@ export interface InjectionPoint {
   confirmed: boolean;
   technique: TechniqueType | null;
   dbms: DbmsType | null;
+  // ── 跳过留痕（[P1-AUDIT] 引擎写入；「没测」不得看起来像「测了且无漏洞」）──
+  skipReason?: 'prefilter' | 'input_validation' | 'static';
+  skipNote?: string;
 }
 
 /** 盲注判定采样点（时间线基础单元） */
@@ -262,6 +347,8 @@ export interface Vulnerability {
   description: string;
   evidence?: string; // 检测器原始证据（P1-U2 新增，供详情页单独展示）
   trace?: BlindTrace | null;
+  // 可复现 PoC（仅导出路径由 ReportGenerator 惰性挂载；UI 侧报告可能缺失，缺失时不渲染复现区）
+  poc?: VulnPoc;
 }
 
 /** 提取数据 */
@@ -286,6 +373,10 @@ export interface ReportSummary {
   };
   // F-20 新增：WAF 指纹识别汇总（来自指纹基线，零额外发包）
   wafDetected?: WafCandidate[];
+  // ── [P0-FIX 2026-09-09] 结论可信度（旧报告缺省 = 未知，UI 走兼容分支）──
+  verdict?: 'no_vulnerability_detected' | 'inconclusive';
+  verdictNote?: string;
+  validity?: ScanValidity;
 }
 
 export interface ReportModel {
@@ -299,6 +390,8 @@ export interface ReportModel {
   data: ExtractedData | null;
   riskLevel: RiskLevel;
   summary: ReportSummary;
+  // 结论可信度摘要（与 report.summary.validity 同构；老报告无此字段）
+  validity?: ScanValidity;
   // ── sqlmap 高级模式附加（P0-U1 新增，仅 engine=sqlmap 的报告存在）──
   engine?: EngineType; // 报告来源引擎（内置引擎报告缺省为 builtin 语义，sqlmap 报告显式标注）
   sqlmap?: SqlmapReportData; // sqlmap 原始 {logs, vulns} 包装数据（内置引擎报告无此字段）
@@ -332,7 +425,7 @@ interface ScanEventPayloads {
   http_request: { method: string; url: string; status: number; ms?: number };
   point_discovered: { points: InjectionPoint[] };
   point_testing: { pointId: string; technique: string; tamperRetry?: boolean };
-  point_skipped: { pointId: string; reason: string };
+  point_skipped: { pointId: string; reason: string; note?: string };
   detection_found: DetectionResult & { riskLevel: RiskLevel };
   extraction_progress: { db: string; table: string | null; count: number };
   scan_completed: ReportModel;
@@ -343,6 +436,9 @@ interface ScanEventPayloads {
   sqlmap_log: SqlmapLogEntry;
   sqlmap_vuln: SqlmapVulnEntry;
   waf_detected: WafDetectedPayload;
+  scan_validity: ScanValidity;
+  scan_validity_abort: ScanValidity & { scanId: string };
+  waf_block_policy: WafBlockPolicyPayload;
 }
 
 /** SSE 事件（判别联合：按 type 分发 payload 类型，消除 any） */

@@ -81,6 +81,16 @@ export class TargetParser {
       points.push(createInjectionPoint('body', k, String(v)));
     }
 
+    // 3.5) JSON body 嵌套叶子注入点（level≥1，jsonBody 传入时生效）
+    // [P1 批次 2026-09-08] 真实 API 场景（POST application/json）的注入点发现：
+    // 递归遍历 jsonBody 树，字符串/数值叶子 → 注入点（param 用点路径如 user.id、
+    // items.0.name 数组下标也支持）。buildInjectionRequest 按路径替换叶子值后重序列化。
+    // 深度限制 6 / 每层节点上限 64 / 点数上限 50（防恶意深层嵌套 DoS）；
+    // 非对象（null/数组标量等）安全跳过。
+    if (target.jsonBody != null && typeof target.jsonBody === 'object') {
+      this._discoverJsonLeaves(target.jsonBody, [], points, 0);
+    }
+
     // 4) Cookie 参数（level≥2）
     if (level >= 2) {
       for (const [k, v] of Object.entries(target.cookieParams || {})) {
@@ -89,12 +99,40 @@ export class TargetParser {
     }
 
     // 5) Header 参数（level≥3 检查非敏感头；level≥4 检查全部头）
-    if (level >= 3) {
+    // [本期新增] config.testHeaders：--test-headers 显式开启时，用户指定的请求头一律作为注入点，
+    //   跳过 SENSITIVE_HEADERS 过滤（含 x-forwarded-for）——否则 level 3 下该类头被排除，
+    //   导致 Cookie/XFF 等真实注入点漏检。SENSITIVE 头本身已在 CLI 层被排除（host/content-length/
+    //   content-type/authorization），此处仅剩 x-forwarded-for 这类需显式测试的头。
+    if (level >= 3 || config.testHeaders) {
       const SENSITIVE_HEADERS = new Set(['authorization', 'cookie', 'host', 'x-forwarded-for']);
       for (const [k, v] of Object.entries(target.headerParams || {})) {
-        if (level >= 4 || !SENSITIVE_HEADERS.has(k.toLowerCase())) {
+        if (config.testHeaders || level >= 4 || !SENSITIVE_HEADERS.has(k.toLowerCase())) {
           points.push(createInjectionPoint('header', k, String(v)));
         }
+      }
+    }
+
+    // 5.5) URL path 末段注入点（--test-path 显式开启，默认关闭零回归）：
+    //   取 pathname 最后一段（非空），若不含 . 后缀（非 .html/.js/.css/.png 等静态资源），
+    //   作为一个 path 注入点（kind 'path'），注入时仅替换该段、保留其余 path 与 query。
+    //   pathSegment 记录段下标（0-based，含前导空段），供 buildInjectionRequest 精确定位替换。
+    if (config.testPath && target.baseUrl) {
+      try {
+        const u = new URL(target.baseUrl);
+        const segs = u.pathname.split('/');
+        let idx = -1;
+        for (let i = segs.length - 1; i >= 0; i--) {
+          if (segs[i] !== '') { idx = i; break; }
+        }
+        if (idx >= 0) {
+          const seg = segs[idx];
+          const isStatic = /\.[a-zA-Z0-9]+$/.test(seg); // 含 . 后缀视为静态资源，跳过
+          if (!isStatic) {
+            points.push(createInjectionPoint('path', seg, seg, { pathSegment: idx }));
+          }
+        }
+      } catch {
+        // URL 解析失败则跳过 path 点
       }
     }
 
@@ -121,6 +159,33 @@ export class TargetParser {
     }
 
     return points;
+  }
+
+  // [P1 批次 2026-09-08] JSON body 嵌套叶子注入点发现（discover 3.5 步的递归实现）。
+  // 遍历 jsonBody 树收集字符串/数值叶子：param 用点路径（user.id / items.0.name，
+  // 数组用数字下标），originalValue 取叶子原值字符串。防护边界（防恶意深层嵌套 DoS）：
+  // 深度 ≤6、每层子节点 ≤64、总点数 ≤50，超限静默停止（保守：已发现的点照常返回）。
+  _discoverJsonLeaves(node, path, points, depth) {
+    if (depth > 6 || points.length >= 50) return;
+    if (node == null || typeof node !== 'object') return; // 标量叶子由父层处理
+    const entries = Array.isArray(node)
+      ? node.slice(0, 64).map((v, i) => [String(i), v])
+      : Object.entries(node).slice(0, 64);
+    for (const [key, val] of entries) {
+      if (points.length >= 50) return;
+      // 数组下标保持裸数字（与 injection 侧 /^\d+$/ 数组匹配规则互逆）；
+      // 对象键仅标识符直接用，其余（含点号等特殊字符）用 JSON.stringify 形式。
+      const seg = Array.isArray(node)
+        ? key
+        : (/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(key) || /^\d+$/.test(key) ? key : JSON.stringify(key));
+      const childPath = [...path, seg];
+      if (val == null || typeof val === 'object') {
+        // 嵌套对象/数组：递归（boolean 也递归跳过——bool 叶子注入语义无意义）
+        this._discoverJsonLeaves(val, childPath, points, depth + 1);
+      } else if (typeof val === 'string' || typeof val === 'number') {
+        points.push(createInjectionPoint('body', childPath.join('.'), String(val)));
+      }
+    }
   }
 
   // 从已解析 URL 中提取路径段注入点（P3）：路径段中含 `*` 即标记注入位置。
@@ -196,6 +261,20 @@ export class TargetParser {
         if (!name) continue; // 无 name 的 input 不可作为注入点
         const value = this._attr(tag, 'value') || '';
         values[name] = value;
+        if (!csrfTokenName && CSRF_RE.test(name)) csrfTokenName = name;
+      }
+
+      // [P1-FIX 2026-09-07] 补 <textarea> 采集：多行文本（评论正文/简介/资料）是二阶注入
+      // 最典型的存储字段——此前只解析 <input>，textarea 字段整体缺失 → 二阶存储探针存错
+      // 参数（存进 item_id 而非正文 body）→ 存储值根本进不了被拼接的 SQL → 二阶必漏
+      // （real-world-lab 实测）。取值语义：标签间文本即默认值；同名时 input 优先（不覆盖）。
+      // <select> 未采集（取值需解析 selected option，场景较少，后续按需补）。
+      const taRe = /<textarea\b([^>]*)>([\s\S]*?)<\/textarea>/gi;
+      let tm;
+      while ((tm = taRe.exec(inner))) {
+        const name = this._attr(tm[1] || '', 'name');
+        if (!name) continue; // 无 name 的 textarea 不可作为注入点
+        if (values[name] == null) values[name] = (tm[2] || '').trim();
         if (!csrfTokenName && CSRF_RE.test(name)) csrfTokenName = name;
       }
 

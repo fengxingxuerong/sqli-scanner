@@ -1,0 +1,167 @@
+{
+  "generatedAt": "2026-09-10T12:25:49.814Z",
+  "mysql": "127.0.0.1:3306/sqli_lab",
+  "pass": 9,
+  "total": 9,
+  "rows": [
+    {
+      "name": "num",
+      "desc": "数值型（union/error/boolean/time 全通道）",
+      "found": [
+        "union",
+        "error",
+        "boolean"
+      ],
+      "dbms": [
+        "MySQL"
+      ],
+      "must": [
+        "union"
+      ],
+      "miss": [],
+      "elapsedMs": 230,
+      "status": "completed",
+      "ok": true,
+      "expectSafe": false
+    },
+    {
+      "name": "str",
+      "desc": "字符串型（' 闭合）",
+      "found": [
+        "union",
+        "error",
+        "boolean"
+      ],
+      "dbms": [
+        "MySQL"
+      ],
+      "must": [
+        "boolean"
+      ],
+      "miss": [],
+      "elapsedMs": 105,
+      "status": "completed",
+      "ok": true,
+      "expectSafe": false
+    },
+    {
+      "name": "like",
+      "desc": "LIKE 上下文（%' 闭合，P1-3 修复验证）",
+      "found": [
+        "union",
+        "error",
+        "boolean"
+      ],
+      "dbms": [
+        "MySQL"
+      ],
+      "must": [
+        "boolean"
+      ],
+      "miss": [],
+      "elapsedMs": 92,
+      "status": "completed",
+      "ok": true,
+      "expectSafe": false
+    },
+    {
+      "name": "orderby",
+      "desc": "ORDER BY 位置注入（子句轮需 level≥2）",
+      "found": [
+        "error",
+        "boolean"
+      ],
+      "dbms": [
+        "MySQL"
+      ],
+      "must": [
+        "boolean"
+      ],
+      "miss": [],
+      "elapsedMs": 523,
+      "status": "completed",
+      "ok": true,
+      "expectSafe": false
+    },
+    {
+      "name": "blind",
+      "desc": "布尔盲注（错误吞掉，无回显）",
+      "found": [
+        "union",
+        "boolean"
+      ],
+      "dbms": [
+        "MySQL"
+      ],
+      "must": [
+        "boolean"
+      ],
+      "miss": [],
+      "elapsedMs": 1351,
+      "status": "completed",
+      "ok": true,
+      "expectSafe": false
+    },
+    {
+      "name": "time",
+      "desc": "时间盲注（内容恒定）",
+      "found": [
+        "time"
+      ],
+      "dbms": [
+        "MySQL"
+      ],
+      "must": [
+        "time"
+      ],
+      "miss": [],
+      "elapsedMs": 9108,
+      "status": "completed",
+      "ok": true,
+      "expectSafe": false
+    },
+    {
+      "name": "stacked",
+      "desc": "堆叠注入（opt-in 技术）",
+      "found": [
+        "stacked"
+      ],
+      "dbms": [
+        "MySQL"
+      ],
+      "must": [
+        "stacked"
+      ],
+      "miss": [],
+      "elapsedMs": 8183,
+      "status": "completed",
+      "ok": true,
+      "expectSafe": false
+    },
+    {
+      "name": "safe",
+      "desc": "参数化占位符（期望 0 检出）",
+      "found": [],
+      "dbms": [],
+      "must": [],
+      "miss": [],
+      "elapsedMs": 3430,
+      "status": "completed",
+      "ok": true,
+      "expectSafe": true
+    },
+    {
+      "name": "echo",
+      "desc": "输入不进 SQL（期望 0 检出）",
+      "found": [],
+      "dbms": [],
+      "must": [],
+      "miss": [],
+      "elapsedMs": 575,
+      "status": "completed",
+      "ok": true,
+      "expectSafe": true
+    }
+  ],
+  "sqlmap": null
+}

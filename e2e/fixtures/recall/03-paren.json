@@ -1,11 +1,33 @@
 {
   "name": "paren",
   "description": "括号包裹上下文(('...')，需 ') 闭合)",
-  "target": { "type": "mock", "endpoint": "paren", "param": "id", "value": "1" },
-  "config": { "techniques": ["union", "error", "boolean"] },
+  "target": {
+    "type": "mock",
+    "endpoint": "paren",
+    "param": "id",
+    "value": "1"
+  },
+  "config": {
+    "techniques": [
+      "union",
+      "error",
+      "boolean"
+    ]
+  },
   "expected": {
     "vulnerable": true,
-    "techniques": { "must": ["boolean"], "nice": ["error", "union"] },
-    "requestCount": { "max": 80 }
+    "techniques": {
+      "must": [
+        "boolean"
+      ],
+      "nice": [
+        "error",
+        "union"
+      ]
+    },
+    "requestCount": {
+      "max": 90,
+      "note": "边界闭合候选补全（反斜杠转义形态，对标 sqlmap boundary）后探测成本 +1，阈值按 2026-09-08 P1 批次新基线校准"
+    }
   }
 }

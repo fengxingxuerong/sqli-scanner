@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { Card, CardContent, Button, Stack, Typography, Chip } from '@mui/material';
 import type { NavigateFunction } from 'react-router-dom';
 import type { ReportModel } from '../shared/types';
+import ValidityBanner from './ValidityBanner';
 
 const RISK_COLOR: Record<string, 'error' | 'warning' | 'info' | 'success'> = {
   Critical: 'error', High: 'warning', Medium: 'info', Low: 'success',
@@ -70,6 +71,9 @@ export default function ScanResult({ report, status, navigate }: ScanResultProps
                 points: report.points.length,
               })}
         </Typography>
+        {/* 扫描收尾态同步展示结论可信度（与报告页同源组件，防文案漂移）：
+            「未检出」在封禁/不可达场景下不得被读成「安全」 */}
+        <ValidityBanner report={report} className="mt-3" />
       </CardContent>
     </Card>
   );

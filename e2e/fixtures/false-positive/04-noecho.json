@@ -1,11 +1,29 @@
 {
   "name": "fp_noecho",
   "description": "无回显（输入不进入响应）",
-  "target": { "type": "safe", "endpoint": "noecho", "param": "id", "value": "1" },
-  "config": { "techniques": ["union", "error", "boolean", "time"] },
+  "target": {
+    "type": "safe",
+    "endpoint": "noecho",
+    "param": "id",
+    "value": "1"
+  },
+  "config": {
+    "techniques": [
+      "union",
+      "error",
+      "boolean",
+      "time"
+    ],
+    "prefilterSinglePoint": true
+  },
   "expected": {
     "vulnerable": false,
-    "techniques": { "must": [], "nice": [] },
-    "requestCount": { "max": 250 }
+    "techniques": {
+      "must": [],
+      "nice": []
+    },
+    "requestCount": {
+      "max": 250
+    }
   }
 }

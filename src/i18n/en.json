@@ -101,6 +101,24 @@
     "extractedData": "Extracted Data",
     "summary": "Summary",
     "noVulns": "No vulnerabilities found",
+    "noVulnsInconclusive": "Detection was incomplete and the target is unhealthy - a \"no vulnerability\" conclusion cannot be drawn (see the reliability notice above)",
+    "noVulnsReliable": "No SQL injection detected this run: the negative conclusion is reliable, but manual review of high-risk parameters is still recommended",
+    "pointList": "Injection Points",
+    "validity": {
+      "inconclusiveTitle": "Inconclusive Result",
+      "inconclusivePoints": "{{count}} injection points did not complete valid testing",
+      "advicePrefix": "Suggested action: ",
+      "negativeReliable": "This negative conclusion is reliable (target reachable, not blocked, session valid), but manual review is still recommended - this report does NOT mean \"secure\"",
+      "reliableWithVulns": "This scan sent {{total}} requests in total; result reliability is normal",
+      "suggestBackoff": "Target returned Retry-After; slow down, back off {{ms}}ms and rescan",
+      "status": {
+        "ok": "Reliability OK",
+        "blocked": "Likely WAF-blocked/banned",
+        "unreachable": "Target unreachable",
+        "session_expired": "Session expired",
+        "target_error": "Target persistently 5xx"
+      }
+    },
     "target": "Target",
     "duration": "Duration",
     "dbms": "Database",
@@ -165,7 +183,19 @@
     "risk": "Risk {{level}}",
     "vulns": "{{count}} vulnerabilities",
     "noVulns": "No vulnerabilities",
-    "unknownTarget": "(Unknown)"
+    "unknownTarget": "(Unknown)",
+    "resumeDialog": {
+      "title": "Confirm authorization scope before resuming",
+      "target": "Target: {{url}} ({{method}})",
+      "scopeCarried": "Reusing the previous authorization scope ({{count}} entries):",
+      "scopeMissing": "The previous scan set no authorization scope. Resuming as-is means no hard constraint - redirects and related assets can leave the authorized range. Add a scope, or explicitly confirm authorization.",
+      "noConfig": "No full config was stored with this record, so the resume can only start from defaults; the authorization scope must be confirmed here.",
+      "scopeLabel": "Authorization scope for this resume (empty = no restriction)",
+      "scopePlaceholder": "e.g. 10.0.0.0/24, target.example.com (comma or newline separated)",
+      "ack": "I confirm written authorization for this target and accept resuming without a scope constraint",
+      "confirm": "Resume scan",
+      "cancel": "Cancel"
+    }
   },
   "exploit": {
     "title": "Exploit Tool",
@@ -262,7 +292,35 @@
     "headersLabel": "Custom Headers (k:v, separate multiple with |)",
     "headersPlaceholder": "e.g. X-Auth: token123 | X-Forwarded-For: 1.2.3.4",
     "enableCrawler": "Enable in-site crawler (auto-discover more params)",
-    "enableResume": "Enable resume (auto-restore next scan of same URL)"
+    "enableResume": "Enable resume (auto-restore next scan of same URL)",
+    "scopeSecurity": "Engagement Scope & Transport Security",
+    "scopeLabel": "Engagement scope (CIDR / domain / URL prefix, comma or newline separated)",
+    "scopePlaceholder": "e.g. 10.0.0.0/24, target.example.com (empty = disabled)",
+    "scopeHint": "When enabled, the target and every redirect hop must fall inside the scope or the request is refused - zero packets to unauthorized assets",
+    "insecureTlsLabel": "Ignore self-signed certificates (insecureTls)",
+    "insecureTlsWarning": "Disabling certificate verification removes MITM protection; only for self-signed/internal-CA lab targets, and note it in the report",
+    "validationSkipLabel": "Input-validation skip (short-circuit whitelist-blocked params)",
+    "validationSkipHint": "When on, whitelist-blocked params skip 200+ futile requests; when off, full detection still runs (audit/control scenario)",
+    "payloadTuning": "Payload & Response-Match Tuning",
+    "prefilterLabel": "Parameter pre-filter (cheap probes before full detection)",
+    "prefilterHint": "When on, each injection point gets 1-2 cheap probes and obviously dead points are skipped (saves 50-75% requests); when off everything runs in full (audit/control) - do not rely on it to stay under a WAF rate limit",
+    "prefilterSingleLabel": "Pre-filter single-point targets too (prefilterSinglePoint)",
+    "prefilterSingleHint": "Off by default for a single injection point: a silent probe is not enough to call the only point clean - high false-negative risk",
+    "skipStaticLabel": "Skip static parameters (skipStatic, 1 sentinel request per point)",
+    "useRegistryLabel": "Use declarative payload registry (useRegistry)",
+    "testFilterLabel": "Payload whitelist testFilter (comma-separated registry id substrings)",
+    "testFilterPlaceholder": "e.g. bool,err (keep only entries whose id contains a substring)",
+    "testSkipLabel": "Payload blacklist testSkip (matched entries are excluded)",
+    "testSkipPlaceholder": "e.g. floor,benchmark",
+    "useRegistryGate": "testFilter / testSkip only take effect once the declarative payload registry is enabled (the flat payload pool has no ids to match)",
+    "dbmsLabel": "Force DBMS (empty = automatic fingerprinting)",
+    "dbmsAuto": "Auto-detect",
+    "dbmsHint": "Skips fingerprinting (saves 8-9 requests per point); picking the wrong engine means only that engine's payloads run - not detected is not the same as not vulnerable",
+    "matchStringLabel": "True-page anchor matchString (--string: text the true page must contain)",
+    "matchStringPlaceholder": "e.g. Added to cart (must be text actually present in the response)",
+    "notStringLabel": "False-page anchor notString (--not-string: text the false page must contain)",
+    "notStringPlaceholder": "e.g. You have an error in your SQL syntax",
+    "anchorHint": "With an anchor the detector decides true/false by substring match instead of similarity scoring; empty = disabled (this is a text value, not a checkbox)"
   },
   "waf": {
     "detected": "WAF Detected: {{vendors}}",
@@ -325,6 +383,11 @@
       "Q": "Inline query"
     }
   },
+  "pointSkip": {
+    "prefilter": "Pre-filter skipped",
+    "input_validation": "Input-validation skipped",
+    "static": "Static skipped"
+  },
   "technique": {
     "union": "Union-based Injection",
     "error": "Error-based Injection",
@@ -358,6 +421,12 @@
     "unknown": "Unknown",
     "vendorSep": ", ",
     "pointsDiscovered": "Discovered {{count}} candidate injection points",
+    "scanValidity": "Result reliability notice",
+    "scanValidityAbort": "Scan aborted by guard: result unreliable",
+    "validityInconclusivePoints": "{{count}} points left untested",
+    "wafBlockPolicy": "WAF block policy: {{action}}",
+    "wafBlockBackoff": "backoff {{ms}}ms",
+    "pointSkipped": "Injection point {{pointId}} skipped ({{reason}})",
     "stageTiming": "Stage Timing",
     "stageDetect": "Detect",
     "stageExtract": "Extract",
@@ -385,7 +454,12 @@
     "stackedWarning": "Stacked injection can be further abused for file writes / command execution - extremely dangerous (not auto-exploited in this release; for confirmation only).",
     "injectionPointField": "Injection point: {{location}}",
     "originalValueSuffix": " (original value {{value}})",
-    "payloadLine": "Payload: {{payload}}"
+    "payloadLine": "Payload: {{payload}}",
+    "pocTitle": "Reproduction (PoC)",
+    "pocCurl": "curl (copy & run)",
+    "pocRaw": "Raw HTTP request",
+    "pocGenerated": "Generated at {{time}}",
+    "copyCurl": "Copy curl command"
   },
   "blindTrace": {
     "title": "Decision Timeline",

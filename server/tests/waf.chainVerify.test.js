@@ -25,8 +25,9 @@ function classify(opts) {
   const url = String(opts.url || '');
   const dec = decodeURIComponent(url).replace(/\+/g, ' ');
   if (dec.includes('LIKE')) return 'chain1';
-  if (/%2527/.test(url)) return 'chain2';
-  if (dec.includes('AND 1=1')) return 'raw';
+  if (/%41%4E%44/i.test(url)) return "chain2";
+  // 探针族：带注释尾 与 引号闭合无注释，均属裸探针
+  if (dec.includes('AND 1=1') || dec.includes("AND '1'='1")) return 'raw';
   return 'baseline';
 }
 
@@ -90,12 +91,29 @@ test('验证器内部异常 → 保守回退首条链', async () => {
   assert.deepEqual(out.plugins, ['equaltolike']);
 });
 
-test('响应体缩水 50% 判定拦截（无 403 状态码的软拦截）', async () => {
+test('裸探针缩水判敏感；链验证阶段只认硬拦截（strict，2026-09-10 语义变更）', async () => {
   let first = true;
   const client = {
     async request() {
       if (first) { first = false; return OK(); } // 首请求=基线
       return SHRUNK(); // 其后所有注入请求均缩水
+    },
+  };
+  const out = await verifyTamperChains({ httpClient: client, target, point, chains });
+  // 变更理由：payload 一旦真正生效，结果集本就变空/变短（如恒空页的 /blind）；
+  // 若链验证阶段沿用「缩水 = 被拦」，每条链都会被误判失败 → 重跑被整轮跳过（实测 CRS blind 场景）。
+  // 链验证要回答的是「WAF 是否放行」，故只看状态码与拦截页文案。
+  assert.deepEqual(out.plugins, ['equaltolike']);
+});
+
+test('链验证阶段命中拦截页文案 → 判被拦（硬拦截信号）', async () => {
+  let first = true;
+  const client = {
+    async request(opts) {
+      if (first) { first = false; return OK(); }
+      const blocked = classify(opts) === 'raw'; // 裸探针被硬拦
+      if (blocked) return { status: 200, data: 'Request blocked by OWASP CRS rule 942460' };
+      return { status: 200, data: 'Request blocked by OWASP CRS rule 942100' }; // 链探针同样硬拦
     },
   };
   const out = await verifyTamperChains({ httpClient: client, target, point, chains });

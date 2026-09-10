@@ -15,6 +15,7 @@ import { useScanStore } from '../store/scanStore';
 import { API_BASE } from '../shared/apiClient';
 import { tauriBridge } from '../shared/tauriBridge';
 import { DEFAULT_CONFIG, DEFAULT_SQLMAP_CONFIG } from '../shared/constants';
+import { buildStartConfig } from '../shared/scanConfig';
 import i18n from '../i18n';
 import type {
   ReportModel,
@@ -146,7 +147,16 @@ export function useScan() {
       }
 
       // ── 默认模式：自带引擎 ──
-      const data = await apiClient.post<{ scanId: string }>('/scan/start', payload);
+      // [P0-FIX 2026-09-09] config 不再原样丢给后端，而是过 buildStartConfig：
+      //   ① 面板键逐键规范化落位（类型与后端 sanitizeStart 对齐、空串/undefined 省略）；
+      //   ② 前端未建模的键（历史回显里的 delay/reqRate/blindRobust 等）原样透传，不手抄字段表。
+      //   后端只认 KNOWN_CFG_KEYS，白名单外的键被静默丢弃，所以下游新增开关必须同步
+      //   src/shared/constants.ts 的 SCAN_CONFIG_KEYS（契约测试会抱）。
+      const { config: scanCfg, ...restPayload } = payload;
+      const data = await apiClient.post<{ scanId: string }>('/scan/start', {
+        ...restPayload,
+        config: buildStartConfig(scanCfg),
+      });
       st.startSession(data.scanId, 'builtin');
       return data.scanId;
     } catch (e: unknown) {

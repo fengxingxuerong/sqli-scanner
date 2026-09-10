@@ -6,7 +6,7 @@
   "expected": {
     "vulnerable": true,
     "techniques": { "must": ["union"], "nice": [] },
-    "requestCount": { "max": 120 },
+    "requestCount": { "max": 150 },
     "extracted": { "databases": "non-empty", "tables": "non-empty" }
   }
 }

@@ -62,6 +62,39 @@ test('发现 Header 注入点', async () => {
   assert.equal(points[0].param, 'X-Forwarded-For');
 });
 
+// [2026-09-10] 默认 level=1 不发现 header 注入点 —— 这是有意的（header 探测会显著增加
+// 请求数），但它同时意味着「请求头通道」在默认配置下是**盲区**。
+// 请求头通道的价值（e2e/waf-real/header-channel.mjs 实测，真实 MySQL + CRS v4.1.0）：
+//   同一个 SQL 注入点，走 URL 参数被 CRS 拦 73 次、只检出 boolean；
+//   走自定义请求头被拦 **0 次**、level>=3 时 union/error/boolean 三技术位全检出。
+// 即：WAF 面前，请求头是「通道绕过」面。锁住 level 分级语义，避免有人随手改默认值。
+test('默认 level=1：不发现 header 注入点（请求头通道需显式 level>=3）', async () => {
+  const target = createTarget({
+    url: 'http://example.com',
+    headerParams: { 'X-User-Id': '1' },
+    config: { level: 1 },
+  });
+  const points = await parser.discover(target);
+  assert.equal(points.filter((p) => p.location === 'header').length, 0);
+});
+
+test('level=3 发现非敏感 header 注入点，但仍排除敏感头（authorization/cookie/host/xff）', async () => {
+  const target = createTarget({
+    url: 'http://example.com',
+    headerParams: {
+      'X-User-Id': '1',
+      Referer: 'http://r',
+      Authorization: 'Bearer t',
+      Cookie: 'c=1',
+      'X-Forwarded-For': '1.2.3.4',
+    },
+    config: { level: 3 },
+  });
+  const points = await parser.discover(target);
+  const names = points.filter((p) => p.location === 'header').map((p) => p.param).sort();
+  assert.deepEqual(names, ['Referer', 'X-User-Id']);
+});
+
 test('多位置注入点可同时发现', async () => {
   const target = createTarget({
     url: 'http://example.com/search?q=hi',

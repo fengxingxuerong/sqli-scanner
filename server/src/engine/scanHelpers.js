@@ -139,3 +139,18 @@ export async function mapPool(items, fn, concurrency) {
   const n = Math.max(1, Math.min(concurrency, queue.length));
   await Promise.all(Array.from({ length: n }, () => worker()));
 }
+
+// [P1 2026-09-09] 跳过点汇总（report.summary.skippedPoints）：
+// 点级 skipReason 已有（prefilter/static/input_validation/…），汇总层必须回答
+// 「有多少点没测、为什么没测」，否则「没测」看起来像「测了且无漏洞」。
+// @param {Array<{skipReason?:string}>} points 注入点全量
+// @returns {{total:number, byReason:Record<string,number>}|null} 无跳过点返回 null
+export function summarizeSkipped(points) {
+  if (!Array.isArray(points) || points.length === 0) return null;
+  const byReason = {};
+  for (const p of points) {
+    if (p && p.skipReason) byReason[p.skipReason] = (byReason[p.skipReason] || 0) + 1;
+  }
+  const total = Object.values(byReason).reduce((a, b) => a + b, 0);
+  return total ? { total, byReason } : null;
+}

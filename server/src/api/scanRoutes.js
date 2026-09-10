@@ -17,6 +17,8 @@ import { defaults } from '../config/defaults.js';
 import { logger } from '../core/logger.js';
 import { isSafeSessionPath } from '../core/sessionStore.js';
 import { assertSafeHttpTarget } from '../core/httpClient.js';
+// [P0-SEC 2026-09-08] 授权范围（scope）硬约束 + 逐跳登记
+import { parseScope, assertInScope, filterInScope, registerScanScope, releaseScanScope } from '../core/scopeGuard.js';
 
 // ── 配置白名单 clamp 工具（原逻辑不变）──
 const clampInt = (v, def, min, max) => {
@@ -51,12 +53,40 @@ const KNOWN_CFG_KEYS = new Set([
   // [sqlmap 对标] 行范围导出 + 保活探测（--start/--stop/--safe-url/--safe-freq）
   'dumpStart', 'dumpStop', 'safeUrl', 'safeFreq',
   'secondOrder', 'wafEvasion', 'oob', 'noSql', 'blindRobust', 'sessionFile',
+  // [P0-FIX 2026-09-10] 布尔盲注二级判据：组间稳定差异（boolStableDiff 总开关 + 采样数）
+  'boolStableDiff', 'boolStableDiffSamples',
   'sessionDefault',
   'level', 'risk', 'prefix', 'suffix',
   // [对标 sqlmap --dbms] 强制指定 DBMS（scanRunner 消费：跳过指纹直接按指定库检测）
   'dbms',
   // [B-perf] skip-static 参数预筛选 / 响应相似度锚点（--string/--not-string）
   'skipStatic', 'matchString', 'notString',
+  // [perf-FIX 2026-09-07] 单点目标 opt-in 预筛选（--prefilter-single-point）
+  'prefilterSinglePoint',
+  // [P0 2026-09-09 实战批次] 失效值替换（--invalid-bignum/--invalid-logical/--invalid-string）
+  // + 已知注入点直通（手工确认的可注入参数跳过预筛选/闭合探测）
+  'invalidValue', 'knownPoint',
+  // [P1 批次 2026-09-08] 白名单漂移补齐（configWhitelist.guard.test 守卫检出）：
+  // 以下键均为引擎实际消费的用户扫描配置（defaults.js 顶层），此前不在白名单导致
+  // REST 传入被静默忽略（配置语义漂移）。
+  'prefilter', // 参数预筛选总开关（scanRunner 消费）
+  'testFilter', 'testSkip', 'useRegistry', // 声明式注册表筛选（payloadRegistry 消费）
+  'excludeSysdbs', 'nullConnection', // --exclude-sysdbs / --null-connection
+  // [P0-SEC 2026-09-08] 授权范围硬约束（数组或逗号串，条目形如 example.com / *.example.com /
+  // 10.0.0.0/8 / https://a.example.com/portal）；非空即强制，越界直接拒绝启动。
+  'scope',
+  // [P1-FIX 2026-09-08 实战批次] HTTP 层实战能力：自签证书目标 / 环境变量代理 / 代理下目标校验下放
+  'insecureTls', 'trustProxyEnv', 'ssrfViaProxy',
+  // [P0-FIX 2026-09-09] 本地/私网目标绕过环境变量代理（默认 true）
+  'proxyBypassLocal',
+  // [P1-PERF 2026-09-08] 输入校验型目标的可证安全跳过开关 + PoC 凭据脱敏开关
+  'validationSkip', 'pocRedactAuth',
+  // [P0-FIX 2026-09-09] 生产护栏：高危池（RCE/写文件/DoS 类）投放必须显式确认。
+  // 这两个键必须可达 REST：否则「引擎实现了、API 收不到」会重演——使用者以为 risk=3 就真能控住风险。
+  'productionMode', 'confirmDestructive',
+  'delay', 'reqRate', 'maxReq', // --delay/--reqrate/--max-requests 限速治理
+  'forceSsl', 'ignoreRedirects', // HTTPS 强制 / 重定向跟随开关
+  'hpp', 'activeWafProbe', // HTTP 参数污染 / WAF 主动探测（opt-in）
   // [主代理收尾] 盲注响应匹配多指标（--text-only/--code/--regexp/--titles）
   'matchText', 'matchCode', 'matchRegexp', 'trueRegexp', 'falseRegexp', 'matchTitle',
   // [sqlmap 对标] 动态内容块自动排除（对标 sqlmap 默认动态内容感知）
@@ -68,6 +98,9 @@ const KNOWN_CFG_KEYS = new Set([
   'cookieJar', 'dropSetCookie',
   // [G4 对标 sqlmap --parse-errors] 错误响应原文/上下文进证据链（opt-in boolean）
   'parseErrors',
+  // [P1-FIX 2026-09-09] freshQueries：面板（SqlmapOptions）有开关、scanRunner 也读 cfg.freshQueries，
+  // 但白名单里没有这个键 → 勾了等于没勾（本批前端契约测试抱出来的活例）。
+  'freshQueries',
 ]);
 
 // 禁止由调用者覆写的头名（P2-8，与 httpClient 侧 FORBIDDEN_HEADERS 保持一致）
@@ -123,7 +156,17 @@ export function sanitizeStart(body) {
     throw new AppError(ErrorCode.INVALID_PARAM, '仅支持 http/https 目标');
   }
 
+  // [P0-SEC 2026-09-08] 授权范围（scope）硬约束——渗透作战第一红线：
+  //   SSRF 防护管的是「别打自己人」，scope 管的是「别打没授权的人」。真实事故往往是手滑把同 C 段
+  //   的预发系统 / 第三方 SaaS（支付、短信网关、客服）当授权目标打了进去。配置了就是硬约束
+  //   （不提供「只告警」模式——告警模式等于没有）；未配置时行为与历史一致。
+  //   重定向跳的校验由 HttpClient 按 scanId 登记的 scope 执行（见 scopeGuard.registerScanScope）。
+  const scopeRules = parseScope(cfg.scope);
+  if (scopeRules.enabled) assertInScope(u.toString(), scopeRules);
+
   const config = {};
+  // scope 原文进 config（可序列化：数组形态），供路由层登记与 HttpClient 逐跳重定向校验复用
+  if (scopeRules.enabled) config.scope = scopeRules.raw;
 
   // —— 网络/调度 ——
   // [REVERTED P2-3] ratePerSec 保持原样透传（不 clamp）：既有测试契约
@@ -177,9 +220,16 @@ export function sanitizeStart(body) {
   // [sqlmap 对标] 保活探测：--safe-url 仅放行 http(s)（SSRF 在 client.request 内逐请求校验）；
   // safeFreq clamp 1~10000。非法协议静默丢弃（不阻断启动）。
   if (typeof cfg.safeUrl === 'string' && /^https?:\/\//i.test(cfg.safeUrl.trim())) {
-    config.safeUrl = clampStr(cfg.safeUrl.trim(), '', 2000);
-    const safeFreq = pickInt(cfg, 'safeFreq', defaults.safeFreq, 1, 10000);
-    if (safeFreq !== undefined) config.safeFreq = safeFreq;
+    // [P0-SEC 2026-09-08] safeUrl 也受授权范围约束：保活探测页常是另一个主机（/health 走网关），
+    // 不校就等于开了一个「扫描器自己往圈外发请求」的旁路，而且会携带 Cookie/Authorization。
+    const safeUrlInScope = !scopeRules.enabled || filterInScope([cfg.safeUrl.trim()], scopeRules).allowed.length > 0;
+    if (!safeUrlInScope) {
+      logger.warn(`safeUrl ${cfg.safeUrl.trim()} 越出授权范围（scope），已丢弃该配置`);
+    } else {
+      config.safeUrl = clampStr(cfg.safeUrl.trim(), '', 2000);
+      const safeFreq = pickInt(cfg, 'safeFreq', defaults.safeFreq, 1, 10000);
+      if (safeFreq !== undefined) config.safeFreq = safeFreq;
+    }
   }
   const dumpConcurrency = pickInt(cfg, 'dumpConcurrency', defaults.dumpConcurrency, 1, 16);
   if (dumpConcurrency !== undefined) config.dumpConcurrency = dumpConcurrency;
@@ -187,9 +237,18 @@ export function sanitizeStart(body) {
   if (dumpDatabaseConcurrency !== undefined) config.dumpDatabaseConcurrency = dumpDatabaseConcurrency;
   const crawlForms = pickBool(cfg, 'crawlForms');
   if (crawlForms !== undefined) config.crawlForms = crawlForms;
-  // [B-perf] skip-static 参数预筛选（对标 sqlmap --skip-static）：boolean 化透传，默认关（opt-in）
+  // [B-perf] skip-static 参数预筛选（对标 --skip-static）：boolean 化透传，默认关（opt-in）
   const skipStatic = pickBool(cfg, 'skipStatic');
   if (skipStatic !== undefined) config.skipStatic = skipStatic;
+  // [P1-PERF 2026-09-08] 输入校验跳过的开关（默认 true，需能透传 false 才能关）
+  const validationSkip = pickBool(cfg, 'validationSkip');
+  if (validationSkip !== undefined) config.validationSkip = validationSkip;
+  // [P0-SEC 2026-09-08] PoC 凭据脱敏开关（交付型报告建议开）
+  const pocRedactAuth = pickBool(cfg, 'pocRedactAuth');
+  if (pocRedactAuth !== undefined) config.pocRedactAuth = pocRedactAuth;
+  // [perf-FIX 2026-09-07] 单点目标 opt-in 预筛选：默认关闭（不配置时单点不预筛，行为与历史一致）
+  const prefilterSinglePoint = pickBool(cfg, 'prefilterSinglePoint');
+  if (prefilterSinglePoint !== undefined) config.prefilterSinglePoint = prefilterSinglePoint;
   // [B-perf] 响应相似度锚点（对标 --string / --not-string）：Detector.matchAnchors / _boundarySimilar
   // 消费 config.matchString / config.notString（此前不在白名单被静默丢弃）。字符串截断到 500。
   const matchString = clampStr(cfg.matchString, undefined, 500);
@@ -242,12 +301,43 @@ export function sanitizeStart(body) {
     }
     config.techniques = cfg.techniques;
   }
+  // [P1-FIX 2026-09-08 接线补齐] proxy scheme 与 httpClient.PROXY_SCHEMES 对齐（补 socks4/socks4a）：
+  // 原正则只认 https?|socks5?，引擎已支持的 socks4 在 API 层就被拒（功能可达性与实现不一致）。
   if (cfg.proxy) {
-    if (typeof cfg.proxy !== 'string' || !/^(https?|socks5?):\/\//i.test(cfg.proxy)) {
-      throw new AppError(ErrorCode.INVALID_PARAM, 'proxy 格式非法');
+    if (typeof cfg.proxy !== 'string' || !/^(?:https?|socks5h?|socks4a?):\/\//i.test(cfg.proxy)) {
+      throw new AppError(
+        ErrorCode.INVALID_PARAM,
+        'proxy 格式非法（支持 http:// https:// socks5:// socks5h:// socks4:// socks4a://；需强制直连请设 trustProxyEnv=false）'
+      );
     }
     config.proxy = cfg.proxy;
   }
+  // [P1-FIX 2026-09-08] 出口层三键透传：此前只进了 defaults/env，per-scan config 到不了
+  // HttpClient（engine 侧靠 opts 逐层透传），导致 UI 勾了「忽略自签证书」对检测请求无效。
+  const insecureTls = pickBool(cfg, 'insecureTls');
+  if (insecureTls !== undefined) config.insecureTls = insecureTls;
+  const trustProxyEnv = pickBool(cfg, 'trustProxyEnv');
+  if (trustProxyEnv !== undefined) config.trustProxyEnv = trustProxyEnv;
+  // [P0-FIX 2026-09-09] 生产护栏透传：productionMode 默认 true（按生产环境对待遇），
+  // 关掉它（false）是显式脱离护栏——只应出现在靶场/自建演练环境。
+  const productionMode = pickBool(cfg, 'productionMode');
+  if (productionMode !== undefined) config.productionMode = productionMode;
+  const confirmDestructive = pickBool(cfg, 'confirmDestructive');
+  if (confirmDestructive !== undefined) config.confirmDestructive = confirmDestructive;
+  if (typeof cfg.ssrfViaProxy === 'string') {
+    const v = cfg.ssrfViaProxy.trim().toLowerCase();
+    // [P1-FIX 2026-09-09] 新增 strict-dns：本地能解析就先按严格层判（解不出才下放给代理）。
+    // 为什么需要：auto 语义下，内网 DNS 把域名指到 169.254.169.254 时代理解析会照打，
+    // 边界完全转移到代理配置上；挂 Burp/企业代理扫内网时至少要有一个选项能把门要回来。
+    if (v === 'auto' || v === 'off' || v === 'strict-dns') config.ssrfViaProxy = v;
+    else if (v === 'true' || v === '1') config.ssrfViaProxy = 'auto';
+    else if (v === 'false' || v === '0') config.ssrfViaProxy = 'off';
+    else throw new AppError(ErrorCode.INVALID_PARAM, 'ssrfViaProxy 仅支持 "auto" | "off" | "strict-dns"');
+  }
+  // [P0-FIX 2026-09-09] proxyBypassLocal：默认 true（本地/私网不吃环境变量代理）；
+  // 显式传 false 可恢复「连本地也走代理」的旧行为。
+  const proxyBypassLocal = pickBool(cfg, 'proxyBypassLocal');
+  if (proxyBypassLocal !== undefined) config.proxyBypassLocal = proxyBypassLocal;
   if (cfg.secondOrder) {
     const so = cfg.secondOrder;
     config.secondOrder = {
@@ -259,6 +349,12 @@ export function sanitizeStart(body) {
         ? so.triggerUrls.filter((x) => typeof x === 'string' && /^https?:\/\//i.test(x))
         : [],
       refreshCsrf: so.refreshCsrf !== false,
+      // [P0-FIX 2026-09-09] 二阶写请求确认位：productionMode=true 时，非幂等 method
+      // （POST/PUT/PATCH/DELETE）与触发页写请求必须 allowWrites===true 才放行。
+      // 实战后果：二阶检测天然要「写一次」才能触发存储型路径，而对 /order/create 这类
+      // GET 写端点，“只读复核”的说法从一开始就不成立——必须把“我在写”这件事显式开关化。
+      allowWrites: so.allowWrites === true,
+      triggerMethod: so.triggerMethod,
       negativeControl: so.negativeControl !== false,
       oobTrigger: !!so.oobTrigger,
     };
@@ -312,13 +408,18 @@ export function sanitizeStart(body) {
       enabled: boolOf(br.enabled, d.enabled),
       booleanSamples: clampInt(br.booleanSamples, d.booleanSamples, 1, 10),
       baselineSamples: clampInt(br.baselineSamples, d.baselineSamples, 1, 20),
-      timeConfidenceZ: clampNum(br.timeConfidenceZ, d.timeConfidenceZ, 0, 5),
-      minStableRatio: clampNum(br.minStableRatio, d.minStableRatio, 0, 1),
-      booleanSignificanceZ: clampNum(br.booleanSignificanceZ, d.booleanSignificanceZ, 0, 5),
+      timeConfidenceZ: clampNum(br.timeConfidenceZ, d.timeConfidenceZ, 1, 5),
+      minStableRatio: clampNum(br.minStableRatio, d.minStableRatio, 0.5, 1),
+      booleanSignificanceZ: clampNum(br.booleanSignificanceZ, d.booleanSignificanceZ, 1, 5),
       adaptive: boolOf(br.adaptive, d.adaptive),
       adaptiveHeadroom: clampNum(br.adaptiveHeadroom, d.adaptiveHeadroom, 0, 1),
-      minStableRatioFloor: clampNum(br.minStableRatioFloor, d.minStableRatioFloor, 0, 1),
-      minStableRatioCap: clampNum(br.minStableRatioCap, d.minStableRatioCap, 0, 1),
+      // [P0-FIX 2026-09-08] 统计判定的「关掉护栏」下限：原 clamp 允许 floor=0 / z=0，
+      // 而 adaptive=true 时门槛 = clamp(噪声 + headroom, floor, cap)，floor=0 会把噪声目标的
+      // 一致率门槛拉到 0 → 任何抖动都算「稳定」；booleanSignificanceZ=0 则「false 组与基线
+      // 完全相同也判阳」——两个都是误报放大器。盲注误报的代价（往报告里写假漏洞）远大于漏报，
+      // 故给硬下限：一致率门槛不低于 0.5、显著性 z 不低于 1.0（单侧≈84% 置信）。
+      minStableRatioFloor: clampNum(br.minStableRatioFloor, d.minStableRatioFloor, 0.5, 1),
+      minStableRatioCap: clampNum(br.minStableRatioCap, d.minStableRatioCap, 0.5, 1),
       adaptiveTimeFloorScale: clampNum(br.adaptiveTimeFloorScale, d.adaptiveTimeFloorScale, 0, 10),
       concurrency: clampInt(br.concurrency, d.concurrency, 1, 16),
     };
@@ -350,9 +451,55 @@ export function sanitizeStart(body) {
   const parseErrorsFlag = pickBool(cfg, 'parseErrors');
   if (parseErrorsFlag !== undefined) config.parseErrors = parseErrorsFlag;
 
+  // [P0 2026-09-09 实战批次] 失效值替换（对标 sqlmap --invalid-*）：仅接受三种合法模式，
+  // 非法值静默丢弃（引擎侧 invalidValue.js 同样对非法模式零行为变化，双保险）。
+  if (cfg.invalidValue !== undefined && cfg.invalidValue !== null) {
+    const m = String(cfg.invalidValue).trim().toLowerCase();
+    if (['bignum', 'logical', 'string'].includes(m)) config.invalidValue = m;
+  }
+  // [P0 2026-09-09 实战批次] 已知注入点直通：{ param 必填, quote?, paren?, techniques? }。
+  // quote/paren 为闭合形态原文（如 quote="'" paren="))"），techniques 为技术位白名单。
+  if (cfg.knownPoint !== undefined && cfg.knownPoint !== null && typeof cfg.knownPoint === 'object') {
+    const kp = cfg.knownPoint;
+    const out = {};
+    if (kp.param != null && String(kp.param).trim() !== '') out.param = String(kp.param).trim().slice(0, 256);
+    if (kp.quote != null) out.quote = String(kp.quote).slice(0, 16);
+    if (kp.paren != null) out.paren = String(kp.paren).slice(0, 16);
+    if (Array.isArray(kp.techniques) && kp.techniques.length) {
+      const TECHS_OK = ['union', 'error', 'boolean', 'time', 'stacked', 'oob', 'inline', 'second_order'];
+      const techs = kp.techniques.map(String).filter((t) => TECHS_OK.includes(t));
+      if (techs.length) out.techniques = [...new Set(techs)];
+    }
+    if (out.param) config.knownPoint = out;
+  }
+
   // 未知字段忽略（debug 级单行提示，不打日志刷屏）
   const ignored = Object.keys(cfg).filter((k) => !KNOWN_CFG_KEYS.has(k));
   if (ignored.length) logger.debug(`扫描配置忽略未知字段：${ignored.join(', ')}`);
+
+  // [P0-FIX 2026-09-09] 白名单标量键兜底透传（**显式名单**，不是“所有未处理的白名单键”）。
+  // 发现原因：configWhitelist.passthrough 守卫抱出 13 个「进了 KNOWN_CFG_KEYS 但 sanitizeStart
+  // 根本没透传」的键——delay / reqRate / maxReq（限速与请求预算治理）、excludeSysdbs /
+  // nullConnection / testFilter / testSkip / useRegistry / hpp / forceSsl / ignoreRedirects /
+  // activeWafProbe / prefilter 均在内。表现为「REST 传了但引擎收不到」：sqlmap 对标能力在
+  // API/CLI 层不可达，而「降低扫描风险」的治理键默认被当成已生效。
+  // 为什么用显式名单而不是反向遍历：clampStr/pickInt 系列对「空串/非法值」的契约是**丢弃**
+  // （有既有测试锁定），反向遍历会把 `''` 这类值当合法透传，改变现有语义。
+  const BACKFILL_SCALAR_KEYS = new Set([
+    'prefilter', 'testFilter', 'testSkip', 'useRegistry', 'excludeSysdbs', 'nullConnection',
+    'delay', 'reqRate', 'maxReq', 'forceSsl', 'ignoreRedirects', 'hpp', 'activeWafProbe',
+    // freshQueries：纯布尔开关，无需单独校验分支，走统一标量透传
+    'freshQueries',
+  ]);
+  for (const k of BACKFILL_SCALAR_KEYS) {
+    if (!(k in cfg) || k in config) continue;
+    const v = cfg[k];
+    if (v === undefined || v === null) continue;
+    if (typeof v === 'boolean') { config[k] = v; continue; }
+    if (typeof v === 'number' && Number.isFinite(v)) { config[k] = v; continue; }
+    if (typeof v === 'string' && v !== '') { config[k] = v.slice(0, 2000); continue; }
+    // 其余形态（对象/数组/空串）不兜底：交由逐项 clamp 处理，不绕过现有校验
+  }
   const method = (src.method || 'GET').toUpperCase();
   if (!['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
     throw new AppError(ErrorCode.INVALID_PARAM, `不支持的请求方法：${method}`);
@@ -366,10 +513,25 @@ export function sanitizeStart(body) {
       delete headerParams[key];
     }
   }
+  // [P1 批次 2026-09-08] JSON body 注入通道透传：JSON 对象（POST application/json 目标）。
+  // 安全校验：仅接受纯 JSON 对象（无函数/undefined 等非法值——REST 入参经 JSON 解析天然满足）；
+  // 体积限制与 clampParams 同级（序列化后 10KB），防超大 JSON body 注入 DoS。
+  // null/undefined/非对象 → null（不启用 JSON 语义，走 bodyParams 表单）。
+  let jsonBody = null;
+  if (src.jsonBody != null && typeof src.jsonBody === 'object' && !Array.isArray(src.jsonBody)) {
+    try {
+      const s = JSON.stringify(src.jsonBody);
+      if (s && s.length <= 10000) jsonBody = JSON.parse(s);
+      else logger.warn('jsonBody 序列化超 10KB 上限，忽略（防超大 body DoS）');
+    } catch {
+      logger.warn('jsonBody 非法 JSON 对象，忽略');
+    }
+  }
   return {
     url: u.toString(),
     method,
     bodyParams: clampParams(src.bodyParams),
+    jsonBody,
     cookieParams: clampParams(src.cookieParams),
     headerParams,
     config,
@@ -418,6 +580,8 @@ function trackScanTerminal(sm, bus, scanId, release) {
     if (done) return;
     done = true;
     em.off('event', onEvent);
+    // [P0-SEC 2026-09-08] 扫描终结即回收 scope 登记（避免同 id 复用、也防 Map 无界增长）
+    releaseScanScope(scanId);
     release();
   };
   const onEvent = (evt) => {
@@ -470,6 +634,17 @@ export function createRoutes({ scanManager, eventBus: bus = eventBus, reportToke
   const router = Router();
   const requireReport = createReportGuard(reportToken);
 
+  // [P0-SEC 2026-09-08] scanId 形状校验：scanId 会被拼进导出响应的 Content-Disposition 文件名，
+  // 且出现在日志里。引擎自身用 nanoid(10) 生成，但路由不得假定调用方传得对：
+  // 带 CR/LF 的 id 可试响应头注入，带 ../ 的 id 会被任何后续“落盘/拉取”型逻辑当路径用。
+  // 统一用 router.param 拦住所有 :id 端点（比逐路由判更不容易漏）。
+  router.param('id', (req, res, next, id) => {
+    if (typeof id !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(id)) {
+      return res.status(400).json({ code: ErrorCode.SCAN_ID_INVALID, data: null, message: 'scanId 格式非法' });
+    }
+    next();
+  });
+
   router.post('/scan/start', async (req, res) => {
     const release = acquireScanSlot();
     if (!release) {
@@ -492,24 +667,39 @@ export function createRoutes({ scanManager, eventBus: bus = eventBus, reportToke
       // 二阶触发页逐个 SSRF 校验（剔除非法项）
       const soTrigger = sanitized.config?.secondOrder?.triggerUrls;
       if (Array.isArray(soTrigger) && soTrigger.length) {
+        // [P0-SEC 2026-09-08] 二阶触发页同步受 scope 约束：存储点在圈内不代表回显页在圈内
+        // （“写入 admin 后台、回显在另一个域”很常见），而触发页会携带会话 Cookie。
+        const scopeRules = parseScope(sanitized.config?.scope);
         const checked = [];
         for (const u2 of soTrigger) {
           try {
             await assertSafeHttpTarget(u2);
+            if (scopeRules.enabled) assertInScope(u2, scopeRules);
             checked.push(u2);
-          } catch {
-            logger.warn(`二阶触发页 ${u2} 未通过 SSRF 校验，已剔除`);
+          } catch (e) {
+            logger.warn(`二阶触发页 ${u2} 未通过 SSRF/授权范围校验，已剔除：${e.message}`);
           }
         }
         sanitized.config.secondOrder.triggerUrls = checked;
       }
       const scanId = await sm.start(sanitized);
+      // [P0-SEC] 把本次扫描的授权范围登记到 scopeGuard：HttpClient 在「每一跳重定向」前取用，
+      // 防止目标 302 到未授权主机（统一登录/CDN 回源/灰度切流）后，后续全部注入请求默默跑出圈。
+      try {
+        registerScanScope(scanId, parseScope(sanitized.config?.scope));
+      } catch { /* 登记失败不影响扫描启动（启动前已做过入口校验） */ }
       trackScanTerminal(sm, bus, scanId, release);
       res.json({ code: 0, data: { scanId }, message: 'ok' });
     } catch (e) {
       release();
       const err = e instanceof AppError ? e : new AppError(ErrorCode.UNKNOWN, e.message);
-      logger.warn(`启动扫描失败：${err.message}\n${e.stack || ''}`);
+      // [P2-SEC 2026-09-08] 不把整段 e.stack 写进日志：本仓日志级别是 warn（不是 debug），
+      // 且会落到 logs/engine.log（任本机用户可读）。框架层堆栈会带入调用方传入的
+      // config/headers 片段（旧版 redact 不盖 JSON 形态的 key），现在只留栈顶一帧定位，
+      // 完整堆栈降到 debug（需要时手动开）。
+      const topFrame = String(e.stack || '').split('\n').slice(1, 3).join(' | ').trim();
+      logger.warn(`启动扫描失败：${err.message}${topFrame ? `（${topFrame}）` : ''}`);
+      logger.debug(`启动扫描失败堆栈：${e.stack || ''}`);
       res.json({ code: err.code, data: null, message: err.message });
     }
   });
@@ -549,11 +739,24 @@ export function createRoutes({ scanManager, eventBus: bus = eventBus, reportToke
     if (!report) {
       return res.json({ code: ErrorCode.SCAN_NOT_FOUND, data: null, message: '扫描不存在或已结束' });
     }
-    res.json({ code: 0, data: report, message: 'ok' });
+    // [P1-UX 2026-09-08] 查看报告同样带 PoC 证据（与导出同源、纯函数浅拷贝）：
+    // 实战里「在界面上看到可复制的 curl」是开完台本后立刻要用的东西，不该为了一条命令再导一次报告。
+    let data = report;
+    try {
+      if (typeof sm.reportGen?.attachPoc === 'function') data = sm.reportGen.attachPoc(report);
+    } catch { /* PoC 是增强项，失败不影响报告主体 */ }
+    res.json({ code: 0, data, message: 'ok' });
   });
 
   router.get('/scan/:id/report/export', requireReport, (req, res) => {
-    const format = (req.query.format || 'json').toString().toLowerCase();
+    const rawFormat = (req.query.format || 'json').toString().toLowerCase();
+    // [P0-SEC 2026-09-08] format 白名单：它既进 Content-Type 又拼进 Content-Disposition 文件名，
+    // 原实现直接透传 `req.query.format` → 带 `"` / CR / LF 的取值可闭合头字段或注入额外响应头。
+    const FORMAT_EXT = { json: 'json', html: 'html', csv: 'csv', markdown: 'markdown', md: 'markdown', 'db-json': 'db.json' };
+    if (!Object.prototype.hasOwnProperty.call(FORMAT_EXT, rawFormat)) {
+      return res.status(400).json({ code: ErrorCode.INVALID_PARAM, data: null, message: 'format 非法，仅支持 json/html/csv/markdown/md/db-json' });
+    }
+    const format = rawFormat;
     const out = sm.exportReport(req.params.id, format);
     if (out == null) {
       return res.json({ code: ErrorCode.SCAN_NOT_FOUND, data: null, message: '扫描不存在或已结束' });
@@ -567,7 +770,7 @@ export function createRoutes({ scanManager, eventBus: bus = eventBus, reportToke
       'db-json': 'application/json; charset=utf-8',
     };
     res.setHeader('Content-Type', contentTypes[format] || contentTypes.json);
-    const ext = format === 'md' ? 'markdown' : format === 'db-json' ? 'db.json' : format;
+    const ext = FORMAT_EXT[format];
     res.setHeader(
       'Content-Disposition',
       `attachment; filename="report_${req.params.id}.${ext}"`

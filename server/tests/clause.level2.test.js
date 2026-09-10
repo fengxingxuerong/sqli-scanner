@@ -232,12 +232,13 @@ test('BooleanBlindDetector：level=1（默认）不投放子句变体，请求�
   const d = new BooleanBlindDetector();
   const res = await d.detect(buildCtx(mock));
   assert.equal(res.vulnerable, false);
-  // legacy 路径：2 基线 + 3 对真假（risk 未配置 → 不含 OR 对）
-  assert.equal(mock.calls.length, 8);
+  // legacy 路径：2 基线 + 3 对真假 AND + 1 对空基线兜底 OR（[P1-FIX 2026-09-10]）
+  // 兜底对排最后，仅当 AND 对全部失败才轮到；关闭方式 config.booleanOrFallback=false
+  assert.equal(mock.calls.length, 10);
   // 未配置 level（undefined）同样不投放
   const mock2 = makeCountingMock();
   await d.detect(buildCtx(mock2, { config: { timeoutMs: 5000, level: 1 } }));
-  assert.equal(mock2.calls.length, 8);
+  assert.equal(mock2.calls.length, 10);
   // 无任何子句位置变体标记
   const markers = [/HAVING 1=/, /,\(SELECT 1 UNION SELECT 2\)/, /,\(SELECT 1\)-- -/, /\) AND 1=1-- -/];
   for (const q of mock.calls) {
@@ -251,8 +252,9 @@ test('BooleanBlindDetector：level=2 主模板未命中时追加有界子句轮�
   const res = await d.detect(buildCtx(mock, { config: { timeoutMs: 5000, level: 2 } }));
   assert.equal(res.vulnerable, false);
   const pairs = buildClausePairs('MySQL', { orig: '1' }, { maxTotal: 6 });
-  const expected = 8 + 2 + pairs.length * 2;
-  assert.equal(mock.calls.length, expected, `level=2 请求数应为 8 主轮 + 2 基线 + ${pairs.length}×2 子句对`);
+  // 主轮 10 = 2 基线 + 3 对 AND + 1 对空基线兜底 OR（[P1-FIX 2026-09-10]）
+  const expected = 10 + 2 + pairs.length * 2;
+  assert.equal(mock.calls.length, expected, `level=2 请求数应为 10 主轮 + 2 基线 + ${pairs.length}×2 子句对`);
   // 子句变体确实投放
   assert.ok(mock.calls.some((q) => q.includes(' HAVING 1=1-- -')), '应投放 groupby 变体');
   assert.ok(mock.calls.some((q) => q.includes(',(SELECT 1)-- -')), '应投放 orderby 变体');

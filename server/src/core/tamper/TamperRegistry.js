@@ -56,6 +56,9 @@ export class TamperRegistry {
       description: p.description || '',
       ...(Array.isArray(p.dbms) && p.dbms.length ? { dbms: [...p.dbms] } : {}),
       ...(p.terminal ? { terminal: true } : {}),
+      // [P0 2026-09-09] 幂等声明透出（tamper.idempotency.test.js 守卫：
+      // 声明 idempotent:true 的插件必须满足 f(f(x)) === f(x)，链式/重跑不损坏 payload）
+      ...(p.idempotent === true ? { idempotent: true } : {}),
     }));
   }
 
@@ -84,11 +87,23 @@ export class TamperRegistry {
   resolve(names = [], ctx = {}) {
     const resolved = [];
     let truncated = false;
+    // [P0 2026-09-09] 显式声明 idempotent:false 的插件在链中重复出现 → 告警：
+    // 非幂等插件二次应用必然损坏 payload（f(f(x)) !== f(x)），
+    // 「被 WAF 拦后重跑」场景会把损坏形态发给目标，实测即假阴性 + 噪声请求。
+    const seenNonIdempotent = new Set();
+    const dupWarned = new Set();
     for (const n of names || []) {
       const p = this._plugins.get(n);
       if (!p) {
         logger.warn(`tamper 插件未找到：${n}（已跳过）`);
         continue;
+      }
+      if (p.idempotent === false) {
+        if (seenNonIdempotent.has(n) && !dupWarned.has(n)) {
+          logger.warn(`tamper 链中非幂等插件 ${n} 重复出现：二次应用会损坏 payload（f(f(x))≠f(x)），请确认链配置`);
+          dupWarned.add(n);
+        }
+        seenNonIdempotent.add(n);
       }
       if (truncated) {
         logger.warn(`tamper 链已因 ${resolved[resolved.length - 1]?.name}（terminal）截断，跳过：${n}`);

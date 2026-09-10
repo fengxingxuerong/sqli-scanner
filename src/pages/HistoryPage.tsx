@@ -13,6 +13,7 @@ import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
 import { useTranslation } from 'react-i18next';
 import { useScanStore } from '../store/scanStore';
 import { useScan } from '../hooks/useScan';
+import { buildResumeConfig } from '../shared/scanConfig';
 import i18n from '../i18n';
 import type { HistoryRecord, RiskLevel } from '../shared/types';
 
@@ -60,11 +61,10 @@ export default function HistoryPage() {
         bodyParams: h.report.target.bodyParams,
         cookieParams: h.report.target.cookieParams,
         headerParams: h.report.target.headerParams,
-        config: {
-          ...cfg,
-          sessionFile: cfg.sessionFile || (cfg.sessionDefault ? 'sqli-session-latest.json' : undefined),
-          sessionDefault: cfg.sessionDefault,
-        },
+        // [P0-FIX 2026-09-09] 续跑配置走 buildResumeConfig：结构化透传 + 类型归一。
+        // 以前这里手拄字段表（`sessionFile`/`sessionDefault` 逐键列），而 scope / delay / reqRate
+        // 这类「前端未建模但已保存」的键全靠人记——历史上正是这么把「授权范围」丢在续跑路上的。
+        config: buildResumeConfig(cfg),
       });
       navigate('/scan');
     } catch (e: unknown) {

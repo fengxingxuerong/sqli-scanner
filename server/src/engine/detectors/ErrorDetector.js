@@ -138,6 +138,9 @@ export class ErrorDetector extends Detector {
     for (const tpl of templates) {
       const filled = fillPayload(tpl, { orig });
       const payload = this.obfuscateValue(ctx, filled);
+      // [熔断] 目标库已报致命错误（如 PG stack depth）后，跳过多层嵌套子查询——
+      // 这类 payload 正是把并发栈深度打爆的主因，库已受损时不能再补刀。
+      if (ctx?.guard?.shouldSkip(payload)) continue;
       const res = await this.send(httpClient, ctx, this.buildRequest(target, point, payload), ctx);
       const body = String(res?.data ?? '');
       const match = body.match(ERROR_SIG);

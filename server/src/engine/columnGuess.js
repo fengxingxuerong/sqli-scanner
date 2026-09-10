@@ -16,8 +16,13 @@ export async function binaryGuessColumns(probe, { baseLen, maxCols = 50, cache, 
   if (cache && cacheKey != null && cache.has(cacheKey)) {
     return cache.get(cacheKey);
   }
-  const ans = await doGuessColumns(probe, baseLen, maxCols);
-  if (cache && cacheKey != null) {
+  const { n: ans, reliable } = await doGuessColumns(probe, baseLen, maxCols);
+  // [CRS-FIX 2026-09-09] 不可信结果不写缓存（原实现无条件缓存 = 缓存投毒）：
+  // WAF 全量拦截时每个 ORDER BY 都返回 403 短响应 —— 403 既不是 5xx，长度又远小于基线，
+  // 于是被判据当成「超出列数」→ 二分收敛到 1。这个 1 一旦写入模块级缓存，后续扫描
+  // （含换用有效 tamper 链的重试）会一直复用错误的列数 → UNION 永远走不通。
+  // 实测：真实 MySQL + CRS，off 链猜成 1 被缓存，之后 dash2hash/hexliterals 链全部复用该值。
+  if (cache && cacheKey != null && reliable) {
     // P1: 淘汰最旧条目防 Map 无界增长（长驻进程跨扫描累积）
     if (cache.size >= COL_GUESS_CACHE_MAX && typeof cache.keys === 'function') {
       const oldest = cache.keys().next().value;
@@ -33,18 +38,23 @@ async function doGuessColumns(probe, baseLen, maxCols) {
   let lo = 1;
   let hi = maxCols;
   let ans = 0;
+  // reliable：二分过程中是否至少拿到一次正常业务响应（2xx/3xx）。
+  // 全为 403/429 等拦截响应说明探测根本没触达 SQL，结果不可信（不可缓存）。
+  let reliable = false;
   while (lo <= hi) {
     const mid = Math.floor((lo + hi) / 2);
     const res = await probe(mid);
+    const status = Number(res?.status ?? 0);
     const len = String(res?.data ?? '').length;
-    if (res?.status >= 500 || len < baseLen * 0.5) {
+    if (status >= 200 && status < 400) reliable = true;
+    if (status >= 500 || len < baseLen * 0.5) {
       hi = mid - 1;
     } else {
       ans = mid;
       lo = mid + 1;
     }
   }
-  return ans <= 0 ? 1 : ans;
+  return { n: ans <= 0 ? 1 : ans, reliable };
 }
 
 // 创建扫描级猜列共享缓存（按注入点 id 作 key）

@@ -4,13 +4,112 @@
 //   [P1-1] 导出前剥离 target 中的认证/代理等敏感配置（config.auth / cookieParams /
 //          headerParams），避免 JSON 报告分享/落盘泄露目标站凭据
 //   [P2-7] CSV 单元格公式注入转义（= + - @ \t \r 前缀加 ' 前缀）
+//   [P0-FIX 2026-09-08] 可复现 PoC 证据链：导出时惰性给每条 vuln 挂 vuln.poc
+//          （method/url/headers/body/curl/raw/note/payload/generatedAt），markdown 与
+//          html 各新增「复现方式」小节；同时补上报告链接面的两处加固：
+//          esc() 数字实体转义引号（PoC 要落进属性位）、safeHref/renderUrlLink 只放行
+//          http(s) 且内网地址不可点击（报告在浏览器打开，点一下就是 SSRF）。
+//          只增字段、只增小节：既有函数签名与既有输出行保持原样，调用方零感知。
 // 其余逻辑与原文件一致（HTML 转义已存在且正确，原样保留）。
 // ============================================================================
 
 import { truncateLong } from '../core/logger.js';
+import { buildPocEvidence } from '../engine/pocBuilder.js';
 
 // 导出时单条证据/说明的最大长度（原逻辑不变）
 const EVIDENCE_MAX = 4000;
+
+// ============================================================================
+// [P0-FIX 2026-09-08] 报告侧安全渲染原语（PoC 要塞进 <pre> 与属性位，故单独成组）
+// ============================================================================
+
+// 数字实体版转义：& < > " ' 全覆盖。
+// 为什么不用 _escape：_escape 的 `"` → `&quot;` 形式已被既有测试锁定（行为不变原则），
+// 而 PoC 文本要落进 title/href 等属性位，`"` → `&#34;`、`'` → `&#39;` 的数字实体在
+// 「带引号属性」与「裸属性」两种上下文里都安全（&#34; 不会被任何解析器当引号闭合）。
+const ESC_MAP = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&#34;', "'": '&#39;' };
+export function esc(s) {
+  return String(s ?? '').replace(/[&<>"']/g, (c) => ESC_MAP[c]);
+}
+
+// 内网/回环地址判定：报告常在浏览器里打开，内网链接一点就是「报告文件 → SSRF」。
+// 命中时渲染成 <code> 纯文本，保留可读性但不可点击。
+export function isInternalHost(host) {
+  const h = String(host || '').toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
+  if (!h) return false;
+  if (h === 'localhost' || h.endsWith('.localhost')) return true;
+  if (h.endsWith('.local') || h.endsWith('.internal') || h.endsWith('.internaldomain')) return true;
+  if (h === '::1' || h === '0.0.0.0' || h === '0') return true;
+  if (/^(127|10|169\.254|192\.0\.0)\./.test(h)) return true;
+  if (h.startsWith('192.168.')) return true;
+  if (/^172\.(1[6-9]|2\d|3[01])\./.test(h)) return true;
+  return false;
+}
+
+// 可链接化判定：仅 http/https 允许进 href。javascript:/data:/file:/vbscript: 一律返回
+// null（调用方降级为纯文本）。先剥掉控制字符与空白——`java\nscript:` 这类写法浏览器
+// 会忽略换行继续按脚本协议解析，是过滤器的经典绕过面。
+export function safeHref(url) {
+  const raw = String(url ?? '').trim();
+  if (!raw) return null;
+  const cleaned = raw.replace(/[\u0000-\u0020\u007f]/g, '');
+  if (!/^https?:\/\//i.test(cleaned)) return null;
+  try {
+    const u = new URL(cleaned);
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;
+    return cleaned;
+  } catch {
+    return null; // 非法 URL（含 host 里的 < > 等禁用字符）：不可点
+  }
+}
+
+// 从 URL 中取主机名（内网判定用）；解析失败返回空串 → 调用方按「非内网」处理。
+function hostOfUrl(u) {
+  try {
+    return new URL(String(u)).hostname;
+  } catch {
+    return '';
+  }
+}
+
+// 目标/PoC URL 的 HTML 渲染：安全外链 → <a>；内网 → <code>；其余 → 纯文本。
+// rel 加 noopener noreferrer：避免 target=_blank 反向拿到 window.opener。
+export function renderUrlLink(url, label) {
+  const text = esc(label ?? (url || '-'));
+  const href = safeHref(url);
+  if (!href) return text;
+  if (isInternalHost(hostOfUrl(href))) return `<code>${text}</code>`;
+  return `<a href="${esc(href)}" target="_blank" rel="noopener noreferrer nofollow">${text}</a>`;
+}
+
+// Markdown 内联代码：反引号必须转义，否则 payload/URL 里的 ` 会提前闭合行内代码。
+function mdInline(s) {
+  return String(s ?? '').replace(/`/g, '\\`');
+}
+
+// Markdown 围栏：内容里可能出现反引号（payload 常含 ` 与 ```），围栏长度必须严格大于
+// 正文中最长的反引号串，否则 PoC 会提前闭合围栏、把后续报告内容变成正文。
+function mdFence(content, lang = '') {
+  const runs = String(content || '').match(/`+/g) || [];
+  const max = runs.reduce((m, r) => Math.max(m, r.length), 0);
+  const tick = '`'.repeat(Math.max(3, max + 1));
+  return `${tick}${lang}\n${content}\n${tick}`;
+}
+
+// 取「用于复现的那条 payload」：各检测器约定 payloads[0] 为命中样本
+// （boolean=[真,假]、union=[命中 UNION,ORDER BY 确认]、error/stacked=[命中串]）。
+function confirmedPayload(vuln) {
+  if (typeof vuln?.evidencePayload === 'string' && vuln.evidencePayload) return vuln.evidencePayload;
+  const list = Array.isArray(vuln?.payloads) ? vuln.payloads : [];
+  const hit = list.find((p) => typeof p === 'string' && p.length);
+  return hit || '';
+}
+
+// 以原始 vuln 对象为键的 PoC 缓存（WeakMap，随报告快照回收，不常驻内存）。
+// 为何需要：同一次会话里 markdown / md 别名 / html 会被反复导出，而
+// poc.generatedAt 是时间戳——不缓存则两次渲染文本不相等（CLI 的 md/markdown 等价
+// 断言直接挂），且白白重算一遍 o(漏洞数) 的字符串拼接。
+const POC_CACHE = new WeakMap();
 
 // [P1-1] 导出前脱敏 target：剥离认证凭据与代理配置，只保留展示字段
 // （baseUrl/method/bodyParams 等）。返回浅拷贝，不污染内存中的 report。
@@ -111,9 +210,54 @@ export class ReportGenerator {
     return { ...report, vulns };
   }
 
-  // [P1-1] 导出统一脱敏：先截断证据，再剥离 target 凭据
+  // [P0-FIX 2026-09-08] 惰性生成 PoC 证据：只在导出报告时计算，检测流程零侵入。
+  // 顺序敏感——必须在 sanitizeTargetForExport 之前跑：PoC 要还原「扫描时真实发出的请求」，
+  // 会话 Cookie / 自定义头缺一就无法复现登录后注入；脱敏只作用于 target 字段本身。
+  // 返回浅拷贝（{ ...v, poc }），不写回调用方内存中的 report/vuln 对象，ScanManager 快照不受污染。
+  /**
+   * [P1-UX 2026-09-08] 对外只读入口：给「查看报告」接口挂上 PoC 证据（与导出同源、同缓存）。
+   * 纯函数式返回浅拷贝，不写回 ScanManager 内存里的报告对象。
+   * @param {object} report
+   * @returns {object}
+   */
+  attachPoc(report) {
+    return this._attachPoc(report);
+  }
+
+  _attachPoc(report) {
+    const vulns = report && Array.isArray(report.vulns) ? report.vulns : null;
+    if (!vulns || !vulns.length) return report;
+    const points = (report && report.points) || [];
+    const byId = new Map();
+    for (const p of points) if (p && p.id != null) byId.set(p.id, p);
+    // [P0-SEC 2026-09-08] 交付型报告可选把凭据头脱敏（config.pocRedactAuth=true）。
+    // 默认关：PoC 要能直接复制跑；开启后 curl/raw/headers 统一打码。
+    const redactAuth = !!(report && report.target && report.target.config && report.target.config.pocRedactAuth);
+    let touched = false;
+    const out = vulns.map((v) => {
+      if (!v || typeof v !== 'object' || v.poc) return v; // 已有 poc（外部预生成）→ 不重复计算
+      const cached = redactAuth ? undefined : POC_CACHE.get(v);
+      if (cached) {
+        touched = true;
+        return { ...v, poc: cached }; // 同一份报告多次导出 → 逐字节一致（含 generatedAt）
+      }
+      try {
+        const point = byId.get(v.pointId) || null;
+        const poc = buildPocEvidence(report.target, point, confirmedPayload(v), { redactAuth });
+        if (!redactAuth) POC_CACHE.set(v, poc);
+        touched = true;
+        return { ...v, poc };
+      } catch {
+        return v; // 任何异常都不让报告生成失败（PoC 是增强项，不是必需项）
+      }
+    });
+    return touched ? { ...report, vulns: out } : report;
+  }
+
+  // [P1-1] 导出统一脱敏：先挂 PoC（缓存键是原始 vuln 对象，故须在截断拷贝前），
+  // 再截断证据，最后剥离 target 凭据
   _forExport(report) {
-    const r = this._truncate(report);
+    const r = this._truncate(this._attachPoc(report));
     if (!r.target) return r;
     return { ...r, target: sanitizeTargetForExport(r.target) };
   }
@@ -165,6 +309,8 @@ export class ReportGenerator {
     md.push(`- 数据库：${report.dbms || '-'}`);
     md.push(`- 注入点：${(report.points || []).length} · 漏洞：${(r.vulns || []).length}`);
     md.push('');
+    // [P0-FIX 2026-09-09] 结论可信度 + 本次抑制项（报告会被转出去，这两条不写就是默认「全测了且结论可靠」）
+    md.push(...this._conclusionMarkdown(report));
     md.push('## 漏洞清单');
     md.push('');
     md.push('| 注入点 | 技术 | 数据库 | 风险 | 说明 |');
@@ -182,7 +328,125 @@ export class ReportGenerator {
     } else {
       md.push('- 无');
     }
+    // [P0-FIX 2026-09-08] 复现方式：payload 字符串 → 可直接粘进终端的 curl + 可落盘导入的原始报文
+    md.push(...this._pocMarkdown(r));
     return md.join('\n');
+  }
+
+  // [P0-FIX 2026-09-09] 结论可信度与「本次被抑制的能力」。
+  // 交付物首屏必须说清两件事：
+  //   ① 0 漏洞到底是「没测出」还是「没测成」（verdict/verdictNote 来自 scanValidityGuard）；
+  //   ② 哪些能力被安全护栏压住了（summary.constraints）——否则「已按最高风险等级测试」是不实陈述。
+  // 缺省（旧报告无这两个字段）时整段不渲染，保持向后兼容。
+  _conclusion(report) {
+    const s = (report && report.summary) || {};
+    const verdict = String(s.verdict || '');
+    const note = String(s.verdictNote || '');
+    const constraints = Array.isArray(s.constraints)
+      ? s.constraints.filter((x) => typeof x === 'string' && x.trim())
+      : [];
+    if (!verdict && !note && !constraints.length) return null;
+    return { verdict, note, constraints };
+  }
+
+  _conclusionMarkdown(report) {
+    const c = this._conclusion(report);
+    if (!c) return [];
+    const out = ['## 结论可信度与本次抑制项', ''];
+    if (c.verdict) {
+      out.push(`- 结论判定：**${c.verdict === 'inconclusive' ? '不可判定（inconclusive）' : c.verdict}**`);
+    }
+    if (c.note) out.push(`> ${c.note.replace(/\s*\n\s*/g, ' ')}`);
+    if (c.constraints.length) {
+      out.push('', '- 本次被抑制的能力（不代表已测试）：');
+      for (const x of c.constraints) out.push(`  - ${x}`);
+    }
+    out.push('');
+    return out;
+  }
+
+  _conclusionHtml(report) {
+    const c = this._conclusion(report);
+    if (!c) return '';
+    const esc = (s) => this._escape(String(s));
+    const items = c.constraints.map((x) => `<li>${esc(x)}</li>`).join('');
+    const bad = c.verdict === 'inconclusive';
+    return `<div class="verdict${bad ? ' bad' : ''}">
+      <h2>${bad ? '结论不可信：未检出 ≠ 无漏洞' : '结论可信度与本次抑制项'}</h2>
+      ${c.verdict ? `<p class="meta">判定：${esc(c.verdict)}</p>` : ''}
+      ${c.note ? `<p>${esc(c.note)}</p>` : ''}
+      ${items ? `<p class="meta">本次被抑制的能力（不代表已测试）：</p><ul>${items}</ul>` : ''}
+    </div>`;
+  }
+
+  // [P0-FIX 2026-09-08] Markdown「复现方式」小节（只增小节，不改上面任何一行）
+  _pocMarkdown(r) {
+    const list = this._pocEntries(r);
+    const out = ['', '## 复现方式（PoC）', ''];
+    if (!list.length) {
+      out.push('未发现漏洞，无可复现请求。', '');
+      return out;
+    }
+    out.push('以下请求由引擎实际发送形态还原（含 prefix/suffix 与会话上下文），可直接回放验证“这不是误报”。', '');
+    for (const it of list) {
+      out.push(`### ${it.title}`, '');
+      out.push(`- 请求：\`${mdInline(it.req)}\``);
+      if (it.poc.payload) out.push(`- Payload：\`${mdInline(it.poc.payload)}\``);
+      if (it.poc.note) out.push(`- 说明：${it.poc.note}`);
+      out.push(`- 生成时间：${it.poc.generatedAt}`, '');
+      if (it.poc.curl) {
+        out.push('curl（复制即跑）：', '');
+        out.push(mdFence(it.poc.curl, 'bash'), '');
+      }
+      if (it.poc.raw) {
+        out.push(`原始报文（存为 \`${it.file}\` 后可用 -r 导入复现）：`, '');
+        out.push(mdFence(it.poc.raw, 'http'), '');
+      }
+    }
+    return out;
+  }
+
+  // [P0-FIX 2026-09-08] HTML「复现方式」小节：curl 一行 + <details> 折叠原始报文
+  _pocHtml(r) {
+    const list = this._pocEntries(r);
+    if (!list.length) return '<p class="meta">未发现漏洞，无可复现请求。</p>';
+    return list
+      .map((it) => {
+        const curl = it.poc.curl
+          ? `<p class="meta">curl（复制即跑）</p><pre class="curl">${esc(it.poc.curl)}</pre>`
+          : '';
+        const raw = it.poc.raw
+          ? `<details><summary>原始 HTTP 报文（存为 ${esc(it.file)} 后用 -r 导入复现）</summary><pre>${esc(it.poc.raw)}</pre></details>`
+          : '';
+        return `<div class="poc">
+        <h3>${esc(it.title)}</h3>
+        <p class="meta">请求：<code>${esc(it.method)}</code> ${renderUrlLink(it.poc.url, it.poc.url || '-')}</p>
+        <p class="meta">Payload：${it.poc.payload ? `<code>${esc(it.poc.payload)}</code>` : '-'}</p>
+        <p class="meta">${esc(it.poc.note || '')} · 生成于 ${esc(it.poc.generatedAt)}</p>
+        ${curl}${raw}
+      </div>`;
+      })
+      .join('\n');
+  }
+
+  // PoC 条目归一化：markdown / html 共用同一取数与标题规则，避免两侧漂移
+  _pocEntries(r) {
+    const out = [];
+    let n = 0;
+    for (const v of r.vulns || []) {
+      const poc = v && v.poc;
+      if (!poc) continue;
+      n += 1;
+      const point = String(v.pointId ?? '-');
+      out.push({
+        poc,
+        title: `PoC-${n} · 注入点 ${point} · ${v.technique || '-'}`,
+        file: `poc-${n}-${point}.txt`,
+        method: poc.method || 'GET',
+        req: `${poc.method || 'GET'} ${poc.url || '-'}`.trim(),
+      });
+    }
+    return out;
   }
 
   // 导出 HTML（原逻辑不变：所有用户可控字段均已 _escape 转义，P3 已核验）
@@ -203,6 +467,9 @@ export class ReportGenerator {
       .flatMap((v) => v.payloads || [])
       .map((p) => '• ' + this._escape(p))
       .join('\n');
+    // [P0-FIX 2026-09-08] 复现方式小节（只增不改上面既有行）
+    const pocSection = this._pocHtml(r);
+    const conclusionSection = this._conclusionHtml(report);
 
     return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
       <title>SQL 注入检测报告 ${report.scanId}</title>
@@ -215,15 +482,25 @@ export class ReportGenerator {
         .high{color:#ef6c00}.medium{color:#f9a825}.low{color:#9e9e9e}
         .meta{color:#666;font-size:13px}pre{background:#f7f7f7;padding:10px;border-radius:6px;white-space:pre-wrap;word-break:break-all}
         .footer{margin-top:32px;padding-top:12px;border-top:1px solid #eee;color:#999;font-size:12px;text-align:center}
+        .poc{border:1px solid #e3e3e3;border-radius:6px;padding:4px 12px 10px;margin:12px 0}
+        .verdict{border-left:4px solid #f9a825;background:#fffbe6;padding:6px 14px 10px;margin:12px 0;border-radius:4px}
+        .verdict.bad{border-left-color:#c62828;background:#fff3f2}
+        .verdict h2{margin:8px 0 4px;font-size:15px}
+        .verdict ul{margin:4px 0 4px 18px;padding:0;font-size:13px;color:#5a4a00}
+        .poc h3{font-size:14px;margin:10px 0 4px}details{margin:6px 0}summary{cursor:pointer;font-size:13px;color:#555}
+        pre.curl{background:#0f1115;color:#d7e0ea;border-radius:6px;padding:10px;white-space:pre-wrap;word-break:break-all}
       </style></head><body>
       <h1>SQL 注入检测报告</h1>
       <p class="meta">扫描ID：${this._escape(report.scanId)} · 风险等级：<b>${this._escape(report.riskLevel)}</b> · 数据库：${this._escape(report.dbms || '-')}</p>
-      <p class="meta">目标：${this._escape(report.target?.baseUrl || '-')} · 注入点：${(report.points || []).length} · 漏洞：${(report.vulns || []).length}</p>
+      <p class="meta">目标：${renderUrlLink(report.target?.baseUrl)} · 注入点：${(report.points || []).length} · 漏洞：${(report.vulns || []).length}</p>
+      ${conclusionSection}
       <h2>漏洞清单</h2>
       <table><thead><tr><th>注入点</th><th>技术</th><th>数据库</th><th>风险</th><th>说明</th></tr></thead>
       <tbody>${rows || '<tr><td colspan="5">未发现漏洞</td></tr>'}</tbody></table>
       <h2>Payload 示例</h2>
       <pre>${payloads || '无'}</pre>
+      <h2>复现方式（PoC）</h2>
+      ${pocSection}
       <footer class="footer">本报告仅供授权安全测试使用。未获授权对任何系统进行扫描、测试或数据提取均可能违反法律法规，请勿用于非法用途。</footer>
       </body></html>`;
   }

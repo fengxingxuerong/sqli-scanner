@@ -1,0 +1,12 @@
+import { evaluate, parseCrsFile } from '../waf-real/crs-engine.js';
+const rules = parseCrsFile('e2e/waf-real/crs/REQUEST-942-SQLI.conf');
+console.log('解析规则组:', rules.length, '（含链式）');
+const t1 = evaluate({ uri: '/num?id=1', queryString: 'id=1', args: { id: '1 UNION SELECT NULL,NULL' }, cookies: {}, headers: {} });
+const t2 = evaluate({ uri: '/num?id=1', queryString: 'id=1', args: { id: '1' }, cookies: {}, headers: {} });
+const t3 = evaluate({ uri: '/num?id=1', queryString: 'id=1', args: { id: "1' AND SLEEP(5)-- -" }, cookies: {}, headers: {} });
+const t4 = evaluate({ uri: '/s?q=keyboard', queryString: 'q=keyboard', args: { q: 'keyboard' }, cookies: {}, headers: {} });
+console.log('UNION 注入:', t1.blocked, 'rule', t1.ruleId);
+console.log('正常值    :', t2.blocked);
+console.log('SLEEP 注入:', t3.blocked, 'rule', t3.ruleId);
+console.log('正常搜索  :', t4.blocked);
+process.exit(0);

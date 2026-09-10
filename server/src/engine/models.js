@@ -40,6 +40,10 @@ export function createTarget(input) {
     baseUrl: input.url,
     method,
     bodyParams: input.bodyParams || {},
+    // [P1 批次 2026-09-08] JSON body 注入通道：传入对象时 TargetParser 递归发现嵌套叶子
+    // 注入点（param 用点路径如 user.id），injection.js 按路径替换叶子值后重序列化发送。
+    // 不与 bodyParams 互斥：jsonBody 存在时优先走 JSON 语义。
+    jsonBody: input.jsonBody || null,
     cookieParams: input.cookieParams || {},
     headerParams: input.headerParams || {},
     config: { ...defaults, ...(input.config || {}) },

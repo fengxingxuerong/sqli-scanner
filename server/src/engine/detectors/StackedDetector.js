@@ -56,14 +56,24 @@ export class StackedDetector extends Detector {
     const baseTimeoutMs = ctx.config?.timeoutMs ?? defaults.timeoutMs;
     const orig = point.originalValue || '1';
 
-    // ★FIX [误报防护] 基线补偿：先测一次无注入基线耗时。
+    // ★FIX [误报防护] 基线补偿：测无注入基线耗时。
     // 堆叠判定与注释声称的 TimeBlind「同构」但缺了基线对照——固定阈值下，
     // 正常响应 ≥ 阈值的慢站上任意点都会被误报为堆叠注入并强制 Critical 定级。
-    const baseStart = Date.now();
-    try {
-      await this.send(httpClient, ctx, this.buildRequest(target, point, orig), { timeoutMs: baseTimeoutMs });
-    } catch { /* 基线失败不阻断，退化为仅用配置阈值 */ }
-    const baselineMs = Date.now() - baseStart;
+    // [OPT-FIX 2026-09-08] 基线 3 次并发采样取中位数：单次基线对网络抖动/目标瞬时排队
+    // 敏感（一次偶然慢响应 → effectiveThreshold 虚高 → 漏报；一次偶然快响应 → 阈值偏低 →
+    // 并发采样排队被误判为延迟命中 → 误报）。中位数对瞬时毛刺稳健，且 sendConcurrent
+    // 3 样本并发只花 1 轮 RTT 墙钟。全部失败 → 退化仅用配置阈值（与旧行为一致）。
+    const baseSamples = 3;
+    const baseReqs = [];
+    for (let i = 0; i < baseSamples; i++) baseReqs.push(this.buildRequest(target, point, orig));
+    const baseResps = await this.sendConcurrent(httpClient, ctx, baseReqs, { timeoutMs: baseTimeoutMs }, baseSamples);
+    const baseElapsed = baseResps
+      .filter((r) => !r.__error && r.resp != null)
+      .map((r) => r.__elapsed)
+      .sort((a, b) => a - b);
+    const baselineMs = baseElapsed.length
+      ? baseElapsed[Math.floor(baseElapsed.length / 2)] // 中位数
+      : 0;
     // 有效阈值：取「配置阈值」与「基线 + 半个预期延迟」的较大者，
     // 保证命中样本的耗时必须显著高于该点自身正常水位，而非仅高于全局常数。
     const effectiveThreshold = Math.max(thresholdMs, baselineMs + (sleep * 1000) / 2);
@@ -90,25 +100,51 @@ export class StackedDetector extends Detector {
       return fam[0] || tpls[0];
     };
     // 单族采样：全部样本用同一模板，返回 { stable, matchedPayloads }
-    const probeFamily = async (tpl) => {
+    // [perf-FIX 2026-09-07] 串行→限并发：原 for 循环逐个 await，samples×(RTT+sleep) 全额累加
+    // （默认 5 样本 × 2s sleep ≈ 10s+ 墙钟，e2e stacked 场景实测 6s）。改走基类 sendConcurrent
+    // （与 TimeBlindDetector._robustDetect 同一通道）：并发度取 blindRobust.concurrency（默认 4），
+    // 墙钟 ≈ ceil(samples/并发)×sleep。语义不变：每样本独立生成 payload（保留 obfuscate/tamper
+    // 逐样本语义）、独立计时（__elapsed 优先纯网络耗时）、超时/失败仍计为未触发延迟。
+    // [OPT-FIX 2026-09-08] opts.serial=true + samplesOverride：串行复验模式（确认命中前消除
+    // 并发排队对计时的干扰），样本数可覆写（复验只发 1 次）。
+    const stackedConcurrency = Math.max(
+      1,
+      Math.min(ctx.config?.blindRobust?.concurrency ?? 4, samples)
+    );
+    const probeFamily = async (tpl, opts = {}) => {
+      const serial = opts.serial === true;
+      const n = Math.min(Math.max(1, opts.samplesOverride ?? samples), serial ? 1 : samples);
+      const reqs = [];
+      const payloads = [];
+      for (let i = 0; i < n; i++) {
+        const payload = this.obfuscateValue(ctx, fillPayload(tpl, { orig, sleep }));
+        payloads.push(payload);
+        reqs.push(this.buildRequest(target, point, payload));
+      }
+      let resps;
+      if (serial) {
+        // 串行复验：逐个 await，无并发排队干扰，计时可信
+        resps = [];
+        for (const req of reqs) {
+          const t0 = Date.now();
+          try {
+            const resp = await this.send(httpClient, ctx, req, { timeoutMs });
+            resps.push({ resp, __elapsed: resp?.__networkMs ?? (Date.now() - t0) });
+          } catch (e) {
+            resps.push({ __error: e, __elapsed: Date.now() - t0 });
+          }
+        }
+      } else {
+        resps = await this.sendConcurrent(httpClient, ctx, reqs, { timeoutMs }, stackedConcurrency);
+      }
       let stable = 0;
       const matchedPayloads = [];
-      for (let i = 0; i < samples; i++) {
-        const payload = this.obfuscateValue(ctx, fillPayload(tpl, { orig, sleep }));
-        const start = Date.now();
-        let res = null;
-        try {
-          res = await this.send(httpClient, ctx, this.buildRequest(target, point, payload), {
-            timeoutMs,
-          });
-        } catch {
-          // 超时或网络错误，视为未触发延迟
-          continue;
-        }
-        const elapsed = Date.now() - start;
-        if (res && elapsed >= effectiveThreshold) {
+      for (let i = 0; i < n; i++) {
+        const r = resps[i] || {};
+        if (r.__error || r.resp == null) continue; // 超时/网络错误：未触发延迟
+        if (r.__elapsed >= effectiveThreshold) {
           stable++;
-          matchedPayloads.push(payload);
+          matchedPayloads.push(payloads[i]);
         }
       }
       return { stable, matchedPayloads };
@@ -131,6 +167,14 @@ export class StackedDetector extends Detector {
       }
 
       if (stable >= Math.ceil(samples / 2)) {
+        // [OPT-FIX 2026-09-08] 串行复验（防并发排队误报）：并发采样时 N 个请求可能被目标
+        // 连接池/应用排队同时拖慢，elapsed 达标但非真实延迟。复验用同模板串行发 1 次——
+        // 无排队干扰下若仍延迟达标，确认注入；复验未达标（视为偶发排队）→ 降级不计命中，
+        // 继续尝试其余库。复验失败不消耗该库的命中计数（stable 已达半数，仅此一轮作废）。
+        const reverify = await probeFamily(tpl, { serial: true, samplesOverride: 1 });
+        if (reverify.stable < 1) {
+          continue; // 复验未通过：偶发排队，不确认，尝试下一个 DBMS
+        }
         result.vulnerable = true;
         result.dbms = dbmsKey;
         result.evidence =

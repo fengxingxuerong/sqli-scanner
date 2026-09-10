@@ -1,0 +1,1 @@
+http://127.0.0.1:8140/num?id=1 (GET)  # C:\Users\Admin（无密码）\AppData\Local\Programs\Python\Python39\Scripts\sqlmap -u http://127.0.0.1:8140/num?id=1 --batch --flush-session --dbms=mysql --technique=BEUSTQ --time-sec=2 --level=3 --risk=2 --threads=4 --output-dir D:\projects\sqli-scanner\e2e\real-mysql-lab\.sqlmap-out

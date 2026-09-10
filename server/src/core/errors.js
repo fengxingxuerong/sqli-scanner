@@ -5,6 +5,10 @@ export const ErrorCode = {
   INVALID_TARGET: 1001, // 无效目标
   UNSUPPORTED_METHOD: 1002, // 不支持的请求方法
   INVALID_PARAM: 1003, // 入参非法
+  // [P0-SEC 2026-09-08] 越出授权范围（scope）：渗透作战里「打了没授权的资产」是事故级风险，
+  // 单独给错误码便于调用方（CI/流水线）区分「参数写错了」与「这个目标不允许碰」。
+  SCOPE_VIOLATION: 1004, // 目标不在授权范围内
+  SCAN_ID_INVALID: 1005, // scanId 格式非法（防响应头注入/路径穿越）
   SCAN_NOT_FOUND: 2001, // 扫描不存在/已结束
   ENGINE_BUSY: 2002, // 引擎忙
   HTTP_TIMEOUT: 3001, // HTTP 超时

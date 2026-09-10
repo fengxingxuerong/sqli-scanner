@@ -37,6 +37,11 @@ export async function extractAll(sm, scanId, ctx) {
     data.tables = aggregated.tables;
     data.columns = aggregated.columns;
     data.rows = aggregated.rows;
+    // [P0 2026-09-09] 「0 行未确认」表透出：空结果 ≠ 空表（提取通路可能被 WAF/类型限制拦死）
+    if (aggregated.meta?.dumpUnconfirmed?.length) {
+      data.meta = data.meta || {};
+      data.meta.dumpUnconfirmed = aggregated.meta.dumpUnconfirmed;
+    }
     // 列类型枚举 + 进度推送（库数通常不多，保持串行遍历；类型枚举失败被吞）
     for (const db of dbs) {
       const tbls = aggregated.tables[db] || [];
@@ -405,6 +410,12 @@ export function mergeExtracted(target, src) {
   if (src.userPrivs !== undefined) target.userPrivs = src.userPrivs;
   if (src.roles !== undefined) target.roles = src.roles;
   if (src.schemas) target.schemas = { ...(target.schemas || {}), ...src.schemas };
+  // [P0 2026-09-09] 「0 行未确认」标注透传（meta 形态：{ dumpUnconfirmed: ['db.t', …] }）
+  if (src.meta?.dumpUnconfirmed?.length) {
+    target.meta = target.meta || {};
+    const prev = Array.isArray(target.meta.dumpUnconfirmed) ? target.meta.dumpUnconfirmed : [];
+    target.meta.dumpUnconfirmed = [...new Set([...prev, ...src.meta.dumpUnconfirmed])];
+  }
 }
 
 /** 检查提取结果是否包含有效数据 */

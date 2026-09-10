@@ -102,7 +102,9 @@ test('预筛选：单引号报错有信号的点保守保留并完整检出（�
   assert.ok(report.vulns.find((v) => v.technique === 'union'), '可疑点应保留并完整检出');
   // [P1-FIX 2026-09-05] 1 次基线 RTT + 2 点 × 4 探针（未知库双族时间探针）+ p2 完整检测
   // （指纹桩 0 请求，仅 union 检测命中；union 命中后慢速层不跑）
-  assert.equal(requests, 9, `2 点应发 9 次预筛选探测（含 1 次基线 RTT），实际 ${requests} 次`);
+  // [OPT-FIX 2026-09-08] p2 单引号探针报错 → 追加 1 次良性非法值甄别探针（响应异构 →
+  // 真实 SQL 报错信号 → 保守保留），探测请求 9 → 10。
+  assert.equal(requests, 10, `2 点应发 10 次预筛选探测（含 1 次基线 RTT + 1 次良性甄别探针），实际 ${requests} 次`);
   // 只有可疑点进入完整检测；默认 techniques 不含 inline，且 union 命中后 time 层跳过
   assert.deepEqual([...sm._detectCalls].sort(), ['boolean', 'error', 'union']);
 });

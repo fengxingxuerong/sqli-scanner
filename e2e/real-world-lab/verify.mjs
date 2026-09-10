@@ -137,7 +137,7 @@ async function main() {
       const mustMiss = sc.must.filter((t) => !found.includes(t));
       const ok = out.status === 'completed' && mustMiss.length === 0 && (sc.expectSafe ? found.length === 0 : true);
       const dbmses = [...new Set((out.vulns || []).map((v) => v.dbms).filter(Boolean))];
-      rows.push({ name: sc.name, desc: sc.desc, found, dbmses, mustMiss, requests, elapsedMs: out.elapsedMs, status: out.status, ok, expectSafe: sc.expectSafe });
+      rows.push({ name: sc.name, desc: sc.desc, found, dbmses, must: sc.must, mustMiss, requests, elapsedMs: out.elapsedMs, status: out.status, ok, expectSafe: sc.expectSafe });
       console.log(
         `[${ok ? 'PASS' : 'FAIL'}] ${sc.name}（${sc.desc}）检出=[${found.join(',') || '-'}] ` +
         `mustMiss=[${mustMiss.join(',') || '-'}] 请求=${requests} 耗时=${fmtMs(out.elapsedMs)} dbms=${dbmses.join(',') || '?'}`
@@ -149,12 +149,15 @@ async function main() {
 // —— 二阶注入验证：写入含 SQL 片段的评论 → level=5 爬取 + /panel 触发 ——
     console.log('\n[verify] 二阶注入链路：写入 payload 评论 → 爬取 → /panel 触发');
     const injectBody = "alice's'); SELECT 1; -- ";
+    // [P0-FIX 2026-09-06] 自检用 item_id=2（独立商品）：若把爆炸 payload 写进被测的
+    // item 1，二阶扫描时 /panel?id=1 的基线本就 500（baselineErr=true）→ 引擎保守跳过
+    // 二阶判定 → 永远检不出。基线必须干净，被测通道留给引擎自己的探针。
     await fetch(`${BASE}/comment`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', cookie: `sid=${sid}` },
-      body: JSON.stringify({ item_id: 1, body: injectBody }),
+      body: JSON.stringify({ item_id: 2, body: injectBody }),
     });
-    const panelResp = await fetch(`${BASE}/panel?id=1`, { headers: { cookie: `sid=${sid}` } });
+    const panelResp = await fetch(`${BASE}/panel?id=2`, { headers: { cookie: `sid=${sid}` } });
     const panelText = await panelResp.text();
     const panelExplodes = panelResp.status === 500 && /syntax error/i.test(panelText);
     console.log(`[verify] 靶场自检：/panel 对 payload=${JSON.stringify(injectBody)} → ${panelExplodes ? '真实引爆 ✅' : '未引爆 ❌'} (status=${panelResp.status})`);
@@ -168,14 +171,19 @@ async function main() {
         level: 5,
         crawlForms: true,
         techniques: ['error', 'boolean'],
-        secondOrder: { enabled: true, triggerUrls: [`${BASE}/panel?id=`] },
+        // [P1-FIX 2026-09-07] triggerUrl 必须是完整可用 URL（/panel?id=1）：空 id（/panel?id=）
+        // 在靶场产生与存储值无关的恒定语法错误（WHERE id =  AND），任何判定路径都会被堵死。
+        // 对标 sqlmap --second-url（完整 URL 语义）。同时开启阴性对照提升判定置信。
+        secondOrder: { enabled: true, triggerUrls: [`${BASE}/panel?id=1`], negativeControl: true },
       },
     });
     const soReq = app._stats.total - before;
     const soFound = techs(soOut.vulns);
-    const soMiss = ['second_order', 'error'].filter((t) => !soFound.includes(t));
+    // [P1-FIX 2026-09-07] 判定口径修正：SecondOrderDetector 命中时报 technique='second_order'，
+    // 不会同时报一阶的 'error'（原 must 含 'error' 导致检出也判 FAIL）。
+    const soMiss = ['second_order'].filter((t) => !soFound.includes(t));
     const soOk = soOut.status === 'completed' && soMiss.length === 0;
-    rows.push({ name: 'second_order', desc: '评论存储 → /panel 触发页二阶注入', found: soFound, dbmses: [], mustMiss: soMiss, requests: soReq, elapsedMs: soOut.elapsedMs, status: soOut.status, ok: soOk, expectSafe: false });
+    rows.push({ name: 'second_order', desc: '评论存储 → /panel 触发页二阶注入', found: soFound, dbmses: [], must: ['second_order'], mustMiss: soMiss, requests: soReq, elapsedMs: soOut.elapsedMs, status: soOut.status, ok: soOk, expectSafe: false });
     console.log(`[${soOk ? 'PASS' : 'FAIL'}] second_order 检出=[${soFound.join(',') || '-'}] miss=[${soMiss.join(',') || '-'}] 请求=${soReq} 耗时=${fmtMs(soOut.elapsedMs)}`);
 
     // —— sqlmap 对拍 ——
@@ -183,7 +191,7 @@ async function main() {
       console.log('\n[verify] sqlmap 对拍（真实 PG 指纹，不加 --dbms）…');
       const sq = runSqlmap(`${BASE}/items?cat=1`);
       console.log(`[sqlmap] 检出=[${sq.found.join(',') || '-'}] 耗时=${fmtMs(sq.elapsedMs)}${sq.err ? ` err=${sq.err}` : ''}`);
-      rows.push({ name: 'sqlmap_items', desc: 'sqlmap 对拍 /items?cat=1', found: sq.found, dbmses: [], mustMiss: [], requests: 0, elapsedMs: sq.elapsedMs, status: 'sqlmap', ok: true, expectSafe: false, isSqlmap: true });
+      rows.push({ name: 'sqlmap_items', desc: 'sqlmap 对拍 /items?cat=1', found: sq.found, dbmses: [], must: [], mustMiss: [], requests: 0, elapsedMs: sq.elapsedMs, status: 'sqlmap', ok: true, expectSafe: false, isSqlmap: true });
     }
   } finally {
     server.close();

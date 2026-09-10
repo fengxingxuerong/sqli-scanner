@@ -11,7 +11,14 @@ import {
   extractDigestChallenge,
 } from '../src/core/digestAuth.js';
 function bodyOf(res) {
-  return typeof res.data === 'string' ? bodyOf(res.data) : res.data;
+  if (typeof res.data !== 'string') return res.data;
+  // [P1-FIX 2026-09-08] HttpClient 统一 responseType:'text'（响应体恒为原始文本，
+  // JSON API 不再被 axios 隐式 parse），测试侧按 JSON 解析取字段；非 JSON 原样返回。
+  try {
+    return JSON.parse(res.data);
+  } catch {
+    return res.data;
+  }
 }
 
 

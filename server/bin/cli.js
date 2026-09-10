@@ -21,6 +21,9 @@ import { tamperRegistry } from '../src/core/tamper/TamperRegistry.js';
 // [P1-FIX 2026-09-05] --format 出口：原为死参数（解析后从未消费，-o 恒写 JSON）。
 // ReportGenerator 的 toCSV/toMarkdown/toHTML 与 REST /report/export 同源，直接复用。
 import { ReportGenerator } from '../src/services/ReportGenerator.js';
+// [P0-SEC 2026-09-09] --scope 接线：CLI 直走 ScanManager 不经 scanRoutes，需在本层完成
+// 「目标先校验 + 按 scanId 登记」，否则 --scope 是静默 no-op（httpClient 逐跳取用登记项）。
+import { parseScope, assertInScope, registerScanScope, releaseScanScope } from '../src/core/scopeGuard.js';
 import path from 'node:path';
 
 // --format 分发（json|csv|markdown|html）：单目标 -o 与批量目录导出共用。
@@ -42,6 +45,10 @@ function parseArgs(argv) {
     url: null, batch: null, method: 'GET', body: null, cookie: null, headers: null,
     format: 'json', out: null, timeoutMs: 0, concurrency: 1, help: false,
     technique: null, level: null, risk: null, dump: false, tamper: null, proxy: null, auth: null,
+    // —— 授权范围 / 传输安全 / 输入校验跳过（[P0-SEC 2026-09-09] 对应引擎新增三能力）——
+    scope: null, insecureTls: false, noValidationSkip: false,
+    // [P0-FIX 2026-09-09] 生产护栏开关：高危池投放确认 / 脱离护栏 / 二阶写请求放行
+    confirmDestructive: false, noProductionMode: false, allowSecondOrderWrites: false,
     // —— HTTP 协议层（对标 sqlmap --force-ssl / --ignore-redirects / --hpp）——
     forceSsl: false, ignoreRedirects: false, hpp: false,
     ratePerSec: 50, concurrencyDet: 4,
@@ -57,6 +64,13 @@ function parseArgs(argv) {
     smart: false,
     requestFile: null, // 对标 sqlmap -r：从请求文件导入
     logFile: null,     // 对标 sqlmap -l：从代理/Burp 日志批量导入请求
+    // —— 注入点扩展开关（本期新增，默认关闭，零回归）——
+    // --test-headers：把显式传入的请求头（--header / -r 解析的 headerObj）作为注入点
+    //   （引擎 TargetParser 早已支持 header/cookie 注入点，此前 CLI 从未填充这些字段，
+    //   导致 Cookie / X-Forwarded-For 等真实注入点被完全跳过）。
+    // --test-path：把 URL path 末段作为注入点（path 型注入点）。
+    testHeaders: false,
+    testPath: false,
     checkTor: false,   // 对标 sqlmap --check-tor：校验 Tor 出口后继续
     // —— 攻击操作（对标 sqlmap --os-cmd/--sql-shell/--file-read/--file-write；需 EXPLOIT_ENABLED=1）——
     osCmd: null, sqlShell: null, fileRead: null, fileWrite: null, fileDest: null,
@@ -100,14 +114,28 @@ function parseArgs(argv) {
     else if (a === '--cookie') args.cookie = next();
     else if (a === '--header' || a === '--headers') args.headers = next();
     else if (a === '--technique') args.technique = next();
+    // [P0 2026-09-09 实战批次] 失效值替换 + 已知注入点直通（对标 sqlmap --invalid-*）
+    else if (a === '--invalid-bignum') args.invalidBignum = true;
+    else if (a === '--invalid-logical') args.invalidLogical = true;
+    else if (a === '--invalid-string') args.invalidString = true;
+    else if (a === '--known-point') args.knownPoint = next();
     else if (a === '--level') args.level = Number(next()) || null;
     else if (a === '--risk') args.risk = Number(next()) || null;
     else if (a === '--test-filter') args.testFilter = next();
     else if (a === '--test-skip') args.testSkip = next();
+    // —— 注入点扩展开关（本期新增，默认关闭，零回归）——
+    else if (a === '--test-headers') args.testHeaders = true;
+    else if (a === '--test-path') args.testPath = true;
     else if (a === '--use-registry') args.useRegistry = true;
     else if (a === '--dump') args.dump = true;
     else if (a === '--tamper') args.tamper = next();
     else if (a === '--proxy') args.proxy = next();
+    else if (a === '--scope') args.scope = next();
+    else if (a === '--insecure') args.insecureTls = true;
+    else if (a === '--no-validation-skip') args.noValidationSkip = true;
+    else if (a === '--confirm-destructive') args.confirmDestructive = true;
+    else if (a === '--no-production-mode') args.noProductionMode = true;
+    else if (a === '--allow-second-order-writes') args.allowSecondOrderWrites = true;
     else if (a === '--auth') args.auth = next();
     else if (a === '--auth-type') args.authType = next();
     else if (a === '--rate' || a === '--ratePerSec') args.ratePerSec = Number(next()) || 50;
@@ -141,6 +169,8 @@ function parseArgs(argv) {
     else if (a === '--count') args.count = true;
     else if (a === '--exclude-sysdbs') args.excludeSysdbs = true;
     else if (a === '--no-exclude-sysdbs') args.excludeSysdbs = false;
+    else if (a === '--proxy-bypass-local') args.proxyBypassLocal = true;
+    else if (a === '--no-proxy-bypass-local') args.proxyBypassLocal = false;
     else if (a === '--search') args.search = next();
     else if (a === '--smart') args.smart = true;
     // —— 高级检测参数（对标 sqlmap 页面匹配/注入上下文）——
@@ -211,6 +241,11 @@ function printHelp() {
   --risk <1-3>               风险等级（1 安全，2 标准，3 含 OR 变体）
   --test-filter <str>        仅运行 id 匹配的测试（逗号分隔子串，大小写不敏感，对标 sqlmap --test-filter）
   --test-skip <str>          跳过 id 匹配的测试（逗号分隔子串，大小写不敏感，对标 sqlmap --test-skip）
+  --test-headers             把显式传入的请求头（--header 或 -r 请求文件中的头，如 Cookie / X-Forwarded-For）
+                             作为注入点测试（默认关闭：保持现有行为，头仅作会话透传）。授权的渗透测试中，
+                             服务端按请求头取值拼 SQL 的场景（如 SELECT ... WHERE id=\${x_forwarded_for}）必须开启才能检出
+  --test-path               把 URL path 末段（非空且非静态资源 .html/.js/.css/.png 等）作为注入点测试
+                             （默认关闭：保持现有行为。服务端按 path 段取值拼 SQL 的场景必须开启才能检出）
   --use-registry             启用声明式 payload 注册表（检测器改用 PAYLOAD_REGISTRY 筛选，受 level/risk/test-filter/test-skip 控制）
   --dump                     启用数据提取（拖库，默认关闭对标 sqlmap 显式 opt-in）
   --dbs                      枚举数据库（对标 sqlmap --dbs，自动排除系统库，--no-exclude-sysdbs 关闭）
@@ -241,6 +276,15 @@ function printHelp() {
   --tamper <name,name>       tamper 插件链（逗号分隔，对标 sqlmap --tamper）；传 .js 文件路径可加载自定义插件
   --smart                    智能启发式（别名，等价 prefilter: true，跳过非注入参数）
   --proxy <url>              代理（http://host:port 或 socks5://host:port）
+  --scope <cidr/域名,...>    授权范围硬约束（[P0-SEC] 如 10.0.0.0/24,target.example.com）：
+                             启用后目标与每一跳重定向均须在范围内，越界直接拒发；留空不启用
+  --insecure                 忽略自签/内网 CA 证书（关闭 TLS 校验，失去中间人防护，报告须注明）
+  --no-validation-skip       关闭「输入校验短路」（参数被白名单拦死也照跑完整检测，审计/对照用）
+  --confirm-destructive      确认投放高危 payload 池（--risk 3 默认只「选风险」不「放行写操作」；无本开关时高危向量一条不发）
+  --no-production-mode       声明本次不是生产环境（靶场/自建演练）：关掉生产护栏，高危池与二阶写请求不再被预置抑制
+  --allow-second-order-writes 允许二阶使用非幂等方法（POST/PUT/PATCH/DELETE）：二阶本质是写操作，默认仅 GET/HEAD
+  --no-proxy-bypass-local    关闭本地/私网代理豁免（默认豁免：127.0.0.1/内网不走 *PROXY 环境变量，
+                             避免系统代理掐断请求后被记成「无漏洞」）
   --auth <user:pass>         Basic 认证（user:password 形式）
   --auth-type <Basic|Digest>  认证类型（默认 Basic；Digest 走 RFC 7616 挑战-响应，对标 sqlmap）
   --rate <n>                 限速 req/s（默认 50）
@@ -261,6 +305,11 @@ function printHelp() {
   --regexp <pat>            页面匹配正则表达式
   --dbms <name>             强制指定 DBMS（跳过指纹，如 MySQL/PostgreSQL/Oracle）
   --second-order <url>      二阶注入触发页（写入后回访触发判定，对标 sqlmap --second-order）
+  --invalid-bignum          有效值替换为随机大数（缓存/静态页噪声规避，对标 sqlmap）
+  --invalid-logical         有效值替换为恒真逻辑式 n=n（同上）
+  --invalid-string          有效值替换为随机字符串（同上；数值上下文会注入失败）
+  --known-point <spec>      已知注入点直通（跳过预筛选/闭合探测，键值对用 ; 分隔）：
+                            "param=id;quote=';paren=);techniques=union,error"
 
 利用操作（对标 sqlmap --os-cmd/--sql-shell/--file-read/--file-write；需环境变量 EXPLOIT_ENABLED=1 且显式 --authorized）:
   --authorized              声明已获授权（安全红线，仅限授权渗透场景）
@@ -547,6 +596,48 @@ function buildAuth(args) {
   return auth;
 }
 
+// 对标 sqlmap --test-headers / --test-path（本期新增，默认关闭，零回归）：
+// 把用户显式传入的请求头 / URL path 末段转为注入点。引擎 TargetParser 早已支持
+// header/cookie/path 注入点（遍历 target.cookieParams / target.headerParams / path 段），
+// 此前 CLI/解析层从未填充这些字段，导致带注入点的请求头（Cookie、X-Forwarded-For）与
+// path 末段被完全跳过（危险假阴性）。
+//
+// --test-headers：把请求头（--header 或 -r 解析出的 headerObj）转为 target.headerParams；
+//   Cookie 头特殊解析为 k=v 填入 target.cookieParams；host / content-length / content-type /
+//   authorization 排除（传输层/认证类头，避免破坏请求或会话）。
+// 返回 { headerParams?, cookieParams? }，供 runSingleScan 注入 target；无内容时返回 {}。
+function buildInjectionTargets(args) {
+  const result = {};
+  if (!args.testHeaders) return result;
+  const hdrs = {};
+  if (args.headerObj) Object.assign(hdrs, args.headerObj);
+  const parsed = args.headers ? parseHeaders(args.headers) : undefined;
+  if (parsed) Object.assign(hdrs, parsed);
+  const EXCLUDE = new Set(['host', 'content-length', 'content-type', 'authorization']);
+  const headerParams = {};
+  const cookieObj = {};
+  for (const [k, v] of Object.entries(hdrs)) {
+    const lk = String(k).toLowerCase();
+    if (EXCLUDE.has(lk)) continue; // 传输层/认证类头排除
+    if (lk === 'cookie') {
+      // Cookie 头：解析为 k=v，填入 cookieParams（TargetParser 在 level≥2 生成 cookie 注入点）
+      for (const pair of String(v).split(';')) {
+        const eq = pair.indexOf('=');
+        if (eq > 0) {
+          const name = pair.slice(0, eq).trim();
+          const val = pair.slice(eq + 1).trim();
+          if (name) cookieObj[name] = val;
+        }
+      }
+      continue;
+    }
+    headerParams[k] = v;
+  }
+  if (Object.keys(headerParams).length) result.headerParams = headerParams;
+  if (Object.keys(cookieObj).length) result.cookieParams = cookieObj;
+  return result;
+}
+
 // 构建 config：透传 level/risk/technique/dump/tamper/proxy/rate/threads
 function buildConfig(args) {
   const enumActive = isEnumMode(args);
@@ -559,22 +650,41 @@ function buildConfig(args) {
   else if (args.crawl || args.forms) config.level = 5; // [UX] --crawl/--forms 隐含 level 5（TargetParser 要求）
   if (args.risk != null) config.risk = Math.max(1, Math.min(3, args.risk));
   // --risk=3：显式启用高危 payload 池（写文件 / RCE / 外连 / DoS 类向量）。
-  // 与 sqlmap 语义一致：risk 3 意味着「可能造成数据/服务影响」，需使用者明确承担。
+  // [P0-FIX 2026-09-09] 高危池投放必须 --confirm-destructive 硬门：risk=3 本身不是「授权声明」。
+  // 旧行为是 `--risk 3` 直接往进程级 PAYLOADS 合并 DROP/写文件/RCE 向量，一行拼错就打到不相关的
+  // 主机（一个进程只跑一个扫描时看不出来，共用引擎时污染面更大）。
+  // 逃生口：--no-production-mode（靶场/自建演练环境）等价于已确认。
+  config.productionMode = !args.noProductionMode;
+  config.confirmDestructive = args.confirmDestructive === true;
+  if (args.allowSecondOrderWrites) {
+    config.secondOrder = { ...(config.secondOrder || {}), allowWrites: true };
+  }
   if (config.risk >= 3) {
-    try {
-      enableDestructivePayloads(PAYLOADS, config.risk);
+    if (!config.confirmDestructive && config.productionMode) {
       logger.warn(
-        '⚠️ --risk=3：已启用高危 payload 池（含文件读写 / 命令执行 / 外连探测 / 资源消耗型向量）。' +
-        '仅在已获书面授权的渗透测试中使用。'
+        'ℹ --risk=3 但本次未投放高危 payload 池：写文件 / 命令执行 / 资源消耗型向量均**未发送**。' +
+          '确认目标已书面授权且可承担影响时，加 --confirm-destructive（或在靶场用 --no-production-mode）。'
       );
-    } catch (e) {
-      logger.error(`高危 payload 池启用失败：${e.message}`);
+      config.destructiveSuppressed = true;
+    } else {
+      try {
+        enableDestructivePayloads(PAYLOADS, config.risk);
+        logger.warn(
+          '⚠️ --risk=3 + 已确认：高危 payload 池已投放（含文件读写 / 命令执行 / 外连探测 / 资源消耗型向量）。' +
+          '仅在已获书面授权的渗透测试中使用，且注意本进程内其他扫描会共享同一份 payload 池。'
+        );
+      } catch (e) {
+        logger.error(`高危 payload 池启用失败：${e.message}`);
+      }
     }
   }
   // --test-filter / --test-skip / --use-registry（对标 sqlmap --test-filter / --test-skip）
   if (args.testFilter) config.testFilter = args.testFilter;
   if (args.testSkip) config.testSkip = args.testSkip;
   if (args.useRegistry) config.useRegistry = true;
+  // 注入点扩展开关（本期新增，默认关闭，零回归）：透传给 TargetParser 决定是否把请求头 / path 末段生成注入点
+  if (args.testHeaders) config.testHeaders = true;
+  if (args.testPath) config.testPath = true;
   if (args.technique) {
     const valid = ['union', 'error', 'boolean', 'time', 'stacked', 'oob', 'inline', 'second_order'];
     const list = String(args.technique).split(',').map(s => s.trim().toLowerCase()).filter(t => valid.includes(t));
@@ -590,6 +700,19 @@ function buildConfig(args) {
     }
   }
   if (args.proxy) config.proxy = args.proxy;
+  // [P0-SEC] --scope：授权范围硬约束（CIDR/域名/URL 前缀，逗号分隔）；空=不启用（零行为变化）。
+  // 引擎侧 scopeGuard 在目标解析与每一跳重定向前校验，越界直接拒发。
+  if (args.scope) {
+    const rules = String(args.scope).split(',').map(s => s.trim()).filter(Boolean);
+    if (rules.length) config.scope = rules;
+  }
+  // --insecure：config.insecureTls=true（HttpClient 换用 rejectUnauthorized:false 专用 Agent）
+  if (args.insecureTls) config.insecureTls = true;
+  // --no-validation-skip：显式关闭输入校验短路（引擎默认开）；不影响预筛 prefilter
+  if (args.noValidationSkip) config.validationSkip = false;
+  // [P0-FIX 2026-09-09] --no-proxy-bypass-local：显式恢复「本地也走环境变量代理」
+  if (args.proxyBypassLocal === true) config.proxyBypassLocal = true;
+  else if (args.proxyBypassLocal === false) config.proxyBypassLocal = false;
   // [对标 sqlmap --dbms] 强制指定 DBMS（scanRunner 消费：跳过指纹直接按指定库检测）
   if (args.dbms) config.dbms = String(args.dbms).trim();
   // [对标 sqlmap --second-order] 二阶触发页（写入后回访触发判定）
@@ -601,6 +724,43 @@ function buildConfig(args) {
     };
   }
   if (args.smart) config.prefilter = true;
+  // [P0 2026-09-09 实战批次] 失效值替换（对标 sqlmap --invalid-bignum/--invalid-logical/--invalid-string）：
+  // 布尔盲注的有效值前缀替换为随机大数/恒真逻辑式/随机串，规避缓存页/静态页噪声
+  if (args.invalidBignum) config.invalidValue = 'bignum';
+  else if (args.invalidLogical) config.invalidValue = 'logical';
+  else if (args.invalidString) config.invalidValue = 'string';
+  // [P0 2026-09-09 实战批次] 已知注入点直通：--known-point "param=id;quote=';paren=);techniques=union,error"
+  // 键值对用 ; 分隔（techniques 值内含逗号，与 --technique 同名法）
+  // 手工确认的可注入参数跳过预筛选与闭合探测；techniques 限定技术位
+  if (args.knownPoint) {
+    try {
+      const kp = {};
+      for (const pair of String(args.knownPoint).split(';')) {
+        const i = pair.indexOf('=');
+        if (i <= 0) continue;
+        const k = pair.slice(0, i).trim();
+        const v = pair.slice(i + 1).trim();
+        if (k === 'param') kp.param = v;
+        else if (k === 'quote') kp.quote = v;
+        else if (k === 'paren') kp.paren = v;
+        else if (k === 'techniques') kp.techniques = v;
+      }
+      if (kp.param) {
+        config.knownPoint = { param: kp.param };
+        if (kp.quote != null) config.knownPoint.quote = kp.quote;
+        if (kp.paren != null) config.knownPoint.paren = kp.paren;
+        if (kp.techniques) {
+          const valid = ['union', 'error', 'boolean', 'time', 'stacked', 'oob', 'inline', 'second_order'];
+          const list = String(kp.techniques).split(',').map((s) => s.trim().toLowerCase()).filter((t) => valid.includes(t));
+          if (list.length) config.knownPoint.techniques = list;
+        }
+      } else {
+        logger.warn('--known-point 缺少 param= 键，已忽略（示例：--known-point "param=id,quote=\',techniques=union"）');
+      }
+    } catch (e) {
+      logger.warn(`--known-point 解析失败，已忽略：${e.message}`);
+    }
+  }
   // 限速三件套（对标 sqlmap --delay / --reqrate / --max-requests）
   if (args.delaySec > 0) config.delay = Math.min(Number(args.delaySec) || 0, 60);
   if (args.reqRate > 0) config.reqRate = Number(args.reqRate) || 0;
@@ -791,7 +951,25 @@ function printExtractView(report) {
 async function runSingleScan(sm, url, args) {
   const bodyParams = args.body ? JSON.parse(args.body) : {};
   const config = buildConfig(args);
+  // [P0-SEC] 目标先过一遍 scope（与 scanRoutes sanitizeStart 同步拦截同构）：越界直接报错，
+  // 一个包都不发。直连模式（-d）无 HTTP 请求可言，不参与 scope 判定。
+  const scopeRules = args.scope && !args.direct
+    ? parseScope(String(args.scope).split(',').map(s => s.trim()).filter(Boolean))
+    : null;
+  if (scopeRules?.enabled) assertInScope(String(url), scopeRules);
   const auth = buildAuth(args);
+  // [本期新增] --test-headers：把显式请求头转为注入点字段。被纳入注入点的头不再经 auth 透传，
+  // 否则 httpClient.mergeAuthHeaders 会用原始值覆盖注入 payload（请求仍畸形/无注入）。
+  // 注入点的原始值由 buildInjectionRequest 始终从 target.headerParams/cookieParams 注入（含基线请求）。
+  const injTarget = buildInjectionTargets(args);
+  // 被纳入注入点的「请求头」不再经 auth 透传：mergeAuthHeaders 对普通头是**覆盖**语义，
+  // 否则会用原始值覆盖注入 payload（请求仍畸形/无注入）。Cookie 头不在此处删除 ——
+  // mergeAuthHeaders 对 cookie 是「追加」语义（existing + '; ' + auth.cookie），保留 auth.cookie
+  // 既能让注入点的 uid=<payload> 生效，又能带上独立传入的会话 Cookie（如 --cookie session=abc），避免掉会话。
+  if (injTarget.headerParams && auth && auth.headers) {
+    for (const k of Object.keys(injTarget.headerParams)) delete auth.headers[k];
+    if (auth.headers && Object.keys(auth.headers).length === 0) delete auth.headers;
+  }
   // 枚举模式：把 CLI 参数解析为 extractScope 挂到 config（对标 sqlmap --dbs/--tables/...）
   const scope = buildExtractScope(args);
   if (scope) config.extractScope = scope;
@@ -804,8 +982,12 @@ async function runSingleScan(sm, url, args) {
         sqlTemplate: args.sqlTemplate || 'SELECT * FROM users WHERE id={INJECT}',
         config,
       }
-    : { url, method: args.method, bodyParams, config, auth };
+    : { url, method: args.method, bodyParams, config, auth, ...injTarget };
   const scanId = await sm.start(input);
+  // [P0-SEC] scope 按 scanId 登记：httpClient 在每一跳（含重定向）前取用，防 302 出圈
+  if (scopeRules?.enabled) {
+    try { registerScanScope(scanId, scopeRules); } catch { /* 登记失败不阻断扫描（入口已校） */ }
+  }
 
   // 订阅事件 → 控制台进度
   const em = eventBus.create(scanId);
@@ -828,6 +1010,7 @@ async function runSingleScan(sm, url, args) {
   }
 
   const report = sm.getReport(scanId);
+  if (scopeRules?.enabled) { try { releaseScanScope(scanId); } catch { /* ignore */ } }
   eventBus.dispose(scanId);
   return report;
 }
@@ -1142,4 +1325,4 @@ if (invokedDirectly) {
 }
 
 // 导出供单测使用（parseArgs / buildConfig / buildExtractScope / printExtractView）
-export { parseArgs, buildConfig, buildExtractScope, validateEnumArgs, printExtractView, runSingleScan, applyRequestFile, resolveTamperPlugins };
+export { parseArgs, buildConfig, buildExtractScope, validateEnumArgs, printExtractView, runSingleScan, applyRequestFile, resolveTamperPlugins, buildInjectionTargets };

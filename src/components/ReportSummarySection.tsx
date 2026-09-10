@@ -8,6 +8,7 @@ import {
   Box, Typography, Card, CardContent, Grid, Stack, Chip, Alert, Button,
 } from '@mui/material';
 import type { ReportModel, SqlmapVulnEntry, Vulnerability } from '../shared/types';
+import ValidityBanner from './ValidityBanner';
 
 // 风险等级 → 颜色（与 ReportPage 原 RISK_COLORS 一致，导出供 ReportPage 复用防漂移）
 // 注：为保证漏洞列表卡片与摘要卡片的 WCAG 对比度一致，采用 ReportPage 原值（AA 达标）。
@@ -91,6 +92,10 @@ export default function ReportSummarySection({
 
   return (
     <>
+      {/* 结论可信度 Banner（[P0-FIX] A 项）：inconclusive=warning / 阴性可信=info / 命中且可信=info；
+          旧报告（无 verdict/validity）不渲染，保持向后兼容 */}
+      <ValidityBanner report={report} className="mb-4" />
+
       {/* 风险等级卡片 */}
       <Card className="mb-4" sx={{ borderLeft: `6px solid ${riskColor}` }}>
         <CardContent>

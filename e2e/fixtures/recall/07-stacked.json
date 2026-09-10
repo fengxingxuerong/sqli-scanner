@@ -1,11 +1,31 @@
 {
   "name": "stacked",
   "description": "堆叠注入（; 第二条语句 sleep）",
-  "target": { "type": "mock", "endpoint": "stacked", "param": "i", "value": "1" },
-  "config": { "techniques": ["stacked"], "timeBlindSleepSec": 1, "timeThresholdMs": 800, "timeBlindSamples": 3 },
+  "target": {
+    "type": "mock",
+    "endpoint": "stacked",
+    "param": "i",
+    "value": "1"
+  },
+  "config": {
+    "techniques": [
+      "stacked"
+    ],
+    "timeBlindSleepSec": 1,
+    "timeThresholdMs": 800,
+    "timeBlindSamples": 3
+  },
   "expected": {
     "vulnerable": true,
-    "techniques": { "must": ["stacked"], "nice": [] },
-    "requestCount": { "max": 60 }
+    "techniques": {
+      "must": [
+        "stacked"
+      ],
+      "nice": []
+    },
+    "requestCount": {
+      "max": 170,
+      "note": "语言级响应头特征移除（php/asp.net 不证明后端数据库）后，未知 DBMS 走诚实报错/时间向量遍历，阈值按 2026-09-08 新基线校准"
+    }
   }
 }

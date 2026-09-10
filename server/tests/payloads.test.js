@@ -65,11 +65,16 @@ test('Oracle UNION 使用 v$version 作为源表（FROM dual 在提取/指纹时
   assert.ok(PAYLOADS.Oracle.union[0].includes('v$version'));
 });
 
-test('FINGERPRINT 对每个库都有响应头特征；DB_VERSION 有 func 与 sig', () => {
+test('FINGERPRINT 每库有指纹条目（可为空数组）；DB_VERSION 有 func 与 sig', () => {
   for (const dbms of DBMS_LIST) {
     assert.ok(FINGERPRINT[dbms], `缺少指纹 ${dbms}`);
-    assert.ok(Array.isArray(FINGERPRINT[dbms]) && FINGERPRINT[dbms].length > 0, `${dbms} 指纹应为非空数组`);
-    assert.ok(FINGERPRINT[dbms][0].header && FINGERPRINT[dbms][0].match instanceof RegExp, `${dbms} 指纹缺 header/match`);
+    // [OPT-FIX 2026-09-08] 允许空数组：MySQL/SQL Server/SQLite 无可靠响应头特征
+    // （php/asp.net 等语言级信号已移除——它们不证明后端数据库），由报错签名/
+    // UNION 版本回显/时间向量定库。仅校验非空条目的结构。
+    assert.ok(Array.isArray(FINGERPRINT[dbms]), `${dbms} 指纹应为数组`);
+    if (FINGERPRINT[dbms].length > 0) {
+      assert.ok(FINGERPRINT[dbms][0].header && FINGERPRINT[dbms][0].match instanceof RegExp, `${dbms} 指纹缺 header/match`);
+    }
     // UNION 版本指纹映射（DB_VERSION）：供 DBFingerprinter 判定 dbms
     assert.equal(typeof DB_VERSION[dbms].func, 'string');
     assert.ok(DB_VERSION[dbms].sig instanceof RegExp);

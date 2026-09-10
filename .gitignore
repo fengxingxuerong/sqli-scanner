@@ -43,8 +43,20 @@ server/dist-engine/
 # recall-lab run results (auto-generated, machine-specific, not committed)
 e2e/recall-lab/results/
 
+# [P2-HYGIENE 2026-09-09] 一次性排障脚本与本地代理临时目录：不属于任何回归入项，
+# 但会把 `eslint .` 与 `git status` 搅浑（历史审计会话残留）。统一忽略，需要时自行处理。
+e2e/diag/
+e2e/waf-real/.sqlmap-waf/
+e2e/waf-real/results/
+e2e/real-world-lab/results/
+e2e/recall-lab/.sqlmap-tmp/
+
 # [P0-FIX] e2e 结果产物入库噪音：sqli-labs/tamper-matrix/waf-lab 的结果文件为每次跑批生成，
 # 统一 gitignore + 改为 CI artifact（已有 git 跟踪的历史文件需 git rm --cached 处理）。
 e2e/sqli-labs/results/
 e2e/tamper-matrix/results/
 e2e/waf-lab/results/.git-broken-20260906/
+
+# 红队评测产物（本地生成，不入库）
+e2e/redteam-lab/out/
+e2e/redteam-lab/sqlmap-out/

@@ -3,6 +3,8 @@
 // 占位符：{ORIG}=原始值 {SLEEP}=延迟秒数 {NUM}=随机整数 {SEP}=注释符 {CALLBACK}=带外回调地址 {TOKEN}=子域标签 {DOMAIN}=DNS 回调域名
 
 import { mysqlPayloads, mysqlClauses } from './mysql.js';
+// [P0-FIX 2026-09-09] 时间向量夹顶需要可观察：被夹时必须留一条日志，否则使用者以为 --time-sec 生效了
+import { logger } from '../../core/logger.js';
 import { postgresPayloads, postgresClauses } from './postgres.js';
 import { sqlserverPayloads, sqlserverClauses } from './sqlserver.js';
 import { sqlitePayloads, sqliteClauses } from './sqlite.js';
@@ -152,14 +154,21 @@ export const DNS_OOB_PAYLOADS = {
 };
 
 // DBMS 指纹规则（按响应头特征识别）
+// [OPT-FIX 2026-09-08] 移除语言级信号（php/phpsessid/asp.net/python）：X-Powered-By: PHP
+// 只能证明应用是 PHP 写的，后端可以是任何数据库——Python sqli-labs（SQLite 靶场）回显
+// X-Powered-By: PHP/7.4.33 → 此前第 2 步提前误判 MySQL，报错签名/时间向量定库（真实
+// 方言证据）根本没机会执行 → L04/L14 漏检。数据库判定只保留 DB 特征（Server 头、
+// 厂商标识、报错签名、UNION 版本回显）。
 export const FINGERPRINT = {
-  MySQL: [{ header: 'X-Powered-By', match: /php/i }, { header: 'Set-Cookie', match: /phpsessid/i }],
-  PostgreSQL: [{ header: 'X-Powered-By', match: /(postgresql|php)/i }],
-  'SQL Server': [{ header: 'X-Powered-By', match: /asp\.net/i }, { header: 'Set-Cookie', match: /asp\.net|sessionid/i }],
-  SQLite: [{ header: 'X-Powered-By', match: /(python|php)/i }],
+  // MySQL：无可靠响应头特征（由 UNION 版本回显 / 报错签名 / 时间向量定库）
+  MySQL: [],
+  PostgreSQL: [{ header: 'X-Powered-By', match: /postgresql/i }],
+  // SQL Server：asp.net 仅证明应用栈，不证明数据库（由报错签名/时间向量定库）
+  'SQL Server': [],
+  SQLite: [],
   Oracle: [{ header: 'Server', match: /oracle/i }],
-  // MariaDB：协议与 MySQL 互通，但响应头常带 mariadb 标识，独立识别
-  MariaDB: [{ header: 'X-Powered-By', match: /(php|mariadb)/i }, { header: 'Server', match: /mariadb/i }],
+  // MariaDB：响应头带 mariadb 标识时独立识别
+  MariaDB: [{ header: 'X-Powered-By', match: /mariadb/i }, { header: 'Server', match: /mariadb/i }],
   // TiDB：MySQL 协议兼容，版本串含 "TiDB" 标识（如 "5.7.25-TiDB-v7.x"），独立识别
   TiDB: [{ header: 'Server', match: /tidb/i }, { header: 'X-Powered-By', match: /tidb/i }],
   // DM8（达梦数据库）：Oracle 兼容模式，版本串含 "DM Database" / "DM8" 标识
@@ -220,12 +229,12 @@ export const DB_VERSION = {
 
 export const DBMS_LIST = ['MySQL', 'PostgreSQL', 'SQL Server', 'SQLite', 'Oracle', 'MariaDB', 'TiDB', 'DM8', 'ClickHouse', 'DB2', 'Sybase', 'Firebird', 'Informix', 'H2', 'Access', 'HSQLDB', 'Derby', 'MonetDB'];
 
-// DBMS 验证状态标注（诚实标注：3 真实验证 + 15 最小适配待验证）
-// 真实验证：经过真实 DBMS 引擎（SQLite WASM / PGlite / MariaDB 便携）的 recall-lab 18 场景验证
+// DBMS 验证状态标注（诚实标注：4 真实验证 + 14 最小适配待验证）
+// 真实验证：经过真实 DBMS 引擎的靶场场景验证
 // 最小适配：有 payload 模板但未经真实 DBMS 验证，方言可能有偏差
 export const DBMS_VERIFIED = {
-  MySQL: 'verified',        // MariaDB 便携真实验证
-  PostgreSQL: 'verified',   // PGlite WASM 真实验证
+  MySQL: 'verified',        // 真实 MySQL 8.0.28（e2e/real-mysql-lab 9/9：union/error/boolean/time/stacked 全通道 + 安全点零误报）
+  PostgreSQL: 'verified',   // PGlite WASM 真实验证（PG 18.3，e2e/real-world-lab 9/9）
   SQLite: 'verified',       // sql.js WASM 真实验证
   MariaDB: 'verified',      // MariaDB 便携真实验证
   'SQL Server': 'unverified', // 有模板，无真实 MSSQL 验证
@@ -277,7 +286,7 @@ export const SUPPORTED = {
 // 报错特征正则（跨库常见报错关键字）：提升为共享常量，
 // 供 ErrorDetector 与 SecondOrderDetector 触发页判定复用（避免重复定义）。
 export const ERROR_SIG =
-  /(SQL syntax|mysql_fetch|ORA-\d{5}|Microsoft SQL Server|PostgreSQL.*ERROR|SQLite3|syntax error|Unclosed quotation|extractvalue|updatexml|conversion failed|unknown column|Division by zero|SQL\d{4}[NRT]|DB2 SQL Error|SQLSTATE|Adaptive Server|Sybase|SQL error code|Firebird|isc_|Informix|H2|JDBC|Cannot parse|Microsoft Access|ODBC|Jet.*Database|HSQLDB|org\.hsqldb|Derby|org\.apache\.derby|MonetDB|monetdb)/i;
+  /(SQL syntax|mysql_fetch|ORA-\d{5}|Microsoft SQL Server|PostgreSQL.*ERROR|SQLite3|syntax error|unterminated quoted string|Unclosed quotation|extractvalue|updatexml|conversion failed|unknown column|Division by zero|SQL\d{4}[NRT]|DB2 SQL Error|SQLSTATE|Adaptive Server|Sybase|SQL error code|Firebird|isc_|Informix|H2|JDBC|Cannot parse|Microsoft Access|ODBC|Jet.*Database|HSQLDB|org\.hsqldb|Derby|org\.apache\.derby|MonetDB|monetdb)/i;
 
 // per-dbms 报错签名表（P1-D3）：由 ERROR_SIG 拆分，用于「报错回显反推 DBMS」。
 // 无回显/无响应头特征时，ErrorDetector 命中后按此表定库，避免 dbms 恒为 null。
@@ -287,10 +296,22 @@ export const ERROR_SIG_BY_DBMS = [
   // [⑯] 补全 TiDB/DM8 独立报错签名（置于 MySQL/Oracle 前，优先匹配兼容分支特征词）
   { dbms: 'TiDB', sig: /(TiDB)/i },
   { dbms: 'DM8', sig: /(DM8|达梦|Dameng)/i },
-  { dbms: 'MySQL', sig: /(mysql_fetch|extractvalue|updatexml|You have an error in your SQL syntax|mysqli|SQL syntax)/i },
-  { dbms: 'PostgreSQL', sig: /(PostgreSQL.*ERROR|psycopg|syntax error at or near|PG::)/i },
+  // [P0-FIX 2026-09-06] PostgreSQL 前移 + 强特征前缀："syntax error at or near" 是 PG
+  // 独有短语（MySQL 报错为 "You have an error in your SQL syntax"）。原顺序下 PG 报错
+  // 会引用注入函数名（如 syntax error at or near "extractvalue"）→ 命中 MySQL 的
+  // extractvalue 特征 → 真实 PG 靶场被整体误识别为 MySQL（real-world-lab 实测）。
+  // [P1-FIX 2026-09-07] 补 "unterminated quoted string at or near"（PG 引号未闭合高频
+  // 报错形态，此前仅收录 MSSQL 风格 "Unclosed quotation" → 二阶探针触发页报错漏识别）。
+  { dbms: 'PostgreSQL', sig: /(PostgreSQL.*ERROR|psycopg|syntax error at or near|unterminated quoted string|PG::)/i },
+  // MySQL 特征清理：移除 extractvalue/updatexml（它们会以注入函数名形式出现在其它库的
+  // 报错里，属污染特征）；补 XPATH syntax（extractvalue 回显报错的真实形态）。
+  { dbms: 'MySQL', sig: /(mysql_fetch|mysqli|You have an error in your SQL syntax|XPATH syntax|SQL syntax)/i },
   { dbms: 'SQL Server', sig: /(Microsoft SQL Server|SQL Server|Unclosed quotation mark|SQL\d{4}[NRT]|Incorrect syntax near|ODBC)/i },
-  { dbms: 'SQLite', sig: /(SQLite3|no such (table|column|function)|SQLite)/i },
+  // [OPT-FIX 2026-09-08] 补 "unrecognized token"（SQLite Python sqlite3/驱动高频语法报错形态，
+  // 如 unrecognized token: ""1"")"。此前该形态不命中任何签名 → 指纹 null → 时间向量逐库粗筛
+  // 仍可能误判（Python sqli-labs L04/L14 实测漏检，强制 dbms=SQLite 即检出）。
+  // 注意：正则锚定 "unrecognized token" 前缀——MySQL 报错也含 near 但不含该短语，无冲突。
+  { dbms: 'SQLite', sig: /(SQLite3|unrecognized token|no such (table|column|function)|SQLite)/i },
   { dbms: 'Oracle', sig: /(ORA-\d{5}|Oracle|PLS-\d+)/i },
   { dbms: 'DB2', sig: /(DB2 SQL Error|SQLSTATE)/i },
   { dbms: 'Sybase', sig: /(Adaptive Server|Sybase|SQL error code)/i },
@@ -305,8 +326,18 @@ export const ERROR_SIG_BY_DBMS = [
 ];
 
 // 从报错文本反推 DBMS（P1-D3）：命中 per-dbms 签名返回库名，否则 null。
+// [OPT-FIX 2026-09-08] 匹配前剥除 HTML 标签：H2 签名 `H2`（大小写不敏感）会把正常页的
+// <h2> 标签误判为 H2 数据库证据（Python sqli-labs L04 实测：无报错正常页 → 误定库 H2 →
+// payload 族错配 → 漏检）。含标签才剥（纯文本零开销），剥除后签名只匹配真实文本。
 export function dbmsFromError(text) {
-  const s = String(text ?? '');
+  let s = String(text ?? '');
+  if (/<[a-z!/[ ]/i.test(s)) {
+    s = s
+      .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+      .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+      .replace(/<!--[\s\S]*?-->/g, ' ')
+      .replace(/<[^>]*>/g, ' ');
+  }
   for (const { dbms, sig } of ERROR_SIG_BY_DBMS) {
     if (sig.test(s)) return dbms;
   }
@@ -322,7 +353,11 @@ export const TIME_VECTORS = [
   { dbms: 'PostgreSQL', payload: '{ORIG} AND pg_sleep({SLEEP})-- -' },
   { dbms: 'SQL Server', payload: "{ORIG}; WAITFOR DELAY '0:0:{SLEEP}'-- -" },
   { dbms: 'Oracle', payload: "{ORIG} AND DBMS_PIPE.RECEIVE_MESSAGE('sqli',{SLEEP})=0-- -" },
-  { dbms: 'SQLite', payload: "{ORIG} AND LIKE('ABCDEFG',UPPER(HEX(RANDOMBLOB({SLEEP}0000000/2))))-- -" },
+  // [P1 批次 2026-09-08] SQLite 向量夹上限：RANDOMBLOB 上限 5MB（原 {SLEEP} 线性放大在
+  // {SLEEP}=3+ 时达 15MB+，低端目标 CPU 重运算可 >10s 熔断超时）。MIN 夹顶不降基准：
+  // {SLEEP}=1（指纹默认）仍为 5MB 与历史一致，零检出回归。超时由 sendInjection 的
+  // timeoutMs 天然熔断（失败返回 null → 跳过该向量）。
+  { dbms: 'SQLite', payload: "{ORIG} AND LIKE('ABCDEFG',UPPER(HEX(RANDOMBLOB(MIN(({SLEEP}*5000000),5000000)))))-- -" },
   // [⑯] 补全时间向量：ClickHouse sleep() + Sybase WAITFOR DELAY（语句级，需堆叠分号）
   { dbms: 'ClickHouse', payload: '{ORIG}\' AND sleep({SLEEP})=0-- -' },
   { dbms: 'Sybase', payload: "{ORIG}'; WAITFOR DELAY '0:0:{SLEEP}'-- -" },
@@ -439,12 +474,68 @@ export function nullSequence(columns) {
   return Array.from({ length: n }, () => 'NULL').join(',');
 }
 
+/**
+ * [P0-FIX 2026-09-09] 时间/重运算向量的安全上界。
+ *
+ * 为什么在渲染层收口而不是逐条改模板：全项目有 20+ 个带 {SLEEP} 的向量（TIME_VECTORS、
+ * 各库 time 池、注册表里的 BENCHMARK 变体），逐条改必然漏，漏一条就等于没做。
+ *
+ * 实战后果：
+ *   · `--time-sec 60` 会让目标库每个探针睡 60 秒，乘上采样次数与并发，相当于把客户库的
+ *     连接池占死几分钟（在共享实例上这就是一次我们自造成的可用性问题）；
+ *   · MySQL 的 `BENCHMARK({SLEEP}0000000, MD5(1))` 是**字符串拼接**：sleep=60 → 六千万次 MD5。
+ *
+ * 上界取值的保守原则：**今天默认配置的产物不得变化**（sleep=1 指纹、sleep=2 检测），
+ * 只拦「用户显式调大后的失控值」。要真的压低默认开销，应单独开一批并用 e2e 验证后再改。
+ */
+export const TIME_SLEEP_MIN_SEC = 1;
+export const TIME_SLEEP_MAX_SEC = 15;
+/** BENCHMARK 迭代上限：等于 sleep=2（历史默认）拼出的 20000000，因此默认路径零变化 */
+export const BENCHMARK_MAX_ITER = 20_000_000;
+/** RANDOMBLOB 字节上限：与 SQLite 模板里的 MIN(...,5000000) 保持一致（此处只兵头） */
+export const RANDOMBLOB_MAX_BYTES = 5_000_000;
+
+/**
+ * 夹顶时间变量：非法/缺失保持历史默认（1 秒），区间外贴边。
+ * @param {{sleep?: number|string}} [vars]
+ * @returns {{sleep:number}} 浅拷贝后的变量集
+ */
+export function clampTimeVars(vars = {}) {
+  const raw = Number(vars?.sleep);
+  if (!Number.isFinite(raw)) {
+    // 未提供或非数值：保持旧语义（?? 1），绝不把 NaN 拼进 payload（会渲染出 `SLEEP(NaN)`）
+    return { ...(vars || {}), sleep: 1 };
+  }
+  const clamped = Math.min(Math.max(raw, TIME_SLEEP_MIN_SEC), TIME_SLEEP_MAX_SEC);
+  if (clamped !== raw) {
+    logger.debug(
+      `时间向量 sleep 已从 ${raw}s 夹到 ${clamped}s（允许区间 ${TIME_SLEEP_MIN_SEC}~${TIME_SLEEP_MAX_SEC}s）：` +
+        '避免对目标库造成分钟级挂住。确需更长延迟请同步调高 TIME_SLEEP_MAX_SEC，并确认可承担影响。'
+    );
+  }
+  return { ...vars, sleep: clamped };
+}
+
+/**
+ * 对渲染结果里的重运算函数做迭代数/字节数封顶（幂等：已在上限内的值原样返回）。
+ * @param {string} filled 已填充的 payload
+ * @returns {string}
+ */
+export function capHeavyFunctions(filled) {
+  return String(filled)
+    .replace(/BENCHMARK\(\s*(\d+)/gi, (m, digits) => `BENCHMARK(${Math.min(Number(digits), BENCHMARK_MAX_ITER)}`)
+    .replace(/RANDOMBLOB\(\s*(\d+)/gi, (m, digits) => `RANDOMBLOB(${Math.min(Number(digits), RANDOMBLOB_MAX_BYTES)}`);
+}
+
 export function fillPayload(template, vars = {}) {
-  return template
-    .replaceAll('{ORIG}', vars.orig ?? '')
-    .replaceAll('{SLEEP}', String(vars.sleep ?? 1))
-    .replaceAll('{NUM}', String(vars.num ?? Math.floor(Math.random() * 9000) + 1000))
-    .replaceAll('{SEP}', vars.sep ?? '-- -');
+  const v = clampTimeVars(vars);
+  return capHeavyFunctions(
+    template
+      .replaceAll('{ORIG}', v.orig ?? '')
+      .replaceAll('{SLEEP}', String(v.sleep ?? 1))
+      .replaceAll('{NUM}', String(v.num ?? Math.floor(Math.random() * 9000) + 1000))
+      .replaceAll('{SEP}', v.sep ?? '-- -')
+  );
 }
 
 /**

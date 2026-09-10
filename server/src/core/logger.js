@@ -12,6 +12,13 @@ import os from 'node:os';
 // 通用敏感键值对（password/token/api_key 等）
 // [B-10a] 补全 private_key/access_key/secret_key/client_id/client_secret 等常见变体
 const SENSITIVE_KEY_RE = /(password|passwd|pwd|secret|token|api[_-]?key|authorization|cookie|private[_-]?key|access[_-]?key|secret[_-]?key|client[_-]?id|client[_-]?secret)\s*[=:]\s*[^\s&;,]+/gi;
+// [P0-SEC 2026-09-08] JSON 形态的敏感键（`"token":"<32hex>"`）：上面的正则要求 key 后紧跟 =/:，
+// 而 JSON 里 key 后是先闭合引号再 `:` → 完全不匹配。实际泄漏路径：
+//   • scanRoutes 启动失败日志把 e.stack 整段输出（栈里带调用方传入的 config 对象）；
+//   • ReportAI 把 options 展开进请求体后报错回显。
+// 只打码 value，保留 key 与引号结构（日志可读性）。
+const SENSITIVE_JSON_KEY_RE =
+  /("(?:[a-z0-9_-]*(?:password|passwd|pwd|secret|token|api[_-]?key|authorization|cookie|private[_-]?key|access[_-]?key|client[_-]?id|client[_-]?secret))"\s*:\s*")[^"]*(")/gi;
 // URL 内嵌凭据
 const URL_CRED_RE = /(https?:\/\/)([^/@\s]+):([^/@\s]+)@/gi;
 // 认证头（含 Bearer/Basic/Digest scheme，值整体打码）
@@ -51,6 +58,8 @@ export function redact(input, options = {}) {
   s = s.replace(COOKIE_HEADER_RE, '$1=***');
   // ④ 通用敏感键值（含 password/token/api_key 等）
   s = s.replace(SENSITIVE_KEY_RE, '$1=***');
+  // ④b JSON 键值形态（"token":"xxx"）
+  s = s.replace(SENSITIVE_JSON_KEY_RE, '$1***$2');
   // ⑤ 超长截断 + 打标（防 payload 证据/响应体刷屏）
   if (maxLength > 0 && s.length > maxLength) {
     s = `${s.slice(0, maxLength)}…[截断 ${s.length - maxLength} 字符]`;

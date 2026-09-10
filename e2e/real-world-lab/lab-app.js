@@ -225,7 +225,11 @@ export async function createRealLabApp(opts = {}) {
     res.status(500).send(errPage(err));
   });
 
-  app._stats = { ...stats, db: 'postgresql', ver: 'PostgreSQL 18.3 (PGlite)' };
+  // [P1-FIX 2026-09-08] 原实现 `{ ...stats }` 是对象快照：中间件里 `stats.total++` 递增的是
+  // 闭包内的原对象，快照不会同步 → 报告里 requests 恒为 0（长期掩盖真实请求开销）。
+  // 改为把元信息写回同一对象并返回其引用，计数随请求实时反映。
+  Object.assign(stats, { db: 'postgresql', ver: 'PostgreSQL 18.3 (PGlite)' });
+  app._stats = stats;
   app._db = db;
   app._sessions = sessions;
   return app;

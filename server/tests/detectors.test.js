@@ -218,6 +218,66 @@ test('UnionDetector 无可回显时不误报', async () => {
   assert.equal(res.vulnerable, false);
 });
 
+// [CRS-FIX 2026-09-09] 门控尾注回归：原实现在 tamper 开启时固定用 `/*`，而 MySQL 系方言下
+// 未闭合块注释直接语法错误 → 真假探针双双 500 且长度相同 → 门控误判「无注入」→
+// UNION 在一切 tamper 开启场景恒 0 检出（真实 MySQL + CRS 实测根因）。
+test('UnionDetector 门控：tamper 开启 + MySQL 用 # 行注释，不得使用未闭合 /*  ', async () => {
+  const sent = [];
+  const d = new UnionDetector();
+  d.buildRequest = (_t, _p, v) => ({ v });
+  d.obfuscateValue = (_c, v) => v;
+  // 让 AND 真假探针分化（真值/假值页面不同）→ 不触发空基线 OR 复判，请求数保持一对
+  d.send = async (_hc, _ctx, req) => {
+    sent.push(String(req.v));
+    return { data: String(req.v).includes('1=1') ? 'TRUEPAGE' : 'FALSEPAGE', status: 200 };
+  };
+  d._similar = (a, b) => a === b;
+  await d._gateInjection({ dbms: 'MySQL', config: { wafEvasion: { tamper: { enabled: true } } } }, {}, {}, { originalValue: '1' }, '');
+  assert.equal(sent.length, 2, `应发一对真假探针，实际 ${sent.length}`);
+  for (const v of sent) {
+    assert.ok(!v.includes('/*'), `门控探针不得使用未闭合块注释（MySQL 下触发 500）：${v}`);
+    assert.ok(v.endsWith('#'), `MySQL 门控探针应以 # 行注释结尾：${v}`);
+  }
+});
+
+test('UnionDetector 门控：AND 探针同长（空基线）→ 追加 OR 型复判并据其放行', async () => {
+  const sent = [];
+  const d = new UnionDetector();
+  d.buildRequest = (_t, _p, v) => ({ v });
+  d.obfuscateValue = (_c, v) => v;
+  // 模拟「原值查不到行」：AND 真假双双同页（空结果）；OR 1=1 命中全表、OR 1=2 仍空 → 分化
+  d.send = async (_hc, _ctx, req) => {
+    const v = String(req.v);
+    sent.push(v);
+    if (v.includes('AND')) return { data: 'EMPTY', status: 200 };
+    return { data: v.includes('OR 1=1') ? 'ROWS_FOUND' : 'EMPTY', status: 200 };
+  };
+  d._similar = (a, b) => a === b;
+  const pass = await d._gateInjection({ dbms: 'MySQL', config: {} }, {}, {}, { originalValue: 'ghost' }, "'");
+  assert.equal(pass, true, '空基线下 OR 复判应放行（否则 union 通道恒 0）');
+  assert.equal(sent.length, 4, `应为 AND 对 + OR 对共 4 个探针，实际 ${sent.length}`);
+  assert.ok(sent.some((v) => v.includes('OR 1=1')), '应发出 OR 1=1 探针');
+  assert.ok(sent.some((v) => v.includes('OR 1=2')), '应发出 OR 1=2 探针');
+});
+
+test('UnionDetector 门控：tamper 关闭 / 非 MySQL 方言沿用 -- -（既有行为不变）', async () => {
+  const run = async (ctx) => {
+    const sent = [];
+    const d = new UnionDetector();
+    d.buildRequest = (_t, _p, v) => ({ v });
+    d.obfuscateValue = (_c, v) => v;
+    d.send = async (_hc, _c2, req) => { sent.push(String(req.v)); return { data: 'x', status: 200 }; };
+    d._similar = (a, b) => a === b;
+    await d._gateInjection(ctx, {}, {}, { originalValue: '1' }, '');
+    return sent;
+  };
+  const off = await run({ dbms: 'MySQL', config: {} });
+  assert.ok(off.every((v) => v.endsWith('-- -')), `tamper 关闭应沿用 -- -：${off.join('|')}`);
+  const pg = await run({ dbms: 'PostgreSQL', config: { wafEvasion: { tamper: { enabled: true } } } });
+  assert.ok(pg.every((v) => v.endsWith('-- -')), `PG 不支持 # 注释，应沿用 -- -：${pg.join('|')}`);
+  assert.ok(pg.every((v) => !v.includes('/*')), `PG 同样不得用未闭合 /*：${pg.join('|')}`);
+});
+
 // ===== Detector: 首请求自动学习页面特征（baseTitle）=====
 test('probeBoundary 提取 <title> 存入 ctx.point._baselineTitle', async () => {
   const mock = {

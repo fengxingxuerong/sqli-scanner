@@ -1,11 +1,31 @@
 {
   "name": "time_only",
   "description": "仅时间通道（内容恒定，sleep 生效）",
-  "target": { "type": "mock", "endpoint": "time", "param": "tid", "value": "1" },
-  "config": { "techniques": ["time"], "timeBlindSleepSec": 1, "timeThresholdMs": 800, "timeBlindSamples": 3 },
+  "target": {
+    "type": "mock",
+    "endpoint": "time",
+    "param": "tid",
+    "value": "1"
+  },
+  "config": {
+    "techniques": [
+      "time"
+    ],
+    "timeBlindSleepSec": 1,
+    "timeThresholdMs": 800,
+    "timeBlindSamples": 3
+  },
   "expected": {
     "vulnerable": true,
-    "techniques": { "must": ["time"], "nice": [] },
-    "requestCount": { "max": 60 }
+    "techniques": {
+      "must": [
+        "time"
+      ],
+      "nice": []
+    },
+    "requestCount": {
+      "max": 170,
+      "note": "语言级响应头特征移除（php/asp.net 不证明后端数据库）后，未知 DBMS 走诚实报错/时间向量遍历，阈值按 2026-09-08 新基线校准"
+    }
   }
 }

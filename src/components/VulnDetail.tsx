@@ -1,10 +1,15 @@
-import { Box, Typography, Paper, Chip, Alert } from '@mui/material';
+import { useState } from 'react';
+import { Box, Typography, Paper, Chip, Alert, Button, Collapse, IconButton } from '@mui/material';
+import ContentCopyIcon from '@mui/icons-material/ContentCopy';
+import CheckIcon from '@mui/icons-material/Check';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import { useTranslation } from 'react-i18next';
-import type { Vulnerability, Target, InjectionPoint } from '../shared/types';
+import type { Vulnerability, Target, InjectionPoint, VulnPoc } from '../shared/types';
 import { useScanStore } from '../store/scanStore';
 import i18n from '../i18n';
 import PayloadViewer from './PayloadViewer';
 import BlindTraceTimeline from './BlindTraceTimeline';
+import { copyText } from './progress/progressUtils';
 
 // 复现请求证据（方法 + URL + 关键头 + 注入 payload），供详情页展示与人工复现
 export interface RequestEvidence {
@@ -68,6 +73,88 @@ export function formatRequestEvidence(ev: RequestEvidence): string[] {
   // 注入点信息作为注释行（人工复现时参考）
   lines.push(`# ${i18n.t('vulnDetail.injectionPointField', { location: ev.location })}${ev.originalValue ? i18n.t('vulnDetail.originalValueSuffix', { value: ev.originalValue }) : ''}`);
   return lines;
+}
+
+// ── 复现方式（PoC）区 ──────────────────────────────────────────────
+// 单行可复制框：左侧等宽文本 + 右侧复制按钮（复制成功短暂打勾反馈）。
+// 导出报告的 poc.curl 就是给工程师粘终端用的，复制必须一键直达。
+function CopyBox({ text, ariaLabel }: { text: string; ariaLabel: string }) {
+  // 不接 useTranslation：本块只有复制按钮与等宽文本，无可翻译文案（避免无用 hook 与 lint 告警）
+  const [copied, setCopied] = useState(false);
+  const handleCopy = async () => {
+    try {
+      await copyText(text);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      /* 剪贴板不可用（非安全上下文）：静默，用户仍可手动选中复制 */
+    }
+  };
+  return (
+    <Box className="flex items-center gap-1">
+      <Box
+        component="pre"
+        sx={{
+          flex: 1, m: 0, p: 1, backgroundColor: '#f5f5f5', borderRadius: 1,
+          fontSize: '0.72rem', fontFamily: '"JetBrains Mono", monospace',
+          whiteSpace: 'pre-wrap', wordBreak: 'break-all',
+        }}
+      >
+        {text}
+      </Box>
+      <IconButton size="small" onClick={handleCopy} aria-label={ariaLabel}>
+        {copied ? <CheckIcon fontSize="small" color="success" /> : <ContentCopyIcon fontSize="small" />}
+      </IconButton>
+    </Box>
+  );
+}
+
+// 复现方式（PoC）折叠区：curl 一行 + 可展开的原始报文。
+// vuln.poc 缺失（UI 侧报告未经导出路径生成）时整块不渲染，绝不显示空白/undefined。
+function PocSection({ poc }: { poc: VulnPoc }) {
+  const { t } = useTranslation();
+  const [rawOpen, setRawOpen] = useState(false);
+  return (
+    <Paper variant="outlined" className="p-3 bg-gray-50" data-testid="poc-section">
+      <Typography variant="subtitle2" fontWeight={600} className="mb-1">
+        {t('vulnDetail.pocTitle')}
+      </Typography>
+      {poc.curl ? (
+        <Box className="mb-1">
+          <Typography variant="caption" color="text.secondary">{t('vulnDetail.pocCurl')}</Typography>
+          <CopyBox text={poc.curl} ariaLabel={t('vulnDetail.copyCurl')} />
+        </Box>
+      ) : null}
+      {poc.raw ? (
+        <Box>
+          <Button
+            size="small"
+            onClick={() => setRawOpen((o) => !o)}
+            startIcon={<ExpandMoreIcon sx={{ transform: rawOpen ? 'rotate(180deg)' : 'none', transition: 'transform .2s' }} />}
+          >
+            {t('vulnDetail.pocRaw')}
+          </Button>
+          <Collapse in={rawOpen}>
+            <Box
+              component="pre"
+              sx={{
+                m: 0, p: 1, backgroundColor: '#1e1e1e', color: '#e0e0e0', borderRadius: 1,
+                fontSize: '0.72rem', whiteSpace: 'pre-wrap', wordBreak: 'break-all', maxHeight: 320, overflowY: 'auto',
+              }}
+            >
+              {poc.raw}
+            </Box>
+          </Collapse>
+        </Box>
+      ) : null}
+      {(poc.note || poc.generatedAt) && (
+        <Typography variant="caption" color="text.secondary" className="mt-1">
+          {poc.note ? `${poc.note} · ` : ''}
+          {poc.generatedAt ? t('vulnDetail.pocGenerated', { time: poc.generatedAt }) : ''}
+        </Typography>
+      )}
+    </Paper>
+  );
 }
 
 // 单漏洞详情 + 证据 + 复现请求报文 + Payload 展示
@@ -141,6 +228,9 @@ export default function VulnDetail({
           </pre>
         </Paper>
       )}
+
+      {/* 复现方式（PoC）：仅当报告带 poc 字段（导出路径生成）时渲染，缺失整块隐藏 */}
+      {vuln.poc && <PocSection poc={vuln.poc} />}
 
       {vuln.trace && <BlindTraceTimeline trace={vuln.trace} />}
       <PayloadViewer payloads={vuln.payloads} />

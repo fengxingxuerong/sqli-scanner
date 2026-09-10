@@ -101,6 +101,24 @@
     "extractedData": "提取数据",
     "summary": "检测摘要",
     "noVulns": "未发现漏洞",
+    "noVulnsInconclusive": "检测未完成且目标状态异常，不能得出「无漏洞」结论（见上方可信度提示）",
+    "noVulnsReliable": "本次未检出 SQL 注入：阴性结论可信度正常，但仍建议对高风险参数人工复核",
+    "pointList": "注入点明细",
+    "validity": {
+      "inconclusiveTitle": "结论不可信",
+      "inconclusivePoints": "{{count}} 个注入点未完成有效检测",
+      "advicePrefix": "处置建议：",
+      "negativeReliable": "本次阴性结论可信度正常（目标可达、未被拦、会话有效），但仍建议人工复核，本报告不代表「安全」",
+      "reliableWithVulns": "本次扫描累计 {{total}} 次请求，结论可信度正常",
+      "suggestBackoff": "目标返回过 Retry-After，建议降速退避 {{ms}}ms 后复扫",
+      "status": {
+        "ok": "可信度正常",
+        "blocked": "疑似被 WAF/封禁",
+        "unreachable": "目标不可达",
+        "session_expired": "会话已失效",
+        "target_error": "目标持续 5xx"
+      }
+    },
     "target": "目标",
     "duration": "耗时",
     "dbms": "数据库",
@@ -165,7 +183,19 @@
     "risk": "风险 {{level}}",
     "vulns": "{{count}} 个漏洞",
     "noVulns": "未发现漏洞",
-    "unknownTarget": "(未知)"
+    "unknownTarget": "(未知)",
+    "resumeDialog": {
+      "title": "续跑前确认授权范围",
+      "target": "目标：{{url}}（{{method}}）",
+      "scopeCarried": "沿用上一轮授权范围（{{count}} 条）：",
+      "scopeMissing": "上一轮未设置授权范围（scope）：直接续跑 = 没有硬约束，重定向与关联资产都可能打出圈外。请补上范围，或显式确认已获授权。",
+      "noConfig": "历史记录里没有保存完整配置，续跑只能按默认配置发起；授权范围必须在此确认。",
+      "scopeLabel": "本次续跑的授权范围（留空 = 不设限制）",
+      "scopePlaceholder": "如 10.0.0.0/24, target.example.com（逗号或换行分隔）",
+      "ack": "我确认已获得该目标的书面授权，允许在无 scope 硬约束下续跑",
+      "confirm": "确认续跑",
+      "cancel": "取消"
+    }
   },
   "exploit": {
     "title": "利用工具",
@@ -262,7 +292,35 @@
     "headersLabel": "自定义请求头（k:v，多组用 | 分隔）",
     "headersPlaceholder": "如 X-Auth: token123 | X-Forwarded-For: 1.2.3.4",
     "enableCrawler": "启用站内爬虫（自动发现更多参数）",
-    "enableResume": "启用断点续跑（下次扫描同 URL 自动恢复）"
+    "enableResume": "启用断点续跑（下次扫描同 URL 自动恢复）",
+    "scopeSecurity": "授权范围与传输安全",
+    "scopeLabel": "授权范围 scope（CIDR / 域名 / URL 前缀，逗号或换行分隔）",
+    "scopePlaceholder": "如 10.0.0.0/24, target.example.com（留空=不启用）",
+    "scopeHint": "启用后目标与每一跳重定向都必须落在范围内，越界直接拒发——渗透第一红线，未授权资产零请求",
+    "insecureTlsLabel": "忽略自签证书（insecureTls）",
+    "insecureTlsWarning": "关闭证书校验将失去中间人防护，仅限自签/内网 CA 的实验环境，且报告需注明该配置",
+    "validationSkipLabel": "输入校验跳过（参数被白名单拦死时短路跳过）",
+    "validationSkipHint": "开启时对被拦死的参数可省 200+ 无效请求；关闭后仍照跑完整检测（审计/对照场景）",
+    "payloadTuning": "payload 与响应判定调优",
+    "prefilterLabel": "参数预筛选（廉价探测先筛后测）",
+    "prefilterHint": "开启时每个注入点先发 1-2 个廉价探测，无迹象的点直接跳过（省 50-75% 请求）；关闭 = 全量跑（审计/对照，拓了 WAF 频次限制也不能靠它撑）",
+    "prefilterSingleLabel": "单点目标也走预筛选（prefilterSinglePoint）",
+    "prefilterSingleHint": "只有一个注入点时默认不预筛：「探针无信号」不足以判定干净，误杀风险高",
+    "skipStaticLabel": "静态参数跳过（skipStatic，每点 1 请求哨兵探测）",
+    "useRegistryLabel": "启用声明式 payload 注册表（useRegistry）",
+    "testFilterLabel": "payload 白名单 testFilter（逗号分隔的注册表 id 子串）",
+    "testFilterPlaceholder": "如 bool,err（仅保留 id 含这些子串的条目）",
+    "testSkipLabel": "payload 黑名单 testSkip（命中即排除）",
+    "testSkipPlaceholder": "如 floor,benchmark",
+    "useRegistryGate": "testFilter / testSkip 只在开启「声明式 payload 注册表」后生效（扁平 payload 池无 id 可依）",
+    "dbmsLabel": "强制指定 DBMS（留空=自动指纹识别）",
+    "dbmsAuto": "自动识别",
+    "dbmsHint": "指定后跳过指纹识别（省 8-9 请求/点）；选错库 = 只跑该库 payload，没测出来不等于没洞",
+    "matchStringLabel": "真页锚点 matchString（对标 --string，真页面必含的文本）",
+    "matchStringPlaceholder": "如 已加入购物车（必须是页面上确实存在的文本）",
+    "notStringLabel": "假页锚点 notString（对标 --not-string，假页面必含的文本）",
+    "notStringPlaceholder": "如 语法错误",
+    "anchorHint": "填了锚点就优先用锚点判定真/假，不再依赖对动态内容敏感的相似度比对；留空 = 不启用（不是「勾上」）" 
   },
   "waf": {
     "detected": "识别到 WAF：{{vendors}}",
@@ -325,6 +383,11 @@
       "Q": "内联查询"
     }
   },
+  "pointSkip": {
+    "prefilter": "预筛跳过",
+    "input_validation": "输入校验跳过",
+    "static": "静态跳过"
+  },
   "technique": {
     "union": "联合查询注入",
     "error": "报错注入",
@@ -358,6 +421,12 @@
     "unknown": "未知",
     "vendorSep": "、",
     "pointsDiscovered": "发现 {{count}} 个候选注入点",
+    "scanValidity": "结论可信度提示",
+    "scanValidityAbort": "扫描被守卫中止：结论不可信",
+    "validityInconclusivePoints": "{{count}} 个注入点未完成有效检测",
+    "wafBlockPolicy": "WAF 拦截策略：{{action}}",
+    "wafBlockBackoff": "退避 {{ms}}ms",
+    "pointSkipped": "注入点 {{pointId}} 已跳过（{{reason}}）",
     "stageTiming": "阶段耗时",
     "stageDetect": "检测",
     "stageExtract": "提取",
@@ -385,7 +454,12 @@
     "stackedWarning": "堆叠注入可进一步用于写文件 / 命令执行，危害极高（非本期自动利用，仅供确认）。",
     "injectionPointField": "注入点：{{location}}",
     "originalValueSuffix": "（原始值 {{value}}）",
-    "payloadLine": "Payload: {{payload}}"
+    "payloadLine": "Payload: {{payload}}",
+    "pocTitle": "复现方式（PoC）",
+    "pocCurl": "curl（复制即跑）",
+    "pocRaw": "原始 HTTP 报文",
+    "pocGenerated": "生成于 {{time}}",
+    "copyCurl": "复制 curl 命令"
   },
   "blindTrace": {
     "title": "判定时间线",
