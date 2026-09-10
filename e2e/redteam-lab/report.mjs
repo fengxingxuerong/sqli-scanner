@@ -195,6 +195,10 @@ CLI 退出码是对的（命中 High 返回 2），但任何读报告 JSON 做 C
 <td class="ok">✅ C7 由「只报 time」变为命中 boolean；7 个安全点仍零误报</td></tr>
 <tr><td>P0-2 衍生：子句轮偶发误报</td><td>子句轮（level≥2，ORDER BY/GROUP BY/HAVING 位置）此前仍是单次比较，随机 nonce 页面 4 次误报 1 次；已把稳定差异复核接入子句轮命中链路</td>
 <td class="ok">✅ <code>/safe/rand</code> 连跑 5 次零误报；A4（ORDER BY，靠子句轮命中）仍命中</td></tr>
+<tr><td>P1-1 二阶注入</td><td>根因是 <code>isStorePoint</code> 只在表单爬取（level≥5）路径标记 → <code>--method POST --body</code> 这类 API 二阶场景解析出 0 个存储点，编排层直接跳过整个二阶补充趟。已在 <code>TargetParser</code> 补：二阶显式开启时，非幂等方法的 body 点（含 JSON 叶子）标记为候选存储端</td>
+<td class="ok">✅ E15 由「250 请求全空」变为命中 <code>second_order</code>（High）</td></tr>
+<tr><td>P0-3 报错签名误匹配（新发现）</td><td><code>ERROR_SIG</code> 含裸库名 <code>H2</code>（大小写不敏感）→ 普通页面的 <code>&lt;h2&gt;</code> 标题被判成「数据库报错」。后果连锁：二阶基线被误判「本就报错」→ 判定退化到需显式阴性对照的路径 → 默认必漏；报错通道同样被压制</td>
+<td class="ok">✅ 收紧为「库名 + 错误上下文」形态；签名自测 9/9；二阶与报错通道同时恢复</td></tr>
 </tbody></table>
 
 <table><thead><tr><th>口径</th><th>修复前</th><th>修复后</th><th>变化</th></tr></thead><tbody>
@@ -203,7 +207,9 @@ CLI 退出码是对的（命中 High 返回 2），但任何读报告 JSON 做 C
 <tr><td>误报（安全点）</td><td>0</td><td>${FP2}</td><td class="ok">保持 0</td></tr>
 <tr><td>sqlmap 同题</td><td colspan="2">${SM.hit}/${SM.total}（${SM.pct}%）</td><td>差距收窄</td></tr>
 </tbody></table>
-<div class="foot">仍未覆盖：D14 base64 编码参数、E15 二阶注入、E17 WAF 绕过（sqlmap 在 E17 用纯布尔向量命中，本工具因布尔通道历史缺陷未命中——布尔修好后建议重测该点）。</div>
+<div class="foot">
+修复过程中还意外收回两个点：<b>D14（base64 编码参数）</b>与多靶点的 <b>error</b> 通道——此前被 <code>ERROR_SIG</code> 的 <code>&lt;h2&gt;</code> 误匹配压着（基线被判「本就报错」→ 报错判定被抑制），修正签名后一并恢复，且单靶点请求数从 ~120 降到 ~58（报错通道命中后提前收敛）。<br>
+<b>仍未覆盖：仅剩 E17 WAF 绕过</b>（sqlmap 在此点用 <code>AND 6573=6573</code> 这类不触发规则的纯布尔向量命中；本工具已具备布尔通道，建议下一轮重测该点）。</div>
 
 <h2>八、修复优先级建议（剩余）</h2>
 <ol>

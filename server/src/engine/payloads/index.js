@@ -285,8 +285,15 @@ export const SUPPORTED = {
 
 // 报错特征正则（跨库常见报错关键字）：提升为共享常量，
 // 供 ErrorDetector 与 SecondOrderDetector 触发页判定复用（避免重复定义）。
+// [P0-FIX 2026-09-10 实测] 收紧「裸库名」签名：原正则含裸词 H2 / Derby / Sybase / Firebird /
+// Informix / MonetDB / HSQLDB / JDBC，大小写不敏感 → 普通 HTML 页面里的 <h2> 标题、
+// "Derby" 之类的正文用词都会被判成「数据库报错」。实测二阶注入因此完全失效：
+// 触发页含 <h2> → 基线被误判「本就报错」→ 判定走「基线噪声路径」→ 该路径要求显式
+// negativeControl 才下结论 → 默认直接漏检（E15 靶点 250 请求全空）；同时对含 h2 的
+// 常规页面构成误报隐患。
+// 处置：库名一律要求带错误上下文（驱动类名/异常名/报错短语）才算报错特征。
 export const ERROR_SIG =
-  /(SQL syntax|mysql_fetch|ORA-\d{5}|Microsoft SQL Server|PostgreSQL.*ERROR|SQLite3|syntax error|unterminated quoted string|Unclosed quotation|extractvalue|updatexml|conversion failed|unknown column|Division by zero|SQL\d{4}[NRT]|DB2 SQL Error|SQLSTATE|Adaptive Server|Sybase|SQL error code|Firebird|isc_|Informix|H2|JDBC|Cannot parse|Microsoft Access|ODBC|Jet.*Database|HSQLDB|org\.hsqldb|Derby|org\.apache\.derby|MonetDB|monetdb)/i;
+  /(SQL syntax|mysql_fetch|ORA-\d{5}|Microsoft SQL Server|PostgreSQL.*ERROR|SQLite3|syntax error|unterminated quoted string|Unclosed quotation|extractvalue|updatexml|conversion failed|unknown column|Division by zero|SQL\d{4}[NRT]|DB2 SQL Error|SQLSTATE|Adaptive Server|Sybase\s*(?:error|message)|SQL error code|Firebird.*(?:error|exception)|isc_\d+|Informix\s+SQL|Informix.*(?:error|exception)|JdbcSQLException|org\.h2\.jdbc|Syntax error in SQL statement|org\.hsqldb|HSQLDB.*(?:error|exception)|org\.apache\.derby|Derby.*SQLException|Syntax error: Encountered|Cannot parse|Microsoft Access|ODBC|Jet.*Database|MonetDB.*(?:error|exception)|MonetDB\s+\d{5})/i;
 
 // per-dbms 报错签名表（P1-D3）：由 ERROR_SIG 拆分，用于「报错回显反推 DBMS」。
 // 无回显/无响应头特征时，ErrorDetector 命中后按此表定库，避免 dbms 恒为 null。

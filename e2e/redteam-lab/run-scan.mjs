@@ -31,8 +31,11 @@ const TARGETS = [
   T('D12-xff-header', `${LAB}/shop/ip`, ['--header', 'x-forwarded-for: 1', '--test-headers']),
   T('D13-path', `${LAB}/shop/user/1`, ['--test-path']),
   T('D14-base64', `${LAB}/shop/b64?id=MQ`),
+  // 每次用唯一会话 id：靶场把写入值存在内存 store[sid]，复用同一 sid 会让"基线触发页"
+  // 读到上一轮残留探针 → 基线自带报错 → 走基线噪声路径 → 判定条件不成立（实测踩过）。
   T('E15-second-order', `${LAB}/account/update`, ['--method', 'POST', '--body', '{"name":"alice"}',
-    '--cookie', 'sid=rt1', '--second-order', `${LAB}/account/me`, '--allow-second-order-writes']),
+    '--header', `cookie: sid=rt${Date.now().toString(36)}`, '--test-headers',
+    '--second-order', `${LAB}/account/me`, '--allow-second-order-writes', '--no-production-mode']),
   T('E16-stacked', `${LAB}/shop/stack?id=1`),
   T('E17-waf-guarded', `${LAB}/waf/item?id=1`),
   T('F18-safe-item', `${LAB}/safe/item?id=1`),

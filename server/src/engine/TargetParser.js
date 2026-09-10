@@ -91,6 +91,26 @@ export class TargetParser {
       this._discoverJsonLeaves(target.jsonBody, [], points, 0);
     }
 
+    // 3.6) 二阶存储点标记（--second-order 显式开启时）
+    //   isStorePoint 此前只在「表单爬取」（level≥5 + crawlForms）路径标记，于是
+    //   「--method POST --body '{...}' + --second-order <触发页>」这种最常用的 API 二阶场景
+    //   解析出 0 个存储点 → ScanManager._runSecondOrder 门控直接 return [] → second_order
+    //   通道恒零检出（2026-09-10 独立红队评测靶点 E15 实测，250 次请求全空）。
+    //   用户显式给出触发页即代表要在（已授权）目标上测二阶，此时非幂等方法的 body 点
+    //   （含表单字段与 JSON 叶子）本身就是候选存储端，理应标记。
+    //   安全边界：仅当 secondOrder.enabled 为真才标记；未开启二阶时零行为变化。
+    if (config.secondOrder && config.secondOrder.enabled) {
+      const m = String(target.method || 'GET').toUpperCase();
+      if (m === 'POST' || m === 'PUT' || m === 'PATCH' || m === 'DELETE') {
+        for (const p of points) {
+          if (p.location !== 'body') continue;
+          p.isStorePoint = true;
+          if (!p.actionUrl) p.actionUrl = target.baseUrl;
+          if (!p.storeKind) p.storeKind = 'unknown';
+        }
+      }
+    }
+
     // 4) Cookie 参数（level≥2）
     if (level >= 2) {
       for (const [k, v] of Object.entries(target.cookieParams || {})) {

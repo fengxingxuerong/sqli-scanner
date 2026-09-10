@@ -4,18 +4,18 @@
     "url": "http://127.0.0.1:8231/shop/item?id=1",
     "round": "r1",
     "exit": 2,
-    "ms": 2059,
+    "ms": 947,
     "hit": true,
-    "techs": "union+boolean",
+    "techs": "union+error+boolean",
     "dbms": "MySQL",
     "risk": "High",
-    "reqs": 117,
+    "reqs": 58,
     "verdict": "no_vulnerability_detected",
     "err": "",
     "raw": {
-      "scanId": "iNEODCLKaIdL",
+      "scanId": "Z7eMI6VQ9RBu",
       "target": {
-        "id": "CEp69waSPb",
+        "id": "ydG-w50BW8",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/shop/item?id=1",
         "method": "GET",
@@ -155,8 +155,8 @@
           }
         }
       },
-      "startedAt": "2026-09-10T14:52:39.332Z",
-      "finishedAt": "2026-09-10T14:52:40.696Z",
+      "startedAt": "2026-09-10T15:36:05.386Z",
+      "finishedAt": "2026-09-10T15:36:05.564Z",
       "dbms": "MySQL",
       "points": [
         {
@@ -191,7 +191,7 @@
       ],
       "vulns": [
         {
-          "id": "Tb-hSUQl",
+          "id": "6V-gek0R",
           "pointId": "283e732d",
           "technique": "union",
           "dbms": "MySQL",
@@ -205,7 +205,20 @@
           "trace": null
         },
         {
-          "id": "xFzJ7SAA",
+          "id": "5bJq8eg2",
+          "pointId": "283e732d",
+          "technique": "error",
+          "dbms": "MySQL",
+          "riskLevel": "High",
+          "payloads": [
+            "1' AND extractvalue(1,concat(0x7e,(SELECT version())))-- -"
+          ],
+          "description": "数据库报错回显：SQL syntax（识别为 MySQL）",
+          "evidence": "数据库报错回显：SQL syntax（识别为 MySQL）",
+          "trace": null
+        },
+        {
+          "id": "f81dI2v4",
           "pointId": "283e732d",
           "technique": "boolean",
           "dbms": "MySQL",
@@ -475,13 +488,13 @@
         "validity": {
           "status": "ok",
           "reliable": true,
-          "reason": "目标可达性与会话状态正常：累计 117 次请求，无连续失败/拦截/会话失效/持续 5xx 迹象",
+          "reason": "目标可达性与会话状态正常：累计 58 次请求，无连续失败/拦截/会话失效/持续 5xx 迹象",
           "counts": {
-            "total": 117,
+            "total": 58,
             "failStreak": 0,
             "blockHits": 0,
-            "serverErr": 12,
-            "injection5xx": 79,
+            "serverErr": 11,
+            "injection5xx": 22,
             "authLostHits": 0,
             "netErrPoints": 0
           },
@@ -491,7 +504,7 @@
           "advice": "无需处置"
         },
         "verdict": "no_vulnerability_detected",
-        "verdictNote": "本次扫描检出 2 条漏洞；verdict 仅描述「未检出」类阴性结论的可信度，命中详情见 vulns",
+        "verdictNote": "本次扫描检出 3 条漏洞；verdict 仅描述「未检出」类阴性结论的可信度，命中详情见 vulns",
         "dbmsEvidence": {
           "dbms": "MySQL",
           "level": "verified",
@@ -512,13 +525,13 @@
       "validity": {
         "status": "ok",
         "reliable": true,
-        "reason": "目标可达性与会话状态正常：累计 117 次请求，无连续失败/拦截/会话失效/持续 5xx 迹象",
+        "reason": "目标可达性与会话状态正常：累计 58 次请求，无连续失败/拦截/会话失效/持续 5xx 迹象",
         "counts": {
-          "total": 117,
+          "total": 58,
           "failStreak": 0,
           "blockHits": 0,
-          "serverErr": 12,
-          "injection5xx": 79,
+          "serverErr": 11,
+          "injection5xx": 22,
           "authLostHits": 0,
           "netErrPoints": 0
         },
@@ -534,18 +547,18 @@
     "url": "http://127.0.0.1:8231/shop/search?name=alice",
     "round": "r1",
     "exit": 2,
-    "ms": 1855,
+    "ms": 976,
     "hit": true,
-    "techs": "union+boolean",
+    "techs": "union+error+boolean",
     "dbms": "MySQL",
     "risk": "High",
-    "reqs": 105,
+    "reqs": 46,
     "verdict": "no_vulnerability_detected",
     "err": "",
     "raw": {
-      "scanId": "tDfnDFPu615j",
+      "scanId": "kRU5n2piLhfD",
       "target": {
-        "id": "qarX-cy-Lz",
+        "id": "rVXP9T_LWE",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/shop/search?name=alice",
         "method": "GET",
@@ -685,8 +698,8 @@
           }
         }
       },
-      "startedAt": "2026-09-10T14:52:41.393Z",
-      "finishedAt": "2026-09-10T14:52:42.517Z",
+      "startedAt": "2026-09-10T15:36:06.372Z",
+      "finishedAt": "2026-09-10T15:36:06.538Z",
       "dbms": "MySQL",
       "points": [
         {
@@ -721,7 +734,7 @@
       ],
       "vulns": [
         {
-          "id": "czsFFkzJ",
+          "id": "owD_xVYC",
           "pointId": "de9d0cb9",
           "technique": "union",
           "dbms": "MySQL",
@@ -735,7 +748,20 @@
           "trace": null
         },
         {
-          "id": "zfqNS0c-",
+          "id": "LUIZWIrY",
+          "pointId": "de9d0cb9",
+          "technique": "error",
+          "dbms": "MySQL",
+          "riskLevel": "High",
+          "payloads": [
+            "alice' AND extractvalue(1,concat(0x7e,(SELECT version())))-- -"
+          ],
+          "description": "数据库报错回显：syntax error（识别为 MySQL）",
+          "evidence": "数据库报错回显：syntax error（识别为 MySQL）",
+          "trace": null
+        },
+        {
+          "id": "LiUAen7w",
           "pointId": "de9d0cb9",
           "technique": "boolean",
           "dbms": "MySQL",
@@ -867,13 +893,13 @@
         "validity": {
           "status": "ok",
           "reliable": true,
-          "reason": "目标可达性与会话状态正常：累计 105 次请求，无连续失败/拦截/会话失效/持续 5xx 迹象",
+          "reason": "目标可达性与会话状态正常：累计 46 次请求，无连续失败/拦截/会话失效/持续 5xx 迹象",
           "counts": {
-            "total": 105,
+            "total": 46,
             "failStreak": 0,
             "blockHits": 0,
-            "serverErr": 48,
-            "injection5xx": 10,
+            "serverErr": 6,
+            "injection5xx": 4,
             "authLostHits": 0,
             "netErrPoints": 0
           },
@@ -883,7 +909,7 @@
           "advice": "无需处置"
         },
         "verdict": "no_vulnerability_detected",
-        "verdictNote": "本次扫描检出 2 条漏洞；verdict 仅描述「未检出」类阴性结论的可信度，命中详情见 vulns",
+        "verdictNote": "本次扫描检出 3 条漏洞；verdict 仅描述「未检出」类阴性结论的可信度，命中详情见 vulns",
         "dbmsEvidence": {
           "dbms": "MySQL",
           "level": "verified",
@@ -904,13 +930,13 @@
       "validity": {
         "status": "ok",
         "reliable": true,
-        "reason": "目标可达性与会话状态正常：累计 105 次请求，无连续失败/拦截/会话失效/持续 5xx 迹象",
+        "reason": "目标可达性与会话状态正常：累计 46 次请求，无连续失败/拦截/会话失效/持续 5xx 迹象",
         "counts": {
-          "total": 105,
+          "total": 46,
           "failStreak": 0,
           "blockHits": 0,
-          "serverErr": 48,
-          "injection5xx": 10,
+          "serverErr": 6,
+          "injection5xx": 4,
           "authLostHits": 0,
           "netErrPoints": 0
         },
@@ -926,18 +952,18 @@
     "url": "http://127.0.0.1:8231/shop/find?q=a",
     "round": "r1",
     "exit": 2,
-    "ms": 1903,
+    "ms": 931,
     "hit": true,
-    "techs": "union+boolean",
+    "techs": "union+error+boolean",
     "dbms": "MySQL",
     "risk": "High",
-    "reqs": 106,
+    "reqs": 47,
     "verdict": "no_vulnerability_detected",
     "err": "",
     "raw": {
-      "scanId": "xMB6OU9Psndt",
+      "scanId": "hHvouWld-ZOW",
       "target": {
-        "id": "dwPrh6rrJA",
+        "id": "Ya-A-lUMdE",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/shop/find?q=a",
         "method": "GET",
@@ -1077,8 +1103,8 @@
           }
         }
       },
-      "startedAt": "2026-09-10T14:52:43.304Z",
-      "finishedAt": "2026-09-10T14:52:44.452Z",
+      "startedAt": "2026-09-10T15:36:07.298Z",
+      "finishedAt": "2026-09-10T15:36:07.427Z",
       "dbms": "MySQL",
       "points": [
         {
@@ -1087,7 +1113,7 @@
           "param": "q",
           "originalValue": "a",
           "confirmed": true,
-          "technique": "union",
+          "technique": "boolean",
           "dbms": "MySQL",
           "formMethod": null,
           "actionUrl": null,
@@ -1112,7 +1138,7 @@
       ],
       "vulns": [
         {
-          "id": "VZ181nlj",
+          "id": "YhRYUbla",
           "pointId": "dec9ec92",
           "technique": "union",
           "dbms": "MySQL",
@@ -1126,7 +1152,20 @@
           "trace": null
         },
         {
-          "id": "oGG9smPd",
+          "id": "GqOLPQ0Q",
+          "pointId": "dec9ec92",
+          "technique": "error",
+          "dbms": "MySQL",
+          "riskLevel": "High",
+          "payloads": [
+            "a' AND extractvalue(1,concat(0x7e,(SELECT version())))-- -"
+          ],
+          "description": "数据库报错回显：syntax error（识别为 MySQL）",
+          "evidence": "数据库报错回显：syntax error（识别为 MySQL）",
+          "trace": null
+        },
+        {
+          "id": "v6O-wExx",
           "pointId": "dec9ec92",
           "technique": "boolean",
           "dbms": "MySQL",
@@ -1258,13 +1297,13 @@
         "validity": {
           "status": "ok",
           "reliable": true,
-          "reason": "目标可达性与会话状态正常：累计 106 次请求，无连续失败/拦截/会话失效/持续 5xx 迹象",
+          "reason": "目标可达性与会话状态正常：累计 47 次请求，无连续失败/拦截/会话失效/持续 5xx 迹象",
           "counts": {
-            "total": 106,
+            "total": 47,
             "failStreak": 0,
             "blockHits": 0,
-            "serverErr": 46,
-            "injection5xx": 10,
+            "serverErr": 6,
+            "injection5xx": 4,
             "authLostHits": 0,
             "netErrPoints": 0
           },
@@ -1274,7 +1313,7 @@
           "advice": "无需处置"
         },
         "verdict": "no_vulnerability_detected",
-        "verdictNote": "本次扫描检出 2 条漏洞；verdict 仅描述「未检出」类阴性结论的可信度，命中详情见 vulns",
+        "verdictNote": "本次扫描检出 3 条漏洞；verdict 仅描述「未检出」类阴性结论的可信度，命中详情见 vulns",
         "dbmsEvidence": {
           "dbms": "MySQL",
           "level": "verified",
@@ -1295,13 +1334,13 @@
       "validity": {
         "status": "ok",
         "reliable": true,
-        "reason": "目标可达性与会话状态正常：累计 106 次请求，无连续失败/拦截/会话失效/持续 5xx 迹象",
+        "reason": "目标可达性与会话状态正常：累计 47 次请求，无连续失败/拦截/会话失效/持续 5xx 迹象",
         "counts": {
-          "total": 106,
+          "total": 47,
           "failStreak": 0,
           "blockHits": 0,
-          "serverErr": 46,
-          "injection5xx": 10,
+          "serverErr": 6,
+          "injection5xx": 4,
           "authLostHits": 0,
           "netErrPoints": 0
         },
@@ -1316,19 +1355,19 @@
     "id": "A4-orderby",
     "url": "http://127.0.0.1:8231/shop/sort?by=id",
     "round": "r1",
-    "exit": 0,
-    "ms": 2746,
-    "hit": false,
-    "techs": "",
+    "exit": 2,
+    "ms": 2556,
+    "hit": true,
+    "techs": "error",
     "dbms": "MySQL",
-    "risk": "Low",
-    "reqs": 142,
+    "risk": "High",
+    "reqs": 73,
     "verdict": "no_vulnerability_detected",
     "err": "",
     "raw": {
-      "scanId": "cEu9XKNiQEm3",
+      "scanId": "Jv1JigoPPgMM",
       "target": {
-        "id": "xkWOWwVxC3",
+        "id": "K-aVUstDrt",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/shop/sort?by=id",
         "method": "GET",
@@ -1468,8 +1507,8 @@
           }
         }
       },
-      "startedAt": "2026-09-10T14:52:45.223Z",
-      "finishedAt": "2026-09-10T14:52:47.079Z",
+      "startedAt": "2026-09-10T15:36:08.230Z",
+      "finishedAt": "2026-09-10T15:36:09.886Z",
       "dbms": "MySQL",
       "points": [
         {
@@ -1477,8 +1516,8 @@
           "location": "url",
           "param": "by",
           "originalValue": "id",
-          "confirmed": false,
-          "technique": null,
+          "confirmed": true,
+          "technique": "error",
           "dbms": "MySQL",
           "formMethod": null,
           "actionUrl": null,
@@ -1491,9 +1530,23 @@
           "boundary": ""
         }
       ],
-      "vulns": [],
+      "vulns": [
+        {
+          "id": "A-NO_6cC",
+          "pointId": "97ad129c",
+          "technique": "error",
+          "dbms": "MySQL",
+          "riskLevel": "High",
+          "payloads": [
+            "id' AND extractvalue(1,concat(0x7e,(SELECT version())))-- -"
+          ],
+          "description": "数据库报错回显：SQL syntax（识别为 MySQL）",
+          "evidence": "数据库报错回显：SQL syntax（识别为 MySQL）",
+          "trace": null
+        }
+      ],
       "data": null,
-      "riskLevel": "Low",
+      "riskLevel": "High",
       "summary": {
         "constraints": [],
         "stackedEnabled": false,
@@ -1501,13 +1554,13 @@
         "validity": {
           "status": "ok",
           "reliable": true,
-          "reason": "目标可达性与会话状态正常：累计 142 次请求，无连续失败/拦截/会话失效/持续 5xx 迹象",
+          "reason": "目标可达性与会话状态正常：累计 73 次请求，无连续失败/拦截/会话失效/持续 5xx 迹象",
           "counts": {
-            "total": 142,
+            "total": 73,
             "failStreak": 0,
             "blockHits": 0,
-            "serverErr": 8,
-            "injection5xx": 107,
+            "serverErr": 7,
+            "injection5xx": 44,
             "authLostHits": 0,
             "netErrPoints": 0
           },
@@ -1517,7 +1570,7 @@
           "advice": "无需处置"
         },
         "verdict": "no_vulnerability_detected",
-        "verdictNote": "目标在本次扫描窗口内可达、未被拦且会话有效，「未检出漏洞」的阴性结论可信度正常（仍建议对高风险参数人工复核）",
+        "verdictNote": "本次扫描检出 1 条漏洞；verdict 仅描述「未检出」类阴性结论的可信度，命中详情见 vulns",
         "dbmsEvidence": {
           "dbms": "MySQL",
           "level": "verified",
@@ -1533,18 +1586,37 @@
           "reason": "无拦截证据，保持当前发包形态",
           "tamperHint": [],
           "backoffMs": null
+        },
+        "wafAdaptive": {
+          "triggered": true,
+          "mode": "filterBypass",
+          "errorOnlyPoints": 1,
+          "chains": [
+            [
+              "keywordinterleave",
+              "dash2hash"
+            ],
+            [
+              "keywordinterleave"
+            ],
+            [
+              "dash2hash",
+              "keywordinterleave"
+            ]
+          ],
+          "note": "error 命中但数据面通道全 miss 且存在 5xx：疑关键词被静默过滤，已用插入式双写链重跑"
         }
       },
       "validity": {
         "status": "ok",
         "reliable": true,
-        "reason": "目标可达性与会话状态正常：累计 142 次请求，无连续失败/拦截/会话失效/持续 5xx 迹象",
+        "reason": "目标可达性与会话状态正常：累计 73 次请求，无连续失败/拦截/会话失效/持续 5xx 迹象",
         "counts": {
-          "total": 142,
+          "total": 73,
           "failStreak": 0,
           "blockHits": 0,
-          "serverErr": 8,
-          "injection5xx": 107,
+          "serverErr": 7,
+          "injection5xx": 44,
           "authLostHits": 0,
           "netErrPoints": 0
         },
@@ -1560,18 +1632,18 @@
     "url": "http://127.0.0.1:8231/shop/detail?id=1&cat=0",
     "round": "r1",
     "exit": 2,
-    "ms": 2269,
+    "ms": 1160,
     "hit": true,
-    "techs": "union+boolean",
+    "techs": "union+error+boolean",
     "dbms": "MySQL",
     "risk": "High",
-    "reqs": 122,
+    "reqs": 63,
     "verdict": "no_vulnerability_detected",
     "err": "",
     "raw": {
-      "scanId": "6qssDJqHLCIY",
+      "scanId": "KJ204Vw-eAOz",
       "target": {
-        "id": "C86hPP28zx",
+        "id": "SQP0kHIzTo",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/shop/detail?id=1&cat=0",
         "method": "GET",
@@ -1711,8 +1783,8 @@
           }
         }
       },
-      "startedAt": "2026-09-10T14:52:47.916Z",
-      "finishedAt": "2026-09-10T14:52:49.378Z",
+      "startedAt": "2026-09-10T15:36:10.814Z",
+      "finishedAt": "2026-09-10T15:36:11.095Z",
       "dbms": "MySQL",
       "points": [
         {
@@ -1763,7 +1835,7 @@
       ],
       "vulns": [
         {
-          "id": "E2oZN4cX",
+          "id": "IlOGU11v",
           "pointId": "283e732d",
           "technique": "union",
           "dbms": "MySQL",
@@ -1777,7 +1849,20 @@
           "trace": null
         },
         {
-          "id": "YMmtl_xu",
+          "id": "cW5HHObn",
+          "pointId": "283e732d",
+          "technique": "error",
+          "dbms": "MySQL",
+          "riskLevel": "High",
+          "payloads": [
+            "1' AND extractvalue(1,concat(0x7e,(SELECT version())))-- -"
+          ],
+          "description": "数据库报错回显：SQL syntax（识别为 MySQL）",
+          "evidence": "数据库报错回显：SQL syntax（识别为 MySQL）",
+          "trace": null
+        },
+        {
+          "id": "WxiFESUl",
           "pointId": "283e732d",
           "technique": "boolean",
           "dbms": "MySQL",
@@ -2053,13 +2138,13 @@
         "validity": {
           "status": "ok",
           "reliable": true,
-          "reason": "目标可达性与会话状态正常：累计 122 次请求，无连续失败/拦截/会话失效/持续 5xx 迹象",
+          "reason": "目标可达性与会话状态正常：累计 63 次请求，无连续失败/拦截/会话失效/持续 5xx 迹象",
           "counts": {
-            "total": 122,
+            "total": 63,
             "failStreak": 0,
             "blockHits": 0,
-            "serverErr": 12,
-            "injection5xx": 80,
+            "serverErr": 11,
+            "injection5xx": 23,
             "authLostHits": 0,
             "netErrPoints": 0
           },
@@ -2069,7 +2154,7 @@
           "advice": "无需处置"
         },
         "verdict": "no_vulnerability_detected",
-        "verdictNote": "本次扫描检出 2 条漏洞；verdict 仅描述「未检出」类阴性结论的可信度，命中详情见 vulns",
+        "verdictNote": "本次扫描检出 3 条漏洞；verdict 仅描述「未检出」类阴性结论的可信度，命中详情见 vulns",
         "dbmsEvidence": {
           "dbms": "MySQL",
           "level": "verified",
@@ -2090,13 +2175,13 @@
       "validity": {
         "status": "ok",
         "reliable": true,
-        "reason": "目标可达性与会话状态正常：累计 122 次请求，无连续失败/拦截/会话失效/持续 5xx 迹象",
+        "reason": "目标可达性与会话状态正常：累计 63 次请求，无连续失败/拦截/会话失效/持续 5xx 迹象",
         "counts": {
-          "total": 122,
+          "total": 63,
           "failStreak": 0,
           "blockHits": 0,
-          "serverErr": 12,
-          "injection5xx": 80,
+          "serverErr": 11,
+          "injection5xx": 23,
           "authLostHits": 0,
           "netErrPoints": 0
         },
@@ -2112,18 +2197,18 @@
     "url": "http://127.0.0.1:8231/shop/err?id=1",
     "round": "r1",
     "exit": 2,
-    "ms": 2044,
+    "ms": 953,
     "hit": true,
-    "techs": "union+boolean",
+    "techs": "union+error+boolean",
     "dbms": "MySQL",
     "risk": "High",
-    "reqs": 117,
+    "reqs": 58,
     "verdict": "no_vulnerability_detected",
     "err": "",
     "raw": {
-      "scanId": "f4ZviFmqzToh",
+      "scanId": "sxU1J3vudIQD",
       "target": {
-        "id": "pvXVR5TydZ",
+        "id": "rq-4vgDvcI",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/shop/err?id=1",
         "method": "GET",
@@ -2263,8 +2348,8 @@
           }
         }
       },
-      "startedAt": "2026-09-10T14:52:50.162Z",
-      "finishedAt": "2026-09-10T14:52:51.515Z",
+      "startedAt": "2026-09-10T15:36:11.964Z",
+      "finishedAt": "2026-09-10T15:36:12.142Z",
       "dbms": "MySQL",
       "points": [
         {
@@ -2299,7 +2384,7 @@
       ],
       "vulns": [
         {
-          "id": "RZC7w6j0",
+          "id": "fOIkq3jm",
           "pointId": "283e732d",
           "technique": "union",
           "dbms": "MySQL",
@@ -2313,7 +2398,20 @@
           "trace": null
         },
         {
-          "id": "AVV-Ztwq",
+          "id": "s7cbUmtR",
+          "pointId": "283e732d",
+          "technique": "error",
+          "dbms": "MySQL",
+          "riskLevel": "High",
+          "payloads": [
+            "1' AND extractvalue(1,concat(0x7e,(SELECT version())))-- -"
+          ],
+          "description": "数据库报错回显：SQL syntax（识别为 MySQL）",
+          "evidence": "数据库报错回显：SQL syntax（识别为 MySQL）",
+          "trace": null
+        },
+        {
+          "id": "hRkexSWP",
           "pointId": "283e732d",
           "technique": "boolean",
           "dbms": "MySQL",
@@ -2583,13 +2681,13 @@
         "validity": {
           "status": "ok",
           "reliable": true,
-          "reason": "目标可达性与会话状态正常：累计 117 次请求，无连续失败/拦截/会话失效/持续 5xx 迹象",
+          "reason": "目标可达性与会话状态正常：累计 58 次请求，无连续失败/拦截/会话失效/持续 5xx 迹象",
           "counts": {
-            "total": 117,
+            "total": 58,
             "failStreak": 0,
             "blockHits": 0,
-            "serverErr": 12,
-            "injection5xx": 79,
+            "serverErr": 11,
+            "injection5xx": 22,
             "authLostHits": 0,
             "netErrPoints": 0
           },
@@ -2599,7 +2697,7 @@
           "advice": "无需处置"
         },
         "verdict": "no_vulnerability_detected",
-        "verdictNote": "本次扫描检出 2 条漏洞；verdict 仅描述「未检出」类阴性结论的可信度，命中详情见 vulns",
+        "verdictNote": "本次扫描检出 3 条漏洞；verdict 仅描述「未检出」类阴性结论的可信度，命中详情见 vulns",
         "dbmsEvidence": {
           "dbms": "MySQL",
           "level": "verified",
@@ -2620,13 +2718,13 @@
       "validity": {
         "status": "ok",
         "reliable": true,
-        "reason": "目标可达性与会话状态正常：累计 117 次请求，无连续失败/拦截/会话失效/持续 5xx 迹象",
+        "reason": "目标可达性与会话状态正常：累计 58 次请求，无连续失败/拦截/会话失效/持续 5xx 迹象",
         "counts": {
-          "total": 117,
+          "total": 58,
           "failStreak": 0,
           "blockHits": 0,
-          "serverErr": 12,
-          "injection5xx": 79,
+          "serverErr": 11,
+          "injection5xx": 22,
           "authLostHits": 0,
           "netErrPoints": 0
         },
@@ -2642,7 +2740,7 @@
     "url": "http://127.0.0.1:8231/shop/blind?id=1",
     "round": "r1",
     "exit": 0,
-    "ms": 5773,
+    "ms": 5813,
     "hit": true,
     "techs": "boolean",
     "dbms": "MySQL",
@@ -2651,9 +2749,9 @@
     "verdict": "no_vulnerability_detected",
     "err": "",
     "raw": {
-      "scanId": "aKtKL_kFgoTZ",
+      "scanId": "UUoREkVfdu6l",
       "target": {
-        "id": "ivAZD1GNSP",
+        "id": "VFf9QqSp3a",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/shop/blind?id=1",
         "method": "GET",
@@ -2793,8 +2891,8 @@
           }
         }
       },
-      "startedAt": "2026-09-10T14:52:52.253Z",
-      "finishedAt": "2026-09-10T14:52:57.161Z",
+      "startedAt": "2026-09-10T15:36:12.910Z",
+      "finishedAt": "2026-09-10T15:36:17.830Z",
       "dbms": "MySQL",
       "points": [
         {
@@ -2818,7 +2916,7 @@
       ],
       "vulns": [
         {
-          "id": "YijOIe-s",
+          "id": "m3ARzjiY",
           "pointId": "283e732d",
           "technique": "boolean",
           "dbms": "MySQL",
@@ -3153,7 +3251,7 @@
     "url": "http://127.0.0.1:8231/shop/time?id=1",
     "round": "r1",
     "exit": 0,
-    "ms": 10056,
+    "ms": 10138,
     "hit": true,
     "techs": "time",
     "dbms": "MySQL",
@@ -3162,9 +3260,9 @@
     "verdict": "no_vulnerability_detected",
     "err": "",
     "raw": {
-      "scanId": "od9_h6i2yVf9",
+      "scanId": "wo4pLeC2l0Qd",
       "target": {
-        "id": "iCc8i90GfY",
+        "id": "rJNeppXAjG",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/shop/time?id=1",
         "method": "GET",
@@ -3304,8 +3402,8 @@
           }
         }
       },
-      "startedAt": "2026-09-10T14:52:58.026Z",
-      "finishedAt": "2026-09-10T14:53:07.310Z",
+      "startedAt": "2026-09-10T15:36:18.735Z",
+      "finishedAt": "2026-09-10T15:36:28.033Z",
       "dbms": "MySQL",
       "points": [
         {
@@ -3329,7 +3427,7 @@
       ],
       "vulns": [
         {
-          "id": "fkitxfSJ",
+          "id": "HMMNbR33",
           "pointId": "283e732d",
           "technique": "time",
           "dbms": "MySQL",
@@ -3337,71 +3435,71 @@
           "payloads": [
             "1 AND SLEEP(2)-- -"
           ],
-          "description": "时间盲注确认(统计·自适应): μ=0.05s σ=0.03s z=2 阈值=1.61s 自适应下限=1.56s 稳定率1.00",
-          "evidence": "时间盲注确认(统计·自适应): μ=0.05s σ=0.03s z=2 阈值=1.61s 自适应下限=1.56s 稳定率1.00",
+          "description": "时间盲注确认(统计·自适应): μ=0.05s σ=0.02s z=2 阈值=1.60s 自适应下限=1.55s 稳定率1.00",
+          "evidence": "时间盲注确认(统计·自适应): μ=0.05s σ=0.02s z=2 阈值=1.60s 自适应下限=1.55s 稳定率1.00",
           "trace": {
             "technique": "time",
             "adaptive": true,
             "baselineNoiseRate": null,
-            "mu": 0.0482,
-            "sigma": 0.02886797533600166,
-            "threshold": 1.6059359506720035,
-            "floor": 1.5577359506720034,
+            "mu": 0.0494,
+            "sigma": 0.024952755358877705,
+            "threshold": 1.5993055107177554,
+            "floor": 1.5499055107177555,
             "baselineSamples": [
               {
                 "idx": 0,
-                "ms": 0.005,
+                "ms": 0.015,
                 "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>time</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-c"
               },
               {
                 "idx": 1,
-                "ms": 0.025,
+                "ms": 0.031,
                 "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>time</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-c"
               },
               {
                 "idx": 2,
-                "ms": 0.061,
+                "ms": 0.046,
                 "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>time</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-c"
               },
               {
                 "idx": 3,
-                "ms": 0.066,
+                "ms": 0.077,
                 "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>time</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-c"
               },
               {
                 "idx": 4,
-                "ms": 0.084,
+                "ms": 0.078,
                 "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>time</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-c"
               }
             ],
             "injectSamples": [
               {
                 "idx": 0,
-                "ms": 2.024,
+                "ms": 2.018,
                 "delayed": true,
                 "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>time</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-c"
               },
               {
                 "idx": 1,
-                "ms": 2.056,
+                "ms": 2.049,
                 "delayed": true,
                 "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>time</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-c"
               },
               {
                 "idx": 2,
-                "ms": 2.071,
+                "ms": 2.065,
                 "delayed": true,
                 "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>time</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-c"
               },
               {
                 "idx": 3,
-                "ms": 2.086,
+                "ms": 2.08,
                 "delayed": true,
                 "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>time</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-c"
               },
               {
                 "idx": 4,
-                "ms": 2.01,
+                "ms": 2.019,
                 "delayed": true,
                 "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>time</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-c"
               }
@@ -3479,18 +3577,18 @@
     "url": "http://127.0.0.1:8231/login",
     "round": "r1",
     "exit": 2,
-    "ms": 11674,
+    "ms": 6625,
     "hit": true,
-    "techs": "union+boolean+time",
+    "techs": "error+union+boolean",
     "dbms": "MySQL",
     "risk": "High",
-    "reqs": 394,
+    "reqs": 266,
     "verdict": "no_vulnerability_detected",
     "err": "",
     "raw": {
-      "scanId": "QTdVFWUjE5mT",
+      "scanId": "PUzirsie9fVA",
       "target": {
-        "id": "8lvV8wyt9N",
+        "id": "yQxNR--LSP",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/login",
         "method": "POST",
@@ -3633,8 +3731,8 @@
           }
         }
       },
-      "startedAt": "2026-09-10T14:53:08.061Z",
-      "finishedAt": "2026-09-10T14:53:19.019Z",
+      "startedAt": "2026-09-10T15:36:28.866Z",
+      "finishedAt": "2026-09-10T15:36:34.660Z",
       "dbms": "MySQL",
       "points": [
         {
@@ -3643,7 +3741,7 @@
           "param": "username",
           "originalValue": "alice",
           "confirmed": true,
-          "technique": "time",
+          "technique": "error",
           "dbms": "MySQL",
           "formMethod": null,
           "actionUrl": null,
@@ -3682,7 +3780,20 @@
       ],
       "vulns": [
         {
-          "id": "p_ZguQvE",
+          "id": "eJGnHnst",
+          "pointId": "92d712fc",
+          "technique": "error",
+          "dbms": "MySQL",
+          "riskLevel": "High",
+          "payloads": [
+            "alice' AND extractvalue(1,concat(0x7e,(SELECT version())))-- -"
+          ],
+          "description": "数据库报错回显：syntax error（识别为 MySQL）",
+          "evidence": "数据库报错回显：syntax error（识别为 MySQL）",
+          "trace": null
+        },
+        {
+          "id": "3oFkM5As",
           "pointId": "590739db",
           "technique": "union",
           "dbms": "MySQL",
@@ -3696,7 +3807,20 @@
           "trace": null
         },
         {
-          "id": "r7uqTb2p",
+          "id": "LI8TV8aY",
+          "pointId": "590739db",
+          "technique": "error",
+          "dbms": "MySQL",
+          "riskLevel": "High",
+          "payloads": [
+            "x' AND extractvalue(1,concat(0x7e,(SELECT version())))-- -"
+          ],
+          "description": "数据库报错回显：syntax error（识别为 MySQL）",
+          "evidence": "数据库报错回显：syntax error（识别为 MySQL）",
+          "trace": null
+        },
+        {
+          "id": "qjFQFSmX",
           "pointId": "590739db",
           "technique": "boolean",
           "dbms": "MySQL",
@@ -4162,88 +4286,6 @@
             ],
             "decision": "vulnerable"
           }
-        },
-        {
-          "id": "SZNZQtO5",
-          "pointId": "92d712fc",
-          "technique": "time",
-          "dbms": "MySQL",
-          "riskLevel": "Medium",
-          "payloads": [
-            "alice' AND SLEEP(2)-- -"
-          ],
-          "description": "时间盲注确认(统计·自适应): μ=0.06s σ=0.02s z=2 阈值=1.61s 自适应下限=1.55s 稳定率1.00",
-          "evidence": "时间盲注确认(统计·自适应): μ=0.06s σ=0.02s z=2 阈值=1.61s 自适应下限=1.55s 稳定率1.00",
-          "trace": {
-            "technique": "time",
-            "adaptive": true,
-            "baselineNoiseRate": null,
-            "mu": 0.0634,
-            "sigma": 0.022676860452893386,
-            "threshold": 1.6087537209057867,
-            "floor": 1.5453537209057868,
-            "baselineSamples": [
-              {
-                "idx": 0,
-                "ms": 0.03,
-                "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>login</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-"
-              },
-              {
-                "idx": 1,
-                "ms": 0.044,
-                "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>login</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-"
-              },
-              {
-                "idx": 2,
-                "ms": 0.076,
-                "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>login</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-"
-              },
-              {
-                "idx": 3,
-                "ms": 0.091,
-                "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>login</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-"
-              },
-              {
-                "idx": 4,
-                "ms": 0.076,
-                "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>login</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-"
-              }
-            ],
-            "injectSamples": [
-              {
-                "idx": 0,
-                "ms": 2.037,
-                "delayed": true,
-                "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>login</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-"
-              },
-              {
-                "idx": 1,
-                "ms": 2.052,
-                "delayed": true,
-                "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>login</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-"
-              },
-              {
-                "idx": 2,
-                "ms": 2.068,
-                "delayed": true,
-                "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>login</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-"
-              },
-              {
-                "idx": 3,
-                "ms": 2.099,
-                "delayed": true,
-                "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>login</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-"
-              },
-              {
-                "idx": 4,
-                "ms": 2.007,
-                "delayed": true,
-                "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>login</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-"
-              }
-            ],
-            "stableRatio": 1,
-            "decision": "vulnerable"
-          }
         }
       ],
       "data": null,
@@ -4253,25 +4295,25 @@
         "stackedEnabled": false,
         "stackedCorroborations": [],
         "validity": {
-          "status": "target_error",
-          "reliable": false,
-          "reason": "近 40 次请求中 5xx 共 76 次（占比 0.8），目标自身处于错误状态",
+          "status": "ok",
+          "reliable": true,
+          "reason": "目标可达性与会话状态正常：累计 266 次请求，无连续失败/拦截/会话失效/持续 5xx 迹象",
           "counts": {
-            "total": 394,
+            "total": 266,
             "failStreak": 0,
             "blockHits": 0,
-            "serverErr": 76,
-            "injection5xx": 123,
+            "serverErr": 10,
+            "injection5xx": 111,
             "authLostHits": 0,
             "netErrPoints": 0
           },
           "blockRatio": 0,
           "suggestBackoffMs": null,
           "inconclusivePoints": [],
-          "advice": "先看目标应用日志/DB 连接池，确认服务健康后复扫；5xx 期间的响应差异无判定意义（若同时命中 dbHealth 熔断，先降并发避免持续伤害）"
+          "advice": "无需处置"
         },
         "verdict": "no_vulnerability_detected",
-        "verdictNote": "本次扫描检出 3 条漏洞；verdict 仅描述「未检出」类阴性结论的可信度，命中详情见 vulns",
+        "verdictNote": "本次扫描检出 4 条漏洞；verdict 仅描述「未检出」类阴性结论的可信度，命中详情见 vulns",
         "dbmsEvidence": {
           "dbms": "MySQL",
           "level": "verified",
@@ -4287,25 +4329,44 @@
           "reason": "无拦截证据，保持当前发包形态",
           "tamperHint": [],
           "backoffMs": null
+        },
+        "wafAdaptive": {
+          "triggered": true,
+          "mode": "filterBypass",
+          "errorOnlyPoints": 1,
+          "chains": [
+            [
+              "keywordinterleave",
+              "dash2hash"
+            ],
+            [
+              "keywordinterleave"
+            ],
+            [
+              "dash2hash",
+              "keywordinterleave"
+            ]
+          ],
+          "note": "error 命中但数据面通道全 miss 且存在 5xx：疑关键词被静默过滤，已用插入式双写链重跑"
         }
       },
       "validity": {
-        "status": "target_error",
-        "reliable": false,
-        "reason": "近 40 次请求中 5xx 共 76 次（占比 0.8），目标自身处于错误状态",
+        "status": "ok",
+        "reliable": true,
+        "reason": "目标可达性与会话状态正常：累计 266 次请求，无连续失败/拦截/会话失效/持续 5xx 迹象",
         "counts": {
-          "total": 394,
+          "total": 266,
           "failStreak": 0,
           "blockHits": 0,
-          "serverErr": 76,
-          "injection5xx": 123,
+          "serverErr": 10,
+          "injection5xx": 111,
           "authLostHits": 0,
           "netErrPoints": 0
         },
         "blockRatio": 0,
         "suggestBackoffMs": null,
         "inconclusivePoints": [],
-        "advice": "先看目标应用日志/DB 连接池，确认服务健康后复扫；5xx 期间的响应差异无判定意义（若同时命中 dbHealth 熔断，先降并发避免持续伤害）"
+        "advice": "无需处置"
       }
     }
   },
@@ -4314,18 +4375,18 @@
     "url": "http://127.0.0.1:8231/api/profile",
     "round": "r1",
     "exit": 2,
-    "ms": 2076,
+    "ms": 907,
     "hit": true,
-    "techs": "union+boolean",
+    "techs": "union+error+boolean",
     "dbms": "MySQL",
     "risk": "High",
-    "reqs": 117,
+    "reqs": 58,
     "verdict": "no_vulnerability_detected",
     "err": "",
     "raw": {
-      "scanId": "iV3vSeK70IS8",
+      "scanId": "5kzkzypOk8VD",
       "target": {
-        "id": "b-dOPEr9mv",
+        "id": "WmBx5MIaPA",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/api/profile",
         "method": "POST",
@@ -4467,8 +4528,8 @@
           }
         }
       },
-      "startedAt": "2026-09-10T14:53:19.747Z",
-      "finishedAt": "2026-09-10T14:53:21.099Z",
+      "startedAt": "2026-09-10T15:36:35.463Z",
+      "finishedAt": "2026-09-10T15:36:35.645Z",
       "dbms": "MySQL",
       "points": [
         {
@@ -4503,7 +4564,7 @@
       ],
       "vulns": [
         {
-          "id": "ioPabNA3",
+          "id": "wbl4jsIY",
           "pointId": "845293ee",
           "technique": "union",
           "dbms": "MySQL",
@@ -4517,7 +4578,20 @@
           "trace": null
         },
         {
-          "id": "8P47S_PT",
+          "id": "7PvhP_O-",
+          "pointId": "845293ee",
+          "technique": "error",
+          "dbms": "MySQL",
+          "riskLevel": "High",
+          "payloads": [
+            "1' AND extractvalue(1,concat(0x7e,(SELECT version())))-- -"
+          ],
+          "description": "数据库报错回显：SQL syntax（识别为 MySQL）",
+          "evidence": "数据库报错回显：SQL syntax（识别为 MySQL）",
+          "trace": null
+        },
+        {
+          "id": "O9OQPA6x",
           "pointId": "845293ee",
           "technique": "boolean",
           "dbms": "MySQL",
@@ -4787,13 +4861,13 @@
         "validity": {
           "status": "ok",
           "reliable": true,
-          "reason": "目标可达性与会话状态正常：累计 117 次请求，无连续失败/拦截/会话失效/持续 5xx 迹象",
+          "reason": "目标可达性与会话状态正常：累计 58 次请求，无连续失败/拦截/会话失效/持续 5xx 迹象",
           "counts": {
-            "total": 117,
+            "total": 58,
             "failStreak": 0,
             "blockHits": 0,
-            "serverErr": 6,
-            "injection5xx": 85,
+            "serverErr": 5,
+            "injection5xx": 28,
             "authLostHits": 0,
             "netErrPoints": 0
           },
@@ -4803,7 +4877,7 @@
           "advice": "无需处置"
         },
         "verdict": "no_vulnerability_detected",
-        "verdictNote": "本次扫描检出 2 条漏洞；verdict 仅描述「未检出」类阴性结论的可信度，命中详情见 vulns",
+        "verdictNote": "本次扫描检出 3 条漏洞；verdict 仅描述「未检出」类阴性结论的可信度，命中详情见 vulns",
         "dbmsEvidence": {
           "dbms": "MySQL",
           "level": "verified",
@@ -4824,13 +4898,13 @@
       "validity": {
         "status": "ok",
         "reliable": true,
-        "reason": "目标可达性与会话状态正常：累计 117 次请求，无连续失败/拦截/会话失效/持续 5xx 迹象",
+        "reason": "目标可达性与会话状态正常：累计 58 次请求，无连续失败/拦截/会话失效/持续 5xx 迹象",
         "counts": {
-          "total": 117,
+          "total": 58,
           "failStreak": 0,
           "blockHits": 0,
-          "serverErr": 6,
-          "injection5xx": 85,
+          "serverErr": 5,
+          "injection5xx": 28,
           "authLostHits": 0,
           "netErrPoints": 0
         },
@@ -4846,7 +4920,7 @@
     "url": "http://127.0.0.1:8231/shop/cookie",
     "round": "r1",
     "exit": 0,
-    "ms": 849,
+    "ms": 938,
     "hit": false,
     "techs": "",
     "dbms": "",
@@ -4855,9 +4929,9 @@
     "verdict": "no_vulnerability_detected",
     "err": "",
     "raw": {
-      "scanId": "KzvEx0O-aaAS",
+      "scanId": "DcVGGe7mW1N-",
       "target": {
-        "id": "Y7VqXVPV3y",
+        "id": "x5uY0uB7HD",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/shop/cookie",
         "method": "GET",
@@ -5000,8 +5074,8 @@
           "testHeaders": true
         }
       },
-      "startedAt": "2026-09-10T14:53:21.800Z",
-      "finishedAt": "2026-09-10T14:53:21.805Z",
+      "startedAt": "2026-09-10T15:36:36.395Z",
+      "finishedAt": "2026-09-10T15:36:36.401Z",
       "dbms": null,
       "points": [],
       "vulns": [],
@@ -5065,18 +5139,18 @@
     "url": "http://127.0.0.1:8231/shop/ip",
     "round": "r1",
     "exit": 2,
-    "ms": 2065,
+    "ms": 985,
     "hit": true,
-    "techs": "union+boolean",
+    "techs": "union+error+boolean",
     "dbms": "MySQL",
     "risk": "High",
-    "reqs": 117,
+    "reqs": 58,
     "verdict": "no_vulnerability_detected",
     "err": "",
     "raw": {
-      "scanId": "poeS8IKQ131d",
+      "scanId": "CXGhFZJD6GOg",
       "target": {
-        "id": "MdfwvnUMCZ",
+        "id": "2Vq1s2j2_d",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/shop/ip",
         "method": "GET",
@@ -5219,8 +5293,8 @@
           "testHeaders": true
         }
       },
-      "startedAt": "2026-09-10T14:53:22.652Z",
-      "finishedAt": "2026-09-10T14:53:24.011Z",
+      "startedAt": "2026-09-10T15:36:37.376Z",
+      "finishedAt": "2026-09-10T15:36:37.553Z",
       "dbms": "MySQL",
       "points": [
         {
@@ -5255,7 +5329,7 @@
       ],
       "vulns": [
         {
-          "id": "XxUzGOr3",
+          "id": "jwpSQCwB",
           "pointId": "a7471d66",
           "technique": "union",
           "dbms": "MySQL",
@@ -5269,7 +5343,20 @@
           "trace": null
         },
         {
-          "id": "LWFbcmki",
+          "id": "T7fowQWH",
+          "pointId": "a7471d66",
+          "technique": "error",
+          "dbms": "MySQL",
+          "riskLevel": "High",
+          "payloads": [
+            "1' AND extractvalue(1,concat(0x7e,(SELECT version())))-- -"
+          ],
+          "description": "数据库报错回显：SQL syntax（识别为 MySQL）",
+          "evidence": "数据库报错回显：SQL syntax（识别为 MySQL）",
+          "trace": null
+        },
+        {
+          "id": "SJuNMz75",
           "pointId": "a7471d66",
           "technique": "boolean",
           "dbms": "MySQL",
@@ -5537,14 +5624,14 @@
         "stackedEnabled": false,
         "stackedCorroborations": [],
         "validity": {
-          "status": "target_error",
-          "reliable": false,
-          "reason": "近 40 次请求中 5xx 共 52 次（占比 0.8），目标自身处于错误状态",
+          "status": "ok",
+          "reliable": true,
+          "reason": "目标可达性与会话状态正常：累计 58 次请求，无连续失败/拦截/会话失效/持续 5xx 迹象",
           "counts": {
-            "total": 117,
+            "total": 58,
             "failStreak": 0,
             "blockHits": 0,
-            "serverErr": 52,
+            "serverErr": 33,
             "injection5xx": 0,
             "authLostHits": 0,
             "netErrPoints": 0
@@ -5552,10 +5639,10 @@
           "blockRatio": 0,
           "suggestBackoffMs": null,
           "inconclusivePoints": [],
-          "advice": "先看目标应用日志/DB 连接池，确认服务健康后复扫；5xx 期间的响应差异无判定意义（若同时命中 dbHealth 熔断，先降并发避免持续伤害）"
+          "advice": "无需处置"
         },
         "verdict": "no_vulnerability_detected",
-        "verdictNote": "本次扫描检出 2 条漏洞；verdict 仅描述「未检出」类阴性结论的可信度，命中详情见 vulns",
+        "verdictNote": "本次扫描检出 3 条漏洞；verdict 仅描述「未检出」类阴性结论的可信度，命中详情见 vulns",
         "dbmsEvidence": {
           "dbms": "MySQL",
           "level": "verified",
@@ -5574,14 +5661,14 @@
         }
       },
       "validity": {
-        "status": "target_error",
-        "reliable": false,
-        "reason": "近 40 次请求中 5xx 共 52 次（占比 0.8），目标自身处于错误状态",
+        "status": "ok",
+        "reliable": true,
+        "reason": "目标可达性与会话状态正常：累计 58 次请求，无连续失败/拦截/会话失效/持续 5xx 迹象",
         "counts": {
-          "total": 117,
+          "total": 58,
           "failStreak": 0,
           "blockHits": 0,
-          "serverErr": 52,
+          "serverErr": 33,
           "injection5xx": 0,
           "authLostHits": 0,
           "netErrPoints": 0
@@ -5589,7 +5676,7 @@
         "blockRatio": 0,
         "suggestBackoffMs": null,
         "inconclusivePoints": [],
-        "advice": "先看目标应用日志/DB 连接池，确认服务健康后复扫；5xx 期间的响应差异无判定意义（若同时命中 dbHealth 熔断，先降并发避免持续伤害）"
+        "advice": "无需处置"
       }
     }
   },
@@ -5598,18 +5685,18 @@
     "url": "http://127.0.0.1:8231/shop/user/1",
     "round": "r1",
     "exit": 2,
-    "ms": 1448,
+    "ms": 934,
     "hit": true,
     "techs": "union+error+boolean",
     "dbms": "MySQL",
     "risk": "High",
-    "reqs": 83,
+    "reqs": 58,
     "verdict": "no_vulnerability_detected",
     "err": "",
     "raw": {
-      "scanId": "zAhmnwPXN_Zb",
+      "scanId": "XXfmeBZVfuPj",
       "target": {
-        "id": "SaEYbG8hqU",
+        "id": "9_MQMffjmu",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/shop/user/1",
         "method": "GET",
@@ -5750,8 +5837,8 @@
           "testPath": true
         }
       },
-      "startedAt": "2026-09-10T14:53:24.712Z",
-      "finishedAt": "2026-09-10T14:53:25.396Z",
+      "startedAt": "2026-09-10T15:36:38.308Z",
+      "finishedAt": "2026-09-10T15:36:38.488Z",
       "dbms": "MySQL",
       "points": [
         {
@@ -5760,7 +5847,7 @@
           "param": "1",
           "originalValue": "1",
           "confirmed": true,
-          "technique": "error",
+          "technique": "boolean",
           "dbms": "MySQL",
           "formMethod": null,
           "actionUrl": null,
@@ -5787,7 +5874,7 @@
       ],
       "vulns": [
         {
-          "id": "8g10-x9w",
+          "id": "oEhdHZbz",
           "pointId": "86d7dabd",
           "technique": "union",
           "dbms": "MySQL",
@@ -5801,20 +5888,20 @@
           "trace": null
         },
         {
-          "id": "uEtCGc0t",
+          "id": "y2rwHyFT",
           "pointId": "86d7dabd",
           "technique": "error",
           "dbms": "MySQL",
           "riskLevel": "High",
           "payloads": [
-            "1' AND extractvalue(1,concat(0x7e,(SELECT version())))/**/"
+            "1' AND extractvalue(1,concat(0x7e,(SELECT version())))-- -"
           ],
-          "description": "数据库报错回显：extractvalue（识别为 MySQL）",
-          "evidence": "数据库报错回显：extractvalue（识别为 MySQL）",
+          "description": "数据库报错回显：SQL syntax（识别为 MySQL）",
+          "evidence": "数据库报错回显：SQL syntax（识别为 MySQL）",
           "trace": null
         },
         {
-          "id": "HkpmnAG8",
+          "id": "KACdWnrj",
           "pointId": "86d7dabd",
           "technique": "boolean",
           "dbms": "MySQL",
@@ -6084,13 +6171,13 @@
         "validity": {
           "status": "ok",
           "reliable": true,
-          "reason": "目标可达性与会话状态正常：累计 83 次请求，无连续失败/拦截/会话失效/持续 5xx 迹象",
+          "reason": "目标可达性与会话状态正常：累计 58 次请求，无连续失败/拦截/会话失效/持续 5xx 迹象",
           "counts": {
-            "total": 83,
+            "total": 58,
             "failStreak": 0,
             "blockHits": 0,
-            "serverErr": 12,
-            "injection5xx": 39,
+            "serverErr": 11,
+            "injection5xx": 17,
             "authLostHits": 0,
             "netErrPoints": 0
           },
@@ -6121,13 +6208,13 @@
       "validity": {
         "status": "ok",
         "reliable": true,
-        "reason": "目标可达性与会话状态正常：累计 83 次请求，无连续失败/拦截/会话失效/持续 5xx 迹象",
+        "reason": "目标可达性与会话状态正常：累计 58 次请求，无连续失败/拦截/会话失效/持续 5xx 迹象",
         "counts": {
-          "total": 83,
+          "total": 58,
           "failStreak": 0,
           "blockHits": 0,
-          "serverErr": 12,
-          "injection5xx": 39,
+          "serverErr": 11,
+          "injection5xx": 17,
           "authLostHits": 0,
           "netErrPoints": 0
         },
@@ -6142,19 +6229,19 @@
     "id": "D14-base64",
     "url": "http://127.0.0.1:8231/shop/b64?id=MQ",
     "round": "r1",
-    "exit": 0,
-    "ms": 2510,
-    "hit": false,
-    "techs": "",
+    "exit": 2,
+    "ms": 2392,
+    "hit": true,
+    "techs": "error",
     "dbms": "MySQL",
-    "risk": "Low",
-    "reqs": 140,
+    "risk": "High",
+    "reqs": 71,
     "verdict": "no_vulnerability_detected",
     "err": "",
     "raw": {
-      "scanId": "s2aBRnY96FfW",
+      "scanId": "itICQyQ3KWXW",
       "target": {
-        "id": "Fa8jepb34S",
+        "id": "JuYFJzTR3H",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/shop/b64?id=MQ",
         "method": "GET",
@@ -6294,8 +6381,8 @@
           }
         }
       },
-      "startedAt": "2026-09-10T14:53:26.198Z",
-      "finishedAt": "2026-09-10T14:53:28.021Z",
+      "startedAt": "2026-09-10T15:36:39.289Z",
+      "finishedAt": "2026-09-10T15:36:40.912Z",
       "dbms": "MySQL",
       "points": [
         {
@@ -6303,8 +6390,8 @@
           "location": "url",
           "param": "id",
           "originalValue": "MQ",
-          "confirmed": false,
-          "technique": null,
+          "confirmed": true,
+          "technique": "error",
           "dbms": "MySQL",
           "formMethod": null,
           "actionUrl": null,
@@ -6317,9 +6404,23 @@
           "boundary": ""
         }
       ],
-      "vulns": [],
+      "vulns": [
+        {
+          "id": "YnAZwCyY",
+          "pointId": "283e732d",
+          "technique": "error",
+          "dbms": "MySQL",
+          "riskLevel": "High",
+          "payloads": [
+            "MQ' AND extractvalue(1,concat(0x7e,(SELECT version())))-- -"
+          ],
+          "description": "数据库报错回显：SQL syntax（识别为 MySQL）",
+          "evidence": "数据库报错回显：SQL syntax（识别为 MySQL）",
+          "trace": null
+        }
+      ],
       "data": null,
-      "riskLevel": "Low",
+      "riskLevel": "High",
       "summary": {
         "constraints": [],
         "stackedEnabled": false,
@@ -6327,13 +6428,13 @@
         "validity": {
           "status": "ok",
           "reliable": true,
-          "reason": "目标可达性与会话状态正常：累计 140 次请求，无连续失败/拦截/会话失效/持续 5xx 迹象",
+          "reason": "目标可达性与会话状态正常：累计 71 次请求，无连续失败/拦截/会话失效/持续 5xx 迹象",
           "counts": {
-            "total": 140,
+            "total": 71,
             "failStreak": 0,
             "blockHits": 0,
             "serverErr": 12,
-            "injection5xx": 111,
+            "injection5xx": 47,
             "authLostHits": 0,
             "netErrPoints": 0
           },
@@ -6343,7 +6444,7 @@
           "advice": "无需处置"
         },
         "verdict": "no_vulnerability_detected",
-        "verdictNote": "目标在本次扫描窗口内可达、未被拦且会话有效，「未检出漏洞」的阴性结论可信度正常（仍建议对高风险参数人工复核）",
+        "verdictNote": "本次扫描检出 1 条漏洞；verdict 仅描述「未检出」类阴性结论的可信度，命中详情见 vulns",
         "dbmsEvidence": {
           "dbms": "MySQL",
           "level": "verified",
@@ -6359,18 +6460,37 @@
           "reason": "无拦截证据，保持当前发包形态",
           "tamperHint": [],
           "backoffMs": null
+        },
+        "wafAdaptive": {
+          "triggered": true,
+          "mode": "filterBypass",
+          "errorOnlyPoints": 1,
+          "chains": [
+            [
+              "keywordinterleave",
+              "dash2hash"
+            ],
+            [
+              "keywordinterleave"
+            ],
+            [
+              "dash2hash",
+              "keywordinterleave"
+            ]
+          ],
+          "note": "error 命中但数据面通道全 miss 且存在 5xx：疑关键词被静默过滤，已用插入式双写链重跑"
         }
       },
       "validity": {
         "status": "ok",
         "reliable": true,
-        "reason": "目标可达性与会话状态正常：累计 140 次请求，无连续失败/拦截/会话失效/持续 5xx 迹象",
+        "reason": "目标可达性与会话状态正常：累计 71 次请求，无连续失败/拦截/会话失效/持续 5xx 迹象",
         "counts": {
-          "total": 140,
+          "total": 71,
           "failStreak": 0,
           "blockHits": 0,
           "serverErr": 12,
-          "injection5xx": 111,
+          "injection5xx": 47,
           "authLostHits": 0,
           "netErrPoints": 0
         },
@@ -6385,19 +6505,19 @@
     "id": "E15-second-order",
     "url": "http://127.0.0.1:8231/account/update",
     "round": "r1",
-    "exit": 0,
-    "ms": 4293,
-    "hit": false,
-    "techs": "",
+    "exit": 2,
+    "ms": 6418,
+    "hit": true,
+    "techs": "second_order",
     "dbms": "",
-    "risk": "Low",
+    "risk": "High",
     "reqs": 229,
     "verdict": "no_vulnerability_detected",
     "err": "",
     "raw": {
-      "scanId": "zl6UOQ8L0NsD",
+      "scanId": "dMqW2rLDQZBU",
       "target": {
-        "id": "Ph6mxq_NNf",
+        "id": "x69-LSiwHQ",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/account/update",
         "method": "POST",
@@ -6405,7 +6525,9 @@
           "name": "alice"
         },
         "jsonBody": null,
-        "cookieParams": {},
+        "cookieParams": {
+          "sid": "rtmtvow8xt"
+        },
         "headerParams": {},
         "config": {
           "port": 4567,
@@ -6418,7 +6540,7 @@
           "sessionDefault": false,
           "level": 1,
           "risk": 2,
-          "productionMode": true,
+          "productionMode": false,
           "confirmDestructive": false,
           "testFilter": "",
           "testSkip": "",
@@ -6531,11 +6653,12 @@
             "adaptiveTimeFloorScale": 2,
             "concurrency": 4,
             "extractVerify": true
-          }
+          },
+          "testHeaders": true
         }
       },
-      "startedAt": "2026-09-10T14:53:28.674Z",
-      "finishedAt": "2026-09-10T14:53:32.264Z",
+      "startedAt": "2026-09-10T15:36:41.645Z",
+      "finishedAt": "2026-09-10T15:36:47.280Z",
       "dbms": null,
       "points": [
         {
@@ -6543,23 +6666,37 @@
           "location": "body",
           "param": "name",
           "originalValue": "alice",
-          "confirmed": false,
-          "technique": null,
+          "confirmed": true,
+          "technique": "second_order",
           "dbms": null,
           "formMethod": null,
-          "actionUrl": null,
+          "actionUrl": "http://127.0.0.1:8231/account/update",
           "formValues": null,
           "csrfTokenName": null,
-          "isStorePoint": false,
-          "storeKind": null,
+          "isStorePoint": true,
+          "storeKind": "unknown",
           "boundaryProbed": true,
           "_baselineTitle": "update",
           "boundary": ""
         }
       ],
-      "vulns": [],
+      "vulns": [
+        {
+          "id": "QqXqaiou",
+          "pointId": "0e86acf3",
+          "technique": "second_order",
+          "dbms": null,
+          "riskLevel": "High",
+          "payloads": [
+            "'"
+          ],
+          "description": "二阶注入确认：存储探针后在触发页 http://127.0.0.1:8231/account/me 回显数据库报错（基线无、实验有、阴性无），存储点 name@http://127.0.0.1:8231/account/update 的数据被读出后重新拼入查询触发注入",
+          "evidence": "二阶注入确认：存储探针后在触发页 http://127.0.0.1:8231/account/me 回显数据库报错（基线无、实验有、阴性无），存储点 name@http://127.0.0.1:8231/account/update 的数据被读出后重新拼入查询触发注入",
+          "trace": null
+        }
+      ],
       "data": null,
-      "riskLevel": "Low",
+      "riskLevel": "High",
       "summary": {
         "constraints": [],
         "stackedEnabled": false,
@@ -6583,7 +6720,7 @@
           "advice": "无需处置"
         },
         "verdict": "no_vulnerability_detected",
-        "verdictNote": "目标在本次扫描窗口内可达、未被拦且会话有效，「未检出漏洞」的阴性结论可信度正常（仍建议对高风险参数人工复核）",
+        "verdictNote": "本次扫描检出 1 条漏洞；verdict 仅描述「未检出」类阴性结论的可信度，命中详情见 vulns",
         "blockPolicy": {
           "action": "none",
           "reason": "无拦截证据，保持当前发包形态",
@@ -6616,18 +6753,18 @@
     "url": "http://127.0.0.1:8231/shop/stack?id=1",
     "round": "r1",
     "exit": 2,
-    "ms": 2051,
+    "ms": 1241,
     "hit": true,
-    "techs": "union+boolean",
+    "techs": "union+error+boolean",
     "dbms": "MySQL",
     "risk": "High",
-    "reqs": 118,
+    "reqs": 59,
     "verdict": "no_vulnerability_detected",
     "err": "",
     "raw": {
-      "scanId": "IU3BHLWILtMF",
+      "scanId": "V_Cb5mbFnxUX",
       "target": {
-        "id": "64wnP4IKAN",
+        "id": "V_gfVeddmR",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/shop/stack?id=1",
         "method": "GET",
@@ -6767,8 +6904,8 @@
           }
         }
       },
-      "startedAt": "2026-09-10T14:53:32.959Z",
-      "finishedAt": "2026-09-10T14:53:34.333Z",
+      "startedAt": "2026-09-10T15:36:48.163Z",
+      "finishedAt": "2026-09-10T15:36:48.372Z",
       "dbms": "MySQL",
       "points": [
         {
@@ -6802,7 +6939,7 @@
       ],
       "vulns": [
         {
-          "id": "diIvhO-z",
+          "id": "nTXS0gy8",
           "pointId": "283e732d",
           "technique": "union",
           "dbms": "MySQL",
@@ -6816,7 +6953,20 @@
           "trace": null
         },
         {
-          "id": "lINcClr8",
+          "id": "_CPYKjCg",
+          "pointId": "283e732d",
+          "technique": "error",
+          "dbms": "MySQL",
+          "riskLevel": "High",
+          "payloads": [
+            "1' AND extractvalue(1,concat(0x7e,(SELECT version())))-- -"
+          ],
+          "description": "数据库报错回显：SQL syntax（识别为 MySQL）",
+          "evidence": "数据库报错回显：SQL syntax（识别为 MySQL）",
+          "trace": null
+        },
+        {
+          "id": "taYzKfwd",
           "pointId": "283e732d",
           "technique": "boolean",
           "dbms": "MySQL",
@@ -7092,13 +7242,13 @@
         "validity": {
           "status": "ok",
           "reliable": true,
-          "reason": "目标可达性与会话状态正常：累计 118 次请求，无连续失败/拦截/会话失效/持续 5xx 迹象",
+          "reason": "目标可达性与会话状态正常：累计 59 次请求，无连续失败/拦截/会话失效/持续 5xx 迹象",
           "counts": {
-            "total": 118,
+            "total": 59,
             "failStreak": 0,
             "blockHits": 0,
-            "serverErr": 12,
-            "injection5xx": 79,
+            "serverErr": 11,
+            "injection5xx": 22,
             "authLostHits": 0,
             "netErrPoints": 0
           },
@@ -7108,7 +7258,7 @@
           "advice": "无需处置"
         },
         "verdict": "no_vulnerability_detected",
-        "verdictNote": "本次扫描检出 2 条漏洞；verdict 仅描述「未检出」类阴性结论的可信度，命中详情见 vulns",
+        "verdictNote": "本次扫描检出 3 条漏洞；verdict 仅描述「未检出」类阴性结论的可信度，命中详情见 vulns",
         "dbmsEvidence": {
           "dbms": "MySQL",
           "level": "verified",
@@ -7129,13 +7279,13 @@
       "validity": {
         "status": "ok",
         "reliable": true,
-        "reason": "目标可达性与会话状态正常：累计 118 次请求，无连续失败/拦截/会话失效/持续 5xx 迹象",
+        "reason": "目标可达性与会话状态正常：累计 59 次请求，无连续失败/拦截/会话失效/持续 5xx 迹象",
         "counts": {
-          "total": 118,
+          "total": 59,
           "failStreak": 0,
           "blockHits": 0,
-          "serverErr": 12,
-          "injection5xx": 79,
+          "serverErr": 11,
+          "injection5xx": 22,
           "authLostHits": 0,
           "netErrPoints": 0
         },
@@ -7151,7 +7301,7 @@
     "url": "http://127.0.0.1:8231/waf/item?id=1",
     "round": "r1",
     "exit": 0,
-    "ms": 2463,
+    "ms": 2615,
     "hit": false,
     "techs": "",
     "dbms": "",
@@ -7160,9 +7310,9 @@
     "verdict": "inconclusive",
     "err": "",
     "raw": {
-      "scanId": "Y7FI9wEIugxK",
+      "scanId": "VIvsqDBZ5N1J",
       "target": {
-        "id": "2vr-skzKJs",
+        "id": "lvtw2t2g2N",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/waf/item?id=1",
         "method": "GET",
@@ -7302,8 +7452,8 @@
           }
         }
       },
-      "startedAt": "2026-09-10T14:53:35.015Z",
-      "finishedAt": "2026-09-10T14:53:36.775Z",
+      "startedAt": "2026-09-10T15:36:49.362Z",
+      "finishedAt": "2026-09-10T15:36:51.121Z",
       "dbms": null,
       "points": [
         {
@@ -7420,7 +7570,7 @@
     "url": "http://127.0.0.1:8231/safe/item?id=1",
     "round": "r1",
     "exit": 0,
-    "ms": 4333,
+    "ms": 4457,
     "hit": false,
     "techs": "",
     "dbms": "",
@@ -7429,9 +7579,9 @@
     "verdict": "no_vulnerability_detected",
     "err": "",
     "raw": {
-      "scanId": "blFIlEzNHbfQ",
+      "scanId": "NK8YF-dd5B57",
       "target": {
-        "id": "yIEr1hNlj0",
+        "id": "SkmswineWO",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/safe/item?id=1",
         "method": "GET",
@@ -7571,8 +7721,8 @@
           }
         }
       },
-      "startedAt": "2026-09-10T14:53:37.529Z",
-      "finishedAt": "2026-09-10T14:53:41.131Z",
+      "startedAt": "2026-09-10T15:36:51.986Z",
+      "finishedAt": "2026-09-10T15:36:55.597Z",
       "dbms": null,
       "points": [
         {
@@ -7653,7 +7803,7 @@
     "url": "http://127.0.0.1:8231/safe/search?q=a",
     "round": "r1",
     "exit": 0,
-    "ms": 4138,
+    "ms": 4215,
     "hit": false,
     "techs": "",
     "dbms": "",
@@ -7662,9 +7812,9 @@
     "verdict": "no_vulnerability_detected",
     "err": "",
     "raw": {
-      "scanId": "qDwboQ-XoPH1",
+      "scanId": "6M0oeht12KvN",
       "target": {
-        "id": "tDODJP8ycp",
+        "id": "hmd6mSJpbp",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/safe/search?q=a",
         "method": "GET",
@@ -7804,8 +7954,8 @@
           }
         }
       },
-      "startedAt": "2026-09-10T14:53:41.837Z",
-      "finishedAt": "2026-09-10T14:53:45.275Z",
+      "startedAt": "2026-09-10T15:36:56.428Z",
+      "finishedAt": "2026-09-10T15:36:59.861Z",
       "dbms": null,
       "points": [
         {
@@ -7886,18 +8036,18 @@
     "url": "http://127.0.0.1:8231/safe/rand?x=1",
     "round": "r1",
     "exit": 0,
-    "ms": 3723,
+    "ms": 6493,
     "hit": false,
     "techs": "",
-    "dbms": "H2",
+    "dbms": "",
     "risk": "Low",
-    "reqs": 202,
+    "reqs": 325,
     "verdict": "no_vulnerability_detected",
     "err": "",
     "raw": {
-      "scanId": "-8uXbgUX-d0H",
+      "scanId": "ab90HOnm3q2E",
       "target": {
-        "id": "WYlaR6W8JF",
+        "id": "Tr-XAflekd",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/safe/rand?x=1",
         "method": "GET",
@@ -8037,9 +8187,9 @@
           }
         }
       },
-      "startedAt": "2026-09-10T14:53:45.973Z",
-      "finishedAt": "2026-09-10T14:53:49.029Z",
-      "dbms": "H2",
+      "startedAt": "2026-09-10T15:37:00.663Z",
+      "finishedAt": "2026-09-10T15:37:06.174Z",
+      "dbms": null,
       "points": [
         {
           "id": "c847836a",
@@ -8048,7 +8198,7 @@
           "originalValue": "1",
           "confirmed": false,
           "technique": null,
-          "dbms": "H2",
+          "dbms": null,
           "formMethod": null,
           "actionUrl": null,
           "formValues": null,
@@ -8070,9 +8220,9 @@
         "validity": {
           "status": "ok",
           "reliable": true,
-          "reason": "目标可达性与会话状态正常：累计 202 次请求，无连续失败/拦截/会话失效/持续 5xx 迹象",
+          "reason": "目标可达性与会话状态正常：累计 325 次请求，无连续失败/拦截/会话失效/持续 5xx 迹象",
           "counts": {
-            "total": 202,
+            "total": 325,
             "failStreak": 0,
             "blockHits": 0,
             "serverErr": 0,
@@ -8087,16 +8237,6 @@
         },
         "verdict": "no_vulnerability_detected",
         "verdictNote": "目标在本次扫描窗口内可达、未被拦且会话有效，「未检出漏洞」的阴性结论可信度正常（仍建议对高风险参数人工复核）",
-        "dbmsEvidence": {
-          "dbms": "H2",
-          "level": "partial",
-          "levelText": "部分通道真实引擎验证",
-          "evidence": "e2e/multi-engine-lab（真实 JDBC 内存库，仅布尔通道 × CRS）",
-          "caveat": "仅在真实引擎上验证了部分通道（见 evidence），未覆盖的通道按 template-only 看待",
-          "all": [
-            "H2:partial"
-          ]
-        },
         "blockPolicy": {
           "action": "none",
           "reason": "无拦截证据，保持当前发包形态",
@@ -8107,9 +8247,9 @@
       "validity": {
         "status": "ok",
         "reliable": true,
-        "reason": "目标可达性与会话状态正常：累计 202 次请求，无连续失败/拦截/会话失效/持续 5xx 迹象",
+        "reason": "目标可达性与会话状态正常：累计 325 次请求，无连续失败/拦截/会话失效/持续 5xx 迹象",
         "counts": {
-          "total": 202,
+          "total": 325,
           "failStreak": 0,
           "blockHits": 0,
           "serverErr": 0,
@@ -8129,7 +8269,7 @@
     "url": "http://127.0.0.1:8231/safe/boom?id=1",
     "round": "r1",
     "exit": 0,
-    "ms": 2286,
+    "ms": 2436,
     "hit": false,
     "techs": "",
     "dbms": "",
@@ -8138,9 +8278,9 @@
     "verdict": "inconclusive",
     "err": "",
     "raw": {
-      "scanId": "L41GjRETrGQd",
+      "scanId": "OxZXcBgqD1B5",
       "target": {
-        "id": "sI5X5Ox2lF",
+        "id": "G2SO5NqqL8",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/safe/boom?id=1",
         "method": "GET",
@@ -8280,8 +8420,8 @@
           }
         }
       },
-      "startedAt": "2026-09-10T14:53:49.706Z",
-      "finishedAt": "2026-09-10T14:53:51.257Z",
+      "startedAt": "2026-09-10T15:37:07.171Z",
+      "finishedAt": "2026-09-10T15:37:08.724Z",
       "dbms": null,
       "points": [
         {
@@ -8362,7 +8502,7 @@
     "url": "http://127.0.0.1:8231/safe/blocked?id=1",
     "round": "r1",
     "exit": 0,
-    "ms": 2499,
+    "ms": 2623,
     "hit": false,
     "techs": "",
     "dbms": "",
@@ -8371,9 +8511,9 @@
     "verdict": "inconclusive",
     "err": "",
     "raw": {
-      "scanId": "ZDaKkUeKc4zx",
+      "scanId": "EOA2WZVUTvEk",
       "target": {
-        "id": "g6Yfx4_e1c",
+        "id": "LI4-N4qqZE",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/safe/blocked?id=1",
         "method": "GET",
@@ -8513,8 +8653,8 @@
           }
         }
       },
-      "startedAt": "2026-09-10T14:53:51.980Z",
-      "finishedAt": "2026-09-10T14:53:53.743Z",
+      "startedAt": "2026-09-10T15:37:09.590Z",
+      "finishedAt": "2026-09-10T15:37:11.349Z",
       "dbms": null,
       "points": [
         {
@@ -8631,7 +8771,7 @@
     "url": "http://127.0.0.1:8231/safe/redirect?id=1",
     "round": "r1",
     "exit": 0,
-    "ms": 4282,
+    "ms": 4503,
     "hit": false,
     "techs": "",
     "dbms": "",
@@ -8640,9 +8780,9 @@
     "verdict": "no_vulnerability_detected",
     "err": "",
     "raw": {
-      "scanId": "rOZpX2qTAH8d",
+      "scanId": "o6GYIOdB-uO-",
       "target": {
-        "id": "F2UGWxPTrU",
+        "id": "-Kel431I9b",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/safe/redirect?id=1",
         "method": "GET",
@@ -8782,8 +8922,8 @@
           }
         }
       },
-      "startedAt": "2026-09-10T14:53:54.457Z",
-      "finishedAt": "2026-09-10T14:53:58.061Z",
+      "startedAt": "2026-09-10T15:37:12.262Z",
+      "finishedAt": "2026-09-10T15:37:15.871Z",
       "dbms": null,
       "points": [
         {
@@ -8864,7 +9004,7 @@
     "url": "http://127.0.0.1:8231/safe/static?id=1",
     "round": "r1",
     "exit": 0,
-    "ms": 4292,
+    "ms": 4501,
     "hit": false,
     "techs": "",
     "dbms": "",
@@ -8873,9 +9013,9 @@
     "verdict": "no_vulnerability_detected",
     "err": "",
     "raw": {
-      "scanId": "5IFAulpKf-kr",
+      "scanId": "ogmBk2PANhnd",
       "target": {
-        "id": "Fw1Rilsb88",
+        "id": "99XqJlcGgx",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/safe/static?id=1",
         "method": "GET",
@@ -9015,8 +9155,8 @@
           }
         }
       },
-      "startedAt": "2026-09-10T14:53:58.741Z",
-      "finishedAt": "2026-09-10T14:54:02.333Z",
+      "startedAt": "2026-09-10T15:37:16.767Z",
+      "finishedAt": "2026-09-10T15:37:20.368Z",
       "dbms": null,
       "points": [
         {

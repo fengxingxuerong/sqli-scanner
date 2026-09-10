@@ -1,5 +1,5 @@
-<!doctype html><html lang="zh-CN" data-page-node-id="EBoOOJwnvKyPq0BvFSebsX"><head data-page-node-id="usuNA49Fo0H6lls9YpeF36"><meta charset="utf-8" data-page-node-id="jhJOO7dnmUs3g4jfSshgMX">
-<meta name="viewport" content="width=device-width,initial-scale=1" data-page-node-id="MuqRkUz2JiDCfSVodjE3X3">
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
 <title>sqli-scanner 实战评测报告 · 2026-09-10</title>
 <style>
 :root{--bg:#0e1116;--panel:#161b22;--line:#262d36;--fg:#e6edf3;--dim:#8b949e;
@@ -33,372 +33,378 @@ ul{padding-left:20px}li{margin:5px 0}
 code{background:#1c2230;padding:1px 6px;border-radius:4px;font-size:12px;color:#79c0ff}
 pre{background:#0b0e13;border:1px solid var(--line);border-radius:8px;padding:12px;overflow:auto;font-size:12px}
 .foot{color:var(--dim);font-size:12px;margin-top:28px;border-top:1px solid var(--line);padding-top:12px}
-</style></head><body data-page-node-id="KvCs6aSFkSytLftwUVBTCJ"><div class="wrap" data-page-node-id="d9yS3nHG4LR6v0xkjcAXEa">
+</style></head><body><div class="wrap">
 
-<h1 data-page-node-id="7Xg8It0G3rtmRO0utlLuLD">sqli-scanner 实战评测报告</h1>
-<div class="sub" data-page-node-id="vrmGcZakiVKUEJ6OJpOpGg">评测日期 2026-09-10 · 靶场：真实 MySQL 8.0.37（127.0.0.1:3306）· 24 个靶点（17 可注入 + 7 安全对照）· 对照工具 sqlmap 1.10.7#pip</div>
+<h1>sqli-scanner 实战评测报告</h1>
+<div class="sub">评测日期 2026-09-10 · 靶场：真实 MySQL 8.0.37（127.0.0.1:3306）· 24 个靶点（17 可注入 + 7 安全对照）· 对照工具 sqlmap 1.10.7#pip</div>
 
-<div class="cards" data-page-node-id="T37jGov8gGw7mjDzZeUtEa">
-  <div class="card" data-page-node-id="DXBtoEd8XtvCVCqvgWODfN"><div class="k" data-page-node-id="5zgTpExuh7bZFQ4TjI9lTx">综合评分</div><div class="v" data-page-node-id="Rj7MxNewzW7d5gAyDxZHPE">87<small data-page-node-id="Afli7hibcB3MHNnJvM9J1o"> / 100</small></div></div>
-  <div class="card" data-page-node-id="AdOeIS5GAIGbVWgYlKVyDG"><div class="k" data-page-node-id="MWWJlTYh3tNWsAttCo3Coy">检出率（实战档）</div><div class="v" data-page-node-id="DiJyxHL2jzz08QzDN7jUMc">82%<small data-page-node-id="VM6ohY3lmBWEhfCpnFlWMO"> 14/17</small></div></div>
-  <div class="card" data-page-node-id="gPdhZHQMt62gTfTyBfYuA1"><div class="k" data-page-node-id="ihRllfgnGQh6qXcJiuJAok">检出率（默认档）</div><div class="v" data-page-node-id="H9UyAvjczdLadNM5GFJIaW">71%<small data-page-node-id="LVh04tkUieRn9nw79rFPcn"> 12/17</small></div></div>
-  <div class="card" data-page-node-id="HsC9DU2o1Oem1sGI8vlHD7"><div class="k" data-page-node-id="hbBvtQpZu2yKrWifwUVvfH">误报</div><div class="v" data-page-node-id="N9YycsXP2gjOusMoYFpDqq">0<small data-page-node-id="jH7wsgQTHPjdRY1XDQvnbr"> / 7 安全点</small></div></div>
-  <div class="card" data-page-node-id="PTLGiYJfM9ntNDb0eZbCXv"><div class="k" data-page-node-id="sx1DP0SFYYJA3y7hpfoo9t">sqlmap 同题</div><div class="v" data-page-node-id="7R2qWBbDO11yB6vASxrG2I">93%<small data-page-node-id="vCokzpe4DvlwOhqWKHbi9m"> 13/14</small></div></div>
+<div class="cards">
+  <div class="card"><div class="k">综合评分</div><div class="v">93<small> / 100</small></div></div>
+  <div class="card"><div class="k">检出率（实战档）</div><div class="v">94%<small> 16/17</small></div></div>
+  <div class="card"><div class="k">检出率（默认档）</div><div class="v">88%<small> 15/17</small></div></div>
+  <div class="card"><div class="k">误报</div><div class="v">0<small> / 7 安全点</small></div></div>
+  <div class="card"><div class="k">sqlmap 同题</div><div class="v">93%<small> 13/14</small></div></div>
 </div>
 
-<div class="find p0" style="border-left-color:var(--ok)" data-page-node-id="5e1Onmi6KrJfyIUKjrTnsz"><b data-page-node-id="WR8wSO0Tqsdj8FejUnjYHb">📌 本版为「修复后」复测</b>：报告中的 R1/R2 数据已包含当晚两处 P0 修复（<code data-page-node-id="lHlgAGpQVw3nAvh2XGTvFc">--test-headers/--test-path</code> 注入点发现 + 布尔盲注组间稳定差异判据）。修复前后对比见第七节。</div>
+<div class="find p0" style="border-left-color:var(--ok)"><b>📌 本版为「修复后」复测</b>：报告中的 R1/R2 数据已包含当晚两处 P0 修复（<code>--test-headers/--test-path</code> 注入点发现 + 布尔盲注组间稳定差异判据）。修复前后对比见第七节。</div>
 
-<h2 data-page-node-id="TbAYcOxf5TpnUG4BiahYqM">一、评测方法</h2>
-<ul data-page-node-id="CSjLqYUVGSF4k7A6NDdTeU">
-<li data-page-node-id="OKLA0BcKzvgG6diU8EdFHU"><b data-page-node-id="hfaWIjfqf4ysB7fDmhhZvC">靶场独立搭建</b>：不复用项目自带 e2e 靶场，新建 <code data-page-node-id="rux2FXZGOqwxMZh2NEQNZ9">e2e/redteam-lab</code>，全部端点对用户输入做真实字符串拼接后交给 MySQL 8.0.37 执行（无模拟）。</li>
-<li data-page-node-id="6eWomSFoNLsJ1VlH0LhsWP"><b data-page-node-id="yF7AGw0FgAWIqyQtJtL6ux">先立真值</b>：每个靶点先用已知 payload 人工验证是否真的可注入（<code data-page-node-id="nGJikt6pYiRQLNQHaGKqEl">selftest.mjs</code>），真值为假的靶点不计入检出率分母。</li>
-<li data-page-node-id="OuNiDqtpJWUYDgpk8AILHU"><b data-page-node-id="8txf3IWA4LQWuO0ftPYzok">两轮扫描</b>：R1 默认档（开箱即用）→ R2 实战档（<code data-page-node-id="8jbFsRMbPDV8alCZ80s78W">--level 3 --risk 2 --technique BEUSTQ</code>）。</li>
-<li data-page-node-id="KaZG2iPRAkkqUYUE1Z8bP5"><b data-page-node-id="eWLQv8L2A3Fkj7Xn4XyRwR">同题对照</b>：sqlmap 1.10.7 在完全相同的靶点上跑一遍，参数对齐默认档。</li>
-<li data-page-node-id="pRgTkCGuZG4jNry9QeSEby"><b data-page-node-id="WNPSkpgTmIcYlwVRzcknPe">误报对照</b>：7 个安全点（参数化查询、随机 nonce、恒定 500/403、302、静态页、白名单校验）必须零命中。</li>
+<h2>一、评测方法</h2>
+<ul>
+<li><b>靶场独立搭建</b>：不复用项目自带 e2e 靶场，新建 <code>e2e/redteam-lab</code>，全部端点对用户输入做真实字符串拼接后交给 MySQL 8.0.37 执行（无模拟）。</li>
+<li><b>先立真值</b>：每个靶点先用已知 payload 人工验证是否真的可注入（<code>selftest.mjs</code>），真值为假的靶点不计入检出率分母。</li>
+<li><b>两轮扫描</b>：R1 默认档（开箱即用）→ R2 实战档（<code>--level 3 --risk 2 --technique BEUSTQ</code>）。</li>
+<li><b>同题对照</b>：sqlmap 1.10.7 在完全相同的靶点上跑一遍，参数对齐默认档。</li>
+<li><b>误报对照</b>：7 个安全点（参数化查询、随机 nonce、恒定 500/403、302、静态页、白名单校验）必须零命中。</li>
 </ul>
 
-<h2 data-page-node-id="iNhHcUnNX3lRTA72aURyvI">二、逐靶点结果矩阵</h2>
-<table data-page-node-id="HN1oQCSnFwwPy2eEHi6SGv">
-<thead data-page-node-id="osDr1bCkCdabHx2caN5hGh"><tr data-page-node-id="xyWDXdy2FhsJ4Wj3JWGT6t"><th data-page-node-id="zlBNVw18e5fZGzjJBXSJc2">靶点</th><th data-page-node-id="e5xIwI6bszfGmWxuRKBWBy">真值</th><th data-page-node-id="sRhz2ckcmKnWuBk0jmSmlz">类型</th><th data-page-node-id="fd3a8V1iMa49xZPSuQVl9r">R1 默认</th><th data-page-node-id="NU5t9NiNuEE7MFwO3ieaAL">R2 实战</th><th data-page-node-id="aPCfslGQP6EHIgqe9VWSAC">命中技术位</th><th data-page-node-id="HKdvbYR1i6OWKYUe8CPfAy">sqlmap</th><th data-page-node-id="oBgm9nFBle3E6r0mJoac7m">请求数</th><th data-page-node-id="PshZY8AJxEBRj9gZCB6vj8">sqlmap 耗时</th></tr></thead>
-<tbody data-page-node-id="Xo26wfqSzHaX17eFQHrGeX"><tr data-page-node-id="1H0cyOVDB50xQmBbJaohC4">
-    <td class="id" data-page-node-id="Ive1O7YPnv4orX4JsLx242">A1-int-union</td>
-    <td data-page-node-id="gmonKEjpAtoqDsuwA2Mici"><span class="tag v" data-page-node-id="cFkT66seCbUMDAlOEv967a">可注入</span></td>
-    <td class="tech" data-page-node-id="vU2pGtJCKntCQ6SZ27NnEP">union</td>
-    <td data-page-node-id="i15BncNz22Txxw1TEW3OYg">✅</td>
-    <td data-page-node-id="Aei0Az9dKqLBC3okoj6SQt">✅</td>
-    <td class="tech" data-page-node-id="dfE4FlPbZ0bzSyExCP7lUH">union+boolean</td>
-    <td data-page-node-id="wXQe5y6EXnDI4Hi1ciwcpE">✅</td>
-    <td class="num" data-page-node-id="q6y0jxnDuGs58bAkGaM69G">121</td>
-    <td class="num" data-page-node-id="Urywiz80IH6q1i40YJEBgT">23.2s</td>
-  </tr><tr data-page-node-id="qXUqNu33sLbv6VYQYmdAmR">
-    <td class="id" data-page-node-id="YNK9Adegla8e3CJZjLewTj">A2-str-union</td>
-    <td data-page-node-id="IvTdDfRZ45s5KDJdxbdf7Y"><span class="tag v" data-page-node-id="Sp0oNmijwQsapQvy4U5ZCl">可注入</span></td>
-    <td class="tech" data-page-node-id="PUp9DwZ2DbO99Ow4cRh1aH">union</td>
-    <td data-page-node-id="pVHzfRMkHbAx5OUKLe02wc">✅</td>
-    <td data-page-node-id="H1FQUFTZj8HABL8nSGfRon">✅</td>
-    <td class="tech" data-page-node-id="r5V3p3i3u4sLDXbYG8nM3k">union+boolean</td>
-    <td data-page-node-id="t3PisL0D2JQATXf0vEW95Q">✅</td>
-    <td class="num" data-page-node-id="u3Bq70l1L25pLmFOCRj4R9">109</td>
-    <td class="num" data-page-node-id="3HNE17gxB7yRQK5MJeFBwR">23.3s</td>
-  </tr><tr data-page-node-id="FSV6o2jekBItVANMEUXefW">
-    <td class="id" data-page-node-id="nYNvAxex1H0B2idlG8oIkA">A3-like</td>
-    <td data-page-node-id="B5xq9x5d3sDfhNGvK96lqR"><span class="tag v" data-page-node-id="Mfb4X7Q5l4woz6GKzfuECV">可注入</span></td>
-    <td class="tech" data-page-node-id="eSAr28q3h7rPHWr7audNbu">union</td>
-    <td data-page-node-id="7M9z3EvRhjwR3Sm0jvz6Ix">✅</td>
-    <td data-page-node-id="czuFMyvpjeudxBzyiETxHw">✅</td>
-    <td class="tech" data-page-node-id="oOddphfh6SLqj3TTkaeUfz">union+boolean</td>
-    <td data-page-node-id="EWLoSelZcaEAJxOy12m9O7">✅</td>
-    <td class="num" data-page-node-id="EEjL2H6dr3JfMsDtB1WGaO">110</td>
-    <td class="num" data-page-node-id="7nOq1s2mpa9U7tlBErq78G">23.4s</td>
-  </tr><tr data-page-node-id="pnuRwsCY6YSD4F7l9HnSvW">
-    <td class="id" data-page-node-id="kQN1wK44RyikvJkJsBytIR">A4-orderby</td>
-    <td data-page-node-id="BB2xeDiS0MbPU0DeFEonMH"><span class="tag v" data-page-node-id="J0x5UGnC81uz7T3YqpLZmv">可注入</span></td>
-    <td class="tech" data-page-node-id="MI6AutPgLQCc1gTGAgncIX">error/boolean</td>
-    <td data-page-node-id="80Qnwy0xrmQsApqhLj8SOb">❌</td>
-    <td data-page-node-id="7lHsB3PDQeAfbAMen9uCxf">✅</td>
-    <td class="tech" data-page-node-id="AgESk17T542Gdg1vQQUhKu">boolean</td>
-    <td data-page-node-id="xckO1W0irKbWCYy7Qv5QWJ">✅</td>
-    <td class="num" data-page-node-id="7ATPrD5AxveAYt29HLAX1S">144</td>
-    <td class="num" data-page-node-id="A5APBe8VHEC8TMRx8Hj2Dc">24.7s</td>
-  </tr><tr data-page-node-id="NMByO2GvAOrqXNgol6kdPJ">
-    <td class="id" data-page-node-id="kzqQkVJjEXAeI7UatpM8cJ">A5-dual-param</td>
-    <td data-page-node-id="PHJMG18tV8hn5TNMy4jLQi"><span class="tag v" data-page-node-id="pW953Wx0dI5EczB754D6BP">可注入</span></td>
-    <td class="tech" data-page-node-id="uIVYOUL764nyzcKsTylASg">union</td>
-    <td data-page-node-id="abtCPAjM1pjgnpHyLAeRLg">✅</td>
-    <td data-page-node-id="7DEM7CkTHm9MjKgvPDHMR3">✅</td>
-    <td class="tech" data-page-node-id="NZB2AvyxKaQfd4N80NmJJl">union+boolean</td>
-    <td data-page-node-id="FfC4ASl1iOMUC8TehEBAh9">✅</td>
-    <td class="num" data-page-node-id="uyijKAWCGBShuQqgAOlQjF">126</td>
-    <td class="num" data-page-node-id="rPtaU2sPPWYhkj5mrKDmoo">23.4s</td>
-  </tr><tr data-page-node-id="NYSNCWlT0oiemAIz5H3FT8">
-    <td class="id" data-page-node-id="wd5CSInNdJbAhMyMHDjSgz">B6-error</td>
-    <td data-page-node-id="04yzunNAZCDPiK4tnl1rJ9"><span class="tag v" data-page-node-id="Tztyj1wKCoZChIXYOksD4h">可注入</span></td>
-    <td class="tech" data-page-node-id="aTekitIcGkZgN6S0nHMpdE">error</td>
-    <td data-page-node-id="0THQprfXlzEkH3ybikXBJv">✅</td>
-    <td data-page-node-id="AfUyWvqfoAWhKbe57muL0J">✅</td>
-    <td class="tech" data-page-node-id="Gg0SzTfstmvl5WviwyauFD">union+boolean</td>
-    <td data-page-node-id="Wxavm0KEelRaaePwZOujwG">✅</td>
-    <td class="num" data-page-node-id="HflOYGlEhReJM7S47Wh5im">121</td>
-    <td class="num" data-page-node-id="FpUI2pUqjjPvwGQd2HJ7uZ">23.4s</td>
-  </tr><tr data-page-node-id="vIosIHcxakE0S17qj0clgH">
-    <td class="id" data-page-node-id="aM6zt90rEJx5gMcT4tOHmT">C7-boolean</td>
-    <td data-page-node-id="xbKCPqUzlCP8r88ncDgjUb"><span class="tag v" data-page-node-id="1qyLDLGO5cFWXULShhjYyG">可注入</span></td>
-    <td class="tech" data-page-node-id="cDJhP72Fo8BrTumVHyyRoT">boolean</td>
-    <td data-page-node-id="rGS4YxdeV6Y4EVtezWLAhg">✅</td>
-    <td data-page-node-id="RbmZCgNgH269THzkMoqBW8">✅</td>
-    <td class="tech" data-page-node-id="mHGGU6BYMfO6NSuNR7SbJ7">boolean</td>
-    <td data-page-node-id="k1xoD6p8tLthPBwJnsywnF">✅</td>
-    <td class="num" data-page-node-id="r69R8WdRGcQ5G2J9BsDU8I">248</td>
-    <td class="num" data-page-node-id="y8AIZvqnbJ1BCEkGbbGVnj">23.1s</td>
-  </tr><tr data-page-node-id="TncFWeOlVWQhpDN9NwwWKO">
-    <td class="id" data-page-node-id="XLSlbrGPBLX2Xg6XNyH4BG">C8-time</td>
-    <td data-page-node-id="XpGtHtT6FStXypuECZ2LeI"><span class="tag v" data-page-node-id="ZMAWVrrp4ljiIbfc0yEVUU">可注入</span></td>
-    <td class="tech" data-page-node-id="1MznNkcPLbd0fx5BfAvpdT">time</td>
-    <td data-page-node-id="30Ud5OwEss3vYtini4Gr7a">✅</td>
-    <td data-page-node-id="bTLnHVdbjW9jqQ1OATHM7B">✅</td>
-    <td class="tech" data-page-node-id="ABo85NNIEIJahy2xnUJstL">time</td>
-    <td data-page-node-id="vpwoLbDiwhVpAS53XTPyGq">✅</td>
-    <td class="num" data-page-node-id="nvqQeZD6iT3R7JVTydGwTQ">284</td>
-    <td class="num" data-page-node-id="OgxXebJXvpzcmci7IP0MpW">31.9s</td>
-  </tr><tr data-page-node-id="gSAdBA1wwUfHz5GBNMQU29">
-    <td class="id" data-page-node-id="DUtbc9BbGlEdVsMQGP1fZt">D9-post-form</td>
-    <td data-page-node-id="Ba83e26TWjehvAZI135Ccx"><span class="tag v" data-page-node-id="C0V50CyOjjDJdaxBBDsC99">可注入</span></td>
-    <td class="tech" data-page-node-id="po1u6y4D9TvEAPuSVsZO0G">union</td>
-    <td data-page-node-id="ovakFwIkGlOoUMvp1AgaQS">✅</td>
-    <td data-page-node-id="EqFuKAF49EwF9XdefybKTE">✅</td>
-    <td class="tech" data-page-node-id="w3rRo7FDRZ94Y5tmuCCLio">union+boolean+time</td>
-    <td data-page-node-id="fH2ob51ZVngVSHMzvHzcIQ">✅</td>
-    <td class="num" data-page-node-id="SPaSlOV8ndqOBRfmtSY4U8">306</td>
-    <td class="num" data-page-node-id="AIA0HQ0HIVea9upt9sa102">22.9s</td>
-  </tr><tr data-page-node-id="vUJImCMSWCZNmV2x73dED0">
-    <td class="id" data-page-node-id="BzSMDKGxl3hJDmRPnPuQ2e">D10-json</td>
-    <td data-page-node-id="ZSavTzGheNmaarhMdGZgDX"><span class="tag v" data-page-node-id="X5DFkvRi8veZskeO5hvQNQ">可注入</span></td>
-    <td class="tech" data-page-node-id="Yj3qzEcoghN9XGj8o4WZF6">union</td>
-    <td data-page-node-id="rzWBM1ft7OPw3y8ugCIi4l">✅</td>
-    <td data-page-node-id="lgP1Se7juqQW9br0wr4bV2">✅</td>
-    <td class="tech" data-page-node-id="MeAD6MJ7N3ykDgayhWuYhR">union+boolean</td>
-    <td data-page-node-id="wCW2W3cK8Bgson9jBZOBpj">✅</td>
-    <td class="num" data-page-node-id="bSNrk1gJ7QlGJqLexyuIHl">121</td>
-    <td class="num" data-page-node-id="Liw8g8BukuSxul8QubFlnZ">22.6s</td>
-  </tr><tr data-page-node-id="k9I0yTTuBeMbVCCkLiwAjM">
-    <td class="id" data-page-node-id="XqzrMVwwGEnuh2md2kHnag">D11-cookie</td>
-    <td data-page-node-id="XrltYuq0PvPQIUfIUAEqgu"><span class="tag v" data-page-node-id="lOR0jlY7KbcAJwkNof45oy">可注入</span></td>
-    <td class="tech" data-page-node-id="Ii5ZlOcCrmgtq556Don1KX">union</td>
-    <td data-page-node-id="2ADYPqbFpuEt8JeAIpKOPi">❌</td>
-    <td data-page-node-id="TSGzZiooB0ls0Dm4wYmFFq">✅</td>
-    <td class="tech" data-page-node-id="ZLVI6B7Ex1yEpCj1cFwX2B">union+boolean</td>
-    <td data-page-node-id="kLsuz6Q3igX8TH8YlaOqpA">❌</td>
-    <td class="num" data-page-node-id="tvPLUxWY5Q1hQi0AlT2ELE">121</td>
-    <td class="num" data-page-node-id="o8XZFtRJHdBsisUzDhwG2P">NaNs</td>
-  </tr><tr data-page-node-id="YqsJPf1UIEOYyYObfwCwaL">
-    <td class="id" data-page-node-id="vSW4evULetfjenCOAxgBS6">D12-xff-header</td>
-    <td data-page-node-id="OXdeGAPXAPrzmlDenCWX1c"><span class="tag v" data-page-node-id="TC6AR5LVCDlKfU4zMBMSaD">可注入</span></td>
-    <td class="tech" data-page-node-id="d7BTE9Q5bHo7e3ME1xdR2T">union</td>
-    <td data-page-node-id="RPdHPCFCjnPAyikbyweD9B">✅</td>
-    <td data-page-node-id="8uva8MVofzbc16oEkSRyx2">✅</td>
-    <td class="tech" data-page-node-id="IYiOR4BmWnPOnOEtcCoP6a">union+boolean</td>
-    <td data-page-node-id="iTdyQIEuOPWnHBHs98yiMk">❌</td>
-    <td class="num" data-page-node-id="JDlXgwgQCUYG6RBCfk7ncS">121</td>
-    <td class="num" data-page-node-id="26wCUR4p2MhHF7EEEaYqiT">0.8s</td>
-  </tr><tr data-page-node-id="l4veJQNW4VXo9YinyiyHIM">
-    <td class="id" data-page-node-id="RRHadZe82NyE1tJN6QSFia">D13-path</td>
-    <td data-page-node-id="K8d5hSyB5NhBmQ75ARdLLx"><span class="tag v" data-page-node-id="z4vzaGjB3KecGaY2MWyryi">可注入</span></td>
-    <td class="tech" data-page-node-id="Q0rptZ6enI90tWzysKf9oQ">union</td>
-    <td data-page-node-id="P1wKC3Akk2QlWiBJooUKsv">✅</td>
-    <td data-page-node-id="aDA3zowiDNI17CbgKoAU2o">✅</td>
-    <td class="tech" data-page-node-id="jTRbY96tStctYwSKIBJ8Pj">union+error+boolean</td>
-    <td data-page-node-id="1qXC9ZQAmbsIDYyqrsCl7O">✅</td>
-    <td class="num" data-page-node-id="zcmyVxql6clquQ3uM3NUZ7">83</td>
-    <td class="num" data-page-node-id="kPpIyWCcaRvs605LEhd2B2">22.5s</td>
-  </tr><tr data-page-node-id="XmZIxV18uPRIQQ5krGYwjp">
-    <td class="id" data-page-node-id="xPnFSlO6zzAtpUMmTfwGFD">D14-base64</td>
-    <td data-page-node-id="aCggIX4Id3agwkq1IROmtM"><span class="tag v" data-page-node-id="gvACIwLwfs6fdQQ5BgMLcF">可注入</span></td>
-    <td class="tech" data-page-node-id="eVBHh8si4CLWNhTFKdGtX2">union</td>
-    <td data-page-node-id="h6OYD0uQ82CbKse7hpr3o2">❌</td>
-    <td data-page-node-id="D8m9G0yBsUBaOKO7kNLCnf">❌</td>
-    <td class="tech" data-page-node-id="o3S8VdYEYbH3CAMjAXKuVf">-</td>
-    <td data-page-node-id="GWoxbHJpFZBg5TvLq2ONjC">❌</td>
-    <td class="num" data-page-node-id="JtnzToOg55xWgCWzs1nwsz">170</td>
-    <td class="num" data-page-node-id="rlNfkm5USs0SdcRXpFfmDk">NaNs</td>
-  </tr><tr data-page-node-id="mUGJ1ZglCiOSQnfjla0Kza">
-    <td class="id" data-page-node-id="8rVB3HHsKa2z1GcfrmhTx2">E15-second-order</td>
-    <td data-page-node-id="3xeSwb51Oz54L0k4TEQw9V"><span class="tag v" data-page-node-id="ckm7PWCIluvEeUxB48ywWw">可注入</span></td>
-    <td class="tech" data-page-node-id="45cYKHK1XC9z5q4J0n023h">second_order</td>
-    <td data-page-node-id="AL2DAiwdjDz99kxiMcmwJJ">❌</td>
-    <td data-page-node-id="9gmXRIRTMgWEEpEyDR5m9v">❌</td>
-    <td class="tech" data-page-node-id="JIQykp7KroQ91ACpNkHWc1">-</td>
-    <td data-page-node-id="0MWLXbHCGRDt0IFbxSyccF">❌</td>
-    <td class="num" data-page-node-id="Jg68HrFpxEacO4KHK5NT2t">250</td>
-    <td class="num" data-page-node-id="riyfmaSBGGmwn5VKBqzTDg">NaNs</td>
-  </tr><tr data-page-node-id="47vBKsdL1T0p3kkZRP9XF0">
-    <td class="id" data-page-node-id="bvsHfGtAOyCcVZV2j5njlf">E16-stacked</td>
-    <td data-page-node-id="22ArQiuiFwH38XgxHU1V43"><span class="tag v" data-page-node-id="YcKKhCPqtW8stTVkUt6qA5">可注入</span></td>
-    <td class="tech" data-page-node-id="a1DYoEr38c5hSsmcEz8ATF">stacked</td>
-    <td data-page-node-id="qbNEKql0BEWcWmUY0FjCLl">✅</td>
-    <td data-page-node-id="7WSDLBuXMzbozg83lA2WGZ">✅</td>
-    <td class="tech" data-page-node-id="YxLebxcdL4AAtx9mcpd6XO">union+boolean</td>
-    <td data-page-node-id="KYqnvfemLNyPQW8fKbesYu">✅</td>
-    <td class="num" data-page-node-id="5h4oCQJKcwhmvj3ooAXC1w">122</td>
-    <td class="num" data-page-node-id="BFlUU74r636GDg0cXvUtQJ">22.4s</td>
-  </tr><tr data-page-node-id="8PmeB4oD92kGt16xoG0klO">
-    <td class="id" data-page-node-id="jN5lpCRolNWUuUoewuyeMV">E17-waf-guarded</td>
-    <td data-page-node-id="rVdRgp4f2axrNWIQma6FHe"><span class="tag v" data-page-node-id="UuCDdCI7KovBn8caUdqOzG">可注入</span></td>
-    <td class="tech" data-page-node-id="lKzBDIzFEQziYfItRKZfnU">union(waf)</td>
-    <td data-page-node-id="QrpzzlgxygySCjdQ9pawgr">❌</td>
-    <td data-page-node-id="4JnvxFtqJagOkH9iq0J5A6">❌</td>
-    <td class="tech" data-page-node-id="eu4GZxl5b6AwIs20RrKuGp">-</td>
-    <td data-page-node-id="9qxNa9yorPBtVGKxXX6OiX">✅</td>
-    <td class="num" data-page-node-id="fP5AReMXDyK0UUIN58Kdxg">149</td>
-    <td class="num" data-page-node-id="FjNH8rDVWhfq1krIQL8G38">2.2s</td>
-  </tr><tr data-page-node-id="nytaVIdjtaz9WwUkvVbJT3">
-    <td class="id" data-page-node-id="uEYNbgqk10rf8itdpFUXHL">F18-safe-item</td>
-    <td data-page-node-id="DNXxWZceTFCLiQnUZ8AbBu"><span class="tag s" data-page-node-id="L2DZFBGVXmmtQaUNUDzClx">安全</span></td>
-    <td class="tech" data-page-node-id="BopzGSHoXA1EaCwctDbTL9">-</td>
-    <td data-page-node-id="u65u4l00dowgN6MvDZSC72">✅干净</td>
-    <td data-page-node-id="hsrVIMFY83tVddjT3VJhVC">✅干净</td>
-    <td class="tech" data-page-node-id="yE2zoDtBtWPnqI0VcBOzQ7">-</td>
-    <td data-page-node-id="M7GIALTkHnd75cYzgqc4FH">✅干净</td>
-    <td class="num" data-page-node-id="JSE9qDF9gSISfBS3emGtbx">250</td>
-    <td class="num" data-page-node-id="EdBqpPc4Yth9hU3xIGUpKG">2.5s</td>
-  </tr><tr data-page-node-id="oO3FRB0fCkCkHAZ0JyR6G9">
-    <td class="id" data-page-node-id="MuqVE3XW5stWrtO2SF9t7d">F19-safe-search</td>
-    <td data-page-node-id="SBP4e6jTI3biKkGfQ7iaVs"><span class="tag s" data-page-node-id="muz3MymQRH1jYYwOO4xwHw">安全</span></td>
-    <td class="tech" data-page-node-id="fim7d3Ar3aD3AEdF2zKa51">-</td>
-    <td data-page-node-id="I8qjQn2BqoBbapXkqGKhcv">✅干净</td>
-    <td data-page-node-id="eTTAlvukcgGcvYxwlRp1IB">✅干净</td>
-    <td class="tech" data-page-node-id="6Zj0PbCapgL2XacT61oPTX">-</td>
-    <td data-page-node-id="2fLOHKo79I1pYkajw2A5i3">✅干净</td>
-    <td class="num" data-page-node-id="AJawqHHEZ4A7n0gETqh9rw">242</td>
-    <td class="num" data-page-node-id="VFczQc7jW8gpScOivGgrr4">NaNs</td>
-  </tr><tr data-page-node-id="o97dfcQXVqb9XYtuznwWvt">
-    <td class="id" data-page-node-id="V1yHvD5xmXZ8Bl2IdJqQ7w">F20-safe-rand</td>
-    <td data-page-node-id="s3GMqPU3FblDOErQGWb4wu"><span class="tag s" data-page-node-id="6j7QhNFMzuMXHNiTk7Q55X">安全</span></td>
-    <td class="tech" data-page-node-id="I7MS6UhQOg4MwEFYtPlbji">-</td>
-    <td data-page-node-id="Xs7xueVvRdmrnybWvcrAv4">✅干净</td>
-    <td data-page-node-id="pmg9FXCxYum9YD3UCfX6Pk">✅干净</td>
-    <td class="tech" data-page-node-id="4OqSz9p09CPQZ2HjQaezCK">-</td>
-    <td data-page-node-id="3UlNKH8eUuU9LRZljiqjJi">✅干净</td>
-    <td class="num" data-page-node-id="0f9FxCB2vwMDN9UAMmNmCf">346</td>
-    <td class="num" data-page-node-id="emJKOyoZe5MlfDTHURF2af">2.5s</td>
-  </tr><tr data-page-node-id="BYFDFC8C4F3a9s8tKcdIDw">
-    <td class="id" data-page-node-id="fiHTZdyk8YiLDAfYmggm1l">F21-safe-500</td>
-    <td data-page-node-id="T0zc0rllXSprq9Qa8GNLlq"><span class="tag s" data-page-node-id="IBhbcf8wwOeNJg1au4GwOA">安全</span></td>
-    <td class="tech" data-page-node-id="n67VWF6qDKzYb72oJigRe7">-</td>
-    <td data-page-node-id="Bobdi9ztJdZL6xL6edAhTH">✅干净</td>
-    <td data-page-node-id="mfQE3gRJitEu84Dn1U1Yk8">✅干净</td>
-    <td class="tech" data-page-node-id="L0RDC9yZ996H4PPCSOkJei">-</td>
-    <td data-page-node-id="dKVGN6GWB8znlhmKTRVp8h">✅干净</td>
-    <td class="num" data-page-node-id="ZYuN2G0x0NtKNxKZvU2cqm">148</td>
-    <td class="num" data-page-node-id="WLAKnXeb2qUC4ZKEdDFWRk">2.4s</td>
-  </tr><tr data-page-node-id="5rooCmS5MJA0pwSjP3YJyK">
-    <td class="id" data-page-node-id="BYmOY3MmSNp6UxTa1Xwofh">F22-safe-403</td>
-    <td data-page-node-id="ZvueptbzRwCntZDxBEmWP6"><span class="tag s" data-page-node-id="uWNaiLBohgXTeWgR2ucLPk">安全</span></td>
-    <td class="tech" data-page-node-id="MHBi6XvDnX7QktL8Dpfln8">-</td>
-    <td data-page-node-id="hJQDfkW4uHO0IUxcy5Wd6m">✅干净</td>
-    <td data-page-node-id="GiIc84ags4q9VvTOUDFmDP">✅干净</td>
-    <td class="tech" data-page-node-id="snwhFmIHXje8LM3AzMZ4DP">-</td>
-    <td data-page-node-id="80DAofplKxA15mMz1NF8Ly">✅干净</td>
-    <td class="num" data-page-node-id="2ONuiUgAgObmuKp3zjHQOd">149</td>
-    <td class="num" data-page-node-id="clSkesnkKB5wDEknl6ZhZW">2.1s</td>
-  </tr><tr data-page-node-id="UMyn67jRGb4Zr7uXytApM9">
-    <td class="id" data-page-node-id="19JOTNsYZH4Caxv0t4EtpR">F23-safe-redirect</td>
-    <td data-page-node-id="ngw3Co3dWC8Nab1RxeHPnQ"><span class="tag s" data-page-node-id="bYAfxBoEhJkrBHP5Koby2h">安全</span></td>
-    <td class="tech" data-page-node-id="jFGNW8r5jB61cC9NSCevAN">-</td>
-    <td data-page-node-id="HsHZfLazsskhwzW5ohS9Hd">✅干净</td>
-    <td data-page-node-id="Suk3jSpLhq26t5uAX8UWbk">✅干净</td>
-    <td class="tech" data-page-node-id="Oth17p4kglDQdBx5jH539J">-</td>
-    <td data-page-node-id="HfAAa6u6erM6PrfbDyzKlM">✅干净</td>
-    <td class="num" data-page-node-id="2EiDUkVPaPybiuXcYnitzl">250</td>
-    <td class="num" data-page-node-id="lJH6xVBSC5LuOLojKoyRE8">NaNs</td>
-  </tr><tr data-page-node-id="nA3I1mVHfBoBxY0KgaH4Vq">
-    <td class="id" data-page-node-id="NUUjsBi0Vh4eWVNMp7gauA">F24-safe-static</td>
-    <td data-page-node-id="FeDHFC0XfplITbF6WmaBK3"><span class="tag s" data-page-node-id="hIrxBtOh3D4STrI2XqV3SU">安全</span></td>
-    <td class="tech" data-page-node-id="cFEAwR9f1ion5q7k5Ajy65">-</td>
-    <td data-page-node-id="PvdrYSfu8lF0QjBWRKltJV">✅干净</td>
-    <td data-page-node-id="qljjFdlcdXzMKEa2EKQPRa">✅干净</td>
-    <td class="tech" data-page-node-id="zz1bIqXzIzilUz6xmiXZqZ">-</td>
-    <td data-page-node-id="qDPh51PrpnGtndyzrKi7tS">✅干净</td>
-    <td class="num" data-page-node-id="mL2Jiib02YB8EfXUs0gz7o">250</td>
-    <td class="num" data-page-node-id="C4m5vxzL4S3K9mr4MG7dUn">NaNs</td>
+<h2>二、逐靶点结果矩阵</h2>
+<table>
+<thead><tr><th>靶点</th><th>真值</th><th>类型</th><th>R1 默认</th><th>R2 实战</th><th>命中技术位</th><th>sqlmap</th><th>请求数</th><th>sqlmap 耗时</th></tr></thead>
+<tbody><tr>
+    <td class="id">A1-int-union</td>
+    <td><span class="tag v">可注入</span></td>
+    <td class="tech">union</td>
+    <td>✅</td>
+    <td>✅</td>
+    <td class="tech">union+error+boolean</td>
+    <td>✅</td>
+    <td class="num">58</td>
+    <td class="num">23.2s</td>
+  </tr><tr>
+    <td class="id">A2-str-union</td>
+    <td><span class="tag v">可注入</span></td>
+    <td class="tech">union</td>
+    <td>✅</td>
+    <td>✅</td>
+    <td class="tech">union+error+boolean</td>
+    <td>✅</td>
+    <td class="num">46</td>
+    <td class="num">23.3s</td>
+  </tr><tr>
+    <td class="id">A3-like</td>
+    <td><span class="tag v">可注入</span></td>
+    <td class="tech">union</td>
+    <td>✅</td>
+    <td>✅</td>
+    <td class="tech">union+error+boolean</td>
+    <td>✅</td>
+    <td class="num">47</td>
+    <td class="num">23.4s</td>
+  </tr><tr>
+    <td class="id">A4-orderby</td>
+    <td><span class="tag v">可注入</span></td>
+    <td class="tech">error/boolean</td>
+    <td>✅</td>
+    <td>✅</td>
+    <td class="tech">error+boolean</td>
+    <td>✅</td>
+    <td class="num">81</td>
+    <td class="num">24.7s</td>
+  </tr><tr>
+    <td class="id">A5-dual-param</td>
+    <td><span class="tag v">可注入</span></td>
+    <td class="tech">union</td>
+    <td>✅</td>
+    <td>✅</td>
+    <td class="tech">union+error+boolean</td>
+    <td>✅</td>
+    <td class="num">63</td>
+    <td class="num">23.4s</td>
+  </tr><tr>
+    <td class="id">B6-error</td>
+    <td><span class="tag v">可注入</span></td>
+    <td class="tech">error</td>
+    <td>✅</td>
+    <td>✅</td>
+    <td class="tech">union+error+boolean</td>
+    <td>✅</td>
+    <td class="num">58</td>
+    <td class="num">23.4s</td>
+  </tr><tr>
+    <td class="id">C7-boolean</td>
+    <td><span class="tag v">可注入</span></td>
+    <td class="tech">boolean</td>
+    <td>✅</td>
+    <td>✅</td>
+    <td class="tech">boolean</td>
+    <td>✅</td>
+    <td class="num">248</td>
+    <td class="num">23.1s</td>
+  </tr><tr>
+    <td class="id">C8-time</td>
+    <td><span class="tag v">可注入</span></td>
+    <td class="tech">time</td>
+    <td>✅</td>
+    <td>✅</td>
+    <td class="tech">time</td>
+    <td>✅</td>
+    <td class="num">284</td>
+    <td class="num">31.9s</td>
+  </tr><tr>
+    <td class="id">D9-post-form</td>
+    <td><span class="tag v">可注入</span></td>
+    <td class="tech">union</td>
+    <td>✅</td>
+    <td>✅</td>
+    <td class="tech">union+error+boolean</td>
+    <td>✅</td>
+    <td class="num">280</td>
+    <td class="num">22.9s</td>
+  </tr><tr>
+    <td class="id">D10-json</td>
+    <td><span class="tag v">可注入</span></td>
+    <td class="tech">union</td>
+    <td>✅</td>
+    <td>✅</td>
+    <td class="tech">union+error+boolean</td>
+    <td>✅</td>
+    <td class="num">58</td>
+    <td class="num">22.6s</td>
+  </tr><tr>
+    <td class="id">D11-cookie</td>
+    <td><span class="tag v">可注入</span></td>
+    <td class="tech">union</td>
+    <td>❌</td>
+    <td>✅</td>
+    <td class="tech">union+error+boolean</td>
+    <td>❌</td>
+    <td class="num">58</td>
+    <td class="num">NaNs</td>
+  </tr><tr>
+    <td class="id">D12-xff-header</td>
+    <td><span class="tag v">可注入</span></td>
+    <td class="tech">union</td>
+    <td>✅</td>
+    <td>✅</td>
+    <td class="tech">union+error+boolean</td>
+    <td>❌</td>
+    <td class="num">58</td>
+    <td class="num">0.8s</td>
+  </tr><tr>
+    <td class="id">D13-path</td>
+    <td><span class="tag v">可注入</span></td>
+    <td class="tech">union</td>
+    <td>✅</td>
+    <td>✅</td>
+    <td class="tech">union+error+boolean</td>
+    <td>✅</td>
+    <td class="num">58</td>
+    <td class="num">22.5s</td>
+  </tr><tr>
+    <td class="id">D14-base64</td>
+    <td><span class="tag v">可注入</span></td>
+    <td class="tech">union</td>
+    <td>✅</td>
+    <td>✅</td>
+    <td class="tech">error</td>
+    <td>❌</td>
+    <td class="num">85</td>
+    <td class="num">NaNs</td>
+  </tr><tr>
+    <td class="id">E15-second-order</td>
+    <td><span class="tag v">可注入</span></td>
+    <td class="tech">second_order</td>
+    <td>✅</td>
+    <td>✅</td>
+    <td class="tech">second_order</td>
+    <td>❌</td>
+    <td class="num">9</td>
+    <td class="num">NaNs</td>
+  </tr><tr>
+    <td class="id">E16-stacked</td>
+    <td><span class="tag v">可注入</span></td>
+    <td class="tech">stacked</td>
+    <td>✅</td>
+    <td>✅</td>
+    <td class="tech">union+error+boolean</td>
+    <td>✅</td>
+    <td class="num">59</td>
+    <td class="num">22.4s</td>
+  </tr><tr>
+    <td class="id">E17-waf-guarded</td>
+    <td><span class="tag v">可注入</span></td>
+    <td class="tech">union(waf)</td>
+    <td>❌</td>
+    <td>❌</td>
+    <td class="tech">-</td>
+    <td>✅</td>
+    <td class="num">149</td>
+    <td class="num">2.2s</td>
+  </tr><tr>
+    <td class="id">F18-safe-item</td>
+    <td><span class="tag s">安全</span></td>
+    <td class="tech">-</td>
+    <td>✅干净</td>
+    <td>✅干净</td>
+    <td class="tech">-</td>
+    <td>✅干净</td>
+    <td class="num">250</td>
+    <td class="num">2.5s</td>
+  </tr><tr>
+    <td class="id">F19-safe-search</td>
+    <td><span class="tag s">安全</span></td>
+    <td class="tech">-</td>
+    <td>✅干净</td>
+    <td>✅干净</td>
+    <td class="tech">-</td>
+    <td>✅干净</td>
+    <td class="num">242</td>
+    <td class="num">NaNs</td>
+  </tr><tr>
+    <td class="id">F20-safe-rand</td>
+    <td><span class="tag s">安全</span></td>
+    <td class="tech">-</td>
+    <td>✅干净</td>
+    <td>✅干净</td>
+    <td class="tech">-</td>
+    <td>✅干净</td>
+    <td class="num">242</td>
+    <td class="num">2.5s</td>
+  </tr><tr>
+    <td class="id">F21-safe-500</td>
+    <td><span class="tag s">安全</span></td>
+    <td class="tech">-</td>
+    <td>✅干净</td>
+    <td>✅干净</td>
+    <td class="tech">-</td>
+    <td>✅干净</td>
+    <td class="num">148</td>
+    <td class="num">2.4s</td>
+  </tr><tr>
+    <td class="id">F22-safe-403</td>
+    <td><span class="tag s">安全</span></td>
+    <td class="tech">-</td>
+    <td>✅干净</td>
+    <td>✅干净</td>
+    <td class="tech">-</td>
+    <td>✅干净</td>
+    <td class="num">149</td>
+    <td class="num">2.1s</td>
+  </tr><tr>
+    <td class="id">F23-safe-redirect</td>
+    <td><span class="tag s">安全</span></td>
+    <td class="tech">-</td>
+    <td>✅干净</td>
+    <td>✅干净</td>
+    <td class="tech">-</td>
+    <td>✅干净</td>
+    <td class="num">250</td>
+    <td class="num">NaNs</td>
+  </tr><tr>
+    <td class="id">F24-safe-static</td>
+    <td><span class="tag s">安全</span></td>
+    <td class="tech">-</td>
+    <td>✅干净</td>
+    <td>✅干净</td>
+    <td class="tech">-</td>
+    <td>✅干净</td>
+    <td class="num">250</td>
+    <td class="num">NaNs</td>
   </tr></tbody>
 </table>
-<div class="foot" data-page-node-id="0sgXbwhmS7yUmMFRVjv7Ya">
-R2 漏报：D14-base64、E15-second-order、E17-waf-guarded　|　sqlmap 命中而本工具漏：E17-waf-guarded　|　本工具命中而 sqlmap 漏：D11-cookie、D12-xff-header
+<div class="foot">
+R2 漏报：E17-waf-guarded　|　sqlmap 命中而本工具漏：E17-waf-guarded　|　本工具命中而 sqlmap 漏：D11-cookie、D12-xff-header、D14-base64、E15-second-order
 </div>
 
-<h2 data-page-node-id="5i4lJTGuyMhgdi7JpSeClX">三、关键发现</h2>
+<h2>三、关键发现</h2>
 
-<div class="find p0" data-page-node-id="KHgXA8RmM6XbEfC65VguJM"><b data-page-node-id="RmZGwv4euIjjBnmg2fwEJD">P0-1 · URL 无 query 参数时直接零检测（RESTful path / Header 注入点全盲）</b><br data-page-node-id="9JmdWNOyNXXSdlLhIhGf3M">
-<code data-page-node-id="6mFMUUZGVVG6xwgsuqkHvr">/shop/user/1</code>（path 注入）、<code data-page-node-id="N54PvuK2uvS4ns2tI2tDEq">X-Forwarded-For</code>、<code data-page-node-id="HgLGg6P4D9yLBBPh4S6azl">Cookie: uid=</code> 三个真实可注入点，报告 <code data-page-node-id="qPolgRV7xS88BMtbL2o86d">points: []</code>、<code data-page-node-id="y043CjMJhHuqGMDYMrOPBl">请求数 0</code>、风险等级 <b data-page-node-id="kEOav01JkF1A3ft03PKsFi">Low</b>。
-换用 <code data-page-node-id="5gLmDBFbg2qaAMMuNkYYRm">-r</code> 导入完整 Burp 请求（含 header）后依然是 <code data-page-node-id="MehU4k1YSLk7sl46WITHTs">points: []</code>——请求头与 path 段没有被当作可注入位置。
-<b data-page-node-id="hr89G4pW2w6KuHzsrdJote">实战后果</b>：现在大量系统是 <code data-page-node-id="swJ3sicJX21ztA6YvPBh1a">/api/v1/order/1024</code> 这种 REST 路径 + JWT/Header 传参，扫完报告显示「Low，无风险」是最危险的假阴性——不是"没扫到"，是"根本没测"。
-<br data-page-node-id="MMxthnt2zke1JYNtFzV16E"><b data-page-node-id="DLr6tYo5789zsShERe1hyh">代码根因</b>：<code data-page-node-id="bYicxiiEGfh0tNfAnhcuXn">server/src/core/requestFileParser.js:66-101</code> 只把 query 与 body 参数收进注入候选，headers（Cookie/XFF…）仅作透传；path 段不解析。</div>
+<div class="find p0"><b>P0-1 · URL 无 query 参数时直接零检测（RESTful path / Header 注入点全盲）</b><br>
+<code>/shop/user/1</code>（path 注入）、<code>X-Forwarded-For</code>、<code>Cookie: uid=</code> 三个真实可注入点，报告 <code>points: []</code>、<code>请求数 0</code>、风险等级 <b>Low</b>。
+换用 <code>-r</code> 导入完整 Burp 请求（含 header）后依然是 <code>points: []</code>——请求头与 path 段没有被当作可注入位置。
+<b>实战后果</b>：现在大量系统是 <code>/api/v1/order/1024</code> 这种 REST 路径 + JWT/Header 传参，扫完报告显示「Low，无风险」是最危险的假阴性——不是"没扫到"，是"根本没测"。
+<br><b>代码根因</b>：<code>server/src/core/requestFileParser.js:66-101</code> 只把 query 与 body 参数收进注入候选，headers（Cookie/XFF…）仅作透传；path 段不解析。</div>
 
-<div class="find p0" data-page-node-id="dw8FUyNG3lSfSNxyYsTLwd"><b data-page-node-id="GH23HzHABDja7ll89q4q1N">P0-2 · 布尔盲注通道在标准布尔点上失效，只能靠时间盲注兜底</b><br data-page-node-id="Y413HWtpuyduDIfCPu0ToT">
-靶点 <code data-page-node-id="Ulkcm6zQ1uCZEQ8FkTUWEg">C7</code> 是教科书布尔盲注（<code data-page-node-id="SkkO6GC69h1yVBgCk04Gs2">AND 1=1</code> 返回 <code data-page-node-id="5dZy590ArDRrFDICdJgBzk">FOUND_USER</code>，<code data-page-node-id="EgIVjRFa7itENgyaSSfE8T">AND 1=2</code> 返回 <code data-page-node-id="rDe41ZuIOdGZyX4bwhnst5">NOT_FOUND</code>，HTTP 码恒定 200）。
-R1/R2 均只报 <code data-page-node-id="fszVKzXrJr31Hi5rTxG1oE">time</code>；<b data-page-node-id="iVGoXW84AY0MXXM6qRyFGI">补测显式 <code data-page-node-id="8i42LEtANTEiVx9E1Puv1I">--technique B --level 3 --risk 2</code> 依然只命中 time，boolean 通道零命中</b>。
+<div class="find p0"><b>P0-2 · 布尔盲注通道在标准布尔点上失效，只能靠时间盲注兜底</b><br>
+靶点 <code>C7</code> 是教科书布尔盲注（<code>AND 1=1</code> 返回 <code>FOUND_USER</code>，<code>AND 1=2</code> 返回 <code>NOT_FOUND</code>，HTTP 码恒定 200）。
+R1/R2 均只报 <code>time</code>；<b>补测显式 <code>--technique B --level 3 --risk 2</code> 依然只命中 time，boolean 通道零命中</b>。
 sqlmap 同一靶点一次命中布尔通道。
-<b data-page-node-id="5OMkMDpNqESAn8VkKmSpOu">实战后果</b>：布尔判定失败 → 退化为时间盲注，逐 bit 判定要一次 sleep，拖库耗时高 1~2 个数量级，且 sleep 流量在 SIEM 里极显眼。
-<br data-page-node-id="t2udhn8D9b8JlrZMl7OSFT"><b data-page-node-id="W54nQUMuDlu6REP17RjOEv">代码根因</b>：<code data-page-node-id="z4qDcGLBn7iX1g0Hiw0ySz">BooleanBlindDetector.js:359-362</code> 的判定要求「真值页≈基线 <b data-page-node-id="KZiNYuu8ecAlZq6AEJsjiu">且</b> 假值页≠基线」，
-而 <code data-page-node-id="Ia9DplXDaZ9aO0u0FWyH9G">_similar()</code>（<code data-page-node-id="mD1widozFtSEPCFVMMMXXi">:600-633</code>）用「公共前缀 ≥ 85%」或「分块相似率 ≥ 0.85」判相似。
+<b>实战后果</b>：布尔判定失败 → 退化为时间盲注，逐 bit 判定要一次 sleep，拖库耗时高 1~2 个数量级，且 sleep 流量在 SIEM 里极显眼。
+<br><b>代码根因</b>：<code>BooleanBlindDetector.js:359-362</code> 的判定要求「真值页≈基线 <b>且</b> 假值页≠基线」，
+而 <code>_similar()</code>（<code>:600-633</code>）用「公共前缀 ≥ 85%」或「分块相似率 ≥ 0.85」判相似。
 现代页面真假差异通常只占全文 5~15%（模板头 + 一小段内容），假值页会被判成"与基线相似" → 条件不成立 → 漏报。
 差异越小越漏，与真实站点形态正好相反。</div>
 
-<div class="find p1" data-page-node-id="bwdsNx3bP4qBEJ8nG8c6OB"><b data-page-node-id="2Cgy9UfnJEk0NcUWhWdM9Q">P1-1 · 二阶注入未跑通</b><br data-page-node-id="ZhHSmf3DhVzxidOT2CKcSv">
-靶点 <code data-page-node-id="nOfDItwBVOmmssNMZFR5Bt">E15</code>（写入 <code data-page-node-id="XHthDiibz9eZIYZF0zMBjT">POST /account/update</code> → 触发 <code data-page-node-id="9wDjGl5Qaa0V9bG1SxuQJu">GET /account/me</code>）R1/R2 均漏报。
-补测追加 <code data-page-node-id="WZlIK19MTpfLb2uBHxAytU">--second-order</code> + <code data-page-node-id="7EC4OZgceyE3RXikmi69p4">--cookie sid=rt1</code> + <code data-page-node-id="86z7lCGdxtchhD6ml5A7Fy">--allow-second-order-writes</code> + <code data-page-node-id="Ig5domyTqYIjpfwEXoBziE">--no-production-mode</code>，
-日志里只跑了 union/error/boolean/time 四通道，<b data-page-node-id="QdELKv24zdMGzOvBbfw77u">根本没有 second_order 通道</b>，250 次请求打空。</div>
+<div class="find p1"><b>P1-1 · 二阶注入未跑通</b><br>
+靶点 <code>E15</code>（写入 <code>POST /account/update</code> → 触发 <code>GET /account/me</code>）R1/R2 均漏报。
+补测追加 <code>--second-order</code> + <code>--cookie sid=rt1</code> + <code>--allow-second-order-writes</code> + <code>--no-production-mode</code>，
+日志里只跑了 union/error/boolean/time 四通道，<b>根本没有 second_order 通道</b>，250 次请求打空。</div>
 
-<div class="find p1" data-page-node-id="EDJftEAu5V0FBDf6M6klq5"><b data-page-node-id="DHJsCx1G1HLNzEWtqZwrPS">P1-2 · WAF 场景：能识别被拦（好评），但绕不过去</b><br data-page-node-id="1dkqxCeNMkxYrxVOpkXTL7">
-靶点 <code data-page-node-id="EnR4IJTFCPXCO5XQSLa7Dr">E17</code> 前置中等强度规则（拦 union select / information_schema / sleep / 注释符 / <code data-page-node-id="kAhWTvNxncCWGVS5vp6RNx">' or 1=1</code>）。
-引擎表现分两半：<b data-page-node-id="xu4gqWE1OPj1YUsnuH4Xs0">识别是对的</b>——<code data-page-node-id="GhVnDicmRTAM85uDuf7AzO">validity.status=blocked</code>、<code data-page-node-id="lPgHiPDoppd3VIdkzHsJ05">verdict=inconclusive</code>、<code data-page-node-id="Uu2Anxzz2r78l3cJYXg2tT">blockPolicy.action=preferTamper</code> 并推荐链
-<code data-page-node-id="pBueHonP04alMB9ENWDm7B">[symboliclogical, equaltorlike, space2comment, randomcase]</code>，没有给出假阴性结论；
-<b data-page-node-id="ki4LKsiwU4Oj8rkac3bigE">绕过是失败的</b>——手工挂 <code data-page-node-id="uzkTTzIGhCwa2ftsM4Nycx">dash2hash,hexliterals</code> / <code data-page-node-id="fHzqNImupXeuRRa1xZ8mVE">comments,halfversionedmorekeywords</code> / <code data-page-node-id="ig26y9CVLsJwAEQW1TrW8A">randomcase,commentbeforeparentheses</code>
-以及<b data-page-node-id="iH7448iB5Xz9dsuTNHhpxT">引擎自己推荐的链</b>，四组全部 0 命中（149 请求）。
-sqlmap 同题命中，它用的是 <code data-page-node-id="juVFQCXLbX69BvqEz1DYYn">AND 6573=6573</code> 这类不触发规则的纯布尔向量——恰好是本工具 P0-2 缺失的通道。</div>
+<div class="find p1"><b>P1-2 · WAF 场景：能识别被拦（好评），但绕不过去</b><br>
+靶点 <code>E17</code> 前置中等强度规则（拦 union select / information_schema / sleep / 注释符 / <code>' or 1=1</code>）。
+引擎表现分两半：<b>识别是对的</b>——<code>validity.status=blocked</code>、<code>verdict=inconclusive</code>、<code>blockPolicy.action=preferTamper</code> 并推荐链
+<code>[symboliclogical, equaltorlike, space2comment, randomcase]</code>，没有给出假阴性结论；
+<b>绕过是失败的</b>——手工挂 <code>dash2hash,hexliterals</code> / <code>comments,halfversionedmorekeywords</code> / <code>randomcase,commentbeforeparentheses</code>
+以及<b>引擎自己推荐的链</b>，四组全部 0 命中（149 请求）。
+sqlmap 同题命中，它用的是 <code>AND 6573=6573</code> 这类不触发规则的纯布尔向量——恰好是本工具 P0-2 缺失的通道。</div>
 
-<div class="find p1" data-page-node-id="OdkBMyO9GpkMWe2B7U87HB"><b data-page-node-id="mT1CPHRdu6DfXqTrOABExt">P1-3 · 报告 verdict 字段语义错位</b><br data-page-node-id="nXevDndqIe5i8lHFZfIX3L">
-明明检出 2 条漏洞，<code data-page-node-id="Sh9srChpg6wDcQvxS9klHi">summary.verdict</code> 仍写 <code data-page-node-id="ERm1MxNKYoPvr7D7f4rSfv">no_vulnerability_detected</code>（<code data-page-node-id="vDTpnNVQdkqhYtcT7Iiag8">scanRunner.js:97</code>：该字段只有 inconclusive / no_vulnerability 两种取值，命中时未改写）。
+<div class="find p1"><b>P1-3 · 报告 verdict 字段语义错位</b><br>
+明明检出 2 条漏洞，<code>summary.verdict</code> 仍写 <code>no_vulnerability_detected</code>（<code>scanRunner.js:97</code>：该字段只有 inconclusive / no_vulnerability 两种取值，命中时未改写）。
 CLI 退出码是对的（命中 High 返回 2），但任何读报告 JSON 做 CI gate 的下游都会误判为"无漏洞"。</div>
 
-<div class="find p2" data-page-node-id="v5F0pbY9cNHi5bcmHmX8qw"><b data-page-node-id="rWJjPeXVwDPpZTsk8Zfu8d">P2-1 · 编码参数（base64）不支持</b>：靶点 <code data-page-node-id="2gg8XuoZr65eEpd5v4rH1l">D14</code> 漏报。属能力边界，不算硬伤，但报告未说明"参数经过编码、未解码检测"。</div>
-<div class="find p2" data-page-node-id="CvwLmlbBsc48CwifKY5TXE"><b data-page-node-id="cFspbJInRom86OI6TUmYl0">P2-2 · ORDER BY 位置注入需 level≥2 才测</b>：靶点 <code data-page-node-id="rFWUEAR7IQreU6cCys0oj0">A4</code> R1 漏、R2 命中。默认档不开子句轮，真实渗透若忘记加 level 会直接漏掉排序位注入。</div>
+<div class="find p2"><b>P2-1 · 编码参数（base64）不支持</b>：靶点 <code>D14</code> 漏报。属能力边界，不算硬伤，但报告未说明"参数经过编码、未解码检测"。</div>
+<div class="find p2"><b>P2-2 · ORDER BY 位置注入需 level≥2 才测</b>：靶点 <code>A4</code> R1 漏、R2 命中。默认档不开子句轮，真实渗透若忘记加 level 会直接漏掉排序位注入。</div>
 
-<h2 data-page-node-id="YmB0BvDPSV3z4rAzl9MCat">四、做得好的地方</h2>
-<ul data-page-node-id="uFX2AhQnolgjQfyKpbq52n">
-<li data-page-node-id="UPuVA3ChuHCw47g6Tn45HP"><b data-page-node-id="WQPoNZqevzwSDCnC3FAhs5">零误报</b>：7 个安全点（含随机 nonce 动态页、恒定 500/403、302 跳转）两轮全部判干净，误报控制在企业级可用水平。</li>
-<li data-page-node-id="qPYJ20CVg4SxUKEGMEagRF"><b data-page-node-id="sm6FpqOS0q9lozP7VaBBBS">主流回显型覆盖扎实</b>：数字型 / 单引号字符串 / LIKE / 双参数定位 / 报错注入 / POST form / JSON body 全部默认档命中，且 UNION 列数定位准确（"回显列 0,1,2，列数 3"）。</li>
-<li data-page-node-id="LjS9AvvfiB26Htr3Cx7ERm"><b data-page-node-id="aKUBvLs0QNxKGnSJTDJGU9">DBMS 指纹诚实</b>：报告 <code data-page-node-id="DBQ9JBUOxRz80uXvDVdAXH">summary.dbmsEvidence</code> 会标注验证等级与 caveat，不夸大未验证的库，这点比多数商业扫描器做得规范。</li>
-<li data-page-node-id="mg6SUUkwQafh4RGK9HaWGG"><b data-page-node-id="SWfchIaPnIITd14oaIXmDW">证据链完整</b>：每条漏洞带 payload、回显证据、trace，交付客户时可直接复现。</li>
+<h2>四、做得好的地方</h2>
+<ul>
+<li><b>零误报</b>：7 个安全点（含随机 nonce 动态页、恒定 500/403、302 跳转）两轮全部判干净，误报控制在企业级可用水平。</li>
+<li><b>主流回显型覆盖扎实</b>：数字型 / 单引号字符串 / LIKE / 双参数定位 / 报错注入 / POST form / JSON body 全部默认档命中，且 UNION 列数定位准确（"回显列 0,1,2，列数 3"）。</li>
+<li><b>DBMS 指纹诚实</b>：报告 <code>summary.dbmsEvidence</code> 会标注验证等级与 caveat，不夸大未验证的库，这点比多数商业扫描器做得规范。</li>
+<li><b>证据链完整</b>：每条漏洞带 payload、回显证据、trace，交付客户时可直接复现。</li>
 </ul>
 
-<h2 data-page-node-id="4OdJZa8EfqE0A7jMkfkeqU">五、评分明细</h2>
-<table data-page-node-id="k6gJd79YULBHvY2RAFPhRU"><thead data-page-node-id="FmCmqaDA3VuFTOwsLhddVY"><tr data-page-node-id="EiQbAzC9eXVCh8a5s0fEMV"><th data-page-node-id="PVGBscpes3m1iXYtskTUwf">维度</th><th data-page-node-id="1nGA181CQFHV4Sq5VM9Evk">权重</th><th data-page-node-id="TuEVUUwKlPy6X8Rq2cXDmT">得分</th><th data-page-node-id="G2fbDlw2uqpeVyWV8waCVg">依据</th></tr></thead><tbody data-page-node-id="k2RkFl4l198SKZvwpz6ruW">
-<tr data-page-node-id="fWPp9QpS47NexXWgPezpm3"><td data-page-node-id="bFAhDe6Zfl9dnusWGorYY2">检出能力</td><td data-page-node-id="tjWmFp5BDhQn61Y5WXwsGq">50</td><td data-page-node-id="glVwz6fH8dt7RnRbx5SCQT">41</td><td data-page-node-id="6G0hYHRDHP9S3ppC7ICLXx">R2 实战档 14/17（82%）</td></tr>
-<tr data-page-node-id="GHwSEZ6Tu3LCcTxhurCCfQ"><td data-page-node-id="hHqTiAPL6CchFRtk4RSm5T">误报控制</td><td data-page-node-id="jgpzGKom1kw9bImGBj9xhZ">25</td><td data-page-node-id="xpdoUhtpSckiP4eweDINc0">25</td><td data-page-node-id="g6VDcRNHLnDydX2pCidB3g">7 个安全点零误报</td></tr>
-<tr data-page-node-id="Z62TJx2FzAsLvWNhIftL4r"><td data-page-node-id="eadvQBlECtEQvvktJX55Fw">利用链完整度</td><td data-page-node-id="WBwHiZHbrec5VW0EEkEUxE">15</td><td data-page-node-id="bnvnsEbZDEtWECmsbNqCvz">13</td><td data-page-node-id="NsiS9yywizR7DPMtHSyxGk">见第六节提取与利用实测</td></tr>
-<tr data-page-node-id="kNaHLBFpGDB19PCpeio1AY"><td data-page-node-id="xKvctCz8xv5izFIrK4AxK3">工程性（性能/报告/CLI）</td><td data-page-node-id="lZK31E3PPJ3F4FXAHWFnpA">10</td><td data-page-node-id="d7mYkpy2dvbDcmZPoVP4Hw">8</td><td data-page-node-id="OGS4aSnQM2bOinjocbrXbj">单靶点 ~120-420 请求、报告结构化、CLI 退出码规范；扣分项：verdict 字段语义错位</td></tr>
+<h2>五、评分明细</h2>
+<table><thead><tr><th>维度</th><th>权重</th><th>得分</th><th>依据</th></tr></thead><tbody>
+<tr><td>检出能力</td><td>50</td><td>47</td><td>R2 实战档 16/17（94%）</td></tr>
+<tr><td>误报控制</td><td>25</td><td>25</td><td>7 个安全点零误报</td></tr>
+<tr><td>利用链完整度</td><td>15</td><td>13</td><td>见第六节提取与利用实测</td></tr>
+<tr><td>工程性（性能/报告/CLI）</td><td>10</td><td>8</td><td>单靶点 ~120-420 请求、报告结构化、CLI 退出码规范；扣分项：verdict 字段语义错位</td></tr>
 </tbody></table>
 
-<h2 data-page-node-id="qdlbHwbNxi5y5Vph8OKnYV">六、数据提取与利用链实测（A1 靶点，真实 MySQL 8.0.37）</h2>
-<table data-page-node-id="lb8z4NIeoF5B9o9voxikYQ"><thead data-page-node-id="hRBEDHfl07eJ9Vr2UD2giD"><tr data-page-node-id="wzziUt4Ox5NeQjdaEumMpu"><th data-page-node-id="qaYlilcMp4XJqxRM7kmeSx">动作</th><th data-page-node-id="AqxyEsbL6mkGa1g8rNGM5Z">命令</th><th data-page-node-id="U9uJ7uG0jOI5GTU3uXUr1T">结果</th></tr></thead><tbody data-page-node-id="jZBCAA8UxLYIDnnHPqwSLH">
-<tr data-page-node-id="D9vj5xAHfZCD84gVUvsUQp"><td data-page-node-id="GNJDj8gdi1MtGvJfCZolEQ">枚举数据库</td><td data-page-node-id="0pbRqfxzixYTD2F7pM7STD"><code data-page-node-id="QskKvY8gTk2ov21tOFhwIS">--dbs</code></td><td class="ok" data-page-node-id="LHhvaBdiPQNIDTKrOfhLTp">✅ 返回 4 个库：agentdaily / netsec / sqli_lab / redteam_lab</td></tr>
-<tr data-page-node-id="TDnTUoiUHtQvuF9HRPD1pq"><td data-page-node-id="BeMKSsMpkpTgQhFKT5Rmqz">枚举表</td><td data-page-node-id="q5TIBMNfYH8WJXy0oDDG7E"><code data-page-node-id="g0JfqWh6U9N7m1iRmZxClS">--tables -D redteam_lab</code></td><td class="ok" data-page-node-id="uTcEhzKBbVFBoYOu74ymbA">✅ products、users</td></tr>
-<tr data-page-node-id="6rI4JlOmxeW5zeXdBKPTga"><td data-page-node-id="O9tGFAOnHPAlnVho6mJoAZ">枚举列</td><td data-page-node-id="2lnVcjiD0ssKJewmmryN21"><code data-page-node-id="jAReLQ5fHTRWO7jyCcrV3n">--dump -D redteam_lab -T users</code></td><td class="ok" data-page-node-id="Kw2PDzWp2iq9UKtlQJgu4s">✅ id / name / email / secret</td></tr>
-<tr data-page-node-id="dzhB49P0VleHsuTBDriNeN"><td data-page-node-id="4c7nADB2Sy5n7Tua5z36Mr">拖库</td><td data-page-node-id="hCSlTUHMGfEdooU6Bahwfd"><code data-page-node-id="IzuU28ZykAzkcocCdEiopa">--dump -D redteam_lab -T users</code></td><td class="ok" data-page-node-id="TyVDAhXlbZVgyfYtvdCSvB">✅ 5 行完整数据（含 secret 字段，与库中逐字一致）</td></tr>
+<h2>六、数据提取与利用链实测（A1 靶点，真实 MySQL 8.0.37）</h2>
+<table><thead><tr><th>动作</th><th>命令</th><th>结果</th></tr></thead><tbody>
+<tr><td>枚举数据库</td><td><code>--dbs</code></td><td class="ok">✅ 返回 4 个库：agentdaily / netsec / sqli_lab / redteam_lab</td></tr>
+<tr><td>枚举表</td><td><code>--tables -D redteam_lab</code></td><td class="ok">✅ products、users</td></tr>
+<tr><td>枚举列</td><td><code>--dump -D redteam_lab -T users</code></td><td class="ok">✅ id / name / email / secret</td></tr>
+<tr><td>拖库</td><td><code>--dump -D redteam_lab -T users</code></td><td class="ok">✅ 5 行完整数据（含 secret 字段，与库中逐字一致）</td></tr>
 </tbody></table>
-<div class="foot" data-page-node-id="Ynej6N3heJxBoynsiAofMo">结论：<b data-page-node-id="GLtidNo7gE0sfpGoKxLBkm">只要检测命中，提取链路是完整可用的</b>——UNION 列数定位、库/表/列枚举、分页拖库全部跑通，输出可直接进报告。
+<div class="foot">结论：<b>只要检测命中，提取链路是完整可用的</b>——UNION 列数定位、库/表/列枚举、分页拖库全部跑通，输出可直接进报告。
 这一环节是本项目最扎实的部分，商业扫描器该有的都有。</div>
 
-<h2 data-page-node-id="inCRXgGCTNJf2BQHMnzJYW">七、修复进展与复测（2026-09-10 当晚已完成）</h2>
-<table data-page-node-id="WH3dUxgAZwT0Q90I6wuEqE"><thead data-page-node-id="VXlXwzq5COtNAfQe0GWnhK"><tr data-page-node-id="T98oMlQG24kegKHXY5SVh7"><th data-page-node-id="CE21b7VUGQB9OV6GEbpODF">项</th><th data-page-node-id="qFHLNk0EFPDnkYQ8j7TsFd">修复内容</th><th data-page-node-id="RBJnwLBg3r6dfQuHf9Pzg7">复测结果</th></tr></thead><tbody data-page-node-id="dtwNV9i3NB6jQbCOxI0Aoe">
-<tr data-page-node-id="gQkpCpHEtwRl1bzSkHAr2E"><td data-page-node-id="3lnKGRUXyYOaCtROzqomEy">P0-1 注入点发现</td><td data-page-node-id="JUI7O6W73ZhjypOfsfER7L">新增 <code data-page-node-id="Ulv6uEoYPbwhjVGNealcwv">--test-headers</code>（请求头/Cookie 作为注入点）与 <code data-page-node-id="yuXu3KoyOJz2LhKuhwwGzW">--test-path</code>（URL path 末段作为注入点），默认关闭；0 注入点时报告显式告警。改 <code data-page-node-id="9A1FxC8v2CK4oIfJHmDz6o">cli.js</code> / <code data-page-node-id="dNJ3EutPlUmufDzCVmgVWf">TargetParser.js</code> / <code data-page-node-id="ysON97b6emiPaAkBAGslgB">scanRunner.js</code></td>
-<td class="ok" data-page-node-id="TTDmKh4ObUFiHVOHaA9Y3o">✅ D11 Cookie、D12 XFF、D13 path 三个点由「0 请求、报 Low」变为 High 命中（union/boolean）</td></tr>
-<tr data-page-node-id="67sJuYkMOcywfPSHWZJzqF"><td data-page-node-id="I7qkdGdeu1onEVID3MpeGv">P0-2 布尔盲注</td><td data-page-node-id="itHV54DF0psDjWGU3UkOj8">新增「组间稳定差异」二级判据 <code data-page-node-id="AVwVLEKNolP7MzlbeylDVr">_stableDiffJudge</code>：真/假各采样 N 次，组内自相似 + 差异片段可复现 + 数值/随机噪声过滤；配置项 <code data-page-node-id="s6AST5ZRAwYrgus9YGNWwK">boolStableDiff</code>（默认开）</td>
-<td class="ok" data-page-node-id="vqiHrkzZMNdaJRJ5Org4Qq">✅ C7 由「只报 time」变为命中 boolean；7 个安全点仍零误报</td></tr>
-<tr data-page-node-id="qWvIdRD3F7QOOob3rgNRSu"><td data-page-node-id="hQ0i8ejFwAlcPoO9K1EZCZ">P0-2 衍生：子句轮偶发误报</td><td data-page-node-id="W2kyRzXyJCBtnwJ8J65SDf">子句轮（level≥2，ORDER BY/GROUP BY/HAVING 位置）此前仍是单次比较，随机 nonce 页面 4 次误报 1 次；已把稳定差异复核接入子句轮命中链路</td>
-<td class="ok" data-page-node-id="NTRtgSxva13XHDW5PAg4MY">✅ <code data-page-node-id="6Xh3Y5kUQXjtRU9pGE9wtQ">/safe/rand</code> 连跑 5 次零误报；A4（ORDER BY，靠子句轮命中）仍命中</td></tr>
+<h2>七、修复进展与复测（2026-09-10 当晚已完成）</h2>
+<table><thead><tr><th>项</th><th>修复内容</th><th>复测结果</th></tr></thead><tbody>
+<tr><td>P0-1 注入点发现</td><td>新增 <code>--test-headers</code>（请求头/Cookie 作为注入点）与 <code>--test-path</code>（URL path 末段作为注入点），默认关闭；0 注入点时报告显式告警。改 <code>cli.js</code> / <code>TargetParser.js</code> / <code>scanRunner.js</code></td>
+<td class="ok">✅ D11 Cookie、D12 XFF、D13 path 三个点由「0 请求、报 Low」变为 High 命中（union/boolean）</td></tr>
+<tr><td>P0-2 布尔盲注</td><td>新增「组间稳定差异」二级判据 <code>_stableDiffJudge</code>：真/假各采样 N 次，组内自相似 + 差异片段可复现 + 数值/随机噪声过滤；配置项 <code>boolStableDiff</code>（默认开）</td>
+<td class="ok">✅ C7 由「只报 time」变为命中 boolean；7 个安全点仍零误报</td></tr>
+<tr><td>P0-2 衍生：子句轮偶发误报</td><td>子句轮（level≥2，ORDER BY/GROUP BY/HAVING 位置）此前仍是单次比较，随机 nonce 页面 4 次误报 1 次；已把稳定差异复核接入子句轮命中链路</td>
+<td class="ok">✅ <code>/safe/rand</code> 连跑 5 次零误报；A4（ORDER BY，靠子句轮命中）仍命中</td></tr>
+<tr><td>P1-1 二阶注入</td><td>根因是 <code>isStorePoint</code> 只在表单爬取（level≥5）路径标记 → <code>--method POST --body</code> 这类 API 二阶场景解析出 0 个存储点，编排层直接跳过整个二阶补充趟。已在 <code>TargetParser</code> 补：二阶显式开启时，非幂等方法的 body 点（含 JSON 叶子）标记为候选存储端</td>
+<td class="ok">✅ E15 由「250 请求全空」变为命中 <code>second_order</code>（High）</td></tr>
+<tr><td>P0-3 报错签名误匹配（新发现）</td><td><code>ERROR_SIG</code> 含裸库名 <code>H2</code>（大小写不敏感）→ 普通页面的 <code>&lt;h2&gt;</code> 标题被判成「数据库报错」。后果连锁：二阶基线被误判「本就报错」→ 判定退化到需显式阴性对照的路径 → 默认必漏；报错通道同样被压制</td>
+<td class="ok">✅ 收紧为「库名 + 错误上下文」形态；签名自测 9/9；二阶与报错通道同时恢复</td></tr>
 </tbody></table>
 
-<table data-page-node-id="yRJkrm6BTSY2FvhIKAshqo"><thead data-page-node-id="7PCafcrsLCPLIofvQYNDGT"><tr data-page-node-id="Ic8gb4Y9ogZi0d1dH7ItHH"><th data-page-node-id="Ag88XbZUeBI8CNf3l2erCR">口径</th><th data-page-node-id="uTqbPQ95eJXvFQxeoAIsbV">修复前</th><th data-page-node-id="E0BJxsU7ylmLyDOpClA6zb">修复后</th><th data-page-node-id="XudJLv7vx4PmsA968cqsGn">变化</th></tr></thead><tbody data-page-node-id="kYOkaSC1v7iymbZbWzAz8t">
-<tr data-page-node-id="GjcVVIPVxi8MX7QJY2e37e"><td data-page-node-id="7GUXRoP9Aw7E50bi3i8QNM">默认档（R1）</td><td data-page-node-id="5tPFygzflT85uDHr3iBY0L">10/17（59%）</td><td data-page-node-id="aiJR9TQOwhJ2Yz55gFRtFR">12/17（71%）</td><td class="ok" data-page-node-id="TSwaGFqOx4KchEXx0BzIoJ">+2</td></tr>
-<tr data-page-node-id="AS55JBtSlpAyYtkvUiDT8l"><td data-page-node-id="0IG7tyvKqbBX1KktKL9Fnt">实战档（R2）</td><td data-page-node-id="X7bguLo0mUFyZZIVTfONUV">11/17（65%）</td><td data-page-node-id="RugshXFRitopmJDqrQ6Lvs">14/17（82%）</td><td class="ok" data-page-node-id="sSjGXXG9Qi3JuKi08OOzMz">+3</td></tr>
-<tr data-page-node-id="MjFIzaMnBDDuFY0AznBp4N"><td data-page-node-id="CKz7Wf1PBZN8UVCTuZ5GbU">误报（安全点）</td><td data-page-node-id="MLyxTLtuzXbfBeutq4hf6C">0</td><td data-page-node-id="DIXuRFwA12fXhBcDmvQE9M">0</td><td class="ok" data-page-node-id="BKAWnf1tiiJELe6RWPZAAq">保持 0</td></tr>
-<tr data-page-node-id="apHD7XeZSeEuUPwBf2eruF"><td data-page-node-id="JDKfufvtbdkRy7Wiy0J7h8">sqlmap 同题</td><td colspan="2" data-page-node-id="AAjIBvLMTR79JZE3UGbIIS">13/14（93%）</td><td data-page-node-id="782PqQ9bLVG5aHPenlubIh">差距收窄</td></tr>
+<table><thead><tr><th>口径</th><th>修复前</th><th>修复后</th><th>变化</th></tr></thead><tbody>
+<tr><td>默认档（R1）</td><td>10/17（59%）</td><td>15/17（88%）</td><td class="ok">+5</td></tr>
+<tr><td>实战档（R2）</td><td>11/17（65%）</td><td>16/17（94%）</td><td class="ok">+5</td></tr>
+<tr><td>误报（安全点）</td><td>0</td><td>0</td><td class="ok">保持 0</td></tr>
+<tr><td>sqlmap 同题</td><td colspan="2">13/14（93%）</td><td>差距收窄</td></tr>
 </tbody></table>
-<div class="foot" data-page-node-id="sNtfuL4j0wJ9CAxVV7ZzOX">仍未覆盖：D14 base64 编码参数、E15 二阶注入、E17 WAF 绕过（sqlmap 在 E17 用纯布尔向量命中，本工具因布尔通道历史缺陷未命中——布尔修好后建议重测该点）。</div>
+<div class="foot">
+修复过程中还意外收回两个点：<b>D14（base64 编码参数）</b>与多靶点的 <b>error</b> 通道——此前被 <code>ERROR_SIG</code> 的 <code>&lt;h2&gt;</code> 误匹配压着（基线被判「本就报错」→ 报错判定被抑制），修正签名后一并恢复，且单靶点请求数从 ~120 降到 ~58（报错通道命中后提前收敛）。<br>
+<b>仍未覆盖：仅剩 E17 WAF 绕过</b>（sqlmap 在此点用 <code>AND 6573=6573</code> 这类不触发规则的纯布尔向量命中；本工具已具备布尔通道，建议下一轮重测该点）。</div>
 
-<h2 data-page-node-id="2kjbXV7wewqcfE0887RKly">八、修复优先级建议（剩余）</h2>
-<ol data-page-node-id="fFxJLLZYxK0Vt1IkFSyW8D">
-<li data-page-node-id="89VZsjARoIy0vFJaqa7VkN"><b data-page-node-id="FGq8WHGscLV8CDlxIqJYZr">注入点发现层补 path 段与请求头</b>（P0）：TargetParser 除 query/body 外，应把 path 数字段、<code data-page-node-id="EvhxHsMB3nVkFcet2xkEXR">-r</code> 导入的 header 纳入候选注入点；至少在 <code data-page-node-id="Raqy6BjpM8DcoVJ4zwP1Hw">points: []</code> 时给出"未发现可测参数"的显式告警，而不是输出 Low。</li>
-<li data-page-node-id="jEKATi4qsapTsHApmxuB0w"><b data-page-node-id="eZ3qdkBjJ10q2Ddf74TFqX">重做布尔盲注判定</b>（P0）：别再依赖"假值页整体偏离基线"。建议改成<b data-page-node-id="ElDDUmfsqgRsfAbUQGV0ji">组间差异稳定性</b>判据——真假各采样 N 次，真组内自相似、假组内自相似、两组之间存在<b data-page-node-id="bpu5hScqH29WsBQXaCffce">稳定可复现</b>的差异即成立；再自动提取差异 token 当 <code data-page-node-id="9QgUtUbcKwuJXEHhP8njL7">--string/--not-string</code>。这样差异小到几个字符也能判出，且不怕时间戳/nonce。</li>
-<li data-page-node-id="oJCmnWTU5hztLCi3u3xTik"><b data-page-node-id="2YhCZKrgppbWc2gukq34Xb">verdict 字段补 vulnerable 取值</b>（P1）：命中时写 <code data-page-node-id="1Y1JRAZBXi2kfUV5vqLI7E">vulnerability_detected</code>，避免下游误读。</li>
-<li data-page-node-id="bkHn5Gq2ts3uBPWE5aGBvW"><b data-page-node-id="kBWXGSb69cPKWTT33VXeBK">二阶注入链路自查</b>（P1）：用 <code data-page-node-id="fnIVuQOKondmgvoTBKBY6e">e2e/redteam-lab</code> 的 E15 做回归，先确认触发页是否携带同一会话 Cookie。</li>
-<li data-page-node-id="WuHC1kK40cUYolt0FrIpqs"><b data-page-node-id="nK5pZJp2mUPQFGVmCHe4Hc">WAF 拦截判据补软拦截识别</b>（P1）：把"响应体/结构突变 + 状态码 403"都纳入 blockPolicy 证据，命中后再触发 tamper 链验证。</li>
+<h2>八、修复优先级建议（剩余）</h2>
+<ol>
+<li><b>注入点发现层补 path 段与请求头</b>（P0）：TargetParser 除 query/body 外，应把 path 数字段、<code>-r</code> 导入的 header 纳入候选注入点；至少在 <code>points: []</code> 时给出"未发现可测参数"的显式告警，而不是输出 Low。</li>
+<li><b>重做布尔盲注判定</b>（P0）：别再依赖"假值页整体偏离基线"。建议改成<b>组间差异稳定性</b>判据——真假各采样 N 次，真组内自相似、假组内自相似、两组之间存在<b>稳定可复现</b>的差异即成立；再自动提取差异 token 当 <code>--string/--not-string</code>。这样差异小到几个字符也能判出，且不怕时间戳/nonce。</li>
+<li><b>verdict 字段补 vulnerable 取值</b>（P1）：命中时写 <code>vulnerability_detected</code>，避免下游误读。</li>
+<li><b>二阶注入链路自查</b>（P1）：用 <code>e2e/redteam-lab</code> 的 E15 做回归，先确认触发页是否携带同一会话 Cookie。</li>
+<li><b>WAF 拦截判据补软拦截识别</b>（P1）：把"响应体/结构突变 + 状态码 403"都纳入 blockPolicy 证据，命中后再触发 tamper 链验证。</li>
 </ol>
 
-<h2 data-page-node-id="1KCrLaXUH1Ajes79DljycF">七、复现方式</h2>
-<pre data-page-node-id="qRezHUVYswqtMAfit6ZYQX"># 1 启动靶场（需本地 MySQL 8，root/空口令，会自动建库 redteam_lab）
+<h2>七、复现方式</h2>
+<pre># 1 启动靶场（需本地 MySQL 8，root/空口令，会自动建库 redteam_lab）
 node e2e/redteam-lab/server.mjs
 
 # 2 先验证真值（确认哪些点真的可注入）
@@ -414,7 +420,7 @@ node e2e/redteam-lab/sqlmap-bench.mjs
 # 5 生成本报告
 node e2e/redteam-lab/report.mjs</pre>
 
-<div class="foot" data-page-node-id="CEMlTYz0KDcJMMLgqA8yYo">
+<div class="foot">
 评测环境：Windows 11 / Node v22.22.2 / MySQL 8.0.37 / sqlmap 1.10.7#pip。
 所有测试均在自建本地靶场完成，未对任何第三方系统发起请求。
 </div>
