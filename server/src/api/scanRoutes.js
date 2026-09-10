@@ -287,6 +287,11 @@ export function sanitizeStart(body) {
   // 检测器/提取器一律走 null/默认路径，对标能力形同虚设。透传 + 用 defaults 作默认值落地。
   const autoDynamicBlock = pickBool(cfg, 'autoDynamicBlock');
   config.autoDynamicBlock = autoDynamicBlock !== undefined ? autoDynamicBlock : defaults.autoDynamicBlock;
+  // [P0-FIX 2026-09-10] 布尔盲注二级判据（组间稳定差异）开关 + 采样数：透传 + 用 defaults 作默认值落地
+  const boolStableDiff = pickBool(cfg, 'boolStableDiff');
+  config.boolStableDiff = boolStableDiff !== undefined ? boolStableDiff : defaults.boolStableDiff;
+  const boolStableDiffSamples = pickInt(cfg, 'boolStableDiffSamples', defaults.boolStableDiffSamples, 2, 4);
+  if (boolStableDiffSamples !== undefined) config.boolStableDiffSamples = boolStableDiffSamples;
   const predictOutput = pickBool(cfg, 'predictOutput');
   if (predictOutput !== undefined) config.predictOutput = predictOutput;
   const crawlDepth = pickInt(cfg, 'crawlDepth', defaults.crawlDepth, 0, 3);

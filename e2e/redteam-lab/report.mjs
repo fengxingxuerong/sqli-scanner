@@ -97,11 +97,13 @@ pre{background:#0b0e13;border:1px solid var(--line);border-radius:8px;padding:12
 
 <div class="cards">
   <div class="card"><div class="k">综合评分</div><div class="v">${total}<small> / 100</small></div></div>
-  <div class="card"><div class="k">检出率（调参后）</div><div class="v">${S2.pct}%<small> ${S2.hit}/${S2.total}</small></div></div>
+  <div class="card"><div class="k">检出率（实战档）</div><div class="v">${S2.pct}%<small> ${S2.hit}/${S2.total}</small></div></div>
   <div class="card"><div class="k">检出率（默认档）</div><div class="v">${S1.pct}%<small> ${S1.hit}/${S1.total}</small></div></div>
   <div class="card"><div class="k">误报</div><div class="v">${FP2}<small> / ${safes.length} 安全点</small></div></div>
   <div class="card"><div class="k">sqlmap 同题</div><div class="v">${SM.pct}%<small> ${SM.hit}/${SM.total}</small></div></div>
 </div>
+
+<div class="find p0" style="border-left-color:var(--ok)"><b>📌 本版为「修复后」复测</b>：报告中的 R1/R2 数据已包含当晚两处 P0 修复（<code>--test-headers/--test-path</code> 注入点发现 + 布尔盲注组间稳定差异判据）。修复前后对比见第七节。</div>
 
 <h2>一、评测方法</h2>
 <ul>
@@ -185,7 +187,25 @@ CLI 退出码是对的（命中 High 返回 2），但任何读报告 JSON 做 C
 <div class="foot">结论：<b>只要检测命中，提取链路是完整可用的</b>——UNION 列数定位、库/表/列枚举、分页拖库全部跑通，输出可直接进报告。
 这一环节是本项目最扎实的部分，商业扫描器该有的都有。</div>
 
-<h2>七、修复优先级建议</h2>
+<h2>七、修复进展与复测（2026-09-10 当晚已完成）</h2>
+<table><thead><tr><th>项</th><th>修复内容</th><th>复测结果</th></tr></thead><tbody>
+<tr><td>P0-1 注入点发现</td><td>新增 <code>--test-headers</code>（请求头/Cookie 作为注入点）与 <code>--test-path</code>（URL path 末段作为注入点），默认关闭；0 注入点时报告显式告警。改 <code>cli.js</code> / <code>TargetParser.js</code> / <code>scanRunner.js</code></td>
+<td class="ok">✅ D11 Cookie、D12 XFF、D13 path 三个点由「0 请求、报 Low」变为 High 命中（union/boolean）</td></tr>
+<tr><td>P0-2 布尔盲注</td><td>新增「组间稳定差异」二级判据 <code>_stableDiffJudge</code>：真/假各采样 N 次，组内自相似 + 差异片段可复现 + 数值/随机噪声过滤；配置项 <code>boolStableDiff</code>（默认开）</td>
+<td class="ok">✅ C7 由「只报 time」变为命中 boolean；7 个安全点仍零误报</td></tr>
+<tr><td>P0-2 衍生：子句轮偶发误报</td><td>子句轮（level≥2，ORDER BY/GROUP BY/HAVING 位置）此前仍是单次比较，随机 nonce 页面 4 次误报 1 次；已把稳定差异复核接入子句轮命中链路</td>
+<td class="ok">✅ <code>/safe/rand</code> 连跑 5 次零误报；A4（ORDER BY，靠子句轮命中）仍命中</td></tr>
+</tbody></table>
+
+<table><thead><tr><th>口径</th><th>修复前</th><th>修复后</th><th>变化</th></tr></thead><tbody>
+<tr><td>默认档（R1）</td><td>10/17（59%）</td><td>${S1.hit}/${S1.total}（${S1.pct}%）</td><td class="ok">+${S1.hit - 10}</td></tr>
+<tr><td>实战档（R2）</td><td>11/17（65%）</td><td>${S2.hit}/${S2.total}（${S2.pct}%）</td><td class="ok">+${S2.hit - 11}</td></tr>
+<tr><td>误报（安全点）</td><td>0</td><td>${FP2}</td><td class="ok">保持 0</td></tr>
+<tr><td>sqlmap 同题</td><td colspan="2">${SM.hit}/${SM.total}（${SM.pct}%）</td><td>差距收窄</td></tr>
+</tbody></table>
+<div class="foot">仍未覆盖：D14 base64 编码参数、E15 二阶注入、E17 WAF 绕过（sqlmap 在 E17 用纯布尔向量命中，本工具因布尔通道历史缺陷未命中——布尔修好后建议重测该点）。</div>
+
+<h2>八、修复优先级建议（剩余）</h2>
 <ol>
 <li><b>注入点发现层补 path 段与请求头</b>（P0）：TargetParser 除 query/body 外，应把 path 数字段、<code>-r</code> 导入的 header 纳入候选注入点；至少在 <code>points: []</code> 时给出"未发现可测参数"的显式告警，而不是输出 Low。</li>
 <li><b>重做布尔盲注判定</b>（P0）：别再依赖"假值页整体偏离基线"。建议改成<b>组间差异稳定性</b>判据——真假各采样 N 次，真组内自相似、假组内自相似、两组之间存在<b>稳定可复现</b>的差异即成立；再自动提取差异 token 当 <code>--string/--not-string</code>。这样差异小到几个字符也能判出，且不怕时间戳/nonce。</li>

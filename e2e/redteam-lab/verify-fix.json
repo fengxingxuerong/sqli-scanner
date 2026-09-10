@@ -1,0 +1,82 @@
+[
+  {
+    "id": "C7-boolean",
+    "expect": "hit",
+    "vulns": 1,
+    "techs": "boolean",
+    "risk": "Medium",
+    "pass": true
+  },
+  {
+    "id": "C8-time",
+    "expect": "hit",
+    "vulns": 1,
+    "techs": "time",
+    "risk": "Medium",
+    "pass": true
+  },
+  {
+    "id": "A1-int-union",
+    "expect": "hit",
+    "vulns": 2,
+    "techs": "union+boolean",
+    "risk": "High",
+    "pass": true
+  },
+  {
+    "id": "F18-safe-item",
+    "expect": "clean",
+    "vulns": 0,
+    "techs": "",
+    "risk": "Low",
+    "pass": true
+  },
+  {
+    "id": "F19-safe-search",
+    "expect": "clean",
+    "vulns": 0,
+    "techs": "",
+    "risk": "Low",
+    "pass": true
+  },
+  {
+    "id": "F20-safe-rand",
+    "expect": "clean",
+    "vulns": 0,
+    "techs": "",
+    "risk": "Low",
+    "pass": true
+  },
+  {
+    "id": "F21-safe-500",
+    "expect": "clean",
+    "vulns": 0,
+    "techs": "",
+    "risk": "Low",
+    "pass": true
+  },
+  {
+    "id": "F22-safe-403",
+    "expect": "clean",
+    "vulns": 0,
+    "techs": "",
+    "risk": "Low",
+    "pass": true
+  },
+  {
+    "id": "F23-safe-redirect",
+    "expect": "clean",
+    "vulns": 0,
+    "techs": "",
+    "risk": "Low",
+    "pass": true
+  },
+  {
+    "id": "F24-safe-static",
+    "expect": "clean",
+    "vulns": 0,
+    "techs": "",
+    "risk": "Low",
+    "pass": true
+  }
+]

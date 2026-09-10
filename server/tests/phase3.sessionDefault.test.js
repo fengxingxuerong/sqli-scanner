@@ -82,9 +82,17 @@ async function runScan(sm, url, config) {
   return id;
 }
 
-const URL_A = 'http://x/?id=1';
-const URL_B = 'http://x/?a=1';
-const URL_C = 'http://x/?b=2';
+// [FLAKY-FIX 2026-09-10] 三个 URL 曾共用固定值，而会话文件名按 URL 哈希派生、
+// 落在进程 CWD，于是用例之间（以及上一次全量运行的残留文件）通过文件系统隐式耦合：
+//   - 用例1 落盘 URL_A 会话 → 用例3 断言「URL_A 不应落盘」时可能撞上用例1 的异步写盘残留 → 挂；
+//   - 用例2 判定「URL_C 应完整检测」时，若 CWD 存在上次运行残留的 URL_C 会话文件 → 走 resume
+//     → 检测器零调用 → 断言失败（全量跑偶发，单跑通过）。
+// 修法：URL 带运行内随机 token，保证文件名跨运行、跨用例都唯一；用例3 另用独立 URL_D。
+const RND = Math.random().toString(36).slice(2, 10);
+const URL_A = `http://x/${RND}-a/?id=1`;
+const URL_B = `http://x/${RND}-b/?a=1`;
+const URL_C = `http://x/${RND}-c/?b=2`;
+const URL_D = `http://x/${RND}-d/?c=3`; // 用例3 专用，避免与用例1 共享会话文件
 
 test('sessionDefault：自动落盘按 URL 哈希文件名 + 同 URL resume 复扫 0 检测请求', { concurrency: false }, async () => {
   const sp = sessionPath(URL_A);
@@ -137,11 +145,11 @@ test('sessionDefault：不同 URL 各自独立文件不互踩', { concurrency: f
 });
 
 test('sessionDefault 缺省（false）：不自动落盘（与旧行为一致）', { concurrency: false }, async () => {
-  const sp = sessionPath(URL_A);
+  const sp = sessionPath(URL_D);
   try {
     rmQuiet(sp);
     const m = makeManager({ error: { vulnerable: true } });
-    await runScan(m, URL_A, {});
+    await runScan(m, URL_D, {});
     assert.ok(!fs.existsSync(sp), '未开启 sessionDefault 不应落盘会话文件');
   } finally {
     rmQuiet(sp);

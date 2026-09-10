@@ -4,7 +4,7 @@
     "url": "http://127.0.0.1:8231/shop/item?id=1",
     "round": "r1",
     "exit": 2,
-    "ms": 2334,
+    "ms": 2059,
     "hit": true,
     "techs": "union+boolean",
     "dbms": "MySQL",
@@ -13,9 +13,9 @@
     "verdict": "no_vulnerability_detected",
     "err": "",
     "raw": {
-      "scanId": "JKQDu08O4MIB",
+      "scanId": "iNEODCLKaIdL",
       "target": {
-        "id": "AJkUwm7jaP",
+        "id": "CEp69waSPb",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/shop/item?id=1",
         "method": "GET",
@@ -41,6 +41,8 @@
           "useRegistry": false,
           "prefix": "",
           "suffix": "",
+          "boolStableDiff": true,
+          "boolStableDiffSamples": 3,
           "timeThresholdMs": 1500,
           "timeBlindSamples": 5,
           "timeBlindSleepSec": 2,
@@ -153,8 +155,8 @@
           }
         }
       },
-      "startedAt": "2026-09-10T13:41:56.271Z",
-      "finishedAt": "2026-09-10T13:41:57.637Z",
+      "startedAt": "2026-09-10T14:52:39.332Z",
+      "finishedAt": "2026-09-10T14:52:40.696Z",
       "dbms": "MySQL",
       "points": [
         {
@@ -189,7 +191,7 @@
       ],
       "vulns": [
         {
-          "id": "n6_DdaOY",
+          "id": "Tb-hSUQl",
           "pointId": "283e732d",
           "technique": "union",
           "dbms": "MySQL",
@@ -203,7 +205,7 @@
           "trace": null
         },
         {
-          "id": "lvMdnHqb",
+          "id": "xFzJ7SAA",
           "pointId": "283e732d",
           "technique": "boolean",
           "dbms": "MySQL",
@@ -532,7 +534,7 @@
     "url": "http://127.0.0.1:8231/shop/search?name=alice",
     "round": "r1",
     "exit": 2,
-    "ms": 2146,
+    "ms": 1855,
     "hit": true,
     "techs": "union+boolean",
     "dbms": "MySQL",
@@ -541,9 +543,9 @@
     "verdict": "no_vulnerability_detected",
     "err": "",
     "raw": {
-      "scanId": "1JcNDPod_38k",
+      "scanId": "tDfnDFPu615j",
       "target": {
-        "id": "QVAYNaHfe0",
+        "id": "qarX-cy-Lz",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/shop/search?name=alice",
         "method": "GET",
@@ -569,6 +571,8 @@
           "useRegistry": false,
           "prefix": "",
           "suffix": "",
+          "boolStableDiff": true,
+          "boolStableDiffSamples": 3,
           "timeThresholdMs": 1500,
           "timeBlindSamples": 5,
           "timeBlindSleepSec": 2,
@@ -681,8 +685,8 @@
           }
         }
       },
-      "startedAt": "2026-09-10T13:41:58.602Z",
-      "finishedAt": "2026-09-10T13:41:59.735Z",
+      "startedAt": "2026-09-10T14:52:41.393Z",
+      "finishedAt": "2026-09-10T14:52:42.517Z",
       "dbms": "MySQL",
       "points": [
         {
@@ -717,7 +721,7 @@
       ],
       "vulns": [
         {
-          "id": "jRBbAWD4",
+          "id": "czsFFkzJ",
           "pointId": "de9d0cb9",
           "technique": "union",
           "dbms": "MySQL",
@@ -731,7 +735,7 @@
           "trace": null
         },
         {
-          "id": "p8M3E9VR",
+          "id": "zfqNS0c-",
           "pointId": "de9d0cb9",
           "technique": "boolean",
           "dbms": "MySQL",
@@ -922,7 +926,7 @@
     "url": "http://127.0.0.1:8231/shop/find?q=a",
     "round": "r1",
     "exit": 2,
-    "ms": 2308,
+    "ms": 1903,
     "hit": true,
     "techs": "union+boolean",
     "dbms": "MySQL",
@@ -931,9 +935,9 @@
     "verdict": "no_vulnerability_detected",
     "err": "",
     "raw": {
-      "scanId": "F5hdhyBJm84v",
+      "scanId": "xMB6OU9Psndt",
       "target": {
-        "id": "58K8-U24Lb",
+        "id": "dwPrh6rrJA",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/shop/find?q=a",
         "method": "GET",
@@ -959,6 +963,8 @@
           "useRegistry": false,
           "prefix": "",
           "suffix": "",
+          "boolStableDiff": true,
+          "boolStableDiffSamples": 3,
           "timeThresholdMs": 1500,
           "timeBlindSamples": 5,
           "timeBlindSleepSec": 2,
@@ -1071,8 +1077,8 @@
           }
         }
       },
-      "startedAt": "2026-09-10T13:42:00.927Z",
-      "finishedAt": "2026-09-10T13:42:02.090Z",
+      "startedAt": "2026-09-10T14:52:43.304Z",
+      "finishedAt": "2026-09-10T14:52:44.452Z",
       "dbms": "MySQL",
       "points": [
         {
@@ -1081,7 +1087,7 @@
           "param": "q",
           "originalValue": "a",
           "confirmed": true,
-          "technique": "boolean",
+          "technique": "union",
           "dbms": "MySQL",
           "formMethod": null,
           "actionUrl": null,
@@ -1106,7 +1112,7 @@
       ],
       "vulns": [
         {
-          "id": "KC7roBd8",
+          "id": "VZ181nlj",
           "pointId": "dec9ec92",
           "technique": "union",
           "dbms": "MySQL",
@@ -1120,7 +1126,7 @@
           "trace": null
         },
         {
-          "id": "WLq0dgbB",
+          "id": "oGG9smPd",
           "pointId": "dec9ec92",
           "technique": "boolean",
           "dbms": "MySQL",
@@ -1311,7 +1317,7 @@
     "url": "http://127.0.0.1:8231/shop/sort?by=id",
     "round": "r1",
     "exit": 0,
-    "ms": 3098,
+    "ms": 2746,
     "hit": false,
     "techs": "",
     "dbms": "MySQL",
@@ -1320,9 +1326,9 @@
     "verdict": "no_vulnerability_detected",
     "err": "",
     "raw": {
-      "scanId": "3GP8kACmhSNT",
+      "scanId": "cEu9XKNiQEm3",
       "target": {
-        "id": "C7iaucYSk1",
+        "id": "xkWOWwVxC3",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/shop/sort?by=id",
         "method": "GET",
@@ -1348,6 +1354,8 @@
           "useRegistry": false,
           "prefix": "",
           "suffix": "",
+          "boolStableDiff": true,
+          "boolStableDiffSamples": 3,
           "timeThresholdMs": 1500,
           "timeBlindSamples": 5,
           "timeBlindSleepSec": 2,
@@ -1460,8 +1468,8 @@
           }
         }
       },
-      "startedAt": "2026-09-10T13:42:03.203Z",
-      "finishedAt": "2026-09-10T13:42:05.077Z",
+      "startedAt": "2026-09-10T14:52:45.223Z",
+      "finishedAt": "2026-09-10T14:52:47.079Z",
       "dbms": "MySQL",
       "points": [
         {
@@ -1552,7 +1560,7 @@
     "url": "http://127.0.0.1:8231/shop/detail?id=1&cat=0",
     "round": "r1",
     "exit": 2,
-    "ms": 2580,
+    "ms": 2269,
     "hit": true,
     "techs": "union+boolean",
     "dbms": "MySQL",
@@ -1561,9 +1569,9 @@
     "verdict": "no_vulnerability_detected",
     "err": "",
     "raw": {
-      "scanId": "6_aplSCPLMfA",
+      "scanId": "6qssDJqHLCIY",
       "target": {
-        "id": "I-G5icUI9y",
+        "id": "C86hPP28zx",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/shop/detail?id=1&cat=0",
         "method": "GET",
@@ -1589,6 +1597,8 @@
           "useRegistry": false,
           "prefix": "",
           "suffix": "",
+          "boolStableDiff": true,
+          "boolStableDiffSamples": 3,
           "timeThresholdMs": 1500,
           "timeBlindSamples": 5,
           "timeBlindSleepSec": 2,
@@ -1701,8 +1711,8 @@
           }
         }
       },
-      "startedAt": "2026-09-10T13:42:06.199Z",
-      "finishedAt": "2026-09-10T13:42:07.664Z",
+      "startedAt": "2026-09-10T14:52:47.916Z",
+      "finishedAt": "2026-09-10T14:52:49.378Z",
       "dbms": "MySQL",
       "points": [
         {
@@ -1753,7 +1763,7 @@
       ],
       "vulns": [
         {
-          "id": "qxMrTZGP",
+          "id": "E2oZN4cX",
           "pointId": "283e732d",
           "technique": "union",
           "dbms": "MySQL",
@@ -1767,7 +1777,7 @@
           "trace": null
         },
         {
-          "id": "sRP8EKX_",
+          "id": "YMmtl_xu",
           "pointId": "283e732d",
           "technique": "boolean",
           "dbms": "MySQL",
@@ -2102,7 +2112,7 @@
     "url": "http://127.0.0.1:8231/shop/err?id=1",
     "round": "r1",
     "exit": 2,
-    "ms": 2261,
+    "ms": 2044,
     "hit": true,
     "techs": "union+boolean",
     "dbms": "MySQL",
@@ -2111,9 +2121,9 @@
     "verdict": "no_vulnerability_detected",
     "err": "",
     "raw": {
-      "scanId": "wN7fr13Iy4za",
+      "scanId": "f4ZviFmqzToh",
       "target": {
-        "id": "G6JiLfLnp1",
+        "id": "pvXVR5TydZ",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/shop/err?id=1",
         "method": "GET",
@@ -2139,6 +2149,8 @@
           "useRegistry": false,
           "prefix": "",
           "suffix": "",
+          "boolStableDiff": true,
+          "boolStableDiffSamples": 3,
           "timeThresholdMs": 1500,
           "timeBlindSamples": 5,
           "timeBlindSleepSec": 2,
@@ -2251,8 +2263,8 @@
           }
         }
       },
-      "startedAt": "2026-09-10T13:42:08.652Z",
-      "finishedAt": "2026-09-10T13:42:10.016Z",
+      "startedAt": "2026-09-10T14:52:50.162Z",
+      "finishedAt": "2026-09-10T14:52:51.515Z",
       "dbms": "MySQL",
       "points": [
         {
@@ -2287,7 +2299,7 @@
       ],
       "vulns": [
         {
-          "id": "guvwVvJH",
+          "id": "RZC7w6j0",
           "pointId": "283e732d",
           "technique": "union",
           "dbms": "MySQL",
@@ -2301,7 +2313,7 @@
           "trace": null
         },
         {
-          "id": "uwlrzk_i",
+          "id": "AVV-Ztwq",
           "pointId": "283e732d",
           "technique": "boolean",
           "dbms": "MySQL",
@@ -2630,18 +2642,18 @@
     "url": "http://127.0.0.1:8231/shop/blind?id=1",
     "round": "r1",
     "exit": 0,
-    "ms": 10175,
+    "ms": 5773,
     "hit": true,
-    "techs": "time",
+    "techs": "boolean",
     "dbms": "MySQL",
     "risk": "Medium",
-    "reqs": 266,
+    "reqs": 244,
     "verdict": "no_vulnerability_detected",
     "err": "",
     "raw": {
-      "scanId": "MCuiRYUmPWMl",
+      "scanId": "aKtKL_kFgoTZ",
       "target": {
-        "id": "gf3czkbe4R",
+        "id": "ivAZD1GNSP",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/shop/blind?id=1",
         "method": "GET",
@@ -2667,6 +2679,8 @@
           "useRegistry": false,
           "prefix": "",
           "suffix": "",
+          "boolStableDiff": true,
+          "boolStableDiffSamples": 3,
           "timeThresholdMs": 1500,
           "timeBlindSamples": 5,
           "timeBlindSleepSec": 2,
@@ -2779,8 +2793,8 @@
           }
         }
       },
-      "startedAt": "2026-09-10T13:42:10.938Z",
-      "finishedAt": "2026-09-10T13:42:20.241Z",
+      "startedAt": "2026-09-10T14:52:52.253Z",
+      "finishedAt": "2026-09-10T14:52:57.161Z",
       "dbms": "MySQL",
       "points": [
         {
@@ -2789,7 +2803,7 @@
           "param": "id",
           "originalValue": "1",
           "confirmed": true,
-          "technique": "time",
+          "technique": "boolean",
           "dbms": "MySQL",
           "formMethod": null,
           "actionUrl": null,
@@ -2804,85 +2818,270 @@
       ],
       "vulns": [
         {
-          "id": "9G1bN_M5",
+          "id": "YijOIe-s",
           "pointId": "283e732d",
-          "technique": "time",
+          "technique": "boolean",
           "dbms": "MySQL",
           "riskLevel": "Medium",
           "payloads": [
-            "1 AND SLEEP(2)-- -"
+            "1 AND 1=1",
+            "1 AND 1=2"
           ],
-          "description": "时间盲注确认(统计·自适应): μ=0.06s σ=0.02s z=2 阈值=1.61s 自适应下限=1.54s 稳定率1.00",
-          "evidence": "时间盲注确认(统计·自适应): μ=0.06s σ=0.02s z=2 阈值=1.61s 自适应下限=1.54s 稳定率1.00",
+          "description": "布尔注入确认(组间稳定差异): 真/假响应在差异片段[FOUND_USER:alice</p></div></body]vs[NOT_FOUND</p></div></body></html]可复现（真组3样本一致、假组3样本一致；非数值噪声）",
+          "evidence": "布尔注入确认(组间稳定差异): 真/假响应在差异片段[FOUND_USER:alice</p></div></body]vs[NOT_FOUND</p></div></body></html]可复现（真组3样本一致、假组3样本一致；非数值噪声）",
           "trace": {
-            "technique": "time",
+            "technique": "boolean",
             "adaptive": true,
-            "baselineNoiseRate": null,
-            "mu": 0.061,
-            "sigma": 0.022360679774997897,
-            "threshold": 1.6057213595499957,
-            "floor": 1.5447213595499958,
+            "baselineNoiseRate": 0,
+            "minStable": 0.66,
             "baselineSamples": [
               {
                 "idx": 0,
-                "ms": 0.029,
+                "len": 328,
+                "likeBaseline": true,
                 "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>blind</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-"
               },
               {
                 "idx": 1,
-                "ms": 0.046,
+                "len": 328,
+                "likeBaseline": true,
                 "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>blind</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-"
               },
               {
                 "idx": 2,
-                "ms": 0.06,
+                "len": 328,
+                "likeBaseline": true,
                 "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>blind</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-"
               },
               {
                 "idx": 3,
-                "ms": 0.092,
+                "len": 328,
+                "likeBaseline": true,
                 "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>blind</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-"
               },
               {
                 "idx": 4,
-                "ms": 0.078,
+                "len": 328,
+                "likeBaseline": true,
                 "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>blind</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-"
               }
             ],
-            "injectSamples": [
+            "pairs": [
               {
-                "idx": 0,
-                "ms": 2.026,
-                "delayed": true,
-                "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>blind</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-"
+                "ti": 0,
+                "fi": 2,
+                "trueSamples": [
+                  {
+                    "idx": 0,
+                    "len": 321,
+                    "likeBaseline": true,
+                    "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>blind</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-"
+                  },
+                  {
+                    "idx": 1,
+                    "len": 321,
+                    "likeBaseline": true,
+                    "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>blind</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-"
+                  },
+                  {
+                    "idx": 2,
+                    "len": 321,
+                    "likeBaseline": true,
+                    "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>blind</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-"
+                  }
+                ],
+                "falseSamples": [
+                  {
+                    "idx": 0,
+                    "len": 321,
+                    "likeBaseline": true,
+                    "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>blind</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-"
+                  },
+                  {
+                    "idx": 1,
+                    "len": 321,
+                    "likeBaseline": true,
+                    "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>blind</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-"
+                  },
+                  {
+                    "idx": 2,
+                    "len": 321,
+                    "likeBaseline": true,
+                    "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>blind</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-"
+                  }
+                ],
+                "trueRatio": 1,
+                "falseRatio": 0,
+                "meaningfulRatio": 0,
+                "z": null,
+                "significant": false,
+                "diffs": [
+                  {
+                    "idx": 0,
+                    "lenDelta": 0,
+                    "firstDiffOffset": -1,
+                    "changedSnippet": ""
+                  },
+                  {
+                    "idx": 1,
+                    "lenDelta": 0,
+                    "firstDiffOffset": -1,
+                    "changedSnippet": ""
+                  },
+                  {
+                    "idx": 2,
+                    "lenDelta": 0,
+                    "firstDiffOffset": -1,
+                    "changedSnippet": ""
+                  }
+                ]
               },
               {
-                "idx": 1,
-                "ms": 2.041,
-                "delayed": true,
-                "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>blind</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-"
+                "ti": 1,
+                "fi": 3,
+                "trueSamples": [
+                  {
+                    "idx": 0,
+                    "len": 321,
+                    "likeBaseline": true,
+                    "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>blind</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-"
+                  },
+                  {
+                    "idx": 1,
+                    "len": 321,
+                    "likeBaseline": true,
+                    "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>blind</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-"
+                  },
+                  {
+                    "idx": 2,
+                    "len": 321,
+                    "likeBaseline": true,
+                    "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>blind</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-"
+                  }
+                ],
+                "falseSamples": [
+                  {
+                    "idx": 0,
+                    "len": 321,
+                    "likeBaseline": true,
+                    "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>blind</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-"
+                  },
+                  {
+                    "idx": 1,
+                    "len": 321,
+                    "likeBaseline": true,
+                    "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>blind</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-"
+                  },
+                  {
+                    "idx": 2,
+                    "len": 321,
+                    "likeBaseline": true,
+                    "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>blind</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-"
+                  }
+                ],
+                "trueRatio": 1,
+                "falseRatio": 0,
+                "meaningfulRatio": 0,
+                "z": null,
+                "significant": false,
+                "diffs": [
+                  {
+                    "idx": 0,
+                    "lenDelta": 0,
+                    "firstDiffOffset": -1,
+                    "changedSnippet": ""
+                  },
+                  {
+                    "idx": 1,
+                    "lenDelta": 0,
+                    "firstDiffOffset": -1,
+                    "changedSnippet": ""
+                  },
+                  {
+                    "idx": 2,
+                    "lenDelta": 0,
+                    "firstDiffOffset": -1,
+                    "changedSnippet": ""
+                  }
+                ]
               },
               {
-                "idx": 2,
-                "ms": 2.072,
-                "delayed": true,
-                "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>blind</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-"
-              },
-              {
-                "idx": 3,
-                "ms": 2.088,
-                "delayed": true,
-                "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>blind</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-"
-              },
-              {
-                "idx": 4,
-                "ms": 2.014,
-                "delayed": true,
-                "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>blind</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-"
+                "ti": 4,
+                "fi": 5,
+                "trueSamples": [
+                  {
+                    "idx": 0,
+                    "len": 328,
+                    "likeBaseline": true,
+                    "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>blind</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-"
+                  },
+                  {
+                    "idx": 1,
+                    "len": 328,
+                    "likeBaseline": true,
+                    "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>blind</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-"
+                  },
+                  {
+                    "idx": 2,
+                    "len": 328,
+                    "likeBaseline": true,
+                    "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>blind</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-"
+                  }
+                ],
+                "falseSamples": [
+                  {
+                    "idx": 0,
+                    "len": 321,
+                    "likeBaseline": true,
+                    "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>blind</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-"
+                  },
+                  {
+                    "idx": 1,
+                    "len": 321,
+                    "likeBaseline": true,
+                    "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>blind</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-"
+                  },
+                  {
+                    "idx": 2,
+                    "len": 321,
+                    "likeBaseline": true,
+                    "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>blind</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-"
+                  }
+                ],
+                "trueRatio": 1,
+                "falseRatio": 0,
+                "meaningfulRatio": 1,
+                "z": null,
+                "significant": false,
+                "diffs": [
+                  {
+                    "idx": 0,
+                    "lenDelta": -7,
+                    "firstDiffOffset": 288,
+                    "changedSnippet": "div id=\"content\"><p>NOT_FOUND</p></div></body></html>"
+                  },
+                  {
+                    "idx": 1,
+                    "lenDelta": -7,
+                    "firstDiffOffset": 288,
+                    "changedSnippet": "div id=\"content\"><p>NOT_FOUND</p></div></body></html>"
+                  },
+                  {
+                    "idx": 2,
+                    "lenDelta": -7,
+                    "firstDiffOffset": 288,
+                    "changedSnippet": "div id=\"content\"><p>NOT_FOUND</p></div></body></html>"
+                  }
+                ]
               }
             ],
-            "stableRatio": 1,
-            "decision": "vulnerable"
+            "decision": "vulnerable",
+            "stableDiff": {
+              "first": 288,
+              "last": 320,
+              "tSpan": "FOUND_USER:alice</p></div></body",
+              "fSpan": "NOT_FOUND</p></div></body></html"
+            }
           }
         }
       ],
@@ -2895,9 +3094,9 @@
         "validity": {
           "status": "ok",
           "reliable": true,
-          "reason": "目标可达性与会话状态正常：累计 266 次请求，无连续失败/拦截/会话失效/持续 5xx 迹象",
+          "reason": "目标可达性与会话状态正常：累计 244 次请求，无连续失败/拦截/会话失效/持续 5xx 迹象",
           "counts": {
-            "total": 266,
+            "total": 244,
             "failStreak": 0,
             "blockHits": 0,
             "serverErr": 0,
@@ -2932,9 +3131,9 @@
       "validity": {
         "status": "ok",
         "reliable": true,
-        "reason": "目标可达性与会话状态正常：累计 266 次请求，无连续失败/拦截/会话失效/持续 5xx 迹象",
+        "reason": "目标可达性与会话状态正常：累计 244 次请求，无连续失败/拦截/会话失效/持续 5xx 迹象",
         "counts": {
-          "total": 266,
+          "total": 244,
           "failStreak": 0,
           "blockHits": 0,
           "serverErr": 0,
@@ -2954,7 +3153,7 @@
     "url": "http://127.0.0.1:8231/shop/time?id=1",
     "round": "r1",
     "exit": 0,
-    "ms": 10309,
+    "ms": 10056,
     "hit": true,
     "techs": "time",
     "dbms": "MySQL",
@@ -2963,9 +3162,9 @@
     "verdict": "no_vulnerability_detected",
     "err": "",
     "raw": {
-      "scanId": "9VNzKaFlTJ1v",
+      "scanId": "od9_h6i2yVf9",
       "target": {
-        "id": "_YU2swUK7x",
+        "id": "iCc8i90GfY",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/shop/time?id=1",
         "method": "GET",
@@ -2991,6 +3190,8 @@
           "useRegistry": false,
           "prefix": "",
           "suffix": "",
+          "boolStableDiff": true,
+          "boolStableDiffSamples": 3,
           "timeThresholdMs": 1500,
           "timeBlindSamples": 5,
           "timeBlindSleepSec": 2,
@@ -3103,8 +3304,8 @@
           }
         }
       },
-      "startedAt": "2026-09-10T13:42:21.235Z",
-      "finishedAt": "2026-09-10T13:42:30.551Z",
+      "startedAt": "2026-09-10T14:52:58.026Z",
+      "finishedAt": "2026-09-10T14:53:07.310Z",
       "dbms": "MySQL",
       "points": [
         {
@@ -3128,7 +3329,7 @@
       ],
       "vulns": [
         {
-          "id": "IJP55LlI",
+          "id": "fkitxfSJ",
           "pointId": "283e732d",
           "technique": "time",
           "dbms": "MySQL",
@@ -3136,71 +3337,71 @@
           "payloads": [
             "1 AND SLEEP(2)-- -"
           ],
-          "description": "时间盲注确认(统计·自适应): μ=0.06s σ=0.02s z=2 阈值=1.61s 自适应下限=1.54s 稳定率1.00",
-          "evidence": "时间盲注确认(统计·自适应): μ=0.06s σ=0.02s z=2 阈值=1.61s 自适应下限=1.54s 稳定率1.00",
+          "description": "时间盲注确认(统计·自适应): μ=0.05s σ=0.03s z=2 阈值=1.61s 自适应下限=1.56s 稳定率1.00",
+          "evidence": "时间盲注确认(统计·自适应): μ=0.05s σ=0.03s z=2 阈值=1.61s 自适应下限=1.56s 稳定率1.00",
           "trace": {
             "technique": "time",
             "adaptive": true,
             "baselineNoiseRate": null,
-            "mu": 0.0622,
-            "sigma": 0.022211708624056817,
-            "threshold": 1.6066234172481137,
-            "floor": 1.5444234172481137,
+            "mu": 0.0482,
+            "sigma": 0.02886797533600166,
+            "threshold": 1.6059359506720035,
+            "floor": 1.5577359506720034,
             "baselineSamples": [
               {
                 "idx": 0,
-                "ms": 0.031,
+                "ms": 0.005,
                 "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>time</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-c"
               },
               {
                 "idx": 1,
-                "ms": 0.046,
+                "ms": 0.025,
                 "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>time</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-c"
               },
               {
                 "idx": 2,
-                "ms": 0.062,
+                "ms": 0.061,
                 "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>time</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-c"
               },
               {
                 "idx": 3,
-                "ms": 0.093,
+                "ms": 0.066,
                 "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>time</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-c"
               },
               {
                 "idx": 4,
-                "ms": 0.079,
+                "ms": 0.084,
                 "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>time</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-c"
               }
             ],
             "injectSamples": [
               {
                 "idx": 0,
-                "ms": 2.023,
+                "ms": 2.024,
                 "delayed": true,
                 "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>time</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-c"
               },
               {
                 "idx": 1,
-                "ms": 2.038,
+                "ms": 2.056,
                 "delayed": true,
                 "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>time</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-c"
               },
               {
                 "idx": 2,
-                "ms": 2.07,
+                "ms": 2.071,
                 "delayed": true,
                 "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>time</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-c"
               },
               {
                 "idx": 3,
-                "ms": 2.085,
+                "ms": 2.086,
                 "delayed": true,
                 "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>time</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-c"
               },
               {
                 "idx": 4,
-                "ms": 2.009,
+                "ms": 2.01,
                 "delayed": true,
                 "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>time</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-c"
               }
@@ -3278,7 +3479,7 @@
     "url": "http://127.0.0.1:8231/login",
     "round": "r1",
     "exit": 2,
-    "ms": 11853,
+    "ms": 11674,
     "hit": true,
     "techs": "union+boolean+time",
     "dbms": "MySQL",
@@ -3287,9 +3488,9 @@
     "verdict": "no_vulnerability_detected",
     "err": "",
     "raw": {
-      "scanId": "mP31shVsx6Fj",
+      "scanId": "QTdVFWUjE5mT",
       "target": {
-        "id": "EqvLD_ZyQr",
+        "id": "8lvV8wyt9N",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/login",
         "method": "POST",
@@ -3318,6 +3519,8 @@
           "useRegistry": false,
           "prefix": "",
           "suffix": "",
+          "boolStableDiff": true,
+          "boolStableDiffSamples": 3,
           "timeThresholdMs": 1500,
           "timeBlindSamples": 5,
           "timeBlindSleepSec": 2,
@@ -3430,8 +3633,8 @@
           }
         }
       },
-      "startedAt": "2026-09-10T13:42:31.447Z",
-      "finishedAt": "2026-09-10T13:42:42.419Z",
+      "startedAt": "2026-09-10T14:53:08.061Z",
+      "finishedAt": "2026-09-10T14:53:19.019Z",
       "dbms": "MySQL",
       "points": [
         {
@@ -3479,7 +3682,7 @@
       ],
       "vulns": [
         {
-          "id": "2gO-RCwA",
+          "id": "p_ZguQvE",
           "pointId": "590739db",
           "technique": "union",
           "dbms": "MySQL",
@@ -3493,7 +3696,7 @@
           "trace": null
         },
         {
-          "id": "2qHLWmB9",
+          "id": "r7uqTb2p",
           "pointId": "590739db",
           "technique": "boolean",
           "dbms": "MySQL",
@@ -3961,7 +4164,7 @@
           }
         },
         {
-          "id": "qpKoN4YY",
+          "id": "SZNZQtO5",
           "pointId": "92d712fc",
           "technique": "time",
           "dbms": "MySQL",
@@ -3975,10 +4178,10 @@
             "technique": "time",
             "adaptive": true,
             "baselineNoiseRate": null,
-            "mu": 0.0646,
-            "sigma": 0.023346091750012465,
-            "threshold": 1.611292183500025,
-            "floor": 1.546692183500025,
+            "mu": 0.0634,
+            "sigma": 0.022676860452893386,
+            "threshold": 1.6087537209057867,
+            "floor": 1.5453537209057868,
             "baselineSamples": [
               {
                 "idx": 0,
@@ -3987,7 +4190,7 @@
               },
               {
                 "idx": 1,
-                "ms": 0.045,
+                "ms": 0.044,
                 "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>login</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-"
               },
               {
@@ -3997,37 +4200,37 @@
               },
               {
                 "idx": 3,
-                "ms": 0.093,
+                "ms": 0.091,
                 "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>login</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-"
               },
               {
                 "idx": 4,
-                "ms": 0.079,
+                "ms": 0.076,
                 "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>login</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-"
               }
             ],
             "injectSamples": [
               {
                 "idx": 0,
-                "ms": 2.026,
+                "ms": 2.037,
                 "delayed": true,
                 "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>login</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-"
               },
               {
                 "idx": 1,
-                "ms": 2.057,
+                "ms": 2.052,
                 "delayed": true,
                 "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>login</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-"
               },
               {
                 "idx": 2,
-                "ms": 2.072,
+                "ms": 2.068,
                 "delayed": true,
                 "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>login</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-"
               },
               {
                 "idx": 3,
-                "ms": 2.088,
+                "ms": 2.099,
                 "delayed": true,
                 "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>login</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-"
               },
@@ -4111,7 +4314,7 @@
     "url": "http://127.0.0.1:8231/api/profile",
     "round": "r1",
     "exit": 2,
-    "ms": 2328,
+    "ms": 2076,
     "hit": true,
     "techs": "union+boolean",
     "dbms": "MySQL",
@@ -4120,9 +4323,9 @@
     "verdict": "no_vulnerability_detected",
     "err": "",
     "raw": {
-      "scanId": "eSY8Xj-y6q9s",
+      "scanId": "iV3vSeK70IS8",
       "target": {
-        "id": "7fMGVgV3mF",
+        "id": "b-dOPEr9mv",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/api/profile",
         "method": "POST",
@@ -4150,6 +4353,8 @@
           "useRegistry": false,
           "prefix": "",
           "suffix": "",
+          "boolStableDiff": true,
+          "boolStableDiffSamples": 3,
           "timeThresholdMs": 1500,
           "timeBlindSamples": 5,
           "timeBlindSleepSec": 2,
@@ -4262,8 +4467,8 @@
           }
         }
       },
-      "startedAt": "2026-09-10T13:42:43.335Z",
-      "finishedAt": "2026-09-10T13:42:44.701Z",
+      "startedAt": "2026-09-10T14:53:19.747Z",
+      "finishedAt": "2026-09-10T14:53:21.099Z",
       "dbms": "MySQL",
       "points": [
         {
@@ -4298,7 +4503,7 @@
       ],
       "vulns": [
         {
-          "id": "_dKsdEFj",
+          "id": "ioPabNA3",
           "pointId": "845293ee",
           "technique": "union",
           "dbms": "MySQL",
@@ -4312,7 +4517,7 @@
           "trace": null
         },
         {
-          "id": "vecE-Cmt",
+          "id": "8P47S_PT",
           "pointId": "845293ee",
           "technique": "boolean",
           "dbms": "MySQL",
@@ -4641,7 +4846,7 @@
     "url": "http://127.0.0.1:8231/shop/cookie",
     "round": "r1",
     "exit": 0,
-    "ms": 1249,
+    "ms": 849,
     "hit": false,
     "techs": "",
     "dbms": "",
@@ -4650,15 +4855,17 @@
     "verdict": "no_vulnerability_detected",
     "err": "",
     "raw": {
-      "scanId": "_jVNlJAPfiRG",
+      "scanId": "KzvEx0O-aaAS",
       "target": {
-        "id": "YDypqEKSJb",
+        "id": "Y7VqXVPV3y",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/shop/cookie",
         "method": "GET",
         "bodyParams": {},
         "jsonBody": null,
-        "cookieParams": {},
+        "cookieParams": {
+          "uid": "1"
+        },
         "headerParams": {},
         "config": {
           "port": 4567,
@@ -4678,6 +4885,8 @@
           "useRegistry": false,
           "prefix": "",
           "suffix": "",
+          "boolStableDiff": true,
+          "boolStableDiffSamples": 3,
           "timeThresholdMs": 1500,
           "timeBlindSamples": 5,
           "timeBlindSleepSec": 2,
@@ -4787,11 +4996,12 @@
             "adaptiveTimeFloorScale": 2,
             "concurrency": 4,
             "extractVerify": true
-          }
+          },
+          "testHeaders": true
         }
       },
-      "startedAt": "2026-09-10T13:42:45.789Z",
-      "finishedAt": "2026-09-10T13:42:45.797Z",
+      "startedAt": "2026-09-10T14:53:21.800Z",
+      "finishedAt": "2026-09-10T14:53:21.805Z",
       "dbms": null,
       "points": [],
       "vulns": [],
@@ -4799,6 +5009,8 @@
       "riskLevel": "Low",
       "summary": {
         "constraints": [],
+        "noInjectionPoints": true,
+        "noInjectionPointsHint": "未发现任何可测参数：目标 URL 无 query 参数，且未启用请求头/ path 段注入点。如需测试请求头注入请加 --test-headers，测试 URL path 末段注入请加 --test-path。",
         "stackedEnabled": false,
         "stackedCorroborations": [],
         "validity": {
@@ -4852,26 +5064,28 @@
     "id": "D12-xff-header",
     "url": "http://127.0.0.1:8231/shop/ip",
     "round": "r1",
-    "exit": 0,
-    "ms": 1156,
-    "hit": false,
-    "techs": "",
-    "dbms": "",
-    "risk": "Low",
-    "reqs": 0,
+    "exit": 2,
+    "ms": 2065,
+    "hit": true,
+    "techs": "union+boolean",
+    "dbms": "MySQL",
+    "risk": "High",
+    "reqs": 117,
     "verdict": "no_vulnerability_detected",
     "err": "",
     "raw": {
-      "scanId": "94tVSN2z5Vkb",
+      "scanId": "poeS8IKQ131d",
       "target": {
-        "id": "c9icGHhmxp",
+        "id": "MdfwvnUMCZ",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/shop/ip",
         "method": "GET",
         "bodyParams": {},
         "jsonBody": null,
         "cookieParams": {},
-        "headerParams": {},
+        "headerParams": {
+          "x-forwarded-for": "1"
+        },
         "config": {
           "port": 4567,
           "timeoutMs": 30000,
@@ -4890,6 +5104,8 @@
           "useRegistry": false,
           "prefix": "",
           "suffix": "",
+          "boolStableDiff": true,
+          "boolStableDiffSamples": 3,
           "timeThresholdMs": 1500,
           "timeBlindSamples": 5,
           "timeBlindSleepSec": 2,
@@ -4999,29 +5215,336 @@
             "adaptiveTimeFloorScale": 2,
             "concurrency": 4,
             "extractVerify": true
-          }
+          },
+          "testHeaders": true
         }
       },
-      "startedAt": "2026-09-10T13:42:46.951Z",
-      "finishedAt": "2026-09-10T13:42:46.958Z",
-      "dbms": null,
-      "points": [],
-      "vulns": [],
+      "startedAt": "2026-09-10T14:53:22.652Z",
+      "finishedAt": "2026-09-10T14:53:24.011Z",
+      "dbms": "MySQL",
+      "points": [
+        {
+          "id": "a7471d66",
+          "location": "header",
+          "param": "x-forwarded-for",
+          "originalValue": "1",
+          "confirmed": true,
+          "technique": "boolean",
+          "dbms": "MySQL",
+          "formMethod": null,
+          "actionUrl": null,
+          "formValues": null,
+          "csrfTokenName": null,
+          "isStorePoint": false,
+          "storeKind": null,
+          "boundaryProbed": true,
+          "_baselineTitle": "xff",
+          "boundary": "",
+          "dbmsVersion": {
+            "raw": "8.0.37",
+            "major": 8,
+            "minor": 0
+          },
+          "echoCols": [
+            0,
+            1,
+            2
+          ],
+          "columns": 3
+        }
+      ],
+      "vulns": [
+        {
+          "id": "XxUzGOr3",
+          "pointId": "a7471d66",
+          "technique": "union",
+          "dbms": "MySQL",
+          "riskLevel": "High",
+          "payloads": [
+            "1 UNION SELECT 'SQLISCANNER0','SQLISCANNER1','SQLISCANNER2'-- -",
+            "1 ORDER BY 3-- -"
+          ],
+          "description": "UNION 注入成功，回显列：0,1,2（列数 3）",
+          "evidence": "UNION 注入成功，回显列：0,1,2（列数 3）",
+          "trace": null
+        },
+        {
+          "id": "LWFbcmki",
+          "pointId": "a7471d66",
+          "technique": "boolean",
+          "dbms": "MySQL",
+          "riskLevel": "Medium",
+          "payloads": [
+            "1 AND 1=1",
+            "1 AND 1=2"
+          ],
+          "description": "布尔注入确认(统计·自适应): 真≈基线1.00、假≠基线1.00、差异1.00、基线噪声0.00、门槛0.66、z=2.83(显著)",
+          "evidence": "布尔注入确认(统计·自适应): 真≈基线1.00、假≠基线1.00、差异1.00、基线噪声0.00、门槛0.66、z=2.83(显著)",
+          "trace": {
+            "technique": "boolean",
+            "adaptive": true,
+            "baselineNoiseRate": 0,
+            "minStable": 0.66,
+            "baselineSamples": [
+              {
+                "idx": 0,
+                "len": 370,
+                "likeBaseline": true,
+                "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>xff</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-co"
+              },
+              {
+                "idx": 1,
+                "len": 370,
+                "likeBaseline": true,
+                "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>xff</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-co"
+              },
+              {
+                "idx": 2,
+                "len": 370,
+                "likeBaseline": true,
+                "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>xff</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-co"
+              },
+              {
+                "idx": 3,
+                "len": 370,
+                "likeBaseline": true,
+                "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>xff</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-co"
+              },
+              {
+                "idx": 4,
+                "len": 370,
+                "likeBaseline": true,
+                "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>xff</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-co"
+              }
+            ],
+            "pairs": [
+              {
+                "ti": 0,
+                "fi": 2,
+                "trueSamples": [
+                  {
+                    "idx": 0,
+                    "len": 481,
+                    "likeBaseline": false,
+                    "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>xff</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-co"
+                  },
+                  {
+                    "idx": 1,
+                    "len": 481,
+                    "likeBaseline": false,
+                    "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>xff</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-co"
+                  },
+                  {
+                    "idx": 2,
+                    "len": 481,
+                    "likeBaseline": false,
+                    "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>xff</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-co"
+                  }
+                ],
+                "falseSamples": [
+                  {
+                    "idx": 0,
+                    "len": 481,
+                    "likeBaseline": false,
+                    "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>xff</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-co"
+                  },
+                  {
+                    "idx": 1,
+                    "len": 481,
+                    "likeBaseline": false,
+                    "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>xff</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-co"
+                  },
+                  {
+                    "idx": 2,
+                    "len": 481,
+                    "likeBaseline": false,
+                    "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>xff</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-co"
+                  }
+                ],
+                "trueRatio": 0,
+                "falseRatio": 1,
+                "meaningfulRatio": 1,
+                "z": 2.82842712474619,
+                "significant": true,
+                "diffs": [
+                  {
+                    "idx": 0,
+                    "lenDelta": 0,
+                    "firstDiffOffset": 443,
+                    "changedSnippet": "se near '' AND '1'='2' at line 1</pre></div></body></html>"
+                  },
+                  {
+                    "idx": 1,
+                    "lenDelta": 0,
+                    "firstDiffOffset": 443,
+                    "changedSnippet": "se near '' AND '1'='2' at line 1</pre></div></body></html>"
+                  },
+                  {
+                    "idx": 2,
+                    "lenDelta": 0,
+                    "firstDiffOffset": 443,
+                    "changedSnippet": "se near '' AND '1'='2' at line 1</pre></div></body></html>"
+                  }
+                ]
+              },
+              {
+                "ti": 1,
+                "fi": 3,
+                "trueSamples": [
+                  {
+                    "idx": 0,
+                    "len": 481,
+                    "likeBaseline": false,
+                    "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>xff</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-co"
+                  },
+                  {
+                    "idx": 1,
+                    "len": 481,
+                    "likeBaseline": false,
+                    "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>xff</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-co"
+                  },
+                  {
+                    "idx": 2,
+                    "len": 481,
+                    "likeBaseline": false,
+                    "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>xff</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-co"
+                  }
+                ],
+                "falseSamples": [
+                  {
+                    "idx": 0,
+                    "len": 481,
+                    "likeBaseline": false,
+                    "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>xff</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-co"
+                  },
+                  {
+                    "idx": 1,
+                    "len": 481,
+                    "likeBaseline": false,
+                    "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>xff</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-co"
+                  },
+                  {
+                    "idx": 2,
+                    "len": 481,
+                    "likeBaseline": false,
+                    "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>xff</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-co"
+                  }
+                ],
+                "trueRatio": 0,
+                "falseRatio": 1,
+                "meaningfulRatio": 1,
+                "z": 2.82842712474619,
+                "significant": true,
+                "diffs": [
+                  {
+                    "idx": 0,
+                    "lenDelta": 0,
+                    "firstDiffOffset": 443,
+                    "changedSnippet": "se near '\" AND \"1\"=\"2' at line 1</pre></div></body></html>"
+                  },
+                  {
+                    "idx": 1,
+                    "lenDelta": 0,
+                    "firstDiffOffset": 443,
+                    "changedSnippet": "se near '\" AND \"1\"=\"2' at line 1</pre></div></body></html>"
+                  },
+                  {
+                    "idx": 2,
+                    "lenDelta": 0,
+                    "firstDiffOffset": 443,
+                    "changedSnippet": "se near '\" AND \"1\"=\"2' at line 1</pre></div></body></html>"
+                  }
+                ]
+              },
+              {
+                "ti": 4,
+                "fi": 5,
+                "trueSamples": [
+                  {
+                    "idx": 0,
+                    "len": 370,
+                    "likeBaseline": true,
+                    "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>xff</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-co"
+                  },
+                  {
+                    "idx": 1,
+                    "len": 370,
+                    "likeBaseline": true,
+                    "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>xff</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-co"
+                  },
+                  {
+                    "idx": 2,
+                    "len": 370,
+                    "likeBaseline": true,
+                    "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>xff</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-co"
+                  }
+                ],
+                "falseSamples": [
+                  {
+                    "idx": 0,
+                    "len": 315,
+                    "likeBaseline": false,
+                    "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>xff</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-co"
+                  },
+                  {
+                    "idx": 1,
+                    "len": 315,
+                    "likeBaseline": false,
+                    "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>xff</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-co"
+                  },
+                  {
+                    "idx": 2,
+                    "len": 315,
+                    "likeBaseline": false,
+                    "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>xff</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-co"
+                  }
+                ],
+                "trueRatio": 1,
+                "falseRatio": 1,
+                "meaningfulRatio": 1,
+                "z": 2.82842712474619,
+                "significant": true,
+                "diffs": [
+                  {
+                    "idx": 0,
+                    "lenDelta": -55,
+                    "firstDiffOffset": 282,
+                    "changedSnippet": "><div id=\"content\"><p>NO_ROWS</p></div></body></html>"
+                  },
+                  {
+                    "idx": 1,
+                    "lenDelta": -55,
+                    "firstDiffOffset": 282,
+                    "changedSnippet": "><div id=\"content\"><p>NO_ROWS</p></div></body></html>"
+                  },
+                  {
+                    "idx": 2,
+                    "lenDelta": -55,
+                    "firstDiffOffset": 282,
+                    "changedSnippet": "><div id=\"content\"><p>NO_ROWS</p></div></body></html>"
+                  }
+                ]
+              }
+            ],
+            "decision": "vulnerable"
+          }
+        }
+      ],
       "data": null,
-      "riskLevel": "Low",
+      "riskLevel": "High",
       "summary": {
         "constraints": [],
         "stackedEnabled": false,
         "stackedCorroborations": [],
         "validity": {
-          "status": "ok",
-          "reliable": true,
-          "reason": "目标可达性与会话状态正常：累计 0 次请求，无连续失败/拦截/会话失效/持续 5xx 迹象",
+          "status": "target_error",
+          "reliable": false,
+          "reason": "近 40 次请求中 5xx 共 52 次（占比 0.8），目标自身处于错误状态",
           "counts": {
-            "total": 0,
+            "total": 117,
             "failStreak": 0,
             "blockHits": 0,
-            "serverErr": 0,
+            "serverErr": 52,
             "injection5xx": 0,
             "authLostHits": 0,
             "netErrPoints": 0
@@ -5029,10 +5552,20 @@
           "blockRatio": 0,
           "suggestBackoffMs": null,
           "inconclusivePoints": [],
-          "advice": "无需处置"
+          "advice": "先看目标应用日志/DB 连接池，确认服务健康后复扫；5xx 期间的响应差异无判定意义（若同时命中 dbHealth 熔断，先降并发避免持续伤害）"
         },
         "verdict": "no_vulnerability_detected",
-        "verdictNote": "目标在本次扫描窗口内可达、未被拦且会话有效，「未检出漏洞」的阴性结论可信度正常（仍建议对高风险参数人工复核）",
+        "verdictNote": "本次扫描检出 2 条漏洞；verdict 仅描述「未检出」类阴性结论的可信度，命中详情见 vulns",
+        "dbmsEvidence": {
+          "dbms": "MySQL",
+          "level": "verified",
+          "levelText": "真实引擎验证",
+          "evidence": "e2e/real-mysql-lab（真实 8.0.28 / 8.0.37）+ e2e/waf-real",
+          "caveat": null,
+          "all": [
+            "MySQL:verified"
+          ]
+        },
         "blockPolicy": {
           "action": "none",
           "reason": "无拦截证据，保持当前发包形态",
@@ -5041,14 +5574,14 @@
         }
       },
       "validity": {
-        "status": "ok",
-        "reliable": true,
-        "reason": "目标可达性与会话状态正常：累计 0 次请求，无连续失败/拦截/会话失效/持续 5xx 迹象",
+        "status": "target_error",
+        "reliable": false,
+        "reason": "近 40 次请求中 5xx 共 52 次（占比 0.8），目标自身处于错误状态",
         "counts": {
-          "total": 0,
+          "total": 117,
           "failStreak": 0,
           "blockHits": 0,
-          "serverErr": 0,
+          "serverErr": 52,
           "injection5xx": 0,
           "authLostHits": 0,
           "netErrPoints": 0
@@ -5056,7 +5589,7 @@
         "blockRatio": 0,
         "suggestBackoffMs": null,
         "inconclusivePoints": [],
-        "advice": "无需处置"
+        "advice": "先看目标应用日志/DB 连接池，确认服务健康后复扫；5xx 期间的响应差异无判定意义（若同时命中 dbHealth 熔断，先降并发避免持续伤害）"
       }
     }
   },
@@ -5064,19 +5597,19 @@
     "id": "D13-path",
     "url": "http://127.0.0.1:8231/shop/user/1",
     "round": "r1",
-    "exit": 0,
-    "ms": 1153,
-    "hit": false,
-    "techs": "",
-    "dbms": "",
-    "risk": "Low",
-    "reqs": 0,
+    "exit": 2,
+    "ms": 1448,
+    "hit": true,
+    "techs": "union+error+boolean",
+    "dbms": "MySQL",
+    "risk": "High",
+    "reqs": 83,
     "verdict": "no_vulnerability_detected",
     "err": "",
     "raw": {
-      "scanId": "eLsWWvIMi34N",
+      "scanId": "zAhmnwPXN_Zb",
       "target": {
-        "id": "K4W9Wmn0Tt",
+        "id": "SaEYbG8hqU",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/shop/user/1",
         "method": "GET",
@@ -5102,6 +5635,8 @@
           "useRegistry": false,
           "prefix": "",
           "suffix": "",
+          "boolStableDiff": true,
+          "boolStableDiffSamples": 3,
           "timeThresholdMs": 1500,
           "timeBlindSamples": 5,
           "timeBlindSleepSec": 2,
@@ -5211,16 +5746,337 @@
             "adaptiveTimeFloorScale": 2,
             "concurrency": 4,
             "extractVerify": true
-          }
+          },
+          "testPath": true
         }
       },
-      "startedAt": "2026-09-10T13:42:48.101Z",
-      "finishedAt": "2026-09-10T13:42:48.108Z",
-      "dbms": null,
-      "points": [],
-      "vulns": [],
+      "startedAt": "2026-09-10T14:53:24.712Z",
+      "finishedAt": "2026-09-10T14:53:25.396Z",
+      "dbms": "MySQL",
+      "points": [
+        {
+          "id": "86d7dabd",
+          "location": "path",
+          "param": "1",
+          "originalValue": "1",
+          "confirmed": true,
+          "technique": "error",
+          "dbms": "MySQL",
+          "formMethod": null,
+          "actionUrl": null,
+          "formValues": null,
+          "csrfTokenName": null,
+          "isStorePoint": false,
+          "storeKind": null,
+          "pathSegment": 3,
+          "boundaryProbed": true,
+          "_baselineTitle": "user",
+          "boundary": "",
+          "dbmsVersion": {
+            "raw": "8.0.37",
+            "major": 8,
+            "minor": 0
+          },
+          "echoCols": [
+            0,
+            1,
+            2
+          ],
+          "columns": 3
+        }
+      ],
+      "vulns": [
+        {
+          "id": "8g10-x9w",
+          "pointId": "86d7dabd",
+          "technique": "union",
+          "dbms": "MySQL",
+          "riskLevel": "High",
+          "payloads": [
+            "1 UNION SELECT 'SQLISCANNER0','SQLISCANNER1','SQLISCANNER2'-- -",
+            "1 ORDER BY 3-- -"
+          ],
+          "description": "UNION 注入成功，回显列：0,1,2（列数 3）",
+          "evidence": "UNION 注入成功，回显列：0,1,2（列数 3）",
+          "trace": null
+        },
+        {
+          "id": "uEtCGc0t",
+          "pointId": "86d7dabd",
+          "technique": "error",
+          "dbms": "MySQL",
+          "riskLevel": "High",
+          "payloads": [
+            "1' AND extractvalue(1,concat(0x7e,(SELECT version())))/**/"
+          ],
+          "description": "数据库报错回显：extractvalue（识别为 MySQL）",
+          "evidence": "数据库报错回显：extractvalue（识别为 MySQL）",
+          "trace": null
+        },
+        {
+          "id": "HkpmnAG8",
+          "pointId": "86d7dabd",
+          "technique": "boolean",
+          "dbms": "MySQL",
+          "riskLevel": "Medium",
+          "payloads": [
+            "1 AND 1=1",
+            "1 AND 1=2"
+          ],
+          "description": "布尔注入确认(统计·自适应): 真≈基线1.00、假≠基线1.00、差异1.00、基线噪声0.00、门槛0.66、z=2.83(显著)",
+          "evidence": "布尔注入确认(统计·自适应): 真≈基线1.00、假≠基线1.00、差异1.00、基线噪声0.00、门槛0.66、z=2.83(显著)",
+          "trace": {
+            "technique": "boolean",
+            "adaptive": true,
+            "baselineNoiseRate": 0,
+            "minStable": 0.66,
+            "baselineSamples": [
+              {
+                "idx": 0,
+                "len": 372,
+                "likeBaseline": true,
+                "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>user</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-c"
+              },
+              {
+                "idx": 1,
+                "len": 372,
+                "likeBaseline": true,
+                "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>user</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-c"
+              },
+              {
+                "idx": 2,
+                "len": 372,
+                "likeBaseline": true,
+                "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>user</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-c"
+              },
+              {
+                "idx": 3,
+                "len": 372,
+                "likeBaseline": true,
+                "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>user</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-c"
+              },
+              {
+                "idx": 4,
+                "len": 372,
+                "likeBaseline": true,
+                "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>user</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-c"
+              }
+            ],
+            "pairs": [
+              {
+                "ti": 0,
+                "fi": 2,
+                "trueSamples": [
+                  {
+                    "idx": 0,
+                    "len": 483,
+                    "likeBaseline": false,
+                    "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>user</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-c"
+                  },
+                  {
+                    "idx": 1,
+                    "len": 483,
+                    "likeBaseline": false,
+                    "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>user</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-c"
+                  },
+                  {
+                    "idx": 2,
+                    "len": 483,
+                    "likeBaseline": false,
+                    "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>user</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-c"
+                  }
+                ],
+                "falseSamples": [
+                  {
+                    "idx": 0,
+                    "len": 483,
+                    "likeBaseline": false,
+                    "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>user</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-c"
+                  },
+                  {
+                    "idx": 1,
+                    "len": 483,
+                    "likeBaseline": false,
+                    "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>user</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-c"
+                  },
+                  {
+                    "idx": 2,
+                    "len": 483,
+                    "likeBaseline": false,
+                    "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>user</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-c"
+                  }
+                ],
+                "trueRatio": 0,
+                "falseRatio": 1,
+                "meaningfulRatio": 1,
+                "z": 2.82842712474619,
+                "significant": true,
+                "diffs": [
+                  {
+                    "idx": 0,
+                    "lenDelta": 0,
+                    "firstDiffOffset": 445,
+                    "changedSnippet": "se near '' AND '1'='2' at line 1</pre></div></body></html>"
+                  },
+                  {
+                    "idx": 1,
+                    "lenDelta": 0,
+                    "firstDiffOffset": 445,
+                    "changedSnippet": "se near '' AND '1'='2' at line 1</pre></div></body></html>"
+                  },
+                  {
+                    "idx": 2,
+                    "lenDelta": 0,
+                    "firstDiffOffset": 445,
+                    "changedSnippet": "se near '' AND '1'='2' at line 1</pre></div></body></html>"
+                  }
+                ]
+              },
+              {
+                "ti": 1,
+                "fi": 3,
+                "trueSamples": [
+                  {
+                    "idx": 0,
+                    "len": 483,
+                    "likeBaseline": false,
+                    "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>user</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-c"
+                  },
+                  {
+                    "idx": 1,
+                    "len": 483,
+                    "likeBaseline": false,
+                    "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>user</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-c"
+                  },
+                  {
+                    "idx": 2,
+                    "len": 483,
+                    "likeBaseline": false,
+                    "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>user</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-c"
+                  }
+                ],
+                "falseSamples": [
+                  {
+                    "idx": 0,
+                    "len": 483,
+                    "likeBaseline": false,
+                    "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>user</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-c"
+                  },
+                  {
+                    "idx": 1,
+                    "len": 483,
+                    "likeBaseline": false,
+                    "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>user</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-c"
+                  },
+                  {
+                    "idx": 2,
+                    "len": 483,
+                    "likeBaseline": false,
+                    "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>user</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-c"
+                  }
+                ],
+                "trueRatio": 0,
+                "falseRatio": 1,
+                "meaningfulRatio": 1,
+                "z": 2.82842712474619,
+                "significant": true,
+                "diffs": [
+                  {
+                    "idx": 0,
+                    "lenDelta": 0,
+                    "firstDiffOffset": 445,
+                    "changedSnippet": "se near '\" AND \"1\"=\"2' at line 1</pre></div></body></html>"
+                  },
+                  {
+                    "idx": 1,
+                    "lenDelta": 0,
+                    "firstDiffOffset": 445,
+                    "changedSnippet": "se near '\" AND \"1\"=\"2' at line 1</pre></div></body></html>"
+                  },
+                  {
+                    "idx": 2,
+                    "lenDelta": 0,
+                    "firstDiffOffset": 445,
+                    "changedSnippet": "se near '\" AND \"1\"=\"2' at line 1</pre></div></body></html>"
+                  }
+                ]
+              },
+              {
+                "ti": 4,
+                "fi": 5,
+                "trueSamples": [
+                  {
+                    "idx": 0,
+                    "len": 372,
+                    "likeBaseline": true,
+                    "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>user</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-c"
+                  },
+                  {
+                    "idx": 1,
+                    "len": 372,
+                    "likeBaseline": true,
+                    "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>user</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-c"
+                  },
+                  {
+                    "idx": 2,
+                    "len": 372,
+                    "likeBaseline": true,
+                    "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>user</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-c"
+                  }
+                ],
+                "falseSamples": [
+                  {
+                    "idx": 0,
+                    "len": 317,
+                    "likeBaseline": false,
+                    "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>user</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-c"
+                  },
+                  {
+                    "idx": 1,
+                    "len": 317,
+                    "likeBaseline": false,
+                    "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>user</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-c"
+                  },
+                  {
+                    "idx": 2,
+                    "len": 317,
+                    "likeBaseline": false,
+                    "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>user</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-c"
+                  }
+                ],
+                "trueRatio": 1,
+                "falseRatio": 1,
+                "meaningfulRatio": 1,
+                "z": 2.82842712474619,
+                "significant": true,
+                "diffs": [
+                  {
+                    "idx": 0,
+                    "lenDelta": -55,
+                    "firstDiffOffset": 284,
+                    "changedSnippet": "><div id=\"content\"><p>NO_ROWS</p></div></body></html>"
+                  },
+                  {
+                    "idx": 1,
+                    "lenDelta": -55,
+                    "firstDiffOffset": 284,
+                    "changedSnippet": "><div id=\"content\"><p>NO_ROWS</p></div></body></html>"
+                  },
+                  {
+                    "idx": 2,
+                    "lenDelta": -55,
+                    "firstDiffOffset": 284,
+                    "changedSnippet": "><div id=\"content\"><p>NO_ROWS</p></div></body></html>"
+                  }
+                ]
+              }
+            ],
+            "decision": "vulnerable"
+          }
+        }
+      ],
       "data": null,
-      "riskLevel": "Low",
+      "riskLevel": "High",
       "summary": {
         "constraints": [],
         "stackedEnabled": false,
@@ -5228,13 +6084,13 @@
         "validity": {
           "status": "ok",
           "reliable": true,
-          "reason": "目标可达性与会话状态正常：累计 0 次请求，无连续失败/拦截/会话失效/持续 5xx 迹象",
+          "reason": "目标可达性与会话状态正常：累计 83 次请求，无连续失败/拦截/会话失效/持续 5xx 迹象",
           "counts": {
-            "total": 0,
+            "total": 83,
             "failStreak": 0,
             "blockHits": 0,
-            "serverErr": 0,
-            "injection5xx": 0,
+            "serverErr": 12,
+            "injection5xx": 39,
             "authLostHits": 0,
             "netErrPoints": 0
           },
@@ -5244,7 +6100,17 @@
           "advice": "无需处置"
         },
         "verdict": "no_vulnerability_detected",
-        "verdictNote": "目标在本次扫描窗口内可达、未被拦且会话有效，「未检出漏洞」的阴性结论可信度正常（仍建议对高风险参数人工复核）",
+        "verdictNote": "本次扫描检出 3 条漏洞；verdict 仅描述「未检出」类阴性结论的可信度，命中详情见 vulns",
+        "dbmsEvidence": {
+          "dbms": "MySQL",
+          "level": "verified",
+          "levelText": "真实引擎验证",
+          "evidence": "e2e/real-mysql-lab（真实 8.0.28 / 8.0.37）+ e2e/waf-real",
+          "caveat": null,
+          "all": [
+            "MySQL:verified"
+          ]
+        },
         "blockPolicy": {
           "action": "none",
           "reason": "无拦截证据，保持当前发包形态",
@@ -5255,13 +6121,13 @@
       "validity": {
         "status": "ok",
         "reliable": true,
-        "reason": "目标可达性与会话状态正常：累计 0 次请求，无连续失败/拦截/会话失效/持续 5xx 迹象",
+        "reason": "目标可达性与会话状态正常：累计 83 次请求，无连续失败/拦截/会话失效/持续 5xx 迹象",
         "counts": {
-          "total": 0,
+          "total": 83,
           "failStreak": 0,
           "blockHits": 0,
-          "serverErr": 0,
-          "injection5xx": 0,
+          "serverErr": 12,
+          "injection5xx": 39,
           "authLostHits": 0,
           "netErrPoints": 0
         },
@@ -5277,7 +6143,7 @@
     "url": "http://127.0.0.1:8231/shop/b64?id=MQ",
     "round": "r1",
     "exit": 0,
-    "ms": 2761,
+    "ms": 2510,
     "hit": false,
     "techs": "",
     "dbms": "MySQL",
@@ -5286,9 +6152,9 @@
     "verdict": "no_vulnerability_detected",
     "err": "",
     "raw": {
-      "scanId": "GxmVbUY26EN9",
+      "scanId": "s2aBRnY96FfW",
       "target": {
-        "id": "Q-R9xI2Dyn",
+        "id": "Fa8jepb34S",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/shop/b64?id=MQ",
         "method": "GET",
@@ -5314,6 +6180,8 @@
           "useRegistry": false,
           "prefix": "",
           "suffix": "",
+          "boolStableDiff": true,
+          "boolStableDiffSamples": 3,
           "timeThresholdMs": 1500,
           "timeBlindSamples": 5,
           "timeBlindSleepSec": 2,
@@ -5426,8 +6294,8 @@
           }
         }
       },
-      "startedAt": "2026-09-10T13:42:49.230Z",
-      "finishedAt": "2026-09-10T13:42:51.049Z",
+      "startedAt": "2026-09-10T14:53:26.198Z",
+      "finishedAt": "2026-09-10T14:53:28.021Z",
       "dbms": "MySQL",
       "points": [
         {
@@ -5518,7 +6386,7 @@
     "url": "http://127.0.0.1:8231/account/update",
     "round": "r1",
     "exit": 0,
-    "ms": 4639,
+    "ms": 4293,
     "hit": false,
     "techs": "",
     "dbms": "",
@@ -5527,9 +6395,9 @@
     "verdict": "no_vulnerability_detected",
     "err": "",
     "raw": {
-      "scanId": "O_sMVel058e3",
+      "scanId": "zl6UOQ8L0NsD",
       "target": {
-        "id": "v5ZWKiEiIB",
+        "id": "Ph6mxq_NNf",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/account/update",
         "method": "POST",
@@ -5557,6 +6425,8 @@
           "useRegistry": false,
           "prefix": "",
           "suffix": "",
+          "boolStableDiff": true,
+          "boolStableDiffSamples": 3,
           "timeThresholdMs": 1500,
           "timeBlindSamples": 5,
           "timeBlindSleepSec": 2,
@@ -5664,8 +6534,8 @@
           }
         }
       },
-      "startedAt": "2026-09-10T13:42:52.048Z",
-      "finishedAt": "2026-09-10T13:42:55.644Z",
+      "startedAt": "2026-09-10T14:53:28.674Z",
+      "finishedAt": "2026-09-10T14:53:32.264Z",
       "dbms": null,
       "points": [
         {
@@ -5746,18 +6616,18 @@
     "url": "http://127.0.0.1:8231/shop/stack?id=1",
     "round": "r1",
     "exit": 2,
-    "ms": 2775,
+    "ms": 2051,
     "hit": true,
-    "techs": "union",
+    "techs": "union+boolean",
     "dbms": "MySQL",
     "risk": "High",
-    "reqs": 130,
+    "reqs": 118,
     "verdict": "no_vulnerability_detected",
     "err": "",
     "raw": {
-      "scanId": "gRMD-N5TwzdX",
+      "scanId": "IU3BHLWILtMF",
       "target": {
-        "id": "b6hlAbpTES",
+        "id": "64wnP4IKAN",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/shop/stack?id=1",
         "method": "GET",
@@ -5783,6 +6653,8 @@
           "useRegistry": false,
           "prefix": "",
           "suffix": "",
+          "boolStableDiff": true,
+          "boolStableDiffSamples": 3,
           "timeThresholdMs": 1500,
           "timeBlindSamples": 5,
           "timeBlindSleepSec": 2,
@@ -5895,8 +6767,8 @@
           }
         }
       },
-      "startedAt": "2026-09-10T13:42:56.663Z",
-      "finishedAt": "2026-09-10T13:42:58.297Z",
+      "startedAt": "2026-09-10T14:53:32.959Z",
+      "finishedAt": "2026-09-10T14:53:34.333Z",
       "dbms": "MySQL",
       "points": [
         {
@@ -5905,7 +6777,7 @@
           "param": "id",
           "originalValue": "1",
           "confirmed": true,
-          "technique": "union",
+          "technique": "boolean",
           "dbms": "MySQL",
           "formMethod": null,
           "actionUrl": null,
@@ -5930,7 +6802,7 @@
       ],
       "vulns": [
         {
-          "id": "iGwZAuIL",
+          "id": "diIvhO-z",
           "pointId": "283e732d",
           "technique": "union",
           "dbms": "MySQL",
@@ -5942,6 +6814,273 @@
           "description": "UNION 注入成功，回显列：0,1（列数 2）",
           "evidence": "UNION 注入成功，回显列：0,1（列数 2）",
           "trace": null
+        },
+        {
+          "id": "lINcClr8",
+          "pointId": "283e732d",
+          "technique": "boolean",
+          "dbms": "MySQL",
+          "riskLevel": "Medium",
+          "payloads": [
+            "1 AND 1=1",
+            "1 AND 1=2"
+          ],
+          "description": "布尔注入确认(组间稳定差异): 真/假响应在差异片段[table><tr><td>1</td><td>alice</td]vs[p>NO_ROWS</p></div></body></html>]可复现（真组3样本一致、假组3样本一致；非数值噪声）",
+          "evidence": "布尔注入确认(组间稳定差异): 真/假响应在差异片段[table><tr><td>1</td><td>alice</td]vs[p>NO_ROWS</p></div></body></html>]可复现（真组3样本一致、假组3样本一致；非数值噪声）",
+          "trace": {
+            "technique": "boolean",
+            "adaptive": true,
+            "baselineNoiseRate": 0,
+            "minStable": 0.66,
+            "baselineSamples": [
+              {
+                "idx": 0,
+                "len": 353,
+                "likeBaseline": true,
+                "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>stack</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-"
+              },
+              {
+                "idx": 1,
+                "len": 353,
+                "likeBaseline": true,
+                "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>stack</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-"
+              },
+              {
+                "idx": 2,
+                "len": 353,
+                "likeBaseline": true,
+                "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>stack</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-"
+              },
+              {
+                "idx": 3,
+                "len": 353,
+                "likeBaseline": true,
+                "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>stack</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-"
+              },
+              {
+                "idx": 4,
+                "len": 353,
+                "likeBaseline": true,
+                "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>stack</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-"
+              }
+            ],
+            "pairs": [
+              {
+                "ti": 0,
+                "fi": 2,
+                "trueSamples": [
+                  {
+                    "idx": 0,
+                    "len": 485,
+                    "likeBaseline": false,
+                    "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>stack</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-"
+                  },
+                  {
+                    "idx": 1,
+                    "len": 485,
+                    "likeBaseline": false,
+                    "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>stack</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-"
+                  },
+                  {
+                    "idx": 2,
+                    "len": 485,
+                    "likeBaseline": false,
+                    "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>stack</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-"
+                  }
+                ],
+                "falseSamples": [
+                  {
+                    "idx": 0,
+                    "len": 485,
+                    "likeBaseline": false,
+                    "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>stack</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-"
+                  },
+                  {
+                    "idx": 1,
+                    "len": 485,
+                    "likeBaseline": false,
+                    "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>stack</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-"
+                  },
+                  {
+                    "idx": 2,
+                    "len": 485,
+                    "likeBaseline": false,
+                    "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>stack</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-"
+                  }
+                ],
+                "trueRatio": 0,
+                "falseRatio": 1,
+                "meaningfulRatio": 1,
+                "z": 2.82842712474619,
+                "significant": true,
+                "diffs": [
+                  {
+                    "idx": 0,
+                    "lenDelta": 0,
+                    "firstDiffOffset": 447,
+                    "changedSnippet": "se near '' AND '1'='2' at line 1</pre></div></body></html>"
+                  },
+                  {
+                    "idx": 1,
+                    "lenDelta": 0,
+                    "firstDiffOffset": 447,
+                    "changedSnippet": "se near '' AND '1'='2' at line 1</pre></div></body></html>"
+                  },
+                  {
+                    "idx": 2,
+                    "lenDelta": 0,
+                    "firstDiffOffset": 447,
+                    "changedSnippet": "se near '' AND '1'='2' at line 1</pre></div></body></html>"
+                  }
+                ]
+              },
+              {
+                "ti": 1,
+                "fi": 3,
+                "trueSamples": [
+                  {
+                    "idx": 0,
+                    "len": 485,
+                    "likeBaseline": false,
+                    "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>stack</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-"
+                  },
+                  {
+                    "idx": 1,
+                    "len": 485,
+                    "likeBaseline": false,
+                    "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>stack</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-"
+                  },
+                  {
+                    "idx": 2,
+                    "len": 485,
+                    "likeBaseline": false,
+                    "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>stack</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-"
+                  }
+                ],
+                "falseSamples": [
+                  {
+                    "idx": 0,
+                    "len": 485,
+                    "likeBaseline": false,
+                    "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>stack</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-"
+                  },
+                  {
+                    "idx": 1,
+                    "len": 485,
+                    "likeBaseline": false,
+                    "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>stack</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-"
+                  },
+                  {
+                    "idx": 2,
+                    "len": 485,
+                    "likeBaseline": false,
+                    "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>stack</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-"
+                  }
+                ],
+                "trueRatio": 0,
+                "falseRatio": 1,
+                "meaningfulRatio": 1,
+                "z": 2.82842712474619,
+                "significant": true,
+                "diffs": [
+                  {
+                    "idx": 0,
+                    "lenDelta": 0,
+                    "firstDiffOffset": 447,
+                    "changedSnippet": "se near '\" AND \"1\"=\"2' at line 1</pre></div></body></html>"
+                  },
+                  {
+                    "idx": 1,
+                    "lenDelta": 0,
+                    "firstDiffOffset": 447,
+                    "changedSnippet": "se near '\" AND \"1\"=\"2' at line 1</pre></div></body></html>"
+                  },
+                  {
+                    "idx": 2,
+                    "lenDelta": 0,
+                    "firstDiffOffset": 447,
+                    "changedSnippet": "se near '\" AND \"1\"=\"2' at line 1</pre></div></body></html>"
+                  }
+                ]
+              },
+              {
+                "ti": 4,
+                "fi": 5,
+                "trueSamples": [
+                  {
+                    "idx": 0,
+                    "len": 353,
+                    "likeBaseline": true,
+                    "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>stack</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-"
+                  },
+                  {
+                    "idx": 1,
+                    "len": 353,
+                    "likeBaseline": true,
+                    "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>stack</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-"
+                  },
+                  {
+                    "idx": 2,
+                    "len": 353,
+                    "likeBaseline": true,
+                    "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>stack</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-"
+                  }
+                ],
+                "falseSamples": [
+                  {
+                    "idx": 0,
+                    "len": 319,
+                    "likeBaseline": true,
+                    "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>stack</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-"
+                  },
+                  {
+                    "idx": 1,
+                    "len": 319,
+                    "likeBaseline": true,
+                    "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>stack</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-"
+                  },
+                  {
+                    "idx": 2,
+                    "len": 319,
+                    "likeBaseline": true,
+                    "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>stack</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-"
+                  }
+                ],
+                "trueRatio": 1,
+                "falseRatio": 0,
+                "meaningfulRatio": 1,
+                "z": null,
+                "significant": false,
+                "diffs": [
+                  {
+                    "idx": 0,
+                    "lenDelta": -34,
+                    "firstDiffOffset": 286,
+                    "changedSnippet": "><div id=\"content\"><p>NO_ROWS</p></div></body></html>"
+                  },
+                  {
+                    "idx": 1,
+                    "lenDelta": -34,
+                    "firstDiffOffset": 286,
+                    "changedSnippet": "><div id=\"content\"><p>NO_ROWS</p></div></body></html>"
+                  },
+                  {
+                    "idx": 2,
+                    "lenDelta": -34,
+                    "firstDiffOffset": 286,
+                    "changedSnippet": "><div id=\"content\"><p>NO_ROWS</p></div></body></html>"
+                  }
+                ]
+              }
+            ],
+            "decision": "vulnerable",
+            "stableDiff": {
+              "first": 286,
+              "last": 319,
+              "tSpan": "table><tr><td>1</td><td>alice</td",
+              "fSpan": "p>NO_ROWS</p></div></body></html>"
+            }
+          }
         }
       ],
       "data": null,
@@ -5953,13 +7092,13 @@
         "validity": {
           "status": "ok",
           "reliable": true,
-          "reason": "目标可达性与会话状态正常：累计 130 次请求，无连续失败/拦截/会话失效/持续 5xx 迹象",
+          "reason": "目标可达性与会话状态正常：累计 118 次请求，无连续失败/拦截/会话失效/持续 5xx 迹象",
           "counts": {
-            "total": 130,
+            "total": 118,
             "failStreak": 0,
             "blockHits": 0,
             "serverErr": 12,
-            "injection5xx": 91,
+            "injection5xx": 79,
             "authLostHits": 0,
             "netErrPoints": 0
           },
@@ -5969,7 +7108,7 @@
           "advice": "无需处置"
         },
         "verdict": "no_vulnerability_detected",
-        "verdictNote": "本次扫描检出 1 条漏洞；verdict 仅描述「未检出」类阴性结论的可信度，命中详情见 vulns",
+        "verdictNote": "本次扫描检出 2 条漏洞；verdict 仅描述「未检出」类阴性结论的可信度，命中详情见 vulns",
         "dbmsEvidence": {
           "dbms": "MySQL",
           "level": "verified",
@@ -5990,13 +7129,13 @@
       "validity": {
         "status": "ok",
         "reliable": true,
-        "reason": "目标可达性与会话状态正常：累计 130 次请求，无连续失败/拦截/会话失效/持续 5xx 迹象",
+        "reason": "目标可达性与会话状态正常：累计 118 次请求，无连续失败/拦截/会话失效/持续 5xx 迹象",
         "counts": {
-          "total": 130,
+          "total": 118,
           "failStreak": 0,
           "blockHits": 0,
           "serverErr": 12,
-          "injection5xx": 91,
+          "injection5xx": 79,
           "authLostHits": 0,
           "netErrPoints": 0
         },
@@ -6012,7 +7151,7 @@
     "url": "http://127.0.0.1:8231/waf/item?id=1",
     "round": "r1",
     "exit": 0,
-    "ms": 2753,
+    "ms": 2463,
     "hit": false,
     "techs": "",
     "dbms": "",
@@ -6021,9 +7160,9 @@
     "verdict": "inconclusive",
     "err": "",
     "raw": {
-      "scanId": "PeLUKlx_HDbo",
+      "scanId": "Y7FI9wEIugxK",
       "target": {
-        "id": "v02_ku2ntX",
+        "id": "2vr-skzKJs",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/waf/item?id=1",
         "method": "GET",
@@ -6049,6 +7188,8 @@
           "useRegistry": false,
           "prefix": "",
           "suffix": "",
+          "boolStableDiff": true,
+          "boolStableDiffSamples": 3,
           "timeThresholdMs": 1500,
           "timeBlindSamples": 5,
           "timeBlindSleepSec": 2,
@@ -6161,8 +7302,8 @@
           }
         }
       },
-      "startedAt": "2026-09-10T13:42:59.394Z",
-      "finishedAt": "2026-09-10T13:43:01.155Z",
+      "startedAt": "2026-09-10T14:53:35.015Z",
+      "finishedAt": "2026-09-10T14:53:36.775Z",
       "dbms": null,
       "points": [
         {
@@ -6279,7 +7420,7 @@
     "url": "http://127.0.0.1:8231/safe/item?id=1",
     "round": "r1",
     "exit": 0,
-    "ms": 4724,
+    "ms": 4333,
     "hit": false,
     "techs": "",
     "dbms": "",
@@ -6288,9 +7429,9 @@
     "verdict": "no_vulnerability_detected",
     "err": "",
     "raw": {
-      "scanId": "t2Lh0kKiPKDE",
+      "scanId": "blFIlEzNHbfQ",
       "target": {
-        "id": "IGGJfc4b16",
+        "id": "yIEr1hNlj0",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/safe/item?id=1",
         "method": "GET",
@@ -6316,6 +7457,8 @@
           "useRegistry": false,
           "prefix": "",
           "suffix": "",
+          "boolStableDiff": true,
+          "boolStableDiffSamples": 3,
           "timeThresholdMs": 1500,
           "timeBlindSamples": 5,
           "timeBlindSleepSec": 2,
@@ -6428,8 +7571,8 @@
           }
         }
       },
-      "startedAt": "2026-09-10T13:43:02.308Z",
-      "finishedAt": "2026-09-10T13:43:05.912Z",
+      "startedAt": "2026-09-10T14:53:37.529Z",
+      "finishedAt": "2026-09-10T14:53:41.131Z",
       "dbms": null,
       "points": [
         {
@@ -6510,7 +7653,7 @@
     "url": "http://127.0.0.1:8231/safe/search?q=a",
     "round": "r1",
     "exit": 0,
-    "ms": 4358,
+    "ms": 4138,
     "hit": false,
     "techs": "",
     "dbms": "",
@@ -6519,9 +7662,9 @@
     "verdict": "no_vulnerability_detected",
     "err": "",
     "raw": {
-      "scanId": "YaOtEaa4Ue50",
+      "scanId": "qDwboQ-XoPH1",
       "target": {
-        "id": "llBvdhPU_r",
+        "id": "tDODJP8ycp",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/safe/search?q=a",
         "method": "GET",
@@ -6547,6 +7690,8 @@
           "useRegistry": false,
           "prefix": "",
           "suffix": "",
+          "boolStableDiff": true,
+          "boolStableDiffSamples": 3,
           "timeThresholdMs": 1500,
           "timeBlindSamples": 5,
           "timeBlindSleepSec": 2,
@@ -6659,8 +7804,8 @@
           }
         }
       },
-      "startedAt": "2026-09-10T13:43:06.874Z",
-      "finishedAt": "2026-09-10T13:43:10.318Z",
+      "startedAt": "2026-09-10T14:53:41.837Z",
+      "finishedAt": "2026-09-10T14:53:45.275Z",
       "dbms": null,
       "points": [
         {
@@ -6741,18 +7886,18 @@
     "url": "http://127.0.0.1:8231/safe/rand?x=1",
     "round": "r1",
     "exit": 0,
-    "ms": 4482,
+    "ms": 3723,
     "hit": false,
     "techs": "",
-    "dbms": "",
+    "dbms": "H2",
     "risk": "Low",
-    "reqs": 221,
+    "reqs": 202,
     "verdict": "no_vulnerability_detected",
     "err": "",
     "raw": {
-      "scanId": "6_5p1aJmbHU6",
+      "scanId": "-8uXbgUX-d0H",
       "target": {
-        "id": "OJBsvGpItL",
+        "id": "WYlaR6W8JF",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/safe/rand?x=1",
         "method": "GET",
@@ -6778,6 +7923,8 @@
           "useRegistry": false,
           "prefix": "",
           "suffix": "",
+          "boolStableDiff": true,
+          "boolStableDiffSamples": 3,
           "timeThresholdMs": 1500,
           "timeBlindSamples": 5,
           "timeBlindSleepSec": 2,
@@ -6890,9 +8037,9 @@
           }
         }
       },
-      "startedAt": "2026-09-10T13:43:11.350Z",
-      "finishedAt": "2026-09-10T13:43:14.785Z",
-      "dbms": null,
+      "startedAt": "2026-09-10T14:53:45.973Z",
+      "finishedAt": "2026-09-10T14:53:49.029Z",
+      "dbms": "H2",
       "points": [
         {
           "id": "c847836a",
@@ -6901,7 +8048,7 @@
           "originalValue": "1",
           "confirmed": false,
           "technique": null,
-          "dbms": null,
+          "dbms": "H2",
           "formMethod": null,
           "actionUrl": null,
           "formValues": null,
@@ -6923,9 +8070,9 @@
         "validity": {
           "status": "ok",
           "reliable": true,
-          "reason": "目标可达性与会话状态正常：累计 221 次请求，无连续失败/拦截/会话失效/持续 5xx 迹象",
+          "reason": "目标可达性与会话状态正常：累计 202 次请求，无连续失败/拦截/会话失效/持续 5xx 迹象",
           "counts": {
-            "total": 221,
+            "total": 202,
             "failStreak": 0,
             "blockHits": 0,
             "serverErr": 0,
@@ -6940,6 +8087,16 @@
         },
         "verdict": "no_vulnerability_detected",
         "verdictNote": "目标在本次扫描窗口内可达、未被拦且会话有效，「未检出漏洞」的阴性结论可信度正常（仍建议对高风险参数人工复核）",
+        "dbmsEvidence": {
+          "dbms": "H2",
+          "level": "partial",
+          "levelText": "部分通道真实引擎验证",
+          "evidence": "e2e/multi-engine-lab（真实 JDBC 内存库，仅布尔通道 × CRS）",
+          "caveat": "仅在真实引擎上验证了部分通道（见 evidence），未覆盖的通道按 template-only 看待",
+          "all": [
+            "H2:partial"
+          ]
+        },
         "blockPolicy": {
           "action": "none",
           "reason": "无拦截证据，保持当前发包形态",
@@ -6950,9 +8107,9 @@
       "validity": {
         "status": "ok",
         "reliable": true,
-        "reason": "目标可达性与会话状态正常：累计 221 次请求，无连续失败/拦截/会话失效/持续 5xx 迹象",
+        "reason": "目标可达性与会话状态正常：累计 202 次请求，无连续失败/拦截/会话失效/持续 5xx 迹象",
         "counts": {
-          "total": 221,
+          "total": 202,
           "failStreak": 0,
           "blockHits": 0,
           "serverErr": 0,
@@ -6972,7 +8129,7 @@
     "url": "http://127.0.0.1:8231/safe/boom?id=1",
     "round": "r1",
     "exit": 0,
-    "ms": 2611,
+    "ms": 2286,
     "hit": false,
     "techs": "",
     "dbms": "",
@@ -6981,9 +8138,9 @@
     "verdict": "inconclusive",
     "err": "",
     "raw": {
-      "scanId": "MbZdnt6Q4ULE",
+      "scanId": "L41GjRETrGQd",
       "target": {
-        "id": "3lYvD_gWuQ",
+        "id": "sI5X5Ox2lF",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/safe/boom?id=1",
         "method": "GET",
@@ -7009,6 +8166,8 @@
           "useRegistry": false,
           "prefix": "",
           "suffix": "",
+          "boolStableDiff": true,
+          "boolStableDiffSamples": 3,
           "timeThresholdMs": 1500,
           "timeBlindSamples": 5,
           "timeBlindSleepSec": 2,
@@ -7121,8 +8280,8 @@
           }
         }
       },
-      "startedAt": "2026-09-10T13:43:15.787Z",
-      "finishedAt": "2026-09-10T13:43:17.351Z",
+      "startedAt": "2026-09-10T14:53:49.706Z",
+      "finishedAt": "2026-09-10T14:53:51.257Z",
       "dbms": null,
       "points": [
         {
@@ -7203,7 +8362,7 @@
     "url": "http://127.0.0.1:8231/safe/blocked?id=1",
     "round": "r1",
     "exit": 0,
-    "ms": 2915,
+    "ms": 2499,
     "hit": false,
     "techs": "",
     "dbms": "",
@@ -7212,9 +8371,9 @@
     "verdict": "inconclusive",
     "err": "",
     "raw": {
-      "scanId": "79cLYtkXbWtj",
+      "scanId": "ZDaKkUeKc4zx",
       "target": {
-        "id": "5U9Snwrqq8",
+        "id": "g6Yfx4_e1c",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/safe/blocked?id=1",
         "method": "GET",
@@ -7240,6 +8399,8 @@
           "useRegistry": false,
           "prefix": "",
           "suffix": "",
+          "boolStableDiff": true,
+          "boolStableDiffSamples": 3,
           "timeThresholdMs": 1500,
           "timeBlindSamples": 5,
           "timeBlindSleepSec": 2,
@@ -7352,8 +8513,8 @@
           }
         }
       },
-      "startedAt": "2026-09-10T13:43:18.489Z",
-      "finishedAt": "2026-09-10T13:43:20.250Z",
+      "startedAt": "2026-09-10T14:53:51.980Z",
+      "finishedAt": "2026-09-10T14:53:53.743Z",
       "dbms": null,
       "points": [
         {
@@ -7470,7 +8631,7 @@
     "url": "http://127.0.0.1:8231/safe/redirect?id=1",
     "round": "r1",
     "exit": 0,
-    "ms": 4913,
+    "ms": 4282,
     "hit": false,
     "techs": "",
     "dbms": "",
@@ -7479,9 +8640,9 @@
     "verdict": "no_vulnerability_detected",
     "err": "",
     "raw": {
-      "scanId": "nY3ucLYJKTjD",
+      "scanId": "rOZpX2qTAH8d",
       "target": {
-        "id": "6TVEHoLIoV",
+        "id": "F2UGWxPTrU",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/safe/redirect?id=1",
         "method": "GET",
@@ -7507,6 +8668,8 @@
           "useRegistry": false,
           "prefix": "",
           "suffix": "",
+          "boolStableDiff": true,
+          "boolStableDiffSamples": 3,
           "timeThresholdMs": 1500,
           "timeBlindSamples": 5,
           "timeBlindSleepSec": 2,
@@ -7619,8 +8782,8 @@
           }
         }
       },
-      "startedAt": "2026-09-10T13:43:21.597Z",
-      "finishedAt": "2026-09-10T13:43:25.220Z",
+      "startedAt": "2026-09-10T14:53:54.457Z",
+      "finishedAt": "2026-09-10T14:53:58.061Z",
       "dbms": null,
       "points": [
         {
@@ -7701,7 +8864,7 @@
     "url": "http://127.0.0.1:8231/safe/static?id=1",
     "round": "r1",
     "exit": 0,
-    "ms": 4568,
+    "ms": 4292,
     "hit": false,
     "techs": "",
     "dbms": "",
@@ -7710,9 +8873,9 @@
     "verdict": "no_vulnerability_detected",
     "err": "",
     "raw": {
-      "scanId": "j1BLRcW1zof8",
+      "scanId": "5IFAulpKf-kr",
       "target": {
-        "id": "ygOkWfU10s",
+        "id": "Fw1Rilsb88",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/safe/static?id=1",
         "method": "GET",
@@ -7738,6 +8901,8 @@
           "useRegistry": false,
           "prefix": "",
           "suffix": "",
+          "boolStableDiff": true,
+          "boolStableDiffSamples": 3,
           "timeThresholdMs": 1500,
           "timeBlindSamples": 5,
           "timeBlindSleepSec": 2,
@@ -7850,8 +9015,8 @@
           }
         }
       },
-      "startedAt": "2026-09-10T13:43:26.142Z",
-      "finishedAt": "2026-09-10T13:43:29.748Z",
+      "startedAt": "2026-09-10T14:53:58.741Z",
+      "finishedAt": "2026-09-10T14:54:02.333Z",
       "dbms": null,
       "points": [
         {
