@@ -118,33 +118,5 @@ test('单点重测：不存在的 pointId → 明确报错，不退化成整站�
   });
 });
 
-test('onlyPoint 过滤（纯逻辑层）：未匹配到点位时抛带可用点位列表的错误', async () => {
-  const { TargetParser } = await import('../src/engine/TargetParser.js');
-  const { createTarget } = await import('../src/engine/models.js');
-  const parser = new TargetParser();
-  const t = createTarget({
-    url: 'http://example.com/p?id=1&name=a',
-    config: { onlyPoint: { location: 'url', param: 'notexist' } },
-  });
-  await assert.rejects(
-    () => parser.discover(t),
-    (e) => /onlyPoint 未匹配到注入点/.test(e.message) && /url:id/.test(e.message),
-    '应提示未匹配且列出可用点位'
-  );
-
-  const t2 = createTarget({
-    url: 'http://example.com/p?id=1&name=a',
-    config: { onlyPoint: { location: 'url', param: 'name' } },
-  });
-  const pts = await parser.discover(t2);
-  assert.equal(pts.length, 1);
-  assert.equal(pts[0].param, 'name');
-});
-
-test('onlyPoint 缺省时行为不变（零回归）', async () => {
-  const { TargetParser } = await import('../src/engine/TargetParser.js');
-  const { createTarget } = await import('../src/engine/models.js');
-  const parser = new TargetParser();
-  const pts = await parser.discover(createTarget({ url: 'http://example.com/p?id=1&name=a' }));
-  assert.equal(pts.length, 2);
-});
+// 注：onlyPoint 的**纯逻辑契约**（过滤语义 / 未匹配报错 / 缺省零回归）由
+// tests/onlyPoint.retest.test.js 覆盖，本文件只负责真接口集成层，避免重复。
