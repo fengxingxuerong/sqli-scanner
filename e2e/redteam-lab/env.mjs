@@ -17,6 +17,12 @@ const MYSQLD = process.env.MYSQLD_PATH || 'D:/mysql/bin/mysqld.exe';
 const MYSQL_CWD = process.env.MYSQL_CWD || 'D:/mysql';
 const LAB_PORT = Number(process.env.REDTEAM_LAB_PORT) || 8231;
 
+// PostgreSQL（OOB 带外验证 e2e/oob-real-lab 需要，真实 PG 16.2）
+// 与 MySQL 同理：后台 spawn 的进程会随父命令结束被回收，必须在同一常驻进程里拉起。
+// 用 postgres.exe 前台运行（不用 pg_ctl start —— 它会 fork 后退出，同样被回收）。
+const PG_EXE = process.env.PG_EXE || 'D:/pg-smoke/bin/bin/postgres.exe';
+const PG_DATA = process.env.PG_DATA || 'D:/pg-smoke/data';
+
 const waitPort = (port, timeoutMs = 60000) =>
   new Promise((resolve, reject) => {
     const t0 = Date.now();
@@ -51,6 +57,23 @@ try {
   console.log('[env] MySQL 就绪（3306）');
 }
 
+// 1.2) PostgreSQL（OOB 靶场依赖）：已监听则复用
+let pgProc = null;
+try {
+  await waitPort(5432, 1500);
+  console.log('[env] PostgreSQL 已在运行，复用');
+} catch {
+  console.log(`[env] 启动 PostgreSQL：${PG_EXE}`);
+  pgProc = spawn(PG_EXE, ['-D', PG_DATA], { cwd: PG_DATA, stdio: ['ignore', 'ignore', 'ignore'] });
+  pgProc.on('error', (e) => console.error(`[env] postgres 启动失败：${e.message}`));
+  try {
+    await waitPort(5432, 60000);
+    console.log('[env] PostgreSQL 就绪（5432）');
+  } catch {
+    console.warn('[env] PostgreSQL 未就绪：OOB 相关 e2e 将不可用（MySQL 靶场不受影响）');
+  }
+}
+
 // 1.5) 探测 root 口令（本机实例未必是空口令；其它 e2e 靶场用的是 root/root）
 process.env.LAB_DB_PASSWORD = process.env.LAB_DB_PASSWORD || '';
 try {
@@ -82,6 +105,7 @@ const server = app.listen(LAB_PORT, () => {
 // 3) 优雅退出
 const shutdown = () => {
   server.close(() => {
+    if (pgProc) try { pgProc.kill(); } catch { /* noop */ }
     if (mysqld) try { mysqld.kill(); } catch { /* noop */ }
     process.exit(0);
   });
