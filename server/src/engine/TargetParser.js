@@ -2,6 +2,7 @@ import { URL } from 'url';
 import { createInjectionPoint } from './models.js';
 // [编码参数] base64 / 0x-hex 参数值识别（payload 需按同样编码发送）
 import { detectParamEncoding } from './paramEncoding.js';
+import { ErrorCode, AppError } from '../core/errors.js';
 import { httpClient as defaultHttpClient } from '../core/httpClient.js';
 import { LinkCrawler, attrValue } from './crawler.js';
 
@@ -198,10 +199,34 @@ export class TargetParser {
         p.originalValue = p.originalValue.slice(0, -1); // 剥离尾部 *
         p.precisionMarked = true;
       }
-      return marked;
+      return this._applyOnlyPoint(marked, config);
     }
 
-    return points;
+    return this._applyOnlyPoint(points, config);
+  }
+
+  /**
+   * [单点重测] config.onlyPoint = { location, param } → 只保留该注入点。
+   *
+   * 用途：API `POST /api/scan/:id/point/:pointId/retest` 调参后只重跑一个点。
+   * 为什么不重构 scanRunner：runScanLoop 是 1100+ 行的单函数，检测主循环内联其中，
+   * 硬抽 per-point 入口风险远高于收益；而"限定注入点 + 复用整条扫描链路"能达到
+   * 同样效果（请求量从数百降到几十），且对既有流程零侵入。
+   * 匹配用 location:param 而非 pointId —— 后者每次扫描都重新生成，跨扫描不稳定。
+   */
+  _applyOnlyPoint(points, config) {
+    const only = config && config.onlyPoint;
+    if (!only || !only.param) return points;
+    const filtered = points.filter(
+      (p) => p.param === only.param && (!only.location || p.location === only.location)
+    );
+    if (!filtered.length) {
+      throw new AppError(
+        ErrorCode.INVALID_PARAM,
+        `onlyPoint 未匹配到注入点：${only.location || '*'}:${only.param}（可用点位：${points.map((p) => `${p.location}:${p.param}`).join('、') || '无'}）`
+      );
+    }
+    return filtered;
   }
 
   // [P1 批次 2026-09-08] JSON body 嵌套叶子注入点发现（discover 3.5 步的递归实现）。

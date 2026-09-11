@@ -238,6 +238,25 @@ export class SecondOrderDetector extends Detector {
   async _store(httpClient, ctx, value) {
     // 复用基类 buildRequest：表单点已自动并入 formValues（含 CSRF），再把当前注入参数覆盖为 value
     const req = this.buildRequest(ctx.target, ctx.point, value);
+    // [todo#39] 跨角色触发：存储阶段使用 storeCookies 指定身份（低权写入方）。
+    // 显式配置的同名 Cookie 优先（同名不覆盖），target.cookieParams 会话合并补充——
+    // 与 _trigger 的 Cookie 合并语义一致，未配置 storeCookies 时行为零变化。
+    const soCookies = (ctx.config && ctx.config.secondOrder && ctx.config.secondOrder.storeCookies) || null;
+    if (soCookies && typeof soCookies === 'object') {
+      const headers = { ...(req.headers || {}) };
+      const existing = Object.keys(headers).find((k) => k.toLowerCase() === 'cookie');
+      const sessPairs = Object.entries(ctx.target.cookieParams || {});
+      const explicitPairs = Object.entries(soCookies);
+      if (existing) {
+        const names = new Set(String(headers[existing]).split(';').map((p) => p.split('=')[0].trim()));
+        const extra = [...explicitPairs, ...sessPairs].filter(([k]) => !names.has(k));
+        if (extra.length) headers[existing] = `${headers[existing]}; ${extra.map((p) => p.join('=')).join('; ')}`;
+      } else {
+        const merged = [...explicitPairs, ...sessPairs.filter(([k]) => !(k in soCookies))];
+        if (merged.length) headers['Cookie'] = merged.map((p) => p.join('=')).join('; ');
+      }
+      req.headers = headers;
+    }
     await this.send(httpClient, ctx, req);
   }
 
@@ -273,14 +292,20 @@ export class SecondOrderDetector extends Detector {
     // 用户显式 headerParams 的 Cookie 优先（同名不覆盖），会话 cookie 合并补充。
     const headers = { ...(ctx.target.headerParams || {}) };
     const sessCookies = ctx.target.cookieParams || {};
-    if (Object.keys(sessCookies).length) {
+    // [todo#39] 跨角色触发：触发页读取使用 triggerCookies 指定身份（高权读出方）。
+    // 优先级：用户显式 headerParams Cookie > triggerCookies > 会话 cookieParams 合并补充。
+    const roleCookies = so.triggerCookies && typeof so.triggerCookies === 'object' ? so.triggerCookies : null;
+    if (Object.keys(sessCookies).length || roleCookies) {
       const existing = Object.keys(headers).find((k) => k.toLowerCase() === 'cookie');
+      const sessPairs = Object.entries(sessCookies);
+      const rolePairs = roleCookies ? Object.entries(roleCookies) : [];
       if (existing) {
         const names = new Set(String(headers[existing]).split(';').map((p) => p.split('=')[0].trim()));
-        const extra = Object.entries(sessCookies).filter(([k]) => !names.has(k)).map(([k, v]) => `${k}=${v}`);
-        if (extra.length) headers[existing] = `${headers[existing]}; ${extra.join('; ')}`;
+        const extra = [...rolePairs, ...sessPairs].filter(([k]) => !names.has(k));
+        if (extra.length) headers[existing] = `${headers[existing]}; ${extra.map((p) => p.join('=')).join('; ')}`;
       } else {
-        headers['Cookie'] = Object.entries(sessCookies).map(([k, v]) => `${k}=${v}`).join('; ');
+        const merged = [...rolePairs, ...sessPairs.filter(([k]) => !(roleCookies && k in roleCookies))];
+        if (merged.length) headers['Cookie'] = merged.map((p) => p.join('=')).join('; ');
       }
     }
     const req = {

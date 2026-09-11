@@ -176,15 +176,19 @@ export const FINGERPRINT = {
   // ClickHouse：响应头/版本串含 clickhouse 标识
   ClickHouse: [{ header: 'Server', match: /clickhouse/i }, { header: 'X-ClickHouse-Summary', match: /./ }],
   // —— C 方向新增（最小适配，响应头特征，待真实环境验证）——
-  DB2: [{ header: 'Server', match: /db2/i }],
-  Sybase: [{ header: 'Server', match: /(Adaptive Server|Sybase|ASE)/i }],
-  Firebird: [{ header: 'Server', match: /firebird/i }],
-  Informix: [{ header: 'Server', match: /informix/i }],
-  H2: [{ header: 'Server', match: /h2/i }, { header: 'X-Powered-By', match: /h2/i }],
+  // [todo#39 2026-09-11] 词边界加固：裸子串签名会误命中无关响应头——实测 Python 靶场
+  // `Server: BaseHTTP/0.6 Python/3.x` 的 "BaseHTTP" 含子串 "ase" → Sybase 的 /ASE/i 误命中
+  // → 25ms 内抢先定库 Sybase → payload 族错配 → sqli-labs L46 整关 0 检出。所有裸短签名
+  // 加 \b 词边界（Adaptive Server/Sybase 等长短语本身无误命中风险，保持原样）。
+  DB2: [{ header: 'Server', match: /\bdb2\b/i }],
+  Sybase: [{ header: 'Server', match: /(Adaptive Server|Sybase|\bASE\b)/i }],
+  Firebird: [{ header: 'Server', match: /\bfirebird\b/i }],
+  Informix: [{ header: 'Server', match: /\binformix\b/i }],
+  H2: [{ header: 'Server', match: /\bh2\b/i }, { header: 'X-Powered-By', match: /\bh2\b/i }],
   // —— D 方向新增（最小适配，响应头特征，待真实环境验证）——
-  Access: [{ header: 'X-Powered-By', match: /asp/i }],
-  HSQLDB: [{ header: 'Server', match: /hsqldb/i }],
-  Derby: [{ header: 'Server', match: /(derby|java)/i }],
+  Access: [{ header: 'X-Powered-By', match: /\basp\b/i }],
+  HSQLDB: [{ header: 'Server', match: /\bhsqldb\b/i }],
+  Derby: [{ header: 'Server', match: /(\bderby\b|\bjava\b)/i }],
   MonetDB: [{ header: 'Server', match: /monetdb/i }],
 };
 
@@ -336,6 +340,13 @@ export const ERROR_SIG_BY_DBMS = [
 // [OPT-FIX 2026-09-08] 匹配前剥除 HTML 标签：H2 签名 `H2`（大小写不敏感）会把正常页的
 // <h2> 标签误判为 H2 数据库证据（Python sqli-labs L04 实测：无报错正常页 → 误定库 H2 →
 // payload 族错配 → 漏检）。含标签才剥（纯文本零开销），剥除后签名只匹配真实文本。
+// [todo#38 2026-09-11] 裸库名命中护栏：剥标签防不住正文随机文本——强动态页（时间戳/广告位/
+// 推荐流为随机 base36/hex 文本）可自然拼出 "h2"/"dm8" 子串，报错探针打到吞错页返回的正常页
+// 上弱签名误命中 → 定库在 H2/DM8 间摇摆（/noisy 靶点实测）。处置：匹配结果恰好是裸库名
+// （而非 org.h2.jdbc / ORA-00933 / SQL syntax 这类强特征短语）时，要求命中位置 ±160 字符
+// 窗口内存在报错上下文关键词；强特征短语自带可信度直接放行（不影响真实报错页定库，零回归）。
+const ERR_CONTEXT_RE = /(error|exception|syntax|warning|jdbc|sqlstate|stack\s*trace|错误|异常|失败|ORA-)/i;
+const BARE_DB_NAME_RE = /^(h2|dm8|mariadb|tidb|mysql|oracle|derby|informix|monetdb|firebird|sybase|db2|access|clickhouse|postgresql|sqlite|sql server)$/i;
 export function dbmsFromError(text) {
   let s = String(text ?? '');
   if (/<[a-z!/[ ]/i.test(s)) {
@@ -346,7 +357,15 @@ export function dbmsFromError(text) {
       .replace(/<[^>]*>/g, ' ');
   }
   for (const { dbms, sig } of ERROR_SIG_BY_DBMS) {
-    if (sig.test(s)) return dbms;
+    const m = sig.exec(s);
+    if (!m) continue;
+    // 裸库名命中：须有报错上下文佐证（防随机文本误命中）；强特征短语直接放行
+    if (BARE_DB_NAME_RE.test(String(m[0]).trim())) {
+      const idx = m.index ?? 0;
+      const win = s.slice(Math.max(0, idx - 160), Math.min(s.length, idx + m[0].length + 160));
+      if (!ERR_CONTEXT_RE.test(win)) continue;
+    }
+    return dbms;
   }
   return null;
 }

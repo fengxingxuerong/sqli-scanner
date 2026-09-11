@@ -123,6 +123,38 @@ export function createMysqlLabApp(pool, preMiddleware = null) {
     res.send(html('Echo', `<p>key = ${key.replace(/</g, '&lt;')}</p>`));
   });
 
+  // —— [todo#38] 强动态页布尔盲注：注入语义与 /blind 完全一致，但响应混入高密度动态内容 ——
+  // 设计：动态内容占比压到 ~60-75%（每请求变化：时间戳×2、随机 hex、随机数矩阵、session id、
+  // 随机块序），块大小 64B 对齐 dynamicBlockFilter 的 blockSize，用于实测：
+  //   ① autoDynamicBlock 动态块排除在强动态页下是否失效（total===0 恒相似 → 漏报）
+  //   ② 噪声率自适应（adaptiveMinStable）能否把真差异从抖动里救回来
+  app.get('/noisy', wrap(async (req, res) => {
+    const uid = req.query.uid || '1';
+    let rows = [];
+    try {
+      const [r] = await pool.query(`SELECT * FROM users WHERE id = ${uid}`);
+      rows = r;
+    } catch { /* 错误吞掉回空结果：与 /blind 同语义 */ }
+    // 高密度动态内容（每请求必变，散布在响应各处）：
+    const now = Date.now();
+    const rnd = () => Math.floor(Math.random() * Number.MAX_SAFE_INTEGER).toString(36);
+    const hex = (n) => Array.from({ length: n }, () => Math.floor(Math.random() * 16).toString(16)).join('');
+    const matrix = Array.from({ length: 12 }, (_, i) => `<span class="m" data-k="${hex(16)}">${rnd()}</span>`).join('');
+    const blocks = [
+      `<div class="stat">ts=${now}</div>`,
+      `<div class="sid">session=${hex(32)}</div>`,
+      `<div class="mx">${matrix}</div>`,
+      `<div class="ad" id="${hex(24)}">recommend-${rnd()}</div>`,
+    ];
+    // 随机块序：进一步打散固定位置对齐
+    for (let i = blocks.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [blocks[i], blocks[j]] = [blocks[j], blocks[i]];
+    }
+    const resultHtml = rows.length ? table(rows) : '<p>empty</p>';
+    res.send(html('Feed', `${blocks.join('\n')}\n${resultHtml}\n<div class="ft">gen=${now}-${rnd()}</div>`));
+  }));
+
   // 错误页（真实 MySQL 报错文本，供 ErrorDetector 识别）
   app.use((err, req, res, next) => {
     res.status(500).send(html('Error', `<pre>${String(err?.message ?? err).replace(/</g, '&lt;')}</pre>`));

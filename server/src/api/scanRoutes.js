@@ -46,6 +46,22 @@ const pickBool = (cfg, key) => {
   const v = cfg[key];
   return v === undefined || v === null ? undefined : boolOf(v);
 };
+// [todo#39 2026-09-11] 二阶跨角色触发：Cookie 映射消毒（storeCookies/triggerCookies 共用）。
+// 仅保留字符串键值对；过滤原型污染键（__proto__/constructor/prototype）；上限 32 键防滥用。
+const sanitizeCookieMap = (v) => {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return undefined;
+  const out = {};
+  let n = 0;
+  for (const [k, val] of Object.entries(v)) {
+    if (n >= 32) break;
+    if (typeof k !== 'string' || typeof val !== 'string') continue;
+    if (k === '__proto__' || k === 'constructor' || k === 'prototype') continue;
+    if (!k.trim() || k.length > 256 || val.length > 4096) continue;
+    out[k] = val;
+    n++;
+  }
+  return n ? out : undefined;
+};
 
 // 白名单字段全集（原逻辑不变）
 const KNOWN_CFG_KEYS = new Set([
@@ -364,6 +380,11 @@ export function sanitizeStart(body) {
       triggerMethod: so.triggerMethod,
       negativeControl: so.negativeControl !== false,
       oobTrigger: !!so.oobTrigger,
+      // [todo#39 2026-09-11] 跨角色触发（读写分离身份）：存储与触发页可分属不同会话身份
+      // （低权账号写入、高权账号读出是存储型注入的实战高发形态）。键值均须为字符串，
+      // 过滤 __proto__/constructor/prototype 等危险键（对象字面量展开会沿原型链污染）。
+      storeCookies: sanitizeCookieMap(so.storeCookies),
+      triggerCookies: sanitizeCookieMap(so.triggerCookies),
     };
   }
   if (cfg.wafEvasion && typeof cfg.wafEvasion === 'object') {
@@ -728,6 +749,74 @@ export function createRoutes({ scanManager, eventBus: bus = eventBus, reportToke
   router.post('/scan/:id/stop', requireReport, (req, res) => {
     const ok = sm.stop(req.params.id);
     res.json({ code: 0, data: { stopped: ok }, message: 'ok' });
+  });
+
+  // [实战最高频动作] 单点重测：调完参（level/risk/tamper/technique…）只重跑某个注入点。
+  // POST /api/scan/:id/point/:pointId/retest   body: { config?: {...覆盖项} }
+  // 旧实现只能整站重扫——调参验证一次要等几分钟。这里复用原扫描的 target + 新 config，
+  // 通过 config.onlyPoint 把注入点收敛到目标点，请求量从数百降到几十，且对检测主流程零侵入。
+  // 返回新的 scanId（与 /scan/start 一致，异步扫描，用 /scan/:id/report 取结果）。
+  router.post('/scan/:id/point/:pointId/retest', requireReport, async (req, res) => {
+    const release = acquireScanSlot();
+    if (!release) {
+      return res.json({ code: ErrorCode.ENGINE_BUSY, data: null, message: '引擎忙：并发扫描已达上限，请稍后再试' });
+    }
+    try {
+      const base = sm.getReport(req.params.id);
+      if (!base) {
+        release();
+        return res.json({ code: ErrorCode.SCAN_NOT_FOUND, data: null, message: '基线扫描不存在' });
+      }
+      const point = (base.points || []).find((p) => p.id === req.params.pointId);
+      if (!point) {
+        release();
+        return res.json({ code: ErrorCode.SCAN_NOT_FOUND, data: null, message: '注入点不存在（pointId 需来自同一份报告）' });
+      }
+      const target = base.target || {};
+      if (!target.baseUrl) {
+        release();
+        return res.json({ code: ErrorCode.INVALID_PARAM, data: null, message: '基线报告缺少目标信息，无法重测' });
+      }
+      const override = (req.body && req.body.config) || {};
+      const merged = {
+        ...(target.config || {}),
+        ...override,
+        onlyPoint: { location: point.location, param: point.param },
+      };
+      // 重测只做检测：带上原 extractScope 会重复枚举，既慢又可能误触发写入
+      delete merged.extractScope;
+      const payload = {
+        url: target.baseUrl,
+        method: target.method || 'GET',
+        bodyParams: target.bodyParams || {},
+        jsonBody: target.jsonBody || null,
+        cookieParams: target.cookieParams || {},
+        headerParams: target.headerParams || {},
+        config: merged,
+      };
+      await assertSafeHttpTarget(payload.url).catch((e) => {
+        throw e instanceof AppError ? e : new AppError(ErrorCode.INVALID_PARAM, e.message || '目标 URL 校验失败');
+      });
+      const scanId = await sm.start(payload);
+      try {
+        registerScanScope(scanId, parseScope(merged.scope));
+      } catch { /* 登记失败不影响已启动的扫描 */ }
+      trackScanTerminal(sm, bus, scanId, release);
+      res.json({
+        code: 0,
+        data: {
+          scanId,
+          point: { id: point.id, location: point.location, param: point.param, encoding: point.encoding || null },
+          configApplied: { level: merged.level ?? null, risk: merged.risk ?? null, tamper: merged.tamper ?? null, techniques: merged.techniques ?? null },
+        },
+        message: 'ok',
+      });
+    } catch (e) {
+      release();
+      const err = e instanceof AppError ? e : new AppError(ErrorCode.UNKNOWN, e.message);
+      logger.warn(`单点重测启动失败：${err.message}`);
+      res.json({ code: err.code, data: null, message: err.message });
+    }
   });
 
   // [P0-FIX] 暂停/续跑扫描（对标 sqlmap Ctrl+C 暂停语义；仅 running 可暂停、paused 可恢复）

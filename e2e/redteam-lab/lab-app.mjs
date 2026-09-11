@@ -9,15 +9,18 @@ const require = createRequire(new URL('../../server/package.json', import.meta.u
 const express = require('express');
 const mysql = require('mysql2/promise');
 
+// 口令走环境变量：本机 MySQL 的 root 口令未必为空（其它 e2e 靶场用的是 root/root），
+// 硬编码空口令会让靶场在不同机器上莫名连不上。默认值保持空以兼容原环境。
+const DB_PASSWORD = process.env.LAB_DB_PASSWORD ?? '';
 const DB_CFG = {
-  host: '127.0.0.1', port: 3306, user: 'root', password: '',
+  host: '127.0.0.1', port: 3306, user: 'root', password: DB_PASSWORD,
   database: 'redteam_lab', multipleStatements: true,
 };
 const DB_CFG_SAFE = { ...DB_CFG, multipleStatements: false };
 
 export async function createLabApp() {
   // ── 初始化数据 ──
-  const root = await mysql.createConnection({ host: '127.0.0.1', port: 3306, user: 'root', password: '' });
+  const root = await mysql.createConnection({ host: '127.0.0.1', port: 3306, user: 'root', password: DB_PASSWORD });
   await root.query(`CREATE DATABASE IF NOT EXISTS redteam_lab DEFAULT CHARSET utf8mb4`);
   await root.query('USE redteam_lab');
   await root.query(`CREATE TABLE IF NOT EXISTS users(

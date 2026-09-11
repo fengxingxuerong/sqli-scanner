@@ -1,18 +1,18 @@
 # 多引擎 tamper A/B（H2 / HSQLDB / Derby × CRS v4.1.0）
 
-> 生成：2026-09-09T13:16:15.393Z　｜　引擎：真实 JDBC 引擎（内存库）　｜　CRS：官方规则原文 + 自实现执行器 ≈PL3
+> 生成：2026-09-11T08:33:41.865Z　｜　引擎：真实 JDBC 引擎（内存库）　｜　CRS：官方规则原文 + 自实现执行器 ≈PL3
 
 | 引擎 | 场景 | tamper off | tamper on | 说明 |
 |---|---|---|---|---|
-| h2 | num | - | error | 检出 |
-| h2 | str | - | error | 检出 |
-| h2 | blind | - | - | 检出 |
-| hsqldb | num | - | - | 检出 |
+| h2 | num | boolean | boolean | 检出 |
+| h2 | str | - | - | 检出 |
+| h2 | blind | boolean | boolean | 检出 |
+| hsqldb | num | boolean | boolean | 检出 |
 | hsqldb | str | - | - | 检出 |
-| hsqldb | blind | - | - | 检出 |
-| derby | num | - | error | 检出 |
-| derby | str | - | error | 检出 |
-| derby | blind | - | - | 检出 |
+| hsqldb | blind | boolean | boolean | 检出 |
+| derby | num | boolean | boolean | 检出 |
+| derby | str | - | - | 检出 |
+| derby | blind | boolean | boolean | 检出 |
 
 安全对照（参数化）：零误报
 

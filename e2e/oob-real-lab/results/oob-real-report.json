@@ -1,0 +1,16 @@
+{
+  "generatedAt": "2026-09-11T08:54:19.120Z",
+  "engine": "PostgreSQL 16.2 @5432 (superuser)",
+  "results": {
+    "oobOn": {
+      "found": [
+        "oob"
+      ],
+      "status": "completed"
+    },
+    "control": {
+      "found": [],
+      "status": "completed"
+    }
+  }
+}

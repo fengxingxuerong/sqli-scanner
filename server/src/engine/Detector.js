@@ -1,6 +1,8 @@
 import { obfuscateWithConfig } from '../core/tamper/applyTampers.js';
 import { chunkSimilarity, chunkHashes, dynamicBlockFilter } from '../core/statsHelper.js';
 import { buildInjectionRequest } from './injection.js';
+// [P0-FIX 2026-09-11] WAF 拦截页判定（布尔真假对防误报）：复用统一拦截签名识别
+import { detectGenericBlock } from '../core/waf/blockSignatures.js';
 // [P0-FIX 2026-09-09] 出口选项同源（send / sendHead 与 sendInjection 共用一个构造器）
 import {
   buildEgressOpts,
@@ -377,6 +379,77 @@ export class Detector {
    */
   unusableOf(res) {
     return isUnusableResponse(res) ? unusableReasonText(res) || '响应不可用' : '';
+  }
+
+  /**
+   * [P0-FIX 2026-09-11] WAF 拦截页判定：真假对中任一侧是拦截页时，差异不可作注入证据。
+   * 背景（waf-real echo 安全对照误报，2/2 复现）：CRS 对真/假 payload 的拦截是确定性的——
+   * 真 payload 放行（200 ≈ 基线）、假 payload 被拦（403 拦截页 ≠ 基线），完美满足布尔判定
+   * 三条件（真≈基线 / 假≠基线 / 真假有差异），且「组间稳定差异」复核还会强化它（拦截每次
+   * 都一样）。这会把安全页误报为布尔注入。判定复用 detectGenericBlock（状态码门槛 +
+   * 文案特征，裸 403 业务错误页不会被误判为 WAF）。
+   * @param {object|null|undefined} res
+   * @returns {boolean}
+   */
+  _isWafBlockPage(res) {
+    if (!res || typeof res !== 'object') return false;
+    try {
+      const r = detectGenericBlock(res);
+      return !!(r && r.vendor === 'generic_block');
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * [P0-FIX 2026-09-11] 布尔真假对防 WAF 误报总闸：任一侧是拦截页 → 该对不算命中。
+   * 返回 true 表示「被拦截页污染，本对应跳过」。
+   * @param {object|null|undefined} rTrue
+   * @param {object|null|undefined} rFalse
+   * @returns {boolean}
+   */
+  _pairPollutedByWafBlock(rTrue, rFalse) {
+    return this._isWafBlockPage(rTrue) || this._isWafBlockPage(rFalse);
+  }
+
+  /**
+   * [P0-FIX 2026-09-11] 反射剥离：从响应体中剥掉被页面回显的注入 payload 自身。
+   * 背景（multi-engine /num 布尔漏检）：回显型页面（`key = <payload>` / `id = <payload>`）
+   * 把真/假 payload 原样渲染进响应，真/假页都被推离基线 → `真≈基线` 前提永不成立 →
+   * 布尔通道在回显页上系统性漏检（无 WAF 也是 0 检出）。
+   * 剥离语义（增量剥离）：payload 通常以 originalValue 开头（`1 AND 1=1-- ` 的 `1` 即原值，
+   * 基线页回显的正是它）——整段剥离会把基线回显槽位一并剥掉，真页仍≠基线。
+   * 故优先剥「payload 相对原值的增量」（保留 `id=1` 槽位）：真页剥离后≈基线 + 数据行，
+   * 假页剥离后≈基线 + 空行，真假差异聚焦到 SQL 执行结果（1 行 vs 0 行）——这才是布尔
+   * 判定应看的信号。payload 不以原值开头时回退整段剥离。
+   * 对不回显的页面是零操作（零回归）。
+   * @param {string} body 响应体
+   * @param {string} payload 本次注入的 payload
+   * @param {string} [orig] 注入点原始值（增量剥离的锚点）
+   * @returns {string}
+   */
+  _stripReflected(body, payload, orig) {
+    let out = String(body ?? '');
+    let p = String(payload ?? '');
+    if (!p || p.length < 2) return out;
+    // 增量剥离：payload 以原值开头 → 只剥增量（保留基线回显槽位）
+    const o = String(orig ?? '');
+    if (o && p.startsWith(o) && p.length > o.length) p = p.slice(o.length);
+    const forms = new Set([p]);
+    try {
+      const decoded = decodeURIComponent(p.replace(/\+/g, ' '));
+      if (decoded !== p) forms.add(decoded);
+    } catch { /* 非法序列忽略 */ }
+    // HTML 实体转义形态（常见三种引号 + 少量端点做全量转义）
+    for (const base of [...forms]) {
+      forms.add(base.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;'));
+    }
+    for (const f of forms) {
+      // 替换为空串而非空格：回显槽位里 payload 增量剥掉后应精确回归基线形态
+      // （`id=1 AND 1=1` 剥增量 → `id=1` ≈ 基线；若换成空格则 `id=1 ` ≠ 基线，实测像/不像判定被一个尾随空格毁掉）
+      if (f.length >= 2 && out.includes(f)) out = out.split(f).join('');
+    }
+    return out;
   }
 
   matchMetrics(trueRes, falseRes, config) {

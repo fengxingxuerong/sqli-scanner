@@ -35,6 +35,7 @@ const SCENARIOS = [
   { name: 'like', desc: 'LIKE 上下文（%\' 闭合，P1-3 修复验证）', target: () => ({ url: `${BASE}/like?q=keyboard` }), must: ['boolean'], nice: ['error', 'union'] },
   { name: 'orderby', desc: 'ORDER BY 位置注入（子句轮需 level≥2）', target: () => ({ url: `${BASE}/orderby?sort=id` }), must: ['boolean'], nice: [], cfg: { level: 2 } },
   { name: 'blind', desc: '布尔盲注（错误吞掉，无回显）', target: () => ({ url: `${BASE}/blind?uid=1` }), must: ['boolean'], nice: [] },
+  { name: 'noisy', desc: '强动态页布尔盲注（todo#38：高密度动态内容 + 注入）', target: () => ({ url: `${BASE}/noisy?uid=1` }), must: ['boolean'], nice: [] },
   { name: 'time', desc: '时间盲注（内容恒定）', target: () => ({ url: `${BASE}/time?tid=1` }), must: ['time'], nice: [] },
   // stacked/inline 为 opt-in 技术（默认 techniques 不含），需显式指定
   { name: 'stacked', desc: '堆叠注入（opt-in 技术）', target: () => ({ url: `${BASE}/stacked?i=1` }), must: ['stacked'], nice: [], cfg: { techniques: ['stacked'] } },

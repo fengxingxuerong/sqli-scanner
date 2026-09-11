@@ -352,8 +352,16 @@ export class ReportGenerator {
   _conclusionMarkdown(report) {
     const c = this._conclusion(report);
     if (!c) return [];
-    const out = ['## 结论可信度与本次抑制项', ''];
-    if (c.verdict) {
+    // [P1-FIX 2026-09-12] 有命中时不得原样展示 verdict：verdict 只描述「未检出」类阴性结论的
+    // 可信度，与「已检出 N 条漏洞」并列会被读成自相矛盾——实测交付报告第一行出现
+    // 「结论判定：no_vulnerability_detected」，而紧接着下方列着 3 条漏洞，属交付物级误导。
+    const hits = Array.isArray(report?.vulns) ? report.vulns.length : 0;
+    const out = [hits ? '## 本次命中与抑制项' : '## 结论可信度与本次抑制项', ''];
+    if (hits) {
+      out.push(
+        `- 本次已检出 **${hits}** 条漏洞（详见下方清单）；verdict 仅用于描述「未检出」类阴性结论的可信度，不适用于本次结果。`
+      );
+    } else if (c.verdict) {
       out.push(`- 结论判定：**${c.verdict === 'inconclusive' ? '不可判定（inconclusive）' : c.verdict}**`);
     }
     if (c.note) out.push(`> ${c.note.replace(/\s*\n\s*/g, ' ')}`);
@@ -371,9 +379,17 @@ export class ReportGenerator {
     const esc = (s) => this._escape(String(s));
     const items = c.constraints.map((x) => `<li>${esc(x)}</li>`).join('');
     const bad = c.verdict === 'inconclusive';
-    return `<div class="verdict${bad ? ' bad' : ''}">
-      <h2>${bad ? '结论不可信：未检出 ≠ 无漏洞' : '结论可信度与本次抑制项'}</h2>
-      ${c.verdict ? `<p class="meta">判定：${esc(c.verdict)}</p>` : ''}
+    // [P1-FIX 2026-09-12] 与 _conclusionMarkdown 同源：有命中时不展示 verdict（语义冲突会误导）
+    const hits = Array.isArray(report?.vulns) ? report.vulns.length : 0;
+    const title = hits ? '本次命中与抑制项' : bad ? '结论不可信：未检出 ≠ 无漏洞' : '结论可信度与本次抑制项';
+    const verdictLine = hits
+      ? `<p class="meta">本次已检出 ${hits} 条漏洞；verdict 仅描述「未检出」类阴性结论的可信度，不适用于本次结果。</p>`
+      : c.verdict
+        ? `<p class="meta">判定：${esc(c.verdict)}</p>`
+        : '';
+    return `<div class="verdict${bad && !hits ? ' bad' : ''}">
+      <h2>${title}</h2>
+      ${verdictLine}
       ${c.note ? `<p>${esc(c.note)}</p>` : ''}
       ${items ? `<p class="meta">本次被抑制的能力（不代表已测试）：</p><ul>${items}</ul>` : ''}
     </div>`;

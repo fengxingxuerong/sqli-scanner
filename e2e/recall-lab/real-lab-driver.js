@@ -137,7 +137,9 @@ export function buildMysqlTarget(injectValue, ctxType = 'numeric') {
   };
   return {
     mode: 'direct',
-    db: { driverType: 'mysql', host: '127.0.0.1', port: 3307, user: 'root', initSql: MYSQL_INIT_SQL },
+    // [P0-FIX 2026-09-11] password：本机 3307 实例为 root/root（root 无密码会 Access denied，
+    // 该场景自 09-10 新增以来因 mysql2 不可用被跳过，从未真正跑通）。MYSQL_PASSWORD 兜底。
+    db: { driverType: 'mysql', host: '127.0.0.1', port: 3307, user: 'root', password: process.env.MYSQL_PASSWORD ?? 'root', initSql: MYSQL_INIT_SQL },
     sqlTemplate: templates[ctxType] || templates.numeric,
     originalValue: String(injectValue),
     config: { dbms: 'MySQL' },

@@ -246,6 +246,33 @@ SSE 实时进度流，事件结构 `{ type, scanId, ts, payload }`，事件类�
 { "code": 0, "data": { "stopped": true }, "message": "ok" }
 ```
 
+#### `POST /scan/:id/point/:pointId/retest`
+
+单点重测：带新 config 只重跑指定注入点（调参验证省分钟级等待）。`pointId` 需来自同一份报告；
+引擎按 `location:param` 锁定单点（跨扫描 pointId 不稳定），请求量从数百降到几十。
+
+请求体（均可选，仅覆盖想调整的项）：
+
+```json
+{ "config": { "level": 3, "risk": 2, "techniques": ["boolean", "time"] } }
+```
+
+响应：
+
+```json
+{
+  "code": 0,
+  "data": {
+    "scanId": "新扫描 ID（事件流/报告与普通扫描一致）",
+    "point": { "id": "…", "location": "url", "param": "id", "encoding": null },
+    "configApplied": { "level": 3, "risk": 2, "tamper": null, "techniques": ["boolean", "time"] }
+  },
+  "message": "ok"
+}
+```
+
+错误码：`1002` 基线扫描不存在 / `1002` 注入点不存在（pointId 需来自同一报告）/ `1002` 基线缺目标信息；重测自动剥离子项 `extractScope`（避免重复枚举与误触发写入），scope 与 SSRF 校验与全扫一致。
+
 #### `GET /scan/:id/report`
 
 完整报告（`ReportModel`）：

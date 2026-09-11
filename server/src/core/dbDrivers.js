@@ -132,7 +132,11 @@ export class MysqlDriver {
     const host = this._opts.host || '127.0.0.1';
     const port = this._opts.port || 3306;
     const user = this._opts.user || 'root';
-    this._conn = await mysql.createConnection({ host, port, user, charset: 'utf8mb4' });
+    // [P0-FIX 2026-09-11] password 支持：真实 MySQL 场景（recall-lab real_mysql_*）此前从未
+    // 跑通过——mysql2 不可用时静默跳过，可用后立即暴露 Access denied（root 无密码连 root/root 实例）。
+    // 选项优先，MYSQL_PASSWORD 环境变量兜底；undefined 保持旧「无密码」行为（零回归）。
+    const password = this._opts.password ?? process.env.MYSQL_PASSWORD ?? undefined;
+    this._conn = await mysql.createConnection({ host, port, user, password, charset: 'utf8mb4' });
     if (this._opts.initSql) {
       for (const sql of this._opts.initSql.split(';').map((s) => s.trim()).filter(Boolean)) {
         await this._conn.query(sql);

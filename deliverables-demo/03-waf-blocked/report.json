@@ -1,0 +1,525 @@
+{
+  "scanId": "oVmB5fg5j6iW",
+  "target": {
+    "id": "tXD86U1nf_",
+    "mode": "http",
+    "baseUrl": "http://127.0.0.1:8182/waf?id=1",
+    "method": "GET",
+    "bodyParams": {},
+    "jsonBody": null,
+    "cookieParams": {},
+    "headerParams": {},
+    "config": {
+      "port": 4567,
+      "timeoutMs": 15000,
+      "retry": 0,
+      "disableKeepAlive": false,
+      "http2": false,
+      "ratePerSec": 50,
+      "concurrency": 4,
+      "sessionDefault": false,
+      "level": 3,
+      "risk": 2,
+      "productionMode": true,
+      "confirmDestructive": false,
+      "testFilter": "",
+      "testSkip": "",
+      "useRegistry": false,
+      "prefix": "",
+      "suffix": "",
+      "boolStableDiff": true,
+      "boolStableDiffSamples": 3,
+      "timeThresholdMs": 1500,
+      "timeBlindSamples": 5,
+      "timeBlindSleepSec": 2,
+      "timeBlindCalibrate": false,
+      "timeBlindCalibrateMin": 1,
+      "timeProbeSleepSec": null,
+      "timeExtractSleepSec": null,
+      "maxColumnsGuess": 50,
+      "matchString": null,
+      "notString": null,
+      "matchText": false,
+      "matchCode": null,
+      "matchRegexp": null,
+      "trueRegexp": null,
+      "falseRegexp": null,
+      "matchTitle": false,
+      "autoDynamicBlock": true,
+      "prefilter": true,
+      "skipStatic": false,
+      "validationSkip": true,
+      "pocRedactAuth": false,
+      "scope": [],
+      "prefilterSinglePoint": false,
+      "invalidValue": null,
+      "knownPoint": null,
+      "enableExtract": true,
+      "excludeSysdbs": true,
+      "dumpRowLimit": 20,
+      "dumpStart": 0,
+      "dumpStop": 0,
+      "safeUrl": "",
+      "safeFreq": 0,
+      "extractConcurrency": 4,
+      "dumpConcurrency": 4,
+      "dumpDatabaseConcurrency": 2,
+      "predictOutput": true,
+      "wafEvasion": {
+        "randomUA": false,
+        "jitterMs": 0,
+        "obfuscate": false,
+        "tamper": {
+          "enabled": false,
+          "plugins": [],
+          "intensity": "medium"
+        },
+        "adaptiveOnBlock": true,
+        "filterAdaptive": true,
+        "autoRetry": false
+      },
+      "oob": {
+        "enabled": false,
+        "callbackBase": "127.0.0.1:8899",
+        "httpPort": 8899,
+        "timeoutMs": 5000,
+        "dnsOob": false,
+        "dnsDomain": "",
+        "dnsPort": 53
+      },
+      "techniques": [
+        "union",
+        "error",
+        "boolean",
+        "time"
+      ],
+      "crawlForms": false,
+      "crawlDepth": 0,
+      "proxy": null,
+      "auth": null,
+      "dbms": null,
+      "insecureTls": false,
+      "trustProxyEnv": true,
+      "proxyBypassLocal": true,
+      "ssrfViaProxy": "auto",
+      "secondOrder": {
+        "enabled": false,
+        "triggerUrls": [],
+        "refreshCsrf": true,
+        "negativeControl": true,
+        "oobTrigger": false,
+        "secondUrl": "",
+        "secondMethod": "GET",
+        "secondData": null,
+        "triggerMethod": "GET",
+        "allowWrites": false
+      },
+      "nullConnection": false,
+      "delay": 0,
+      "reqRate": 0,
+      "maxReq": 0,
+      "forceSsl": false,
+      "ignoreRedirects": false,
+      "hpp": false,
+      "parseErrors": false,
+      "freshQueries": false,
+      "activeWafProbe": false,
+      "blindRobust": {
+        "enabled": true,
+        "booleanSamples": 3,
+        "baselineSamples": 5,
+        "timeConfidenceZ": 2,
+        "minStableRatio": 0.66,
+        "booleanSignificanceZ": 1.645,
+        "adaptive": true,
+        "adaptiveHeadroom": 0.3,
+        "minStableRatioFloor": 0.66,
+        "minStableRatioCap": 0.95,
+        "adaptiveTimeFloorScale": 2,
+        "concurrency": 4,
+        "extractVerify": true
+      }
+    }
+  },
+  "startedAt": "2026-09-11T18:28:22.047Z",
+  "finishedAt": "2026-09-11T18:28:27.268Z",
+  "dbms": "MySQL",
+  "points": [
+    {
+      "id": "283e732d",
+      "location": "url",
+      "param": "id",
+      "originalValue": "1",
+      "confirmed": true,
+      "technique": "boolean",
+      "dbms": "MySQL",
+      "formMethod": null,
+      "actionUrl": null,
+      "formValues": null,
+      "csrfTokenName": null,
+      "isStorePoint": false,
+      "storeKind": null,
+      "boundaryProbed": true,
+      "_baselineTitle": "WAF Protected",
+      "boundary": ""
+    }
+  ],
+  "vulns": [
+    {
+      "id": "500g2mr_",
+      "pointId": "283e732d",
+      "technique": "boolean",
+      "dbms": "MySQL",
+      "riskLevel": "Medium",
+      "payloads": [
+        "1 && 1=1",
+        "1 && 1=2"
+      ],
+      "description": "布尔注入确认(统计·自适应): 真≈基线1.00、假≠基线1.00、差异1.00、基线噪声0.00、门槛0.66、z=2.83(显著)",
+      "evidence": "布尔注入确认(统计·自适应): 真≈基线1.00、假≠基线1.00、差异1.00、基线噪声0.00、门槛0.66、z=2.83(显著)",
+      "trace": {
+        "technique": "boolean",
+        "adaptive": true,
+        "baselineNoiseRate": 0,
+        "minStable": 0.66,
+        "baselineSamples": [
+          {
+            "idx": 0,
+            "len": 321,
+            "likeBaseline": true,
+            "excerpt": "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>WAF Protected</title></head><body><h1>WAF Protected</h1><table border=\"1\"><tr><th>id</th><th>username</t"
+          },
+          {
+            "idx": 1,
+            "len": 321,
+            "likeBaseline": true,
+            "excerpt": "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>WAF Protected</title></head><body><h1>WAF Protected</h1><table border=\"1\"><tr><th>id</th><th>username</t"
+          },
+          {
+            "idx": 2,
+            "len": 321,
+            "likeBaseline": true,
+            "excerpt": "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>WAF Protected</title></head><body><h1>WAF Protected</h1><table border=\"1\"><tr><th>id</th><th>username</t"
+          },
+          {
+            "idx": 3,
+            "len": 321,
+            "likeBaseline": true,
+            "excerpt": "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>WAF Protected</title></head><body><h1>WAF Protected</h1><table border=\"1\"><tr><th>id</th><th>username</t"
+          },
+          {
+            "idx": 4,
+            "len": 321,
+            "likeBaseline": true,
+            "excerpt": "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>WAF Protected</title></head><body><h1>WAF Protected</h1><table border=\"1\"><tr><th>id</th><th>username</t"
+          }
+        ],
+        "pairs": [
+          {
+            "ti": 0,
+            "fi": 2,
+            "trueSamples": [
+              {
+                "idx": 0,
+                "len": 267,
+                "likeBaseline": false,
+                "excerpt": "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>Error</title></head><body><h1>Error</h1><pre>You have an error in your SQL syntax; check the manual that"
+              },
+              {
+                "idx": 1,
+                "len": 267,
+                "likeBaseline": false,
+                "excerpt": "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>Error</title></head><body><h1>Error</h1><pre>You have an error in your SQL syntax; check the manual that"
+              },
+              {
+                "idx": 2,
+                "len": 267,
+                "likeBaseline": false,
+                "excerpt": "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>Error</title></head><body><h1>Error</h1><pre>You have an error in your SQL syntax; check the manual that"
+              }
+            ],
+            "falseSamples": [
+              {
+                "idx": 0,
+                "len": 267,
+                "likeBaseline": false,
+                "excerpt": "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>Error</title></head><body><h1>Error</h1><pre>You have an error in your SQL syntax; check the manual that"
+              },
+              {
+                "idx": 1,
+                "len": 267,
+                "likeBaseline": false,
+                "excerpt": "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>Error</title></head><body><h1>Error</h1><pre>You have an error in your SQL syntax; check the manual that"
+              },
+              {
+                "idx": 2,
+                "len": 267,
+                "likeBaseline": false,
+                "excerpt": "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>Error</title></head><body><h1>Error</h1><pre>You have an error in your SQL syntax; check the manual that"
+              }
+            ],
+            "trueRatio": 0,
+            "falseRatio": 1,
+            "meaningfulRatio": 0,
+            "z": 2.82842712474619,
+            "significant": true,
+            "diffs": [
+              {
+                "idx": 0,
+                "lenDelta": 0,
+                "firstDiffOffset": -1,
+                "changedSnippet": ""
+              },
+              {
+                "idx": 1,
+                "lenDelta": 0,
+                "firstDiffOffset": -1,
+                "changedSnippet": ""
+              },
+              {
+                "idx": 2,
+                "lenDelta": 0,
+                "firstDiffOffset": -1,
+                "changedSnippet": ""
+              }
+            ]
+          },
+          {
+            "ti": 1,
+            "fi": 3,
+            "trueSamples": [
+              {
+                "idx": 0,
+                "len": 267,
+                "likeBaseline": false,
+                "excerpt": "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>Error</title></head><body><h1>Error</h1><pre>You have an error in your SQL syntax; check the manual that"
+              },
+              {
+                "idx": 1,
+                "len": 267,
+                "likeBaseline": false,
+                "excerpt": "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>Error</title></head><body><h1>Error</h1><pre>You have an error in your SQL syntax; check the manual that"
+              },
+              {
+                "idx": 2,
+                "len": 267,
+                "likeBaseline": false,
+                "excerpt": "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>Error</title></head><body><h1>Error</h1><pre>You have an error in your SQL syntax; check the manual that"
+              }
+            ],
+            "falseSamples": [
+              {
+                "idx": 0,
+                "len": 267,
+                "likeBaseline": false,
+                "excerpt": "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>Error</title></head><body><h1>Error</h1><pre>You have an error in your SQL syntax; check the manual that"
+              },
+              {
+                "idx": 1,
+                "len": 267,
+                "likeBaseline": false,
+                "excerpt": "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>Error</title></head><body><h1>Error</h1><pre>You have an error in your SQL syntax; check the manual that"
+              },
+              {
+                "idx": 2,
+                "len": 267,
+                "likeBaseline": false,
+                "excerpt": "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>Error</title></head><body><h1>Error</h1><pre>You have an error in your SQL syntax; check the manual that"
+              }
+            ],
+            "trueRatio": 0,
+            "falseRatio": 1,
+            "meaningfulRatio": 0,
+            "z": 2.82842712474619,
+            "significant": true,
+            "diffs": [
+              {
+                "idx": 0,
+                "lenDelta": 0,
+                "firstDiffOffset": -1,
+                "changedSnippet": ""
+              },
+              {
+                "idx": 1,
+                "lenDelta": 0,
+                "firstDiffOffset": -1,
+                "changedSnippet": ""
+              },
+              {
+                "idx": 2,
+                "lenDelta": 0,
+                "firstDiffOffset": -1,
+                "changedSnippet": ""
+              }
+            ]
+          },
+          {
+            "ti": 4,
+            "fi": 5,
+            "trueSamples": [
+              {
+                "idx": 0,
+                "len": 321,
+                "likeBaseline": true,
+                "excerpt": "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>WAF Protected</title></head><body><h1>WAF Protected</h1><table border=\"1\"><tr><th>id</th><th>username</t"
+              },
+              {
+                "idx": 1,
+                "len": 321,
+                "likeBaseline": true,
+                "excerpt": "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>WAF Protected</title></head><body><h1>WAF Protected</h1><table border=\"1\"><tr><th>id</th><th>username</t"
+              },
+              {
+                "idx": 2,
+                "len": 321,
+                "likeBaseline": true,
+                "excerpt": "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>WAF Protected</title></head><body><h1>WAF Protected</h1><table border=\"1\"><tr><th>id</th><th>username</t"
+              }
+            ],
+            "falseSamples": [
+              {
+                "idx": 0,
+                "len": 150,
+                "likeBaseline": false,
+                "excerpt": "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>WAF Protected</title></head><body><h1>WAF Protected</h1><p>No results found.</p></body></html>"
+              },
+              {
+                "idx": 1,
+                "len": 150,
+                "likeBaseline": false,
+                "excerpt": "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>WAF Protected</title></head><body><h1>WAF Protected</h1><p>No results found.</p></body></html>"
+              },
+              {
+                "idx": 2,
+                "len": 150,
+                "likeBaseline": false,
+                "excerpt": "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>WAF Protected</title></head><body><h1>WAF Protected</h1><p>No results found.</p></body></html>"
+              }
+            ],
+            "trueRatio": 1,
+            "falseRatio": 1,
+            "meaningfulRatio": 1,
+            "z": 2.82842712474619,
+            "significant": true,
+            "diffs": [
+              {
+                "idx": 0,
+                "lenDelta": -171,
+                "firstDiffOffset": 113,
+                "changedSnippet": ">WAF Protected</h1><p>No results found.</p></body></html>"
+              },
+              {
+                "idx": 1,
+                "lenDelta": -171,
+                "firstDiffOffset": 113,
+                "changedSnippet": ">WAF Protected</h1><p>No results found.</p></body></html>"
+              },
+              {
+                "idx": 2,
+                "lenDelta": -171,
+                "firstDiffOffset": 113,
+                "changedSnippet": ">WAF Protected</h1><p>No results found.</p></body></html>"
+              }
+            ]
+          }
+        ],
+        "decision": "vulnerable"
+      }
+    }
+  ],
+  "data": {
+    "databases": [],
+    "tables": {},
+    "columns": {},
+    "rows": {},
+    "schemas": {},
+    "counts": {}
+  },
+  "riskLevel": "Medium",
+  "summary": {
+    "constraints": [
+      "高危 payload 池（写文件/RCE/重运算类，本配置下候选 1 条）已抑制：productionMode=true 且未 confirmDestructive=true。确需在已授权目标上投放时显式设 confirmDestructive=true；靶场/演练环境可整体关护栏（productionMode=false）",
+      "本次开启拖库（enableExtract）：提取阶段会向目标发出大量读请求（受限速与行数上限约束）。生产环境建议控制行数并避开业务高峰"
+    ],
+    "stackedEnabled": false,
+    "stackedCorroborations": [],
+    "validity": {
+      "status": "blocked",
+      "reliable": false,
+      "reason": "近 40 次请求中拦截特征 8 次（403/406/429/503 或拦截页文案），窗口拦截占比 0.67",
+      "counts": {
+        "total": 172,
+        "failStreak": 0,
+        "blockHits": 8,
+        "serverErr": 1,
+        "injection5xx": 2,
+        "authLostHits": 0,
+        "netErrPoints": 0
+      },
+      "blockRatio": 0.67,
+      "suggestBackoffMs": null,
+      "inconclusivePoints": [],
+      "advice": "疑似 WAF/封 IP：降速并加抖动（ratePerSec≤1、jitterMs>0）、套用 tamper 规避链；申请把扫描源 IP 加入 WAF 白名单或换时段复扫；被拦请求对应的点应视为未测"
+    },
+    "verdict": "no_vulnerability_detected",
+    "verdictNote": "本次扫描检出 1 条漏洞；verdict 仅描述「未检出」类阴性结论的可信度，命中详情见 vulns",
+    "dbmsEvidence": {
+      "dbms": "MySQL",
+      "level": "verified",
+      "levelText": "真实引擎验证",
+      "evidence": "e2e/real-mysql-lab（真实 8.0.28 / 8.0.37）+ e2e/waf-real",
+      "caveat": null,
+      "all": [
+        "MySQL:verified"
+      ]
+    },
+    "blockPolicy": {
+      "action": "adaptiveTamper",
+      "reason": "本次实际出现拦截响应（blockHits=8）并已自动换链重跑：[\"dash2hash\",\"hexliterals\"]",
+      "tamperHint": [
+        "dash2hash",
+        "hexliterals"
+      ],
+      "backoffMs": null
+    },
+    "wafAdaptive": {
+      "triggered": true,
+      "blockHits": 8,
+      "chains": [
+        [
+          "dash2hash",
+          "hexliterals"
+        ],
+        [
+          "dash2hash"
+        ],
+        [
+          "symboliclogical"
+        ],
+        [
+          "hexliterals",
+          "dash2hash"
+        ]
+      ],
+      "note": "未识别到 WAF 厂商但出现拦截响应，已用算子替换族重跑未命中点"
+    }
+  },
+  "validity": {
+    "status": "blocked",
+    "reliable": false,
+    "reason": "近 40 次请求中拦截特征 8 次（403/406/429/503 或拦截页文案），窗口拦截占比 0.67",
+    "counts": {
+      "total": 172,
+      "failStreak": 0,
+      "blockHits": 8,
+      "serverErr": 1,
+      "injection5xx": 2,
+      "authLostHits": 0,
+      "netErrPoints": 0
+    },
+    "blockRatio": 0.67,
+    "suggestBackoffMs": null,
+    "inconclusivePoints": [],
+    "advice": "疑似 WAF/封 IP：降速并加抖动（ratePerSec≤1、jitterMs>0）、套用 tamper 规避链；申请把扫描源 IP 加入 WAF 白名单或换时段复扫；被拦请求对应的点应视为未测"
+  }
+}

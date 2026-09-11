@@ -1148,7 +1148,29 @@ export async function runScanLoop(sm, scanId) {
       tamperHint: Array.isArray(blockPolicy?.tamperHint) ? [...blockPolicy.tamperHint] : [],
       backoffMs: blockPolicy?.backoffMs ?? null,
     };
+    // [P0-FIX 2026-09-12] 报告一致性：blockPolicy 由 decideBlockPolicy 依「厂商识别 + wafEvasion 配置」
+    // 生成，不看本次实际发生的拦截与自适应重跑，于是会出现自相矛盾的交付物——实测 waf 场景报告里
+    // blockPolicy.action='none'（理由「无拦截证据」），而 summary.wafAdaptive.triggered=true、
+    // validity.status='blocked'（拦截 8 次），PoC 里的 payload 已经是自适应换链后的 `1 && 1=1`。
+    // 客户只读 blockPolicy 会误判「目标没有 WAF 拦截」。此处用实际证据校正，保持单一事实来源。
+    if (blockAdaptiveInfo?.triggered && report.summary.blockPolicy.action === 'none') {
+      report.summary.blockPolicy = {
+        action: blockAdaptiveInfo.mode === 'filterBypass' ? 'filterBypass' : 'adaptiveTamper',
+        reason:
+          `本次实际出现拦截响应（blockHits=${blockAdaptiveInfo.blockHits ?? blockAdaptiveInfo.errorOnlyPoints ?? '?'}）` +
+          `并已自动换链重跑：${JSON.stringify(blockAdaptiveInfo.chains?.[0] || [])}`,
+        tamperHint: Array.isArray(blockAdaptiveInfo.chains?.[0]) ? [...blockAdaptiveInfo.chains[0]] : [],
+        backoffMs: report.summary.blockPolicy.backoffMs,
+      };
+    }
     if (blockAdaptiveInfo) report.summary.wafAdaptive = blockAdaptiveInfo;
+    // 有效性守卫已判 blocked（拦截占比超阈值）时，同样不得对外声称「无拦截证据」
+    const valStatus = (validity && typeof validity.summary === 'function' ? validity.summary() : null)?.status;
+    if (valStatus === 'blocked' && report.summary.blockPolicy.action === 'none') {
+      report.summary.blockPolicy.action = 'none_but_blocked';
+      report.summary.blockPolicy.reason =
+        '本次请求被大量拦截（validity.status=blocked），未执行自适应重跑（可能无未命中点可补）；结论可信度受抑制，详见 summary.validity';
+    }
     // 会话落盘收尾（resume 模式可用同一 sessionFile 续跑/复核）：必须先 finalize 落盘完成，再置 completed，
     // 避免 resume 端在 status=completed 后、落盘前抢读到一个 vulns 为空的半成品会话。
     if (session) await session.finalize(report).catch(() => {});

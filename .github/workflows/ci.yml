@@ -134,6 +134,72 @@ jobs:
         name: Recall-lab e2e (18 scenarios)
         timeout-minutes: 5
 
+  # [P1-ADD 2026-09-12] 全方位验收门禁。
+  # 此前 CI 覆盖面已很广（lint / 单测 / 前端覆盖率 / 召回率 / Docker / npm audit），但
+  # **所有需要 MySQL 的 e2e 套件都不在 CI 内**：独立刁钻靶场、真 MySQL、检测回归、CRS 对抗、
+  # 报告契约、文件读写真闭环。而这些恰恰是「靶场存在却因环境问题长期跑不起来」的地方——
+  # 数字于是靠口口相传，最终沉淀成 README 里无法复现的过期口径。
+  # 本 job 把它们拉进门禁：事实断言（不采信自报 PASS）+ 失败非零退出 + 报告留档 artifact。
+  acceptance:
+    runs-on: ubuntu-latest
+    needs: [test-server]
+    if: github.event_name != 'schedule'
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Cache server node_modules
+        uses: actions/cache@v4
+        with:
+          path: server/node_modules
+          key: ${{ runner.os }}-server-${{ hashFiles('server/package-lock.json') }}
+      - run: cd server && npm ci
+        name: Install server deps
+      # 用 docker run 而非 service container：只有命令行方式才能给 mysqld 传
+      # --secure-file-priv=""（默认 NULL 会让 fileRead/fileWrite 套件只能 SKIP）。
+      # ⚠️ 未被本地验证的假设（2026-09-12）：本机无 docker，无法实测 mysql:8.0 镜像
+      # 的 entrypoint 是否把额外参数透传给 mysqld。风险可控——若假设不成立，
+      # 对应套件会走 optional SKIP（原因写明 secure_file_priv 未放行），不影响门禁结论；
+      # 反之若 MySQL 容器起不来，必需依赖缺失会让门禁 BLOCKED 并返回非零退出码（不会假绿）。
+      - name: 启动 MySQL（放行 secure_file_priv，使文件读写套件也能真跑）
+        run: |
+          docker run -d --name mysql-lab -p 3306:3306 \
+            -e MYSQL_ROOT_PASSWORD=root \
+            -e MYSQL_DATABASE=sqli_lab \
+            mysql:8.0 --secure-file-priv=""
+      - name: 等待 MySQL 就绪
+        run: |
+          for i in $(seq 1 60); do
+            if docker exec mysql-lab mysqladmin ping -h 127.0.0.1 -uroot -proot --silent 2>/dev/null; then
+              echo "MySQL ready after ${i} attempts"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "MySQL 未在 120s 内就绪"
+          docker logs mysql-lab | tail -30
+          exit 1
+      - name: 初始化靶场库表
+        run: node e2e/real-mysql-lab/init-db.mjs
+        env:
+          MYSQL_PORT: 3306
+          MYSQL_USER: root
+          MYSQL_PASSWORD: root
+      - name: 全方位验收门禁（事实断言模式）
+        run: npm run acceptance
+        env:
+          MYSQL_PORT: 3306
+          MYSQL_USER: root
+          MYSQL_PASSWORD: root
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: acceptance-report
+          path: e2e/results/acceptance-report.md
+          if-no-files-found: warn
+
   tamper-waf-matrix:
     runs-on: ubuntu-latest
     # [修复] 原 job 级 schedule:/workflow_dispatch: 为非法键（只能放顶层 on:），已移至顶层。

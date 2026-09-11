@@ -1,0 +1,75 @@
+﻿漏洞ID,注入点,技术,数据库,风险,说明
+"AtsxQOWV","283e732d","union","MySQL","High","UNION 注入成功，回显列：0 1 2 3 4（列数 5）"
+"opTf-e3U","283e732d","error","MySQL","High","数据库报错回显：SQL syntax（识别为 MySQL）"
+"gX0J8a9F","283e732d","boolean","MySQL","Medium","布尔注入确认(统计·自适应): 真≈基线1.00、假≠基线1.00、差异1.00、基线噪声0.00、门槛0.66、z=2.83(显著)"
+
+# 拖库数据
+
+## sqli_lab.products
+id,title,price,category
+"1","Mechanical Keyboard","329.00","digital"
+"2","Ergonomic Chair","699.00","furniture"
+"3","4K Monitor","1899.00","digital"
+"4","Desk Lamp","129.00","furniture"
+
+## sqli_lab.users
+id,username,password,email,is_admin
+"1","admin","admin123","admin@lab.local","1"
+"2","bob","bob456","bob@lab.local","0"
+"3","alice","alice789","alice@lab.local","0"
+"4","test","test@123","test@lab.local","0"
+"5","guest","guest123","guest@lab.local","0"
+
+## sqli_test.users
+id,name,email,password
+"1","alice","alice@example.com","pass123"
+"2","bob","bob@example.com","secret456"
+"3","张三","zhangsan@example.com","p@ss789"
+
+## netsec.alerts
+id,asset_id,vuln_id,title,severity,status,disposition,created_at,updated_at
+"4","1","11","127.0.0.1 - MySQL 弱口令/暴露风险","medium","pending","","2026-08-16 10:09:05","2026-08-16 10:09:05"
+"5","1","12","127.0.0.1 - SMB 服务暴露（EternalBlue 风险）","high","pending","","2026-08-16 10:09:05","2026-08-16 10:09:05"
+"6","2","13","127.0.0.2 - MySQL 弱口令/暴露风险","medium","pending","","2026-08-16 10:09:05","2026-08-16 10:09:05"
+"7","2","14","127.0.0.2 - SMB 服务暴露（EternalBlue 风险）","high","pending","","2026-08-16 10:09:05","2026-08-16 10:09:05"
+"8","3","15","127.0.0.3 - MySQL 弱口令/暴露风险","medium","pending","","2026-08-16 10:09:05","2026-08-16 10:09:05"
+"9","3","16","127.0.0.3 - SMB 服务暴露（EternalBlue 风险）","high","pending","","2026-08-16 10:09:05","2026-08-16 10:09:05"
+"10","4","17","127.0.0.4 - MySQL 弱口令/暴露风险","medium","pending","","2026-08-16 10:09:05","2026-08-16 10:09:05"
+"11","4","18","127.0.0.4 - SMB 服务暴露（EternalBlue 风险）","high","pending","","2026-08-16 10:09:05","2026-08-16 10:09:05"
+"12","5","19","127.0.0.5 - MySQL 弱口令/暴露风险","medium","pending","","2026-08-16 10:09:05","2026-08-16 10:09:05"
+"13","5","20","127.0.0.5 - SMB 服务暴露（Eterna","","","","",""
+
+## netsec.assets
+id,ip,domain,hostname,ports,os,owner,tags,source,last_scan_at,created_at,updated_at
+"1","127.0.0.1","web.internal","web-01","[{""port"": 135, ""banner"": """", ""service"": ""msrpc"", ""version"": """"}, {""port"": 445, ""banner"": """", ""service"": ""microsoft-ds"", ""version"": """"}, {""port"": 3306, ""banner"": ""J\u0000\u0000\u0000\n8.0.28\u0000\u001d\u0000\u0000\u0000zFYcl:)<\u0000���\u0002\u0000��\u0015\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000Ohw`\t\u0004v\u00035k\u0005\u0000caching_sha2_password\u0000"", ""service"": ""mysql"", ""version"": """"}]","Linux","运维组","[""web"", ""production""]","manual","2026-08-16 10:09:05","2026-08-16 18:07:49","2026-08-16 10:09:05"
+"2","127.0.0.2","db.internal","db-01","[{""port"": 135, ""banner"": """", ""service"": ""msrpc"", ""version"": """"}, {""port"": 445, ""banner"": """", ""service"": ""microsoft-ds"", ""version"": """"}, {""port"": 3306, ""banner"": ""J\u0000\u0000\u0000\n8.0.28\u0000\u001e\u0000\u0000\u0000!\""xa)ILz\u0000���\u0002\u0000��\u0015\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u00006=@\u001bom\t#\u0006C\u0007y\u0000caching_sha2_password\u0000"", ""service"": ""mysql"", ""version"": """"}]","Linu","","","","","",""
+
+## netsec.export_logs
+id,user_id,username,export_type,target_id,status,file_size,detail,created_at,updated_at
+"1","1","admin","excel","","done","","{""vulns"": 12, ""alerts"": 12, ""assets"": 6}","2026-08-16 10:09:21","2026-08-16 10:09:21"
+
+## netsec.schema_migrations
+name,applied_at
+"01_add_audit_chain.sql","2026-08-16 18:07:49"
+"02_add_key_version.sql","2026-08-16 18:07:49"
+
+## netsec.users
+id,username,password_hash,role,display_name,created_at,updated_at
+"1","admin","$2a$10$52AdU8TNWZn/50Y2wwjffuASk58Ntd4Ig/Gp9r9RqFAfLIOI6/u9u","admin","系统管理员","2026-08-16 18:07:49","2026-08-16 18:07:49"
+
+## netsec.vulnerabilities
+id,asset_id,name,cve,severity,cvss,category,evidence,description,recommendation,status,detected_at,created_at,updated_at
+"11","1","MySQL 弱口令/暴露风险","N/A","medium","5.6","弱口令风险","端口 3306/mysql 开放，存在弱口令与暴露风险","MySQL(3306) 公网暴露或存在弱口令时，攻击者可拖库。本平台仅做风险识别，不实际爆破。","禁止 MySQL 公网暴露，设置强口令，启用访问白名单。","open","2026-08-16 10:09:05","2026-08-16 10:09:05","2026-08-16 10:09:05"
+"12","1","SMB 服务暴露（EternalBlue 风险）","CVE-2017-0144","high","8.1","已知漏洞","端口 445/microsoft-ds 开放，存在 EternalBlue 类风险","SMB(445) 暴露且未打补丁时存在 EternalBlue（CVE-2017-0144）远程代码执行风险。","安装 MS17-010 补丁，关闭不必要 SMB，使用防火墙隔离。","open","2026-08-16 10:09:05","2026-08-16 10:09:05","2026-08-16 10:09:05"
+"13","2","MySQL 弱口令/暴露风险","N/A","medium","5.6","弱口令风险","端口 3306/mysql 开放，存在弱口令与暴露风险","MySQL(3306) 公网暴露或存在弱口令时，攻击者可拖库。本平台仅做风险识别，不实际爆破。","禁止 MySQL 公网暴露","","","",""
+
+## netsec.audit_logs
+id,user_id,username,action,target_type,target_id,detail,ip,created_at,prev_hash,record_hash,key_version
+"1","","admin","LOGIN","","","","::1","2026-08-16 10:08:27","","afb402fc1ba89eb2e763308ac980ec45af489ced0137c92973e5f0d34fb635c0","1"
+"2","","admin","LOGIN","","","","::1","2026-08-16 10:08:27","afb402fc1ba89eb2e763308ac980ec45af489ced0137c92973e5f0d34fb635c0","dbe47001216547c98681ab3eac3b05c572a2041f173e6d9d6da28a5336d1f312","1"
+"3","","admin","LOGIN","","","","::1","2026-08-16 10:09:00","dbe47001216547c98681ab3eac3b05c572a2041f173e6d9d6da28a5336d1f312","ed37c4a933fcf1097949933b1b909733acd61b1124218651ec9e7160ec6376e7","1"
+"4","1","admin","SCAN_TRIGGER","","","","::1","2026-08-16 10:09:05","ed37c4a933fcf1097949933b1b909733acd61b1124218651ec9e7160ec6376e7","1816e5302911871f3e9996d7ab456f829860066c2850e635b97a00091421756d","1"
+"5","","admin","LOGIN","","","","::1","2026-08-16 10:09:21","1816e5302911871f3e9996d7ab456f829860066c2850e635b97a00091421756d","f6949321d4d674d9b0ccacbc1f5130394d638e8da2b38aec963a39f1ab9952dd","1"
+"6","1","admin","REPORT_EXPORT","report","","","::1","2026-08-16 10:09:21","f6949321d4d674d9b0ccacbc1f5130394d638e8da2b38aec963a39f1ab9952dd","3d0deef01358c40c5e25070804998189b1ed6352b8d21dac5d2ade4714485703","1"
+"7","","admin","LOGIN","","","","::1","2026-08-16 10:10:45","3d0deef01358c40c5e25070804998189b1ed6352b8d21dac5d2ade4714485703","3bfbc5f171ab81e22d8fbe263f1e6594f569a62ef40c62557beaef987e507289","1"
+"8","","admin","LOGIN","","","","::1","2026-08-16 12:26:53","3bfbc5f171ab81e22d8fbe263f1e6594f569a62ef40c62557beaef987e507289","9c659d0e98177472b4aee1b039cc70dd78855366cbc2214b923e700012e3b4da","1"

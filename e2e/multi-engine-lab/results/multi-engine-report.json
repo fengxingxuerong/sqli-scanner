@@ -1,12 +1,14 @@
 {
-  "generatedAt": "2026-09-09T13:16:15.393Z",
+  "generatedAt": "2026-09-11T08:33:41.865Z",
   "engines": {
     "h2": {
       "label": "H2 2.2.224 (MODE=MySQL)",
       "rows": {
         "off": {
           "num": {
-            "found": [],
+            "found": [
+              "boolean"
+            ],
             "status": "completed"
           },
           "str": {
@@ -14,7 +16,9 @@
             "status": "completed"
           },
           "blind": {
-            "found": [],
+            "found": [
+              "boolean"
+            ],
             "status": "completed"
           },
           "safe": {
@@ -25,18 +29,18 @@
         "on": {
           "num": {
             "found": [
-              "error"
+              "boolean"
             ],
             "status": "completed"
           },
           "str": {
-            "found": [
-              "error"
-            ],
+            "found": [],
             "status": "completed"
           },
           "blind": {
-            "found": [],
+            "found": [
+              "boolean"
+            ],
             "status": "completed"
           },
           "safe": {
@@ -51,7 +55,9 @@
       "rows": {
         "off": {
           "num": {
-            "found": [],
+            "found": [
+              "boolean"
+            ],
             "status": "completed"
           },
           "str": {
@@ -59,7 +65,9 @@
             "status": "completed"
           },
           "blind": {
-            "found": [],
+            "found": [
+              "boolean"
+            ],
             "status": "completed"
           },
           "safe": {
@@ -69,7 +77,9 @@
         },
         "on": {
           "num": {
-            "found": [],
+            "found": [
+              "boolean"
+            ],
             "status": "completed"
           },
           "str": {
@@ -77,7 +87,9 @@
             "status": "completed"
           },
           "blind": {
-            "found": [],
+            "found": [
+              "boolean"
+            ],
             "status": "completed"
           },
           "safe": {
@@ -92,7 +104,9 @@
       "rows": {
         "off": {
           "num": {
-            "found": [],
+            "found": [
+              "boolean"
+            ],
             "status": "completed"
           },
           "str": {
@@ -100,7 +114,9 @@
             "status": "completed"
           },
           "blind": {
-            "found": [],
+            "found": [
+              "boolean"
+            ],
             "status": "completed"
           },
           "safe": {
@@ -111,18 +127,18 @@
         "on": {
           "num": {
             "found": [
-              "error"
+              "boolean"
             ],
             "status": "completed"
           },
           "str": {
-            "found": [
-              "error"
-            ],
+            "found": [],
             "status": "completed"
           },
           "blind": {
-            "found": [],
+            "found": [
+              "boolean"
+            ],
             "status": "completed"
           },
           "safe": {
