@@ -2,6 +2,22 @@
 
 > 结论先行：**分三批渐进拆，每批独立提交 + 独立验证；不建议一次性重写。**
 
+## 实施进度
+
+| 批次 | 内容 | 状态 |
+|---|---|---|
+| 第一批 | `finalize.js`（阶段5）+ `supplemental.js`（3.5/3.6） | ✅ **已完成**（1184 → 1035 行，减 149 行） |
+| 第二批 | `extract.js`（阶段4）+ `aggregate.js`（阶段3） | ⏳ 待做 |
+| 第三批 | `discover.js` + `context.js` + `detect.js`（~550 行，高风险） | ⏳ 待做 |
+
+**第一批的验证结果**（三件套全过）：
+
+1. 全量单测 **1735/1735 通过**
+2. 靶场全量复测 **18/18 漏洞点命中 + 7/7 安全点零误报**
+3. **报告字段级等价**（`e2e/redteam-lab/diff-reports.mjs` 对比 A1/C7/D13 三靶点，无差异）
+
+顺带产出正式工具 `e2e/redteam-lab/diff-reports.mjs`（可复用，任何重构都能拿它做行为等价性门禁）。
+
 ## 一、现状
 
 `server/src/engine/scanRunner.js` 全文 1184 行，其中 `runScanLoop(sm, scanId)` 一个函数占
