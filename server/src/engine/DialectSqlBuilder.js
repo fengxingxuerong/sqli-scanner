@@ -226,15 +226,21 @@ export function nullSafeQuoteCol(c, db) {
 // ── UNION 标记包裹 ─────────────────────────────────────────────────────────
 // 不同库对标记包裹的方式（UNION 提取版本时定位回显列）
 export const WRAP = {
-  MySQL: (s) => `CONCAT('__S__',CAST((${s}) AS CHAR),'__E__')`,
+  // [P0-FIX 2026-09-12] MySQL 家族的 WRAP 加 CONVERT(... USING utf8mb4) + COLLATE utf8mb4_bin：
+  //   目标表混 collation（老库迁移极常见，如同表 utf8mb4_general_ci + utf8mb4_unicode_ci 列）时，
+  //   原纯 CAST 的产物是「连接默认 collation 的 COERCIBLE 串」，在 UNION 里与目标 IMPLICIT 列相遇
+  //   会抛 Illegal mix of collations for operation 'UNION'（实测 mixcols 靶点：检测三通道命中、
+  //   拖库 0 行）。COLLATE 显式声明 coercibility 最高，任何目标列都让位，UNION 永不报 mix；
+  //   输出文本形态不变（标记匹配零改动）。仅改已验证的 MySQL 家族，其它方言不动。
+  MySQL: (s) => `CONVERT(CONCAT('__S__',CAST((${s}) AS CHAR),'__E__') USING utf8mb4) COLLATE utf8mb4_bin`,
   // [⑯] 补 MariaDB key（与 MySQL 相同，resolveDbms 已归一化但字典应完整）
-  MariaDB: (s) => `CONCAT('__S__',CAST((${s}) AS CHAR),'__E__')`,
+  MariaDB: (s) => `CONVERT(CONCAT('__S__',CAST((${s}) AS CHAR),'__E__') USING utf8mb4) COLLATE utf8mb4_bin`,
   PostgreSQL: (s) => `('__S__' || CAST((${s}) AS TEXT) || '__E__')`,
   SQLite: (s) => `('__S__' || (${s}) || '__E__')`,
   'SQL Server': (s) => `('__S__'+CAST((${s}) AS VARCHAR(MAX))+'__E__')`,
   Oracle: (s) => `('__S__' || TO_CHAR((${s})) || '__E__')`,
-  // TiDB：MySQL 协议兼容，复用 MySQL WRAP
-  TiDB: (s) => `CONCAT('__S__',CAST((${s}) AS CHAR),'__E__')`,
+  // TiDB：MySQL 协议兼容，复用 MySQL WRAP（含 collation 修复）
+  TiDB: (s) => `CONVERT(CONCAT('__S__',CAST((${s}) AS CHAR),'__E__') USING utf8mb4) COLLATE utf8mb4_bin`,
   // DM8：Oracle 兼容，复用 Oracle WRAP
   DM8: (s) => `('__S__' || TO_CHAR((${s})) || '__E__')`,
   // ClickHouse：用 concat 包裹（CH 原生 string 拼接），无需 CAST 到定长类型

@@ -6,7 +6,7 @@
     "truth": true,
     "status": 200,
     "sample": "<!doctype html><html><head><meta charset=\"utf-8\"><title>item</title> <style>body{font:14px/1.6 system-ui;padding:24px;ma",
-    "ms": 39
+    "ms": 37
   },
   {
     "id": "A2-str-union",
@@ -15,7 +15,7 @@
     "truth": true,
     "status": 200,
     "sample": "<!doctype html><html><head><meta charset=\"utf-8\"><title>search</title> <style>body{font:14px/1.6 system-ui;padding:24px;",
-    "ms": 9
+    "ms": 5
   },
   {
     "id": "A3-like",
@@ -24,7 +24,7 @@
     "truth": true,
     "status": 200,
     "sample": "<!doctype html><html><head><meta charset=\"utf-8\"><title>find</title> <style>body{font:14px/1.6 system-ui;padding:24px;ma",
-    "ms": 4
+    "ms": 3
   },
   {
     "id": "A4-orderby",
@@ -33,7 +33,7 @@
     "truth": true,
     "status": 200,
     "sample": "<!doctype html><html><head><meta charset=\"utf-8\"><title>sort</title> <style>body{font:14px/1.6 system-ui;padding:24px;ma",
-    "ms": 2020
+    "ms": 2011
   },
   {
     "id": "A5-dual-param",
@@ -42,7 +42,7 @@
     "truth": true,
     "status": 200,
     "sample": "<!doctype html><html><head><meta charset=\"utf-8\"><title>detail</title> <style>body{font:14px/1.6 system-ui;padding:24px;",
-    "ms": 5
+    "ms": 3
   },
   {
     "id": "B6-error",
@@ -51,7 +51,7 @@
     "truth": true,
     "status": 500,
     "sample": "<!doctype html><html><head><meta charset=\"utf-8\"><title>err</title> <style>body{font:14px/1.6 system-ui;padding:24px;max",
-    "ms": 3
+    "ms": 4
   },
   {
     "id": "C7-boolean",
@@ -69,7 +69,7 @@
     "truth": true,
     "status": 200,
     "sample": "<!doctype html><html><head><meta charset=\"utf-8\"><title>time</title> <style>body{font:14px/1.6 system-ui;padding:24px;ma",
-    "ms": 3017
+    "ms": 3013
   },
   {
     "id": "D9-post-form",
@@ -78,7 +78,7 @@
     "truth": true,
     "status": 200,
     "sample": "<!doctype html><html><head><meta charset=\"utf-8\"><title>login</title> <style>body{font:14px/1.6 system-ui;padding:24px;m",
-    "ms": 11
+    "ms": 6
   },
   {
     "id": "D10-json",
@@ -87,7 +87,7 @@
     "truth": true,
     "status": 200,
     "sample": "<!doctype html><html><head><meta charset=\"utf-8\"><title>profile</title> <style>body{font:14px/1.6 system-ui;padding:24px",
-    "ms": 6
+    "ms": 3
   },
   {
     "id": "D11-cookie",
@@ -96,7 +96,7 @@
     "truth": true,
     "status": 200,
     "sample": "<!doctype html><html><head><meta charset=\"utf-8\"><title>cookie</title> <style>body{font:14px/1.6 system-ui;padding:24px;",
-    "ms": 4
+    "ms": 2
   },
   {
     "id": "D12-xff-header",
@@ -105,7 +105,7 @@
     "truth": true,
     "status": 200,
     "sample": "<!doctype html><html><head><meta charset=\"utf-8\"><title>xff</title> <style>body{font:14px/1.6 system-ui;padding:24px;max",
-    "ms": 3
+    "ms": 2
   },
   {
     "id": "D13-path",
@@ -114,7 +114,7 @@
     "truth": true,
     "status": 200,
     "sample": "<!doctype html><html><head><meta charset=\"utf-8\"><title>user</title> <style>body{font:14px/1.6 system-ui;padding:24px;ma",
-    "ms": 7
+    "ms": 3
   },
   {
     "id": "D14-base64",
@@ -123,7 +123,16 @@
     "truth": true,
     "status": 200,
     "sample": "<!doctype html><html><head><meta charset=\"utf-8\"><title>b64</title> <style>body{font:14px/1.6 system-ui;padding:24px;max",
-    "ms": 5
+    "ms": 3
+  },
+  {
+    "id": "D16-collate-mix",
+    "kind": "vuln",
+    "tech": "union",
+    "truth": true,
+    "status": 200,
+    "sample": "<!doctype html><html><head><meta charset=\"utf-8\"><title>mix</title> <style>body{font:14px/1.6 system-ui;padding:24px;max",
+    "ms": 2
   },
   {
     "id": "D15-param-del",
@@ -132,7 +141,7 @@
     "truth": true,
     "status": 200,
     "sample": "<!doctype html><html><head><meta charset=\"utf-8\"><title>semi</title> <style>body{font:14px/1.6 system-ui;padding:24px;ma",
-    "ms": 9
+    "ms": 3
   },
   {
     "id": "E15-second-order",
@@ -168,7 +177,7 @@
     "truth": true,
     "status": 200,
     "sample": "<!doctype html><html><head><meta charset=\"utf-8\"><title>safe-item</title> <style>body{font:14px/1.6 system-ui;padding:24",
-    "ms": 8
+    "ms": 3
   },
   {
     "id": "F19-safe-search",
@@ -177,7 +186,7 @@
     "truth": true,
     "status": 200,
     "sample": "<!doctype html><html><head><meta charset=\"utf-8\"><title>safe-search</title> <style>body{font:14px/1.6 system-ui;padding:",
-    "ms": 3
+    "ms": 4
   },
   {
     "id": "F20-safe-rand",
@@ -195,7 +204,7 @@
     "truth": true,
     "status": 500,
     "sample": "<!doctype html><html><head><meta charset=\"utf-8\"><title>boom</title> <style>body{font:14px/1.6 system-ui;padding:24px;ma",
-    "ms": 3
+    "ms": 1
   },
   {
     "id": "F22-safe-403",
@@ -213,7 +222,7 @@
     "truth": true,
     "status": 302,
     "sample": "Found. Redirecting to /safe/item?id=1",
-    "ms": 2
+    "ms": 1
   },
   {
     "id": "F24-safe-static",
@@ -222,6 +231,6 @@
     "truth": true,
     "status": 200,
     "sample": "<!doctype html><html><head><meta charset=\"utf-8\"><title>static</title> <style>body{font:14px/1.6 system-ui;padding:24px;",
-    "ms": 1
+    "ms": 0
   }
 ]

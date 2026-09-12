@@ -34,6 +34,7 @@ const TARGETS = [
   T('D14-base64', `${LAB}/shop/b64?id=MQ==`),
   // 自定义参数分隔符（; ）：必须配 --param-del 才会正确切分 query
   T('D15-param-del', `${LAB}/shop/semi?a=1;id=1`, ['--param-del', ';']),
+  T('D16-collate-mix', `${LAB}/shop/mix?kw=alpha`),
   // 每次用唯一会话 id：靶场把写入值存在内存 store[sid]，复用同一 sid 会让"基线触发页"
   // 读到上一轮残留探针 → 基线自带报错 → 走基线噪声路径 → 判定条件不成立（实测踩过）。
   T('E15-second-order', `${LAB}/account/update`, ['--method', 'POST', '--body', '{"name":"alice"}',

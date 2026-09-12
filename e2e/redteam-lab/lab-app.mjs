@@ -33,6 +33,16 @@ export async function createLabApp() {
   for (const r of seedU) await root.query('REPLACE INTO users VALUES(?,?,?,?)', r);
   const seedP = [[1,'Keyboard',199],[2,'Mouse',99],[3,'Monitor',1299]];
   for (const r of seedP) await root.query('REPLACE INTO products VALUES(?,?,?)', r);
+  // D16 COLLATE 混存靶点：老库迁移常见「同表两列 collation 不同」。
+  // 若提取 SQL 在此表上抛 Illegal mix of collations → UNION/GROUP_CONCAT 聚合提取全灭。
+  await root.query(`DROP TABLE IF EXISTS mixcols`);
+  await root.query(`CREATE TABLE mixcols(
+    id INT PRIMARY KEY,
+    a VARCHAR(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci,
+    b VARCHAR(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci) ENGINE=InnoDB`);
+  for (const r of [[1,'alpha','beta-x9'],[2,'gamma','delta-x8'],[3,'epsilon','zeta-x7']]) {
+    await root.query('REPLACE INTO mixcols VALUES(?,?,?)', r);
+  }
   await root.end();
 
   const app = express();
@@ -171,6 +181,12 @@ export async function createLabApp() {
     }
     const id = map.id ?? '1';
     return rowsHtml(await q(`SELECT id,name,email FROM users WHERE id=${id}`));
+  }));
+
+  // D16 COLLATE 混存靶点：字符串上下文注入，dumpData 会对 a/b 两列做多列聚合提取
+  app.get('/shop/mix', (req, res) => run(res, 'mix', async () => {
+    const kw = String(req.query.kw ?? 'alpha');
+    return rowsHtml(await q(`SELECT a,b FROM mixcols WHERE a LIKE '%${kw}%'`));
   }));
 
   // ───────────────────────── E. 高阶场景 ─────────────────────────

@@ -139,6 +139,16 @@ export class Extractor {
   // 通过 UNION 提取单个标量值（用标记包裹，返回标记间内容）
   async extractScalar(ctx, sql, columns) {
     const { point, dbms } = ctx;
+    // [P0-FIX 2026-09-12] 列数优先用「检测期 UNION 实测确认」的 point.columns：
+    //   传入的 columns 来自 _guessColumnsCached（ORDER BY 二分），而 **ORDER BY 在字符串
+    //   上下文注入点（如 LIKE '%..%'）里根本不进 SQL**（payload 整个落在字符串字面量内，
+    //   服务端返回 200 正常页）→ 二分失去真值反馈，会收敛到完全错误的列数。
+    //   实测 mixcols 靶点（字符串上下文）：检测期 UNION 实测 2 列、ORDER BY 猜 13 列
+    //   → UNION 列数不匹配 → 目标 500 → 枚举/拖库全灭（报告 0 行）。
+    //   point.columns 是检测阶段真枪实弹回显成功的列数，可信度更高；
+    //   error/boolean-only 注入点无该字段 → 原样回落（零回归）。
+    const confirmed = Number.isInteger(point?.columns) && point.columns > 0 ? point.columns : null;
+    if (confirmed) columns = confirmed;
     const nulls = nullSequence(columns).split(',');
     // 优先复用检测阶段已识别的回显列；未识别（如 error 型注入）则现场探测，
     // 不再硬编第 2 列，回显列非 2 也能正确拖库。
