@@ -5,17 +5,17 @@
     "detectedB": 1,
     "detectRateA": 0,
     "detectRateB": 100,
-    "blockedReqA": 44,
-    "blockedReqB": 8,
-    "blockRateA": 51.8,
-    "blockRateB": 32
+    "blockedReqA": 129,
+    "blockedReqB": 15,
+    "blockRateA": 67.5,
+    "blockRateB": 37.5
   },
   "configA": {
     "tamper": "off",
     "detected": 0,
     "totalPoints": 1,
-    "blockedReq": 44,
-    "totalReq": 85
+    "blockedReq": 129,
+    "totalReq": 191
   },
   "configB": {
     "tamper": "on",
@@ -26,7 +26,7 @@
     ],
     "detected": 1,
     "totalPoints": 1,
-    "blockedReq": 8,
-    "totalReq": 25
+    "blockedReq": 15,
+    "totalReq": 40
   }
 }

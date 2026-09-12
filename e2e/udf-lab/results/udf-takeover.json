@@ -1,0 +1,15 @@
+{
+  "generatedAt": "2026-09-12T11:39:59.274Z",
+  "mysqlVersion": "8.0.28",
+  "pluginDir": "D:/mysql/lib/plugin/",
+  "secureFilePriv": "",
+  "registered": 1,
+  "commandOutput": "udf_lab_99176",
+  "whoami": "admin\\admin�������룩",
+  "osShell": {
+    "ok": true,
+    "value": "osshell_ok\n"
+  },
+  "deliveryBoundary": "DLL 落地为预置前提；未复现经 SQL 通道投递大体积二进制",
+  "pass": true
+}

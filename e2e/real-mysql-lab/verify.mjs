@@ -1,7 +1,7 @@
 // ============================================================================
 // e2e/real-mysql-lab/verify.mjs —— 真实 MySQL 8.0.28 驱动靶场验证
 // 用法：node e2e/real-mysql-lab/verify.mjs [--sqlmap]
-// 环境变量：MYSQL_LAB_PORT(8140) / MYSQL_HOST / MYSQL_PORT(3307) / MYSQL_USER / MYSQL_PASSWORD / MYSQL_DATABASE
+// 环境变量：MYSQL_LAB_PORT(8140) / MYSQL_HOST / MYSQL_PORT(3306) / MYSQL_USER / MYSQL_PASSWORD / MYSQL_DATABASE
 // 流程：init 自检 → 起 lab-app（mysql2 直连）→ 逐端点引擎扫描 → 可选 sqlmap 对拍 → 报告
 // ============================================================================
 import { execFileSync } from 'node:child_process';
@@ -22,7 +22,7 @@ const PORT = Number(process.env.MYSQL_LAB_PORT) || 8140;
 const BASE = `http://127.0.0.1:${PORT}`;
 const MYSQL_CONF = {
   host: process.env.MYSQL_HOST || '127.0.0.1',
-  port: Number(process.env.MYSQL_PORT) || 3307,
+  port: Number(process.env.MYSQL_PORT) || 3306,
   user: process.env.MYSQL_USER || 'root',
   // 密码允许空串（本机 root 常为空密码），用 ?? 而非 ||
   password: process.env.MYSQL_PASSWORD ?? 'root',

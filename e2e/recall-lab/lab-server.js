@@ -337,7 +337,10 @@ function evalItem(tokens) {
     }
     return { kind: 'unknown' };
   }
-  // 函数调用：name(args)
+  // [跟进 2026-09-12 引擎 WRAP 修复] collate 尾巴：expr COLLATE xxx —— 排序规则声明
+  // 不改变标量值，直接剥掉尾巴再求值。
+  const colIdx = findTopIdent(tokens, 'collate');
+  if (colIdx > 0) return evalItem(tokens.slice(0, colIdx));  // 函数调用：name(args)
   if (tokens[0].t === 'id' && tokens[1] && tokens[1].t === 'op' && tokens[1].v === '(' && tokens.at(-1).v === ')') {
     const name = tokens[0].v.toLowerCase();
     const args = splitTop(tokens.slice(2, -1), (tk) => tk.t === 'op' && tk.v === ',');
@@ -355,7 +358,19 @@ function evalItem(tokens) {
         return { kind: 'num', value: '3' };
       case 'sleep':
         return { kind: 'num', value: '0' };
-      case 'cast': {
+      // [跟进 2026-09-12 引擎 WRAP 修复] CONVERT(x USING charset) / CONVERT(x, type)：
+      // 引擎侧 MySQL 家族 WRAP 已升级为 CONVERT(... USING utf8mb4) COLLATE utf8mb4_bin
+      // （修混 collation UNION 报错），mock 求值器必须同步支持，否则所有 UNION 提取
+      // 场景在 detection-runner 回归里全灭（实测：databases/tables 提取全空）。
+      // 语义：charset/类型子句不影响本 mock 的字符串求值，直接对主表达式求值即可。
+      case 'convert': {
+        // CONVERT(expr USING cs) 或 CONVERT(expr, type)：去掉 USING cs / , type 尾巴
+        let inner = args[0] ?? [];
+        if (args.length > 1) return evalItem(stripOuterParens(inner));
+        const usingIdx = findTopIdent(inner, 'using');
+        if (usingIdx >= 0) inner = inner.slice(0, usingIdx);
+        return evalItem(stripOuterParens(inner));
+      }      case 'cast': {
         const asIdx = args[0] ? findTopIdent(args[0], 'as') : -1;
         const inner = asIdx >= 0 ? args[0].slice(0, asIdx) : args[0];
         return evalItem(stripOuterParens(inner));

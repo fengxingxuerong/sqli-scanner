@@ -3,234 +3,234 @@
     "id": "A1-int-union",
     "kind": "vuln",
     "tech": "union",
-    "truth": true,
-    "status": 200,
-    "sample": "<!doctype html><html><head><meta charset=\"utf-8\"><title>item</title> <style>body{font:14px/1.6 system-ui;padding:24px;ma",
-    "ms": 37
+    "truth": false,
+    "status": 0,
+    "sample": "ERR fetch failed",
+    "ms": 0
   },
   {
     "id": "A2-str-union",
     "kind": "vuln",
     "tech": "union",
-    "truth": true,
-    "status": 200,
-    "sample": "<!doctype html><html><head><meta charset=\"utf-8\"><title>search</title> <style>body{font:14px/1.6 system-ui;padding:24px;",
-    "ms": 5
+    "truth": false,
+    "status": 0,
+    "sample": "ERR fetch failed",
+    "ms": 0
   },
   {
     "id": "A3-like",
     "kind": "vuln",
     "tech": "union",
-    "truth": true,
-    "status": 200,
-    "sample": "<!doctype html><html><head><meta charset=\"utf-8\"><title>find</title> <style>body{font:14px/1.6 system-ui;padding:24px;ma",
-    "ms": 3
+    "truth": false,
+    "status": 0,
+    "sample": "ERR fetch failed",
+    "ms": 0
   },
   {
     "id": "A4-orderby",
     "kind": "vuln",
     "tech": "error/boolean",
-    "truth": true,
-    "status": 200,
-    "sample": "<!doctype html><html><head><meta charset=\"utf-8\"><title>sort</title> <style>body{font:14px/1.6 system-ui;padding:24px;ma",
-    "ms": 2011
+    "truth": false,
+    "status": 0,
+    "sample": "ERR fetch failed",
+    "ms": 0
   },
   {
     "id": "A5-dual-param",
     "kind": "vuln",
     "tech": "union",
-    "truth": true,
-    "status": 200,
-    "sample": "<!doctype html><html><head><meta charset=\"utf-8\"><title>detail</title> <style>body{font:14px/1.6 system-ui;padding:24px;",
-    "ms": 3
+    "truth": false,
+    "status": 0,
+    "sample": "ERR fetch failed",
+    "ms": 0
   },
   {
     "id": "B6-error",
     "kind": "vuln",
     "tech": "error",
-    "truth": true,
-    "status": 500,
-    "sample": "<!doctype html><html><head><meta charset=\"utf-8\"><title>err</title> <style>body{font:14px/1.6 system-ui;padding:24px;max",
-    "ms": 4
+    "truth": false,
+    "status": 0,
+    "sample": "ERR fetch failed",
+    "ms": 0
   },
   {
     "id": "C7-boolean",
     "kind": "vuln",
     "tech": "boolean",
-    "truth": true,
-    "status": 200,
-    "sample": "TRUE=true FALSE=false",
+    "truth": false,
+    "status": 0,
+    "sample": "ERR fetch failed",
     "ms": 0
   },
   {
     "id": "C8-time",
     "kind": "vuln",
     "tech": "time",
-    "truth": true,
-    "status": 200,
-    "sample": "<!doctype html><html><head><meta charset=\"utf-8\"><title>time</title> <style>body{font:14px/1.6 system-ui;padding:24px;ma",
-    "ms": 3013
+    "truth": false,
+    "status": 0,
+    "sample": "ERR fetch failed",
+    "ms": 0
   },
   {
     "id": "D9-post-form",
     "kind": "vuln",
     "tech": "union",
-    "truth": true,
-    "status": 200,
-    "sample": "<!doctype html><html><head><meta charset=\"utf-8\"><title>login</title> <style>body{font:14px/1.6 system-ui;padding:24px;m",
-    "ms": 6
+    "truth": false,
+    "status": 0,
+    "sample": "ERR fetch failed",
+    "ms": 0
   },
   {
     "id": "D10-json",
     "kind": "vuln",
     "tech": "union",
-    "truth": true,
-    "status": 200,
-    "sample": "<!doctype html><html><head><meta charset=\"utf-8\"><title>profile</title> <style>body{font:14px/1.6 system-ui;padding:24px",
-    "ms": 3
+    "truth": false,
+    "status": 0,
+    "sample": "ERR fetch failed",
+    "ms": 0
   },
   {
     "id": "D11-cookie",
     "kind": "vuln",
     "tech": "union",
-    "truth": true,
-    "status": 200,
-    "sample": "<!doctype html><html><head><meta charset=\"utf-8\"><title>cookie</title> <style>body{font:14px/1.6 system-ui;padding:24px;",
-    "ms": 2
+    "truth": false,
+    "status": 0,
+    "sample": "ERR fetch failed",
+    "ms": 0
   },
   {
     "id": "D12-xff-header",
     "kind": "vuln",
     "tech": "union",
-    "truth": true,
-    "status": 200,
-    "sample": "<!doctype html><html><head><meta charset=\"utf-8\"><title>xff</title> <style>body{font:14px/1.6 system-ui;padding:24px;max",
-    "ms": 2
+    "truth": false,
+    "status": 0,
+    "sample": "ERR fetch failed",
+    "ms": 0
   },
   {
     "id": "D13-path",
     "kind": "vuln",
     "tech": "union",
-    "truth": true,
-    "status": 200,
-    "sample": "<!doctype html><html><head><meta charset=\"utf-8\"><title>user</title> <style>body{font:14px/1.6 system-ui;padding:24px;ma",
-    "ms": 3
+    "truth": false,
+    "status": 0,
+    "sample": "ERR fetch failed",
+    "ms": 0
   },
   {
     "id": "D14-base64",
     "kind": "vuln",
     "tech": "union",
-    "truth": true,
-    "status": 200,
-    "sample": "<!doctype html><html><head><meta charset=\"utf-8\"><title>b64</title> <style>body{font:14px/1.6 system-ui;padding:24px;max",
-    "ms": 3
+    "truth": false,
+    "status": 0,
+    "sample": "ERR fetch failed",
+    "ms": 0
   },
   {
     "id": "D16-collate-mix",
     "kind": "vuln",
     "tech": "union",
-    "truth": true,
-    "status": 200,
-    "sample": "<!doctype html><html><head><meta charset=\"utf-8\"><title>mix</title> <style>body{font:14px/1.6 system-ui;padding:24px;max",
-    "ms": 2
+    "truth": false,
+    "status": 0,
+    "sample": "ERR fetch failed",
+    "ms": 0
   },
   {
     "id": "D15-param-del",
     "kind": "vuln",
     "tech": "union",
-    "truth": true,
-    "status": 200,
-    "sample": "<!doctype html><html><head><meta charset=\"utf-8\"><title>semi</title> <style>body{font:14px/1.6 system-ui;padding:24px;ma",
-    "ms": 3
+    "truth": false,
+    "status": 0,
+    "sample": "ERR fetch failed",
+    "ms": 0
   },
   {
     "id": "E15-second-order",
     "kind": "vuln",
     "tech": "second_order",
-    "truth": true,
-    "status": 200,
-    "sample": "<!doctype html><html><head><meta charset=\"utf-8\"><title>me</title> <style>body{font:14px/1.6 system-ui;padding:24px;max-",
+    "truth": false,
+    "status": 0,
+    "sample": "ERR fetch failed",
     "ms": 0
   },
   {
     "id": "E16-stacked",
     "kind": "vuln",
     "tech": "stacked",
-    "truth": true,
-    "status": 200,
-    "sample": "<!doctype html><html><head><meta charset=\"utf-8\"><title>item</title> <style>body{font:14px/1.6 system-ui;padding:24px;ma",
+    "truth": false,
+    "status": 0,
+    "sample": "ERR fetch failed",
     "ms": 0
   },
   {
     "id": "E17-waf-guarded",
     "kind": "vuln",
     "tech": "union(waf)",
-    "truth": true,
-    "status": 403,
-    "sample": "plain=403 bypass=false",
+    "truth": false,
+    "status": 0,
+    "sample": "ERR fetch failed",
     "ms": 0
   },
   {
     "id": "F18-safe-item",
     "kind": "safe",
     "tech": "-",
-    "truth": true,
-    "status": 200,
-    "sample": "<!doctype html><html><head><meta charset=\"utf-8\"><title>safe-item</title> <style>body{font:14px/1.6 system-ui;padding:24",
-    "ms": 3
+    "truth": false,
+    "status": 0,
+    "sample": "ERR fetch failed",
+    "ms": 0
   },
   {
     "id": "F19-safe-search",
     "kind": "safe",
     "tech": "-",
-    "truth": true,
-    "status": 200,
-    "sample": "<!doctype html><html><head><meta charset=\"utf-8\"><title>safe-search</title> <style>body{font:14px/1.6 system-ui;padding:",
-    "ms": 4
+    "truth": false,
+    "status": 0,
+    "sample": "ERR fetch failed",
+    "ms": 0
   },
   {
     "id": "F20-safe-rand",
     "kind": "safe",
     "tech": "-",
-    "truth": true,
-    "status": 200,
-    "sample": "<!doctype html><html><head><meta charset=\"utf-8\"><title>rand</title> <style>body{font:14px/1.6 system-ui;padding:24px;ma",
-    "ms": 1
+    "truth": false,
+    "status": 0,
+    "sample": "ERR fetch failed",
+    "ms": 0
   },
   {
     "id": "F21-safe-500",
     "kind": "safe",
     "tech": "-",
-    "truth": true,
-    "status": 500,
-    "sample": "<!doctype html><html><head><meta charset=\"utf-8\"><title>boom</title> <style>body{font:14px/1.6 system-ui;padding:24px;ma",
-    "ms": 1
+    "truth": false,
+    "status": 0,
+    "sample": "ERR fetch failed",
+    "ms": 0
   },
   {
     "id": "F22-safe-403",
     "kind": "safe",
     "tech": "-",
-    "truth": true,
-    "status": 403,
-    "sample": "<!doctype html><html><head><meta charset=\"utf-8\"><title>blocked</title> <style>body{font:14px/1.6 system-ui;padding:24px",
-    "ms": 1
+    "truth": false,
+    "status": 0,
+    "sample": "ERR fetch failed",
+    "ms": 0
   },
   {
     "id": "F23-safe-redirect",
     "kind": "safe",
     "tech": "-",
-    "truth": true,
-    "status": 302,
-    "sample": "Found. Redirecting to /safe/item?id=1",
-    "ms": 1
+    "truth": false,
+    "status": 0,
+    "sample": "ERR fetch failed",
+    "ms": 0
   },
   {
     "id": "F24-safe-static",
     "kind": "safe",
     "tech": "-",
-    "truth": true,
-    "status": 200,
-    "sample": "<!doctype html><html><head><meta charset=\"utf-8\"><title>static</title> <style>body{font:14px/1.6 system-ui;padding:24px;",
+    "truth": false,
+    "status": 0,
+    "sample": "ERR fetch failed",
     "ms": 0
   }
 ]

@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-11T18:11:58.156Z",
+  "generatedAt": "2026-09-12T11:38:44.812Z",
   "mysql": "127.0.0.1:3306/sqli_lab",
   "pass": 10,
   "total": 10,
@@ -19,7 +19,7 @@
         "union"
       ],
       "miss": [],
-      "elapsedMs": 211,
+      "elapsedMs": 206,
       "status": "completed",
       "ok": true,
       "expectSafe": false
@@ -59,7 +59,7 @@
         "boolean"
       ],
       "miss": [],
-      "elapsedMs": 105,
+      "elapsedMs": 93,
       "status": "completed",
       "ok": true,
       "expectSafe": false
@@ -78,7 +78,7 @@
         "boolean"
       ],
       "miss": [],
-      "elapsedMs": 636,
+      "elapsedMs": 625,
       "status": "completed",
       "ok": true,
       "expectSafe": false
@@ -97,7 +97,7 @@
         "boolean"
       ],
       "miss": [],
-      "elapsedMs": 1327,
+      "elapsedMs": 1317,
       "status": "completed",
       "ok": true,
       "expectSafe": false
@@ -115,7 +115,7 @@
         "boolean"
       ],
       "miss": [],
-      "elapsedMs": 5792,
+      "elapsedMs": 5734,
       "status": "completed",
       "ok": true,
       "expectSafe": false
@@ -133,7 +133,7 @@
         "time"
       ],
       "miss": [],
-      "elapsedMs": 9301,
+      "elapsedMs": 9286,
       "status": "completed",
       "ok": true,
       "expectSafe": false
@@ -151,7 +151,7 @@
         "stacked"
       ],
       "miss": [],
-      "elapsedMs": 8341,
+      "elapsedMs": 8313,
       "status": "completed",
       "ok": true,
       "expectSafe": false
@@ -163,7 +163,7 @@
       "dbms": [],
       "must": [],
       "miss": [],
-      "elapsedMs": 3605,
+      "elapsedMs": 3614,
       "status": "completed",
       "ok": true,
       "expectSafe": true
@@ -175,7 +175,7 @@
       "dbms": [],
       "must": [],
       "miss": [],
-      "elapsedMs": 762,
+      "elapsedMs": 757,
       "status": "completed",
       "ok": true,
       "expectSafe": true

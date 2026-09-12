@@ -23,7 +23,7 @@ const ROOT = path.resolve(HERE, '..');
 
 // 靶场清单。deps 里的键对应 probe 表；env 为该靶场专有环境变量。
 const LABS = [
-  { name: 'redteam-lab', desc: '红队评测：24 靶点（17 注入 + 7 安全对照）', entry: 'e2e/redteam-lab/run-scan.mjs', args: ['r2'], deps: ['mysql'] },
+  { name: 'redteam-lab', desc: '红队评测：24 靶点（17 注入 + 7 安全对照）', entry: 'e2e/redteam-lab/run-with-env.mjs', args: ['r2'], deps: ['mysql'] },
   { name: 'retest-lab', desc: '单点重测接口端到端（自起靶场）', entry: 'e2e/retest-lab/verify.mjs', deps: [] },
   { name: 'multi-engine-lab', desc: '多引擎 tamper A/B（真 JDBC：H2/HSQLDB/Derby）', entry: 'e2e/multi-engine-lab/verify.mjs', deps: ['java'], env: { ENGINE_JARS: 'D:\\engines\\jars\\h2.jar;D:\\engines\\jars\\hsqldb.jar;D:\\engines\\jars\\derby.jar;D:\\engines\\jars\\derbyshared.jar' } },
   { name: 'tamper-matrix', desc: 'tamper × WAF 规则绕过矩阵', entry: 'e2e/tamper-matrix/tamper-test.mjs', deps: [] },
