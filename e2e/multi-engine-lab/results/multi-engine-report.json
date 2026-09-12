@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-11T08:33:41.865Z",
+  "generatedAt": "2026-09-12T08:25:11.260Z",
   "engines": {
     "h2": {
       "label": "H2 2.2.224 (MODE=MySQL)",
@@ -7,7 +7,8 @@
         "off": {
           "num": {
             "found": [
-              "boolean"
+              "boolean",
+              "union"
             ],
             "status": "completed"
           },
@@ -17,7 +18,8 @@
           },
           "blind": {
             "found": [
-              "boolean"
+              "boolean",
+              "union"
             ],
             "status": "completed"
           },
@@ -29,6 +31,7 @@
         "on": {
           "num": {
             "found": [
+              "union",
               "boolean"
             ],
             "status": "completed"
@@ -39,6 +42,7 @@
           },
           "blind": {
             "found": [
+              "union",
               "boolean"
             ],
             "status": "completed"
@@ -56,7 +60,8 @@
         "off": {
           "num": {
             "found": [
-              "boolean"
+              "boolean",
+              "union"
             ],
             "status": "completed"
           },
@@ -66,7 +71,8 @@
           },
           "blind": {
             "found": [
-              "boolean"
+              "boolean",
+              "union"
             ],
             "status": "completed"
           },
@@ -78,6 +84,7 @@
         "on": {
           "num": {
             "found": [
+              "union",
               "boolean"
             ],
             "status": "completed"
@@ -88,6 +95,7 @@
           },
           "blind": {
             "found": [
+              "union",
               "boolean"
             ],
             "status": "completed"
@@ -105,7 +113,8 @@
         "off": {
           "num": {
             "found": [
-              "boolean"
+              "boolean",
+              "union"
             ],
             "status": "completed"
           },
@@ -115,7 +124,8 @@
           },
           "blind": {
             "found": [
-              "boolean"
+              "boolean",
+              "union"
             ],
             "status": "completed"
           },
@@ -127,6 +137,7 @@
         "on": {
           "num": {
             "found": [
+              "union",
               "boolean"
             ],
             "status": "completed"
@@ -137,6 +148,7 @@
           },
           "blind": {
             "found": [
+              "union",
               "boolean"
             ],
             "status": "completed"
