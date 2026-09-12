@@ -24,6 +24,8 @@ import { dbmsEvidenceOf } from './dbmsEvidence.js';
 // [拆分第一批 2026-09-12] runScanLoop 阶段外移（纯搬移，行为不变）
 import { supplementalPasses } from './scan/supplemental.js';
 import { finalizeReport } from './scan/finalize.js';
+import { aggregateVulns } from './scan/aggregate.js';
+import { extractPhase } from './scan/extract.js';
 
 // 暂停轮询间隔（ms）：扫描暂停时在点边界阻塞等待，避免忙等
 const PAUSE_POLL_MS = 300;
@@ -905,34 +907,8 @@ export async function runScanLoop(sm, scanId) {
       }
     }
 
-    // 3) 聚合 + 去重（同点 stacked 命中 → 仅留 1 条 stacked(Critical)，其余移入印证）
-    const finalVulns = [];
-    const corroborations = [];
-    for (const { point, found } of foundByPoint.values()) {
-      const stackedItem = found.find((f) => f.technique === 'stacked');
-      const items = stackedItem ? [stackedItem] : found;
-      if (stackedItem) {
-        for (const f of found) {
-          if (f !== stackedItem) {
-            corroborations.push({ pointId: point.id, technique: f.technique, dbms: f.result.dbms });
-          }
-        }
-      }
-      for (const f of items) {
-        const risk =
-          f.technique === 'stacked'
-            ? 'Critical'
-            : sm.reportGen.riskOf([
-                createVulnerability(point.id, f.technique, 'Medium', f.result.payloads, f.result.evidence, f.result.trace),
-              ]);
-        const vuln = createVulnerability(point.id, f.technique, risk, f.result.payloads, f.result.evidence, f.result.trace);
-        vuln.dbms = f.result.dbms;
-        // [G4 对标 sqlmap --parse-errors] 透传错误详情（opt-in）：错误原文/上下文/SQL 片段
-        if (f.result.errorDetail) vuln.errorDetail = f.result.errorDetail;
-        finalVulns.push(vuln);
-        eventBus.emit(scanId, 'detection_found', { ...f.result, riskLevel: risk });
-      }
-    }
+    // 3) 聚合 + 去重（已抽至 scan/aggregate.js，纯搬移）
+    const { finalVulns, corroborations } = aggregateVulns({ sm, scanId, foundByPoint });
 
     // [MERGED: engine ★FIX-1] 用户已 stop()：不再发起任何新的检测/写请求。聚合（纯内存）已完成，
     // 此处直接收尾，保持 status='stopped'。原实现会继续跑二阶段/NoSQL/提取，且最终把 status
@@ -958,78 +934,8 @@ export async function runScanLoop(sm, scanId) {
     // 3.5) 二阶补充趟 + 3.6) 非 SQL 补充趟（已抽至 scan/supplemental.js，纯搬移）
     await supplementalPasses({ sm, scanId, target, points, dbms, validity, finalVulns });
 
-    // 4) 提取：仅对最终保留的漏洞做（union/error 拖库；boolean/time 版本证明）。
-    // 点间并行（T3）：不同注入点的提取任务并发执行，并行度受 extractConcurrency 约束；
-    // 实际发包速率仍被 HttpClient 令牌桶 + Scheduler 统一限速，不放大对目标压力到危险程度。
-    const extractTasks = [];
-    for (const { point, ctx } of foundByPoint.values()) {
-      const vuln = finalVulns.find((v) => v.pointId === point.id);
-      if (!vuln) continue;
-      extractTasks.push({ point, ctx, vuln });
-    }
-    if (target.config.enableExtract) {
-      const extractConcurrency = Math.max(1, target.config.extractConcurrency || defaults.extractConcurrency);
-      await sm._mapPool(extractTasks, async ({ point, ctx, vuln }) => {
-        // [MERGED: engine ★FIX-1] 兜底：提取期间用户 stop()，立即停止剩余提取请求
-        if (s.cancelled) return;
-        if (vuln.technique === 'union' || vuln.technique === 'error') {
-          eventBus.emit(scanId, 'scan_phase', { phase: 'extracting', message: `正在从 ${point.dbms || '数据库'} 提取数据…` });
-          const exData = await sm._extract(scanId, ctx);
-          sm._mergeExtracted(extracted, exData);
-          // [P0 2026-09-09] 「0 行未确认」表进报告首屏约束区：空结果 ≠ 空表，
-          // 提取通路可能被 WAF/类型限制拦死——交付前必须让使用者看见
-          if (exData?.meta?.dumpUnconfirmed?.length) {
-            try {
-              report.summary = report.summary || {};
-              report.summary.constraints = report.summary.constraints || [];
-              report.summary.constraints.push(
-                `拖库空结果未确认（非空表但提取 0 行，提取通路可能不稳）：${exData.meta.dumpUnconfirmed.join('、')} —— 请人工复核`
-              );
-            } catch { /* 约束标注失败不影响扫描 */ }
-          }
-        } else if (vuln.technique === 'boolean') {
-          const proof = await sm.extractor.extractProof(ctx);
-          if (proof) {
-            eventBus.emit(scanId, 'extraction_progress', {
-              db: point.dbms,
-              table: null,
-              count: 1,
-              // P2-P7：完整值投票复验未通过时注明低置信（提取值仍可用，需人工复核）
-              confidence: ctx.extractConfidence === 'low' ? 'low' : 'high',
-              note: `盲注二分提取版本：${proof}${ctx.extractConfidence === 'low' ? '（低置信：完整值复验未通过）' : ''}`,
-            });
-          }
-        } else if (vuln.technique === 'time') {
-          // 时间盲注独立提取通道：优先走时间判定，无标量延迟原语的库降级布尔通道。
-          // 可选链调用保证老 extractor 桩（仅实现 extractProof）零回归。
-          const proof =
-            (typeof sm.extractor.extractTimeProof === 'function'
-              ? await sm.extractor.extractTimeProof(ctx)
-              : null) || (await sm.extractor.extractProof(ctx));
-          if (proof) {
-            eventBus.emit(scanId, 'extraction_progress', {
-              db: point.dbms,
-              table: null,
-              count: 1,
-              confidence: ctx.extractConfidence === 'low' ? 'low' : 'high',
-              note: `时间盲注提取版本：${proof}${ctx.extractConfidence === 'low' ? '（低置信：完整值复验未通过）' : ''}`,
-            });
-          }
-        } else if (vuln.technique === 'inline') {
-          // 内联提取（对标 sqlmap Q）：把标量子查询注入值位置，期待回显点把结果带出。
-          // 无回显点时 extractInlineProof 返回 null（本工具不重建查询模板，故回退到盲注通道由其它技术覆盖）。
-          const proof = await sm.extractor.extractInlineProof(ctx);
-          if (proof) {
-            eventBus.emit(scanId, 'extraction_progress', {
-              db: point.dbms,
-              table: null,
-              count: 1,
-              note: `内联查询提取版本：${proof}`,
-            });
-          }
-        }
-      }, extractConcurrency);
-    }
+    // 4) 提取（已抽至 scan/extract.js，纯搬移）
+    await extractPhase({ sm, scanId, s, target, foundByPoint, finalVulns, extracted, report });
 
     // 5) 汇总报告并定级（已抽至 scan/finalize.js，纯搬移）
     await finalizeReport({

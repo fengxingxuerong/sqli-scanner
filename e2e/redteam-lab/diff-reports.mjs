@@ -23,10 +23,21 @@ if (!beforeDir || !afterDir || !idList) {
   process.exit(2);
 }
 
+// 匹配改后报告。⚠️ 不要用 readdirSync().find() 取"第一个匹配"——目录顺序由文件系统决定，
+// 同一靶点常有多个档位结果（如 <id>.r1.json / <id>.r2.json），readdir 顺序下曾误取到 r1
+// 而把档位差异误判成"重构导致行为变化"（2026-09-12 实测踩到）。
+// 正确做法：精确名优先，其余按 mtime 取最新。
 const findAfter = (dir, id) => {
-  const f = fs.readdirSync(dir).find((n) => n === `${id}.json` || new RegExp(`^${id}\\..*\\.json$`).test(n));
-  if (!f) throw new Error(`${dir} 下找不到 ${id} 的报告`);
-  return path.join(dir, f);
+  const cands = fs.readdirSync(dir)
+    .filter((n) => n === `${id}.json` || new RegExp(`^${id}\\..*\\.json$`).test(n));
+  if (!cands.length) throw new Error(`${dir} 下找不到 ${id} 的报告`);
+  const exact = cands.find((n) => n === `${id}.json`);
+  if (exact) return path.join(dir, exact);
+  cands.sort((a, b) => fs.statSync(path.join(dir, b)).mtimeMs - fs.statSync(path.join(dir, a)).mtimeMs);
+  if (cands.length > 1) {
+    console.log(`   [提示] ${id} 有 ${cands.length} 个候选，取最新的 ${cands[0]}`);
+  }
+  return path.join(dir, cands[0]);
 };
 
 // 归一化：只保留结论性字段，去掉时间戳 / 随机 id / 请求数等「必然不同」的部分
