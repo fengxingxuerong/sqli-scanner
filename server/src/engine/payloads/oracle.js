@@ -326,7 +326,6 @@ export const oracleClauses = {
     boolean: [
       ["{ORIG}') AND 1=1-- -", "{ORIG}') AND 1=2-- -"],
       ["{ORIG}')) AND '1'='1'-- -", "{ORIG}')) AND '1'='2'-- -"],
-      ['{ORIG}") AND 1=1-- -', '{ORIG}") AND 1=2-- -'],
     ],
   },
 };

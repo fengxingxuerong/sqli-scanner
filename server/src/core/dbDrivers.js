@@ -146,7 +146,8 @@ export class MysqlDriver {
   async query(sql) {
     const [rows, fields] = await this._conn.query(String(sql));
     const columns = fields ? fields.map((f) => String(f.name)) : [];
-    const data = (rows || []).map((r) => {
+    // mysql2 的 query 返回类型含非数组分支，此处 rows 运行时必为数组（并有 || [] 兜底）
+    const data = (/** @type {any[]} */ (rows) || []).map((r) => {
       if (Array.isArray(r)) return r.map((v) => (v == null ? '' : String(v))).join('\t');
       return columns.map((c) => {
         const v = r[c];

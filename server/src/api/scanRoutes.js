@@ -657,6 +657,13 @@ function createReportGuard(tokenOverride) {
   };
 }
 
+/**
+ * 创建扫描相关路由。
+ * @param {object} [opts]
+ * @param {import('../engine/ScanManager.js').ScanManager} [opts.scanManager] 不传则内部自建
+ * @param {typeof import('../core/eventBus.js').eventBus} [opts.eventBus]
+ * @param {string} [opts.reportToken] 报告导出接口的访问令牌
+ */
 export function createRoutes({ scanManager, eventBus: bus = eventBus, reportToken } = {}) {
   const sm = scanManager || new ScanManager();
   const router = Router();
