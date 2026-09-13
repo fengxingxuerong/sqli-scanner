@@ -100,7 +100,7 @@ services:
 - [x] NRPT 规则 `.ooblab.test` / `.oob-lab.local` 已提权移除（2026-09-11 完成，`Get-DnsClientNrptRule` 确认清零）
 - [x] MySQL 3307 实验实例（secure-file-priv 放行模式）已回收
 - [ ] MySQL 3306 常规实例现为后台进程（bash_id 3eb9c610，runtime 存活）；按 mysql-start.bat 语义属本机常驻，无需处理，但注意下次开机需手动拉起
-- [ ] `D:/mysql/data-backup-20260912`（187MB）：git 提交记录注明「数据未损坏，备份可删」——确认无回滚需求后可删
+- [x] `D:/mysql/data-backup-20260912`（187MB）**已删除**（2026-09-14，数据未损坏已实证，雪绒确认无回滚需求）
 - [ ] 实验用 pg 驱动 --no-save 安装已核验未污染 package.json，无需处理
 
 ## 诚实边界（README 已标注，勿夸大）

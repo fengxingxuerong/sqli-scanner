@@ -1,4 +1,7 @@
 node_modules
+# é‡æ„ä¸´æ—¶è„šæœ¬/ä¸´æ—¶æ–‡ä»¶ï¼ˆä¸å…¥åº“ï¼‰
+._*
+.tmp-*
 dist
 server/node_modules
 src-tauri/target
@@ -61,10 +64,10 @@ e2e/waf-lab/results/.git-broken-20260906/
 e2e/redteam-lab/out/
 e2e/redteam-lab/sqlmap-out/
 
-# e2e ÁÙÊ±Õï¶Ï½Å±¾ÓëÔËĞĞÊä³ö£¨±¾µØ scratch£¬²»ÄÉÈë°æ±¾¹ÜÀí£©
+# e2e ï¿½ï¿½Ê±ï¿½ï¿½Ï½Å±ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ scratchï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½æ±¾ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 e2e/diag/
 
-# [²ßÂÔÀ©Õ¹ 2026-09-13] e2e ÔËĞĞ²úÎï json ³ö¿â£¨md ÕªÒª/±¨¸æ±£ÁôÁôºÛ£»ÀúÊ·¸ú×ÙÎÄ¼şÒÑ git rm --cached£©
+# [ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Õ¹ 2026-09-13] e2e ï¿½ï¿½ï¿½Ğ²ï¿½ï¿½ï¿½ json ï¿½ï¿½ï¿½â£¨md ÕªÒª/ï¿½ï¿½ï¿½æ±£ï¿½ï¿½ï¿½ï¿½ï¿½Û£ï¿½ï¿½ï¿½Ê·ï¿½ï¿½ï¿½ï¿½ï¿½Ä¼ï¿½ï¿½ï¿½ git rm --cachedï¿½ï¿½
 e2e/detection-runner/results/*.json
 e2e/multi-engine-lab/results/*.json
 e2e/oob-real-lab/results/*.json
@@ -74,12 +77,12 @@ e2e/real-mysql-lab/.sqlmap-out/
 e2e/waf-lab/results/*.json
 e2e/redteam-lab/results-*.json
 
-# [P1] Tauri ¹¹½¨×Ô¶¯Éú³ÉµÄ schema£¨Ô´Îª src-tauri/capabilities/default.json£¬tauri build/dev Ê±ÖØ½¨£©
+# [P1] Tauri ï¿½ï¿½ï¿½ï¿½ï¿½Ô¶ï¿½ï¿½ï¿½ï¿½Éµï¿½ schemaï¿½ï¿½Ô´Îª src-tauri/capabilities/default.jsonï¿½ï¿½tauri build/dev Ê±ï¿½Ø½ï¿½ï¿½ï¿½
 src-tauri/gen/schemas/
 
-# [P1] UDF ¹¹½¨²úÎï£¨udf_sys.c + build-udf.py ÒÑÈë¿â£¬DLL ¿ÉÖØ½¨£»±ÜÃâÉ±ÈíÎó±¨Èë¿â£©
+# [P1] UDF ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï£¨udf_sys.c + build-udf.py ï¿½ï¿½ï¿½ï¿½â£¬DLL ï¿½ï¿½ï¿½Ø½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½É±ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½â£©
 e2e/udf-lab/*.dll
 
-# [.env ²ßÂÔ¶ÔÆë] .env* Ä¬ÈÏ²»Èë¿â£»ÒÔÏÂÁ½¸öÎªÎŞÃô¸ĞĞÅÏ¢µÄ°²È«ÎÄ¼ş£¨½ö VITE_API_BASE£©£¬ÏÔÊ½·ÅĞĞÓëÊµ¼Ê¸ú×Ù×´Ì¬Ò»ÖÂ
+# [.env ï¿½ï¿½ï¿½Ô¶ï¿½ï¿½ï¿½] .env* Ä¬ï¿½Ï²ï¿½ï¿½ï¿½â£»ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Îªï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ï¢ï¿½Ä°ï¿½È«ï¿½Ä¼ï¿½ï¿½ï¿½ï¿½ï¿½ VITE_API_BASEï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ê½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Êµï¿½Ê¸ï¿½ï¿½ï¿½×´Ì¬Ò»ï¿½ï¿½
 !.env.development
 !.env.tauri
