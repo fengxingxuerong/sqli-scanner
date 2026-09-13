@@ -23,12 +23,27 @@ test('crawlDepth 默认关闭（0）：不触发链接爬取', async () => {
   assert.equal(points.length, 0);
 });
 
+// [FIX 2026-09-13 回归锁定] level 与 crawl 解耦：前端默认档（level=1 + crawlDepth=1）必须真实生效。
+// 原服务端门槛 level>=5 + 前端默认 level=1 → 显式开启的爬虫对全部前端用户静默失效。
+// 本用例把「低 level 开启即生效」锁死，防止未来回归为「开了却不爬」。
+test('level=1（前端默认档）时 crawlDepth=1 依然触发链接爬取（开启即生效）', async () => {
+  const http = mockHttp({
+    'https://x.com/page': '<a href="/list?page=2&size=50">下一页</a>',
+  });
+  const parser = new TargetParser(http);
+  const target = createTarget({ url: 'https://x.com/page', method: 'GET', config: { level: 1 } });
+  target.config.crawlDepth = 1;
+  const points = await parser.discover(target);
+  const pagePoint = points.find((p) => p.param === 'page');
+  assert.ok(pagePoint, 'level=1 时爬取应生效并产出链接 query 参数点');
+});
+
 test('crawlDepth=1：首页发现的链接 URL 的 query 参数并入注入点', async () => {
   const http = mockHttp({
     'https://x.com/page': '<a href="/list?page=2&size=50">下一页</a>',
   });
   const parser = new TargetParser(http);
-  const target = createTarget({ url: 'https://x.com/page', method: 'GET', config: { level: 5 } });
+  const target = createTarget({ url: 'https://x.com/page', method: 'GET', config: { level: 1 } }); // [FIX 2026-09-13] 开启即生效、与 level 解耦（原锁 level=5）
   target.config.crawlDepth = 1;
   const points = await parser.discover(target);
   // 首页无 query，但链接 /list?page=2&size=50 的 query 参数成为注入点（对标 sqlmap 不抓链接页也测试其参数）
@@ -48,7 +63,7 @@ test('crawlDepth=2：抓取一层链接页并发现更深链接的 query 参数'
     'https://x.com/list?page=2&size=50': '<a href="/detail?id=9">详情</a>',
   });
   const parser = new TargetParser(http);
-  const target = createTarget({ url: 'https://x.com/page', method: 'GET', config: { level: 5 } });
+  const target = createTarget({ url: 'https://x.com/page', method: 'GET', config: { level: 1 } }); // [FIX 2026-09-13] 开启即生效、与 level 解耦（原锁 level=5）
   target.config.crawlDepth = 2;
   const points = await parser.discover(target);
   const pagePoint = points.find((p) => p.param === 'page');
@@ -67,7 +82,7 @@ test('与既有 points 合并去重：同 URL+参数不重复加', async () => {
     'https://x.com/other?x=1': '<p>ok</p>',
   });
   const parser = new TargetParser(http);
-  const target = createTarget({ url: 'https://x.com/page?page=2', method: 'GET', config: { level: 5 } });
+  const target = createTarget({ url: 'https://x.com/page?page=2', method: 'GET', config: { level: 1 } }); // [FIX 2026-09-13] 开启即生效、与 level 解耦（原锁 level=5）
   target.config.crawlDepth = 2;
   const points = await parser.discover(target);
   const pages = points.filter((p) => p.param === 'page');
@@ -82,7 +97,7 @@ test('同域限制：跨域链接的 query 不生成注入点', async () => {
     'https://x.com/page': '<a href="https://evil.com/steal?id=1">外域</a>',
   });
   const parser = new TargetParser(http);
-  const target = createTarget({ url: 'https://x.com/page', method: 'GET', config: { level: 5 } });
+  const target = createTarget({ url: 'https://x.com/page', method: 'GET', config: { level: 1 } }); // [FIX 2026-09-13] 开启即生效、与 level 解耦（原锁 level=5）
   target.config.crawlDepth = 3;
   const points = await parser.discover(target);
   assert.ok(!points.some((p) => p.param === 'id'));
@@ -90,7 +105,7 @@ test('同域限制：跨域链接的 query 不生成注入点', async () => {
 
 test('爬取失败不阻断：目标页取不到也正常返回既有发现', async () => {
   const parser = new TargetParser(mockHttp({})); // 所有 URL 未命中 → 取页失败
-  const target = createTarget({ url: 'https://x.com/page', method: 'GET', bodyParams: { a: '1' }, config: { level: 5 } });
+  const target = createTarget({ url: 'https://x.com/page', method: 'GET', bodyParams: { a: '1' }, config: { level: 1 } }); // [FIX 2026-09-13] 开启即生效、与 level 解耦（原锁 level=5）
   target.config.crawlDepth = 2;
   const points = await parser.discover(target);
   // 原 body 参数仍被发现
@@ -103,7 +118,7 @@ test('crawlDepth + crawlForms 同时开启：爬取页表单也被解析为 body
     'https://x.com/search': '<form method="GET" action="/do-search"><input name="q" value=""></form>',
   });
   const parser = new TargetParser(http);
-  const target = createTarget({ url: 'https://x.com/page', method: 'GET', config: { level: 5 } });
+  const target = createTarget({ url: 'https://x.com/page', method: 'GET', config: { level: 1 } }); // [FIX 2026-09-13] 开启即生效、与 level 解耦（原锁 level=5）
   target.config.crawlDepth = 2;
   target.config.crawlForms = true;
   const points = await parser.discover(target);

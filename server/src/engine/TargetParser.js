@@ -95,7 +95,7 @@ export class TargetParser {
     }
 
     // 3.6) 二阶存储点标记（--second-order 显式开启时）
-    //   isStorePoint 此前只在「表单爬取」（level≥5 + crawlForms）路径标记，于是
+    //   isStorePoint 此前只在「表单爬取」（crawlForms 开启）路径标记，于是
     //   「--method POST --body '{...}' + --second-order <触发页>」这种最常用的 API 二阶场景
     //   解析出 0 个存储点 → ScanManager._runSecondOrder 门控直接 return [] → second_order
     //   通道恒零检出（2026-09-10 独立红队评测靶点 E15 实测，250 次请求全空）。
@@ -159,14 +159,17 @@ export class TargetParser {
       }
     }
 
-    // 6) 表单爬取（level≥5，且 opt-in crawlForms 开启）
-    if (level >= 5 && config.crawlForms) {
+    // 6) 表单爬取（opt-in crawlForms 开启即生效，与 level 解耦——对齐 sqlmap --forms 独立开关）
+    //    [FIX 2026-09-13] 原门槛 level>=5 造成「前端默认 level=1 + crawlForms/crawlDepth 显式开启」
+    //    时静默不生效（实测前后端默认不一致：前端 crawlDepth=1 / level=1，服务端 level=1）；
+    //    sqlmap 的 --crawl/--forms 均独立于 --level，本工具同样双重 opt-in 已足够保守。
+    if (config.crawlForms) {
       await this._crawlForms(target, points);
     }
 
-    // 6.5) 站内链接爬取（level≥5，且 crawlDepth>0 开启）
+    // 6.5) 站内链接爬取（crawlDepth>0 开启即生效，与 level 解耦——对齐 sqlmap --crawl=<depth>）
     const crawlDepth = Number(config.crawlDepth) || 0;
-    if (level >= 5 && crawlDepth > 0) {
+    if (crawlDepth > 0) {
       await this._crawlLinks(target, points, crawlDepth);
     }
 
