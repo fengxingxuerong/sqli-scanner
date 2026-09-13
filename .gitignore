@@ -63,3 +63,23 @@ e2e/redteam-lab/sqlmap-out/
 
 # e2e 临时诊断脚本与运行输出（本地 scratch，不纳入版本管理）
 e2e/diag/
+
+# [策略扩展 2026-09-13] e2e 运行产物 json 出库（md 摘要/报告保留留痕；历史跟踪文件已 git rm --cached）
+e2e/detection-runner/results/*.json
+e2e/multi-engine-lab/results/*.json
+e2e/oob-real-lab/results/*.json
+e2e/pentest-lab/results/*.json
+e2e/real-mysql-lab/results/*.json
+e2e/real-mysql-lab/.sqlmap-out/
+e2e/waf-lab/results/*.json
+e2e/redteam-lab/results-*.json
+
+# [P1] Tauri 构建自动生成的 schema（源为 src-tauri/capabilities/default.json，tauri build/dev 时重建）
+src-tauri/gen/schemas/
+
+# [P1] UDF 构建产物（udf_sys.c + build-udf.py 已入库，DLL 可重建；避免杀软误报入库）
+e2e/udf-lab/*.dll
+
+# [.env 策略对齐] .env* 默认不入库；以下两个为无敏感信息的安全文件（仅 VITE_API_BASE），显式放行与实际跟踪状态一致
+!.env.development
+!.env.tauri
