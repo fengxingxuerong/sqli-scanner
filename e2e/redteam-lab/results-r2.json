@@ -4,7 +4,7 @@
     "url": "http://127.0.0.1:8231/shop/item?id=1",
     "round": "r2",
     "exit": 2,
-    "ms": 853,
+    "ms": 1153,
     "hit": true,
     "techs": "union+error+boolean",
     "dbms": "MySQL",
@@ -13,9 +13,9 @@
     "verdict": "no_vulnerability_detected",
     "err": "",
     "raw": {
-      "scanId": "nCk0n-eh0S87",
+      "scanId": "cQxnzwGqosjQ",
       "target": {
-        "id": "RZ-Mayi3hb",
+        "id": "0PErtNyFkw",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/shop/item?id=1",
         "method": "GET",
@@ -155,8 +155,8 @@
           }
         }
       },
-      "startedAt": "2026-09-12T11:35:47.261Z",
-      "finishedAt": "2026-09-12T11:35:47.482Z",
+      "startedAt": "2026-09-12T16:29:23.344Z",
+      "finishedAt": "2026-09-12T16:29:23.564Z",
       "dbms": "MySQL",
       "points": [
         {
@@ -191,7 +191,7 @@
       ],
       "vulns": [
         {
-          "id": "Cu7vpudx",
+          "id": "u-CM_FeV",
           "pointId": "283e732d",
           "technique": "union",
           "dbms": "MySQL",
@@ -205,7 +205,7 @@
           "trace": null
         },
         {
-          "id": "y9AAkO8E",
+          "id": "BBLkTKIj",
           "pointId": "283e732d",
           "technique": "error",
           "dbms": "MySQL",
@@ -218,7 +218,7 @@
           "trace": null
         },
         {
-          "id": "sz2_5g6n",
+          "id": "h4Ofle4w",
           "pointId": "283e732d",
           "technique": "boolean",
           "dbms": "MySQL",
@@ -549,7 +549,7 @@
     "url": "http://127.0.0.1:8231/shop/search?name=alice",
     "round": "r2",
     "exit": 2,
-    "ms": 662,
+    "ms": 927,
     "hit": true,
     "techs": "union+error+boolean",
     "dbms": "MySQL",
@@ -558,9 +558,9 @@
     "verdict": "no_vulnerability_detected",
     "err": "",
     "raw": {
-      "scanId": "aESvfcH1qVzY",
+      "scanId": "qetgGKTDyJIk",
       "target": {
-        "id": "inyKVTIM5d",
+        "id": "MpilOBbzSU",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/shop/search?name=alice",
         "method": "GET",
@@ -700,8 +700,8 @@
           }
         }
       },
-      "startedAt": "2026-09-12T11:35:48.133Z",
-      "finishedAt": "2026-09-12T11:35:48.312Z",
+      "startedAt": "2026-09-12T16:29:24.479Z",
+      "finishedAt": "2026-09-12T16:29:24.639Z",
       "dbms": "MySQL",
       "points": [
         {
@@ -736,7 +736,7 @@
       ],
       "vulns": [
         {
-          "id": "ICU4VG-K",
+          "id": "1oJQUSqr",
           "pointId": "de9d0cb9",
           "technique": "union",
           "dbms": "MySQL",
@@ -750,7 +750,7 @@
           "trace": null
         },
         {
-          "id": "m6JJ9yu2",
+          "id": "eaUppdbX",
           "pointId": "de9d0cb9",
           "technique": "error",
           "dbms": "MySQL",
@@ -763,7 +763,7 @@
           "trace": null
         },
         {
-          "id": "Thc4M_wZ",
+          "id": "ZS8M4JKR",
           "pointId": "de9d0cb9",
           "technique": "boolean",
           "dbms": "MySQL",
@@ -956,7 +956,7 @@
     "url": "http://127.0.0.1:8231/shop/find?q=a",
     "round": "r2",
     "exit": 2,
-    "ms": 656,
+    "ms": 942,
     "hit": true,
     "techs": "union+error+boolean",
     "dbms": "MySQL",
@@ -965,9 +965,9 @@
     "verdict": "no_vulnerability_detected",
     "err": "",
     "raw": {
-      "scanId": "xoPCAn3-bq-n",
+      "scanId": "VXfhMdX6k0Zs",
       "target": {
-        "id": "eJPhBqIDXO",
+        "id": "NNJdl_Djrs",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/shop/find?q=a",
         "method": "GET",
@@ -1107,8 +1107,8 @@
           }
         }
       },
-      "startedAt": "2026-09-12T11:35:48.788Z",
-      "finishedAt": "2026-09-12T11:35:48.971Z",
+      "startedAt": "2026-09-12T16:29:25.422Z",
+      "finishedAt": "2026-09-12T16:29:25.579Z",
       "dbms": "MySQL",
       "points": [
         {
@@ -1142,7 +1142,7 @@
       ],
       "vulns": [
         {
-          "id": "MxslV0gR",
+          "id": "YypYheoy",
           "pointId": "dec9ec92",
           "technique": "union",
           "dbms": "MySQL",
@@ -1156,7 +1156,7 @@
           "trace": null
         },
         {
-          "id": "GFKaD_BW",
+          "id": "_vBahz92",
           "pointId": "dec9ec92",
           "technique": "error",
           "dbms": "MySQL",
@@ -1169,7 +1169,7 @@
           "trace": null
         },
         {
-          "id": "4e1R5r7P",
+          "id": "s514WU4X",
           "pointId": "dec9ec92",
           "technique": "boolean",
           "dbms": "MySQL",
@@ -1362,7 +1362,7 @@
     "url": "http://127.0.0.1:8231/shop/sort?by=id",
     "round": "r2",
     "exit": 2,
-    "ms": 1295,
+    "ms": 1549,
     "hit": true,
     "techs": "error+boolean",
     "dbms": "MySQL",
@@ -1371,9 +1371,9 @@
     "verdict": "no_vulnerability_detected",
     "err": "",
     "raw": {
-      "scanId": "KEAkEziBREvG",
+      "scanId": "T2OCVZCTRzxQ",
       "target": {
-        "id": "wZEVWiX97i",
+        "id": "Natc2wKqyF",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/shop/sort?by=id",
         "method": "GET",
@@ -1513,8 +1513,8 @@
           }
         }
       },
-      "startedAt": "2026-09-12T11:35:49.483Z",
-      "finishedAt": "2026-09-12T11:35:50.120Z",
+      "startedAt": "2026-09-12T16:29:26.369Z",
+      "finishedAt": "2026-09-12T16:29:27.003Z",
       "dbms": "MySQL",
       "points": [
         {
@@ -1538,7 +1538,7 @@
       ],
       "vulns": [
         {
-          "id": "OTCQcCvC",
+          "id": "lNS2VAix",
           "pointId": "97ad129c",
           "technique": "error",
           "dbms": "MySQL",
@@ -1551,7 +1551,7 @@
           "trace": null
         },
         {
-          "id": "EiA1eOYi",
+          "id": "sbqMufzh",
           "pointId": "97ad129c",
           "technique": "boolean",
           "dbms": "MySQL",
@@ -2020,7 +2020,7 @@
     "url": "http://127.0.0.1:8231/shop/detail?id=1&cat=0",
     "round": "r2",
     "exit": 2,
-    "ms": 878,
+    "ms": 1150,
     "hit": true,
     "techs": "union+error+boolean",
     "dbms": "MySQL",
@@ -2029,9 +2029,9 @@
     "verdict": "no_vulnerability_detected",
     "err": "",
     "raw": {
-      "scanId": "gJH-CrndJp3_",
+      "scanId": "qhf0usEKVncO",
       "target": {
-        "id": "olLslUU0mB",
+        "id": "pKxFZqjdQ2",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/shop/detail?id=1&cat=0",
         "method": "GET",
@@ -2171,8 +2171,8 @@
           }
         }
       },
-      "startedAt": "2026-09-12T11:35:50.763Z",
-      "finishedAt": "2026-09-12T11:35:51.036Z",
+      "startedAt": "2026-09-12T16:29:27.919Z",
+      "finishedAt": "2026-09-12T16:29:28.203Z",
       "dbms": "MySQL",
       "points": [
         {
@@ -2223,7 +2223,7 @@
       ],
       "vulns": [
         {
-          "id": "SuHv8o2I",
+          "id": "mCyw0Wfe",
           "pointId": "283e732d",
           "technique": "union",
           "dbms": "MySQL",
@@ -2237,7 +2237,7 @@
           "trace": null
         },
         {
-          "id": "Pd3amPMi",
+          "id": "Yt7Nt1Js",
           "pointId": "283e732d",
           "technique": "error",
           "dbms": "MySQL",
@@ -2250,7 +2250,7 @@
           "trace": null
         },
         {
-          "id": "3nN6rm1m",
+          "id": "EHxVRq9x",
           "pointId": "283e732d",
           "technique": "boolean",
           "dbms": "MySQL",
@@ -2587,7 +2587,7 @@
     "url": "http://127.0.0.1:8231/shop/err?id=1",
     "round": "r2",
     "exit": 2,
-    "ms": 693,
+    "ms": 958,
     "hit": true,
     "techs": "union+error+boolean",
     "dbms": "MySQL",
@@ -2596,9 +2596,9 @@
     "verdict": "no_vulnerability_detected",
     "err": "",
     "raw": {
-      "scanId": "HexGCHrxDeG8",
+      "scanId": "_V-hpnsT-FBx",
       "target": {
-        "id": "kA0Xeb7EVW",
+        "id": "jtKJrNMJ1_",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/shop/err?id=1",
         "method": "GET",
@@ -2738,8 +2738,8 @@
           }
         }
       },
-      "startedAt": "2026-09-12T11:35:51.655Z",
-      "finishedAt": "2026-09-12T11:35:51.853Z",
+      "startedAt": "2026-09-12T16:29:29.082Z",
+      "finishedAt": "2026-09-12T16:29:29.275Z",
       "dbms": "MySQL",
       "points": [
         {
@@ -2774,7 +2774,7 @@
       ],
       "vulns": [
         {
-          "id": "9FVojRqK",
+          "id": "nf_3EKxo",
           "pointId": "283e732d",
           "technique": "union",
           "dbms": "MySQL",
@@ -2788,7 +2788,7 @@
           "trace": null
         },
         {
-          "id": "Uq2OFl9b",
+          "id": "DY39IYhA",
           "pointId": "283e732d",
           "technique": "error",
           "dbms": "MySQL",
@@ -2801,7 +2801,7 @@
           "trace": null
         },
         {
-          "id": "EhboG-XH",
+          "id": "UweyO5D8",
           "pointId": "283e732d",
           "technique": "boolean",
           "dbms": "MySQL",
@@ -3132,7 +3132,7 @@
     "url": "http://127.0.0.1:8231/shop/blind?id=1",
     "round": "r2",
     "exit": 0,
-    "ms": 5522,
+    "ms": 5792,
     "hit": true,
     "techs": "boolean",
     "dbms": "MySQL",
@@ -3141,9 +3141,9 @@
     "verdict": "no_vulnerability_detected",
     "err": "",
     "raw": {
-      "scanId": "eoEObAKtCc96",
+      "scanId": "waAzk82L7gW9",
       "target": {
-        "id": "8X6xBiWWo-",
+        "id": "DewQWYI-Ni",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/shop/blind?id=1",
         "method": "GET",
@@ -3283,8 +3283,8 @@
           }
         }
       },
-      "startedAt": "2026-09-12T11:35:52.341Z",
-      "finishedAt": "2026-09-12T11:35:57.313Z",
+      "startedAt": "2026-09-12T16:29:30.050Z",
+      "finishedAt": "2026-09-12T16:29:35.023Z",
       "dbms": "MySQL",
       "points": [
         {
@@ -3308,7 +3308,7 @@
       ],
       "vulns": [
         {
-          "id": "hoZsBq_R",
+          "id": "teWavFyl",
           "pointId": "283e732d",
           "technique": "boolean",
           "dbms": "MySQL",
@@ -3645,7 +3645,7 @@
     "url": "http://127.0.0.1:8231/shop/time?id=1",
     "round": "r2",
     "exit": 0,
-    "ms": 10219,
+    "ms": 10410,
     "hit": true,
     "techs": "time",
     "dbms": "MySQL",
@@ -3654,9 +3654,9 @@
     "verdict": "no_vulnerability_detected",
     "err": "",
     "raw": {
-      "scanId": "uefyPA-qcKA3",
+      "scanId": "SmW2oeammd70",
       "target": {
-        "id": "flC9wPi4Di",
+        "id": "gPepZ_JbAd",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/shop/time?id=1",
         "method": "GET",
@@ -3796,8 +3796,8 @@
           }
         }
       },
-      "startedAt": "2026-09-12T11:35:57.885Z",
-      "finishedAt": "2026-09-12T11:36:07.518Z",
+      "startedAt": "2026-09-12T16:29:35.831Z",
+      "finishedAt": "2026-09-12T16:29:45.448Z",
       "dbms": "MySQL",
       "points": [
         {
@@ -3821,7 +3821,7 @@
       ],
       "vulns": [
         {
-          "id": "jNv8t3kK",
+          "id": "DITm_3CK",
           "pointId": "283e732d",
           "technique": "time",
           "dbms": "MySQL",
@@ -3829,40 +3829,40 @@
           "payloads": [
             "1 AND SLEEP(2)-- -"
           ],
-          "description": "时间盲注确认(统计·自适应): μ=0.05s σ=0.02s z=2 阈值=1.59s 自适应下限=1.54s 稳定率1.00",
-          "evidence": "时间盲注确认(统计·自适应): μ=0.05s σ=0.02s z=2 阈值=1.59s 自适应下限=1.54s 稳定率1.00",
+          "description": "时间盲注确认(统计·自适应): μ=0.06s σ=0.02s z=2 阈值=1.60s 自适应下限=1.55s 稳定率1.00",
+          "evidence": "时间盲注确认(统计·自适应): μ=0.06s σ=0.02s z=2 阈值=1.60s 自适应下限=1.55s 稳定率1.00",
           "trace": {
             "technique": "time",
             "adaptive": true,
             "baselineNoiseRate": null,
-            "mu": 0.053000000000000005,
-            "sigma": 0.020029977533686853,
-            "threshold": 1.5930599550673736,
-            "floor": 1.5400599550673737,
+            "mu": 0.05600000000000001,
+            "sigma": 0.023883048381645084,
+            "threshold": 1.6037660967632903,
+            "floor": 1.5477660967632902,
             "baselineSamples": [
               {
                 "idx": 0,
-                "ms": 0.023,
+                "ms": 0.02,
                 "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>time</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-c"
               },
               {
                 "idx": 1,
-                "ms": 0.038,
+                "ms": 0.039,
                 "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>time</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-c"
               },
               {
                 "idx": 2,
-                "ms": 0.057,
+                "ms": 0.059,
                 "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>time</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-c"
               },
               {
                 "idx": 3,
-                "ms": 0.07,
+                "ms": 0.079,
                 "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>time</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-c"
               },
               {
                 "idx": 4,
-                "ms": 0.077,
+                "ms": 0.083,
                 "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>time</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-c"
               }
             ],
@@ -3875,25 +3875,25 @@
               },
               {
                 "idx": 1,
-                "ms": 2.033,
+                "ms": 2.037,
                 "delayed": true,
                 "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>time</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-c"
               },
               {
                 "idx": 2,
-                "ms": 2.05,
+                "ms": 2.059,
                 "delayed": true,
                 "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>time</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-c"
               },
               {
                 "idx": 3,
-                "ms": 2.069,
+                "ms": 2.076,
                 "delayed": true,
                 "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>time</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-c"
               },
               {
                 "idx": 4,
-                "ms": 2.005,
+                "ms": 2.006,
                 "delayed": true,
                 "excerpt": "<!doctype html><html><head><meta charset=\"utf-8\"><title>time</title>\n<style>body{font:14px/1.6 system-ui;padding:24px;max-width:900px;margin:auto}table{border-c"
               }
@@ -3973,7 +3973,7 @@
     "url": "http://127.0.0.1:8231/login",
     "round": "r2",
     "exit": 2,
-    "ms": 7039,
+    "ms": 7173,
     "hit": true,
     "techs": "union+error+boolean",
     "dbms": "MySQL",
@@ -3982,9 +3982,9 @@
     "verdict": "no_vulnerability_detected",
     "err": "",
     "raw": {
-      "scanId": "-igvVROup87R",
+      "scanId": "oo3u1hSA2lXW",
       "target": {
-        "id": "3OIRgCunuA",
+        "id": "Ewwd_r1A05",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/login",
         "method": "POST",
@@ -4127,8 +4127,8 @@
           }
         }
       },
-      "startedAt": "2026-09-12T11:36:08.104Z",
-      "finishedAt": "2026-09-12T11:36:14.471Z",
+      "startedAt": "2026-09-12T16:29:46.216Z",
+      "finishedAt": "2026-09-12T16:29:52.572Z",
       "dbms": "MySQL",
       "points": [
         {
@@ -4176,7 +4176,7 @@
       ],
       "vulns": [
         {
-          "id": "ve0fIiuB",
+          "id": "XlTwN9Wu",
           "pointId": "590739db",
           "technique": "union",
           "dbms": "MySQL",
@@ -4190,7 +4190,7 @@
           "trace": null
         },
         {
-          "id": "2QVYuiVc",
+          "id": "ChjoyoBP",
           "pointId": "590739db",
           "technique": "error",
           "dbms": "MySQL",
@@ -4203,7 +4203,7 @@
           "trace": null
         },
         {
-          "id": "grgJoxqe",
+          "id": "8OlqvyTW",
           "pointId": "590739db",
           "technique": "boolean",
           "dbms": "MySQL",
@@ -4671,7 +4671,7 @@
           }
         },
         {
-          "id": "mXVP7IER",
+          "id": "RwxM3_V1",
           "pointId": "92d712fc",
           "technique": "error",
           "dbms": "MySQL",
@@ -4776,7 +4776,7 @@
     "url": "http://127.0.0.1:8231/api/profile",
     "round": "r2",
     "exit": 2,
-    "ms": 719,
+    "ms": 937,
     "hit": true,
     "techs": "union+error+boolean",
     "dbms": "MySQL",
@@ -4785,9 +4785,9 @@
     "verdict": "no_vulnerability_detected",
     "err": "",
     "raw": {
-      "scanId": "sNcN47Nmw7ES",
+      "scanId": "LMnn7SvHPp-8",
       "target": {
-        "id": "ngCJD-vHQm",
+        "id": "cy17Yl7k_J",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/api/profile",
         "method": "POST",
@@ -4929,8 +4929,8 @@
           }
         }
       },
-      "startedAt": "2026-09-12T11:36:15.149Z",
-      "finishedAt": "2026-09-12T11:36:15.337Z",
+      "startedAt": "2026-09-12T16:29:53.396Z",
+      "finishedAt": "2026-09-12T16:29:53.572Z",
       "dbms": "MySQL",
       "points": [
         {
@@ -4965,7 +4965,7 @@
       ],
       "vulns": [
         {
-          "id": "ZHFIP0YB",
+          "id": "ehhu71U9",
           "pointId": "845293ee",
           "technique": "union",
           "dbms": "MySQL",
@@ -4979,7 +4979,7 @@
           "trace": null
         },
         {
-          "id": "iGD58rB3",
+          "id": "VhrbA2lf",
           "pointId": "845293ee",
           "technique": "error",
           "dbms": "MySQL",
@@ -4992,7 +4992,7 @@
           "trace": null
         },
         {
-          "id": "hUv4cR0l",
+          "id": "XG1R9AZK",
           "pointId": "845293ee",
           "technique": "boolean",
           "dbms": "MySQL",
@@ -5323,7 +5323,7 @@
     "url": "http://127.0.0.1:8231/shop/cookie",
     "round": "r2",
     "exit": 2,
-    "ms": 709,
+    "ms": 962,
     "hit": true,
     "techs": "union+error+boolean",
     "dbms": "MySQL",
@@ -5332,9 +5332,9 @@
     "verdict": "no_vulnerability_detected",
     "err": "",
     "raw": {
-      "scanId": "H4MZ6EktcFiT",
+      "scanId": "4-z7oOz7XgpW",
       "target": {
-        "id": "qfgJE11FMe",
+        "id": "O6nv7iFAPI",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/shop/cookie",
         "method": "GET",
@@ -5477,8 +5477,8 @@
           "testHeaders": true
         }
       },
-      "startedAt": "2026-09-12T11:36:15.865Z",
-      "finishedAt": "2026-09-12T11:36:16.070Z",
+      "startedAt": "2026-09-12T16:29:54.361Z",
+      "finishedAt": "2026-09-12T16:29:54.534Z",
       "dbms": "MySQL",
       "points": [
         {
@@ -5513,7 +5513,7 @@
       ],
       "vulns": [
         {
-          "id": "LanBCFq9",
+          "id": "9DhlqleI",
           "pointId": "5c5e110e",
           "technique": "union",
           "dbms": "MySQL",
@@ -5527,7 +5527,7 @@
           "trace": null
         },
         {
-          "id": "juLR3lrz",
+          "id": "Cm7tzhOC",
           "pointId": "5c5e110e",
           "technique": "error",
           "dbms": "MySQL",
@@ -5540,7 +5540,7 @@
           "trace": null
         },
         {
-          "id": "qOeXo_CN",
+          "id": "CJZZhmdB",
           "pointId": "5c5e110e",
           "technique": "boolean",
           "dbms": "MySQL",
@@ -5871,7 +5871,7 @@
     "url": "http://127.0.0.1:8231/shop/ip",
     "round": "r2",
     "exit": 2,
-    "ms": 737,
+    "ms": 914,
     "hit": true,
     "techs": "union+error+boolean",
     "dbms": "MySQL",
@@ -5880,9 +5880,9 @@
     "verdict": "no_vulnerability_detected",
     "err": "",
     "raw": {
-      "scanId": "vZF9PiXZgisF",
+      "scanId": "spxdH6pzjFUf",
       "target": {
-        "id": "1urvk40Qav",
+        "id": "5wA8kZRdt-",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/shop/ip",
         "method": "GET",
@@ -6025,8 +6025,8 @@
           "testHeaders": true
         }
       },
-      "startedAt": "2026-09-12T11:36:16.601Z",
-      "finishedAt": "2026-09-12T11:36:16.795Z",
+      "startedAt": "2026-09-12T16:29:55.274Z",
+      "finishedAt": "2026-09-12T16:29:55.449Z",
       "dbms": "MySQL",
       "points": [
         {
@@ -6061,7 +6061,7 @@
       ],
       "vulns": [
         {
-          "id": "iwWTwxQJ",
+          "id": "f6LtYLoZ",
           "pointId": "a7471d66",
           "technique": "union",
           "dbms": "MySQL",
@@ -6075,7 +6075,7 @@
           "trace": null
         },
         {
-          "id": "dr2nHtBt",
+          "id": "XgoJWwtn",
           "pointId": "a7471d66",
           "technique": "error",
           "dbms": "MySQL",
@@ -6088,7 +6088,7 @@
           "trace": null
         },
         {
-          "id": "7Ze2NXTT",
+          "id": "lUXuk17b",
           "pointId": "a7471d66",
           "technique": "boolean",
           "dbms": "MySQL",
@@ -6419,7 +6419,7 @@
     "url": "http://127.0.0.1:8231/shop/user/1",
     "round": "r2",
     "exit": 2,
-    "ms": 969,
+    "ms": 922,
     "hit": true,
     "techs": "union+error+boolean",
     "dbms": "MySQL",
@@ -6428,9 +6428,9 @@
     "verdict": "no_vulnerability_detected",
     "err": "",
     "raw": {
-      "scanId": "9F2j3hvoj5FR",
+      "scanId": "Q4knRzFMOtf_",
       "target": {
-        "id": "JpRdsisr1T",
+        "id": "8LDYy5mkXv",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/shop/user/1",
         "method": "GET",
@@ -6571,8 +6571,8 @@
           "testPath": true
         }
       },
-      "startedAt": "2026-09-12T11:36:17.360Z",
-      "finishedAt": "2026-09-12T11:36:17.601Z",
+      "startedAt": "2026-09-12T16:29:56.194Z",
+      "finishedAt": "2026-09-12T16:29:56.369Z",
       "dbms": "MySQL",
       "points": [
         {
@@ -6608,7 +6608,7 @@
       ],
       "vulns": [
         {
-          "id": "J_V2gxPj",
+          "id": "Wm9n-IcA",
           "pointId": "86d7dabd",
           "technique": "union",
           "dbms": "MySQL",
@@ -6622,7 +6622,7 @@
           "trace": null
         },
         {
-          "id": "5IpryBgz",
+          "id": "BtFOpC9N",
           "pointId": "86d7dabd",
           "technique": "error",
           "dbms": "MySQL",
@@ -6635,7 +6635,7 @@
           "trace": null
         },
         {
-          "id": "q20T74xa",
+          "id": "eT6k4on8",
           "pointId": "86d7dabd",
           "technique": "boolean",
           "dbms": "MySQL",
@@ -6913,7 +6913,7 @@
             "failStreak": 0,
             "blockHits": 0,
             "serverErr": 11,
-            "injection5xx": 17,
+            "injection5xx": 22,
             "authLostHits": 0,
             "netErrPoints": 0
           },
@@ -6950,7 +6950,7 @@
           "failStreak": 0,
           "blockHits": 0,
           "serverErr": 11,
-          "injection5xx": 17,
+          "injection5xx": 22,
           "authLostHits": 0,
           "netErrPoints": 0
         },
@@ -6966,7 +6966,7 @@
     "url": "http://127.0.0.1:8231/shop/b64?id=MQ==",
     "round": "r2",
     "exit": 2,
-    "ms": 990,
+    "ms": 938,
     "hit": true,
     "techs": "union+error+boolean",
     "dbms": "MySQL",
@@ -6975,9 +6975,9 @@
     "verdict": "no_vulnerability_detected",
     "err": "",
     "raw": {
-      "scanId": "ElDVAiF4eXEt",
+      "scanId": "EPVdLA5KUsa-",
       "target": {
-        "id": "KC0_DAMWKw",
+        "id": "i7UVW1xsc9",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/shop/b64?id=MQ==",
         "method": "GET",
@@ -7117,8 +7117,8 @@
           }
         }
       },
-      "startedAt": "2026-09-12T11:36:18.351Z",
-      "finishedAt": "2026-09-12T11:36:18.568Z",
+      "startedAt": "2026-09-12T16:29:57.134Z",
+      "finishedAt": "2026-09-12T16:29:57.306Z",
       "dbms": "MySQL",
       "points": [
         {
@@ -7156,7 +7156,7 @@
       ],
       "vulns": [
         {
-          "id": "OIVIbNcu",
+          "id": "Jet6YMo5",
           "pointId": "283e732d",
           "technique": "union",
           "dbms": "MySQL",
@@ -7170,7 +7170,7 @@
           "trace": null
         },
         {
-          "id": "TmD1VxY7",
+          "id": "lmhOGUOW",
           "pointId": "283e732d",
           "technique": "error",
           "dbms": "MySQL",
@@ -7183,7 +7183,7 @@
           "trace": null
         },
         {
-          "id": "4q-pVB_o",
+          "id": "D-ZgiU2x",
           "pointId": "283e732d",
           "technique": "boolean",
           "dbms": "MySQL",
@@ -7514,7 +7514,7 @@
     "url": "http://127.0.0.1:8231/shop/semi?a=1;id=1",
     "round": "r2",
     "exit": 2,
-    "ms": 942,
+    "ms": 1144,
     "hit": true,
     "techs": "union+error+boolean",
     "dbms": "MySQL",
@@ -7523,9 +7523,9 @@
     "verdict": "no_vulnerability_detected",
     "err": "",
     "raw": {
-      "scanId": "Vioh1XNbA3sr",
+      "scanId": "TlXZOpVVYv1y",
       "target": {
-        "id": "uc8ZL2FScK",
+        "id": "I4eWVee3T6",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/shop/semi?a=1;id=1",
         "method": "GET",
@@ -7666,8 +7666,8 @@
           "paramDel": ";"
         }
       },
-      "startedAt": "2026-09-12T11:36:19.300Z",
-      "finishedAt": "2026-09-12T11:36:19.592Z",
+      "startedAt": "2026-09-12T16:29:58.077Z",
+      "finishedAt": "2026-09-12T16:29:58.356Z",
       "dbms": "MySQL",
       "points": [
         {
@@ -7718,7 +7718,7 @@
       ],
       "vulns": [
         {
-          "id": "rNhawNN9",
+          "id": "_SysNQ5q",
           "pointId": "283e732d",
           "technique": "union",
           "dbms": "MySQL",
@@ -7732,7 +7732,7 @@
           "trace": null
         },
         {
-          "id": "mUKYUHsh",
+          "id": "ezIodu1e",
           "pointId": "283e732d",
           "technique": "error",
           "dbms": "MySQL",
@@ -7745,7 +7745,7 @@
           "trace": null
         },
         {
-          "id": "qoG-gTCT",
+          "id": "DqPZ8rmV",
           "pointId": "283e732d",
           "technique": "boolean",
           "dbms": "MySQL",
@@ -8082,7 +8082,7 @@
     "url": "http://127.0.0.1:8231/shop/mix?kw=alpha",
     "round": "r2",
     "exit": 2,
-    "ms": 714,
+    "ms": 963,
     "hit": true,
     "techs": "union+error+boolean",
     "dbms": "MySQL",
@@ -8091,9 +8091,9 @@
     "verdict": "no_vulnerability_detected",
     "err": "",
     "raw": {
-      "scanId": "FRNVgkbnWIri",
+      "scanId": "BDWAbLSUhuV9",
       "target": {
-        "id": "EkGuk-_D0r",
+        "id": "AiILqtPmrz",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/shop/mix?kw=alpha",
         "method": "GET",
@@ -8233,8 +8233,8 @@
           }
         }
       },
-      "startedAt": "2026-09-12T11:36:20.217Z",
-      "finishedAt": "2026-09-12T11:36:20.417Z",
+      "startedAt": "2026-09-12T16:29:59.242Z",
+      "finishedAt": "2026-09-12T16:29:59.419Z",
       "dbms": "MySQL",
       "points": [
         {
@@ -8268,7 +8268,7 @@
       ],
       "vulns": [
         {
-          "id": "NXCmVz9f",
+          "id": "Bi5qiWBi",
           "pointId": "f19aee69",
           "technique": "union",
           "dbms": "MySQL",
@@ -8282,7 +8282,7 @@
           "trace": null
         },
         {
-          "id": "0Prgfz9k",
+          "id": "4lsYECoQ",
           "pointId": "f19aee69",
           "technique": "error",
           "dbms": "MySQL",
@@ -8295,7 +8295,7 @@
           "trace": null
         },
         {
-          "id": "2C2VIX96",
+          "id": "LVcuX9oG",
           "pointId": "f19aee69",
           "technique": "boolean",
           "dbms": "MySQL",
@@ -8494,7 +8494,7 @@
     "url": "http://127.0.0.1:8231/account/update",
     "round": "r2",
     "exit": 2,
-    "ms": 708,
+    "ms": 966,
     "hit": true,
     "techs": "second_order",
     "dbms": "",
@@ -8503,9 +8503,9 @@
     "verdict": "no_vulnerability_detected",
     "err": "",
     "raw": {
-      "scanId": "s8p3F6zhCB5I",
+      "scanId": "DsNfcAqIqxKL",
       "target": {
-        "id": "dlLpJRCpmo",
+        "id": "nY6lLn8i7w",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/account/update",
         "method": "POST",
@@ -8514,7 +8514,7 @@
         },
         "jsonBody": null,
         "cookieParams": {
-          "sid": "rtmtyb6xeb"
+          "sid": "rtmtylohtq"
         },
         "headerParams": {},
         "config": {
@@ -8645,8 +8645,8 @@
           "testHeaders": true
         }
       },
-      "startedAt": "2026-09-12T11:36:20.932Z",
-      "finishedAt": "2026-09-12T11:36:20.993Z",
+      "startedAt": "2026-09-12T16:30:00.211Z",
+      "finishedAt": "2026-09-12T16:30:00.271Z",
       "dbms": null,
       "points": [
         {
@@ -8669,7 +8669,7 @@
           "id": "e30960cf",
           "location": "cookie",
           "param": "sid",
-          "originalValue": "rtmtyb6xeb",
+          "originalValue": "rtmtylohtq",
           "confirmed": false,
           "technique": null,
           "dbms": null,
@@ -8684,7 +8684,7 @@
       ],
       "vulns": [
         {
-          "id": "FQcmUU4L",
+          "id": "QmO82xgh",
           "pointId": "0e86acf3",
           "technique": "second_order",
           "dbms": null,
@@ -8761,7 +8761,7 @@
     "url": "http://127.0.0.1:8231/shop/stack?id=1",
     "round": "r2",
     "exit": 2,
-    "ms": 694,
+    "ms": 969,
     "hit": true,
     "techs": "union+error+boolean",
     "dbms": "MySQL",
@@ -8770,9 +8770,9 @@
     "verdict": "no_vulnerability_detected",
     "err": "",
     "raw": {
-      "scanId": "EU2LN8_BX_sO",
+      "scanId": "lRoOgnIGQoy0",
       "target": {
-        "id": "b788um5bAg",
+        "id": "ZrRhA-nC6R",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/shop/stack?id=1",
         "method": "GET",
@@ -8912,8 +8912,8 @@
           }
         }
       },
-      "startedAt": "2026-09-12T11:36:21.624Z",
-      "finishedAt": "2026-09-12T11:36:21.824Z",
+      "startedAt": "2026-09-12T16:30:01.176Z",
+      "finishedAt": "2026-09-12T16:30:01.372Z",
       "dbms": "MySQL",
       "points": [
         {
@@ -8947,7 +8947,7 @@
       ],
       "vulns": [
         {
-          "id": "409xH0QU",
+          "id": "tY9hJF9A",
           "pointId": "283e732d",
           "technique": "union",
           "dbms": "MySQL",
@@ -8961,7 +8961,7 @@
           "trace": null
         },
         {
-          "id": "T8SvoWJt",
+          "id": "SupD2Hny",
           "pointId": "283e732d",
           "technique": "error",
           "dbms": "MySQL",
@@ -8974,7 +8974,7 @@
           "trace": null
         },
         {
-          "id": "lNPpPYHg",
+          "id": "ZMQSu0Gj",
           "pointId": "283e732d",
           "technique": "boolean",
           "dbms": "MySQL",
@@ -9311,7 +9311,7 @@
     "url": "http://127.0.0.1:8231/waf/item?id=1",
     "round": "r2",
     "exit": 2,
-    "ms": 1556,
+    "ms": 1690,
     "hit": true,
     "techs": "error+boolean",
     "dbms": "MySQL",
@@ -9320,9 +9320,9 @@
     "verdict": "no_vulnerability_detected",
     "err": "",
     "raw": {
-      "scanId": "pUp3JRzZf2Cq",
+      "scanId": "wGD6ECO4AcLr",
       "target": {
-        "id": "TvrkkEvaT0",
+        "id": "wgTU8RQ1n_",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/waf/item?id=1",
         "method": "GET",
@@ -9462,8 +9462,8 @@
           }
         }
       },
-      "startedAt": "2026-09-12T11:36:22.356Z",
-      "finishedAt": "2026-09-12T11:36:23.335Z",
+      "startedAt": "2026-09-12T16:30:02.068Z",
+      "finishedAt": "2026-09-12T16:30:03.041Z",
       "dbms": "MySQL",
       "points": [
         {
@@ -9487,7 +9487,7 @@
       ],
       "vulns": [
         {
-          "id": "ZNow7rTy",
+          "id": "VbmqtC6d",
           "pointId": "283e732d",
           "technique": "error",
           "dbms": "MySQL",
@@ -9500,7 +9500,7 @@
           "trace": null
         },
         {
-          "id": "3dCHdHmT",
+          "id": "8WcUAmCm",
           "pointId": "283e732d",
           "technique": "boolean",
           "dbms": "MySQL",
@@ -9855,7 +9855,7 @@
     "url": "http://127.0.0.1:8231/safe/item?id=1",
     "round": "r2",
     "exit": 0,
-    "ms": 4595,
+    "ms": 4800,
     "hit": false,
     "techs": "",
     "dbms": "",
@@ -9864,9 +9864,9 @@
     "verdict": "no_vulnerability_detected",
     "err": "",
     "raw": {
-      "scanId": "NUhXGRTVONq-",
+      "scanId": "nf81ylPIjnns",
       "target": {
-        "id": "b-pPd9m-E0",
+        "id": "eJMwk9uQxI",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/safe/item?id=1",
         "method": "GET",
@@ -10006,8 +10006,8 @@
           }
         }
       },
-      "startedAt": "2026-09-12T11:36:23.934Z",
-      "finishedAt": "2026-09-12T11:36:27.963Z",
+      "startedAt": "2026-09-12T16:30:03.831Z",
+      "finishedAt": "2026-09-12T16:30:07.850Z",
       "dbms": null,
       "points": [
         {
@@ -10090,7 +10090,7 @@
     "url": "http://127.0.0.1:8231/safe/search?q=a",
     "round": "r2",
     "exit": 0,
-    "ms": 4412,
+    "ms": 4740,
     "hit": false,
     "techs": "",
     "dbms": "",
@@ -10099,9 +10099,9 @@
     "verdict": "no_vulnerability_detected",
     "err": "",
     "raw": {
-      "scanId": "o3i-Qm9Wt-Cb",
+      "scanId": "v2Wv6UR_t66t",
       "target": {
-        "id": "nl34AovDo3",
+        "id": "Gb7ZzLchTe",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/safe/search?q=a",
         "method": "GET",
@@ -10241,8 +10241,8 @@
           }
         }
       },
-      "startedAt": "2026-09-12T11:36:28.534Z",
-      "finishedAt": "2026-09-12T11:36:32.399Z",
+      "startedAt": "2026-09-12T16:30:08.583Z",
+      "finishedAt": "2026-09-12T16:30:12.435Z",
       "dbms": null,
       "points": [
         {
@@ -10325,18 +10325,18 @@
     "url": "http://127.0.0.1:8231/safe/rand?x=1",
     "round": "r2",
     "exit": 0,
-    "ms": 4426,
+    "ms": 6990,
     "hit": false,
     "techs": "",
     "dbms": "",
     "risk": "Low",
-    "reqs": 242,
+    "reqs": 356,
     "verdict": "no_vulnerability_detected",
     "err": "",
     "raw": {
-      "scanId": "exIrRx5jjuA7",
+      "scanId": "Xd4u33Y3xyRe",
       "target": {
-        "id": "MRIKydzjYO",
+        "id": "SrDrxpVIay",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/safe/rand?x=1",
         "method": "GET",
@@ -10476,8 +10476,8 @@
           }
         }
       },
-      "startedAt": "2026-09-12T11:36:32.944Z",
-      "finishedAt": "2026-09-12T11:36:36.798Z",
+      "startedAt": "2026-09-12T16:30:13.374Z",
+      "finishedAt": "2026-09-12T16:30:19.506Z",
       "dbms": null,
       "points": [
         {
@@ -10496,7 +10496,7 @@
           "storeKind": null,
           "boundaryProbed": true,
           "_baselineTitle": "rand",
-          "boundary": ""
+          "boundary": "\"))"
         }
       ],
       "vulns": [],
@@ -10511,9 +10511,9 @@
         "validity": {
           "status": "ok",
           "reliable": true,
-          "reason": "目标可达性与会话状态正常：累计 242 次请求，无连续失败/拦截/会话失效/持续 5xx 迹象",
+          "reason": "目标可达性与会话状态正常：累计 356 次请求，无连续失败/拦截/会话失效/持续 5xx 迹象",
           "counts": {
-            "total": 242,
+            "total": 356,
             "failStreak": 0,
             "blockHits": 0,
             "serverErr": 0,
@@ -10538,9 +10538,9 @@
       "validity": {
         "status": "ok",
         "reliable": true,
-        "reason": "目标可达性与会话状态正常：累计 242 次请求，无连续失败/拦截/会话失效/持续 5xx 迹象",
+        "reason": "目标可达性与会话状态正常：累计 356 次请求，无连续失败/拦截/会话失效/持续 5xx 迹象",
         "counts": {
-          "total": 242,
+          "total": 356,
           "failStreak": 0,
           "blockHits": 0,
           "serverErr": 0,
@@ -10560,7 +10560,7 @@
     "url": "http://127.0.0.1:8231/safe/boom?id=1",
     "round": "r2",
     "exit": 0,
-    "ms": 2562,
+    "ms": 2771,
     "hit": false,
     "techs": "",
     "dbms": "",
@@ -10569,9 +10569,9 @@
     "verdict": "inconclusive",
     "err": "",
     "raw": {
-      "scanId": "8NOMLr-XNwOU",
+      "scanId": "dH_gXLGRGA0a",
       "target": {
-        "id": "ykN_SpK793",
+        "id": "GIhr5r0L1G",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/safe/boom?id=1",
         "method": "GET",
@@ -10711,8 +10711,8 @@
           }
         }
       },
-      "startedAt": "2026-09-12T11:36:37.331Z",
-      "finishedAt": "2026-09-12T11:36:39.307Z",
+      "startedAt": "2026-09-12T16:30:20.364Z",
+      "finishedAt": "2026-09-12T16:30:22.335Z",
       "dbms": null,
       "points": [
         {
@@ -10795,7 +10795,7 @@
     "url": "http://127.0.0.1:8231/safe/blocked?id=1",
     "round": "r2",
     "exit": 0,
-    "ms": 2701,
+    "ms": 2902,
     "hit": false,
     "techs": "",
     "dbms": "",
@@ -10804,9 +10804,9 @@
     "verdict": "inconclusive",
     "err": "",
     "raw": {
-      "scanId": "BEIBElr-m3jF",
+      "scanId": "aOwU_YRYPw0i",
       "target": {
-        "id": "h2BLjEvgFO",
+        "id": "DotfPImnhs",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/safe/blocked?id=1",
         "method": "GET",
@@ -10946,8 +10946,8 @@
           }
         }
       },
-      "startedAt": "2026-09-12T11:36:39.847Z",
-      "finishedAt": "2026-09-12T11:36:42.034Z",
+      "startedAt": "2026-09-12T16:30:23.067Z",
+      "finishedAt": "2026-09-12T16:30:25.242Z",
       "dbms": null,
       "points": [
         {
@@ -11066,7 +11066,7 @@
     "url": "http://127.0.0.1:8231/safe/redirect?id=1",
     "round": "r2",
     "exit": 0,
-    "ms": 4546,
+    "ms": 4834,
     "hit": false,
     "techs": "",
     "dbms": "",
@@ -11075,9 +11075,9 @@
     "verdict": "no_vulnerability_detected",
     "err": "",
     "raw": {
-      "scanId": "kpx8XMisJk5n",
+      "scanId": "TdlGvf4vIorn",
       "target": {
-        "id": "ra5HnyyOhD",
+        "id": "2HMfMCyBEb",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/safe/redirect?id=1",
         "method": "GET",
@@ -11217,8 +11217,8 @@
           }
         }
       },
-      "startedAt": "2026-09-12T11:36:42.567Z",
-      "finishedAt": "2026-09-12T11:36:46.591Z",
+      "startedAt": "2026-09-12T16:30:26.081Z",
+      "finishedAt": "2026-09-12T16:30:30.104Z",
       "dbms": null,
       "points": [
         {
@@ -11301,7 +11301,7 @@
     "url": "http://127.0.0.1:8231/safe/static?id=1",
     "round": "r2",
     "exit": 0,
-    "ms": 4552,
+    "ms": 4736,
     "hit": false,
     "techs": "",
     "dbms": "",
@@ -11310,9 +11310,9 @@
     "verdict": "no_vulnerability_detected",
     "err": "",
     "raw": {
-      "scanId": "zOG5f9PgQxeY",
+      "scanId": "snhqZuXENe_h",
       "target": {
-        "id": "Mw4wMVJd6X",
+        "id": "Hy9egZa70-",
         "mode": "http",
         "baseUrl": "http://127.0.0.1:8231/safe/static?id=1",
         "method": "GET",
@@ -11452,8 +11452,8 @@
           }
         }
       },
-      "startedAt": "2026-09-12T11:36:47.136Z",
-      "finishedAt": "2026-09-12T11:36:51.149Z",
+      "startedAt": "2026-09-12T16:30:30.817Z",
+      "finishedAt": "2026-09-12T16:30:34.828Z",
       "dbms": null,
       "points": [
         {

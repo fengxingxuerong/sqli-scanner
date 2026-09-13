@@ -187,6 +187,22 @@ jobs:
           MYSQL_PORT: 3306
           MYSQL_USER: root
           MYSQL_PASSWORD: root
+      # 红队评测靶场（ground-truth 真值对照 + sqlmap 同题对比）：独立常驻进程，
+      # CI 环境可能缺 PostgreSQL（D:/pg-smoke 类本地路径），故失败不阻塞——
+      # 门禁会把该套件标为 SKIP，其余套件照常判定。
+      - name: 尝试拉起红队评测靶场（可选，失败不阻塞）
+        continue-on-error: true
+        run: |
+          nohup node e2e/redteam-lab/env.mjs > redteam-env.log 2>&1 &
+          for i in $(seq 1 60); do
+            if curl -s -o /dev/null http://127.0.0.1:8231/; then
+              echo "redteam lab ready"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "红队靶场未就绪（CI 可能缺 PG），门禁将跳过该套件（SKIP）"
+          tail -20 redteam-env.log || true
       - name: 全方位验收门禁（事实断言模式）
         run: npm run acceptance
         env:

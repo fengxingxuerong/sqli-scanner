@@ -78,7 +78,7 @@ const num = (re, s, g = 1) => {
 };
 
 // ── 前置检查：依赖不可用必须显式 SKIP 并给出原因 ──────────────────────────────
-const pre = { mysql: false, mysqlReason: '', secureFilePriv: null, mysqlVersion: null };
+const pre = { mysql: false, mysqlReason: '', secureFilePriv: null, mysqlVersion: null, redteamLab: false };
 {
   if (await portOpen(MYSQL.port)) {
     try {
@@ -95,6 +95,10 @@ const pre = { mysql: false, mysqlReason: '', secureFilePriv: null, mysqlVersion:
     pre.mysqlReason = `端口 ${MYSQL.port} 未监听——请先启动 MySQL`;
   }
 }
+
+// 红队评测靶场（ground-truth 真值对照 + sqlmap 同题对比）：独立进程常驻，需预先拉起
+const REDTEAM_PORT = Number(process.env.REDTEAM_LAB_PORT) || 8231;
+pre.redteamLab = await portOpen(REDTEAM_PORT, '127.0.0.1', 1500);
 
 const envDb = {
   MYSQL_HOST: MYSQL.host,
@@ -182,7 +186,7 @@ const SUITES = [
     id: 'report-contract',
     title: '报告契约（自报字段必须与真实状态一致）',
     needs: ['mysql'],
-    run: () => run('node', ['e2e/diag/report-contract.e2e.mjs'], { ...envDb, PENTEST_LAB_PORT: String(PORT_BASE + 1) }),
+    run: () => run('node', ['e2e/contract/report-contract.e2e.mjs'], { ...envDb, PENTEST_LAB_PORT: String(PORT_BASE + 1) }),
     assert: (out) => {
       const ok = num(/\[contract\] 校验通过 (\d+)/, out);
       const bad = num(/\[contract\] 不一致 (\d+)/, out);
@@ -223,13 +227,39 @@ const SUITES = [
     },
   },
   {
+    id: 'redteam',
+    title: '红队实战评测（ground-truth 真值对照 + sqlmap 同题）',
+    needs: ['redteamLab'],
+    optional: true, // 依赖独立常驻靶场（npm run lab:redteam），CI 外不强制
+    heavy: true,
+    // 顺序：重建地面真值 → 调参口径扫描 → 汇总（含 sqlmap 对照）
+    // 不跑 selftest（它会重写真值表），只跑扫描 + 由 gate-check 直接读文件算准确率
+    run: () => run('node', ['e2e/redteam-lab/run-scan.mjs', 'r2']).then(() =>
+      run('node', ['e2e/redteam-lab/gate-check.mjs', 'r2'])
+    ),
+    assert: (out) => {
+      // 只吃事实数字：R2 命中/总数、sqlmap 命中/总数、误报数
+      // 直接吃 gate-check 算好的真值数字（分母只含已确认 vuln，误报只数 safe）
+      const hit = num(/\[redteam\] round=r2 vuln=(\d+) hit=(\d+) rate=(\d+)% safe=(\d+) fp=(\d+)/, out, 2);
+      const total = num(/\[redteam\] round=r2 vuln=(\d+) hit=(\d+) rate=(\d+)% safe=(\d+) fp=(\d+)/, out, 1);
+      const pct = num(/\[redteam\] round=r2 vuln=(\d+) hit=(\d+) rate=(\d+)% safe=(\d+) fp=(\d+)/, out, 3);
+      const safeN = num(/\[redteam\] round=r2 vuln=(\d+) hit=(\d+) rate=(\d+)% safe=(\d+) fp=(\d+)/, out, 4);
+      const fp = num(/\[redteam\] round=r2 vuln=(\d+) hit=(\d+) rate=(\d+)% safe=(\d+) fp=(\d+)/, out, 5);
+      return {
+        facts: { 检出: `${hit}/${total}`, 检出率: `${pct}%`, 安全点: safeN, 误报: fp },
+        pass: total > 0 && pct != null && pct >= 90 && fp === 0,
+        reason: fp ? `安全点误报 ${fp} 个` : pct == null ? '未取到 gate-check 判据' : `检出率仅 ${pct}%`,
+      };
+    },
+  },
+  {
     id: 'file-read',
     title: 'fileRead 真闭环',
     needs: ['secure_file_priv'],
     // optional：secure_file_priv 未放行属 MySQL 8 默认环境（NULL），此时脚本自身即输出 SKIP；
     // 这类「环境可选依赖」缺失不影响门禁结论，与「必需依赖缺失」必须区别对待。
     optional: true,
-    run: () => run('node', ['e2e/diag/exploit-file-read.e2e.mjs'], { ...envDb, PENTEST_LAB_PORT: String(PORT_BASE + 2) }),
+    run: () => run('node', ['e2e/fileops/exploit-file-read.e2e.mjs'], { ...envDb, PENTEST_LAB_PORT: String(PORT_BASE + 2) }),
     assert: (out) => {
       const passed = /\[PASS\] fileRead/.test(out);
       const skipped = /\[SKIP\]/.test(out);
@@ -241,7 +271,7 @@ const SUITES = [
     title: 'fileWrite 真闭环（文件系统侧断言）',
     needs: ['secure_file_priv'],
     optional: true,
-    run: () => run('node', ['e2e/diag/exploit-file-write.e2e.mjs'], { ...envDb, PENTEST_LAB_PORT: String(PORT_BASE + 3) }),
+    run: () => run('node', ['e2e/fileops/exploit-file-write.e2e.mjs'], { ...envDb, PENTEST_LAB_PORT: String(PORT_BASE + 3) }),
     assert: (out) => {
       const passed = /\[PASS\] fileWrite/.test(out);
       const skipped = /\[SKIP\]/.test(out);

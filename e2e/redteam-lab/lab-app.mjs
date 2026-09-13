@@ -157,9 +157,16 @@ export async function createLabApp() {
     return rowsHtml(await q(`SELECT id,name,email FROM users WHERE id=${ip}`));
   }));
 
-  // D13 Path 参数
-  app.get('/shop/user/:id', (req, res) => run(res, 'user', async () =>
-    rowsHtml(await q(`SELECT id,name,email FROM users WHERE id=${req.params.id}`))));
+  // D13 Path 参数。不用 :id 路由参数：Express 在**路由匹配阶段**就对路径段做
+  // decodeURIComponent，payload 含非法序列（如 `1%%22`）时直接 URIError → 400，
+  // handler 根本进不去（这也是上一版 decodeSafe 补丁无效的原因——它写在 handler 里，
+  // 而 decode 发生在 handler 之前）。改为 app.use 前缀匹配 + 手工取最后一段原样拼 SQL
+  //（保留「直接拼进查询」的注入语义，非法序列由 decodeSafe 容错）。
+  app.use('/shop/user', (req, res) => {
+    const rawSeg = decodeSafe(String(req.originalUrl).split('?')[0].split('/').pop() ?? '1');
+    run(res, 'user', async () =>
+      rowsHtml(await q(`SELECT id,name,email FROM users WHERE id=${rawSeg}`)));
+  });
 
   // D14 base64 编码参数（考验能否处理编码）
   app.get('/shop/b64', (req, res) => run(res, 'b64', async () => {
@@ -168,6 +175,11 @@ export async function createLabApp() {
     return rowsHtml(await q(`SELECT id,name,email FROM users WHERE id=${id}`));
   }));
 
+// 容错 decode：非法序列原样返回（模拟"站点自己 decode 失败时拿原始值凑合用"的真实行为，
+// 也让扫描端看到 200 + 注入差异，而不是 500 噪声）
+function decodeSafe(v) {
+  try { return decodeURIComponent(v); } catch { return v; }
+}
   // D15 自定义参数分隔符（; ）——模拟只认分号的站点。
   // Express 默认按 & 解析会把 `a=1;id=1` 整体塞进 a 的值，所以这里从 originalUrl 手工切。
   app.get('/shop/semi', (req, res) => run(res, 'semi', async () => {

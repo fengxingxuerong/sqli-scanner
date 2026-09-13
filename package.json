@@ -19,8 +19,8 @@
     "waf-validate": "node e2e/waf-lab/validate-tamper.mjs",
     "waf-real": "node e2e/waf-real/waf-verify.mjs",
     "waf-auto": "node e2e/waf-real/waf-auto-check.mjs",
-    "e2e:file-read": "node e2e/diag/exploit-file-read.e2e.mjs",
-    "e2e:file-write": "node e2e/diag/exploit-file-write.e2e.mjs",
+    "e2e:file-read": "node e2e/fileops/exploit-file-read.e2e.mjs",
+    "e2e:file-write": "node e2e/fileops/exploit-file-write.e2e.mjs",
     "tauri": "tauri",
     "build:engine": "node scripts/build-engine.mjs",
     "build:tauri": "npm run build && npm run build:engine && tauri build",
@@ -39,7 +39,15 @@
     "real-lab": "node e2e/real-world-lab/server.js",
     "real-verify": "node e2e/real-world-lab/verify.mjs",
     "test:detection": "node e2e/detection-runner/run.js",
-    "acceptance": "node e2e/acceptance.mjs"
+    "acceptance": "node e2e/acceptance.mjs",
+    "lab:redteam": "node e2e/redteam-lab/env.mjs",
+    "redteam:truth": "node e2e/redteam-lab/selftest.mjs",
+    "redteam:r1": "node e2e/redteam-lab/run-scan.mjs r1",
+    "redteam:r2": "node e2e/redteam-lab/run-scan.mjs r2",
+    "redteam:report": "node e2e/redteam-lab/report.mjs",
+    "redteam:sqlmap": "node e2e/redteam-lab/sqlmap-bench.mjs",
+    "demo:report": "node e2e/demo/deliverable-demo.mjs",
+    "typecheck:server": "tsc -p server/tsconfig.json"
   },
   "lint-staged": {
     "*.{js,mjs,cjs,ts,tsx}": [
