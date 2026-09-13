@@ -27,7 +27,7 @@
     "package:win": "npm run build && npm run build:engine && tauri build --runner cargo --target x86_64-pc-windows-msvc",
     "package:mac": "npm run build && npm run build:engine && tauri build --runner cargo --target universal-apple-darwin",
     "typecheck": "tsc --noEmit",
-    "test:server": "cd server && node --test --test-concurrency=1",
+    "test:server": "cd server && npm test",
     "test:all": "npm run test && npm run test:server",
     "test": "vitest run",
     "test:watch": "vitest",

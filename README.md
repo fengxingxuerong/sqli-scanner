@@ -1,7 +1,7 @@
 # sqli-scanner
 
 [![CI](https://img.shields.io/github/actions/workflow/status/OWNER/REPO/ci.yml?branch=main&label=CI)](https://github.com/OWNER/REPO/actions)
-[![ Tests](https://img.shields.io/badge/tests-1440%20passing-brightgreen)](#测试)
+[![ Tests](https://img.shields.io/badge/tests-1996%20passing-brightgreen)](#测试)
 
 一键式 SQL 注入检测工具。无需记忆命令行参数，打开浏览器即可使用。
 
