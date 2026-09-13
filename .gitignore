@@ -60,3 +60,6 @@ e2e/waf-lab/results/.git-broken-20260906/
 # 绾㈤槦璇勬祴浜х墿锛堟湰鍦扮敓鎴愶紝涓嶅叆搴擄級
 e2e/redteam-lab/out/
 e2e/redteam-lab/sqlmap-out/
+
+# e2e 临时诊断脚本与运行输出（本地 scratch，不纳入版本管理）
+e2e/diag/

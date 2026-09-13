@@ -202,6 +202,45 @@ error 通道仅在 orderby 场景命中。
 
 另：`off` 档须同时关掉 `adaptiveOnBlock`，否则不再是「无规避基线」（A/B 会串味）。
 
+### 红队实战评测（ground-truth 真值对照）
+
+`e2e/redteam-lab/` 是一套**带地面真值的实战评测**：26 个靶点（19 个真实漏洞点 + 7 个安全对照），
+覆盖数值/字符串/LIKE/ORDER BY/报错/布尔/时间/POST/JSON/Cookie/Header/Path/Base64/二阶/堆叠/WAF 守卫。
+
+```bash
+npm run lab:redteam     # 拉起环境（MySQL + PG + 靶场，同进程常驻）
+npm run redteam:truth   # 用已知 payload 重建地面真值（selftest）
+npm run redteam:r2      # 调参口径扫描（level 3 / risk 2 / 全技术）
+npm run redteam:report  # 汇总（含 sqlmap 同题对照）
+```
+
+**实测（2026-09-12，真 MySQL 8.0.28）**：
+
+| 口径 | 检出 | 说明 |
+|---|---|---|
+| R1 开箱即用（level 1） | 18/19（95%） | 唯一漏项是 Cookie 点——level 1 不测 Cookie，**与 sqlmap 的默认行为一致** |
+| R2 调参（level 3） | **19/19（100%）** | 全中 |
+| 安全对照（7 个安全点） | **误报 0** | 参数化/随机/500/403/重定向/静态资源 |
+
+### sqlmap 同题对照（当期实测）
+
+```bash
+npm run redteam:sqlmap   # 14 个漏洞用例 + 4 个安全用例，--level 1 --risk 1（与本工具 R1 档对齐）
+```
+
+| 指标 | sqli-scanner R1 | sqlmap（同档 level 1） | 口径说明 |
+|---|---|---|---|
+| 漏洞检出 | 18/19（95%） | 13/14（93%） | **分母不同**：sqlmap 用例未覆盖 D11-cookie / D14-D16 / E15 |
+| 安全点误报 | **0/7（0%）** | 3/4（75%） | **分母不同**：sqlmap 只跑 4 个安全用例（F18/F20/F21/F22） |
+
+sqlmap 误报的具体条目：`F18-safe-item`、`F20-safe-rand`、`F21-safe-500` 被判为注入；
+`F22-safe-403` 未误报。本工具 7 个安全点（含 F19/F23/F24）全部零误报。
+
+⚠️ 这不是严格同题对比（用例数量不同），**比率不可直接类比**；但「安全点误报 0 vs 3」是
+方向性差异，且可复现（两条命令都能跑）。调参后本工具 R2 为 19/19（100%）。
+
+已作为 `redteam` 套件纳入 `npm run acceptance`（需先起靶场；CI 里起不来则按 SKIP 处理，不假绿）。
+
 ### 验收门禁（`npm run acceptance`）
 
 10 套件一次跑完：服务端单测 → 独立刁钻靶场 → 检测回归 → 真 MySQL → 真 PG（含二阶）→
@@ -222,6 +261,19 @@ npm run acceptance -- --only=waf-auto,waf-real   # 改完某模块做定向门�
 
 - 依赖缺失时输出 **SKIP + 原因**（不静默跳过、不假装通过）；任一必需套件失败 → 非零退出码。
 - 报告落盘 `e2e/results/acceptance-report.md`。
+
+**最近一次全量结果（2026-09-12，MySQL 8.0.28 + 红队靶场就绪）**：**9 PASS / 0 FAIL / 2 SKIP**
+
+| 套件 | 事实 |
+|---|---|
+| 服务端单测 | 1735 / 1735 pass |
+| 独立刁钻靶场 | 10/10 检出，安全误报 0 |
+| 检测回归 | 19 PASS / 0 FAIL |
+| 真 MySQL / 真 PG（含二阶） | 10 PASS / 全部通过 |
+| 报告契约 | 8 项一致 |
+| CRS 人工挂链 / 自动选链 | off 2 → on 10；技术位 10，误报 0 |
+| 红队实战评测（真值对照） | 19/19（100%），安全点误报 0 |
+| fileRead / fileWrite | SKIP（`secure_file_priv=NULL`，MySQL 8 默认；需受控实例放行才能真跑） |
 - 门禁本身做过**缺陷注入验证**：临时移除有效 tamper 链后，`waf-auto` 套件精准 FAIL
   （技术位 10 → 2），恢复后回到 PASS。
 
@@ -231,7 +283,28 @@ npm run acceptance -- --only=waf-auto,waf-real   # 改完某模块做定向门�
 |---|---|---|
 | **fileRead（MySQL）** | ✅ **已跑通真实闭环** | HTTP 注入点 → UNION 注入 → `LOAD_FILE` → 内容回传，与自备标记文件**逐字节一致**。复现：`npm run e2e:file-read` |
 | **fileWrite（MySQL）** | ✅ **已跑通真实闭环** | HTTP 注入点 → `INTO OUTFILE` → **文件系统侧确认落盘**（含注入标记）。复现：`npm run e2e:file-write` |
-| UDF / os-shell / 注册表 | ⚠️ **实验特性，未真实验证** | 仍只有 mock 单测；能力矩阵按 DBMS 文档声明，未在任何真实库跑通 |
+| **UDF / os-shell** | 🟡 **验证素材齐备，真跑未完成** | `e2e/udf-lab/` 提供最小 UDF 源码 + MSVC 构建脚本 + 两个验证脚本；**两个脚本的运行均被安全审批拦截**（详见下） |
+| 注册表 | ⚠️ 实验特性，未真实验证 | 仍只有 mock 单测 |
+
+**UDF 接管的当前边界（如实说明，勿夸大）**：
+
+```
+e2e/udf-lab/
+  udf_sys.c        最小 UDF：udf_echo(s) 原样返回 + sys_eval(cmd) 执行并返回 stdout
+  build-udf.py     MSVC x64 构建（显式 INCLUDE/LIB/PATH，不依赖 vcvars/reg.exe）
+  udf-takeover.e2e.mjs  全链验证：落地 → 经注入通道 CREATE FUNCTION → sys_eval 执行 → 断言输出
+```
+
+已完成：**DLL 真编译通过**（`udf_sys.dll`，导出 `udf_echo` / `sys_eval`，符号已核对）。
+
+未完成：两个验证脚本**都在运行时被环境安全审批拦截**——
+`udf-takeover.e2e.mjs`（含经 UDF 执行系统命令）与 `udf-register.e2e.mjs`（仅加载注册、不执行命令，
+但 `CREATE FUNCTION ... SONAME` 加载原生库同样被判敏感）。两次均未重试、未绕过，
+**因此 os-shell 仍不得标记为「已验证」**。在有授权的环境里手动放开审批后即可跑通。
+
+另一条独立限制：完整「经 SQL 通道投递 DLL 本体」在 HTTP 侧不可行——DLL hex 约 24 万字符，
+远超 Node 的 URL/header 上限（16KB），走 POST body 也需目标放宽限制（Express json 默认 100kb）。
+实际接管通常靠精简体积的 UDF 库或配合已有文件写权限。
 
 **fileWrite 两条投递通道（`via` 字段如实标注）**：
 

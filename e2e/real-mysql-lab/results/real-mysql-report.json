@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-12T11:38:44.812Z",
+  "generatedAt": "2026-09-12T16:22:33.590Z",
   "mysql": "127.0.0.1:3306/sqli_lab",
   "pass": 10,
   "total": 10,
@@ -19,7 +19,7 @@
         "union"
       ],
       "miss": [],
-      "elapsedMs": 206,
+      "elapsedMs": 4933,
       "status": "completed",
       "ok": true,
       "expectSafe": false
@@ -39,7 +39,7 @@
         "boolean"
       ],
       "miss": [],
-      "elapsedMs": 93,
+      "elapsedMs": 3750,
       "status": "completed",
       "ok": true,
       "expectSafe": false
@@ -59,7 +59,7 @@
         "boolean"
       ],
       "miss": [],
-      "elapsedMs": 93,
+      "elapsedMs": 4139,
       "status": "completed",
       "ok": true,
       "expectSafe": false
@@ -78,7 +78,7 @@
         "boolean"
       ],
       "miss": [],
-      "elapsedMs": 625,
+      "elapsedMs": 7141,
       "status": "completed",
       "ok": true,
       "expectSafe": false
@@ -97,7 +97,7 @@
         "boolean"
       ],
       "miss": [],
-      "elapsedMs": 1317,
+      "elapsedMs": 10528,
       "status": "completed",
       "ok": true,
       "expectSafe": false
@@ -115,7 +115,7 @@
         "boolean"
       ],
       "miss": [],
-      "elapsedMs": 5734,
+      "elapsedMs": 28521,
       "status": "completed",
       "ok": true,
       "expectSafe": false
@@ -133,7 +133,7 @@
         "time"
       ],
       "miss": [],
-      "elapsedMs": 9286,
+      "elapsedMs": 30141,
       "status": "completed",
       "ok": true,
       "expectSafe": false
@@ -151,7 +151,7 @@
         "stacked"
       ],
       "miss": [],
-      "elapsedMs": 8313,
+      "elapsedMs": 21344,
       "status": "completed",
       "ok": true,
       "expectSafe": false
@@ -163,7 +163,7 @@
       "dbms": [],
       "must": [],
       "miss": [],
-      "elapsedMs": 3614,
+      "elapsedMs": 21920,
       "status": "completed",
       "ok": true,
       "expectSafe": true
@@ -175,7 +175,7 @@
       "dbms": [],
       "must": [],
       "miss": [],
-      "elapsedMs": 757,
+      "elapsedMs": 7612,
       "status": "completed",
       "ok": true,
       "expectSafe": true

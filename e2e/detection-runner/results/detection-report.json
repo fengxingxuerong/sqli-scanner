@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-12T11:39:57.115Z",
+  "generatedAt": "2026-09-12T16:20:12.575Z",
   "stats": {
     "pass": 19,
     "fail": 0,
@@ -54,7 +54,7 @@
         }
       ],
       "requestCount": 40,
-      "elapsedMs": 117,
+      "elapsedMs": 3033,
       "vulnCount": 1
     },
     {
@@ -87,7 +87,7 @@
         }
       ],
       "requestCount": 78,
-      "elapsedMs": 587,
+      "elapsedMs": 6834,
       "vulnCount": 0
     },
     {
@@ -110,7 +110,7 @@
         }
       ],
       "requestCount": 5,
-      "elapsedMs": 23,
+      "elapsedMs": 29,
       "vulnCount": 0
     },
     {
@@ -133,7 +133,7 @@
         }
       ],
       "requestCount": 72,
-      "elapsedMs": 457,
+      "elapsedMs": 6207,
       "vulnCount": 0
     },
     {
@@ -156,7 +156,7 @@
         }
       ],
       "requestCount": 78,
-      "elapsedMs": 577,
+      "elapsedMs": 6829,
       "vulnCount": 0
     },
     {
@@ -179,7 +179,7 @@
         }
       ],
       "requestCount": 5,
-      "elapsedMs": 23,
+      "elapsedMs": 21,
       "vulnCount": 0
     },
     {
@@ -202,7 +202,7 @@
         }
       ],
       "requestCount": 81,
-      "elapsedMs": 653,
+      "elapsedMs": 7125,
       "vulnCount": 0
     },
     {
@@ -234,7 +234,7 @@
         }
       ],
       "requestCount": 53,
-      "elapsedMs": 75,
+      "elapsedMs": 4345,
       "vulnCount": 3
     },
     {
@@ -271,7 +271,7 @@
         }
       ],
       "requestCount": 46,
-      "elapsedMs": 44,
+      "elapsedMs": 3634,
       "vulnCount": 3
     },
     {
@@ -308,7 +308,7 @@
         }
       ],
       "requestCount": 50,
-      "elapsedMs": 45,
+      "elapsedMs": 4030,
       "vulnCount": 3
     },
     {
@@ -343,7 +343,7 @@
         }
       ],
       "requestCount": 88,
-      "elapsedMs": 2096,
+      "elapsedMs": 8771,
       "vulnCount": 1
     },
     {
@@ -373,7 +373,7 @@
         }
       ],
       "requestCount": 74,
-      "elapsedMs": 2063,
+      "elapsedMs": 7338,
       "vulnCount": 1
     },
     {
@@ -403,7 +403,7 @@
         }
       ],
       "requestCount": 162,
-      "elapsedMs": 5100,
+      "elapsedMs": 17350,
       "vulnCount": 1
     },
     {
@@ -433,7 +433,7 @@
         }
       ],
       "requestCount": 166,
-      "elapsedMs": 6339,
+      "elapsedMs": 19506,
       "vulnCount": 1
     },
     {
@@ -463,7 +463,7 @@
         }
       ],
       "requestCount": 23,
-      "elapsedMs": 51,
+      "elapsedMs": 1332,
       "vulnCount": 1
     },
     {
@@ -503,7 +503,7 @@
         }
       ],
       "requestCount": 35,
-      "elapsedMs": 55,
+      "elapsedMs": 2520,
       "vulnCount": 1
     },
     {
@@ -533,7 +533,7 @@
         }
       ],
       "requestCount": 43,
-      "elapsedMs": 47,
+      "elapsedMs": 3312,
       "vulnCount": 1
     },
     {
@@ -563,7 +563,7 @@
         }
       ],
       "requestCount": 155,
-      "elapsedMs": 2258,
+      "elapsedMs": 14508,
       "vulnCount": 1
     },
     {
@@ -593,7 +593,7 @@
         }
       ],
       "requestCount": 5,
-      "elapsedMs": 31,
+      "elapsedMs": 36,
       "vulnCount": 1
     }
   ]
