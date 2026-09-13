@@ -41,6 +41,8 @@ import { ErrorCode, AppError } from './errors.js';
 import { logger } from './logger.js';
 import { CookieJar } from './cookieJar.js';
 import { parseDigestChallenge, extractDigestChallenge, buildDigestHeader, makeCnonce } from './digestAuth.js';
+// [P1-2026-09-14] NTLM 三步握手（对标 sqlmap --auth-type=NTLM）：Type1 → Type2(challenge) → Type3
+import { NtlmHandshake } from './ntlmHandshake.js';
 
 // ── SSRF 防护（P0-1）────────────────────────────────────────────────────────
 // 分层策略（按 env 决定拒绝集合）：
@@ -737,7 +739,11 @@ export function mergeAuthHeaders(headers, auth) {
     }
   }
   if (!auth) return h;
-  if (auth.basic && auth.basic.username != null) {
+  // [P1-2026-09-14] NTLM 模式不发 Basic 头：NTLM 走自己的三步握手（Type1→Type2→Type3），
+  // 预置 Basic 会 ① 让首请求平白吃一次 401 ② 挡住 Type3 的预附加（已有 Authorization 则不附加）
+  // → 同主机后续请求每次都重走握手（实测复用失效：第二次仍 3 次请求）。
+  const authIsNtlm = auth.type && String(auth.type).toLowerCase() === 'ntlm';
+  if (auth.basic && auth.basic.username != null && !authIsNtlm) {
     const user = auth.basic.username;
     const pass = auth.basic.password != null ? auth.basic.password : '';
     h['Authorization'] = 'Basic ' + Buffer.from(`${user}:${pass}`).toString('base64');
@@ -856,6 +862,8 @@ export class HttpClient {
     // 对标 curl --digest：challenge 一旦取得即缓存复用，nc 每次请求单调递增防重放；
     // 服务端 401 刷新（nonce 过期）时更新 challenge 并重算，避免死循环。
     this._digestStates = new Map();
+    // [P1-2026-09-14] NTLM 三步握手状态机（独立模块，避免 httpClient 继续膨胀）
+    this._ntlm = new NtlmHandshake();
     // [P1-FIX 2026-09-05] Cookie Jar（对标 sqlmap 自动会话保持）：scanId -> CookieJar，
     // 请求自动携带服务端 Set-Cookie 回发的会话，扫描退役时 clearJar 一并清理
     this._jars = new Map();
@@ -1444,6 +1452,15 @@ export class HttpClient {
         digestPreAttached = true;
       }
     }
+    // [P1-2026-09-14] NTLM 预附加：同主机已握过手（持有 Type2 challenge）时直接带 Type3，
+    // 省掉 Type1/Type2 两跳。无 state 时保持裸请求，由下方 401 握手重放建立 state。
+    {
+      const na0 = opts.auth ?? defaults.auth ?? null;
+      const ntlmPre = this._ntlm.preAuthHeader(opts.url, na0);
+      if (ntlmPre && !headers['Authorization'] && !headers['authorization']) {
+        headers['Authorization'] = ntlmPre;
+      }
+    }
     let lastErr;
     for (let attempt = 0; attempt <= retry; attempt++) {
       // [⑮] abort 检查：signal 已取消时不再发新请求（重试循环防漏）
@@ -1530,6 +1547,32 @@ export class HttpClient {
               } else {
                 const first2 = await this._rawRequest({ lookup: pinnedLookup() }, opts, headers, proxyConf, timeoutMs, disableKA);
                 res = await this._followRedirects(first2, opts, headers, proxyConf, timeoutMs, disableKA, redirectsLeft, egress);
+              }
+            }
+          }
+        }
+        // [P1-2026-09-14] NTLM 三步握手重放：最多 2 跳（Type1 → Type2 → Type3）。
+        // 与 Digest 单次重放不同——NTLM 要服务端先回 Type2 才能算 Type3，故这里是**有上限的循环**
+        // （hop<2 硬上限，且 done=true 后仍 401 即清 state 退出，双保险防死循环）。
+        // 仅当配置了 NTLM 凭据且响应仍是 401+NTLM 挑战时进入；用户显式 Authorization 优先不干预。
+        {
+          const na = opts.auth ?? defaults.auth ?? null;
+          if (res && res.status === 401 && na && typeof na === 'object' && this._ntlm.cred(na)) {
+            for (let hop = 0; hop < 2; hop++) {
+              const rp = this._ntlm.replay(opts.url, na, res);
+              if (!rp.replay || !rp.header) break;
+              headers['Authorization'] = rp.header;
+              if (opts.http2 === true) {
+                res = await this._followRedirectsH2(opts, headers, timeoutMs, redirectsLeft, egress);
+              } else {
+                const first2 = await this._rawRequest({ lookup: pinnedLookup() }, opts, headers, proxyConf, timeoutMs, disableKA);
+                res = await this._followRedirects(first2, opts, headers, proxyConf, timeoutMs, disableKA, redirectsLeft, egress);
+              }
+              if (!res || res.status !== 401) break; // 认证通过（或其它状态）→ 结束握手
+              if (rp.done) {
+                // 已发 Type3 仍 401 → 凭据无效：清 state，避免后续请求一直重试坏凭据
+                this._ntlm.clear(opts.url);
+                break;
               }
             }
           }

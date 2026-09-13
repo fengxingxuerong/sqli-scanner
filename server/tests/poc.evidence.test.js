@@ -421,7 +421,14 @@ test('报告接线：同报告多次导出逐字节一致（generatedAt 走 Weak
   const b = rg.toMarkdown(report);
   assert.equal(a, b);
   const json = JSON.parse(rg.toJSON(report));
-  assert.equal(json.vulns[0].poc.generatedAt, /生成时间：([^\n]+)/.exec(a)[1]);
+  // [FIX 2026-09-14 flaky] 原文用 /生成时间：([^\n]+)/ 抓到的是**报告级** meta.generatedAt
+  // （ReportGenerator 报告头那一行），却与 **PoC 级** json.vulns[0].poc.generatedAt 比较——
+  // 两者是两次独立的 Date.now()，跨毫秒边界即失败（实测 5 次挂 2 次）。
+  // 改为断言「PoC 自身的生成时间确实出现在报告里」：语义正确且不依赖毫秒巧合。
+  assert.ok(
+    a.includes(json.vulns[0].poc.generatedAt),
+    `PoC 生成时间应出现在 markdown 中：${json.vulns[0].poc.generatedAt}`
+  );
   assert.equal(
     json.vulns[0].poc.curl,
     "curl -i -s -k -H 'X-Api-Key: k1' -H 'Cookie: session=abc' 'http://test.local/api/search?id=1%27+AND+1%3D1--+-'"

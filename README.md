@@ -144,13 +144,13 @@ npm run acceptance      # 【门禁】全方位验收（10 套件，事实断言
 | `EXPLOIT_ENABLED` | `0` | 开启利用能力（=1 启用） |
 | `ALLOWED_ORIGINS` | `http://localhost:5173` | 跨域白名单 |
 
-**目标认证能力实测口径（2026-09-13 起）**：
+**目标认证能力实测口径（2026-09-14 起）**：
 
 | 认证类型 | 状态 | 说明 |
 |---|---|---|
 | Basic | ✅ 已实现并接线 | `config.auth.basic`，HttpClient 内建 |
 | Digest | ✅ 已实现并接线 | `config.auth.digest`（对标 sqlmap `--auth-type=Digest`），每主机挑战缓存 + nc 防重放，有 digestAuth 单测 |
-| NTLM | ⚠️ 模块已修复、**未接线** | `core/ntlmAuth.js`（RFC 2617 三步握手 + NTLMv1 DES-L）2026-09-13 审计修复三重缺陷（语法断裂/缺 import/DES key 截断）并通过 12 项单测（含 RFC 1320 权威向量），但 HttpClient 尚未消费——`auth.type=ntlm` 暂不可用。另注意：DES 原语需 `--openssl-legacy-provider` 启动参数（OpenSSL 3 默认禁用），相应测试在无该参数环境下显式 skip |
+| NTLM | ✅ **已实现并接线**（2026-09-14） | `config.auth.type=NTLM` + `auth.basic={username,password,domain}`（对标 sqlmap `--auth-type=NTLM`），NTLMv1（DES-L）。HttpClient 三步握手：裸请求→Type1→Type2(challenge)→Type3，每主机挑战缓存（同主机后续请求 1 跳直达，省握手往返）。**DES 已自实现**（`core/desEcb.js`，3 个公开向量 + 与 OpenSSL 交叉验证一致），**不需要** `--openssl-legacy-provider` 启动参数。验证：`node e2e/ntlm-lab/verify.mjs`（mock 服务端 10 项断言：握手 3 跳 200、复用 1 跳、换坏凭据不死循环） |
 
 ## 架构
 

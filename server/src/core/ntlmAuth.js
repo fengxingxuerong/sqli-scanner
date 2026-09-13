@@ -24,6 +24,7 @@
 
 import crypto from 'node:crypto';
 import { md4Utf16le } from './ntlmMd4.js';
+import { desEcbEncrypt } from './desEcb.js';
 
 // ── NTLMSSP flags（MS-NLMP §2.2.2.5 常用子集） ─────────────────────────────
 export const NTLM_FLAGS = {
@@ -55,10 +56,12 @@ function expand7to8(b7) {
 }
 
 // DES-ECB 加密 8 字节块（key 8 字节；无填充）
+// [P0-FIX 2026-09-14] 原用 node:crypto 的 des-ecb，但 OpenSSL 3（Node 17+）把 DES 划入
+//   legacy provider，运行时抛 `digital envelope routines::unsupported`，必须带
+//   `--openssl-legacy-provider` 启动——等于要求所有使用者改启动参数（部署即踩坑）。
+//   改用自实现 desEcb.js（与 ntlmMd4.js 同一路线），零部署前提，已与 OpenSSL 交叉验证一致。
 function desEcb(key, block) {
-  const c = crypto.createCipheriv('des-ecb', key, null);
-  c.setAutoPadding(false);
-  return Buffer.concat([c.update(block), c.final()]);
+  return desEcbEncrypt(key, block);
 }
 
 // 21 字节（16 字节 hash + 5 个 0x00）→ 3 组 7 字节 → 各 DES-ECB(challenge) → 24 字节
