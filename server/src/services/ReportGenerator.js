@@ -15,6 +15,8 @@
 
 import { truncateLong } from '../core/logger.js';
 import { buildPocEvidence } from '../engine/pocBuilder.js';
+// [2026-09-13] 交付层：元信息/执行摘要/WAF 交战/修复建议+CVSS（markdown/html/csv 共用单一取数源）
+import { buildDelivery } from './reportDelivery.js';
 
 // 导出时单条证据/说明的最大长度（原逻辑不变）
 const EVIDENCE_MAX = 4000;
@@ -85,6 +87,12 @@ export function renderUrlLink(url, label) {
 // Markdown 内联代码：反引号必须转义，否则 payload/URL 里的 ` 会提前闭合行内代码。
 function mdInline(s) {
   return String(s ?? '').replace(/`/g, '\\`');
+}
+
+// [2026-09-13] 顶层小助手：漏洞表行里的 CVSS 单元格文本（score + vector，同源 reportDelivery）
+function cvssOfVuln(v, d) {
+  const it = d.remediation.perVuln.find((x) => x.pointId === v.pointId && x.technique === v.technique);
+  return it ? `${it.cvss.score}（${it.cvss.vector}）` : '-';
 }
 
 // Markdown 围栏：内容里可能出现反引号（payload 常含 ` 与 ```），围栏长度必须严格大于
@@ -268,13 +276,29 @@ export class ReportGenerator {
   }
 
   // 导出 CSV（P1-U3）：漏洞表 + 拖库数据两档，BOM 头 + [P2-7] 公式注入转义
+  // [2026-09-13] 交付化：补 CVSS 与修复建议列（口径与 markdown/html 同源）
   toCSV(report) {
     const r = this._forExport(report);
+    const d = buildDelivery(report);
+    const cvssOf = new Map(d.remediation.perVuln.map((it) => [`${it.pointId}|${it.technique}`, it.cvss]));
+    const remOf = new Map(d.remediation.perVuln.map((it) => [`${it.pointId}|${it.technique}`, it.actions]));
     const lines = [];
-    lines.push('漏洞ID,注入点,技术,数据库,风险,说明');
+    lines.push('漏洞ID,注入点,技术,数据库,风险,CVSS,修复建议,说明');
     for (const v of r.vulns || []) {
+      const key = `${v.pointId}|${v.technique}`;
+      const cvss = cvssOf.get(key);
+      const rem = (remOf.get(key) || []).join(' / ');
       lines.push(
-        [v.id, v.pointId, v.technique, v.dbms || '', v.riskLevel, (v.description || '').replace(/[\r\n,]/g, ' ')]
+        [
+          v.id,
+          v.pointId,
+          v.technique,
+          v.dbms || '',
+          v.riskLevel,
+          cvss ? `${cvss.score} ${cvss.vector}` : '',
+          rem.replace(/[\r\n,]/g, ' '),
+          (v.description || '').replace(/[\r\n,]/g, ' '),
+        ]
           .map((c) => csvSafeCell(c))
           .join(',')
       );
@@ -298,8 +322,10 @@ export class ReportGenerator {
   }
 
   // 导出 Markdown（原逻辑不变，仅 target 脱敏由 _forExport 覆盖）
+  // [2026-09-13] 交付化（只增小节）：报告元信息/执行摘要/修复建议/WAF 交战 + 漏洞表 CVSS 列
   toMarkdown(report) {
     const r = this._forExport(report);
+    const d = buildDelivery(report);
     const md = [];
     md.push(`# SQL 注入检测报告`);
     md.push('');
@@ -309,17 +335,21 @@ export class ReportGenerator {
     md.push(`- 数据库：${report.dbms || '-'}`);
     md.push(`- 注入点：${(report.points || []).length} · 漏洞：${(r.vulns || []).length}`);
     md.push('');
+    md.push(...this._metaMarkdown(d));
+    md.push(...this._execMarkdown(d));
     // [P0-FIX 2026-09-09] 结论可信度 + 本次抑制项（报告会被转出去，这两条不写就是默认「全测了且结论可靠」）
     md.push(...this._conclusionMarkdown(report));
     md.push('## 漏洞清单');
     md.push('');
-    md.push('| 注入点 | 技术 | 数据库 | 风险 | 说明 |');
-    md.push('|---|---|---|---|---|');
+    md.push('| 注入点 | 技术 | 数据库 | 风险 | CVSS | 说明 |');
+    md.push('|---|---|---|---|---|---|');
     for (const v of r.vulns || []) {
-      md.push(`| ${v.pointId} | ${v.technique} | ${v.dbms || '-'} | ${v.riskLevel} | ${(v.description || '').replace(/\|/g, '\\|')} |`);
+      const cvss = cvssOfVuln(v, d);
+      md.push(`| ${v.pointId} | ${v.technique} | ${v.dbms || '-'} | ${v.riskLevel} | ${cvss} | ${(v.description || '').replace(/\|/g, '\\|')} |`);
     }
-    if (!(r.vulns || []).length) md.push('| - | - | - | - | 未发现漏洞 |');
+    if (!(r.vulns || []).length) md.push('| - | - | - | - | - | 未发现漏洞 |');
     md.push('');
+    md.push(...this._remediationMarkdown(d));
     md.push('## Payload 示例');
     md.push('');
     const payloads = (r.vulns || []).flatMap((v) => v.payloads || []);
@@ -330,6 +360,7 @@ export class ReportGenerator {
     }
     // [P0-FIX 2026-09-08] 复现方式：payload 字符串 → 可直接粘进终端的 curl + 可落盘导入的原始报文
     md.push(...this._pocMarkdown(r));
+    md.push(...this._wafMarkdown(d));
     return md.join('\n');
   }
 
@@ -347,6 +378,157 @@ export class ReportGenerator {
       : [];
     if (!verdict && !note && !constraints.length) return null;
     return { verdict, note, constraints };
+  }
+
+  // ============================================================================
+  // [2026-09-13] 交付层章节（markdown/html 共用取数源 buildDelivery；只增小节不改既有行）
+  // ============================================================================
+
+  // markdown 报告元信息
+  _metaMarkdown(d) {
+    const out = ['', '## 报告元信息', ''];
+    out.push(`- 起止时间：${d.meta.startedAt || '-'} → ${d.meta.finishedAt || '-'}（耗时 ${d.meta.durationText || '-'}）`);
+    out.push(`- 请求总数：${d.meta.requestCount ?? '-'} · 检测配置：level=${d.meta.level ?? '-'} · risk=${d.meta.risk ?? '-'} · 技术=${d.meta.techniques || '-'}`);
+    out.push(`- 测试范围：${d.meta.scope}`);
+    out.push('- 授权声明：本报告仅供授权安全测试使用；未获授权对任何系统进行扫描、测试或数据提取均可能违反法律法规。');
+    out.push(`- 生成时间：${d.meta.generatedAt}`, '');
+    return out;
+  }
+
+  // markdown 执行摘要（管理层视角：结果 + 影响实证 + 可信度 + 定库依据）
+  _execMarkdown(d) {
+    const e = d.exec;
+    const out = ['', '## 执行摘要', ''];
+    if (e.vulnCount) {
+      const techs = e.techniques.join('/') || '-';
+      out.push(`- 目标 ${d.meta.target} 共测试 ${e.pointCount} 个注入点，检出 **${e.vulnCount}** 条 SQL 注入漏洞（技术：${techs}），最高风险 **${e.riskLevel}**${e.dbms ? `，数据库 ${e.dbms}` : ''}。`);
+      if (e.impact) {
+        out.push(`- **影响实证**：本次已提取 ${e.impact.tableCount} 张表 / ${e.impact.rowCount} 行数据（样例：${e.impact.sampleTables.join('、')}），数据泄露风险已被验证成立。`);
+      } else {
+        out.push('- 影响实证：本次未开启拖库（enableExtract），影响面按检出通道定性推断（union/error 通道通常可达数据读出）。');
+      }
+    } else {
+      out.push(`- 目标 ${d.meta.target} 共测试 ${e.pointCount} 个注入点，**未检出漏洞**。`);
+    }
+    if (e.validity) {
+      out.push(`- 结论可信度：${e.validity.status}${e.validity.reliable === false ? '（**结论不可信，见「结论可信度」小节**）' : ''}${e.validity.reason ? `——${e.validity.reason}` : ''}。`);
+    }
+    if (e.dbmsEvidence) {
+      out.push(`- 定库依据：${e.dbmsEvidence.levelText || e.dbmsEvidence.level || '-'}（${e.dbmsEvidence.dbms || '-'}）${e.dbmsEvidence.caveat ? `；${e.dbmsEvidence.caveat}` : ''}。`);
+    }
+    out.push('');
+    return out;
+  }
+
+  // markdown 修复建议（按注入点 + 通用基线）
+  _remediationMarkdown(d) {
+    const out = ['', '## 修复建议（Remediation）', ''];
+    if (d.remediation.perVuln.length) {
+      out.push('### 按注入点', '');
+      for (const it of d.remediation.perVuln) {
+        out.push(`**${it.pointId} · ${it.technique} · CVSS ${it.cvss.score} ${it.cvss.severity}**（\`${it.cvss.vector}\`）`, '');
+        for (const a of it.actions) out.push(`- ${a}`);
+        out.push('');
+      }
+    } else {
+      out.push('未检出漏洞，以下为通用加固基线。', '');
+    }
+    out.push('### 通用加固基线', '');
+    for (const a of d.remediation.general) out.push(`- ${a}`);
+    out.push('');
+    out.push('> CVSS 口径：v3.1 启发式映射（按技术通道给分，环境项未设），供排期排序参考，非逐条人工评定。', '');
+    return out;
+  }
+
+  // markdown WAF 交战记录
+  _wafMarkdown(d) {
+    const w = d.waf;
+    const out = ['', '## WAF 交战记录', ''];
+    if (!w.engaged) {
+      out.push('- 本次未观察到 WAF 拦截或厂商特征（activeWafProbe 默认关闭，未主动探测）。', '');
+      return out;
+    }
+    if (w.detected.length) {
+      out.push(`- 识别到 WAF 厂商：${w.detected.map((v) => `${v.vendor}（置信度 ${v.confidence ?? '-'}）`).join('、')}。`);
+    }
+    out.push(`- 被拦截请求数：${w.blockHits ?? '-'}。`);
+    if (w.blockPolicy) {
+      const hint = Array.isArray(w.blockPolicy.tamperHint) && w.blockPolicy.tamperHint.length ? `；自动换用 tamper：${w.blockPolicy.tamperHint.join(', ')}` : '';
+      out.push(`- 处置策略：${w.blockPolicy.action}——${w.blockPolicy.reason || ''}${hint}。`);
+    }
+    out.push('');
+    return out;
+  }
+
+  // HTML 报告元信息 + 执行摘要（合并渲染在既有结论卡之前）
+  _deliveryHtml(d) {
+    const esc = (s) => this._escape(String(s));
+    const items = [
+      `起止时间：${esc(d.meta.startedAt || '-')} → ${esc(d.meta.finishedAt || '-')}（耗时 ${esc(d.meta.durationText || '-')}）`,
+      `请求总数：${esc(d.meta.requestCount ?? '-')} · 检测配置：level=${esc(d.meta.level ?? '-')} · risk=${esc(d.meta.risk ?? '-')} · 技术=${esc(d.meta.techniques || '-')}`,
+      `测试范围：${esc(d.meta.scope)}`,
+      '授权声明：本报告仅供授权安全测试使用；未获授权对任何系统进行扫描、测试或数据提取均可能违反法律法规。',
+      `生成时间：${esc(d.meta.generatedAt)}`,
+    ]
+      .map((x) => `<li>${x}</li>`)
+      .join('');
+    const e = d.exec;
+    const execLines = [];
+    if (e.vulnCount) {
+      const techs = esc(e.techniques.join('/') || '-');
+      execLines.push(`目标 ${esc(d.meta.target)} 共测试 ${e.pointCount} 个注入点，检出 <b>${e.vulnCount}</b> 条 SQL 注入漏洞（技术：${techs}），最高风险 <b>${esc(e.riskLevel)}</b>${e.dbms ? `，数据库 ${esc(e.dbms)}` : ''}。`);
+      execLines.push(
+        e.impact
+          ? `影响实证：本次已提取 ${e.impact.tableCount} 张表 / ${e.impact.rowCount} 行数据（样例：${esc(e.impact.sampleTables.join('、'))}），数据泄露风险已被验证成立。`
+          : '影响实证：本次未开启拖库（enableExtract），影响面按检出通道定性推断。'
+      );
+    } else {
+      execLines.push(`目标 ${esc(d.meta.target)} 共测试 ${e.pointCount} 个注入点，<b>未检出漏洞</b>。`);
+    }
+    if (e.validity) execLines.push(`结论可信度：${esc(e.validity.status)}${e.validity.reason ? `——${esc(e.validity.reason)}` : ''}。`);
+    if (e.dbmsEvidence) execLines.push(`定库依据：${esc(e.dbmsEvidence.levelText || e.dbmsEvidence.level || '-')}（${esc(e.dbmsEvidence.dbms || '-')}）。`);
+    return `<div class="verdict">
+        <h2>报告元信息</h2>
+        <ul class="meta">${items}</ul>
+        <h2>执行摘要</h2>
+        ${execLines.map((x) => `<p>${x}</p>`).join('\n        ')}
+      </div>`;
+  }
+
+  // HTML 修复建议
+  _remediationHtml(d) {
+    const esc = (s) => this._escape(String(s));
+    const per = d.remediation.perVuln
+      .map((it) => {
+        const actions = it.actions.map((a) => `<li>${esc(a)}</li>`).join('');
+        return `<div class="poc"><p><b>${esc(it.pointId)} · ${esc(it.technique)}</b> · CVSS ${esc(it.cvss.score)} ${esc(it.cvss.severity)}（<code>${esc(it.cvss.vector)}</code>）</p><ul>${actions}</ul></div>`;
+      })
+      .join('');
+    const general = d.remediation.general.map((a) => `<li>${esc(a)}</li>`).join('');
+    return `<h2>修复建议（Remediation）</h2>
+      ${per || '<p class="meta">未检出漏洞，以下为通用加固基线。</p>'}
+      <p class="meta"><b>通用加固基线</b></p><ul>${general}</ul>
+      <p class="meta">CVSS 口径：v3.1 启发式映射（按技术通道给分，环境项未设），供排期排序参考，非逐条人工评定。</p>`;
+  }
+
+  // HTML WAF 交战记录
+  _wafHtml(d) {
+    const esc = (s) => this._escape(String(s));
+    const w = d.waf;
+    if (!w.engaged) {
+      return '<h2>WAF 交战记录</h2><p class="meta">本次未观察到 WAF 拦截或厂商特征（activeWafProbe 默认关闭，未主动探测）。</p>';
+    }
+    const vendorLine = w.detected.length
+      ? `<p>识别到 WAF 厂商：${esc(w.detected.map((v) => `${v.vendor}（置信度 ${v.confidence ?? '-'}）`).join('、'))}。</p>`
+      : '';
+    const policy = w.blockPolicy
+      ? `<p>处置策略：${esc(w.blockPolicy.action)}——${esc(w.blockPolicy.reason || '')}${
+          Array.isArray(w.blockPolicy.tamperHint) && w.blockPolicy.tamperHint.length
+            ? `；自动换用 tamper：${esc(w.blockPolicy.tamperHint.join(', '))}`
+            : ''
+        }。</p>`
+      : '';
+    return `<h2>WAF 交战记录</h2><p class="meta">${vendorLine}被拦截请求数：${esc(w.blockHits ?? '-')}。</p>${policy}`;
   }
 
   _conclusionMarkdown(report) {
@@ -466,17 +648,24 @@ export class ReportGenerator {
   }
 
   // 导出 HTML（原逻辑不变：所有用户可控字段均已 _escape 转义，P3 已核验）
+  // [2026-09-13] 交付化（只增小节）：报告元信息/执行摘要卡、漏洞表 CVSS 列、修复建议、WAF 交战
   toHTML(report) {
     const r = this._forExport(report);
+    const d = buildDelivery(report);
     const rows = (r.vulns || [])
       .map(
-        (v) => `<tr>
+        (v) => {
+          const it = d.remediation.perVuln.find((x) => x.pointId === v.pointId && x.technique === v.technique);
+          const cvss = it ? `${it.cvss.score} ${it.cvss.severity}` : '-';
+          return `<tr>
         <td>${this._escape(v.pointId)}</td>
         <td>${this._escape(v.technique)}</td>
         <td>${this._escape(v.dbms || '-')}</td>
         <td class="${this._escape(String(v.riskLevel || 'low').toLowerCase())}">${this._escape(v.riskLevel)}</td>
+        <td>${this._escape(cvss)}</td>
         <td>${this._escape(v.description || '')}</td>
-      </tr>`
+      </tr>`;
+        }
       )
       .join('');
     const payloads = (r.vulns || [])
@@ -486,6 +675,9 @@ export class ReportGenerator {
     // [P0-FIX 2026-09-08] 复现方式小节（只增不改上面既有行）
     const pocSection = this._pocHtml(r);
     const conclusionSection = this._conclusionHtml(report);
+    const deliverySection = this._deliveryHtml(d);
+    const remediationSection = this._remediationHtml(d);
+    const wafSection = this._wafHtml(d);
 
     return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
       <title>SQL 注入检测报告 ${report.scanId}</title>
@@ -509,14 +701,17 @@ export class ReportGenerator {
       <h1>SQL 注入检测报告</h1>
       <p class="meta">扫描ID：${this._escape(report.scanId)} · 风险等级：<b>${this._escape(report.riskLevel)}</b> · 数据库：${this._escape(report.dbms || '-')}</p>
       <p class="meta">目标：${renderUrlLink(report.target?.baseUrl)} · 注入点：${(report.points || []).length} · 漏洞：${(report.vulns || []).length}</p>
+      ${deliverySection}
       ${conclusionSection}
       <h2>漏洞清单</h2>
-      <table><thead><tr><th>注入点</th><th>技术</th><th>数据库</th><th>风险</th><th>说明</th></tr></thead>
-      <tbody>${rows || '<tr><td colspan="5">未发现漏洞</td></tr>'}</tbody></table>
+      <table><thead><tr><th>注入点</th><th>技术</th><th>数据库</th><th>风险</th><th>CVSS</th><th>说明</th></tr></thead>
+      <tbody>${rows || '<tr><td colspan="6">未发现漏洞</td></tr>'}</tbody></table>
+      ${remediationSection}
       <h2>Payload 示例</h2>
       <pre>${payloads || '无'}</pre>
       <h2>复现方式（PoC）</h2>
       ${pocSection}
+      ${wafSection}
       <footer class="footer">本报告仅供授权安全测试使用。未获授权对任何系统进行扫描、测试或数据提取均可能违反法律法规，请勿用于非法用途。</footer>
       </body></html>`;
   }
