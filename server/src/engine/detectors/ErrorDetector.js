@@ -1,7 +1,7 @@
 import { Detector } from '../Detector.js';
 import { createDetectionResult } from '../models.js';
 import { PAYLOADS, fillPayload, ERROR_SIG, ERROR_SIG_BY_DBMS, dbmsFromError, getClauseTemplates, CLAUSE_PAYLOADS } from '../payloads.js';
-import { selectPayloads } from '../payloadRegistry.js';
+import { selectPayloads, orderEntriesByBoundary } from '../payloadRegistry.js';
 import { extractErrorContext, extractSqlFragment } from '../parseErrors.js';
 
 // 报错注入检测器
@@ -116,14 +116,19 @@ export class ErrorDetector extends Detector {
       const cfg = ctx.config || {};
       const level = Number(cfg.level) > 0 ? Number(cfg.level) : undefined;
       const risk = Number(cfg.risk) > 0 ? Number(cfg.risk) : undefined;
-      const entries = selectPayloads({
-        dbms,
-        technique: 'error',
-        level,
-        risk,
-        testFilter: cfg.testFilter,
-        testSkip: cfg.testSkip,
-      });
+      // [G1] 按探测闭合族排序：兼容变体优先（逐模板全池扫描时兼容形态先出结果，
+      // 对 WAF 熔断/guard.shouldSkip 更友好；探测误判时全集仍在，零回归）
+      const entries = orderEntriesByBoundary(
+        selectPayloads({
+          dbms,
+          technique: 'error',
+          level,
+          risk,
+          testFilter: cfg.testFilter,
+          testSkip: cfg.testSkip,
+        }),
+        ctx.point?.boundary
+      );
       const templates = entries.map((e) => e.template);
       // 注册表无命中时回退到扁平数组（保证未声明的 DBMS 不空跑）
       if (templates.length) return templates;

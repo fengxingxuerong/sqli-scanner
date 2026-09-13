@@ -1,7 +1,7 @@
 import { Detector } from '../Detector.js';
 import { createDetectionResult } from '../models.js';
 import { PAYLOADS, fillPayload, getClauseTemplates } from '../payloads.js';
-import { selectPayloads } from '../payloadRegistry.js';
+import { selectPayloads, orderEntriesByBoundary } from '../payloadRegistry.js';
 import { defaults } from '../../config/defaults.js';
 import { mean, std, effectiveThreshold, adaptiveTimeFloor } from '../../core/statsHelper.js';
 
@@ -115,7 +115,10 @@ export class TimeBlindDetector extends Detector {
       const risk = Number(cfg.risk) > 0 ? Number(cfg.risk) : undefined;
       const testFilter = cfg.testFilter || undefined;
       const testSkip = cfg.testSkip || undefined;
-      const entries = selectPayloads({ dbms, technique: 'time', level, risk, testFilter, testSkip });
+      const entries = orderEntriesByBoundary(
+        selectPayloads({ dbms, technique: 'time', level, risk, testFilter, testSkip }),
+        ctx.point?.boundary
+      ); // [G1] 按探测闭合族排序（与下方 real-MySQL 选族重排互补：元数据级排序先落位，正则重排兜底）
       if (entries.length > 0) {
         list = entries.map((p) => p.template);
       }

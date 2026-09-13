@@ -911,6 +911,46 @@ export function countDestructiveCandidates({ level, risk, testFilter, testSkip }
 }
 
 /**
+ * [G1 接线 2026-09-13] 按探测闭合前缀（point.boundary）对注册表条目做「兼容族优先」稳定排序。
+ *
+ * 背景（对标 sqlmap boundary×payload 笛卡尔积的等价落地）：
+ *   sqlmap 用 boundaries.xml × payloads/*.xml 生成「闭合形态 × 载荷族」全积并按 level 门投放；
+ *   本架构的注册表条目自带 `boundary` 元数据（声明该模板适用的闭合引号形态），但历史上
+ *   selectPayloads 无消费者、检测器按声明顺序全量盲发——兼容形态与无关形态混排，命中即停的
+ *   检测器（Boolean 主轮有 break）浪费请求在无关变体上。
+ *
+ * 兼容单位是「引号族」而非「精确前缀」：
+ *   模板仅内嵌最小闭合引号（如 `{ORIG}' AND '1'='1`），引号自平衡——因此单引号族条目对
+ *   `')` / `'))` / `%'` 等一切单引号系上下文语法均有效（括号/通配符由模板外原样保留），
+ *   实测依据 TimeBlindDetector [real-MySQL FIX 2026-09-07] 选族重排同思路。
+ *
+ * 排序而非硬过滤（与 sqlmap 的关键差异，刻意为之）：
+ *   probeBoundary 在 WAF 拦截探测 payload 时会回退空串（见 Detector.probeBoundary 注释），
+ *   硬过滤会让「探测被拦 → boundary 误判」直接灭绝对应闭合族的全部变体 → 漏检。
+ *   排序优先保证：命中即停的通道更早命中（省请求）；误判时全集仍在（零回归）。
+ *
+ * @template T
+ * @param {T[]} entries 注册表条目数组
+ * @param {string} [boundary] 探测出的闭合前缀（'' / `'` / `')` / `'))` / `"` / `")` / `` ` `` / `\`）
+ * @returns {T[]} 排序后数组（无引号族可判定 / 全兼容 / 全不兼容 / 输入<2 条时原样返回）
+ */
+export function orderEntriesByBoundary(entries, boundary) {
+  if (!Array.isArray(entries) || entries.length < 2) return entries;
+  // 引号族判定：取探测前缀中首个引号字符。`%'`/`%")` 的 % 是 LIKE 通配符不是闭合符；
+  // `\`（反斜杠转义）与 ''（空=无闭合）族不可判定 → 原序返回（不改变现有行为）。
+  const m = typeof boundary === 'string' ? boundary.match(/['"`]/) : null;
+  if (!m) return entries;
+  const quote = m[0];
+  const isCompatible = (e) =>
+    Array.isArray(e?.boundary) && e.boundary.some((b) => typeof b === 'string' && b.includes(quote));
+  const compat = [];
+  const rest = [];
+  for (const e of entries) (isCompatible(e) ? compat : rest).push(e);
+  if (compat.length === 0 || rest.length === 0) return entries;
+  return [...compat, ...rest];
+}
+
+/**
  * 列出所有声明的 payload（统计/调试用）。
  * @returns {typeof PAYLOAD_REGISTRY}
  */
