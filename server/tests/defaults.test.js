@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { defaults } from '../src/config/defaults.js';
 
 test('默认值完整性（ratePerSec/concurrency/retry/timeoutMs）', () => {
-  assert.equal(defaults.ratePerSec, 50);
+  assert.equal(defaults.ratePerSec, 10); // [P0-FIX 2026-09-12] 保守化：50 → 10（防「一键打挂脆弱目标」）
   assert.equal(defaults.concurrency, 4);
   // [P0-FIX] 对标 sqlmap 默认：timeoutMs 30s、retry 3
   assert.equal(defaults.retry, 3);
