@@ -459,7 +459,7 @@ export function resolveProxy(configuredProxy, { targetUrl = '', trustProxyEnv, p
  *   auto 语义下代理会照打（代理自己会解析），边界完全转移到代理配置上；strict-dns 把这道门
  *   要回来，代价是「只能经代理解析的域名」会退化成放行（仍会记一条日志）。
  * @param {string} urlString 目标 URL
- * @param {{viaProxy?:boolean, ssrfViaProxy?:string}} [egress] 本次请求的出口语义
+ * @param {{viaProxy?:boolean, ssrfViaProxy?:string}|null} [egress] 本次请求的出口语义（null = 未指定）
  */
 export async function assertSafeTargetForEgress(urlString, egress = null) {
   const mode = String(egress?.ssrfViaProxy ?? 'auto').toLowerCase();
@@ -539,7 +539,7 @@ export function agentsForTls(insecureTls, keepAlive = true) {
   const key = `${insecureTls ? 'insecure' : 'secure'}|${keepAlive ? 'ka' : 'noka'}`;
   const hit = _tlsAgentCache.get(key);
   if (hit) return hit;
-  let conf;
+  /** @type {any} */ let conf;
   if (!insecureTls) conf = keepAlive ? { httpAgent, httpsAgent } : {};
   else {
     const base = keepAlive ? { ...KEEPALIVE_AGENT_OPTS } : { keepAlive: false, maxSockets: AGENT_MAX_SOCKETS };
@@ -621,243 +621,34 @@ function warnInsecureTls() {
 // 目标（老 Java/ASP/JSP 站极常见）被解成 U+FFFD 且不可逆 —— 中文报错文案丢失、布尔比对出现字节
 // 碰撞（不同字节序列映射成同一替换符 → 差异消失 → 漏检）、拖库出的中文数据是乱码。
 // 现在两条通道统一先取原始字节、再按声明字符集解码，对外仍是 string。
-const CHARSET_HEADER_RE = /(?:^|;)\s*charset\s*=\s*"?([^";\s]+)"?/i;
-// <meta charset="x"> 与 <meta http-equiv="Content-Type" content="text/html; charset=x"> 共用一条：
-// [^>] 保证只在单个标签内匹配
-const META_CHARSET_RE = /<meta[^>]{0,300}?charset\s*=\s*["']?\s*([a-zA-Z0-9._:+-]+)/i;
-// 预扫描窗口：只在 body 前 2048 字节（ASCII 视角）里找 <meta>，字符集声明必在 head 前部
-const CHARSET_SNIFF_BYTES = 2048;
-const UTF8_LABELS = new Set(['utf-8', 'utf8']);
-
-/**
- * [P0-FIX 2026-09-09] 按 content-encoding 解包响应体（undici/H2 通道用；axios 通道自带解压）。
- * 只处理 Node zlib 能同步完成的编码；未知编码抛错，由调用方标注为「本次比对不可信」而不是静默。
- * @param {Buffer} buf 原始字节
- * @param {string} encoding content-encoding 头值（可含多段，如 `gzip, br` 时按最外层取最后一个）
- * @returns {Buffer} 解压后的字节
- */
-export function decompressResponseBody(buf, encoding) {
-  const chain = String(encoding || '')
-    .split(',')
-    .map((x) => x.trim().toLowerCase())
-    .filter(Boolean);
-  let out = buf;
-  for (const enc of chain) {
-    if (enc === 'identity') continue;
-    if (enc === 'gzip' || enc === 'x-gzip') {
-      out = zlib.gunzipSync(out);
-    } else if (enc === 'deflate') {
-      // RFC 7230 允许服务端直接发 raw deflate：先按 zlib 容器试，失败再按 raw 试
-      try {
-        out = zlib.inflateSync(out);
-      } catch {
-        out = zlib.inflateRawSync(out);
-      }
-    } else if (enc === 'br') {
-      if (typeof zlib.brotliDecompressSync !== 'function') throw new Error('当前 Node 不支持 brotli');
-      out = zlib.brotliDecompressSync(out);
-    } else {
-      throw new Error(`不支持的编码 ${enc}`);
-    }
-  }
-  return out;
-}
-
-/**
- * 大小写不敏感地取响应头（兼容 axios AxiosHeaders / undici Headers / 普通对象）。
- * @param {object} headers 响应头
- * @param {string} name 头名（小写）
- * @returns {string} 头值（缺失时空串）
- */
-function getResponseHeader(headers, name) {
-  if (!headers) return '';
-  try {
-    if (typeof headers.get === 'function') {
-      const v = headers.get(name);
-      if (v != null && v !== '') return String(v);
-    }
-  } catch { /* AxiosHeaders#get 对未知头会抛/返回 undefined，忽略后走索引取值 */ }
-  const v = headers[name] ?? headers[name.toLowerCase()] ?? headers[name.toUpperCase()];
-  if (v == null) return '';
-  return String(Array.isArray(v) ? v[0] : v);
-}
-
-/**
- * 原始响应体 → Buffer（axios arraybuffer 给 Buffer；也兼容 ArrayBuffer / TypedArray）。
- * @param {*} data 响应体
- * @returns {Buffer|null} 非二进制输入返回 null
- */
-function toBuffer(data) {
-  if (Buffer.isBuffer(data)) return data;
-  if (data instanceof ArrayBuffer) return Buffer.from(data);
-  if (ArrayBuffer.isView(data)) return Buffer.from(data.buffer, data.byteOffset, data.byteLength);
-  return null;
-}
-
-// axios 的 text 通道会 stripBOM；解码路径必须保持一致，否则带 BOM 的响应长度/内容会变
-function stripBom(s) {
-  return s.charCodeAt(0) === 0xfeff ? s.slice(1) : s;
-}
-
-function normalizeCharsetLabel(raw) {
-  const s = String(raw || '')
-    .trim()
-    .replace(/^["']|["';,]+$/g, '')
-    .toLowerCase();
-  return /^[a-z0-9][a-z0-9._:+-]{1,29}$/.test(s) ? s : '';
-}
-
-/**
- * 探测响应字符集：Content-Type charset= → HTML <meta charset>（前 2048 字节 ASCII 预扫描）→ 无。
- * @param {string} contentType Content-Type 头
- * @param {Buffer|null} buf 原始字节
- * @returns {{label:string, source:'header'|'meta'}|null}
- */
-export function detectResponseCharset(contentType, buf) {
-  const m = CHARSET_HEADER_RE.exec(String(contentType || ''));
-  if (m) {
-    const label = normalizeCharsetLabel(m[1]);
-    if (label) return { label, source: 'header' };
-  }
-  if (buf && buf.length > 0) {
-    // latin1 逐字节映射 → 正则只可能命中 ASCII，非 ASCII 字节不会伪造出 meta 标签
-    const head = buf.subarray(0, CHARSET_SNIFF_BYTES).toString('latin1');
-    if (head.includes('<meta')) {
-      const mm = META_CHARSET_RE.exec(head);
-      if (mm) {
-        const label = normalizeCharsetLabel(mm[1]);
-        if (label) return { label, source: 'meta' };
-      }
-    }
-  }
-  return null;
-}
-
-/**
- * 解码响应体为文本（两通道共用）。
- * 关键不变量：未声明字符集 / 声明 utf-8 时，结果与改动前（axios utf8 + stripBOM、undici
- * Buffer.toString('utf-8')）逐字符一致 —— utf-8 走 Node 原生解码，不进 TextDecoder。
- * @param {*} data 原始响应体（Buffer/ArrayBuffer/Uint8Array/string/undefined）
- * @param {object} [headers] 响应头
- * @returns {{text:string, charset:string, charsetSource:string, declaredCharset?:string, charsetUnsupported?:boolean}}
- */
-export function decodeResponseBody(data, headers) {
-  // 已是文本（HEAD 请求、被 mock 的传输层、历史调用方）→ 原样透传，绝不二次解码
-  if (typeof data === 'string') {
-    return { text: data, charset: 'utf-8', charsetSource: 'passthrough' };
-  }
-  const buf = toBuffer(data);
-  if (!buf || buf.length === 0) {
-    return { text: '', charset: 'utf-8', charsetSource: data === undefined || data === null ? 'none' : 'empty' };
-  }
-  const found = detectResponseCharset(getResponseHeader(headers, 'content-type'), buf);
-  if (!found || UTF8_LABELS.has(found.label)) {
-    return {
-      text: stripBom(buf.toString('utf8')),
-      charset: 'utf-8',
-      charsetSource: found ? found.source : 'fallback',
-    };
-  }
-  try {
-    return {
-      text: new TextDecoder(found.label, { fatal: false }).decode(buf),
-      charset: found.label,
-      charsetSource: found.source,
-    };
-  } catch {
-    // Node 无该解码器（ICU 缺表 / 私有别名如 x-big5）→ 回退 utf-8 并标记，
-    // 让报告能区分「目标本来就是乱码」与「解码器缺失」
-    return {
-      text: stripBom(buf.toString('utf8')),
-      charset: 'utf-8',
-      charsetSource: 'fallback',
-      declaredCharset: found.label,
-      charsetUnsupported: true,
-    };
-  }
-}
-
-/**
- * 读取响应对象上的 __meta（非枚举元数据）。
- * @param {object} res 响应对象
- * @returns {object} 元数据副本（缺省空对象）
- */
-export function getResMeta(res) {
-  if (!res || typeof res !== 'object' || !res.__meta) return {};
-  return { ...res.__meta };
-}
-
-/**
- * 合并写入响应元数据（④：截断 / 字符集 / insecureTls / viaProxy）。
- * 与 __networkMs 同样用非枚举属性：不污染 JSON 序列化与任何 {...res} 透传路径。
- * @param {object} res 响应对象
- * @param {object} meta 待合并字段
- * @returns {object} res
- */
-export function attachResMeta(res, meta) {
-  if (!res || typeof res !== 'object') return res;
-  const merged = { ...(res.__meta && typeof res.__meta === 'object' ? res.__meta : {}), ...(meta || {}) };
-  try {
-    Object.defineProperty(res, '__meta', {
-      value: merged,
-      enumerable: false,
-      configurable: true,
-      writable: true,
-    });
-  } catch {
-    try {
-      res.__meta = merged; // 冻结/异常对象兜底（不致命）
-    } catch { /* ignore */ }
-  }
-  return res;
-}
-
-// 证书类错误（默认严格校验下自签/内网 CA 目标必然命中）：给出可操作提示，避免「扫不出」无痕
-const TLS_CERT_CODES = new Set([
-  'DEPTH_ZERO_SELF_SIGNED_CERT',
-  'SELF_SIGNED_CERT_IN_CHAIN',
-  'UNABLE_TO_VERIFY_LEAF_SIGNATURE',
-  'ERR_TLS_CERT_ALTNAME_INVALID',
-  'CERT_HAS_EXPIRED',
-  'CERT_UNTRUSTED',
-  'UNABLE_TO_GET_ISSUER_CERT',
-  'UNABLE_TO_GET_ISSUER_CERT_LOCALLY',
-]);
-
-// axios 通道超限的判定（message 由 axios http adapter 给出，无独立错误码）
-function isMaxContentLengthError(err) {
-  if (!err) return false;
-  return /maxContentLength|maximum response length/i.test(String(err.message || ''));
-}
-
-// 显式 HTTP/HTTPS Agent（keep-alive + 连接复用），与 Node 版本解耦（原逻辑不变）
-// ── 连接池上限与配置并发对齐（B-perf）──
-// 旧值固定 maxSockets:50，与配置并发脱钩（无限收敛的本意是防 Agent 无上限放大）。
-// 现按部署的理论在途峰值推导：并发扫描上限（MAX_SCAN_API_CONCURRENT，默认 8）× 单扫描并发
-// （defaults.concurrency，默认 4）= 32，且不低于 max(concurrency*2, 16)；既不无限放大，
-// 也不低于实际并发需求造成跨扫描排队。可用 HTTP_AGENT_MAX_SOCKETS 显式覆盖（≥1）。
-// 注意：Agent 为模块级共享（服务所有扫描），用户按扫描覆盖 concurrency 不影响本上限——
-// 超出上限的并发请求会在 Agent 排队（不报错、不丢请求），极端部署请用环境变量调高。
-/**
- * 按部署的理论在途峰值推导 Agent maxSockets：
- * 并发扫描上限 × 单扫描并发，且不低于 concurrency*2 和 16。
- * @param {number} concurrency 单扫描并发数
- * @param {number} maxConcurrentScans 最大同时扫描数
- * @returns {number} Agent maxSockets 值
- */
-export function computeAgentMaxSockets(concurrency, maxConcurrentScans) {
-  const c = Number.isFinite(concurrency) && concurrency > 0 ? concurrency : defaults.concurrency || 4;
-  const m =
-    Number.isFinite(maxConcurrentScans) && maxConcurrentScans > 0
-      ? maxConcurrentScans
-      : Number(process.env.MAX_SCAN_API_CONCURRENT) || 8;
-  return Math.max(c * m, c * 2, 16);
-}
-export const AGENT_MAX_SOCKETS = (() => {
-  const env = Number(process.env.HTTP_AGENT_MAX_SOCKETS);
-  if (Number.isFinite(env) && env >= 1) return Math.round(env);
-  return computeAgentMaxSockets(defaults.concurrency, Number(process.env.MAX_SCAN_API_CONCURRENT) || 8);
-})();
+import {
+  decompressResponseBody,
+  detectResponseCharset,
+  decodeResponseBody,
+  getResMeta,
+  attachResMeta,
+  getResponseHeader,
+  toBuffer,
+} from './http/responseCodec.js';
+// 再导出：既有 import 路径保持不变（外部模块与测试仍可从 httpClient.js 取到这些符号）
+export {
+  decompressResponseBody,
+  detectResponseCharset,
+  decodeResponseBody,
+  getResMeta,
+  attachResMeta,
+} from './http/responseCodec.js';
+import {
+  computeAgentMaxSockets,
+  AGENT_MAX_SOCKETS,
+  TLS_CERT_CODES,
+  isMaxContentLengthError,
+} from './http/agentPool.js';
+// 再导出：既有 import 路径保持不变（外部模块与测试仍可从 httpClient.js 取到这些符号）
+export {
+  computeAgentMaxSockets,
+  AGENT_MAX_SOCKETS,
+} from './http/agentPool.js';
 const KEEPALIVE_AGENT_OPTS = {
   keepAlive: true,
   keepAliveMsecs: 1000,
@@ -900,79 +691,13 @@ const MAX_DELAY_SEC = 60;
 // --max-requests 计数表最大条目数：超出后清理最早写入的条目，防异常退出残留累积
 const MAX_TRACKED_SCANS = 512;
 
-// ── 令牌桶（MERGED: perf 版——并发突发修复 + 构造参数守卫）─────────────────
-// 旧实现每个并发 acquire() 各自用「入口时刻 now」计算 waitMs 并睡到同一时刻，醒来后各自按
-// 「入口起经过时长」补令牌再扣 1：N 个并发等待者会在同一时刻全部放行，实际突发速率 ≈ 并发数 × 设定速率。
-// 修复：acquire 经 promise 链严格串行化——每个等待者只有在前一个令牌占用者结算完成后才开始计算，
-// 醒来时刻的令牌数反映「上一请求之后的真实补充量」，从而保证任意并发下平均速率 ≤ ratePerSec。
-// 突发语义保留：初始 tokens = capacity = ratePerSec，满桶时可突发消耗（与旧行为一致，测试不变）。
-export class TokenBucket {
-  constructor(ratePerSec) {
-    this.ratePerSec = Number.isFinite(ratePerSec) && ratePerSec > 0
-    ? Math.min(ratePerSec, 10000) // [P0-2] 上限 10000 req/s，防配置错误打爆目标
-    : defaults.ratePerSec;
-    this.capacity = this.ratePerSec;
-    this.tokens = this.ratePerSec;
-    this.last = Date.now();
-    // 串行化队列：同一桶的 acquire 结算互斥，杜绝「多个等待者同一时刻放行」的突发
-    this._chain = Promise.resolve();
-  }
+import { TokenBucket } from './http/tokenBucket.js';
+// 再导出：保持既有 import 路径不变（defaults.js / ScanManager.js / 测试仍从 httpClient.js 取）
+export { TokenBucket } from './http/tokenBucket.js';
 
-  // 获取一个令牌（不足则等待）。返回 promise；串行化保证并发调用下的真实限速。
-  acquire() {
-    const run = async () => {
-      const now = Date.now();
-      const elapsed = (now - this.last) / 1000;
-      this.tokens = Math.min(this.capacity, this.tokens + elapsed * this.ratePerSec);
-      this.last = now;
-      if (this.tokens >= 1) {
-        this.tokens -= 1;
-        return;
-      }
-      const waitMs = ((1 - this.tokens) / this.ratePerSec) * 1000;
-      await new Promise((resolve) => setTimeout(resolve, waitMs));
-      // 等待期间令牌按速率持续补充：醒来后重新结算并扣除 1 个，不再直接清零
-      // （原实现丢掉了等待期间累积的令牌，长等待下实际速率明显低于设定值）。
-      const after = Date.now();
-      this.tokens = Math.min(this.capacity, this.tokens + ((after - now) / 1000) * this.ratePerSec) - 1;
-      this.last = after;
-    };
-    const p = this._chain.then(run, run);
-    // 单个结算失败不阻断后续 acquire（setTimeout/算术不会抛，此为防御）
-    this._chain = p.catch(() => {});
-    return p;
-  }
-}
-
-// 内置常见浏览器 User-Agent 池（原逻辑不变）
-const DESKTOP_UA_POOL = [
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15',
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:125.0) Gecko/20100101 Firefox/125.0',
-  'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36 Edg/122.0.0.0',
-  'Mozilla/5.0 (Macintosh; Intel Mac OS X 13_5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-  'Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:124.0) Gecko/20100101 Firefox/124.0',
-];
-
-// 移动端 UA 池（对标 sqlmap --mobile：CLI 将 --mobile 映射为 wafEvasion.randomUA='mobile'）
-const MOBILE_UA_POOL = [
-  'Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1',
-  'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36',
-  'Mozilla/5.0 (iPad; CPU OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1',
-];
-
-const UA_POOL = [...DESKTOP_UA_POOL, ...MOBILE_UA_POOL];
-
-/**
- * 从 UA 池随机选取 User-Agent 字符串（WAF 规避 / 随机指纹）。
- * @param {'mobile'|'desktop'|undefined} kind 指定 'mobile' 则仅从移动端池取，否则从全池取
- * @returns {string} User-Agent 字符串
- */
-export function pickRandomUA(kind) {
-  const pool = kind === 'mobile' ? MOBILE_UA_POOL : UA_POOL;
-  return pool[Math.floor(Math.random() * pool.length)];
-}
+import { pickRandomUA } from './http/userAgents.js';
+// 再导出：保持既有 import 路径不变
+export { pickRandomUA } from './http/userAgents.js';
 
 // ── 认证头合并（P2-8：头名黑名单）────────────────────────────────────────────
 // 禁止调用者通过 auth.headers / headerParams 覆写以下头，防止请求走私/虚拟主机绕过
@@ -1052,7 +777,7 @@ export function buildProxyAgent(proxyUrl, { insecureTls = false } = {}) {
   const cacheKey = `${proxyUrl}|${insecureTls ? 'insecure' : 'secure'}`;
   if (_proxyAgentCache.has(cacheKey)) return _proxyAgentCache.get(cacheKey);
   const { u, scheme } = parseProxyUrl(proxyUrl);
-  let conf;
+  /** @type {any} */ let conf;
   if (SOCKS_PROXY_SCHEMES.has(scheme)) {
     // [P1-FIX ②] 旧实现只认 ^socks5?://，socks4:// 与 socks4a:// 落到 else 分支被当成 http 明文
     // 代理发出（凭据泄漏）。现按 socks-proxy-agent 支持的完整 scheme 集合分流（类型/是否本地解析
@@ -1117,6 +842,10 @@ export function logSafeUrl(urlString) {
 }
 
 export class HttpClient {
+  /**
+   * @param {object} [opts]
+   * @param {boolean} [opts.disableKeepAlive] 关闭长连接（对标 sqlmap --keep-alive 关闭）
+   */
   constructor({ disableKeepAlive } = {}) {
     this.bucket = new TokenBucket(defaults.ratePerSec);
     this.buckets = new Map();
@@ -1229,7 +958,7 @@ export class HttpClient {
   // 可中断延时：delay 期间若扫描被停止（signal aborted）立即返回，不必等完整个周期
   _sleep(ms, signal) {
     if (!ms || ms <= 0) return Promise.resolve();
-    return new Promise((resolve) => {
+    return new Promise(/** @param {(value?: any) => void} resolve */ (resolve) => {
       const timer = setTimeout(() => {
         if (signal) signal.removeEventListener?.('abort', onAbort);
         resolve();
@@ -1337,6 +1066,20 @@ export class HttpClient {
   // 手动重定向跟随（P0-1）：最多 5 跳，每跳校验 Location 的 SSRF 策略
   // [P2-5] --ignore-redirects：redirects 传 0 时完全忽略 3xx（直接返回首跳跳转响应），
   // 对标 sqlmap --ignore-redirects（“不跟随重定向，直接返回 3xx”）。
+  /**
+   * 手动逐跳跟随重定向（最多 5 跳）：每跳 SSRF 校验 + 跨域剥离凭据头 + DNS 钉死。
+   * egress 标注 any：它是出口语义透传对象（viaProxy/proxySource/insecureTls/ssrfViaProxy
+   * 等字段随调用链演进），逐字段声明只会不断失配。
+   * @param {any} initial
+@param {any} opts
+@param {any} headers
+@param {any} proxyConf
+   * @param {number} timeoutMs
+@param {boolean} disableKA
+@param {any} redirects
+   * @param {any} egress
+@returns {Promise<any>}
+   */
   async _followRedirects(initial, opts, headers, proxyConf, timeoutMs, disableKA, redirects, egress = null) {
     let current = initial;
     let currentUrl = opts.url;
@@ -1350,7 +1093,7 @@ export class HttpClient {
       const status = current.status;
       if (status >= 300 && status < 400 && current.headers && current.headers.location) {
         // 每跳基于「当前请求 URL」解析相对 Location（多跳链正确性）
-        const nextUrl = new URL(current.headers.location, currentUrl).toString();
+        const nextUrl = new URL(String(current.headers.location), currentUrl).toString();
         await assertSafeTargetForEgress(nextUrl, egress); // 每跳重新校验（P0-1；[P1-FIX ②] 代理模式按同一 egress 下放）
         await assertScanScope(opts?.scanId, nextUrl); // [P0-SEC] 跳转目标同样受授权范围约束
         // 跨域判定：hostname 或 protocol 变化即视为跨域（端口变化不强制剥离，避免误伤同站多端口）
@@ -1400,7 +1143,7 @@ export class HttpClient {
     if (pinnedLookup) {
       lookup = (hostname, o, cb) => pinnedLookup(hostname, o, cb);
     }
-    const connectOpts = { ...(dispatcher.opts?.connect || {}) };
+    const connectOpts = { ...(/** @type {any} */ (dispatcher).opts?.connect || {}) };
     if (insecureTls) connectOpts.rejectUnauthorized = false;
     if (lookup) connectOpts.lookup = lookup;
     const { statusCode, headers: resHeaders, body } = await undiciRequest(opts.url, {
@@ -1415,6 +1158,7 @@ export class HttpClient {
       // [P0-FIX] 手动重定向（逐跳 SSRF 校验 + 跨域剥离敏感头由 _followRedirectsH2 负责）：
       // undici 内置 maxRedirections 跟随的跳转目标不经过 assertSafeHttpTarget 校验、不钉 DNS，
       // 302 可跳内网/元数据地址（绕过出口 SSRF 防护）。置 0 关闭内置跟随。
+      // @ts-expect-error undici 支持 maxRedirections，但其 RequestOptions 类型未收录（运行时有效）
       maxRedirections: 0,
     });
     // 体积上限：读流但截断超限（与 axios maxContentLength 语义近似，防 OOM）
@@ -1442,7 +1186,7 @@ export class HttpClient {
     let encodingUnsupported = false;
     if (enc && enc !== 'identity' && !truncated) {
       try {
-        raw = decompressResponseBody(raw, enc);
+        raw = /** @type {any} */ (decompressResponseBody(raw, enc));
       } catch (e) {
         encodingUnsupported = true;
         logger.warn(
@@ -1482,6 +1226,17 @@ export class HttpClient {
   //   ② 跨域（hostname/protocol 变化）时剥离 Authorization/Cookie 等凭据头（防凭据泄露到第三方域）；
   //   ③ 对跳转 URL 重新 DNS 钉死（防 rebinding）。
   // [P2-5] --ignore-redirects：redirects 传 0 时忽略 3xx（HTTP/2 路径与 HTTP/1.1 一致）
+  /**
+   * 手动逐跳跟随重定向（内置跟随已关闭，见 maxRedirections: 0）。
+   * egress 标注为 any：它是出口语义透传对象（含 viaProxy/proxySource/insecureTls/ssrfViaProxy
+   * 等字段，随调用链演进），在此逐字段声明只会不断失配。
+   * @param {any} opts
+@param {any} headers
+@param {number} timeoutMs
+   * @param {any} redirects
+@param {any} egress
+@returns {Promise<any>}
+   */
   async _followRedirectsH2(opts, headers, timeoutMs, redirects, egress = null) {
     let currentUrl = opts.url;
     let activeHeaders = headers;
@@ -1496,7 +1251,8 @@ export class HttpClient {
       this._captureCookies(currentUrl, current, opts); // 每跳捕获 Set-Cookie（幂等）
       const status = current.status;
       if (status >= 300 && status < 400 && current.headers && current.headers.location) {
-        const nextUrl = new URL(current.headers.location, currentUrl).toString();
+        // 多值头下 location 可能是 string[] → 显式收窄为 string
+        const nextUrl = new URL(String(current.headers.location), currentUrl).toString();
         await assertSafeTargetForEgress(nextUrl, egress); // 每跳重新校验（P0-1；[P1-FIX ②] 代理模式按同一 egress 下放）
         await assertScanScope(opts?.scanId, nextUrl); // [P0-SEC] 跳转目标同样受授权范围约束
         // 跨域判定：hostname 或 protocol 变化即视为跨域（与 _followRedirects 一致）
@@ -1626,7 +1382,7 @@ export class HttpClient {
     };
     // [P1-FIX ②] socks5://（非 socks5h）按协议在**本地**解析目标域名：内网专用 DNS 场景会解析失败，
     // 这里只提示（不擅改语义 —— 静默升级成远端解析等于替用户改了代理行为）
-    if (egress.viaProxy && opts.url && /^socks5:\/\//i.test(proxySel.proxyUrl)) {
+    if (egress.viaProxy && opts.url && /^socks5:\/\//i.test(String(proxySel.proxyUrl))) {
       try {
         if (!net.isIP(new URL(opts.url).hostname)) {
           logOnce(
@@ -1661,7 +1417,7 @@ export class HttpClient {
       (opts.scanId && this.buckets.get(opts.scanId)) ||
       (Number.isFinite(effectiveRate) && effectiveRate > 0 ? this.bucketForRate(effectiveRate) : this.bucket);
     // [P1-FIX ①②] 代理来源已在入口统一解析（含环境变量），insecureTls 一并决定 Agent 组合
-    const proxyConf = buildProxyAgent(proxySel.proxyUrl, { insecureTls });
+    const proxyConf = buildProxyAgent(/** @type {string} */ (proxySel.proxyUrl), { insecureTls });
     const disableKA = opts.disableKeepAlive === true || this.disableKeepAlive === true;
     // 头合并（含 P2-8 头名黑名单过滤）
     let headers = mergeAuthHeaders(opts.headers || {}, opts.auth ?? defaults.auth ?? null);
@@ -1692,7 +1448,7 @@ export class HttpClient {
     for (let attempt = 0; attempt <= retry; attempt++) {
       // [⑮] abort 检查：signal 已取消时不再发新请求（重试循环防漏）
       if (opts.signal?.aborted) {
-        const abortErr = new Error('请求已取消（扫描停止）');
+        const abortErr = /** @type {NodeJS.ErrnoException} */ (new Error('请求已取消（扫描停止）'));
         abortErr.name = 'AbortError';
         abortErr.code = 'ERR_CANCELED';
         throw abortErr;
@@ -1716,7 +1472,7 @@ export class HttpClient {
         // [P2-FIX] delay 期间可能被 abort（_sleep 响应 signal 提前返回），
         // 复查 signal：已取消则不再发请求（原实现 sleep 后直接继续，浪费一次请求）
         if (opts.signal?.aborted) {
-          const abortErr = new Error('请求已取消（扫描停止）');
+          const abortErr = /** @type {NodeJS.ErrnoException} */ (new Error('请求已取消（扫描停止）'));
           abortErr.name = 'AbortError';
           abortErr.code = 'ERR_CANCELED';
           throw abortErr;
@@ -1754,7 +1510,7 @@ export class HttpClient {
               // 无缓存 challenge：首次裸请求返回 401 → 建立 state 并重放
               const rp = this._digestReplay(opts.method || 'GET', opts.url, da, res);
               if (rp.replay) {
-                headers['Authorization'] = rp.header;
+                headers['Authorization'] = /** @type {string} */ (rp.header);
                 if (opts.http2 === true) {
                   res = await this._followRedirectsH2(opts, headers, timeoutMs, redirectsLeft, egress);
                 } else {
@@ -1876,7 +1632,7 @@ export class HttpClient {
           // [P2-FIX] 退避期间响应 abort signal（_sleep 可中断）：点了停止不必等完 backoff
           await this._sleep(backoffMs, opts.signal);
           if (opts.signal?.aborted) {
-            const abortErr = new Error('请求已取消（扫描停止）');
+            const abortErr = /** @type {NodeJS.ErrnoException} */ (new Error('请求已取消（扫描停止）'));
             abortErr.name = 'AbortError';
             abortErr.code = 'ERR_CANCELED';
             throw abortErr;

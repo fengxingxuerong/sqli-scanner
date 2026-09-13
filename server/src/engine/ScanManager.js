@@ -47,6 +47,13 @@ import { mapPool, mergeExtracted, mergeExtractedForResume, hasData, publicTarget
 // 扫描管理器（门面模式）：对外暴露 start/stop/getReport/exportReport，
 // 内部串起「发现→指纹→四检测器→提取→构造报告」，全程经 EventBus 推送进度。
 export class ScanManager {
+  /**
+   * @param {object} [opts]
+   * @param {any} [opts.wafIdentifier] 测试注入：WAF 指纹识别器
+   * @param {any} [opts.wafRecommend] 测试注入：tamper 推荐器
+   * @param {number} [opts.retireTtlMs] 扫描上下文回收 TTL（默认 30s）
+   * @param {number} [opts.maxScans] scans Map 上限（默认 100）
+   */
   constructor({ wafIdentifier, wafRecommend, retireTtlMs, maxScans } = {}) {
     this.httpClient = httpClient; // 统一 HttpClient（便于测试时注入 mock）
     this.parser = new TargetParser(this.httpClient);
@@ -265,7 +272,7 @@ export class ScanManager {
       const cfg = (target && target.config) || {};
       let view = sc;
       if (typeof cfg.safeUrl === 'string' && /^https?:\/\//i.test(cfg.safeUrl)) {
-        view = withSafeUrl(sc, { safeUrl: cfg.safeUrl, safeFreq: cfg.safeFreq });
+        view = /** @type {any} */ (withSafeUrl(sc, { safeUrl: cfg.safeUrl, safeFreq: cfg.safeFreq }));
       }
       // [P2-5] --force-ssl / --ignore-redirects：协议层策略注入每个请求（对标 sqlmap）。
       // forceSsl：目标 http:// 强制升级 https（httpClient.request 消费改写）；
@@ -736,6 +743,7 @@ export class ScanManager {
         for (const r of rest) {
           const rs = st(r);
           if (rs == null || rs < 400) return;
+          if (!r) continue;
           if (!this._prefilterSimilar(quoteBody, quoteStatus, norm(r, r.value), rs)) return;
         }
         skip.set(point.id, {

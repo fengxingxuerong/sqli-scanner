@@ -12,7 +12,7 @@ import { logger } from '../../core/logger.js';
 import { createVulnerability } from '../models.js';
 import { summarizeSkipped } from '../scanHelpers.js';
 import { dbmsEvidenceOf } from '../dbmsEvidence.js';
-import { publicReport } from '../ScanManager.js';
+import { publicReport } from '../scanHelpers.js';
 
 /**
  * @param {object} run 扫描运行期上下文（见 scanRunner.js）

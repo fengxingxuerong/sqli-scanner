@@ -193,18 +193,21 @@ export function buildInjectionRequest(target, point, value) {
       const segs = _splitJsonPath(point.param);
       let cur = clone;
       let ok = true;
+      // 显式取出非空局部量：下面的循环/尾部取值都依赖它非 null，
+      // 仅靠 if (!segs) 赋值 ok 无法让 TS 在循环体内完成窄化。
+      const segsArr = /** @type {string[]} */ (segs);
       if (!segs) {
         ok = false; // 非法路径（引号未闭合/空段）：JSON 注入失效，保持表单语义
       }
-      for (let i = 0; ok && i < segs.length - 1; i++) {
-        const raw = segs[i];
+      for (let i = 0; ok && i < segsArr.length - 1; i++) {
+        const raw = segsArr[i];
         const num = /^\d+$/.test(raw) ? Number(raw) : null;
         const key = num !== null ? num : _matchJsonKey(cur, raw);
         if (key === null || cur[key] == null || typeof cur[key] !== 'object') { ok = false; break; }
         cur = cur[key];
       }
       if (ok) {
-        const leaf = segs[segs.length - 1];
+        const leaf = segsArr[segsArr.length - 1];
         const leafNum = /^\d+$/.test(leaf) ? Number(leaf) : null;
         const leafKey = leafNum !== null ? leafNum : _matchJsonKey(cur, leaf);
         if (leafKey !== null) {

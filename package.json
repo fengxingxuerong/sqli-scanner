@@ -23,6 +23,8 @@
     "e2e:file-write": "node e2e/fileops/exploit-file-write.e2e.mjs",
     "tauri": "tauri",
     "build:engine": "node scripts/build-engine.mjs",
+    "arch:guard": "node scripts/arch-guard.mjs",
+    "arch:baseline": "node scripts/arch-guard.mjs --update",
     "build:tauri": "npm run build && npm run build:engine && tauri build",
     "package:win": "npm run build && npm run build:engine && tauri build --runner cargo --target x86_64-pc-windows-msvc",
     "package:mac": "npm run build && npm run build:engine && tauri build --runner cargo --target universal-apple-darwin",

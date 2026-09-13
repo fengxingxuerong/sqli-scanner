@@ -9,14 +9,17 @@
 // 用法：
 //   import { md4 } from './ntlmMd4.js';
 //   md4(Buffer.from('abc'))            → Buffer（16 bytes）
-//   md4(Buffer.from('abc')).toString('hex')  → 'a448017aaf21d8525fc10ae01aa6a2d3'
-//   md4Utf16le('password')             → NTLM hash（e52cac67419a9a224a3b108f3fa6cb6d）
+//   md4(Buffer.from('abc')).toString('hex')  → 'a448017aaf21d8525fc10ae87aa6729d'
+//   md4Utf16le('password')             → NTLM hash（8846f7eaee8fb117ad06bdd830b7586c）
 //
-// 测试向量（RFC 1320 §A.5）：
+// 测试向量（RFC 1320 §A.5，经 OpenSSL legacy provider 权威对拍核verify 2026-09-13）：
 //   md4('')            = 31d6cfe0d16ae931b73c59d7e0c089c0
 //   md4('a')           = bde52cb31de33e46245e05fbdbd6fb24
-//   md4('abc')         = a448017aaf21d8525fc10ae01aa6a2d3
+//   md4('abc')         = a448017aaf21d8525fc10ae87aa6729d
 //   md4('message digest') = d9130a8164549fe818874806e1c7014b
+//   md4(UTF16LE('password')) = 8846f7eaee8fb117ad06bdd830b7586c（微软 NTLM 公认值）
+//   注：文件早期注释把 md4('abc') 写成 a448...01aa6a2d3、md4Utf16le('password') 写成
+//   e52cac67...，均为错误记忆值（实现正确、注释错）。已按权威对拍修正。
 // ============================================================================
 
 import crypto from 'node:crypto';

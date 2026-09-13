@@ -20,7 +20,8 @@ export const overlongutf8more = {
         i += 2;
         continue;
       }
-      const ordinal = s.codePointAt(i);
+      // codePointAt 的返回类型含 undefined；此处 i < s.length 已保证有效索引
+      const ordinal = /** @type {number} */ (s.codePointAt(i));
       if (ordinal > 0xffff) i++; // 代理对
       if (ordinal < 0x80) {
         // 超长 UTF-8：双字节表示单字节 ASCII

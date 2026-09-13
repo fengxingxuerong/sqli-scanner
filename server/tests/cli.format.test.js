@@ -44,3 +44,16 @@ test('formatReport: md 别名与 markdown 等价', () => {
 test('formatReport: 未知格式回退 json（与 REST 宽容行为一致）', () => {
   assert.equal(formatReport(report, 'xml'), formatReport(report, 'json'));
 });
+
+// [P1-REGRESSION 2026-09-13] 锁住「同一份 report 多次渲染必须逐字节一致」。
+// 背景：上面的 md/markdown 等价断言曾**偶发失败**（flaky）——根因不在别名分发，而在
+// reportDelivery.buildDelivery 的 meta.generatedAt：报告缺 finishedAt/startedAt 时落到
+// new Date()，两次渲染跨毫秒即产生差异（同一份报告渲染两次结果不同，本身也是交付层缺陷）。
+// 修法是给 buildDelivery 加 report 级缓存。本用例**故意拉开 8ms** 复现该时序，
+// 若有人把缓存去掉或改成实时取值，它会稳定失败而不是偶发失败——把 flaky 变成确定性红灯。
+test('formatReport: 同一份 report 相隔渲染仍逐字节一致（generatedAt 不得漂移）', async () => {
+  const first = formatReport(report, 'md');
+  await new Promise((r) => setTimeout(r, 8));
+  const second = formatReport(report, 'md');
+  assert.equal(first, second, '同一份 report 相隔毫秒渲染应完全一致（含“生成时间”行）');
+});

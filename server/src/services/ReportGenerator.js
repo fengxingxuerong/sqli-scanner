@@ -98,7 +98,7 @@ function cvssOfVuln(v, d) {
 // Markdown 围栏：内容里可能出现反引号（payload 常含 ` 与 ```），围栏长度必须严格大于
 // 正文中最长的反引号串，否则 PoC 会提前闭合围栏、把后续报告内容变成正文。
 function mdFence(content, lang = '') {
-  const runs = String(content || '').match(/`+/g) || [];
+  const runs = /** @type {string[]} */ (String(content || '').match(/`+/g) || []);
   const max = runs.reduce((m, r) => Math.max(m, r.length), 0);
   const tick = '`'.repeat(Math.max(3, max + 1));
   return `${tick}${lang}\n${content}\n${tick}`;

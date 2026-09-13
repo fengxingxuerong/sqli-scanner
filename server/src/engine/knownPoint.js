@@ -34,7 +34,8 @@ export function normalizeKnownPoint(kp) {
 /**
  * 对注入点集合应用已知点标记（预筛选/闭合探测之前调用）。
  * 匹配的点打 knownPoint=true（预筛选保守保留、闭合探测短路、基线请求仍发以学习页面特征）。
- * @param {Array<{param?:string}>} points 注入点
+ * @param {Array<{param?:string, knownPoint?:boolean, boundary?:string, knownBoundary?:boolean}>} points 注入点
+ *   （函数会就地写入 knownPoint / boundary / knownBoundary 三个标记字段）
  * @param {object} config 扫描配置
  * @returns {number} 命中的点数
  */

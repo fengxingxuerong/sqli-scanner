@@ -137,7 +137,9 @@ if (LOG_PATH) {
   });
   // 文件不可写（如沙箱/只读目录）时静默降级，绝不影响引擎主流程
   fileTransport.on('error', () => {});
-  transports.push(fileTransport);
+  // winston 的 transports 数组在类型上被收窄为 ConsoleTransportInstance[]，
+  // 实际可混装 File 传输（运行期合法）
+  transports.push(/** @type {any} */ (fileTransport));
 }
 
 // 单条日志最大长度：超长（如整段响应体/拖库证据被误打印）截断，防日志刷屏与落盘膨胀

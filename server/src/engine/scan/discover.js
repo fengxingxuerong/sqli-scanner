@@ -16,7 +16,7 @@
 import * as eventBus from '../../core/eventBus.js';
 import { logger } from '../../core/logger.js';
 import { ScanSession } from '../../core/sessionStore.js';
-import { urlHash } from '../ScanManager.js';
+import { urlHash } from '../scanHelpers.js';
 import { _colGuessCache } from '../Extractor.js';
 import { dnsCache } from '../../core/httpClient.js';
 import { applyInvalidValues } from '../invalidValue.js';

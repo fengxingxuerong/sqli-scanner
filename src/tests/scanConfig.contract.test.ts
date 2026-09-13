@@ -1,3 +1,4 @@
+// @vitest-environment node
 // ============================================================================
 // src/tests/scanConfig.contract.test.ts —— 面板键 → 请求体 config 的契约
 // [P0-FIX 2026-09-09]
@@ -19,6 +20,10 @@ import { fileURLToPath } from 'node:url';
 import { SCAN_CONFIG_KEYS, SCAN_CONFIG_VALUE_TYPES, DEFAULT_CONFIG } from '../shared/constants';
 import { buildStartConfig, buildResumeConfig } from '../shared/scanConfig';
 
+// [audit-FIX 2026-09-13] 本套件只读源码文本，不需要 DOM。原默认 jsdom 环境下
+// node:url/node:path 的函数导出在本机 Node 24 上被覆盖为 undefined（fileURLToPath/
+// resolve is not a function，套件直接挂起）。声明 @vitest-environment node 后恢复
+// 原生实现，路径逻辑零改动。
 const read = (rel: string) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf8');
 
 /**

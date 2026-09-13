@@ -16,28 +16,14 @@ import { tauriBridge } from './shared/tauriBridge';
 import './i18n';
 
 // 主题模式：浅色 / 跟随系统 / 暗色
-export type ThemeMode = 'light' | 'system' | 'dark';
-const THEME_KEY = 'sqli_theme';
 
 // 首启合规声明持久化 key（勾选「已知晓」后不再弹出，参考 THEME_KEY 模式）
 const DISCLAIMER_KEY = 'sqli_disclaimer';
-
-interface ThemeModeContextValue {
-  mode: ThemeMode;
-  effectiveMode: 'light' | 'dark';
-  setMode: (m: ThemeMode) => void;
-}
-
-const ThemeModeContext = createContext<ThemeModeContextValue>({
-  mode: 'light',
-  effectiveMode: 'light',
-  setMode: () => {},
-});
-
-// 供子组件（如 TopBar）读取/切换主题模式
-export function useThemeMode() {
-  return useContext(ThemeModeContext);
-}
+import type { ThemeMode } from './shared/themeMode';
+import { THEME_KEY, ThemeModeContext } from './shared/themeMode';
+// 再导出：保持既有 import 路径不变（TopBar 等组件仍可从 App 取到主题类型/hook）
+export type { ThemeMode } from './shared/themeMode';
+export { useThemeMode } from './shared/themeMode';
 
 // 顶层主题 Provider：动态 createTheme，主题模式持久化到 localStorage
 function AppThemeProvider({ children }: { children: ReactNode }) {

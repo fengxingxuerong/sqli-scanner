@@ -6,6 +6,17 @@
 // 支持按注入点缓存（传 cache + cacheKey）：同一注入点的猜列结果跨检测器复用，命中即零请求。
 const COL_GUESS_CACHE_MAX = 500;
 
+/**
+ * ORDER BY 二分猜列数（三处调用方共用，防判据漂移）。
+ * @param {(payload: string) => Promise<any>} probe 发送 payload 并返回响应的回调
+ * @param {object} [opts]
+ * @param {number} [opts.baseLen] 基线响应长度（差异比对用）
+ * @param {number} [opts.maxCols] 猜测上限（默认 50）
+ * @param {Map<string, number>} [opts.cache] 注入点级缓存
+ * @param {string} [opts.cacheKey] 缓存键
+ * @param {number} [opts.fixed] 已知列数（--union-cols），>0 时跳过猜测
+ * @returns {Promise<number>} 列数
+ */
 export async function binaryGuessColumns(probe, { baseLen, maxCols = 50, cache, cacheKey, fixed } = {}) {
   // [P2-5] --union-cols：用户给定列数（sqlmap 语义：已知列数时跳过猜测，零请求）。
   // fixed > 0 时直接返回该列数，不做 ORDER BY 二分（调用方 UnionDetector/Extractor 从
@@ -14,7 +25,7 @@ export async function binaryGuessColumns(probe, { baseLen, maxCols = 50, cache, 
   if (Number.isInteger(fixedN) && fixedN > 0 && fixedN <= maxCols) return fixedN;
   // 缓存命中：直接返回，不再发任何 ORDER BY 探测请求
   if (cache && cacheKey != null && cache.has(cacheKey)) {
-    return cache.get(cacheKey);
+    return /** @type {number} */ (cache.get(cacheKey)); // has() 已判定存在
   }
   const { n: ans, reliable } = await doGuessColumns(probe, baseLen, maxCols);
   // [CRS-FIX 2026-09-09] 不可信结果不写缓存（原实现无条件缓存 = 缓存投毒）：

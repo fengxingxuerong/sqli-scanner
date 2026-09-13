@@ -45,7 +45,7 @@ class OobReceiver {
     // 按来源 IP 的令牌桶：{ ip: { tokens, last } }
     this._ipBuckets = new Map();
     // P1: 互斥锁 — 序列化 start()/stop()，防并发 _stopAll 互相关闭对方服务器
-    this._mutex = Promise.resolve();
+    this._mutex = Promise.resolve(undefined);
   }
 
   // P1: 互斥锁辅助 — 串行化异步操作，防 start/stop 交叉执行
@@ -109,7 +109,7 @@ class OobReceiver {
       server.listen(port, LISTEN_HOST, () => {
         this._listening = true;
         logger.info(`OOB HTTP 接收端已启动：监听 ${LISTEN_HOST}:${port}`);
-        resolve();
+        resolve(undefined);
       });
     });
   }
@@ -132,7 +132,7 @@ class OobReceiver {
       socket.on('error', (err) => {
         logger.warn(`OOB DNS 接收端启动失败：${err.message}（DNS OOB 不可用，HTTP OOB 仍正常工作）`);
         this._dnsServer = null;
-        resolve(); // 不阻断——HTTP OOB 仍正常工作
+        resolve(undefined); // 不阻断——HTTP OOB 仍正常工作
       });
 
       socket.on('message', (msg, rinfo) => {
@@ -142,7 +142,7 @@ class OobReceiver {
       socket.on('listening', () => {
         const addr = socket.address();
         logger.info(`OOB DNS 接收端已启动：监听 ${LISTEN_HOST}:${addr.port}（已配置域名: ${dnsDomain || '未配置'})`);
-        resolve();
+        resolve(undefined);
       });
 
       try {
@@ -150,7 +150,7 @@ class OobReceiver {
       } catch (err) {
         logger.warn(`OOB DNS 绑定端口 ${dnsPort} 失败：${err.message}（DNS OOB 不可用，HTTP OOB 仍正常工作）`);
         this._dnsServer = null;
-        resolve();
+        resolve(undefined);
       }
     });
   }
@@ -159,8 +159,8 @@ class OobReceiver {
     if (this._server) {
       try { if (typeof this._server.closeAllConnections === 'function') this._server.closeAllConnections(); } catch { /* ignore */ }
       // 等待 close 回调完成，确保端口释放后再 start（防 EADDRINUSE）
-      await new Promise((resolve) => {
-        try { this._server.close(resolve); } catch { resolve(); }
+      await new Promise(/** @param {(value?: any) => void} resolve */ (resolve) => {
+        try { this._server?.close(resolve); } catch { resolve(undefined); }
       });
       this._server = null;
     }
@@ -339,7 +339,7 @@ class OobReceiver {
   waitForToken(token, timeoutMs) {
     if (!token) return Promise.resolve(false);
     if (this._received.has(token)) return Promise.resolve(true);
-    return new Promise((resolve) => {
+    return new Promise(/** @param {(value?: any) => void} resolve */ (resolve) => {
       const entry = {
         resolve: (v) => {
           clearTimeout(timer);

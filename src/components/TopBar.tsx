@@ -15,7 +15,7 @@ import SettingsBrightnessIcon from '@mui/icons-material/SettingsBrightness';
 import HomeIcon from '@mui/icons-material/Home';
 import { Link as RouterLink, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { useThemeMode } from '../App';
+import { useThemeMode } from '../shared/themeMode';
 
 // 顶栏：应用标题 + 导航 + 主题切换 + 语言切换
 export default function TopBar() {

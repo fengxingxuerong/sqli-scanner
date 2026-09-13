@@ -840,6 +840,7 @@ export const PAYLOAD_REGISTRY = [
  * @param {{dbms?: string, technique?: string, level?: number, risk?: number,
  *          clause?: string[], boundary?: string,
  *          testFilter?: string, testSkip?: string,
+ *          dbmsVersion?: { major?: number|null, minor?: number|null, patch?: number|null, raw?: string },
  *          productionMode?: boolean, confirmDestructive?: boolean}} opts
  * @returns {typeof PAYLOAD_REGISTRY} 筛选后的条目（原对象引用，不拷贝）
  */

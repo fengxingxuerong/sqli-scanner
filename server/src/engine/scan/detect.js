@@ -12,7 +12,6 @@ import { Scheduler } from '../../services/Scheduler.js';
 import * as eventBus from '../../core/eventBus.js';
 import { logger } from '../../core/logger.js';
 import { oobReceiver } from '../../core/oobReceiver.js';
-import { dnsCache } from '../../core/httpClient.js';
 import { dialectToDbms } from '../DialectSqlBuilder.js';
 import { verifyTamperChains } from '../../core/waf/chainVerify.js';
 import { decideBlockPolicy, isUntrustedVendor } from '../../core/waf/blockPolicy.js';
@@ -20,7 +19,7 @@ import { OPERATOR_SWAP_CHAINS, FILTER_BYPASS_CHAINS } from '../../core/waf/wafRe
 import { GENERIC_BLOCK_VENDOR } from '../../core/waf/blockSignatures.js';
 import { isNetworkFailureError } from '../../core/scanValidityGuard.js';
 import { emptyExtractedData } from '../models.js';
-import { PAUSE_POLL_MS, HTTP_LOG_THROTTLE_MS } from './constants.js';
+import { PAUSE_POLL_MS } from './constants.js';
 
 /**
  * @param {object} run 扫描运行期上下文
@@ -50,6 +49,12 @@ export async function detectPhase(run) {
     // [P1-FIX 2026-09-05] 解析出的 DBMS 版本（{major,minor,raw} | null），供 ctx/payload 过滤消费
     let dbmsVersion = null;
     // WAF 重跑共享基线：指纹阶段抓取的 baseline 响应（status/headers/body）供 retry 复用
+    /**
+     * 跨检测器共享的基线响应（指纹阶段零额外发包抓取）。
+     * 标注 any 而非结构化联合类型：实测 `{...}|null` 在 checkJs 下会被推断成 null，
+     * 导致 `sharedBaseline?.status` 报 never；此处本就是跨模块弱类型透传对象。
+     * @type {any}
+     */
     let sharedBaseline = null;
     const selectedTechs = sm._selectedTechs(target.config);
     const stackedSelected = selectedTechs.includes('stacked');
@@ -301,6 +306,7 @@ export async function detectPhase(run) {
     // [P1-FIX 2026-09-08] 拦截处置策略：把「识别到 WAF」从前端提示变成有据可依的发包决策。
     // 复用指纹阶段已抓的 baseline（零额外发包）；未配置 scope/未命中拦截页时 action='none'，
     // 行为与历史一致。'unknown' 兜底结论由 blockPolicy 一票否决（不把形态变更交给一个不知是谁的结论）。
+    /** @type {any} */
     let blockPolicy = { action: 'none', tamperHint: [], backoffMs: null, reason: '未启用策略' };
     try {
       blockPolicy = decideBlockPolicy({
@@ -434,7 +440,7 @@ export async function detectPhase(run) {
         suggestions.push({ vendor: GENERIC_BLOCK_VENDOR, plugins: [...blockPolicy.tamperHint] });
       }
       // [P1-FIX 2026-09-08] 限流/过载退避：目标回了 Retry-After 还立刻重跑整轮，等于自请封 IP。
-      if (blockPolicy.backoffMs > 0) {
+      if ((blockPolicy.backoffMs ?? 0) > 0) {
         const waitMs = Math.min(30000, blockPolicy.backoffMs);
         logger.info(`[waf-policy] 目标限流，重跑前退避 ${waitMs}ms（Retry-After）`);
         const deadline = Date.now() + waitMs;
@@ -445,9 +451,9 @@ export async function detectPhase(run) {
         // 目标刚回过限流/过载，退避结束立刻恢复到原并发等于再次加压。复用 db-guard 的
         // schedulerRef.concurrency=1 模式（不碰令牌桶，零回归面），本轮剩余重跑保持低并发，
         // 避免「退避 → 高并发 → 又退避」的抖动循环。
-        if (schedulerRef) {
-          schedulerRef.concurrency = 1;
-          schedulerRef.baseConcurrency = 1;
+        if (run.schedulerRef) {
+          run.schedulerRef.concurrency = 1;
+          run.schedulerRef.baseConcurrency = 1;
           logger.warn(`[waf-policy] 容量退避后并发已降至 1（目标限流/过载，本轮剩余重跑低并发）`);
           eventBus.emit(scanId, 'waf_block_policy', { action: 'slowdown', concurrency: 1 });
         }

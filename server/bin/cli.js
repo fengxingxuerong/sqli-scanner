@@ -41,6 +41,7 @@ export function formatReport(report, fmt = 'json') {
 
 // 极简参数解析（避免引入 commander 依赖）
 function parseArgs(argv) {
+  /** @type {any} */
   const args = {
     url: null, batch: null, method: 'GET', body: null, cookie: null, headers: null,
     format: 'json', out: null, timeoutMs: 0, concurrency: 1, help: false,
@@ -616,7 +617,7 @@ function applyRequestFile(args) {
 
 // 合并 --cookie / --header / --auth / --proxy → auth 对象
 function buildAuth(args) {
-  let auth = undefined;
+  /** @type {any} */ let auth = undefined;
   if (args.cookie) auth = { ...auth, cookie: args.cookie };
   // 请求文件解析出的 header 对象优先（值可能含逗号，避免被 parseHeaders 截断）
   if (args.headerObj) auth = { ...auth, headers: { ...(auth?.headers || {}), ...args.headerObj } };
@@ -1213,7 +1214,7 @@ async function runIdentifyWaf(args) {
     }, null, 2));
     return;
   }
-  const rec = recommend(list.map((v) => ({ vendor: v.vendor })));
+  const rec = recommend(/** @type {any} */ (list.map((v) => ({ vendor: v.vendor }))));
   console.log(JSON.stringify({
     target: args.url,
     waf: {

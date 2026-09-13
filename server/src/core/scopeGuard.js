@@ -38,6 +38,9 @@ export function parseScope(entries) {
   const list = (Array.isArray(entries) ? entries : String(entries ?? '').split(','))
     .map((s) => String(s ?? '').trim())
     .filter(Boolean);
+  /** @type {{ enabled: boolean, hosts: Set<string>, domains: string[],
+   *           cidrs: Array<{net:number[],bits:number,v6:boolean}>,
+   *           paths: Array<{host: string, prefix: string}>, raw: string[] }} */
   const scope = { enabled: list.length > 0, hosts: new Set(), domains: [], cidrs: [], paths: [], raw: list };
   for (const item0 of list) {
     // CIDR 先判（否则 `10.0.0.0/8` 会被下面的“host/path”切分误当成路径前缀）

@@ -1,7 +1,7 @@
 import { emptyExtractedData } from './models.js';
 import { logger } from '../core/logger.js';
 import { defaults } from '../config/defaults.js';
-import { SYS_DBS } from './ScanManager.js';
+import { SYS_DBS } from './scanHelpers.js';
 import * as eventBus from '../core/eventBus.js';
 
 /**
@@ -323,7 +323,7 @@ export async function extractByScope(sm, scanId, ctx, scope) {
         // keyword 为空时直接返回空结果
         if (!keyword) {
           data.databases = [];
-          data.search = { keyword: '', matchedTables: [], matchedColumns: [] };
+          data.search = { keyword: '', matchedTables: /** @type {any[]} */ ([]), matchedColumns: /** @type {any[]} */ ([]) };
           break;
         }
         data.databases = allDbs;

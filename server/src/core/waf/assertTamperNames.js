@@ -2,7 +2,7 @@
 // 遍历 WAF_RECOMMEND_MAP 全部值，断言每个插件名都在 tamperRegistry 已注册清单中。
 // 由 wafRecommend.js 在模块加载期调用（fail-fast），单测亦可显式调用固化契约。
 import { tamperRegistry } from '../tamper/index.js';
-import { WAF_RECOMMEND_MAP } from './wafRecommend.js';
+import { WAF_RECOMMEND_MAP } from './wafRecommendMap.js';
 
 /**
  * 校验 WAF_RECOMMEND_MAP 引用的所有 tamper 插件名均已注册。

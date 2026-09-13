@@ -107,6 +107,7 @@ export class CookieJar {
     const name = nv.slice(0, eq).trim();
     const value = nv.slice(eq + 1).trim();
     if (!name) return null;
+    /** @type {{ name: string, value: string, domain: string, path: string, expiresAt: number|null, secure: boolean, hostOnly: boolean }} */
     const c = { name, value, domain: defaultHost, path: this._defaultPath(defaultPath), expiresAt: null, secure: false, hostOnly: true };
     for (const attr of attrs) {
       const [kRaw, vRaw] = attr.split('=');

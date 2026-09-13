@@ -22,7 +22,8 @@ export { WRAP, HIGH_FREQ_DBMS, fromDummy };
 export class DBFingerprinter {
   /**
    * @param {object} ctx { httpClient, target, point, config }
-   * @returns {Promise<{dbms: string|null, baseline: {status:number, headers:object, body:string}}>}
+   * @returns {Promise<{dbms: string|null, version?: any, baseline?: {status:number, headers:object, body:string}}>}
+   *   version 仅在版本识别成功时存在（parseDbmsVersion 的结果，供按版本选 payload）
    *   dbms: 命中的数据库类型；baseline: 指纹阶段已抓取的良性基线响应（供 WAF 识别复用，零额外发包）
    */
   async fingerprint(ctx) {

@@ -915,11 +915,13 @@ export class Extractor {
     // 判定与主二分同通道（响应 ≠ false 基准即真），确定性目标下收敛结果与全区间二分一致；
     // 若类探测被目标抖动污染，收敛值会越界 → extractVerify 等值验证失败 → 回退全区间重测
     // （重测跳过类探测，直接全区间二分，与旧行为一致），无回归。
+    /** @type {Array<{ pos: number; lo: number; hi: number; phase: string; _mid?: number; _err?: any; _retries?: number }>} */
     const st = Array.from({ length: len }, (_, i) => ({
       pos: i + 1,
       lo: 0,
       hi: 255,
       phase: 'cls-digits', // cls-digits → cls-lower → bisect
+      // _mid / _err / _retries 由下方批处理循环按需填充（非必填，不改变既有行为）
     }));
     let remaining = st.slice(); // 未完成（未收敛）位置；每轮取前 K 个并发探测，未收敛的回插队尾
     while (remaining.length) {
@@ -987,8 +989,9 @@ export class Extractor {
           continue;
         }
         // —— 二分阶段（原逻辑不变）——
-        if (ok) s.lo = s._mid + 1;
-        else s.hi = s._mid - 1;
+        const midNow = /** @type {number} */ (s._mid); // 本批请求前已赋值（见上方 s._mid = mid）
+        if (ok) s.lo = midNow + 1;
+        else s.hi = midNow - 1;
         if (s.lo > s.hi) {
           const candidate = s.hi + 1; // 收敛出的单字节码值（0–255）
           if (extractVerify) {

@@ -1,29 +1,18 @@
-import { Scheduler } from '../services/Scheduler.js';
-import { emptyExtractedData, createVulnerability } from './models.js';
-import { defaults } from '../config/defaults.js';
+// [audit-2026-09-13] 清理搬移后残留的死 import：Scheduler/defaults/oobReceiver 也已随阶段
+// 搬移到 scan/detect.js 等子模块消费。本文件仅做阶段编排，保留 eventBus/logger/守卫与
+// scan/* 子模块导入。
 import * as eventBus from '../core/eventBus.js';
-import { ScanSession } from '../core/sessionStore.js';
-import { oobReceiver } from '../core/oobReceiver.js';
 import { logger } from '../core/logger.js';
-import { urlHash, publicReport } from './ScanManager.js';
-import { _colGuessCache } from './Extractor.js';
-import { dialectToDbms } from './DialectSqlBuilder.js';
-import { dnsCache } from '../core/httpClient.js';
-import { verifyTamperChains } from '../core/waf/chainVerify.js';
 import { DbHealthGuard } from '../core/dbHealthGuard.js';
-import { ScanValidityGuard, isNetworkFailureError } from '../core/scanValidityGuard.js';
-// [P0 2026-09-09 实战批次] 失效值替换（--invalid-*）+ 已知注入点直通
-import { applyInvalidValues } from './invalidValue.js';
-import { applyKnownPoints } from './knownPoint.js';
-import { summarizeSkipped } from './scanHelpers.js';
-// [P1-FIX 2026-09-08 实战批次] 拦截页 → 发包决策的统一裁决入口
-import { decideBlockPolicy, isUntrustedVendor } from '../core/waf/blockPolicy.js';
-import { OPERATOR_SWAP_CHAINS, FILTER_BYPASS_CHAINS } from '../core/waf/wafRecommend.js';
-import { GENERIC_BLOCK_VENDOR } from '../core/waf/blockSignatures.js';
-import { dbmsEvidenceOf } from './dbmsEvidence.js';
-// [状态收拢] 暂停轮询/日志节流常量收拢至 scan/constants.js
-import { PAUSE_POLL_MS, HTTP_LOG_THROTTLE_MS } from './scan/constants.js';
+import { ScanValidityGuard } from '../core/scanValidityGuard.js';
+import { HTTP_LOG_THROTTLE_MS } from './scan/constants.js';
 // [拆分第一批 2026-09-12] runScanLoop 阶段外移（纯搬移，行为不变）
+// [audit-2026-09-13] 清理搬移后残留的死 import（20 项，eslint no-unused-vars 29→0 前置）：
+// emptyExtractedData/createVulnerability/ScanSession/urlHash/publicReport/_colGuessCache/
+// dialectToDbms/dnsCache/verifyTamperChains/isNetworkFailureError/applyInvalidValues/
+// applyKnownPoints/summarizeSkipped/decideBlockPolicy/isUntrustedVendor/OPERATOR_SWAP_CHAINS/
+// FILTER_BYPASS_CHAINS/GENERIC_BLOCK_VENDOR/dbmsEvidenceOf/PAUSE_POLL_MS 均已随阶段搬移
+// 到 scan/detect.js 等子模块消费，此处删除不影响任何行为。
 import { supplementalPasses } from './scan/supplemental.js';
 import { finalizeReport } from './scan/finalize.js';
 import { aggregateVulns } from './scan/aggregate.js';
@@ -127,6 +116,8 @@ export async function runScanLoop(sm, scanId) {
     const ctxBase = {
       guard,
       validity,
+      /** @type {number} 上次 http_request 事件推送时间戳（节流，避免刷屏） */
+      _lastHttpLogTs: 0,
       httpClient: client && target.mode !== 'direct'
         ? {
             ...client,

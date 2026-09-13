@@ -302,7 +302,8 @@ async function callLLM(cfg, systemPrompt, userPrompt, timeoutMs = 60000) {
       markKeyFail(cfg.keyIdx, false);
       throw new Error(`LLM API ${res.status}: ${errText.slice(0, 200)}`);
     }
-    const data = await res.json();
+    /** @type {any} */
+    const data = await res.json(); // OpenAI 兼容响应：choices[0].message.content
     return data.choices?.[0]?.message?.content || '';
   } catch (e) {
     if (e.name === 'AbortError') {

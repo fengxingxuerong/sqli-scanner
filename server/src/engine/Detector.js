@@ -51,6 +51,13 @@ export class Detector {
   }
 
   // 由子类实现具体检测逻辑
+  /**
+   * 抽象方法：子类必须实现并返回 DetectionResult。
+   * 必须显式声明返回类型——否则 TS 按本方法体（只 throw）推断为 Promise<never>，
+   * 导致全部子类实现触发 TS2416「返回类型与基类不兼容」。
+   * @param {object} ctx { httpClient, target, point, dbms, config }
+   * @returns {Promise<import('./models.js').DetectionResult>}
+   */
   async detect(ctx) {
     throw new Error('Detector.detect 必须由子类实现');
   }
@@ -129,8 +136,12 @@ export class Detector {
             .then((r) => ({ prefix, body: String(r?.data ?? ''), status: r?.status }));
         })
       );
-      const similarHits = results.filter(
-        (r) => r.status === 'fulfilled' && this._boundarySimilar(baseBody, baseStatus, r.value.body, r.value.status, config)
+      // JSDoc 断言：上面的 filter 已保证 fulfilled，但 TS 无法从回调里收窄，
+      // 收窄后下方 `r.value` / `hit.value` 的访问才是类型安全的（运行时语义不变）。
+      const similarHits = /** @type {PromiseFulfilledResult<{ prefix: string; body: string; status: any }>[]} */ (
+        results.filter(
+          (r) => r.status === 'fulfilled' && this._boundarySimilar(baseBody, baseStatus, r.value.body, r.value.status, config)
+        )
       );
       const hit = similarHits[0];
       // [P1-FIX 2026-09-10 实战实测] 空基线下的闭合前缀歧义消解：
@@ -161,7 +172,7 @@ export class Detector {
             };
           })
         );
-        const best = probes.find((r) => r.status === 'fulfilled' && r.value.ok);
+        const best = /** @type {any} */ (probes.find((r) => r.status === 'fulfilled' && r.value.ok));
         if (best) return best.value.prefix;
       }
       if (hit) return hit.value.prefix;
@@ -295,6 +306,7 @@ export class Detector {
       return tre.test(t) && fre.test(f) ? true : false;
     }
     if (tre) { tre.lastIndex = 0; return tre.test(t) ? true : false; }
+    if (!fre) return false;
     fre.lastIndex = 0;
     return fre.test(f) ? true : false;
   }
@@ -622,8 +634,9 @@ export class Detector {
    * @returns {boolean} true=可区分（注入信号），false=无差异
    */
   matchNullConnection(response, baselineResponse) {
-    const r = response || {};
-    const b = baselineResponse || {};
+    // `|| {}` 会让推断类型并上空对象 → 显式标注，保留原兜底语义
+    const r = /** @type {{ status?: number, headers?: any }} */ (response || {});
+    const b = /** @type {{ status?: number, headers?: any }} */ (baselineResponse || {});
     // 状态码不同即信号
     const rStatus = r.status ?? 0;
     const bStatus = b.status ?? 0;

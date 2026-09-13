@@ -59,7 +59,8 @@ export class WafIdentifier {
    * @returns {Array<{vendor:string, confidence:number, evidence:string, source?:string, alsoMatched?:string[]}>} 按 confidence 降序；无任何特征返回 []
    */
   identify(response) {
-    const resp = response || {};
+    const resp = /** @type {any} */ (response || {});
+    /** @type {any[]} 候选结构随厂商/通用/兜底三类分支演进，逐字段声明会不断失配 */
     const candidates = [];
     for (const [vendor, rule] of Object.entries(this.rules)) {
       const evidences = [];
@@ -141,7 +142,9 @@ export class WafIdentifier {
    *
    * @param {object} target 目标对象（含 baseUrl 或 url）
    * @param {object} httpClient 统一 HttpClient 实例
-   * @returns {Promise<{detected:boolean, vendor:string|null, confidence:number}>}
+   * @returns {Promise<{detected:boolean, vendor:string|null, confidence:number, source?:string, evidence?:string}>}
+   *   source 取值：wafRules（厂商签名）/ generic_block（通用拦截页）/ behavior（仅行为差异）/
+   *   none（无任何证据）—— 调用方 blockPolicy 依此决定是否允许变更发包形态。
    */
   async activeProbe(target, httpClient) {
     const baseUrl = (target && (target.baseUrl || target.url)) || '';

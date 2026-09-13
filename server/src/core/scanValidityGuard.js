@@ -105,7 +105,7 @@ export function pickStatus(res) {
  * 是否为「被拦截」响应：状态码命中拦截集合，或 4xx/5xx 且响应体含通用拦截特征。
  * 关键防误判：文案匹配只在 status>=400 时生效——200 页面里出现「安全验证/防火墙」
  * （帮助文档、产品名、验证码组件）不得判为拦截。
- * @param {{status?: number, data?: any, headers?: object}|null} res
+ * @param {{status?: number, data?: any, body?: any, headers?: object}|null} res
  * @returns {boolean}
  */
 export function isBlockedResponse(res) {
@@ -134,7 +134,7 @@ export function isLoginRedirect(res) {
 
 /**
  * 请求是否为「注入请求」（携带 payload 特征）。
- * @param {{url?: string, method?: string, data?: any}|string|null} req
+ * @param {{url?: string, method?: string, data?: any, body?: any, params?: any}|string|null} req
  * @returns {boolean}
  */
 export function looksLikeInjection(req) {
@@ -242,6 +242,7 @@ export class ScanValidityGuard {
     this.samples = []; // 滑动窗口样本：{ fail, blocked, serverErr, auth }
     this.failStreak = 0; // 连续失败（res==null 或 status===0）
     this.maxFailStreak = 0; // 最长连续失败（粘滞展示用：目标恢复后 failStreak 会归零，但结论需保留真实峰值）
+    this._abortLogged = false; // 已因连续失败/命中熔断而记录过一次中止事件（避免重复打日志）
     this.blockHits = 0; // 累计拦截命中
     this.serverErr = 0; // 累计 5xx（已排除「自己触发的 SQL 报错」）
     this.injection5xx = 0; // 注入请求引发的 5xx 总数：不参与状态裁定，但必须进报告（我们确实把目标打报错了几次）

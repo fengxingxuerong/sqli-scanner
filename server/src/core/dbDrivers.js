@@ -98,6 +98,7 @@ export class PgDriver {
   }
   async query(sql) {
     sql = String(sql);
+    if (!this._db) throw new Error('[direct] 直连驱动未初始化')
     const res = await this._db.query(sql);
     const columns = (res.fields || []).map((f) => f.name);
     const rows = (res.rows || []).map((r) =>
@@ -144,6 +145,7 @@ export class MysqlDriver {
     }
   }
   async query(sql) {
+    if (!this._conn) throw new Error('[direct] MySQL 连接未建立')
     const [rows, fields] = await this._conn.query(String(sql));
     const columns = fields ? fields.map((f) => String(f.name)) : [];
     // mysql2 的 query 返回类型含非数组分支，此处 rows 运行时必为数组（并有 || [] 兜底）

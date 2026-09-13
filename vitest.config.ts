@@ -25,6 +25,11 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     globals: false,
+    // [audit-FIX 2026-09-13] NODE_ENV=test 强制注入：本机裸跑 `npm test` 时 vitest worker 未带
+    // NODE_ENV，jsdom 内 React 被解析为 production build → `act(...) is not supported in
+    // production builds` 导致 246/263 用例批量假失败（NODE_ENV=test 时 263/263 全过，实测）。
+    // CI（GITHUB_ACTIONS）环境 vitest 自带 NODE_ENV=test，此行无副作用。
+    env: { NODE_ENV: 'test' },
     setupFiles: ['./vitest.setup.ts'],
     include: ['src/tests/**/*.{test,spec}.{ts,tsx}'],
     // 单文件串行执行：本机 jsdom + 多个测试文件并行时偶发挂起（进程不退），

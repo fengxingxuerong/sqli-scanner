@@ -1,0 +1,268 @@
+#!/usr/bin/env node
+// ============================================================================
+// arch-guard.mjs —— 架构门禁（防止工程重新腐化）
+//
+// 三条规则：
+//  ① 体积上限：单个文件超过 MAX_LINES 行 → 失败。已有超标文件记在基线里，
+//     基线内允许存在（技术债显式化），但**不允许再变长**——瘦身后需下调基线。
+//  ② 循环依赖：server/src 与 src 的 ESM import 图里出现环 → 失败。
+//  ③ console 回归：生产代码（排除 tests/scripts/e2e）不得出现 console.*。
+//
+// 设计原则：**不留半开的闸门**。规则一旦启用就必须为 0 违规；
+// 历史债靠基线显式列出（可见、可追、可逐步清），而不是靠警告蒙混。
+//
+// 用法：
+//   node scripts/arch-guard.mjs            # 检查（违规则退出码 1）
+//   node scripts/arch-guard.mjs --update   # 重新生成基线（仅在瘦身后使用）
+// ============================================================================
+import fs from 'node:fs';
+import path from 'node:path';
+
+const ROOT = process.cwd();
+const MAX_LINES = 1200;
+const HARD_MAX_LINES = 2000; // 任何情况下都不得越过（含基线内文件）
+const BASELINE_PATH = path.join('scripts', '.arch-baseline.json');
+
+const SCAN_DIRS = [
+  { dir: path.join('server', 'src'), exts: ['.js', '.mjs'] },
+  { dir: path.join('server', 'bin'), exts: ['.js'] },
+  { dir: 'src', exts: ['.ts', '.tsx', '.js'] },
+];
+
+const EXCLUDE_RE = /(^|[\\/])(node_modules|dist|dist-engine|tests|e2e|scripts|archived|__mocks__)([\\/]|$)/;
+
+function walk(dir, exts, out = []) {
+  const abs = path.join(ROOT, dir);
+  if (!fs.existsSync(abs)) return out;
+  for (const ent of fs.readdirSync(abs, { withFileTypes: true })) {
+    const rel = path.posix.join(dir.split(path.sep).join('/'), ent.name);
+    if (EXCLUDE_RE.test(rel)) continue;
+    if (ent.isDirectory()) walk(rel, exts, out);
+    else if (exts.some((e) => ent.name.endsWith(e))) out.push(rel);
+  }
+  return out;
+}
+
+function lineCount(rel) {
+  const t = fs.readFileSync(path.join(ROOT, rel), 'utf8');
+  return t.split('\n').length;
+}
+
+// ---------- ① 体积 ----------
+function checkSize(files, baseline) {
+  const violations = [];
+  const oversize = [];
+  for (const f of files) {
+    const n = lineCount(f);
+    if (n > HARD_MAX_LINES) {
+      violations.push(`${f}：${n} 行，越过硬上限 ${HARD_MAX_LINES} 行（必须拆分）`);
+      continue;
+    }
+    if (n <= MAX_LINES) continue;
+    const base = baseline[f];
+    if (base === undefined) {
+      violations.push(`${f}：${n} 行，超过 ${MAX_LINES} 行且不在基线内（新债，必须拆分或说明）`);
+    } else if (n > base) {
+      violations.push(`${f}：${n} 行 > 基线 ${base} 行（技术债只能减不能增，请先瘦到 ≤ ${base} 或更新基线）`);
+    } else {
+      oversize.push({ file: f, lines: n, baseline: base });
+    }
+  }
+  // 基线里已瘦身完成的（可选：提示下调基线）
+  const shrunk = oversize.filter((o) => o.lines < o.baseline);
+  return { violations, oversize, shrunk };
+}
+
+// ---------- ② 循环依赖 ----------
+function parseImports(rel) {
+  let t = fs.readFileSync(path.join(ROOT, rel), 'utf8');
+  // 必须先剥掉块注释：JSDoc 里常有 `@param {import('./X.js').T}` 这类**纯类型引用**，
+  // 它不是运行时依赖。不剥离会产生大量假阳性（首次跑就误报了 ScanManager 环）。
+  t = t.replace(/\/\*[\s\S]*?\*\//g, '');
+  // 行注释同样剥掉（避免示例代码里的 import 被计入）
+  t = t.replace(/(^|[^:])\/\/[^\n]*/g, '$1');
+  const specs = [];
+  const re = /(?:^|\n)\s*(?:import|export)[\s\S]*?from\s*['"]([^'"]+)['"]|(?:^|\n)\s*import\s*['"]([^'"]+)['"]|import\(\s*['"]([^'"]+)['"]\s*\)/g;
+  let m;
+  while ((m = re.exec(t))) {
+    const s = m[1] || m[2] || m[3];
+    if (s) specs.push(s);
+  }
+  return specs;
+}
+
+function resolveSpec(fromRel, spec) {
+  if (!spec.startsWith('.')) return null; // 外部包/内置模块
+  const base = path.posix.normalize(path.posix.join(path.posix.dirname(fromRel), spec));
+  for (const cand of [base, base + '.js', base + '.mjs', base + '.ts', base + '.tsx',
+                      path.posix.join(base, 'index.js'), path.posix.join(base, 'index.ts')]) {
+    if (fs.existsSync(path.join(ROOT, cand))) return cand;
+  }
+  return null;
+}
+
+function buildGraph(files) {
+  const graph = new Map();
+  for (const f of files) {
+    const deps = new Set();
+    for (const s of parseImports(f)) {
+      const r = resolveSpec(f, s);
+      if (r && r !== f) deps.add(r);
+    }
+    graph.set(f, [...deps]);
+  }
+  return graph;
+}
+
+function findCycles(graph) {
+  const cycles = [];
+  const state = new Map(); // 0=未访问 1=在栈 2=完成
+  const stack = [];
+  const seen = new Set();
+
+  function dfs(node) {
+    state.set(node, 1);
+    stack.push(node);
+    for (const dep of graph.get(node) || []) {
+      if (state.get(dep) === 1) {
+        const idx = stack.indexOf(dep);
+        const cycle = stack.slice(idx).concat(dep);
+        const key = [...cycle].slice(0, -1).sort().join('→');
+        if (!seen.has(key)) {
+          seen.add(key);
+          cycles.push(cycle);
+        }
+      } else if (!state.get(dep)) {
+        dfs(dep);
+      }
+    }
+    stack.pop();
+    state.set(node, 2);
+  }
+
+  for (const n of graph.keys()) if (!state.get(n)) dfs(n);
+  return cycles;
+}
+
+// ---------- ③ console 回归 ----------
+function checkConsole(files) {
+  const hits = [];
+  for (const f of files) {
+    if (!(f.startsWith('server/src') || f.startsWith('src/'))) continue;
+    const t = fs.readFileSync(path.join(ROOT, f), 'utf8');
+    const lines = t.split('\n');
+    lines.forEach((l, i) => {
+      if (/(^|[^.\w])console\.(log|debug|info|warn|error)\s*\(/.test(l) && !l.trim().startsWith('//')) {
+        hits.push(`${f}:${i + 1}`);
+      }
+    });
+  }
+  return hits;
+}
+
+// ---------- main ----------
+const files = [];
+for (const s of SCAN_DIRS) files.push(...walk(s.dir, s.exts));
+
+// 基线统一结构：
+//   { "__size__": { 文件: 行数 }, "__cycles__": ["环的规范化 key"], "__console__": { 文件: 命中数 } }
+// 历史债**显式登记**（可见、可追、可逐步清），但一律「只减不增」——
+// 这是本门禁与「警告式检查」的关键差别：不新增一行债，也不靠警告蒙混。
+function cycleKey(cycle) {
+  return [...new Set(cycle)].sort().join('|');
+}
+
+function loadBaseline() {
+  if (!fs.existsSync(path.join(ROOT, BASELINE_PATH))) return { __size__: {}, __cycles__: [], __console__: {} };
+  const raw = JSON.parse(fs.readFileSync(path.join(ROOT, BASELINE_PATH), 'utf8'));
+  // 兼容旧版（只有体积基线）
+  if (raw.__size__ || raw.__cycles__ || raw.__console__) return { __size__: {}, __cycles__: [], __console__: {}, ...raw };
+  return { __size__: raw, __cycles__: [], __console__: {} };
+}
+
+if (process.argv.includes('--update')) {
+  const nextSize = {};
+  for (const f of files) {
+    const n = lineCount(f);
+    if (n > MAX_LINES) nextSize[f] = n;
+  }
+  const nextCycles = findCycles(buildGraph(files)).map(cycleKey);
+  const nextConsole = {};
+  for (const hit of checkConsole(files)) {
+    const file = hit.split(':')[0];
+    nextConsole[file] = (nextConsole[file] || 0) + 1;
+  }
+  const next = { __size__: nextSize, __cycles__: nextCycles, __console__: nextConsole };
+  fs.mkdirSync(path.join(ROOT, 'scripts'), { recursive: true });
+  fs.writeFileSync(path.join(ROOT, BASELINE_PATH), JSON.stringify(next, null, 2) + '\n');
+  console.log(`基线已更新 → ${BASELINE_PATH}`);
+  console.log(`  体积超标 ${Object.keys(nextSize).length} 个 · 循环依赖 ${nextCycles.length} 条 · console ${Object.values(nextConsole).reduce((a, b) => a + b, 0)} 处`);
+  for (const [f, n] of Object.entries(nextSize)) console.log(`    [体积] ${n} 行  ${f}`);
+  for (const f of nextCycles) console.log(`    [循环] ${f}`);
+  for (const [f, n] of Object.entries(nextConsole)) console.log(`    [console] ${n} 处  ${f}`);
+  process.exit(0);
+}
+
+const baseline = loadBaseline();
+
+const size = checkSize(files, baseline.__size__);
+const cycles = findCycles(buildGraph(files));
+const consoleHits = checkConsole(files);
+
+const problems = [];
+if (size.violations.length) problems.push(['文件体积', size.violations]);
+
+// 循环依赖：基线外的环（新增债）才算失败
+const baseCycles = new Set(baseline.__cycles__ || []);
+const newCycles = cycles.filter((c) => !baseCycles.has(cycleKey(c)));
+if (newCycles.length) problems.push(['循环依赖（新增，基线外）', newCycles.map((c) => c.join(' → '))]);
+
+// console：同一文件的命中数超过基线（新增）才算失败
+const consoleByFile = {};
+for (const hit of consoleHits) {
+  const f = hit.split(':')[0];
+  consoleByFile[f] = (consoleByFile[f] || 0) + 1;
+}
+const newConsole = Object.entries(consoleByFile)
+  .filter(([f, n]) => n > (baseline.__console__?.[f] ?? 0))
+  .map(([f, n]) => `${f}：${n} 处 > 基线 ${baseline.__console__?.[f] ?? 0} 处`);
+if (newConsole.length) problems.push(['生产代码 console.*（新增）', newConsole]);
+
+const knownCycles = cycles.length - newCycles.length;
+
+console.log(`扫描 ${files.length} 个文件（server/src + server/bin + src）`);
+console.log(`阈值：单文件 ${MAX_LINES} 行（硬上限 ${HARD_MAX_LINES}）`);
+console.log('');
+
+if (size.oversize.length) {
+  console.log(`基线内的技术债 ${size.oversize.length} 个（只减不增）：`);
+  for (const o of size.oversize) {
+    const delta = o.lines - o.baseline;
+    console.log(`  ${String(o.lines).padStart(5)} 行  ${o.file}${delta < 0 ? `  （已瘦 ${-delta} 行，可下调基线）` : ''}`);
+  }
+  console.log('');
+}
+
+if (knownCycles > 0) {
+  console.log(`基线内的循环依赖 ${knownCycles} 条（只减不增，建议排期清）：`);
+  for (const c of cycles.filter((x) => baseCycles.has(cycleKey(x)))) console.log('  ' + c.join(' → '));
+  console.log('');
+}
+if (Object.keys(consoleByFile).length) {
+  const total = Object.values(consoleByFile).reduce((a, b) => a + b, 0);
+  console.log(`基线内的 console.* ${total} 处（只减不增）：`);
+  for (const [f, n] of Object.entries(consoleByFile)) console.log(`  ${n} 处  ${f}`);
+  console.log('');
+}
+
+if (problems.length === 0) {
+  console.log('架构门禁通过：无新增体积违规 / 无新增循环依赖 / 无新增 console');
+  process.exit(0);
+}
+
+console.error('架构门禁未通过：');
+for (const [name, list] of problems) {
+  console.error(`\n[${name}] ${list.length} 项`);
+  for (const x of list) console.error('  - ' + x);
+}
+process.exit(1);

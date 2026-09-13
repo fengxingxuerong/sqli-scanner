@@ -309,7 +309,7 @@ export class SqlmapBridge {
         LANG: process.env.LANG || 'en_US.UTF-8',
       },
     });
-    rec.child = child;
+    rec.child = /** @type {any} */ (child); // spawn 的 stdio 泛型与 rec.child 的声明不逐一匹配
 
     // [P1-4] 总运行时限：超时 SIGTERM 子进程并置 error（防 sqlmap 无限期占用并发槽）
     const runtimeTimer = setTimeout(() => {

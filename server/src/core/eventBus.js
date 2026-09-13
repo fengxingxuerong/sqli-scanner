@@ -43,7 +43,7 @@ export function create(scanId) {
   if (!emitters.has(scanId)) {
     const em = new EventEmitter();
     em.setMaxListeners(100);
-    em._replayBuffer = []; // [P3-SSE] 环形回放缓冲，dispose 时随命名空间一起回收
+    /** @type {any} */ (em)._replayBuffer = []; // [P3-SSE] 环形回放缓冲，dispose 时随命名空间一起回收
     emitters.set(scanId, em);
   }
   return emitters.get(scanId);

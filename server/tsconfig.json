@@ -7,6 +7,22 @@
     "allowJs": true,
     "checkJs": true,
     "noEmit": true,
+    // —— 渐进式严格化（不整体开 strict）——
+    // 实测各开关的代价（2026-09-13，基线已清零后）：
+    //   strictNullChecks   ✅ **已启用**（2026-09-13）：从 83 处降到 0，明细与修法见
+    //                        docs/服务端类型化.md。它抓到的是真问题（codePointAt 越界、
+    //                        _server 空引用、多值 location 头、digest header null 等），
+    //                        不是纯标注。CI 已强制 0 错误。
+    "strictNullChecks": true,
+    //   strictFunctionTypes 0 处 ← 免费，已启用
+    //   noImplicitThis     11 处 ← 暂缓：报错集中在 Exploiter 的 3 个模块级函数
+    //                              （udfInstall/regRead/registryWrite 用 this.extractor，
+    //                              由实例以 .call(this,...) 调用）。JSDoc `@this` 对**函数声明**
+    //                              不生效，正解是改造成类方法——留给阶段②（拆上帝对象）一并做。
+    //   noImplicitAny    3045 处 ← 给每个函数参数补类型，属体力活，**暂缓**
+    // 所以这里逐项评估、逐项启用，而非写 "strict": true —— 后者会一次性引入 3000+ 噪声，
+    // 反而让真正有价值的 null 检查被淹没。
+    "strictFunctionTypes": true,
     "skipLibCheck": true,
     "esModuleInterop": true,
     "resolveJsonModule": true,

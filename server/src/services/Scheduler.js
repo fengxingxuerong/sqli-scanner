@@ -16,7 +16,7 @@ import { logger } from '../core/logger.js';
 export class Scheduler {
   /**
    * @param {number} concurrency 初始并发数
-   * @param {number} [ratePerSec] @deprecated 此参数不再生效，保留仅为调用点兼容。
+   * @param {number} [_ratePerSec] @deprecated 此参数不再生效，保留仅为调用点兼容。
    *   实际限速由 HttpClient 令牌桶负责（单一真源）。scanRunner 传入的 ratePerSec
    *   通过 HttpClient 的 opts.ratePerSec 路径生效，不经过 Scheduler。
    * @param {object} [options] { retryBackoffMs, retryBackoffMaxMs, adaptive }

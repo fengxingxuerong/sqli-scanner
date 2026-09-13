@@ -1,0 +1,14 @@
+{
+  "__size__": {
+    "server/src/core/httpClient.js": 1669,
+    "server/src/engine/Extractor.js": 1391,
+    "server/bin/cli.js": 1453
+  },
+  "__cycles__": [],
+  "__console__": {
+    "server/src/engine/unionDebug.js": 1,
+    "src/components/DbTree.tsx": 1,
+    "src/components/ErrorBoundary.tsx": 1,
+    "src/components/ReportExport.tsx": 2
+  }
+}

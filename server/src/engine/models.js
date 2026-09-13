@@ -6,7 +6,71 @@ import { defaults } from '../config/defaults.js';
 // 工厂与校验函数：构造 Target / InjectionPoint / DetectionResult /
 // Vulnerability / ReportModel / ExtractedData，保证字段完整。
 
+/**
+ * 扫描目标（HTTP 模式或直连模式）。直连模式用 db/sqlTemplate，HTTP 模式用 baseUrl 等。
+ * @typedef {object} Target
+ * @property {string} id
+ * @property {'http'|'direct'} mode
+ * @property {string} [baseUrl]
+ * @property {string} [method]
+ * @property {Record<string, any>} [bodyParams]
+ * @property {object|null} [jsonBody]
+ * @property {Record<string, any>} [cookieParams]
+ * @property {Record<string, any>} [headerParams]
+ * @property {Record<string, any>} config
+ * @property {object} [db] 直连模式：{ connectionString, driverType }
+ * @property {string} [sqlTemplate] 直连模式：含 {INJECT} 标记的 SQL 模板
+ * @property {string} [originalValue] 直连模式：注入标记的原始值
+ */
+
+/**
+ * 注入点。工厂仅创建基础字段，运行期由探测阶段补充（encoding/rawValue 等）。
+ * @typedef {object} InjectionPoint
+ * @property {string} id
+ * @property {string} location
+ * @property {string} param
+ * @property {string} originalValue
+ * @property {boolean} confirmed
+ * @property {string|null} technique
+ * @property {string|null} dbms
+ * @property {string|null} [formMethod]
+ * @property {string|null} [actionUrl]
+ * @property {Record<string, any>|null} [formValues]
+ * @property {string|null} [csrfTokenName]
+ * @property {boolean} [isStorePoint]
+ * @property {string|null} [storeKind]
+ * @property {string} [encoding] 运行期补充：编码方式（如 base64）
+ * @property {string} [rawValue] 运行期补充：编码前的原始值
+ * @property {string} [decodedValue] 运行期补充：解码后的值
+ * @property {boolean} [precisionMarked] 运行期补充：精确标记点（跳静态探测）
+ * @property {string} [_baselineTitle] 运行期补充：基线页 <title>
+ */
+
+/**
+ * 单点单技术的检测结果。
+ * @typedef {object} DetectionResult
+ * @property {string} pointId
+ * @property {string} technique
+ * @property {boolean} vulnerable
+ * @property {string|null} dbms
+ * @property {string} evidence
+ * @property {any[]} payloads
+ * @property {any} trace 结构化判定轨迹（布尔/时间盲注统计用）
+ * @property {number} [baseLen] 探测期使用：基线响应长度
+ * @property {any} [errorDetail] error 技术专用：结构化报错上下文（signature/context/sqlFragment/body，部分可能为 null）
+ * @property {string} [noSqlKind] NoSQL 技术专用：NoSQL 类型标记
+ * @property {boolean} [inconclusive] time 技术专用：判定不可信（噪声过大/样本不足）
+ * @property {string} [inconclusiveReason] time 技术专用：不可信原因说明
+ * @property {number} [idxs] 探测期使用：回显列位
+ * @property {string[]} [columns] 提取期使用：列名
+ * @property {object} [extractedData] 提取期使用：数据
+ */
+
 // 构造扫描目标（校验 URL 与方法）
+/**
+ * @param {any} input
+ * @returns {Target}
+ */
 export function createTarget(input) {
   const mode = (input && input.mode) || 'http';
   // 直连模式（对标 sqlmap -d）：绕过 HTTP，直接用原生驱动连库执行 SQL。
@@ -52,6 +116,13 @@ export function createTarget(input) {
 
 // 构造注入点
 // id 用 location+param+actionUrl 的稳定 hash，确保 resume 跨扫描匹配同一注入点
+/**
+ * @param {string} location
+ * @param {string} param
+ * @param {string} originalValue
+ * @param {Record<string, any>} [extra]
+ * @returns {InjectionPoint}
+ */
 export function createInjectionPoint(location, param, originalValue, extra = {}) {
   const stableKey = `${location}:${param}:${extra.actionUrl || ''}`;
   return {
@@ -75,6 +146,11 @@ export function createInjectionPoint(location, param, originalValue, extra = {})
 }
 
 // 构造检测结果（默认未命中）
+/**
+ * @param {string} pointId
+ * @param {string} technique
+ * @returns {DetectionResult}
+ */
 export function createDetectionResult(pointId, technique) {
   return {
     pointId,
@@ -87,10 +163,35 @@ export function createDetectionResult(pointId, technique) {
   };
 }
 
+/**
+ * 漏洞条目。工厂创建时 dbms 为 null，检出后由调用方回填。
+ * @typedef {object} Vulnerability
+ * @property {string} id
+@property {string} pointId
+@property {string} technique
+ * @property {string|null} dbms
+@property {string} riskLevel
+@property {any[]} payloads
+ * @property {string} description
+@property {string} evidence
+@property {any} trace
+ * @property {any} [errorDetail] error 技术回填：结构化报错上下文
+ * @property {string} [noSqlKind] NoSQL 技术回填：NoSQL 类型标记
+ */
+
 // 构造漏洞
 // description 与 evidence 语义分离（P1-U2）：description=可读说明，evidence=检测器原始证据串。
 // 调用方（ScanManager）第 5 参传入的是检测器 evidence，故此处同时写入 description 与 evidence，
 // 前端 VulnDetail 可单独展示 evidence，报告审计更完整。
+/**
+ * @param {string} pointId
+ * @param {string} technique
+ * @param {string} riskLevel
+ * @param {any[]} payloads
+ * @param {string} description
+ * @param {any} [trace]
+ * @returns {Vulnerability}
+ */
 export function createVulnerability(pointId, technique, riskLevel, payloads, description, trace = null) {
   return {
     id: nanoid(8),
@@ -124,7 +225,7 @@ export function emptyExtractedData() {
     users: undefined,
     passwords: undefined,
     counts: {},
-    search: undefined,
+    search: /** @type {any} */ (undefined), // 枚举模式回填（--search 结果树）
   };
 }
 

@@ -133,7 +133,17 @@ export function dataImpactOf(data) {
  * 汇总交付四要素。纯只读：不修改 report。
  * @param {object} report ScanManager.getReport() 的报告对象（可缺字段，全程容错）
  */
+// [P1-FIX 2026-09-13] 同一份 report 多次导出必须逐字节一致：meta.generatedAt 在报告缺
+// finishedAt/startedAt 时会落到 new Date()，相隔毫秒即产生差异——实测 CLI 的
+// 「md 别名与 markdown 等价」断言因此偶发失败（flaky），也让「同一份报告渲染两次结果
+// 不同」成为交付层缺陷。delivery 是纯只读派生结果，以 report 对象为键缓存最省且安全。
+const DELIVERY_CACHE = new WeakMap();
+
 export function buildDelivery(report) {
+  if (report && typeof report === 'object') {
+    const cached = DELIVERY_CACHE.get(report);
+    if (cached) return cached;
+  }
   const summary = report?.summary || {};
   const validity = summary.validity || null;
   const cfg = report?.target?.config || {};
@@ -204,5 +214,7 @@ export function buildDelivery(report) {
     general: GENERAL_REMEDIATION,
   };
 
-  return { meta, exec, waf, remediation };
+  const delivery = { meta, exec, waf, remediation };
+  if (report && typeof report === 'object') DELIVERY_CACHE.set(report, delivery);
+  return delivery;
 }

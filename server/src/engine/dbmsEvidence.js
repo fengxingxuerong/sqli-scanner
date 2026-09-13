@@ -46,7 +46,7 @@ const LEVEL_TEXT = {
 /**
  * 取某方言的证据等级（未知方言按最保守处理：template-only）。
  * @param {string} dbms
- * @returns {{dbms:string, level:string, levelText:string, evidence:string|null, caveat:string|null}}
+ * @returns {{dbms:string|null, level:string, levelText:string, evidence:string|null, caveat:string|null}}
  */
 export function dbmsEvidenceOf(dbms) {
   const key = String(dbms || '');

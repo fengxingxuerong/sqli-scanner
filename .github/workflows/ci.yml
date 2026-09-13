@@ -34,7 +34,18 @@ jobs:
       - run: npm ci
       - run: cd server && npm ci
       - run: npx tsc --noEmit
-        name: TypeScript check
+        name: TypeScript check (frontend)
+      # [P1-ADD 2026-09-13] 服务端此前**零类型覆盖**：tsconfig 的 include 只有前端 src，
+      # 几万行 server JS 无任何静态检查，重构没有安全网。本次建立 server/tsconfig.json
+      # （allowJs + checkJs + noEmit）并把基线 110 个错误全部清零后接入门禁。
+      # 注意：必须用 node 直调 tsc，不要用 npx（本机 npx 依赖 bash，曾因此静默失败并误报 0 错误）。
+      - run: node node_modules/typescript/bin/tsc -p server/tsconfig.json
+        name: TypeScript check (server, checkJs)
+      # [P1-ADD 2026-09-13] 架构门禁：单文件体积上限（1200 行，硬上限 2000）、循环依赖、
+      # 生产代码 console.*。历史债登记在 scripts/.arch-baseline.json（只减不增），
+      # 新增任何一项即失败——防止 httpClient（原 1943 行）这类上帝对象重新长回来。
+      - run: node scripts/arch-guard.mjs
+        name: 架构门禁（体积 / 循环依赖 / console）
       - run: npx eslint .
         name: ESLint
       # [P0-FIX] Rust 门禁：Tauri 壳此前无任何 lint 检查。新增 cargo fmt --check + clippy

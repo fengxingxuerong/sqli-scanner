@@ -23,7 +23,7 @@
 // ============================================================================
 
 import crypto from 'node:crypto';
-import { md4 } from './ntlmMd4.js';
+import { md4Utf16le } from './ntlmMd4.js';
 
 // ── NTLMSSP flags（MS-NLMP §2.2.2.5 常用子集） ─────────────────────────────
 export const NTLM_FLAGS = {
@@ -139,6 +139,21 @@ export function parseType2Message(input) {
   if (buf.length >= 48 && (flags & NTLM_FLAGS.NEGOTIATE_TARGET_INFO)) {
     const tiLen = buf.readUInt16LE(40);
     const tiOffset = buf.readUInt32LE(44);
+    if (tiLen > 0 && tiOffset > 0 && tiOffset + tiLen <= buf.length) {
+      targetInfo = buf.subarray(tiOffset, tiOffset + tiLen);
+    }
+  }
+  // target name fields @12
+  let targetName = '';
+  if (buf.length >= 20) {
+    const tnLen = buf.readUInt16LE(12);
+    const tnOffset = buf.readUInt32LE(16);
+    if (tnLen > 0 && tnOffset > 0 && tnOffset + tnLen <= buf.length) {
+      targetName = buf.subarray(tnOffset, tnOffset + tnLen).toString('latin1');
+    }
+  }
+  return { challenge, flags, targetInfo, targetName };
+}
 
 // ── Type3 message（AUTH） ───────────────────────────────────────────────────
 /**
@@ -171,7 +186,7 @@ export function createType3Message(p) {
   const magic = Buffer.from('KGS!@#$%', 'latin1'); // 经典 LM magic（8 字节）
   const lmHash = Buffer.alloc(16);
   desEcb(upper14.subarray(0, 8), magic).copy(lmHash, 0);
-  desEcb(upper14.subarray(7, 14), magic).copy(lmHash, 8);
+  desEcb(upper14.subarray(6, 14), magic).copy(lmHash, 8); // [audit-FIX 2026-09-13] 后半 key 取 [6:14]（8 字节）——原 [7:14] 只有 7 字节，DES key 长度非法（"Invalid key length"），LM hash 后半从未生成成功
   const lmResponse = desL(Buffer.concat([lmHash, Buffer.alloc(5)]), challenge);
 
   const domainBuf = Buffer.from(domain, 'utf16le');
@@ -215,18 +230,3 @@ export function extractNtlmChallenge(headers) {
   return parseType2Message(raw);
 }
 
-    if (tiLen > 0 && tiOffset > 0 && tiOffset + tiLen <= buf.length) {
-      targetInfo = buf.subarray(tiOffset, tiOffset + tiLen);
-    }
-  }
-  // target name fields @12
-  let targetName = '';
-  if (buf.length >= 20) {
-    const tnLen = buf.readUInt16LE(12);
-    const tnOffset = buf.readUInt32LE(16);
-    if (tnLen > 0 && tnOffset > 0 && tnOffset + tnLen <= buf.length) {
-      targetName = buf.subarray(tnOffset, tnOffset + tnLen).toString('latin1');
-    }
-  }
-  return { challenge, flags, targetInfo, targetName };
-}

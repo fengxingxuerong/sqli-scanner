@@ -105,7 +105,7 @@ export class SecondOrderDetector extends Detector {
       result.evidence = !baselineErr
         ? `二阶注入确认：存储探针后在触发页 ${triggerUrl} 回显数据库报错（基线无、实验有、阴性无），` +
           `存储点 ${point.param}@${point.actionUrl} 的数据被读出后重新拼入查询触发注入`
-        : `二阶注入确认（基线噪声路径）：触发页 ${triggerUrl} 固有报错「${baseMatch[0]}」，存储探针后报错变化为「${expMatch[0]}」，` +
+        : `二阶注入确认（基线噪声路径）：触发页 ${triggerUrl} 固有报错「${baseMatch[0]}」，存储探针后报错变化为「${expMatch?.[0] ?? ''}」，` +
           `阴性对照恢复基线报错——存储点 ${point.param}@${point.actionUrl} 的数据被读出后改写了查询行为`;
       result.payloads = [probe];
       point.confirmed = true;

@@ -487,12 +487,6 @@ export const GRAPHQL_PROBES = [
   { name: '循环查询', query: 'query { __schema { types { name fields { name } } } }', sig: /__schema|types/ },
 ];
 
-/**
- * 填充 payload 模板中的占位符
- * @param {string} template 含占位符的模板
- * @param {{orig?: string, sleep?: number, num?: number, sep?: string}} vars 占位符值
- * @returns {string} 填充后的 payload
- */
 // 生成 N 个 NULL 占位（UNION SELECT 中非回显列填空，回显列由 WRAP 包裹结果替换）
 // 非正数时至少返回 1 个 NULL，避免生成空序列导致 UNION 列数错配。
 export function nullSequence(columns) {
@@ -524,7 +518,8 @@ export const RANDOMBLOB_MAX_BYTES = 5_000_000;
 /**
  * 夹顶时间变量：非法/缺失保持历史默认（1 秒），区间外贴边。
  * @param {{sleep?: number|string}} [vars]
- * @returns {{sleep:number}} 浅拷贝后的变量集
+ * @returns {{orig?: string, sleep: number, num?: number, sep?: string}} 浅拷贝后的变量集
+ *   （函数体用 { ...vars } 透传其余字段，故返回类型须含 orig/num/sep，否则调用方取值会被判不存在）
  */
 export function clampTimeVars(vars = {}) {
   const raw = Number(vars?.sleep);
@@ -553,6 +548,12 @@ export function capHeavyFunctions(filled) {
     .replace(/RANDOMBLOB\(\s*(\d+)/gi, (m, digits) => `RANDOMBLOB(${Math.min(Number(digits), RANDOMBLOB_MAX_BYTES)}`);
 }
 
+/**
+ * 填充 payload 模板中的占位符
+ * @param {string} template 含占位符的模板
+ * @param {{orig?: string, sleep?: number, num?: number, sep?: string}} vars 占位符值
+ * @returns {string} 填充后的 payload
+ */
 export function fillPayload(template, vars = {}) {
   const v = clampTimeVars(vars);
   return capHeavyFunctions(

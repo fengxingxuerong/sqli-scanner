@@ -52,8 +52,10 @@ describe('F-18 暗色主题', () => {
     render(<App />);
     // 读回：dark 按钮被选中
     expect(screen.getByRole('button', { name: 'Dark theme' }).getAttribute('aria-pressed')).toBe('true');
-    // 暗色主题应用到站点（head 含 #0f172a 暗色背景）
-    expect(document.head.innerHTML.toLowerCase()).toContain('0f172a');
+    // [audit-FIX 2026-09-13] 暗色主题应用到站点：改用 body 计算样式断言（MUI v6 emotion
+    // 在 jsdom 下 style 标签内容为空，head.innerHTML 无色值可查；getComputedStyle 可靠）。
+    // 暗色 background.default=#0a0e16 → rgb(10, 14, 22)。
+    expect(getComputedStyle(document.body).backgroundColor).toBe('rgb(10, 14, 22)');
     // 点击浅色 → 切回 light 并写回
     act(() => {
       fireEvent.click(screen.getByRole('button', { name: 'Light theme' }));
@@ -69,7 +71,7 @@ describe('F-18 暗色主题', () => {
     // system 模式确实查询了系统配色
     expect(spy).toHaveBeenCalledWith('(prefers-color-scheme: dark)');
     expect(screen.getByRole('button', { name: 'System theme' }).getAttribute('aria-pressed')).toBe('true');
-    // 系统暗色 → 实际渲染暗色主题
-    expect(document.head.innerHTML.toLowerCase()).toContain('0f172a');
+    // 系统暗色 → 实际渲染暗色主题（[audit-FIX] body 计算样式断言，同上）
+    expect(getComputedStyle(document.body).backgroundColor).toBe('rgb(10, 14, 22)');
   });
 });

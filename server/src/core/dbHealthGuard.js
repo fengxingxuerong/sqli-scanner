@@ -106,7 +106,8 @@ export class DbHealthGuard {
    */
   constructor({ onTrip, abortAfter } = {}) {
     this.onTrip = typeof onTrip === 'function' ? onTrip : null;
-    this.abortAfter = Number.isFinite(abortAfter) && abortAfter > 0 ? abortAfter : 3;
+    const abortAfterN = Number(abortAfter);
+    this.abortAfter = Number.isFinite(abortAfterN) && abortAfterN > 0 ? abortAfterN : 3;
     this.tripped = false;
     this.fatalHits = 0;
     this.lastFatal = null;

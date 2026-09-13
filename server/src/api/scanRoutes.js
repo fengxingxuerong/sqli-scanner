@@ -661,7 +661,7 @@ function createReportGuard(tokenOverride) {
  * 创建扫描相关路由。
  * @param {object} [opts]
  * @param {import('../engine/ScanManager.js').ScanManager} [opts.scanManager] 不传则内部自建
- * @param {typeof import('../core/eventBus.js').eventBus} [opts.eventBus]
+ * @param {any} [opts.eventBus] 事件总线（默认取模块级 eventBus 单例）
  * @param {string} [opts.reportToken] 报告导出接口的访问令牌
  */
 export function createRoutes({ scanManager, eventBus: bus = eventBus, reportToken } = {}) {
@@ -695,7 +695,7 @@ export function createRoutes({ scanManager, eventBus: bus = eventBus, reportToke
       // （策略见 httpClient.js；SSRF_ALLOW_PRIVATE=1 / SSRF_ALLOW_CIDRS=... 显式放行内部授权目标）
       // 直连模式（mode=direct）不发起 HTTP 请求，跳过 SSRF 校验（无 SSRF 面）。
       if (sanitized.mode !== 'direct') {
-        await assertSafeHttpTarget(sanitized.url).catch((e) => {
+        await assertSafeHttpTarget(/** @type {string} */ (sanitized.url)).catch((e) => {
           throw e instanceof AppError ? e : new AppError(ErrorCode.INVALID_PARAM, e.message || '目标 URL 校验失败');
         });
       }

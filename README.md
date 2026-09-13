@@ -1,7 +1,7 @@
 # sqli-scanner
 
 [![CI](https://img.shields.io/github/actions/workflow/status/OWNER/REPO/ci.yml?branch=main&label=CI)](https://github.com/OWNER/REPO/actions)
-[![ Tests](https://img.shields.io/badge/tests-2008%20passing-brightgreen)](#测试)
+[![ Tests](https://img.shields.io/badge/tests-2030%20passing-brightgreen)](#测试)
 
 一键式 SQL 注入检测工具。无需记忆命令行参数，打开浏览器即可使用。
 
@@ -144,6 +144,14 @@ npm run acceptance      # 【门禁】全方位验收（10 套件，事实断言
 | `EXPLOIT_ENABLED` | `0` | 开启利用能力（=1 启用） |
 | `ALLOWED_ORIGINS` | `http://localhost:5173` | 跨域白名单 |
 
+**目标认证能力实测口径（2026-09-13 起）**：
+
+| 认证类型 | 状态 | 说明 |
+|---|---|---|
+| Basic | ✅ 已实现并接线 | `config.auth.basic`，HttpClient 内建 |
+| Digest | ✅ 已实现并接线 | `config.auth.digest`（对标 sqlmap `--auth-type=Digest`），每主机挑战缓存 + nc 防重放，有 digestAuth 单测 |
+| NTLM | ⚠️ 模块已修复、**未接线** | `core/ntlmAuth.js`（RFC 2617 三步握手 + NTLMv1 DES-L）2026-09-13 审计修复三重缺陷（语法断裂/缺 import/DES key 截断）并通过 12 项单测（含 RFC 1320 权威向量），但 HttpClient 尚未消费——`auth.type=ntlm` 暂不可用。另注意：DES 原语需 `--openssl-legacy-provider` 启动参数（OpenSSL 3 默认禁用），相应测试在无该参数环境下显式 skip |
+
 ## 架构
 
 ```
@@ -158,10 +166,10 @@ backend/  ← Express + Node.js
 ## 测试
 
 ```bash
-# 前端测试（191 个用例）
+# 前端测试（263 个用例）
 npm test
 
-# 服务端测试（1249 个用例）
+# 服务端测试（1767 个用例）
 cd server && npm test
 
 # 全部测试
@@ -171,8 +179,8 @@ npm run test:all
 ## 项目状态
 
 - TypeScript: 零错误
-- 前端测试: 191/191 通过
-- 服务端测试: 1249/1249 通过
+- 前端测试: 263/263 通过
+- 服务端测试: 1767/1767 通过（含 12 项 NTLM 补测；3 skip 为 DES 环境依赖显式跳过）
 - Tamper 插件: 225 个（含 v24 增量 20 个，对齐 sqlmap 官方 tamper 全集，含官方 CRS/libinjection 实测组合 uniontable+odbcbrace）
 - WAF 绕过能力: 200+ 插件链式组合，覆盖 62 个 WAF 厂商指纹识别 + 推荐
 
