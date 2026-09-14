@@ -17,6 +17,14 @@ const DB_CFG = {
   database: 'redteam_lab', multipleStatements: true,
 };
 const DB_CFG_SAFE = { ...DB_CFG, multipleStatements: false };
+// [stability-FIX 2026-09-14 / TODO 3b] q() 原实现**每条查询新建 TCP 连接再销毁**——
+// 26 靶点全量扫描 ≈ 2600 次高频短连。连接风暴下观测到两个进程先后 native 崩溃：
+// node（靶场）0xC0000409 fast-fail（无栈、killed=false）+ mysqld（CrashDumps 有
+// mysqld.exe.5948.dmp）。改为常驻连接池消除连接风暴。两个池严格保留
+// multipleStatements 语义边界：堆叠靶点（E16）用 true 池，安全对照（F18-F24）
+// 与参数化查询用 false 池——防止堆叠能力泄漏到安全端点造成真值漂移。
+const poolVuln = mysql.createPool({ ...DB_CFG, connectionLimit: 12 });
+const poolSafe = mysql.createPool({ ...DB_CFG_SAFE, connectionLimit: 6 });
 
 export async function createLabApp() {
   // ── 初始化数据 ──
@@ -57,9 +65,10 @@ export async function createLabApp() {
     : `<table>${rows.map(r => `<tr>${Object.values(r).map(v => `<td>${v}</td>`).join('')}</tr>`).join('')}</table>`;
 
   const q = async (sql, safe = false) => {
-    const c = await mysql.createConnection(safe ? DB_CFG_SAFE : DB_CFG);
-    try { const [rows] = await c.query(sql); return rows; }
-    finally { await c.end(); }
+    // [stability-FIX 2026-09-14 / TODO 3b] 原 createConnection-per-query 已换常驻池（见顶部注释）
+    const pool = safe ? poolSafe : poolVuln;
+    const [rows] = await pool.query(sql);
+    return rows;
   };
 
   // 统一异常出口（模拟开启 debug 的站点，把 SQL 错误吐给前端）
@@ -268,19 +277,16 @@ function decodeSafe(v) {
     try {
       const [rows] = await q('SELECT id,name,email FROM users WHERE id=?', true)
         .catch(() => []);
-      const c = await mysql.createConnection(DB_CFG_SAFE);
-      let out;
-      try { const [r] = await c.query('SELECT id,name,email FROM users WHERE id=?', [id]); out = r; }
-      finally { await c.end(); }
+      const [r] = await poolSafe.query('SELECT id,name,email FROM users WHERE id=?', [id]);
+      const out = r;
       res.send(page('safe-item', rowsHtml(out && out.length ? out : [])));
     } catch { res.status(500).send(page('safe-item', '<pre>INTERNAL_ERROR</pre>')); }
   });
   app.get('/safe/search', async (req, res) => {
-    const c = await mysql.createConnection(DB_CFG_SAFE);
     try {
-      const [rows] = await c.query("SELECT id,name FROM users WHERE name LIKE ?", [`%${String(req.query.q ?? '')}%`]);
+      const [rows] = await poolSafe.query("SELECT id,name FROM users WHERE name LIKE ?", [`%${String(req.query.q ?? '')}%`]);
       res.send(page('safe-search', rowsHtml(rows)));
-    } finally { await c.end(); }
+    } catch { res.status(500).send(page('safe-search', '<pre>INTERNAL_ERROR</pre>')); }
   });
   // 动态内容：每次随机 nonce（考验把随机性当布尔差异）
   app.get('/safe/rand', (_req, res) =>

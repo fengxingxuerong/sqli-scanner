@@ -74,11 +74,15 @@ services:
 - **实现点**：real-world-lab 增加 `/panel-admin`（仅 admin 会话可见的触发页），验证跨角色配置能检出单身份场景漏掉的二阶注入
 - **验收**：verify.mjs 新增场景 PASS，README 二阶口径补一句实测结论
 
-### 3b. redteam-lab env.mjs 间歇性死亡根因排查（2026-09-14 发现）
-- **现象**：node spawn 方式拉起的 env.mjs（8231 靶场）在 run-scan 中段**无栈死亡**（3 次复现：1/26、4/26、6/26 hit，死亡点随机）；Start-Process 完全独立启动的同一脚本稳定满分 19/19
-- **已修**：run-with-env 强制执行 gate-check 门禁（rate≥90% + 零误报）+ 已就绪复用模式（规避 spawn 短命进程）——假绿已不可能，commit 33c6c39
-- **待查根因**：疑似 Windows 进程树/job 关联（spawn 子进程随某事件被清理）或资源竞态；排查方向：①记录 env.mjs 进程 exit 事件与退出码 ②对比 spawn vs Start-Process 的 job object 归属 ③观察是否与 CLI 子进程退出时序相关
-- **影响面**：仅靶场编排层，引擎检测能力无回归（干净环境下 19/19 满分实证）
+### 3b. redteam-lab env.mjs 间歇性死亡根因排查（✅ 已结案 2026-09-14：连接风暴）
+- **现象**：spawn 版 env.mjs 在 run-scan 中段无栈死亡（1/26、4/26、6/26），死亡点随机
+- **根因（已坐实）**：**lab-app 的 `q()` 每条查询新建 TCP 连接再销毁**——26 靶点全量扫描 ≈ 2600 次高频短连，连接风暴下 node（靶场）与 mysqld 双双 native fast-fail（CrashDumps 同时存在 node 崩溃观测 `0xC0000409` 与 `mysqld.exe.5948.dmp`）
+- **排查过程**（redteam-death-diag.mjs，5 轮对照实验）：
+  - 抓到退出证据：`code=3221226505(0xC0000409) signal=null killed=false` → **native fast-fail 自崩，排除外部杀/进程树关联假设**（外部杀必有 signal）
+  - stderr 全空 → 排除 JS 异常路径；内存曲线 154→270MB 正常 → 排除 OOM；pipe/inherit 均死 → 排除 stdio 管道断裂；`--report-on-fatalerror` 无报告（fast-fail 绕过诊断钩子）；WER/Defender 无记录 → 排除 EDR
+  - 池化改造后连续 2 轮全存活（18/26、19/26），gate-check 19/19 rate=100% [PASS] → 根因坐实
+- **修复**：`q()` 与两处 safe 端点改用常驻连接池（poolVuln/poolSafe 分池，严格保留 multipleStatements 语义边界防堆叠能力泄漏到安全端点）
+- **教训**：靶场自身的「每请求建连」反模式 + 高频扫描 = 双进程 native 崩溃；门禁此前形同虚设掩盖了它。`--report-on-fatalerror` 对 fast-fail 无效，Windows 下抓这类死亡要靠 exit code（0xC0000409）+ CrashDumps 目录
 
 ### 4. 大文件二期拆分（照 scanRunner 模式）
 - **对象**：`core/httpClient.js`（1913 行）、`engine/Extractor.js`（1388 行）、`engine/ScanManager.js`（1003 行）
