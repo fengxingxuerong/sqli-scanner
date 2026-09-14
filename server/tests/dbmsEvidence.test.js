@@ -47,7 +47,7 @@ test('dbmsEvidence：分级覆盖 README 宣称的全部 18 个方言', () => {
   const all = [...g.verified, ...g.partial, ...g['template-only']];
   assert.equal(all.length, 18, `应为 18 个方言，实际 ${all.length}`);
   // 真实验证的具体名单（升级/降级都会触发本断言，迫使改动者同步 README）
-  assert.deepEqual(g.verified.sort(), ['MariaDB', 'MySQL', 'PostgreSQL', 'SQLite']);
+  assert.deepEqual(g.verified.sort(), ['MariaDB', 'MySQL', 'PostgreSQL', 'SQL Server', 'SQLite']); // [批次 5 2026-09-14] MSSQL 真机靶场（e2e/mssql-lab）升级 verified
   assert.deepEqual(g.partial.sort(), ['Derby', 'H2', 'HSQLDB']);
-  assert.ok(g['template-only'].includes('SQL Server') && g['template-only'].includes('Oracle'));
+  assert.ok(g['template-only'].includes('Oracle')); // SQL Server 已升级 verified，template-only 不再含它
 });

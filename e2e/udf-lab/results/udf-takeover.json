@@ -1,10 +1,10 @@
 {
-  "generatedAt": "2026-09-14T04:39:26.338Z",
+  "generatedAt": "2026-09-14T05:26:34.493Z",
   "mysqlVersion": "8.0.28",
   "pluginDir": "D:/mysql/lib/plugin/",
   "secureFilePriv": "",
   "registered": 1,
-  "commandOutput": "udf_lab_66238",
+  "commandOutput": "udf_lab_94384",
   "whoami": "admin\\admin�������룩",
   "osShell": {
     "ok": true,

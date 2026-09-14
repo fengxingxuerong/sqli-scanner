@@ -33,7 +33,9 @@ export const DBMS_EVIDENCE = {
   Informix: { level: 'template-only', evidence: null },
   Access: { level: 'template-only', evidence: null },
   MonetDB: { level: 'template-only', evidence: null },
-  'SQL Server': { level: 'template-only', evidence: null },
+  // [批次 5 2026-09-14] SQL Server 2022 Express 本机真机靶场（mssql npm 驱动直拼 SQL）：
+  // num/str 双上下文 union/error/boolean 三通道检出（e2e/mssql-lab）
+  'SQL Server': { level: 'verified', evidence: 'e2e/mssql-lab（SQL Server 2022 Express 16.0 真机，union/error/boolean 三通道）' },
   Oracle: { level: 'template-only', evidence: null },
 };
 
