@@ -63,10 +63,11 @@ services:
 - Windows Docker Desktop 的 `host.docker.internal` 在 Linux 机器不存在——用 `host-gateway` extra_hosts 或直接 `--network host`
 - CRS 版本漂移——务必固定镜像 digest 并在报告中记录镜像版本 + CRS 版本 + PARANOIA + 阻断阈值四要素，否则结果不可比
 
-### 2. NTLM 接线 HttpClient
-- **现状**：`core/ntlmAuth.js` 已修复三重缺陷（语法断裂/缺 import/DES key [7:14] 截断）并通过 12 项单测，但 **HttpClient 未消费**——`auth.type=ntlm` 不可用（README 认证口径表已标注 ⚠️）
-- **实现点**：仿照 `_digestAuthHeader`（httpClient.js:1541）增加 NTLM 三步握手分支；401 + `WWW-Authenticate: NTLM` 时用 `extractNtlmChallenge` → `createType3Message` 重放
-- **部署前提**：DES 原语需服务以 `--openssl-legacy-provider` 启动（OpenSSL 3 默认禁用 des-ecb）；启动脚本与 docs/deploy.md 需同步注明，运行时应探测降级提示
+### 2. NTLM 接线 HttpClient（✅ 已完成）
+- **✅ 已接线（commit f5c40ae）**：独立模块 `core/ntlmHandshake.js`（NtlmHandshake 状态机：cred/preAuthHeader/replay/clear），HttpClient 请求前预附加 Type3（已握手主机免重复挑战）+ 401+NTLM 挑战时三步握手重放（上限 2 跳）；NTLM 模式不发 Basic 头
+- **✅ DES 部署前提已消除**：desEcb 换自实现 `core/desEcb.js`（与 OpenSSL 交叉验证一致），不再依赖 `--openssl-legacy-provider`
+- **✅ 测试覆盖（14 项）**：模块级 12 项（RFC 1320 向量 + Type1/2/3 闭环）+ HTTP 层集成 2 项（`ntlmHandshake.http.test.js`：mock server 401+Type2 → 自动 Type3 → 200 闭环、同主机状态复用 challenge 只发一次）
+- **诚实边界**：mock server 不校验 NT/LM response 密码学正确性（模块级已钉 RFC 向量）；真实 IIS/NTLMv2 环境未实测
 - **验收**：新增 NTLM mock 服务端 e2e（401→Type2→Type3→200），README 口径表更新为 ✅
 
 ### 3. 二阶跨角色双身份靶场 e2e
