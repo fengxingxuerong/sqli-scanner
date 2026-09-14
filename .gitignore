@@ -86,3 +86,6 @@ e2e/udf-lab/*.dll
 # [.env ���Զ���] .env* Ĭ�ϲ���⣻��������Ϊ��������Ϣ�İ�ȫ�ļ����� VITE_API_BASE������ʽ������ʵ�ʸ���״̬һ��
 !.env.development
 !.env.tauri
+
+# agent 临时诊断脚本
+**/.openclaw-*.mjs
