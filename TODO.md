@@ -74,6 +74,12 @@ services:
 - **实现点**：real-world-lab 增加 `/panel-admin`（仅 admin 会话可见的触发页），验证跨角色配置能检出单身份场景漏掉的二阶注入
 - **验收**：verify.mjs 新增场景 PASS，README 二阶口径补一句实测结论
 
+### 3b. redteam-lab env.mjs 间歇性死亡根因排查（2026-09-14 发现）
+- **现象**：node spawn 方式拉起的 env.mjs（8231 靶场）在 run-scan 中段**无栈死亡**（3 次复现：1/26、4/26、6/26 hit，死亡点随机）；Start-Process 完全独立启动的同一脚本稳定满分 19/19
+- **已修**：run-with-env 强制执行 gate-check 门禁（rate≥90% + 零误报）+ 已就绪复用模式（规避 spawn 短命进程）——假绿已不可能，commit 33c6c39
+- **待查根因**：疑似 Windows 进程树/job 关联（spawn 子进程随某事件被清理）或资源竞态；排查方向：①记录 env.mjs 进程 exit 事件与退出码 ②对比 spawn vs Start-Process 的 job object 归属 ③观察是否与 CLI 子进程退出时序相关
+- **影响面**：仅靶场编排层，引擎检测能力无回归（干净环境下 19/19 满分实证）
+
 ### 4. 大文件二期拆分（照 scanRunner 模式）
 - **对象**：`core/httpClient.js`（1913 行）、`engine/Extractor.js`（1388 行）、`engine/ScanManager.js`（1003 行）
 - **模式**：参考 scanRunner 第一轮「阶段外移」——纯搬移封边、输入输出注释明确、行为零变化
