@@ -163,6 +163,14 @@ export const defaults = {
   dumpStart: 0,
   dumpStop: 0,
   // [sqlmap 对标] 保活探测（--safe-url/--safe-freq）：每 safeFreq 个扫描请求触发一次对 safeUrl 的 GET，
+  // [sqlmap 对标 2026-09-14] --csrf-url/--csrf-token/--csrf-method：CSRF 会话层。
+  // csrfUrl 配置后：扫描启动取页提取 token，每请求自动携带（GET 入 query / POST 入表单 data），
+  // 每 csrfRefreshFreq 请求刷新一次（token 一次性场景）。自动探测常见 hidden input 名
+  // （csrf_token/_csrf/token/authenticity_token 等），显式 csrfTokenName 优先。
+  csrfUrl: '',
+  csrfTokenName: '',
+  csrfMethod: 'GET',
+  csrfRefreshFreq: 50,
   // 维持目标应用会话/防空闲锁死。safeUrl 为空时关闭。SSRF 校验由 HttpClient.request 逐请求执行。
   safeUrl: '',
   safeFreq: 0,

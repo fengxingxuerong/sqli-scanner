@@ -217,6 +217,11 @@ function parseArgs(argv) {
     else if (a === '--stop') args.stopRow = Number(next()) || 0;
     else if (a === '--safe-url') args.safeUrl = next();
     else if (a === '--safe-freq') args.safeFreq = Number(next()) || 0;
+  // —— CSRF 会话层（对标 sqlmap --csrf-url/--csrf-token）——
+  else if (a === '--csrf-url') args.csrfUrl = next();
+  else if (a === '--csrf-token') args.csrfTokenName = next();
+  else if (a === '--csrf-method') args.csrfMethod = String(next()).toUpperCase();
+  else if (a === '--csrf-refresh') args.csrfRefreshFreq = Number(next()) || 50;
     // —— 对标 sqlmap 最后两个参数（--tor/--mobile）——
     else if (a === '--tor') args.tor = true;
     else if (a === '--mobile') args.mobile = true;
@@ -303,6 +308,10 @@ function printHelp() {
    --stop <n>                拖库结束行号（对标 sqlmap --stop，绝对行号，0=不限）
    --safe-url <url>          保活 URL：扫描期间定期 GET 维持会话（对标 sqlmap --safe-url）
    --safe-freq <n>           每 n 个请求触发一次保活访问（默认 1，配合 --safe-url）
+   --csrf-url <url>         CSRF 取页 URL：扫描前 GET 提取 token，每请求自动携带（对标 sqlmap --csrf-url）
+   --csrf-token <name>      anti-CSRF 字段名（缺省自动探测常见名：csrf_token/_csrf/token 等）
+   --csrf-method <m>        取页方法（默认 GET）
+   --csrf-refresh <n>       每 n 个请求刷新一次 token（默认 50）
   -D, --db <dbname>         数据库（枚举目标）
   -T, --table <tablename>   表（枚举目标）
   -C, --columns-list <c1,c2>  列子集（配合 --dump -T）
@@ -828,6 +837,13 @@ function buildConfig(args) {
   if (args.safeUrl && /^https?:\/\//i.test(args.safeUrl)) {
     config.safeUrl = args.safeUrl;
     config.safeFreq = args.safeFreq > 0 ? args.safeFreq : 1;
+  }
+  // [sqlmap 对标 2026-09-14] CSRF 会话层
+  if (args.csrfUrl && /^https?:\/\//i.test(args.csrfUrl)) {
+    config.csrfUrl = args.csrfUrl;
+    if (args.csrfTokenName) config.csrfTokenName = args.csrfTokenName;
+    if (args.csrfMethod) config.csrfMethod = args.csrfMethod;
+    if (args.csrfRefreshFreq > 0) config.csrfRefreshFreq = Math.min(args.csrfRefreshFreq, 10000);
   }
   // --tor：Tor 本地代理（默认 socks5://127.0.0.1:9050）；已设 --proxy 时不覆盖
   if (args.tor && !config.proxy) config.proxy = 'socks5://127.0.0.1:9050';

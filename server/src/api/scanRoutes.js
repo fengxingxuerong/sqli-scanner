@@ -70,6 +70,8 @@ const KNOWN_CFG_KEYS = new Set([
   'dumpConcurrency', 'dumpDatabaseConcurrency', 'crawlForms', 'crawlDepth', 'auth', 'proxy', 'techniques',
   // [sqlmap 对标] 行范围导出 + 保活探测（--start/--stop/--safe-url/--safe-freq）
   'dumpStart', 'dumpStop', 'safeUrl', 'safeFreq',
+  // [sqlmap 对标 2026-09-14] --csrf-url/--csrf-token/--csrf-method（CSRF 会话层）
+  'csrfUrl', 'csrfTokenName', 'csrfMethod', 'csrfRefreshFreq',
   'secondOrder', 'wafEvasion', 'oob', 'noSql', 'blindRobust', 'sessionFile',
   // [P0-FIX 2026-09-10] 布尔盲注二级判据：组间稳定差异（boolStableDiff 总开关 + 采样数）
   'boolStableDiff', 'boolStableDiffSamples',

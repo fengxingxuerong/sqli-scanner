@@ -23,6 +23,7 @@ import { TECHNIQUE_TYPES, ERROR_SIG } from './payloads.js';
 import { defaults } from '../config/defaults.js';
 import * as eventBus from '../core/eventBus.js';
 import { withSafeUrl } from '../core/safeUrlKeeper.js';
+import { withCsrf } from '../core/csrfKeeper.js';
 import { httpClient } from '../core/httpClient.js';
 import { DirectConnector } from '../core/directConnector.js';
 import { oobReceiver } from '../core/oobReceiver.js';
@@ -273,6 +274,16 @@ export class ScanManager {
       let view = sc;
       if (typeof cfg.safeUrl === 'string' && /^https?:\/\//i.test(cfg.safeUrl)) {
         view = /** @type {any} */ (withSafeUrl(sc, { safeUrl: cfg.safeUrl, safeFreq: cfg.safeFreq }));
+      }
+      // [sqlmap 对标 2026-09-14] --csrf-url/--csrf-token：CSRF 会话层（取页提取 token，
+      // 每请求自动携带 + 定期刷新）。挂在 safeUrl 之后：token 取页吃到保活/协议策略。
+      if (typeof cfg.csrfUrl === 'string' && /^https?:\/\//i.test(cfg.csrfUrl)) {
+        view = /** @type {any} */ (withCsrf(view, {
+          csrfUrl: cfg.csrfUrl,
+          csrfTokenName: cfg.csrfTokenName,
+          csrfMethod: cfg.csrfMethod,
+          refreshFreq: cfg.csrfRefreshFreq,
+        }));
       }
       // [P2-5] --force-ssl / --ignore-redirects：协议层策略注入每个请求（对标 sqlmap）。
       // forceSsl：目标 http:// 强制升级 https（httpClient.request 消费改写）；
