@@ -1,7 +1,7 @@
 # sqli-scanner
 
 [![CI](https://img.shields.io/github/actions/workflow/status/OWNER/REPO/ci.yml?branch=main&label=CI)](https://github.com/OWNER/REPO/actions)
-[![ Tests](https://img.shields.io/badge/tests-2030%20passing-brightgreen)](#测试)
+[![ Tests](https://img.shields.io/badge/tests-2047%20passing-brightgreen)](#测试)
 
 一键式 SQL 注入检测工具。无需记忆命令行参数，打开浏览器即可使用。
 
@@ -174,7 +174,7 @@ backend/  ← Express + Node.js
 # 前端测试（263 个用例）
 npm test
 
-# 服务端测试（1767 个用例）
+# 服务端测试（1784 个用例）
 cd server && npm test
 
 # 全部测试
@@ -185,7 +185,7 @@ npm run test:all
 
 - TypeScript: 零错误
 - 前端测试: 263/263 通过
-- 服务端测试: 1767/1767 通过（含 12 项 NTLM 补测；3 skip 为 DES 环境依赖显式跳过）
+- 服务端测试: 1784/1784 通过（含 NTLM HTTP 层集成测试 2 项；3 skip 为环境依赖显式跳过）
 - Tamper 插件: 225 个（含 v24 增量 20 个，对齐 sqlmap 官方 tamper 全集，含官方 CRS/libinjection 实测组合 uniontable+odbcbrace）
 - WAF 绕过能力: 200+ 插件链式组合，覆盖 62 个 WAF 厂商指纹识别 + 推荐
 
