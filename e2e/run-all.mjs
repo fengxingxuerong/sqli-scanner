@@ -37,6 +37,7 @@ const LABS = [
   { name: 'csrf-lab', desc: 'CSRF 防护目标闭环（取页 token → 携带 → 检出）', entry: 'e2e/csrf-lab/e2e.mjs', deps: ['mysql'] },
   { name: 'mssql-lab', desc: 'SQL Server 真机全链路（num/str 双上下文三通道）', entry: 'e2e/mssql-lab/e2e.mjs', deps: ['mssql'] },
   { name: 'mssql-oshell', desc: 'MSSQL xp_cmdshell os-shell 真机闭环（含 auto-enable）', entry: 'e2e/mssql-lab/osshell.e2e.mjs', deps: ['mssql'] },
+  { name: 'mssql-dump', desc: 'MSSQL 拖库正确性（string_agg/OFFSET-FETCH 方言真机）', entry: 'e2e/mssql-lab/dump.e2e.mjs', deps: ['mssql'] },
   { name: 'recall-lab', desc: '假阳性验证（安全靶场零误报）', entry: 'e2e/recall-lab/false-positive.e2e.js', deps: [] },
   { name: 'detection-runner', desc: '数据驱动检测测试', entry: 'e2e/detection-runner/run.js', deps: [] },
   { name: 'udf-lab', desc: 'UDF 接管真实验证（真 DLL）', entry: 'e2e/udf-lab/udf-takeover.e2e.mjs', deps: ['mysql'] },
@@ -95,7 +96,11 @@ const runOne = (lab) =>
     p.on('exit', (code) => {
       // 从输出里抓一眼关键字（各靶场格式不一，仅作提示，不作判定）
       const hint = out.split('\n').filter((l) => /done:|结论|误报|✅|❌|FAIL|PASS/i.test(l)).slice(-2).join(' | ').slice(0, 160);
-      resolve({ code, ms: Date.now() - t0, hint, tail: out.split('\n').filter(Boolean).slice(-3).join('\n') });
+      // [P1-FIX 2026-09-14] 区分「通过」与「按设计跳过」：
+      // 部分套件（如 udf-lab 因 secure_file_priv=NULL）退出码为 0，输出里一行 [SKIP] 就结束了。
+      // 旧汇总把它算进「全部通过」—— 15/15 里其实只有 14 个真跑。数字比没有更误导。
+      const skipped = code === 0 && /\bSKIP\b/i.test(out);
+      resolve({ code, skipped, ms: Date.now() - t0, hint, tail: out.split('\n').filter(Boolean).slice(-3).join('\n') });
     });
   });
 
@@ -134,15 +139,22 @@ for (const t of targets) {
   if (!t.ok) console.log(`(缺依赖: ${t.missing.join(', ')})`);
   const r = await runOne(t.lab);
   results.push({ name: t.lab.name, ...r });
-  console.log(`${r.code === 0 ? '✅ 通过' : '❌ 失败(code=' + r.code + ')'}  ${(r.ms / 1000).toFixed(1)}s  ${r.hint}`);
+  const verdict = r.code !== 0 ? `❌ 失败(code=${r.code})` : r.skipped ? '⏭ 跳过（按设计）' : '✅ 通过';
+  console.log(`${verdict}  ${(r.ms / 1000).toFixed(1)}s  ${r.hint}`);
 }
 
 console.log('');
 console.log('=== 汇总 ===');
 for (const r of results) {
-  console.log(`${r.code === 0 ? '✅' : '❌'} ${r.name.padEnd(20)} ${(r.ms / 1000).toFixed(1)}s`);
+  const mark = r.code !== 0 ? '❌' : r.skipped ? '⏭' : '✅';
+  console.log(`${mark} ${r.name.padEnd(20)} ${(r.ms / 1000).toFixed(1)}s${r.skipped ? '  (跳过)' : ''}`);
 }
 const failed = results.filter((r) => r.code !== 0);
+const skipped = results.filter((r) => r.skipped);
+const passed = results.length - failed.length - skipped.length;
 console.log('');
-console.log(failed.length ? `❌ ${failed.length}/${results.length} 个靶场失败` : `✅ 全部 ${results.length} 个靶场通过`);
+console.log(`通过 ${passed} / 跳过 ${skipped.length} / 失败 ${failed.length}  （共 ${results.length} 个靶场）`);
+if (skipped.length) {
+  console.log('跳过的不算通过 —— 原因见各靶场输出（如 secure_file_priv 未放行时文件读写类套件无法真跑）');
+}
 process.exit(failed.length ? 1 : 0);
