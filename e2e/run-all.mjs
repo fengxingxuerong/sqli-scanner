@@ -33,6 +33,7 @@ const LABS = [
   { name: 'waf-real', desc: '真实 CRS v4.1.0 规则绕过验证', entry: 'e2e/waf-real/selftest.mjs', deps: ['mysql'] },
   { name: 'oob-real-lab', desc: 'OOB 带外全链路（PG COPY TO PROGRAM / MySQL UNC）', entry: 'e2e/oob-real-lab/verify.mjs', deps: ['pg', 'mysql'] },
   { name: 'pg-osshell', desc: 'PG os-shell 真机闭环（COPY FROM PROGRAM 落表 → 回显）', entry: 'e2e/oob-real-lab/pg-osshell.e2e.mjs', deps: ['pg'] },
+  { name: 'concurrent-isolation', desc: '并发多扫描隔离性（PG+MySQL 混扫不串扰）', entry: 'e2e/concurrent-isolation/e2e.mjs', deps: ['pg', 'mysql'] },
   { name: 'recall-lab', desc: '假阳性验证（安全靶场零误报）', entry: 'e2e/recall-lab/false-positive.e2e.js', deps: [] },
   { name: 'detection-runner', desc: '数据驱动检测测试', entry: 'e2e/detection-runner/run.js', deps: [] },
   { name: 'udf-lab', desc: 'UDF 接管真实验证（真 DLL）', entry: 'e2e/udf-lab/udf-takeover.e2e.mjs', deps: ['mysql'] },
