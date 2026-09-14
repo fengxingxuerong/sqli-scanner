@@ -47,6 +47,12 @@ const PROBE = {
   ssrfViaProxy: 'auto',
   safeUrl: 'http://ping.example.com/health',
   safeFreq: 5,
+  // [批次 5 补遗 2026-09-14] CSRF / skip 探针值（默认探针 1 过不了键自身校验）
+  csrfUrl: 'http://auth.example.com/login',
+  csrfTokenName: 'csrf_token',
+  csrfMethod: 'GET',
+  csrfRefreshFreq: 30,
+  skipParams: ['debug', 'logout'],
   // [P0 2026-09-09 实战批次] 新键探针值（默认探针 1 过不了键自身校验）
   invalidValue: 'bignum',
   knownPoint: { param: 'id' },
@@ -58,8 +64,11 @@ const PROBE = {
 // 不参与本守卫的键（附理由）：
 // · 直连模式专用：走 sanitizeStart 的 isDirect 早退分支，HTTP 探针形态下不适用
 // · 仅在其它键成立时条件写入：safeFreq 依赖 safeUrl（已在 PROBE 里成对给出，故不豁免）
-const EXEMPT = new Set(['db', 'connectionString', 'sqlTemplate', 'mode', 'safeFreq']);
+const EXEMPT = new Set(['db', 'connectionString', 'sqlTemplate', 'mode', 'safeFreq',
+  'csrfTokenName', 'csrfMethod', 'csrfRefreshFreq']);
 // safeFreq 豁免理由：条件写入——仅当同时配置了合法 safeUrl 才透传（单独探测必抱不到）。
+// [批次 5 补遗 2026-09-14] csrfTokenName/csrfMethod/csrfRefreshFreq 同款豁免：条件写入——
+// 仅当同时配置了合法 csrfUrl 才透传（成对守卫见下方 CSRF 成对测试）。
 
 test('守卫：KNOWN_CFG_KEYS 每个键都要在 sanitizeStart 有透传（防「白名单有、引擎收不到」）', () => {
   const missing = [];
@@ -89,6 +98,22 @@ test('守卫（条件键配对）：safeFreq 随 safeUrl 一起下发时必须�
   });
   assert.equal(out.config.safeUrl, PROBE.safeUrl);
   assert.equal(out.config.safeFreq, PROBE.safeFreq);
+});
+
+// [批次 5 补遗 2026-09-14] CSRF 条件键成对守卫：csrfTokenName/csrfMethod/csrfRefreshFreq
+// 随合法 csrfUrl 一起下发时必须透传（单独探测因条件写入拿不到，见 EXEMPT 豁免理由）。
+test('守卫（条件键配对）：CSRF 三键随 csrfUrl 一起下发时必须透传', () => {
+  const out = sanitizeStart({
+    target: { url: 'http://shop.example.com/item?id=1' },
+    config: {
+      csrfUrl: PROBE.csrfUrl, csrfTokenName: PROBE.csrfTokenName,
+      csrfMethod: PROBE.csrfMethod, csrfRefreshFreq: PROBE.csrfRefreshFreq,
+    },
+  });
+  assert.equal(out.config.csrfUrl, PROBE.csrfUrl);
+  assert.equal(out.config.csrfTokenName, PROBE.csrfTokenName);
+  assert.equal(out.config.csrfMethod, PROBE.csrfMethod);
+  assert.equal(out.config.csrfRefreshFreq, PROBE.csrfRefreshFreq);
 });
 
 test('守卫（反向）：非白名单键不得进入 config（含嵌套对象内的多余键）', () => {

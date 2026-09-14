@@ -252,6 +252,35 @@ export function sanitizeStart(body) {
       if (safeFreq !== undefined) config.safeFreq = safeFreq;
     }
   }
+  // [批次 5 补遗 2026-09-14] CSRF 会话层透传（KNOWN_CFG_KEYS 守卫要求：白名单键必须在
+  // sanitizeStart 落地，否则 REST/API 路径收不到——CLI 单独走自己的映射不受影响）。
+  // csrfUrl 与 safeUrl 同款：仅放行 http(s) + 受授权范围约束。
+  // [位置修复 2026-09-14] 原插入落在 safeUrl 的 else 分支内 → 单独配置 csrfUrl（不带
+  // safeUrl）时透传不执行，契约守卫 FAIL（5 键全 miss）。移出到顶层平级。
+  if (typeof cfg.csrfUrl === 'string' && cfg.csrfUrl.trim()) {
+    const csrfUrl = cfg.csrfUrl.trim();
+    if (!/^https?:\/\//i.test(csrfUrl)) {
+      logger.warn(`csrfUrl ${csrfUrl} 非法协议，已丢弃该配置`);
+    } else if (scopeRules.enabled && filterInScope([csrfUrl], scopeRules).allowed.length === 0) {
+      logger.warn(`csrfUrl ${csrfUrl} 越出授权范围（scope），已丢弃该配置`);
+    } else {
+      config.csrfUrl = clampStr(csrfUrl, '', 2048);
+      if (typeof cfg.csrfTokenName === 'string' && cfg.csrfTokenName.trim()) {
+        config.csrfTokenName = clampStr(cfg.csrfTokenName.trim(), '', 128);
+      }
+      if (typeof cfg.csrfMethod === 'string' && cfg.csrfMethod.trim()) {
+        const m = cfg.csrfMethod.trim().toUpperCase();
+        if (['GET', 'POST'].includes(m)) config.csrfMethod = m;
+      }
+      const csrfFreq = pickInt(cfg, 'csrfRefreshFreq', defaults.csrfRefreshFreq, 1, 10000);
+      if (csrfFreq !== undefined) config.csrfRefreshFreq = csrfFreq;
+    }
+  }
+  // --skip：参数名数组（去重、去空、clamp 64，字符串化校验）
+  if (Array.isArray(cfg.skipParams)) {
+    const sp = [...new Set(cfg.skipParams.map((s) => String(s).trim()).filter(Boolean))].slice(0, 64);
+    if (sp.length) config.skipParams = sp;
+  }
   const dumpConcurrency = pickInt(cfg, 'dumpConcurrency', defaults.dumpConcurrency, 1, 16);
   if (dumpConcurrency !== undefined) config.dumpConcurrency = dumpConcurrency;
   const dumpDatabaseConcurrency = pickInt(cfg, 'dumpDatabaseConcurrency', defaults.dumpDatabaseConcurrency, 1, 16);
