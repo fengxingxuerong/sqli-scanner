@@ -16,18 +16,31 @@ import defaults from '../../config/defaults.js';
 // 突发语义保留：初始 tokens = capacity = ratePerSec，满桶时可突发消耗（与旧行为一致，测试不变）。
 export class TokenBucket {
   constructor(ratePerSec) {
-    this.ratePerSec = Number.isFinite(ratePerSec) && ratePerSec > 0
-    ? Math.min(ratePerSec, 10000) // [P0-2] 上限 10000 req/s，防配置错误打爆目标
-    : defaults.ratePerSec;
-    this.capacity = this.ratePerSec;
-    this.tokens = this.ratePerSec;
-    this.last = Date.now();
+    // [P0-FIX 2026-09-14] ratePerSec<=0 语义修正：**不限速**（原实现把 <=0 静默替换成
+    // defaults.ratePerSec）。为什么要改：defaults=50 时代「0 意外变 50」掩盖了语义错位；
+    // defaults 保守化到 10 后，显式传 0（对标 sqlmap --delay=0 = 不限速）的调用方
+    // （如 pentest-lab 本地靶场 baseConfig ratePerSec:0）被暗中压到 10 req/s → 盲注场景
+    // 时序断言全崩（实测 0/10 检出）。规则：>0 才建真桶；<=0 = 不限速（acquire 直通）。
+    if (Number.isFinite(ratePerSec) && ratePerSec > 0) {
+      this.ratePerSec = Math.min(ratePerSec, 10000); // [P0-2] 上限 10000 req/s，防配置错误打爆目标
+      this.capacity = this.ratePerSec;
+      this.tokens = this.ratePerSec;
+      this.last = Date.now();
+    } else {
+      this.ratePerSec = 0;
+      this.capacity = Number.POSITIVE_INFINITY;
+      this.tokens = Number.POSITIVE_INFINITY;
+      this.last = Date.now();
+    }
     // 串行化队列：同一桶的 acquire 结算互斥，杜绝「多个等待者同一时刻放行」的突发
     this._chain = Promise.resolve();
   }
 
   // 获取一个令牌（不足则等待）。返回 promise；串行化保证并发调用下的真实限速。
   acquire() {
+    // [P0-FIX 2026-09-14] 不限速桶直通：ratePerSec=0（容量 ∞）时 tokens 恒 ≥1，
+    // 显式短路省掉 promise 链调度开销，也让「0=不限速」语义在代码里可见。
+    if (this.ratePerSec === 0) return Promise.resolve();
     const run = async () => {
       const now = Date.now();
       const elapsed = (now - this.last) / 1000;

@@ -447,7 +447,10 @@ export class HttpClient {
   }
 
   createBucket(scanId, ratePerSec) {
-    const rps = Number.isFinite(ratePerSec) && ratePerSec > 0 ? ratePerSec : defaults.ratePerSec;
+    // [P0-FIX 2026-09-14] ratePerSec<=0 = 不限速：建 UNLIMITED 桶（TokenBucket 内部处理），
+    // 保持 per-scan 桶注册表结构不变（removeBucket/桶查询路径零改动）。原实现把 <=0 换成
+    // defaults —— 显式 0 的调用方（本地靶场「不限速」意图）被暗中按保守默认限速。
+    const rps = Number.isFinite(ratePerSec) && ratePerSec > 0 ? ratePerSec : 0;
     const bucket = new TokenBucket(rps);
     this.buckets.set(scanId, bucket);
     return bucket;
@@ -515,6 +518,8 @@ export class HttpClient {
   }
 
   bucketForRate(ratePerSec) {
+    // [P0-FIX 2026-09-14] 调用方保证只在 effectiveRate>0 时进入本方法；<=0 守卫为直通语义
+    // 由上层处理（主选择点已短路），这里保留 >0 归一防误用。
     const rps = Number.isFinite(ratePerSec) && ratePerSec > 0 ? ratePerSec : defaults.ratePerSec;
     if (!this.rateBuckets.has(rps)) {
       // [P0-FIX] 兜底淘汰：rate 值由调用方控制（ratePerSec 透传），恶意/异常值可撑爆 Map。
@@ -953,9 +958,16 @@ export class HttpClient {
     const redirectsLeft = opts.ignoreRedirects === true ? 0 : 5;
     // [sqlmap 对标] --reqrate：reqRate > 0 时覆盖 ratePerSec 作为 TokenBucket 速率
     const effectiveRate = (opts.reqRate && opts.reqRate > 0) ? opts.reqRate : opts.ratePerSec;
+    // [P0-FIX 2026-09-14] 限速语义对齐 TokenBucket：effectiveRate<=0 = 不限速（直通，不落桶）。
+    // 原实现把 <=0 交给 this.bucket（defaults 单例桶），显式 0 会被暗中按默认值限速——
+    // defaults 保守化后该错位直接打崩以 0 表达「不限速」的调用方（pentest-lab 实测 0/10）。
     const bucket =
       (opts.scanId && this.buckets.get(opts.scanId)) ||
-      (Number.isFinite(effectiveRate) && effectiveRate > 0 ? this.bucketForRate(effectiveRate) : this.bucket);
+      (Number.isFinite(effectiveRate) && effectiveRate > 0
+        ? this.bucketForRate(effectiveRate)
+        : Number.isFinite(effectiveRate) && effectiveRate <= 0
+          ? null // 不限速：跳过令牌桶
+          : this.bucket); // 未配置 → 默认单例桶（defaults.ratePerSec）
     // [P1-FIX ①②] 代理来源已在入口统一解析（含环境变量），insecureTls 一并决定 Agent 组合
     const proxyConf = buildProxyAgent(/** @type {string} */ (proxySel.proxyUrl), { insecureTls });
     const disableKA = opts.disableKeepAlive === true || this.disableKeepAlive === true;
@@ -1028,7 +1040,7 @@ export class HttpClient {
         }
       }
       try {
-        await bucket.acquire();
+        await bucket?.acquire(); // [P0-FIX 2026-09-14] bucket 可为 null（不限速直通）
         await applyJitter(opts.wafEvasion);
         // networkTiming（MERGED: perf 版）：从「令牌获取完成之后」计网络耗时，供时间盲注判定
         // 剔除限速排队等待（限速低时并发采样的排队时间会被旧 __elapsed 计入，导致基线虚高）。
