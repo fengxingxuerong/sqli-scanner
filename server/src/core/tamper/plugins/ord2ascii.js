@@ -7,6 +7,10 @@ export const ord2ascii = {
     { input: "1 AND ORD(MID(pw,1,1))>71", output: "1 AND ASCII(MID(pw,1,1))>71" },
     { input: '1 AND 1=1', output: '1 AND 1=1' },
   ],
+  /**
+   * @param {string} payload
+   * @returns {string}
+   */
   transform(payload) {
     return String(payload ?? '').replace(/\bORD\(/gi, 'ASCII(');
   },

@@ -3,6 +3,11 @@
 export const randomorder = {
   name: 'randomorder',
   description: '随机化 ORDER BY 子句格式，绕过 WAF 对 ORDER BY 的检测',
+  /**
+   * @param {string} payload
+   * @param {object} ctx
+   * @returns {string}
+   */
   transform(payload, ctx) {
     const variants = [
       (m, num) => `${m}${num}`,

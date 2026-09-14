@@ -3,6 +3,11 @@
 export const xor = {
   name: 'xor',
   description: 'XOR 编码字符串字面量，绕过 WAF 字符串检测',
+  /**
+   * @param {string} payload
+   * @param {object} ctx
+   * @returns {string}
+   */
   transform(payload, ctx) {
     const key = 0x1F;
     const src = String(payload ?? '');

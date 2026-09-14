@@ -3,6 +3,11 @@
 export const _360waf = {
   name: '_360waf',
   description: '针对 360 主机卫士/WAF：UNION/**/SELECT + 关键字间注释随机插入 + CHAR 十六进制',
+  /**
+   * @param {string} payload
+   * @param {object} ctx
+   * @returns {string}
+   */
   transform(payload, ctx) {
     let s = String(payload ?? '');
     // 1) UNION SELECT → UNION/**/SELECT

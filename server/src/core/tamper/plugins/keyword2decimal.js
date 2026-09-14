@@ -3,6 +3,11 @@ export const keyword2decimal = {
   name: 'keyword2decimal',
   description: '将 SQL 关键字编码为十进制数字序列，绕过 WAF 关键字检测',
   terminal: true, // [P1-FIX] 输出形态固定：其后 tamper 均空转，链上自动截断
+  /**
+   * @param {string} payload
+   * @param {object} ctx
+   * @returns {string}
+   */
   transform(payload, ctx) {
     const keywords = ['SELECT', 'UNION', 'WHERE', 'FROM', 'AND', 'OR', 'ORDER', 'GROUP', 'HAVING', 'LIMIT', 'INSERT', 'UPDATE', 'DELETE', 'INTO', 'VALUES', 'SET'];
     let s = String(payload ?? '');

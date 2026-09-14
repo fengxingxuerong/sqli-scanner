@@ -2,6 +2,11 @@
 export const space2letter = {
   name: 'space2letter',
   description: '将空格替换为随机字母，绕过 WAF 空格过滤（引号保护）',
+  /**
+   * @param {string} payload
+   * @param {object} ctx
+   * @returns {string}
+   */
   transform(payload, ctx) {
     const letters = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ';
     const src = String(payload ?? '');

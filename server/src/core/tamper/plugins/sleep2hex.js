@@ -9,6 +9,10 @@ export const sleep2hex = {
     { input: '1 AND SLEEP(0)', output: '1 AND SLEEP(0x0)' },
     { input: '1 AND 1=1', output: '1 AND 1=1' },
   ],
+  /**
+   * @param {string} payload
+   * @returns {string}
+   */
   transform(payload) {
     return String(payload ?? '').replace(/\bSLEEP\(\s*(\d+)\s*\)/gi, (m, n) => `SLEEP(0x${Number(n).toString(16)})`);
   },

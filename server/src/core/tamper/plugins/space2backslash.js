@@ -2,6 +2,11 @@
 export const space2backslash = {
   name: 'space2backslash',
   description: '将空格替换为反斜杠 \\，绕过 WAF 空格过滤（引号保护）',
+  /**
+   * @param {string} payload
+   * @param {object} ctx
+   * @returns {string}
+   */
   transform(payload, ctx) {
     const src = String(payload ?? '');
     let out = '';

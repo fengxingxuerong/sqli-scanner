@@ -4,6 +4,11 @@ const BOUNDARIES = ['/**/', '/*!*/', '--', '#', '/*', '*/'];
 export const randomboundary = {
   name: 'randomboundary',
   description: '在关键字之间插入随机边界符，绕过 WAF 关键字检测',
+  /**
+   * @param {string} payload
+   * @param {object} ctx
+   * @returns {string}
+   */
   transform(payload, ctx) {
     const keywords = ['SELECT', 'UNION', 'WHERE', 'FROM', 'AND', 'OR', 'ORDER', 'GROUP', 'HAVING', 'LIMIT', 'INSERT', 'UPDATE', 'DELETE', 'INTO', 'VALUES', 'SET'];
     let s = String(payload ?? '');

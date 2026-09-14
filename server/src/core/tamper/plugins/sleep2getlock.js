@@ -10,6 +10,10 @@ export const sleep2getlock = {
     { input: '1 AND 1=1', output: '1 AND 1=1' },
   ],
   dbms: ['MySQL'], // [P1-FIX] 方言限定：异构库下无效，运行时告警
+  /**
+   * @param {string} payload
+   * @returns {string}
+   */
   transform(payload) {
     // alias 固定为项目名（官方为随机会话别名；固定值保证 doctest 确定性）
     return String(payload ?? '').replace(/\bSLEEP\(/gi, "GET_LOCK('sqliscanner',");

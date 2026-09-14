@@ -2,6 +2,11 @@
 export const space2unicode = {
   name: 'space2unicode',
   description: '将空格替换为 Unicode 不间断空格 \\u00A0，绕过 WAF 空格过滤（引号保护）',
+  /**
+   * @param {string} payload
+   * @param {object} ctx
+   * @returns {string}
+   */
   transform(payload, ctx) {
     const src = String(payload ?? '');
     let out = '';

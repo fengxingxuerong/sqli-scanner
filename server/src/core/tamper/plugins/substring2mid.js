@@ -2,6 +2,11 @@
 export const substring2mid = {
   name: 'substring2mid',
   description: '将 SUBSTRING() 替换为 MID()，绕过函数过滤规则',
+  /**
+   * @param {string} payload
+   * @param {object} ctx
+   * @returns {string}
+   */
   transform(payload, ctx) {
     return String(payload ?? '')
       .replace(/SUBSTRING\s*\(/gi, (match) => {

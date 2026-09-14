@@ -2,6 +2,10 @@
 export const appendnullbyte = {
   name: 'appendnullbyte',
   description: '在 payload 末尾追加 %00 空字节，绕过基于后缀匹配的过滤',
+  /**
+   * @param {string} payload
+   * @returns {string}
+   */
   transform(payload) {
     return payload + '%00';
   },

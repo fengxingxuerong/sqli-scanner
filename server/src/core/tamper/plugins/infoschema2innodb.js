@@ -14,6 +14,10 @@ export const infoschema2innodb = {
     },
     { input: '1 AND 1=1', output: '1 AND 1=1' }, // 不含 information_schema.tables 不动
   ],
+  /**
+   * @param {string} payload
+   * @returns {string}
+   */
   transform(payload) {
     let out = String(payload ?? '');
     if (!out) return out;

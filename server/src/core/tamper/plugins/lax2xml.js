@@ -3,6 +3,11 @@
 export const lax2xml = {
   name: 'lax2xml',
   description: '将 LAX 函数替换为 XML 函数，绕过 WAF 对 LAX 关键词的检测',
+  /**
+   * @param {string} payload
+   * @param {object} ctx
+   * @returns {string}
+   */
   transform(payload, ctx) {
     let s = String(payload ?? '');
     s = s.replace(/\bLAX\b/gi, (m) => m[0] === 'L' ? 'XML' : 'xml');

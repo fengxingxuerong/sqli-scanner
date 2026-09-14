@@ -19,6 +19,11 @@ export const dash2hash = {
   // 双形态后全方言安全（非 MySQL 系落到 SQL92 标准 `-- `），无需 dbms 门控告警
   // 标记安全：只替换尾部注释符，不触碰 __S__ / SQLISCANNER<N> 标记
   markerSafe: true,
+  /**
+   * @param {string} payload
+   * @param {object} ctx
+   * @returns {string}
+   */
   transform(payload, ctx) {
     const src = String(payload ?? '');
     // 尾部 `--` + 任意注释尾缀（- / 空白）→ 方言感知替换

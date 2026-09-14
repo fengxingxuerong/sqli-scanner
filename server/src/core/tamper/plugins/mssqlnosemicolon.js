@@ -8,6 +8,10 @@ export const mssqlnosemicolon = {
     { input: ';DECLARE @x CHAR(9);SET @x=0x303a303a35;WAITFOR DELAY @x', output: ' DECLARE @x CHAR(9) SET @x=0x303a303a35 WAITFOR DELAY @x' },
     { input: "1' AND 'a'='a", output: "1' AND 'a'='a" }, // 无分号不动
   ],
+  /**
+   * @param {string} payload
+   * @returns {string}
+   */
   transform(payload) {
     const keywords = 'WAITFOR|DECLARE|SET|EXEC(?:UTE)?|SELECT|INSERT|UPDATE|DELETE|CREATE|DROP|ALTER|TRUNCATE|BEGIN|IF|WHILE|PRINT|USE|GRANT|REVOKE|BACKUP|RESTORE|RECONFIGURE|SHUTDOWN|WITH';
     return String(payload ?? '').replace(new RegExp(`;(?=\\s*(?:${keywords})\\b)`, 'gi'), ' ');

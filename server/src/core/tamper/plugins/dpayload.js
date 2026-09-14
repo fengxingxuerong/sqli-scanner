@@ -3,6 +3,11 @@
 export const dpayload = {
   name: 'dpayload',
   description: '动态大小写混淆每个字母，绕过 WAF 关键字检测（比 randomcase 更激进）',
+  /**
+   * @param {string} payload
+   * @param {object} ctx
+   * @returns {string}
+   */
   transform(payload, ctx) {
     const src = String(payload ?? '');
     let out = '';

@@ -3,6 +3,11 @@
 export const nconcatenation = {
   name: 'nconcatenation',
   description: '将 CONCAT() 替换为参数拼接，绕过 WAF 对 CONCAT 的检测',
+  /**
+   * @param {string} payload
+   * @param {object} ctx
+   * @returns {string}
+   */
   transform(payload, ctx) {
     return String(payload ?? '').replace(/CONCAT\s*\(/gi, (match) => {
       return match[0] === 'C' ? 'CONCAT_WS(0x0,' : 'concat_ws(0x0,';

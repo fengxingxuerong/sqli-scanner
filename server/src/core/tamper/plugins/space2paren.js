@@ -2,6 +2,11 @@
 export const space2paren = {
   name: 'space2paren',
   description: '将空格替换为括号 ()，绕过 WAF 空格过滤（引号保护）',
+  /**
+   * @param {string} payload
+   * @param {object} ctx
+   * @returns {string}
+   */
   transform(payload, ctx) {
     const src = String(payload ?? '');
     let out = '';

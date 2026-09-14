@@ -3,6 +3,11 @@
 export const jsonescape = {
   name: 'jsonescape',
   description: '对字符串字面量中的 JSON 特殊字符做转义，绕过 JSON API WAF',
+  /**
+   * @param {string} payload
+   * @param {object} ctx
+   * @returns {string}
+   */
   transform(payload, ctx) {
     const src = String(payload ?? '');
     let out = '';

@@ -3,6 +3,11 @@
 export const vigenere = {
   name: 'vigenere',
   description: 'Vigenere 密码编码字符串字面量，绕过 WAF 字符串检测',
+  /**
+   * @param {string} payload
+   * @param {object} ctx
+   * @returns {string}
+   */
   transform(payload, ctx) {
     const key = 'sqlmap';
     const src = String(payload ?? '');

@@ -3,6 +3,11 @@
 export const rot13 = {
   name: 'rot13',
   description: 'ROT13 编码字符串字面量，绕过 WAF 字符串检测',
+  /**
+   * @param {string} payload
+   * @param {object} ctx
+   * @returns {string}
+   */
   transform(payload, ctx) {
     const src = String(payload ?? '');
     let out = '';

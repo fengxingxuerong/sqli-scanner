@@ -6,6 +6,10 @@ export const space2plus = {
   doctests: [
     { input: 'a AND b', output: 'a+AND+b' },
   ],
+  /**
+   * @param {string} payload
+   * @returns {string}
+   */
   transform(payload) {
     return payload.replace(/ /g, '+');
   },

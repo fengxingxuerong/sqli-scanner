@@ -47,9 +47,9 @@ docker compose up -d
 
 | 等级 | 方言 | 证据 |
 |---|---|---|
-| ✅ **真实引擎验证**（检测/绕过主链路跑通） | MySQL、MariaDB、PostgreSQL、SQLite、SQL Server（2026-09-14，e2e/mssql-lab） | 真 MySQL 8.0.x（`e2e/real-mysql-lab` + `e2e/waf-real`）、真 MariaDB 11.4.13（`e2e/multi-engine-lab/mariadb-verify.mjs`）、PGlite 18.3、sql.js WASM、真 PostgreSQL 16.2（`e2e/oob-real-lab` OOB 带外全链路） |
+| ✅ **真实引擎验证**（检测/绕过主链路跑通） | MySQL、MariaDB、PostgreSQL、SQLite、Oracle（2026-09-15，e2e/oracle-lab）、SQL Server（2026-09-14，e2e/mssql-lab） | 真 MySQL 8.0.x（`e2e/real-mysql-lab` + `e2e/waf-real`）、真 MariaDB 11.4.13（`e2e/multi-engine-lab/mariadb-verify.mjs`）、PGlite 18.3、sql.js WASM、真 PostgreSQL 16.2（`e2e/oob-real-lab` OOB 带外全链路） |
 | ⚠️ **部分通道验证** | H2、HSQLDB、Derby | `e2e/multi-engine-lab`（真实 JDBC 内存库，仅布尔通道 × CRS） |
-| ⛔ **模板适配（未在真实 DBMS 验证）** | Oracle、TiDB、DM8、ClickHouse、DB2、Sybase、Firebird、Informix、Access、MonetDB | 仅有检测/提取模板；方言语法、列类型、报错文本均可能有偏差 |
+| ⛔ **模板适配（未在真实 DBMS 验证）** | TiDB、DM8、ClickHouse、DB2、Sybase、Firebird、Informix、Access、MonetDB | 仅有检测/提取模板；方言语法、列类型、报错文本均可能有偏差 |
 
 **OOB 带外通道实测口径（2026-09-11 起）**：
 - **HTTP 回连**：真 PostgreSQL 16.2（超管）× 无回显 + WAF（拦 sleep/报错/union）场景下，
@@ -89,7 +89,7 @@ admin-only 触发页 `/admin/panel`（users.admin 角色门禁 403）+ admin 会
 403 跨角色门禁）全过；单身份场景（second_order）同步切换 user 身份后零回归，靶场
 11 场景全 PASS。
 
-**给客户的话**：若目标是 ⛔ 等级中的数据库（尤其 Oracle 这类主流库；SQL Server 已于 2026-09-14 升级 verified，见 e2e/mssql-lab），
+**给客户的话**：若目标是 ⛔ 等级中的数据库（SQL Server 与 Oracle 已分别于 2026-09-14/15 升级 verified，见 e2e/mssql-lab 与 e2e/oracle-lab），
 请把结论视为**待复核线索**而非可用证据——报告会在 `summary.dbmsEvidence.caveat` 中自动声明这一点。
 | **1870+ 条 payload 模板** | 含注释/编码/子句/嵌套闭合变体（1779 主库 + 82 子句 + 14 OOB）+ 672 条声明式注册表 |
 | **225 个 tamper 插件** | 覆盖 sqlmap 官方 tamper 全集（84/84）。⚠️ 绕过率口径见下文「WAF 绕过能力实测口径」 |

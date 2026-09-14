@@ -5,6 +5,11 @@ import { brotliCompressSync } from 'node:zlib';
 export const brotli = {
   name: 'brotli',
   description: '将字符串字面量 brotli 压缩后用 UNCOMPRESS() 解压，绕过 WAF 检测',
+  /**
+   * @param {string} payload
+   * @param {object} ctx
+   * @returns {string}
+   */
   transform(payload, ctx) {
     const src = String(payload ?? '');
     let out = '';

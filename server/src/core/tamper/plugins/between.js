@@ -11,6 +11,10 @@ export const between = {
     { input: 'a<2', output: 'a<2' }, // 不改写 <
     { input: 'a<>1', output: 'a<>1' },
   ],
+  /**
+   * @param {string} payload
+   * @returns {string}
+   */
   transform(payload) {
     return payload.replace(/(?<![<>!=])>(?![>=])/g, ' NOT BETWEEN 0 AND ');
   },

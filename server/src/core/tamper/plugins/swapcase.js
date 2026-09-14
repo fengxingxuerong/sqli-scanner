@@ -3,6 +3,11 @@
 export const swapcase = {
   name: 'swapcase',
   description: '对关键字进行大小写互换，绕过 WAF 关键字检测',
+  /**
+   * @param {string} payload
+   * @param {object} ctx
+   * @returns {string}
+   */
   transform(payload, ctx) {
     return String(payload ?? '')
       .replace(/\bSELECT\b/gi, 'sElEcT')

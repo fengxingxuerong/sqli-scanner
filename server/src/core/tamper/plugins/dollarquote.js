@@ -8,6 +8,10 @@ export const dollarquote = {
     { input: "SELECT 'a'='b'", output: 'SELECT $$a$$=$$b$$' },
   ],
   dbms: ['PostgreSQL'], // [P1-FIX] 方言限定：异构库下无效，运行时告警
+  /**
+   * @param {string} payload
+   * @returns {string}
+   */
   transform(payload) {
     return String(payload ?? '').replace(/'([^']*)'/g, (m, inner) => {
       if (typeof inner === 'string' && inner.includes('$$')) return m;

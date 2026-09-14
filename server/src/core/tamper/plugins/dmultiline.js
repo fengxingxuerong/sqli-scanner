@@ -3,6 +3,11 @@
 export const dmultiline = {
   name: 'dmultiline',
   description: '用多行注释包裹 SQL 表达式，利用 MySQL 条件注释绕过 WAF',
+  /**
+   * @param {string} payload
+   * @param {object} ctx
+   * @returns {string}
+   */
   transform(payload, ctx) {
     const src = String(payload ?? '');
     // 包覆 SELECT/UNION/AND/OR 等关键字

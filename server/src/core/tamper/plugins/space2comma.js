@@ -2,6 +2,11 @@
 export const space2comma = {
   name: 'space2comma',
   description: '将空格替换为逗号 ,，绕过 WAF 空格过滤（引号保护）',
+  /**
+   * @param {string} payload
+   * @param {object} ctx
+   * @returns {string}
+   */
   transform(payload, ctx) {
     const src = String(payload ?? '');
     let out = '';

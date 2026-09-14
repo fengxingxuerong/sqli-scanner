@@ -5,6 +5,10 @@ export const ifnull2ifisnull = {
   doctests: [
     { input: 'IFNULL(a,1)', output: 'IF(ISNULL(a),1,a)' },
   ],
+  /**
+   * @param {string} payload
+   * @returns {string}
+   */
   transform(payload) {
     return payload.replace(/IFNULL\(([^,]+),([^)]+)\)/gi, 'IF(ISNULL($1),$2,$1)');
   },

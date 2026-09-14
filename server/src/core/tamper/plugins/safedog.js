@@ -3,6 +3,11 @@
 export const safedog = {
   name: 'safedog',
   description: '针对 安全狗 WAF：tab+newline 混合空格 + 关键字双写（SELECT→SELSELECTECT）',
+  /**
+   * @param {string} payload
+   * @param {object} ctx
+   * @returns {string}
+   */
   transform(payload, ctx) {
     let s = String(payload ?? '');
     // 1) 空格 → \t 或 \n 随机

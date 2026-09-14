@@ -11,6 +11,10 @@ export const mid2leftright = {
     { input: '1 AND SUBSTR((SELECT pw FROM users LIMIT 1),1,1)=0x73', output: '1 AND RIGHT(LEFT((SELECT pw FROM users LIMIT 1),1),1)=0x73' },
     { input: '1 AND 1=1', output: '1 AND 1=1' },
   ],
+  /**
+   * @param {string} payload
+   * @returns {string}
+   */
   transform(payload) {
     const re = /\b(?:MID|SUBSTRING|SUBSTR)\(\s*((?:[^()]|\([^()]*\))+?)\s*,(\s*)([^,()]+),(\s*)([^,()]+)\)/gi;
     return String(payload ?? '').replace(re, (m, expr, sp1, pos, sp2, len) => {

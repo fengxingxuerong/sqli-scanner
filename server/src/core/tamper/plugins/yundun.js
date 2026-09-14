@@ -3,6 +3,11 @@
 export const yundun = {
   name: 'yundun',
   description: '针对 阿里云盾/云锁 WAF：MySQL versioned comment /*!...*/ + OR→|| + AND→&&',
+  /**
+   * @param {string} payload
+   * @param {object} ctx
+   * @returns {string}
+   */
   transform(payload, ctx) {
     let s = String(payload ?? '');
     // 1) UNION SELECT → /*!UNION*/ /*!SELECT*/

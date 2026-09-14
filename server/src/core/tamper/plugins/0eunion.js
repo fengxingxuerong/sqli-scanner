@@ -10,6 +10,11 @@ export const eunion = {
    * @returns {string}
    */
   dbms: ['MySQL'], // [P1-FIX] 方言限定：异构库下无效，运行时告警
+  /**
+   * @param {string} payload
+   * @param {object} ctx
+   * @returns {string}
+   */
   transform(payload, ctx) {
     return payload.replace(/(\d+)\s+(UNION )/gi, '$1e0$2');
   },

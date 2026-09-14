@@ -11,6 +11,7 @@ function randomIP() {
   return octets.join('.');
 }
 
+/** @param {object} ctx */
 function ensureHeaders(ctx) {
   if (ctx && ctx.headers && typeof ctx.headers === 'object') return ctx.headers;
   if (ctx && ctx.target && typeof ctx.target === 'object') {

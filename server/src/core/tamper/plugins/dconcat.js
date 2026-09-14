@@ -5,6 +5,11 @@ const SEPARATORS = [',', ' ', '|', '/', ':', ';', '#'];
 export const dconcat = {
   name: 'dconcat',
   description: '将 CONCAT() 替换为 CONCAT_WS() 使用随机分隔符，绕过 WAF 检测',
+  /**
+   * @param {string} payload
+   * @param {object} ctx
+   * @returns {string}
+   */
   transform(payload, ctx) {
     const sep = SEPARATORS[Math.floor(Math.random() * SEPARATORS.length)];
     return String(payload ?? '').replace(/CONCAT\s*\(/gi, (match) => {

@@ -3,6 +3,11 @@
 export const hardindex = {
   name: 'hardindex',
   description: '将数字索引替换为 ASCII 字符编码，绕过 WAF 对数字索引的检测',
+  /**
+   * @param {string} payload
+   * @param {object} ctx
+   * @returns {string}
+   */
   transform(payload, ctx) {
     return String(payload ?? '').replace(/\b(\d+)\b/g, (match, num) => {
       const n = parseInt(num, 10);

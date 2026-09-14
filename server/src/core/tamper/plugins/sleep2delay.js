@@ -2,6 +2,10 @@
 export const sleep2delay = {
   name: 'sleep2delay',
   description: "将 SLEEP(n) 改写为 MSSQL 的 WAITFOR DELAY '0:0:n'",
+  /**
+   * @param {string} payload
+   * @returns {string}
+   */
   transform(payload) {
     return payload.replace(/SLEEP\((\d+)\)/gi, "WAITFOR DELAY '0:0:$1'");
   },

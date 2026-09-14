@@ -3,6 +3,11 @@
 export const lpad = {
   name: 'lpad',
   description: '将字符串字面量包装为 LPAD() 调用，绕过 WAF 字符串检测',
+  /**
+   * @param {string} payload
+   * @param {object} ctx
+   * @returns {string}
+   */
   transform(payload, ctx) {
     const src = String(payload ?? '');
     let out = '';

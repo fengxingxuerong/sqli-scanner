@@ -7,6 +7,10 @@ const RE = new RegExp(`\\b(${KW})\\b`, 'gi');
 export const modsecurityversionedkeywords = {
   name: 'modsecurityversionedkeywords',
   description: '用 /*!50000keyword*/ 版本化注释包裹每个关键字（MySQL 5.0+ 执行注释内语法），绕过 ModSecurity 类 WAF',
+  /**
+   * @param {string} payload
+   * @returns {string}
+   */
   transform(payload) {
     return payload.replace(RE, (m) => '/*!50000' + m + '*/');
   },

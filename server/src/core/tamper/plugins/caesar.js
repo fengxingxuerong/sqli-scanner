@@ -3,6 +3,11 @@
 export const caesar = {
   name: 'caesar',
   description: 'Caesar 移位编码字符串字面量，绕过 WAF 字符串检测',
+  /**
+   * @param {string} payload
+   * @param {object} ctx
+   * @returns {string}
+   */
   transform(payload, ctx) {
     const shift = Math.floor(Math.random() * 24) + 1;
     const src = String(payload ?? '');

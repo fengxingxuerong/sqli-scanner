@@ -2,6 +2,10 @@
 export const ifnull2casewhenisnull = {
   name: 'ifnull2casewhenisnull',
   description: '将 IFNULL(a, b) 改写为 CASE WHEN ISNULL(a) THEN b ELSE a END',
+  /**
+   * @param {string} payload
+   * @returns {string}
+   */
   transform(payload) {
     return payload.replace(/IFNULL\(([^,]+),\s*([^)]+)\)/gi,
       'CASE WHEN ISNULL($1) THEN $2 ELSE $1 END');

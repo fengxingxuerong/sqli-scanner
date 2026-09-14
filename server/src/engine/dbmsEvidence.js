@@ -36,7 +36,9 @@ export const DBMS_EVIDENCE = {
   // [批次 5 2026-09-14] SQL Server 2022 Express 本机真机靶场（mssql npm 驱动直拼 SQL）：
   // num/str 双上下文 union/error/boolean 三通道检出（e2e/mssql-lab）
   'SQL Server': { level: 'verified', evidence: 'e2e/mssql-lab（SQL Server 2022 Express 16.0 真机，union/error/boolean 三通道）' },
-  Oracle: { level: 'template-only', evidence: null },
+  // [批次 7 2026-09-15] Oracle 26ai Free 真机靶场（oracledb thin 直拼 SQL）：
+  // num/str 双上下文 union/error/boolean 三通道检出 + 拖库正确性（e2e/oracle-lab）
+  Oracle: { level: 'verified', evidence: 'e2e/oracle-lab（Oracle 26ai Free 真机，三通道 + 拖库）' },
 };
 
 const LEVEL_TEXT = {

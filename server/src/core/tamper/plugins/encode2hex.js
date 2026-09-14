@@ -3,6 +3,11 @@
 export const encode2hex = {
   name: 'encode2hex',
   description: '将整个 payload 编码为十六进制，绕过 WAF 检测',
+  /**
+   * @param {string} payload
+   * @param {object} ctx
+   * @returns {string}
+   */
   transform(payload, ctx) {
     return Buffer.from(String(payload ?? '')).toString('hex');
   },

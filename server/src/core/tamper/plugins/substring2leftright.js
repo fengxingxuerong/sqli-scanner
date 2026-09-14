@@ -10,6 +10,10 @@ export const substring2leftright = {
     { input: 'SUBSTRING((SELECT usename FROM pg_user)::text FROM 3 FOR 1)', output: 'LEFT(RIGHT((SELECT usename FROM pg_user)::text,-2),1)' },
     { input: '1 AND 1=1', output: '1 AND 1=1' },
   ],
+  /**
+   * @param {string} payload
+   * @returns {string}
+   */
   transform(payload) {
     const s = String(payload ?? '');
     if (!s) return s;

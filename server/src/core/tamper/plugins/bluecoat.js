@@ -2,6 +2,10 @@
 export const bluecoat = {
   name: 'bluecoat',
   description: '空格替换为 %09，等号 = 替换为 LIKE，绕过 BlueCoat 类规则',
+  /**
+   * @param {string} payload
+   * @returns {string}
+   */
   transform(payload) {
     return payload.replace(/ /g, '%09').replace(/=/g, ' LIKE ');
   },

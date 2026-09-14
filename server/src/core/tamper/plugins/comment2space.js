@@ -2,6 +2,11 @@
 export const comment2space = {
   name: 'comment2space',
   description: '将内联注释 /**/ 替换为空格，绕过 WAF 对注释的检测',
+  /**
+   * @param {string} payload
+   * @param {object} ctx
+   * @returns {string}
+   */
   transform(payload, ctx) {
     return String(payload ?? '').replace(/\/\*[\s\S]*?\*\//g, ' ');
   },

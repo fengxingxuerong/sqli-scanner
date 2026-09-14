@@ -243,6 +243,7 @@ export function buildInjectionRequest(target, point, value) {
 // 于是判定层能区分「目标返回空页」与「一个包都没发出去」—— 前者可以下结论，后者不行。
 // 两类例外必须继续抛出：扫描停止（Abort）与安全硬拒（SSRF / scope 越界 / URL 非法）——
 // 把「越界」写成「这个点没洞」是最坏的失败方式。
+/** @param {any} httpClient @param {object} ctx @param {any} req @param {any} opts */
 export async function sendInjection(httpClient, ctx, req, opts = {}) {
   const config = (ctx && ctx.config) || {};
   try {
@@ -279,6 +280,7 @@ export async function sendInjection(httpClient, ctx, req, opts = {}) {
 }
 
 // 按 WAF 规避配置包裹混淆（tamper 链式优先，否则 legacy obfuscate，否则原样）
+/** @param {object} ctx @param {any} value */
 export function obfuscateIfNeeded(ctx, value) {
   return obfuscateWithConfig(value, ctx);
 }
@@ -297,6 +299,7 @@ const NUM_MARKER_BASE_B = 5182960;
 // 构造一次标记 UNION 探测请求（boundary 由调用方传入；缺省回落到 point.boundary）
 // [CRS-FIX 2026-09-10] 末尾必须带行注释：否则字符串型注入点残留的闭合引号无法被注释掉
 // → 整条 SQL 语法错误 → 探测恒 500（实测 /str、/like 的 UNION 回显列定位 100% 失败）。
+/** @param {object} ctx @param {any} columns @param {any} markerExprs @param {any} boundary @param {any} fromClause */
 function _markerProbe(ctx, columns, markerExprs, boundary, fromClause = '') {
   const { target, point } = ctx;
   const suffix = commentSuffix(ctx.dbms, { tamperEnabled: !!ctx?.config?.wafEvasion?.tamper?.enabled });
@@ -315,6 +318,7 @@ function _numMarkers(base, columns) {
   return Array.from({ length: columns }, (_, i) => String(base + i));
 }
 
+/** @param {any} httpClient @param {object} ctx @param {any} probe */
 async function _probeBody(httpClient, ctx, probe) {
   const res = await sendInjection(httpClient, ctx, probe.req);
   const status = res?.status ?? null;
@@ -331,6 +335,7 @@ async function _probeBody(httpClient, ctx, probe) {
 
 // 用给定的 fromClause 做一轮完整回显列探测（text → 逐列 text → numeric A → B 交叉确认）。
 // 提取为独立函数以支持「DBMS 已知时用对应 FROM 子句、未知时先空再 FROM dual 兜底」两轮复用。
+/** @param {any} httpClient @param {object} ctx @param {any} columns @param {any} boundary @param {any} fromClause */
 async function _probeWithFromClause(httpClient, ctx, columns, boundary, fromClause) {
   // 与 _markerProbe 同一判据：证据 payload 必须与实际发出的探测逐字节一致
   const suffix = commentSuffix(ctx.dbms, { tamperEnabled: !!ctx?.config?.wafEvasion?.tamper?.enabled });
@@ -452,6 +457,7 @@ async function _probeWithFromClause(httpClient, ctx, columns, boundary, fromClau
 // 注入点上发出未闭合的 UNION 探测 → 整句落在引号内 → 恒失败 → 指纹的 UNION 版本通道
 // 在 /str、/like、/blind 上 100% 空转。显式传参的 UnionDetector 本就传 point.boundary，
 // 行为不变（数值型注入点 boundary 探测结果就是 ''）。
+/** @param {any} httpClient @param {object} ctx @param {any} columns @param {any} boundary */
 export async function discoverEchoColumnsDetailed(httpClient, ctx, columns, boundary = ctx?.point?.boundary || '') {
   if (!(columns > 0)) return { cols: [], numericCols: [], style: 'none', evidencePayload: '' };
 
@@ -477,6 +483,7 @@ export async function discoverEchoColumnsDetailed(httpClient, ctx, columns, boun
 
 // 在已知列数下用标记 UNION 定位可回显列（返回 0-based 索引数组）
 // 提取器/指纹器复用本函数，避免各自硬编第 2 列。语义保持向后兼容：仅返回文本可回显列。
+/** @param {any} httpClient @param {object} ctx @param {any} columns */
 export async function discoverEchoColumns(httpClient, ctx, columns) {
   const { cols } = await discoverEchoColumnsDetailed(httpClient, ctx, columns);
   return cols;

@@ -876,13 +876,13 @@ export class Extractor {
   }
 
   // ===== 盲注/时间/内联提取：实现已抽至 engine/blindExtractor.js（薄包装保持调用方零改动） =====
-  async extractBoolean(...args) { return extractBooleanImpl(this, ...args); }
-  async extractProof(...args) { return extractProofImpl(this, ...args); }
-  async extractTimeProof(...args) { return extractTimeProofImpl(this, ...args); }
-  async extractTime(...args) { return extractTimeImpl(this, ...args); }
-  async calibrateTimeSleep(...args) { return calibrateTimeSleepImpl(this, ...args); }
-  async extractInline(...args) { return extractInlineImpl(this, ...args); }
-  async extractInlineProof(...args) { return extractInlineProofImpl(this, ...args); }
+  async extractBoolean(ctx, expr) { return extractBooleanImpl(this, ctx, expr); }
+  async extractProof(ctx) { return extractProofImpl(this, ctx); }
+  async extractTimeProof(ctx) { return extractTimeProofImpl(this, ctx); }
+  async extractTime(ctx, expr) { return extractTimeImpl(this, ctx, expr); }
+  async calibrateTimeSleep(ctx, base, condFn) { return calibrateTimeSleepImpl(this, ctx, base, condFn); }
+  async extractInline(ctx, sql) { return extractInlineImpl(this, ctx, sql); }
+  async extractInlineProof(ctx) { return extractInlineProofImpl(this, ctx); }
 }
 
 export default Extractor;

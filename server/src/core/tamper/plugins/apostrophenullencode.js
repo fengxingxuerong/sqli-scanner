@@ -2,6 +2,10 @@
 export const apostrophenullencode = {
   name: 'apostrophenullencode',
   description: "将单引号 ' 替换为 %00%27（NULL 前缀编码），绕过引号过滤",
+  /**
+   * @param {string} payload
+   * @returns {string}
+   */
   transform(payload) {
     return payload.replace(/'/g, '%00%27');
   },

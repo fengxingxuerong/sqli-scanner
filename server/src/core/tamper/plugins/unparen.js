@@ -3,6 +3,11 @@
 export const unparen = {
   name: 'unparen',
   description: '移除 SQL 中多余的括号，绕过 WAF 对括号的检测',
+  /**
+   * @param {string} payload
+   * @param {object} ctx
+   * @returns {string}
+   */
   transform(payload, ctx) {
     const src = String(payload ?? '');
     let out = '';

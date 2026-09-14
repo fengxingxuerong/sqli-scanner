@@ -3,6 +3,10 @@
 export const nonrecursivereplace = {
   name: 'nonrecursivereplace',
   description: '双写 SQL 关键字（如 OR→OROR），绕过"关键字命中即删除"类 WAF',
+  /**
+   * @param {string} payload
+   * @returns {string}
+   */
   transform(payload) {
     return payload.replace(
       /\b(UNION|SELECT|FROM|WHERE|AND|OR|ORDER|BY|HAVING|LIMIT|INSERT|UPDATE|DELETE|NOT|NULL|LIKE|IN|BETWEEN|GROUP)\b/gi,

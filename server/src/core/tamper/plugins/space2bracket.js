@@ -2,6 +2,11 @@
 export const space2bracket = {
   name: 'space2bracket',
   description: '将空格替换为方括号 []，绕过 WAF 空格过滤（引号保护）',
+  /**
+   * @param {string} payload
+   * @param {object} ctx
+   * @returns {string}
+   */
   transform(payload, ctx) {
     const src = String(payload ?? '');
     let out = '';

@@ -3,6 +3,11 @@
 export const squiggle = {
   name: 'squiggle',
   description: '在关键字之间插入波浪线符号，绕过 WAF 关键字检测',
+  /**
+   * @param {string} payload
+   * @param {object} ctx
+   * @returns {string}
+   */
   transform(payload, ctx) {
     return String(payload ?? '')
       .replace(/\bSELECT\b/gi, (m) => m[0] === 'S' ? 'SEL~~ECT' : 'sel~~ect')

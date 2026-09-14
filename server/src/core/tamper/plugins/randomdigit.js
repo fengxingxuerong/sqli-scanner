@@ -3,6 +3,11 @@
 export const randomdigit = {
   name: 'randomdigit',
   description: '将数字随机替换为数学表达式，绕过 WAF 对数字的检测',
+  /**
+   * @param {string} payload
+   * @param {object} ctx
+   * @returns {string}
+   */
   transform(payload, ctx) {
     const expressions = [
       (n) => `${n + 1}-1`,

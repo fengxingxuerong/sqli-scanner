@@ -2,6 +2,11 @@
 export const space2asterisk = {
   name: 'space2asterisk',
   description: '将空格替换为星号 *，绕过 WAF 空格过滤（引号保护）',
+  /**
+   * @param {string} payload
+   * @param {object} ctx
+   * @returns {string}
+   */
   transform(payload, ctx) {
     const src = String(payload ?? '');
     let out = '';

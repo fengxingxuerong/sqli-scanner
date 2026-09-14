@@ -3,6 +3,11 @@
 export const arges = {
   name: 'arges',
   description: '对请求添加 X-Forwarded-For 和 Client-IP 头，绕过基于 IP 的 WAF 规则',
+  /**
+   * @param {string} payload
+   * @param {object} ctx
+   * @returns {string}
+   */
   transform(payload, ctx) {
     // 此插件不修改 payload，而是修改请求头
     // 通过 ctx.headers 告知上层添加额外头

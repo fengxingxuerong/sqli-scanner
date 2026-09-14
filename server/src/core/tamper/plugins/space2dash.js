@@ -10,6 +10,10 @@ export const space2dash = {
     // 随机十六进制，用正则断言换行终止契约
     { input: 'a b', match: '^a--[0-9a-f]{6}%0Ab$' },
   ],
+  /**
+   * @param {string} payload
+   * @returns {string}
+   */
   transform(payload) {
     return payload.replace(/ /g, () => '--' + randomBytes(3).toString('hex') + '%0A');
   },

@@ -19,6 +19,7 @@ import { buildDynamicSimilarFn } from './Detector.js';
   // ===== 盲注二分提取（兜底） =====
 
   // 盲注二分提取单个表达式字符串：长度二分 + 多字符并行二分（并发度 extractConcurrency）
+/** @param {any} ex @param {object} ctx @param {any} expr */
 export async function extractBoolean(ex, ctx, expr) {
     const dbms = resolveDbms(ctx.dbms || 'MySQL');
     // boundary 感知：闭合前缀拼进 base，确保提取阶段的 payload 与检测阶段同构闭合
@@ -197,6 +198,7 @@ export async function extractBoolean(ex, ctx, expr) {
   }
 
   // 限并发发送一批注入值，保持顺序返回（单请求失败返回 null，不中断整体）
+/** @param {any} ex @param {object} ctx @param {any} values */
 async function _sendBatch(ex, ctx, values) {
     const K = ctx.config?.extractConcurrency || 4;
     const out = new Array(values.length);
@@ -223,6 +225,7 @@ async function _sendBatch(ex, ctx, values) {
   // autoDynamicBlock 显式关闭（config.autoDynamicBlock === false）时回退严格不等
   // 比较（与旧行为一致，零回归）。
   // =====================================================================
+/** @param {any} ex @param {object} ctx */
 function _dynJudge(ex, ctx) {
     const config = (ctx && ctx.config) || {};
     const enabled =
@@ -260,6 +263,7 @@ function _dynJudge(ex, ctx) {
   // [P0-FIX] 判定接入 autoDynamicBlock（与 extractBoolean 同通道）：动态页下长度二分
   // 原先恒判「真」（长度上界一路打到 255）→ 长度错误导致整条提取失败
   // [P2-FIX 长度上界] range={lo,hi} 支持延伸区间（长度 >255 的长值续段二分，见 _extendLength）
+/** @param {any} ex @param {object} ctx @param {any} base @param {any} makeCond @param {any} range */
 async function _binarySearch(ex, ctx, base, makeCond, range = {}) {
     const judge = _dynJudge(ex, ctx);
     const test = async (cmp) => {
@@ -289,6 +293,7 @@ async function _binarySearch(ex, ctx, base, makeCond, range = {}) {
   // [P2-FIX 长度上界延伸] 长度二分撞到 255 上界时，探测真实长度是否 >255（原实现静默截断）：
   // 短值（<255，绝大多数场景）零额外请求；确为长值则在 [256, blindMaxLen] 续段二分。
   // blindMaxLen 可配（config.blindMaxLen，默认 65535），防超长值无限拉取。
+/** @param {any} ex @param {object} ctx @param {any} base @param {any} lenExpr @param {any} current */
 async function _extendLength(ex, ctx, base, lenExpr, current) {
     const maxLen = Number(ctx?.config?.blindMaxLen) > 255 ? Math.floor(ctx.config.blindMaxLen) : 65535;
     if (current < 255 || maxLen <= 255) return current;
@@ -305,6 +310,7 @@ async function _extendLength(ex, ctx, base, lenExpr, current) {
   }
 
   // 盲注提取版本证明（供 ScanManager 在布尔/时间注入点调用）
+/** @param {any} ex @param {object} ctx */
 export async function extractProof(ex, ctx) {
     const expr = VERSION_EXPR[resolveDbms(ctx.dbms)];
     if (!expr) return null;
@@ -313,6 +319,7 @@ export async function extractProof(ex, ctx) {
 
   // 时间盲注提取版本证明（供 ScanManager 在 time 注入点调用，路由到时间通道）。
   // SQL Server（需堆叠 WAITFOR）与 SQLite（无原生 sleep）无标量延迟原语，返回 null → 降级布尔通道。
+/** @param {any} ex @param {object} ctx */
 export async function extractTimeProof(ex, ctx) {
     const expr = VERSION_EXPR[resolveDbms(ctx.dbms)];
     if (!expr) return null;
@@ -324,6 +331,7 @@ export async function extractTimeProof(ex, ctx) {
   // 仅支持 MySQL / PostgreSQL / Oracle / ClickHouse / H2 / MonetDB（含 MariaDB/TiDB 复用 MySQL、DM8 复用 Oracle）；
   // SQL Server / Sybase / SQLite 无标量条件延迟原语，返回 null（诚实降级布尔通道）。
   // [P1] DB2/Firebird/Informix/Access/HSQLDB/Derby 同样无标量延时原语 → null（降级布尔通道）。
+/** @param {any} ex @param {object} ctx @param {any} expr */
 export async function extractTime(ex, ctx, expr) {
     const dbms = resolveDbms(ctx.dbms || 'MySQL');
     const condFn = TIME_COND[dbms];
@@ -427,6 +435,7 @@ export async function extractTime(ex, ctx, expr) {
 
   // 提取阶段 sleep（P2-P8）：timeExtractSleepSec 显式配置时用标准时长保证时间判定阈值可靠；
   // 未配置回退 timeBlindSleepSec（与现状一致，零回归）。探测阶段用 timeProbeSleepSec（见 TimeBlindDetector）。
+/** @param {any} ex @param {object} ctx */
 function _extractSleep(ex, ctx) {
     return ctx.config?.timeExtractSleepSec ?? ctx.config?.timeBlindSleepSec ?? defaults.timeBlindSleepSec ?? 2;
   }
@@ -436,6 +445,7 @@ function _extractSleep(ex, ctx) {
   // 判定与主二分完全一致：响应 ≠ false 基准即「条件为真」。仅 1 次额外请求（不逐字符重测）。
   // 失败不丢弃值、不重测（避免逐字符成本），仅标记低置信供调用方在结果上注明。
   // 值内单引号转义为双单引号，避免破坏字符串字面量。
+/** @param {any} ex @param {object} ctx @param {any} base @param {any} expr @param {any} value */
 async function _verifyWholeValue(ex, ctx, base, expr, value) {
     const escaped = String(value).replace(/'/g, "''");
     const [rTrue, rFalse] = await _sendBatch(ex, ctx, [
@@ -452,6 +462,7 @@ async function _verifyWholeValue(ex, ctx, base, expr, value) {
   // （默认 false，与现状一致：不标定、直接用提取 sleep）。关闭时零标定请求。
   // 说明：标定仅发 1~N 个「恒真延迟」请求（N=候选数，通常 1~2），命中后每个二分请求都省下 sleep 差值，
   // 版本证明（约 7 字节 × 8 轮）可省数十秒。
+/** @param {any} ex @param {object} ctx @param {any} base @param {any} condFn */
 export async function calibrateTimeSleep(ex, ctx, base, condFn) {
     const cfg = ctx.config || {};
     const defaultSec = _extractSleep(ex, ctx);
@@ -477,6 +488,7 @@ function _sleepCandidates(ex, defaultSec) {
   }
 
   // 时间判定版的通用二分：返回使条件成立的最大值+1（默认 0..255；range 支持延伸区间）
+/** @param {any} ex @param {object} ctx @param {any} base @param {any} makeCond @param {any} timedTrue @param {any} range */
 async function _timeBinarySearch(ex, ctx, base, makeCond, timedTrue, range = {}) {
     let lo = range.lo ?? 0;
     let hi = range.hi ?? 255;
@@ -497,6 +509,7 @@ async function _timeBinarySearch(ex, ctx, base, makeCond, timedTrue, range = {})
   // 内联查询提取（对标 sqlmap Q）：把标量子查询注入值位置，期待"回显点"把结果带出响应。
   // 约束：仅对"响应可见 + 注入值能进入被回显列"的目标有效（内联技术的本质边界，详见 docs）。
   // 无回显点时返回 null，调用方应回退到 UNION / 字节级盲注通道（本工具不重建查询模板，故如此）。
+/** @param {any} ex @param {object} ctx @param {any} sql */
 export async function extractInline(ex, ctx, sql) {
     const dbms = resolveDbms(ctx.dbms || 'MySQL');
     const fromDual = resolveFromClause(dbms, ctx?.config?.unionFrom);
@@ -515,6 +528,7 @@ export async function extractInline(ex, ctx, sql) {
   }
 
   // 内联提取版本证明（供 ScanManager 在内联注入点调用）
+/** @param {any} ex @param {object} ctx */
 export async function extractInlineProof(ex, ctx) {
     const expr = VERSION_EXPR[resolveDbms(ctx.dbms)];
     if (!expr) return null;

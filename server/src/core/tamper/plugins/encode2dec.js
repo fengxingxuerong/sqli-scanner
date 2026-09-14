@@ -2,6 +2,11 @@
 export const encode2dec = {
   name: 'encode2dec',
   description: '将整个 payload 编码为十进制数字序列，绕过 WAF 检测',
+  /**
+   * @param {string} payload
+   * @param {object} ctx
+   * @returns {string}
+   */
   transform(payload, ctx) {
     const src = String(payload ?? '');
     return src.split('').map(c => String(c.charCodeAt(0))).join(' ');

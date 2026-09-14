@@ -38,6 +38,7 @@ const LABS = [
   { name: 'mssql-lab', desc: 'SQL Server 真机全链路（num/str 双上下文三通道）', entry: 'e2e/mssql-lab/e2e.mjs', deps: ['mssql'] },
   { name: 'mssql-oshell', desc: 'MSSQL xp_cmdshell os-shell 真机闭环（含 auto-enable）', entry: 'e2e/mssql-lab/osshell.e2e.mjs', deps: ['mssql'] },
   { name: 'mssql-dump', desc: 'MSSQL 拖库正确性（string_agg/OFFSET-FETCH 方言真机）', entry: 'e2e/mssql-lab/dump.e2e.mjs', deps: ['mssql'] },
+  { name: 'oracle-lab', desc: 'Oracle 26ai Free 真机全链路（检测+拖库）', entry: 'e2e/oracle-lab/e2e.mjs', deps: ['oracle'] },
   { name: 'recall-lab', desc: '假阳性验证（安全靶场零误报）', entry: 'e2e/recall-lab/false-positive.e2e.js', deps: [] },
   { name: 'detection-runner', desc: '数据驱动检测测试', entry: 'e2e/detection-runner/run.js', deps: [] },
   { name: 'udf-lab', desc: 'UDF 接管真实验证（真 DLL）', entry: 'e2e/udf-lab/udf-takeover.e2e.mjs', deps: ['mysql'] },
@@ -47,6 +48,7 @@ const LABS = [
 const PROBES = {
   mysql: { port: 3306, label: 'MySQL:3306' },
   mssql: { port: Number(process.env.MSSQL_TCP_PORT) || 65039, label: 'MSSQL:65039' },
+  oracle: { port: 1521, label: 'Oracle:1521' },
   mariadb: { port: 3308, label: 'MariaDB:3308' },
   pg: { port: 5432, label: 'PostgreSQL:5432' },
   java: { label: 'Java' },

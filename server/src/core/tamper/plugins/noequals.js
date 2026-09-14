@@ -3,6 +3,11 @@
 export const noequals = {
   name: 'noequals',
   description: '将 = 替换为 LIKE，绕过 WAF 对等号的过滤规则（引号保护）',
+  /**
+   * @param {string} payload
+   * @param {object} ctx
+   * @returns {string}
+   */
   transform(payload, ctx) {
     const src = String(payload ?? '');
     let out = '';

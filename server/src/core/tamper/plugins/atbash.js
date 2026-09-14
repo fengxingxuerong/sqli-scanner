@@ -3,6 +3,11 @@
 export const atbash = {
   name: 'atbash',
   description: 'Atbash 密码编码字符串字面量，绕过 WAF 字符串检测',
+  /**
+   * @param {string} payload
+   * @param {object} ctx
+   * @returns {string}
+   */
   transform(payload, ctx) {
     const src = String(payload ?? '');
     let out = '';

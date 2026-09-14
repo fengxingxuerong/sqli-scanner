@@ -2,6 +2,10 @@
 export const space2nbsp = {
   name: 'space2nbsp',
   description: '将空格替换为非断空格 %a0，绕过空格过滤',
+  /**
+   * @param {string} payload
+   * @returns {string}
+   */
   transform(payload) {
     return payload.replace(/ /g, '%a0');
   },

@@ -2,6 +2,10 @@
 export const informationschemacomment = {
   name: 'informationschemacomment',
   description: '在 information_schema 后插入 /**/ 注释，绕过基于库名的规则',
+  /**
+   * @param {string} payload
+   * @returns {string}
+   */
   transform(payload) {
     return payload.replace(/information_schema/gi, 'information_schema/**/');
   },

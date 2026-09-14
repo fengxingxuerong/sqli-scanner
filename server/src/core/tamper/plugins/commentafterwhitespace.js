@@ -2,6 +2,10 @@
 export const commentafterwhitespace = {
   name: 'commentafterwhitespace',
   description: '在每个空格后插入 /**/ 注释，变形关键字与空格的分隔结构',
+  /**
+   * @param {string} payload
+   * @returns {string}
+   */
   transform(payload) {
     return payload.replace(/ /g, ' /**/');
   },

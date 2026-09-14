@@ -2,6 +2,10 @@
 export const randomcomments = {
   name: 'randomcomments',
   description: '在 SELECT/UNION/WHERE/AND/OR/FROM/ORDER/BY 等关键字后插入 /**/ 注释',
+  /**
+   * @param {string} payload
+   * @returns {string}
+   */
   transform(payload) {
     return payload.replace(/\b(SELECT|UNION|WHERE|AND|OR|FROM|ORDER|BY|LIMIT)\b/gi,
       (m) => m + '/**/');

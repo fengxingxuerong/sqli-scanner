@@ -8,6 +8,10 @@ export const space2mysqldash = {
     { input: 'a b', match: '^a--[0-9a-z]{4}%0Ab$' },
   ],
   dbms: ['MySQL'], // [P1-FIX] 方言限定：异构库下无效，运行时告警
+  /**
+   * @param {string} payload
+   * @returns {string}
+   */
   transform(payload) {
     return payload.replace(/ /g, '--' + Math.random().toString(36).slice(2, 6) + '%0A');
   },

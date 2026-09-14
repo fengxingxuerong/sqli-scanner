@@ -2,6 +2,10 @@
 export const sp_password = {
   name: 'sp_password',
   description: "在 payload 末尾追加 ' sp_password'（MSSQL 注释绕过技巧）",
+  /**
+   * @param {string} payload
+   * @returns {string}
+   */
   transform(payload) {
     return payload + ' sp_password';
   },

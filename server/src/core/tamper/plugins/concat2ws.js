@@ -3,6 +3,11 @@
 export const concat2ws = {
   name: 'concat2ws',
   description: '将 CONCAT() 替换为 CONCAT_WS(\'\',...)，绕过 CONCAT 关键字过滤',
+  /**
+   * @param {string} payload
+   * @param {object} ctx
+   * @returns {string}
+   */
   transform(payload, ctx) {
     return String(payload ?? '').replace(/CONCAT\s*\(/gi, (match) => {
       const isLower = match[0] === 'c';

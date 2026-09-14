@@ -7,6 +7,10 @@ export const least = {
     { input: 'a<1', output: 'LEAST(a,1-1)=a' },
     { input: 'a<=1', output: 'a<=1' }, // 复合运算符保护
   ],
+  /**
+   * @param {string} payload
+   * @returns {string}
+   */
   transform(payload) {
     return payload.replace(/(\w+)\s*<(?!=)\s*(\w+)/g, 'LEAST($1,$2-1)=$1');
   },

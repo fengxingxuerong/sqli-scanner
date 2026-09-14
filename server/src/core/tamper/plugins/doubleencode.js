@@ -2,6 +2,11 @@
 export const doubleencode = {
   name: 'doubleencode',
   description: '双重 URL 编码字符串字面量，绕过 WAF 对 URL 编码的检测',
+  /**
+   * @param {string} payload
+   * @param {object} ctx
+   * @returns {string}
+   */
   transform(payload, ctx) {
     const src = String(payload ?? '');
     let out = '';

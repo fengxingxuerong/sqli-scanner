@@ -3,6 +3,11 @@
 export const keyword2unicode = {
   name: 'keyword2unicode',
   description: '将 SQL 关键字中的字母用 Unicode 编码，绕过 WAF 关键字检测',
+  /**
+   * @param {string} payload
+   * @param {object} ctx
+   * @returns {string}
+   */
   transform(payload, ctx) {
     const keywords = ['SELECT', 'UNION', 'WHERE', 'FROM', 'AND', 'OR', 'ORDER', 'GROUP', 'HAVING', 'LIMIT', 'INSERT', 'UPDATE', 'DELETE', 'INTO', 'VALUES', 'SET'];
     let s = String(payload ?? '');

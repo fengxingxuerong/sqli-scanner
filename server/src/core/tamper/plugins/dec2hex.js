@@ -2,6 +2,11 @@
 export const dec2hex = {
   name: 'dec2hex',
   description: '将十进制数字转换为十六进制表示，绕过 WAF 检测',
+  /**
+   * @param {string} payload
+   * @param {object} ctx
+   * @returns {string}
+   */
   transform(payload, ctx) {
     return String(payload ?? '').replace(/\b(\d+)\b/g, (match, num) => {
       const n = parseInt(num, 10);

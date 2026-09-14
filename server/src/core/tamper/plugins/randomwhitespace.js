@@ -5,6 +5,10 @@ const POOL = ['%09', '%0a', '%0c', '%0d', '%0b'];
 export const randomwhitespace = {
   name: 'randomwhitespace',
   description: '将空格替换为空白字符序列（%09/%0a/%0c/%0d/%0b 轮换），绕过空格过滤',
+  /**
+   * @param {string} payload
+   * @returns {string}
+   */
   transform(payload) {
     let i = 0;
     return payload.replace(/ /g, () => POOL[i++ % POOL.length]);

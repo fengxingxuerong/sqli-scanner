@@ -3,6 +3,11 @@
 export const sap = {
   name: 'sap',
   description: 'SAP 系统 WAF 绕过：在关键字之间插入 SAP 特定注释',
+  /**
+   * @param {string} payload
+   * @param {object} ctx
+   * @returns {string}
+   */
   transform(payload, ctx) {
     return String(payload ?? '')
       .replace(/\bSELECT\b/gi, (m) => m[0] === 'S' ? 'SEL/**/ECT' : 'sel/**/ect')

@@ -8,6 +8,10 @@ export const overlongutf8more = {
     { input: 'a', output: '%C1%A1' },
     { input: '%41', output: '%41' }, // 已编码序列保持原样
   ],
+  /**
+   * @param {string} payload
+   * @returns {string}
+   */
   transform(payload) {
     const s = String(payload ?? '');
     if (!s) return s;

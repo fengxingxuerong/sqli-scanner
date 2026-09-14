@@ -5,6 +5,11 @@ import { deflateSync } from 'node:zlib';
 export const compression = {
   name: 'compression',
   description: '将字符串字面量用 COMPRESS() 编码，绕过 WAF 字符串检测（MySQL 专用）',
+  /**
+   * @param {string} payload
+   * @param {object} ctx
+   * @returns {string}
+   */
   transform(payload, ctx) {
     const src = String(payload ?? '');
     let out = '';

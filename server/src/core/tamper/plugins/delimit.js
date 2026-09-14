@@ -3,6 +3,11 @@
 export const delimit = {
   name: 'delimit',
   description: '在 SQL 关键字前添加分隔符（\' 开头），绕过 WAF 关键字检测',
+  /**
+   * @param {string} payload
+   * @param {object} ctx
+   * @returns {string}
+   */
   transform(payload, ctx) {
     // 仅对以 SELECT/UNION/AND/OR/WHERE/FROM 等开头的短语添加分隔符
     return String(payload ?? '').replace(/\b(SELECT|UNION|AND|OR|WHERE|FROM|HAVING|ORDER|GROUP|LIMIT|OFFSET)\b/gi, "'$1");

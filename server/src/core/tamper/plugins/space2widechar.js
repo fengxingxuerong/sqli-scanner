@@ -2,6 +2,11 @@
 export const space2widechar = {
   name: 'space2widechar',
   description: '将空格替换为全角空格 \\u3000，绕过 WAF 空格过滤（引号保护）',
+  /**
+   * @param {string} payload
+   * @param {object} ctx
+   * @returns {string}
+   */
   transform(payload, ctx) {
     const src = String(payload ?? '');
     let out = '';

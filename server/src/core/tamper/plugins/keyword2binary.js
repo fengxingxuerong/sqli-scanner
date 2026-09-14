@@ -2,6 +2,11 @@
 export const keyword2binary = {
   name: 'keyword2binary',
   description: '将 SQL 关键字编码为二进制 0b 表示，绕过 WAF 关键字检测',
+  /**
+   * @param {string} payload
+   * @param {object} ctx
+   * @returns {string}
+   */
   transform(payload, ctx) {
     const keywords = ['SELECT', 'UNION', 'WHERE', 'FROM', 'AND', 'OR', 'ORDER', 'GROUP', 'HAVING', 'LIMIT', 'INSERT', 'UPDATE', 'DELETE', 'INTO', 'VALUES', 'SET'];
     let s = String(payload ?? '');

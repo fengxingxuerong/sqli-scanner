@@ -3,6 +3,11 @@
 export const unhtmlencode = {
   name: 'unhtmlencode',
   description: '将 HTML 实体编码的字符解码为原始字符，绕过 WAF 检测',
+  /**
+   * @param {string} payload
+   * @param {object} ctx
+   * @returns {string}
+   */
   transform(payload, ctx) {
     const src = String(payload ?? '');
     return src

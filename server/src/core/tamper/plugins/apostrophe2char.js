@@ -2,6 +2,10 @@
 export const apostrophe2char = {
   name: 'apostrophe2char',
   description: "将单引号 ' 替换为 CHAR(39)，避免字面引号出现在注入串",
+  /**
+   * @param {string} payload
+   * @returns {string}
+   */
   transform(payload) {
     return payload.replace(/'/g, 'CHAR(39)');
   },

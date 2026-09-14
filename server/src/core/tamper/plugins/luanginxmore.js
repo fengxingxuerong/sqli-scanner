@@ -7,6 +7,11 @@ export const luanginxmore = {
   doctests: [
     { input: '1 AND 2>1', match: '^[A-Za-z0-9]{2}=&' },
   ],
+  /**
+   * @param {string} payload
+   * @param {object} ctx
+   * @returns {string}
+   */
   transform(payload, ctx) {
     const count = (ctx && ctx.tamperHints && Number(ctx.tamperHints.luaginxMoreCount)) || 10000;
     const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';

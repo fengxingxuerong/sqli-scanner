@@ -3,6 +3,11 @@ export const string2octal = {
   name: 'string2octal',
   description: '将字符串字面量编码为八进制表示，绕过 WAF 字符串检测',
   terminal: true, // [P1-FIX] 输出形态固定：其后 tamper 均空转，链上自动截断
+  /**
+   * @param {string} payload
+   * @param {object} ctx
+   * @returns {string}
+   */
   transform(payload, ctx) {
     const src = String(payload ?? '');
     let out = '';

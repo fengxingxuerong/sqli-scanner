@@ -3,6 +3,11 @@
 export const coffee = {
   name: 'coffee',
   description: 'CoffeeScript 编码字符串字面量，绕过 CoffeeScript 后端 WAF',
+  /**
+   * @param {string} payload
+   * @param {object} ctx
+   * @returns {string}
+   */
   transform(payload, ctx) {
     const src = String(payload ?? '');
     let out = '';

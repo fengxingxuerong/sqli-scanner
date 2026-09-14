@@ -3,6 +3,11 @@
 export const scientific = {
   name: 'scientific',
   description: '将数字编码为科学计数法形式，绕过 WAF 对数字的检测',
+  /**
+   * @param {string} payload
+   * @param {object} ctx
+   * @returns {string}
+   */
   transform(payload, ctx) {
     return String(payload ?? '').replace(/\b(\d+)\b/g, (match, num) => {
       const n = parseInt(num, 10);

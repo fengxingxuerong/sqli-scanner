@@ -3,6 +3,11 @@
 export const union2no = {
   name: 'union2no',
   description: '在 UNION SELECT 关键字间插入特殊标记，绕过 WAF 关键字检测',
+  /**
+   * @param {string} payload
+   * @param {object} ctx
+   * @returns {string}
+   */
   transform(payload, ctx) {
     return String(payload ?? '')
       .replace(/\bUNION\s+SELECT\b/gi, (match) => {

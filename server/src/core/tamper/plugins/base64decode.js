@@ -3,6 +3,11 @@
 export const base64decode = {
   name: 'base64decode',
   description: '将字符串字面量 base64 编码后用 FROM_BASE64() 解码，绕过 WAF 字符串检测',
+  /**
+   * @param {string} payload
+   * @param {object} ctx
+   * @returns {string}
+   */
   transform(payload, ctx) {
     const src = String(payload ?? '');
     let out = '';

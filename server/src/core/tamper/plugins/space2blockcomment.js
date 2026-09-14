@@ -3,6 +3,11 @@
 export const space2blockcomment = {
   name: 'space2blockcomment',
   description: '将空格替换为 MySQL 条件注释 /*! */，绕过 WAF 空格过滤（引号保护）',
+  /**
+   * @param {string} payload
+   * @param {object} ctx
+   * @returns {string}
+   */
   transform(payload, ctx) {
     const src = String(payload ?? '');
     let out = '';

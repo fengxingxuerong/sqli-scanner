@@ -3,6 +3,11 @@
 export const dbase64encode = {
   name: 'dbase64encode',
   description: '将字符串字面量用 TO_BASE64() 包装，绕过 WAF 字符串检测',
+  /**
+   * @param {string} payload
+   * @param {object} ctx
+   * @returns {string}
+   */
   transform(payload, ctx) {
     const src = String(payload ?? '');
     let out = '';

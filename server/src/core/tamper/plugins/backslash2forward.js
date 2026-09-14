@@ -2,6 +2,11 @@
 export const backslash2forward = {
   name: 'backslash2forward',
   description: '将反斜杠替换为正斜杠，绕过路径过滤（引号状态机保护字符串字面量）',
+  /**
+   * @param {string} payload
+   * @param {object} ctx
+   * @returns {string}
+   */
   transform(payload, ctx) {
     const src = String(payload ?? '');
     let out = '';

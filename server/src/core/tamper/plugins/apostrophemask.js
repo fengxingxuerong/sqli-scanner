@@ -5,6 +5,10 @@ export const apostrophemask = {
   doctests: [
     { input: "a'b", output: 'a%EF%BC%87b' },
   ],
+  /**
+   * @param {string} payload
+   * @returns {string}
+   */
   transform(payload) {
     return payload.replace(/'/g, '%EF%BC%87');
   },

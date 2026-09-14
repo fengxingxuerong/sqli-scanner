@@ -3,6 +3,11 @@
 export const octalencode = {
   name: 'octalencode',
   description: '将字符串字面量编码为八进制转义序列，绕过 WAF 字符串检测',
+  /**
+   * @param {string} payload
+   * @param {object} ctx
+   * @returns {string}
+   */
   transform(payload, ctx) {
     const src = String(payload ?? '');
     let out = '';

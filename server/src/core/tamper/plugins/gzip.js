@@ -6,6 +6,11 @@ import { deflateSync } from 'node:zlib';
 export const gzip = {
   name: 'gzip',
   description: '将字符串字面量 zlib(deflate) 压缩后用 UNCOMPRESS() 解压，绕过 WAF 检测',
+  /**
+   * @param {string} payload
+   * @param {object} ctx
+   * @returns {string}
+   */
   transform(payload, ctx) {
     const src = String(payload ?? '');
     let out = '';

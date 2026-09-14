@@ -3,6 +3,11 @@
 export const floatencode = {
   name: 'floatencode',
   description: '将整数编码为浮点数表示，绕过 WAF 对整数的检测',
+  /**
+   * @param {string} payload
+   * @param {object} ctx
+   * @returns {string}
+   */
   transform(payload, ctx) {
     return String(payload ?? '').replace(/\b(\d+)\b/g, (match, num) => {
       const n = parseInt(num, 10);

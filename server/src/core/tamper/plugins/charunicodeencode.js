@@ -4,6 +4,10 @@
 export const charunicodeencode = {
   name: 'charunicodeencode',
   description: '将字母字符编码为 %uXXXX（宽字节/Unicode 注入绕过）',
+  /**
+   * @param {string} payload
+   * @returns {string}
+   */
   transform(payload) {
     return payload.replace(/[A-Za-z]/g, (c) => '%u' + c.charCodeAt(0).toString(16).padStart(4, '0'));
   },

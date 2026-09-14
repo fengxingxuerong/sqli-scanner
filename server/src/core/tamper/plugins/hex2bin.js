@@ -2,6 +2,11 @@
 export const hex2bin = {
   name: 'hex2bin',
   description: '将十六进制数字转换为二进制表示，绕过 WAF 检测',
+  /**
+   * @param {string} payload
+   * @param {object} ctx
+   * @returns {string}
+   */
   transform(payload, ctx) {
     return String(payload ?? '').replace(/0x([0-9a-fA-F]+)/g, (match, hex) => {
       try {

@@ -20,6 +20,11 @@ export const base64encode = {
    * @returns {string}
    */
   terminal: true, // [P1-FIX] 输出形态固定：其后 tamper 均空转，链上自动截断
+  /**
+   * @param {string} payload
+   * @param {object} ctx
+   * @returns {string}
+   */
   transform(payload, ctx) {
     if (typeof payload !== 'string' || payload.length === 0) return payload;
     // [P0-D3 FIX] 先抠出「提取标记 + 占位符」（哨兵暂存）

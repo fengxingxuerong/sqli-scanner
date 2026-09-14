@@ -3,6 +3,11 @@
 export const mixedcase = {
   name: 'mixedcase',
   description: '混合大小写模式混淆关键字，绕过 WAF 关键字检测',
+  /**
+   * @param {string} payload
+   * @param {object} ctx
+   * @returns {string}
+   */
   transform(payload, ctx) {
     return String(payload ?? '')
       .replace(/\bSELECT\b/gi, 'SeLeCt')

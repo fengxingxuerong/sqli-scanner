@@ -3,6 +3,11 @@
 export const char2ascii = {
   name: 'char2ascii',
   description: '将字符串字面量编码为 ASCII 十进制数字序列，绕过 WAF 字符串检测',
+  /**
+   * @param {string} payload
+   * @param {object} ctx
+   * @returns {string}
+   */
   transform(payload, ctx) {
     const src = String(payload ?? '');
     let out = '';

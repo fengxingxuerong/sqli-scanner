@@ -3,6 +3,11 @@
 export const nullencode = {
   name: 'nullencode',
   description: '在关键字之间插入 NULL 字节，绕过对 NULL 字节处理不当的 WAF',
+  /**
+   * @param {string} payload
+   * @param {object} ctx
+   * @returns {string}
+   */
   transform(payload, ctx) {
     return String(payload ?? '')
       .replace(/\bUNION\b/gi, (m) => m[0] === 'U' ? 'UN%00ION' : 'un%00ion')

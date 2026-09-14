@@ -5,6 +5,10 @@ export const concat2concatws = {
   doctests: [
     { input: 'CONCAT(a,b)', output: 'CONCAT_WS(CHAR(32),a,b)' },
   ],
+  /**
+   * @param {string} payload
+   * @returns {string}
+   */
   transform(payload) {
     return payload.replace(/CONCAT\(/gi, 'CONCAT_WS(CHAR(32),');
   },

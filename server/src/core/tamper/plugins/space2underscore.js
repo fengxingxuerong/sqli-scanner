@@ -2,6 +2,11 @@
 export const space2underscore = {
   name: 'space2underscore',
   description: '将空格替换为下划线 _，绕过 WAF 空格过滤（引号保护）',
+  /**
+   * @param {string} payload
+   * @param {object} ctx
+   * @returns {string}
+   */
   transform(payload, ctx) {
     const src = String(payload ?? '');
     let out = '';

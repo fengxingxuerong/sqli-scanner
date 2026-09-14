@@ -10,6 +10,10 @@ export const unionvaluesrow = {
     { input: '-1 UNION SELECT 45,45#', output: '-1 UNION VALUES ROW(45,45)#' },
     { input: '-1 UNION ALL SELECT NULL,NULL FROM DUAL-- -', output: '-1 UNION ALL SELECT NULL,NULL FROM DUAL-- -' },
   ],
+  /**
+   * @param {string} payload
+   * @returns {string}
+   */
   transform(payload) {
     return String(payload ?? '').replace(
       /(UNION)(\s+ALL)?\s+SELECT\s+([\s\S]+?)(?=(?:--|#|\/\*)|$)/gi,

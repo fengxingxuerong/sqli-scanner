@@ -6,6 +6,10 @@ export const modsecurityzeroversioned = {
   name: 'modsecurityzeroversioned',
   description: '用 /*!00000 KEYWORD */ 包裹关键字（MySQL 忽略版本仍执行），绕过 ModSecurity',
   dbms: ['MySQL'], // [P1-FIX] 方言限定：异构库下无效，运行时告警
+  /**
+   * @param {string} payload
+   * @returns {string}
+   */
   transform(payload) {
     return payload.replace(RE, '/*!00000 $1 */');
   },

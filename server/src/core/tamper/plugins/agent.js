@@ -12,6 +12,11 @@ const USER_AGENTS = [
 export const agent = {
   name: 'agent',
   description: '随机 User-Agent 头，绕过 WAF 对默认 UA 的检测',
+  /**
+   * @param {string} payload
+   * @param {object} ctx
+   * @returns {string}
+   */
   transform(payload, ctx) {
     if (ctx && ctx.headers) {
       ctx.headers['User-Agent'] = USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)];

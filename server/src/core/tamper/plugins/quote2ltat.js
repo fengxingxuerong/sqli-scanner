@@ -10,6 +10,10 @@ export const quote2ltat = {
     { input: "' AND 1=1-- -", output: "' AND 1=1-- -" }, // AND 型不处理
     { input: '-1 OR 1=1-- -', output: '-1 OR 1=1-- -' }, // 非引号开头不处理
   ],
+  /**
+   * @param {string} payload
+   * @returns {string}
+   */
   transform(payload) {
     return String(payload ?? '').replace(/^'\s*(?=(?:OR|\|\|)\b)/i, "'<@ ");
   },

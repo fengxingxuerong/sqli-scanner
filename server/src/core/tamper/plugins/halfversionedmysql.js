@@ -8,6 +8,10 @@ const RE = new RegExp(`\\b(${KW})\\b`, 'gi');
 export const halfversionedmysql = {
   name: 'halfversionedmysql',
   description: '在每个关键字前添加 /*!0 半版本化注释（MySQL < 5.1 执行），绕过 WAF 关键字检测',
+  /**
+   * @param {string} payload
+   * @returns {string}
+   */
   transform(payload) {
     return payload.replace(RE, (m) => '/*!0' + m);
   },

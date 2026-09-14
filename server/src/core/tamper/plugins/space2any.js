@@ -3,6 +3,11 @@ const CHARS = '!@#$%^&*()_+-=[]{}|;:,.<>?/~`';
 export const space2any = {
   name: 'space2any',
   description: '将空格替换为随机可见字符，绕过 WAF 空格过滤（引号保护）',
+  /**
+   * @param {string} payload
+   * @param {object} ctx
+   * @returns {string}
+   */
   transform(payload, ctx) {
     const src = String(payload ?? '');
     let out = '';

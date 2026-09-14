@@ -4,6 +4,11 @@ export const string2hexall = {
   name: 'string2hexall',
   description: '将所有字符串字面量编码为十六进制 0xHEX，绕过 WAF 字符串检测',
   terminal: true, // [P1-FIX] 输出形态固定：其后 tamper 均空转，链上自动截断
+  /**
+   * @param {string} payload
+   * @param {object} ctx
+   * @returns {string}
+   */
   transform(payload, ctx) {
     const src = String(payload ?? '');
     let out = '';

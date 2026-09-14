@@ -3,6 +3,11 @@
 export const css = {
   name: 'css',
   description: '将字符串字面量用 CSS 反斜杠十六进制编码，绕过 ASP.NET WAF',
+  /**
+   * @param {string} payload
+   * @param {object} ctx
+   * @returns {string}
+   */
   transform(payload, ctx) {
     const src = String(payload ?? '');
     let out = '';

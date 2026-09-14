@@ -2,6 +2,10 @@
 export const symboliclogical = {
   name: 'symboliclogical',
   description: '将 AND 转 &&、OR 转 ||，绕过基于逻辑关键字的规则',
+  /**
+   * @param {string} payload
+   * @returns {string}
+   */
   transform(payload) {
     return payload.replace(/\bAND\b/gi, '&&').replace(/\bOR\b/gi, '||');
   },

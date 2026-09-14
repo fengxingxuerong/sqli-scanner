@@ -2,6 +2,11 @@
 export const oct2hex = {
   name: 'oct2hex',
   description: '将八进制数字转换为十六进制表示，绕过 WAF 检测',
+  /**
+   * @param {string} payload
+   * @param {object} ctx
+   * @returns {string}
+   */
   transform(payload, ctx) {
     return String(payload ?? '').replace(/(\d+)o/g, (match, num) => {
       try {

@@ -12,6 +12,10 @@ export const chardoubleencode = {
   name: 'chardoubleencode',
   description: '对 payload 全部字符做双重 URL 编码（已有 %XX 补一层 %25），绕过只解码一次的 WAF',
   terminal: true, // [P1-FIX] 输出形态固定：其后 tamper 均空转，链上自动截断
+  /**
+   * @param {string} payload
+   * @returns {string}
+   */
   transform(payload) {
     if (typeof payload !== 'string' || payload.length === 0) return payload;
     // [P0-D3 FIX] 抠出提取标记与占位符

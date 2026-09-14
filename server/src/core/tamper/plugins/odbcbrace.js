@@ -12,6 +12,10 @@ export const odbcbrace = {
     { input: '-4162 OR 1=1#', output: '{x !0}*-4162 OR 1=1#' },
     { input: "' UNION ALL SELECT NULL-- -", output: "' UNION ALL SELECT NULL-- -" }, // 引号开头不动
   ],
+  /**
+   * @param {string} payload
+   * @returns {string}
+   */
   transform(payload) {
     return String(payload ?? '').replace(/^([+-]?\d+)(?![\w.])/, '{x !0}*$1');
   },

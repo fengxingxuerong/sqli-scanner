@@ -10,6 +10,10 @@ export const sign = {
     { input: "1 AND name>'a'", output: "1 AND SIGN((name)-('a'))=1" },
     { input: '1 AND 1=1', output: '1 AND 1=1' }, // 无 > 不动
   ],
+  /**
+   * @param {string} payload
+   * @returns {string}
+   */
   transform(payload) {
     const s = String(payload ?? '');
     if (!s) return s;

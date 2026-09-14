@@ -9,6 +9,10 @@ export const castprefix = {
     { input: '-4162 OR 1=1#', output: 'cast(-4162 as decimal) OR 1=1#' },
     { input: "' OR 1=1-- -", output: "' OR 1=1-- -" }, // 引号开头不处理
   ],
+  /**
+   * @param {string} payload
+   * @returns {string}
+   */
   transform(payload) {
     const s = String(payload ?? '');
     if (!s) return s;

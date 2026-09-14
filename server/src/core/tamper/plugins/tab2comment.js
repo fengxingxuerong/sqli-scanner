@@ -2,6 +2,10 @@
 export const tab2comment = {
   name: 'tab2comment',
   description: '将制表符 \\t 替换为 /**/ 注释',
+  /**
+   * @param {string} payload
+   * @returns {string}
+   */
   transform(payload) {
     return payload.replace(/\t/g, '/**/');
   },

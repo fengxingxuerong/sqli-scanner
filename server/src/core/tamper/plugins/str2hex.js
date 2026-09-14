@@ -3,6 +3,11 @@
 export const str2hex = {
   name: 'str2hex',
   description: '将字符串字面量编码为十六进制 0xHEX 表示，绕过 WAF 字符串检测',
+  /**
+   * @param {string} payload
+   * @param {object} ctx
+   * @returns {string}
+   */
   transform(payload, ctx) {
     const src = String(payload ?? '');
     let out = '';

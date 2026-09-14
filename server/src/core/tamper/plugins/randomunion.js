@@ -3,6 +3,11 @@
 export const randomunion = {
   name: 'randomunion',
   description: '随机化 UNION SELECT 关键字间距和大小写，绕过 WAF 关键字检测',
+  /**
+   * @param {string} payload
+   * @param {object} ctx
+   * @returns {string}
+   */
   transform(payload, ctx) {
     const src = String(payload ?? '');
     return src.replace(/\bUNION\s+SELECT\b/gi, () => {

@@ -3,6 +3,11 @@
 export const json = {
   name: 'json',
   description: '将字符串字面量 JSON 编码，绕过 JSON API WAF 检测',
+  /**
+   * @param {string} payload
+   * @param {object} ctx
+   * @returns {string}
+   */
   transform(payload, ctx) {
     const src = String(payload ?? '');
     let out = '';

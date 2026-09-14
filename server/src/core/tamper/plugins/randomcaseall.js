@@ -3,6 +3,11 @@
 export const randomcaseall = {
   name: 'randomcaseall',
   description: '对 payload 中所有字母字符随机大小写，绕过 WAF 检测',
+  /**
+   * @param {string} payload
+   * @param {object} ctx
+   * @returns {string}
+   */
   transform(payload, ctx) {
     const src = String(payload ?? '');
     let out = '';

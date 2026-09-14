@@ -3,6 +3,11 @@
 export const randomascii = {
   name: 'randomascii',
   description: '随机选择字符用 CHAR() 编码，绕过 WAF 关键字检测',
+  /**
+   * @param {string} payload
+   * @param {object} ctx
+   * @returns {string}
+   */
   transform(payload, ctx) {
     const src = String(payload ?? '');
     let out = '';

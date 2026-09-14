@@ -3,6 +3,11 @@
 export const binary = {
   name: 'binary',
   description: '将字符串字面量编码为二进制表示，绕过 WAF 关键字检测',
+  /**
+   * @param {string} payload
+   * @param {object} ctx
+   * @returns {string}
+   */
   transform(payload, ctx) {
     const src = String(payload ?? '');
     let out = '';

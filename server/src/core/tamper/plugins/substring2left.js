@@ -3,6 +3,11 @@
 export const substring2left = {
   name: 'substring2left',
   description: '将 SUBSTRING() 替换为 LEFT() 和 RIGHT() 组合，绕过函数过滤',
+  /**
+   * @param {string} payload
+   * @param {object} ctx
+   * @returns {string}
+   */
   transform(payload, ctx) {
     return String(payload ?? '')
       .replace(/SUBSTRING\s*\(/gi, (match) => {

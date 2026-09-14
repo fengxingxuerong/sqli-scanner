@@ -2,6 +2,11 @@
 export const char2hex = {
   name: 'char2hex',
   description: '将字符串字面量内的字符编码为 \\xHH 十六进制转义序列，绕过 WAF 检测',
+  /**
+   * @param {string} payload
+   * @param {object} ctx
+   * @returns {string}
+   */
   transform(payload, ctx) {
     const src = String(payload ?? '');
     let out = '';

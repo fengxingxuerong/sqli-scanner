@@ -179,6 +179,26 @@ export function createDetectionResult(pointId, technique) {
  * @property {string} [noSqlKind] NoSQL 技术回填：NoSQL 类型标记
  */
 
+/**
+ * 扫描执行上下文：由 ScanManager/Detector 组装，贯穿检测器、提取器与利用器。
+ * 现有代码多标注为 any（消除 noImplicitAny 噪声）；需要精确类型的代码可直接引用本 typedef，
+ * 未列出的新增字段请在本处补 @property（JSDoc 不支持对象索引签名）。
+ * 现有代码多标注为 any（消除 noImplicitAny 噪声）；需要精确类型的新代码可直接引用本 typedef。
+ * @typedef {object} Ctx
+ * @property {any} [config] 生效配置
+ * @property {string} [dbms] 已识别方言
+ * @property {any} [dbmsVersion] 方言版本串
+ * @property {InjectionPoint} [point] 当前注入点
+ * @property {Target} [target] 当前目标
+ * @property {any} [headers] 请求头
+ * @property {any} [session] 会话（cookie/认证态）
+ * @property {any} [httpClient] 发包客户端
+ * @property {any} [oobReceiver] 带外接收器
+ * @property {any} [guard] 健康守卫
+ * @property {any} [extractor] 提取器
+ * @property {any} [scanId] 扫描 ID
+ */
+
 // 构造漏洞
 // description 与 evidence 语义分离（P1-U2）：description=可读说明，evidence=检测器原始证据串。
 // 调用方（ScanManager）第 5 参传入的是检测器 evidence，故此处同时写入 description 与 evidence，

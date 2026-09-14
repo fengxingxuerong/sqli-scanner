@@ -11,6 +11,10 @@ export const oraclequote = {
     { input: "1 AND 1=1", output: '1 AND 1=1' }, // 无引号不动
   ],
   dbms: ['Oracle'], // [P1-FIX] 方言限定：异构库下无效，运行时告警
+  /**
+   * @param {string} payload
+   * @returns {string}
+   */
   transform(payload) {
     return String(payload ?? '').replace(/'([^']*)'/g, (m, value) => {
       const pairs = [

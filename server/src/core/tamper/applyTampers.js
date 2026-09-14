@@ -526,6 +526,7 @@ const _PH_RE = /(?<!\d)7331999(\d{3})(?!\d)/g;
 // 宽松版通过索引合法性（idx < placeholders.length）约束误还原面。
 const _PH_LENIENT_RE = /7331999(\d{3})/g;
 
+/** @param {any} input @param {any} plugins @param {object} ctx */
 function _runChain(input, plugins, ctx) {
   let out = input;
   for (const p of plugins) {

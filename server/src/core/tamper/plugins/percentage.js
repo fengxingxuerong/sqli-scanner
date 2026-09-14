@@ -10,6 +10,10 @@ export const percentage = {
   name: 'percentage',
   description: '每个字符前置 %（空格与已编码 %XX 保留），仅 ASP 目标有效，绕过弱 WAF',
   dbms: ['SQL Server'], // [P1-FIX] 方言限定：异构库下无效，运行时告警
+  /**
+   * @param {string} payload
+   * @returns {string}
+   */
   transform(payload) {
     if (typeof payload !== 'string' || payload.length === 0) return payload;
     let out = '';
