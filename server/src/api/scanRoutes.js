@@ -72,6 +72,7 @@ const KNOWN_CFG_KEYS = new Set([
   'dumpStart', 'dumpStop', 'safeUrl', 'safeFreq',
   // [sqlmap 对标 2026-09-14] --csrf-url/--csrf-token/--csrf-method（CSRF 会话层）
   'csrfUrl', 'csrfTokenName', 'csrfMethod', 'csrfRefreshFreq',
+  'skipParams',
   'secondOrder', 'wafEvasion', 'oob', 'noSql', 'blindRobust', 'sessionFile',
   // [P0-FIX 2026-09-10] 布尔盲注二级判据：组间稳定差异（boolStableDiff 总开关 + 采样数）
   'boolStableDiff', 'boolStableDiffSamples',

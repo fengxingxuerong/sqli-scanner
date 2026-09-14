@@ -109,6 +109,26 @@ export async function discoverPoints(run) {
     if (knownHits) {
       logger.info(`已知注入点直通：${knownHits}/${pointsToScan.length} 个点跳过预筛选与闭合探测（config.knownPoint）`);
     }
+    // [sqlmap 对标 2026-09-14] --skip：排除指定参数（逗号分隔参数名，精确匹配大小写不敏感）。
+    // 实战场景：目标有已知会破坏会话/触发风控的参数（如 logout、__events、btnSubmit），
+    // 逐一排除而非硬编码进 prefix/suffix。排除记入 eventBus（point_skipped reason=user-skip）。
+    if (Array.isArray(cfg.skipParams) && cfg.skipParams.length > 0) {
+      const skipSet = new Set(cfg.skipParams.map((s) => String(s).trim().toLowerCase()).filter(Boolean));
+      if (skipSet.size > 0) {
+        const before = pointsToScan.length;
+        const skipped = pointsToScan.filter((p) => skipSet.has(String(p.param || '').toLowerCase()));
+        pointsToScan = pointsToScan.filter((p) => !skipSet.has(String(p.param || '').toLowerCase()));
+        for (const p of skipped) {
+          eventBus.emit(scanId, 'point_skipped', { pointId: p.id, reason: 'user-skip' });
+        }
+        if (skipped.length) {
+          logger.info(`--skip 排除 ${skipped.length}/${before} 个参数点（${[...skipSet].join(', ')}）`);
+          if (session) {
+            await Promise.all(skipped.map((p) => session.savePointResult(p.id, { found: [] }).catch(() => null)));
+          }
+        }
+      }
+    }
     const invalidCount = applyInvalidValues(pointsToScan, cfg);
     if (invalidCount) {
       logger.info(`失效值替换已应用（invalidValue=${cfg.invalidValue}）：${invalidCount} 个点的有效值已替换（缓存/静态页噪声规避）`);

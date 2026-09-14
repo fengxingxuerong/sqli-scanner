@@ -222,6 +222,7 @@ function parseArgs(argv) {
   else if (a === '--csrf-token') args.csrfTokenName = next();
   else if (a === '--csrf-method') args.csrfMethod = String(next()).toUpperCase();
   else if (a === '--csrf-refresh') args.csrfRefreshFreq = Number(next()) || 50;
+  else if (a === '--skip') args.skipParams = String(next()).split(',').map((s) => s.trim()).filter(Boolean);
     // —— 对标 sqlmap 最后两个参数（--tor/--mobile）——
     else if (a === '--tor') args.tor = true;
     else if (a === '--mobile') args.mobile = true;
@@ -312,6 +313,7 @@ function printHelp() {
    --csrf-token <name>      anti-CSRF 字段名（缺省自动探测常见名：csrf_token/_csrf/token 等）
    --csrf-method <m>        取页方法（默认 GET）
    --csrf-refresh <n>       每 n 个请求刷新一次 token（默认 50）
+   --skip <params>          排除指定参数不测（逗号分隔参数名，对标 sqlmap --skip）
   -D, --db <dbname>         数据库（枚举目标）
   -T, --table <tablename>   表（枚举目标）
   -C, --columns-list <c1,c2>  列子集（配合 --dump -T）
@@ -844,6 +846,7 @@ function buildConfig(args) {
     if (args.csrfTokenName) config.csrfTokenName = args.csrfTokenName;
     if (args.csrfMethod) config.csrfMethod = args.csrfMethod;
     if (args.csrfRefreshFreq > 0) config.csrfRefreshFreq = Math.min(args.csrfRefreshFreq, 10000);
+  if (Array.isArray(args.skipParams) && args.skipParams.length) config.skipParams = args.skipParams.slice(0, 64);
   }
   // --tor：Tor 本地代理（默认 socks5://127.0.0.1:9050）；已设 --proxy 时不覆盖
   if (args.tor && !config.proxy) config.proxy = 'socks5://127.0.0.1:9050';

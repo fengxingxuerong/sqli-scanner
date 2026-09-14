@@ -167,6 +167,8 @@ export const defaults = {
   // csrfUrl 配置后：扫描启动取页提取 token，每请求自动携带（GET 入 query / POST 入表单 data），
   // 每 csrfRefreshFreq 请求刷新一次（token 一次性场景）。自动探测常见 hidden input 名
   // （csrf_token/_csrf/token/authenticity_token 等），显式 csrfTokenName 优先。
+  // [sqlmap 对标 2026-09-14] --skip：排除指定参数（逗号分隔参数名）
+  skipParams: [],
   csrfUrl: '',
   csrfTokenName: '',
   csrfMethod: 'GET',
