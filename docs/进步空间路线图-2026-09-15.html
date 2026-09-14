@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>sqli-scanner 进步空间路线图 · 2026-09-15</title>
+<style>
+  :root{
+    --bg:#f6f6f4; --surface:#fbfbfa; --ink:#17191e; --muted:#5b6270; --faint:#8a9099;
+    --hairline:#d8dad4; --hairline-strong:#b9bcb4;
+    --accent:#a8272e; --ok:#3d7a50; --warn:#9a6b15;
+    --mono:ui-monospace,"Cascadia Code",Consolas,monospace;
+    --sans:"Microsoft YaHei","PingFang SC","Noto Sans SC","Segoe UI",sans-serif;
+  }
+  *{margin:0;padding:0;box-sizing:border-box;}
+  body{background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:15px;line-height:1.65;-webkit-font-smoothing:antialiased;}
+  .page{max-width:1120px;margin:0 auto;padding:0 48px 96px;}
+  .cover{padding:72px 0 48px;border-bottom:1px solid var(--hairline-strong);}
+  .kicker{font-family:var(--mono);font-size:12px;letter-spacing:.14em;color:var(--accent);text-transform:uppercase;margin-bottom:22px;}
+  h1{font-size:44px;font-weight:700;letter-spacing:-0.02em;line-height:1.15;margin-bottom:14px;}
+  .subtitle{font-size:17px;color:var(--muted);max-width:680px;margin-bottom:36px;}
+  .meta-grid{display:grid;grid-template-columns:repeat(3,1fr);border-top:1px solid var(--hairline);}
+  .meta-cell{padding:16px 20px 4px 0;border-right:1px solid var(--hairline);}
+  .meta-cell:last-child{border-right:none;}
+  .meta-label{font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;color:var(--faint);text-transform:uppercase;margin-bottom:6px;}
+  .meta-value{font-size:13.5px;}
+  section{padding:56px 0 16px;}
+  .sec-head{display:flex;align-items:baseline;gap:18px;border-bottom:1px solid var(--hairline-strong);padding-bottom:12px;margin-bottom:28px;}
+  .sec-no{font-family:var(--mono);font-size:13px;color:var(--accent);}
+  h2{font-size:25px;font-weight:700;}
+  h3{font-size:17px;font-weight:600;margin:30px 0 12px;}
+  p{margin-bottom:13px;max-width:78ch;}
+  strong{font-weight:600;} em{font-style:normal;color:var(--accent-ink);color:#8c2027;}
+  code{font-family:var(--mono);font-size:.86em;background:rgba(0,0,0,.045);padding:1px 5px;border:1px solid var(--hairline);}
+  .tier{display:grid;grid-template-columns:130px 1fr;border:1px solid var(--hairline-strong);background:var(--surface);margin:20px 0;}
+  .tier-tag{padding:20px 18px;border-right:1px solid var(--hairline);display:flex;flex-direction:column;gap:6px;}
+  .tier-tag .t-name{font-family:var(--mono);font-size:13px;font-weight:600;letter-spacing:.06em;}
+  .tier-tag .t-sub{font-size:11.5px;color:var(--muted);line-height:1.5;}
+  .tier-body{padding:16px 22px;}
+  .tier-body ul{list-style:none;}
+  .tier-body li{padding:8px 0 8px 18px;position:relative;font-size:13.8px;border-bottom:1px solid var(--hairline);line-height:1.6;}
+  .tier-body li:last-child{border-bottom:none;}
+  .tier-body li::before{content:"";position:absolute;left:0;top:15px;width:8px;height:1.5px;background:var(--accent);}
+  .tier-body li b{font-weight:600;}
+  .p0 .t-name{color:var(--accent);} .p1 .t-name{color:var(--warn);} .p2 .t-name{color:var(--ok);}
+  table{width:100%;border-collapse:collapse;font-size:13.2px;margin:20px 0 26px;background:var(--surface);border:1px solid var(--hairline-strong);}
+  th{font-family:var(--mono);font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);font-weight:400;text-align:left;padding:10px 14px;border-bottom:1px solid var(--hairline-strong);background:rgba(0,0,0,.025);}
+  td{padding:10px 14px;border-bottom:1px solid var(--hairline);vertical-align:top;line-height:1.55;}
+  tr:last-child td{border-bottom:none;}
+  .tag{font-family:var(--mono);font-size:10.5px;padding:1.5px 7px;border:1px solid var(--hairline-strong);white-space:nowrap;}
+  .tag.ok{color:var(--ok);border-color:var(--ok);} .tag.bad{color:var(--accent-ink);border-color:var(--accent);} .tag.warn{color:var(--warn);border-color:var(--warn);} .tag.mut{color:var(--muted);}
+  .panel{border:1px solid var(--hairline-strong);background:var(--surface);padding:20px 24px;margin:22px 0;}
+  .panel-title{font-family:var(--mono);font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--accent);margin-bottom:10px;}
+  .cols{display:grid;grid-template-columns:1fr 1fr;gap:0;border:1px solid var(--hairline-strong);margin:22px 0;background:var(--surface);}
+  .col{padding:18px 24px;} .col:first-child{border-right:1px solid var(--hairline);}
+  .col h4{font-size:13px;font-family:var(--mono);letter-spacing:.08em;text-transform:uppercase;margin-bottom:10px;color:var(--muted);font-weight:600;}
+  .col ul{list-style:none;} .col li{padding:6px 0 6px 16px;position:relative;font-size:13.2px;border-bottom:1px solid var(--hairline);}
+  .col li:last-child{border-bottom:none;} .col li::before{content:"";position:absolute;left:0;top:13px;width:7px;height:1.5px;background:var(--hairline-strong);}
+  .now{display:grid;grid-template-columns:repeat(4,1fr);border:1px solid var(--hairline-strong);background:var(--surface);margin:24px 0;}
+  .now .m{padding:18px 20px;border-right:1px solid var(--hairline);} .now .m:last-child{border-right:none;}
+  .now .num{font-family:var(--mono);font-size:25px;font-weight:600;margin-bottom:5px;}
+  .now .lbl{font-size:12px;color:var(--muted);line-height:1.5;}
+  .callout{border:1px solid var(--hairline-strong);border-left:3px solid var(--accent);background:var(--surface);padding:16px 22px;margin:22px 0;font-size:13.8px;}
+  .callout b{font-family:var(--mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--accent);display:block;margin-bottom:6px;}
+  .colophon{margin-top:64px;padding-top:24px;border-top:1px solid var(--hairline-strong);font-family:var(--mono);font-size:11px;color:var(--faint);line-height:1.9;display:flex;justify-content:space-between;}
+  @media (max-width:900px){.page{padding:0 22px 64px;}h1{font-size:32px;}.tier{grid-template-columns:1fr;}.tier-tag{border-right:none;border-bottom:1px solid var(--hairline);}.cols,.now,.meta-grid{grid-template-columns:1fr;}.meta-cell{border-right:none;}}
+</style>
+</head>
+<body>
+<div class="page">
+
+  <header class="cover">
+    <div class="kicker">Improvement Roadmap</div>
+    <h1>sqli-scanner 进步空间路线图</h1>
+    <p class="subtitle">七批优化后的能力盘点与下一程：从「能打赢靶场」到「能在真实战场稳定交付」，差距集中在哪、按什么顺序补。</p>
+    <div class="meta-grid">
+      <div class="meta-cell"><div class="meta-label">Baseline</div><div class="meta-value">master @ fa17b32 · 2026-09-15</div></div>
+      <div class="meta-cell"><div class="meta-label">现状锚点</div><div class="meta-value">20 套靶场 · 四库真机闭环 · verified 6/18</div></div>
+      <div class="meta-cell"><div class="meta-label">视角</div><div class="meta-value">渗透工程师（召回/误报/吞吐/合规/交付）</div></div>
+    </div>
+  </header>
+
+  <section>
+    <div class="sec-head"><span class="sec-no">§ 00</span><h2>当前位置</h2></div>
+    <div class="now">
+      <div class="m"><div class="num">6/18</div><div class="lbl">verified 库<br>MySQL · MariaDB · PostgreSQL · SQLite · SQL Server · Oracle</div></div>
+      <div class="m"><div class="num">20 套</div><div class="lbl">真机靶场全绿<br>（含 os-shell 三闭环、CSRF、并发隔离）</div></div>
+      <div class="m"><div class="num">1779/0</div><div class="lbl">后端单测通过/失败<br>覆盖率门禁已接入 CI</div></div>
+      <div class="m"><div class="num">CRS 5/5</div><div class="lbl">ModSecurity CRS 4.1.0 绕过<br>安全对照零误拦</div></div>
+    </div>
+    <p>七批优化把「检测召回、拖库正确性、利用链闭环、工程正确性」四个维度补到了真机可验证的水位。剩下的进步空间不再是「补缺陷」，而是<strong>三层跃迁</strong>：对抗纵深（真实 WAF）、覆盖广度（国产库与协议面）、架构天花板（分布式与吞吐）。</p>
+  </section>
+
+  <section>
+    <div class="sec-head"><span class="sec-no">§ 01</span><h2>P0 —— 实战价值最高（下一程主攻）</h2></div>
+
+    <div class="tier p0">
+      <div class="tier-tag"><span class="t-name">1 · 真实 WAF 实测矩阵</span><span class="t-sub">CRS 战绩无法外推到云 WAF —— 这是交付可信度的最大缺口</span></div>
+      <div class="tier-body"><ul>
+        <li><b>雷池（SafeLine）社区版本机部署</b>：语义分析引擎，与 CRS 关键字正则是两个物种；开源可自架，是「无 Docker 也能真测云级 WAF」的最短路径（Linux 主机或虚拟机）</li>
+        <li><b>安全狗 / 云锁免费版</b>：国内交付环境最高频，装 Windows 靶机即可实测（tamper 自动选链对关键字族 vs 语义族的差异会被真实暴露）</li>
+        <li><b>阿里云 WAF / Cloudflare 免费档</b>：需要公网入口 + 授权域名，按 pentest-lab 方法论做 off/on A/B + 手工绕过对照</li>
+        <li>验收：WAF 实测矩阵写入 run-all（可跳过标记），报告的 WAF 交战章节从「实验室数据」升级为「真实环境数据」</li>
+      </ul></div>
+    </div>
+
+    <div class="tier p0">
+      <div class="tier-tag"><span class="t-name">2 · 分布式扫描队列</span><span class="t-sub">Scheduler 目前是内存态单机 —— 批量资产扫描的架构天花板</span></div>
+      <div class="tier-body"><ul>
+        <li><b>BullMQ + Redis 任务队列</b>：scan 任务入队、多 worker 消费、断点续扫跨进程恢复（sessionFile 已有基础，缺的是跨进程语义）</li>
+        <li><b>限速桶随任务走</b>：TokenBucket 已按 scanId 隔离，分布式化后需 per-worker 全局配额（防止 3 个 worker × 10 req/s 变 30 req/s 打爆授权书范围）</li>
+        <li>验收：3 worker × 20 目标并发，结果汇聚与单机一致，scope 约束在分布式下依然逐跳硬约束</li>
+      </ul></div>
+    </div>
+
+    <div class="tier p0">
+      <div class="tier-tag"><span class="t-name">3 · 国产库真机化（DM8 / TiDB）</span><span class="t-sub">政企信创交付的真实需求，template-only 里最有价值的一块</span></div>
+      <div class="tier-body"><ul>
+        <li><b>DM8（达梦）</b>：Windows 安装包直接装（MSSQL 同款路线），方言语法独立（兼容 Oracle 风格但差异多），国产化项目渗透几乎必遇</li>
+        <li><b>TiDB</b>：MySQL 协议兼容，单二进制零安装——成本最低、可先行；重点验证 MySQL 方言模板在 TiDB 的<strong>差异面</strong>（information_schema 差异、函数支持差异）</li>
+        <li>验收：各建靶场一套（检测 + 拖库），dbmsEvidence 升级对应档位</li>
+      </ul></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head"><span class="sec-no">§ 02</span><h2>P1 —— 引擎内核与协议面</h2></div>
+
+    <div class="tier p1">
+      <div class="tier-tag"><span class="t-name">4 · 盲注提取再提速</span><span class="t-sub">字节级并行二分已做到 K 倍；位平面法还有 4-8 倍空间</span></div>
+      <div class="tier-body"><ul>
+        <li><b>位平面提取</b>：现一次请求取一个字节（0-255 二分 ≈ 8 次请求）；BIT_COUNT+位掩码法一次请求取 8 位，理论上再省 ~4 倍请求（对时间盲注场景 = 直接决定能不能在授权窗口内拖完库）</li>
+        <li><b>SPRT 顺序检验替代固定 μ+zσ</b>：时间盲注判定用序贯概率比，可在置信度不变下再降 20-40% 请求</li>
+        <li><b>predictOutput 智能化</b>：前缀树 + 常见值字典（表名/列名预猜）在缓存未命中时也能跳过完整二分</li>
+      </ul></div>
+    </div>
+
+    <div class="tier p1">
+      <div class="tier-tag"><span class="t-name">5 · 攻击面发现（爬虫 / --crawl / --forms）</span><span class="t-sub">sqlmap 有、本项目还没有的整块能力</span></div>
+      <div class="tier-body"><ul>
+        <li><b>受限爬虫</b>：scope 内同域爬取 + 表单自动发现 + 参数模糊化（--forms 已有表单点捕获，缺主动发现）</li>
+        <li><b>Burp/ZAP 请求导入</b>：从代理历史直接建 target（真实交付里注入点大多是人工浏览发现的，爬虫只是兜底）</li>
+        <li><b>union-char / --hex / --no-escape</b>：三个保留接口落地（差距清单已标注未实现）</li>
+      </ul></div>
+    </div>
+
+    <div class="tier p1">
+      <div class="tier-tag"><span class="t-name">6 · 认证与协议面补齐</span><span class="t-sub">Windows 域与现代 Web 认证</span></div>
+      <div class="tier-body"><ul>
+        <li><b>Negotiate/Kerberos</b>：MSSQL 真机已就绪，域内目标（sa 走域账号）是自然延伸；NTLM 已自实现 DES，Kerberos 可走 SSPI 桥</li>
+        <li><b>OAuth2 Bearer / JWT 自动续期</b>：token 过期自动刷新（与 CSRF 刷新同构，csrfKeeper 模式可复用）</li>
+        <li><b>Oracle os-shell（Java Source）真机闭环</b>：环境已就绪（26ai Free + SYS），补最后一条利用链</li>
+      </ul></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head"><span class="sec-no">§ 03</span><h2>P2 —— 工程与交付质量</h2></div>
+
+    <div class="tier p2">
+      <div class="tier-tag"><span class="t-name">7 · CI 真机化 + 前端 e2e</span><span class="t-sub">CI 目前跑不了 20 套真机靶场（依赖本机四库）</span></div>
+      <div class="tier-body"><ul>
+        <li><b>GitHub Actions services 容器</b>：mysql/pg/mssql 官方镜像做 service container，CI 里跑大部分靶场（Oracle 用 gvenzl/oracle-free 镜像）；本机四库作为 full 套件的补充</li>
+        <li><b>Playwright 前端 e2e</b>：扫描下发 → SSE 进度 → 报告导出的 UI 主链路目前无浏览器级回归</li>
+        <li><b>覆盖率阈值硬门禁</b>：wrapper 已有，补数字基线（branches/lines 门槛进 CI fail 条件）</li>
+      </ul></div>
+    </div>
+
+    <div class="tier p2">
+      <div class="tier-tag"><span class="t-name">8 · 报告与生态互操作</span><span class="t-sub">markdown/html/csv + CVSS 已有；差的是「接入客户工作流」</span></div>
+      <div class="tier-body"><ul>
+        <li><b>SARIF 输出</b>：直通 GitHub Security / DefectDojo（甲方安全平台对接的通用货币）</li>
+        <li><b>PDF 导出</b>：正式交付物形态（当前 html/csv/markdown，客户合同常要求 PDF）</li>
+        <li><b>性能基线回归</b>：perf-baseline.json（盲注吞吐/并发 QPS/union 延迟）进 CI，防「优化引入回归」</li>
+      </ul></div>
+    </div>
+
+    <div class="tier p2">
+      <div class="tier-tag"><span class="t-name">9 · 仓库与协作收口</span><span class="t-sub">多会话并行开发的遗留整合</span></div>
+      <div class="tier-body"><ul>
+        <li><b>223 文件未提交改动收口</b>：并行会话的 tamper meta 重构（meta 注释 + cli.js 拆分）在制品，需 review 后合入</li>
+        <li><b>架构守卫基线刷新</b>：arch-baseline.json 随拆分更新，防止「拆分后文件悄悄长回去」</li>
+        <li><b>union-char/hex/no-escape</b>：文档口径与实现状态对齐（保留接口标注已做，剩余是落地）</li>
+      </ul></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head"><span class="sec-no">§ 04</span><h2>优先级总表</h2></div>
+    <table>
+      <tr><th>#</th><th>方向</th><th>实战价值</th><th>工作量</th><th>验收方式</th></tr>
+      <tr><td>1</td><td><b>真实 WAF 实测矩阵</b>（雷池自架 / 安全狗 / 云 WAF）</td><td>交付可信度的最大缺口</td><td>中</td><td>WAF 矩阵入 run-all + 报告 WAF 章节真实数据</td></tr>
+      <tr><td>2</td><td><b>分布式扫描队列</b>（BullMQ）</td><td>批量资产场景架构天花板</td><td>大</td><td>3 worker 并发隔离 + scope 分布式硬约束</td></tr>
+      <tr><td>3</td><td><b>DM8 / TiDB 真机化</b></td><td>信创交付刚需</td><td>中</td><td>两套靶场 + evidence 升级</td></tr>
+      <tr><td>4</td><td>位平面盲注提取</td><td>时间盲注吞吐 4 倍</td><td>中</td><td>perf 基线对比 + 正确性回归</td></tr>
+      <tr><td>5</td><td>受限爬虫 / Burp 导入</td><td>攻击面发现自动化</td><td>中</td><td>--crawl 端到端靶场</td></tr>
+      <tr><td>6</td><td>Kerberos / OAuth2 续期</td><td>域环境与现代 Web</td><td>中</td><td>NTLM 同款 e2e 模式</td></tr>
+      <tr><td>7</td><td>CI services + Playwright</td><td>回归安全网</td><td>小-中</td><td>CI 跑真机靶场子集 + UI 主链路</td></tr>
+      <tr><td>8</td><td>SARIF / PDF / perf 基线</td><td>交付与防回归</td><td>小</td><td>格式校验 + 门禁生效</td></tr>
+      <tr><td>9</td><td>并行会话改动收口</td><td>协作卫生</td><td>小</td><td>review + 合入 + arch 基线刷新</td></tr>
+    </table>
+
+    <div class="callout">
+      <b>Selection Logic</b>
+      排序依据是渗透交付的五要素：<em>召回</em>（别漏——靠覆盖广度与检测深度）、<em>误报</em>（别虚——靠安全对照与诚实分级，已达标）、<em>吞吐</em>（别慢——位平面 + 分布式）、<em>合规</em>（别出事——scope/限速已达标，分布式化后要重点回归）、<em>交付</em>（报告好用——SARIF/PDF）。P0 三项都是「不做就上不了真实战场」的级别；P1 是「做了在真实战场明显更强」；P2 是「工程复利」。
+    </div>
+
+    <div class="cols">
+      <div class="col">
+        <h4>明确不做（保持边界）</h4>
+        <ul>
+          <li>os-pwn / meterpreter / 横向移动 —— 超出注入检测工具的合规边界</li>
+          <li>--eval 动态代码 —— 安全考虑，仅 sqlmap 桥接透传</li>
+          <li>未授权目标的任何能力强化 —— scope 约束是产品的一部分</li>
+        </ul>
+      </div>
+      <div class="col">
+        <h4>已达标无需再投入</h4>
+        <ul>
+          <li>攻击工具自防御纵深（SSRF/scope/脱敏/恒时比较）</li>
+          <li>诚实性工程（inconclusive verdict / evidence 分级 / 守卫测试）</li>
+          <li>主流库利用链闭环（MySQL/PG/MSSQL 四条路径真机验证）</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <footer class="colophon">
+    <div>sqli-scanner 进步空间路线图 · 2026-09-15<br>Baseline fa17b32 · 七批优化后盘点</div>
+    <div style="text-align:right">证据：代码核查 + 20 套靶场实测 + 差距清单交叉验证<br>姊妹文档：交付文档.md · 全方面优化测试-2026-09-12.md</div>
+  </footer>
+
+</div>
+</body>
+</html>
