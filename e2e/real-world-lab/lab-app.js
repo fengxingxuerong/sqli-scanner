@@ -103,6 +103,9 @@ export async function createRealLabApp(opts = {}) {
 
   // —— 会话（内存 Map + sid cookie）——
   const sessions = new Map();
+  // [P1-3 跨角色] 角色表：sid → 'admin' | 'user'（由 users.admin 列决定）。
+  // admin 会话禁写评论（低权写入方）、专用于 /admin/panel（高权读出方）。
+  const sessionRoles = new Map();
   app.post('/login', async (req, res) => {
     const { username, password } = req.body || {};
     try {
@@ -112,6 +115,7 @@ export async function createRealLabApp(opts = {}) {
       if (!u || hash(password) !== u.password_hash) return res.status(401).send(html('登录失败', '<p>用户名或密码错误</p>'));
       const sid = Math.random().toString(36).slice(2);
       sessions.set(sid, u.id);
+      sessionRoles.set(sid, u.admin ? 'admin' : 'user');
       res.setHeader('Set-Cookie', `sid=${sid}; HttpOnly; Path=/`);
       res.send(html('登录成功', `<p>欢迎回来，${u.username}</p>`));
     } catch (e) {
@@ -192,11 +196,56 @@ export async function createRealLabApp(opts = {}) {
 
   // ============ 二阶注入链：POST /comment（store）→ GET /panel?id=（触发拼接） ============
   app.post('/comment', requireAuth, wrap(async (req, res) => {
+    // [P1-3 跨角色] admin 会话禁写评论：写入方必须是普通用户（低权），管理面板才是
+    // 读取方（高权）——跨角色语义的靶场侧硬约束（admin 想代写也写不了）。
+    const sid = (req.headers.cookie || '').match(/sid=([^;]+)/)?.[1];
+    if (sessionRoles.get(sid) === 'admin') {
+      return res.status(403).send(html('禁止操作', '<p>管理员账号不允许发表评论（合规审计要求）</p>'));
+    }
     const { item_id, body } = req.body || {};
     if (!item_id || !body) return res.status(400).send('item_id/body 必填');
     await db.query('INSERT INTO reviews (item_id, user_id, body) VALUES ($1, $2, $3)', [Number(item_id), req.uid, String(body)]);
     res.send(html('评论已提交', '<p>感谢你的点评</p>'));
   }));
+
+  // [P1-3 跨角色] 管理端登录：独立会话（aid cookie），与用户 sid 会话分属不同身份域。
+  // 演示靶场用固定 key 校验（真实站点等价「仅管理员知道的后台入口」）。
+  const adminSessions = new Map();
+  app.post('/admin/login', (req, res) => {
+    const { key } = req.body || {};
+    if (String(key ?? '') !== 'admin-key-2026') return res.status(401).send(html('登录失败', '<p>管理密钥错误</p>'));
+    const aid = Math.random().toString(36).slice(2);
+    adminSessions.set(aid, 1);
+    res.setHeader('Set-Cookie', `aid=${aid}; HttpOnly; Path=/`);
+    res.send(html('管理端登录成功', '<p>欢迎，管理员</p>'));
+  });
+  const requireAdmin = (req, res, next) => {
+    // 路径①：管理端独立会话（/admin/login 的 aid cookie）
+    const aid = (req.headers.cookie || '').match(/aid=([^;]+)/)?.[1];
+    if (aid && adminSessions.has(aid)) return next();
+    // 路径②（实战主形态）：用户登录体系内的 admin 角色——同一名为 sid 的 cookie、
+    // 两个不同会话值（user/admin），跨角色配置 storeCookies/triggerCookies 正是
+    // 「同 cookie 名、不同会话值」的实战形态。
+    const sid = (req.headers.cookie || '').match(/sid=([^;]+)/)?.[1];
+    if (sid && sessionRoles.get(sid) === 'admin') return next();
+    return res.status(403).send(html('禁止访问', '<p>需要管理员身份（/admin/login 或管理员账号登录）</p>'));
+  };
+
+  // [P1-3 跨角色] 管理后台触发页（admin-only）：与 /panel 同款二阶语义（把最新评论正文
+  // 拼进 SQL），但**仅 admin 会话可达**（403），普通用户/未登录读不到 → 低权写入、
+  // 高权读出的存储型注入只能被「跨角色配置」（storeCookies+triggerCookies）检出。
+  app.get('/admin/panel', requireAdmin, async (req, res) => {
+    const id = req.query.id ?? '1';
+    const latest = await db.query('SELECT body FROM reviews WHERE item_id = $1 ORDER BY id DESC LIMIT 1', [Number(id)]);
+    const body = latest.rows[0]?.body ?? '';
+    let rows;
+    try {
+      rows = (await db.query(`SELECT * FROM items WHERE id = ${id} AND title != '${body}'`)).rows;
+    } catch (e) {
+      return res.status(500).send(html('管理面板错误', `<pre>${e.message}</pre>`));
+    }
+    res.send(html('管理点评面板', tableHtml(rows) + `<p>待审点评：${body}</p>`));
+  });
 
   app.get('/panel', requireAuth, async (req, res) => {
     const id = req.query.id ?? '1';

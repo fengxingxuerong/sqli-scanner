@@ -82,7 +82,12 @@ ModSecurity/商业云 WAF 环境未实测。
 二阶注入新增跨角色触发（读写分离身份）：`secondOrder.storeCookies`（低权写入方）/ 
 `secondOrder.triggerCookies`（高权读出方）分别覆盖存储与触发页会话，显式 Cookie 优先、
 会话 cookieParams 合并补充，键值消毒（原型污染键过滤、上限 32 键）；未配置时行为零变化，
-二阶单测 20/20 + real-world-lab 端到端 9/9（second_order 检出）回归通过。
+二阶单测 20/20 回归通过。**双身份端到端已实测（2026-09-14）**：real-world-lab 新增
+admin-only 触发页 `/admin/panel`（users.admin 角色门禁 403）+ admin 会话禁写评论，场景
+`second_order_crossrole`（alice 会话写评论 → triggerCookies: admin 会话触发）检出
+`[second_order]`（25 请求 4.1s），自检三连（写入 200 / admin 触发 500 真实引爆 / user+匿名
+403 跨角色门禁）全过；单身份场景（second_order）同步切换 user 身份后零回归，靶场
+11 场景全 PASS。
 
 **给客户的话**：若目标是 ⛔ 等级中的数据库（尤其 Oracle 这类主流库；SQL Server 已于 2026-09-14 升级 verified，见 e2e/mssql-lab），
 请把结论视为**待复核线索**而非可用证据——报告会在 `summary.dbmsEvidence.caveat` 中自动声明这一点。

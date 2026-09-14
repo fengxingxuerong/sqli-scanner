@@ -89,11 +89,11 @@ function runSqlmap(url) {
   }
 }
 
-async function login() {
+async function login(username = 'admin', password = 'admin@market') {
   const resp = await fetch(`${BASE}/login`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ username: 'admin', password: 'admin@market' }),
+    body: JSON.stringify({ username, password }),
     redirect: 'manual',
   });
   const setCookie = resp.headers.get('set-cookie') || '';
@@ -152,16 +152,19 @@ async function main() {
     }
 // —— 二阶注入验证：写入含 SQL 片段的评论 → level=5 爬取 + /panel 触发 ——
     console.log('\n[verify] 二阶注入链路：写入 payload 评论 → 爬取 → /panel 触发');
+    // [P1-3 跨角色] 二阶链改用普通用户身份（alice）：admin 会话被靶场禁写评论
+    // （合规审计语义），写入方必须是低权用户；管理面板 /admin/panel 是高权读出方。
+    const userSid = await login('alice', 'alice@example');
     const injectBody = "alice's'); SELECT 1; -- ";
     // [P0-FIX 2026-09-06] 自检用 item_id=2（独立商品）：若把爆炸 payload 写进被测的
     // item 1，二阶扫描时 /panel?id=1 的基线本就 500（baselineErr=true）→ 引擎保守跳过
     // 二阶判定 → 永远检不出。基线必须干净，被测通道留给引擎自己的探针。
     await fetch(`${BASE}/comment`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', cookie: `sid=${sid}` },
+      headers: { 'content-type': 'application/json', cookie: `sid=${userSid}` },
       body: JSON.stringify({ item_id: 2, body: injectBody }),
     });
-    const panelResp = await fetch(`${BASE}/panel?id=2`, { headers: { cookie: `sid=${sid}` } });
+    const panelResp = await fetch(`${BASE}/panel?id=2`, { headers: { cookie: `sid=${userSid}` } });
     const panelText = await panelResp.text();
     const panelExplodes = panelResp.status === 500 && /syntax error/i.test(panelText);
     console.log(`[verify] 靶场自检：/panel 对 payload=${JSON.stringify(injectBody)} → ${panelExplodes ? '真实引爆 ✅' : '未引爆 ❌'} (status=${panelResp.status})`);
@@ -169,7 +172,8 @@ async function main() {
     const before = app._stats.total;
     const soOut = await runScan(sm, {
       url: `${BASE}/`,
-      cookieParams: { sid },
+      // [P1-3 跨角色] 存储身份切到 alice（普通用户）：admin 会话被靶场禁写评论
+      cookieParams: { sid: userSid },
       config: {
         ...baseConfig,
         level: 5,
@@ -189,6 +193,59 @@ async function main() {
     const soOk = soOut.status === 'completed' && soMiss.length === 0;
     rows.push({ name: 'second_order', desc: '评论存储 → /panel 触发页二阶注入', found: soFound, dbmses: [], must: ['second_order'], mustMiss: soMiss, requests: soReq, elapsedMs: soOut.elapsedMs, status: soOut.status, ok: soOk, expectSafe: false });
     console.log(`[${soOk ? 'PASS' : 'FAIL'}] second_order 检出=[${soFound.join(',') || '-'}] miss=[${soMiss.join(',') || '-'}] 请求=${soReq} 耗时=${fmtMs(soOut.elapsedMs)}`);
+
+    // —— [P1-3] 二阶跨角色双身份场景：alice（低权）写评论 → /admin/panel（admin-only）触发 ——
+    // 语义：存储方与读取方分属不同身份域。靶场硬约束：admin 会话禁写评论（403）、
+    // /admin/panel 仅 admin 会话可达（403）——单身份（不配 triggerCookies）时引擎以
+    // alice 身份读触发页必 403 → 无回显 → 检出不了，只有跨角色配置能检出。
+    console.log('\n[verify] 二阶跨角色链路：alice 写评论 → /admin/panel（admin-only）触发');
+    const adminSid = await login('admin', 'admin@market');
+    // 自检三连：① user 写入合法 ② admin 触发页真实引爆 ③ user 读管理面板被 403（角色语义必要性）
+    const xrItem = 3; // 独立商品：不污染 item 1（引擎被测通道，基线必须干净）
+    const xrBody = "bob's'); SELECT 1; -- "; // 语法破坏型：PG 报错含 syntax error（UNION 型报列数不匹配，不匹配判定正则）
+    const xrWrite = await fetch(`${BASE}/comment`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie: `sid=${userSid}` },
+      body: JSON.stringify({ item_id: xrItem, body: xrBody }),
+    });
+    const xrAdmin = await fetch(`${BASE}/admin/panel?id=${xrItem}`, { headers: { cookie: `sid=${adminSid}` } });
+    const xrAdminText = await xrAdmin.text();
+    const xrDeny = await fetch(`${BASE}/admin/panel?id=${xrItem}`, { headers: { cookie: `sid=${userSid}` } });
+    const xrAnon = await fetch(`${BASE}/admin/panel?id=${xrItem}`);
+    const xrExplodes = xrWrite.status === 200 && xrAdmin.status === 500 && /syntax error/i.test(xrAdminText);
+    const xrGate = xrDeny.status === 403 && xrAnon.status === 403;
+    console.log(`[verify] 自检：写入=${xrWrite.status}（期望 200） admin 触发=${xrAdmin.status}${xrExplodes ? ' 真实引爆 ✅' : ' ❌'} user 读管理面板=${xrDeny.status} 匿名=${xrAnon.status}（期望 403/403${xrGate ? ' 跨角色门禁 ✅' : ' ❌'}）`);
+    if (!xrExplodes || !xrGate) {
+      rows.push({ name: 'second_order_crossrole', desc: '跨角色双身份（alice 写 → admin-only 面板触发）', found: [], dbmses: [], must: ['second_order'], mustMiss: ['second_order'], requests: 0, elapsedMs: 0, status: 'selftest-failed', ok: false, expectSafe: false });
+      console.log('[FAIL] second_order_crossrole 靶场自检失败（写入/触发/门禁三连未全过）');
+    } else {
+      const xBefore = app._stats.total;
+      const xOut = await runScan(sm, {
+        url: `${BASE}/`,
+        // 存储身份：alice（低权写入方）——爬取与表单提交均以此会话
+        cookieParams: { sid: userSid },
+        config: {
+          ...baseConfig,
+          level: 5,
+          crawlForms: true,
+          techniques: ['error', 'boolean'],
+          secondOrder: {
+            enabled: true,
+            // 高权读出方：admin-only 面板（item 1 基线干净，见 xrItem=3 自检隔离设计）
+            triggerUrls: [`${BASE}/admin/panel?id=1`],
+            storeCookies: { sid: userSid },   // 显式存储身份（_store 路径）
+            triggerCookies: { sid: adminSid }, // 显式读取身份（_trigger 路径，跨角色核心）
+            negativeControl: true,
+          },
+        },
+      });
+      const xReq = app._stats.total - xBefore;
+      const xFound = techs(xOut.vulns);
+      const xMiss = ['second_order'].filter((t) => !xFound.includes(t));
+      const xOk = xOut.status === 'completed' && xMiss.length === 0;
+      rows.push({ name: 'second_order_crossrole', desc: '跨角色双身份（alice 写 → admin-only 面板触发）', found: xFound, dbmses: [], must: ['second_order'], mustMiss: xMiss, requests: xReq, elapsedMs: xOut.elapsedMs, status: xOut.status, ok: xOk, expectSafe: false });
+      console.log(`[${xOk ? 'PASS' : 'FAIL'}] second_order_crossrole 检出=[${xFound.join(',') || '-'}] miss=[${xMiss.join(',') || '-'}] 请求=${xReq} 耗时=${fmtMs(xOut.elapsedMs)}`);
+    }
 
     // —— sqlmap 对拍 ——
     if (withSqlmap) {
