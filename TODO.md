@@ -91,7 +91,7 @@ services:
 - 32 个 md 中的测试数/引擎等级表易失真（本次审计修正 2 处）。可复制 `dbmsEvidence.js` 模式：数字由代码统一导出，文档生成时引用
 
 ### 8. 前端测试环境差异固化
-- 已修 `vitest.config.ts` 强制 `NODE_ENV=test`（jsdom 下 React production build 导致 246 个假失败）+ 契约测试 `@vitest-environment node`。CI（GITHUB_ACTIONS）下建议跑一次确认两处修改在 Linux 路径同样稳定
+- ~~已修 `vitest.config.ts` 强制 `NODE_ENV=test`（jsdom 下 React production build 导致 246 个假失败）+ 契约测试 `@vitest-environment node`~~（已完成）；**CI 已搭建**（`.github/workflows/ci.yml`，2026-09-13）：lint/typecheck + 前端 vitest + 服务端 1767 用例 + `run-all` 自足 6 套靶场，ubuntu/Node 24。**剩余动作：push 后观察首次 CI 实跑**——Linux 与 Windows 的路径/换行差异（e2e 脚本/测试断言）只有真跑才能暴露，若单测在 Linux 出现平台性失败按最小修复处理
 
 ---
 

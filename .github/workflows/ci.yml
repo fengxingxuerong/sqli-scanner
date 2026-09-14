@@ -95,6 +95,11 @@ jobs:
           path: server/node_modules
           key: ${{ runner.os }}-server-${{ hashFiles('server/package-lock.json') }}
       - run: cd server && npm ci
+      # [audit-FIX 2026-09-13] .env.test 未入库（.gitignore .env* 策略），旧版此处直接
+      # npm test 会在 CI 上因 --env-file 找不到文件而失败。按其真实内容重建（两个开关
+      # 与本地文件一致：SSRF 放行本地 mock 目标 + 利用端点测试门禁）。
+      - name: Recreate server/.env.test（不入库文件的 CI 重建）
+        run: printf 'SSRF_ALLOW_PRIVATE=1\nEXPLOIT_ENABLED=1\n' > server/.env.test
       - run: cd server && npm test
         name: Server tests
         timeout-minutes: 10
@@ -127,6 +132,11 @@ jobs:
         name: TypeScript check
       - run: npx vitest run
         name: Frontend tests
+      # [audit-FIX] 同 test-server：跨平台矩阵同样需要重建未入库的 .env.test
+      - name: Recreate server/.env.test（不入库文件的 CI 重建）
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then printf 'SSRF_ALLOW_PRIVATE=1\r\nEXPLOIT_ENABLED=1\r\n' > server/.env.test; else printf 'SSRF_ALLOW_PRIVATE=1\nEXPLOIT_ENABLED=1\n' > server/.env.test; fi
+        shell: bash
       - run: cd server && npm test
         name: Server tests
         timeout-minutes: 10
@@ -281,3 +291,34 @@ jobs:
         name: Frontend npm audit (high+)
       - run: cd server && npm audit --audit-level=high
         name: Server npm audit (high+)
+  # ============================================================================
+  # [audit 新增 2026-09-13] 自足 e2e 批量回归：run-all.mjs 依赖探测自动收敛到
+  # deps:[] 的 6 套靶场（retest-lab / tamper-matrix / real-world-lab(PGlite) /
+  # recall-lab / detection-runner / waf-lab）。与 recall-lab 单独 job 并存：
+  # 该 job 一次跑齐全部自足套件并输出统一汇总，作为「无 Docker 前提」的 e2e 基线。
+  # 依赖真实 DB 的 12 套靶场由 acceptance job（docker run mysql + init-db）覆盖。
+  # ============================================================================
+  e2e-self-contained:
+    runs-on: ubuntu-latest
+    needs: [test-server]
+    if: github.event_name != 'schedule'
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Cache server node_modules
+        uses: actions/cache@v4
+        with:
+          path: server/node_modules
+          key: ${{ runner.os }}-server-${{ hashFiles('server/package-lock.json') }}
+      - run: npm ci
+        name: Install frontend
+      - run: cd server && npm ci
+        name: Install server
+      - name: Recreate server/.env.test（不入库文件的 CI 重建）
+        run: printf 'SSRF_ALLOW_PRIVATE=1\nEXPLOIT_ENABLED=1\n' > server/.env.test
+      - name: run-all（依赖探测自动收敛到 6 套自足靶场）
+        run: node e2e/run-all.mjs
+        timeout-minutes: 8
