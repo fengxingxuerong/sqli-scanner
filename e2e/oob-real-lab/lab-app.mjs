@@ -66,5 +66,21 @@ export function createOobLabApp({ waf = true } = {}) {
     }
   });
 
+  // [pg-osshell 闭环 2026-09-14] 有回显数值型注入点：os-shell（COPY FROM PROGRAM 落表
+  // 再 UNION 回显）需要一个能把查询结果渲染出来的点。/oob 是恒定页盲点（OOB 专用），
+  // 走不了 COPY 落表回读。/shell?id= 数值型直拼，结果表渲染（真实回显）。
+  app.get('/shell', async (req, res) => {
+    const id = req.query.id || '1';
+    try {
+      const { rows } = await getPool().query(`SELECT id, name, secret FROM users WHERE id = ${id}`);
+      const rowsHtml = (rows || [])
+        .map((r) => `<tr><td>${r.id ?? ''}</td><td>${r.name ?? ''}</td><td>${r.secret ?? ''}</td></tr>`)
+        .join('');
+      res.send(`<!DOCTYPE html><html><head><title>shell-pt</title></head><body><h1>user detail</h1><table border="1"><tr><th>id</th><th>name</th><th>secret</th></tr>${rowsHtml}</table></body></html>`);
+    } catch (e) {
+      res.status(500).send(`Query error: ${e.message}`);
+    }
+  });
+
   return { app, close: async () => { if (pool) await pool.end().catch(() => {}); pool = null; } };
 }

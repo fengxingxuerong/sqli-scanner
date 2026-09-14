@@ -62,7 +62,11 @@ try {
     for (const [label, tamper] of Object.entries(TAMPERS)) {
       const app = createMultiEngineApp(bridge, eng.engine);
       const server = app.listen(0, '127.0.0.1');
-      await new Promise((r) => server.once('listening', r));
+      await new Promise((resolve, reject) => {
+  server.once('listening', resolve);
+  // [P0-FIX 2026-09-14] listen 失败硬退出：端口被占/权限问题时静默继续 = 扫错目标出废报告
+  server.once('error', (e) => reject(new Error(`靶场监听失败（端口被占？先杀残留进程）: ${e.message}`)));
+});
       const base = `http://127.0.0.1:${server.address().port}`;
       const sm = new ScanManager();
       const rows = {};

@@ -98,7 +98,11 @@ function runSqlmap(url) {
 const pool = mysql.createPool({ ...MYSQL_CONF, connectionLimit: 8, multipleStatements: true });
 const app = createMysqlLabApp(pool);
 const server = app.listen(PORT, '127.0.0.1');
-await new Promise((r) => server.once('listening', r));
+// [P0-FIX 2026-09-14] listen 失败硬退出（对齐 pentest-lab 守卫）：端口被占时静默扫错目标 = 废报告还 exit 0
+await new Promise((resolve, reject) => {
+  server.once('listening', resolve);
+  server.once('error', (e) => reject(new Error('[real-mysql-lab] 靶场端口监听失败（被占用？先杀残留进程）: ' + e.message)));
+});
 console.log(`[verify] 靶场就绪 ${BASE}  sqlmap对拍=${process.argv.includes('--sqlmap') ? 'on' : 'off'}\n`);
 
 const sm = new ScanManager();

@@ -80,6 +80,7 @@ const check = (cond, msg) => {
 
 const port = await new Promise((resolve) => {
   server.listen(0, '127.0.0.1', () => resolve(server.address().port));
+server.on('error', (e) => reject(new Error(`靶场监听失败: ${e.message}`)));
 });
 const url = `http://127.0.0.1:${port}/`;
 
