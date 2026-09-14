@@ -43,7 +43,7 @@ const admin = await mysql.createConnection({
   host: process.env.MYSQL_HOST ?? '127.0.0.1',
   port: Number(process.env.MYSQL_PORT) || 3306,
   user: process.env.MYSQL_USER ?? 'root',
-  password: process.env.MYSQL_PASSWORD ?? '',
+  password: process.env.MYSQL_PASSWORD ?? process.env.LAB_DB_PASSWORD ?? 'root',
   multipleStatements: true,
 });
 const [meta] = await admin.query('SELECT @@plugin_dir pd, @@secure_file_priv sfp, @@version v');
@@ -68,7 +68,7 @@ const pool = mysql.createPool({ ...({
   host: process.env.MYSQL_HOST ?? '127.0.0.1',
   port: Number(process.env.MYSQL_PORT) || 3306,
   user: process.env.MYSQL_USER ?? 'root',
-  password: process.env.MYSQL_PASSWORD ?? '',
+  password: process.env.MYSQL_PASSWORD ?? process.env.LAB_DB_PASSWORD ?? 'root',
   database: process.env.MYSQL_DATABASE || 'sqli_lab',
 }), multipleStatements: true, connectionLimit: 4 });
 const server = createMysqlLabApp(pool).listen(PORT, '127.0.0.1');
