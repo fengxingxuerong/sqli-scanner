@@ -189,42 +189,59 @@ npm run test:all
 - Tamper 插件: 228 个（含 v24 增量 20 个，对齐 sqlmap 官方 tamper 全集，含官方 CRS/libinjection 实测组合 uniontable+odbcbrace）
 - WAF 绕过能力: 200+ 插件链式组合，覆盖 62 个 WAF 厂商指纹识别 + 推荐
 
-### ⚠️ 已知问题（黑盒评测发现，**尚未修复**）
+### ⚠️ 已知问题与修复记录（黑盒评测）
 
 **来源**：`e2e/blackbox-lab/` —— 独立第三方评测靶场。刻意**不复用项目自带靶场**（避免作者自证），
 真 MySQL 8.0.28 拼接 SQL，22 靶点（15 漏洞 + 7 安全对照）。
 真值标定：**漏洞点 15/15 成立、安全点 7/7 防护确认**（每点 3 次采样）。
 
-| 编号 | 问题 | 触发条件 | 实测现象 | 影响 |
-|---|---|---|---|---|
-| **P0** | `--test-path` 在非 200 端点误报 | 开启 `--test-path`，且目标存在返回 500/403 的路由 | 7 个安全点中 **6 个被误判为 error 注入** | 该档报告**不可直接交付客户** |
-| **P1** | DBMS 误判 | 未知（13 个点全部命中） | 真 **MySQL 8.0.28** 被判定为 **DB2** | payload 族错配，影响后续提取 |
+| 编号 | 问题 | 状态 |
+|---|---|---|
+| **P0** | `--test-path` 在非 200 端点误报（7 个安全点中 6 个） | ✅ **已修复**（2026-09-16） |
+| **P1** | DBMS 误判（真 MySQL 8.0.28 被判定为 DB2） | ⚠️ 未修，13 个点全部命中 |
 
-**P0 根因（已用靶场行为核验锁定）**：path 段注入后 URL 变为不存在的路径（500/403 → 404），
-而 404 页会**回显请求 URL**（Express 默认 `Cannot GET /xxx`），响应里于是出现 payload 自带的
-`extractvalue`/`SQL syntax` 等关键词，被 `ERROR_SIG` 匹配 → 误判为「数据库报错回显」。
-即 **payload 自我匹配**。（两次修复尝试均未生效，已回滚；定位路径见 `e2e/blackbox-lab/` 产物。）
+**P0 根因与修法**（诊断实测，非推断）：
+path 段注入后 URL 变为不存在的路径（500/403 → 404），404 页**回显请求 URL**，
+响应里于是出现 payload 自带的 `extractvalue` / `SQL syntax` 等关键词，被 `ERROR_SIG` 匹配
+→ 误判为「数据库报错回显」。即 **payload 自我匹配**。
 
-**复现**：
-```bash
-node e2e/blackbox-lab/selftest.mjs                                  # 先立真值（安全点应不可注入）
-node e2e/blackbox-lab/run-scan.mjs --only=F3-const500,F4-const403 --round=r2
-```
+关键细节：回显形式是 **HTML 实体 + URL 编码混合** ——
+`Cannot GET /api/safe/error&#39;%20AND%20extractvalue(1,concat...`
+单引号是 `&#39;`（HTML 实体）而非 `%27`，空格是 `%20`。
+**只做其中一种编码还原都剔不掉 payload**（前两次修复因此失败）。
+最终修法：`normalizeEcho()` 先做「HTML 实体 → 字符」，再做「URL 解码（两轮）」，然后剔除 payload 原文。
 
-**规避建议**：生产使用**不要开启 `--test-path`**；默认档（r1）实测误报 0/7。
+**修复验证**：
+- 安全点误报 **6/7 → 0/7**
+- 真阳性 `B1-error` **仍命中**（未修坏）
+- 同一靶点**连跑 5 次**：误报 0/5、真阳性 5/5（无偶发）
+- 报错注入相关单测 47/47；全量单测 1815 / 0 fail
+
+**⚠️ 修复同时推翻了一组此前对外数据**：
+
+r2 档原报「检出 13/13」，但其中 **3 个点（A3-like / A4-orderby / C2-blindtime）的「命中」
+正是靠上述误报机制达成的**（技术位均为 `error`）。修掉误报后它们的假命中同步消失。
+
+**修复后两档检出均为 9/13、误报 0/7**。即：
+**「扫不出来就加参数」在本工具上不成立 —— 拉满参数没有带来额外真检出。**
 
 **同题对照（sqlmap 1.10.7，同一批靶点）**：
 
 | 工具 / 档位 | 漏洞检出 | 安全误报 |
 |---|---|---|
-| sqli-scanner **默认档** | 9/13 | **0/7** |
-| sqli-scanner 实战档（level5/risk3/全技术/test-headers/test-path） | 13/13 | **6/7** |
+| sqli-scanner **默认档（r1）** | 9/13 | **0/7** |
+| sqli-scanner 实战档（r2，level5/risk3/全技术/test-headers/test-path） | 9/13 | **0/7** |
 | sqlmap（level 1 / risk 1，与默认档对齐） | 7/13 | **0/7** |
 
-**两条结论**：
-1. **默认档强于 sqlmap 同档**（9 vs 7，误报同为 0/7），且独有检出 base64 编码参数、REST path 段、堆叠通道。
-2. **「扫不出来就加参数」在本工具上不成立** —— 拉满参数后检出 100% 但误报失控。
-   默认档安全，调参需谨慎。
+**结论**：默认档强于 sqlmap 同档（9 vs 7，误报同为 0/7），且独有检出 base64 编码参数、
+REST path 段、堆叠通道（sqlmap level 1 三者全漏）。
+
+**复现**：
+```bash
+node e2e/blackbox-lab/selftest.mjs                        # 立真值（漏洞点应可注入、安全点应不可注入）
+node e2e/blackbox-lab/run-scan.mjs                        # 两轮扫描（r1 默认档 / r2 实战档）
+node e2e/blackbox-lab/sqlmap-bench.mjs                    # sqlmap 同题对照
+```
 
 ### WAF 绕过能力实测口径（2026-09-09 起，勿混用）
 

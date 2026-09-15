@@ -35,11 +35,11 @@ export function printHelp() {
                              服务端按请求头取值拼 SQL 的场景（如 SELECT ... WHERE id=\${x_forwarded_for}）必须开启才能检出
   --test-path               把 URL path 末段（非空且非静态资源 .html/.js/.css/.png 等）作为注入点测试
                              （默认关闭：保持现有行为。服务端按 path 段取值拼 SQL 的场景必须开启才能检出）
-                             ⚠️ 已知问题（2026-09-15，未修）：目标存在返回 500/403 的路由时，
-                             注入后 URL 变为不存在的路径 → 404 页回显 URL → payload 自带关键词
-                             被误读为数据库报错 → 该路由会被误报为 error 注入。
-                             实测 7 个安全点中 6 个因此误报（sqlmap 同题 0 误报）。
-                             生产使用建议暂不开启；详见 README「已知问题」与 e2e/blackbox-lab/
+                             [P0-FIX 2026-09-16] 曾因「404 页回显 URL → payload 自带关键词被误读为
+                             数据库报错」导致非 200 端点误报（7 个安全点中 6 个），已修复：
+                             匹配前先做 HTML 实体 + URL 解码归一化并剔除被回显的 payload。
+                             验证：安全点误报 6/7 → 0/7，真阳性保持命中，同点连跑 5 次无偶发。
+                             详见 README「已知问题与修复记录」与 e2e/blackbox-lab/
   --use-registry             启用声明式 payload 注册表（检测器改用 PAYLOAD_REGISTRY 筛选，受 level/risk/test-filter/test-skip 控制）
   --dump                     启用数据提取（拖库，默认关闭对标 sqlmap 显式 opt-in）
   --dump-all                 全库拖库（对标 sqlmap --dump-all）：枚举所有库后逐库逐表拖，

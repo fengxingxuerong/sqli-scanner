@@ -148,7 +148,12 @@ export class ErrorDetector extends Detector {
       if (ctx?.guard?.shouldSkip(payload)) continue;
       const res = await this.send(httpClient, ctx, this.buildRequest(target, point, payload), ctx);
       const body = String(res?.data ?? '');
-      const match = body.match(ERROR_SIG);
+      // [P0-FIX 2026-09-16] 先做「HTML 实体 → URL 解码」两段归一化，再剔除被回显的 payload。
+      // 诊断实测：path 注入时响应形如
+      //   Cannot GET /api/safe/error&#39;%20AND%20extractvalue(1,concat...
+      // 单引号被 Express 404 页转成 **HTML 实体 &#39;**（不是 %27），空格是 %20 —— 只做
+      // decodeURIComponent 无法还原，这正是前两次修复失败的原因。
+      const match = stripEchoedPayload(body, payload).match(ERROR_SIG);
       if (!match) continue;
       // 基线已存在同样的报错信息 → 视为页面固有，不计入注入
       if (baseMatch && match[0] === baseMatch[0]) continue;
@@ -186,4 +191,57 @@ export function pickErrorTemplates(dbms) {
   // 兜底：若高频表未覆盖（理论不发生），回退 MySQL 模板防止空跑
   if (!out.length && PAYLOADS.MySQL && PAYLOADS.MySQL.error.length) out.push(PAYLOADS.MySQL.error[0]);
   return out;
+}
+
+
+/**
+ * 把响应归一化成「纯文本」：HTML 实体 → 字符 → URL 解码（两轮，防双重编码）。
+ *
+ * 为什么需要两段：Express 等框架回显 URL 时会做 HTML 转义，同一个单引号在响应里
+ * 既可能是 &#39;（HTML 实体）也可能是 %27（URL 编码），只做其中一种都还原不出来。
+ * @param {string} s
+ * @returns {string}
+ */
+function normalizeEcho(s) {
+  let t = String(s || '');
+  t = t.replace(/&#(\d+);/g, (_, d) => String.fromCharCode(Number(d) || 0))
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => String.fromCharCode(parseInt(h, 16) || 0))
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+    .replace(/&quot;/g, String.fromCharCode(34)).replace(/&apos;/g, String.fromCharCode(39))
+    .replace(/&amp;/g, '&');
+  for (let i = 0; i < 2; i++) {
+    try {
+      const d = decodeURIComponent(t.replace(/\+/g, ' '));
+      if (d !== t) t = d; else break;
+    } catch { break; }
+  }
+  return t;
+}
+
+/**
+ * 剔除响应中被回显的 payload 原文，避免 payload 自我匹配。
+ *
+ * [P0-FIX 2026-09-16] 黑盒评测（e2e/blackbox-lab）发现的根因：path 注入时 payload 落在 URL 里，
+ * 而 404/错误页普遍回显请求 URL，响应里于是出现 extractvalue / SQL syntax 这类
+ * **payload 自带的关键词**，被 ERROR_SIG 匹配，误判成「数据库报错回显」。
+ * 实测 --test-path 开启时 7 个安全点有 6 个因此误报，sqlmap 在同题上 0 误报。
+ *
+ * 要点：必须先归一化（HTML 实体 + URL 解码）再比对 —— 诊断实测响应形如
+ *   Cannot GET /api/safe/error&#39;%20AND%20extractvalue(1,concat...
+ * 单引号是 HTML 实体、空格是 URL 编码；前两次修复只做 URL 解码，故都无效。
+ *
+ * 只做字符串剔除，不改变 ERROR_SIG 语义；真报错来自数据库、与 payload 原文不是同一串，不受影响。
+ * @param {string} body 响应体
+ * @param {string} payload 本次注入的 payload
+ * @returns {string}
+ */
+function stripEchoedPayload(body, payload) {
+  if (!body || !payload) return body || '';
+  let best = normalizeEcho(body);
+  const variants = new Set([payload, normalizeEcho(payload)]);
+  try { variants.add(encodeURIComponent(payload)); } catch { /* noop */ }
+  for (const v of variants) {
+    if (v && v.length > 3) best = best.split(v).join('');
+  }
+  return best;
 }
