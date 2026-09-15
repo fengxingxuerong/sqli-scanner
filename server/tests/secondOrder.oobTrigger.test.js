@@ -26,7 +26,14 @@ function makeOobMock({ param = 'username', triggerOob = true } = {}) {
     async request(opts) {
       if (opts.method === 'POST') {
         state.posts++;
-        const data = opts.data && typeof opts.data === 'object' ? opts.data : {};
+        // [P0-FIX 2026-09-15] 表单点 data 已序列化为 urlencoded 字符串（Content-Type 修正），
+        // mock 按新口径解析回对象后取参。
+        let data = opts.data && typeof opts.data === 'object' ? opts.data : {};
+        if (typeof opts.data === 'string' && opts.data) {
+          data = Object.fromEntries(new URLSearchParams(opts.data));
+        } else {
+          data = {};
+        }
         state.stored = param && data[param] != null ? data[param] : Object.values(data)[0] ?? state.stored;
         return { data: 'OK', status: 200 };
       }
@@ -51,7 +58,14 @@ function makeErrorMock({ param = 'username' } = {}) {
     async request(opts) {
       if (opts.method === 'POST') {
         state.posts++;
-        const data = opts.data && typeof opts.data === 'object' ? opts.data : {};
+        // [P0-FIX 2026-09-15] 表单点 data 已序列化为 urlencoded 字符串（Content-Type 修正），
+        // mock 按新口径解析回对象后取参。
+        let data = opts.data && typeof opts.data === 'object' ? opts.data : {};
+        if (typeof opts.data === 'string' && opts.data) {
+          data = Object.fromEntries(new URLSearchParams(opts.data));
+        } else {
+          data = {};
+        }
         state.value = param && data[param] != null ? data[param] : Object.values(data)[0] ?? state.value;
         return { data: 'OK', status: 200 };
       }

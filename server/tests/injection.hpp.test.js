@@ -47,9 +47,10 @@ test('hpp: body 注入点不受影响（仅 GET query 生效）', () => {
   const target = mkTarget({ hpp: true }, { method: 'POST' });
   const point = { location: 'body', param: 'user', originalValue: 'a', formValues: { user: 'a', csrf: 't' } };
   const req = buildInjectionRequest(target, point, "a' OR '1'='1");
-  assert.equal(req.data['user'], "a' OR '1'='1");
-  assert.equal(req.data['csrf'], 't');
-  assert.equal(req.data['csrf'] !== undefined, true);
+  const form = new URLSearchParams(req.data); // [P0-FIX 2026-09-15] urlencoded 序列化口径
+  assert.equal(form.get('user'), "a' OR '1'='1");
+  assert.equal(form.get('csrf'), 't');
+  assert.equal(form.get('csrf') !== undefined, true);
 });
 
 // 直连模式（direct）不受 hpp 影响

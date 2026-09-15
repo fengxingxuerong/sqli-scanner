@@ -181,6 +181,14 @@ export function buildInjectionRequest(target, point, value) {
     const formValues = point.formValues || {};
     req.data = { ...formValues };
     req.data[point.param] = injected;
+    // [P0-FIX 2026-09-15] 表单点 Content-Type 修正：axios 对对象 data 默认 JSON 序列化，
+    // urlencoded-only 目标（真实 HTML 表单常态）解析不到 body → 注入值从未进 SQL → 全漏检。
+    // 序列化为 urlencoded 并显式声明 Content-Type。JSON API 目标（target.jsonBody 存在）
+    // 保持 axios JSON 序列化（下方 JSON 分支按需重序列化），仅 HTML 表单点走 urlencoded。
+    if (target.jsonBody == null) {
+      req.data = new URLSearchParams(req.data).toString();
+      req.headers['Content-Type'] = 'application/x-www-form-urlencoded';
+    }
     // [P1 批次 2026-09-08] JSON body 嵌套注入点（param 为点路径如 user.id）：
     // target.jsonBody 存在时按路径替换叶子值为注入值后整体重序列化为 JSON 字符串
     // （Content-Type 设 application/json——HttpClient 对字符串 data 直发不覆盖）。

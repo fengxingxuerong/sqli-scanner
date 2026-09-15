@@ -68,7 +68,7 @@ test('buildInjectionRequest：body 注入点包裹 prefix/suffix', () => {
   const point = { location: 'body', param: 'id', originalValue: '1' };
   const req = buildInjectionRequest(target, point, "1') AND 1=1");
   assert.equal(req.method, 'POST');
-  assert.equal(req.data.id, "')1') AND 1=1-- -");
+  assert.equal(new URLSearchParams(req.data).get('id'), "')1') AND 1=1-- -"); // [P0-FIX 2026-09-15] body 表单点序列化为 urlencoded
 });
 
 test('buildInjectionRequest：基线请求不被 prefix/suffix 污染', () => {

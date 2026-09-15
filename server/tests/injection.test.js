@@ -27,8 +27,12 @@ test('body 注入点：injected 值覆盖 data[param]，其余表单字段保留
   const t = baseTarget({ method: 'POST' });
   const p = { location: 'body', param: 'user', originalValue: '1', formValues: { csrf: 'tok', user: '1' } };
   const req = buildInjectionRequest(t, p, "1' OR '1'='1");
-  assert.equal(req.data.csrf, 'tok');
-  assert.equal(req.data.user, "1' OR '1'='1");
+  // [P0-FIX 2026-09-15] 表单点 data 序列化为 urlencoded + 显式 Content-Type：
+  // axios 对对象默认 JSON 序列化会让 urlencoded-only 目标解析不到 body（真机实测全漏检）。
+  assert.equal(req.headers['Content-Type'], 'application/x-www-form-urlencoded');
+  const form = new URLSearchParams(req.data);
+  assert.equal(form.get('csrf'), 'tok');
+  assert.equal(form.get('user'), "1' OR '1'='1");
   assert.equal(req.method, 'POST');
 });
 

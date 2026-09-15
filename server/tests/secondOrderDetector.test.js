@@ -14,7 +14,10 @@ function makeMockForState({ param, initialStored = '1', alwaysError = false } = 
     async request(opts) {
       if (opts.method === 'POST') {
         state.posts++;
-        const data = opts.data && typeof opts.data === 'object' ? opts.data : {};
+        // [P0-FIX 2026-09-15] 表单点 data 已序列化为 urlencoded（Content-Type 修正口径）
+        let data = {};
+        if (opts.data && typeof opts.data === 'object') data = opts.data;
+        else if (typeof opts.data === 'string' && opts.data) data = Object.fromEntries(new URLSearchParams(opts.data));
         // 取触发点字段值；否则取第一个值兜底
         state.value = param && data[param] != null ? data[param] : Object.values(data)[0] ?? state.value;
         return { data: 'OK', status: 200 };

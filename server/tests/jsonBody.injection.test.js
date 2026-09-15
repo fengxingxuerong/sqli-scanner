@@ -96,7 +96,7 @@ test('非 JSON 目标（bodyParams 表单）不受影响（回归）', () => {
   const target = createTarget({ url: 'http://mock/api', bodyParams: { uname: '1' } });
   const point = { id: 'p1', location: 'body', param: 'uname', originalValue: '1' };
   const req = buildInjectionRequest(target, point, "1' AND 1=1-- -");
-  // 表单语义保持：data 是对象
-  assert.equal(typeof req.data, 'object');
-  assert.equal(req.data.uname, "1' AND 1=1-- -");
+  // [P0-FIX 2026-09-15] 表单语义保持：data 序列化为 urlencoded（JSON 目标才走 JSON 序列化）
+  assert.equal(req.headers['Content-Type'], 'application/x-www-form-urlencoded');
+  assert.equal(new URLSearchParams(req.data).get('uname'), "1' AND 1=1-- -");
 });
