@@ -104,5 +104,45 @@ export function parseRequestFile(text) {
     } catch { /* ignore decode errors */ }
   }
 
+  // [批次 10 2026-09-15] multipart/form-data：提取 text 字段名→值作为注入参数候选
+  //（Burp 抓包上传表单常态；文件字段值取 filename 不取二进制）。只读提取，body 原样保留。
+  if (body && ctVal && /multipart\/form-data/i.test(ctVal)) {
+    const bm = /boundary=(?:"([^"]+)"|([^;\s]+))/i.exec(ctVal);
+    const boundary = bm ? (bm[1] || bm[2]) : null;
+    if (boundary) {
+      const parts = body.split('--' + boundary);
+      for (const part of parts) {
+        if (!part || part.trim() === '--' || part.trim() === '') continue;
+        const ci = part.indexOf('\n\n');
+        const head = ci >= 0 ? part.slice(0, ci) : part;
+        let val = ci >= 0 ? part.slice(ci + 2) : '';
+        val = val.replace(/\r?\n$/, '').replace(/^\r?\n/, '').replace(/\n+$/, '');
+        const nm = /name="([^"]+)"/i.exec(head);
+        if (!nm) continue;
+        const fn = /filename="([^"]*)"/i.exec(head);
+        if (fn) {
+          // 文件字段：值取 filename（二进制内容无注入语义，文件名常进 SQL/日志）
+          if (fn[1] && !(nm[1] in params)) params[nm[1]] = fn[1];
+          continue;
+        }
+        if (val && !(nm[1] in params)) params[nm[1]] = val;
+      }
+    }
+  }
+  // [批次 10 2026-09-15] JSON body：顶层叶子值并入 params（嵌套叶子走点路径标记为候选）
+  if (body && ctVal && /application\/json/i.test(ctVal)) {
+    try {
+      const obj = JSON.parse(body);
+      const flat = (o, prefix) => {
+        for (const [k, v] of Object.entries(o || {})) {
+          const key = prefix ? prefix + '.' + k : k;
+          if (v !== null && typeof v === 'object') flat(v, key);
+          else if (!(key in params)) params[key] = String(v);
+        }
+      };
+      flat(obj, '');
+    } catch { /* 非 JSON body 原样保留 */ }
+  }
+
   return { method, url, headers, body, params };
 }
