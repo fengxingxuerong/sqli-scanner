@@ -89,3 +89,7 @@ e2e/udf-lab/*.dll
 
 # agent 临时诊断脚本
 **/.openclaw-*.mjs
+
+# blackbox-lab 独立评测靶场产物（扫描输出 + 依赖目录链接）
+e2e/blackbox-lab/out/
+e2e/blackbox-lab/node_modules

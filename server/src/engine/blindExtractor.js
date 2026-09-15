@@ -58,13 +58,11 @@ export async function extractBoolean(ex, ctx, expr) {
     const bytes = new Array(len).fill(0);
 
     // [批次 11 2026-09-15] 位平面提取（opt-in config.blindBitwise === true，默认关零回归）：
-    console.log('[bitwise] entered, cfg.blindBitwise=', ctx.config?.blindBitwise, 'dbms=', resolveDbms(ctx.dbms || 'MySQL'));
     // BIT_COUNT(CONV(HEX(SUBSTRING(expr,pos,1)),16,10) & mask) 非 0 ⇔ 字节第 bit 位为 1。
     // 8 位并行 → 每字符 1 轮请求（二分 ~8 轮 / 字符类 ~5 轮）。仅 MySQL/TiDB 族启用；
     // 判定复用 _dynJudge 通道；8 位收敛后整体等值验证（复用 extractVerify 语义），
     // 任一字符验证失败 → 整体放弃位平面结果、落回下方原二分路径（保守，零漏提取）。
     if (ctx.config?.blindBitwise === true && /^(MySQL|MariaDB|TiDB)$/i.test(resolveDbms(ctx.dbms || 'MySQL'))) {
-    console.log('[bitwise] entered, cfg.blindBitwise=', ctx.config?.blindBitwise, 'dbms=', resolveDbms(ctx.dbms || 'MySQL'));
       const judgeB = _dynJudge(ex, ctx);
       const bytesB = new Array(len).fill(0);
       let bitsValid = true;

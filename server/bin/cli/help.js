@@ -35,6 +35,11 @@ export function printHelp() {
                              服务端按请求头取值拼 SQL 的场景（如 SELECT ... WHERE id=\${x_forwarded_for}）必须开启才能检出
   --test-path               把 URL path 末段（非空且非静态资源 .html/.js/.css/.png 等）作为注入点测试
                              （默认关闭：保持现有行为。服务端按 path 段取值拼 SQL 的场景必须开启才能检出）
+                             ⚠️ 已知问题（2026-09-15，未修）：目标存在返回 500/403 的路由时，
+                             注入后 URL 变为不存在的路径 → 404 页回显 URL → payload 自带关键词
+                             被误读为数据库报错 → 该路由会被误报为 error 注入。
+                             实测 7 个安全点中 6 个因此误报（sqlmap 同题 0 误报）。
+                             生产使用建议暂不开启；详见 README「已知问题」与 e2e/blackbox-lab/
   --use-registry             启用声明式 payload 注册表（检测器改用 PAYLOAD_REGISTRY 筛选，受 level/risk/test-filter/test-skip 控制）
   --dump                     启用数据提取（拖库，默认关闭对标 sqlmap 显式 opt-in）
   --dump-all                 全库拖库（对标 sqlmap --dump-all）：枚举所有库后逐库逐表拖，
@@ -84,6 +89,14 @@ export function printHelp() {
   --insecure                 忽略自签/内网 CA 证书（关闭 TLS 校验，失去中间人防护，报告须注明）
   --no-validation-skip       关闭「输入校验短路」（参数被白名单拦死也照跑完整检测，审计/对照用）
   --confirm-destructive      确认投放高危 payload 池（--risk 3 默认只「选风险」不「放行写操作」；无本开关时高危向量一条不发）
+  --advise                   扫描前风险评估：**不发起任何请求**，只按目标 URL 与参数给出
+                             风险等级（低/中/高/极高）、问题清单与保守参数建议。
+                             规则为确定性实现（不调用 LLM），只给建议、不改你的参数；
+                             评估后默认退出，加 --yes 才继续扫描。
+  --yes                      配合 --advise：表示「我已看过建议」，允许继续扫描
+  --confirm-extreme          配合 --advise：风险等级为「极高」时的第二道确认。
+                             --yes 只代表看过建议，本开关才代表接受可能的不可逆后果 ——
+                             把两个动作分开，避免一次回车扫平生产库。
   --no-production-mode       声明本次不是生产环境（靶场/自建演练）：关掉生产护栏，高危池与二阶写请求不再被预置抑制
   --allow-second-order-writes 允许二阶使用非幂等方法（POST/PUT/PATCH/DELETE）：二阶本质是写操作，默认仅 GET/HEAD
   --no-proxy-bypass-local    关闭本地/私网代理豁免（默认豁免：127.0.0.1/内网不走 *PROXY 环境变量，

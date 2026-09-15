@@ -1,7 +1,7 @@
 # sqli-scanner
 
 [![CI](https://img.shields.io/github/actions/workflow/status/OWNER/REPO/ci.yml?branch=main&label=CI)](https://github.com/OWNER/REPO/actions)
-[![ Tests](https://img.shields.io/badge/tests-2047%20passing-brightgreen)](#测试)
+[![ Tests](https://img.shields.io/badge/tests-2069%20passing-brightgreen)](#测试)
 
 一键式 SQL 注入检测工具。无需记忆命令行参数，打开浏览器即可使用。
 
@@ -92,7 +92,7 @@ admin-only 触发页 `/admin/panel`（users.admin 角色门禁 403）+ admin 会
 **给客户的话**：若目标是 ⛔ 等级中的数据库（SQL Server 与 Oracle 已分别于 2026-09-14/15 升级 verified，见 e2e/mssql-lab 与 e2e/oracle-lab），
 请把结论视为**待复核线索**而非可用证据——报告会在 `summary.dbmsEvidence.caveat` 中自动声明这一点。
 | **1870+ 条 payload 模板** | 含注释/编码/子句/嵌套闭合变体（1779 主库 + 82 子句 + 14 OOB）+ 672 条声明式注册表 |
-| **225 个 tamper 插件** | 覆盖 sqlmap 官方 tamper 全集（84/84）。⚠️ 绕过率口径见下文「WAF 绕过能力实测口径」 |
+| **228 个 tamper 插件** | 覆盖 sqlmap 官方 tamper 全集（84/84）。⚠️ 绕过率口径见下文「WAF 绕过能力实测口径」 |
 | **62 WAF 指纹** | 自动识别 WAF 类型并推荐 tamper 组合 |
 | **可视化报告** | 风险环形图 + 技术分布条形图 + 漏洞列表 + 数据提取树 + 检测摘要 |
 | **深度提取** | 分页聚合数据提取，绕过 UNION 限制 |
@@ -101,7 +101,7 @@ admin-only 触发页 `/admin/panel`（users.admin 角色门禁 403）+ admin 会
 | **WAF 识别接口** | `--identify-waf`：仅识别 WAF 厂商并输出推荐 tamper 链，不发起注入检测（对标 sqlmap --identify-waf） |
 | **AI 漏洞报告** | 3 角色流水线（分析师→撰写→审阅），支持多 key 容灾，自动生成专业中文安全分析报告 |
 | **利用工具** | SQL Shell / 文件读写 / OS 命令执行（需授权）。⚠️ 验证状态见下文「利用能力实测口径」：**fileRead 已跑通真实闭环**，其余仍为 mock 单测 |
-| **CLI 100+ 参数（原生引擎）** | 对标 sqlmap：--dbs/--tables/--dump/**--dump-all**/**--common-tables**/**--common-columns**/-D/-T/-C/--search/--users/--passwords/--prefix/--suffix/--time-sec/-r/--mobile/--parse-errors/--safe-url/--safe-freq/--delay/--current-user/--current-db/--hostname/--is-dba/**--identify-waf**/--skip-static/--predict-output/--test-headers/--test-path/**--hex**/--where/--param-del 等（`node bin/cli.js --help` 为准） |
+| **CLI 100+ 参数（原生引擎）** | 对标 sqlmap：--dbs/--tables/--dump/**--dump-all**/**--common-tables**/**--common-columns**/-D/-T/-C/--search/--users/--passwords/--prefix/--suffix/--time-sec/-r/--mobile/--parse-errors/--safe-url/--safe-freq/--delay/--current-user/--current-db/--hostname/--is-dba/**--identify-waf**/--skip-static/--predict-output/--test-headers/--test-path/**--hex**/--where/--param-del/**--advise**（扫描前风险评估）/**--confirm-extreme**（极高危第二道确认）等（`node bin/cli.js --help` 为准） |
 | **sqlmap 桥接参数（非原生）** | `--csrf-url` / `--csrf-token` / `--eval` / `--skip-urlencode` / `--keep-alive` / `--null-connection`：**仅当转交外部 sqlmap 进程（sqlmapBridge）时才会被传递**，本项目自有引擎不消费这些键。请勿把上表与本节混用 |
 | **-r 请求文件** | 从 Burp/curl 请求文本导入 URL/method/headers/body |
 | **中英双语** | 全界面 i18n 支持中英切换 |
@@ -174,7 +174,7 @@ backend/  ← Express + Node.js
 # 前端测试（263 个用例）
 npm test
 
-# 服务端测试（1784 个用例）
+# 服务端测试（1806 个用例）
 cd server && npm test
 
 # 全部测试
@@ -185,9 +185,46 @@ npm run test:all
 
 - TypeScript: 零错误
 - 前端测试: 263/263 通过
-- 服务端测试: 1784/1784 通过（含 NTLM HTTP 层集成测试 2 项；3 skip 为环境依赖显式跳过）
-- Tamper 插件: 225 个（含 v24 增量 20 个，对齐 sqlmap 官方 tamper 全集，含官方 CRS/libinjection 实测组合 uniontable+odbcbrace）
+- 服务端测试: 1806/1806 通过（含 NTLM HTTP 层集成测试 2 项；3 skip 为环境依赖显式跳过）
+- Tamper 插件: 228 个（含 v24 增量 20 个，对齐 sqlmap 官方 tamper 全集，含官方 CRS/libinjection 实测组合 uniontable+odbcbrace）
 - WAF 绕过能力: 200+ 插件链式组合，覆盖 62 个 WAF 厂商指纹识别 + 推荐
+
+### ⚠️ 已知问题（黑盒评测发现，**尚未修复**）
+
+**来源**：`e2e/blackbox-lab/` —— 独立第三方评测靶场。刻意**不复用项目自带靶场**（避免作者自证），
+真 MySQL 8.0.28 拼接 SQL，22 靶点（15 漏洞 + 7 安全对照）。
+真值标定：**漏洞点 15/15 成立、安全点 7/7 防护确认**（每点 3 次采样）。
+
+| 编号 | 问题 | 触发条件 | 实测现象 | 影响 |
+|---|---|---|---|---|
+| **P0** | `--test-path` 在非 200 端点误报 | 开启 `--test-path`，且目标存在返回 500/403 的路由 | 7 个安全点中 **6 个被误判为 error 注入** | 该档报告**不可直接交付客户** |
+| **P1** | DBMS 误判 | 未知（13 个点全部命中） | 真 **MySQL 8.0.28** 被判定为 **DB2** | payload 族错配，影响后续提取 |
+
+**P0 根因（已用靶场行为核验锁定）**：path 段注入后 URL 变为不存在的路径（500/403 → 404），
+而 404 页会**回显请求 URL**（Express 默认 `Cannot GET /xxx`），响应里于是出现 payload 自带的
+`extractvalue`/`SQL syntax` 等关键词，被 `ERROR_SIG` 匹配 → 误判为「数据库报错回显」。
+即 **payload 自我匹配**。（两次修复尝试均未生效，已回滚；定位路径见 `e2e/blackbox-lab/` 产物。）
+
+**复现**：
+```bash
+node e2e/blackbox-lab/selftest.mjs                                  # 先立真值（安全点应不可注入）
+node e2e/blackbox-lab/run-scan.mjs --only=F3-const500,F4-const403 --round=r2
+```
+
+**规避建议**：生产使用**不要开启 `--test-path`**；默认档（r1）实测误报 0/7。
+
+**同题对照（sqlmap 1.10.7，同一批靶点）**：
+
+| 工具 / 档位 | 漏洞检出 | 安全误报 |
+|---|---|---|
+| sqli-scanner **默认档** | 9/13 | **0/7** |
+| sqli-scanner 实战档（level5/risk3/全技术/test-headers/test-path） | 13/13 | **6/7** |
+| sqlmap（level 1 / risk 1，与默认档对齐） | 7/13 | **0/7** |
+
+**两条结论**：
+1. **默认档强于 sqlmap 同档**（9 vs 7，误报同为 0/7），且独有检出 base64 编码参数、REST path 段、堆叠通道。
+2. **「扫不出来就加参数」在本工具上不成立** —— 拉满参数后检出 100% 但误报失控。
+   默认档安全，调参需谨慎。
 
 ### WAF 绕过能力实测口径（2026-09-09 起，勿混用）
 

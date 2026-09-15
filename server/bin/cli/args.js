@@ -105,6 +105,11 @@ export function parseArgs(argv) {
     // —— 注入点扩展开关（本期新增，默认关闭，零回归）——
     else if (a === '--test-headers') args.testHeaders = true;
     else if (a === '--test-path') args.testPath = true;
+    // —— 扫描前风险评估（--advise）：只打印建议，不执行；配 --yes 才继续扫描 ——
+    else if (a === '--advise') args.advise = true;
+    else if (a === '--yes') args.yes = true;
+    // 极高危专用：`--yes` 不够，必须再加本开关（防把「我看过建议」当成「我接受后果」）
+    else if (a === '--confirm-extreme') args.confirmExtreme = true;
     else if (a === '--use-registry') args.useRegistry = true;
     else if (a === '--dump') args.dump = true;
     // [对标 sqlmap --dump-all] 全库拖库（枚举所有库 → 逐库逐表拖）

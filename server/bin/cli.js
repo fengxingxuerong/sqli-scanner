@@ -8,30 +8,22 @@
 import { ScanManager } from '../src/engine/ScanManager.js';
 import * as eventBus from '../src/core/eventBus.js';
 import { logger } from '../src/core/logger.js';
-import { readFileSync, existsSync } from 'node:fs';
-// 对标 sqlmap -r：解析 Burp/curl 文本请求文件
-import { parseRequestFile } from '../src/core/requestFileParser.js';
-// 高危 payload 池：--risk=3 时显式启用（默认池不含写文件/RCE/外连/DoS 向量）
-import { PAYLOADS, enableDestructivePayloads } from '../src/engine/payloads.js';
+// 对标 sqlmap -r：解析 Burp/curl 文本请求文件（parseRequestFile 在 args.js 消费）
 // 攻击操作（对标 sqlmap --os-cmd/--sql-shell/--file-read/--file-write）：复用引擎 Exploiter
 import { Exploiter } from '../src/engine/Exploiter.js';
 import { httpClient } from '../src/core/httpClient.js';
-// 自定义 tamper 文件加载（对标 sqlmap --tamper=path/to/script.py → 本项目 JS 插件）
-import { tamperRegistry } from '../src/core/tamper/TamperRegistry.js';
 // [P1-FIX 2026-09-05] --format 出口：原为死参数（解析后从未消费，-o 恒写 JSON）。
 // ReportGenerator 的 toCSV/toMarkdown/toHTML 与 REST /report/export 同源，直接复用。
 import { ReportGenerator } from '../src/services/ReportGenerator.js';
 // [P0-SEC 2026-09-09] --scope 接线：CLI 直走 ScanManager 不经 scanRoutes，需在本层完成
 // 「目标先校验 + 按 scanId 登记」，否则 --scope 是静默 no-op（httpClient 逐跳取用登记项）。
 import { parseScope, assertInScope, registerScanScope, releaseScanScope } from '../src/core/scopeGuard.js';
-import path from 'node:path';
 import { printHelp } from './cli/help.js';
 import {
   parseArgs,
   parseLogFile,
   resolveTamperPlugins,
   parseHeaders,
-  parseAuth,
   bodyToJsonString,
   applyRequestFile,
   buildAuth,
@@ -389,6 +381,16 @@ async function main() {
   if (args.help || (!args.url && !args.batch && !args.direct && !args.logFile)) {
     printHelp();
     process.exit(args.help ? 0 : 1);
+  }
+  // [P1 2026-09-15] --advise：扫描前风险评估。
+  // 刻意放在 checkTor/扫描之前 —— 评估**不发起任何请求**，只看 URL 与参数。
+  // 默认打印后退出；加 --yes 才继续（把「人看过建议」变成显式动作）。
+  if (args.advise) {
+    const { buildAdvice, printAdvice, allowedToContinue } = await import('./cli/advise.js');
+    const cfg = buildConfig(args);
+    const advice = buildAdvice(args, cfg);
+    printAdvice(advice, args);
+    if (!allowedToContinue(advice, args)) process.exit(0);
   }
   // 自定义 tamper 文件（--tamper=path/to/custom.js）异步加载注册（buildConfig 消费 tamperResolved）
   if (args.tamper) {
