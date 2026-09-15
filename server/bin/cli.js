@@ -69,6 +69,10 @@ export function formatReport(report, fmt = 'json') {
       : f === 'html' ? rg.toHTML(report)
       : rg.toMarkdown(report);
   }
+  if (f === 'sarif') {
+    // [批次 9 2026-09-15] SARIF 2.1.0：GitHub Security / DefectDojo 对接
+    return new ReportGenerator().toSARIF(report);
+  }
   return JSON.stringify(report, null, 2);
 }
 

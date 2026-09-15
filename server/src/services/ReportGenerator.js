@@ -323,6 +323,71 @@ export class ReportGenerator {
 
   // 导出 Markdown（原逻辑不变，仅 target 脱敏由 _forExport 覆盖）
   // [2026-09-13] 交付化（只增小节）：报告元信息/执行摘要/修复建议/WAF 交战 + 漏洞表 CVSS 列
+  // [批次 9 2026-09-15] SARIF 2.1.0 导出：对接 GitHub Security / DefectDojo / 甲方安全平台。
+  // 每个漏洞一个 result；规则按 technique 注册（一个 technique 一条 rule，全扫描复用）。
+  // 严重度映射：critical/high→error, medium→warning, low/info→note。
+  toSARIF(report) {
+    const r = this._forExport(report);
+    const vulns = Array.isArray(r.vulns) ? r.vulns : [];
+    const sevRank = { critical: 4, high: 3, medium: 2, low: 1, info: 0 };
+    const rules = [];
+    const ruleIds = new Set();
+    const results = [];
+    for (const v of vulns) {
+      const technique = String(v.technique || 'sql-injection');
+      const ruleId = 'SQLI-' + technique.toUpperCase().replace(/[^A-Z0-9]/g, '-');
+      if (!ruleIds.has(ruleId)) {
+        ruleIds.add(ruleId);
+        rules.push({
+          id: ruleId,
+          name: { text: 'SQL injection via ' + technique },
+          shortDescription: { text: 'SQL injection (' + technique + ')' },
+          fullDescription: { text: 'SQL 注入漏洞，检测技术: ' + technique + '。攻击者可通过该注入点读取/篡改数据库数据，视数据库权限可能进一步获取操作系统命令执行。' },
+          helpUri: 'https://owasp.org/www-community/attacks/SQL_Injection',
+          defaultConfiguration: { level: 'warning' },
+        });
+      }
+      const sev = String(v.severity || 'high').toLowerCase();
+      const level = (sevRank[sev] ?? 3) >= 3 ? 'error' : (sevRank[sev] ?? 3) >= 2 ? 'warning' : 'note';
+      const point = (r.points || []).find((p) => p.id === v.pointId) || {};
+      const url = point.url || r.target?.url || '';
+      const uri = (() => { try { return new URL(url).pathname + (new URL(url).search || ''); } catch { return url; } })();
+      results.push({
+        ruleId,
+        ruleIndex: rules.findIndex((x) => x.id === ruleId),
+        level,
+        message: { text: '[' + technique + '] ' + (v.evidence || '').slice(0, 400) },
+        locations: [{
+          physicalLocation: {
+            artifactLocation: { uri: uri || '/' },
+          },
+          // 逻辑位置携带参数名与请求信息（SARIF logicalLocations 供平台聚合）
+          logicalLocations: [{ name: point.param || 'unknown', kind: 'resource' }],
+        }],
+        partialFingerprints: { scanPointId: v.pointId || '' },
+        properties: {
+          dbms: v.dbms || null,
+          payloads: (v.payloads || []).slice(0, 5),
+          method: r.target?.method || 'GET',
+        },
+      });
+    }
+    return JSON.stringify({
+      $schema: 'https://json.schemastore.org/sarif-2.1.0.json',
+      version: '2.1.0',
+      runs: [{
+        tool: {
+          driver: {
+            name: 'sqli-scanner',
+            informationUri: 'https://owasp.org/www-community/attacks/SQL_Injection',
+            rules,
+          },
+        },
+        results,
+      }],
+    }, null, 2);
+  }
+
   toMarkdown(report) {
     const r = this._forExport(report);
     const d = buildDelivery(report);

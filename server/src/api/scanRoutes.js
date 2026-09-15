@@ -905,9 +905,9 @@ export function createRoutes({ scanManager, eventBus: bus = eventBus, reportToke
     const rawFormat = (req.query.format || 'json').toString().toLowerCase();
     // [P0-SEC 2026-09-08] format 白名单：它既进 Content-Type 又拼进 Content-Disposition 文件名，
     // 原实现直接透传 `req.query.format` → 带 `"` / CR / LF 的取值可闭合头字段或注入额外响应头。
-    const FORMAT_EXT = { json: 'json', html: 'html', csv: 'csv', markdown: 'markdown', md: 'markdown', 'db-json': 'db.json' };
+    const FORMAT_EXT = { json: 'json', html: 'html', csv: 'csv', markdown: 'markdown', md: 'markdown', 'db-json': 'db.json', sarif: 'sarif' };
     if (!Object.prototype.hasOwnProperty.call(FORMAT_EXT, rawFormat)) {
-      return res.status(400).json({ code: ErrorCode.INVALID_PARAM, data: null, message: 'format 非法，仅支持 json/html/csv/markdown/md/db-json' });
+      return res.status(400).json({ code: ErrorCode.INVALID_PARAM, data: null, message: 'format 非法，仅支持 json/html/csv/markdown/md/db-json/sarif' });
     }
     const format = rawFormat;
     const out = sm.exportReport(req.params.id, format);
@@ -918,6 +918,7 @@ export function createRoutes({ scanManager, eventBus: bus = eventBus, reportToke
       html: 'text/html; charset=utf-8',
       csv: 'text/csv; charset=utf-8',
       markdown: 'text/markdown; charset=utf-8',
+      sarif: 'application/sarif+json; charset=utf-8',
       md: 'text/markdown; charset=utf-8',
       json: 'application/json; charset=utf-8',
       'db-json': 'application/json; charset=utf-8',
