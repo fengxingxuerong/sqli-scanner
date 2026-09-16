@@ -1,0 +1,505 @@
+{
+  "rows": [
+    {
+      "id": 1,
+      "desc": "GET 单引号字符串",
+      "ours": {
+        "hit": true,
+        "techs": [
+          "boolean",
+          "inline"
+        ],
+        "ms": 348,
+        "verdict": "no_vulnerability_detected"
+      },
+      "smap": {
+        "hit": true,
+        "techs": [
+          "boolean",
+          "union"
+        ],
+        "ms": 3202
+      },
+      "agree": true
+    },
+    {
+      "id": 2,
+      "desc": "GET 数值型",
+      "ours": {
+        "hit": true,
+        "techs": [
+          "error"
+        ],
+        "ms": 417,
+        "verdict": "no_vulnerability_detected"
+      },
+      "smap": {
+        "hit": true,
+        "techs": [
+          "boolean",
+          "union"
+        ],
+        "ms": 2234
+      },
+      "agree": true
+    },
+    {
+      "id": 3,
+      "desc": "GET 单引号+括号",
+      "ours": {
+        "hit": true,
+        "techs": [
+          "boolean",
+          "inline"
+        ],
+        "ms": 381,
+        "verdict": "no_vulnerability_detected"
+      },
+      "smap": {
+        "hit": true,
+        "techs": [
+          "boolean",
+          "union"
+        ],
+        "ms": 2282
+      },
+      "agree": true
+    },
+    {
+      "id": 4,
+      "desc": "GET 双引号+括号",
+      "ours": {
+        "hit": true,
+        "techs": [
+          "boolean"
+        ],
+        "ms": 579,
+        "verdict": "no_vulnerability_detected"
+      },
+      "smap": {
+        "hit": true,
+        "techs": [
+          "boolean",
+          "union"
+        ],
+        "ms": 2596
+      },
+      "agree": true
+    },
+    {
+      "id": 5,
+      "desc": "GET 双注入单引号",
+      "ours": {
+        "hit": true,
+        "techs": [
+          "boolean",
+          "inline"
+        ],
+        "ms": 415,
+        "verdict": "no_vulnerability_detected"
+      },
+      "smap": {
+        "hit": true,
+        "techs": [
+          "boolean",
+          "union"
+        ],
+        "ms": 2432
+      },
+      "agree": true
+    },
+    {
+      "id": 6,
+      "desc": "GET 双注入双引号",
+      "ours": {
+        "hit": true,
+        "techs": [
+          "boolean"
+        ],
+        "ms": 543,
+        "verdict": "no_vulnerability_detected"
+      },
+      "smap": {
+        "hit": true,
+        "techs": [
+          "boolean",
+          "union"
+        ],
+        "ms": 2362
+      },
+      "agree": true
+    },
+    {
+      "id": 8,
+      "desc": "GET 布尔盲注",
+      "ours": {
+        "hit": true,
+        "techs": [
+          "boolean",
+          "inline"
+        ],
+        "ms": 378,
+        "verdict": "no_vulnerability_detected"
+      },
+      "smap": {
+        "hit": true,
+        "techs": [
+          "boolean",
+          "union"
+        ],
+        "ms": 2276
+      },
+      "agree": true
+    },
+    {
+      "id": 9,
+      "desc": "GET 时间盲注",
+      "ours": {
+        "hit": true,
+        "techs": [
+          "boolean",
+          "inline"
+        ],
+        "ms": 372,
+        "verdict": "no_vulnerability_detected"
+      },
+      "smap": {
+        "hit": true,
+        "techs": [
+          "boolean",
+          "union"
+        ],
+        "ms": 2193
+      },
+      "agree": true
+    },
+    {
+      "id": 10,
+      "desc": "GET 时间盲注双引号",
+      "ours": {
+        "hit": true,
+        "techs": [
+          "boolean"
+        ],
+        "ms": 678,
+        "verdict": "no_vulnerability_detected"
+      },
+      "smap": {
+        "hit": true,
+        "techs": [
+          "boolean",
+          "union"
+        ],
+        "ms": 2723
+      },
+      "agree": true
+    },
+    {
+      "id": 23,
+      "desc": "OR/AND 过滤",
+      "ours": {
+        "hit": true,
+        "techs": [
+          "error",
+          "inline"
+        ],
+        "ms": 210,
+        "verdict": "no_vulnerability_detected"
+      },
+      "smap": {
+        "hit": true,
+        "techs": [
+          "union"
+        ],
+        "ms": 15432
+      },
+      "agree": true
+    },
+    {
+      "id": 25,
+      "desc": "注释过滤",
+      "ours": {
+        "hit": true,
+        "techs": [
+          "boolean",
+          "inline"
+        ],
+        "ms": 213,
+        "verdict": "no_vulnerability_detected"
+      },
+      "smap": {
+        "hit": true,
+        "techs": [
+          "boolean"
+        ],
+        "ms": 3556
+      },
+      "agree": true
+    },
+    {
+      "id": 26,
+      "desc": "空格过滤",
+      "ours": {
+        "hit": true,
+        "techs": [
+          "error",
+          "boolean",
+          "inline"
+        ],
+        "ms": 168,
+        "verdict": "no_vulnerability_detected"
+      },
+      "smap": {
+        "hit": false,
+        "techs": [],
+        "ms": 14700
+      },
+      "agree": false
+    },
+    {
+      "id": 28,
+      "desc": "UNION SELECT 过滤",
+      "ours": {
+        "hit": true,
+        "techs": [
+          "union",
+          "error",
+          "boolean",
+          "inline"
+        ],
+        "ms": 204,
+        "verdict": "no_vulnerability_detected"
+      },
+      "smap": {
+        "hit": true,
+        "techs": [
+          "boolean",
+          "union"
+        ],
+        "ms": 2146
+      },
+      "agree": true
+    },
+    {
+      "id": 29,
+      "desc": "UNION 过滤",
+      "ours": {
+        "hit": true,
+        "techs": [
+          "error",
+          "inline"
+        ],
+        "ms": 252,
+        "verdict": "no_vulnerability_detected"
+      },
+      "smap": {
+        "hit": false,
+        "techs": [],
+        "ms": 25196
+      },
+      "agree": false
+    },
+    {
+      "id": 30,
+      "desc": "UNION+注释过滤",
+      "ours": {
+        "hit": true,
+        "techs": [
+          "error",
+          "boolean",
+          "inline"
+        ],
+        "ms": 216,
+        "verdict": "no_vulnerability_detected"
+      },
+      "smap": {
+        "hit": true,
+        "techs": [
+          "boolean"
+        ],
+        "ms": 3555
+      },
+      "agree": true
+    },
+    {
+      "id": 31,
+      "desc": "堆叠注入",
+      "ours": {
+        "hit": true,
+        "techs": [
+          "error",
+          "boolean"
+        ],
+        "ms": 461,
+        "verdict": "no_vulnerability_detected"
+      },
+      "smap": {
+        "hit": true,
+        "techs": [
+          "boolean",
+          "union"
+        ],
+        "ms": 2118
+      },
+      "agree": true
+    },
+    {
+      "id": 32,
+      "desc": "宽字节",
+      "ours": {
+        "hit": true,
+        "techs": [
+          "boolean",
+          "inline"
+        ],
+        "ms": 328,
+        "verdict": "no_vulnerability_detected"
+      },
+      "smap": {
+        "hit": true,
+        "techs": [
+          "boolean",
+          "union"
+        ],
+        "ms": 2343
+      },
+      "agree": true
+    },
+    {
+      "id": 38,
+      "desc": "堆叠+数值",
+      "ours": {
+        "hit": true,
+        "techs": [
+          "error",
+          "boolean"
+        ],
+        "ms": 374,
+        "verdict": "no_vulnerability_detected"
+      },
+      "smap": {
+        "hit": true,
+        "techs": [
+          "boolean",
+          "union"
+        ],
+        "ms": 2043
+      },
+      "agree": true
+    },
+    {
+      "id": 46,
+      "desc": "ORDER BY 注入",
+      "ours": {
+        "hit": true,
+        "techs": [
+          "error"
+        ],
+        "ms": 172,
+        "verdict": "no_vulnerability_detected"
+      },
+      "smap": {
+        "hit": true,
+        "techs": [
+          "boolean"
+        ],
+        "ms": 7604
+      },
+      "agree": true
+    },
+    {
+      "id": 47,
+      "desc": "ORDER BY 单引号",
+      "ours": {
+        "hit": true,
+        "techs": [
+          "inline"
+        ],
+        "ms": 246,
+        "verdict": "no_vulnerability_detected"
+      },
+      "smap": {
+        "hit": true,
+        "techs": [
+          "boolean"
+        ],
+        "ms": 8621
+      },
+      "agree": true
+    },
+    {
+      "id": 54,
+      "desc": "无回显数值",
+      "ours": {
+        "hit": true,
+        "techs": [
+          "error",
+          "boolean"
+        ],
+        "ms": 378,
+        "verdict": "no_vulnerability_detected"
+      },
+      "smap": {
+        "hit": true,
+        "techs": [
+          "boolean",
+          "union"
+        ],
+        "ms": 2269
+      },
+      "agree": true
+    },
+    {
+      "id": 61,
+      "desc": "挑战多过滤",
+      "ours": {
+        "hit": true,
+        "techs": [
+          "error",
+          "inline"
+        ],
+        "ms": 206,
+        "verdict": "no_vulnerability_detected"
+      },
+      "smap": {
+        "hit": false,
+        "techs": [],
+        "ms": 27311
+      },
+      "agree": false
+    },
+    {
+      "id": 66,
+      "desc": "XML 注入",
+      "ours": {
+        "hit": true,
+        "techs": [
+          "boolean",
+          "inline"
+        ],
+        "ms": 369,
+        "verdict": "no_vulnerability_detected"
+      },
+      "smap": {
+        "hit": true,
+        "techs": [
+          "boolean",
+          "union"
+        ],
+        "ms": 2263
+      },
+      "agree": true
+    }
+  ],
+  "summary": {
+    "oursRate": "100.0",
+    "smapRate": "87.0",
+    "agreeRate": "87.0",
+    "both": 20,
+    "oursOnly": 3,
+    "smapOnly": 0,
+    "neither": 0,
+    "oursAvgMs": 344,
+    "smapAvgMs": 3713
+  }
+}

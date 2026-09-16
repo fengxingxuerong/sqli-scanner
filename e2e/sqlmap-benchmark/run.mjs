@@ -23,6 +23,12 @@ const SM_TIMEOUT = Number(process.env.SM_TIMEOUT_MS) || 60_000;
 const SMAP_TIMEOUT = Number(process.env.SQLMAP_TIMEOUT_S) || 120;
 
 const TECHNIQUES = ['union', 'error', 'boolean', 'time', 'stacked', 'inline'];
+
+// [--l3 2026-09-16] 高配对标轮：sqlmap --level=3 --risk=2（检验我方相对高配 sqlmap 的位置，而非只对标浅配置）
+const L3_MODE = process.argv.includes('--l3');
+const SMAP_LEVEL = L3_MODE ? 3 : 1;
+const SMAP_RISK = L3_MODE ? 2 : 1;
+const TAG = L3_MODE ? 'level3' : 'level1';
 const baseConfig = {
   concurrency: 2, ratePerSec: 0, retry: 0, timeoutMs: 15_000,
   techniques: TECHNIQUES,
@@ -80,7 +86,7 @@ function runSqlmap(sc) {
     const startedAt = Date.now();
     const args = [
       '-u', `${sc.url}?${sc.param}=1`,
-      '--batch', '--level=1', '--risk=1', '--threads=4',
+      '--batch', `--level=${SMAP_LEVEL}`, `--risk=${SMAP_RISK}`, '--threads=4',
       '--technique=BEUSQ', '--no-cast', '--flush-session',
       `--output-dir=${resolve(OUT_DIR, 'sqlmap-raw')}`,
       '--timeout=10', '--retries=1',
@@ -155,7 +161,7 @@ async function main() {
   const oursAvgMs = Math.round(rows.filter((r) => r.ours.hit).reduce((a, r) => a + r.ours.ms, 0) / Math.max(1, rows.filter((r) => r.ours.hit).length));
   const smapAvgMs = Math.round(rows.filter((r) => r.smap.hit).reduce((a, r) => a + r.smap.ms, 0) / Math.max(1, rows.filter((r) => r.smap.hit).length));
 
-  console.log(`\n==== 对标汇总（${rows.length} 关，SQLite 靶场）====`);
+  console.log(`\n==== [${TAG}] 对标汇总（${rows.length} 关，SQLite 靶场）====`);
   console.log(`双方一致: ${both} | 仅我方: ${oursOnly} | 仅 sqlmap: ${smapOnly} | 双方未检出: ${neither}`);
   console.log(`我方命中率: ${oursRate}% | sqlmap 命中率: ${smapRate}% | 结论一致率: ${agreeRate}%`);
   console.log(`平均耗时（命中场景）: 我方 ${fmtMs(oursAvgMs)} vs sqlmap ${fmtMs(smapAvgMs)}`);
@@ -193,8 +199,8 @@ async function main() {
     '',
   ].join('\r\n');
 
-  writeFileSync(resolve(OUT_DIR, `sqlmap-benchmark-${new Date().toISOString().slice(0, 10)}.md`), md, 'utf8');
-  writeFileSync(resolve(OUT_DIR, 'results.json'), JSON.stringify({ rows, summary: { oursRate, smapRate, agreeRate, both, oursOnly, smapOnly, neither, oursAvgMs, smapAvgMs } }, null, 2), 'utf8');
+  writeFileSync(resolve(OUT_DIR, `sqlmap-benchmark-${new Date().toISOString().slice(0, 10)}-${TAG}.md`), md, 'utf8');
+  writeFileSync(resolve(OUT_DIR, `results-${TAG}.json`), JSON.stringify({ rows, summary: { oursRate, smapRate, agreeRate, both, oursOnly, smapOnly, neither, oursAvgMs, smapAvgMs } }, null, 2), 'utf8');
   console.log(`\n报告已写入 ${resolve(OUT_DIR)}`);
 }
 
