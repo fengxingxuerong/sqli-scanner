@@ -214,6 +214,14 @@ export function createApp() {
 
   // 兜底错误处理
   app.use((err, req, res, next) => {
+    // [交付缺口修复 2026-09-16] body-parser 错误分流：客户端输入问题按 400/413 语义化返回，
+    // 不再落入 9001「服务器内部错误」（系统本就不崩，但状态码与提示误导排障方向）。
+    if (err && (err.type === 'entity.parse.failed' || (err instanceof SyntaxError && err.status === 400 && 'body' in err))) {
+      return res.status(400).json({ code: 1002, data: null, message: `请求体不是合法 JSON：${String(err.message).slice(0, 120)}` });
+    }
+    if (err && err.type === 'entity.too.large') {
+      return res.status(413).json({ code: 1004, data: null, message: '请求体超出大小限制（2mb）' });
+    }
     // [P0-FIX] 打印完整堆栈（生产可脱敏），便于线上排障定位
     logger.error(`未捕获的异常：${err.message}\n${err.stack || ''}`);
     res.status(500).json({ code: 9001, data: null, message: '服务器内部错误' });
