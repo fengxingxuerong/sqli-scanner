@@ -210,23 +210,26 @@ export const DB_VERSION = {
   // ClickHouse：version() 返回 "23.8.1.1" 等纯数字串，加 CH 专属回显特征避免与 SQLite 误判
   ClickHouse: { func: 'version()', sig: /^\d+\.\d+\.\d+(\.\d+)?$/ },
   // —— C 方向新增（最小适配，func 用常量串/版本函数 + sig 标识，待真实环境验证）——
-  // DB2：以常量串 'DB2' 回显标识（确保 UNION 回显可识别；DB2 无简单 version() 标量函数）
-  DB2: { func: "'DB2'", sig: /DB2/i },
+  // [P1-FIX 2026-09-16] DB2：原 sig=/DB2/i 会命中常量串本身 —— 任何支持 UNION 的库都能
+  // 执行 SELECT 'DB2' 并原样返回，于是「前 9 个库都没识别出来」的目标必然被判 DB2
+  // （blackbox-lab 实测：真 MySQL 8.0.28 被判 DB2）。现要求真实引擎特征文本；
+  // DB2 定库改由报错签名（DB2 SQL Error / SQLSTATE）与专属伪表承担。
+  DB2: { func: "'DB2'", sig: /IBM\s+DB2|DB2\s+(?:SQL|Database|for\s)|DB2\/[A-Za-z0-9]/i },
   // Sybase（ASE）：@@version 含 "Adaptive Server Enterprise" 标识
   Sybase: { func: '@@version', sig: /(Adaptive Server|Sybase|ASE)/i },
   // Firebird：rdb$get_context 返回引擎版本（数字串）
   Firebird: { func: "rdb$get_context('SYSTEM','ENGINE_VERSION')", sig: /^\d+\.\d+/ },
-  // Informix：以常量串 'Informix' 回显标识
-  Informix: { func: "'Informix'", sig: /Informix/i },
+  // [P1-FIX 2026-09-16] Informix：同上 —— 常量串无区分度，收紧为需版本/产品特征文本
+  Informix: { func: "'Informix'", sig: /Informix\s+(?:Dynamic|Server|IDS|Version)|IBM\s+Informix/i },
   // H2：version() 返回 "1.4.200" 等纯数字串
   H2: { func: 'version()', sig: /^\d+\.\d+/ },
   // —— D 方向新增（最小适配，待真实环境验证）——
-  // Access：无 version() 原生函数，用常量串 'ACCESS' 回显标识
-  Access: { func: "'ACCESS'", sig: /ACCESS/i },
-  // HSQLDB：用常量串 'HSQLDB' 回显标识
-  HSQLDB: { func: "'HSQLDB'", sig: /HSQLDB/i },
-  // Derby：用常量串 'DERBY' 回显标识
-  Derby: { func: "'DERBY'", sig: /DERBY/i },
+  // [P1-FIX 2026-09-16] Access：同上
+  Access: { func: "'ACCESS'", sig: /Microsoft\s+(?:Office\s+)?Access|Access\s+Database\s+Engine/i },
+  // [P1-FIX 2026-09-16] HSQLDB：同上
+  HSQLDB: { func: "'HSQLDB'", sig: /HSQLDB\s+\d|HyperSQL|org\.hsqldb/i },
+  // [P1-FIX 2026-09-16] Derby：同上
+  Derby: { func: "'DERBY'", sig: /Apache\s+Derby|Derby\s+\d|org\.apache\.derby/i },
   // MonetDB：用 sys.version 视图回显版本号
   MonetDB: { func: '(SELECT sys_version FROM sys.version)', sig: /^\d+\.\d+/ },
 };
