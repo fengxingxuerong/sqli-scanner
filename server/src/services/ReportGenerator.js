@@ -781,22 +781,69 @@ export class ReportGenerator {
     return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
       <title>SQL 注入检测报告 ${report.scanId}</title>
       <style>
-        body{font-family:system-ui,'Microsoft YaHei',sans-serif;margin:24px;color:#222}
-        h1{font-size:20px}h2{font-size:16px;margin-top:24px}
-        table{border-collapse:collapse;width:100%;margin-top:8px}
-        th,td{border:1px solid #ccc;padding:6px 8px;font-size:13px;text-align:left}
-        th{background:#f5f5f5}.critical{color:#c62828;font-weight:bold}
-        .high{color:#ef6c00}.medium{color:#f9a825}.low{color:#9e9e9e}
-        .meta{color:#666;font-size:13px}pre{background:#f7f7f7;padding:10px;border-radius:6px;white-space:pre-wrap;word-break:break-all}
-        .footer{margin-top:32px;padding-top:12px;border-top:1px solid #eee;color:#999;font-size:12px;text-align:center}
-        .poc{border:1px solid #e3e3e3;border-radius:6px;padding:4px 12px 10px;margin:12px 0}
-        .verdict{border-left:4px solid #f9a825;background:#fffbe6;padding:6px 14px 10px;margin:12px 0;border-radius:4px}
-        .verdict.bad{border-left-color:#c62828;background:#fff3f2}
-        .verdict h2{margin:8px 0 4px;font-size:15px}
-        .verdict ul{margin:4px 0 4px 18px;padding:0;font-size:13px;color:#5a4a00}
-        .poc h3{font-size:14px;margin:10px 0 4px}details{margin:6px 0}summary{cursor:pointer;font-size:13px;color:#555}
-        pre.curl{background:#0f1115;color:#d7e0ea;border-radius:6px;padding:10px;white-space:pre-wrap;word-break:break-all}
-      </style></head><body>
+  /* —— Fathom Information Design (preset 04) —— 数据墨青 / 冷静中性 / 语义风险色 */
+  :root{
+    --ink:#1c2430;          /* 近黑蓝正文 */
+    --muted:#5a6b7d;        /* 次级灰蓝 */
+    --faint:#93a1ae;
+    --paper:#f4f6f8;        /* 冷纸底 */
+    --card:#ffffff;
+    --hairline:#d7dee5;
+    --hairline-strong:#b8c4ce;
+    --data:#0f5e6b;         /* 数据墨青（主色） */
+    --data-soft:#e3eff1;
+    --risk-critical:#8c1d2f;--risk-high:#b3451f;--risk-medium:#9a6d0b;--risk-low:#5f6f5f;
+    --mono:"Cascadia Code","JetBrains Mono",Consolas,ui-monospace,monospace;
+  }
+  body{font-family:"Segoe UI","Microsoft YaHei",sans-serif;margin:0;color:var(--ink);
+       background:var(--paper);line-height:1.6;font-size:14px}
+  .wrap{max-width:1060px;margin:0 auto;padding:28px 40px 60px}
+  h1{font-size:24px;font-weight:600;letter-spacing:.01em;margin:6px 0 4px;color:var(--ink)}
+  h2{font-size:16px;font-weight:600;margin:34px 0 10px;padding-bottom:6px;
+     border-bottom:1px solid var(--hairline-strong);color:var(--ink)}
+  h3{font-size:14px;font-weight:600;margin:12px 0 4px}
+  .kicker{font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;
+          color:var(--data);margin-bottom:2px}
+  .meta{color:var(--muted);font-size:12.5px}
+  table{border-collapse:collapse;width:100%;margin:10px 0 6px;background:var(--card);
+        border:1px solid var(--hairline-strong);font-size:13px}
+  th,td{border-bottom:1px solid var(--hairline);padding:7px 10px;text-align:left;vertical-align:top}
+  th{font-family:var(--mono);font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;
+     color:var(--muted);background:#eef2f5;border-bottom:1px solid var(--hairline-strong)}
+  tr:last-child td{border-bottom:none}
+  code{font-family:var(--mono);font-size:12.5px;background:var(--data-soft);
+       border:1px solid var(--hairline);padding:0 4px}
+  pre{background:#10222a;color:#cfe3e8;padding:12px 14px;border-radius:4px;
+      white-space:pre-wrap;word-break:break-all;font-family:var(--mono);font-size:12.5px}
+  .critical{color:var(--risk-critical);font-weight:700}
+  .high{color:var(--risk-high);font-weight:600}
+  .medium{color:var(--risk-medium)} .low{color:var(--risk-low)}
+  .card{background:var(--card);border:1px solid var(--hairline-strong);border-radius:6px;
+        padding:14px 18px;margin:14px 0}
+  .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--hairline);
+        border:1px solid var(--hairline-strong);margin:14px 0}
+  .grid>div{background:var(--card);padding:12px 16px}
+  .grid .num{font-family:var(--mono);font-size:22px;font-weight:600;color:var(--data)}
+  .grid .lbl{font-size:11.5px;color:var(--muted)}
+  .footer{margin-top:40px;padding-top:14px;border-top:1px solid var(--hairline-strong);
+          color:var(--faint);font-size:11.5px;font-family:var(--mono)}
+  .poc{border:1px solid var(--hairline);border-radius:6px;padding:4px 14px 12px;
+       margin:14px 0;background:var(--card)}
+  .poc h3{margin:12px 0 6px}
+  .verdict{border-left:4px solid var(--risk-medium);background:#fbf7ec;padding:8px 16px 12px;
+           margin:16px 0;border-radius:4px}
+  .verdict.bad{border-left-color:var(--risk-critical);background:#fdf3f2}
+  .verdict h2{border-bottom:none;margin:6px 0 4px;font-size:15px}
+  .verdict ul{margin:4px 0 4px 18px;padding:0;font-size:13px;color:#6a5a20}
+  details{margin:8px 0}summary{cursor:pointer;font-size:12.5px;color:var(--muted)}
+  pre.curl{background:#10222a;color:#cfe3e8}
+  .sari-badge{font-family:var(--mono);font-size:10px;color:var(--faint)}
+  @media print{ body{background:#fff} .wrap{padding:0} .card,.poc{break-inside:avoid} }
+  </style>
+</head>
+<body>
+      <div class="wrap">
+      <div class="kicker">SQL Injection Assessment · Evidence-Grade Report</div>
       <h1>SQL 注入检测报告</h1>
       <p class="meta">扫描ID：${this._escape(report.scanId)} · 风险等级：<b>${this._escape(report.riskLevel)}</b> · 数据库：${this._escape(report.dbms || '-')}</p>
       <p class="meta">目标：${renderUrlLink(report.target?.baseUrl)} · 注入点：${(report.points || []).length} · 漏洞：${(report.vulns || []).length}</p>
@@ -812,7 +859,7 @@ export class ReportGenerator {
       ${pocSection}
       ${wafSection}
       <footer class="footer">本报告仅供授权安全测试使用。未获授权对任何系统进行扫描、测试或数据提取均可能违反法律法规，请勿用于非法用途。</footer>
-      </body></html>`;
+      </div></body></html>`;
   }
 
   _escape(s) {
