@@ -75,8 +75,13 @@ test('D: DB_VERSION 回显标识设置正确（常量串/子查询）', () => {
     assert.ok(DB_VERSION[db], `${db} 应有 DB_VERSION 条目`);
     assert.ok(DB_VERSION[db].func.includes(expectVers[db]), `${db} 版本回显应含 ${expectVers[db]}`);
   }
-  // 货币符号/标识签名可命中对应常量串
-  assert.ok(DB_VERSION.Access.sig.test('ACCESS'), 'Access 签名应命中 ACCESS');
+  // [P1-FIX 2026-09-16 口径跟随] sig 已收紧为「真机回显产品特征文本」：
+  //   · 必须命中真机典型版本/产品串（有定库区分度的证据）
+  //   · 不得命中裸常量串（防回归回无区分度的旧口径）
+  assert.ok(DB_VERSION.Access.sig.test('Microsoft Access Database Engine 2016'), 'Access 签名应命中真机产品串');
+  assert.ok(!DB_VERSION.Access.sig.test('ACCESS'), 'Access 签名不应命中裸常量串（收紧口径）');
+  assert.ok(DB_VERSION.HSQLDB.sig.test('HSQLDB 2.7.1'), 'HSQLDB 签名应命中真机版本串');
+  assert.ok(DB_VERSION.Derby.sig.test('Apache Derby 10.17'), 'Derby 签名应命中真机产品串');
   assert.ok(DB_VERSION.MonetDB.sig.test('11.39.11'), 'MonetDB 签名应命中版本号');
 });
 

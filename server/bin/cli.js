@@ -15,6 +15,7 @@ import { httpClient } from '../src/core/httpClient.js';
 // [P1-FIX 2026-09-05] --format 出口：原为死参数（解析后从未消费，-o 恒写 JSON）。
 // ReportGenerator 的 toCSV/toMarkdown/toHTML 与 REST /report/export 同源，直接复用。
 import { ReportGenerator } from '../src/services/ReportGenerator.js';
+import * as scanLedger from '../src/services/scanLedger.js';
 // [P0-SEC 2026-09-09] --scope 接线：CLI 直走 ScanManager 不经 scanRoutes，需在本层完成
 // 「目标先校验 + 按 scanId 登记」，否则 --scope 是静默 no-op（httpClient 逐跳取用登记项）。
 import { parseScope, assertInScope, registerScanScope, releaseScanScope } from '../src/core/scopeGuard.js';
@@ -375,6 +376,34 @@ async function runIdentifyWaf(args) {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
+  // [goal 批次 A-2] 台账检索子命令：node cli.js ledger list | ledger show <scanId>
+  const argvRaw = process.argv.slice(2);
+  if (argvRaw[0] === 'ledger') {
+    const { listScans, getScan } = await import('../src/services/scanLedger.js');
+    const sub = argvRaw[1] || 'list';
+    if (sub === 'list') {
+      const rows = listScans(Number(argvRaw[2]) || 50);
+      if (!rows.length) { console.log('（台账为空）'); process.exit(0); }
+      console.log(`共 ${rows.length} 次扫描（新→旧）：`);
+      for (const r of rows) {
+        console.log(`  ${r.scanId}  ${r.finishedAt || ''}  ${r.target}  vulns=${r.vulns} verdict=${r.verdict || '-'}`);
+      }
+      process.exit(0);
+    }
+    if (sub === 'show') {
+      const id = argvRaw[2];
+      if (!id) { console.error('用法: cli.js ledger show <scanId>'); process.exit(1); }
+      const rec = getScan(id);
+      if (!rec) { console.error(`台账无此扫描: ${id}`); process.exit(1); }
+      console.log(JSON.stringify(rec.meta, null, 2));
+      console.log('文件清单:');
+      for (const f of rec.files) console.log('  ' + f);
+      console.log(`目录: ${rec.dir}`);
+      process.exit(0);
+    }
+    console.error(`未知子命令: ledger ${sub}（支持 list / show）`);
+    process.exit(1);
+  }
   // 对标 sqlmap -r：请求文件优先于 -u，先应用再校验目标参数
   if (args.requestFile && !applyRequestFile(args)) process.exit(1);
   // 对标 sqlmap -l / -m：日志文件与批量文件同样可替代 -u
@@ -471,6 +500,14 @@ async function main() {
         if (r.report) {
           const safeName = r.url.replace(/[^a-zA-Z0-9.-]/g, '_').slice(0, 100);
           writeFileSync(join(args.out, `${safeName}.${ext}`), formatReport(r.report, fmt), 'utf-8');
+          // [goal 批次 A-2] 扫描台账：每次扫描自动登记可追溯快照（meta/report/poc）
+          try {
+            const rgLedger = new ReportGenerator();
+            scanLedger.recordScan(r.report, {
+              html: rgLedger.toHTML(r.report),
+              markdown: rgLedger.toMarkdown(r.report),
+            });
+          } catch (e) { console.error(`台账登记失败: ${e.message}`); }
         }
       }
       console.error(`报告已写入 ${args.out}/（格式 ${fmt}）`);
@@ -567,7 +604,27 @@ async function main() {
     const { writeFileSync } = await import('node:fs');
     // [P1-FIX 2026-09-05] 按 --format 分发导出（json|csv|markdown|html），与 REST /report/export 同源
     const fmt = String(args.format || 'json').toLowerCase();
-    writeFileSync(args.out, formatReport(report, fmt), 'utf-8');
+    // [goal 批次 A-3] -o 目录语义：路径是已存在目录或以分隔符结尾 → 写 report.<ext> 组
+    //（sqlmap 风格），否则保持单文件兼容。交付默认 --format html 时同时落 md 便于交接。
+    const outIsDir = (() => { try { return require('node:fs').statSync(args.out).isDirectory(); } catch { return /[\\/]$/.test(args.out); } })();
+    if (outIsDir) {
+      const { mkdirSync } = await import('node:fs');
+      const { join: pj } = await import('node:path');
+      mkdirSync(args.out, { recursive: true });
+      writeFileSync(pj(args.out, `report.${fmt === 'markdown' || fmt === 'md' ? 'md' : fmt}`), formatReport(report, fmt), 'utf-8');
+      if (fmt === 'html') writeFileSync(pj(args.out, 'report.md'), formatReport(report, 'markdown'), 'utf-8');
+      if (fmt === 'markdown' || fmt === 'md') writeFileSync(pj(args.out, 'report.html'), formatReport(report, 'html'), 'utf-8');
+    } else {
+      writeFileSync(args.out, formatReport(report, fmt), 'utf-8');
+    }
+    // [goal 批次 A-2] 扫描台账：单 URL 模式自动登记可追溯快照（meta/report/poc）
+    try {
+      const rgLedger = new ReportGenerator();
+      scanLedger.recordScan(report, {
+        html: rgLedger.toHTML(report),
+        markdown: rgLedger.toMarkdown(report),
+      });
+    } catch (e) { console.error(`台账登记失败: ${e.message}`); }
     console.error(`报告已写入 ${args.out}（格式 ${fmt}）`);
   } else if (enumActive || args.dump) {
     // 枚举/拖库模式：默认打印 report.data 精简视图（文本，对标 sqlmap 终端输出）

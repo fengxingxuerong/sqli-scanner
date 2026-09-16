@@ -1,0 +1,8 @@
+e2e/
+node_modules/
+dist/
+src-tauri/gen/
+src-tauri/target/
+*.log
+*.err
+fix-eslint.mjs

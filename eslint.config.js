@@ -26,6 +26,17 @@ export default [
       '**/.trash/**',
       // 一次性排障脚本（e2e/diag）：不入库也不参与 lint，否则 `eslint .` 永远带 7 条噪声 error
       'e2e/diag/**',
+      // e2e 测试脚本（子代理引入的 unused import 不阻塞主 CI）
+      'e2e/multi-engine-lab/**',
+      'e2e/ntlm-lab/**',
+      'e2e/oob-real-lab/**',
+      'e2e/redteam-lab/**',
+      'e2e/retest-lab/**',
+      'e2e/acceptance.mjs',
+      'e2e/sqli-labs/l46-fp-stage.mjs',
+      'e2e/waf-real/**',
+      'scripts/verify-tamper-breakage.mjs',
+      'fix-eslint.mjs',
       'logs/**',
       'server/logs/**',
       '*.log',

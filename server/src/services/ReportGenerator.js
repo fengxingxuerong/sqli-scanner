@@ -693,23 +693,57 @@ export class ReportGenerator {
   }
 
   // PoC 条目归一化：markdown / html 共用同一取数与标题规则，避免两侧漂移
+  // [goal 批次 A-1] payloads 逐条展开：每个漏洞的每条 payload 各生成一条可复放 PoC
+  //（主命中 = payloads[0]，与既有单条行为兼容；其余为同点补充 payload，均标注来源）。
+  // buildPocEvidence 按每条 payload 重算请求形态，满足「可逐条手工复放验证」的交付口径。
   _pocEntries(r) {
     const out = [];
     let n = 0;
     for (const v of r.vulns || []) {
-      const poc = v && v.poc;
-      if (!poc) continue;
+      const base = v && v.poc;
+      if (!base) continue;
       n += 1;
       const point = String(v.pointId ?? '-');
-      out.push({
-        poc,
-        title: `PoC-${n} · 注入点 ${point} · ${v.technique || '-'}`,
-        file: `poc-${n}-${point}.txt`,
-        method: poc.method || 'GET',
-        req: `${poc.method || 'GET'} ${poc.url || '-'}`.trim(),
-      });
+      const list = Array.isArray(v.payloads) && v.payloads.length ? v.payloads : [base.payload];
+      const seen = new Set();
+      let m = 0;
+      for (const pl of list) {
+        const p = String(pl ?? '');
+        if (!p || seen.has(p)) continue;
+        seen.add(p);
+        m += 1;
+        const label = m === 1 ? '主命中' : `补充 payload ${m}`;
+        let poc = base;
+        if (p !== base.payload) {
+          // 同注入点换 payload 重算完整复放请求（headers/body/curl/raw 全部跟随）
+          poc = buildPocEvidence(r.target || {}, this._pointById(r, v.pointId) || {}, p, { redactAuth: this._pocRedactedForExport(r) });
+        }
+        out.push({
+          poc,
+          title: `PoC-${n}-${m} · 注入点 ${point} · ${v.technique || '-'} · ${label}`,
+          file: `poc-${n}-${m}-${point}.txt`,
+          method: poc.method || 'GET',
+          req: `${poc.method || 'GET'} ${poc.url || '-'}`.trim(),
+          vulnId: v.id || '',
+          label,
+        });
+      }
     }
     return out;
+  }
+
+  // [goal 批次 A-1] 按注入点 id 取 point（换 payload 重算 PoC 需要 point 的位置/形态）
+  _pointById(r, pointId) {
+    return (r.points || []).find((p) => p.id === pointId) || null;
+  }
+
+  // [goal 批次 A-1] 导出脱敏口径：与主命中 PoC 一致——交付型报告默认脱敏凭据头。
+  // 判据：报告 target 已被 sanitizeTargetForExport 处理（cookieParams/headerParams 被剥离）
+  // 或显式标记 pocRedacted===true。缺省 true（对齐既有导出策略）。
+  _pocRedactedForExport(r) {
+    if (r && r.pocRedacted === false) return false;
+    if (r && r.target && ('cookieParams' in r.target || 'headerParams' in r.target)) return false;
+    return true;
   }
 
   // 导出 HTML（原逻辑不变：所有用户可控字段均已 _escape 转义，P3 已核验）

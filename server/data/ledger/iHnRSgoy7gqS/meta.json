@@ -1,0 +1,18 @@
+{
+  "scanId": "iHnRSgoy7gqS",
+  "target": "http://127.0.0.1:8297/num?id=1",
+  "method": "GET",
+  "startedAt": "2026-09-16T07:04:04.076Z",
+  "finishedAt": "2026-09-16T07:04:04.326Z",
+  "points": 1,
+  "vulns": 3,
+  "payloadHits": 5,
+  "verdict": "no_vulnerability_detected",
+  "dbms": "MySQL",
+  "files": [
+    "report.html",
+    "report.md",
+    "report.json"
+  ],
+  "recordedAt": "2026-09-16T07:04:04.513Z"
+}
