@@ -93,3 +93,6 @@ e2e/udf-lab/*.dll
 # blackbox-lab 独立评测靶场产物（扫描输出 + 依赖目录链接）
 e2e/blackbox-lab/out/
 e2e/blackbox-lab/node_modules
+
+# 扫描台账运行时数据（不入库）
+server/data/ledger/
