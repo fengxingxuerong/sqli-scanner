@@ -86,7 +86,10 @@ export function recordScan(report, docs = {}, opts = {}) {
     points: (report.points || []).length,
     vulns: (report.vulns || []).length,
     payloadHits: (report.vulns || []).reduce((acc, v) => acc + (Array.isArray(v.payloads) ? v.payloads.length : 0), 0),
-    verdict: report.summary?.verdict || null,
+    // [goal-FIX 2026-09-16] verdict 口径修正：vulns>0 时 summary.verdict 仍是阴性口径
+    // （scanRunner 仅在无命中时区分 inconclusive/no_vulnerability_detected），台账若原样透传
+    // 会出现「vulns=3 verdict=no_vulnerability_detected」的交付级自相矛盾。
+    verdict: (report.vulns || []).length > 0 ? 'vulnerability_detected' : (report.summary?.verdict || 'no_vulnerability_detected'),
     dbms: report.dbms || null,
     files,
     recordedAt: new Date().toISOString(),
