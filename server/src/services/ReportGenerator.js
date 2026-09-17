@@ -142,11 +142,41 @@ function confirmedPayload(vuln) {
   return hit || '';
 }
 
-// 以原始 vuln 对象为键的 PoC 缓存（WeakMap，随报告快照回收，不常驻内存）。
+// PoC 缓存（键 = 稳定字符串，见 pocCacheKey；Map + 容量上限，不常驻无界内存）。
 // 为何需要：同一次会话里 markdown / md 别名 / html 会被反复导出，而
 // poc.generatedAt 是时间戳——不缓存则两次渲染文本不相等（CLI 的 md/markdown 等价
 // 断言直接挂），且白白重算一遍 o(漏洞数) 的字符串拼接。
-const POC_CACHE = new WeakMap();
+// [FIX 2026-09-18 发布前 flaky] 原实现是 WeakMap（键 = vuln 对象引用）：只要上游
+// （_enrich 未命中时的重建 / _truncate 的拷贝）产生过一次新对象，缓存就永久不命中，
+// 于是每次导出都重算 poc.generatedAt → 「同一份报告两次导出逐字节一致」在跨毫秒时挂
+// （实测单独复跑 3 次挂 1 次）。键必须与对象身份无关。
+const POC_CACHE = new Map();
+const POC_CACHE_MAX = 500;
+
+/**
+ * PoC 缓存键：scanId + 注入点 + 载荷 + 脱敏开关。
+ * 不含对象引用，也不含时间——保证「同一份逻辑上的报告」在任何拷贝链路上都命中同一份 PoC。
+ */
+function pocCacheKey(report, v, redactAuth) {
+  const scanId = String((report && report.scanId) || '');
+  const pointId = String(v && v.pointId != null ? v.pointId : '');
+  let payload = '';
+  try {
+    payload = String(confirmedPayload(v) ?? '');
+  } catch {
+    payload = '';
+  }
+  return `${scanId}|${pointId}|${payload}|${redactAuth ? 1 : 0}`;
+}
+
+function pocCacheSet(key, poc) {
+  // Map 保持插入顺序：超出上限时淘汰最早写入的一条（WeakMap 换成 Map 后必须有界）
+  if (POC_CACHE.size >= POC_CACHE_MAX) {
+    const oldest = POC_CACHE.keys().next().value;
+    if (oldest !== undefined) POC_CACHE.delete(oldest);
+  }
+  POC_CACHE.set(key, poc);
+}
 
 // [2026-09-17] 漏洞上下文增强结果的缓存（WeakMap，键=调用方传入的原始 report）。
 // 为什么必须缓存而不是每次现算：
@@ -282,7 +312,8 @@ export class ReportGenerator {
     let touched = false;
     const out = vulns.map((v) => {
       if (!v || typeof v !== 'object' || v.poc) return v; // 已有 poc（外部预生成）→ 不重复计算
-      const cached = redactAuth ? undefined : POC_CACHE.get(v);
+      const key = pocCacheKey(report, v, redactAuth);
+      const cached = redactAuth ? undefined : POC_CACHE.get(key);
       if (cached) {
         touched = true;
         return { ...v, poc: cached }; // 同一份报告多次导出 → 逐字节一致（含 generatedAt）
@@ -290,7 +321,7 @@ export class ReportGenerator {
       try {
         const point = byId.get(v.pointId) || null;
         const poc = buildPocEvidence(report.target, point, confirmedPayload(v), { redactAuth });
-        if (!redactAuth) POC_CACHE.set(v, poc);
+        if (!redactAuth) pocCacheSet(key, poc);
         touched = true;
         return { ...v, poc };
       } catch {

@@ -11,7 +11,6 @@ import dns from 'node:dns';
 import { URL } from 'node:url';
 import { ErrorCode, AppError } from '../errors.js';
 import { logOnce, PROXY_DELEGATION_NOTE } from './logOnce.js';
-import { defaults } from '../../config/defaults.js';
 import { logger } from '../logger.js';
 
 // ── SSRF 防护（P0-1）────────────────────────────────────────────────────────

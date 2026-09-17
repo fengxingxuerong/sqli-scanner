@@ -33,6 +33,10 @@ USER app
 EXPOSE 4567
 
 ENV NODE_ENV=production
+# 容器内必须监听 0.0.0.0（否则宿主端口映射连不进来）；因此**必须配置鉴权**：
+# 引擎非回环监听且无 token 时会拒绝启动（server/index.js resolveApiToken）。
+# 二选一：SCAN_API_TOKEN=<强随机串> 或 SCAN_API_TOKEN_FILE=/run/secrets/scan_token
+# （确知风险的隔离网络可设 SCAN_API_ALLOW_NO_TOKEN=1 恢复旧行为）
 ENV HOST=0.0.0.0
 ENV PORT=4567
 ENV EXPLOIT_ENABLED=0

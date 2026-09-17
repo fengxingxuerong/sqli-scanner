@@ -9,7 +9,6 @@
 // ============================================================================
 import { readFileSync, existsSync } from 'node:fs';
 import { parseRequestFile } from '../../src/core/requestFileParser.js';
-import { httpClient } from '../../src/core/httpClient.js';
 import { logger } from '../../src/core/logger.js';
 import { tamperRegistry } from '../../src/core/tamper/TamperRegistry.js';
 import path from 'node:path';

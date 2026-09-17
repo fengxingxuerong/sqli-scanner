@@ -103,3 +103,6 @@ reports/
 
 # [2026-09-17] 利用能力验证产物（fileRead/fileWrite 落地文件与断言快照）
 e2e/fileops/results/
+
+# 本机工作记忆（WorkBuddy 会话上下文，非项目源码，不入库）
+.workbuddy/

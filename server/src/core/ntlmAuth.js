@@ -22,7 +22,6 @@
 //   NTLMv2 / Negotiate(Kerberos) 暂不支持（07-remnant-gaps 后续候选）。
 // ============================================================================
 
-import crypto from 'node:crypto';
 import { md4Utf16le } from './ntlmMd4.js';
 import { desEcbEncrypt } from './desEcb.js';
 

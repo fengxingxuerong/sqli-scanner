@@ -15,15 +15,34 @@ export class ApiError extends Error {
   }
 }
 
-// 前端 API base：Web 版为 /api（同源代理），Tauri 版为 http://127.0.0.1:4567
+// 前端 API base：Web 版为 /api（同源代理），Tauri 版为 http://127.0.0.1:4567。
+// [A3 2026-09-17] 运行期可覆盖：桌面版由 Rust sidecar 告知实际端口（4567 被占时随机端口），
+// 前端启动时经 tauriBridge.getEngineInfo() 调 setApiBase()，不再依赖编译期常量。
 export const API_BASE: string =
   (import.meta.env.VITE_API_BASE as string | undefined) ?? '/api';
+let runtimeBase: string | null = null;
+export function setApiBase(base: string): void {
+  runtimeBase = base;
+}
+export function getApiBase(): string {
+  return runtimeBase || API_BASE;
+}
 
-// Token 来源：编译期 env（VITE_SCAN_API_TOKEN）或运行期 localStorage（用户设置页输入）
+// Token 来源优先级：运行期注入（Tauri sidecar 一次性 token）→ 编译期 env → localStorage。
 // 后端设置 SCAN_API_TOKEN 后，前端需携带此 token 否则全 401。
-function getApiToken(): string {
+let runtimeToken: string | null = null;
+export function setApiToken(token: string): void {
+  const v = String(token || '').trim();
+  runtimeToken = v || null;
+  try {
+    if (v) localStorage.setItem('scanApiToken', v);
+    else localStorage.removeItem('scanApiToken');
+  } catch { /* localStorage 不可用（隐私模式）时仅内存生效 */ }
+}
+export function getApiToken(): string {
   const envToken = import.meta.env.VITE_SCAN_API_TOKEN as string | undefined;
   if (envToken) return envToken;
+  if (runtimeToken) return runtimeToken;
   try {
     return localStorage.getItem('scanApiToken') || '';
   } catch {
@@ -38,8 +57,9 @@ const http = axios.create({
   headers: { 'Content-Type': 'application/json' },
 });
 
-// 请求拦截：注入 API Token（对标后端 SCAN_API_TOKEN 中间件）
+// 请求拦截：注入 API Token（对标后端 SCAN_API_TOKEN 中间件）+ 运行期 baseURL
 http.interceptors.request.use((config) => {
+  config.baseURL = getApiBase();
   const token = getApiToken();
   if (token) {
     config.headers = config.headers || {};
@@ -58,6 +78,28 @@ http.interceptors.response.use(
     return response;
   },
   (error) => {
+    // [A2 2026-09-17] 401 引导：引擎启用鉴权（非回环部署会强制启用）而前端还没 token 时，
+    // 弹一次输入并原样重放该请求——否则用户看到的是一串无上下文的 401。
+    // 仅在真实浏览器、且当前确实没有 token、且未提示过该请求时触发（防无限循环）。
+    const status = error?.response?.status;
+    const cfg = error?.config;
+    const canPrompt =
+      typeof window !== 'undefined' &&
+      typeof (window as any).prompt === 'function' &&
+      import.meta.env.MODE !== 'test';
+    if (status === 401 && cfg && !cfg.__tokenPrompted && !getApiToken() && canPrompt) {
+      cfg.__tokenPrompted = true;
+      const input = (window as any).prompt(
+        '引擎已启用 API 鉴权，请输入 SCAN_API_TOKEN（将保存在本机 localStorage）'
+      );
+      if (input && String(input).trim()) {
+        setApiToken(String(input).trim());
+        cfg.baseURL = getApiBase();
+        cfg.headers = cfg.headers || {};
+        cfg.headers['x-api-token'] = getApiToken();
+        return http.request(cfg);
+      }
+    }
     // 优先从响应体提取 code + message（后端统一 { code, data, message } 包装）
     const body = error?.response?.data;
     if (body && typeof body.code === 'number') {

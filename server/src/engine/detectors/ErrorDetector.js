@@ -160,7 +160,11 @@ export class ErrorDetector extends Detector {
       // 二次确认：再发一次，报错应稳定出现，过滤偶发噪声
       const res2 = await this.send(httpClient, ctx, this.buildRequest(target, point, payload), ctx);
       const body2 = String(res2?.data ?? '');
-      if (!body2.match(ERROR_SIG)) continue;
+      // [P0-FIX 2026-09-17] 二次确认同样必须剔除回显——否则防线被整段绕过：
+      // 首次判定（上方）已剔除，但这里用原始 body2，只要 payload 被页面回显就必然
+      // 再次命中 ERROR_SIG → 「二次确认」形同虚设。recall-lab /escape 实测（转义型
+      // 安全靶点）即因此误报：回显为转义变体 `alice'' AND extractvalue(...)`。
+      if (!stripEchoedPayload(body2, payload).match(ERROR_SIG)) continue;
       // [G4] body 随命中返回，供 --parse-errors 原文留存（opt-in 消费）
       return { payload, match: match[0], body };
     }
@@ -238,7 +242,18 @@ function normalizeEcho(s) {
 function stripEchoedPayload(body, payload) {
   if (!body || !payload) return body || '';
   let best = normalizeEcho(body);
+  // [P0-FIX 2026-09-17] 回显变体覆盖面扩展：转义型防护（单引号 → '' ）把用户输入
+  // 原样回显时，响应里是 payload 的**转义变体**而非原文——recall-lab /escape 实测
+  // 回显 `alice'' AND extractvalue(...)`，原文 `alice' AND extractvalue(...)` 剔不掉
+  // → ERROR_SIG 命中 payload 自带关键词 → 安全点误报 High。除原文外，一并剔除
+  // 单引号翻倍（SQL 转义）与反斜杠转义两种常见变体。
   const variants = new Set([payload, normalizeEcho(payload)]);
+  const escapeVariants = [...variants];
+  for (const v of escapeVariants) {
+    if (!v) continue;
+    variants.add(v.replace(/'/g, "''")); // SQL 转义：' → ''
+    variants.add(v.replace(/'/g, "\\'")); // 反斜杠转义：' → \'
+  }
   try { variants.add(encodeURIComponent(payload)); } catch { /* noop */ }
   for (const v of variants) {
     if (v && v.length > 3) best = best.split(v).join('');

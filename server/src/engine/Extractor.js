@@ -20,7 +20,6 @@ import { binaryGuessColumns } from './columnGuess.js';
 import { obfuscateWithConfig } from '../core/tamper/applyTampers.js';
 // [P0-FIX 2026-09-09] 出口选项同源（delay/reqRate/maxReq/cookieJar 等必须在提取阶段也生效）
 import { buildEgressOpts } from './egressOpts.js';
-import { defaults } from '../config/defaults.js';
 import {
   resolveDbms, tableRef,
   resolveFromClause, WRAP, escSql, WRAP_NOCAST,
@@ -34,7 +33,6 @@ import { COMMON_TABLES, COMMON_COLUMNS, NONEXISTENT_PROBE } from './commonNames.
 import { EXTRACT_MAX_BODY_BYTES } from '../core/httpClient.js';
 // [P0-FIX] 布尔提取复用检测层 autoDynamicBlock：与 Detector 共用同一份
 // 「排除动态块的相似判定」构建器，避免两层逻辑漂移
-import { buildDynamicSimilarFn } from './Detector.js';
 // [大文件拆分 2026-09-14] 盲注/时间/内联提取已抽至 blindExtractor.js（实例作首参传入）
 import {
   extractBoolean as extractBooleanImpl,
@@ -53,8 +51,7 @@ export { WRAP };
 
 // [P2] 方言查询/函数映射表已拆分到 extractionMaps.js（消除 430 行常量定义）
 import {
-  SYS_QUERIES, LEN_FN, SUB_FN, ASCII_FN,
-  VERSION_EXPR, TIME_COND,
+  SYS_QUERIES,
   CURRENT_DB_EXPR, HOSTNAME_QUERY, ISDBA_QUERY,
   SCHEMA_QUERY, PRIVILEGES_QUERY, ROLES_QUERY,
   CURRENT_USER_EXPR,
@@ -113,6 +110,14 @@ export class Extractor {
         })
       );
     } catch (e) {
+      // [P1-FIX 2026-09-17] 「请求上限已达」是**终止信号**，不是「这一次失败」。
+      // 原实现对所有异常统一 return null → 上层 worker 以为只是单点失败 → 继续全速调用
+      // → 上限持续命中、持续被吞 → 空转 327,875 次 / 33 秒 CPU（实测），
+      // 并把 validity 判定污染成 unreachable（目标其实完全可达，真实请求仅 203 次）。
+      // 置位后由 _sendBatch 的 worker 检出并停止本批，后续批次同样因该标志不再发包。
+      if (e && typeof e.message === 'string' && e.message.indexOf('请求上限已达') >= 0) {
+        /** @type {any} */ (this)._limitHit = true;
+      }
       // [审计 P3] 提取请求失败时记录原因，便于运维定位（不改变静默降级语义）
       logger.debug(`[extractor._send] 提取请求失败：${e && e.message ? e.message : e}`);
       return null;

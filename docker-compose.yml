@@ -13,8 +13,13 @@ services:
       - PORT=4567
       - EXPLOIT_ENABLED=0
       - ALLOWED_ORIGINS=http://localhost:4567,http://127.0.0.1:4567
-      # [P0-FIX] 必须设置 SCAN_API_TOKEN 才能启用鉴权；留空 = 无鉴权（仅本地开发）
-      - SCAN_API_TOKEN=
+      # [P0-SEC 2026-09-17] 必须设置 SCAN_API_TOKEN 才能启用鉴权。
+      # ${VAR:?} 语法：宿主未提供该变量时 compose 直接报错拒绝启动（与引擎 fail-closed 一致），
+      # 避免"拉起来才发现是个无鉴权的扫描代理"。生成方式：
+      #   openssl rand -hex 32    （或 node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"）
+      # 也可用 secret 文件方式：SCAN_API_TOKEN_FILE=/run/secrets/scan_token（此时本项可留空）
+      - SCAN_API_TOKEN=${SCAN_API_TOKEN:?请先设置 SCAN_API_TOKEN（openssl rand -hex 32），或使用 SCAN_API_TOKEN_FILE 挂载 secret}
+      # - SCAN_API_TOKEN_FILE=/run/secrets/scan_token
     volumes:
       - sqli-sessions:/app/server/sessions
     healthcheck:

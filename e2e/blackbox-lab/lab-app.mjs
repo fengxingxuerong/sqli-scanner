@@ -54,7 +54,7 @@ const WAF_RULES = [
   { id: 'or-true', re: /['"]?\s*or\s+['"]?\d+['"]?\s*=\s*['"]?\d+/i, why: "' or 1=1 类恒真" },
   { id: 'extractvalue', re: /\bextractvalue\b|\bupdatexml\b/i, why: '报错注入函数' },
 ];
-function wafMiddleware(req, _res, next) {
+function wafMiddleware(req, res, next) {
   if (!WAF_ON) return next();
   const vals = [];
   for (const [, v] of Object.entries(req.query || {})) vals.push(String(v));

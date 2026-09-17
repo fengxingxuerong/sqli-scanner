@@ -33,8 +33,6 @@ import https from 'node:https';
 import { SocksProxyAgent } from 'socks-proxy-agent';
 import { URL } from 'url';
 import net from 'node:net';
-import dns from 'node:dns';
-import zlib from 'node:zlib';
 import { Agent as UndiciAgent, request as undiciRequest } from 'undici';
 import { defaults } from '../config/defaults.js';
 import { ErrorCode, AppError } from './errors.js';
@@ -54,7 +52,7 @@ import {
   parseProxyUrl, assertProxyUsable, isLocalOrPrivateHost, isNoProxyHost, resolveProxy,
   SOCKS_PROXY_SCHEMES,
 } from './http/proxy.js';
-import { logOnce, infoOnce, warnInsecureTls } from './http/logOnce.js';
+import { logOnce, warnInsecureTls } from './http/logOnce.js';
 // 注：dnsCache / EXTRACT_MAX_BODY_BYTES 等由文件尾部原有 export 语句导出，此处不重复导出。
 // 下面这行是**兼容再导出**：这些符号虽已搬走，但既有调用方（含测试）仍从 httpClient.js 取，
 // 保持路径不变 = 拆分对调用方零影响（netErrGuard.test.js 就依赖 resolveProxy/isLocalOrPrivateHost）。
@@ -157,9 +155,7 @@ function effectiveInsecureTls(opts) {
 // 现在两条通道统一先取原始字节、再按声明字符集解码，对外仍是 string。
 import {
   decompressResponseBody,
-  detectResponseCharset,
   decodeResponseBody,
-  getResMeta,
   attachResMeta,
   getResponseHeader,
   toBuffer,
@@ -173,7 +169,6 @@ export {
   attachResMeta,
 } from './http/responseCodec.js';
 import {
-  computeAgentMaxSockets,
   AGENT_MAX_SOCKETS,
   TLS_CERT_CODES,
   isMaxContentLengthError,

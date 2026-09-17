@@ -127,7 +127,7 @@ async function main() {
   const waf = argv.includes('--waf');
 
   const targets = only ? POINTS.filter((p) => only.includes(p.id)) : POINTS;
-  const { proc, log } = await startLab(waf);
+  const { proc } = await startLab(waf);
   console.log(`[run-scan] 靶场已起 ${BASE}  WAF=${waf ? 'ON' : 'OFF'}  点=${targets.length}`);
 
   const matrix = [];

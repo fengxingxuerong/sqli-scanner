@@ -60,8 +60,6 @@ async function req(pathname, opts = {}, timeoutMs = 15000) {
   }
 }
 
-const bodyOf = (rows) => (rows.length ? rows[0].username || rows[0].id : 'EMPTY');
-const stableDiff = (a, b) => a !== b;
 
 // ── 靶点定义：baseline / inject / 判定 ──────────────────────────────────────
 // kind: vuln（应可注入）| safe（不应可注入）
@@ -231,7 +229,7 @@ function safeJson(r) {
 
 // ── 主流程：每点采样 SAMPLES 次，全部一致才算真值成立 ─────────────────────
 async function main() {
-  const { proc, log } = await startLab();
+  const { proc } = await startLab();
   console.log(`[selftest] 靶场已起 @ ${BASE}  WAF=${WAF ? 'ON' : 'OFF'}`);
   const out = { lab: 'blackbox-lab', waf: WAF, generatedAt: new Date().toISOString(), points: [] };
 

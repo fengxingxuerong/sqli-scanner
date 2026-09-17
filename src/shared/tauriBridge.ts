@@ -27,6 +27,21 @@ export const tauriBridge = {
     return () => { if (unlisten) unlisten(); };
   },
 
+  // [A3 2026-09-17] 读取 Rust 侧 sidecar 的实连信息：{ port, token }
+  // 桌面版引擎不再固定 4567（被占则用随机端口），且带一次性 token，
+  // 前端必须向 Rust 询问后才能正确连接（Web 版返回 null，走同源 /api）。
+  async getEngineInfo(): Promise<{ port: number; token: string } | null> {
+    if (!tauriAvailable) return null;
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      const info = await (invoke as any)('get_engine_info');
+      if (info && typeof info.port === 'number') {
+        return { port: info.port, token: String(info.token || '') };
+      }
+    } catch { /* 命令不存在（旧壳）或引擎未起 → 降级为默认端口 */ }
+    return null;
+  },
+
   // 启动本地引擎（Tauri 由 Rust 侧 sidecar 自动拉起；Web 版无需操作）
   async startEngine(): Promise<void> {
     if (!tauriAvailable) return;

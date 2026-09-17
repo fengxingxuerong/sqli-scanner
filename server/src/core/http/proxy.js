@@ -7,7 +7,7 @@
 // 也让 SSRF/代理规则可被单独测试。
 // ============================================================================
 import { ErrorCode, AppError } from '../errors.js';
-import { logOnce, infoOnce } from './logOnce.js';
+import { infoOnce } from './logOnce.js';
 import { defaults } from '../../config/defaults.js';
 
 const PROXY_SCHEMES = new Set(['socks5', 'socks5h', 'socks4', 'socks4a', 'socks', 'http', 'https']);

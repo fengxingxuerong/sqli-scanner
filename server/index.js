@@ -13,7 +13,7 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import crypto from 'node:crypto';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { defaults } from './src/config/defaults.js';
 import { scanRoutes, defaultScanManager } from './src/api/scanRoutes.js';
@@ -36,7 +36,10 @@ const HOST = process.env.HOST || '127.0.0.1';
 // 跨域白名单（Vite 开发服、同机 API 直连、Tauri 同源），其余一律拒绝
 const ALLOWED_ORIGINS = (
   process.env.ALLOWED_ORIGINS ||
-  'http://localhost:5173,http://127.0.0.1:5173,http://localhost:4567,http://127.0.0.1:4567'
+  // Tauri v2 WebView 的页面 origin 不是 localhost（Windows/Linux 为 http://tauri.localhost，
+  // macOS 为 tauri://localhost）。桌面版前端要跨域调用 127.0.0.1:4567，必须显式放行，
+  // 否则会被引擎的「跨站变更请求」守卫一律 403（扫描/停止/导出全部不可用）。
+  'http://localhost:5173,http://127.0.0.1:5173,http://localhost:4567,http://127.0.0.1:4567,http://tauri.localhost,tauri://localhost'
 )
   .split(',')
   .map((s) => s.trim())
@@ -64,6 +67,57 @@ const PUBLIC_READONLY = new Set([
   '/sqlmap/status',
   '/api/sqlmap/status',
 ]);
+
+// ── API Token 解析（[P0-SEC 2026-09-17] 默认鉴权）─────────────────────────────
+// 背景：本服务能对任意可达目标发起扫描与拖库。旧实现「没配 token 就整个鉴权中间件不装」，
+// 而 Dockerfile 是 HOST=0.0.0.0 且未设 token → 直接 `docker run -p 4567:4567` 就是一个
+// 无鉴权的扫描/拖库代理（可被当攻击跳板、可被任意读取报告数据）。
+// 现有策略（fail-closed + 逃生口）：
+//   1. SCAN_API_TOKEN_FILE（Docker/K8s secret 挂载）优先；
+//   2. 其次 SCAN_API_TOKEN；
+//   3. 都没有时：仅回环监听允许无鉴权（本地开发/桌面 sidecar 体验）；
+//      非回环监听 → **拒绝启动**（除非显式 SCAN_API_ALLOW_NO_TOKEN=1 声明接受风险）。
+export const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1', '[::1]']);
+// 同进程内 generated token 必须幂等：否则每次调用 resolveApiToken 都会换一个随机串，
+// 出现「打印给父进程的 token ≠ 鉴权用的 token」这类只在 emit 模式暴露的错配。
+let generatedTokenCache = null;
+export function resolveApiToken({ host = '127.0.0.1', env = process.env } = {}) {
+  const file = String(env.SCAN_API_TOKEN_FILE || '').trim();
+  if (file) {
+    try {
+      const v = readFileSync(file, 'utf8').trim();
+      if (v) return { token: v, source: 'file' };
+      logger.warn(`SCAN_API_TOKEN_FILE=${file} 内容为空，已忽略`);
+    } catch (e) {
+      logger.warn(`读取 SCAN_API_TOKEN_FILE=${file} 失败：${e.message}`);
+    }
+  }
+  const direct = String(env.SCAN_API_TOKEN || '').trim();
+  if (direct) return { token: direct, source: 'env' };
+
+  // [A3 2026-09-17] 桌面 sidecar 场景：Tauri 需要「引擎自己生成的一次性 token」——
+  // Rust 标准库没有 CSPRNG，与其在壳里造弱的随机数，不如让 Node 用 crypto 生成后
+  // 打印到 stdout（SCAN_API_TOKEN_EMIT=1），由壳捕获并经 get_engine_info 交给前端。
+  if (String(env.SCAN_API_TOKEN_EMIT || '').trim() === '1') {
+    if (!generatedTokenCache) generatedTokenCache = crypto.randomBytes(32).toString('hex');
+    return { token: generatedTokenCache, source: 'generated' };
+  }
+
+  const exposed = !LOOPBACK_HOSTS.has(String(host || '').trim());
+  if (!exposed) return { token: '', source: 'none' };
+  if (String(env.SCAN_API_ALLOW_NO_TOKEN || '').trim() === '1') {
+    return { token: '', source: 'none-explicit' };
+  }
+  throw new Error(
+    `拒绝以无鉴权方式监听 ${host}：本服务可发起扫描/拖库，暴露到非回环接口时必须配置鉴权。\n` +
+      '  任选其一： ① 设置 SCAN_API_TOKEN=<强随机串>；② 挂载 secret 后设置 SCAN_API_TOKEN_FILE=/run/secrets/scan_token；' +
+      '③ 仅本机使用则设 HOST=127.0.0.1；④ 确知风险并接受无鉴权则设 SCAN_API_ALLOW_NO_TOKEN=1。'
+  );
+}
+
+// 模块级解析一次：createApp 与 start 共用同一结论，避免「装配时没 token、启动时才生成」的不一致。
+// 非回环监听且无 token 时这里直接抛错 → 进程启动失败（fail-closed，见 resolveApiToken 注释）。
+const { token: API_TOKEN, source: TOKEN_SOURCE } = resolveApiToken({ host: HOST });
 
 /**
  * 装配 Express 应用（P1-A5：装配与启动分离，便于测试注入 / 无副作用 import）。
@@ -139,16 +193,38 @@ export function createApp() {
 
   app.use(express.json({ limit: '2mb' }));
   // P1: 安全响应头（CSP 收紧 + 防点击劫持 + 防 MIME 嗅探）
+  // [P0-FIX 2026-09-17] CSP 必须按「响应类型」分流，不能一刀切：
+  // 旧实现对所有响应下发 `default-src 'none'`，连 express.static 托管的 dist/index.html 与
+  // /assets/*.js 也被禁 → 浏览器拒绝执行前端脚本 → **Docker 单端口部署（4567）打开即白屏**。
+  // 本地开发（Vite 5173）与 Tauri（自有 CSP）都不经过这里，所以这个缺陷在开发期永远测不出来。
+  //   · API 响应（/api / /sqlmap）：纯数据，不需要任何资源加载 → default-src 'none'（最严）
+  //   · 前端静态资源：允许同源脚本/样式/字体/图片；MUI(emotion) 运行期注入 <style> →
+  //     style-src 需 'unsafe-inline'；图标/字体可能为 data: → img-src/font-src 放行 data:
+  const CSP_API = "default-src 'none'; frame-ancestors 'none'";
+  const CSP_STATIC =
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; " +
+    "img-src 'self' data:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'";
+  const isApiResponse = (p) => p.startsWith('/api') || p.startsWith('/sqlmap');
   app.use((req, res, next) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('X-Frame-Options', 'DENY');
-    res.setHeader('Content-Security-Policy', "default-src 'none'; frame-ancestors 'none'");
+    res.setHeader('Content-Security-Policy', isApiResponse(req.path) ? CSP_API : CSP_STATIC);
     next();
   });
 
-  // 可选 API Token：设置 SCAN_API_TOKEN 后，除「完全只读的公开元数据」外的端点
+  // 可选 API Token：设置后，除「完全只读的公开元数据」外的端点
   // （含扫描报告/导出/SSE）均需携带 x-api-token 请求头或 Authorization: Bearer <token>。
-  const API_TOKEN = process.env.SCAN_API_TOKEN || '';
+  // [P0-SEC 2026-09-17] 鉴权状态在装配时显式播报一次（token 由模块级 resolveApiToken 统一解析，
+  // 这里只读不解析——避免"装配一处、启动一处"各生成一份随机 token 的错配）。
+  if (API_TOKEN) {
+    logger.info(`API 鉴权已启用（来源 ${TOKEN_SOURCE}）`);
+  } else if (TOKEN_SOURCE === 'none-explicit') {
+    logger.warn(
+      '⚠️ 已显式声明无鉴权（SCAN_API_ALLOW_NO_TOKEN=1）：任何可达客户端都能调用全部 API（含扫描/拖库）。仅应在隔离网络中使用。'
+    );
+  } else {
+    logger.warn('未设置 SCAN_API_TOKEN：仅回环监听，本机任意进程可调用全部 API（含扫描/拖库）。生产部署请设置 Token。');
+  }
   if (API_TOKEN) {
     app.use((req, res, next) => {
       if (req.method === 'OPTIONS') return next();
@@ -163,12 +239,6 @@ export function createApp() {
       if (provided && safeEqual(provided, API_TOKEN)) return next(); // P2-1 恒时比较
       return res.status(401).json({ code: 401, data: null, message: '需要有效的 API Token' });
     });
-  } else if (HOST !== '127.0.0.1' && HOST !== 'localhost') {
-    // P0-1 配套：引擎暴露在非回环接口且未设 token —— 显著告警，防止被当无鉴权扫描代理滥用
-    logger.warn(
-      `⚠️ 引擎正在监听 ${HOST} 且未设置 SCAN_API_TOKEN：任何可达客户端都能无鉴权调用全部 API（含扫描/拖库/利用）。` +
-        `强烈建议设置 SCAN_API_TOKEN，并开启 SSRF_STRICT=1。`
-    );
   }
 
   // 路由挂载：同时挂载在 /api（Web 版，前端 base=/api）与 /（Tauri 版 base=http://127.0.0.1:4567）
@@ -248,6 +318,11 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 export function start() {
   const app = createApp();
   const PORT = process.env.PORT ? Number(process.env.PORT) : defaults.port;
+  // [A3] 桌面 sidecar：把一次性 token 以固定格式打到 stdout，供 Tauri 壳捕获后交给前端。
+  // 仅 SCAN_API_TOKEN_EMIT=1（壳显式要求）时输出，普通 CLI/服务端启动不打印任何额外内容。
+  if (TOKEN_SOURCE === 'generated' && API_TOKEN) {
+    process.stdout.write(`ENGINE_TOKEN=${API_TOKEN}\n`);
+  }
   const server = app.listen(PORT, HOST, () => {
     logger.info(`SQL 注入检测引擎已启动，监听 ${HOST}:${PORT}`);
   });

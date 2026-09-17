@@ -11,6 +11,7 @@ import { useTranslation } from 'react-i18next';
 import router, { PageFallback } from './router';
 import DisclaimerDialog from './components/DisclaimerDialog';
 import { tauriBridge } from './shared/tauriBridge';
+import { setApiBase, setApiToken } from './shared/apiClient';
 import './i18n';
 
 // 主题模式：浅色 / 跟随系统 / 暗色
@@ -49,6 +50,20 @@ function AppThemeProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (typeof window !== 'undefined') window.localStorage.setItem(THEME_KEY, mode);
   }, [mode]);
+
+  // [A3 2026-09-17] 桌面版：向 Rust 询问 sidecar 实际端口与一次性 token。
+  // 引擎不再固定 4567（端口被占时随机），且带鉴权 token，前端必须按实况连接。
+  useEffect(() => {
+    if (!tauriBridge.isTauri) return;
+    let cancelled = false;
+    (async () => {
+      const info = await tauriBridge.getEngineInfo();
+      if (cancelled || !info) return;
+      setApiBase(`http://127.0.0.1:${info.port}/api`);
+      if (info.token) setApiToken(info.token);
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   // Tauri 桌面版：监听引擎崩溃/退出，Snackbar 提示用户可重启
   const [engineDown, setEngineDown] = useState(false);

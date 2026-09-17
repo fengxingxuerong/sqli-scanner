@@ -1,7 +1,10 @@
 # sqli-scanner
 
-[![CI](https://img.shields.io/github/actions/workflow/status/OWNER/REPO/ci.yml?branch=main&label=CI)](https://github.com/OWNER/REPO/actions)
-[![ Tests](https://img.shields.io/badge/tests-2144%20passing-brightgreen)](#测试)
+[![Tests](https://img.shields.io/badge/tests-2144%20passing-brightgreen)](#测试)
+[![Dependencies](https://img.shields.io/badge/dependencies-0%20known%20vulns-brightgreen)](#环境变量)
+
+> CI 徽章待仓库地址确定后启用（当前 `OWNER/REPO` 是占位，占位链接会显示成"通过"，属误导，
+> 故先移除）。发布判定以 `CHANGELOG.md` 与本地/远端门禁结果为准。
 
 一键式 SQL 注入检测工具。无需记忆命令行参数，打开浏览器即可使用。
 

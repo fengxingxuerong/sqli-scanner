@@ -268,13 +268,28 @@ jobs:
       - name: Build Docker image
         run: docker build -t sqli-scanner .
       - name: Smoke test
+        # [A2 2026-09-17] 引擎非回环监听且无 token 时会拒绝启动（fail-closed），
+        # 容器镜像的 HOST=0.0.0.0 是端口映射必需 → 冒烟必须显式给 token，否则 health 探测必然失败。
         run: |
-          docker run -d --name sqli-test -p 4567:4567 sqli-scanner
+          docker run -d --name sqli-test -p 4567:4567 -e SCAN_API_TOKEN=ci-smoke-token sqli-scanner
           sleep 8
           curl -f http://127.0.0.1:4567/api/health || exit 1
           echo "--- Backend health OK ---"
           curl -f -o /dev/null -w "Frontend HTTP %{http_code}\n" http://127.0.0.1:4567/ || exit 1
           echo "--- Frontend reachable OK ---"
+          # 鉴权生效性断言：无 token 的受保护端点必须 401（防止 fail-closed 被改回无鉴权）
+          code=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:4567/api/scan/aaaaaaaaaa)
+          [ "$code" = "401" ] || { echo "期望 401，实际 $code"; exit 1; }
+          echo "--- Auth enforced OK ---"
+          # [A1 2026-09-17] 静态资源必须放行 'self'：CSP 若仍是一刀切 default-src 'none'，
+          # dist/index.html 与 /assets/*.js 会被浏览器拒绝执行 → 部署后白屏（curl 探测不到，
+          # 只看 HTTP 200 会假绿）。这里直接断言响应头，守住这条交付级回归。
+          csp=$(curl -sI http://127.0.0.1:4567/ | tr -d '\r' | awk -F': ' 'tolower($1)=="content-security-policy"{print $2}')
+          echo "CSP(/) = $csp"
+          echo "$csp" | grep -q "'self'" || { echo "静态资源 CSP 未放行 'self'，前端会白屏"; exit 1; }
+          csp_api=$(curl -sI http://127.0.0.1:4567/api/health | tr -d '\r' | awk -F': ' 'tolower($1)=="content-security-policy"{print $2}')
+          echo "$csp_api" | grep -q "default-src 'none'" || { echo "API 响应 CSP 未收紧"; exit 1; }
+          echo "--- CSP split OK ---"
           docker stop sqli-test
           docker rm sqli-test
 
