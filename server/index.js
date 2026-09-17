@@ -225,9 +225,18 @@ export function createApp() {
   } else {
     logger.warn('未设置 SCAN_API_TOKEN：仅回环监听，本机任意进程可调用全部 API（含扫描/拖库）。生产部署请设置 Token。');
   }
+  // 路由段白名单：这些前缀下挂的都是 API（注意路由同时挂在 /api 与 / 两个基址，
+  // 所以 `/scan/:id/report` 也是 API——不能只按 /api 前缀判断）。
+  const API_SEGMENTS = new Set(['api', 'sqlmap', 'scan', 'exploit']);
+  const isApiPath = (p) => API_SEGMENTS.has(String(p || '').split('/')[1]);
   if (API_TOKEN) {
     app.use((req, res, next) => {
       if (req.method === 'OPTIONS') return next();
+      // [P0-FIX 2026-09-18 发布冒烟实测] 前端外壳（dist 静态资源 + SPA 路由）必须与 API 分开判断：
+      // 旧实现只放行 PUBLIC_READONLY 精确集合，`GET /` 落到「需要有效的 API Token」→
+      // Docker/单端口部署下**打开站点就是一段 401 JSON，Web UI 完全不可用**。
+      // 静态外壳本身不含任何扫描数据，放行不构成信息泄露；所有数据接口仍受 token 保护。
+      if (req.method === 'GET' && !isApiPath(req.path)) return next();
       const isPublicReadonly = req.method === 'GET' && PUBLIC_READONLY.has(req.path);
       if (isPublicReadonly) return next();
       // x-api-token header 优先；Authorization Bearer 其次；query token 为 SSE EventSource 备选

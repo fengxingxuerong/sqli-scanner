@@ -259,6 +259,30 @@ jobs:
         timeout-minutes: 10
         continue-on-error: true
 
+  # [发布冒烟 2026-09-18] 与 acceptance 互补：acceptance 覆盖"依赖真实 DB 的 e2e"，
+  # 本 job 覆盖"生产配置组合"——带 token + Express 托管 dist + 引擎常驻，
+  # 这正是 Docker/单端口部署的真实形态。A1（CSP 白屏）与本次「启用 token 后 GET / 401，
+  # Web UI 打不开」两个缺陷都只在这个组合下现形，单测与开发模式都测不到。
+  # 只依赖 PGlite 靶场，不需要 MySQL。
+  release-smoke:
+    runs-on: ubuntu-latest
+    needs: [test-server]
+    if: github.event_name != 'schedule'
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm ci
+        name: Install frontend
+      - run: cd server && npm ci
+        name: Install server deps
+      - run: npm run build
+        name: Build frontend (dist)
+      - run: node e2e/diag/release-smoke.mjs
+        name: Release smoke (production config + real lab)
+
   docker:
     runs-on: ubuntu-latest
     needs: [test-frontend, test-server]
