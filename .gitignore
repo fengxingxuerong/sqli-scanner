@@ -96,3 +96,10 @@ e2e/blackbox-lab/node_modules
 
 # 扫描台账运行时数据（不入库）
 server/data/ledger/
+
+# [2026-09-17] 一键扫描产物：scripts/one-click-scan.mjs 默认输出到 reports/<host>-<时间戳>/，
+# 每次扫描一个目录、含可能敏感的目标地址与拖库数据，必须忽略。
+reports/
+
+# [2026-09-17] 利用能力验证产物（fileRead/fileWrite 落地文件与断言快照）
+e2e/fileops/results/

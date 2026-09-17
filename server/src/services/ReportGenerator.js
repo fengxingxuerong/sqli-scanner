@@ -15,6 +15,12 @@
 
 import { truncateLong } from '../core/logger.js';
 import { buildPocEvidence } from '../engine/pocBuilder.js';
+// [2026-09-17] 交付缺口修复：vuln 只有内部 pointId hash，报告读者无法自解「哪个参数中招」。
+// attachVulnContext 兜底给漏洞条目补 param/location/url/method/vulnType（幂等浅拷贝），
+// 使「受影响参数」与「漏洞类型(CWE/OWASP)」成为报告的自包含字段——
+// 对引擎新产出的报告是冗余安全网（finalize 已写入），对历史快照/外部构造报告是唯一来源。
+import { attachVulnContext } from '../engine/vulnEnrich.js';
+import { vulnTypeOf } from './vulnTaxonomy.js';
 // [2026-09-13] 交付层：元信息/执行摘要/WAF 交战/修复建议+CVSS（markdown/html/csv 共用单一取数源）
 import { buildDelivery } from './reportDelivery.js';
 
@@ -89,10 +95,33 @@ function mdInline(s) {
   return String(s ?? '').replace(/`/g, '\\`');
 }
 
+// [2026-09-17] Markdown 表格单元格：竖线必须转义，否则会切列、把整张表拆散。
+// 参数名/类型名可能来自目标页面（参数名由被测系统决定），属不可信输入，一律经此出口。
+function mdCell(s) {
+  return String(s ?? '-').replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
+}
+
 // [2026-09-13] 顶层小助手：漏洞表行里的 CVSS 单元格文本（score + vector，同源 reportDelivery）
 function cvssOfVuln(v, d) {
   const it = d.remediation.perVuln.find((x) => x.pointId === v.pointId && x.technique === v.technique);
   return it ? `${it.cvss.score}（${it.cvss.vector}）` : '-';
+}
+
+// [2026-09-17] 漏洞类型单元格文本：规范化中文类型名 + CWE 编号。
+// 单一取数源（vulnTaxonomy），markdown / html / csv 三侧共用——避免三处各写一份映射而漂移。
+// 条目缺 vulnType 时按 technique 现算（历史快照兜底），仍缺则走词表兜底类型，不产出空格。
+function vulnTypeText(v) {
+  const t = (v && v.vulnType) || vulnTypeOf(v && v.technique);
+  return `${t.nameZh} · ${t.cwe}`;
+}
+
+// [2026-09-17] 受影响参数单元格文本：优先取回填的 affectedParam（含位置说明），
+// 退化时打印参数名本身，再退化标记为未记录——报告里不得出现空单元格被读成「无影响」。
+function affectedParamText(v) {
+  if (!v) return '（未记录）';
+  if (v.affectedParam) return v.affectedParam;
+  if (v.param) return `${v.param} · ${v.locationText || v.location || '未知位置'}`;
+  return '（未记录参数名）';
 }
 
 // Markdown 围栏：内容里可能出现反引号（payload 常含 ` 与 ```），围栏长度必须严格大于
@@ -118,6 +147,15 @@ function confirmedPayload(vuln) {
 // poc.generatedAt 是时间戳——不缓存则两次渲染文本不相等（CLI 的 md/markdown 等价
 // 断言直接挂），且白白重算一遍 o(漏洞数) 的字符串拼接。
 const POC_CACHE = new WeakMap();
+
+// [2026-09-17] 漏洞上下文增强结果的缓存（WeakMap，键=调用方传入的原始 report）。
+// 为什么必须缓存而不是每次现算：
+//   ① 报告渲染是多次取数（_forExport 与 buildDelivery 各取一次），不缓存则每次得到**不同的**
+//      vuln 对象副本——POC_CACHE 与 DELIVERY_CACHE 的键随之漂移，两个缓存全部失效，
+//      报告每次重算（含 poc.generatedAt），「同报告多次导出逐字节一致」的既有契约被破坏；
+//   ② 同一份报告在交互式界面里会被反复导出/预览，缓存让增强成本只付一次。
+// 值随原始 report 一起回收，不常驻内存。
+const ENRICH_CACHE = new WeakMap();
 
 // [P1-1] 导出前脱敏 target：剥离认证凭据与代理配置，只保留展示字段
 // （baseUrl/method/bodyParams 等）。返回浅拷贝，不污染内存中的 report。
@@ -264,8 +302,25 @@ export class ReportGenerator {
 
   // [P1-1] 导出统一脱敏：先挂 PoC（缓存键是原始 vuln 对象，故须在截断拷贝前），
   // 再截断证据，最后剥离 target 凭据
+  // [2026-09-17] 漏洞上下文增强（带缓存，保证同一份报告多次取数拿到同一个对象）。
+  // 纯只读：返回浅拷贝，不写回调用方内存中的 report。
+  _enrich(report) {
+    if (!report || typeof report !== 'object') return report;
+    const hit = ENRICH_CACHE.get(report);
+    if (hit) return hit;
+    const out = attachVulnContext(report);
+    ENRICH_CACHE.set(report, out);
+    return out;
+  }
+
+  // [2026-09-17] 交付缺口修复：增强顺序敏感——attachVulnContext 必须放在 _attachPoc 之后。
+  // _attachPoc 用**原始 vuln 对象**作 POC_CACHE 的键；若先增强，缓存键会变成每次导出新建的
+  // 拷贝对象，缓存恒不命中 → poc.generatedAt 每次重算 → 「同一份报告两次渲染逐字节一致」被破坏
+  // （cli.format 的 md/markdown 等价断言与 poc.evidence 的确定性用例锁此行为）。
+  // 兜底对象：引擎产出的报告已由 finalize 回填，这里只为历史快照/外部构造的报告补齐
+  // 「受影响参数 / 漏洞类型」字段，是幂等操作（已有字段不覆盖）。
   _forExport(report) {
-    const r = this._truncate(this._attachPoc(report));
+    const r = this._truncate(this._attachPoc(this._enrich(report)));
     if (!r.target) return r;
     return { ...r, target: sanitizeTargetForExport(r.target) };
   }
@@ -279,23 +334,32 @@ export class ReportGenerator {
   // [2026-09-13] 交付化：补 CVSS 与修复建议列（口径与 markdown/html 同源）
   toCSV(report) {
     const r = this._forExport(report);
-    const d = buildDelivery(report);
+    const d = buildDelivery(this._enrich(report));
     const cvssOf = new Map(d.remediation.perVuln.map((it) => [`${it.pointId}|${it.technique}`, it.cvss]));
     const remOf = new Map(d.remediation.perVuln.map((it) => [`${it.pointId}|${it.technique}`, it.actions]));
     const lines = [];
-    lines.push('漏洞ID,注入点,技术,数据库,风险,CVSS,修复建议,说明');
+    // [2026-09-17] 交付缺口修复：新增受影响参数/漏洞类型/CWE/OWASP/受影响请求五列，
+    // 原列（漏洞ID/注入点/技术/数据库/风险/CVSS/修复建议/说明）全部保留且相对顺序不变。
+    lines.push('漏洞ID,注入点,受影响参数,漏洞类型,CWE,OWASP,技术,数据库,风险,CVSS,受影响请求,修复建议,说明');
     for (const v of r.vulns || []) {
       const key = `${v.pointId}|${v.technique}`;
       const cvss = cvssOf.get(key);
       const rem = (remOf.get(key) || []).join(' / ');
+      const t = (v && v.vulnType) || vulnTypeOf(v && v.technique);
+      const req = v.url ? `${v.method || 'GET'} ${v.url}` : '';
       lines.push(
         [
           v.id,
           v.pointId,
+          affectedParamText(v),
+          t.nameZh,
+          t.cwe,
+          t.owasp,
           v.technique,
           v.dbms || '',
           v.riskLevel,
           cvss ? `${cvss.score} ${cvss.vector}` : '',
+          req,
           rem.replace(/[\r\n,]/g, ' '),
           (v.description || '').replace(/[\r\n,]/g, ' '),
         ]
@@ -336,15 +400,19 @@ export class ReportGenerator {
     for (const v of vulns) {
       const technique = String(v.technique || 'sql-injection');
       const ruleId = 'SQLI-' + technique.toUpperCase().replace(/[^A-Z0-9]/g, '-');
+      // [2026-09-17] 规则侧带上规范化类型与 CWE/OWASP：GitHub Security / DefectDojo 会直接
+      // 用 CWE 做告警归类与去重，这里给不出编号就只能落到「未分类」。
+      const vt = (v && v.vulnType) || vulnTypeOf(technique);
       if (!ruleIds.has(ruleId)) {
         ruleIds.add(ruleId);
         rules.push({
           id: ruleId,
-          name: { text: 'SQL injection via ' + technique },
-          shortDescription: { text: 'SQL injection (' + technique + ')' },
-          fullDescription: { text: 'SQL 注入漏洞，检测技术: ' + technique + '。攻击者可通过该注入点读取/篡改数据库数据，视数据库权限可能进一步获取操作系统命令执行。' },
-          helpUri: 'https://owasp.org/www-community/attacks/SQL_Injection',
+          name: { text: vt.nameEn },
+          shortDescription: { text: vt.nameEn },
+          fullDescription: { text: vt.descZh + '（' + vt.cwe + '，OWASP ' + vt.owasp + '）' },
+          helpUri: 'https://cwe.mitre.org/data/definitions/' + String(vt.cwe).replace(/[^0-9]/g, '') + '.html',
           defaultConfiguration: { level: 'warning' },
+          properties: { cwe: vt.cwe, owasp: vt.owasp, technique },
         });
       }
       const sev = String(v.severity || 'high').toLowerCase();
@@ -361,12 +429,17 @@ export class ReportGenerator {
           physicalLocation: {
             artifactLocation: { uri: uri || '/' },
           },
-          // 逻辑位置携带参数名与请求信息（SARIF logicalLocations 供平台聚合）
-          logicalLocations: [{ name: point.param || 'unknown', kind: 'resource' }],
+          // 逻辑位置携带参数名与请求信息（SARIF logicalLocations 供平台聚合）。
+          // [2026-09-17] 优先取漏洞条目回填的 param（自包含），退化为从 points 现查。
+          logicalLocations: [{ name: (v && v.param) || point.param || 'unknown', kind: 'resource' }],
         }],
         partialFingerprints: { scanPointId: v.pointId || '' },
         properties: {
           dbms: v.dbms || null,
+          // [2026-09-17] 交付字段：受影响参数/位置/漏洞类型（平台侧无需回查原始报告即可分派）
+          affectedParam: (v && v.param) || point.param || null,
+          location: (v && v.location) || point.location || null,
+          vulnType: vt.nameEn,
           payloads: (v.payloads || []).slice(0, 5),
           method: r.target?.method || 'GET',
         },
@@ -390,7 +463,7 @@ export class ReportGenerator {
 
   toMarkdown(report) {
     const r = this._forExport(report);
-    const d = buildDelivery(report);
+    const d = buildDelivery(this._enrich(report));
     const md = [];
     md.push(`# SQL 注入检测报告`);
     md.push('');
@@ -406,13 +479,17 @@ export class ReportGenerator {
     md.push(...this._conclusionMarkdown(report));
     md.push('## 漏洞清单');
     md.push('');
-    md.push('| 注入点 | 技术 | 数据库 | 风险 | CVSS | 说明 |');
-    md.push('|---|---|---|---|---|---|');
+    // [2026-09-17] 交付缺口修复：新增「受影响参数」「漏洞类型」两列（其余列原样保留，不做信息削减）。
+    // 此前只有内部 pointId hash 与 technique，收报告的人无法自解「哪个参数中招、这是什么漏洞」。
+    md.push('| 注入点 | 受影响参数 | 漏洞类型 | 技术 | 数据库 | 风险 | CVSS | 说明 |');
+    md.push('|---|---|---|---|---|---|---|---|');
     for (const v of r.vulns || []) {
       const cvss = cvssOfVuln(v, d);
-      md.push(`| ${v.pointId} | ${v.technique} | ${v.dbms || '-'} | ${v.riskLevel} | ${cvss} | ${(v.description || '').replace(/\|/g, '\\|')} |`);
+      md.push(
+        `| ${mdCell(v.pointId)} | ${mdCell(affectedParamText(v))} | ${mdCell(vulnTypeText(v))} | ${mdCell(v.technique)} | ${mdCell(v.dbms || '-')} | ${mdCell(v.riskLevel)} | ${mdCell(cvss)} | ${mdCell(v.description)} |`
+      );
     }
-    if (!(r.vulns || []).length) md.push('| - | - | - | - | - | 未发现漏洞 |');
+    if (!(r.vulns || []).length) md.push('| - | - | - | - | - | - | - | 未发现漏洞 |');
     md.push('');
     md.push(...this._remediationMarkdown(d));
     md.push('## Payload 示例');
@@ -491,7 +568,9 @@ export class ReportGenerator {
     if (d.remediation.perVuln.length) {
       out.push('### 按注入点', '');
       for (const it of d.remediation.perVuln) {
-        out.push(`**${it.pointId} · ${it.technique} · CVSS ${it.cvss.score} ${it.cvss.severity}**（\`${it.cvss.vector}\`）`, '');
+        // [2026-09-17] 标题带受影响参数：整改清单必须能对应到具体参数，不能只有内部 pointId hash
+        const where = it.affectedParam ? ` · ${it.affectedParam}` : '';
+        out.push(`**${it.pointId}${where} · ${it.technique} · CVSS ${it.cvss.score} ${it.cvss.severity}**（\`${it.cvss.vector}\`）`, '');
         for (const a of it.actions) out.push(`- ${a}`);
         out.push('');
       }
@@ -566,7 +645,9 @@ export class ReportGenerator {
     const per = d.remediation.perVuln
       .map((it) => {
         const actions = it.actions.map((a) => `<li>${esc(a)}</li>`).join('');
-        return `<div class="poc"><p><b>${esc(it.pointId)} · ${esc(it.technique)}</b> · CVSS ${esc(it.cvss.score)} ${esc(it.cvss.severity)}（<code>${esc(it.cvss.vector)}</code>）</p><ul>${actions}</ul></div>`;
+        // [2026-09-17] 标题带受影响参数（与 markdown 侧同口径）
+        const where = it.affectedParam ? ` · ${esc(it.affectedParam)}` : '';
+        return `<div class="poc"><p><b>${esc(it.pointId)}</b>${where}<b> · ${esc(it.technique)}</b> · CVSS ${esc(it.cvss.score)} ${esc(it.cvss.severity)}（<code>${esc(it.cvss.vector)}</code>）</p><ul>${actions}</ul></div>`;
       })
       .join('');
     const general = d.remediation.general.map((a) => `<li>${esc(a)}</li>`).join('');
@@ -717,10 +798,18 @@ export class ReportGenerator {
         if (p !== base.payload) {
           // 同注入点换 payload 重算完整复放请求（headers/body/curl/raw 全部跟随）
           poc = buildPocEvidence(r.target || {}, this._pointById(r, v.pointId) || {}, p, { redactAuth: this._pocRedactedForExport(r) });
+          // [2026-09-17 FIX] 同批证据共用主命中的生成时间戳。
+          // 原实现让补充 payload 的 PoC 携带自身 Date.now()，而主命中 PoC 走 WeakMap 缓存——
+          // 于是「同一份报告两次渲染逐字节一致」在跨毫秒边界时必然失败（实测 5 次挂 2 次，
+          // poc.evidence.test.js 的确定性用例即被此击中）。一次导出产出的证据链属于同一时刻，
+          // 共用时间戳在语义上也更正确。
+          poc = { ...poc, generatedAt: base.generatedAt };
         }
         out.push({
           poc,
-          title: `PoC-${n}-${m} · 注入点 ${point} · ${v.technique || '-'} · ${label}`,
+          // [2026-09-17] 标题带受影响参数：PoC 清单要能直接对上「哪个参数中招」，
+          // 此前只有内部 pointId hash，手工复现时需回查 JSON 才能确认。
+          title: `PoC-${n}-${m} · 注入点 ${point}${v.param ? `（参数 ${v.param}）` : ''} · ${v.technique || '-'} · ${label}`,
           file: `poc-${n}-${m}-${point}.txt`,
           method: poc.method || 'GET',
           req: `${poc.method || 'GET'} ${poc.url || '-'}`.trim(),
@@ -737,27 +826,33 @@ export class ReportGenerator {
     return (r.points || []).find((p) => p.id === pointId) || null;
   }
 
-  // [goal 批次 A-1] 导出脱敏口径：与主命中 PoC 一致——交付型报告默认脱敏凭据头。
-  // 判据：报告 target 已被 sanitizeTargetForExport 处理（cookieParams/headerParams 被剥离）
-  // 或显式标记 pocRedacted===true。缺省 true（对齐既有导出策略）。
+  // [goal 批次 A-1] 导出脱敏口径，[2026-09-17 FIX] 与 _attachPoc 统一为同源判据。
+  // 原实现在导出路径下**恒返回 true**：target 已被 sanitizeTargetForExport 剥掉
+  // cookieParams/headerParams，`'cookieParams' in target` 永远为 false，于是走到最后一行 true。
+  // 后果是同一次交付里两条 PoC 自相矛盾——主命中 PoC 带真实会话凭据（可复制即跑），
+  // 补充 payload PoC 的 Cookie 却被替换成占位符（复制过去跑不通，等于交了条废证据）。
+  // 现口径：跟随 config.pocRedactAuth（与主命中 PoC 的既定设计一致，默认关——
+  // PoC 的价值就在「复制即跑」；报告要外发时显式开该开关，主命中与补充 payload 一并脱敏）。
   _pocRedactedForExport(r) {
-    if (r && r.pocRedacted === false) return false;
-    if (r && r.target && ('cookieParams' in r.target || 'headerParams' in r.target)) return false;
-    return true;
+    if (r && r.pocRedacted === true) return true;
+    return !!(r && r.target && r.target.config && r.target.config.pocRedactAuth);
   }
 
   // 导出 HTML（原逻辑不变：所有用户可控字段均已 _escape 转义，P3 已核验）
   // [2026-09-13] 交付化（只增小节）：报告元信息/执行摘要卡、漏洞表 CVSS 列、修复建议、WAF 交战
   toHTML(report) {
     const r = this._forExport(report);
-    const d = buildDelivery(report);
+    const d = buildDelivery(this._enrich(report));
     const rows = (r.vulns || [])
       .map(
         (v) => {
           const it = d.remediation.perVuln.find((x) => x.pointId === v.pointId && x.technique === v.technique);
           const cvss = it ? `${it.cvss.score} ${it.cvss.severity}` : '-';
+          // [2026-09-17] 新增「受影响参数」「漏洞类型」两列（列顺序与 markdown/csv 对齐）
           return `<tr>
         <td>${this._escape(v.pointId)}</td>
+        <td>${this._escape(affectedParamText(v))}</td>
+        <td>${this._escape(vulnTypeText(v))}</td>
         <td>${this._escape(v.technique)}</td>
         <td>${this._escape(v.dbms || '-')}</td>
         <td class="${this._escape(String(v.riskLevel || 'low').toLowerCase())}">${this._escape(v.riskLevel)}</td>
@@ -850,8 +945,8 @@ export class ReportGenerator {
       ${deliverySection}
       ${conclusionSection}
       <h2>漏洞清单</h2>
-      <table><thead><tr><th>注入点</th><th>技术</th><th>数据库</th><th>风险</th><th>CVSS</th><th>说明</th></tr></thead>
-      <tbody>${rows || '<tr><td colspan="6">未发现漏洞</td></tr>'}</tbody></table>
+      <table><thead><tr><th>注入点</th><th>受影响参数</th><th>漏洞类型</th><th>技术</th><th>数据库</th><th>风险</th><th>CVSS</th><th>说明</th></tr></thead>
+      <tbody>${rows || '<tr><td colspan="8">未发现漏洞</td></tr>'}</tbody></table>
       ${remediationSection}
       <h2>Payload 示例</h2>
       <pre>${payloads || '无'}</pre>

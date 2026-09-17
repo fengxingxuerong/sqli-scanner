@@ -1,7 +1,7 @@
 # sqli-scanner
 
 [![CI](https://img.shields.io/github/actions/workflow/status/OWNER/REPO/ci.yml?branch=main&label=CI)](https://github.com/OWNER/REPO/actions)
-[![ Tests](https://img.shields.io/badge/tests-2075%20passing-brightgreen)](#测试)
+[![ Tests](https://img.shields.io/badge/tests-2144%20passing-brightgreen)](#测试)
 
 一键式 SQL 注入检测工具。无需记忆命令行参数，打开浏览器即可使用。
 
@@ -30,11 +30,105 @@ docker compose up -d
 # 后端 API http://localhost:4567
 ```
 
+### 一键扫描（CLI，扫完自动出全套报告）
+
+无需先启动服务，一条命令完成「目标校验 → 扫描 → 全套报告落盘 → 机器可读清单」：
+
+```bash
+node scripts/one-click-scan.mjs -u "http://target/page?id=1"
+# 等价：npm run scan -- -u "http://target/page?id=1"
+```
+
+产出到 `reports/<主机名>-<时间戳>/`：
+
+| 文件 | 用途 |
+|---|---|
+| `report.html` | 人读交付物（执行摘要 / 漏洞清单 / PoC / 修复建议 / WAF 交战记录） |
+| `report.json` | 机器可读完整报告（含逐条 PoC 证据链） |
+| `report.md` | Markdown 交付物（可直接贴进工单 / 知识库） |
+| `report.sarif` | SARIF 2.1.0，对接 GitHub Security / DefectDojo（`--formats` 显式指定时产出） |
+| `report.csv` | 漏洞表 + 拖库数据，Excel 可开（`--formats` 显式指定时产出） |
+| `manifest.json` | 本次扫描结构化清单（元信息 + 漏洞索引 + 文件清单 + 授权声明） |
+
+常用选项（其余与 `bin/cli.js` 完全一致）：
+
+```bash
+-F, --formats html,json,markdown,sarif,csv   # 输出格式（默认 html,json,markdown）
+-o, --out <dir>                              # 输出目录
+    --scope <域名/CIDR,...>                  # 授权范围（缺省按目标同源执行）
+    --level 1-5 --risk 1-3 --technique union,error,... --tamper <链>
+    --timeout <ms> --quiet --no-ledger
+```
+
+退出码可直接用于 CI 门禁：`0` 未发现高危 / `2` 发现 Critical 或 High / `1` 执行失败。
+
+> 内网/回环目标需显式放行：`SSRF_ALLOW_PRIVATE=1 node scripts/one-click-scan.mjs -u http://127.0.0.1:8130/...`
+
+**本地实测（2026-09-17，`e2e/real-world-lab`，PGlite 真实 PostgreSQL）**：
+
+```bash
+$ node scripts/one-click-scan.mjs -u "http://127.0.0.1:8130/items?cat=1"
+  风险等级  : High    数据库: PostgreSQL        注入点: 1 个    漏洞: 3 条
+    [高危] SQL 注入（联合查询注入） · CWE-89   受影响参数: cat · URL 查询参数（GET query）
+    [高危] SQL 注入（报错注入） · CWE-89       受影响参数: cat · URL 查询参数（GET query）
+    [中危] SQL 注入（布尔盲注） · CWE-89       受影响参数: cat · URL 查询参数（GET query）
+  产出文件: report.html report.json report.md report.sarif report.csv manifest.json
+$ echo $?   # 2（发现 High，CI 门禁生效）
+2
+```
+
+### 扫描目标范围
+
+| 维度 | 口径 |
+|---|---|
+| **默认范围** | 目标 URL **同源**（scheme + host + port）；`config.scope` 未配置时按此执行并在报告中如实标注 |
+| **显式范围** | `--scope <域名/CIDR/URL 前缀,...>`；越界目标在**发起任何请求前**被拒（`core/scopeGuard.js`） |
+| **重定向** | 每一跳都重新校验授权范围，目标 302 到未授权主机时后续请求立即停止（防「统一登录/CDN 回源」逃逸） |
+| **SSRF 防护** | 内网/回环/链路本地/云元数据地址默认拒绝；授权内网目标需 `SSRF_ALLOW_PRIVATE=1` 或 `SSRF_ALLOW_CIDRS=<CIDR>` |
+| **二阶触发页** | 与主目标同受 scope 约束（存储点在圈内不代表回显页在圈内） |
+| **注入点范围** | 默认 query + body（含 JSON 嵌套）；`--test-headers` / `--test-path` 显式开启后追加请求头与 path 段 |
+
+### 支持的注入与漏洞类型
+
+引擎内置 9 条技术通道，每条在报告中映射为规范化的**漏洞类型 + CWE + OWASP 分类**
+（单一取数源 `server/src/services/vulnTaxonomy.js`）：
+
+| technique | 漏洞类型 | CWE | 说明 |
+|---|---|---|---|
+| `union` | SQL 注入（联合查询注入） | CWE-89 | UNION SELECT 拼进回显位，可直接读表 |
+| `error` | SQL 注入（报错注入） | CWE-89 | 借报错回显带出数据 + 数据库指纹 |
+| `boolean` | SQL 注入（布尔盲注） | CWE-89 | 靠真假条件的内容差异逐位推断 |
+| `time` | SQL 注入（时间盲注） | CWE-89 | 条件化延迟逐位推断，无内容差异亦可 |
+| `stacked` | SQL 注入（堆叠查询） | CWE-89 | 多语句执行，可写库/调过程 |
+| `oob` | SQL 注入（带外通道） | CWE-89 | 数据库进程主动 DNS/HTTP 回连带数据 |
+| `second_order` | SQL 注入（二阶注入） | CWE-89 | 写入点与触发点分离（支持跨角色双身份） |
+| `inline` | SQL 注入（内联查询注入） | CWE-89 | 派生表/子查询等内联上下文注入 |
+| `nosql` | NoSQL 注入 | CWE-943 | 用户输入并入查询对象（`$where` / 操作符） |
+
+OWASP 分类统一为 `A03:2021-Injection`。**未收录的通道不会被静默归类**——走词表兜底类型并在报告中标注「待人工复核」。
+
+### 报告输出格式
+
+所有格式由 `services/ReportGenerator.js` 渲染，**同源取数**（`reportDelivery.js` + `vulnTaxonomy.js`），
+不存在「HTML 有、Markdown 没有」的字段漂移。每条漏洞条目必含交付五要素：
+
+| 要素 | 字段 | 出现位置 |
+|---|---|---|
+| 漏洞类型 | `vulnType.nameZh/nameEn/cwe/owasp` | 全部格式 |
+| 风险等级 | `riskLevel` + CVSS v3.1（`score`/`vector`/`severity`） | 全部格式 |
+| 受影响参数 | `param` / `location` / `affectedParam` / `url` / `method` | 全部格式 |
+| 利用证明 | `poc.curl` / `poc.raw` / `poc.payload`（引擎实发请求形态还原） | HTML / Markdown / JSON / manifest |
+| 修复建议 | 按技术通道的针对性措施 + 通用加固基线 | HTML / Markdown / CSV |
+
+> 「受影响参数」是漏洞条目的**自包含字段**（`server/src/engine/vulnEnrich.js` 回填），
+> 报告脱离原始 JSON 后仍可读——不再只有内部 pointId hash。
+
 ## 功能
 
 | 功能 | 说明 |
 |------|------|
-| **一键扫描** | 输入 URL → 点击开始 → 查看报告 |
+| **一键扫描** | 三种形态：Web UI（输入 URL → 点击开始 → 查看报告）/ **CLI 一条命令出全套报告**（`npm run scan -- -u <url>`）/ REST API。CLI 形态见「一键扫描」小节 |
+| **结构化漏洞报告** | HTML / JSON / Markdown / SARIF / CSV / manifest，每条漏洞含**漏洞类型(CWE·OWASP) / 风险等级(CVSS) / 受影响参数 / 利用证明(curl·原始报文) / 修复建议**，且明确标注扫描范围与结论可信度 |
 | **9 种检测技术** | union / error / boolean / time / stacked / oob / second_order / inline / nosql |
 | **18 种数据库** | MySQL / PostgreSQL / SQL Server / Oracle / SQLite / MariaDB / TiDB / DM8 / ClickHouse / DB2 / Sybase / Firebird / Informix / H2 / Access / HSQLDB / Derby / MonetDB | **4 种真实引擎全链路验证 + 3 种部分通道验证 + 11 种模板适配**（分层见下） |
 
@@ -145,9 +239,40 @@ npm run acceptance      # 【门禁】全方位验收（10 套件，事实断言
 |------|--------|------|
 | `HOST` | `127.0.0.1` | 监听地址 |
 | `PORT` | `4567` | 监听端口 |
-| `SCAN_API_TOKEN` | 无 | API 认证 Token |
+| `SCAN_API_TOKEN` | 无 | API 认证 Token（**非回环监听时必填**，见下） |
+| `SCAN_API_TOKEN_FILE` | 无 | 从文件读取 Token（Docker/K8s secret 挂载优先于此项） |
+| `SCAN_API_ALLOW_NO_TOKEN` | `0` | 置 `1` 显式接受无鉴权（仅隔离网络；非回环时会打显著告警） |
 | `EXPLOIT_ENABLED` | `0` | 开启利用能力（=1 启用） |
 | `ALLOWED_ORIGINS` | `http://localhost:5173` | 跨域白名单 |
+
+### 部署安全基线（2026-09-17 起，fail-closed）
+
+引擎能对任意可达目标发起扫描与拖库，因此**暴露面的默认值必须是"起不来"而不是"裸奔"**：
+
+| 监听 | 未设 Token | 结果 |
+|---|---|---|
+| `HOST=127.0.0.1`（默认 / docker-compose / 桌面版） | ✅ 允许 | 无鉴权但仅本机可达，启动打 WARN |
+| `HOST=0.0.0.0` 等网卡地址（Docker 容器必需） | ❌ | **拒绝启动**并打印修复指引（设置 `SCAN_API_TOKEN` 或 `SCAN_API_TOKEN_FILE`，或改回 `HOST=127.0.0.1`） |
+| 任意 + `SCAN_API_ALLOW_NO_TOKEN=1` | ✅ 允许 | 显式接受风险，启动打显著 WARN |
+
+```bash
+# 生成 token（compose 已要求必填，缺省会拒绝启动）
+openssl rand -hex 32   # 或：node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+docker compose up -d   # SCAN_API_TOKEN 未设置时 compose 直接报错
+```
+
+Web 端在鉴权启用后需填写一次 token：首次请求遇 401 会弹出输入框（写入 `localStorage.scanApiToken`），
+或构建期注入 `VITE_SCAN_API_TOKEN`。
+
+### 桌面版（Tauri）引擎连接（2026-09-17 起）
+
+旧实现把 sidecar 写死在 `127.0.0.1:4567` 且无鉴权：本机任何进程都能连上这个"能扫能拖库"的引擎，
+甚至可以先占 4567 冒充引擎（WebView CSP 允许该 origin）截获目标 Cookie 与拖库结果。现在：
+
+- **端口**：优先 4567，被占用则自动改用空闲端口（不再与应用一起"起不来"）；
+- **一次性 token**：引擎用 `crypto.randomBytes(32)` 生成，经 stdout `ENGINE_TOKEN=…` 回传给壳，
+  壳通过 `get_engine_info` 命令交给前端自动注入，用户无感；
+- **失败不崩**：sidecar 缺失/启动失败只广播 `engine-exit`，前端给"重启引擎"入口（旧实现 `expect` 直接 panic）。
 
 **目标认证能力实测口径（2026-09-14 起）**：
 
@@ -171,10 +296,10 @@ backend/  ← Express + Node.js
 ## 测试
 
 ```bash
-# 前端测试（263 个用例）
+# 前端测试（294 个用例）
 npm test
 
-# 服务端测试（1815 个用例）
+# 服务端测试（1850 个用例）
 cd server && npm test
 
 # 全部测试
@@ -184,8 +309,9 @@ npm run test:all
 ## 项目状态
 
 - TypeScript: 零错误
-- 前端测试: 263/263 通过
-- 服务端测试: 1815 用例（1812 pass / 0 fail / 3 skip，串行口径 2026-09-17 复测；3 skip 为环境依赖显式跳过。并发口径存在低频时序偶发，见 docs 评分台账）
+- 前端测试: 294/294 通过（覆盖率门禁 stmts 90.01 / branch 79.01 / func 70.64，阈值 87/76/67）
+- 服务端测试: 1850 用例（1847 pass / 0 fail / 3 skip，并发口径 2026-09-17 复测；3 skip 为环境依赖显式跳过。覆盖率 lines 88.42 / branch 72.67 / func 75.75，阈值 85/69/72）
+- 一键扫描: `npm run scan -- -u <url>`（CLI 一条命令产出 HTML/JSON/Markdown 全套报告 + manifest，退出码可直接进 CI 门禁）
 - Tamper 插件: 228 个（含 v24 增量 20 个，对齐 sqlmap 官方 tamper 全集，含官方 CRS/libinjection 实测组合 uniontable+odbcbrace）
 - WAF 绕过能力: 200+ 插件链式组合，覆盖 62 个 WAF 厂商指纹识别 + 推荐
 
@@ -198,7 +324,16 @@ npm run test:all
 | 编号 | 问题 | 状态 |
 |---|---|---|
 | **P0** | `--test-path` 在非 200 端点误报（7 个安全点中 6 个） | ✅ **已修复**（2026-09-16） |
-| **P1** | DBMS 误判（真 MySQL 8.0.28 被判定为 DB2） | ⚠️ 未修，13 个点全部命中 |
+| **P1-A** | 提取阶段内部空转 327,875 次 + `validity` 误报 `unreachable` | ✅ **已修复**（2026-09-17） |
+| **P1-B** | 列数探测在「恒 200 + 错误页回显」目标上顶到上限 50 | ✅ **已修复**（2026-09-17） |
+| **P1-C** | DBMS 定库：5 个**常量串** sig 无区分度（真 MySQL 判 DB2） | ✅ **已修复**（2026-09-16） |
+| **P1-D** | DBMS 定库：**纯版本号** sig 互相冲突（自检出 20 处） | ⚠️ **未修**（`node e2e/blackbox-lab/check-dbms-sig.mjs` 仍非零退出） |
+| **P1-E** | 提取链：长度探测顶到上限 **65,531** → 拖库不可用 | ⚠️ **根因已定位，未修**（见下） |
+
+> **P1-A / P1-B / P1-E 是同一病根的三个实例**（详见 `docs/统一探测判据-设计.md`）：
+> 二分探测的真/假判据依赖「响应差异」，而目标**恒 200 + 错误页回显**时差异被抹平
+> → 二分失去方向 → **顶到上限** → 下游拿着荒谬值继续跑（且不报错）。
+> 前两个已修，第三个（长度探测）修法与它们相同，抽象已就绪（`server/src/engine/binaryProbe.js`）。
 
 **P0 根因与修法**（诊断实测，非推断）：
 path 段注入后 URL 变为不存在的路径（500/403 → 404），404 页**回显请求 URL**，
@@ -310,8 +445,8 @@ sqlmap 误报的具体条目：`F18-safe-item`、`F20-safe-rand`、`F21-safe-500
 
 ### 验收门禁（`npm run acceptance`）
 
-10 套件一次跑完：服务端单测 → 独立刁钻靶场 → 检测回归 → 真 MySQL → 真 PG（含二阶）→
-**报告契约** → CRS 人工挂链 A/B → CRS 自动选链 → fileRead/fileWrite 真闭环。
+11 套件一次跑完：服务端单测 → 独立刁钻靶场 → 检测回归 → 真 MySQL → 真 PG（含二阶）→
+**报告契约** → CRS 人工挂链 A/B → CRS 自动选链 → 红队实战（真值对照）→ fileRead/fileWrite 真闭环。
 
 **判定纪律（关键）**：门禁**不采信任何套件自报的 PASS 字样**，只解析可独立核对的事实数字
 （漏洞场景数 / 安全误报数 / 技术位 / 文件是否真的存在），据此断言并决定退出码。
@@ -329,20 +464,37 @@ npm run acceptance -- --only=waf-auto,waf-real   # 改完某模块做定向门�
 - 依赖缺失时输出 **SKIP + 原因**（不静默跳过、不假装通过）；任一必需套件失败 → 非零退出码。
 - 报告落盘 `e2e/results/acceptance-report.md`。
 
-**最近一次全量结果（2026-09-12，MySQL 8.0.28 + 红队靶场就绪）**：**9 PASS / 0 FAIL / 2 SKIP**
+**最近一次全量结果（2026-09-17，MySQL 8.0.28 `secure_file_priv=''` 放行实例 + 红队靶场就绪）**：**11 PASS / 0 FAIL / 0 SKIP**
 
 | 套件 | 事实 |
 |---|---|
-| 服务端单测 | 1735 / 1735 pass |
+| 服务端单测 | 1838 tests / 1835 pass / 0 fail / 3 skip（skip 为环境依赖显式跳过） |
 | 独立刁钻靶场 | 10/10 检出，安全误报 0 |
 | 检测回归 | 19 PASS / 0 FAIL |
 | 真 MySQL / 真 PG（含二阶） | 10 PASS / 全部通过 |
-| 报告契约 | 8 项一致 |
+| 报告契约 | 8 项一致 / 0 不一致 |
 | CRS 人工挂链 / 自动选链 | off 2 → on 10；技术位 10，误报 0 |
-| 红队实战评测（真值对照） | 19/19（100%），安全点误报 0 |
-| fileRead / fileWrite | SKIP（`secure_file_priv=NULL`，MySQL 8 默认；需受控实例放行才能真跑） |
+| 红队实战评测（真值对照） | 19/19（100%），安全点 7，误报 0 |
+| fileRead / fileWrite | **PASS**（放行实例下；fileWrite 含文件系统侧落盘断言） |
+
 - 门禁本身做过**缺陷注入验证**：临时移除有效 tamper 链后，`waf-auto` 套件精准 FAIL
   （技术位 10 → 2），恢复后回到 PASS。
+- **[2026-09-17] 门禁自身两处缺陷已修**（修复前它会给出错误结论，属于「门禁不可信」级别）：
+  1. 单测套件断言写的是 `pass === tests`，与「允许环境依赖 skip」自相矛盾 → **只要存在 skip 就恒判 FAIL**
+     （实测 1838 tests / 1835 pass / 0 fail / 3 skip 被判失败，原因打印「断言未通过」）。
+     改为 `pass + skipped === tests && fail === 0`。**门禁假红比没有门禁更糟**：团队会习惯性
+     忽略它，真失败也随之被淹没。
+  2. `pre` 里的键是驼峰 `secureFilePriv`，而 `SUITES[].needs` 写的是 `'secure_file_priv'` →
+     `!pre['secure_file_priv']` 恒为 true → redteam / file-read / file-write **无论 MySQL 怎么配
+     都被 SKIP**（门禁声称「因环境跳过」，实为键名拼错，这三项能力从未被门禁验证过）。
+     修复后三者首次真跑即 PASS。判据同时改为 `s !== null && s !== undefined`
+     （MySQL 语义：`NULL`=禁止导入导出、`''`=不限制、`/path`=限定目录，后两者都算放行；
+     用真值语义会把完全放行的 `''` 误判成未放行，与事实正好相反）。
+- **[2026-09-17] 新增一键扫描专项 e2e**：`node e2e/one-click/one-click-scan.e2e.mjs`，
+  33 条断言全 PASS。真实 PGlite 靶场 + **独立子进程**跑 `scripts/one-click-scan.mjs`，
+  覆盖主路径（5 格式+manifest 落盘 / 退出码 2 / 交付五要素字段）、四格式字段一致性、
+  退出码语义（安全目标→0）、参数矩阵（POST JSON / `-r` 导入 / `--formats` 子集 / `--quiet`）、
+  边界（缺目标→1、非法格式→1）、安全边界（SSRF 严格层 / 云元数据硬底线 / scope 越界）。
 
 ### 利用能力实测口径（2026-09-10 起）
 

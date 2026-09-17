@@ -12,6 +12,7 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "server": "cd server && node index.js",
+    "scan": "node scripts/one-click-scan.mjs",
     "waf-lab": "node e2e/waf-lab/lab-server.js",
     "waf-lab-v2": "node e2e/waf-lab/lab-server-v2.js",
     "waf-e2e": "node e2e/waf-lab/compare.e2e.js",

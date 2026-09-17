@@ -78,7 +78,14 @@ const num = (re, s, g = 1) => {
 };
 
 // ── 前置检查：依赖不可用必须显式 SKIP 并给出原因 ──────────────────────────────
-const pre = { mysql: false, mysqlReason: '', secureFilePriv: null, mysqlVersion: null, redteamLab: false };
+// [2026-09-17 FIX] 依赖键必须与 SUITES[].needs 的拼写**逐字一致**。
+// 原实现 pre 里只有驼峰键 secureFilePriv，而 redteam/file-read/file-write 三个套件的
+// needs 写的是 'secure_file_priv' —— `!pre['secure_file_priv']` 恒为 true，
+// 于是这三个套件**无论 MySQL 怎么配都被判 SKIP**（假 SKIP：门禁声称"因环境跳过"，
+// 实际是键名拼错，能力从未被验证过）。故这里同时提供：
+//   · secureFilePriv    —— 原值（null / '' / '/path'），供报告展示；
+//   · secure_file_priv  —— 布尔判据，供 needs 消费。
+const pre = { mysql: false, mysqlReason: '', secureFilePriv: null, secure_file_priv: false, mysqlVersion: null, redteamLab: false };
 {
   if (await portOpen(MYSQL.port)) {
     try {
@@ -87,6 +94,10 @@ const pre = { mysql: false, mysqlReason: '', secureFilePriv: null, mysqlVersion:
       pre.mysql = true;
       pre.mysqlVersion = r[0].v;
       pre.secureFilePriv = r[0].s;
+      // [2026-09-17 FIX] MySQL 语义：NULL=禁止导入导出；''=不限制；'/path'=限定该目录。
+      // 后两者都算「已放行」，故判据是「非 null/undefined」而不是「非空字符串」——
+      // 用真值语义会把 ''（完全放行）误判成未放行，正好和实际能力相反。
+      pre.secure_file_priv = r[0].s !== null && r[0].s !== undefined;
       await c.end();
     } catch (e) {
       pre.mysqlReason = `端口开放但连接失败（${e.code || e.message}）——检查 MYSQL_USER/MYSQL_PASSWORD`;
@@ -116,14 +127,19 @@ const SUITES = [
     needs: [],
     // 单测须在 server/ 目录下跑（其 package.json 与相对导入路径都以此为根）
     run: () => run('node', ['--test', '--test-concurrency=1'], {}, 1200000, resolve(ROOT, 'server')),
-    // 事实：通过数与失败数
+    // 事实：通过数、失败数与跳过数
     assert: (out) => {
       const tests = num(/# tests (\d+)/, out);
       const pass = num(/# pass (\d+)/, out);
       const fail = num(/# fail (\d+)/, out);
+      // [2026-09-17 FIX] 原断言是 `pass === tests`，与「环境依赖缺失显式 skip」自相矛盾：
+      // 只要存在 1 条 skip 就恒判 FAIL。实测 1838 tests / 1835 pass / 0 fail / 3 skip 被判
+      // FAIL（原因却打印「断言未通过」）。**门禁假红比没有门禁更糟**——团队会习惯性忽略它，
+      // 真失败也随之被淹没。正确口径：pass + skipped === tests 且 fail === 0。
+      const skipped = num(/# skipped (\d+)/, out);
       return {
-        facts: { tests, pass, fail },
-        pass: tests != null && fail === 0 && pass === tests && tests > 1000,
+        facts: { tests, pass, fail, skipped },
+        pass: tests != null && fail === 0 && pass + (skipped || 0) === tests && tests > 1000,
         reason: fail === 0 ? null : `${fail} 条失败`,
       };
     },

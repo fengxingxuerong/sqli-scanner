@@ -206,6 +206,10 @@ export function buildDelivery(report) {
     perVuln: vulns.map((v) => ({
       pointId: v.pointId,
       technique: v.technique,
+      // [2026-09-17] 交付缺口修复：修复建议的「按注入点」小节此前只印内部 pointId hash，
+      // 客户拿到整改清单后无法把条目对应到具体参数。取值与漏洞表同源（affectedParam 优先，
+      // 引擎产出的报告已由 finalize/vulnEnrich 回填）；历史快照缺该字段时降级为 null 不渲染。
+      affectedParam: v.affectedParam || v.param || null,
       cvss: cvssFor(v),
       actions: REMEDIATION_BY_TECHNIQUE[v.technique] || [
         '改用参数化查询/预编译语句（未识别技术通道，按通用基线处置）',

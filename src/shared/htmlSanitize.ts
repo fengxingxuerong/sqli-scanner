@@ -22,7 +22,12 @@ const EVENT_ATTR_RE = /\son[a-z]{3,20}\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>"'`]+)/gi;
 // 危险协议（href/src/action/xlink:href/background）
 const BAD_PROTO_ATTR_RE = /\s(?:href|src|action|xlink:href|background|formaction|data)\s*=\s*(?:"\s*(?:javascript|vbscript|livescript|data\s*:\s*text\/html)[^"]*"|'\s*(?:javascript|vbscript|livescript|data\s*:\s*text\/html)[^']*'|(?:javascript|vbscript|livescript|data\s*:\s*text\/html)[^\s>"]*)/gi;
 // CSS url() 内联脚本
-const CSS_URL_JS_RE = /url\s*\(\s*['"]?\s*(?:javascript|vbscript|livescript)[^)]*\)?/gi;
+// [2026-09-17 FIX] 原正则尾部 `\)?` 只吃**一个**右括号，输入 `url(javascript:alert(1))`
+// 会残留一个 `)`；替换为 `url("")` 时其双引号还会提前闭合 HTML 的 style 属性 → 产出
+// `style="background:url(""))"` 这种畸形片段。虽然 javascript: 已被剥离（不构成 XSS），
+// 但清洗器产出破坏结构的 HTML 是次品。改为 `\)+` 吃掉全部右括号，替换串用不带引号的
+// `url()`（合法空 CSS URL，不会闭合属性）。
+const CSS_URL_JS_RE = /url\s*\(\s*['"]?\s*(?:javascript|vbscript|livescript)[^)]*\)+/gi;
 // HTML 注释（条件注释曾是 IE 逃逸通道）
 const COMMENT_RE = /<!--[\s\S]*?-->/g;
 
@@ -39,7 +44,7 @@ export function sanitizeInjectedHtml(html: unknown): string {
   out = out.replace(COMMENT_RE, '');
   out = out.replace(BAD_PROTO_ATTR_RE, ' href="#"');
   out = out.replace(EVENT_ATTR_RE, '');
-  out = out.replace(CSS_URL_JS_RE, 'url("")');
+  out = out.replace(CSS_URL_JS_RE, 'url()');
   // 事件属性清洗可能因嵌套引号漏网（如 <div "\nonclick=...">），对剩余 "javascript:"
   // 字面量做最后兜底：整体降为无害文本
   out = out.replace(/javascript\s*:/gi, 'javascript&#58;');

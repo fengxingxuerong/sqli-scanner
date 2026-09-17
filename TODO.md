@@ -93,8 +93,16 @@ services:
 
 ## P2 · 工程化补强
 
-### 5. coverage 门禁数据刷新
-- vitest.config.ts 阈值是 2026-09-03 口径（stmts 90/branch 77/func 69），本轮修复后重测并按实测收紧 ~3pt 余量
+### 5. coverage 门禁数据刷新（✅ 已完成 2026-09-17）
+- **✅ 已完成（2026-09-17）**：
+  - 前端实测 `stmts 90.01 / branch 79.01 / func 70.64 / lines 90.01`（补测后由 89.47 提升），
+    门禁由 **FAIL 转 PASS**；阈值按「实测 −3pt」刷新为 **87 / 76 / 67 / 87**。
+    旧阈值 90 压在实测 90.01 上（差 0.01pt）——门禁架在刀尖：既容不下正常波动，也防不住真回退。
+  - 服务端实测 `lines 88.42 / branch 72.67 / func 75.75`，阈值刷新为 **85 / 69 / 72**
+    （原 84/71/73；branch 余量仅 1.67pt，太脆）。
+  - 本轮补测：`src/shared/htmlSanitize.ts` —— **此前 0% 覆盖的安全模块**（现 100%，
+    另修复其 CSS 清洗产出畸形 HTML 的瑕疵：`url()` 残留右括号 + 双引号提前闭合 style 属性）；
+    `src/shared/scanConfig.ts` 的授权范围解析（76.31% → 92.1%，scope 解析错 = 扫越界）。
 
 ### 6. 弱引用模块补直接单测
 - `tamperRoutes` / `digestAuth` / `egressOpts` / `reportDelivery` 目前仅 1 个测试文件弱引用；ntlmAuth 盲区曾藏了三重缺陷，教训明确

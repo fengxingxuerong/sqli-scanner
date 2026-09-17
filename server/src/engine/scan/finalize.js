@@ -13,6 +13,8 @@ import { createVulnerability } from '../models.js';
 import { summarizeSkipped } from '../scanHelpers.js';
 import { dbmsEvidenceOf } from '../dbmsEvidence.js';
 import { publicReport } from '../scanHelpers.js';
+// [2026-09-17] 漏洞条目上下文回填（受影响参数 / 规范化漏洞类型）
+import { attachVulnContext } from '../vulnEnrich.js';
 
 /**
  * @param {object} run 扫描运行期上下文（见 scanRunner.js）
@@ -34,6 +36,12 @@ export async function finalizeReport(run) {
       }
     }
   }
+  // [2026-09-17] 漏洞条目上下文回填（交付物「受影响参数」一等字段）：
+  // 把注入点的 param/location 与受影响 URL/method 复制到每条漏洞上，并补规范化漏洞类型
+  // （CWE/OWASP）。此前 vuln 只有 pointId —— 一个内部 hash，报告读者无法自解「哪个参数中招」。
+  // 在此处（而非仅报告导出层）落盘，是为了让 JSON 报告 / SSE / 前端全部拿到同一份字段。
+  // attachVulnContext 是纯函数浅拷贝；对已含字段的条目幂等，resume 合并来的历史条目同样受益。
+  report.vulns = attachVulnContext(report).vulns;
   report.data = target.config.enableExtract ? extracted : null;
   // [P0-FIX] resume 模式：合并历史会话已落盘的提取数据（拖库断点续跑不丢已拉数据）。
   // 已完成点本次跳过不重提取，但历史库/表/列/行结论须合并回报告，保证数据证据链完整。
