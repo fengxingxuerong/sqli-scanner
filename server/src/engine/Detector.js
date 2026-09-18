@@ -182,22 +182,31 @@ export class Detector {
       // 强动态页不会因此假命中：噪声让两侧「相似」而不是「不同」，判据方向正好相反。
       // 成本：仅在基线比对一条候选都没命中时才发（正常站点零额外请求）。
       if (similarHits.length === 0) {
-        const pairHits = await Promise.allSettled(
-          candidates.map(async (prefix) => {
-            const tp = this.obfuscateValue(ctx, `${orig}${prefix} AND 1=1-- -`);
-            const fp = this.obfuscateValue(ctx, `${orig}${prefix} AND 1=2-- -`);
-            const [t, f] = await Promise.all([
-              this.send(httpClient, ctx, this.buildRequest(target, point, tp), PROBE_OPTS),
-              this.send(httpClient, ctx, this.buildRequest(target, point, fp), PROBE_OPTS),
-            ]);
-            const tc = stripEchoedPayload(String(t?.data ?? ''), tp);
-            const fc = stripEchoedPayload(String(f?.data ?? ''), fp);
-            // 两侧都空（如全程 404）不构成信号
-            return { prefix, ok: tc.length > 0 && !this.chunkedSimilar(tc, fc) };
-          })
-        );
-        const bestPair = /** @type {any} */ (pairHits.find((r) => r.status === 'fulfilled' && r.value.ok));
-        if (bestPair) return bestPair.value.prefix;
+        // 分波投放：候选表按出现频率排序，实战绝大多数上下文落在前 6 个（'' / ' / ') / ')) / " / ")）。
+        // 一次把 13 个候选全投 = 26 个请求，实测在「本来就能检出」的目标上白烧 +24 请求
+        // （e2e/fixtures/recall/10-search-like.json：41 → 65，撞破它自己的请求数上限），
+        // 而且在 WAF 目标上这 26 条全是硬拦截特征 —— 多花的是封 IP 的风险。
+        // 先投前 6 个（12 请求），拿不到差分再投剩余（LIKE 的 `%'` 在第 9 位，仍会覆盖到）。
+        const WAVES = [candidates.slice(0, 6), candidates.slice(6)];
+        for (const wave of WAVES) {
+          if (!wave.length) continue;
+          const pairHits = await Promise.allSettled(
+            wave.map(async (prefix) => {
+              const tp = this.obfuscateValue(ctx, `${orig}${prefix} AND 1=1-- -`);
+              const fp = this.obfuscateValue(ctx, `${orig}${prefix} AND 1=2-- -`);
+              const [t, f] = await Promise.all([
+                this.send(httpClient, ctx, this.buildRequest(target, point, tp), PROBE_OPTS),
+                this.send(httpClient, ctx, this.buildRequest(target, point, fp), PROBE_OPTS),
+              ]);
+              const tc = stripEchoedPayload(String(t?.data ?? ''), tp);
+              const fc = stripEchoedPayload(String(f?.data ?? ''), fp);
+              // 两侧都空（如全程 404）不构成信号
+              return { prefix, ok: tc.length > 0 && !this.chunkedSimilar(tc, fc) };
+            })
+          );
+          const bestPair = /** @type {any} */ (pairHits.find((r) => r.status === 'fulfilled' && r.value.ok));
+          if (bestPair) return bestPair.value.prefix;
+        }
       }
       // [P1-FIX 2026-09-10 实战实测] 空基线下的闭合前缀歧义消解：
       // 参数**原值查不到行**时（实测 UA 头注入 `WHERE username='Mozilla'` 恒 0 行），**所有**候选
