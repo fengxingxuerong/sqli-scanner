@@ -283,6 +283,27 @@ jobs:
       - run: node e2e/diag/release-smoke.mjs
         name: Release smoke (production config + real lab)
 
+  # [2026-09-18] sidecar 构建门禁：desktop 交付依赖「引擎打成单文件可执行」。
+  # 这条链路曾长期静默失效——`--format cjs` 的产物因 import.meta.url 为 undefined
+  # 根本起不来（ERR_INVALID_ARG_TYPE），而此前没有任何门禁覆盖它。
+  # 现在 build:sidecar 自带冒烟（起 exe 断言 health 200 + ENGINE_TOKEN 回传），跑绿即算通过。
+  sidecar-build:
+    runs-on: ubuntu-latest
+    needs: [test-server]
+    if: github.event_name != 'schedule'
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm ci
+        name: Install root deps (esbuild + postject)
+      - run: cd server && npm ci
+        name: Install server deps
+      - run: npm run build:sidecar
+        name: Build sidecar (SEA) + smoke
+
   docker:
     runs-on: ubuntu-latest
     needs: [test-frontend, test-server]
