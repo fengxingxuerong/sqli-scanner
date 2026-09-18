@@ -104,8 +104,29 @@ services:
     另修复其 CSS 清洗产出畸形 HTML 的瑕疵：`url()` 残留右括号 + 双引号提前闭合 style 属性）；
     `src/shared/scanConfig.ts` 的授权范围解析（76.31% → 92.1%，scope 解析错 = 扫越界）。
 
-### 6. 弱引用模块补直接单测
-- `tamperRoutes` / `digestAuth` / `egressOpts` / `reportDelivery` 目前仅 1 个测试文件弱引用；ntlmAuth 盲区曾藏了三重缺陷，教训明确
+### 6. 弱引用模块补直接单测（✅ 已完成 2026-09-18，含清单纠错）
+- **⚠️ 本项原描述已证伪**：原文写「tamperRoutes / digestAuth / egressOpts / reportDelivery 仅 1 个测试文件弱引用」，
+  但实测覆盖率完全相反 —— `egressOpts.js` 行覆盖 **100%**、`reportDelivery.js` **99.55%**、
+  `digestAuth` 也有专属测试文件。**照原文补测等于白做工**。
+- **真实缺口在清单未提之处**：`scanLedger.js` 行 **26.39%** / 函数 **0%**
+  （只被 `bin/cli.js` 调用，CLI 走 e2e 不入单测；但 `cli.js ledger list|show` 是真实交付路径，
+  且已有 163 个真实台账目录）。
+- **✅ 已完成（2026-09-18，commit efabace）**：新增 `server/tests/scanLedger.test.js`（12 条，
+  真实文件系统、不 mock 落盘）；覆盖率 **行 26.39→96.02% / 函数 0→91.67%**。
+  补测过程实测并修复三个真实缺陷：
+  1. **PoC 落盘恒为空（交付级）**：`_attachPoc` 惰性且不可变（返回新对象不回写入参），
+     CLI 传原始 report → `if (!v.poc) continue` 全命中 → **163 个真实台账 0 个 poc 文件**。
+     修：CLI 两处改传 `rg.attachPoc(report)`。真靶场验证：修复版 poc=5 / 回退版 poc=0。
+  2. **`getScan` files 分隔符随平台**：`poc\a.txt` vs `recordScan` 存的 `poc/a.txt`，
+     消费方 `startsWith('poc/')` 过滤恒为空。修：统一归一为 `/`。
+  3. **scanId 路径穿越**：`../x` 可建目录到 ledger 根之外（`getScan` 的 scanId 直接来自 CLI 参数）。
+     修：新增 `safeScanId` 拒绝分隔符/`..`/绝对路径/`\0`。
+- **教训**：清单里的模块名与数字都可能过时。**补测前必须先跑覆盖率报告**
+  （`cd server && npm run test:coverage:report`）再决定打哪。
+- **副产品发现（未修，建议单独立项）**：`scanManager.scheduling.test.js` 与 `tamper.f20.test.js`
+  存在**既有 flaky**（连跑 3 次 2/1/2 个失败，从不全绿）。根因是 `runScan` 轮询预算
+  `200×5ms=1s` 太紧（测试注释自承"飘到 1.6s"），机器负载高时扫描未完成即断言。
+  与本次改动零引用关系（已核实导入链）。
 
 ### 7. docs/ 数字口径单一来源
 - 32 个 md 中的测试数/引擎等级表易失真（本次审计修正 2 处）。可复制 `dbmsEvidence.js` 模式：数字由代码统一导出，文档生成时引用
