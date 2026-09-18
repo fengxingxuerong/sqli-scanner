@@ -26,9 +26,9 @@
     "build:engine": "node scripts/build-engine.mjs",
     "arch:guard": "node scripts/arch-guard.mjs",
     "arch:baseline": "node scripts/arch-guard.mjs --update",
-    "build:tauri": "npm run build && npm run build:engine && tauri build",
-    "package:win": "npm run build && npm run build:engine && tauri build --runner cargo --target x86_64-pc-windows-msvc",
-    "package:mac": "npm run build && npm run build:engine && tauri build --runner cargo --target universal-apple-darwin",
+    "build:tauri": "npm run build && npm run build:engine && npm run build:sidecar && tauri build",
+    "package:win": "npm run build && npm run build:engine && npm run build:sidecar && tauri build --runner cargo --target x86_64-pc-windows-msvc",
+    "package:mac": "npm run build && npm run build:engine && npm run build:sidecar && tauri build --runner cargo --target universal-apple-darwin",
     "typecheck": "tsc --noEmit",
     "test:server": "cd server && npm test",
     "test:all": "npm run test && npm run test:server",
@@ -50,7 +50,8 @@
     "redteam:report": "node e2e/redteam-lab/report.mjs",
     "redteam:sqlmap": "node e2e/redteam-lab/sqlmap-bench.mjs",
     "demo:report": "node e2e/demo/deliverable-demo.mjs",
-    "typecheck:server": "tsc -p server/tsconfig.json"
+    "typecheck:server": "tsc -p server/tsconfig.json",
+    "build:sidecar": "node scripts/build-sidecar.mjs"
   },
   "lint-staged": {
     "*.{js,mjs,cjs,ts,tsx}": [
@@ -90,6 +91,7 @@
     "jsdom": "^25.0.1",
     "lint-staged": "^17.3.0",
     "postcss": "^8.4.39",
+    "postject": "^1.0.0-alpha.6",
     "tailwindcss": "^3.4.4",
     "typescript": "^5.4.5",
     "typescript-eslint": "^8.67.0",

@@ -130,6 +130,13 @@ async function main() {
   // 1) esbuild bundle（sql.js 保持外部，其余全部内联）
   const build = await loadEsbuild();
   log(`esbuild bundle: server/index.js → ${path.relative(ROOT, outfile)} (format=${format}, minify=${opts.minify})`);
+  // [FIX 2026-09-18] CJS 输出下 esbuild 不提供 `import.meta.url`（原样保留会变成 undefined），
+  // 而引擎入口用 `fileURLToPath(new URL('../dist/index.html', import.meta.url))` 定位前端产物
+  // → 立刻抛 ERR_INVALID_ARG_TYPE，`--format cjs` 的产物**根本起不来**（此前从未验证过）。
+  // 用 banner 定义 CJS 版的 __filename URL，并把 import.meta.url 重写指向它。
+  const cjsMetaShim = [
+    "const __engine_meta_url = require('node:url').pathToFileURL(__filename).href;",
+  ].join('\n');
   const result = await build({
     entryPoints: [entry],
     outfile,
@@ -142,6 +149,9 @@ async function main() {
     legalComments: 'none',
     sourcemap: false,
     external: ['sql.js'], // 动态 import('sql.js') 原样保留，运行时从 dist-engine/node_modules 解析
+    ...(format === 'cjs'
+      ? { banner: { js: cjsMetaShim }, define: { 'import.meta.url': '__engine_meta_url' } }
+      : {}),
     logLevel: 'info',
   });
   if (result.errors && result.errors.length > 0) {
