@@ -58,16 +58,23 @@ export default defineConfig({
       reporter: ['text', 'json', 'html'],
       reportsDirectory: './coverage',
       thresholds: {
-        // [2026-09-17 数据刷新] 实测：stmts 90.01 / branch 79.01 / func 70.64 / lines 90.01。
-        // 阈值按「实测 − 约 3pt」留余量，防止前端任何一处小改动就让 CI 假红——
-        // 旧阈值 90 恰好压在实测 90.01 上（差 0.01pt），等于把门禁架在刀尖：
-        // 既不能容忍正常波动，也起不到防回退作用（跌到 87 以下才真正需要关注）。
-        // 本轮补测项：htmlSanitize（0% → 100%，此前是零覆盖的安全模块）、
-        // scanConfig 的授权范围解析（parseScopeList / stringArray 容错 / 续跑 scope 继承）。
-        statements: 87,
-        branches: 76,
+        // [2026-09-18 数据刷新] 实测：stmts 91.11 / branch 80.01 / func 72.01 / lines 91.11。
+        // 阈值仍按「实测 − 约 3pt」留余量，防止前端任何一处小改动就让 CI 假红。
+        //
+        // 【为什么 func 阈值刻意不跟涨 —— 别按 stmts 的规则去"修"它】
+        // 本轮把 func 从 70.64 提到 72.01（+1.37pt）只用了 4 个函数（21 条用例），
+        // 按 293 个函数折算恰好是 4/293 = 1.37pt，即**覆盖面每一处都落在真逻辑上**。
+        // 但同期统计：剩余 82 个未覆盖函数里 **69 个是 JSX 内联事件处理器**
+        // （onChange/onClick/onClose 之类，见 src/components/SqlmapOptions.tsx 单文件 21 个），
+        // 真正带分支逻辑的仅剩约 13 个。
+        // 结论：func% 这个指标在本项目里**主要反映"组件里写了多少内联箭头函数"**，
+        // 而不是逻辑质量 —— 每新增一个组件它就会自然下跌。把它按 stmts 的 −3pt 规则跟着涨，
+        // 等于要求为 JSX 样板写测试（负收益），且会持续制造假红。
+        // 故：func 保持宽松余量；想验真实逻辑盲区请看 stmts/branch/lines。
+        statements: 88,
+        branches: 77,
         functions: 67,
-        lines: 87,
+        lines: 88,
       },
     },
   },

@@ -19,7 +19,7 @@
 //   node scripts/facts-sync.mjs                        # --check：校验 README 是否漂移
 //   node scripts/facts-sync.mjs --fix                  # 按 _facts.json 修正 README
 // ============================================================================
-import { execFileSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -70,31 +70,34 @@ function readServerThresholds() {
 // 实测坑（2026-09-18）：vitest 即使 stdout 被管道捕获**照样输出 ANSI 颜色码**，
 // 形如 `Tests \u001b[22m \u001b[1m\u001b[32m294 passed` —— 数字前带转义序列，
 // 任何 `Tests\s+(\d+)` 都匹配不上。必须先剥离再解析（覆盖率表格同理，否则整表解析失败）。
-const ANSI_RE = /\u001b\[[0-9;]*[A-Za-z]/g;
+// 覆盖 CSI（含 `?` 参数，如 `\u001b[?25l`）、OSC、以及单字符 ESC 形式。
+const ANSI_RE = /\u001b\[[0-9;?]*[ -/]*[@-~]|\u001b\][^\u0007]*(?:\u0007|\u001b\\)|\u001b[@-Z\\-_]/g;
 const stripAnsi = (s) => String(s).replace(ANSI_RE, '');
 
+// 为什么用 spawnSync 而不是 execFileSync：
+// execFileSync **只返回 stdout**，stderr 拿不到；而 vitest 在 TTY 探测不确定时会换输出流，
+// 导致「同一条命令上一次拿得到 Tests 行、这一次拿不到」（实测踩到，非确定性）。
+// spawnSync 无论退出码如何都同时给出 stdout + stderr，两个流合并后再解析才稳。
 function run(cmd, cwd) {
-  const opts = {
+  const r = spawnSync(cmd, {
     cwd, shell: true, encoding: 'utf8',
     maxBuffer: 64 * 1024 * 1024,
-    stdio: ['ignore', 'pipe', 'pipe'],
-  };
-  try {
-    return stripAnsi(execFileSync(cmd, opts));
-  } catch (e) {
-    // 非零退出但仍有输出（典型：覆盖率低于阈值 / 有用例失败）——照常解析，
-    // 阈值与用例是否通过由各自的原有门禁负责，本脚本只负责把真实数字取出来。
-    const out = stripAnsi(`${e.stdout || ''}${e.stderr || ''}`);
-    if (out.trim()) return out;
-    throw e;
-  }
+  });
+  if (r.error) throw r.error;
+  // 非零退出（覆盖率低于阈值 / 有用例失败）也照常解析：阈值与用例是否通过由各自原有门禁负责，
+  // 本脚本只负责把真实数字取出来。
+  return stripAnsi(`${r.stdout || ''}${r.stderr || ''}`);
 }
 
 function collectFrontend({ coverage }) {
   const out = run(`npx vitest run${coverage ? ' --coverage' : ''}`, ROOT);
   const files = out.match(/Test Files\s+(\d+)\s+passed/);
   const tests = out.match(/Tests\s+(\d+)\s+passed(?:\s*\|\s*(\d+)\s+failed)?/);
-  if (!tests) throw new Error('前端测试输出里找不到 Tests 行');
+  if (!tests) {
+    console.error('── 前端测试输出尾部（未能解析 Tests 行）──');
+    console.error(out.split('\n').slice(-40).join('\n'));
+    throw new Error('前端测试输出里找不到 Tests 行');
+  }
   const res = {
     files: files ? Number(files[1]) : null,
     tests: Number(tests[1]) + (tests[2] ? Number(tests[2]) : 0),

@@ -1,5 +1,6 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach, beforeAll } from 'vitest';
 import { render, screen } from '@testing-library/react';
+import type { ReactNode } from 'react';
 import {
   getEventStyle,
   renderSecondary,
@@ -205,5 +206,93 @@ describe('progressUtils.copyText', () => {
     // 临时 textarea 已通过 body.removeChild 从 DOM 移除
     expect(removeChildSpy).toHaveBeenCalled();
     expect(document.querySelector('textarea')).toBeNull();
+  });
+});
+
+// ── renderValidity（经 renderSecondary 的 scan_validity / scan_validity_abort 路径）──
+//
+// 为什么补这一组：`renderValidity` 未被 `export`，只能从这两个事件类型进入；而它是
+// **结论可信度守卫的 UI 出口** —— 后端判定「已被 WAF 封 / 目标挂了 / 会话失效」时，
+// 用户看到的唯一提示就是它。此前 0 覆盖，意味着这段文案与分支（异常状态回退、
+// 中止时的未完成点数）从没被验证过。
+describe('progressUtils.renderSecondary · 可信度守卫（renderValidity）', () => {
+  // 语言可能被其他测试经 localStorage 改写，这里显式固定，避免用例顺序依赖
+  beforeAll(async () => {
+    await i18n.changeLanguage('zh');
+  });
+
+  const textOf = (el: ReactNode) => render(<>{el}</>).container.textContent || '';
+
+  it('scan_validity（非中止）：渲染「提示 + 状态标签 + 实测原因」，且不出现中止文案', () => {
+    const txt = textOf(
+      renderSecondary(
+        ev('scan_validity', 't', {
+          status: 'blocked',
+          reliable: false,
+          reason: '实测拦截 12/20',
+        } as never),
+        t
+      )
+    );
+    expect(txt).toContain('结论可信度提示');
+    expect(txt).toContain('疑似被 WAF/封禁');
+    expect(txt).toContain('：实测拦截 12/20');
+    // 非中止路径不得出现中止文案
+    expect(txt).not.toContain('扫描被守卫中止');
+  });
+
+  it('scan_validity_abort：切换到中止文案，并带出未完成检测的注入点数量', () => {
+    const txt = textOf(
+      renderSecondary(
+        ev('scan_validity_abort', 't', {
+          status: 'session_expired',
+          reliable: false,
+          reason: '连续 401',
+          inconclusivePoints: ['p1', 'p2'],
+        } as never),
+        t
+      )
+    );
+    expect(txt).toContain('扫描被守卫中止：结论不可信');
+    expect(txt).toContain('会话已失效');
+    expect(txt).toContain('：连续 401');
+    expect(txt).toContain('2 个注入点未完成有效检测');
+  });
+
+  it('中止但未完成点为空：不渲染「0 个注入点」这种噪声', () => {
+    const txt = textOf(
+      renderSecondary(
+        ev('scan_validity_abort', 't', {
+          status: 'unreachable',
+          reliable: false,
+          reason: '连续超时',
+          inconclusivePoints: [],
+        } as never),
+        t
+      )
+    );
+    expect(txt).toContain('目标不可达');
+    expect(txt).not.toContain('个注入点未完成');
+  });
+
+  it('未知 status 回退「可信度正常」标签（后端新增状态时不至于渲染 undefined）', () => {
+    const txt = textOf(
+      renderSecondary(
+        ev('scan_validity', 't', { status: 'no_such_status', reliable: true, reason: '' } as never),
+        t
+      )
+    );
+    expect(txt).toContain('可信度正常');
+    expect(txt).not.toContain('no_such_status');
+  });
+
+  it('reason 为空串时不渲染多余的冒号', () => {
+    const txt = textOf(
+      renderSecondary(
+        ev('scan_validity', 't', { status: 'ok', reliable: true, reason: '' } as never),
+        t
+      )
+    );
+    expect(txt).not.toContain('：');
   });
 });

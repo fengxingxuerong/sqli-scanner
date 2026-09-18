@@ -167,6 +167,34 @@ services:
   但**同一文件在 Windows 与 Linux 间来回 checkout 会产生整文件 diff 噪声**。建议后续加：
   `* text=auto` + `*.md text eol=lf`。属一次性大 diff，需单独提交。
 
+### 7c. 前端 func 覆盖率低 = 指标假象（✅ 已查清 2026-09-18）
+- **原判断被实测证伪**：此前评估写「func 70.64% 说明存在整块未执行的函数，属函数级盲区」。
+  实测把未覆盖函数逐条拉出来后，**这个说法不成立**。
+- **实测结构**（`coverage/coverage-final.json`，293 个函数）：
+
+  | 类别 | 数量 | 说明 |
+  |---|---|---|
+  | 未覆盖合计 | 86 | 占 29.35% |
+  | 其中 JSX 内联事件处理器 | **69** | onChange/onClick/onClose 之类，靠用户交互驱动 |
+  | 其中「真逻辑」函数 | 17 | 且多数是 1–2 行透传（如 `goScan = () => navigate('/scan')`） |
+  | 其中**带分支逻辑值得测** | **4** | 见下 |
+
+- **本轮实际补测的 4 个（21 条用例）**：
+  | 函数 | 文件 | 为什么值得测 |
+  |---|---|---|
+  | `renderValidity` | `components/progress/` | 可信度守卫的 UI 出口（被封/目标挂/会话失效时用户唯一看到的提示），此前 0 覆盖 |
+  | `setApiToken` | `shared/apiClient.ts` | **鉴权**：trim/空值归一/localStorage 持久化/隐私模式降级 |
+  | `setApiBase` | `shared/apiClient.ts` | **桌面版命门**：sidecar 随机端口经此注入，错了就「连不上」 |
+  | `handleImportRequestFile` | `components/TargetForm.tsx` | 唯一带 IO 的多分支处理（取消/解析失败/成功/抛异常），结果直接决定扫描目标 |
+
+- **量化结论**：21 条用例 → 4 个函数 → func 70.64% → **72.01%（+1.37pt）**，
+  与 4/293 = 1.37pt 精确吻合，说明每一处都打在真逻辑上。
+  但要到 85% 需再覆盖约 46 个函数，而真逻辑只剩 13 个 —— **数学上做不到，除非去测 JSX 样板**。
+- **处置**：func 阈值**刻意不跟涨**（保持 67），理由已写进 `vitest.config.ts` 的注释；
+  stmts/branch/lines 按「实测 −3pt」上调为 88/77/88。
+- **教训**：覆盖率是**聚合指标**，会掩盖结构。看到某一维偏低时，先把它拆成「逐条清单」再下结论 ——
+  否则容易把「组件里内联箭头函数多」误读成「有逻辑没测」。
+
 ### 8. 前端测试环境差异固化
 - ~~已修 `vitest.config.ts` 强制 `NODE_ENV=test`（jsdom 下 React production build 导致 246 个假失败）+ 契约测试 `@vitest-environment node`~~（已完成）；**CI 已搭建**（`.github/workflows/ci.yml`，2026-09-13）：lint/typecheck + 前端 vitest + 服务端 1767 用例 + `run-all` 自足 6 套靶场，ubuntu/Node 24。**剩余动作：push 后观察首次 CI 实跑**——Linux 与 Windows 的路径/换行差异（e2e 脚本/测试断言）只有真跑才能暴露，若单测在 Linux 出现平台性失败按最小修复处理
 
