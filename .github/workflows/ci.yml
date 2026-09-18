@@ -33,13 +33,21 @@ jobs:
           key: ${{ runner.os }}-server-${{ hashFiles('server/package-lock.json') }}
       - run: npm ci
       - run: cd server && npm ci
-      - run: npx tsc --noEmit
+      # [CI-FIX 2026-09-19] 类型门禁改为调 package.json 里的脚本，不再在 YAML 里手写命令行。
+      # 原状：前端一步写 `npx tsc --noEmit`（与下面第 41 行自己的教训冲突——npx 曾静默失败、
+      # 误报 0 错误），服务端一步写 `node node_modules/typescript/bin/tsc -p ...`。
+      # 于是「本地 npm run typecheck」与「CI 的类型门禁」是两份命令：本地那条只覆盖前端，
+      # 服务端的 36.7k 行 JS 在开发机上从未被检查 —— 一处 TS2339（新加 {BD} 占位符没同步
+      # clampTimeVars 的 JSDoc 返回类型）就这么进了提交。现在两侧跑的是同一份定义：
+      #   typecheck = typecheck:frontend && typecheck:server
+      - run: npm run typecheck:frontend
         name: TypeScript check (frontend)
       # [P1-ADD 2026-09-13] 服务端此前**零类型覆盖**：tsconfig 的 include 只有前端 src，
       # 几万行 server JS 无任何静态检查，重构没有安全网。本次建立 server/tsconfig.json
       # （allowJs + checkJs + noEmit）并把基线 110 个错误全部清零后接入门禁。
-      # 注意：必须用 node 直调 tsc，不要用 npx（本机 npx 依赖 bash，曾因此静默失败并误报 0 错误）。
-      - run: node node_modules/typescript/bin/tsc -p server/tsconfig.json
+      # 注意：必须用 node 直调 tsc，不要用 npx（本机 npx 依赖 bash，曾因此静默失败并误报 0 错误）
+      # —— 该口径已收进 package.json 的 typecheck:server，别在这里改回 npx。
+      - run: npm run typecheck:server
         name: TypeScript check (server, checkJs)
       # [P1-ADD 2026-09-13] 架构门禁：单文件体积上限（1200 行，硬上限 2000）、循环依赖、
       # 生产代码 console.*。历史债登记在 scripts/.arch-baseline.json（只减不增），
@@ -144,8 +152,10 @@ jobs:
         name: Install frontend
       - run: cd server && npm ci
         name: Install server
-      - run: npx tsc --noEmit
-        name: TypeScript check
+      # [CI-FIX 2026-09-19] 此处原来只有 `npx tsc --noEmit`（前端），也就是说 windows/macos
+      # 两条腿从不检查服务端 —— 而那恰好是唯一能暴露平台相关类型问题（路径/换行）的地方。
+      - run: npm run typecheck
+        name: TypeScript check (frontend + server)
       - run: npx vitest run
         name: Frontend tests
       # [audit-FIX] 同 test-server：跨平台矩阵同样需要重建未入库的 .env.test
