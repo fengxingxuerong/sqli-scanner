@@ -57,7 +57,10 @@ fn spawn_engine(app: &tauri::AppHandle) {
         .env("HOST", "127.0.0.1")
         .env("PORT", port.to_string())
         .env("SCAN_API_TOKEN_EMIT", "1")
-        .env("ALLOWED_ORIGINS", "http://tauri.localhost,tauri://localhost");
+        .env(
+            "ALLOWED_ORIGINS",
+            "http://tauri.localhost,tauri://localhost",
+        );
 
     let (mut rx, child) = match cmd.spawn() {
         Ok(v) => v,
@@ -180,7 +183,11 @@ pub fn run() {
             spawn_engine(app.handle());
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![start_engine, stop_engine, get_engine_info])
+        .invoke_handler(tauri::generate_handler![
+            start_engine,
+            stop_engine,
+            get_engine_info
+        ])
         .build(tauri::generate_context!())
         .expect("构建 Tauri 应用失败");
 

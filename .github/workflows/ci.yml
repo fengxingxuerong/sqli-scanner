@@ -50,8 +50,17 @@ jobs:
         name: ESLint
       # [P0-FIX] Rust 门禁：Tauri 壳此前无任何 lint 检查。新增 cargo fmt --check + clippy
       # （eslint 的 ignores 排除 src-tauri/**，需独立门禁；cargo 缓存加速重复构建）
-      - uses: dtolnay/rust-toolchain@stable
+      # [B4 2026-09-18] 用 rust-toolchain@master 而非 @stable：@stable 每次都拉**最新** stable，
+      # 而 rustfmt 的换行/宏排版在小版本间会变、clippy 也会加新 lint →
+      # 会出现「本机 fmt 通过、CI 报 fmt 失败」这类不可复现的红。
+      # 版本在两处显式对齐（都在 1.98.0）：
+      #   1) 这里的 toolchain: —— action 在 repo 根安装，需显式指定，
+      #      否则会先装 stable、进 src-tauri 再被 rust-toolchain.toml 切走，白下一轮；
+      #   2) src-tauri/rust-toolchain.toml —— 权威来源，同时约束所有开发机本地。
+      # 升级时两处一起改（文件里也有同样提示）。
+      - uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: 1.98.0
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
         with:

@@ -55,10 +55,12 @@
 | 红队真值对照 | **R2 检出 19/19（100%）、安全点 7、误报 0**；sqlmap 同题 13/14 |
 | 全量验收门禁 | **11 PASS / 0 FAIL / 0 SKIP**（含真 MySQL 10/10、CRS v4.1.0、红队、fileRead/fileWrite 真闭环） |
 | 发布冒烟（沙箱） | 30 项断言全过（生产配置：token + 托管 dist + 真靶场扫描） |
-| sidecar 冒烟 | exe 起服务 + 一次性 token + 真扫 PGlite 靶场检出 3 条 |
+| sidecar 冒烟 | exe 起服务 + 一次性 token + **空目录下真扫 SQLite 检出 3 条**（含负向验证） |
+| Rust 门禁（本地） | `cargo fmt --check` 通过（修 2 处）；`cargo clippy -- -D warnings` 0 warning |
 
 复现：`npm run acceptance`（需 MySQL）、`node e2e/diag/release-smoke.mjs`、
-`node e2e/diag/security-guardrails.e2e.mjs`、`npm run build:sidecar`。
+`node e2e/diag/security-guardrails.e2e.mjs`、`npm run build:sidecar`、
+**`npm run check:all`**（一条命令跑齐 ESLint + 前后端 tsc + 架构门禁 + Rust fmt/clippy）。
 
 ## 文档
 
