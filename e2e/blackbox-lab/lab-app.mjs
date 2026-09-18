@@ -233,7 +233,14 @@ app.post('/api/order', async (req, res) => {
 app.get('/api/profile', async (req, res) => {
   const cookie = String(req.headers.cookie || '');
   const m = /(?:^|;\s*)uid=([^;]*)/.exec(cookie);
-  const uid = m ? decodeURIComponent(m[1]) : '1';
+  // [LAB-FIX 2026-09-18] 靶场自身缺陷，非被测属性：本 handler 是 async，Express 4 不会捕获
+  // async 回调里抛出的异常 → `decodeURIComponent("1%'…")` 的 URIError 变成 unhandledRejection，
+  // 该请求**永不应答**（客户端只能等超时）。注入器投放的闭合候选里 `%'` / `%"` 是正常形态，
+  // 于是这条缺陷会把「D3 cookie 点」整个测段拖成分钟级停顿。真值标定阶段（uid=1）碰不到，
+  // 所以此前从未暴露。
+  // 修的是「靶场不应因非 SQL 原因挂住连接」；SQL 拼接形态一字未改，注入难度与真值不变。
+  let uid = '1';
+  try { uid = m ? decodeURIComponent(m[1]) : '1'; } catch { uid = m ? m[1] : '1'; }
   const sql = `SELECT id, username, email, role FROM users WHERE id=${uid}`;
   try {
     const rows = await q(sql);

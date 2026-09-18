@@ -123,8 +123,12 @@ function collectFrontend({ coverage }) {
 function collectServer({ coverage }) {
   // 覆盖率采集用 :report 变体（不带 --test-coverage-*=阈值）：
   // 阈值是门禁的职责，采集脚本不该因为它退出非零而拿不到数字。
+  // [TOOL-FIX 2026-09-18] 显式钉 `--test-reporter=tap`。本脚本只认 `# tests N` 这种 TAP 汇总行，
+  // 而 node:test 的 reporter 选型取决于 stdout 的 TTY 探测：在 Windows + Git Bash 下 `npm run test`
+  // 走管道时输出的是 spec 格式（`ℹ tests 1885`）→ 本地跑 --refresh 必失败（数字采集器在自己
+  // 机器上取不到数，等于没有）。同一台机器上「上一次能解析、下一次不能」的不确定性也一并消除。
   const script = coverage ? 'test:coverage:report' : 'test';
-  const out = run(`npm run ${script}`, resolve(ROOT, 'server'));
+  const out = run(`npm run ${script} -- --test-reporter=tap`, resolve(ROOT, 'server'));
   const pick = (key) => {
     const m = out.match(new RegExp(`^# ${key} (\\d+)$`, 'm'));
     if (!m) throw new Error(`服务端测试输出里找不到 "# ${key}"`);
