@@ -126,7 +126,14 @@ const SUITES = [
     title: '服务端单测',
     needs: [],
     // 单测须在 server/ 目录下跑（其 package.json 与相对导入路径都以此为根）
-    run: () => run('node', ['--test', '--test-concurrency=1'], {}, 1200000, resolve(ROOT, 'server')),
+    // [GATE-FIX 2026-09-19] 必须显式钉 `--test-reporter=tap`：下面的断言只认 TAP 汇总行
+    // （`# tests/# pass/# fail/# skipped`），而 node:test 的 reporter 选型取决于 stdout 的 TTY
+    // 探测 —— 本机（Windows + Git Bash）子进程走管道时输出的是 spec 格式（`ℹ tests 1885`），
+    // 于是四个 num() 全取到 null → `fail === 0` 判假 → **门禁假红**，报告里那行写着
+    // 「FAIL　tests=null pass=null fail=null」，一眼看不出是没测到而不是测挂了。
+    // 同一坑已在此前的 scripts/facts-sync.mjs 修过一次（还咬过 3d63b7 那轮回流解析），
+    // 三处共同的前置修复应是给 run() 统一加 reporter/stdout 口径。
+    run: () => run('node', ['--test', '--test-reporter=tap', '--test-concurrency=1'], {}, 1200000, resolve(ROOT, 'server')),
     // 事实：通过数、失败数与跳过数
     assert: (out) => {
       const tests = num(/# tests (\d+)/, out);
@@ -137,6 +144,15 @@ const SUITES = [
       // FAIL（原因却打印「断言未通过」）。**门禁假红比没有门禁更糟**——团队会习惯性忽略它，
       // 真失败也随之被淹没。正确口径：pass + skipped === tests 且 fail === 0。
       const skipped = num(/# skipped (\d+)/, out);
+      // 取不到汇总行 = **门禁自己坏了**，绝不能报成「单测失败」（也不该报成通过）。
+      // 与本次 reporter 修复配套：以后格式再漂，报的是「解析不到」这个真原因，而不是 null 条失败。
+      if (tests == null || pass == null || fail == null) {
+        return {
+          facts: { tests, pass, fail, skipped },
+          pass: false,
+          reason: '解析不到 TAP 汇总行（门禁取数口径与测试输出格式不符，非单测失败）',
+        };
+      }
       return {
         facts: { tests, pass, fail, skipped },
         pass: tests != null && fail === 0 && pass + (skipped || 0) === tests && tests > 1000,

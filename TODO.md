@@ -52,6 +52,29 @@ r2 档黑盒 9/13 → 13/13，A3-like 从 time 变 union+boolean。
 本轮实跑到的门禁：服务端全量单测（1885 用例 0 fail）+ 前端 315/315 + `tsc` 0 错 + eslint
 0 error + blackbox-lab 两轮 + redteam-lab R1/R2。合入前请补跑 acceptance 一次。
 
+### F. README 的 WAF 绕过口径已经过期（**待重定基线**，2026-09-19 实测）
+README「WAF 绕过能力实测口径」那行写的是 2026-09-10 复测的 **tamper off 2/5 → on 10/5 技术位**、
+自动路径 **11 技术位**。今天（2026-09-19）整跑 acceptance 实测到的是 **on=8、auto=8**，
+丢的两格都在 `num` 与 `blind` 的 union 上（`e2e/waf-real/results/waf-real-report.json`：
+两点的 `on.found` 都只剩 `[boolean]`，dbms=null）。
+
+**已排除本批改动**：只把本轮动过的 4 个引擎文件回退到改动前（`git checkout ebc660a^ --
+payloads/index.js DBFingerprinter.js Detector.js ScanManager.js`）、其余保持不变，重跑
+同两个场景 → 结果一字不差（`[boolean]`、被拦 62 vs 61 请求）。所以这是**更早批次**的
+某次改动吃掉的两格，一直没人复测才发现。
+
+要做的两件事：
+1. 归因：在 09-10 之后的提交里二分定位是哪一次掉的（候选：phase3 预筛选/时间探针、
+   binaryProbe 迁移、`_fingerprintCached` 之前的列数缓存改动）；
+2. 若确认是**合理代价**（例如为压低请求数而收严了投放），就把 README 那行的数字与
+   日期一并重定；若是缺陷，修完再重测。**在归因完成前，对外不要引用 10/11 这两个数**。
+
+顺带记录一个门禁自身的假红（已修）：`acceptance.mjs` 的「服务端单测」套件按 TAP 汇总行取数，
+但 node:test 的 reporter 选型随 TTY 探测漂移 → 本机子进程走管道时输出 spec 格式 →
+四个数全 null → 报成「FAIL　null 条失败」。现钉 `--test-reporter=tap`，并在取不到汇总行时
+明确报「门禁取数口径不符，非单测失败」。同一坑此前已在 `scripts/facts-sync.mjs` 咬过一次
+（还咬过 3d63b7 那轮回流解析器），**第三处应该去 `run()` 里统一收口**，别再一处一处打补丁。
+
 ---
 
 ## P1 · 实战视角高价值
