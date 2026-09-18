@@ -314,8 +314,18 @@ if (ONLY && !selected.length) {
 for (const s of selected) {
   const missing = (s.needs || []).filter((n) => !pre[n]);
   if (missing.length) {
-    const why =
-      missing.includes('mysql') ? pre.mysqlReason : 'secure_file_priv 未放行（MySQL 8 默认 NULL）';
+    // [P0-FIX 2026-09-18] 原因必须按**实际缺失的依赖**生成。
+    // 旧实现只在缺 mysql 时用真实原因，其余一律兜底成「secure_file_priv 未放行」——
+    // 于是「红队靶场没起」会被报成「MySQL 8 默认 NULL」，排障方向直接被带偏
+    // （本次全量验收实测：10 PASS / 0 FAIL，唯一的 SKIP 就被贴错原因）。
+    const MISSING_REASONS = {
+      mysql: () => pre.mysqlReason,
+      secure_file_priv: () => 'secure_file_priv 未放行（MySQL 8 默认 NULL）',
+      redteamLab: () => `红队评测靶场未常驻（127.0.0.1:${REDTEAM_PORT}）——先执行 npm run lab:redteam`,
+    };
+    const why = missing
+      .map((n) => (MISSING_REASONS[n] ? MISSING_REASONS[n]() : `缺少依赖：${n}`))
+      .join('；');
     // [P0-FIX 2026-09-12] SKIP 必须分两类，否则会出现**假绿**：
     //   ① optional 套件（fileRead/fileWrite）因 secure_file_priv=NULL 跳过 —— 环境常态，不影响结论；
     //   ② 必需依赖缺失（MySQL 没起）导致 8 个套件全跳 —— 此时若仍退出码 0，CI 会**绿灯放过**
