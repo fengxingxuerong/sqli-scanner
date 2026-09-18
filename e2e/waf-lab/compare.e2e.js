@@ -1,4 +1,22 @@
 // e2e/waf-lab/compare.e2e.js
+//
+// ============================================================================
+// ⚠️ 已失效（DEPRECATED，2026-09-18）—— 结论恒为 NO，请勿据此判断 tamper 效果
+// ============================================================================
+// 本脚本的靶场（lab-server-v2.js 的 /vuln 端点）实现是：
+//     app.get('/vuln', (req, r) => r.send(`row:${req.query.id}`));
+// —— 纯字符串拼接回显，**没有任何 SQL 执行**。实测证据（2026-09-18）：
+//     `?id=1'`                    → 200 `row:1'`（无报错）
+//     `?id=1' order by 1-- -`     → 200 `row:1' order by 1-- -`（无差异）
+//     `?id=1' and 1=1-- -`        → 403（仅 WAF 拦，非注入信号）
+// 因此 union/error/boolean 三种技术**都不可能**在服务端产生信号，
+// 两侧检出率恒为 0，判据 `detectRateB > detectRateA` 从设计上不可能成立。
+//
+// 替代品：compare-real.e2e.mjs（真 MySQL 靶场 + WAF 中间件），
+//   入口见 package.json 的 `waf-e2e-real`（或 npm run e2e:sandbox e2e/waf-lab/compare-real.e2e.mjs）。
+//   它复用 e2e/real-mysql-lab/lab-app.js 的真注入点，并把 WAF 规则挂在 preMiddleware 上。
+// ============================================================================
+//
 // 独立 e2e 夹具：同进程起 lab + 直接 import ScanManager 驱动两次扫描
 //   configA：tamper 关（模拟裸请求被 WAF 拦 → 检出低）
 //   configB：tamper 开（space2comment + charencode，绕过 WAF → 检出高）

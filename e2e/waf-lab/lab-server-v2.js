@@ -41,6 +41,14 @@ export function createLabApp(profileId = 'modsecurity_crs') {
   app.get('/benign', (_q, r) => r.send('<html><body>ok</body></html>'));
 
   // 注入点
+  //
+  // ⚠️ 注意：本端点**不是真实注入点**（2026-09-18 查明）。
+  //   实现只是 `row:${id}` 字符串拼接回显，没有任何 SQL 执行 ——
+  //   加 `'` 不报错、`order by` 无差异、union 回显标记永不出现。
+  //   历史注释曾写「放行至后端 sqli-labs 风格注入点」，但**后端从未实现**。
+  //   依赖本端点的 A/B 判据（compare.e2e.js）因此恒失败，请改用真靶场：
+  //   e2e/waf-lab/compare-real.e2e.mjs（复用 real-mysql-lab 的真注入点）。
+  //   保留本端点仅为兼容既有可视化/统计调试，勿用于验证检测能力。
   app.get('/vuln', (req, r) => {
     const id = String(req.query.id ?? '1');
     r.send(`row:${id}`);

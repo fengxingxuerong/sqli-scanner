@@ -66,7 +66,6 @@ probe('copyFileSync 源在外、目标在白名单内（应放行）', false, ()
 
 // ⑦ copyFileSync：目标在名单外 → 预期拦截
 probe('copyFileSync 目标在白名单外（应拦截）', true, () => {
-  const tmp = process.env.SANDBOX_WRITE_ROOTS.split(';')[0];
   copyFileSync(new URL(import.meta.url), 'C:/sandbox_copy_escape.mjs');
 });
 

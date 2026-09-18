@@ -91,10 +91,29 @@ function checkCommand(file, args) {
     const joined = argv.map(String).join(' ');
     const m = /\/c\s+(.+)$/i.exec(joined.replace(/["']/g, ' '));
     if (!m) {
+      // /K 会保持 shell 存活，比 /c 更危险，同样拒绝
       violation('cmd 被拒', `未使用 /c：${joined.slice(0, 80)}`);
       throw SandboxDeny('cmd 调用', `未使用 /c 形式：${joined.slice(0, 80)}`);
     }
-    const first = m[1].trim().split(/\s+/)[0] || '';
+
+    const tail = m[1].trim();
+
+    // ★ 关键加固：拒绝命令串联。
+    //   历史漏洞（2026-09-18 对抗性压测发现）：只校验首个 token，
+    //   于是 `cmd /c "whoami & del /f x"` 因首个词是白名单动词 whoami 而被放行，
+    //   但 `&` 后的 del 照样执行 —— 白名单形同虚设。
+    //   治理：只要出现命令分隔符（& | < > 等），一律拒绝，不做部分解析。
+    //   理由：正确解析 cmd 的引号/转义/延迟展开语义极难且易漏，
+    //   而验证脚本没有"必须用分隔符"的正当需求。
+    const SEPARATORS = /[&|<>^]/;
+    if (SEPARATORS.test(tail)) {
+      const hit = tail.match(SEPARATORS)[0];
+      violation('cmd 被拒', `含命令分隔符 ${hit}（疑似串联夹带）：${tail.slice(0, 80)}`);
+      throw SandboxDeny('cmd 调用',
+        `命令含分隔符 ${hit}，拒绝执行（禁止串联/重定向/管道）：${tail.slice(0, 80)}`);
+    }
+
+    const first = tail.split(/\s+/)[0] || '';
     let verb = path.basename(first).toLowerCase().split('.')[0].split('/')[0];
     if (verb && !ALLOWED_CMD_VERBS.has(verb)) {
       for (const a of ALLOWED_CMD_VERBS) {
@@ -209,26 +228,65 @@ try {
   };
 
   // http/https 也要拦（否则可绕道 fetch/axios）
+  //
+  // 坑（2026-09-18 对抗性压测发现）：只包装 `http.request` **拦不住 `http.get`**
+  // —— `get` 在模块内部持有自己的实现引用，不经过被改写后的 `request` 属性。
+  // 必须把 get / request 都显式包装，并另外覆盖全局 fetch 与 undici。
   for (const mod of ['node:http', 'node:https']) {
     try {
       const m = require(mod);
-      const origReq = m.request;
-      m.request = function (...a) {
+
+      const extractHttpHost = (a) => {
         let host = '';
         const o = a[0];
         if (typeof o === 'string') {
           try { host = new URL(o).hostname; } catch { host = ''; }
         } else if (o && typeof o === 'object') {
+          // 注意：URL 实例有 hostname；纯 options 对象可能只有 host
           host = String(o.hostname || o.host || '');
         }
-        if (host && !isAllowedHost(host)) {
-          violation('HTTP 出站被拒', `${mod} request(${host})`);
-          throw SandboxDeny('HTTP 请求', `非白名单地址 ${host}`);
-        }
-        return origReq.apply(this, a);
+        return host;
       };
+
+      const wrap = (name) => {
+        const orig = m[name];
+        if (typeof orig !== 'function') return;
+        m[name] = function (...a) {
+          const host = extractHttpHost(a);
+          if (host && !isAllowedHost(host)) {
+            violation('HTTP 出站被拒', `${mod} ${name}(${host})`);
+            throw SandboxDeny('HTTP 请求', `非白名单地址 ${host}`);
+          }
+          return orig.apply(this, a);
+        };
+      };
+      wrap('request');
+      wrap('get');
     } catch { /* 模块不可用时跳过 */ }
   }
+
+  // 全局 fetch（Node 18+ 内置，走 undici，不经过 http.request）
+  try {
+    if (typeof globalThis.fetch === 'function') {
+      const origFetch = globalThis.fetch;
+      globalThis.fetch = function (input, init) {
+        let host = '';
+        try {
+          if (typeof input === 'string') host = new URL(input).hostname;
+          else if (input instanceof URL) host = input.hostname;
+          else if (input && typeof input === 'object' && input.url) {
+            host = new URL(input.url).hostname;
+          }
+        } catch { host = ''; }
+        if (host && !isAllowedHost(host)) {
+          violation('fetch 出站被拒', `fetch(${host})`);
+          return Promise.reject(
+            SandboxDeny('HTTP 请求', `非白名单地址 ${host}`));
+        }
+        return origFetch.apply(this, arguments);
+      };
+    }
+  } catch { /* fetch 不可用时跳过 */ }
 } catch { /* net 不可用时跳过 */ }
 
 try {
@@ -333,6 +391,38 @@ try {
       return orig.apply(this, arguments);
     };
   }
+
+  // ★ fs.promises 是独立对象，不受上面 fs.<name> 改写影响。
+  //   历史漏洞（2026-09-18 对抗性压测发现）：`fs.promises.writeFile('C:/x')`
+  //   可绕过白名单写出文件。治理：用同样的规则包装 fs.promises 上的写入口。
+  try {
+    const fp = fs.promises;
+    if (fp) {
+      const WRITE_API = ['writeFile', 'appendFile', 'mkdir', 'open', 'rm', 'unlink',
+                         'rename', 'copyFile', 'truncate', 'rmdir', 'chmod', 'symlink'];
+      for (const name of WRITE_API) {
+        const orig = fp[name];
+        if (typeof orig !== 'function') continue;
+        fp[name] = function (p, ...rest) {
+          // open 仅写模式检查
+          if (name === 'open') {
+            const flags = rest[0];
+            if (typeof flags === 'string' && !WRITE_FLAGS.test(flags)) {
+              return orig.apply(this, arguments);
+            }
+          }
+          // copyFile(src, dest)：只查目标
+          if (name === 'copyFile') {
+            checkWrite(rest[0]);
+          } else {
+            checkWrite(p);
+            if (name === 'rename') checkWrite(rest[0]);
+          }
+          return orig.apply(this, arguments);
+        };
+      }
+    }
+  } catch { /* fs.promises 不可用时跳过 */ }
 } catch { /* fs 不可用时跳过 */ }
 
 // 暴露给被测脚本自查

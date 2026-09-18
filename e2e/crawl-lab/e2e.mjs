@@ -24,7 +24,16 @@ const { ScanManager } = await import(pathToFileURL(resolve(ROOT, 'server/src/eng
 const PORT = Number(process.env.CRAWL_LAB_PORT) || 8287;
 const BASE = `http://127.0.0.1:${PORT}`;
 
-const pool = mysql.createPool({ host: '127.0.0.1', port: 3306, user: 'root', password: process.env.MYSQL_PASSWORD ?? 'root', database: 'sqli_lab', connectionLimit: 6 });
+// [2026-09-18] 连接参数改读环境变量：默认仍是 127.0.0.1:3306/root（向后兼容），
+// 但可指向隔离沙箱（e2e/run-with-sandbox.py 注入 MYSQL_HOST/PORT/USER/PASSWORD）。
+const pool = mysql.createPool({
+  host: process.env.MYSQL_HOST || '127.0.0.1',
+  port: Number(process.env.MYSQL_PORT) || 3306,
+  user: process.env.MYSQL_USER || 'root',
+  password: process.env.MYSQL_PASSWORD ?? 'root',
+  database: process.env.MYSQL_DATABASE || 'sqli_lab',
+  connectionLimit: 6,
+});
 try { await pool.query('SELECT 1'); } catch (e) {
   console.log(`[SKIP] MySQL 不可连（${e.message.split('\n')[0]}）`);
   await pool.end(); process.exit(0);

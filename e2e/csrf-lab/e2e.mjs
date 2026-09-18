@@ -39,7 +39,16 @@ app.post('/login', (req, res) => {
 });
 
 // 目标注入点：token 校验 + 真 MySQL LIKE 注入（sqli_lab.users）
-const pool = mysql.createPool({ host: '127.0.0.1', port: 3306, user: 'root', password: process.env.MYSQL_PASSWORD ?? 'root', database: 'sqli_lab', connectionLimit: 4 });
+// [2026-09-18] 连接参数改读环境变量：默认仍是 127.0.0.1:3306/root（向后兼容），
+// 但可指向隔离沙箱（e2e/run-with-sandbox.py 注入 MYSQL_HOST/PORT/USER/PASSWORD）。
+const pool = mysql.createPool({
+  host: process.env.MYSQL_HOST || '127.0.0.1',
+  port: Number(process.env.MYSQL_PORT) || 3306,
+  user: process.env.MYSQL_USER || 'root',
+  password: process.env.MYSQL_PASSWORD ?? 'root',
+  database: process.env.MYSQL_DATABASE || 'sqli_lab',
+  connectionLimit: 4,
+});
 app.get('/search', (req, res) => {
   if (req.query.csrf_token !== TOKEN) { tokenBad++; return res.status(403).send('<p>csrf invalid</p>'); }
   tokenOk++;
