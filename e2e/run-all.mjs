@@ -204,6 +204,10 @@ const passed = results.length - failed.length - skipped.length;
 console.log('');
 console.log(`通过 ${passed} / 跳过 ${skipped.length} / 失败 ${failed.length}  （共 ${results.length} 个靶场）`);
 if (skipped.length) {
-  console.log('跳过的不算通过 —— 原因见各靶场输出（如 secure_file_priv 未放行时文件读写类套件无法真跑）');
+  // 原先这里举的例子是「secure_file_priv 未放行时文件读写类套件无法真跑」——
+  // 但本套件里**根本没有** fileRead/fileWrite（它们归 acceptance 管），照抄 acceptance
+  // 的总结会让人去找一个不存在的套件。改成只讲本套件真实存在的跳过原因。
+  console.log('跳过的不算通过 —— 本套件未执行任何断言。缺失依赖已在每个靶场上方逐条打印，补齐后重跑。');
+  console.log('注意：fileRead / fileWrite 不在本套件内（它们需要 secure_file_priv 放行），由 `npm run acceptance` 覆盖。');
 }
 process.exit(failed.length ? 1 : 0);

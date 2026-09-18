@@ -355,9 +355,19 @@ for (const s of selected) {
 }
 
 // ── 报告 ────────────────────────────────────────────────────────────────────
-const failed = results.filter((r) => r.status === 'FAIL' || r.status === 'BLOCKED');
+// BLOCKED 与 FAIL 必须分开计数：两者都让门禁不通过（都对），但**语义完全不同** ——
+// FAIL = 断言没通过（被测代码有问题）；BLOCKED = 必需依赖缺失、套件根本没能执行。
+// 此前终端汇总把两者合并成 "N FAIL"，与它上方刚打印的 `⛔ BLOCKED` 标签自相矛盾，
+// 也与文档里写的 "6 BLOCKED" 不一致 —— 读的人会误以为有 6 项真的失败了。
+// 报告文件里本来就带了 "(含 BLOCKED)" 限定词，终端那行漏了，现统一为分列。
+const blocked = results.filter((r) => r.status === 'BLOCKED');
+const realFailed = results.filter((r) => r.status === 'FAIL');
+const failed = [...realFailed, ...blocked]; // 供退出码使用：两类都算不通过
 const skipped = results.filter((r) => r.status === 'SKIP');
 const passed = results.filter((r) => r.status === 'PASS');
+
+const tally = () =>
+  `${passed.length} PASS / ${blocked.length} BLOCKED / ${realFailed.length} FAIL / ${skipped.length} SKIP`;
 
 const badge = { PASS: '✅ PASS', SKIP: '⏭ SKIP', BLOCKED: '⛔ BLOCKED', FAIL: '❌ FAIL' };
 const row = (r) =>
