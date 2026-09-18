@@ -536,9 +536,11 @@ export const RANDOMBLOB_MAX_BYTES = 5_000_000;
 
 /**
  * 夹顶时间变量：非法/缺失保持历史默认（1 秒），区间外贴边。
- * @param {{sleep?: number|string}} [vars]
- * @returns {{orig?: string, sleep: number, num?: number, sep?: string}} 浅拷贝后的变量集
- *   （函数体用 { ...vars } 透传其余字段，故返回类型须含 orig/num/sep，否则调用方取值会被判不存在）
+ * @param {{sleep?: number|string, bd?: string}} [vars]
+ * @returns {{orig?: string, sleep: number, num?: number, sep?: string, bd?: string}} 浅拷贝后的变量集
+ *   （函数体用 { ...vars } 透传其余字段，故返回类型须含 orig/num/sep/bd，否则调用方取值会被判不存在。
+ *   这里漏列过 `bd` → `tsc -p server/tsconfig.json` 报 TS2339，而本地 `npm run typecheck` 只覆盖
+ *   前端，所以它一路进了提交；服务端类型检查在 CI 里是独立一步，而 CI 从未真正执行过。）
  */
 export function clampTimeVars(vars = {}) {
   const raw = Number(vars?.sleep);
