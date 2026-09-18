@@ -524,6 +524,8 @@ e2e/udf-lab/
   build-udf.py           MSVC x64 构建（显式 INCLUDE/LIB/PATH，不依赖 vcvars/reg.exe）
   mysql_sandbox.py       隔离 MySQL 实例：独立 datadir + 端口 3308 + secure_file_priv/plugin_dir
                          双锁在沙箱内；--verify-isolation-ephemeral 实测越权写入被拒
+                         my-sandbox.ini **由本脚本自动生成**（--print-ini 可只读预览），
+                         不依赖磁盘遗留文件 —— 修复了「新克隆/CI 上 --init 因缺配置直接失败」
   sandbox.py             沙箱执行器：起隔离实例 → 跑验证脚本 → 必停；进程/写入/出站三重白名单
   _sandbox_node_guard.cjs  Node 侧守卫（--require 预加载）：真实拦截 node 内越权动作
   udf_direct_probe.py    直连基线：DLL 落地 → 注册 → 调用 → 回传（不经注入通道）

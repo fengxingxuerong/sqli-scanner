@@ -195,6 +195,42 @@ services:
 - **教训**：覆盖率是**聚合指标**，会掩盖结构。看到某一维偏低时，先把它拆成「逐条清单」再下结论 ——
   否则容易把「组件里内联箭头函数多」误读成「有逻辑没测」。
 
+### 7d. 沙箱配置不可复现（✅ 已修 2026-09-18，属真实缺陷）
+- **现象**：`mysql_sandbox.py` 用 `mysqld --defaults-file=<INI>` 启动沙箱，但**全仓库
+  搜不到任何生成该 INI 的代码**（只有第 48 行的引用）；而 INI 位于 `.mysql-sandbox/`（已 gitignore）
+  且内含写死的绝对路径。
+- **后果**：新克隆 / CI / 换机器跑 `--init` 会在「找不到 defaults-file」直接失败 →
+  **README 报告的 UDF/os-shell 真机验证不可复现**。本机之所以一直能跑，只因为磁盘上
+  遗留了一份来路不明的 INI（2175 字节，含 `secure_file_priv` / `plugin_dir` /
+  「不要开 skip-name-resolve」等关键项与实测教训，全都只存在于那份未入库的文件里）。
+- **修法**：新增 `render_ini()` + `write_ini()`，从脚本常量派生全部路径；在 `do_init` 与
+  `do_start` 里**先落配置再起 mysqld**；`write_ini()` 幂等（内容不变不写）。
+  另加 `--print-ini` 只读预览，无需启动任何进程即可校验配置。
+- **验证（20 项断言全过，均为纯文本/文件操作，不启动 mysqld）**：
+  删除 INI 后 `write_ini()` 能自建且**配置项与在用基线逐条一致**（不会把在用沙箱搞挂）、
+  幂等、6 个路径项全部锁在沙箱内、`render_ini()` 与磁盘内容一致。
+- **教训**：`gitignore` 一份「运行必需的配置」= 本地能跑、别人跑不了。
+  凡 `--defaults-file` / 外部配置文件，**必须由代码生成**或入库，不能两头不占。
+
+### 7e. 沙箱磁盘瘦身（⑤ 部分完成 2026-09-18）
+- 已清理崩溃残留 `ibtmp1.DDA9.d`（孤儿临时表空间，MySQL 文档明确的 `ibtmp1.<随机>.d` 形态）：
+  **202M → 190M**。只删孤儿，未动活动 `ibtmp1`。
+- redo 日志仍占 ~100MB（`ib_logfile0/1` 各 50MB）。**不建议贸然改**：本机 MySQL 为 **8.0.28**，
+  8.0.30 之前**不支持运行期改 redo 日志大小** —— 对已初始化 datadir 写 `innodb_log_file_size`
+  会让 mysqld 拒绝启动。要瘦身必须重建：`SANDBOX_SMALL_REDO=1 python mysql_sandbox.py --init --force`
+  （开关已实现并验证：追加而非替换，`skip-log-bin` 不丢）。默认关闭，避免把在用的沙箱搞挂。
+
+### 9. 本地裸仓备份远端（✅ 2026-09-18 建立，属缓解非根治）
+- **背景**：仓库长期无 remote（`gh` 未安装、无全局 git 身份、无 SSH 密钥 → 真远端与 CI 均阻塞），
+  而本机 `.git` 有反复损坏史（`refs` 被整个删除、被标 Hidden）。
+- **已做**：建裸仓 `D:/projects/sqli-scanner-backup.git`，加为名为 **`backup`** 的 remote
+  （**刻意不占用 `origin`**，将来接真远端无冲突），push 全部分支 + tag。
+  **验证方式不是「push 说 OK」**：实际 clone 出来核对 —— 131 提交与源一致、master 分支、
+  两个 tag 在位、文件可读。
+- **仍需你提供**：真远端地址 + 凭据。届时 `git remote set-url origin <url> && git push -u origin master --tags`
+  即可，backup 可保留或删除。
+- 提醒：本地裸仓能防 `.git` 损坏，**防不了磁盘故障**，不等于异地备份。
+
 ### 8. 前端测试环境差异固化
 - ~~已修 `vitest.config.ts` 强制 `NODE_ENV=test`（jsdom 下 React production build 导致 246 个假失败）+ 契约测试 `@vitest-environment node`~~（已完成）；**CI 已搭建**（`.github/workflows/ci.yml`，2026-09-13）：lint/typecheck + 前端 vitest + 服务端 1767 用例 + `run-all` 自足 6 套靶场，ubuntu/Node 24。**剩余动作：push 后观察首次 CI 实跑**——Linux 与 Windows 的路径/换行差异（e2e 脚本/测试断言）只有真跑才能暴露，若单测在 Linux 出现平台性失败按最小修复处理
 

@@ -81,6 +81,98 @@ def _ensure_dirs() -> None:
         d.mkdir(parents=True, exist_ok=True)
 
 
+# ── 沙箱配置生成 ────────────────────────────────────────────────────────────
+# 为什么必须在脚本里生成（这是修一个真缺陷，别改回手写文件）：
+# 本文件此前**只引用 INI、从不生成它**，而 INI 位于 `.mysql-sandbox/`（已 gitignore）
+# 且内含写死的绝对路径。后果 = 新克隆 / CI / 换台机器跑 `--init` 会在
+# `mysqld --defaults-file=<不存在>` 直接失败，README 里报告的 UDF/os-shell 验证
+# 变得**不可复现**（本机之所以能跑，只因磁盘上遗留了一份来路不明的 INI）。
+# 现在改为从下面的常量派生，路径全部相对脚本自身位置 → 可移植、可复现。
+def render_ini() -> str:
+    """按当前常量渲染 my-sandbox.ini 内容（不落盘，便于 --print-ini 与测试）。
+
+    注意：环境变量 SANDBOX_SMALL_REDO 在这里生效，而不是在 write_ini()。
+    放在这里是为了让 `--print-ini`（只读预览）与实际落盘内容**永远一致** ——
+    否则同一组常量会出现「预览与写出不同」的分叉，那是比没有开关更坏的坑。
+    """
+    def p(path: Path) -> str:
+        # MySQL 在 Windows 上接受正斜杠；统一成 / 以免反斜杠被 INI 当转义
+        return path.as_posix()
+
+    # 可选瘦身：MySQL < 8.0.30 不支持运行期改 redo 日志大小，仅在重建 datadir 时有意义。
+    # 注意是**追加**而非替换 —— skip-log-bin 两种模式下都要保留。
+    slim = "skip-log-bin"
+    if os.environ.get("SANDBOX_SMALL_REDO") == "1":
+        slim += "\ninnodb_log_file_size = 16M\ninnodb_doublewrite = 0"
+
+    return f"""\
+# UDF 验证专用：隔离 MySQL 沙箱实例配置
+# 【本文件由 mysql_sandbox.py 自动生成，请勿手改】—— 改常量，不要改这里。
+#
+# 设计目标：与主实例({p(HOST_DATADIR)})完全隔离，用完即毁。
+#   · 独立 datadir  → 沙箱里的任何破坏（DROP DATABASE / 写入文件）不触及主库
+#   · 独立端口 {SANDBOX_PORT} → 不抢占/不影响主实例端口
+#   · 独立 socket / pid / log → 无共享状态
+#   · secure_file_priv 指向沙箱自己的 plugin 目录 → UDF 的 .dll 只能落在沙箱内
+#   · plugin_dir 指向沙箱自己的 plugin 目录 → CREATE FUNCTION 只从沙箱加载
+#
+# 注意：本实例**不做任何网络暴露**（bind-address=127.0.0.1）。
+
+[mysqld]
+basedir = {p(MYSQL_HOME)}
+datadir = {p(DATADIR)}
+port    = {SANDBOX_PORT}
+bind-address = 127.0.0.1
+socket  = {p(SB / 'mysql.sock')}
+pid-file = {p(PIDFILE)}
+log-error = {p(ERRORLOG)}
+tmpdir  = {p(TMPDIR)}
+
+# UDF 关键项：把 UDF 的加载目录与 secure_file_priv 都锁在沙箱内
+plugin_dir = {p(PLUGIN_DIR)}
+secure_file_priv = {p(PLUGIN_DIR)}
+
+# 沙箱不需要 binlog / 慢查询等持久化产物
+{slim}
+max_connections = 32
+
+# 注意：**不要**开 skip-name-resolve。
+# 实测（2026-09-18）：开启后 `-h localhost` 不再解析为本机 socket，
+# 而是按 127.0.0.1 匹配 TCP 账户，导致刚初始化的 `root@localhost`
+# 无法登录（ERROR 1130）。沙箱只需回环连接，无解析性能顾虑。
+
+# 关闭 ONLY_FULL_GROUP_BY 之外严格性以便测试脚本兼容
+sql_mode = "STRICT_TRANS_TABLES,NO_ENGINE_SUBSTITUTION"
+
+# 磁盘占用说明（默认即可，勿贸然修改）：
+#   redo 日志占 ~100MB（ib_logfile0/1 各 50MB）。本机 MySQL 为 8.0.28，
+#   **8.0.30 之前不支持运行期改 redo 日志大小** —— 对已初始化的 datadir 写
+#   innodb_log_file_size 会导致 mysqld 拒绝启动。要瘦身必须重建 datadir：
+#       SANDBOX_SMALL_REDO=1 python mysql_sandbox.py --init --force
+#   （沙箱本就是「用完即毁」，重建无损失；默认不开，避免把在用的沙箱搞挂。）
+
+[client]
+port = {SANDBOX_PORT}
+socket = {p(SB / 'mysql.sock')}
+"""
+
+
+def write_ini(*, verbose: bool = True) -> int:
+    """把 render_ini() 落到 INI。内容无变化时不写，避免无谓改动。"""
+    _ensure_dirs()
+    content = render_ini()
+    try:
+        if INI.exists() and INI.read_text(encoding="utf-8") == content:
+            return 0
+        INI.write_text(content, encoding="utf-8")
+        if verbose:
+            print(f"[mysql-sandbox] 已生成配置：{INI}")
+        return 0
+    except OSError as exc:
+        print(f"[mysql-sandbox] 写配置失败：{exc}", file=sys.stderr)
+        return 1
+
+
 def _mysql_conn_args() -> list[list[str]]:
     """按可靠性排序的连接参数候选：命名管道 → localhost → 127.0.0.1。"""
     return [
@@ -129,6 +221,9 @@ def do_init(force: bool = False) -> int:
         DATADIR.mkdir(parents=True, exist_ok=True)
 
     print(f"[mysql-sandbox] 初始化沙箱 datadir：{DATADIR}")
+    # 必须先落配置再起 mysqld —— 配置不再依赖磁盘上的遗留文件
+    if write_ini() != 0:
+        return 1
     r = _run([str(MYSQLD), f"--defaults-file={INI}", "--initialize-insecure", "--console"])
     out = (r.stdout or "") + (r.stderr or "")
     if r.returncode != 0:
@@ -252,6 +347,9 @@ def do_start(wait_sec: int = 45) -> int:
         return 2
 
     _ensure_dirs()
+    # 每次启动都对齐配置：换了机器/路径后无需手工重建 INI
+    if write_ini() != 0:
+        return 1
     print(f"[mysql-sandbox] 启动 mysqld（端口 {SANDBOX_PORT}）…")
     logf = open(LOGS / "console.log", "a", encoding="utf-8")
     subprocess.Popen(
@@ -529,9 +627,14 @@ def main() -> int:
     g.add_argument("--verify-isolation", action="store_true")
     g.add_argument("--verify-isolation-ephemeral", action="store_true",
                    help="自起自用自停的隔离验证（本机推荐方式）")
+    g.add_argument("--print-ini", action="store_true",
+                   help="只打印将生成的 my-sandbox.ini 内容（不落盘、不启动任何进程）")
     ap.add_argument("--force", action="store_true", help="配合 --init：清空旧 datadir 重来")
     a = ap.parse_args()
 
+    if a.print_ini:
+        print(render_ini(), end="")
+        return 0
     if a.init:
         return do_init(force=a.force)
     if a.start:
