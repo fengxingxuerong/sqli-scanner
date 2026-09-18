@@ -501,9 +501,13 @@ async function main() {
           const safeName = r.url.replace(/[^a-zA-Z0-9.-]/g, '_').slice(0, 100);
           writeFileSync(join(args.out, `${safeName}.${ext}`), formatReport(r.report, fmt), 'utf-8');
           // [goal 批次 A-2] 扫描台账：每次扫描自动登记可追溯快照（meta/report/poc）
+          // [FIX 2026-09-18] PoC 落盘此前恒为空：ReportGenerator 的 poc 是**惰性且不可变**挂载
+          // （_attachPoc 返回新对象、不回写入参），而此处把【原始】r.report 交给 recordScan，
+          // 其 `if (!v.poc) continue` 于是全部命中 → poc/ 目录恒空。实测 163 次真实台账
+          // 0 个 poc 文件。改传 attachPoc 的导出形态（公开方法，与渲染同源）。
           try {
             const rgLedger = new ReportGenerator();
-            scanLedger.recordScan(r.report, {
+            scanLedger.recordScan(rgLedger.attachPoc(r.report), {
               html: rgLedger.toHTML(r.report),
               markdown: rgLedger.toMarkdown(r.report),
             });
@@ -618,9 +622,11 @@ async function main() {
       writeFileSync(args.out, formatReport(report, fmt), 'utf-8');
     }
     // [goal 批次 A-2] 扫描台账：单 URL 模式自动登记可追溯快照（meta/report/poc）
+    // [FIX 2026-09-18] 同批量模式：必须传 attachPoc 的导出形态，否则 poc/ 恒为空
+    // （_attachPoc 不可变返回新对象，原始 report 上永远没有 v.poc）。
     try {
       const rgLedger = new ReportGenerator();
-      scanLedger.recordScan(report, {
+      scanLedger.recordScan(rgLedger.attachPoc(report), {
         html: rgLedger.toHTML(report),
         markdown: rgLedger.toMarkdown(report),
       });

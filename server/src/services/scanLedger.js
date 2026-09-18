@@ -25,14 +25,19 @@ function ledgerDir() {
 
 /**
  * 台账登记：把一次扫描的完整快照写入 ledger。
- * @param {object} report 已导出形态的报告（ScanManager.getReport 快照）
- * @param {{html?:string, markdown?:string, json?:string}} docs 预渲染文档（缺省自动生成）
- * @param {{redactAuth?:boolean}} [opts]
+ * @param {object} report 已导出形态的报告。**必须传 ReportGenerator.attachPoc() 的返回值**：
+ *   poc 是惰性挂载且不可变的（_attachPoc 返回新对象），直接传原始 report 会让下面
+ *   `if (!v.poc) continue` 全部命中 → poc/ 恒为空（2026-09-18 实测 163 次真实台账 0 个 poc 文件）。
+ * @param {{html?:string, markdown?:string, json?:string}} [docs] 预渲染文档；缺省时只落 report.json
+ * @param {{redactAuth?:boolean}} [opts] 预留（PoC 脱敏由 ReportGenerator 侧决定，此处不重复处理）
  * @returns {{dir:string, scanId:string, files:string[]}}
  */
 export function recordScan(report, docs = {}, opts = {}) {
+  void opts; // 预留参数：脱敏在 ReportGenerator 完成，此处不参与，显式声明以免误读
   if (!report || typeof report !== 'object') throw new Error('recordScan: report required');
-  const scanId = String(report.scanId || report.id || `scan-${Date.now()}`);
+  // [FIX 2026-09-18] scanId 会拼进落盘路径，必须收敛为单层目录名（原先 `../x` 可在
+  // ledger 根目录之外创建目录，实测复现）。scanId 缺省时的自动生成值不受影响。
+  const scanId = safeScanId(report.scanId || report.id || `scan-${Date.now()}`);
   const dir = join(ledgerDir(), scanId);
   const pocDir = join(dir, 'poc');
   mkdirSync(pocDir, { recursive: true });
@@ -44,13 +49,6 @@ export function recordScan(report, docs = {}, opts = {}) {
     writeFileSync(p, content, 'utf-8');
     files.push(name);
   };
-
-  // docs 缺省：延迟 import 避免与 ReportGenerator 循环依赖
-  let html = docs.html;
-  let md = docs.markdown;
-  if (!html || !md) {
-    // 动态 import 在同步函数中不可行——调用方应传入 docs；此处仅写 json 兜底
-  }
   if (docs.html) write('report.html', docs.html);
   if (docs.markdown) write('report.md', docs.markdown);
   write('report.json', docs.json || JSON.stringify(report, null, 2));
@@ -101,7 +99,7 @@ export function recordScan(report, docs = {}, opts = {}) {
   return { dir, scanId, files };
 }
 
-/** 台账检索：列出全部登记（新→旧） */
+/** 台账检索：列出全部登记（取最新的 limit 条，新→旧） */
 export function listScans(limit = 50) {
   const idx = join(ledgerDir(), 'index.jsonl');
   if (!existsSync(idx)) return [];
@@ -113,27 +111,61 @@ export function listScans(limit = 50) {
   return rows.slice(-limit).reverse();
 }
 
-/** 台账检索：读取单次扫描的 meta + 文件清单 */
+/**
+ * [FIX 2026-09-18] 校验 scanId 不得逃出 ledger 根目录。
+ * 背景：getScan 的 scanId 直接来自 CLI 参数（`cli.js ledger show <scanId>`），完全用户可控；
+ * recordScan 的 scanId 来自报告。二者都会拼进路径，`../x` 可越界读写（实测 recordScan 能
+ * 在 ledger 目录之外建目录）。此处收敛为「单层目录名」语义：拒绝分隔符、`..`、绝对路径。
+ * @param {unknown} scanId
+ * @returns {string} 安全的单层目录名
+ * @throws {Error} 非法 scanId
+ */
+function safeScanId(scanId) {
+  const s = String(scanId ?? '');
+  if (!s || s === '.' || s === '..' || /[\\/]/.test(s) || path_isAbsolute(s) || s.includes('\0')) {
+    throw new Error(`scanLedger: 非法 scanId（不得包含路径分隔符或 ..）：${s.slice(0, 80)}`);
+  }
+  return s;
+}
+
+/**
+ * 台账检索：读取单次扫描的 meta + 文件清单。
+ * [FIX 2026-09-18] files 统一使用 `/` 分隔（此前用 join 产出平台分隔符，Windows 下为
+ * `poc\poc-1-1-p1.txt`，与 recordScan 写入 meta.files 的 `poc/poc-1-1-p1.txt` 口径不一致，
+ * 导致消费方按 `startsWith('poc/')` 过滤时恒为空）。
+ */
 export function getScan(scanId) {
-  const dir = join(ledgerDir(), String(scanId));
+  const id = safeScanId(scanId);
+  const dir = join(ledgerDir(), id);
   const metaPath = join(dir, 'meta.json');
   if (!existsSync(metaPath)) return null;
   const meta = JSON.parse(readFileSync(metaPath, 'utf-8'));
   const files = [];
   (function walk(d) {
-    for (const name of readdirSync(d)) {
-      const p = join(d, name);
-      // eslint-disable-next-line no-loop-func
-      const isDir = require_dir(p);
-      if (isDir) walk(p);
-      else files.push(p.slice(dir.length + 1));
+    for (const ent of readdirSync(d, { withFileTypes: true })) {
+      const p = join(d, ent.name);
+      // withFileTypes 直接给出类型，不再靠 readdirSync 抛 ENOTDIR 反推（对符号链接/权限
+      // 异常更稳）。符号链接按目录处理会跟随，故先判 isDirectory 再判 isSymbolicLink。
+      if (ent.isDirectory()) walk(p);
+      else if (ent.isSymbolicLink() && isDirEntry(p)) walk(p);
+      else files.push(relPosix(dir, p));
     }
   })(dir);
   return { meta, dir, files };
 }
 
-// 极简目录判定（避免引 is-what 依赖）
-function require_dir(p) {
+/** 相对根目录的 POSIX 风格相对路径（统一 `/`，跨平台一致） */
+function relPosix(root, p) {
+  return p.slice(root.length + 1).split(/[\\/]/).join('/');
+}
+
+/** 路径是否为绝对路径（避免直接依赖 path.isAbsolute 的平台歧义） */
+function path_isAbsolute(p) {
+  return /^([a-zA-Z]:[\\/]|[\\/])/.test(p);
+}
+
+/** 判定符号链接目标是否为目录（仅符号链接分支使用） */
+function isDirEntry(p) {
   try {
     return readdirSync(p) !== undefined;
   } catch {
