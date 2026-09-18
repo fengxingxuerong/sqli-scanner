@@ -46,6 +46,13 @@ jobs:
       # 新增任何一项即失败——防止 httpClient（原 1943 行）这类上帝对象重新长回来。
       - run: node scripts/arch-guard.mjs
         name: 架构门禁（体积 / 循环依赖 / console）
+      # [P1-ADD 2026-09-18] 文档数字单一来源门禁：README 的测试数/覆盖率/阈值必须与
+      # docs/_facts.json 一致。此前这些数字靠人手维护，实测同时存在 5 处漂移
+      # （徽章写 2144 而实际 2172、服务端写 1850 而实际 1881，连当天写的评估报告都已过时）。
+      # 只校验 README（对外门面）；docs/ 下带日期的报告是历史存档，改了就毁证据，故不纳入。
+      # 修法：npm run facts:refresh（实跑采集）→ npm run facts:fix（回写 README）
+      - run: node scripts/facts-sync.mjs --check
+        name: 文档数字口径（README ↔ docs/_facts.json）
       - run: npx eslint .
         name: ESLint
       # [P0-FIX] Rust 门禁：Tauri 壳此前无任何 lint 检查。新增 cargo fmt --check + clippy

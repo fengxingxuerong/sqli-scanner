@@ -128,8 +128,44 @@ services:
   `200×5ms=1s` 太紧（测试注释自承"飘到 1.6s"），机器负载高时扫描未完成即断言。
   与本次改动零引用关系（已核实导入链）。
 
-### 7. docs/ 数字口径单一来源
+### 7. docs/ 数字口径单一来源（✅ 已完成 2026-09-18）
 - 32 个 md 中的测试数/引擎等级表易失真（本次审计修正 2 处）。可复制 `dbmsEvidence.js` 模式：数字由代码统一导出，文档生成时引用
+- **✅ 已完成（2026-09-18）**：建立 `docs/_facts.json`（实时口径唯一来源，由 `scripts/facts-sync.mjs --refresh` 实跑采集）
+  + 三档命令 `facts:refresh` / `facts:check` / `facts:fix`，并把 `facts:check` 接入 `check:all` 与 CI 的 lint job。
+- **本轮实测的漂移（5 处，修正前）**：
+
+  | 位置 | README 原写 | 实测 |
+  |---|---|---|
+  | 徽章 | tests-2144 | **2172**（294 + 1878） |
+  | 「测试」块·服务端 | 1850 个用例 | **1881** |
+  | 项目状态·服务端 | 1850 用例（1847 pass） | **1881（1878 pass）** |
+  | 项目状态·复测日期 | 2026-09-17 | **2026-09-18** |
+  | 项目状态·服务端覆盖率 | 88.42 / 72.67 / 75.75 | **88.82 / 72.95 / 76.26**（偏差 0.51pt） |
+
+- **关键设计决策**：
+  1. **只严格校验 README**（对外门面）。`docs/` 下带日期的评估报告与 `release-notes-*` 是历史存档，
+     改了就毁证据 —— 已实测它们确实含旧数字（263 / 1815 / 1850），**均按记录保留，不动**。
+  2. **阈值不重复定义**：前端读 `vitest.config.ts` 的 `coverage.thresholds`，服务端读 `server/package.json`
+     的 `--test-coverage-*` 参数。
+  3. **覆盖率给 0.2pt 容差，其余精确比对**：实测同一台机器连跑 3 次，前端 branch 得 79.03 / 79.01 / 79.01
+     （抖动 0.02pt，其余字段稳定）。逐位精确比对会把门禁变成 flake 源 —— 正是本项目最反感的「假红」。
+  4. **规则未命中即报错**（不静默跳过）：README 结构一变、规则失效，必须显形，否则校验会变假绿。
+
+- **踩到的两个真坑（已修，留档）**：
+  - **vitest 即使 stdout 被管道捕获仍输出 ANSI 颜色码**：`Tests \u001b[22m \u001b[1m\u001b[32m294 passed` ——
+    数字前带转义序列，任何 `Tests\s+(\d+)` 都匹配不上；覆盖率表格同理。必须先剥离再解析。
+  - **README 是纯 CRLF（575/575）且仓库无 `.gitattributes`**：按 `'\n'` 切分会让每行残留 `\r`，
+    而 JS 正则的 `$` **不匹配**尾部 `\r` 之前的位置 → 带 `$` 锚点的规则**全部静默失效**（实测踩到）。
+    现按检测到的 EOL 切分并原样写回，`--fix` 后 `git diff` 恰好 3 行、CRLF 保持 575/575。
+
+- **顺带清掉一个同类缺陷**：`.eslintignore` 被 ESLint 10 的 flat config **静默忽略**（文件已废弃），
+  内容又已被 `eslint.config.js` 的 `ignores` 完全覆盖 —— 一个「看起来在管、实际不工作」的配置，
+  与文档数字漂移同源。已删除，删除前后 `npx eslint .` 均为 0 error / 6 warning（无行为变化）。
+
+### 7b. 建议新增 `.gitattributes`（未做）
+- 仓库无 `.gitattributes`，而 README 等文件在工作区是 CRLF。目前 `facts:check` 已按运行时检测 EOL 兼容，
+  但**同一文件在 Windows 与 Linux 间来回 checkout 会产生整文件 diff 噪声**。建议后续加：
+  `* text=auto` + `*.md text eol=lf`。属一次性大 diff，需单独提交。
 
 ### 8. 前端测试环境差异固化
 - ~~已修 `vitest.config.ts` 强制 `NODE_ENV=test`（jsdom 下 React production build 导致 246 个假失败）+ 契约测试 `@vitest-environment node`~~（已完成）；**CI 已搭建**（`.github/workflows/ci.yml`，2026-09-13）：lint/typecheck + 前端 vitest + 服务端 1767 用例 + `run-all` 自足 6 套靶场，ubuntu/Node 24。**剩余动作：push 后观察首次 CI 实跑**——Linux 与 Windows 的路径/换行差异（e2e 脚本/测试断言）只有真跑才能暴露，若单测在 Linux 出现平台性失败按最小修复处理

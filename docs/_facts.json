@@ -1,0 +1,47 @@
+{
+  "_comment": "实时口径唯一来源。由 scripts/facts-sync.mjs --refresh 生成，勿手改。",
+  "_definitions": {
+    "badge.testsPassing": "前端 pass + 服务端 pass（徽章文案为 tests passing，据此取真实通过数）",
+    "frontend.tests": "vitest 用例总数（含失败）",
+    "server.tests": "node:test 用例总数（含 skip/fail）"
+  },
+  "generatedAt": "2026-09-18T12:24:56+00:00",
+  "coverageCollected": true,
+  "frontend": {
+    "files": 42,
+    "tests": 294,
+    "pass": 294,
+    "fail": 0,
+    "coverage": {
+      "statements": 90.01,
+      "branches": 79.01,
+      "functions": 70.64,
+      "lines": 90.01
+    },
+    "thresholds": {
+      "statements": 87,
+      "branches": 76,
+      "functions": 67,
+      "lines": 87
+    }
+  },
+  "server": {
+    "tests": 1881,
+    "pass": 1878,
+    "fail": 0,
+    "skip": 3,
+    "coverage": {
+      "lines": 88.82,
+      "branches": 72.95,
+      "functions": 76.26
+    },
+    "thresholds": {
+      "lines": 85,
+      "branches": 69,
+      "functions": 72
+    }
+  },
+  "badge": {
+    "testsPassing": 2172
+  }
+}
