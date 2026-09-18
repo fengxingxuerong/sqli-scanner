@@ -133,4 +133,7 @@ e2e/udf-lab/__pycache__/
 e2e/.pg-ready-probe.cjs
 
 # 本机工作记忆（WorkBuddy 会话上下文，非项目源码，不入库）
+# [2026-09-18] 规则加在 e97082d，但 `memory/2026-09-09.md` 是在 6f7b728「对象库损毁后
+# 重建基线」那次恢复快照里被顺带扫进来的，一直跟踪到今天（同一批未配套的还有
+# server/data/ledger，见上文）。现补 `git rm --cached`：文件留在磁盘，只是不再入库。
 .workbuddy/
