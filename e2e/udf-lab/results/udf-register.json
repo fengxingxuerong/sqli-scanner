@@ -1,0 +1,11 @@
+{
+  "generatedAt": "2026-09-18T10:41:56.126Z",
+  "mysqlVersion": "8.0.28",
+  "pluginDir": "D:/projects/sqli-scanner/e2e/udf-lab/.mysql-sandbox/plugin/",
+  "fn": "udf_echo",
+  "registered": 1,
+  "injectedEcho": "udf_echo_116119",
+  "directEcho": "udf_echo_116119",
+  "boundary": "DLL 落地为预置前提；本脚本不调用 sys_eval、不执行系统命令",
+  "pass": true
+}

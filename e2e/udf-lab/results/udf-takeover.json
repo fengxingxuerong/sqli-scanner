@@ -1,11 +1,11 @@
 {
-  "generatedAt": "2026-09-15T04:00:59.170Z",
+  "generatedAt": "2026-09-18T10:42:11.466Z",
   "mysqlVersion": "8.0.28",
-  "pluginDir": "D:/mysql/lib/plugin/",
-  "secureFilePriv": "",
+  "pluginDir": "D:/projects/sqli-scanner/e2e/udf-lab/.mysql-sandbox/plugin/",
+  "secureFilePriv": "D:\\projects\\sqli-scanner\\e2e\\udf-lab\\.mysql-sandbox\\plugin\\",
   "registered": 1,
-  "commandOutput": "udf_lab_59039",
-  "whoami": "admin\\admin�������룩",
+  "commandOutput": "udf_lab_30614",
+  "whoami": "Admin（无密码）",
   "osShell": {
     "ok": true,
     "value": "osshell_ok\n"

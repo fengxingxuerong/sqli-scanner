@@ -104,5 +104,11 @@ reports/
 # [2026-09-17] 利用能力验证产物（fileRead/fileWrite 落地文件与断言快照）
 e2e/fileops/results/
 
+# [2026-09-18] UDF 验证沙箱运行时产物
+# .mysql-sandbox/ 是「用完即毁」的隔离 MySQL 实例（datadir + 二进制日志 + 错误日志），
+# 属本地运行时数据，含机器路径，不入库；由 mysql_sandbox.py --init 按需重建。
+e2e/udf-lab/.mysql-sandbox/
+e2e/udf-lab/__pycache__/
+
 # 本机工作记忆（WorkBuddy 会话上下文，非项目源码，不入库）
 .workbuddy/
