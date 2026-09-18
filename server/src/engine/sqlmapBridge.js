@@ -16,6 +16,14 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as eventBus from '../core/eventBus.js';
 import { logger } from '../core/logger.js';
+import { AppError, ErrorCode } from '../core/errors.js';
+import { isAuthEnabled } from '../core/apiAuthState.js';
+
+// SQLMAP_ALLOW_EVAL：是否允许把 --eval 透传给 sqlmap（默认关）。运行时读取，便于测试与运维动态开关。
+function isEvalAllowed() {
+  const v = String(process.env.SQLMAP_ALLOW_EVAL || '').trim().toLowerCase();
+  return v === '1' || v === 'true';
+}
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -217,8 +225,26 @@ export function buildArgs(input) {
   if (c.fileRead) {
     destructive.push('--file-read', clampLen(String(c.fileRead), 4096));
   }
-  // --eval（Python 表达式动态求值参数）属高危能力：同样显式 opt-in + 告警
+  // --eval（Python 表达式动态求值参数）属最高危能力：会在**服务端**执行任意 Python 表达式。
+  // [P0-SEC 2026-09-18] 从「显式 opt-in + 告警」升级为**默认禁用 + 双条件门控**：
+  //   ① 运维显式设置 SQLMAP_ALLOW_EVAL=1（默认关）；
+  //   ② 引擎必须已启用 API 鉴权（否则任意本机/同网可达者都能塞一段 Python 进来执行）。
+  // 未满足时**直接拒绝**（不静默丢弃参数——静默丢弃会让调用方以为已生效）。
   if (c.evalCode) {
+    if (!isEvalAllowed()) {
+      throw new AppError(
+        ErrorCode.INVALID_PARAM,
+        'sqlmap --eval 未启用：该参数会让 sqlmap 在服务端执行 Python 表达式（等价代码执行）。' +
+          '确需使用请设置 SQLMAP_ALLOW_EVAL=1，且必须同时启用 API 鉴权（SCAN_API_TOKEN）。'
+      );
+    }
+    if (!isAuthEnabled()) {
+      throw new AppError(
+        ErrorCode.INVALID_PARAM,
+        'sqlmap --eval 需要引擎已启用 API 鉴权：未配置 SCAN_API_TOKEN 时任何人都能提交表达式。' +
+          '请设置 SCAN_API_TOKEN（或 SCAN_API_TOKEN_FILE）后重试。'
+      );
+    }
     logger.warn('sqlmap 启用 --eval（Python 表达式动态求值）—— 仅在已授权目标上使用');
     destructive.push('--eval', clampLen(String(c.evalCode), 4096));
   }

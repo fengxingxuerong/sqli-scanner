@@ -7,6 +7,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildArgs } from '../src/engine/sqlmapBridge.js';
+import { setAuthEnabled, isAuthEnabled } from '../src/core/apiAuthState.js';
 
 // 构造最小入参：sqlmap = config.sqlmap，extra 挂到 config 顶层（如 prefix/suffix）
 const mkInput = (sqlmap = {}, extra = {}) => ({
@@ -277,12 +278,24 @@ test('buildArgs: 只读枚举参数透传（currentUser/currentDb/hostname/isDba
   }
 });
 
-test('buildArgs: evalCode 走破坏性 opt-in 通道（透传 --eval 且 clamp 4096）', () => {
-  const args = buildArgs(mkInput({ evalCode: "import hashlib; pwd='x'" }));
-  assert.ok(args.includes('--eval'), 'evalCode 应透传 --eval');
-  const val = args[args.indexOf('--eval') + 1];
-  assert.ok(val.length <= 4096);
-  assert.ok(!buildArgs(mkInput({})).includes('--eval'), 'evalCode 缺省不透传');
+test('buildArgs: evalCode 走破坏性 opt-in 通道（门控通过后透传 --eval 且 clamp 4096）', () => {
+  // [A4 2026-09-18] --eval 现为**双条件门控**：SQLMAP_ALLOW_EVAL=1 且引擎已启用鉴权。
+  // 旧断言「默认就透传」正是被修掉的行为，这里改为在门控满足的前提下验证透传与 clamp。
+  const savedEnv = process.env.SQLMAP_ALLOW_EVAL;
+  const savedAuth = isAuthEnabled();
+  process.env.SQLMAP_ALLOW_EVAL = '1';
+  setAuthEnabled(true);
+  try {
+    const args = buildArgs(mkInput({ evalCode: "import hashlib; pwd='x'" }));
+    assert.ok(args.includes('--eval'), '门控通过时 evalCode 应透传 --eval');
+    const val = args[args.indexOf('--eval') + 1];
+    assert.ok(val.length <= 4096);
+    assert.ok(!buildArgs(mkInput({})).includes('--eval'), 'evalCode 缺省不透传');
+  } finally {
+    if (savedEnv === undefined) delete process.env.SQLMAP_ALLOW_EVAL;
+    else process.env.SQLMAP_ALLOW_EVAL = savedEnv;
+    setAuthEnabled(savedAuth);
+  }
 });
 
 // ── noCast / hex / noEscape 透传 ─────────────────────────────────────────────

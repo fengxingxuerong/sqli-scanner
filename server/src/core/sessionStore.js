@@ -11,6 +11,8 @@
 import { promises as fs } from 'fs';
 import path from 'path';
 import os from 'os';
+import { logger } from './logger.js';
+import { sealSecret, openSecret, secretKeySource } from './sessionSecret.js';
 
 // ── 会话落盘路径白名单（原逻辑不变）──
 const SESSION_NAME_RE = /^[A-Za-z0-9._-]+$/;
@@ -149,7 +151,11 @@ export class ScanSession {
       config: sanitizeConfigForDisk(this.config),
       createdAt: this.createdAt,
       completedAt: this.completedAt || null,
-      points: this.points,
+      // [P0-SEC 2026-09-18 / A5] 注入点原始值（可能是 Cookie/认证头 → 会话凭据）落盘前封存。
+      // 内存语义不变（this.points 仍是明文），只有磁盘这一份是密文；load() 会解封回来。
+      points: this.points.map((p) => (p && typeof p === 'object'
+        ? { ...p, originalValue: sealSecret(p.originalValue) }
+        : p)),
       perPoint: this.perPoint,
       vulns: this.vulns,
       // [P0-FIX] 持久化提取数据，断点续跑时合并回 report.data
@@ -192,8 +198,31 @@ export class ScanSession {
       const raw = await fs.readFile(filePath, 'utf-8');
       const data = JSON.parse(raw);
       const s = new ScanSession(data.scanId, { url: data.url, config: data.config }, filePath);
-      s.points = data.points || [];
+      // [A5] 解封注入点原始值。解不开（换过 key / 旧随机 key）→ 该点降级为待重扫，
+      // 而不是把密文当参数值发出去（那会发出一个毫无意义的请求并污染结果）。
+      const unsealed = [];
+      const failedPointIds = [];
+      for (const p of Array.isArray(data.points) ? data.points : []) {
+        if (!p || typeof p !== 'object') { unsealed.push(p); continue; }
+        const opened = openSecret(p.originalValue);
+        if (opened === null) {
+          failedPointIds.push(String(p.id));
+          unsealed.push({ ...p, originalValue: undefined });
+        } else {
+          unsealed.push({ ...p, originalValue: opened });
+        }
+      }
+      if (failedPointIds.length) {
+        logger.warn(
+          `会话 ${data.scanId} 有 ${failedPointIds.length} 个注入点原始值无法解封` +
+            `（密钥来源 ${secretKeySource()}）——这些点将作为未完成重新扫描：${failedPointIds.slice(0, 5).join(', ')}`
+        );
+      }
+      s.points = unsealed;
       s.perPoint = data.perPoint || {};
+      for (const id of failedPointIds) {
+        s.perPoint[id] = { status: 'pending', found: [], extracted: false };
+      }
       s.vulns = data.vulns || [];
       s.extracted = data.extracted || null; // [P0-FIX] 恢复提取数据
       s.dumpCheckpoints = data.dumpCheckpoints || {}; // [Feature 4] 恢复行级断点

@@ -23,6 +23,7 @@ import { sqlmapRoutes } from './src/api/sqlmapRoutes.js';
 import { exploitRoutes } from './src/api/exploitRoutes.js';
 import { reportAiRoutes } from './src/api/reportAiRoutes.js';
 import { logger } from './src/core/logger.js';
+import { setAuthEnabled } from './src/core/apiAuthState.js';
 import { oobReceiver } from './src/core/oobReceiver.js';
 import { httpClient } from './src/core/httpClient.js';
 
@@ -218,6 +219,7 @@ export function createApp() {
   // 这里只读不解析——避免"装配一处、启动一处"各生成一份随机 token 的错配）。
   if (API_TOKEN) {
     logger.info(`API 鉴权已启用（来源 ${TOKEN_SOURCE}）`);
+    setAuthEnabled(true); // [A4] 供 sqlmapBridge 等模块判定「高危能力是否允许」（见 core/apiAuthState.js）
   } else if (TOKEN_SOURCE === 'none-explicit') {
     logger.warn(
       '⚠️ 已显式声明无鉴权（SCAN_API_ALLOW_NO_TOKEN=1）：任何可达客户端都能调用全部 API（含扫描/拖库）。仅应在隔离网络中使用。'
