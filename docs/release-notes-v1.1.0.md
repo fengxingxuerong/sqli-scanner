@@ -31,8 +31,9 @@
 - `npm run build:sidecar`（Node SEA）：cjs bundle → SEA blob → postject 注入 → 起 exe 冒烟。
 - 补齐 `tauri.conf.json` 的 `bundle.externalBin`（此前缺失，即使有 exe 也进不了安装包）。
 - 实测产出 `SQL注入检测工具_1.1.0_x64-setup.exe`（26.4 MB），壳启动后 sidecar 监听 127.0.0.1:4567。
+- ✅ **桌面版「直连 SQLite」现已可用**（v1.1.0 内完成）：wasm 内嵌进 SEA，
+  引擎在**空目录**下也能连真 SQLite（此前会静默回退到内存自检驱动，扫得出结果但不是真库）。
 - ⚠️ MSI（WiX `light.exe`）在含全角括号的路径下会失败，Windows 打包默认改用 NSIS。
-- ⚠️ 已知限制：SEA 单文件不含 sql.js（external）→ 桌面版「直连 SQLite」不可用，HTTP/HTTPS 扫描完整。
 
 ## 正确性
 

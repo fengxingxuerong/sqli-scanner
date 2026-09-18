@@ -14,6 +14,7 @@
 // 真实生产驱动（mysql2 / pg / mssql / oracledb 等）需用户自备并 `npm install`，再按 target.db.driverType 注册接入。
 
 import { logger } from './logger.js';
+import { loadSqlJs } from './sqlJsLoader.js';
 
 const TABLE = { columns: ['id', 'name'], rows: [[1, 'alice'], [2, 'bob']] };
 
@@ -175,8 +176,10 @@ export class SqlJsDriver {
     this._db = null;
   }
   async connect() {
-    const initSqlJs = (await import('sql.js')).default;
-    const SQL = await initSqlJs();
+    // [B1] 经 sqlJsLoader 统一三种形态下的 sql.js / wasm 定位（SEA 单文件走内嵌 asset）。
+    // 直接 `import('sql.js')` 在 SEA 里会抛 "No such built-in module: sql.js"，
+    // 详见 core/sqlJsLoader.js 头部说明。
+    const SQL = await loadSqlJs();
     this._db = new SQL.Database();
     if (this._opts.initSql) this._db.run(this._opts.initSql);
   }

@@ -64,6 +64,7 @@ if (rawArgs.includes('--help') || rawArgs.includes('-h')) {
   --no-minify     关闭 esbuild 压缩（调试）
   --skip-binaries 不复制产物到 src-tauri/binaries/
   --format <fmt>  输出格式: esm（默认）| cjs（SEA/pkg 前置可选）
+  --inline-sqljs  把 sql.js 内联进 bundle（SEA 单文件必需；见 sqlJsLoader.js 头部）
   --help          显示本帮助`);
   process.exit(0);
 }
@@ -76,6 +77,9 @@ const opts = {
   minify: !rawArgs.includes('--no-minify'),
   copyBinaries: !rawArgs.includes('--skip-binaries'),
   format,
+  // [B1] SEA 单文件必须内联 sql.js：SEA 的 require 被劫持为「只认内建模块」，
+  // 访问外部 sql.js 会抛 "No such built-in module: sql.js"，NODE_PATH 也救不了。
+  inlineSqlJs: rawArgs.includes('--inline-sqljs'),
 };
 
 // ── 工具 ────────────────────────────────────────────────────────────
@@ -127,9 +131,12 @@ async function main() {
   fs.rmSync(DIST_DIR, { recursive: true, force: true });
   fs.mkdirSync(DIST_DIR, { recursive: true });
 
-  // 1) esbuild bundle（sql.js 保持外部，其余全部内联）
+  // 1) esbuild bundle（默认 sql.js 保持外部；--inline-sqljs 时内联，供 SEA 单文件用）
   const build = await loadEsbuild();
-  log(`esbuild bundle: server/index.js → ${path.relative(ROOT, outfile)} (format=${format}, minify=${opts.minify})`);
+  log(
+    `esbuild bundle: server/index.js → ${path.relative(ROOT, outfile)} ` +
+      `(format=${format}, minify=${opts.minify}, inlineSqlJs=${opts.inlineSqlJs})`
+  );
   // [FIX 2026-09-18] CJS 输出下 esbuild 不提供 `import.meta.url`（原样保留会变成 undefined），
   // 而引擎入口用 `fileURLToPath(new URL('../dist/index.html', import.meta.url))` 定位前端产物
   // → 立刻抛 ERR_INVALID_ARG_TYPE，`--format cjs` 的产物**根本起不来**（此前从未验证过）。
@@ -148,7 +155,14 @@ async function main() {
     charset: 'utf8', // 保留中文可读，不转义成 \uXXXX
     legalComments: 'none',
     sourcemap: false,
-    external: ['sql.js'], // 动态 import('sql.js') 原样保留，运行时从 dist-engine/node_modules 解析
+    // 默认 external：动态 import('sql.js') 原样保留，运行时从 dist-engine/node_modules 解析。
+    // [B1] --inline-sqljs（SEA 单文件）时必须把 sql.js 打进 bundle：SEA 的模块解析只认内建模块，
+    // 外部 require 直接抛 "No such built-in module: sql.js"，NODE_PATH 也无效（实测）。
+    // 内联后 sql-wasm.js 变成 bundle 内的一等模块，其 wasm 由 initSqlJs({ wasmBinary }) 提供
+    // （见 core/sqlJsLoader.js），因此不再依赖 __dirname 定位 wasm。
+    external: opts.inlineSqlJs ? [] : ['sql.js'],
+    // 内联 sql.js 时需让 esbuild 能在 server/node_modules 里解析它
+    ...(opts.inlineSqlJs ? { nodePaths: [path.join(SERVER_DIR, 'node_modules')] } : {}),
     ...(format === 'cjs'
       ? { banner: { js: cjsMetaShim }, define: { 'import.meta.url': '__engine_meta_url' } }
       : {}),
@@ -158,20 +172,31 @@ async function main() {
     fail(`esbuild 打包失败（${result.errors.length} 个错误）`);
   }
 
-  // 2) 复制 sql.js 运行时（仅 3 个必要文件：入口 js + wasm + 解析用的 package.json）
-  const destPkg = path.join(DIST_DIR, 'node_modules', 'sql.js');
-  fs.mkdirSync(path.join(destPkg, 'dist'), { recursive: true });
+  // 2) sql.js 运行时处置
+  //    · 默认（external）：复制 3 个必要文件到 dist-engine/node_modules/sql.js，
+  //      wasm 与 sql-wasm.js 同目录，sql.js 用 __dirname 自行定位。
+  //    · --inline-sqljs（SEA）：sql-wasm.js 已进 bundle，**不再需要** node_modules/sql.js；
+  //      但仍把 wasm 单独放到 dist-engine/sql-wasm.wasm，供 build-sidecar 加进 SEA assets。
   const sqlJsFiles = ['package.json', 'dist/sql-wasm.js', 'dist/sql-wasm.wasm'];
-  for (const rel of sqlJsFiles) {
-    const src = path.join(SQLJS_SRC, rel);
-    if (!fs.existsSync(src)) fail(`sql.js 缺少文件: ${rel}（版本与预期不符，请重新 npm ci）`);
-    fs.copyFileSync(src, path.join(destPkg, rel));
-    log(`  ✓ 已复制 ${rel} → node_modules/sql.js/${rel}`);
+  const wasmSrc = path.join(SQLJS_SRC, 'dist', 'sql-wasm.wasm');
+  if (opts.inlineSqlJs) {
+    const wasmDest = path.join(DIST_DIR, 'sql-wasm.wasm');
+    fs.copyFileSync(wasmSrc, wasmDest);
+    log(`  ✓ [inline] sql.js 已内联进 bundle；wasm 单独输出 → ${path.relative(ROOT, wasmDest)}`);
+  } else {
+    const destPkg = path.join(DIST_DIR, 'node_modules', 'sql.js');
+    fs.mkdirSync(path.join(destPkg, 'dist'), { recursive: true });
+    for (const rel of sqlJsFiles) {
+      const src = path.join(SQLJS_SRC, rel);
+      if (!fs.existsSync(src)) fail(`sql.js 缺少文件: ${rel}（版本与预期不符，请重新 npm ci）`);
+      fs.copyFileSync(src, path.join(destPkg, rel));
+      log(`  ✓ 已复制 ${rel} → node_modules/sql.js/${rel}`);
+    }
   }
 
   // 3) 产物校验：冒烟 import + 打印大小
   const engineStat = fs.statSync(outfile);
-  const wasmStat = fs.statSync(path.join(destPkg, 'dist', 'sql-wasm.wasm'));
+  const wasmStat = fs.statSync(wasmSrc);
   log(`engine.${ext} 大小: ${(engineStat.size / 1024).toFixed(1)} KB | sql-wasm.wasm 大小: ${(wasmStat.size / 1024).toFixed(1)} KB`);
 
   if (format === 'esm') {
