@@ -90,11 +90,29 @@ e2e/udf-lab/*.dll
 # agent 临时诊断脚本
 **/.openclaw-*.mjs
 
+# [2026-09-18] PG 靶场运行器：上一批次**明确决定不提交**，但文件留在磁盘上备用。
+# 记在这里而不只记在会话笔记里，是因为它长期挂在 `git status` 的未跟踪区，
+# 每一轮都要重新判断一次「这是产物还是垃圾」。不提交的两条理由：
+#   ① 未端到端验证 —— 就绪探测（pg_ready）判定一直失败，且 `PG_DB` 默认值
+#      `sqli_lab` 在 pg-smoke 里可能根本不存在（会报 database does not exist）；
+#   ② 硬编码 `D:/pg-smoke` 路径 —— 恰好违反同一轮学到的「配置不能依赖环境遗留」。
+# 另注：跑它会弹出控制台窗口（本机反感），默认不执行。要跑 PG 系三个套件
+# （oob-real-lab / pg-osshell / concurrent-isolation）改用 `npm run lab:redteam`，
+# 它的 env.mjs 已经在同进程里把 PostgreSQL 拉起来了。
+e2e/run-with-pg.py
+
 # blackbox-lab 独立评测靶场产物（扫描输出 + 依赖目录链接）
 e2e/blackbox-lab/out/
 e2e/blackbox-lab/node_modules
 
 # 扫描台账运行时数据（不入库）
+# [2026-09-18] 这条规则从 a65839b 起就**空转**着：加规则时没配套 `git rm --cached`，
+# 于是 index.jsonl 与两份扫描目录一直挂在版本控制上，每跑一次扫描就多一行 diff
+# （本轮实测工作区里因此堆了 237 行台账改动，和这批改动的主题混在一起看不清）。
+# 现已补上 untrack（文件留在磁盘上，不丢数据）。留这条注释是为了不再退回去：
+# 台账是**追加式**的扫描历史，写进去的就是扫过的目标地址 —— 哪天扫了客户系统，
+# 这些地址会直接进 git 历史。ledgerDir() 每次都会 mkdirSync，listScans() 也容忍
+# index.jsonl 不存在，所以新克隆没有这个目录一样能跑。
 server/data/ledger/
 
 # [2026-09-17] 一键扫描产物：scripts/one-click-scan.mjs 默认输出到 reports/<host>-<时间戳>/，
