@@ -5,6 +5,55 @@
 
 ---
 
+## 2026-09-18 批次 · 定库与检出链路的回显污染（已修，留此防回归）
+
+已修内容见 CHANGELOG「[Unreleased]」与 README「P1-F / P1-G」。这一批**没有新增任何能力**，
+全部是把「已经在报『未检出』的地方其实根本没发对请求」挖掉：
+r2 档黑盒 9/13 → 13/13，A3-like 从 time 变 union+boolean。
+
+本批实测顺手暴露、**尚未处理**的四项（按性价比排序）：
+
+### A. P1-D 的真实危害面比「20 处冲突」这句话更具体（未修）
+`node e2e/blackbox-lab/check-dbms-sig.mjs` 报 20 处 sig 冲突，其中**可执行**的那几条才是真风险
+（冲突要成立，前提是「A 库的版本函数在 B 库上也能跑」）：
+- `MySQL.sig = /^\d+\.\d+\.\d+(?!.*MariaDB).*$/` 会吞掉 **H2 / ClickHouse / HSQLDB** 的
+  `version()` 回显（这三家都真的有 `version()`），且遍历顺序 MySQL 在前 → 真 H2/CH 目标
+  会被定成 MySQL，payload 族整体错配。
+- `Sybase.sig = /(Adaptive Server|Sybase|ASE)/i` 的 `ASE` **没有词边界**，
+  Oracle 的 banner「Rel**ease** 19.0.0.0.0」直接命中 —— 与 L46 那次 `Server: BaseHTTP` 含
+  "ase" 误判 Sybase 是同一个坑（那次只修了 `FINGERPRINT` 头签名，DB_VERSION 与报错签名两处没同步）。
+- **验收口径**：`check-dbms-sig.mjs` 零退出；并补一条「A 库函数在 B 库上不可执行则不算冲突」的
+  跨库可执行性矩阵，让自检报的是**可执行冲突**而不是理论冲突（现在 20 条里绝大多数打不到）。
+
+### B. `binaryProbe` 的 `capped` 在长度链路上被忽略（未修）
+`docs/统一探测判据-设计.md` 3.3 明确要求「拿到 capped=true 不得当正常结果用」；
+`engine/blindExtractor.js` `_binarySearch` 现在只 `return r.n + 1`，把 `r.capped` 丢了，
+`_extendLength` 再用 `Math.min(ext, maxLen)` 钳到 4096 —— 症状（睡 65531 次）没了，
+但**判据失效时仍在拿错误值继续跑**（会去逐字节提一个 4096 长度的假值）。
+修法：capped 时让该字段直接判「探测失败」并入 `summary.constraints`（与 P1-E 同一记录）。
+
+### C. `--test-path` 的闭合候选在 404 段上是噪声（未修）
+实测 `/api/sleep` 开 `--test-path` 时，path 点拿到 boundary `%"` —— 13 个候选的响应全是同一张
+404 页（Express 回显 URL），剔除回显后仍偶有同形判定。path 点本身没洞无所谓，但它会**触发**
+整轮指纹/列数探测（每次 ~40 请求）。修法方向：path 点基线为 4xx 时不投放闭合探测（或指纹
+提前 bail），既省请求也少一份误判来源。
+
+### D. 靶场侧缺陷（已就地修一处，其余待扫）
+`e2e/blackbox-lab/lab-app.mjs` 的 `/api/profile` 对 Cookie 值做 `decodeURIComponent`，收到
+`%'` 这类非法转义就在 **async handler** 里抛 URIError → Express 4 不捕获 async 异常 →
+该请求**永不应答**，把 D3 的整个测段拖成分钟级停顿（真值标定用 `uid=1` 碰不到，所以一直没暴露）。
+已加 try/catch 并注明「改的是靶场不应无端挂连接，SQL 拼接形态一字未改」。
+**待办**：其余 e2e 靶场（redteam / real-mysql / multi-engine / pentest-lab）同一形态
+（async handler + 未包 try 的 decode/parse）值得一次性扫掉，否则下一个漏检又会归因到引擎。
+
+### E. 本轮**未跑**的门禁（诚实记录）
+`npm run acceptance`（11 套件）没有整跑：`e2e/acceptance.mjs` 与多份 `results/*` 是另一批次
+未提交的在制品，跑一次就会覆盖它们的产物、把两批改动混进同一份报告。
+本轮实跑到的门禁：服务端全量单测（1885 用例 0 fail）+ 前端 315/315 + `tsc` 0 错 + eslint
+0 error + blackbox-lab 两轮 + redteam-lab R1/R2。合入前请补跑 acceptance 一次。
+
+---
+
 ## P1 · 实战视角高价值
 
 ### 1. 真实 ModSecurity/Coraza WAF 验证（可执行步骤）

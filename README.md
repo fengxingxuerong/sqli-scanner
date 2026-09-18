@@ -1,6 +1,6 @@
 # sqli-scanner
 
-[![Tests](https://img.shields.io/badge/tests-2193%20passing-brightgreen)](#测试)
+[![Tests](https://img.shields.io/badge/tests-2197%20passing-brightgreen)](#测试)
 [![Dependencies](https://img.shields.io/badge/dependencies-0%20known%20vulns-brightgreen)](#环境变量)
 
 > CI 徽章待仓库地址确定后启用（当前 `OWNER/REPO` 是占位，占位链接会显示成"通过"，属误导，
@@ -302,7 +302,7 @@ backend/  ← Express + Node.js
 # 前端测试（315 个用例）
 npm test
 
-# 服务端测试（1881 个用例）
+# 服务端测试（1885 个用例）
 cd server && npm test
 
 # 全部测试
@@ -318,7 +318,7 @@ npm run test:all
 
 - TypeScript: 零错误
 - 前端测试: 315/315 通过（覆盖率门禁 stmts 91.11 / branch 80.00 / func 72.01，阈值 88/77/67）
-- 服务端测试: 1881 用例（1878 pass / 0 fail / 3 skip，并发口径 2026-09-18 复测；3 skip 为环境依赖显式跳过。覆盖率 lines 88.82 / branch 72.95 / func 76.26，阈值 85/69/72）
+- 服务端测试: 1885 用例（1882 pass / 0 fail / 3 skip，并发口径 2026-09-18 复测；3 skip 为环境依赖显式跳过。覆盖率 lines 88.82 / branch 72.95 / func 76.26，阈值 85/69/72）
 - 一键扫描: `npm run scan -- -u <url>`（CLI 一条命令产出 HTML/JSON/Markdown 全套报告 + manifest，退出码可直接进 CI 门禁）
 - Tamper 插件: 228 个（含 v24 增量 20 个，对齐 sqlmap 官方 tamper 全集，含官方 CRS/libinjection 实测组合 uniontable+odbcbrace）
 - WAF 绕过能力: 200+ 插件链式组合，覆盖 62 个 WAF 厂商指纹识别 + 推荐
@@ -337,6 +337,8 @@ npm run test:all
 | **P1-C** | DBMS 定库：5 个**常量串** sig 无区分度（真 MySQL 判 DB2） | ✅ **已修复**（2026-09-16） |
 | **P1-D** | DBMS 定库：**纯版本号** sig 互相冲突（自检出 20 处） | ⚠️ **未修**（`node e2e/blackbox-lab/check-dbms-sig.mjs` 仍非零退出） |
 | **P1-E** | 提取链：长度探测顶到上限 **65,531** → 拖库不可用 | ⚠️ **根因已定位，未修**（见下） |
+| **P1-F** | 定库链路的**回显污染 + 上下文盲区**：真 MySQL 被判 ClickHouse / 闭合探测拿不到前缀 / 版本回显通道整条失效 | ✅ **已修复**（2026-09-18，详见下） |
+| **P1-G** | `--cookie` 只当会话用、**从不作为注入面**（level 5 下解析出 0 个点） | ✅ **已修复**（2026-09-18，详见下） |
 
 > **P1-A / P1-B / P1-E 是同一病根的三个实例**（详见 `docs/统一探测判据-设计.md`）：
 > 二分探测的真/假判据依赖「响应差异」，而目标**恒 200 + 错误页回显**时差异被抹平
@@ -365,18 +367,76 @@ path 段注入后 URL 变为不存在的路径（500/403 → 404），404 页**�
 r2 档原报「检出 13/13」，但其中 **3 个点（A3-like / A4-orderby / C2-blindtime）的「命中」
 正是靠上述误报机制达成的**（技术位均为 `error`）。修掉误报后它们的假命中同步消失。
 
-**修复后两档检出均为 9/13、误报 0/7**。即：
-**「扫不出来就加参数」在本工具上不成立 —— 拉满参数没有带来额外真检出。**
+当时的复测结论是「**两档检出均为 9/13、误报 0/7**」，并由此得出
+**「扫不出来就加参数」在本工具上不成立**。—— 这条结论在 2026-09-18 被**部分推翻**：
+拉满参数确实没换来检出，是因为当时还有三条**与参数无关**的链路缺陷在吃掉真阳性
+（见下方 P1-F / P1-G）。修掉之后，实战档 r2 从 9/13 升到 **13/13**、误报仍为 0/7；
+默认档 r1 为 **10/13**（余下 3 个漏项全部是 level/risk 门控：Cookie 点要 level≥2、
+Header 点要 level≥3、ORDER BY 布尔对要 level 3（同点的时间型向量要 risk≥2），与 sqlmap 同语义，不是判据失效）。
+
+**P1-F 根因与修法**（三条同源缺陷，全部由 blackbox-lab 真 MySQL 实测定位，非推断）：
+
+同一病根 = **目标把注入值原样回显时，所有「响应 vs 基线」的比较都被那份回显污染**，
+这正是 `echoStrip.js` 文件头列的第 ②③ 个坑在另外两条链路上的复发：
+
+1. **闭合探测整批落空**（`engine/Detector.js` `probeBoundary`）：LIKE 搜索框
+   （`WHERE name LIKE '%${kw}%'`，需 `%'` 闭合）的 13 个候选**全部**判不相似 →
+   boundary 回退 `''` → union 门控真假同长 → **该点 union+boolean 技术位全灭**。
+   修法：相似判定先剔除被回显的 payload；并补一条**不依赖基线**的判据 ——
+   等长真假对差分（`AND 1=1` vs `AND 1=2`，各自剔除回显后：闭合正确必不同、闭合错误必相同）。
+   只在基线比对一条都不命中时才发这组探针，正常站点零额外请求。
+2. **版本回显定库通道失效**（`engine/DBFingerprinter.js`）：回显型目标的页面里有**两份**
+   `__S__…__E__`（一份来自被回显的 SQL 文本，一份来自真实结果行），`match` 取第一处 →
+   永远拿到 SQL 文本 → 18 库 sig 全落空 → 退化到报错/时间向量定库，而误判就发生在那里。
+   修法：取标记前先剔除本条 payload 的回显。
+3. **时间向量把闭合引号写死在模板里**（`engine/payloads/index.js` `TIME_VECTORS`）：
+   MySQL/PG/Oracle/SQLite 的向量不带引号、ClickHouse/Sybase/H2/MonetDB 自带 `'` →
+   在字符串型上下文上「向量顺序即优先级」被打乱：真 MySQL 的字符串点上，MySQL 向量落进
+   字面量内不延时，第 6 位的 ClickHouse 向量靠自带引号闭合成功 → **定库 ClickHouse**
+   （实测 A2-string / A3-like 均误判）。修法：模板统一用 `{BD}`（该点已探到的闭合前缀）填充。
+   附带修掉一处**误判放大**：指纹缓存原先整台目标共享一份，而检测是多点**并发**跑的，
+   排在最前的若是 path/header 点（实测其探针全 404），那份 null 就被后面每个点继承 →
+   C2-blindtime 在 r2 档整点漏检。现按点类别（main / header / path）分桶。
+
+**P1-F 顺带消除的一处自伤风险**：H2 的 `SLEEP()` 以**毫秒**计、MySQL 同名函数以**秒**计。
+原向量 `SLEEP({SLEEP}000)` 是字符串拼接，加了 `{BD}` 之后它在数值上下文的 MySQL 上完全合法
+—— 一旦排前的 MySQL 向量因故未延时（例如 WAF 只拦 `SLEEP(1)`），就是让目标库睡 1000~15000 秒。
+单位不对称无法用任何表达式同时满足两边，故 H2 **移出盲探时间向量**，定库改由报错签名承担
+（`org.h2.jdbc` / "Syntax error in SQL statement"），并加了一条防回归断言：
+盲探向量里不允许出现任何 `{SLEEP}0+` 放大写法。
+
+**P1-G 根因与修法**（`bin/cli/config.js`）：`--cookie` 此前只进 `auth.cookie`（会话携带），
+cookieParams 只能由 `--header 'cookie: …'` + `--test-headers` 那条路填进来。于是最主流的写法
+`--cookie uid=1 -u …/api/profile --level 5` 解析出 **0 个注入点** → 0 请求 → 报告「未检出」，
+看起来像一次干净的低风险扫描。现 `--cookie` 的每一对都直接成为候选注入面（是否真投放仍由
+TargetParser 的 level≥2 门控决定，与 sqlmap 同语义）；同时不再把已升为注入点的键经
+`auth.cookie` 重复附加（同名两份时哪份生效取决于目标解析顺序 → 结论不可复现）。
+
+**P1-F / P1-G 修复验证**（blackbox-lab 真 MySQL 8.0.28 + 全量单测）：
+
+| 靶点 | 修前 | 修后 |
+|---|---|---|
+| A2-string | dbms=ClickHouse（误判） tech=[boolean] | dbms=null（诚实未知） tech=[boolean] |
+| A3-like | dbms=ClickHouse（误判） tech=[**time**]（蹭误判才命中） | dbms=**MySQL** tech=[union,boolean] 风险 Medium→**High** |
+| C2-blindtime（r2） | 整点漏检（指纹缓存继承 null） | HIT tech=[time] |
+| D3-cookie | r2 档 0 个点 / 0 请求 | HIT tech=[union,boolean] |
+| 两档合计 | r1 10/13、r2 9/13 | **r1 10/13、r2 13/13，误报 0/7** |
+
+回归：服务端全量单测 0 fail、前端 315/315、`tsc` 0 错、eslint 0 error；
+redteam-lab（真 MySQL）R1 **18/19**、R2 **19/19**、安全点误报 0/7（与既有记录一致，零回归）。
+新增纯 JS mock 回归钉 `server/tests/boundary.echoTarget.test.js`（不依赖真库即可复现回显污染两类缺陷）。
 
 **同题对照（sqlmap 1.10.7，同一批靶点）**：
 
 | 工具 / 档位 | 漏洞检出 | 安全误报 |
 |---|---|---|
-| sqli-scanner **默认档（r1）** | 9/13 | **0/7** |
-| sqli-scanner 实战档（r2，level5/risk3/全技术/test-headers/test-path） | 9/13 | **0/7** |
+| sqli-scanner **默认档（r1）** | 10/13 | **0/7** |
+| sqli-scanner 实战档（r2，level5/risk3/全技术/test-headers/test-path） | **13/13** | **0/7** |
 | sqlmap（level 1 / risk 1，与默认档对齐） | 7/13 | **0/7** |
 
-**结论**：默认档强于 sqlmap 同档（9 vs 7，误报同为 0/7），且独有检出 base64 编码参数、
+（sqlmap 行为 2026-09-15 实测，本工具两档为 2026-09-18 复测；同批靶点、同一靶场进程。）
+
+**结论**：默认档强于 sqlmap 同档（10 vs 7，误报同为 0/7），且独有检出 base64 编码参数、
 REST path 段、堆叠通道（sqlmap level 1 三者全漏）。
 
 **复现**：
