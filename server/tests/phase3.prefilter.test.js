@@ -73,9 +73,11 @@ test('预筛选：无注入迹象目标只发少量请求，完整检测被跳�
   const sm = makeManager(points, cleanMock);
   const id = await runScan(sm, { prefilter: true });
   const report = sm.getReport(id);
-  // [P1-FIX 2026-09-05] 1 次基线 RTT 测量（共享）+ 3 点 × 4 探针（基线/单引号/MySQL SLEEP/pg_sleep
-  // 双族时间探针，dbms 未知）= 13 次预筛选请求，完整检测（含指纹）零请求
-  assert.equal(requests, 13, `应只发预筛选探测请求，实际 ${requests} 次`);
+  // [P1-FIX 2026-09-05] 1 次基线 RTT 测量（共享）+ 每点 4 探针（基线/单引号/MySQL SLEEP/pg_sleep）
+  // [CTX-FIX 2026-09-18] 每点 5 探针：MySQL 时间探针补一条**数值上下文**变体（不带前导 `'`）。
+  //   少这一条会让「恒 200 固定页 + 数值型时间盲注」的点在多点目标上被整点剪掉（实测漏检）。
+  //   请求数 13 → 16 是这条判据变严的直接代价，不是漂移。
+  assert.equal(requests, 16, `应只发预筛选探测请求，实际 ${requests} 次`);
   assert.equal(sm._detectCalls.length, 0, '无注入迹象点不应进入完整检测');
   assert.equal(report.points.length, 3, '预筛选不应影响报告 point 列表');
   assert.equal(report.vulns.length, 0);
@@ -104,7 +106,9 @@ test('预筛选：单引号报错有信号的点保守保留并完整检出（�
   // （指纹桩 0 请求，仅 union 检测命中；union 命中后慢速层不跑）
   // [OPT-FIX 2026-09-08] p2 单引号探针报错 → 追加 1 次良性非法值甄别探针（响应异构 →
   // 真实 SQL 报错信号 → 保守保留），探测请求 9 → 10。
-  assert.equal(requests, 10, `2 点应发 10 次预筛选探测（含 1 次基线 RTT + 1 次良性甄别探针），实际 ${requests} 次`);
+  // [CTX-FIX 2026-09-18] 未知库的时间探针由 2 条增至 3 条（MySQL 数值上下文变体 +1，
+  // 见 ScanManager._timeProbeValues 的 CTX-FIX 注释）：2 点 × 1 = +2 → 10 → 12。
+  assert.equal(requests, 12, `2 点应发 12 次预筛选探测（含 1 次基线 RTT + 1 次良性甄别探针），实际 ${requests} 次`);
   // 只有可疑点进入完整检测；默认 techniques 不含 inline，且 union 命中后 time 层跳过
   assert.deepEqual([...sm._detectCalls].sort(), ['boolean', 'error', 'union']);
 });

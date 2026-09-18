@@ -37,6 +37,7 @@ import {
   isEnumMode,
   buildExtractScope,
   validateEnumArgs,
+  parseCookiePairs,
 } from './cli/config.js';
 // 再导出：8 个测试文件从 ../bin/cli.js 导入这些符号，路径不能变
 export {
@@ -160,7 +161,7 @@ async function runSingleScan(sm, url, args) {
     ? parseScope(String(args.scope).split(',').map(s => s.trim()).filter(Boolean))
     : null;
   if (scopeRules?.enabled) assertInScope(String(url), scopeRules);
-  const auth = buildAuth(args);
+  let auth = buildAuth(args);
   // [本期新增] --test-headers：把显式请求头转为注入点字段。被纳入注入点的头不再经 auth 透传，
   // 否则 httpClient.mergeAuthHeaders 会用原始值覆盖注入 payload（请求仍畸形/无注入）。
   // 注入点的原始值由 buildInjectionRequest 始终从 target.headerParams/cookieParams 注入（含基线请求）。
@@ -172,6 +173,19 @@ async function runSingleScan(sm, url, args) {
   if (injTarget.headerParams && auth && auth.headers) {
     for (const k of Object.keys(injTarget.headerParams)) delete auth.headers[k];
     if (auth.headers && Object.keys(auth.headers).length === 0) delete auth.headers;
+  }
+  // [P0-FIX 2026-09-18] --cookie 的每一对都已升为 cookieParams 注入点后，不再经 auth.cookie
+  // 重复附加：否则 Cookie 头出现同名两份（`uid=<payload>; uid=1`），哪份生效取决于目标的
+  // 解析顺序（多数取第一个、部分取最后一个）→ 同一目标重跑结论可能翻转。
+  // 只要还有「未被当作注入点」的键（如独立会话 cookie），auth.cookie 就原样保留。
+  if (injTarget.cookieParams && auth && auth.cookie && args.cookie) {
+    const asPoints = injTarget.cookieParams;
+    const fromFlag = parseCookiePairs(args.cookie, {});
+    const leftover = Object.keys(fromFlag).filter((k) => !(k in asPoints));
+    auth = leftover.length
+      ? { ...auth, cookie: leftover.map((k) => `${k}=${fromFlag[k]}`).join('; ') }
+      : { ...auth, cookie: undefined };
+    if (!auth.cookie) delete auth.cookie;
   }
   // 枚举模式：把 CLI 参数解析为 extractScope 挂到 config（对标 sqlmap --dbs/--tables/...）
   const scope = buildExtractScope(args);

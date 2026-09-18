@@ -33,6 +33,9 @@ import { PAYLOADS } from '../src/engine/payloads.js';
 function legacyFill(template, vars = {}) {
   return template
     .replaceAll('{ORIG}', vars.orig ?? '')
+    // [CTX-FIX 2026-09-18] TIME_VECTORS 新增 {BD}（闭合前缀）占位符；本对照实现按「未提供 bd」
+    // 渲染成空串，与 fillPayload 一致 —— 本测试钉的是「sleep/重运算的上界没变」，不是占位符集合。
+    .replaceAll('{BD}', vars.bd ?? '')
     .replaceAll('{SLEEP}', String(vars.sleep ?? 1))
     .replaceAll('{NUM}', '7777') // 随机项固定化，两边一致即可比较
     .replaceAll('{SEP}', vars.sep ?? '-- -');

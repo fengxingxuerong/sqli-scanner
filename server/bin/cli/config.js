@@ -12,28 +12,49 @@ import { parseHeaders } from './args.js';
 import { logger } from '../../src/core/logger.js';
 import { PAYLOADS, enableDestructivePayloads } from '../../src/engine/payloads.js';
 
+/**
+ * Cookie 串（`a=1; b=2`）→ 键值对象；无 `=` 的片段忽略。
+ * @param {string} raw @param {Record<string,string>} into
+ */
+export function parseCookiePairs(raw, into) {
+  for (const pair of String(raw || '').split(';')) {
+    const eq = pair.indexOf('=');
+    if (eq > 0) {
+      const name = pair.slice(0, eq).trim();
+      const val = pair.slice(eq + 1).trim();
+      if (name) into[name] = val;
+    }
+  }
+  return into;
+}
+
 export function buildInjectionTargets(args) {
   const result = {};
-  if (!args.testHeaders) return result;
+  // [P0-FIX 2026-09-18] `--cookie` 本身就是「这个 Cookie 是注入面」的显式表达，不再要求
+  // 同时给 `--test-headers`。此前 cookieParams 只能从 `--header 'cookie: …'` 那条路填进来，
+  // 于是最主流的写法反而静默失效：实测 `--cookie uid=1 -u …/api/profile --level 5` 解析出
+  // **0 个注入点** → 0 请求 → 报告「未检出」。cookie 型数字注入在 PHP/JSP 老系统上是高频洞，
+  // 而「参数被忽略」比慢更糟——它看起来像一次干净的低风险扫描。
+  // 是否真的投放 cookie 注入点仍由 TargetParser 的 level≥2 门控决定（与 sqlmap 同语义）。
+  const cookieObj = parseCookiePairs(args.cookie, {});
+  if (!args.testHeaders) {
+    if (Object.keys(cookieObj).length) result.cookieParams = cookieObj;
+    return result;
+  }
   const hdrs = {};
   if (args.headerObj) Object.assign(hdrs, args.headerObj);
   const parsed = args.headers ? parseHeaders(args.headers) : undefined;
   if (parsed) Object.assign(hdrs, parsed);
   const EXCLUDE = new Set(['host', 'content-length', 'content-type', 'authorization']);
   const headerParams = {};
-  const cookieObj = {};
   for (const [k, v] of Object.entries(hdrs)) {
     const lk = String(k).toLowerCase();
     if (EXCLUDE.has(lk)) continue; // 传输层/认证类头排除
     if (lk === 'cookie') {
-      // Cookie 头：解析为 k=v，填入 cookieParams（TargetParser 在 level≥2 生成 cookie 注入点）
-      for (const pair of String(v).split(';')) {
-        const eq = pair.indexOf('=');
-        if (eq > 0) {
-          const name = pair.slice(0, eq).trim();
-          const val = pair.slice(eq + 1).trim();
-          if (name) cookieObj[name] = val;
-        }
+      // Cookie 头：解析为 k=v，填入 cookieParams（TargetParser 在 level≥2 生成 cookie 注入点）。
+      // 同名键以 `--cookie` 为准（显式参数优先于从 --header 顺带解析出来的那一份）。
+      for (const [name, val] of Object.entries(parseCookiePairs(v, {}))) {
+        if (!(name in cookieObj)) cookieObj[name] = val;
       }
       continue;
     }

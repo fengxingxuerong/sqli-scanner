@@ -52,12 +52,27 @@ describe('[C-16] DBMS 覆盖率补全', () => {
       .filter(([_, caps]) => caps.time === true)
       .map(([dbms]) => dbms);
     const timeDbmsInVectors = TIME_VECTORS.map(v => v.dbms);
+    // [UNIT-TRAP 2026-09-18] H2 有意**不在**盲探时间向量里：H2 的 SLEEP 以毫秒计、MySQL 同名函数
+    // 以秒计，同一条 SQL 差 1000 倍 —— 在未知目标上投 `SLEEP(2000)` 等于可能让客户库睡 2000 秒
+    // （事故级自伤，见 payloads/index.js 的 UNIT-TRAP 注释）。H2 定库改由报错签名承担。
+    const UNIT_TRAP_EXCLUDED = new Set(['H2']);
     // MariaDB/TiDB/DM8 经 resolveDbms 归一化到 MySQL/Oracle，TIME_VECTORS 用 MySQL/Oracle 条目覆盖
     for (const dbms of timeDbmsInSupported) {
       const resolved = resolveDbms(dbms) || dbms;
       assert.ok(
-        timeDbmsInVectors.includes(dbms) || timeDbmsInVectors.includes(resolved),
+        timeDbmsInVectors.includes(dbms) || timeDbmsInVectors.includes(resolved) || UNIT_TRAP_EXCLUDED.has(dbms),
         `TIME_VECTORS 缺少 ${dbms}（resolved=${resolved}）`
+      );
+    }
+  });
+
+  test('盲探时间向量不得含跨库单位不对称的延时（H2 毫秒陷阱防回归）', () => {
+    // `{SLEEP}000` 这类「字符串拼接放大」在毫秒制库上正确、在秒制库上放大 1000 倍。
+    // 时间向量是**在未知库上盲投**的，所以这种条目一条都不允许存在。
+    for (const v of TIME_VECTORS) {
+      assert.ok(
+        !/\{SLEEP\}0+/.test(v.payload),
+        `${v.dbms} 的时间向量含「{SLEEP}+零放大」写法（单位不对称，误命中即长时间挂住目标库）：${v.payload}`
       );
     }
   });
@@ -141,13 +156,15 @@ describe('[C-16] DBMS 覆盖率补全', () => {
     }
   });
 
-  test('TIME_VECTORS 新增 ClickHouse/Sybase/H2/MonetDB 条目', () => {
+  test('TIME_VECTORS 新增 ClickHouse/Sybase/MonetDB 条目（H2 因单位陷阱刻意排除）', () => {
     const dbmsList = TIME_VECTORS.map(v => v.dbms);
     assert.ok(dbmsList.includes('ClickHouse'), 'TIME_VECTORS 缺少 ClickHouse');
     assert.ok(dbmsList.includes('Sybase'), 'TIME_VECTORS 缺少 Sybase');
-    // [P1] H2/MonetDB 新增
-    assert.ok(dbmsList.includes('H2'), 'TIME_VECTORS 缺少 H2');
+    // [P1] MonetDB 新增
     assert.ok(dbmsList.includes('MonetDB'), 'TIME_VECTORS 缺少 MonetDB');
+    // [UNIT-TRAP 2026-09-18] H2 曾在此列（`SLEEP({SLEEP}000)`），因毫秒/秒单位不对称移除；
+    // 断言其不在，防止有人「补覆盖率」时把它原样塞回来。
+    assert.ok(!dbmsList.includes('H2'), 'H2 不应出现在盲探时间向量里（毫秒制 SLEEP 会挂住秒制库）');
   });
 
   test('ERROR_SIG_BY_DBMS TiDB 签名匹配 TiDB 报错文本', () => {

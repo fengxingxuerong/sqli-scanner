@@ -338,19 +338,42 @@ export class ScanManager {
 
   // 指纹结果按目标缓存（同目标多注入点不重复跑 8-9 请求指纹）。
   // fpCache 存 Promise：并发 worker 同时命中 miss 时共享同一 in-flight 指纹，杜绝重复请求。
+  // [CTX-FIX 2026-09-18] **判不出的结果不共享**：整轮指纹是用「触发它的那一个注入点」的上下文跑的
+  //   （闭合前缀与点位置直接决定探针能否执行）。开 --test-headers/--test-path 后排在最前的常常是
+  //   path/header 点，其上下文会把整轮指纹跑废，而 null 一旦被缓存就被后面每个点继承：
+  //   实测 blackbox-lab C2-blindtime（真 MySQL 时间盲注点）r2 档因此 dbms=null → time 通道按
+  //   未知方言投放 → 漏检；同一目标关掉 header/path 点单跑则 dbms=MySQL 正常命中。
+  //   现给「重跑」留预算：最多 FP_RETRY_MAX+1 次尝试，成功定库的目标零额外请求（行为与原来一致）。
   async _fingerprintCached(fpCache, ctxBase, target, point) {
-    const key = target.baseUrl || target.url || (target.mode === 'direct' ? 'direct' : 'target');
-    let entry = fpCache.get(key);
-    if (!entry) {
-      entry = this.fp
+    // [CTX-FIX 2026-09-18] 缓存键按「点类别」分桶，不再整台目标共享一份：
+    // path / header 点的探针上下文与 query/body 点往往完全不同（实测 /api/sleep 的 path 点
+    // 探针全部 404 → 整轮指纹 null），而检测是多点**并发**跑的（detect.js 里 Promise.all），
+    // 谁先跑谁定调 → 真能出结果的 query 点只能继承那份 null。
+    // 分桶后最多每类各跑一次指纹（query/body/cookie 仍共用 'main'，与原行为等价）。
+    const cls = point?.location === 'path' || point?.location === 'header' ? point.location : 'main';
+    const key = `${target.baseUrl || target.url || (target.mode === 'direct' ? 'direct' : 'target')}|${cls}`;
+    const FP_RETRY_MAX = 2;
+    let slot = fpCache.get(key);
+    if (!slot) {
+      slot = { promise: null, attempts: 0 };
+      fpCache.set(key, slot);
+    }
+    if (!slot.promise) {
+      slot.attempts++;
+      const allowRetry = slot.attempts <= FP_RETRY_MAX;
+      slot.promise = this.fp
         .fingerprint({ ...ctxBase, target, point })
         .catch((e) => {
           logger.warn(`指纹识别失败：${e.message}`);
           return null;
+        })
+        .then((res) => {
+          // 未定出库 → 撤下这条 in-flight 记录，让下一个注入点用自己的上下文再试
+          if (allowRetry && (!res || !res.dbms)) slot.promise = null;
+          return res;
         });
-      fpCache.set(key, entry);
     }
-    return await entry;
+    return await slot.promise;
   }
 
   // 扫描上下文回收：completed/stopped/error 后置 retiredAt，TTL 到期清 scans 条目 + eventBus + 限速桶
@@ -663,26 +686,39 @@ export class ScanManager {
     }
   }
 
-  // [P1-FIX 2026-09-05] 时间探针按 dbms 选族（闭引号上下文，与原 MySQL SLEEP 样式一致）：
+  // [P1-FIX 2026-09-05] 时间探针按 dbms 选族：
   //   MySQL 族 → AND SLEEP(s)；PostgreSQL → AND pg_sleep(s) IS NULL；
   //   SQL Server → '; WAITFOR DELAY（堆叠）；Oracle → DBMS_PIPE.RECEIVE_MESSAGE；
   //   SQLite（无服务器端 sleep）→ 空数组，仅靠单引号报错探针；
   //   未知库 → MySQL + PG 双族（覆盖公网最常见两系，语法错误在异构库上只会快速失败，无副作用）。
+  // [CTX-FIX 2026-09-18] 每个方言族补发**数值上下文**变体（不带前导单引号）。
+  // 原实现每种方言只有带 `'` 的一条 → 数值型注入点上 `' AND SLEEP(2)` 是语法错误、秒回无延迟；
+  // 而「恒 200 + 固定页」这类点又没有单引号内容差异信号可用 → 预筛选判「无迹象」直接剪掉整点。
+  // 实测 blackbox-lab C2-blindtime（`WHERE id=${id}`，任何输入都返回同一张 130 字节页）：
+  //   · 只测该点（1 个点 → 不触发预筛选）→ dbms=MySQL，time 通道正常命中；
+  //   · 加 --test-path 变成 2 个点（触发预筛选）→ 该点被 skipReason=prefilter 剪掉 → **整点漏检**。
+  // 代价：每点 +1 个探测请求（未知库 +1 而非 +2，见 default 分支的取舍说明）。
   _timeProbeValues(dbms, sleepSec) {
     const s = Number(sleepSec) || 2;
+    /** 同一条件的两种闭合上下文：[字符串型, 数值型] */
+    const both = (cond) => [`' ${cond}`, ` ${cond}`];
     switch (String(dbms || '').toLowerCase()) {
       case 'mysql': case 'mariadb': case 'tidb':
-        return [`' AND SLEEP(${s})-- -`];
+        return both(`AND SLEEP(${s})-- -`);
       case 'postgresql':
-        return [`' AND pg_sleep(${s}) IS NULL-- -`];
+        return both(`AND pg_sleep(${s}) IS NULL-- -`);
       case 'sql server': case 'mssql':
-        return [`'; WAITFOR DELAY '0:0:${s}'--`];
+        return [`'; WAITFOR DELAY '0:0:${s}'--`, `; WAITFOR DELAY '0:0:${s}'--`];
       case 'oracle': case 'dm8':
-        return [`' AND DBMS_PIPE.RECEIVE_MESSAGE('pf', ${s}) = 'pf'-- -`];
+        return both(`AND DBMS_PIPE.RECEIVE_MESSAGE('pf', ${s}) = 'pf'-- -`);
       case 'sqlite':
         return [];
       default:
-        return [`' AND SLEEP(${s})-- -`, `' AND pg_sleep(${s}) IS NULL-- -`];
+        // 未知库：MySQL 双上下文 + PG 字符串上下文。不给 PG 数值变体是**有意的**：
+        // 预筛选的判定方向是「所有探针都无信号才剪」，每多一条探针就多一份「剪不断反而白花请求」，
+        // 而 budget 不足时整个预筛选会自动放弃（保守全保留）—— 多给 PG 数值变体会让多参数目标
+        // 更容易撞上那条线，把 MySQL 目标本已到手的剪枝收益一起赔进去。
+        return [`' AND SLEEP(${s})-- -`, ` AND SLEEP(${s})-- -`, `' AND pg_sleep(${s}) IS NULL-- -`];
     }
   }
 

