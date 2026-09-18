@@ -24,6 +24,27 @@
 - **静态外壳与 API 鉴权分离**：启用 `SCAN_API_TOKEN` 后，前端外壳（dist 静态资源与 SPA 路由）不再被
   token 中间件拦截（此前 `GET /` 直接返回 401 JSON，Docker/单端口部署下 **Web UI 完全打不开**）；
   所有数据接口（含不带 `/api` 前缀的 `/scan/*`、`/exploit/*`、`/sqlmap/*`）仍需 token。
+- **桌面端 sidecar 可打包了**（此前无法构建）：
+  - `npm run build:sidecar`（`scripts/build-sidecar.mjs`）走 Node SEA 路线：
+    cjs bundle → SEA blob → postject 注入 → 冒烟（起 exe 断言 `/api/health`=200 与
+    `ENGINE_TOKEN` 回传）。产物 `src-tauri/binaries/sqli-engine-<target-triple>[.exe]`（Windows x64 约 86 MB）。
+  - 为什么不用 pkg：本机实测 `@yao-pkg/pkg --target node20-win-x64` 无预编译 base binary，
+    退化为源码编译 Node 并因缺 NASM 失败。
+  - 修复 `--format cjs` 产物不可运行：CJS 下 esbuild 不提供 `import.meta.url`，
+    引擎入口定位前端产物时抛 `ERR_INVALID_ARG_TYPE`（此前该格式从未被验证过）。
+  - 修复 `tauri.conf.json` 缺 `bundle.externalBin`：即使产出了 exe，`tauri build` 也不会打进安装包，
+    运行时 `shell().sidecar("sqli-engine")` 找不到可执行文件。
+  - `build:tauri` / `package:win` / `package:mac` 三条链已补上 sidecar 构建步骤。
+  - **实测打包结果**：`npx tauri build --bundles nsis` 成功产出
+    `SQL注入检测工具_1.1.0_x64-setup.exe`（26.4 MB，内含 90 MB sidecar 的 LZMA 压缩）；
+    产物结构验证：`target/release/sqli-scanner.exe`（壳）+ `sqli-engine.exe`（sidecar）同目录，
+    启动后日志 `[引擎] sidecar 已启动：127.0.0.1:4567`，`sqli-engine.exe` 进程在线。
+  - ⚠️ **MSI（WiX）在当前用户目录下会失败**：`light.exe` 无法处理含全角括号的路径
+    （`C:\Users\Admin（无密码）\AppData\...`）。因此 `package:win` 默认改用 NSIS；
+    需要 MSI 时请在纯 ASCII 路径下构建。
+  - **已知限制**：sql.js（SQLite 直连模式）在 bundle 中为 external，SEA 单文件不含它，
+    桌面版「直连 SQLite」不可用（HTTP/HTTPS 扫描能力完整）；需要该模式时把
+    `dist-engine/node_modules` 作为 Tauri resource 分发。
 - **CI 门禁加固**：Docker 冒烟增加「无 token 必须 401」「静态资源 CSP 必须含 'self'」两条断言。
 - **新增发布冒烟 `e2e/diag/release-smoke.mjs`**（已接入 CI 的 `release-smoke` job）：在临时沙箱里以
   **生产配置**（token + 托管 dist + 引擎常驻）跑完整链路——鉴权、跨站、CSP 分流、静态资源可达、
