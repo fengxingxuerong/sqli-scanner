@@ -38,6 +38,9 @@ SANDBOX_LABS = [
     ("crawl-lab", "e2e/crawl-lab/e2e.mjs"),
     ("redteam-lab", "e2e/redteam-lab/run-with-env.mjs"),
     ("waf-real", "e2e/waf-real/selftest.mjs"),
+    # 文件读写闭环：宿主 mysqld 默认 secure_file_priv=NULL 只能 SKIP，套上沙箱（限定目录）就能真跑
+    ("file-read", "e2e/fileops/exploit-file-read.e2e.mjs"),
+    ("file-write", "e2e/fileops/exploit-file-write.e2e.mjs"),
 ]
 
 
@@ -56,6 +59,10 @@ def sandbox_env(inst: dict) -> dict:
         "MYSQL_USER": inst["user"],
         "MYSQL_PASSWORD": inst["password"] or "",
         "MYSQL_DATABASE": "sqli_lab",
+        # 沙箱把 secure_file_priv 指向这个目录（见 mysql_sandbox.py 的 my.cnf 模板）。
+        # 文件读/写两套件要靠它把标记文件放进"被允许的那个目录"，否则在默认配置的机器上
+        # 只能报 SKIP —— 而"限定一个目录"也正是现实里 DBA 唯一会批准的放行方式。
+        "MYSQL_SECURE_FILE_DIR": str(inst.get("pluginDir") or ""),
         # 本地回环不走代理
         "NO_PROXY": "127.0.0.1,localhost",
         "no_proxy": "127.0.0.1,localhost",

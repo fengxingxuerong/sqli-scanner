@@ -130,6 +130,24 @@ try {
   process.exit(2);
 }
 
+// 红队靶场是独立常驻进程（PG + 8231）。以前"没常驻"就 SKIP —— 于是这一格既不会红、也永远不测。
+// 现在缺就自己拉起来，跑完收掉；只有真起不动（典型：本机没有 PostgreSQL）才落回 SKIP 并写明原因。
+async function withRedteamLab(body) {
+  if (pre.redteamLab) return body();
+  console.log('    （红队靶场未常驻：自己拉起 env.mjs，跑完会收掉）');
+  const proc = spawn('node', ['e2e/redteam-lab/env.mjs'], { cwd: ROOT, stdio: 'ignore', shell: process.platform === 'win32' });
+  let up = false;
+  for (let i = 0; i < 60; i++) {
+    if (await portOpen(REDTEAM_PORT, '127.0.0.1', 1000)) { up = true; break; }
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  try {
+    return up ? await body() : { code: 0, out: '[SKIP] 自起红队靶场失败（120s 内 8231 未就绪，多半是缺 PostgreSQL）' };
+  } finally {
+    try { proc.kill(); } catch { /* 已退出 */ }
+  }
+}
+
 // ── 套件定义：assert 只吃「事实数字」，不看套件自报的 PASS 字样 ─────────────────
 const SUITES = [
   {
@@ -304,26 +322,27 @@ const SUITES = [
   {
     id: 'redteam',
     title: '红队实战评测（ground-truth 真值对照 + sqlmap 同题）',
-    needs: ['redteamLab'],
-    optional: true, // 依赖独立常驻靶场（npm run lab:redteam），CI 外不强制
+    needs: [],          // 自己会拉起 env（缺 PG 时才落回 SKIP），不再要求外部常驻
+    optional: true,     // 起不动时算 SKIP（环境常态），不判红
     heavy: true,
-    // 顺序：重建地面真值 → 调参口径扫描 → 汇总（含 sqlmap 对照）
-    // 不跑 selftest（它会重写真值表），只跑扫描 + 由 gate-check 直接读文件算准确率
-    run: () => run('node', ['e2e/redteam-lab/run-scan.mjs', 'r2']).then(() =>
-      run('node', ['e2e/redteam-lab/gate-check.mjs', 'r2'])
-    ),
+    // 顺序：调参口径扫描 → 由 gate-check 直接读文件算准确率
+    // 不跑 selftest（它会重写真值表）
+    run: () => withRedteamLab(async () => {
+      await run('node', ['e2e/redteam-lab/run-scan.mjs', 'r2']);
+      return run('node', ['e2e/redteam-lab/gate-check.mjs', 'r2']);
+    }),
     assert: (out) => {
-      // 只吃事实数字：R2 命中/总数、sqlmap 命中/总数、误报数
-      // 直接吃 gate-check 算好的真值数字（分母只含已确认 vuln，误报只数 safe）
-      const hit = num(/\[redteam\] round=r2 vuln=(\d+) hit=(\d+) rate=(\d+)% safe=(\d+) fp=(\d+)/, out, 2);
-      const total = num(/\[redteam\] round=r2 vuln=(\d+) hit=(\d+) rate=(\d+)% safe=(\d+) fp=(\d+)/, out, 1);
-      const pct = num(/\[redteam\] round=r2 vuln=(\d+) hit=(\d+) rate=(\d+)% safe=(\d+) fp=(\d+)/, out, 3);
-      const safeN = num(/\[redteam\] round=r2 vuln=(\d+) hit=(\d+) rate=(\d+)% safe=(\d+) fp=(\d+)/, out, 4);
-      const fp = num(/\[redteam\] round=r2 vuln=(\d+) hit=(\d+) rate=(\d+)% safe=(\d+) fp=(\d+)/, out, 5);
+      // 自起失败（典型：本机没 PG）→ 报 SKIP 而不是 FAIL：没测过不该判红，但也不能算通过
+      if (/\[SKIP\]/.test(out) && !/\[redteam\] round=r2/.test(out)) {
+        return { pass: false, skipped: true, skipReason: (/\[SKIP\] (.+)/.exec(out) || [, '红队靶场未就绪'])[1].trim() };
+      }
+      // 只吃事实数字：gate-check 算好的真值（分母只含已确认 vuln，误报只数 safe 点）
+      const m = /\[redteam\] round=r2 vuln=(\d+) hit=(\d+) rate=(\d+)% safe=(\d+) fp=(\d+)/.exec(out) || [];
+      const [, total, hit, pct, safeN, fp] = m;
       return {
-        facts: { 检出: `${hit}/${total}`, 检出率: `${pct}%`, 安全点: safeN, 误报: fp },
-        pass: total > 0 && pct != null && pct >= 90 && fp === 0,
-        reason: fp ? `安全点误报 ${fp} 个` : pct == null ? '未取到 gate-check 判据' : `检出率仅 ${pct}%`,
+        facts: { 检出: `${hit}/${total}`, 检出率: pct == null ? null : `${pct}%`, 安全点: safeN, 误报: fp },
+        pass: Number(total) > 0 && pct != null && Number(pct) >= 90 && Number(fp) === 0,
+        reason: fp && Number(fp) > 0 ? `安全点误报 ${fp} 个` : pct == null ? '未取到 gate-check 判据（输出格式变了？）' : Number(pct) < 90 ? `检出率仅 ${pct}%` : null,
       };
     },
   },
@@ -331,16 +350,27 @@ const SUITES = [
     id: 'file-read',
     title: 'fileRead 真闭环',
     needs: ['secure_file_priv'],
-    // optional：secure_file_priv 未放行属 MySQL 8 默认环境（NULL），此时脚本自身即输出 SKIP；
-    // 这类「环境可选依赖」缺失不影响门禁结论，与「必需依赖缺失」必须区别对待。
     optional: true,
-    run: () => run('node', ['e2e/fileops/exploit-file-read.e2e.mjs'], { ...envDb, PENTEST_LAB_PORT: String(PORT_BASE + 2) }),
+    // [SELF-HEAL 2026-09-19] 宿主 mysqld 没放行 secure_file_priv 时不再直接 SKIP：
+    // 改用仓库自带的隔离 MySQL 沙箱重试一次（沙箱把 secure_file_priv 指到自己的 plugin 目录，
+    // 套件会把标记文件放进那个目录）。2026-09-19 实测：两套件在沙箱内均真跑 PASS。
+    // 只有"沙箱也起不来"（缺 python / 缺 mysqld 二进制）才落到 SKIP，并写清缺什么。
+    run: async () => {
+      const r1 = await run('node', ['e2e/fileops/exploit-file-read.e2e.mjs'], { ...envDb, PENTEST_LAB_PORT: String(PORT_BASE + 2) });
+      if (!/\[SKIP\]/.test(r1.out)) return r1;
+      const r2 = await run('python', ['e2e/run-with-sandbox.py', 'e2e/fileops/exploit-file-read.e2e.mjs'], {}, 600000);
+      return { ...r2, out: `${r1.out}\n—— 宿主未放行，改用隔离沙箱重试 ——\n${r2.out}` };
+    },
     assert: (out) => {
-      const passed = /\[PASS\] fileRead/.test(out);
-      const skipped = /\[SKIP\]/.test(out);
+      // 走过沙箱重试时，判定只看**重试那一段**：否则第一次的 [SKIP] 文案会和最终的 [PASS] 混在
+      // 同一行事实里，报出「PASS=true SKIP=true」这种看着就自相矛盾的东西。
+      const tail = out.includes('改用隔离沙箱重试') ? out.split('改用隔离沙箱重试 ——').pop() : out;
+      const viaSandbox = tail !== out;
+      const passed = /\[PASS\] fileRead/.test(tail);
+      const skipped = /\[SKIP\]/.test(tail);
       // [SKIP-FIX 2026-09-19] 只跳过、未执行断言时不再报 PASS（见下面 skippedOnly 的处理）。
       const v = {
-        facts: { PASS: passed, SKIP: skipped },
+        facts: { PASS: passed, SKIP: skipped, 方式: viaSandbox ? '隔离沙箱重试' : '宿主实例' },
         pass: passed || skipped,
         reason: skipped ? null : passed ? null : '断言未通过',
       };
@@ -356,14 +386,22 @@ const SUITES = [
     title: 'fileWrite 真闭环（文件系统侧断言）',
     needs: ['secure_file_priv'],
     optional: true,
-    run: () => run('node', ['e2e/fileops/exploit-file-write.e2e.mjs'], { ...envDb, PENTEST_LAB_PORT: String(PORT_BASE + 3) }),
+    // 与 fileRead 同一套自愈路径：宿主没放行 → 隔离沙箱重试（实测沙箱内真跑 PASS）。
+    run: async () => {
+      const r1 = await run('node', ['e2e/fileops/exploit-file-write.e2e.mjs'], { ...envDb, PENTEST_LAB_PORT: String(PORT_BASE + 3) });
+      if (!/\[SKIP\]/.test(r1.out)) return r1;
+      const r2 = await run('python', ['e2e/run-with-sandbox.py', 'e2e/fileops/exploit-file-write.e2e.mjs'], {}, 600000);
+      return { ...r2, out: `${r1.out}\n—— 宿主未放行，改用隔离沙箱重试 ——\n${r2.out}` };
+    },
     assert: (out) => {
-      const passed = /\[PASS\] fileWrite/.test(out);
-      const skipped = /\[SKIP\]/.test(out);
-      const landed = /文件存在=true/.test(out);
+      const tail = out.includes('改用隔离沙箱重试') ? out.split('改用隔离沙箱重试 ——').pop() : out;
+      const viaSandbox = tail !== out;
+      const passed = /\[PASS\] fileWrite/.test(tail);
+      const skipped = /\[SKIP\]/.test(tail);
+      const landed = /文件存在=true/.test(tail);
       // [SKIP-FIX 2026-09-19] 同 fileRead：只跳过就报 SKIP，不再冒充通过。
       const v = {
-        facts: { PASS: passed, SKIP: skipped, 文件落盘: landed },
+        facts: { PASS: passed, SKIP: skipped, 文件落盘: landed, 方式: viaSandbox ? '隔离沙箱重试' : '宿主实例' },
         pass: passed || skipped,
         reason: passed ? null : skipped ? null : '文件未落盘或断言失败',
       };

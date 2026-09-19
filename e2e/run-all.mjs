@@ -52,6 +52,15 @@ const LABS = [
   { name: 'concurrent-isolation', desc: '并发多扫描隔离性（PG+MySQL 混扫不串扰）', entry: 'e2e/concurrent-isolation/e2e.mjs', deps: ['pg', 'sandbox'] },
   { name: 'csrf-lab', desc: 'CSRF 防护目标闭环（取页 token → 携带 → 检出）', entry: 'e2e/csrf-lab/e2e.mjs', deps: ['sandbox'] },
   { name: 'crawl-lab', desc: '--crawl/--forms 攻击面发现真机闭环（scope 纪律）', entry: 'e2e/crawl-lab/e2e.mjs', deps: ['sandbox'] },
+  // 文件读写闭环：宿主 mysqld 默认 secure_file_priv=NULL → 直跑只能 SKIP。
+  // 走沙箱就有救：沙箱把 secure_file_priv 指到自己的 plugin 目录，套件把标记文件放进去
+  // （MYSQL_SECURE_FILE_DIR 由 run-with-sandbox.py 注入）→ 2026-09-19 实测两套件均真跑 PASS。
+  // 「限定一个目录」也正是现实里 DBA 唯一会批准的放行形态，比全局放行更贴近真实。
+  { name: 'file-read', desc: 'fileRead 真闭环（UNION → LOAD_FILE → 逐字节回读）', entry: 'e2e/fileops/exploit-file-read.e2e.mjs', deps: ['sandbox'] },
+  { name: 'file-write', desc: 'fileWrite 真闭环（INTO OUTFILE → 文件系统侧确认）', entry: 'e2e/fileops/exploit-file-write.e2e.mjs', deps: ['sandbox'] },
+  // 随机化真值电池：案例由种子生成（一半注入一半良性），报召回的 **Wilson 95%CI 下界**而不是
+  // 一个分数。存在的意义就是提醒"13/13"那种小样本口径撑不起"检出率 100%"这句话。
+  { name: 'random-battery', desc: '随机化真值电池（召回 CI 下界 + 良性零误报）', entry: 'e2e/random-lab/battery.mjs', deps: ['sandbox'] },
   { name: 'mssql-lab', desc: 'SQL Server 真机全链路（num/str 双上下文三通道）', entry: 'e2e/mssql-lab/e2e.mjs', deps: ['mssql'] },
   { name: 'mssql-oshell', desc: 'MSSQL xp_cmdshell os-shell 真机闭环（含 auto-enable）', entry: 'e2e/mssql-lab/osshell.e2e.mjs', deps: ['mssql'] },
   { name: 'mssql-dump', desc: 'MSSQL 拖库正确性（string_agg/OFFSET-FETCH 方言真机）', entry: 'e2e/mssql-lab/dump.e2e.mjs', deps: ['mssql'] },

@@ -271,6 +271,17 @@ jobs:
           MYSQL_PORT: 3306
           MYSQL_USER: root
           MYSQL_PASSWORD: root
+      # [P1-ADD 2026-09-19] 随机化真值电池：案例按种子生成（一半注入、一半结构良性），
+      # 报的是召回率的 **Wilson 95% 置信区间下界**，不是"13/13"那种小样本分数。
+      # 它同时自带一道诚实闸：每个"注入案例"先用一对已知真假探针自证可观测，
+      # 按构造发现不了的（如 3 行数据上的 ORDER BY 布尔差分）剔出分母并单列 —— 不让分母掺假。
+      - name: 随机化真值电池（召回 CI 下界 + 良性零误报）
+        run: node e2e/random-lab/battery.mjs --cases=40 --seed=20260919
+        timeout-minutes: 18
+        env:
+          MYSQL_PORT: 3306
+          MYSQL_USER: root
+          MYSQL_PASSWORD: root
       - uses: actions/upload-artifact@v4
         if: always()
         with:

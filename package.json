@@ -28,6 +28,7 @@
     "waf-rules:verify": "node scripts/fetch-crs-assets.mjs --verify-rules",
     "tamper:parity": "node scripts/verify-tamper-parity.mjs",
     "tamper:parity:refresh": "node scripts/verify-tamper-parity.mjs --refresh",
+    "lab:battery": "node e2e/random-lab/battery.mjs",
     "e2e:file-read": "node e2e/fileops/exploit-file-read.e2e.mjs",
     "e2e:file-write": "node e2e/fileops/exploit-file-write.e2e.mjs",
     "tauri": "tauri",
