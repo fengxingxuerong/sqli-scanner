@@ -58,6 +58,17 @@
 | sidecar 冒烟 | exe 起服务 + 一次性 token + **空目录下真扫 SQLite 检出 3 条**（含负向验证） |
 | Rust 门禁（本地） | `cargo fmt --check` 通过（修 2 处）；`cargo clippy -- -D warnings` 0 warning |
 
+> **口径注记（2026-09-19 补，不改上表的存档值）**：上表有两行的**判定口径**后来被证明有问题，
+> 记录值按"存档不改"原则保留，口径变更在此说明。
+> ① 「11 PASS / 0 SKIP」：按 README 当时的记载，那次跑在 `secure_file_priv=''` 的放行实例 + 红队靶场
+> 常驻环境上，若记载属实则三个 SKIP 位是真跑过的；但**判定逻辑本身不可信** —— 当时
+> `acceptance.mjs` 用 `pass: passed || skipped`，只输出 SKIP、一行断言都没跑的套件同样计入 PASS。
+> 2026-09-19 同一份代码在本机默认环境复跑就是证据：它报「11 PASS」，实为 **8 PASS / 3 SKIP**。
+> 现已改为 `PASS / SKIP / BLOCKED / FAIL` 四态分列。
+> ② 「ESLint 全量 0 error」是**带着 9 条 e2e 目录/文件级 ignore** 测的（含门禁总控 `e2e/acceptance.mjs`
+> 自己被排除在外）；ignore 撤掉后暴露 25 条 `no-unused-vars`（含一个真实缺陷：ntlm 靶场脚本里 `reject`
+> 未声明），已全部清零。详见 `CHANGELOG.md` 的「门禁可信度：掐掉两条假绿」。
+
 复现：`npm run acceptance`（需 MySQL）、`node e2e/diag/release-smoke.mjs`、
 `node e2e/diag/security-guardrails.e2e.mjs`、`npm run build:sidecar`、
 **`npm run check:all`**（一条命令跑齐 ESLint + 前后端 tsc + 架构门禁 + Rust fmt/clippy）。

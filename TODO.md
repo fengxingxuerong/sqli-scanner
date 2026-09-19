@@ -13,31 +13,45 @@ r2 档黑盒 9/13 → 13/13，A3-like 从 time 变 union+boolean。
 
 本批实测顺手暴露、**尚未处理**的四项（按性价比排序）：
 
-### A. P1-D 的真实危害面比「20 处冲突」这句话更具体（未修）
+### A. P1-D 的真实危害面比「20 处冲突」这句话更具体（H2 已修，余下待办见文末）
 `node e2e/blackbox-lab/check-dbms-sig.mjs` 报 20 处 sig 冲突，其中**可执行**的那几条才是真风险
 （冲突要成立，前提是「A 库的版本函数在 B 库上也能跑」）：
-- `MySQL.sig = /^\d+\.\d+\.\d+(?!.*MariaDB).*$/` 会吞掉 **H2 / ClickHouse / HSQLDB** 的
-  `version()` 回显（这三家都真的有 `version()`），且遍历顺序 MySQL 在前 → 真 H2/CH 目标
-  会被定成 MySQL，payload 族整体错配。
+- `MySQL.sig = /^\d+\.\d+\.\d+(?!.*MariaDB).*$/` 会吞掉任何「裸三段版本号」回显 → 若别家库的版本串
+  能从 MySQL 那条探针回显出来，就会被定成 MySQL（payload 族整体错配）。
+  **但 2026-09-19 的真引擎实测把这条降级了**：MySQL/MariaDB/PG/TiDB/ClickHouse 五条探针各自带的 WRAP
+  （`CAST(x AS CHAR)` 等）在 H2 / HSQLDB / Derby 三台上**全部报错、无标记回显**（18/18 echo=N），
+  所以「MySQL 抢走别家裸版本号」在这三台上不可达。其余库（真 PG/CH/MSSQL）未测，不作断言。
+  （H2 原本也被列进这条，实测**不成立**：H2 根本没有 `version()` 标量函数，见下方撤回。）
 - `Sybase.sig = /(Adaptive Server|Sybase|ASE)/i` 的 `ASE` **没有词边界**，
   Oracle 的 banner「Rel**ease** 19.0.0.0.0」直接命中 —— 与 L46 那次 `Server: BaseHTTP` 含
   "ase" 误判 Sybase 是同一个坑（那次只修了 `FINGERPRINT` 头签名，DB_VERSION 与报错签名两处没同步）。
 
-**2026-09-19 补：这条已经从"理论冲突"变成实测后果。** 本批修掉版本回显通道的回显污染
-（`DBFingerprinter` 取 `__S__…__E__` 前先剔回显）之后，那条通道在回显型目标上**第一次真的工作起来了**，
-于是 `MySQL.sig` 吞 H2 的问题当场现形：`e2e/multi-engine-lab`（真 JDBC 内存库 × CRS）
-H2 / HSQLDB / Derby 三台的 union 从 `num`+`blind` 两处**搬到了 `str`**（每引擎技术位总数不变，
-安全对照仍 0 误报）。归因：H2 的 `version()` 返回 `2.2.224 (2023-09-17)`，命中 MySQL 的
-裸版本号 sig → 定库 MySQL → 按 MySQL 族投放（`#` 注释、`CONCAT` 等 H2 不吃）→ num/blind 的
-union 掉，而 str 因闭合探测被修好反而补回 union。
-**修法（已验证思路，未实施）**：给有**专属版本函数**的库把 func 换成 exclusive 形态并排到 MySQL 之前
-—— H2 用 `H2VERSION()`（本仓 `e2e/blackbox-lab/diag-l2-probe.mjs` 已在用它做 L2 探针）、
-ClickHouse 用 `version()` + CH 专属伪表交叉确认；MySQL 上执行 `H2VERSION()` 只会报错、无标记回显，
-代价是每目标多一次探针。改时要同步 `server/tests/dbmsExtend6.test.js` 里对 `DB_VERSION[*].func`
-的字面断言。
-- **验收口径**：`check-dbms-sig.mjs` 零退出；并补一条「A 库函数在 B 库上不可执行则不算冲突」的
-  跨库可执行性矩阵，让自检报的是**可执行冲突**而不是理论冲突（现在 20 条里绝大多数打不到）；
-  multi-engine-lab 三台的 `num`/`blind` union 应随定库修正回来。
+**2026-09-19 补（含一次撤回）：这条已从"理论冲突"进到实测，但我当时的归因是错的。**
+先更正：我写过「H2 的 `version()` 返回 `2.2.224 (2023-09-17)` 命中 MySQL 的裸版本号 sig → 真 H2 被定成
+MySQL」—— **这句是错的，实际测到的是定库失败（dbms=null），不是定成 MySQL。** A/B 数据（真 JDBC 内存库
+H2 2.2.224，`{waf:false}` 才跑得通，见下）：
+- 修复前（H2 在遍历末尾 + `func:'version()'`）：18 条探针**全部** `echo=N` → `dbms=null`。
+  原因：H2 没有 `version()` 标量函数，而 MySQL 系 WRAP 用的是 `CAST(x AS CHAR)`，H2 直接报错 → 无标记回显。
+  也就是说「MySQL 抢走 H2 版本串」这条路径在这台真 H2 上**根本不可达**，我把它当成了观测结果。
+- 修复后（H2 前置 + `func:'H2VERSION()'`）：`verFp H2 echo=Y 取到值="2.2.224" sig命中=true` → `dbms=H2`。
+- 反向确认（真 MySQL 8.0.28，blackbox-lab r2 三点）：`A1-numeric / A3-like / C2-blindtime` 全部
+  `dbms=MySQL`、3/3 HIT、0 误报 —— 前置的 H2 条目不会抢 MySQL。
+
+**已实施**（本批）：`server/src/engine/payloads/index.js` 的 `DB_VERSION.H2` 换成 exclusive 的
+`H2VERSION()` 并排到 MySQL 之前（与 `extractionMaps.js:408` 早已用 `H2VERSION()` 对齐）；单测侧把
+「假引擎能执行哪些探针表达式」显式建模（`boundary.echoTarget.test.js` 新增正/反两条 exclusive 守卫，
+`fingerprint.mariadb.test.js` 的 mock 加 `supportedFuncs`）—— 不给这层，mock 等于「谁探测都回同一个
+版本」，会把真实判据（跑不动 → 无回显）抹平，这正是刚才那次错误归因的来源。
+
+- **验收口径（部分已达）**：真引擎 A/B ✅、真 MySQL 回归 ✅、相关单测 58/58 ✅。仍欠两条：
+  1. `check-dbms-sig.mjs` 的 20 处冲突是 **sig 层**口径、不等于运行时误判数（脚本头已写明口径边界）；
+     要报「可执行冲突」得补跨库可执行性矩阵，尚未做。
+  2. 本批新暴露：`e2e/multi-engine-lab` **默认开着 CRS**，UNION 哨兵探针整条被 403 →
+     版本回显定库通道在该靶场上从未执行（这就是为什么它"没现形"）。要么给 `verify.mjs` 加一档
+     `waf:false`，要么在报告里写清"本靶场只覆盖 boolean 通道"。
+  3. 同批实测：HSQLDB / Derby 两台在**关掉 WAF** 后仍 `18/18 echo=N → dbms=null`，即这两台的版本回显
+     定库整条失效（各自的 WRAP/伪表问题，与 H2 无关）。README 的分层措辞（「3 种部分通道验证」）不用改，
+     但"这三家的**定库**都可用"不成立：三台里只有 H2 现在能被版本回显定库。
 
 ### B. `binaryProbe` 的 `capped` 在长度链路上被忽略（未修）
 `docs/统一探测判据-设计.md` 3.3 明确要求「拿到 capped=true 不得当正常结果用」；
@@ -72,22 +86,31 @@ ClickHouse 用 `version()` + CH 专属伪表交叉确认；MySQL 上执行 `H2VE
 同一天还按 ci.yml 的 job 顺序做了本机等价全量跑（`npm run ci:local`，17 段：15 PASS / 1 FAIL / 0 SKIP，
 唯一稳定红的是 G 条那个 concurrent-isolation）。
 
-### F. README 的 WAF 绕过口径已经过期（**待重定基线**，2026-09-19 实测）
-README「WAF 绕过能力实测口径」那行写的是 2026-09-10 复测的 **tamper off 2/5 → on 10/5 技术位**、
-自动路径 **11 技术位**。今天（2026-09-19）整跑 acceptance 实测到的是 **on=8、auto=8**，
-丢的两格都在 `num` 与 `blind` 的 union 上（`e2e/waf-real/results/waf-real-report.json`：
-两点的 `on.found` 都只剩 `[boolean]`，dbms=null）。
+### F. README 的 WAF 绕过口径已经过期（**已重定为 8/8 并定位到规则号**，2026-09-19）
+README 原写 2026-09-10 复测的 **tamper off 2/5 → on 10/5 技术位**、自动路径 **11 技术位**。
+本批整跑 acceptance 一次 + 单独复跑两套件一次，两次都是 **on=8、auto=8**。量纲也修了：
+`N/M` 那个分数把「技术位合计」和「场景数」混在一起（README 于是抄成「10/5」），现打印
+「技术位合计 8（5 个注入场景，每场景可有多个技术位）」，`acceptance.mjs` 的解析同步跟上；
+`waf-auto-check.mjs` 里写死的「人工 dash2hash 基线 = 10」改成从 `waf-real-report.json` 现读
+（写死的对照数不会随被测代码变化，等于长期说谎）。丢的两格都在 `num` 与 `blind` 的 union。
 
-**已排除本批改动**：只把本轮动过的 4 个引擎文件回退到改动前（`git checkout ebc660a^ --
-payloads/index.js DBFingerprinter.js Detector.js ScanManager.js`）、其余保持不变，重跑
-同两个场景 → 结果一字不差（`[boolean]`、被拦 62 vs 61 请求）。所以这是**更早批次**的
-某次改动吃掉的两格，一直没人复测才发现。
+**归因（逐条手工发探针：真 MySQL 8.0.28 × CRS，规则号可复核）**：
 
-要做的两件事：
-1. 归因：在 09-10 之后的提交里二分定位是哪一次掉的（候选：phase3 预筛选/时间探针、
-   binaryProbe 迁移、`_fingerprintCached` 之前的列数缓存改动）；
-2. 若确认是**合理代价**（例如为压低请求数而收严了投放），就把 README 那行的数字与
-   日期一并重定；若是缺陷，修完再重测。**在归因完成前，对外不要引用 10/11 这两个数**。
+| 探针 | 结果 | 规则 |
+|---|---|---|
+| `1 ORDER BY n-- -` | 403 | 942460（4 连非词字符） |
+| `1 UNION SELECT NULL,…`（尾 `-- -` / `-- ` / `#` 三形态都试） | **全部 403** | **942361**（UNION SELECT 短语） |
+| `1 UNION SELECT 'SQLISCANNER…'` | 403 | 942200（单引号字面量） |
+| `alice' UNION SELECT NULL,…#`（字符串上下文） | **200** | 未命中 |
+
+即：**同一条 UNION 探针，数值上下文被 942361 拦、字符串上下文放行**；而 `dash2hash` 只规整尾部注释符，
+对 942361 无效。所以这两格不是"判据判错"，是**请求在 WAF 层就到不了数据库**。
+本批改动已排除（把动过的 4 个引擎文件回退到 `ebc660a^` 重跑，结果逐字相同）。
+至于 09-10 那次为什么算进过 10：`e2e/waf-real/results/` 不入库、旧报告没留档，**已无从核对**；
+有一条可检验的猜测 —— 当时的链含 `space2comment`，`UNION/**/SELECT` 正好拆开 942361 要的相邻性，
+而 `/**/` 同为 4 连非词字符会触发 942460，于是它被摘掉（见 `waf-verify.mjs` 的「组合修正」注释），
+**摘它的同时带走了这两格**，而 README 的数字没人跟着复测。本条按「合理代价 + 口径下修」结案，
+不做"退化了 2 位"的断言。正面把这两格拿回来另立 I 条。
 
 顺带记录一个门禁自身的假红（已修）：`acceptance.mjs` 的「服务端单测」套件按 TAP 汇总行取数，
 但 node:test 的 reporter 选型随 TTY 探测漂移 → 本机子进程走管道时输出 spec 格式 →
@@ -111,6 +134,23 @@ payloads/index.js DBFingerprinter.js Detector.js ScanManager.js`）、其余保�
 `sys_eval('cmd /c echo <ASCII marker>')` 偶发捕获为空时，step6 的 note 固定写
 「典型：Windows 本地化 whoami 的 GBK 输出」。marker 是纯 ASCII，这句话把人往编码方向带，
 而实际形态是**输出捕获为空**。改成按实测分支给原因（空捕获与"不可字符化"是两回事）。
+
+### I. 严格档 CRS 下数值点的 union 怎么拿回来（未做，本批已把可行/不可行分开）
+F 条的探针表给出：**换分隔符这条路对 942361 完全无效**（`/**/`、`%0a`、`%09`、双空格、`UNION ALL`
+八种形态全部 403，且这些形态不套 WAF 时 MySQL 全部正常执行）。原因是该规则的判据是
+`^[\W\d]+\s*?(?:alter|union)\b` —— 打的是**参数值起始形状**，不是 UNION/SELECT 相邻性。
+数值点 `id=1…` 必然以数字开头 → 命中；`alice'…` 以字母开头 → 不命中。
+可做的两条（都要实测，别再抄"sqlmap 这么干"）：
+1. **改起始形状**：让投放值不以 `[\W\d]` 直接接 `union`。候选是 `space2plus`/`spatialessuffix`/
+   `versionedmore` 这类，或在数值前拼一个词字符再靠 SQL 语义消化掉（`1x` 非法；`1/*x*/UNION`… 需实测）
+   —— 先写一条 `e2e/waf-real/probe-*-shape.mjs` 单点探针（纯发请求，几秒出结果）筛掉无效形态。
+2. **换档测量**：942361 官方注释写明属 **PL2**，而 `e2e/waf-real/crs-engine.js` 默认全规则（≈PL3 最严档）。
+   `evaluate(req, { paranoiaLevel })` 已有参数，只是各靶场的中间件调用处没传 → 加一个 `CRS_PL` 环境变量，
+   把 **PL1（CRS 默认部署档）** 的绕过率一并测出来。现在 README 的 8/8 只有最严档，
+   拿它当"典型线上值"会**低估**自己在真实默认部署下的表现（也会低估对手）。
+
+验收：任一形态让 `num`/`blind` 的 `on.found` 出现 `union`，且 `safe`/`echo` 两个对照仍零误拦；
+或 README/评估报告里同时给出 PL1 与 PL3 两档数字。
 
 ---
 

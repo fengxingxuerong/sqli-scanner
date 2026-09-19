@@ -41,10 +41,56 @@
 
 - blackbox-lab（真 MySQL 8.0.28，22 靶点）：实战档 r2 **9/13 → 13/13**，默认档 r1 **10/13**，
   两档安全点误报均 **0/7**；A3-like 从「蹭误判才命中的 time」变成 `union+boolean`（风险 Medium→High）。
-- redteam-lab R1 18/19、R2 19/19、误报 0/7（零回归）；服务端单测 1885 用例 0 fail、前端 315/315、
+- redteam-lab R1 18/19、R2 19/19、误报 0/7（零回归）；服务端单测 1887 用例 0 fail、前端 315/315、
   `tsc` 0 错、eslint 0 error。
 - 工具链：`scripts/facts-sync.mjs` 采集服务端数字时显式钉 `--test-reporter=tap`
   （node:test 的 reporter 选型随 TTY 探测漂移 → 本地 `--refresh` 必失败）。
+
+### 定库判据：从「sig 能不能区分」换成「表达式只在自家库跑得动」
+
+- **H2 改用 exclusive 探针 `H2VERSION()` 并前置到 MySQL 之前**（`engine/payloads/index.js`）。
+  真引擎 A/B（`e2e/multi-engine-lab`，H2 2.2.224 经 JDBC，须 `{waf:false}` 才让 UNION 探针过靶场 CRS）：
+  修复前 18 条探针全部 `echo=N` → **`dbms=null`（定库失败）**；修复后
+  `verFp H2 echo=Y 取到值="2.2.224" sig命中=true` → **`dbms=H2`**。真 MySQL 8.0.28 三点
+  （`A1-numeric`/`A3-like`/`C2-blindtime`）仍全部 `dbms=MySQL`、3/3 检出、0 误报，前置不抢库。
+  与 `engine/extractionMaps.js` 早已使用的 `H2VERSION()` 对齐。
+- **一次公开更正**：本批先前把这条写成「H2 的 `version()` 回显命中 MySQL 的裸版本号 sig → 真 H2 被定成
+  MySQL」。实测**不成立**——H2 没有 `version()` 标量函数，MySQL 系 WRAP 的 `CAST(x AS CHAR)` 在 H2 上
+  直接报错，那条路径运行时不可达；实际症状是定库失败而非误判。`TODO.md` §A 已按实测改写并留证据。
+- 单测侧把「假引擎能执行哪些探针表达式」显式建模（`tests/boundary.echoTarget.test.js` 新增正/反两条
+  exclusive 守卫，`tests/fingerprint.mariadb.test.js` 的 mock 加 `supportedFuncs`）。不给这层，mock 等于
+  「谁探测都回同一个版本」，会把真实判据（跑不动 → 无回显）抹平 —— 上面那次错误归因正源于此。
+- 新测得的欠账（记录未修）：HSQLDB / Derby 两台**关掉 WAF** 后仍 `18/18 echo=N → dbms=null`，
+  即版本回显定库对这两台整条失效；`multi-engine-lab` 默认开着 CRS，UNION 哨兵探针全被 403，
+  该靶场从未跑到这条通道（见 TODO §A 验收口径 2/3）。
+
+### 门禁可信度：掐掉两条假绿
+
+- **`acceptance` 的 SKIP 不再算 PASS**（`e2e/acceptance.mjs`）：`pass: passed || skipped` 让
+  fileRead / fileWrite 在 `secure_file_priv=NULL`（MySQL 8 默认）时以「✅ PASS」进报告并计入顶部
+  汇总，一行断言都没跑却算通过，与同仓 `run-all.mjs` 的「跳过的不算通过」自相矛盾。现改为
+  `PASS / SKIP / BLOCKED / FAIL` 四态分列，SKIP 带原因、不进失败也不冒充通过。
+  本机默认环境实测：**8 PASS / 0 BLOCKED / 0 FAIL / 3 SKIP**（此前同一环境报的是「11 PASS / 0 SKIP」）。
+- **撤掉 9 条 eslint 目录/文件级 ignore**（`eslint.config.js`）：被挡住的包括门禁总控
+  `e2e/acceptance.mjs` 自己 —— 它因此从未被 lint 过，`tally is assigned but never used`、
+  `ntlm-lab` 里 `reject` 未声明（真实缺陷：靶场端口被占时抛 ReferenceError 而非可读错误）都没人看见。
+  纳回后 25 条 `no-unused-vars` 全部清零，`eslint .` 现 0 error / 6 warning、退出码 0。
+- **WAF 口径的量纲与写死基线**：`waf-verify.mjs` 原输出 `检出 ${det}/${total} 个技术位` 把「技术位合计」
+  与「场景数」塞进同一个分数（README 于是抄成「10/5」），改为「技术位合计 8（5 个注入场景…）」；
+  `waf-auto-check.mjs` 里写死的「人工 dash2hash 基线 = 10」改成从 `waf-real-report.json` 现读，
+  读不到就显示「未采集」。
+
+### 实测口径变化（WAF 绕过率下修，附规则级归因）
+
+- **对外数字从 10（人工挂链）/ 11（自动选链）下修到 8 / 8**（整跑 acceptance 一次 + 单独复跑一次，
+  两次一致）。丢的两格是 `num`/`blind` 的 union，**逐条手工探针定位到 CRS 规则原文**：
+  942361 是 `^[\W\d]+\s*?(?:alter|union)\b` —— 打的是**参数值起始形状**，数值点 `id=1…` 必命中、
+  `alice'…` 不命中；`/**/`、`%0a`、`%09`、双空格、`UNION ALL` 八种换分隔符形态全部 403，
+  而它们不套 WAF 时 MySQL 全部正常执行。`dash2hash` 只规整尾部注释符，对这条无效。
+  本批改动已排除（回退动过的 4 个引擎文件重跑，结果逐字相同）。
+- 另一层口径：942361 官方注释属 **PL2**，而本仓自实现执行器默认全规则（≈PL3 最严档）→
+  **8/8 是「最严档」数字，CRS 默认部署档（PL1）的绕过率未测**（TODO §I 已把两档测量列为待办）。
+  旧数字 10/11 无留档报告可核对，故只作口径下修，不断言"能力退化"。
 
 ## [1.1.0] - 2026-09-18
 
