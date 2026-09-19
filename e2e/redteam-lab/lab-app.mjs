@@ -275,7 +275,7 @@ function decodeSafe(v) {
     const raw = Number(req.query.id ?? 1);
     const id = Number.isFinite(raw) ? raw : 1;
     try {
-      const [rows] = await q('SELECT id,name,email FROM users WHERE id=?', true)
+      await q('SELECT id,name,email FROM users WHERE id=?', true)
         .catch(() => []);
       const [r] = await poolSafe.query('SELECT id,name,email FROM users WHERE id=?', [id]);
       const out = r;

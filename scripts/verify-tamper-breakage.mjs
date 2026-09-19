@@ -62,7 +62,7 @@ check('Type3：字段解析 + 独立重算 NT response 完全一致', () => {
   if (buf.readUInt32LE(8) !== 3) throw new Error('type != 3');
 
   const readF = (base) => ({ len: buf.readUInt16LE(base), max: buf.readUInt16LE(base + 2), off: buf.readUInt32LE(base + 4) });
-  const lmF = readF(12), ntF = readF(20), domF = readF(28), userF = readF(36), wsF = readF(44);
+  const lmF = readF(12), ntF = readF(20), domF = readF(28), userF = readF(36);
   if (lmF.len !== 24 || ntF.len !== 24) throw new Error(`lm/nt 长度错 lm=${lmF.len} nt=${ntF.len}`);
 
   const ntResponse = buf.subarray(ntF.off, ntF.off + 24);

@@ -24,7 +24,6 @@ const arg = (k, d) => {
   const hit = process.argv.find((a) => a.startsWith(`--${k}=`));
   return hit ? hit.slice(k.length + 3) : d;
 };
-const NOWAF = process.argv.includes('--nowaf');
 const LEVEL = Number(arg('level', 1));
 
 const PORT = 8153;

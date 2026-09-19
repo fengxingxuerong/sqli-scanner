@@ -26,7 +26,7 @@ const rateCovered = (m) => {
 };
 const fp = (m) => safes.filter(s => m[s.id]?.hit).length;
 const S1 = rate(r1m), S2 = rate(r2m), SM = rateCovered(smm);
-const FP1 = fp(r1m), FP2 = fp(r2m), FPSM = fp(smm);
+const FP2 = fp(r2m);
 
 // 评分：检出 50 / 误报 25 / 利用链 15 / 工程性 10
 const scoreDetect = Math.round(S2.pct / 100 * 50);
@@ -35,7 +35,6 @@ const EXPLOIT = Number(process.env.EXPLOIT_SCORE || 13); // 实测：--dbs/--tab
 const scoreEng = 8;
 const total = scoreDetect + scoreFp + EXPLOIT + scoreEng;
 
-const cell = (ok, text) => `<td class="${ok ? 'ok' : 'bad'}">${text}</td>`;
 const rows = gt.map(g => {
   const a = r1m[g.id] || {}, b = r2m[g.id] || {}, c = smm[g.id] || {};
   return `<tr>

@@ -1,11 +1,6 @@
 // 探测：通用注释形态（-- 尾空格）与 # 在 CRS v4.1.0 下的通过性对比
 // 目标：验证 commentcompact（-- - → -- ）作为全方言通用替代的可行性
 import { evaluate } from './crs-engine.js';
-import { pathToFileURL } from 'node:url';
-import { resolve } from 'node:path';
-
-const ROOT = resolve(import.meta.dirname, '../..');
-const { applyTampers } = await import(pathToFileURL(resolve(ROOT, 'server/src/core/tamper/applyTampers.js')).href);
 
 const SAMPLES = [
   "1' AND 1=1-- -",

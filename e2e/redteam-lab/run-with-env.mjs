@@ -26,14 +26,6 @@ const waitPort = (port, timeoutMs = 60000) =>
     tryOnce();
   });
 
-const envProc = (() => {
-  // [stability-FIX 2026-09-14] 已就绪复用（外部常驻模式）：实测 node spawn 出的 env.mjs
-  // 在扫描中段会无栈死亡（1/26、4/26、6/26 三次复现，死点随机；而 Start-Process 完全
-  // 独立起的同一 env.mjs 稳定满分 19/19——疑似 Windows 进程树/job 关联问题，待深挖）。
-  // 8231 已通时跳过自 spawn，直接复用外部常驻靶场；未就绪才自己拉起（CI 路径）。
-  // 注意：外部靶场可能带着上一轮的内存 store 残留，E15-second-order 已用唯一 sid 防串扰。
-  return { killed: true, kill() {} }; // 占位：真正 spawn 移至下方 try 内按需执行
-})();
 let envStarted = false;
 let envProcRef = null;
 

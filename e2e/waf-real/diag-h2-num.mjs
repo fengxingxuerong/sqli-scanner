@@ -2,10 +2,7 @@
 import { pathToFileURL } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createRequire } from 'node:module';
 
-const require = createRequire(new URL('../../server/package.json', import.meta.url));
-const { evaluate, fromExpress } = await import(pathToFileURL(resolve(dirname(fileURLToPath(import.meta.url)), './crs-engine.js')).href);
 const { ScanManager } = await import(pathToFileURL(resolve(dirname(fileURLToPath(import.meta.url)), '../../server/src/engine/ScanManager.js')).href);
 const { EngineBridgeClient, createMultiEngineApp } = await import(pathToFileURL(resolve(dirname(fileURLToPath(import.meta.url)), '../multi-engine-lab/lab-app.mjs')).href);
 
@@ -33,7 +30,6 @@ for (const x of v) {
   console.log('  evidence:', String(x.evidence || '').slice(0, 240));
 }
 // 报告里的点状态：确认 boolean 检测器到底跑到了哪一步
-const points = (rep.points || rep.targets || []).flat?.() || [];
 for (const p of (rep.points || [])) {
   console.log('point:', p.id, '| confirmed:', p.confirmed, '| technique:', p.technique, '| boundary:', JSON.stringify(p.boundary));
 }

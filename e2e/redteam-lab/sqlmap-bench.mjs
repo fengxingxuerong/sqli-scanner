@@ -3,7 +3,7 @@
 // 口径：--batch --level 1 --risk 1 --flush-session（与 sqli-scanner 默认档对齐）
 // ============================================================================
 import { spawn } from 'node:child_process';
-import { writeFileSync, readFileSync, existsSync } from 'node:fs';
+import { writeFileSync, readFileSync } from 'node:fs';
 
 const SQLMAP = 'C:\\Users\\Admin（无密码）\\AppData\\Local\\Programs\\Python\\Python39\\Scripts\\sqlmap.exe';
 const LAB = 'http://127.0.0.1:8231';

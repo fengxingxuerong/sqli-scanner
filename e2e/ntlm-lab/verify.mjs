@@ -8,10 +8,6 @@
 // 用法：node e2e/ntlm-lab/verify.mjs
 // ============================================================================
 import { createServer } from 'node:http';
-import { createRequire } from 'node:module';
-
-const require = createRequire(import.meta.url);
-const req = require; // 保持 CJS/ESM 路径解析一致
 
 const { httpClient } = await import('../../server/src/core/httpClient.js');
 const { NTLM_SIG_B64_PREFIX } = { NTLM_SIG_B64_PREFIX: 'TlRMTVNTUAAD' }; // Type3 签名 base64 前缀
@@ -78,9 +74,13 @@ const check = (cond, msg) => {
   else { console.log('❌ ' + msg); failures.push(msg); }
 };
 
-const port = await new Promise((resolve) => {
+// [LINT-FIX 2026-09-19] 原来只声明了 `(resolve)`，而下一行的 error 分支用了 `reject`
+// —— 靶场监听失败时这里抛的是 ReferenceError: reject is not defined（在 'error' 事件回调里，
+// 直接变成未捕获异常），既不是预期的 reject、也说不清失败原因。这个 bug 之所以活着：
+// e2e/ntlm-lab/** 当时整目录在 eslint 的 ignores 里，no-undef 从没报出来过（2026-09-19 已纳回）。
+const port = await new Promise((resolve, reject) => {
   server.listen(0, '127.0.0.1', () => resolve(server.address().port));
-server.on('error', (e) => reject(new Error(`靶场监听失败: ${e.message}`)));
+  server.on('error', (e) => reject(new Error(`靶场监听失败: ${e.message}`)));
 });
 const url = `http://127.0.0.1:${port}/`;
 

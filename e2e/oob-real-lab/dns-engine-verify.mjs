@@ -11,15 +11,12 @@
 import { pathToFileURL } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createRequire } from 'node:module';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 
-const require = createRequire(new URL('../../server/package.json', import.meta.url));
 const { ScanManager } = await import(pathToFileURL(resolve(dirname(fileURLToPath(import.meta.url)), '../../server/src/engine/ScanManager.js')).href);
 const { createMysqlOobLabApp } = await import(pathToFileURL(resolve(dirname(fileURLToPath(import.meta.url)), './mysql-lab-app.mjs')).href);
 const { oobReceiver } = await import(pathToFileURL(resolve(dirname(fileURLToPath(import.meta.url)), '../../server/src/core/oobReceiver.js')).href);
-const express = require('express');
 
 const LAB_PORT = 8172;
 const BASE = 'http://127.0.0.1:' + LAB_PORT;

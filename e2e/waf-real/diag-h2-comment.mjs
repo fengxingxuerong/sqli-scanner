@@ -2,9 +2,7 @@
 import { pathToFileURL } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createRequire } from 'node:module';
 
-const require = createRequire(new URL('../../server/package.json', import.meta.url));
 const { EngineBridgeClient, createMultiEngineApp } = await import(pathToFileURL(resolve(dirname(fileURLToPath(import.meta.url)), '../multi-engine-lab/lab-app.mjs')).href);
 
 const JAVA_BIN = process.env.JAVA_BIN || 'java';

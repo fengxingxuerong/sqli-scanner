@@ -5,7 +5,6 @@ import { pathToFileURL } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import http from 'node:http';
 
 const require = createRequire(new URL('../../server/package.json', import.meta.url));
 const express = require('express');
@@ -87,7 +86,6 @@ console.log(`   新扫描的点位: ${(rep2.points || []).map((p) => `${p.locati
 
 // 3) 断言
 const okPoints = (rep2.points || []).every((p) => p.param === sel.param);
-const okRequests = retestReqs < REQ_COUNT - before + 1; // 显著小于全扫（宽松断言：非首次全量）
 console.log(`\n断言：只保留目标点 ${okPoints ? '✅' : '❌'}；请求收敛 ${retestReqs < 500 ? '✅（' + retestReqs + ' 次）' : '❌'}`);
 server.close();
 process.exit(okPoints ? 0 : 1);

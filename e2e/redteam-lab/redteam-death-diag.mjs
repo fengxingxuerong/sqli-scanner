@@ -90,7 +90,6 @@ const scanCode = await new Promise((resolve) => {
   p.on('exit', (c) => { writeFileSync('e2e/redteam-lab/.diag-scan.log', out); resolve(c ?? 0); });
 });
 clearInterval(probeIv);
-const m = readScanTail();
 log(`run-scan exit=${scanCode} → ${readScanTail()}`);
 log(`8231 中途死亡: ${dead ? '是' : '否'}`);
 if (envProc.exitCode === null && !dead) log('（envProc 全程存活，诊断结束——本轮未复现，需多次采样）');

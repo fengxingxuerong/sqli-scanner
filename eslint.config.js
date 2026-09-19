@@ -24,18 +24,15 @@ export default [
       'src-tauri/**',
       '**/*.d.ts',
       '**/.trash/**',
-      // 一次性排障脚本（e2e/diag）：不入库也不参与 lint，否则 `eslint .` 永远带 7 条噪声 error
+      // 一次性排障脚本目录（e2e/diag）：不入库也不参与 lint
       'e2e/diag/**',
-      // e2e 测试脚本（子代理引入的 unused import 不阻塞主 CI）
-      'e2e/multi-engine-lab/**',
-      'e2e/ntlm-lab/**',
-      'e2e/oob-real-lab/**',
-      'e2e/redteam-lab/**',
-      'e2e/retest-lab/**',
-      'e2e/acceptance.mjs',
-      'e2e/sqli-labs/l46-fp-stage.mjs',
-      'e2e/waf-real/**',
-      'scripts/verify-tamper-breakage.mjs',
+      // [LINT-FIX 2026-09-19] 原先这里另有 9 条目录/文件级 ignore（multi-engine-lab / ntlm-lab /
+      // oob-real-lab / redteam-lab / retest-lab / waf-real / acceptance.mjs / l46-fp-stage /
+      // verify-tamper-breakage），理由是「子代理引入的 unused import 不阻塞主 CI」。
+      // 问题不在理由，在于**挡住的正是门禁自己**：`e2e/acceptance.mjs` 是全方位验收总控，
+      // 被整文件 ignore 后它的语法/未定义变量错误没人检查 —— 门禁脚本裸奔。
+      // 本批全部纳回并逐条清零（子代理 18 条 + 本批 7 条 no-unused-vars），目录级豁免只剩上面
+      // 那条 e2e/diag。**今后 lint 报错要修，不要再加 ignore**；真要豁免请精确到单个文件并写明理由。
       'fix-eslint.mjs',
       'logs/**',
       'server/logs/**',

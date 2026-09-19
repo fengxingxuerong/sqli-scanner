@@ -13,7 +13,7 @@ import { createRequire } from 'node:module';
 const _require = createRequire(new URL('../../server/package.json', import.meta.url));
 const express = _require('express');
 import { spawn } from 'node:child_process';
-import { resolve, dirname } from 'node:path';
+import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { evaluate, fromExpress } from '../waf-real/crs-engine.js';
 

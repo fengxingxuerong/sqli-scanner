@@ -1,5 +1,4 @@
 // [todo#39] L46 DBFingerprinter 逐阶段诊断 v2：定位 Sybase 误定库来源
-import { ScanManager } from '../../server/src/engine/ScanManager.js';
 import { DBFingerprinter } from '../../server/src/engine/DBFingerprinter.js';
 import { TargetParser } from '../../server/src/engine/TargetParser.js';
 import { createTarget } from '../../server/src/engine/models.js';
