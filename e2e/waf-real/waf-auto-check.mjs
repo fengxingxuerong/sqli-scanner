@@ -11,7 +11,7 @@ import { pathToFileURL } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { createMysqlLabApp } from '../real-mysql-lab/lab-app.js';
 
 const require = createRequire(new URL('../../server/package.json', import.meta.url));
@@ -99,6 +99,18 @@ writeFileSync(
   resolve(HERE, 'results', 'waf-auto-check.json'),
   JSON.stringify({ generatedAt: new Date().toISOString(), wafHits: WAF_HITS, techBits: bits, safeFalsePositive: falsePositive, rows }, null, 2)
 );
-console.log(`\n[auto] 自动绕过技术位合计 ${bits}（人工 dash2hash 基线 = 10）｜WAF 拦截 ${WAF_HITS} 次｜安全误报 ${falsePositive}`);
+// 人工挂链基线不再写死。原来这里是字面量「基线 = 10」，而 2026-09-19 复测实测是 8 ——
+// 写死的对照数不会随被测代码变化，等于长期说谎。改成从 waf-verify 落盘的报告里读；
+// 没跑过 waf-real 时明确显示「未采集」，不猜。
+let manualBaseline = '未采集（先跑 npm run waf-real）';
+try {
+  const rep = JSON.parse(readFileSync(resolve(HERE, 'results', 'waf-real-report.json'), 'utf8'));
+  const rows = Array.isArray(rep.summaryRows) ? rep.summaryRows : null;
+  if (rows?.length) {
+    const sum = (k) => rows.reduce((a, r) => a + ((r[k] || []).length), 0);
+    manualBaseline = `off=${sum('tamperOff')} on=${sum('tamperOn')}（${rep.generatedAt || '时间未知'}）`;
+  }
+} catch { /* 报告缺失即视为未采集 */ }
+console.log(`\n[auto] 自动绕过技术位合计 ${bits}（人工挂链基线：${manualBaseline}）｜WAF 拦截 ${WAF_HITS} 次｜安全误报 ${falsePositive}`);
 console.log('[auto] 结论：' + (bits >= 5 ? '自动路径生效 ✅' : '自动路径未生效 ❌'));
 process.exit(0);

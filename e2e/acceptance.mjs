@@ -232,8 +232,10 @@ const SUITES = [
     heavy: true,
     run: () => run('node', ['e2e/waf-real/waf-verify.mjs'], envDb),
     assert: (out) => {
-      const off = num(/\[tamper off\] 注入点检出 (\d+)\//, out);
-      const on = num(/\[tamper on\] 注入点检出 (\d+)\//, out);
+      // [口径修正 2026-09-19] waf-verify 的输出从「注入点检出 N/M 个技术位」（量纲混在一个分数里）
+      // 改成「技术位合计 N（M 个注入场景…）」，这里的解析同步跟上，否则 off/on 解析成 null 会误判 FAIL。
+      const off = num(/\[tamper off\] 技术位合计 (\d+)/, out);
+      const on = num(/\[tamper on\] 技术位合计 (\d+)/, out);
       const noFp = /安全对照误拦：无/.test(out);
       return {
         facts: { off, on, 安全对照误拦: !noFp },
@@ -295,7 +297,17 @@ const SUITES = [
     assert: (out) => {
       const passed = /\[PASS\] fileRead/.test(out);
       const skipped = /\[SKIP\]/.test(out);
-      return { facts: { PASS: passed, SKIP: skipped }, pass: passed || skipped, reason: skipped ? null : passed ? null : '断言未通过' };
+      // [SKIP-FIX 2026-09-19] 只跳过、未执行断言时不再报 PASS（见下面 skippedOnly 的处理）。
+      const v = {
+        facts: { PASS: passed, SKIP: skipped },
+        pass: passed || skipped,
+        reason: skipped ? null : passed ? null : '断言未通过',
+      };
+      if (skipped && !passed) {
+        v.skipped = true;
+        v.skipReason = 'secure_file_priv 未放行（MySQL 8 默认 NULL）→ 本套件未执行任何断言';
+      }
+      return v;
     },
   },
   {
@@ -308,7 +320,17 @@ const SUITES = [
       const passed = /\[PASS\] fileWrite/.test(out);
       const skipped = /\[SKIP\]/.test(out);
       const landed = /文件存在=true/.test(out);
-      return { facts: { PASS: passed, SKIP: skipped, 文件落盘: landed }, pass: passed || skipped, reason: passed ? null : skipped ? null : '文件未落盘或断言失败' };
+      // [SKIP-FIX 2026-09-19] 同 fileRead：只跳过就报 SKIP，不再冒充通过。
+      const v = {
+        facts: { PASS: passed, SKIP: skipped, 文件落盘: landed },
+        pass: passed || skipped,
+        reason: passed ? null : skipped ? null : '文件未落盘或断言失败',
+      };
+      if (skipped && !passed) {
+        v.skipped = true;
+        v.skipReason = 'secure_file_priv 未放行（MySQL 8 默认 NULL）→ 本套件未执行任何断言';
+      }
+      return v;
     },
   },
 ];
@@ -364,9 +386,27 @@ for (const s of selected) {
   const r = await s.run();
   // 断言只吃事实数字；子进程非零退出但断言通过（如脚本用退出码表达 SKIP）不判失败
   const verdict = s.assert(r.out);
-  const status = verdict.pass ? 'PASS' : 'FAIL';
+  // [SKIP-FIX 2026-09-19] 第三态：断言根本没执行就是 SKIP，不是 PASS。
+  // 原实现 `pass: passed || skipped` 让 fileRead / fileWrite 在 secure_file_priv=NULL 时以
+  // 「✅ PASS　PASS=false　SKIP=true」进报告并计入顶部「11 PASS」——一行断言都没跑却算通过，
+  // 与本仓 e2e/run-all.mjs 自己那句「跳过的不算通过」相互矛盾。
+  // optional 的原意保留：SKIP 不进 failed、不改退出码（环境常态不该让门禁红），
+  // 但必须数在 SKIP 名下（本机现状：9 PASS / 2 SKIP，而不是 11 PASS / 0 SKIP）。
+  const skippedOnly = verdict.skipped === true;
+  const status = skippedOnly ? 'SKIP' : verdict.pass ? 'PASS' : 'FAIL';
   const reason = verdict.pass ? null : verdict.reason || `断言未通过（退出码 ${r.code}）`;
-  results.push({ ...s, status, facts: verdict.facts, reason, code: r.code, out: r.out });
+  results.push({
+    ...s,
+    status,
+    facts: skippedOnly ? { 原因: verdict.skipReason || '环境不满足，未执行断言' } : verdict.facts,
+    reason: skippedOnly ? null : reason,
+    code: r.code,
+    out: r.out,
+  });
+  if (skippedOnly) {
+    console.log(`SKIP  原因：${verdict.skipReason || '环境不满足，未执行断言'}`);
+    continue;
+  }
   // [DIAG-FIX 2026-09-19] 失败时必须把该套件的原始输出留在盘上。
   // 此前 assert() 只回传「事实数字」，报告里就只剩一行 `服务端单测 fail=1` —— 到底是哪一条用例
   // 失败，得自己再手跑一遍才知道；而实测恰恰是这么丢的：acceptance 里 1883 pass / 1 fail，
@@ -432,8 +472,8 @@ for (const r of results) {
 }
 // [WIRE-FIX 2026-09-19] 用 tally()。上一批提交（381afdb）写好了 tally() 却没接上调用点，
 // 于是终端仍输出合并版「N FAIL」—— 与它自己上方刚打的 ⛔ BLOCKED 标签依旧矛盾，
-// 也就是那条"BLOCKED 与 FAIL 分列"的修复实际没生效。e2e/acceptance.mjs 在 eslint 的 ignores
-// 里（第 35 行），所以 `tally is assigned but never used` 这条 error 谁也没看见。
+// 也就是那条"BLOCKED 与 FAIL 分列"的修复实际没生效。e2e/acceptance.mjs 当时在 eslint 的 ignores
+// 里（该目录级 ignore 已于 2026-09-19 撤掉），所以 `tally is assigned but never used` 这条 error 谁也没看见。
 console.log(`\n${tally()}`);
 console.log(`报告：e2e/results/acceptance-report.md`);
 process.exit(failed.length ? 1 : 0);

@@ -1,7 +1,7 @@
 // ============================================================================
 // e2e/waf-real/waf-verify.mjs —— 真实 WAF 实测：OWASP CRS v4.1.0 官方规则 × 真实 MySQL 8.0.28
 // 用法：node e2e/waf-real/waf-verify.mjs
-// 矩阵：引擎 tamper off / tamper on（space2comment+commentbeforeparentheses+charencode）
+// 矩阵：引擎 tamper off / tamper on（on 档实投 ['dash2hash']，见下方 TAMPERS 的口径修正注释）
 //       × 场景（num/str/like/orderby/blind/time）+ 安全对照（不应误拦）
 // ============================================================================
 import { pathToFileURL } from 'node:url';
@@ -99,7 +99,9 @@ for (const [label, tamper] of Object.entries(TAMPERS)) {
   matrix[label] = rows;
   const det = SCENARIOS.filter((s) => !s.expectSafe).map((s) => rows[s.name].found.length).reduce((a, b) => a + b, 0);
   const total = SCENARIOS.filter((s) => !s.expectSafe).length;
-  console.log(`[tamper ${label}] 注入点检出 ${det}/${total} 个技术位，WAF 拦截请求 ${WAF_HITS} 次`);
+  // [口径修正 2026-09-19] 原输出 `检出 ${det}/${total} 个技术位` 把两个不同量纲的数放进一个分数里
+  // （det=技术位合计、total=场景数），README 于是抄成了「10/5 技术位」。改成两句各说各的。
+  console.log(`[tamper ${label}] 技术位合计 ${det}（${total} 个注入场景，每场景可有多个技术位），WAF 拦截请求 ${WAF_HITS} 次`);
   for (const sc of SCENARIOS) {
     const r = rows[sc.name];
     console.log(`  ${sc.name.padEnd(8)} 检出=[${r.found.join(',') || '-'}]  被WAF拦 ${r.wafBlocked} 请求`);
