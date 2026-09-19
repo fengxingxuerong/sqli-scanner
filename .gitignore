@@ -105,6 +105,9 @@ e2e/run-with-pg.py
 e2e/blackbox-lab/out/
 e2e/blackbox-lab/node_modules
 
+# acceptance 套件失败时落盘的原始输出（本地排障现场，不入库；文件名见 acceptance.mjs 的 DIAG-FIX）
+e2e/results/last-failure-*.log
+
 # 扫描台账运行时数据（不入库）
 # [2026-09-18] 这条规则从 a65839b 起就**空转**着：加规则时没配套 `git rm --cached`，
 # 于是 index.jsonl 与两份扫描目录一直挂在版本控制上，每跑一次扫描就多一行 diff

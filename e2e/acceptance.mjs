@@ -20,8 +20,8 @@
 // ============================================================================
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { mkdirSync, writeFileSync, existsSync, rmSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { dirname, resolve, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import net from 'node:net';
 
@@ -367,6 +367,19 @@ for (const s of selected) {
   const status = verdict.pass ? 'PASS' : 'FAIL';
   const reason = verdict.pass ? null : verdict.reason || `断言未通过（退出码 ${r.code}）`;
   results.push({ ...s, status, facts: verdict.facts, reason, code: r.code, out: r.out });
+  // [DIAG-FIX 2026-09-19] 失败时必须把该套件的原始输出留在盘上。
+  // 此前 assert() 只回传「事实数字」，报告里就只剩一行 `服务端单测 fail=1` —— 到底是哪一条用例
+  // 失败，得自己再手跑一遍才知道；而实测恰恰是这么丢的：acceptance 里 1883 pass / 1 fail，
+  // 单独连跑 4 次全绿，失败现场已经没了。**门禁留不下现场，就等于把偶发缺陷变成了不可查。**
+  if (status === 'FAIL') {
+    try {
+      mkdirSync(resolve(HERE, 'results'), { recursive: true });
+      const dump = resolve(HERE, 'results', `last-failure-${s.id}.log`);
+      writeFileSync(dump, `$ ${s.title}\n退出码：${r.code}\n\n${r.out}`, 'utf8');
+      console.log(`${status}  → ${reason}\n        现场已存 ${relative(ROOT, dump)}`);
+      continue;
+    } catch { /* 落盘失败不阻断门禁 */ }
+  }
   console.log(`${status}  ${verdict.pass ? '' : `→ ${reason}`}`);
 }
 
@@ -417,6 +430,10 @@ for (const r of results) {
     `${r.status.padEnd(5)} ${r.title}　${Object.entries(r.facts || {}).map(([k, v]) => `${k}=${v}`).join(' ')}`
   );
 }
-console.log(`\n${passed.length} PASS / ${failed.length} FAIL / ${skipped.length} SKIP`);
+// [WIRE-FIX 2026-09-19] 用 tally()。上一批提交（381afdb）写好了 tally() 却没接上调用点，
+// 于是终端仍输出合并版「N FAIL」—— 与它自己上方刚打的 ⛔ BLOCKED 标签依旧矛盾，
+// 也就是那条"BLOCKED 与 FAIL 分列"的修复实际没生效。e2e/acceptance.mjs 在 eslint 的 ignores
+// 里（第 35 行），所以 `tally is assigned but never used` 这条 error 谁也没看见。
+console.log(`\n${tally()}`);
 console.log(`报告：e2e/results/acceptance-report.md`);
 process.exit(failed.length ? 1 : 0);
