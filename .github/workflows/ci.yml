@@ -61,6 +61,21 @@ jobs:
       # 修法：npm run facts:refresh（实跑采集）→ npm run facts:fix（回写 README）
       - run: node scripts/facts-sync.mjs --check
         name: 文档数字口径（README ↔ docs/_facts.json）
+      # [P1-ADD 2026-09-19] CRS 执行器保真度门禁。本仓所有 WAF 绕过数字都出自**自实现的
+      # SecRule 执行器**（crs-engine.js）——执行器若与官方规则不等价，那些数字全部无意义。
+      # 判据不来自我们自己：跑 CRS 项目官方回归集（805 条带「该拦/不该拦」期望的用例），
+      # 按规则自身档位对齐后要求逐规则一致率 ≥90%，且分歧必须逐条点名在
+      # e2e/waf-real/crs-known-divergences.json（只减不增）。不需要 MySQL，故放 lint job。
+      # 复现：npm run waf-fidelity（用例首次获取：npm run waf-fidelity:refresh）
+      - run: npm run waf-fidelity
+        name: CRS 执行器保真度（官方回归集）
+      # 规则原文与上游 v4.1.0 逐字节一致（README 写"官方规则原文"，这条让它可核验）
+      - run: node scripts/fetch-crs-assets.mjs --verify-rules
+        name: CRS 规则原文与上游一致
+      # tamper 覆盖口径：README 写"覆盖 sqlmap 官方 tamper 全集"，故对上游清单核一次。
+      # 清单快照 upstream-sqlmap-tamper.json 已入库 → 无网络也能跑；缺失集合走只减不增基线。
+      - run: npm run tamper:parity
+        name: tamper 对齐 sqlmap 官方清单
       - run: npx eslint .
         name: ESLint
       # [P0-FIX] Rust 门禁：Tauri 壳此前无任何 lint 检查。新增 cargo fmt --check + clippy

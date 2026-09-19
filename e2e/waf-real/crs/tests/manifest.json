@@ -1,0 +1,306 @@
+{
+  "tag": "v4.1.0",
+  "files": {
+    "crs/tests/942/942100.yaml": {
+      "sha256": "1e728f7be2b6e4250b2b0c87072aae9d495d4a3356d53f2d17450b09d31c172c",
+      "bytes": 8203,
+      "upstream": "https://raw.githubusercontent.com/coreruleset/coreruleset/v4.1.0/tests/regression/tests/REQUEST-942-APPLICATION-ATTACK-SQLI/942100.yaml"
+    },
+    "crs/tests/942/942101.yaml": {
+      "sha256": "3a814e2a78c86f0eb683c27e8307103e4da31bcbe7e7a6bd162285b8b83830d0",
+      "bytes": 6322,
+      "upstream": "https://raw.githubusercontent.com/coreruleset/coreruleset/v4.1.0/tests/regression/tests/REQUEST-942-APPLICATION-ATTACK-SQLI/942101.yaml"
+    },
+    "crs/tests/942/942120.yaml": {
+      "sha256": "f6390ebd980ab0eab5fa40d1762ae85ccf6da4049c9a648764b182334e635e72",
+      "bytes": 23033,
+      "upstream": "https://raw.githubusercontent.com/coreruleset/coreruleset/v4.1.0/tests/regression/tests/REQUEST-942-APPLICATION-ATTACK-SQLI/942120.yaml"
+    },
+    "crs/tests/942/942130.yaml": {
+      "sha256": "6aefcb2efaf5217cd272bbf14b946c193221f993229dd553c1ebcdd6b9c91159",
+      "bytes": 5553,
+      "upstream": "https://raw.githubusercontent.com/coreruleset/coreruleset/v4.1.0/tests/regression/tests/REQUEST-942-APPLICATION-ATTACK-SQLI/942130.yaml"
+    },
+    "crs/tests/942/942131.yaml": {
+      "sha256": "7c5e76b12ad26c81ad8b633609c95f92dff4074d7a752a0a2e0e66d313af64b7",
+      "bytes": 3819,
+      "upstream": "https://raw.githubusercontent.com/coreruleset/coreruleset/v4.1.0/tests/regression/tests/REQUEST-942-APPLICATION-ATTACK-SQLI/942131.yaml"
+    },
+    "crs/tests/942/942140.yaml": {
+      "sha256": "e611fe8887dd793289349cdeb398c821555ff43155fff63f1502bba2b8c57115",
+      "bytes": 9772,
+      "upstream": "https://raw.githubusercontent.com/coreruleset/coreruleset/v4.1.0/tests/regression/tests/REQUEST-942-APPLICATION-ATTACK-SQLI/942140.yaml"
+    },
+    "crs/tests/942/942150.yaml": {
+      "sha256": "4bdfdf0278905f10659953c11ce7aed5de6ef41dc2be65927270797729d87753",
+      "bytes": 11371,
+      "upstream": "https://raw.githubusercontent.com/coreruleset/coreruleset/v4.1.0/tests/regression/tests/REQUEST-942-APPLICATION-ATTACK-SQLI/942150.yaml"
+    },
+    "crs/tests/942/942151.yaml": {
+      "sha256": "aa36665777a0d584c04fdb0a736c3875e5604d2330456edc2c83e137d8e9f39c",
+      "bytes": 6917,
+      "upstream": "https://raw.githubusercontent.com/coreruleset/coreruleset/v4.1.0/tests/regression/tests/REQUEST-942-APPLICATION-ATTACK-SQLI/942151.yaml"
+    },
+    "crs/tests/942/942152.yaml": {
+      "sha256": "b0e3fdf86b88347de5c5213285cc692bce3a74244d4201dde03c0af49208eab8",
+      "bytes": 1840,
+      "upstream": "https://raw.githubusercontent.com/coreruleset/coreruleset/v4.1.0/tests/regression/tests/REQUEST-942-APPLICATION-ATTACK-SQLI/942152.yaml"
+    },
+    "crs/tests/942/942160.yaml": {
+      "sha256": "8e395a67af1fc81689b1d3e2f8088aa4e39b6a1be22d2c6185d19615a5936bfb",
+      "bytes": 5974,
+      "upstream": "https://raw.githubusercontent.com/coreruleset/coreruleset/v4.1.0/tests/regression/tests/REQUEST-942-APPLICATION-ATTACK-SQLI/942160.yaml"
+    },
+    "crs/tests/942/942170.yaml": {
+      "sha256": "c4bebbf2529c283d3610ce27cbdcba7917e6731d67ba60426bf7e4da0debda18",
+      "bytes": 2529,
+      "upstream": "https://raw.githubusercontent.com/coreruleset/coreruleset/v4.1.0/tests/regression/tests/REQUEST-942-APPLICATION-ATTACK-SQLI/942170.yaml"
+    },
+    "crs/tests/942/942180.yaml": {
+      "sha256": "f6efa2138490acd3c565ca3fd894f30b7a7dc97504467cf5f4b361daf1d17592",
+      "bytes": 4649,
+      "upstream": "https://raw.githubusercontent.com/coreruleset/coreruleset/v4.1.0/tests/regression/tests/REQUEST-942-APPLICATION-ATTACK-SQLI/942180.yaml"
+    },
+    "crs/tests/942/942190.yaml": {
+      "sha256": "171b2598b46aef4ffe05fea62b6c52eb3efa05cc1d6e2d6190149a022cbc6bb5",
+      "bytes": 28464,
+      "upstream": "https://raw.githubusercontent.com/coreruleset/coreruleset/v4.1.0/tests/regression/tests/REQUEST-942-APPLICATION-ATTACK-SQLI/942190.yaml"
+    },
+    "crs/tests/942/942200.yaml": {
+      "sha256": "21f32fd1e80572d31170f4e54ab3f4061abb3069587cd0ffbb8f99531e8593ab",
+      "bytes": 1258,
+      "upstream": "https://raw.githubusercontent.com/coreruleset/coreruleset/v4.1.0/tests/regression/tests/REQUEST-942-APPLICATION-ATTACK-SQLI/942200.yaml"
+    },
+    "crs/tests/942/942210.yaml": {
+      "sha256": "e641010afbea7565aa88245b04157141d1b85eacfb3567edfc527a68b129d6cc",
+      "bytes": 47595,
+      "upstream": "https://raw.githubusercontent.com/coreruleset/coreruleset/v4.1.0/tests/regression/tests/REQUEST-942-APPLICATION-ATTACK-SQLI/942210.yaml"
+    },
+    "crs/tests/942/942220.yaml": {
+      "sha256": "ceed002c50648dc7446082a89f83a5863be9c99986784e2f34198f93d511538f",
+      "bytes": 1244,
+      "upstream": "https://raw.githubusercontent.com/coreruleset/coreruleset/v4.1.0/tests/regression/tests/REQUEST-942-APPLICATION-ATTACK-SQLI/942220.yaml"
+    },
+    "crs/tests/942/942230.yaml": {
+      "sha256": "f403a6d367acf2b6c57cc15fb07730de5877c994e05fc73ccc0fedc7bde9b5e2",
+      "bytes": 6854,
+      "upstream": "https://raw.githubusercontent.com/coreruleset/coreruleset/v4.1.0/tests/regression/tests/REQUEST-942-APPLICATION-ATTACK-SQLI/942230.yaml"
+    },
+    "crs/tests/942/942240.yaml": {
+      "sha256": "707f2ce6e425d6aa6dbeb205f5290ed14517ec686b3fde1f708fa9eafe87d152",
+      "bytes": 6794,
+      "upstream": "https://raw.githubusercontent.com/coreruleset/coreruleset/v4.1.0/tests/regression/tests/REQUEST-942-APPLICATION-ATTACK-SQLI/942240.yaml"
+    },
+    "crs/tests/942/942250.yaml": {
+      "sha256": "a647d7602b37fef89d37771851eb37c25a2b66326aea5d402bd82e7120e7bf7e",
+      "bytes": 677,
+      "upstream": "https://raw.githubusercontent.com/coreruleset/coreruleset/v4.1.0/tests/regression/tests/REQUEST-942-APPLICATION-ATTACK-SQLI/942250.yaml"
+    },
+    "crs/tests/942/942251.yaml": {
+      "sha256": "1481d72991d1c4592b2dab25ae0d380675325b498c795a10b708ac00d00d20a5",
+      "bytes": 1245,
+      "upstream": "https://raw.githubusercontent.com/coreruleset/coreruleset/v4.1.0/tests/regression/tests/REQUEST-942-APPLICATION-ATTACK-SQLI/942251.yaml"
+    },
+    "crs/tests/942/942260.yaml": {
+      "sha256": "0587fb529843a8779a4296f67d1905ddbf4c7c3f8e8c0138252cc24381badec4",
+      "bytes": 702,
+      "upstream": "https://raw.githubusercontent.com/coreruleset/coreruleset/v4.1.0/tests/regression/tests/REQUEST-942-APPLICATION-ATTACK-SQLI/942260.yaml"
+    },
+    "crs/tests/942/942270.yaml": {
+      "sha256": "d4ac20f7716c6f31bf71ce51cc5c77911720e9d29d881a19c17c2d230b9ab3a4",
+      "bytes": 1308,
+      "upstream": "https://raw.githubusercontent.com/coreruleset/coreruleset/v4.1.0/tests/regression/tests/REQUEST-942-APPLICATION-ATTACK-SQLI/942270.yaml"
+    },
+    "crs/tests/942/942280.yaml": {
+      "sha256": "be9e1c3d5cfbb7225ee64b8f27ef05cc61ca98972a8423b813f226853b79c7cf",
+      "bytes": 1294,
+      "upstream": "https://raw.githubusercontent.com/coreruleset/coreruleset/v4.1.0/tests/regression/tests/REQUEST-942-APPLICATION-ATTACK-SQLI/942280.yaml"
+    },
+    "crs/tests/942/942290.yaml": {
+      "sha256": "154f349f8301bc0726c2bc516afe3c883c4bc2770bb043981f2f41fbe90c96af",
+      "bytes": 4777,
+      "upstream": "https://raw.githubusercontent.com/coreruleset/coreruleset/v4.1.0/tests/regression/tests/REQUEST-942-APPLICATION-ATTACK-SQLI/942290.yaml"
+    },
+    "crs/tests/942/942300.yaml": {
+      "sha256": "a3471d01496fe6d0283f9dc1cfeb4f585aea405573085a5e9fe9d6e96ef04fc6",
+      "bytes": 1831,
+      "upstream": "https://raw.githubusercontent.com/coreruleset/coreruleset/v4.1.0/tests/regression/tests/REQUEST-942-APPLICATION-ATTACK-SQLI/942300.yaml"
+    },
+    "crs/tests/942/942310.yaml": {
+      "sha256": "1f6586f0c55356b151835aceda3f3133e42872be8f55a9f6ab79810e1d3777ff",
+      "bytes": 2374,
+      "upstream": "https://raw.githubusercontent.com/coreruleset/coreruleset/v4.1.0/tests/regression/tests/REQUEST-942-APPLICATION-ATTACK-SQLI/942310.yaml"
+    },
+    "crs/tests/942/942320.yaml": {
+      "sha256": "9982c22e0785746bd9438c95a6a1a6a2060ee121002864b3adb19c17fb329f48",
+      "bytes": 7809,
+      "upstream": "https://raw.githubusercontent.com/coreruleset/coreruleset/v4.1.0/tests/regression/tests/REQUEST-942-APPLICATION-ATTACK-SQLI/942320.yaml"
+    },
+    "crs/tests/942/942321.yaml": {
+      "sha256": "c0f990299f2771e36d19a0f96857f810da78a8ff2dceedbcb0df110070204287",
+      "bytes": 1211,
+      "upstream": "https://raw.githubusercontent.com/coreruleset/coreruleset/v4.1.0/tests/regression/tests/REQUEST-942-APPLICATION-ATTACK-SQLI/942321.yaml"
+    },
+    "crs/tests/942/942330.yaml": {
+      "sha256": "1ed7d93bd451ac857abc38f094dfffe2aa81cfd762b4085bf982c017ed99cf02",
+      "bytes": 2920,
+      "upstream": "https://raw.githubusercontent.com/coreruleset/coreruleset/v4.1.0/tests/regression/tests/REQUEST-942-APPLICATION-ATTACK-SQLI/942330.yaml"
+    },
+    "crs/tests/942/942340.yaml": {
+      "sha256": "0c086b9a45df1604e6f90982ddb4e077ff43e4128f8226a825b3e08073b18478",
+      "bytes": 6546,
+      "upstream": "https://raw.githubusercontent.com/coreruleset/coreruleset/v4.1.0/tests/regression/tests/REQUEST-942-APPLICATION-ATTACK-SQLI/942340.yaml"
+    },
+    "crs/tests/942/942350.yaml": {
+      "sha256": "ea8b17ca9afc88ac50c50ee7d59f363990cd5f99f4d00e8efb352d01ef9d1967",
+      "bytes": 2691,
+      "upstream": "https://raw.githubusercontent.com/coreruleset/coreruleset/v4.1.0/tests/regression/tests/REQUEST-942-APPLICATION-ATTACK-SQLI/942350.yaml"
+    },
+    "crs/tests/942/942360.yaml": {
+      "sha256": "218303728a781f6fa96141e815474e1ef82b59fbb4f1ebd0445dd0789f32137f",
+      "bytes": 22543,
+      "upstream": "https://raw.githubusercontent.com/coreruleset/coreruleset/v4.1.0/tests/regression/tests/REQUEST-942-APPLICATION-ATTACK-SQLI/942360.yaml"
+    },
+    "crs/tests/942/942361.yaml": {
+      "sha256": "3554968d7d5ad90f65914ef06c45c67d68aebe25e9cd8b2ed7b7732829b2aab6",
+      "bytes": 4152,
+      "upstream": "https://raw.githubusercontent.com/coreruleset/coreruleset/v4.1.0/tests/regression/tests/REQUEST-942-APPLICATION-ATTACK-SQLI/942361.yaml"
+    },
+    "crs/tests/942/942362.yaml": {
+      "sha256": "dfae3994d8deb92df491b9379efcdaf6e0af6399d22419d5ce43722f93b8d960",
+      "bytes": 18912,
+      "upstream": "https://raw.githubusercontent.com/coreruleset/coreruleset/v4.1.0/tests/regression/tests/REQUEST-942-APPLICATION-ATTACK-SQLI/942362.yaml"
+    },
+    "crs/tests/942/942370.yaml": {
+      "sha256": "48839ee9185d8e4b3a66fc8e1ce241203bbc10cd521452367a51f8d579876247",
+      "bytes": 6715,
+      "upstream": "https://raw.githubusercontent.com/coreruleset/coreruleset/v4.1.0/tests/regression/tests/REQUEST-942-APPLICATION-ATTACK-SQLI/942370.yaml"
+    },
+    "crs/tests/942/942380.yaml": {
+      "sha256": "59ada2374564ff50d2a351549a9b2b3c1a4b6698311d65234b8d98039dbc68bb",
+      "bytes": 27306,
+      "upstream": "https://raw.githubusercontent.com/coreruleset/coreruleset/v4.1.0/tests/regression/tests/REQUEST-942-APPLICATION-ATTACK-SQLI/942380.yaml"
+    },
+    "crs/tests/942/942390.yaml": {
+      "sha256": "742de0ae4552ba92ab2a567839339f61bf4559fc30f60696ba6bb77645913a18",
+      "bytes": 644,
+      "upstream": "https://raw.githubusercontent.com/coreruleset/coreruleset/v4.1.0/tests/regression/tests/REQUEST-942-APPLICATION-ATTACK-SQLI/942390.yaml"
+    },
+    "crs/tests/942/942400.yaml": {
+      "sha256": "c17f8de5783cf764b5bfda986f1bff9a76dcdf3aab39e195e7aac20fa1f1626c",
+      "bytes": 1285,
+      "upstream": "https://raw.githubusercontent.com/coreruleset/coreruleset/v4.1.0/tests/regression/tests/REQUEST-942-APPLICATION-ATTACK-SQLI/942400.yaml"
+    },
+    "crs/tests/942/942410.yaml": {
+      "sha256": "9474d52c1c6c213b8e6729d15901ce470dd7786cb9effa5908dcbb2066abd09a",
+      "bytes": 64203,
+      "upstream": "https://raw.githubusercontent.com/coreruleset/coreruleset/v4.1.0/tests/regression/tests/REQUEST-942-APPLICATION-ATTACK-SQLI/942410.yaml"
+    },
+    "crs/tests/942/942420.yaml": {
+      "sha256": "52a42d38b7b28eefd782750071f747ddb7c85e3044f3ec718fc7c826f4e69f4f",
+      "bytes": 749,
+      "upstream": "https://raw.githubusercontent.com/coreruleset/coreruleset/v4.1.0/tests/regression/tests/REQUEST-942-APPLICATION-ATTACK-SQLI/942420.yaml"
+    },
+    "crs/tests/942/942421.yaml": {
+      "sha256": "608d0e7eee85ac73bde801218e2e21b781f3c476bb940e542b4edcff04813cc6",
+      "bytes": 730,
+      "upstream": "https://raw.githubusercontent.com/coreruleset/coreruleset/v4.1.0/tests/regression/tests/REQUEST-942-APPLICATION-ATTACK-SQLI/942421.yaml"
+    },
+    "crs/tests/942/942430.yaml": {
+      "sha256": "9632f4010c3faaca8b56b3b3decae8552a11349f5f378bbfc5f9f8b04d3ac3a6",
+      "bytes": 714,
+      "upstream": "https://raw.githubusercontent.com/coreruleset/coreruleset/v4.1.0/tests/regression/tests/REQUEST-942-APPLICATION-ATTACK-SQLI/942430.yaml"
+    },
+    "crs/tests/942/942431.yaml": {
+      "sha256": "84e2af79f8bc2f8bb08700c4c2d4079c5276c7d9616a9ac4f007b1b475eefc68",
+      "bytes": 720,
+      "upstream": "https://raw.githubusercontent.com/coreruleset/coreruleset/v4.1.0/tests/regression/tests/REQUEST-942-APPLICATION-ATTACK-SQLI/942431.yaml"
+    },
+    "crs/tests/942/942432.yaml": {
+      "sha256": "57b9a4946282c2d1c07e2c34699f069dae2d0f5d6d70026b22c1694c842eda8c",
+      "bytes": 699,
+      "upstream": "https://raw.githubusercontent.com/coreruleset/coreruleset/v4.1.0/tests/regression/tests/REQUEST-942-APPLICATION-ATTACK-SQLI/942432.yaml"
+    },
+    "crs/tests/942/942440.yaml": {
+      "sha256": "598dab22b1dbf96cd3e3c8296b1c4060fdb7b4fc9d3e4c441b431ae268565bbb",
+      "bytes": 11423,
+      "upstream": "https://raw.githubusercontent.com/coreruleset/coreruleset/v4.1.0/tests/regression/tests/REQUEST-942-APPLICATION-ATTACK-SQLI/942440.yaml"
+    },
+    "crs/tests/942/942450.yaml": {
+      "sha256": "2b26feef719af139273ee4380a43de19ed15d02e59b3d89fd9d17a8518e5ab4e",
+      "bytes": 2959,
+      "upstream": "https://raw.githubusercontent.com/coreruleset/coreruleset/v4.1.0/tests/regression/tests/REQUEST-942-APPLICATION-ATTACK-SQLI/942450.yaml"
+    },
+    "crs/tests/942/942460.yaml": {
+      "sha256": "943810bf7912066cbcc877a9b58c6998ab358f9f68adc8498c3786e0910cfb65",
+      "bytes": 1240,
+      "upstream": "https://raw.githubusercontent.com/coreruleset/coreruleset/v4.1.0/tests/regression/tests/REQUEST-942-APPLICATION-ATTACK-SQLI/942460.yaml"
+    },
+    "crs/tests/942/942470.yaml": {
+      "sha256": "be64628c34c8f6e51044a335adf07d51329e3e736fa96242122eb2c71ee61efa",
+      "bytes": 6108,
+      "upstream": "https://raw.githubusercontent.com/coreruleset/coreruleset/v4.1.0/tests/regression/tests/REQUEST-942-APPLICATION-ATTACK-SQLI/942470.yaml"
+    },
+    "crs/tests/942/942480.yaml": {
+      "sha256": "120001d283d93ac2a406dea8bcaf3a8199ca7cce565be2a1c1fae1a721b7b68e",
+      "bytes": 7299,
+      "upstream": "https://raw.githubusercontent.com/coreruleset/coreruleset/v4.1.0/tests/regression/tests/REQUEST-942-APPLICATION-ATTACK-SQLI/942480.yaml"
+    },
+    "crs/tests/942/942490.yaml": {
+      "sha256": "a38ecf21cc1d16e68629e004c7ddcc8cc8aab591102421ac179024b8702fc480",
+      "bytes": 12385,
+      "upstream": "https://raw.githubusercontent.com/coreruleset/coreruleset/v4.1.0/tests/regression/tests/REQUEST-942-APPLICATION-ATTACK-SQLI/942490.yaml"
+    },
+    "crs/tests/942/942500.yaml": {
+      "sha256": "f479fd813a316ebb9a3a4f64181ba99bfb65ef3e273cea04393cc62a9a250287",
+      "bytes": 3196,
+      "upstream": "https://raw.githubusercontent.com/coreruleset/coreruleset/v4.1.0/tests/regression/tests/REQUEST-942-APPLICATION-ATTACK-SQLI/942500.yaml"
+    },
+    "crs/tests/942/942510.yaml": {
+      "sha256": "2a783d9b9bb2d4c25ae7e35171910122ca56697e02dfc57a440dec047f615130",
+      "bytes": 1158,
+      "upstream": "https://raw.githubusercontent.com/coreruleset/coreruleset/v4.1.0/tests/regression/tests/REQUEST-942-APPLICATION-ATTACK-SQLI/942510.yaml"
+    },
+    "crs/tests/942/942511.yaml": {
+      "sha256": "2e95632cd94cd943c400de6d143bc5df30796d9fe5438d0eb38c1309ccd9b1d1",
+      "bytes": 1145,
+      "upstream": "https://raw.githubusercontent.com/coreruleset/coreruleset/v4.1.0/tests/regression/tests/REQUEST-942-APPLICATION-ATTACK-SQLI/942511.yaml"
+    },
+    "crs/tests/942/942520.yaml": {
+      "sha256": "141d258d5f625c16ff990162fe36e58ed21d8322c64e6e4e35782b397cf2da59",
+      "bytes": 13323,
+      "upstream": "https://raw.githubusercontent.com/coreruleset/coreruleset/v4.1.0/tests/regression/tests/REQUEST-942-APPLICATION-ATTACK-SQLI/942520.yaml"
+    },
+    "crs/tests/942/942521.yaml": {
+      "sha256": "623cb4e1ca71953f14f78c360ccd66d5d10245aa516ea258a9b8c4af181df518",
+      "bytes": 29854,
+      "upstream": "https://raw.githubusercontent.com/coreruleset/coreruleset/v4.1.0/tests/regression/tests/REQUEST-942-APPLICATION-ATTACK-SQLI/942521.yaml"
+    },
+    "crs/tests/942/942522.yaml": {
+      "sha256": "b10299b41a7a6b289bb1781e7295735a71899ed0c2c897a87e4db68ba9d1a7a5",
+      "bytes": 8667,
+      "upstream": "https://raw.githubusercontent.com/coreruleset/coreruleset/v4.1.0/tests/regression/tests/REQUEST-942-APPLICATION-ATTACK-SQLI/942522.yaml"
+    },
+    "crs/tests/942/942530.yaml": {
+      "sha256": "8e963025334f8f8d8efaee1760fbd57c47bfd8f88f4a203976c22629aef8cfe0",
+      "bytes": 694,
+      "upstream": "https://raw.githubusercontent.com/coreruleset/coreruleset/v4.1.0/tests/regression/tests/REQUEST-942-APPLICATION-ATTACK-SQLI/942530.yaml"
+    },
+    "crs/tests/942/942540.yaml": {
+      "sha256": "ae996d8a7beec24dafea92430cac0ac916407f82ec2409e9a709174095129aab",
+      "bytes": 4554,
+      "upstream": "https://raw.githubusercontent.com/coreruleset/coreruleset/v4.1.0/tests/regression/tests/REQUEST-942-APPLICATION-ATTACK-SQLI/942540.yaml"
+    },
+    "crs/tests/942/942550.yaml": {
+      "sha256": "b3a0e7e907e0a4dad31053b72dba33472206914a0b94605ebec0ab6da55249a6",
+      "bytes": 25307,
+      "upstream": "https://raw.githubusercontent.com/coreruleset/coreruleset/v4.1.0/tests/regression/tests/REQUEST-942-APPLICATION-ATTACK-SQLI/942550.yaml"
+    },
+    "crs/tests/942/942560.yaml": {
+      "sha256": "c743b7416af36a0d57f8481e691e54d6540d23ae13ec7dcb0c6ae1ad4be40045",
+      "bytes": 1439,
+      "upstream": "https://raw.githubusercontent.com/coreruleset/coreruleset/v4.1.0/tests/regression/tests/REQUEST-942-APPLICATION-ATTACK-SQLI/942560.yaml"
+    }
+  },
+  "fetchedAt": "2026-09-19T09:00:12.214Z"
+}

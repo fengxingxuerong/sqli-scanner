@@ -1,0 +1,13 @@
+{
+  "_comment": "CRS 靶场技术位基线，按 Paranoia Level 分别锁死（只减不增）。低于该档值=能力退化，门禁 FAIL；高于该档值=按实测收紧本文件并在提交信息里写明。",
+  "_why_per_pl": "不带档位的绕过率没有可比性：CRS 官方默认部署是 PL1，全规则（≈PL3/4）下的检测强度完全不同。本仓自实现执行器的保真度由 e2e/waf-real/crs-equivalence.mjs（CRS 官方回归集）把守。",
+  "_history": "2026-09-19 之前 README 记的是 off 2 → on 8（PL3）。当天用 CRS 官方回归集查出执行器两处结构性缺陷（(?i) 大小写被吃掉、链节点的 TX/MATCHED_VARS 未实现），修复后同一份 PL3 数字变成 0/0 —— 旧的「绕过生效」是宽松执行器白给的。保真度：修复前 60.7% → 修复后 99.3%。",
+  "at": "2026-09-19",
+  "engine": "自实现 SecRule 执行器（crs-engine.js）；规则 = coreruleset v4.1.0 REQUEST-942 原文，逐字节一致性由 node scripts/fetch-crs-assets.mjs --verify-rules 校验",
+  "bits": {
+    "1": { "realOff": 8, "realOn": 8, "auto": 8, "测于": "2026-09-19T09:26Z", "说明": "CRS 默认部署档：现有探针本就能通过，挂链无可证增益" },
+    "3": { "realOff": 0, "realOn": 0, "auto": 0, "测于": "2026-09-19T09:26Z", "说明": "全规则最严档：现有 tamper 链对 942 家族无可证绕过" }
+  },
+  "gatePl": 1,
+  "gatePlReason": "默认档才是客户线上真正面对的配置；PL3 的 0/0 作为「最严档无绕过」写进 README，不做门禁（否则任何规则微调都会把它顶成红）。"
+}

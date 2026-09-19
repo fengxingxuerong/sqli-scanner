@@ -23,6 +23,11 @@
     "waf-validate": "node e2e/waf-lab/validate-tamper.mjs",
     "waf-real": "node e2e/waf-real/waf-verify.mjs",
     "waf-auto": "node e2e/waf-real/waf-auto-check.mjs",
+    "waf-fidelity": "node e2e/waf-real/crs-equivalence.mjs",
+    "waf-fidelity:refresh": "node scripts/fetch-crs-assets.mjs --force",
+    "waf-rules:verify": "node scripts/fetch-crs-assets.mjs --verify-rules",
+    "tamper:parity": "node scripts/verify-tamper-parity.mjs",
+    "tamper:parity:refresh": "node scripts/verify-tamper-parity.mjs --refresh",
     "e2e:file-read": "node e2e/fileops/exploit-file-read.e2e.mjs",
     "e2e:file-write": "node e2e/fileops/exploit-file-write.e2e.mjs",
     "tauri": "tauri",
@@ -39,7 +44,7 @@
     "ci:local": "node scripts/ci-local.mjs",
     "ci:local:quick": "node scripts/ci-local.mjs --quick",
     "typecheck:frontend": "tsc --noEmit",
-    "typecheck:server": "node node_modules/typescript/bin/tsc -p server/tsconfig.json",
+    "typecheck:server": "tsc -p server/tsconfig.json",
     "test:server": "cd server && npm test",
     "test:all": "npm run test && npm run test:server",
     "test": "vitest run",
@@ -63,7 +68,6 @@
     "redteam:report": "node e2e/redteam-lab/report.mjs",
     "redteam:sqlmap": "node e2e/redteam-lab/sqlmap-bench.mjs",
     "demo:report": "node e2e/demo/deliverable-demo.mjs",
-    "typecheck:server": "tsc -p server/tsconfig.json",
     "build:sidecar": "node scripts/build-sidecar.mjs"
   },
   "lint-staged": {
@@ -109,6 +113,7 @@
     "typescript": "^5.4.5",
     "typescript-eslint": "^8.67.0",
     "vite": "^7.3.6",
-    "vitest": "^3.2.7"
+    "vitest": "^3.2.7",
+    "yaml": "^2.9.1"
   }
 }

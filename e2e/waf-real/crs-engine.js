@@ -50,6 +50,22 @@ const T = {
 };
 
 // —— 解析 .conf：续行拼接 → SecRule 分条 → 链聚合 ——
+//
+// [CENSUS 2026-09-19] 本机没有 Docker/Go，跑不了真 ModSecurity/Coraza，所以"≈PL3"这句话过去只是
+// 一句注释。这里把**执行器与官方规则的差距变成可核对的计数**：多少条 SecRule 被解析器丢掉、
+// 多少条用的是我们没实现的 operator（@detectSQLi 等 → 那条规则恒不匹配，报告里看不出异常）。
+// 计数在 parseCrsFile 里做一次（不在 execOp 热路径上），由 getParseStats() 读出；
+// 实测结果由 e2e/waf-real/crs-equivalence.mjs 打印，并用 CRS 官方回归用例交叉验证。
+// （曾经我在此处记过"`(?i:…)` 内联分组在 JS 会抛所以 5 条规则静默失效"——那是误报：
+//   内联修饰组是 ES2025 语法，V8 13 / Node 24 合法且语义正确。别照那种说法再写一遍。）
+const PARSE_STATS = new Map();
+// execOp 只实现了这两个 operator；其余（@detectSQLi/@pm/@ge/@within/…）一律"永不匹配"，必须计数
+const IMPLEMENTED_OPS = new Set(['@rx', '@streq']);
+
+export function getParseStats(confPath) {
+  return PARSE_STATS.get(confPath) || null;
+}
+
 export function parseCrsFile(confPath) {
   const raw = readFileSync(confPath, 'utf8');
   // 续行：行尾 \ 与下一行拼接（正确维护 pending 状态）
@@ -69,21 +85,27 @@ export function parseCrsFile(confPath) {
   const rules = [];       // 平铺链节点
   let curChain = null;    // 当前链聚合
   let pl = 0;             // 当前 Paranoia Level 区块
+  const stats = { secRuleLines: 0, droppedBySplit: 0, skippedMeta: 0, ops: {}, regexBad: [], loaded: 0, chainHeads: 0, unimplemented: 0, unimplementedIds: [], plById: {} };
   for (const st of statements) {
     // PL 区块注释跟踪
     const plm = st.match(/-= Paranoia Level (\d+)/);
     if (plm) pl = Number(plm[1]);
     if (!st.startsWith('SecRule')) continue;
+    stats.secRuleLines++;
     // CRS 正则内含转义引号 \" → 先替换为占位符再按引号切分，解析后还原
     const esc = st.replace(/\\"/g, '\u0001');
     const m = esc.match(/^SecRule\s+(.+?)\s+"([^"]*)"\s+"([^"]*)"\s*$/);
-    if (!m) continue;
+    if (!m) { stats.droppedBySplit++; continue; }
     const [, varsRaw, opRaw, actRaw] = m;
     const unesc = (s) => s.replace(/\u0001/g, '"');
     const op = unesc(opRaw);
     const act = unesc(actRaw);
+    // 链节点里的 `&TX:1` / `&ARGS` 是**计数语义**（取个数而非内容），`&` 要单独记下来
+    const varTokens = varsRaw.split('|').map((v) => v.trim());
+    const countMode = varTokens.every((v) => v.startsWith('&'));
     const rule = {
-      vars: varsRaw.split('|').map((v) => v.trim()),
+      vars: varTokens.map((v) => (v.startsWith('&') ? v.slice(1) : v)),
+      countMode,
       opRaw: op,
       id: (act.match(/id:(\d+)/) || [])[1] || null,
       phase: Number((act.match(/phase:(\d)/) || [])[1]) || 2,
@@ -93,8 +115,11 @@ export function parseCrsFile(confPath) {
       msg: (act.match(/msg:'([^']*)'/) || [])[1] || '',
       isChainHead: false,
     };
-    // TX:DETECTION_PARANOIA_LEVEL 元规则 / skipAfter 控制规则 → 跳过
-    if (/^TX:/i.test(varsRaw.trim()) || rule.opRaw.startsWith('@lt') || /skipAfter/.test(act)) continue;
+    // 元规则/控制规则：只在**它不是链节点**时跳过。
+    // [CHAIN-FIX 2026-09-19] 原来无条件 `continue` 把 `SecRule TX:1 "@rx …"` 这类**链的第二节点**
+    // 也丢了（942130/942150/942521/942522 全靠它做"同一请求里还要有第二种 SQL 信号"的判据），
+    // 而且跳过后 curChain 没复位，会把再下一条语句错接到原链上。
+    if (!curChain && (/^TX:/i.test(varsRaw.trim()) || op.startsWith('@lt') || /skipAfter/.test(act))) { stats.skippedMeta++; continue; }
     // 链：actions 含 chain → 后续紧邻 SecRule 是链内节点
     const isChain = /\bchain\b/.test(act);
     rule.isChainHead = isChain && !curChain;
@@ -104,12 +129,39 @@ export function parseCrsFile(confPath) {
       rules.push(curChain);
     } else rules.push(rule);
     if (!isChain) curChain = null;
+
+    // —— 保真度普查（只统计，不改变判定）——
+    stats.loaded++;
+    // 规则 id → 所属 PL 区块：官方回归用例的"逐规则一致率"必须在**该规则本该生效的档位**上比，
+    // 否则 PL1 档下那些 PL2/PL3 规则的低命中会被当成执行器失真（其实是正确行为）。
+    if (rule.id && stats.plById[rule.id] == null) stats.plById[rule.id] = pl;
+    const opName = (op.match(/^@\w+/) || ['(裸正则 @rx)'])[0];
+    stats.ops[opName] = (stats.ops[opName] || 0) + 1;
+    if (!IMPLEMENTED_OPS.has(opName) && opName !== '(裸正则 @rx)') {
+      stats.unimplemented = (stats.unimplemented || 0) + 1;
+      (stats.unimplementedIds ||= []).push(`${rule.id || '?'}:${opName}`);
+    }
+    // 编译探针必须与 execOp **逐字同构**（同样的 (?i) 剥离、同样的 flags 选择），
+    // 否则普查会和实际行为两套真相。注意 (?i:…) 这种内联修饰组在 V8 13 / Node 24 是
+    // 合法语法（ES2025 已收进 JS），早先我按"PCRE 专属构造"把它记成静默失效，是误报。
+    const rawRx = opName === '@rx' ? op.slice(3).trim() : op.startsWith('@') ? '' : op;
+    if (rawRx) {
+      // 与 execOp 逐字同构（同样的 (?i) 剥离、同样恒用 flags='i'），否则普查与实际两套真相
+      const src = rawRx.startsWith('(?i)') ? rawRx.slice(4) : rawRx;
+      try { new RegExp(src, 'i'); } catch { stats.regexBad.push(rule.id || '?'); }
+    }
+    if (rule.isChainHead) stats.chainHeads++;
   }
+  stats.groups = rules.length;
+  PARSE_STATS.set(confPath, stats);
   return rules;
 }
 
 // —— 变量取值：把请求对象映射为 CRS 变量名 → [值...] ——
-function collectValues(vars, req) {
+// state 用于链式规则：captures = 上一节点正则的捕获组，matchedVals = 上一节点命中的值。
+// CRS 的"条件式 SQLi"族（942130/942150/942521/942522…）靠 `TX:1`、`MATCHED_VARS` 表达
+// "同一请求里还得有第二种信号"，不给这两个变量的值，那批规则就永远不匹配。
+function collectValues(vars, req, state = {}) {
   const out = [];
   for (const v of vars) {
     const neg = v.startsWith('!');
@@ -119,7 +171,13 @@ function collectValues(vars, req) {
     else if (name === 'ARGS_NAMES') push(Object.keys(req.args));
     else if (name === 'REQUEST_COOKIES') push(Object.values(req.cookies));
     else if (name === 'REQUEST_COOKIES_NAMES') push(Object.keys(req.cookies));
-    else if (name.startsWith('REQUEST_HEADERS:')) {
+    else if (/^TX:\d+$/.test(name)) {
+      // 链上下文里的 TX:n = 上一节点的第 n 个捕获组（ModSecurity 语义）
+      const c = state.captures;
+      push(c && c[Number(name.slice(3))] != null ? [String(c[Number(name.slice(3))])] : []);
+    } else if (name === 'MATCHED_VARS' || name === 'MATCHED_VARS_NAMES') {
+      push(state.matchedVals || []);
+    } else if (name.startsWith('REQUEST_HEADERS:')) {
       const h = name.split(':')[1].toLowerCase();
       push(req.headers[h] ? [req.headers[h]] : []);
     } else if (name === 'REQUEST_HEADERS') push(Object.values(req.headers));
@@ -139,27 +197,80 @@ function applyTransforms(value, transforms) {
   return s;
 }
 
-// —— 执行 operator ——
-function matchOp(rule, value) {
-  const op = rule.opRaw;
+/** 计数语义（`&ARGS @ge 2`）：拿"个数"和 operator 的数字比。 */
+function matchCount(opRaw, n) {
+  const m = /^@(ge|gt|le|lt|eq)\s+(\d+)\s*$/.exec(opRaw.trim());
+  if (!m) return false;
+  const k = Number(m[2]);
+  switch (m[1]) {
+    case 'ge': return n >= k;
+    case 'gt': return n > k;
+    case 'le': return n <= k;
+    case 'lt': return n < k;
+    default: return n === k;
+  }
+}
+
+/** 命中则返回 RegExp 的匹配结果（链节点要靠它取捕获组），否则返回 null。 */
+function execOp(rule, value, state = {}) {
+  const op0 = rule.opRaw;
+  // `!@rx …` / `!@pm …`：CRS 用取反 operator 表达"除这种形态外都算"（如 942440 的
+  // `MATCHED_VARS "!@rx ^ey…"`，意思是"命中的值里只要**不是** JWT 段就算 SQLi 特征"）。
+  // 原来不认 `!` 前缀：既不匹配也不报错，整条规则恒不命中。
+  const negated = op0.startsWith('!');
+  const op = negated ? op0.slice(1) : op0;
+  // operator 参数里的 `%{TX.n}` 是**上一节点正则的捕获组**（942130 用 `TX:1 "@streq %{TX.2}"`
+  // 表达"两个操作数相等"），不展开就等于拿字面量 "%{TX.2}" 去比，永远不相等。
+  const expand = (s) => String(s).replace(/%\{TX\.(\d+)\}/g, (_, n) => {
+    const c = state.captures;
+    return c && c[Number(n)] != null ? String(c[Number(n)]) : '';
+  });
   if (op.startsWith('@rx') || !op.startsWith('@')) {
-    const reSrc = op.startsWith('@rx') ? op.slice(3).trim() : op;
-    // CRS 正则多为 PCRE 兼容（(?i:...) / \b 等），JS 直接可用；个别含 \p{} 已人工确认无
+    const reSrc = expand(op.startsWith('@rx') ? op.slice(3).trim() : op);
+    // [FIDELITY-FIX 2026-09-19] 原实现把 `(?i)` 前缀剥掉、flags 却给空串（`'i'.repeat(... ? 0 : 1)`）
+    // —— 等于把 CRS 里几乎所有 @rx 规则从「大小写不敏感」变成「大小写敏感」。`(?i)` 这个标记的
+    // 唯一语义就是大小写不敏感，剥掉标记就必须把 i 标志补回来，否则混合大小写的 payload
+    // （`UnIoN SeLeCt`）一律不命中。用 CRS 官方回归集实测：修前 PL4 逐规则一致率 60.7%、
+    // 应拦用例漏 284/720，漏得最多的 942410 / 942210 / 942362 / 942150 全是 `(?i)` 开头的规则
+    // （明细见 e2e/waf-real/results/crs-equivalence.md）。不带 `(?i)` 的 pattern 原本就是 flags='i'，
+    // 那条路一字未改（CRS 作者写这些 pattern 时已按不敏感设计）。
     try {
-      const re = new RegExp(reSrc.startsWith('(?i)') ? reSrc.slice(4) : reSrc, 'i'.repeat(reSrc.startsWith('(?i)') ? 0 : 1));
-      return re.test(value);
+      const re = new RegExp(reSrc.startsWith('(?i)') ? reSrc.slice(4) : reSrc, 'i');
+      const m = re.exec(value);
+      if (negated) return m ? null : [value];
+      return m;
     } catch {
-      return false; // JS 不兼容的正则保守跳过（统计）
+      return negated ? [value] : null; // 编不出来的正则保守跳过；条数由普查报出来
     }
   }
-  if (op.startsWith('@streq')) return value === op.slice(6).trim();
-  return false; // @detectSQLi 等无内核 operator：不匹配（跳过统计在调用侧）
+  if (op.startsWith('@streq')) {
+    const eq = value === expand(op.slice(6).trim());
+    // 取反必须在这里也生效：942131 的链节点是 `TX:1 "!@streq %{TX.2}"`（"两个操作数**不**相等才算"），
+    // 漏掉 negated 会把判据整个反过来 —— `11!=11` 这种平凡式反而被判成 SQLi。
+    if (negated) return eq ? null : [value];
+    return eq ? [value] : null;
+  }
+  // 未实现的 operator：即使外面套了 `!` 也**不伪造命中**。取反的意思本是"排除这种"，
+  // 我们既然算不出内层条件，就没有资格宣布它不成立 —— 宁可不命中（漏，由普查与分歧清单暴露），
+  // 也不要用"看起来更严"的假命中污染 WAF 数字。
+  return null; // @detectSQLi / @pm / @ge 等：恒不匹配（按 id 点名在普查里）
 }
+
+// 默认 Paranoia Level：**显式可配**，并且必须在报告里写出来。
+// 原来固定 3（≈全规则最严档），既不是 CRS 的默认部署档（官方默认 PL1），也没在数字旁边标注，
+// 于是"绕过率 8/8"这种说法既不知道对齐的是哪一档、也容易被当成线上典型表现。
+// 用 CRS_PL=1..4 覆盖；未设置时保持 3（与既有报告口径连续），但调用方要把打印出来的档位一起存档。
+const DEFAULT_PL = (() => {
+  const v = Number(process.env.CRS_PL);
+  return Number.isInteger(v) && v >= 1 && v <= 4 ? v : 3;
+})();
+/** 报告要用它把口径写清楚（"8/8" 不带档位等于没说）。 */
+export const EFFECTIVE_PL = DEFAULT_PL;
 
 /**
  * 评估一次请求是否被 CRS 942（SQLi）拦截。
  * @param {object} req { method, uri, queryString, args:{k:v}, cookies:{}, headers:{} }
- * @param {object} [opts] { paranoiaLevel=3, confPath }
+ * @param {object} [opts] { paranoiaLevel=CRS_PL||3, confPath, collectAll }
  * @returns {{blocked: boolean, ruleId: string|null, msg: string, matchedRules: string[]}}
  */
 export function evaluate(req, opts = {}) {
@@ -168,24 +279,48 @@ export function evaluate(req, opts = {}) {
     evaluate._rules = parseCrsFile(confPath);
     evaluate._confPath = confPath;
   }
-  const maxPL = opts.paranoiaLevel ?? 3;
+  const maxPL = opts.paranoiaLevel ?? DEFAULT_PL;
+  // [等价性验证用] collectAll：跑完全部规则、不早退，返回"所有命中的规则 id"。
+  // 官方回归用例的期望是**按规则 id**写的（log_contains: id "942100"），只看"拦没拦"就没法
+  // 逐条核对；默认 false，检测链路行为一字不变。
+  const collectAll = opts.collectAll === true;
   const matched = [];
+  let firstBlock = null;
   for (const group of evaluate._rules) {
     const nodes = group.chain || [group];
     // PL 截断（规则所在区块 PL > 配置上限 → 跳过）
     if (nodes.some((n) => n.pl > maxPL)) continue;
     let allHit = true;
+    // [CHAIN-FIX] 链式规则按 ModSecurity 语义逐节点求值，并把上一节点的**捕获组**与**命中的值**
+    // 传给下一节点（`TX:1` / `MATCHED_VARS` / `&…@ge N` 全靠这两个状态）。
+    let state = {};
     for (const node of nodes) {
-      const values = collectValues(node.vars, req).map((v) => applyTransforms(v, node.transforms));
-      const hit = values.some((v) => matchOp(node, v));
+      const values = collectValues(node.vars, req, state).map((v) => applyTransforms(v, node.transforms));
+      if (node.countMode) {
+        if (!matchCount(node.opRaw, values.length)) { allHit = false; break; }
+        continue;
+      }
+      let hit = null;
+      const matchedVals = [];
+      for (const v of values) {
+        const m = execOp(node, v, state);
+        if (m) { matchedVals.push(v); hit ||= m; }
+      }
       if (!hit) { allHit = false; break; }
+      state = { captures: hit, matchedVals };
     }
     if (allHit) {
       matched.push(group.id || 'no-id');
       if (group.block !== false) {
-        return { blocked: true, ruleId: group.id, msg: group.msg, matchedRules: matched };
+        if (!collectAll) return { blocked: true, ruleId: group.id, msg: group.msg, matchedRules: matched };
+        firstBlock ||= { ruleId: group.id, msg: group.msg };
       }
     }
+  }
+  if (collectAll) {
+    return firstBlock
+      ? { blocked: true, ruleId: firstBlock.ruleId, msg: firstBlock.msg, matchedRules: matched }
+      : { blocked: false, ruleId: null, msg: '', matchedRules: matched };
   }
   return { blocked: false, ruleId: null, msg: '', matchedRules: matched };
 }

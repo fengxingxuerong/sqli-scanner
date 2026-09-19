@@ -12,7 +12,8 @@ import { createMysqlLabApp } from '../real-mysql-lab/lab-app.js';
 
 const require = createRequire(new URL('../../server/package.json', import.meta.url));
 const mysql = require('mysql2/promise');
-const { evaluate, fromExpress } = await import(pathToFileURL(resolve(dirname(fileURLToPath(import.meta.url)), './crs-engine.js')).href);
+const { evaluate, fromExpress, EFFECTIVE_PL } = await import(pathToFileURL(resolve(dirname(fileURLToPath(import.meta.url)), './crs-engine.js')).href);
+const PL_LABEL = `PL${EFFECTIVE_PL}`;
 const { ScanManager } = await import(pathToFileURL(resolve(dirname(fileURLToPath(import.meta.url)), '../../server/src/engine/ScanManager.js')).href);
 
 const PORT = 8150;
@@ -130,12 +131,13 @@ const summaryRows = SCENARIOS.filter((s) => !s.expectSafe).map((s) => ({
   tamperOn: matrix.on[s.name].found,
   must: s.must,
 }));
-const report = { generatedAt: genAt, crs: 'OWASP CRS v4.1.0 (自实现 SecRule 执行器 ≈PL3)', db: `MySQL ${MYSQL_CONF.host}:${MYSQL_CONF.port}/${MYSQL_CONF.database}`, matrix, summaryRows, safeControlFalsePositive: !safeOk };
+// 口径必须随数字一起存档：不带 PL 的"绕过率 N/N"没有可比性（CRS 官方默认部署是 PL1）。
+const report = { generatedAt: genAt, crs: `OWASP CRS v4.1.0 (自实现 SecRule 执行器, ${PL_LABEL})`, paranoiaLevel: EFFECTIVE_PL, db: `MySQL ${MYSQL_CONF.host}:${MYSQL_CONF.port}/${MYSQL_CONF.database}`, matrix, summaryRows, safeControlFalsePositive: !safeOk };
 writeFileSync(resolve(RESULTS_DIR, 'waf-real-report.json'), JSON.stringify(report, null, 2));
 const md = [
   '# 真实 CRS v4.1.0 下 tamper 开/关 A/B（对外唯一口径）',
   '',
-  `> 生成：${genAt}　｜　靶场：真实 MySQL 8.0.28（e2e/real-mysql-lab/lab-app）　｜　CRS：官方规则原文 + 自实现执行器 ≈PL3`,
+  `> 生成：${genAt}　｜　靶场：真实 MySQL 8.0.28（e2e/real-mysql-lab/lab-app）　｜　CRS：官方规则原文 + 自实现执行器，档位 **${PL_LABEL}**（改档：` + '`CRS_PL=1 npm run waf-real`' + `；CRS 官方默认部署为 PL1）`,
   '',
   '| 场景 | tamper 关 | tamper 开 | 结论 |',
   '|---|---|---|---|',

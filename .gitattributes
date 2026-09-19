@@ -1,0 +1,9 @@
+# 换行符策略：仓库历史上没配过 .gitattributes，本机 core.autocrlf=true。
+# 这里**只**对"逐字节入库的上游资产"关掉换行符改写 —— 别的文件一律不动，避免一次性把全仓
+# 换行符重写一遍（那会制造上千行无意义 diff，也会毁掉带日期报告的字节可核对性）。
+#
+# 为什么必须管：e2e/waf-real/crs/tests/manifest.json 存的是上游文件的 sha256。若检出时被
+# 改成 CRLF，磁盘字节的哈希就和清单不符 ——「与 CRS v4.1.0 上游逐字节一致」这句话在 Windows
+# 检出上立刻变成假话（而这正是新加的那条门禁要守住的东西）。
+e2e/waf-real/crs/** -text
+server/src/core/tamper/upstream-sqlmap-tamper.json -text

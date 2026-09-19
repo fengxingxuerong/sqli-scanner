@@ -20,7 +20,7 @@
 // ============================================================================
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { dirname, resolve, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import net from 'node:net';
@@ -118,6 +118,17 @@ const envDb = {
   MYSQL_PASSWORD: MYSQL.password,
   MYSQL_DATABASE: MYSQL.database,
 };
+
+// CRS 靶场的技术位基线（按 PL 分别锁，只减不增）。缺文件就**直接终止**而不是"没基线就当通过"——
+// 那正是本仓栽过的假绿形态。改档：WAF_GATE_PL=3 npm run acceptance。
+const WAF_GATE_PL = Number(process.env.WAF_GATE_PL) || 1;
+let WAF_BASELINE;
+try {
+  WAF_BASELINE = JSON.parse(readFileSync(resolve(ROOT, 'e2e/waf-real/waf-bits-baseline.json'), 'utf8'));
+} catch (e) {
+  console.error(`❌ 读不到 e2e/waf-real/waf-bits-baseline.json（${e.message}）—— WAF 两套件无基线可判，拒绝跑`);
+  process.exit(2);
+}
 
 // ── 套件定义：assert 只吃「事实数字」，不看套件自报的 PASS 字样 ─────────────────
 const SUITES = [
@@ -227,36 +238,66 @@ const SUITES = [
   },
   {
     id: 'waf-real',
-    title: 'CRS v4.1.0 人工挂链 A/B',
+    title: `CRS 人工挂链 A/B（PL${WAF_GATE_PL} 档基线）`,
     needs: ['mysql'],
     heavy: true,
-    run: () => run('node', ['e2e/waf-real/waf-verify.mjs'], envDb),
+    run: () => run('node', ['e2e/waf-real/waf-verify.mjs'], { ...envDb, CRS_PL: String(WAF_GATE_PL) }),
     assert: (out) => {
-      // [口径修正 2026-09-19] waf-verify 的输出从「注入点检出 N/M 个技术位」（量纲混在一个分数里）
-      // 改成「技术位合计 N（M 个注入场景…）」，这里的解析同步跟上，否则 off/on 解析成 null 会误判 FAIL。
+      // [BASELINE-FIX 2026-09-19] 原断言是 `on > off`（"挂链必须有增益"）。用 CRS 官方回归集把执行器
+      // 修准之后该断言在两档上都不成立：PL1 下 off=on=8（探针本来就能通过默认部署的 CRS，无需绕过）、
+      // PL3 下 off=on=0（全规则档全拦）。所以旧口径那句「tamper off 2 → on 8，绕过生效」是
+      // **宽松执行器白给的假收益**（保真度 60.7% 时测的）。现在锁的是"不低于该档基线 + 安全对照零误拦"，
+      // 基线按 PL 分别写在 e2e/waf-real/waf-bits-baseline.json（只减不增）。
       const off = num(/\[tamper off\] 技术位合计 (\d+)/, out);
       const on = num(/\[tamper on\] 技术位合计 (\d+)/, out);
       const noFp = /安全对照误拦：无/.test(out);
+      const b = WAF_BASELINE.bits?.[String(WAF_GATE_PL)];
+      if (!b) return { facts: { 错误: '基线缺该档' }, pass: false, reason: `waf-bits-baseline.json 里没有 PL${WAF_GATE_PL} 的条目` };
       return {
-        facts: { off, on, 安全对照误拦: !noFp },
-        pass: off != null && on != null && on > off && noFp,
-        reason: !noFp ? '安全对照存在误拦' : on <= off ? '挂链未带来增益' : null,
+        facts: { off, on, 基线: `off≥${b.realOff} on≥${b.realOn}`, 安全对照误拦: !noFp },
+        pass: off != null && on != null && noFp && off >= b.realOff && on >= b.realOn,
+        reason: !noFp ? '安全对照存在误拦' : off < b.realOff || on < b.realOn ? `低于 PL${WAF_GATE_PL} 基线（off ${off}/${b.realOff}，on ${on}/${b.realOn}）` : null,
       };
     },
   },
   {
     id: 'waf-auto',
-    title: 'CRS 自动选链绕过',
+    title: `CRS 自动选链绕过（PL${WAF_GATE_PL} 档基线）`,
     needs: ['mysql'],
     heavy: true,
-    run: () => run('node', ['e2e/waf-real/waf-auto-check.mjs'], envDb),
+    run: () => run('node', ['e2e/waf-real/waf-auto-check.mjs'], { ...envDb, CRS_PL: String(WAF_GATE_PL) }),
     assert: (out) => {
       const bits = num(/自动绕过技术位合计 (\d+)/, out);
       const fp = num(/安全误报 (\d+)/, out);
+      const floor = WAF_BASELINE.bits?.[String(WAF_GATE_PL)]?.auto ?? 0;
       return {
-        facts: { 技术位: bits, 安全误报: fp },
-        pass: bits != null && bits >= 6 && fp === 0,
-        reason: fp ? `安全误报 ${fp}` : bits < 6 ? `技术位仅 ${bits}` : null,
+        facts: { 技术位: bits, 基线: `≥${floor}`, 安全误报: fp },
+        pass: bits != null && bits >= floor && fp === 0,
+        reason: fp ? `安全误报 ${fp}` : bits < floor ? `技术位 ${bits} < PL${WAF_GATE_PL} 基线 ${floor}` : null,
+      };
+    },
+  },
+  {
+    // [P1-ADD 2026-09-19] 本仓所有 WAF 数字都出自**自实现 SecRule 执行器**（本机无 Docker/Go，
+    // 跑不了真 ModSecurity/Coraza）。执行器不可信 → 那些数字全部作废。此套件用 CRS 官方回归集
+    // （805 条带"该拦/不该拦"期望的用例，规则作者写的断言，不是我们自证的循环）验收保真度，
+    // 并把分歧按"只减不增"基线点名。它不需要 MySQL，属于任何环境都该跑的一类。
+    id: 'crs-fidelity',
+    title: 'CRS 执行器保真度（官方回归集）',
+    needs: [],
+    run: () => run('node', ['e2e/waf-real/crs-equivalence.mjs'], {}),
+    assert: (out) => {
+      const rate = num(/剔除后逐规则一致率 ([\d.]+)%/, out);
+      const unknown = num(/未点名 (\d+) 条/, out);
+      const stale = num(/已消失 (\d+) 条/, out);
+      const fp = num(/误触该规则 (\d+)（/, out);
+      return {
+        facts: { 保真度: rate == null ? null : `${rate}%`, 未点名分歧: unknown, 已消失: stale, 误触: fp },
+        pass: rate != null && rate >= 90 && unknown === 0,
+        reason:
+          rate == null ? '取不到保真度行（输出格式变了？）' :
+          rate < 90 ? `保真度 ${rate}% < 90%，WAF 数字不可对外引用` :
+          unknown ? `出现 ${unknown} 条未点名分歧（看 e2e/waf-real/crs-equivalence.md）` : null,
       };
     },
   },

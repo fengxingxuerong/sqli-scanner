@@ -64,6 +64,14 @@ const GATES = [
   { id: 'lint', name: 'ESLint', cmd: 'npm run lint' },
   { id: 'lint', name: '架构门禁（体积/循环依赖/console）', cmd: 'node scripts/arch-guard.mjs' },
   { id: 'lint', name: '文档数字口径（README ↔ _facts.json）', cmd: 'npm run facts:check' },
+  // CRS 执行器保真度：本仓 WAF 数字全部出自自实现 SecRule 执行器（本机无 Docker/Go，跑不了真
+  // ModSecurity/Coraza），所以"执行器像不像 CRS"必须有外部真值兜住 —— 这里用 CRS 官方回归集。
+  // 不需要 MySQL，故与 lint 同组（真 CI 里也应放在 lint job）。
+  { id: 'lint', name: 'CRS 执行器保真度（官方回归集 805 例）', cmd: 'npm run waf-fidelity' },
+  { id: 'lint', name: 'CRS 规则原文与上游逐字节一致', cmd: 'node scripts/fetch-crs-assets.mjs --verify-rules' },
+  // tamper 覆盖率同样是对外口径：README 写"覆盖 sqlmap 官方 tamper 全集"，那就对上游清单核一次
+  // （清单快照已入库，离线可跑；缺失集合走"只减不增"基线）。
+  { id: 'lint', name: 'tamper 对齐 sqlmap 官方清单', cmd: 'npm run tamper:parity' },
   { id: 'lint', name: 'cargo fmt --check', cmd: 'cd src-tauri && cargo fmt --check' },
   { id: 'lint', name: 'cargo clippy -D warnings', cmd: 'cd src-tauri && cargo clippy -- -D warnings' },
   { id: 'test-frontend', name: '前端测试 + 覆盖率门禁', cmd: 'npx vitest run --coverage --reporter=dot', slow: true },

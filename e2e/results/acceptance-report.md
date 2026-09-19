@@ -1,6 +1,6 @@
 # 全方位验收门禁报告
 
-> 生成：2026-09-19T08:25:39.498Z　｜　执行器：`node e2e/acceptance.mjs`
+> 生成：2026-09-19T09:42:32.435Z　｜　执行器：`node e2e/acceptance.mjs`
 > 前置：MySQL 8.0.28 @127.0.0.1:3306；secure_file_priv="NULL"
 
 > **判定纪律**：不采信各套件自报的 PASS 字样，只解析可独立核对的事实数字并据此断言。
@@ -13,13 +13,14 @@
 | ✅ PASS | 真 MySQL 靶场 | PASS=10　FAIL=0 |
 | ✅ PASS | 真 PG 靶场（含二阶注入） | 全部通过=true　引擎=PGlite |
 | ✅ PASS | 报告契约（自报字段必须与真实状态一致） | 通过=8　不一致=0 |
-| ✅ PASS | CRS v4.1.0 人工挂链 A/B | off=2　on=8　安全对照误拦=false |
-| ✅ PASS | CRS 自动选链绕过 | 技术位=8　安全误报=0 |
+| ✅ PASS | CRS 人工挂链 A/B（PL1 档基线） | off=8　on=8　基线=off≥8 on≥8　安全对照误拦=false |
+| ✅ PASS | CRS 自动选链绕过（PL1 档基线） | 技术位=8　基线=≥8　安全误报=0 |
+| ✅ PASS | CRS 执行器保真度（官方回归集） | 保真度=99.3%　未点名分歧=0　已消失=0　误触=4 |
 | ⏭ SKIP | 红队实战评测（ground-truth 真值对照 + sqlmap 同题） | 原因=红队评测靶场未常驻（127.0.0.1:8231）——先执行 npm run lab:redteam |
 | ⏭ SKIP | fileRead 真闭环 | 原因=secure_file_priv 未放行（MySQL 8 默认 NULL）→ 本套件未执行任何断言 |
 | ⏭ SKIP | fileWrite 真闭环（文件系统侧断言） | 原因=secure_file_priv 未放行（MySQL 8 默认 NULL）→ 本套件未执行任何断言 |
 
-**汇总：8 PASS / 0 FAIL(含 BLOCKED) / 3 SKIP**
+**汇总：9 PASS / 0 FAIL(含 BLOCKED) / 3 SKIP**
 
 
 ## 跳过原因
