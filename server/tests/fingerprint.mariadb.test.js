@@ -76,22 +76,28 @@ function extractInjected(opts) {
 }
 
 // 模拟目标：ORDER BY 返回 500（列数=1）；UNION 回显版本串（含 SQLISCANNER 标记用于定位回显列）
-function makeFpMock(versionStr) {
+// [EXCL-FIX 2026-09-19] supportedFuncs 声明**这台假引擎跑得动的探针表达式**：不给这层，
+// mock 就等价于「谁探测都回同一个版本」，于是定库结果只由遍历顺序 + sig 宽松度决定 —— 那正是
+// 修复前 H2/MySQL 抢裸版本号的形状，但也把「exclusive 函数跑不动就没回显」这个真实判据抹掉了。
+function makeFpMock(versionStr, supportedFuncs = ['version()']) {
   return {
     async request(opts) {
       const q = extractInjected(opts);
       if (/ORDER BY/i.test(q)) return { status: 500, data: '' };
       if (/SQLISCANNER/.test(q)) return { data: 'x SQLISCANNER0 y', status: 200 };
-      if (/UNION SELECT/i.test(q)) return { data: `__S__${versionStr}__E__`, status: 200 };
+      if (/UNION SELECT/i.test(q)) {
+        const runnable = supportedFuncs.some((f) => q.includes(f));
+        return { data: runnable ? `__S__${versionStr}__E__` : 'db error: unsupported function', status: 200 };
+      }
       return { data: 'normal', status: 200 };
     },
   };
 }
 
-function fpCtx(versionStr) {
+function fpCtx(versionStr, supportedFuncs) {
   const target = createTarget({ url: 'http://mock/?q=1' });
   const point = { id: 'p1', location: 'url', param: 'q', originalValue: '1', dbms: null };
-  return { httpClient: makeFpMock(versionStr), target, point, config: {} };
+  return { httpClient: makeFpMock(versionStr, supportedFuncs), target, point, config: {} };
 }
 
 test('DBFingerprinter：MariaDB 版本串 → 优先判 MariaDB（非 MySQL）', async () => {

@@ -9,6 +9,12 @@
 // 判据（一条）：**某个库的典型返回值，只能命中它自己的 sig**。
 // 命中 ≥2 个 → 冲突；命中 0 个 → 该库定不回来（漏检）。
 //
+// [口径边界 2026-09-19] 本脚本只看 **sig 层**，不看运行时遍历：真实定库是「按 DB_VERSION 顺序
+// 逐条发 exclusive/common 探针，谁先命中自己 sig 谁赢」。因此这里的冲突数**不等于**运行时误判数
+// —— 例如 H2 改用 H2VERSION() 后，裸版本号 sig 与 MySQL/Firebird/MonetDB 的重叠在运行时已不可达
+// （那些库的探针在 H2 上报错、无标记回显）。运行时可达性要靠真引擎测（见 multi-engine-lab
+// 的 SQLI_UNION_DEBUG A/B），别拿本脚本的 20 处冲突当"线上会错 20 次"。
+//
 // 另外单独检查「func 是否跨库可执行」：常量串与通用函数在任何库上都能返回内容，
 // 区分度**只能**由 sig 承担 —— 这类条目是 sig 缺陷的高危区。
 //
@@ -42,7 +48,9 @@ const SAMPLES = {
   Sybase: [['Adaptive Server Enterprise 16.0.0'], ['Sybase ASE 15.7']],
   Firebird: [['3.0.7.33374', '文档'], ['2.5.9']],
   Informix: [['IBM Informix Dynamic Server Version 14.10.FC9'], ['Informix Server 12.10']],
-  H2: [['2.2.224 (2023-09-17)', '项目 e2e 真 JDBC'], ['1.4.200']],
+  // [EXCL-FIX 2026-09-19] 样本换成**真引擎回显值**：H2 现在探测的是独有的 H2VERSION()，
+  // 实测（multi-engine-lab JDBC）回显 `2.2.224`；旧样本是 version() 的带日期形式，已不再是被探测的值。
+  H2: [['2.2.224', '实测 H2VERSION() 回显'], ['1.4.200', '文档/推断']],
   Access: [['Microsoft Access 2016'], ['Microsoft Office Access 2007'], ['Microsoft Access Database Engine']],
   HSQLDB: [['2.7.2 (2023-06-28)', '项目 e2e 真 JDBC'], ['HSQLDB 2.5.0']],
   Derby: [['10.16.1.1 - (1873585)', '项目 e2e 真 JDBC'], ['Apache Derby 10.15.2.0']],

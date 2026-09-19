@@ -23,9 +23,13 @@ const ORIG = 'Keyboard';
 /**
  * 模拟 `WHERE name LIKE '%${v}%'` 且**把注入值原样回显**的目标。
  * 闭合形态：值后紧跟 `'` 或 `%'` 才算闭合出字面量；未闭合则整条落在字符串里 → 恒假但不报错。
- * @param {{versionEcho?: string}} [opts] versionEcho 非空时，UNION 探针回显该值（真库版本串）
+ * @param {{versionEcho?: string, supportedFuncs?: string[]}} [opts] versionEcho 非空时，
+ *   UNION 探针回显该值（真库版本串）；supportedFuncs 声明**这台假引擎能执行哪些探针表达式**——
+ *   不给这一层，mock 就等于「任何库的探针都回同一个版本」，测不出「宽松 sig 前置后抢走裸版本号」。
  */
 function makeEchoTarget(opts = {}) {
+  // 默认按真 MySQL 8.0.28 的可执行集合：version() 可跑，H2VERSION() 报错无回显（2026-09-19 实测）
+  const supported = opts.supportedFuncs ?? ['version()'];
   const calls = [];
   return {
     calls,
@@ -40,7 +44,9 @@ function makeEchoTarget(opts = {}) {
       let body = '';
       // 版本回显探针：结果列里带真实版本串（另有一份「被回显的 SQL 文本」在下面拼上）
       if (closed && /UNION SELECT/.test(rest) && opts.versionEcho) {
-        body = `<p>${opts.versionEcho}</p>`;
+        // 哨兵探针（定位回显列）一律照常回显；版本探针只有这台假引擎**能执行该表达式**时才有回显
+        const probe = /SQLISCANNER/.test(rest) || supported.some((f) => rest.includes(f));
+        body = probe ? `<p>${opts.versionEcho}</p>` : ERR;
       } else if (closed && /ORDER BY (\d+)/.test(rest)) {
         const n = Number(/ORDER BY (\d+)/.exec(rest)[1]);
         body = n <= 3 ? ROWS : ERR;
@@ -99,4 +105,27 @@ test('回显型目标：版本回显定库取真实结果行，而不是被回�
   assert.equal(res?.dbms, 'MySQL', `应定库 MySQL，实得 ${res?.dbms}（取到 SQL 文本时会是 null/误判）`);
   assert.equal(res?.version?.raw, '8.0.28', '版本串应来自结果行，而不是被回显的 SQL 文本');
   assert.equal(res?.version?.major, 8, '主版本号应被正确解析（后续按版本选 payload/枚举语句要用）');
+});
+
+// [EXCL-FIX 2026-09-19] 定库判据的机制钉：H2 之所以能排在 MySQL 之前，靠的是「exclusive 函数」
+// 而不是「sig 能区分」——H2 的 sig 就是裸版本号 `/^\d+\.\d+/`，与 MySQL/SQLite/ClickHouse/
+// Firebird/MonetDB 全重叠。于是守卫落在**可执行集合**上：跑不动的表达式必须没有回显。
+//   · 正向：H2 假引擎只认 H2VERSION() → 必须判 H2（修复前这台是 dbms=null，见 multi-engine-lab A/B）。
+//   · 反向：MySQL 假引擎只认 version() → 必须仍判 MySQL。若有人把 H2 换回通用的 version()，
+//     前置的 H2 条目就会在 MySQL 上抢走裸版本号 → 这条先炸。
+test('exclusive 版本探针：只有 H2 能跑 H2VERSION() 时，裸版本号判给 H2 而非 MySQL', async () => {
+  const httpClient = makeEchoTarget({ versionEcho: '__S__2.2.224__E__', supportedFuncs: ['H2VERSION()'] });
+  const ctx = makeCtx(httpClient, { boundary: "'" });
+  const res = await new DBFingerprinter().fingerprint(ctx);
+  assert.equal(res?.dbms, 'H2', `应定库 H2，实得 ${res?.dbms}`);
+  assert.equal(res?.version?.raw, '2.2.224');
+});
+
+test('exclusive 版本探针的反向守卫：MySQL 上 H2 探针无回显 → 仍判 MySQL（前置不抢库）', async () => {
+  // 与上一条同构，只把可执行集合换成 MySQL 系（version() 可跑、H2VERSION() 报错）。
+  // 若哪天有人把 H2 的 sig 放宽到能吃下「别的库回显的裸版本号」，这条会先炸。
+  const httpClient = makeEchoTarget({ versionEcho: '__S__8.0.28__E__', supportedFuncs: ['version()'] });
+  const ctx = makeCtx(httpClient, { boundary: "'" });
+  const res = await new DBFingerprinter().fingerprint(ctx);
+  assert.equal(res?.dbms, 'MySQL', `应定库 MySQL，实得 ${res?.dbms}`);
 });

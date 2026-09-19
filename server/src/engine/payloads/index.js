@@ -197,6 +197,18 @@ export const FINGERPRINT = {
 export const DB_VERSION = {
   // MariaDB 置于 MySQL 之前：优先命中（与 DBFingerprinter 遍历顺序配合区分）
   MariaDB: { func: 'version()', sig: /MariaDB/i },
+  // [EXCL-FIX 2026-09-19] H2 提到 MySQL 之前，并把探测函数换成 H2 **独有**的 H2VERSION()。
+  // 真引擎 A/B（e2e/multi-engine-lab，H2 2.2.224 经 JDBC 内存库，NO_WAF 以放行 UNION 探针）：
+  //   · 修复前（H2 在末尾 + `version()`）：18 条探针全部 echo=N → **定库失败 dbms=null**。
+  //     实测落空点：MySQL/MariaDB/PG/TiDB/ClickHouse 都走 `version()`，而 MySQL 系 WRAP 的
+  //     `CAST(x AS CHAR)` 在 H2 上直接报错 → 整行无标记回显，H2 那条排在末尾也轮不到。
+  //   · 修复后：`verFp H2 echo=Y 取到值="2.2.224" sig命中=true` → dbms=H2。
+  //     （同台上 HSQLDB/Derby 仍 18/18 echo=N → dbms=null，那是它们自己的 WRAP/伪表问题，另记 TODO。）
+  // 顺序前置是**预防性**的：H2 的 sig 是裸版本号，若某台 H2（1.x 或 MODE=MySQL 兼容更完整时）
+  // 的 version() 能在 MySQL 系 wrap 下回显，MySQL 会先抢走 → payload 族/注释符/提取语句整套错配。
+  // 本机未实测到这条，但它与「MariaDB 必须排在 MySQL 前」是同一个机理，成本为零。
+  // 换 exclusive 函数才是把判据从「sig 能不能区分」换成「**这个表达式只在它自己的库上能跑出结果**」。
+  H2: { func: 'H2VERSION()', sig: /^\d+\.\d+/ },
   // MySQL 负向约束：版本串若含 MariaDB 则判为 MariaDB（不让 MySQL 抢匹配）
   MySQL: { func: 'version()', sig: /^\d+\.\d+\.\d+(?!.*MariaDB).*$/i },
   PostgreSQL: { func: 'version()', sig: /PostgreSQL\s+\d+/i },
@@ -221,8 +233,7 @@ export const DB_VERSION = {
   Firebird: { func: "rdb$get_context('SYSTEM','ENGINE_VERSION')", sig: /^\d+\.\d+/ },
   // [P1-FIX 2026-09-16] Informix：同上 —— 常量串无区分度，收紧为需版本/产品特征文本
   Informix: { func: "'Informix'", sig: /Informix\s+(?:Dynamic|Server|IDS|Version)|IBM\s+Informix/i },
-  // H2：version() 返回 "1.4.200" 等纯数字串
-  H2: { func: 'version()', sig: /^\d+\.\d+/ },
+  // H2 已上移到 MariaDB 之后、MySQL 之前并改用 H2VERSION()，见上方 EXCL-FIX。
   // —— D 方向新增（最小适配，待真实环境验证）——
   // [P1-FIX 2026-09-16] Access：同上
   Access: { func: "'ACCESS'", sig: /Microsoft\s+(?:Office\s+)?Access|Access\s+Database\s+Engine/i },
