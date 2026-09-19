@@ -14,6 +14,10 @@
 //   - @detectSQLi（libinjection 指纹，2 条规则）无 C 内核，按跳过统计，不做近似
 //   - 不支持 SecAction/ctl/排除集（ exclusion packages）、IP 信誉等周边
 //   - 相位简化：phase:1/2 不区分（全部对请求体求值）
+//   - PCRE 语法只适配到「本执行器恒用 flags:'i'」能表达的那一层：`(?i)` / `(?i:…)` 已降级，
+//     `(?-i:…)` 与 (?s)(?x)(?P<>) 等遇到即放弃该规则（命中失败 + 普查记一笔 + 保真度门禁 FAIL）。
+//     ⚠️ Node ≥23（V8 13）原生支持 `(?i:…)`，届时降级是冗余的但**仍等价**；反过来若把本仓
+//     升到 Node 23+ 再回退到 22，会让这 5 条规则静默失效 —— 所以保真度门禁必须一直跑。
 // 结论：检出强度略低于真实 ModSecurity+CRS（缺 libinjection），绕过率据此略偏高。
 // ============================================================================
 
@@ -141,14 +145,15 @@ export function parseCrsFile(confPath) {
       stats.unimplemented = (stats.unimplemented || 0) + 1;
       (stats.unimplementedIds ||= []).push(`${rule.id || '?'}:${opName}`);
     }
-    // 编译探针必须与 execOp **逐字同构**（同样的 (?i) 剥离、同样的 flags 选择），
-    // 否则普查会和实际行为两套真相。注意 (?i:…) 这种内联修饰组在 V8 13 / Node 24 是
-    // 合法语法（ES2025 已收进 JS），早先我按"PCRE 专属构造"把它记成静默失效，是误报。
+    // 编译探针必须与 execOp **共用同一个适配函数**，否则普查会和实际行为两套真相。
+    // （上一版注释称 `(?i:…)` 在 ES2025/V8 13 已合法、记进 regexBad 是"误报"——实测打脸：
+    //   本项目跑在 Node 22.22.2 / V8 12.4，`new RegExp('(?i:…)', 'i')` 直接抛 Invalid group，
+    //   那 5 条规则是真的恒不命中。ES2025 的修饰符组要到 Node 23+ 才有，不能拿未来语法当下现状。）
     const rawRx = opName === '@rx' ? op.slice(3).trim() : op.startsWith('@') ? '' : op;
     if (rawRx) {
-      // 与 execOp 逐字同构（同样的 (?i) 剥离、同样恒用 flags='i'），否则普查与实际两套真相
-      const src = rawRx.startsWith('(?i)') ? rawRx.slice(4) : rawRx;
-      try { new RegExp(src, 'i'); } catch { stats.regexBad.push(rule.id || '?'); }
+      const jsSrc = toJsRegex(rawRx);
+      if (jsSrc == null) stats.regexBad.push(rule.id || '?');
+      else { try { new RegExp(jsSrc, 'i'); } catch { stats.regexBad.push(rule.id || '?'); } }
     }
     if (rule.isChainHead) stats.chainHeads++;
   }
@@ -211,6 +216,15 @@ function matchCount(opRaw, n) {
   }
 }
 
+// —— PCRE → JS 正则适配（execOp 与装载期普查**必须共用**，否则两套真相）——
+// 返回 null = 主动放弃（存在无法用全局 flag 表达的反向开关），调用方按"算不出"处理。
+function toJsRegex(src) {
+  if (/\(\?-i[:)]/.test(src)) return null;
+  // `(?i)`：模式级开关，本执行器恒用 flags:'i'，删掉即可（行首、中间都删）
+  // `(?i:`：组级开关，同样因外层已全局不敏感而等价于普通非捕获组
+  return String(src).replace(/\(\?i\)/g, '').replace(/\(\?i:/g, '(?:');
+}
+
 /** 命中则返回 RegExp 的匹配结果（链节点要靠它取捕获组），否则返回 null。 */
 function execOp(rule, value, state = {}) {
   const op0 = rule.opRaw;
@@ -227,21 +241,32 @@ function execOp(rule, value, state = {}) {
   });
   if (op.startsWith('@rx') || !op.startsWith('@')) {
     const reSrc = expand(op.startsWith('@rx') ? op.slice(3).trim() : op);
-    // [FIDELITY-FIX 2026-09-19] 原实现把 `(?i)` 前缀剥掉、flags 却给空串（`'i'.repeat(... ? 0 : 1)`）
-    // —— 等于把 CRS 里几乎所有 @rx 规则从「大小写不敏感」变成「大小写敏感」。`(?i)` 这个标记的
-    // 唯一语义就是大小写不敏感，剥掉标记就必须把 i 标志补回来，否则混合大小写的 payload
-    // （`UnIoN SeLeCt`）一律不命中。用 CRS 官方回归集实测：修前 PL4 逐规则一致率 60.7%、
-    // 应拦用例漏 284/720，漏得最多的 942410 / 942210 / 942362 / 942150 全是 `(?i)` 开头的规则
-    // （明细见 e2e/waf-real/results/crs-equivalence.md）。不带 `(?i)` 的 pattern 原本就是 flags='i'，
-    // 那条路一字未改（CRS 作者写这些 pattern 时已按不敏感设计）。
-    try {
-      const re = new RegExp(reSrc.startsWith('(?i)') ? reSrc.slice(4) : reSrc, 'i');
-      const m = re.exec(value);
-      if (negated) return m ? null : [value];
-      return m;
-    } catch {
-      return negated ? [value] : null; // 编不出来的正则保守跳过；条数由普查报出来
+    // [PCRE-ADAPT 2026-09-19 实测] CRS 的 pattern 是 PCRE 语法，其中两类构造在
+    // **本项目实际运行的 Node 22.22.2（V8 12.4）上直接抛 "Invalid group"**：
+    //   ① 模式级开关 `(?i)`（行首或中间任意位置）
+    //   ② 组级开关 `(?i:…)`（ES2025 regex modifiers —— 要 V8 13 / Node 23+ 才有）
+    // 也就是说：这不是"记错了的误报"，是**真的编译失败**，而 catch 分支返回 null →
+    // 这 5 条规则（942160/942220/942250/942361/942450）恒不命中，官方回归集上漏 23 条
+    // （sleep()/benchmark()、整数溢出、EXECUTE IMMEDIATE、^[\W\d]+\s*(alter|union)、0x 十六进制）。
+    // 降级规则：本执行器恒以 flags:'i' 编译，所以 `(?i)` 是冗余可删、`(?i:…)` 等价于 `(?:…)`。
+    // 反向开关 `(?-i:…)` 无法用全局 flag 表达，遇到即放弃（继续走 catch → 保守跳过），
+    // 否则会把"本该大小写敏感"的子表达式放大成不敏感，制造假命中。
+    // try/catch 必须留着：降级只覆盖**今天已知的**两类构造。将来 CRS 升版引入别的 PCRE 语法
+    // （(?s) (?x) (?P<>) 等），这里会抛——抛了要退化成"该规则不命中 + 普查记一笔 + 门禁 FAIL"，
+    // 而不是让整个保真度脚本崩掉（崩掉反而看不见失败原因）。
+    const jsSrc = toJsRegex(reSrc);
+    if (jsSrc != null) {
+      try {
+        const re = new RegExp(jsSrc, 'i');
+        const m = re.exec(value);
+        if (negated) return m ? null : [value];
+        return m;
+      } catch { /* 落到下面的保守跳过 */ }
     }
+    return negated ? [value] : null; // 编不出来/主动放弃：保守跳过，条数由普查报出来
+    // 沿革：上一版只剥**行首** `(?i)` 就把源码丢给 `new RegExp`，碰上 `(?i:…)` 一律进 catch。
+    // 更早那版更糟——剥掉 `(?i)` 却给空 flags，等于把 CRS 几乎所有 @rx 从"不敏感"变成"敏感"
+    // （修前 PL4 逐规则一致率仅 60.7%）。现在统一走 toJsRegex + flags:'i'，两种 `(?i)` 形态都覆盖。
   }
   if (op.startsWith('@streq')) {
     const eq = value === expand(op.slice(6).trim());
