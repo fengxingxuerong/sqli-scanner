@@ -36,6 +36,8 @@
     "package:win": "npm run build && npm run build:engine && npm run build:sidecar && tauri build --bundles nsis --runner cargo --target x86_64-pc-windows-msvc",
     "package:mac": "npm run build && npm run build:engine && npm run build:sidecar && tauri build --runner cargo --target universal-apple-darwin",
     "typecheck": "npm run typecheck:frontend && npm run typecheck:server",
+    "ci:local": "node scripts/ci-local.mjs",
+    "ci:local:quick": "node scripts/ci-local.mjs --quick",
     "typecheck:frontend": "tsc --noEmit",
     "typecheck:server": "node node_modules/typescript/bin/tsc -p server/tsconfig.json",
     "test:server": "cd server && npm test",
