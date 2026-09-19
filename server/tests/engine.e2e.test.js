@@ -4,7 +4,9 @@
 // 3) POST /api/scan/start 指向 mock 目标，GET 报告，断言检测到注入
 // 4) 校验 /health、/api/health、/api/payloads 契约
 import http from 'node:http';
+import net from 'node:net';
 import { spawn } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test, before, after } from 'node:test';
@@ -12,18 +14,31 @@ import assert from 'node:assert/strict';
 
 const SERVER_DIR = path.dirname(fileURLToPath(new URL('../index.js', import.meta.url)));
 const INDEX_JS = path.join(SERVER_DIR, 'index.js');
-const ENGINE_PORT = 4567;
-const ENGINE_BASE = `http://127.0.0.1:${ENGINE_PORT}`;
+
+// [ENV-COUPLING-FIX 2026-09-19] 旧实现把引擎端口**写死 4567 且复用**该端口上已存在的进程：
+// 只要本机跑着一个带 SCAN_API_TOKEN 的实例（手动起的 server / 桌面版 sidecar / 上一次门禁残留），
+// 受保护端点就全部返 401，而本文件断言的是 2001 —— 稳定假红，且与被测代码毫无关系
+// （实测：另起一个无 token 实例请求同一路径返回 {"code":2001}，证明引擎契约本身没问题）。
+// 现改为三条：① 取空闲端口（不再与任何常驻实例抢 4567）；② 自己 spawn 一个带一次性 token
+// 的实例（不再复用别人的进程）；③ 所有请求显式带 token。
+// 副作用是好的：鉴权链路顺带被真实覆盖，见下方「鉴权契约」两条用例。
+let ENGINE_PORT = 0;
+let ENGINE_BASE = '';
+let ENGINE_TOKEN = '';
 
 let child = null;
-let spawned = false;
 let mockServer = null;
 
 // ===== 工具 =====
-function getJson(urlStr) {
+// 默认带 token；显式传 `{}` 表示「不带任何凭据」（用于断言 401）
+function authHeaders(headers) {
+  return headers || { 'x-api-token': ENGINE_TOKEN };
+}
+
+function getJson(urlStr, headers) {
   return new Promise((resolve, reject) => {
     http
-      .get(urlStr, (res) => {
+      .get(urlStr, { headers: authHeaders(headers) }, (res) => {
         let body = '';
         res.on('data', (c) => (body += c));
         res.on('end', () => {
@@ -38,7 +53,7 @@ function getJson(urlStr) {
   });
 }
 
-function postJson(urlStr, payload) {
+function postJson(urlStr, payload, headers) {
   return new Promise((resolve, reject) => {
     const data = JSON.stringify(payload);
     const u = new URL(urlStr);
@@ -51,6 +66,7 @@ function postJson(urlStr, payload) {
         headers: {
           'Content-Type': 'application/json',
           'Content-Length': Buffer.byteLength(data),
+          ...authHeaders(headers),
         },
       },
       (res) => {
@@ -82,22 +98,39 @@ async function waitForHealth(base, timeoutMs = 20000) {
   throw new Error('引擎健康检查超时');
 }
 
+// 向内核要一个空闲端口：先 listen(0) 拿到再关闭交给子进程。
+// 存在极小的时间窗被别的进程抢占，届时 spawn 会 EADDRINUSE → waitForHealth 超时并给出明确错误，
+// 不会像旧实现那样「静默连上一个来路不明的引擎」。
+function pickFreePort() {
+  return new Promise((resolve, reject) => {
+    const probe = net.createServer();
+    probe.on('error', reject);
+    probe.listen(0, '127.0.0.1', () => {
+      const { port } = probe.address();
+      probe.close(() => resolve(port));
+    });
+  });
+}
+
 async function startEngine() {
-  // 若已有引擎在跑则复用，否则新启动
-  try {
-    const r = await getJson(`${ENGINE_BASE}/health`);
-    if (r && r.code === 0) return false;
-  } catch {}
+  ENGINE_PORT = await pickFreePort();
+  ENGINE_BASE = `http://127.0.0.1:${ENGINE_PORT}`;
+  ENGINE_TOKEN = randomBytes(24).toString('hex');
   child = spawn(process.execPath, [INDEX_JS], {
     cwd: SERVER_DIR,
-    env: { ...process.env },
+    env: {
+      ...process.env,
+      HOST: '127.0.0.1',
+      PORT: String(ENGINE_PORT),
+      // 一次性 token：本实例专属，不读宿主环境里可能存在的 SCAN_API_TOKEN
+      SCAN_API_TOKEN: ENGINE_TOKEN,
+    },
     stdio: 'ignore',
   });
   child.on('error', (e) => {
     throw new Error(`启动引擎失败: ${e.message}`);
   });
   await waitForHealth(ENGINE_BASE);
-  return true;
 }
 
 // ===== mock 易受攻击目标 =====
@@ -139,12 +172,12 @@ function startMockTarget() {
 // ===== 生命周期 =====
 before(async () => {
   mockServer = await startMockTarget();
-  spawned = await startEngine();
+  await startEngine();
 });
 
 after(() => {
   if (mockServer) mockServer.close();
-  if (spawned && child) child.kill();
+  if (child) child.kill();
 });
 
 // ===== API 契约 =====
@@ -178,6 +211,21 @@ test('API 契约：未知 scanId 返回 SCAN_NOT_FOUND', async () => {
   const r = await getJson(`${ENGINE_BASE}/api/scan/nonexistent/report`);
   assert.equal(r.code, 2001);
   assert.equal(r.data, null);
+});
+
+// ===== 鉴权契约（本实例自带一次性 token，可确定性断言）=====
+// 这两条同时是上面 ENV-COUPLING-FIX 的回归钉：旧实现复用外部 4567 实例，
+// 遇到带 token 的实例时下面第一条会拿到 401、第二条会拿到 2001 —— 全靠外部环境掷骰子。
+test('鉴权：不带 token 访问受保护端点应 401', async () => {
+  const r = await getJson(`${ENGINE_BASE}/api/scan/nonexistent/report`, {});
+  assert.equal(r.code, 401, '受保护端点在无凭据时必须拒绝');
+});
+
+test('鉴权：带错 token 访问受保护端点应 401', async () => {
+  const r = await getJson(`${ENGINE_BASE}/api/scan/nonexistent/report`, {
+    'x-api-token': 'definitely-not-the-token',
+  });
+  assert.equal(r.code, 401);
 });
 
 // ===== 端到端检测 =====
