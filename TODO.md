@@ -22,8 +22,22 @@ r2 档黑盒 9/13 → 13/13，A3-like 从 time 变 union+boolean。
 - `Sybase.sig = /(Adaptive Server|Sybase|ASE)/i` 的 `ASE` **没有词边界**，
   Oracle 的 banner「Rel**ease** 19.0.0.0.0」直接命中 —— 与 L46 那次 `Server: BaseHTTP` 含
   "ase" 误判 Sybase 是同一个坑（那次只修了 `FINGERPRINT` 头签名，DB_VERSION 与报错签名两处没同步）。
+
+**2026-09-19 补：这条已经从"理论冲突"变成实测后果。** 本批修掉版本回显通道的回显污染
+（`DBFingerprinter` 取 `__S__…__E__` 前先剔回显）之后，那条通道在回显型目标上**第一次真的工作起来了**，
+于是 `MySQL.sig` 吞 H2 的问题当场现形：`e2e/multi-engine-lab`（真 JDBC 内存库 × CRS）
+H2 / HSQLDB / Derby 三台的 union 从 `num`+`blind` 两处**搬到了 `str`**（每引擎技术位总数不变，
+安全对照仍 0 误报）。归因：H2 的 `version()` 返回 `2.2.224 (2023-09-17)`，命中 MySQL 的
+裸版本号 sig → 定库 MySQL → 按 MySQL 族投放（`#` 注释、`CONCAT` 等 H2 不吃）→ num/blind 的
+union 掉，而 str 因闭合探测被修好反而补回 union。
+**修法（已验证思路，未实施）**：给有**专属版本函数**的库把 func 换成 exclusive 形态并排到 MySQL 之前
+—— H2 用 `H2VERSION()`（本仓 `e2e/blackbox-lab/diag-l2-probe.mjs` 已在用它做 L2 探针）、
+ClickHouse 用 `version()` + CH 专属伪表交叉确认；MySQL 上执行 `H2VERSION()` 只会报错、无标记回显，
+代价是每目标多一次探针。改时要同步 `server/tests/dbmsExtend6.test.js` 里对 `DB_VERSION[*].func`
+的字面断言。
 - **验收口径**：`check-dbms-sig.mjs` 零退出；并补一条「A 库函数在 B 库上不可执行则不算冲突」的
-  跨库可执行性矩阵，让自检报的是**可执行冲突**而不是理论冲突（现在 20 条里绝大多数打不到）。
+  跨库可执行性矩阵，让自检报的是**可执行冲突**而不是理论冲突（现在 20 条里绝大多数打不到）；
+  multi-engine-lab 三台的 `num`/`blind` union 应随定库修正回来。
 
 ### B. `binaryProbe` 的 `capped` 在长度链路上被忽略（未修）
 `docs/统一探测判据-设计.md` 3.3 明确要求「拿到 capped=true 不得当正常结果用」；
