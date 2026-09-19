@@ -66,6 +66,12 @@ ClickHouse 用 `version()` + CH 专属伪表交叉确认；MySQL 上执行 `H2VE
 本轮实跑到的门禁：服务端全量单测（1885 用例 0 fail）+ 前端 315/315 + `tsc` 0 错 + eslint
 0 error + blackbox-lab 两轮 + redteam-lab R1/R2。合入前请补跑 acceptance 一次。
 
+**（2026-09-19 更新）这条已经不再成立**：那批在制品提交后（`381afdb`）acceptance 在本机连跑 3 次
+—— 2 次 `11 PASS / 0 FAIL`，1 次 `10 PASS / 1 FAIL`（失败的是「服务端单测」里的 1 条用例，
+单独连跑 4 次不复现，属偶发；失败现场当时没留下 → 已改为失败即落盘 `e2e/results/last-failure-<id>.log`）。
+同一天还按 ci.yml 的 job 顺序做了本机等价全量跑（`npm run ci:local`，17 段：15 PASS / 1 FAIL / 0 SKIP，
+唯一稳定红的是 G 条那个 concurrent-isolation）。
+
 ### F. README 的 WAF 绕过口径已经过期（**待重定基线**，2026-09-19 实测）
 README「WAF 绕过能力实测口径」那行写的是 2026-09-10 复测的 **tamper off 2/5 → on 10/5 技术位**、
 自动路径 **11 技术位**。今天（2026-09-19）整跑 acceptance 实测到的是 **on=8、auto=8**，
@@ -88,6 +94,23 @@ payloads/index.js DBFingerprinter.js Detector.js ScanManager.js`）、其余保�
 四个数全 null → 报成「FAIL　null 条失败」。现钉 `--test-reporter=tap`，并在取不到汇总行时
 明确报「门禁取数口径不符，非单测失败」。同一坑此前已在 `scripts/facts-sync.mjs` 咬过一次
 （还咬过 3d63b7 那轮回流解析器），**第三处应该去 `run()` 里统一收口**，别再一处一处打补丁。
+
+### G. concurrent-isolation 是**确定性红**，不是抖动（已定性，未修，2026-09-19）
+`e2e/run-all.mjs` 现在稳定挂在这一套：本批改动前后各连跑 3 次，6 次全失败、失败行逐字相同
+（按「每边 ≥3 次」的口径做的定性）。现象：PG 那条扫描正常（`dbms=PostgreSQL`、union 命中），
+两条 MySQL 扫描**什么都测不到**（`dbms=null techs=[]`）—— 不是判据判错，是请求层面就没拿到可用信号。
+
+查的时候先盯这两处（都有实测依据，别从 payload 入手）：
+1. `e2e/concurrent-isolation/e2e.mjs:32` 建 MySQL 池写死 `port: 3306`，**不读 `MYSQL_PORT`**；
+   而 `run-all` 按 `deps:['sandbox']` 把它交给 `run-with-sandbox.py`（沙箱在 3308）。
+   「声明走沙箱」与「实际连宿主」自相矛盾 —— 宿主 3306 的库表/权限与沙箱不同，正好会造成"整点无信号"。
+2. 它在 CI 里**永远抓不到**：`deps` 含 `pg`，CI 无 PostgreSQL → 直接 SKIP。要么给 CI 补 PG
+   service container，要么让它显式 BLOCKED —— 别以一个 SKIP 混在"全绿"里。
+
+### H. udf-lab step6 的归因文案会把人带偏（未修）
+`sys_eval('cmd /c echo <ASCII marker>')` 偶发捕获为空时，step6 的 note 固定写
+「典型：Windows 本地化 whoami 的 GBK 输出」。marker 是纯 ASCII，这句话把人往编码方向带，
+而实际形态是**输出捕获为空**。改成按实测分支给原因（空捕获与"不可字符化"是两回事）。
 
 ---
 
