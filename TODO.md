@@ -53,12 +53,25 @@ H2 2.2.224，`{waf:false}` 才跑得通，见下）：
      定库整条失效（各自的 WRAP/伪表问题，与 H2 无关）。README 的分层措辞（「3 种部分通道验证」）不用改，
      但"这三家的**定库**都可用"不成立：三台里只有 H2 现在能被版本回显定库。
 
-### B. `binaryProbe` 的 `capped` 在长度链路上被忽略（未修）
+### B. `binaryProbe` 的 `capped` 在长度链路上被忽略（**已修，2026-09-20**）
 `docs/统一探测判据-设计.md` 3.3 明确要求「拿到 capped=true 不得当正常结果用」；
-`engine/blindExtractor.js` `_binarySearch` 现在只 `return r.n + 1`，把 `r.capped` 丢了，
-`_extendLength` 再用 `Math.min(ext, maxLen)` 钳到 4096 —— 症状（睡 65531 次）没了，
-但**判据失效时仍在拿错误值继续跑**（会去逐字节提一个 4096 长度的假值）。
-修法：capped 时让该字段直接判「探测失败」并入 `summary.constraints`（与 P1-E 同一记录）。
+`engine/blindExtractor.js` `_binarySearch` 原先只 `return r.n + 1`，把 `r.capped` 丢了。
+
+**修法（比原计划的「直接判失败」多一层，因为一刀切会打死正常长值 —— 实测挂了 2 个用例）**：
+「顶到上界」有两种成因，探测层面无法区分，必须分层裁决：
+
+| 位置 | 顶到上界的含义 | 处置 |
+|---|---|---|
+| 主段（hi=255） | 可能只是真实长度 ≥256（合法信号） | 只打 `ctx.blindLenCapped` 标记，交 `_extendLength` 预检 `>255` 裁决 |
+| 延伸段（hi=maxLen，用户**显式**配了 `blindMaxLen`） | 用户已授权「最多提这么长」 | 按 maxLen **截断**提取（旧行为不变） |
+| 延伸段（hi=maxLen=默认护栏 4096） | 用户没授权过这么长 → 判据失效 | **判失败**（-1 → 该字段提取返回 null） |
+
+失败原因经 `ctx.blindLenCapped` 上浮，由 `scan/extract.js` 写进 `report.summary.constraints`
+（「盲注长度探测失败：二分顶到上界 N 且响应差异不可区分」）—— 让「没提取到」不再被读成「目标没数据」。
+
+**验证**：新增 `server/tests/blindLenCapped.test.js`（3 条）。缺陷注入（撤销延伸段终审）→
+**只有第 1 条红**，且实际值是一整串 4096 个垃圾字符（直观展示伤害），另两条（显式
+blindMaxLen 截断 / 真长值 300 字节延伸）仍绿 —— 三条各测一面，不是一红红一片。
 
 ### C. `--test-path` 的闭合候选在 404 段上是噪声（未修）
 实测 `/api/sleep` 开 `--test-path` 时，path 点拿到 boundary `%"` —— 13 个候选的响应全是同一张
@@ -118,17 +131,25 @@ README 原写 2026-09-10 复测的 **tamper off 2/5 → on 10/5 技术位**、�
 明确报「门禁取数口径不符，非单测失败」。同一坑此前已在 `scripts/facts-sync.mjs` 咬过一次
 （还咬过 3d63b7 那轮回流解析器），**第三处应该去 `run()` 里统一收口**，别再一处一处打补丁。
 
-### G. concurrent-isolation 是**确定性红**，不是抖动（已定性，未修，2026-09-19）
-`e2e/run-all.mjs` 现在稳定挂在这一套：本批改动前后各连跑 3 次，6 次全失败、失败行逐字相同
-（按「每边 ≥3 次」的口径做的定性）。现象：PG 那条扫描正常（`dbms=PostgreSQL`、union 命中），
+### G. concurrent-isolation 是**确定性红**（**已修，2026-09-20**）
+`e2e/run-all.mjs` 曾稳定挂在这一套：现象是 PG 那条扫描正常（`dbms=PostgreSQL`、union 命中），
 两条 MySQL 扫描**什么都测不到**（`dbms=null techs=[]`）—— 不是判据判错，是请求层面就没拿到可用信号。
 
-查的时候先盯这两处（都有实测依据，别从 payload 入手）：
-1. `e2e/concurrent-isolation/e2e.mjs:32` 建 MySQL 池写死 `port: 3306`，**不读 `MYSQL_PORT`**；
-   而 `run-all` 按 `deps:['sandbox']` 把它交给 `run-with-sandbox.py`（沙箱在 3308）。
-   「声明走沙箱」与「实际连宿主」自相矛盾 —— 宿主 3306 的库表/权限与沙箱不同，正好会造成"整点无信号"。
-2. 它在 CI 里**永远抓不到**：`deps` 含 `pg`，CI 无 PostgreSQL → 直接 SKIP。要么给 CI 补 PG
-   service container，要么让它显式 BLOCKED —— 别以一个 SKIP 混在"全绿"里。
+1. **`e2e/concurrent-isolation/e2e.mjs` 建 MySQL 池写死 `port: 3306`**（还有 user/password），
+   只读了 `MYSQL_PASSWORD` 一个变量；而 `run-all` 按 `deps:['sandbox']` 把它交给
+   `run-with-sandbox.py`（沙箱在 3308，并注入 `MYSQL_HOST/PORT/USER/PASSWORD/DATABASE`）。
+   「声明走沙箱」与「实际连宿主」自相矛盾。
+   实测复现沙箱路径：写死 3306 时沙箱注入的**空口令**连不上宿主 → 退出码 2；改成读 `MYSQL_*`
+   契约后沙箱下 PASS（3308，3/3 union 命中）。另加了环境自检（连不上 / 库内 0 张表 → 显式
+   BLOCKED 退出码 2），避免再把环境问题判成「并发串扰」归给被测代码。
+2. **CI 里永远抓不到**（`deps` 含 `pg`，CI 无 PostgreSQL）：原先缺依赖的靶场被 `run-all`
+   直接过滤掉，**连 SKIP 都不显示** → 「通过 6 / 失败 0」看起来是全绿。现汇总新增
+   「未跑（缺依赖，本轮零断言）」单列，计数行加 `未跑 N`。
+   注：给 CI 补 PG service container 仍未做（那是另一条路，二选一即可，现已不靠它保证诚实）。
+
+**顺带修**：`run-all.mjs --only` 只认空格形式 `--only 名字`，写 `--only=名字` 时
+`indexOf('--only')` 返回 -1 → **静默退化成跑全部依赖齐全的靶场**（实测：想跑 1 个 0.5s 套件，
+结果跑了 21 个含 77s 红队）。现两种写法都认，并打印「定向模式：只跑 X」。
 
 ### H. udf-lab step6 的归因文案会把人带偏（未修）
 `sys_eval('cmd /c echo <ASCII marker>')` 偶发捕获为空时，step6 的 note 固定写

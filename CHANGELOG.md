@@ -129,6 +129,38 @@
   不是一红红一片），恢复后 4/4。
 - 注：本条此前只存在于工作区未提交，README/CHANGELOG 均无记录，属「修了但没留痕」。
 
+### 修复：盲注长度二分「顶到上界」时拿上界当长度（TODO §B）
+
+`binaryProbe` 早就给出 `capped` 标记，但 `blindExtractor._binarySearch` 只 `return r.n + 1`，
+把标记丢了 —— 判据失效时会**按上界逐字节提取**（历史事故：上界 65531，一个 5 字符的值
+要提 6.5 万字符）。
+
+修的时候发现「顶到上界」**有两种成因**，探测层面无法区分，一刀切判失败会打死正常长值
+（实跑挂了 2 个用例），故分层裁决：
+
+| 位置 | 含义 | 处置 |
+|---|---|---|
+| 主段（hi=255） | 也可能只是真实长度 ≥256 | 只打 `ctx.blindLenCapped`，交 `_extendLength` 预检 `>255` 裁决 |
+| 延伸段，`blindMaxLen` 由用户显式配置 | 用户已授权「最多提这么长」 | 按 maxLen 截断提取（旧行为不变） |
+| 延伸段，撞上默认护栏 4096 | 用户没授权过这么长 → 判据失效 | 判失败（-1 → 该字段返回 null） |
+
+失败原因经 `ctx.blindLenCapped` 上浮，由 `scan/extract.js` 写进 `report.summary.constraints`。
+新增 `server/tests/blindLenCapped.test.js`（3 条）；缺陷注入（撤销延伸段终审）→ **只有第 1 条红**
+且实际值是一整串 4096 个垃圾字符，另两条（显式 blindMaxLen 截断 / 真长值 300 字节延伸）仍绿。
+
+### 修复：concurrent-isolation 的确定性红 + 门禁「未跑」不可见（TODO §G）
+
+- `e2e/concurrent-isolation/e2e.mjs` 建 MySQL 池**写死** `port:3306/user:root/password:'root'`，
+  而 `run-all` 按 `deps:['sandbox']` 把它交给 `run-with-sandbox.py`（沙箱在 3308，注入
+  `MYSQL_*`）。「声明走沙箱」与「实际连宿主」自相矛盾 → 两条 MySQL 扫描 `dbms=null techs=[]`。
+  现统一读 `MYSQL_*` 契约；另加环境自检（连不上 / 库内 0 张表 → 显式 BLOCKED，退出码 2），
+  不再把环境问题判成「并发串扰」归给被测代码。
+  **实测**：沙箱路径下，写死 3306 时沙箱注入的空口令连不上宿主 → 退出码 2；改后 PASS（3/3 union 命中）。
+- `run-all.mjs` 汇总新增「未跑（缺依赖，本轮零断言）」单列：此前缺依赖的靶场被直接过滤，
+  连 SKIP 都不显示，「通过 6 / 失败 0」是假绿。
+- 顺带：`--only` 只认空格形式，写 `--only=名字` 会**静默退化成跑全部**（实测想跑 1 个 0.5s
+  套件结果跑了 21 个，含 77s 红队）。现两种写法都认并打印「定向模式」。
+
 ### 修复：CRS 执行器保真度门禁唯一的 FAIL（96% / 23 条未点名分歧 → 99.3% / 0）
 
 - **病根**：CRS v4.1.0 的 pattern 用 PCRE 的组级大小写开关 `(?i:…)`。本仓跑在

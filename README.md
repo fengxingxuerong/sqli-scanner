@@ -1,6 +1,6 @@
 # sqli-scanner
 
-[![Tests](https://img.shields.io/badge/tests-2207%20passing-brightgreen)](#测试)
+[![Tests](https://img.shields.io/badge/tests-2210%20passing-brightgreen)](#测试)
 [![Dependencies](https://img.shields.io/badge/dependencies-0%20known%20vulns-brightgreen)](#环境变量)
 
 > CI 徽章待仓库地址确定后启用（当前 `OWNER/REPO` 是占位，占位链接会显示成"通过"，属误导，
@@ -302,7 +302,7 @@ backend/  ← Express + Node.js
 # 前端测试（315 个用例）
 npm test
 
-# 服务端测试（1893 个用例）
+# 服务端测试（1896 个用例）
 cd server && npm test
 
 # 全部测试
@@ -318,7 +318,7 @@ npm run test:all
 
 - TypeScript: 零错误
 - 前端测试: 315/315 通过（覆盖率门禁 stmts 91.11 / branch 80.00 / func 72.01，阈值 88/77/67）
-- 服务端测试: 1893 用例（1892 pass / 0 fail / 1 skip，并发口径 2026-09-19 复测；1 skip 为环境依赖显式跳过。覆盖率 lines 89.08 / branch 72.95 / func 76.55，阈值 85/69/72）
+- 服务端测试: 1896 用例（1895 pass / 0 fail / 1 skip，并发口径 2026-09-19 复测；1 skip 为环境依赖显式跳过。覆盖率 lines 89.08 / branch 72.95 / func 76.55，阈值 85/69/72）
 - 一键扫描: `npm run scan -- -u <url>`（CLI 一条命令产出 HTML/JSON/Markdown 全套报告 + manifest，退出码可直接进 CI 门禁）
 - Tamper 插件: 228 个（含 v24 增量 20 个，对齐 sqlmap 官方 tamper 全集，含官方 CRS/libinjection 实测组合 uniontable+odbcbrace）
 - WAF 绕过能力: 200+ 插件链式组合，覆盖 62 个 WAF 厂商指纹识别 + 推荐
@@ -561,12 +561,12 @@ npm run acceptance -- --only=waf-auto,waf-real   # 改完某模块做定向门�
 - 依赖缺失时输出 **SKIP + 原因**（不静默跳过、不假装通过）；任一必需套件失败 → 非零退出码。
 - 报告落盘 `e2e/results/acceptance-report.md`。
 
-**最近一次全量结果（2026-09-20 00:18，本机：MySQL 8.0.28 @3306 + 红队靶场 @8231 均在线）**：
-**12 PASS / 0 BLOCKED / 0 FAIL / 0 SKIP**（12 套件，首次全绿）
+**最近一次全量结果（2026-09-20 01:00，本机：MySQL 8.0.28 @3306 + 红队靶场 @8231 均在线）**：
+**12 PASS / 0 BLOCKED / 0 FAIL / 0 SKIP**（12 套件全绿；改到盲注提取链路后复跑仍全绿）
 
 | 套件 | 事实 |
 |---|---|
-| 服务端单测 | 1893 tests / 1892 pass / 0 fail / 1 skip（skip 为环境依赖显式跳过） |
+| 服务端单测 | 1896 tests / 1895 pass / 0 fail / 1 skip（skip 为环境依赖显式跳过） |
 | 独立刁钻靶场 | 10/10 检出，安全误报 0 |
 | 检测回归 | 19 PASS / 0 FAIL |
 | 真 MySQL / 真 PG（含二阶） | 10 PASS / 全部通过（PGlite） |
