@@ -163,8 +163,16 @@ const runOne = (lab, useSandbox = false) =>
 const argv = process.argv.slice(2);
 const listMode = argv.includes('--list');
 const allMode = argv.includes('--all');
-const onlyIdx = argv.indexOf('--only');
-const only = onlyIdx >= 0 ? (argv[onlyIdx + 1] || '').split(',').map((s) => s.trim()).filter(Boolean) : null;
+// [ONLY-FIX 2026-09-20] 原来只认 `--only 名字`（空格形式）。写成 `--only=名字` 时
+// `indexOf('--only')` 返回 -1 → only 为 null → **静默退化成"跑全部依赖齐全的靶场"**。
+// 实测：本想只跑 1 个 0.5s 的套件，结果跑了 21 个（含 77s 的红队），耗时从 1s 变 10 分钟。
+// 更糟的是它不说自己忽略了参数 —— 定向复测的结论会被全量结果污染。
+const onlyIdx = argv.findIndex((a) => a === '--only' || a.startsWith('--only='));
+const only = onlyIdx >= 0
+  ? (argv[onlyIdx] === '--only' ? (argv[onlyIdx + 1] || '') : argv[onlyIdx].slice('--only='.length))
+    .split(',').map((s) => s.trim()).filter(Boolean)
+  : null;
+if (only) console.log(`[run-all] 定向模式：只跑 ${only.join(', ')}`);
 
 console.log('=== e2e 靶场清单（依赖探测）===');
 const status = [];
@@ -210,8 +218,20 @@ for (const r of results) {
 const failed = results.filter((r) => r.code !== 0);
 const skipped = results.filter((r) => r.skipped);
 const passed = results.length - failed.length - skipped.length;
+// [G2-FIX 2026-09-20] 「缺依赖 → 默认模式直接过滤掉」的靶场在此前**完全不出现在汇总里**：
+// 顶部清单打了 ⛔，但汇总只按 results 统计，于是 `通过 6 / 跳过 0 / 失败 0` 看起来是全绿，
+// 而 concurrent-isolation 这类（deps 含 pg，CI 无 PostgreSQL）压根没跑、也没人看见。
+// 未跑 ≠ 通过 ≠ 跳过 —— 必须单独列出来，否则「CI 全绿」是假绿。
+const notRun = only ? [] : status.filter((s) => !s.ok && !targets.includes(s));
+if (notRun.length) {
+  console.log('');
+  console.log('=== 未跑（缺依赖，本轮零断言）===');
+  for (const s of notRun) console.log(`⛔ ${s.lab.name.padEnd(20)} 缺: ${s.missing.join(', ')}`);
+}
 console.log('');
-console.log(`通过 ${passed} / 跳过 ${skipped.length} / 失败 ${failed.length}  （共 ${results.length} 个靶场）`);
+console.log(`通过 ${passed} / 跳过 ${skipped.length} / 失败 ${failed.length}`
+  + `${notRun.length ? ` / 未跑 ${notRun.length}` : ''}  （共 ${results.length} 个靶场`
+  + `${notRun.length ? `，清单共 ${status.length} 个）` : '）'}`);
 if (skipped.length) {
   // 原先这里举的例子是「secure_file_priv 未放行时文件读写类套件无法真跑」——
   // 但本套件里**根本没有** fileRead/fileWrite（它们归 acceptance 管），照抄 acceptance

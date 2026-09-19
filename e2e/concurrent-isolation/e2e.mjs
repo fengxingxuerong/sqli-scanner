@@ -29,7 +29,23 @@ const MY_PORT = Number(process.env.CONC_MY_PORT) || 8273;
 await initDb();
 const { app: pgApp, close: pgClose } = createOobLabApp({ waf: false });
 const pgServer = pgApp.listen(PG_PORT, '127.0.0.1');
-const myPool = mysql.createPool({ host: '127.0.0.1', port: 3306, user: 'root', password: process.env.MYSQL_PASSWORD ?? 'root', database: 'sqli_lab', connectionLimit: 8 });
+// [G-FIX 2026-09-20] 这条连库语句原先**写死** host=127.0.0.1 / port=3306 / user=root /
+// password='root'，只读了 MYSQL_PASSWORD 一个变量。而 `run-all.mjs` 给本套件的 deps 是
+// ['pg','sandbox'] —— 也就是把它交给 `run-with-sandbox.py`，由沙箱在**另一个端口**（非 3306）
+// 起一个隔离 mysqld 并注入 MYSQL_HOST/MYSQL_PORT/MYSQL_USER/MYSQL_PASSWORD/MYSQL_DATABASE。
+// 于是「声明走沙箱」与「实际连宿主 3306」自相矛盾：宿主库里的表/权限与沙箱不同，
+// 两条 MySQL 扫描什么都测不到（dbms=null techs=[]），套件稳定红且红得莫名其妙。
+// 现与所有其它 MySQL 靶场（real-mysql-lab/verify.mjs 等）统一读 MYSQL_* 契约。
+const MYSQL_CONF = {
+  host: process.env.MYSQL_HOST || '127.0.0.1',
+  port: Number(process.env.MYSQL_PORT) || 3306,
+  user: process.env.MYSQL_USER || 'root',
+  password: process.env.MYSQL_PASSWORD ?? 'root',
+  database: process.env.MYSQL_DATABASE || 'sqli_lab',
+};
+console.log(`[setup] MySQL 连 ${MYSQL_CONF.host}:${MYSQL_CONF.port}/${MYSQL_CONF.database}`
+  + `　凭据来源：${process.env.MYSQL_PORT ? `环境变量 MYSQL_PORT=${process.env.MYSQL_PORT}（沙箱）` : '默认值 3306（未走沙箱，请确认该库已初始化且口令匹配）'}`);
+const myPool = mysql.createPool({ ...MYSQL_CONF, connectionLimit: 8 });
 const myServer = createMysqlLabApp(myPool).listen(MY_PORT, '127.0.0.1');
 await new Promise((resolve, reject) => {
   let n = 0;
@@ -39,6 +55,21 @@ await new Promise((resolve, reject) => {
   pgServer.once('error', reject);
   myServer.once('error', reject);
 });
+// 环境自检：连不上 / 库里没表 必须先喊出来。
+// 不校验的话，MySQL 两条会「什么都测不到 → dbms=null」并被下面的断言判成
+// **隔离性 FAIL** —— 把一个环境问题归给被测代码，正是本套件此前被误判成"并发串扰"的原因。
+try {
+  const [tables] = await myPool.query('SHOW TABLES');
+  const n = Array.isArray(tables) ? tables.length : 0;
+  if (n === 0) {
+    console.error(`[BLOCKED] MySQL ${MYSQL_CONF.host}:${MYSQL_CONF.port}/${MYSQL_CONF.database} 里一张表都没有 —— 靶场未初始化，本套件无法验证隔离性`);
+    process.exit(2);
+  }
+  console.log(`[setup] MySQL 库内有 ${n} 张表`);
+} catch (e) {
+  console.error(`[BLOCKED] 连不上 MySQL ${MYSQL_CONF.host}:${MYSQL_CONF.port}/${MYSQL_CONF.database}：${e?.message || e}`);
+  process.exit(2);
+}
 console.log(`[setup] PG:${PG_PORT} + MySQL:${MY_PORT} 靶场就绪`);
 
 // 2) 三个并发扫描（2 个 MySQL 不同上下文 + 1 个 PG，故意混库）
