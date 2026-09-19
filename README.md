@@ -1,6 +1,6 @@
 # sqli-scanner
 
-[![Tests](https://img.shields.io/badge/tests-2199%20passing-brightgreen)](#测试)
+[![Tests](https://img.shields.io/badge/tests-2207%20passing-brightgreen)](#测试)
 [![Dependencies](https://img.shields.io/badge/dependencies-0%20known%20vulns-brightgreen)](#环境变量)
 
 > CI 徽章待仓库地址确定后启用（当前 `OWNER/REPO` 是占位，占位链接会显示成"通过"，属误导，
@@ -302,7 +302,7 @@ backend/  ← Express + Node.js
 # 前端测试（315 个用例）
 npm test
 
-# 服务端测试（1887 个用例）
+# 服务端测试（1893 个用例）
 cd server && npm test
 
 # 全部测试
@@ -318,7 +318,7 @@ npm run test:all
 
 - TypeScript: 零错误
 - 前端测试: 315/315 通过（覆盖率门禁 stmts 91.11 / branch 80.00 / func 72.01，阈值 88/77/67）
-- 服务端测试: 1887 用例（1884 pass / 0 fail / 3 skip，并发口径 2026-09-19 复测；3 skip 为环境依赖显式跳过。覆盖率 lines 88.82 / branch 72.95 / func 76.26，阈值 85/69/72）
+- 服务端测试: 1893 用例（1892 pass / 0 fail / 1 skip，并发口径 2026-09-19 复测；1 skip 为环境依赖显式跳过。覆盖率 lines 89.08 / branch 72.95 / func 76.55，阈值 85/69/72）
 - 一键扫描: `npm run scan -- -u <url>`（CLI 一条命令产出 HTML/JSON/Markdown 全套报告 + manifest，退出码可直接进 CI 门禁）
 - Tamper 插件: 228 个（含 v24 增量 20 个，对齐 sqlmap 官方 tamper 全集，含官方 CRS/libinjection 实测组合 uniontable+odbcbrace）
 - WAF 绕过能力: 200+ 插件链式组合，覆盖 62 个 WAF 厂商指纹识别 + 推荐
@@ -446,52 +446,36 @@ node e2e/blackbox-lab/run-scan.mjs                        # 两轮扫描（r1 �
 node e2e/blackbox-lab/sqlmap-bench.mjs                    # sqlmap 同题对照
 ```
 
-### WAF 绕过能力实测口径（2026-09-09 起，勿混用）
+### WAF 绕过能力实测口径（2026-09-19 重写：旧数字已作废）
 
-| 数据来源 | 口径 | 对外可用性 |
-|---|---|---|
-| `npm run waf-real`（e2e/waf-real，OWASP CRS v4.1.0 官方规则原文 + 自实现 SecRule 执行器 ≈PL3） | **tamper off 2 → tamper on 8 个技术位**（5 个注入场景；2026-09-19 复测）。逐场景：`str`/`like` = `[union,boolean]`、`orderby` = `[error,boolean]`、`num`/`blind` = `[boolean]`；安全对照零误拦 | ✅ 唯一对外引用数字 |
-| `npm run waf-auto`（同一 CRS 下不显式配 tamper，引擎自行识别拦截证据 → 选链 → 重跑） | **8 个技术位、安全误报 0**（2026-09-19 复测） | ✅ 与上一行同口径可比 |
-| `npm run waf-validate`（e2e/waf-lab，自写正则模拟器） | 「107/225 有效、base64encode 100%」等 | ⚠️ 仅作插件自检，不得对外引用 |
-| 真实 ModSecurity/Coraza/商业云 WAF | 未实测 | ❌ 禁止声明 |
+> ⚠️ **本节在 2026-09-19 被整体推翻过一次。** 此前对外引用的「tamper off 2 → tamper on 8」
+> 「自动选链 11」出自保真度只有 **60.7%** 的自实现 SecRule 执行器（两处结构性缺陷：`(?i)`
+> 内联大小写标记被吃掉、链节点的 `TX/MATCHED_VARS` 未实现）。用 CRS 官方回归集把执行器修准后
+> （保真度 99.3%），**同一批探针在同一份规则上的结论完全变了** —— 「绕过有效」是宽松执行器
+> 白给的假收益。旧归因（含 942361 的规则级分析）保留在 TODO §F 作历史记录，**不再作为对外口径**。
 
-**2026-09-19 复测把旧口径 10（人工挂链）/ 11（自动选链）下修到 8/8，原因已定位到规则号与规则原文**
-（逐条手工发探针，`e2e/real-mysql-lab` 真 MySQL 8.0.28 × CRS）：数值上下文 `?id=` 上的 UNION 探针
-**在 WAF 层就被拦死**，而 `dash2hash` 只改尾部注释符，救不了它 ——
+| 档位 | tamper off | tamper on | 自动选链 | 结论 |
+|---|---|---|---|---|
+| **PL1（CRS 默认部署档 —— 客户线上真正面对的）** | 8 | 8 | 8 | 现有探针本就能通过默认部署的 CRS，**挂链无可证增益** |
+| **PL3（全规则最严档）** | 0 | 0 | 0 | 现有 tamper 链对 942 家族**无可证绕过** |
 
-| 探针形态 | 结果 | 命中规则 |
-|---|---|---|
-| `1 ORDER BY n-- -` | 403 | 942460（4 连非词字符） |
-| `1 UNION SELECT NULL,…`（尾 `-- -` / `-- ` / `#` 三种都试） | **全部 403** | 942361 |
-| `1 UNION/**/SELECT`、`UNION%0aSELECT`、`UNION  双空格`、`UNION ALL SELECT` | **全部 403** | 942361（换分隔符无效） |
-| `1 /*!UNION*/ /*!SELECT*/` | 403 | 942500 |
-| `alice' UNION SELECT NULL,…#`（字符串上下文） | **200** | 未命中 |
+- 两档基线分别锁在 `e2e/waf-real/waf-bits-baseline.json`（只减不增）；门禁默认跑 **PL1**
+  （`WAF_GATE_PL=3 npm run acceptance` 可切档）。
+- 上表是「技术位合计」，**不是绕过率** —— 不要再写成 `N/M` 分数或百分比对外引用。
+- 安全对照：两档均零误拦。复现：`npm run acceptance`（`waf-real` / `waf-auto` 两套件，事实数字进报告）。
+- `npm run waf-validate`（e2e/waf-lab，自写正则模拟器）的「107/225 有效」等数字 ⚠️ 仅作插件自检，**禁止对外**。
 
-上面 8 条换分隔符的形态**在不套 WAF 时全部被 MySQL 正常执行**（直连靶场回 200 + 结果表），
-所以不是语法问题，是 WAF 判定。看 942361 原文就明白为什么换分隔符没用：
+**执行器保真度门禁（`crs-fidelity`，用 CRS 官方回归集把执行器自身钉住）**：基线记录 99.3% / 0 未点名分歧；
+**2026-09-19 23:15 本机复测为 96% / 23 条未点名分歧 → 该套件 FAIL**（942160/942220/942250/942361/942450 漏规则，
+明细见 `e2e/results/last-failure-crs-fidelity.log` 与 `e2e/waf-real/results/crs-equivalence.md`）。
+**在它转绿之前，上表两档数字都只是「自实现执行器口径」**；真实 ModSecurity/Coraza/商业云 WAF **从未实测**
+—— ❌ 禁止对外声明任何真实 WAF 环境下的绕过率。
 
-```
-SecRule … ARGS … "@rx (?i:^[\W\d]+\s*?(?:alter|union)\b)"   # id:942361, phase:2
-# 官方注释：This rule is a stricter sibling of 942360. The keywords 'alter' and 'union'
-# led to false positives. Therefore they have been moved to PL2…
-```
+旧口径的逐探针归因（942361 打的是参数值起始形状 `^[\W\d]+\s*?(?:alter|union)\b`，故 `1 UNION…` 必拦、
+`alice' UNION…` 放行）**测于执行器修复之前**：规则原文可复核，但由此得出的「数值点 union 拿不回来、
+需要改起始形状的算子」这一结论在新口径下不再需要 —— PL3 下所有探针全拦（0/0），PL1 下无需绕过（8/8）。
 
-它打的是**参数值的起始形状**（`^[\W\d]+` 后紧跟 `union`），根本不看 `UNION` 与 `SELECT` 是否相邻。
-数值点 `id=1…` 天然以数字开头 → 必命中；`alice'…` 以字母开头 → 不命中。这解释了表里全部现象，
-也说明"拆开相邻性"那条路（`/**/`、`%0a`）对这条规则无效。
-**另一层口径**：942361 按官方注释属 **PL2**，而本仓执行器默认全规则（≈PL3 最严档）→
-上面 8/8 是「最严档」数字；**CRS 默认部署（PL1）下的绕过率未测**，别把 8/8 当成"典型线上值"。
-
-因此本仓对外只引用 **8/8（全规则≈PL3 档）**，可用 `npm run acceptance` 的 `waf-real`/`waf-auto`
-两套件复现（事实数字进报告）。旧数字 10/11 来自哪一次代码状态、当时判据是否把 403 拦截页当成回显，
-已无从核对（`e2e/waf-real/results/` 不入库、旧报告未留档），所以这里**不做"退化了 2 位"的断言**。
-把数值点在严格档下的 union 拿回来，需要的是**改掉参数值起始形状**的算子（见 TODO 的 I 条）。
-
-结论（诚实边界）：严格 CRS v4.1.0 下 **union 与布尔通道均已实测可绕过（限字符串上下文靶点）**
-（`dash2hash` 把 `-- -` 规整成 `#`/`-- ` 规避 942460；`hexliterals` 抽掉字面量引号规避 942200/942370）。
-error 通道仅在 orderby 场景命中。
-
-**自动路径（不显式配 tamper）实测 8 技术位**（`npm run waf-auto`）：
+**自动路径（不显式配 tamper）**（`npm run waf-auto`）：
 引擎自行识别拦截证据 → 链验证选中 `['dash2hash','hexliterals']`（日志 `WAF 链验证：[dash2hash,hexliterals] 探针放行`）
 → 重跑补全。三项关键使能修复：
 
@@ -546,8 +530,9 @@ sqlmap 误报的具体条目：`F18-safe-item`、`F20-safe-rand`、`F21-safe-500
 
 ### 验收门禁（`npm run acceptance`）
 
-11 套件一次跑完：服务端单测 → 独立刁钻靶场 → 检测回归 → 真 MySQL → 真 PG（含二阶）→
-**报告契约** → CRS 人工挂链 A/B → CRS 自动选链 → 红队实战（真值对照）→ fileRead/fileWrite 真闭环。
+12 套件一次跑完：服务端单测 → 独立刁钻靶场 → 检测回归 → 真 MySQL → 真 PG（含二阶）→
+**报告契约** → CRS 人工挂链 A/B → CRS 自动选链 → **CRS 执行器保真度（官方回归集）** →
+红队实战（真值对照）→ fileRead/fileWrite 真闭环。
 
 **判定纪律（关键）**：门禁**不采信任何套件自报的 PASS 字样**，只解析可独立核对的事实数字
 （漏洞场景数 / 安全误报数 / 技术位 / 文件是否真的存在），据此断言并决定退出码。
@@ -565,21 +550,35 @@ npm run acceptance -- --only=waf-auto,waf-real   # 改完某模块做定向门�
 - 依赖缺失时输出 **SKIP + 原因**（不静默跳过、不假装通过）；任一必需套件失败 → 非零退出码。
 - 报告落盘 `e2e/results/acceptance-report.md`。
 
-**最近一次全量结果（2026-09-19，本机默认 mysqld：`secure_file_priv=NULL`、红队靶场未常驻）**：
-**8 PASS / 0 BLOCKED / 0 FAIL / 3 SKIP**
+**最近一次全量结果（2026-09-19 23:50，本机：MySQL 8.0.28 @3306 + 红队靶场 @8231 均在线）**：
+**11 PASS / 0 BLOCKED / 1 FAIL / 0 SKIP**（12 套件）
 
 | 套件 | 事实 |
 |---|---|
-| 服务端单测 | 1887 tests / 1884 pass / 0 fail / 3 skip（skip 为环境依赖显式跳过） |
+| 服务端单测 | 1893 tests / 1892 pass / 0 fail / 1 skip（skip 为环境依赖显式跳过） |
 | 独立刁钻靶场 | 10/10 检出，安全误报 0 |
 | 检测回归 | 19 PASS / 0 FAIL |
 | 真 MySQL / 真 PG（含二阶） | 10 PASS / 全部通过（PGlite） |
 | 报告契约 | 8 项一致 / 0 不一致 |
-| CRS 人工挂链 / 自动选链 | off 2 → **on 8**；自动 **8**，误报 0（口径与规则级归因见上文「WAF 绕过能力实测口径」） |
-| 红队实战评测（真值对照） | **SKIP** —— 靶场未常驻（`127.0.0.1:8231`），需先 `npm run lab:redteam` |
-| fileRead / fileWrite | **SKIP** —— `secure_file_priv=NULL`（MySQL 8 默认），本套件未执行任何断言 |
+| CRS 人工挂链 A/B（PL1） | off 8 / on 8，安全对照零误拦 |
+| CRS 自动选链（PL1） | 技术位 8，安全误报 0 |
+| CRS 执行器保真度（官方回归集） | **FAIL** —— 保真度 96%，**23 条未点名分歧**（942160/942220/942250/942361/942450 漏规则） |
+| 红队实战评测（真值对照） | 19/19（100%），安全点 7，误报 0 |
+| fileRead / fileWrite 真闭环 | PASS（文件落盘=true，隔离沙箱重试） |
 
-> 这三个 SKIP **不是"上次是 11 PASS 现在退步了"**：2026-09-17 那次是在 `secure_file_priv=''` 的放行实例
+**本轮唯一 FAIL：`CRS 执行器保真度`（可复现，未修）** —— 自实现 SecRule 执行器与 CRS 官方回归集
+存在 **23 条未点名分歧**（942160/942220/942250/942361/942450 漏规则，保真度 96%），
+基线文件记录的是 99.3% / 0 分歧。**在它转绿前，本仓所有 WAF 数字都只能在「自实现执行器口径」内引用**
+（见上文 WAF 节）。明细：`e2e/results/last-failure-crs-fidelity.log`、`e2e/waf-real/results/crs-equivalence.md`。
+
+> 同轮跑出的另一条 FAIL **已修**：`tests/engine.e2e.test.js` 旧实现把引擎端口写死 4567 **并复用**该端口上
+> 已存在的进程 —— 本机 4567 跑着一个带 `SCAN_API_TOKEN` 的实例，受保护端点返 401，而用例断言的是 2001，
+> 与被测代码无关（另起无 token 实例请求同一路径返回 `{"code":2001}`）。现改为「取空闲端口 + 自己 spawn
+> 带一次性 token 的实例 + 请求显式带 token」，并补两条鉴权契约用例；修后单文件连跑 5 次 7/7、
+> 门禁内该套件 1892 pass / 0 fail。这类「测试复用外部进程 → 结果由环境决定」的假红形态值得单独警惕。
+
+> 更早那次「8 PASS / 3 SKIP」是在 MySQL 未起、红队靶场未常驻的环境下跑的，与本次不是同一环境的两个样本。
+> 再早的「11 PASS / 0 SKIP」则是假绿：2026-09-17 那次是在 `secure_file_priv=''` 的放行实例
 > + 红队靶场就绪下跑的（当时记作 11 PASS / 0 SKIP）。同一天之后 `acceptance.mjs` 一直把
 > 「只输出 SKIP、一行断言都没跑」的套件**算进 PASS 并计入顶部汇总**——那是假绿，2026-09-19 已改为
 > 独立三态（`PASS / SKIP / BLOCKED / FAIL` 分列，SKIP 不进失败也不冒充通过）。所以现在的
