@@ -231,6 +231,25 @@ export function createApp() {
   // 所以 `/scan/:id/report` 也是 API——不能只按 /api 前缀判断）。
   const API_SEGMENTS = new Set(['api', 'sqlmap', 'scan', 'exploit']);
   const isApiPath = (p) => API_SEGMENTS.has(String(p || '').split('/')[1]);
+  // [SPA-DEEPLINK-FIX 2026-09-19 真浏览器实测] 上面那个白名单把前端自己的两个路由
+  // `/scan`、`/exploit` 一起当成 API 拦了：带 token 部署时，浏览器直接访问/刷新/收藏这两页
+  // 拿到的是一段 `{"code":401,...}` JSON —— **Web UI 的两个主页面打不开**（`/`、`/history`、
+  // `/report/:id` 反而没事，因为它们不在 API_SEGMENTS 里）。开发模式(Vite 代理)与不带 token
+  // 时都看不到，所以此前从没暴露。
+  // 判据收紧在"确实是浏览器要的外壳"上，三者同时成立才放行：
+  //   ① GET；② 路径是**裸** /scan 或 /exploit（没有子路径 —— `/scan/<id>/report` 这类仍是 API）；
+  //   ③ Accept 里带 text/html（API 客户端不会带；curl 直取仍 401，不额外暴露任何东西）；
+  //   ④ 且 dist/index.html 真的存在（否则放行了也只会 404）。
+  // 数据接口一律不受影响：前端走的是 `/api/...` 基址，仍在 isApiPath 分支里要 token。
+  const SPA_TOP_ROUTES = new Set(['scan', 'exploit']);
+  const wantsHtml = (req) => /text\/html/i.test(String(req.headers.accept || ''));
+  const servesSpaShell = existsSync(fileURLToPath(new URL('../dist/index.html', import.meta.url)));
+  const isSpaShellRequest = (req) =>
+    req.method === 'GET' &&
+    servesSpaShell &&
+    wantsHtml(req) &&
+    SPA_TOP_ROUTES.has(String(req.path || '').split('/')[1]) &&
+    !String(req.path || '').slice(1).includes('/');
   if (API_TOKEN) {
     app.use((req, res, next) => {
       if (req.method === 'OPTIONS') return next();
@@ -238,7 +257,7 @@ export function createApp() {
       // 旧实现只放行 PUBLIC_READONLY 精确集合，`GET /` 落到「需要有效的 API Token」→
       // Docker/单端口部署下**打开站点就是一段 401 JSON，Web UI 完全不可用**。
       // 静态外壳本身不含任何扫描数据，放行不构成信息泄露；所有数据接口仍受 token 保护。
-      if (req.method === 'GET' && !isApiPath(req.path)) return next();
+      if (req.method === 'GET' && (!isApiPath(req.path) || isSpaShellRequest(req))) return next();
       const isPublicReadonly = req.method === 'GET' && PUBLIC_READONLY.has(req.path);
       if (isPublicReadonly) return next();
       // x-api-token header 优先；Authorization Bearer 其次；query token 为 SSE EventSource 备选
