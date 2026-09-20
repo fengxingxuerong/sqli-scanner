@@ -13,11 +13,8 @@
 // 用法：node e2e/waf-real/probe-union-shape.mjs
 // 纯发请求 + 直连真库，几秒出结果，不启动靶场 HTTP 进程。
 // ============================================================================
-import { resolve, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 const require = createRequire(new URL('../../server/package.json', import.meta.url));
-const HERE = dirname(fileURLToPath(import.meta.url));
 const mysql = require('mysql2/promise');
 const { evaluate, EFFECTIVE_PL } = await import(new URL('./crs-engine.js', import.meta.url).href);
 
@@ -36,7 +33,6 @@ const POOL = mysql.createPool({
 // 字符串点形如：      SELECT ... WHERE username='<INJECT>'
 const TAG = 'SQLISCANNER';
 const NUM_SQL = (inject) => `SELECT id,username FROM users WHERE id=${inject}`;
-const STR_SQL = (inject) => `SELECT id,username FROM users WHERE username='${inject}'`;
 
 // 标记值必须真回来才算「语义成立」——光不报错不够（可能 union 被注释吞掉只剩合法前缀）
 const UNION_TAIL = `UNION SELECT 999,'${TAG}OK'`;

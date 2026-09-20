@@ -15,8 +15,6 @@
 // 因此本版系统扫「union 与 select 之间的填充字符种类」×「注释形态」，逐格看：
 //   CRS 拦不拦 / MySQL 认不认 / 标记值能不能取回
 // ============================================================================
-import { resolve, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 const require = createRequire(new URL('../../server/package.json', import.meta.url));
 const mysql = require('mysql2/promise');

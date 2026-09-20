@@ -302,12 +302,20 @@ jobs:
         with:
           node-version: 24
       - run: cd server && npm ci
-      - run: node e2e/tamper-matrix/run.js
+      # [CI-FIX 2026-09-20] 两个入口文件路径是错的，指向了**不存在**的 run.js：
+      #   · e2e/tamper-matrix/run.js  → 实际入口 tamper-test.mjs
+      #   · e2e/waf-lab/run.js        → 实际入口 compare-real.e2e.mjs（需真 MySQL，由 run.py 起沙箱）
+      # 且两者都带 continue-on-error: true，于是 `node <不存在的文件>` 每次静默失败、
+      # 从不拦人 —— 这两个 job **从未验证过任何东西**（空转门禁）。
+      # waf-lab 依赖真 MySQL：本机无 docker，CI 侧也没有起库步骤，直接调会 ECONNREFUSED；
+      # 故此处改为经 Python 沙箱启动器（它自己起隔离 mysqld，见 compare-real.run.py 注释）。
+      # 若 CI 环境无 python/mysqld，该步会明确报缺失依赖而非静默通过。
+      - run: node e2e/tamper-matrix/tamper-test.mjs
         name: Tamper effect matrix
         timeout-minutes: 10
         continue-on-error: true
-      - run: node e2e/waf-lab/run.js
-        name: WAF rule lab
+      - run: python3 e2e/waf-lab/compare-real.run.py
+        name: WAF rule lab (真 MySQL 沙箱 A/B)
         timeout-minutes: 10
         continue-on-error: true
 

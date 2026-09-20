@@ -1,1 +1,3 @@
 {"at":"2026-09-19T10:58:07.206Z","seed":20260921,"requested":40,"observableVuln":18,"unobservable":2,"recallHit":18,"benign":20,"fp":0,"ci95Lower":82.41}
+{"at":"2026-09-20T05:09:56.888Z","seed":880992649,"requested":24,"observableVuln":9,"unobservable":3,"recallHit":9,"benign":12,"fp":0,"ci95Lower":70.08}
+{"at":"2026-09-20T05:21:44.480Z","seed":20260919,"requested":40,"observableVuln":17,"unobservable":3,"recallHit":17,"benign":20,"fp":0,"ci95Lower":81.57}

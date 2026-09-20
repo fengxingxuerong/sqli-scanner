@@ -1,16 +1,17 @@
 {
-  "at": "2026-09-19T10:58:07.205Z",
-  "seed": 20260921,
+  "at": "2026-09-20T05:21:44.478Z",
+  "seed": 20260919,
   "cases": 40,
   "mysql": "127.0.0.1:3306",
   "unobservable": [
-    "c10-orderby",
-    "c32-orderby"
+    "c00-orderby",
+    "c20-orderby",
+    "c34-orderby"
   ],
   "recall": {
-    "hit": 18,
-    "total": 18,
-    "ci95Lower": 82.41
+    "hit": 17,
+    "total": 17,
+    "ci95Lower": 81.57
   },
   "falsePositive": {
     "count": 0,
@@ -20,19 +21,13 @@
   "missByShape": {},
   "results": [
     {
-      "id": "c00-num",
-      "shape": "num",
+      "id": "c00-orderby",
+      "shape": "orderby",
       "vulnerable": true,
-      "detected": true,
-      "status": "done",
-      "techs": [
-        "union",
-        "error",
-        "boolean"
-      ],
-      "dbms": [
-        "MySQL"
-      ]
+      "detected": false,
+      "status": "unobservable",
+      "techs": [],
+      "dbms": []
     },
     {
       "id": "c01-param",
@@ -44,8 +39,8 @@
       "dbms": []
     },
     {
-      "id": "c02-strparen",
-      "shape": "strparen",
+      "id": "c02-like",
+      "shape": "like",
       "vulnerable": true,
       "detected": true,
       "status": "done",
@@ -68,31 +63,7 @@
       "dbms": []
     },
     {
-      "id": "c04-str",
-      "shape": "str",
-      "vulnerable": true,
-      "detected": true,
-      "status": "done",
-      "techs": [
-        "union",
-        "error",
-        "boolean"
-      ],
-      "dbms": [
-        "MySQL"
-      ]
-    },
-    {
-      "id": "c05-intval",
-      "shape": "intval",
-      "vulnerable": false,
-      "detected": false,
-      "status": "done",
-      "techs": [],
-      "dbms": []
-    },
-    {
-      "id": "c06-like",
+      "id": "c04-like",
       "shape": "like",
       "vulnerable": true,
       "detected": true,
@@ -107,8 +78,30 @@
       ]
     },
     {
-      "id": "c07-intval",
-      "shape": "intval",
+      "id": "c05-escape",
+      "shape": "escape",
+      "vulnerable": false,
+      "detected": false,
+      "status": "done",
+      "techs": [],
+      "dbms": []
+    },
+    {
+      "id": "c06-paren",
+      "shape": "paren",
+      "vulnerable": true,
+      "detected": true,
+      "status": "done",
+      "techs": [
+        "error"
+      ],
+      "dbms": [
+        "MySQL"
+      ]
+    },
+    {
+      "id": "c07-param",
+      "shape": "param",
       "vulnerable": false,
       "detected": false,
       "status": "done",
@@ -140,17 +133,23 @@
       "dbms": []
     },
     {
-      "id": "c10-orderby",
-      "shape": "orderby",
+      "id": "c10-strparen",
+      "shape": "strparen",
       "vulnerable": true,
-      "detected": false,
-      "status": "unobservable",
-      "techs": [],
-      "dbms": []
+      "detected": true,
+      "status": "done",
+      "techs": [
+        "union",
+        "error",
+        "boolean"
+      ],
+      "dbms": [
+        "MySQL"
+      ]
     },
     {
-      "id": "c11-whitelist",
-      "shape": "whitelist",
+      "id": "c11-param",
+      "shape": "param",
       "vulnerable": false,
       "detected": false,
       "status": "done",
@@ -158,8 +157,8 @@
       "dbms": []
     },
     {
-      "id": "c12-num",
-      "shape": "num",
+      "id": "c12-str",
+      "shape": "str",
       "vulnerable": true,
       "detected": true,
       "status": "done",
@@ -182,13 +181,12 @@
       "dbms": []
     },
     {
-      "id": "c14-strparen",
-      "shape": "strparen",
+      "id": "c14-paren",
+      "shape": "paren",
       "vulnerable": true,
       "detected": true,
       "status": "done",
       "techs": [
-        "union",
         "error",
         "boolean"
       ],
@@ -197,8 +195,8 @@
       ]
     },
     {
-      "id": "c15-escape",
-      "shape": "escape",
+      "id": "c15-param",
+      "shape": "param",
       "vulnerable": false,
       "detected": false,
       "status": "done",
@@ -206,8 +204,8 @@
       "dbms": []
     },
     {
-      "id": "c16-num",
-      "shape": "num",
+      "id": "c16-str",
+      "shape": "str",
       "vulnerable": true,
       "detected": true,
       "status": "done",
@@ -230,79 +228,7 @@
       "dbms": []
     },
     {
-      "id": "c18-strparen",
-      "shape": "strparen",
-      "vulnerable": true,
-      "detected": true,
-      "status": "done",
-      "techs": [
-        "union",
-        "error",
-        "boolean"
-      ],
-      "dbms": [
-        "MySQL"
-      ]
-    },
-    {
-      "id": "c19-escape",
-      "shape": "escape",
-      "vulnerable": false,
-      "detected": false,
-      "status": "done",
-      "techs": [],
-      "dbms": []
-    },
-    {
-      "id": "c20-like",
-      "shape": "like",
-      "vulnerable": true,
-      "detected": true,
-      "status": "done",
-      "techs": [
-        "union",
-        "error",
-        "boolean"
-      ],
-      "dbms": [
-        "MySQL"
-      ]
-    },
-    {
-      "id": "c21-intval",
-      "shape": "intval",
-      "vulnerable": false,
-      "detected": false,
-      "status": "done",
-      "techs": [],
-      "dbms": []
-    },
-    {
-      "id": "c22-like",
-      "shape": "like",
-      "vulnerable": true,
-      "detected": true,
-      "status": "done",
-      "techs": [
-        "union",
-        "error",
-        "boolean"
-      ],
-      "dbms": [
-        "MySQL"
-      ]
-    },
-    {
-      "id": "c23-whitelist",
-      "shape": "whitelist",
-      "vulnerable": false,
-      "detected": false,
-      "status": "done",
-      "techs": [],
-      "dbms": []
-    },
-    {
-      "id": "c24-str",
+      "id": "c18-str",
       "shape": "str",
       "vulnerable": true,
       "detected": true,
@@ -317,7 +243,25 @@
       ]
     },
     {
-      "id": "c25-escape",
+      "id": "c19-intval",
+      "shape": "intval",
+      "vulnerable": false,
+      "detected": false,
+      "status": "done",
+      "techs": [],
+      "dbms": []
+    },
+    {
+      "id": "c20-orderby",
+      "shape": "orderby",
+      "vulnerable": true,
+      "detected": false,
+      "status": "unobservable",
+      "techs": [],
+      "dbms": []
+    },
+    {
+      "id": "c21-escape",
       "shape": "escape",
       "vulnerable": false,
       "detected": false,
@@ -326,12 +270,13 @@
       "dbms": []
     },
     {
-      "id": "c26-paren",
-      "shape": "paren",
+      "id": "c22-strparen",
+      "shape": "strparen",
       "vulnerable": true,
       "detected": true,
       "status": "done",
       "techs": [
+        "union",
         "error",
         "boolean"
       ],
@@ -340,8 +285,56 @@
       ]
     },
     {
-      "id": "c27-whitelist",
-      "shape": "whitelist",
+      "id": "c23-intval",
+      "shape": "intval",
+      "vulnerable": false,
+      "detected": false,
+      "status": "done",
+      "techs": [],
+      "dbms": []
+    },
+    {
+      "id": "c24-num",
+      "shape": "num",
+      "vulnerable": true,
+      "detected": true,
+      "status": "done",
+      "techs": [
+        "union",
+        "error",
+        "boolean"
+      ],
+      "dbms": [
+        "MySQL"
+      ]
+    },
+    {
+      "id": "c25-intval",
+      "shape": "intval",
+      "vulnerable": false,
+      "detected": false,
+      "status": "done",
+      "techs": [],
+      "dbms": []
+    },
+    {
+      "id": "c26-like",
+      "shape": "like",
+      "vulnerable": true,
+      "detected": true,
+      "status": "done",
+      "techs": [
+        "union",
+        "error",
+        "boolean"
+      ],
+      "dbms": [
+        "MySQL"
+      ]
+    },
+    {
+      "id": "c27-escape",
+      "shape": "escape",
       "vulnerable": false,
       "detected": false,
       "status": "done",
@@ -364,7 +357,54 @@
       ]
     },
     {
-      "id": "c29-intval",
+      "id": "c29-param",
+      "shape": "param",
+      "vulnerable": false,
+      "detected": false,
+      "status": "done",
+      "techs": [],
+      "dbms": []
+    },
+    {
+      "id": "c30-paren",
+      "shape": "paren",
+      "vulnerable": true,
+      "detected": true,
+      "status": "done",
+      "techs": [
+        "error",
+        "boolean"
+      ],
+      "dbms": [
+        "MySQL"
+      ]
+    },
+    {
+      "id": "c31-param",
+      "shape": "param",
+      "vulnerable": false,
+      "detected": false,
+      "status": "done",
+      "techs": [],
+      "dbms": []
+    },
+    {
+      "id": "c32-num",
+      "shape": "num",
+      "vulnerable": true,
+      "detected": true,
+      "status": "done",
+      "techs": [
+        "union",
+        "error",
+        "boolean"
+      ],
+      "dbms": [
+        "MySQL"
+      ]
+    },
+    {
+      "id": "c33-intval",
       "shape": "intval",
       "vulnerable": false,
       "detected": false,
@@ -373,7 +413,25 @@
       "dbms": []
     },
     {
-      "id": "c30-str",
+      "id": "c34-orderby",
+      "shape": "orderby",
+      "vulnerable": true,
+      "detected": false,
+      "status": "unobservable",
+      "techs": [],
+      "dbms": []
+    },
+    {
+      "id": "c35-param",
+      "shape": "param",
+      "vulnerable": false,
+      "detected": false,
+      "status": "done",
+      "techs": [],
+      "dbms": []
+    },
+    {
+      "id": "c36-str",
       "shape": "str",
       "vulnerable": true,
       "detected": true,
@@ -388,7 +446,7 @@
       ]
     },
     {
-      "id": "c31-whitelist",
+      "id": "c37-whitelist",
       "shape": "whitelist",
       "vulnerable": false,
       "detected": false,
@@ -397,49 +455,8 @@
       "dbms": []
     },
     {
-      "id": "c32-orderby",
-      "shape": "orderby",
-      "vulnerable": true,
-      "detected": false,
-      "status": "unobservable",
-      "techs": [],
-      "dbms": []
-    },
-    {
-      "id": "c33-whitelist",
-      "shape": "whitelist",
-      "vulnerable": false,
-      "detected": false,
-      "status": "done",
-      "techs": [],
-      "dbms": []
-    },
-    {
-      "id": "c34-paren",
-      "shape": "paren",
-      "vulnerable": true,
-      "detected": true,
-      "status": "done",
-      "techs": [
-        "error",
-        "boolean"
-      ],
-      "dbms": [
-        "MySQL"
-      ]
-    },
-    {
-      "id": "c35-param",
-      "shape": "param",
-      "vulnerable": false,
-      "detected": false,
-      "status": "done",
-      "techs": [],
-      "dbms": []
-    },
-    {
-      "id": "c36-strparen",
-      "shape": "strparen",
+      "id": "c38-like",
+      "shape": "like",
       "vulnerable": true,
       "detected": true,
       "status": "done",
@@ -453,32 +470,8 @@
       ]
     },
     {
-      "id": "c37-param",
-      "shape": "param",
-      "vulnerable": false,
-      "detected": false,
-      "status": "done",
-      "techs": [],
-      "dbms": []
-    },
-    {
-      "id": "c38-strparen",
-      "shape": "strparen",
-      "vulnerable": true,
-      "detected": true,
-      "status": "done",
-      "techs": [
-        "union",
-        "error",
-        "boolean"
-      ],
-      "dbms": [
-        "MySQL"
-      ]
-    },
-    {
-      "id": "c39-param",
-      "shape": "param",
+      "id": "c39-escape",
+      "shape": "escape",
       "vulnerable": false,
       "detected": false,
       "status": "done",

@@ -22,6 +22,7 @@
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import fs from 'node:fs';
+import net from 'node:net';
 import { createRequire } from 'node:module';
 import { createMysqlLabApp } from '../real-mysql-lab/lab-app.js';
 import { computeMetrics } from './metrics.js';
@@ -136,11 +137,38 @@ async function main() {
 
   const waf = makeWafMiddleware({});
   const app = createMysqlLabApp(pool, waf);
-  const server = app.listen(LAB_PORT);
-  await new Promise((r) => {
-    if (server.listening) return r();
-    server.once('listening', r);
+
+  // [PORT-GUARD 2026-09-20] 端口占用前置检查。
+  // 实测踩坑：8099 上残留了一个旧的 lab-server-v2（手动跑老 compare.e2e.js 留下的），
+  // `app.listen(8099)` 的 'error' 事件**无人监听** → 监听静默失败，但下面的自检照样
+  // 打到残留靶场，得回 `/num` 404，于是报出「良性请求未通过（404），靶场异常」——
+  // 一条把「端口被占」伪装成「靶场坏了」的误导性结论。这类假红比真红更有害：
+  // 它指向错误的排查方向。故先探一次端口，占了就显式说清楚是谁占的。
+  await new Promise((resolve, reject) => {
+    const probe = net.createServer();
+    probe.once('error', (e) => {
+      reject(
+        new Error(
+          `端口 ${LAB_PORT} 已被占用（${e.code}）—— 本套件需要独占该端口。\n` +
+          '  多半是上一次异常退出的 waf-lab 进程残留，先清掉再跑：\n' +
+          `    Windows:  netstat -ano | findstr :${LAB_PORT}   然后 taskkill /F /PID <pid>\n` +
+          `    POSIX:    lsof -ti :${LAB_PORT} | xargs kill -9\n` +
+          `  或换端口重跑： WAF_LAB_PORT=8199 node e2e/run-all.mjs --only waf-lab`
+        )
+      );
+    });
+    probe.once('listening', () => probe.close(resolve));
+    probe.listen(LAB_PORT, '127.0.0.1');
   });
+
+  const server = app.listen(LAB_PORT, '127.0.0.1');
+  // 显式接住监听失败，避免 ERR_SERVER_ALREADY_LISTEN 变成未捕获异常。
+  const listenErr = await new Promise((resolve) => {
+    const t = setTimeout(() => resolve(null), 15000);
+    server.once('listening', () => { clearTimeout(t); resolve(null); });
+    server.once('error', (e) => { clearTimeout(t); resolve(e); });
+  });
+  if (listenErr) throw new Error(`靶场监听 ${LAB_PORT} 失败：${listenErr.code || listenErr.message}`);
 
   // 自检：确认靶子**真的可注入**（否则判据又是空转）
   const selfCheck = async (u) => {
