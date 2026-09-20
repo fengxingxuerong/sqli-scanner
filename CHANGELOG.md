@@ -37,6 +37,31 @@ CLI 侧 `config.X =` ∧ 引擎侧 `config.X`/`ctx.config?.X` − `KNOWN_CFG_KEY
 所以白名单对这批键只管告警不管放行 —— 缺陷注入实测确认后，新守卫加了
 「BACKFILL ⊆ KNOWN」一条把它钉住。
 
+### 修复：`-r` 导入 multipart 抓包时整份 body 塌成一个垃圾键（静默 0 检出）
+
+`-r`（Burp/curl 导入）是实战喂目标最主要的方式，而这条路上**解析器是对的、接线是坏的**：
+`parseRequestFile` 正确抽出 `{username, caption, avatar}`，但 `applyRequestFile` 丢开这些
+字段、把**原始 body** 交给 `bodyToJsonString` 的 urlencoded 启发式。multipart 里没有 `&`、
+只有 `name="…"` 里的 `=`，于是整份 body 塌成**一个**键，键名为
+`--<boundary>\r\nContent-Disposition: form-data; name`；同时那个
+`Content-Type: multipart/form-data; boundary=…` 被原样保留 —— 发出去的是"声明 multipart
+却带一坨 urlencoded 垃圾"，目标必然取不到参数 → **扫描正常跑完、0 检出、零告警**。
+
+修法：解析器新增 `bodyFields`（只装来自 body 的字段；原有的 `params` 把 query 和 body 混在
+一个扁平对象里，调用方无法区分），multipart 时用它构造 body，并**删掉那个已经对不上的
+Content-Type**，让引擎按 urlencoded 重发同一批字段名与值。这是"降级但说实话"：很多框架
+两种编码都吃；不吃的那批由 warn 明确告知"未检出 ≠ 没有洞"，而不是让人以为目标干净。
+
+**为什么既有测试全绿却没拦住**：`requestFileParser.multipart.test.js` 测的是被调函数，
+断点却在调用链的下一环。**只测被调函数、不测调用链，就会出现"测试全绿而入口是坏的"**。
+新增 `requestFile.importWiring.test.js` 一律从 `applyRequestFile` 进、从引擎收到的注入点出
+（5 条，含 urlencoded/JSON 两条"别波及既有路径"的对照）；缺陷注入复验：把 multipart 判定
+短路 → 第 1、2 条同时红。
+
+真 multipart 发送仍未支持（`injection.js`/`httpClient` 里 0 处 FormData，已核实），
+连同"前端 `requestParser.ts` 连 multipart 分支都没有"一起记在 TODO §O，并写明动手前
+必须先补 multipart 靶场——`buildInjectionRequest` 是全项目最吃重的函数。
+
 ### 修复：CLI 的嵌套 JSON body 被摊平成不可注入的畸形值（同一份抓包 CLI 少测注入点）
 
 `--body` 的文档语义是「JSON 对象字符串」，但 CLI 一律摊进 `bodyParams`，而 TargetParser

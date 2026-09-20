@@ -399,6 +399,43 @@ TargetParser 看点位（只测 `resolveBodyChannel` 挡不住"忘了把 jsonBod
 目标，端到端跑出 `dbms=MySQL` + `param=user.id` 的 union/error 两条检出、共 206 请求
 无拦截——这条链路是真通了，不是只有测试绿。
 
+### O. `-r` 导入 multipart 抓包：整份 body 塌成一个垃圾键（✅ 已止血 2026-09-20，剩两条）
+
+`-r`（Burp/curl 导入）是实战里喂目标最主要的方式，而这条路上**解析器是对的、接线是坏的**：
+`parseRequestFile` 正确抽出 `{username, caption, avatar}`（`requestFileParser.multipart.test.js`
+一直是绿的），但 `applyRequestFile` 丢开这些字段、把**原始 body** 交给
+`bodyToJsonString` 的 urlencoded 启发式。multipart 里没有 `&`、只有 `name="…"` 里的 `=`，
+于是整份 body 塌成**一个**键，键名是
+
+```
+--<boundary>\r\nContent-Disposition: form-data; name
+```
+
+值为余下全部内容；同时 `Content-Type: multipart/form-data; boundary=…` 被原样保留。
+发出去的是"声明 multipart 却带一坨 urlencoded 垃圾"，目标必然解析不到参数 →
+**扫描正常跑完、0 检出、零告警**。
+
+修法：给解析器加 `bodyFields`（只装来自 body 的字段，与混了 query 的 `params` 分开），
+multipart 时用它构造 body，并**删掉那个已经对不上的 Content-Type**，让引擎按 urlencoded
+重发同一批字段名与值。这是"降级但说实话"：很多框架两种编码都吃；不吃的那批由 warn 明确
+告知"未检出 ≠ 没有洞"，而不是让人以为目标干净。
+
+**为什么既有测试全绿却没拦住**（这条最值得留）：
+`requestFileParser.multipart.test.js` 测的是被调函数，而断点在调用链的下一环。
+**只测被调函数、不测调用链**，就会出现"测试全绿而入口是坏的"。新加的
+`requestFile.importWiring.test.js` 一律从 `applyRequestFile` 进、从引擎收到的注入点出；
+缺陷注入复验（把 multipart 判定短路）→ 第 1、2 条同时红。
+
+**还剩两条（本批未做，按需排）**
+1. **引擎不支持发送 multipart**（`injection.js`/`httpClient` 里 0 处 FormData/boundary，
+   已核实）。真要覆盖"只吃 multipart 的目标"，得在 body 构造处加一条 multipart 序列化分支
+   （含 boundary 生成与文件字段回发）。**风险点要认清**：`buildInjectionRequest` 是全项目
+   最吃重的函数，五种技术位每条请求都过它，而当前 multipart 的 e2e 覆盖为 0 ——
+   动手前应先补一个 multipart 靶场进 `e2e/`，否则改完没有任何东西能证明没改坏别的。
+2. **前端 `src/shared/requestParser.ts` 完全没有 multipart 分支**（0 命中），
+   也就是说在 UI 里粘贴 multipart 抓包，连"字段名"这一步都拿不到，比 CLI 修前更空。
+   与 §L 第 1 条同源：CLI 与 UI 是两套解析实现，口径会各自漂移。
+
 
 ---
 

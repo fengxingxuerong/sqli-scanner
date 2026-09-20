@@ -65,6 +65,13 @@ export function parseRequestFile(text) {
 
   // 提取 query params（注入参数候选）
   const params = {};
+  // [MULTIPART-R-FIX 2026-09-20] bodyFields 与 params 同步收集，但**只装来自 body 的字段**。
+  // 为什么不能只给 params：它把 query、urlencoded body、multipart、JSON 四个来源混在同一个
+  // 扁平对象里，调用方分不清哪个键该进 body、哪个该进 URL。以前 `-r` 导入 multipart 抓包时
+  // 就是因为没处拿"纯 body 字段"，只能把原始 body 塞给 urlencoded 启发式去猜，结果整份 body
+  // 塌成一个以 boundary 行命名的垃圾键（实测），扫描照跑、0 检出、无告警。
+  const bodyFields = {};
+  const addBody = (k, v) => { if (k && !(k in bodyFields)) bodyFields[k] = v; };
   try {
     const qIdx = url.indexOf('?');
     if (qIdx >= 0) {
@@ -96,9 +103,11 @@ export function parseRequestFile(text) {
           const k = decodeURIComponent(pair.slice(0, eq));
           const v = decodeURIComponent(pair.slice(eq + 1));
           if (k && !(k in params)) params[k] = v;
+          addBody(k, v);
         } else {
           const k = decodeURIComponent(pair);
           if (k && !(k in params)) params[k] = '';
+          addBody(k, '');
         }
       }
     } catch { /* ignore decode errors */ }
@@ -123,9 +132,11 @@ export function parseRequestFile(text) {
         if (fn) {
           // 文件字段：值取 filename（二进制内容无注入语义，文件名常进 SQL/日志）
           if (fn[1] && !(nm[1] in params)) params[nm[1]] = fn[1];
+          if (fn[1]) addBody(nm[1], fn[1]);
           continue;
         }
         if (val && !(nm[1] in params)) params[nm[1]] = val;
+        if (val) addBody(nm[1], val);
       }
     }
   }
@@ -137,12 +148,19 @@ export function parseRequestFile(text) {
         for (const [k, v] of Object.entries(o || {})) {
           const key = prefix ? prefix + '.' + k : k;
           if (v !== null && typeof v === 'object') flat(v, key);
-          else if (!(key in params)) params[key] = String(v);
+          else {
+            if (!(key in params)) params[key] = String(v);
+            // JSON 走点路径叶子（与 params 同口径）。bodyFields 的语义是"来自 body 的注入
+            // 字段候选"，不是"可直接 urlencoded 的键值"——JSON body 有自己那条通道
+            // （runSingleScan 的 jsonBody），这里填它是为了让"这个 body 到底有没有字段"
+            // 在三种编码下都是可答的问题，别让调用方靠 Object.keys().length 猜。
+            addBody(key, String(v));
+          }
         }
       };
       flat(obj, '');
     } catch { /* 非 JSON body 原样保留 */ }
   }
 
-  return { method, url, headers, body, params };
+  return { method, url, headers, body, params, bodyFields };
 }

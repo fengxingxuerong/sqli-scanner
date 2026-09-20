@@ -437,8 +437,32 @@ export function applyRequestFile(args) {
   } else {
     args.method = parsed.method;
   }
-  const bodyJson = bodyToJsonString(parsed.body);
-  if (bodyJson) args.body = bodyJson;
+  const ctKeyForBody = Object.keys(parsed.headers || {}).find((k) => /^content-type$/i.test(k));
+  const ctForBody = ctKeyForBody ? String(parsed.headers[ctKeyForBody]) : '';
+  const isMultipart = /multipart\/form-data/i.test(ctForBody);
+  if (isMultipart) {
+    // [MULTIPART-R-FIX 2026-09-20] 抓包是 multipart 时，绝不能走下面的 urlencoded 启发式。
+    // 实测那条路会把整份 body 塌成**一个**键，键名是 `--<boundary>\r\nContent-Disposition:
+    // form-data; name`、值是余下全部内容（因为 multipart 里没有 '&'，只有'name="' 里的 '='）。
+    // 于是 `parsed.params` 里明明解析对了 3 个字段（username/caption/avatar），递进引擎的
+    // 却是 1 个垃圾点：扫描正常跑完、0 检出、一句"未检出"——静默假阴性。
+    // 引擎目前**不支持发送 multipart**（injection.js / httpClient 里 0 处 FormData/boundary），
+    // 所以这里做的是"降级但要说实话"：改用解析器抽出的真实字段，并**丢掉那个已经对不上的
+    // multipart Content-Type**（留着它 = 声明 multipart 却发 urlencoded，目标必然解析失败），
+    // 让 HttpClient 按 urlencoded 发。字段名与值都是对的，很多框架两种编码都吃；
+    // 不吃的那些，下面的 warn 会明确告诉你为什么没测到，而不是让你以为没有洞。
+    const fields = parsed.bodyFields || {};
+    if (Object.keys(fields).length) args.body = JSON.stringify(fields);
+    if (ctKeyForBody) delete parsed.headers[ctKeyForBody];
+    console.warn(
+      `  [!] -r 抓到的是 multipart/form-data 目标（字段：${Object.keys(fields).slice(0, 6).join(', ') || '(未解析出)'}）。`
+      + '\n      引擎当前不支持发送 multipart，本次已降级为 application/x-www-form-urlencoded 重发同一批字段。'
+      + '\n      只认 multipart 的目标会收不到参数 → "未检出"不代表没有注入。需要真 multipart 请见 TODO。'
+    );
+  } else {
+    const bodyJson = bodyToJsonString(parsed.body);
+    if (bodyJson) args.body = bodyJson;
+  }
   // Cookie 头 → args.cookie；其余请求头 → args.headerObj
   const cookieKey = Object.keys(parsed.headers).find(k => k.toLowerCase() === 'cookie');
   if (cookieKey) args.cookie = parsed.headers[cookieKey];
