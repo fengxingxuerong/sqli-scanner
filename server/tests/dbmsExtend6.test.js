@@ -67,8 +67,11 @@ test('D: union payload 使用正确的方言伪表（fromDummy 一致）', () =>
 test('D: DB_VERSION 回显标识设置正确（常量串/子查询）', () => {
   const expectVers = {
     Access: "'ACCESS'",
-    HSQLDB: "'HSQLDB'",
-    Derby: "'DERBY'",
+    // [EXCL-FIX 2026-09-20] HSQLDB/Derby 不再是裸常量串：裸串的执行结果永远匹配不上
+    // 09-16 收紧后的 sig（sig 要 `HSQLDB\s+\d`，常量里没有数字），定库恒 null 就是这么来的。
+    // 现在改成 exclusive 探针（区分力来自只在自家库存在的 FROM），标识串仍在 func 里。
+    HSQLDB: "'HSQLDB '",
+    Derby: "'DERBY '",
     MonetDB: 'sys_version',
   };
   for (const db of NEW) {
@@ -83,6 +86,42 @@ test('D: DB_VERSION 回显标识设置正确（常量串/子查询）', () => {
   assert.ok(DB_VERSION.HSQLDB.sig.test('HSQLDB 2.7.1'), 'HSQLDB 签名应命中真机版本串');
   assert.ok(DB_VERSION.Derby.sig.test('Apache Derby 10.17'), 'Derby 签名应命中真机产品串');
   assert.ok(DB_VERSION.MonetDB.sig.test('11.39.11'), 'MonetDB 签名应命中版本号');
+});
+
+// [EXCL-FIX 2026-09-20] 这条是上面那支测试**没抱住**的那个 bug 的正面对策。
+// 旧测试只查「func 里有没有标识串」和「sig 能不能命中一个手写的漂亮串」，
+// 于是 `'HSQLDB'` + `sig:/HSQLDB\s+\d/` 这种**自己回显自己也匹配不上**的组合可以长期全绿：
+// sig 要求一个数字，而裸常量串里根本没有数字的来源。定库恒 null 就是这么来的。
+//
+// 这里钉住真正的不变量：**sig 若要求数字，func 就必须有产出数字的来源**。
+// 注意这是**必要条件**检查、不是充分证明——它能拦住"探针与判据互不满足"这一整类形状，
+// 不能替代真引擎验证（那部分在 e2e/multi-engine-lab 的定库列里）。
+// 复验方式：把 func 改回旧值 `"'HSQLDB'"` → 本测试立刻红。
+test('不变量：sig 要求数字时 func 必须有数字来源（防"自回显也匹配不上"的死探针）', () => {
+  // sig 源文本里出现裸 \d（不含在 \d+ 之外的转义歧义）即视为"要求数字"
+  const DIGIT_SOURCE = /(version|COUNT\(|sys_version|@@version|SYSCS_|[0-9])/i;
+  const offenders = [];
+  for (const [db, info] of Object.entries(DB_VERSION)) {
+    if (!/\\d/.test(info.sig.source)) continue;         // sig 不要求数字 → 不适用
+    if (!DIGIT_SOURCE.test(info.func)) offenders.push(`${db}: sig=${info.sig} 要求 \\d，而 func=${info.func} 没有任何数字来源`);
+  }
+  assert.deepEqual(offenders, [], `死探针（回显结果永远匹配不上自身 sig）：\n${offenders.join('\n')}`);
+});
+
+// 真机实测回显必须命中自身 sig（数字来源检查的落地佐证，样例取自 multi-engine-lab）
+test('不变量：exclusive 探针的真机回显命中自身 sig，且区分力来自 FROM', () => {
+  const MEASURED = {
+    HSQLDB: 'HSQLDB 103',          // COUNT(*) over INFORMATION_SCHEMA.SYSTEM_TABLES
+    Derby: 'DERBY 24        ',     // CAST(.. AS CHAR(10)) 会右补空格，一并测进来
+  };
+  for (const [db, realEcho] of Object.entries(MEASURED)) {
+    assert.ok(
+      DB_VERSION[db].sig.test(realEcho),
+      `${db} 的探针在真机上回显 ${JSON.stringify(realEcho)}，却被自己的 sig 判不命中`
+    );
+    // 区分力必须来自 FROM 而非字面量，所以这两条**必须**声明 from
+    assert.ok(DB_VERSION[db].from, `${db} 是 exclusive 探针，必须带自己的 FROM（否则退化成谁都能执行的常量串）`);
+  }
 });
 
 test('D: WRAP 对各新 DBMS 是函数且产出来回显标记（方言拼接）', () => {

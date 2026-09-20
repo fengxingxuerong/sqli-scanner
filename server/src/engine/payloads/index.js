@@ -237,10 +237,35 @@ export const DB_VERSION = {
   // —— D 方向新增（最小适配，待真实环境验证）——
   // [P1-FIX 2026-09-16] Access：同上
   Access: { func: "'ACCESS'", sig: /Microsoft\s+(?:Office\s+)?Access|Access\s+Database\s+Engine/i },
-  // [P1-FIX 2026-09-16] HSQLDB：同上
-  HSQLDB: { func: "'HSQLDB'", sig: /HSQLDB\s+\d|HyperSQL|org\.hsqldb/i },
-  // [P1-FIX 2026-09-16] Derby：同上
-  Derby: { func: "'DERBY'", sig: /Apache\s+Derby|Derby\s+\d|org\.apache\.derby/i },
+  // [EXCL-FIX 2026-09-20] HSQLDB / Derby 的原 func 是**裸常量串**（`'HSQLDB'` / `'DERBY'`），
+  // 而 09-16 那次为堵 DB2 误判把 sig 收紧成了 `HSQLDB\s+\d` / `Apache\s+Derby|Derby\s+\d`——
+  // 于是这两条探针**回显了自己也永远匹配不上自己的 sig**：常量串里没有数字、没有厂商前缀。
+  // 定库恒 null 不是"探针跑不动"，是判据写死了不可满足。多引擎靶场开 NO_WAF 实测确认：
+  // 技术位 3/3 全检出（说明 UNION 通道通、回显在），定库却仍是 null。
+  //
+  // 换成 exclusive 表达式：区分力来自 **FROM 子句只在自家库存在**（不是来自字面量），
+  // 所以正面回应了 DB2 那次的教训——别家库执行它直接报错 → 无回显 → 不可能误判。
+  //
+  // 但这需要探针**带自己的 FROM**，而版本回显通道的列表达式是
+  // `UNION SELECT NULL, WRAP(func), NULL <fromDummy>` —— func 只能是标量表达式。
+  // 实测 HSQLDB 直接拒绝"CAST 里放子查询"（`unexpected token`），所以把 FROM 做成
+  // DB_VERSION 条目的可选字段 `from`：只在声明了它的条目上生效，其余 16 个库的
+  // 探针构造一字不变（blast radius 收到最小）。
+  // 真引擎实测（e2e/multi-engine-lab NO_WAF=1，HSQLDB 2.7.3 / Derby 10.16.1.1）：
+  //   hsqldb → "HSQLDB 103"；同一条放 H2 报 Table "system_tables" not found、放 Derby 报 Schema 不存在
+  //   derby  → "DERBY 24" ；Derby 不做 INTEGER→VARCHAR 隐式转换，且 CAST(.. AS VARCHAR) 反而报
+  //            Cannot convert types —— 只有 CAST(.. AS CHAR(n)) 通（实测踩过）
+  // COUNT(*) 给的数字正好喂给 sig 里那个 `\d`。
+  HSQLDB: {
+    func: "'HSQLDB ' || COUNT(*)",
+    from: 'FROM INFORMATION_SCHEMA.SYSTEM_TABLES',
+    sig: /HSQLDB\s+\d|HyperSQL|org\.hsqldb/i,
+  },
+  Derby: {
+    func: "'DERBY ' || CAST(COUNT(*) AS CHAR(10))",
+    from: 'FROM SYS.SYSTABLES',
+    sig: /Apache\s+Derby|Derby\s+\d|org\.apache\.derby/i,
+  },
   // MonetDB：用 sys.version 视图回显版本号
   MonetDB: { func: '(SELECT sys_version FROM sys.version)', sig: /^\d+\.\d+/ },
 };
