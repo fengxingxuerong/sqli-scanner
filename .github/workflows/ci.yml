@@ -195,6 +195,13 @@ jobs:
     if: github.event_name != 'schedule'
     steps:
       - uses: actions/checkout@v4
+      # [CI-FIX 2026-09-20] macOS 默认只配了 127.0.0.1，而 Linux 是整个 127.0.0.0/8 可用。
+      # server/tests/httpClient.egressHardening.test.js 需要绑定 **127.0.0.2**
+      # （验证出站守卫对"非 .1 回环地址"的处理），首跑 macOS 腿直接 EADDRNOTAVAIL。
+      # 给 lo0 加别名即可，不动测试意图。
+      - name: Add loopback alias 127.0.0.2 (macOS only)
+        if: matrix.os == 'macos-latest'
+        run: sudo ifconfig lo0 alias 127.0.0.2 up
       - uses: actions/setup-node@v4
         with:
           node-version: 24
