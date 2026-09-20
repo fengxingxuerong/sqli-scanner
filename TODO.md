@@ -699,7 +699,7 @@ md5 因此与改前不同；而 `git status` 说 clean、`git diff --numstat` �
 已按此法收尾：`git status` 无靶场文件残留、门禁仍绿。
 
 
-### W. blackbox-lab 有 2 个靶点从未被扫描（✅ 已补齐：1 个能检出、1 个暴露引擎边界）
+### W. blackbox-lab 有 2 个靶点从未被扫描（✅ 已补齐：两点均检出，顺带纠正一处二阶标定错误）
 
 **发现方式**：把 §V 的判据**推广到第二个靶场**时露出 —— `blackbox-lab` 的真值标定是
 **22 点**，而 `run-scan.mjs` 的 POINTS 只有 **20 点**。
@@ -737,18 +737,38 @@ md5 因此与改前不同；而 `git status` 说 clean、`git diff --numstat` �
 `resolveBodyChannel`（§N 那次的产物）判为"不含嵌套" → 以 urlencoded 发出，正是靶场要的编码。
 **若只看到"MISS"就去查引擎，会完全查错方向**（0.7s 这个耗时本身就该是线索）。
 
-**E1b 的 MISS 是引擎能力边界，不是参数错 —— 已定位到代码**：
-- `SecondOrderDetector.js:55-70` 的判定链是「读触发页 → 写探针 → 再读触发页 →
-  **看是否出现 SQL 报错特征（`ERROR_SIG`）**」，即**只覆盖 error 型二阶**；
-- 而 E1b 是 **boolean 型**：手工实测触发页注入后返回**空结果**（`<body></body>`，无任何报错），
-  真值表里它的标定判据也正是 `b.body !== i.body`（响应差异）；
-- 即：参数接对了、靶点也真可注入（手工 curl 已验证），但引擎**结构上判不出来**。
-- 处置：**保留扫描接入 + 如实记录 MISS**，不把它退回 `scanGaps` 来美化口径 ——
-  "未覆盖"与"覆盖了但检不出"是两件事，后者是真实现状。
-  修引擎的二阶 boolean 通道是独立话题（未做）。
+**E1b 的 MISS 原因：标定错误，不是引擎能力边界 —— 上轮结论已作废**
 
-**参照实现**：redteam-lab 的 `E15-second-order` 用的是同一组参数（那边 26/26 全覆盖）——
-差别在于它的触发页形态落在 error 通道内，所以能命中。
+第一版我把它归因为「引擎二阶只覆盖 error 型回显」（那个**事实**本身没错，见
+`SecondOrderDetector.js:55-70`），但**拿它当本次 MISS 的原因**是错的。查证后：
+
+| # | 证据 |
+|---|---|
+| ① | 靶场代码：`/api/admin/orders` 的 SQL 是 `WHERE status='${req.query.status}'` —— 注入源是 **HTTP query** |
+| ② | 靶场代码：`/api/comment` 是 `INSERT INTO orders (username,item,address,status) VALUES (?,?,?, 'pending')` —— status 硬编码，且写入的字段只出现在 **SELECT 列表（输出）**，不进 WHERE |
+| ③ | 实测：**不带任何前置写入**、直接扫触发页 URL → 命中 `union+error`，风险 High |
+
+→ 写入**丝毫不影响**查询结构；那个「先 POST comment 再注入」的标定里，comment 是**无关动作**。
+本点实为「**需 admin 会话的普通 query 注入**」。
+
+**修正（本轮）**：
+- `selftest.mjs`：`E1b-secondorder` → `E1b-admin-query`，technique 由 `second_order` 改为
+  `union/boolean`，标定去掉无关写入（直接注入触发页 query）；
+- `run-scan.mjs`：接入由「POST /api/comment + `--second-order`」改为**直接扫触发页** + admin 会话 cookie；
+- `lab-app.mjs`：订正那句与实现不符的注释（"把存储内容拼进 SQL"）；
+- 重跑 `selftest` 重建真值表 → **漏洞点 15/15 + 安全点 7/7 仍全部成立**
+  （改的只是分类与标定方式，**靶点的 SQL 拼接形态一字未动**）。
+
+**验证（r1 + r2 两轮，均 2/2 检出）**：
+
+| 靶点 | r1 | r2 |
+|---|---|---|
+| `D1-postform` | ✅ HIT `[boolean,time]`　333 请求 | ✅ HIT　546 请求 |
+| `E1b-admin-query` | ✅ HIT `[union,error]` dbms=MySQL　81 请求 | ✅ HIT　287 请求 |
+
+**教训（这条比修复本身更值钱）**：靶场/标定里的**注释与实现不符**，会把**分类错误**
+伪装成**工具能力缺口**。若不是多问了一句"这个写入到底影响了什么"，
+就会去给引擎加一个根本没被需要的能力（二阶 boolean 通道），而且**永远修不好这个靶点**。
 
 **为什么长期没被发现**：blackbox-lab **不在任何门禁里** —— 它是"独立第三方评测靶场"
 （刻意不复用项目自带靶场，属阶段性工具）。它的一致性原本没有任何东西在守护；

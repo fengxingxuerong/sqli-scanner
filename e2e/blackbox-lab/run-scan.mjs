@@ -45,14 +45,11 @@ async function startLab(waf) {
 }
 
 // ── 靶点 → CLI 参数映射 ─────────────────────────────────────────────────────
-// 只列「已接进扫描」的点。真值表里另有 2 个点**从未被扫描过**（见 TODO §W）：
-//   · D1-postform      POST 表单（/api/login，urlencoded 的 username）
-//   · E1b-secondorder  二阶：先 POST /api/comment 写入，再用 admin 会话 GET /api/admin/orders 触发
-// [2026-09-20 勘误] 这里原本写「由 run-scenario.mjs 单独处理」—— **该文件全仓不存在**
-// （`find . -name "run-scenario*"` 零命中，本行是唯一提及处；out/ 里也没有这两点的任何产物）。
-// 于是「真值标定 22 点」与「实际扫描 20 点」长期被混为一谈。现改为此事实陈述，
-// 并由 scripts/lab-targets-check.mjs 的 scanGaps 显式登记（不再静默）。
-// 补齐所需的 args 草案写在 TODO §W，**未验证，勿直接照抄**。
+// 22 个靶点现在**全部**接进扫描（2026-09-20 补齐最后两个，见 TODO §W）。
+// [勘误] 这里原写「D1-postform / E1b-secondorder 由 run-scenario.mjs 单独处理」——
+// **该文件全仓不存在**（`find . -name "run-scenario*"` 零命中，本行是唯一提及处），
+// 于是「真值标定 22 点」与「实际扫描 20 点」长期被混为一谈。
+// 差集现由 `npm run targets:check` 的 scanGaps 守护（当前为空 = 全覆盖）。
 const POINTS = [
   { id: 'A1-numeric', url: '/api/user?id=1' },
   { id: 'A2-string', url: '/api/search?name=alice' },
@@ -61,25 +58,24 @@ const POINTS = [
   { id: 'B1-error', url: '/api/product?id=1' },
   { id: 'C1-blindbool', url: '/api/blind?id=1' },
   { id: 'C2-blindtime', url: '/api/sleep?id=1', timeoutMs: 300000 },
-  // [2026-09-20 补齐] 下面两个点真值表早已标定，但此前**从未接进扫描**（见 TODO §W）。
-  // 原先此处只留一句「由 run-scenario.mjs 单独处理」的注释，而那个文件全仓不存在。
+  // [2026-09-20 补齐] 原先从未接进扫描的两个点：
   //   D1-postform —— POST 表单注入（/api/login 的 username，字符串上下文）。
-  //   body 必须写成**扁平 JSON**：CLI 的 `--body` 语义是 JSON 串，且扁平形态会经
-  //   `resolveBodyChannel` 判为不含嵌套 → 以 urlencoded 发出（正是靶场要的编码）。
-  //   实测传 urlencoded 串会直接被 CLI 按 JSON 解析报错（`Unexpected token 'u'`），
-  //   报告不产出 → 静默算成 MISS。
+  //     body 必须写成**扁平 JSON**：CLI 的 `--body` 语义是 JSON 串，且扁平形态会经
+  //     `resolveBodyChannel` 判为不含嵌套 → 以 urlencoded 发出（正是靶场要的编码）。
+  //     实测传 urlencoded 串会被 CLI 按 JSON 解析报错（`Unexpected token 'u'`），
+  //     报告不产出 → 静默算成 MISS（0.7s、`req=undefined`）。
+  //   E1b-admin-query —— admin 面板的 query 注入（`?status=`），**不是二阶**：
+  //     靶场把写入字段放在 SELECT 列表，WHERE 用的是 query，**写入不影响查询结构**；
+  //     实测不带任何前置写入、直接扫触发页即命中 union+error（详见 TODO §W）。
+  //     `--cookie` 在这里是**认证用**（拿 admin 会话），注入面是 status。
   { id: 'D1-postform', url: '/api/login', args: ['--method', 'POST', '--body', '{"username":"alice","password":"x"}'] },
   { id: 'D2-json', url: '/api/order', args: ['--method', 'POST', '--body', '{"item":"USB-C Hub"}'] },
   { id: 'D3-cookie', url: '/api/profile', args: ['--cookie', 'uid=1'] },
   { id: 'D4-xff', url: '/api/visitor', args: ['--header', 'X-Forwarded-For: alice'] },
   { id: 'D5-base64', url: '/api/encoded?d=MQ%3D%3D' },
   { id: 'D6-pathseg', url: '/api/rest/1', args: ['--test-path'] },
-  //   E1b-secondorder —— 二阶：先 POST /api/comment 写入，再用 admin 会话访问触发页 /api/admin/orders。
-  // `--cookie` 在这里是**认证用**（拿 admin 会话），不是注入面；注入面是 comment 的 username。
-  { id: 'E1b-secondorder', url: '/api/comment',
-    args: ['--method', 'POST', '--body', '{"username":"bob","item":"so-probe","address":"x"}',
-      '--cookie', 'token=tok-admin-blackbox-0001',
-      '--second-order', `${BASE}/api/admin/orders`, '--allow-second-order-writes', '--no-production-mode'] },
+  { id: 'E1b-admin-query', url: '/api/admin/orders?status=pending',
+    args: ['--cookie', 'token=tok-admin-blackbox-0001'] },
   { id: 'E2-stacked', url: '/api/batch?id=1' },
   // 安全对照（必须零检出）
   { id: 'F1-parametrized', kind: 'safe', url: '/api/safe/user?id=1' },

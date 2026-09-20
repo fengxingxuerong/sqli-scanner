@@ -162,13 +162,15 @@ const POINTS = [
 
   // E. 高阶
   {
-    id: 'E1b-secondorder', kind: 'vuln', technique: 'second_order', where: 'POST /api/comment → GET /api/admin/orders（admin 会话）',
-    baseline: () => req("/api/admin/orders?status=pending", { headers: { Cookie: 'token=tok-admin-blackbox-0001' } }),
-    inject: async () => {
-      await req('/api/comment', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: 'bob', item: 'so-probe', address: 'x' }) });
-      return req("/api/admin/orders?status=pending'%20AND%20'1'='2", { headers: { Cookie: 'token=tok-admin-blackbox-0001' } });
-    },
-    judge: (b, i) => (b.body !== i.body ? '触发页参数可控（存储内容已落库）' : null),
+    // [2026-09-20 勘误] 原标为 `second_order`，并先发一次 POST /api/comment 再注入。
+    // 但靶场里写入的 username/item/address 只出现在 SELECT 列表，**WHERE 用的是 query 的 status**
+    // —— 写入根本不影响查询结构，那个前置写入是**无关动作**。
+    // 实测：不带任何前置写入、直接对 `?status=` 发 `' AND '1'='2` 即产生稳定响应差异
+    // → 本点实为「**需 admin 会话的普通 query 注入**」，不是二阶。
+    id: 'E1b-admin-query', kind: 'vuln', technique: 'union/boolean', where: 'GET /api/admin/orders?status=（需 admin 会话）',
+    baseline: () => req('/api/admin/orders?status=pending', { headers: { Cookie: 'token=tok-admin-blackbox-0001' } }),
+    inject: () => req("/api/admin/orders?status=pending'%20AND%20'1'='2", { headers: { Cookie: 'token=tok-admin-blackbox-0001' } }),
+    judge: (b, i) => (b.body !== i.body ? 'admin 面板的 status 参数可控（字符串闭合后布尔条件生效）' : null),
   },
   {
     id: 'E2-stacked', kind: 'vuln', technique: 'stacked', where: 'GET /api/batch?id=',

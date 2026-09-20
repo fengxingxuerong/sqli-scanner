@@ -315,7 +315,14 @@ app.post('/api/comment', async (req, res) => {
   }
 });
 
-// E1b 二阶触发：admin-only 面板，把存储内容拼进 SQL（跨角色才能触发）
+// E1b 触发页：admin-only 面板。
+// [2026-09-20 勘误] 原注释写「把存储内容拼进 SQL（跨角色才能触发）」，**与实现不符**：
+// 拼进 SQL 的是 **HTTP query 的 status**（见下方 `WHERE status='${req.query.status}'`），
+// 而 /api/comment 写入的 username/item/address 只出现在 **SELECT 列表（输出）**，
+// 不参与 WHERE —— 即写入不影响查询结构，本点**并非二阶注入**，
+// 而是「需 admin 会话的直接 query 注入」。
+// 依据：① 如上的代码；② 实测不带任何前置写入、直接对 `?status=` 注入即产生响应差异。
+// **SQL 拼接形态一字未改**，只订正分类与注释（靶点的能力本身没变）。
 app.get('/api/admin/orders', async (req, res) => {
   const cookie = String(req.headers.cookie || '');
   const m = /(?:^|;\s*)token=([^;]*)/.exec(cookie);

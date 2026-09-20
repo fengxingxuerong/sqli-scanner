@@ -75,8 +75,8 @@ const LABS = [
     subsets: [
       {
         file: 'sqlmap-bench.mjs', baseline: 20, re: /\{\s*id:\s*'([^']+)'/g,
-        why: '与 run-scan 对照的 sqlmap 同题命令（20 点）：比扫描覆盖少 D1-postform / E1b-secondorder '
-          + '（两者原先都不在扫描范围内，sqlmap 侧也无对应前置动作），故比率不可直接类比',
+        why: '与 run-scan 对照的 sqlmap 同题命令（20 点）：比扫描覆盖少 D1-postform / E1b-admin-query '
+          + '（两者原先都不在扫描范围内，sqlmap 侧也无对应命令），故比率不可直接类比',
       },
     ],
   },

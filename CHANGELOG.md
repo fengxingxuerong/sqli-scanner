@@ -20,6 +20,35 @@
   "刚刚又红了一次"的证据——**留着比没有更坏**，它会把人往已作废的方向带。
 - 环境抖动的**根因未消除**（多套件各起各的沙箱、挤同一 3308 端口与 datadir），记 TODO §T。
 
+### 更正：E1b 的 MISS 不是引擎能力边界，而是**标定错误**（已修，两点现均检出）
+
+上一条把 `E1b-secondorder` 的 MISS 归因为「引擎二阶只覆盖 error 型回显」。那个**事实**本身没错
+（`SecondOrderDetector.js:55-70` 确实只认触发页的 SQL 报错特征），但**拿它当本次 MISS 的原因**
+是错的 —— 本条更正，并给出正确修法。
+
+**查证（三条独立证据）**：
+
+| # | 证据 |
+|---|---|
+| ① | 靶场 `/api/admin/orders` 的 SQL 是 `WHERE status='${req.query.status}'` —— 注入源是 **HTTP query** |
+| ② | `/api/comment` 是 `INSERT INTO orders (username,item,address,status) VALUES (?,?,?, 'pending')` —— status 硬编码，且写入的字段只出现在 **SELECT 列表（输出）**，不进 WHERE |
+| ③ | 实测：**不带任何前置写入**、直接扫触发页 URL → 命中 `union+error`，风险 High |
+
+→ 写入**丝毫不影响**查询结构；「先 POST comment 再注入」里的 comment 是**无关动作**。
+本点实为「**需 admin 会话的普通 query 注入**」。
+
+**修正**：`selftest.mjs` 改名并改技术分类（`E1b-secondorder` → `E1b-admin-query`，
+`second_order` → `union/boolean`，标定去掉无关写入）；`run-scan.mjs` 改为直接扫触发页 + admin 会话
+cookie，不再用 `--second-order`；订正 `lab-app.mjs` 那句与实现不符的注释；
+重跑 selftest 重建真值表 → **漏洞点 15/15、安全点 7/7 仍全部成立**（靶点 SQL 拼接形态一字未动）。
+
+**验证（r1 + r2 两轮）**：`D1-postform` ✅ HIT（333 / 546 请求）、
+`E1b-admin-query` ✅ HIT（`union+error`，dbms=MySQL，81 / 287 请求）→ 两条均 2/2。
+
+**教训（比修复本身更值钱）**：靶场/标定里**注释与实现不符**，会把**分类错误**伪装成
+**工具能力缺口**。若不追问"这个写入到底影响了什么"，就会去给引擎加一个根本没被需要的能力，
+而且**永远修不好这个靶点**。
+
 ### 补齐 blackbox-lab 两个从未被扫描的靶点：1 个能检出、1 个暴露引擎能力边界
 
 承接上一条查出的缺口（真值标定 22 点、实际只扫 20 点），本轮把两点接进扫描并实测：
