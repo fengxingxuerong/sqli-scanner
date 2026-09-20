@@ -4,6 +4,32 @@
 
 ## [Unreleased]
 
+### 新增「采集源过期」判据：README 与 _facts.json 一致 ≠ 数字是新的（门禁假绿）
+
+`facts:check` 只比对 README ↔ `docs/_facts.json`，**从不校验 _facts.json 自己是否过期**。
+于是出现一种假绿：后继两批提交带来 +19 条用例（1985 → 2004），没人回填，
+`_facts.json` 停在 1985、README 也写 1985 → 门禁报「一致」，而真实用例数早已是 2004。
+（与 `continue-on-error` 的空转 job 同源：都是**静默地没在做事**。）
+
+判据：把「决定跑哪些测试、总共多少条」的文件集合做**内容指纹**，随 `--refresh`
+与数字**同批**落盘（`docs/_facts.sources.json`），`--check` 时重算比对。
+用内容哈希而非 mtime —— CI 上 checkout 后所有文件同一时刻，mtime 判据必然全量误报。
+
+两个设计决策：
+- **指纹缺失不静默通过**：文件不存在时报「没有依据」并 exit 1，而不是跳过检查。
+- **基准过期时拒绝 `--fix`**：`_facts.json` 自己过期时按它改 README，等于把旧数字再抄一遍；
+  故 stale 时 fix 不落盘，明确要求先 `--refresh`（顺序反了就是抄旧数）。
+
+边界（写在脚本注释里，勿当万能）：只覆盖测试文件 + 驱动采集的配置；
+依赖版本 / `.env.test` / 被测源码改动不在此判据内（改源码不改用例数，那是覆盖率门禁的职责）。
+
+**顺带修正 README 三处陈旧结论**（逐条实测核对后改，非顺手改）：
+- 「利用工具」行写「fileRead 已跑通，其余仍为 mock 单测」，但同文件「利用能力实测口径」表
+  已记 fileWrite / UDF-os-shell 均为真闭环 —— **同一份 README 自相矛盾**。
+- `npm run acceptance` 注释写「10 套件」，实际 `e2e/acceptance.mjs` 的 SUITES 是 **12** 个。
+- P1-E 标「根因已定位，未修」，实际 `blindExtractor.js` 的分层裁决早已落地；
+  按实情改写并补上**边界**：修的是「静默误用荒谬上界」，真超 4K 的字段仍判失败（有意护栏）。
+
 ### 修复：9 个「CLI 能设、引擎真读、REST 收不到」的扫描配置键（静默假阴性）
 
 `sanitizeStart` 的返回 `config` 只由白名单键构成，未知键原来只留一行 `logger.debug`

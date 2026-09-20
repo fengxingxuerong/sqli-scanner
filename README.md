@@ -1,6 +1,6 @@
 # sqli-scanner
 
-[![Tests](https://img.shields.io/badge/tests-2299%20passing-brightgreen)](#测试)
+[![Tests](https://img.shields.io/badge/tests-2318%20passing-brightgreen)](#测试)
 [![Dependencies](https://img.shields.io/badge/dependencies-0%20known%20vulns-brightgreen)](#环境变量)
 
 > CI 徽章待仓库地址确定后启用（当前 `OWNER/REPO` 是占位，占位链接会显示成"通过"，属误导，
@@ -197,7 +197,7 @@ admin-only 触发页 `/admin/panel`（users.admin 角色门禁 403）+ admin 会
 | **字典爆破**（information_schema 不可用时的出路） | `--common-tables` / `--common-columns`：WAF 拦 information_schema、账号权限不足、或目标库无该视图时，用内置常见表/列名字典逐个做存在性探针（130+ 表名 / 140+ 列名，含「通道自检 + 不存在对照名」防假阴性）。实测在 WAF 拦 information_schema 的目标上仍能定位表与列 |
 | **WAF 识别接口** | `--identify-waf`：仅识别 WAF 厂商并输出推荐 tamper 链，不发起注入检测（对标 sqlmap --identify-waf） |
 | **AI 漏洞报告** | 3 角色流水线（分析师→撰写→审阅），支持多 key 容灾，自动生成专业中文安全分析报告 |
-| **利用工具** | SQL Shell / 文件读写 / OS 命令执行（需授权）。⚠️ 验证状态见下文「利用能力实测口径」：**fileRead 已跑通真实闭环**，其余仍为 mock 单测 |
+| **利用工具** | SQL Shell / 文件读写 / OS 命令执行（需授权）。⚠️ 验证状态见下文「利用能力实测口径」：**fileRead / fileWrite / UDF-os-shell 均已跑通真实闭环**（后者在隔离沙箱内），仅注册表仍为 mock 单测 |
 | **CLI 100+ 参数（原生引擎）** | 对标 sqlmap：--dbs/--tables/--dump/**--dump-all**/**--common-tables**/**--common-columns**/-D/-T/-C/--search/--users/--passwords/--prefix/--suffix/--time-sec/-r/--mobile/--parse-errors/--safe-url/--safe-freq/--delay/--current-user/--current-db/--hostname/--is-dba/**--identify-waf**/--skip-static/--predict-output/--test-headers/--test-path/**--hex**/--where/--param-del/**--advise**（扫描前风险评估）/**--confirm-extreme**（极高危第二道确认）等（`node bin/cli.js --help` 为准） |
 | **sqlmap 桥接参数（非原生）** | `--csrf-url` / `--csrf-token` / `--eval` / `--skip-urlencode` / `--keep-alive` / `--null-connection`：**仅当转交外部 sqlmap 进程（sqlmapBridge）时才会被传递**，本项目自有引擎不消费这些键。请勿把上表与本节混用 |
 | **-r 请求文件** | 从 Burp/curl 请求文本导入 URL/method/headers/body |
@@ -217,7 +217,7 @@ npm run waf-validate    # HTTP 实测验证 WAF 绕过
 npm run waf-e2e         # 运行 WAF e2e 对比测试
 npm run waf-real        # [对外口径] 真实 OWASP CRS v4.1.0 规则下 tamper 开/关 A/B
 npm run waf-auto        # CRS 下「引擎自动选链绕过」验收（不显式配 tamper）
-npm run acceptance      # 【门禁】全方位验收（10 套件，事实断言模式，可进 CI）
+npm run acceptance      # 【门禁】全方位验收（12 套件，事实断言模式，可进 CI）
 ```
 
 ## 后端 API
@@ -302,7 +302,7 @@ backend/  ← Express + Node.js
 # 前端测试（315 个用例）
 npm test
 
-# 服务端测试（1985 个用例）
+# 服务端测试（2004 个用例）
 cd server && npm test
 
 # 全部测试
@@ -318,7 +318,7 @@ npm run test:all
 
 - TypeScript: 零错误
 - 前端测试: 315/315 通过（覆盖率门禁 stmts 91.11 / branch 80.00 / func 72.01，阈值 88/77/67）
-- 服务端测试: 1985 用例（1984 pass / 0 fail / 1 skip，并发口径 2026-09-20 复测；1 skip 为环境依赖显式跳过。覆盖率 lines 89.08 / branch 72.95 / func 76.55，阈值 85/69/72）
+- 服务端测试: 2004 用例（2003 pass / 0 fail / 1 skip，并发口径 2026-09-20 复测；1 skip 为环境依赖显式跳过。覆盖率 lines 89.47 / branch 73.68 / func 76.68，阈值 85/69/72）
 - 一键扫描: `npm run scan -- -u <url>`（CLI 一条命令产出 HTML/JSON/Markdown 全套报告 + manifest，退出码可直接进 CI 门禁）
 - Tamper 插件: 228 个（含 v24 增量 20 个，对齐 sqlmap 官方 tamper 全集，含官方 CRS/libinjection 实测组合 uniontable+odbcbrace）
 - WAF 绕过能力: 200+ 插件链式组合，覆盖 62 个 WAF 厂商指纹识别 + 推荐
@@ -336,14 +336,30 @@ npm run test:all
 | **P1-B** | 列数探测在「恒 200 + 错误页回显」目标上顶到上限 50 | ✅ **已修复**（2026-09-17） |
 | **P1-C** | DBMS 定库：5 个**常量串** sig 无区分度（真 MySQL 判 DB2） | ✅ **已修复**（2026-09-16） |
 | **P1-D** | DBMS 定库：**纯版本号** sig 互相冲突（自检出 20 处） | ⚠️ **未修**（`node e2e/blackbox-lab/check-dbms-sig.mjs` 仍非零退出） |
-| **P1-E** | 提取链：长度探测顶到上限 **65,531** → 拖库不可用 | ⚠️ **根因已定位，未修**（见下） |
+| **P1-E** | 提取链：长度探测顶到上限 **65,531** → 拖库不可用 | ✅ **静默误用已修**（2026-09-20）｜超长值仍判失败，属**有意边界**（见下） |
 | **P1-F** | 定库链路的**回显污染 + 上下文盲区**：真 MySQL 被判 ClickHouse / 闭合探测拿不到前缀 / 版本回显通道整条失效 | ✅ **已修复**（2026-09-18，详见下） |
 | **P1-G** | `--cookie` 只当会话用、**从不作为注入面**（level 5 下解析出 0 个点） | ✅ **已修复**（2026-09-18，详见下） |
 
 > **P1-A / P1-B / P1-E 是同一病根的三个实例**（详见 `docs/统一探测判据-设计.md`）：
 > 二分探测的真/假判据依赖「响应差异」，而目标**恒 200 + 错误页回显**时差异被抹平
 > → 二分失去方向 → **顶到上限** → 下游拿着荒谬值继续跑（且不报错）。
-> 前两个已修，第三个（长度探测）修法与它们相同，抽象已就绪（`server/src/engine/binaryProbe.js`）。
+> **三个已全部修复**（P1-E 于 2026-09-20 补齐，抽象取 `server/src/engine/binaryProbe.js`）。
+>
+> P1-E 的修法与另两个**不同**：「顶到上界」有两种成因，探测层面无法区分，一刀切判失败
+> 会把正常长值打死（实测挂 2 个用例），故分层裁决 ——
+>
+> | 位置 | 顶到上界的含义 | 处置 |
+> |---|---|---|
+> | 主段（hi=255） | 真实长度可能 ≥256，**合法信号** | 只打 `ctx.blindLenCapped` 标记，交延伸段预检裁决 |
+> | 延伸段顶到**用户显式** `blindMaxLen` | 用户已授权「最多提这么长」 | 按 maxLen **截断**提取（旧行为不变） |
+> | 延伸段顶到**默认护栏** 4096 | 判据恒真失效，该上界是假长度 | **判失败**（该字段返回 null），不逐字节提 4096 个垃圾字节 |
+>
+> 失败原因经 `ctx.blindLenCapped` 上浮到 `report.summary.constraints`，让「没提取到」
+> 不再被读成「目标没数据」。
+> **边界（勿夸大）**：修掉的是「静默误用荒谬上界」；一个真的超过 4K 的字段仍会判失败，
+> 那是有意保留的护栏而非缺陷，需要更长时用 `blindMaxLen` 显式放大。
+> 复现：`server/tests/blindLenCapped.test.js`（3 条契约测试）。缺陷注入复验：撤掉延伸段终审
+> → **只有第 1 条红**，且实际返回值是一整串 4096 个垃圾字符（另两条仍绿 → 各测一面）。
 
 **P0 根因与修法**（诊断实测，非推断）：
 path 段注入后 URL 变为不存在的路径（500/403 → 404），404 页**回显请求 URL**，

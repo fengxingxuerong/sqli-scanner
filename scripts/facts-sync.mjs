@@ -20,14 +20,16 @@
 //   node scripts/facts-sync.mjs --fix                  # 按 _facts.json 修正 README
 // ============================================================================
 import { spawnSync } from 'node:child_process';
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { dirname, resolve, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, '..');
 const FACTS_PATH = resolve(ROOT, 'docs/_facts.json');
 const README_PATH = resolve(ROOT, 'README.md');
+const SOURCES_PATH = resolve(ROOT, 'docs/_facts.sources.json');
 
 const args = new Set(process.argv.slice(2));
 const doRefresh = args.has('--refresh');
@@ -148,6 +150,93 @@ function collectServer({ coverage }) {
     res.coverage = { lines: Number(row[1]), branches: Number(row[2]), functions: Number(row[3]) };
   }
   return res;
+}
+
+// ── 采集源指纹：README 与 _facts.json 一致 ≠ 数字是新的 ─────────────────────────
+// [2026-09-20 新增] 起因是一次**假绿**：后又提交了两批测试（+17 条用例）却没回填，
+// `_facts.json` 停在 1985，而 README 也写 1985 —— 于是 --check 报「一致」。
+// **校验的基准自己过期时，一致性检查反而给出假绿。** 这与 CI 里 `continue-on-error`
+// 的空转 job 同源（`scripts/ref-integrity.mjs` 也是为此而生）：都是「静默地没在做事」，
+// 而静默失败是本项目最贵的一类错。
+//
+// 判据：把「决定跑哪些测试、总共多少条」的文件集合做**内容指纹**，随 --refresh 一起落盘；
+// --check 时重算比对，不一致即报「采集源已改动，_facts.json 可能过期」。
+// 用内容哈希而非 mtime：mtime 在 git checkout / 拷贝文件 / CI 上不可复现，
+// 会把判据变成噪声源（CI 里所有文件同一时刻，mtime 判据必然全量误报）。
+//
+// 边界（写清免得被当万能）：只覆盖**测试文件 + 驱动采集的配置**。
+// 依赖版本、`.env.test`、被测源码改动**不在此判据内** —— 改被测源码不改用例数，
+// 那是覆盖率门禁的职责。判据宁可窄而准，也不宽而吵。
+
+const SOURCE_SPECS = [
+  ['src/tests', /\.(test|spec)\.(ts|tsx)$/], // 前端：vitest.config.ts 的 include
+  ['server/tests', /\.test\.js$/],           // 服务端：node --test 默认发现
+];
+// 驱动采集的配置：前者决定「哪些文件算测试」，后者决定「怎么跑、覆盖率阈值多少」
+// （`server/tests/_setup.mjs` 是 `--import=` 的入口，改了会影响整轮运行）
+const SOURCE_SINGLES = ['vitest.config.ts', 'server/package.json', 'server/tests/_setup.mjs'];
+
+function listSources() {
+  const out = SOURCE_SINGLES.filter((f) => existsSync(resolve(ROOT, f)));
+  for (const [dir, re] of SOURCE_SPECS) {
+    const abs = resolve(ROOT, dir);
+    if (!existsSync(abs)) continue;
+    for (const e of readdirSync(abs, { recursive: true, withFileTypes: true })) {
+      if (!e.isFile() || !re.test(e.name)) continue;
+      // Dirent.parentPath 在 Node 20.12+ 才有（更早是 .path），两种都兜住
+      const parent = e.parentPath ?? e.path;
+      out.push(relative(ROOT, resolve(parent, e.name)).replace(/\\/g, '/'));
+    }
+  }
+  return [...new Set(out)].sort();
+}
+
+const hashFile = (abs) =>
+  createHash('sha256').update(readFileSync(abs)).digest('hex').slice(0, 12);
+
+function collectSourceDigest() {
+  const files = {};
+  for (const rel of listSources()) files[rel] = hashFile(resolve(ROOT, rel));
+  // 总指纹：对「路径:短哈希」有序列表再哈希 —— 任一文件增/删/改都会改变它。
+  // per-file 表一并留档，是为了报错时能指名道姓，而不是只说「有东西变了」。
+  const sha256 = createHash('sha256')
+    .update(Object.entries(files).map(([k, v]) => `${k}:${v}`).join('\n'))
+    .digest('hex').slice(0, 16);
+  return {
+    at: new Date().toISOString().replace(/\.\d+Z$/, '+00:00'),
+    count: Object.keys(files).length,
+    sha256,
+    files,
+  };
+}
+
+function writeSourceDigest() {
+  const d = collectSourceDigest();
+  mkdirSync(dirname(SOURCES_PATH), { recursive: true });
+  writeFileSync(SOURCES_PATH, JSON.stringify({
+    _comment: '采集源指纹：决定「跑哪些测试、多少条」的文件集合。由 scripts/facts-sync.mjs --refresh 生成，勿手改。',
+    _why: 'README 与 _facts.json 互相一致不等于数字是新的 —— 两边可能双双停在旧值上。本文件是「数字采集于哪一版测试代码」的凭证，--check 时重算比对。',
+    _scope: '测试文件 + 驱动采集的配置（含覆盖率阈值来源）。不含依赖版本 / .env.test / 被测源码。',
+    ...d,
+  }, null, 2) + '\n', 'utf8');
+  return d;
+}
+
+function checkSourceStaleness() {
+  if (!existsSync(SOURCES_PATH)) {
+    return { ok: false, reason: 'missing' };
+  }
+  const saved = JSON.parse(readFileSync(SOURCES_PATH, 'utf8'));
+  const now = collectSourceDigest();
+  if (saved.sha256 === now.sha256) return { ok: true };
+  const old = saved.files || {};
+  const added = Object.keys(now.files).filter((k) => !(k in old));
+  const changed = Object.keys(now.files).filter((k) => k in old && old[k] !== now.files[k]);
+  const removed = Object.keys(old).filter((k) => !(k in now.files));
+  return {
+    ok: false, reason: 'stale', savedAt: saved.at,
+    savedCount: saved.count, nowCount: now.count, added, changed, removed,
+  };
 }
 
 // ── README 实时口径的定位规则（声明式，不靠行号） ───────────────────────────
@@ -302,6 +391,33 @@ function maxNumericDelta(a, b) {
 // server package.json 的阈值门禁负责，职责不重叠。
 const COVERAGE_TOLERANCE = 0.2;
 
+// 报「采集源过期」时最多列几个文件名：本地排障够用，CI 日志不被刷屏
+const STALE_LIST_MAX = 8;
+const fmtList = (arr) => {
+  const head = arr.slice(0, STALE_LIST_MAX).map((f) => `            · ${f}`).join('\n');
+  return arr.length > STALE_LIST_MAX
+    ? `${head}\n            …另有 ${arr.length - STALE_LIST_MAX} 个`
+    : head;
+};
+
+function reportStale(s, doFix) {
+  if (s.reason === 'missing') {
+    console.error(`[facts] 缺少 ${SOURCES_PATH}：无法确认 _facts.json 是当前测试代码采出来的。`);
+    console.error('[facts] 这不是「没问题」，是「没有依据」—— 本判据不静默通过。');
+    console.error('[facts] 修法：node scripts/facts-sync.mjs --refresh --coverage');
+    return;
+  }
+  console.error('[facts] ⚠ 采集源已改动 —— _facts.json 可能过期（README 与它「一致」不代表数字是新的）');
+  console.error(`[facts]   指纹采集于 ${s.savedAt}（${s.savedCount} 个文件）→ 现在 ${s.nowCount} 个`);
+  if (s.added.length) console.error(`[facts]   新增（${s.added.length}）：\n${fmtList(s.added)}`);
+  if (s.changed.length) console.error(`[facts]   修改（${s.changed.length}）：\n${fmtList(s.changed)}`);
+  if (s.removed.length) console.error(`[facts]   删除（${s.removed.length}）：\n${fmtList(s.removed)}`);
+  if (doFix) {
+    console.error('[facts] 已**拒绝**本次 --fix：基准（_facts.json）自己过期时，按它改 README 等于把旧数字再抄一遍。');
+  }
+  console.error('[facts] 修法：node scripts/facts-sync.mjs --refresh --coverage && node scripts/facts-sync.mjs --fix');
+}
+
 // ── 主流程 ──────────────────────────────────────────────────────────────────
 
 function buildFacts() {
@@ -354,6 +470,10 @@ function main() {
     writeFileSync(FACTS_PATH, JSON.stringify(facts, null, 2) + '\n', 'utf8');
     console.log(`[facts] 已写入 ${FACTS_PATH}`);
     console.log(`[facts] 徽章测试数 = ${facts.badge.testsPassing}（${facts.frontend.pass} + ${facts.server.pass}）`);
+    // 采集源指纹与数字**同批**落盘。分开写会制造「数字已新、指纹还旧」的中间态，
+    // 那比「两个都旧」更坏：判据会报 stale，而数字其实是对的。
+    const digest = writeSourceDigest();
+    console.log(`[facts] 已写入 ${SOURCES_PATH}（测试源 ${digest.count} 个文件，总指纹 ${digest.sha256}）`);
     return 0;
   }
 
@@ -369,35 +489,48 @@ function main() {
   const eol = readme.includes('\r\n') ? '\r\n' : '\n';
   const { drifts, out } = rewriteLines(readme.split(eol), facts);
 
+  // 先算采集源是否过期 —— 它决定 --fix 能不能落地（基准脏时一律拒绝改文件）
+  const stale = checkSourceStaleness();
+  let failed = false;
+
   if (drifts.length === 0) {
     console.log('[facts] README 实时口径与 _facts.json 一致。');
-    return 0;
-  }
-
-  console.log(`[facts] 检出 ${drifts.length} 处漂移：\n`);
-  for (const d of drifts) {
-    console.log(`  · ${d.rule ? d.rule.desc : '（规则失效，需人工处理）'}`);
-    if (d.reason) {
-      console.log(`      原因: ${d.reason}（README 结构可能已改）\n`);
-      continue;
+  } else {
+    console.log(`[facts] 检出 ${drifts.length} 处漂移：\n`);
+    for (const d of drifts) {
+      console.log(`  · ${d.rule ? d.rule.desc : '（规则失效，需人工处理）'}`);
+      if (d.reason) {
+        console.log(`      原因: ${d.reason}（README 结构可能已改）\n`);
+        continue;
+      }
+      console.log(`      README 现状: ${d.from.trim()}`);
+      console.log(`      _facts.json: ${d.to.trim()}`);
+      if (d.delta !== null && d.delta !== undefined) {
+        console.log(`      偏差: ${d.delta.toFixed(2)}pt（容差 ${COVERAGE_TOLERANCE}）`);
+      }
+      console.log();
     }
-    console.log(`      README 现状: ${d.from.trim()}`);
-    console.log(`      _facts.json: ${d.to.trim()}`);
-    if (d.delta !== null && d.delta !== undefined) {
-      console.log(`      偏差: ${d.delta.toFixed(2)}pt（容差 ${COVERAGE_TOLERANCE}）`);
+
+    if (doFix && stale.ok) {
+      writeFileSync(README_PATH, out.join(eol), 'utf8');
+      console.log(`[facts] 已按 _facts.json 修正 README（${drifts.length} 处，保持原有 ${eol === '\r\n' ? 'CRLF' : 'LF'} 换行）。`);
+    } else if (!doFix) {
+      console.log('[facts] 数字漂移：README 声称的测试/覆盖率与实测不符。');
+      console.log('[facts] 修法：node scripts/facts-sync.mjs --fix（或先 --refresh 重新采集）');
+      failed = true;
     }
-    console.log();
+    // doFix && !stale.ok 的分支：不写盘，由下面的 reportStale 说明为什么
   }
 
-  if (doFix) {
-    writeFileSync(README_PATH, out.join(eol), 'utf8');
-    console.log(`[facts] 已按 _facts.json 修正 README（${drifts.length} 处，保持原有 ${eol === '\r\n' ? 'CRLF' : 'LF'} 换行）。`);
-    return 0;
+  if (stale.ok) {
+    console.log('[facts] 采集源未改动（指纹与 _facts.json 同批）。');
+  } else {
+    console.error('');
+    reportStale(stale, doFix);
+    failed = true;
   }
 
-  console.log('[facts] 数字漂移：README 声称的测试/覆盖率与实测不符。');
-  console.log('[facts] 修法：node scripts/facts-sync.mjs --fix（或先 --refresh 重新采集）');
-  return 1;
+  return failed ? 1 : 0;
 }
 
 process.exit(main());
