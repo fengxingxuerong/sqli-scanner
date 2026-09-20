@@ -63,6 +63,10 @@ const GATES = [
   { id: 'typecheck', name: 'TypeScript 前后端（= CI 两条类型步骤）', cmd: 'npm run typecheck' },
   { id: 'lint', name: 'ESLint', cmd: 'npm run lint' },
   { id: 'lint', name: '架构门禁（体积/循环依赖/console）', cmd: 'node scripts/arch-guard.mjs' },
+  // 引用完整性：ci.yml / package.json / run-all.mjs 里写的本地路径必须真实存在。
+  // 起因：ci.yml 两个 job 写着不存在的 run.js，又带 continue-on-error → 静默失败、从不拦人，
+  // 那两个 job 从未验证过任何东西，靠人工 grep 才发现。这道闸门防的就是同类复发。
+  { id: 'lint', name: '引用完整性（CI/scripts/e2e 入口路径存在性）', cmd: 'node scripts/ref-integrity.mjs' },
   { id: 'lint', name: '文档数字口径（README ↔ _facts.json）', cmd: 'npm run facts:check' },
   // CRS 执行器保真度：本仓 WAF 数字全部出自自实现 SecRule 执行器（本机无 Docker/Go，跑不了真
   // ModSecurity/Coraza），所以"执行器像不像 CRS"必须有外部真值兜住 —— 这里用 CRS 官方回归集。

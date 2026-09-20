@@ -264,19 +264,29 @@ F 条的探针表给出：**换分隔符这条路对 942361 完全无效**（`/*
 
 ## P0′ · 门禁可信度（2026-09-20 新增）
 
-### J. 「CI 引用的文件是否存在」应固化成门禁（**根因已修，防护未做**）
+### J. 「CI 引用的文件是否存在」应固化成门禁（✅ 已完成 2026-09-20）
 
 **已修的真 bug**（`8144fc7`）：`ci.yml` 里两个 job 引用**不存在**的文件 ——
 `e2e/tamper-matrix/run.js`（真入口 `tamper-test.mjs`）与 `e2e/waf-lab/run.js`
 （真入口 `compare-real.e2e.mjs`）。两者都带 `continue-on-error: true`，
 于是 `node <不存在的文件>` 每次 Cannot find module 却**从不拦人** ——
 **这两个 job 从未验证过任何东西**，是彻底的「空转门禁」。
-现已修正，并手工核对 CI 里全部 8 个 e2e 引用逐一存在。
 
-**未做的防护**：这次是靠人工 grep 才发现的，极易复发（改文件名/删脚本都可能再踩）。
-应加一条门禁：解析 `ci.yml` / `package.json` 里所有 `node <path>` / `python <path>` 调用，
-逐一校验文件存在，缺失即 FAIL。**验收**：注入一个假路径 → 门禁变红；
-故意去掉 `continue-on-error` 后 CI 仍能捕获。
+**防护已落地**：新增 `scripts/ref-integrity.mjs`，校验三处引用源：
+`.github/workflows/*.yml` 的 `run:` 步骤（含多行块 + `cd X &&` 基准目录偏移）、
+两个 `package.json` 的 `scripts`（含 `npm run <name>` 交叉引用）、
+`e2e/run-all.mjs` 的 `entry` 字段。当前校验 **82 处，全部存在**。
+接入 `npm run refs:check` / `check:all` / `ci-local` 的 lint 组 / `ci.yml` 的 lint job。
+
+**缺陷注入复验（4 例）**：① ci.yml 路径改回不存在的 → 报第 313 行；
+② run-all entry 改坏 → 报出条目；③ package.json 引用不存在的 script → 报「脚本引用」；
+④ **自指注入**（把 ref-integrity 自己在 ci.yml 里的路径写错）→ 被抓到，证明覆盖了自己。
+
+**修门禁自身时的两个教训**（值得记住）：
+- 初版不认 `cd server && node index.js` → 把 3 个**相对子目录**的正确路径误报成缺失。
+  **门禁报假红比没有门禁更糟**（会训练人忽略红灯），故校验器自身也要测。
+- 缺陷注入② 首次"成功"实为**替换未命中而静默通过** —— 注入脚本必须断言替换真的生效。
+  这与 J 条本身的病根同源：**静默失败最危险**。
 
 ### K. `tamper-waf-matrix` job 红了没人知道（设计取舍，待决）
 

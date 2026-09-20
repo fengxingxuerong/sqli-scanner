@@ -4,6 +4,34 @@
 
 ## [Unreleased]
 
+### 新增「引用完整性」门禁（CI 里写的路径必须真实存在）
+
+起因是一次**空转门禁**：`ci.yml` 的 `tamper-waf-matrix` job 里写着
+`node e2e/tamper-matrix/run.js` 与 `node e2e/waf-lab/run.js` —— 两个文件**都不存在**
+（真入口是 `tamper-test.mjs` / `compare-real.run.py`）。更隐蔽的是它们都带
+`continue-on-error: true`，于是 `node <不存在的文件>` 每次报 Cannot find module
+却**从不拦人** —— 这两个 job **从未验证过任何东西**。是靠人工 grep 才发现的。
+
+新增 `scripts/ref-integrity.mjs`，校验三处引用源里的本地路径是否真实存在：
+- `.github/workflows/*.yml` 的 `run:` 步骤（含多行块，能识别 `cd X && node Y` 的基准目录偏移）
+- `package.json` / `server/package.json` 的 `scripts`（含 `npm run <name>` 交叉引用存在性）
+- `e2e/run-all.mjs` 的靶场注册表 `entry` 字段
+
+接入：`npm run refs:check` · `npm run check:all` · `ci-local.mjs` 的 lint 组 · `ci.yml` 的 lint job。
+
+**缺陷注入复验（4 例，全部按预期报红）**：
+① ci.yml 路径改回不存在的 `run.js` → 报「第 313 行」；
+② `run-all` 的 `entry` 改成不存在 → 报出条目；
+③ `package.json` 引用不存在的 npm script → 报「脚本引用」；
+④ **自指注入**：把 ci.yml 里 `ref-integrity.mjs` 自己写成拼错的名字 → 门禁抓到自己
+（证明校验范围确实覆盖了它自身的接入点）。
+
+**过程中修正的两处自身缺陷**（否则会天天报假红，比没有更糟）：
+- 初版不认 `cd server && node index.js` → 把 3 个**相对子目录**的正确路径误报为缺失；
+  改为按 `&&`/`;`/`|` 切段并跟踪 `cd` 目标。
+- 缺陷注入② 首次"注入成功"实为**替换未命中而静默通过**——真实 entry 与我预设的字符串不同，
+  这也印证了"注入必须断言替换真的生效"。
+
 ### WAF 归因修正（拦住数值点 union 的是 942190，不是 942361）
 
 TODO §I「改起始形状把 num/blind 的 union 拿回来」立项时假定拦路虎是 942361
