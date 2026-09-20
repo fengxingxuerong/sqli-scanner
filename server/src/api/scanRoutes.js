@@ -20,48 +20,28 @@ import { assertSafeHttpTarget } from '../core/httpClient.js';
 // [交付场景] 两次扫描差异对比（纯函数，便于单测；见 tests/scanDiff.test.js）
 import { diffReports } from '../engine/scanDiff.js';
 // [P0-SEC 2026-09-08] 授权范围（scope）硬约束 + 逐跳登记
-import { parseScope, assertInScope, filterInScope, registerScanScope, releaseScanScope } from '../core/scopeGuard.js';
+// [大文件拆分 2026-09-21] releaseScanScope 随 trackScanTerminal 一并移至 scanGovernance.js
+// （本文件的唯一调用点就在那簇里），故此处不再 import。
+import { parseScope, assertInScope, filterInScope, registerScanScope } from '../core/scopeGuard.js';
+// [大文件拆分 2026-09-21] 两簇外移后的引用（下方同时 re-export 保路径）
+import {
+  clampInt,
+  clampNum,
+  boolOf,
+  clampStr,
+  pickInt,
+  pickBool,
+  sanitizeCookieMap,
+  clampParams,
+} from './scanConfigUtils.js';
+import { acquireScanSlot, trackScanTerminal, _scanGovernance } from './scanGovernance.js';
 
-// ── 配置白名单 clamp 工具（原逻辑不变）──
-const clampInt = (v, def, min, max) => {
-  const n = Number(v);
-  return Number.isFinite(n) ? Math.round(Math.min(max, Math.max(min, n))) : def;
-};
-const clampNum = (v, def, min, max) => {
-  const n = Number(v);
-  return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : def;
-};
-const boolOf = (v, def = false) => (v === undefined || v === null ? def : !!v);
-const clampStr = (v, def, maxLen) => {
-  if (v === undefined || v === null) return undefined;
-  const s = String(v);
-  if (s === '') return undefined;
-  return s.length > maxLen ? s.slice(0, maxLen) : s;
-};
-const pickInt = (cfg, key, def, min, max) => {
-  const v = cfg[key];
-  return v === undefined || v === null ? undefined : clampInt(v, def, min, max);
-};
-const pickBool = (cfg, key) => {
-  const v = cfg[key];
-  return v === undefined || v === null ? undefined : boolOf(v);
-};
-// [todo#39 2026-09-11] 二阶跨角色触发：Cookie 映射消毒（storeCookies/triggerCookies 共用）。
-// 仅保留字符串键值对；过滤原型污染键（__proto__/constructor/prototype）；上限 32 键防滥用。
-const sanitizeCookieMap = (v) => {
-  if (!v || typeof v !== 'object' || Array.isArray(v)) return undefined;
-  const out = {};
-  let n = 0;
-  for (const [k, val] of Object.entries(v)) {
-    if (n >= 32) break;
-    if (typeof k !== 'string' || typeof val !== 'string') continue;
-    if (k === '__proto__' || k === 'constructor' || k === 'prototype') continue;
-    if (!k.trim() || k.length > 256 || val.length > 4096) continue;
-    out[k] = val;
-    n++;
-  }
-  return n ? out : undefined;
-};
+export { acquireScanSlot, _scanGovernance };
+
+// [大文件拆分 2026-09-21] clamp 家族（clampInt / clampNum / boolOf / clampStr /
+// pickInt / pickBool / sanitizeCookieMap）已外移至 api/scanConfigUtils.js（纯函数、零依赖）。
+// 它们是配置入口的第一道闸门（数值区间 / 长度上限 / 原型污染键过滤），
+// 抽出来后每条闸门都能单独穷举测试。
 
 // 白名单字段全集（原逻辑不变）
 const KNOWN_CFG_KEYS = new Set([
@@ -699,72 +679,11 @@ export function sanitizeStart(body) {
   };
 }
 
-// [安全审计 P1] bodyParams/cookieParams 长度+数量限制
-// 防超大 body 注入 / 超多参数 DoS（对标 headerParams 黑名单过滤的安全级别）
-function clampParams(params, maxKeys = 50, maxValLen = 10000, maxKeyLen = 100) {
-  if (!params || typeof params !== 'object' || Array.isArray(params)) return {};
-  const out = {};
-  let count = 0;
-  for (const [k, v] of Object.entries(params)) {
-    if (count >= maxKeys) break;
-    const key = String(k).slice(0, maxKeyLen);
-    const val = typeof v === 'string' ? v.slice(0, maxValLen) : String(v ?? '').slice(0, maxValLen);
-    out[key] = val;
-    count++;
-  }
-  return out;
-}
-
 // ── 并发扫描上限（原逻辑不变）──
-let activeScanCount = 0;
-const MAX_SCAN_API_CONCURRENT = (() => {
-  const n = Number(process.env.MAX_SCAN_API_CONCURRENT);
-  return Number.isInteger(n) && n >= 1 ? n : 8;
-})();
-
-export function acquireScanSlot() {
-  if (activeScanCount >= MAX_SCAN_API_CONCURRENT) return null;
-  activeScanCount++;
-  let released = false;
-  return () => {
-    if (!released) {
-      released = true;
-      activeScanCount = Math.max(0, activeScanCount - 1);
-    }
-  };
-}
-
-function trackScanTerminal(sm, bus, scanId, release) {
-  const em = bus.create(scanId);
-  let done = false;
-  const finish = () => {
-    if (done) return;
-    done = true;
-    em.off('event', onEvent);
-    // [P0-SEC 2026-09-08] 扫描终结即回收 scope 登记（避免同 id 复用、也防 Map 无界增长）
-    releaseScanScope(scanId);
-    release();
-  };
-  const onEvent = (evt) => {
-    if (evt && (evt.type === 'scan_completed' || evt.type === 'scan_error' || evt.type === 'scan_stopped')) {
-      finish();
-    }
-  };
-  em.on('event', onEvent);
-  const s = sm.scans.get(scanId);
-  if (s && (s.status === 'completed' || s.status === 'error')) finish();
-}
-
-// 测试钩子
-export const _scanGovernance = {
-  maxConcurrent: MAX_SCAN_API_CONCURRENT,
-  get activeScanCount() {
-    return activeScanCount;
-  },
-  resetForTest() {
-    activeScanCount = 0;
-  },
-};
+// [大文件拆分 2026-09-21] 并发额度与扫描终结回收已外移至 api/scanGovernance.js。
+// 下方 re-export 保住既有 import 路径：tests/securityGovernance.test.js 从本文件
+// import 了 acquireScanSlot / _scanGovernance。导出的是**同一对象引用**，
+// 故测试读写的仍是 scanGovernance.js 里那份 activeScanCount 状态 —— 语义不变。
 
 // ── 报告访问护栏（P2-1：恒时比较）───────────────────────────────────────────
 function createReportGuard(tokenOverride) {
