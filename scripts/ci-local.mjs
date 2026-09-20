@@ -10,8 +10,14 @@
 //
 // 与 CI 的关系（重要，别把它当 CI 的替身）：
 //   · 覆盖：与平台无关的那 9 个 job 的命令序列，逐条取真实退出码；
-//   · 不覆盖：需要 docker 的 job（`docker`、`acceptance` 的 MySQL+secure_file_priv 前置、
-//     以及 acceptance 在 CI 里"新克隆 + 空 datadir"的干净环境），本机若缺依赖会如实标 SKIP，
+//   · 不覆盖的 3 个 job，**逐个在 EXCLUDED_JOBS 里登记并写理由**（见下方常量）：
+//       docker              —— 本机无 docker
+//       test-matrix         —— 跨平台矩阵，命令集已覆盖，但「另一个操作系统」本机不可替代
+//       tamper-waf-matrix   —— schedule-only 实验矩阵，continue-on-error 是有意设计（TODO §K）
+//     这份清单不是注释而是**可跑判据**：ci.yml 新增 job 而这里没跟上时会直接报错退出，
+//     不会静默漏跑（详见 auditJobCoverage）。
+//   · 另注：`docker` job 与 `acceptance` 的 MySQL+secure_file_priv 前置、以及 acceptance
+//     在 CI 里"新克隆 + 空 datadir"的干净环境，本机都不等价；缺依赖会如实标 SKIP/BLOCKED，
 //     **SKIP 不计入通过**（与 e2e/run-all.mjs 同一口径）。
 //
 // 用法：
@@ -32,6 +38,7 @@
 //     后重跑即 0 错误。CI 是冷 target，不会碰到；只有本机跑会撞上。
 // ============================================================================
 import { spawnSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import net from 'node:net';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -97,6 +104,70 @@ const GATES = [
 
 const SKIP_IN_QUICK = new Set(['test-frontend', 'test-server', 'e2e-self-contained', 'acceptance', 'sidecar-build']);
 
+// ── 覆盖完整性自检：ci.yml 的每个 job 必须有人管（本地覆盖 or 显式排除 + 理由）───────
+// 与 scripts/ref-integrity.mjs（TODO §J）同源：那道闸门查「引用的**文件**存不存在」，
+// 这道查「ci.yml 里的 **job** 有没有人执行」—— 都是「配置里写了、实际没人跑」的静默缺口。
+//
+// 起因：本文件头部原写「不覆盖：需要 docker 的 job（docker、…）」，只提了 1 个，
+// 而实际未覆盖的是 **3 个**（test-matrix / tamper-waf-matrix / docker）。声明与实际不符，
+// 且没有任何东西会因此变红 —— 读者只会以为除 docker 外都覆盖了。
+// 更实际的后果在将来：ci.yml 新加一个 job，本地门禁**静默少跑一段**，谁也不会发现。
+//
+// 口径：不留「默认跳过」的口子 —— 没登记就报错退出，逼人当场二选一：
+// ① 在 GATES 里补命令；② 在 EXCLUDED_JOBS 里写清「为什么本机替代不了」。
+const EXCLUDED_JOBS = {
+  'test-matrix':
+    '跨平台矩阵（windows-latest / macos-latest）：命令集（typecheck + vitest + 服务端单测）已由 ' +
+    'lint / test-frontend / test-server 在本机覆盖；「另一个操作系统」这个维度本机替代不了（只有 Windows）',
+  'tamper-waf-matrix':
+    'schedule-only 的实验矩阵（TODO §K），ci.yml 里带 continue-on-error 是有意设计（不阻塞日常流水线）',
+  docker: '本机无 docker（实测 `docker --version` exit 127）',
+};
+
+// GATES 覆盖到的 job 名（`typecheck` 不是 ci.yml 的 job 而是 lint job 内的步骤，一并计入无害）
+const COVERED_JOBS = new Set(GATES.map((g) => g.id));
+
+function auditJobCoverage() {
+  const yml = readFileSync(resolve(ROOT, '.github/workflows/ci.yml'), 'utf8');
+  const start = yml.search(/^jobs:\r?$/m);
+  if (start < 0) throw new Error('ci.yml 里定位不到 `jobs:` 行（结构变了？本自检需要跟着改）');
+  const tail = yml.slice(start + 'jobs:'.length);
+  // 判据失效必须**显形**：jobs 段后若冒出新的顶级键，缩进匹配就可能收错/漏收。
+  // 宁可报错要求同步本自检，也不静默漏检 —— 静默漏检正是这道闸门要防的东西。
+  const topLevel = tail.match(/^[A-Za-z][\w-]*:/m);
+  if (topLevel) throw new Error(`ci.yml 的 jobs: 段之后出现新的顶级键 \`${topLevel[0]}\` —— 本自检需要跟着改`);
+  const jobs = [...tail.matchAll(/^ {2}([a-z][a-z0-9-]*):\r?$/gm)].map((m) => m[1]);
+  if (!jobs.length) throw new Error('ci.yml 的 jobs: 段里一个 job 都没解析到（缩进变了？）');
+  return {
+    jobs,
+    covered: jobs.filter((j) => COVERED_JOBS.has(j)),
+    excluded: jobs.filter((j) => !COVERED_JOBS.has(j) && j in EXCLUDED_JOBS),
+    unaccounted: jobs.filter((j) => !COVERED_JOBS.has(j) && !(j in EXCLUDED_JOBS)),
+    // 反向：清单里登记了、ci.yml 已经没有的 job —— 清单会腐烂，同样要报
+    stale: Object.keys(EXCLUDED_JOBS).filter((j) => !jobs.includes(j)),
+  };
+}
+
+{
+  const cov = auditJobCoverage();
+  console.log(
+    `job 覆盖自检：ci.yml ${cov.jobs.length} 个 job → 本地覆盖 ${cov.covered.length} / ` +
+      `显式排除 ${cov.excluded.length} / ${cov.unaccounted.length ? `⚠️ 未声明 ${cov.unaccounted.length}` : '未声明 0'}`
+  );
+  if (cov.stale.length) {
+    console.error(`\n❌ EXCLUDED_JOBS 里登记了 ci.yml 已不存在的 job：${cov.stale.join('、')}`);
+    console.error('   排除清单腐烂了（那个 job 可能已删除或改名）—— 请同步更新本脚本的 EXCLUDED_JOBS。');
+    process.exit(2);
+  }
+  if (cov.unaccounted.length) {
+    console.error(`\n❌ ci.yml 里有 ${cov.unaccounted.length} 个 job 没有登记的归宿：${cov.unaccounted.join('、')}`);
+    console.error('   每个 job 必须二选一：① 在 GATES 里补上它的命令（本地能跑）；');
+    console.error('   ② 在 EXCLUDED_JOBS 里登记，并写清「为什么本机替代不了」。');
+    console.error('   不给默认跳过 —— 否则 ci.yml 新增 job 时本地门禁会静默少跑一段，而没人会发现。');
+    process.exit(2);
+  }
+}
+
 console.log('=== ci-local：按 ci.yml 的 job 顺序在本机跑一遍 ===');
 const ports = { 3306: await probePort(3306), 5432: await probePort(5432), 8231: await probePort(8231) };
 console.log(`环境探测：MySQL 3306=${ports[3306] ? '在' : '不在'}  PG 5432=${ports[5432] ? '在' : '不在'}  红队靶场 8231=${ports[8231] ? '在' : '不在'}`);
@@ -152,7 +223,11 @@ for (const r of results) {
   console.log(`${badge} ${r.state.padEnd(8)} ${r.name}${r.why ? `　(${r.why})` : ''}`);
 }
 console.log(`\n${pass} PASS / ${fail.length} FAIL / ${blocked.length} BLOCKED / ${skipped.length} SKIP`);
-console.log('注：CI 还有两个本机跑不了的 job —— `docker`（build + 冒烟）与 acceptance 在 CI 里的'
-  + '「docker 起 MySQL 并放行 secure_file_priv」前置。这两处只能等真远端接上才算验证过。');
+// [2026-09-20] 原先这里写「CI 还有两个本机跑不了的 job —— `docker` 与 acceptance 的…前置」，
+// 但「两个」里只有一个（docker）真是 job，且实际本机替代不了的 job 是 3 个（见 EXCLUDED_JOBS）。
+// 散文式声明最容易与实际漂移，故此处不再复述数量，只指向启动时那行**可跑判据**的输出。
+console.log('注：本机覆盖不到的部分以启动时「job 覆盖自检」那行为准（不在此复述，避免两处漂移）。');
+console.log('    仍需真远端才能验证：docker job、test-matrix 的 macOS 腿、'
+  + '以及 acceptance 在 CI 里「docker 起 MySQL + 放行 secure_file_priv」的干净环境前置。');
 if (fail.length || blocked.length) console.log('SKIP 与 BLOCKED 都不算通过。');
 process.exit(fail.length || blocked.length ? 1 : 0);
