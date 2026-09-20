@@ -259,6 +259,12 @@ jobs:
         with:
           path: server/node_modules
           key: ${{ runner.os }}-server-${{ hashFiles('server/package-lock.json') }}
+      # [CI-FIX 2026-09-20] 必须**同时装 root 依赖**：e2e/waf-real/crs-equivalence.mjs
+      # import 了 `yaml`（在 root package.json 的 devDependencies 里），只装 server 的
+      # 话会 `ERR_MODULE_NOT_FOUND: Cannot find package 'yaml'` —— 首跑实测 CRS 保真度
+      # 套件正是因此 FAIL（本地 node_modules 里早就有它，所以本机一直是绿的：隐式依赖）。
+      - run: npm ci
+        name: Install root deps（CRS 保真度脚本需要 yaml）
       - run: cd server && npm ci
         name: Install server deps
       # 用 docker run 而非 service container：只有命令行方式才能给 mysqld 传
