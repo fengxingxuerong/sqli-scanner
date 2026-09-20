@@ -836,7 +836,7 @@ process.exit(0);          // ← 漏检 / 误报 / must 未命中，一律退 0
 | job | 根因 | 状态 |
 |---|---|---|
 | `lint` | ① 指纹门禁没做 **EOL 规范化**：本机 CRLF / CI LF → 69 文件假报"改动"（同 `git archive` 假阳性那一课，踩了两次）；② 修完指纹后仍红 → **Tauri 在 Linux 编译缺 GTK 系统库**（glib-sys 找不到 glib-2.0.pc → clippy exit 101），本地 Windows 是另一套依赖链 | ✅ 已修（hashFile 规范化 `b64e772` + apt 装 Tauri 依赖），待下轮验证 |
-| `acceptance` | fileRead=BLOCKED（CI 容器起不了隔离沙箱）、fileWrite=FAIL（service container 的 MySQL secure_file_priv 未放行）、CRS 保真度=「取不到保真度行」（现场未进 artifact，已修 artifact path 待下轮取证） | ⏳ 待逐个处置 |
+| `acceptance` | **三个套件各自独立**（靠 `last-failure-*.log` 现场定位）：<br>① **CRS 保真度** = `ERR_MODULE_NOT_FOUND: Cannot find package 'yaml'` —— acceptance job 只跑 `cd server && npm ci`，而 `yaml` 在 **root 的 devDependencies**；本机 node_modules 里早就有它（隐式依赖）→ **已修** `0fbbfaf`<br>② **fileWrite** = 落盘路径写死 Windows：`exploit` 报 `remotePath=D:/tmp/mysql-fw-lab/out/pwned.txt`、`wrote:true` 但 `verified:false` → 容器里按该路径检查不到文件 —— **待修**（跨平台路径）<br>③ **fileRead** = 隔离沙箱 `datadir 未初始化` → BLOCKED（判据语义正确）→ **待决策**：CI 容器起不来沙箱时该套件应算 SKIP 还是继续算失败 |
 | `e2e-self-contained` | redteam-lab 跑 90.6s 失败、multi-engine-lab 0.4s 秒败（疑似 CI 容器缺依赖） | ⏳ 待查 |
 
 **过程教训（两条）**：
