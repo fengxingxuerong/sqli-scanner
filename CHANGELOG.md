@@ -4,6 +4,31 @@
 
 ## [Unreleased]
 
+### 诊断可信度（归因文案不再把人带向错误方向）
+
+`Exploiter.myOsShell` 的 echo 探针（纯 ASCII 数字 marker）原为**单次**判定：为空即写
+「典型：Windows 本地化 whoami 的 GBK 输出」。但 marker 是纯 ASCII，它的空捕获**不可能是
+编码问题** —— 这句话在「判据偶发抖动」时会把排障引向编码方向。改为最多两次重试，把三种
+成因分开：echo 命中+原命令 null → 真·不可字符化；首空后命中 → 判据抖动（**不写编码归因**）；
+两次都空 → 探测通道不可靠（新增 `probeInconclusive`，且**不**写 `udfInstall`，因为两次空
+≠ 未注册）。缺陷注入复验：撤掉重试 → 新增两条变红、原语义那条仍绿。
+
+### 靶场侧噪声源（`--test-path` 白烧请求 + redteam 喂假 SQL 错）
+
+- **闭合探测在 404 路径上白烧约 40 请求**（`Detector.probeBoundary`）：闭合前缀的前提是该
+  路径真执行了 SQL；路径不存在时后端没路由到查询代码，13 个候选只是同一张错误页（Express
+  还回显 URL）→ 噪声 boundary → 触发整轮指纹/列数探测。现于基线请求后早退：
+  `kind==='path'` 且 `400≤status<500`（排除 401/403/429 —— 鉴权/限流 ≠ 路径不存在）。
+  真存在注入的路径不会是 4xx，故不影响真实检出；留 `boundarySkipReason` 供排障。
+  实测来源：`/api/sleep` 开 `--test-path` 时 path 点拿到 boundary `%"`。
+- **redteam-lab `/shop/semi` 的 URIError 喂假信号**（D15 靶点）：4 处裸调 `decodeURIComponent`
+  （同文件已备好 `decodeSafe` 却没接上）。payload 含裸 `%` 时抛 URIError，被外层 `run()`
+  兜成 `500 + SQL_ERROR: URIError` —— 不是「挂连接」，但等于靶场亲手给扫描器的 error 通道
+  喂假信号（该看 UNION 结果行，却看到伪 SQL 错误）。改用 `decodeSafe` 后实测报错文本全部
+  转为真实 MySQL 错：`id=1%` → `syntax ... near ''`；`id=1%zz` → `Unknown column 'zz'`。
+- 附带纠正：TODO 原判「redteam / real-mysql / multi-engine / pentest-lab 同一形态」经实测
+  **不成立** —— 这 4 个靶场均已具备防护，只有 `/shop/semi` 真中招。
+
 ### 测试可信度（消除两条既有 flaky 的假红）
 
 两条 flaky 同根：**拿固定墙钟给异步扫描流水线设上限**，等价于在测机器负载。负载一高就红，

@@ -186,27 +186,53 @@ README 原写 2026-09-10 复测的 **tamper off 2/5 → on 10/5 技术位**、�
 `indexOf('--only')` 返回 -1 → **静默退化成跑全部依赖齐全的靶场**（实测：想跑 1 个 0.5s 套件，
 结果跑了 21 个含 77s 红队）。现两种写法都认，并打印「定向模式：只跑 X」。
 
-### H. udf-lab step6 的归因文案会把人带偏（未修）
+### H. udf-lab step6 的归因文案会把人带偏（✅ 已修 2026-09-20）
 `sys_eval('cmd /c echo <ASCII marker>')` 偶发捕获为空时，step6 的 note 固定写
 「典型：Windows 本地化 whoami 的 GBK 输出」。marker 是纯 ASCII，这句话把人往编码方向带，
 而实际形态是**输出捕获为空**。改成按实测分支给原因（空捕获与"不可字符化"是两回事）。
 
-### I. 严格档 CRS 下数值点的 union 怎么拿回来（未做，本批已把可行/不可行分开）
+**✅ 已按此修（`Exploiter.myOsShell` 路径 2.5）**：
+- echo 探针（纯 ASCII 数字 marker）从**单次**改为**最多两次**，用重试结果把三种成因分开：
+  | 观测 | 归因 | 关键点 |
+  |---|---|---|
+  | echo 命中 + 原命令 null | 真·输出不可字符化 | note 明确写「该命令**自身**的输出编码，非探测通道问题」 |
+  | echo 首空、重试命中 | 判据抖动（偶发空捕获） | **不写任何编码归因**（ASCII marker 不存在字符化失败） |
+  | echo 两次都空 | 探测通道不可靠 | 新增 `probeInconclusive: true`；note 点明 marker 是 ASCII、不是编码问题；**不写 udfInstall**（两次空 ≠ 未注册，不把人引向重投 DLL） |
+- **验证**（`tests/exploiter.udfChain.test.js` 新增 3 条，9/9 绿）：
+  · 正向（保留原语义）：echo 命中 + 原命令 null → `suggestHexEcho: true`，无 `probeInconclusive`；
+  · 抖动：断言 echo 探针**确实发了 2 次**，且 note 不含 `GBK|本地化`；
+  · 通道不通：`probeInconclusive: true`，note 含 `ASCII`、不含 `GBK|本地化`、不含 `udfInstall`。
+- **缺陷注入验证**：撤掉重试段 → **第 8、9 条变红，第 7 条（保留原语义）仍绿**（7 pass / 2 fail）
+  → 证明新测试钉的是新增行为，且没有破坏原归因路径。
+- **实测背景**：`e2e/udf-lab/results/udf-takeover.json` 最近一次 `osShell.ok=true`（值 `osshell_ok`）
+  未触发该分支，但同次 `whoami` 实测返回 `Admin（无密码）` —— **非 ASCII 用户名**，
+  说明这条归因分支在真机上确实可达。
+
+### I. 严格档 CRS 下数值点的 union 怎么拿回来（**第 2 条已完成，第 1 条未做**）
 F 条的探针表给出：**换分隔符这条路对 942361 完全无效**（`/**/`、`%0a`、`%09`、双空格、`UNION ALL`
 八种形态全部 403，且这些形态不套 WAF 时 MySQL 全部正常执行）。原因是该规则的判据是
 `^[\W\d]+\s*?(?:alter|union)\b` —— 打的是**参数值起始形状**，不是 UNION/SELECT 相邻性。
 数值点 `id=1…` 必然以数字开头 → 命中；`alice'…` 以字母开头 → 不命中。
-可做的两条（都要实测，别再抄"sqlmap 这么干"）：
-1. **改起始形状**：让投放值不以 `[\W\d]` 直接接 `union`。候选是 `space2plus`/`spatialessuffix`/
-   `versionedmore` 这类，或在数值前拼一个词字符再靠 SQL 语义消化掉（`1x` 非法；`1/*x*/UNION`… 需实测）
-   —— 先写一条 `e2e/waf-real/probe-*-shape.mjs` 单点探针（纯发请求，几秒出结果）筛掉无效形态。
-2. **换档测量**：942361 官方注释写明属 **PL2**，而 `e2e/waf-real/crs-engine.js` 默认全规则（≈PL3 最严档）。
-   `evaluate(req, { paranoiaLevel })` 已有参数，只是各靶场的中间件调用处没传 → 加一个 `CRS_PL` 环境变量，
-   把 **PL1（CRS 默认部署档）** 的绕过率一并测出来。现在 README 的 8/8 只有最严档，
-   拿它当"典型线上值"会**低估**自己在真实默认部署下的表现（也会低估对手）。
 
-验收：任一形态让 `num`/`blind` 的 `on.found` 出现 `union`，且 `safe`/`echo` 两个对照仍零误拦；
-或 README/评估报告里同时给出 PL1 与 PL3 两档数字。
+**✅ 第 2 条「换档测量」已完成（实测发现早于本条记录）**：
+`CRS_PL` 环境变量机制已落在 `crs-engine.js:287-293`（`DEFAULT_PL` 读环境变量，默认 3），
+`e2e/waf-real/waf-bits-baseline.json` 已按 PL 分档锁基线，并写明 `_why_per_pl`：
+「不带档位的绕过率没有可比性 —— CRS 官方默认部署是 PL1」。README 已同时给出两档：
+
+| 档位 | tamper off | tamper on | 自动选链 |
+|---|---|---|---|
+| **PL1（CRS 默认部署档）** | 8 | 8 | 8 |
+| **PL3（全规则最严档）** | 0 | 0 | 0 |
+
+门禁默认跑 **PL1**（`WAF_GATE_PL=3 npm run acceptance` 可切档）。
+→ 原担忧「README 只有最严档会低估自己在真实默认部署下的表现」**已消除**。
+
+**第 1 条「改起始形状」未做**（需真做实验，不是抄 sqlmap）：
+让投放值不以 `[\W\d]` 直接接 `union`。候选是 `space2plus`/`spatialessuffix`/`versionedmore`
+这类，或在数值前拼一个词字符再靠 SQL 语义消化掉（`1x` 非法；`1/*x*/UNION`… 需实测）。
+先写 `e2e/waf-real/probe-*-shape.mjs` 单点探针（纯发请求，几秒出结果）筛掉无效形态。
+
+验收：任一形态让 `num`/`blind` 的 `on.found` 出现 `union`，且 `safe`/`echo` 两个对照仍零误拦。
 
 ---
 
