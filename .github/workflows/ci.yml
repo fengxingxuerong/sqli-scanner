@@ -115,6 +115,14 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+      # [CI-FIX 2026-09-20] tauri-build 会校验 externalBin（sidecar 引擎二进制）的存在性：
+      # lint 只做 fmt/clippy 静态检查，不需要真 sidecar —— 生成占位文件让校验通过。
+      # 真实 sidecar 由 sidecar-build job 构建。首跑实测：缺它时 build script 报
+      # `resource path binaries/sqli-engine-x86_64-unknown-linux-gnu doesn't exist` → exit 101。
+      - name: Stub sidecar binary for tauri-build check
+        run: |
+          mkdir -p src-tauri/binaries
+          touch "src-tauri/binaries/sqli-engine-x86_64-unknown-linux-gnu"
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.98.0
