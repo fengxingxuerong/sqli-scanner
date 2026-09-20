@@ -770,6 +770,54 @@ md5 因此与改前不同；而 `git status` 说 clean、`git diff --numstat` �
 伪装成**工具能力缺口**。若不是多问了一句"这个写入到底影响了什么"，
 就会去给引擎加一个根本没被需要的能力（二阶 boolean 通道），而且**永远修不好这个靶点**。
 
+
+### X. pentest-lab 自检的两处门禁断口：`must` 从不参与判定 + 无条件 exit 0（✅ 已修 2026-09-20）
+
+与 §J/§Q/§R/§U/§V/W 同族（**声明了却没人拦**），这次落在**靶场自检脚本**里。
+
+**断口 1：`must` 技术期望是装饰性的**。`e2e/pentest-lab/verify.mjs` 的每个场景都声明了
+`must: ['union','error','boolean']` 这类期望（如 `ua` / `ck`），但判定式是：
+
+```js
+const miss = sc.must.filter((t) => !union.includes(t));
+const ok = sc.expectSafe ? union.length === 0 : union.length > 0;   // ← ok 完全不用 miss
+```
+
+→ **must 未命中只在输出里附一句 `miss=[...]`，不会让任何东西变红**：
+"声明了技术期望，但达不到也没关系"。
+
+**断口 2：`process.exit(0)` 是无条件的**，就写在同一段里：
+
+```js
+const tag = sc.expectSafe ? … : union.length ? 'PASS' : 'FAIL(漏检)';
+console.log(`[pentest-lab] 漏洞场景检出 ${detected}/${vulnerable}；…`);
+process.exit(0);          // ← 漏检 / 误报 / must 未命中，一律退 0
+```
+
+→ 直接跑 `node e2e/pentest-lab/verify.mjs` **永远是绿退出码**，脚本自己打的 FAIL 标签形同装饰。
+（同 skill 陷阱 11「打印 + 无条件退出 = 假绿」。）
+
+**为什么更早没被发现**：acceptance 那条路**是有效的** —— 它解析 stdout 的
+`漏洞场景检出 N/M` 数字并断言 `vuln === total && fp === 0`。于是"聚合门禁绿"与
+"脚本自己绿"两件事长期并存；**两个入口口径不一致本身就是缺陷**。
+
+**修法**：
+1. `ok` 纳入 must（`union.length > 0 && miss.length === 0`；安全场景仍是"必须 0 检出"）；
+2. `tag` 增加 `FAIL(miss=…)` 形态；
+3. 末尾改为 `process.exit(failedRows.length ? 1 : 0)` 并按场景点名；
+4. 顺带只给**描述里明确写了技术**的场景补 must —— 本次只补 `noisy`（描述写"布尔盲注"）。
+   其余 9 个场景描述未声明技术，**故意不补**：把"当前实测出什么"固化成"期望出什么"
+   等于把实现当规范，会制造假红。
+
+**验证（实测 11 场景）**：
+
+| 步骤 | 结果 |
+|---|---|
+| 加严后基准 | `漏洞场景检出 10/10；安全场景误报 0`，11 场景全 PASS，**exit 0**；`noisy` 的新 must 命中 |
+| 注入 ①：`noisy` 的 must 改成 `['nosql']` | `❌ 1 个场景未通过：noisy` + **exit 1**（注意 `10/10` 仍显示"有检出" —— 这正是"有没有检出"与"期望是否满足"的区别） |
+| 注入 ②：`empty` 指向不存在的路由 | `FAIL(漏检)` + `9/10` + **exit 1** |
+| 撤销两处注入 | 恢复 10/10 + exit 0 |
+
 **为什么长期没被发现**：blackbox-lab **不在任何门禁里** —— 它是"独立第三方评测靶场"
 （刻意不复用项目自带靶场，属阶段性工具）。它的一致性原本没有任何东西在守护；
 本轮起由 `npm run targets:check` 覆盖（已接入 ci-local 的 lint 组与 ci.yml 的 lint job）。
