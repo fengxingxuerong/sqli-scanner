@@ -14,7 +14,18 @@
 // ============================================================================
 
 import { truncateLong } from '../core/logger.js';
-import { buildPocEvidence } from '../engine/pocBuilder.js';
+// [大文件拆分 2026-09-21] PoC 证据链（生成 + 归一化 + md/html 渲染）外移至 reportPoC.js；
+// buildPocEvidence 随之移走 —— 本文件已无直接调用点。
+// HTML 渲染原语（esc/safeHref/renderUrlLink/isInternalHost）外移至 reportHtml.js，
+// 并在下方 re-export 保住既有 import 路径。
+import {
+  attachPoc,
+  pocEntries,
+  pocMarkdown,
+  pocHtml,
+  pointById,
+  pocRedactedForExport,
+} from './reportPoC.js';
 // [2026-09-17] 交付缺口修复：vuln 只有内部 pointId hash，报告读者无法自解「哪个参数中招」。
 // attachVulnContext 兜底给漏洞条目补 param/location/url/method/vulnType（幂等浅拷贝），
 // 使「受影响参数」与「漏洞类型(CWE/OWASP)」成为报告的自包含字段——
@@ -31,69 +42,13 @@ const EVIDENCE_MAX = 4000;
 // [P0-FIX 2026-09-08] 报告侧安全渲染原语（PoC 要塞进 <pre> 与属性位，故单独成组）
 // ============================================================================
 
-// 数字实体版转义：& < > " ' 全覆盖。
-// 为什么不用 _escape：_escape 的 `"` → `&quot;` 形式已被既有测试锁定（行为不变原则），
-// 而 PoC 文本要落进 title/href 等属性位，`"` → `&#34;`、`'` → `&#39;` 的数字实体在
-// 「带引号属性」与「裸属性」两种上下文里都安全（&#34; 不会被任何解析器当引号闭合）。
-const ESC_MAP = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&#34;', "'": '&#39;' };
-export function esc(s) {
-  return String(s ?? '').replace(/[&<>"']/g, (c) => ESC_MAP[c]);
-}
-
-// 内网/回环地址判定：报告常在浏览器里打开，内网链接一点就是「报告文件 → SSRF」。
-// 命中时渲染成 <code> 纯文本，保留可读性但不可点击。
-export function isInternalHost(host) {
-  const h = String(host || '').toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
-  if (!h) return false;
-  if (h === 'localhost' || h.endsWith('.localhost')) return true;
-  if (h.endsWith('.local') || h.endsWith('.internal') || h.endsWith('.internaldomain')) return true;
-  if (h === '::1' || h === '0.0.0.0' || h === '0') return true;
-  if (/^(127|10|169\.254|192\.0\.0)\./.test(h)) return true;
-  if (h.startsWith('192.168.')) return true;
-  if (/^172\.(1[6-9]|2\d|3[01])\./.test(h)) return true;
-  return false;
-}
-
-// 可链接化判定：仅 http/https 允许进 href。javascript:/data:/file:/vbscript: 一律返回
-// null（调用方降级为纯文本）。先剥掉控制字符与空白——`java\nscript:` 这类写法浏览器
-// 会忽略换行继续按脚本协议解析，是过滤器的经典绕过面。
-export function safeHref(url) {
-  const raw = String(url ?? '').trim();
-  if (!raw) return null;
-  const cleaned = raw.replace(/[\u0000-\u0020\u007f]/g, '');
-  if (!/^https?:\/\//i.test(cleaned)) return null;
-  try {
-    const u = new URL(cleaned);
-    if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;
-    return cleaned;
-  } catch {
-    return null; // 非法 URL（含 host 里的 < > 等禁用字符）：不可点
-  }
-}
-
-// 从 URL 中取主机名（内网判定用）；解析失败返回空串 → 调用方按「非内网」处理。
-function hostOfUrl(u) {
-  try {
-    return new URL(String(u)).hostname;
-  } catch {
-    return '';
-  }
-}
-
-// 目标/PoC URL 的 HTML 渲染：安全外链 → <a>；内网 → <code>；其余 → 纯文本。
-// rel 加 noopener noreferrer：避免 target=_blank 反向拿到 window.opener。
-export function renderUrlLink(url, label) {
-  const text = esc(label ?? (url || '-'));
-  const href = safeHref(url);
-  if (!href) return text;
-  if (isInternalHost(hostOfUrl(href))) return `<code>${text}</code>`;
-  return `<a href="${esc(href)}" target="_blank" rel="noopener noreferrer nofollow">${text}</a>`;
-}
-
-// Markdown 内联代码：反引号必须转义，否则 payload/URL 里的 ` 会提前闭合行内代码。
-function mdInline(s) {
-  return String(s ?? '').replace(/`/g, '\\`');
-}
+// [大文件拆分 2026-09-21] HTML 渲染原语（esc / isInternalHost / safeHref /
+// renderUrlLink）已外移至 services/reportHtml.js —— 单独成叶子模块是为了**打破循环依赖**：
+// reportPoC.js 要用 esc/renderUrlLink，而本文件又要 import reportPoC.js。
+// 下方 re-export 保证既有 `import { esc, safeHref, ... } from './ReportGenerator.js'`
+// 继续可用（tests/poc.evidence.test.js:15 依赖这条路径，不可删）。
+import { esc, isInternalHost, safeHref, renderUrlLink } from './reportHtml.js';
+export { esc, isInternalHost, safeHref, renderUrlLink };
 
 // [2026-09-17] Markdown 表格单元格：竖线必须转义，否则会切列、把整张表拆散。
 // 参数名/类型名可能来自目标页面（参数名由被测系统决定），属不可信输入，一律经此出口。
@@ -126,57 +81,11 @@ function affectedParamText(v) {
 
 // Markdown 围栏：内容里可能出现反引号（payload 常含 ` 与 ```），围栏长度必须严格大于
 // 正文中最长的反引号串，否则 PoC 会提前闭合围栏、把后续报告内容变成正文。
-function mdFence(content, lang = '') {
-  const runs = /** @type {string[]} */ (String(content || '').match(/`+/g) || []);
-  const max = runs.reduce((m, r) => Math.max(m, r.length), 0);
-  const tick = '`'.repeat(Math.max(3, max + 1));
-  return `${tick}${lang}\n${content}\n${tick}`;
-}
-
-// 取「用于复现的那条 payload」：各检测器约定 payloads[0] 为命中样本
-// （boolean=[真,假]、union=[命中 UNION,ORDER BY 确认]、error/stacked=[命中串]）。
-function confirmedPayload(vuln) {
-  if (typeof vuln?.evidencePayload === 'string' && vuln.evidencePayload) return vuln.evidencePayload;
-  const list = Array.isArray(vuln?.payloads) ? vuln.payloads : [];
-  const hit = list.find((p) => typeof p === 'string' && p.length);
-  return hit || '';
-}
-
-// PoC 缓存（键 = 稳定字符串，见 pocCacheKey；Map + 容量上限，不常驻无界内存）。
-// 为何需要：同一次会话里 markdown / md 别名 / html 会被反复导出，而
-// poc.generatedAt 是时间戳——不缓存则两次渲染文本不相等（CLI 的 md/markdown 等价
-// 断言直接挂），且白白重算一遍 o(漏洞数) 的字符串拼接。
-// [FIX 2026-09-18 发布前 flaky] 原实现是 WeakMap（键 = vuln 对象引用）：只要上游
-// （_enrich 未命中时的重建 / _truncate 的拷贝）产生过一次新对象，缓存就永久不命中，
-// 于是每次导出都重算 poc.generatedAt → 「同一份报告两次导出逐字节一致」在跨毫秒时挂
-// （实测单独复跑 3 次挂 1 次）。键必须与对象身份无关。
-const POC_CACHE = new Map();
-const POC_CACHE_MAX = 500;
-
-/**
- * PoC 缓存键：scanId + 注入点 + 载荷 + 脱敏开关。
- * 不含对象引用，也不含时间——保证「同一份逻辑上的报告」在任何拷贝链路上都命中同一份 PoC。
- */
-function pocCacheKey(report, v, redactAuth) {
-  const scanId = String((report && report.scanId) || '');
-  const pointId = String(v && v.pointId != null ? v.pointId : '');
-  let payload = '';
-  try {
-    payload = String(confirmedPayload(v) ?? '');
-  } catch {
-    payload = '';
-  }
-  return `${scanId}|${pointId}|${payload}|${redactAuth ? 1 : 0}`;
-}
-
-function pocCacheSet(key, poc) {
-  // Map 保持插入顺序：超出上限时淘汰最早写入的一条（WeakMap 换成 Map 后必须有界）
-  if (POC_CACHE.size >= POC_CACHE_MAX) {
-    const oldest = POC_CACHE.keys().next().value;
-    if (oldest !== undefined) POC_CACHE.delete(oldest);
-  }
-  POC_CACHE.set(key, poc);
-}
+// [大文件拆分 2026-09-21] confirmedPayload / POC_CACHE / pocCacheKey / pocCacheSet
+// 已随 attachPoc 一并移至 services/reportPoC.js —— 它们**只被 attachPoc 使用**，
+// 搬走后缓存语义完全不变（仍是模块级单例 Map，同一份报告多次导出命中同一份 PoC）。
+// ⚠ 缓存键必须**不含对象引用、不含时间**（见 [FIX 2026-09-18 发布前 flaky]）：
+// 一旦改回 WeakMap(键 = vuln 对象)，「同一份报告两次导出逐字节一致」会再次挂。
 
 // [2026-09-17] 漏洞上下文增强结果的缓存（WeakMap，键=调用方传入的原始 report）。
 // 为什么必须缓存而不是每次现算：
@@ -300,38 +209,11 @@ export class ReportGenerator {
     return this._attachPoc(report);
   }
 
+  // [大文件拆分 2026-09-21] 实现已移至 services/reportPoC.js#attachPoc。
+  // 本方法原本就不引用 this（只用模块级缓存 + pocBuilder），故是纯搬移。
   _attachPoc(report) {
-    const vulns = report && Array.isArray(report.vulns) ? report.vulns : null;
-    if (!vulns || !vulns.length) return report;
-    const points = (report && report.points) || [];
-    const byId = new Map();
-    for (const p of points) if (p && p.id != null) byId.set(p.id, p);
-    // [P0-SEC 2026-09-08] 交付型报告可选把凭据头脱敏（config.pocRedactAuth=true）。
-    // 默认关：PoC 要能直接复制跑；开启后 curl/raw/headers 统一打码。
-    const redactAuth = !!(report && report.target && report.target.config && report.target.config.pocRedactAuth);
-    let touched = false;
-    const out = vulns.map((v) => {
-      if (!v || typeof v !== 'object' || v.poc) return v; // 已有 poc（外部预生成）→ 不重复计算
-      const key = pocCacheKey(report, v, redactAuth);
-      const cached = redactAuth ? undefined : POC_CACHE.get(key);
-      if (cached) {
-        touched = true;
-        return { ...v, poc: cached }; // 同一份报告多次导出 → 逐字节一致（含 generatedAt）
-      }
-      try {
-        const point = byId.get(v.pointId) || null;
-        const poc = buildPocEvidence(report.target, point, confirmedPayload(v), { redactAuth });
-        if (!redactAuth) pocCacheSet(key, poc);
-        touched = true;
-        return { ...v, poc };
-      } catch {
-        return v; // 任何异常都不让报告生成失败（PoC 是增强项，不是必需项）
-      }
-    });
-    return touched ? { ...report, vulns: out } : report;
-  }
-
-  // [P1-1] 导出统一脱敏：先挂 PoC（缓存键是原始 vuln 对象，故须在截断拷贝前），
+    return attachPoc(report);
+  }  // [P1-1] 导出统一脱敏：先挂 PoC（缓存键是原始 vuln 对象，故须在截断拷贝前），
   // 再截断证据，最后剥离 target 凭据
   // [2026-09-17] 漏洞上下文增强（带缓存，保证同一份报告多次取数拿到同一个对象）。
   // 纯只读：返回浅拷贝，不写回调用方内存中的 report。
@@ -756,108 +638,20 @@ export class ReportGenerator {
 
   // [P0-FIX 2026-09-08] Markdown「复现方式」小节（只增小节，不改上面任何一行）
   _pocMarkdown(r) {
-    const list = this._pocEntries(r);
-    const out = ['', '## 复现方式（PoC）', ''];
-    if (!list.length) {
-      out.push('未发现漏洞，无可复现请求。', '');
-      return out;
-    }
-    out.push('以下请求由引擎实际发送形态还原（含 prefix/suffix 与会话上下文），可直接回放验证“这不是误报”。', '');
-    for (const it of list) {
-      out.push(`### ${it.title}`, '');
-      out.push(`- 请求：\`${mdInline(it.req)}\``);
-      if (it.poc.payload) out.push(`- Payload：\`${mdInline(it.poc.payload)}\``);
-      if (it.poc.note) out.push(`- 说明：${it.poc.note}`);
-      out.push(`- 生成时间：${it.poc.generatedAt}`, '');
-      if (it.poc.curl) {
-        out.push('curl（复制即跑）：', '');
-        out.push(mdFence(it.poc.curl, 'bash'), '');
-      }
-      if (it.poc.raw) {
-        out.push(`原始报文（存为 \`${it.file}\` 后可用 -r 导入复现）：`, '');
-        out.push(mdFence(it.poc.raw, 'http'), '');
-      }
-    }
-    return out;
-  }
-
-  // [P0-FIX 2026-09-08] HTML「复现方式」小节：curl 一行 + <details> 折叠原始报文
+    return pocMarkdown(r);
+  }  // [P0-FIX 2026-09-08] HTML「复现方式」小节：curl 一行 + <details> 折叠原始报文
   _pocHtml(r) {
-    const list = this._pocEntries(r);
-    if (!list.length) return '<p class="meta">未发现漏洞，无可复现请求。</p>';
-    return list
-      .map((it) => {
-        const curl = it.poc.curl
-          ? `<p class="meta">curl（复制即跑）</p><pre class="curl">${esc(it.poc.curl)}</pre>`
-          : '';
-        const raw = it.poc.raw
-          ? `<details><summary>原始 HTTP 报文（存为 ${esc(it.file)} 后用 -r 导入复现）</summary><pre>${esc(it.poc.raw)}</pre></details>`
-          : '';
-        return `<div class="poc">
-        <h3>${esc(it.title)}</h3>
-        <p class="meta">请求：<code>${esc(it.method)}</code> ${renderUrlLink(it.poc.url, it.poc.url || '-')}</p>
-        <p class="meta">Payload：${it.poc.payload ? `<code>${esc(it.poc.payload)}</code>` : '-'}</p>
-        <p class="meta">${esc(it.poc.note || '')} · 生成于 ${esc(it.poc.generatedAt)}</p>
-        ${curl}${raw}
-      </div>`;
-      })
-      .join('\n');
-  }
-
-  // PoC 条目归一化：markdown / html 共用同一取数与标题规则，避免两侧漂移
+    return pocHtml(r);
+  }  // PoC 条目归一化：markdown / html 共用同一取数与标题规则，避免两侧漂移
   // [goal 批次 A-1] payloads 逐条展开：每个漏洞的每条 payload 各生成一条可复放 PoC
   //（主命中 = payloads[0]，与既有单条行为兼容；其余为同点补充 payload，均标注来源）。
   // buildPocEvidence 按每条 payload 重算请求形态，满足「可逐条手工复放验证」的交付口径。
   _pocEntries(r) {
-    const out = [];
-    let n = 0;
-    for (const v of r.vulns || []) {
-      const base = v && v.poc;
-      if (!base) continue;
-      n += 1;
-      const point = String(v.pointId ?? '-');
-      const list = Array.isArray(v.payloads) && v.payloads.length ? v.payloads : [base.payload];
-      const seen = new Set();
-      let m = 0;
-      for (const pl of list) {
-        const p = String(pl ?? '');
-        if (!p || seen.has(p)) continue;
-        seen.add(p);
-        m += 1;
-        const label = m === 1 ? '主命中' : `补充 payload ${m}`;
-        let poc = base;
-        if (p !== base.payload) {
-          // 同注入点换 payload 重算完整复放请求（headers/body/curl/raw 全部跟随）
-          poc = buildPocEvidence(r.target || {}, this._pointById(r, v.pointId) || {}, p, { redactAuth: this._pocRedactedForExport(r) });
-          // [2026-09-17 FIX] 同批证据共用主命中的生成时间戳。
-          // 原实现让补充 payload 的 PoC 携带自身 Date.now()，而主命中 PoC 走 WeakMap 缓存——
-          // 于是「同一份报告两次渲染逐字节一致」在跨毫秒边界时必然失败（实测 5 次挂 2 次，
-          // poc.evidence.test.js 的确定性用例即被此击中）。一次导出产出的证据链属于同一时刻，
-          // 共用时间戳在语义上也更正确。
-          poc = { ...poc, generatedAt: base.generatedAt };
-        }
-        out.push({
-          poc,
-          // [2026-09-17] 标题带受影响参数：PoC 清单要能直接对上「哪个参数中招」，
-          // 此前只有内部 pointId hash，手工复现时需回查 JSON 才能确认。
-          title: `PoC-${n}-${m} · 注入点 ${point}${v.param ? `（参数 ${v.param}）` : ''} · ${v.technique || '-'} · ${label}`,
-          file: `poc-${n}-${m}-${point}.txt`,
-          method: poc.method || 'GET',
-          req: `${poc.method || 'GET'} ${poc.url || '-'}`.trim(),
-          vulnId: v.id || '',
-          label,
-        });
-      }
-    }
-    return out;
-  }
-
-  // [goal 批次 A-1] 按注入点 id 取 point（换 payload 重算 PoC 需要 point 的位置/形态）
+    return pocEntries(r);
+  }  // [goal 批次 A-1] 按注入点 id 取 point（换 payload 重算 PoC 需要 point 的位置/形态）
   _pointById(r, pointId) {
-    return (r.points || []).find((p) => p.id === pointId) || null;
-  }
-
-  // [goal 批次 A-1] 导出脱敏口径，[2026-09-17 FIX] 与 _attachPoc 统一为同源判据。
+    return pointById(r, pointId);
+  }  // [goal 批次 A-1] 导出脱敏口径，[2026-09-17 FIX] 与 _attachPoc 统一为同源判据。
   // 原实现在导出路径下**恒返回 true**：target 已被 sanitizeTargetForExport 剥掉
   // cookieParams/headerParams，`'cookieParams' in target` 永远为 false，于是走到最后一行 true。
   // 后果是同一次交付里两条 PoC 自相矛盾——主命中 PoC 带真实会话凭据（可复制即跑），
@@ -865,11 +659,8 @@ export class ReportGenerator {
   // 现口径：跟随 config.pocRedactAuth（与主命中 PoC 的既定设计一致，默认关——
   // PoC 的价值就在「复制即跑」；报告要外发时显式开该开关，主命中与补充 payload 一并脱敏）。
   _pocRedactedForExport(r) {
-    if (r && r.pocRedacted === true) return true;
-    return !!(r && r.target && r.target.config && r.target.config.pocRedactAuth);
-  }
-
-  // 导出 HTML（原逻辑不变：所有用户可控字段均已 _escape 转义，P3 已核验）
+    return pocRedactedForExport(r);
+  }  // 导出 HTML（原逻辑不变：所有用户可控字段均已 _escape 转义，P3 已核验）
   // [2026-09-13] 交付化（只增小节）：报告元信息/执行摘要卡、漏洞表 CVSS 列、修复建议、WAF 交战
   toHTML(report) {
     const r = this._forExport(report);
