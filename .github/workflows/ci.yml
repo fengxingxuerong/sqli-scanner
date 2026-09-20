@@ -349,7 +349,7 @@ jobs:
         name: Install server deps
       - run: npm run build
         name: Build frontend (dist)
-      - run: node e2e/diag/release-smoke.mjs
+      - run: node e2e/release/release-smoke.mjs
         name: Release smoke (production config + real lab)
 
   # [2026-09-18] sidecar 构建门禁：desktop 交付依赖「引擎打成单文件可执行」。

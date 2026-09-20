@@ -86,7 +86,7 @@ const GATES = [
   { id: 'audit', name: 'npm audit（服务端）', cmd: 'cd server && npm audit --audit-level=high' },
   { id: 'e2e-self-contained', name: 'run-all（自足靶场 + 依赖探测）', cmd: 'node e2e/run-all.mjs', slow: true },
   { id: 'recall-lab', name: 'recall-lab e2e', cmd: 'node e2e/recall-lab/recall.e2e.js' },
-  { id: 'release-smoke', name: '发布冒烟（生产配置组合）', cmd: 'node e2e/diag/release-smoke.mjs' },
+  { id: 'release-smoke', name: '发布冒烟（生产配置组合）', cmd: 'node e2e/release/release-smoke.mjs' },
   { id: 'sidecar-build', name: 'sidecar SEA 构建 + 空目录真扫冒烟', cmd: 'npm run build:sidecar', slow: true },
   { id: 'acceptance', name: 'acceptance（12 套件，需 3306；redteam/文件读写会自己起环境）',
     cmd: 'npm run acceptance', needsPorts: [3306], slow: true },

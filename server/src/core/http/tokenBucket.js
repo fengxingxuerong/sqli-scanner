@@ -54,7 +54,12 @@ export class TokenBucket {
       // 等待期间令牌按速率持续补充：醒来后重新结算并扣除 1 个，不再直接清零
       // （原实现丢掉了等待期间累积的令牌，长等待下实际速率明显低于设定值）。
       const after = Date.now();
-      this.tokens = Math.min(this.capacity, this.tokens + ((after - now) / 1000) * this.ratePerSec) - 1;
+      const settled = Math.min(this.capacity, this.tokens + ((after - now) / 1000) * this.ratePerSec) - 1;
+      // [FLAKY-FIX 2026-09-20] 等待窗口由 setTimeout(小数 ms) 决定，定时器可能比所需的 waitMs
+      // 早 fires 亚毫秒级 → 结算出 -0.010000…231 这种极小负数。它的含义只是"这一颗令牌还没攒满"，
+      // 而我们恰好就是为这一颗等的，所以取 0；留着极小负值会让"令牌不为负"这条不变量
+      // 在负载下随机翻脸（本机覆盖率门禁就是这样抖红的，不是阈值也不是逻辑回归）。
+      this.tokens = Math.max(0, settled);
       this.last = after;
     };
     const p = this._chain.then(run, run);

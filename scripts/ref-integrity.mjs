@@ -23,6 +23,7 @@
 // ============================================================================
 import fs from 'node:fs';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 
 const ROOT = process.cwd();
 const JSON_OUT = process.argv.includes('--json');
@@ -86,6 +87,31 @@ function collectYamlRunBlocks(text) {
 const findings = []; // { source, where, ref, resolved }
 
 /**
+ * 判"引用是否成立"的口径 —— **以 git 跟踪为准，不是以磁盘为准**。
+ *
+ * [CRITERION-FIX 2026-09-20 缺陷注入实测] 原来这里用 fs.existsSync()，于是有一条致命的漏判：
+ * ci.yml 写着 `node e2e/diag/release-smoke.mjs`，而 `.gitignore` 第 51/68 行把整个 `e2e/diag/`
+ * 排除在仓库外（`git ls-files e2e/diag` = 0 个文件）。**开发机上它存在、门禁报绿；
+ * GitHub 上 checkout 出来没这个文件，那个 job 必然 Cannot find module 起不来。**
+ * 门禁要守的不变量从来不是"我这台机器上有没有"，而是"CI 拿到的那份树里有没有"。
+ * 所以判定改成 git 跟踪集合；磁盘状态只用来把话讲清楚（区分"忘了 git add"与"被 ignore 排除"）。
+ */
+const TRACKED = new Set(
+  execFileSync('git', ['ls-files'], { cwd: ROOT, encoding: 'utf8' })
+    .split('\n')
+    .filter(Boolean)
+    .map((p) => p.replace(/\\/g, '/'))
+);
+function gitIgnored(rel) {
+  try {
+    execFileSync('git', ['check-ignore', '-q', rel], { cwd: ROOT, stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * @param {string} source      引用来源文件（相对 ROOT）
  * @param {string} where       位置描述（行号 / script 名）
  * @param {string} ref         被引用的路径 token
@@ -95,15 +121,21 @@ const findings = []; // { source, where, ref, resolved }
 function checkRef(source, where, ref, base = '') {
   // 跳过 npm 脚本名（`node` 后跟的 token 若已在白名单里则不是文件）
   if (EXTERNAL_CMDS.has(ref)) return;
+  // 跳过命令行开关：acceptance.mjs 里有一条 `run('node', ['--test', '--test-reporter=tap', …])`
+  // —— 数组首元素是 flag 不是入口，早先被当成路径报"文件不存在"（自伤式误报最伤门禁可信度）。
+  if (/^-/.test(ref)) return;
   // 绝对路径 / 明显不是仓库内文件的外部形状（如指向 node_modules 的包名）跳过
   if (path.isAbsolute(ref)) return;
   const rel = ref.replace(/^\.\//, '');
-  const abs = path.join(ROOT, base, rel);
-  const exists = fs.existsSync(abs);
+  const joined = base ? path.posix.join(base, rel) : rel;
+  const inRepo = TRACKED.has(joined);
+  const onDisk = fs.existsSync(path.join(ROOT, base, rel));
   findings.push({
     source, where,
-    ref: base ? path.posix.join(base, rel) : rel,
-    exists,
+    ref: joined,
+    exists: inRepo,
+    // 话要说准：磁盘上有但库里没有 = CI 上必挂；两处都没有 = 路径本身写错了
+    note: inRepo ? '' : onDisk ? (gitIgnored(joined) ? '仅存在于本机：被 .gitignore 排除，CI checkout 里没有这个文件' : '本机有但未 git add') : '文件不存在',
   });
 }
 
@@ -155,6 +187,28 @@ if (fs.existsSync(RUN_ALL)) {
   while ((m = re.exec(text))) checkRef('e2e/run-all.mjs', 'entry', m[1]);
 }
 
+// ---------- ④ 门禁总控自己引用的入口 ----------
+// acceptance.mjs 的 12 个套件、ci-local.mjs 的 20 段门禁 —— 这两处才是"真正会被跑的命令"。
+// 原来只查 ci.yml：而 ci.yml 大多写的是 `npm run acceptance`，真正指向具体脚本的是这两个文件。
+// 缺陷注入实测：把 acceptance.mjs 里的 waf-verify.mjs 改成不存在的名字，老版门禁完全无感。
+for (const [rel, re] of [
+  ['e2e/acceptance.mjs', /\brun\(\s*'(?:node|python)'\s*,\s*\['([^']+)'/g],
+  ['scripts/ci-local.mjs', /cmd:\s*'([^']+)'/g],
+]) {
+  const abs = path.join(ROOT, rel);
+  if (!fs.existsSync(abs)) continue;
+  const text = fs.readFileSync(abs, 'utf8');
+  let m;
+  while ((m = re.exec(text))) {
+    if (rel === 'scripts/ci-local.mjs') {
+      // ci-local 的 cmd 是整条 shell 命令（`cd server && npm test`），走同一套解析
+      for (const p of extractPaths(m[1])) checkRef(rel, 'gate cmd', p.ref, p.base);
+    } else {
+      checkRef(rel, '套件入口', m[1]);
+    }
+  }
+}
+
 // ---------- 输出 ----------
 const bad = findings.filter((f) => !f.exists);
 const kindOf = (f) => (f.kind === 'script' ? '脚本引用' : '文件路径');
@@ -162,18 +216,19 @@ const kindOf = (f) => (f.kind === 'script' ? '脚本引用' : '文件路径');
 if (JSON_OUT) {
   console.log(JSON.stringify({ total: findings.length, missing: bad }, null, 2));
 } else {
-  console.log(`引用完整性门禁：校验 ${findings.length} 处本地引用`);
-  console.log('  来源：.github/workflows/*.yml · package.json · server/package.json · e2e/run-all.mjs');
+  console.log(`引用完整性门禁：校验 ${findings.length} 处本地引用（判据 = 是否被 git 跟踪，即 CI checkout 里有没有）`);
+  console.log('  来源：.github/workflows/*.yml · package.json · server/package.json · e2e/run-all.mjs · e2e/acceptance.mjs · scripts/ci-local.mjs');
   console.log('');
   if (bad.length === 0) {
-    console.log('✅ 全部存在');
+    console.log('✅ 全部已入库（CI 拿得到）');
   } else {
-    console.error(`❌ 发现 ${bad.length} 处引用不存在：`);
+    console.error(`❌ 发现 ${bad.length} 处引用在仓库里不存在：`);
     for (const f of bad) {
       console.error(`  - [${kindOf(f)}] ${f.source} → ${f.where}`);
-      console.error(`      ${f.ref}`);
+      console.error(`      ${f.ref}${f.note ? `　← ${f.note}` : ''}`);
     }
     console.error('\n这类错误极其隐蔽：若被 continue-on-error 包裹，CI 会静默失败、从不拦人。');
+    console.error('特别注意"本机有、库里没有"那一类：开发机上一切正常，CI 上 Cannot find module。');
   }
 }
 

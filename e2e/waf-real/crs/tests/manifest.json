@@ -302,5 +302,19 @@
       "upstream": "https://raw.githubusercontent.com/coreruleset/coreruleset/v4.1.0/tests/regression/tests/REQUEST-942-APPLICATION-ATTACK-SQLI/942560.yaml"
     }
   },
-  "fetchedAt": "2026-09-19T09:00:12.214Z"
+  "fetchedAt": "2026-09-19T09:00:12.214Z",
+  "rules": {
+    "crs/REQUEST-942-SQLI.conf": {
+      "sha256": "d4aadc8142fee78a85d63a8b774b7cfb66068e6be107d06dc7b34bf6f1d12b7a",
+      "bytes": 96338,
+      "upstream": "https://raw.githubusercontent.com/coreruleset/coreruleset/v4.1.0/rules/REQUEST-942-APPLICATION-ATTACK-SQLI.conf",
+      "tag": "v4.1.0"
+    },
+    "crs/REQUEST-930.conf": {
+      "sha256": "ccb7898b64a1ba44030a2267eb9761fd15b49f453a48b9e739a77c9c62fc1d60",
+      "bytes": 8078,
+      "upstream": "https://raw.githubusercontent.com/coreruleset/coreruleset/v4.1.0/rules/REQUEST-930-APPLICATION-ATTACK-LFI.conf",
+      "tag": "v4.1.0"
+    }
+  }
 }

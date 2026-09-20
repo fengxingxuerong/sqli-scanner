@@ -96,24 +96,63 @@ async function fetchTests(force) {
   console.log(`[crs] 用例落盘：新增/更新 ${added}、哈希一致跳过 ${skipped}、内容变更 ${changed}；共 ${Object.keys(manifest.files).length} 个文件（tag ${CRS_TAG}）`);
 }
 
-/** 校验入库规则文件与上游同 tag 是否逐字节一致（README 的"官方规则原文"要靠它，而不是靠注释）。 */
-async function verifyRules() {
+/**
+ * 校验入库规则文件是否与上游一致。
+ *
+ * [GATE-FIX 2026-09-20] 默认走**离线核对**：磁盘字节 vs manifest 里记录的上游 sha256。
+ * 原实现每次都要现拉 raw.githubusercontent.com 比哈希 —— 门禁因此继承了一个外部服务的可用性，
+ * 本机 ci:local 一轮就被网络抖动刷成一次假红（代码一字未改）。而"入库文件没被人改过"这个
+ * 不变量本来就不需要联网：抓取那一刻记录的上游哈希就是证据。
+ * 要连上游现拉是**升级规则版本时**的动作，显式加 --online。
+ */
+async function verifyRules(online) {
+  const manifest = readManifest();
+  manifest.rules ||= {};
   let bad = 0;
+  let bootstrapped = 0;
   for (const fam of FAMILIES) {
     const abs = resolve(ROOT, 'e2e/waf-real', fam.conf);
     if (!existsSync(abs)) { console.log(`  ❌ ${fam.conf} 不存在`); bad++; continue; }
     const local = sha256(readFileSync(abs));
-    const { body, notFound } = await get(`${RAW}/${CRS_TAG}/${fam.upstreamConf}`);
-    if (notFound) { console.log(`  ?  ${fam.conf} → 上游没有 ${fam.upstreamConf}（文件名与上游不同，需人工核对来源）`); continue; }
-    const remote = sha256(body);
-    const same = local === remote;
+    const rec = manifest.rules[fam.conf];
+    if (!rec) {
+      if (!online) {
+        // 首次：离线没有可比基线，必须联网抓一次并记账（否则这一条就永远是"看起来通过"）
+        console.log(`  …  ${fam.conf} 无入库快照，联网抓一次建立基线（此后离线可判）`);
+      }
+      const { body, notFound } = await get(`${RAW}/${CRS_TAG}/${fam.upstreamConf}`);
+      if (notFound) { console.log(`  ?  ${fam.conf} → 上游没有 ${fam.upstreamConf}（文件名与上游不同，需人工核对来源）`); continue; }
+      manifest.rules[fam.conf] = { sha256: sha256(body), bytes: body.length, upstream: `${RAW}/${CRS_TAG}/${fam.upstreamConf}`, tag: CRS_TAG };
+      bootstrapped++;
+      const same = local === manifest.rules[fam.conf].sha256;
+      if (!same) bad++;
+      console.log(`  ${same ? '✅' : '❌'} ${fam.conf}  ${local.slice(0, 12)}… ${same ? '== 上游（已记账）' : '!= 上游'}`);
+      continue;
+    }
+    const same = local === rec.sha256;
     if (!same) bad++;
-    console.log(`  ${same ? '✅' : '❌'} ${fam.conf}  ${local.slice(0, 12)}… ${same ? '== 上游' : `!= 上游 ${remote.slice(0, 12)}…（${body.length}B vs ${readFileSync(abs).length}B）`}`);
+    console.log(
+      `  ${same ? '✅' : '❌'} ${fam.conf}  ${local.slice(0, 12)}… ${same ? `== 入库快照（tag ${rec.tag}，离线核对）` : `!= 入库快照 ${rec.sha256.slice(0, 12)}…（文件被改过？tag ${rec.tag}）`}`
+    );
+    if (online) {
+      const { body, notFound } = await get(rec.upstream);
+      if (notFound) console.log(`     ? 在线核对跳过：上游取不到 ${rec.upstream}`);
+      else {
+        const remote = sha256(body);
+        console.log(`     在线核对：${remote === rec.sha256 ? '入库快照与上游一致' : `上游已变 ${remote.slice(0, 12)}…（快照过期，需 --force 重抓）`}`);
+        if (remote !== rec.sha256) bad++;
+      }
+    }
   }
-  console.log(bad ? `\n[crs] 规则原文一致性：${bad} 处不符 —— README「官方规则原文」的说法需要修正` : '\n[crs] 规则原文一致性：全部逐字节相同');
+  if (bootstrapped) writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
+  console.log(
+    bad
+      ? `\n[crs] 规则原文一致性：${bad} 处不符 —— README「官方规则原文」的说法需要修正`
+      : `\n[crs] 规则原文一致性：全部一致（离线核对入库快照${online ? ' + 上游在线核对' : ''}；升级规则后跑 --verify-rules=online 复验）`
+  );
   process.exitCode = bad ? 1 : 0;
 }
 
-const arg = process.argv.find((a) => a.startsWith('--'));
-if (arg === '--verify-rules') await verifyRules();
-else await fetchTests(arg === '--force');
+const arg = process.argv.find((a) => a.startsWith('--verify-rules')) ? '--verify-rules' : process.argv.find((a) => a.startsWith('--'));
+if (arg === '--verify-rules') await verifyRules(process.argv.includes('--verify-rules=online') || process.argv.includes('--online'));
+else await fetchTests(process.argv.includes('--force'));

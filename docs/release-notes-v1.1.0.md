@@ -69,8 +69,8 @@
 > 自己被排除在外）；ignore 撤掉后暴露 25 条 `no-unused-vars`（含一个真实缺陷：ntlm 靶场脚本里 `reject`
 > 未声明），已全部清零。详见 `CHANGELOG.md` 的「门禁可信度：掐掉两条假绿」。
 
-复现：`npm run acceptance`（需 MySQL）、`node e2e/diag/release-smoke.mjs`、
-`node e2e/diag/security-guardrails.e2e.mjs`、`npm run build:sidecar`、
+复现：`npm run acceptance`（需 MySQL）、`node e2e/release/release-smoke.mjs`、
+`node e2e/release/security-guardrails.e2e.mjs`、`npm run build:sidecar`、
 **`npm run check:all`**（一条命令跑齐 ESLint + 前后端 tsc + 架构门禁 + Rust fmt/clippy）。
 
 ## 文档

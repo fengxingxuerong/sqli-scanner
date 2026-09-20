@@ -39,7 +39,9 @@ test('令牌桶：等待期间累积的令牌不被丢弃（醒来后重算可�
   assert.ok(b.tokens < 1, '初始突发耗尽后令牌应 <1');
   // 第 rate+1 个 acquire 需等待 ~100ms；醒来后按真实经过时长结算再扣 1（不应清零/负超额）
   await b.acquire();
-  assert.ok(b.tokens >= -1e-9, `等待后令牌结算不应为负，实际 ${b.tokens}`);
+  // 不变量：**结算后令牌恒 ≥0**（产品侧 Math.max(0,…) 保证）。原来写的是 `>= -1e-9`，
+  // 容差只是把亚毫秒舍入兜住，实际负载下测到的是 -0.01 —— 那已经穿过容差，门禁随机变红。
+  assert.ok(b.tokens >= 0, `等待后令牌结算不应为负，实际 ${b.tokens}`);
   assert.ok(b.tokens <= b.capacity, '令牌不得超过容量');
   // 空闲 0.4s → 应累积 ~4 个令牌，下一个 acquire 立即可用（若等待期令牌被丢弃会再等 ~100ms）
   await new Promise((r) => setTimeout(r, 400));
