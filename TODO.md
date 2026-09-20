@@ -262,6 +262,31 @@ F 条的探针表给出：**换分隔符这条路对 942361 完全无效**（`/*
 
 ---
 
+## P0′ · 门禁可信度（2026-09-20 新增）
+
+### J. 「CI 引用的文件是否存在」应固化成门禁（**根因已修，防护未做**）
+
+**已修的真 bug**（`8144fc7`）：`ci.yml` 里两个 job 引用**不存在**的文件 ——
+`e2e/tamper-matrix/run.js`（真入口 `tamper-test.mjs`）与 `e2e/waf-lab/run.js`
+（真入口 `compare-real.e2e.mjs`）。两者都带 `continue-on-error: true`，
+于是 `node <不存在的文件>` 每次 Cannot find module 却**从不拦人** ——
+**这两个 job 从未验证过任何东西**，是彻底的「空转门禁」。
+现已修正，并手工核对 CI 里全部 8 个 e2e 引用逐一存在。
+
+**未做的防护**：这次是靠人工 grep 才发现的，极易复发（改文件名/删脚本都可能再踩）。
+应加一条门禁：解析 `ci.yml` / `package.json` 里所有 `node <path>` / `python <path>` 调用，
+逐一校验文件存在，缺失即 FAIL。**验收**：注入一个假路径 → 门禁变红；
+故意去掉 `continue-on-error` 后 CI 仍能捕获。
+
+### K. `tamper-waf-matrix` job 红了没人知道（设计取舍，待决）
+
+该 job 是 `schedule`/`workflow_dispatch` 专属的实验矩阵，`continue-on-error: true` 是
+**有意设计**（不阻塞日常流水线），本次**未动**。代价是它失败时没有任何显式信号 ——
+J 条那两个 bug 就是靠这个特性藏了不知多久。可选做法：job 末尾加一步读各 step 的
+outcome，失败则打 `::warning::` 或开 issue。属设计取舍，需先定「要告警还是要安静」。
+
+---
+
 ## P1 · 实战视角高价值
 
 ### 1. 真实 ModSecurity/Coraza WAF 验证（可执行步骤）
