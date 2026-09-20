@@ -1,13 +1,15 @@
 # 全方位验收门禁报告
 
-> 生成：2026-09-20T10:55:23.368Z　｜　执行器：`node e2e/acceptance.mjs`
+> 生成：2026-09-20T12:24:12.382Z　｜　执行器：`node e2e/acceptance.mjs`　｜　Node v22.22.2
+> 代码版本：`4bfa858`　⚠️ **工作区 dirty**（跑验收前有 6 个未提交改动：e2e/detection-runner/results/detection-report.md、e2e/multi-engine-lab/results/multi-engine-report.md、e2e/oob-real-lab/results/oob-real-report.md 等）—— **本报告不对应任何提交**
+> 套件范围：**12/12 跑出断言**　｜　判定：**全量**
 > 前置：MySQL 8.0.28 @127.0.0.1:3306；secure_file_priv="NULL"
 
 > **判定纪律**：不采信各套件自报的 PASS 字样，只解析可独立核对的事实数字并据此断言。
 
 | 结果 | 套件 | 事实 |
 |---|---|---|
-| ✅ PASS | 服务端单测 | tests=1997　pass=1996　fail=0　skipped=1 |
+| ✅ PASS | 服务端单测 | tests=2004　pass=2003　fail=0　skipped=1 |
 | ✅ PASS | 独立刁钻靶场（11 场景） | 漏洞场景=10/10　安全误报=0 |
 | ✅ PASS | 检测回归（19 场景） | PASS=19　FAIL=0 |
 | ✅ PASS | 真 MySQL 靶场 | PASS=10　FAIL=0 |
