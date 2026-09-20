@@ -53,6 +53,13 @@ import {
   SOCKS_PROXY_SCHEMES,
 } from './http/proxy.js';
 import { logOnce, warnInsecureTls } from './http/logOnce.js';
+// [大文件二期拆分 2026-09-20] 重定向的纯决策逻辑（跨域判定 / 方法降级 / 凭据头剥离）：
+// H1 与 H2 两条跟随路径共用同一份安全语义，且可脱离 I/O 直接单测。
+import {
+  isCrossOriginRedirect,
+  resolveRedirectMethod,
+  applyRedirectHeaders,
+} from './http/redirectPolicy.js';
 // 注：dnsCache / EXTRACT_MAX_BODY_BYTES 等由文件尾部原有 export 语句导出，此处不重复导出。
 // 下面这行是**兼容再导出**：这些符号虽已搬走，但既有调用方（含测试）仍从 httpClient.js 取，
 // 保持路径不变 = 拆分对调用方零影响（netErrGuard.test.js 就依赖 resolveProxy/isLocalOrPrivateHost）。
@@ -158,7 +165,7 @@ import {
   decodeResponseBody,
   attachResMeta,
   getResponseHeader,
-  toBuffer,
+  finalizeAxiosResponse,
 } from './http/responseCodec.js';
 // 再导出：既有 import 路径保持不变（外部模块与测试仍可从 httpClient.js 取到这些符号）
 export {
@@ -583,24 +590,11 @@ export class HttpClient {
   // [P1-FIX ③④] axios 通道响应后处理：解码文本（对外仍是 string）+ 挂 __meta 元数据。
   // 超限在 axios 侧是「抛错」而非截断（maxContentLength 命中即 reject），故 truncated 恒 false；
   // 真正的静默截断风险在 undici 通道（见 _rawUndici），两通道共用同一元数据契约。
+  // [大文件二期拆分 2026-09-20] 逻辑已外移至 http/responseCodec.js#finalizeAxiosResponse
+  // （纯函数、无 this 依赖）。此处保留同名方法作为薄委托：方法名不动 = 既有调用方与
+  // 打桩测试零影响，行为与原实现逐字节一致。
   _finishResponse(res, opts) {
-    if (!res || typeof res !== 'object') return res;
-    const raw = res.data;
-    if (raw === undefined || raw === null) return res; // 无响应体（HEAD/204/被 mock 的传输层）：不造数据
-    const buf = toBuffer(raw);
-    const bodyBytes = buf ? buf.length : Buffer.byteLength(String(raw), 'utf8');
-    const decoded = decodeResponseBody(raw, res.headers);
-    res.data = decoded.text;
-    attachResMeta(res, {
-      bodyBytes,
-      truncated: false,
-      charset: decoded.charset,
-      charsetSource: decoded.charsetSource,
-      ...(decoded.charsetUnsupported
-        ? { charsetUnsupported: true, declaredCharset: decoded.declaredCharset }
-        : {}),
-    });
-    return res;
+    return finalizeAxiosResponse(res, opts);
   }
 
   // 手动重定向跟随（P0-1）：最多 5 跳，每跳校验 Location 的 SSRF 策略
@@ -636,21 +630,11 @@ export class HttpClient {
         const nextUrl = new URL(String(current.headers.location), currentUrl).toString();
         await assertSafeTargetForEgress(nextUrl, egress); // 每跳重新校验（P0-1；[P1-FIX ②] 代理模式按同一 egress 下放）
         await assertScanScope(opts?.scanId, nextUrl); // [P0-SEC] 跳转目标同样受授权范围约束
-        // 跨域判定：hostname 或 protocol 变化即视为跨域（端口变化不强制剥离，避免误伤同站多端口）
-        const u1 = new URL(currentUrl);
-        const u2 = new URL(nextUrl);
-        if (u1.hostname !== u2.hostname || u1.protocol !== u2.protocol) {
-          if (activeHeaders === headers) activeHeaders = { ...headers }; // 首次跨域才克隆
-          delete activeHeaders['Authorization'];
-          delete activeHeaders['Cookie'];
-          delete activeHeaders['Cookie2'];
-          delete activeHeaders['Proxy-Authorization'];
-        }
-        // 303 → 强制 GET；301/302 对非 GET/HEAD 也降级为 GET（与浏览器一致，避免表单 POST 重放）
-        let method = opts.method || 'GET';
-        if (status === 303 || ((status === 301 || status === 302) && !['GET', 'HEAD'].includes(method))) {
-          method = 'GET';
-        }
+        // [大文件二期拆分 2026-09-20] 跨域判定 / 方法降级 / 凭据头剥离三条安全判定
+        // 已抽为 http/redirectPolicy.js 的纯函数（与 H2 路径共用同一份语义）。
+        const crossOrigin = isCrossOriginRedirect(currentUrl, nextUrl);
+        activeHeaders = applyRedirectHeaders(activeHeaders, headers, crossOrigin);
+        const method = resolveRedirectMethod(status, opts.method || 'GET');
         current = await this._rawRequest(
           // [P0-3] 重定向每跳也传 pinnedLookup（对重定向 URL 重新解析 DNS 钉死）
           { method, lookup: buildPinnedLookup(nextUrl) },
@@ -795,23 +779,11 @@ export class HttpClient {
         const nextUrl = new URL(String(current.headers.location), currentUrl).toString();
         await assertSafeTargetForEgress(nextUrl, egress); // 每跳重新校验（P0-1；[P1-FIX ②] 代理模式按同一 egress 下放）
         await assertScanScope(opts?.scanId, nextUrl); // [P0-SEC] 跳转目标同样受授权范围约束
-        // 跨域判定：hostname 或 protocol 变化即视为跨域（与 _followRedirects 一致）
-        const u1 = new URL(currentUrl);
-        const u2 = new URL(nextUrl);
-        if (u1.hostname !== u2.hostname || u1.protocol !== u2.protocol) {
-          if (activeHeaders === headers) activeHeaders = { ...headers };
-          for (const k of Object.keys(activeHeaders)) {
-            const lk = k.toLowerCase();
-            if (lk === 'authorization' || lk === 'cookie' || lk === 'cookie2' || lk === 'proxy-authorization') {
-              delete activeHeaders[k];
-            }
-          }
-        }
-        // 303 → 强制 GET；301/302 对非 GET/HEAD 也降级为 GET（与浏览器一致）
-        let method = opts.method || 'GET';
-        if (status === 303 || ((status === 301 || status === 302) && !['GET', 'HEAD'].includes(method))) {
-          method = 'GET';
-        }
+        // [大文件二期拆分 2026-09-20] 三条安全判定改用 http/redirectPolicy.js 纯函数，
+        // 与 H1 路径共用同一份语义（此前两处各自实现，凭据头删除的大小写处理不一致）。
+        const crossOrigin = isCrossOriginRedirect(currentUrl, nextUrl);
+        activeHeaders = applyRedirectHeaders(activeHeaders, headers, crossOrigin);
+        const method = resolveRedirectMethod(status, opts.method || 'GET');
         current = await this._rawUndici(
           { ...opts, url: nextUrl, method, data: method === 'GET' ? undefined : opts.data },
           activeHeaders,

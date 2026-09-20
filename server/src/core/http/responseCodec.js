@@ -198,3 +198,37 @@ export function attachResMeta(res, meta) {
   return res;
 }
 
+/**
+ * [大文件二期拆分 2026-09-20] axios 通道响应后处理：解码文本（对外仍是 string）+ 挂 __meta。
+ *
+ * 从 httpClient.js 的 `HttpClient#_finishResponse` 原样外移（行为零变化），归位理由是它
+ * 与 undici 通道的收尾逻辑共用同一元数据契约，本就属于「字节 → 文本 + 元数据」这一职责。
+ *
+ * 不变量：
+ *   · 无响应体（HEAD/204/被 mock 的传输层）→ 直接返回原对象，**不造数据**；
+ *   · 超限在 axios 侧是「抛错」而非截断（maxContentLength 命中即 reject），故 truncated 恒 false；
+ *     真正的静默截断风险在 undici 通道（见 httpClient#_rawUndici）。
+ * @param {any} res axios 原始响应（res.data 为 arraybuffer）
+ * @param {any} [opts] 请求选项（本函数当前不消费，保留签名以便与 undici 通道对齐）
+ * @returns {any} 就地改写 res.data 为 string 后的同一对象
+ */
+export function finalizeAxiosResponse(res, opts) {
+  if (!res || typeof res !== 'object') return res;
+  const raw = res.data;
+  if (raw === undefined || raw === null) return res; // 无响应体：不造数据
+  const buf = toBuffer(raw);
+  const bodyBytes = buf ? buf.length : Buffer.byteLength(String(raw), 'utf8');
+  const decoded = decodeResponseBody(raw, res.headers);
+  res.data = decoded.text;
+  attachResMeta(res, {
+    bodyBytes,
+    truncated: false,
+    charset: decoded.charset,
+    charsetSource: decoded.charsetSource,
+    ...(decoded.charsetUnsupported
+      ? { charsetUnsupported: true, declaredCharset: decoded.declaredCharset }
+      : {}),
+  });
+  return res;
+}
+
