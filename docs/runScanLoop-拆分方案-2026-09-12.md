@@ -11,8 +11,40 @@
 | 第三批 3a | `discover.js`（阶段1 发现注入点 + 点位准备） | ✅ **已完成**（948 → 779 行） |
 | 第三批 3b | `detect.js`（阶段2 + 3.4，~550 行） | ⛔ **评估后建议不做**（见下） |
 | 第三批 3c | `context.js`（阶段0 初始化） | ⏸ 收益低，可不做 |
+| 后续 | `detect.js`（阶段2 + 3.x） | ✅ **已补做**（方案当时判"不做"，后被推翻，见下） |
+| 后续 | `scan/prefilter.js`（注入点预过滤家族，9 方法 / ~390 行） | ✅ **已完成**（2026-09-20） |
 
 累计：**1184 → 779 行（-405，-34%）**，已抽出 5 个阶段模块。
+
+### 订正：`detect.js` 最终做了（2026-09-13）
+
+本方案第 17 行原结论是「⛔ 评估后建议不做」，理由是耦合量化后 detect 段引用主函数
+**37 个变量**。但 `scan/detect.js` 于 2026-09-13 实际创建（37KB）。
+结论订正：当时用「引用变量数」作为风险代理指标，**过于保守** —— 引入显式 `run` 上下文
+对象后，那 37 个变量的传递成本被一次性摊平，实际可行。
+→ 教训：**静态耦合计数能提示风险，但不该直接当作"不做"的充分理由**；应先试小步验证。
+
+### 2026-09-20 第三刀：`scan/prefilter.js`（预过滤家族）
+
+`ScanManager.js` 1058 → **756 行（-302）**。抽出 9 个方法到 `scan/prefilter.js`（491 行）。
+
+**为什么这簇是安全的**（与 detect 段的对照）：
+- 9 个方法中 **6 个完全不引用 `this`**（`_staticSentinel` / `_normalizeForStatic` /
+  `_probeBaselineRttMs` / `_timeProbeValues` / `_normEcho` / `_prefilterSimilar`）；
+- 其余只**簇内互调** + 一个 `_mapPool` 外部依赖 → 后者改**依赖注入**
+  （`get _prefilterDeps() { return { mapPool: this._mapPool.bind(this) } }`），
+  不外传 `this`。全簇引用外部变量数 ≈ **0-1**，对比 detect 段的 37。
+
+**钉子（外部依赖的实例方法名，故保留同名薄委托）**：
+`discover.js` 调 `sm._skipStaticPoints/_prefilterPoints/_validationGuardedSkipPoints`；
+`tests/skipStatic.test.js` 直调 `sm._staticSentinel/_normalizeForStatic`；
+`tests/prefilter.netFail.test.js` 直调 `sm._probeBaselineRttMs/_skipStaticPoints/_prefilterPoints/_validationGuardedSkipPoints`。
+
+**顺带保住的一条关键约束**：原文件里那段 `[P0-FIX 2026-09-09]` 注释
+（`sendInjection` 失败降级成带 `__netErr` 的对象而非 `null`，预过滤若继续用 `res == null`
+判断会把两次失败看成「同构」→ 直接新增假阴性）**随搬移一起移入 prefilter.js 顶部**，
+避免这条约束在文件边界处丢失。
+
 
 ### ⛔ 为什么建议不做 `detect.js`（耦合量化后的结论）
 
