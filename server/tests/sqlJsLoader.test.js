@@ -5,7 +5,7 @@
 // 必须有单测兜住，不能只靠端到端冒烟（冒烟只在打包产物上跑，覆盖不到 dev 路径）。
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -76,7 +76,11 @@ test('resolveWasmPath：cwd 下的 dist-engine 布局可被识别', () => {
     // 清掉显式覆盖，确保走候选路径逻辑
     delete process.env.SCAN_SQLJS_WASM;
     const p = resolveWasmPath();
-    assert.equal(p, target);
+    // [CI-FIX 2026-09-20] macOS 上 tmpdir() 给的是 `/var/folders/...`，而 **/var 是
+    // /private/var 的符号链接** —— 实际拿到的是 `/private/var/...`，直接比字符串必然不等
+    // （Linux/Windows 没有这一层符号链接，所以本用例在本地和 CI 的 ubuntu 上都绿）。
+    // 两侧都 realpath 后再比：比的是"同一个文件"而不是"同一个字符串"，平台无关。
+    assert.equal(realpathSync(p), realpathSync(target));
   } finally {
     process.chdir(savedCwd);
     rmSync(dir, { recursive: true, force: true });
