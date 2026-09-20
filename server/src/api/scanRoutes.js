@@ -122,7 +122,34 @@ const KNOWN_CFG_KEYS = new Set([
   // [P1-FIX 2026-09-09] freshQueries：面板（SqlmapOptions）有开关、scanRunner 也读 cfg.freshQueries，
   // 但白名单里没有这个键 → 勾了等于没勾（本批前端契约测试抱出来的活例）。
   'freshQueries',
+  // [CFG-REACH 2026-09-20] 一批「CLI 能设、引擎真读、REST 收不到」的键。判据不是 grep 猜测，
+  // 而是把两端交叉：CLI 往 config 上写的键 ∩ engine 用 config.X / ctx.config?.X 读的键，
+  // 再减去 KNOWN_CFG_KEYS —— 第一轮剩下这 9 个。后果与普通 bug 不同：调用方传了 testPath=true
+  // 会得到 200 + 一个正常 scanId，只是引擎**根本没开路径注入点探测**，报告写「未检出」。
+  // 那是管道造成的假阴性，而假阴性对扫描器是最贵的一类错。
+  // 由 server/tests/configReachability.guard.test.js 逐键真调 sanitizeStart 钉住（含反向：
+  // 以后再加 CLI 可设键忘了进白名单，测试当场红，不必再靠人一轮轮手工补）。
+  'testPath', 'testHeaders', // --test-path / --test-headers（TargetParser 消费）
+  'noCast', 'flushSession', // --no-cast（DBFingerprinter/Extractor）/ --flush-session（sqlmapBridge）
+  'dumpWhere', // --where：提取阶段的 WHERE 片段（extractScope 消费；会拼进 SQL，故下方拒分号）
+  'unionCols', // --union-cols：固定列数、跳过 ORDER BY 二分（UnionDetector 消费）
+  'paramDel', // --param-del：自定义参数分隔符（injection/TargetParser 消费，会进 URL，故下方强校验）
+  // hex / unionFrom 是这支守卫测试第一次跑就自己抱出来的——我先前手工 triage 时把 `hex`
+  // 当成 grep 噪声丢了（`hex` 这个词在 server/src 有上百处无关命中）。教训：判据要能跑，
+  // 不能靠人眼看 grep。unionFrom 无需在此再加校验——引擎侧 resolveFromClause 已经过
+  // sanitizeUnionFrom（仅 [A-Za-z0-9_ .$] 与括号），REST 再校一遍只会多一处会漂移的口径。
+  'hex', // --hex：字符常量十六进制化（Extractor.searchColumnData → buildLikePattern）
+  'unionFrom', // --union-from：强制 UNION FROM 子句（blindExtractor/Extractor/injection 四处消费）
 ]);
+
+// [CFG-REACH 2026-09-20] --param-del 合法字符集。该值会直接参与请求 URL 的 split/join
+// （engine/injection.js:145,155），所以不能只照抄 CLI 的「截到 1 字符」：CLI 的输入是
+// 操作者自己打的，REST 的输入来自网络调用方。
+// 取「实战确实见到的那几个分隔符」这个窄集合，而不是「排除危险字符」的宽集合——
+// 因为要排除的实在太多：# 截断片段、? 与 / 动路径、= 破坏 k=v 切分、& 与默认分隔符歧义、
+// % 是百分号编码前缀（拿它当分隔符会和编码值互相打架）、空白与控制符直接非法。
+// 窄集合写错只会误拒（调用方看得见 warn），宽集合写错是静默改请求形状 —— 后者贵得多。
+const PARAM_DEL_ALLOWED = /^[;,|^~]$/;
 
 // 禁止由调用者覆写的头名（P2-8，与 httpClient 侧 FORBIDDEN_HEADERS 保持一致）
 const FORBIDDEN_HEADER_NAMES = new Set([
@@ -533,9 +560,58 @@ export function sanitizeStart(body) {
     if (out.param) config.knownPoint = out;
   }
 
-  // 未知字段忽略（debug 级单行提示，不打日志刷屏）
+  // ── [CFG-REACH 2026-09-20] 两个不能走「通用标量透传」的键，各自需要真校验 ──
+  // unionCols：引擎按 Number() 用（UnionDetector.js:119）并当作「固定列数」直接喂进二分。
+  // 通用透传会把 "abc" 原样带下去 → NaN 参与列数判定；"99999" 则会以固定列数名义
+  // 构造超宽 UNION。这里收敛成 1..200 的整数，非法值丢弃并说明（不静默）。
+  if ('unionCols' in cfg) {
+    const n = Number(String(cfg.unionCols).trim());
+    if (Number.isInteger(n) && n >= 1 && n <= 200) config.unionCols = String(n);
+    else logger.warn(`unionCols ${JSON.stringify(cfg.unionCols)} 非 1..200 整数，已丢弃（保留自动列数二分）`);
+  }
+  // paramDel：见 PARAM_DEL_ALLOWED 注释——该值会进请求 URL，必须单字符 + 白名单。
+  if ('paramDel' in cfg) {
+    const d = String(cfg.paramDel ?? '');
+    if (d.length === 1 && PARAM_DEL_ALLOWED.test(d)) config.paramDel = d;
+    else if (d !== '') logger.warn(`paramDel ${JSON.stringify(d)} 需为 ; , | ^ ~ 中的单个字符，已丢弃`);
+  }
+  // dumpWhere：extractScope 把它原样拼进提取 SQL 的 WHERE 位（extractScope.js:160,219）。
+  // 拒分号是因为分号是把「一个条件」变成「第二条语句」的那一步（堆叠查询）——本键只在
+  // 已确认注入点之后用于收窄导出范围，没有任何合法场景需要带分号，所以这不是取舍是净收益。
+  // 长度与 CLI 的 clampStr 同档（2000），空串按「不配置」处理（与其它字符串键口径一致）。
+  if ('dumpWhere' in cfg) {
+    const w = String(cfg.dumpWhere ?? '').trim();
+    if (!w) {
+      // 空 = 显式不配，与 defaults 语义一致，不告警
+    } else if (w.includes(';')) {
+      logger.warn('dumpWhere 含分号（堆叠查询形态），已丢弃该配置');
+    } else {
+      config.dumpWhere = w.slice(0, 2000);
+    }
+  }
+  // hex / flushSession：必须是**真布尔**。
+  // 通用标量透传会把 1 / "true" / {} 这类 truthy 值原样收下，而引擎按 `config.hex === true`
+  // 判定（Extractor.js:618,697）—— 结果就是"API 收了、引擎不生效"，与本批要消灭的
+  // 「白名单有、透传没有」是同一个 bug 形状，只是换了触发条件。宁可拒掉并说明。
+  for (const boolKey of ['hex', 'flushSession']) {
+    if (!(boolKey in cfg)) continue;
+    const v = cfg[boolKey];
+    if (typeof v === 'boolean') config[boolKey] = v;
+    else logger.warn(`${boolKey} 需为布尔值（收到 ${JSON.stringify(v)}），已丢弃——该开关按严格 true 判定，传 truthy 非布尔值不会生效`);
+  }
+
+  // 未知字段：忽略，但**必须喊出来**（原来是 debug 级，默认 info 日志下等于静默）。
+  // [CFG-REACH 2026-09-20] 为什么从 debug 提到 warn：本函数的返回 config 只由白名单键构成，
+  // 所以「传了未知键」= 「你以为设置了的开关根本没进引擎」。调用方拿到的是 200 + scanId，
+  // 报告里是一句「未检出」——静默丢弃把一个配置笔误变成了看起来完全正常的假阴性。
+  // 这正是本仓库反复手工补过的坑（注释里已有 6 处「此前不在白名单被静默丢弃」）。
+  // 前端不会因此刷屏：它发的是 SCAN_CONFIG_KEYS 推导出来的键集，实测不含未知键。
   const ignored = Object.keys(cfg).filter((k) => !KNOWN_CFG_KEYS.has(k));
-  if (ignored.length) logger.debug(`扫描配置忽略未知字段：${ignored.join(', ')}`);
+  if (ignored.length) {
+    logger.warn(
+      `扫描配置含 ${ignored.length} 个未知字段，已忽略（这些设置**不会生效**，请核对键名或改用 CLI）：${ignored.join(', ')}`
+    );
+  }
 
   // [P0-FIX 2026-09-09] 白名单标量键兜底透传（**显式名单**，不是“所有未处理的白名单键”）。
   // 发现原因：configWhitelist.passthrough 守卫抱出 13 个「进了 KNOWN_CFG_KEYS 但 sanitizeStart
@@ -550,6 +626,16 @@ export function sanitizeStart(body) {
     'delay', 'reqRate', 'maxReq', 'forceSsl', 'ignoreRedirects', 'hpp', 'activeWafProbe',
     // freshQueries：纯布尔开关，无需单独校验分支，走统一标量透传
     'freshQueries',
+    // [CFG-REACH 2026-09-20] 进白名单只解决「不报错」，不透传就仍然收不到——这正是上面
+    // 注释里那 13 个键的老病。这几个都是引擎按 truthy 判定的开关，走统一透传即可：
+    // testPath/testHeaders（TargetParser）· noCast（DBFingerprinter/Extractor）
+    // · unionFrom（引擎侧 resolveFromClause 已再过 sanitizeUnionFrom）
+    // 刻意不进这里的三个，各自都有会坏事的理由：
+    //   dumpWhere    —— 拼进提取 SQL 的原始片段，走下方 bespoke 分支拒分号
+    //   hex          —— 引擎按 `config.hex === true` **严格**判定（Extractor.js:618,697），
+    //                    通用透传会放过 1/"true"，于是又变成「API 收了、引擎不生效」
+    //   flushSession —— 与 hex 同口径收严格布尔，避免同一批键里两种真值语义并存
+    'testPath', 'testHeaders', 'noCast', 'unionFrom',
   ]);
   for (const k of BACKFILL_SCALAR_KEYS) {
     if (!(k in cfg) || k in config) continue;

@@ -56,6 +56,15 @@ const PROBE = {
   // [P0 2026-09-09 实战批次] 新键探针值（默认探针 1 过不了键自身校验）
   invalidValue: 'bignum',
   knownPoint: { param: 'id' },
+  // [CFG-REACH 2026-09-20] paramDel 的探针值：默认探针 1 过不了校验是**正确行为**——
+  // 该键会直接参与请求 URL 的 split/join，所以只收 ; , | ^ ~ 这 5 个单字符
+  // （见 scanRoutes 的 PARAM_DEL_ALLOWED）。这里给合法值，是为了测「透传在不在」，
+  // 而不是放宽校验；校验本身的负例在 configReachability.guard.test.js。
+  paramDel: ';',
+  // hex / flushSession 走 bespoke 严格布尔分支（引擎按 config.hex === true 判定，
+  // 通用透传放过 1/"true" 会变成"收了不生效"）——默认探针 1 被拒是**正确行为**。
+  hex: true,
+  flushSession: true,
   db: null,
   connectionString: null,
   sqlTemplate: null,
