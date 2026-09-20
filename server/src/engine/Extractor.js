@@ -58,7 +58,19 @@ import {
   SEARCH_COLUMNS_QUERY, SEARCH_TABLES_QUERY, COUNT_WHERE_QUERY,
   resolveSysQueries,
 } from './extractionMaps.js';
-import { AppError, ErrorCode } from '../core/errors.js';
+// [大文件拆分 2026-09-20] 拖库结果格式化（纯函数，无 this/无 I/O）外移至独立模块。
+// 注意：import 名与类内方法名**故意同名**（formatDumpData/formatSql 等）。
+// 这不冲突：类内 `this.formatDumpData()` 解析到原型方法（薄委托），
+// 裸 `formatDumpData(...)` 解析到本 import —— 正是薄委托要的写法，无需别名。
+// 注：原 AppError/ErrorCode import 随之移走 —— 本文件已无抛错点（唯一的
+// `throw new AppError(INVALID_PARAM)` 在 formatDumpData 的 default 分支，现已外移）。
+import {
+  formatDumpData,
+  formatCsv,
+  escapeCsvCell,
+  formatSql,
+  formatHtml,
+} from './dumpFormat.js';
 
 // 数据提取器：基于确认的可回显注入点做库/表/列/数据枚举；
 // 盲注场景退化为布尔/时间二分提取（受 config 约束）。
@@ -151,6 +163,48 @@ export class Extractor {
     return ctx._guessedColumns;
   }
 
+  // ── [大文件拆分 2026-09-20] 枚举类方法的公共骨架（消除 20 个方法的重复）──────────────
+  // 抽离理由：`enumerateXxx` / `currentXxx` 共 20 个方法的实现完全同构，差异只在三处：
+  //   ① 查询来源（SYS_QUERIES 版本变体 / 各查询表 / 表达式表）
+  //   ② 「该方言无此查询」时的返回值（列表类给 []，标量类给 null）
+  //   ③ 是否需要把结果按逗号切成数组
+  // 此前 20 份重复带来的真实风险（不只是啰嗦）：**任何一处改动都要改 20 遍**，
+  // 漏改一处就产生行为漂移 —— 例如「权限不足静默降级」这条 try/catch 语义，
+  // 只要有一个方法漏写，该方法在权限不足时就会把异常抛给上层而非返回 null。
+  //
+  // 两个助手都要传入已解析的查询（调用方负责查表 + 版本分支），
+  // 助手只负责「提取 + 失败降级」这段真正重复的部分。
+
+  /**
+   * 提取单个标量（枚举类方法的公共后半段）。
+   * @param {object} ctx 扫描上下文
+   * @param {string|null|undefined} q 已解析的 SQL；falsy 表示该方言无此查询
+   * @param {{ fallback?: any }} [opts] fallback：无查询时返回值（列表类传 []，标量类传 null）
+   * @returns {Promise<any>} 提取结果；查询失败（权限不足等）时静默降级为 fallback
+   */
+  async _enumScalar(ctx, q, { fallback = null } = {}) {
+    if (!q) return fallback;
+    const columns = await this._guessColumnsCached(ctx);
+    try {
+      return await this.extractScalar(ctx, q, columns);
+    } catch {
+      return fallback; // 权限不足等静默降级，不阻断主流程
+    }
+  }
+
+  /**
+   * 提取逗号分隔列表并切分为数组（databases/tables/columns 三个枚举用）。
+   * @param {object} ctx 扫描上下文
+   * @param {string|null|undefined} q 已解析的 SQL
+   * @param {{ fallback?: any }} [opts] 无查询时返回值（默认 []）
+   * @returns {Promise<string[]>} 值数组（无查询/提取为空时为空数组）
+   */
+  async _enumList(ctx, q, { fallback = [] } = {}) {
+    if (!q) return fallback;
+    const val = await this._enumScalar(ctx, q, { fallback: null });
+    return val ? String(val).split(',').filter(Boolean) : [];
+  }
+
   // 通过 UNION 提取单个标量值（用标记包裹，返回标记间内容）
   async extractScalar(ctx, sql, columns) {
     const { point, dbms } = ctx;
@@ -190,34 +244,28 @@ export class Extractor {
   }
 
   // 枚举数据库
+  // [大文件拆分 2026-09-20] 实现收敛到 _enumList（原为 20 份重复骨架之一）。
+  // SQLite 无 information_schema 概念，但库名恒为 main → 保持原有特例。
   async enumerateDatabases(ctx) {
     const db = resolveDbms(ctx.dbms);
     // [P2-2] resolveSysQueries：按 ctx.dbmsVersion 选版本变体（MySQL<5.7 / MSSQL<2017 降级）
     const q = resolveSysQueries(db, ctx.dbmsVersion)?.databases;
     if (q == null) return ctx.dbms === 'SQLite' ? ['main'] : [];
-    const columns = await this._guessColumnsCached(ctx);
-    const val = await this.extractScalar(ctx, q, columns);
-    return val ? val.split(',').filter(Boolean) : [];
+    return this._enumList(ctx, q, { fallback: [] });
   }
 
   // 枚举表
   async enumerateTables(ctx, db) {
     const edb = resolveDbms(ctx.dbms);
     const q = resolveSysQueries(edb, ctx.dbmsVersion)?.tables(db);
-    if (!q) return [];
-    const columns = await this._guessColumnsCached(ctx);
-    const val = await this.extractScalar(ctx, q, columns);
-    return val ? val.split(',').filter(Boolean) : [];
+    return this._enumList(ctx, q, { fallback: [] });
   }
 
   // 枚举列
   async enumerateColumns(ctx, db, table) {
     const edb = resolveDbms(ctx.dbms);
     const q = resolveSysQueries(edb, ctx.dbmsVersion)?.columns(db, table);
-    if (!q) return [];
-    const columns = await this._guessColumnsCached(ctx);
-    const val = await this.extractScalar(ctx, q, columns);
-    return val ? val.split(',').filter(Boolean) : [];
+    return this._enumList(ctx, q, { fallback: [] });
   }
 
   // 提取数据（返回对象数组，键为列名）；MySQL/SQLite/PG/SQLServer 自动分页续拉到全量，Oracle 受 ROWNUM 单页限制
@@ -414,19 +462,14 @@ export class Extractor {
   // 实现对标 extractProof 模式：查方言表达式表，无表达式（SQLite 无会话库概念）返回 null。
   async currentDb(ctx) {
     const edb = resolveDbms(ctx.dbms);
-    const expr = CURRENT_DB_EXPR[edb];
-    if (!expr) return null; // SQLite 等无会话库概念 → null
-    const columns = await this._guessColumnsCached(ctx);
-    return this.extractScalar(ctx, expr, columns);
+    // SQLite 等无会话库概念 → null（_enumScalar 对 falsy 查询直接返回 fallback）
+    return this._enumScalar(ctx, CURRENT_DB_EXPR[edb], { fallback: null });
   }
 
   // 当前用户（对标 sqlmap --current-user）：复用 extractScalar 提取当前用户名标量。
   async currentUser(ctx) {
     const edb = resolveDbms(ctx.dbms);
-    const expr = CURRENT_USER_EXPR[edb];
-    if (!expr) return null;
-    const columns = await this._guessColumnsCached(ctx);
-    return this.extractScalar(ctx, expr, columns);
+    return this._enumScalar(ctx, CURRENT_USER_EXPR[edb], { fallback: null });
   }
 
   // 枚举用户列表（对标 sqlmap --users）：复用 extractScalar 提取 SYS_QUERIES[dbms].users。
@@ -435,13 +478,7 @@ export class Extractor {
     const db = resolveDbms(ctx.dbms);
     // [P2-2] 版本分支：MSSQL<2017 凭据收割同步降级（FOR XML PATH）
     const q = resolveSysQueries(db, ctx.dbmsVersion)?.users;
-    if (!q) return null;
-    const columns = await this._guessColumnsCached(ctx);
-    try {
-      return await this.extractScalar(ctx, q, columns);
-    } catch {
-      return null; // 权限不足等静默降级，不阻断主流程
-    }
+    return this._enumScalar(ctx, q, { fallback: null });
   }
 
   // 枚举凭据（对标 sqlmap --passwords）：复用 extractScalar 提取 SYS_QUERIES[dbms].passwords。
@@ -450,41 +487,21 @@ export class Extractor {
     const db = resolveDbms(ctx.dbms);
     // [P2-2] 版本分支：MySQL<5.7 回退 password 列；MSSQL<2017 走 FOR XML PATH
     const q = resolveSysQueries(db, ctx.dbmsVersion)?.passwords;
-    if (!q) return null;
-    const columns = await this._guessColumnsCached(ctx);
-    try {
-      return await this.extractScalar(ctx, q, columns);
-    } catch {
-      return null; // 权限不足等静默降级，不阻断主流程
-    }
+    return this._enumScalar(ctx, q, { fallback: null });
   }
 
   // 枚举 hostname（对标 sqlmap --hostname）：复用 extractScalar 提取主机名/地址。
   // 查询失败时返回 null（不阻断主流程）。
   async enumerateHostname(ctx) {
     const db = resolveDbms(ctx.dbms);
-    const q = HOSTNAME_QUERY[db];
-    if (!q) return null;
-    const columns = await this._guessColumnsCached(ctx);
-    try {
-      return await this.extractScalar(ctx, q, columns);
-    } catch {
-      return null;
-    }
+    return this._enumScalar(ctx, HOSTNAME_QUERY[db], { fallback: null });
   }
 
   // 枚举 is-dba（对标 sqlmap --is-dba）：复用 extractScalar 返回 1（是）或 0（否）。
   // 查询失败时返回 null（不阻断主流程）。
   async enumerateIsDba(ctx) {
     const db = resolveDbms(ctx.dbms);
-    const q = ISDBA_QUERY[db];
-    if (!q) return null;
-    const columns = await this._guessColumnsCached(ctx);
-    try {
-      return await this.extractScalar(ctx, q, columns);
-    } catch {
-      return null;
-    }
+    return this._enumScalar(ctx, ISDBA_QUERY[db], { fallback: null });
   }
 
   // 枚举 schema（表结构/列定义，对标 sqlmap --schema）：
@@ -492,41 +509,21 @@ export class Extractor {
   async enumerateSchema(ctx, db, table) {
     const edb = resolveDbms(ctx.dbms);
     const q = SCHEMA_QUERY[edb];
-    if (!q) return null;
-    const columns = await this._guessColumnsCached(ctx);
-    try {
-      return await this.extractScalar(ctx, q(db, table), columns);
-    } catch {
-      return null;
-    }
+    return this._enumScalar(ctx, q ? q(db, table) : null, { fallback: null });
   }
 
   // 枚举用户权限（对标 sqlmap --privileges）：复用 extractScalar 提取权限列表。
   // 查询失败时返回 null（不阻断主流程）。
   async enumerateUserPrivs(ctx) {
     const db = resolveDbms(ctx.dbms);
-    const q = PRIVILEGES_QUERY[db];
-    if (!q) return null;
-    const columns = await this._guessColumnsCached(ctx);
-    try {
-      return await this.extractScalar(ctx, q, columns);
-    } catch {
-      return null;
-    }
+    return this._enumScalar(ctx, PRIVILEGES_QUERY[db], { fallback: null });
   }
 
   // 枚举角色（对标 sqlmap --roles）：复用 extractScalar 提取角色列表。
   // 查询失败时返回 null（不阻断主流程）。
   async enumerateRoles(ctx) {
     const db = resolveDbms(ctx.dbms);
-    const q = ROLES_QUERY[db];
-    if (!q) return null;
-    const columns = await this._guessColumnsCached(ctx);
-    try {
-      return await this.extractScalar(ctx, q, columns);
-    } catch {
-      return null;
-    }
+    return this._enumScalar(ctx, ROLES_QUERY[db], { fallback: null });
   }
 
   // 表行数统计（对标 sqlmap --count）：SELECT COUNT(*) FROM <table>，复用 extractScalar。
@@ -735,75 +732,45 @@ export class Extractor {
   }
 
   // ===== [sqlmap 对标 --dump-format] 数据导出格式化 =====
+  // [大文件拆分 2026-09-20] 实现已外移至 engine/dumpFormat.js（纯函数、无 this 依赖）。
+  // 下方 5 个方法保留同名薄委托：外部实例引用零影响，行为逐字等价。
+  //
+  // ⚠ 如实记录（勿美化）：这 5 个方法在 `src/` 内**当前无任何调用点**，
+  //   连 `ctx.config.dumpFormat` 都未被接线 —— 即「格式化已实现但链路未接」。
+  //   故保留薄委托不是为了"迁移既有调用方"，而是为了 (a) 不破坏任何外部/动态调用，
+  //   (b) 等接线时接口就位。真行为保证在 dumpFormat.test.js（直接测实现，27 例），
+  //   不在这层委托上。
 
-  // 将提取的行数据格式化为指定格式（对标 sqlmap --dump-format）。
-  // format: 'json'(默认,返回原始数组) | 'csv' | 'sql' | 'html'
+  /**
+   * 将提取的行数据格式化为指定格式（对标 sqlmap --dump-format）。
+   * @param {object[]} rows 行数组
+   * @param {string[]} [columns] 列名
+   * @param {string} [table] 表名（仅 sql 格式使用）
+   * @param {string} [format] 'json'(默认,返回原始数组) | 'csv' | 'sql' | 'html'
+   * @returns {any} json 返回原始数组，其余返回字符串
+   */
   formatDumpData(rows, columns, table, format = 'json') {
-    if (!Array.isArray(rows) || rows.length === 0) {
-      // 空数据仍返回格式骨架（CSV 返回表头行，SQL 返回空串，HTML 返回空表）
-      if (format === 'csv') return (columns || []).map(this._escapeCsvCell).join(',');
-      if (format === 'sql') return '';
-      if (format === 'html') return this._formatHtml([], columns || []);
-      return rows || [];
-    }
-    const cols = columns || Object.keys(rows[0]);
-    switch (format) {
-      case 'json':
-        return rows;
-      case 'csv':
-        return this._formatCsv(rows, cols);
-      case 'sql':
-        return this._formatSql(rows, cols, table);
-      case 'html':
-        return this._formatHtml(rows, cols);
-      default:
-        throw new AppError(ErrorCode.INVALID_PARAM, `不支持的 dump 格式: ${format}`);
-    }
+    return formatDumpData(rows, columns, table, format);
   }
 
   // CSV 格式化：表头 + 行数据，逗号分隔，含逗号/引号/换行的字段用双引号包裹
   _formatCsv(rows, columns) {
-    const lines = [columns.map(this._escapeCsvCell).join(',')];
-    for (const row of rows) {
-      lines.push(columns.map((c) => this._escapeCsvCell(row[c])).join(','));
-    }
-    return lines.join('\n');
+    return formatCsv(rows, columns);
   }
 
   // CSV 单元格转义：含逗号/引号/换行/首尾空格的字段用双引号包裹，内部引号双写
   _escapeCsvCell(v) {
-    const s = v == null ? '' : String(v);
-    if (/[",\n\r]/.test(s) || /^\s|\s$/.test(s)) {
-      return `"${s.replace(/"/g, '""')}"`;
-    }
-    return s;
+    return escapeCsvCell(v);
   }
 
   // SQL INSERT 语句格式化：INSERT INTO table (cols) VALUES (vals);
   _formatSql(rows, columns, table) {
-    const escapeSqlValue = (v) => {
-      if (v == null) return 'NULL';
-      return `'${String(v).replace(/'/g, "''")}'`;
-    };
-    const colList = columns.join(', ');
-    return rows.map((row) =>
-      `INSERT INTO ${table} (${colList}) VALUES (${columns.map((c) => escapeSqlValue(row[c])).join(', ')});`
-    ).join('\n');
+    return formatSql(rows, columns, table);
   }
 
   // HTML 表格格式化：<table><thead>...<tbody>...，所有值做 HTML 实体编码
   _formatHtml(rows, columns) {
-    const esc = (s) => String(s ?? '')
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#39;');
-    const thead = `<thead><tr>${columns.map((c) => `<th>${esc(c)}</th>`).join('')}</tr></thead>`;
-    const tbody = `<tbody>${rows.map((row) =>
-      `<tr>${columns.map((c) => `<td>${esc(row[c])}</td>`).join('')}</tr>`
-    ).join('')}</tbody>`;
-    return `<table>${thead}${tbody}</table>`;
+    return formatHtml(rows, columns);
   }
 
   // 并发多表拖库：同库内表级并发（受 dumpConcurrency 约束），单表失败不影响其他表
