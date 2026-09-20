@@ -85,6 +85,17 @@ jobs:
       # 清单快照 upstream-sqlmap-tamper.json 已入库 → 无网络也能跑；缺失集合走只减不增基线。
       - run: npm run tamper:parity
         name: tamper 对齐 sqlmap 官方清单
+      # [P1-ADD 2026-09-20] 红队靶点清单一致性：redteam-lab 的检出率/误报结论建立在一条
+      # **真值链**上（run-scan 决定"扫哪些" ↔ selftest 决定"标定哪些" ↔ ground-truth.json 真值表），
+      # 而这三份清单**各自手写**、彼此之间没有任何判据。不同步的后果是**不对称**的：
+      #   · run-scan 多一个点、selftest 少一个 → 该点不进真值表 → **完全不计入分母** → 静默，
+      #     而且结论看起来更漂亮；
+      #   · 反向则会把不可观测的 id 恒判未命中 → 检出率被拉低 → 变红（至少有人会去查）。
+      # 另：子集清单（sqlmap-bench / verify-fix）的规模走「只减不增」基线 ——
+      # 悄悄删几项会让对标结论的分母变小而无人察觉。
+      # 纯本地解析，不需要 MySQL（故与其它 lint 类门禁同组）。
+      - run: npm run targets:check
+        name: 红队靶点清单一致性（真值链）
       - run: npx eslint .
         name: ESLint
       # [P0-FIX] Rust 门禁：Tauri 壳此前无任何 lint 检查。新增 cargo fmt --check + clippy

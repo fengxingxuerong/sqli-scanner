@@ -36,6 +36,7 @@
     "arch:guard": "node scripts/arch-guard.mjs",
     "arch:baseline": "node scripts/arch-guard.mjs --update",
     "refs:check": "node scripts/ref-integrity.mjs",
+    "targets:check": "node scripts/lab-targets-check.mjs",
     "facts:refresh": "node scripts/facts-sync.mjs --refresh --coverage",
     "facts:check": "node scripts/facts-sync.mjs --check",
     "facts:fix": "node scripts/facts-sync.mjs --fix",

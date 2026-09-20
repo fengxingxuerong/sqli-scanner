@@ -74,6 +74,12 @@ const GATES = [
   // 起因：ci.yml 两个 job 写着不存在的 run.js，又带 continue-on-error → 静默失败、从不拦人，
   // 那两个 job 从未验证过任何东西，靠人工 grep 才发现。这道闸门防的就是同类复发。
   { id: 'lint', name: '引用完整性（CI/scripts/e2e 入口路径存在性）', cmd: 'node scripts/ref-integrity.mjs' },
+  // 靶点清单一致性：redteam-lab 的检出率/误报结论依赖一条**真值链**
+  // （run-scan 决定扫哪些 ↔ selftest 决定标定哪些 ↔ ground-truth.json 真值表），
+  // 而三份清单各自手写、彼此之间没有判据。不同步的后果**不对称**：
+  // run-scan 多一个点而 selftest 少一个 → 该点不进真值表 → 完全不计入分母 → 静默
+  // （结论看着更漂亮）；反向则会被拉低而变红。故与引用完整性并列成一条可跑判据。
+  { id: 'lint', name: '红队靶点清单一致性（真值链）', cmd: 'npm run targets:check' },
   { id: 'lint', name: '文档数字口径（README ↔ _facts.json）', cmd: 'npm run facts:check' },
   // CRS 执行器保真度：本仓 WAF 数字全部出自自实现 SecRule 执行器（本机无 Docker/Go，跑不了真
   // ModSecurity/Coraza），所以"执行器像不像 CRS"必须有外部真值兜住 —— 这里用 CRS 官方回归集。
