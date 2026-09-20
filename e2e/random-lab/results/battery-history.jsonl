@@ -7,3 +7,5 @@
 {"at":"2026-09-20T09:46:35.587Z","seed":20260919,"requested":40,"observableVuln":20,"unobservable":0,"recallHit":20,"benign":20,"fp":0,"ci95Lower":83.89}
 {"at":"2026-09-20T10:04:52.484Z","seed":898688127,"requested":24,"observableVuln":12,"unobservable":0,"recallHit":12,"benign":12,"fp":0,"ci95Lower":75.75}
 {"at":"2026-09-20T10:15:48.804Z","seed":20260919,"requested":40,"observableVuln":20,"unobservable":0,"recallHit":20,"benign":20,"fp":0,"ci95Lower":83.89}
+{"at":"2026-09-20T10:44:11.111Z","seed":901046546,"requested":24,"observableVuln":12,"unobservable":0,"recallHit":12,"benign":12,"fp":0,"ci95Lower":75.75}
+{"at":"2026-09-20T10:55:31.248Z","seed":20260919,"requested":40,"observableVuln":20,"unobservable":0,"recallHit":20,"benign":20,"fp":0,"ci95Lower":83.89}
