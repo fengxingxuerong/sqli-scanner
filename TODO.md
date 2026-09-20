@@ -818,6 +818,36 @@ process.exit(0);          // ← 漏检 / 误报 / must 未命中，一律退 0
 | 注入 ②：`empty` 指向不存在的路由 | `FAIL(漏检)` + `9/10` + **exit 1** |
 | 撤销两处注入 | 恢复 10/10 + exit 0 |
 
+
+### Y. CI 首跑战报（2026-09-20）：9 绿 3 红，三个红全部定位
+
+远端接入后的**第一次真跑**（run `35513609939`，`ee14dd5`）。
+
+**结果**：✅ test-server（2004 用例 Linux 全过）· test-frontend（315）· audit · **docker**
+（本机没 docker 测不了的，在 CI 直接过了）· recall-lab · sidecar-build · release-smoke ·
+红队 19/19；⏭ tamper-waf-matrix（按设计）、test-matrix（被 needs 连带跳过）；
+❌ **lint** · **acceptance**（9 PASS/1 BLOCKED/2 FAIL）· **e2e-self-contained**。
+
+**含金量**：服务端 2004 用例 + 前端 315 用例 + 红队 19/19 在 **Linux 干净环境全部复现**
+—— 核心引擎没有平台性问题。
+
+**三个红的定位与状态**：
+
+| job | 根因 | 状态 |
+|---|---|---|
+| `lint` | ① 指纹门禁没做 **EOL 规范化**：本机 CRLF / CI LF → 69 文件假报"改动"（同 `git archive` 假阳性那一课，踩了两次）；② 修完指纹后仍红 → **Tauri 在 Linux 编译缺 GTK 系统库**（glib-sys 找不到 glib-2.0.pc → clippy exit 101），本地 Windows 是另一套依赖链 | ✅ 已修（hashFile 规范化 `b64e772` + apt 装 Tauri 依赖），待下轮验证 |
+| `acceptance` | fileRead=BLOCKED（CI 容器起不了隔离沙箱）、fileWrite=FAIL（service container 的 MySQL secure_file_priv 未放行）、CRS 保真度=「取不到保真度行」（现场未进 artifact，已修 artifact path 待下轮取证） | ⏳ 待逐个处置 |
+| `e2e-self-contained` | redteam-lab 跑 90.6s 失败、multi-engine-lab 0.4s 秒败（疑似 CI 容器缺依赖） | ⏳ 待查 |
+
+**过程教训（两条）**：
+1. 我的监视脚本把「jobs 列表为空」（run 还在 queued 的正常中间态）当成了「全部完成」
+   —— **判据失效必须显形**，自己写进 skill 的原则自己也要遵守。已改为以 run 自身 status 为准。
+2. GCM 凭据通道**间歇性**返回 Bad credentials（旧监视器 12 轮后连续 30 分钟取到坏 token）——
+   该通道可用但**不可靠**，重要取证别依赖它。
+
+**另**：`ref-integrity` 在 CI 上校验了 **104 处**引用（本地 91 处 —— 因为本机跑的是旧提交；
+差值即本轮新增的引用），CI 侧全绿 ✅ 这道门禁在两端都工作了。
+
 **为什么长期没被发现**：blackbox-lab **不在任何门禁里** —— 它是"独立第三方评测靶场"
 （刻意不复用项目自带靶场，属阶段性工具）。它的一致性原本没有任何东西在守护；
 本轮起由 `npm run targets:check` 覆盖（已接入 ci-local 的 lint 组与 ci.yml 的 lint job）。

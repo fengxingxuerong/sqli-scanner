@@ -108,6 +108,13 @@ jobs:
       #      否则会先装 stable、进 src-tauri 再被 rust-toolchain.toml 切走，白下一轮；
       #   2) src-tauri/rust-toolchain.toml —— 权威来源，同时约束所有开发机本地。
       # 升级时两处一起改（文件里也有同样提示）。
+      # [CI-FIX 2026-09-20] Tauri 在 Linux 上编译需要 GTK/WebKit 系统库：
+      # ubuntu runner 没预装 → glib-sys 找不到 glib-2.0.pc → clippy 直接编译失败
+      # （exit 101，首跑实测）。这是 Tauri 官方文档列的 Linux 依赖清单。
+      - name: Install Tauri system deps (Linux)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.98.0
