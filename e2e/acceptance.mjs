@@ -20,7 +20,7 @@
 // ============================================================================
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { mkdirSync, writeFileSync, readFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs';
 import { dirname, resolve, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import net from 'node:net';
@@ -496,13 +496,29 @@ for (const s of selected) {
   // optional 的原意保留：SKIP 不进 failed、不改退出码（环境常态不该让门禁红），
   // 但必须数在 SKIP 名下（本机现状：9 PASS / 2 SKIP，而不是 11 PASS / 0 SKIP）。
   const skippedOnly = verdict.skipped === true;
-  const status = skippedOnly ? 'SKIP' : verdict.pass ? 'PASS' : 'FAIL';
-  const reason = verdict.pass ? null : verdict.reason || `断言未通过（退出码 ${r.code}）`;
+  let status = skippedOnly ? 'SKIP' : verdict.pass ? 'PASS' : 'FAIL';
+  let reason = verdict.pass ? null : verdict.reason || `断言未通过（退出码 ${r.code}）`;
+  // [ENV-BLOCK 2026-09-20] 「隔离 MySQL 沙箱根本没起来」要判 BLOCKED，不是 FAIL。
+  // 触发实况：全量 ci:local 里 fileWrite 报 `FAIL PASS=false 文件落盘=false`，看起来像
+  // fileWrite 被改坏了；单独 `--only=file-write` 连跑 3 次全绿，而保留下来的失败现场
+  // （[DIAG-FIX] 那份 dump）显示真因是 mysqld 沙箱启动超时 45s 后 python 抛 RuntimeError
+  // ——**一条断言都没执行**。把它记成 FAIL 会让下一个人去查文件写入代码，正是 §G 那次
+  // "把环境问题归给被测代码"的重演。
+  // 匹配刻意只用 ASCII 稳定标记（python 文件名+Traceback），因为 [mysql-sandbox] 那些行
+  // 在本机 cp936 控制台下是乱码，按中文匹配必失效。
+  // 这不是放水：BLOCKED 与 FAIL 一样进 failed、一样让门禁非零退出（见文件末尾汇总），
+  // 变的只是**语义标签**，让人一眼知道该去查环境还是查代码。
+  const sandboxDead = /mysql_sandbox\.py", line \d+, in /m.test(r.out)
+    && /Traceback \(most recent call last\)/.test(r.out);
+  if (status === 'FAIL' && sandboxDead) {
+    status = 'BLOCKED';
+    reason = '隔离 MySQL 沙箱未能启动（环境条件不满足，本套件一条断言都没执行；不是被测代码失败）';
+  }
   results.push({
     ...s,
     status,
     facts: skippedOnly ? { 原因: verdict.skipReason || '环境不满足，未执行断言' } : verdict.facts,
-    reason: skippedOnly ? null : reason,
+    reason: status === 'PASS' ? null : reason,
     code: r.code,
     out: r.out,
   });
@@ -514,14 +530,28 @@ for (const s of selected) {
   // 此前 assert() 只回传「事实数字」，报告里就只剩一行 `服务端单测 fail=1` —— 到底是哪一条用例
   // 失败，得自己再手跑一遍才知道；而实测恰恰是这么丢的：acceptance 里 1883 pass / 1 fail，
   // 单独连跑 4 次全绿，失败现场已经没了。**门禁留不下现场，就等于把偶发缺陷变成了不可查。**
-  if (status === 'FAIL') {
+  // [ENV-BLOCK] 现场保留范围从 FAIL 扩到 FAIL+BLOCKED：上面那次定性靠的就是这份 dump，
+  // 少了它就只能看到一个查不出原因的红灯。
+  const dumpPath = resolve(HERE, 'results', `last-failure-${s.id}.log`);
+  if (status === 'FAIL' || status === 'BLOCKED') {
     try {
       mkdirSync(resolve(HERE, 'results'), { recursive: true });
-      const dump = resolve(HERE, 'results', `last-failure-${s.id}.log`);
-      writeFileSync(dump, `$ ${s.title}\n退出码：${r.code}\n\n${r.out}`, 'utf8');
-      console.log(`${status}  → ${reason}\n        现场已存 ${relative(ROOT, dump)}`);
+      // [现场卫生 2026-09-20] dump 必须带时间戳：否则三天前那次失败的现场会被下一个人当成
+      // "刚刚又红了一次"的证据。本轮就差点这么被骗——file-write 的现场是 20:04 那次全量
+      // 跑留下的，之后 `--only=file-write` 连跑 3 次全绿，但文件一直躺在那儿没变。
+      writeFileSync(
+        dumpPath,
+        `$ ${s.title}\n状态：${status}\n失败于 ${new Date().toISOString()}\n退出码：${r.code}\n\n${r.out}`,
+        'utf8'
+      );
+      console.log(`${status}  → ${reason}\n        现场已存 ${relative(ROOT, dumpPath)}`);
       continue;
     } catch { /* 落盘失败不阻断门禁 */ }
+  }
+  // [现场卫生 2026-09-20] 本套件这次过了，就把它的旧现场删掉。
+  // 留着比没有更坏：一份"看起来是最新"的失败日志会误导排查方向（而它对应的那次运行早已作废）。
+  if (status === 'PASS') {
+    try { if (existsSync(dumpPath)) rmSync(dumpPath); } catch { /* 删不掉不影响门禁 */ }
   }
   console.log(`${status}  ${verdict.pass ? '' : `→ ${reason}`}`);
 }
