@@ -20,6 +20,33 @@
   "刚刚又红了一次"的证据——**留着比没有更坏**，它会把人往已作废的方向带。
 - 环境抖动的**根因未消除**（多套件各起各的沙箱、挤同一 3308 端口与 datadir），记 TODO §T。
 
+### 补齐 blackbox-lab 两个从未被扫描的靶点：1 个能检出、1 个暴露引擎能力边界
+
+承接上一条查出的缺口（真值标定 22 点、实际只扫 20 点），本轮把两点接进扫描并实测：
+
+| 靶点 | 结果 |
+|---|---|
+| `D1-postform` | ✅ **HIT**（r1/r2 两轮均检出 `[boolean,time]`，333 / 546 请求） |
+| `E1b-secondorder` | ❌ **MISS**（244 / 455 请求，有实质扫描） |
+
+**D1 的坑（不知道它会完全查错方向）**：`--body` 只吃 **JSON 串**。
+按 urlencoded 写 `--body 'username=alice&password=x'` 会让 CLI 直接报
+`Unexpected token 'u', "username=a"... is not valid JSON`、**报告根本不产出**，
+于是 run-scan 静默算成 MISS（0.7s、`req=undefined` —— 这个耗时本身就是线索）。
+正确写法是**扁平 JSON** `{"username":"alice","password":"x"}`：扁平形态会经
+`resolveBodyChannel`（本项目此前的产物）判为「不含嵌套」→ 以 urlencoded 发出，正是靶场要的编码。
+
+**E1b 的 MISS 是引擎能力边界，不是参数错**：`SecondOrderDetector.js:55-70` 的判定链是
+「读触发页 → 写探针 → 再读触发页 → 看是否出现 **SQL 报错特征**」—— **只覆盖 error 型二阶**；
+而该靶点是 **boolean 型差异**（手工 curl 实测：注入后触发页返回空结果、不报错，
+真值表里的标定判据也是响应差异）。参数接对了、靶点也真可注入，但引擎**结构上判不出来**。
+
+**处置：保留扫描接入 + 如实记录 MISS**，不把它退回 `scanGaps` 来美化口径 ——
+「未覆盖」与「覆盖了但检不出」是两件事，后者是真实现状。修二阶 boolean 通道是独立话题，未做。
+
+`scanGaps` 因此清零，`targets:check` 现在显示 blackbox-lab「扫描目标 **22/22 ✅ 全覆盖**」。
+README 同步改为 22/22，并把「真值成立」与「引擎检出」明确分开陈述。
+
 ### 靶点清单判据推广到第二个靶场，立刻查出一处真缺口：blackbox-lab 有 2 个靶点从未被扫描
 
 把上一条的判据从 redteam-lab 推广到 blackbox-lab（`scripts/lab-targets-check.mjs` 改为

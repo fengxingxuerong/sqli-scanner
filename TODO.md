@@ -699,7 +699,7 @@ md5 因此与改前不同；而 `git status` 说 clean、`git diff --numstat` �
 已按此法收尾：`git status` 无靶场文件残留、门禁仍绿。
 
 
-### W. blackbox-lab 有 2 个靶点从未被扫描（✅ 已显式登记，补齐待做）
+### W. blackbox-lab 有 2 个靶点从未被扫描（✅ 已补齐：1 个能检出、1 个暴露引擎边界）
 
 **发现方式**：把 §V 的判据**推广到第二个靶场**时露出 —— `blackbox-lab` 的真值标定是
 **22 点**，而 `run-scan.mjs` 的 POINTS 只有 **20 点**。
@@ -722,20 +722,33 @@ md5 因此与改前不同；而 `git status` 说 clean、`git diff --numstat` �
 - `run-scan.mjs:49` 的错注释已改为事实陈述（原文指向一个不存在的文件）。
 - README 补「扫描覆盖 20/22」并指向本条。
 
-**待补齐（未做，需真机验证）**：两点其实**都能用现有 CLI 参数表达**，草案如下
-（**未跑过，勿照抄**）：
+**补齐结果（2026-09-20 实测，r1 + r2 两轮）**：
 
-```
-D1-postform:      --method POST --body 'username=alice&password=x'
-E1b-secondorder:  --method POST --body '{"username":"bob","item":"so-probe","address":"x"}'
-                  --cookie 'token=tok-admin-blackbox-0001'
-                  --second-order <admin 触发页 URL> --allow-second-order-writes --no-production-mode
-```
+| 靶点 | 接入参数 | 结果 |
+|---|---|---|
+| `D1-postform` | `--method POST --body '{"username":"alice","password":"x"}'` | ✅ **HIT**（两轮均检出 `[boolean,time]`，333 / 546 请求） |
+| `E1b-secondorder` | `--method POST --body '{…}'` + `--cookie <admin 会话>` + `--second-order <触发页 URL>` + `--allow-second-order-writes` + `--no-production-mode` | ❌ **MISS**（244 / 455 请求，有实质扫描） |
 
-参照实现：redteam-lab 的 `E15-second-order` 已用同一组参数跑通（那边 26/26 全覆盖）。
-补齐后应把 `scanGaps` 清空，并跑一轮完整 blackbox 评测确认两点能命中且无误报 ——
-**注意**：若跑出来是 MISS，先判「是用例/参数写错还是引擎缺陷」（§11 那次教训），
-别直接当成引擎 bug 去改代码。
+**D1 踩到的坑（很值得记）**：`--body` 只吃 **JSON 串**。第一版我按 urlencoded 写
+`--body 'username=alice&password=x'` → CLI 直接报
+`Unexpected token 'u', "username=a"... is not valid JSON` → **报告根本不产出**
+→ run-scan 把它静默算成 MISS（0.7s、`req=undefined`）。
+正确写法是**扁平 JSON** `{"username":"alice","password":"x"}` —— 扁平形态会经
+`resolveBodyChannel`（§N 那次的产物）判为"不含嵌套" → 以 urlencoded 发出，正是靶场要的编码。
+**若只看到"MISS"就去查引擎，会完全查错方向**（0.7s 这个耗时本身就该是线索）。
+
+**E1b 的 MISS 是引擎能力边界，不是参数错 —— 已定位到代码**：
+- `SecondOrderDetector.js:55-70` 的判定链是「读触发页 → 写探针 → 再读触发页 →
+  **看是否出现 SQL 报错特征（`ERROR_SIG`）**」，即**只覆盖 error 型二阶**；
+- 而 E1b 是 **boolean 型**：手工实测触发页注入后返回**空结果**（`<body></body>`，无任何报错），
+  真值表里它的标定判据也正是 `b.body !== i.body`（响应差异）；
+- 即：参数接对了、靶点也真可注入（手工 curl 已验证），但引擎**结构上判不出来**。
+- 处置：**保留扫描接入 + 如实记录 MISS**，不把它退回 `scanGaps` 来美化口径 ——
+  "未覆盖"与"覆盖了但检不出"是两件事，后者是真实现状。
+  修引擎的二阶 boolean 通道是独立话题（未做）。
+
+**参照实现**：redteam-lab 的 `E15-second-order` 用的是同一组参数（那边 26/26 全覆盖）——
+差别在于它的触发页形态落在 error 通道内，所以能命中。
 
 **为什么长期没被发现**：blackbox-lab **不在任何门禁里** —— 它是"独立第三方评测靶场"
 （刻意不复用项目自带靶场，属阶段性工具）。它的一致性原本没有任何东西在守护；

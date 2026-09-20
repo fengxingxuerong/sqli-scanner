@@ -61,11 +61,25 @@ const POINTS = [
   { id: 'B1-error', url: '/api/product?id=1' },
   { id: 'C1-blindbool', url: '/api/blind?id=1' },
   { id: 'C2-blindtime', url: '/api/sleep?id=1', timeoutMs: 300000 },
+  // [2026-09-20 补齐] 下面两个点真值表早已标定，但此前**从未接进扫描**（见 TODO §W）。
+  // 原先此处只留一句「由 run-scenario.mjs 单独处理」的注释，而那个文件全仓不存在。
+  //   D1-postform —— POST 表单注入（/api/login 的 username，字符串上下文）。
+  //   body 必须写成**扁平 JSON**：CLI 的 `--body` 语义是 JSON 串，且扁平形态会经
+  //   `resolveBodyChannel` 判为不含嵌套 → 以 urlencoded 发出（正是靶场要的编码）。
+  //   实测传 urlencoded 串会直接被 CLI 按 JSON 解析报错（`Unexpected token 'u'`），
+  //   报告不产出 → 静默算成 MISS。
+  { id: 'D1-postform', url: '/api/login', args: ['--method', 'POST', '--body', '{"username":"alice","password":"x"}'] },
   { id: 'D2-json', url: '/api/order', args: ['--method', 'POST', '--body', '{"item":"USB-C Hub"}'] },
   { id: 'D3-cookie', url: '/api/profile', args: ['--cookie', 'uid=1'] },
   { id: 'D4-xff', url: '/api/visitor', args: ['--header', 'X-Forwarded-For: alice'] },
   { id: 'D5-base64', url: '/api/encoded?d=MQ%3D%3D' },
   { id: 'D6-pathseg', url: '/api/rest/1', args: ['--test-path'] },
+  //   E1b-secondorder —— 二阶：先 POST /api/comment 写入，再用 admin 会话访问触发页 /api/admin/orders。
+  // `--cookie` 在这里是**认证用**（拿 admin 会话），不是注入面；注入面是 comment 的 username。
+  { id: 'E1b-secondorder', url: '/api/comment',
+    args: ['--method', 'POST', '--body', '{"username":"bob","item":"so-probe","address":"x"}',
+      '--cookie', 'token=tok-admin-blackbox-0001',
+      '--second-order', `${BASE}/api/admin/orders`, '--allow-second-order-writes', '--no-production-mode'] },
   { id: 'E2-stacked', url: '/api/batch?id=1' },
   // 安全对照（必须零检出）
   { id: 'F1-parametrized', kind: 'safe', url: '/api/safe/user?id=1' },

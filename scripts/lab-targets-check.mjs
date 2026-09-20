@@ -66,20 +66,17 @@ const LABS = [
     authority: { file: 'selftest.mjs', label: '真值标定', re: /\bid:\s*'([^']+)'/g },
     derived: { file: 'ground-truth.json', label: '真值表', pick: (j) => j.points.map((x) => x.id) },
     scan: { file: 'run-scan.mjs', label: '扫描目标', re: /\{\s*id:\s*'([^']+)'/g },
-    // [2026-09-20 实测] 这两个点**从未被扫描过**：run-scan 的 POINTS 只有 20 项，
-    // 而 run-scan.mjs:49 的注释当时写着「由 run-scenario.mjs 单独处理」——
-    // **该文件全仓不存在**（`find . -name "run-scenario*"` 零命中，注释是唯一提及处），
-    // out/ 目录里也没有这两个点的任何产物（20 点 × 3 类 + 调试文件）。
-    // 真值表却标定了它们（22 点）→「真值标定 22 点」与「实际扫描 20 点」长期被混为一谈。
-    // 这里先**显式登记**（消灭静默），补齐见 TODO §W。
-    scanGaps: [
-      { id: 'D1-postform', why: 'POST 表单注入（/api/login，urlencoded username），run-scan 当时只映射 URL/header/cookie 形态' },
-      { id: 'E1b-secondorder', why: '二阶注入：需先 POST /api/comment 写入，再用 admin 会话 GET /api/admin/orders 触发' },
-    ],
+    // [2026-09-20] 原先这两个点从未被扫描（run-scan 的 POINTS 只有 20 项，而注释声称
+    // 「由 run-scenario.mjs 单独处理」—— 该文件全仓不存在，out/ 里也没有它们的产物）。
+    // 现已按 TODO §W 补进扫描，差集清零。**注意**：差集清零只代表"不再有未覆盖的点"，
+    // 不代表它们都能被检出 —— E1b 当前实测 MISS（引擎二阶只覆盖 error 型回显，
+    // 而该靶点是 boolean 型差异），那是**评测结果**，记在 TODO §W 与 README，不归本门禁管。
+    scanGaps: [],
     subsets: [
       {
         file: 'sqlmap-bench.mjs', baseline: 20, re: /\{\s*id:\s*'([^']+)'/g,
-        why: '与 run-scan 同靶点集合（同题对照），故与扫描覆盖同宽，不含 scanGaps 里的两点',
+        why: '与 run-scan 对照的 sqlmap 同题命令（20 点）：比扫描覆盖少 D1-postform / E1b-secondorder '
+          + '（两者原先都不在扫描范围内，sqlmap 侧也无对应前置动作），故比率不可直接类比',
       },
     ],
   },

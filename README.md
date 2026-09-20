@@ -328,9 +328,14 @@ npm run test:all
 **来源**：`e2e/blackbox-lab/` —— 独立第三方评测靶场。刻意**不复用项目自带靶场**（避免作者自证），
 真 MySQL 8.0.28 拼接 SQL，22 靶点（15 漏洞 + 7 安全对照）。
 真值标定：**漏洞点 15/15 成立、安全点 7/7 防护确认**（每点 3 次采样）。
-**扫描覆盖 20/22**：`D1-postform`（POST 表单）与 `E1b-secondorder`（二阶）**真值已标定、
-但 `run-scan.mjs` 从未扫过** —— 这两点的检出能力尚未被评测（详见 TODO §W）。
-该差集已由 `npm run targets:check` 的 `scanGaps` 显式登记，不再静默。
+**扫描覆盖 22/22**（2026-09-20 补齐原先从未被扫描的 `D1-postform` / `E1b-secondorder`，
+见 TODO §W）—— 由 `npm run targets:check` 持续守护该差集，不再静默。
+
+> ⚠️ **「真值成立」与「引擎检出」是两件事，别混读**：补齐后实测 ——
+> `D1-postform` r1/r2 两轮均检出（`[boolean,time]`）；
+> 而 `E1b-secondorder` 为 **MISS**：引擎的二阶检测当前只覆盖 **error 型回显**
+> （`SecondOrderDetector` 的判定链依赖触发页出现 SQL 报错），而该靶点是 **boolean 型差异**
+> （注入后触发页返回空结果、不报错）。缺口如实记录，未做美化。
 
 | 编号 | 问题 | 状态 |
 |---|---|---|
