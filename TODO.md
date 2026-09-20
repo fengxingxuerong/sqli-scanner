@@ -295,6 +295,78 @@ F 条的探针表给出：**换分隔符这条路对 942361 完全无效**（`/*
 J 条那两个 bug 就是靠这个特性藏了不知多久。可选做法：job 末尾加一步读各 step 的
 outcome，失败则打 `::warning::` 或开 issue。属设计取舍，需先定「要告警还是要安静」。
 
+### L. 「白名单有、引擎收不到」的第三段断口：CLI↔REST 键集不等（✅ 已修 2026-09-20）
+
+J/K 都在讲 CI 的静默失败，这条是同一病根换了个器官：**扫描配置**。
+
+`sanitizeStart` 的返回 `config` 只由白名单键构成，未知键原来只留一行 `logger.debug`
+（默认 info 级等于没有）。于是调用方传 `testPath:true` 会拿到 **200 + 正常 scanId +
+一句「未检出」**——请求成功了、开关根本没进引擎。这不是崩溃型 bug，是**静默假阴性**，
+而假阴性对扫描器是最贵的一类错。
+
+为什么既有两支守卫都没抱住：`configWhitelist.guard.test` 的正向真值来源是
+**defaults.js 顶层键**，而这批键**根本不在 defaults.js 里**（只由 CLI 写入）。
+`configWhitelist.passthrough.test` 只遍历 KNOWN_CFG_KEYS，也就永远看不到它们。
+注释里已经留着 6 处「此前不在白名单被静默丢弃」——每次都是人肉发现一个补一个。
+
+**判据改成两端交叉**（`configReachability.guard.test.js`，可跑，不靠人眼看 grep）：
+CLI 侧 `config.X =` ∧ 引擎侧 `config.X` / `ctx.config?.X` − KNOWN_CFG_KEYS。
+第一轮抱出 **9 个**：`testPath` `testHeaders` `noCast` `flushSession` `hex`
+`unionFrom` `dumpWhere` `unionCols` `paramDel`。
+
+> 其中 `hex` 是我自己 triage 时丢的：`hex` 这个词在 `server/src` 有上百处无关命中，
+> 我按噪声跳过了。**守卫测试第一次跑就把它指出来**。教训写进文件头：判据要能跑。
+> 反向 also 有价值——我最初给 `unionFrom` 写了句"大概由别处覆盖"的豁免，
+> 实测它被 blindExtractor/DBFingerprinter/Extractor/injection **四处**读取，豁免已撤。
+
+透传时顺手补的两处真校验（不是顺手重构，是这两类值会坏事）：
+- `unionCols` 引擎按 `Number()` 当固定列数用 → 收敛成 1..200 整数（否则 `abc`→NaN 进二分）；
+- `paramDel` 直接参与请求 URL 的 split/join → 只收 `; , | ^ ~` 单字符。
+  这里取**窄集合**：宽集合写错是静默改请求形状，窄集合写错只是误拒且带 warn。
+- `hex`/`flushSession` 必须真布尔——引擎按 `config.hex === true` 判定，
+  通用标量透传会放过 `1`/`"true"`，那又变回「收了不生效」，同一个 bug 形状换个触发条件。
+- `dumpWhere` 拒分号：它是拼进提取 SQL 的原始片段，分号是把「一个条件」变成
+  「第二条语句」的那一步，而这个键没有任何合法场景需要分号。
+
+顺手查实的一个**新形状**（已被新守卫的"BACKFILL ⊆ KNOWN"那条钉住）：
+`BACKFILL_SCALAR_KEYS` 的透传循环**不看 KNOWN_CFG_KEYS**，所以白名单对这批键其实只管
+告警不管放行——把 `testPath` 从 KNOWN 里删掉，它照样能透传到引擎。缺陷注入实测确认了这点。
+
+**剩余待办（本条只修了 REST 可达性，没修 UI 可达性）**
+1. 这 9 个键在 Web 面板 / Tauri 桌面版仍然无处可设：前端只发 `SCAN_CONFIG_KEYS`
+   推导出来的 16 个键。**桌面版用户拿到的能力面小于 CLI**，与"同一引擎"的承诺不符。
+2. `--random-agent` 在 CLI 侧同时写 `config.wafEvasion.randomUA`（活）和顶层
+   `config.randomUA`（`server/src` 内 0 个读取点，空转冗余）。已在守卫豁免清单注明，
+   但该清的是删掉那次空转写入。
+3. CLI `--body` 的 JSON 会摊平成顶层 `bodyParams`，嵌套叶子（`user.id`、`items.0.name`）
+   只有 REST 的 `jsonBody` 路径能发现 → **CLI 用户在嵌套 JSON 目标上恒漏注入点**。
+   引擎侧 `_discoverJsonLeaves` 已实现，缺的是把 CLI 接过去。这条是检出面缺口，
+   优先级高于前两条。
+
+### M. 随机化电池的 ORDER BY 形态：探针选错让一整类恒被剔出分母（✅ 已修 2026-09-20）
+
+`results/battery.json` 里 `c00/c20/c34-orderby` 三条长期是 `status:"unobservable"`。
+看起来是"自证机制正常工作，剔掉了按构造不可观测的案例"，实际是**我自己把分母做空的**：
+orderby 形态 `need:''`，于是复用了一对布尔探针 ` AND 1=1-- -` / ` AND 1=2-- -`，
+而 `ORDER BY id AND 1=1` 与 `ORDER BY id AND 1=2` 在这张表上分别退化成
+`ORDER BY id` 和 `ORDER BY 0`（常量，且与 id 物理序同序）；取 name/price 时字符串转数值恒 0，
+两探针更是完全同序。**没有哪个检测器能看见这种案例**，而"看不见就剔掉"让它变成了沉默的
+覆盖率漏洞：电池宣称 6 种形态，实际恒测 5 种，n 只有 17 时少一整类会明显抬高召回。
+
+换成列索引有效性对 `, 1` / `, 9999`（后者报 `Unknown column '9999' in 'order clause'`，
+正是 sqlmap `--order-by` 的信号）。**同 seed=20260919、同 cases=40 严格对照**：
+
+| | 修复前 | 修复后 |
+|---|---|---|
+| 召回 | 17/17（3 条剔除） | **20/20（0 条剔除）** |
+| orderby | 3/3 不可观测 | 3/3 以 `[error,boolean]` 真检出 |
+| Wilson 95%CI 下界 | 81.57% | 83.9% |
+
+分母补全、下界反而更高——是**更强的数字而不是更大的数字**。
+可复用的判断：**"不可观测"的剔除清单必须按形态看分布**。三条全落在同一个 shape
+就不是随机退化，而是那一类的探针选错了；只看"剔除了 3 条（共 20）"是看不出信号的。
+
+
 ---
 
 ## P1 · 实战视角高价值

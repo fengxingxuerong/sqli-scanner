@@ -4,6 +4,53 @@
 
 ## [Unreleased]
 
+### 修复：9 个「CLI 能设、引擎真读、REST 收不到」的扫描配置键（静默假阴性）
+
+`sanitizeStart` 的返回 `config` 只由白名单键构成，未知键原来只留一行 `logger.debug`
+（默认 info 级等于没有）。后果不是报错，是**调用方拿到 200 + 正常 scanId + 一句「未检出」**：
+请求成功了，开关根本没进引擎。假阴性对扫描器是最贵的一类错。
+
+既有两支守卫都抱不到它：`configWhitelist.guard` 的真值来源是 `defaults.js` 顶层键，
+而这批键根本不在 defaults.js 里（只由 CLI 写入）；`configWhitelist.passthrough` 只遍历
+`KNOWN_CFG_KEYS`，自然也不会去看没进白名单的键。源码注释里已留着 6 处
+「此前不在白名单被静默丢弃」——一直是人肉发现一个补一个。
+
+改成**可跑的两端交叉判据**（`server/tests/configReachability.guard.test.js`）：
+CLI 侧 `config.X =` ∧ 引擎侧 `config.X`/`ctx.config?.X` − `KNOWN_CFG_KEYS`，
+再对每个键**真调 `sanitizeStart`** 断言落地。第一轮抱出 9 个，全部接通：
+`testPath` `testHeaders` `noCast` `flushSession` `hex` `unionFrom` `dumpWhere` `unionCols` `paramDel`。
+
+过程里两次自我更正，都写进了代码注释：
+- `hex` 最初被我当 grep 噪声跳过（`hex` 一词在 `server/src` 有上百处无关命中），
+  是守卫测试第一次跑就把它指出来 —— 判据必须能跑，不能靠人眼看；
+- 我最初给 `unionFrom` 写了句"大概由别处覆盖"的豁免，实测它被
+  blindExtractor/DBFingerprinter/Extractor/injection **四处**读取，豁免已撤回。
+
+接通时补的真校验（这些值会进 SQL 或进请求 URL，不是顺手重构）：
+`unionCols` 收敛 1..200 整数（引擎按 `Number()` 当固定列数，`abc`→NaN 会进二分）；
+`paramDel` 只收 `; , | ^ ~` 单字符（取**窄集合**：宽集合写错是静默改请求形状）；
+`hex`/`flushSession` 收严格布尔（引擎按 `=== true` 判定，放过 `1` 又变回"收了不生效"）；
+`dumpWhere` 拒分号（分号是把"一个条件"变成"第二条语句"那一步）。
+
+未知键的提示从 `debug` 提到 `warn` 并明说"这些设置不会生效"。
+顺带查实一个新形状：`BACKFILL_SCALAR_KEYS` 的透传循环**不看** `KNOWN_CFG_KEYS`，
+所以白名单对这批键只管告警不管放行 —— 缺陷注入实测确认后，新守卫加了
+「BACKFILL ⊆ KNOWN」一条把它钉住。
+
+### 修复：随机化电池的 ORDER BY 形态恒被剔出分母（探针选错，非引擎缺陷）
+
+`battery.json` 里 `c00/c20/c34-orderby` 长期 `status:"unobservable"`。看着像自证机制在
+正常工作，实际是我自己把分母做空的：orderby 复用了 `AND 1=1`/`AND 1=2` 这对布尔探针，
+而 `ORDER BY id AND 1=1` 与 `AND 1=2` 在这张表上分别退化成 `ORDER BY id` 与常量 `ORDER BY 0`
+（同序）；取 name/price 时字符串转数值恒 0，两探针更完全同序 —— 没有哪个检测器能看见。
+电池宣称 6 种形态，实际恒测 5 种。换成列索引有效性对（`, 1` 合法 / `, 9999` 报错，
+即 sqlmap `--order-by` 的信号）。
+
+**同 seed、同 cases 的严格对照**：召回 17/17（剔 3 条）→ **20/20（剔 0 条）**，
+三条 orderby 全部以 `[error,boolean]` 真检出，Wilson 95%CI 下界 81.57% → **83.9%**。
+分母补全而下界更高，是更强的数字而不是更大的数字。
+
+
 ### 新增「引用完整性」门禁（CI 里写的路径必须真实存在）
 
 起因是一次**空转门禁**：`ci.yml` 的 `tamper-waf-matrix` job 里写着
