@@ -12,7 +12,20 @@ import { TECHNIQUE_TYPES } from '../src/engine/payloads.js';
 import { create as createEmitter } from '../src/core/eventBus.js';
 
 // 等待扫描完成（监听 scan_completed / scan_error 事件；report 本身无 status 字段，status 在扫描态上）
-async function runScanUntilDone(sm, scanId, timeoutMs = 8000) {
+//
+// [TIMEOUT-FIX 2026-09-20] 原 8s 墙钟在负重下假红：全量门禁（1896 用例 / --test-concurrency=3）
+// 时这三条里两条报「scan did not finish in time」，而同一文件孤立跑 3 次全绿（10/10）。
+// 8.0s 里绝大部分是被同机其他测试文件抢占的 CPU 时间，不是被测代码慢——用固定墙钟给异步流水线
+// 设上限，本质上是在测机器负载。故只把上限放宽到 30s（可用 TAMPER_SCAN_TIMEOUT_MS 覆盖）。
+//
+// [坑，勿重蹈] 曾试图改成「事件 + setInterval 轮询」双通道，结果三条全红且报
+// cancelledByParent（Promise resolution is still pending but the event loop has already resolved）：
+// 原始实现靠「未 unref 的 setTimeout」在等待期间维持事件循环活跃；一旦把 poll/timer 全部
+// clear 干净，事件循环立刻见底，父级判定本轮结束并取消剩余子测试。
+// 结论：本函数里的等待定时器**不得** unref，也不得在收尾时把活跃锚一并清光。
+const SCAN_DONE_TIMEOUT_MS = Number(process.env.TAMPER_SCAN_TIMEOUT_MS) || 30000;
+
+async function runScanUntilDone(sm, scanId, timeoutMs = SCAN_DONE_TIMEOUT_MS) {
   const em = createEmitter(scanId);
   await new Promise((resolve, reject) => {
     const onEvent = (evt) => {

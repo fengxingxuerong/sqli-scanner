@@ -46,7 +46,13 @@ async function runScan(sm, config) {
     config: { concurrency: 1, ratePerSec: 100, techniques: (config && config.techniques) || TECHNIQUE_TYPES, ...config },
   });
   // 等待 _run 完成（轮询状态）
-  for (let i = 0; i < 200; i++) {
+  // [FLAKY-FIX 2026-09-20] 原预算 200×5ms=1s 太紧：负载高时扫描未完成即继续断言，假红。
+  // 本文件 2026-09-18 的记录是「连跑 3 次 2/1/2 个失败，从不全绿」，根因就是这个固定墙钟预算。
+  // 放宽到 6000×5ms=30s（语义不变：仍是「轮询到终态即返回」，只是不再假定耗时上限）。
+  // 注意：这里必须用**未 unref** 的普通 setTimeout —— 它是等待期间的活跃锚，
+  // 一旦换成被 unref 的定时器或提前清空所有定时器，父级会判定本轮结束并取消剩余子测试
+  // （实测报 cancelledByParent: "event loop has already resolved"）。
+  for (let i = 0; i < 6000; i++) {
     const s = sm.scans.get(scanId);
     if (s && (s.status === 'completed' || s.status === 'error')) break;
     await new Promise((r) => setTimeout(r, 5));

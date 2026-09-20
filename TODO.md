@@ -293,10 +293,18 @@ services:
      修：新增 `safeScanId` 拒绝分隔符/`..`/绝对路径/`\0`。
 - **教训**：清单里的模块名与数字都可能过时。**补测前必须先跑覆盖率报告**
   （`cd server && npm run test:coverage:report`）再决定打哪。
-- **副产品发现（未修，建议单独立项）**：`scanManager.scheduling.test.js` 与 `tamper.f20.test.js`
+- **副产品发现（✅ 已修 2026-09-20）**：`scanManager.scheduling.test.js` 与 `tamper.f20.test.js`
   存在**既有 flaky**（连跑 3 次 2/1/2 个失败，从不全绿）。根因是 `runScan` 轮询预算
   `200×5ms=1s` 太紧（测试注释自承"飘到 1.6s"），机器负载高时扫描未完成即断言。
   与本次改动零引用关系（已核实导入链）。
+- **修法与实测（2026-09-20）**：两处都是「拿固定墙钟给异步流水线设上限」，等价于在测机器负载。
+  - `scanManager.scheduling.test.js:49`：轮询预算 `200×5ms=1s` → `6000×5ms=30s`（语义不变，仍轮询到终态即返回）。
+  - `tamper.f20.test.js:15` `runScanUntilDone`：固定 `8000ms` 超时 → `30000ms`（`TAMPER_SCAN_TIMEOUT_MS` 可覆盖）。
+  - **验证**：两文件各自连跑 3 次全绿（scheduling 4/4 ×3；tamper.f20 10/10 ×3）；全量 `npm test` → 1896 用例 / 1895 pass / 0 fail / 1 skip。
+  - **踩坑记录（勿重蹈）**：曾把 `runScanUntilDone` 改成「事件 + setInterval 轮询」双通道，
+    结果三条全红且报 `cancelledByParent`（`Promise resolution is still pending but the event loop has already resolved`）。
+    原因是原实现靠**未 unref 的 setTimeout** 在等待期维持事件循环活跃；一旦把 poll/timer 全 clear 干净，
+    事件循环见底，父级判定本轮结束并取消剩余子测试。**此类等待定时器不得 unref，收尾时也不得把活跃锚清光。**
 
 ### 7. docs/ 数字口径单一来源（✅ 已完成 2026-09-18）
 - 32 个 md 中的测试数/引擎等级表易失真（本次审计修正 2 处）。可复制 `dbmsEvidence.js` 模式：数字由代码统一导出，文档生成时引用
@@ -332,10 +340,16 @@ services:
   内容又已被 `eslint.config.js` 的 `ignores` 完全覆盖 —— 一个「看起来在管、实际不工作」的配置，
   与文档数字漂移同源。已删除，删除前后 `npx eslint .` 均为 0 error / 6 warning（无行为变化）。
 
-### 7b. 建议新增 `.gitattributes`（未做）
-- 仓库无 `.gitattributes`，而 README 等文件在工作区是 CRLF。目前 `facts:check` 已按运行时检测 EOL 兼容，
-  但**同一文件在 Windows 与 Linux 间来回 checkout 会产生整文件 diff 噪声**。建议后续加：
-  `* text=auto` + `*.md text eol=lf`。属一次性大 diff，需单独提交。
+### 7b. 建议新增 `.gitattributes`（✅ 已完成，本条已过时）
+- **实测修正（2026-09-20）**：`.gitattributes` **已存在**，且已按实际需求落地（原文"仓库无 .gitattributes"过时）：
+  ```
+  e2e/waf-real/crs/** -text
+  server/src/core/tamper/upstream-sqlmap-tamper.json -text
+  ```
+- 取向与原文建议**相反**：不是 `* text=auto` 全仓规整，而是给 **sha256 校验的上游快照**打 `-text`，
+  保证字节级保真（CRS 官方回归集、sqlmap upstream tamper）。这比"eol=lf 全仓"更贴合本仓的核心风险
+  —— 快照被 EOL 转换后 hash 对不上，保真度门禁会假红。
+- 仍可补的（低优先）：`*.md text eol=lf` 治 Windows↔Linux checkout 的整文件 diff 噪声。
 
 ### 7c. 前端 func 覆盖率低 = 指标假象（✅ 已查清 2026-09-18）
 - **原判断被实测证伪**：此前评估写「func 70.64% 说明存在整块未执行的函数，属函数级盲区」。
