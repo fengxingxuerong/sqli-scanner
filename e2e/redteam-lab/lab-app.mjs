@@ -197,8 +197,18 @@ function decodeSafe(v) {
     for (const part of qs.split(';')) {
       if (!part) continue;
       const i = part.indexOf('=');
-      if (i < 0) { map[decodeURIComponent(part)] = ''; continue; }
-      map[decodeURIComponent(part.slice(0, i))] = decodeURIComponent(part.slice(i + 1));
+      // [LAB-FIX 2026-09-20 / TODO §D] 原先四处 decodeURIComponent 裸调（本文件 187 行已备好
+      // decodeSafe 却没接上）。实测后果：payload 含裸 `%`（如 `1%`、`1%zz`）时抛 URIError，
+      // 被外层 run() 的 try 兜成 **500 + `SQL_ERROR: URIError` 回显**——不是「挂连接」，
+      // 但这个靶点的真值是 tech=union（测 --param-del 切分），返回的却是「数据库报错」，
+      // 等于靶场亲手给扫描器的 error 通道喂了假信号：明明该看 UNION 结果行，却看到一个
+      // 伪 SQL 错误。真实站点只认分号时也不会对已切好的片段二次 decode，失败即用原值，
+      // 故改用 decodeSafe（与 187-191 行既有容错语义一致）。
+      if (i < 0) {
+        map[decodeSafe(part)] = '';
+        continue;
+      }
+      map[decodeSafe(part.slice(0, i))] = decodeSafe(part.slice(i + 1));
     }
     const id = map.id ?? '1';
     return rowsHtml(await q(`SELECT id,name,email FROM users WHERE id=${id}`));

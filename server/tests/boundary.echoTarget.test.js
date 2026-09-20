@@ -129,3 +129,88 @@ test('exclusive 版本探针的反向守卫：MySQL 上 H2 探针无回显 → �
   const res = await new DBFingerprinter().fingerprint(ctx);
   assert.equal(res?.dbms, 'MySQL', `应定库 MySQL，实得 ${res?.dbms}`);
 });
+
+// ============================================================================
+// [TODO §C 2026-09-20] 路径点基线 4xx → 跳过闭合探测
+//
+// 语义：闭合前缀回答的是「怎么跳出 SQL 字符串字面量」，前提是该路径**真的执行了 SQL**。
+// 路径不存在（404）时后端没路由到查询代码，13 个候选只会拿到同一张 404 页
+// （Express 默认错误页还回显请求 URL），剔除回显后仍偶有同形判定 → 噪声 boundary
+// 进而**触发整轮指纹/列数探测（每次约 40 请求）**，全打在一条不存在的路径上。
+//
+// 实测来源：e2e 记录 `/api/sleep` 开 --test-path 时 path 点拿到 boundary `%"`。
+// 守卫要点（两个方向都要钉）：
+//   · 正向：path 点 + 404 → 0 候选请求，boundary=''，且留下跳过原因；
+//   · 反向：path 点 + 200 → 照常探测（不能把真实路径点也砍掉）；
+//   · 边界：401/403/429 不跳过（鉴权/限流 ≠ 路径不存在）；
+//   · 边界：非 path 点（url/body/cookie/header）即便 404 也不走这条早退（那是另一类语义）。
+// ============================================================================
+
+/** 固定状态码的桩，记录每个请求的 URL（用于断言「有没有真的投候选」）。 */
+function makeStatusTarget(status, body = '') {
+  const urls = [];
+  return {
+    urls,
+    async request(reqOpts) {
+      urls.push(reqOpts.url);
+      return { status, headers: {}, data: body };
+    },
+  };
+}
+
+test('§C 正向：path 点基线 404 → 不发任何闭合候选，boundary 回退空串并记原因', async () => {
+  const det = new Detector('union');
+  const httpClient = makeStatusTarget(404, '<html><body><p>Cannot GET /shop/user/1</p></body></html>');
+  const ctx = makeCtx(httpClient, { kind: 'path', location: 'path' });
+  const boundary = await det.probeBoundary(ctx);
+  assert.equal(boundary, '', 'path 点 404 时应回退空串');
+  // 早退后只应有基线那 1 次请求；旧行为是 1 + 13 个候选（可比对先看到 14）
+  assert.equal(
+    httpClient.urls.length,
+    1,
+    `path 点 404 应只发基线 1 次请求，实发 ${httpClient.urls.length} 次（13 候选未跳过=§C 未修）`
+  );
+  assert.ok(
+    typeof ctx.point.boundarySkipReason === 'string' && ctx.point.boundarySkipReason.includes('404'),
+    '应留下可解释的跳过原因（供报告/排障），实得 ' + JSON.stringify(ctx.point.boundarySkipReason)
+  );
+});
+
+test('§C 反向：path 点基线 200 → 照常投放闭合候选（不误伤真实路径点）', async () => {
+  const det = new Detector('union');
+  // 200 且回显 payload：与 makeEchoTarget 同形态，确保候选真的被投出去
+  const httpClient = makeEchoTarget();
+  const ctx = makeCtx(httpClient, { kind: 'path', location: 'path' });
+  const before = httpClient.calls.length;
+  await det.probeBoundary(ctx);
+  assert.ok(
+    httpClient.calls.length > before,
+    'path 点 200 时仍应正常探测（早退条件不得命中）'
+  );
+  assert.equal(ctx.point.boundarySkipReason, undefined, '200 路径不应留下跳过原因');
+});
+
+test('§C 边界：401/403/429 不跳过（鉴权/限流 ≠ 路径不存在）', async () => {
+  const det = new Detector('union');
+  for (const status of [401, 403, 429]) {
+    const httpClient = makeStatusTarget(status, '<html><body>denied</body></html>');
+    const ctx = makeCtx(httpClient, { kind: 'path', location: 'path' });
+    await det.probeBoundary(ctx);
+    assert.ok(
+      httpClient.urls.length > 1,
+      `HTTP ${status} 属「路径存在但本次被拒」，不应走 404 早退（实发 ${httpClient.urls.length} 次）`
+    );
+  }
+});
+
+test('§C 边界：非 path 点基线 404 不走这条早退（语义不同，避免误砍）', async () => {
+  const det = new Detector('union');
+  const httpClient = makeStatusTarget(404, '<html><body><p>not found</p></body></html>');
+  // url 点：404 可能只是缺参数，闭合探测仍有意义（后端逻辑可能照跑）
+  const ctx = makeCtx(httpClient, { kind: 'url', location: 'url' });
+  await det.probeBoundary(ctx);
+  assert.ok(
+    httpClient.urls.length > 1,
+    `非 path 点不应被此早退影响（实发 ${httpClient.urls.length} 次）`
+  );
+});

@@ -73,19 +73,54 @@ H2 2.2.224，`{waf:false}` 才跑得通，见下）：
 **只有第 1 条红**，且实际值是一整串 4096 个垃圾字符（直观展示伤害），另两条（显式
 blindMaxLen 截断 / 真长值 300 字节延伸）仍绿 —— 三条各测一面，不是一红红一片。
 
-### C. `--test-path` 的闭合候选在 404 段上是噪声（未修）
+### C. `--test-path` 的闭合候选在 404 段上是噪声（✅ 已修 2026-09-20）
 实测 `/api/sleep` 开 `--test-path` 时，path 点拿到 boundary `%"` —— 13 个候选的响应全是同一张
 404 页（Express 回显 URL），剔除回显后仍偶有同形判定。path 点本身没洞无所谓，但它会**触发**
 整轮指纹/列数探测（每次 ~40 请求）。修法方向：path 点基线为 4xx 时不投放闭合探测（或指纹
 提前 bail），既省请求也少一份误判来源。
 
-### D. 靶场侧缺陷（已就地修一处，其余待扫）
+**✅ 已按此方向修（`Detector.probeBoundary` 基线请求后早退）**：
+- **语义论证**：闭合前缀回答的是「怎么跳出 SQL 字符串字面量」，前提是该路径**真的执行了 SQL**。
+  路径不存在时后端没路由到查询代码，候选拿到的只是同一张错误页 → 噪声 boundary
+  → 触发整轮指纹/列数探测打在一条不存在的路径上。**真存在注入的路径不会是 4xx**
+  （要么 200 要么 5xx 报错），故早退不影响任何真实检出。
+- **口径**：`kind==='path'` 且 `400 ≤ status < 500`，但**排除 401/403/429** ——
+  鉴权/封禁是「路径存在但本次不带凭据」，限流是「稍后可能通」，都不等于路径不存在。
+- **留痕**：写入 `point.boundarySkipReason`，报告/排障可解释「这里为什么没探测」。
+- **验证**（`tests/boundary.echoTarget.test.js` 新增 4 条，全绿 9/9）：
+  · 正向：path+404 → **只发 1 次基线请求**（旧行为 1+13），boundary 回退空串 + 留原因；
+  · 反向：path+200 → 照常投放（不误伤真实路径点）；
+  · 边界：401/403/429 不跳过；非 path 点（url/body/cookie/header）404 也不走此早退。
+- **缺陷注入验证**：临时把早退条件改成恒 false → **只有正向那条变红**（8 pass / 1 fail），
+  其余 8 条仍绿 → 证明测试真的钉住了该行为，而非陪跑。
+
+### D. 靶场侧缺陷（✅ 已扫完并修复 2026-09-20）
 `e2e/blackbox-lab/lab-app.mjs` 的 `/api/profile` 对 Cookie 值做 `decodeURIComponent`，收到
 `%'` 这类非法转义就在 **async handler** 里抛 URIError → Express 4 不捕获 async 异常 →
 该请求**永不应答**，把 D3 的整个测段拖成分钟级停顿（真值标定用 `uid=1` 碰不到，所以一直没暴露）。
 已加 try/catch 并注明「改的是靶场不应无端挂连接，SQL 拼接形态一字未改」。
-**待办**：其余 e2e 靶场（redteam / real-mysql / multi-engine / pentest-lab）同一形态
-（async handler + 未包 try 的 decode/parse）值得一次性扫掉，否则下一个漏检又会归因到引擎。
+
+**✅ 2026-09-20 全仓扫完 —— 原「待办」的 4 个靶场经实测全部无需修改，但扫出另一处真中招**：
+
+- 原点名 4 靶场实测**都已有防护**：`redteam-lab:190`、`pentest-lab:72` 都是
+  `try { decodeURIComponent } catch { 保持原样 }`；`real-mysql-lab` 零 decode；
+  `multi-engine-lab` 仅 `JSON.parse` 且已包 try。**「同一形态」这个预判不成立。**
+- **真中招的是 `e2e/redteam-lab/lab-app.mjs` 的 `/shop/semi`（D15 靶点）**：
+  4 处 `decodeURIComponent` **裸调**（同文件 187 行已备好 `decodeSafe` 却没接上——写了工具没接线）。
+- **实测表现比原描述更微妙**：不是"永不应答"，而是被外层 `run()` 的 try 兜成
+  **500 + `SQL_ERROR: URIError` 回显**。危害在于——D15 真值是 `tech=union`（测 `--param-del`
+  切分），返回的却是「数据库报错」，**靶场亲手给扫描器的 error 通道喂了假信号**。
+- **修法**：改用 `decodeSafe`（与 187-191 行既有容错语义一致；真实站点只认分号时也不会
+  对已切好的片段二次 decode，失败即用原值）。
+- **验证（实测报错文本变化）**：
+  | payload | 修复前 | 修复后 |
+  |---|---|---|
+  | `id=1%` | `URIError` | `MySQL syntax ... near ''`（真 SQL 信号） |
+  | `id=1%zz` | `URIError` | `Unknown column 'zz' in 'where clause'` |
+  `URIError` 彻底消失，全部转为真实 MySQL 报错。
+- **顺带实测的有效能力**：扫描器对不可达目标（155 次请求全无响应）正确给出
+  `validity.status="unreachable"` + `reliable:false` + 具体 advice，**拒绝输出阴性结论** ——
+  这是 `scanValidityGuard` 的真靶场级正面验证。
 
 ### E. 本轮**未跑**的门禁（诚实记录）
 `npm run acceptance`（11 套件）没有整跑：`e2e/acceptance.mjs` 与多份 `results/*` 是另一批次

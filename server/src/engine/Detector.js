@@ -127,6 +127,28 @@ export class Detector {
       const baseStatus = baseRes?.status ?? null;
       // 首请求自动学习页面特征：提取 <title> 供后续 matchTitle 使用
       point._baselineTitle = this._extractTitle(baseBody);
+      // [TODO §C 2026-09-20] 路径点（--test-path）基线 4xx 时**直接跳过闭合探测**。
+      // 语义：闭合前缀是「如何跳出 SQL 字符串字面量」的概念，前提是这个路径**真的执行了 SQL**。
+      // 路径不存在（404）时后端根本没路由到查询代码，13 个候选拿到的只是同一张 404 页
+      // （Express 默认错误页还会回显请求 URL），剔除回显后仍偶有同形判定 → 噪声 boundary
+      // 进而**触发整轮指纹/列数探测（每次约 40 请求）**，全部打在一条不存在的路径上。
+      // 实测 e2e 记录：`/api/sleep` 开 --test-path 时 path 点拿到 boundary `%"`。
+      // 代价与收益：真存在注入的路径不会是 4xx（要么 200 要么 5xx 报错），故此处早退
+      // **不影响任何真实检出**，只砍掉噪声源与白烧请求。
+      // 取值口径：4xx 排除 401/403——鉴权/封禁是「这条路径存在但本次不带凭据」，
+      // 闭合探测仍可能在被放行后有意义；429 是限流，属于「稍后可能通」。
+      const isAbsentPath =
+        point.kind === 'path' &&
+        baseStatus != null &&
+        baseStatus >= 400 &&
+        baseStatus < 500 &&
+        baseStatus !== 401 &&
+        baseStatus !== 403 &&
+        baseStatus !== 429;
+      if (isAbsentPath) {
+        point.boundarySkipReason = `path 基线 HTTP ${baseStatus}（路径不存在），跳过闭合探测以免噪声 boundary 触发整轮指纹/列数探测`;
+        return '';
+      }
       // [ECHO-FIX 2026-09-18] 相似判定必须先剔除「被回显的 payload 自身」。
       // 目标把注入值原样打回页面（`sql=…` 调试回显 / 报错页回显请求 URL）时，正确闭合的响应
       // 比基线**恰好长出 payload 那几个字节**——差异全来自回显文本，与结果集无关。
