@@ -673,6 +673,21 @@ export function sanitizeStart(body) {
       logger.warn('jsonBody 非法 JSON 对象，忽略');
     }
   }
+  // [JSON-BODY-FIX 2026-09-20] bodyParams 里放嵌套对象 = 得到一个不可能注入的畸形点。
+  // clampParams 对非字符串值做 String(v)（:696），于是 {user:{id:1}} 变成 body 参数
+  // `user=[object Object]`，扫描照常跑完、报告写「未检出」—— 与同批修的「CLI 嵌套 body
+  // 摊平」「白名单静默丢键」是同一类：能力在引擎（jsonBody + _discoverJsonLeaves）齐备，
+  // 用错字段的那一方什么提示都收不到。这里不改行为（改成自动路由到 jsonBody 会让两个
+  // 字段的语义纠缠不清），只把提示打出来：该走 jsonBody 的人一眼就知道自己走错了门。
+  const nestedBodyKeys = Object.entries(src.bodyParams || {})
+    .filter(([, v]) => v !== null && typeof v === 'object')
+    .map(([k]) => String(k).slice(0, 100));
+  if (nestedBodyKeys.length) {
+    logger.warn(
+      `bodyParams 含 ${nestedBodyKeys.length} 个对象/数组值（${nestedBodyKeys.slice(0, 5).join(', ')}），`
+      + '会被 String() 成不可注入的畸形值——嵌套 body 请改用 jsonBody（引擎按叶子路径如发现 user.id 注入点）'
+    );
+  }
   return {
     url: u.toString(),
     method,

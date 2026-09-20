@@ -28,6 +28,30 @@ export function parseCookiePairs(raw, into) {
   return into;
 }
 
+/**
+ * --body 解析结果 → 该走哪条 body 通道。
+ *
+ * 为什么需要这个判定（[JSON-BODY-FIX 2026-09-20]）：help.js 写的 --body 语义是「JSON 对象
+ * 字符串」，但原来一律摊进 bodyParams，而 TargetParser 对每个 body 值做 String(v) ——
+ *   --body '{"user":{"id":1},"tags":["a","b"]}'
+ * 实测只得到两个**结构上不可能注入**的点：body:user="[object Object]"、body:tags="a,b"；
+ * 同一份 body 走 REST 的 jsonBody 会得到 4 个真叶子点（user.id / user.name / tags.0 / tags.1）。
+ * 也就是「嵌套 JSON 注入点只有 REST 用户测得到」，而 CLI 用户看到的是一句未检出。
+ * 引擎侧 _discoverJsonLeaves 早就有，缺的只是把 CLI 接过去。
+ *
+ * 判定刻意保持保守：**只有真含嵌套才切通道**。扁平 body 继续 bodyParams（urlencoded），
+ * 既有行为一字不变 —— 否则会把"目标是表单接口、但顺手用了 JSON 语法写扁平 body"的
+ * 既有扫描全改成 application/json，那是回归不是修复。
+ * @param {unknown} parsed JSON.parse(args.body) 的结果
+ * @returns {{ bodyParams: Record<string, any>, jsonBody: object|null }}
+ */
+export function resolveBodyChannel(parsed) {
+  const isPlainObject = !!parsed && typeof parsed === 'object' && !Array.isArray(parsed);
+  const hasNested = isPlainObject
+    && Object.values(parsed).some((v) => v !== null && typeof v === 'object');
+  return hasNested ? { bodyParams: {}, jsonBody: parsed } : { bodyParams: parsed ?? {}, jsonBody: null };
+}
+
 export function buildInjectionTargets(args) {
   const result = {};
   // [P0-FIX 2026-09-18] `--cookie` 本身就是「这个 Cookie 是注入面」的显式表达，不再要求

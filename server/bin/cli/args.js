@@ -394,8 +394,11 @@ export function parseAuth(str, type) {
   return { basic: cred };
 }
 
-// 请求 body → bodyParams JSON 字符串（runSingleScan 用 JSON.parse 消费）
+// 请求 body → JSON 字符串（runSingleScan 用 JSON.parse 消费）
 // 支持 JSON 与 form-urlencoded 两种形态；无法转换返回 null
+// 注：这里只负责"变成字符串"。嵌套 JSON 走 jsonBody 还是扁平走 bodyParams，
+// 由 runSingleScan 的 [JSON-BODY-FIX] 判定——-r 导入的抓包里嵌套 body 很常见，
+// 所以这个判定必须留在消费侧，不能在两处各写一份。
 export function bodyToJsonString(body) {
   if (!body) return null;
   try { return JSON.stringify(JSON.parse(body)); } catch { /* fallthrough */ }

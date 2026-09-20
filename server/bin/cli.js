@@ -38,6 +38,7 @@ import {
   buildExtractScope,
   validateEnumArgs,
   parseCookiePairs,
+  resolveBodyChannel,
 } from './cli/config.js';
 // 再导出：8 个测试文件从 ../bin/cli.js 导入这些符号，路径不能变
 export {
@@ -153,7 +154,15 @@ function printExtractView(report) {
 }
 
 async function runSingleScan(sm, url, args) {
-  const bodyParams = args.body ? JSON.parse(args.body) : {};
+  const parsedBody = args.body ? JSON.parse(args.body) : {};
+  // [JSON-BODY-FIX 2026-09-20] 判定本体在 cli/config.js 的 resolveBodyChannel（带完整理由注释）：
+  // 含嵌套的 --body 走 jsonBody（引擎 _discoverJsonLeaves 取叶子路径），扁平 body 继续
+  // bodyParams（urlencoded），既有行为不变。这里只负责接线与播报。
+  const { bodyParams, jsonBody } = resolveBodyChannel(parsedBody);
+  if (jsonBody) {
+    console.log('  [body] 检测到嵌套 JSON → 按 application/json 语义扫描，'
+      + '注入点取自叶子路径（如 user.id / tags.0）；扁平 body 仍走 urlencoded。');
+  }
   const config = buildConfig(args);
   // [P0-SEC] 目标先过一遍 scope（与 scanRoutes sanitizeStart 同步拦截同构）：越界直接报错，
   // 一个包都不发。直连模式（-d）无 HTTP 请求可言，不参与 scope 判定。
@@ -199,7 +208,7 @@ async function runSingleScan(sm, url, args) {
         sqlTemplate: args.sqlTemplate || 'SELECT * FROM users WHERE id={INJECT}',
         config,
       }
-    : { url, method: args.method, bodyParams, config, auth, ...injTarget };
+    : { url, method: args.method, bodyParams, jsonBody, config, auth, ...injTarget };
   const scanId = await sm.start(input);
   // [P0-SEC] scope 按 scanId 登记：httpClient 在每一跳（含重定向）前取用，防 302 出圈
   if (scopeRules?.enabled) {
@@ -684,4 +693,4 @@ if (invokedDirectly) {
 }
 
 // 导出供单测使用（仍在 cli.js 定义的符号；args 族的再导出见文件顶部）
-export { buildConfig, buildExtractScope, validateEnumArgs, printExtractView, runSingleScan, buildInjectionTargets };
+export { buildConfig, buildExtractScope, validateEnumArgs, printExtractView, runSingleScan, buildInjectionTargets, resolveBodyChannel };

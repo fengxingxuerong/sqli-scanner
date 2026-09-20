@@ -338,10 +338,9 @@ CLI 侧 `config.X =` ∧ 引擎侧 `config.X` / `ctx.config?.X` − KNOWN_CFG_KE
 2. `--random-agent` 在 CLI 侧同时写 `config.wafEvasion.randomUA`（活）和顶层
    `config.randomUA`（`server/src` 内 0 个读取点，空转冗余）。已在守卫豁免清单注明，
    但该清的是删掉那次空转写入。
-3. CLI `--body` 的 JSON 会摊平成顶层 `bodyParams`，嵌套叶子（`user.id`、`items.0.name`）
-   只有 REST 的 `jsonBody` 路径能发现 → **CLI 用户在嵌套 JSON 目标上恒漏注入点**。
-   引擎侧 `_discoverJsonLeaves` 已实现，缺的是把 CLI 接过去。这条是检出面缺口，
-   优先级高于前两条。
+3. ~~CLI `--body` 的 JSON 会摊平成顶层 `bodyParams`，嵌套叶子（`user.id`、`items.0.name`）
+   只有 REST 的 `jsonBody` 路径能发现 → **CLI 用户在嵌套 JSON 目标上恒漏注入点**。~~
+   **已修 2026-09-20**，见 §N。REST 侧同坑（`bodyParams` 里塞对象）也已补提示。
 
 ### M. 随机化电池的 ORDER BY 形态：探针选错让一整类恒被剔出分母（✅ 已修 2026-09-20）
 
@@ -365,6 +364,40 @@ orderby 形态 `need:''`，于是复用了一对布尔探针 ` AND 1=1-- -` / ` 
 分母补全、下界反而更高——是**更强的数字而不是更大的数字**。
 可复用的判断：**"不可观测"的剔除清单必须按形态看分布**。三条全落在同一个 shape
 就不是随机退化，而是那一类的探针选错了；只看"剔除了 3 条（共 20）"是看不出信号的。
+
+### N. CLI 的嵌套 JSON body 摊平成不可注入的畸形值（✅ 已修 2026-09-20）
+
+§L 第 3 条，也是这批里唯一**直接少测注入点**的一条。
+
+`--body` 在 `help.js:25` 写的是「POST body（JSON 对象字符串）」，但 `runSingleScan`
+一律把它摊进 `bodyParams`，而 `TargetParser` 对每个 body 值做 `String(v)`。实测两端：
+
+```
+--body '{"user":{"id":1,"name":"alice"},"tags":["a","b"],"plain":"x"}'
+  CLI（bodyParams）   →  user="[object Object]"   tags="a,b"   plain="x"
+  REST（jsonBody）    →  user.id="1"  user.name="alice"  tags.0="a"  tags.1="b"  plain="x"
+```
+
+前两个值**结构上不可能注入**——没有任何 payload 能让 `[object Object]` 变成合法 SQL。
+所以同一份抓包，CLI 用户看到的是"这个 body 只有 3 个参数、都没洞"，REST 用户看到的是
+5 个真叶子点。断的不是引擎（`_discoverJsonLeaves` 早写了），是 CLI 的接线。
+
+修法保守：**只有 body 真含嵌套时才切 jsonBody**，扁平 body 继续走 bodyParams(urlencoded)。
+否则会把"目标是表单接口、但顺手用 JSON 语法写了个扁平 body"的既有扫描全改成
+application/json —— 那是回归不是修复。判定抽成 `cli/config.js` 的 `resolveBodyChannel`
+（一处定义，`-r` 导入抓包那条路也共用）。
+
+REST 侧同一个坑（`clampParams:696` 的 `String(v)`）选择**只加 warn 不改行为**：
+自动把 bodyParams 里的对象路由到 jsonBody 会让两个字段的语义纠缠不清，
+而"我传的东西其实没被测"这件事必须可见——这和本批把未知键从 debug 提到 warn 同源。
+
+**验证**：`server/tests/cli.jsonBody.test.js` 6 条。主用例不测纯函数，而是走
+`parseArgs(argv)` → `runSingleScan` → 捕获真正递给 `ScanManager.start()` 的对象 → 再接
+TargetParser 看点位（只测 `resolveBodyChannel` 挡不住"忘了把 jsonBody 放进 input"）。
+缺陷注入复验：从 input 里摘掉 `jsonBody` → 第 1、2 条同时红。
+另用一次性靶场（gitignore 的 `e2e/diag/` 下，跑完已删）拿**真 CLI 二进制**打嵌套 JSON
+目标，端到端跑出 `dbms=MySQL` + `param=user.id` 的 union/error 两条检出、共 206 请求
+无拦截——这条链路是真通了，不是只有测试绿。
 
 
 ---

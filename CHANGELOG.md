@@ -37,6 +37,32 @@ CLI 侧 `config.X =` ∧ 引擎侧 `config.X`/`ctx.config?.X` − `KNOWN_CFG_KEY
 所以白名单对这批键只管告警不管放行 —— 缺陷注入实测确认后，新守卫加了
 「BACKFILL ⊆ KNOWN」一条把它钉住。
 
+### 修复：CLI 的嵌套 JSON body 被摊平成不可注入的畸形值（同一份抓包 CLI 少测注入点）
+
+`--body` 的文档语义是「JSON 对象字符串」，但 CLI 一律摊进 `bodyParams`，而 TargetParser
+对每个值做 `String(v)`。同一份 body 实测两端：
+
+```
+--body '{"user":{"id":1,"name":"alice"},"tags":["a","b"],"plain":"x"}'
+  CLI（bodyParams） →  user="[object Object]"  tags="a,b"  plain="x"
+  REST（jsonBody）  →  user.id  user.name  tags.0  tags.1  plain
+```
+
+前两个值结构上不可能注入（没有 payload 能把 `[object Object]` 变成合法 SQL）。断的不是
+引擎（`_discoverJsonLeaves` 早已实现），是 CLI 的接线。
+
+修法保守：**只有真含嵌套才切 jsonBody**，扁平 body 继续走 bodyParams(urlencoded)——
+否则会把"表单接口但用 JSON 语法写了扁平 body"的既有扫描全改成 application/json，
+那是回归不是修复。判定抽成 `cli/config.js` 的 `resolveBodyChannel` 单点定义
+（`-r` 导入抓包那条路共用，不在两处各写一份）。REST 侧同一个坑只加 warn 不改行为：
+自动路由会让两个字段语义纠缠，但"我传的东西其实没被测"必须可见。
+
+验证：`server/tests/cli.jsonBody.test.js` 6 条。主用例刻意不测纯函数，而是走
+`parseArgs(argv)` → `runSingleScan` → 捕获递给 `ScanManager.start()` 的真实 input →
+再接 TargetParser 看点位（只测纯函数挡不住"忘了放进 input"）。缺陷注入复验：从 input
+摘掉 `jsonBody` → 两条同时红。另用一次性靶场拿**真 CLI 二进制**端到端打出
+`dbms=MySQL` + `param=user.id` 的 union/error 两条检出（206 请求、0 拦截）。
+
 ### 修复：随机化电池的 ORDER BY 形态恒被剔出分母（探针选错，非引擎缺陷）
 
 `battery.json` 里 `c00/c20/c34-orderby` 长期 `status:"unobservable"`。看着像自证机制在
