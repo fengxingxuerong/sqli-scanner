@@ -1,30 +1,30 @@
 #!/usr/bin/env node
 // ============================================================================
-// scripts/lab-targets-check.mjs —— 红队靶场「靶点清单」一致性门禁
+// scripts/lab-targets-check.mjs —— 靶场「靶点清单」一致性门禁（多靶场）
 // ============================================================================
-// 为什么需要它：redteam-lab 的评测结论（检出率 / 误报）建立在一条**真值链**上：
+// 为什么需要它：评测结论（检出率 / 误报）建立在一条**真值链**上 ——
 //
-//   selftest.mjs ──生成──▶ ground-truth.json ──被读──▶ gate-check.mjs ◀── results-r2.json
-//        ▲                                                    ▲                    ▲
-//        └── id 集合必须一致 ──┐                               │                    │
-//                             │                               └── 分母只含 truth=true 的 vuln
-//        run-scan.mjs ────────┘（决定"扫哪些"）────────────────────────────────────────┘
+//   selftest.mjs ──生成──▶ ground-truth.json ──被读──▶ 评测判据（gate-check 等）
+//        ▲                                     ▲
+//        │（真值标定＝"这靶场有哪些点"的权威）   │
+//   run-scan.mjs（决定"实际扫哪些"）────────────┘
 //
-// 三份清单（run-scan / selftest / ground-truth）是**各自手写**的，彼此之间没有任何判据。
-// 一旦不同步，后果**不对称**：
-//   · run-scan 多一个点、selftest 少一个 → 该点不进真值表 → **完全不计入分母** → 静默，
-//     而且结论看起来更漂亮（检出率不受影响）。
-//   · selftest 多一个点、run-scan 少一个 → 那个不可观测的 id 恒判未命中 → 检出率被拉低，
-//     这个方向会红，至少有人会去查。
-// 前者正是本仓反复出现的那类「静默缺口」（见 TODO §J/§Q/§R/§U），故固化成可跑判据。
+// 「标定哪些」与「实际扫哪些」是**两份各自手写**的清单，加上真值表与若干子集清单，
+// 彼此之间原本没有任何判据。不同步时后果**不对称**：
+//   · 标定有、扫描无 → 该点不进扫描统计（检出的分母少一项，**静默**）
+//   · 标定无、扫描有 → 评测拿到一个没有真值的点，无从判定（这个方向至少会红）
+// 前者正是本仓反复出现的那类「静默缺口」（见 TODO §J/§Q/§R/§U/§V），故固化成判据。
 //
-// 口径：
-//   · **权威集合** = run-scan 的 TARGETS 与 selftest 的 TARGETS，且两者必须**逐 id 相等**
-//     （「要扫哪些」与「要标定哪些」是同一件事的两面，不允许差集）
-//   · `ground-truth.json` 的 id 集合必须**等于**权威集合（它是 selftest 的派生物）
-//   · 子集清单（sqlmap-bench / verify-fix）必须 ⊆ 权威，且**显式登记"为什么是子集"**；
-//     规模受「只减不增」基线保护 —— 悄悄删几个会让对标结论的分母变小而无人察觉
-//     （与 `scripts/.arch-baseline.json`、tamper 缺失集合基线同一模式）
+// 口径（每个靶场都按这套查）：
+//   1. **权威集合 = selftest 的真值标定**（"这个靶场有哪些点"由它说了算）；
+//   2. `ground-truth.json`（派生物）必须**等于**权威 —— 不能少（漏项静默偏乐观）、
+//      不能多（幽灵条目）；
+//   3. **扫描清单 ⊆ 权威**，且**差集必须显式登记**在 `scanGaps` 里并写清理由
+//      （不留"默认跳过"的口子；反向也查：登记的 id 必须真的在差集里，否则是清单腐烂）；
+//   4. 子集清单（对标 sqlmap / 定向复核）⊆ 权威，**显式登记"为什么是子集"**，
+//      规模走「只减不增」基线（悄悄删几项会让对标结论的分母变小而无人察觉）；
+//   5. 任一文件解析不到靶点 id → 直接报错退出（判据失效必须显形，
+//      静默返回空集合会让"一致"变成假绿）。
 //
 // 用法：node scripts/lab-targets-check.mjs   （退出码即结论）
 // ============================================================================
@@ -35,40 +35,67 @@ import { fileURLToPath } from 'node:url';
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const read = (rel) => readFileSync(resolve(ROOT, rel), 'utf8');
 
-const LAB = 'e2e/redteam-lab/';
+// 靶点 id 的形状（各靶场一致：字母+数字(+可选小写字母) + 若干 `-词`）
+const ID_SHAPE = /^[A-Z]\d+[a-z]?(-[a-z0-9]+)+$/;
 
-// 权威清单：两份必须逐 id 相等
-const AUTHORITATIVE = [
-  { key: 'run-scan.mjs', label: '扫描目标', re: /T\('([^']+)'/g },
-  { key: 'selftest.mjs', label: '真值标定', re: /\{\s*id:\s*'([^']+)'/g },
-];
-
-// 子集清单：显式登记"为什么不是全集"，并用基线锁住规模（只减不增）
-const SUBSETS = [
+const LABS = [
   {
-    key: 'sqlmap-bench.mjs',
-    label: 'sqlmap 同题对照',
-    re: /\{\s*id:\s*'([^']+)'/g,
-    baseline: 18,
-    why: '只取 sqlmap 能跑通的形态；README「sqlmap 同题对照」已注明分母不同、比率不可直接类比',
+    name: 'redteam-lab',
+    dir: 'e2e/redteam-lab/',
+    // 权威：真值标定
+    authority: { file: 'selftest.mjs', label: '真值标定', re: /\{\s*id:\s*'([^']+)'/g },
+    // 派生物：必须等于权威
+    derived: { file: 'ground-truth.json', label: '真值表', pick: (j) => j.map((x) => x.id) },
+    // 扫描清单：⊆ 权威，差集必须登记在 scanGaps
+    scan: { file: 'run-scan.mjs', label: '扫描目标', re: /T\('([^']+)'/g },
+    scanGaps: [], // 全覆盖
+    subsets: [
+      {
+        file: 'sqlmap-bench.mjs', baseline: 18, re: /\{\s*id:\s*'([^']+)'/g,
+        why: '只取 sqlmap 能跑通的形态；README「sqlmap 同题对照」已注明分母不同、比率不可直接类比',
+      },
+      {
+        file: 'verify-fix.mjs', baseline: 10, re: /\{\s*id:\s*'([^']+)'/g,
+        why: '针对布尔/时间通道修复的复核：3 个命中点（C7/C8/A1）+ 7 个安全点全量，不覆盖其它通道',
+      },
+    ],
   },
   {
-    key: 'verify-fix.mjs',
-    label: '修复后独立复核',
-    re: /\{\s*id:\s*'([^']+)'/g,
-    baseline: 10,
-    why: '针对布尔/时间通道修复的复核：3 个命中点（C7/C8/A1）+ 7 个安全点全量，不覆盖其它通道',
+    name: 'blackbox-lab',
+    dir: 'e2e/blackbox-lab/',
+    authority: { file: 'selftest.mjs', label: '真值标定', re: /\bid:\s*'([^']+)'/g },
+    derived: { file: 'ground-truth.json', label: '真值表', pick: (j) => j.points.map((x) => x.id) },
+    scan: { file: 'run-scan.mjs', label: '扫描目标', re: /\{\s*id:\s*'([^']+)'/g },
+    // [2026-09-20 实测] 这两个点**从未被扫描过**：run-scan 的 POINTS 只有 20 项，
+    // 而 run-scan.mjs:49 的注释当时写着「由 run-scenario.mjs 单独处理」——
+    // **该文件全仓不存在**（`find . -name "run-scenario*"` 零命中，注释是唯一提及处），
+    // out/ 目录里也没有这两个点的任何产物（20 点 × 3 类 + 调试文件）。
+    // 真值表却标定了它们（22 点）→「真值标定 22 点」与「实际扫描 20 点」长期被混为一谈。
+    // 这里先**显式登记**（消灭静默），补齐见 TODO §W。
+    scanGaps: [
+      { id: 'D1-postform', why: 'POST 表单注入（/api/login，urlencoded username），run-scan 当时只映射 URL/header/cookie 形态' },
+      { id: 'E1b-secondorder', why: '二阶注入：需先 POST /api/comment 写入，再用 admin 会话 GET /api/admin/orders 触发' },
+    ],
+    subsets: [
+      {
+        file: 'sqlmap-bench.mjs', baseline: 20, re: /\{\s*id:\s*'([^']+)'/g,
+        why: '与 run-scan 同靶点集合（同题对照），故与扫描覆盖同宽，不含 scanGaps 里的两点',
+      },
+    ],
   },
 ];
 
-function extractIds(rel, re, who) {
-  const src = read(rel);
-  const ids = [...src.matchAll(re)].map((m) => m[1]);
+function extractIds(file, re, who) {
+  const src = read(file);
+  const raw = [...src.matchAll(re)].map((m) => m[1]);
+  const ids = raw.filter((x) => ID_SHAPE.test(x));
+  const junk = raw.filter((x) => !ID_SHAPE.test(x));
   if (!ids.length) {
-    console.error(`❌ 从 ${rel} 里一条 id 都没解析到（${who}）—— 该文件结构变了，本门禁需要跟着改。`);
+    console.error(`❌ 从 ${file} 里一条靶点 id 都没解析到（${who}）—— 结构变了，本门禁需要跟着改。`);
     console.error('   判据失效必须显形：静默返回空集合会让下面的"一致"变成假绿。');
     process.exit(2);
   }
+  if (junk.length) console.error(`⚠️ ${file}（${who}）里有 ${junk.length} 个不像靶点 id 的匹配，已忽略：${junk.slice(0, 5).join('、')}`);
   const dup = [...new Set(ids.filter((x, i) => ids.indexOf(x) !== i))];
   return { ids, dup };
 }
@@ -76,70 +103,76 @@ function extractIds(rel, re, who) {
 const problems = [];
 const info = [];
 
-// ── 权威清单：两份必须相等 ────────────────────────────────────────────────────
-const auth = AUTHORITATIVE.map((a) => {
-  const { ids, dup } = extractIds(LAB + a.key, a.re, a.label);
-  if (dup.length) problems.push(`${a.key} 里有重复 id：${dup.join('、')}`);
-  return { ...a, ids };
-});
-const [first, ...rest] = auth;
-for (const other of rest) {
-  const onlyA = first.ids.filter((i) => !other.ids.includes(i));
-  const onlyB = other.ids.filter((i) => !first.ids.includes(i));
-  if (onlyA.length || onlyB.length) {
+for (const lab of LABS) {
+  const D = lab.dir;
+  info.push(`【${lab.name}】`);
+
+  const auth = extractIds(D + lab.authority.file, lab.authority.re, lab.authority.label);
+  const authority = new Set(auth.ids);
+  if (auth.dup.length) problems.push(`${lab.name}: ${lab.authority.file} 有重复 id：${auth.dup.join('、')}`);
+  info.push(`  权威（${lab.authority.label}）${authority.size} 个靶点`);
+
+  // ② 派生物必须等于权威
+  try {
+    const json = JSON.parse(read(D + lab.derived.file));
+    const dIds = lab.derived.pick(json);
+    precheck(dIds);
+    const miss = [...authority].filter((i) => !dIds.includes(i));
+    const ghost = dIds.filter((i) => !authority.has(i));
+    if (miss.length) {
+      problems.push(`${lab.name}: ${lab.derived.file} 缺 ${miss.length} 个靶点（会被**静默排除出统计分母**）：${miss.join('、')}`);
+    }
+    if (ghost.length) problems.push(`${lab.name}: ${lab.derived.file} 里有权威集合之外的"幽灵靶点"：${ghost.join('、')}`);
+    info.push(`  ${lab.derived.label} ${dIds.length} 条${miss.length || ghost.length ? '（见下方问题）' : ' ✅'}`);
+  } catch (e) {
+    problems.push(`${lab.name}: 读 ${lab.derived.file} 失败：${e.message}`);
+  }
+
+  // ③ 扫描清单 ⊆ 权威，差集必须登记
+  const scan = extractIds(D + lab.scan.file, lab.scan.re, lab.scan.label);
+  if (scan.dup.length) problems.push(`${lab.name}: ${lab.scan.file} 有重复 id：${scan.dup.join('、')}`);
+  const scanGhost = scan.ids.filter((i) => !authority.has(i));
+  if (scanGhost.length) problems.push(`${lab.name}: ${lab.scan.file} 扫了权威集合之外的靶点：${scanGhost.join('、')}`);
+  const gap = [...authority].filter((i) => !scan.ids.includes(i));
+  const declared = new Set(lab.scanGaps.map((g) => g.id));
+  const undeclared = gap.filter((i) => !declared.has(i));
+  const staleGap = [...declared].filter((i) => !gap.includes(i));
+  if (undeclared.length) {
     problems.push(
-      `权威清单不一致：${first.key}(${first.ids.length}) ↔ ${other.key}(${other.ids.length})\n` +
-        (onlyA.length ? `     只在 ${first.key}：${onlyA.join('、')}\n` : '') +
-        (onlyB.length ? `     只在 ${other.key}：${onlyB.join('、')}` : '')
+      `${lab.name}: 有 ${undeclared.length} 个靶点**真值已标定、但扫描没有覆盖**，且未登记理由：${undeclared.join('、')}\n` +
+        '     → 这些点的检出能力从未被评测过，而统计里看不出来。补扫 或 在 scanGaps 里登记'
     );
   }
-}
-const authority = new Set(first.ids);
-info.push(`权威集合 ${authority.size} 个靶点（${auth.map((a) => a.key).join(' / ')}）`);
+  if (staleGap.length) problems.push(`${lab.name}: scanGaps 登记了实际已被覆盖的靶点（清单腐烂）：${staleGap.join('、')}`);
+  info.push(`  ${lab.scan.label} ${scan.ids.length}/${authority.size}${gap.length ? `（差集 ${gap.length} 个，已登记）` : ' ✅ 全覆盖'}`);
 
-// ── 真值表：必须等于权威集合（它是 selftest 的派生物）──────────────────────────
-try {
-  const gt = JSON.parse(read(LAB + 'ground-truth.json'));
-  const gtIds = gt.map((g) => g.id);
-  if (!gtIds.length) {
-    problems.push('ground-truth.json 是空的（没有条目）—— 它应由 selftest 生成，先跑 npm run redteam:truth');
+  // ④ 子集
+  if (lab.subsets) {
+    for (const s of lab.subsets) {
+      const sub = extractIds(D + s.file, s.re, s.file);
+      if (sub.dup.length) problems.push(`${lab.name}: ${s.file} 有重复 id：${sub.dup.join('、')}`);
+      const ghost2 = sub.ids.filter((i) => !authority.has(i));
+      if (ghost2.length) problems.push(`${lab.name}: ${s.file} 引用了权威集合之外的靶点 id：${ghost2.join('、')}`);
+      if (sub.ids.length < s.baseline) {
+        problems.push(
+          `${lab.name}: ${s.file} 只有 ${sub.ids.length} 条，低于基线 ${s.baseline}（只减不增）——` +
+            '分母悄悄变小会让对标/复核结论失真；确认是有意缩减就同步下调基线'
+        );
+      }
+      info.push(`  子集 ${s.file} ${sub.ids.length}/${authority.size} ⊆ 权威（基线 ${s.baseline}｜${s.why}）`);
+    }
   }
-  const missInGt = [...authority].filter((i) => !gtIds.includes(i));
-  const ghostInGt = gtIds.filter((i) => !authority.has(i));
-  if (missInGt.length) {
-    problems.push(
-      `真值表缺 ${missInGt.length} 个靶点（会被**静默排除出检出率分母**）：${missInGt.join('、')}\n` +
-        '     先跑 npm run redteam:truth 重建真值表'
-    );
-  }
-  if (ghostInGt.length) problems.push(`真值表里有权威集合之外的"幽灵靶点"：${ghostInGt.join('、')}`);
-  const unsafe = gt.filter((g) => g.kind === 'vuln' && g.truth !== true).map((g) => g.id);
-  if (unsafe.length) {
-    problems.push(`真值表里有 ${unsafe.length} 个 vuln 未通过标定（truth≠true）：${unsafe.join('、')}`);
-  }
-  info.push(`真值表 ${gtIds.length} 条（vuln ${gt.filter((g) => g.kind === 'vuln').length} / safe ${gt.filter((g) => g.kind === 'safe').length}）`);
-} catch (e) {
-  problems.push(`读 ground-truth.json 失败：${e.message}`);
 }
 
-// ── 子集清单：⊆ 权威 + 规模只减不增 ──────────────────────────────────────────
-for (const s of SUBSETS) {
-  const { ids, dup } = extractIds(LAB + s.key, s.re, s.label);
-  if (dup.length) problems.push(`${s.key} 里有重复 id：${dup.join('、')}`);
-  const ghost = ids.filter((i) => !authority.has(i));
-  if (ghost.length) problems.push(`${s.key} 引用了权威集合之外的靶点 id：${ghost.join('、')}`);
-  if (ids.length < s.baseline) {
-    problems.push(
-      `${s.key} 只有 ${ids.length} 条，低于基线 ${s.baseline}（只减不增）——` +
-        '分母悄悄变小会让对标/复核结论失真；确认是有意缩减就同步下调基线'
-    );
+function precheck(ids) {
+  if (!Array.isArray(ids) || !ids.length) {
+    console.error('❌ 派生物里一条靶点 id 都没取到 —— 结构变了，本门禁需要跟着改。');
+    process.exit(2);
   }
-  info.push(`子集 ${s.key} ${ids.length}/${authority.size} ⊆ 权威（基线 ${s.baseline}｜${s.label}：${s.why}）`);
 }
 
-// ── 输出 ──────────────────────────────────────────────────────────────────────
 console.log('靶点清单一致性门禁：');
-for (const line of info) console.log(`  · ${line}`);
+for (const line of info) console.log(line.startsWith('  ') || line.startsWith('【') ? line : `  · ${line}`);
 
 if (problems.length) {
   console.error(`\n❌ 检出 ${problems.length} 处不一致：\n`);
@@ -149,5 +182,5 @@ if (problems.length) {
   process.exit(1);
 }
 
-console.log('\n✅ 五份清单一致：权威 %d 个靶点，真值表与子集均已核对。', authority.size);
+console.log('\n✅ 所有靶场的清单一致（权威 = 真值表；扫描差集与子集均已登记）。');
 process.exit(0);

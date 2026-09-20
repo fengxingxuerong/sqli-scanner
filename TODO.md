@@ -699,6 +699,54 @@ md5 因此与改前不同；而 `git status` 说 clean、`git diff --numstat` �
 已按此法收尾：`git status` 无靶场文件残留、门禁仍绿。
 
 
+### W. blackbox-lab 有 2 个靶点从未被扫描（✅ 已显式登记，补齐待做）
+
+**发现方式**：把 §V 的判据**推广到第二个靶场**时露出 —— `blackbox-lab` 的真值标定是
+**22 点**，而 `run-scan.mjs` 的 POINTS 只有 **20 点**。
+
+**查证（三条独立证据，不是推断）**：
+1. `run-scan.mjs:49` 的注释写「（D1-postform / E1b-secondorder）由 `run-scenario.mjs` 单独处理」；
+2. `find . -name "run-scenario*"` **零命中** —— 全仓唯一提及处就是那行注释；
+3. `e2e/blackbox-lab/out/` 里 20 个靶点各有 r1/r2/sqlmap 三类产物，
+   **那两个点一个产物都没有**。
+
+且 `run-scan.mjs` 的汇总以 `vulnRows.length` 为分母 → 它实际报的是「漏洞检出 N/13」，
+而 README 写「22 靶点（15 漏洞 + 7 安全对照）」「真值标定 15/15」——
+**「真值标定 15 个漏洞点」与「实际扫描 13 个漏洞点」长期被混为一谈**。
+
+**已做（消灭静默）**：
+- `scripts/lab-targets-check.mjs` 扩展为**多靶场**（redteam-lab + blackbox-lab），
+  新增第三类判据：**扫描清单 ⊆ 权威，差集必须显式登记在 `scanGaps`**，
+  反向也查「登记腐烂」（登记了实际已覆盖的点）。启动输出：
+  「扫描目标 **20/22（差集 2 个，已登记）**」。
+- `run-scan.mjs:49` 的错注释已改为事实陈述（原文指向一个不存在的文件）。
+- README 补「扫描覆盖 20/22」并指向本条。
+
+**待补齐（未做，需真机验证）**：两点其实**都能用现有 CLI 参数表达**，草案如下
+（**未跑过，勿照抄**）：
+
+```
+D1-postform:      --method POST --body 'username=alice&password=x'
+E1b-secondorder:  --method POST --body '{"username":"bob","item":"so-probe","address":"x"}'
+                  --cookie 'token=tok-admin-blackbox-0001'
+                  --second-order <admin 触发页 URL> --allow-second-order-writes --no-production-mode
+```
+
+参照实现：redteam-lab 的 `E15-second-order` 已用同一组参数跑通（那边 26/26 全覆盖）。
+补齐后应把 `scanGaps` 清空，并跑一轮完整 blackbox 评测确认两点能命中且无误报 ——
+**注意**：若跑出来是 MISS，先判「是用例/参数写错还是引擎缺陷」（§11 那次教训），
+别直接当成引擎 bug 去改代码。
+
+**为什么长期没被发现**：blackbox-lab **不在任何门禁里** —— 它是"独立第三方评测靶场"
+（刻意不复用项目自带靶场，属阶段性工具）。它的一致性原本没有任何东西在守护；
+本轮起由 `npm run targets:check` 覆盖（已接入 ci-local 的 lint 组与 ci.yml 的 lint job）。
+
+**顺带（未做）**：`ref-integrity` 只查 yml / package.json / run-all entry 的引用，
+**注释里引用的本地文件不在其内** —— 本条的 `run-scenario.mjs` 就是这么藏住的。
+是否把注释引用也纳入判据要先解决误报（注释里提及已删除的旧脚本是常见且合理的写法），
+故本轮只手工修正了这一处，未加判据。
+
+
 ---
 
 ## P1 · 实战视角高价值

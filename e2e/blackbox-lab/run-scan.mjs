@@ -45,8 +45,14 @@ async function startLab(waf) {
 }
 
 // ── 靶点 → CLI 参数映射 ─────────────────────────────────────────────────────
-// 只列「能通过 URL/header/cookie 表达」的点；需要请求文件或二阶前置动作的
-// （D1-postform / E1b-secondorder）由 run-scenario.mjs 单独处理。
+// 只列「已接进扫描」的点。真值表里另有 2 个点**从未被扫描过**（见 TODO §W）：
+//   · D1-postform      POST 表单（/api/login，urlencoded 的 username）
+//   · E1b-secondorder  二阶：先 POST /api/comment 写入，再用 admin 会话 GET /api/admin/orders 触发
+// [2026-09-20 勘误] 这里原本写「由 run-scenario.mjs 单独处理」—— **该文件全仓不存在**
+// （`find . -name "run-scenario*"` 零命中，本行是唯一提及处；out/ 里也没有这两点的任何产物）。
+// 于是「真值标定 22 点」与「实际扫描 20 点」长期被混为一谈。现改为此事实陈述，
+// 并由 scripts/lab-targets-check.mjs 的 scanGaps 显式登记（不再静默）。
+// 补齐所需的 args 草案写在 TODO §W，**未验证，勿直接照抄**。
 const POINTS = [
   { id: 'A1-numeric', url: '/api/user?id=1' },
   { id: 'A2-string', url: '/api/search?name=alice' },
