@@ -1,17 +1,13 @@
 {
-  "at": "2026-09-20T05:21:44.478Z",
+  "at": "2026-09-20T10:15:48.803Z",
   "seed": 20260919,
   "cases": 40,
   "mysql": "127.0.0.1:3306",
-  "unobservable": [
-    "c00-orderby",
-    "c20-orderby",
-    "c34-orderby"
-  ],
+  "unobservable": [],
   "recall": {
-    "hit": 17,
-    "total": 17,
-    "ci95Lower": 81.57
+    "hit": 20,
+    "total": 20,
+    "ci95Lower": 83.89
   },
   "falsePositive": {
     "count": 0,
@@ -24,10 +20,15 @@
       "id": "c00-orderby",
       "shape": "orderby",
       "vulnerable": true,
-      "detected": false,
-      "status": "unobservable",
-      "techs": [],
-      "dbms": []
+      "detected": true,
+      "status": "done",
+      "techs": [
+        "error",
+        "boolean"
+      ],
+      "dbms": [
+        "MySQL"
+      ]
     },
     {
       "id": "c01-param",
@@ -255,10 +256,15 @@
       "id": "c20-orderby",
       "shape": "orderby",
       "vulnerable": true,
-      "detected": false,
-      "status": "unobservable",
-      "techs": [],
-      "dbms": []
+      "detected": true,
+      "status": "done",
+      "techs": [
+        "error",
+        "boolean"
+      ],
+      "dbms": [
+        "MySQL"
+      ]
     },
     {
       "id": "c21-escape",
@@ -416,10 +422,15 @@
       "id": "c34-orderby",
       "shape": "orderby",
       "vulnerable": true,
-      "detected": false,
-      "status": "unobservable",
-      "techs": [],
-      "dbms": []
+      "detected": true,
+      "status": "done",
+      "techs": [
+        "error",
+        "boolean"
+      ],
+      "dbms": [
+        "MySQL"
+      ]
     },
     {
       "id": "c35-param",

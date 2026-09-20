@@ -173,8 +173,8 @@ function wilson(k, n, z = 1.96) {
 /**
  * ground truth 自证：对"注入"案例先自己发一对**已知真假**的探针，只有响应确实不同才算
  * "可观测的漏洞"。不做这一步，分母里就会混进按构造不可能被任何检测器发现的案例 ——
- * 例：ORDER BY name AND 1=1 / AND 1=2 行序完全一样；LIKE '%mouse%' 两边都零行。
- * 那类案例算进"漏报"是让电池自己骗自己。剔除后单列成 unobservable，报告里如实写明。
+ * 例：LIKE '%mouse%' 两边都零行。那类案例算进"漏报"是让电池自己骗自己。
+ * 剔除后单列成 unobservable，报告里如实写明。
  */
 const PROBE_PAIRS = {
   '': [' AND 1=1-- -', ' AND 1=2-- -'],
@@ -183,8 +183,19 @@ const PROBE_PAIRS = {
   ')': [') AND 1=1-- -', ') AND 1=2-- -'],
   "')": ["') AND 1=1-- -", "') AND 1=2-- -"],
 };
+// [BATTERY-FIX 2026-09-20] ORDER BY 位置不能用「AND 1=1 / AND 1=2」这对布尔探针。
+// 这不是引擎问题，是我自己把分母做空的：`SELECT … ORDER BY id AND 1=1` 与 `AND 1=2`
+// 分别退化成 `ORDER BY id`（真值即 id 本身）和 `ORDER BY 0`（常量），而这张小表的常量序
+// 与 id 物理序**本来就是同一个顺序**；取 name/price 时字符串转数值恒 0，两探针更是完全同序。
+// 于是三个 orderby 案例 100% 被判"按构造不可观测"剔除 —— 电池看起来在测 6 种形态，
+// 实际恒测 5 种，而 n 只有 17 时少一整类会明显抬高召回数字。
+// 换成列索引有效性这对：`ORDER BY id, 1` 合法、`ORDER BY id, 9999` 报
+// Unknown column '9999' in 'order clause'（sqlmap --order-by 就是这个信号），真假立判。
+const PROBE_PAIRS_BY_SHAPE = {
+  orderby: [', 1', ', 9999'],
+};
 async function observable(c) {
-  const pair = PROBE_PAIRS[c.need] ?? PROBE_PAIRS[''];
+  const pair = PROBE_PAIRS_BY_SHAPE[c.shape] ?? PROBE_PAIRS[c.need] ?? PROBE_PAIRS[''];
   const get = async (suffix) => {
     const v = c.value + suffix;
     const url = `${BASE}/r/${c.id}?${c.param}=${encodeURIComponent(v)}`;
