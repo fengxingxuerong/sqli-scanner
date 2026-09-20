@@ -77,6 +77,26 @@ const num = (re, s, g = 1) => {
   return m ? Number(m[g]) : null;
 };
 
+// ── 代码版本凭证 ────────────────────────────────────────────────────────────
+// [2026-09-20 新增] 报告此前只有时间戳，回答不了「这份 N PASS 是哪一版代码跑出来的」。
+// 与 facts 那次假绿同源（TODO §Q）：结论没绑到版本上，代码变了报告还留着旧结论。
+// 更麻烦的是**工作区 dirty 时跑出的报告会被提交进库** —— 读的人会以为它对应某个提交。
+// 故：记录 HEAD + 未提交清单，dirty 时显式标注「本报告不对应任何提交」。
+//
+// 时序要求：必须在**验收开始前**采集。跑验收本身会写 e2e/*/results/*，
+// 结束时再采集会把「运行产物」误读成「跑之前的未提交改动」，反过来说谎。
+async function gitStamp() {
+  const head = await run('git', ['rev-parse', '--short', 'HEAD']);
+  if (head.code !== 0) return { head: '(非 git 工作区)', dirty: [] };
+  const st = await run('git', ['status', '--porcelain']);
+  // porcelain 每行 = `XY<space>path`，故 slice(3)。行尾 \r 要剥掉（Windows 上 git 仍输出 LF，
+  // 但不值得为它赌一次），空行必须滤掉（输出尾部一定有）。
+  const dirty = st.out
+    .split('\n').map((l) => l.replace(/\r$/, '')).filter((l) => l.trim())
+    .map((l) => l.slice(3).trim());
+  return { head: head.out.trim(), dirty };
+}
+
 // ── 前置检查：依赖不可用必须显式 SKIP 并给出原因 ──────────────────────────────
 // [2026-09-17 FIX] 依赖键必须与 SUITES[].needs 的拼写**逐字一致**。
 // 原实现 pre 里只有驼峰键 secureFilePriv，而 redteam/file-read/file-write 三个套件的
@@ -85,6 +105,10 @@ const num = (re, s, g = 1) => {
 // 实际是键名拼错，能力从未被验证过）。故这里同时提供：
 //   · secureFilePriv    —— 原值（null / '' / '/path'），供报告展示；
 //   · secure_file_priv  —— 布尔判据，供 needs 消费。
+// [2026-09-20] 代码版本凭证：必须在任何套件开跑**之前**采集（跑起来会写 e2e/*/results/*，
+// 之后再采集就把运行产物当成未提交改动了）。详见 gitStamp() 注释。
+const git = await gitStamp();
+
 const pre = { mysql: false, mysqlReason: '', secureFilePriv: null, secure_file_priv: false, mysqlVersion: null, redteamLab: false };
 {
   if (await portOpen(MYSQL.port)) {
@@ -522,10 +546,36 @@ const row = (r) =>
   `| ${badge[r.status]} | ${r.title} | ` +
   `${Object.entries(r.facts || {}).map(([k, v]) => `${k}=${v}`).join('　')} |`;
 
+// 套件范围：判据是「几个套件真跑出了断言 / 一共注册几个」，**不是文件名**（文件名可以被改）。
+// 起因是实测到的一次假绿：`--only=file-write` 定向跑验收时，报告被写进
+// `acceptance-report.md`（全量报告的位置），内容只有一行「✅ PASS fileWrite 真闭环」
+// 加汇总「1 PASS / 0 FAIL」—— 看着全绿，实际 12 个套件只跑了 1 个。
+// 与 TODO §Q 同源：**结论看着正常，语义完全不同**。
+const trulyRan = results.filter((r) => r.status === 'PASS' || r.status === 'FAIL').length;
+const isFullRun = !ONLY && !SKIP_HEAVY;
+const scopeNotes = [
+  ONLY ? `定向 --only=${[...ONLY].join(',')}` : '',
+  SKIP_HEAVY ? '--skip-heavy' : '',
+].filter(Boolean);
+const scopeLine =
+  `> 套件范围：**${trulyRan}/${SUITES.length} 跑出断言**` +
+  (scopeNotes.length ? `（${scopeNotes.join('、')}）` : '') +
+  (trulyRan === SUITES.length && isFullRun
+    ? '　｜　判定：**全量**'
+    : '　｜　⚠️ **判定：不完整 —— 不得当作该代码版本的整体验收结论**');
+// 版本凭证：dirty 时报告**不对应任何提交**，必须让人一眼看到，否则它入库后会被读成
+// 「某版代码的验收结论」。注意 dirty 是「跑之前」采集的，不含本次运行写出的产物。
+const versionLine = git.dirty.length
+  ? `> 代码版本：\`${git.head}\`　⚠️ **工作区 dirty**（跑验收前有 ${git.dirty.length} 个未提交改动：` +
+    `${git.dirty.slice(0, 3).join('、')}${git.dirty.length > 3 ? ' 等' : ''}）—— **本报告不对应任何提交**`
+  : `> 代码版本：\`${git.head}\`（工作区 clean）`;
+
 const md = [
-  '# 全方位验收门禁报告',
+  isFullRun ? '# 全方位验收门禁报告' : '# 全方位验收门禁报告（⛔ 非全量运行）',
   '',
-  `> 生成：${new Date().toISOString()}　｜　执行器：\`node e2e/acceptance.mjs\``,
+  `> 生成：${new Date().toISOString()}　｜　执行器：\`node e2e/acceptance.mjs\`　｜　Node ${process.version}`,
+  versionLine,
+  scopeLine,
   `> 前置：MySQL ${pre.mysql ? `${pre.mysqlVersion} @${MYSQL.host}:${MYSQL.port}` : `不可用（${pre.mysqlReason}）`}；secure_file_priv=${JSON.stringify(pre.secureFilePriv)}`,
   '',
   '> **判定纪律**：不采信各套件自报的 PASS 字样，只解析可独立核对的事实数字并据此断言。',
@@ -540,8 +590,11 @@ const md = [
   '',
 ].join('\n');
 
+// 只有**真全量**运行才写这份入库证据文件。定向 / 跳过 heavy 的写到 .partial.md ——
+// 否则一次 `--only` 就会把库里那份全量结论覆盖掉（实测发生过，见上）。
 mkdirSync(resolve(HERE, 'results'), { recursive: true });
-writeFileSync(resolve(HERE, 'results', 'acceptance-report.md'), md);
+const reportPath = resolve(HERE, 'results', isFullRun ? 'acceptance-report.md' : 'acceptance-report.partial.md');
+writeFileSync(reportPath, md);
 
 console.log('\n═══ 汇总 ═══');
 for (const r of results) {
@@ -554,5 +607,6 @@ for (const r of results) {
 // 也就是那条"BLOCKED 与 FAIL 分列"的修复实际没生效。e2e/acceptance.mjs 当时在 eslint 的 ignores
 // 里（该目录级 ignore 已于 2026-09-19 撤掉），所以 `tally is assigned but never used` 这条 error 谁也没看见。
 console.log(`\n${tally()}`);
-console.log(`报告：e2e/results/acceptance-report.md`);
+console.log(`套件范围：${trulyRan}/${SUITES.length} 跑出断言${isFullRun ? '' : '（**非全量**，未覆盖全量报告）'}`);
+console.log(`报告：${relative(ROOT, reportPath)}`);
 process.exit(failed.length ? 1 : 0);
