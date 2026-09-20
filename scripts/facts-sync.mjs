@@ -191,8 +191,16 @@ function listSources() {
   return [...new Set(out)].sort();
 }
 
-const hashFile = (abs) =>
-  createHash('sha256').update(readFileSync(abs)).digest('hex').slice(0, 12);
+const hashFile = (abs) => {
+  const buf = readFileSync(abs);
+  // [CI-FIX 2026-09-20] 指纹必须对 EOL 规范化（\r\n → \n）：本机 core.autocrlf=true 时
+  // 工作区是 CRLF、CI checkout 是 LF，按原始字节算则同一个 blob 两边指纹不同 ——
+  // 首次 CI 实跑即 69 个文件全报「修改」（假红）。与当年 `git archive + diff -rq`
+  // 的 EOL 假阳性同族：**跨平台判据里任何字节级比较都必须先做 EOL 归一**。
+  // 含 \0 的二进制文件不规范化（按原字节）。
+  const norm = buf.includes(0) ? buf : Buffer.from(buf.toString('utf8').replace(/\r\n/g, '\n'), 'utf8');
+  return createHash('sha256').update(norm).digest('hex').slice(0, 12);
+};
 
 function collectSourceDigest() {
   const files = {};

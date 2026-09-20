@@ -306,7 +306,12 @@ jobs:
         if: always()
         with:
           name: acceptance-report
-          path: e2e/results/acceptance-report.md
+          # [2026-09-20] 补传 last-failure-*.log（DIAG-FIX 落盘的失败现场）：
+          # 首跑时 CRS 保真度套件在 CI 报「取不到保真度行」，但现场日志没进 artifact，
+          # 隔着一层网查不了 —— 排障信息要跟着失败一起上传，否则等于没存。
+          path: |
+            e2e/results/acceptance-report.md
+            e2e/results/last-failure-*.log
           if-no-files-found: warn
 
   tamper-waf-matrix:
