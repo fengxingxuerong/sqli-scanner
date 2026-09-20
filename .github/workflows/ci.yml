@@ -275,9 +275,16 @@ jobs:
       # 反之若 MySQL 容器起不来，必需依赖缺失会让门禁 BLOCKED 并返回非零退出码（不会假绿）。
       - name: 启动 MySQL（放行 secure_file_priv，使文件读写套件也能真跑）
         run: |
+          # [CI-FIX 2026-09-20] 文件读写套件要在 **runner 侧**验证落盘，而 mysqld 在容器里
+          # —— 必须把目录挂进去，否则它写进容器内部，runner 永远 existsSync 不到
+          # （首跑实测：wrote:true 但 verified:false）。同时预置 fileRead 要读的标记文件。
+          mkdir -p /tmp/mysql-fw-lab/out /tmp/mysql-fr-lab
+          printf 'FILEREAD_OK_marker_2026=abc123\n' > /tmp/mysql-fr-lab/secret.txt
           docker run -d --name mysql-lab -p 3306:3306 \
             -e MYSQL_ROOT_PASSWORD=root \
             -e MYSQL_DATABASE=sqli_lab \
+            -v /tmp/mysql-fw-lab:/tmp/mysql-fw-lab \
+            -v /tmp/mysql-fr-lab:/tmp/mysql-fr-lab \
             mysql:8.0 --secure-file-priv=""
       - name: 等待 MySQL 就绪
         run: |
@@ -319,6 +326,9 @@ jobs:
           MYSQL_PORT: 3306
           MYSQL_USER: root
           MYSQL_PASSWORD: root
+          # 与上面 docker 挂载卷对应：让 fileWrite/fileRead 在 runner 可见的路径上验证
+          FILE_WRITE_DIR: /tmp/mysql-fw-lab/out
+          FILE_READ_TARGET: /tmp/mysql-fr-lab/secret.txt
       # [P1-ADD 2026-09-19] 随机化真值电池：案例按种子生成（一半注入、一半结构良性），
       # 报的是召回率的 **Wilson 95% 置信区间下界**，不是"13/13"那种小样本分数。
       # 它同时自带一道诚实闸：每个"注入案例"先用一对已知真假探针自证可观测，
