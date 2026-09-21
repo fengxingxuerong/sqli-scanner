@@ -136,10 +136,26 @@ test('-r 吃 HAR 多请求：只取第 1 个，且**明确打印**共几个（�
   assert.match(out, /只扫描第 1 个/);
 });
 
-test('-r 遇到暂不支持的集合格式（Postman）：返回 null 并说明当前支持什么', async () => {
-  const { args, out } = await viaDashR(JSON.stringify({ info: { name: 'p' }, item: [] }), 'p.postman.json');
+test('-r 吃 Postman 集合：嵌套 folder 展开后取第 1 个请求', async () => {
+  const pm = {
+    info: { name: 'p' },
+    item: [
+      {
+        name: 'folder',
+        item: [{ name: 'q', request: { method: 'GET', url: 'http://shop.example.com/search?q=Keyboard' } }],
+      },
+    ],
+  };
+  const { args } = await viaDashR(JSON.stringify(pm), 'p.postman.json');
+  assert.ok(args, 'Postman 集合应能被 -r 导入（D1 二期）');
+  assert.equal(args.url, 'http://shop.example.com/search?q=Keyboard');
+  assert.equal(args.method, 'GET');
+});
+
+test('-r 遇到真正不支持的格式（非 Burp 的 XML）：返回 null 并说明当前支持什么', async () => {
+  const { args, out } = await viaDashR('<feed><entry/></feed>', 'x.xml');
   assert.equal(args, null);
-  assert.match(out, /Burp XML|HAR/);
+  assert.match(out, /Burp XML|HAR|Postman/);
 });
 
 test('回归保护：单个 Burp/curl 文本请求走 -r 行为完全不变', async () => {

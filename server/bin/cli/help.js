@@ -15,8 +15,9 @@ export function printHelp() {
   批量    node bin/cli.js -m <urls.txt> [选项]
 
 选项:
-  -r, --request-file <file>  导入单个请求（对标 sqlmap -r）。支持三种来源：
-                             Burp/curl 文本报文、Burp XML 导出、HAR（浏览器 F12 / Charles）
+  -r, --request-file <file>  导入请求（对标 sqlmap -r）。支持的来源：
+                             · Burp/curl 文本报文   · Burp XML 导出   · HAR（浏览器 F12 / Charles）
+                             · Postman 集合(v2.x)   · OpenAPI/Swagger（JSON；YAML 需先转 JSON）
                              提取 URL/method/headers/body，覆盖 -u/--method/--body/--cookie/--header
                              集合文件含多个请求时只取第 1 个（会打印共几个，不静默）
   -l, --log-file <file>      从代理/Burp 日志文件批量扫描（对标 sqlmap -l）：

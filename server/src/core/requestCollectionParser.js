@@ -12,18 +12,23 @@
 //     · multipart「整份 body 塌成一个垃圾键」、JSON 点路径叶子、urlencoded bodyFields
 //       这些**已经踩过坑才修好**的逻辑自动继承，不会在新格式上二次犯错。
 //
-// 已支持：Burp Suite XML（<items><item>，request 可 base64）、HAR 1.2。
-// 暂不支持（二期）：Postman Collection、OpenAPI/Swagger（会明确返回 unsupported）。
+// 已支持：Burp Suite XML（<items><item>，request 可 base64）、HAR 1.2、
+//         Postman Collection v2.x（item 可嵌套）、OpenAPI 3.x / Swagger 2.0（JSON）。
+// 不支持：OpenAPI 的 YAML 形式（本模块不引 YAML 依赖，会给出转换指引）、非 Burp 的 XML。
 //
 // 诚实口径：解析失败**不抛异常**，返回 { format, requests: [], warnings: [] }，
 //   由调用方决定如何提示 —— 不给"静默返回空"留机会。
 // ============================================================================
 import { parseRequestFile } from './requestFileParser.js';
 
-/** 集合格式识别。返回 'har' | 'burp-xml' | 'unsupported' | 'raw'（raw = 单请求文本） */
+/** 集合格式识别。返回 'har' | 'burp-xml' | 'postman' | 'openapi' | 'openapi-yaml' | 'unsupported' | 'raw' */
 export function detectRequestFormat(text) {
   if (!text || typeof text !== 'string') return null;
   const head = text.replace(/^\uFEFF/, '').trimStart();
+
+  // OpenAPI 常以 YAML 形式流通（`openapi: 3.0.0`）。本模块**不引 YAML 依赖**（server 侧未装 yaml，
+  // 装了也会把依赖面扩大），故只给出可操作提示，而不是让它落到 raw 分支报"不是合法请求文本"。
+  if (/^[\s#-]*(openapi|swagger)\s*:/im.test(head) && !head.startsWith('{')) return 'openapi-yaml';
 
   // XML 家族：<items> 是 Burp 导出；其它 XML 明确报 unsupported，不猜
   if (head.startsWith('<')) {
@@ -38,8 +43,13 @@ export function detectRequestFormat(text) {
     } catch {
       return 'raw'; // 不是合法 JSON：交给单请求解析器处理（它自己会判非法）
     }
-    if (obj && typeof obj === 'object' && obj.log && Array.isArray(obj.log.entries)) return 'har';
-    if (obj && typeof obj === 'object' && (obj.info || obj.openapi || obj.swagger)) return 'unsupported';
+    if (obj && typeof obj === 'object') {
+      if (obj.log && Array.isArray(obj.log.entries)) return 'har';
+      // Postman Collection v2.x：顶层 { info, item[] }；item 可嵌套（folder）→ 解析时递归展开
+      if (Array.isArray(obj.item)) return 'postman';
+      // OpenAPI 3.x / Swagger 2.0（JSON 形式）
+      if (obj.openapi || obj.swagger) return 'openapi';
+    }
     return 'raw';
   }
 
@@ -200,6 +210,181 @@ function stripCdata(s) {
   return m ? m[1] : s;
 }
 
+/** Postman 变量占位（{{baseUrl}} 等）：无法求值 → 跳过并提示，而不是拼出一个坏 URL */
+const HAS_POSTMAN_VAR = /\{\{[^}]+\}\}/;
+
+/** Postman Collection v2.x：{ info, item[] }；item 可嵌套（folder）需递归展开 */
+function parsePostman(obj) {
+  const requests = [];
+  const warnings = [];
+  const urlOf = (u) => {
+    if (typeof u === 'string') return u;
+    if (!u || typeof u !== 'object') return '';
+    if (u.raw) return String(u.raw);
+    const host = Array.isArray(u.host) ? u.host.join('.') : String(u.host || '');
+    if (!host) return '';
+    const path = Array.isArray(u.path) ? u.path.join('/') : String(u.path || '');
+    const q = (u.query || []).filter((x) => x && x.key).map((x) => `${x.key}=${x.value ?? ''}`).join('&');
+    return `${u.protocol || 'http'}://${host}${path ? '/' + path : ''}${q ? '?' + q : ''}`;
+  };
+
+  const walk = (items) => {
+    for (const it of items || []) {
+      if (!it || typeof it !== 'object') continue;
+      if (Array.isArray(it.item)) { walk(it.item); continue; } // folder → 递归
+      const r = it.request;
+      if (!r || typeof r !== 'object') continue;
+      const name = it.name ? `「${it.name}」` : '';
+      const url = urlOf(r.url);
+      if (!url) { warnings.push(`第 ${requests.length + 1} 个 item${name} 无可用 URL，已跳过`); continue; }
+      if (HAS_POSTMAN_VAR.test(url)) {
+        warnings.push(`item${name} 的 URL 含 Postman 变量（{{…}}）：${url.slice(0, 80)} —— 请先在 Postman 里替换变量后重新导出`);
+        continue;
+      }
+      const headers = {};
+      for (const h of r.header || []) {
+        if (h && h.key && h.disabled !== true) headers[h.key] = h.value == null ? '' : String(h.value);
+      }
+      // body：四种 mode 归一化成"报文里的 body + 必要 Content-Type"
+      let body = '';
+      const b = r.body || {};
+      const hasCt = Object.keys(headers).some((k) => /^content-type$/i.test(k));
+      if (b.mode === 'raw') {
+        body = String(b.raw ?? '');
+      } else if (b.mode === 'urlencoded') {
+        const pairs = (b.urlencoded || []).filter((x) => x && x.key && x.disabled !== true);
+        body = pairs.map((x) => `${x.key}=${x.value ?? ''}`).join('&');
+        if (!hasCt) headers['Content-Type'] = 'application/x-www-form-urlencoded';
+      } else if (b.mode === 'formdata') {
+        // 构造真实 multipart 报文（boundary + Content-Disposition），这样能复用
+        // requestFileParser 的 multipart 提取 → bodyFields 拿到真实字段名而不是一个垃圾键
+        const boundary = `----PostmanBoundary${Math.random().toString(36).slice(2, 10)}`;
+        const chunks = [];
+        for (const f of b.formdata || []) {
+          if (!f || !f.key || f.disabled === true) continue;
+          if (f.type === 'file') {
+            const fn = String(f.src || 'file.bin').split(/[\\/]/).pop() || 'file.bin';
+            chunks.push(
+              `--${boundary}\r\nContent-Disposition: form-data; name="${f.key}"; filename="${fn}"\r\nContent-Type: application/octet-stream\r\n\r\n`
+            );
+          } else {
+            chunks.push(`--${boundary}\r\nContent-Disposition: form-data; name="${f.key}"\r\n\r\n${f.value ?? ''}\r\n`);
+          }
+        }
+        chunks.push(`--${boundary}--\r\n`);
+        body = chunks.join('');
+        headers['Content-Type'] = `multipart/form-data; boundary=${boundary}`;
+      } else if (b.mode === 'graphql') {
+        body = JSON.stringify({ query: b.graphql?.query || '', variables: safeJson(b.graphql?.variables) });
+        if (!hasCt) headers['Content-Type'] = 'application/json';
+      } else if (b.mode) {
+        warnings.push(`item${name} 的 body.mode=${b.mode} 暂不支持，已按无 body 处理`);
+      }
+
+      const parsed = toRequest(buildRawRequest({ method: r.method, url, headers, body }));
+      if (!parsed) { warnings.push(`item${name} 报文解析失败（url=${url.slice(0, 80)}）`); continue; }
+      if (/^https?:\/\//i.test(url)) parsed.url = url; // Postman 的 url.raw 是权威值（含正确 scheme）
+      requests.push({ ...parsed, label: `${String(r.method || 'GET').toUpperCase()} ${url}` });
+    }
+  };
+
+  walk(obj.item);
+  if (!requests.length && !warnings.length) warnings.push('Postman 集合里没有可解析的请求（item 为空？）');
+  return { requests, warnings };
+}
+
+function safeJson(s) {
+  if (s == null || s === '') return undefined;
+  if (typeof s === 'object') return s;
+  try { return JSON.parse(String(s)); } catch { return undefined; }
+}
+
+/** 从 parameter/schema 推一个样例值：有 example 用 example，否则按类型给可注入的占位 */
+function sampleValue(prm) {
+  const ex = prm.example ?? prm.schema?.example ?? prm.schema?.default;
+  if (ex !== undefined && ex !== null) return String(ex);
+  if (Array.isArray(prm.schema?.enum) && prm.schema.enum.length) return String(prm.schema.enum[0]);
+  const t = prm.schema?.type;
+  if (t === 'boolean') return 'true';
+  // 数字/字符串统一给 '1'：数字形态在真实 SQL 里最可能被直接拼接，注入点更贴近实际
+  return '1';
+}
+
+/** 递归从 JSON Schema 造样例（深度封顶，避免自引用 schema 打转） */
+function schemaExample(schema, depth = 0) {
+  if (!schema || typeof schema !== 'object' || depth > 3) return null;
+  if (schema.example !== undefined) return schema.example;
+  if (Array.isArray(schema.enum) && schema.enum.length) return schema.enum[0];
+  if (schema.type === 'object' || schema.properties) {
+    const o = {};
+    for (const [k, v] of Object.entries(schema.properties || {})) o[k] = schemaExample(v, depth + 1) ?? '1';
+    return o;
+  }
+  if (schema.type === 'array') return [schemaExample(schema.items, depth + 1) ?? '1'];
+  if (schema.type === 'integer' || schema.type === 'number') return 1;
+  if (schema.type === 'boolean') return true;
+  return '1';
+}
+
+/**
+ * OpenAPI 3.x / Swagger 2.0（JSON 形式）→ 样例请求集合。
+ * ⚠️ 与 HAR/Burp 有**本质区别**：接口定义不是抓包，参数值来自 example/default，
+ * 缺失处用占位值。因此输出**必然带一条警示 warning**，不做"看起来像真请求"的伪装。
+ */
+function parseOpenApi(obj) {
+  const requests = [];
+  const warnings = [];
+  const base = obj.servers?.[0]?.url
+    || (obj.host ? `${(obj.schemes && obj.schemes[0]) || 'http'}://${obj.host}${obj.basePath || ''}` : '');
+  if (!base) {
+    warnings.push('OpenAPI 未声明 servers[0].url（Swagger 2.0 需 host/basePath）→ 无法拼出目标地址');
+    return { requests, warnings };
+  }
+  const METHODS = ['get', 'post', 'put', 'patch', 'delete'];
+  for (const [rawPath, item] of Object.entries(obj.paths || {})) {
+    if (!item || typeof item !== 'object') continue;
+    for (const m of METHODS) {
+      const op = item[m];
+      if (!op || typeof op !== 'object') continue;
+      let path = rawPath;
+      const query = [];
+      const headers = {};
+      for (const prm of [...(item.parameters || []), ...(op.parameters || [])]) {
+        if (!prm || !prm.name) continue;
+        const val = sampleValue(prm);
+        if (prm.in === 'path') path = path.replace(`{${prm.name}}`, encodeURIComponent(val));
+        else if (prm.in === 'query') query.push(`${prm.name}=${encodeURIComponent(val)}`);
+        else if (prm.in === 'header') headers[prm.name] = val;
+      }
+      let body = '';
+      const content = op.requestBody?.content;
+      if (content) {
+        const [ct, media] = Object.entries(content)[0] || [];
+        if (ct) {
+          headers['Content-Type'] = ct;
+          const ex = media?.example ?? schemaExample(media?.schema);
+          body = typeof ex === 'string' ? ex : JSON.stringify(ex ?? {});
+        }
+      }
+      const url = base.replace(/\/+$/, '') + (path.startsWith('/') ? path : '/' + path)
+        + (query.length ? '?' + query.join('&') : '');
+      const parsed = toRequest(buildRawRequest({ method: m.toUpperCase(), url, headers, body }));
+      if (!parsed) { warnings.push(`${m.toUpperCase()} ${rawPath} 报文解析失败`); continue; }
+      parsed.url = url;
+      requests.push({ ...parsed, label: `${m.toUpperCase()} ${url}` });
+    }
+  }
+  if (requests.length) {
+    warnings.push(
+      `OpenAPI 是**接口定义**而非抓包：参数值取自 example/default，缺失处用占位 '1' —— ` +
+      `共推导 ${requests.length} 个样例请求，实际参数需自行核对后再扫`
+    );
+  } else {
+    warnings.push('OpenAPI 未展开出任何请求（paths 为空？或方法不在 GET/POST/PUT/PATCH/DELETE 内）');
+  }
+  return { requests, warnings };
+}
+
 /**
  * 统一入口：识别格式 → 归一化成原始报文 → parseRequestFile。
  * @returns {{format: string|null, requests: Array<object>, warnings: string[]}}
@@ -220,13 +405,35 @@ export function parseRequestCollection(text) {
 
   if (format === 'burp-xml') return { format, ...parseBurpXml(text) };
 
+  if (format === 'postman' || format === 'openapi') {
+    let obj;
+    try {
+      obj = JSON.parse(text);
+    } catch (e) {
+      return { format, requests: [], warnings: [`${format === 'postman' ? 'Postman' : 'OpenAPI'} JSON 解析失败：${e.message}`] };
+    }
+    return { format, ...(format === 'postman' ? parsePostman(obj) : parseOpenApi(obj)) };
+  }
+
+  if (format === 'openapi-yaml') {
+    return {
+      format,
+      requests: [],
+      warnings: [
+        '识别为 OpenAPI/Swagger 的 **YAML** 形式。本工具不引 YAML 依赖（只在 server 侧跑，'
+          + '装 yaml 会扩大依赖面）→ 请转成 JSON 后重试：'
+          + 'Swagger Editor 里 File → Convert and save as JSON，或 `python -c "import yaml,json,sys;json.dump(yaml.safe_load(open(sys.argv[1])),open(sys.argv[2],\'w\'))" in.yaml out.json`',
+      ],
+    };
+  }
+
   if (format === 'unsupported') {
     return {
       format,
       requests: [],
       warnings: [
-        '识别为暂不支持的集合格式（Postman Collection / OpenAPI / 其它 XML）。' +
-          '当前支持：Burp XML 导出、HAR；或直接给单个 Burp/curl 文本请求。',
+        '识别为暂不支持的格式（非 Burp 的 XML）。当前支持：Burp XML 导出、HAR、'
+          + 'Postman Collection、OpenAPI/Swagger（JSON）；或直接给单个 Burp/curl 文本请求。',
       ],
     };
   }
