@@ -159,9 +159,13 @@ export async function profileBlockedTokens({
  * 按画像给候选链重排：能消除被拦 token 的链优先（命中的被拦 token 越多越靠前）。
  * 纯函数，稳定排序（同分保持原顺序 —— 原顺序来自 wafRecommend 的置信度）。
  *
- * @param {Array<{vendor?:string, plugins:string[]}>} chains
+ * 注：`vendor` 标为**必填**，与上游契约一致（wafRecommend 的 61 厂商映射每条都带 vendor），
+ * 也与 `verifyTamperChains` 的 `@returns {Promise<{vendor:string,plugins:string[]}|null>}` 对齐
+ * —— 首版标成可选会让调用处 TS2322（CI 实测：lint job 的 "TypeScript check (server, checkJs)"）。
+ *
+ * @param {Array<{vendor: string, plugins: string[]}>} chains
  * @param {string[]} blockedTokens profileBlockedTokens 的输出
- * @returns {Array<{vendor?:string, plugins:string[]}>} 重排后的新数组（不改原数组）
+ * @returns {Array<{vendor: string, plugins: string[]}>} 重排后的新数组（不改原数组）
  */
 export function rankChainsByProfile(chains, blockedTokens) {
   const list = Array.isArray(chains) ? chains.filter((c) => c && Array.isArray(c.plugins) && c.plugins.length) : [];
