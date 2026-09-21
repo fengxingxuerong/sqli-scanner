@@ -9,6 +9,9 @@
 // ============================================================================
 import { readFileSync, existsSync } from 'node:fs';
 import { parseRequestFile } from '../../src/core/requestFileParser.js';
+// [COLLECTION-2026-09-21] 抓包**集合**格式（Burp XML 导出 / HAR）→ 原始报文 → 上面这个解析器。
+// 归一化统一走 requestFileParser，故 params/bodyFields/multipart 的既有修复自动继承。
+import { parseRequestCollection } from '../../src/core/requestCollectionParser.js';
 import { logger } from '../../src/core/logger.js';
 import { tamperRegistry } from '../../src/core/tamper/TamperRegistry.js';
 import path from 'node:path';
@@ -250,21 +253,20 @@ export function parseLogFile(filePath) {
   }
   const text = readFileSync(filePath, 'utf-8');
   // —— Burp XML：优先识别 ——
+  // [COLLECTION-2026-09-21] 改走 requestCollectionParser（取 <request> 原始报文解析）。
+  // 原实现只按 `<url>/<method>` 提取并硬写 `headers: {}` / `body: null` ⇒ **Cookie、
+  // Content-Type、POST body 全丢**：`-l` 扫 Burp 导出时 body 注入点拿不到、需登录的目标
+  // 也扫不到。该缺陷此前无测试覆盖（cli.log.test.js 只断言了 url，没断言 headers/body）。
+  // 现与 `-r` 共用同一条归一化路径，方法/URL 过滤语义保持不变。
   if (/<items|<item\b|<burp/i.test(text)) {
-    const out = [];
-    const itemRe = /<item\b[^>]*>([\s\S]*?)<\/item>/gi;
-    let m;
-    while ((m = itemRe.exec(text)) !== null) {
-      const block = m[1];
-      const urlMatch = block.match(/<url><!\[CDATA\[([^\]]*)\]\]><\/url>|<url>([^<]*)<\/url>/i);
-      const methodMatch = block.match(/<method><!\[CDATA\[([^\]]*)\]\]><\/method>|<method>([^<]*)<\/method>/i);
-      const url = urlMatch ? (urlMatch[1] || urlMatch[2] || '').trim() : '';
-      if (!/^https?:\/\//i.test(url)) continue;
-      const method = (methodMatch ? (methodMatch[1] || methodMatch[2] || '') : 'GET').toUpperCase();
-      if (!['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) continue;
-      out.push({ url, method, headers: {}, body: null });
-    }
-    return out;
+    return parseRequestCollection(text).requests
+      .map((r) => ({
+        url: r.url,
+        method: r.method,
+        headers: r.headers || {},
+        body: r.body || null,
+      }))
+      .filter((r) => /^https?:\/\//i.test(r.url) && ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].includes(r.method));
   }
   // —— 纯文本多请求：按请求行切分，剥时间戳/前缀重建规范请求行 ——
   const lines = text.split(/\r?\n/);
@@ -425,11 +427,26 @@ export function applyRequestFile(args) {
     console.error(`请求文件不存在: ${args.requestFile}`);
     return null;
   }
-  const parsed = parseRequestFile(readFileSync(args.requestFile, 'utf-8'));
-  if (!parsed) {
-    console.error(`请求文件解析失败（需为 Burp/curl 文本 HTTP 请求格式）: ${args.requestFile}`);
+  // [COLLECTION-2026-09-21] 从「只认单个文本请求」扩到「也认集合格式」：
+  // 实战交付的起点常是 Burp 的 XML 导出或浏览器/Charles 的 HAR —— 原先一律抛
+  // 「需为 Burp/curl 文本 HTTP 请求格式」，第一步就卡住。现在统一经
+  // parseRequestCollection 归一化（内部仍走 parseRequestFile，契约不变）。
+  const coll = parseRequestCollection(readFileSync(args.requestFile, 'utf-8'));
+  if (!coll.requests.length) {
+    console.error(`请求文件解析失败: ${args.requestFile}`);
+    for (const w of coll.warnings) console.error(`  · ${w}`);
     return null;
   }
+  const parsed = coll.requests[0];
+  // 集合里多于一条时**必须说出来**：静默取第一条会让人以为整份都测了
+  // （本仓教训：静默降级比报错更难查）。
+  if (coll.requests.length > 1) {
+    console.error(
+      `[集合导入] 识别为 ${coll.format}，共 ${coll.requests.length} 个请求；本次只扫描第 1 个：${parsed.label || parsed.url}`
+    );
+    console.error('           其余请求未扫描；要逐个测请拆分文件后分别用 -r。');
+  }
+  for (const w of coll.warnings) console.error(`  [提示] ${w}`);
   args.url = parsed.url;
   if (parsed.method === 'HEAD' || parsed.method === 'OPTIONS' || parsed.method === 'TRACE' || parsed.method === 'CONNECT') {
     // MethodType 仅支持 GET/POST/PUT/PATCH/DELETE，越界方法回退 GET

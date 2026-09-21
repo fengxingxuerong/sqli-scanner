@@ -15,8 +15,10 @@ export function printHelp() {
   批量    node bin/cli.js -m <urls.txt> [选项]
 
 选项:
-  -r, --request-file <file>  从 Burp/curl 文本请求文件导入完整请求（对标 sqlmap -r）：
+  -r, --request-file <file>  导入单个请求（对标 sqlmap -r）。支持三种来源：
+                             Burp/curl 文本报文、Burp XML 导出、HAR（浏览器 F12 / Charles）
                              提取 URL/method/headers/body，覆盖 -u/--method/--body/--cookie/--header
+                             集合文件含多个请求时只取第 1 个（会打印共几个，不静默）
   -l, --log-file <file>      从代理/Burp 日志文件批量扫描（对标 sqlmap -l）：
                              支持 Burp XML 导出与纯文本多请求日志，逐请求复用 -r 的字段映射
   -u, --url <url>            目标 URL
