@@ -11,6 +11,7 @@
 // ============================================================================
 import { spawn } from 'node:child_process';
 import net from 'node:net';
+import { existsSync } from 'node:fs';
 import { createRequire } from 'node:module';
 
 const MYSQLD = process.env.MYSQLD_PATH || 'D:/mysql/bin/mysqld.exe';
@@ -44,6 +45,19 @@ try {
   await waitPort(3306, 1500);
   console.log('[env] MySQL 已在运行，复用');
 } catch {
+  // [CI-FIX 2026-09-21] 先做**存在性检查**再 spawn。
+  // 原实现：路径不存在时 `spawn` 的 'error' 事件只打一行日志，紧接着仍 `waitPort(3306, 60000)`
+  // 硬等 60 秒才抛错。CI（ubuntu-latest）上 MYSQLD 默认值是 `D:/mysql/bin/mysqld.exe`
+  // —— Windows 绝对路径，必然不存在 → 白等 60s 后 env.mjs 崩溃 → run-with-env 继续
+  // 等 8231 到 90s 超时 → run-all 报 `redteam-lab ❌ 失败(code=1) 90.6s`。
+  // 而真实性质是「本环境没有 mysqld 二进制」= 缺依赖，不是靶场或产品有缺陷。
+  // 本仓对缺依赖的既定口径是**跳过**（run-all 认 `[SKIP]` + exit 0，见 needsSandbox 上方注释），
+  // 故这里如实打印 [SKIP] 并以 0 退出，让跳过理由出现在 CI 日志里而不是一个查不出原因的 90s 红灯。
+  if (!existsSync(MYSQLD)) {
+    console.log(`[SKIP] 未找到 mysqld 二进制：${MYSQLD}`);
+    console.log('[SKIP] 该路径是本地默认值；CI/Linux 请用 MYSQLD_PATH 指定，或让 3306 常驻供复用');
+    process.exit(0);
+  }
   console.log(`[env] 启动 MySQL：${MYSQLD}`);
   // --skip-grant-tables：本机 MySQL 实例的 root 口令未知，而靶场代码里是空口令连。
   // 加这个参数后免密即可连接，**不去改用户的 root 密码**（最小侵入，仅本次进程生效）。
@@ -63,14 +77,20 @@ try {
   await waitPort(5432, 1500);
   console.log('[env] PostgreSQL 已在运行，复用');
 } catch {
-  console.log(`[env] 启动 PostgreSQL：${PG_EXE}`);
-  pgProc = spawn(PG_EXE, ['-D', PG_DATA], { cwd: PG_DATA, stdio: ['ignore', 'ignore', 'ignore'] });
-  pgProc.on('error', (e) => console.error(`[env] postgres 启动失败：${e.message}`));
-  try {
-    await waitPort(5432, 60000);
-    console.log('[env] PostgreSQL 就绪（5432）');
-  } catch {
-    console.warn('[env] PostgreSQL 未就绪：OOB 相关 e2e 将不可用（MySQL 靶场不受影响）');
+  // [CI-FIX 2026-09-21] 同 MySQL：缺二进制就别 spawn + 白等 60 秒（PG_EXE 默认也是 Windows 路径）。
+  // PG 在本靶场是**可选**依赖 —— 缺了只影响 OOB 靶点，MySQL 靶场照常，故只降级告警不退出。
+  if (!existsSync(PG_EXE)) {
+    console.warn(`[env] 未找到 postgres 二进制：${PG_EXE} → 跳过（OOB 相关 e2e 不可用，MySQL 靶场不受影响）`);
+  } else {
+    console.log(`[env] 启动 PostgreSQL：${PG_EXE}`);
+    pgProc = spawn(PG_EXE, ['-D', PG_DATA], { cwd: PG_DATA, stdio: ['ignore', 'ignore', 'ignore'] });
+    pgProc.on('error', (e) => console.error(`[env] postgres 启动失败：${e.message}`));
+    try {
+      await waitPort(5432, 60000);
+      console.log('[env] PostgreSQL 就绪（5432）');
+    } catch {
+      console.warn('[env] PostgreSQL 未就绪：OOB 相关 e2e 将不可用（MySQL 靶场不受影响）');
+    }
   }
 }
 

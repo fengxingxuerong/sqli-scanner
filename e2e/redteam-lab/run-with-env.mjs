@@ -37,17 +37,42 @@ try {
     s.on('connect', () => { s.end(); resolve(true); });
     s.on('error', () => { s.destroy(); resolve(false); });
   });
+  let envOut = '';
+  let envExit = null;
   if (preReady) {
     console.log(`[run-with-env] 复用已就绪的外部常驻靶场 :${LAB_PORT}`);
   } else {
+    // [CI-FIX 2026-09-21] 原先 `stdio: ['ignore','inherit','inherit']` —— 子进程输出直接进本进程
+    // stdout，**本进程读不到内容**。于是 env.mjs 早早判定「本环境没有 mysqld 二进制」并打印
+    // [SKIP] 后 exit 0 时，这里仍在死等 8231 端口直到 90s 超时，把一次「缺依赖跳过」报成
+    // 「redteam-lab ❌ 失败」。改成 pipe：一边转发一边留档，同时监听 exit 以便提前中止等待。
     envProcRef = spawn(process.execPath, ['e2e/redteam-lab/env.mjs'], {
       cwd: ROOT,
       env: { ...process.env, NO_PROXY: '127.0.0.1,localhost' },
-      stdio: ['ignore', 'inherit', 'inherit'],
+      stdio: ['ignore', 'pipe', 'pipe'],
     });
+    envProcRef.stdout.on('data', (d) => { envOut += d; process.stdout.write(d); });
+    envProcRef.stderr.on('data', (d) => { envOut += d; process.stderr.write(d); });
     envStarted = true;
   }
-  await waitPort(LAB_PORT, 90000);
+  const ready = await Promise.race([
+    waitPort(LAB_PORT, 90000).then(() => 'ready'),
+    new Promise((r) => {
+      if (!envProcRef) return; // 外部复用模式：没有本进程拉起的 env 可等
+      envProcRef.on('exit', (c) => { envExit = c ?? 0; r('exit'); });
+    }),
+  ]);
+  if (ready === 'exit') {
+    // 环境进程先于端口就绪而退出：按它**自报的语义**决定是跳过还是失败 ——
+    // 打印过 [SKIP] 就是「本环境缺依赖」（与 run-all 对缺依赖套件的口径一致），
+    // 否则才是真失败。不再用「等端口超时」这种把两种性质混成一个红灯的判法。
+    if (/\[SKIP\]/.test(envOut)) {
+      console.log('[run-with-env] 环境依赖缺失（见上方 [SKIP] 行）→ 本套件按设计跳过');
+      process.exit(0);
+    }
+    console.error(`[run-with-env] 环境进程提前退出（code=${envExit}）且未宣告跳过 → 判失败`);
+    process.exit(envExit || 1);
+  }
   console.log(`[run-with-env] 靶场就绪 :${LAB_PORT}，开始 run-scan`);
   scanCode = await new Promise((resolve) => {
     const p = spawn(process.execPath, ['e2e/redteam-lab/run-scan.mjs', ...(process.argv.slice(2).length ? process.argv.slice(2) : ['r2'])], {

@@ -156,7 +156,8 @@ const runOne = (lab, useSandbox = false) =>
       // 部分套件（如 udf-lab 因 secure_file_priv=NULL）退出码为 0，输出里一行 [SKIP] 就结束了。
       // 旧汇总把它算进「全部通过」—— 15/15 里其实只有 14 个真跑。数字比没有更误导。
       const skipped = code === 0 && /\bSKIP\b/i.test(out);
-      resolve({ code, skipped, ms: Date.now() - t0, hint, sandbox: useSandbox, tail: out.split('\n').filter(Boolean).slice(-3).join('\n') });
+      // [DIAG-FIX 2026-09-21] 保留**完整输出**（原先只留 3 行 tail 且没人打印，见下方失败分支）
+      resolve({ code, skipped, ms: Date.now() - t0, hint, sandbox: useSandbox, tail: out.split('\n').filter(Boolean).slice(-3).join('\n'), full: out });
     });
   });
 
@@ -206,6 +207,32 @@ for (const t of targets) {
   results.push({ name: t.lab.name, ...r });
   const verdict = r.code !== 0 ? `❌ 失败(code=${r.code})` : r.skipped ? '⏭ 跳过（按设计）' : '✅ 通过';
   console.log(`${verdict}  ${(r.ms / 1000).toFixed(1)}s  ${r.hint}`);
+  // [DIAG-FIX 2026-09-21] 失败必须留下现场。
+  // 触发实况：CI 的 e2e-self-contained 里 redteam-lab 报 `❌ 失败(code=1)  90.6s  `（hint 为空），
+  // 子进程输出被整个丢弃 —— 只看到「红了」，看不到「为什么红」，排障等于重新猜。
+  // 与 acceptance.mjs 的 [DIAG-FIX] 同一条纪律：**门禁留不下现场，就等于把缺陷变成不可查**。
+  // hint 只按 /done:|结论|误报|✅|❌|FAIL|PASS/ 抓关键字（各靶场格式不一），
+  // 而「[env] 启动 MySQL：D:/mysql/bin/mysqld.exe」这类**关键线索恰好不匹配**任何关键词。
+  if (r.code !== 0) {
+    const lines = String(r.full || '').split('\n').filter(Boolean);
+    console.log(`   ── ${t.lab.name} 输出末 ${Math.min(lines.length, 40)} 行（共 ${lines.length} 行）──`);
+    for (const l of lines.slice(-40)) console.log(`   │ ${l}`);
+    try {
+      fs.mkdirSync(path.join(ROOT, 'e2e', 'results'), { recursive: true });
+      fs.writeFileSync(
+        path.join(ROOT, 'e2e', 'results', `last-failure-${t.lab.name}.log`),
+        `$ ${t.lab.name}\n退出码：${r.code}\n耗时：${(r.ms / 1000).toFixed(1)}s\n\n${r.full}`
+      );
+      console.log(`   ── 完整现场已落盘：e2e/results/last-failure-${t.lab.name}.log ──`);
+    } catch { /* 现场落盘失败不应改变判定 */ }
+  } else if (r.skipped) {
+    // [DIAG-FIX 2026-09-21] 跳过也必须**说出理由**。
+    // 实测：redteam-lab 因缺 mysqld 二进制跳过时，日志只剩一行 `⏭ 跳过（按设计）`，
+    // 子进程打的 `[SKIP] 未找到 mysqld 二进制：…` 被 hint 的关键字过滤掉了
+    // （hint 只认 /done:|结论|误报|✅|❌|FAIL|PASS/）—— 于是「跳过」等于没说是缺什么。
+    const why = String(r.full || '').split('\n').filter((l) => /\[SKIP\]|skip/i.test(l)).slice(0, 5);
+    for (const l of why) console.log(`   │ ${l.trim()}`);
+  }
 }
 
 console.log('');

@@ -286,6 +286,13 @@ jobs:
             -v /tmp/mysql-fw-lab:/tmp/mysql-fw-lab \
             -v /tmp/mysql-fr-lab:/tmp/mysql-fr-lab \
             mysql:8.0 --secure-file-priv=""
+          # [CI-FIX 2026-09-21] 两个目录由 runner 侧 mkdir 创建（owner=runner uid 1001，模式 755），
+          # 而容器里的 mysqld 以 **mysql 用户（uid 999）** 运行 → 对该目录**没有写权限**。
+          # 症状呈"一绿一红"：fileRead 只需 r（644 的标记文件其他用户可读）→ PASS；
+          # fileWrite 需要对目录 w 才能建新文件 → `INTO OUTFILE` 报 Errcode 13 → 永不落盘。
+          # 这就是 run 35521829228 里 `文件存在=false / via=null` 的最可能成因。
+          # 注意 chmod 作用于**挂载源**（同一 inode），容器内视角同步生效。
+          chmod -R 777 /tmp/mysql-fw-lab /tmp/mysql-fr-lab
       - name: 等待 MySQL 就绪
         run: |
           for i in $(seq 1 60); do
@@ -298,6 +305,26 @@ jobs:
           echo "MySQL 未在 120s 内就绪"
           docker logs mysql-lab | tail -30
           exit 1
+      # [CI-FIX 2026-09-21] 文件写入通道**预检**：用与产品同构的路径先自证「容器内 mysqld
+      # 执行 INTO OUTFILE → 宿主文件系统能看到」，再让 fileWrite 套件去测产品逻辑。
+      # 理由：不隔离通道，通道坏掉会被报成「产品 fileWrite 坏了」—— 这正是本仓反复踩的
+      # 归因错误（§G / ENV-BLOCK 两次）。预检红了 → 一眼知道该查环境；预检绿 → 红灯必是产品。
+      # `docker exec` 默认以容器默认用户（mysql, uid 999）执行，与 mysqld 进程同权限 ——
+      # 这一条正是权限假设的判据：id 会打印 uid，`ls -ld` 会打印目录 owner/模式。
+      - name: 文件写入通道预检（容器写 → 宿主可见）
+        run: |
+          echo "── 诊断：容器内有效用户与挂载目录权限 ──"
+          docker exec mysql-lab id || true
+          docker exec mysql-lab ls -ld /tmp/mysql-fw-lab /tmp/mysql-fw-lab/out || true
+          rm -f /tmp/mysql-fw-lab/out/probe.txt   # INTO OUTFILE 拒绝覆盖已存在文件
+          docker exec mysql-lab mysql -uroot -proot -e \
+            "SELECT 'probe_marker_2026' INTO OUTFILE '/tmp/mysql-fw-lab/out/probe.txt'"
+          test -f /tmp/mysql-fw-lab/out/probe.txt \
+            || { echo "❌ 通道预检失败：容器写出的文件在宿主侧不可见（挂载或权限问题，与产品代码无关）"; exit 1; }
+          grep -q probe_marker_2026 /tmp/mysql-fw-lab/out/probe.txt \
+            || { echo "❌ 通道预检失败：文件内容不含标记"; exit 1; }
+          rm -f /tmp/mysql-fw-lab/out/probe.txt
+          echo "✅ 写入通道预检通过（容器内 mysqld 写得进，宿主侧看得见）"
       - name: 初始化靶场库表
         run: node e2e/real-mysql-lab/init-db.mjs
         env:
