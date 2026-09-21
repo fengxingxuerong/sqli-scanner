@@ -201,3 +201,29 @@ test('OOB 标记唯一：两次检测产生不同 token', async () => {
   const t2 = d._buildOobToken({ scanId: 's1', point: { id: 'p1' } });
   assert.notEqual(t1, t2);
 });
+
+// ── [DNS-LABEL-FIX 2026-09-21] OOB token 必须放得进 DNS 单个标签 ─────────────
+// 根因：token 会被拼成 `{CALLBACK}` 的子域标签（见 _detectOob），而接收端 _handleDns
+// **只取第一个标签**当 token、waitForToken 又是**精确匹配** —— 超 63 字节时目标端 DNS 库
+// 要么拒绝发送、要么被拆/截断，收到的字符串永远不等于完整 token ⇒ **有回连却判未命中**。
+test('OOB token ≤63 字节（DNS 单标签上限）—— 常规规模', () => {
+  const d = new SecondOrderDetector();
+  const t = d._buildOobToken({ scanId: 'a1b2c3d4e5f6', point: { id: 'dec9ec92' } });
+  assert.ok(t.length <= 63, `实际 ${t.length}`);
+  assert.match(t, /^[A-Za-z0-9_-]+$/, 'token 必须是 DNS 安全字符集');
+});
+
+test('★OOB token 遇到超长 scanId/pointId 仍须压到 63 字节内（修复前必然超限）', () => {
+  const d = new SecondOrderDetector();
+  const t = d._buildOobToken({ scanId: 'x'.repeat(60), point: { id: 'y'.repeat(60) } });
+  assert.ok(t.length <= 63, `实际 ${t.length}（超限即静默漏报）`);
+  assert.match(t, /^[A-Za-z0-9_-]+$/);
+});
+
+test('OOB token 压缩后仍保持唯一性（唯一性来自时间戳+随机段，不是长 id）', () => {
+  const d = new SecondOrderDetector();
+  const longCtx = { scanId: 'x'.repeat(60), point: { id: 'y'.repeat(60) } };
+  const set = new Set();
+  for (let i = 0; i < 50; i++) set.add(d._buildOobToken(longCtx));
+  assert.equal(set.size, 50, '50 次生成应互不相同（若把随机段也截掉就会撞）');
+});

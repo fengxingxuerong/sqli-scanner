@@ -287,7 +287,14 @@ export const defaults = {
     triggerUrls: [], // 候选触发页 URL 列表（仅 http/https），可多个；为空则不跑
     refreshCsrf: true, // 存储前是否 GET actionUrl 重抓 CSRF token（应对单次 token 失效）
     negativeControl: true, // 是否做"存良性值→读触发页"阴性对照（多一次写，提高判定置信）
-    oobTrigger: false, // 扩展点：触发判定是否借用 OOB（本期未实现，仅预留开关）
+    // [订正 2026-09-21] ⚠️ 本行原注释写「本期未实现，仅预留开关」——**与实现不符**，
+    // 已被三方引用当成"缺口"（外部优化方案、docs/待办盘点 均据此判"未实现"）。
+    // 事实：二阶 OOB **已落地** —— SecondOrderDetector._detectOob（token 唯一化 + 候选库 +
+    // 轮询回传），配 oobReceiver 的 HTTP/DNS 双通道，并有专门单测
+    // tests/secondOrder.oobTrigger.test.js（命中 / 未回连不误报 / 关闭时回归老路径）。
+    // 默认 false 是**默认关闭（opt-in）**而非"未实现"：开启需 oob.enabled=true 且接收端
+    // 已就绪，否则抛 OOB_DISABLED（见 SecondOrderDetector.js#_detectOob 的守卫）。
+    oobTrigger: false,
     // [sqlmap 对标] --second-url：写入与读取分离的二阶注入。secondUrl 非空时，
     // 触发阶段的读取请求发往 secondUrl 而非原始 triggerUrl（用于"注入存入 A 页面、
     // 回显在 B 页面"的场景）。secondMethod 默认 GET；secondData 为可选请求体。

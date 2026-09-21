@@ -408,7 +408,8 @@ sequenceDiagram
 2. **存储阶段副作用**：每次（存储点×triggerUrl）最多 2 次真实写（探针 + 阴性对照），会在目标留下测试账户/垃圾评论。缓解：`enabled` 默认关 + 告警日志 + 可选 `negativeControl:false` 减少一次写；测试全 mock。
 3. **CSRF token 重放失效**：爬取时捕获的 token 可能单次有效。`_refreshCsrf` 在存储前 GET `actionUrl` 重抓（best-effort）；若 `actionUrl` 不渲染表单或 token 绑会话，仍可能失败——此时存储请求报错，检测器按"存储失败→跳过该点"处理，不误报。列为中风险。
 4. **与一阶流水线共存**：二阶趟在 `_run` 末尾、独立实例、独立 `foundByPoint` 合并，不与 per-point 循环/`break-on-first-hit`/提取互相干扰；二阶命中**不做拖库**（同 oob 仅确认），避免额外副作用。
-5. **OOB 与二阶的关系（扩展点）**：`oobTrigger:false` 默认关。思路——存储阶段改存 OOB 探针（`OOB_PAYLOADS[dbms]`），触发页回显不靠报错而靠 `oobReceiver.waitForToken` 确认；需 `config.oob.enabled` 且 `oobReceiver` 已启动（复用现有 OOB 接收端）。本期不实现，仅预留开关与接口位。
+5. **OOB 与二阶的关系（扩展点 → 已落地）**：`oobTrigger:false` 默认关。实现——存储阶段改存 OOB 探针（`SECOND_ORDER_OOB_PROBES[dbms]`），触发页回显不靠报错而靠 `oobReceiver.waitForToken` 确认；需 `config.oob.enabled` 且 `oobReceiver` 已启动（复用现有 OOB 接收端，未就绪时抛 `OOB_DISABLED`）。
+   **[订正 2026-09-21]** 本条原写「本期不实现，仅预留开关与接口位」——**与实现不符**：已在 `SecondOrderDetector._detectOob` 落地并有专门单测 `tests/secondOrder.oobTrigger.test.js`（命中 / 未回连不误报 / 关闭时回归老路径）。该过期说法曾被外部优化方案与本仓待办盘点同时引用，判成"缺口"。
 6. **风险定级**：二阶 error-echo 确认 → 设 `High`（与 `error` 同级，因其可通过触发页进一步拖取数据）。若团队认为应等同盲注 `Medium`，改 `ReportGenerator.riskOf` 一处即可。
 7. **前端类型同步（超出引擎范围，需后续跟进）**：`payloads.js` 注释提到与前端 `src/shared/types.ts` 的 `TechniqueType` 严格对应（本次 `Grep` 未在 `src/**` 命中该枚举，疑似前端类型尚未落地或命名不同）。要让 UI 暴露"二阶"开关，需前端 `TechniqueType` 追加 `'second_order'` 并在 `scanStore`/配置面板支持 `secondOrder` 配置项——列为**前端跟随任务**，不在本次 server 交付内。
 8. **DBMS 无关性**：触发判定基于 `ERROR_SIG` 报错特征，对未知 DBMS 也能工作（用 `SECOND_ORDER_PROBES`）；已知 `dbms` 时优先用该库 `error` 模板提高命中率。

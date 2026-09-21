@@ -1,5 +1,10 @@
 import { nanoid } from 'nanoid';
 import { Detector } from '../Detector.js';
+
+// DNS 单个标签上限（RFC 1035 §2.3.4）。
+// OOB token 会作为子域标签回连，超长会导致「有回连但精确匹配不上」的静默漏报，
+// 故在 token 生成处显式约束 —— 见 _buildOobToken 的 [DNS-LABEL-FIX] 说明。
+const MAX_DNS_LABEL = 63;
 // [P0-FIX 2026-09-09] 二阶方法白名单 + 出口选项同源
 import { resolveSecondOrderMethod } from '../secondOrderMethod.js';
 import { buildEgressOpts } from '../egressOpts.js';
@@ -212,7 +217,20 @@ export class SecondOrderDetector extends Detector {
     const scanId = String(ctx.scanId || 'noscan').replace(/[^A-Za-z0-9_-]/g, '');
     const pointId = String((ctx.point && ctx.point.id) || 'nopoint').replace(/[^A-Za-z0-9_-]/g, '');
     const ts = Date.now().toString(36); // 时间戳哈希（36 进制）
-    return `${scanId}_${pointId}_${ts}_${nanoid(10)}`;
+    // [DNS-LABEL-FIX 2026-09-21] DNS 单个标签上限 **63 字节**（RFC 1035 §2.3.4）。
+    // 本 token 会被拼成 `{CALLBACK}` 的子域名（见 _detectOob），而接收端 _handleDns
+    // **只取第一个标签**当 token、waitForToken 又是**精确匹配**：
+    //   若 token 超 63 字节 → 目标端 DNS 库要么拒绝发送该查询，要么被拆/截成第一个标签
+    //   → 收到的字符串永远不等于完整 token → **静默漏报**（有回连却判未命中）。
+    // 此前无任何长度约束（grep `63` 在 oobReceiver / OobDetector / 本文件零命中）。
+    // 一阶 OobDetector 用 nanoid(16) 天然安全；二阶把 scanId+pointId+ts 串起来，长度
+    // 取决于上游 id 格式（scanId 现为 nanoid(12)），实测约 41，但**无约束即无保证**。
+    const full = `${scanId}_${pointId}_${ts}_${nanoid(10)}`;
+    if (full.length <= MAX_DNS_LABEL) return full;
+    // 超长：优先保住唯一性来源（时间戳 + 随机段），长 id 退化为片段（仅便于人读定位）
+    const tail = `${ts}_${nanoid(10)}`;
+    const head = `${scanId}_${pointId}`.slice(0, Math.max(1, MAX_DNS_LABEL - tail.length - 1));
+    return `${head}_${tail}`;
   }
 
   /**
