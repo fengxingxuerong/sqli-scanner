@@ -1,6 +1,6 @@
 # 多引擎 tamper A/B（H2 / HSQLDB / Derby）　—　WAF：off（NO_WAF=1）
 
-> 生成：2026-09-20T11:40:43.601Z　｜　引擎：真实 JDBC 引擎（内存库）　｜　本档 WAF：off（NO_WAF=1）
+> 生成：2026-09-21T17:04:22.985Z　｜　引擎：真实 JDBC 引擎（内存库）　｜　本档 WAF：off（NO_WAF=1）
 >
 > **口径必须先看这行**：WAF=on 时 CRS 会把 UNION 哨兵探针整条 403 掉，**版本回显定库通道
 > 根本不会被执行**，所以那一档里的 `dbms=null` 只说明"没定出库"，不能读成"探针在该库上跑不动"。
@@ -8,15 +8,15 @@
 
 | 引擎 | 场景 | tamper off | tamper on | 说明 |
 |---|---|---|---|---|
-| h2 | num | union,error,boolean | union,error,boolean | 检出 |
-| h2 | str | union,error,boolean | union,error,boolean | 检出 |
-| h2 | blind | union,boolean | union,boolean | 检出 |
-| hsqldb | num | union,boolean | union,boolean | 检出 |
-| hsqldb | str | union,boolean | union,boolean | 检出 |
-| hsqldb | blind | union,boolean | union,boolean | 检出 |
-| derby | num | error,boolean | union,error,boolean | 检出 |
-| derby | str | union,error,boolean | error,boolean | 检出 |
-| derby | blind | boolean | union,boolean | 检出 |
+| h2 | num | - | - | 检出 |
+| h2 | str | - | - | 检出 |
+| h2 | blind | - | - | 检出 |
+| hsqldb | num | - | - | 检出 |
+| hsqldb | str | - | - | 检出 |
+| hsqldb | blind | - | - | 检出 |
+| derby | num | - | - | 检出 |
+| derby | str | - | - | 检出 |
+| derby | blind | - | - | 检出 |
 
 安全对照（参数化）：零误报
 
