@@ -860,6 +860,34 @@ process.exit(0);          // ← 漏检 / 误报 / must 未命中，一律退 0
 
 ---
 
+### Z. 注入请求**发送侧**补齐 multipart（✅ 已修 2026-09-22）
+
+**缺口性质**：引擎只能以 urlencoded / JSON 发出注入请求（`buildInjectionRequest` 的 body
+分支就这两条路）。碰到**只吃 multipart** 的目标 → 目标解析不到字段 → 注入值从未进 SQL
+→ **静默 0 检出**，症状与「没洞」无法区分。
+
+⚠️ **易混淆点**：`-r` 的**导入侧**（`requestCollectionParser`）早就支持 multipart ——
+Postman `formdata` 会构造真实报文、设 `Content-Type: multipart/form-data; boundary=...`，
+再交给 `requestFileParser` 提取真实字段名。所以「引擎支持 multipart」的印象来自那里；
+**真正缺的一直是发送侧**。
+
+**修法**：body 分支新增一条 —— 目标请求头声明 `multipart/form-data` 时，按其 boundary
+重建报文（文本字段 + 闭合段），未声明 boundary 时自动生成。
+已知限制：只重建**文本字段**，file 类型字段以空值占位（字段名仍在；注入面在字段名/文本值上，
+对 SQL 注入检测无影响）。
+
+**验证**：
+
+| 层 | 结果 |
+|---|---|
+| 单测 | **5/5**（`server/tests/injection.multipart.test.js`，含 2 条回归：普通表单仍是 urlencoded、JSON 目标仍走 JSON 且点路径叶子被替换） |
+| 缺陷注入 | 让 multipart 分支不可达 → **恰好 3 个 multipart 用例变红**，回归用例不受影响；恢复后 5/5 |
+| 端到端 | pentest-lab 新增 `/mp` 靶点（只接受 multipart，其它 Content-Type 一律 415）+ `verify.mjs` 新增 `mp` 场景 → 由 CI（有 MySQL）真验 |
+
+**过程注**：本机 MySQL 当时没在跑（本地不随便起常驻进程），故端到端交给 CI；
+靶场的 415 分流逻辑已用手工 curl 在本地验证（urlencoded / JSON 均 415，multipart 通）。
+
+
 ## P1 · 实战视角高价值
 
 ### 1. 真实 ModSecurity/Coraza WAF 验证（可执行步骤）

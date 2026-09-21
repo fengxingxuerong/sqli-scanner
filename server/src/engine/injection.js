@@ -83,6 +83,21 @@ export function applyPrefixSuffix(target, point, value) {
 
 // 统一的注入请求构造（url/body/cookie/header 四种注入点）
 // 与 Detector.buildRequest / Extractor._build / DBFingerprinter._build 行为一致，集中维护避免三处漂移。
+// multipart 报文构造（发送侧）：按 RFC 7578 拼文本字段，末段为闭合 boundary。
+// 已知限制：只重建**文本字段**；原请求里的 file 类型字段会以空值占位（字段名仍在），
+// 文件内容不回传 —— 对 SQL 注入检测无影响（注入面在字段名/文本值上）。
+function buildMultipartBody(fields, boundary) {
+  const chunks = [];
+  for (const [k, v] of Object.entries(fields || {})) {
+    chunks.push(`--${boundary}\r\nContent-Disposition: form-data; name="${k}"\r\n\r\n${v ?? ''}\r\n`);
+  }
+  chunks.push(`--${boundary}--\r\n`);
+  return chunks.join('');
+}
+
+// boundary 随机串（纯小写字母数字，避免特殊字符引发解析歧义）
+const nanoidLc = () => Math.random().toString(36).slice(2, 12);
+
 export function buildInjectionRequest(target, point, value) {
   // 先包裹 prefix/suffix（对标 sqlmap --prefix/--suffix），再按注入点位置拼入请求
   const wrapped = applyPrefixSuffix(target, point, value);
@@ -181,11 +196,23 @@ export function buildInjectionRequest(target, point, value) {
     const formValues = point.formValues || {};
     req.data = { ...formValues };
     req.data[point.param] = injected;
-    // [P0-FIX 2026-09-15] 表单点 Content-Type 修正：axios 对对象 data 默认 JSON 序列化，
-    // urlencoded-only 目标（真实 HTML 表单常态）解析不到 body → 注入值从未进 SQL → 全漏检。
-    // 序列化为 urlencoded 并显式声明 Content-Type。JSON API 目标（target.jsonBody 存在）
-    // 保持 axios JSON 序列化（下方 JSON 分支按需重序列化），仅 HTML 表单点走 urlencoded。
-    if (target.jsonBody == null) {
+    // [P1 2026-09-22] multipart 目标：目标请求头声明了 multipart/form-data 时，
+    // 必须以 multipart 形态重建报文 —— 否则发成 urlencoded / JSON，只吃 multipart 的目标
+    // 解析不到字段 → **注入值从未进 SQL → 静默 0 检出**。
+    // （`-r` 导入侧早就能认出 multipart 的字段名，缺的一直是发送侧；靶场 e2e/pentest-lab
+    //  的 `/mp` 把这个缺口钉成了可复现事实。）
+    // 已知限制：只重建**文本字段**；原请求里的 file 类型字段会以空值占位（文件名仍在）。
+    const declaredCt = Object.keys(req.headers).find((k) => /^content-type$/i.test(k));
+    if (declaredCt && /^multipart\/form-data/i.test(req.headers[declaredCt])) {
+      const existing = /boundary=(?:"([^"]+)"|([^;\s]+))/i.exec(req.headers[declaredCt]);
+      const boundary = (existing?.[1] || existing?.[2] || `----SqlScanBoundary${nanoidLc()}`).trim();
+      req.data = buildMultipartBody(req.data, boundary);
+      req.headers['Content-Type'] = `multipart/form-data; boundary=${boundary}`;
+    } else if (target.jsonBody == null) {
+      // [P0-FIX 2026-09-15] 表单点 Content-Type 修正：axios 对对象 data 默认 JSON 序列化，
+      // urlencoded-only 目标（真实 HTML 表单常态）解析不到 body → 注入值从未进 SQL → 全漏检。
+      // 序列化为 urlencoded 并显式声明 Content-Type。JSON API 目标（target.jsonBody 存在）
+      // 保持 axios JSON 序列化（下方 JSON 分支按需重序列化），仅 HTML 表单点走 urlencoded。
       req.data = new URLSearchParams(req.data).toString();
       req.headers['Content-Type'] = 'application/x-www-form-urlencoded';
     }

@@ -4,6 +4,27 @@
 
 ## [Unreleased]
 
+### 新增：注入请求支持以 multipart/form-data 发送（补齐一项真实能力缺口）
+
+**缺口**：引擎此前只能以 **urlencoded 或 JSON** 发出注入请求（`buildInjectionRequest` 的 body
+分支就这两条路）。碰到**只吃 multipart** 的目标 → 目标解析不到字段 → **注入值从未进 SQL
+→ 静默 0 检出**（不报错，属于最危险的一类：症状与"没洞"无法区分）。
+注意：`-r` 导入侧（`requestCollectionParser`）**早就能认出** multipart 的字段名 ——
+真正缺的一直是**发送侧**。
+
+**修法**：目标请求头声明 `multipart/form-data` 时，按其 boundary 重建 multipart 报文
+（文本字段 + 闭合段），未声明 boundary 时自动生成。
+已知限制：只重建**文本字段**，file 类型字段以空值占位（字段名仍在）—— 注入面在字段名/文本值上，
+对 SQL 注入检测无影响。
+
+**验证**：
+- 单测 **5/5**（`server/tests/injection.multipart.test.js`）：multipart 报文契约，
+  外加两条回归（普通表单仍是 urlencoded、JSON 目标仍走 JSON 分支且点路径叶子被替换）。
+- **缺陷注入复验**：让 multipart 分支不可达 → **恰好 3 个 multipart 用例变红**，
+  回归用例不受影响；恢复后 5/5 全绿。
+- 端到端：pentest-lab 新增 `/mp` 靶点（只接受 multipart，其它 Content-Type 一律 415）
+  + `verify.mjs` 新增 `mp` 场景 —— 由 CI（有 MySQL）真验。
+
 ### 修复：acceptance 把"沙箱根本没起来"记成产品 FAIL，且失败现场会过期
 
 全量 `ci:local` 里 `fileWrite` 报 `FAIL 文件落盘=false`，读起来像文件写入被改坏了。真因来自
