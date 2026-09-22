@@ -151,7 +151,13 @@ SYS_QUERIES.ClickHouse = {
   /** @type {(db: string, table: string, cols: string[], limit: number, offset: number, where: string|null) => string} */
   data: (db, table, cols, limit, offset = 0, where = null) => {
     const w = where ? ` WHERE ${where}` : '';
-    return `SELECT arrayStringConcat(groupArray(CONCAT(${escCols(cols, 'ClickHouse')})), CHAR(30)) FROM (SELECT ${escCols(cols, 'ClickHouse')} FROM \`${escBacktick(db)}\`.\`${escBacktick(table)}\`${w} LIMIT ${limit} OFFSET ${offset}) __p`;
+    // [P2 审计修复 2026-09-20] NULL 安全：ClickHouse 的 concat() **任一参数为 NULL 即返回 NULL**，
+    // 而 groupArray 默认**跳过 NULL 元素** → 只要某行任一列为 NULL，该行整行被静默丢弃
+    // （比「列错位」更严重的整行丢失）。逐列包 ifNull(toString(col),'') 兜底；
+    // 显式 toString 是因为 concat 对非 String 类型走隐式序列化（语义等价但更明确）。
+    const args = cols.map((c) => `ifNull(toString(${escCols([c], 'ClickHouse')}),'')`);
+    const concatArgs = `CHAR(31), ${args.join(', CHAR(31), ')}`;
+    return `SELECT arrayStringConcat(groupArray(CONCAT(${concatArgs})), CHAR(30)) FROM (SELECT ${escCols(cols, 'ClickHouse')} FROM \`${escBacktick(db)}\`.\`${escBacktick(table)}\`${w} LIMIT ${limit} OFFSET ${offset}) __p`;
   },
 };
 
@@ -241,7 +247,13 @@ SYS_QUERIES.Firebird = {
   /** @type {(db: string, table: string, cols: string[], limit: number, offset: number, where: string|null) => string} */
   data: (db, table, cols, limit, offset = 0, where = null) => {
     const w = where ? ` WHERE ${where}` : '';
-    return `SELECT list(ASCII_CHAR(31) || ${escCols(cols, 'Firebird').replace(/,/g, ' || ASCII_CHAR(31) || ')}, ASCII_CHAR(30)) FROM (SELECT ${escCols(cols, 'Firebird').replace(/,/g, ' || ASCII_CHAR(31) || ')} FROM "${escDq(table)}"${w} ROWS (${offset + 1}) TO (${offset + limit})) __p`;
+    // [P2 审计修复 2026-09-20] NULL 安全：Firebird 的 || 运算符遇 NULL 即整串变 NULL
+    // （官方手册明示 `'Home ' || 'sweet ' || NULL = NULL`），配合 list() 聚合会**整行静默丢失**。
+    // 原实现用 escCols(...).replace(/,/g,' || ASCII_CHAR(31) || ') 拼列——这正是
+    // DialectSqlBuilder 注释里点名批评的反模式（兜底表达式内部的逗号会被误替换）。
+    // 改用 escColsNNJoin 逐列包 COALESCE(CAST(... AS VARCHAR(4000)),'')，连接符显式传入。
+    const concat = `ASCII_CHAR(31) || ${escColsNNJoin(cols, 'Firebird', ' || ASCII_CHAR(31) || ')}`;
+    return `SELECT list(${concat}, ASCII_CHAR(30)) FROM (SELECT ${escCols(cols, 'Firebird')} FROM "${escDq(table)}"${w} ROWS (${offset + 1}) TO (${offset + limit})) __p`;
   },
 };
 
