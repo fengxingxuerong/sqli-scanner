@@ -29,6 +29,9 @@ import {
   estimatePunctCost,
   SEMANTIC_CATEGORIES,
 } from './semantics.js';
+// [接线 2026-09-23] 复用既有「按画像重排」判据 —— 不重写第二套排序。
+// blockProfile.js 不反向 import 本模块，无循环依赖。
+import { rankChainsByProfile } from '../blockProfile.js';
 
 /**
  * 探针 id → 该探针实际引入的 token（小写，与 semantics 索引的 eliminates 口径对齐）。
@@ -202,6 +205,38 @@ export function mergeCandidateChains(staticChains = [], generatedChains = []) {
     out.push({ vendor: c.vendor || (c.plugins.length ? `bypass:${c.plugins.join('+')}` : 'unknown'), plugins: [...c.plugins] });
   }
   return out;
+}
+
+/**
+ * 画像 → 候选池（`chainVerify` 的接线入口，也是本模块唯一被生产代码调用的函数）。
+ *
+ * 顺序约定（保守回退的核心）：
+ *   ① 先走既有 `rankChainsByProfile` 重排静态推荐链 —— **静态链整体保持在前**；
+ *   ② 再追加定向生成的补充链。
+ *   ⇒ 生成链只在你"挪到后面"的位置生效：新逻辑无效时，前 MAX_CHAINS 条仍与改造前一致。
+ *
+ * 零额外请求：本函数只用已拿到的画像结果做纯计算，不发任何请求；
+ * 请求数由调用方的 MAX_CHAINS 截断决定，与改造前相同。
+ *
+ * @param {Array<{vendor:string, plugins:string[]}>} staticChains wafRecommend 输出
+ * @param {string[]} blockedTokens profileBlockedTokens 的输出（探针 id 列表）
+ * @param {{dbms?:string, maxGenerated?:number}} [opts]
+ * @returns {Array<{vendor:string, plugins:string[]}>}
+ */
+export function buildCandidateChains(staticChains, blockedTokens, opts = {}) {
+  const list = Array.isArray(staticChains)
+    ? staticChains.filter((c) => c && Array.isArray(c.plugins) && c.plugins.length)
+    : [];
+  // 无画像（目标不敏感 / 画像没拿到）→ 原样返回，与改造前逐字一致
+  if (!Array.isArray(blockedTokens) || blockedTokens.length === 0) return list.slice();
+
+  const ranked = rankChainsByProfile(list, blockedTokens);
+  const { chains } = planChainsByProfile({
+    blockedTokens,
+    dbms: opts.dbms || undefined,
+    maxChains: opts.maxGenerated ?? 3,
+  });
+  return mergeCandidateChains(ranked, chains);
 }
 
 /** 供调用方判断某条链是否属于"定向生成"（报告里区分来源） */
