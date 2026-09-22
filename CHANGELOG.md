@@ -4,6 +4,42 @@
 
 ## [Unreleased]
 
+### 新增：payload 声明式 schema 与校验器（E5 第一步 —— 只定义与校验，不切换加载源）
+
+E5（payload 声明式 DSL）是个大改造，按比例分两步。本步**只定义 schema 并校验现有数据，
+不改任何取数路径**：`payloadRegistry.js` 仍是唯一加载源，**零行为变更**。
+
+**为什么必须先做这一步**：直接抽 YAML/JSON 的风险是「schema 与真实数据对不上」—— 681 条里有
+多少可选字段、枚举实际取到哪些值、有没有既成事实的脏数据，不先量清楚就动手，
+切换时只会把问题搬过去再爆一次。
+
+交付 `server/src/engine/payloadSchema.js`：
+
+- 枚举：`TECHNIQUE_VALUES` / `WHERE_VALUES` / `CLAUSE_VALUES` / `POSITION_CLAUSES`
+- 区间：`LEVEL_RANGE`（1-5）/ `RISK_RANGE`（1-3）（沿用 sqlmap 分级约定）
+- 校验：`validatePayloadEntry` —— 结构/枚举越界判 **error**；一致性可疑判 **warning**（不阻塞，
+  避免把「我没理解的合法用法」误判成错误）
+- DSL 化前提：`isJsonSafe`（YAML/JSON 装不下 undefined/函数/Symbol/BigInt）+ `toDslEntry`（往返无损）
+- 防漂移：`KNOWN_FIELDS` —— 数据里出现的字段必须都在清单内，否则 DSL 化会**静默丢字段**
+
+**实测结果（本步的核心产出就是这条判据）**：现有 **681 条全部通过校验**；id **零重复**；
+**全部 JSON-safe**；`toDslEntry` 往返**深相等**；字段**无遗漏**；一致性 warning **0 条**。
+→ **现有数据可被 DSL 无损表达」，把加载源切到 YAML/JSON 具备可行性。**
+
+⚠️ **schema 被真实数据校准了两处**（首版判据太窄，被实测打回）：
+
+1. `where:'position'` 的位置类子句漏了 `update` —— `mssql-bool-update-1` 正是
+   `clause: ['update'], where: 'position'` → 补进 `POSITION_CLAUSES`。
+2. 曾加「boolean 必须有 falseTemplate」的 warning —— **不成立**：boolean 条目有**两种合法形态**，
+   成对型（template + falseTemplate）与**半边型**（template 内容本身就是假值半边，如
+   `mysql-boolean-100` 的 `{ORIG}' AND '1'='2`，配对在上游完成）。单个条目层面无法区分
+   「漏配」与「刻意半边」，加这条只会制造噪声 → 已移除并写明原因。
+
+**验证**：新增 11 例单测；缺陷注入复验（枚举检查短路 → **恰好 1 红**；`KNOWN_FIELDS` 移除
+`boundary` → **恰好 1 红**；撤销后 11/11 绿）；`typecheck`/`eslint`/`arch:guard`/`facts:check` 全绿。
+
+**下一步（本步未做）**：把加载源切到 YAML/JSON —— 属行为变更，需单独评估与靶场验收。
+
 ### 新增：报告「攻击路径」叙事 —— 交付四件套补齐（内联 SVG，离线可用）
 
 方案 §E3 的四件套里 CVSS / PoC 复现包 / 管理层摘要**都已实现**，唯独缺攻击路径叙事：
