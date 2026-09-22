@@ -4,6 +4,45 @@
 
 ## [Unreleased]
 
+### 新增：WAF 对抗的「语义选弹」—— 给既有 tamper 库补机器可用的元数据
+
+**先纠偏**：`docs/全方面优化方案` 原计划新建「语义等价变换库」，核实后确认**它已经存在** ——
+`core/tamper/plugins/` 的 228 个插件已覆盖方案表格里的**每一类**等价变换
+（逻辑算符 `symboliclogical`、比较算符 `equaltolike`/`equaltorlike`/`noequals`/`between`、
+空白 `space2*` 60+、函数等价 `substring2mid`、字符串构造 `hexliterals`/`quote2hex`、
+数字 `scientific`、结构 `misunion`/`0eunion`、版本注释 `versionedkeywords`/`modsecurity*`）。
+照方案再写一份＝重复造轮子，且会立刻与既有链守卫（幂等 / terminal / dbms 过滤）脱节。
+
+**真实缺口是元数据维度**：既有插件只有人类可读的 `description`，没有机器可用的
+「消除哪些 token / 引入哪些 token / 付多少标点代价」。危害有实测证据 ——
+`wafRecommend.js` 记录 `symboliclogical` 在 CRS 下是**负收益**（942120 正则直接含 `&&`/`||`），
+即**收益方向无法从名字推断**，这才是"有弹药没枪法"的成因。
+
+**本次交付**（`core/waf/bypass/semantics.js`，不复制任何变换逻辑）：
+- 语义索引三维度：`eliminates`（字面消失）/ `mutates`（字面仍在但被打散，选弹须排除）/
+  `reducesPunct`（降低最长非词字符连续串）
+- 定向选弹 `selectByAvoiding(黑名单)`：mutates 命中即排除、eliminates 命中即加分、
+  unclassified 在黑名单非空时保守排除；最终交既有 `TamperRegistry.validateChain` 把关
+- 代价度量 `maxNonWordRun`：对齐 CRS 942460「4 连非词字符」的真实判据
+- 启动期完整性断言：索引里写错插件名当场报错（防腐烂，对齐 `assertTamperNames` 既有做法）
+
+**元数据接受机械检验**（新增 14 例，不看人工声明）：每条 `eliminates` 都用插件自身的
+`transform` 实测兑现，且**样本先自检确实含该 token**（防断言空转）。检验当场打回 **3 处错误声明**
+——全部是我写的，不是插件的问题：
+
+| 错误声明 | 事实 | 处置 |
+|---|---|---|
+| `substring2leftright` 消除 substring | 只认 PostgreSQL 的 `SUBSTRING(x FROM y FOR n)` 拼写，**逗号形态空转** | 补 `applicablePattern` + 写明边界 |
+| `dash2hash` 消除 `--` | `1-- -` → `1-- `，`--` **仍在** | 新增 `reducesPunct` 维度（4 连 → 1 连） |
+| `space2span` 消除空格 | 替换文本 `<span> </span>` **本身含空格** | 改按 `mutates` 建模 |
+
+**缺陷注入复验**：注入 A（让 mutates 排除路径真正不可达）+ 注入 B（制造一条不成立的 eliminates）
+→ **恰好 2 条红**（机械检验 / mutates 排除），其余 12 条保持绿 → 恢复 14/14 绿。
+
+**诚实边界**：228 个插件中精标 39、族派生 83、**未分类 106**（不假装全覆盖）；
+`maxNonWordRun` 是**相对指标**（同一目标下比较两套链的优劣），不是 CRS 分值的精确复算
+（本项目已实测 JS 的 `\s` 与 PCRE 存在差异）。
+
 ### 修复：`tamper-waf-matrix` 的空转静音 —— 一个真门禁被 `continue-on-error` 吞掉
 
 该 job 的 `if:` 只允许 `schedule` / `workflow_dispatch` 触发，**根本不在 PR/push 上跑**，
