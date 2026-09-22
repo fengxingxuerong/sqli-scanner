@@ -93,6 +93,36 @@ export const TAMPER_COVERS = {
   randomcase: ['union', 'select', 'and', 'or', 'sleep'],
 };
 
+/**
+ * ⚠️ **未注册条目白名单**（清单腐烂可见化，2026-09-22 核实）
+ *
+ * 上表有 5 个 key 在 `tamperRegistry` 里**不存在**，经全仓 grep 核实它们**从未生效**：
+ * `tamperRegistry.resolve` 对未注册名会告警并跳过，所以链里不可能出现这些名字，
+ * `coveredTokens()` 也就永远收不到它们 → 覆盖声明是空的，且**没有任何门禁会因此变红**。
+ *
+ * 疑似历史笔误（本仓真实插件名放在括号里），但**不猜作者意图、不做无据改名**：
+ *   · `logical_operators`（正确条目 `symboliclogical` 已单独存在 → 此条纯重复）
+ *   · `comment`（注册表有 `comments`，但其真实覆盖 ≠ 本条声明的 comment/hash/space）
+ *   · `versionedcomments`（注册表无此名；`versionedkeywords`/`versionedmorekeywords` 另在）
+ *   · `modsecversionedkeywords`（注册表为 `modsecurityversionedkeywords`，少一个 `i`）
+ *   · `charcode`（注册表为 `charencode`/`chardoubleencode`，均已单独有条目）
+ *
+ * 保留而非删除：**不丢失线索**（将来若引入同名插件即自动生效），且删除/改名都属行为变更，
+ * 需真实 WAF 靶场验收覆盖语义后才做。
+ *
+ * 判据（由 waf.bypassSearcher.test.js 双向守卫，对齐 `ci-local` 的 EXCLUDED_JOBS 做法）：
+ *   ① 上表出现未注册名 → 必须登记在本白名单，否则报错（防新增腐烂被静默吞掉）；
+ *   ② 白名单登记了已注册名 → 同样报错（防白名单自身腐烂）。
+ * @type {string[]}
+ */
+export const UNREGISTERED_COVER_NAMES = [
+  'logical_operators',
+  'comment',
+  'versionedcomments',
+  'modsecversionedkeywords',
+  'charcode',
+];
+
 /** 某条链（插件数组）能消除的 token 并集 */
 export function coveredTokens(plugins) {
   const out = new Set();
