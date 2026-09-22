@@ -32,7 +32,6 @@ import http from 'node:http';
 import https from 'node:https';
 import { SocksProxyAgent } from 'socks-proxy-agent';
 import { URL } from 'url';
-import net from 'node:net';
 import { Agent as UndiciAgent, request as undiciRequest } from 'undici';
 import { defaults } from '../config/defaults.js';
 import { ErrorCode, AppError } from './errors.js';
@@ -143,23 +142,12 @@ function markAgentInsecure(agent) {
 }
 
 /**
- * 解析 insecureTls 生效值：请求级覆盖（opts.insecureTls，供未来按扫描下发）→ 全局默认。
- * 接受 true/1/'true'/'1'（与仓库其它 env 风格一致），其余一律 false。
- * @param {object} [opts] 请求选项
- * @returns {boolean}
+ * [P1-FIX 2026-09-08 ③] 响应体字符集解码
+ * 旧实现 responseType:'text' → axios 无条件按 utf8 解码：GBK/Big5/Shift-JIS/EUC-KR/Windows-1252
+ * 目标（老 Java/ASP/JSP 站极常见）被解成 U+FFFD 且不可逆 —— 中文报错文案丢失、布尔比对出现字节
+ * 碰撞（不同字节序列映射成同一替换符 → 差异消失 → 漏检）、拖库出的中文数据是乱码。
+ * 现在两条通道统一先取原始字节、再按声明字符集解码，对外仍是 string。
  */
-function effectiveInsecureTls(opts) {
-  const v = opts && opts.insecureTls !== undefined ? opts.insecureTls : defaults.insecureTls;
-  return v === true || v === 1 || v === '1' || v === 'true';
-}
-
-// ── [P1-FIX 2026-09-08] 一次性告警（安全语义变更不逐请求刷屏，但必须至少被看见一次）──────────
-
-// ── [P1-FIX 2026-09-08 ③] 响应体字符集解码 ────────────────────────────────────
-// 旧实现 responseType:'text' → axios 无条件按 utf8 解码：GBK/Big5/Shift-JIS/EUC-KR/Windows-1252
-// 目标（老 Java/ASP/JSP 站极常见）被解成 U+FFFD 且不可逆 —— 中文报错文案丢失、布尔比对出现字节
-// 碰撞（不同字节序列映射成同一替换符 → 差异消失 → 漏检）、拖库出的中文数据是乱码。
-// 现在两条通道统一先取原始字节、再按声明字符集解码，对外仍是 string。
 import {
   decompressResponseBody,
   decodeResponseBody,
@@ -235,68 +223,15 @@ import { pickRandomUA } from './http/userAgents.js';
 // 再导出：保持既有 import 路径不变
 export { pickRandomUA } from './http/userAgents.js';
 
-// ── 认证头合并（P2-8：头名黑名单）────────────────────────────────────────────
-// 禁止调用者通过 auth.headers / headerParams 覆写以下头，防止请求走私/虚拟主机绕过
-const FORBIDDEN_HEADERS = new Set([
-  'host',
-  'content-length',
-  'transfer-encoding',
-  'connection',
-  'upgrade',
-  'proxy-connection',
-  'keep-alive',
-  'te',
-  'trailer',
-  'expect',
-]);
-
-/**
- * 合并基础请求头与认证信息（Basic Auth / Cookie / 自定义头），
- * 对 FORBIDDEN_HEADERS 黑名单中的头名做拒绝覆写（防请求走私）。
- * @param {Record<string,string>} headers 基础请求头
- * @param {object} [auth] 认证配置 { basic:{username,password}, cookie, headers }
- * @returns {Record<string,string>} 合并后的请求头
- */
-export function mergeAuthHeaders(headers, auth) {
-  const h = { ...(headers || {}) };
-  // [P0-FIX 2026-09-09] 基础头同样过黑名单。此前只有 `auth.headers` 会被拦，`headers`（调用方
-  // 传入 / 原始请求解析出来的那一份）原样透传 —— 于是 REST 入口的 headerParams 过滤成了唯一防线：
-  // 任何绕过 REST 的路径（库用法、新加的客户端路由）都能把 Transfer-Encoding / Content-Length
-  // 塞进出口，对目标前置代理就是请求走私。Host 留作例外：按 IP 直连 + 改 Host 打 vhost 是合法需求，
-  // 而 REST 入口仍按原策略连 Host 一起拒（那一层面向不可信调用者）。
-  for (const key of Object.keys(h)) {
-    const lk = String(key).toLowerCase();
-    if (lk === 'host') continue;
-    if (FORBIDDEN_HEADERS.has(lk)) {
-      logger.warn(`出口头清洗：忽略调用方设置的传输层头 ${key}（由传输层自行决定，防请求走私）`);
-      delete h[key];
-    }
-  }
-  if (!auth) return h;
-  // [P1-2026-09-14] NTLM 模式不发 Basic 头：NTLM 走自己的三步握手（Type1→Type2→Type3），
-  // 预置 Basic 会 ① 让首请求平白吃一次 401 ② 挡住 Type3 的预附加（已有 Authorization 则不附加）
-  // → 同主机后续请求每次都重走握手（实测复用失效：第二次仍 3 次请求）。
-  const authIsNtlm = auth.type && String(auth.type).toLowerCase() === 'ntlm';
-  if (auth.basic && auth.basic.username != null && !authIsNtlm) {
-    const user = auth.basic.username;
-    const pass = auth.basic.password != null ? auth.basic.password : '';
-    h['Authorization'] = 'Basic ' + Buffer.from(`${user}:${pass}`).toString('base64');
-  }
-  if (auth.cookie) {
-    const existing = h['Cookie'] ? String(h['Cookie']).replace(/;?\s*$/, '') : '';
-    h['Cookie'] = existing ? `${existing}; ${auth.cookie}` : auth.cookie;
-  }
-  if (auth.headers && typeof auth.headers === 'object') {
-    for (const [k, v] of Object.entries(auth.headers)) {
-      if (FORBIDDEN_HEADERS.has(String(k).toLowerCase())) {
-        logger.warn(`合并认证头时忽略禁止覆写的头：${k}`);
-        continue;
-      }
-      h[k] = v;
-    }
-  }
-  return h;
-}
+// ── 认证头合并 / 日志脱敏 / 出口语义：已抽至 core/http/requestContext.js（三期拆分 2026-09-22）
+// 下方 import + re-export 保证既有 import 路径不变（外部模块与测试仍从 httpClient.js 取）。
+import {
+  mergeAuthHeaders,
+  logSafeUrl,
+  effectiveInsecureTls,
+  resolveEgressPolicy,
+} from './http/requestContext.js';
+export { mergeAuthHeaders, logSafeUrl, effectiveInsecureTls, resolveEgressPolicy };
 
 // [P0-FIX] SOCKS/HTTP 代理 Agent 模块级缓存（按 proxyUrl 复用），避免每次请求重建 Agent
 // 造成的 TCP+SOCKS5 握手开销（高量盲注提取下为主导成本）。
@@ -361,23 +296,6 @@ async function applyJitter(wafEvasion) {
   if (wafEvasion && wafEvasion.jitterMs > 0) {
     const ms = Math.floor(Math.random() * wafEvasion.jitterMs);
     await new Promise((resolve) => setTimeout(resolve, ms));
-  }
-}
-
-// 日志安全 URL（P2-5）：仅保留 scheme+host+path，query 值整体打码（防 payload/敏感参数进日志）
-/**
- * 日志安全 URL（P2-5）：仅保留 scheme+host+path，query 整体打码（防 payload/敏感参数进日志）。
- * @param {string} urlString 原始 URL
- * @returns {string} 脱敏后的 URL 字符串
- */
-export function logSafeUrl(urlString) {
-  try {
-    const u = new URL(urlString);
-    u.search = '?...'; // 打码全部 query
-    u.hash = '';
-    return u.toString();
-  } catch {
-    return String(urlString).slice(0, 200);
   }
 }
 
@@ -877,34 +795,9 @@ export class HttpClient {
     }
     // [P1-FIX 2026-09-08 ①②] 先确定本次请求的「出口语义」（代理 / 证书校验 / 目标校验下放），
     // 再据此做 SSRF 校验 —— 顺序很关键：是否走代理决定本地能否解析目标，insecureTls 决定挂哪套 Agent。
-    const insecureTls = effectiveInsecureTls(opts);
+    // [三期拆分 2026-09-22] 该决策整体抽为纯函数 resolveEgressPolicy（含 socks5 本地解析提示）。
+    const { insecureTls, proxyUrl, egress } = resolveEgressPolicy(opts);
     if (insecureTls) warnInsecureTls();
-    // [P1-FIX ②] 代理来源：显式配置 → *PROXY 环境变量（curl/sqlmap 语义）；https:// 代理在此被显式拒绝。
-    // 注意 opts.proxy 为 false 表示「未配置」（调用方统一写 `config.proxy ?? false`），不是「禁用」。
-    const proxySel = resolveProxy(opts.proxy ?? defaults.proxy ?? false, {
-      targetUrl: opts.url,
-      trustProxyEnv: opts.trustProxyEnv ?? defaults.trustProxyEnv !== false,
-      proxyBypassLocal: opts.proxyBypassLocal ?? defaults.proxyBypassLocal !== false,
-    });
-    const egress = {
-      viaProxy: !!proxySel.proxyUrl,
-      proxySource: proxySel.source,
-      insecureTls,
-      ssrfViaProxy: String(opts.ssrfViaProxy ?? defaults.ssrfViaProxy ?? 'auto').toLowerCase(),
-    };
-    // [P1-FIX ②] socks5://（非 socks5h）按协议在**本地**解析目标域名：内网专用 DNS 场景会解析失败，
-    // 这里只提示（不擅改语义 —— 静默升级成远端解析等于替用户改了代理行为）
-    if (egress.viaProxy && opts.url && /^socks5:\/\//i.test(String(proxySel.proxyUrl))) {
-      try {
-        if (!net.isIP(new URL(opts.url).hostname)) {
-          logOnce(
-            'warn',
-            'socks5:// 代理会在本地解析目标域名（解析失败即中断请求）；' +
-              '目标域名仅代理侧可解析时请改用 socks5h://（远端解析）'
-          );
-        }
-      } catch { /* URL 非法交给 SSRF 校验报错 */ }
-    }
     // P0-1：出口统一 SSRF 校验（直连模式 req.sql 无 URL，跳过）
     // [P1-FIX ②] 已走代理且 ssrfViaProxy!=='off' → 解析/严格层判定下放至代理（硬底线段仍无条件拒）
     if (opts.url) {
@@ -936,7 +829,7 @@ export class HttpClient {
           ? null // 不限速：跳过令牌桶
           : this.bucket); // 未配置 → 默认单例桶（defaults.ratePerSec）
     // [P1-FIX ①②] 代理来源已在入口统一解析（含环境变量），insecureTls 一并决定 Agent 组合
-    const proxyConf = buildProxyAgent(/** @type {string} */ (proxySel.proxyUrl), { insecureTls });
+    const proxyConf = buildProxyAgent(/** @type {string} */ (proxyUrl), { insecureTls });
     const disableKA = opts.disableKeepAlive === true || this.disableKeepAlive === true;
     // 头合并（含 P2-8 头名黑名单过滤）
     let headers = mergeAuthHeaders(opts.headers || {}, opts.auth ?? defaults.auth ?? null);
