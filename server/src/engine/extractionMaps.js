@@ -190,22 +190,49 @@ SYS_QUERIES.HSQLDB = {
   /** @type {(db: string, table: string, cols: string[], limit: number, offset: number, where: string|null) => string} */
   data: (db, table, cols, limit, offset = 0, where = null) => {
     const w = where ? ` WHERE ${where}` : '';
-    return `SELECT GROUP_CONCAT(CONCAT_WS(CHAR(31), ${escColsNN(cols, 'HSQLDB')}) SEPARATOR CHAR(30)) FROM (SELECT ${escCols(cols, 'HSQLDB')} FROM \`${escBacktick(table)}\`${w} LIMIT ${limit} OFFSET ${offset}) __p`;
+    // [P2 审计修复 2026-09-22 真引擎实测] HSQLDB 的 GROUP_CONCAT 分隔符**只接受引号字符串字面量**，
+    // 表达式操作数会被语法分析器拒绝：
+    //   SELECT GROUP_CONCAT(NAME SEPARATOR CHAR(30)) ...
+    //   -> unexpected token : CHAR required: a quoted string   （HSQLDB 2.x 原话）
+    // 与 MySQL 的 SEPARATOR_SYM text_string（Bug #64600）是**同一类**限制。
+    // 修法：改用 U&'\001E'（SQL 标准 Unicode 转义字面量，0x1E 记录分隔符）。
+    // 实测 `SEPARATOR U&'\001e'` 产出 `a<RS>b`，`SEPARATOR X'1E'` 仍被拒（HSQLDB 不认 hex 字面量作分隔符）。
+    // 注意 CHAR(31) 在**行表达式里**是可用的（实测 SELECT CHAR(31) 返回 <US>），
+    // 仅 SEPARATOR 的操作数受限——所以只改分隔符，列间拼接符保持 CHAR(31)。
+    // 表引用同样不能用反引号：HSQLDB 实测 `FROM \`users\`` 报语法错/找不到对象。
+    // 改用双引号（与 escCols 的 HSQLDB 分支一致）。
+    return `SELECT GROUP_CONCAT(CONCAT_WS(CHAR(31), ${escColsNN(cols, 'HSQLDB')}) SEPARATOR U&'\\001E') FROM (SELECT ${escCols(cols, 'HSQLDB')} FROM "${escDq(table)}"${w} LIMIT ${limit} OFFSET ${offset}) __p`;
   },
 };
 
-// Derby（D 方向，最小适配）：用 SYS.SYSTABLES / SYS.SYSCOLUMNS 枚举
+// Derby（D 方向，最小适配）：系统表 SYS.SYSTABLES / SYS.SYSCOLUMNS
+// [P2 审计修复 2026-09-22 真引擎实测] Derby 的枚举与拖库**均不可用**，原因是同一个：
+// Derby 没有「多行折成一行字符串」的聚合原语，也没有控制字符函数。
+// Derby 10.16 真 JDBC 实测（e2e/multi-engine-lab，Java 21）：
+//
+//   (1) 字符串聚合函数全部不存在：
+//         SELECT GROUP_CONCAT(name) FROM users  -> 'GROUP_CONCAT' is not recognized as a function or procedure.
+//         SELECT LISTAGG(name, ',') FROM users   -> 'LISTAGG' is not recognized as a function or procedure.
+//         SELECT STRING_AGG(name, ',') FROM users-> 'STRING_AGG' is not recognized as a function or procedure.
+//       SQL/XML 路线 XMLAGG(XMLELEMENT(NAME a, x)) 在本机引擎上逐一被拒：
+//         Encountered "a" / Missing SQL/XML keyword(s) 'AS' / Encountered "e"
+//       → 原模板用 GROUP_CONCAT 拼 TABLENAME / COLUMNNAME，**实测直接报函数不存在**。
+//         （对照：databases 用 `SELECT CURRENT SCHEMA FROM SYSIBM.SYSDUMMY1` **实测 OK** → ["APP"]，
+//           因它只取单值，无需聚合，故保留。）
+//
+//   (2) 控制字符函数不存在 —— CHAR(31) 被解析成**字符串字面量**而非 ASCII 31：
+//         SELECT CHAR(31) FROM users        -> "31         "（11 字符，右填充）
+//         SELECT LENGTH(CAST(CHAR(31) AS VARCHAR(100)))  -> 11
+//       → 行/列分隔符（0x1E/0x1F）在 Derby 上根本造不出来，即使有聚合函数也无法分隔多行多列。
+//
+// 故 tables / columns / data 三项一律降级为 null（与 Access / Informix 同处置）。
+// 调用方 Extractor 已支持 null（枚举走 `?.tables?.(db)` 返回空列表；拖库走 `if (!q0) return []`），
+// 不再出现「标记不支持、运行时抛错」的错配。
 SYS_QUERIES.Derby = {
   databases: "SELECT CURRENT SCHEMA FROM SYSIBM.SYSDUMMY1",
-  tables: () => "SELECT GROUP_CONCAT(TABLENAME) FROM SYS.SYSTABLES WHERE TABLETYPE='T'",
-  /** @type {(db: string, table: string) => string} */
-  columns: (db, table) =>
-    `SELECT GROUP_CONCAT(COLUMNNAME) FROM SYS.SYSCOLUMNS WHERE REFERENCEID=(SELECT TABLEID FROM SYS.SYSTABLES WHERE TABLENAME='${escSql(table)}')`,
-  /** @type {(db: string, table: string, cols: string[], limit: number, offset: number, where: string|null) => string} */
-  data: (db, table, cols, limit, offset = 0, where = null) => {
-    const w = where ? ` WHERE ${where}` : '';
-    return `SELECT GROUP_CONCAT(CONCAT_WS(CHAR(31), ${escColsNN(cols, 'Derby')}), CHAR(30)) FROM (SELECT ${escCols(cols, 'Derby')} FROM "${escDq(table)}"${w} OFFSET ${offset} ROWS FETCH NEXT ${limit} ROWS ONLY) __p`;
-  },
+  tables: null,
+  columns: null,
+  data: null,
 };
 
 // [⑭] 补全 6 库拖库字典（Sybase/Firebird/Informix/H2/Access/MonetDB）

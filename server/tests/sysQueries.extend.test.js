@@ -3,7 +3,8 @@
 //   1) Oracle databases 从 null → 发送含 all_users 的 SQL（可枚举 schema）
 //   2) ClickHouse 全链存在（system.databases / system.tables / system.columns）
 //   3) DB2 全链存在（SYSCAT.TABLES / SYSCAT.COLUMNS）
-//   4) HSQLDB/Derby 全链存在（INFORMATION_SCHEMA / SYS.SYSTABLES）
+//   4) HSQLDB 全链存在（INFORMATION_SCHEMA）；
+//      Derby 经真引擎实测无聚合函数 → tables/columns/data 降级为 null（2026-09-22 修正）
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Extractor } from '../src/engine/Extractor.js';
@@ -83,11 +84,29 @@ test('HSQLDB: enumerateTables 发送 INFORMATION_SCHEMA SQL', async () => {
   assert.ok(getLastSql().includes('INFORMATION_SCHEMA'), '应含 INFORMATION_SCHEMA');
 });
 
-test('Derby: enumerateTables 发送 SYS.SYSTABLES SQL', async () => {
+// [P2 审计修复 2026-09-22 真引擎实测] 原断言是「Derby 的 enumerateTables 应发送
+// SYS.SYSTABLES SQL」——但该 SQL 用的是 `GROUP_CONCAT(TABLENAME)`，而 Derby 10.16 真 JDBC
+// 实测**没有该函数**（`'GROUP_CONCAT' is not recognized as a function or procedure.`；
+// LISTAGG / STRING_AGG 同样不存在）。即原断言锁定的是一个**必然失败**的查询形状，
+// 「测试通过」并不代表能力可用（属本仓 MEMORY「断言太浅=假绿」的同一类问题）。
+// 现改为断言**已实测的真实行为**：Derby 枚举降级为空、且不发任何请求；
+// databases 仍可用（单值查询，无需聚合，实测返回 ["APP"]）。
+test('Derby: enumerateTables 降级为空（无 GROUP_CONCAT，实测不可用）', async () => {
   const { client, getLastSql } = captureClient();
   const ctx = { ...makeCtx('Derby'), httpClient: client };
-  await ex.enumerateTables(ctx, 'APP');
-  assert.ok(getLastSql().includes('SYS.SYSTABLES'), '应含 SYS.SYSTABLES');
+  const r = await ex.enumerateTables(ctx, 'APP');
+  assert.deepEqual(r, [], 'Derby 枚举应诚实降级为空数组');
+  assert.equal(getLastSql(), '', '降级后不应发送任何注入请求（mock 未记录到 SQL）');
+});
+
+test('Derby: enumerateDatabases 仍发送 CURRENT SCHEMA（单值查询，实测可用）', async () => {
+  const { client, getLastSql } = captureClient();
+  const ctx = { ...makeCtx('Derby'), httpClient: client };
+  await ex.enumerateDatabases(ctx);
+  assert.ok(
+    String(getLastSql()).includes('CURRENT SCHEMA'),
+    'Derby 的 databases 实测可用，应保留 CURRENT SCHEMA 查询',
+  );
 });
 
 test('MySQL 回归: enumerateDatabases 发送 information_schema.schemata', async () => {
