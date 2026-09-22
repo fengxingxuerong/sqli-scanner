@@ -20,6 +20,7 @@ const express = _require('express');
 
 const { ScanManager } = await import(pathToFileURL(resolve(ROOT, 'server/src/engine/ScanManager.js')).href);
 const { Extractor } = await import(pathToFileURL(resolve(ROOT, 'server/src/engine/Extractor.js')).href);
+const { connectMssqlOrSkip } = await import(pathToFileURL(resolve(ROOT, 'e2e/lib/dbProbe.mjs')).href);
 
 const PORT = Number(process.env.MSSQL_LAB_PORT) || 8285;
 const SQL_PORT = Number(process.env.MSSQL_TCP_PORT) || 65039;
@@ -27,7 +28,8 @@ const BASE = `http://127.0.0.1:${PORT}`;
 const SQL = { server: '127.0.0.1', port: SQL_PORT, user: 'sa', password: 'SqLi_2026_T!', database: 'sqli_lab_mssql', options: { trustServerCertificate: true, encrypt: false } };
 
 // ---- 基线数据（含中文 / 单引号 / 跳号 ID）----
-const pool = await sql.connect(SQL);
+// [SKIP 出口 2026-09-22] 见 e2e/lib/dbProbe.mjs：环境缺项 → [SKIP] + exit 0，不放水。
+const pool = await connectMssqlOrSkip(sql, SQL);
 try { await pool.request().query(`IF OBJECT_ID('users') IS NULL CREATE TABLE users (id INT PRIMARY KEY, username NVARCHAR(64), email NVARCHAR(128), password NVARCHAR(128), role NVARCHAR(32))`); } catch { /* noop */ }
 const cnt = await pool.request().query('SELECT COUNT(*) n FROM users');
 if (cnt.recordset[0].n === 0) {
