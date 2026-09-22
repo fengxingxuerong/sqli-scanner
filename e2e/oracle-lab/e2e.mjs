@@ -24,13 +24,17 @@ const oracledb = _require('oracledb');
 
 const { ScanManager } = await import(pathToFileURL(resolve(ROOT, 'server/src/engine/ScanManager.js')).href);
 const { Extractor } = await import(pathToFileURL(resolve(ROOT, 'server/src/engine/Extractor.js')).href);
+const { getOracleConnectionOrSkip } = await import(pathToFileURL(resolve(ROOT, 'e2e/lib/dbProbe.mjs')).href);
 
 const PORT = Number(process.env.ORACLE_LAB_PORT) || 8286;
 const BASE = `http://127.0.0.1:${PORT}`;
 const DB = { user: 'SYS', password: 'SqLi_2026_0!', connectString: '127.0.0.1:1521/FREEPDB1', privilege: oracledb.SYSDBA };
 
 // ---- 建表 + 基线（含中文/单引号/跳号）----
-const admin = await oracledb.getConnection(DB);
+// [SKIP 出口 2026-09-22] 本靶场依赖**本机静默安装**的 Oracle 26ai Free，CI 上必然缺项。
+// 原实现直接 getConnection → 连不上抛异常裸退（无第三态），把环境缺项报成产品 FAIL。
+// 统一走 dbProbe：连不上/认证失败 → [SKIP] + exit 0；连上但断言不过 → 仍是 FAIL（不放水）。
+const admin = await getOracleConnectionOrSkip(oracledb, DB);
 try { await admin.execute(`CREATE TABLE users (id NUMBER PRIMARY KEY, username VARCHAR2(64), email VARCHAR2(128), password VARCHAR2(128), role VARCHAR2(32))`); } catch { /* exists */ }
 const cnt = await admin.execute('SELECT COUNT(*) n FROM users');
 if (cnt.rows[0][0] === 0) {

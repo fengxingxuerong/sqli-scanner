@@ -23,6 +23,7 @@ const sql = _require('mssql');
 
 const { ScanManager } = await import(pathToFileURL(resolve(ROOT, 'server/src/engine/ScanManager.js')).href);
 const { Exploiter } = await import(pathToFileURL(resolve(ROOT, 'server/src/engine/Exploiter.js')).href);
+const { connectMssqlOrSkip } = await import(pathToFileURL(resolve(ROOT, 'e2e/lib/dbProbe.mjs')).href);
 
 const PORT = Number(process.env.MSSQL_LAB_PORT) || 8284;
 const SQL_PORT = Number(process.env.MSSQL_TCP_PORT) || 65039;
@@ -30,7 +31,8 @@ const BASE = `http://127.0.0.1:${PORT}`;
 const SQL = { server: '127.0.0.1', port: SQL_PORT, user: 'sa', password: 'SqLi_2026_T!', database: 'sqli_lab_mssql', options: { trustServerCertificate: true, encrypt: false } };
 
 // 前置：MSSQL 可连 + 确认 xp_cmdshell 初始状态
-const admin = await sql.connect(SQL);
+// [SKIP 出口 2026-09-22] 见 e2e/lib/dbProbe.mjs：环境缺项 → [SKIP] + exit 0，不放水。
+const admin = await connectMssqlOrSkip(sql, SQL);
 const xpc = await admin.request().query("SELECT CAST(value_in_use AS INT) AS v FROM sys.configurations WHERE name = 'xp_cmdshell'");
 const initialXp = xpc.recordset[0].v;
 console.log(`[pre] SQL Server @ ${SQL_PORT} | xp_cmdshell 初始 value_in_use=${initialXp}`);
@@ -42,7 +44,9 @@ if (initialXp === 1) {
 
 // 靶场（与 mssql-lab e2e 同款 /num 堆叠注入点）
 const app = _require('express');
-const pool = await sql.connect(SQL);
+// 复用上面已验证过的池：mssql 驱动的 sql.connect 本身是全局单例，
+// 同配置二次调用返回同一池，但**显式复用**才表达出「同一个已探活的连接」这层语义。
+const pool = admin;
 const expressApp = app();
 expressApp.get('/num', async (req, res) => {
   const id = String(req.query.id ?? '1');

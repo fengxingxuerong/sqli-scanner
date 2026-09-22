@@ -22,6 +22,7 @@ const express = _require('express');
 const sql = _require('mssql');
 
 const { ScanManager } = await import(pathToFileURL(resolve(ROOT, 'server/src/engine/ScanManager.js')).href);
+const { connectMssqlOrSkip } = await import(pathToFileURL(resolve(ROOT, 'e2e/lib/dbProbe.mjs')).href);
 
 const PORT = Number(process.env.MSSQL_LAB_PORT) || 8284;
 const SQL_PORT = Number(process.env.MSSQL_TCP_PORT) || 65039;
@@ -29,7 +30,10 @@ const BASE = `http://127.0.0.1:${PORT}`;
 const SQL = { server: '127.0.0.1', port: SQL_PORT, user: 'sa', password: 'SqLi_2026_T!', database: 'sqli_lab_mssql', options: { trustServerCertificate: true, encrypt: false } };
 
 // ---- 数据库就绪 ----
-const pool = await sql.connect(SQL);
+// [SKIP 出口 2026-09-22] 本靶场依赖**本机静默安装**的 SQL Server 2022 Express，CI 上必然缺项。
+// 原实现直接 connect → 连不上抛异常裸退（无第三态），把环境缺项报成产品 FAIL。
+// 统一走 dbProbe：连不上/认证失败 → [SKIP] + exit 0；连上但断言不过 → 仍是 FAIL（不放水）。
+const pool = await connectMssqlOrSkip(sql, SQL);
 try { await pool.request().query(`IF OBJECT_ID('users') IS NULL CREATE TABLE users (id INT PRIMARY KEY, username NVARCHAR(64), email NVARCHAR(128), password NVARCHAR(128), role NVARCHAR(32))`); } catch { /* noop */ }
 const cnt = await pool.request().query('SELECT COUNT(*) n FROM users');
 if (cnt.recordset[0].n === 0) {

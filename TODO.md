@@ -1216,8 +1216,13 @@ services:
 
 - 真实 ModSecurity/Coraza/商业云 WAF 未实测
 - SQL Server `xp_dirtree` / Oracle `UTL_HTTP` OOB 模板未真机验证
-- ⛔ 等级数据库（SQL Server/Oracle/TiDB/DM8 等 11 种）仅有模板适配，结论视为待复核线索
-- fileWrite / UDF / os-shell 为未真机验证的实验能力
+- ⛔ 等级数据库（TiDB/DM8/ClickHouse/DB2/Sybase/Firebird/Informix/Access/MonetDB 共 **9 种**）仅有模板适配，结论视为待复核线索
+  —— **SQL Server 与 Oracle 已于 2026-09-14/15 升级 verified，2026-09-22 补齐产物与版本凭证**，
+  不再属于本行（见 `e2e/mssql-lab/results/VERIFICATION-2026-09-22.md`：4/4 PASS）。
+- fileWrite / UDF / os-shell **均已跑通真机闭环**（fileWrite 见 `npm run acceptance` 的
+  「fileWrite 真闭环」套件；MSSQL os-shell 见 `e2e/mssql-lab/results/last-run-osshell.log`
+  —— xp_cmdshell auto-enable 真实覆盖、回显 marker 命中；UDF 见 `e2e/udf-lab`）。
+  仅**注册表**侧仍为 mock 单测。
 
 ---
 
