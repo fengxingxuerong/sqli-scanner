@@ -21,10 +21,17 @@ import { dynamicBlockFilter } from '../src/core/statsHelper.js';
  * 造"前面有动态块（ts/sid）、后面有静态块（填充 + 结果）"的响应，模拟 /noisy。
  * ⚠️ 必须足够长（多个 64B 块）：若整个响应只占 1 块，加空串后动态块数不会变多，
  * 就观测不到污染 —— 这是我第一版 mock 的错（4 条用例全红就是这么来的）。
+ *
+ * ⚠️ 动态内容必须用**确定性递增序列**，不能用 Date.now()/Math.random()：
+ * 同一毫秒内的两次调用会生成**相同**字符串，于是"两条基线"实际变成"同一条"，
+ * 动态块数就不再随污染翻倍 —— 本地（毫秒边界恰好跨过）绿、CI（Linux 调度更快，
+ * 同毫秒命中）红。测试要的是"每次调用内容不同"这个语义，计数器才是准确表达。
  */
+let noisySeq = 0;
 const noisy = (result) => {
-  const ts = `<div class="ts">${Date.now()}-${Math.random().toString(36).slice(2, 10)}</div>`;
-  const sid = `<div class="sid">session=${Math.random().toString(16).slice(2, 18)}</div>`;
+  const n = ++noisySeq;
+  const ts = `<div class="ts">1700000000${String(n).padStart(4, '0')}-abcd${String(n).padStart(4, '0')}</div>`;
+  const sid = `<div class="sid">session=deadbeef${String(n).padStart(8, '0')}</div>`;
   const pad = `<div class="pad">${'x'.repeat(120)}</div>`;
   return `${ts}${sid}${pad}<p>${result}</p>${pad}`;
 };
