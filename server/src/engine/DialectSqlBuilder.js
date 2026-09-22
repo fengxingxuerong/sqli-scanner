@@ -144,9 +144,11 @@ export function escCols(cols, dialect) {
 // 解析器按索引回填后整行起错位（NULL 后面的值全左移）。实测 MySQL 拖库跨行串列的根因之一。
 // 各方言用 IFNULL/ISNULL/NVL/COALESCE(CAST(col AS …),'') 包一层；未知方言退化为原样（保持旧行为）。
 // 已覆盖方言（与 nnExpr 的 case 列表严格一致）：MySQL/TiDB/MariaDB/HSQLDB/MonetDB、SQLite、
-// PostgreSQL、SQL Server、H2/Derby、Sybase、Oracle/DM8、DB2。
-// [P2 审计修复 2026-09-20] 补 Oracle/DM8（NVL）与 DB2（COALESCE）——此前二者落 default
-// 无 NULL 安全，配合 CONCAT 改造后成为活跃路径（见 extractionMaps 的 data 模板）。
+// PostgreSQL、SQL Server、H2/Derby、Sybase、Oracle/DM8、DB2、ClickHouse、Firebird。
+// [P2 审计修复 2026-09-20] 补 Oracle/DM8（NVL）、DB2（COALESCE）、ClickHouse（ifNull(toString)）、
+// Firebird（COALESCE）——此前这些方言的 data 模板要么无兜底（NULL 列整行丢失），要么落 default。
+// 其中 ClickHouse/Firebird 的 || / concat 是「任一 NULL → 整串 NULL」语义，比 CONCAT_WS
+// 的「跳过 NULL 段」更严重：不只是列错位，而是整行从聚合结果里消失。
 export function escColsNN(cols, dialect) {
   if (!Array.isArray(cols) || cols.length === 0) return '*';
   return cols.map((c) => nnExpr(c, dialect)).join(',');
@@ -185,6 +187,15 @@ function nnExpr(col, dialect) {
       return `NVL(CAST(${id} AS VARCHAR2(4000)),'')`;
     // [P2 审计修复 2026-09-20] 补 DB2 分支：DB2 无 IFNULL/ISNULL/NVL，用标准 COALESCE。
     case 'DB2':
+      return `COALESCE(CAST(${id} AS VARCHAR(4000)),'')`;
+    // [P2 审计修复 2026-09-20] 补 ClickHouse：concat 任一参数为 NULL 即返回 NULL，
+    // 且 groupArray 默认跳过 NULL → 整行丢失。ifNull 是 ClickHouse 的 NULL 兜底函数，
+    // toString 把非 String 列显式转字符串（concat 的隐式序列化等价但语义不直观）。
+    case 'ClickHouse':
+      return `ifNull(toString(${id}),'')`;
+    // [P2 审计修复 2026-09-20] 补 Firebird：|| 遇 NULL 整串变 NULL（官方手册明示），
+    // 配合 list() 聚合会整行丢失；Firebird 无 IFNULL/ISNULL，用标准 COALESCE。
+    case 'Firebird':
       return `COALESCE(CAST(${id} AS VARCHAR(4000)),'')`;
     default:
       return id;

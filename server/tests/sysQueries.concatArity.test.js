@@ -95,3 +95,40 @@ describe('[P2] nnExpr 补 Oracle/DB2 分支（escColsNN 契约）', () => {
     assert.ok(j.includes('|| CHR(31) ||'), 'Join 变体应保留指定连接符');
   });
 });
+
+// ── [P2 审计修复 2026-09-20 第二批] ClickHouse / Firebird 整行丢失 ──────────────
+// 危害比 CONCAT 超限更重：不是「报错」也不是「列错位」，而是**行从结果里静默消失**。
+//   · ClickHouse：concat() 任一参数 NULL → 整个 concat 返回 NULL；groupArray 默认跳过 NULL
+//     → 该行整行不在聚合数组里 → 拖库少行且无任何报错。
+//   · Firebird：'a' || NULL = NULL（官方手册明示）→ list() 聚合时该行整行丢失。
+describe('[P2] ClickHouse/Firebird：NULL 列不得导致整行丢失', () => {
+  const COLS = ['a', 'b', 'c'];
+
+  it('ClickHouse: 每列 ifNull(toString(...)) 兜底，且分隔符保留', () => {
+    const sql = SYS_QUERIES.ClickHouse.data('d', 't', COLS, 10, 0, null);
+    assert.equal((sql.match(/ifNull\(toString\(/g) || []).length, 3, `每列都应 ifNull 兜底: ${sql}`);
+    // 分隔符必须出现在列之间：3 列 → 3 个 CHAR(31)（前缀 1 + 列间 2）
+    assert.equal((sql.match(/CHAR\(31\)/g) || []).length, 3, `列分隔符个数异常: ${sql}`);
+    assert.ok(sql.includes('CHAR(30)'), '行分隔符应为 CHAR(30)');
+    assert.ok(sql.includes('arrayStringConcat(groupArray('), '聚合形态应保持');
+  });
+
+  it('Firebird: 每列 COALESCE 兜底，且不再用 replace 反模式', () => {
+    const sql = SYS_QUERIES.Firebird.data('d', 't', COLS, 10, 0, null);
+    assert.equal((sql.match(/COALESCE\(CAST\(/g) || []).length, 3, `每列都应 COALESCE 兜底: ${sql}`);
+    assert.equal((sql.match(/ASCII_CHAR\(31\)/g) || []).length, 3, `列分隔符个数异常: ${sql}`);
+    assert.ok(sql.includes('ASCII_CHAR(30)'), '行分隔符应为 ASCII_CHAR(30)');
+    assert.ok(sql.includes('list('), 'Firebird 聚合应为 list');
+  });
+
+  it('全 15 个有 data 模板的方言均含 NULL 兜底（防未来的新模板漏包）', () => {
+    const missing = [];
+    for (const db of Object.keys(SYS_QUERIES)) {
+      const d = SYS_QUERIES[db]?.data;
+      if (typeof d !== 'function') continue; // Informix/Access 的 data=null 为有意降级
+      const sql = d('d', 't', COLS, 10, 0, null);
+      if (!/IFNULL\(|ISNULL\(|COALESCE\(|NVL\(|ifNull\(/i.test(sql)) missing.push(db);
+    }
+    assert.deepEqual(missing, [], `以下方言的 data 模板缺 NULL 兜底（NULL 列会丢行/错位）: ${missing.join(', ')}`);
+  });
+});
