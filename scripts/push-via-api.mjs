@@ -45,6 +45,16 @@
  *                                 [--local <sha>] [--base <sha>] [--dry-run] [--force-commit]
  *
  * 退出码：0 = 推送且校验通过；1 = 失败（含校验不通过）。
+ *
+ * ⚠️ 运行时注意（实测）：
+ *   - 全量重建树的 API 往返较慢，**整轮约 2.5 分钟**。在带 2 分钟默认超时的
+ *     非交互执行环境里必须**后台跑**（否则会被 SIGTERM 掐断在半途）。
+ *   - 脚本**幂等**：被掐断后直接重跑即可 —— 远端 HEAD 的树已等于本地树时
+ *     会秒退并打印"内容已同步"。
+ *   - 日志落在 `.push-log.txt`；失败详情落在 `.push-via-api-result.json`。
+ *     两者都在 `.gitignore` 覆盖范围内，勿提交。
+ *   - `refs/remotes/origin/master` 缺失（fetch 不落 ref 的本机故障）与
+ *     `ls-remote` 失败都是**预期噪音**，脚本会自动回退到读 API 取 base。
  */
 import { execFileSync } from 'node:child_process';
 import { writeFileSync } from 'node:fs';

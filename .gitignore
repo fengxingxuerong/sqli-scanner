@@ -18,6 +18,9 @@ src-tauri/externalBin
 /nul
 debug-target.mjs
 live-scan-demo.mjs
+# push-via-api.mjs 的运行产物（日志/结果 JSON），不入库
+.push-log*.txt
+.push-via-api-result.json
 .mock/
 *.bak*
 .trash/
