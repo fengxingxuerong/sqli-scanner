@@ -397,8 +397,15 @@ export const SUB_FN = {
   Access: (e, i) => `mid((${e}),${i},1)`,
   /** @type {(e: string, i: string) => string} */
   HSQLDB: (e, i) => `substring((${e}),${i},1)`,
-  /** @type {(e: string, i: string) => string} */
-  Derby: (e, i) => `substring((${e}) FROM ${i} FOR 1)`,
+  // [P2 审计修复 2026-09-22 真引擎实测] Derby 由 `substring((e) FROM i FOR 1)` 改为 `substr((e),i,1)`。
+  // Derby 10.16 真 JDBC 实测：**`SUBSTRING` 根本不是 Derby 的函数名**（三种写法全部报
+  //   `Syntax error: Encountered "substring"/"SUBSTRING"`）：
+  //     substring((name) FROM 1 FOR 1)  -> Syntax error: Encountered "substring"
+  //     substring((name),1,1)           -> Syntax error: Encountered "substring"
+  //     SUBSTRING((name),1,1)           -> Syntax error: Encountered "SUBSTRING"
+  // 只有 `substr((name),1,1)` 实测返回 [["A"]]。误用会让 Derby 的**布尔盲注数据提取恒失败**
+  // （注意：Derby 的拖库通道 data=null 已诚实降级，但盲注通道是独立可达路径）。
+  Derby: (e, i) => `substr((${e}),${i},1)`,
   /** @type {(e: string, i: string) => string} */
   MonetDB: (e, i) => `substring((${e}),${i},1)`,
 };
@@ -428,8 +435,19 @@ export const ASCII_FN = {
   Access: (c) => `asc(${c})`,
   /** @type {(c: string) => string} */
   HSQLDB: (c) => `ascii(${c})`,
-  /** @type {(c: string) => string} */
-  Derby: (c) => `unicode(${c})`,
+  // [P2 审计修复 2026-09-22 真引擎实测] Derby 原写作 `unicode(c)` —— Derby **没有这个函数**：
+  //   SELECT unicode(substr(name,1,1)) FROM b -> 'UNICODE' is not recognized as a function or procedure.
+  // 且经穷举确认 Derby **不存在任何「字符→码点」函数**（逐个真机实测，全部报
+  //   "is not recognized as a function or procedure"）：ASCII / UNICODE / CODE_POINT / ORD /
+  //   ORDINAL / CHAR_CODE / SYSFUN.ASCII / SYSFUN.UNICODE / SYSFUN.CODE_POINT；
+  //   `CAST(substr(name,1,1) AS INT)` 亦不可行（Invalid character string format for type INTEGER）。
+  // → Derby 的**码点式**二分提取结构性不可用，故显式置 null（结构性不支持，非「未验证」）。
+  // 调用方（blindExtractor）已改为：显式 null **不得回落 MySQL**，直接返回 null 诚实降级。
+  //
+  // 已知可行但**未实施**的替代策略（留档，非本次改动）：Derby 支持字符串比较，
+  //   实测 `substr(name,1,1) >= 'A'` / `< 'a'` / `BETWEEN 'A' AND 'Z'` 均返回布尔值，
+  //   故可改用「字符序二分」而非「码点二分」重写提取循环——属架构级改动，本次不做。
+  Derby: null,
   /** @type {(c: string) => string} */
   MonetDB: (c) => `ascii(${c})`,
 };
