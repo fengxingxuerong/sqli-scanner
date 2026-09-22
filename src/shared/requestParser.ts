@@ -62,6 +62,98 @@ function parseCookiePairs(cookieStr: string): Record<string, string> {
   return out;
 }
 
+// ── 从 body 提取注入字段候选（与 server/src/core/requestFileParser.js 同口径） ──
+// 为什么需要它：params 把 query / urlencoded / multipart / JSON 四个来源混在同一个扁平
+// 对象里，调用方分不清哪个键来自 body、该走哪条通道。bodyFields 只装 body 来源的字段。
+//
+// 四种编码的差异都要认：
+//   · urlencoded  : k=v&k2=v2
+//   · multipart   : 文本字段取值；**文件字段取 filename**（二进制无注入语义，文件名常进 SQL/日志）
+//   · JSON        : 顶层叶子 + 嵌套叶子走点路径
+//   · 其它        : 不猜（旧版对任意含 '=' 的 body 套 urlencoded 启发式，会把 multipart 报文
+//                  整份塌成一个以 boundary 行命名的垃圾键）
+export interface BodyFieldExtraction {
+  params: Record<string, string>; // 与 query 合并后的全量候选（query 优先，不被 body 覆盖）
+  bodyFields: Record<string, string>; // 仅来自 body 的字段
+}
+
+export function extractBodyFields(
+  body: string,
+  contentType: string,
+  params: Record<string, string>,
+): BodyFieldExtraction {
+  const addBody = (k: string, v: string) => {
+    if (k && !(k in bodyFields)) bodyFields[k] = v;
+  };
+  const bodyFields: Record<string, string> = {};
+  if (!body) return { params, bodyFields };
+  const ct = contentType || '';
+
+  if (/application\/x-www-form-urlencoded/i.test(ct)) {
+    try {
+      for (const pair of body.split('&')) {
+        if (!pair) continue;
+        const eq = pair.indexOf('=');
+        if (eq > 0) {
+          const k = decodeURIComponent(pair.slice(0, eq));
+          const v = decodeURIComponent(pair.slice(eq + 1));
+          if (k && !(k in params)) params[k] = v;
+          addBody(k, v);
+        } else {
+          const k = decodeURIComponent(pair);
+          if (k && !(k in params)) params[k] = '';
+          addBody(k, '');
+        }
+      }
+    } catch { /* 解码失败忽略 */ }
+    return { params, bodyFields };
+  }
+
+  if (/multipart\/form-data/i.test(ct)) {
+    const bm = /boundary=(?:"([^"]+)"|([^;\s]+))/i.exec(ct);
+    const boundary = bm ? (bm[1] || bm[2]) : null;
+    if (boundary) {
+      const parts = body.split('--' + boundary);
+      for (const part of parts) {
+        if (!part || part.trim() === '--' || part.trim() === '') continue;
+        const ci = part.indexOf('\n\n');
+        const head = ci >= 0 ? part.slice(0, ci) : part;
+        let val = ci >= 0 ? part.slice(ci + 2) : '';
+        val = val.replace(/\r?\n$/, '').replace(/^\r?\n/, '').replace(/\n+$/, '');
+        const nm = /name="([^"]+)"/i.exec(head);
+        if (!nm) continue;
+        const fn = /filename="([^"]*)"/i.exec(head);
+        if (fn) {
+          if (fn[1] && !(nm[1] in params)) params[nm[1]] = fn[1];
+          if (fn[1]) addBody(nm[1], fn[1]);
+          continue;
+        }
+        if (val && !(nm[1] in params)) params[nm[1]] = val;
+        if (val) addBody(nm[1], val);
+      }
+    }
+    return { params, bodyFields };
+  }
+
+  if (/application\/json/i.test(ct)) {
+    try {
+      const obj = JSON.parse(body);
+      const flat = (o: unknown, prefix: string) => {
+        for (const [k, v] of Object.entries((o ?? {}) as Record<string, unknown>)) {
+          const key = prefix ? prefix + '.' + k : k;
+          if (v !== null && typeof v === 'object') flat(v, key);
+          else {
+            if (!(key in params)) params[key] = String(v);
+            addBody(key, String(v));
+          }
+        }
+      };
+      flat(obj, '');
+    } catch { /* 非 JSON body 原样保留 */ }
+  }
+  return { params, bodyFields };
+}
+
 // ── ① 原始 HTTP 请求 ──
 function detectFromRequest(text: string): DetectedTarget | null {
   const lines = text.split(/\r?\n/);
@@ -159,6 +251,8 @@ export interface ParsedRequest {
   headers: Record<string, string>;
   body: string;
   params: Record<string, string>;
+  /** 仅来自 body 的注入字段（区别于 params 里混入的 query 来源） */
+  bodyFields: Record<string, string>;
   cookieText: string;
   headerText: string;
   bodyText: string;
@@ -214,14 +308,30 @@ export function parseRequestFile(text: string): ParsedRequest | null {
   }
   body = body.trim();
 
+  // body 编码分派：multipart / JSON / urlencoded 三种来源各自提取注入字段。
+  // params 已在上面装了 query 候选，这里把 body 来源的字段并进来（query 优先）。
+  const ctKey = Object.keys(headers).find((k) => k.toLowerCase() === 'content-type');
+  const ctVal = ctKey ? headers[ctKey] : '';
+  const { bodyFields } = extractBodyFields(body, ctVal, params);
+
+  // bodyText 是给表单 body 编辑器用的「可读结构化文本」。multipart 报文不能被
+  // toJsonText 的 `=` 启发式处理（会把整份报文塌成一个垃圾键），因此这里按编码分派：
+  //   · multipart → 用提取出的 bodyFields 重建 JSON（文件字段标出 filename 形态）
+  //   · 其它       → 维持既有 toJsonText 行为（urlencoded / JSON / 原样）
+  const isMultipart = /multipart\/form-data/i.test(ctVal);
+  const bodyText = isMultipart && Object.keys(bodyFields).length
+    ? JSON.stringify(bodyFields, null, 2)
+    : toJsonText(body);
+
   return {
     method: detected.method,
     url: detected.url,
     headers,
     body,
     params,
+    bodyFields,
     cookieText: detected.cookieText,
     headerText: detected.headerText,
-    bodyText: detected.bodyText,
+    bodyText,
   };
 }

@@ -427,14 +427,17 @@ multipart 时用它构造 body，并**删掉那个已经对不上的 Content-Typ
 缺陷注入复验（把 multipart 判定短路）→ 第 1、2 条同时红。
 
 **还剩两条（本批未做，按需排）**
-1. **引擎不支持发送 multipart**（`injection.js`/`httpClient` 里 0 处 FormData/boundary，
-   已核实）。真要覆盖"只吃 multipart 的目标"，得在 body 构造处加一条 multipart 序列化分支
+1. ~~**引擎不支持发送 multipart**~~ —— **✅ 已修 2026-09-22（`dd45522`）**：body 分支已加
+   multipart 序列化（按目标声明的 boundary 重建报文，未声明则自动生成）；动手前先补了
+   `e2e/pentest-lab` 的 `/mp` 靶点 + `mp` 场景，CI 实测 `漏洞场景=11/11`（原 10/10）。
+   原描述留档：真要覆盖"只吃 multipart 的目标"，得在 body 构造处加一条 multipart 序列化分支
    （含 boundary 生成与文件字段回发）。**风险点要认清**：`buildInjectionRequest` 是全项目
    最吃重的函数，五种技术位每条请求都过它，而当前 multipart 的 e2e 覆盖为 0 ——
    动手前应先补一个 multipart 靶场进 `e2e/`，否则改完没有任何东西能证明没改坏别的。
-2. **前端 `src/shared/requestParser.ts` 完全没有 multipart 分支**（0 命中），
-   也就是说在 UI 里粘贴 multipart 抓包，连"字段名"这一步都拿不到，比 CLI 修前更空。
-   与 §L 第 1 条同源：CLI 与 UI 是两套解析实现，口径会各自漂移。
+2. ~~**前端 `src/shared/requestParser.ts` 完全没有 multipart 分支**~~ —— **✅ 已修 2026-09-22**：新增 `extractBodyFields()`，与 `server/src/core/requestFileParser.js` 同口径地分派 urlencoded / multipart / JSON 三种 body 编码；multipart 文本字段进 `params`、文件字段取 `filename`，另出 `bodyFields`（只装 body 来源，供调用方区分通道）。
+   之前 multipart 报文会被 `toJsonText` 的 `=` 启发式塌成一个以 boundary 行命名的垃圾键 —— `bodyText` 现改为按编码分派（multipart 用字段重建 JSON，其它维持原行为）。
+   缺陷注入复验：短路 multipart 分支 → 仅 2 条 multipart 用例红（JSON 用例不受影响，证明分支隔离正确）→ 恢复全绿。
+   原描述留档：
 
 ### P. 版本回显定库在严格类型库上恒失效（✅ HSQLDB **与 Derby 均已修**，2026-09-22 实测确认）
 
@@ -488,7 +491,8 @@ derby   定库=Derby  期望=Derby  ✅
    （3→2）。漏洞照样检出、场景计数不变，但报错通道不再被单独记账——原因是定库成功后
    引擎跳过了那条冗余的报错重探。这是"知道 dbms 之后是否还该报 error 通道"的**策略问题**，
    不是我这次改出来的崩溃，值得单独定口径。
-2. **Derby 仍未识别**。探针本身经真机验证可执行（`'DERBY ' || CAST(COUNT(*) AS CHAR(10))`
+2. ~~**Derby 仍未识别**~~ —— **✅ 已证伪 2026-09-22**：`NO_WAF=1` 档实测 `定库=Derby` 与期望一致
+   （见本条开头「口径更正」）。原描述留档：探针本身经真机验证可执行（`'DERBY ' || CAST(COUNT(*) AS CHAR(10))`
    over `SYS.SYSTABLES` → `"DERBY 24"`，且 Derby 不做 INTEGER→VARCHAR 隐式转换、
    `CAST(.. AS VARCHAR)` 反而报错、只有 `CHAR(n)` 通——都实测踩过），但组合成引擎实发的
    查询后仍 echo=N。下一个待查方向：手测时发现 Derby 对 select 列表里的**裸 `NULL`**
@@ -850,7 +854,7 @@ process.exit(0);          // ← 漏检 / 误报 / must 未命中，一律退 0
 | job | 根因 | 状态 |
 |---|---|---|
 | `lint` | ① 指纹门禁没做 **EOL 规范化**：本机 CRLF / CI LF → 69 文件假报"改动"（同 `git archive` 假阳性那一课，踩了两次）；② 修完指纹后仍红 → **Tauri 在 Linux 编译缺 GTK 系统库**（glib-sys 找不到 glib-2.0.pc → clippy exit 101），本地 Windows 是另一套依赖链 | ✅ 已修（hashFile 规范化 `b64e772` + apt 装 Tauri 依赖），待下轮验证 |
-| `acceptance` | **三个套件各自独立**（靠 `last-failure-*.log` 现场定位）：<br>① **CRS 保真度** = `ERR_MODULE_NOT_FOUND: Cannot find package 'yaml'` —— acceptance job 只跑 `cd server && npm ci`，而 `yaml` 在 **root 的 devDependencies**；本机 node_modules 里早就有它（隐式依赖）→ **已修** `0fbbfaf`<br>② **fileWrite** = 落盘路径写死 Windows：`exploit` 报 `remotePath=D:/tmp/mysql-fw-lab/out/pwned.txt`、`wrote:true` 但 `verified:false` → 容器里按该路径检查不到文件 —— **待修**（跨平台路径）<br>③ **fileRead** = 隔离沙箱 `datadir 未初始化` → BLOCKED（判据语义正确）→ **待决策**：CI 容器起不来沙箱时该套件应算 SKIP 还是继续算失败 |
+| `acceptance` | **三个套件各自独立**（靠 `last-failure-*.log` 现场定位）：<br>① **CRS 保真度** = `ERR_MODULE_NOT_FOUND: Cannot find package 'yaml'` —— acceptance job 只跑 `cd server && npm ci`，而 `yaml` 在 **root 的 devDependencies**；本机 node_modules 里早就有它（隐式依赖）→ **已修** `0fbbfaf`<br>② **fileWrite** = 落盘路径写死 Windows（`remotePath=D:/tmp/...`、`wrote:true` 但 `verified:false`）—— **✅ 已修 2026-09-21（`5e5aa2b`）**：兜底改 `tmpdir()` 派生 + CI docker 挂载卷 + `FILE_WRITE_DIR`<br>③ **fileRead** = 隔离沙箱 `datadir 未初始化` → BLOCKED（判据语义正确）→ **待决策**：CI 容器起不来沙箱时该套件应算 SKIP 还是继续算失败 |
 | `e2e-self-contained` | redteam-lab 跑 90.6s 失败、multi-engine-lab 0.4s 秒败（疑似 CI 容器缺依赖） | ⏳ 待查 |
 
 **过程教训（两条）**：

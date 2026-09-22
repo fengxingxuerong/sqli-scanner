@@ -25,6 +25,34 @@
 - 端到端：pentest-lab 新增 `/mp` 靶点（只接受 multipart，其它 Content-Type 一律 415）
   + `verify.mjs` 新增 `mp` 场景 —— 由 CI（有 MySQL）真验。
 
+### 修复：前端导入 multipart / JSON 抓包拿不到字段名（与上条同源的另一端）
+
+引擎发送侧修好后，UI 的**导入侧**还停在原地：`src/shared/requestParser.ts` 全无 multipart
+分支，粘贴 multipart 抓包时 body 只走 `toJsonText` 的 `=` 启发式 —— 整份报文会被**塌成一个
+以 boundary 行命名的垃圾键**，用户看不到任何真实字段名，比 CLI 修前更空。
+（这与 CLI 是**两套独立解析实现**，口径会各自漂移；服务端 `requestFileParser.js` 早在
+`[MULTIPART-R-FIX 2026-09-20]` 就修过了。）
+
+**修法**：新增 `extractBodyFields()`，与服务端同口径分派三种 body 编码：
+
+| 编码 | 字段提取规则 |
+|---|---|
+| `application/x-www-form-urlencoded` | `k=v&k2=v2` → 键值 |
+| `multipart/form-data` | 文本字段取值；**文件字段取 `filename`**（二进制无注入语义） |
+| `application/json` | 顶层叶子 + 嵌套叶子走点路径 |
+
+同时新增 `bodyFields`（**只装来自 body 的字段**）：`params` 把 query / urlencoded / multipart /
+JSON 四个来源混在同一个扁平对象里，调用方分不清哪个键该走哪条通道。`bodyText` 也改为按编码
+分派 —— multipart 用字段重建 JSON（对用户可读且与引擎的重建口径一致），其它维持原行为。
+
+**验证**：
+- 新增 3 条用例（`src/tests/requestParser.test.ts`），先跑红证明缺口真实 → 实现后 22/22 绿。
+- **缺陷注入复验**：把 multipart 分支短路成不可达 → **恰好 2 条 multipart 用例红**，
+  JSON 用例不受影响（证明分支隔离正确）；恢复后全绿。
+- 关联套件无回归：`targetForm.importRequest` / `targetForm.injectionMark` / `scanWizard` 共 39 例全绿。
+- 门禁：`arch-guard`（337 行，无新增违规）、前后端 `typecheck`、`facts:check`（已重采指纹 +
+  README 数字同步至 318/2425）全通过。
+
 ### 修复：acceptance 把"沙箱根本没起来"记成产品 FAIL，且失败现场会过期
 
 全量 `ci:local` 里 `fileWrite` 报 `FAIL 文件落盘=false`，读起来像文件写入被改坏了。真因来自

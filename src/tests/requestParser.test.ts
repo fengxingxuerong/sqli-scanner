@@ -188,3 +188,77 @@ describe('parseRequestFile', () => {
     expect(parseRequestFile('GET /a HTTP/1.1\r\nX-Only: 1\r\n')).toBeNull();
   });
 });
+
+// ── body 编码分派：与服务端 requestFileParser 同口径 ──
+// 这三条覆盖的是「前端导入 multipart/JSON 抓包拿不到字段名」的缺口：
+// 以前 body 只有 urlencoded 启发式（toJsonText 里的 `=` 猜测），
+// 粘贴 multipart 报文时整份 body 塌成一个以 boundary 行命名的垃圾键。
+describe('parseRequestFile · body 编码分派', () => {
+  it('multipart/form-data：text 字段进 params，文件字段取 filename', () => {
+    const raw = [
+      'POST /upload HTTP/1.1',
+      'Host: up.example.com',
+      'Content-Type: multipart/form-data; boundary=----WebKitFormBoundaryX',
+      '',
+      '------WebKitFormBoundaryX',
+      'Content-Disposition: form-data; name="title"',
+      '',
+      'my report',
+      '------WebKitFormBoundaryX',
+      'Content-Disposition: form-data; name="avatar"; filename="a.png"',
+      'Content-Type: image/png',
+      '',
+      'BINDATA',
+      '------WebKitFormBoundaryX--',
+    ].join('\r\n');
+    const r = parseRequestFile(raw)!;
+    expect(r.method).toBe('POST');
+    expect(r.params.title).toBe('my report');
+    expect(r.params.avatar).toBe('a.png'); // 文件字段值取 filename，不取二进制
+    expect(r.body).toContain('BINDATA'); // body 原样保留，只读提取
+    // bodyFields 只装来自 body 的字段（与 query 来源可区分）
+    expect(r.bodyFields.title).toBe('my report');
+    expect(r.bodyFields.avatar).toBe('a.png');
+  });
+
+  it('multipart 带引号 boundary + 无 boundary → 前者解析、后者不炸', () => {
+    const quoted = [
+      'POST /up HTTP/1.1',
+      'Host: t.example.com',
+      'Content-Type: multipart/form-data; boundary="QB-123"',
+      '',
+      '--QB-123',
+      'Content-Disposition: form-data; name="q"',
+      '',
+      'v1',
+      '--QB-123--',
+    ].join('\r\n');
+    expect(parseRequestFile(quoted)!.params.q).toBe('v1');
+
+    const noB = [
+      'POST /up HTTP/1.1',
+      'Host: t.example.com',
+      'Content-Type: multipart/form-data',
+      '',
+      'garbage',
+    ].join('\r\n');
+    const r = parseRequestFile(noB)!;
+    expect(r.method).toBe('POST');
+    expect('title' in r.params).toBe(false);
+  });
+
+  it('JSON body：顶层叶子并入 params，嵌套走点路径', () => {
+    const raw = [
+      'POST /api/user HTTP/1.1',
+      'Host: api.example.com',
+      'Content-Type: application/json',
+      '',
+      '{"user":{"id":7,"name":"bob"},"role":"admin"}',
+    ].join('\r\n');
+    const r = parseRequestFile(raw)!;
+    expect(r.params['user.id']).toBe('7');
+    expect(r.params['user.name']).toBe('bob');
+    expect(r.params.role).toBe('admin');
+    expect(r.bodyFields['user.id']).toBe('7');
+  });
+});
