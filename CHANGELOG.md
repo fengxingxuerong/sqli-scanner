@@ -39,9 +39,43 @@
 **缺陷注入复验**：注入 A（让 mutates 排除路径真正不可达）+ 注入 B（制造一条不成立的 eliminates）
 → **恰好 2 条红**（机械检验 / mutates 排除），其余 12 条保持绿 → 恢复 14/14 绿。
 
-**诚实边界**：228 个插件中精标 39、族派生 83、**未分类 106**（不假装全覆盖）；
+**诚实边界**：228 个插件中精标 45、族派生 77、**未分类 106**（不假装全覆盖）；
 `maxNonWordRun` 是**相对指标**（同一目标下比较两套链的优劣），不是 CRS 分值的精确复算
 （本项目已实测 JS 的 `\s` 与 PCRE 存在差异）。
+
+### 新增：定向变异搜索器 —— 按被拦词表**组合生成**候选链（A2 的真缺口部分）
+
+**先核实、划清分工**：A2 原计划五步，核实后**前四步已存在**于 `core/waf/`：
+拦截画像（`blockProfile.profileBlockedTokens`）、预算封顶（`maxProbes` / `MAX_CHAINS`）、
+按画像重排（`rankChainsByProfile`）、逐链探针验证（`chainVerify.verifyTamperChains`，
+且已有 `[A2-2026-09-21]` 接线）。→ 新模块**不重复其中任何一条**。
+
+真缺口是：候选**只来自静态推荐表**（`wafRecommend` 的 3 条），所谓"定向"只是"3 条里挑"，
+不是"按黑名单从 228 个插件里组合"。新增 `core/waf/bypass/searcher.js`：
+
+- `planChainsByProfile(被拦词)` → 单插件 + 双插件候选；排序 = 针对性优先 → 覆盖被拦词多者优先 → 标点代价小者优先
+- 兜底弹药（整串编码）**整体排最后** —— 它要求目标做预解码才有意义，不该霸榜（否则等于退回盲试）
+- `mergeCandidateChains` → 静态链**保持首位**（保守回退：新逻辑无效时行为退化回改造前）
+
+**过程中抓到并修复 2 个真实缺陷**（都不是本次新代码引入的）：
+
+| 缺陷 | 事实 | 处置 |
+|---|---|---|
+| `TAMPER_COVERS` 有 **5 条腐烂条目** | `logical_operators` / `comment` / `versionedcomments` / `modsecversionedkeywords` / `charcode` 在注册表里**不存在** → 这些覆盖声明**从出生起就没生效过**，且没有任何门禁会因此变红 | 按本仓「显式登记 + 双向检查」模式引入 `UNREGISTERED_COVER_NAMES` 白名单，测试双向守卫（**不删条目、不猜作者意图改名**） |
+| `selectByAvoiding` 把**清单当链** | 首版对它调了 `validateChain(usable)` —— 那是**链级**判据，`charencode`（terminal）之后的所有插件被静默截断；症状：拦 `and`/`or` 时 `symboliclogical` 整个丢失、候选池只剩编码兜底（选弹形同虚设） | 移除该调用（逐链校验的正确位置在 `searcher` 的 `push()`），并加断言「usable **不得**因含 terminal 插件而被截断」防回归 |
+
+**`eliminatesAll` 又被机械检验打回一次**：首版按族规则 `/encode$/` 给整族声明「整串编码」，
+实测族内 **14 个只有 6 个**成立 —— `htmlencode`（输出 `1&#32;AND&#32;1&#61;1`）、
+`octalencode`、`floatencode`、`doubleencode`、`dbase64encode`、`unhtmlencode` 的关键词原样还在。
+→ 改为**逐条实测精标** 6 个（charencode / chardoubleencode / charunicodeencode /
+charunicodeescape / base64encode / hexentities），并加断言：声明 `eliminatesAll` 的插件
+必须让 AND/UNION/SELECT 明文真的消失。**「从名字推断元数据 = 猜」再次应验。**
+
+**缺陷注入复验**：注入 A（让 `eliminatesAll` 判定不可达）→ **恰好 1 条红**（兜底链测试）；
+注入 B（把清单当链的回归）→ 恰好 1 条红（不得被截断）；两者撤销后 26/26 绿。
+
+**验证**：新增 12 例（T2）+ T1 扩到 14 例；`typecheck:server` ✅ · `eslint` ✅ ·
+`arch:guard` ✅ · `refs:check` ✅；既有 waf/tamper 套件 29/29 无回归。
 
 ### 修复：`tamper-waf-matrix` 的空转静音 —— 一个真门禁被 `continue-on-error` 吞掉
 

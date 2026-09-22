@@ -132,6 +132,31 @@ test('口径：dash2hash 确实降低标点代价（wafRecommend 实测结论的
   assert.equal(after.failed.length, 0, `链中插件抛错：${after.failed.join(',')}`);
 });
 
+test('机械检验：eliminatesAll 声明必须让明文关键词真的消失（整串编码的承诺）', () => {
+  // ⚠️ 这条是为一次真实错误立的防线：首版按族规则 `/encode$/` 给整族声明 eliminatesAll，
+  //    实测族内 14 个只有 6 个成立 —— htmlencode(`1&#32;AND&#32;1&#61;1`) / octalencode /
+  //    floatencode / doubleencode / dbase64encode / unhtmlencode 的关键词原样还在。
+  //    「从名字推断元数据 = 猜」，故改为逐条精标 + 本条机械兑现。
+  const codecs = Object.entries(CORE_SEMANTICS).filter(([, m]) => m.eliminatesAll);
+  assert.ok(codecs.length > 0, '应有若干 eliminatesAll 精标（整串编码族）—— 全空说明维度未被使用');
+  const samples = ['1 AND 1=1', '1 UNION SELECT 1'];
+  const kws = ['and', 'union', 'select'];
+  const problems = [];
+  for (const [name] of codecs) {
+    const plugin = tamperRegistry.get(name);
+    assert.ok(plugin, `${name} 应已注册`);
+    for (const s of samples) {
+      const out = plugin.transform(s, {});
+      for (const kw of kws) {
+        if (new RegExp(`\\b${kw}\\b`, 'i').test(out)) {
+          problems.push(`${name}: 「${kw}」明文仍在 → ${JSON.stringify(out).slice(0, 48)}`);
+        }
+      }
+    }
+  }
+  assert.deepEqual(problems, [], `eliminatesAll 声明不成立：\n  - ${problems.join('\n  - ')}`);
+});
+
 test('机械检验：reducesPunct 声明必须真的降低非词字符连续串（CRS 942460 对抗维度）', () => {
   const reducers = Object.entries(CORE_SEMANTICS).filter(([, m]) => m.reducesPunct);
   assert.ok(reducers.length > 0, '应至少有一条 reducesPunct 声明（dash2hash）—— 全空说明维度未被使用');
@@ -179,10 +204,22 @@ test('选弹：unclassified 在黑名单非空时必须被排除（不认识的�
   assert.equal(r0.dropped.filter((d) => d.reason === 'unclassified').length, 0);
 });
 
-test('选弹：返回的 usable 必须通过既有链守卫（terminal/dbms 语义不在本模块重复实现）', () => {
+test('选弹：usable 里每个名字都已注册，且**不得**因清单含 terminal 插件而被截断', () => {
   const r = selectByAvoiding(['or', 'select']);
-  const validated = tamperRegistry.validateChain(r.usable, {});
-  assert.deepEqual(r.usable, validated.plugins);
+  for (const n of r.usable) {
+    assert.ok(tamperRegistry.get(n), `${n} 未注册，不该出现在 usable 里`);
+  }
+  // ⚠️ 防守回归（2026-09-22 实测踩坑）：曾误把「插件清单」当「链」交给 validateChain，
+  //    而 validateChain 是**链级**判据（terminal 截断语义）→ 第一个 terminal 插件之后
+  //    的所有插件被静默丢弃。症状：拦 and/or 时 symboliclogical 消失，候选池只剩编码兜底。
+  const terminalIdx = r.usable.findIndex((n) => tamperRegistry.get(n)?.terminal);
+  if (terminalIdx >= 0) {
+    assert.ok(
+      r.usable.length > terminalIdx + 1,
+      'usable 清单在 terminal 插件处被截断了（会把 terminal 之后的全部弹药丢掉）',
+    );
+  }
+  assert.ok(r.usable.includes('symboliclogical'), 'symboliclogical 必须仍在清单里（拦 and/or 的核心弹药）');
   assert.ok(Array.isArray(r.dropped));
 });
 

@@ -36,6 +36,9 @@
 //     也是 wafRecommend.js 记录的"减标点方向唯一有效项"。
 //       ⟶ 判据：maxNonWordRun(out) < maxNonWordRun(in)。
 //   ⚠️ 首版曾把 dash2hash 误标为 eliminates:['--']，被机械检验当场打回（`1-- -` → `1-- `）。
+//   · `eliminatesAll`：整串被编码/转义 ⇒ **全部明文关键词一起消失**（不是消除某一个 token）。
+//     编码族（`*encode` / `charunicode*` / `hexentities`）属此类。
+//     ⚠️ 它是**兜底弹药**：目标必须做对应预解码才有效，故选弹时应排在"针对性消除"之后。
 //
 // ■ 口径边界（诚实标注）
 //   - `eliminates` 只声明**可机械验证**的结论（输出中该 token 字面消失），
@@ -80,7 +83,7 @@ export const EVIDENCE = {
  * 手工精标：语义明确、选取价值高的插件。
  * 只写**能被测试机械验证**的字段：`eliminates`（输出中该 token 消失）、
  * `introduces`（新出现的 token）。`note` 为人读依据，不参与判定。
- * @type {Record<string, {category:string, eliminates?:string[], introduces?:string[], mutates?:string[], reducesPunct?:boolean, applicablePattern?:string, evidence?:string, note?:string}>}
+ * @type {Record<string, {category:string, eliminates?:string[], introduces?:string[], mutates?:string[], reducesPunct?:boolean, eliminatesAll?:boolean, applicablePattern?:string, evidence?:string, note?:string}>}
  */
 export const CORE_SEMANTICS = {
   symboliclogical: {
@@ -301,12 +304,46 @@ export const CORE_SEMANTICS = {
     eliminates: [' '],
     introduces: ['\t'],
   },
+
+  // ── 整串编码族（eliminatesAll）：**逐条实测精标**，不靠族规则按名字推 ──
+  // 判据（waf.bypassSemantics/Searcher 测试机械守卫）：应用到含 AND/UNION 的样本后，
+  // 明文关键词必须消失。族内 14 个插件里只有下面 6 个成立（其余 8 个只动特殊字符）。
+  charencode: {
+    category: SEMANTIC_CATEGORIES.ENCODING,
+    eliminatesAll: true,
+    note: '整串 URL 编码（实测明文消失）；TERMINAL —— 其后插件失效',
+  },
+  chardoubleencode: {
+    category: SEMANTIC_CATEGORIES.ENCODING,
+    eliminatesAll: true,
+    note: '双重 URL 编码；TERMINAL',
+  },
+  charunicodeencode: {
+    category: SEMANTIC_CATEGORIES.ENCODING,
+    eliminatesAll: true,
+    note: '字母 → %uXXXX（实测明文消失）',
+  },
+  charunicodeescape: {
+    category: SEMANTIC_CATEGORIES.ENCODING,
+    eliminatesAll: true,
+    note: '字符 → \\uXXXX（实测明文消失）',
+  },
+  base64encode: {
+    category: SEMANTIC_CATEGORIES.ENCODING,
+    eliminatesAll: true,
+    note: '整串 base64（实测明文消失）',
+  },
+  hexentities: {
+    category: SEMANTIC_CATEGORIES.ENCODING,
+    eliminatesAll: true,
+    note: '字符 → &#xHH 十六进制实体（实测明文消失；注意与 htmlencode 的区别 —— 后者只编特殊字符）',
+  },
 };
 
 /**
  * 同构族规则：按插件名前缀/后缀批量派生元数据（避免 60+ 个 space2* 逐条手抄）。
  * 规则只做**形态归类**，不猜收益方向（收益方向一律留空，有实测才手写进 CORE_SEMANTICS）。
- * @type {Array<{test:RegExp, tie:{category:string, eliminates?:string[], introduces?:string[], mutates?:string[], note?:string}}>}
+ * @type {Array<{test:RegExp, tie:{category:string, eliminates?:string[], introduces?:string[], mutates?:string[], eliminatesAll?:boolean, note?:string}}>}
  */
 export const FAMILY_RULES = [
   // space2<X>：空格 → X 形态（60+ 个）
@@ -316,7 +353,20 @@ export const FAMILY_RULES = [
   { test: /^newline2/, tie: { category: SEMANTIC_CATEGORIES.WHITESPACE, eliminates: ['\n'] } },
   { test: /^comment2/, tie: { category: SEMANTIC_CATEGORIES.WHITESPACE, eliminates: ['/**/'] } },
   // char*encode / *escape：传输编码族
-  { test: /encode$|^charunicode|^hexentities|^charencode/, tie: { category: SEMANTIC_CATEGORIES.ENCODING } },
+  // ⚠️ **本族绝不按名字声明 `eliminatesAll`** —— 已实测踩坑：`/encode$/` 看似"整串编码"，
+  //   但族内 14 个插件里只有 6 个真的让明文关键词消失，其余 8 个只动特殊字符：
+  //     明文消失 ✅ charencode / chardoubleencode / charunicodeencode / charunicodeescape
+  //                / base64encode / hexentities
+  //     明文仍在 ❌ htmlencode(`1&#32;AND&#32;1&#61;1`) / dbase64encode / octalencode
+  //                / doubleencode / floatencode / unhtmlencode / apostrophenullencode（后者空转）
+  //   → `eliminatesAll` 一律在 CORE_SEMANTICS 里**逐条精标**，并由测试用真实 transform 兑现。
+  {
+    test: /encode$|^charunicode|^hexentities/,
+    tie: {
+      category: SEMANTIC_CATEGORIES.ENCODING,
+      note: '编码/转义族：是否消除明文取决于实现，不可从名字推断（见 CORE_SEMANTICS 的逐条精标）',
+    },
+  },
   // keyword2<X>：关键词变形
   { test: /^keyword2/, tie: { category: SEMANTIC_CATEGORIES.LEXICAL, mutates: [], note: 'keyword2* 族：关键字形态变形' } },
   // 进制互转：hex2/char2/bin2/dec2/num2/oct2
@@ -409,7 +459,8 @@ export function maxNonWordRun(s) {
  *  - `unclassified` 且目标黑名单非空 → 排除（不认识的不敢用，避免盲试噪声）。
  *
  * @param {string[]} blocked 目标黑名单词表（小写；来自 A2 的拦截画像）
- * @param {{dbms?:string}} [ctx] 目标 DBMS（交由 TamperRegistry 的既有 dbms 守卫复核）
+ * @param {{dbms?:string}} [ctx] 保留参数：dbms 适用性属**链级**判据，请在组装成链后
+ *   交给 `TamperRegistry.validateChain(chain, { dbms })`；本函数不做链级判定（见下方注）
  * @returns {{usable:string[], dropped:Array<{name:string, reason:string}>, boosted:string[]}}
  */
 export function selectByAvoiding(blocked = [], ctx = {}) {
@@ -444,9 +495,14 @@ export function selectByAvoiding(blocked = [], ctx = {}) {
     if (hitEliminates) boosted.push(p.name);
   }
 
-  // 复用既有链守卫做最终把关（幂等/terminal 语义不重复实现）
-  const validated = tamperRegistry.validateChain(usable, ctx);
-  return { usable: validated.plugins, dropped, boosted };
+  // ⚠️ 此处**不得**调用 `tamperRegistry.validateChain(usable, ctx)` —— 已实测踩坑：
+  //    那是**链级**判据（含 `terminal` 截断语义）。把 228 个插件的**清单**当一条链传进去，
+  //    第一个 terminal 插件（如 charencode）之后的所有插件会被**静默截断丢弃**。
+  //    症状：拦 `and`/`or` 时候选池只剩编码兜底，`symboliclogical`（eliminates: and,or）
+  //    因为排在 charencode 之后而被整个丢掉 —— 选弹功能形同虚设。
+  //    ✅ 逐**链**校验的正确位置在 bypass/searcher.js 的 push()（那条路径上输入本来就是链）。
+  //    dbms 适用性同理属链级上下文，故本函数只做"单插件层面"的可用性筛选。
+  return { usable, dropped, boosted };
 }
 
 /**
@@ -484,7 +540,7 @@ export function assertIndexIntegrity() {
   for (const [name, meta] of buildSemanticIndex()) {
     if (meta.source === 'curated') {
       const hasPayload = (meta.eliminates?.length || 0) + (meta.mutates?.length || 0) +
-        (meta.introduces?.length || 0) + (meta.reducesPunct ? 1 : 0);
+        (meta.introduces?.length || 0) + (meta.reducesPunct ? 1 : 0) + (meta.eliminatesAll ? 1 : 0);
       // 允许「纯说明型」条目（只写 note），但必须至少写 note，否则是空壳
       if (!hasPayload && !meta.note) problems.push(`CORE_SEMANTICS.${name} 既无 token 声明也无 note（空壳条目）`);
     }
