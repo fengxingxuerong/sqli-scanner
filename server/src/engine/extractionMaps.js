@@ -534,11 +534,19 @@ ISDBA_QUERY.H2 = null;
 ISDBA_QUERY.MonetDB = null;
 
 // 枚举 schema（表结构/列定义）查询表达式（对标 sqlmap --schema）：
-// 返回列定义元数据（列名、类型、可空、默认值），行分隔符 CHAR(30)，列分隔符 CHAR(31)。
+// 返回列定义元数据（列名、类型、可空、默认值），行分隔符 0x1E/CHAR(30)，列分隔符 CHAR(31)。
 export const SCHEMA_QUERY = {
   /** @type {(db: string, table: string) => string} */
   MySQL: (db, table) =>
-    `SELECT GROUP_CONCAT(COLUMN_NAME,CHAR(31),COLUMN_TYPE,CHAR(31),IS_NULLABLE,CHAR(31),IFNULL(COLUMN_DEFAULT,'NULL') SEPARATOR CHAR(30)) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA='${escSql(db)}' AND TABLE_NAME='${escSql(table)}'`,
+    // [P2 审计修复 2026-09-20] 原写 `SEPARATOR CHAR(30)` —— **MySQL 语法错（1064）**：
+    // MySQL 的 GROUP_CONCAT 分隔符语法节点是 `SEPARATOR_SYM text_string`，**只接受字面量**，
+    // 不接受表达式（MySQL Bug #64600，官方答复「works as designed」；sql_yacc.yy 亦为
+    // `SEPARATOR_SYM text_string`）。实测同库的 SYS_QUERIES.MySQL.data 早已因同一原因
+    // 改用 hex 字面量 0x1E（见本文件 line 33 注释）。→ `enumerateSchema` 在
+    // MySQL/MariaDB/TiDB 上**恒失败返回 null**。此处同样改用 0x1E 字面量。
+    // 注：多 expr 形态 GROUP_CONCAT(a,CHAR(31),b,...) 是合法的——多个 expr 之间用
+    // （默认或指定的）分隔符连接，故选保留该形态表达「列定义用 CHAR(31) 分隔」的语义。
+    `SELECT GROUP_CONCAT(COLUMN_NAME,CHAR(31),COLUMN_TYPE,CHAR(31),IS_NULLABLE,CHAR(31),IFNULL(COLUMN_DEFAULT,'NULL') SEPARATOR 0x1E) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA='${escSql(db)}' AND TABLE_NAME='${escSql(table)}'`,
   /** @type {(db: string, table: string) => string} */
   PostgreSQL: (db, table) =>
     `SELECT string_agg(column_name||' '||data_type||CASE WHEN character_maximum_length IS NOT NULL THEN '('||character_maximum_length||')' ELSE '' END, CHR(30)) FROM information_schema.columns WHERE table_name='${escSql(table)}' AND table_schema='public'`,

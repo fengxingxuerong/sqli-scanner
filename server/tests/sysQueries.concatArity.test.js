@@ -13,7 +13,7 @@
 // 做 NULL 安全（NULL 列若不兜底，该行串长少一段，解析器按 0x1F 切列会整体错位）。
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { SYS_QUERIES } from '../src/engine/extractionMaps.js';
+import { SYS_QUERIES, SCHEMA_QUERY } from '../src/engine/extractionMaps.js';
 
 // 统计 SQL 中每个 CONCAT(...) 调用点的「顶层参数个数」
 function concatArities(sql) {
@@ -130,5 +130,40 @@ describe('[P2] ClickHouse/Firebird：NULL 列不得导致整行丢失', () => {
       if (!/IFNULL\(|ISNULL\(|COALESCE\(|NVL\(|ifNull\(/i.test(sql)) missing.push(db);
     }
     assert.deepEqual(missing, [], `以下方言的 data 模板缺 NULL 兜底（NULL 列会丢行/错位）: ${missing.join(', ')}`);
+  });
+});
+
+// ── [P2 审计修复 2026-09-20 第三批] MySQL SCHEMA_QUERY 的 SEPARATOR 语法错 ──────
+// 缺陷：`... SEPARATOR CHAR(30)` —— MySQL 的 GROUP_CONCAT 分隔符语法节点是
+//   `SEPARATOR_SYM text_string`，**只接受字面量**（MySQL Bug #64600，官方答复
+//   "works as designed"；sql_yacc.yy 同形），传表达式即 **ERROR 1064 语法错误**。
+//   → `enumerateSchema` 在 MySQL / MariaDB / TiDB 上**恒失败返回 null**。
+//   同文件 SYS_QUERIES.MySQL.data 早已因同一原因改用 hex 字面量 0x1E。
+// 注：多 expr 形态 GROUP_CONCAT(a,CHAR(31),b) 合法（多 expr 之间用分隔符连接），保留。
+describe('[P2] MySQL SCHEMA_QUERY：SEPARATOR 不得传表达式', () => {
+  for (const db of ['MySQL', 'MariaDB', 'TiDB']) {
+    it(`${db}: enumerateSchema SQL 不含 \`SEPARATOR CHAR(\` / \`SEPARATOR CHR(\``, () => {
+      const sql = SCHEMA_QUERY[db]('db1', 'users');
+      // 通用判据：SEPARATOR 后面必须是字面量（引号串或 0x.. hex），不能是函数调用
+      assert.doesNotMatch(
+        sql, /SEPARATOR\s+(CHAR|CHR|CONCAT|CONVERT)\s*\(/i,
+        `${db} 的 SEPARATOR 传了表达式 → MySQL 1064 语法错，enumerateSchema 恒失败: ${sql}`,
+      );
+      assert.match(sql, /SEPARATOR\s+0x1E\b/i, `${db} 行分隔符应为 hex 字面量 0x1E: ${sql}`);
+      // 该形态本身必须仍在（防顺手改坏）
+      assert.ok(sql.includes('information_schema.COLUMNS'), '应仍查 information_schema.COLUMNS');
+      assert.ok(sql.includes('COLUMN_NAME') && sql.includes('COLUMN_TYPE'), '字段列表不应丢');
+    });
+  }
+
+  it('全局：任何方言的 SCHEMA_QUERY 都不得用函数调用作 SEPARATOR', () => {
+    const bad = [];
+    for (const db of Object.keys(SCHEMA_QUERY)) {
+      const q = SCHEMA_QUERY[db];
+      if (typeof q !== 'function') continue;
+      const sql = q('db1', 'users');
+      if (/SEPARATOR\s+\w+\s*\(/i.test(sql)) bad.push(db + ' :: ' + sql.slice(0, 70));
+    }
+    assert.deepEqual(bad, [], `以下方言 SCHEMA_QUERY 的 SEPARATOR 用了表达式（MySQL 系直接 1064）:\n${bad.join('\n')}`);
   });
 });
