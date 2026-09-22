@@ -121,7 +121,13 @@ export const SYS_QUERIES = {
       const w = where ? ` WHERE ${where}` : '';
       // [P0-FIX 2026-09-09] 先对源表行做 ROWNUM 分页，再对取到的行聚合。
       // 旧实现对聚合结果套 ROWNUM（恒 1 行）：offset>0 恒空、limit>1 无意义。
-      const inner = `SELECT CONCAT(CHR(31), ${escCols(cols, 'Oracle')}) AS r FROM "${escDq(table)}"${w}`;
+      // [P2 审计修复 2026-09-20] 原用 CONCAT(CHR(31), <多列>) 拼列——Oracle 的 CONCAT
+      // **恰好接受 2 个参数**，列数 ≥2 时第三个参数起直接 ORA-00909（实测 cols=["a","b"]
+      // 生成 CONCAT(CHR(31), "a","b")）→ 拖库对多列表恒报错。改用 Oracle 的 || 运算符
+      // 逐列拼接（无参数上限），并经 escColsNNJoin 逐列包 NVL(CAST(... AS VARCHAR2(4000)),'')
+      // 做 NULL 安全——列值含 NULL 时若不兜底会整段丢失，解析器按 0x1F 切列将错位。
+      const concat = `CHR(31) || ${escColsNNJoin(cols, 'Oracle', ' || CHR(31) || ')}`;
+      const inner = `SELECT ${concat} AS r FROM "${escDq(table)}"${w}`;
       const src = offset > 0
         ? `SELECT r FROM (SELECT x.*, ROWNUM rnum FROM (${inner}) x WHERE ROWNUM <= ${offset + limit}) WHERE rnum > ${offset}`
         : `SELECT r FROM (${inner}) WHERE ROWNUM <= ${limit}`;
@@ -159,7 +165,12 @@ SYS_QUERIES.DB2 = {
   /** @type {(db: string, table: string, cols: string[], limit: number, offset: number, where: string|null) => string} */
   data: (db, table, cols, limit, offset = 0, where = null) => {
     const w = where ? ` WHERE ${where}` : '';
-    return `SELECT listagg(CONCAT(CHAR(31), ${escCols(cols, 'DB2')}), CHAR(30)) FROM (SELECT ${escCols(cols, 'DB2')} FROM "${escDq(table)}"${w} LIMIT ${limit} OFFSET ${offset}) __p`;
+    // [P2 审计修复 2026-09-20] 同上：DB2 的 CONCAT **只接受 2 个参数**（与 MySQL 的变参
+    // CONCAT 不同），原 CONCAT(CHAR(31), <多列>) 在列数 ≥2 时参数超限报错 → 拖库恒失败。
+    // 改用 DB2 支持的 || 运算符逐列拼接，并经 escColsNNJoin 包 COALESCE(CAST(... AS VARCHAR(4000)),'')
+    // 做 NULL 安全（DB2 无 IFNULL/NVL，标准 COALESCE 可用）。
+    const concat = `CHAR(31) || ${escColsNNJoin(cols, 'DB2', ' || CHAR(31) || ')}`;
+    return `SELECT listagg(${concat}, CHAR(30)) FROM (SELECT ${escCols(cols, 'DB2')} FROM "${escDq(table)}"${w} LIMIT ${limit} OFFSET ${offset}) __p`;
   },
 };
 
