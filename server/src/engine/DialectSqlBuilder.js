@@ -126,8 +126,27 @@ export function escCols(cols, dialect) {
   const wrap = (c) => {
     const safe = String(c).replace(/[`"\[\]]/g, ''); // 去除标识符边界符
     switch (dialect) {
-      case 'MySQL': case 'TiDB': case 'MariaDB': case 'ClickHouse': case 'HSQLDB': case 'MonetDB':
+      case 'MySQL': case 'TiDB': case 'MariaDB': case 'ClickHouse':
         return '`' + safe + '`';
+      // [P2 审计修复 2026-09-22 真引擎实测] HSQLDB 从反引号组移出。
+      // HSQLDB 默认（jdbc:hsqldb:mem:，无 MySQL 兼容模式）**不接受反引号标识符**：
+      //   SELECT `ID` FROM `T5`  -> unexpected token:
+      //   SELECT GROUP_CONCAT(CONCAT_WS(CHAR(31), `ID`, `NAME`) ...) -> unexpected token : required: ,
+      // 双引号标识符实测可用（"ID"/"T5"）。误归反引号组会让 HSQLDB 上**所有**列/表引用语法错，
+      // 连带拖库、枚举全通道失效——不是单点问题。
+      case 'HSQLDB':
+      // [P2 审计修复 2026-09-22 文档取证] MonetDB 同样从反引号组移出（与 HSQLDB 同类）。
+      // 证据：MonetDB 官方手册《Lexical Structure》「Identifiers and Keywords」一节明确：
+      //   「Users can overrule the interpretation of an identifier as a keyword by
+      //    encapsulation with **double quotes**」「unless **encapsulated by double quotes**」
+      //   —— 引号标识符在 MonetDB 词法里**只有双引号**一种形态，未定义反引号。
+      // 内部矛盾佐证（无需引擎即可静态发现）：同一条 data 模板里
+      //   表引用走 tableRef → `"users"`（双引号），列引用走 escCols → `` `id` ``（反引号）
+      //   ——同一语句两种引号策略，至少有一种必错；tableRef 的双引号与官方手册一致，
+      //   故判定 escCols 的反引号是错的。
+      // 诚实边界：本机**无 MonetDB 引擎**（且无 Docker），此项**未经真机执行验证**，
+      //   结论仅基于官方文档 + 静态自洽性。若日后接入 MonetDB 真引擎须复验。
+      case 'MonetDB':
       case 'PostgreSQL': case 'SQLite': case 'Oracle': case 'DM8': case 'DB2': case 'Derby': case 'Firebird': case 'H2':
         return '"' + safe + '"';
       case 'SQL Server': case 'Access': case 'Sybase':
@@ -165,7 +184,13 @@ export function escColsNNJoin(cols, dialect, sep) {
 function nnExpr(col, dialect) {
   const id = escCols([col], dialect);
   switch (dialect) {
-    case 'MySQL': case 'TiDB': case 'MariaDB': case 'HSQLDB': case 'MonetDB':
+    case 'MySQL': case 'TiDB': case 'MariaDB': case 'MonetDB':
+      return `IFNULL(CAST(${id} AS CHAR),'')`;
+    // [P2 审计修复 2026-09-22] HSQLDB 从 MySQL 组合并出（escCols 已把其引号切到双引号）。
+    // 兜底函数仍是 IFNULL + CAST(x AS CHAR)：HSQLDB 实测两者都可用
+    //   SELECT IFNULL(CAST(ID AS CHAR),'') FROM T2 -> [["1"],["2"]]  （OK）
+    // 与 MySQL 组合并的原因仅是引号策略不同，NULL 兜底语义完全一致，故表达式不变。
+    case 'HSQLDB':
       return `IFNULL(CAST(${id} AS CHAR),'')`;
     case 'SQLite':
       return `IFNULL(CAST(${id} AS TEXT),'')`;
@@ -175,8 +200,17 @@ function nnExpr(col, dialect) {
     case 'SQL Server':
       // MSSQL concat_ws 对 NULL 的处理是跳过（与 PG 一致），ISNULL 兜底；nvarchar(max) 防 TRUNC
       return `ISNULL(CAST(${id} AS nvarchar(max)),'')`;
-    case 'H2': case 'Derby':
+    case 'H2':
       return `IFNULL(CAST(${id} AS VARCHAR),'')`;
+    // [P2 审计修复 2026-09-22 真引擎实测] Derby 从 H2 分支拆出。三处修正：
+    //   ① CAST(x AS VARCHAR) 无长度 → Derby 拒绝：`Syntax error: Encountered ")"`
+    //   ② IFNULL(CAST(x AS VARCHAR(4000)),'') → Derby 拒绝：`Cannot convert types 'INTEGER' to 'VARCHAR'`
+    //      （Derby 把 VARCHAR 视为「需定长声明」的字符串类型，对 INTEGER 的转换须走 CHAR）
+    //   ③ COALESCE(CAST(x AS VARCHAR(4000)),'') → Derby **实测通过**，返回 [["a"],[""]]
+    // 故改用 COALESCE + 显式长度。COALESCE 在 H2/Derby 都可用，但因 H2 分支已实测通过
+    // （IFNULL+无长度，H2 宽容），保持不动以缩小改动面——H2 的 `CAST(x AS VARCHAR)` 实测 OK。
+    case 'Derby':
+      return `COALESCE(CAST(${id} AS VARCHAR(4000)),'')`;
     case 'Sybase':
       return `ISNULL(CAST(${id} AS VARCHAR(4000)),'')`;
     // [P2 审计修复 2026-09-20] 补 Oracle/DM8 分支：此前落到 default（无 NULL 安全），
@@ -211,23 +245,44 @@ export function tableRef(edb, db, table) {
       return `\`${escBacktick(db)}\`.\`${escBacktick(t)}\``;
     case 'SQL Server':
       return `[${escBracket(t)}]`;
-    case 'HSQLDB':
-      return `\`${escBacktick(t)}\``;
+    // [P2 审计修复 2026-09-22] HSQLDB 表引用由反引号改双引号（与 escCols 同步）。
+    // 原实现返回 `\`${t}\``，而 HSQLDB（无 MySQL 兼容模式）实测拒绝反引号 → 表名解析失败。
+    // 落到 default 分支即可得到双引号形态，故此处直接删除 HSQLDB 特例。
     default:
       return `"${escDq(t)}"`;
   }
 }
 
 // 列名引号适配（Exploiter 原有实现，改用统一 resolveDbms）
-// MySQL/MariaDB/SQLite 用反引号，其余（PG/SQLServer/Oracle）用双引号
+// [P2 审计修复 2026-09-22] 原实现只区分「PG/SQL Server/Oracle → 双引号，其余 → 反引号」，
+// 把 H2/HSQLDB/Derby/DB2/ClickHouse/Firebird/Informix/MonetDB/Sybase/Access 全部误落反引号。
+// HSQLDB 真引擎实测反引号**语法错**（unexpected token），双引号可用 → 该默认分支会让
+// buildStackPageSql 在 HSQLDB 上必然失败（复验时正是这样暴露出来的）。
+//
+// 注意：不能直接委托 escCols —— 两者策略有两处历史差异，且都有既有测试锁定：
+//   · SQL Server：escCols 用 [..] 方括号，此处用双引号（dumpRowSplit.sqlshape.test.js 锁定）
+//   · SQLite    ：escCols 用双引号，此处用反引号（dialectSqlBuilder.test.js 锁定）
+// 两组写法在各自引擎中都合法（T-SQL 认双引号；SQLite 同时认反引号/双引号/方括号），
+// 改它们属**无收益的行为漂移**。按最小改动原则：仅把原本就错的方言（HSQLDB 及
+// 所有落进「其余 → 反引号」分支的非 MySQL 库）修正为双引号，其余保持既有契约。
 export function quoteCol(c, db) {
-  const dq = ['PostgreSQL', 'SQL Server', 'Oracle'].includes(resolveDbms(db));
-  return dq ? `"${c}"` : `\`${c}\``;
+  const dbms = resolveDbms(db);
+  // MySQL 家族 + SQLite：保留反引号（SQLite 实测/官方均接受反引号，既有测试已锁定）
+  if (dbms === 'MySQL' || dbms === 'MariaDB' || dbms === 'TiDB' || dbms === 'SQLite') {
+    return '`' + c + '`';
+  }
+  // 其余一律双引号。原实现只对 PG/SQL Server/Oracle 双引号，把 HSQLDB/H2/Derby/DB2/
+  // ClickHouse/Firebird/Informix/MonetDB/Access/DM8 全部误落反引号 —— 其中 HSQLDB
+  // 已由真引擎实测证明反引号是**语法错**（unexpected token），双引号可用。
+  return '"' + c + '"';
 }
 
 // [P0-FIX 2026-09-09] CONCAT_WS 专用的 NULL 安全列引用（与 escColsNN 同一问题的堆叠路径版）。
 // Exploiter.buildStackPageSql 生成 `GROUP_CONCAT(CONCAT_WS(CHAR(31), …) SEPARATOR …)` 时，
 // 行中 NULL 列会让 concat_ws 跳过该段 → 解析按索引回填后整行左移错位。
+// [P2 审计修复 2026-09-22] default 分支的注释原写作「MySQL/TiDB/MariaDB/H2/HSQLDB 系」，
+// 但 HSQLDB 的 CAST 目标类型已单独取证（IFNULL(CAST(x AS CHAR),'') 实测可用，与 MySQL 同期）。
+// 该 default 表达式本身对 HSQLDB 是正确的，保持不动；仅更新注释以免误导（见下 case 说明）。
 export function nullSafeQuoteCol(c, db) {
   const dbms = resolveDbms(db);
   const id = quoteCol(c, db);
@@ -241,8 +296,15 @@ export function nullSafeQuoteCol(c, db) {
     case 'Oracle':
       // Oracle 无 IFNULL；CAST AS VARCHAR2 防隐式类型歧义
       return `NVL(CAST(${id} AS VARCHAR2(4000)),'')`;
+    case 'Derby':
+      // [P2 修复] Derby 实测：CAST(x AS VARCHAR) 需显式长度、且 IFNULL(CAST(int AS VARCHAR)) 报
+      // `Cannot convert types 'INTEGER' to 'VARCHAR'`；COALESCE(CAST(x AS VARCHAR(4000)),'') 可用。
+      return `COALESCE(CAST(${id} AS VARCHAR(4000)),'')`;
     default:
-      // MySQL/TiDB/MariaDB/H2/HSQLDB 系：IFNULL(CAST(... AS CHAR),'')
+      // MySQL/TiDB/MariaDB/HSQLDB：IFNULL(CAST(... AS CHAR),'')
+      // HSQLDB 实测 IFNULL(CAST(ID AS CHAR),'') 返回 [["1"],["2"]]，可用。
+      // 注：H2 与 Derby 已在上面单列 case，不会落到此处（Derby 用 VARCHAR(4000) 而非 CHAR，
+      // 因 Derby 的 CAST(int AS VARCHAR) 需显式长度）。原注释把 H2 列进本组属误记，已更正。
       return `IFNULL(CAST(${id} AS CHAR),'')`;
   }
 }

@@ -70,9 +70,13 @@ describe('[item14] SYS_QUERIES 6 库查询生成', () => {
     assert.equal(cols, '"id","name"');
   });
 
-  it('MonetDB: escCols 用反引号', () => {
+  // [P2 审计修复 2026-09-22] 原断言锁定「MonetDB: escCols 用反引号」——但那是错的：
+  // MonetDB 官方手册《Lexical Structure》规定引号标识符只有双引号（"encapsulation with
+  // double quotes"），未定义反引号；且同一条 data 模板里 tableRef 早已产出双引号表名
+  // （"users"），与列的反引号自相矛盾。本机无 MonetDB 引擎，结论基于官方文档 + 静态自洽性。
+  it('MonetDB: escCols 用双引号（官方手册只定义双引号，反引号非法）', () => {
     const cols = escCols(['id', 'name'], 'MonetDB');
-    assert.equal(cols, '`id`,`name`');
+    assert.equal(cols, '"id","name"');
   });
 
   it('escSql 对 6 库均可用', () => {

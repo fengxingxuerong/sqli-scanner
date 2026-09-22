@@ -255,16 +255,24 @@ export class Extractor {
   }
 
   // 枚举表
+  // [P2 审计修复 2026-09-22] 原写法 `resolveSysQueries(edb, …)?.tables?.(db)` 只对**对象**做了
+  // 可选链，`tables` 本身就是 null 时（Access、以及 Derby 的诚实降级）会以
+  // `?.tables is not a function` 抛错而非返回空列表 —— 枚举能力「标记为不支持」却「运行时崩溃」。
+  // 实测复现：new Extractor().enumerateTables({dbms:'Access',…}) → 抛
+  //   `resolveSysQueries(...)?.tables is not a function`
+  // 修法：用 `?.tables?.(db)` 两个可选链（属性可选 + 调用可选），与 enumerateDatabases 的
+  // `if (q == null) return []` 语义对齐 —— 不支持时**返回空列表**，不抛错。
   async enumerateTables(ctx, db) {
     const edb = resolveDbms(ctx.dbms);
-    const q = resolveSysQueries(edb, ctx.dbmsVersion)?.tables(db);
+    const q = resolveSysQueries(edb, ctx.dbmsVersion)?.tables?.(db);
     return this._enumList(ctx, q, { fallback: [] });
   }
 
   // 枚举列
+  // [P2 审计修复 2026-09-22] 同 enumerateTables：`?.columns?.(db, table)` 双可选链。
   async enumerateColumns(ctx, db, table) {
     const edb = resolveDbms(ctx.dbms);
-    const q = resolveSysQueries(edb, ctx.dbmsVersion)?.columns(db, table);
+    const q = resolveSysQueries(edb, ctx.dbmsVersion)?.columns?.(db, table);
     return this._enumList(ctx, q, { fallback: [] });
   }
 
