@@ -142,7 +142,11 @@ export function escCols(cols, dialect) {
 // ── [P0-FIX 2026-09-09] NULL 安全列表达式（CONCAT_WS 聚合拖库专用） ──────────────
 // 背景：CONCAT_WS 会**跳过 NULL 参数**——行中任一列为 NULL，该行产出的串就少一段，
 // 解析器按索引回填后整行起错位（NULL 后面的值全左移）。实测 MySQL 拖库跨行串列的根因之一。
-// 各方言用 IFNULL/ISNULL(CAST(col AS …),'') 包一层；未知方言退化为原样（保持旧行为）。
+// 各方言用 IFNULL/ISNULL/NVL/COALESCE(CAST(col AS …),'') 包一层；未知方言退化为原样（保持旧行为）。
+// 已覆盖方言（与 nnExpr 的 case 列表严格一致）：MySQL/TiDB/MariaDB/HSQLDB/MonetDB、SQLite、
+// PostgreSQL、SQL Server、H2/Derby、Sybase、Oracle/DM8、DB2。
+// [P2 审计修复 2026-09-20] 补 Oracle/DM8（NVL）与 DB2（COALESCE）——此前二者落 default
+// 无 NULL 安全，配合 CONCAT 改造后成为活跃路径（见 extractionMaps 的 data 模板）。
 export function escColsNN(cols, dialect) {
   if (!Array.isArray(cols) || cols.length === 0) return '*';
   return cols.map((c) => nnExpr(c, dialect)).join(',');
@@ -173,6 +177,15 @@ function nnExpr(col, dialect) {
       return `IFNULL(CAST(${id} AS VARCHAR),'')`;
     case 'Sybase':
       return `ISNULL(CAST(${id} AS VARCHAR(4000)),'')`;
+    // [P2 审计修复 2026-09-20] 补 Oracle/DM8 分支：此前落到 default（无 NULL 安全），
+    // 与同文件 nullSafeQuoteCol 已有的 NVL 处理不一致。Oracle 无 IFNULL/ISNULL，用 NVL；
+    // CAST 到 VARCHAR2(4000) 是 Oracle 里把非字符列（NUMBER/DATE）转字符串的标准做法，
+    // 4000 是 SQL 层 VARCHAR2 上限（超长需 CLOB，此处不涉）。
+    case 'Oracle': case 'DM8':
+      return `NVL(CAST(${id} AS VARCHAR2(4000)),'')`;
+    // [P2 审计修复 2026-09-20] 补 DB2 分支：DB2 无 IFNULL/ISNULL/NVL，用标准 COALESCE。
+    case 'DB2':
+      return `COALESCE(CAST(${id} AS VARCHAR(4000)),'')`;
     default:
       return id;
   }
