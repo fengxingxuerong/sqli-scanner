@@ -19,7 +19,7 @@
 //   node scripts/facts-sync.mjs                        # --check：校验 README 是否漂移
 //   node scripts/facts-sync.mjs --fix                  # 按 _facts.json 修正 README
 // ============================================================================
-import { spawnSync } from 'node:child_process';
+import { spawnSync, execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { dirname, resolve, relative } from 'node:path';
@@ -188,7 +188,24 @@ function listSources() {
       out.push(relative(ROOT, resolve(parent, e.name)).replace(/\\/g, '/'));
     }
   }
-  return [...new Set(out)].sort();
+  // [TRACKED-ONLY 2026-09-22] 只保留 **git 已跟踪** 的文件，与 `ref-integrity.mjs` 同口径。
+  //
+  // 为什么必须这样：本函数原先扫**磁盘**（工作区），而 `--check` 在 CI 上跑的是 **git
+  // checkout**（只有已跟踪文件）。于是**工作区里任何一个未跟踪的测试文件都会污染指纹** ——
+  // 本机算出 283，CI 只有 282 → 报「采集源已改动」→ 而按提示 `--refresh` **只会再算一遍
+  // 283**，即**这个红永远修不掉**（除非先把那个文件 commit 或删掉）。
+  //
+  // 实测（2026-09-22）：并发会话留下未跟踪的 `server/tests/booleanBlind.baselinePoison.test.js`
+  // → 我 refresh 得 283、CI 得 282 → lint 红，且重采无效。这正是本项目最贵的一类错：
+  // **判据的采集面与实际校验面不一致**（同族：`continue-on-error` 空转 job、
+  // `ref-integrity` 曾经的「以磁盘为准」）。
+  //
+  // 用 git ls-files 而非 `check-ignore`：判据是「CI 拿不拿得到」，而不是「有没有被 ignore」。
+  const tracked = new Set(
+    execFileSync('git', ['ls-files'], { cwd: ROOT, encoding: 'utf8' })
+      .split('\n').map((s) => s.trim()).filter(Boolean),
+  );
+  return [...new Set(out)].filter((rel) => tracked.has(rel)).sort();
 }
 
 const hashFile = (abs) => {
