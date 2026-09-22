@@ -98,6 +98,16 @@ jobs:
         name: 红队靶点清单一致性（真值链）
       - run: npx eslint .
         name: ESLint
+      # [DECISION-2026-09-22] e2e 辅助模块的单测（纯 Node，无 MySQL 依赖）。
+      # 为什么需要这一步：`e2e/lib/suiteVerdict.mjs` 决定验收套件的「红」被记到环境头上
+      # 还是代码头上 —— 判错方向代价不对称（记 FAIL 会让人去查产品代码；记 BLOCKED 会掩盖真回归）。
+      # 而 e2e/ 下的 *.test.mjs **不在** test-server(server/tests) / test-frontend(src/tests)
+      # 的发现范围里，不接线就是「写了但永远不会跑第二次」（本仓已登记过的同类陷阱）。
+      # 注意必须用 **glob**（`e2e/lib/*.test.mjs`）—— Node 的 `--test <目录>/` 会把目录当成
+      # 一个待 require 的**模块**（实测报 `Cannot find module .../e2e/lib`、1 fail），
+      # 而不是「扫描该目录」。引号不可省：交给 Node 自己展开，避免各 shell 展开规则不一致。
+      - run: node --test "e2e/lib/*.test.mjs"
+        name: e2e 辅助模块单测（状态判定等）
       # [P0-FIX] Rust 门禁：Tauri 壳此前无任何 lint 检查。新增 cargo fmt --check + clippy
       # （eslint 的 ignores 排除 src-tauri/**，需独立门禁；cargo 缓存加速重复构建）
       # [B4 2026-09-18] 用 rust-toolchain@master 而非 @stable：@stable 每次都拉**最新** stable，
@@ -383,8 +393,22 @@ jobs:
     runs-on: ubuntu-latest
     # [修复] 原 job 级 schedule:/workflow_dispatch: 为非法键（只能放顶层 on:），已移至顶层。
     # 注意不能用 needs:[test-server]：schedule 触发时 test-server 被 if 跳过会连带跳过本 job，
-    # 周度矩阵永远不跑。改为仅由 schedule / 手动 dispatch 触发（与原 schedule-only 语义一致），
-    # 实验性矩阵带 continue-on-error，不阻塞正常 CI 流水线。
+    # 周度矩阵永远不跑。改为仅由 schedule / 手动 dispatch 触发（与原 schedule-only 语义一致）。
+    #
+    # [CI-FIX 2026-09-22] 订正一处「声明与实现不符」+ 把两类步骤分开对待：
+    #
+    # ① 旧注释写「实验性矩阵带 continue-on-error，不阻塞正常 CI 流水线」—— **前提已过期**。
+    #    本 job 只由 schedule / workflow_dispatch 触发（见下面 if:），**根本不在 PR/push 上跑**，
+    #    因此它无论如何都不会阻塞 PR。continue-on-error 在这里**买不到任何"不阻塞"的好处**，
+    #    唯一效果是让失败（含依赖缺失、真回归）也报成绿。
+    #
+    # ② 两步性质**并不相同**，不能一刀切：
+    #    · `e2e/tamper-matrix/tamper-test.mjs` = **纯测量脚本**（输出绕过矩阵，无任何断言、
+    #      不设退出码）。它本来就不是门禁 → 保留 continue-on-error（它恒为 0，去掉没意义），
+    #      但**必须改掉"门禁"的暗示**，并把产物上传（否则数据取不回，等于白跑）。
+    #    · `e2e/waf-lab/compare-real.run.py` → `compare-real.e2e.mjs` = **真断言门禁**
+    #      （`process.exit(pass ? 0 : 1)`，内含 200/表空/靶场异常等硬断言；run.py 忠实透传 rc）。
+    #      → **去掉 continue-on-error**：它吞掉的正是真实的红。
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     steps:
       - uses: actions/checkout@v4
@@ -400,14 +424,28 @@ jobs:
       # waf-lab 依赖真 MySQL：本机无 docker，CI 侧也没有起库步骤，直接调会 ECONNREFUSED；
       # 故此处改为经 Python 沙箱启动器（它自己起隔离 mysqld，见 compare-real.run.py 注释）。
       # 若 CI 环境无 python/mysqld，该步会明确报缺失依赖而非静默通过。
+      # 纯测量脚本（无断言、不设退出码）：产出绕过矩阵供人工研判，**不是门禁**。
+      # 名字里写明「非门禁」避免读 CI 绿红时误以为这里验证过什么。
       - run: node e2e/tamper-matrix/tamper-test.mjs
-        name: Tamper effect matrix
+        name: Tamper 绕过矩阵（测量，非门禁）
         timeout-minutes: 10
         continue-on-error: true
+      # 真断言门禁（exit(pass?0:1)）：**故意不加 continue-on-error** ——
+      # 之前它吞掉了真实的红（同族：`node <不存在的文件>` + continue-on-error = 空转门禁）。
+      # 本 job 只跑 schedule/dispatch，红也不会阻塞 PR，但会如实反映在 job 结论里。
       - run: python3 e2e/waf-lab/compare-real.run.py
-        name: WAF rule lab (真 MySQL 沙箱 A/B)
+        name: WAF 规则实验室（真 MySQL 沙箱 A/B，断言门禁）
         timeout-minutes: 10
-        continue-on-error: true
+      # 测量产物必须能取回，否则这一步等于白跑。
+      - name: 上传矩阵与 A/B 产物
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tamper-waf-artifacts
+          path: |
+            e2e/tamper-matrix/results/
+            e2e/waf-lab/results/
+          if-no-files-found: warn
 
   # [发布冒烟 2026-09-18] 与 acceptance 互补：acceptance 覆盖"依赖真实 DB 的 e2e"，
   # 本 job 覆盖"生产配置组合"——带 token + Express 托管 dist + 引擎常驻，

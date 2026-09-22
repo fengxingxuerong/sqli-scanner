@@ -854,7 +854,7 @@ process.exit(0);          // ← 漏检 / 误报 / must 未命中，一律退 0
 | job | 根因 | 状态 |
 |---|---|---|
 | `lint` | ① 指纹门禁没做 **EOL 规范化**：本机 CRLF / CI LF → 69 文件假报"改动"（同 `git archive` 假阳性那一课，踩了两次）；② 修完指纹后仍红 → **Tauri 在 Linux 编译缺 GTK 系统库**（glib-sys 找不到 glib-2.0.pc → clippy exit 101），本地 Windows 是另一套依赖链 | ✅ 已修（hashFile 规范化 `b64e772` + apt 装 Tauri 依赖），待下轮验证 |
-| `acceptance` | **三个套件各自独立**（靠 `last-failure-*.log` 现场定位）：<br>① **CRS 保真度** = `ERR_MODULE_NOT_FOUND: Cannot find package 'yaml'` —— acceptance job 只跑 `cd server && npm ci`，而 `yaml` 在 **root 的 devDependencies**；本机 node_modules 里早就有它（隐式依赖）→ **已修** `0fbbfaf`<br>② **fileWrite** = 落盘路径写死 Windows（`remotePath=D:/tmp/...`、`wrote:true` 但 `verified:false`）—— **✅ 已修 2026-09-21（`5e5aa2b`）**：兜底改 `tmpdir()` 派生 + CI docker 挂载卷 + `FILE_WRITE_DIR`<br>③ **fileRead** = 隔离沙箱 `datadir 未初始化` → BLOCKED（判据语义正确）→ **待决策**：CI 容器起不来沙箱时该套件应算 SKIP 还是继续算失败 |
+| `acceptance` | **三个套件各自独立**（靠 `last-failure-*.log` 现场定位）：<br>① **CRS 保真度** = `ERR_MODULE_NOT_FOUND: Cannot find package 'yaml'` —— acceptance job 只跑 `cd server && npm ci`，而 `yaml` 在 **root 的 devDependencies**；本机 node_modules 里早就有它（隐式依赖）→ **已修** `0fbbfaf`<br>② **fileWrite** = 落盘路径写死 Windows（`remotePath=D:/tmp/...`、`wrote:true` 但 `verified:false`）—— **✅ 已修 2026-09-21（`5e5aa2b`）**：兜底改 `tmpdir()` 派生 + CI docker 挂载卷 + `FILE_WRITE_DIR`<br>③ **fileRead** = 隔离沙箱 `datadir 未初始化` → BLOCKED（判据语义正确）→ **✅ 已决策 2026-09-22**：判 **BLOCKED（进 failed）**，既非 SKIP 也非 FAIL。理由：① 不该 SKIP —— SKIP 不进 failed，等于让这项能力的覆盖**静默归零**（本仓最贵的一类错）；② 不该 FAIL —— 一条断言都没执行，记 FAIL 会把下一个人引去查产品代码（§G 重演）；③ BLOCKED 与 FAIL 一样非零退出，区别只在标签。同时把判据抽成可单测的 `e2e/lib/suiteVerdict.mjs`，并**扩了两种漏检形态**（详见 §Y-b） |
 | `e2e-self-contained` | redteam-lab 跑 90.6s 失败、multi-engine-lab 0.4s 秒败（疑似 CI 容器缺依赖） | ⏳ 待查 |
 
 **过程教训（两条）**：
@@ -877,6 +877,59 @@ process.exit(0);          // ← 漏检 / 误报 / must 未命中，一律退 0
 
 
 ---
+
+### Y-b. 两项挂起的决策（✅ 均已决 2026-09-22）
+
+#### 决策 ①：`tamper-waf-matrix` 的 `continue-on-error` —— 分两步、两种待遇
+
+先订正一个**过期前提**：旧注释写「带 continue-on-error 是为了不阻塞正常流水线」。
+但该 job 的 `if:` 只允许 `schedule` / `workflow_dispatch` 触发，**根本不在 PR/push 上跑**
+→ 它无论如何都不会阻塞 PR，`continue-on-error` 在这里**买不到任何"不阻塞"的好处**，
+唯一效果是让失败（含依赖缺失、真回归）也报成绿。
+
+进一步读代码发现**两步性质不同，不能一刀切**：
+
+| 步骤 | 性质 | 处置 |
+|---|---|---|
+| `e2e/tamper-matrix/tamper-test.mjs` | **纯测量脚本**：输出绕过矩阵，无任何断言、不设退出码 | 保留 `continue-on-error`（它恒为 0，去掉无意义），但**改掉"门禁"的暗示** + **上传产物** |
+| `e2e/waf-lab/compare-real.run.py` → `compare-real.e2e.mjs` | **真断言门禁**：`process.exit(pass ? 0 : 1)`，含 200/表空/靶场异常等硬断言；run.py 忠实透传 rc | **去掉 `continue-on-error`** —— 它吞掉的正是真实的红 |
+
+实测证据（为什么第二步必须去掉）：该 job 在 CI 上从来是绿的，而「Tamper effect matrix」
+这一步跑的脚本**没有任何退出码逻辑**，配合 `continue-on-error` → 这一步**不可能失败**。
+这与 §Y 首跑时发现「`node <不存在的文件>` + continue-on-error = 空转门禁」**同源**：
+上次修了**路径**，没修**静音**。
+
+顺带补了一个缺口：两步产出的 `results/` **都在 .gitignore 里**（`e2e/tamper-matrix/results/`、
+`e2e/waf-lab/results/*.json`）→ 加了 `actions/upload-artifact`，否则数据从 CI 取不回，
+这一步等于白跑。
+
+#### 决策 ②：fileRead 在 CI 起不来沙箱时 —— 判 **BLOCKED（进 failed）**，不是 SKIP 也不是 FAIL
+
+理由见 §Y 表格第 ③ 行。这里补**实施细节**与一个**实测纠正**：
+
+判据从 `acceptance.mjs` 内联抽到 `e2e/lib/suiteVerdict.mjs`（可单测），并扩了漏检形态：
+
+| 形态 | 输出特征 | 旧判据 | 现判据 |
+|---|---|---|---|
+| ① 沙箱内部抛错（超时） | traceback 栈顶在 `mysql_sandbox.py` | ✅ 认得 | ✅ |
+| ② 启动器 import 失败（缺模块） | traceback 栈顶在 `run-with-sandbox.py` | ❌ **漏检** | ✅ |
+| ③ 无 traceback（容器缺 python/mysqld） | 只剩 `[sandbox-run]` 前缀 | ❌ **漏检** | ✅（**且要求"从未就绪"**） |
+
+⚠️ **形态③ 的第一版写错了，被真实数据打回**（值得记下）：第一版判据是
+「有 `[sandbox-run]` 前缀 + 无 `[PASS]`/`[SKIP]`」，随后用仓库里真实的历史现场
+（`e2e/results/last-failure-oob-real-lab.log`）与一个合成的**真回归样本**去验，发现它会
+把「沙箱正常就绪、靶场正常、但断言真失败」也判成 BLOCKED → **真回归被掩盖**（放水方向，
+比漏检更坏）。正解是**要求「就绪」这行不存在**：就绪过 = 沙箱没问题，失败在下游。
+
+**测试**：`e2e/lib/suiteVerdict.test.mjs` 12 例，含 4 条**反例**（真回归不许被贴环境标签、
+真实历史现场不许被认领、SKIP 优先于沙箱判据）。缺陷注入复验：把 `isSandboxDead` 短路成恒
+`false` → 恰好 4 条变红（3 形态 + BLOCKED 归类），4 条反例**保持绿**（证明注入只打中了该打的方向）。
+
+**接线**（避免"写了但永远不会跑第二次"）：`e2e/` 下的 `*.test.mjs` **不在**
+`server/tests` / `src/tests` 的发现范围里 → 已在 ci.yml 的 lint job 与 `scripts/ci-local.mjs`
+各加一步 `node --test "e2e/lib/*.test.mjs"`。
+注意**必须用 glob**：Node 的 `--test <目录>/` 会把目录当成待 require 的模块
+（实测报 `Cannot find module .../e2e/lib`、1 fail），不是"扫描该目录"。
 
 ### Z. 注入请求**发送侧**补齐 multipart（✅ 已修 2026-09-22）
 

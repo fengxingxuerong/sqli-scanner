@@ -24,6 +24,8 @@ import { mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node
 import { dirname, resolve, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import net from 'node:net';
+// [DECISION-2026-09-22] 套件状态判定（含「沙箱起不来」三形态识别）抽成可单测模块
+import { classifySuite } from './lib/suiteVerdict.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, '..');
@@ -496,24 +498,20 @@ for (const s of selected) {
   // optional 的原意保留：SKIP 不进 failed、不改退出码（环境常态不该让门禁红），
   // 但必须数在 SKIP 名下（本机现状：9 PASS / 2 SKIP，而不是 11 PASS / 0 SKIP）。
   const skippedOnly = verdict.skipped === true;
-  let status = skippedOnly ? 'SKIP' : verdict.pass ? 'PASS' : 'FAIL';
-  let reason = verdict.pass ? null : verdict.reason || `断言未通过（退出码 ${r.code}）`;
-  // [ENV-BLOCK 2026-09-20] 「隔离 MySQL 沙箱根本没起来」要判 BLOCKED，不是 FAIL。
-  // 触发实况：全量 ci:local 里 fileWrite 报 `FAIL PASS=false 文件落盘=false`，看起来像
-  // fileWrite 被改坏了；单独 `--only=file-write` 连跑 3 次全绿，而保留下来的失败现场
-  // （[DIAG-FIX] 那份 dump）显示真因是 mysqld 沙箱启动超时 45s 后 python 抛 RuntimeError
-  // ——**一条断言都没执行**。把它记成 FAIL 会让下一个人去查文件写入代码，正是 §G 那次
-  // "把环境问题归给被测代码"的重演。
-  // 匹配刻意只用 ASCII 稳定标记（python 文件名+Traceback），因为 [mysql-sandbox] 那些行
-  // 在本机 cp936 控制台下是乱码，按中文匹配必失效。
-  // 这不是放水：BLOCKED 与 FAIL 一样进 failed、一样让门禁非零退出（见文件末尾汇总），
-  // 变的只是**语义标签**，让人一眼知道该去查环境还是查代码。
-  const sandboxDead = /mysql_sandbox\.py", line \d+, in /m.test(r.out)
-    && /Traceback \(most recent call last\)/.test(r.out);
-  if (status === 'FAIL' && sandboxDead) {
-    status = 'BLOCKED';
-    reason = '隔离 MySQL 沙箱未能启动（环境条件不满足，本套件一条断言都没执行；不是被测代码失败）';
-  }
+  // [DECISION-2026-09-22] 「沙箱起不来」的判定抽到 e2e/lib/suiteVerdict.mjs（可单测）。
+  // 旧实现只匹配「栈顶在 mysql_sandbox.py 的 traceback」一种形态 —— 实测（见该模块单测）
+  // 漏掉了另外两种，且它们恰是 CI 容器最常见的：
+  //   ② 启动器自身 import 失败（缺模块 / python 版本不对）
+  //   ③ 连 python 都没起来（无 traceback，只剩 [sandbox-run] 前缀 + 非零退出）
+  // 漏检的后果是把「验证装置没起来」误判成 FAIL —— 正是 §G「把环境问题归给被测代码」的重演。
+  // 口径（回答 TODO §Y 的待决策项）：**既不是 SKIP 也不是 FAIL，是 BLOCKED**。
+  //   · 不该 SKIP：SKIP 不进 failed，等于让这项能力的覆盖静默归零 ——
+  //     而「静默地没在做事」是本项目最贵的一类错（见 facts 假绿 / 空转门禁）。
+  //   · 不该 FAIL：一条断言都没执行，记 FAIL 会把下一个人引去查产品代码。
+  //   · BLOCKED 与 FAIL 一样进 failed、一样让门禁非零退出，区别只在标签 —— 不是放水。
+  const cls = classifySuite(verdict, r.out, r.code);
+  const status = cls.status;
+  const reason = cls.reason;
   results.push({
     ...s,
     status,

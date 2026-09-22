@@ -13,7 +13,7 @@
 //   · 不覆盖的 3 个 job，**逐个在 EXCLUDED_JOBS 里登记并写理由**（见下方常量）：
 //       docker              —— 本机无 docker
 //       test-matrix         —— 跨平台矩阵，命令集已覆盖，但「另一个操作系统」本机不可替代
-//       tamper-waf-matrix   —— schedule-only 实验矩阵，continue-on-error 是有意设计（TODO §K）
+//       tamper-waf-matrix   —— schedule-only 实验矩阵，本机要起 mysqld 沙箱（会弹窗）故交 CI
 //     这份清单不是注释而是**可跑判据**：ci.yml 新增 job 而这里没跟上时会直接报错退出，
 //     不会静默漏跑（详见 auditJobCoverage）。
 //   · 另注：`docker` job 与 `acceptance` 的 MySQL+secure_file_priv 前置、以及 acceptance
@@ -89,6 +89,10 @@ const GATES = [
   // tamper 覆盖率同样是对外口径：README 写"覆盖 sqlmap 官方 tamper 全集"，那就对上游清单核一次
   // （清单快照已入库，离线可跑；缺失集合走"只减不增"基线）。
   { id: 'lint', name: 'tamper 对齐 sqlmap 官方清单', cmd: 'npm run tamper:parity' },
+  // [DECISION-2026-09-22] e2e 辅助模块单测：决定「红」记到环境还是代码头上，判错代价不对称。
+  // e2e/ 下的 *.test.mjs 不在 server/tests / src/tests 的发现范围里 —— 不接线就等于没写。
+  // 必须用 glob：Node 的 `--test <目录>/` 会把目录当模块 require（实测 1 fail），不是扫描目录。
+  { id: 'lint', name: 'e2e 辅助模块单测（状态判定等）', cmd: 'node --test "e2e/lib/*.test.mjs"' },
   { id: 'lint', name: 'cargo fmt --check', cmd: 'cd src-tauri && cargo fmt --check' },
   { id: 'lint', name: 'cargo clippy -D warnings', cmd: 'cd src-tauri && cargo clippy -- -D warnings' },
   { id: 'test-frontend', name: '前端测试 + 覆盖率门禁', cmd: 'npx vitest run --coverage --reporter=dot', slow: true },
@@ -126,7 +130,10 @@ const EXCLUDED_JOBS = {
     '跨平台矩阵（windows-latest / macos-latest）：命令集（typecheck + vitest + 服务端单测）已由 ' +
     'lint / test-frontend / test-server 在本机覆盖；「另一个操作系统」这个维度本机替代不了（只有 Windows）',
   'tamper-waf-matrix':
-    'schedule-only 的实验矩阵（TODO §K），ci.yml 里带 continue-on-error 是有意设计（不阻塞日常流水线）',
+    'schedule-only 的实验矩阵（TODO §K）：本机跑它要起隔离 mysqld 沙箱（会弹控制台窗口，' +
+    '本机默认不起服务）→ 交 CI。注意 job 内两步性质不同（2026-09-22 订正）：' +
+    'tamper-test.mjs 是纯测量（非门禁，保留 continue-on-error）；' +
+    'compare-real.run.py 是真断言门禁（已去掉 continue-on-error，红会如实报告）。',
   docker: '本机无 docker（实测 `docker --version` exit 127）',
 };
 

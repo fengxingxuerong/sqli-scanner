@@ -4,6 +4,54 @@
 
 ## [Unreleased]
 
+### 修复：`tamper-waf-matrix` 的空转静音 —— 一个真门禁被 `continue-on-error` 吞掉
+
+该 job 的 `if:` 只允许 `schedule` / `workflow_dispatch` 触发，**根本不在 PR/push 上跑**，
+所以旧注释「带 continue-on-error 是为了不阻塞正常流水线」是个**过期前提** ——
+`continue-on-error` 在这里买不到任何"不阻塞"的好处，唯一效果是让失败也报成绿。
+
+读代码发现两步**性质不同**：
+
+- `e2e/tamper-matrix/tamper-test.mjs` = **纯测量脚本**（输出绕过矩阵，无断言、不设退出码）
+  → 保留 `continue-on-error`，但改名去掉"门禁"暗示，并**上传产物**
+  （`results/` 都在 .gitignore 里，不传就从 CI 取不回，这步等于白跑）。
+- `e2e/waf-lab/compare-real.run.py` → `compare-real.e2e.mjs` = **真断言门禁**
+  （`process.exit(pass ? 0 : 1)`；`run.py` 忠实透传 rc）→ **去掉 `continue-on-error`**。
+
+这与之前那次「`node <不存在的文件>` + continue-on-error = 空转门禁」**同源**：
+上次修了**路径**，没修**静音**。
+
+### 决策：fileRead 起不来沙箱判 **BLOCKED**；判据抽出可单测并补两种漏检形态
+
+`acceptance` 里「隔离沙箱没起来」的判据原先只认一种形态（traceback 栈顶在 `mysql_sandbox.py`）。
+实测（对 3 组输入做探针）证明它**漏检两种**，且这两种恰是 CI 容器最常见的：
+
+| 形态 | 旧判据 | 现判据 |
+|---|---|---|
+| 沙箱内部抛错（traceback 在 `mysql_sandbox.py`） | ✅ | ✅ |
+| 启动器 import 失败（traceback 在 `run-with-sandbox.py`） | ❌ 漏检 | ✅ |
+| 无 traceback（容器缺 python/mysqld） | ❌ 漏检 | ✅（要求"从未就绪"） |
+
+漏检后果是把「验证装置没起来」误判成 **FAIL** —— §G「把环境问题归给被测代码」的重演。
+
+**口径**：判 **BLOCKED**，既非 SKIP（会让覆盖静默归零）也非 FAIL（会把人引去查产品代码），
+但**与 FAIL 一样进 failed、非零退出** —— 变的只是语义标签。
+
+⚠️ **形态③ 第一版写错、被真实数据打回**：第一版是「有 `[sandbox-run]` 前缀 + 无 PASS/SKIP」，
+拿仓库里**真实的历史失败现场**（`e2e/results/last-failure-oob-real-lab.log`：沙箱就绪、PG 缺失）
+与一个合成的**真回归样本**去验，发现它会把「沙箱正常、靶场正常、但断言真失败」也判成 BLOCKED
+→ **真回归被掩盖**（放水方向，比漏检更坏）。改为**要求「就绪」这行不存在**。
+
+**验证**：
+- `e2e/lib/suiteVerdict.test.mjs` **12 例**，含 4 条**反例**（真回归不许被贴环境标签、
+  真实历史现场不许被认领、SKIP 优先于沙箱判据、正常输出不许误判）。
+- **缺陷注入**：把 `isSandboxDead` 短路成恒 `false` → 恰好 4 条变红（3 形态 + BLOCKED 归类），
+  4 条反例**保持绿** → 恢复后 12/12 全绿。
+- **接线**（避免"写了但永远不会跑第二次"）：`e2e/*.test.mjs` 不在 `server/tests` / `src/tests`
+  的发现范围里 → 已在 ci.yml 的 lint job 与 `scripts/ci-local.mjs` 各加
+  `node --test "e2e/lib/*.test.mjs"`。**必须用 glob**（`--test <目录>/` 会把目录当模块 require，
+  实测 1 fail）。
+
 ### 新增：注入请求支持以 multipart/form-data 发送（补齐一项真实能力缺口）
 
 **缺口**：引擎此前只能以 **urlencoded 或 JSON** 发出注入请求（`buildInjectionRequest` 的 body
