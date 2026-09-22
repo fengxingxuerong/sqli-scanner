@@ -223,7 +223,11 @@ export class BooleanBlindDetector extends Detector {
     const baselines = [];
     for (let i = 0; i < 2; i++) {
       const r = await this.send(httpClient, ctx, this.buildRequest(target, point, orig), ctx);
-      baselines.push(String(r?.data ?? ''));
+      // [FIX 2026-09-21] 空/失败的 body 不得进动态块学习（详见 _robustDetect 里的同名注释）：
+      // 本分支只采样 2 次，混入 1 个空串时 pairs=1、diffCount=1 → 1/1 > 0.5 →
+      // 全部块判成动态块 → 判定恒"相似" → boolean 漏报。比 5 次采样的分支更脆。
+      const body = String(r?.data ?? '');
+      if (body) baselines.push(body);
     }
     const explicit = this.hasExplicitMatch(ctx.config);
     for (const pair of pairs) {
@@ -365,7 +369,9 @@ export class BooleanBlindDetector extends Detector {
         this.buildRequest(target, point, orig),
         ctx
       );
-      baselines.push(String(r?.data ?? ''));
+      // [FIX 2026-09-21] 同 _robustDetect / _clauseRound：空/失败的 body 不进动态块学习
+      const body = String(r?.data ?? '');
+      if (body) baselines.push(body);
     }
 
     // 自动动态块识别（T2）：开启时排除基线中的动态块再做相似度比对（默认关闭，路径不变）
@@ -455,12 +461,38 @@ export class BooleanBlindDetector extends Detector {
     const concurrency = rb.concurrency || 4;
 
     // 1) 基线指纹集（并发采样，比 legacy 串行更稳更快）
-    const baselineReqs = [];
-    for (let i = 0; i < rb.baselineSamples; i++) {
-      baselineReqs.push(this.buildRequest(target, point, orig));
+    // [FIX 2026-09-21 失败样本污染] 两条要求必须同时满足，缺一不可：
+    //
+    // ① **失败/超时样本必须剔除**：`_bodyOf` 对失败项返回 ''（空串）。空串混进 baselines 后，
+    //   `dynamicBlockFilter` 拿它跟每个正常响应两两比对 —— 空串没有任何块，于是**每一块**
+    //   都与它不同 → 所有块 diffCount 被整体抬高 → `diffCount[k]/pairs > 0.5` 把**全部块**
+    //   判成动态块 → buildDynamicSimilarFn 里 `total === 0` 直接 return true →
+    //   **真/假一律判"相似"** → boolean 系统性漏报。
+    //
+    // ② **只剔除不重试同样会失败**：`dynamicBlockFilter` 在 `baselines.length < 2` 时返回空
+    //   动态块集 → 回落到不带动态块排除的严格比对 → 噪声页上真值也≠基线 → 依然漏报。
+    //   （这一条是我先只做剔除、被单测直接打脸后补上的 —— 剔除必须配补足。）
+    //
+    // 实测形态：CI 上 `real-mysql-lab` 的 noisy 场景 `检出=[time] miss=[boolean]` ——
+    // 慢机器上并发失败率升高，正踩在这条链上（本地 2385ms 通过、CI 6241ms 失败）。
+    const baselines = [];
+    const wanted = Math.max(2, rb.baselineSamples || 2);
+    let attempt = 0;
+    const maxAttempts = 3; // 兜底上限：目标持续不可达时不空转
+    while (baselines.length < wanted && attempt < maxAttempts) {
+      attempt++;
+      const need = wanted - baselines.length;
+      const reqs = [];
+      for (let i = 0; i < need; i++) reqs.push(this.buildRequest(target, point, orig));
+      const resps = await this.sendConcurrent(httpClient, ctx, reqs, {}, concurrency);
+      let got = 0;
+      for (const r of resps) {
+        if (!r || r.__error || !r.resp) continue; // 失败样本：宁可少一个，也不用一个假样本
+        const body = this._bodyOf(r);
+        if (body) { baselines.push(body); got++; }
+      }
+      if (got === 0) break; // 整轮全败 → 目标不可达，别继续烧请求
     }
-    const baselineResps = await this.sendConcurrent(httpClient, ctx, baselineReqs, {}, concurrency);
-    const baselines = baselineResps.map((r) => this._bodyOf(r));
     // 自动动态块识别（T2）：开启时排除基线动态块，相似度/噪声率/真假差异均按动态块过滤
     const dynSimilar = this.buildDynamicSimilar(baselines, ctx.config);
     const similarToBaseline = dynSimilar
