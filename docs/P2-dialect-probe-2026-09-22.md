@@ -99,6 +99,8 @@ Derby 是纯 SQL 标准库，二者皆无。官方等价物是 `XMLAGG`/`XMLSERI
 | **D5** | `DialectSqlBuilder.nnExpr`（Derby 分支） | `IFNULL(CAST(x AS VARCHAR),'')` → Derby 报 `Cannot convert types 'INTEGER' to 'VARCHAR'` | **引擎实测** | 改 `COALESCE(CAST(x AS VARCHAR(4000)),'')` |
 | **D6** | Derby 整条拖库链路 | Derby 无控制字符函数（`CHAR(31)` 返回字符串 `"31"`）+ 无字符串聚合函数 → 结构性不可用 | **引擎实测** | 诚实降级 `data=null`（与 Access/Informix 同处置） |
 | **D7** | `DialectSqlBuilder.escCols`（MonetDB 分支） | MonetDB 误归反引号组，与同一语句里 `tableRef` 的双引号表名**自相矛盾** | **官方文档 + 静态自洽**（本机无引擎，强度低于 D1–D6） | 移出反引号组 → 双引号，**缺陷注入复验通过** |
+| **D8** | `SUB_FN.Derby`（盲注字典，独立于 SYS_QUERIES） | 用 Derby **不存在**的 `SUBSTRING`（三种写法全语法错）→ Derby 布尔盲注提取恒失败 | **引擎实测** | 改 `substr((e),i,1)`，**真机复验通过** |
+| **D9** | `ASCII_FN.Derby` + `blindExtractor` 字典查询 | 用 Derby 不存在的 `unicode()`，且 Derby **无任何字符→码点函数**（穷举 10 个名字）；`\|\| MySQL` 回落会再生成同样无效的 `ASCII()` | **引擎实测** | `ASCII_FN.Derby = null` + `pickDialectFn()`（显式 null 不回落），**真机反证通过** |
 
 ### 复验（修复后真机再投递）
 
@@ -192,6 +194,66 @@ MonetDB.data = SELECT group_concat(CONCAT_WS(CHAR(31), IFNULL(CAST(`id` AS CHAR)
 
 ---
 
+## 四·补3、第七批：Derby 盲注字典（脱离 SYS_QUERIES 的第二类模板，**纯引擎实测**）
+
+前六批集中在 `SYS_QUERIES`（拖库/枚举）与 `buildStackPageSql`（堆叠）**两条模板族**。
+本批把审计面扩到**第三族**——盲注提取函数字典 `LEN_FN` / `SUB_FN` / `ASCII_FN`。
+它们同样是「按方言拼 SQL」，同样只有「键是否存在」的浅断言覆盖，同样从未被真机验证过。
+
+**方法**：先做字典覆盖率矩阵（发现 DM8/MariaDB/TiDB 的缺键其实是 `resolveDbms` 归一化后的
+良性空缺：DM8→Oracle、MariaDB/TiDB→MySQL），再把 H2/HSQLDB/Derby 三引擎的真 JDBC 投递
+结果对齐。**结果：HSQLDB/H2 全绿；Derby 两处真实缺陷。**
+
+### D8 —— `SUB_FN.Derby` 用了 Derby 不存在的 `SUBSTRING`
+
+```
+SUB_FN.Derby 原值: `substring((name) FROM 1 FOR 1)`
+-> Syntax error: Encountered "substring" at line 1, column 9.
+```
+
+真机实测 **Derby 10.16 根本没有 `SUBSTRING` 这个函数名**（三种写法全部失败）：
+
+| 写法 | 真机结果 |
+|---|---|
+| `substring((name) FROM 1 FOR 1)` | ❌ `Syntax error: Encountered "substring"` |
+| `substring((name),1,1)` | ❌ `Syntax error: Encountered "substring"` |
+| `SUBSTRING((name),1,1)` | ❌ `Syntax error: Encountered "SUBSTRING"` |
+| **`substr((name),1,1)`** | ✅ `[["A"]]` |
+
+→ 修 `substr((e),i,1)`。**注意这与拖库通道 `data=null` 是两条独立路径**：
+拖库降级了，但**盲注通道仍然可达**（`extractProof` 走 `VERSION_EXPR.Derby = "'DERBY'"`），
+故该缺陷会真实触发——Derby 的布尔盲注数据提取原本恒失败。
+
+### D9 —— `ASCII_FN.Derby` 用了 Derby 不存在的 `unicode()`，且 Derby 无任何码点函数
+
+```
+SELECT unicode(substr(name,1,1)) FROM b -> 'UNICODE' is not recognized as a function or procedure.
+```
+
+**穷举确认 Derby 不存在任何「字符→码点」函数**（逐个真机实测，全部 `is not recognized…`）：
+`ASCII` / `UNICODE` / `CODE_POINT` / `ORD` / `ORDINAL` / `CHAR_CODE` /
+`SYSFUN.ASCII` / `SYSFUN.UNICODE` / `SYSFUN.CODE_POINT`；
+`CAST(substr(name,1,1) AS INT)` 亦不可行（`Invalid character string format for type INTEGER`）。
+
+→ Derby 的**码点式**二分提取**结构性不可用**，故 `ASCII_FN.Derby = null`（诚实降级）。
+**配套**：`blindExtractor` 的字典查询由 `|| XXX.MySQL` 改为 `pickDialectFn()`——
+**显式 null 不得回落 MySQL**（否则会生成 Derby 同样不认识的 `ASCII(...)`，仍是静默失败）；
+键**不存在**（未知方言）才回落，保持既有契约。
+
+> **留档（未实施，非本次改动）**：Derby 支持字符串比较（实测 `substr(name,1,1) >= 'A'` /
+> `< 'a'` / `BETWEEN 'A' AND 'Z'` 均返回布尔值），故可改用**字符序二分**替代码点二分。
+> 属架构级改动，本次不做，仅记录可行性。
+
+### 附带：一条「断言太浅」的存量测试
+
+`c-class-dbms-coverage.test.js` 的 `ASCII_FN 覆盖全部 18 库` 用正则从源码数**键**，
+而 `Derby: unicode(...)` 键是存在的 → **测试绿但函数是错的**。
+已补一条更严的断言（值必须是函数，或**已声明的结构性不支持 null**）。
+**但必须诚实标注它的边界**：该新断言只防「值不是函数」，**防不住「值是函数但函数是错的」**——
+后者只有真引擎能发现（本轮注入复验已证实：注入 `unicode` 时新断言仍绿，注入 `'unicode'` 字符串时才红）。
+
+---
+
 ## 五、本轮的方法论要点（可复用）
 
 1. **同一条 SQL 在不同方言上合法性相反**：H2 接受 `SEPARATOR CHAR(30)`（实测产出 `a<RS>b`），
@@ -202,21 +264,39 @@ MonetDB.data = SELECT group_concat(CONCAT_WS(CHAR(31), IFNULL(CAST(`id` AS CHAR)
    → 改动引号策略时**必须全仓搜集判定点**（`grep -n "backtick\|反引号\|'\`'"`）。
 4. **引擎报错文本是最强证据**：`CHAR required: a quoted string` 直接说明语法定义的限制，
    比任何文档推测都硬。
+5. **「键存在」不等于「值可用」**：字典覆盖率测试（数 key）对 D8/D9 这类缺陷**完全不敏感**——
+   `SUB_FN.Derby` / `ASCII_FN.Derby` 的键都在，值是**错的**。
+   → 方言字典必须做**真机投递**，或至少断言**值的精确形状**（如 `substr((x),1,1)`）。
+6. **审计要覆盖所有模板族，不能只查一条链**：D8/D9 不在 `SYS_QUERIES` 里，
+   而在 `LEN_FN/SUB_FN/ASCII_FN`——**同一份「方言支持」声明散落在多个字典**，
+   查完一族要主动去找下一族（`grep -rn "\[dbms\]"` 找出所有按方言取值的点）。
+7. **「不支持的 A 通道」不等于「不支持的 B 通道」**：Derby 的拖库（`data:null`）已降级，
+   但**盲注通道独立可达**（走 `VERSION_EXPR`）——降级一处不代表该库全通道安全。
 
-## 六、回归测试总账（`server/tests/sysQueries.concatArity.test.js`）
+## 六、回归测试总账
 
-| 批次 | 内容 | 用例数 |
-|---|---|---|
-| 一（2026-09-20） | Oracle/DB2 CONCAT 参数超限 | 4 |
-| 二（2026-09-20） | ClickHouse/Firebird 整行丢失 + 全方言 NULL 兜底 | 3 |
-| 三（2026-09-20） | MySQL SCHEMA_QUERY 的 SEPARATOR | 4 |
-| **四（本轮）** | **HSQLDB / H2 / Derby / 引号 / default 分支** | **11** |
-| **五（本轮）** | **枚举 null 空查询不抛错 + 源码契约** | **3** |
-| **六（本轮）** | **MonetDB 引号自洽（文档取证）** | **3** |
-| 合计 | | **30** |
+| 文件 | 批次 | 内容 | 用例数 |
+|---|---|---|---|
+| `sysQueries.concatArity.test.js` | 一（09-20） | Oracle/DB2 CONCAT 参数超限 | 4 |
+| 同上 | 二（09-20） | ClickHouse/Firebird 整行丢失 + 全方言 NULL 兜底 | 3 |
+| 同上 | 三（09-20） | MySQL SCHEMA_QUERY 的 SEPARATOR | 4 |
+| 同上 | **四（本轮）** | HSQLDB / H2 / Derby / 引号 / default 分支 | **11** |
+| 同上 | **五（本轮）** | 枚举 null 空查询不抛错 + 源码契约 | **3** |
+| 同上 | **六（本轮）** | MonetDB 引号自洽（文档取证） | **3** |
+| `blindFnsDialect.test.js`（新） | **七（本轮）** | **Derby 盲注字典 SUB/ASCII + 显式 null 不回落 + 零回归** | **9** |
+| `c-class-dbms-coverage.test.js` | **七（本轮）** | **字典值须为函数或已声明 null（补「键覆盖」的浅断言）** | **1** |
+| 合计新增 | | | **34** |
 
-全量服务端：**2140 用例 / 2137 pass / 0 fail / 3 skip**（本轮累计新增 17 例，零回归）。
+全量服务端：**2150 用例 / 2147 pass / 0 fail / 3 skip**（本轮累计新增 27 例，零回归）。
 另：`dialectSqlBuilder.test.js`、`dumpRowSplit.sqlshape.test.js` 的形状契约保持不变、全绿。
 
 > **注：`sysqueries-completion.test.js` 有 1 例被改写**（原锁定 MonetDB 反引号这一错误契约）——
 > 非新增用例，故不计入上表「用例数」，但属本批必须记录的改动（详见「四·补2」）。
+
+### 复现入口
+
+```bash
+# 真引擎验证脚本（12 → 16 条断言；**必须带 ENGINE_JARS**，否则 exit 2 + 打印用法）
+ENGINE_JARS="D:\engines\jars\h2.jar;D:\engines\jars\hsqldb.jar;D:\engines\jars\derby.jar;D:\engines\jars\derbyshared.jar" \
+  node e2e/multi-engine-lab/verify-dialect-templates.mjs   # 期望 PASS 16 / FAIL 0
+```

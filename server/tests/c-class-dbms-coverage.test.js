@@ -5,6 +5,11 @@ import {
   escCols,
 } from '../src/engine/DialectSqlBuilder.js';
 import { DBMS_LIST, SUPPORTED, TIME_VECTORS, ERROR_SIG_BY_DBMS, dbmsFromError } from '../src/engine/payloads/index.js';
+// [P2 审计修复 2026-09-22] 直接导入真实字典对象（它们本就是 export）。
+// 上面的 extractConstMap 是正则读源码的**较脆**做法：它只能证明「键出现过」，
+// 证明不了值是函数还是 null —— 新增的严格断言需要真实值，故直接用 import。
+import { LEN_FN, SUB_FN, ASCII_FN } from '../src/engine/extractionMaps.js';
+const FN_SOURCE_OBJ = { LEN_FN, SUB_FN, ASCII_FN };
 
 // ─── 辅助：读取 extractionMaps.js 内部常量（非 export，通过 eval 文件源码提取）───
 import { readFileSync } from 'node:fs';
@@ -133,6 +138,25 @@ describe('[C-16] DBMS 覆盖率补全', () => {
     for (const dbms of DBMS_LIST) {
       const resolved = resolveDbms(dbms) || dbms;
       assert.ok(ASCII_FN_KEYS.includes(resolved), `ASCII_FN 缺少 ${dbms}（resolved=${resolved}）`);
+    }
+  });
+
+  // [P2 审计修复 2026-09-22 真引擎实测] 上面三条「覆盖 18 库」只数**键是否存在**，
+  // 而键存在 ≠ 值是可用函数 —— ASCII_FN.Derby 曾是 `unicode(c)`（键存在、测试绿），
+  // 但 Derby 真机报 'UNICODE' is not recognized as a function or procedure.
+  // 即：**键覆盖测试对本类缺陷不敏感**（「断言太浅=假绿」的又一实例）。
+  // 补一条更严格的断言：每个方言的值必须是函数、或**显式 null 且已声明为结构性不支持**。
+  test('LEN/SUB/ASCII_FN 每个键的值须为函数；null 仅允许在已实测的结构性不支持方言上', () => {
+    // 经真机穷举确认无「字符→码点」函数，故 ASCII 通道结构性不可用（见 extractionMaps 注释）
+    const ASCII_NULL_OK = new Set(['Derby']);
+    const maps = { LEN_FN: LEN_FN_KEYS, SUB_FN: SUB_FN_KEYS, ASCII_FN: ASCII_FN_KEYS };
+    for (const [name, keys] of Object.entries(maps)) {
+      for (const k of keys) {
+        const v = FN_SOURCE_OBJ[name][k];
+        if (typeof v === 'function') continue;
+        if (v === null && name === 'ASCII_FN' && ASCII_NULL_OK.has(k)) continue;
+        assert.fail(`${name}.${k} 的值不是函数也不是「已声明的结构性不支持 null」：${JSON.stringify(v)}`);
+      }
     }
   });
 

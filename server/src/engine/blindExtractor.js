@@ -18,6 +18,22 @@ import { buildDynamicSimilarFn } from './Detector.js';
 import { binaryProbe } from './binaryProbe.js';
 import { responseSkeleton, stripEchoedPayload } from './echoStrip.js';
 
+// [P2 审计修复 2026-09-22 真引擎实测] 方言函数字典查询：**显式 null = 结构性不支持**，
+// 必须**直接降级**，不得用 `|| XXX.MySQL` 回落成 MySQL 语法。
+//
+// 为什么不能回落：回落会生成目标数据库**不认识**的函数名 → 目标报错 → 判定恒为假 →
+// 提取产出垃圾/空值，而调用方看不到「为什么没值」（与「诚实地不支持」相悖）。
+// 实测案例：ASCII_FN.Derby 原为 `unicode(c)`，而 Derby 无任何「字符→码点」函数；
+//   若再回落 MySQL 的 `ASCII(...)`，Derby 同样报函数不存在 —— 两条路都是静默失败。
+// 语义约定（与 TIME_COND 的 `if (!condFn) return null` 一致）：
+//   · 键存在且为函数 → 用它；
+//   · 键存在且为 null → 该方言结构性不支持 → 返回 null（降级）；
+//   · 键不存在（未知方言）→ 回落 MySQL（保持既有 `|| MySQL` 行为，不动既有契约）。
+function pickDialectFn(dict, dbms, fallbackKey = 'MySQL') {
+  if (Object.prototype.hasOwnProperty.call(dict, dbms)) return dict[dbms];
+  return dict[fallbackKey] || null;
+}
+
   // ===== 盲注二分提取（兜底） =====
 
   // 盲注二分提取单个表达式字符串：长度二分 + 多字符并行二分（并发度 extractConcurrency）
@@ -33,9 +49,11 @@ export async function extractBoolean(ex, ctx, expr) {
     const cacheKey = `${scanId}:${dbms}:${expr}`;
     const targetCache = ex._extractCache.get(ctx.target);
     if (predictOutput && targetCache && targetCache.has(cacheKey)) return targetCache.get(cacheKey);
-    const lenFn = LEN_FN[dbms] || LEN_FN.MySQL;
-    const subFn = SUB_FN[dbms] || SUB_FN.MySQL;
-    const asciiFn = ASCII_FN[dbms] || ASCII_FN.MySQL;
+    const lenFn = pickDialectFn(LEN_FN, dbms);
+    const subFn = pickDialectFn(SUB_FN, dbms);
+    const asciiFn = pickDialectFn(ASCII_FN, dbms);
+    // 任一函数缺失/显式 null → 该方言此通道结构性不可用，诚实返回 null（不投无效 SQL）
+    if (!lenFn || !subFn || !asciiFn) return null;
 
     // [P2-FIX 长度上界] 撞 255 上界时探测长值延伸（短值零额外请求）
     let len = await _binarySearch(ex, ctx, base, (cmp) =>
@@ -488,9 +506,11 @@ export async function extractTime(ex, ctx, expr) {
     if (predictOutput && targetCache && targetCache.has(cacheKey)) return targetCache.get(cacheKey);
     // boundary 感知：闭合前缀拼进 base
     const base = `${ctx.point.originalValue || '1'}${ctx.point.boundary || ''}`;
-    const lenFn = LEN_FN[dbms] || LEN_FN.MySQL;
-    const subFn = SUB_FN[dbms] || SUB_FN.MySQL;
-    const asciiFn = ASCII_FN[dbms] || ASCII_FN.MySQL;
+    // [P2 审计修复 2026-09-22] 同 extractBoolean：显式 null 不回落到 MySQL（见 pickDialectFn 注释）
+    const lenFn = pickDialectFn(LEN_FN, dbms);
+    const subFn = pickDialectFn(SUB_FN, dbms);
+    const asciiFn = pickDialectFn(ASCII_FN, dbms);
+    if (!lenFn || !subFn || !asciiFn) return null;
     // 时间判定阈值：以「基线耗时 + timeThresholdMs」为准，避免目标本身慢造成误判
     const thresholdMs = (ctx.config?.timeThresholdMs ?? defaults.timeThresholdMs) * 1;
     // 完整值投票复验开关（P2-P7，与布尔通道共用 blindRobust.extractVerify，默认 true）

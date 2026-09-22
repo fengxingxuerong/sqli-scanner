@@ -22,6 +22,8 @@
 //   ⑦ 形如 MySQL 的 SEPARATOR CHAR() 在 HSQLDB 上被拒（缺陷形态的反证，防回归）
 //   ⑧ SYS_QUERIES.Derby.tables / .columns 亦为 null，但 databases 保留并真机可执行
 //   ⑩ SYS_QUERIES.MonetDB.data 引号自洽（**静态断言，非引擎实测**；依据官方手册）
+//   ⑪⑫ 盲注字典：修复后 SUB_FN.Derby（substr）真机可执行；反证 Derby 拒绝 substring…FROM…FOR
+//   ⑬⑭ ASCII_FN.Derby === null，且真机反证 Derby 确无 unicode()/ascii()（结构性不支持）
 //
 // 前置守卫：若未设置 ENGINE_JARS，脚本会在跑断言前探测驱动，命中 `No suitable driver`
 //   即打印用法并以退出码 2 退出 —— 避免把「漏设环境变量」误判成「方言模板回归」。
@@ -30,7 +32,7 @@
 // ============================================================================
 import { EngineBridgeClient } from './lab-app.mjs';
 import { buildStackPageSql } from '../../server/src/engine/Exploiter.js';
-import { SYS_QUERIES } from '../../server/src/engine/extractionMaps.js';
+import { SYS_QUERIES, SUB_FN, ASCII_FN } from '../../server/src/engine/extractionMaps.js';
 
 const bridge = new EngineBridgeClient().start();
 
@@ -145,6 +147,27 @@ try {
   check('⑩ MonetDB.data 引号自洽（列/表同为双引号，无混用）',
     !mdData.includes('`') && mdData.includes('"id"') && mdData.includes('FROM "users"'),
     '[静态，非引擎实测] ' + mdData.slice(0, 60) + '…');
+
+  // ── ⑪⑫ 盲注提取函数字典（LEN_FN/SUB_FN/ASCII_FN）真实引擎取证 ──────────────
+  // 这两条覆盖 Derby 的**盲注通道**（与 ⑤⑧ 的拖库通道 data=null 是不同路径，独立可达）。
+  await q('derby', `DROP TABLE bb`);
+  await q('derby', `CREATE TABLE bb (id INT, name VARCHAR(64))`);
+  await q('derby', `INSERT INTO bb VALUES (1,'Abc')`);
+  const derbySubSql = `SELECT (${SUB_FN.Derby('name', '1')}) AS v FROM bb`;
+  check('⑪ 修复后 SUB_FN.Derby（substr）真机可执行（修复前 substring…FROM…FOR 语法错）',
+    (await q('derby', derbySubSql)).ok, derbySubSql);
+  const badSub = await q('derby', `SELECT (${'substring((name) FROM 1 FOR 1)'}) AS v FROM bb`);
+  check('⑫ 反证：Derby 拒绝 substring((x) FROM n FOR m)（证明修复必要性）', !badSub.ok,
+    String(badSub.raw).slice(0, 66));
+  // ⑬ ASCII_FN.Derby 必须为 null（Derby 无任何「字符→码点」函数）
+  //    —— 静态断言 + 真机反证：确认 unicode/ascii 在 Derby 上确实不存在
+  check('⑬ ASCII_FN.Derby === null（Derby 无字符→码点函数，结构性不支持）',
+    ASCII_FN.Derby === null, String(ASCII_FN.Derby));
+  const noUni = await q('derby', `SELECT unicode(substr(name,1,1)) AS v FROM bb`);
+  const noAsc = await q('derby', `SELECT ascii(substr(name,1,1)) AS v FROM bb`);
+  check('⑭ 反证：Derby 确实无 unicode()/ascii()（证明置 null 的必要性）',
+    !noUni.ok && !noAsc.ok,
+    `unicode -> ${String(noUni.raw).slice(0, 34)}; ascii -> ${String(noAsc.raw).slice(0, 34)}`);
 
   // ── 汇总 ─────────────────────────────────────────────────────────────────
   const failed = results.filter((r) => !r.ok);
