@@ -34,6 +34,9 @@ import { attachVulnContext } from '../engine/vulnEnrich.js';
 import { vulnTypeOf } from './vulnTaxonomy.js';
 // [2026-09-13] 交付层：元信息/执行摘要/WAF 交战/修复建议+CVSS（markdown/html/csv 共用单一取数源）
 import { buildDelivery } from './reportDelivery.js';
+// [E3 2026-09-22] 攻击路径叙事：从入口 → 注入点 → 可用通道 → 数据获取 → 影响定性的链路。
+// HTML 侧用**内联 SVG**（自包含、断网/打印可读）；markdown 侧 mermaid + 步骤列表双轨。
+import { attackPathHtml, attackPathMarkdown } from './reportAttackPath.js';
 
 // 导出时单条证据/说明的最大长度（原逻辑不变）
 const EVIDENCE_MAX = 4000;
@@ -390,6 +393,10 @@ export class ReportGenerator {
     md.push(...this._execMarkdown(d));
     // [P0-FIX 2026-09-09] 结论可信度 + 本次抑制项（报告会被转出去，这两条不写就是默认「全测了且结论可靠」）
     md.push(...this._conclusionMarkdown(report));
+    // [E3 2026-09-22] 攻击路径段：**与 HTML 侧同序**（结论可信度之后、漏洞清单之前）——
+    // 读者先拿到全局链路，再进明细表逐条核对；两种格式的叙事顺序必须一致，
+    // 否则同一份报告换个格式导出，读者看到的"故事走向"就变了。
+    md.push(...this._attackPathMarkdown(r));
     md.push('## 漏洞清单');
     md.push('');
     // [2026-09-17] 交付缺口修复：新增「受影响参数」「漏洞类型」两列（其余列原样保留，不做信息削减）。
@@ -642,6 +649,16 @@ export class ReportGenerator {
   }  // [P0-FIX 2026-09-08] HTML「复现方式」小节：curl 一行 + <details> 折叠原始报文
   _pocHtml(r) {
     return pocHtml(r);
+  }
+
+  // [E3 2026-09-22] 「攻击路径」小节（纯只读派生，数据全来自既有 report，不新增探测）。
+  // 层级只按报告里真实存在的证据推进（无 data.rows 就停在「已证实可注入」），止步时显式写明边界。
+  _attackPathMarkdown(report) {
+    return attackPathMarkdown(report);
+  }
+
+  _attackPathHtml(report) {
+    return attackPathHtml(report);
   }  // PoC 条目归一化：markdown / html 共用同一取数与标题规则，避免两侧漂移
   // [goal 批次 A-1] payloads 逐条展开：每个漏洞的每条 payload 各生成一条可复放 PoC
   //（主命中 = payloads[0]，与既有单条行为兼容；其余为同点补充 payload，均标注来源）。
@@ -694,6 +711,9 @@ export class ReportGenerator {
     const deliverySection = this._deliveryHtml(d);
     const remediationSection = this._remediationHtml(d);
     const wafSection = this._wafHtml(d);
+    // [E3 2026-09-22] 攻击路径段：插在执行摘要之后、漏洞清单之前 —— 读者先拿到全局链路，
+    // 再进明细表逐条核对（与 toMarkdown 的顺序保持一致，避免两种格式的叙事顺序漂移）。
+    const attackPathSection = this._attackPathHtml(report);
 
     return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
       <title>SQL 注入检测报告 ${report.scanId}</title>
@@ -766,6 +786,7 @@ export class ReportGenerator {
       <p class="meta">目标：${renderUrlLink(report.target?.baseUrl)} · 注入点：${(report.points || []).length} · 漏洞：${(report.vulns || []).length}</p>
       ${deliverySection}
       ${conclusionSection}
+      ${attackPathSection}
       <h2>漏洞清单</h2>
       <table><thead><tr><th>注入点</th><th>受影响参数</th><th>漏洞类型</th><th>技术</th><th>数据库</th><th>风险</th><th>CVSS</th><th>说明</th></tr></thead>
       <tbody>${rows || '<tr><td colspan="8">未发现漏洞</td></tr>'}</tbody></table>
