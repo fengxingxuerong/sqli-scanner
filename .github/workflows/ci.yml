@@ -354,6 +354,21 @@ jobs:
       # 红队评测靶场（ground-truth 真值对照 + sqlmap 同题对比）：独立常驻进程，
       # CI 环境可能缺 PostgreSQL（D:/pg-smoke 类本地路径），故失败不阻塞——
       # 门禁会把该套件标为 SKIP，其余套件照常判定。
+      # [OOB 套件 2026-09-23] OOB 带外真机套件需要**真** PostgreSQL：`COPY TO PROGRAM curl`
+      # 只有真 PG 服务端才会真的执行系统命令回连，PGlite 之类嵌入式引擎做不到 —— 所以这一项
+      # 不能像 real-world-lab 那样退回自包含引擎。ubuntu-latest 镜像预装 PG 但默认未启动，
+      # 故显式拉起并把 postgres 口令设成靶场默认值（oob-real-lab/lab-app.mjs 的缺省）。
+      # 失败不阻塞：门禁会把 oob-real 标为 SKIP 并写明「缺 PG」，既不判红也不假绿。
+      - name: 尝试启动 PostgreSQL（OOB 套件需要，失败不阻塞）
+        continue-on-error: true
+        run: |
+          sudo systemctl start postgresql || sudo service postgresql start || true
+          for i in $(seq 1 30); do
+            if pg_isready -h 127.0.0.1 -p 5432; then echo "pg ready"; break; fi
+            sleep 2
+          done
+          sudo -u postgres psql -c "ALTER USER postgres PASSWORD 'postgres';" || true
+          pg_isready -h 127.0.0.1 -p 5432 || echo "PostgreSQL 未就绪 —— oob-real 套件将 SKIP"
       - name: 尝试拉起红队评测靶场（可选，失败不阻塞）
         continue-on-error: true
         run: |

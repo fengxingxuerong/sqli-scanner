@@ -111,7 +111,13 @@ async function gitStamp() {
 // 之后再采集就把运行产物当成未提交改动了）。详见 gitStamp() 注释。
 const git = await gitStamp();
 
-const pre = { mysql: false, mysqlReason: '', secureFilePriv: null, secure_file_priv: false, mysqlVersion: null, redteamLab: false };
+const pre = {
+  mysql: false, mysqlReason: '', secureFilePriv: null, secure_file_priv: false, mysqlVersion: null,
+  redteamLab: false,
+  // [OOB 套件 2026-09-23] OOB 必须真 PG（`COPY TO PROGRAM` 只有真服务端才会执行系统命令回连），
+  // 不能退回嵌入式引擎。缺 PG 时该套件走 optional SKIP 并写明原因 —— 与 redteam 同一口径。
+  pg: false, pgReason: '',
+};
 {
   if (await portOpen(MYSQL.port)) {
     try {
@@ -130,6 +136,34 @@ const pre = { mysql: false, mysqlReason: '', secureFilePriv: null, secure_file_p
     }
   } else {
     pre.mysqlReason = `端口 ${MYSQL.port} 未监听——请先启动 MySQL`;
+  }
+}
+
+// 真 PostgreSQL：OOB 套件的前置。判据与 MySQL 同款（先探端口，再真连一次）——
+// 只探端口会把「端口被别的进程占着」误判成可用。
+{
+  const PGPORT = Number(process.env.PGPORT) || 5432;
+  if (await portOpen(PGPORT)) {
+    try {
+      const { Client } = require('pg');
+      const c = new Client({
+        host: process.env.PGHOST || '127.0.0.1',
+        port: PGPORT,
+        user: process.env.PGUSER || 'postgres',
+        password: process.env.PGPASSWORD ?? 'postgres',
+        database: 'postgres',
+        connectionTimeoutMillis: 5000,
+      });
+      await c.connect();
+      const r = await c.query('select version() v');
+      await c.end();
+      pre.pg = true;
+      pre.pgVersion = String(r.rows[0].v).split(' ').slice(0, 2).join(' ');
+    } catch (e) {
+      pre.pgReason = `端口开放但连接失败（${e.code || e.message}）——检查 PGUSER/PGPASSWORD`;
+    }
+  } else {
+    pre.pgReason = `端口 ${PGPORT} 未监听（CI 需先启动 PostgreSQL）`;
   }
 }
 
@@ -267,6 +301,32 @@ const SUITES = [
       const allPass = /全部通过/.test(out);
       const dbOk = /PGlite/.test(out);
       return { facts: { 全部通过: allPass, 引擎: dbOk ? 'PGlite' : '?' }, pass: allPass && dbOk, reason: allPass ? null : '存在未通过项' };
+    },
+  },
+  {
+    // [2026-09-23] OOB 带外通道此前**只在 run-all.mjs 里**（本地手工跑），acceptance 12 套件里没有它
+    // —— 于是这条「唯一能在无回显+WAF 场景下可达」的通道从来没有常态化验收：
+    // 改坏了不会红，只能靠人记得去跑。故纳入门禁。
+    // ⚠️ 判据必须读**文本**而不是退出码：verify.mjs 结尾是无条件 `process.exit(0)`，
+    //    退出码恒 0 —— 拿它当判据等于「永远绿」（本仓已栽过一次同类）。
+    id: 'oob-real',
+    title: 'OOB 带外通道真机（真 PG COPY TO PROGRAM 真实回连）',
+    needs: ['pg'],
+    optional: true, // 缺真 PG 属环境常态 → SKIP 并写明原因，不判红也不算通过
+    run: () => run('node', ['e2e/oob-real-lab/verify.mjs'], { PGUSER: 'postgres', PGPASSWORD: 'postgres' }),
+    assert: (out) => {
+      const hit = /OOB 通道检出：✅ 全链路回连命中/.test(out);
+      const ctrlZero = /对照组（无回显\+WAF，默认技术）：0 检出/.test(out);
+      const ctrlOther = /对照组（无回显\+WAF，默认技术）：有检出：(.+)/.exec(out);
+      const ctrl = ctrlZero ? '0 检出（OOB 唯一可达）' : ctrlOther ? `有检出：${ctrlOther[1].trim()}` : '取不到对照组结论（输出格式变了？）';
+      return {
+        facts: { OOB真实回连: hit ? '✅' : '❌', 对照组: ctrl },
+        pass: hit && ctrlZero,
+        reason:
+          !hit ? 'OOB 未命中（回连链路断了？现场见 e2e/oob-real-lab/results/）'
+            : !ctrlZero ? `对照组有检出（${ctrl}）→「OOB 是唯一可达通道」的前提不成立，场景构造失效`
+            : null,
+      };
     },
   },
   {
@@ -502,6 +562,7 @@ for (const s of selected) {
       mysql: () => pre.mysqlReason,
       secure_file_priv: () => 'secure_file_priv 未放行（MySQL 8 默认 NULL）',
       redteamLab: () => `红队评测靶场未常驻（127.0.0.1:${REDTEAM_PORT}）——先执行 npm run lab:redteam`,
+      pg: () => pre.pgReason,
     };
     const why = missing
       .map((n) => (MISSING_REASONS[n] ? MISSING_REASONS[n]() : `缺少依赖：${n}`))
