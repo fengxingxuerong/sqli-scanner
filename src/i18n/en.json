@@ -398,7 +398,19 @@
     "secondOrderSecondUrlPlaceholder": "e.g. https://target.example.com/read",
     "secondOrderSecondUrlHint": "Mirrors sqlmap --second-url: use it when the injection is stored on page A but echoed on page B. Empty = reuse the trigger page. It gets the same SSRF and scope checks as the trigger page and falls back automatically when a check fails.",
     "secondOrderSecondMethod": "Read page HTTP method",
-    "secondOrderSecondMethodHint": "Non-idempotent methods (e.g. POST) also require \"Allow write requests\" while the production guard is on."
+    "secondOrderSecondMethodHint": "Non-idempotent methods (e.g. POST) also require \"Allow write requests\" while the production guard is on.",
+    "safetyGuardTitle": "Authorisation and safety guard",
+    "productionModeLabel": "Target is a production system (production guard)",
+    "productionModeHint": "When on, high-risk payloads (file writes / command execution / permanent config changes / resource exhaustion) require a separate confirmation before being sent. Turning it off asserts that this is a lab or self-built exercise environment.",
+    "productionModeOffWarning": "Production guard is off: registry entries with risk >= 3 will be sent directly, with no high-risk confirmation. Make sure the target can tolerate file-write and command-execution probes.",
+    "confirmDestructiveLabel": "Confirm high-risk payloads (written authorisation obtained)",
+    "confirmDestructiveHint": "Enable only when you are authorised and the target can tolerate file-write / command-execution / resource-exhaustion probes. Note: the high-risk pool additionally requires level=5 and risk=3 — ticking this alone will not send them.",
+    "confirmDestructiveWarning": "High-risk payloads are enabled: the target will receive INTO OUTFILE / LOAD_FILE / xp_cmdshell / BENCHMARK and similar requests that write data, run commands, or exhaust resources.",
+    "delayLabel": "Fixed delay per request",
+    "delayHint": "Mirrors sqlmap --delay: wait this long between every request, to stay under WAF rate limits. It is a different mechanism from \"requests per second\" above (fixed interval vs average rate). Maximum 60 seconds.",
+    "seconds": "s",
+    "maxReqLabel": "Total request cap (0 = unlimited)",
+    "maxReqHint": "Scanning stops once this many requests have been sent — a safety valve for labs and large targets. Leave 0 for unlimited."
   },
   "waf": {
     "detected": "WAF Detected: {{vendors}}",

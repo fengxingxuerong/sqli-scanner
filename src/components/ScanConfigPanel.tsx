@@ -203,6 +203,43 @@ export default function ScanConfigPanel({ config, mode, onChange, wafSuggestion 
 
           <Divider />
 
+          {/* ── 授权与安全护栏 [2026-09-23 UI-REACH] ─────────────────────────────
+              引擎默认就把目标当生产系统（defaults.js: productionMode=true），高危池
+              （写文件 / RCE / 永久改配置 / DoS）必须 confirmDestructive===true 才投放。
+              这两键此前没有 UI 入口，后果不是「没有护栏」而是**能力被默认值锁死**：
+              界面用户无论怎么调 level/risk 都拿不到高危载荷，报告却只写「未检出」。
+              与 OOB / 二阶同一形态 —— 默认关 + 无入口 = 永远测不到。 */}
+          <Box>
+            <Typography variant="subtitle2" fontWeight={600} className="mb-3">{t('scanConfig.safetyGuardTitle')}</Typography>
+            <FormControlLabel
+              control={<Switch checked={config.productionMode ?? true} onChange={handleToggle('productionMode')} />}
+              label={t('scanConfig.productionModeLabel')}
+            />
+            <Typography variant="caption" color="text.disabled" className="block mt-1">
+              {t('scanConfig.productionModeHint')}
+            </Typography>
+            {config.productionMode === false && (
+              <Alert severity="warning" variant="outlined" className="my-2">
+                {t('scanConfig.productionModeOffWarning')}
+              </Alert>
+            )}
+            <FormControlLabel
+              sx={{ display: 'flex', mt: 2 }}
+              control={<Switch checked={config.confirmDestructive ?? false} onChange={handleToggle('confirmDestructive')} />}
+              label={t('scanConfig.confirmDestructiveLabel')}
+            />
+            <Typography variant="caption" color="text.disabled" className="block mt-1">
+              {t('scanConfig.confirmDestructiveHint')}
+            </Typography>
+            {config.confirmDestructive === true && (
+              <Alert severity="error" variant="outlined" className="mt-2">
+                {t('scanConfig.confirmDestructiveWarning')}
+              </Alert>
+            )}
+          </Box>
+
+          <Divider />
+
           {/* ── 注入点范围 ── */}
           {/* [2026-09-23] 这两键此前「引擎已消费 / REST 白名单已收 / UI 无入口」：
               能力在，用户拿不到。默认关（与 TargetParser 默认一致）。 */}
@@ -247,6 +284,37 @@ export default function ScanConfigPanel({ config, mode, onChange, wafSuggestion 
               <Box>
                 <Typography variant="caption" color="text.secondary">{t('scanConfig.ratePerSec')}: {config.ratePerSec}</Typography>
                 <Slider value={config.ratePerSec} min={1} max={100} step={1} aria-label={t('scanConfig.ratePerSec')} onChange={handleNumber('ratePerSec')} size="small" />
+              </Box>
+              {/* [2026-09-23 UI-REACH] delay / maxReq（对标 sqlmap --delay / --max-requests）。
+                  delay 与上面的 ratePerSec 是**两套机制**：一个是固定间隔、一个是令牌桶平均速率 ——
+                  文案必须说清，否则使用者会以为是重复项。maxReq 是总请求上限（0=不限），
+                  靶场与大目标上的安全阀。上限 60 秒与引擎侧 MAX_DELAY_SEC 一致。 */}
+              <Box>
+                <Typography variant="caption" color="text.secondary">{t('scanConfig.delayLabel')}: {config.delay ?? 0} {t('scanConfig.seconds')}</Typography>
+                <Slider
+                  value={config.delay ?? 0}
+                  min={0} max={60} step={1}
+                  aria-label={t('scanConfig.delayLabel')}
+                  onChange={handleNumber('delay')}
+                  size="small"
+                />
+                <Typography variant="caption" color="text.disabled">{t('scanConfig.delayHint')}</Typography>
+              </Box>
+              <Box>
+                <Typography variant="caption" color="text.secondary">{t('scanConfig.maxReqLabel')}</Typography>
+                <input
+                  type="number"
+                  min={0}
+                  className="mt-1 w-full px-3 py-2 border rounded text-sm"
+                  aria-label={t('scanConfig.maxReqLabel')}
+                  placeholder="0"
+                  value={config.maxReq ?? 0}
+                  onChange={(e) => {
+                    const n = Number(e.target.value);
+                    onChange({ maxReq: Number.isFinite(n) && n > 0 ? n : 0 });
+                  }}
+                />
+                <Typography variant="caption" color="text.disabled">{t('scanConfig.maxReqHint')}</Typography>
               </Box>
               {/* [2026-09-23 UI-REACH] timeThresholdMs：登记在 SCAN_CONFIG_KEYS 但面板从未渲染
                   （契约测试当时把「登记」当「有入口」，故这条断链一直假绿）。

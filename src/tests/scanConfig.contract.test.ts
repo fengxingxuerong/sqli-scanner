@@ -159,14 +159,17 @@ const KNOWN_MISSING_UI_KEYS = new Set([
   'skipParams', 'knownPoint', 'invalidValue', 'excludeSysdbs', 'nullConnection', 'paramDel',
   // HTTP 层行为
   'forceSsl', 'ignoreRedirects', 'hpp', 'activeWafProbe', 'trustProxyEnv', 'ssrfViaProxy', 'proxyBypassLocal',
-  // 限速
-  'delay', 'reqRate', 'maxReq',
+  // 限速：delay / maxReq 已于 2026-09-23 接进「请求控制」分组 → 移出本表。
+  // reqRate **有意不接**：引擎语义是「> 0 时覆盖 ratePerSec」（ScanManager.js:284 /
+  // httpClient.js:820），而 ratePerSec 早就在面板上。再暴露一个限速旋钮只会让使用者分不清
+  // 哪个在生效 —— 同样效果已有入口，故不算能力缺失，作为「显式承认的债」留在此处。
+  'reqRate',
   // 响应判定多指标（--string/--not-string/--code/--regexp/--titles 的同族）
   'matchText', 'matchCode', 'matchRegexp', 'trueRegexp', 'falseRegexp', 'matchTitle', 'predictOutput',
   // 动态块 / 错误原文留存
   'autoDynamicBlock', 'parseErrors', 'pocRedactAuth',
-  // 生产护栏（高危池确认位）
-  'productionMode', 'confirmDestructive',
+  // 生产护栏（高危池确认位）：productionMode / confirmDestructive 已于 2026-09-23
+  // 接进「授权与安全护栏」分组 → 移出本表
   // 高级姿势（--second-order / --oob 已于 2026-09-23 接进 ScanConfigPanel 的
   // 「二阶注入」「带外通道」分组 → 从本表移出，见判据 ⑦）
   'freshQueries',

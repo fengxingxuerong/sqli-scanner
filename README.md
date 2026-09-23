@@ -318,7 +318,7 @@ npm run test:all
 ## 项目状态
 
 - TypeScript: 零错误
-- 前端测试: 332/332 通过（覆盖率门禁 stmts 88.65 / branch 79.73 / func 68.47，阈值 88/77/67）
+- 前端测试: 332/332 通过（覆盖率门禁 stmts 88.61 / branch 79.64 / func 68.25，阈值 88/77/67）
 - 服务端测试: 2239 用例（2236 pass / 0 fail / 3 skip，并发口径 2026-09-23 复测；3 skip 为环境依赖显式跳过。覆盖率 lines 90.16 / branch 77.00 / func 79.30，阈值 85/69/72）
 - 一键扫描: `npm run scan -- -u <url>`（CLI 一条命令产出 HTML/JSON/Markdown 全套报告 + manifest，退出码可直接进 CI 门禁）
 - Tamper 插件: 228 个（含 v24 增量 20 个，对齐 sqlmap 官方 tamper 全集，含官方 CRS/libinjection 实测组合 uniontable+odbcbrace）

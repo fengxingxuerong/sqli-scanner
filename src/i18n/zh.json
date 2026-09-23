@@ -398,7 +398,19 @@
     "secondOrderSecondUrlPlaceholder": "如：https://target.example.com/read",
     "secondOrderSecondUrlHint": "对标 sqlmap --second-url：注入存入 A 页面、回显在 B 页面时填这里。留空 = 沿用触发页。与触发页同级做 SSRF 与授权范围校验，不通过则自动回退触发页。",
     "secondOrderSecondMethod": "读取页请求方法",
-    "secondOrderSecondMethodHint": "非幂等方法（如 POST）在生产护栏下需要同时打开「允许写请求」。" 
+    "secondOrderSecondMethodHint": "非幂等方法（如 POST）在生产护栏下需要同时打开「允许写请求」。",
+    "safetyGuardTitle": "授权与安全护栏",
+    "productionModeLabel": "目标为生产系统（生产护栏）",
+    "productionModeHint": "开启时，高危载荷（写文件 / 命令执行 / 永久改配置 / 资源耗尽）必须另行确认才投放。关闭 = 已确认这是靶场或自建演练环境。",
+    "productionModeOffWarning": "已脱离生产护栏：注册表 risk ≥ 3 的载荷将直接投放，不再要求高危确认。请确认目标可承受写文件与命令执行类探测。",
+    "confirmDestructiveLabel": "确认投放高危载荷（已获书面授权）",
+    "confirmDestructiveHint": "仅在已取得授权、且目标可承受写文件 / 命令执行 / 资源耗尽类探测时开启。注意：高危池还需 level=5 且 risk=3 才会被投放 —— 只勾这里而不提 level/risk，它们仍然不会发出。",
+    "confirmDestructiveWarning": "高危载荷已启用：将向目标发出 INTO OUTFILE / LOAD_FILE / xp_cmdshell / BENCHMARK 等可写数据、执行命令或耗尽资源的请求。",
+    "delayLabel": "每请求固定延时",
+    "delayHint": "对标 sqlmap --delay：每个请求之间固定等这么久，用于规避 WAF 的频率限制。与上方「每秒请求数」是两套机制（固定间隔 vs 平均速率）。上限 60 秒。",
+    "seconds": "秒",
+    "maxReqLabel": "总请求上限（0 = 不限）",
+    "maxReqHint": "达到该数量即停止扫描 —— 靶场与大目标上的安全阀。留 0 表示不限。" 
   },
   "waf": {
     "detected": "识别到 WAF：{{vendors}}",

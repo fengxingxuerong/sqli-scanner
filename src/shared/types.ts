@@ -303,6 +303,20 @@ export interface ScanConfig {
   // 使用者少测两类注入点，报告只会写「未检出」。
   testPath?: boolean;
   testHeaders?: boolean;
+  // ── [2026-09-23 UI-REACH] 授权与安全护栏（两键默认值即安全默认，但 UI 必须能看见并改）──
+  // productionMode（默认 **true**）：把目标当**生产**系统 —— 高危池（写文件 / RCE / 永久改配置 /
+  // DoS）只有在 confirmDestructive===true 时才投放，否则跳过并在 report.summary.constraints 记一条。
+  // 设为 false 是**显式脱离护栏**（打靶场 / 自建演练环境）：注册表 risk≥3 即投放并打 warn。
+  // ⚠️ 这两键不是可选调优项：UI 缺它们时，界面用户既无法「确认授权后投放高危载荷」，
+  // 也无法「显式声明这是靶场」，而报告只会写「未检出」—— 能力被默认值锁死（与 OOB 同一形态）。
+  productionMode?: boolean;
+  confirmDestructive?: boolean;
+  // ── [2026-09-23 UI-REACH] 请求节奏（对标 sqlmap --delay / --max-requests）──
+  // delay：每次请求间的**固定**延时（秒；引擎侧 httpClient 夹到上限 60），用于规避 WAF 频率限制。
+  // 与 ratePerSec 的令牌桶是两套机制（固定间隔 vs 平均速率），不是重复项。
+  delay?: number;
+  // maxReq：本次扫描的**总请求上限**（0 = 不限），达到即停 —— 靶场与大目标上的安全阀。
+  maxReq?: number;
   // [2026-09-23 E2] 枚举 / 拖库动作族。undefined = 不启用（引擎走既有全量提取分支，零行为变化）。
   extractScope?: ExtractScopeConfig | null;
   // payload 白名单（对标 --test-filter）：逗号分隔的注册表 id 子串，大小写不敏感；空 = 不过滤。
