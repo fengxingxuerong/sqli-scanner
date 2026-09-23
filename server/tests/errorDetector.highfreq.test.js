@@ -22,9 +22,19 @@ test('差距3: 高频库在前（MySQL/PG/MSSQL/Oracle 等先于边缘库）', (
   assert.ok(tpls.length >= 3, '应覆盖至少 3 个高频库的模板');
 });
 
-test('差距3: dbms 已知时仍返回该库全部 error 模板（不截断）', () => {
-  const tpls = pickErrorTemplates('MySQL');
-  assert.deepEqual(tpls, PAYLOADS.MySQL.error, '已知库应原样返回全部模板');
+// [语义变更 2026-09-23] 原断言是「已知库原样返回全部模板」。那是**请求数之源**：
+// 命中即停让"能注入的点"很便宜，但**不命中的点会把整包走完**（MySQL 61 条），
+// 而真实扫描里绝大多数点是不命中的 —— 实测单点 148 → 111 请求（-25%，error 62 → 25）。
+// 新语义：默认档按报错机制族有界裁剪（覆盖全部机制），高阶档 `{compact:false}` 仍全量。
+// 「不许丢机制族」等不变量由 tests/errorDetector.compact.test.js 钉住。
+test('差距3: dbms 已知时默认档有界裁剪、高阶档不截断', () => {
+  const all = PAYLOADS.MySQL.error;
+  const compact = pickErrorTemplates('MySQL', {});
+  assert.ok(compact.length < all.length, `默认档应小于全量（现 ${compact.length}/${all.length}）`);
+  assert.ok(compact.length <= 24, `默认档应有界（现 ${compact.length}）`);
+  assert.equal(compact[0], all[0], '最高收益模板不得被挤掉');
+  // 高阶档（level/risk ≥3，或显式关闭裁剪）保持全量 —— 调优空间留给愿意多花请求的人
+  assert.deepEqual(pickErrorTemplates('MySQL', { compact: false }), all, '高阶档应原样返回全部模板');
 });
 
 // 可解析的注入值取回（同其它检测测试）

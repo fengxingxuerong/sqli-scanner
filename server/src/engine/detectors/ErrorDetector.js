@@ -137,7 +137,12 @@ export class ErrorDetector extends Detector {
       // 注册表无命中时回退到扁平数组（保证未声明的 DBMS 不空跑）
       if (templates.length) return templates;
     }
-    return pickErrorTemplates(dbms);
+    // 高阶档（level/risk ≥ 3，或显式 fullErrorTemplates）不裁剪 —— 调优空间留给愿意多花请求的人
+    const cfg = ctx.config || {};
+    const level = Number(cfg.level) || 1;
+    const risk = Number(cfg.risk) || 1;
+    const full = level >= 3 || risk >= 3 || cfg.fullErrorTemplates === true;
+    return pickErrorTemplates(dbms, { compact: !full });
   }
 
   // 逐模板探测：报错命中 + 基线剔除 + 二次发送确认；返回 { payload, match, body } 或 null
@@ -182,9 +187,104 @@ export default ErrorDetector;
 // 顺序取 ERROR_SIG_BY_DBMS（MariaDB→MySQL→PostgreSQL→SQL Server→SQLite→Oracle→…），
 // 每库至多取首条 error 模板，总量 ≤8：覆盖最常见 6-8 种库的报错注入，命中即停，
 // 避免原实现「无 dbms 时 14+ 库 × N 模板全量连发」的请求爆炸（43+ → ≤8 / 命中 2-4）。
-export function pickErrorTemplates(dbms) {
+/**
+ * 报错**机制族**识别表（检测阶段的裁剪依据）。
+ *
+ * 为什么够用：同一族里的模板差异几乎只在「取什么数」（version()/database()/user()/@@datadir）
+ * 和「注释尾巴」（-- - / # / /**\/），而**是否触发报错由机制本身决定** —— 目标若能被
+ * extractvalue 报错打出来，`(SELECT version())` 与 `(SELECT database())` 都会报错。
+ * 取数差异是为 `--parse-errors` 与提取阶段服务的，不是检测阶段。
+ *
+ * 与 tamper 语义索引（core/waf/bypass/semantics.js）同一套路：**给数据补机器可用的分类**，
+ * 而不是靠人记住「第几条是干嘛的」。
+ * ⚠️ 新增报错机制时必须同步补这里，否则那条模板落进 other（由单测「未识别比例」兜住）。
+ */
+/** @type {Array<[string, RegExp]>} */
+export const ERROR_MECHANISMS = [
+  ['extractvalue', /extractvalue/i],
+  ['updatexml', /updatexml/i],
+  ['floor_rand', /floor\s*\(\s*rand/i],
+  ['exp_overflow', /\bexp\s*\(\s*~/i],
+  ['gtid', /gtid_/i],
+  ['json_keys', /json_keys/i],
+  ['json_value', /json_value/i],
+  ['geometry', /st_|polygon|geomfrom|geohash/i],
+  ['procedure_analyse', /procedure\s+analyse/i],
+  ['bigint_overflow', /8446744073709551610|as\s+unsigned/i],
+  ['div_zero', /1\s*\/\s*0/],
+  ['insert_tail', /\),\(/],
+  ['having', /\bhaving\b/i],
+  ['cast_type', /cast\s*\(|::\s*(int|integer|numeric|bigint|date|boolean|float)/i],
+  ['convert_type', /convert\s*\(/i],
+  ['oracle_ctxsys', /ctxsys\./i],
+  ['oracle_utl', /utl_inaddr|utl_http/i],
+];
+
+/**
+ * 检测阶段的**有界**裁剪：按机制族轮次取样，保证「每种报错机制都还在」。
+ *
+ * 设计约束（都是为「不许用漏检换请求数」服务的）：
+ *   ① 轮次分配而非截断：先给每族 1 条（覆盖全部机制），有预算再补第 2/3 条 ——
+ *      直接 `slice(0, N)` 会把后面的族整族砍掉，那等于关掉一类报错机制。
+ *   ② **未识别比例过高就不裁**：族表没覆盖的机制（如某些库的冷门函数）全在 other 桶里，
+ *      此时裁剪是在瞎裁 → 原样返回全量（宁可不省，不可漏检）。阈值 30%。
+ *   ③ other 桶优先保留前几条：未识别的机制我们不知道它是什么，不能替它决定要不要。
+ *
+ * @param {string[]} tpls 该 dbms 的全量 error 模板
+ * @param {{maxTotal?:number, maxRounds?:number}} [opts]
+ * @returns {{tpls:string[], compacted:boolean, reason?:string, families:number}}
+ */
+export function compactErrorTemplates(tpls, { maxTotal = 24, maxRounds = 3 } = {}) {
+  const list = Array.isArray(tpls) ? tpls : [];
+  if (list.length <= maxTotal) return { tpls: list.slice(), compacted: false, families: 0 };
+
+  const buckets = new Map();
+  const order = [];
+  const other = [];
+  for (const t of list) {
+    const hit = ERROR_MECHANISMS.find(([, re]) => re.test(t));
+    if (!hit) { other.push(t); continue; }
+    if (!buckets.has(hit[0])) { buckets.set(hit[0], []); order.push(hit[0]); }
+    buckets.get(hit[0]).push(t);
+  }
+  // ② 未识别占比过高 → 不裁（族表对该库覆盖不足，裁剪就是瞎裁）
+  if (other.length / list.length > 0.3) {
+    return {
+      tpls: list.slice(),
+      compacted: false,
+      families: buckets.size,
+      reason: `未识别机制 ${other.length}/${list.length} > 30%，族表对该库覆盖不足 → 不裁剪`,
+    };
+  }
+
+  const picked = new Set();
+  const out = [];
+  // ③ 未识别项先留 3 条兜底
+  for (const t of other.slice(0, 3)) { out.push(t); picked.add(t); }
+  // ① 轮次分配：每轮每族取 1 条，直到用完预算
+  for (let round = 0; round < maxRounds && out.length < maxTotal; round++) {
+    for (const id of order) {
+      if (out.length >= maxTotal) break;
+      const t = (buckets.get(id) || []).find((x) => !picked.has(x));
+      if (t) { out.push(t); picked.add(t); }
+    }
+  }
+  // 保持**原相对顺序**（原数组顺序 ≈ 历史收益序，打乱会让高收益模板后移）
+  const rank = new Map(list.map((t, i) => [t, i]));
+  out.sort((a, b) => (rank.get(a) ?? 0) - (rank.get(b) ?? 0));
+  return { tpls: out, compacted: true, families: buckets.size };
+}
+
+export function pickErrorTemplates(dbms, opts = {}) {
   if (dbms && PAYLOADS[dbms] && Array.isArray(PAYLOADS[dbms].error) && PAYLOADS[dbms].error.length) {
-    return PAYLOADS[dbms].error;
+    const all = PAYLOADS[dbms].error;
+    // [PERF 2026-09-23] 已知 dbms 时原实现**整包返回**（MySQL 61 条全发）。
+    // 命中即停让「能注入的点」很便宜，但**不命中的点会把整包走完** —— 真实扫描里
+    // 绝大多数点是不命中的，这才是 error 通道 62 条请求的来源。
+    // 默认档按机制族裁剪（覆盖全部机制，有界 24 条）；高阶档（level/risk ≥3 或显式 full）
+    // 走全量 —— 调优空间留给愿意多花请求的人，默认档不背漏检风险。
+    if (opts.compact === false) return all;
+    return compactErrorTemplates(all, opts).tpls;
   }
   const out = [];
   const seen = new Set();
