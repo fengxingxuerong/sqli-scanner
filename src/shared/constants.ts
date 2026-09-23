@@ -107,6 +107,8 @@ export const SCAN_CONFIG_KEYS = [
   // 此前引擎已消费（TargetParser）、REST 白名单也已收（2026-09-20 CFG-REACH），
   // 唯独 UI 没有入口 → 使用者少测两类注入点，且报告只写「未检出」（能力缺失，不是便利开关）。
   'testPath', 'testHeaders',
+  // [2026-09-23 UI-REACH] 授权与安全护栏 + 请求节奏（四键此前无 UI 入口）
+  'productionMode', 'confirmDestructive', 'delay', 'maxReq',
   // 盲注响应判定锚点（字符串，不是布尔）
   'matchString', 'notString',
   // 数据提取
@@ -119,6 +121,9 @@ export const SCAN_CONFIG_KEYS = [
   'extractScope',
   // 爬虫 / 会话 / 非 SQL 注入
   'crawlDepth', 'sessionFile', 'sessionDefault', 'noSql',
+  // [2026-09-23 UI-REACH] 两条**整通道**接进 UI（此前 REST 白名单与引擎都支持，
+  // 但前端只在 KNOWN_MISSING_UI_KEYS 里当债记着 → 界面用户永远测不到它们）
+  'oob', 'secondOrder',
   // 出口层（代理 / 证书 / 授权范围）
   'proxy', 'auth', 'insecureTls', 'validationSkip', 'scope',
   // WAF 规避（tamper 链等整块配置）
@@ -170,8 +175,18 @@ export const SCAN_CONFIG_VALUE_TYPES: Record<ScanConfigKey, ScanConfigValueType>
   useRegistry: 'boolean',
   testPath: 'boolean',
   testHeaders: 'boolean',
+  // 生产护栏两键走严格布尔（defaults.js 默认 productionMode=true / confirmDestructive=false，
+  // 面板必须能把「显式脱离护栏」与「确认投放高危池」这两个动作如实发出去）
+  productionMode: 'boolean',
+  confirmDestructive: 'boolean',
+  // 0 是合法值（delay=0 不延时 / maxReq=0 不限量），不能被当成「未配置」丢掉
+  delay: 'number',
+  maxReq: 'number',
   auth: 'object',
   noSql: 'object',
+  // 嵌套对象：子字段形状由后端逐项 clamp（oob 的回调地址/端口、secondOrder 的触发页列表）
+  oob: 'object',
+  secondOrder: 'object',
   wafEvasion: 'object',
   extractScope: 'object',
 };

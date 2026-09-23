@@ -1040,8 +1040,14 @@ services:
 - **修复**：`q()` 与两处 safe 端点改用常驻连接池（poolVuln/poolSafe 分池，严格保留 multipleStatements 语义边界防堆叠能力泄漏到安全端点）
 - **教训**：靶场自身的「每请求建连」反模式 + 高频扫描 = 双进程 native 崩溃；门禁此前形同虚设掩盖了它。`--report-on-fatalerror` 对 fast-fail 无效，Windows 下抓这类死亡要靠 exit code（0xC0000409）+ CrashDumps 目录
 
-### 4. 大文件二期拆分（照 scanRunner 模式）
-- **对象**：`core/httpClient.js`（1913 行）、`engine/Extractor.js`（1388 行）、`engine/ScanManager.js`（1003 行）
+### 4. 大文件二期拆分（照 scanRunner 模式）（⚠️ 2026-09-23 实测：本项数字已全部过期）
+- **实测行数（2026-09-23，`wc -l`）**：`core/httpClient.js` **1115**（原记 1913 —— 已拆出 `core/http/requestContext.js`）、
+  `engine/Extractor.js` **884**（原记 1388）、`engine/ScanManager.js` **756**（原记 1003）。
+  **三者均已低于 1200 行软上限，`arch-guard` 对它们零告警。**
+- **真正还在体积债上的只有 `engine/payloadRegistry.js`：167.2 KB / 983 行**（行数不超、**字节超**，
+  已在 `scripts/.arch-baseline.json` 显式登记；字节判据见 D1）→ 出路是 E5 的声明式加载源切换，不是"拆分"。
+- **结论**：本项**不再由架构门禁驱动**，降级为「机会性重构」。若要做，按下面的模式与验收口径执行；
+  若不做，把额度投给 A3（WAF 通道降级编排）这类产品能力缺口更划算。
 - **模式**：参考 scanRunner 第一轮「阶段外移」——纯搬移封边、输入输出注释明确、行为零变化
 - **验收**：全量单测 + e2e 关键 lab（real-mysql/waf-real）回归通过
 

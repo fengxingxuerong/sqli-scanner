@@ -58,6 +58,9 @@ describe('配置契约：面板 → 请求体 → 后端白名单', () => {
       // 此前只认 handle*/setConfig/set()，这一种写法整类不在视野内 ——
       // 「守卫看不见它声称在管的东西」是本仓反复出现的病灶形态，故补齐。
       /onChange\(\s*\{\s*([a-zA-Z]+)\s*:/g,
+      // [2026-09-23 UI-REACH] 嵌套对象配置（noSql / oob / secondOrder）的子字段走 patchNested。
+      // 新增一类写入方式必须同步补 pattern，否则新接的键会被误判成「面板没有控件」而假红。
+      /patchNested\(\s*'([a-zA-Z]+)'/g,
     ];
     for (const re of patterns) {
       for (const m of panelSrc.matchAll(re)) found.add(m[1]);
@@ -156,16 +159,20 @@ const KNOWN_MISSING_UI_KEYS = new Set([
   'skipParams', 'knownPoint', 'invalidValue', 'excludeSysdbs', 'nullConnection', 'paramDel',
   // HTTP 层行为
   'forceSsl', 'ignoreRedirects', 'hpp', 'activeWafProbe', 'trustProxyEnv', 'ssrfViaProxy', 'proxyBypassLocal',
-  // 限速
-  'delay', 'reqRate', 'maxReq',
+  // 限速：delay / maxReq 已于 2026-09-23 接进「请求控制」分组 → 移出本表。
+  // reqRate **有意不接**：引擎语义是「> 0 时覆盖 ratePerSec」（ScanManager.js:284 /
+  // httpClient.js:820），而 ratePerSec 早就在面板上。再暴露一个限速旋钮只会让使用者分不清
+  // 哪个在生效 —— 同样效果已有入口，故不算能力缺失，作为「显式承认的债」留在此处。
+  'reqRate',
   // 响应判定多指标（--string/--not-string/--code/--regexp/--titles 的同族）
   'matchText', 'matchCode', 'matchRegexp', 'trueRegexp', 'falseRegexp', 'matchTitle', 'predictOutput',
   // 动态块 / 错误原文留存
   'autoDynamicBlock', 'parseErrors', 'pocRedactAuth',
-  // 生产护栏（高危池确认位）
-  'productionMode', 'confirmDestructive',
-  // 高级姿势（--second-order / --oob / 声明式注册表之外的新 dilute 姿势）
-  'secondOrder', 'oob', 'freshQueries',
+  // 生产护栏（高危池确认位）：productionMode / confirmDestructive 已于 2026-09-23
+  // 接进「授权与安全护栏」分组 → 移出本表
+  // 高级姿势（--second-order / --oob 已于 2026-09-23 接进 ScanConfigPanel 的
+  // 「二阶注入」「带外通道」分组 → 从本表移出，见判据 ⑦）
+  'freshQueries',
   // 2026-09-20_CFG-REACH 那批「CLI 能设、引擎真读、REST 刚收」的键
   // （testPath / testHeaders 已于 2026-09-23 接进 ScanConfigPanel 的「注入点范围」分组 → 从本表移除）
   'noCast', 'dumpWhere', 'unionCols', 'hex', 'unionFrom',
@@ -199,6 +206,26 @@ const KNOWN_MISSING_UI_KEYS = new Set([
       KNOWN_MISSING_UI_KEYS.size,
       '实际缺口数与登记表条目数不一致 —— 有键接上 UI 或后端删了键，请同步本表'
     );
+  });
+
+  // ⑦ [2026-09-23 UI-REACH] **登记在 SCAN_CONFIG_KEYS ≠ 面板真的有控件**。
+  //
+  // 为什么非要这条：④⑤ 把「有 UI 入口」的判据定成了「键是否登记在 SCAN_CONFIG_KEYS」。
+  // 于是 5 个键长期处于**假暴露**状态 —— 登记在案（故不算缺口、④ 不报）、面板里却从未渲染
+  // 任何控件（故用户永远改不了它）：noSql（NoSQL/GraphQL/SSTI 整条通道）、prefix、suffix、
+  // sessionFile、timeThresholdMs。判据与危害不同源（判的是「登记没登记」、危害是「有没有开关」），
+  // 所以 CI 一直绿 —— 又一个「守卫看不见它声称在管的东西」的实例。
+  //
+  // 现在的判据直接指向危害：面板源码里必须出现对该键的**写入**（由本文件顶部的 patterns 提取）。
+  it('⑦ 登记为「UI 可控」的键必须在面板里真的有控件（防「登记即视为有入口」的假暴露）', () => {
+    // 先自证不空转：提取必须还能看见面板键，否则正则全失效时本判据会恒绿
+    expect(panelKeys.length, '面板键提取失效 —— 本判据会恒绿，先修 patterns').toBeGreaterThan(25);
+    const facade = SCAN_CONFIG_KEYS.filter((k) => !panelKeys.includes(k));
+    expect(
+      facade,
+      `这些键登记为「UI 可控」，但 ScanConfigPanel 里没有任何控件写它 —— 界面用户根本改不了：${facade.join(', ')}\n` +
+        '要么在面板里补上控件，要么从 SCAN_CONFIG_KEYS 移除并登记进 KNOWN_MISSING_UI_KEYS。'
+    ).toEqual([]);
   });
 
   it('后端白名单提取有效（含安全关键键；防提取失效导致断言空转）', () => {

@@ -1,6 +1,6 @@
 # sqli-scanner
 
-[![Tests](https://img.shields.io/badge/tests-2553%20passing-brightgreen)](#测试)
+[![Tests](https://img.shields.io/badge/tests-2568%20passing-brightgreen)](#测试)
 [![Dependencies](https://img.shields.io/badge/dependencies-0%20known%20vulns-brightgreen)](#环境变量)
 
 > CI 徽章待仓库地址确定后启用（当前 `OWNER/REPO` 是占位，占位链接会显示成"通过"，属误导，
@@ -133,7 +133,7 @@ OWASP 分类统一为 `A03:2021-Injection`。**未收录的通道不会被静默
 | **一键扫描** | 三种形态：Web UI（输入 URL → 点击开始 → 查看报告）/ **CLI 一条命令出全套报告**（`npm run scan -- -u <url>`）/ REST API。CLI 形态见「一键扫描」小节 |
 | **结构化漏洞报告** | HTML / JSON / Markdown / SARIF / CSV / manifest，每条漏洞含**漏洞类型(CWE·OWASP) / 风险等级(CVSS) / 受影响参数 / 利用证明(curl·原始报文) / 修复建议**，且明确标注扫描范围与结论可信度 |
 | **9 种检测技术** | union / error / boolean / time / stacked / oob / second_order / inline / nosql |
-| **18 种数据库** | MySQL / PostgreSQL / SQL Server / Oracle / SQLite / MariaDB / TiDB / DM8 / ClickHouse / DB2 / Sybase / Firebird / Informix / H2 / Access / HSQLDB / Derby / MonetDB | **4 种真实引擎全链路验证 + 3 种部分通道验证 + 11 种模板适配**（分层见下） |
+| **18 种数据库** | MySQL / PostgreSQL / SQL Server / Oracle / SQLite / MariaDB / TiDB / DM8 / ClickHouse / DB2 / Sybase / Firebird / Informix / H2 / Access / HSQLDB / Derby / MonetDB | **6 种真实引擎全链路验证 + 3 种部分通道验证 + 9 种模板适配**（分层见下，口径自洽由 `npm run readme:check` 守护） |
 
 ### 数据库支持验证等级（2026-09-10 复核，按证据分层）
 
@@ -189,7 +189,7 @@ admin-only 触发页 `/admin/panel`（users.admin 角色门禁 403）+ admin 会
 **给客户的话**：上表 ⛔ 等级（TiDB / DM8 / ClickHouse / DB2 / Sybase / Firebird / Informix / Access / MonetDB 共 9 种）仅有模板适配，
 请把结论视为**待复核线索**而非可用证据——报告会在 `summary.dbmsEvidence.caveat` 中自动声明这一点。
 （SQL Server 与 Oracle 已于 2026-09-14/15 升级 verified，2026-09-22 补齐产物与版本凭证，**不在本段范围**。）
-| **1870+ 条 payload 模板** | 含注释/编码/子句/嵌套闭合变体（1779 主库 + 82 子句 + 14 OOB）+ 672 条声明式注册表 |
+| **1920 条 payload 模板** | 含注释/编码/子句/嵌套闭合变体：主库 1769 + 子句 137 + OOB 14（口径：各库×各技术下的模板条目数，**同一模板跨库/技术重复计入**）+ 681 条声明式注册表（`payloads/registry.json`） |
 | **228 个 tamper 插件** | 覆盖 sqlmap 官方 tamper 全集（84/84）。⚠️ 绕过率口径见下文「WAF 绕过能力实测口径」 |
 | **62 WAF 指纹** | 自动识别 WAF 类型并推荐 tamper 组合 |
 | **可视化报告** | 风险环形图 + 技术分布条形图 + 漏洞列表 + 数据提取树 + 检测摘要 |
@@ -300,10 +300,10 @@ backend/  ← Express + Node.js
 ## 测试
 
 ```bash
-# 前端测试（331 个用例）
+# 前端测试（332 个用例）
 npm test
 
-# 服务端测试（2225 个用例）
+# 服务端测试（2239 个用例）
 cd server && npm test
 
 # 全部测试
@@ -318,8 +318,8 @@ npm run test:all
 ## 项目状态
 
 - TypeScript: 零错误
-- 前端测试: 331/331 通过（覆盖率门禁 stmts 90.49 / branch 80.17 / func 71.42，阈值 88/77/67）
-- 服务端测试: 2225 用例（2222 pass / 0 fail / 3 skip，并发口径 2026-09-23 复测；3 skip 为环境依赖显式跳过。覆盖率 lines 90.16 / branch 77.00 / func 79.30，阈值 85/69/72）
+- 前端测试: 332/332 通过（覆盖率门禁 stmts 88.61 / branch 79.64 / func 68.25，阈值 88/77/67）
+- 服务端测试: 2239 用例（2236 pass / 0 fail / 3 skip，并发口径 2026-09-23 复测；3 skip 为环境依赖显式跳过。覆盖率 lines 90.16 / branch 77.00 / func 79.30，阈值 85/69/72）
 - 一键扫描: `npm run scan -- -u <url>`（CLI 一条命令产出 HTML/JSON/Markdown 全套报告 + manifest，退出码可直接进 CI 门禁）
 - Tamper 插件: 228 个（含 v24 增量 20 个，对齐 sqlmap 官方 tamper 全集，含官方 CRS/libinjection 实测组合 uniontable+odbcbrace）
 - WAF 绕过能力: 200+ 插件链式组合，覆盖 62 个 WAF 厂商指纹识别 + 推荐

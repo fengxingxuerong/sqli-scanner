@@ -36,10 +36,18 @@ const GRACE_BYTES = 16 * 1024; // 16 KB 容差：小幅数据增长不该让门�
 const BASELINE_PATH = path.join('scripts', '.arch-baseline.json');
 
 const SCAN_DIRS = [
-  { dir: path.join('server', 'src'), exts: ['.js', '.mjs'] },
+  // [E5-2 2026-09-23] server/src 补 `.json`：数据从 JS 搬到 JSON 后，体积债**不该因为换了容器而隐身**。
+  // 实测：payloadRegistry.js 167.2 KB（已登记）→ 变成 15.9 KB + payloads/registry.json 150.1 KB；
+  // 若继续只扫代码扩展名，后者会凭空消失，门禁报告看不出任何变化 —— 那正是「判据被绕过」的形态。
+  { dir: path.join('server', 'src'), exts: ['.js', '.mjs', '.json'] },
   { dir: path.join('server', 'bin'), exts: ['.js'] },
   { dir: 'src', exts: ['.ts', '.tsx', '.js'] },
 ];
+
+// 只有**代码**文件才做「导入图解析」与「console 扫描」：JSON 里出现 `import` / `console.log`
+// 字样既可能是数据，也可能是误伤源（本仓 payload 模板里就有大量 SQL 关键字与函数名）。
+const CODE_EXTS = ['.js', '.mjs', '.ts', '.tsx'];
+const isCodeFile = (f) => CODE_EXTS.some((e) => f.endsWith(e));
 
 const EXCLUDE_RE = /(^|[\\/])(node_modules|dist|dist-engine|tests|e2e|scripts|archived|__mocks__)([\\/]|$)/;
 
@@ -126,7 +134,7 @@ function resolveSpec(fromRel, spec) {
 
 function buildGraph(files) {
   const graph = new Map();
-  for (const f of files) {
+  for (const f of files.filter(isCodeFile)) {
     const deps = new Set();
     for (const s of parseImports(f)) {
       const r = resolveSpec(f, s);
@@ -176,6 +184,7 @@ function findCycles(graph) {
 function checkConsole(files) {
   const hits = [];
   for (const f of files) {
+    if (!isCodeFile(f)) continue;
     if (!(f.startsWith('server/src') || f.startsWith('src/'))) continue;
     const t = fs.readFileSync(path.join(ROOT, f), 'utf8');
     const lines = t.split('\n');

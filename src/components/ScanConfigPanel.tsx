@@ -25,6 +25,9 @@ import type { ExtractScopeField } from '../shared/constants';
 import { parseScopeList } from '../shared/scanConfig';
 import WafTamperPanel from './WafTamperPanel';
 
+/** 非 SQL 注入的三类（与后端 ScanManager 的 kinds 白名单严格一致） */
+const NO_SQL_KINDS = ['nosql', 'graphql', 'ssti'] as const;
+
 /** 枚举动作的输入项（顺序 = UI 展示顺序）。哪些项与当前动作相关由 EXTRACT_SCOPE_OPTIONS.needs 决定。 */
 const SCOPE_FIELDS: { key: ExtractScopeField; label: string }[] = [
   { key: 'dbs', label: 'scanConfig.extractScopeDbs' },
@@ -82,6 +85,18 @@ export default function ScanConfigPanel({ config, mode, onChange, wafSuggestion 
   const handleScopeChange = (raw: string) => {
     const list = parseScopeList(raw);
     onChange({ scope: list.length ? list : undefined });
+  };
+
+  // [2026-09-23 UI-REACH] 嵌套对象配置（noSql / oob / secondOrder）的子字段更新。
+  // 与 setScopeField 同口径：undefined 一律**删键**（关闭态在请求体里干脆地没这个键）。
+  // 刻意**不**在此自动打开 enabled —— OOB 会向回调地址发起出站回连、二阶会发出真实写请求，
+  // 「填了地址就自动生效」会把两个有副作用的动作变成隐蔽副作用，总开关必须由用户显式打开。
+  const patchNested = (key: 'noSql' | 'oob' | 'secondOrder', field: string, value: unknown) => {
+    const cur = (config[key] ?? {}) as Record<string, unknown>;
+    const next: Record<string, unknown> = { ...cur };
+    if (value === undefined) delete next[field];
+    else next[field] = value;
+    onChange({ [key]: next } as unknown as Partial<ScanConfig>);
   };
 
   return (
@@ -188,6 +203,43 @@ export default function ScanConfigPanel({ config, mode, onChange, wafSuggestion 
 
           <Divider />
 
+          {/* ── 授权与安全护栏 [2026-09-23 UI-REACH] ─────────────────────────────
+              引擎默认就把目标当生产系统（defaults.js: productionMode=true），高危池
+              （写文件 / RCE / 永久改配置 / DoS）必须 confirmDestructive===true 才投放。
+              这两键此前没有 UI 入口，后果不是「没有护栏」而是**能力被默认值锁死**：
+              界面用户无论怎么调 level/risk 都拿不到高危载荷，报告却只写「未检出」。
+              与 OOB / 二阶同一形态 —— 默认关 + 无入口 = 永远测不到。 */}
+          <Box>
+            <Typography variant="subtitle2" fontWeight={600} className="mb-3">{t('scanConfig.safetyGuardTitle')}</Typography>
+            <FormControlLabel
+              control={<Switch checked={config.productionMode ?? true} onChange={handleToggle('productionMode')} />}
+              label={t('scanConfig.productionModeLabel')}
+            />
+            <Typography variant="caption" color="text.disabled" className="block mt-1">
+              {t('scanConfig.productionModeHint')}
+            </Typography>
+            {config.productionMode === false && (
+              <Alert severity="warning" variant="outlined" className="my-2">
+                {t('scanConfig.productionModeOffWarning')}
+              </Alert>
+            )}
+            <FormControlLabel
+              sx={{ display: 'flex', mt: 2 }}
+              control={<Switch checked={config.confirmDestructive ?? false} onChange={handleToggle('confirmDestructive')} />}
+              label={t('scanConfig.confirmDestructiveLabel')}
+            />
+            <Typography variant="caption" color="text.disabled" className="block mt-1">
+              {t('scanConfig.confirmDestructiveHint')}
+            </Typography>
+            {config.confirmDestructive === true && (
+              <Alert severity="error" variant="outlined" className="mt-2">
+                {t('scanConfig.confirmDestructiveWarning')}
+              </Alert>
+            )}
+          </Box>
+
+          <Divider />
+
           {/* ── 注入点范围 ── */}
           {/* [2026-09-23] 这两键此前「引擎已消费 / REST 白名单已收 / UI 无入口」：
               能力在，用户拿不到。默认关（与 TargetParser 默认一致）。 */}
@@ -232,6 +284,81 @@ export default function ScanConfigPanel({ config, mode, onChange, wafSuggestion 
               <Box>
                 <Typography variant="caption" color="text.secondary">{t('scanConfig.ratePerSec')}: {config.ratePerSec}</Typography>
                 <Slider value={config.ratePerSec} min={1} max={100} step={1} aria-label={t('scanConfig.ratePerSec')} onChange={handleNumber('ratePerSec')} size="small" />
+              </Box>
+              {/* [2026-09-23 UI-REACH] delay / maxReq（对标 sqlmap --delay / --max-requests）。
+                  delay 与上面的 ratePerSec 是**两套机制**：一个是固定间隔、一个是令牌桶平均速率 ——
+                  文案必须说清，否则使用者会以为是重复项。maxReq 是总请求上限（0=不限），
+                  靶场与大目标上的安全阀。上限 60 秒与引擎侧 MAX_DELAY_SEC 一致。 */}
+              <Box>
+                <Typography variant="caption" color="text.secondary">{t('scanConfig.delayLabel')}: {config.delay ?? 0} {t('scanConfig.seconds')}</Typography>
+                <Slider
+                  value={config.delay ?? 0}
+                  min={0} max={60} step={1}
+                  aria-label={t('scanConfig.delayLabel')}
+                  onChange={handleNumber('delay')}
+                  size="small"
+                />
+                <Typography variant="caption" color="text.disabled">{t('scanConfig.delayHint')}</Typography>
+              </Box>
+              <Box>
+                <Typography variant="caption" color="text.secondary">{t('scanConfig.maxReqLabel')}</Typography>
+                <input
+                  type="number"
+                  min={0}
+                  className="mt-1 w-full px-3 py-2 border rounded text-sm"
+                  aria-label={t('scanConfig.maxReqLabel')}
+                  placeholder="0"
+                  value={config.maxReq ?? 0}
+                  onChange={(e) => {
+                    const n = Number(e.target.value);
+                    onChange({ maxReq: Number.isFinite(n) && n > 0 ? n : 0 });
+                  }}
+                />
+                <Typography variant="caption" color="text.disabled">{t('scanConfig.maxReqHint')}</Typography>
+              </Box>
+              {/* [2026-09-23 UI-REACH] timeThresholdMs：登记在 SCAN_CONFIG_KEYS 但面板从未渲染
+                  （契约测试当时把「登记」当「有入口」，故这条断链一直假绿）。
+                  它是时间盲注的真/假判据阈值 —— 目标链路慢（跨地域/CDN）时 1500ms 会误判，
+                  快的时候又过于宽松，属于必须能调的判定参数。 */}
+              <Box>
+                <Typography variant="caption" color="text.secondary">{t('scanConfig.timeThreshold')}: {config.timeThresholdMs} ms</Typography>
+                <Slider
+                  value={config.timeThresholdMs}
+                  min={100} max={60000} step={100}
+                  aria-label={t('scanConfig.timeThreshold')}
+                  onChange={handleNumber('timeThresholdMs')}
+                  size="small"
+                />
+                <Typography variant="caption" color="text.disabled">
+                  {t('scanConfig.timeThresholdHint')}
+                </Typography>
+              </Box>
+              {/* [2026-09-23 UI-REACH] prefix / suffix：payload 闭合控制（对标 sqlmap --prefix/--suffix）。
+                  同样登记在案却无控件的假暴露键。手工确认过注入点上下文、而引擎自动闭合探测
+                  失败时，这是唯一的补救手段（后端 clamp 上限 200 字符）。 */}
+              <Box>
+                <Typography variant="caption" color="text.secondary">{t('scanConfig.payloadClosure')}</Typography>
+                <Box className="grid grid-cols-2 gap-2 mt-1">
+                  <input
+                    className="px-3 py-2 border rounded text-sm"
+                    aria-label={t('scanConfig.prefixLabel')}
+                    placeholder={t('scanConfig.prefixPlaceholder')}
+                    maxLength={200}
+                    value={config.prefix ?? ''}
+                    onChange={handleText('prefix')}
+                  />
+                  <input
+                    className="px-3 py-2 border rounded text-sm"
+                    aria-label={t('scanConfig.suffixLabel')}
+                    placeholder={t('scanConfig.suffixPlaceholder')}
+                    maxLength={200}
+                    value={config.suffix ?? ''}
+                    onChange={handleText('suffix')}
+                  />
+                </Box>
+                <Typography variant="caption" color="text.disabled">
+                  {t('scanConfig.payloadClosureHint')}
+                </Typography>
               </Box>
             </Stack>
           </Box>
@@ -605,11 +732,223 @@ export default function ScanConfigPanel({ config, mode, onChange, wafSuggestion 
           {/* ── 会话持久化 ── */}
           <Box>
             <Typography variant="subtitle2" fontWeight={600} className="mb-3">{t('scanConfig.sessionPersistence')}</Typography>
-            <FormControlLabel
-              control={<Switch checked={config.sessionDefault ?? false} onChange={handleToggle('sessionDefault')} />}
-              label={t('scanConfig.enableResume')}
-            />
+            <Stack spacing={2}>
+              <FormControlLabel
+                control={<Switch checked={config.sessionDefault ?? false} onChange={handleToggle('sessionDefault')} />}
+                label={t('scanConfig.enableResume')}
+              />
+              {/* [2026-09-23 UI-REACH] sessionFile：显式指定会话文件名（登记在案却无控件的假暴露键）。
+                  后端 isSafeSessionPath 只收「工作目录下的文件名」或系统临时目录内路径，
+                  绝对路径与 .. 逃逸一律拒绝 —— 提示里要写清，否则用户填绝对路径会拿到 400。 */}
+              <Box>
+                <Typography variant="caption" color="text.secondary">{t('scanConfig.sessionFileLabel')}</Typography>
+                <input
+                  className="mt-1 w-full px-3 py-2 border rounded text-sm"
+                  aria-label={t('scanConfig.sessionFileLabel')}
+                  placeholder="sqli-session.json"
+                  value={config.sessionFile ?? ''}
+                  onChange={handleText('sessionFile')}
+                />
+                <Typography variant="caption" color="text.disabled">{t('scanConfig.sessionFileHint')}</Typography>
+              </Box>
+            </Stack>
           </Box>
+
+          {/* ── 非 SQL 注入（NoSQL / GraphQL / SSTI）[2026-09-23 UI-REACH] ─────────────
+              这三类此前「引擎已实现（detectors/NoSqlInjectionDetector.js）、REST 白名单已收
+              （scanRoutes.js:530）、类型与 SCAN_CONFIG_KEYS 都登记了」—— 唯独面板从未渲染过控件。
+              而契约测试当时的判据是「键是否登记在 SCAN_CONFIG_KEYS」，于是它被判成「已有入口」、
+              不在缺口清单里 → 假绿。真实后果：Web / 桌面端用户永远测不到 NoSQL 注入。 */}
+          {mode === 'builtin' && (
+            <>
+              <Divider />
+              <Box>
+                <Typography variant="subtitle2" fontWeight={600} className="mb-3">{t('scanConfig.noSqlTitle')}</Typography>
+                <FormControlLabel
+                  control={<Switch checked={config.noSql?.enabled ?? false} onChange={(e) => patchNested('noSql', 'enabled', e.target.checked)} />}
+                  label={t('scanConfig.noSqlEnable')}
+                />
+                <Typography variant="caption" color="text.disabled" className="block mt-1">
+                  {t('scanConfig.noSqlHint')}
+                </Typography>
+                {config.noSql?.enabled && (
+                  <Stack spacing={0.5} className="mt-2">
+                    {NO_SQL_KINDS.map((k) => {
+                      // kinds 缺省 = 三类全跑（后端 ScanManager:627 同义兜底），故此处也按全选显示
+                      const selected = config.noSql?.kinds ?? [...NO_SQL_KINDS];
+                      const checked = selected.includes(k);
+                      return (
+                        <FormControlLabel
+                          key={k}
+                          control={
+                            <Switch
+                              size="small"
+                              checked={checked}
+                              onChange={() =>
+                                patchNested(
+                                  'noSql',
+                                  'kinds',
+                                  checked ? selected.filter((x) => x !== k) : [...selected, k]
+                                )
+                              }
+                            />
+                          }
+                          label={t(`scanConfig.noSqlKind.${k}`)}
+                        />
+                      );
+                    })}
+                    <Typography variant="caption" color="text.disabled">
+                      {t('scanConfig.noSqlKindsHint')}
+                    </Typography>
+                  </Stack>
+                )}
+              </Box>
+
+              {/* ── 带外通道（OOB）[2026-09-23 UI-REACH] ─────────────
+                  enabled 是**总开关**：techniques 里勾了 oob 还不够，接收端必须在此开启才会启动。
+                  这条通道在「无回显 + WAF 拦 sleep/报错/union」的场景里是唯一可达的一条
+                  （e2e/oob-real-lab 真 PG 16.2 实测），此前 UI 完全拿不到。 */}
+              <Divider />
+              <Box>
+                <Typography variant="subtitle2" fontWeight={600} className="mb-3">{t('scanConfig.oobTitle')}</Typography>
+                <FormControlLabel
+                  control={<Switch checked={config.oob?.enabled ?? false} onChange={(e) => patchNested('oob', 'enabled', e.target.checked)} />}
+                  label={t('scanConfig.oobEnable')}
+                />
+                <Typography variant="caption" color="text.disabled" className="block mt-1">
+                  {t('scanConfig.oobHint')}
+                </Typography>
+                {config.oob?.enabled && (
+                  <>
+                    <Alert severity="info" variant="outlined" className="my-2">
+                      {t('scanConfig.oobWarning')}
+                    </Alert>
+                    <Stack spacing={2}>
+                      <Box>
+                        <Typography variant="caption" color="text.secondary">{t('scanConfig.oobCallbackBase')}</Typography>
+                        <input
+                          className="mt-1 w-full px-3 py-2 border rounded text-sm"
+                          aria-label={t('scanConfig.oobCallbackBase')}
+                          placeholder="127.0.0.1:8899"
+                          value={config.oob?.callbackBase ?? ''}
+                          onChange={(e) => patchNested('oob', 'callbackBase', e.target.value.trim() || undefined)}
+                        />
+                        <Typography variant="caption" color="text.disabled">{t('scanConfig.oobCallbackBaseHint')}</Typography>
+                      </Box>
+                      <FormControlLabel
+                        control={<Switch size="small" checked={config.oob?.dnsOob ?? false} onChange={(e) => patchNested('oob', 'dnsOob', e.target.checked)} />}
+                        label={t('scanConfig.oobDnsEnable')}
+                      />
+                      {config.oob?.dnsOob && (
+                        <Box>
+                          <Typography variant="caption" color="text.secondary">{t('scanConfig.oobDnsDomain')}</Typography>
+                          <input
+                            className="mt-1 w-full px-3 py-2 border rounded text-sm"
+                            aria-label={t('scanConfig.oobDnsDomain')}
+                            placeholder="oob.example.com"
+                            value={config.oob?.dnsDomain ?? ''}
+                            onChange={(e) => patchNested('oob', 'dnsDomain', e.target.value.trim() || undefined)}
+                          />
+                          <Typography variant="caption" color="text.disabled">{t('scanConfig.oobDnsHint')}</Typography>
+                        </Box>
+                      )}
+                    </Stack>
+                  </>
+                )}
+              </Box>
+
+              {/* ── 二阶注入 [2026-09-23 UI-REACH] ─────────────
+                  开启即代表将对目标发起**真实写请求**，故警示与写确认位（allowWrites）
+                  都必须在界面上给出来：生产护栏（productionMode）一开，非幂等请求没有
+                  allowWrites 一律不放行 —— 只给 enabled 不给 allowWrites，
+                  用户会得到「开了二阶却永远未检出」这种最难查的假阴性。 */}
+              <Divider />
+              <Box>
+                <Typography variant="subtitle2" fontWeight={600} className="mb-3">{t('scanConfig.secondOrderTitle')}</Typography>
+                <FormControlLabel
+                  control={<Switch checked={config.secondOrder?.enabled ?? false} onChange={(e) => patchNested('secondOrder', 'enabled', e.target.checked)} />}
+                  label={t('scanConfig.secondOrderEnable')}
+                />
+                <Typography variant="caption" color="text.disabled" className="block mt-1">
+                  {t('scanConfig.secondOrderHint')}
+                </Typography>
+                {config.secondOrder?.enabled && (
+                  <>
+                    <Alert severity="warning" variant="outlined" className="my-2">
+                      {t('scanConfig.secondOrderWarning')}
+                    </Alert>
+                    <Stack spacing={2}>
+                      <Box>
+                        <Typography variant="caption" color="text.secondary">{t('scanConfig.secondOrderTriggerUrls')}</Typography>
+                        <textarea
+                          className="mt-1 w-full px-3 py-2 border rounded text-sm"
+                          rows={2}
+                          aria-label={t('scanConfig.secondOrderTriggerUrls')}
+                          placeholder="https://target.example.com/profile"
+                          value={(config.secondOrder?.triggerUrls ?? []).join('\n')}
+                          onChange={(e) => {
+                            const list = parseScopeList(e.target.value);
+                            patchNested('secondOrder', 'triggerUrls', list.length ? list : undefined);
+                          }}
+                        />
+                        <Typography variant="caption" color="text.disabled">{t('scanConfig.secondOrderTriggerUrlsHint')}</Typography>
+                      </Box>
+                      <FormControlLabel
+                        control={<Switch size="small" checked={config.secondOrder?.allowWrites ?? false} onChange={(e) => patchNested('secondOrder', 'allowWrites', e.target.checked)} />}
+                        label={t('scanConfig.secondOrderAllowWrites')}
+                      />
+                      <Typography variant="caption" color="text.disabled">
+                        {t('scanConfig.secondOrderAllowWritesHint')}
+                      </Typography>
+                      <FormControlLabel
+                        control={<Switch size="small" checked={config.secondOrder?.negativeControl ?? true} onChange={(e) => patchNested('secondOrder', 'negativeControl', e.target.checked)} />}
+                        label={t('scanConfig.secondOrderNegativeControl')}
+                      />
+                      <FormControlLabel
+                        control={<Switch size="small" checked={config.secondOrder?.oobTrigger ?? false} onChange={(e) => patchNested('secondOrder', 'oobTrigger', e.target.checked)} />}
+                        label={t('scanConfig.secondOrderOobTrigger')}
+                      />
+                      <Typography variant="caption" color="text.disabled">
+                        {t('scanConfig.secondOrderOobTriggerHint')}
+                      </Typography>
+                      {/* [2026-09-23 UI-REACH] 读写分离：读取阶段的请求发往独立 URL。
+                          引擎一直在读这三个字段，但此前 CLI/REST/UI 三条路径都到不了它们。
+                          secondUrl 与触发页同级风险（会带会话 Cookie 发请求），后端对其
+                          单独做 SSRF + 授权范围校验，不通过则回退触发页。 */}
+                      <Box>
+                        <Typography variant="caption" color="text.secondary">{t('scanConfig.secondOrderSecondUrl')}</Typography>
+                        <input
+                          className="mt-1 w-full px-3 py-2 border rounded text-sm"
+                          aria-label={t('scanConfig.secondOrderSecondUrl')}
+                          placeholder={t('scanConfig.secondOrderSecondUrlPlaceholder')}
+                          value={config.secondOrder?.secondUrl ?? ''}
+                          onChange={(e) => patchNested('secondOrder', 'secondUrl', e.target.value.trim() || undefined)}
+                        />
+                        <Typography variant="caption" color="text.disabled">
+                          {t('scanConfig.secondOrderSecondUrlHint')}
+                        </Typography>
+                      </Box>
+                      <FormControl size="small" fullWidth>
+                        <InputLabel>{t('scanConfig.secondOrderSecondMethod')}</InputLabel>
+                        <Select
+                          value={config.secondOrder?.secondMethod ?? 'GET'}
+                          label={t('scanConfig.secondOrderSecondMethod')}
+                          onChange={(e) => patchNested('secondOrder', 'secondMethod', e.target.value)}
+                        >
+                          {['GET', 'POST', 'HEAD'].map((m2) => (
+                            <MenuItem key={m2} value={m2}>{m2}</MenuItem>
+                          ))}
+                        </Select>
+                        <Typography variant="caption" color="text.disabled">
+                          {t('scanConfig.secondOrderSecondMethodHint')}
+                        </Typography>
+                      </FormControl>
+                    </Stack>
+                  </>
+                )}
+              </Box>
+            </>
+          )}
 
         </Paper>
       </Collapse>

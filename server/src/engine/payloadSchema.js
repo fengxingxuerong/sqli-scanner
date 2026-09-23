@@ -47,6 +47,10 @@ export const POSITION_CLAUSES = ['orderby', 'limit', 'update'];
 export const KNOWN_FIELDS = [
   'id', 'dbms', 'technique', 'level', 'risk', 'clause', 'boundary',
   'template', 'falseTemplate', 'where', 'minVersion', 'maxVersion',
+  // note：**知识字段**，不是工程字段。数据原本以 JS 数组承载时，条目上方有大量行内注释
+  // （"为什么加这条 payload""实战价值""补全依据"），一旦外置成 JSON/YAML 就会全部丢失。
+  // 引擎不消费它，但迁移时把它一起搬走是"不丢决策理由"的硬要求（见 migrate-payload-registry.mjs）。
+  'note',
 ];
 
 /** 高危池标记（id 含此串，见 payloadRegistry 的 destructive 策略） */
@@ -103,6 +107,11 @@ export function validatePayloadEntry(e) {
   if (typeof e.template !== 'string' || !e.template) errors.push('template 必须是非空字符串');
   if (e.falseTemplate !== undefined && typeof e.falseTemplate !== 'string') {
     errors.push('falseTemplate 若存在必须是字符串');
+  }
+  // note：迁移自 JS 行内注释的知识字段。要求非空字符串 —— 空串/纯空白是"迁移把注释写丢了"
+  // 的典型形态，宁可报错也不要静默留下一个空 note（那等于注释丢了却看不出来）。
+  if (e.note !== undefined && (typeof e.note !== 'string' || !e.note.trim())) {
+    errors.push('note 若存在必须是非空字符串');
   }
   if (e.boundary !== undefined) {
     if (!Array.isArray(e.boundary)) errors.push('boundary 必须是数组');

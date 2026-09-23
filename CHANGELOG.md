@@ -4,6 +4,88 @@
 
 ## [Unreleased]
 
+### 前端可达性：两条整通道 + 五个假暴露键接进面板；契约测试判据修正
+
+**病灶（两个，同一族）**：
+
+1. **整通道无入口**：`oob`（带外）与 `secondOrder`（二阶）在引擎与 REST 白名单里都支持，
+   前端只在 `KNOWN_MISSING_UI_KEYS` 里当债记着 → Web / 桌面端用户永远测不到这两条通道
+   （带外通道在「无回显 + WAF 拦 sleep/报错/union」的场景里是**唯一可达**的一条）。
+2. **假暴露（本轮新发现）**：契约测试把「登记在 `SCAN_CONFIG_KEYS`」当成「有 UI 入口」，
+   于是 5 个键长期处于「登记在案（故不算缺口）+ 面板从未渲染控件（故用户改不了）」：
+   `noSql`（NoSQL/GraphQL/SSTI 整条通道）、`prefix`、`suffix`、`sessionFile`、`timeThresholdMs`。
+   判据与危害不同源（判的是「登记没登记」、危害是「有没有开关」），所以 CI 一直绿。
+
+**修复**：
+
+- 新增「非 SQL 注入检测」「带外通道（OOB）」「二阶注入」三个分组，含危险动作告知：
+  二阶开启即发出**真实写请求**、OOB 会启动接收端等待回连
+- 请求控制组补 `timeThresholdMs` / `prefix` / `suffix`；会话持久化组补 `sessionFile`
+- 契约测试新增**判据 ⑦**：登记为「UI 可控」的键必须在面板源码里**真有写入**
+  （由 `handle*('k')` / `onChange({ k: … })` / `patchNested('k', …)` 等模式提取），
+  并对 `patchNested` 这类新写入方式同步补 pattern —— 守卫看不见新写法就等于没守卫
+- `KNOWN_MISSING_UI_KEYS` 移除 `oob` / `secondOrder`
+
+**顺带修掉一个不可达能力**：`secondUrl` / `secondMethod` / `secondData`（读写分离二阶注入，
+对标 sqlmap `--second-url`）。`SecondOrderDetector._trigger` 一直在读它们，但 REST clamp 不保留、
+CLI 无处可设 → **三条路径全不可达**（与 `extractScope` 同一病灶）。现补 clamp 保留 + 面板入口，
+并按**触发页同级**处理安全：`secondUrl` 同样过 `assertSafeHttpTarget` + `assertInScope`，
+不通过则清空回退触发页（引擎侧 `so.secondUrl || url` 语义天然安全）。
+
+**验证**：
+
+- 新增 `server/tests/configNested.guard.test.js`（5 例）：把**面板会产生的形状**喂给 `sanitizeStart`，
+  断言每个子字段都活到引擎（拼错一个字段名 = 面板显示已配置、引擎用默认值），含反向
+  （非法类别过滤 / 越界 clamp / 非 http(s) URL 清空 / `allowWrites` 严格 true）
+- 该测试首版自己抓出两条**我写错的断言**：`sanitizeStart` 不注入未传的键（默认值由引擎侧合并）；
+  `clampInt` 越界行为是**夹到边界**而非回落默认值 —— 已按实测行为修正并留档
+- 缺陷注入复验：判据 ⑦（撤掉 `prefix` 控件写入 → **恰好 1 红**）、`secondUrl` 可达性
+  （撤掉 clamp → **恰好 1 红**且点名「secondUrl 必须落地」）
+- 前端 332 通过 / 服务端 2239（2236 pass / 0 fail / 3 skip）；`typecheck` 前后端 0 错；
+  `lint` 0 error；`arch:guard` 通过（面板 889 行 < 1200 上限）
+
+**遗留**：OOB 与二阶的**端到端效果**需真靶场验收（CI 恢复后）。本批只保证「配置能到达引擎」，
+不申明检出率变化。
+
+### payload 声明式化收口（E5-2）与 README 口径守卫
+
+**E5-2 交付**：681 条声明式条目外置到 `server/src/engine/payloads/registry.json`（每条一行，可直接 diff），
+`payloadRegistry.js` 167.2 KB / 982 行 → 15.9 KB / 268 行，只留逻辑（高危池门禁 / `selectPayloads` /
+版本过滤 / boundary 排序）。切换前后业务字段逐条等价。
+
+三处配套（缺一条这批就不完整）：
+
+- `arch-guard` 补 `.json` 字节判据 —— 数据换了容器，体积债不该因此隐身（原判据只扫 `.js/.mjs/.ts`，
+  150 KB 会凭空消失、门禁报告看不出任何变化，那正是「判据被绕过」的形态）
+- `eslint` `ecmaVersion 2022 → 2025`：`import data from './x.json' with { type: 'json' }` 在
+  2022/2024 下解析失败（espree 实测），2025 起支持
+- 新增 `server/tests/payloadRegistry.fingerprint.test.js`：条数 + id 序列（顺序即投放优先级）+
+  内容指纹三层钉住数据，`note` 与行为指纹解耦。**起因**：既有 34 条测试对「模板正文被改坏」
+  零覆盖 —— 实测把 `AND 1=1` 改成 `AND 1=9` 仍全绿（它们断言的是条数/id/level/risk）
+
+**新增 README 口径守卫**（`scripts/readme-consistency.mjs`，10 判据 + 16 类自证样本）：
+同一事实在手写文本里被说成几个版本、且没有任何判据 —— 这类漂移现有门禁全都看不见
+（`tamper:parity` 管的是「对齐 sqlmap 官方清单 84/84」不是总数；`facts:check` 管测试数与覆盖率）。
+判据分两层：① README 内部自洽（方言分层三处表述两两比对 + 跨层重复检测）；
+② 对代码取数源（检测通道 ↔ `VULN_TAXONOMY`、tamper 数 ↔ 运行期注册数、payload 分项 ↔ `PAYLOADS` 系列）。
+**刻意不纳入**「62 WAF 指纹」（`WAF_RECOMMEND_MAP` 有 64 键含 2 个非厂商项 → 取数口径两解，
+加守卫会造出脆弱判据）与「1870+」（约数），理由写在文件头。
+
+**顺带修正 4 处对外口径漂移**（均自 2026-08-23 快照后未更新）：
+
+| 项 | 原值 | 实测 |
+|---|---|---|
+| 方言分层 | 4 真实 + 3 部分 + **11** 模板 | **6 + 3 + 9** |
+| payload 主库 / 子句 / 注册表 | 1779 / 82 / **672** | **1769 / 137 / 681** |
+
+第一处的危害不是「数字错」而是**对外低估自己** —— 4+3+11=18 与 6+3+9=18 都自洽，读者看不出破绽。
+⚠️ payload 计数有两种口径：同一模板跨库/技术重复，**含重复 1769 条、去重仅 959 条**；README 用前者，
+换口径等同改语义。该守卫**接线三处**（`ci.yml` lint job + `scripts/ci-local.mjs` GATES +
+`package.json` 的 `check:all`，漏一处 = 空转）。
+
+**验收**：缺陷注入复验 3 类（方言三数 / 检测通道双向集合 / payload 注册表数）注入后精确点名、
+恢复后全绿；`build:engine` 打包 + 内置冒烟通过（确认 JSON import attributes 在 esbuild bundle 后可用）。
+
 ### 接线：T1 / T2 正式接进验链流程（保守回退，零额外请求）
 
 此前 `core/waf/bypass/semantics.js` 与 `searcher.js` **没有任何生产调用点** —— 只被彼此和测试

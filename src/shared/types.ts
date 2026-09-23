@@ -232,6 +232,43 @@ export interface ScanConfig {
     enabled: boolean;
     kinds?: Array<'nosql' | 'graphql' | 'ssti'>;
   };
+  // ── [2026-09-23 UI-REACH] 两条整通道此前「引擎/REST 都支持、UI 无入口」──
+  // 带外通道（OOB，无回显盲注的兜底）。★ enabled 是**总开关**：即使 techniques 里勾了 oob，
+  // 也需此处开启接收端才会启动（server/src/config/defaults.js 的 oob 段）。
+  // 此前 UI 拿不到它 → 界面用户永远测不到带外通道，而该通道在「无回显 + WAF 拦 sleep/报错/union」
+  // 的场景里是**唯一可达**的一条（e2e/oob-real-lab 真 PG 16.2 实测）。
+  oob?: {
+    enabled: boolean;
+    callbackBase?: string; // 接收端可达地址（真实环境换成自有域名/公网 IP）
+    httpPort?: number; // 接收端监听端口（独立于引擎端口）
+    timeoutMs?: number; // 等待回连上限
+    dnsOob?: boolean; // 走 DNS 通道替代 HTTP（防火墙几乎不拦 DNS 出站）
+    dnsDomain?: string; // DNS 回调域名，token 放子域名里
+    dnsPort?: number; // DNS 监听端口（默认 53，需管理员权限）
+  };
+  // 二阶注入（Second-order / 存储型）：先写进库、别处读取触发。
+  // ★ 默认关闭是**产品语义而非未实现** —— 开启即代表将对目标发起**真实写请求**
+  // （POST 注册/评论/资料），故面板必须给显式告知；triggerUrls 为空则不跑。
+  secondOrder?: {
+    enabled: boolean;
+    triggerUrls?: string[]; // 候选触发页 URL（仅 http/https），可为多个；为空则不跑
+    refreshCsrf?: boolean; // 存储前重抓 CSRF token（应对单次 token 失效）
+    negativeControl?: boolean; // 存良性值→读触发页 的阴性对照（多一次写，提高置信）
+    oobTrigger?: boolean; // 触发页无回显时改走带外（需 oob.enabled=true 且接收端就绪）
+    secondUrl?: string; // 写入与读取分离：读取请求发往此处而非原始触发页
+    // ★ 写确认位（server/src/api/scanRoutes.js:486）：productionMode=true 时，非幂等 method
+    // （POST/PUT/PATCH/DELETE）与触发页写请求必须 allowWrites===true 才放行。
+    // 二阶检测天然要「写一次」才能触发存储型路径，故这一位必须能在 UI 上给出，
+    // 否则生产护栏一开、二阶就永远跑不起来（且报「未检出」）。
+    allowWrites?: boolean;
+    triggerMethod?: string; // 触发页请求方法（白名单归一化，非法值回落 GET）
+    // 读写分离（对标 sqlmap --second-url / --second-method / --second-data）：读取阶段的请求
+    // 发往 secondUrl、用 secondMethod（引擎 resolveSecondOrderMethod 做过白名单 + 幂等门）、
+    // 携带 secondData。★ 这三个字段在 2026-09-23 之前**三条路径全不可达**（CLI 不能设、
+    // REST clamp 不保留、UI 无入口）—— 而 SecondOrderDetector._trigger 一直在读它们。
+    secondMethod?: string;
+    secondData?: string;
+  };
   // 站内链接爬取深度（对标 sqlmap --crawl=<depth>）：0=关闭，1-3=深度
   crawlDepth?: number;
   // 授权范围（[P0-SEC] scope 硬约束）：CIDR/域名/URL 前缀列表；空/缺省 = 不启用。
@@ -266,6 +303,20 @@ export interface ScanConfig {
   // 使用者少测两类注入点，报告只会写「未检出」。
   testPath?: boolean;
   testHeaders?: boolean;
+  // ── [2026-09-23 UI-REACH] 授权与安全护栏（两键默认值即安全默认，但 UI 必须能看见并改）──
+  // productionMode（默认 **true**）：把目标当**生产**系统 —— 高危池（写文件 / RCE / 永久改配置 /
+  // DoS）只有在 confirmDestructive===true 时才投放，否则跳过并在 report.summary.constraints 记一条。
+  // 设为 false 是**显式脱离护栏**（打靶场 / 自建演练环境）：注册表 risk≥3 即投放并打 warn。
+  // ⚠️ 这两键不是可选调优项：UI 缺它们时，界面用户既无法「确认授权后投放高危载荷」，
+  // 也无法「显式声明这是靶场」，而报告只会写「未检出」—— 能力被默认值锁死（与 OOB 同一形态）。
+  productionMode?: boolean;
+  confirmDestructive?: boolean;
+  // ── [2026-09-23 UI-REACH] 请求节奏（对标 sqlmap --delay / --max-requests）──
+  // delay：每次请求间的**固定**延时（秒；引擎侧 httpClient 夹到上限 60），用于规避 WAF 频率限制。
+  // 与 ratePerSec 的令牌桶是两套机制（固定间隔 vs 平均速率），不是重复项。
+  delay?: number;
+  // maxReq：本次扫描的**总请求上限**（0 = 不限），达到即停 —— 靶场与大目标上的安全阀。
+  maxReq?: number;
   // [2026-09-23 E2] 枚举 / 拖库动作族。undefined = 不启用（引擎走既有全量提取分支，零行为变化）。
   extractScope?: ExtractScopeConfig | null;
   // payload 白名单（对标 --test-filter）：逗号分隔的注册表 id 子串，大小写不敏感；空 = 不过滤。

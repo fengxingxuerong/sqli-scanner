@@ -81,6 +81,11 @@ const GATES = [
   // （结论看着更漂亮）；反向则会被拉低而变红。故与引用完整性并列成一条可跑判据。
   { id: 'lint', name: '红队靶点清单一致性（真值链）', cmd: 'npm run targets:check' },
   { id: 'lint', name: '文档数字口径（README ↔ _facts.json）', cmd: 'npm run facts:check' },
+  // README **内部**口径自洽：同一事实被写多处时必须互相一致（与上一条互补 ——
+  // facts:check 管的是「README ↔ 实测采集」，本条管的是「README 内部各处之间」）。
+  // 实测第一例：方言分层的三处表述在 Oracle/MSSQL 升级后只改了两处，概览行残留
+  // 「4 种真实 + 11 种模板」→ 对外低估自己，且两个三元组和都等于 18，肉眼看不出破绽。
+  { id: 'lint', name: 'README 内部口径自洽（方言分层三处表述）', cmd: 'node scripts/readme-consistency.mjs' },
   // CRS 执行器保真度：本仓 WAF 数字全部出自自实现 SecRule 执行器（本机无 Docker/Go，跑不了真
   // ModSecurity/Coraza），所以"执行器像不像 CRS"必须有外部真值兜住 —— 这里用 CRS 官方回归集。
   // 不需要 MySQL，故与 lint 同组（真 CI 里也应放在 lint job）。
