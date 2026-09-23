@@ -164,6 +164,11 @@ const KNOWN_MISSING_UI_KEYS = new Set([
   // httpClient.js:820），而 ratePerSec 早就在面板上。再暴露一个限速旋钮只会让使用者分不清
   // 哪个在生效 —— 同样效果已有入口，故不算能力缺失，作为「显式承认的债」留在此处。
   'reqRate',
+  // 报错模板按机制族裁剪（2026-09-23 新增的性能开关）。**默认关**（默认全量）：
+  // CI 实测裁剪会让 CRS PL1 技术位 8 → 6，本仓口径是「不用检出能力换请求数」。
+  // 属「调优参数」而非「能力缺失」—— 不接 UI 不会造成假阴性（关着 = 历史全量行为），
+  // 故登记为此处显式承认的债，而不是强行塞进面板。
+  'compactErrorTemplates',
   // 响应判定多指标（--string/--not-string/--code/--regexp/--titles 的同族）
   'matchText', 'matchCode', 'matchRegexp', 'trueRegexp', 'falseRegexp', 'matchTitle', 'predictOutput',
   // 动态块 / 错误原文留存
