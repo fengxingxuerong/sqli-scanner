@@ -13,6 +13,32 @@ export interface DetectedTarget {
   bodyText: string;
 }
 
+// ── 请求行首行：方法集与「HTTP 版本是否可选」──────────────────────────────
+// [SERVER-PARITY 2026-09-23] 服务端权威实现在 `server/src/core/requestFileParser.js:25`：
+//   /^\s*(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS|TRACE|CONNECT)\s+(\S+)(?:\s+HTTP\/[\d.]+)?/i
+// 前端此前**要求 HTTP 版本必填**，服务端可选 → 从 Burp 直接粘贴的「无版本」报文在 UI 上判非法、
+// 引擎却扫得了（同一份粘贴文本，两端结论不同）。现已对齐「版本可选」这一条。
+//
+// 方法集分两套，且**都窄于服务端**，这是有意的：
+//   · PARSER（7 个）：`parseRequestFile` 首行 —— 用于「请求文件导入」按钮，导入后要还原 method。
+//   · DETECT（5 个）：`tryAutoDetect` / `detectFromRequest` / `looksLikeRawRequest` ——
+//     它们返回 `DetectedTarget.method: MethodType`，而 `shared/types.ts` 的 MethodType 只有 5 个
+//     （它同时驱动 UI 的「请求方法」下拉框）。把 TRACE/CONNECT 塞进 MethodType 会让用户能
+//     选一个「扫不出注入且不该由本工具发」的方法，代价远大于收益。
+//   服务端多出的 TRACE / CONNECT 因此**有意不支持**，前端是服务端的子集 ——
+//   这个差异由 src/tests/requestParser.serverParity.test.ts 登记并守卫（任一侧改动都会红）。
+export const REQUEST_LINE_METHODS_PARSER = [
+  'GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS',
+] as const;
+export const REQUEST_LINE_METHODS_DETECT = [
+  'GET', 'POST', 'PUT', 'PATCH', 'DELETE',
+] as const;
+/** HTTP 版本可选：兼容 Burp 等抓包工具粘贴出的无版本请求行 */
+const RE_BUILD = (methods: readonly string[]) =>
+  new RegExp(`^\\s*(${methods.join('|')})\\s+(\\S+)(?:\\s+HTTP\\/[\\d.]+)?`, 'i');
+const RE_PARSER = RE_BUILD(REQUEST_LINE_METHODS_PARSER);
+const RE_DETECT = RE_BUILD(REQUEST_LINE_METHODS_DETECT);
+
 // ── 常见浏览器噪声请求头（自动识别时剔除） ──
 const NOISE_HEADERS = [
   'host', 'content-length', 'accept', 'accept-encoding', 'accept-language',
@@ -158,7 +184,7 @@ export function extractBodyFields(
 function detectFromRequest(text: string): DetectedTarget | null {
   const lines = text.split(/\r?\n/);
   const first = lines[0] ?? '';
-  const m = /^\s*(GET|POST|PUT|PATCH|DELETE)\s+(\S+)\s+HTTP\//i.exec(first);
+  const m = RE_DETECT.exec(first);
   if (!m) return null;
   const method = m[1].toUpperCase() as MethodType;
   let target = m[2];
@@ -233,12 +259,12 @@ export function tryAutoDetect(input: string): DetectedTarget | null {
   const t = input.trim();
   if (!t) return null;
   if (/^curl\b/i.test(t)) return detectFromCurl(t);
-  if (/^\s*(GET|POST|PUT|PATCH|DELETE)\s+\S+\s+HTTP\//i.test(t)) return detectFromRequest(t);
+  if (RE_DETECT.test(t)) return detectFromRequest(t);
   return null;
 }
 
 export function looksLikeRawRequest(input: string): boolean {
-  return /^\s*(GET|POST|PUT|PATCH|DELETE)\s+\S+\s+HTTP\//i.test(input.trim());
+  return RE_DETECT.test(input.trim());
 }
 
 // ── 对标 sqlmap -r：解析完整 HTTP 请求文本 → 结构化目标 ──
@@ -262,10 +288,10 @@ export function parseRequestFile(text: string): ParsedRequest | null {
   const trimmed = (text ?? '').replace(/^\uFEFF/, '').trim();
   if (!trimmed) return null;
   const lines = trimmed.split(/\r?\n/);
-  const m = /^\s*(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s+(\S+)\s+HTTP\/[\d.]+/i.exec(lines[0] ?? '');
+  const m = RE_PARSER.exec(lines[0] ?? '');
   if (!m) return null;
   const detected = tryAutoDetect(trimmed);
-  if (!detected) return null; // 缺 Host 头等 → 复用既有降级逻辑
+  if (!detected) return null; // 缺 Host 头、或方法在 DETECT 集之外（HEAD/OPTIONS/TRACE/CONNECT）→ 沿用既有降级逻辑
 
   // 提取 query params（注入候选）
   const params: Record<string, string> = {};

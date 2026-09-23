@@ -14,7 +14,11 @@ import { applyTampers } from '../tamper/applyTampers.js';
 import { logger } from '../logger.js';
 // [A2-2026-09-21] 拦截判定与逐词画像/定向选链统一收敛到 blockProfile：
 // 原来 looksBlocked 定义在本文件，新模块若各写一份就会出现"两处口径漂移"（本仓高频病）。
-import { looksBlocked, profileBlockedTokens, rankChainsByProfile } from './blockProfile.js';
+import { looksBlocked, profileBlockedTokens } from './blockProfile.js';
+// [接线 2026-09-23] T1/T2 的产出（语义索引 + 定向变异）正式接进验链流程。
+// buildCandidateChains 内部先走既有 rankChainsByProfile 重排静态链、再追加生成链，
+// 故**静态链整体保持在前** —— 新逻辑无效时前 MAX_CHAINS 条与改造前完全一致（保守回退）。
+import { buildCandidateChains } from './bypass/searcher.js';
 
 const MAX_CHAINS = 3; // 最多验证 3 条候选链（预算约束）
 
@@ -79,7 +83,13 @@ export async function verifyTamperChains({ httpClient, target, point, chains, co
     //    现在先花预算做逐词画像（哪些词被拦），再按「能消除被拦词」重排候选。
     //    成本纪律：**仅在此分支发生** —— 目标不敏感时（上面 allRawBlocked=false 已返回）零额外请求。
     const profile = await profileBlockedTokens({ httpClient, target, point, config, baseLen, timeoutMs });
-    const ranked = profile.blocked.length ? rankChainsByProfile(list, profile.blocked) : list.slice();
+    // [接线 2026-09-23] 画像 → 候选池。**零额外请求**：只用已拿到的画像做纯计算，
+    // 请求数仍由下面的 MAX_CHAINS 截断决定，与改造前相同。
+    // 生成链排在静态链之后，故静态链仍是首选（新逻辑无效 = 自动退化回改造前）。
+    const ranked = buildCandidateChains(list, profile.blocked, {
+      dbms: point?.dbms || undefined,
+      maxGenerated: MAX_CHAINS,
+    });
 
     // 4) 逐链验证：任一探针套链后未被拦截 → 该链有效（strict：只认硬拦截）
     for (const chain of ranked.slice(0, MAX_CHAINS)) {

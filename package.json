@@ -64,6 +64,7 @@
     "real-verify": "node e2e/real-world-lab/verify.mjs",
     "test:detection": "node e2e/detection-runner/run.js",
     "acceptance": "node e2e/acceptance.mjs",
+    "perf:budget": "node e2e/perf/request-budget.probe.mjs",
     "lab:redteam": "node e2e/redteam-lab/env.mjs",
     "redteam:truth": "node e2e/redteam-lab/selftest.mjs",
     "redteam:r1": "node e2e/redteam-lab/run-scan.mjs r1",

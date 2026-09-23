@@ -1,6 +1,7 @@
 {
-  "__size__": {
-    "server/src/core/httpClient.js": 1115
+  "__size__": {},
+  "__size_bytes__": {
+    "server/src/engine/payloadRegistry.js": 171220
   },
   "__cycles__": [],
   "__console__": {}

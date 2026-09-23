@@ -55,7 +55,22 @@ export function stripEchoedPayload(body, payload) {
   if (!body) return '';
   let t = normalizeEcho(body);
   if (!payload) return t;
+  // [P0-FIX 2026-09-17 外溢 2026-09-23] 变体集合必须覆盖**转义型回显**：
+  // 目标若先把用户输入做 SQL 转义再回显，响应里的 payload 是它的转义形态
+  // （recall-lab `/escape` 实测回显 `alice'' AND extractvalue(...)`，
+  //  而原文是 `alice' AND extractvalue(...)`）——只按原文剔，剔不干净，
+  // 于是 payload 自带的关键词继续命中判据信号 → 安全点误报。
+  // 常见转义只有两种：单引号翻倍（SQL 标准）与反斜杠转义（MySQL/PHP addslashes 系）。
+  //
+  // 这段修复原先只写在 ErrorDetector 的私有副本里（故只有报错通道受益），
+  // 而共享版一直是弱版本 —— 本文件的另外三个调用方（边界探测 / 布尔比对 / 定库）
+  // 面对的是同一种污染，却没拿到同一个修复。
   const variants = new Set([String(payload), normalizeEcho(payload)]);
+  for (const v of [...variants]) {
+    if (!v) continue;
+    variants.add(v.replace(/'/g, "''")); // SQL 转义：' → ''
+    variants.add(v.replace(/'/g, "\\'")); // 反斜杠转义：' → \'
+  }
   try {
     variants.add(encodeURIComponent(payload));
   } catch { /* 非法字符忽略 */ }

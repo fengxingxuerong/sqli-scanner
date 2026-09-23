@@ -1,4 +1,36 @@
-import type { RiskLevel, TechniqueType, ScanConfig, SqlmapConfig } from './types';
+import type { RiskLevel, TechniqueType, ScanConfig, SqlmapConfig, ExtractScopeMode } from './types';
+
+/**
+ * [2026-09-23 E2] 枚举 / 拖库动作表（对标 sqlmap 的枚举开关）。
+ *
+ * `needs` 声明该动作会用到的输入项 —— UI 据此禁用无关输入框，避免「填了表名但选的动作不看表名」
+ * 这种「填了没用」的困惑（本仓对「勾了没生效」这类断链有专门纪律）。
+ * 与 CLI 的对应关系见 server/bin/cli/config.js:314 buildExtractScope（同一套 mode 名）。
+ */
+export const EXTRACT_SCOPE_OPTIONS: { value: ExtractScopeMode; needs: ExtractScopeField[] }[] = [
+  { value: 'dbs', needs: [] },
+  { value: 'tables', needs: ['dbs'] },
+  { value: 'columns', needs: ['dbs', 'tables'] },
+  { value: 'dump', needs: ['dbs', 'tables', 'cols'] },
+  { value: 'dumpAll', needs: [] },
+  { value: 'commonTables', needs: ['dbs'] },
+  { value: 'commonColumns', needs: ['dbs', 'tables'] },
+  { value: 'search', needs: ['keyword'] },
+  { value: 'currentDb', needs: [] },
+  { value: 'currentUser', needs: [] },
+  { value: 'hostname', needs: [] },
+  { value: 'isDba', needs: [] },
+  { value: 'users', needs: [] },
+  { value: 'passwords', needs: [] },
+  { value: 'schema', needs: ['dbs', 'tables'] },
+  { value: 'privileges', needs: [] },
+  { value: 'roles', needs: [] },
+  { value: 'count', needs: ['dbs', 'tables'] },
+];
+
+/** 枚举动作会用到的输入项（与 ExtractScopeConfig 的子字段同名） */
+export type ExtractScopeField = 'dbs' | 'tables' | 'cols' | 'keyword';
+
 
 /** 检测技术列表（UI 勾选项；inline 内联查询对标 sqlmap Q，默认不勾选，需用户显式开启） */
 export const TECHNIQUES: TechniqueType[] = ['union', 'error', 'boolean', 'time', 'stacked', 'inline'];
@@ -45,6 +77,11 @@ export const DEFAULT_CONFIG: ScanConfig = {
   // 输入校验跳过（后端 defaults.validationSkip 同为 true）：参数被白名单拦死时短路跳过，
   // UI 开关默认勾选；关闭后对被拦死的点也照跑完整检测（审计场景）。
   validationSkip: true,
+  // [2026-09-23] 注入点范围：默认只测 query + body（与 TargetParser 的默认一致）。
+  // 注意后端还有一条隐式规则：level ≥ 3 时 testHeaders 会自动生效（TargetParser.js:129），
+  // 因此这两个开关的语义是「在 level 门控之外**强制**追加」，不是「唯一入口」。
+  testPath: false,
+  testHeaders: false,
 };
 
 // ── [P0-FIX 2026-09-09] /api/scan/start 的 config 契约：单一事实来源 ────────────────
@@ -66,10 +103,20 @@ export const SCAN_CONFIG_KEYS = [
   // 检测强度与 payload
   'level', 'risk', 'techniques', 'prefix', 'suffix', 'dbms',
   'prefilter', 'skipStatic', 'prefilterSinglePoint', 'useRegistry', 'testFilter', 'testSkip',
+  // [2026-09-23] 注入点范围：默认只测 query + body；这两键显式开启后追加 path 段与请求头。
+  // 此前引擎已消费（TargetParser）、REST 白名单也已收（2026-09-20 CFG-REACH），
+  // 唯独 UI 没有入口 → 使用者少测两类注入点，且报告只写「未检出」（能力缺失，不是便利开关）。
+  'testPath', 'testHeaders',
   // 盲注响应判定锚点（字符串，不是布尔）
   'matchString', 'notString',
   // 数据提取
   'enableExtract',
+  // [2026-09-23 E2] 枚举 / 拖库动作族（对标 sqlmap --dbs/--tables/--columns/--dump/--dump-all/
+  // --users/--passwords/--current-db/--current-user/--hostname/--is-dba/--schema/--privileges/
+  // --roles/--count/--search/--common-tables/--common-columns）。
+  // 此前这条链断在**两处**：引擎能跑、CLI 能用，但 REST 白名单没收该键（传了静默丢弃）、
+  // UI 也没有入口 → Web/桌面/API 三端完全拿不到枚举与拖库能力。
+  'extractScope',
   // 爬虫 / 会话 / 非 SQL 注入
   'crawlDepth', 'sessionFile', 'sessionDefault', 'noSql',
   // 出口层（代理 / 证书 / 授权范围）
@@ -121,9 +168,12 @@ export const SCAN_CONFIG_VALUE_TYPES: Record<ScanConfigKey, ScanConfigValueType>
   skipStatic: 'boolean',
   prefilterSinglePoint: 'boolean',
   useRegistry: 'boolean',
+  testPath: 'boolean',
+  testHeaders: 'boolean',
   auth: 'object',
   noSql: 'object',
   wafEvasion: 'object',
+  extractScope: 'object',
 };
 
 /**

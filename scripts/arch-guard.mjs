@@ -25,6 +25,14 @@ const HARD_MAX_LINES = 2000; // 任何情况下都不得越过（含基线内文
 // 实测教训：本门禁首次上线后就误伤过两次合理提交（httpClient +12 是 ratePerSec 语义修复、
 // cli.js +19 是 CSRF 会话层与 --skip 新功能）。超过容差才视为"膨胀"需先瘦身或显式更新基线。
 const GRACE_LINES = 30;
+// [2026-09-23] 补第二判据：**字节数**。
+// 行数会系统性漏掉「数据密集型」文件 —— `payloadRegistry.js` 只有 983 行（低于 1200 上限），
+// 却有 167.2 KB（平均 174 字节/行，567 行超 200 字符，是第二名 httpClient.js 的 2.7 倍）。
+// 纯按行数管，它永远绿灯；而 SEA/sidecar 打包体积、AST 解析开销、diff 可读性都只跟**字节**有关。
+// 「门禁看不见它声称在管的东西」是比「没有门禁」更隐蔽的形态，故此处两侧都量。
+const MAX_BYTES = 100 * 1024; // 100 KB：超过即视为技术债（须进基线或拆分）
+const HARD_MAX_BYTES = 256 * 1024; // 256 KB：任何情况下都不得越过（含基线内）
+const GRACE_BYTES = 16 * 1024; // 16 KB 容差：小幅数据增长不该让门禁变红
 const BASELINE_PATH = path.join('scripts', '.arch-baseline.json');
 
 const SCAN_DIRS = [
@@ -52,31 +60,40 @@ function lineCount(rel) {
   return t.split('\n').length;
 }
 
+function byteCount(rel) {
+  return fs.statSync(path.join(ROOT, rel)).size;
+}
+
 // ---------- ① 体积 ----------
-function checkSize(files, baseline) {
+// 两个维度并行：行数管「代码复杂度」，字节管「数据/打包成本」。两者不是同一件事，
+// 只量其中一个都会留盲区（见 MAX_BYTES 处的注释）。
+function checkSize(files, baselineLines, baselineBytes = {}) {
   const violations = [];
-  const oversize = [];
-  for (const f of files) {
-    const n = lineCount(f);
-    if (n > HARD_MAX_LINES) {
-      violations.push(`${f}：${n} 行，越过硬上限 ${HARD_MAX_LINES} 行（必须拆分）`);
-      continue;
+  const oversize = new Map(); // file → [{ kind, value, base }]
+
+  const dimension = (f, kind, value, fmt, max, hardMax, grace, base) => {
+    const pretty = fmt(value);
+    if (value > hardMax) {
+      violations.push(`${f}：${pretty}，越过硬上限 ${fmt(hardMax)}（必须拆分）`);
+      return;
     }
-    if (n <= MAX_LINES) continue;
-    const base = baseline[f];
+    if (value <= max) return;
     if (base === undefined) {
-      violations.push(`${f}：${n} 行，超过 ${MAX_LINES} 行且不在基线内（新债，必须拆分或说明）`);
-    } else if (n > base + GRACE_LINES) {
-      violations.push(`${f}：${n} 行 > 基线 ${base} + 容差 ${GRACE_LINES}（膨胀 ${n - base} 行，请先瘦身或显式更新基线）`);
-    } else if (n > base) {
-      oversize.push({ file: f, lines: n, baseline: base }); // 容差内增长：列出提示，不算违规
+      violations.push(`${f}：${pretty}，超过 ${fmt(max)} 且不在基线内（新债，必须拆分或说明）`);
+    } else if (value > base + grace) {
+      violations.push(`${f}：${pretty} > 基线 ${fmt(base)} + 容差 ${fmt(grace)}（膨胀，请先瘦身或显式更新基线）`);
     } else {
-      oversize.push({ file: f, lines: n, baseline: base });
+      if (!oversize.has(f)) oversize.set(f, []);
+      oversize.get(f).push({ kind, value, fmt, base });
     }
+  };
+
+  for (const f of files) {
+    dimension(f, '行数', lineCount(f), (v) => `${v} 行`, MAX_LINES, HARD_MAX_LINES, GRACE_LINES, baselineLines[f]);
+    dimension(f, '体积', byteCount(f), (v) => `${(v / 1024).toFixed(1)} KB`, MAX_BYTES, HARD_MAX_BYTES, GRACE_BYTES, baselineBytes[f]);
   }
-  // 基线里已瘦身完成的（可选：提示下调基线）
-  const shrunk = oversize.filter((o) => o.lines < o.baseline);
-  return { violations, oversize, shrunk };
+
+  return { violations, oversize };
 }
 
 // ---------- ② 循环依赖 ----------
@@ -184,18 +201,22 @@ function cycleKey(cycle) {
 }
 
 function loadBaseline() {
-  if (!fs.existsSync(path.join(ROOT, BASELINE_PATH))) return { __size__: {}, __cycles__: [], __console__: {} };
+  const empty = { __size__: {}, __size_bytes__: {}, __cycles__: [], __console__: {} };
+  if (!fs.existsSync(path.join(ROOT, BASELINE_PATH))) return empty;
   const raw = JSON.parse(fs.readFileSync(path.join(ROOT, BASELINE_PATH), 'utf8'));
-  // 兼容旧版（只有体积基线）
-  if (raw.__size__ || raw.__cycles__ || raw.__console__) return { __size__: {}, __cycles__: [], __console__: {}, ...raw };
-  return { __size__: raw, __cycles__: [], __console__: {} };
+  // 兼容旧版（只有行数体积基线）
+  if (raw.__size__ || raw.__cycles__ || raw.__console__) return { ...empty, ...raw, __size_bytes__: raw.__size_bytes__ || {} };
+  return { ...empty, __size__: raw };
 }
 
 if (process.argv.includes('--update')) {
   const nextSize = {};
+  const nextBytes = {};
   for (const f of files) {
     const n = lineCount(f);
     if (n > MAX_LINES) nextSize[f] = n;
+    const b = byteCount(f);
+    if (b > MAX_BYTES) nextBytes[f] = b;
   }
   const nextCycles = findCycles(buildGraph(files)).map(cycleKey);
   const nextConsole = {};
@@ -203,12 +224,13 @@ if (process.argv.includes('--update')) {
     const file = hit.split(':')[0];
     nextConsole[file] = (nextConsole[file] || 0) + 1;
   }
-  const next = { __size__: nextSize, __cycles__: nextCycles, __console__: nextConsole };
+  const next = { __size__: nextSize, __size_bytes__: nextBytes, __cycles__: nextCycles, __console__: nextConsole };
   fs.mkdirSync(path.join(ROOT, 'scripts'), { recursive: true });
   fs.writeFileSync(path.join(ROOT, BASELINE_PATH), JSON.stringify(next, null, 2) + '\n');
   console.log(`基线已更新 → ${BASELINE_PATH}`);
-  console.log(`  体积超标 ${Object.keys(nextSize).length} 个 · 循环依赖 ${nextCycles.length} 条 · console ${Object.values(nextConsole).reduce((a, b) => a + b, 0)} 处`);
-  for (const [f, n] of Object.entries(nextSize)) console.log(`    [体积] ${n} 行  ${f}`);
+  console.log(`  行数超标 ${Object.keys(nextSize).length} 个 · 体积超标 ${Object.keys(nextBytes).length} 个 · 循环依赖 ${nextCycles.length} 条 · console ${Object.values(nextConsole).reduce((a, b) => a + b, 0)} 处`);
+  for (const [f, n] of Object.entries(nextSize)) console.log(`    [行数] ${n} 行  ${f}`);
+  for (const [f, b] of Object.entries(nextBytes)) console.log(`    [体积] ${(b / 1024).toFixed(1)} KB  ${f}`);
   for (const f of nextCycles) console.log(`    [循环] ${f}`);
   for (const [f, n] of Object.entries(nextConsole)) console.log(`    [console] ${n} 处  ${f}`);
   process.exit(0);
@@ -216,7 +238,7 @@ if (process.argv.includes('--update')) {
 
 const baseline = loadBaseline();
 
-const size = checkSize(files, baseline.__size__);
+const size = checkSize(files, baseline.__size__, baseline.__size_bytes__);
 const cycles = findCycles(buildGraph(files));
 const consoleHits = checkConsole(files);
 
@@ -242,16 +264,20 @@ if (newConsole.length) problems.push(['生产代码 console.*（新增）', newC
 const knownCycles = cycles.length - newCycles.length;
 
 console.log(`扫描 ${files.length} 个文件（server/src + server/bin + src）`);
-console.log(`阈值：单文件 ${MAX_LINES} 行（硬上限 ${HARD_MAX_LINES}）`);
+console.log(`阈值：单文件 ${MAX_LINES} 行（硬上限 ${HARD_MAX_LINES}）且 ${MAX_BYTES / 1024} KB（硬上限 ${HARD_MAX_BYTES / 1024} KB）`);
 console.log('');
 
-if (size.oversize.length) {
-  console.log(`基线内的技术债 ${size.oversize.length} 个（只减不增）：`);
-  for (const o of size.oversize) {
-    const delta = o.lines - o.baseline;
-    const tag = delta < 0 ? `（已瘦 ${-delta} 行，可下调基线）`
-      : delta > 0 ? `（容差内 +${delta} 行）` : '';
-    console.log(`  ${String(o.lines).padStart(5)} 行  ${o.file}${tag ? '  ' + tag : ''}`);
+if (size.oversize.size) {
+  console.log(`基线内的技术债 ${size.oversize.size} 个文件（只减不增）：`);
+  for (const [file, notes] of size.oversize) {
+    const summary = notes
+      .map((n) => {
+        const delta = n.value - n.base;
+        const tag = delta < 0 ? `（已瘦 ${n.fmt(-delta)}，可下调基线）` : delta > 0 ? `（容差内 +${n.fmt(delta)}）` : '';
+        return `${n.kind} ${n.fmt(n.value)}（基线 ${n.fmt(n.base)}）${tag}`;
+      })
+      .join(' · ');
+    console.log(`  ${file}  ${summary}`);
   }
   console.log('');
 }

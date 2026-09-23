@@ -1,6 +1,6 @@
 # sqli-scanner
 
-[![Tests](https://img.shields.io/badge/tests-2512%20passing-brightgreen)](#测试)
+[![Tests](https://img.shields.io/badge/tests-2553%20passing-brightgreen)](#测试)
 [![Dependencies](https://img.shields.io/badge/dependencies-0%20known%20vulns-brightgreen)](#环境变量)
 
 > CI 徽章待仓库地址确定后启用（当前 `OWNER/REPO` 是占位，占位链接会显示成"通过"，属误导，
@@ -300,10 +300,10 @@ backend/  ← Express + Node.js
 ## 测试
 
 ```bash
-# 前端测试（318 个用例）
+# 前端测试（331 个用例）
 npm test
 
-# 服务端测试（2197 个用例）
+# 服务端测试（2225 个用例）
 cd server && npm test
 
 # 全部测试
@@ -318,8 +318,8 @@ npm run test:all
 ## 项目状态
 
 - TypeScript: 零错误
-- 前端测试: 318/318 通过（覆盖率门禁 stmts 91.20 / branch 80.34 / func 72.29，阈值 88/77/67）
-- 服务端测试: 2197 用例（2194 pass / 0 fail / 3 skip，并发口径 2026-09-22 复测；3 skip 为环境依赖显式跳过。覆盖率 lines 90.04 / branch 76.88 / func 79.06，阈值 85/69/72）
+- 前端测试: 331/331 通过（覆盖率门禁 stmts 90.49 / branch 80.17 / func 71.42，阈值 88/77/67）
+- 服务端测试: 2225 用例（2222 pass / 0 fail / 3 skip，并发口径 2026-09-23 复测；3 skip 为环境依赖显式跳过。覆盖率 lines 90.16 / branch 77.00 / func 79.30，阈值 85/69/72）
 - 一键扫描: `npm run scan -- -u <url>`（CLI 一条命令产出 HTML/JSON/Markdown 全套报告 + manifest，退出码可直接进 CI 门禁）
 - Tamper 插件: 228 个（含 v24 增量 20 个，对齐 sqlmap 官方 tamper 全集，含官方 CRS/libinjection 实测组合 uniontable+odbcbrace）
 - WAF 绕过能力: 200+ 插件链式组合，覆盖 62 个 WAF 厂商指纹识别 + 推荐
