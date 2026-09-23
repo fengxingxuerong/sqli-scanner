@@ -27,14 +27,13 @@ test('差距3: 高频库在前（MySQL/PG/MSSQL/Oracle 等先于边缘库）', (
 // 而真实扫描里绝大多数点是不命中的 —— 实测单点 148 → 111 请求（-25%，error 62 → 25）。
 // 新语义：默认档按报错机制族有界裁剪（覆盖全部机制），高阶档 `{compact:false}` 仍全量。
 // 「不许丢机制族」等不变量由 tests/errorDetector.compact.test.js 钉住。
-test('差距3: dbms 已知时默认档有界裁剪、高阶档不截断', () => {
+test('差距3: dbms 已知时默认全量；显式 compact 才有界裁剪', () => {
   const all = PAYLOADS.MySQL.error;
-  const compact = pickErrorTemplates('MySQL', {});
-  assert.ok(compact.length < all.length, `默认档应小于全量（现 ${compact.length}/${all.length}）`);
-  assert.ok(compact.length <= 24, `默认档应有界（现 ${compact.length}）`);
+  // 默认全量：CI 实测 CRS PL1 技术位 8 → 6（WAF 场景需要完整弹药），故不拿能力换请求数
+  assert.deepEqual(pickErrorTemplates('MySQL', {}), all, '默认档应原样返回全部模板');
+  const compact = pickErrorTemplates('MySQL', { compact: true });
+  assert.ok(compact.length < all.length && compact.length <= 24, `裁剪档应有界（现 ${compact.length}）`);
   assert.equal(compact[0], all[0], '最高收益模板不得被挤掉');
-  // 高阶档（level/risk ≥3，或显式关闭裁剪）保持全量 —— 调优空间留给愿意多花请求的人
-  assert.deepEqual(pickErrorTemplates('MySQL', { compact: false }), all, '高阶档应原样返回全部模板');
 });
 
 // 可解析的注入值取回（同其它检测测试）

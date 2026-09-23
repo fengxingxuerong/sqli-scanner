@@ -137,12 +137,16 @@ export class ErrorDetector extends Detector {
       // 注册表无命中时回退到扁平数组（保证未声明的 DBMS 不空跑）
       if (templates.length) return templates;
     }
-    // 高阶档（level/risk ≥ 3，或显式 fullErrorTemplates）不裁剪 —— 调优空间留给愿意多花请求的人
+    // [2026-09-23 口径修正] 初版做成「默认档就裁」，CI 立刻给出代价：**CRS PL1 技术位 8 → 6**。
+    // 干净场景零损失是本地与 CI 双证，但 WAF 场景确实需要更多同机制不同形态的弹药 ——
+    // 「不用检出能力换请求数」是本仓口径，故改为**默认全量，显式开启才裁**。
+    // 高阶档（level/risk ≥ 3）也强制全量：拉高档位本就是「我愿意多花请求」的语义。
     const cfg = ctx.config || {};
     const level = Number(cfg.level) || 1;
     const risk = Number(cfg.risk) || 1;
-    const full = level >= 3 || risk >= 3 || cfg.fullErrorTemplates === true;
-    return pickErrorTemplates(dbms, { compact: !full });
+    const compact =
+      cfg.compactErrorTemplates === true && level < 3 && risk < 3 && cfg.fullErrorTemplates !== true;
+    return pickErrorTemplates(dbms, { compact });
   }
 
   // 逐模板探测：报错命中 + 基线剔除 + 二次发送确认；返回 { payload, match, body } 或 null
@@ -281,9 +285,12 @@ export function pickErrorTemplates(dbms, opts = {}) {
     // [PERF 2026-09-23] 已知 dbms 时原实现**整包返回**（MySQL 61 条全发）。
     // 命中即停让「能注入的点」很便宜，但**不命中的点会把整包走完** —— 真实扫描里
     // 绝大多数点是不命中的，这才是 error 通道 62 条请求的来源。
-    // 默认档按机制族裁剪（覆盖全部机制，有界 24 条）；高阶档（level/risk ≥3 或显式 full）
-    // 走全量 —— 调优空间留给愿意多花请求的人，默认档不背漏检风险。
-    if (opts.compact === false) return all;
+    // [口径修正 2026-09-23，CI acceptance 反馈] 裁剪**必须显式 opt-in**（`compact === true`），
+    // 默认维持历史全量行为。初版做成"默认档就裁"，CI 立刻给出代价：
+    //   CRS 人工挂链 A/B off/on 均 6（基线 ≥8）、自动选链 6（基线 ≥8）→ **WAF 场景掉 2 个技术位**。
+    // 本仓口径是「不用检出能力换请求数」：默认全量，确知目标无 WAF 或追求请求预算时再显式开启
+    // `config.compactErrorTemplates`（引擎侧 _resolveErrorTemplates 还会在 level/risk ≥3 时强制全量）。
+    if (opts.compact !== true) return all;
     return compactErrorTemplates(all, opts).tpls;
   }
   const out = [];

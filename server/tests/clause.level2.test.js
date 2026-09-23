@@ -291,8 +291,9 @@ test('ErrorDetector：level=1 仅主模板轮（请求数 = 1 基线 + 主模板
     return { res, calls };
   };
   // [2026-09-23] 主模板数**不再写死为 PAYLOADS.MySQL.error.length**：
-  // 默认档（level=1）已按报错机制族裁剪（61 → 24），写死 62 会让这条用例随任何模板增删而
-  // 假红/假绿 —— 与本项目「写死的对照数会长期说谎」同一教训。改为**向生产同一函数取数**。
+  // 写死 62 会让这条用例随任何模板增删而假红/假绿 —— 与本项目「写死的对照数会长期说谎」同一教训。
+  // 改为**向生产同一函数取数**；口径：报错模板裁剪已是**显式 opt-in**（默认全量），
+  // 不传参即全量（61），与默认档扫描路径的取数一致。
   const mainTplCount = pickErrorTemplates('MySQL', {}).length;
   const low = await run({ timeoutMs: 5000, level: 1 });
   assert.equal(low.res.vulnerable, false);

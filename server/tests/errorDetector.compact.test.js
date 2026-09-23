@@ -69,11 +69,16 @@ test('④ 保持原相对顺序（原数组顺序 ≈ 历史收益序，打乱�
   assert.equal(r.tpls[0], all[0]);
 });
 
-test('⑤ 高阶档（level/risk ≥3）不得裁剪 —— 调优空间留给愿意多花请求的人', () => {
-  assert.equal(pickErrorTemplates('MySQL', { compact: false }).length, PAYLOADS.MySQL.error.length);
-  // 默认档确实更小
-  const compacted = pickErrorTemplates('MySQL', {}).length;
-  assert.ok(compacted < PAYLOADS.MySQL.error.length, `默认档应裁剪（现在 ${compacted} 条）`);
+// [口径修正 2026-09-23] 初版是「默认档就裁」，CI 立刻给出代价：CRS PL1 技术位 8 → 6
+// （干净场景零损失，但 WAF 场景需要更多同机制不同形态的弹药）。
+// 本仓口径：**不用检出能力换请求数** → 默认全量，显式 compact 才裁。
+test('⑤ 默认档不裁剪；显式 compact 才裁；compact:false 恒全量', () => {
+  const all = PAYLOADS.MySQL.error;
+  assert.equal(pickErrorTemplates('MySQL', {}).length, all.length, '默认档应全量（能力优先）');
+  assert.equal(pickErrorTemplates('MySQL', { compact: false }).length, all.length);
+  const compacted = pickErrorTemplates('MySQL', { compact: true }).length;
+  assert.ok(compacted < all.length, `显式开启后应变小（现在 ${compacted}/${all.length}）`);
+  assert.ok(compacted <= 24);
 });
 
 test('⑥ 小模板集不裁剪（避免无意义计算 + 顺序/语义扰动）', () => {
