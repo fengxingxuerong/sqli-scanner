@@ -35,6 +35,13 @@ const SCENARIOS = [
   { name: 'like', desc: 'LIKE 上下文（%\' 闭合，P1-3 修复验证）', target: () => ({ url: `${BASE}/like?q=keyboard` }), must: ['boolean'], nice: ['error', 'union'] },
   { name: 'orderby', desc: 'ORDER BY 位置注入（子句轮需 level≥2）', target: () => ({ url: `${BASE}/orderby?sort=id` }), must: ['boolean'], nice: [], cfg: { level: 2 } },
   { name: 'blind', desc: '布尔盲注（错误吞掉，无回显）', target: () => ({ url: `${BASE}/blind?uid=1` }), must: ['boolean'], nice: [] },
+  // ⚠️ [FLAKY 2026-09-23 实测] 本场景在 CI（ubuntu + MySQL 8.0.46 容器）上**间歇失败**：
+  //   同一份代码，16:34 那轮 `检出=[time] miss=[boolean]`（FAIL，耗时 6345ms），
+  //   16:50 原地 rerun 同一 job → PASS=10/FAIL=0。即 `/noisy` 的 boolean 判定会随
+  //   **宿主负载/时序**抖动（强动态页本就靠差异稳定性判布尔，是最脆的一类）。
+  //   ⛔ 不要把它降级成 nice 了事 —— 那会让门禁对这块永远失明。正确处置是**修布尔判定的
+  //   抗噪性**（噪声页的采样数/阈值/去噪），并把本注释连同复跑证据一起删掉。
+  //   现状（如实）：门禁含 1 个已知 flaky 项，红灯出现时**先 rerun 再看**是否是它。
   { name: 'noisy', desc: '强动态页布尔盲注（todo#38：高密度动态内容 + 注入）', target: () => ({ url: `${BASE}/noisy?uid=1` }), must: ['boolean'], nice: [] },
   { name: 'time', desc: '时间盲注（内容恒定）', target: () => ({ url: `${BASE}/time?tid=1` }), must: ['time'], nice: [] },
   // stacked/inline 为 opt-in 技术（默认 techniques 不含），需显式指定
