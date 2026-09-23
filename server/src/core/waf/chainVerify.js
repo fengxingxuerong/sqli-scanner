@@ -18,9 +18,16 @@ import { looksBlocked, profileBlockedTokens } from './blockProfile.js';
 // [接线 2026-09-23] T1/T2 的产出（语义索引 + 定向变异）正式接进验链流程。
 // buildCandidateChains 内部先走既有 rankChainsByProfile 重排静态链、再追加生成链，
 // 故**静态链整体保持在前** —— 新逻辑无效时前 MAX_CHAINS 条与改造前完全一致（保守回退）。
-import { buildCandidateChains } from './bypass/searcher.js';
+import { buildCandidateChains, isGeneratedChain } from './bypass/searcher.js';
+import { rankChainsByProfile } from './blockProfile.js';
 
 const MAX_CHAINS = 3; // 最多验证 3 条候选链（预算约束）
+// [A2-ENDPOINT 2026-09-23] 定向生成的链占用几个验证名额。
+// ⚠️ 为什么必须**显式留名额**：`list`（OPERATOR_SWAP_CHAINS）有 4 条静态链，
+// 而 MAX_CHAINS=3 只取前三 —— 生成链被追加在静态链**之后**（保守回退的设计），
+// 于是它永远落在第 5 位、**一次也不会被验证**，A2 等于接了线却从未生效。
+// 留 1 个名额后：仍是「静态链优先」（前 2 条）+「生成链 1 条」，验证总条数不变（预算纪律）。
+const GENERATED_SLOTS = 1;
 
 /**
  * 对候选 tamper 链做探针验证。
@@ -29,11 +36,24 @@ const MAX_CHAINS = 3; // 最多验证 3 条候选链（预算约束）
  * @param {object} p.target 扫描目标
  * @param {object} p.point 探测点（取未命中点中的第一个）
  * @param {Array<{vendor:string, plugins:string[]}>} p.chains wafRecommend 输出（按置信度序）
- * @param {object} p.config 扫描配置（timeoutMs/cookieJar 等透传）
+ * @param {object} [p.config] 扫描配置（timeoutMs/cookieJar 等透传）
  * @param {number} [p.timeoutMs] 探针超时（默认 6000）
+ * @param {null|((e:{plugins:string[], vendor:string, generated:boolean, probe:string, blocked:boolean}) => void)} [p.onChainProbe]
+ *   [可观测性 2026-09-23] 每条候选链每发一次探针就回调一次。存在的理由：验链结果
+ *   （返回哪条链）无法回答「哪些链被**试过**」——而 A2 的验收判据恰恰是「生成链有没有
+ *   进入验证流程」，不是「它有没有赢」。没有这个回调就只能靠猜，与本项目「取数要能看见
+ *   它声称在管的东西」的纪律相悖。生产路径不传即为 no-op，零成本。
  * @returns {Promise<{vendor:string, plugins:string[]}|null>} 首条验证通过的链；全被拦返回 null
  */
-export async function verifyTamperChains({ httpClient, target, point, chains, config = {}, timeoutMs = 6000 }) {
+export async function verifyTamperChains({
+  httpClient,
+  target,
+  point,
+  chains,
+  config = {},
+  timeoutMs = 6000,
+  onChainProbe = null,
+}) {
   const list = Array.isArray(chains) ? chains.filter((c) => c && Array.isArray(c.plugins) && c.plugins.length) : [];
   if (!httpClient || !target || !point || list.length === 0) return null;
   const orig = point.originalValue || '1';
@@ -86,16 +106,44 @@ export async function verifyTamperChains({ httpClient, target, point, chains, co
     // [接线 2026-09-23] 画像 → 候选池。**零额外请求**：只用已拿到的画像做纯计算，
     // 请求数仍由下面的 MAX_CHAINS 截断决定，与改造前相同。
     // 生成链排在静态链之后，故静态链仍是首选（新逻辑无效 = 自动退化回改造前）。
-    const ranked = buildCandidateChains(list, profile.blocked, {
+    //
+    // [A2-ENDPOINT 2026-09-23] 关键改动：**显式给生成链留 GENERATED_SLOTS 个名额**。
+    // 不改这一处的话，`ranked` = [4 条静态链 ..., 生成链 ...]，而下面只验前 3 条 →
+    // 生成链永远排在第 5 位、一次也不会被发请求验证（A2 接了线但从未生效）。
+    // 现在池子 = 静态链前 (MAX_CHAINS - GENERATED_SLOTS) 条 + 生成链前 GENERATED_SLOTS 条，
+    // **验证总条数仍是 MAX_CHAINS**（预算不变），静态链仍在前（回退语义不变）。
+    const bypassSearch = config?.wafEvasion?.bypassSearch !== false;
+    const merged = buildCandidateChains(list, profile.blocked, {
       dbms: point?.dbms || undefined,
       maxGenerated: MAX_CHAINS,
     });
+    let ranked;
+    if (bypassSearch) {
+      const statics = merged.filter((c) => !isGeneratedChain(c.vendor));
+      const generated = merged.filter((c) => isGeneratedChain(c.vendor));
+      ranked = [...statics.slice(0, MAX_CHAINS - GENERATED_SLOTS), ...generated.slice(0, GENERATED_SLOTS)];
+    } else {
+      // 关闭档 = 只有静态链（既有 A2-1 的按画像重排），用于 A/B 对照与回归定位
+      ranked = rankChainsByProfile(list, profile.blocked).slice(0, MAX_CHAINS);
+    }
 
     // 4) 逐链验证：任一探针套链后未被拦截 → 该链有效（strict：只认硬拦截）
     for (const chain of ranked.slice(0, MAX_CHAINS)) {
       for (const pv of probeValues) {
         const t = await send(pv, chain.plugins);
-        if (!looksBlocked(t.res, baseLen, { strict: true })) {
+        const blocked = looksBlocked(t.res, baseLen, { strict: true });
+        if (onChainProbe) {
+          try {
+            onChainProbe({
+              plugins: chain.plugins,
+              vendor: chain.vendor,
+              generated: isGeneratedChain(chain.vendor),
+              probe: pv,
+              blocked,
+            });
+          } catch { /* 观察者的异常不得影响验链 */ }
+        }
+        if (!blocked) {
           logger.info(
             `WAF 链验证：[${chain.plugins.join(',')}] 探针放行（${t.elapsed}ms），候选共 ${list.length} 条` +
               (profile.blocked.length ? `（画像被拦：${profile.blocked.join('/')}）` : '')

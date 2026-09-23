@@ -29,15 +29,15 @@ function classify(opts) {
   return 'baseline';
 }
 
-/** 记录调用序列的 mock client */
-function makeClient(map) {
+/** 记录调用序列的 mock client（fallback 默认放行，可显式改成"其余一律被拦"） */
+function makeClient(map, fallback = OK) {
   const calls = [];
   return {
     calls,
     async request(opts) {
       const kind = classify(opts);
       calls.push(kind);
-      const r = map[kind] ?? OK;
+      const r = map[kind] ?? fallback;
       return typeof r === 'function' ? r() : r;
     },
   };
@@ -80,6 +80,74 @@ test('dbms 参数透传：指定 MySQL 时不会选出明显不适用于该库�
   const out = buildCandidateChains(chains, ['and', 'or'], { dbms: 'MySQL' });
   // 至少不该抛错，且每条链的插件都已注册（由 mergeCandidateChains 内部的 validateChain 保证）
   for (const c of out) assert.ok(Array.isArray(c.plugins) && c.plugins.length);
+});
+
+// [2026-09-23] 下面这条是**上一条的补丁**，起因是一次真实的假绿：
+// 上一条喂的是 1 条静态链，而生产路径喂 `OPERATOR_SWAP_CHAINS`（4 条）。
+// `chainVerify` 只验前 MAX_CHAINS=3 条，生成链被追加在静态链之后 → 落在第 5 位、
+// **一次也不会被验证**；1 条静态链的场景恰好让生成链排在第 2 位，盲区被完全绕开。
+// 教训（本仓第二次同类）：**单测的输入规模必须等于生产输入规模**，否则"生成链能顶上"
+// 这种断言在真实调用里可能永远不成立。
+test('生产真实输入（4 条静态链）下，生成链也必须拿到验证名额', async () => {
+  const { OPERATOR_SWAP_CHAINS } = await import('../src/core/waf/wafRecommend.js');
+  assert.ok(
+    OPERATOR_SWAP_CHAINS.length > 3,
+    `本用例的前提是静态链多于 MAX_CHAINS(3)；当前 ${OPERATOR_SWAP_CHAINS.length} 条。` +
+      '若哪天减到 3 条以内，本用例的盲区前提消失，请改写它而不是删掉。',
+  );
+
+  // 全部非基线请求一律被拦：裸探针被拦（进入画像分支）→ 所有词被拦（生成链有弹药）
+  // → 所有链验证也失败（返回 null），但**被验证过**这件事由回调记录下来，正是判据所在。
+  const client = makeClient({ baseline: OK }, BLOCKED);
+  const probes = [];
+  const picked = await verifyTamperChains({
+    httpClient: client,
+    target,
+    point,
+    chains: OPERATOR_SWAP_CHAINS.map((c) => ({ vendor: 'generic-block', plugins: [...c] })),
+    config: { wafEvasion: { bypassSearch: true } },
+    onChainProbe: (e) => probes.push(e),
+  });
+
+  // ⚠️ 不断言 picked === null：classify() 只按明文形态分类，而生成链（如编码族）变换后的
+  // 请求在它眼里就是 'baseline'（放行）。**采纳了生成链同样是"生成链被验证过"的证据** ——
+  // 硬钉 null 会把这条好不容易暴露出来的成功路径判成失败（把判据钉在环境巧合上 = 脆弱断言）。
+  // 采纳的链必须是**真被验证过**的链（不允许凭空返回一条没发过请求的链）
+  if (picked) {
+    assert.ok(
+      probes.some((p) => p.plugins.join('+') === picked.plugins.join('+')),
+      `采纳的链 ${picked.plugins.join('+')} 不在被验证过的集合里`,
+    );
+  }
+  const generated = probes.filter((p) => p.generated);
+  assert.ok(
+    generated.length >= 1,
+    `4 条静态链占满前 3 个名额时，生成链仍应至少被验证 1 次；实际被验证的链：` +
+      `${JSON.stringify(probes.map((p) => ({ plugins: p.plugins, generated: p.generated })))}`,
+  );
+  // 预算纪律：开启定向搜索不得增加验证条数（仍是 MAX_CHAINS 条链 × 探针数）
+  const chainsTried = new Set(probes.map((p) => p.plugins.join('+')));
+  assert.ok(chainsTried.size <= 3, `验证链条数 ${chainsTried.size} 超过 MAX_CHAINS=3`);
+});
+
+test('关闭开关（bypassSearch=false）→ 生成链不进池（回归到 2026-09-21 行为）', async () => {
+  const { OPERATOR_SWAP_CHAINS } = await import('../src/core/waf/wafRecommend.js');
+  const client = makeClient({ baseline: OK }, BLOCKED);
+  const probes = [];
+  await verifyTamperChains({
+    httpClient: client,
+    target,
+    point,
+    chains: OPERATOR_SWAP_CHAINS.map((c) => ({ vendor: 'generic-block', plugins: [...c] })),
+    config: { wafEvasion: { bypassSearch: false } },
+    onChainProbe: (e) => probes.push(e),
+  });
+  assert.equal(
+    probes.filter((p) => p.generated).length,
+    0,
+    `关闭档不得出现生成链，实际：${JSON.stringify(probes.filter((p) => p.generated).map((p) => p.plugins))}`,
+  );
+  assert.ok(probes.length > 0, '关闭档仍应验证静态链（不能变成什么都不做）');
 });
 
 // —— 集成层：verifyTamperChains 真的会用上生成链 ——

@@ -346,6 +346,43 @@ const SUITES = [
     },
   },
   {
+    // [A2-ENDPOINT 2026-09-23] 定向变异搜索（T2）的端到端验收。
+    // 与上面两个 CRS 套件**不重复**：它们答的是「绕过之后检出多少」，本套件答的是
+    // 「引擎到底有没有去试那些按被拦词组合出来的链」——没有它，A2 可以接了线却一次都不生效，
+    // 而所有套件照样绿（真实成因：静态候选 4 条 > MAX_CHAINS 3 条，生成链永远排在第 5 位）。
+    // A/B 双向：开档必须验到生成链、关档必须一条都没有，且两档验证总条数相同（预算纪律）。
+    // 自包含（不需要 MySQL/DB）—— 验的是选链层，故任何环境都该跑。
+    id: 'waf-bypass-search',
+    title: 'WAF 定向变异搜索（A2）端到端',
+    needs: [],
+    run: () => run('node', ['e2e/waf-real/waf-bypass-search.e2e.mjs'], {}),
+    assert: (out) => {
+      // 前提不满足（裸探针没被拦 / 靶场没起来）→ 一条断言都没执行，算 SKIP 不是通过
+      if (/\[BLOCKED\]/.test(out)) {
+        return {
+          pass: false,
+          skipped: true,
+          skipReason: (/\[BLOCKED\] (.+)/.exec(out) || [, 'CRS 未生效，未执行断言'])[1].trim(),
+        };
+      }
+      const on = num(/生成链验证 A档=(\d+) 条/, out);
+      const off = num(/B档=(\d+) 条/, out);
+      const nOn = num(/验证总数 on=(\d+)/, out);
+      const nOff = num(/off=(\d+)/, out);
+      const reason =
+        on == null || off == null ? '取不到生成链计数（输出格式变了？）'
+          : on < 1 ? `A 档未验证到任何生成链（A2 未生效：静态链占满名额？）`
+          : off !== 0 ? `B 档（关闭开关）仍出现 ${off} 条生成链 —— 开关失效`
+          : nOn !== nOff ? `开启定向搜索改变了验证条数（${nOn} vs ${nOff}）—— 违反预算纪律`
+          : null;
+      return {
+        facts: { 'A档生成链': on, 'B档生成链': off, 验证条数: `${nOn}/${nOff}` },
+        pass: reason === null,
+        reason,
+      };
+    },
+  },
+  {
     id: 'redteam',
     title: '红队实战评测（ground-truth 真值对照 + sqlmap 同题）',
     needs: [],          // 自己会拉起 env（缺 PG 时才落回 SKIP），不再要求外部常驻
