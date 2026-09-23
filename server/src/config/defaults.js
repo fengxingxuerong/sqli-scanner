@@ -203,6 +203,13 @@ export const defaults = {
     // 用于 A/B 对照与问题定位（e2e/waf-real/waf-bypass-search.e2e.mjs 两档都跑）。
     // 预算纪律：开启**不增加**验证条数（仍是 MAX_CHAINS=3，只是把最后 1 个名额给生成链）。
     bypassSearch: true,
+    // [报错模板裁剪 2026-09-23] **默认关**：实测代价是真实的 ——
+    //   干净场景（real-mysql / pentest / detection / 红队 r2 19/19）**零损失**，
+    //   单点请求数 148 → 111（error 62 → 25，-25%）；
+    //   **但 CRS PL1 场景掉了 2 个技术位（off/on 8 → 6，自动选链 8 → 6）** ——
+    //   WAF 下需要更多「同机制不同形态」的弹药才能找到不被拦的那条。
+    // 取舍口径：**不用检出能力换请求数**。故默认全量；确知目标无 WAF / 追求请求预算时显式开启。
+    compactErrorTemplates: false,
     // [P1-FIX 2026-09-10] 关键词「静默过滤」型绕过重跑（error-only 点 → 套插入式双写链）。
     // 默认开启：实测靶场 bl（删 union/select/and/or/--）由 `[error]` 提升为 `[error,boolean]`，
     // 依赖三项使能——重跑前重探闭合前缀、链验证只认硬拦截、候选纳入 error-only 点

@@ -120,6 +120,8 @@ const KNOWN_CFG_KEYS = new Set([
   // sanitizeUnionFrom（仅 [A-Za-z0-9_ .$] 与括号），REST 再校一遍只会多一处会漂移的口径。
   'hex', // --hex：字符常量十六进制化（Extractor.searchColumnData → buildLikePattern）
   'unionFrom', // --union-from：强制 UNION FROM 子句（blindExtractor/Extractor/injection 四处消费）
+  // [2026-09-23] 报错模板按机制族裁剪（默认 false：见 defaults.js 里写明的实测代价）
+  'compactErrorTemplates',
   // [2026-09-23 E2] 枚举 / 拖库动作族：--dbs/--tables/--columns/--dump/--dump-all/--users/
   // --passwords/--current-db/--current-user/--hostname/--is-dba/--schema/--privileges/--roles/
   // --count/--search/--common-tables/--common-columns。CLI 一路把参数解析成 config.extractScope
