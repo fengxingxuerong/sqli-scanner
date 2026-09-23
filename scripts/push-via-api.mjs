@@ -113,7 +113,9 @@ async function api(method, path, body) {
     try {
       return await apiOnce(method, path, body);
     } catch (e) {
-      const retriable = /fetch failed|UND_ERR_SOCKET|other side closed|ECONNRESET|50[0-9]|timeout|EAI_AGAIN/i
+      // [2026-09-23] `400 malformed request` 也要重试：实测同一 blob 内容（98562B）原样重发即 201，
+      // 说明是本机代理链路上的偶发传输损坏，不是内容问题。blob 上传幂等（同内容 → 同 sha），可安全重试。
+      const retriable = /fetch failed|UND_ERR_SOCKET|other side closed|ECONNRESET|50[0-9]|timeout|EAI_AGAIN|malformed request/i
         .test(String(e?.message || e));
       if (!retriable || i === 6) throw e;
       const wait = Math.min(2000 * i, 8000);
@@ -211,8 +213,16 @@ for (const sha of owned) {
   if (git('cat-file', '-t', sha) !== 'blob') continue;
   try { await api('GET', `/git/blobs/${sha}`); uploadedBlob.set(sha, sha); continue; } catch { /* 需上传 */ }
   const buf = gitBuf('cat-file', 'blob', sha);
-  const r = await api('POST', '/git/blobs', { content: buf.toString('base64'), encoding: 'base64' });
-  uploadedBlob.set(sha, r.sha);
+  // [2026-09-23] 400 malformed 曾在这里发生且无上下文 → 失败时把「哪个对象、多大、开头字节」
+  // 打出来，否则只能盲猜（此前误以为是 Content-Type 缺失，实测小 blob 不带也 201）。
+  try {
+    const r = await api('POST', '/git/blobs', { content: buf.toString('base64'), encoding: 'base64' });
+    uploadedBlob.set(sha, r.sha);
+  } catch (e) {
+    throw new Error(
+      `blob ${sha}（${buf.length}B，${git('cat-file', '-t', sha)}，head=${buf.subarray(0, 32).toString('hex')}）上传失败：${e.message}`
+    );
+  }
   console.log(`  blob ${sha.slice(0, 8)} ${buf.length}B`);
 }
 
