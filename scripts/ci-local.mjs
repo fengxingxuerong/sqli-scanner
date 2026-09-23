@@ -110,7 +110,7 @@ const GATES = [
   { id: 'recall-lab', name: 'recall-lab e2e', cmd: 'node e2e/recall-lab/recall.e2e.js' },
   { id: 'release-smoke', name: '发布冒烟（生产配置组合）', cmd: 'node e2e/release/release-smoke.mjs' },
   { id: 'sidecar-build', name: 'sidecar SEA 构建 + 空目录真扫冒烟', cmd: 'npm run build:sidecar', slow: true },
-  { id: 'acceptance', name: 'acceptance（12 套件，需 3306；redteam/文件读写会自己起环境）',
+  { id: 'acceptance', name: 'acceptance（13 套件，需 3306；redteam/文件读写会自己起环境）',
     cmd: 'npm run acceptance', needsPorts: [3306], slow: true },
   // 随机化真值电池：召回率报 Wilson 95%CI 下界（40 例 ≈6-8 分钟）。见 ci.yml 同名步骤的理由。
   { id: 'acceptance', name: '随机化真值电池（召回 CI 下界 + 良性零误报）',

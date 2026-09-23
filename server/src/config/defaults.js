@@ -197,6 +197,12 @@ export const defaults = {
     // 用算子替换族（OR→|| / AND→&& / =→RLIKE）重跑一轮。实测把关键词黑名单 WAF 场景
     // 从 0 检出拉到 boolean 命中。关闭：wafEvasion.adaptiveOnBlock=false。
     adaptiveOnBlock: true,
+    // [A2 2026-09-23] 定向变异搜索（语义索引 → 按被拦词组合生成候选链）**在验链时是否占用名额**。
+    // 默认开：静态候选表只有 4 条固定链，遇到「拦 union + select 且不引入新标点」这类组合时
+    // 表里可能根本没有对应解，生成链是唯一出路。关闭 → 只验静态链（回退到 2026-09-21 的行为），
+    // 用于 A/B 对照与问题定位（e2e/waf-real/waf-bypass-search.e2e.mjs 两档都跑）。
+    // 预算纪律：开启**不增加**验证条数（仍是 MAX_CHAINS=3，只是把最后 1 个名额给生成链）。
+    bypassSearch: true,
     // [P1-FIX 2026-09-10] 关键词「静默过滤」型绕过重跑（error-only 点 → 套插入式双写链）。
     // 默认开启：实测靶场 bl（删 union/select/and/or/--）由 `[error]` 提升为 `[error,boolean]`，
     // 依赖三项使能——重跑前重探闭合前缀、链验证只认硬拦截、候选纳入 error-only 点
