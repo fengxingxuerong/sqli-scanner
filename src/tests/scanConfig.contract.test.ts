@@ -46,13 +46,18 @@ describe('配置契约：面板 → 请求体 → 后端白名单', () => {
   const panelSrc = read('../components/ScanConfigPanel.tsx');
   const BACKEND_KNOWN_CFG_KEYS = backendKnownCfgKeys();
 
-  /** 面板实际会写的键：handle*('k') 与 store 直写 set('k', …) 两类写法 */
+  /** 面板实际会写的键：handle*('k') / store 直写 set('k', …) / 内联 onChange({ k: … }) 三类写法 */
   const panelKeys = (() => {
     const found = new Set<string>();
     const patterns = [
       /handle[A-Za-z]*\(\s*'([a-zA-Z]+)'/g,
       /(?:setConfig|updateConfig|patchConfig)\(\s*'([a-zA-Z]+)'/g,
       /\bset\(\s*'([a-zA-Z]+)'/g,
+      // [2026-09-23] 补这一类：面板里「选一个动作就整体替换某个对象键」的写法
+      // （如 extractScope 的 Select：`onChange({ extractScope: … })`）。
+      // 此前只认 handle*/setConfig/set()，这一种写法整类不在视野内 ——
+      // 「守卫看不见它声称在管的东西」是本仓反复出现的病灶形态，故补齐。
+      /onChange\(\s*\{\s*([a-zA-Z]+)\s*:/g,
     ];
     for (const re of patterns) {
       for (const m of panelSrc.matchAll(re)) found.add(m[1]);
@@ -120,6 +125,80 @@ describe('配置契约：面板 → 请求体 → 后端白名单', () => {
     expect(cfg.sessionFile).toBe('sqli-session-latest.json');
     // 快照里没有 scope 时不得凭空造一个「看起来受限制」的值
     expect('scope' in buildResumeConfig({ concurrency: 4 } as never)).toBe(false);
+  });
+
+// ④ 反向守卫 [2026-09-23]：后端**可达**但前端**无入口**的键，必须显式登记在这里。
+//
+// 为什么必须有：上面三条都是单向的（前端发的 ⊆ 后端认的）。反向从未被守卫过，于是
+// 「后端加了一个新参数，UI 永远不会出现它」这件事 CI 完全沉默 —— 使用者看到的形态是
+// 「REST 调它没反应」或「UI 上根本找不到开关」，而**没有任何一个测试会红**。
+// 本项目已经把这类断链踩了三批，前三批全靠人脑记住才补上。
+//
+// 登记表的作用不是「允许它们缺失」，而是**把缺失变成可见且可执行的技术债**：
+//   · 新键忘了接 UI → ④ 立刻红；
+//   · 有人把某键接进了 UI 却没从表里移除 → ⑤ 立刻红（登记表不得腐烂）；
+//   · 表里列了一个不存在的后端键 → ⑥ 立刻红。
+//
+// 这不是要不要补 UI 的判断（那是产品决策），而是「缺口清单必须随时准确」。
+const KNOWN_MISSING_UI_KEYS = new Set([
+  // 提取 / 拖库治理
+  'extractConcurrency', 'dumpConcurrency', 'dumpDatabaseConcurrency', 'dumpMaxRows', 'dumpRowLimit',
+  'dumpStart', 'dumpStop', 'maxColumnsGuess',
+  // 时间盲注标定与采样
+  'timeBlindSamples', 'timeBlindCalibrate', 'timeBlindCalibrateMin',
+  'timeBlindSleepSec', 'timeProbeSleepSec', 'timeExtractSleepSec',
+  // 布尔盲注二级判据 / 鲁棒性
+  'boolStableDiff', 'boolStableDiffSamples', 'blindRobust',
+  // 会话 / CSRF / 保活 / cookie
+  'crawlForms', 'safeUrl', 'safeFreq', 'csrfUrl', 'csrfTokenName', 'csrfMethod', 'csrfRefreshFreq',
+  'cookieJar', 'dropSetCookie', 'flushSession',
+  // 参数筛选 / 已知点 / 失效值
+  'skipParams', 'knownPoint', 'invalidValue', 'excludeSysdbs', 'nullConnection', 'paramDel',
+  // HTTP 层行为
+  'forceSsl', 'ignoreRedirects', 'hpp', 'activeWafProbe', 'trustProxyEnv', 'ssrfViaProxy', 'proxyBypassLocal',
+  // 限速
+  'delay', 'reqRate', 'maxReq',
+  // 响应判定多指标（--string/--not-string/--code/--regexp/--titles 的同族）
+  'matchText', 'matchCode', 'matchRegexp', 'trueRegexp', 'falseRegexp', 'matchTitle', 'predictOutput',
+  // 动态块 / 错误原文留存
+  'autoDynamicBlock', 'parseErrors', 'pocRedactAuth',
+  // 生产护栏（高危池确认位）
+  'productionMode', 'confirmDestructive',
+  // 高级姿势（--second-order / --oob / 声明式注册表之外的新 dilute 姿势）
+  'secondOrder', 'oob', 'freshQueries',
+  // 2026-09-20_CFG-REACH 那批「CLI 能设、引擎真读、REST 刚收」的键
+  // （testPath / testHeaders 已于 2026-09-23 接进 ScanConfigPanel 的「注入点范围」分组 → 从本表移除）
+  'noCast', 'dumpWhere', 'unionCols', 'hex', 'unionFrom',
+]);
+
+  it('④ 后端可达但前端无入口的键，必须登记在 KNOWN_MISSING_UI_KEYS（防新增键静默断链）', () => {
+    const uncovered = BACKEND_KNOWN_CFG_KEYS.filter(
+      (k) => !(SCAN_CONFIG_KEYS as readonly string[]).includes(k) && !KNOWN_MISSING_UI_KEYS.has(k)
+    );
+    expect(
+      uncovered,
+      `这些后端键在 UI 里没有任何入口，且未登记：${uncovered.join(', ')}\n` +
+        '要么把它接到 ScanConfigPanel 并登记进 SCAN_CONFIG_KEYS，要么加入 KNOWN_MISSING_UI_KEYS 显式承认这笔债。'
+    ).toEqual([]);
+  });
+
+  it('⑤ 登记表不得腐烂：已接进 UI 的键必须从 KNOWN_MISSING_UI_KEYS 移除', () => {
+    const stale = [...KNOWN_MISSING_UI_KEYS].filter((k) => (SCAN_CONFIG_KEYS as readonly string[]).includes(k));
+    expect(stale, `这些键 UI 已经有入口了，不应再记在「无入口」清单里：${stale.join(', ')}`).toEqual([]);
+  });
+
+  it('⑥ 登记表不得虚胖：表里列的键必须是真实的后端缺口（防判据漂移/假绿）', () => {
+    const backendSet = new Set(BACKEND_KNOWN_CFG_KEYS);
+    const bogus = [...KNOWN_MISSING_UI_KEYS].filter((k) => !backendSet.has(k));
+    expect(bogus, `登记了后端并不存在的键：${bogus.join(', ')}`).toEqual([]);
+    // 缺口数量应具备规模感：若后端键被大量删除导致差集骤减，说明提取逻辑或登记表已失同步
+    const actualUncovered = BACKEND_KNOWN_CFG_KEYS.filter(
+      (k) => !(SCAN_CONFIG_KEYS as readonly string[]).includes(k)
+    );
+    expect(actualUncovered.length).toBe(
+      KNOWN_MISSING_UI_KEYS.size,
+      '实际缺口数与登记表条目数不一致 —— 有键接上 UI 或后端删了键，请同步本表'
+    );
   });
 
   it('后端白名单提取有效（含安全关键键；防提取失效导致断言空转）', () => {

@@ -442,51 +442,9 @@ export async function extractByScope(sm, scanId, ctx, scope) {
   return data;
 }
 
-/** 合并两个提取结果数据对象（src 合并到 target） */
-export function mergeExtracted(target, src) {
-  if (!src) return;
-  // 防御：提取返回结构残缺（如桩/部分失败）时不抛错，仅合并已有字段
-  for (const db of (src.databases || [])) {
-    if (!target.databases.includes(db)) target.databases.push(db);
-  }
-  for (const [k, v] of Object.entries(src.tables || {})) target.tables[k] = v;
-  for (const [k, v] of Object.entries(src.columns || {})) target.columns[k] = v;
-  for (const [k, v] of Object.entries(src.rows || {})) target.rows[k] = v;
-  // 枚举模式专有字段（--current-db / --current-user / --count）
-  if (src.currentDb !== undefined) target.currentDb = src.currentDb;
-  if (src.currentUser !== undefined) target.currentUser = src.currentUser;
-  if (src.users !== undefined) target.users = src.users;
-  if (src.passwords !== undefined) target.passwords = src.passwords;
-  if (src.counts) target.counts = { ...(target.counts || {}), ...src.counts };
-  // 枚举模式专有字段（--hostname / --is-dba / --schema / --privileges / --roles）
-  if (src.hostname !== undefined) target.hostname = src.hostname;
-  if (src.isDba !== undefined) target.isDba = src.isDba;
-  if (src.userPrivs !== undefined) target.userPrivs = src.userPrivs;
-  if (src.roles !== undefined) target.roles = src.roles;
-  if (src.schemas) target.schemas = { ...(target.schemas || {}), ...src.schemas };
-  // [P0 2026-09-09] 「0 行未确认」标注透传（meta 形态：{ dumpUnconfirmed: ['db.t', …] }）
-  if (src.meta?.dumpUnconfirmed?.length) {
-    target.meta = target.meta || {};
-    const prev = Array.isArray(target.meta.dumpUnconfirmed) ? target.meta.dumpUnconfirmed : [];
-    target.meta.dumpUnconfirmed = [...new Set([...prev, ...src.meta.dumpUnconfirmed])];
-  }
-}
-
-/** 检查提取结果是否包含有效数据 */
-export function hasExtractedData(data) {
-  return !!(
-    (data.databases && data.databases.length) ||
-    (data.tables && Object.keys(data.tables).length) ||
-    (data.rows && Object.keys(data.rows).length) ||
-    data.currentDb ||
-    data.currentUser ||
-    data.users ||
-    data.passwords ||
-    data.hostname ||
-    data.isDba ||
-    data.userPrivs ||
-    data.roles ||
-    (data.schemas && Object.keys(data.schemas).length) ||
-    (data.counts && Object.values(data.counts).some((v) => v != null))
-  );
-}
+// [DEAD-CODE-FIX 2026-09-23] 此处原本还有一份 `mergeExtracted` / `hasExtractedData`
+// （`--search` 修复前的化石形态：缺 search 与 meta 合并分支），全仓零调用，已删除。
+// 现役唯一实现在 `scanHelpers.js`（createExtracted / mergeExtracted / mergeExtractedForResume /
+// hasData），由 ScanManager._mergeExtracted* 委托。**不要在这里重新声明同类函数**——
+// 「名字一样但行为是旧版」会让未来改 import 路径的人静默复活早已修掉的 P0
+// （search 结果丢失）。`server/tests/deadSymbols.guard.test.js` 钉住这两个名字不再出现。

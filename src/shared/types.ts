@@ -181,6 +181,30 @@ export interface HistoryRecord {
 }
 
 /** 扫描配置 */
+// ── [2026-09-23 E2] 枚举 / 拖库动作族（对标 sqlmap --dbs/--tables/--dump/--dump-all/…）──
+// 与引擎侧的契约形状（engine/extractScope.js:109 的 switch + ScanManager._extractByScope）：
+// 只有 mode 是必填，其余按所选动作填。后端形状校验见 scanRoutes 的 sanitizeExtractScope
+// （mode 白名单 + 数组去重/限长/限数量 + 拒控制字符；**不做字符集白名单**，因为引擎侧已 escSql）。
+export type ExtractScopeMode =
+  | 'dbs' | 'tables' | 'columns' | 'dump' | 'dumpAll'
+  | 'commonTables' | 'commonColumns' | 'search'
+  | 'currentDb' | 'currentUser' | 'hostname' | 'isDba'
+  | 'users' | 'passwords' | 'schema' | 'privileges' | 'roles' | 'count';
+
+export interface ExtractScopeConfig {
+  mode: ExtractScopeMode;
+  /** 目标数据库（多选）；留空 = 由引擎枚举 */
+  dbs?: string[];
+  /** 目标表（多选） */
+  tables?: string[];
+  /** 目标列（多选，仅 dump 用） */
+  cols?: string[];
+  /** search 模式的匹配关键字 */
+  keyword?: string;
+  /** 过滤系统库（默认 true，与 CLI 一致） */
+  excludeSysdbs?: boolean;
+}
+
 export interface ScanConfig {
   concurrency: number;
   timeoutMs: number;
@@ -234,6 +258,16 @@ export interface ScanConfig {
   // true = 走 PAYLOAD_REGISTRY 按 level/risk/dbms/testFilter/testSkip 精确筛选。
   // ★ testFilter / testSkip 只有在本键为 true 时才生效——面板必须把这条依赖讲清楚。
   useRegistry?: boolean;
+  // ── [2026-09-23] 注入点范围（对标 sqlmap 的 path/header 测试）──
+  // 默认只测 query + body。这两键显式开启后，TargetParser 会把 REST 路径段 / 请求头值
+  // 也当作候选注入点。后端还有一条隐式规则：level ≥ 3 时 testHeaders 自动生效
+  // （TargetParser.js:129），故本键语义是「在 level 门控之外强制开启」。
+  // 此前引擎已消费、REST 白名单已收（2026-09-20 CFG-REACH），但 UI 无入口 →
+  // 使用者少测两类注入点，报告只会写「未检出」。
+  testPath?: boolean;
+  testHeaders?: boolean;
+  // [2026-09-23 E2] 枚举 / 拖库动作族。undefined = 不启用（引擎走既有全量提取分支，零行为变化）。
+  extractScope?: ExtractScopeConfig | null;
   // payload 白名单（对标 --test-filter）：逗号分隔的注册表 id 子串，大小写不敏感；空 = 不过滤。
   testFilter?: string;
   // payload 黑名单（对标 --test-skip）：逗号分隔的 id 子串，命中即排除；空 = 不跳过。

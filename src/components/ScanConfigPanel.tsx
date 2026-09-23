@@ -19,10 +19,24 @@ import {
   Paper,
 } from '@mui/material';
 import { ExpandMore, ExpandLess, Settings } from '@mui/icons-material';
-import type { ScanConfig, EngineType, WafSuggestion, TechniqueType } from '../shared/types';
-import { TECHNIQUES, BUILTIN_DBMS_OPTIONS } from '../shared/constants';
+import type { ScanConfig, EngineType, WafSuggestion, TechniqueType, ExtractScopeMode, ExtractScopeConfig } from '../shared/types';
+import { TECHNIQUES, BUILTIN_DBMS_OPTIONS, EXTRACT_SCOPE_OPTIONS } from '../shared/constants';
+import type { ExtractScopeField } from '../shared/constants';
 import { parseScopeList } from '../shared/scanConfig';
 import WafTamperPanel from './WafTamperPanel';
+
+/** 枚举动作的输入项（顺序 = UI 展示顺序）。哪些项与当前动作相关由 EXTRACT_SCOPE_OPTIONS.needs 决定。 */
+const SCOPE_FIELDS: { key: ExtractScopeField; label: string }[] = [
+  { key: 'dbs', label: 'scanConfig.extractScopeDbs' },
+  { key: 'tables', label: 'scanConfig.extractScopeTables' },
+  { key: 'cols', label: 'scanConfig.extractScopeCols' },
+  { key: 'keyword', label: 'scanConfig.extractScopeKeyword' },
+];
+
+/** 该动作会用到哪些输入项 —— 用不到的置灰禁用，避免「填了但选了不看它的动作」这种白填。 */
+function scopeFieldsFor(mode: ExtractScopeMode): ExtractScopeField[] {
+  return EXTRACT_SCOPE_OPTIONS.find((o) => o.value === mode)?.needs ?? [];
+}
 
 interface ScanConfigPanelProps {
   config: ScanConfig;
@@ -50,6 +64,18 @@ export default function ScanConfigPanel({ config, mode, onChange, wafSuggestion 
   const handleText = (key: keyof ScanConfig) => (e: React.ChangeEvent<HTMLInputElement>) => {
     const v = e.target.value.trim();
     onChange({ [key]: v === '' ? undefined : v } as Partial<ScanConfig>);
+  };
+
+  // [2026-09-23 E2] 枚举动作的子字段更新：undefined 一律**删键**（而不是留个空值），
+  // 与其它配置「关闭态在请求体里干脆地没这个键」口径一致 —— 后端 sanitizeExtractScope
+  // 也是按「有值才写入」处理，两侧不会出现「有键无值」的中间态。
+  const setScopeField = (key: ExtractScopeField | 'excludeSysdbs', value: unknown) => {
+    const cur = config.extractScope;
+    if (!cur) return;
+    const next = { ...cur } as Record<string, unknown>;
+    if (value === undefined) delete next[key];
+    else next[key] = value;
+    onChange({ extractScope: next as unknown as ExtractScopeConfig });
   };
 
   // 授权范围：多行/逗号（或分号）分隔 → string[]；留空 = 不启用（发 undefined，后端零行为变化）
@@ -162,6 +188,31 @@ export default function ScanConfigPanel({ config, mode, onChange, wafSuggestion 
 
           <Divider />
 
+          {/* ── 注入点范围 ── */}
+          {/* [2026-09-23] 这两键此前「引擎已消费 / REST 白名单已收 / UI 无入口」：
+              能力在，用户拿不到。默认关（与 TargetParser 默认一致）。 */}
+          <Box>
+            <Typography variant="subtitle2" fontWeight={600} className="mb-3">{t('scanConfig.injectionScope')}</Typography>
+            <Stack spacing={2}>
+              <FormControlLabel
+                control={<Switch checked={config.testPath ?? false} onChange={handleToggle('testPath')} />}
+                label={t('scanConfig.testPathLabel')}
+              />
+              <Typography variant="caption" color="text.disabled">
+                {t('scanConfig.testPathHint')}
+              </Typography>
+              <FormControlLabel
+                control={<Switch checked={config.testHeaders ?? false} onChange={handleToggle('testHeaders')} />}
+                label={t('scanConfig.testHeadersLabel')}
+              />
+              <Typography variant="caption" color="text.disabled">
+                {t('scanConfig.testHeadersHint')}
+              </Typography>
+            </Stack>
+          </Box>
+
+          <Divider />
+
           {/* ── 请求控制 ── */}
           <Box>
             <Typography variant="subtitle2" fontWeight={600} className="mb-3">{t('scanConfig.requestControl')}</Typography>
@@ -199,6 +250,80 @@ export default function ScanConfigPanel({ config, mode, onChange, wafSuggestion 
                 {t('scanConfig.extractWarning')}
               </Alert>
             )}
+          </Box>
+
+          <Divider />
+
+          {/* ── 枚举与拖库 [2026-09-23 E2] ── */}
+          {/* 这条链此前断在两处：引擎能跑（engine/extractScope.js）、CLI 能用
+              （bin/cli/config.js:314），但 REST 白名单没收该键（传了静默丢弃）、UI 无入口
+              → Web / 桌面 / API 三端实际拿不到枚举与拖库能力。 */}
+          <Box>
+            <Typography variant="subtitle2" fontWeight={600} className="mb-3">{t('scanConfig.enumeration')}</Typography>
+            <Stack spacing={2}>
+              <FormControl size="small" fullWidth>
+                <InputLabel>{t('scanConfig.extractScopeLabel')}</InputLabel>
+                <Select
+                  value={config.extractScope?.mode ?? ''}
+                  label={t('scanConfig.extractScopeLabel')}
+                  onChange={(e) => {
+                    const v = e.target.value as ExtractScopeMode | '';
+                    // 留空 = 不启用：整键发 undefined（与其它开关「关闭态干净」口径一致）
+                    onChange({ extractScope: v === '' ? undefined : { ...(config.extractScope ?? {}), mode: v } });
+                  }}
+                >
+                  <MenuItem value="">{t('scanConfig.extractScopeNone')}</MenuItem>
+                  {EXTRACT_SCOPE_OPTIONS.map((o) => (
+                    <MenuItem key={o.value} value={o.value}>{t(`scanConfig.extractScopes.${o.value}`)}</MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+
+              {config.extractScope && (
+                <>
+                  <Typography variant="caption" color="text.disabled">
+                    {t('scanConfig.extractScopeHint')}
+                  </Typography>
+                  {SCOPE_FIELDS.map((f) => {
+                    const need = scopeFieldsFor(config.extractScope!.mode).includes(f.key);
+                    return (
+                      <Box key={f.key} sx={{ opacity: need ? 1 : 0.45 }}>
+                        <Typography variant="caption" color="text.secondary">{t(f.label)}</Typography>
+                        <input
+                          className="mt-1 w-full px-3 py-2 border rounded text-sm"
+                          aria-label={t(f.label)}
+                          disabled={!need}
+                          value={(f.key === 'keyword'
+                            ? (config.extractScope!.keyword ?? '')
+                            : ((config.extractScope![f.key as 'dbs' | 'tables' | 'cols'] ?? []) as string[]).join(', '))}
+                          onChange={(e) => {
+                            const raw = e.target.value;
+                            if (f.key === 'keyword') {
+                              setScopeField('keyword', raw.trim() || undefined);
+                            } else {
+                              const list = parseScopeList(raw);
+                              setScopeField(f.key, list.length ? list : undefined);
+                            }
+                          }}
+                        />
+                      </Box>
+                    );
+                  })}
+                  <FormControlLabel
+                    control={
+                      <Switch
+                        checked={config.extractScope.excludeSysdbs !== false}
+                        onChange={(e) => setScopeField('excludeSysdbs', e.target.checked)}
+                      />
+                    }
+                    label={t('scanConfig.extractScopeExcludeSys')}
+                  />
+                  <Alert severity="warning" variant="outlined">
+                    {t('scanConfig.extractWarning')}
+                  </Alert>
+                </>
+              )}
+            </Stack>
           </Box>
 
           <Divider />

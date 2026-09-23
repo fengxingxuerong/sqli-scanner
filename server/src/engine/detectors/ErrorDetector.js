@@ -3,6 +3,10 @@ import { createDetectionResult } from '../models.js';
 import { PAYLOADS, fillPayload, ERROR_SIG, ERROR_SIG_BY_DBMS, dbmsFromError, getClauseTemplates, CLAUSE_PAYLOADS } from '../payloads.js';
 import { selectPayloads, orderEntriesByBoundary } from '../payloadRegistry.js';
 import { extractErrorContext, extractSqlFragment } from '../parseErrors.js';
+// [UNIFY 2026-09-23] 回显归一化/剔除的唯一实现。本文件原先自留一份私有副本，
+// 与 echoStrip.js 是同一设施的两个版本且不等价（副本多 SQL 转义变体），
+// 造成「同一个 P0 只修了报错通道」。详见 ../echoStrip.js 文件头。
+import { stripEchoedPayload } from '../echoStrip.js';
 
 // 报错注入检测器
 // 思路：注入会触发数据库报错的 Payload，检测响应中是否出现数据库报错特征
@@ -197,66 +201,9 @@ export function pickErrorTemplates(dbms) {
   return out;
 }
 
-
-/**
- * 把响应归一化成「纯文本」：HTML 实体 → 字符 → URL 解码（两轮，防双重编码）。
- *
- * 为什么需要两段：Express 等框架回显 URL 时会做 HTML 转义，同一个单引号在响应里
- * 既可能是 &#39;（HTML 实体）也可能是 %27（URL 编码），只做其中一种都还原不出来。
- * @param {string} s
- * @returns {string}
- */
-function normalizeEcho(s) {
-  let t = String(s || '');
-  t = t.replace(/&#(\d+);/g, (_, d) => String.fromCharCode(Number(d) || 0))
-    .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => String.fromCharCode(parseInt(h, 16) || 0))
-    .replace(/&lt;/g, '<').replace(/&gt;/g, '>')
-    .replace(/&quot;/g, String.fromCharCode(34)).replace(/&apos;/g, String.fromCharCode(39))
-    .replace(/&amp;/g, '&');
-  for (let i = 0; i < 2; i++) {
-    try {
-      const d = decodeURIComponent(t.replace(/\+/g, ' '));
-      if (d !== t) t = d; else break;
-    } catch { break; }
-  }
-  return t;
-}
-
-/**
- * 剔除响应中被回显的 payload 原文，避免 payload 自我匹配。
- *
- * [P0-FIX 2026-09-16] 黑盒评测（e2e/blackbox-lab）发现的根因：path 注入时 payload 落在 URL 里，
- * 而 404/错误页普遍回显请求 URL，响应里于是出现 extractvalue / SQL syntax 这类
- * **payload 自带的关键词**，被 ERROR_SIG 匹配，误判成「数据库报错回显」。
- * 实测 --test-path 开启时 7 个安全点有 6 个因此误报，sqlmap 在同题上 0 误报。
- *
- * 要点：必须先归一化（HTML 实体 + URL 解码）再比对 —— 诊断实测响应形如
- *   Cannot GET /api/safe/error&#39;%20AND%20extractvalue(1,concat...
- * 单引号是 HTML 实体、空格是 URL 编码；前两次修复只做 URL 解码，故都无效。
- *
- * 只做字符串剔除，不改变 ERROR_SIG 语义；真报错来自数据库、与 payload 原文不是同一串，不受影响。
- * @param {string} body 响应体
- * @param {string} payload 本次注入的 payload
- * @returns {string}
- */
-function stripEchoedPayload(body, payload) {
-  if (!body || !payload) return body || '';
-  let best = normalizeEcho(body);
-  // [P0-FIX 2026-09-17] 回显变体覆盖面扩展：转义型防护（单引号 → '' ）把用户输入
-  // 原样回显时，响应里是 payload 的**转义变体**而非原文——recall-lab /escape 实测
-  // 回显 `alice'' AND extractvalue(...)`，原文 `alice' AND extractvalue(...)` 剔不掉
-  // → ERROR_SIG 命中 payload 自带关键词 → 安全点误报 High。除原文外，一并剔除
-  // 单引号翻倍（SQL 转义）与反斜杠转义两种常见变体。
-  const variants = new Set([payload, normalizeEcho(payload)]);
-  const escapeVariants = [...variants];
-  for (const v of escapeVariants) {
-    if (!v) continue;
-    variants.add(v.replace(/'/g, "''")); // SQL 转义：' → ''
-    variants.add(v.replace(/'/g, "\\'")); // 反斜杠转义：' → \'
-  }
-  try { variants.add(encodeURIComponent(payload)); } catch { /* noop */ }
-  for (const v of variants) {
-    if (v && v.length > 3) best = best.split(v).join('');
-  }
-  return best;
-}
+// [UNIFY 2026-09-23] 本文件原先在这里自留了 normalizeEcho / stripEchoedPayload 两份私有实现，
+// 与共享模块 ../echoStrip.js 是同一设施的两个版本，能力不等价（私有版多两个 SQL 转义变体，
+// 修的是 recall-lab `/escape` 安全点误报；共享版没有）→ 走共享版的另外三条链路
+// （Detector.js 边界探测 / blindExtractor 布尔比对 / DBFingerprinter 定库）拿不到同一个修复。
+// 现已统一：**变体集合上提到 echoStrip.js**，本文件改为 import。
+// 「不得再开 private 副本」由 server/tests/duplicateSymbol.guard.test.js 钉住。
