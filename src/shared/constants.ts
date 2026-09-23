@@ -119,6 +119,9 @@ export const SCAN_CONFIG_KEYS = [
   'extractScope',
   // 爬虫 / 会话 / 非 SQL 注入
   'crawlDepth', 'sessionFile', 'sessionDefault', 'noSql',
+  // [2026-09-23 UI-REACH] 两条**整通道**接进 UI（此前 REST 白名单与引擎都支持，
+  // 但前端只在 KNOWN_MISSING_UI_KEYS 里当债记着 → 界面用户永远测不到它们）
+  'oob', 'secondOrder',
   // 出口层（代理 / 证书 / 授权范围）
   'proxy', 'auth', 'insecureTls', 'validationSkip', 'scope',
   // WAF 规避（tamper 链等整块配置）
@@ -172,6 +175,9 @@ export const SCAN_CONFIG_VALUE_TYPES: Record<ScanConfigKey, ScanConfigValueType>
   testHeaders: 'boolean',
   auth: 'object',
   noSql: 'object',
+  // 嵌套对象：子字段形状由后端逐项 clamp（oob 的回调地址/端口、secondOrder 的触发页列表）
+  oob: 'object',
+  secondOrder: 'object',
   wafEvasion: 'object',
   extractScope: 'object',
 };

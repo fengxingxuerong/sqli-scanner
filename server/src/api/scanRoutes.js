@@ -487,6 +487,21 @@ export function sanitizeStart(body) {
       triggerMethod: so.triggerMethod,
       negativeControl: so.negativeControl !== false,
       oobTrigger: !!so.oobTrigger,
+      // [P0-REACH 2026-09-23] 读写分离二阶注入（对标 sqlmap --second-url/--second-method/--second-data）：
+      // 引擎在 SecondOrderDetector._trigger 里**真读**这三个字段（`so.secondUrl || url`、
+      // resolveSecondOrderMethod(so.secondMethod, …)、`so.secondData`），但本 clamp 此前不保留它们、
+      // CLI 也没有可设入口 → 该能力**三条路径全不可达**（CLI 不能设 / REST 传了被丢弃 / UI 更无入口）。
+      // 与 extractScope 那次是同一病灶：能力在，入口不在，而报告只会写「未检出」。
+      // ⚠️ 形状只做协议白名单 + 长度上限；**SSRF/授权范围校验在路由 handler 的 async 层**执行
+      // （与 triggerUrls 同一条链，见下方 secondUrl 校验段）—— 不能在这里放行未校验的 URL。
+      // 方法白名单刻意不在此重复：单一真相在引擎的 resolveSecondOrderMethod（含幂等门）。
+      secondUrl: typeof so.secondUrl === 'string' && /^https?:\/\//i.test(so.secondUrl)
+        ? so.secondUrl.slice(0, 2048)
+        : '',
+      secondMethod: typeof so.secondMethod === 'string' ? so.secondMethod.slice(0, 16) : undefined,
+      secondData: typeof so.secondData === 'string'
+        ? so.secondData.slice(0, 8192)
+        : (so.secondData && typeof so.secondData === 'object' ? so.secondData : null),
       // [todo#39 2026-09-11] 跨角色触发（读写分离身份）：存储与触发页可分属不同会话身份
       // （低权账号写入、高权账号读出是存储型注入的实战高发形态）。键值均须为字符串，
       // 过滤 __proto__/constructor/prototype 等危险键（对象字面量展开会沿原型链污染）。
@@ -851,6 +866,20 @@ export function createRoutes({ scanManager, eventBus: bus = eventBus, reportToke
           }
         }
         sanitized.config.secondOrder.triggerUrls = checked;
+      }
+      // [P0-REACH 2026-09-23] 读写分离的 secondUrl 与触发页**同级**：它同样会携带会话 Cookie
+      // 发出真实请求，故适用同一条 SSRF + 授权范围判据。校验不过就清空 —— 引擎侧
+      // `so.secondUrl || url` 恰好把空串当「回退触发页」，语义天然安全，不会带病进引擎。
+      const secondUrl = sanitized.config?.secondOrder?.secondUrl;
+      if (typeof secondUrl === 'string' && secondUrl) {
+        try {
+          await assertSafeHttpTarget(secondUrl);
+          const readScopeRules = parseScope(sanitized.config?.scope);
+          if (readScopeRules.enabled) assertInScope(secondUrl, readScopeRules);
+        } catch (e) {
+          logger.warn(`二阶读取页 ${secondUrl} 未通过 SSRF/授权范围校验，已清空（回退触发页）：${e.message}`);
+          sanitized.config.secondOrder.secondUrl = '';
+        }
       }
       const scanId = await sm.start(sanitized);
       // [P0-SEC] 把本次扫描的授权范围登记到 scopeGuard：HttpClient 在「每一跳重定向」前取用，
