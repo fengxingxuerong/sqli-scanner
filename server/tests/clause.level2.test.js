@@ -17,7 +17,7 @@ import {
   buildClausePairs,
 } from '../src/engine/payloads.js';
 import { BooleanBlindDetector } from '../src/engine/detectors/BooleanBlindDetector.js';
-import { ErrorDetector } from '../src/engine/detectors/ErrorDetector.js';
+import { ErrorDetector, pickErrorTemplates } from '../src/engine/detectors/ErrorDetector.js';
 import { TimeBlindDetector } from '../src/engine/detectors/TimeBlindDetector.js';
 
 const CLAUSE_KEYS = new Set(['where', 'orderby', 'groupby', 'having', 'limit']);
@@ -290,9 +290,13 @@ test('ErrorDetector：level=1 仅主模板轮（请求数 = 1 基线 + 主模板
     const res = await new ErrorDetector().detect(buildCtx(mock, { config }));
     return { res, calls };
   };
+  // [2026-09-23] 主模板数**不再写死为 PAYLOADS.MySQL.error.length**：
+  // 默认档（level=1）已按报错机制族裁剪（61 → 24），写死 62 会让这条用例随任何模板增删而
+  // 假红/假绿 —— 与本项目「写死的对照数会长期说谎」同一教训。改为**向生产同一函数取数**。
+  const mainTplCount = pickErrorTemplates('MySQL', {}).length;
   const low = await run({ timeoutMs: 5000, level: 1 });
   assert.equal(low.res.vulnerable, false);
-  assert.equal(low.calls.length, 1 + PAYLOADS.MySQL.error.length);
+  assert.equal(low.calls.length, 1 + mainTplCount);
   // 主 error 数组现含 LIMIT PROCEDURE ANALYSE 变体（深度扩容），level=1 会合法投放它；
   // 子句门控区分改为 clause-only 签名 `PROCEDURE ANALYSE(1,1)`（仅 CLAUSE_PAYLOADS.limit.error 有）。
   assert.ok(!low.calls.some((q) => q.includes('PROCEDURE ANALYSE(1,1)')), 'level=1 不应投放子句专属 LIMIT 变体');
@@ -300,7 +304,7 @@ test('ErrorDetector：level=1 仅主模板轮（请求数 = 1 基线 + 主模板
   const high = await run({ timeoutMs: 5000, level: 2 });
   assert.equal(high.res.vulnerable, false);
   const clauseErr = getClauseTemplates('MySQL', 'error', { maxPerClause: 2, maxTotal: 4 });
-  assert.equal(high.calls.length, 1 + PAYLOADS.MySQL.error.length + clauseErr.length);
+  assert.equal(high.calls.length, 1 + mainTplCount + clauseErr.length);
   assert.ok(high.calls.some((q) => q.includes('PROCEDURE ANALYSE(1,1)')), 'level=2 应投放 MySQL LIMIT 子句变体');
   assert.ok(high.calls.some((q) => q.includes(',(extractvalue(') || q.includes(',(updatexml(')), 'level=2 应投放 ORDER BY 变体');
 });
