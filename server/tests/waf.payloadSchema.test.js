@@ -104,6 +104,9 @@ test('单元：结构性错误被拦下（缺字段 / 越界 / 非法枚举）',
     [{ ...base, where: 'side' }, 'where 取值非法'],
     [{ ...base, template: '' }, 'template 必须是非空字符串'],
     [{ ...base, falseTemplate: 123 }, 'falseTemplate 若存在必须是字符串'],
+    [{ ...base, note: '' }, 'note 若存在必须是非空字符串'],
+    [{ ...base, note: '   ' }, 'note 若存在必须是非空字符串'],
+    [{ ...base, note: 123 }, 'note 若存在必须是非空字符串'],
     [{ ...base, boundary: 'not-array' }, 'boundary 必须是数组'],
     [{ ...base, minVersion: '5.7' }, 'minVersion 必须是数字或'],
     [null, '条目不是对象'],
@@ -120,6 +123,8 @@ test('单元：合法条目（含可选字段两种形态）通过', () => {
   assert.equal(validatePayloadEntry({ ...base, falseTemplate: '{ORIG} AND 1=2' }).ok, true);
   assert.equal(validatePayloadEntry({ ...base, minVersion: 5.7 }).ok, true);
   assert.equal(validatePayloadEntry({ ...base, maxVersion: { major: 8, minor: 0 } }).ok, true);
+  // note 是迁移自 JS 行内注释的知识字段：存在即须非空，且不影响通过
+  assert.equal(validatePayloadEntry({ ...base, note: '为什么加这条 payload' }).ok, true);
   // 不写可选字段也合法
   const minimal = { id: 'x', dbms: ['MySQL'], technique: 'union', level: 1, risk: 1, template: 't' };
   assert.equal(validatePayloadEntry(minimal).ok, true);

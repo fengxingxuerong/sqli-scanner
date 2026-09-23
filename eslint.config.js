@@ -67,7 +67,11 @@ export default [
   {
     files: ['**/*.{js,mjs,cjs}', 'server/**/*.js', 'e2e/**/*.js'],
     languageOptions: {
-      ecmaVersion: 2022,
+      // [E5-2 2026-09-23] 2022 → 2025：`payloads/registry.json` 用 import attributes 加载
+      // （`import data from './x.json' with { type: 'json' }`）。espree 在 2022/2024 下都报
+      // `Parsing error: Unexpected token with`（实测 espree 11.2.0），2025 起支持。
+      // 运行时（Node 22/24）与 tsc（module: NodeNext）均已实测可用。
+      ecmaVersion: 2025,
       sourceType: 'module',
       globals: nodeEnv,
     },

@@ -1,7 +1,7 @@
 {
   "__size__": {},
   "__size_bytes__": {
-    "server/src/engine/payloadRegistry.js": 171220
+    "server/src/engine/payloads/registry.json": 153714
   },
   "__cycles__": [],
   "__console__": {}

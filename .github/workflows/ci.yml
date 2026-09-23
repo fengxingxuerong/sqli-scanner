@@ -70,6 +70,16 @@ jobs:
       # 修法：npm run facts:refresh（实跑采集）→ npm run facts:fix（回写 README）
       - run: node scripts/facts-sync.mjs --check
         name: 文档数字口径（README ↔ docs/_facts.json）
+      # [P1-ADD 2026-09-23] README 内部口径自洽门禁：同一事实在 README 里被写了多处时，
+      # 各处必须互相一致。实测到的第一例：方言分层在「功能表概览行（三数 + 方言清单）」
+      # 「分层详表（三行）」「给客户的话（共 N 种）」三处各写一遍 —— Oracle / SQL Server
+      # 在 2026-09-14/15 升级为真实引擎验证时，详表与客户段改了，**概览行的「4 种真实 +
+      # 11 种模板」没改**。危害不是"数字错"而是**对外低估自己**，且 4+3+11=18 与 6+3+9=18
+      # 都自洽，读者看不出破绽。判据：从 README 文本机械解析三处后两两比对（含集合双向
+      # 比对与跨层重复检测），不依赖行号。--selftest 用构造样本自证判据不空转。
+      # 复现：npm run readme:check（自证：node scripts/readme-consistency.mjs --selftest）
+      - run: node scripts/readme-consistency.mjs
+        name: README 内部口径自洽（方言分层三处表述）
       # [P1-ADD 2026-09-19] CRS 执行器保真度门禁。本仓所有 WAF 绕过数字都出自**自实现的
       # SecRule 执行器**（crs-engine.js）——执行器若与官方规则不等价，那些数字全部无意义。
       # 判据不来自我们自己：跑 CRS 项目官方回归集（805 条带「该拦/不该拦」期望的用例），
