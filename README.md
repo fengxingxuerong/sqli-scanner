@@ -163,7 +163,9 @@ OWASP 分类统一为 `A03:2021-Injection`。**未收录的通道不会被静默
   连 DNS 都不发起）；② 目标主机需能对外发起 DNS 查询且解析路径可达攻击者 NS；③ Windows 下
   `.local` 被 mDNS 保留，测试域用 `.test` TLD。
 诚实边界：SQL Server xp_dirtree / Oracle UTL_HTTP 等其它库的 OOB 模板未真机验证；真实
-ModSecurity/商业云 WAF 环境未实测。
+ModSecurity/商业云 WAF 环境未实测。CRS 保真度口径（805 条官方回归用例）也只覆盖
+**query / 表单 body**：静态普查显示 942 家族装载的 66 条规则里有 54 条声明读 `XML:/*`，而本仓库的执行器不解析 XML ⇒
+那 99.3% 的一致率不能外推到 XML 接口（`npm run waf-fidelity` 会打印这条普查，别只看结论行）。
 
 **强动态页实测口径（2026-09-11 起）**：真 MySQL × `/noisy` 强动态靶点（动态内容占比 ~65%，
 时间戳/随机 hex/base36 矩阵 + 随机块序，`e2e/real-mysql-lab` lab-app.js）下布尔盲注稳定检出

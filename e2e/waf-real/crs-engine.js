@@ -153,6 +153,21 @@ export function parseCrsFile(confPath) {
       stats.unimplemented = (stats.unimplemented || 0) + 1;
       (stats.unimplementedIds ||= []).push(`${rule.id || '?'}:${opName}`);
     }
+    // [2026-09-24] 变量侧普查，与上面 operator 侧同一套路。
+    // 之前变量只有"落不进去就 push([])"的隐式行为，谁不支持没人知道 ——
+    // `ARGS_GET:fbclid` 就是例子：两条官方排除规则因此恒不命中，而症状表现为"942440 误报"。
+    // 判据与取值**共用 classifyVar**，避免"普查说支持、实际取不到"的两套真相。
+    for (const tok of rule.vars || []) {
+      const c = classifyVar(tok);
+      if (c.ok) continue;
+      const bucket = c.exclusion ? 'unhonoredExclusions' : 'unsupportedVars';
+      stats[bucket] = (stats[bucket] || 0) + 1;
+      const listKey = bucket === 'unsupportedVars' ? 'unsupportedVarIds' : 'unhonoredExclusionIds';
+      // 链上第 2+ 个节点没有自己的 id（CRS 把 id 只给链头），归因要退到链头，
+      // 否则报告里出现 "?:TX:1" 这种查不到是谁的条目。
+      const owner = rule.id || (curChain && curChain.id) || '(未知规则)';
+      (stats[listKey] ||= new Set()).add(`${owner}:${tok}`);
+    }
     // 编译探针必须与 execOp **共用同一个适配函数**，否则普查会和实际行为两套真相。
     // （上一版注释称 `(?i:…)` 在 ES2025/V8 13 已合法、记进 regexBad 是"误报"——实测打脸：
     //   本项目跑在 Node 22.22.2 / V8 12.4，`new RegExp('(?i:…)', 'i')` 直接抛 Invalid group，
@@ -166,6 +181,9 @@ export function parseCrsFile(confPath) {
     if (rule.isChainHead) stats.chainHeads++;
   }
   stats.groups = rules.length;
+  for (const k of ['unsupportedVarIds', 'unhonoredExclusionIds']) {
+    if (stats[k] instanceof Set) stats[k] = [...stats[k]].sort();
+  }
   PARSE_STATS.set(confPath, stats);
   return rules;
 }
@@ -174,63 +192,111 @@ export function parseCrsFile(confPath) {
 // state 用于链式规则：captures = 上一节点正则的捕获组，matchedVals = 上一节点命中的值。
 // CRS 的"条件式 SQLi"族（942130/942150/942521/942522…）靠 `TX:1`、`MATCHED_VARS` 表达
 // "同一请求里还得有第二种信号"，不给这两个变量的值，那批规则就永远不匹配。
-function collectValues(vars, req, state = {}, exclArgs = null) {
+
+/**
+ * 变量派发表的**唯一真相源**：`COLL[:selector]` 里的 COLL 部分。
+ * kind 决定从请求的哪个面取值；`sel` 表示该形态支持元素选择器（`ARGS_GET:fbclid`）。
+ *
+ * 为什么要从 if 链改成表：原来是一条 if 链 + 末尾 `else push([])`，"哪种形态其实没人处理"
+ * 在代码里根本看不出来 —— `ARGS_GET:fbclid` 就是这么静默恒空了两条排除规则（→ ctl 永不生效，
+ * 表面症状却是"942440 误报"）。有了这张表，同一个判断既能驱动取值，又能被解析期普查复用，
+ * "不支持"于是从**看不见的空值**变成**能数出来的缺口**。
+ */
+const VAR_KINDS = {
+  ARGS: { kind: 'args', sel: true },
+  ARGS_GET: { kind: 'args', sel: true },
+  ARGS_POST: { kind: 'args', sel: true },
+  ARGS_PATH: { kind: 'args', sel: true },
+  ARGS_MULTIMATCH: { kind: 'args', sel: true },
+  ARGS_NAMES: { kind: 'argsNames', sel: true },
+  ARGS_GET_NAMES: { kind: 'argsNames', sel: true },
+  ARGS_POST_NAMES: { kind: 'argsNames', sel: true },
+  REQUEST_COOKIES: { kind: 'cookies', sel: false },
+  REQUEST_COOKIES_NAMES: { kind: 'cookieNames', sel: false },
+  REQUEST_HEADERS: { kind: 'headers', sel: true },
+  REQUEST_URI: { kind: 'uri', sel: false },
+  REQUEST_FILENAME: { kind: 'uri', sel: false },
+  REQUEST_BASENAME: { kind: 'uri', sel: false },
+  QUERY_STRING: { kind: 'queryString', sel: false },
+  MATCHED_VARS: { kind: 'matchedVars', sel: false },
+  MATCHED_VARS_NAMES: { kind: 'matchedVars', sel: false },
+  // TX 的"选择器"是**数字下标**（`TX:1` = 链上前一节点的第 1 个捕获组），必须 sel:true，
+  // 否则下面的数字校验根本轮不到 —— 实测：这里写成 false 会让 942521 等链式规则恒不命中，
+  // 官方回归集当场冒出 23 条未点名分歧而 FAIL。
+  TX: { kind: 'tx', sel: true },
+};
+
+/** 判断一个变量 token 的支持度。不支持的一律走这里点名，不再靠"落到 else 返回空"。 */
+export function classifyVar(token) {
+  const raw = String(token);
+  const name = raw.replace(/^!/, '');
+  const [coll, ...rest] = name.split(':');
+  const sel = rest.join(':');
+  const spec = VAR_KINDS[coll];
+  // 两类"不支持"必须分开，它们的风险方向相反：
+  //   · exclusion —— `!COLL:sel` 是要**从集合里扣掉**一部分。不扣只会让取值变多
+  //     （偏保守：可能多命中，不会漏命中），所以它记一笔即可，不能和下面混成一个数。
+  //   · gap —— 正向变量取不到值 ⇒ 该规则在这份数据上**恒不命中**，是真正的检测面缺口。
+  const exclusion = raw.startsWith('!');
+  const mk = (ok, extra) => ({ ok, exclusion, token: name, coll, ...extra });
+  if (!spec) return mk(false, { why: exclusion ? '排除项未实现（不扣，只多取不少取）' : '未知集合：该变量取不到值' });
+  if (sel && !spec.sel) return mk(false, { why: exclusion ? '排除项未实现（不扣，只多取不少取）' : '该集合不支持选择器形态' });
+  if (spec.kind === 'tx' && !/^\d+$/.test(sel || '')) return mk(false, { why: 'TX 仅支持数字下标（链捕获）' });
+  return mk(true, { kind: spec.kind, sel: sel || null });
+}
+
+const push = (arr, vals) => { arr.push(...vals); };
+
+export function collectValues(vars, req, state = {}, exclArgs = null) {
   const out = [];
   // ARGS 家族：有参数级豁免时按**名字**剔元素（ModSecurity 的 `ARGS:fbclid` 语义是
   // "ARGS 集合里叫 fbclid 的那个元素"，不是整族剔除）
   const argEntries = () => {
-    const e = Object.entries(req.args);
+    const e = Object.entries(req.args || {});
     return exclArgs && exclArgs.size ? e.filter(([k]) => !exclArgs.has(k)) : e;
   };
-  /**
-   * 带选择器的 ARGS 家族取值：`ARGS_GET:fbclid`（元素名）、`ARGS:/^utm_/`（正则选键）。
-   * ⚠ 选择器必须处理：CRS 的两条参数级排除规则就是 `ARGS_GET:fbclid` / `ARGS_GET:gclid`
-   * 形态，此前它们落到本函数末尾的 `else push([])`（"未知变量保守跳过"），
-   * 于是**排除规则永远不可能命中**、ctl 永远不生效 —— 表面看是"942440 误报"，
-   * 根因在这里。
-   */
-  const argsWith = (coll, sel, wantNames) => {
-    let entries = argEntries();
-    if (coll === 'ARGS_GET' || coll === 'ARGS_POST' || coll === 'ARGS_PATH' || coll === 'ARGS_COOKIES') {
-      // 本执行器的 req.args 是 query+body 合并视图，不区分来源子集（近似，见下）
-    }
+  const pick = (entries, sel, wantNames) => {
+    let list = entries;
     if (sel) {
-      if (sel.startsWith('/') && sel.endsWith('/') && sel.length > 2) {
-        const re = new RegExp(sel.slice(1, -1), 'i');
-        entries = entries.filter(([k]) => re.test(k));
-      } else {
-        entries = entries.filter(([k]) => k === sel);
-      }
+      // 元素名 或 `/正则/` 两种选择器；本执行器的 req.args 是 query+body 合并视图，
+      // 不区分来源子集（ARGS_GET/POST 落在一起，属**有意的近似**）。
+      list = sel.startsWith('/') && sel.endsWith('/') && sel.length > 2
+        ? list.filter(([k]) => new RegExp(sel.slice(1, -1), 'i').test(k))
+        : list.filter(([k]) => k === sel);
     }
-    return wantNames ? entries.map(([k]) => k) : entries.map(([, v]) => v);
+    return wantNames ? list.map(([k]) => k) : list.map(([, v]) => v);
   };
   for (const v of vars) {
     const neg = v.startsWith('!');
-    const name = neg ? v.slice(1) : v;
-    const push = (arr) => { if (!neg) out.push(...arr); else out.length && out; };
-    const [coll, ...rest] = name.split(':');
-    const sel = rest.join(':');
-    if (coll === 'ARGS' || coll === 'ARGS_GET' || coll === 'ARGS_POST' || coll === 'ARGS_PATH' || coll === 'ARGS_MULTIMATCH') {
-      push(argsWith(coll, sel, false));
-    } else if (coll === 'ARGS_NAMES' || coll === 'ARGS_GET_NAMES' || coll === 'ARGS_POST_NAMES') {
-      push(argsWith('ARGS', sel, true));
-    } else if (name === 'REQUEST_COOKIES') push(Object.values(req.cookies));
-    else if (name === 'REQUEST_COOKIES_NAMES') push(Object.keys(req.cookies));
-    else if (/^TX:\d+$/.test(name)) {
-      // 链上下文里的 TX:n = 上一节点的第 n 个捕获组（ModSecurity 语义）
-      const c = state.captures;
-      push(c && c[Number(name.slice(3))] != null ? [String(c[Number(name.slice(3))])] : []);
-    } else if (name === 'MATCHED_VARS' || name === 'MATCHED_VARS_NAMES') {
-      push(state.matchedVals || []);
-    } else if (name.startsWith('REQUEST_HEADERS:')) {
-      const h = name.split(':')[1].toLowerCase();
-      push(req.headers[h] ? [req.headers[h]] : []);
-    } else if (name === 'REQUEST_HEADERS') push(Object.values(req.headers));
-    else if (name === 'REQUEST_URI' || name === 'REQUEST_FILENAME' || name === 'REQUEST_BASENAME') {
-      push([req.uri]);
-    } else if (name === 'QUERY_STRING') push([req.queryString]);
-    else if (name === 'XML:/*' || name === 'TX:DETECTION_PARANOIA_LEVEL') push([]);
-    else push([]); // 未知变量（REQUEST_BODY 等）：保守跳过
+    // ⚠ 取反变量（`!REQUEST_COOKIES:/__utm/`）在 ModSecurity 里是"从集合里**扣掉**这些元素"，
+    // 而旧实现与本项目前都当 no-op 处理（等价于不扣）。这不是笔误而是**已知的不精确**：
+    // 扣与不扣只会让取值变多，不会变少，所以偏保守方向（可能多命中，不会漏命中）。
+    // 要修就得连同"同一 vars 里 `ARGS|!ARGS:x` 的合并语义"一起做，届时 805 例回归集是唯一裁判。
+    if (neg) continue;
+    const c = classifyVar(v);
+    if (!c.ok) continue; // 不支持面由解析期普查点名，这里保持与旧实现一致的"返回空"
+    switch (c.kind) {
+      case 'args': push(out, pick(argEntries(), c.sel, false)); break;
+      case 'argsNames': push(out, pick(argEntries(), c.sel, true)); break;
+      case 'cookies': push(out, Object.values(req.cookies || {})); break;
+      case 'cookieNames': push(out, Object.keys(req.cookies || {})); break;
+      case 'headers':
+        if (!c.sel) push(out, Object.values(req.headers || {}));
+        else push(out, [req.headers[String(c.sel).toLowerCase()]].filter((x) => x != null));
+        break;
+      case 'uri': push(out, [req.uri]); break;
+      case 'queryString': push(out, [req.queryString]); break;
+      case 'matchedVars': push(out, state.matchedVals || []); break;
+      case 'tx': {
+        // 只有 `TX:<数字>`（链上节点的捕获组）有定义；TX:DETECTION_PARANOIA_LEVEL 之类
+        // 由 classifyVar 判为不支持（本执行器不建模 PL 状态），与旧实现返回空等价。
+        const g = state.captures;
+        const n = Number(c.sel);
+        push(out, g && g[n] != null ? [String(g[n])] : []);
+        break;
+      }
+      default: break;
+    }
   }
   return out;
 }

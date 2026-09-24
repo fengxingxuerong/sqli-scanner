@@ -133,6 +133,15 @@ const census = getParseStats(CONF) || {};
 console.log('=== 自实现 CRS 执行器 × CRS 官方回归用例 ===');
 console.log(`规则文件：crs/REQUEST-942-SQLI.conf（SecRule 行 ${census.secRuleLines}，装载 ${census.loaded}，链头 ${census.chainHeads}，解析丢弃 ${census.droppedBySplit}，元规则跳过 ${census.skippedMeta}）`);
 console.log(`未实现 operator：${census.unimplemented} 条 ${JSON.stringify(census.unimplementedIds || [])}　正则编不出来：${(census.regexBad || []).length} 条 ${JSON.stringify(census.regexBad || [])}`);
+// [2026-09-24] 变量侧普查：与 operator 侧同一套路，**风险方向相反**的两类必须分开报。
+{
+  const gaps = census.unsupportedVarIds || [];
+  const byVar = {};
+  for (const x of gaps) { const t = x.slice(x.indexOf(':') + 1); byVar[t] = (byVar[t] || 0) + 1; }
+  console.log(`变量取不到值（该规则在这份数据上恒不命中）：${census.unsupportedVars || 0} 处 / 去重 ${gaps.length} 条 ${JSON.stringify(byVar)}`);
+  console.log(`  涉及规则：${[...new Set(gaps.map((x) => x.split(':')[0]))].slice(0, 12).join(', ')}${new Set(gaps.map((x) => x.split(':')[0])).size > 12 ? ` …共 ${new Set(gaps.map((x) => x.split(':')[0])).size} 条` : ''}`);
+  console.log(`排除项未实现（只多取不少取，偏保守）：${census.unhonoredExclusions || 0} 处 / 去重 ${(census.unhonoredExclusionIds || []).length} 条`);
+}
 console.log(`官方用例：${cases.length} 条（另有 ${stagesUnmodeled} 条 stage 无 log_contains/no_log_contains，不计入）\n`);
 
 const perPl = {};
@@ -285,6 +294,12 @@ const md = [
   `- SecRule 行 ${census.secRuleLines}，装载 ${census.loaded}（链头 ${census.chainHeads}），解析丢弃 ${census.droppedBySplit}，元规则跳过 ${census.skippedMeta}`,
   `- 未实现 operator：${census.unimplemented} 条 → ${JSON.stringify(census.unimplementedIds || [])}（这些规则**恒不匹配**）`,
   `- 正则编译失败：${(census.regexBad || []).length} 条 → ${JSON.stringify(census.regexBad || [])}`,
+  // 变量侧普查（2026-09-24）：**风险方向相反的两类，分开列，不合并成一个"差距"数**
+  `- 变量取不到值（声明读它、本执行器读不出 ⇒ 该规则在这类输入上恒不命中）：${census.unsupportedVars || 0} 处 / 去重 ${(census.unsupportedVarIds || []).length} 条`,
+  `  - 按变量：${JSON.stringify((() => { const m = {}; for (const x of census.unsupportedVarIds || []) { const t = x.slice(x.indexOf(':') + 1); m[t] = (m[t] || 0) + 1; } return m; })())}`,
+  `  - ⚠ 其中 XML:/* 一家就占 ${(census.unsupportedVarIds || []).filter((x) => x.endsWith(':XML:/*')).length} 条 —— 意味着**XML 请求体整体不在本执行器的检测面内**：`,
+  `    官方回归集是 query/表单 body 形态，所以上面那个一致率**不包含** XML 载荷，别把它外推到 XML 接口。`,
+  `- 排除项未实现（\`!COLL:sel\` 不扣，只多取不少取，偏保守方向）：${census.unhonoredExclusions || 0} 处 / 去重 ${(census.unhonoredExclusionIds || []).length} 条`,
   '',
   '## 分歧明细（主口径：按规则自身档位对齐；前 ' + TOP + ' 条，全量见 results/crs-equivalence.json）',
   '',
