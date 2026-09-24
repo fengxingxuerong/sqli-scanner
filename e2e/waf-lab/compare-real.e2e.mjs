@@ -25,7 +25,7 @@ import fs from 'node:fs';
 import net from 'node:net';
 import { createRequire } from 'node:module';
 import { createMysqlLabApp } from '../real-mysql-lab/lab-app.js';
-import { computeMetrics } from './metrics.js';
+import { computeMetrics, evaluateAbExperiment } from './metrics.js';
 import { PROFILES } from './waf-profiles.js';
 
 const _require = createRequire(new URL('../../server/package.json', import.meta.url));
@@ -233,26 +233,41 @@ async function main() {
   });
 
   // ────────────────────────────────────────────────────────────────────────
-  // 判据（2026-09-18 修订）
+  // 判据（2026-09-18 改用 WAF 侧指标；2026-09-25 补回检出侧作**前置**）
   // ────────────────────────────────────────────────────────────────────────
   // 旧判据 detectRateB > detectRateA 在本装置上**无区分度**：靶场只有一个注入点，
   // 且 error/boolean 通道在两种配置下都能打进 → 两侧恒 100%，触顶后比较不出差异。
   // 实测（2026-09-18）：configA 检出率 100%、configB 100% → 旧判据恒 NO。
   //
-  // 真正要验证的是「tamper 是否绕过了 WAF」，故改用 WAF 侧指标：
+  // 真正要验证的是「tamper 是否绕过了 WAF」，故比较项改用 WAF 侧指标：
   //   主判据 blockRateB < blockRateA —— tamper 生效后请求被拦的比例必须下降；
   //   辅判据 高危规则命中数下降 —— 942141(extractvalue)/942142(updatexml)/942180
   //          (information_schema) 这类「函数名 + \s*\( 锚定」的规则应被 tamper 绕开。
   // 实测：blockRate 70.7% → 45.7%；942141/942142 命中 26 次 → 0 次。
+  //
+  // 但「无区分度」≠「可以不看」——09-18 那一步把检出侧从判据里**整个拿掉**了，
+  // 于是它退化成一条永不为红的装饰性表格。实测代价（2026-09-25）：A3 通道降级
+  // 初版把 CRS 画像下的 error 通道判死，configA 检出 1/1 → **0/1**、请求数
+  // 175 → 246，而本门禁退出码仍是 0、报告仍印「tamper 确已绕过 WAF ✅」。
+  // 故现在检出侧作为**有效性前置**（两侧均须 ≥1）接回判据：零检出时本实验
+  // 不成立，而不是成立且通过。逻辑抽在 metrics.js:evaluateAbExperiment 里便于单测。
   // ────────────────────────────────────────────────────────────────────────
   const HIGH_RISK_RULES = ['crs_942141', 'crs_942142', 'crs_942180'];
   const sumRules = (byRule, ids) => ids.reduce((n, id) => n + (byRule[id] || 0), 0);
   const highRiskA = sumRules(A.byRule, HIGH_RISK_RULES);
   const highRiskB = sumRules(B.byRule, HIGH_RISK_RULES);
 
-  const criterion1 = metrics.blockRateB < metrics.blockRateA;      // 拦截率下降
-  const criterion2 = highRiskB < highRiskA;                        // 高危规则命中下降
-  const pass = criterion1 && criterion2;
+  const verdict = evaluateAbExperiment({
+    totalPoints,
+    detectedA: A.detectedPoints,
+    detectedB: B.detectedPoints,
+    blockRateA: metrics.blockRateA,
+    blockRateB: metrics.blockRateB,
+    highRiskA,
+    highRiskB,
+  });
+  const { valid, validityReasons, blockRateDrop: criterion1, highRiskDrop: criterion2 } = verdict;
+  const pass = verdict.passed;
 
   const outDir = path.join(HERE, 'results');
   fs.mkdirSync(outDir, { recursive: true });
@@ -272,6 +287,7 @@ async function main() {
         },
         metrics,
         criteria: {
+          validity: { value: valid, reasons: validityReasons },
           blockRateDrop: { value: criterion1, from: metrics.blockRateA, to: metrics.blockRateB },
           highRiskRuleDrop: { value: criterion2, from: highRiskA, to: highRiskB, rules: HIGH_RISK_RULES },
           passed: pass,
@@ -292,7 +308,7 @@ async function main() {
     `> WAF profile：${PROFILE.id}`,
     `> configB tamper：${CONFIG_B_TAMPER.join(', ')}`,
     '',
-    '## 检出侧（靶子是否真被打进）',
+    '## 检出侧（有效性前置：靶子是否真被打进）',
     '',
     '| 配置 | 注入点 | 检出点 | 检出率 | 漏洞条目 | 命中技术 |',
     '|------|-------|--------|--------|---------|---------|',
@@ -306,15 +322,20 @@ async function main() {
     `| tamper 关 (configA) | ${A.totalReq} | ${A.blockedReq} | ${metrics.blockRateA}% | ${highRiskA} |`,
     `| tamper 开 (configB) | ${B.totalReq} | ${B.blockedReq} | ${metrics.blockRateB}% | ${highRiskB} |`,
     '',
+    `**前置 两侧都必须有检出（A=${A.detectedPoints}/${totalPoints}　B=${B.detectedPoints}/${totalPoints}）? ${valid ? 'YES ✅' : `NO ❌ 实验不成立：${validityReasons.join('；')}`}**`,
+    '',
     `**判据① 拦截率下降（${metrics.blockRateA}% → ${metrics.blockRateB}%）? ${criterion1 ? 'YES ✅' : 'NO ❌'}**`,
     `**判据② 高危规则命中下降（${highRiskA} → ${highRiskB}，规则 ${HIGH_RISK_RULES.join('/')}）? ${criterion2 ? 'YES ✅' : 'NO ❌'}**`,
     '',
-    `**结论：${pass ? 'tamper 确已绕过 WAF ✅' : '未证实绕过 ❌'}**`,
+    `**结论：${!valid ? '实验不成立 ❌（检出侧零检出，拦截率比较无意义）' : pass ? 'tamper 确已绕过 WAF ✅' : '未证实绕过 ❌'}**`,
     '',
     '> 口径说明：',
     '> · 检出率 = 去重 pointId 数 / report.points.length（对齐 metrics.js 注释）。',
-    '> · 本装置单注入点且 error/boolean 双通道均可打进，检出率两侧触顶 100%，',
-    '>   故**不作主判据**（旧版以此为判据，恒为 NO，属指标选择错误）。',
+    '> · 检出率**不作 A/B 比较判据**：单注入点下 error/boolean 双通道两侧同时触顶 100%，',
+    '>   比较不出差异（旧版以此为判据，恒为 NO，属指标选择错误）。',
+    '> · 但它是**有效性前置**：任一侧零检出 ⇒ 本实验不成立、判红。依据（2026-09-25）：',
+    ">   A3 通道降级初版把 CRS 画像下的 error 通道判死，configA 检出 1/1 → 0/1、",
+    '>   请求数 175 → 246，而当时退出码仍是 0、报告照印 ✅。',
     '> · 漏洞条目按 technique 拆分，仅作附加信息。',
     '',
     `> configA 命中规则：${JSON.stringify(A.byRule)}`,

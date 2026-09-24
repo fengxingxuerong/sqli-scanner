@@ -93,7 +93,7 @@ curl -s "http://localhost:4567/api/scan/<ID2>/report" | head -c 2000
 
 ---
 
-## 4. 对比两次报告检出率
+## 4. 对比两次报告：先看有效性，再看 WAF 侧
 
 两次报告都看 `vulns.length`（确认 vulnerable 的注入点数）与 `points.length`（总注入点）：
 
@@ -102,16 +102,19 @@ echo "关:"; curl -s "http://localhost:4567/api/scan/<ID>/report"  | node -e "le
 echo "开:"; curl -s "http://localhost:4567/api/scan/<ID2>/report" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const r=JSON.parse(s).data;console.log('points',r.points.length,'vulns',r.vulns.length)})"
 ```
 
-预期：开 tamper 的 `vulns` 明显多于关 tamper（与本地 e2e 的 `detectRateB > detectRateA` 一致）。
+**`vulns` 两侧都必须 >0**，这是有效性前提而非成绩：零检出说明 payload 没被执行，此时"关 vs 开"比的是噪声（或"谁也没打进去"），任何下降/上升都推不出绕过与否。
 
-或用本地 e2e 夹具在真实靶机上做可复现 A/B（需临时把 `e2e/waf-lab/compare.e2e.js` 的 `TARGET` 指向授权靶机、**并注释掉起 lab 的两行**）：
+检出数本身**不是**绕过的判据：单个注入点上 error/boolean 通道常在两种配置下都打满 100%，触顶后比较不出差异。真正的判据在 WAF 侧 —— 关 tamper 的拦截率须明显高于开 tamper，且 `942141`(extractvalue)/`942142`(updatexml)/`942180`(information_schema) 这类"函数名 + `\s*\(` 锚定"的高危规则命中须下降。
+
+可复现的 A/B 装置（真 MySQL 真注入点 + WAF 中间件，自起隔离沙箱，不依赖外部资源）：
 
 ```bash
-# 编辑 compare.e2e.js：TARGET = 'http://target.example.com/vuln?id=1'; 并跳过 createLabApp().listen(...)
-node e2e/waf-lab/compare.e2e.js   # 产出 results/compare.json + compare.md（真实 A/B 对照）
+python e2e/waf-lab/compare-real.run.py   # 产物 e2e/waf-lab/results/compare-real.{json,md}
 ```
 
-> 本地实验室（无真实 WAF）复现：直接 `npm run waf-lab` 起 8099，再 `npm run waf-e2e` 即可产出"开>关"对照，无需任何外部资源。
+退出码即判据：`e2e/waf-lab/metrics.js` 的 `evaluateAbExperiment()` 三条件（两侧均有检出 && 拦截率下降 && 高危命中下降）全真才返回 0；检出侧为 0 时报告印「实验不成立」并以非 0 退出。
+
+> ⚠️ `e2e/waf-lab/compare.e2e.js`（`npm run waf-e2e`）**已于 2026-09-18 废弃**：它用的 `/vuln` 端点是纯字符串回显、不执行任何 SQL，union/error/boolean 三种技术都不可能产生信号 ⇒ 两侧 `vulns` 恒为 0，产出的"对照表"没有信息量。文件头部已有标注，勿再用它判断 tamper 效果。
 
 ---
 
