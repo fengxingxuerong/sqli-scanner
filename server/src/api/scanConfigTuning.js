@@ -15,6 +15,7 @@
 // （那是 KNOWN_CFG_KEYS 的事）、不做跨字段校验。
 // ============================================================================
 import { defaults } from '../config/defaults.js';
+import { logger } from '../core/logger.js';
 import { VALIDITY_DEFAULTS } from '../core/scanValidityGuard.js';
 import { clampNum, pickBool, pickInt } from './scanConfigUtils.js';
 
@@ -25,6 +26,18 @@ import { clampNum, pickBool, pickInt } from './scanConfigUtils.js';
  * @param {object} cfg 请求体里的原始 config
  */
 export function applyTuningKnobs(config, cfg) {
+  // ── 严格布尔：hex / flushSession ────────────────────────────────────────
+  // [2026-09-24] 从 sanitizeStart 原样搬来（含告警文案），与本模块其余键同一形状。
+  // 通用标量透传会把 1 / "true" / {} 这类 truthy 值原样收下，而引擎按 `config.hex === true`
+  // 判定（Extractor.js:618,697）—— 结果就是"API 收了、引擎不生效"，与本仓反复清理的
+  // 「白名单有、透传没有」是同一个 bug 形状，只是换了触发条件。宁可拒掉并说明。
+  for (const boolKey of ['hex', 'flushSession']) {
+    if (!(boolKey in cfg)) continue;
+    const v = cfg[boolKey];
+    if (typeof v === 'boolean') config[boolKey] = v;
+    else logger.warn(`${boolKey} 需为布尔值（收到 ${JSON.stringify(v)}），已丢弃——该开关按严格 true 判定，传 truthy 非布尔值不会生效`);
+  }
+
   // ── 严格布尔位（引擎判据分别是 `=== true` / `!== false` / `!== true`，三种都要求键存在
   //    才是用户真正表达的意图，故逐个显式转发；非法/未传则留给 defaults 浅合并）──
   // 位平面提取（每字符 1 轮请求，仅 MySQL/MariaDB/TiDB 族；失败整体回落二分）

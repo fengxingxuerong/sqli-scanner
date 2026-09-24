@@ -35,6 +35,7 @@ import {
   pickBool,
   sanitizeCookieMap,
   clampParams,
+  diffDroppedConfigKeys,
 } from './scanConfigUtils.js';
 import { acquireScanSlot, trackScanTerminal, _scanGovernance } from './scanGovernance.js';
 
@@ -160,6 +161,11 @@ const FORBIDDEN_HEADER_NAMES = new Set([
   'host', 'content-length', 'transfer-encoding', 'connection', 'upgrade',
   'proxy-connection', 'keep-alive', 'te', 'trailer', 'expect',
 ]);
+
+// 直连模式专用键：HTTP 模式下 sanitizeStart 不会把它们写进 config（走 isDirect 早退分支），
+// 所以"发了却没落地"在这里**不是**丢弃 —— 差分时必须排除，否则每个直连配置混进 HTTP 请求体
+// 都会误报一条"设置不会生效"。
+const DIRECT_ONLY_CFG_KEYS = new Set(['db', 'connectionString', 'sqlTemplate', 'mode']);
 
 // ── [2026-09-23 E2] extractScope（枚举 / 拖库动作族）的形状校验 ──────────────
 //
@@ -751,16 +757,10 @@ export function sanitizeStart(body) {
       config.dumpWhere = w.slice(0, 2000);
     }
   }
-  // hex / flushSession：必须是**真布尔**。
-  // 通用标量透传会把 1 / "true" / {} 这类 truthy 值原样收下，而引擎按 `config.hex === true`
-  // 判定（Extractor.js:618,697）—— 结果就是"API 收了、引擎不生效"，与本批要消灭的
-  // 「白名单有、透传没有」是同一个 bug 形状，只是换了触发条件。宁可拒掉并说明。
-  for (const boolKey of ['hex', 'flushSession']) {
-    if (!(boolKey in cfg)) continue;
-    const v = cfg[boolKey];
-    if (typeof v === 'boolean') config[boolKey] = v;
-    else logger.warn(`${boolKey} 需为布尔值（收到 ${JSON.stringify(v)}），已丢弃——该开关按严格 true 判定，传 truthy 非布尔值不会生效`);
-  }
+  // hex / flushSession 两个严格布尔位已随本批调优旋钮一起挪到 api/scanConfigTuning.js
+  // （同一形状："REST 收下、引擎按 === true 判定"的那类键，宁可拒掉并说明）；
+  // 统一在上方 compactErrorTemplates 之后那一次 applyTuningKnobs 调用里落地，
+  // **不要再调第二遍** —— 它是幂等的，但两处调用会让"哪个键在哪被写"重新变成读代码才能知道的事。
 
   // 未知字段：忽略，但**必须喊出来**（原来是 debug 级，默认 info 日志下等于静默）。
   // [CFG-REACH 2026-09-20] 为什么从 debug 提到 warn：本函数的返回 config 只由白名单键构成，
@@ -768,10 +768,24 @@ export function sanitizeStart(body) {
   // 报告里是一句「未检出」——静默丢弃把一个配置笔误变成了看起来完全正常的假阴性。
   // 这正是本仓库反复手工补过的坑（注释里已有 6 处「此前不在白名单被静默丢弃」）。
   // 前端不会因此刷屏：它发的是 SCAN_CONFIG_KEYS 推导出来的键集，实测不含未知键。
-  const ignored = Object.keys(cfg).filter((k) => !KNOWN_CFG_KEYS.has(k));
-  if (ignored.length) {
+  // 两类静默丢弃都**必须喊出来**（判据在 scanConfigUtils.diffDroppedConfigKeys，纯函数可单测）：
+  // · unknown —— 键名不在白名单：本函数返回的 config 只由白名单键构成，"传了未知键"
+  //   等于"你以为设置的开关根本没进引擎"（[CFG-REACH 2026-09-20] 从 debug 提到 warn）。
+  // · shapeDropped —— 键名**在**白名单、值也确实发了，却因形状/clamp 校验被丢
+  //   （matchCode:200、skipParams:"a,b"、paramDel 取了窄集合外的字符…）。
+  //   后果与上一类完全相同：200 + scanId + 报告里一句「未检出」，而那项设置没生效。
+  //   原先只有 hex/flushSession 一处按这个口径在喊（现于 scanConfigTuning），这一类却是整个入口的通病。
+  const dropped = diffDroppedConfigKeys(cfg, KNOWN_CFG_KEYS, config, DIRECT_ONLY_CFG_KEYS);
+  if (dropped.unknown.length) {
     logger.warn(
-      `扫描配置含 ${ignored.length} 个未知字段，已忽略（这些设置**不会生效**，请核对键名或改用 CLI）：${ignored.join(', ')}`
+      `扫描配置含 ${dropped.unknown.length} 个未知字段，已忽略（这些设置**不会生效**，请核对键名或改用 CLI）：${dropped.unknown.join(', ')}`
+    );
+  }
+  if (dropped.shapeDropped.length) {
+    logger.warn(
+      `扫描配置有 ${dropped.shapeDropped.length} 个键被丢弃（键名在白名单内，但**值形态不合该键的校验**，` +
+        '设置不会生效；部分键需与父键同发，如 safeFreq 需 safeUrl、csrfTokenName 需 csrfUrl）：' +
+        dropped.shapeDropped.map((k) => `${k}=${JSON.stringify(cfg[k])}`).join(', ')
     );
   }
 
