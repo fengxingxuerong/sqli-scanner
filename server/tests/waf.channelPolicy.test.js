@@ -39,10 +39,16 @@ test('union：union 与 select **都被拦** 才降级（只拦一个不降级�
   assert.deepEqual(both.skipped[0].deadTokens, ['union', 'select']);
 });
 
-test('boolean：and/or 是 OR 组 —— 二者皆拦才降级', () => {
-  assert.deepEqual(planChannels({ techniques: ['boolean'], blocked: ['and'] }).run, ['boolean']);
-  assert.deepEqual(planChannels({ techniques: ['boolean'], blocked: ['or'] }).run, ['boolean']);
-  assert.deepEqual(planChannels({ techniques: ['boolean'], blocked: ['and', 'or'] }).run, []);
+test('boolean：与验链探针同形态 → 任何画像都不降级', () => {
+  // 画像存在的前提是验链通过（探针「闭合 + AND 表达式」放行），boolean 本身就是这个
+  // 形态 → 直接证据优先于记号推断。首版会在这里降级，实测是误杀主力通道。
+  for (const blocked of [['and'], ['or'], ['and', 'or'], ['and', 'or', 'quote', 'comment']]) {
+    assert.deepEqual(
+      planChannels({ techniques: ['boolean'], blocked }).run,
+      ['boolean'],
+      `boolean 不得因画像 [${blocked.join(',')}] 被降级`
+    );
+  }
 });
 
 test('当前 tamper 链能消除必需记号中的任一 → 不降级', () => {
@@ -63,9 +69,10 @@ test('当前 tamper 链能消除必需记号中的任一 → 不降级', () => {
 });
 
 test('未知技术一律保留（新接入的通道不猜，防"未登记即被降级"）', () => {
-  const out = planChannels({ techniques: ['someNewTech', 'boolean'], blocked: ['and', 'or'] });
+  // 用 union 做对照（它此刻会真降级），才能证明「未知技术被保留」不是因为全都没降级
+  const out = planChannels({ techniques: ['someNewTech', 'union'], blocked: ['union', 'select'] });
   assert.deepEqual(out.run, ['someNewTech']);
-  assert.deepEqual(out.skipped.map((s) => s.technique), ['boolean']);
+  assert.deepEqual(out.skipped.map((s) => s.technique), ['union']);
 });
 
 test('稳定排序：保留的通道保持入参顺序', () => {
@@ -81,7 +88,6 @@ test('CHANNEL_TOKENS 覆盖全部两层的调度技术（缺一个 = 该通道�
   const SLOW = ['time', 'stacked', 'oob'];
   for (const t of [...FAST, ...SLOW]) {
     assert.ok(CHANNEL_TOKENS[t], `CHANNEL_TOKENS 缺少技术 ${t}`);
-    assert.ok(CHANNEL_TOKENS[t].required.length > 0, `${t} 的 required 不得为空`);
   }
   // 必需记号必须是真实存在的探针 id（写错即永远不会被拦 → 降级永不触发）
   const ids = new Set(TOKEN_PROBES.map((p) => p.id));
@@ -90,6 +96,47 @@ test('CHANNEL_TOKENS 覆盖全部两层的调度技术（缺一个 = 该通道�
       for (const tok of group) assert.ok(ids.has(tok), `${tech} 引用了不存在的探针 id：${tok}`);
     }
   }
+});
+
+test('降级对象**恰好**是 union 与 time（扩面必须显式改本条，防偷偷扩大跳过范围）', () => {
+  // 依据：画像只在验链通过时才有，而验链探针是「闭合 + 布尔表达式」形态 ——
+  // 与探针同形态的通道（error/boolean/inline/stacked/oob）不该被记号画像判死。
+  // 与探针**不同形态**、画像才有推断价值的只有 union（集合查询）与 time（延时函数）。
+  const degradable = Object.entries(CHANNEL_TOKENS)
+    .filter(([, s]) => s.required.length > 0)
+    .map(([t]) => t)
+    .sort();
+  assert.deepEqual(degradable, ['time', 'union'], '降级对象集合变了：请先跑 probe-channel-profile.mjs 复核');
+  // required 为空的必须**显式**标 sameShapeAsProbe —— 防「忘了写判据」被当成「永不降级」
+  for (const [tech, spec] of Object.entries(CHANNEL_TOKENS)) {
+    if (spec.required.length === 0) {
+      assert.equal(
+        spec.sameShapeAsProbe,
+        true,
+        `${tech} 的 required 为空却没标 sameShapeAsProbe —— 是「有意不降级」还是「忘了写判据」？`
+      );
+    }
+  }
+});
+
+test('CRS 实测画像快照：只降级 union，不得误杀 error/boolean', () => {
+  // 画像取自 `node e2e/waf-real/probe-channel-profile.mjs`（crs-engine 真规则执行器，
+  // 非 mock）。硬编码快照的价值：把「降级过激」这个已踩过的坑钉死。
+  // ⚠️ 若 CRS 规则集/档位变了导致画像变化，本条会红 —— 那时应重跑探针脚本复核，
+  // 而不是直接改快照数字。
+  const CRS_BLOCKED = ['quote', 'comment', 'or', 'union', 'select', 'sleep', 'cmp'];
+  const plan = planChannels({
+    techniques: ['union', 'error', 'boolean'],
+    blocked: CRS_BLOCKED,
+    // 拦截驱动重跑实际使用的算子替换族
+    covered: ['and', 'or'],
+  });
+  assert.deepEqual(plan.run, ['error', 'boolean'], 'CRS 下 error 与 boolean 都必须保留');
+  assert.deepEqual(
+    plan.skipped.map((s) => s.technique),
+    ['union'],
+    'CRS 下只应降级 union'
+  );
 });
 
 // —— ② 画像真的流出来了（端到端，mock 不发真请求）——

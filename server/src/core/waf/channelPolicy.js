@@ -39,18 +39,28 @@ export const CHANNEL_TOKENS = {
   // UNION 查询：没有 union 与 select 就无法构造集合查询（记忆里的死路：
   // 「绕开 union 字面量」5 类手法均已实测排空 → 二者皆拦即无望）
   union: { required: [['union', 'select']], aux: ['space', 'comma', 'paren'] },
-  // 报错注入：靠闭合引号制造语法错误，引号被拦且链不消除 → 无从触发
-  error: { required: [['quote']], aux: ['paren', 'comma', 'space'] },
-  // 布尔盲注：真假两态靠 AND/OR 构造；二者皆拦则无法构造对照
-  boolean: { required: [['and', 'or']], aux: ['space', 'cmp', 'comment', 'hash'] },
-  // 内联注入：同 error，依赖闭合引号
-  inline: { required: [['quote']], aux: ['space'] },
-  // 时间盲注：SLEEP/BENCHMARK 是延时载体，被拦即无法测时
-  time: { required: [['sleep']], aux: ['paren', 'comma', 'space'] },
-  // 堆叠查询：需闭合引号后接分号与新语句
-  stacked: { required: [['quote']], aux: ['comment', 'hash', 'space'] },
-  // 带外通道：需闭合引号后拼带外函数名
-  oob: { required: [['quote']], aux: ['space', 'paren'] },
+
+  // ⚠️ [2026-09-25 形态族论证 —— 为什么下面五类 required 为空（永不降级）]
+  // 画像是拿探针 `${orig}' AND 1=1-- -` 这类「**闭合 + 布尔表达式**」形态测出来的，
+  // 而 A3 的画像只在 `chainVerify` **验链通过**时才拿得到（验链失败返回 null、不带画像）。
+  // 也就是说：**画像存在 ⇒ 该链已让「闭合 + 表达式」形态通过了 WAF**。
+  // 那么与探针**同形态**的通道就不该再被记号画像判死 —— 直接证据（探针放行）
+  // 的效力高于间接推断（某些记号被拦）。首版正是反过来的：CRS 实测画像含 quote
+  // （942330），symboliclogical 又不消除它 → error 被判死跳过；而 error 恰是 CRS 下的
+  // 主力通道（"error 命中但数据面全 miss" 正是 filterAdaptive 的触发前提），
+  // 跳过它 = 用检出能力换请求数，与本仓口径相悖。实测脚本见
+  // `e2e/waf-real/probe-channel-profile.mjs`（改判据前先跑它）。
+  // 同形态族（永不降级）：
+  error: { required: [], aux: ['quote', 'paren', 'comma', 'space', 'cmp'], sameShapeAsProbe: true },
+  boolean: { required: [], aux: ['and', 'or', 'space', 'cmp', 'comment', 'hash'], sameShapeAsProbe: true },
+  inline: { required: [], aux: ['quote', 'space'], sameShapeAsProbe: true },
+  stacked: { required: [], aux: ['quote', 'comment', 'hash', 'space'], sameShapeAsProbe: true },
+  oob: { required: [], aux: ['quote', 'space', 'paren'], sameShapeAsProbe: true },
+
+  // 真正**与探针不同形态**、画像才有推断价值的两个：
+  // 时间盲注：延时载体除 SLEEP 还有 BENCHMARK / pg_sleep / 重查询，但都需要括号调用
+  // → 括号也被拦才算死（CRS 实测 paren 未拦 → 不降级）
+  time: { required: [['sleep', 'paren']], aux: ['comma', 'space'] },
 };
 
 /**
