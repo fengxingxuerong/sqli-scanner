@@ -4,6 +4,51 @@
 
 ## [Unreleased]
 
+### 2026-09-24 批次 · 「静默」本身就是一类缺陷：配置入口、报告出口、标定阈值三处收口
+
+**共同形状**：不是崩溃型 bug，而是"看起来一切正常、实际少做了一件事"。本轮七笔提交按同一
+判据（把**读取点**与**写入点**两边交叉，而不是靠人记）扫出来的结果：
+
+1. **浅合并下的嵌套配置组**（`69633c6` / `67871e9`）：`models.js:90,113` 是
+   `{...defaults, ...input.config}` 的**浅**合并，所以请求体里出现某个组，该组就整体替换
+   defaults 的同名对象；组内少转发一个子键，引擎看到的就是 `undefined`。REST 的
+   `wafEvasion`（9 键重建 4 键）、`blindRobust.extractVerify`（13 漏 1）、
+   `secondOrder.secondMethod/triggerMethod` 三处断口，加上 **CLI 是另一条独立入口**、
+   只修 REST 等于没修（`--tamper` 让 `filterAdaptive` 从 true 变 undefined，而引擎判据是
+   `=== true` ⇒ 关键词静默过滤型目标的自适应重跑整轮消失，扫描照常报绿）。
+   同批把 `compactErrorTemplates` 从 `defaults.wafEvasion` 移到引擎真正读取的顶层，
+   并删掉一个恒为真的死条件 `fullErrorTemplates`。
+2. **报告的 markdown / CSV 出口**（`bd9a65b`）：HTML 侧一直有转义，`.md` 侧只防拆表的 `|`
+   —— 参数名里的 `<img src=x onerror=…>` 原样进正文，而 pandoc / markdown-it 默认保留行内
+   HTML ⇒ 在**读报告的机器**上执行；行内代码用 `\`` 转义反引号在 CommonMark 里是空操作；
+   CSV 拖库列头是全仓最后一处无公式守卫的出口；`isInternalHost` 被
+   `[::ffff:127.0.0.1]`（URL 规范化成 `::ffff:7f00:1`）绕过 ⇒ 报告里留下可点的回环链接。
+3. **11 个"注释承诺可配、实际无人能设"的旋钮**（`ae38595` / `14fd87f`）：
+   `http2` / `disableKeepAlive` / `xpAutoEnable` / `noSql.concurrency` 加上一批提取与统计层
+   调优键。判据换成不依赖 CLI 的版本后新增 `server/tests/configOrphanKeys.guard.test.js`：
+   可达 = 白名单 ∪ defaults ∪ CLI 写入 ∪ 前端声明 ∪ 同文件内部字段，**新孤儿即红、
+   过期豁免也红**（它当场抓到我抄错的 5 条豁免）。`StackedDetector` 那个假旋钮
+   （`sleepSecs`）不配新钥匙，改成认已有的 `timeBlindSleepSec`。
+4. **白名单内"值形态不合被丢弃"也开始喊 warn**（`ad7da92`）：此前只有"键名写错"会 warn，
+   `matchCode:200` / `skipParams:"id,page"` 这类一声不响，而后果完全相同。判据抽成纯函数，
+   并钉住"一份合法的面板形态 payload 不产生任何丢弃告警"——加告警先算误报率。
+5. **时间盲注标定探针量纲错**（`8cc9757`）：拿**绝对耗时**去比**增量下限**，把页面自身基线 μ
+   白送给了探针。默认档可达：μ≈1.2s 的站上 1s 探针实测 1.5s 就"标定成功"，而判定需要
+   ≥ μ+absFloor = 2.0s ⇒ 之后每次采样恒判未延迟，**只在开了标定的慢站上漏报**（既有三支
+   测试的 base 都是 0，两种算法同解，故缺陷活到今天）。改成与检测实际阈值同量纲比较。
+6. **docs/api.md 与代码口径对齐 + 守卫**（`9e63bdb`）：`retry`「默认 2」实为 3、
+   `timeoutMs`「默认 10000」实为 30000、`maxColumnsGuess`「默认 10」实为 50。
+   README 有 `readme:check` 盯着，REST 配置表此前一道门禁都没有。
+
+**方法论（本轮四条硬教训）**：
+- 一条修复要**逐入口**验：REST 与 CLI 是两条独立通路，只修一半等于没修；
+- 断言不能只写"键存在"——`!== false` 型判据下 `undefined` 与默认开恰好同值，
+  必须断"等于 defaults"并**反向**逐键发非默认值；
+- 子代理给的引擎侧结论 4 条里 3 条不成立（`dumpTarget` 转义、`level=0`、`fillPayload`
+  非字符串），全部经实测撤回 ⇒ 结论一律先复现再修；
+- 新写的守卫必须**先在旧代码上跑红**再恢复修复（本批两支都留了失败现场）。
+
+
 ### 前端可达性：两条整通道 + 五个假暴露键接进面板；契约测试判据修正
 
 **病灶（两个，同一族）**：
