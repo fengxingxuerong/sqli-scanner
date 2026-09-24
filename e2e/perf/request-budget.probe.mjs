@@ -110,6 +110,8 @@ function buildCtx(httpClient, overrides = {}) {
       risk: 1,
       techniques: ['union', 'error', 'boolean', 'inline', 'nosql'],
       useRegistry: false,
+      // PERF_COMPACT=1 → 量「报错模板按机制族裁剪」档（默认档不裁，见 ErrorDetector 口径注释）
+      compactErrorTemplates: process.env.PERF_COMPACT === '1',
       // 关掉所有"会额外发请求"的可选项，得到**最小配置**下的请求预算
       prefilter: false,
       unionSkipGate: true,
