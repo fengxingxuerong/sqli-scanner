@@ -50,13 +50,14 @@ const EVIDENCE_MAX = 4000;
 // reportPoC.js 要用 esc/renderUrlLink，而本文件又要 import reportPoC.js。
 // 下方 re-export 保证既有 `import { esc, safeHref, ... } from './ReportGenerator.js'`
 // 继续可用（tests/poc.evidence.test.js:15 依赖这条路径，不可删）。
-import { esc, isInternalHost, safeHref, renderUrlLink } from './reportHtml.js';
-export { esc, isInternalHost, safeHref, renderUrlLink };
+import { esc, isInternalHost, mdCode, mdText, safeHref, renderUrlLink } from './reportHtml.js';
+export { esc, isInternalHost, mdCode, mdText, safeHref, renderUrlLink };
 
 // [2026-09-17] Markdown 表格单元格：竖线必须转义，否则会切列、把整张表拆散。
 // 参数名/类型名可能来自目标页面（参数名由被测系统决定），属不可信输入，一律经此出口。
 function mdCell(s) {
-  return String(s ?? '-').replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
+  // `?? '-'` 的空单元格标记必须保留（注释见 vulnTypeText 处：空单元格会被读成「无影响」）
+  return mdText(s ?? '-').replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
 }
 
 // [2026-09-13] 顶层小助手：漏洞表行里的 CVSS 单元格文本（score + vector，同源 reportDelivery）
@@ -130,6 +131,14 @@ function csvSafeCell(v) {
   // 公式注入防护：以 = + - @ \t \r 开头的单元格加 ' 前缀（Excel/WPS 不再按公式解析）
   if (FORMULA_PREFIX_RE.test(s)) s = `'${s}`;
   return `"${s.replace(/"/g, '""')}"`;
+}
+
+// 「整行只有一列」的区块标题行专用（如 `## 表名`）：这类行**不经 csvSafeCell**，
+// 所以名字里的 \r \n 会凭空造出新行、逗号会把后半段切成新单元格 —— 两种都是
+// 「公式前缀出现在行/单元格首」的可达路径（`a,=1+1` → 第 2 列就是 `=1+1`）。
+// 口径与本文件既有的 rem/description 处理一致（:283-284 同样是压平 [\r\n,]）。
+function flattenCell(v) {
+  return String(v ?? '').replace(/[\r\n,]+/g, ' ').trim();
 }
 
 // 报告生成器：汇总 ReportModel、风险定级、JSON/HTML 导出
@@ -295,8 +304,15 @@ export class ReportGenerator {
         if (!arr || !arr.length) continue;
         const cols = Object.keys(arr[0]);
         lines.push('');
-        lines.push(`## ${table}`);
-        lines.push(cols.join(','));
+        // 表名/列名同样是**目标库可控数据**（来自 information_schema），不是本工具的常量：
+        // [2026-09-24 修] ① 区块标题行原样内插表名 —— 名字里带 \n 就能凭空注入一行，
+        //   而那一行以 `=` 开头时就是一个公式单元格（`-4+2` 求值成 -2 已实测）；
+        // ② 列头此前**完全没有过 csvSafeCell**，是全仓最后一处无守卫的 CSV 出口
+        //   （前端同源导出 src/shared/dumpExport.ts 早就 `cols.map(csvCell)` 了）。
+        // 换行/回车先压成空格再判公式前缀：`csvSafeCell` 只在**行首**生效，
+        // 被 \n 拆出来的后半段它管不到，必须由这里先把行结构钉住。
+        lines.push(`## ${flattenCell(table)}`);
+        lines.push(cols.map((c) => csvSafeCell(c)).join(','));
         for (const obj of arr) {
           lines.push(cols.map((c) => csvSafeCell(obj[c] ?? '')).join(','));
         }
@@ -420,7 +436,9 @@ export class ReportGenerator {
     md.push('');
     const payloads = (r.vulns || []).flatMap((v) => v.payloads || []);
     if (payloads.length) {
-      for (const p of payloads) md.push(`- \`${p}\``);
+      // 手写一对反引号 = payload 里任意一个 ` 就把围栏提前闭合（HTML 侧同一份数据走
+      // esc 后放进 <pre>，是安全的；markdown 侧此前没有对应守卫）。围栏交给 mdCode。
+      for (const p of payloads) md.push(`- ${mdCode(p)}`);
     } else {
       md.push('- 无');
     }
@@ -493,7 +511,8 @@ export class ReportGenerator {
       out.push('### 按注入点', '');
       for (const it of d.remediation.perVuln) {
         // [2026-09-17] 标题带受影响参数：整改清单必须能对应到具体参数，不能只有内部 pointId hash
-        const where = it.affectedParam ? ` · ${it.affectedParam}` : '';
+        // [2026-09-24] affectedParam 是**目标可控**的参数名 → 正文位必须过 mdText（同 mdCell）
+        const where = it.affectedParam ? ` · ${mdText(it.affectedParam)}` : '';
         out.push(`**${it.pointId}${where} · ${it.technique} · CVSS ${it.cvss.score} ${it.cvss.severity}**（\`${it.cvss.vector}\`）`, '');
         for (const a of it.actions) out.push(`- ${a}`);
         out.push('');

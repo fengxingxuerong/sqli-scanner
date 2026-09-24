@@ -17,7 +17,7 @@
 //   路径层级**只按报告里真实存在的证据推进**：没有 data.rows 就停在「已证实可注入」，
 //   **不虚构**「已提权/已写入 shell」。止步时会显式写明"利用链未在本报告中执行或未留存证据"。
 // ============================================================================
-import { esc } from './reportHtml.js';
+import { esc, mdText } from './reportHtml.js';
 
 /** 路径层级（只按证据推进，见文件头"诚实边界"） */
 export const PATH_LEVELS = {
@@ -203,15 +203,18 @@ export function attackPathMarkdown(report) {
   const ids = p.stages.map((_, i) => `S${i + 1}`);
   for (let i = 0; i < p.stages.length; i++) {
     const s = p.stages[i];
-    const label = `${s.title}\\n${s.items.map((it) => it.label).join(' / ')}`.replace(/"/g, "'");
+    // items 的 label/detail 里是**参数名、DBMS 串、目标库表名**（:109/:147），全部目标可控。
+    // SVG 侧走 esc（:291），markdown 侧此前是裸内插：mermaid 默认 htmlLabels 会渲染行内 HTML，
+    // 下面的编号清单更是普通 markdown 正文 —— 两者都是「打开报告的机器」执行目标字符串。
+    const label = mdText(`${s.title}\\n${s.items.map((it) => it.label).join(' / ')}`).replace(/"/g, "'");
     lines.push(`  ${ids[i]}["${clip(label, 90)}"]`);
   }
   for (let i = 0; i < ids.length - 1; i++) lines.push(`  ${ids[i]} --> ${ids[i + 1]}`);
   lines.push('```');
   lines.push('');
   p.stages.forEach((s, i) => {
-    lines.push(`${i + 1}. **${s.title}**`);
-    for (const it of s.items) lines.push(`   - ${it.label}${it.detail ? ` —— ${it.detail}` : ''}`);
+    lines.push(`${i + 1}. **${mdText(s.title)}**`);
+    for (const it of s.items) lines.push(`   - ${mdText(it.label)}${it.detail ? ` —— ${mdText(it.detail)}` : ''}`);
   });
   if (p.note) {
     lines.push('');
