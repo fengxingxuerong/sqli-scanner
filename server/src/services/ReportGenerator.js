@@ -121,10 +121,14 @@ function sanitizeTargetForExport(target) {
 }
 
 // [P2-7] CSV 单元格转义：引号翻倍 + 公式前缀防护
+// FORMULA_PREFIX_RE 三处同源（本文件 / engine/dumpFormat.js / src/shared/dumpExport.ts），
+// 由 src/tests/csvFormulaParity.test.ts 从三份源码里抽字面量比对，改动任一侧即红。
+const FORMULA_PREFIX_RE = /^[=+\-@\t\r]/;
+
 function csvSafeCell(v) {
   let s = v === null || v === undefined ? '' : String(v);
   // 公式注入防护：以 = + - @ \t \r 开头的单元格加 ' 前缀（Excel/WPS 不再按公式解析）
-  if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
+  if (FORMULA_PREFIX_RE.test(s)) s = `'${s}`;
   return `"${s.replace(/"/g, '""')}"`;
 }
 
