@@ -245,6 +245,23 @@ export const defaults = {
     dnsPort: 53, // DNS 服务器监听端口（默认 53，需 root/管理员权限）
   },
 
+  // [2026-09-24] 补顶层默认位（引擎判据是 `!== false`，此前键不存在时行为等价于 true，
+  // 但没有任何地方**写明**这件事）：MSSQL 的 os shell 通路在 xp_cmdshell 未启用时会
+  // 自动发 `sp_configure 'xp_cmdshell',1; RECONFIGURE`（Exploiter.js:450 → xpEnable），
+  // 那是**实例级永久配置变更**。默认保持 true（零行为变化），需要严格停在只读边界内的
+  // 授权场景显式传 `xpAutoEnable:false`（REST config 与 CLI 同键）。
+  xpAutoEnable: true,
+
+  // 非 SQL 注入补充趟（NoSQL / GraphQL / SSTI）。[2026-09-24] 这份 defaults 是本轮补的：
+  // 此前该组只存在于 sanitizeStart 的重建字面量里、defaults 完全没有 ⇒ 引擎读
+  // `noSql.concurrency`（ScanManager.js:633）时既没有默认值可回落，也没有任何守卫
+  // 能发现「REST 少转发一个子键」（少转发的后果是并发恒为 2，改不动）。
+  noSql: {
+    enabled: false, // 总开关（默认关：对关系型后端是纯噪声，且每点多一轮探测）
+    kinds: ['nosql', 'graphql', 'ssti'], // 类别（空数组=三类全跑，见 ScanManager._runNoSql）
+    concurrency: 2, // 注入点级并发（同类别在同一注入点内仍串行，保持命中即停语义）
+  },
+
   // 检测技术选择（默认 4 类全选，堆叠/OOB 不勾选 opt-in 以保兼容）
   techniques: ['union', 'error', 'boolean', 'time'],
 

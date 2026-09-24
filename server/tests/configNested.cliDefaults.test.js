@@ -25,7 +25,7 @@ import { buildConfig } from '../bin/cli/config.js';
 import { defaults as D } from '../src/config/defaults.js';
 
 const CLI_SRC = readFileSync(new URL('../bin/cli/config.js', import.meta.url), 'utf8');
-const NESTED_GROUPS = ['wafEvasion', 'secondOrder', 'oob', 'blindRobust'];
+const NESTED_GROUPS = ['wafEvasion', 'secondOrder', 'oob', 'blindRobust', 'noSql'];
 
 /** 一个组的「完整性」断言：defaults 的每个子键都必须有值，且用户意图键不被带底覆盖 */
 function assertGroupComplete(label, config, group, expectedOverrides = {}) {

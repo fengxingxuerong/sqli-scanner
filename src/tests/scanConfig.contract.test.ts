@@ -169,6 +169,15 @@ const KNOWN_MISSING_UI_KEYS = new Set([
   // 属「调优参数」而非「能力缺失」—— 不接 UI 不会造成假阴性（关着 = 历史全量行为），
   // 故登记为此处显式承认的债，而不是强行塞进面板。
   'compactErrorTemplates',
+  // [2026-09-24] 三键是「引擎一直真读、但 REST 白名单此前根本没有它们」补进来的
+  // （sanitizeStart 里有完整取证注释）。登记为**已知无 UI 入口**而不是顺手接进面板：
+  //   · http2 / disableKeepAlive —— 传输形态旋钮，接进面板等于向「一键扫描」人群暴露
+  //     一个他们无法验证的效果（换协议后 WAF 指纹也不同，误配比不配更难查）；
+  //   · xpAutoEnable —— 默认 true 只是**不改变历史行为**；它真正的用途是给 REST/CLI
+  //     一个「不可逆动作的拒绝位」（MSSQL 侧 sp_configure + RECONFIGURE 是实例级永久变更）。
+  //     这类开关该出现在「授权与安全护栏」分组里，而不是被塞进普通配置面板——
+  //     接 UI 是产品决策，本表只负责让缺口可见。
+  'http2', 'disableKeepAlive', 'xpAutoEnable',
   // 响应判定多指标（--string/--not-string/--code/--regexp/--titles 的同族）
   'matchText', 'matchCode', 'matchRegexp', 'trueRegexp', 'falseRegexp', 'matchTitle', 'predictOutput',
   // 动态块 / 错误原文留存

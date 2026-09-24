@@ -138,6 +138,12 @@ export function buildConfig(args) {
   // 逃生口：--no-production-mode（靶场/自建演练环境）等价于已确认。
   config.productionMode = !args.noProductionMode;
   config.confirmDestructive = args.confirmDestructive === true;
+  // [2026-09-24] 不可逆动作拒绝位：MSSQL 的 os shell 通路在 xp_cmdshell 未启用时会自动发
+  // `sp_configure 'xp_cmdshell',1; RECONFIGURE`（Exploiter.js:450，判据 `!== false`）。
+  // 那是**实例级永久配置变更**，与「只读复核」不是同一件事；引擎侧一直支持拒绝，
+  // 但这个键在 CLI/REST 都不存在 ⇒ 使用者无法把扫描留在授权边界内。
+  // 默认保持 true（零行为变化），这里补的是**拒绝**的入口。
+  if (args.noXpAutoEnable) config.xpAutoEnable = false;
   if (args.allowSecondOrderWrites) {
     patchGroup(config, 'secondOrder', { allowWrites: true });
   }

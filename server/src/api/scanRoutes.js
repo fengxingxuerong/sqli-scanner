@@ -80,6 +80,9 @@ const KNOWN_CFG_KEYS = new Set([
   'insecureTls', 'trustProxyEnv', 'ssrfViaProxy',
   // [P0-FIX 2026-09-09] 本地/私网目标绕过环境变量代理（默认 true）
   'proxyBypassLocal',
+  // [2026-09-24] 引擎真读、此前**任何入口都设不了**的三键（见 sanitizeStart 内注释）：
+  // http2 / disableKeepAlive（传输形态）+ xpAutoEnable（不可逆动作的拒绝位）
+  'http2', 'disableKeepAlive', 'xpAutoEnable',
   // [P1-PERF 2026-09-08] 输入校验型目标的可证安全跳过开关 + PoC 凭据脱敏开关
   'validationSkip', 'pocRedactAuth',
   // [P0-FIX 2026-09-09] 生产护栏：高危池（RCE/写文件/DoS 类）投放必须显式确认。
@@ -475,6 +478,30 @@ export function sanitizeStart(body) {
   // 显式传 false 可恢复「连本地也走代理」的旧行为。
   const proxyBypassLocal = pickBool(cfg, 'proxyBypassLocal');
   if (proxyBypassLocal !== undefined) config.proxyBypassLocal = proxyBypassLocal;
+  // [2026-09-24] HTTP 传输形态两键：defaults.js 的注释早在 2026-09-09 就写着
+  // 「本键与 http2 此前只存在于 defaults，未进 KNOWN_CFG_KEYS → 已补白名单+透传」，
+  // 但白名单里**从来没有它们**（本轮实测：sanitizeStart 对 config.http2 / 
+  // config.disableKeepAlive 都不落地，还会回一条「未知字段」warn）。后果不是"不好看"：
+  //   · http2 —— crawler.js:169 / TargetParser.js:288 的判据是 `config?.http2 === true`，
+  //     收不到就永远走 axios HTTP/1.1，而调用方以为换了协议形态（WAF 侧指纹也不同）；
+  //   · disableKeepAlive —— httpClient.js:322 只看构造参数，REST 传了等于没传。
+  // CLI 侧这两个键连旋钮都没有 ⇒ 此前没有任何入口能让引擎读到非默认值。
+  // 走严格布尔（同 compactErrorTemplates）：`1`/`"true"` 在 REST 收下却不被引擎生效，
+  // 是一种更难的查法，不如在入口就拒掉。
+  const http2 = pickBool(cfg, 'http2');
+  if (http2 !== undefined) config.http2 = http2;
+  const disableKeepAlive = pickBool(cfg, 'disableKeepAlive');
+  if (disableKeepAlive !== undefined) config.disableKeepAlive = disableKeepAlive;
+  // [2026-09-24] xpAutoEnable：**不可逆动作的拒绝位**。Exploiter.js:450 的判据是
+  // `ctx.config?.xpAutoEnable !== false`，命中就发
+  // `EXEC sp_configure 'xp_cmdshell',1; RECONFIGURE`（实例级永久配置变更，MSSQL 侧
+  // 对标 sqlmap 的自动开启行为）。原实现该键在任何入口都不存在 ⇒ 使用者**无法拒绝**
+  // 一次改服务器配置的写操作——这与本仓「高危动作必须显式确认」（productionMode /
+  // confirmDestructive / secondOrder.allowWrites）的口径不一致。
+  // 默认仍为 true（零行为变化，避免把既有 MSSQL 利用链打断了还没人知道），
+  // 但从本轮起 `config.xpAutoEnable=false` 真的能把这一步关掉。
+  const xpAutoEnable = pickBool(cfg, 'xpAutoEnable');
+  if (xpAutoEnable !== undefined) config.xpAutoEnable = xpAutoEnable;
   if (cfg.secondOrder) {
     const so = cfg.secondOrder;
     config.secondOrder = {
@@ -574,7 +601,11 @@ export function sanitizeStart(body) {
       enabled: !!ns.enabled,
       kinds: Array.isArray(ns.kinds)
         ? ns.kinds.filter((k) => typeof k === 'string' && ['nosql', 'graphql', 'ssti'].includes(k))
-        : [],
+        : defaults.noSql.kinds,
+      // [2026-09-24] 本组此前整键漏转发 concurrency：ScanManager.js:633 读
+      // `Number(noSql.concurrency) || 2`，而 sanitizeStart 只重建 {enabled, kinds} ⇒
+      // 传 concurrency:8 静默回到 2（非 SQL 补充趟的并发上不去，大点集扫描白等）。
+      concurrency: clampInt(ns.concurrency, defaults.noSql.concurrency, 1, 16),
     };
   }
   if (cfg.blindRobust && typeof cfg.blindRobust === 'object') {

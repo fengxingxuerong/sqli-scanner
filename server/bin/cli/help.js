@@ -102,6 +102,9 @@ export function printHelp() {
                              把两个动作分开，避免一次回车扫平生产库。
   --no-production-mode       声明本次不是生产环境（靶场/自建演练）：关掉生产护栏，高危池与二阶写请求不再被预置抑制
   --allow-second-order-writes 允许二阶使用非幂等方法（POST/PUT/PATCH/DELETE）：二阶本质是写操作，默认仅 GET/HEAD
+  --no-xp-auto-enable        拒绝自动开启 xp_cmdshell：MSSQL 的 os shell 通路在未启用时会发
+                             sp_configure 'xp_cmdshell',1 + RECONFIGURE（实例级永久配置变更）。
+                             默认仍自动开启（与历史行为一致）；要把扫描严格停在只读边界内就加本开关。
   --no-proxy-bypass-local    关闭本地/私网代理豁免（默认豁免：127.0.0.1/内网不走 *PROXY 环境变量，
                              避免系统代理掐断请求后被记成「无漏洞」）
   --auth <user:pass>         Basic 认证（user:password 形式）

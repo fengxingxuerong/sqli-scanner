@@ -155,7 +155,7 @@ test('守卫（反向）：非白名单键不得进入 config（含嵌套对象�
 //
 // 判据写成数据驱动的：**以 defaults 的键集为准**，只发组内第一个子键，
 // 断言其余子键全部带着 defaults 的值落地 —— 新增嵌套组或新增子键都自动纳入。
-const NESTED_GROUPS = ['wafEvasion', 'oob', 'secondOrder', 'blindRobust'];
+const NESTED_GROUPS = ['wafEvasion', 'oob', 'secondOrder', 'blindRobust', 'noSql'];
 
 test('守卫（嵌套组带底完整性）：只发组内一个子键时，其余子键必须带 defaults 值落地', () => {
   // 先钉住分母：defaults 里新增嵌套组却不进本清单，等于又开一条无人看守的断口
@@ -252,6 +252,33 @@ test('守卫（嵌套组带底完整性）：wafEvasion 的关键布尔位必须
     config: { wafEvasion: { filterAdaptive: false, tamper: { enabled: true } } },
   });
   assert.equal(off.config.wafEvasion.filterAdaptive, false, '显式 false 必须赢过 defaults 的 true');
+});
+
+test('守卫（不可逆动作拒绝位）：xpAutoEnable=false 必须活到引擎', () => {
+  // Exploiter.js:450 的判据是 `ctx.config?.xpAutoEnable !== false` —— 命中就发
+  // `EXEC sp_configure 'xp_cmdshell',1; RECONFIGURE`（MSSQL 实例级永久配置变更）。
+  // 这个键此前在 defaults / 白名单 / CLI / 面板**一处都没有** ⇒ 使用者无法拒绝。
+  // 默认档（不传）必须仍是"照旧自动开启"，本断言钉住两侧：
+  const untouched = sanitizeStart({ target: { url: 'http://shop.example.com/item?id=1' }, config: {} });
+  assert.notEqual(untouched.config.xpAutoEnable, false, '未传时不得变成 false（那是行为变化）');
+  const off = sanitizeStart({
+    target: { url: 'http://shop.example.com/item?id=1' },
+    config: { xpAutoEnable: false },
+  });
+  assert.equal(off.config.xpAutoEnable, false, '显式 false 被丢弃 ⇒ 授权边界内的只读复核做不到');
+});
+
+test('守卫（传输形态两键）：http2 / disableKeepAlive 必须活到引擎', () => {
+  // defaults.js:14-16 的注释从 2026-09-09 起就写着「已补白名单+透传」，但白名单里
+  // **从来没有这两个键**（实测 sanitizeStart 直接丢弃 + 回一条未知字段 warn）。
+  // 引擎读取点：crawler.js:169 / TargetParser.js:288 的 `config?.http2 === true`、
+  // httpClient.js:322 的 disableKeepAlive。注释与代码不一致时，错的是代码。
+  const out = sanitizeStart({
+    target: { url: 'http://shop.example.com/item?id=1' },
+    config: { http2: true, disableKeepAlive: true },
+  });
+  assert.equal(out.config.http2, true, 'http2 被丢弃 ⇒ 爬虫/取页永远停在 HTTP/1.1');
+  assert.equal(out.config.disableKeepAlive, true, 'disableKeepAlive 被丢弃 ⇒ 长连接行为与调用方预期相反');
 });
 
 test('守卫（嵌套组带底完整性·反向）：带底不得变成「用户没发的键也能被塞进来」', () => {

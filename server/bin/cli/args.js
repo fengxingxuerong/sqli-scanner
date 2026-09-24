@@ -28,6 +28,8 @@ export function parseArgs(argv) {
     scope: null, insecureTls: false, noValidationSkip: false,
     // [P0-FIX 2026-09-09] 生产护栏开关：高危池投放确认 / 脱离护栏 / 二阶写请求放行
     confirmDestructive: false, noProductionMode: false, allowSecondOrderWrites: false,
+    // [2026-09-24] 不可逆动作拒绝位：MSSQL 自动 sp_configure 开启 xp_cmdshell（实例级永久变更）
+    noXpAutoEnable: false,
     // —— HTTP 协议层（对标 sqlmap --force-ssl / --ignore-redirects / --hpp）——
     forceSsl: false, ignoreRedirects: false, hpp: false,
     ratePerSec: 50, concurrencyDet: 4,
@@ -136,6 +138,7 @@ export function parseArgs(argv) {
     else if (a === '--confirm-destructive') args.confirmDestructive = true;
     else if (a === '--no-production-mode') args.noProductionMode = true;
     else if (a === '--allow-second-order-writes') args.allowSecondOrderWrites = true;
+    else if (a === '--no-xp-auto-enable') args.noXpAutoEnable = true;
     else if (a === '--auth') args.auth = next();
     else if (a === '--auth-type') args.authType = next();
     else if (a === '--rate' || a === '--ratePerSec') args.ratePerSec = Number(next()) || 50;
