@@ -88,6 +88,48 @@ describe('sanitizeInjectedHtml: 危险协议', () => {
   });
 });
 
+describe('sanitizeInjectedHtml: 非空白的属性分隔写法（2026-09-24 绕过修复）', () => {
+  // 旧实现用 /\son[a-z]{3,20}\s*=/ 全文扫，要求属性名前必须有**空白**。而 HTML5 的
+  // 属性分隔另有两种宽容写法，浏览器解析器都会照收：斜杠分隔、以及引号值结束后
+  // 直接接下一个属性名。这两种向量都能整段穿过旧清洗器（修复前实测原样输出）。
+  it('斜杠分隔的事件属性被剥除', () => {
+    expect(sanitizeInjectedHtml('<svg/onload=alert(1)>')).toBe('<svg>');
+    expect(sanitizeInjectedHtml('<input/onfocus=alert(1)>')).toBe('<input>');
+    expect(sanitizeInjectedHtml('<textarea/onchange=alert(1)>q</textarea>')).toBe('<textarea>q</textarea>');
+    expect(sanitizeInjectedHtml('<svg><animate/onbegin="alert(1)">z</animate></svg>'))
+      .toBe('<svg><animate>z</animate></svg>');
+    // 大小写混写的事件名同样认（EVENT_NAME_RE 带 i 标志）；`/x` 是无害残属性，保留原样
+    expect(sanitizeInjectedHtml('<b/x OnClIcK="alert(1)">y</b>')).toBe('<b/x>y</b>');
+  });
+
+  it('引号值后无分隔直接接事件属性也被剥除', () => {
+    expect(sanitizeInjectedHtml('<img src="x"onerror=alert(1)>')).toBe('<img src="x">');
+    expect(sanitizeInjectedHtml("<div id='a'onclick=alert(1)>x</div>")).toBe("<div id='a'>x</div>");
+  });
+
+  it('引号内的 > 不得提前结束标签（否则其后的 on* 逃到标签外而漏网）', () => {
+    expect(sanitizeInjectedHtml('<div title="a>b" onclick=alert(1)>x</div>'))
+      .toBe('<div title="a>b">x</div>');
+  });
+
+  it('但值内部的斜杠/属性样式文本不得被误当成属性边界', () => {
+    // 这条正是「把分隔符从 \\s 简单放宽到 [\s/]」会踩的坑：放宽后产出 <div data-x="a>
+    expect(sanitizeInjectedHtml('<div data-x="a/onmouseover=b()">ok</div>'))
+      .toBe('<div data-x="a/onmouseover=b()">ok</div>');
+    expect(sanitizeInjectedHtml('<a href=/onerror=1/x.png>p</a>')).toBe('<a href=/onerror=1/x.png>p</a>');
+  });
+
+  it('字面量小于号不当标签处理（`<` 后非字母非斜杠）', () => {
+    expect(sanitizeInjectedHtml('a < b onerror=1')).toBe('a < b onerror=1');
+  });
+
+  it('新写法同样幂等', () => {
+    const once = sanitizeInjectedHtml('<svg/onload=alert(1)><img src="x"onerror=alert(1)>');
+    expect(once).toBe('<svg><img src="x">');
+    expect(sanitizeInjectedHtml(once)).toBe(once);
+  });
+});
+
 describe('sanitizeInjectedHtml: 注释与正常内容', () => {
   it('HTML 注释（含条件注释逃逸通道）被剥除', () => {
     expect(sanitizeInjectedHtml('a<!--[if IE]><script>x</script><![endif]-->b')).toBe('ab');
