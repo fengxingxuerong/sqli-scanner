@@ -102,6 +102,37 @@ export const defaults = {
   timeProbeSleepSec: null,
   timeExtractSleepSec: null,
   maxColumnsGuess: 50, // UNION 猜测列数上限
+  // ── [2026-09-24 接入口] 八个「引擎早就实现、但任何入口都设不了」的旋钮 ──────────────
+  // 判据：引擎读取点 `(config|cfg).X` 存在 ∩ X ∉ (KNOWN_CFG_KEYS ∪ defaults ∪ CLI 写入 ∪ 面板)，
+  // 且全仓**没有任何写入点**（有写入者的那 13 个属于内部字段，另当别论）。
+  // 这批的共同点：每一处注释都写着"可经 config.X 关闭/调整"，而 X 在四个入口里都不存在
+  // ⇒ 那句话对使用者不成立（对写单测的人成立）。下面的默认值**逐个等于引擎内部兜底值**，
+  // 所以本批是零行为变化：改动只是"让注释里承诺的旋钮真的能拧"。
+  // 布尔位用严格语义（`=== true` / `!== false` / `!== true`），带底与原样都已在
+  // tests/configWhitelist.passthrough.test.js 钉住。
+  // 位平面提取（每字符 1 轮请求，对比二分 ~8 轮）：仅 MySQL/MariaDB/TiDB 族生效，
+  // 8 位收敛后仍走 extractVerify 等值验证，失败整体回落二分（保守，零漏提取）。
+  // 默认关：改了提取请求形状，需要在真目标上按 targetProfile 逐例确认后开启。
+  blindBitwise: false,
+  // 盲注单字段长度上界（超过则不再延伸）。Engine 侧判据是 `> 255` 才采纳，否则回落 4096。
+  // 4096 的来历：单字段超 4K 属异常，拿 65531 去逐字节提取会把一次扫描拖成十几分钟（实测）。
+  blindMaxLen: 4096,
+  // 布尔通道的「空基线」OR 型兜底对（参数原值查不到行时 AND 型真假同形 → 通道静默失效）。
+  // 代价：主轮未命中的点 +2 请求。默认开（这是漏报防线，不是优化项）。
+  booleanOrFallback: true,
+  // union 存在性门控（防参数反射误报）的逃生口：true=跳过门控。
+  // 门控本身是误报防线，默认关着跳；但反射型页面会把门控判成"无注入"从而漏报，
+  // 现场需要能单独放开这一格，而不是整条 union 通道重跑。
+  unionSkipGate: false,
+  // deepDump 分页聚合的每页行数（规避 LISTAGG 4000 / GROUP_CONCAT 1024 截断）。
+  deepDumpPageSize: 200,
+  // 拖库断点写入会话的行间隔。只影响"续跑能省多少请求"，不影响结果正确性
+  // （断点只记 offset，历史行取不回时退化为从头拉）。
+  dumpCheckpointInterval: 100,
+  // 时间定库通道的 sleep 与判定阈值：与时间盲注**刻意分开**——定库要快（每库一条向量），
+  // 用 timeBlindSleepSec/timeThresholdMs 会把 18 库遍历的墙钟放大到不可接受。
+  fingerprintSleepSec: 1,
+  fingerprintTimeThresholdMs: 800,
   // 响应相似度锚点（对标 sqlmap --string / --not-string）：有锚点时检测器优先用锚点判定真/假页面，
   // 不再依赖对动态内容敏感的相似度比对。默认 null=不启用（回落分块比对，保持现状）。
   matchString: null, // 真页面必含文本

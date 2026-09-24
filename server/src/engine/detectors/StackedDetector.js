@@ -49,7 +49,11 @@ export class StackedDetector extends Detector {
       return result;
     }
 
-    const sleep = ctx.config?.sleepSecs ?? this.sleepSecs;
+    // [2026-09-24] 本行原本还有一层 `ctx.config?.sleepSecs ??` —— 那个键在 defaults / REST 白名单
+    // / CLI / 面板**四处都不存在**（全仓零写入点），留着只会让人以为堆叠的 sleep 能单独调。
+    // 现统一走 timeBlindSleepSec（`--time-sec` 就是它的入口）：同一个"慢目标要多等"的意图
+    // 在时间盲注与堆叠两条通道上终于同一口径。默认值 2 与本检测器原硬编码值相同 ⇒ 零行为变化。
+    const sleep = ctx.config?.timeBlindSleepSec ?? this.sleepSecs;
     const thresholdMs = ctx.config?.timeThresholdMs ?? this.timeThresholdMs;
     const samples = Math.min(10, Math.max(1, ctx.config?.timeBlindSamples ?? defaults.timeBlindSamples));
     // 基线超时：用配置值（不加 sleep 余量），基线不应触发延迟

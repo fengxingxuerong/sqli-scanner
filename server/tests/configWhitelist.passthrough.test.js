@@ -32,6 +32,9 @@ const PROBE = {
   noSql: { enabled: false },
   secondOrder: { enabled: false },
   blindRobust: { enabled: true },
+  // 结论可信度守卫组：默认探针值 1 过不了 `typeof === 'object'` 那道形状门（那是正确行为），
+  // 所以给它一个最小合法对象 —— 本守卫要验的是"键有没有透传"，不是形状宽容度。
+  scanValidity: { enabled: false },
   dbms: 'MySQL',
   matchCode: true,
   matchString: 'ok',
@@ -279,6 +282,66 @@ test('守卫（传输形态两键）：http2 / disableKeepAlive 必须活到引�
   });
   assert.equal(out.config.http2, true, 'http2 被丢弃 ⇒ 爬虫/取页永远停在 HTTP/1.1');
   assert.equal(out.config.disableKeepAlive, true, 'disableKeepAlive 被丢弃 ⇒ 长连接行为与调用方预期相反');
+});
+
+test('守卫（scanValidity 组带底）：只发一个阈值时其余阈值必须带着 VALIDITY_DEFAULTS 落地', async () => {
+  const { VALIDITY_DEFAULTS } = await import('../src/core/scanValidityGuard.js');
+  const out = sanitizeStart({
+    target: { url: 'http://shop.example.com/item?id=1' },
+    config: { scanValidity: { windowSize: 80 } },
+  });
+  const sv = out.config.scanValidity;
+  assert.equal(sv.windowSize, 80, '用户显式给的阈值必须赢过常量');
+  // 这份常量是 ScanValidityGuard 判定式的分母/除数（minSamples 缺席不是"用默认"，
+  // 而是让比例类判定失去样本数门），所以一个都不能丢。
+  for (const k of Object.keys(VALIDITY_DEFAULTS)) {
+    if (k === 'windowSize') continue;
+    assert.deepEqual(sv[k], VALIDITY_DEFAULTS[k], `scanValidity.${k} 没有带底落地`);
+  }
+  // 逃生口（关掉整条观察）必须真的能关：scanRunner.js:68 判据是 `enabled !== false`
+  const off = sanitizeStart({
+    target: { url: 'http://shop.example.com/item?id=1' },
+    config: { scanValidity: { enabled: false } },
+  });
+  assert.equal(off.config.scanValidity.enabled, false, 'enabled:false 被吃掉 ⇒ 逃生口不存在');
+  // 比例类阈值收在 (0,1]，越界值必须被 clamp 而不是原样送进判定式
+  const clamped = sanitizeStart({
+    target: { url: 'http://shop.example.com/item?id=1' },
+    config: { scanValidity: { blockRatio: 7, minSamples: 0 } },
+  });
+  assert.equal(clamped.config.scanValidity.blockRatio, 1, 'blockRatio 越界未被 clamp');
+  assert.equal(clamped.config.scanValidity.minSamples, 1, 'minSamples=0 会让比例判定失去分母');
+});
+
+test('守卫（八个"注释承诺过但没人接"的旋钮）：显式值必须活到引擎', () => {
+  const body = {
+    target: { url: 'http://shop.example.com/item?id=1' },
+    config: {
+      blindBitwise: true,
+      blindMaxLen: 32000,
+      booleanOrFallback: false,
+      unionSkipGate: true,
+      deepDumpPageSize: 500,
+      dumpCheckpointInterval: 250,
+      fingerprintSleepSec: 4,
+      fingerprintTimeThresholdMs: 2500,
+      prefilterBudgetMs: 9000,
+      maxExtractBodyBytes: 1024 * 1024 * 64,
+    },
+  };
+  const c = sanitizeStart(body).config;
+  for (const [k, v] of Object.entries(body.config)) {
+    assert.equal(c[k], v, `${k}：显式发了 ${v}，落地是 ${c[k]} —— 引擎读取点见 tests/configOrphanKeys.guard.test.js 的扫描`);
+  }
+  // 未传时必须等于 defaults（引擎内部兜底值），而不是 undefined 或被 clamp 到别处
+  const bare = sanitizeStart({ target: { url: 'http://shop.example.com/item?id=1' }, config: { level: 3 } }).config;
+  for (const k of ['blindBitwise', 'blindMaxLen', 'booleanOrFallback', 'unionSkipGate', 'deepDumpPageSize',
+    'dumpCheckpointInterval', 'fingerprintSleepSec', 'fingerprintTimeThresholdMs']) {
+    assert.equal(bare[k], undefined, `${k} 未传时不该被凭空写入（defaults 由浅合并提供）`);
+  }
+  // maxExtractBodyBytes 刻意不在 defaults 里：defaults.js 的注释写明它回落
+  // EXTRACT_MAX_BODY_BYTES（env EXTRACT_MAX_BODY_MB），入口若写默认值会让那条 env 永久失效
+  assert.equal(bare.maxExtractBodyBytes, undefined);
 });
 
 test('守卫（嵌套组带底完整性·反向）：带底不得变成「用户没发的键也能被塞进来」', () => {

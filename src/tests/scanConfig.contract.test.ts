@@ -178,6 +178,23 @@ const KNOWN_MISSING_UI_KEYS = new Set([
   //     这类开关该出现在「授权与安全护栏」分组里，而不是被塞进普通配置面板——
   //     接 UI 是产品决策，本表只负责让缺口可见。
   'http2', 'disableKeepAlive', 'xpAutoEnable',
+  // [2026-09-24 接入口批次] 这 11 个是「引擎一直在读、注释一直写着可配、但四个入口都没接」
+  // 那批键的收口（判据与逐个定性见 server/tests/configOrphanKeys.guard.test.js）。
+  // 本批把可达性补上（defaults + REST 白名单 + 严格 clamp），**没有顺手接进面板**：
+  // 它们全是提取/统计层面的调优旋钮（默认值逐个等于引擎内部兜底 ⇒ 不接不会造成假阴性），
+  // 而面板的核心用户是「一键扫描」人群，多一个无法自行验证的旋钮只会让设置更难归因。
+  // 接不接是产品决策，本表负责让"没有入口"这件事始终可数。
+  'blindBitwise', // 位平面提取（仅 MySQL 族，改提取请求形状）
+  'blindMaxLen', // 盲注单字段长度上界
+  'booleanOrFallback', // 空基线 OR 型兜底对（关掉=省 2 请求/点，代价是漏报防线）
+  'unionSkipGate', // union 反射门控逃生口（误报防线，刻意不给网络调用方便利开关）
+  'deepDumpPageSize', // deepDump 分页聚合每页行数
+  'dumpCheckpointInterval', // 拖库断点写入间隔（只影响续跑省多少请求）
+  'fingerprintSleepSec', // 时间定库 sleep（与时间盲注刻意分开，定库要快）
+  'fingerprintTimeThresholdMs', // 时间定库判定阈值
+  'prefilterBudgetMs', // 预筛选时间预算
+  'maxExtractBodyBytes', // 提取阶段响应上限（per-scan，env EXTRACT_MAX_BODY_MB 之外）
+  'scanValidity', // 结论可信度守卫阈值组（含 enabled 逃生口）
   // 响应判定多指标（--string/--not-string/--code/--regexp/--titles 的同族）
   'matchText', 'matchCode', 'matchRegexp', 'trueRegexp', 'falseRegexp', 'matchTitle', 'predictOutput',
   // 动态块 / 错误原文留存

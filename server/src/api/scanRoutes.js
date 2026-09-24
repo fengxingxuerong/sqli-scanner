@@ -15,6 +15,9 @@ import { ErrorCode, AppError } from '../core/errors.js';
 import { PAYLOADS, FINGERPRINT, TECHNIQUE_TYPES } from '../engine/payloads.js';
 import { defaults } from '../config/defaults.js';
 import { logger } from '../core/logger.js';
+// [2026-09-24] config.scanValidity 组的**唯一真相**在守卫模块自己那份常量里；
+// 这里 import 而不是在 defaults.js 复制一份，是为了避免出现第二个数字来源（改了不生效那种）。
+import { VALIDITY_DEFAULTS } from '../core/scanValidityGuard.js';
 import { isSafeSessionPath } from '../core/sessionStore.js';
 import { assertSafeHttpTarget } from '../core/httpClient.js';
 // [交付场景] 两次扫描差异对比（纯函数，便于单测；见 tests/scanDiff.test.js）
@@ -125,6 +128,16 @@ const KNOWN_CFG_KEYS = new Set([
   'unionFrom', // --union-from：强制 UNION FROM 子句（blindExtractor/Extractor/injection 四处消费）
   // [2026-09-23] 报错模板按机制族裁剪（默认 false：见 defaults.js 里写明的实测代价）
   'compactErrorTemplates',
+  // [2026-09-24 接入口] 引擎读取点一直在、注释也一直写着"可经 config.X 调整"，
+  // 但 X 在 defaults / 本白名单 / CLI / 面板**四处都没有** ⇒ 那承诺只有写单测的人能兑现。
+  // 默认值逐个等于引擎内部兜底，故零行为变化；细节见 defaults.js 同批注释。
+  'blindBitwise', 'blindMaxLen', 'booleanOrFallback', 'unionSkipGate',
+  'deepDumpPageSize', 'dumpCheckpointInterval', 'fingerprintSleepSec', 'fingerprintTimeThresholdMs',
+  // 预筛选时间预算（prefilter.js 明写"手动 cfg.prefilterBudgetMs 仍最高优先"）与
+  // 提取响应上限（Extractor.js:121 回落 EXTRACT_MAX_BODY_BYTES，env 之外的 per-scan 覆盖）
+  'prefilterBudgetMs', 'maxExtractBodyBytes',
+  // 结论可信度守卫的阈值组（scanValidityGuard.VALIDITY_DEFAULTS 的 7 个阈值 + enabled 逃生口）
+  'scanValidity',
   // [2026-09-23 E2] 枚举 / 拖库动作族：--dbs/--tables/--columns/--dump/--dump-all/--users/
   // --passwords/--current-db/--current-user/--hostname/--is-dba/--schema/--privileges/--roles/
   // --count/--search/--common-tables/--common-columns。CLI 一路把参数解析成 config.extractScope
@@ -464,6 +477,61 @@ export function sanitizeStart(body) {
   // 通用标量透传，否则 `1`/`"true"` 会被 REST 收下却在引擎侧不生效（白名单有、引擎收不到）。
   const compactErrorTemplates = pickBool(cfg, 'compactErrorTemplates');
   if (compactErrorTemplates !== undefined) config.compactErrorTemplates = compactErrorTemplates;
+  // [2026-09-24 接入口] 八键：引擎读取点一直在，注释也一直写着"可经 config.X 调整"，
+  // 但 X 既不在 defaults、也不在本白名单、CLI/面板也没有 ⇒ 那句话只有写单测的人能兑现。
+  // 默认值逐个等于引擎内部兜底（见 defaults.js 本批注释），所以本批零行为变化。
+  // 数值键的区间刻意**比引擎判据更宽但不越物理边界**：blindMaxLen 下限取 256（引擎对
+  // `<= 255` 的值会静默回落 4096，与其让它默默回落，不如在入口就拒掉/收敛到合法域）。
+  const blindBitwise = pickBool(cfg, 'blindBitwise');
+  if (blindBitwise !== undefined) config.blindBitwise = blindBitwise;
+  const booleanOrFallback = pickBool(cfg, 'booleanOrFallback');
+  if (booleanOrFallback !== undefined) config.booleanOrFallback = booleanOrFallback;
+  const unionSkipGate = pickBool(cfg, 'unionSkipGate');
+  if (unionSkipGate !== undefined) config.unionSkipGate = unionSkipGate;
+  const blindMaxLen = pickInt(cfg, 'blindMaxLen', defaults.blindMaxLen, 256, 65535);
+  if (blindMaxLen !== undefined) config.blindMaxLen = blindMaxLen;
+  const deepDumpPageSize = pickInt(cfg, 'deepDumpPageSize', defaults.deepDumpPageSize, 1, 2000);
+  if (deepDumpPageSize !== undefined) config.deepDumpPageSize = deepDumpPageSize;
+  const dumpCheckpointInterval = pickInt(cfg, 'dumpCheckpointInterval', defaults.dumpCheckpointInterval, 1, 100000);
+  if (dumpCheckpointInterval !== undefined) config.dumpCheckpointInterval = dumpCheckpointInterval;
+  const fingerprintSleepSec = pickInt(cfg, 'fingerprintSleepSec', defaults.fingerprintSleepSec, 1, 30);
+  if (fingerprintSleepSec !== undefined) config.fingerprintSleepSec = fingerprintSleepSec;
+  const fingerprintTimeThresholdMs = pickInt(cfg, 'fingerprintTimeThresholdMs', defaults.fingerprintTimeThresholdMs, 100, 60000);
+  if (fingerprintTimeThresholdMs !== undefined) config.fingerprintTimeThresholdMs = fingerprintTimeThresholdMs;
+  // 预筛选预算：prefilter.js 的判据是 `Number.isFinite(x) && x > 0`，非有限值它自己会回落
+  // 实测 RTT 自适应；这里只保证进来的是合法预算（100ms ~ 5min，超界无意义）。
+  const prefilterBudgetMs = pickInt(cfg, 'prefilterBudgetMs', 1500, 100, 300000);
+  if (prefilterBudgetMs !== undefined) config.prefilterBudgetMs = prefilterBudgetMs;
+  // 提取阶段响应上限：**不写默认值**是刻意的 —— 引擎侧是
+  // `config.maxExtractBodyBytes ?? EXTRACT_MAX_BODY_BYTES`，而后者由 env
+  // EXTRACT_MAX_BODY_MB 推导；在这里塞 defaults 会让那条 env 永久失效。
+  const maxExtractBodyBytes = pickInt(cfg, 'maxExtractBodyBytes', undefined, 1024 * 1024, 1024 * 1024 * 1024);
+  if (maxExtractBodyBytes !== undefined) config.maxExtractBodyBytes = maxExtractBodyBytes;
+  // 结论可信度守卫（scanValidityGuard）：这是一组**嵌套阈值**，必须带底重建 ——
+  // 浅合并下少转发一个子键，引擎侧就是 undefined 而不是 VALIDITY_DEFAULTS 的值，
+  // 而 windowSize / minSamples 这类阈值"缺席"不是"用默认"而是**参与判定的除数/分母**
+  // （见本仓同日教训：blindRobust.extractVerify 因判据写成 `!== false` 躲过了存在性检查）。
+  if (cfg.scanValidity && typeof cfg.scanValidity === 'object' && !Array.isArray(cfg.scanValidity)) {
+    const sv = cfg.scanValidity;
+    // `enabled` 不在 VALIDITY_DEFAULTS 里（那份常量只有阈值），但带底必须把它写上：
+    // scanRunner.js:68 的判据是 `validityCfg.enabled !== false`，缺席虽然等价于"开"，
+    // 与本仓同日教训同一条 —— 现场要能区分"用户没配"与"键不存在"。
+    const out = { enabled: true, ...VALIDITY_DEFAULTS };
+    const en = pickBool(sv, 'enabled');
+    if (en !== undefined) out.enabled = en;
+    for (const k of ['windowSize', 'blockMinHits', 'authStreak', 'minSamples', 'abortAfterFails']) {
+      const v = pickInt(sv, k, VALIDITY_DEFAULTS[k], 1, 100000);
+      if (v !== undefined) out[k] = v;
+    }
+    for (const k of ['blockRatio', 'serverErrRatio']) {
+      const raw = sv[k];
+      // 不新增 pickNum：scanConfigUtils 的语义是「未传 → undefined（该键不写入）」，
+      // 这层判断留在调用点，公共 API 面不再长。
+      const v = raw === undefined || raw === null ? undefined : clampNum(raw, VALIDITY_DEFAULTS[k], 0.01, 1);
+      if (v !== undefined) out[k] = v;
+    }
+    config.scanValidity = out;
+  }
   if (typeof cfg.ssrfViaProxy === 'string') {
     const v = cfg.ssrfViaProxy.trim().toLowerCase();
     // [P1-FIX 2026-09-09] 新增 strict-dns：本地能解析就先按严格层判（解不出才下放给代理）。
