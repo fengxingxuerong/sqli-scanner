@@ -340,6 +340,18 @@
       "bytes": 8078,
       "upstream": "https://raw.githubusercontent.com/coreruleset/coreruleset/v4.1.0/rules/REQUEST-930-APPLICATION-ATTACK-LFI.conf",
       "tag": "v4.1.0"
+    },
+    "crs/lfi-os-files.data": {
+      "sha256": "6dceddeb870a0e70166b29e59551a51264a400bea7b33fa4ac921e100d6e16ae",
+      "bytes": 11677,
+      "upstream": "https://raw.githubusercontent.com/coreruleset/coreruleset/v4.1.0/rules/lfi-os-files.data",
+      "tag": "v4.1.0"
+    },
+    "crs/restricted-files.data": {
+      "sha256": "611991160f26c49c03ca393705f30181f9dae3da354aded4945472627837a027",
+      "bytes": 3996,
+      "upstream": "https://raw.githubusercontent.com/coreruleset/coreruleset/v4.1.0/rules/restricted-files.data",
+      "tag": "v4.1.0"
     }
   }
 }

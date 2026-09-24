@@ -135,8 +135,53 @@ function declaredTransforms(act) {
 // （曾经我在此处记过"`(?i:…)` 内联分组在 JS 会抛所以 5 条规则静默失效"——那是误报：
 //   内联修饰组是 ES2025 语法，V8 13 / Node 24 合法且语义正确。别照那种说法再写一遍。）
 const PARSE_STATS = new Map();
-// execOp 只实现了这两个 operator；其余（@detectSQLi/@pm/@ge/@within/…）一律"永不匹配"，必须计数
-const IMPLEMENTED_OPS = new Set(['@rx', '@streq']);
+// execOp 只实现了这三个 operator；其余（@detectSQLi/@pm/@ge/@within/…）一律"永不匹配"，必须计数。
+// @pmFromFile 于 2026-09-25 登记 —— 但登记只是"有资格匹配"，实际能不能匹配取决于词典文件在不在，
+// 所以它的缺口不在这里归零，而在 pmLoaded/missingDicts 那一组计数里（见 loadPmDict 注释）。
+const IMPLEMENTED_OPS = new Set(['@rx', '@streq', '@pmFromFile']);
+
+/**
+ * `@pmFromFile <name>.data` 的词典：按**绝对路径**缓存（同一份词典被 930120/930121 复用）。
+ *
+ * 语义照 ModSecurity：不敏感**子串**匹配，无词边界（Aho-Corasick 多模式）。所以条目
+ * `sys/class` 能命中 `/sys/class` —— 上游词典有意用"最短可辨识路径"，斜杠形态也不统一，
+ * 任何"按行首/词边界匹配"的自作聪明都会把召回砍掉。
+ *
+ * 载入时机在**解析期**而不是 execOp 热路径：这样"文件不在"是一条能当场报出来的配置错误，
+ * 而不是让那三条规则静默恒不匹配 —— 后者正是本项目反复出现的失效形状（数字照常产出，
+ * 前提却没人看见）。缺文件时记进 `stats.missingDicts` 并保持该规则不命中（宁漏勿假命中）。
+ */
+const PM_DICT_CACHE = new Map();
+function loadPmDict(absPath, stats, ruleId, dictName) {
+  stats.pmRefs = (stats.pmRefs || 0) + 1;
+  let entries = PM_DICT_CACHE.get(absPath);
+  if (entries === undefined) {
+    // 缓存里"没有这个键"才代表没读过；读失败也缓存 null，避免每次解析都重复撞文件系统
+    try {
+      entries = readFileSync(absPath, 'utf8')
+        .split(/\r?\n/)
+        .map((l) => l.trim())
+        .filter((l) => l && !l.startsWith('#'))
+        .map((l) => l.toLowerCase());
+    } catch {
+      entries = null;
+    }
+    PM_DICT_CACHE.set(absPath, entries);
+  }
+  // 文件级计数按**本次解析**去重（stats.pmFiles 随每次 parseCrsFile 新建）：
+  // 词典缓存是模块级的，若把计数挂在"缓存未命中"分支上，同一进程里第二次解析同一份
+  // conf 就会报出"载入 0 个文件、合计 0 条条目"—— 数字在撒谎，却撒得看不出来。
+  const seen = (stats.pmFiles ||= new Set());
+  if (!seen.has(absPath)) {
+    seen.add(absPath);
+    stats.pmLoaded = (stats.pmLoaded || 0) + (entries ? 1 : 0);
+    stats.pmEntries = (stats.pmEntries || 0) + (entries ? entries.length : 0);
+  }
+  // 缺失/空词典按**规则**记（两条规则共用一份坏词典 = 两条都恒不匹配，得数得对）
+  if (entries && entries.length === 0) (stats.emptyDicts ||= new Set()).add(`${ruleId || '?'}:${dictName}`);
+  if (!entries) (stats.missingDicts ||= new Set()).add(`${ruleId || '?'}:${dictName}`);
+  return entries;
+}
 
 export function getParseStats(confPath) {
   return PARSE_STATS.get(confPath) || null;
@@ -161,7 +206,7 @@ export function parseCrsFile(confPath) {
   const rules = [];       // 平铺链节点
   let curChain = null;    // 当前链聚合
   let pl = 0;             // 当前 Paranoia Level 区块
-  const stats = { secRuleLines: 0, droppedBySplit: 0, skippedMeta: 0, ops: {}, regexBad: [], loaded: 0, chainHeads: 0, unimplemented: 0, unimplementedIds: [], plById: {} };
+  const stats = { secRuleLines: 0, droppedBySplit: 0, skippedMeta: 0, ops: {}, regexBad: [], loaded: 0, chainHeads: 0, unimplemented: 0, unimplementedIds: [], plById: {}, missingDicts: new Set(), emptyDicts: new Set() };
   for (const st of statements) {
     // PL 区块注释跟踪
     const plm = st.match(/-= Paranoia Level (\d+)/);
@@ -225,6 +270,14 @@ export function parseCrsFile(confPath) {
       stats.unimplemented = (stats.unimplemented || 0) + 1;
       (stats.unimplementedIds ||= []).push(`${rule.id || '?'}:${opName}`);
     }
+    // @pmFromFile 的词典在**解析期**就位。文件名就是 operator 的参数，路径与 conf 同目录
+    // （上游 CRS 把 rules/*.conf 与 rules/*.data 放在一起，所以 conf 落在哪、词典就落在哪）。
+    if (opName === '@pmFromFile') {
+      const dictName = op.slice(opName.length).trim();
+      rule.dict = dictName
+        ? loadPmDict(resolve(dirname(confPath), dictName), stats, rule.id, dictName)
+        : null;
+    }
     // [2026-09-24] 变量侧普查，与上面 operator 侧同一套路。
     // 之前变量只有"落不进去就 push([])"的隐式行为，谁不支持没人知道 ——
     // `ARGS_GET:fbclid` 就是例子：两条官方排除规则因此恒不命中，而症状表现为"942440 误报"。
@@ -266,7 +319,14 @@ export function parseCrsFile(confPath) {
   // 三个普查桶恒归一成**数组**：补全之后"没有缺口"必须是 `[]`，不能是"字段没建 ⇒ undefined"。
   // （selftest 断言 942 侧 `droppedTransforms` 为空，undefined 会让它红得莫名其妙——
   //   红的原因看起来像"断言写错了"，而真正该被看见的是"缺口没了"。）
-  for (const k of ['unsupportedVarIds', 'unhonoredExclusionIds', 'droppedTransforms']) {
+  //
+  // [2026-09-25] 词典两个桶也必须登记在这里，这不是格式统一洁癖而是补上的一个真 bug：
+  //   没归一时它们是 Set，而消费侧按这套桶的既有写法判空 `if ((census.missingDicts || []).length)`
+  //   —— Set 没有 `.length`，恒为 undefined ⇒ **缺失词典的告警永远不会响**。同一段代码里
+  //   用 `[...]` 展开的那行却正常打印（Set 可迭代），于是报告说有缺口、控制台说没有，
+  //   两边只有一边在撒谎，而撒谎的那边恰好是"看起来更安静"的那边。
+  //   加新桶时若忘了这里，症状就是那道守卫静默空转。
+  for (const k of ['unsupportedVarIds', 'unhonoredExclusionIds', 'droppedTransforms', 'missingDicts', 'emptyDicts']) {
     stats[k] = stats[k] instanceof Set ? [...stats[k]].sort() : [];
   }
   PARSE_STATS.set(confPath, stats);
@@ -491,6 +551,16 @@ function execOp(rule, value, state = {}) {
     // 漏掉 negated 会把判据整个反过来 —— `11!=11` 这种平凡式反而被判成 SQLi。
     if (negated) return eq ? null : [value];
     return eq ? [value] : null;
+  }
+  // @pmFromFile：词典里任一条目作为**不敏感子串**出现在取值里即命中（无词边界、无锚定，
+  // 与 ModSecurity 的 Aho-Corasick 多模式匹配同语义）。
+  // 返回**命中的那条词典条目**而非整段取值：CRS 用 %{TX.0} 在 logdata 里报告
+  // "Matched Data"，那个位置语义上就是"词典里的哪条路径踩中了"。
+  if (op.startsWith('@pmFromFile')) {
+    if (!rule.dict) return null; // 词典没载入：由普查 missingDicts 报出来，不在此伪造命中
+    const hay = String(value).toLowerCase();
+    for (const item of rule.dict) if (hay.includes(item)) return negated ? null : [item];
+    return negated ? [value] : null;
   }
   // 未实现的 operator：即使外面套了 `!` 也**不伪造命中**。取反的意思本是"排除这种"，
   // 我们既然算不出内层条件，就没有资格宣布它不成立 —— 宁可不命中（漏，由普查与分歧清单暴露），

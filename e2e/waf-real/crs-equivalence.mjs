@@ -179,11 +179,24 @@ console.log(`未实现 operator：${census.unimplemented} 条 ${JSON.stringify(c
   console.log(`排除项未实现（只多取不少取，偏保守）：${census.unhonoredExclusions || 0} 处 / 去重 ${(census.unhonoredExclusionIds || []).length} 条`);
 }
 if (idleFamilies.length) {
-  console.log(`⚠ 已入库但**未接入门禁**的族：${idleFamilies.join(', ')}（用例与本 harness 评估的 conf 必须成对，接入门禁需按族配对）`);
+  // 措辞必须是"未参与本轮评估"，不是"未接入门禁"：idleFamilies 的定义是 FAMILY_CONF 里
+  // 除本轮那一族之外的全部 —— 跑 930 时它装着 942，而 942 恰恰是**唯一受门禁管的族**。
+  // 旧文案在那一行把门禁族印成"未接入门禁"，读者据此会得出"805 例那套没进门禁"的反向结论。
+  console.log(`ℹ 本轮只裁族 ${FAMILY}；同批入库、未参与本轮评估的族：${idleFamilies.join(', ')}（用例与 conf 必须成对评估，接入门禁需按族配对）`);
   console.log(`   要数字就当场重测，别引用记录里的旧值：CRS_EQUIV_FAMILIES=${idleFamilies[0]} npm run waf-fidelity`);
   console.log('   （非门禁族只报数不判红 —— 分歧基线是按 942 的用例标题点名的。）');
-  console.log('   已知缺口（当场普查，别照抄旧结论）：930 的应拦侧主要是 @pmFromFile 词典规则（930120/930121/930130）未实现，');
-  console.log('   其次才是 t:normalizePathWin / t:cmdLine；t:utf8toUnicode 现已实现 ⇒ 上面这份一致率只覆盖被裁的那个族。');
+}
+// 缺口一律由普查现算，不写死结论。上一版在这里钉着"930 的主缺口是 @pmFromFile 词典规则
+// 未实现"，而 @pmFromFile 实现、词典入库之后，那两行仍会每天照印一遍**已经不成立**的事实 ——
+// 结论句和行号锚点一样会漂，而且比数字更容易被读者当成现状。
+{
+  const gaps = [];
+  if (census.unimplemented) gaps.push(`${census.unimplemented} 条 operator 未实现（${JSON.stringify(census.unimplementedIds || [])}）`);
+  if ((census.missingDicts || []).length) gaps.push(`@pmFromFile 词典缺失：${[...census.missingDicts].join('、')}`);
+  if ((census.emptyDicts || []).length) gaps.push(`@pmFromFile 词典为空：${[...census.emptyDicts].join('、')}`);
+  const dt = [...(census.droppedTransforms || [])];
+  if (dt.length) gaps.push(`变换未实现：${JSON.stringify(dt)}`);
+  console.log(`   本族缺口（普查当场算，变量侧缺口另见上一行）：${gaps.length ? gaps.join('；') : 'operator / 词典 / 变换三类均无缺口'}`);
 }
 console.log(`官方用例：${cases.length} 条（另有 ${stagesUnmodeled} 条 stage 无 log_contains/no_log_contains，不计入）\n`);
 
@@ -422,8 +435,11 @@ const md = [
   `- 静默丢掉的变换：${JSON.stringify(census.droppedTransforms || [])} —— 上面的保真度数字是**在缺这些变换的前提下**量出来的（空清单 = 无缺口）`,
   `  （utf8toUnicode 现已实现：超长 UTF-8 折叠此前从未进过取值链，而官方回归集里**没有一条**超长编码载荷，
      ⇒ 它**不会**改动上面那个一致率，所以该行为改由 selftest 的端到端差分断言兜住（注册成功但空转 = 当场红）。
-     族 930 的主缺口是 @pmFromFile 词典规则（930120/930121/930130）未实现，其次才是
-     normalizePathWin / cmdLine ⇒ 本报告结论只覆盖族 ${FAMILY}，不等于"CRS 整体已对齐"。）`,
+     本报告结论只覆盖族 ${FAMILY}，不等于"CRS 整体已对齐"。）`,
+  // 词典侧普查：@pmFromFile "实现了"不等于"在干活" —— 词典文件不在磁盘上时那几条规则
+  // 依旧恒不匹配，而 operator 普查会归零（因为它只看 operator 名字）。这一行堵的就是
+  // "注册成功≠在干活"的第二个变体：实现在、数据不在。
+  `- @pmFromFile 词典：${census.pmRefs || 0} 处引用 / 载入 ${census.pmLoaded || 0} 个文件、合计 ${census.pmEntries || 0} 条条目；缺失 ${JSON.stringify([...(census.missingDicts || [])])}，空词典 ${JSON.stringify([...(census.emptyDicts || [])])}${(census.missingDicts || []).length ? ' —— ⚠ 缺失的那几条规则**恒不匹配**，上面的数字不含它们（跑 npm run waf-fidelity:refresh 补词典）' : ''}`,
   // 变量侧普查（2026-09-24）：**风险方向相反的两类，分开列，不合并成一个"差距"数**
   `- 变量取不到值（声明读它、本执行器读不出 ⇒ 该规则在这类输入上恒不命中）：${census.unsupportedVars || 0} 处 / 去重 ${(census.unsupportedVarIds || []).length} 条`,
   `  - 按变量：${JSON.stringify((() => { const m = {}; for (const x of census.unsupportedVarIds || []) { const t = x.slice(x.indexOf(':') + 1); m[t] = (m[t] || 0) + 1; } return m; })())}`,

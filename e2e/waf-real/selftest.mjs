@@ -95,6 +95,15 @@ let varFailed = 0;
   parseCrsFile(CONF930);
   eq('942 缺失变换清单（当前应为空）', getParseStats(CONFIG).droppedTransforms, []);
   eq('930 仍缺的两个变换', getParseStats(CONF930).droppedTransforms, ['cmdline', 'normalizepathwin']);
+  // @pmFromFile 词典侧快照。为什么这一组必须存在：operator 一旦登记进 IMPLEMENTED_OPS，
+  // "未实现 operator"普查就归零，而词典文件**不在磁盘上**时那三条规则照样恒不匹配 ——
+  // 805 例那批是 942 的用例，对 930 一个字节都不关心。载入量 + 三个桶是这里唯一的机器判据。
+  eq('930 @pmFromFile 引用数', getParseStats(CONF930).pmRefs, 3);
+  eq('930 词典载入文件数', getParseStats(CONF930).pmLoaded, 2);
+  eq('930 词典条目总数（v4.1.0 快照，改动即红）', getParseStats(CONF930).pmEntries, 936);
+  eq('930 缺失词典（当前应为空）', getParseStats(CONF930).missingDicts, []);
+  eq('930 空词典（当前应为空）', getParseStats(CONF930).emptyDicts, []);
+  eq('942 缺失词典（该族不用 @pmFromFile）', getParseStats(CONFIG).missingDicts, []);
 }
 
 // ── t:utf8toUnicode 的"非空壳"断言（2026-09-24）──────────────────────────
@@ -123,7 +132,40 @@ let u8Failed = 0;
   check('纯 ASCII 不误折（%25%20）', hits('100%25%20loaded'), []);
 }
 
-const extraFailed = varFailed + u8Failed;
+// ── @pmFromFile 的"非空壳"端到端差分（2026-09-25）─────────────────────────
+// 与上面 utf8toUnicode 同一族问题，且更难：把 operator 登记进 IMPLEMENTED_OPS 之后
+// "未实现 operator"普查归零，而词典文件不在磁盘上时那三条规则**照样恒不匹配** ——
+// 一个数字都不会变（942 那 805 例压根不看 930）。所以"注册了"和"在干活"之间
+// 只隔着一条端到端差分：词典里的路径必须被拦，不在词典里的正常路径必须不拦
+// （反向对照防的是"恒返回命中"这种看起来更严的假绿）。
+console.log('\n[@pmFromFile 词典匹配]');
+let pmFailed = 0;
+{
+  const CONF930PM = 'e2e/waf-real/crs/REQUEST-930.conf';
+  const OPT = { confPath: CONF930PM, collectAll: true, paranoiaLevel: 3 };
+  const hitArgs = (p) =>
+    evaluate({ uri: '/x', queryString: '', args: { file: p }, cookies: {}, headers: {} }, OPT).matchedRules;
+  const hitFile = (f) =>
+    evaluate({ uri: f, queryString: '', args: {}, cookies: {}, headers: {} }, OPT).matchedRules;
+  const check = (name, got, want) => {
+    const ok = JSON.stringify(got) === JSON.stringify(want);
+    if (!ok) pmFailed += 1;
+    console.log(`[${ok ? 'PASS' : 'FAIL'}] ${name.padEnd(32)} 命中 ${JSON.stringify(got)} 期望 ${JSON.stringify(want)}`);
+  };
+  check('ARGS /etc/passwd → 930120', hitArgs('/etc/passwd'), ['930120']);
+  // 上游条目用"最短可辨识路径"，所以前面套几层穿越都只按**子串**命中，不依赖 normalizePathWin
+  check('ARGS 多层穿越前缀仍子串命中', hitArgs('....//....//etc/passwd'), ['930120']);
+  check('ARGS %2f 编码（先 urlDecodeUni）', hitArgs('..%2f..%2fetc%2fpasswd'), ['930100', '930110', '930120']);
+  // 930130 读 REQUEST_FILENAME（phase:1），条目 `sys/class` 不带前置斜杠 ⇒ 检验的正是子串语义
+  check('FILENAME /sys/class → 930130', hitFile('/sys/class'), ['930130']);
+  check('FILENAME 大小写不敏感', hitFile('/SYS/CLASS'), ['930130']);
+  // —— 安全对照：不在词典里的正常路径，一条都不许拦 ——
+  check('正常 /index.html 不误触', hitFile('/index.html'), []);
+  check('正常 /static/main.css 不误触', hitFile('/static/main.css'), []);
+  check('正常 notes.txt 不误触', hitArgs('notes.txt'), []);
+}
+
+const extraFailed = varFailed + u8Failed + pmFailed;
 console.log(
   `\n[waf-real selftest] ${CASES.length - failed}/${CASES.length} 通过（附加语义断言 ${extraFailed === 0 ? '全过' : `${extraFailed} 条失败`}）`,
 );
