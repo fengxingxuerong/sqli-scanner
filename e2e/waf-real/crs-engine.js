@@ -272,6 +272,14 @@ export function collectValues(vars, req, state = {}, exclArgs = null) {
     // 而旧实现与本项目前都当 no-op 处理（等价于不扣）。这不是笔误而是**已知的不精确**：
     // 扣与不扣只会让取值变多，不会变少，所以偏保守方向（可能多命中，不会漏命中）。
     // 要修就得连同"同一 vars 里 `ARGS|!ARGS:x` 的合并语义"一起做，届时 805 例回归集是唯一裁判。
+    //
+    // [2026-09-24 实测否决，别再照直觉改] 已经试过一版完整实现：subs 按 (kind, 元素名)
+    // 从前面的并集里扣、`REQUEST_COOKIES` 一并开放选择器、同集合出现两次按元素身份去重。
+    // 结果 805 例官方回归集**新增 12 条未点名分歧 → 门禁 FAIL**；二分掉"扣"这一步
+    // （只收集不扣）仍是 12 条 ⇒ 错不在扣除，而在**正向那半边**（开放 cookies 选择器 /
+    // 元素身份去重）与 ModSecurity 的真实语义不一致。已整段回退，保持现状。
+    // 想重做的前提是先弄清两件事：① 扣的是 element 还是 (collection,element) 对；
+    // ② `COLL_NAMES` 与 `COLL` 在同一 vars 里时，扣除项作用在哪一面。
     if (neg) continue;
     const c = classifyVar(v);
     if (!c.ok) continue; // 不支持面由解析期普查点名，这里保持与旧实现一致的"返回空"
