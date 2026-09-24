@@ -8,6 +8,8 @@
 import { ScanManager } from '../src/engine/ScanManager.js';
 import * as eventBus from '../src/core/eventBus.js';
 import { logger } from '../src/core/logger.js';
+// 终端控制序列消毒（拖库结果与 os-shell 回显都是目标可控字节流）
+import { sanitizeForTerminal } from '../src/core/terminalSafe.js';
 // 对标 sqlmap -r：解析 Burp/curl 文本请求文件（parseRequestFile 在 args.js 消费）
 // 攻击操作（对标 sqlmap --os-cmd/--sql-shell/--file-read/--file-write）：复用引擎 Exploiter
 import { Exploiter } from '../src/engine/Exploiter.js';
@@ -86,24 +88,30 @@ export function formatReport(report, fmt = 'json') {
 
 // 枚举模式精简文本输出（report.data 视图）
 function printExtractView(report) {
+  // 本视图打印的每一段都是**目标可控**数据（库名/表名/列名/单元格值/凭据），故在出口处统一消毒控制序列：
+  // OSC 0 能改写操作员终端标题、OSC 8 能造出"显示文字与真实目标完全不同"的可点击超链接、
+  // CR/CSI 能覆盖刚打印的那一行、裸换行能伪造一条时间戳齐全的假日志行。
+  // 消毒定义在函数入口、视图内 24 个打印点一律走 out()：这类出口的常态失效方式是"漏一处"，
+  // 要求每个调用点都记得套一层等于没设防。
+  const out = (...args) => console.log(...args.map((a) => (typeof a === 'string' ? sanitizeForTerminal(a) : a)));
   const data = report.data;
-  if (!data) { console.log('（无提取数据，注入点未确认或提取失败）'); return; }
-  if (data.currentDb !== undefined && data.currentDb !== null) console.log(`current database: ${data.currentDb}`);
-  if (data.currentUser !== undefined && data.currentUser !== null) console.log(`current user: ${data.currentUser}`);
-  if (data.users !== undefined && data.users !== null) console.log(`users: ${data.users}`);
-  if (data.passwords !== undefined && data.passwords !== null) console.log(`passwords: ${data.passwords}`);
-  if (data.hostname !== undefined && data.hostname !== null) console.log(`hostname: ${data.hostname}`);
-  if (data.isDba !== undefined && data.isDba !== null) console.log(`is DBA: ${data.isDba}`);
-  if (data.userPrivs !== undefined && data.userPrivs !== null) console.log(`privileges: ${data.userPrivs}`);
-  if (data.roles !== undefined && data.roles !== null) console.log(`roles: ${data.roles}`);
+  if (!data) { out('（无提取数据，注入点未确认或提取失败）'); return; }
+  if (data.currentDb !== undefined && data.currentDb !== null) out(`current database: ${data.currentDb}`);
+  if (data.currentUser !== undefined && data.currentUser !== null) out(`current user: ${data.currentUser}`);
+  if (data.users !== undefined && data.users !== null) out(`users: ${data.users}`);
+  if (data.passwords !== undefined && data.passwords !== null) out(`passwords: ${data.passwords}`);
+  if (data.hostname !== undefined && data.hostname !== null) out(`hostname: ${data.hostname}`);
+  if (data.isDba !== undefined && data.isDba !== null) out(`is DBA: ${data.isDba}`);
+  if (data.userPrivs !== undefined && data.userPrivs !== null) out(`privileges: ${data.userPrivs}`);
+  if (data.roles !== undefined && data.roles !== null) out(`roles: ${data.roles}`);
   const hasTables = data.tables && Object.keys(data.tables).length;
   const hasCols = data.columns && Object.keys(data.columns).length;
   const hasRows = data.rows && Object.values(data.rows).some(v => Array.isArray(v) && v.length);
   const hasModeField = data.currentDb || data.currentUser || data.users || data.passwords || data.hostname || data.isDba || data.userPrivs || data.roles || (data.counts && Object.keys(data.counts).length);
   // --dbs：仅库名列表（其它模式不进入此分支）
   if (!hasTables && !hasCols && !hasRows && !hasModeField) {
-    for (const db of (data.databases || [])) console.log(db);
-    if (!data.databases || !data.databases.length) console.log('（未枚举到数据库）');
+    for (const db of (data.databases || [])) out(db);
+    if (!data.databases || !data.databases.length) out('（未枚举到数据库）');
   }
   // --tables / --columns / --dump
   for (const [db, tabs] of Object.entries(data.tables || {})) {
@@ -113,42 +121,42 @@ function printExtractView(report) {
       const rows = data.rows ? data.rows[key] : null;
       if (Array.isArray(rows) && rows.length) {
         const showCols = cols || Object.keys(rows[0]);
-        console.log(`[${key}]  共 ${rows.length} 行`);
-        console.log('  ' + showCols.join(' | '));
+        out(`[${key}]  共 ${rows.length} 行`);
+        out('  ' + showCols.join(' | '));
         for (const row of rows.slice(0, 50)) {
-          console.log('  ' + showCols.map(c => row[c] == null ? '' : row[c]).join(' | '));
+          out('  ' + showCols.map(c => row[c] == null ? '' : row[c]).join(' | '));
         }
-        if (rows.length > 50) console.log(`  …（仅显示前 50 行，共 ${rows.length} 行）`);
+        if (rows.length > 50) out(`  …（仅显示前 50 行，共 ${rows.length} 行）`);
       } else if (cols && cols.length) {
-        console.log(`${key}: ${cols.join(', ')}`);
+        out(`${key}: ${cols.join(', ')}`);
       } else {
-        console.log(key);
+        out(key);
       }
     }
   }
   // --count
   if (data.counts) {
-    for (const [k, v] of Object.entries(data.counts)) console.log(`${k}: ${v == null ? 'N/A' : v} 行`);
+    for (const [k, v] of Object.entries(data.counts)) out(`${k}: ${v == null ? 'N/A' : v} 行`);
   }
   // --search：输出匹配的表名和列名汇总
   if (data.search) {
-    console.log(`search keyword: ${data.search.keyword}`);
+    out(`search keyword: ${data.search.keyword}`);
     if (data.search.matchedTables && data.search.matchedTables.length) {
-      console.log(`matched tables: ${data.search.matchedTables.join(', ')}`);
+      out(`matched tables: ${data.search.matchedTables.join(', ')}`);
     } else {
-      console.log('matched tables: (none)');
+      out('matched tables: (none)');
     }
     if (data.search.matchedColumns && data.search.matchedColumns.length) {
       for (const m of data.search.matchedColumns) {
-        console.log(`  ${m.table}: ${m.columns.join(', ')}`);
+        out(`  ${m.table}: ${m.columns.join(', ')}`);
       }
     }
   }
   // --schema：输出表结构定义
   if (data.schemas && Object.keys(data.schemas).length) {
-    console.log('schemas:');
+    out('schemas:');
     for (const [k, v] of Object.entries(data.schemas)) {
-      console.log(`  ${k}: ${v == null ? '(null)' : v}`);
+      out(`  ${k}: ${v == null ? '(null)' : v}`);
     }
   }
 }
@@ -323,7 +331,12 @@ async function runShellRepl(kind, ctx, exploiter) {
       const r = kind === 'sql' ? await exploiter.sqlShell(ctx, line) : await exploiter.osShell(ctx, line);
       if (r && r.ok) {
         const out = r.value ?? r.raw ?? (r.status != null ? `status=${r.status}` : '(无回显)');
-        console.log(typeof out === 'string' ? out : JSON.stringify(out, null, 2));
+        // ⚠ 这里是 os-shell / file-shell：**打印的是目标上执行命令的输出**，也就是
+        // "被控端 → 操作员终端"这条最不该省防线的路径（对扫描器来说目标就是对手）。
+        // 一条 OSC 8 就能在 Windows Terminal / iTerm / VTE 里造出"显示文字与真实地址不同"
+        // 的可点击链接；OSC 0 改终端标题；CR/CSI 改写已经滚过去的结果行。
+        // JSON.stringify 那一支天然安全（控制字符会被转成 \uXXXX），只有裸字符串这支要消毒。
+        console.log(typeof out === 'string' ? sanitizeForTerminal(out) : JSON.stringify(out, null, 2));
         if (r.note) console.error(`[*] ${r.note}`);
       } else {
         console.error(`[!] ${r?.error || '执行失败'}`);

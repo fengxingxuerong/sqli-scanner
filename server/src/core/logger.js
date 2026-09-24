@@ -2,6 +2,8 @@ import winston from 'winston';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+// 终端控制序列消毒（日志伪造 / 行覆盖 / OSC 改标题与超链接）
+import { sanitizeForTerminal } from './terminalSafe.js';
 
 // ── 统一敏感信息打码工具（T1-A：redact）──────────────────────────
 // 覆盖：① URL 内嵌凭据 https://user:pass@host ② 认证头 Authorization/Proxy-Authorization
@@ -50,6 +52,11 @@ const SENSITIVE_HEADER_NAMES = new Set([
 export function redact(input, options = {}) {
   const maxLength = Number(options.maxLength) || 0;
   let s = String(input ?? '');
+  // ⓪ 终端控制序列：本函数是**唯一**的输出格式化点（winston 的 printf 与 CLI 侧都过这里），
+  // 所以日志伪造（`\n` + 一条时间戳齐全的假记录）、行覆盖（CR / CSI 擦除）、
+  // 终端改标题（OSC 0）与终端超链接钓鱼（OSC 8）都在这里被挡住。
+  // 放在最前面：脱敏正则面对的是"已经不会再含 ESC/CR"的稳定文本。
+  s = sanitizeForTerminal(s);
   // ① URL 内嵌 user:pass@
   s = s.replace(URL_CRED_RE, '$1***:***@');
   // ② 认证头值（Authorization / Proxy-Authorization）
