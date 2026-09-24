@@ -4,6 +4,57 @@
 
 ## [Unreleased]
 
+### 2026-09-25 批次 · 产品侧入口/输出层审计：最坏的一条不是缺陷本身，而是"夹具替产品发明了字段"
+
+派两个只读代理分别审**入口层**（`sanitizeStart` 与路由）与**输出层**（报告/SARIF/CSV/下载），
+共交回 11 条候选。**我自己复现了 5 条并修掉；剩下 6 条我不写进结论也不动手**（见文末清单）。
+
+**输出层：SARIF 的两个映射一直是死的**，证据是仓库里那份真实产物
+`reports/127.0.0.1-2026-09-17T13-51-34/`：3 条 vuln 的 `riskLevel` 是 `High/High/Medium`，
+导出的 `report.sarif` 里 `level` 却**全是 error**；同一份 `report.json` 里 `vuln.url` 是
+`http://127.0.0.1:8130/items?cat=1`，导出的 `uri` 却**全是 "/"**。消费方（扫描平台 / IDE 插件）
+按 SARIF 的 level 做分诊 ⇒ Medium 被当严重项处理，而受影响地址彻底丢失。
+根因是两行读了不存在的字段：`v.severity`（模型写的是 `riskLevel`，全仓 `server/src` 没有任何
+一处给 vuln 赋 `severity`）与 `point.url || r.target.url`（真实字段是 `point.actionUrl` /
+`target.baseUrl`）。
+
+**最值得记的是为什么它一直绿**：`tests/report.sarif.test.js` 有一条
+「severity 映射 critical→error / medium→warning」的断言，而它的夹具是**手写字面量**，
+里面就写着 `severity` 和 `target.url` —— 夹具替产品发明了一套字段名，于是测试测的是那个
+想象中的产品。修法不能只是改映射：**夹具改成由真实工厂与真实富化函数生成**
+（`createInjectionPoint` / `createVulnerability` / `attachVulnContext`），再加一条夹具自检
+（必须带 `riskLevel`、必须**不带** `severity`、`url` 必须由富化填上）。以后谁再手写一个不存在的
+字段，夹具自检先红。
+（写这条夹具时我自己又踩一次：`attachVulnContext` 是 `touched ? {...report, vulns: out}`
+**返回新对象**，我第一版丢了返回值 ⇒ 富化等于没跑，症状是"地址断言红"。）
+
+**入口层两条**：
+
+1. `ratePerSec: "20"` 会**静默关掉限速**。下游 `createBucket`/`TokenBucket` 用
+   `Number.isFinite(x) && x > 0` 判定，而 `Number.isFinite` **不做类型转换** ⇒ 字符串被判成 0，
+   而 0 的语义恰恰是"不限速"（那是 P0-FIX 为 `--delay=0` 定的）。数字字符串是 curl/YAML/CSV
+   里最常见的形态，且因为"键在、值也发了、只是类型不对"，连 dropped 告警都不会响。
+   修法只在入口做**类型归一**（数字字符串→数字，仍不 clamp，既有「不 clamp」契约一字不动；
+   非数字形态不写进 config 并喊出来，绝不解成"不限速"）。显式 0/负数仍是"不限速"。
+2. 一处**假告警**：`diffDroppedConfigKeys` 算在 `BACKFILL_SCALAR_KEYS` 兜底透传**之前**，
+   于是那 18 个靠兜底才进 config 的键全体被喊「设置不会生效」。实测复现：六个键
+   （delay/testFilter/reqRate/maxReq/hpp/noCast）同时被报警、同时确实都在返回的 config 里。
+   假告警和静默丢弃是同级的错——它把排查的人支使去改一个本来正确的配置。修法是把比对推迟到
+   `return` 之前。新增的测试不是抽查几个键，而是**从源码抓全部兜底键**遍历，断言
+   「告警集 ∩ 落地集 = ∅」。
+   顺带看清了既有守卫为什么没拦住：它那条"噪声预算是硬约束"用例用的是**面板形态** payload，
+   里面 `testFilter:''` 属"空值不算丢弃"——形状写对了，却没覆盖真实调用方会发的第二种形态。
+
+**三次变异各自验红**：映射改回 `v.severity` ⇒ SARIF 断言红；入口去掉类型归一 ⇒ 字符串用例红；
+在兜底**之前**多调一次比对 ⇒ 不变式红，并精确复刻出「18 个键被丢弃…设置不会生效」那行历史日志。
+
+**没有自己复现、因此不写进结论也不修的 6 条**（代理自称已执行的 4 条同样待我复现）：
+sqlmap `--timeout` 疑似传毫秒（且被 30 分钟上限反向击杀）· `/scan/:id/point/:pointId/retest`
+疑似绕过整条 `sanitizeStart` · `mode:'direct'` 疑似在所有 clamp 之前返回（含"无 SSRF 面"那句
+说法是否成立）· 导出失败时前端疑似把 200 的 JSON 错误体另存成报告 · 设了 API token 时
+UI 全部导出疑似 401 · `manifest` 两个自报计数疑似恒 null。已开任务追踪。
+
+
 ### 2026-09-25 批次 · 先撤回一个我上一轮的判断，再去补那格"从来没人验过的 18"
 
 **撤回**：上一轮我写"剩下最大的一块是 `XML:/*`"。两条依据当场都不成立：

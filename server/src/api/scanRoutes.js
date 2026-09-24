@@ -290,7 +290,20 @@ export function sanitizeStart(body) {
   // —— 网络/调度 ——
   // [REVERTED P2-3] ratePerSec 保持原样透传（不 clamp）：既有测试契约
   // 「ratePerSec 不再 clamp：原样透传（P0-P1③）」。限速治理由 httpClient/defaults 负责。
-  if (cfg.ratePerSec !== undefined && cfg.ratePerSec !== null) config.ratePerSec = cfg.ratePerSec;
+  //
+  // 但"不 clamp"不等于"类型也不管"。下游 TokenBucket/createBucket 用
+  // `Number.isFinite(ratePerSec) && >0` 严格判定，而 Number.isFinite **不做类型转换** ⇒
+  // 一个数字字符串（curl/YAML/CSV/表单里最常见的 `"20"`）被判成 0，而 0 的语义是
+  // "**不限速**"（tokenBucket.js:23 的 P0-FIX 特意定的）—— 于是刚设的闸门被静默关掉，
+  // 且不进 dropped 告警（键名在、值也发了，只是类型不对）。
+  // 这里只做**归一**：数字字符串→数字（仍不 clamp）；非数字形态→不写入 config（按 defaults
+  // 治理）并喊出来。绝不把坏值降级成"不限速"。
+  if (cfg.ratePerSec !== undefined && cfg.ratePerSec !== null) {
+    const raw = cfg.ratePerSec;
+    const n = typeof raw === 'string' ? Number(raw.trim()) : raw;
+    if (typeof n === 'number' && Number.isFinite(n)) config.ratePerSec = n;
+    else logger.warn(`ratePerSec 值不可用作速率（${JSON.stringify(raw)}），已忽略并按默认限速治理；要不限速请显式传数字 0`);
+  }
   const concurrency = pickInt(cfg, 'concurrency', defaults.concurrency, 1, 10);
   if (concurrency !== undefined) config.concurrency = concurrency;
   const retry = pickInt(cfg, 'retry', defaults.retry, 0, 5);
@@ -775,20 +788,26 @@ export function sanitizeStart(body) {
   //   （matchCode:200、skipParams:"a,b"、paramDel 取了窄集合外的字符…）。
   //   后果与上一类完全相同：200 + scanId + 报告里一句「未检出」，而那项设置没生效。
   //   原先只有 hex/flushSession 一处按这个口径在喊（现于 scanConfigTuning），这一类却是整个入口的通病。
-  const dropped = diffDroppedConfigKeys(cfg, KNOWN_CFG_KEYS, config, DIRECT_ONLY_CFG_KEYS);
-  if (dropped.unknown.length) {
-    logger.warn(
-      `扫描配置含 ${dropped.unknown.length} 个未知字段，已忽略（这些设置**不会生效**，请核对键名或改用 CLI）：${dropped.unknown.join(', ')}`
-    );
-  }
-  if (dropped.shapeDropped.length) {
-    logger.warn(
-      `扫描配置有 ${dropped.shapeDropped.length} 个键被丢弃（键名在白名单内，但**值形态不合该键的校验**，` +
-        '设置不会生效；部分键需与父键同发，如 safeFreq 需 safeUrl、csrfTokenName 需 csrfUrl）：' +
-        dropped.shapeDropped.map((k) => `${k}=${JSON.stringify(cfg[k])}`).join(', ')
-    );
-  }
-
+  // ⚠ 比对**必须推迟到本函数末尾**（见 return 前的 warnDroppedConfigKeys() 调用）。
+  //   放在这里会算在下方 BACKFILL_SCALAR_KEYS 兜底透传**之前**，于是那 18 个"靠兜底才进
+  //   config"的键全被判成"被丢弃" —— 本轮实测：同时传 delay/testFilter/reqRate/maxReq/hpp/
+  //   noCast 六个键，日志喊「6 个键被丢弃…设置不会生效」，而返回的 config 里六个**全在**。
+  //   假告警和静默丢弃犯的是同一类错，只是方向相反：它把排查的人支使去改一个本来正确的配置。
+  const warnDroppedConfigKeys = () => {
+    const dropped = diffDroppedConfigKeys(cfg, KNOWN_CFG_KEYS, config, DIRECT_ONLY_CFG_KEYS);
+    if (dropped.unknown.length) {
+      logger.warn(
+        `扫描配置含 ${dropped.unknown.length} 个未知字段，已忽略（这些设置**不会生效**，请核对键名或改用 CLI）：${dropped.unknown.join(', ')}`
+      );
+    }
+    if (dropped.shapeDropped.length) {
+      logger.warn(
+        `扫描配置有 ${dropped.shapeDropped.length} 个键被丢弃（键名在白名单内，但**值形态不合该键的校验**，` +
+          '设置不会生效；部分键需与父键同发，如 safeFreq 需 safeUrl、csrfTokenName 需 csrfUrl）：' +
+          dropped.shapeDropped.map((k) => `${k}=${JSON.stringify(cfg[k])}`).join(', ')
+      );
+    }
+  };
   // [P0-FIX 2026-09-09] 白名单标量键兜底透传（**显式名单**，不是“所有未处理的白名单键”）。
   // 发现原因：configWhitelist.passthrough 守卫抱出 13 个「进了 KNOWN_CFG_KEYS 但 sanitizeStart
   // 根本没透传」的键——delay / reqRate / maxReq（限速与请求预算治理）、excludeSysdbs /
@@ -864,6 +883,7 @@ export function sanitizeStart(body) {
       + '会被 String() 成不可注入的畸形值——嵌套 body 请改用 jsonBody（引擎按叶子路径如发现 user.id 注入点）'
     );
   }
+  warnDroppedConfigKeys(); // 在**所有**写入 config 的步骤（含兜底透传）之后比对，才等于真实结果
   return {
     url: u.toString(),
     method,

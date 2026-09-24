@@ -14,23 +14,28 @@
 // ============================================================================
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { logger } from '../src/core/logger.js';
 import { sanitizeStart } from '../src/api/scanRoutes.js';
 import { diffDroppedConfigKeys, isTrivialValue } from '../src/api/scanConfigUtils.js';
 
 const URL_TARGET = { url: 'http://shop.example.com/item?id=1' };
 
-/** 收集一次 sanitizeStart 期间的 warn（logger 是共享对象，属性调用可被就地替换） */
-function warnsDuring(fn) {
+/** 收集一次调用期间的 warn，并**把返回值带出来**（丢返回值就等于测不到"告警 vs 落地"是否同源） */
+function withWarns(fn) {
   const orig = logger.warn;
   const seen = [];
   logger.warn = (msg) => { seen.push(String(msg)); };
   try {
-    fn();
+    return { warns: seen, result: fn() };
   } finally {
     logger.warn = orig;
   }
-  return seen;
+}
+
+/** 只关心告警文本时用这个 */
+function warnsDuring(fn) {
+  return withWarns(fn).warns;
 }
 
 // ── 纯函数层 ──────────────────────────────────────────────────────────────
@@ -91,4 +96,39 @@ test('接线：合法空值与已生效的键都不产生"被丢弃"warn（噪�
 test('接线：未知字段的旧告警不被这次改动弄丢', () => {
   const seen = warnsDuring(() => sanitizeStart({ target: URL_TARGET, config: { evilKey: 1 } }));
   assert.ok(seen.some((m) => m.includes('未知字段') && m.includes('evilKey')));
+});
+
+// ── 反向：告警必须与"真的没落地"同源（2026-09-25 补）────────────────────────
+// 上面这批"不该喊"的用例全用**面板形态**（`testFilter:''` 属空值、不算丢弃），所以从没踩到
+// 兜底键**带真值**这条路。实况是：diffDroppedConfigKeys 一度算在 BACKFILL_SCALAR_KEYS 兜底
+// 透传**之前**，于是那 18 个键全体被判成「被丢弃…设置不会生效」，而它们其实都在返回的
+// config 里 —— 本轮实测过 delay/testFilter/reqRate/maxReq/hpp/noCast 六个键同时被喊，
+// 六个也同时落地。假告警和静默丢弃是同级的错：它把排查的人支使去改一个本来正确的配置。
+// 所以这里不抽查几个键，而是**从源码抓全部兜底键**（与 configReachability 守卫同一口径）遍历。
+const BACKFILL = (() => {
+  const src = readFileSync(new URL('../src/api/scanRoutes.js', import.meta.url), 'utf8');
+  const m = src.match(/const BACKFILL_SCALAR_KEYS = new Set\(\[([\s\S]*?)\]\)/);
+  assert.ok(m, '定位不到 BACKFILL_SCALAR_KEYS —— 名单被改名/挪走时本测试要先红');
+  return new Set(Array.from(m[1].matchAll(/'([^']+)'/g)).map((x) => x[1]));
+})();
+
+test('不变式：兜底键带真值时，"被丢弃/未知字段"告警与落地集不得有交集', () => {
+  const cfg = Object.fromEntries([...BACKFILL].map((k) => [k, 1])); // 数字 1 对三类兜底分支都合法
+  const { warns: seen, result: out } = withWarns(() => sanitizeStart({ target: URL_TARGET, config: cfg }));
+  const notLanded = [...BACKFILL].filter((k) => !(k in out.config));
+  assert.deepEqual(notLanded, [], `这些兜底键没落地（本该由兜底透传进 config）：${notLanded.join(', ')}`);
+  // 既然 18 个键**全部**进了 config，任何一条丢弃/未知告警都是假告警
+  const accused = seen.filter((m) => m.includes('被丢弃') || m.includes('未知字段'));
+  assert.deepEqual(accused, [],
+    `全部兜底键都已生效，却仍在告警"设置不会生效"（假告警）：${JSON.stringify(accused)}`);
+});
+
+test('混合形态：兜底键 + 真·形状不合 → 只点名后者', () => {
+  const seen = warnsDuring(() =>
+    sanitizeStart({ target: URL_TARGET, config: { delay: 500, reqRate: 10, matchCode: 200, skipParams: 'id,page' } })
+  );
+  const dropped = seen.find((m) => m.includes('被丢弃')) || '';
+  assert.ok(dropped.includes('matchCode') && dropped.includes('skipParams'), `真该喊的没喊：${dropped}`);
+  assert.ok(!dropped.includes('delay=') && !dropped.includes('reqRate='),
+    `兜底键被误报成丢弃：${dropped}`);
 });

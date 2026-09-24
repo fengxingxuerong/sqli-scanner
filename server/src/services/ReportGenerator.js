@@ -351,10 +351,19 @@ export class ReportGenerator {
           properties: { cwe: vt.cwe, owasp: vt.owasp, technique },
         });
       }
-      const sev = String(v.severity || 'high').toLowerCase();
+      // 字段名必须认**引擎真正产出的那个**：漏洞模型写的是 `riskLevel`（models.js:263），
+      // 全仓 server/src 里没有任何一处给 vuln 赋 `severity` —— 原来读 `v.severity` 使这行
+      // 恒取默认 'high'，SARIF 里每条 finding 都是 error（真实产物
+      // reports/127.0.0.1-2026-09-17T13-51-34/report.sarif：3 条 vuln，riskLevel
+      // High/High/Medium，导出的 level 却全是 error）。消费方按 error 做分诊就会把
+      // Medium 当严重项处理。
+      const sev = String(v.riskLevel || 'high').toLowerCase();
       const level = (sevRank[sev] ?? 3) >= 3 ? 'error' : (sevRank[sev] ?? 3) >= 2 ? 'warning' : 'note';
       const point = (r.points || []).find((p) => p.id === v.pointId) || {};
-      const url = point.url || r.target?.url || '';
+      // 同理：注入点上的地址叫 `actionUrl`（models.js:138），target 上的叫 `baseUrl`
+      // （vulnEnrich.js），富化后的漏洞自己带 `url`。原来读 `point.url || r.target?.url`
+      // 两个都不存在 ⇒ 同一份真实产物里 uri 全成 "/"，SARIF 消费方拿不到受影响地址。
+      const url = v.url || point.actionUrl || r.target?.baseUrl || '';
       const uri = (() => { try { return new URL(url).pathname + (new URL(url).search || ''); } catch { return url; } })();
       results.push({
         ruleId,
