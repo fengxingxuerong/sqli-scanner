@@ -84,15 +84,51 @@ let varFailed = 0;
   eq('裸 ARGS 取全量', v(['ARGS']), ['1', '2']);
   // ④ 无名元素没有"元素名"可扣，扣除项对它们必须无效（否则 URI 类规则会被静默清空）
   eq('URI 不受 ARGS 扣除影响', v(['REQUEST_URI', '!ARGS:id']), ['/x']);
-  // 变换静默丢弃的**清单快照**：新增一个没实现的 t:xxx 就会在这里变红。
-  // 数字来自实测，不是愿望 —— 已知缺 utf8toUnicode（942 三条规则用到），
-  // 这是"99.3% 保真度"成立的前提之一，必须与结论一起被看见。
-  eq('942 已知缺失变换（新增即红）', getParseStats(CONFIG).droppedTransforms, ['utf8tounicode']);
+  // 变换静默丢弃的**清单快照**：多一个没实现的 t:xxx 会在这里变红，
+  // 少一个（补上了）也会变红 —— 两边都逼着改的人回来看这条结论。
+  // 2026-09-24 实现 utf8toUnicode 后，942 侧清单归零；930 侧仍缺 cmdline / normalizepathwin，
+  // 那是"930 还没接进裁判"的既有边界（见 crs-equivalence.mjs 的未接入族声明）。
+  // 930 那份 conf 在本进程里没被 evaluate() 解析过，必须先 parseCrsFile ——
+  // getParseStats 只读缓存，直接问它会拿到 null（上一版这条断言就是这么写崩的：
+  // TypeError 让 selftest 以非零码退出，看起来像"测试坏了"，其实从没跑到过）。
+  const CONF930 = 'e2e/waf-real/crs/REQUEST-930.conf';
+  parseCrsFile(CONF930);
+  eq('942 缺失变换清单（当前应为空）', getParseStats(CONFIG).droppedTransforms, []);
+  eq('930 仍缺的两个变换', getParseStats(CONF930).droppedTransforms, ['cmdline', 'normalizepathwin']);
 }
 
-console.log(`\n[waf-real selftest] ${CASES.length - failed}/${CASES.length} 通过（变量语义 ${varFailed === 0 ? '全过' : `${varFailed} 条失败`}）`);
-if (failed > 0 || varFailed > 0) {
-  console.error(`[waf-real selftest] ${failed + varFailed} 条断言失败`);
+// ── t:utf8toUnicode 的"非空壳"断言（2026-09-24）──────────────────────────
+// 为什么必须单独断：把 `utf8tounicode: () => s`（原样返回）注册进 T，普查里的
+// `utf8tounicode` 同样会消失、805 例官方回归**一条都不会变红**（实测：那批用例里
+// 根本没有超长编码载荷）。也就是说"清单归零"只证明注册了，证明不了它在干活。
+// 下面这组是**端到端差分**：超长编码必须被拦，规范编码必须维持原判定（防过度折叠）。
+console.log('\n[超长编码折叠]');
+let u8Failed = 0;
+{
+  const PL3 = { collectAll: true, paranoiaLevel: 3 };
+  const req = (p) => ({ uri: '/x?id=1', queryString: 'id=1', args: { id: p }, cookies: {}, headers: {} });
+  const hits = (p) => evaluate(req(p), PL3).matchedRules;
+  const check = (name, got, want) => {
+    const ok = JSON.stringify(got) === JSON.stringify(want);
+    if (!ok) u8Failed += 1;
+    console.log(`[${ok ? 'PASS' : 'FAIL'}] ${name.padEnd(34)} 命中 ${JSON.stringify(got)} 期望 ${JSON.stringify(want)}`);
+  };
+  // 声明该变换的只有 942100/942101/942120，前两条靠 @detectSQLi（本执行器不支持）
+  // ⇒ 折叠效果唯一可见的落点是 942120「SQL 运算符」。
+  check('overlong ||（%c1%bc×2）', hits('1%c1%bc%c1%bc1'), ['942120']);
+  check('overlong <<（%c0%bc×2）', hits('%c0%bc%c0%bc1'), ['942120']);
+  check('overlong !=（%c0%a1%c0%bd）', hits('%c0%a1%c0%bdversion()'), ['942120', '942431']);
+  // 反向对照：规范编码的同一字符不能被折叠弄坏，也不许顺手多拦
+  check('规范 ||（%7c×2）', hits('1%7c%7c1'), ['942120']);
+  check('纯 ASCII 不误折（%25%20）', hits('100%25%20loaded'), []);
+}
+
+const extraFailed = varFailed + u8Failed;
+console.log(
+  `\n[waf-real selftest] ${CASES.length - failed}/${CASES.length} 通过（附加语义断言 ${extraFailed === 0 ? '全过' : `${extraFailed} 条失败`}）`,
+);
+if (failed > 0 || extraFailed > 0) {
+  console.error(`[waf-real selftest] ${failed + extraFailed} 条断言失败`);
   process.exit(1);
 }
 process.exit(0);

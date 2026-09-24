@@ -29,7 +29,11 @@ const TESTS_DIR = resolve(HERE, 'crs/tests');
 const RESULTS_DIR = resolve(HERE, 'results');
 
 const { evaluate, getParseStats } = await import(pathToFileURL(resolve(HERE, 'crs-engine.js')).href);
-const CONF = resolve(HERE, 'crs/REQUEST-942-SQLI.conf');
+// 族 → **它自己那一族**的规则文件。用例与 conf 必须成对，理由见下方 EVAL_FAMILIES 的教训。
+const FAMILY_CONF = { 942: 'crs/REQUEST-942-SQLI.conf', 930: 'crs/REQUEST-930.conf' };
+// 只有这些族受"基线 + 红线"门禁管：分歧基线是按 942 的用例标题逐条点名的，
+// 拿同一份基线去判 930 只会红得没有意义（那种红会把口径错误伪装成产品缺陷）。
+const GATED_FAMILIES = ['942'];
 
 const argv = process.argv.slice(2);
 const PLS = (argv.find((a) => a.startsWith('--pl='))?.slice(5) || '1,2,3,4').split(',').map(Number);
@@ -101,7 +105,28 @@ function expectation(output) {
 // 配错素材的裁判比没有裁判更坏（它会把口径错误伪装成产品缺陷）。
 // 因此这里按 EVAL_FAMILIES 白名单取目录，未列入的族**显式声明为未接入**（见下方输出），
 // 而不是悄悄扫进来或悄悄不扫。
-const EVAL_FAMILIES = ['942'];
+// 默认只裁 942。**允许用环境变量临时把别的族拉进来量**，而不是把数字写死在注释里：
+// 上一版这里印着"930 一致率 13.2%，根因是缺 normalizePathWin/cmdLine/utf8toUnicode"，
+// 出自一个用完就删掉的一次性探针 —— 谁也无法复现，而且**归因是错的**：
+// 2026-09-24 用下面这条命令当场重测，930 是 38 例/应拦 33，逐规则 27.3%，
+// 剔除"规则 930120/930121/930130 的 @pmFromFile 未实现"这 21 例后为 75.0%，误触 0。
+// ⇒ 主因是**词典 operator 没实现**（占应拦侧 21/33），缺变换只是次要因素；
+//   而 13.2% 这个数本身也复现不出来（当时想必又混了口径）。
+// 现在：`CRS_EQUIV_FAMILIES=930 npm run waf-fidelity` 当场可重测，产物写到
+// results/crs-equivalence-930.md（不覆盖 942 那份对外引用的报告）。
+const EVAL_FAMILIES = (process.env.CRS_EQUIV_FAMILIES || '942')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean);
+// 一次只裁一个族：多个族的用例混在一批里，却只有一份 conf 与之配对（见上），
+// 那批"分歧"里有多少来自别的族根本说不清 —— 与其算个含混的总数，不如拒跑。
+if (EVAL_FAMILIES.length !== 1 || !FAMILY_CONF[EVAL_FAMILIES[0]]) {
+  console.error(`❌ CRS_EQUIV_FAMILIES 需为单一族，可选：${Object.keys(FAMILY_CONF).join(' / ')}（用例与 conf 必须成对）`);
+  process.exit(2);
+}
+const FAMILY = EVAL_FAMILIES[0];
+const CONF = resolve(HERE, FAMILY_CONF[FAMILY]);
+const GATED = GATED_FAMILIES.includes(FAMILY);
 const files = existsSync(TESTS_DIR)
   ? readdirSync(TESTS_DIR, { withFileTypes: true })
       .filter((d) => d.isDirectory() && EVAL_FAMILIES.includes(d.name))
@@ -142,7 +167,7 @@ const inputOf = (c) => {
 evaluate({ method: 'GET', uri: '/', queryString: '', args: {}, cookies: {}, headers: {} }, { confPath: CONF }); // 先强制解析一次，普查计数才就位
 const census = getParseStats(CONF) || {};
 console.log('=== 自实现 CRS 执行器 × CRS 官方回归用例 ===');
-console.log(`规则文件：crs/REQUEST-942-SQLI.conf（SecRule 行 ${census.secRuleLines}，装载 ${census.loaded}，链头 ${census.chainHeads}，解析丢弃 ${census.droppedBySplit}，元规则跳过 ${census.skippedMeta}）`);
+console.log(`规则文件：${CONF.split(/[\\/]/).slice(-1)[0]}（族 ${FAMILY}${GATED ? '' : '，**非门禁族：只报数不判红**'}｜SecRule 行 ${census.secRuleLines}，装载 ${census.loaded}，链头 ${census.chainHeads}，解析丢弃 ${census.droppedBySplit}，元规则跳过 ${census.skippedMeta}）`);
 console.log(`未实现 operator：${census.unimplemented} 条 ${JSON.stringify(census.unimplementedIds || [])}　正则编不出来：${(census.regexBad || []).length} 条 ${JSON.stringify(census.regexBad || [])}`);
 // [2026-09-24] 变量侧普查：与 operator 侧同一套路，**风险方向相反**的两类必须分开报。
 {
@@ -154,10 +179,11 @@ console.log(`未实现 operator：${census.unimplemented} 条 ${JSON.stringify(c
   console.log(`排除项未实现（只多取不少取，偏保守）：${census.unhonoredExclusions || 0} 处 / 去重 ${(census.unhonoredExclusionIds || []).length} 条`);
 }
 if (idleFamilies.length) {
-  console.log(`⚠ 已入库但**未接入裁判**的族：${idleFamilies.join(', ')}（各自的规则文件与本 harness 评估的 942 conf 不同，接入门禁需按族配对 conf）`);
-  console.log('   实测口径（一次性量过，见 e2e/waf-real/crs-engine.js 的变换普查）：930 官方用例按规则 id 对齐仅 13.2%，');
-  console.log('   根因是 930 依赖的执行器未实现变换 —— normalizePathWin / cmdLine（外加 942 也在用的 utf8toUnicode），');
-  console.log('   此前这些缺失被 `.filter(t => T[t])` 静默吞掉，现已进入 droppedTransforms 普查。');
+  console.log(`⚠ 已入库但**未接入门禁**的族：${idleFamilies.join(', ')}（用例与本 harness 评估的 conf 必须成对，接入门禁需按族配对）`);
+  console.log(`   要数字就当场重测，别引用记录里的旧值：CRS_EQUIV_FAMILIES=${idleFamilies[0]} npm run waf-fidelity`);
+  console.log('   （非门禁族只报数不判红 —— 分歧基线是按 942 的用例标题点名的。）');
+  console.log('   已知缺口（当场普查，别照抄旧结论）：930 的应拦侧主要是 @pmFromFile 词典规则（930120/930121/930130）未实现，');
+  console.log('   其次才是 t:normalizePathWin / t:cmdLine；t:utf8toUnicode 现已实现 ⇒ 上面这份一致率只覆盖被裁的那个族。');
 }
 console.log(`官方用例：${cases.length} 条（另有 ${stagesUnmodeled} 条 stage 无 log_contains/no_log_contains，不计入）\n`);
 
@@ -165,7 +191,9 @@ const perPl = {};
 for (const pl of PLS) {
   const r = { mustHit: 0, perRuleOk: 0, blockedAny: 0, mustNotHit: 0, fpSameRule: 0, blockedByOther: 0, mustBlock: 0, mustBlockOk: 0, divergences: [] };
   for (const c of cases) {
-    const got = evaluate(toReq(c.input), { paranoiaLevel: pl, collectAll: true });
+    // confPath 必须显式传：不传就落到 crs-engine 的默认值（942）。
+    // 那样跑 930 时普查按 930 装载、判定却仍按 942 规则 ⇒ 同一份报告里两套真相。
+    const got = evaluate(toReq(c.input), { paranoiaLevel: pl, collectAll: true, confPath: CONF });
     if (c.exp.kind === 'must-hit') {
       r.mustHit++;
       const hit = got.matchedRules.includes(c.exp.id);
@@ -203,10 +231,15 @@ for (const pl of PLS) {
 // 上一张表里的 PL1/PL2 行是"配置档位视图"：CRS 在 PL1 本来就不跑 PL2/PL3 规则，
 // 那 27.6% 不是执行器失真，而是档位正确行为。把它当保真度会得出完全错误的结论。
 const al = { n: 0, perRuleOk: 0, blockedAny: 0, mustNot: 0, fp: 0, div: [] };
+// "已点名的不支持项"从**普查推导**，不写死规则号：写死 942100/942101 时，换一族测量会让
+// 那些"operator 恒不匹配"的规则被算成执行器失真 ⇒ 同一份报告里出现两套口径。
+// 普查里 unimplementedIds 形如 `942100:@detectSQLi`，对 942 恰好就是这两条 ⇒ 门禁数字一字不变。
+const KNOWN_UNSUPPORTED_IDS = new Set((census.unimplementedIds || []).map((x) => x.split(':')[0]));
+const KNOWN_UNSUPPORTED_OPS = [...new Set((census.unimplementedIds || []).map((x) => x.split(':')[1]))];
 for (const c of cases) {
   const pl = c.exp.id ? (census.plById?.[c.exp.id] ?? 4) : 4;
-  const got = evaluate(toReq(c.input), { paranoiaLevel: pl, collectAll: true });
-  const known = c.exp.id === '942100' || c.exp.id === '942101'; // @detectSQLi 未实现，单列不算失真
+  const got = evaluate(toReq(c.input), { paranoiaLevel: pl, collectAll: true, confPath: CONF });
+  const known = KNOWN_UNSUPPORTED_IDS.has(c.exp.id); // 该规则的 operator 本执行器没有 ⇒ 恒不匹配，单列不算失真
   if (c.exp.kind === 'must-hit') {
     al.n++;
     const hit = got.matchedRules.includes(c.exp.id);
@@ -230,7 +263,12 @@ const aligned = al.n ? al.perRuleOk / al.n : null;
 const alignedExKnown = al.n - (al.knownGap || 0) ? (al.perRuleOk) / (al.n - (al.knownGap || 0)) : null;
 console.log('\n=== 保真度主口径（按规则自身档位对齐）===');
 console.log(`  应拦用例 ${al.n}：逐规则命中 ${(aligned * 100).toFixed(1)}%｜任意规则拦下 ${(al.blockedAny / al.n * 100).toFixed(1)}%`);
-if (al.knownGap) console.log(`  其中 ${al.knownGap} 条属**已点名的不支持项**（942100/942101 的 @detectSQLi 需要 libinjection，本执行器没有）；剔除后逐规则一致率 ${(alignedExKnown * 100).toFixed(1)}%`);
+// 括号里的解释必须由普查生成，不能写死"@detectSQLi 需要 libinjection"：
+// 那是 942 的缺口形状，同一句话印在 930 的报告上就成了假的（930 缺的是 @pmFromFile 词典）。
+if (al.knownGap)
+  console.log(
+    `  其中 ${al.knownGap} 条属**已点名的不支持项**（规则 ${[...KNOWN_UNSUPPORTED_IDS].sort().join('/')} 用的 ${KNOWN_UNSUPPORTED_OPS.join('/')} 本执行器没有）；剔除后逐规则一致率 ${(alignedExKnown * 100).toFixed(1)}%`,
+  );
 console.log(`  不应拦用例 ${al.mustNot}：误触该规则 ${al.fp}（${al.mustNot ? ((al.fp / al.mustNot) * 100).toFixed(1) : '0.0'}%）｜分歧合计 ${al.div.length} 条`);
 
 // —— 已知差距基线（只减不增）——
@@ -238,12 +276,15 @@ console.log(`  不应拦用例 ${al.mustNot}：误触该规则 ${al.fp}（${al.m
 // 出现任何不在基线里的新分歧 → 门禁 FAIL；基线里的条目消失了也报出来（提示可以收紧）。
 // 每条都给"为什么不算执行器 bug"，理由不成立的就不该进基线。
 const KNOWN_FILE = resolve(HERE, 'crs-known-divergences.json');
+// ⚠ 这份表**只在"基线文件不存在、需要生成"时用**；日常口径以 crs-known-divergences.json 为准。
+// 两处各写一份理由，就意味着其中一份会烂掉——实测已经烂过一次：
+//   942440-19/20 那条"依赖参数排除集、本仓没 vendored"的归因是错的（排除规则就在同一份 conf 里，
+//   缺的是我们自己没实现 ctl:ruleRemoveTargetById），条目后来被真修掉了。
+// 所以这里只留**仍然成立**的理由，并且不允许再用"外部条件不允许"这种句式（那正是上次骗到自己的话）。
 const KNOWN_REASONS = {
   '942100': 'operator @detectSQLi 需要 libinjection 内核，本执行器没有（真 CRS 用它做整体 SQLi 判定）',
   '942101': '同上（作用于 REQUEST_BASENAME 的 @detectSQLi）',
-  '942440-19': '官方用例标题就是 "False positive against Google click identifier"：期望依赖 CRS 的**参数排除集**（在别的 conf 里，本仓只 vendored 942 家族）',
-  '942440-20': '同上（gclid）',
-  '942210-31': '简化匹配器与 PCRE 的边角差异：该负例要靠 CRS 的 t:lengthAdjust/链内二次约束，本执行器只做逐节点 @rx',
+  '942210-31': '归因未证实：复核发现规则里并无原文所称的 t:lengthAdjust，且本机三种输入形状都复现不出该误触 —— 详见基线文件同条条目的完整记录（定位到机制前应视为未知缺口，不是"外部条件不允许"）',
   '942210-44': '同上',
   '942190-42': '多层嵌套函数 `right(right((select …` 需要 PCRE 递归式匹配，本执行器为逐值 @rx',
   '942200-1': '`,varname"=somedata` 期望依赖引号配对计数（@pm/多变量交叉），未实现',
@@ -251,40 +292,104 @@ const KNOWN_REASONS = {
   '942500-4': '同上',
   '942522-7': '链节点作用在 REQUEST_BASENAME 上，本执行器 uri 取值含查询串，与 ModSecurity 的 basename 语义不同',
 };
-const baseline = existsSync(KNOWN_FILE) ? JSON.parse(readFileSync(KNOWN_FILE, 'utf8')) : null;
+// 只有门禁族才比对基线：基线的键是 942 的用例标题，拿 930 的测量去查这份表，
+// 得到的"未点名分歧 N 条 / 已消失 M 条"全是素材错配的产物（读了只会误导）。
+const baseline = GATED && existsSync(KNOWN_FILE) ? JSON.parse(readFileSync(KNOWN_FILE, 'utf8')) : null;
 const knownTitles = new Set((baseline?.divergences || []).map((d) => d.用例));
 const unexpected = al.div.filter((d) => !knownTitles.has(d.用例));
 const stale = (baseline?.divergences || []).filter((d) => !al.div.some((x) => x.用例 === d.用例));
 if (!baseline) {
-  mkdirSync(RESULTS_DIR, { recursive: true });
-  writeFileSync(
-    KNOWN_FILE,
-    JSON.stringify({
-      _comment: 'CRS 官方回归集上**已逐条核对过原因**的分歧清单。新增未点名分歧 = 门禁 FAIL；条目消失 = 按实测收紧本文件。',
-      tag: 'coreruleset v4.1.0 / REQUEST-942',
-      divergences: al.div.map((d) => ({ 用例: d.用例, 类型: d.类型, 期望: d.期望, 原因: KNOWN_REASONS[d.用例] || KNOWN_REASONS[d.期望] || '待补理由' })),
-    }, null, 2)
-  );
-  console.log(`\n[基线] 已生成 ${KNOWN_FILE}（${al.div.length} 条）——请逐条核对理由后再提交`);
+  if (!GATED) {
+    console.log(`\n[基线] 族 ${FAMILY} 不受门禁管，**不生成基线文件**（那份基线的键是 942 的用例标题，写了就是污染）`);
+  } else {
+    mkdirSync(RESULTS_DIR, { recursive: true });
+    writeFileSync(
+      KNOWN_FILE,
+      JSON.stringify(
+        {
+          _comment: 'CRS 官方回归集上**已逐条核对过原因**的分歧清单。新增未点名分歧 = 门禁 FAIL；条目消失 = 按实测收紧本文件。',
+          tag: `coreruleset v4.1.0 / REQUEST-${FAMILY}`,
+          divergences: al.div.map((d) => ({
+            用例: d.用例,
+            类型: d.类型,
+            期望: d.期望,
+            原因: KNOWN_REASONS[d.用例] || KNOWN_REASONS[d.期望] || '待补理由',
+          })),
+        },
+        null,
+        2
+      )
+    );
+    console.log(`\n[基线] 已生成 ${KNOWN_FILE}（${al.div.length} 条）——请逐条核对理由后再提交`);
+  }
 } else {
   console.log(`\n[基线] 已点名分歧 ${knownTitles.size} 条｜本次新出现未点名 ${unexpected.length} 条｜基线中已消失 ${stale.length} 条`);
   for (const d of unexpected) console.log(`   ❌ 未点名：${d.类型} ${d.用例}（期望 ${d.期望} → 命中 [${d.我们命中}]）输入 ${d.输入.slice(0, 60)}`);
   for (const d of stale) console.log(`   ↻ 可收紧基线：${d.用例}（${d.类型}）已不再分歧`);
 }
 
+// —— README 记分板核对（只 WARN，不判红）——
+// 起因是本次实测出来的漂移：README 写「误触 4」，门禁早已是 2。这类数字**不在 facts:check
+// 的覆盖范围内**（facts 只管测试数/覆盖率），也就是说它是"静默失效"这一类的最后一个藏身处：
+// 报告会随每次运行重算，而 README 那行没人再对过。
+// 为什么只做 WARN：那张表里混着历史轮次的存档（"上一轮 96% → 本轮 99.3%"），
+// 强行让每次测量都回填，会诱使人去改历史数字 —— 那比留着不核对更糟。
+// 但"没人知道"必须变成"当场说出来"。
+if (GATED) {
+  const README = resolve(HERE, '..', '..', 'README.md');
+  if (existsSync(README)) {
+    const lines = readFileSync(README, 'utf8').split(/\r?\n/);
+    const want = {
+      保真度: `${(alignedExKnown * 100).toFixed(1)}%`,
+      未点名: String(unexpected.length),
+      已消失: String(stale.length),
+      误触: String(al.fp),
+    };
+    const drift = [];
+    lines.forEach((line, i) => {
+      if (!/CRS 执行器保真度/.test(line) || !/误触|分歧|保真度/.test(line)) return;
+      const pick = (re) => (line.match(re) || [])[1];
+      const got = {
+        保真度: pick(/保真度 \*?\*?([\d.]+%)/),
+        未点名: pick(/未点名分歧 \*?\*?(\d+)/),
+        已消失: pick(/已消失 (\d+)/),
+        误触: pick(/误触 (\d+)/),
+      };
+      for (const k of Object.keys(want)) {
+        if (got[k] != null && got[k] !== want[k]) drift.push(`  L${i + 1} ${k}：README=${got[k]} 本次实测=${want[k]}`);
+      }
+    });
+    if (drift.length) {
+      console.log('\n⚠ README 的保真度记分板与本次实测不符（不影响门禁结论；要么回填，要么在行内标明是历史存档）：');
+      for (const d of drift) console.log(d);
+    }
+  }
+}
+
 const fails = [];
 if (alignedExKnown < MIN_PER_RULE) fails.push(`保真度 ${(alignedExKnown * 100).toFixed(1)}% < ${(MIN_PER_RULE * 100).toFixed(0)}%`);
 if (baseline && unexpected.length) fails.push(`${unexpected.length} 条未点名分歧`);
+// 非门禁族：数字照出，但**不判红**。基线里的用例名全是 942 家族的，拿它去卡 930 的测量
+// 只会得到"素材错配"造成的假失败（这正是本文件开头那条教训的另一种表现形式）。
+if (!GATED) {
+  if (fails.length) console.log(`\n（非门禁族：以下 ${fails.length} 条只报数不判红 —— 基线按 942 用例命名）`);
+  for (const f of fails) console.log(`   · ${f}`);
+  fails.length = 0;
+}
+// 非门禁族的产物**另起文件名**：`results/crs-equivalence.md` 是 README / 报告引用的那份，
+// 被一次 930 测量覆盖掉的话，对外数字会静默换成别的口径。
+const REPORT = `crs-equivalence${GATED ? '' : `-${FAMILY}`}`;
 mkdirSync(RESULTS_DIR, { recursive: true });
 writeFileSync(
-  resolve(RESULTS_DIR, 'crs-equivalence.json'),
-  JSON.stringify({ at: new Date().toISOString(), cases: cases.length, unmodeled: stagesUnmodeled, threshold: MIN_PER_RULE, census, aligned: { ...al, 逐规则一致率: aligned, 剔除已知不支持: alignedExKnown }, perPl }, null, 2)
+  resolve(RESULTS_DIR, `${REPORT}.json`),
+  JSON.stringify({ at: new Date().toISOString(), family: FAMILY, gated: GATED, cases: cases.length, unmodeled: stagesUnmodeled, threshold: MIN_PER_RULE, census, aligned: { ...al, 逐规则一致率: aligned, 剔除已知不支持: alignedExKnown }, perPl }, null, 2)
 );
 const md = [
-  '# 自实现 CRS 执行器 × CRS 官方回归用例（保真度）',
+  `# 自实现 CRS 执行器 × CRS 官方回归用例（保真度｜族 ${FAMILY}）`,
   '',
-  `> 生成：${new Date().toISOString()}　用例来源：coreruleset v4.1.0 tests/regression/tests/REQUEST-942-*（共 ${cases.length} 条可判定 stage，${stagesUnmodeled} 条无规则期望不计）`,
-  `> 红线：**按规则自身档位对齐后**的逐规则一致率（剔除已点名的 @detectSQLi 不支持项）< ${(MIN_PER_RULE * 100).toFixed(0)}% 即判 FAIL。`,
+  `> 本报告的**全部数字只描述族 ${FAMILY}**（用例目录与 conf 成对评估），不构成"CRS 整体已对齐"。`,
+  `> 生成：${new Date().toISOString()}　用例来源：coreruleset v4.1.0 tests/regression/tests/REQUEST-${FAMILY}-*（共 ${cases.length} 条可判定 stage，${stagesUnmodeled} 条无规则期望不计）`,
+  `> ${GATED ? '红线' : '参考线'}：**按规则自身档位对齐后**的逐规则一致率（剔除已点名的${KNOWN_UNSUPPORTED_OPS.length ? ` ${KNOWN_UNSUPPORTED_OPS.join('/')} ` : ''}不支持项）< ${(MIN_PER_RULE * 100).toFixed(0)}% 即判 FAIL${GATED ? '' : '（本族未接入门禁，只报数不判红）'}。`,
   `> WAF 绕过数字全部出自这个执行器 —— 执行器不像 CRS，那些数字就没有意义。`,
   '',
   '## 分档结果',
@@ -299,7 +404,7 @@ const md = [
   '',
   '## 保真度主口径（按规则自身档位对齐）',
   '',
-  `| 应拦用例 | 逐规则命中 | 任意规则拦下 | 已知不支持（@detectSQLi） | 剔除后一致率 | 不应拦用例 | 误触该规则 |`,
+  `| 应拦用例 | 逐规则命中 | 任意规则拦下 | 已知不支持（${KNOWN_UNSUPPORTED_OPS.length ? KNOWN_UNSUPPORTED_OPS.join('/') : '无'}） | 剔除后一致率 | 不应拦用例 | 误触该规则 |`,
   `|---|---|---|---|---|---|---|`,
   `| ${al.n} | ${aligned == null ? '-' : (aligned * 100).toFixed(1) + '%'} | ${(al.blockedAny / al.n * 100).toFixed(1)}% | ${al.knownGap || 0} | ${alignedExKnown == null ? '-' : (alignedExKnown * 100).toFixed(1) + '%'} | ${al.mustNot} | ${al.fp} |`,
   '',
@@ -311,12 +416,14 @@ const md = [
   `- SecRule 行 ${census.secRuleLines}，装载 ${census.loaded}（链头 ${census.chainHeads}），解析丢弃 ${census.droppedBySplit}，元规则跳过 ${census.skippedMeta}`,
   `- 未实现 operator：${census.unimplemented} 条 → ${JSON.stringify(census.unimplementedIds || [])}（这些规则**恒不匹配**）`,
   `- 正则编译失败：${(census.regexBad || []).length} 条 → ${JSON.stringify(census.regexBad || [])}`,
-  // 变换侧普查（2026-09-24）：`applyTransforms` 的 `.filter(t => T[t])` 会**静默丢掉**
-  // 执行器不认识的变换，缺哪个、缺几条规则用到，此前无处可查。
-  `- 静默丢掉的变换：${JSON.stringify(census.droppedTransforms || [])} —— 上面的保真度数字是**在缺这些变换的前提下**量出来的`,
-  `  （尤其 utf8toUnicode：超长 UTF-8 归一化是绕 WAF 的常用手法，942 有 3 条规则声明要用它；
-     930 还额外缺 normalizePathWin / cmdLine ⇒ 930 的官方用例当前一致率仅 13.2%，
-     所以本报告的结论**只适用于 942**，别把它当成"CRS 整体已对齐"。）`,
+  // 变换侧普查（2026-09-24）：`.filter(t => T[t])` 会**静默丢掉**执行器不认识的变换。
+  // 取名与取值同源（declaredTransforms）⇒ 这一行归零意味着变换真进了取值链，而不只是"注册过"。
+  // （上一版就栽在这个差别上：变换名里的数字把 `utf8toUnicode` 截成 `utf`，注册了也从未生效。）
+  `- 静默丢掉的变换：${JSON.stringify(census.droppedTransforms || [])} —— 上面的保真度数字是**在缺这些变换的前提下**量出来的（空清单 = 无缺口）`,
+  `  （utf8toUnicode 现已实现：超长 UTF-8 折叠此前从未进过取值链，而官方回归集里**没有一条**超长编码载荷，
+     ⇒ 它**不会**改动上面那个一致率，所以该行为改由 selftest 的端到端差分断言兜住（注册成功但空转 = 当场红）。
+     族 930 的主缺口是 @pmFromFile 词典规则（930120/930121/930130）未实现，其次才是
+     normalizePathWin / cmdLine ⇒ 本报告结论只覆盖族 ${FAMILY}，不等于"CRS 整体已对齐"。）`,
   // 变量侧普查（2026-09-24）：**风险方向相反的两类，分开列，不合并成一个"差距"数**
   `- 变量取不到值（声明读它、本执行器读不出 ⇒ 该规则在这类输入上恒不命中）：${census.unsupportedVars || 0} 处 / 去重 ${(census.unsupportedVarIds || []).length} 条`,
   `  - 按变量：${JSON.stringify((() => { const m = {}; for (const x of census.unsupportedVarIds || []) { const t = x.slice(x.indexOf(':') + 1); m[t] = (m[t] || 0) + 1; } return m; })())}`,
@@ -324,7 +431,7 @@ const md = [
   `    官方回归集是 query/表单 body 形态，所以上面那个一致率**不包含** XML 载荷，别把它外推到 XML 接口。`,
   `- 排除项未实现（\`!COLL:sel\` 不扣，只多取不少取，偏保守方向）：${census.unhonoredExclusions || 0} 处 / 去重 ${(census.unhonoredExclusionIds || []).length} 条`,
   '',
-  '## 分歧明细（主口径：按规则自身档位对齐；前 ' + TOP + ' 条，全量见 results/crs-equivalence.json）',
+  `## 分歧明细（主口径：按规则自身档位对齐；前 ${TOP} 条，全量见 results/${REPORT}.json）`,
   '',
   ...(al.div.length
     ? al.div.slice(0, TOP).map((d) => `  - [${d.类型}] ${d.用例}（${d.文件}）期望 ${d.期望} → 我们命中 [${d.我们命中}]，输入 ${d.输入}`)
@@ -340,10 +447,14 @@ const md = [
   }),
   '',
 ].join('\n');
-writeFileSync(resolve(RESULTS_DIR, 'crs-equivalence.md'), md);
-console.log(`\n[report] ${resolve(RESULTS_DIR, 'crs-equivalence.md')}`);
+writeFileSync(resolve(RESULTS_DIR, `${REPORT}.md`), md);
+console.log(`\n[report] ${resolve(RESULTS_DIR, `${REPORT}.md`)}`);
 if (fails.length) {
-  console.log(`\n❌ FAIL：${fails.join('；')} —— 执行器与官方规则的差距已超出可引用范围（分歧明细见 results/crs-equivalence.md）`);
+  console.log(`\n❌ FAIL：${fails.join('；')} —— 执行器与官方规则的差距已超出可引用范围（分歧明细见 results/${REPORT}.md）`);
   process.exit(1);
+}
+if (!GATED) {
+  console.log(`\nℹ 族 ${FAMILY} 未接入门禁：以上数字**只是测量**，不判红也不进对外结论（详见报告头部的族声明）。`);
+  process.exit(0);
 }
 console.log(`\n✅ 保真度（剔除已知不支持后）${(alignedExKnown * 100).toFixed(1)}% ≥ 红线 ${(MIN_PER_RULE * 100).toFixed(0)}%`);

@@ -28,7 +28,66 @@ import { fileURLToPath } from 'node:url';
 const HERE = dirname(fileURLToPath(import.meta.url));
 
 // —— 变换函数（与 ModSecurity t: 动作同名的常用子集）——
+// [2026-09-24] `t:utf8toUnicode` —— 按实测计数：942 有 3 条规则声明它（942100/942101/942120），
+// 930 有 4 条。它此前被**两重**原因丢掉：① T 里没实现；② 取名正则会砍在数字上（见
+// declaredTransforms）。只修①不够——修完①普查归零、取值链照旧丢，这才是最难查的那一步。
+// 做的事：把百分号形态的 UTF-8 字节序列**折成一个码点字符**，让后面那条
+// `t:urlDecodeUni` 看得到真字符。之所以作用在百分号形态上：CRS 把本变换排在 urlDecodeUni
+// **之前**，而 `%c0%af`（`/`）、`%c1%bc`（`|`）这类超长编码正是绕 WAF 的经典写法 ——
+// 不先折叠，紧随其后的规则正则永远看不见被藏起来的字符。
+// 规范序列（`%c3%a9` → é）一并折叠，与 ModSecurity 的落点一致：它折成 `%u00e9` 后
+// urlDecodeUni 同样给出 U+00E9，最终字符相同。
+//
+// ⚠ 必须**逐字节推进**，不能写成 `/((?:%XX){2,4})/` 一次吞掉 2–4 段：
+//   贪婪量词会把**下一个序列的字节**一起吃进去（`%c1%bc%c1%bc` 本应是 `||`，
+//   一次匹配只解出 2 字节、剩下 2 字节被丢弃 ⇒ 变成单个 `|` ⇒ 942120 该中不中）。
+//   这是本机实测出来的（HEAD 版本对新实现做差分，五条 overlong 用例改前改后完全一致）。
+function utf8ToUnicode(s) {
+  const str = String(s);
+  const BYTE = /%([0-9A-Fa-f]{2})/g; // 一个百分号字节 token
+  let out = '';
+  let pos = 0;
+  while (pos < str.length) {
+    BYTE.lastIndex = pos;
+    const m = BYTE.exec(str);
+    if (!m) { out += str.slice(pos); break; }
+    const lead = parseInt(m[1], 16);
+    const need = lead >= 0xf0 ? 4 : lead >= 0xe0 ? 3 : lead >= 0xc0 ? 2 : 0;
+    const afterLead = m.index + m[0].length;
+    // 单字节（ASCII）形态不属于本变换的职责：原样放过，继续找下一个
+    if (!need) { out += str.slice(pos, afterLead); pos = afterLead; continue; }
+    const bytes = [lead];
+    let cur = afterLead;
+    let valid = true;
+    for (let k = 1; k < need; k++) {
+      BYTE.lastIndex = cur;
+      const n = BYTE.exec(str);
+      if (!n || n.index !== cur) { valid = false; break; } // 后续字节不紧邻 ⇒ 不是同一序列
+      const b = parseInt(n[1], 16);
+      if ((b & 0xc0) !== 0x80) { valid = false; break; } // 不是合法 continuation 字节
+      bytes.push(b);
+      cur += n[0].length;
+    }
+    if (!valid) { out += str.slice(pos, afterLead); pos = afterLead; continue; }
+    let cp = lead & (0xff >> (need + 1));
+    for (let k = 1; k < need; k++) cp = (cp << 6) | (bytes[k] & 0x3f);
+    // 只拒"非法码点"（越界、代理区）。绝不能拒超长形态：`cp < 该长度的规范最小值`
+    // （`%c0%af` 解出 0x2f < 0x80）正是本变换唯一要抓的东西，写反过一次 ⇒ 变换对攻击
+    // 形态完全不干活，而普查里 `utf8tounicode` 已消失 ⇒ 数字看着"已实现"，实则空壳。
+    // 同理不能加 `cp < 0x80` 短路：3 字节超长解出 ASCII（`%e0%80%af` → `/`）是同一类绕过。
+    if (cp > 0x10ffff || (cp >= 0xd800 && cp <= 0xdfff)) {
+      out += str.slice(pos, afterLead);
+      pos = afterLead;
+      continue;
+    }
+    out += str.slice(pos, m.index) + String.fromCodePoint(cp);
+    pos = cur; // 只推进到**实际消费掉**的字节之后，剩下的交给下一轮
+  }
+  return out;
+}
+
 const T = {
+  utf8tounicode: utf8ToUnicode,
   none: (s) => s,
   lowercase: (s) => s.toLowerCase(),
   urldecodeuni: (s) => {
@@ -52,6 +111,19 @@ const T = {
     .replace(/&quot;/g, '"').replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n)))
     .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => String.fromCharCode(parseInt(h, 16))),
 };
+
+/**
+ * 从 actions 串里取出规则**声明**的变换名（小写）。
+ *
+ * 取名语法必须是 `[a-zA-Z0-9]+`：CRS 的 `t:utf8toUnicode` 名字里带数字，
+ * 用 `[a-zA-Z]+` 会在 `8` 处截断成 `utf` ⇒ 查不到 T ⇒ 被 `.filter` 静默丢掉，
+ * 而普查（本来就是 `[a-zA-Z0-9]+`）却因为"已经注册"而报"无缺失" —— 两边语法不同，
+ * 于是出现过一种最难查的状态：报告说缺口已补，实际取值链上那个变换从未生效过。
+ * 所以声明侧与普查侧**必须共用这个函数**，不允许再各写一份正则。
+ */
+function declaredTransforms(act) {
+  return [...act.matchAll(/t:([a-zA-Z0-9]+)/g)].map((x) => x[1].toLowerCase());
+}
 
 // —— 解析 .conf：续行拼接 → SecRule 分条 → 链聚合 ——
 //
@@ -114,7 +186,7 @@ export function parseCrsFile(confPath) {
       id: (act.match(/id:(\d+)/) || [])[1] || null,
       phase: Number((act.match(/phase:(\d)/) || [])[1]) || 2,
       block: /\bblock\b|\bdeny\b/.test(act),
-      transforms: [...act.matchAll(/t:([a-zA-Z]+)/g)].map((x) => x[1].toLowerCase()).filter((t) => T[t]),
+      transforms: declaredTransforms(act).filter((t) => T[t]),
       pl,
       msg: (act.match(/msg:'([^']*)'/) || [])[1] || '',
       // [2026-09-24] ctl:ruleRemoveTargetById=<规则id>;<集合>:<参数名>
@@ -158,11 +230,12 @@ export function parseCrsFile(confPath) {
     // `ARGS_GET:fbclid` 就是例子：两条官方排除规则因此恒不命中，而症状表现为"942440 误报"。
     // 判据与取值**共用 classifyVar**，避免"普查说支持、实际取不到"的两套真相。
     // 变换链也不能静默丢：`.filter(t => T[t])` 只留下认识的变换，缺的那几个**连报错都没有** ——
-    // 与变量侧曾经"落到 else 返回空"是同一种失效形状。实测 942 自己就用着未实现的
-    // `t:utf8toUnicode`（超长 UTF-8 归一化，正是绕过 WAF 的常用手法），意味着
+    // 与变量侧曾经"落到 else 返回空"是同一种失效形状。942 自己就用着 `t:utf8toUnicode`，
+    // 而它此前从未进过取值链（取名正则 `[a-zA-Z]+` 在数字 `8` 处截断），意味着
     // "99.3% 一致率"是在缺这个变换的前提下量出来的 —— 这个前提必须能被看见。
-    for (const t of (act.match(/t:([a-zA-Z0-9]+)/g) || [])) {
-      const nm = t.slice(2).toLowerCase();
+    // 取名走 declaredTransforms，与 rule.transforms **同源**，否则会出现"普查说已实现、
+    // 取值链其实没跑"的两套真相（本机真踩过一次）。
+    for (const nm of declaredTransforms(act)) {
       if (nm === 'none' || T[nm]) continue;
       stats.droppedTransforms = (stats.droppedTransforms || new Set()).add(nm);
     }
@@ -190,8 +263,11 @@ export function parseCrsFile(confPath) {
     if (rule.isChainHead) stats.chainHeads++;
   }
   stats.groups = rules.length;
+  // 三个普查桶恒归一成**数组**：补全之后"没有缺口"必须是 `[]`，不能是"字段没建 ⇒ undefined"。
+  // （selftest 断言 942 侧 `droppedTransforms` 为空，undefined 会让它红得莫名其妙——
+  //   红的原因看起来像"断言写错了"，而真正该被看见的是"缺口没了"。）
   for (const k of ['unsupportedVarIds', 'unhonoredExclusionIds', 'droppedTransforms']) {
-    if (stats[k] instanceof Set) stats[k] = [...stats[k]].sort();
+    stats[k] = stats[k] instanceof Set ? [...stats[k]].sort() : [];
   }
   PARSE_STATS.set(confPath, stats);
   return rules;
