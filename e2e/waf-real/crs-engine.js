@@ -239,8 +239,10 @@ export function classifyVar(token) {
   //   · gap —— 正向变量取不到值 ⇒ 该规则在这份数据上**恒不命中**，是真正的检测面缺口。
   const exclusion = raw.startsWith('!');
   const mk = (ok, extra) => ({ ok, exclusion, token: name, coll, ...extra });
-  if (!spec) return mk(false, { why: exclusion ? '排除项未实现（不扣，只多取不少取）' : '未知集合：该变量取不到值' });
-  if (sel && !spec.sel) return mk(false, { why: exclusion ? '排除项未实现（不扣，只多取不少取）' : '该集合不支持选择器形态' });
+  if (!spec) return mk(false, { why: exclusion ? '排除项未实现（未知集合无从扣起）' : '未知集合：该变量取不到值' });
+  // 选择器**只在排除侧**先开放：`!REQUEST_COOKIES:/__utm/` 要按元素名扣就必须解析它；
+  // 正向形态（`REQUEST_COOKIES:sid`）维持原状 —— 上一版把正向一起开放后回归集变红。
+  if (sel && !spec.sel && !exclusion) return mk(false, { why: '该集合不支持选择器形态' });
   if (spec.kind === 'tx' && !/^\d+$/.test(sel || '')) return mk(false, { why: 'TX 仅支持数字下标（链捕获）' });
   return mk(true, { kind: spec.kind, sel: sel || null });
 }
@@ -266,30 +268,46 @@ export function collectValues(vars, req, state = {}, exclArgs = null) {
     }
     return wantNames ? list.map(([k]) => k) : list.map(([, v]) => v);
   };
+  // [2026-09-24 第二版，只走最小半径] `!COLL:sel` 扣除语义。上一版一次改了三件事
+  // （按 (kind,元素名) 扣 / 正向也开放选择器 / 同集合去重），官方 805 例多出 12 条未点名分歧；
+  // 关掉"扣"这步仍是同样多分歧 ⇒ 正向那两件才是元凶。本版**只做扣**，且：
+  //   · 按**精确集合名**登记，不用 kind 归并 —— ModSecurity 里 REQUEST_COOKIES（值）与
+  //     REQUEST_COOKIES_NAMES（名）是两个集合，扣一个不能连坐另一个；
+  //   · 只扣有元素名的集合（ARGS / REQUEST_COOKIES / REQUEST_HEADERS）；
+  //   · 正向取值一字不改。
+  // 定点断言在 e2e/waf-real/selftest.mjs 的「变量列表语义」段：回归集对"值被扣但名不该被扣"
+  // 这件事没有用例覆盖，只有那里拦得住（实测把 coll 折成 kind 会红 3 条）。
+  const drops = new Map(); // 精确集合名 -> (元素名) => 是否扣掉
+  for (const v of vars) {
+    if (!v.startsWith('!')) continue;
+    const c0 = classifyVar(v);
+    if (!c0.ok || !c0.sel) continue;
+    const m = c0.sel.startsWith('/') && c0.sel.endsWith('/') && c0.sel.length > 2
+      ? ((re) => (k) => re.test(k))(new RegExp(c0.sel.slice(1, -1), 'i'))
+      : ((sn) => (k) => k === sn)(c0.sel);
+    drops.set(c0.coll, m);
+  }
+  const keptEntries = (coll, entries) => {
+    const drop = drops.get(coll);
+    return drop ? entries.filter(([k]) => !drop(k)) : entries;
+  };
   for (const v of vars) {
     const neg = v.startsWith('!');
-    // ⚠ 取反变量（`!REQUEST_COOKIES:/__utm/`）在 ModSecurity 里是"从集合里**扣掉**这些元素"，
-    // 而旧实现与本项目前都当 no-op 处理（等价于不扣）。这不是笔误而是**已知的不精确**：
-    // 扣与不扣只会让取值变多，不会变少，所以偏保守方向（可能多命中，不会漏命中）。
-    // 要修就得连同"同一 vars 里 `ARGS|!ARGS:x` 的合并语义"一起做，届时 805 例回归集是唯一裁判。
-    //
-    // [2026-09-24 实测否决，别再照直觉改] 已经试过一版完整实现：subs 按 (kind, 元素名)
-    // 从前面的并集里扣、`REQUEST_COOKIES` 一并开放选择器、同集合出现两次按元素身份去重。
-    // 结果 805 例官方回归集**新增 12 条未点名分歧 → 门禁 FAIL**；二分掉"扣"这一步
-    // （只收集不扣）仍是 12 条 ⇒ 错不在扣除，而在**正向那半边**（开放 cookies 选择器 /
-    // 元素身份去重）与 ModSecurity 的真实语义不一致。已整段回退，保持现状。
-    // 想重做的前提是先弄清两件事：① 扣的是 element 还是 (collection,element) 对；
-    // ② `COLL_NAMES` 与 `COLL` 在同一 vars 里时，扣除项作用在哪一面。
+    // 取反变量（`!REQUEST_COOKIES:/__utm/`）在此**跳过**是有意为之：扣除已在循环前
+    // 登记进 drops、取值时按精确集合名应用，这里不需要再往 out 里放任何东西。
+    // 历史注脚：这行原来是"整条 no-op（等于一个都不扣）"，2026-09-24 起才有扣除语义；
+    // 第一版实现把 (kind,元素名) 当扣除键、并顺手开放正向选择器与去重，被官方 805 例
+    // 判出 12 条未点名分歧后回退重做（细节见上面 drops 段的注释）。
     if (neg) continue;
     const c = classifyVar(v);
     if (!c.ok) continue; // 不支持面由解析期普查点名，这里保持与旧实现一致的"返回空"
     switch (c.kind) {
-      case 'args': push(out, pick(argEntries(), c.sel, false)); break;
-      case 'argsNames': push(out, pick(argEntries(), c.sel, true)); break;
-      case 'cookies': push(out, Object.values(req.cookies || {})); break;
-      case 'cookieNames': push(out, Object.keys(req.cookies || {})); break;
+      case 'args': push(out, pick(keptEntries(c.coll, argEntries()), c.sel, false)); break;
+      case 'argsNames': push(out, pick(keptEntries(c.coll, argEntries()), c.sel, true)); break;
+      case 'cookies': push(out, keptEntries(c.coll, Object.entries(req.cookies || {})).map(([, v2]) => v2)); break;
+      case 'cookieNames': push(out, keptEntries(c.coll, Object.entries(req.cookies || {})).map(([k2]) => k2)); break;
       case 'headers':
-        if (!c.sel) push(out, Object.values(req.headers || {}));
+        if (!c.sel) push(out, keptEntries(c.coll, Object.entries(req.headers || {})).map(([, v2]) => v2));
         else push(out, [req.headers[String(c.sel).toLowerCase()]].filter((x) => x != null));
         break;
       case 'uri': push(out, [req.uri]); break;

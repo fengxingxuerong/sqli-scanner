@@ -16,7 +16,7 @@
 //   裸 `1 UNION SELECT NULL,NULL`（无引号、无 FROM）**不在覆盖范围内**，
 //   这是规则集的真实边界，不是引擎 bug。故用例改用带引号闭合的形态。
 // ============================================================================
-import { evaluate, parseCrsFile } from './crs-engine.js';
+import { evaluate, parseCrsFile, collectValues } from './crs-engine.js';
 
 const CONFIG = 'e2e/waf-real/crs/REQUEST-942-SQLI.conf';
 const rules = parseCrsFile(CONFIG);
@@ -54,9 +54,41 @@ for (const c of CASES) {
   console.log(`[${mark}] ${c.name.padEnd(24)} ${detail} ${why}`);
 }
 
-console.log(`\n[waf-real selftest] ${CASES.length - failed}/${CASES.length} 通过`);
-if (failed > 0) {
-  console.error(`[waf-real selftest] ${failed} 条断言失败`);
+// ── 变量列表语义断言（2026-09-24）────────────────────────────────────────
+// 上面那些用例断的是"载荷进不改检测面"；这几条断的是**取值口径**本身。
+// 为什么值得单独断：`!COLL:sel` 与 `COLL:sel` 这两处形态上一轮直接改出过 12 条未点名分歧，
+// 而回归集里**没有任何一条用例**会在"值被扣掉但名不该被扣"这一点上给我们答案 ——
+// 也就是说这类语义错了，805 例未必拦得住，只能靠这里的定点断言。
+console.log('\n[变量列表语义]');
+let varFailed = 0;
+{
+  const REQ = {
+    method: 'GET', uri: '/x', queryString: '', args: { id: '1', q: '2' },
+    cookies: { __utmz: 'u', sid: 's' }, headers: { host: 'h' },
+  };
+  const v = (vars) => collectValues(vars, REQ, {}, null);
+  const eq = (name, got, want) => {
+    const ok = JSON.stringify(got) === JSON.stringify(want);
+    if (!ok) varFailed += 1;
+    console.log(`[${ok ? 'PASS' : 'FAIL'}] ${name.padEnd(34)} 得到 ${JSON.stringify(got)} 期望 ${JSON.stringify(want)}`);
+  };
+  // ① 扣值不扣名：names 与 values 在 ModSecurity 里是**两个集合**，扣其中一个不能连坐。
+  //    （上一版把两者折成同一个 kind 是这次分歧的来源之一。）
+  eq('扣 __utm 只作用于 cookie 值', v(['REQUEST_COOKIES', '!REQUEST_COOKIES:/__utm/']), ['s']);
+  eq('cookie 名不受值侧扣除影响', v(['REQUEST_COOKIES_NAMES', '!REQUEST_COOKIES:/__utm/']), ['__utmz', 'sid']);
+  eq('扣名要显式写 NAMES 集合', v(['REQUEST_COOKIES_NAMES', '!REQUEST_COOKIES_NAMES:/^__utm/']), ['sid']);
+  // ② 跨集合不连坐：扣 ARGS 的名字不得顺手把同名 cookie 元素扣掉
+  eq('扣 ARGS 元素不连坐 cookies', v(['ARGS', 'REQUEST_COOKIES', '!ARGS:id']), ['2', 'u', 's']);
+  // ③ 正向选择器维持原状（上一版顺手开放、结果变红）：裸名取全量
+  eq('ARGS:id 仍取该元素', v(['ARGS:id']), ['1']);
+  eq('裸 ARGS 取全量', v(['ARGS']), ['1', '2']);
+  // ④ 无名元素没有"元素名"可扣，扣除项对它们必须无效（否则 URI 类规则会被静默清空）
+  eq('URI 不受 ARGS 扣除影响', v(['REQUEST_URI', '!ARGS:id']), ['/x']);
+}
+
+console.log(`\n[waf-real selftest] ${CASES.length - failed}/${CASES.length} 通过（变量语义 ${varFailed === 0 ? '全过' : `${varFailed} 条失败`}）`);
+if (failed > 0 || varFailed > 0) {
+  console.error(`[waf-real selftest] ${failed + varFailed} 条断言失败`);
   process.exit(1);
 }
 process.exit(0);
