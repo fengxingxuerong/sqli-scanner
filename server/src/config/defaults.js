@@ -247,6 +247,16 @@ export const defaults = {
     // （详见 docs/实战渗透实测评估-2026-09-10.md F8）。
     // 仅对「error 命中但数据面通道全 miss 且出现过 5xx」的点触发，安全点不受影响。
     filterAdaptive: true,
+    // [A3 2026-09-25] 通道降级编排：重跑阶段用逐词拦截画像判断「哪些通道在当前形态下
+    // 无望」，跳过它们不再发整包请求。
+    // 默认开，但**判据极保守**（channelPolicy.planChannels）：
+    //   ① 无画像 → 不决策；② 只有某通道**必需记号整组被拦** 且 当前 tamper 链不消除
+    //   其中任一记号 才降级；③ 未知技术一律保留；④ 降级后若一个通道都不剩 → 回退全集。
+    // 与 compactErrorTemplates 的取舍不同：那里是「少发弹药换取请求数」（会掉检出），
+    // 这里是「跳过注定跑不出结论的通道」（理论上不损失检出）—— 但**是否真的不损失
+    // 必须由真靶场（CRS acceptance 套件）验收**，未验收前不宣称无漏检。
+    // 关闭：wafEvasion.channelDegrade=false（回退到 2026-09-24 的重跑行为）。
+    channelDegrade: true,
     // WAF 自动 tamper 重跑（对标 sqlmap --check-waf 自动套 tamper）：高置信识别出 WAF 且注入点
     // 未命中时，自动套 wafRecommend 推荐链对未命中点重跑一轮快速层（union/error/boolean）。
     // 默认 false 保持现状（仅显式开启才自动兜底）；节流：仅高置信 WAF + 未命中点 + 每点最多重跑一轮。

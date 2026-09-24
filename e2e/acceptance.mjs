@@ -443,6 +443,51 @@ const SUITES = [
     },
   },
   {
+    // [A3-2026-09-25] 通道降级编排的端到端验收。
+    // 与上面的 CRS 套件**不重复**：CRS 答的是「绕过之后检出多少」，本套件答的是
+    // 「真实 HTTP 测出来的拦截画像，能不能正确驱动通道降级」——单测里画像是 mock 的，
+    // 证明得了「决策逻辑对」，证明不了「画像对」；画像错了，决策就是对着错误事实推理。
+    // 靶场规则是写死的（双拦 / 单拦两个靶场），故「哪些词被拦」有唯一正确答案 = ground truth。
+    // 断言含反向对照：只拦 union 不拦 select 时 union **不得**降级（防降级过激）。
+    // 自包含（不需要 MySQL/DB，WAF 为自建规则）—— 任何环境都该跑。
+    id: 'waf-channel-degrade',
+    title: 'WAF 通道降级编排（A3）端到端',
+    needs: [],
+    run: () => run('node', ['e2e/waf-real/waf-channel-degrade.e2e.mjs'], {}),
+    assert: (out) => {
+      if (/\[BLOCKED\]/.test(out)) {
+        return {
+          pass: false,
+          skipped: true,
+          skipReason: (/\[BLOCKED\] (.+)/.exec(out) || [, '靶场未生效，未执行断言'])[1].trim(),
+        };
+      }
+      // 只吃事实数字：画像内容 + 两档决策结果（正则取自脚本自己的输出行）
+      const mDual = /双拦=\[([^\]]*)\]/.exec(out);
+      const mSingle = /单拦=\[([^\]]*)\]/.exec(out);
+      const mRunDual = /决策 双拦 run=\[([^\]]*)\]/.exec(out);
+      const mRunSingle = /单拦 run=\[([^\]]*)\]/.exec(out);
+      const reason =
+        !mDual || !mSingle || !mRunDual || !mRunSingle ? '取不到画像/决策行（输出格式变了？）'
+          : !/\bunion\b/.test(mDual[1]) || !/\bselect\b/.test(mDual[1]) ? `双拦靶场画像未同时含 union/select：[${mDual[1]}]`
+          : /\bselect\b/.test(mSingle[1]) ? `单拦靶场画像误含 select（探针未逐词区分）：[${mSingle[1]}]`
+          : !mRunDual[1].includes('error') ? `双拦后 error 通道也被降级了（降级过激）：run=[${mRunDual[1]}]`
+          : mRunDual[1].includes('union') ? `union+select 皆被拦却未降级（A3 未生效）：run=[${mRunDual[1]}]`
+          : !mRunSingle[1].includes('union') ? `只拦 union 时 union 被降级（OR 组语义失效）：run=[${mRunSingle[1]}]`
+          : null;
+      return {
+        facts: {
+          画像双拦: mDual ? mDual[1] : null,
+          画像单拦: mSingle ? mSingle[1] : null,
+          决策双拦: mRunDual ? mRunDual[1] : null,
+          决策单拦: mRunSingle ? mRunSingle[1] : null,
+        },
+        pass: reason === null,
+        reason,
+      };
+    },
+  },
+  {
     id: 'redteam',
     title: '红队实战评测（ground-truth 真值对照 + sqlmap 同题）',
     needs: [],          // 自己会拉起 env（缺 PG 时才落回 SKIP），不再要求外部常驻

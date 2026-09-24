@@ -15,6 +15,9 @@ import { oobReceiver } from '../../core/oobReceiver.js';
 import { dialectToDbms } from '../DialectSqlBuilder.js';
 import { verifyTamperChains } from '../../core/waf/chainVerify.js';
 import { decideBlockPolicy, isUntrustedVendor } from '../../core/waf/blockPolicy.js';
+// [A3-2026-09-25] 通道降级编排：把逐词拦截画像翻译成「哪些通道还值得跑」。
+import { planChannels } from '../../core/waf/channelPolicy.js';
+import { coveredTokens } from '../../core/waf/blockProfile.js';
 import { OPERATOR_SWAP_CHAINS, FILTER_BYPASS_CHAINS } from '../../core/waf/wafRecommend.js';
 import { GENERIC_BLOCK_VENDOR } from '../../core/waf/blockSignatures.js';
 import { isNetworkFailureError } from '../../core/scanValidityGuard.js';
@@ -462,18 +465,24 @@ export async function detectPhase(run) {
       // 取首条放行的链；全部被拦则跳过重跑（省掉注定失败的整轮检测请求）。
       // 验证异常 → 保守回退 suggestions[0]（对齐旧行为，验证器故障不削弱重跑）。
       let plugins = null;
+      // [A3-2026-09-25] 逐词拦截画像（验链顺路产出的 `blocked`，零额外请求）。
+      // 它是通道降级编排的唯一输入；拿不到（未走画像分支）时为空数组 → 不决策。
+      /** @type {string[]} */
+      let blockedTokens = [];
       // 过滤路径优先用「error-only 点」做链验证对象（探针行为最贴近重跑目标）
       const verifyPoint = filterAdaptive
         ? errorOnlyPoints[0]?.point
         : pointsToScan.find((p) => !foundByPoint.has(p.id)) || pointsToScan[0];
       if (verifyPoint && suggestions.length) {
-        plugins = (await verifyTamperChains({
+        const verifyResult = await verifyTamperChains({
           httpClient: sm.getScanClient(scanId, target),
           target,
           point: verifyPoint,
           chains: suggestions,
           config: target.config || {},
-        }))?.plugins ?? null;
+        });
+        plugins = verifyResult?.plugins ?? null;
+        blockedTokens = Array.isArray(verifyResult?.blocked) ? verifyResult.blocked : [];
       } else {
         plugins = suggestions[0] && suggestions[0].plugins;
       }
@@ -531,9 +540,39 @@ export async function detectPhase(run) {
               // （实测：携带时 CRS 场景 str/like 重跑 0 命中；不携带时命中 union+boolean）。
               ...(filterAdaptive || blockAdaptive ? {} : { baseline: sharedBaseline }),
             };
-            const fast = sm.activeDetectors(retryConfig).filter((d) =>
+            const fastAll = sm.activeDetectors(retryConfig).filter((d) =>
               ['union', 'error', 'boolean'].includes(d.technique)
             );
+            // [A3-2026-09-25] 通道降级编排：画像若证明某通道在当前拦截形态下**无望**，
+            // 就不再为它发整包请求 —— 重跑阶段本来就要重发一遍，跳过即纯省请求，
+            // 且避免该通道在无效形态下白跑一遍再判 miss。
+            // 判据极保守（详见 channelPolicy.planChannels）：
+            //   ① 无画像 → 不决策；② 必需记号**整组**被拦 且 当前 tamper 链不消除其中
+            //   任一记号 才降级；③ 未知技术一律保留。
+            // 安全网：若降级后**一个通道都不剩**，回退全集 —— 编排不得把重跑降成空跑。
+            let fast = fastAll;
+            const channelDegrade = target.config?.wafEvasion?.channelDegrade !== false;
+            if (channelDegrade && blockedTokens.length && fastAll.length) {
+              const plan = planChannels({
+                techniques: fastAll.map((d) => d.technique),
+                blocked: blockedTokens,
+                covered: coveredTokens(plugins),
+              });
+              if (plan.skipped.length && plan.run.length) {
+                const skipSet = new Set(plan.skipped.map((x) => x.technique));
+                fast = fastAll.filter((d) => !skipSet.has(d.technique));
+                logger.info(
+                  `[channel-degrade] 画像被拦 [${blockedTokens.join(',')}] → 跳过通道 [${plan.skipped
+                    .map((x) => `${x.technique}(${x.deadTokens.join('|')})`)
+                    .join(', ')}]，重跑仅执行 [${plan.run.join(', ')}]`
+                );
+                eventBus.emit(scanId, 'waf_channel_degrade', {
+                  blocked: blockedTokens,
+                  skipped: plan.skipped.map((x) => ({ technique: x.technique, deadTokens: x.deadTokens })),
+                  run: plan.run,
+                });
+              }
+            }
             // [P0-FIX 2026-09-10 实战实测] 重跑前重探闭合前缀（boundary）。
             // 根因：主轮的 boundary 探测 payload **不带 tamper**，在 CRS 下被 942460 拦光 →
             // probeBoundary 回退空串 → 重跑时探针变成无闭合形态（`alice AND 1=1#` 落进字符串字面量
@@ -541,7 +580,9 @@ export async function detectPhase(run) {
             // 实测证据：gate 插桩 `boundary="" truePayload="alice AND 1=1#" trueLen=138 falseLen=138`。
             // 重跑已带 tamper（`#` 形态可过 CRS），故重探即可拿到正确的 `'`。
             if (blockAdaptive || filterAdaptive) {
-              const prober = fast.find((d) => typeof d.probeBoundary === 'function');
+              // prober 从**全集**找：重探闭合前缀是给后面所有通道用的前置修正，
+              // 不该因为某个通道被降级就找不到探测器（降级只影响谁跑，不影响前置修正）。
+              const prober = fastAll.find((d) => typeof d.probeBoundary === 'function');
               if (prober) {
                 try {
                   const b = await prober.probeBoundary({ ...rctx, point });

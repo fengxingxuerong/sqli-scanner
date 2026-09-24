@@ -592,7 +592,7 @@ export function sanitizeStart(body) {
     if (jitterMs !== undefined) waf.jitterMs = jitterMs;
     // 其余四个布尔位：引擎判据有 `=== true` 与 `!== false` 两种，两种都要求键**存在**
     // 才是用户真正表达的意图，故逐个显式转发（非法/未传则保持 defaults）。
-    for (const k of ['adaptiveOnBlock', 'bypassSearch', 'filterAdaptive', 'autoRetry']) {
+    for (const k of ['adaptiveOnBlock', 'bypassSearch', 'filterAdaptive', 'autoRetry', 'channelDegrade']) {
       const v = pickBool(we, k);
       if (v !== undefined) waf[k] = v;
     }

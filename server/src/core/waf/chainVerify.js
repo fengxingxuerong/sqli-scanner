@@ -43,7 +43,13 @@ const GENERATED_SLOTS = 1;
  *   （返回哪条链）无法回答「哪些链被**试过**」——而 A2 的验收判据恰恰是「生成链有没有
  *   进入验证流程」，不是「它有没有赢」。没有这个回调就只能靠猜，与本项目「取数要能看见
  *   它声称在管的东西」的纪律相悖。生产路径不传即为 no-op，零成本。
- * @returns {Promise<{vendor:string, plugins:string[]}|null>} 首条验证通过的链；全被拦返回 null
+ * @returns {Promise<{vendor:string, plugins:string[], blocked:string[], probed:number}|null>}
+ *   首条验证通过的链；全被拦返回 null。
+ *   [A3-2026-09-25] 附带 `blocked`：本次验链过程中拿到的**逐词拦截画像**
+ *   （profileBlockedTokens 的输出，token id 列表）。存在的理由：画像此前是本函数的
+ *   局部变量，验链结束即丢弃 → 调度层（detect.js）永远拿不到「目标到底拦了什么词」，
+ *   A3 的通道降级编排因此无从下手。此处**零额外请求** —— 画像本来就只在「裸探针全被拦」
+ *   的分支里算过一次，这里只是把它带出去。未走画像分支时为 `[]`（语义：无证据，不决策）。
  */
 export async function verifyTamperChains({
   httpClient,
@@ -95,7 +101,9 @@ export async function verifyTamperChains({
       const raw = await send(pv, null);
       if (!looksBlocked(raw.res, baseLen)) { allRawBlocked = false; break; }
     }
-    if (!allRawBlocked) return list[0];
+    // [A3-2026-09-25] 展开为新对象而非直接返回 list[0]：调用方（含 A3 的通道编排）会往
+    // 返回值上补字段，直接返回数组元素会污染入参 `chains`（同一数组可能被多次复用）。
+    if (!allRawBlocked) return { ...list[0], blocked: [], probed: 0 };
 
     // 3) [A2-2026-09-21] 逐词画像 + 定向选链。
     //    走到这里说明「整串探针**全**被拦」。原先直接 `list.slice(0, MAX_CHAINS)` **按序**取前 3 条
@@ -148,7 +156,8 @@ export async function verifyTamperChains({
             `WAF 链验证：[${chain.plugins.join(',')}] 探针放行（${t.elapsed}ms），候选共 ${list.length} 条` +
               (profile.blocked.length ? `（画像被拦：${profile.blocked.join('/')}）` : '')
           );
-          return chain;
+          // [A3-2026-09-25] 把逐词画像带出去（零额外请求），供调度层做通道降级编排
+          return { ...chain, blocked: profile.blocked || [], probed: profile.probed || 0 };
         }
       }
     }
@@ -160,7 +169,8 @@ export async function verifyTamperChains({
   } catch (e) {
     // 验证流程异常 → 保守回退首条链（不因验证器故障削弱旧行为）
     logger.warn(`WAF 链验证异常（${e.message}），回退首条推荐链`);
-    return list[0] ?? null;
+    // 同早退分支：展开为新对象并补空画像（语义「无证据，不决策」，不污染入参数组）
+    return list[0] ? { ...list[0], blocked: [], probed: 0 } : null;
   }
 }
 
