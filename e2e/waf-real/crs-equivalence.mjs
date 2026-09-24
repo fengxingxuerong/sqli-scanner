@@ -96,10 +96,21 @@ function expectation(output) {
   return { kind: 'unspecified', id: null };
 }
 
+// 用例目录必须与**它自己那一族的规则文件**配对评估。这里原先递归扫 crs/tests/* 却只配一份
+// 942 conf：把 930 的用例拿去比 942 的规则，凭空造出 33 条"分歧"而门禁变红 ——
+// 配错素材的裁判比没有裁判更坏（它会把口径错误伪装成产品缺陷）。
+// 因此这里按 EVAL_FAMILIES 白名单取目录，未列入的族**显式声明为未接入**（见下方输出），
+// 而不是悄悄扫进来或悄悄不扫。
+const EVAL_FAMILIES = ['942'];
 const files = existsSync(TESTS_DIR)
-  ? readdirSync(TESTS_DIR, { withFileTypes: true }).flatMap((d) =>
-      d.isDirectory() ? readdirSync(resolve(TESTS_DIR, d.name)).filter((f) => f.endsWith('.yaml')).map((f) => resolve(TESTS_DIR, d.name, f)) : []
-    )
+  ? readdirSync(TESTS_DIR, { withFileTypes: true })
+      .filter((d) => d.isDirectory() && EVAL_FAMILIES.includes(d.name))
+      .flatMap((d) => readdirSync(resolve(TESTS_DIR, d.name)).filter((f) => f.endsWith('.yaml')).map((f) => resolve(TESTS_DIR, d.name, f)))
+  : [];
+const idleFamilies = existsSync(TESTS_DIR)
+  ? readdirSync(TESTS_DIR, { withFileTypes: true })
+      .filter((d) => d.isDirectory() && !EVAL_FAMILIES.includes(d.name))
+      .map((d) => d.name)
   : [];
 if (!files.length) {
   console.error('❌ 没有官方回归用例（crs/tests/ 为空）。先跑：node scripts/fetch-crs-assets.mjs');
@@ -141,6 +152,12 @@ console.log(`未实现 operator：${census.unimplemented} 条 ${JSON.stringify(c
   console.log(`变量取不到值（该规则在这份数据上恒不命中）：${census.unsupportedVars || 0} 处 / 去重 ${gaps.length} 条 ${JSON.stringify(byVar)}`);
   console.log(`  涉及规则：${[...new Set(gaps.map((x) => x.split(':')[0]))].slice(0, 12).join(', ')}${new Set(gaps.map((x) => x.split(':')[0])).size > 12 ? ` …共 ${new Set(gaps.map((x) => x.split(':')[0])).size} 条` : ''}`);
   console.log(`排除项未实现（只多取不少取，偏保守）：${census.unhonoredExclusions || 0} 处 / 去重 ${(census.unhonoredExclusionIds || []).length} 条`);
+}
+if (idleFamilies.length) {
+  console.log(`⚠ 已入库但**未接入裁判**的族：${idleFamilies.join(', ')}（各自的规则文件与本 harness 评估的 942 conf 不同，接入门禁需按族配对 conf）`);
+  console.log('   实测口径（一次性量过，见 e2e/waf-real/crs-engine.js 的变换普查）：930 官方用例按规则 id 对齐仅 13.2%，');
+  console.log('   根因是 930 依赖的执行器未实现变换 —— normalizePathWin / cmdLine（外加 942 也在用的 utf8toUnicode），');
+  console.log('   此前这些缺失被 `.filter(t => T[t])` 静默吞掉，现已进入 droppedTransforms 普查。');
 }
 console.log(`官方用例：${cases.length} 条（另有 ${stagesUnmodeled} 条 stage 无 log_contains/no_log_contains，不计入）\n`);
 
@@ -294,6 +311,12 @@ const md = [
   `- SecRule 行 ${census.secRuleLines}，装载 ${census.loaded}（链头 ${census.chainHeads}），解析丢弃 ${census.droppedBySplit}，元规则跳过 ${census.skippedMeta}`,
   `- 未实现 operator：${census.unimplemented} 条 → ${JSON.stringify(census.unimplementedIds || [])}（这些规则**恒不匹配**）`,
   `- 正则编译失败：${(census.regexBad || []).length} 条 → ${JSON.stringify(census.regexBad || [])}`,
+  // 变换侧普查（2026-09-24）：`applyTransforms` 的 `.filter(t => T[t])` 会**静默丢掉**
+  // 执行器不认识的变换，缺哪个、缺几条规则用到，此前无处可查。
+  `- 静默丢掉的变换：${JSON.stringify(census.droppedTransforms || [])} —— 上面的保真度数字是**在缺这些变换的前提下**量出来的`,
+  `  （尤其 utf8toUnicode：超长 UTF-8 归一化是绕 WAF 的常用手法，942 有 3 条规则声明要用它；
+     930 还额外缺 normalizePathWin / cmdLine ⇒ 930 的官方用例当前一致率仅 13.2%，
+     所以本报告的结论**只适用于 942**，别把它当成"CRS 整体已对齐"。）`,
   // 变量侧普查（2026-09-24）：**风险方向相反的两类，分开列，不合并成一个"差距"数**
   `- 变量取不到值（声明读它、本执行器读不出 ⇒ 该规则在这类输入上恒不命中）：${census.unsupportedVars || 0} 处 / 去重 ${(census.unsupportedVarIds || []).length} 条`,
   `  - 按变量：${JSON.stringify((() => { const m = {}; for (const x of census.unsupportedVarIds || []) { const t = x.slice(x.indexOf(':') + 1); m[t] = (m[t] || 0) + 1; } return m; })())}`,

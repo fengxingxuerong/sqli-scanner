@@ -32,8 +32,11 @@ const RAW = 'https://raw.githubusercontent.com/coreruleset/coreruleset';
 // 族 → { dir: 上游回归目录, conf: 入库规则文件 }
 const FAMILIES = [
   { key: '942', dir: 'REQUEST-942-APPLICATION-ATTACK-SQLI', conf: 'crs/REQUEST-942-SQLI.conf', upstreamConf: 'rules/REQUEST-942-APPLICATION-ATTACK-SQLI.conf' },
-  // 930（LFI）规则原文已入库但执行器默认不加载，先只校验规则文件本身、不下用例
-  { key: '930', dir: 'REQUEST-930-APPLICATION-ATTACK-LFI', conf: 'crs/REQUEST-930.conf', upstreamConf: 'rules/REQUEST-930-APPLICATION-ATTACK-LFI.conf', tests: false },
+  // 930（LFI）：规则原文 2026-09 就入库了，但一直 `tests:false` 不下用例 ⇒ 执行器对它的
+  // 支持度**没有任何裁判**（`FILES:`、`XML:/*` 这两族变量只在 930 里出现，
+  // 于是"要不要实现 FILES"这类问题当时连讨论依据都没有）。2026-09-24 起一并取回归用例，
+  // 让 930 与 942 同样按官方用例计量（crs-equivalence.mjs 逐族出分）。
+  { key: '930', dir: 'REQUEST-930-APPLICATION-ATTACK-LFI', conf: 'crs/REQUEST-930.conf', upstreamConf: 'rules/REQUEST-930-APPLICATION-ATTACK-LFI.conf' },
 ];
 
 const sha256 = (buf) => createHash('sha256').update(buf).digest('hex');

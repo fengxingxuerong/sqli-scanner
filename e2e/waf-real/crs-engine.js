@@ -157,6 +157,15 @@ export function parseCrsFile(confPath) {
     // 之前变量只有"落不进去就 push([])"的隐式行为，谁不支持没人知道 ——
     // `ARGS_GET:fbclid` 就是例子：两条官方排除规则因此恒不命中，而症状表现为"942440 误报"。
     // 判据与取值**共用 classifyVar**，避免"普查说支持、实际取不到"的两套真相。
+    // 变换链也不能静默丢：`.filter(t => T[t])` 只留下认识的变换，缺的那几个**连报错都没有** ——
+    // 与变量侧曾经"落到 else 返回空"是同一种失效形状。实测 942 自己就用着未实现的
+    // `t:utf8toUnicode`（超长 UTF-8 归一化，正是绕过 WAF 的常用手法），意味着
+    // "99.3% 一致率"是在缺这个变换的前提下量出来的 —— 这个前提必须能被看见。
+    for (const t of (act.match(/t:([a-zA-Z0-9]+)/g) || [])) {
+      const nm = t.slice(2).toLowerCase();
+      if (nm === 'none' || T[nm]) continue;
+      stats.droppedTransforms = (stats.droppedTransforms || new Set()).add(nm);
+    }
     for (const tok of rule.vars || []) {
       const c = classifyVar(tok);
       if (c.ok) continue;
@@ -181,7 +190,7 @@ export function parseCrsFile(confPath) {
     if (rule.isChainHead) stats.chainHeads++;
   }
   stats.groups = rules.length;
-  for (const k of ['unsupportedVarIds', 'unhonoredExclusionIds']) {
+  for (const k of ['unsupportedVarIds', 'unhonoredExclusionIds', 'droppedTransforms']) {
     if (stats[k] instanceof Set) stats[k] = [...stats[k]].sort();
   }
   PARSE_STATS.set(confPath, stats);

@@ -16,7 +16,7 @@
 //   裸 `1 UNION SELECT NULL,NULL`（无引号、无 FROM）**不在覆盖范围内**，
 //   这是规则集的真实边界，不是引擎 bug。故用例改用带引号闭合的形态。
 // ============================================================================
-import { evaluate, parseCrsFile, collectValues } from './crs-engine.js';
+import { evaluate, parseCrsFile, collectValues, getParseStats } from './crs-engine.js';
 
 const CONFIG = 'e2e/waf-real/crs/REQUEST-942-SQLI.conf';
 const rules = parseCrsFile(CONFIG);
@@ -84,6 +84,10 @@ let varFailed = 0;
   eq('裸 ARGS 取全量', v(['ARGS']), ['1', '2']);
   // ④ 无名元素没有"元素名"可扣，扣除项对它们必须无效（否则 URI 类规则会被静默清空）
   eq('URI 不受 ARGS 扣除影响', v(['REQUEST_URI', '!ARGS:id']), ['/x']);
+  // 变换静默丢弃的**清单快照**：新增一个没实现的 t:xxx 就会在这里变红。
+  // 数字来自实测，不是愿望 —— 已知缺 utf8toUnicode（942 三条规则用到），
+  // 这是"99.3% 保真度"成立的前提之一，必须与结论一起被看见。
+  eq('942 已知缺失变换（新增即红）', getParseStats(CONFIG).droppedTransforms, ['utf8tounicode']);
 }
 
 console.log(`\n[waf-real selftest] ${CASES.length - failed}/${CASES.length} 通过（变量语义 ${varFailed === 0 ? '全过' : `${varFailed} 条失败`}）`);
