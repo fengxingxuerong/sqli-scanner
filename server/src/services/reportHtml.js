@@ -84,6 +84,28 @@ export function mdCode(s) {
 }
 
 /**
+ * 报告 HTML 的 CSP（以 `<meta http-equiv>` 形式注入）。
+ *
+ * 为什么要它：报告的防御目前是**逐点转义**（esc / mdText / safeHref 各管一处）。
+ * 那种防线的失效方式是"将来某处新增一个出口忘了调"，而它一旦漏，后果不是"报告不好看"，
+ * 是目标可控字符串在**读者的浏览器**里执行 —— 与本仓同日修掉的 markdown 裸 HTML 完全同源。
+ * CSP 把这类单点失效从「任意脚本执行」降级成「某个标签渲染不出来」，是**结构性的第二道门**，
+ * 不再依赖"每个改报告的人都不漏一处"。
+ *
+ * 策略按"报告只需要能把自己显示出来"来配：
+ *   default-src 'none'    —— 默认拒绝一切外部取数（无脚本、无 XHR/fetch、无 iframe、无字体）
+ *   style-src 'unsafe-inline' —— 本报告的样式表与 SVG 上的 style 属性都是内联的，必须放行
+ *   img-src data:         —— 图仅允许 data: URI（离线交付物，不引外链）
+ *   base-uri 'none'       —— 不让 <base> 把相对 URL 改到攻击者域
+ *   form-action 'none'    —— 报告里没有表单，禁掉可外发的面
+ * ⚠ 不用 frame-ancestors / sandbox / report-uri：按规范它们在 meta 传递里被忽略，
+ *   写上去只会给后来人造成"这条已被保护"的错觉（真要防嵌套得走 HTTP 响应头）。
+ */
+export const REPORT_CSP_META =
+  `<meta http-equiv="Content-Security-Policy" ` +
+  `content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'">`;
+
+/**
  * 内网/回环地址判定：报告常在浏览器里打开，内网链接一点就是「报告文件 → SSRF」。
  * 命中时渲染成 <code> 纯文本，保留可读性但不可点击。
  *

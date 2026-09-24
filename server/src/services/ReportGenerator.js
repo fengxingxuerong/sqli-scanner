@@ -50,8 +50,8 @@ const EVIDENCE_MAX = 4000;
 // reportPoC.js 要用 esc/renderUrlLink，而本文件又要 import reportPoC.js。
 // 下方 re-export 保证既有 `import { esc, safeHref, ... } from './ReportGenerator.js'`
 // 继续可用（tests/poc.evidence.test.js:15 依赖这条路径，不可删）。
-import { esc, isInternalHost, mdCode, mdText, safeHref, renderUrlLink } from './reportHtml.js';
-export { esc, isInternalHost, mdCode, mdText, safeHref, renderUrlLink };
+import { esc, isInternalHost, mdCode, mdText, REPORT_CSP_META, safeHref, renderUrlLink } from './reportHtml.js';
+export { esc, isInternalHost, mdCode, mdText, REPORT_CSP_META, safeHref, renderUrlLink };
 
 // [2026-09-17] Markdown 表格单元格：竖线必须转义，否则会切列、把整张表拆散。
 // 参数名/类型名可能来自目标页面（参数名由被测系统决定），属不可信输入，一律经此出口。
@@ -740,6 +740,7 @@ export class ReportGenerator {
 
     return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
       <title>SQL 注入检测报告 ${report.scanId}</title>
+      ${REPORT_CSP_META}
       <style>
   /* —— Fathom Information Design (preset 04) —— 数据墨青 / 冷静中性 / 语义风险色 */
   :root{
