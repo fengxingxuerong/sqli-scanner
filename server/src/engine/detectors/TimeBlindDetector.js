@@ -287,8 +287,19 @@ export class TimeBlindDetector extends Detector {
         const t0 = Date.now();
         await this.send(httpClient, ctx, this.buildRequest(target, point, probePayload), { timeoutMs: probeTimeout });
         const elapsed = Date.now() - t0;
-        // 探针耗时 ≥ 判定阈值 → 标定成功，用短 sleep
-        if (elapsed >= (cfg.timeThresholdMs || 5000)) {
+        // [2026-09-24 修] 原来这里比的是 `cfg.timeThresholdMs || 5000`，两处偏离本函数的规格：
+        //   ① defaults.js 对 timeBlindCalibrate 的说明是"实测该 sleep 耗时能否稳定超过
+        //      **判定阈值**"，而真正的判定阈值是上面那条 `threshold`（= max(μ+zσ, μ+floor)，
+        //      **含页面自身基线 μ**）。timeThresholdMs 只是其中的增量下限 absFloor，
+        //      拿绝对耗时去比一个增量阈值，等于把 μ 白送给了探针。
+        //      默认档实测可达：μ≈0.8s 的目标，absFloor=1.5s → 判定需要 ≥2.3s，
+        //      而 1s 的探针只需 1.8s 就"标定成功"→ sleep 被缩到 1s → 之后每次采样
+        //      都在 1.8s < 2.3s 上恒判未延迟 ⇒ **时间通道在该目标上必然漏报**，
+        //      而且只在开了标定开关的慢站上发生（正是这个开关服务的那类目标）。
+        //   ② `|| 5000` 与 defaults 的 1500 不同源（显式配 0 也会被顶成 5000）。
+        // 改成与判定式同量纲：探针必须真的越过本次检测要用的那条 threshold。
+        // 语义仍然是"标定不成就回退原 sleep"，所以只会更少地缩短延时，不会更激进。
+        if (elapsed / 1000 >= threshold) {
           effectiveSleep = calibrateMin;
         }
       } catch { /* 探针失败 → 保持原 sleep */ }
