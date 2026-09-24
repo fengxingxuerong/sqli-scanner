@@ -48,19 +48,38 @@ const TOP = Number(argv.find((a) => a.startsWith('--top='))?.slice(6) || 15);
 // 红线：先测后定。低于此值即认为执行器与官方规则已不可信，WAF 数字不该对外引用。
 const MIN_PER_RULE = Number(process.env.CRS_EQUIV_MIN || 0.9);
 
+/**
+ * 按 ModSecurity 的口径把 query / form 串拆成**原文**键值，不做任何 URL 解码。
+ * 为什么不该由夹具先解一次：CRS 的规则把 `t:urlDecodeUni` 写在**自己的取值链**里，
+ * 夹具若先解码，规则就会解第二遍 —— `%2527` 本应得到 `%27`，预解码后得到 `'`。
+ * 也就是说旧的 `new URLSearchParams(...)` 不只是"多解一次"，而是把二次编码载荷的
+ * 判定条件给改了（方向上是**更容易命中**，即假阳侧）。改前/改后两族数字见本轮记录。
+ */
+function rawPairs(s) {
+  const out = {};
+  for (const kv of String(s).split('&')) {
+    if (!kv) continue;
+    const i = kv.indexOf('=');
+    if (i < 0) out[kv] = '';
+    else out[kv.slice(0, i)] = kv.slice(i + 1);
+  }
+  return out;
+}
+
 /** 把一条官方用例的 input 变成执行器入参（args/cookies/headers/uri）。 */
 function toReq(input) {
   const enc = input.encoded_request || input;
   const uri = enc.uri || '/';
   const [path, search = ''] = uri.split('?');
-  const args = Object.fromEntries(new URLSearchParams(search).entries());
+  const args = rawPairs(search);
   const headers = Object.fromEntries(
     Object.entries(enc.headers || {}).map(([k, v]) => [k.toLowerCase(), Array.isArray(v) ? v.join(',') : String(v)])
   );
   const cookies = {};
   for (const part of String(headers.cookie || '').split(';')) {
     const i = part.indexOf('=');
-    if (i > 0) cookies[part.slice(0, i).trim()] = decodeSafe(part.slice(i + 1));
+    // 与 ARGS 同口径：留原文，解码交给规则自己的 t:urlDecodeUni
+    if (i > 0) cookies[part.slice(0, i).trim()] = part.slice(i + 1).trim();
   }
   const body = enc.data ?? enc.serialized_rule_request ?? '';
   // multipart 的文件部件单独抽成 files / fileNames（ModSecurity 的 FILES / FILES_NAMES）。
@@ -75,7 +94,7 @@ function toReq(input) {
     if (ct.includes('json')) {
       try { Object.assign(args, flatten(JSON.parse(body))); } catch { args.__raw_body = body; }
     } else if (/=/.test(body) && !body.includes('\n')) {
-      for (const [k, v] of new URLSearchParams(body).entries()) args[k] = v;
+      Object.assign(args, rawPairs(body)); // 同口径：表单值也留原文
     } else {
       args.__raw_body = body; // REQUEST_BODY 变量当前不支持，保留原文以便归因分歧时看得见
     }
@@ -115,7 +134,6 @@ function multipartFiles(ct, body) {
   }
   return { files, fileNames };
 }
-function decodeSafe(s) { try { return decodeURIComponent(String(s).trim()); } catch { return String(s).trim(); } }
 function flatten(o, pre = '', out = {}) {
   for (const [k, v] of Object.entries(o || {})) {
     const key = pre ? `${pre}[${k}]` : k;

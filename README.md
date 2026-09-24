@@ -163,9 +163,10 @@ OWASP 分类统一为 `A03:2021-Injection`。**未收录的通道不会被静默
   连 DNS 都不发起）；② 目标主机需能对外发起 DNS 查询且解析路径可达攻击者 NS；③ Windows 下
   `.local` 被 mDNS 保留，测试域用 `.test` TLD。
 诚实边界：SQL Server xp_dirtree / Oracle UTL_HTTP 等其它库的 OOB 模板未真机验证；真实
-ModSecurity/商业云 WAF 环境未实测。CRS 保真度口径（805 条官方回归用例）也只覆盖
-**query / 表单 body**：静态普查显示 942 家族装载的 66 条规则里有 54 条声明读 `XML:/*`，而本仓库的执行器不解析 XML ⇒
-那 99.3% 的一致率不能外推到 XML 接口（`npm run waf-fidelity` 会打印这条普查，别只看结论行）。
+ModSecurity/商业云 WAF 环境未实测。CRS 保真度口径（门禁现管**两族**：942 的 805 条 + 930 的 38 条
+官方回归用例）也只覆盖 **query / 表单 body**：静态普查显示 942 家族装载的 66 条规则里有 54 条声明读 `XML:/*`，而本仓库的执行器不解析 XML ⇒
+那 99.6%（942）/ 100.0%（930）的一致率不能外推到 XML 接口（`npm run waf-fidelity` 与
+`npm run waf-fidelity:930` 各自会打印这条普查，别只看结论行）。
 
 **强动态页实测口径（2026-09-11 起）**：真 MySQL × `/noisy` 强动态靶点（动态内容占比 ~65%，
 时间戳/随机 hex/base36 矩阵 + 随机块序，`e2e/real-mysql-lab` lab-app.js）下布尔盲注稳定检出
@@ -493,7 +494,7 @@ node e2e/blackbox-lab/sqlmap-bench.mjs                    # sqlmap 同题对照
 - 安全对照：两档均零误拦。复现：`npm run acceptance`（`waf-real` / `waf-auto` 两套件，事实数字进报告）。
 - `npm run waf-validate`（e2e/waf-lab，自写正则模拟器）的「107/225 有效」等数字 ⚠️ 仅作插件自检，**禁止对外**。
 
-**执行器保真度门禁（`crs-fidelity`，用 CRS 官方回归集把执行器自身钉住）**：**99.3% / 0 未点名分歧 → PASS**。
+**执行器保真度门禁（`crs-fidelity`，用 CRS 官方回归集把执行器自身钉住）**：**族 942 99.6% / 族 930 100.0%，两族各 0 未点名分歧 → PASS**（基线按族各一份文件）。
 
 该套件在 2026-09-19 23:15 曾是**唯一 FAIL**（96% / 23 条未点名分歧），当日定位并修复：
 
@@ -601,7 +602,7 @@ npm run acceptance -- --only=waf-auto,waf-real   # 改完某模块做定向门�
 | 报告契约 | 8 项一致 / 0 不一致 |
 | CRS 人工挂链 A/B（PL1） | off 8 / on 8，安全对照零误拦 |
 | CRS 自动选链（PL1） | 技术位 8，安全误报 0 |
-| CRS 执行器保真度（官方回归集） | 保真度 **99.3%**，未点名分歧 **0**，已消失 0，误触 2 |
+| CRS 执行器保真度（官方回归集｜族 942） | 保真度 **99.6%**，未点名分歧 **0**，已消失 0，误触 2 |
 | 红队实战评测（真值对照） | 19/19（100%），安全点 7，误报 0 |
 | fileRead / fileWrite 真闭环 | PASS（文件落盘=true，隔离沙箱重试） |
 
