@@ -203,13 +203,13 @@ export const defaults = {
     // 用于 A/B 对照与问题定位（e2e/waf-real/waf-bypass-search.e2e.mjs 两档都跑）。
     // 预算纪律：开启**不增加**验证条数（仍是 MAX_CHAINS=3，只是把最后 1 个名额给生成链）。
     bypassSearch: true,
-    // [报错模板裁剪 2026-09-23] **默认关**：实测代价是真实的 ——
-    //   干净场景（real-mysql / pentest / detection / 红队 r2 19/19）**零损失**，
-    //   单点请求数 148 → 111（error 62 → 25，-25%）；
-    //   **但 CRS PL1 场景掉了 2 个技术位（off/on 8 → 6，自动选链 8 → 6）** ——
-    //   WAF 下需要更多「同机制不同形态」的弹药才能找到不被拦的那条。
-    // 取舍口径：**不用检出能力换请求数**。故默认全量；确知目标无 WAF / 追求请求预算时显式开启。
-    compactErrorTemplates: false,
+    // [报错模板裁剪 2026-09-23] 本键原声明在 wafEvasion 内、2026-09-24 移到顶层 ——
+    // 引擎的读取点在 **config 顶层**（ErrorDetector._resolveErrorTemplates 读
+    // `cfg.compactErrorTemplates`），REST 白名单与 sanitizeStart 也在顶层转发；放在这个组里
+    // 等于「defaults 写在一处、引擎读在另一处」：调用方照 defaults 的形状发
+    // `wafEvasion.compactErrorTemplates=true` 会被 sanitizeStart 当未知子键丢掉，
+    // 扫描照常报全量模板，而使用者以为裁了。判据见
+    // server/tests/configWhitelist.passthrough.test.js（逐键发非默认值）。
     // [P1-FIX 2026-09-10] 关键词「静默过滤」型绕过重跑（error-only 点 → 套插入式双写链）。
     // 默认开启：实测靶场 bl（删 union/select/and/or/--）由 `[error]` 提升为 `[error,boolean]`，
     // 依赖三项使能——重跑前重探闭合前缀、链验证只认硬拦截、候选纳入 error-only 点
@@ -221,6 +221,16 @@ export const defaults = {
     // 默认 false 保持现状（仅显式开启才自动兜底）；节流：仅高置信 WAF + 未命中点 + 每点最多重跑一轮。
     autoRetry: false,
   },
+
+  // 报错模板按机制族裁剪（[2026-09-23] 新增，[2026-09-24] 从 wafEvasion 组内移到顶层 ——
+  // 引擎在 config 顶层读它，见上方 wafEvasion 组内那条说明）。
+  // **默认关**：实测代价是真实的 ——
+  //   干净场景（real-mysql / pentest / detection / 红队 r2 19/19）**零损失**，
+  //   单点请求数 148 → 111（error 62 → 25，-25%）；
+  //   **但 CRS PL1 场景掉了 2 个技术位（off/on 8 → 6，自动选链 8 → 6）** ——
+  //   WAF 下需要更多「同机制不同形态」的弹药才能找到不被拦的那条。
+  // 取舍口径：**不用检出能力换请求数**。故默认全量；确知目标无 WAF / 追求请求预算时显式开启。
+  compactErrorTemplates: false,
 
   // OOB 带外通道（无回显盲注兜底）。默认关闭，避免意外出站带外请求。
   oob: {

@@ -144,8 +144,11 @@ export class ErrorDetector extends Detector {
     const cfg = ctx.config || {};
     const level = Number(cfg.level) || 1;
     const risk = Number(cfg.risk) || 1;
-    const compact =
-      cfg.compactErrorTemplates === true && level < 3 && risk < 3 && cfg.fullErrorTemplates !== true;
+    // [2026-09-24] 删掉了此处的第四个条件 `cfg.fullErrorTemplates !== true`：该键既不在
+    // defaults、也不在 REST 白名单、CLI/面板也无入口 ⇒ 恒为 undefined ⇒ 条件恒真，
+    // 读它只是让后来人以为存在一个「强制全量」旋钮（而它唯一的语义 —— 别裁 ——
+    // 已由 compactErrorTemplates=false 与 level/risk≥3 两个真开关覆盖）。
+    const compact = cfg.compactErrorTemplates === true && level < 3 && risk < 3;
     return pickErrorTemplates(dbms, { compact });
   }
 

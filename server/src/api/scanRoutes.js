@@ -491,7 +491,9 @@ export function sanitizeStart(body) {
       // 实战后果：二阶检测天然要「写一次」才能触发存储型路径，而对 /order/create 这类
       // GET 写端点，“只读复核”的说法从一开始就不成立——必须把“我在写”这件事显式开关化。
       allowWrites: so.allowWrites === true,
-      triggerMethod: so.triggerMethod,
+      triggerMethod: typeof so.triggerMethod === 'string'
+        ? so.triggerMethod.slice(0, 16)
+        : defaults.secondOrder.triggerMethod,
       negativeControl: so.negativeControl !== false,
       oobTrigger: !!so.oobTrigger,
       // [P0-REACH 2026-09-23] 读写分离二阶注入（对标 sqlmap --second-url/--second-method/--second-data）：
@@ -502,13 +504,17 @@ export function sanitizeStart(body) {
       // ⚠️ 形状只做协议白名单 + 长度上限；**SSRF/授权范围校验在路由 handler 的 async 层**执行
       // （与 triggerUrls 同一条链，见下方 secondUrl 校验段）—— 不能在这里放行未校验的 URL。
       // 方法白名单刻意不在此重复：单一真相在引擎的 resolveSecondOrderMethod（含幂等门）。
+      // 未传时回落 defaults 而非 undefined：浅合并下 undefined 会让「引擎读到 undefined」
+      // 与「用户没配」在现场无法区分，报告/审计取 config.secondOrder.secondMethod 时也是空的。
       secondUrl: typeof so.secondUrl === 'string' && /^https?:\/\//i.test(so.secondUrl)
         ? so.secondUrl.slice(0, 2048)
-        : '',
-      secondMethod: typeof so.secondMethod === 'string' ? so.secondMethod.slice(0, 16) : undefined,
+        : defaults.secondOrder.secondUrl,
+      secondMethod: typeof so.secondMethod === 'string'
+        ? so.secondMethod.slice(0, 16)
+        : defaults.secondOrder.secondMethod,
       secondData: typeof so.secondData === 'string'
         ? so.secondData.slice(0, 8192)
-        : (so.secondData && typeof so.secondData === 'object' ? so.secondData : null),
+        : (so.secondData && typeof so.secondData === 'object' ? so.secondData : defaults.secondOrder.secondData),
       // [todo#39 2026-09-11] 跨角色触发（读写分离身份）：存储与触发页可分属不同会话身份
       // （低权账号写入、高权账号读出是存储型注入的实战高发形态）。键值均须为字符串，
       // 过滤 __proto__/constructor/prototype 等危险键（对象字面量展开会沿原型链污染）。
@@ -518,20 +524,33 @@ export function sanitizeStart(body) {
   }
   if (cfg.wafEvasion && typeof cfg.wafEvasion === 'object') {
     const we = cfg.wafEvasion;
-    const waf = {};
+    // [2026-09-24] 必须**带底重建**（对照下面的 oob 分支）：models.js:113 的 config 合并是
+    // 浅合并（{...defaults, ...input.config}），wafEvasion 一旦整体替换，未转发的子键就成了
+    // undefined。而引擎侧 filterAdaptive 的判据是 `=== true`（defaults.js 里默认开、且实测
+    // 把关键词过滤靶场从 [error] 提到 [error,boolean]）—— 于是「只带 tamper 的请求」
+    // （UI 的 tamper 编辑器、CLI 的 --tamper 都发这种）会**静默关掉自适应过滤重跑**：
+    // 扫描照常跑完、照常报绿，只是少了一整轮绕过。实测 sanitizeStart 旧写法对
+    // {wafEvasion:{tamper:{...}}} 只转发回 tamper 一个键，9 个子键丢 8 个。
+    const waf = { ...defaults.wafEvasion };
     const randomUA = pickBool(we, 'randomUA');
     if (randomUA !== undefined) waf.randomUA = randomUA;
     const obfuscate = pickBool(we, 'obfuscate');
     if (obfuscate !== undefined) waf.obfuscate = obfuscate;
     const jitterMs = pickInt(we, 'jitterMs', defaults.wafEvasion.jitterMs, 0, 5000);
     if (jitterMs !== undefined) waf.jitterMs = jitterMs;
+    // 其余四个布尔位：引擎判据有 `=== true` 与 `!== false` 两种，两种都要求键**存在**
+    // 才是用户真正表达的意图，故逐个显式转发（非法/未传则保持 defaults）。
+    for (const k of ['adaptiveOnBlock', 'bypassSearch', 'filterAdaptive', 'autoRetry']) {
+      const v = pickBool(we, k);
+      if (v !== undefined) waf[k] = v;
+    }
     if (we.tamper && typeof we.tamper === 'object') {
       const t = we.tamper;
-      const intensity = ['low', 'medium', 'high'].includes(t.intensity) ? t.intensity : 'medium';
-      const plugins = Array.isArray(t.plugins) ? t.plugins.filter((p) => typeof p === 'string') : [];
-      waf.tamper = { enabled: !!t.enabled, plugins, intensity };
+      const intensity = ['low', 'medium', 'high'].includes(t.intensity) ? t.intensity : defaults.wafEvasion.tamper.intensity;
+      const plugins = Array.isArray(t.plugins) ? t.plugins.filter((p) => typeof p === 'string') : defaults.wafEvasion.tamper.plugins;
+      waf.tamper = { ...defaults.wafEvasion.tamper, enabled: !!t.enabled, plugins, intensity };
     }
-    if (Object.keys(waf).length) config.wafEvasion = { ...config.wafEvasion, ...waf };
+    config.wafEvasion = { ...config.wafEvasion, ...waf };
   }
   if (cfg.oob && typeof cfg.oob === 'object') {
     const o = cfg.oob;
@@ -579,6 +598,14 @@ export function sanitizeStart(body) {
       minStableRatioCap: clampNum(br.minStableRatioCap, d.minStableRatioCap, 0.5, 1),
       adaptiveTimeFloorScale: clampNum(br.adaptiveTimeFloorScale, d.adaptiveTimeFloorScale, 0, 10),
       concurrency: clampInt(br.concurrency, d.concurrency, 1, 16),
+      // [2026-09-24] 本组此前**整键漏转发**：blindExtractor 读 `config.blindRobust.extractVerify`
+      // （`!== false` 判据），而 defaults.blindRobust 有 13 键、这里只重建 12 键 ——
+      // 于是带 blindRobust 的请求会把 defaults 里的 `extractVerify: true` 替换成 undefined，
+      // 表面上"看起来还是 true"（undefined !== false 为真），实际后果是**关不掉**：
+      // 调用方显式传 `extractVerify:false` 被丢弃，提取阶段的逐字节等值验证 + 整体投票复验
+      // （每字符 1 次 + 收尾 1 次请求）照跑不误。CLI/面板都没有这个旋钮 ⇒ REST 是**唯一**入口，
+      // 而这个唯一入口是断的。
+      extractVerify: boolOf(br.extractVerify, d.extractVerify),
     };
   }
   // sessionFile 白名单（原逻辑不变）

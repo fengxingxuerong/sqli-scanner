@@ -15,6 +15,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { sanitizeStart } from '../src/api/scanRoutes.js';
+import { defaults as D } from '../src/config/defaults.js';
 
 const src = readFileSync(new URL('../src/api/scanRoutes.js', import.meta.url), 'utf8');
 const m = src.match(/const KNOWN_CFG_KEYS = new Set\(\[([\s\S]*?)\]\)/);
@@ -138,4 +139,129 @@ test('守卫（反向）：非白名单键不得进入 config（含嵌套对象�
   assert.equal((out.config.oob && out.config.oob.evilNested) === undefined, true, '结构化键只取已知子字段');
   // 兼顶：不能因为带底透传循环而把原型链上的键也复制进来
   assert.equal(out.config.polluted, undefined);
+});
+
+// ── 嵌套组的「带底完整性」──────────────────────────────────────────────────
+// 上面的探针只查**顶层**键在不在，查不到组内的断口：models.js:113 的 config 合并是
+// 浅合并（{...defaults, ...input.config}），所以只要请求体里出现了某个嵌套组，
+// 该组就**整体替换**掉 defaults 的同名对象 —— sanitizeStart 少转发一个子键，
+// 引擎侧看到的就是 undefined，而不是 defaults 里写的那个值。
+//
+// 这条不是理论问题：wafEvasion 曾只转发 randomUA/obfuscate/jitterMs/tamper 四键，
+// 而 defaults.wafEvasion 有 9 键；引擎侧 filterAdaptive 的判据是 `=== true`（默认开，
+// 实测把关键词过滤靶场从 [error] 提到 [error,boolean]）。UI 的 tamper 编辑器与 CLI 的
+// --tamper 发的正是「只带 tamper 的 wafEvasion」→ 自适应过滤重跑被静默关掉，
+// 扫描照常报绿，只是少一整轮绕过。
+//
+// 判据写成数据驱动的：**以 defaults 的键集为准**，只发组内第一个子键，
+// 断言其余子键全部带着 defaults 的值落地 —— 新增嵌套组或新增子键都自动纳入。
+const NESTED_GROUPS = ['wafEvasion', 'oob', 'secondOrder', 'blindRobust'];
+
+test('守卫（嵌套组带底完整性）：只发组内一个子键时，其余子键必须带 defaults 值落地', () => {
+  // 先钉住分母：defaults 里新增嵌套组却不进本清单，等于又开一条无人看守的断口
+  const actual = Object.keys(D).filter((k) => D[k] && typeof D[k] === 'object' && !Array.isArray(D[k]));
+  assert.deepEqual([...NESTED_GROUPS].sort(), actual.sort(), 'NESTED_GROUPS 必须覆盖 defaults 里的全部嵌套组');
+  for (const group of NESTED_GROUPS) {
+    const def = D[group];
+    assert.ok(def && typeof def === 'object', `defaults.${group} 不存在或不是对象`);
+    const keys = Object.keys(def);
+    const sent = keys[0];
+    const out = sanitizeStart({
+      target: { url: 'http://shop.example.com/item?id=1' },
+      config: { [group]: { [sent]: structuredClone(def[sent]) } },
+    });
+    const got = out.config[group];
+    assert.ok(got && typeof got === 'object', `${group} 整体没有被透传`);
+    for (const k of keys) {
+      // 断的是**等于 defaults**，不是"键存在"：`!== false` 型判据下 undefined 与默认开
+      // 恰好同值，只查"存在"会放过一整类缺陷（extractVerify 就是这么溜过去的）。
+      assert.deepEqual(
+        got[k],
+        def[k],
+        `${group}.${k} 没有带着 defaults 的值落地（拿到 ${JSON.stringify(got[k])}，期望 ${JSON.stringify(def[k])}）：` +
+          '浅合并下引擎侧看到的将是 undefined 或别的值'
+      );
+    }
+  }
+});
+
+// 同一条断言的反向半边：只查"未传时等于 defaults"会漏掉另一半 ——
+// 带底逻辑（`{...defaults}` 打底再覆盖）如果写反了覆盖顺序，或者某个子键压根没进转发清单，
+// 用户**显式发出来的**非默认值就会被 defaults 吃掉，而"未传"那条测试永远是绿的。
+// 这里逐键发一个"与 defaults 不同"的值，断它没被换回 defaults。
+// 数值键只断"不等于 defaults"而不断"等于我发的值"：clamp 区间是有意的（z 上限 5、
+// 一致率上限 1），发 def+1 落在区间外属于合法归一，不该由本守卫裁定。
+const EXPLICIT_ALT = {
+  // 形状敏感的字符串键：defaults 值本身是空串/占位，通用 `def + '_alt'` 会被各自的
+  // 协议白名单拒掉（那不是缺陷），故逐键给一个**合法且不同**的值。
+  'secondOrder.secondUrl': 'http://shop.example.com/read-back',
+  'secondOrder.secondMethod': 'POST',
+  'secondOrder.triggerMethod': 'POST',
+  'secondOrder.secondData': { id: 7 },
+  'oob.callbackBase': 'oob.example.com:9100',
+  'oob.dnsDomain': 'dns.example.com',
+  'wafEvasion.tamper': { enabled: true, plugins: ['spacev2'], intensity: 'high' },
+};
+
+function altFor(group, key, def) {
+  const custom = EXPLICIT_ALT[`${group}.${key}`];
+  if (custom !== undefined) return custom;
+  if (typeof def === 'boolean') return !def;
+  if (typeof def === 'number') return def + 1;
+  if (typeof def === 'string') return `${def || 'x'}_alt`;
+  if (Array.isArray(def)) return ['http://shop.example.com/trigger-1'];
+  return { alt: true };
+}
+
+test('守卫（嵌套组显式值不被带底吃掉）：逐键发非默认值，必须不等于 defaults', () => {
+  for (const group of NESTED_GROUPS) {
+    const def = D[group];
+    for (const k of Object.keys(def)) {
+      const alt = altFor(group, k, def[k]);
+      const out = sanitizeStart({
+        target: { url: 'http://shop.example.com/item?id=1' },
+        config: { [group]: { [k]: structuredClone(alt) } },
+      });
+      const got = out.config?.[group]?.[k];
+      assert.notDeepEqual(
+        got,
+        def[k],
+        `${group}.${k}：显式发了 ${JSON.stringify(alt)}，落地却仍是 defaults 的 ${JSON.stringify(def[k])} —— ` +
+          '该子键没进 sanitizeStart 的转发清单（或被带底覆盖），调用方的意图被静默丢弃'
+      );
+    }
+  }
+});
+
+test('守卫（嵌套组带底完整性）：wafEvasion 的关键布尔位必须等于 defaults，不是仅"存在"', () => {
+  const out = sanitizeStart({
+    target: { url: 'http://shop.example.com/item?id=1' },
+    config: { wafEvasion: { tamper: { enabled: true, plugins: ['spacev2'] } } },
+  });
+  const we = out.config.wafEvasion;
+  // filterAdaptive 是 `=== true` 判据（关掉就等于少一整轮绕过），必须严格等于 defaults
+  assert.equal(we.filterAdaptive, D.wafEvasion.filterAdaptive);
+  assert.equal(we.adaptiveOnBlock, D.wafEvasion.adaptiveOnBlock);
+  assert.equal(we.bypassSearch, D.wafEvasion.bypassSearch);
+  assert.equal(we.autoRetry, D.wafEvasion.autoRetry);
+  // 用户显式表达的值不得被带底覆盖
+  assert.equal(we.tamper.enabled, true);
+  assert.deepEqual(we.tamper.plugins, ['spacev2']);
+  const off = sanitizeStart({
+    target: { url: 'http://shop.example.com/item?id=1' },
+    config: { wafEvasion: { filterAdaptive: false, tamper: { enabled: true } } },
+  });
+  assert.equal(off.config.wafEvasion.filterAdaptive, false, '显式 false 必须赢过 defaults 的 true');
+});
+
+test('守卫（嵌套组带底完整性·反向）：带底不得变成「用户没发的键也能被塞进来」', () => {
+  const out = sanitizeStart({
+    target: { url: 'http://shop.example.com/item?id=1' },
+    config: { wafEvasion: { evilNested: 'y', __proto__: { polluted: 1 }, tamper: { evil: 'z' } } },
+  });
+  const we = out.config.wafEvasion;
+  assert.equal(we.evilNested, undefined, '未知子键必须丢弃');
+  assert.equal(we.polluted, undefined, '原型污染键不得进入');
+  assert.equal(we.tamper.evil, undefined, 'tamper 的未知子键必须丢弃');
+  assert.equal(we.randomUA, D.wafEvasion.randomUA, '未发的子键取 defaults');
 });
