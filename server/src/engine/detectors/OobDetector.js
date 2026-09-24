@@ -1,7 +1,7 @@
 import { nanoid } from 'nanoid';
 import { Detector } from '../Detector.js';
 import { createDetectionResult } from '../models.js';
-import { OOB_PAYLOADS, DNS_OOB_PAYLOADS, SUPPORTED, fillPayload } from '../payloads.js';
+import { OOB_PAYLOADS, DNS_OOB_PAYLOADS, SUPPORTED, fillPayload, replaceAllLiteral } from '../payloads.js';
 import { oobReceiver } from '../../core/oobReceiver.js';
 import { ErrorCode, AppError } from '../../core/errors.js';
 
@@ -54,7 +54,8 @@ export class OobDetector extends Detector {
     const tried = [];
     for (const cdb of candidates) {
       for (const tpl of OOB_PAYLOADS[cdb] || []) {
-        const payload = fillPayload(tpl, { orig: point.originalValue || '1' }).replaceAll(
+        const payload = replaceAllLiteral(
+          fillPayload(tpl, { orig: point.originalValue || '1' }),
           '{CALLBACK}',
           callback
         );
@@ -102,9 +103,11 @@ export class OobDetector extends Detector {
         dbms && DNS_OOB_PAYLOADS[dbms] && DNS_OOB_PAYLOADS[dbms].length ? [dbms] : dnsSupported;
       for (const cdb of dnsCandidates) {
         for (const tpl of DNS_OOB_PAYLOADS[cdb] || []) {
-          const payload = fillPayload(tpl, { orig: point.originalValue || '1' })
-            .replaceAll('{TOKEN}', dnsToken)
-            .replaceAll('{DOMAIN}', dnsDomain);
+          const payload = replaceAllLiteral(
+            replaceAllLiteral(fillPayload(tpl, { orig: point.originalValue || '1' }), '{TOKEN}', dnsToken),
+            '{DOMAIN}',
+            dnsDomain
+          );
           tried.push(payload);
           const req = this.buildRequest(target, point, payload);
           try {

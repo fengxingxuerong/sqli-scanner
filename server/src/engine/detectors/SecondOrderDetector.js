@@ -10,7 +10,14 @@ import { resolveSecondOrderMethod } from '../secondOrderMethod.js';
 import { buildEgressOpts } from '../egressOpts.js';
 import { logger } from '../../core/logger.js';
 import { createDetectionResult } from '../models.js';
-import { PAYLOADS, SECOND_ORDER_PROBES, SECOND_ORDER_OOB_PROBES, ERROR_SIG, fillPayload } from '../payloads.js';
+import {
+  PAYLOADS,
+  SECOND_ORDER_PROBES,
+  SECOND_ORDER_OOB_PROBES,
+  ERROR_SIG,
+  fillPayload,
+  replaceAllLiteral,
+} from '../payloads.js';
 import { oobReceiver } from '../../core/oobReceiver.js';
 import { ErrorCode, AppError } from '../../core/errors.js';
 // P1-11 收敛：表单/标签属性解析与 TargetParser/crawler 共用单一事实源（含正则缓存）
@@ -183,7 +190,11 @@ export class SecondOrderDetector extends Detector {
     for (const cdb of candidates) {
       for (const tpl of SECOND_ORDER_OOB_PROBES[cdb] || []) {
         // OOB 探针不做 tamper（会破坏回调地址导致回连失败，与一阶 OobDetector 一致）
-        const probe = fillPayload(tpl, { orig: point.originalValue || '1' }).replaceAll('{CALLBACK}', callback);
+        const probe = replaceAllLiteral(
+          fillPayload(tpl, { orig: point.originalValue || '1' }),
+          '{CALLBACK}',
+          callback
+        );
         await this._store(httpClient, ctx, probe);
         stored.push(probe);
         // 触发页读取出最新存储值并执行（若命中则向接收端回连）
