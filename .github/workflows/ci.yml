@@ -262,7 +262,11 @@ jobs:
           node-version: 24
       - run: cd server && npm ci
       - run: node e2e/recall-lab/recall.e2e.js
-        name: Recall-lab e2e (18 scenarios)
+        # 名字别再写 "(18 scenarios)"：这个 job 没有 mysqld，结构上只可能跑 16 条，
+        # 另 2 条真实 MySQL 场景会 SKIP（步骤退出码仍是 0）。步骤名标一个跑不到的数字，
+        # 等于让每个读 CI 的人以为 MySQL 方言被验过。要真跑 18 条，把本步并进
+        # 下方 file-read/file-write 那个已经起了 docker mysqld 的 job，并带上 MYSQL_* env。
+        name: Recall-lab e2e（16 条；另 2 条真实 MySQL 需 mysqld，本 job 会 SKIP）
         timeout-minutes: 5
 
   # [P1-ADD 2026-09-12] 全方位验收门禁。

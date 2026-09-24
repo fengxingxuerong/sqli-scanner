@@ -331,9 +331,9 @@ async function main() {
     }
 
     // —— 真实 MySQL 场景组（mysql2 驱动，连接本地 mysqld/MariaDB）——
-    const useMysqlNow = await mysqlAvailable();
-    if (useMysqlNow) {
-      console.log('[recall-e2e] mysql2 可用，运行真实 MySQL 场景');
+    const my = await mysqlAvailable();
+    if (my.ok) {
+      console.log('[recall-e2e] MySQL 就绪，运行真实 MySQL 场景');
       const MYSQL_SCENARIOS = [
         {
           name: 'real_mysql_numeric',
@@ -371,7 +371,7 @@ async function main() {
         await new Promise((r) => setTimeout(r, 150));
       }
     } else {
-      console.log('[recall-e2e] mysql2 不可用，跳过真实 MySQL 场景（不 fail）');
+      console.log(`[recall-e2e] 跳过真实 MySQL 场景（不 fail）—— 原因：${my.why}`);
     }
   } finally {
     server.close();
