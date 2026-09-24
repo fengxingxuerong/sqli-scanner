@@ -31,9 +31,16 @@ const RESULTS_DIR = resolve(HERE, 'results');
 const { evaluate, getParseStats } = await import(pathToFileURL(resolve(HERE, 'crs-engine.js')).href);
 // 族 → **它自己那一族**的规则文件。用例与 conf 必须成对，理由见下方 EVAL_FAMILIES 的教训。
 const FAMILY_CONF = { 942: 'crs/REQUEST-942-SQLI.conf', 930: 'crs/REQUEST-930.conf' };
-// 只有这些族受"基线 + 红线"门禁管：分歧基线是按 942 的用例标题逐条点名的，
-// 拿同一份基线去判 930 只会红得没有意义（那种红会把口径错误伪装成产品缺陷）。
-const GATED_FAMILIES = ['942'];
+// **对外引用的那份产物属于哪一族**：不带族后缀的报告文件（`results/crs-equivalence.md`，
+// README 与各文档引用的就是它）、不带族后缀的分歧基线、README 记分板核对，三件事都只跟这一族走。
+// 原先这三件事的条件都写成 `GATED ? … : …`，把"受不受门禁管"和"是不是被引用的那一族"混成了
+// 一个判断 —— 于是把 930 接入门禁的那一刻，一次 930 测量就会覆盖掉 README 引用的 942 数字，
+// 且 930 的报告会去比 942 的基线。现在按族拆开，两族可同时受管。
+const BASE_FAMILY = '942';
+// 受"基线 + 红线"门禁管的族：分歧基线**按族各一份文件**，每条分歧都要逐条点名理由。
+// 930 于 2026-09-25 接入 —— 词典 operator 与 multipart FILES 取值落地后实测 97.0%
+// （接前为 90.9%，再前 27.3%），距 90% 红线有 2 例余量；红线值仍来自实测分布。
+const GATED_FAMILIES = ['942', '930'];
 
 const argv = process.argv.slice(2);
 const PLS = (argv.find((a) => a.startsWith('--pl='))?.slice(5) || '1,2,3,4').split(',').map(Number);
@@ -56,6 +63,13 @@ function toReq(input) {
     if (i > 0) cookies[part.slice(0, i).trim()] = decodeSafe(part.slice(i + 1));
   }
   const body = enc.data ?? enc.serialized_rule_request ?? '';
+  // multipart 的文件部件单独抽成 files / fileNames（ModSecurity 的 FILES / FILES_NAMES）。
+  // **有意不改 ARGS 那三行**：multipart 体今天照旧落进 args.__raw_body，抽掉它会改动 942
+  // 门禁的取值面，不属本次半径 —— 补的只是"930110 读 FILES 却无值可取"这一件事。
+  let files = [];
+  let fileNames = [];
+  const mp = typeof body === 'string' && body.length ? multipartFiles(headers['content-type'] || '', body) : null;
+  if (mp) { files = mp.files; fileNames = mp.fileNames; }
   if (typeof body === 'string' && body.length) {
     const ct = headers['content-type'] || '';
     if (ct.includes('json')) {
@@ -73,7 +87,33 @@ function toReq(input) {
     args,
     cookies,
     headers,
+    files,
+    fileNames,
   };
+}
+/**
+ * 从 multipart/form-data 体里取文件部件的 filename（→ FILES）与字段名（→ FILES_NAMES）。
+ * 返回 null 表示这不是（可解析的）multipart 体，交由既有的 json / urlencoded / 原文 分支处理。
+ * 边界串要正则化转义 —— 它来自 Content-Type，不转义就等于把外部输入拼进 RegExp。
+ */
+function multipartFiles(ct, body) {
+  if (!/multipart\/form-data/i.test(ct)) return null;
+  const bm = /boundary=([^;\r\n]+)/i.exec(ct);
+  if (!bm) return null;
+  const b = bm[1].trim().replace(/^"(.*)"$/, '$1');
+  if (!b) return null;
+  const sep = new RegExp(`(?:\\r?\\n)?--${b.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:--)?(?:\\r?\\n)?`, 'g');
+  const files = [];
+  const fileNames = [];
+  for (const part of String(body).split(sep)) {
+    const cd = /content-disposition:\s*([^\r\n]*)/i.exec(part);
+    if (!cd) continue;
+    const name = /;\s*name="([^"]*)"/i.exec(cd[1])?.[1];
+    const filename = /;\s*filename="([^"]*)"/i.exec(cd[1])?.[1];
+    if (filename) files.push(filename);
+    if (name) fileNames.push(name);
+  }
+  return { files, fileNames };
 }
 function decodeSafe(s) { try { return decodeURIComponent(String(s).trim()); } catch { return String(s).trim(); } }
 function flatten(o, pre = '', out = {}) {
@@ -112,9 +152,16 @@ function expectation(output) {
 // 剔除"规则 930120/930121/930130 的 @pmFromFile 未实现"这 21 例后为 75.0%，误触 0。
 // ⇒ 主因是**词典 operator 没实现**（占应拦侧 21/33），缺变换只是次要因素；
 //   而 13.2% 这个数本身也复现不出来（当时想必又混了口径）。
-// 现在：`CRS_EQUIV_FAMILIES=930 npm run waf-fidelity` 当场可重测，产物写到
-// results/crs-equivalence-930.md（不覆盖 942 那份对外引用的报告）。
-const EVAL_FAMILIES = (process.env.CRS_EQUIV_FAMILIES || '942')
+// 现在选族当场可重测，产物写到 results/crs-equivalence-930.md（不覆盖 942 那份对外引用的报告）：
+//   · `npm run waf-fidelity:930`（等价于 `node …/crs-equivalence.mjs --family=930`）——
+//     CI 与本地门禁走这条，因为 `CRS_EQUIV_FAMILIES=930 npm …` 这种前缀写法在 Windows 的
+//     cmd 壳里不生效，而"受门禁管"必须意味着**两台机器上跑的是同一条命令**。
+//   · `CRS_EQUIV_FAMILIES=930 npm run waf-fidelity` —— 临时手测仍可用（POSIX 壳）。
+const EVAL_FAMILIES = (
+    argv.find((a) => a.startsWith('--family='))?.slice('--family='.length) ||
+    process.env.CRS_EQUIV_FAMILIES ||
+    '942'
+  )
   .split(',')
   .map((s) => s.trim())
   .filter(Boolean);
@@ -179,12 +226,18 @@ console.log(`未实现 operator：${census.unimplemented} 条 ${JSON.stringify(c
   console.log(`排除项未实现（只多取不少取，偏保守）：${census.unhonoredExclusions || 0} 处 / 去重 ${(census.unhonoredExclusionIds || []).length} 条`);
 }
 if (idleFamilies.length) {
-  // 措辞必须是"未参与本轮评估"，不是"未接入门禁"：idleFamilies 的定义是 FAMILY_CONF 里
-  // 除本轮那一族之外的全部 —— 跑 930 时它装着 942，而 942 恰恰是**唯一受门禁管的族**。
-  // 旧文案在那一行把门禁族印成"未接入门禁"，读者据此会得出"805 例那套没进门禁"的反向结论。
-  console.log(`ℹ 本轮只裁族 ${FAMILY}；同批入库、未参与本轮评估的族：${idleFamilies.join(', ')}（用例与 conf 必须成对评估，接入门禁需按族配对）`);
-  console.log(`   要数字就当场重测，别引用记录里的旧值：CRS_EQUIV_FAMILIES=${idleFamilies[0]} npm run waf-fidelity`);
-  console.log('   （非门禁族只报数不判红 —— 分歧基线是按 942 的用例标题点名的。）');
+  // 这一行曾经把 idleFamilies（= FAMILY_CONF 里除本轮之外的族）标成"未接入门禁的族"，
+  // 于是跑 930 时打印出"未接入门禁：942" —— 而 942 恰恰是唯一受门禁管的族，读者会拿到
+  // 一个完全反向的结论。标签必须与定义一致：这里只说"未参与本轮评估"，
+  // 受不受管由下一行从 GATED_FAMILIES 现算。
+  console.log(`ℹ 本轮只裁族 ${FAMILY}；同批入库、未参与本轮评估的族：${idleFamilies.join(', ')}（用例与 conf 必须成对评估）`);
+  console.log(`   要数字就当场重测，别引用记录里的旧值：npm run waf-fidelity -- --family=${idleFamilies[0]}`);
+  // 这句必须从 GATED_FAMILIES 现算：930 接入门禁之后，无条件印"非门禁族只报数不判红"
+  // 就是在给一个受管的族发免检声明 —— 而它下一行还接着打印该族的红线判定。
+  const ungated = Object.keys(FAMILY_CONF).filter((f) => !GATED_FAMILIES.includes(f));
+  console.log(ungated.length
+    ? `   （受门禁管的族：${GATED_FAMILIES.join('/')}；仍只报数不判红的：${ungated.join('/')}）`
+    : `   （FAMILY_CONF 里的族已全部受门禁管：${GATED_FAMILIES.join('/')}）`);
 }
 // 缺口一律由普查现算，不写死结论。上一版在这里钉着"930 的主缺口是 @pmFromFile 词典规则
 // 未实现"，而 @pmFromFile 实现、词典入库之后，那两行仍会每天照印一遍**已经不成立**的事实 ——
@@ -288,32 +341,30 @@ console.log(`  不应拦用例 ${al.mustNot}：误触该规则 ${al.fp}（${al.m
 // 与 scripts/arch-guard.mjs 的 .arch-baseline.json 同一套纪律：**分歧必须被逐条点名**，
 // 出现任何不在基线里的新分歧 → 门禁 FAIL；基线里的条目消失了也报出来（提示可以收紧）。
 // 每条都给"为什么不算执行器 bug"，理由不成立的就不该进基线。
-const KNOWN_FILE = resolve(HERE, 'crs-known-divergences.json');
-// ⚠ 这份表**只在"基线文件不存在、需要生成"时用**；日常口径以 crs-known-divergences.json 为准。
-// 两处各写一份理由，就意味着其中一份会烂掉——实测已经烂过一次：
-//   942440-19/20 那条"依赖参数排除集、本仓没 vendored"的归因是错的（排除规则就在同一份 conf 里，
-//   缺的是我们自己没实现 ctl:ruleRemoveTargetById），条目后来被真修掉了。
-// 所以这里只留**仍然成立**的理由，并且不允许再用"外部条件不允许"这种句式（那正是上次骗到自己的话）。
-const KNOWN_REASONS = {
-  '942100': 'operator @detectSQLi 需要 libinjection 内核，本执行器没有（真 CRS 用它做整体 SQLi 判定）',
-  '942101': '同上（作用于 REQUEST_BASENAME 的 @detectSQLi）',
-  '942210-31': '归因未证实：复核发现规则里并无原文所称的 t:lengthAdjust，且本机三种输入形状都复现不出该误触 —— 详见基线文件同条条目的完整记录（定位到机制前应视为未知缺口，不是"外部条件不允许"）',
-  '942210-44': '同上',
-  '942190-42': '多层嵌套函数 `right(right((select …` 需要 PCRE 递归式匹配，本执行器为逐值 @rx',
-  '942200-1': '`,varname"=somedata` 期望依赖引号配对计数（@pm/多变量交叉），未实现',
-  '942500-3': '`/*+optimizer hint*/` 形态：本执行器的 t:replaceComments 先于 @rx 生效，把注释吃掉了',
-  '942500-4': '同上',
-  '942522-7': '链节点作用在 REQUEST_BASENAME 上，本执行器 uri 取值含查询串，与 ModSecurity 的 basename 语义不同',
-};
-// 只有门禁族才比对基线：基线的键是 942 的用例标题，拿 930 的测量去查这份表，
-// 得到的"未点名分歧 N 条 / 已消失 M 条"全是素材错配的产物（读了只会误导）。
+// 基线**按族分文件**：942 沿用被各处引用着的那份无名文件，其余族带族名后缀。
+// 拿 942 的基线去卡 930 的测量，得到的"未点名分歧 / 已消失"全是素材错配的产物
+// （读了只会误导；"门禁族"这个标签原本就是为防这件事加的 —— 现在改用文件隔离，
+//  于是两族各自受管，不必二选一）。
+const KNOWN_FILE = resolve(
+  HERE,
+  FAMILY === BASE_FAMILY ? 'crs-known-divergences.json' : `crs-known-divergences-${FAMILY}.json`
+);
+// 分歧的**理由只存在基线文件里**（`crs-known-divergences*.json` 的 `原因` 字段）。
+// 这里原来还有一份 `KNOWN_REASONS` 表，用于生成基线时填理由 —— 已删除，因为"两处各写一份
+// 理由必烂一处"不是推测而是实测：本轮新加的守卫第一次跑就抓到这份表与 JSON 已经不一致
+// （表里 `942210-44`/`942500-4` 写"同上"，而 JSON 里前者早已被改成整段完整记录）。
+// 现在的分工：基线文件 = 唯一真相；生成骨架时一律写"待补理由"，由
+// server/tests/crsGatedFamilies.wiring.test.js 卡住（每条理由必须自包含且不许是"同上"），
+// 逼着人在提交前把理由写进那份会被读到的文件里。
+// 只有门禁族才比对基线（非门禁族只报数：基线路径虽已按族隔离，但"未点名分歧判红"这件事
+// 只对声明受门禁管的族有意义）。
 const baseline = GATED && existsSync(KNOWN_FILE) ? JSON.parse(readFileSync(KNOWN_FILE, 'utf8')) : null;
 const knownTitles = new Set((baseline?.divergences || []).map((d) => d.用例));
 const unexpected = al.div.filter((d) => !knownTitles.has(d.用例));
 const stale = (baseline?.divergences || []).filter((d) => !al.div.some((x) => x.用例 === d.用例));
 if (!baseline) {
   if (!GATED) {
-    console.log(`\n[基线] 族 ${FAMILY} 不受门禁管，**不生成基线文件**（那份基线的键是 942 的用例标题，写了就是污染）`);
+    console.log(`\n[基线] 族 ${FAMILY} 不受门禁管，**不生成基线文件**（基线只在受管的族里才有意义：它的作用是"逐条点名后仍不许新增"）`);
   } else {
     mkdirSync(RESULTS_DIR, { recursive: true });
     writeFileSync(
@@ -326,7 +377,7 @@ if (!baseline) {
             用例: d.用例,
             类型: d.类型,
             期望: d.期望,
-            原因: KNOWN_REASONS[d.用例] || KNOWN_REASONS[d.期望] || '待补理由',
+            原因: '待补理由',
           })),
         },
         null,
@@ -348,7 +399,10 @@ if (!baseline) {
 // 为什么只做 WARN：那张表里混着历史轮次的存档（"上一轮 96% → 本轮 99.3%"），
 // 强行让每次测量都回填，会诱使人去改历史数字 —— 那比留着不核对更糟。
 // 但"没人知道"必须变成"当场说出来"。
-if (GATED) {
+// 条件必须是"被 README 引用的那一族"，不是"受门禁管的族"：记分板那一行是 942 的数字，
+// 930 也进门禁之后若仍按 GATED 判断，一次 930 测量会拿 33 例的口径去比 720 例的记分板，
+// 天天 WARN 一遍没人能修的错误。
+if (FAMILY === BASE_FAMILY) {
   const README = resolve(HERE, '..', '..', 'README.md');
   if (existsSync(README)) {
     const lines = readFileSync(README, 'utf8').split(/\r?\n/);
@@ -385,13 +439,14 @@ if (baseline && unexpected.length) fails.push(`${unexpected.length} 条未点名
 // 非门禁族：数字照出，但**不判红**。基线里的用例名全是 942 家族的，拿它去卡 930 的测量
 // 只会得到"素材错配"造成的假失败（这正是本文件开头那条教训的另一种表现形式）。
 if (!GATED) {
-  if (fails.length) console.log(`\n（非门禁族：以下 ${fails.length} 条只报数不判红 —— 基线按 942 用例命名）`);
+  if (fails.length) console.log(`\n（非门禁族：以下 ${fails.length} 条只报数不判红）`);
   for (const f of fails) console.log(`   · ${f}`);
   fails.length = 0;
 }
-// 非门禁族的产物**另起文件名**：`results/crs-equivalence.md` 是 README / 报告引用的那份，
-// 被一次 930 测量覆盖掉的话，对外数字会静默换成别的口径。
-const REPORT = `crs-equivalence${GATED ? '' : `-${FAMILY}`}`;
+// 产物命名按**族**走，不按"是否门禁"走：`results/crs-equivalence.md` 是 README / 各报告
+// 引用的那一份（942 的），任何其它族的测量都必须另起文件名 —— 否则把 930 接入门禁的瞬间，
+// 一次 930 运行就会把对外数字静默换成另一个口径（这正是这个文件反复在防的那类失效）。
+const REPORT = `crs-equivalence${FAMILY === BASE_FAMILY ? '' : `-${FAMILY}`}`;
 mkdirSync(RESULTS_DIR, { recursive: true });
 writeFileSync(
   resolve(RESULTS_DIR, `${REPORT}.json`),

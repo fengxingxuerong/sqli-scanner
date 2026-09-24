@@ -360,6 +360,11 @@ const VAR_KINDS = {
   REQUEST_COOKIES_NAMES: { kind: 'cookieNames', sel: false },
   REQUEST_HEADERS: { kind: 'headers', sel: true },
   REQUEST_URI: { kind: 'uri', sel: false },
+  // ModSecurity 里 FILES = 上传文件的**文件名**（`filename="../x"` 的那个值），
+  // FILES_NAMES = 表单里文件字段的**字段名**。930110/930120 靠 FILES 抓"上传文件名里带穿越"，
+  // 此前本执行器连 FILES 都不认 ⇒ 该变量恒取不到值（普查点名过它）。FILES_SIZES 不建模。
+  FILES: { kind: 'files', sel: false },
+  FILES_NAMES: { kind: 'fileNames', sel: false },
   REQUEST_FILENAME: { kind: 'uri', sel: false },
   REQUEST_BASENAME: { kind: 'uri', sel: false },
   QUERY_STRING: { kind: 'queryString', sel: false },
@@ -456,6 +461,8 @@ export function collectValues(vars, req, state = {}, exclArgs = null) {
         else push(out, [req.headers[String(c.sel).toLowerCase()]].filter((x) => x != null));
         break;
       case 'uri': push(out, [req.uri]); break;
+      case 'files': push(out, req.files || []); break;
+      case 'fileNames': push(out, req.fileNames || []); break;
       case 'queryString': push(out, [req.queryString]); break;
       case 'matchedVars': push(out, state.matchedVals || []); break;
       case 'tx': {

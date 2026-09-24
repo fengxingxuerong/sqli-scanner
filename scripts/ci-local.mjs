@@ -95,7 +95,11 @@ const GATES = [
   // CRS 执行器保真度：本仓 WAF 数字全部出自自实现 SecRule 执行器（本机无 Docker/Go，跑不了真
   // ModSecurity/Coraza），所以"执行器像不像 CRS"必须有外部真值兜住 —— 这里用 CRS 官方回归集。
   // 不需要 MySQL，故与 lint 同组（真 CI 里也应放在 lint job）。
-  { id: 'lint', name: 'CRS 执行器保真度（官方回归集 805 例）', cmd: 'npm run waf-fidelity' },
+  { id: 'lint', name: 'CRS 执行器保真度（官方回归集 805 例｜族 942）', cmd: 'npm run waf-fidelity' },
+  // 族 930 与 942 同受门禁管（基线各自一份文件）。这里**必须与 ci.yml 各写一行**：
+  // 门禁族名单写在 crs-equivalence.mjs 里，跑不跑它是 CI/本地清单的事 —— 只改代码不改清单，
+  // "930 受管"就只对读代码的人成立。守卫见 server/tests/crsGatedFamilies.wiring.test.js。
+  { id: 'lint', name: 'CRS 执行器保真度（官方回归集 38 例｜族 930）', cmd: 'npm run waf-fidelity:930' },
   { id: 'lint', name: 'CRS 规则原文与上游逐字节一致', cmd: 'node scripts/fetch-crs-assets.mjs --verify-rules' },
   // tamper 覆盖率同样是对外口径：README 写"覆盖 sqlmap 官方 tamper 全集"，那就对上游清单核一次
   // （清单快照已入库，离线可跑；缺失集合走"只减不增"基线）。

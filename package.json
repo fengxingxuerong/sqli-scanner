@@ -24,6 +24,7 @@
     "waf-real": "node e2e/waf-real/waf-verify.mjs",
     "waf-auto": "node e2e/waf-real/waf-auto-check.mjs",
     "waf-fidelity": "node e2e/waf-real/crs-equivalence.mjs",
+    "waf-fidelity:930": "node e2e/waf-real/crs-equivalence.mjs --family=930",
     "waf-fidelity:refresh": "node scripts/fetch-crs-assets.mjs --force",
     "waf-rules:verify": "node scripts/fetch-crs-assets.mjs --verify-rules",
     "tamper:parity": "node scripts/verify-tamper-parity.mjs",

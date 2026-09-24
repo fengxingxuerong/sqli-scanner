@@ -82,12 +82,19 @@ jobs:
         name: README 内部口径自洽（方言分层三处表述）
       # [P1-ADD 2026-09-19] CRS 执行器保真度门禁。本仓所有 WAF 绕过数字都出自**自实现的
       # SecRule 执行器**（crs-engine.js）——执行器若与官方规则不等价，那些数字全部无意义。
-      # 判据不来自我们自己：跑 CRS 项目官方回归集（805 条带「该拦/不该拦」期望的用例），
-      # 按规则自身档位对齐后要求逐规则一致率 ≥90%，且分歧必须逐条点名在
-      # e2e/waf-real/crs-known-divergences.json（只减不增）。不需要 MySQL，故放 lint job。
-      # 复现：npm run waf-fidelity（用例首次获取：npm run waf-fidelity:refresh）
+      # 判据不来自我们自己：跑 CRS 项目官方回归集（942 是 805 条带「该拦/不该拦」期望的用例），
+      # 按规则自身档位对齐后要求逐规则一致率 ≥90%，且分歧必须逐条点名在**本族自己的**基线文件里
+      # （942 → crs-known-divergences.json，930 → crs-known-divergences-930.json，只减不增）。
+      # 不需要 MySQL，故放 lint job。
+      # 复现：npm run waf-fidelity（942）/ npm run waf-fidelity:930（930）；
+      #   用例首次获取：npm run waf-fidelity:refresh
       - run: npm run waf-fidelity
-        name: CRS 执行器保真度（官方回归集）
+        name: CRS 执行器保真度（官方回归集｜族 942）
+      # 族 930（LFI）2026-09-25 起同样受门禁管：词典 operator + multipart FILES 落地后实测
+      # 97.0%（接前 90.9%，再前 27.3%）。**必须单独一步** —— 门禁族的名单写在代码里，
+      # CI 却只跑默认那一族的话，"930 受管"就是假话（它只会红给看代码的人，红不了 CI）。
+      - run: npm run waf-fidelity:930
+        name: CRS 执行器保真度（官方回归集｜族 930）
       # 规则原文与上游 v4.1.0 逐字节一致（README 写"官方规则原文"，这条让它可核验）
       - run: node scripts/fetch-crs-assets.mjs --verify-rules
         name: CRS 规则原文与上游一致
