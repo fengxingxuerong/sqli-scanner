@@ -117,6 +117,14 @@ export function parseCrsFile(confPath) {
       transforms: [...act.matchAll(/t:([a-zA-Z]+)/g)].map((x) => x[1].toLowerCase()).filter((t) => T[t]),
       pl,
       msg: (act.match(/msg:'([^']*)'/) || [])[1] || '',
+      // [2026-09-24] ctl:ruleRemoveTargetById=<规则id>;<集合>:<参数名>
+      // CRS 用它给已知误报开"参数级豁免"（本 vendored conf 里有两条：942441 豁免 fbclid、
+      // 942442 豁免 gclid，都指向 942440 的注释符检测）。此前执行器**完全不实现 ctl:**，
+      // 于是 crs-known-divergences.json 把 942440-19 记成"依赖参数排除集，而排除集在别的
+      // conf 里、本仓没 vendored" —— 那个归因是错的：两条排除规则就在同一份 conf 的
+      // 1323/1338 行。真实原因从来只有一个：我们自己没实现。
+      ctlRemove: [...act.matchAll(/ctl:ruleRemoveTargetById=(\d+);([A-Za-z_]+):([^,\\'"\s]+)/g)]
+        .map((m) => ({ ruleId: m[1], collection: m[2].toUpperCase(), name: m[3] })),
       isChainHead: false,
     };
     // 元规则/控制规则：只在**它不是链节点**时跳过。
@@ -166,15 +174,47 @@ export function parseCrsFile(confPath) {
 // state 用于链式规则：captures = 上一节点正则的捕获组，matchedVals = 上一节点命中的值。
 // CRS 的"条件式 SQLi"族（942130/942150/942521/942522…）靠 `TX:1`、`MATCHED_VARS` 表达
 // "同一请求里还得有第二种信号"，不给这两个变量的值，那批规则就永远不匹配。
-function collectValues(vars, req, state = {}) {
+function collectValues(vars, req, state = {}, exclArgs = null) {
   const out = [];
+  // ARGS 家族：有参数级豁免时按**名字**剔元素（ModSecurity 的 `ARGS:fbclid` 语义是
+  // "ARGS 集合里叫 fbclid 的那个元素"，不是整族剔除）
+  const argEntries = () => {
+    const e = Object.entries(req.args);
+    return exclArgs && exclArgs.size ? e.filter(([k]) => !exclArgs.has(k)) : e;
+  };
+  /**
+   * 带选择器的 ARGS 家族取值：`ARGS_GET:fbclid`（元素名）、`ARGS:/^utm_/`（正则选键）。
+   * ⚠ 选择器必须处理：CRS 的两条参数级排除规则就是 `ARGS_GET:fbclid` / `ARGS_GET:gclid`
+   * 形态，此前它们落到本函数末尾的 `else push([])`（"未知变量保守跳过"），
+   * 于是**排除规则永远不可能命中**、ctl 永远不生效 —— 表面看是"942440 误报"，
+   * 根因在这里。
+   */
+  const argsWith = (coll, sel, wantNames) => {
+    let entries = argEntries();
+    if (coll === 'ARGS_GET' || coll === 'ARGS_POST' || coll === 'ARGS_PATH' || coll === 'ARGS_COOKIES') {
+      // 本执行器的 req.args 是 query+body 合并视图，不区分来源子集（近似，见下）
+    }
+    if (sel) {
+      if (sel.startsWith('/') && sel.endsWith('/') && sel.length > 2) {
+        const re = new RegExp(sel.slice(1, -1), 'i');
+        entries = entries.filter(([k]) => re.test(k));
+      } else {
+        entries = entries.filter(([k]) => k === sel);
+      }
+    }
+    return wantNames ? entries.map(([k]) => k) : entries.map(([, v]) => v);
+  };
   for (const v of vars) {
     const neg = v.startsWith('!');
     const name = neg ? v.slice(1) : v;
     const push = (arr) => { if (!neg) out.push(...arr); else out.length && out; };
-    if (name === 'ARGS') push(Object.values(req.args));
-    else if (name === 'ARGS_NAMES') push(Object.keys(req.args));
-    else if (name === 'REQUEST_COOKIES') push(Object.values(req.cookies));
+    const [coll, ...rest] = name.split(':');
+    const sel = rest.join(':');
+    if (coll === 'ARGS' || coll === 'ARGS_GET' || coll === 'ARGS_POST' || coll === 'ARGS_PATH' || coll === 'ARGS_MULTIMATCH') {
+      push(argsWith(coll, sel, false));
+    } else if (coll === 'ARGS_NAMES' || coll === 'ARGS_GET_NAMES' || coll === 'ARGS_POST_NAMES') {
+      push(argsWith('ARGS', sel, true));
+    } else if (name === 'REQUEST_COOKIES') push(Object.values(req.cookies));
     else if (name === 'REQUEST_COOKIES_NAMES') push(Object.keys(req.cookies));
     else if (/^TX:\d+$/.test(name)) {
       // 链上下文里的 TX:n = 上一节点的第 n 个捕获组（ModSecurity 语义）
@@ -311,16 +351,21 @@ export function evaluate(req, opts = {}) {
   const collectAll = opts.collectAll === true;
   const matched = [];
   let firstBlock = null;
+  // ctl:ruleRemoveTargetById 的落地状态：规则 id -> 被豁免的参数名集合。
+  // 语义按 ModSecurity：**从本条排除规则命中之后**才对后续规则生效（按文件顺序求值，
+  // 而 CRS 把排除规则放在被豁免规则之前），所以这里只需前向累积、不需要回退。
+  const exclByRule = new Map();
   for (const group of evaluate._rules) {
     const nodes = group.chain || [group];
     // PL 截断（规则所在区块 PL > 配置上限 → 跳过）
     if (nodes.some((n) => n.pl > maxPL)) continue;
+    const exclArgs = exclByRule.get(group.id) || null;
     let allHit = true;
     // [CHAIN-FIX] 链式规则按 ModSecurity 语义逐节点求值，并把上一节点的**捕获组**与**命中的值**
     // 传给下一节点（`TX:1` / `MATCHED_VARS` / `&…@ge N` 全靠这两个状态）。
     let state = {};
     for (const node of nodes) {
-      const values = collectValues(node.vars, req, state).map((v) => applyTransforms(v, node.transforms));
+      const values = collectValues(node.vars, req, state, exclArgs).map((v) => applyTransforms(v, node.transforms));
       if (node.countMode) {
         if (!matchCount(node.opRaw, values.length)) { allHit = false; break; }
         continue;
@@ -336,6 +381,13 @@ export function evaluate(req, opts = {}) {
     }
     if (allHit) {
       matched.push(group.id || 'no-id');
+      // 命中才施加 ctl（ModSecurity 里 ctl 是动作，规则没命中就不该改别人的取值面）
+      for (const n of nodes) {
+        for (const r of n.ctlRemove || []) {
+          if (!exclByRule.has(r.ruleId)) exclByRule.set(r.ruleId, new Set());
+          exclByRule.get(r.ruleId).add(r.name);
+        }
+      }
       if (group.block !== false) {
         if (!collectAll) return { blocked: true, ruleId: group.id, msg: group.msg, matchedRules: matched };
         firstBlock ||= { ruleId: group.id, msg: group.msg };
