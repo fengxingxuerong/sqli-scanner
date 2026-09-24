@@ -192,8 +192,8 @@ curl -X POST http://127.0.0.1:4567/api/scan/start \
 | `risk` | 1-3（默认 2） | 风险等级：1 仅 union/error/boolean；2 含 time/stacked/oob；3 额外 OR 变体 |
 | `ratePerSec` | number（默认 30） | 请求限速（req/s），0=不限速；按 scanId 独立令牌桶 |
 | `concurrency` | 1-10（默认 4） | 并发检测线程数 |
-| `retry` | 0-5（默认 2） | 失败重试次数（含指数退避） |
-| `timeoutMs` | 1000-60000（默认 10000） | 单请求超时 |
+| `retry` | 0-5（默认 3） | 失败重试次数（含指数退避）。[P0-FIX 对标 sqlmap] 2→3；本表此前仍写 2 |
+| `timeoutMs` | 1000-60000（默认 30000） | 单请求超时。[P0-FIX 对标 sqlmap] 10s→30s（慢目标上短超时会把正常响应判成失败，并压缩时间盲注判定窗口）；本表此前仍写 10000 |
 | `prefix` / `suffix` | string，≤200 字符，默认空 | 注入点原值前 / payload 后拼接（对标 sqlmap `--prefix`/`--suffix`），用于闭合引号/括号 |
 | `sessionFile` | 文件名或临时目录路径 | 显式会话文件（白名单校验，拒绝绝对路径/`..`）；下次传同名文件即续跑 |
 | `sessionDefault` | bool（默认 false） | 自动落盘 `sqli-session-latest.json`，同 URL 扫描自动 resume（SSE 推 `point_skipped`） |
@@ -221,7 +221,7 @@ curl -X POST http://127.0.0.1:4567/api/scan/start \
 | `dumpConcurrency` | 1-16（默认 4） | 多表拖库并发度 |
 | `dumpDatabaseConcurrency` | 1-16（默认 2） | 跨库拖库并发度 |
 | `timeBlindSamples` | 3-10（默认 5） | 时间盲注采样次数 |
-| `maxColumnsGuess` | 1-100（默认 10） | UNION 列数猜测上限 |
+| `maxColumnsGuess` | 1-100（默认 50） | UNION 列数猜测上限（`defaults.js:104`；本表此前写 10） |
 | `useRegistry` | bool（默认 false） | 启用声明式 payload 筛选，对标 sqlmap XML `<test>` 元素；`selectPayloads({ dbms, technique, level, risk, clause, boundary })` 从 672 条声明式条目中筛选匹配 payload |
 | `timeBlindCalibrate` | bool（默认 false） | 启用时间盲注标定探针，自动测量目标响应延迟基线 |
 | `timeBlindCalibrateMin` | 1-30（默认 1） | 时间盲注标定最小 sleep 秒数 |

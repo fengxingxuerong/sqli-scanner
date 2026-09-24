@@ -169,7 +169,8 @@ function isInternalIpv6Groups(g) {
 }
 
 /** 唯一的 IPv4 私网/回环判据（点分四段版与 IPv6 内嵌版共用） */
-function isInternalIpv4Octets([a, b, c]) {
+function isInternalIpv4Octets(octets) {
+  const [a, b, c] = octets;
   if (a === 127 || a === 10 || a === 0) return true; // 回环 / 私网 / "this network"
   if (a === 169 && b === 254) return true; // 链路本地
   if (a === 192 && b === 168) return true;
