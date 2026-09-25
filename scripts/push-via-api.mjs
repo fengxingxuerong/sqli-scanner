@@ -30,6 +30,13 @@
  *      最小复现已验证：`{ base_tree, tree: [仅变更项] }` → 201，
  *      且返回树 sha 与本地**完全一致**。
  *
+ *   ④ **删除要显式发**（2026-09-25 补）：本脚本原先只上传"本地新引用到的对象"，
+ *      于是本地删掉的文件在远端**永远删不掉** —— 末尾逐条比对报「远端多出 …」并拒绝
+ *      更新 ref（实测：删一个废弃产物被卡在这一步）。现在根树那次 POST 会带上
+ *      `{path, sha:null}` 摘除条目，并有一道 `PUSH_MAX_DELETIONS`（默认 50）护栏：
+ *      删除数异常多 ⇒ 大概率是 `--local` 取错了提交/目录，宁可停下也不清空远端树。
+ *      ⚠ 只对 blob 发 null；目录由父树重建自然消失，逐个 null 才是真正危险的动作。
+ *
  * 其它：
  *   - **message 尾部换行**：GitHub 建 commit 时给 message 末尾补一个 `\n`，
  *     本地 commit 的 message 已自带 → 需先 `replace(/\n+$/,'')`。
@@ -201,6 +208,31 @@ const localTrees = [];
 const owned = [...new Set([...LMAP.values()].map((e) => e.sha))].filter((s) => !remoteObjs.has(s));
 console.log(`本地快照条目 ${LMAP.size} 个 / 本地独有对象 ${owned.length} 个（远端快照 ${remoteObjs.size} 个对象）`);
 
+// ── 删除支持：远端有、本地快照没有的文件 ⇒ 在根树那次 POST 里以 sha:null 摘掉 ──────────
+// 为什么必须显式处理：本脚本原先只上传「本地新引用到的对象」，删除的条目既不在本地树里、
+// 也没人告诉远端要摘掉 ⇒ 远端永远多出一份"本地已删"的文件，末尾的逐条比对于是报
+// 「远端多出 …」并**拒绝更新 ref**（2026-09-25 实测：删一个废弃产物被卡在这里，
+// 而那才是这次推送唯一还没做到的事）。
+// ⚠ 只发 blob：目录条目由父树重建自然消失，不需要（也不该）逐个 null，
+//    否则一旦本地快照取错目录，就可能把整棵远端树清空。
+const plannedDeletes = remoteTreeResp.tree
+  .filter((e) => e.type === 'blob' && !LMAP.has(e.path))
+  .map((e) => ({ path: e.path, mode: e.mode || '100644', type: 'blob', sha: null }));
+// 护栏：删除数异常多 ⇒ 大概率是本地快照口径错了（错分支 / 错目录），宁可停下。
+const MAX_DELETE = Number(process.env.PUSH_MAX_DELETIONS || 50);
+if (plannedDeletes.length > MAX_DELETE) {
+  console.error(
+    `❌ 本次将删除 ${plannedDeletes.length} 个远端文件，超过上限 PUSH_MAX_DELETIONS=${MAX_DELETE}。\n` +
+      `   先确认 --local 指向的是想要的提交（` +
+      `${localSha.slice(0, 8)}）；确属预期再用环境变量提高上限。`
+  );
+  process.exit(1);
+}
+if (plannedDeletes.length) {
+  console.log(`删除清单（${plannedDeletes.length}）：`);
+  for (const d of plannedDeletes) console.log(`  - ${d.path}`);
+}
+
 if (DRY) {
   for (const sha of owned) console.log(`  ${git('cat-file', '-t', sha)} ${sha}`);
   console.log('（--dry-run 结束）');
@@ -257,7 +289,19 @@ for (const t of localTrees) {
 // 根树
 {
   const entries = changedEntries(listTree(rootTree));
-  const res = await api('POST', '/git/trees', { tree: entries, base_tree: baseTree });
+  // 删除条目与"变更条目"一起发（GitHub 的 trees API：base_tree + `{path, sha:null}` 摘除）。
+  // 422 时退回到最简形态（只给 path + sha:null）——mode/type 在有 base_tree 时是可选的，
+  // 但一旦 API 对带 type 的 null 条目挑剔，退一步比整次推送失败好。
+  const withDeletes = (list) => (plannedDeletes.length ? [...list, ...plannedDeletes] : list);
+  let res;
+  try {
+    res = await api('POST', '/git/trees', { tree: withDeletes(entries), base_tree: baseTree });
+  } catch (e) {
+    if (!plannedDeletes.length) throw e;
+    console.warn(`  带删除的根树 POST 失败（${e.message}），改用 {path, sha:null} 最简形态重试`);
+    const slim = plannedDeletes.map((d) => ({ path: d.path, sha: null }));
+    res = await api('POST', '/git/trees', { tree: [...entries, ...slim], base_tree: baseTree });
+  }
   uploadedTree.set(rootTree, res.sha);
 }
 const newRootTree = uploadedTree.get(rootTree);
