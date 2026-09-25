@@ -52,6 +52,8 @@
     "typecheck:frontend": "tsc --noEmit",
     "typecheck:server": "tsc -p server/tsconfig.json",
     "test:server": "cd server && npm test",
+    "mutation": "node scripts/mutation-check.mjs",
+    "mutation:quick": "node scripts/mutation-check.mjs --limit=8",
     "test:all": "npm run test && npm run test:server",
     "test": "vitest run",
     "test:watch": "vitest",

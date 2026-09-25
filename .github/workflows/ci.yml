@@ -211,6 +211,9 @@ jobs:
       - run: cd server && npm run test:coverage
         name: Server coverage gate (core modules)
         timeout-minutes: 10
+      - run: node scripts/mutation-check.mjs --limit=8
+        name: Mutation gate (assertion sensitivity, quick tier)
+        timeout-minutes: 10
 
   test-matrix:
     strategy:

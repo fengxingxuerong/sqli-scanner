@@ -114,6 +114,9 @@ const GATES = [
   { id: 'test-frontend', name: '前端构建', cmd: 'npm run build' },
   { id: 'test-server', name: '服务端单测', cmd: 'cd server && npm test' },
   { id: 'test-server', name: '服务端覆盖率门禁', cmd: 'cd server && npm run test:coverage', slow: true },
+  // 变异门禁（断言敏感度）：与 ci.yml 同名步骤对应（守卫见 server/tests/mutationGate.wiring.test.js）。
+  // 本地默认快档（--limit=8），全量 `npm run mutation` 留给 CI 慢车道/手动。
+  { id: 'test-server', name: '变异门禁（断言敏感度，快档）', cmd: 'node scripts/mutation-check.mjs --limit=8', slow: true },
   { id: 'audit', name: 'npm audit（前端 prod）', cmd: 'npm audit --omit=dev --audit-level=high' },
   { id: 'audit', name: 'npm audit（服务端）', cmd: 'cd server && npm audit --audit-level=high' },
   { id: 'e2e-self-contained', name: 'run-all（自足靶场 + 依赖探测）', cmd: 'node e2e/run-all.mjs', slow: true },
