@@ -452,7 +452,7 @@
     "dbmsAuto": "自动识别",
     "requestControl": "请求控制",
     "proxyLabel": "代理地址 --proxy",
-    "timeoutLabel": "超时 --timeout (ms)",
+    "timeoutLabel": "请求超时 (毫秒)",
     "retryLabel": "重试 --retries",
     "randomUALabel": "随机 UA --random-agent",
     "techniquesTitle": "检测技术（B/E/U/S/T/Q）",

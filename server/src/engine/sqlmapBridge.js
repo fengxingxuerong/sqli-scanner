@@ -123,9 +123,17 @@ export function buildArgs(input) {
     args.push('--threads', String(threads));
   }
 
+  // 单位换算：本仓这个字段是**毫秒**（src/shared/constants.ts:61「请求超时（毫秒）」，
+  // 面板与 CLI 的 --timeout 也都是 ms），而 sqlmap 的 `--timeout` 是**秒**。
+  // 权威依据取自本机那个真二进制（sqlmap 1.10.7，`sqlmap -hh` 原文）：
+  //   --timeout=TIMEOUT   Seconds to wait before timeout connection (default 30)
+  // 原实现把毫秒直接当秒推过去 ⇒ 面板默认 10000 变成 10000 秒 ≈ 2.8 小时，
+  // 于是「单请求超时」永远不会触发，慢目标上改由本文件的 30 分钟总时限把整场扫描
+  // 击杀（连已经拿到的结果一起丢）—— 用户设的值方向上还偏偏是往"更长"偏。
   const timeoutMs = Number(c.timeoutMs);
   if (Number.isFinite(timeoutMs) && timeoutMs >= 1 && timeoutMs <= 600000) {
-    args.push('--timeout', String(Math.round(timeoutMs)));
+    // 下限兜到 1 秒：sqlmap 收 `--timeout 0` 无意义，而亚秒级超时对连接也没价值
+    args.push('--timeout', String(Math.max(1, Math.round(timeoutMs / 1000))));
   }
   const retry = Number(c.retry);
   if (Number.isFinite(retry) && retry >= 1 && retry <= 10) {

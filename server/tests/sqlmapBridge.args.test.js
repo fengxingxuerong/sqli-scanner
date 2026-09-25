@@ -1,5 +1,5 @@
 // S11 sqlmapBridge.buildArgs 参数透传补齐单测：
-//  - timeoutMs → --timeout <ms>（>0 且 ≤600000 生效，非法值忽略）
+//  - timeoutMs（**毫秒**，面板与 CLI 同单位）→ --timeout <**秒**>（>0 且 ≤600000 生效，非法值忽略）
 //  - retry → --retries <n>（>0 时透传，0/负/越界忽略）
 //  - randomUA → --random-agent（true 才透传）
 //  - prefix/suffix（ScanConfig 层）→ --prefix / --suffix（trim 非空才透传，长度 clamp ≤200）
@@ -27,10 +27,17 @@ test('buildArgs: 目标 URL 缺失或非 http/https 时报错', () => {
   assert.throws(() => buildArgs(mkInput({}, {}).target && { target: { url: 'ftp://x' } }), /目标 URL/);
 });
 
-test('buildArgs: timeoutMs 有效值透传为 --timeout <ms>，非法值忽略', () => {
-  assert.deepEqual(tail({ timeoutMs: 30000 }), ['--timeout', '30000']);
-  assert.deepEqual(tail({ timeoutMs: 1 }), ['--timeout', '1']);
-  // 0 / 负 / NaN / 超上限（600000）→ 不生成 --timeout
+test('buildArgs: timeoutMs 是毫秒，必须换算成 sqlmap 的秒（原实现把 ms 当秒推）', () => {
+  // 单位不靠记忆：本机 sqlmap 1.10.7 `sqlmap -hh` 原文
+  //   --timeout=TIMEOUT   Seconds to wait before timeout connection (default 30)
+  // 本仓字段从面板到 CLI 都是毫秒（src/shared/constants.ts:61「请求超时（毫秒）」）。
+  // 换算前的实况：面板默认 10000 ⇒ --timeout 10000 ≈ 2.8 小时 ⇒ 单请求超时永不触发，
+  // 慢目标上改由 sqlmapBridge 的 30 分钟总时限**整场击杀**（已拿到的结果一起丢）。
+  assert.deepEqual(tail({ timeoutMs: 30000 }), ['--timeout', '30']);
+  assert.deepEqual(tail({ timeoutMs: 10000 }), ['--timeout', '10'], '面板默认值');
+  assert.deepEqual(tail({ timeoutMs: 150000 }), ['--timeout', '150'], 'redteam-lab 用的值');
+  assert.deepEqual(tail({ timeoutMs: 1 }), ['--timeout', '1'], '亚秒级兜到 1 秒：不能发 --timeout 0');
+  // 0 / 负 / NaN / 超上限（600000ms）/ 非数字 → 不生成 --timeout
   for (const bad of [0, -1, NaN, 600001, 'abc']) {
     const args = buildArgs(mkInput({ timeoutMs: bad }));
     assert.ok(!args.includes('--timeout'), `timeoutMs=${bad} 不应透传`);
@@ -87,7 +94,10 @@ test('buildArgs: 全部新参数与既有参数共存且映射正确', () => {
   assert.ok(args.includes('--proxy'));
   assert.ok(args.includes('--threads') && args[args.indexOf('--threads') + 1] === '4');
   // 新参数
-  assert.ok(args.includes('--timeout') && args[args.indexOf('--timeout') + 1] === '30000');
+  // 单位换算在这条"共存"测试里也必须钉住：同一个契约写在两处时，只改一处会让另一处
+  // 继续替旧单位作证 —— 这条断言原本写的就是 '30000'（毫秒当秒）。
+  assert.ok(args.includes('--timeout') && args[args.indexOf('--timeout') + 1] === '30');
+  assert.ok(!args.includes('30000'), '毫秒原文出现在参数里 ⇒ 单位换算又退回去了');
   assert.ok(args.includes('--retries') && args[args.indexOf('--retries') + 1] === '2');
   assert.ok(args.includes('--random-agent'));
   assert.ok(args.includes('--prefix') && args[args.indexOf('--prefix') + 1] === "')");

@@ -452,7 +452,7 @@
     "dbmsAuto": "Auto-detect",
     "requestControl": "Request Control",
     "proxyLabel": "Proxy --proxy",
-    "timeoutLabel": "Timeout --timeout (ms)",
+    "timeoutLabel": "Request timeout (ms)",
     "retryLabel": "Retries --retries",
     "randomUALabel": "Random UA --random-agent",
     "techniquesTitle": "Detection Techniques (B/E/U/S/T/Q)",
