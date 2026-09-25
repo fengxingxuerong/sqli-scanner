@@ -14,9 +14,23 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const { ScanManager } = await import(pathToFileURL(resolve(dirname(fileURLToPath(import.meta.url)), '../../server/src/engine/ScanManager.js')).href);
-const { EngineBridgeClient, createMultiEngineApp } = await import(pathToFileURL(resolve(dirname(fileURLToPath(import.meta.url)), './lab-app.mjs')).href);
+const { EngineBridgeClient, createMultiEngineApp, bridgePreflight } = await import(pathToFileURL(resolve(dirname(fileURLToPath(import.meta.url)), './lab-app.mjs')).href);
 
 const JAVA_BIN = process.env.JAVA_BIN || 'java';
+
+// [CI-FIX 2026-09-25] 前置自检：ENGINE_JARS 未设 / jar 不在 ⇒ **按设计跳过并留下原因**。
+//   为什么不能"照跑然后崩"：真 JDBC 引擎缺环境时 JVM 会立刻退出，而我们随后往它 stdin 写
+//   就拿到 EPIPE —— 原本 stdin 没有 'error' 监听器，于是整条 e2e 以裸堆栈失败，日志里
+//   一个"为什么"都没有（CI 实测两次红正是这个形状）。跳过要跳得下原因，红要红得有现场。
+{
+  const pre = bridgePreflight();
+  if (!pre.ok) {
+    console.log(`[SKIP] multi-engine-lab 本轮零断言 —— ${pre.why}`);
+    console.log('  跑法：ENGINE_JARS="<h2.jar><分隔符><hsqldb.jar><分隔符><derby.jar><分隔符><derbyshared.jar>" node e2e/multi-engine-lab/verify.mjs');
+    console.log('  （分隔符用系统 path.delimiter；Linux/CI 上是 ":"，Windows 上是 ";" —— 见 lab-app.mjs 的 classpath 注释）');
+    process.exit(0);
+  }
+}
 // [LAB-FIX 2026-09-20] 加 NO_WAF=1 一档。为什么必须能关掉：本靶场默认挂 CRS，而 CRS 会把
 // UNION 哨兵探针整条 403 掉 → **版本回显定库通道在这里从来没被执行过**。于是"HSQLDB/Derby
 // 定不了库"这个结论一直缺少可跑的验证手段（TODO §A 第 2 条点了这件事但一直没做）。
@@ -60,6 +74,20 @@ const TAMPERS = {
 
 const bridge = new EngineBridgeClient(JAVA_BIN).start();
 const results = {};
+let bridgeDead = null;
+
+// [CI-FIX 2026-09-25] 桥是否真的活着，要在跑场景**之前**问一次。
+//   JVM 起不来（没 java / classpath 分隔符写错 / jar 版本不符）时，原本每个查询都失败，
+//   而失败不改变任何判据 ⇒ 报告全零 + 退出码 0（本机模拟：JAVA_BIN=node ⇒ 全 0/3 且 RC=0）。
+//   探针的作用还包括"给事件循环一次投递 exit/error 的机会"——桥若是启动即退，
+//   deadReason 在这一次 await 之后才写得上。
+await bridge.query('h2', 'SELECT 1').catch(() => {});
+if (bridge.deadReason) {
+  console.log(`[SKIP] multi-engine-lab 本轮零断言 —— JDBC 桥起不来：${bridge.deadReason}`);
+  console.log('  这是**环境前提**问题（java / classpath / jar），不是检测能力的结论；不计通过也不计失败。');
+  bridge.stop();
+  process.exit(0);
+}
 
 try {
   for (const eng of ENGINES) {
@@ -90,9 +118,22 @@ try {
       }
     }
   }
+  // 桥的死活要在 stop() 之前取（stop 会让 exit 事件把原因写 up）
+  bridgeDead = bridge.deadReason || null;
 } finally {
   bridge.stop();
 }
+
+// 检出合计：报告正文与末尾判定都要用，必须算在两者之前
+// （第一版把它只写在判定块里，而报告 md 的"本档有效性"行先执行 ⇒ ReferenceError）
+const sumDet = (label) =>
+  ENGINES.reduce(
+    (acc, eng) => acc + SCENARIOS.filter((s) => !s.expectSafe)
+      .filter((s) => results[eng.name].rows[label][s.name].found.length > 0).length,
+    0
+  );
+const offDet = sumDet('off');
+const onDet = sumDet('on');
 
 // 汇总
 console.log('\n===== 多引擎 A/B 汇总 =====');
@@ -147,10 +188,25 @@ const md = [
   '|---|---|---|---|---|',
   ...ENGINES.flatMap((eng) => SCENARIOS.filter((s) => !s.expectSafe).map((s) => {
     const r = results[eng.name];
-    const off = r.rows.off[s.name].found.join(',') || '-';
-    const on = r.rows.on[s.name].found.join(',') || '-';
-    return `| ${eng.name} | ${s.name} | ${off} | ${on} | ${on ? '检出' : '未检出'} |`;
+    const offArr = r.rows.off[s.name].found;
+    const onArr = r.rows.on[s.name].found;
+    const off = offArr.join(',') || '-';
+    const on = onArr.join(',') || '-';
+    // ⚠ 这里原本写 `${on ? '检出' : '未检出'}`，而 `on` 是**字符串**（空时是 '-'）——
+    //   '-' 也是 truthy ⇒ 九行全部印"检出"，而两列数字全是 '-'。入库的两份基线
+    //   （multi-engine-report.md 与 .no-waf.md）因此自 09-20 起就在给反向结论：
+    //   读表格的人以为 3 引擎 × 3 场景都检出了，实测是 0/9。判据必须看数组长度，别看拼接串。
+    const note = onArr.length ? 'tamper 后检出' : offArr.length ? '开 tamper 反而丢失' : '两侧均未检出';
+    return `| ${eng.name} | ${s.name} | ${off} | ${on} | ${note} |`;
   })),
+  '',
+  // 有效性口径：两侧都零检出时，本档**只能**验"误报红线"，验不了绕过收益 —— 这句必须印出来，
+  // 否则表格里的 '-' 会被读成"检出了但没内容"（09-20 那两份基线就是这么被误读的）。
+  (offDet === 0 && onDet === 0
+    ? '> **本档有效性**：off 与 on 两侧都零检出 ⇒ 绕过收益**无从判定**（表头的 `on ≥ off` 是空转成立）。'
+      + '本档实际只验了一条红线：safe（参数化对照）零误报。'
+      + '"H2/HSQLDB/Derby 的布尔通道被检出过"这句结论，本档**不提供**证据。'
+    : `> **本档有效性**：off 检出合计 ${offDet}、on 检出合计 ${onDet} ⇒ 绕过收益可比对。`),
   '',
   `安全对照（参数化）：${allSafeOk ? '零误报' : '存在误报（需修）'}`,
   '',
@@ -159,3 +215,30 @@ const md = [
 ].join('\n');
 writeFileSync(resolve(RESULTS_DIR, `multi-engine-report${SUFFIX}.md`), md);
 console.log(`[report] ${RESULTS_DIR}${SUFFIX ? `（本档口径 WAF=off，文件名带 ${SUFFIX}，不覆盖 CRS-on 基线）` : ''}`);
+
+// ============================================================================
+// 判定与退出码（2026-09-25 补）
+// ----------------------------------------------------------------------------
+// 本文件头一直写着"断言：safe 永远零检出；tamper on 应 ≥ tamper off"，但**全文件没有任何
+// 一处设置失败退出码** —— 无论结果怎样都退 0。后果实测到两层：
+//   ① run-all 里这个靶场恒记「✅ 通过」，"通过"背后是一条断言都没落地（注册成功≠在干活）；
+//   ② JVM 中途死掉时引擎侧全 0 检出，而 0 检出不与任何判据冲突 ⇒ 一份"什么都没测到"的
+//      报告照样绿。（本机模拟：JAVA_BIN=node ⇒ [bridge] node: bad option: -cp ⇒ RC 仍是 0。）
+// 退出码口径：0 = 断言通过；1 = 断言失败（误报红线 / 绕过收益为负）；
+//            2 = 前提失效（桥在跑的过程中死了 ⇒ 数字不可用，别当结论用）。
+// "前提失效"与"断言失败"必须分开：前者该去修环境，后者才是真回归。
+// ============================================================================
+const verdicts = [];
+if (bridgeDead) verdicts.push(`前提失效：JDBC 桥运行中退出（${bridgeDead}）`);
+if (!allSafeOk) verdicts.push('误报红线：safe（参数化对照）被检出');
+if (!bridgeDead && onDet < offDet) verdicts.push(`绕过收益为负：tamper on=${onDet} < off=${offDet}`);
+
+console.log(
+  `\n[判定] 断言：safe 零误报=${allSafeOk ? '✅' : '❌'}　tamper 收益 on(${onDet}) ≥ off(${offDet})=` +
+    `${onDet >= offDet ? '✅' : '❌'}　桥存活=${bridgeDead ? '❌ ' + bridgeDead : '✅'}`
+);
+if (verdicts.length) {
+  console.error(`[multi-engine-lab] 失败：${verdicts.join('；')}`);
+  process.exit(bridgeDead ? 2 : 1);
+}
+console.log('[multi-engine-lab] 全部断言通过');

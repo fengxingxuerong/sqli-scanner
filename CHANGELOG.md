@@ -4,6 +4,50 @@
 
 ## [Unreleased]
 
+### 2026-09-25 批次 · multi-engine-lab：Linux 上必崩的 classpath、永远退 0 的"门禁"、以及印了五天的反向结论
+
+远端连着两次红都在同一步（`e2e-self-contained` → run-all → multi-engine-lab），
+报的是 `Error: write EPIPE`、0.5s、没有任何原因可看。查下去是三层问题叠在一起。
+
+1. **classpath 分隔符硬写了 `;`**（`lab-app.mjs` 的 `-cp "${ENGINE_JARS};${HERE}"`）。
+   Windows 用 `;`、POSIX 用 `:` ⇒ Linux 上整串被 JVM 当成**一个**条目 ⇒ 找不到主类
+   `EngineBridge` ⇒ JVM 立刻退出。而 `run-all.mjs` 给这个靶场配的 `ENGINE_JARS` 是
+   `D:\engines\jars\*.jar`（Windows 路径），CI 上 jar 根本不存在 —— 于是
+   **本机它能跑、Linux 上必崩**，且崩在"往已死进程 stdin 写"这种形态上。
+   修：分隔符改走 `path.delimiter`；加 `bridgePreflight()`（ENGINE_JARS 未设 / jar 不在
+   即前提不满足）⇒ 按设计 `[SKIP]` 退 0 并打印原因，run-all 记「跳过」而不是「失败」。
+   ⚠ 我第一版写成"`;` 和 `:` 都拆一下"，当场被自己的跑批打回：Windows 上
+   `D:\engines\jars\h2.jar` 会从**盘符冒号**处切成 `D` + `\engines\…` ⇒ 每个 jar 都"不存在"。
+   现在只按平台分隔符拆；跨平台复制错格式由 preflight 明确报错，不猜着拆。
+2. **`verify.mjs` 从头到尾没有一处设置失败退出码**，而它文件头写着
+   "断言：safe 永远零检出；tamper on 应 ≥ tamper off"。⇒ run-all 里这个靶场**恒记 ✅ 通过**，
+   一条断言都没落地；JVM 半路死掉也一样绿（本机模拟 `JAVA_BIN=node` ⇒ 全 0/3 且 RC=0）。
+   现在退出码真的承接判据：`0` 断言通过 / `1` 误报红线或收益为负 / `2` 前提失效（桥中途死）。
+   前提失效与断言失败**必须分开**：前者去修环境，后者才是真回归。启动处另加一次探针
+   （桥起不来 ⇒ `[SKIP]` + 原因，而不是扫完九个组合再交一堆废数字）。
+   同时补上 stdin / 子进程 'error' 监听（缺了就是未捕获异常）与 stderr 尾部留证 ——
+   CI 那两条红"没有原因"正是这么来的。
+3. **入库报告印的是反向结论**（这次才算清账）：表格"说明"列原本写
+   `${on ? '检出' : '未检出'}`，而 `on` 是拼接**字符串**，空的时候是 `'-'` —— 照样 truthy。
+   于是 `multi-engine-report.md` 与 `.no-waf.md` 两份基线的 9 行**全部**印"检出"，
+   而 off/on 两列都是 `-`。重跑两份产物后：
+   - WAF=on：off=0 / on=0 ⇒ 新加的"本档有效性"行明说"绕过收益无从判定，本档只验了误报红线；
+     'H2/HSQLDB/Derby 布尔通道被检出过'这句结论本档**不提供**证据"；
+   - `NO_WAF=1`：off=9 / on=9 ⇒ 检测能力本身没问题，是 CRS 档下 `dash2hash` 收益为 0。
+   旧基线里那 9 个"-"到底是"真没检出"还是"当时桥就是坏的"，已无法从产物判断 ——
+   这正好是把有效性写成行的理由：**下次不必再靠考古**。
+
+**下一步（本轮未做，只登记）**：CRS-on 档两侧全零说明"真 JDBC 引擎 × CRS"这个组合
+从没证明过任何绕过收益（`dash2hash` 只在 H2 的 MySQL 方言态投放）。要么换成"裸请求被 CRS 拦、
+挂 tamper 能过"的形态重做这档，要么把 README 里"部分通道验证：H2/HSQLDB/Derby"的范围
+说清只到"无 WAF 下布尔通道"。本轮只修**诚实性**，不动结论。
+
+**门禁**：`node --check` × 2、eslint 0 error、`refs:check` / `facts:check` 过；
+本机三向真跑：无 ENGINE_JARS ⇒ `[SKIP]` 退 0；带真 jar ⇒ 两档各退 0 且报告如实；
+`JAVA_BIN=node` ⇒ 退 2 并带 `JVM 退出（code=9）；输出尾部：node: bad option: -cp`。
+CI 侧的必崩条件（Linux 缺 jar）现在会走 `[SKIP]` —— 这条**本机不能代替远端验证**，
+以推上去后 `e2e-self-contained` 的实跑结论为准。
+
 ### 2026-09-25 批次 · CLI 的 `-d` 也归 scope 管了；顺带把"拼错的开关静默忽略"这条假安全关掉
 
 做 REST 直连那条红线时顺手核了第二条入口，结果是**真的不对称**：
