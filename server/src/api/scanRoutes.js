@@ -16,7 +16,7 @@ import { PAYLOADS, FINGERPRINT, TECHNIQUE_TYPES } from '../engine/payloads.js';
 import { defaults } from '../config/defaults.js';
 import { logger } from '../core/logger.js';
 // [2026-09-24] 提取/统计层调优旋钮的入口收敛（11 键），见 api/scanConfigTuning.js。
-import { applyTuningKnobs } from './scanConfigTuning.js';
+import { applyTuningKnobs, warnDroppedConfigKeys } from './scanConfigTuning.js';
 import { isSafeSessionPath } from '../core/sessionStore.js';
 import { assertSafeHttpTarget } from '../core/httpClient.js';
 // [交付场景] 两次扫描差异对比（纯函数，便于单测；见 tests/scanDiff.test.js）
@@ -35,9 +35,9 @@ import {
   pickBool,
   sanitizeCookieMap,
   clampParams,
-  diffDroppedConfigKeys,
 } from './scanConfigUtils.js';
 import { acquireScanSlot, trackScanTerminal, _scanGovernance } from './scanGovernance.js';
+import { buildDirectTarget } from './directTarget.js';
 
 export { acquireScanSlot, _scanGovernance };
 
@@ -237,52 +237,9 @@ export function sanitizeStart(body) {
   const cfg = b.config || {};
 
   // ── 直连模式（对标 sqlmap -d）：不走 HTTP，直接连库执行 SQL 模板 ──
-  // 原实现 sanitizeStart 只认 http:// 目标，mode/db/connectionString 全被丢弃 → 直连能力
-  // 在 API 层不可达（DirectConnector/getDriver 是死代码）。此处放行并做最小校验：
-  //   mode='direct'（或携带 db/connectionString）→ 必须提供 db 连接信息 + 含 {INJECT} 的 sqlTemplate。
-  const isDirect = b.mode === 'direct' || !!(b.db || b.connectionString);
-  if (isDirect) {
-    if (!b.db && !b.connectionString) {
-      throw new AppError(ErrorCode.INVALID_TARGET, '直连模式需要提供 db 连接信息或 connectionString');
-    }
-    if (!b.sqlTemplate || !String(b.sqlTemplate).includes('{INJECT}')) {
-      throw new AppError(ErrorCode.INVALID_TARGET, '直连模式需要提供含 {INJECT} 注入标记的 sqlTemplate');
-    }
-    // [P0-SEC] scope 是**独立于 SSRF 的另一条红线**（本文件里的原话：SSRF 管"别打自己人"，
-    // scope 管"别打没授权的人"）。直连分支过去把两条一起跳过了 ⇒ 配了 scope 也照样能连任意
-    // DB 主机。这里只补 scope，**保留**"直连不做 HTTP SSRF 校验"那个既有判断（DB 连接是操作者
-    // 明示意图，不构成服务端被诱导的内网访问）。未配置 scope 时行为与历史完全一致 —— scope
-    // 自己的既定策略就是"配置了才是硬约束、不提供只告警模式"。
-    const directScope = parseScope(cfg.scope);
-    if (directScope.enabled) {
-      const d = b.db || {};
-      const connStr = String(d.connectionString || b.connectionString || '');
-      const host = d.host
-        || (connStr.match(/^[a-z0-9+.-]+:\/\/(?:[^/?#@]*@)?([^/?#:]+)/i) || [])[1]
-        || '';
-      // 内嵌驱动（内存/文件库）不出网，没有"范围"可言；其余 driverType 拿不到主机就拒绝
-      // —— 放行了反而坏：用户配了 scope 就是期待"未知目标不放行"，而不是"换个入口就不管"。
-      const embedded = /^(sqljs|sqlite|sqlite3|memory|pglite)$/i.test(String(d.driverType || ''));
-      if (!host && !embedded) {
-        throw new AppError(ErrorCode.SCOPE_VIOLATION,
-          '直连模式无法确定数据库主机，不能确认授权范围，已拒绝（scope 已配置时不放行未知目标）');
-      }
-      if (host) {
-        // assertInScope 只取 hostname；scheme 是占位（数据库地址没有 HTTP scheme）
-        assertInScope(`db://${host}`, directScope);
-      }
-    }
-    return {
-      mode: 'direct',
-      db: b.db || {
-        connectionString: String(b.connectionString),
-        driverType: String(b.driverType || 'memory'),
-      },
-      sqlTemplate: b.sqlTemplate,
-      originalValue: b.originalValue != null ? String(b.originalValue) : '1',
-      config: { ...defaults, ...(cfg || {}) },
-    };
-  }
+  // 校验、规范化、以及**对数据库主机的 scope 判定**都在 api/directTarget.js（纯函数）。
+  // 原实现只认 http:// 目标，mode/db/connectionString 全被丢弃 ⇒ 直连能力在 API 层不可达。
+  if (b.mode === 'direct' || b.db || b.connectionString) return buildDirectTarget(b, cfg, defaults);
 
   const src = b.target && typeof b.target === 'object' ? b.target : b;
   const rawUrl = typeof src.url === 'string' ? src.url : '';
@@ -312,16 +269,11 @@ export function sanitizeStart(body) {
   if (scopeRules.enabled) config.scope = scopeRules.raw;
 
   // —— 网络/调度 ——
-  // [REVERTED P2-3] ratePerSec 保持原样透传（不 clamp）：既有测试契约
-  // 「ratePerSec 不再 clamp：原样透传（P0-P1③）」。限速治理由 httpClient/defaults 负责。
-  //
-  // 但"不 clamp"不等于"类型也不管"。下游 TokenBucket/createBucket 用
-  // `Number.isFinite(ratePerSec) && >0` 严格判定，而 Number.isFinite **不做类型转换** ⇒
-  // 一个数字字符串（curl/YAML/CSV/表单里最常见的 `"20"`）被判成 0，而 0 的语义是
-  // "**不限速**"（tokenBucket.js:23 的 P0-FIX 特意定的）—— 于是刚设的闸门被静默关掉，
-  // 且不进 dropped 告警（键名在、值也发了，只是类型不对）。
-  // 这里只做**归一**：数字字符串→数字（仍不 clamp）；非数字形态→不写入 config（按 defaults
-  // 治理）并喊出来。绝不把坏值降级成"不限速"。
+  // [REVERTED P2-3] ratePerSec 不 clamp（既有契约「原样透传 P0-P1③」），限速治理归
+  // httpClient/defaults。但不 clamp ≠ 不管类型：下游用 Number.isFinite 严格判定而它**不转
+  // 类型** ⇒ 数字字符串 "20" 被判成 0，而 0 的语义是「不限速」（tokenBucket.js:23）——
+  // 刚设的闸门被静默关掉，且"键在值也在"所以 dropped 告警不响。这里只做类型归一：
+  // 数字字符串→数字；非数字形态不写入 config（按 defaults 治理）并喊出来，绝不降级成不限速。
   if (cfg.ratePerSec !== undefined && cfg.ratePerSec !== null) {
     const raw = cfg.ratePerSec;
     const n = typeof raw === 'string' ? Number(raw.trim()) : raw;
@@ -812,26 +764,9 @@ export function sanitizeStart(body) {
   //   （matchCode:200、skipParams:"a,b"、paramDel 取了窄集合外的字符…）。
   //   后果与上一类完全相同：200 + scanId + 报告里一句「未检出」，而那项设置没生效。
   //   原先只有 hex/flushSession 一处按这个口径在喊（现于 scanConfigTuning），这一类却是整个入口的通病。
-  // ⚠ 比对**必须推迟到本函数末尾**（见 return 前的 warnDroppedConfigKeys() 调用）。
-  //   放在这里会算在下方 BACKFILL_SCALAR_KEYS 兜底透传**之前**，于是那 18 个"靠兜底才进
-  //   config"的键全被判成"被丢弃" —— 本轮实测：同时传 delay/testFilter/reqRate/maxReq/hpp/
-  //   noCast 六个键，日志喊「6 个键被丢弃…设置不会生效」，而返回的 config 里六个**全在**。
-  //   假告警和静默丢弃犯的是同一类错，只是方向相反：它把排查的人支使去改一个本来正确的配置。
-  const warnDroppedConfigKeys = () => {
-    const dropped = diffDroppedConfigKeys(cfg, KNOWN_CFG_KEYS, config, DIRECT_ONLY_CFG_KEYS);
-    if (dropped.unknown.length) {
-      logger.warn(
-        `扫描配置含 ${dropped.unknown.length} 个未知字段，已忽略（这些设置**不会生效**，请核对键名或改用 CLI）：${dropped.unknown.join(', ')}`
-      );
-    }
-    if (dropped.shapeDropped.length) {
-      logger.warn(
-        `扫描配置有 ${dropped.shapeDropped.length} 个键被丢弃（键名在白名单内，但**值形态不合该键的校验**，` +
-          '设置不会生效；部分键需与父键同发，如 safeFreq 需 safeUrl、csrfTokenName 需 csrfUrl）：' +
-          dropped.shapeDropped.map((k) => `${k}=${JSON.stringify(cfg[k])}`).join(', ')
-      );
-    }
-  };
+  // 未知键 / 值形态不合的丢弃 → 播报壳在 scanConfigTuning.warnDroppedConfigKeys
+  // （判据本身是纯函数 scanConfigUtils.diffDroppedConfigKeys）。⚠ **必须在 return 前**调用：
+  // 放早了会算在下方兜底透传之前，把 18 个"靠兜底才落地"的键误报成"设置不会生效"。
   // [P0-FIX 2026-09-09] 白名单标量键兜底透传（**显式名单**，不是“所有未处理的白名单键”）。
   // 发现原因：configWhitelist.passthrough 守卫抱出 13 个「进了 KNOWN_CFG_KEYS 但 sanitizeStart
   // 根本没透传」的键——delay / reqRate / maxReq（限速与请求预算治理）、excludeSysdbs /
@@ -907,7 +842,7 @@ export function sanitizeStart(body) {
       + '会被 String() 成不可注入的畸形值——嵌套 body 请改用 jsonBody（引擎按叶子路径如发现 user.id 注入点）'
     );
   }
-  warnDroppedConfigKeys(); // 在**所有**写入 config 的步骤（含兜底透传）之后比对，才等于真实结果
+  warnDroppedConfigKeys(cfg, KNOWN_CFG_KEYS, config, DIRECT_ONLY_CFG_KEYS);
   return {
     url: u.toString(),
     method,
@@ -1094,24 +1029,26 @@ export function createRoutes({ scanManager, eventBus: bus = eventBus, reportToke
         return res.json({ code: ErrorCode.INVALID_PARAM, data: null, message: '基线报告缺少目标信息，无法重测' });
       }
       const override = (req.body && req.body.config) || {};
-      // 走与 /scan/start 同一套入口守卫（白名单 / clamp / 类型归一 / dumpWhere 拒分号…）
-      const cleaned = sanitizeStart({
+      // 走与 /scan/start 同一套 config 守卫（白名单 / clamp / 类型归一 / dumpWhere 拒分号 /
+      // techniques 白名单 / scope 断言）—— 历史上这里 merged 直送 sm.start，整条被绕开。
+      // 参数形状仍取自 base 报告：它们在原扫描启动时已经过同一条守卫，不必二次加工。
+      const merged = sanitizeStart({
         url: target.baseUrl,
         method: target.method || 'GET',
-        bodyParams: target.bodyParams || {},
-        jsonBody: target.jsonBody || null,
-        cookieParams: target.cookieParams || {},
-        headerParams: target.headerParams || {},
         config: { ...(target.config || {}), ...override },
-      });
-      const merged = cleaned.config;
+      }).config;
       // 重测只做检测：带上原 extractScope 会重复枚举，既慢又可能误触发写入
       delete merged.extractScope;
-      // onlyPoint 由服务端从报告里的真实点位算出，且刻意不在 KNOWN_CFG_KEYS 白名单里
-      // （跨文件内部字段，见 tests/configOrphanKeys.guard.test.js）⇒ 必须在净化**之后**贴回：
-      // 既不会被白名单丢掉（那样重测会静默退化成整站重扫），也让 override 里伪造的 onlyPoint 进不来。
+      // onlyPoint 是服务端从报告真实点位算出的内部字段，刻意不在 KNOWN_CFG_KEYS 里
+      // （见 configOrphanKeys.guard.test.js）⇒ 必须净化**之后**贴回：既不被白名单丢掉
+      // （那样重测静默退化成整站重扫），也让 override 伪造的 onlyPoint 进不来。
       merged.onlyPoint = { location: point.location, param: point.param };
-      const payload = { ...cleaned, config: merged };
+      const payload = {
+        url: target.baseUrl, method: target.method || 'GET',
+        bodyParams: target.bodyParams || {}, jsonBody: target.jsonBody || null,
+        cookieParams: target.cookieParams || {}, headerParams: target.headerParams || {},
+        config: merged,
+      };
       await assertSafeHttpTarget(payload.url).catch((e) => {
         throw e instanceof AppError ? e : new AppError(ErrorCode.INVALID_PARAM, e.message || '目标 URL 校验失败');
       });

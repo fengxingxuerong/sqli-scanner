@@ -17,7 +17,7 @@
 import { defaults } from '../config/defaults.js';
 import { logger } from '../core/logger.js';
 import { VALIDITY_DEFAULTS } from '../core/scanValidityGuard.js';
-import { clampNum, pickBool, pickInt } from './scanConfigUtils.js';
+import { clampNum, diffDroppedConfigKeys, pickBool, pickInt } from './scanConfigUtils.js';
 
 /**
  * 把提取/统计层的调优键收敛进 config（就地写入）。
@@ -25,6 +25,32 @@ import { clampNum, pickBool, pickInt } from './scanConfigUtils.js';
  * @param {object} config sanitizeStart 正在构建的配置对象
  * @param {object} cfg 请求体里的原始 config
  */
+/**
+ * 「静默丢弃必须喊出来」的播报壳。判据本身是纯函数 `scanConfigUtils.diffDroppedConfigKeys`
+ * （可单测、不 IO），这里只负责把它翻成两条 warn —— 与本文件其它 knob 同一形状：
+ * 键名在白名单内但值没落地，后果与未知键完全相同（200 + scanId + 报告一句「未检出」）。
+ *
+ * ⚠ 调用时机必须在**所有**写 config 的步骤之后（含 BACKFILL_SCALAR_KEYS 兜底透传）。
+ * 实测过的反向缺陷：放在兜底之前，18 个"靠兜底才落地"的键全被判成"被丢弃…设置不会生效"，
+ * 而它们其实都在返回的 config 里 —— 假告警和静默丢弃是同级的错，会把人支使去改一个
+ * 本来正确的配置。不变式由 server/tests/configDroppedKeys.warn.test.js 遍历兜底名单钉住。
+ */
+export function warnDroppedConfigKeys(cfg, knownKeys, config, directOnlyKeys) {
+  const dropped = diffDroppedConfigKeys(cfg, knownKeys, config, directOnlyKeys);
+  if (dropped.unknown.length) {
+    logger.warn(
+      `扫描配置含 ${dropped.unknown.length} 个未知字段，已忽略（这些设置**不会生效**，请核对键名或改用 CLI）：${dropped.unknown.join(', ')}`
+    );
+  }
+  if (dropped.shapeDropped.length) {
+    logger.warn(
+      `扫描配置有 ${dropped.shapeDropped.length} 个键被丢弃（键名在白名单内，但**值形态不合该键的校验**，` +
+        '设置不会生效；部分键需与父键同发，如 safeFreq 需 safeUrl、csrfTokenName 需 csrfUrl）：' +
+        dropped.shapeDropped.map((k) => `${k}=${JSON.stringify(cfg[k])}`).join(', ')
+    );
+  }
+}
+
 export function applyTuningKnobs(config, cfg) {
   // ── 严格布尔：hex / flushSession ────────────────────────────────────────
   // [2026-09-24] 从 sanitizeStart 原样搬来（含告警文案），与本模块其余键同一形状。

@@ -4,6 +4,40 @@
 
 ## [Unreleased]
 
+### 2026-09-25 批次 · 推上去才发现：我本地的"静态检查"没照抄 CI 范围，lint job 当场红
+
+推送完成后回读 CI，`lint` job **失败**（test-frontend / audit 过）。两条都是我本次改动造成的，
+而且都在**本地能提前抓到**：
+
+1. `tsc -p server/tsconfig.json` 报 `scanRoutes.js(1115)` TS2339 —— 我在 retest 里写的
+   `payload.url` 落在 `sanitizeStart` 返回类型的**联合**上（直连那半边没有 `url` 字段）。
+   我本地跑的是 `npx tsc --noEmit`：**根 tsconfig 不覆盖 server/**，所以那条错误根本没进视野。
+   本仓记忆里明明写着"静态检查照抄 CI 范围"，我这次是拿一个不同范围的命令当成了同一个门禁。
+2. `node scripts/arch-guard.mjs` 报"新债"：`scanRoutes.js` **1252 行** > 单文件 1200 上限。
+   会话开始前它是 1187 行 —— 是我今天几笔改动把它推过线的（不是既有欠账）。
+
+**修法按 arch-guard 的本意走：把代码搬出去，不是删注释凑数。** 两处抽取都是"本来就该在那儿"：
+
+- `api/directTarget.js`（新）：直连模式的入参校验 + 规范化 + **对 DB 主机的 scope 判定**。
+  它是纯函数，留在路由文件里没有理由；抽出来之后 `directScope` 那 8 条测试照过。
+  文件头记着为什么只补 scope、SSRF 那半为什么保留。
+- `scanConfigTuning.warnDroppedConfigKeys()`（新导出）：未知键 / 值形态不合的**播报壳**。
+  判据 `diffDroppedConfigKeys` 仍留在 `scanConfigUtils` 保持纯函数（这是它自己的设计约束），
+  挪走的只是打日志那一层 —— 与本文件既有的 hex/flushSession 播报同形状。
+
+顺带把 retest 那处的参数来源说准：`bodyParams/cookieParams/headerParams` 取自 base 报告，
+它们在原扫描启动时**已经过同一条守卫**，不必二次加工（我之前的注释说"顺带把 clamp 也拿到了"，
+那是夸大）。改完之后 `payload` 不再 spread 联合类型，TS 那条错误从根上消失，不需要 JSDoc 强转。
+
+结果：`scanRoutes.js` **1189 行**（比会话开始的 1187 只多 2 行 —— 今天的净增债基本还清），
+arch-guard 通过，`tsc -p server` 零错，eslint 零错。受影响测试 **71 条 0 失败**
+（configDroppedKeys / directScope / retestGuard / configReachability / configOrphanKeys /
+configWhitelist / securityGovernance / directMode 全部）。
+
+**流程上记一笔**：以后凡是动了 `server/**`，本地至少要跑 `npm run typecheck:server`（= CI 那条），
+不能只跑根 `tsc --noEmit`；而 arch-guard 的行数上限是**软线**，接近时应当主动抽取而不是继续往里加。
+
+
 ### 2026-09-25 批次 · 直连模式把"两条红线"当成一条跳过了：配了 scope 仍能连任意数据库主机
 
 清单第 ③ 条。**执行复现**：`scope:['10.20.0.0/16']` 配置下，
