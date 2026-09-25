@@ -4,6 +4,55 @@
 
 ## [Unreleased]
 
+### 2026-09-25 批次 · 两条入口共用一个守卫：直连模式的 config 曾整段绕过 clamp
+
+收尾清单上挂了两次的那项（"抽公共 config 守卫让直连分支也吃 clamp"）本轮做掉了，
+顺带修掉同批挂着的 `manifest.summary.byRisk/byTechnique` 恒 null。
+
+**直连那条入口坏在哪**：`sanitizeStart` 里 `mode:'direct'` 是**早退分支**，
+返回的 `config` 曾是 `{...defaults, ...cfg}` —— HTTP 分支那 536 行 clamp / 形状校验 /
+白名单收敛**一条都没走**。实测会原样进引擎的值：`concurrency:9999`（9999 路并发打库）、
+`timeoutMs:99999999`、以及**带分号的 `dumpWhere`**（它会被原样拼进提取 SQL 的 WHERE 位，
+而 HTTP 分支正是为此拒分号）。同一分支还漏了第二条播报：`warnDroppedConfigKeys`
+只在 HTTP 分支调用，于是直连"传了个不生效的键"是**静默**的。
+
+**修法按"两条入口走同一个守卫函数"，不是"在第二条入口里手挑几个键 clamp"**
+（手挑 = 两张清单各自漂移，而漂移正是它当初被漏掉的机制原因）。整段守卫平移到
+`api/scanConfigGuard.js:buildGuardedConfig(cfg, scopeRules)`，HTTP 与直连各调一次：
+
+- 搬移前先用脚本核过块内依赖：只用到 `cfg` / `config` / `scopeRules` 与模块级导入，
+  HTTP 专有的 url/method/params 处理**全在块外** ⇒ 能整段平移、不夹带目标解析；
+- 随块搬走的还有 `PARAM_DEL_ALLOWED` / `EXTRACT_SCOPE_MODES` / `sanitizeIdentList` /
+  `sanitizeExtractScope`（只有块内用到），`sanitizeExtractScope` 由 scanRoutes re-export
+  保住既有引用路径；
+- `scanRoutes.js` **1190 → 589 行**（arch-guard 那条 1200 软线的债一次还清，留出一倍余量）。
+
+**同批修的输出层缺陷**：`summary.byRisk` / `byTechnique` 只在**并行的**
+`ReportGenerator.build()` 里算过，而产品实际走 `createReport` → `scan/finalize` ——
+于是机读清单 `scripts/one-click-scan.mjs` 的两个键恒 null。现场就是仓库里那份现成产物
+`reports/127.0.0.1-2026-09-17T13-51-34/manifest.json`：findings 三条（High/Medium 齐全），
+`summary.byRisk` 是 null，而同层 `totalPoints/totalVulns` 有值（那两个是清单自己现算的）。
+计数现在落在**报告本体**（`finalize`），并且与 `build()` 共用 `models.countBy` 一份实现。
+
+**验证**（三条新判据都能红，全部用变异跑过）：
+
+| 守卫 | 变异 | 结果 |
+|---|---|---|
+| `api.entryParity.test.js` 三条 | 把直连的守卫调用换回 `{...cfg}` | 恰好 3 条红，还原后绿 |
+| `report.summaryCounts.test.js` 两条 | 摘掉 `finalize` 里那两行赋值 | 2 条红（报"manifest 读到 null"） |
+| 直连 scope / `{INJECT}` 旧判据 | —— | 4 条全过，抽取未削弱 |
+
+搬移当场被**文本型守卫**咬到三处（`docs.configDefaults` / `configReachability.guard` /
+`configDroppedKeys.warn` 都按源码文本找 clamp 收敛点）。没有放宽它们，而是把扫描范围
+改成"入口层这一整簇"（scanRoutes + scanConfigGuard 并读）——这类守卫的价值就在于
+"改名/挪走时先红"，所以它必须跟着事实挪，而不是被删。
+
+**门禁**：server 全量 **2361 条 0 失败**（新增 6 条）、`tsc -p server` 零错、
+eslint 零错、arch-guard 无新循环依赖。搬移涉及每条扫描的启动路径，所以改完又跑了一轮
+**全量 `npm run acceptance`：15 PASS / 0 BLOCKED / 0 FAIL / 0 SKIP（15/15 跑出断言）**
+—— 比上一轮的 14 PASS + 1 SKIP 多一套件，是因为这次本机 PostgreSQL 在听，OOB 真机套件
+第一次在本地跑出断言（不是被跳过）。
+
 ### 2026-09-25 批次 · A3 端到端第一次真跑：挂死被读成"输出格式变了"，一路挖出门禁层三个洞
 
 推上去之后远端 `acceptance` job 唯一的红是「WAF 通道降级编排（A3）端到端」，

@@ -106,7 +106,10 @@ test('接线：未知字段的旧告警不被这次改动弄丢', () => {
 // 六个也同时落地。假告警和静默丢弃是同级的错：它把排查的人支使去改一个本来正确的配置。
 // 所以这里不抽查几个键，而是**从源码抓全部兜底键**（与 configReachability 守卫同一口径）遍历。
 const BACKFILL = (() => {
-  const src = readFileSync(new URL('../src/api/scanRoutes.js', import.meta.url), 'utf8');
+  // 2026-09-25：配置守卫整段搬到 api/scanConfigGuard.js（HTTP 与直连两条入口共用）。
+// 文本锚点于是必须覆盖【入口层这一整簇】——只读 scanRoutes 会让本守卫在搬移后
+// 静默找不到 clamp 收敛点（那正是它要防的"文档写了不存在的能力"的反面：假红/假绿都可能）。
+const src = readFileSync(new URL('../src/api/scanRoutes.js', import.meta.url), 'utf8') + readFileSync(new URL('../src/api/scanConfigGuard.js', import.meta.url), 'utf8');
   const m = src.match(/const BACKFILL_SCALAR_KEYS = new Set\(\[([\s\S]*?)\]\)/);
   assert.ok(m, '定位不到 BACKFILL_SCALAR_KEYS —— 名单被改名/挪走时本测试要先红');
   return new Set(Array.from(m[1].matchAll(/'([^']+)'/g)).map((x) => x[1]));

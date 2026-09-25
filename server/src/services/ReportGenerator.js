@@ -31,6 +31,8 @@ import {
 // 使「受影响参数」与「漏洞类型(CWE/OWASP)」成为报告的自包含字段——
 // 对引擎新产出的报告是冗余安全网（finalize 已写入），对历史快照/外部构造报告是唯一来源。
 import { attachVulnContext } from '../engine/vulnEnrich.js';
+// 风险/技术分布的计数口径（与 finalize 写 summary.byRisk/byTechnique 同一实现）
+import { countBy } from '../engine/models.js';
 import { vulnTypeOf } from './vulnTaxonomy.js';
 // [2026-09-13] 交付层：元信息/执行摘要/WAF 交战/修复建议+CVSS（markdown/html/csv 共用单一取数源）
 import { buildDelivery } from './reportDelivery.js';
@@ -193,10 +195,10 @@ export class ReportGenerator {
     );
   }
 
+  // 计数口径与产品报告路径（engine/scan/finalize 写 summary.byRisk/byTechnique）**同源**：
+  // 两边各写一份就是本仓反复出事的"同一件事两处实现"，故统一走 models.countBy。
   _countBy(arr, key) {
-    const m = {};
-    for (const x of arr) m[x[key]] = (m[x[key]] || 0) + 1;
-    return m;
+    return countBy(arr, key);
   }
 
   _truncate(report) {
