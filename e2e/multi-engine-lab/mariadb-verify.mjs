@@ -67,6 +67,49 @@ const TAMPERS = {
   on: { tamper: { enabled: true, plugins: ['dash2hash'], intensity: 'medium' } },
 };
 
+// [TARGET-GUARD 2026-09-25] 3308 这个端口在本仓有**两个主人**：真 MariaDB 便携版（本套件的靶的）
+//   和 `e2e/udf-lab/mysql_sandbox.py` 起的隔离 **MySQL 8** 沙箱（run-all 里 'sandbox' 类依赖走它）。
+//   两者同端口同库名，脚本连上就跑 ⇒ 沙箱在的时候跑一次，就会把 **MySQL 8 的数字**
+//   写进 `mariadb-report.md` 并标注"MariaDB 11.4.13" —— 那是凭空造出来的假证据，而且看起来完全可信。
+//   所以开跑前读一次服务端自报版本，不是 MariaDB 就硬退（这不是"环境没配好"的 SKIP，是指错对象）。
+{
+  let who = '';
+  try {
+    const c = await mysql.createConnection({ ...MARIADB_CONF, connectionLimit: 1 });
+    try {
+      const [[v]] = await c.query('SELECT VERSION() AS v, @@version_comment AS cm');
+      who = `${v.v} ${v.cm || ''}`.trim();
+    } finally {
+      await c.end().catch(() => {});
+    }
+  } catch (e) {
+    console.error(`[mariadb-verify] 拒绝开跑：连不上 ${MARIADB_CONF.host}:${MARIADB_CONF.port} 的 MariaDB（${e.code || e.message}）。`);
+    console.error('  期望该端口上是 MariaDB（root 无密码，库 sqli_lab）。');
+    console.error('  注意 3308 也会被 e2e/udf-lab 的 MySQL 沙箱占用 —— 那是另一个引擎，别用它的数字。');
+    process.exit(2);
+  }
+  if (!/mariadb/i.test(who)) {
+    console.error(`[mariadb-verify] 拒绝开跑：3308 上跑的是「${who}」，不是 MariaDB。`);
+    console.error('  多半是 e2e/udf-lab 的 MySQL 沙箱占着 3308。本套件的产物名与 README 结论都写着 MariaDB，');
+    console.error('  拿 MySQL 的数字去填就是假证据 ⇒ 先停掉沙箱，或把 MariaDB 换端口后用 MARIADB_PORT= 指过去。');
+    process.exit(2);
+  }
+  console.log(`[mariadb-verify] 目标确认：${who}`);
+}
+
+// 结论列按**集合**判，不按长度判（与 waf-verify.mjs / multi-engine verify.mjs 同一批修）：
+//   `on.length > off.length ⇒ 绕过生效` 会让 off=[boolean] / on=[boolean] 印成"绕过生效"
+//   —— 入库那份 mariadb-report.md 的 num / blind 两行就是这个形状（2026-09-09 生成）。
+function verdictOf(offArr, onArr) {
+  const gained = onArr.filter((t) => !offArr.includes(t));
+  const lost = offArr.filter((t) => !onArr.includes(t));
+  if (!offArr.length && !onArr.length) return '全拦';
+  const parts = [];
+  if (gained.length) parts.push(`绕过生效（新增 ${gained.join(',')}）`);
+  if (lost.length) parts.push(`反而丢失 ${lost.join(',')}`);
+  return parts.length ? parts.join('；') : '技术位持平';
+}
+
 const matrix = {};
 for (const [label, tamper] of Object.entries(TAMPERS)) {
   WAF_HITS = 0;
@@ -96,7 +139,7 @@ console.log('\n===== MariaDB 11.4.13 A/B 汇总 =====');
 for (const sc of SCENARIOS.filter((s) => !s.expectSafe)) {
   const off = matrix.off[sc.name].found;
   const on = matrix.on[sc.name].found;
-  console.log(`${sc.name.padEnd(8)} tamper off: ${off.join(',') || '-'}  tamper on: ${on.join(',') || '-'}  ${on.length > off.length ? '↑ 绕过生效' : off.length === 0 && on.length === 0 ? '✗ 全拦' : '—'}`);
+  console.log(`${sc.name.padEnd(8)} tamper off: ${off.join(',') || '-'}  tamper on: ${on.join(',') || '-'}  ${verdictOf(off, on)}`);
 }
 const safeOk = SCENARIOS.filter((s) => s.expectSafe).every((s) => matrix.off[s.name].found.length === 0 && matrix.on[s.name].found.length === 0);
 console.log(`安全对照误拦：${safeOk ? '无 ✅' : '有 ❌'}`);
@@ -113,9 +156,9 @@ const md = [
   '| 场景 | tamper off | tamper on | 结论 |',
   '|---|---|---|---|',
   ...SCENARIOS.filter((s) => !s.expectSafe).map((s) => {
-    const off = matrix.off[s.name].found.join(',') || '-';
-    const on = matrix.on[s.name].found.join(',') || '-';
-    return `| ${s.name} | ${off} | ${on} | ${on.length > matrix.off[s.name].found.length ? '绕过生效' : off === '-' && on === '-' ? '全拦' : '—'} |`;
+    const offArr = matrix.off[s.name].found;
+    const onArr = matrix.on[s.name].found;
+    return `| ${s.name} | ${offArr.join(',') || '-'} | ${onArr.join(',') || '-'} | ${verdictOf(offArr, onArr)} |`;
   }),
   '',
   `安全对照误拦：${safeOk ? '无' : '有（需修）'}`,

@@ -1,6 +1,6 @@
 # sqli-scanner
 
-[![Tests](https://img.shields.io/badge/tests-2722%20passing-brightgreen)](#测试)
+[![Tests](https://img.shields.io/badge/tests-2724%20passing-brightgreen)](#测试)
 [![Dependencies](https://img.shields.io/badge/dependencies-0%20known%20vulns-brightgreen)](#环境变量)
 
 > CI 徽章待仓库地址确定后启用（当前 `OWNER/REPO` 是占位，占位链接会显示成"通过"，属误导，
@@ -144,7 +144,7 @@ OWASP 分类统一为 `A03:2021-Injection`。**未收录的通道不会被静默
 
 | 等级 | 方言 | 证据 |
 |---|---|---|
-| ✅ **真实引擎验证**（检测/绕过主链路跑通） | MySQL、MariaDB、PostgreSQL、SQLite、Oracle（2026-09-15，e2e/oracle-lab）、SQL Server（2026-09-14，e2e/mssql-lab） | 真 MySQL 8.0.x（`e2e/real-mysql-lab` + `e2e/waf-real`）、真 MariaDB 11.4.13（`e2e/multi-engine-lab/mariadb-verify.mjs`）、PGlite 18.3、sql.js WASM、真 PostgreSQL 16.2（`e2e/oob-real-lab` OOB 带外全链路）、**真 SQL Server 2022 Express 16.0.1000.6**（`e2e/mssql-lab`：双上下文三通道 + 拖库 5/5 + os-shell，2026-09-22 补证，见 `e2e/mssql-lab/results/VERIFICATION-2026-09-22.md`）、**真 Oracle AI Database 26ai Free 23.26.3.0.0**（`e2e/oracle-lab`：双上下文三通道 + 拖库 5/5） |
+| ✅ **真实引擎验证**（检测/绕过主链路跑通） | MySQL、MariaDB、PostgreSQL、SQLite、Oracle（2026-09-15，e2e/oracle-lab）、SQL Server（2026-09-14，e2e/mssql-lab） | 真 MySQL 8.0.x（`e2e/real-mysql-lab` + `e2e/waf-real`）、真 MariaDB 11.4.13（`e2e/multi-engine-lab/mariadb-verify.mjs`；⚠️ 其产物测于 09-09，CRS 执行器 09-19 修准之后**未复跑**，能引什么/不能引什么写在 `results/mariadb-report.md` 顶部）、PGlite 18.3、sql.js WASM、真 PostgreSQL 16.2（`e2e/oob-real-lab` OOB 带外全链路）、**真 SQL Server 2022 Express 16.0.1000.6**（`e2e/mssql-lab`：双上下文三通道 + 拖库 5/5 + os-shell，2026-09-22 补证，见 `e2e/mssql-lab/results/VERIFICATION-2026-09-22.md`）、**真 Oracle AI Database 26ai Free 23.26.3.0.0**（`e2e/oracle-lab`：双上下文三通道 + 拖库 5/5） |
 | ⚠️ **部分通道验证** | H2、HSQLDB、Derby | `e2e/multi-engine-lab`（真实 JDBC 内存库）。**三档分开引，别混**：① 无 WAF 档 = 三引擎布尔通道 9/9，回显定库 H2/HSQLDB 成功、**Derby 定不出**；② CRS **PL1（官方默认部署档）** = 布尔 9/9（`results/multi-engine-report.pl1.md`）⇒ "这三库在默认部署的 CRS 下可被检出"成立，但**定库不达**（UNION 哨兵被吃）；③ CRS **PL2/PL3/PL4** = 0/9，PL1→PL2 之间是断崖 ⇒ 不能拿②说"过任何 WAF"，也不能拿③说"过不了 WAF"。旧 P3 报告（09-09）"tamper 打穿 CRS 后 H2/Derby error 通道检出"今已不可复现，见该文件顶部的失效声明 |
 | ⛔ **模板适配（未在真实 DBMS 验证）** | TiDB、DM8、ClickHouse、DB2、Sybase、Firebird、Informix、Access、MonetDB | 仅有检测/提取模板；方言语法、列类型、报错文本均可能有偏差 |
 
@@ -306,7 +306,7 @@ backend/  ← Express + Node.js
 # 前端测试（349 个用例）
 npm test
 
-# 服务端测试（2374 个用例）
+# 服务端测试（2376 个用例）
 cd server && npm test
 
 # 全部测试
@@ -322,7 +322,7 @@ npm run test:all
 
 - TypeScript: 零错误
 - 前端测试: 349/349 通过（覆盖率门禁 stmts 88.65 / branch 79.90 / func 68.65，阈值 88/77/67）
-- 服务端测试: 2374 用例（2373 pass / 0 fail / 1 skip，并发口径 2026-09-25 复测；1 skip 为环境依赖显式跳过。覆盖率 lines 90.33 / branch 77.40 / func 79.92，阈值 85/69/72）
+- 服务端测试: 2376 用例（2375 pass / 0 fail / 1 skip，并发口径 2026-09-25 复测；1 skip 为环境依赖显式跳过。覆盖率 lines 90.33 / branch 77.40 / func 79.92，阈值 85/69/72）
 - 一键扫描: `npm run scan -- -u <url>`（CLI 一条命令产出 HTML/JSON/Markdown 全套报告 + manifest，退出码可直接进 CI 门禁）
 - Tamper 插件: 228 个（含 v24 增量 20 个，对齐 sqlmap 官方 tamper 全集，含官方 CRS/libinjection 实测组合 uniontable+odbcbrace）
 - WAF 绕过能力: 200+ 插件链式组合，覆盖 62 个 WAF 厂商指纹识别 + 推荐
@@ -486,12 +486,18 @@ node e2e/blackbox-lab/sqlmap-bench.mjs                    # sqlmap 同题对照
 | 档位 | tamper off | tamper on | 自动选链 | 结论 |
 |---|---|---|---|---|
 | **PL1（CRS 默认部署档 —— 客户线上真正面对的）** | 8 | 8 | 8 | 现有探针本就能通过默认部署的 CRS，**挂链无可证增益** |
+| **PL2** | 0 | **1** | 0 | **全仓目前唯一观测到「挂链有净收益」的档**：off 0 → on 1（orderby 的 error 通道） |
 | **PL3（全规则最严档）** | 0 | 0 | 0 | 现有 tamper 链对 942 家族**无可证绕过** |
+| **PL4** | 0 | 0 | 0 | 与 PL3 同形 —— **断崖在 PL1→PL2，之后是平的** |
 
-- 两档基线分别锁在 `e2e/waf-real/waf-bits-baseline.json`（只减不增）；门禁默认跑 **PL1**
-  （`WAF_GATE_PL=3 npm run acceptance` 可切档）。
+- 四档基线分别锁在 `e2e/waf-real/waf-bits-baseline.json`（只减不增，逐档逐字段齐全）；
+  门禁默认跑 **PL1**（`WAF_GATE_PL=2 npm run acceptance` 可切档）。
+- ⚠ 别把这张表读成"能在 CRS 上绕过"：PL2 那格是 **1 个技术位**（不是比率），
+  且它来自自实现执行器口径；PL1 无收益、PL3/PL4 全零。三个 Java 引擎（H2/HSQLDB/Derby）
+  在同一把尺子上是 PL1=9/9、PL2 及以上=0/9（见上面「数据库支持验证等级」那一栏）。
 - 上表是「技术位合计」，**不是绕过率** —— 不要再写成 `N/M` 分数或百分比对外引用。
-- 安全对照：两档均零误拦。复现：`npm run acceptance`（`waf-real` / `waf-auto` 两套件，事实数字进报告）。
+- 安全对照：四档均零误拦。复现：`npm run acceptance`（`waf-real` / `waf-auto` 两套件，事实数字进报告）；
+  逐档复测命令写在基线文件的 `复测` 字段里。改档产物各写独立文件（`waf-real-report.plN.md`），不覆盖 PL1 那份。
 - `npm run waf-validate`（e2e/waf-lab，自写正则模拟器）的「107/225 有效」等数字 ⚠️ 仅作插件自检，**禁止对外**。
 
 **执行器保真度门禁（`crs-fidelity`，用 CRS 官方回归集把执行器自身钉住）**：**族 942 99.6% / 族 930 100.0%，两族各 0 未点名分歧 → PASS**（基线按族各一份文件）。

@@ -6,7 +6,9 @@
   "engine": "自实现 SecRule 执行器（crs-engine.js）；规则 = coreruleset v4.1.0 REQUEST-942 原文，逐字节一致性由 node scripts/fetch-crs-assets.mjs --verify-rules 校验",
   "bits": {
     "1": { "realOff": 8, "realOn": 8, "auto": 8, "测于": "2026-09-19T09:26Z", "说明": "CRS 默认部署档：现有探针本就能通过，挂链无可证增益" },
-    "3": { "realOff": 0, "realOn": 0, "auto": 0, "测于": "2026-09-19T09:26Z", "说明": "全规则最严档：现有 tamper 链对 942 家族无可证绕过" }
+    "2": { "realOff": 0, "realOn": 1, "auto": 0, "测于": "2026-09-25T14:55Z", "复测": "CRS_PL=2 node e2e/waf-real/waf-verify.mjs（人工挂链） + CRS_PL=2 node e2e/waf-real/waf-auto-check.mjs（自动选链），真 MySQL 3306", "说明": "**全仓目前唯一观测到「挂链有净收益」的档**：off 0 → on 1（orderby 的 error 通道）。PL1→PL2 之间是断崖，不是渐变" },
+    "3": { "realOff": 0, "realOn": 0, "auto": 0, "测于": "2026-09-19T09:26Z", "说明": "全规则最严档：现有 tamper 链对 942 家族无可证绕过" },
+    "4": { "realOff": 0, "realOn": 0, "auto": 0, "测于": "2026-09-25T14:57Z", "复测": "CRS_PL=4 node e2e/waf-real/waf-verify.mjs + CRS_PL=4 node e2e/waf-real/waf-auto-check.mjs", "说明": "与 PL3 同形（0/0）。补这一档是为了把'断崖在 PL1→PL2，之后是平的'写成事实而不是推测" }
   },
   "gatePl": 1,
   "gatePlReason": "默认档才是客户线上真正面对的配置；PL3 的 0/0 作为「最严档无绕过」写进 README，不做门禁（否则任何规则微调都会把它顶成红）。"

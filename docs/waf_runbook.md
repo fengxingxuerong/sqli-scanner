@@ -106,6 +106,14 @@ echo "开:"; curl -s "http://localhost:4567/api/scan/<ID2>/report" | node -e "le
 
 检出数本身**不是**绕过的判据：单个注入点上 error/boolean 通道常在两种配置下都打满 100%，触顶后比较不出差异。真正的判据在 WAF 侧 —— 关 tamper 的拦截率须明显高于开 tamper，且 `942141`(extractvalue)/`942142`(updatexml)/`942180`(information_schema) 这类"函数名 + `\s*\(` 锚定"的高危规则命中须下降。
 
+**先问这张 A/B 表跑在哪一档**（2026-09-25 逐档实测：真 MySQL 与 H2/HSQLDB/Derby 三个 Java 引擎同形）。
+PL1（CRS 官方默认部署）下现有探针本来就能通过 ⇒ 挂链"无增益"是**正常形状**（8/8）；
+**PL2 是全仓目前唯一量到"挂链有净收益"的档**（0 → 1 个技术位，orderby 的 error 通道）；
+PL3/PL4 全拦（0/0），那说明 payload 整条没送达，**不能**读成扫描器不行，也不能读成 WAF 一定挡得住。
+断崖在 **PL1→PL2** 之间，之后是平的 —— 所以"两侧同为 0"和"两侧同为满值"这两档都要先报档位再报结论
+（本仓产物把档位写进抬头与文件名：`waf-real-report.md` = PL1 口径，`waf-real-report.pl2.md` = PL2；
+改档跑不会覆盖默认那份）。基线值与逐档复测命令在 `e2e/waf-real/waf-bits-baseline.json`。
+
 可复现的 A/B 装置（真 MySQL 真注入点 + WAF 中间件，自起隔离沙箱，不依赖外部资源）：
 
 ```bash

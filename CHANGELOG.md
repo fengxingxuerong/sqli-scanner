@@ -59,6 +59,48 @@ PL1 = 三引擎 × 三场景 **9/9 检出**（布尔通道，h2/derby 另有 err
 `DBMS_ASSERT = NO_WAF`（PL1 下 UNION 哨兵照样被吃，把定库基线挂上去只会把"没送达"报成"探针坏"）。
 四档本机耗时 6.4 + 4.4 + 4.9 + 1.5s。
 
+### 2026-09-25 批次 · 顺着"档位"摸到的四条：PL2 是全仓唯一有净收益的档、CRS 报告根本不在仓库里、3308 有两个主人、结论列按长度判
+
+上一节写完还剩一个没回答的问题：**高 paranoid 档到底是"过不了 WAF"还是"档太严"**。
+把 CRS 逐档量完之后，顺带挖出三个同类缺陷。
+
+1. **真 MySQL 的逐档数字（原来只有 PL1/PL3 两个点，中间是空的）**：
+   PL1 = off 8 / on 8 / 自动 8；**PL2 = off 0 / on 1 / 自动 0**；PL3 = 0/0/0；PL4 = 0/0/0。
+   ⇒ ① 断崖在 **PL1→PL2**，之后是平的（三个 Java 引擎在同一把尺子上同形）；
+   ② **PL2 是全仓目前唯一观测到"挂链有净收益"的档**（orderby 的 error 通道 0→1）——
+   以前所有档要么"探针本来就能过"要么"全拦"，tamper 的价值从来没被量出来过。
+   四个点写进 `waf-bits-baseline.json`（逐档逐字段，含 `复测` 命令），README 那张档位表补齐。
+2. **`e2e/waf-real/results/` 整目录被 .gitignore 排除** —— 而 README 管 `npm run waf-real` 叫
+   "对外唯一口径"。后果有两层：客户 clone 下来看不到任何数字来源；扫 md 的产物自洽守卫
+   在 CI 的干净 checkout 里**连文件都找不到**，对这份口径从来没生效过。
+   修：`results/` 从"整目录忽略"改成"忽略非 md"+ 白名单只开给 `waf-real-report*.md`
+   （其余 md 保持原政策，不一次性引入六份新产物）。守卫立刻抓到两条真缺陷（见第 4 点）。
+3. **改档跑一次，就把入库基线悄悄换掉**：`waf-verify.mjs` / `waf-auto-check.mjs` 写的是固定文件名，
+   而 CRS 档位是可变的 —— `CRS_PL=3 npm run waf-real` 会把"对外口径 PL1"那份产物覆盖成 0/0 那份。
+   同一天在 multi-engine-lab 上刚踩过同一个坑，这次是它的泛化。修：非默认档一律另起文件
+   （`.plN.md` / `.plN.json`），并把 `paranoiaLevel` 写进 json。
+   连带修掉 `waf-auto-check` 的一句撒谎话：它无论跑在哪一档都去读 PL1 那份产物当"人工挂链基线"，
+   实测打印过 `PL4 下 自动=0（人工挂链基线：off=8 on=8）`；现在按档找对应产物，档位对不上就明说不可比。
+4. **结论列按长度判 ⇒ 报喜不报忧**：`on.length > off.length ⇒ 绕过生效` 这一句同时写在
+   `waf-verify.mjs` 和 `mariadb-verify.mjs` 里。前者会把 `off=[boolean,error] / on=[error]`
+   （同为长度 2，丢了一整条通道）印成 "—"；后者入库那份 09-09 的 `mariadb-report.md` 里
+   `num`、`blind` 两行前后完全相同（`boolean`/`boolean`）也印"绕过生效"。
+   生成端改成集合差（`绕过生效（新增 X）` / `反而丢失 Y` / `技术位持平` / `全拦`），
+   并把守卫从"只看说明列"扩到"结论列 + A/B 两列同向"（B 类判据，六条合成用例 + 一条
+   **往真实产物注入撒谎结论**的用例 —— 只测合成分支不够，表头写法一变守卫就会静默跳过整张表）。
+   `mariadb-report.md` 没法重跑（本机 MariaDB 便携版没起），所以只**按本行两列重算结论列**、
+   测量列原样不动，并在文件顶部写清哪些话能引、哪些不能（09-19 执行器修准后未复跑）。
+5. **3308 端口有两个主人**：真 MariaDB 便携版（`mariadb-verify.mjs` 的靶的）和
+   `e2e/udf-lab/mysql_sandbox.py` 起的隔离 **MySQL 8** 沙箱共用 3308、同库名。
+   ⇒ 沙箱在的时候跑一次 mariadb-verify，就会把 MySQL 的数字写进标着 MariaDB 的产物里，
+   而且看起来完全可信。修：脚本开跑前读 `SELECT VERSION()`，不是 MariaDB 直接硬退（rc=2）。
+   实测覆盖：经 `run-with-sandbox.py` 起了真沙箱后跑 mariadb-verify ⇒ 当场拒绝、未产生任何扫描；
+   另"版本自报不是 MariaDB 就拒"那一支本轮**没有真发环境可测**（便携版没起），只有代码路径。
+6. **门禁口径统一**：`waf-auto` 的断言原来写 `?.auto ?? 0`，即"该档没记基线"= 下限 0 = 必过；
+   而同文件的 `waf-real` 对同一件事是 `基线缺该档 ⇒ FAIL`。两条判据不该一松一严，
+   现在 auto 缺字段也直接红（`WAF_GATE_PL=9 --only=waf-auto` 实测：FAIL + 原因 + 现场日志）。
+
+
 
 ### 2026-09-25 批次 · multi-engine-lab：Linux 上必崩的 classpath、永远退 0 的"门禁"、以及印了五天的反向结论
 

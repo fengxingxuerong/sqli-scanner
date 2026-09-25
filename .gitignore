@@ -53,7 +53,14 @@ e2e/recall-lab/results/
 # 但会把 `eslint .` 与 `git status` 搅浑（历史审计会话残留）。统一忽略，需要时自行处理。
 e2e/diag/
 e2e/waf-real/.sqlmap-waf/
-e2e/waf-real/results/
+# [2026-09-25] 这里从"整目录忽略"改成"只忽略非 md 产物"。原因：README 把 `npm run waf-real`
+# 叫作"对外唯一口径"，可那份报告根本不在仓库里 —— 客户 clone 下来看不到任何数字来源，
+# 而扫 md 的产物自洽守卫（server/tests/e2eArtifacts.consistency.test.js）在 CI 的干净
+# checkout 里连文件都找不到，等于对这份口径**永远不生效**。同目录的 json 继续忽略。
+e2e/waf-real/results/*
+# 例外只开给 CRS A/B 那几份报告（README 引它、自洽守卫在 CI 里要能找到它）；
+# 同目录其余 md（保真度明细、tamper 现场）仍按原政策留在本地，避免一次改规则引入六份新产物。
+!e2e/waf-real/results/waf-real-report*.md
 e2e/real-world-lab/results/
 e2e/recall-lab/.sqlmap-tmp/
 
