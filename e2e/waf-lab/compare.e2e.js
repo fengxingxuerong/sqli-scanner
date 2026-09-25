@@ -1,178 +1,47 @@
 // e2e/waf-lab/compare.e2e.js
 //
 // ============================================================================
-// ⚠️ 已失效（DEPRECATED，2026-09-18）—— 结论恒为 NO，请勿据此判断 tamper 效果
+// 已废弃入口（2026-09-18 判定失效，2026-09-25 收成提示）—— 跑它只会得到一句恒为 NO 的结论
 // ============================================================================
-// 本脚本的靶场（lab-server-v2.js 的 /vuln 端点）实现是：
+// 本夹具原先同进程起 `lab-server-v2.js` 的 `/vuln` 端点做 tamper A/B。那个端点的实现是：
 //     app.get('/vuln', (req, r) => r.send(`row:${req.query.id}`));
-// —— 纯字符串拼接回显，**没有任何 SQL 执行**。实测证据（2026-09-18）：
-//     `?id=1'`                    → 200 `row:1'`（无报错）
-//     `?id=1' order by 1-- -`     → 200 `row:1' order by 1-- -`（无差异）
-//     `?id=1' and 1=1-- -`        → 403（仅 WAF 拦，非注入信号）
-// 因此 union/error/boolean 三种技术**都不可能**在服务端产生信号，
-// 两侧检出率恒为 0，判据 `detectRateB > detectRateA` 从设计上不可能成立。
+// —— 纯字符串拼接回显，**没有任何 SQL 执行**。2026-09-18 实测：
+//     ?id=1'                → 200 `row:1'`                     （无报错）
+//     ?id=1' order by 1-- - → 200 `row:1' order by 1-- -`      （无差异）
+//     ?id=1' and 1=1-- -    → 403（只是 WAF 拦，不是注入信号）
+// 所以 union / error / boolean 三条通道在服务端**不可能**产生信号 ⇒ 两侧检出恒为 0，
+// 判据 `detectRateB > detectRateA` 从设计上不可能成立。
 //
-// 替代品：compare-real.e2e.mjs（真 MySQL 靶场 + WAF 中间件），
-//   入口见 package.json 的 `waf-e2e-real`（或 npm run e2e:sandbox e2e/waf-lab/compare-real.e2e.mjs）。
-//   它复用 e2e/real-mysql-lab/lab-app.js 的真注入点，并把 WAF 规则挂在 preMiddleware 上。
+// 为什么把整段夹具删掉而不是留着加 if：留着就会被再跑一次，而它每次产出的都是
+// "这个判据没通过" —— 读的人得到的是**反向结论**（真因是夹具结构上不可能通过）。
+// 历史实现：`git log -- e2e/waf-lab/compare.e2e.js`。
+// `compare-real.e2e.mjs` 与 `lab-server-v2.js` 的注释仍按名字引用本文件（讲的就是这段历史），
+// 所以文件保留成一份提示，而不是删除。
+//
+// ── 顺带留下的三条 tamper 实测结论（当年的 configB 组合为什么长那样）──────────────
+//   · space2comment：绕过 `union\s+select` 这类**空格锚定**规则的关键一步。但它的引号状态机
+//     会把闭合引号（如 `1'`）之后的整段当字符串字面量跳过替换 ⇒ **不能单独依赖**；
+//   · charencode：把 `-- -` 变成 `--%20-`，绕过 `--\s*$` 这种行尾注释规则；
+//   · randomcase：**不要**放进这类 A/B 的 configB —— 它随机化每个字母的大小写，会把
+//     UnionDetector 用于确认回显的标记 `SQLISCANNER0` 打乱，导致 body.includes() 失败、
+//     union 检测失效（当年表现为"开了 tamper 反而 0 检出"，判据照样不成立）。
+//
+// ── 真验 tamper 的入口 ──────────────────────────────────────────────────────
+//   python e2e/waf-lab/compare-real.run.py   # 自起隔离 MySQL 沙箱（本机推荐）
+//   node e2e/waf-lab/compare-real.e2e.mjs    # 已有 mysqld：设 MYSQL_* 指过去
+//   npm run waf-e2e-real                     # 等价于第一条
+// CI 侧：2026-09-25 起 acceptance job 每次 push 直连它自己的 mysqld 跑这份门禁
+// （退出码 0 通过 / 1 判据失败 / 2 连不上库；判据含"两侧都必须有检出"的有效性前置）。
 // ============================================================================
-//
-// 独立 e2e 夹具：同进程起 lab + 直接 import ScanManager 驱动两次扫描
-//   configA：tamper 关（模拟裸请求被 WAF 拦 → 检出低）
-//   configB：tamper 开（space2comment + charencode，绕过 WAF → 检出高）
-// 算指标并写 results/compare.json + results/compare.md。
-//
-// 不经 vitest / node:test，由 `npm run waf-e2e` 独立运行，不污染单测套件。
-//
-// 关于 configB 的 tamper 组合：
-//   设计原希望用 TAMPER_INTENSITY_PRESETS.medium = [space2comment, randomcase, charencode]。
-//   但 randomcase 对**每个字母**随机大小写，会把 UnionDetector 用于确认注入的回显标记
-//   'SQLISCANNER0' 的大小写打乱，导致 body.includes('SQLISCANNER0') 失败、union 检测失效
-//   （configB 也会 0 检出 → 开>关 不成立）。
-//   本实验室的绕过机制只依赖 space2comment（把 "UNION SELECT" 变为 "UNION/**/SELECT" 绕过空格锚定规则），
-//   charencode 作为链中第二个插件（不影响标记字母）一并演示。randomcase 因上述冲突未纳入本 e2e 的 configB。
-import { fileURLToPath } from 'url';
-import path from 'path';
-import fs from 'fs';
-// [FIX] 使用 v2 靶场（3-profile 规则库，与报告标题 "WAF-v2 e2e" 一致）：
-// 原实现误引 v1 lab-server.js 的宽签名集（WAF_SIGNATURES），tampered 形态全被拦截，
-// 造成 tamper 开/关双 0 检出、A/B 判据恒失败的遗留问题。
-import { createLabApp } from './lab-server-v2.js';
-import { computeMetrics } from './metrics.js';
-import { ScanManager } from '../../server/src/engine/ScanManager.js';
 
-const LAB_PORT = Number(process.env.WAF_LAB_PORT) || 8099;
-const TARGET = `http://localhost:${LAB_PORT}/vuln?id=1`;
-const WAIT_TIMEOUT_MS = 180000;
-
-// configB 实际使用的 tamper 组合：
-//   space2comment —— 绕过空格锚定规则（union\s+select 等）；注意其引号状态机会把
-//     闭合引号（如 `1'`）后的整段视为字符串字面量而跳过空格替换，不能单独依赖；
-//   commentbeforeparentheses —— 在 `(` 前插 `/**/`：绕过 extractvalue/updatexml
-//     等 `\s*\(` 锚定的报错函数规则（ERROR_SIG 只匹配函数名关键词，检测不受影响）；
-//   charencode —— 对空格/符号做 URL 编码：把 `-- -` 变 `--%20-` 绕过 `--\s*$`
-//     行尾注释规则（randomcase 因会打乱回显标记 `SQLISCANNER0` 大小写导致 union
-//     检测失效，故不纳入）。
-const CONFIG_B_TAMPER = ['space2comment', 'commentbeforeparentheses', 'charencode'];
-
-function buildConfig(tamperOn) {
-  const tamper = tamperOn
-    ? { enabled: true, plugins: CONFIG_B_TAMPER, intensity: 'medium' }
-    : { enabled: false, plugins: [], intensity: 'medium' };
-  return {
-    techniques: ['union', 'error', 'boolean'],
-    dbms: 'MySQL', // 已知库时固定方言：报错模板集确定（extractvalue），不被 tampered 探测的指纹噪声带偏
-    enableExtract: false, // 关掉拖库，聚焦"是否检出"，更快更确定
-    maxColumnsGuess: 3, // 缩小 ORDER BY 列数探测，加速
-    ratePerSec: 20,
-    concurrency: 4,
-    timeoutMs: 8000,
-    blindRobust: { enabled: false }, // 用 legacy 布尔判定，减少采样请求、降低抖动
-    wafEvasion: { randomUA: false, jitterMs: 0, obfuscate: false, tamper },
-  };
-}
-
-function waitForScan(sm, scanId) {
-  const start = Date.now();
-  return new Promise((resolve) => {
-    const tick = () => {
-      const report = sm.getReport(scanId);
-      if (report && (report.finishedAt || report.status === 'completed' || report.status === 'error')) {
-        return resolve(report);
-      }
-      if (Date.now() - start > WAIT_TIMEOUT_MS) return resolve(report);
-      setTimeout(tick, 200);
-    };
-    tick();
-  });
-}
-
-async function runScan(sm, tamperOn) {
-  const scanId = await sm.start({ url: TARGET, config: buildConfig(tamperOn) });
-  return waitForScan(sm, scanId);
-}
-
-async function main() {
-  const app = createLabApp();
-  const server = app.listen(LAB_PORT);
-  await new Promise((r) => {
-    if (server.listening) return r();
-    server.once('listening', r);
-  });
-
-  const sm = new ScanManager();
-
-  // —— configA：tamper 关 ——
-  app._stats.total = app._stats.blocked = app._stats.passed = 0;
-  const reportA = await runScan(sm, false);
-  const detectedA = (reportA?.vulns || []).length;
-  const totalPoints = (reportA?.points || []).length || 1;
-  const blockedReqA = app._stats.blocked;
-  const totalReqA = app._stats.total;
-
-  // —— configB：tamper 开 ——
-  app._stats.total = app._stats.blocked = app._stats.passed = 0;
-  const reportB = await runScan(sm, true);
-  const detectedB = (reportB?.vulns || []).length;
-  const blockedReqB = app._stats.blocked;
-  const totalReqB = app._stats.total;
-
-  const metrics = computeMetrics({
-    totalPoints,
-    detectedA,
-    detectedB,
-    blockedReqA,
-    blockedReqB,
-    totalReqA,
-    totalReqB,
-  });
-
-  const outDir = path.resolve(fileURLToPath(import.meta.url), '../results');
-  fs.mkdirSync(outDir, { recursive: true });
-  const jsonPath = path.join(outDir, 'compare.json');
-  const mdPath = path.join(outDir, 'compare.md');
-
-  fs.writeFileSync(
-    jsonPath,
-    JSON.stringify(
-      {
-        metrics,
-        configA: { tamper: 'off', detected: detectedA, totalPoints, blockedReq: blockedReqA, totalReq: totalReqA },
-        configB: { tamper: 'on', plugins: CONFIG_B_TAMPER, detected: detectedB, totalPoints, blockedReq: blockedReqB, totalReq: totalReqB },
-      },
-      null,
-      2
-    )
-  );
-
-  const pass = metrics.detectRateB > metrics.detectRateA;
-  const md = [
-    '# WAF-v2 e2e：tamper 关 vs 开 检出率对比',
-    '',
-    `> 目标：${TARGET}`,
-    `> configB tamper：${CONFIG_B_TAMPER.join(', ')}（medium 预设中的 space2comment 是绕过本实验室空格锚定规则的关键；`,
-    '> randomcase 因会随机化 UnionDetector 用于确认的回显标记 `SQLISCANNER0` 的大小写导致检测失效，故未纳入本 e2e 的 configB）',
-    '',
-    '| 配置 | 总注入点 | 检出 | 检出率 | 被 WAF 拦截(req) | 拦截率 |',
-    '|------|---------|------|--------|----------------|--------|',
-    `| tamper 关 (configA) | ${totalPoints} | ${detectedA} | ${metrics.detectRateA}% | ${blockedReqA} | ${metrics.blockRateA}% |`,
-    `| tamper 开 (configB) | ${totalPoints} | ${detectedB} | ${metrics.detectRateB}% | ${blockedReqB} | ${metrics.blockRateB}% |`,
-    '',
-    `**结论：detectRateB(${metrics.detectRateB}%) > detectRateA(${metrics.detectRateA}%) ? ${pass ? 'YES ✅' : 'NO ❌'}**`,
-    '',
-    '> 注：拦截率(blockRate)仅作参考。两次扫描请求构成不同——configB 命中 union 后提前 break，',
-    '> 总体请求更少，且被跳过的主要是"放行类"布尔请求，故两次拦截率接近。主判据为检出率（开>关）。',
-  ].join('\n');
-  fs.writeFileSync(mdPath, md);
-
-  console.log(md);
-  console.log(`\n[waf-e2e] 产物已写入:\n  ${jsonPath}\n  ${mdPath}`);
-
-  server.close();
-  process.exit(pass ? 0 : 1);
-}
-
-main().catch((e) => {
-  console.error('[waf-e2e] 失败:', e);
-  process.exit(1);
-});
+const NL = String.fromCharCode(10);
+console.error(
+  '[waf-e2e] 该入口已于 2026-09-18 废弃：本夹具的 /vuln 端点不执行 SQL ⇒ 两侧检出恒为 0，' +
+    `判据 detectRateB > detectRateA 结构上不可能成立（详见本文件头）。${NL}` +
+    '  改用真 MySQL 装置：' +
+    `${NL}    python e2e/waf-lab/compare-real.run.py        # 自起隔离沙箱${NL}` +
+    `    node e2e/waf-lab/compare-real.e2e.mjs         # 已有 mysqld 时，设 MYSQL_* 指过去${NL}` +
+    `    npm run waf-e2e-real                          # 等价于第一条${NL}` +
+    '  历史实现：git log -- e2e/waf-lab/compare.e2e.js'
+);
+process.exit(2);

@@ -29,17 +29,17 @@ node e2e/run-all.mjs --all                    # 强制全跑（缺依赖的会�
 | `redteam-lab` | 红队评测：24 靶点（17 注入 + 7 安全对照）+ 真值自检 | `run-scan.mjs r2` / `selftest.mjs` | MySQL |
 | `retest-lab` | 单点重测接口端到端（自起靶场，断言请求量收敛） | `verify.mjs` | 无 |
 | `multi-engine-lab` | 多引擎 tamper A/B（真 JDBC：H2/HSQLDB/Derby） | `verify.mjs` | Java + jar |
-| `mariadb-verify` | MariaDB 11.4 真实引擎 tamper A/B | `mariadb-verify.mjs` | MariaDB:3308 |
+| `mariadb-verify` | MariaDB 11.4 真实引擎 tamper A/B | `multi-engine-lab/mariadb-verify.mjs`（在本仓它**不是独立靶场目录**，挂在 multi-engine-lab 下） | MariaDB:3308 |
 | `oob-real-lab` | OOB 带外全链路（PG `COPY TO PROGRAM` / MySQL UNC DNS） | `verify.mjs` | PG + MySQL |
 | `real-mysql-lab` | 真实 MySQL 驱动靶场验证 | `verify.mjs` | MySQL |
 | `waf-real` | 真实 CRS v4.1.0 规则绕过验证 | `selftest.mjs` | MySQL |
 | `real-world-lab` | 拟真靶场（登录/搜索/上传等业务面） | `verify.mjs` | PGlite（内置） |
 | `pentest-lab` | 渗透视角「刁钻场景」实测 | `verify.mjs` | MySQL |
-| `recall-lab` | 假阳性验证（安全靶场零误报） | `false-positive.e2e.js` | PGlite |
+| `recall-lab` | **两个入口，别混**：`false-positive.e2e.js` = 安全靶场零误报（run-all 里那个叫 "recall-lab" 的条目指它）；`recall.e2e.js` = 18 条召回基线（含 2 条真实 MySQL，CI 在 acceptance job 里带 `RECALL_REQUIRE_MYSQL=1` 每次 push 跑满 18） | 见左列 | PGlite + 真 MySQL |
 | `tamper-matrix` | tamper × WAF 规则绕过矩阵 | `tamper-test.mjs` | 无 |
 | `detection-runner` | 数据驱动检测测试 | `run.js` | 无 |
 | `udf-lab` | UDF 接管真实验证（真 DLL） | `udf-takeover.e2e.mjs` | MySQL |
-| `waf-lab` | WAF 规则对比实验 | `compare.e2e.js` | 无 |
+| `waf-lab` | WAF 规则对比实验 | **门禁看 `compare-real.e2e.mjs`**（真 MySQL；本机经 `compare-real.run.py` 沙箱，CI 每次 push 直连 mysqld 跑）。⚠️ `compare.e2e.js` 是 2026-09-18 已废弃的空壳夹具（其 `/vuln` 端点不执行 SQL ⇒ 判据恒为 NO），只作历史保留、不作入口 | 无 |
 | `sqli-labs` | sqli-labs 靶场适配与诊断脚本 | 各 `diag*.mjs` | 需 sqli-labs 环境 |
 
 ## 常用工具
