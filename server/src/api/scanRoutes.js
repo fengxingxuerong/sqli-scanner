@@ -1162,7 +1162,12 @@ export function createRoutes({ scanManager, eventBus: bus = eventBus, reportToke
     const format = rawFormat;
     const out = sm.exportReport(req.params.id, format);
     if (out == null) {
-      return res.json({ code: ErrorCode.SCAN_NOT_FOUND, data: null, message: '扫描不存在或已结束' });
+      // 必须是 4xx：这是一条**文件下载**端点。历史上它返回 200 + `application/json` 且不带
+      // Content-Disposition，而前端只判 `res.ok` 就把响应体另存盘 ⇒ 用户拿到一个装着
+      // {"code":2001,"message":"扫描不存在或已结束"} 的 "report_xxx.csv"，看起来像报告坏了，
+      // 实际是扫描早已被回收。实测复现过（2026-09-25）。
+      // 只改这一条端点的状态码：`/scan/:id/diff` 那类 JSON 接口按 200+code 契约被前端正常解包。
+      return res.status(404).json({ code: ErrorCode.SCAN_NOT_FOUND, data: null, message: '扫描不存在或已结束' });
     }
     const contentTypes = {
       html: 'text/html; charset=utf-8',

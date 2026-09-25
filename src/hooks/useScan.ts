@@ -12,7 +12,7 @@ import { useCallback } from 'react';
 import { apiClient } from '../shared/apiClient';
 import { ApiError } from '../shared/apiClient';
 import { useScanStore } from '../store/scanStore';
-import { API_BASE } from '../shared/apiClient';
+import { API_BASE, getApiToken } from '../shared/apiClient';
 import { tauriBridge } from '../shared/tauriBridge';
 import { DEFAULT_CONFIG, DEFAULT_SQLMAP_CONFIG } from '../shared/constants';
 import { buildStartConfig } from '../shared/scanConfig';
@@ -261,8 +261,28 @@ export function useScan() {
     format: 'json' | 'html' | 'csv' | 'markdown' | 'db-json'
   ): Promise<void> => {
     const url = `${API_BASE}/scan/${scanId}/report/export?format=${format}`;
-    const res = await fetch(url);
+    // 这是 src/ 里**唯一一处绕开 apiClient 的 fetch**（因为它要拿原始响应体做另存盘，
+    // 而 apiClient 的拦截器按 JSON 解包）。代价是它历史上从不带鉴权头：一旦服务端设了
+    // SCAN_API_TOKEN，所有导出直接 401（实测：裸 fetch 401 / 带 x-api-token 200）。
+    // 所以这里显式补同一个 token —— 抽公共出口的前提是 apiClient 支持二进制/文本直传，
+    // 那是另一件事。
+    const token = getApiToken();
+    const res = await fetch(url, { headers: token ? { 'x-api-token': token } : {} });
     if (!res.ok) throw new Error(i18n.t('common.exportFailed', { status: res.status }));
+    // 产物一定带 Content-Disposition（后端成功分支会设文件名）；没带就说明拿到的不是文件
+    // 而是错误信封 —— 后端已改成 404，这里再钉一道，避免任何"200 但内容不是产物"的形态
+    // 被静默存成 report 文件（用户看到的是"报告打不开"，真因是扫描早被回收）。
+    if (!res.headers.get('content-disposition')) {
+      const errText = await res.text();
+      let reason = errText.slice(0, 200);
+      try {
+        const parsed = JSON.parse(errText) as { message?: string };
+        if (parsed?.message) reason = parsed.message;
+      } catch {
+        /* 不是 JSON 就留原文，别把线索弄丢 */
+      }
+      throw new Error(`${i18n.t('common.exportFailed', { status: res.status })}: ${reason}`);
+    }
     const content = await res.text();
     const mimeMap = {
       html: 'text/html; charset=utf-8',

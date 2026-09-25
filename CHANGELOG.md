@@ -4,6 +4,42 @@
 
 ## [Unreleased]
 
+### 2026-09-25 批次 · 导出这条路同时坏了两侧：错误信封被存成报告文件、设了 Token 就必 401
+
+清单里第 ④⑤ 条，**都执行复现过**（真 app + 真 `fetch`）后修掉。
+
+**复现**：起 `createApp()` 在临时端口上打下载端点，取一个不存在的 scanId ——
+`format=csv → status 200 | ct application/json | 有 Content-Disposition? null |
+body {"code":2001,…,"message":"扫描不存在或已结束"}`。而 `src/hooks/useScan.ts` 只判
+`res.ok` 就把 `res.text()` 交给 `tauriBridge.saveFile('report_<id>.csv', …)`
+⇒ **用户拿到一个装着错误 JSON 的"报告文件"**。症状会被读成"报告导出坏了/内容不对"，
+真因是那次扫描早已被回收 —— 归因方向整个错。
+第二处：设 `SCAN_API_TOKEN=secret123` 后 `裸 fetch → 401 / 带 x-api-token → 200`。
+而这条 fetch 是 **`src/` 里唯一一处绕开 `apiClient` 的**（它要拿原始响应体做另存盘，
+而 `apiClient` 的拦截器按 JSON 解包）⇒ 一旦启用 Token，**全部导出必失败**。
+
+**修法**：后端只在**下载**这一条端点上把缺扫描改成 `404`（`/scan/:id/diff` 那类 JSON 接口
+按 200+code 契约被前端正常解包，不动）；前端补发同一个 `getApiToken()`，并把
+"**响应有没有带 `Content-Disposition`**"当作"这是不是产物"的判别式——不带就抛错并带上
+服务端的 `message`，**任何情况下不落盘**。为什么用这个判别式而不是 content-type：
+`format=json` 成功时本来就是 `application/json`，只有文件名头能区分"产物"与"错误信封"。
+
+**测试分两层**（共 8 条）：`server/tests/api.exportNotFound.test.js` 用桩管理器起真路由，
+钉 ①缺扫描 404 ②成功路径必须仍带 `Content-Disposition`（前端判别式赖以成立的前提，
+谁把它去掉这条先红，而不是让前端静默退回老坑）③设 Token 时裸请求 401、带上才 200
+④接线守卫；`src/tests/useScan.export.test.tsx` 用 `renderHook` + 桩 `fetch` 钉真行为。
+
+**两次变异**：前端撤掉鉴权头 ⇒ "带 x-api-token 请求"红；把判别式改成恒不触发 ⇒
+"错误信封不存盘"红；其余两条不受影响（归因清楚）。
+
+**我自己写错的一条断言**：第 4 条测试原本写 `expect(init.headers).toBeUndefined()`，
+而我实现里无 token 时传的是 `headers: {}` —— 测的是实现细节而不是不变式。改成断言
+"**不许发出空的鉴权头**"（`headers['x-api-token']` 必须为 undefined），形状随便实现。
+
+清单里还剩 4 条未复现：sqlmap `--timeout` 单位 · retest 端点绕过 `sanitizeStart` ·
+`mode:'direct'` 绕过所有 clamp（含"无 SSRF 面"说法是否成立）· manifest 两个自报计数恒 null。
+
+
 ### 2026-09-25 批次 · 产品侧入口/输出层审计：最坏的一条不是缺陷本身，而是"夹具替产品发明了字段"
 
 派两个只读代理分别审**入口层**（`sanitizeStart` 与路由）与**输出层**（报告/SARIF/CSV/下载），
