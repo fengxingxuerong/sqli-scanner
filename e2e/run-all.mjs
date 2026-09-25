@@ -38,10 +38,23 @@ const ROOT = path.resolve(HERE, '..');
 //   · redteam-lab：原标 deps:['mysql']，但其入口 run-with-env.mjs 会**自行拉起**
 //     env.mjs（含 MySQL+PG+靶场）。实测宿主无 3306 时仍跑出 19/19 hit、0 误报。
 //     故改 deps:[]（自起环境），不再因宿主无 3306 被跳过。
+// ENGINE_JARS 的解析顺序：**调用方显式给的 > 本机默认路径（且必须真实存在）**。
+// 原来这里无条件注入一串 Windows 绝对路径，两个后果（2026-09-25 CI 实测）：
+//   ① 它 `...lab.env` 排在 `...process.env` 之后 ⇒ **覆盖** job 侧设好的 ENGINE_JARS，
+//      就算 CI 备好了 jar 也会被这串 Windows 路径顶掉；
+//   ② Linux 上这串必然不存在 ⇒ 要么 JVM 起不来，要么整个靶场永远只能 SKIP。
+// 现在：已继承就不动；默认路径不全就**不注入** —— 让 verify.mjs 的 preflight 明确报
+// "未设置 ENGINE_JARS"，而不是拿假路径去试一次再崩。
+function multiEngineJarEnv() {
+  if (process.env.ENGINE_JARS) return {};
+  const def = ['h2', 'hsqldb', 'derby', 'derbyshared'].map((n) => path.join('D:', 'engines', 'jars', n + '.jar'));
+  return def.every((q) => fs.existsSync(q)) ? { ENGINE_JARS: def.join(path.delimiter) } : {};
+}
+
 const LABS = [
   { name: 'redteam-lab', desc: '红队评测：24 靶点（17 注入 + 7 安全对照，自起环境）', entry: 'e2e/redteam-lab/run-with-env.mjs', args: ['r2'], deps: [] },
   { name: 'retest-lab', desc: '单点重测接口端到端（自起靶场）', entry: 'e2e/retest-lab/verify.mjs', deps: [] },
-  { name: 'multi-engine-lab', desc: '多引擎 tamper A/B（真 JDBC：H2/HSQLDB/Derby）', entry: 'e2e/multi-engine-lab/verify.mjs', deps: ['java'], env: { ENGINE_JARS: 'D:\\engines\\jars\\h2.jar;D:\\engines\\jars\\hsqldb.jar;D:\\engines\\jars\\derby.jar;D:\\engines\\jars\\derbyshared.jar' } },
+  { name: 'multi-engine-lab', desc: '多引擎 tamper A/B（真 JDBC：H2/HSQLDB/Derby）', entry: 'e2e/multi-engine-lab/verify.mjs', deps: ['java'], env: multiEngineJarEnv },
   { name: 'tamper-matrix', desc: 'tamper × WAF 规则绕过矩阵', entry: 'e2e/tamper-matrix/tamper-test.mjs', deps: [] },
   { name: 'real-world-lab', desc: '拟真靶场（登录/搜索/上传，PGlite 内置）', entry: 'e2e/real-world-lab/verify.mjs', deps: [] },
   { name: 'real-mysql-lab', desc: '真实 MySQL 驱动靶场验证', entry: 'e2e/real-mysql-lab/verify.mjs', deps: ['sandbox'] },
@@ -150,7 +163,13 @@ const runOne = (lab, useSandbox = false) =>
       : [lab.entry, ...(lab.args || [])];
     const p = spawn(cmd, cmdArgs, {
       cwd: ROOT,
-      env: { ...process.env, NO_PROXY: '127.0.0.1,localhost', ...(lab.env || {}) },
+      // lab.env 允许是对象，也允许是函数（multiEngineJarEnv 要看进程环境里有没有 ENGINE_JARS，
+      // 有就必须让位 —— 否则无条件注入会把 CI 侧准备好的路径覆盖掉）。
+      env: {
+        ...process.env,
+        NO_PROXY: '127.0.0.1,localhost',
+        ...(typeof lab.env === 'function' ? lab.env() : lab.env || {}),
+      },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     let out = '';

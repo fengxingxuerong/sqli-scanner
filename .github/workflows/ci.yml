@@ -642,6 +642,44 @@ jobs:
         name: Install server
       - name: Recreate server/.env.test（不入库文件的 CI 重建）
         run: printf 'SSRF_ALLOW_PRIVATE=1\nEXPLOIT_ENABLED=1\n' > server/.env.test
+      # [CI-FIX 2026-09-25] 给 multi-engine-lab 备好 H2 / HSQLDB / Derby 的官方 jar，
+      #   让它从"在 CI 里永远 SKIP"变成真跑。这一档的历史：Linux 上 classpath 分隔符硬写
+      #   ';' ⇒ JVM 找不到主类立刻退出 ⇒ 往死进程 stdin 写 ⇒ 裸 `write EPIPE`（0.5s、零原因）；
+      #   修好分隔符后成为"jar 不存在 ⇒ 按设计 SKIP"—— 结果仍是 CI 从没验过这三台引擎。
+      #   ⚠ 逐个校验 sha1 不是形式主义：本机经代理取 h2 曾拿到 285KB 的**合法 zip 头 + 错 sha1**
+      #   （真身 2.6MB），只看退出码就会拿坏 jar 去跑。校验值取自 Maven Central 的官方 .sha1。
+      #   任何一件取不到可信副本 ⇒ **不设 ENGINE_JARS**，套件按 preflight 明确 SKIP
+      #   （零断言、不计通过），也不把这次推送变成假红。
+      - name: 备好真 JDBC 引擎 jar（sha1 校验；不可信则让 multi-engine-lab 按设计 SKIP）
+        run: |
+          set -u
+          dir="$RUNNER_TEMP/engine-jars"; mkdir -p "$dir"
+          ok=1
+          fetch() {
+            name=$1; path=$2; want=$3
+            for try in 1 2 3 4 5; do
+              if curl -fsS --max-time 120 -o "$dir/$name" "https://repo1.maven.org/maven2/$path"; then
+                got=$(sha1sum "$dir/$name" | cut -d' ' -f1)
+                if [ "$got" = "$want" ]; then echo "✓ $name"; return 0; fi
+                echo "⚠ $name 第 $try 次 sha1 不符：期望 $want 实得 $got（$(wc -c < "$dir/$name") 字节）"
+              else
+                echo "⚠ $name 第 $try 次下载失败"
+              fi
+              sleep 3
+            done
+            echo "❌ $name 取不到可信副本"; return 1
+          }
+          fetch h2.jar          com/h2database/h2/2.2.224/h2-2.2.224.jar                          7bdade27d8cd197d9b5ce9dc251f41d2edc5f7ad || ok=0
+          fetch hsqldb.jar      org/hsqldb/hsqldb/2.7.3/hsqldb-2.7.3.jar                            85b49338b36f3051d217295596cf92beb92e4bfb || ok=0
+          fetch derby.jar       org/apache/derby/derby/10.16.1.1/derby-10.16.1.1.jar                f9ca2054b3e33ec3f3f19df4a7490352d82de54a || ok=0
+          fetch derbyshared.jar org/apache/derby/derbyshared/10.16.1.1/derbyshared-10.16.1.1.jar    77a3ec6b9791c7c29c76148c5d56fc1f3f12d638 || ok=0
+          if [ "$ok" = 1 ]; then
+            echo "ENGINE_JARS=$dir/h2.jar:$dir/hsqldb.jar:$dir/derby.jar:$dir/derbyshared.jar" >> "$GITHUB_ENV"
+            echo "✅ 引擎 jar 就绪 ⇒ multi-engine-lab 本轮真跑（3 引擎 × 3 场景 × tamper 开关）"
+          else
+            echo "::warning::引擎 jar 未就绪 ⇒ multi-engine-lab 本轮按设计 SKIP（零断言，不计通过）"
+          fi
+        timeout-minutes: 6
       - name: run-all（依赖探测自动收敛到 6 套自足靶场）
         run: node e2e/run-all.mjs
         timeout-minutes: 8

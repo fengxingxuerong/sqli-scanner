@@ -56,9 +56,30 @@ CI 侧的必崩条件（Linux 缺 jar）现在会走 `[SKIP]` —— 这条**本
    改成按表头文字选列（`tamper|off|on|命中|…`）后，变异验证两步都红、还原后绿。
 ② 全仓那份的目录过滤写成恒假 ⇒ 扫到 0 个文件 —— 靠守卫自己那条"文件数不得少于阈值"
    的防空转断言暴露，而不是静默假绿。
-另记一条事实：CI 里没有"跑完测试工作区必须干净"的门禁（`git diff --exit-code` 在
-`.github/workflows/ci.yml` 里零命中）⇒ "被跟踪的证据被改写后与仓库不一致"目前无人管，
-本轮只钉住了"证据会不会说谎"这半边。
+**CI 现在真跑这一档，而不是永远 SKIP**（`e2e-self-contained` 新增前置步）：修完分隔符之后，
+Linux 上的结果只是从 ❌ 变成 ⏭ —— 远端日志实证：`⏭ 跳过（按设计）0.4s`、
+`[SKIP] ... ENGINE_JARS 中这些 jar 不存在：D、\engines\jars\h2.jar;D、…`（还是被 `:` 切碎的
+Windows 串）⇒ 也就是说 **H2/HSQLDB/Derby 的真引擎检测仍然从没在 CI 跑过一次**。
+新步按 Maven Central 官方 `.sha1` 逐个校验下载（4 件：h2 2.2.224 / hsqldb 2.7.3 /
+derby 10.16.1.1 / derbyshared），全对才 `ENGINE_JARS=…:$dir/…` 写进 `$GITHUB_ENV`；
+**任何一件不可信就不设** ⇒ 套件按 preflight 明确 SKIP（不假绿、也不把推送变成假红）。
+校验不是形式主义：本机经代理第一次取 h2 得到 285KB 的**合法 zip 头 + 错 sha1**（真身 2,614,933
+字节），只看 `curl` 退出码就会拿半截 jar 去跑。重试到第 1 次即全绿（4 件 sha1 全对）。
+
+配套修的是 `run-all.mjs` 里那条会**覆盖** CI 环境的写死值：`lab.env` 无条件注入
+`D:\engines\jars\*.jar`，排在 `...process.env` 之后 ⇒ 就算 CI 备好了 jar 也会被顶掉。
+现在 `ENGINE_JARS` 已存在就让位、默认路径必须真实存在才注入（否则交给 preflight 报"未设置"）。
+两条代码路径用可区分的方式验过（`NO_WAF=1`，同一命令只差 ENGINE_JARS）：
+- 继承单个 jar ⇒ `[判定] ... on(3) ≥ off(3)`（只有 H2 那台引擎能用 ⇒ 证明读的是继承值）
+- 不设 ⇒ `on(9) ≥ off(9)`（本机默认全套 ⇒ 证明 fallback 生效）
+`ENGINE_JARS` 指到刚下载的 jar 亦真跑通过（`✅ 通过 6.5s`）。
+CI 侧的"下载→校验→注入→真跑"这条**本机无法验证**（Linux 路径 + GitHub 网络），
+以下一次远端 `e2e-self-contained` 日志为准：期望看到 `▶ multi-engine-lab ... ✅ 通过`
+而不是 ⏭；若仍 ⏭，日志里会有 ❌/⚠ 的哪一件取不到。
+
+另记一条相关事实：CI 里没有"跑完测试后工作区必须干净"的门禁（`git diff --exit-code` 在
+`.github/workflows/ci.yml` 里零命中），而有 22 份 `results/` 产物是被跟踪的 ⇒
+"证据被改写后与仓库不一致"目前无人管；本轮只钉住了"证据会不会对自己撒谎"这半边。
 
 ### 2026-09-25 批次 · CLI 的 `-d` 也归 scope 管了；顺带把"拼错的开关静默忽略"这条假安全关掉
 
