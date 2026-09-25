@@ -4,6 +4,44 @@
 
 ## [Unreleased]
 
+### 2026-09-25 批次 · 直连模式把"两条红线"当成一条跳过了：配了 scope 仍能连任意数据库主机
+
+清单第 ③ 条。**执行复现**：`scope:['10.20.0.0/16']` 配置下，
+`sanitizeStart({mode:'direct', db:{driverType:'mysql', host:'10.0.0.9'}, ...})` 照样通过。
+
+起因是一句看起来很有道理的注释：`直连模式不发起 HTTP 请求，跳过 SSRF 校验（无 SSRF 面）`。
+**这句话一半对**——直连确实没有 SSRF 面（DB 连接是操作者明示意图，不是服务端被诱导去摸内网）；
+但它顺手把 **scope** 也免了，而本仓自己把这两条分得很清（`scopeGuard.js` 原话：
+SSRF 管"别打自己人"，scope 管"别打没授权的人"）。对渗透工具这是最贵的一类错位：
+授权书写的是"只许打这 3 个系统"，而换个入口（`-d` 直连数据库）范围约束就不存在了。
+
+**为什么这不是"既定取舍被推翻"**：09-08 那批审计把 scope 的覆盖点列成
+「目标 + safeUrl + 二阶触发页 + 每一跳重定向」，而**直连能力是 09-09 之后才加的** ——
+清单没跟着更新，不是有人决定豁免直连。带日期的那份记录不改（它是当时的事实），
+把活的清单补在 `scopeGuard.js` 头部。
+
+**修法只补 scope，SSRF 那半原样保留**。判定形状配了九个，因为"漏放"和"错杀"各有代价：
+范围内 / 范围外 / **未配 scope（必须与历史完全一致）** / 主机只出现在 `connectionString` 里
+（界内、越界各一）/ 内嵌驱动无主机（memory·sqljs·sqlite·pglite 不出网 ⇒ 不得误杀）/
+网络驱动解析不出主机（**fail closed**：配了 scope 就是期待"未知目标不放行"）/
+域名通配命中与不命中。错误码用 `SCOPE_VIOLATION(1004)` 而不是 `INVALID_TARGET`——
+调用方按码分支，"没授权"和"参数写错了"在 UI 上是两句话。
+
+新增 8 条断言（`api.directScope.test.js`），与既有 `directMode.test.js` 12 条同跑 20/20。
+变异验证：把新加的 `if (directScope.enabled)` 短路 ⇒ **4 红 4 绿**，而那 4 条绿的正好是
+"不该误杀"的形状（范围内 / 未配 scope / 内嵌驱动 / HTTP 分支未被弄坏）—— 说明这套断言
+既会抓漏放也会抓错杀，不是一个只会红的摆设。
+
+**同一条直连分支还有另一半没修，但已执行确认存在**：它的 `config: {...defaults, ...cfg}`
+**在所有 clamp 之前返回**，实测同一份输入直连分支送进引擎的是
+`{concurrency:9999, timeoutMs:99999999, ratePerSec:"20", dumpWhere:'id=1; DROP TABLE x',
+techniques:['union','__bogus__'], totallyBogusKey:1}`，而 HTTP 分支同一份输入收敛成
+`{ratePerSec:20, concurrency:10, timeoutMs:60000}`。正确的修法是**把 config 守卫抽成
+两条分支共用的函数**（就像 retest 那格复用 `sanitizeStart` 一样），而不是在直连分支里手挑
+几个键 clamp —— 后者正是本批刚批评过的"第二条路自己拼检查"。那是笔需要单独跑全量的重构，
+留到下一轮，不混进这个安全修复里。
+
+
 ### 2026-09-25 批次 · 单点重测绕开了整条入口守卫：分号版 dumpWhere 曾经直送引擎
 
 清单第 ② 条，**执行复现**（express + 桩 ScanManager，把真正到达 `sm.start` 的 config 打出来）。

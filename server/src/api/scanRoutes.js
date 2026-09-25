@@ -248,6 +248,30 @@ export function sanitizeStart(body) {
     if (!b.sqlTemplate || !String(b.sqlTemplate).includes('{INJECT}')) {
       throw new AppError(ErrorCode.INVALID_TARGET, '直连模式需要提供含 {INJECT} 注入标记的 sqlTemplate');
     }
+    // [P0-SEC] scope 是**独立于 SSRF 的另一条红线**（本文件里的原话：SSRF 管"别打自己人"，
+    // scope 管"别打没授权的人"）。直连分支过去把两条一起跳过了 ⇒ 配了 scope 也照样能连任意
+    // DB 主机。这里只补 scope，**保留**"直连不做 HTTP SSRF 校验"那个既有判断（DB 连接是操作者
+    // 明示意图，不构成服务端被诱导的内网访问）。未配置 scope 时行为与历史完全一致 —— scope
+    // 自己的既定策略就是"配置了才是硬约束、不提供只告警模式"。
+    const directScope = parseScope(cfg.scope);
+    if (directScope.enabled) {
+      const d = b.db || {};
+      const connStr = String(d.connectionString || b.connectionString || '');
+      const host = d.host
+        || (connStr.match(/^[a-z0-9+.-]+:\/\/(?:[^/?#@]*@)?([^/?#:]+)/i) || [])[1]
+        || '';
+      // 内嵌驱动（内存/文件库）不出网，没有"范围"可言；其余 driverType 拿不到主机就拒绝
+      // —— 放行了反而坏：用户配了 scope 就是期待"未知目标不放行"，而不是"换个入口就不管"。
+      const embedded = /^(sqljs|sqlite|sqlite3|memory|pglite)$/i.test(String(d.driverType || ''));
+      if (!host && !embedded) {
+        throw new AppError(ErrorCode.SCOPE_VIOLATION,
+          '直连模式无法确定数据库主机，不能确认授权范围，已拒绝（scope 已配置时不放行未知目标）');
+      }
+      if (host) {
+        // assertInScope 只取 hostname；scheme 是占位（数据库地址没有 HTTP scheme）
+        assertInScope(`db://${host}`, directScope);
+      }
+    }
     return {
       mode: 'direct',
       db: b.db || {
@@ -962,6 +986,9 @@ export function createRoutes({ scanManager, eventBus: bus = eventBus, reportToke
       // [P0-1] SSRF 校验在路由层执行（DNS 解析需 async）：拒绝内网/回环/链路本地/云元数据地址
       // （策略见 httpClient.js；SSRF_ALLOW_PRIVATE=1 / SSRF_ALLOW_CIDRS=... 显式放行内部授权目标）
       // 直连模式（mode=direct）不发起 HTTP 请求，跳过 SSRF 校验（无 SSRF 面）。
+      // ⚠ 但**只跳过 SSRF 这一条**：scope 是另一条红线（"别打没授权的人"），它在
+      //   sanitizeStart 的直连分支里对数据库主机单独判定 —— 过去这句注释把两条一起
+      //   免掉了，读起来像"直连不受任何范围约束"是既定设计，其实不是。
       if (sanitized.mode !== 'direct') {
         await assertSafeHttpTarget(/** @type {string} */ (sanitized.url)).catch((e) => {
           throw e instanceof AppError ? e : new AppError(ErrorCode.INVALID_PARAM, e.message || '目标 URL 校验失败');
