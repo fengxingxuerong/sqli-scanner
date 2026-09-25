@@ -61,6 +61,12 @@ const LABS = [
   //   判定行印成 `tamper 收益 on(0) ≥ off(0)=✅`，0≥0 空转。检测/定库类断言只在无 WAF 档成立，
   //   而那档此前只有我手动跑过、产物入库、门禁里没有它。产物文件名按档分开（.no-waf 后缀），不互相覆盖。
   { name: 'multi-engine-lab-no-waf', desc: '多引擎覆盖面（同靶场去掉 CRS：布尔/UNION/回显定库，检测类断言挂这档）', entry: 'e2e/multi-engine-lab/verify.mjs', deps: ['java'], env: () => ({ ...multiEngineJarEnv(), NO_WAF: '1' }) },
+  // [CI-FIX 2026-09-25] 第三档：CRS **官方默认部署档 PL1**。这档才是 README 里
+  //   "这三库在 CRS 下可被检出"那句的唯一合法来源 —— 本机逐档量过：
+  //   PL1 = 三引擎 × 三场景 9/9 检出（布尔通道，h2/derby 另有 error）；PL2/PL3/PL4 = 0/9。
+  //   也就是说 PL1→PL2 之间是**断崖**，把 PL3 的 0/9 当成"这三库过不了 WAF"是读错了档。
+  //   产物写独立文件名（.pl1），不覆盖 ≈PL3 那份默认基线。
+  { name: 'multi-engine-lab-crs-pl1', desc: '多引擎 × CRS 默认部署档 PL1（实测 9/9 检出；"CRS 下可检出"只在这档成立）', entry: 'e2e/multi-engine-lab/verify.mjs', deps: ['java'], env: () => ({ ...multiEngineJarEnv(), CRS_PL: '1' }) },
   // [CI-FIX 2026-09-25] 这个脚本 2026-09-22 起就在文档里写着"退出码 0 = 全通过 / 期望 PASS 16"，
   //   但从来没进过 run-all，也没进过 CI —— 于是"H2/HSQLDB/Derby/MonetDB 的方言模板真机能跑"
   //   这几句结论自那天起没有再被执行过一次。本机实测 1.6s、16 条全绿 ⇒ 挂进去的代价接近零。

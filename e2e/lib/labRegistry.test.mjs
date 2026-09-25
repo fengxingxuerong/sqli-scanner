@@ -44,13 +44,21 @@ test('清单解析本身不得空转（解析失败会把下面所有断言变�
   assert.ok(labs.every((l) => l.name && l.entry), '存在没有 entry 路径的条目 —— 解析规则与清单写法不匹配');
 });
 
-test('multi-engine 的无 WAF 档必须在清单里（覆盖面/定库断言只挂得在那一档）', () => {
+test('multi-engine 的三档都必须注册（每一档回答的问题不一样）', () => {
   const me = labs.filter((l) => l.entry === 'e2e/multi-engine-lab/verify.mjs');
-  assert.ok(me.length >= 2,
-    `只注册了 ${me.length} 个 multi-engine 档位 —— CRS 档实测 0 检出，覆盖面类断言在它身上永远不执行`);
-  const withNoWaf = me.filter((l) => /NO_WAF/.test(l.raw));
-  assert.equal(withNoWaf.length, 1, 'NO_WAF 档要么没注册、要么注册了两遍（后者会把产物写重）');
-  assert.ok(/NO_WAF: '1'/.test(withNoWaf[0].raw), 'NO_WAF 档的 env 没真的设成 1 —— 那条注册是假的');
+  // CRS≈PL3（默认）：只验误报红线；NO_WAF：覆盖面 + 定库；CRS_PL=1：官方默认档下的"可检出"。
+  // 少任何一档，README 里就有一句结论没有产物支撑 —— 2026-09-25 缺的就是后两档。
+  assert.equal(
+    me.length,
+    3,
+    `只注册了 ${me.length} 个 multi-engine 档位，应为 3 档（PL3 默认 / 无 WAF / PL1）；` +
+      `当前实际在清单里的是：[${me.map((l) => l.name).join(', ') || '空'}]`
+  );
+  const noWaf = me.filter((l) => /NO_WAF: '1'/.test(l.raw));
+  const pl1 = me.filter((l) => /CRS_PL: '1'/.test(l.raw));
+  assert.equal(noWaf.length, 1, 'NO_WAF 档要么没注册、要么注册了两遍（后者会把产物写重）');
+  assert.equal(pl1.length, 1, 'CRS_PL=1 档要么没注册、要么注册了两遍 ⇒ README 那句"默认 CRS 下可检出"没有来源');
+  assert.notEqual(noWaf[0].name, pl1[0].name, '两档必须用不同靶场名，否则 run-all 汇总会合并成一条');
 });
 
 test('只在真引擎上成立的取证脚本必须登记进清单（否则它永远只被写它的那个人跑过一次）', () => {

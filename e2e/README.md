@@ -28,7 +28,8 @@ node e2e/run-all.mjs --all                    # 强制全跑（缺依赖的会�
 |---|---|---|---|
 | `redteam-lab` | 红队评测：24 靶点（17 注入 + 7 安全对照）+ 真值自检 | `run-scan.mjs r2` / `selftest.mjs` | MySQL |
 | `retest-lab` | 单点重测接口端到端（自起靶场，断言请求量收敛） | `verify.mjs` | 无 |
-| `multi-engine-lab` | 多引擎 tamper A/B（真 JDBC：H2/HSQLDB/Derby），**挂 CRS 的那一档** | `verify.mjs`（≈PL3 实测 0/9 ⇒ 本档只验 safe 零误报，判定行会自己标"空转"） | Java + jar |
+| `multi-engine-lab` | 多引擎 tamper A/B（真 JDBC：H2/HSQLDB/Derby），**挂 CRS 的默认档 ≈PL3** | `verify.mjs`（≈PL3 实测 0/9 ⇒ 本档只验 safe 零误报，判定行会自己标"空转"） | Java + jar |
+| `multi-engine-lab-crs-pl1` | 同一设施的 **CRS PL1 档 = 官方默认部署档**：三引擎布尔通道 9/9 ⇒ README 里"默认 CRS 下可被检出"那句的来源 | `CRS_PL=1 verify.mjs`（产物 `.pl1.md`） | Java + jar |
 | `multi-engine-lab-no-waf` | 同一个 `verify.mjs` 的**无 WAF 档**：覆盖面/定库类断言只挂这档（三引擎布尔 9/9，H2/HSQLDB 定库成功、Derby 定不出） | `NO_WAF=1 verify.mjs`（产物另名 `.no-waf.md`，不覆盖 CRS 档） | Java + jar |
 | `dialect-templates` | 方言模板在真引擎上的**可执行性 + 反证**（H2/HSQLDB/Derby/MonetDB，16 条）。09-22 写完只被手动跑过一次，2026-09-25 才注册进 run-all | `verify-dialect-templates.mjs`（缺 `ENGINE_JARS` 时 `[SKIP]` 退 0，不再退 2） | Java + jar |
 | `mariadb-verify` | MariaDB 11.4 真实引擎 tamper A/B | `multi-engine-lab/mariadb-verify.mjs`（在本仓它**不是独立靶场目录**，挂在 multi-engine-lab 下） | MariaDB:3308 |

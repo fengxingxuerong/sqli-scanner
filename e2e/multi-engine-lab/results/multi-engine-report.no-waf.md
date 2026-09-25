@@ -1,6 +1,6 @@
 # 多引擎 tamper A/B（H2 / HSQLDB / Derby）　—　WAF：off（NO_WAF=1）
 
-> 生成：2026-09-25T14:33:29.091Z　｜　引擎：真实 JDBC 引擎（内存库）　｜　本档 WAF：off（NO_WAF=1）
+> 生成：2026-09-25T14:49:42.209Z　｜　引擎：真实 JDBC 引擎（内存库）　｜　本档 WAF：off（NO_WAF=1）
 >
 > **口径必须先看这行**：WAF=on 时 CRS 会把 UNION 哨兵探针整条 403 掉，**版本回显定库通道
 > 根本不会被执行**，所以那一档里的 `dbms=null` 只说明"没定出库"，不能读成"探针在该库上跑不动"。
@@ -29,3 +29,5 @@
 > 本档行内的技术位差异因此**不是**绕过收益：dash2hash 会把 `--` 改写成 `#`，
 > 而 Derby/HSQLDB 不认 `#`（方言门控只在 dbms 已定时生效，Derby 恰好定不出库 ⇒ 门控不挡）。
 > 逐请求归因没做，别把 derby 行里 union 的得失读成能力变化。
+> 档位取自 crs-engine 的 EFFECTIVE_PL（当前 3）：`CRS_PL=1..4` 改档，抬头与文件名一起变。
+> dash2hash 有方言门控（MySQL 系），H2 以 MODE=MySQL 运行故 `#` 注释可用。

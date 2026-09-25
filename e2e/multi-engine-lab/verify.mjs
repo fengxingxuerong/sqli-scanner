@@ -78,11 +78,18 @@ const SCENARIOS = [
 // [ASSERT-FIX 2026-09-25] SCENARIOS 上的 `must` 自写下来就**没有任何一处读它** —— 文件头
 //   那句"断言：safe 零检出；on ≥ off"是真的，但"每个场景至少要有布尔通道"这一条一直只是注释。
 //   于是本靶场即便三个引擎全退化到只剩 error 通道，判定照样 ✅。现在把它接进判定。
-// 只在 NO_WAF 档挂检测类断言，原因实测在 results/multi-engine-report.json：CRS-on 档
-//   36 格全空（≈PL3 全规则档把 UNION/boolean 探针整条 403，acceptance.mjs:380 对 MySQL
-//   也记了同一件事：「PL3 下 off=on=0」）。拿那一档断言"必须检出"= 永久红；
-//   断言"必须为 0"= 把 CRS 的强度当成我们的能力基线。所以 CRS-on 档只留误报红线。
-const DETECT_ASSERTS = NO_WAF;
+// 检出类断言只挂在"实测会检出"的档上（2026-09-25 逐档量出来的，不是猜的）：
+//   NO_WAF       —— 探针直达 ⇒ 9/9。
+//   CRS ≈PL1     —— CRS 官方默认部署档，也是本仓 waf-real 的对外口径 ⇒ 同样 9/9（布尔通道 +
+//                   h2/derby 的 error 通道）。
+//   CRS ≈PL2/3/4 —— 全部 0/9。**PL1→PL2 之间有一个断崖**，不是渐变。
+// 在 0 检出的档上挂"必须检出"= 永久红；反过来挂"必须为 0"= 把 CRS 的强度写成我们的能力基线。
+// 所以那些档只留误报红线，并在判定行自己说清楚"本档不测检测"。
+const MUST_ASSERT = NO_WAF || EFFECTIVE_PL === 1;
+// 定库基线**只在无 WAF 档生效**：PL1 实测 `dbms` 仍全 null（UNION 哨兵被 CRS 吃掉，
+//   回显通道压根没送达）。把它挂到 CRS 档上，红了也分不清是"探针坏"还是"没送达"——
+//   这正是本文件 [LAB-FIX 2026-09-20] 那段注释要分开两档的同一个理由。
+const DBMS_ASSERT = NO_WAF;
 
 const TAMPERS = {
   off: null,
@@ -176,7 +183,7 @@ for (const eng of ENGINES) {
     // 报错库会直接写进交付报告的 DBMS 字段。现在两侧漂移都进判定。
     fpMiss.push(`${eng.name} 定库**误判**：真实引擎 ${eng.expect}，报的是 ${fp.join('/')}`);
   }
-  if (DETECT_ASSERTS) {
+  if (DBMS_ASSERT) {
     // 定库基线（含"当前定不出"这条负向基线）
     if (eng.expectDbms) {
       if (!fp.some((d) => String(d).toLowerCase() === String(eng.expectDbms).toLowerCase())) {
@@ -186,6 +193,8 @@ for (const eng of ENGINES) {
       fpMiss.push(`${eng.name} 的基线写的是"定不出库"，实测报出了 ${fp.join('/')} ⇒ 这是**正向漂移**：` +
         '把 verify.mjs 里的 expectDbms 和 README 覆盖面一栏一起改掉，别只改代码');
     }
+  }
+  if (MUST_ASSERT) {
     // 每场景的技术位底线（此前 `must` 是死字段，没有任何一处读它）
     for (const sc of SCENARIOS.filter((s) => s.must)) {
       for (const [label, rows] of Object.entries(r.rows)) {
@@ -222,6 +231,29 @@ const wafMode = NO_WAF ? 'off（NO_WAF=1）' : `on（CRS v4.1.0 ≈PL${EFFECTIVE
 // 入库基线换成了宽松档的数字，而抬头除了生成时间没有任何痕迹。非默认档一律另起文件。
 const SUFFIX = NO_WAF ? '.no-waf' : (EFFECTIVE_PL === 3 ? '' : `.pl${EFFECTIVE_PL}`);
 writeFileSync(resolve(RESULTS_DIR, `multi-engine-report${SUFFIX}.json`), JSON.stringify({ generatedAt: genAt, waf: wafMode, engines: results }, null, 2));
+// 诚实边界：三档各有各"不许引什么"，逐档写死在生成端。
+//   原来只有一句万能话（"仅验证布尔通道在 CRS 下的检测/绕过"），结果它既印在无 WAF 档上
+//   （那档压根没有 CRS），又在 PL1 档上否认本档真的测到的东西（"不回答检测能力"）。
+//   一个只在 0/9 档成立的免责声明，印到 9/9 档上就是自我抹黑。
+const honesty = NO_WAF
+  ? ['> 诚实边界（本档 WAF=off）：测的是**引擎覆盖面**（布尔/UNION/回显定库跑得通吗），',
+     '> 与"能不能绕过 WAF"无关 —— 绕过结论只能引 CRS-on 那份产物。',
+     '> 本档行内的技术位差异因此**不是**绕过收益：dash2hash 会把 `--` 改写成 `#`，',
+     '> 而 Derby/HSQLDB 不认 `#`（方言门控只在 dbms 已定时生效，Derby 恰好定不出库 ⇒ 门控不挡）。',
+     '> 逐请求归因没做，别把 derby 行里 union 的得失读成能力变化。']
+  : EFFECTIVE_PL === 1
+    ? ['> 诚实边界：本档是 CRS **官方默认部署档 PL1**，三引擎布尔通道 9/9 检出 ⇒',
+       '> 可以据此说"这三库在默认 CRS 下可被检出"；但**定库不在本档口径内**',
+       '> （UNION 哨兵被吃、回显通道没送达，判探针本身可用请看 `.no-waf` 那份产物）。',
+       '> 也别把它外推到高 paranoid 档：PL2/PL3/PL4 实测 0/9（PL1→PL2 之间是断崖，不是渐变；',
+       '> 复测：`CRS_PL=2 node e2e/multi-engine-lab/verify.mjs`，产物按档落到 `.pl2.md`，不会覆盖本文件）。']
+    : ['> 诚实边界：本档挂 CRS，只回答"这一档下探针能不能送达 + safe 会不会误拦"，',
+       '> 不回答检测能力（0 检出时尤其如此，见上面的"本档有效性"）。',
+       '> 想问"引擎本身能不能被检出"，看 `.no-waf` 或 `.pl1` 那两份产物。'];
+honesty.push(
+  `> 档位取自 crs-engine 的 EFFECTIVE_PL（当前 ${EFFECTIVE_PL}）：\`CRS_PL=1..4\` 改档，抬头与文件名一起变。`,
+  '> dash2hash 有方言门控（MySQL 系），H2 以 MODE=MySQL 运行故 `#` 注释可用。'
+);
 const md = [
   `# 多引擎 tamper A/B（H2 / HSQLDB / Derby）　—　WAF：${wafMode}`,
   '',
@@ -271,7 +303,11 @@ const md = [
     : NO_WAF
       ? `> **本档有效性**：off 检出合计 ${offDet}、on 检出合计 ${onDet} ⇒ 覆盖面类断言成立。`
         + '但本档**没有 WAF**，所以两侧差值不是绕过收益，只是 tamper 改写 payload 的副作用（见说明列）。'
-      : `> **本档有效性**：off 检出合计 ${offDet}、on 检出合计 ${onDet} ⇒ 绕过收益可比对。`),
+      : `> **本档有效性**：off 检出合计 ${offDet}、on 检出合计 ${onDet}`
+        + (offDet === onDet
+          ? ' ⇒ 两侧**持平**：本档证明"CRS 这一档下探针能送达并被检出"，但**不**证明 tamper 带来增益'
+            + '（MySQL 在 PL1 上也是同一形状：off=on=8，见 acceptance.mjs 里 waf-real 那段基线注释）。'
+          : ' ⇒ 绕过收益可比对。')),
   '',
   // 定库基线写进产物：README 的覆盖面一栏引的就是这件事，而它此前只出现在控制台汇总里，
   //   跑完就没 —— "Derby 定不出库"这条事实昨天是靠临时手写探针才知道的。
@@ -284,16 +320,7 @@ const md = [
   '',
   `安全对照（参数化）：${allSafeOk ? '零误报' : '存在误报（需修）'}`,
   '',
-  ...(NO_WAF
-    ? ['> 诚实边界（本档 WAF=off）：测的是**引擎覆盖面**（布尔/UNION/回显定库跑得通吗），',
-       '> 与"能不能绕过 WAF"无关 —— 绕过结论只能引 CRS-on 那份产物。',
-       '> 本档行内的技术位差异因此**不是**绕过收益：dash2hash 会把 `--` 改写成 `#`，',
-       '> 而 Derby/HSQLDB 不认 `#`（方言门控只在 dbms 已定时生效，Derby 恰好定不出库 ⇒ 门控不挡）。',
-       '> 逐请求归因没做，别把 derby 行里 union 的得失读成能力变化。']
-    : ['> 诚实边界：本档只回答"CRS 这一档下探针能不能送达 + safe 会不会误拦"，',
-       '> 不回答检测能力（0 检出时尤其如此，见上面的"本档有效性"）。',
-       `> 档位取自 crs-engine 的 EFFECTIVE_PL（当前 ${EFFECTIVE_PL}）：用 \`CRS_PL=1\` 改档，抬头会跟着变。`,
-       '> dash2hash 有方言门控（MySQL 系），H2 以 MODE=MySQL 运行故 `#` 注释可用。']),
+  ...honesty,
 ].join('\n');
 writeFileSync(resolve(RESULTS_DIR, `multi-engine-report${SUFFIX}.md`), md);
 console.log(`[report] ${RESULTS_DIR}${SUFFIX ? `（本档口径 WAF=${NO_WAF ? 'off' : `on/PL${EFFECTIVE_PL}`}，文件名带 ${SUFFIX}，不覆盖默认基线）` : ''}`);
@@ -325,9 +352,10 @@ console.log(
   `\n[判定] 断言：safe 零误报=${allSafeOk ? '✅' : '❌'}　tamper 收益 on(${onDet}) ≥ off(${offDet})=` +
     `${onDet >= offDet ? (vacuous ? '✅（空转：两侧均 0，本档不证明绕过能力）' : '✅') : '❌'}　` +
     `桥存活=${bridgeDead ? '❌ ' + bridgeDead : '✅'}　` +
-    (DETECT_ASSERTS
-      ? `技术位底线=${mustMiss.length ? '❌ ' + mustMiss.length + ' 项' : '✅'}　定库基线=${fpMiss.length ? '❌ ' + fpMiss.length + ' 项' : '✅'}`
-      : `检测类断言=本档不适用（WAF=on 时探针被 CRS 整档拦掉，只挂误报红线；见 results/multi-engine-report.md 的"本档有效性"）`)
+    (MUST_ASSERT
+      ? `技术位底线=${mustMiss.length ? '❌ ' + mustMiss.length + ' 项' : '✅'}　` +
+        `定库基线=${DBMS_ASSERT ? (fpMiss.length ? '❌ ' + fpMiss.length + ' 项' : '✅') : '本档不适用（UNION 哨兵被 CRS 吃掉，回显通道没送达）'}`
+      : '检测类断言=本档不适用（WAF=on 且 PL≠1，实测 0/9；只挂误报红线，见产物"本档有效性"）')
 );
 if (verdicts.length) {
   console.error(`[multi-engine-lab] 失败：${verdicts.join('；')}`);
