@@ -4,6 +4,53 @@
 
 ## [Unreleased]
 
+### 2026-09-25 批次 · CLI 的 `-d` 也归 scope 管了；顺带把"拼错的开关静默忽略"这条假安全关掉
+
+做 REST 直连那条红线时顺手核了第二条入口，结果是**真的不对称**：
+
+| 入口 | 之前 | 现在 |
+|---|---|---|
+| REST `mode:'direct'` | 按 DB 主机判 scope（09-25 上午刚补） | 同 |
+| CLI `bin/cli.js -d <dsn>` | `args.scope && **!args.direct**` ⇒ **完全不判** | 与 REST 共用 `core/scopeGuard.assertDirectDbInScope` |
+
+而 CLI 那三行注释同时自称"与 scanRoutes sanitizeStart 同步拦截同构" —— 同构那句在我改完
+REST 之后就变成假的：**同一个 `-d mysql://root@10.0.0.9/db`，从 REST 进被拒、从 CLI 进放行**。
+判据搬进 `scopeGuard`（两条入口共用一份），不在任何一条入口的文件里留第二套。
+
+### 附带挖出来的更贵的一条：CLI 解析器把无法识别的开关**静默丢弃**
+
+`bin/cli/args.js` 的循环原本没有兜底分支 —— 拼错的开关不报错、不告警，直接当没看见。
+同文件对 `--no-escape` / `--union-char` 却写着「保留显式识别并给出可操作提示，避免用户以为
+传了没生效而反复排查」：政策本来就有，只是只覆盖了两个特例，其余上百个开关仍然一声不响。
+代价实测落在红线上，同一个意图三种写法三种结果：
+
+- `--driver mysql --scope 10.20.0.0/16` ⇒ 越界主机被拒（对）
+- `--driver sqlite --scope …` ⇒ 内嵌驱动放行（对）
+- `--scope-typo 10.20.0.0/16` ⇒ **红线整个消失，命令照常跑完、退出码 0** ← 假安全
+
+现在：未识别开关收集进 `args.unknownFlags` ⇒ 循环结束打一条告警 ⇒ 两个入口
+（`bin/cli.js` 的 main、`scripts/one-click-scan.mjs`）以 `unknownFlagError()` **拒绝启动**（退 2）。
+`--no-escape` / `--union-char` 保持原政策（告警但继续），靠接在同一条 if/else 链**尾部**
+实现 —— 我第一版把它写成链外的独立语句，于是 `-u`、`-d`、`--scope` 全被记成未识别，
+被自己的新测试当场打回（"不该有未识别开关：-d,--driver,--scope,…"）。
+台账子命令 `ledger show <scanId>` 例外：nanoid 可能以 `-` 开头，不按开关判。
+
+**这次自查到的三处自己的错**（都靠 CI 等价命令抓回，没靠感觉）：
+1. 测试里我把 flag 写成 `--driver-type`（真名 `--driver`）与 `--tech`（真名 `--technique`）
+   —— 正是新硬拒该拦的那类错，于是新特性先把自己的测试拦红；连提示语里我也举了
+   `--driver-type` 当反例，改成用真名，免得教人用一个不存在的开关。
+2. `bin/cli.js` 用了 `unknownFlagError` 却没导入 ⇒ `tsc -p server` 与 `eslint` 各报一处
+   （**这条最阴**：缺导入让 `main()` 抛 ReferenceError 也退非 0，那条 spawn 测试当时
+   是"因为程序崩了所以通过"—— 补回导入后重跑才算数）。
+3. 变异验证确认这条断言真承重：把入口硬拒换成 `if (false && …)` ⇒ 恰好那条"真起 CLI"的用例红，
+   其余 4 条单测仍绿（它们只测纯函数，正是"只测被调函数→入口坏"的形态）；还原后重跑恢复绿。
+
+新增测试 11 条（`cli.directScope` 6 + `cli.unknownFlags` 5）。全量：server **2372 条 0 失败**
+（徽章 2720）、`tsc -p server` 零错、eslint 0 error、arch-guard 无新违规、refs/facts/readme 全过。
+顺序按上一批的教训走：**先 `git add` 新测试文件，再 `--refresh --coverage`** —— 数字采自跑测试
+（看得见磁盘），指纹采自 git 索引（= CI 视野），反过来必红。
+`docs/_facts*` 与 README 已随本次重采落盘（覆盖率 lines 90.46 / branch 77.35 / func 79.92）。
+
 ### 2026-09-25 批次 · 搬运工具自己也得能干活：push-via-api 此前**删不掉远端文件**
 
 症状：把废弃夹具的产物 `e2e/waf-lab/results/compare.md` 从仓库里删掉后推送，脚本按设计

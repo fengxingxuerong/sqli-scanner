@@ -20,7 +20,7 @@ import { ReportGenerator } from '../src/services/ReportGenerator.js';
 import * as scanLedger from '../src/services/scanLedger.js';
 // [P0-SEC 2026-09-09] --scope 接线：CLI 直走 ScanManager 不经 scanRoutes，需在本层完成
 // 「目标先校验 + 按 scanId 登记」，否则 --scope 是静默 no-op（httpClient 逐跳取用登记项）。
-import { parseScope, assertInScope, registerScanScope, releaseScanScope } from '../src/core/scopeGuard.js';
+import { parseScope, assertInScope, assertDirectDbInScope, registerScanScope, releaseScanScope } from '../src/core/scopeGuard.js';
 import { printHelp } from './cli/help.js';
 import {
   parseArgs,
@@ -32,6 +32,7 @@ import {
   buildAuth,
   readUrlList,
   checkTor,
+  unknownFlagError,
 } from './cli/args.js';
 import {
   buildInjectionTargets,
@@ -54,6 +55,7 @@ export {
   buildAuth,
   readUrlList,
   checkTor,
+  unknownFlagError,
 } from './cli/args.js';
 
 // --format 分发（json|csv|markdown|html）：单目标 -o 与批量目录导出共用。
@@ -172,12 +174,22 @@ async function runSingleScan(sm, url, args) {
       + '注入点取自叶子路径（如 user.id / tags.0）；扁平 body 仍走 urlencoded。');
   }
   const config = buildConfig(args);
-  // [P0-SEC] 目标先过一遍 scope（与 scanRoutes sanitizeStart 同步拦截同构）：越界直接报错，
-  // 一个包都不发。直连模式（-d）无 HTTP 请求可言，不参与 scope 判定。
-  const scopeRules = args.scope && !args.direct
-    ? parseScope(String(args.scope).split(',').map(s => s.trim()).filter(Boolean))
+  // [P0-SEC] 目标先过一遍 scope：越界直接报错，一个包都不发。
+  //   HTTP 目标校 URL；**直连（-d）校数据库主机** —— 原先这里写 `&& !args.direct`
+  //   并注释称"直连不参与 scope 判定 / 与 scanRoutes 同构"，但 REST 侧自 2026-09-25 起
+  //   是按 DB 主机校的 ⇒ 同构那句成了假话，实际效果是同一个 `-d` 从 REST 进要过红线、
+  //   从 CLI 进完全不过。两条入口现在共用 core/scopeGuard.assertDirectDbInScope。
+  const scopeRules = args.scope
+    ? parseScope(String(args.scope).split(',').map((s) => s.trim()).filter(Boolean))
     : null;
-  if (scopeRules?.enabled) assertInScope(String(url), scopeRules);
+  if (scopeRules?.enabled) {
+    if (args.direct) {
+      // 不传 driverType 的默认值（memory）当"内嵌"放行 = 红线白设，故这里只认操作者显式声明的
+      assertDirectDbInScope({ connectionString: String(args.direct), driverType: args.driverType }, scopeRules);
+    } else {
+      assertInScope(String(url), scopeRules);
+    }
+  }
   let auth = buildAuth(args);
   // [本期新增] --test-headers：把显式请求头转为注入点字段。被纳入注入点的头不再经 auth 透传，
   // 否则 httpClient.mergeAuthHeaders 会用原始值覆盖注入 payload（请求仍畸形/无注入）。
@@ -219,7 +231,8 @@ async function runSingleScan(sm, url, args) {
     : { url, method: args.method, bodyParams, jsonBody, config, auth, ...injTarget };
   const scanId = await sm.start(input);
   // [P0-SEC] scope 按 scanId 登记：httpClient 在每一跳（含重定向）前取用，防 302 出圈
-  if (scopeRules?.enabled) {
+  // 只给 HTTP 扫描登记：直连不发 HTTP 请求，逐跳校验没有对象可校（入口已按 DB 主机校过）
+  if (scopeRules?.enabled && !args.direct) {
     try { registerScanScope(scanId, scopeRules); } catch { /* 登记失败不阻断扫描（入口已校） */ }
   }
 
@@ -414,6 +427,16 @@ async function main() {
   const args = parseArgs(process.argv.slice(2));
   // [goal 批次 A-2] 台账检索子命令：node cli.js ledger list | ledger show <scanId>
   const argvRaw = process.argv.slice(2);
+  // [UNKNOWN-FLAG 2026-09-25] 无法识别的开关 ⇒ 拒绝启动（判据与理由在 cli/args.js:unknownFlagError）。
+  //   以前这些开关被静默吞掉：`--scope-typo 10.20.0.0/16` 会让红线整个消失而退出码仍是 0。
+  //   台账子命令例外：它的 <scanId> 可能以 '-' 开头（nanoid 字母表含 -/_），不能按开关判。
+  if (argvRaw[0] !== 'ledger') {
+    const flagErr = unknownFlagError(args);
+    if (flagErr) {
+      console.error(flagErr);
+      process.exit(2);
+    }
+  }
   if (argvRaw[0] === 'ledger') {
     const { listScans, getScan } = await import('../src/services/scanLedger.js');
     const sub = argvRaw[1] || 'list';

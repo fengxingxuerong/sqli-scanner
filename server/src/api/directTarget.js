@@ -14,24 +14,13 @@
 //   这里只补 scope，SSRF 那半保留原判：直连是操作者明示意图，不构成服务端被诱导的内网访问。
 // ============================================================================
 import { AppError, ErrorCode } from '../core/errors.js';
-import { parseScope, assertInScope } from '../core/scopeGuard.js';
+// assertDirectDbInScope 的本体在 core/scopeGuard.js：REST 的 mode:direct 与 CLI 的 -d 共用一份判据
+import { parseScope, assertDirectDbInScope } from '../core/scopeGuard.js';
 // 与 HTTP 分支共用同一个配置守卫（clamp / 形状校验 / 白名单键落地）。
 // 这里曾经是 `{...defaults, ...cfg}` 直接透传 —— 那等于"第二条入口没设防"：
 // concurrency:9999 / timeoutMs:99999999 / 带分号的 dumpWhere 会原样进引擎。
 import { buildGuardedConfig } from './scanConfigGuard.js';
 
-/** 不出网的内嵌驱动：没有"主机"可言，不得被 scope 误杀。 */
-const EMBEDDED_DRIVERS = /^(sqljs|sqlite|sqlite3|memory|pglite)$/i;
-
-/**
- * 从 db 配置 / connectionString 里取数据库主机。
- * 返回 '' 表示拿不到（内嵌驱动或连接串里没有主机名）。
- */
-export function directDbHost(db = {}, connectionString = '') {
-  if (db.host) return String(db.host);
-  const conn = String(db.connectionString || connectionString || '');
-  return (conn.match(/^[a-z0-9+.-]+:\/\/(?:[^/?#@]*@)?([^/?#:]+)/i) || [])[1] || '';
-}
 
 /**
  * 校验并规范化直连入参。返回的字段形状与 sanitizeStart 的 HTTP 分支**不同**
@@ -52,18 +41,8 @@ export function buildDirectTarget(b, cfg) {
     driverType: String(b.driverType || 'memory'),
   };
   const scopeRules = parseScope(cfg.scope);
-  if (scopeRules.enabled) {
-    const host = directDbHost(db, b.connectionString);
-    if (!host && !EMBEDDED_DRIVERS.test(String(db.driverType || ''))) {
-      // fail closed：配了 scope 就是期待"未知目标不放行"，而不是"换个入口就不管"
-      throw new AppError(ErrorCode.SCOPE_VIOLATION,
-        '直连模式无法确定数据库主机，不能确认授权范围，已拒绝（scope 已配置时不放行未知目标）');
-    }
-    if (host) {
-      // assertInScope 只取 hostname；scheme 是占位（数据库地址没有 HTTP scheme）
-      assertInScope(`db://${host}`, scopeRules);
-    }
-  }
+  // 判据本体在 core/scopeGuard.js（REST 的 mode:direct 与 CLI 的 -d 共用一份），此处只接线
+  assertDirectDbInScope({ db, connectionString: b.connectionString }, scopeRules);
   return {
     mode: 'direct',
     db,

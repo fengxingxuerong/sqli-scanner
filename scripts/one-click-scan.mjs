@@ -40,7 +40,7 @@ import { parseScope } from '../server/src/core/scopeGuard.js';
 import { defaults as DEFAULT_CONFIG } from '../server/src/config/defaults.js';
 import * as scanLedger from '../server/src/services/scanLedger.js';
 import { buildConfig } from '../server/bin/cli/config.js';
-import { parseArgs, applyRequestFile, resolveTamperPlugins } from '../server/bin/cli/args.js';
+import { parseArgs, applyRequestFile, resolveTamperPlugins, unknownFlagError } from '../server/bin/cli/args.js';
 import { runSingleScan } from '../server/bin/cli.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -178,6 +178,15 @@ async function main() {
   if (rest.includes('-h') || rest.includes('--help')) { printHelp(); process.exit(0); }
 
   const args = parseArgs(rest);
+  // [UNKNOWN-FLAG 2026-09-25] 与 bin/cli.js 同一道硬拒：一键扫描是给 CI/工单用的入口，
+  //   拼错的开关若被静默吞掉（尤其 --scope / --authorized），退出码 0 就成了假安全。
+  {
+    const flagErr = unknownFlagError(args);
+    if (flagErr) {
+      console.error(flagErr);
+      process.exit(2);
+    }
+  }
   // -r 优先于 -u（与 bin/cli.js 同语义）：先应用请求文件再校验目标
   if (args.requestFile && !applyRequestFile(args)) { console.error('请求文件解析失败'); process.exit(1); }
   if (!args.url && !args.direct) {
