@@ -208,6 +208,29 @@ function listSources() {
   return [...new Set(out)].filter((rel) => tracked.has(rel)).sort();
 }
 
+/**
+ * 「磁盘上有、git 索引里没有」的测试源（用同一套 SOURCE_SPECS 规则筛）。
+ * 存在的理由见 --refresh 末尾那段：数字采自"跑测试"（看磁盘），指纹采自"索引"（=CI 的视野），
+ * 两者不一致时**本机看不出来**，只有推上 CI 才红 —— 所以必须在这里主动比这两个面。
+ * 用 `--others --exclude-standard` 而不是"磁盘全集减索引"：被 .gitignore 的产物
+ * （如 results/ 里的临时测试）不该来烦人。
+ */
+function untrackedTestSources() {
+  let others;
+  try {
+    others = execFileSync('git', ['ls-files', '--others', '--exclude-standard'], { cwd: ROOT, encoding: 'utf8' })
+      .split('\n').map((s) => s.trim().replace(/\\/g, '/')).filter(Boolean);
+  } catch {
+    return []; // git 不可用时不报（宁可漏报一次提示，也不要把采集流程本身弄挂）
+  }
+  return others
+    .filter((rel) =>
+      SOURCE_SINGLES.includes(rel) ||
+      SOURCE_SPECS.some(([dir, re]) => rel.startsWith(`${dir}/`) && re.test(rel.split('/').pop()))
+    )
+    .sort();
+}
+
 const hashFile = (abs) => {
   const buf = readFileSync(abs);
   // [CI-FIX 2026-09-20] 指纹必须对 EOL 规范化（\r\n → \n）：本机 core.autocrlf=true 时
@@ -499,6 +522,23 @@ function main() {
     // 那比「两个都旧」更坏：判据会报 stale，而数字其实是对的。
     const digest = writeSourceDigest();
     console.log(`[facts] 已写入 ${SOURCES_PATH}（测试源 ${digest.count} 个文件，总指纹 ${digest.sha256}）`);
+    // ⚠ 「数字来自跑测试（看磁盘）、指纹来自 git 索引（=CI 拿得到的集合）」这个不对称，
+    //   本轮（2026-09-25）真实付过一次 CI 红：新建的两个测试文件还没 `git add` 时就
+    //   `--refresh`，用例数把它们算进去了（2361），指纹却没算（315）；提交后 CI 数到 317
+    //   ⇒ lint job 的 facts:check 报「采集源已改动」。**本地当时跑 --check 是绿的**
+    //   （因为索引里也还没有那两个文件）—— 也就是说这个红只有推上去才看得见。
+    //   修法是在提交后再采一次；但更该做的是**当场说清楚**，所以这里主动比对两个面。
+    const untracked = untrackedTestSources();
+    if (untracked.length) {
+      console.error(
+        `[facts] ⚠ 有 ${untracked.length} 个测试源**在磁盘上但未入 git 索引**：${untracked.slice(0, 6).join(', ')}` +
+          `${untracked.length > 6 ? ' …' : ''}\n` +
+          '[facts]   它们已被算进本次用例总数，却不在指纹里 ⇒ 提交这些文件后 CI 的 --check 会判\n' +
+          '[facts]   「采集源已改动」（本机现在看不出来，因为本机索引同样没有它们）。\n' +
+          `[facts]   处置：先 git add 这些文件，再重跑一次 node scripts/facts-sync.mjs --refresh${withCoverage ? ' --coverage' : ''}` +
+          ' && node scripts/facts-sync.mjs --fix。'
+      );
+    }
     return 0;
   }
 
