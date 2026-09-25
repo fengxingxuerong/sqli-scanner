@@ -76,7 +76,14 @@ const PAGE = `<!DOCTYPE html><html><body><h1>item</h1><p>${'x'.repeat(400)}</p><
 function makeLab(port, blockedWords, counter) {
   const app = express();
   app.use((req, res, next) => {
-    const dec = decodeURIComponent(String(req.originalUrl || '')).toLowerCase();
+    // ⚠️ 折叠 `+`（表单式空格）后再解码 —— 与真实 WAF 一致，也与本仓 CRS 执行器同口径
+    // （e2e/waf-real/crs-engine.js 的 t:urlDecodeUni 同样先 `\+`→空格）。
+    // 不折叠会静默废掉整套件：httpClient/axios 把空格编成 `+`，于是线上形态是
+    // `id=1%27+AND+1%3D1--+-`，只 percent-decode 的靶场看不到 `' and '` 这个**带空格**的
+    // 黑名单词 → 裸探针全放行 → verifyTamperChains 走「目标不敏感」早退分支
+    // → 画像为空（blocked=[]、probed=0）→ 本套件的画像断言全部无事实可断。
+    // 2026-09-25 首次真实执行时实测到这一步（探针逐个打状态码定位）。
+    const dec = decodeURIComponent(String(req.originalUrl || '').replace(/\+/g, ' ')).toLowerCase();
     if (blockedWords.some((w) => dec.includes(w))) {
       counter.hits++;
       res.status(403).send('<!DOCTYPE html><html><body><p>request blocked by lab waf</p></body></html>');
@@ -96,8 +103,30 @@ const counter = { hits: 0 };
 // 「目标不敏感」分支就早退了，根本不会画像（那必须报 BLOCKED，不能算通过）。
 const dual = makeLab(PORT_DUAL, ['union', 'select', ' and ', ' or '], counter);
 const single = makeLab(PORT_SINGLE, ['union', ' and ', ' or '], counter);
-await new Promise((r) => dual.server.once('listening', r));
-await new Promise((r) => single.server.once('listening', r));
+// 等两个靶场就绪：必须**一次 await 等全部**，不是两条 await。
+//   两条 await 是本套件 2026-09-25 之前的写法，它会在等第二个时永久挂死：两个 listen 几乎
+//   同时完成，`listening` 事件在 `await dual` 期间就发完了，之后才给 single 挂 once() →
+//   事件不重放 → 永不 resolve。整套件表现为「零输出直到超时」（它第一行正常输出在第 164 行），
+//   因此此前 CI 只看到「取不到画像/决策行」。A3 接线后首次真实执行才暴露这里。
+let labErr = '';
+await Promise.all(
+  [dual, single].map(
+    (lab) =>
+      new Promise((resolve, reject) => {
+        lab.server.once('listening', resolve);
+        lab.server.once('error', (e) => reject(new Error(`${lab.base} 未就绪：${e.code ?? e.message}`)));
+      })
+  )
+).catch((e) => {
+  labErr = e.message;
+});
+if (labErr) {
+  console.log(
+    `[BLOCKED] 靶场未就绪（${labErr}）—— 本套件未执行任何断言` +
+      `（端口 ${PORT_DUAL}/${PORT_SINGLE} 疑被占，可用 CHANNEL_DEGRADE_PORT_DUAL/SINGLE 换端口）`
+  );
+  process.exit(0);
+}
 
 /** 跑一档：真发请求做验链（内部会真做逐词画像），再把画像喂给 planChannels */
 async function runOnce(base, plugins) {

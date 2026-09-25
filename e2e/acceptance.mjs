@@ -66,11 +66,41 @@ function run(cmd, args, env = {}, timeoutMs = 900000, cwd = ROOT) {
       shell: process.platform === 'win32',
     });
     let out = '';
-    const timer = setTimeout(() => child.kill(), timeoutMs);
+    let settled = false;
+    const finish = (r) => {
+      if (settled) return;
+      settled = true;
+      done(r);
+    };
+    const timer = setTimeout(() => {
+      // 到点强杀。**只 child.kill() 不够**：win32 上 spawn 走 cmd.exe，kill 打死的是 shell，
+      // 真正的 node 孙进程还活着并继续持有 stdout/stderr 管道 → 'close' 永不触发 →
+      // 这个"带超时的包装层"自己变成无限等待（2026-09-25 实测：套件卡死时 60s 已到期，
+      // 门禁仍在 200s 外原地等）。故：win32 用 taskkill /T 连树杀，外加 5s 兜底结算。
+      try {
+        if (process.platform === 'win32' && child.pid) {
+          spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
+        } else {
+          child.kill('SIGKILL');
+        }
+      } catch { /* 杀不掉时走下面的兜底结算 */ }
+      setTimeout(() => {
+        finish({
+          code: -2,
+          out: `${out}\n[TIMEOUT] 套件超过 ${timeoutMs}ms 未完成，已强杀（上面是它截止时被收到的全部输出）`,
+        });
+      }, 5000).unref();
+    }, timeoutMs);
     child.stdout.on('data', (d) => (out += d.toString('utf8')));
     child.stderr.on('data', (d) => (out += d.toString('utf8')));
-    child.on('close', (code) => { clearTimeout(timer); done({ code, out }); });
-    child.on('error', (e) => { clearTimeout(timer); done({ code: -1, out: `${out}\n[spawn error] ${e.message}` }); });
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      finish({ code, out });
+    });
+    child.on('error', (e) => {
+      clearTimeout(timer);
+      finish({ code: -1, out: `${out}\n[spawn error] ${e.message}` });
+    });
   });
 }
 
@@ -453,7 +483,7 @@ const SUITES = [
     id: 'waf-channel-degrade',
     title: 'WAF 通道降级编排（A3）端到端',
     needs: [],
-    run: () => run('node', ['e2e/waf-real/waf-channel-degrade.e2e.mjs'], {}),
+    run: () => run('node', ['e2e/waf-real/waf-channel-degrade.e2e.mjs'], {}, 60000),
     assert: (out) => {
       if (/\[BLOCKED\]/.test(out)) {
         return {
@@ -467,8 +497,14 @@ const SUITES = [
       const mSingle = /单拦=\[([^\]]*)\]/.exec(out);
       const mRunDual = /决策 双拦 run=\[([^\]]*)\]/.exec(out);
       const mRunSingle = /单拦 run=\[([^\]]*)\]/.exec(out);
+      // ⚠️ 「一行事实都没打出来」和「打出来了但值不对」是两类故障，归成一句
+      //   「输出格式变了？」会把人支使去改正则（2026-09-25 CI 实测：那次真实原因是
+      //   靶场 `listening` 竞态挂死，输出为空，被读成了输出格式问题）。
       const reason =
-        !mDual || !mSingle || !mRunDual || !mRunSingle ? '取不到画像/决策行（输出格式变了？）'
+        !out.includes('[channel-degrade]')
+          ? `套件未跑到打结论那行（无 [channel-degrade] 输出）—— 挂死或提前崩溃；` +
+            `stdout 尾部：${out.trim() ? `…${out.trim().slice(-200)}` : '（空）'}`
+          : !mDual || !mSingle || !mRunDual || !mRunSingle ? '取不到画像/决策行（输出格式变了？）'
           : !/\bunion\b/.test(mDual[1]) || !/\bselect\b/.test(mDual[1]) ? `双拦靶场画像未同时含 union/select：[${mDual[1]}]`
           : /\bselect\b/.test(mSingle[1]) ? `单拦靶场画像误含 select（探针未逐词区分）：[${mSingle[1]}]`
           : !mRunDual[1].includes('error') ? `双拦后 error 通道也被降级了（降级过激）：run=[${mRunDual[1]}]`

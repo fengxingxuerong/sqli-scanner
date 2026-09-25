@@ -131,6 +131,13 @@ async function depStatus(lab) {
 // 理由见 depStatus 内注释（宿主 3306 的短暂可达会造成行为不确定，实测已踩）。
 const needsSandbox = (lab) => lab.deps.includes('sandbox');
 
+// 单个靶场的墙钟上界。取值来自实测分布：本清单里最慢的是 redteam-lab ~91s，其余在秒级到
+// 几十秒 —— 5 分钟对"真在干活"的套件有 3 倍余量，对**挂死**则能在 CI 的 8 分钟步长内
+// 报出"卡在哪个靶场"。此前 runOne **完全没有超时**：任何一套挂死，run-all 就原地等，
+// CI 只能看到 job 被整体掐掉、连现场都没有（2026-09-25 A3 端到端挂死实测到这条）。
+// 超时按**失败**结算，不当"按设计跳过"——挂死不是跳过。
+const LAB_TIMEOUT_MS = Number(process.env.RUN_ALL_LAB_TIMEOUT_MS) || 300000;
+
 const runOne = (lab, useSandbox = false) =>
   new Promise((resolve) => {
     const t0 = Date.now();
@@ -147,9 +154,13 @@ const runOne = (lab, useSandbox = false) =>
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     let out = '';
-    p.stdout.on('data', (d) => { out += d; });
-    p.stderr.on('data', (d) => { out += d; });
-    p.on('exit', (code) => {
+    let timeoutNote = '';
+    let settled = false;
+    const finish = (code) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(hardTimer);
+      if (timeoutNote) out += timeoutNote;
       // 从输出里抓一眼关键字（各靶场格式不一，仅作提示，不作判定）
       const hint = out.split('\n').filter((l) => /done:|结论|误报|✅|❌|FAIL|PASS/i.test(l)).slice(-2).join(' | ').slice(0, 160);
       // [P1-FIX 2026-09-14] 区分「通过」与「按设计跳过」：
@@ -158,6 +169,28 @@ const runOne = (lab, useSandbox = false) =>
       const skipped = code === 0 && /\bSKIP\b/i.test(out);
       // [DIAG-FIX 2026-09-21] 保留**完整输出**（原先只留 3 行 tail 且没人打印，见下方失败分支）
       resolve({ code, skipped, ms: Date.now() - t0, hint, sandbox: useSandbox, tail: out.split('\n').filter(Boolean).slice(-3).join('\n'), full: out });
+    };
+    const hardTimer = setTimeout(() => {
+      timeoutNote = `\n[TIMEOUT] ${lab.name} 超过 ${LAB_TIMEOUT_MS}ms 未完成，已由 run-all 强杀（下面是它截止时被收到的全部输出）\n`;
+      try {
+        // win32 上 spawn 走 shell 时 kill 只打死外壳、孙进程仍持有管道；这里 stdio 是 pipe 且
+        // 不用 shell，但 python 包装层会再起 mysqld/node —— 连树杀才真能放掉端口。
+        if (process.platform === 'win32' && p.pid) {
+          spawn('taskkill', ['/pid', String(p.pid), '/T', '/F'], { stdio: 'ignore' });
+        } else {
+          p.kill('SIGKILL');
+        }
+      } catch { /* 杀不掉也要结算，见下面的兜底 */ }
+      setTimeout(() => finish(-2), 5000).unref();
+    }, LAB_TIMEOUT_MS);
+    p.stdout.on('data', (d) => { out += d; });
+    p.stderr.on('data', (d) => { out += d; });
+    p.on('exit', (code) => finish(code === null ? -3 : code));
+    // spawn 失败（ENOENT，如 pin 死的 python 路径不在这台机器上）走的是 'error' 而不是 'exit'：
+    // 没有监听器时它会抛未捕获异常、把整个 run-all 带走（上面的 hasJava 同理由才加了 error 分支）。
+    p.on('error', (e) => {
+      timeoutNote = `[spawn error] ${cmd}：${e.message}\n`;
+      finish(-1);
     });
   });
 
