@@ -30,6 +30,13 @@ acceptance 的那份 CI 门禁）、历史实现在哪（`git log -- <本文件>
   按表格逐行核入口是否存在 —— 13 行里第 1 版脚本报了 2 个，**其中一个是我自己的误报**
   （`detection-runner/run.js` 实际存在，是脚本的路径候选写错），核实后只改 mariadb 那一行。
 
+**一处"先改文档后落事实"的自查**：`docs/waf_runbook.md` 收尾那条改成"旧产物已于 09-25 删除"时，
+那两个文件其实还在树里 ⇒ 这次真的 `git rm e2e/waf-lab/results/compare.md`（并删掉未跟踪的
+`compare.json`），让文档说的事实与树一致。
+另核一件事：`run-all` 的 `waf-lab` 条目指的是 `compare-real.e2e.mjs` 而不是这份废弃入口，
+所以把入口改成 exit 2 **不会**把任何门禁改红（也解释了这份夹具为什么能在没人察觉的
+状态下烂一周 —— 没有任何门禁指着它）。
+
 ### 2026-09-25 批次 · WAF A/B 真 MySQL 门禁从"周度才有"挪到每次 push
 
 `e2e/waf-lab/compare-real.e2e.mjs` 是真断言门禁（0 通过 / 1 判据失败 / 2 连不上库），

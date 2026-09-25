@@ -123,7 +123,9 @@ python e2e/waf-lab/compare-real.run.py   # 产物 e2e/waf-lab/results/compare-re
 - 仅对**授权**目标执行；记录目标、时间、授权凭据，审计留痕。
 - 检测完成后关闭不必要的 tamper / 限速，避免对目标造成压力。
 - 不在未授权系统上运行；不开启 `enableExtract`（拖库）、`secondOrder`（写请求）除非额外书面授权。
-- 本报告与 `results/compare.json` 仅用于你自己的整改验证；对外披露前脱敏。
+- 本报告与 `results/compare-real.json` 仅用于你自己的整改验证；对外披露前脱敏。
+  （旧夹具那份 `results/compare.{json,md}` 已于 2026-09-25 删除：它是结构上不可能成立的
+  A/B 留下的"对照表"，留着只会被当成证据。）
 
 ---
 
