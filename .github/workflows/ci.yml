@@ -683,3 +683,12 @@ jobs:
       - name: run-all（依赖探测自动收敛到 6 套自足靶场）
         run: node e2e/run-all.mjs
         timeout-minutes: 8
+      # [GATE-ADD 2026-09-25] 入库基线必须与"这一轮真跑出来的"一致（只忽略时间戳）。
+      #   为什么放在这里而不是 test-server：本 job 刚刚真的重跑过那三个档，产物就在磁盘上，
+      #   比的是"同一台机器、同一轮、当前代码"—— 外部一致性；
+      #   server/tests/e2eArtifacts.consistency.test.js 查的是"结论列与同行数据同向"——
+      #   内部一致性。09-20 那份连印五天「tamper 后检出」的产物，两样都不满足，
+      #   而当轮 CI 全绿 ⇒ 只有这道能拦住。
+      #   不放进 acceptance job：那一份要真 MySQL，服务端小版本一变 error 通道文本就变 ⇒ 假红。
+      - name: 入库基线漂移检查（产物必须等于当前代码跑出来的那份）
+        run: node scripts/artifact-drift.mjs --verbose

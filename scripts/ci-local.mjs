@@ -117,6 +117,10 @@ const GATES = [
   { id: 'audit', name: 'npm audit（前端 prod）', cmd: 'npm audit --omit=dev --audit-level=high' },
   { id: 'audit', name: 'npm audit（服务端）', cmd: 'cd server && npm audit --audit-level=high' },
   { id: 'e2e-self-contained', name: 'run-all（自足靶场 + 依赖探测）', cmd: 'node e2e/run-all.mjs', slow: true },
+  // 入库基线漂移检查：与 ci.yml 的 e2e-self-contained 同名步骤一一对应（守卫见
+  // server/tests/artifactDrift.wiring.test.js —— 只改一边就会红）。
+  { id: 'e2e-self-contained', name: '入库基线漂移检查（产物必须等于当前代码跑出来的那份）',
+    cmd: 'node scripts/artifact-drift.mjs' },
   { id: 'recall-lab', name: 'recall-lab e2e', cmd: 'node e2e/recall-lab/recall.e2e.js' },
   { id: 'release-smoke', name: '发布冒烟（生产配置组合）', cmd: 'node e2e/release/release-smoke.mjs' },
   { id: 'sidecar-build', name: 'sidecar SEA 构建 + 空目录真扫冒烟', cmd: 'npm run build:sidecar', slow: true },
