@@ -4,6 +4,51 @@
 
 ## [Unreleased]
 
+### 2026-09-25 批次 · 单点重测绕开了整条入口守卫：分号版 dumpWhere 曾经直送引擎
+
+清单第 ② 条，**执行复现**（express + 桩 ScanManager，把真正到达 `sm.start` 的 config 打出来）。
+`POST /api/scan/:id/point/:pointId/retest` 是 `merged 直送 sm.start`，绕开整条
+`sanitizeStart`。实测当时到达引擎的 config：
+
+```
+{concurrency:9999, timeoutMs:99999999, ratePerSec:"20",
+ dumpWhere:'id=1; DROP TABLE x', techniques:['union','__bogus__'], totallyBogusKey:1}
+```
+
+逐条对照主入口的守卫：concurrency 本该 clamp 到 1..10、timeoutMs 到 1000..60000、
+`ratePerSec` 字符串本该类型归一（否则下游按"不限速"建桶——就是本批另一格刚修的那个洞）、
+未知键本该 warn。**最重的一条是 `dumpWhere`**：它会拼进提取 SQL，而主入口的注释明写着
+"分号是把一个条件变成第二条语句的那一步"，因此明确拒收 —— 但重测这条路把它原样放了进去。
+非法 `techniques` 同理：主入口直接拒绝，这里静默透传。
+
+修法是**复用同一个函数**而不是在第二条路上补几个检查：`merged` 先过 `sanitizeStart`
+（顺带把 `bodyParams/cookieParams` 的 clamp 和 `headerParams` 头名黑名单也一起得到了，
+这些同样是重测原来没走的）。
+
+**这里有个不修就坏事的前提**：`onlyPoint` 刻意**不在** `KNOWN_CFG_KEYS` 白名单里 ——
+它是服务端从报告里的真实点位算出的跨文件内部字段（`tests/configOrphanKeys.guard.test.js`
+已把这类字段排除在名单外）。若直接把整条 config 塞进净化，`onlyPoint` 会被白名单丢掉，
+**重测就静默退化成整站重扫**（那个退化恰好是这条端点当初要避免的事，而且它有自己的测试）。
+所以顺序是：净化 → 贴回服务端算出的 `onlyPoint` → 删 `extractScope`。副产品是
+override 里伪造的 `onlyPoint` 也进不来了。
+
+**顺带修掉一处自报字段说谎**：回显里的 `configApplied.tamper` 读的是 `merged.tamper`，
+而内置引擎的 tamper 在 `config.wafEvasion.tamper`（顶层 `tamper` 只有 sqlmap 桥接层用）。
+⇒ 用户设了 tamper 复测，接口报 `tamper: null`（做了不说）；反过来若有人把 sqlmap 面板的
+顶层 `tamper` 串进来，它会被报成"已应用"而引擎根本没看它（**报了一个不存在的效果**，
+这一向更坏）。改成读引擎真正消费的键，两个方向各一条断言。
+
+测试 5 条（`server/tests/api.retestGuard.test.js`）。写桩时踩到两次"桩不完整"，都记下来
+免得下次再当成产品缺陷：① 不给 `bus.create` 返回会终结的 emitter ⇒ 模块级并发槽位不回收；
+② 不给 `sm.scans` ⇒ `scanGovernance.js:83` 读 `.get` 抛 TypeError，症状长得像端点坏了。
+变异验证：把净化整段退回旧的直送形状 ⇒ 5 条里 4 条红（第 3 条只测 onlyPoint 语义，
+两种形状下都该绿）。还原后 5/5。
+
+**方法论收获**：入口守卫的失效形状不是"某条路上少写一个检查"，而是**第二条路自己拼对象**。
+以后看到"从同一份数据派生的第二个入口"（重测 / 复跑 / 批量导入），第一个问题应该是
+"它有没有走同一个 `sanitize*`"，而不是"它校验够不够"。
+
+
 ### 2026-09-25 批次 · sqlmap 的 `--timeout` 收的是秒：单位没问工具，是靠问它本身才定案的
 
 清单第 ① 条。这次不靠记忆判断单位，直接问**我们要调用的那个二进制**

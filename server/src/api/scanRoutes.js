@@ -1067,22 +1067,24 @@ export function createRoutes({ scanManager, eventBus: bus = eventBus, reportToke
         return res.json({ code: ErrorCode.INVALID_PARAM, data: null, message: '基线报告缺少目标信息，无法重测' });
       }
       const override = (req.body && req.body.config) || {};
-      const merged = {
-        ...(target.config || {}),
-        ...override,
-        onlyPoint: { location: point.location, param: point.param },
-      };
-      // 重测只做检测：带上原 extractScope 会重复枚举，既慢又可能误触发写入
-      delete merged.extractScope;
-      const payload = {
+      // 走与 /scan/start 同一套入口守卫（白名单 / clamp / 类型归一 / dumpWhere 拒分号…）
+      const cleaned = sanitizeStart({
         url: target.baseUrl,
         method: target.method || 'GET',
         bodyParams: target.bodyParams || {},
         jsonBody: target.jsonBody || null,
         cookieParams: target.cookieParams || {},
         headerParams: target.headerParams || {},
-        config: merged,
-      };
+        config: { ...(target.config || {}), ...override },
+      });
+      const merged = cleaned.config;
+      // 重测只做检测：带上原 extractScope 会重复枚举，既慢又可能误触发写入
+      delete merged.extractScope;
+      // onlyPoint 由服务端从报告里的真实点位算出，且刻意不在 KNOWN_CFG_KEYS 白名单里
+      // （跨文件内部字段，见 tests/configOrphanKeys.guard.test.js）⇒ 必须在净化**之后**贴回：
+      // 既不会被白名单丢掉（那样重测会静默退化成整站重扫），也让 override 里伪造的 onlyPoint 进不来。
+      merged.onlyPoint = { location: point.location, param: point.param };
+      const payload = { ...cleaned, config: merged };
       await assertSafeHttpTarget(payload.url).catch((e) => {
         throw e instanceof AppError ? e : new AppError(ErrorCode.INVALID_PARAM, e.message || '目标 URL 校验失败');
       });
@@ -1096,7 +1098,18 @@ export function createRoutes({ scanManager, eventBus: bus = eventBus, reportToke
         data: {
           scanId,
           point: { id: point.id, location: point.location, param: point.param, encoding: point.encoding || null },
-          configApplied: { level: merged.level ?? null, risk: merged.risk ?? null, tamper: merged.tamper ?? null, techniques: merged.techniques ?? null },
+          // 自报字段必须指向**引擎真正读的那个键**。内置引擎的 tamper 在
+          // `config.wafEvasion.tamper`（见 scanConfigTuning / Detector），顶层 `tamper` 只有
+          // sqlmap 桥接层用（input.config.sqlmap.tamper）。原来回显 `merged.tamper ?? null` ⇒
+          // 用户设了 tamper 复测，接口报 "tamper: null"（说了没做）；而若有人从 sqlmap 面板
+          // 串过来一个顶层 tamper，它会被报成"已应用"，实际内置引擎根本没看它（做了没说反过
+          // 来更糟：报了一个不存在的效果）。
+          configApplied: {
+            level: merged.level ?? null,
+            risk: merged.risk ?? null,
+            tamper: merged.wafEvasion?.tamper ?? null, // 引擎真正读的键（顶层 tamper 只有 sqlmap 桥接层用）
+            techniques: merged.techniques ?? null,
+          },
         },
         message: 'ok',
       });
