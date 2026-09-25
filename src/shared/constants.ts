@@ -111,6 +111,12 @@ export const SCAN_CONFIG_KEYS = [
   'productionMode', 'confirmDestructive', 'delay', 'maxReq',
   // 盲注响应判定锚点（字符串，不是布尔）
   'matchString', 'notString',
+  // [2026-09-26 UI-REACH] 响应判定锚点**族**的其余成员（对标 sqlmap --code/--regexp/--titles）。
+  // 此前这 5 键引擎真消费（Detector._matchByCode/_matchByRegexp/_matchByTitle）、REST 白名单也收，
+  // 唯独前端没有控件 → 只剩 matchString/notString 两条锚点可用；强动态页面（真假响应只差
+  // 状态码或只差一个正则片段）上用户无法给出判据 → 判不出来就记「未检出」。
+  // 这是**能力缺失**而非便利开关，故接进面板。
+  'matchTitle', 'matchCode', 'matchRegexp', 'trueRegexp', 'falseRegexp',
   // 数据提取
   'enableExtract',
   // [2026-09-23 E2] 枚举 / 拖库动作族（对标 sqlmap --dbs/--tables/--columns/--dump/--dump-all/
@@ -120,7 +126,10 @@ export const SCAN_CONFIG_KEYS = [
   // UI 也没有入口 → Web/桌面/API 三端完全拿不到枚举与拖库能力。
   'extractScope',
   // 爬虫 / 会话 / 非 SQL 注入
-  'crawlDepth', 'sessionFile', 'sessionDefault', 'noSql',
+  // [2026-09-26 UI-REACH] crawlForms（对标 sqlmap --forms）：默认 false，关着就**只测 URL 上的
+  // 参数**，页面里的表单（POST body / 隐藏字段）一个都不进注入点清单 —— 少测一整类注入面，
+  // 且报告只会写「未检出」。属能力缺失，故接进面板（与 crawlDepth 同组，开了爬虫才生效）。
+  'crawlDepth', 'crawlForms', 'sessionFile', 'sessionDefault', 'noSql',
   // [2026-09-23 UI-REACH] 两条**整通道**接进 UI（此前 REST 白名单与引擎都支持，
   // 但前端只在 KNOWN_MISSING_UI_KEYS 里当债记着 → 界面用户永远测不到它们）
   'oob', 'secondOrder',
@@ -154,6 +163,7 @@ export const SCAN_CONFIG_VALUE_TYPES: Record<ScanConfigKey, ScanConfigValueType>
   level: 'number',
   risk: 'number',
   crawlDepth: 'number',
+  crawlForms: 'boolean',
   techniques: 'stringArray',
   scope: 'stringArray',
   prefix: 'string',
@@ -161,6 +171,16 @@ export const SCAN_CONFIG_VALUE_TYPES: Record<ScanConfigKey, ScanConfigValueType>
   sessionFile: 'string',
   matchString: 'string',
   notString: 'string',
+  // [2026-09-26] 判定锚点族。
+  // matchCode 只有 **{ true, false } 精确期望**一种形态进 UI：后端 guard 另收 `true`（弱信号：
+  // 真假状态码不同即信号），但 normalizeScanValue 的 object 分支会把标量 true 丢掉
+  // （非对象一律 undefined）→ 面板发 true 等于没发。故 UI 只暴露强语义那一种，弱信号留给
+  // REST/CLI（不是「忘了接」，是前端类型层走不通 —— 注释在此，别当漏项重做）。
+  matchTitle: 'boolean',
+  matchCode: 'object',
+  matchRegexp: 'string',
+  trueRegexp: 'string',
+  falseRegexp: 'string',
   testFilter: 'string',
   testSkip: 'string',
   dbms: 'stringOrNull',

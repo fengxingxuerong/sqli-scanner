@@ -69,6 +69,17 @@ export default function ScanConfigPanel({ config, mode, onChange, wafSuggestion 
     onChange({ [key]: v === '' ? undefined : v } as Partial<ScanConfig>);
   };
 
+  // [2026-09-26] matchCode（对标 --code）是**对象**形态 { true, false }（100-599 的期望状态码）。
+  // 两侧都空 = 不启用 → 整个键从请求体省略（与其它锚点「关闭态不留空值」同口径）。
+  // 只填一侧是合法的（后端 clampInt 逐侧校验，单侧期望同样能当判据）。
+  const setMatchCode = (side: 'true' | 'false', raw: string) => {
+    const n = Number(String(raw).trim());
+    const cur = { ...(config.matchCode ?? {}) } as { true?: number; false?: number };
+    if (raw.trim() === '' || !Number.isFinite(n)) delete cur[side];
+    else cur[side] = Math.floor(n);
+    onChange({ matchCode: Object.keys(cur).length ? cur : undefined });
+  };
+
   // [2026-09-23 E2] 枚举动作的子字段更新：undefined 一律**删键**（而不是留个空值），
   // 与其它配置「关闭态在请求体里干脆地没这个键」口径一致 —— 后端 sanitizeExtractScope
   // 也是按「有值才写入」处理，两侧不会出现「有键无值」的中间态。
@@ -689,6 +700,75 @@ export default function ScanConfigPanel({ config, mode, onChange, wafSuggestion 
                   <Typography variant="caption" color="text.disabled">
                     {t('scanConfig.anchorHint')}
                   </Typography>
+
+                  {/* [2026-09-26 UI-REACH] 判定锚点族的其余成员（对标 --titles / --code / --regexp）。
+                      引擎 Detector._matchByTitle/_matchByCode/_matchByRegexp 一直在消费、
+                      REST 白名单也收，唯独前端没有控件 —— 强动态页面上「真假响应只差状态码」
+                      或「只差一个正则片段」时，用户拿不到任何手段告诉引擎判据是什么，
+                      于是判不出来就落「未检出」。这是能力缺失，不是便利开关。 */}
+                  <Divider />
+                  <FormControlLabel
+                    control={<Switch checked={config.matchTitle ?? false} onChange={handleToggle('matchTitle')} />}
+                    label={t('scanConfig.matchTitleLabel')}
+                  />
+                  <Box>
+                    <Typography variant="caption" color="text.secondary">{t('scanConfig.matchCodeLabel')}</Typography>
+                    <Stack direction="row" spacing={1} className="mt-1">
+                      <input
+                        className="w-full px-3 py-2 border rounded text-sm"
+                        type="number"
+                        min={100}
+                        max={599}
+                        placeholder={t('scanConfig.matchCodeTruePlaceholder')}
+                        aria-label={t('scanConfig.matchCodeTruePlaceholder')}
+                        value={config.matchCode?.true ?? ''}
+                        onChange={(e) => setMatchCode('true', e.target.value)}
+                      />
+                      <input
+                        className="w-full px-3 py-2 border rounded text-sm"
+                        type="number"
+                        min={100}
+                        max={599}
+                        placeholder={t('scanConfig.matchCodeFalsePlaceholder')}
+                        aria-label={t('scanConfig.matchCodeFalsePlaceholder')}
+                        value={config.matchCode?.false ?? ''}
+                        onChange={(e) => setMatchCode('false', e.target.value)}
+                      />
+                    </Stack>
+                  </Box>
+                  <Box>
+                    <Typography variant="caption" color="text.secondary">{t('scanConfig.matchRegexpLabel')}</Typography>
+                    <input
+                      className="mt-1 w-full px-3 py-2 border rounded text-sm"
+                      placeholder={t('scanConfig.matchRegexpPlaceholder')}
+                      aria-label={t('scanConfig.matchRegexpLabel')}
+                      value={config.matchRegexp ?? ''}
+                      onChange={handleText('matchRegexp')}
+                    />
+                  </Box>
+                  <Box>
+                    <Typography variant="caption" color="text.secondary">{t('scanConfig.trueRegexpLabel')}</Typography>
+                    <input
+                      className="mt-1 w-full px-3 py-2 border rounded text-sm"
+                      placeholder={t('scanConfig.trueRegexpPlaceholder')}
+                      aria-label={t('scanConfig.trueRegexpLabel')}
+                      value={config.trueRegexp ?? ''}
+                      onChange={handleText('trueRegexp')}
+                    />
+                  </Box>
+                  <Box>
+                    <Typography variant="caption" color="text.secondary">{t('scanConfig.falseRegexpLabel')}</Typography>
+                    <input
+                      className="mt-1 w-full px-3 py-2 border rounded text-sm"
+                      placeholder={t('scanConfig.falseRegexpPlaceholder')}
+                      aria-label={t('scanConfig.falseRegexpLabel')}
+                      value={config.falseRegexp ?? ''}
+                      onChange={handleText('falseRegexp')}
+                    />
+                  </Box>
+                  <Typography variant="caption" color="text.disabled">
+                    {t('scanConfig.anchorFamilyHint')}
+                  </Typography>
                 </Stack>
               </Box>
             </>
@@ -723,6 +803,25 @@ export default function ScanConfigPanel({ config, mode, onChange, wafSuggestion 
                     <Slider value={config.crawlDepth ?? 2} min={1} max={3} step={1} aria-label={t('scanConfig.crawlDepth')} marks onChange={handleNumber('crawlDepth')} size="small" />
                   </Box>
                 )}
+                {/* [2026-09-26 UI-REACH] crawlForms（对标 --forms）：引擎 TargetParser._crawlForms
+                    一直在读，但前端此前无控件 → 默认 false 意味着**页面表单一个都不测**，
+                    而报告只会写「未检出」（少测一整类注入面，不是便利性差异）。
+                    关着爬虫时该开关无意义 → 置灰，避免「填了也不生效」的假暴露。 */}
+                <Box className="mt-2">
+                  <FormControlLabel
+                    control={
+                      <Switch
+                        checked={config.crawlForms ?? false}
+                        disabled={(config.crawlDepth ?? 0) <= 0}
+                        onChange={handleToggle('crawlForms')}
+                      />
+                    }
+                    label={t('scanConfig.crawlFormsLabel')}
+                  />
+                  <Typography variant="caption" color="text.disabled" className="block">
+                    {t('scanConfig.crawlFormsHint')}
+                  </Typography>
+                </Box>
               </Box>
             </>
           )}

@@ -271,6 +271,11 @@ export interface ScanConfig {
   };
   // 站内链接爬取深度（对标 sqlmap --crawl=<depth>）：0=关闭，1-3=深度
   crawlDepth?: number;
+  // [2026-09-26 UI-REACH] 表单爬取（对标 sqlmap --forms）：默认 false → 只测 URL 参数，
+  // 页面表单（POST body / 隐藏字段）完全不进注入点清单。引擎侧 TargetParser._crawlForms
+  // 一直读它，且已在 2026-09-13 与 level 解耦（独立开关），但前端此前无控件 → 一整类注入面
+  // 对界面用户不可见。仅当 crawlDepth > 0 时才有意义（面板里据此置灰）。
+  crawlForms?: boolean;
   // 授权范围（[P0-SEC] scope 硬约束）：CIDR/域名/URL 前缀列表；空/缺省 = 不启用。
   // 启用后目标与每一跳重定向都必须落在范围内，越界直接拒发（后端 scopeGuard 消费）。
   scope?: string[];
@@ -334,6 +339,19 @@ export interface ScanConfig {
   //   因此 UI 给文本输入框，关闭态省略该键（不发空串、不发布尔）。
   matchString?: string;
   notString?: string;
+  // [2026-09-26 UI-REACH] 判定锚点族的其余成员（后端 Detector 已消费，前端此前无控件）。
+  //   matchTitle   = --titles：真/假响应的 <title> 不同即信号（严格 === true 才启用）。
+  //   matchCode    = --code：**精确期望**形态 { true, false }（100-599）。
+  //                  ⚠️ 另有一种弱信号形态 `true`（真假状态码不同即可），后端也收，
+  //                  但前端 normalizeScanValue 的 object 分支会把它丢掉 → 面板不暴露，留给 REST/CLI。
+  //   matchRegexp  = --regexp：真响应命中、假响应不命中（或反之）即信号；正则源文本。
+  //   trueRegexp / falseRegexp = 分别限定真/假侧**必须**命中的正则（可组合，也可单用）。
+  // 关闭态一律省略该键（与 matchString 同口径：不发空串、不发布尔 false 冒充）。
+  matchTitle?: boolean;
+  matchCode?: { true?: number; false?: number };
+  matchRegexp?: string;
+  trueRegexp?: string;
+  falseRegexp?: string;
 }
 
 /** 扫描目标 */

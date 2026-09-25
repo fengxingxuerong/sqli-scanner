@@ -91,6 +91,16 @@ describe('配置契约：面板 → 请求体 → 后端白名单', () => {
     expect(types.matchString).toBe('string');
     expect(types.notString).toBe('string');
     expect(typeof (DEFAULT_CONFIG as Record<string, unknown>).matchString !== 'boolean').toBe(true);
+    // [2026-09-26] 判定锚点族的类型必须与后端 guard 的解析口径一致，否则「面板能填、引擎读不到」：
+    //   matchTitle/crawlForms → 严格布尔（引擎 `=== true` 才启用）；
+    //   matchCode            → 对象 { true, false }（guard 走 clampInt(mc.true/false, 100-599)）；
+    //   三个正则键           → 字符串（guard 走 clampStr，500 截断，非法正则引擎侧回落）。
+    expect(types.matchTitle).toBe('boolean');
+    expect(types.matchCode).toBe('object');
+    expect(types.matchRegexp).toBe('string');
+    expect(types.trueRegexp).toBe('string');
+    expect(types.falseRegexp).toBe('string');
+    expect(types.crawlForms).toBe('boolean');
   });
 
   it('buildStartConfig：DEFAULT_CONFIG 里已定义的登记键全部出现在请求体', () => {
@@ -113,6 +123,14 @@ describe('配置契约：面板 → 请求体 → 后端白名单', () => {
     expect(body.prefilter).toBe(false, '「关掉预筛」是一个动作，false 不发就等于没发');
     expect('matchString' in body).toBe(false, '空串锚点应省略（后端 clampStr 同义），否则会污染判定');
     expect(body.retry).toBe(0, '0 是合法值，不能被当成未配置丢掉');
+  });
+
+  it('buildStartConfig：matchCode 以对象形态发（后端 guard 按 { true, false } 逐侧 clamp）', () => {
+    const body = buildStartConfig({ matchCode: { true: 200, false: 500 } } as never);
+    expect(body.matchCode).toEqual({ true: 200, false: 500 });
+    // 两侧都清空 = 不启用 → 整个键必须省略（不能发空对象让后端拿到一个「什么都没配」的锚点）
+    const off = buildStartConfig({ matchCode: undefined } as never);
+    expect('matchCode' in off).toBe(false);
   });
 
   it('buildResumeConfig：续跑必须带上 scope（授权范围不能在最常见路径上被丢掉）', () => {
@@ -153,7 +171,8 @@ const KNOWN_MISSING_UI_KEYS = new Set([
   // 布尔盲注二级判据 / 鲁棒性
   'boolStableDiff', 'boolStableDiffSamples', 'blindRobust',
   // 会话 / CSRF / 保活 / cookie
-  'crawlForms', 'safeUrl', 'safeFreq', 'csrfUrl', 'csrfTokenName', 'csrfMethod', 'csrfRefreshFreq',
+  // （crawlForms 已于 2026-09-26 接进「爬虫」分组 → 移出本表）
+  'safeUrl', 'safeFreq', 'csrfUrl', 'csrfTokenName', 'csrfMethod', 'csrfRefreshFreq',
   'cookieJar', 'dropSetCookie', 'flushSession',
   // 参数筛选 / 已知点 / 失效值
   'skipParams', 'knownPoint', 'invalidValue', 'excludeSysdbs', 'nullConnection', 'paramDel',
@@ -196,7 +215,11 @@ const KNOWN_MISSING_UI_KEYS = new Set([
   'maxExtractBodyBytes', // 提取阶段响应上限（per-scan，env EXTRACT_MAX_BODY_MB 之外）
   'scanValidity', // 结论可信度守卫阈值组（含 enabled 逃生口）
   // 响应判定多指标（--string/--not-string/--code/--regexp/--titles 的同族）
-  'matchText', 'matchCode', 'matchRegexp', 'trueRegexp', 'falseRegexp', 'matchTitle', 'predictOutput',
+  // ⚠️ matchCode / matchRegexp / trueRegexp / falseRegexp / matchTitle 已于 2026-09-26
+  //    接进「payload 与响应判定调优」分组 → 移出本表（判据 ⑤ 会在忘记移除时红）。
+  //    matchCode 只接了 { true, false } 精确期望形态；`true`（弱信号）形态前端类型层走不通，
+  //    仍属无入口 —— 但它是**同一键的另一种取值**，不是独立键，故不单列（见 constants.ts 注释）。
+  'matchText', 'predictOutput',
   // 动态块 / 错误原文留存
   'autoDynamicBlock', 'parseErrors', 'pocRedactAuth',
   // 生产护栏（高危池确认位）：productionMode / confirmDestructive 已于 2026-09-23
