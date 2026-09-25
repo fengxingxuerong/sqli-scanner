@@ -46,7 +46,19 @@ export function bridgePreflight() {
   }
   const missing = jars.filter((j) => !existsSync(j));
   if (missing.length) {
-    return { ok: false, why: `ENGINE_JARS 中这些 jar 不存在：${missing.join('、')}`, jars };
+    // CI 实测（2026-09-25）：Linux 上 ENGINE_JARS 常是 Windows 的 ';' 串，被本平台分隔符 `:`
+    // 一切就碎成 "D" + "\engines\jars\h2.jar;D"… —— 结论（不存在）没错，但读的人看不出
+    // 自己贴错了格式。所以补一句人话：本平台的分隔符是什么、这串像哪种写法。
+    const looksForeign = missing.some((j) => j.includes(';'));
+    return {
+      ok: false,
+      why:
+        `ENGINE_JARS 中这些 jar 不存在：${missing.join('、')}` +
+        (looksForeign && PATH_DELIM !== ';'
+          ? `（本平台 classpath 分隔符是 "${PATH_DELIM}"，而串里带 ";" —— 像是 Windows 写法直接贴过来的）`
+          : ''),
+      jars,
+    };
   }
   return { ok: true, jars };
 }
