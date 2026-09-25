@@ -24,10 +24,12 @@ docs/                设计文档与对标分析
    - 前端：`npm run dev`（http://localhost:5173）
 3. **测试**：
    - 前端：`npm test`（vitest，349 用例）
-   - 服务端：`cd server && npm test`（node:test，~2355 用例）
+   - 服务端：`cd server && npm test`（node:test，~2361 用例）
    - 召回靶场：`npm run recall-e2e` ⇒ **16 条 + 2 条 SKIP**（真实 MySQL 组）。要跑满 18 条走隔离沙箱：
      `python e2e/run-with-sandbox.py e2e/recall-lab/recall.e2e.js`（实测 18/18 通过；驱动端点由
-     `MYSQL_HOST/PORT/USER/PASSWORD` 注入，SKIP 时会打印究竟是哪一类原因）
+     `MYSQL_HOST/PORT/USER/PASSWORD` 注入，SKIP 时会打印究竟是哪一类原因）。
+     CI 的 `acceptance` job 里有 mysqld，故那一步带 `RECALL_REQUIRE_MYSQL=1` 跑满 18 条 ——
+     **这个开关的语义是"跳过按失败处理"**：步骤名写着 18 就必须真跑到 18，否则静默降级成 16
    - 以上用例数以 `docs/_facts.json` 为准（`node scripts/facts-sync.mjs --refresh` 重采）
 
 ## 日志输出

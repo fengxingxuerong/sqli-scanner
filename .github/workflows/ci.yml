@@ -251,23 +251,10 @@ jobs:
         name: Server tests
         timeout-minutes: 10
 
-  recall-lab:
-    runs-on: ubuntu-latest
-    needs: [test-server]
-    if: github.event_name != 'schedule'
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-      - run: cd server && npm ci
-      - run: node e2e/recall-lab/recall.e2e.js
-        # 名字别再写 "(18 scenarios)"：这个 job 没有 mysqld，结构上只可能跑 16 条，
-        # 另 2 条真实 MySQL 场景会 SKIP（步骤退出码仍是 0）。步骤名标一个跑不到的数字，
-        # 等于让每个读 CI 的人以为 MySQL 方言被验过。要真跑 18 条，把本步并进
-        # 下方 file-read/file-write 那个已经起了 docker mysqld 的 job，并带上 MYSQL_* env。
-        name: Recall-lab e2e（16 条；另 2 条真实 MySQL 需 mysqld，本 job 会 SKIP）
-        timeout-minutes: 5
+  # [2026-09-25] recall-lab 曾是**独立 job**，但那台 runner 没有 mysqld ⇒ 18 条里
+  #   两条真实 MySQL 场景恒 SKIP（步骤名当时已如实写着"16 条"）。
+  #   现在整步并进下面的 acceptance job（它自己起 docker mysqld + root/root），
+  #   两条 MySQL 场景因此第一次真正进门禁。判据见 acceptance 里那一步的注释。
 
   # [P1-ADD 2026-09-12] 全方位验收门禁。
   # 此前 CI 覆盖面已很广（lint / 单测 / 前端覆盖率 / 召回率 / Docker / npm audit），但
@@ -393,6 +380,25 @@ jobs:
           done
           echo "红队靶场未就绪（CI 可能缺 PG），门禁将跳过该套件（SKIP）"
           tail -20 redteam-env.log || true
+      # [2026-09-25] recall-lab 从独立 job 搬进这里 —— 只有本 job 有 mysqld，
+      #   两条真实 MySQL 场景（real_mysql_numeric / real_mysql_str）自 09-10 写下起
+      #   从未在任何自动门禁里执行过（独立 job 只能跑到 16/18，另 2 条恒 SKIP）。
+      #   端点走 env 由 e2e/recall-lab/real-lab-driver.js:mysqlEndpoint() 读取；
+      #   建库由该文件的 MYSQL_INIT_SQL 自己完成（CREATE DATABASE IF NOT EXISTS sqli_test），
+      #   所以只需要一个可连的 mysqld，不需要额外初始化。
+      #   ⚠ 步骤名写的"18 条"现在是**机检的**：RECALL_REQUIRE_MYSQL=1 让"跳过"直接算失败
+      #   （默认口径是不 fail —— 本机没起 mysqld 不是代码缺陷；但在这里跳过就是降级）。
+      #   两条 MySQL 场景真跑过的现场：本机指到 127.0.0.1:3306，检出分别为
+      #   [union,error,boolean] 与 [boolean]。
+      - name: Recall-lab e2e（18 条，含 2 条真实 MySQL 方言）
+        run: node e2e/recall-lab/recall.e2e.js
+        env:
+          MYSQL_HOST: 127.0.0.1
+          MYSQL_PORT: 3306
+          MYSQL_USER: root
+          MYSQL_PASSWORD: root
+          RECALL_REQUIRE_MYSQL: '1'
+        timeout-minutes: 8
       - name: 全方位验收门禁（事实断言模式）
         run: npm run acceptance
         env:
@@ -584,9 +590,13 @@ jobs:
   # ============================================================================
   # [audit 新增 2026-09-13] 自足 e2e 批量回归：run-all.mjs 依赖探测自动收敛到
   # deps:[] 的 6 套靶场（retest-lab / tamper-matrix / real-world-lab(PGlite) /
-  # recall-lab / detection-runner / waf-lab）。与 recall-lab 单独 job 并存：
-  # 该 job 一次跑齐全部自足套件并输出统一汇总，作为「无 Docker 前提」的 e2e 基线。
-  # 依赖真实 DB 的 12 套靶场由 acceptance job（docker run mysql + init-db）覆盖。
+  # recall-lab（=false-positive.e2e.js，假阳性那套）/ detection-runner / waf-lab）。
+  # 本 job 是「无 Docker 前提」的 e2e 基线；依赖真实 DB 的套件由 acceptance job
+  # （docker run mysql + init-db）覆盖 —— 2026-09-25 起 `recall.e2e.js` 也在那里跑
+  # （原先它是本 job 之外的独立 recall-lab job，那台 runner 没有 mysqld ⇒ 18 条里
+  # 两条真实 MySQL 场景恒 SKIP；现在带 RECALL_REQUIRE_MYSQL=1，跳过即失败）。
+  # ⚠ 两个 runner 里都有叫 "recall-lab" 的条目但**入口不同**：run-all 指
+  #   false-positive.e2e.js（假阳性），acceptance 那一步指 recall.e2e.js（召回 18 条）。
   # ============================================================================
   e2e-self-contained:
     runs-on: ubuntu-latest

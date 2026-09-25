@@ -4,6 +4,39 @@
 
 ## [Unreleased]
 
+### 2026-09-25 批次 · recall-lab 的两条真实 MySQL 场景：自 09-10 写下起第一次进了自动门禁
+
+`e2e/recall-lab/recall.e2e.js` 有 18 条场景，其中 `real_mysql_numeric` / `real_mysql_str`
+需要外部 mysqld。它们此前的实况是：**任何自动路径都跑不到**——
+CI 的 `recall-lab` 独立 job 没有 mysqld（步骤名当时已如实写着"16 条"，另 2 条恒 SKIP），
+而端点写死 `127.0.0.1:3307` 意味着沙箱给的那个端口永远探测不到。
+今天早些时候把端点改成读 `MYSQL_HOST/PORT/USER/PASSWORD`（`real-lab-driver.js:mysqlEndpoint()`，
+默认值不变）之后，这条链路第一次能被指到别处；本轮把它接完：
+
+- **CI**：`recall-lab` 独立 job 删掉，整步并进 `acceptance`（那个 job 自己起 docker mysqld，
+  且 `npm run acceptance` 已经用同一套 `MYSQL_*` env）。建库不需要额外初始化 ——
+  `MYSQL_INIT_SQL` 自带 `CREATE DATABASE IF NOT EXISTS sqli_test`。
+- **判据（关键）**：只搬位置不够。步骤名写着"18 条"，而 mysqld 连不上时套件**仍然退出 0**、
+  只跑 16 条 —— 那个数字就又成了没人验证的宣称（正是这次要修的形状）。
+  所以加 `RECALL_REQUIRE_MYSQL`：声明了它就把"跳过"当失败；CI 那一步显式设 `1`。
+  默认口径不变（本机没起 mysqld 不是代码缺陷，仍然 SKIP + 退出 0）。
+
+**三个方向都真跑过**（新断言必须知道什么输入会让它红）：
+
+| 场景 | 结果 |
+|---|---|
+| 带开关 + 指到没监听的 3399 | RC=1，`[FAIL] real_mysql_* … 未执行`，原因带端口与沙箱命令 |
+| 带开关 + 指到可达的 3306 | RC=0，**18 条 `[PASS]`**（MySQL 两条分别检出 `[union,error,boolean]` / `[boolean]`） |
+| 不带开关 + 不可达 | RC=0，仍打印"跳过真实 MySQL 场景（不 fail）"（默认未变） |
+
+顺带修了收尾那句**误导性的归因**：它原先固定写"存在 must 未命中场景，回归失败"，
+而 `failed` 也可能来自"场景根本没执行"或 `status` 非 completed —— 三种故障查法完全不同，
+归成一句会让人去查一个不存在的问题。现在按明细说原因（`未执行：…` / `未达标：场景（status=…, must 未命中=[…]）`）。
+
+**另外更正一处历史文档**：`docs/optimization-report-2026-08-25.md` 第 101 行把
+"recall-lab 18 场景"当作 CI 结构完整的证据 —— 写的时候与之后很长一段时间里，
+CI 实际只跑 16 条。该报告是当时快照、按本仓口径不改正文，此处留这条为准。
+
 ### 2026-09-25 批次 · 两条入口共用一个守卫：直连模式的 config 曾整段绕过 clamp
 
 收尾清单上挂了两次的那项（"抽公共 config 守卫让直连分支也吃 clamp"）本轮做掉了，
