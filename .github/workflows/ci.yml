@@ -349,6 +349,24 @@ jobs:
           MYSQL_PORT: 3306
           MYSQL_USER: root
           MYSQL_PASSWORD: root
+      # [2026-09-25] WAF A/B 真 MySQL 实验**从周度矩阵挪到这里**（原来只在 schedule /
+      #   workflow_dispatch 上跑 ⇒ 每次 push 都不验，一周一次的门禁对改动等于没有）。
+      #   它是真断言门禁：退出码 0=通过 / 1=判据失败 / 2=连不上 MySQL（显式失败，不静默降级），
+      #   三条判据 = 「两侧都必须有检出」前置 + 拦截率下降 + 高危规则命中下降
+      #   （前置那条是 2026-09-25 补的：A3 通道降级初版把 configA 打到零检出时，
+      #    旧版退出码仍是 0、报告照印 ✅ —— 见 e2e/waf-lab/metrics.js:evaluateAbExperiment）。
+      #   直连 3306 用的是本 job 已起好的 mysqld + 上面 init-db 那份 schema，不需要 Python 沙箱；
+      #   周度矩阵里那份仍保留（它走 run.py 的沙箱路径，顺带验那个启动器）。
+      #   本机实测（指向 127.0.0.1:3306）：9.3s，A=1/1 B=1/1，拦截率 79.4%→45.7%，高危 30→0。
+      - name: WAF A/B 实验（真 MySQL，门禁；周度那份走沙箱路径仍然跑）
+        run: node e2e/waf-lab/compare-real.e2e.mjs
+        env:
+          MYSQL_HOST: 127.0.0.1
+          MYSQL_PORT: 3306
+          MYSQL_USER: root
+          MYSQL_PASSWORD: root
+          MYSQL_DATABASE: sqli_lab
+        timeout-minutes: 6
       # 红队评测靶场（ground-truth 真值对照 + sqlmap 同题对比）：独立常驻进程，
       # CI 环境可能缺 PostgreSQL（D:/pg-smoke 类本地路径），故失败不阻塞——
       # 门禁会把该套件标为 SKIP，其余套件照常判定。
@@ -451,6 +469,9 @@ jobs:
     #    · `e2e/waf-lab/compare-real.run.py` → `compare-real.e2e.mjs` = **真断言门禁**
     #      （`process.exit(pass ? 0 : 1)`，内含 200/表空/靶场异常等硬断言；run.py 忠实透传 rc）。
     #      → **去掉 continue-on-error**：它吞掉的正是真实的红。
+    #      注（2026-09-25）：这道门禁现在**每次 push 都在 acceptance job 里跑**（直连该 job
+    #      自己起的 docker mysqld），本 job 保留的是**经 Python 沙箱启动器**的那条路径 ——
+    #      两者入口同一个脚本， launcher 不同；这里不再是它唯一的执行处，别再按"周度才有"读。
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     steps:
       - uses: actions/checkout@v4

@@ -4,6 +4,27 @@
 
 ## [Unreleased]
 
+### 2026-09-25 批次 · WAF A/B 真 MySQL 门禁从"周度才有"挪到每次 push
+
+`e2e/waf-lab/compare-real.e2e.mjs` 是真断言门禁（0 通过 / 1 判据失败 / 2 连不上库），
+但它此前只挂在 `tamper-waf-matrix` job 上，而那个 job 的 `if:` 是
+`schedule || workflow_dispatch` —— 也就是说**每次 push 都不跑它**。改了 tamper/WAF/通道降级
+的代码，红线要等到下周一才可能亮，这跟"没有门禁"只差一句"反正会红"。
+
+挪法与同批的 recall-lab 一样：`acceptance` job 自己起了 docker mysqld 并有
+"初始化靶场库表"这一步，所以新步骤直连 3306 + `sqli_lab` 即可，不需要 Python 沙箱；
+周度矩阵里那份**保留**（它走 `compare-real.run.py` 的沙箱启动器，顺带验那个 launcher），
+并在两处都写了"这里不再是唯一执行处"，免得注释变成过期结论。
+
+本机按 CI 将用的同一条路径真跑过（不是按沙箱路径跑的）：
+连上 `8.0.28 @ 127.0.0.1:3306/sqli_lab`、`users` 行数=5、9.3s 跑完，
+判据①拦截率 79.4%→45.7% ✅、判据②高危命中 30→0（crs_942141/942142/942180）✅、
+有效性前置 A=1/1 B=1/1 ✅。失败方向也验过：`MYSQL_PORT=3399` ⇒ **RC=2** 并打印两种跑法，
+不会静默当成通过。
+
+这一步的"有效性前置"本身就是同日补的（见下面 A3 那条之前的 `evaluateAbExperiment` 一笔）：
+A3 通道降级初版把 configA 打到零检出时，旧判据仍然退出 0、报告照印 ✅。
+
 ### 2026-09-25 批次 · recall-lab 的两条真实 MySQL 场景：自 09-10 写下起第一次进了自动门禁
 
 `e2e/recall-lab/recall.e2e.js` 有 18 条场景，其中 `real_mysql_numeric` / `real_mysql_str`

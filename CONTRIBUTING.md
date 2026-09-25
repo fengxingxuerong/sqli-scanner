@@ -30,6 +30,7 @@ docs/                设计文档与对标分析
      `MYSQL_HOST/PORT/USER/PASSWORD` 注入，SKIP 时会打印究竟是哪一类原因）。
      CI 的 `acceptance` job 里有 mysqld，故那一步带 `RECALL_REQUIRE_MYSQL=1` 跑满 18 条 ——
      **这个开关的语义是"跳过按失败处理"**：步骤名写着 18 就必须真跑到 18，否则静默降级成 16
+     （首次 CI 实跑 2026-09-25：两条 MySQL 场景分别检出 `[union,error,boolean]` / `[boolean]`，该步 45s）
    - 以上用例数以 `docs/_facts.json` 为准（`node scripts/facts-sync.mjs --refresh` 重采）
 
 ## 日志输出
@@ -72,5 +73,5 @@ docs/                设计文档与对标分析
 - [ ] `npm test`（前端）全绿
 - [ ] `cd server && npm test`（服务端）全绿
 - [ ] 涉及检测/提取：`python e2e/run-with-sandbox.py e2e/recall-lab/recall.e2e.js` 18 场景全 PASS（直跑只有 16，MySQL 组 SKIP 不算绿）
-- [ ] 涉及 tamper/WAF：`npm run tamper-matrix` 与 `python e2e/waf-lab/compare-real.run.py`（真 MySQL 装置；`npm run waf-e2e` 指向的是 2026-09-18 已废弃的空壳靶场，别再用）
+- [ ] 涉及 tamper/WAF：`npm run tamper-matrix` 与 `python e2e/waf-lab/compare-real.run.py`（真 MySQL 装置；`npm run waf-e2e` 指向的是 2026-09-18 已废弃的空壳靶场，别再用）。后者是**门禁**（0 通过 / 1 判据失败 / 2 连不上库），2026-09-25 起 CI 每次 push 也在 acceptance job 里直连该 job 自己的 mysqld 跑一遍，不必等周度矩阵
 - [ ] 更新 `README.md` 功能表与测试数字（如受影响）
