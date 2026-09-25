@@ -54,7 +54,19 @@ function multiEngineJarEnv() {
 const LABS = [
   { name: 'redteam-lab', desc: '红队评测：24 靶点（17 注入 + 7 安全对照，自起环境）', entry: 'e2e/redteam-lab/run-with-env.mjs', args: ['r2'], deps: [] },
   { name: 'retest-lab', desc: '单点重测接口端到端（自起靶场）', entry: 'e2e/retest-lab/verify.mjs', deps: [] },
-  { name: 'multi-engine-lab', desc: '多引擎 tamper A/B（真 JDBC：H2/HSQLDB/Derby）', entry: 'e2e/multi-engine-lab/verify.mjs', deps: ['java'], env: multiEngineJarEnv },
+  { name: 'multi-engine-lab', desc: '多引擎 tamper A/B（真 JDBC：H2/HSQLDB/Derby，挂 CRS）', entry: 'e2e/multi-engine-lab/verify.mjs', deps: ['java'], env: multiEngineJarEnv },
+  // [CI-FIX 2026-09-25] 同一份 verify 的 NO_WAF 档必须也注册。为什么两条不能合成一条：
+  //   CRS-on 档实测 36 格全空（≈PL3 把探针整档 403，MySQL 上也是这个形状），
+  //   所以 CI 上一轮虽然真的下载并校验了 4 个引擎 jar，跑的却是**唯一证不出任何事的那一档** ——
+  //   判定行印成 `tamper 收益 on(0) ≥ off(0)=✅`，0≥0 空转。检测/定库类断言只在无 WAF 档成立，
+  //   而那档此前只有我手动跑过、产物入库、门禁里没有它。产物文件名按档分开（.no-waf 后缀），不互相覆盖。
+  { name: 'multi-engine-lab-no-waf', desc: '多引擎覆盖面（同靶场去掉 CRS：布尔/UNION/回显定库，检测类断言挂这档）', entry: 'e2e/multi-engine-lab/verify.mjs', deps: ['java'], env: () => ({ ...multiEngineJarEnv(), NO_WAF: '1' }) },
+  // [CI-FIX 2026-09-25] 这个脚本 2026-09-22 起就在文档里写着"退出码 0 = 全通过 / 期望 PASS 16"，
+  //   但从来没进过 run-all，也没进过 CI —— 于是"H2/HSQLDB/Derby/MonetDB 的方言模板真机能跑"
+  //   这几句结论自那天起没有再被执行过一次。本机实测 1.6s、16 条全绿 ⇒ 挂进去的代价接近零。
+  //   它跑的是模板 SQL 在真引擎上的**可执行性 + 反证**（Derby 拒 GROUP_CONCAT、HSQLDB 拒 SEPARATOR CHAR），
+  //   与 multi-engine-lab 的检测通道覆盖不重叠。
+  { name: 'dialect-templates', desc: '方言模板真机可执行性 + 反证（H2/HSQLDB/Derby/MonetDB，真 JDBC）', entry: 'e2e/multi-engine-lab/verify-dialect-templates.mjs', deps: ['java'], env: multiEngineJarEnv },
   { name: 'tamper-matrix', desc: 'tamper × WAF 规则绕过矩阵', entry: 'e2e/tamper-matrix/tamper-test.mjs', deps: [] },
   { name: 'real-world-lab', desc: '拟真靶场（登录/搜索/上传，PGlite 内置）', entry: 'e2e/real-world-lab/verify.mjs', deps: [] },
   { name: 'real-mysql-lab', desc: '真实 MySQL 驱动靶场验证', entry: 'e2e/real-mysql-lab/verify.mjs', deps: ['sandbox'] },

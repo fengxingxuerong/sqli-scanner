@@ -145,7 +145,7 @@ OWASP 分类统一为 `A03:2021-Injection`。**未收录的通道不会被静默
 | 等级 | 方言 | 证据 |
 |---|---|---|
 | ✅ **真实引擎验证**（检测/绕过主链路跑通） | MySQL、MariaDB、PostgreSQL、SQLite、Oracle（2026-09-15，e2e/oracle-lab）、SQL Server（2026-09-14，e2e/mssql-lab） | 真 MySQL 8.0.x（`e2e/real-mysql-lab` + `e2e/waf-real`）、真 MariaDB 11.4.13（`e2e/multi-engine-lab/mariadb-verify.mjs`）、PGlite 18.3、sql.js WASM、真 PostgreSQL 16.2（`e2e/oob-real-lab` OOB 带外全链路）、**真 SQL Server 2022 Express 16.0.1000.6**（`e2e/mssql-lab`：双上下文三通道 + 拖库 5/5 + os-shell，2026-09-22 补证，见 `e2e/mssql-lab/results/VERIFICATION-2026-09-22.md`）、**真 Oracle AI Database 26ai Free 23.26.3.0.0**（`e2e/oracle-lab`：双上下文三通道 + 拖库 5/5） |
-| ⚠️ **部分通道验证** | H2、HSQLDB、Derby | `e2e/multi-engine-lab`（真实 JDBC 内存库，仅布尔通道 × CRS） |
+| ⚠️ **部分通道验证** | H2、HSQLDB、Derby | `e2e/multi-engine-lab`（真实 JDBC 内存库）。**口径按档分开，别混着引**：无 WAF 档 = 三引擎布尔通道 9/9 检出，回显定库 H2/HSQLDB 成功、**Derby 定不出**；挂 CRS 的 ≈PL3 档 = **0/9**（CRS 把探针整档拦掉，该档只验了 safe 零误报）。⇒ 这三库的覆盖面**不含**"CRS 下检出"；09-09 那份 P3 报告里"tamper 打穿 CRS 后 error 通道检出"今已不可复现，见该文件顶部的过期声明 |
 | ⛔ **模板适配（未在真实 DBMS 验证）** | TiDB、DM8、ClickHouse、DB2、Sybase、Firebird、Informix、Access、MonetDB | 仅有检测/提取模板；方言语法、列类型、报错文本均可能有偏差 |
 
 **OOB 带外通道实测口径（2026-09-11 起）**：

@@ -4,6 +4,52 @@
 
 ## [Unreleased]
 
+### 2026-09-25 批次 · CI 真跑的偏偏是唯一证不出事的那一档
+
+上一轮忙完，远端 run `09a5e92` 的日志第一次出现了 `▶ multi-engine-lab ... ✅ 通过 6.6s`
+（4 个引擎 jar 逐个 sha1 校验通过）。我当时把它当成果报给自己，但同一行里就写着：
+
+```
+[判定] 断言：safe 零误报=✅　tamper 收益 on(0) ≥ off(0)=✅　桥存活=✅
+```
+
+`0 ≥ 0` 空转成立。翻 `results/multi-engine-report.json`：CRS-on 档 **36 格全空**，连 `dbms`
+都是 null。也就是说 —— 下载 jar、校验 sha1、注入 `ENGINE_JARS` 这条链全在干活，跑的却是
+**唯一证不出任何事的那一档**（≈PL3 全规则档把探针整条 403；`acceptance.mjs:380` 对 MySQL
+早就记过同一件事：「PL3 下 off=on=0」）。真正有信息量的 `NO_WAF=1` 档只在我手动跑过一次，
+产物入了库，**门禁里没有它**。
+
+1. **补注册两档，都挂在同一个 java 依赖上**（`e2e/run-all.mjs`）：
+   `multi-engine-lab-no-waf`（`verify.mjs` + `NO_WAF=1`，检测/定库类断言只在这档成立）与
+   `dialect-templates`（`verify-dialect-templates.mjs`，16 条"方言模板在真引擎上可执行 + 反证"
+   —— 它 09-22 起就写在 `docs/P2-dialect-probe-2026-09-22.md` 的"退出码 0 = 全通过"里，
+   却从没进过任何门禁）。本机实测 6.4s / 4.4s / 1.5s。
+   顺手统一退出码口径：dialect 脚本缺 `ENGINE_JARS` 时原本退 2，而 run-all 的跳过判据是
+   `code===0 && /\[SKIP\]/` ⇒ 一台没放 jar 的机器会把"环境没配"报成"测试挂了"。改成 `[SKIP]` + 0。
+2. **接上一个从没被读过的字段**：`SCENARIOS[].must = ['boolean']` 自写下来没有任何一处引用它，
+   于是"某引擎退化到只剩 error 通道"照样 ✅。现在它进判定（且只在无 WAF 档进 —— CRS 档 0 检出时
+   挂它就是永久红）。变异：给 num 的 `must` 加一个不存在的 `stacked` ⇒ `rc=1` 且原因点名缺哪个通道。
+3. **定库从"印一行警告"变成断言**：新增 `expectDbms`，取值是这轮从产物里读出来的事实
+   （H2→`H2`、HSQLDB→`HSQLDB`、Derby→**null，即"当前定不出"**）。双向漂移都红：丢了 ⇒ 红；
+   Derby 哪天真定出来了 ⇒ 也红，并明确提示"把基线和 README 覆盖面一起改，别只改代码"。
+   两条变异各 `rc=1`。原来那句"定库与真实引擎不符 = 误判，比定不出库更糟"只 `console.log`，
+   现在同样进判定 —— 误判会直接写进交付报告的 DBMS 字段。
+4. **说明列学会了说"丢了一部分"**：上一版只分红 on 空/非空，于是 `derby/str`
+   （`off=union,error,boolean` → `on=error,boolean`，**union 被打掉**）印成「tamper 后检出」。
+   改成集合差分（`丢失 X` / `新增 X` / `技术位与 tamper 前一致`），并给表格加"定库 off/on"列
+   —— "哪条通道才带得出库名"此前只在控制台里，跑完就没。
+5. **档位不再由我手敲**：报告抬头的 `≈PL3` 原本是字面量，`CRS_PL=1` 跑出来的产物照样印 PL3；
+   现在取 `crs-engine` 的 `EFFECTIVE_PL`，且非默认档写独立文件名（`.pl1`），一次改档探索不会再
+   悄悄覆盖入库基线。判定行也自证：空转时印「✅（空转：两侧均 0，本档不证明绕过能力）」，
+   CRS 档直接写明"检测类断言本档不适用"。
+6. **撤下 README 那句没有证据的"× CRS"**：覆盖面表里 `H2、HSQLDB、Derby …… 仅布尔通道 × CRS`
+   溯到 2026-09-09 的 `results/p3-multi-engine-report.md`（那晚记的是"tamper 打穿 CRS 后
+   H2/Derby 的 error 通道检出"）。同一套设施今天复跑 = 0/9 ⇒ 那句结论**已不可复现**
+   （这些天 CRS 执行器改过保真度：`+`→空格、PL 区块截断、FILES 停止预解码，尺子变了）。
+   处置：P3 原件顶部加失效声明并**保留**（它记录的是那天的实验，删掉等于把负记录也扔了），
+   README 改成按档分开引 —— 无 WAF 档给覆盖面与定库，CRS 档只给"safe 零误报"。
+
+
 ### 2026-09-25 批次 · multi-engine-lab：Linux 上必崩的 classpath、永远退 0 的"门禁"、以及印了五天的反向结论
 
 远端连着两次红都在同一步（`e2e-self-contained` → run-all → multi-engine-lab），
