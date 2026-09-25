@@ -495,9 +495,11 @@ jobs:
         continue-on-error: true
       # 真断言门禁（exit(pass?0:1)）：**故意不加 continue-on-error** ——
       # 之前它吞掉了真实的红（同族：`node <不存在的文件>` + continue-on-error = 空转门禁）。
-      # 本 job 只跑 schedule/dispatch，红也不会阻塞 PR，但会如实反映在 job 结论里。
+      # 本 job 只跑 schedule/dispatch；同一道门禁**自 2026-09-25 起每次 push 也在 acceptance
+      # job 里直连跑一遍**（那条会真的拦 PR）。本步的价值是走 **Python 沙箱启动器**这条路，
+      # 顺带验 `compare-real.run.py` 自己 —— 红也会如实反映在本 job 结论里。
       - run: python3 e2e/waf-lab/compare-real.run.py
-        name: WAF 规则实验室（真 MySQL 沙箱 A/B，断言门禁）
+        name: WAF 规则实验室（真 MySQL 沙箱 A/B，断言门禁；push 侧另有一份直连）
         timeout-minutes: 10
       # 测量产物必须能取回，否则这一步等于白跑。
       - name: 上传矩阵与 A/B 产物
