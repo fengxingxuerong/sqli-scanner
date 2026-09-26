@@ -122,6 +122,25 @@ export async function pgAvailable() {
 }
 
 // —— 真实 MySQL/MariaDB 靶场（需本地 mysqld，便携 ZIP 即可）——
+
+/**
+ * MySQL 端点，四项都可由 env 覆盖，**默认值与历史完全一致**（127.0.0.1:3307、root/root）。
+ *
+ * 为什么必须走 env：`e2e/run-with-sandbox.py` 起的是**隔离 mysqld**，并把
+ * MYSQL_HOST/PORT/USER/PASSWORD 注入子进程；端点写死 3307 意味着沙箱给的那个端口
+ * 永远探测不到 ⇒ 这两个场景**在本机没有任何一条命令能跑到它们**（自 09-10 新增起
+ * 实况如此）。"存在但从不执行"的断言比没有断言更糟 —— 它会让文档、CI 步骤名和
+ * CONTRIBUTING 都写着一个没人验证过的数字。
+ */
+export function mysqlEndpoint() {
+  return {
+    host: process.env.MYSQL_HOST || '127.0.0.1',
+    port: Number(process.env.MYSQL_PORT || 3307),
+    user: process.env.MYSQL_USER || 'root',
+    password: process.env.MYSQL_PASSWORD ?? 'root',
+  };
+}
+
 export const MYSQL_INIT_SQL = [
   "CREATE DATABASE IF NOT EXISTS sqli_test CHARACTER SET utf8mb4",
   "USE sqli_test",
@@ -137,23 +156,37 @@ export function buildMysqlTarget(injectValue, ctxType = 'numeric') {
   };
   return {
     mode: 'direct',
-    // [P0-FIX 2026-09-11] password：本机 3307 实例为 root/root（root 无密码会 Access denied，
-    // 该场景自 09-10 新增以来因 mysql2 不可用被跳过，从未真正跑通）。MYSQL_PASSWORD 兜底。
-    db: { driverType: 'mysql', host: '127.0.0.1', port: 3307, user: 'root', password: process.env.MYSQL_PASSWORD ?? 'root', initSql: MYSQL_INIT_SQL },
+    // 端点来自 mysqlEndpoint()：默认仍是本机 3307 的 root/root 实例（历史口径不变），
+    // 但沙箱/CI 可用 MYSQL_* 指到别的实例上 —— 见 mysqlEndpoint 的注释。
+    db: { driverType: 'mysql', ...mysqlEndpoint(), initSql: MYSQL_INIT_SQL },
     sqlTemplate: templates[ctxType] || templates.numeric,
     originalValue: String(injectValue),
     config: { dbms: 'MySQL' },
   };
 }
 
+/**
+ * 真实 MySQL 场景的前置检查。**返回 {ok, why} 而不是布尔**：原来两种完全不同的成因
+ * （驱动解析不到 / 服务端没起）共用调用方那一句「mysql2 不可用」，把"没装依赖"和
+ * "没起库"混成一条信息 —— 本轮就是被这句话误导过一次：实际原因是 3307 根本没监听，
+ * 而驱动一直解析得好好的（`_serverRequire` 走的是 server/package.json）。
+ * 混合的跳过原因会让人去修一个不存在的问题，比不跳过更费时间。
+ */
 export async function mysqlAvailable() {
+  const ep = mysqlEndpoint();
   try {
     _serverRequire('mysql2');
-  } catch {
-    return false;
+  } catch (e) {
+    return { ok: false, why: `驱动 mysql2 解析失败（${e.code || e.message}）—— 先 cd server && npm install` };
   }
-  // 驱动存在 ≠ 服务端就绪：探测 127.0.0.1:3307 TCP 连通性，未连通时 skip，避免 ECONNREFUSED 误判为 must-miss。
-  return _probeMysql('127.0.0.1', 3307);
+  // 驱动存在 ≠ 服务端就绪：探**配置里那个端点**（不是写死的 3307），未连通时 skip，
+  // 避免 ECONNREFUSED 被误判成 must-miss。
+  if (await _probeMysql(ep.host, ep.port)) return { ok: true, why: '' };
+  return {
+    ok: false,
+    why: `MySQL 未监听 ${ep.host}:${ep.port}（user=${ep.user}）。要跑这两个场景就走隔离沙箱：` +
+      'python e2e/run-with-sandbox.py node e2e/recall-lab/recall.e2e.js',
+  };
 }
 
 function _probeMysql(host, port) {

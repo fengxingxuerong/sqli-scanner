@@ -2,11 +2,17 @@
 // ============================================================================
 // scripts/ci-local.mjs —— 把 .github/workflows/ci.yml 的门禁清单在本机按同一顺序跑一遍
 //
-// 为什么要它：本仓**没有远端**（只有一个本地裸仓 backup），GitHub Actions 从未执行过，
-// 于是 ci.yml 里那 12 个 job 全是"写了但没跑过"的声明。上一轮复查就撞过这个后果：
-// ci.yml 的服务端类型检查步骤（checkJs，覆盖 36.7k 行 JS）在任何开发机上都不跑
-// —— 本地 `npm run typecheck` 只查前端，一处 TS2339 因此进了提交。
+// 为什么要它：本仓的门禁清单**只能靠本机跑**。历史上它连远端都没有（只有一个本地裸仓
+// backup），GitHub Actions 从未执行过，于是 ci.yml 里那 12 个 job 全是"写了但没跑过"的
+// 声明。上一轮复查就撞过这个后果：ci.yml 的服务端类型检查步骤（checkJs，覆盖 36.7k 行 JS）
+// 在任何开发机上都不跑 —— 本地 `npm run typecheck` 只查前端，一处 TS2339 因此进了提交。
 // 「CI 绿」这件事不能靠口口相传，也不能靠人肉记 15 条命令（记不全就一定漏）。
+//
+// [2026-09-24 更正本段口径] origin 现在已经存在（GitHub 上同名仓库），但**这不代表 CI 跑过**：
+// 那些提交是经 Contents API 推上去的（scripts/push-via-api.mjs），推送是否触发 Actions、
+// Actions 是否成功，本机无从核实（无 gh CLI，也没有留存在仓库里的运行回执）。
+// 所以本脚本的地位不变：它是**唯一能当场逐条取真实退出码**的门禁；要看 CI 结论请去
+// 仓库的 Actions 页确认，别把"有远端"当成"门禁跑过"。
 //
 // 与 CI 的关系（重要，别把它当 CI 的替身）：
 //   · 覆盖：与平台无关的那 9 个 job 的命令序列，逐条取真实退出码；
@@ -89,7 +95,11 @@ const GATES = [
   // CRS 执行器保真度：本仓 WAF 数字全部出自自实现 SecRule 执行器（本机无 Docker/Go，跑不了真
   // ModSecurity/Coraza），所以"执行器像不像 CRS"必须有外部真值兜住 —— 这里用 CRS 官方回归集。
   // 不需要 MySQL，故与 lint 同组（真 CI 里也应放在 lint job）。
-  { id: 'lint', name: 'CRS 执行器保真度（官方回归集 805 例）', cmd: 'npm run waf-fidelity' },
+  { id: 'lint', name: 'CRS 执行器保真度（官方回归集 805 例｜族 942）', cmd: 'npm run waf-fidelity' },
+  // 族 930 与 942 同受门禁管（基线各自一份文件）。这里**必须与 ci.yml 各写一行**：
+  // 门禁族名单写在 crs-equivalence.mjs 里，跑不跑它是 CI/本地清单的事 —— 只改代码不改清单，
+  // "930 受管"就只对读代码的人成立。守卫见 server/tests/crsGatedFamilies.wiring.test.js。
+  { id: 'lint', name: 'CRS 执行器保真度（官方回归集 38 例｜族 930）', cmd: 'npm run waf-fidelity:930' },
   { id: 'lint', name: 'CRS 规则原文与上游逐字节一致', cmd: 'node scripts/fetch-crs-assets.mjs --verify-rules' },
   // tamper 覆盖率同样是对外口径：README 写"覆盖 sqlmap 官方 tamper 全集"，那就对上游清单核一次
   // （清单快照已入库，离线可跑；缺失集合走"只减不增"基线）。
@@ -104,9 +114,16 @@ const GATES = [
   { id: 'test-frontend', name: '前端构建', cmd: 'npm run build' },
   { id: 'test-server', name: '服务端单测', cmd: 'cd server && npm test' },
   { id: 'test-server', name: '服务端覆盖率门禁', cmd: 'cd server && npm run test:coverage', slow: true },
+  // 变异门禁（断言敏感度）：与 ci.yml 同名步骤对应（守卫见 server/tests/mutationGate.wiring.test.js）。
+  // 本地默认快档（--limit=8），全量 `npm run mutation` 留给 CI 慢车道/手动。
+  { id: 'test-server', name: '变异门禁（断言敏感度，快档）', cmd: 'node scripts/mutation-check.mjs --limit=8', slow: true },
   { id: 'audit', name: 'npm audit（前端 prod）', cmd: 'npm audit --omit=dev --audit-level=high' },
   { id: 'audit', name: 'npm audit（服务端）', cmd: 'cd server && npm audit --audit-level=high' },
   { id: 'e2e-self-contained', name: 'run-all（自足靶场 + 依赖探测）', cmd: 'node e2e/run-all.mjs', slow: true },
+  // 入库基线漂移检查：与 ci.yml 的 e2e-self-contained 同名步骤一一对应（守卫见
+  // server/tests/artifactDrift.wiring.test.js —— 只改一边就会红）。
+  { id: 'e2e-self-contained', name: '入库基线漂移检查（产物必须等于当前代码跑出来的那份）',
+    cmd: 'node scripts/artifact-drift.mjs' },
   { id: 'recall-lab', name: 'recall-lab e2e', cmd: 'node e2e/recall-lab/recall.e2e.js' },
   { id: 'release-smoke', name: '发布冒烟（生产配置组合）', cmd: 'node e2e/release/release-smoke.mjs' },
   { id: 'sidecar-build', name: 'sidecar SEA 构建 + 空目录真扫冒烟', cmd: 'npm run build:sidecar', slow: true },
@@ -140,6 +157,14 @@ const EXCLUDED_JOBS = {
     'tamper-test.mjs 是纯测量（非门禁，保留 continue-on-error）；' +
     'compare-real.run.py 是真断言门禁（已去掉 continue-on-error，红会如实报告）。',
   docker: '本机无 docker（实测 `docker --version` exit 127）',
+  // [2026-09-27] 真机 ModSecurity 对拍：整条链路的前提就是「真实 owasp/modsecurity-crs:nginx
+  // 容器」，本机无 docker 就没有任何等价替代（自实现 crs-engine 恰恰是它要**对照**的对象，
+  // 拿它跑一遍等于自己验自己）。触发方式与 tamper-waf-matrix 同款（schedule / 手动 dispatch）。
+  'modsec-live':
+    '真机 WAF 对拍：需要 docker 起 owasp/modsecurity-crs:nginx 容器（本机无 docker，exit 127）。' +
+    '本机可跑的只有**静态**那一半（`node e2e/waf-real/tamper-sweep.mjs`，走自实现 crs-engine），' +
+    '而本 job 的存在意义正是拿真引擎去对照静态口径 —— 没有容器就没有对照对象。' +
+    '想看结果：GitHub 上手动 dispatch 一次，报告以 artifact 形式下载。',
 };
 
 // GATES 覆盖到的 job 名（`typecheck` 不是 ci.yml 的 job 而是 lint job 内的步骤，一并计入无害）

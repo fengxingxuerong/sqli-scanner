@@ -606,6 +606,25 @@ export function capHeavyFunctions(filled) {
 }
 
 /**
+ * 字面量替换：绝不解释 `$&` / `$'` / `` $` `` / `$$`。
+ *
+ * 为什么必须有：`String.prototype.replace/replaceAll` 的**字符串**替换值里，`$` 序列是
+ * 有特殊含义的（`$&` = 整个匹配、`` $` `` = 匹配之前的部分、`$'` = 之后的部分、`$$` = 字面 `$`）。
+ * 而本项目所有占位符的值都来自**不可信侧**：{ORIG} 是目标参数的原值（Burp 抓包导进来的），
+ * {BD} 是闭合前缀，{CALLBACK}/{DOMAIN} 是用户配置的带外地址。含 `$` 的原值会被静默改写，
+ * 发出去的就不再是设计好的那条 payload —— 实测 fillPayload("{ORIG}' AND '1'='1", {orig:"d$'q"})
+ * 产出 `d' AND '1'='1q' AND '1'='1`（模板尾巴被拼进了值里）。split/join 没有这层语义。
+ *
+ * @param {string} haystack 待替换文本
+ * @param {string} needle 字面量占位符（不是正则）
+ * @param {string} value 原样写入的值
+ * @returns {string}
+ */
+export function replaceAllLiteral(haystack, needle, value) {
+  return String(haystack).split(needle).join(String(value));
+}
+
+/**
  * 填充 payload 模板中的占位符
  * @param {string} template 含占位符的模板
  * @param {{orig?: string, sleep?: number, num?: number, sep?: string, bd?: string}} vars 占位符值
@@ -614,13 +633,19 @@ export function capHeavyFunctions(filled) {
  */
 export function fillPayload(template, vars = {}) {
   const v = clampTimeVars(vars);
+  const values = {
+    ORIG: v.orig ?? '',
+    BD: v.bd ?? '',
+    SLEEP: String(v.sleep ?? 1),
+    NUM: String(v.num ?? Math.floor(Math.random() * 9000) + 1000),
+    SEP: v.sep ?? '-- -',
+  };
   return capHeavyFunctions(
-    template
-      .replaceAll('{ORIG}', v.orig ?? '')
-      .replaceAll('{BD}', v.bd ?? '')
-      .replaceAll('{SLEEP}', String(v.sleep ?? 1))
-      .replaceAll('{NUM}', String(v.num ?? Math.floor(Math.random() * 9000) + 1000))
-      .replaceAll('{SEP}', v.sep ?? '-- -')
+    // 单趟 + 函数替换：既避开 $& / $' / `` $` `` / $$ 的替换语义，也杜绝「值里恰好写着
+    // 另一个占位符」时被二次展开（链式 replace 两条都躲不开）。未知占位符原样保留。
+    String(template).replace(/\{(\w+)\}/g, (m, key) =>
+      Object.hasOwn(values, key) ? values[key] : m
+    )
   );
 }
 

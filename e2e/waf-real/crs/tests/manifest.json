@@ -300,9 +300,34 @@
       "sha256": "c743b7416af36a0d57f8481e691e54d6540d23ae13ec7dcb0c6ae1ad4be40045",
       "bytes": 1439,
       "upstream": "https://raw.githubusercontent.com/coreruleset/coreruleset/v4.1.0/tests/regression/tests/REQUEST-942-APPLICATION-ATTACK-SQLI/942560.yaml"
+    },
+    "crs/tests/930/930100.yaml": {
+      "sha256": "236a2cb6331d492664c47f5f9c51e781e5875fe00b752b5977100606d3033628",
+      "bytes": 2392,
+      "upstream": "https://raw.githubusercontent.com/coreruleset/coreruleset/v4.1.0/tests/regression/tests/REQUEST-930-APPLICATION-ATTACK-LFI/930100.yaml"
+    },
+    "crs/tests/930/930110.yaml": {
+      "sha256": "edd2d9c9e83a0f813994e27e6234822db7d98452b259b20c94ab9cefd3a7a551",
+      "bytes": 7333,
+      "upstream": "https://raw.githubusercontent.com/coreruleset/coreruleset/v4.1.0/tests/regression/tests/REQUEST-930-APPLICATION-ATTACK-LFI/930110.yaml"
+    },
+    "crs/tests/930/930120.yaml": {
+      "sha256": "e507b6f79adf80b7c347e0e870d6cbfcb5b2b7840fb56be0994a1ba4b84ef0a2",
+      "bytes": 6240,
+      "upstream": "https://raw.githubusercontent.com/coreruleset/coreruleset/v4.1.0/tests/regression/tests/REQUEST-930-APPLICATION-ATTACK-LFI/930120.yaml"
+    },
+    "crs/tests/930/930121.yaml": {
+      "sha256": "2c835f491002076494b56f263aef09a30cd9b7c933533cca048348541caefe90",
+      "bytes": 7711,
+      "upstream": "https://raw.githubusercontent.com/coreruleset/coreruleset/v4.1.0/tests/regression/tests/REQUEST-930-APPLICATION-ATTACK-LFI/930121.yaml"
+    },
+    "crs/tests/930/930130.yaml": {
+      "sha256": "a9fd5175e1b20d91ff190ea464e80612ad3cfd43c6ba5198f85c0cb15957ec44",
+      "bytes": 1090,
+      "upstream": "https://raw.githubusercontent.com/coreruleset/coreruleset/v4.1.0/tests/regression/tests/REQUEST-930-APPLICATION-ATTACK-LFI/930130.yaml"
     }
   },
-  "fetchedAt": "2026-09-19T09:00:12.214Z",
+  "fetchedAt": "2026-09-24T14:49:31.448Z",
   "rules": {
     "crs/REQUEST-942-SQLI.conf": {
       "sha256": "d4aadc8142fee78a85d63a8b774b7cfb66068e6be107d06dc7b34bf6f1d12b7a",
@@ -314,6 +339,18 @@
       "sha256": "ccb7898b64a1ba44030a2267eb9761fd15b49f453a48b9e739a77c9c62fc1d60",
       "bytes": 8078,
       "upstream": "https://raw.githubusercontent.com/coreruleset/coreruleset/v4.1.0/rules/REQUEST-930-APPLICATION-ATTACK-LFI.conf",
+      "tag": "v4.1.0"
+    },
+    "crs/lfi-os-files.data": {
+      "sha256": "6dceddeb870a0e70166b29e59551a51264a400bea7b33fa4ac921e100d6e16ae",
+      "bytes": 11677,
+      "upstream": "https://raw.githubusercontent.com/coreruleset/coreruleset/v4.1.0/rules/lfi-os-files.data",
+      "tag": "v4.1.0"
+    },
+    "crs/restricted-files.data": {
+      "sha256": "611991160f26c49c03ca393705f30181f9dae3da354aded4945472627837a027",
+      "bytes": 3996,
+      "upstream": "https://raw.githubusercontent.com/coreruleset/coreruleset/v4.1.0/rules/restricted-files.data",
       "tag": "v4.1.0"
     }
   }

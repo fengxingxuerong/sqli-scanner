@@ -25,10 +25,15 @@
 //   ⑪⑫ 盲注字典：修复后 SUB_FN.Derby（substr）真机可执行；反证 Derby 拒绝 substring…FROM…FOR
 //   ⑬⑭ ASCII_FN.Derby === null，且真机反证 Derby 确无 unicode()/ascii()（结构性不支持）
 //
-// 前置守卫：若未设置 ENGINE_JARS，脚本会在跑断言前探测驱动，命中 `No suitable driver`
-//   即打印用法并以退出码 2 退出 —— 避免把「漏设环境变量」误判成「方言模板回归」。
+// 前置守卫：若未设置 ENGINE_JARS，脚本在跑断言前探测驱动，命中 `No suitable driver`
+//   即打印用法并**按设计跳过**（[SKIP] + 退出码 0）—— 避免把「漏设环境变量」误判成
+//   「方言模板回归」。
 //
-// 退出码：0 = 全部断言通过；1 = 有断言失败；2 = 环境未就绪（缺 ENGINE_JARS）。
+// 退出码口径改动（2026-09-25）：原来这里退 2。退 2 在本仓的语义是"前提失效"，但
+//   `e2e/run-all.mjs` 把非 0 一律记成 ❌ 失败（它的跳过判据是 `code===0 && /\[SKIP\]/`），
+//   于是把本脚本注册进 run-all 之后，任何一台没放 jar 的机器都会把"环境没配"报成"测试挂了"。
+//   统一到仓库既有口径：跳过要说得出理由、退出码 0；红只留给真正的断言失败。
+//   退出码：0 = 通过或按设计跳过（输出里有 [SKIP]）；1 = 有断言失败。
 // ============================================================================
 import { EngineBridgeClient } from './lab-app.mjs';
 import { buildStackPageSql } from '../../server/src/engine/Exploiter.js';
@@ -44,13 +49,14 @@ const bridge = new EngineBridgeClient().start();
   const probe = await bridge.query('hsqldb', 'SELECT 1 FROM (VALUES(0)) v(x)');
   const err = String(probe.error || '');
   if (!probe.ok && /No suitable driver/i.test(err)) {
-    console.error('[ENV ERROR] JVM 未加载 JDBC 驱动（No suitable driver）。');
-    console.error('  原因：未设置 ENGINE_JARS 环境变量 → classpath 为空。');
-    console.error('  用法：ENGINE_JARS="D:\\engines\\jars\\h2.jar;D:\\engines\\jars\\hsqldb.jar;' +
+    console.log('[SKIP] dialect-templates 本轮零断言 —— JVM 未加载 JDBC 驱动（No suitable driver）。');
+    console.log('  原因：未设置 ENGINE_JARS 环境变量 → classpath 为空。');
+    console.log('  用法：ENGINE_JARS="D:\\engines\\jars\\h2.jar;D:\\engines\\jars\\hsqldb.jar;' +
       'D:\\engines\\jars\\derby.jar;D:\\engines\\jars\\derbyshared.jar" node ' +
       'e2e/multi-engine-lab/verify-dialect-templates.mjs');
-    console.error('  注：这是环境配置问题，不是方言模板缺陷——请勿据此判定代码回归。');
-    process.exit(2);
+    console.log('  注：这是环境配置问题，不是方言模板缺陷——请勿据此判定代码回归（也别据此判定通过）。');
+    bridge.stop();
+    process.exit(0);
   }
 }
 

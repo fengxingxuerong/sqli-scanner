@@ -17,7 +17,7 @@ import { createMysqlLabApp } from '../real-mysql-lab/lab-app.js';
 const require = createRequire(new URL('../../server/package.json', import.meta.url));
 const mysql = require('mysql2/promise');
 const HERE = dirname(fileURLToPath(import.meta.url));
-const { evaluate, fromExpress } = await import(pathToFileURL(resolve(HERE, './crs-engine.js')).href);
+const { evaluate, fromExpress, EFFECTIVE_PL } = await import(pathToFileURL(resolve(HERE, './crs-engine.js')).href);
 const { ScanManager } = await import(pathToFileURL(resolve(HERE, '../../server/src/engine/ScanManager.js')).href);
 
 const PORT = 8153;
@@ -95,20 +95,33 @@ for (const sc of SAFE) {
 server.close();
 await pool.end().catch(() => {});
 mkdirSync(resolve(HERE, 'results'), { recursive: true });
+// 产物文件名带档：默认口径 PL1 占无名那份，其余档各写各的（同 waf-verify.mjs 的 SUFFIX 规则）。
+//   否则一次 `CRS_PL=4` 的探索会把入库那份 PL1 取证文件换成 0/0 的形状。
+const OUT_SUFFIX = EFFECTIVE_PL === 1 ? '' : `.pl${EFFECTIVE_PL}`;
 writeFileSync(
-  resolve(HERE, 'results', 'waf-auto-check.json'),
-  JSON.stringify({ generatedAt: new Date().toISOString(), wafHits: WAF_HITS, techBits: bits, safeFalsePositive: falsePositive, rows }, null, 2)
+  resolve(HERE, 'results', `waf-auto-check${OUT_SUFFIX}.json`),
+  JSON.stringify({ generatedAt: new Date().toISOString(), paranoiaLevel: EFFECTIVE_PL, wafHits: WAF_HITS, techBits: bits, safeFalsePositive: falsePositive, rows }, null, 2)
 );
 // 人工挂链基线不再写死。原来这里是字面量「基线 = 10」，而 2026-09-19 复测实测是 8 ——
 // 写死的对照数不会随被测代码变化，等于长期说谎。改成从 waf-verify 落盘的报告里读；
 // 没跑过 waf-real 时明确显示「未采集」，不猜。
-let manualBaseline = '未采集（先跑 npm run waf-real）';
+// [PL-FIX 2026-09-25] 但"读那份报告"必须**按档读**：原来无论 CRS_PL 是几都读
+//   `waf-real-report.json`（= 默认口径 PL1 那份），于是本机实测出现过
+//   `CRS_PL=4` 下打印"自动=0（人工挂链基线：off=8 on=8）"—— 拿 PL1 的 8/8 去比 PL4 的 0，
+//   读的人会以为自动绕过退了一大截，实际是那一档人工挂链也是 0/0。
+//   现在按当前档去找对应产物，产物里记的档位与当前不符就明说"档位不同、不可比"。
+const wantPl = EFFECTIVE_PL;
+const baselineFile = `waf-real-report${wantPl === 1 ? '' : `.pl${wantPl}`}.json`;
+let manualBaseline = '未采集（先跑对应档的 npm run waf-real）';
 try {
-  const rep = JSON.parse(readFileSync(resolve(HERE, 'results', 'waf-real-report.json'), 'utf8'));
+  const rep = JSON.parse(readFileSync(resolve(HERE, 'results', baselineFile), 'utf8'));
   const rows = Array.isArray(rep.summaryRows) ? rep.summaryRows : null;
-  if (rows?.length) {
+  const repPl = rep.paranoiaLevel;
+  if (repPl != null && Number(repPl) !== wantPl) {
+    manualBaseline = `档位不符不可比（产物标 PL${repPl}，本档 PL${wantPl}）`;
+  } else if (rows?.length) {
     const sum = (k) => rows.reduce((a, r) => a + ((r[k] || []).length), 0);
-    manualBaseline = `off=${sum('tamperOff')} on=${sum('tamperOn')}（${rep.generatedAt || '时间未知'}）`;
+    manualBaseline = `PL${wantPl} 档 off=${sum('tamperOff')} on=${sum('tamperOn')}（${rep.generatedAt || '时间未知'}）`;
   }
 } catch { /* 报告缺失即视为未采集 */ }
 console.log(`\n[auto] 自动绕过技术位合计 ${bits}（人工挂链基线：${manualBaseline}）｜WAF 拦截 ${WAF_HITS} 次｜安全误报 ${falsePositive}`);

@@ -4,22 +4,13 @@ import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { evaluate } from './crs-engine.js';
+// [2026-09-27] 样本集上提到 samples.mjs：真机 ModSecurity 对拍（modsec-live.mjs）
+// 用同一批 payload，否则「自实现 vs 真引擎」的差异里会混进「样本不同」这个假差异。
+import { SAMPLES } from './samples.mjs';
 const require = createRequire(new URL('../../server/package.json', import.meta.url));
 const here = dirname(fileURLToPath(import.meta.url));
 const { applyTampers } = require(resolve(here, '../../server/src/core/tamper/applyTampers.js'));
 const { tamperRegistry } = require(resolve(here, '../../server/src/core/tamper/TamperRegistry.js'));
-
-const SAMPLES = [
-  "1' UNION SELECT NULL,CONCAT('__S__',CAST((version()) AS CHAR),'__E__'),NULL,NULL-- -",
-  "1' AND 1=1-- -",
-  "1' AND extractvalue(1,concat(0x7e,(SELECT version())))-- -",
-  "1 AND SLEEP(5)-- -",
-  "1' AND (SELECT 1 FROM (SELECT COUNT(*),CONCAT((SELECT version()),0x3a,FLOOR(RAND(0)*2))x FROM information_schema.tables GROUP BY x)y)-- -",
-  "keyboard%' AND 1=1-- -",
-  // UNION 列探测（引擎真实形态，带 SQLISCANNER<N> 标记）——CRS 942511/942200 以「引号」为锚点
-  "1 UNION SELECT 'SQLISCANNER0','SQLISCANNER1'",
-  "1 UNION SELECT 'SQLISCANNER0','SQLISCANNER1','SQLISCANNER2','SQLISCANNER3'",
-];
 
 const ctx = { dbms: 'MySQL', config: {} };
 const names = tamperRegistry.list().map((p) => (typeof p === 'string' ? p : p.name)).sort();

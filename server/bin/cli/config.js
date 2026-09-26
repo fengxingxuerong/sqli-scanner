@@ -10,6 +10,7 @@
 // ============================================================================
 import { parseHeaders } from './args.js';
 import { logger } from '../../src/core/logger.js';
+import { defaults } from '../../src/config/defaults.js';
 import { PAYLOADS, enableDestructivePayloads } from '../../src/engine/payloads.js';
 
 /**
@@ -89,6 +90,36 @@ export function buildInjectionTargets(args) {
   return result;
 }
 
+// [2026-09-24] CLI 侧的**嵌套配置组**必须带 defaults 底重建。
+//
+// 为什么单独一个函数：引擎在 models.js:90/113 做的是**浅合并**（{...defaults,
+// ...input.config}），REST 那侧由 sanitizeStart 逐组带底重建（见 api/scanRoutes.js
+// 的同名注释），而 CLI 直接产 config 交给 ScanManager —— 这里整体替换一个组，
+// 就等于把该组其余子键在引擎侧变成 undefined。
+//
+// 实测代价（本函数诞生的原因）：`--tamper space2comment` 过去产出
+// `wafEvasion = {tamper:{…}}`（9 键只剩 1 键），而 scan/detect.js:398 的判据是
+// `filterAdaptive === true` ⇒ 关键词「静默过滤」型目标上那一整轮自适应重跑**静默消失**
+// （默认档 filterAdaptive=true 实测把靶场从 [error] 提到 [error,boolean]）。
+// 扫描照常跑完、照常报绿，使用者完全看不出少了一轮绕过。
+//
+// @param {object} config buildConfig 的产物
+// @param {string} name defaults 里的嵌套组名（wafEvasion / secondOrder / oob / blindRobust）
+// @param {object} patch 本次 CLI 参数要覆盖的子键
+// @returns {object} 带底合并后的组对象（可继续就地改其子键）
+function patchGroup(config, name, patch = {}) {
+  const base = defaults[name] && typeof defaults[name] === 'object' ? defaults[name] : {};
+  config[name] = { ...base, ...(config[name] || {}), ...patch };
+  return config[name];
+}
+
+// tamper 是 wafEvasion 里唯一的二级对象，同样带底（漏键后果同上）
+function patchTamper(config, patch) {
+  const waf = patchGroup(config, 'wafEvasion');
+  waf.tamper = { ...defaults.wafEvasion.tamper, ...(waf.tamper || {}), ...patch };
+  return waf.tamper;
+}
+
 // 构建 config：透传 level/risk/technique/dump/tamper/proxy/rate/threads
 export function buildConfig(args) {
   const enumActive = isEnumMode(args);
@@ -107,8 +138,14 @@ export function buildConfig(args) {
   // 逃生口：--no-production-mode（靶场/自建演练环境）等价于已确认。
   config.productionMode = !args.noProductionMode;
   config.confirmDestructive = args.confirmDestructive === true;
+  // [2026-09-24] 不可逆动作拒绝位：MSSQL 的 os shell 通路在 xp_cmdshell 未启用时会自动发
+  // `sp_configure 'xp_cmdshell',1; RECONFIGURE`（Exploiter.js:450，判据 `!== false`）。
+  // 那是**实例级永久配置变更**，与「只读复核」不是同一件事；引擎侧一直支持拒绝，
+  // 但这个键在 CLI/REST 都不存在 ⇒ 使用者无法把扫描留在授权边界内。
+  // 默认保持 true（零行为变化），这里补的是**拒绝**的入口。
+  if (args.noXpAutoEnable) config.xpAutoEnable = false;
   if (args.allowSecondOrderWrites) {
-    config.secondOrder = { ...(config.secondOrder || {}), allowWrites: true };
+    patchGroup(config, 'secondOrder', { allowWrites: true });
   }
   if (config.risk >= 3) {
     if (!config.confirmDestructive && config.productionMode) {
@@ -147,7 +184,7 @@ export function buildConfig(args) {
       ? args.tamperResolved
       : String(args.tamper).split(',').map(s => s.trim()).filter(Boolean);
     if (plugins.length) {
-      config.wafEvasion = { tamper: { enabled: true, plugins, intensity: 'medium' } };
+      patchTamper(config, { enabled: true, plugins, intensity: 'medium' });
     }
   }
   if (args.proxy) config.proxy = args.proxy;
@@ -168,11 +205,8 @@ export function buildConfig(args) {
   if (args.dbms) config.dbms = String(args.dbms).trim();
   // [对标 sqlmap --second-order] 二阶触发页（写入后回访触发判定）
   if (args.secondOrderUrl && /^https?:\/\//i.test(args.secondOrderUrl)) {
-    config.secondOrder = {
-      ...(config.secondOrder || {}),
-      enabled: true,
-      triggerUrls: [...((config.secondOrder && config.secondOrder.triggerUrls) || []), args.secondOrderUrl],
-    };
+    const so = patchGroup(config, 'secondOrder', { enabled: true });
+    so.triggerUrls = [...(so.triggerUrls || []), args.secondOrderUrl];
   }
   if (args.smart) config.prefilter = true;
   // [P0 2026-09-09 实战批次] 失效值替换（对标 sqlmap --invalid-bignum/--invalid-logical/--invalid-string）：
@@ -231,7 +265,7 @@ export function buildConfig(args) {
   if (args.sessionFile) config.sessionFile = args.sessionFile;
   if (args.timeSec) config.timeBlindSleepSec = args.timeSec;
   // [验证] 引擎延迟走 wafEvasion.jitterMs（httpClient.js applyJitter），非独立 requestDelayMs 字段
-  if (args.delay) config.wafEvasion = { ...(config.wafEvasion || {}), jitterMs: args.delay };
+  if (args.delay) patchGroup(config, 'wafEvasion', { jitterMs: args.delay });
   if (args.predictOutput) config.predictOutput = true;
   if (args.skipStatic) config.skipStatic = true;
   // —— 行范围导出 + 保活探测（对标 sqlmap --start/--stop/--safe-url/--safe-freq）——
@@ -252,9 +286,13 @@ export function buildConfig(args) {
   // --tor：Tor 本地代理（默认 socks5://127.0.0.1:9050）；已设 --proxy 时不覆盖
   if (args.tor && !config.proxy) config.proxy = 'socks5://127.0.0.1:9050';
   // --mobile：随机移动端 UA 池
-  if (args.mobile) config.wafEvasion = { ...(config.wafEvasion || {}), randomUA: 'mobile' };
+  // randomUA 在这里是**字符串**（'mobile' / 'desktop'）：httpClient.js:836 按
+  // 「==='mobile' 只取移动池，其余真值取全池」消费，所以窄语义在 CLI 路径上是有效的。
+  // 注意 REST 侧（scanRoutes 的 pickBool）会把它压成 true —— 想在 Web/桌面端表达
+  // 「只要移动池」需要另设显式键，不能照抄这个字符串形态。
+  if (args.mobile) patchGroup(config, 'wafEvasion', { randomUA: 'mobile' });
   // [对标 sqlmap --random-agent] 随机桌面/移动 UA（--mobile 更窄，两者都给时 --mobile 优先）
-  if (args.randomAgent && !args.mobile) config.wafEvasion = { ...(config.wafEvasion || {}), randomUA: 'desktop' };
+  if (args.randomAgent && !args.mobile) patchGroup(config, 'wafEvasion', { randomUA: 'desktop' });
   // [对标 sqlmap --where] 拖库条件过滤（透传 extractScope → dumpData opts.where）
   if (args.where) config.dumpWhere = String(args.where);
   // [对标 sqlmap --param-del] 自定义参数分隔符（TargetParser 按该分隔符切 query）

@@ -91,6 +91,16 @@ describe('配置契约：面板 → 请求体 → 后端白名单', () => {
     expect(types.matchString).toBe('string');
     expect(types.notString).toBe('string');
     expect(typeof (DEFAULT_CONFIG as Record<string, unknown>).matchString !== 'boolean').toBe(true);
+    // [2026-09-26] 判定锚点族的类型必须与后端 guard 的解析口径一致，否则「面板能填、引擎读不到」：
+    //   matchTitle/crawlForms → 严格布尔（引擎 `=== true` 才启用）；
+    //   matchCode            → 对象 { true, false }（guard 走 clampInt(mc.true/false, 100-599)）；
+    //   三个正则键           → 字符串（guard 走 clampStr，500 截断，非法正则引擎侧回落）。
+    expect(types.matchTitle).toBe('boolean');
+    expect(types.matchCode).toBe('object');
+    expect(types.matchRegexp).toBe('string');
+    expect(types.trueRegexp).toBe('string');
+    expect(types.falseRegexp).toBe('string');
+    expect(types.crawlForms).toBe('boolean');
   });
 
   it('buildStartConfig：DEFAULT_CONFIG 里已定义的登记键全部出现在请求体', () => {
@@ -113,6 +123,14 @@ describe('配置契约：面板 → 请求体 → 后端白名单', () => {
     expect(body.prefilter).toBe(false, '「关掉预筛」是一个动作，false 不发就等于没发');
     expect('matchString' in body).toBe(false, '空串锚点应省略（后端 clampStr 同义），否则会污染判定');
     expect(body.retry).toBe(0, '0 是合法值，不能被当成未配置丢掉');
+  });
+
+  it('buildStartConfig：matchCode 以对象形态发（后端 guard 按 { true, false } 逐侧 clamp）', () => {
+    const body = buildStartConfig({ matchCode: { true: 200, false: 500 } } as never);
+    expect(body.matchCode).toEqual({ true: 200, false: 500 });
+    // 两侧都清空 = 不启用 → 整个键必须省略（不能发空对象让后端拿到一个「什么都没配」的锚点）
+    const off = buildStartConfig({ matchCode: undefined } as never);
+    expect('matchCode' in off).toBe(false);
   });
 
   it('buildResumeConfig：续跑必须带上 scope（授权范围不能在最常见路径上被丢掉）', () => {
@@ -153,7 +171,8 @@ const KNOWN_MISSING_UI_KEYS = new Set([
   // 布尔盲注二级判据 / 鲁棒性
   'boolStableDiff', 'boolStableDiffSamples', 'blindRobust',
   // 会话 / CSRF / 保活 / cookie
-  'crawlForms', 'safeUrl', 'safeFreq', 'csrfUrl', 'csrfTokenName', 'csrfMethod', 'csrfRefreshFreq',
+  // （crawlForms 已于 2026-09-26 接进「爬虫」分组 → 移出本表）
+  'safeUrl', 'safeFreq', 'csrfUrl', 'csrfTokenName', 'csrfMethod', 'csrfRefreshFreq',
   'cookieJar', 'dropSetCookie', 'flushSession',
   // 参数筛选 / 已知点 / 失效值
   'skipParams', 'knownPoint', 'invalidValue', 'excludeSysdbs', 'nullConnection', 'paramDel',
@@ -169,8 +188,38 @@ const KNOWN_MISSING_UI_KEYS = new Set([
   // 属「调优参数」而非「能力缺失」—— 不接 UI 不会造成假阴性（关着 = 历史全量行为），
   // 故登记为此处显式承认的债，而不是强行塞进面板。
   'compactErrorTemplates',
+  // [2026-09-24] 三键是「引擎一直真读、但 REST 白名单此前根本没有它们」补进来的
+  // （sanitizeStart 里有完整取证注释）。登记为**已知无 UI 入口**而不是顺手接进面板：
+  //   · http2 / disableKeepAlive —— 传输形态旋钮，接进面板等于向「一键扫描」人群暴露
+  //     一个他们无法验证的效果（换协议后 WAF 指纹也不同，误配比不配更难查）；
+  //   · xpAutoEnable —— 默认 true 只是**不改变历史行为**；它真正的用途是给 REST/CLI
+  //     一个「不可逆动作的拒绝位」（MSSQL 侧 sp_configure + RECONFIGURE 是实例级永久变更）。
+  //     这类开关该出现在「授权与安全护栏」分组里，而不是被塞进普通配置面板——
+  //     接 UI 是产品决策，本表只负责让缺口可见。
+  'http2', 'disableKeepAlive', 'xpAutoEnable',
+  // [2026-09-24 接入口批次] 这 11 个是「引擎一直在读、注释一直写着可配、但四个入口都没接」
+  // 那批键的收口（判据与逐个定性见 server/tests/configOrphanKeys.guard.test.js）。
+  // 本批把可达性补上（defaults + REST 白名单 + 严格 clamp），**没有顺手接进面板**：
+  // 它们全是提取/统计层面的调优旋钮（默认值逐个等于引擎内部兜底 ⇒ 不接不会造成假阴性），
+  // 而面板的核心用户是「一键扫描」人群，多一个无法自行验证的旋钮只会让设置更难归因。
+  // 接不接是产品决策，本表负责让"没有入口"这件事始终可数。
+  'blindBitwise', // 位平面提取（仅 MySQL 族，改提取请求形状）
+  'blindMaxLen', // 盲注单字段长度上界
+  'booleanOrFallback', // 空基线 OR 型兜底对（关掉=省 2 请求/点，代价是漏报防线）
+  'unionSkipGate', // union 反射门控逃生口（误报防线，刻意不给网络调用方便利开关）
+  'deepDumpPageSize', // deepDump 分页聚合每页行数
+  'dumpCheckpointInterval', // 拖库断点写入间隔（只影响续跑省多少请求）
+  'fingerprintSleepSec', // 时间定库 sleep（与时间盲注刻意分开，定库要快）
+  'fingerprintTimeThresholdMs', // 时间定库判定阈值
+  'prefilterBudgetMs', // 预筛选时间预算
+  'maxExtractBodyBytes', // 提取阶段响应上限（per-scan，env EXTRACT_MAX_BODY_MB 之外）
+  'scanValidity', // 结论可信度守卫阈值组（含 enabled 逃生口）
   // 响应判定多指标（--string/--not-string/--code/--regexp/--titles 的同族）
-  'matchText', 'matchCode', 'matchRegexp', 'trueRegexp', 'falseRegexp', 'matchTitle', 'predictOutput',
+  // ⚠️ matchCode / matchRegexp / trueRegexp / falseRegexp / matchTitle 已于 2026-09-26
+  //    接进「payload 与响应判定调优」分组 → 移出本表（判据 ⑤ 会在忘记移除时红）。
+  //    matchCode 只接了 { true, false } 精确期望形态；`true`（弱信号）形态前端类型层走不通，
+  //    仍属无入口 —— 但它是**同一键的另一种取值**，不是独立键，故不单列（见 constants.ts 注释）。
+  'matchText', 'predictOutput',
   // 动态块 / 错误原文留存
   'autoDynamicBlock', 'parseErrors', 'pocRedactAuth',
   // 生产护栏（高危池确认位）：productionMode / confirmDestructive 已于 2026-09-23

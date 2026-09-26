@@ -41,6 +41,9 @@ SANDBOX_LABS = [
     # 文件读写闭环：宿主 mysqld 默认 secure_file_priv=NULL 只能 SKIP，套上沙箱（限定目录）就能真跑
     ("file-read", "e2e/fileops/exploit-file-read.e2e.mjs"),
     ("file-write", "e2e/fileops/exploit-file-write.e2e.mjs"),
+    # 召回基线里的 2 条真实 MySQL 场景：直跑会因"没有 mysqld 在监听"整组 SKIP（自 09-10
+    # 起如此）。沙箱注入 MYSQL_HOST/PORT/USER/PASSWORD 后驱动就连得上 —— 实测 16 → 18 全绿。
+    ("recall-lab", "e2e/recall-lab/recall.e2e.js"),
 ]
 
 

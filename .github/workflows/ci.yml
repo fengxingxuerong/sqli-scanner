@@ -82,12 +82,19 @@ jobs:
         name: README 内部口径自洽（方言分层三处表述）
       # [P1-ADD 2026-09-19] CRS 执行器保真度门禁。本仓所有 WAF 绕过数字都出自**自实现的
       # SecRule 执行器**（crs-engine.js）——执行器若与官方规则不等价，那些数字全部无意义。
-      # 判据不来自我们自己：跑 CRS 项目官方回归集（805 条带「该拦/不该拦」期望的用例），
-      # 按规则自身档位对齐后要求逐规则一致率 ≥90%，且分歧必须逐条点名在
-      # e2e/waf-real/crs-known-divergences.json（只减不增）。不需要 MySQL，故放 lint job。
-      # 复现：npm run waf-fidelity（用例首次获取：npm run waf-fidelity:refresh）
+      # 判据不来自我们自己：跑 CRS 项目官方回归集（942 是 805 条带「该拦/不该拦」期望的用例），
+      # 按规则自身档位对齐后要求逐规则一致率 ≥90%，且分歧必须逐条点名在**本族自己的**基线文件里
+      # （942 → crs-known-divergences.json，930 → crs-known-divergences-930.json，只减不增）。
+      # 不需要 MySQL，故放 lint job。
+      # 复现：npm run waf-fidelity（942）/ npm run waf-fidelity:930（930）；
+      #   用例首次获取：npm run waf-fidelity:refresh
       - run: npm run waf-fidelity
-        name: CRS 执行器保真度（官方回归集）
+        name: CRS 执行器保真度（官方回归集｜族 942）
+      # 族 930（LFI）2026-09-25 起同样受门禁管：词典 operator + multipart FILES 落地后实测
+      # 97.0%（接前 90.9%，再前 27.3%）。**必须单独一步** —— 门禁族的名单写在代码里，
+      # CI 却只跑默认那一族的话，"930 受管"就是假话（它只会红给看代码的人，红不了 CI）。
+      - run: npm run waf-fidelity:930
+        name: CRS 执行器保真度（官方回归集｜族 930）
       # 规则原文与上游 v4.1.0 逐字节一致（README 写"官方规则原文"，这条让它可核验）
       - run: node scripts/fetch-crs-assets.mjs --verify-rules
         name: CRS 规则原文与上游一致
@@ -204,6 +211,9 @@ jobs:
       - run: cd server && npm run test:coverage
         name: Server coverage gate (core modules)
         timeout-minutes: 10
+      - run: node scripts/mutation-check.mjs --limit=8
+        name: Mutation gate (assertion sensitivity, quick tier)
+        timeout-minutes: 10
 
   test-matrix:
     strategy:
@@ -244,19 +254,10 @@ jobs:
         name: Server tests
         timeout-minutes: 10
 
-  recall-lab:
-    runs-on: ubuntu-latest
-    needs: [test-server]
-    if: github.event_name != 'schedule'
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-      - run: cd server && npm ci
-      - run: node e2e/recall-lab/recall.e2e.js
-        name: Recall-lab e2e (18 scenarios)
-        timeout-minutes: 5
+  # [2026-09-25] recall-lab 曾是**独立 job**，但那台 runner 没有 mysqld ⇒ 18 条里
+  #   两条真实 MySQL 场景恒 SKIP（步骤名当时已如实写着"16 条"）。
+  #   现在整步并进下面的 acceptance job（它自己起 docker mysqld + root/root），
+  #   两条 MySQL 场景因此第一次真正进门禁。判据见 acceptance 里那一步的注释。
 
   # [P1-ADD 2026-09-12] 全方位验收门禁。
   # 此前 CI 覆盖面已很广（lint / 单测 / 前端覆盖率 / 召回率 / Docker / npm audit），但
@@ -351,6 +352,24 @@ jobs:
           MYSQL_PORT: 3306
           MYSQL_USER: root
           MYSQL_PASSWORD: root
+      # [2026-09-25] WAF A/B 真 MySQL 实验**从周度矩阵挪到这里**（原来只在 schedule /
+      #   workflow_dispatch 上跑 ⇒ 每次 push 都不验，一周一次的门禁对改动等于没有）。
+      #   它是真断言门禁：退出码 0=通过 / 1=判据失败 / 2=连不上 MySQL（显式失败，不静默降级），
+      #   三条判据 = 「两侧都必须有检出」前置 + 拦截率下降 + 高危规则命中下降
+      #   （前置那条是 2026-09-25 补的：A3 通道降级初版把 configA 打到零检出时，
+      #    旧版退出码仍是 0、报告照印 ✅ —— 见 e2e/waf-lab/metrics.js:evaluateAbExperiment）。
+      #   直连 3306 用的是本 job 已起好的 mysqld + 上面 init-db 那份 schema，不需要 Python 沙箱；
+      #   周度矩阵里那份仍保留（它走 run.py 的沙箱路径，顺带验那个启动器）。
+      #   本机实测（指向 127.0.0.1:3306）：9.3s，A=1/1 B=1/1，拦截率 79.4%→45.7%，高危 30→0。
+      - name: WAF A/B 实验（真 MySQL，门禁；周度那份走沙箱路径仍然跑）
+        run: node e2e/waf-lab/compare-real.e2e.mjs
+        env:
+          MYSQL_HOST: 127.0.0.1
+          MYSQL_PORT: 3306
+          MYSQL_USER: root
+          MYSQL_PASSWORD: root
+          MYSQL_DATABASE: sqli_lab
+        timeout-minutes: 6
       # 红队评测靶场（ground-truth 真值对照 + sqlmap 同题对比）：独立常驻进程，
       # CI 环境可能缺 PostgreSQL（D:/pg-smoke 类本地路径），故失败不阻塞——
       # 门禁会把该套件标为 SKIP，其余套件照常判定。
@@ -382,6 +401,25 @@ jobs:
           done
           echo "红队靶场未就绪（CI 可能缺 PG），门禁将跳过该套件（SKIP）"
           tail -20 redteam-env.log || true
+      # [2026-09-25] recall-lab 从独立 job 搬进这里 —— 只有本 job 有 mysqld，
+      #   两条真实 MySQL 场景（real_mysql_numeric / real_mysql_str）自 09-10 写下起
+      #   从未在任何自动门禁里执行过（独立 job 只能跑到 16/18，另 2 条恒 SKIP）。
+      #   端点走 env 由 e2e/recall-lab/real-lab-driver.js:mysqlEndpoint() 读取；
+      #   建库由该文件的 MYSQL_INIT_SQL 自己完成（CREATE DATABASE IF NOT EXISTS sqli_test），
+      #   所以只需要一个可连的 mysqld，不需要额外初始化。
+      #   ⚠ 步骤名写的"18 条"现在是**机检的**：RECALL_REQUIRE_MYSQL=1 让"跳过"直接算失败
+      #   （默认口径是不 fail —— 本机没起 mysqld 不是代码缺陷；但在这里跳过就是降级）。
+      #   两条 MySQL 场景真跑过的现场：本机指到 127.0.0.1:3306，检出分别为
+      #   [union,error,boolean] 与 [boolean]。
+      - name: Recall-lab e2e（18 条，含 2 条真实 MySQL 方言）
+        run: node e2e/recall-lab/recall.e2e.js
+        env:
+          MYSQL_HOST: 127.0.0.1
+          MYSQL_PORT: 3306
+          MYSQL_USER: root
+          MYSQL_PASSWORD: root
+          RECALL_REQUIRE_MYSQL: '1'
+        timeout-minutes: 8
       - name: 全方位验收门禁（事实断言模式）
         run: npm run acceptance
         env:
@@ -414,6 +452,95 @@ jobs:
             e2e/results/last-failure-*.log
           if-no-files-found: warn
 
+  # [真机 WAF 2026-09-27] 唯一能救回「对外 WAF 可信度」的一步。
+  # 此前全部 WAF 结论都来自**自实现 CRS 执行器**（e2e/waf-real/crs-engine.js 跑官方规则原文），
+  # README 已诚实标注 —— 但那终究是「我们自己实现的规则引擎说我们过了」。
+  # 本 job 起真实 owasp/modsecurity-crs:nginx（含 libinjection），用**与静态扫描完全相同的一批样本**
+  # （e2e/waf-real/samples.mjs 单一来源）真发 HTTP 对拍，PL1 / PL3 两个档位各跑一遍。
+  #
+  # 触发：与 tamper-waf-matrix 同款（schedule / workflow_dispatch）—— 拉镜像 + 两档 × 228 插件 × 8 样本
+  # 在 push 上跑太重。但它是**真门禁**：自检不通过（WAF 不在位/后端没起来）直接 exit 1，
+  # 且**不加 continue-on-error** —— 那正是本仓反复修掉的「空转门禁」形态。
+  # 绕过数/误报数本身是**测量值**，不是成败判据（绕过少是 CRS 强，误报多是 CRS 的问题），
+  # 故只记录进报告，不拿来判红。
+  modsec-live:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: cd server && npm ci
+      # 靶站必须先于容器起来：nginx 启动时上游不在会有概率直接退出（失败现场会伪装成 WAF 不通）
+      - name: 起最小靶站后端
+        run: nohup node e2e/waf-real/modsec-target.mjs > /tmp/modsec-target.log 2>&1 &
+      - name: 拉镜像并记录 tag / digest
+        run: |
+          docker pull owasp/modsecurity-crs:nginx
+          echo "MODSEC_IMAGE=$(docker inspect -f '{{index .RepoTags 0}}' owasp/modsecurity-crs:nginx)" >> $GITHUB_ENV
+          echo "MODSEC_DIGEST=$(docker inspect -f '{{index .RepoDigests 0}}' owasp/modsecurity-crs:nginx)" >> $GITHUB_ENV
+      - name: 起 PL1 容器
+        run: |
+          docker rm -f modsec 2>/dev/null || true
+          docker run -d --name modsec --network host \
+            -e PARANOIA=1 -e ANOMALY_INBOUND=5 \
+            -e BACKEND=http://127.0.0.1:8151 \
+            owasp/modsecurity-crs:nginx
+          sleep 10
+          docker ps --filter name=modsec --format "{{.Status}}"
+      # 四要素取证（缺一不可，否则数字不可比）：镜像 tag / CRS 版本 / PARANOIA / 阻断阈值
+      # 四要素取证：镜像 tag / CRS 版本 / PARANOIA / 阻断阈值 —— 缺一项这份报告就不可复现、不可比。
+      # ⚠️ 首版踩的坑：`sh -c "...'正则'..."` 双层引号嵌套把正则吃掉了，容器里 grep 静默无输出，
+      #    报告里就写上了「未记录」—— 取证失败**看不出来**（不是红，只是少一行字）。
+      #    修法：容器内一律用 `sh -c '...'`（单引号包双层），正则放里面不再转义；
+      #    再补 CRS 规则目录的多个候选路径（镜像版本不同，安装位置会变）。
+      - name: 取证四要素
+        run: |
+          docker exec modsec sh -c 'nginx -v 2>&1 | head -1' || true
+          CRS=$(docker exec modsec sh -c 'grep -rhoE "OWASP_CRS/[0-9.]+|crs_version [0-9.]+" /usr/local/owasp-crs /opt/owasp-crs /etc/modsecurity.d 2>/dev/null | head -1' || true)
+          echo "MODSEC_CRS_VERSION=${CRS:-unknown}" >> $GITHUB_ENV
+          docker exec modsec sh -c 'grep -rEhi "SecRuleEngine" /etc/modsecurity.d/*.conf 2>/dev/null | head -5' || true
+          echo "MODSEC_IMAGE=$(docker inspect -f '{{index .RepoTags 0}}' owasp/modsecurity-crs:nginx)" >> $GITHUB_ENV
+          echo "MODSEC_DIGEST=$(docker inspect -f '{{index .RepoDigests 0}}' owasp/modsecurity-crs:nginx)" >> $GITHUB_ENV
+      - name: 对拍 PL1
+        run: node e2e/waf-real/modsec-live.mjs
+        env:
+          MODSEC_BASE: http://127.0.0.1:8080
+          MODSEC_LABEL: pl1
+          MODSEC_PARANOIA: "1"
+          MODSEC_ANOMALY_INBOUND: "5"
+      - name: 切 PL3 重跑
+        run: |
+          docker rm -f modsec 2>/dev/null || true
+          docker run -d --name modsec --network host \
+            -e PARANOIA=3 -e ANOMALY_INBOUND=5 \
+            -e BACKEND=http://127.0.0.1:8151 \
+            owasp/modsecurity-crs:nginx
+          sleep 10
+          docker ps --filter name=modsec --format "{{.Status}}"
+      - name: 对拍 PL3
+        run: node e2e/waf-real/modsec-live.mjs
+        env:
+          MODSEC_BASE: http://127.0.0.1:8080
+          MODSEC_LABEL: pl3
+          MODSEC_PARANOIA: "3"
+          MODSEC_ANOMALY_INBOUND: "5"
+      - name: 上传对拍报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: modsec-live-results
+          path: e2e/waf-real/results/modsec-docker-*.md
+          if-no-files-found: warn
+      # 自检失败时容器日志是唯一的归因线索，必须留下来
+      - name: 收摊（容器日志 + 清理）
+        if: always()
+        run: |
+          docker logs modsec 2>&1 | tail -40 || true
+          cat /tmp/modsec-target.log 2>/dev/null | tail -10 || true
+          docker rm -f modsec 2>/dev/null || true
   tamper-waf-matrix:
     runs-on: ubuntu-latest
     # [修复] 原 job 级 schedule:/workflow_dispatch: 为非法键（只能放顶层 on:），已移至顶层。
@@ -431,9 +558,14 @@ jobs:
     #    · `e2e/tamper-matrix/tamper-test.mjs` = **纯测量脚本**（输出绕过矩阵，无任何断言、
     #      不设退出码）。它本来就不是门禁 → 保留 continue-on-error（它恒为 0，去掉没意义），
     #      但**必须改掉"门禁"的暗示**，并把产物上传（否则数据取不回，等于白跑）。
-    #    · `e2e/waf-lab/compare-real.run.py` → `compare-real.e2e.mjs` = **真断言门禁**
-    #      （`process.exit(pass ? 0 : 1)`，内含 200/表空/靶场异常等硬断言；run.py 忠实透传 rc）。
+    #    · `e2e/waf-lab/compare-real.e2e.mjs` = **真断言门禁**
+    #      （`process.exit(pass ? 0 : 1)`，连不上 MySQL 时 exit 2 = 显式失败不静默降级）。
     #      → **去掉 continue-on-error**：它吞掉的正是真实的红。
+    #      注（2026-09-25）：这道门禁**每次 push 也在 acceptance job 里跑**（直连该 job 自己起的
+    #      docker mysqld），本 job 是**周度那份**，两者入口同一个脚本、launcher 不同。
+    #      ⚠️ 2026-09-27 更正：本 job 原先走 `compare-real.run.py`（Python 沙箱启动器），
+    #      但那个沙箱是 **Windows 专用**，在 ubuntu 上从未成功过（详见下面该步的注释）。
+    #      现改为与 acceptance 同款的 docker MySQL。
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     steps:
       - uses: actions/checkout@v4
@@ -443,12 +575,12 @@ jobs:
       - run: cd server && npm ci
       # [CI-FIX 2026-09-20] 两个入口文件路径是错的，指向了**不存在**的 run.js：
       #   · e2e/tamper-matrix/run.js  → 实际入口 tamper-test.mjs
-      #   · e2e/waf-lab/run.js        → 实际入口 compare-real.e2e.mjs（需真 MySQL，由 run.py 起沙箱）
+      #   · e2e/waf-lab/run.js        → 实际入口 compare-real.e2e.mjs（需真 MySQL，现由本 job 起 docker 实例）
       # 且两者都带 continue-on-error: true，于是 `node <不存在的文件>` 每次静默失败、
       # 从不拦人 —— 这两个 job **从未验证过任何东西**（空转门禁）。
-      # waf-lab 依赖真 MySQL：本机无 docker，CI 侧也没有起库步骤，直接调会 ECONNREFUSED；
-      # 故此处改为经 Python 沙箱启动器（它自己起隔离 mysqld，见 compare-real.run.py 注释）。
-      # 若 CI 环境无 python/mysqld，该步会明确报缺失依赖而非静默通过。
+      # waf-lab 依赖真 MySQL。⚠️ 2026-09-27 更正：此前这里写「改为经 Python 沙箱启动器」，
+      # 但那一步在 ubuntu 上**从未成功过**（沙箱是 Windows 专用）—— 详见下面 WAF 门禁步的注释。
+      # 现由该步自己起 docker MySQL。
       # 纯测量脚本（无断言、不设退出码）：产出绕过矩阵供人工研判，**不是门禁**。
       # 名字里写明「非门禁」避免读 CI 绿红时误以为这里验证过什么。
       - run: node e2e/tamper-matrix/tamper-test.mjs
@@ -457,9 +589,62 @@ jobs:
         continue-on-error: true
       # 真断言门禁（exit(pass?0:1)）：**故意不加 continue-on-error** ——
       # 之前它吞掉了真实的红（同族：`node <不存在的文件>` + continue-on-error = 空转门禁）。
-      # 本 job 只跑 schedule/dispatch，红也不会阻塞 PR，但会如实反映在 job 结论里。
-      - run: python3 e2e/waf-lab/compare-real.run.py
-        name: WAF 规则实验室（真 MySQL 沙箱 A/B，断言门禁）
+      # 本 job 只跑 schedule/dispatch；同一道门禁**自 2026-09-25 起每次 push 也在 acceptance
+      # job 里直连跑一遍**（那条会真的拦 PR）。
+      # [CI-FIX 2026-09-27] 本步原先调 `compare-real.run.py`（走 Python 沙箱启动器），
+      # 在 ubuntu 上**必然失败**且从未成功过 —— 根因有两层，都不是被测代码的问题：
+      #
+      # ① `e2e/udf-lab/mysql_sandbox.py` 是 **Windows 专用**：`MYSQLD = MYSQL_HOME/"bin"/"mysqld.exe"`
+      #    硬编码 .exe、`MYSQL_HOME` 默认 `D:\mysql`、进程管理用 `tasklist`/`taskkill`，
+      #    且全文**零平台分支**（grep `sys.platform|os.name` = 0 处）。
+      #    ⇒ 在 ubuntu runner 上连 `--init` 都跑不起来（路径不存在，FileNotFoundError）。
+      # ② 就算它能在 Linux 跑，CI 也从没为它做过 `--init`，datadir 恒不存在。
+      #
+      # 为什么此前没被发现（这是本仓最贵的一类错：**假绿**）：
+      #   · 本 job 只在 schedule / workflow_dispatch 触发，push 时整 job skipped ⇒ 平时看不见；
+      #   · 该步曾带 `continue-on-error: true`（2026-09-22 去掉），失败被吞成绿；
+      #   · acceptance 里那条同类沙箱路径**只在宿主不放行 secure_file_priv 时才走**，
+      #     而 acceptance 起的 docker MySQL 已放行 ⇒ 沙箱重试从不触发 ⇒ ubuntu 上「没走到」被读成「能跑」。
+      #   实测佐证：workflow_dispatch 历史上只触发过 2 次（#82/#84），**两次都因同一原因红**。
+      #
+      # 修法：改用与 acceptance **同款**的 docker MySQL（ubuntu runner 原生可用），
+      # 并显式初始化 real-mysql-lab schema（compare-real.e2e.mjs 有 `users 表为空 → throw` 的硬前置）。
+      # 沙箱路径不是丢掉而是**回归它的适用范围**：Windows 本机跑 UDF/fileops 时仍用它。
+      # 注意：`compare-real.run.py` 本体保留（本机 Windows 仍可用），只是不再挂在 ubuntu CI 上。
+      - name: 启动 MySQL（docker，与 acceptance 同款）
+        run: |
+          docker run -d --name mysql-waf -p 3306:3306 \
+            -e MYSQL_ROOT_PASSWORD=root \
+            -e MYSQL_DATABASE=sqli_lab \
+            mysql:8.0
+      - name: 等待 MySQL 就绪
+        run: |
+          for i in $(seq 1 60); do
+            if docker exec mysql-waf mysqladmin ping -h 127.0.0.1 -uroot -proot --silent 2>/dev/null; then
+              echo "MySQL ready after ${i} attempts"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "MySQL 未在 120s 内就绪"
+          docker logs mysql-waf | tail -30
+          exit 1
+      - name: 初始化靶场库表
+        run: node e2e/real-mysql-lab/init-db.mjs
+        env:
+          MYSQL_PORT: 3306
+          MYSQL_USER: root
+          MYSQL_PASSWORD: root
+      # 真断言门禁（exit(pass?0:1)，连不上 MySQL 时 exit 2 = 显式失败不静默降级）。
+      # 直连 3306 用上面刚起的 docker 实例 + init-db 那份 schema。
+      - name: WAF 规则实验室（真 MySQL A/B，断言门禁）
+        run: node e2e/waf-lab/compare-real.e2e.mjs
+        env:
+          MYSQL_HOST: 127.0.0.1
+          MYSQL_PORT: 3306
+          MYSQL_USER: root
+          MYSQL_PASSWORD: root
+          MYSQL_DATABASE: sqli_lab
         timeout-minutes: 10
       # 测量产物必须能取回，否则这一步等于白跑。
       - name: 上传矩阵与 A/B 产物
@@ -573,9 +758,13 @@ jobs:
   # ============================================================================
   # [audit 新增 2026-09-13] 自足 e2e 批量回归：run-all.mjs 依赖探测自动收敛到
   # deps:[] 的 6 套靶场（retest-lab / tamper-matrix / real-world-lab(PGlite) /
-  # recall-lab / detection-runner / waf-lab）。与 recall-lab 单独 job 并存：
-  # 该 job 一次跑齐全部自足套件并输出统一汇总，作为「无 Docker 前提」的 e2e 基线。
-  # 依赖真实 DB 的 12 套靶场由 acceptance job（docker run mysql + init-db）覆盖。
+  # recall-lab（=false-positive.e2e.js，假阳性那套）/ detection-runner / waf-lab）。
+  # 本 job 是「无 Docker 前提」的 e2e 基线；依赖真实 DB 的套件由 acceptance job
+  # （docker run mysql + init-db）覆盖 —— 2026-09-25 起 `recall.e2e.js` 也在那里跑
+  # （原先它是本 job 之外的独立 recall-lab job，那台 runner 没有 mysqld ⇒ 18 条里
+  # 两条真实 MySQL 场景恒 SKIP；现在带 RECALL_REQUIRE_MYSQL=1，跳过即失败）。
+  # ⚠ 两个 runner 里都有叫 "recall-lab" 的条目但**入口不同**：run-all 指
+  #   false-positive.e2e.js（假阳性），acceptance 那一步指 recall.e2e.js（召回 18 条）。
   # ============================================================================
   e2e-self-contained:
     runs-on: ubuntu-latest
@@ -598,6 +787,53 @@ jobs:
         name: Install server
       - name: Recreate server/.env.test（不入库文件的 CI 重建）
         run: printf 'SSRF_ALLOW_PRIVATE=1\nEXPLOIT_ENABLED=1\n' > server/.env.test
+      # [CI-FIX 2026-09-25] 给 multi-engine-lab 备好 H2 / HSQLDB / Derby 的官方 jar，
+      #   让它从"在 CI 里永远 SKIP"变成真跑。这一档的历史：Linux 上 classpath 分隔符硬写
+      #   ';' ⇒ JVM 找不到主类立刻退出 ⇒ 往死进程 stdin 写 ⇒ 裸 `write EPIPE`（0.5s、零原因）；
+      #   修好分隔符后成为"jar 不存在 ⇒ 按设计 SKIP"—— 结果仍是 CI 从没验过这三台引擎。
+      #   ⚠ 逐个校验 sha1 不是形式主义：本机经代理取 h2 曾拿到 285KB 的**合法 zip 头 + 错 sha1**
+      #   （真身 2.6MB），只看退出码就会拿坏 jar 去跑。校验值取自 Maven Central 的官方 .sha1。
+      #   任何一件取不到可信副本 ⇒ **不设 ENGINE_JARS**，套件按 preflight 明确 SKIP
+      #   （零断言、不计通过），也不把这次推送变成假红。
+      - name: 备好真 JDBC 引擎 jar（sha1 校验；不可信则让 multi-engine-lab 按设计 SKIP）
+        run: |
+          set -u
+          dir="$RUNNER_TEMP/engine-jars"; mkdir -p "$dir"
+          ok=1
+          fetch() {
+            name=$1; path=$2; want=$3
+            for try in 1 2 3 4 5; do
+              if curl -fsS --max-time 120 -o "$dir/$name" "https://repo1.maven.org/maven2/$path"; then
+                got=$(sha1sum "$dir/$name" | cut -d' ' -f1)
+                if [ "$got" = "$want" ]; then echo "✓ $name"; return 0; fi
+                echo "⚠ $name 第 $try 次 sha1 不符：期望 $want 实得 $got（$(wc -c < "$dir/$name") 字节）"
+              else
+                echo "⚠ $name 第 $try 次下载失败"
+              fi
+              sleep 3
+            done
+            echo "❌ $name 取不到可信副本"; return 1
+          }
+          fetch h2.jar          com/h2database/h2/2.2.224/h2-2.2.224.jar                          7bdade27d8cd197d9b5ce9dc251f41d2edc5f7ad || ok=0
+          fetch hsqldb.jar      org/hsqldb/hsqldb/2.7.3/hsqldb-2.7.3.jar                            85b49338b36f3051d217295596cf92beb92e4bfb || ok=0
+          fetch derby.jar       org/apache/derby/derby/10.16.1.1/derby-10.16.1.1.jar                f9ca2054b3e33ec3f3f19df4a7490352d82de54a || ok=0
+          fetch derbyshared.jar org/apache/derby/derbyshared/10.16.1.1/derbyshared-10.16.1.1.jar    77a3ec6b9791c7c29c76148c5d56fc1f3f12d638 || ok=0
+          if [ "$ok" = 1 ]; then
+            echo "ENGINE_JARS=$dir/h2.jar:$dir/hsqldb.jar:$dir/derby.jar:$dir/derbyshared.jar" >> "$GITHUB_ENV"
+            echo "✅ 引擎 jar 就绪 ⇒ multi-engine-lab 本轮真跑（3 引擎 × 3 场景 × tamper 开关）"
+          else
+            echo "::warning::引擎 jar 未就绪 ⇒ multi-engine-lab 本轮按设计 SKIP（零断言，不计通过）"
+          fi
+        timeout-minutes: 6
       - name: run-all（依赖探测自动收敛到 6 套自足靶场）
         run: node e2e/run-all.mjs
         timeout-minutes: 8
+      # [GATE-ADD 2026-09-25] 入库基线必须与"这一轮真跑出来的"一致（只忽略时间戳）。
+      #   为什么放在这里而不是 test-server：本 job 刚刚真的重跑过那三个档，产物就在磁盘上，
+      #   比的是"同一台机器、同一轮、当前代码"—— 外部一致性；
+      #   server/tests/e2eArtifacts.consistency.test.js 查的是"结论列与同行数据同向"——
+      #   内部一致性。09-20 那份连印五天「tamper 后检出」的产物，两样都不满足，
+      #   而当轮 CI 全绿 ⇒ 只有这道能拦住。
+      #   不放进 acceptance job：那一份要真 MySQL，服务端小版本一变 error 通道文本就变 ⇒ 假红。
+      - name: 入库基线漂移检查（产物必须等于当前代码跑出来的那份）
+        run: node scripts/artifact-drift.mjs --verbose

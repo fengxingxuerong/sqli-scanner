@@ -102,6 +102,37 @@ export const defaults = {
   timeProbeSleepSec: null,
   timeExtractSleepSec: null,
   maxColumnsGuess: 50, // UNION 猜测列数上限
+  // ── [2026-09-24 接入口] 八个「引擎早就实现、但任何入口都设不了」的旋钮 ──────────────
+  // 判据：引擎读取点 `(config|cfg).X` 存在 ∩ X ∉ (KNOWN_CFG_KEYS ∪ defaults ∪ CLI 写入 ∪ 面板)，
+  // 且全仓**没有任何写入点**（有写入者的那 13 个属于内部字段，另当别论）。
+  // 这批的共同点：每一处注释都写着"可经 config.X 关闭/调整"，而 X 在四个入口里都不存在
+  // ⇒ 那句话对使用者不成立（对写单测的人成立）。下面的默认值**逐个等于引擎内部兜底值**，
+  // 所以本批是零行为变化：改动只是"让注释里承诺的旋钮真的能拧"。
+  // 布尔位用严格语义（`=== true` / `!== false` / `!== true`），带底与原样都已在
+  // tests/configWhitelist.passthrough.test.js 钉住。
+  // 位平面提取（每字符 1 轮请求，对比二分 ~8 轮）：仅 MySQL/MariaDB/TiDB 族生效，
+  // 8 位收敛后仍走 extractVerify 等值验证，失败整体回落二分（保守，零漏提取）。
+  // 默认关：改了提取请求形状，需要在真目标上按 targetProfile 逐例确认后开启。
+  blindBitwise: false,
+  // 盲注单字段长度上界（超过则不再延伸）。Engine 侧判据是 `> 255` 才采纳，否则回落 4096。
+  // 4096 的来历：单字段超 4K 属异常，拿 65531 去逐字节提取会把一次扫描拖成十几分钟（实测）。
+  blindMaxLen: 4096,
+  // 布尔通道的「空基线」OR 型兜底对（参数原值查不到行时 AND 型真假同形 → 通道静默失效）。
+  // 代价：主轮未命中的点 +2 请求。默认开（这是漏报防线，不是优化项）。
+  booleanOrFallback: true,
+  // union 存在性门控（防参数反射误报）的逃生口：true=跳过门控。
+  // 门控本身是误报防线，默认关着跳；但反射型页面会把门控判成"无注入"从而漏报，
+  // 现场需要能单独放开这一格，而不是整条 union 通道重跑。
+  unionSkipGate: false,
+  // deepDump 分页聚合的每页行数（规避 LISTAGG 4000 / GROUP_CONCAT 1024 截断）。
+  deepDumpPageSize: 200,
+  // 拖库断点写入会话的行间隔。只影响"续跑能省多少请求"，不影响结果正确性
+  // （断点只记 offset，历史行取不回时退化为从头拉）。
+  dumpCheckpointInterval: 100,
+  // 时间定库通道的 sleep 与判定阈值：与时间盲注**刻意分开**——定库要快（每库一条向量），
+  // 用 timeBlindSleepSec/timeThresholdMs 会把 18 库遍历的墙钟放大到不可接受。
+  fingerprintSleepSec: 1,
+  fingerprintTimeThresholdMs: 800,
   // 响应相似度锚点（对标 sqlmap --string / --not-string）：有锚点时检测器优先用锚点判定真/假页面，
   // 不再依赖对动态内容敏感的相似度比对。默认 null=不启用（回落分块比对，保持现状）。
   matchString: null, // 真页面必含文本
@@ -203,24 +234,44 @@ export const defaults = {
     // 用于 A/B 对照与问题定位（e2e/waf-real/waf-bypass-search.e2e.mjs 两档都跑）。
     // 预算纪律：开启**不增加**验证条数（仍是 MAX_CHAINS=3，只是把最后 1 个名额给生成链）。
     bypassSearch: true,
-    // [报错模板裁剪 2026-09-23] **默认关**：实测代价是真实的 ——
-    //   干净场景（real-mysql / pentest / detection / 红队 r2 19/19）**零损失**，
-    //   单点请求数 148 → 111（error 62 → 25，-25%）；
-    //   **但 CRS PL1 场景掉了 2 个技术位（off/on 8 → 6，自动选链 8 → 6）** ——
-    //   WAF 下需要更多「同机制不同形态」的弹药才能找到不被拦的那条。
-    // 取舍口径：**不用检出能力换请求数**。故默认全量；确知目标无 WAF / 追求请求预算时显式开启。
-    compactErrorTemplates: false,
+    // [报错模板裁剪 2026-09-23] 本键原声明在 wafEvasion 内、2026-09-24 移到顶层 ——
+    // 引擎的读取点在 **config 顶层**（ErrorDetector._resolveErrorTemplates 读
+    // `cfg.compactErrorTemplates`），REST 白名单与 sanitizeStart 也在顶层转发；放在这个组里
+    // 等于「defaults 写在一处、引擎读在另一处」：调用方照 defaults 的形状发
+    // `wafEvasion.compactErrorTemplates=true` 会被 sanitizeStart 当未知子键丢掉，
+    // 扫描照常报全量模板，而使用者以为裁了。判据见
+    // server/tests/configWhitelist.passthrough.test.js（逐键发非默认值）。
     // [P1-FIX 2026-09-10] 关键词「静默过滤」型绕过重跑（error-only 点 → 套插入式双写链）。
     // 默认开启：实测靶场 bl（删 union/select/and/or/--）由 `[error]` 提升为 `[error,boolean]`，
     // 依赖三项使能——重跑前重探闭合前缀、链验证只认硬拦截、候选纳入 error-only 点
     // （详见 docs/实战渗透实测评估-2026-09-10.md F8）。
     // 仅对「error 命中但数据面通道全 miss 且出现过 5xx」的点触发，安全点不受影响。
     filterAdaptive: true,
+    // [A3 2026-09-25] 通道降级编排：重跑阶段用逐词拦截画像判断「哪些通道在当前形态下
+    // 无望」，跳过它们不再发整包请求。
+    // 默认开，但**判据极保守**（channelPolicy.planChannels）：
+    //   ① 无画像 → 不决策；② 只有某通道**必需记号整组被拦** 且 当前 tamper 链不消除
+    //   其中任一记号 才降级；③ 未知技术一律保留；④ 降级后若一个通道都不剩 → 回退全集。
+    // 与 compactErrorTemplates 的取舍不同：那里是「少发弹药换取请求数」（会掉检出），
+    // 这里是「跳过注定跑不出结论的通道」（理论上不损失检出）—— 但**是否真的不损失
+    // 必须由真靶场（CRS acceptance 套件）验收**，未验收前不宣称无漏检。
+    // 关闭：wafEvasion.channelDegrade=false（回退到 2026-09-24 的重跑行为）。
+    channelDegrade: true,
     // WAF 自动 tamper 重跑（对标 sqlmap --check-waf 自动套 tamper）：高置信识别出 WAF 且注入点
     // 未命中时，自动套 wafRecommend 推荐链对未命中点重跑一轮快速层（union/error/boolean）。
     // 默认 false 保持现状（仅显式开启才自动兜底）；节流：仅高置信 WAF + 未命中点 + 每点最多重跑一轮。
     autoRetry: false,
   },
+
+  // 报错模板按机制族裁剪（[2026-09-23] 新增，[2026-09-24] 从 wafEvasion 组内移到顶层 ——
+  // 引擎在 config 顶层读它，见上方 wafEvasion 组内那条说明）。
+  // **默认关**：实测代价是真实的 ——
+  //   干净场景（real-mysql / pentest / detection / 红队 r2 19/19）**零损失**，
+  //   单点请求数 148 → 111（error 62 → 25，-25%）；
+  //   **但 CRS PL1 场景掉了 2 个技术位（off/on 8 → 6，自动选链 8 → 6）** ——
+  //   WAF 下需要更多「同机制不同形态」的弹药才能找到不被拦的那条。
+  // 取舍口径：**不用检出能力换请求数**。故默认全量；确知目标无 WAF / 追求请求预算时显式开启。
+  compactErrorTemplates: false,
 
   // OOB 带外通道（无回显盲注兜底）。默认关闭，避免意外出站带外请求。
   oob: {
@@ -233,6 +284,23 @@ export const defaults = {
     dnsOob: false, // 总开关：开启后使用 DNS 通道替代 HTTP 通道
     dnsDomain: '', // DNS 回调域名（如 attacker.com），token 放在子域名中
     dnsPort: 53, // DNS 服务器监听端口（默认 53，需 root/管理员权限）
+  },
+
+  // [2026-09-24] 补顶层默认位（引擎判据是 `!== false`，此前键不存在时行为等价于 true，
+  // 但没有任何地方**写明**这件事）：MSSQL 的 os shell 通路在 xp_cmdshell 未启用时会
+  // 自动发 `sp_configure 'xp_cmdshell',1; RECONFIGURE`（Exploiter.js:450 → xpEnable），
+  // 那是**实例级永久配置变更**。默认保持 true（零行为变化），需要严格停在只读边界内的
+  // 授权场景显式传 `xpAutoEnable:false`（REST config 与 CLI 同键）。
+  xpAutoEnable: true,
+
+  // 非 SQL 注入补充趟（NoSQL / GraphQL / SSTI）。[2026-09-24] 这份 defaults 是本轮补的：
+  // 此前该组只存在于 sanitizeStart 的重建字面量里、defaults 完全没有 ⇒ 引擎读
+  // `noSql.concurrency`（ScanManager.js:633）时既没有默认值可回落，也没有任何守卫
+  // 能发现「REST 少转发一个子键」（少转发的后果是并发恒为 2，改不动）。
+  noSql: {
+    enabled: false, // 总开关（默认关：对关系型后端是纯噪声，且每点多一轮探测）
+    kinds: ['nosql', 'graphql', 'ssti'], // 类别（空数组=三类全跑，见 ScanManager._runNoSql）
+    concurrency: 2, // 注入点级并发（同类别在同一注入点内仍串行，保持命中即停语义）
   },
 
   // 检测技术选择（默认 4 类全选，堆叠/OOB 不勾选 opt-in 以保兼容）

@@ -13,3 +13,9 @@
 {"at":"2026-09-20T12:04:33.637Z","seed":20260919,"requested":40,"observableVuln":20,"unobservable":0,"recallHit":20,"benign":20,"fp":0,"ci95Lower":83.89}
 {"at":"2026-09-20T12:36:33.105Z","seed":907786456,"requested":24,"observableVuln":12,"unobservable":0,"recallHit":12,"benign":12,"fp":0,"ci95Lower":75.75}
 {"at":"2026-09-20T12:47:31.428Z","seed":20260919,"requested":40,"observableVuln":20,"unobservable":0,"recallHit":20,"benign":20,"fp":0,"ci95Lower":83.89}
+{"at":"2026-09-24T15:56:07.983Z","seed":265361094,"requested":24,"observableVuln":12,"unobservable":0,"recallHit":12,"benign":12,"fp":0,"ci95Lower":75.75}
+{"at":"2026-09-24T16:08:46.936Z","seed":266119055,"requested":24,"observableVuln":12,"unobservable":0,"recallHit":12,"benign":12,"fp":0,"ci95Lower":75.75}
+{"at":"2026-09-24T16:20:04.374Z","seed":20260919,"requested":40,"observableVuln":20,"unobservable":0,"recallHit":20,"benign":20,"fp":0,"ci95Lower":83.89}
+{"at":"2026-09-24T16:24:12.780Z","seed":267046307,"requested":24,"observableVuln":12,"unobservable":0,"recallHit":12,"benign":12,"fp":0,"ci95Lower":75.75}
+{"at":"2026-09-24T17:05:24.172Z","seed":269518205,"requested":24,"observableVuln":12,"unobservable":0,"recallHit":12,"benign":12,"fp":0,"ci95Lower":75.75}
+{"at":"2026-09-24T17:16:44.330Z","seed":20260919,"requested":40,"observableVuln":20,"unobservable":0,"recallHit":20,"benign":20,"fp":0,"ci95Lower":83.89}

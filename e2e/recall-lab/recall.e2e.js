@@ -189,6 +189,9 @@ async function main() {
 
   const rows = [];
   let failed = false;
+  // 收尾那句"存在 must 未命中场景"曾是**误导**：failed 也可能来自"场景没执行"
+  // （RECALL_REQUIRE_MYSQL 下跳过）或 status 不是 completed。失败现场得说对原因。
+  let notRunReason = '';
   let realSkipped = false;
   let useReal = false;
   try {
@@ -331,9 +334,9 @@ async function main() {
     }
 
     // —— 真实 MySQL 场景组（mysql2 驱动，连接本地 mysqld/MariaDB）——
-    const useMysqlNow = await mysqlAvailable();
-    if (useMysqlNow) {
-      console.log('[recall-e2e] mysql2 可用，运行真实 MySQL 场景');
+    const my = await mysqlAvailable();
+    if (my.ok) {
+      console.log('[recall-e2e] MySQL 就绪，运行真实 MySQL 场景');
       const MYSQL_SCENARIOS = [
         {
           name: 'real_mysql_numeric',
@@ -371,7 +374,21 @@ async function main() {
         await new Promise((r) => setTimeout(r, 150));
       }
     } else {
-      console.log('[recall-e2e] mysql2 不可用，跳过真实 MySQL 场景（不 fail）');
+      // 「不 fail」这个默认在**本机**是对的（没起 mysqld 不是代码缺陷）；但在明确要求跑
+      // 它们的环境里就是静默降级：CI 那一步的名字写着"18 条"，而 MySQL 连不上时它照样
+      // 退出 0、只跑 16 条 —— 步骤名里的数字于是变成没人验证的宣称（本仓反复出事的形状）。
+      // 所以这里加一个开关：声明了 RECALL_REQUIRE_MYSQL 就把"跳过"当失败。
+      const req = String(process.env.RECALL_REQUIRE_MYSQL ?? '').trim().toLowerCase();
+      if (req !== '' && req !== '0' && req !== 'false') {
+        failed = true;
+        notRunReason = `2 条真实 MySQL 场景未执行（${my.why}）`;
+        console.log(
+          `[FAIL] real_mysql_*（2 条真实 MySQL 场景）**未执行**，但本环境声明了 ` +
+            `RECALL_REQUIRE_MYSQL=${process.env.RECALL_REQUIRE_MYSQL} ⇒ 按失败处理。原因：${my.why}`
+        );
+      } else {
+        console.log(`[recall-e2e] 跳过真实 MySQL 场景（不 fail）—— 原因：${my.why}`);
+      }
     }
   } finally {
     server.close();
@@ -403,7 +420,17 @@ async function main() {
   writeFileSync(resolve(RESULTS_DIR, 'recall.md'), md, 'utf8');
   console.log(`[recall-e2e] 基线已写入 e2e/recall-lab/results/recall.md`);
   if (failed) {
-    console.error('[recall-e2e] 存在 must 未命中场景，回归失败');
+    // 说对原因，别一律写成"must 未命中"：场景没执行 / status 非 completed 都是不同故障，
+    // 归错类会让人去查一个不存在的问题（本仓在这一点上付过学费）。
+    const missed = rows
+      .filter((r) => !r.ok)
+      .map((r) => `${r.name}（status=${r.status}，must 未命中=[${(r.mustMiss || []).join(',') || '-'}]）`);
+    console.error(
+      `[recall-e2e] 回归失败：` +
+        [notRunReason ? `未执行：${notRunReason}` : '', missed.length ? `未达标：${missed.join('；')}` : '']
+          .filter(Boolean)
+          .join('　｜　') || '原因见上方逐条输出'
+    );
     process.exitCode = 1;
   }
 }

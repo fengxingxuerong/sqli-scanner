@@ -12,6 +12,12 @@
 //   灰度切换）时，扫描器会跟着跳并把后续全部注入请求打到新主机上——人根本不会察觉。
 //   因此 scope 校验必须与 SSRF 校验一样在每一跳执行（见 httpClient 侧 getScopeForScan）。
 //
+//   第三个口子是**直连模式（对标 sqlmap -d）**：它不发 HTTP 包，但会**连一个数据库主机**——
+//   那同样是"打谁"的决定。2026-09-25 起 scope 对直连的 DB 主机生效（`api/scanRoutes.js`
+//   直连分支）。过去那边只写着"直连不发起 HTTP 请求，跳过 SSRF 校验（无 SSRF 面）"，
+//   一句话把两条约束一起免掉了；而直连能力本身是 scope 落地之后才加的，所以那不是既定取舍，
+//   是清单没跟着更新。SSRF 对直连确实不适用（DB 连接是操作者明示意图），scope 适用。
+//
 // 设计约束：
 //   - 纯函数、无 IO、无副作用：可被 sanitizeStart（同步）与逐跳校验（异步）共用。
 //   - 未配置 scope 时**不启用**（零行为变化，保持既有部署语义）；配置了就是硬约束，
@@ -273,4 +279,68 @@ export function getScopeForScan(scanId) {
   return hit.scope;
 }
 
-export default { parseScope, isHostInScope, assertInScope, filterInScope, registerScanScope, releaseScanScope, getScopeForScan };
+
+// ── 直连（-d）目标的授权范围 ────────────────────────────────────────────────
+// 为什么放在 scopeGuard 而不是 api 层：这条红线有**两条入口**要共享 ——
+// `api/directTarget.js`（REST 的 mode:direct）与 `bin/cli.js`（`-d <dsn>`）。
+// CLI 侧原先写着"直连不参与 scope 判定"，于是同一个 DSN 从 REST 进要过红线、从 CLI 进
+// 完全不过 —— 判据若长在其中一条入口的文件里，另一条就必然漏。
+/** 不出网的内嵌驱动：没有"主机"可言，不得被 scope 误杀。 */
+const EMBEDDED_DB_DRIVERS = /^(sqljs|sqlite|sqlite3|memory|pglite)$/i;
+
+/**
+ * 从 db 配置 / connectionString 里取数据库主机。
+ * 返回 '' 表示拿不到（内嵌驱动或连接串里没有主机名）。
+ */
+export function directDbHost(db = {}, connectionString = '') {
+  if (db.host) return String(db.host);
+  const conn = String(db.connectionString || connectionString || '');
+  return (conn.match(/^[a-z0-9+.-]+:\/\/(?:[^/?#@]*@)?([^/?#:]+)/i) || [])[1] || '';
+}
+
+/**
+ * 直连目标是否落在授权范围内。**HTTP 与 CLI 两条直连入口共用这一份判据**
+ * （两条入口原先各写一套：REST 有、CLI 完全没有 —— 见下）。
+ *
+ * 为什么不能有第二套：`scope` 管的是"别打没授权的人"，与"这条连接走不走 HTTP"无关。
+ * CLI（`bin/cli.js` 的 runSingleScan）曾经写着"直连模式不参与 scope 判定"，
+ * 而同一段注释又称自己"与 scanRoutes sanitizeStart 同步拦截同构" —— 后者在
+ * 2026-09-25 之后已经不成立（REST 直连那时开始按 DB 主机判 scope），
+ * 于是同一个 `-d` 从 REST 进要过红线、从 CLI 进完全不过。
+ *
+ * @param {{db?:object, connectionString?:string, driverType?:string}} t 直连描述（三选一即可）
+ * @param {object} scopeRules parseScope() 的结果；未启用时直接返回
+ */
+export function assertDirectDbInScope({ db = {}, connectionString = '', driverType = '' }, scopeRules) {
+  if (!scopeRules?.enabled) return;
+  const host = directDbHost(db, connectionString);
+  // 内嵌/不出网的驱动没有"主机"可言，不该被 scope 误杀。判据取**连接串自己的 scheme** 优先，
+  // 再退回调用方声明的 driverType —— 否则 CLI 那句 `driverType || 'memory'` 的默认值
+  // 会把一个解析不出主机的远端 DSN 也当成内嵌，红线就白设了。
+  const scheme = (/^([a-z0-9+.-]+):\/\//i.exec(String(connectionString || '')) || [])[1] || '';
+  const effDriver = scheme || String(db.driverType || driverType || '');
+  if (!host) {
+    if (!EMBEDDED_DB_DRIVERS.test(effDriver)) {
+      // fail closed：配了 scope 就是期待"未知目标不放行"，而不是"换个入口就不管"
+      throw new AppError(
+        ErrorCode.SCOPE_VIOLATION,
+        `直连目标无法确定数据库主机（driver/DSN：${effDriver || '未声明'}），` +
+          '不能确认授权范围，已拒绝（scope 已配置时不放行未知目标；如为内嵌库请显式声明 --driver）'
+      );
+    }
+    return;
+  }
+  // assertInScope 只取 hostname；scheme 是占位（数据库地址没有 HTTP scheme）
+  assertInScope(`db://${host}`, scopeRules);
+}
+export default {
+  parseScope,
+  isHostInScope,
+  assertInScope,
+  filterInScope,
+  registerScanScope,
+  releaseScanScope,
+  getScopeForScan,
+  directDbHost,
+  assertDirectDbInScope,
+};

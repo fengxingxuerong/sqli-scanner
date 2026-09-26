@@ -15,11 +15,20 @@
 // 依赖方向：reportHtml.js（叶子） + engine/pocBuilder.js。不反向依赖 ReportGenerator。
 // =====================================================================
 import { buildPocEvidence } from '../engine/pocBuilder.js';
-import { esc, renderUrlLink } from './reportHtml.js';
+import { esc, mdCode, mdText, renderUrlLink } from './reportHtml.js';
 
-// Markdown 内联代码：反引号必须转义，否则 payload/URL 里的 ` 会提前闭合行内代码。
-function mdInline(s) {
-  return String(s ?? '').replace(/`/g, '\\`');
+// Markdown 行内代码：围栏由 reportHtml.mdCode 统一负责（与「Payload 示例」小节同一实现，
+// 不在本文件另写一份 —— 这类「三处同源」的口径漂移本仓已吃过多次）。
+// [2026-09-24 修] 本处原写法 `s.replace(/`/g, '\\`')` 是**空操作**：CommonMark 规定
+// 行内代码内反斜杠不再有转义含义，于是 payload 里的一个 ` 会让围栏提前闭合，
+// 后半段掉回 markdown 正文 —— 而 SQLi payload 恰好大量含反引号（MySQL 标识符引用）。
+// 实测 `1`<svg onload=alert(1)>` 一条就同时打穿「Payload：」行与代码位。
+
+// Markdown 标题/正文位：不可信内容（参数名等）先过 mdText，再拼进 `###` 标题。
+// 与 mdCode 的分工：这里是**正文位**（要防裸 HTML 与换行拆行），那里是**代码位**
+// （要防内容里的反引号把围栏提前闭合）。
+function mdHeadingText(s) {
+  return mdText(s).replace(/`/g, "'");
 }
 
 // Markdown 代码块围栏：内容里最长的反引号串决定围栏长度（+1），避免提前闭合。
@@ -218,9 +227,13 @@ export function pocMarkdown(r, deps = {}) {
   }
   out.push('以下请求由引擎实际发送形态还原（含 prefix/suffix 与会话上下文），可直接回放验证“这不是误报”。', '');
   for (const it of list) {
-    out.push(`### ${it.title}`, '');
-    out.push(`- 请求：\`${mdInline(it.req)}\``);
-    if (it.poc.payload) out.push(`- Payload：\`${mdInline(it.poc.payload)}\``);
+    // 标题里带着**参数名**（`PoC-1-1 · 注入点 p1（参数 <目标起的名字>）`），
+    // 参数名由被测系统决定 ⇒ 正文位必须过 mdHeadingText；HTML 侧同一 title 走 esc（:279）
+    out.push(`### ${mdHeadingText(it.title)}`, '');
+    // 围栏由 mdCode 自带（这两个调用点历史上是**手写一对反引号**，会与函数返回值里的
+    // 反引号叠成双围栏 —— 现统一由函数负责）
+    out.push(`- 请求：${mdCode(it.req)}`);
+    if (it.poc.payload) out.push(`- Payload：${mdCode(it.poc.payload)}`);
     if (it.poc.note) out.push(`- 说明：${it.poc.note}`);
     out.push(`- 生成时间：${it.poc.generatedAt}`, '');
     if (it.poc.curl) {

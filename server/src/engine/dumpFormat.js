@@ -17,14 +17,25 @@
 import { AppError, ErrorCode } from '../core/errors.js';
 
 /**
- * CSV 单元格转义：含逗号/引号/换行/首尾空格的字段用双引号包裹，内部引号双写。
+ * 公式注入前缀集：以这些字符开头的单元格会被 Excel/WPS/LibreOffice 当作公式求值。
+ * 与 ReportGenerator.csvSafeCell、src/shared/dumpExport.ts 逐字一致，
+ * 三处同源由 src/tests/csvFormulaParity.test.ts 钉住（改动任一侧即红）。
+ */
+export const FORMULA_PREFIX_RE = /^[=+\-@\t\r]/;
+
+/**
+ * CSV 单元格转义：公式前缀防护 + 含逗号/引号/换行/首尾空格的字段用双引号包裹，内部引号双写。
  *
  * 为什么首尾空格也要包裹：不包裹的话，`" a"` 往返一轮会变成 `"a"`，数据静默失真。
+ * 为什么需要公式防护：本模块渲染的是**拖库结果**，单元格值全部来自目标数据库，
+ *   而目标库内容正是被扫系统的可控数据 —— 测试者用 Excel 打开导出件时，
+ *   `=cmd|'/c calc'!A1` 这类值会被当作公式执行，扫描器就成了把恶意数据送进 Office 的通道。
  * @param {any} v 单元格值（null/undefined 视为空串）
  * @returns {string} 可直接拼进 CSV 行的文本
  */
 export function escapeCsvCell(v) {
-  const s = v == null ? '' : String(v);
+  let s = v == null ? '' : String(v);
+  if (FORMULA_PREFIX_RE.test(s)) s = `'${s}`;
   if (/[",\n\r]/.test(s) || /^\s|\s$/.test(s)) {
     return `"${s.replace(/"/g, '""')}"`;
   }

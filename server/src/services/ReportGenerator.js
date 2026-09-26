@@ -31,6 +31,8 @@ import {
 // 使「受影响参数」与「漏洞类型(CWE/OWASP)」成为报告的自包含字段——
 // 对引擎新产出的报告是冗余安全网（finalize 已写入），对历史快照/外部构造报告是唯一来源。
 import { attachVulnContext } from '../engine/vulnEnrich.js';
+// 风险/技术分布的计数口径（与 finalize 写 summary.byRisk/byTechnique 同一实现）
+import { countBy } from '../engine/models.js';
 import { vulnTypeOf } from './vulnTaxonomy.js';
 // [2026-09-13] 交付层：元信息/执行摘要/WAF 交战/修复建议+CVSS（markdown/html/csv 共用单一取数源）
 import { buildDelivery } from './reportDelivery.js';
@@ -50,13 +52,14 @@ const EVIDENCE_MAX = 4000;
 // reportPoC.js 要用 esc/renderUrlLink，而本文件又要 import reportPoC.js。
 // 下方 re-export 保证既有 `import { esc, safeHref, ... } from './ReportGenerator.js'`
 // 继续可用（tests/poc.evidence.test.js:15 依赖这条路径，不可删）。
-import { esc, isInternalHost, safeHref, renderUrlLink } from './reportHtml.js';
-export { esc, isInternalHost, safeHref, renderUrlLink };
+import { esc, isInternalHost, mdCode, mdText, REPORT_CSP_META, safeHref, renderUrlLink } from './reportHtml.js';
+export { esc, isInternalHost, mdCode, mdText, REPORT_CSP_META, safeHref, renderUrlLink };
 
 // [2026-09-17] Markdown 表格单元格：竖线必须转义，否则会切列、把整张表拆散。
 // 参数名/类型名可能来自目标页面（参数名由被测系统决定），属不可信输入，一律经此出口。
 function mdCell(s) {
-  return String(s ?? '-').replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
+  // `?? '-'` 的空单元格标记必须保留（注释见 vulnTypeText 处：空单元格会被读成「无影响」）
+  return mdText(s ?? '-').replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
 }
 
 // [2026-09-13] 顶层小助手：漏洞表行里的 CVSS 单元格文本（score + vector，同源 reportDelivery）
@@ -121,11 +124,23 @@ function sanitizeTargetForExport(target) {
 }
 
 // [P2-7] CSV 单元格转义：引号翻倍 + 公式前缀防护
+// FORMULA_PREFIX_RE 三处同源（本文件 / engine/dumpFormat.js / src/shared/dumpExport.ts），
+// 由 src/tests/csvFormulaParity.test.ts 从三份源码里抽字面量比对，改动任一侧即红。
+const FORMULA_PREFIX_RE = /^[=+\-@\t\r]/;
+
 function csvSafeCell(v) {
   let s = v === null || v === undefined ? '' : String(v);
   // 公式注入防护：以 = + - @ \t \r 开头的单元格加 ' 前缀（Excel/WPS 不再按公式解析）
-  if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
+  if (FORMULA_PREFIX_RE.test(s)) s = `'${s}`;
   return `"${s.replace(/"/g, '""')}"`;
+}
+
+// 「整行只有一列」的区块标题行专用（如 `## 表名`）：这类行**不经 csvSafeCell**，
+// 所以名字里的 \r \n 会凭空造出新行、逗号会把后半段切成新单元格 —— 两种都是
+// 「公式前缀出现在行/单元格首」的可达路径（`a,=1+1` → 第 2 列就是 `=1+1`）。
+// 口径与本文件既有的 rem/description 处理一致（:283-284 同样是压平 [\r\n,]）。
+function flattenCell(v) {
+  return String(v ?? '').replace(/[\r\n,]+/g, ' ').trim();
 }
 
 // 报告生成器：汇总 ReportModel、风险定级、JSON/HTML 导出
@@ -180,10 +195,10 @@ export class ReportGenerator {
     );
   }
 
+  // 计数口径与产品报告路径（engine/scan/finalize 写 summary.byRisk/byTechnique）**同源**：
+  // 两边各写一份就是本仓反复出事的"同一件事两处实现"，故统一走 models.countBy。
   _countBy(arr, key) {
-    const m = {};
-    for (const x of arr) m[x[key]] = (m[x[key]] || 0) + 1;
-    return m;
+    return countBy(arr, key);
   }
 
   _truncate(report) {
@@ -291,8 +306,15 @@ export class ReportGenerator {
         if (!arr || !arr.length) continue;
         const cols = Object.keys(arr[0]);
         lines.push('');
-        lines.push(`## ${table}`);
-        lines.push(cols.join(','));
+        // 表名/列名同样是**目标库可控数据**（来自 information_schema），不是本工具的常量：
+        // [2026-09-24 修] ① 区块标题行原样内插表名 —— 名字里带 \n 就能凭空注入一行，
+        //   而那一行以 `=` 开头时就是一个公式单元格（`-4+2` 求值成 -2 已实测）；
+        // ② 列头此前**完全没有过 csvSafeCell**，是全仓最后一处无守卫的 CSV 出口
+        //   （前端同源导出 src/shared/dumpExport.ts 早就 `cols.map(csvCell)` 了）。
+        // 换行/回车先压成空格再判公式前缀：`csvSafeCell` 只在**行首**生效，
+        // 被 \n 拆出来的后半段它管不到，必须由这里先把行结构钉住。
+        lines.push(`## ${flattenCell(table)}`);
+        lines.push(cols.map((c) => csvSafeCell(c)).join(','));
         for (const obj of arr) {
           lines.push(cols.map((c) => csvSafeCell(obj[c] ?? '')).join(','));
         }
@@ -331,10 +353,19 @@ export class ReportGenerator {
           properties: { cwe: vt.cwe, owasp: vt.owasp, technique },
         });
       }
-      const sev = String(v.severity || 'high').toLowerCase();
+      // 字段名必须认**引擎真正产出的那个**：漏洞模型写的是 `riskLevel`（models.js:263），
+      // 全仓 server/src 里没有任何一处给 vuln 赋 `severity` —— 原来读 `v.severity` 使这行
+      // 恒取默认 'high'，SARIF 里每条 finding 都是 error（真实产物
+      // reports/127.0.0.1-2026-09-17T13-51-34/report.sarif：3 条 vuln，riskLevel
+      // High/High/Medium，导出的 level 却全是 error）。消费方按 error 做分诊就会把
+      // Medium 当严重项处理。
+      const sev = String(v.riskLevel || 'high').toLowerCase();
       const level = (sevRank[sev] ?? 3) >= 3 ? 'error' : (sevRank[sev] ?? 3) >= 2 ? 'warning' : 'note';
       const point = (r.points || []).find((p) => p.id === v.pointId) || {};
-      const url = point.url || r.target?.url || '';
+      // 同理：注入点上的地址叫 `actionUrl`（models.js:138），target 上的叫 `baseUrl`
+      // （vulnEnrich.js），富化后的漏洞自己带 `url`。原来读 `point.url || r.target?.url`
+      // 两个都不存在 ⇒ 同一份真实产物里 uri 全成 "/"，SARIF 消费方拿不到受影响地址。
+      const url = v.url || point.actionUrl || r.target?.baseUrl || '';
       const uri = (() => { try { return new URL(url).pathname + (new URL(url).search || ''); } catch { return url; } })();
       results.push({
         ruleId,
@@ -416,7 +447,9 @@ export class ReportGenerator {
     md.push('');
     const payloads = (r.vulns || []).flatMap((v) => v.payloads || []);
     if (payloads.length) {
-      for (const p of payloads) md.push(`- \`${p}\``);
+      // 手写一对反引号 = payload 里任意一个 ` 就把围栏提前闭合（HTML 侧同一份数据走
+      // esc 后放进 <pre>，是安全的；markdown 侧此前没有对应守卫）。围栏交给 mdCode。
+      for (const p of payloads) md.push(`- ${mdCode(p)}`);
     } else {
       md.push('- 无');
     }
@@ -489,7 +522,8 @@ export class ReportGenerator {
       out.push('### 按注入点', '');
       for (const it of d.remediation.perVuln) {
         // [2026-09-17] 标题带受影响参数：整改清单必须能对应到具体参数，不能只有内部 pointId hash
-        const where = it.affectedParam ? ` · ${it.affectedParam}` : '';
+        // [2026-09-24] affectedParam 是**目标可控**的参数名 → 正文位必须过 mdText（同 mdCell）
+        const where = it.affectedParam ? ` · ${mdText(it.affectedParam)}` : '';
         out.push(`**${it.pointId}${where} · ${it.technique} · CVSS ${it.cvss.score} ${it.cvss.severity}**（\`${it.cvss.vector}\`）`, '');
         for (const a of it.actions) out.push(`- ${a}`);
         out.push('');
@@ -717,6 +751,7 @@ export class ReportGenerator {
 
     return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
       <title>SQL 注入检测报告 ${report.scanId}</title>
+      ${REPORT_CSP_META}
       <style>
   /* —— Fathom Information Design (preset 04) —— 数据墨青 / 冷静中性 / 语义风险色 */
   :root{

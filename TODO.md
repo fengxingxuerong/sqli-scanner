@@ -966,6 +966,16 @@ Postman `formdata` 会构造真实报文、设 `Content-Type: multipart/form-dat
 - **现状**：全部 WAF 绕过结论均为「自实现 CRS 执行器 ≈PL3」口径（`e2e/waf-real`，CRS v4.1.0 官方规则原文 942/930），README 已诚实标注但这是对外可信度最大短板
 - **验收**：真实 ModSecurity + libinjection 引擎下复测 tamper 链绕过率，README「WAF 绕过能力实测口径」表新增一行真实引擎数据
 
+> **✅ 2026-09-27 已自动化（步骤 0–4 全部落进 CI）**：新增 job `modsec-live`
+> （`.github/workflows/ci.yml`），手动 dispatch 或周度触发即在 GitHub Linux runner 上
+> 起真实 `owasp/modsecurity-crs:nginx`，PL1 / PL3 两档各跑一遍 228 插件 × 8 样本，
+> 报告以 artifact 下载（`e2e/waf-real/results/modsec-docker-<档位>-<日期>.md`）。
+> 探针 `e2e/waf-real/modsec-live.mjs` + 靶站 `modsec-target.mjs` + 样本单一来源
+> `samples.mjs`（与静态扫描共用，守卫见 `server/tests/wafSamples.guard.test.js`）。
+> 本机无 docker → 已在 `scripts/ci-local.mjs` 的 `EXCLUDED_JOBS` 登记并写明理由。
+> **只剩步骤 5（报告口径写回 README）待真跑出数字后做。**
+> 下面 0–4 保留原文，作为「换一台有 docker 的机器手跑」时的可复现手册。
+
 #### 步骤 0 · 前置确认（Docker 机器上）
 ```bash
 docker --version && docker compose version   # 均需可用

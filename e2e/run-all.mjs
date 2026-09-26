@@ -38,10 +38,41 @@ const ROOT = path.resolve(HERE, '..');
 //   · redteam-lab：原标 deps:['mysql']，但其入口 run-with-env.mjs 会**自行拉起**
 //     env.mjs（含 MySQL+PG+靶场）。实测宿主无 3306 时仍跑出 19/19 hit、0 误报。
 //     故改 deps:[]（自起环境），不再因宿主无 3306 被跳过。
+// ENGINE_JARS 的解析顺序：**调用方显式给的 > 本机默认路径（且必须真实存在）**。
+// 原来这里无条件注入一串 Windows 绝对路径，两个后果（2026-09-25 CI 实测）：
+//   ① 它 `...lab.env` 排在 `...process.env` 之后 ⇒ **覆盖** job 侧设好的 ENGINE_JARS，
+//      就算 CI 备好了 jar 也会被这串 Windows 路径顶掉；
+//   ② Linux 上这串必然不存在 ⇒ 要么 JVM 起不来，要么整个靶场永远只能 SKIP。
+// 现在：已继承就不动；默认路径不全就**不注入** —— 让 verify.mjs 的 preflight 明确报
+// "未设置 ENGINE_JARS"，而不是拿假路径去试一次再崩。
+function multiEngineJarEnv() {
+  if (process.env.ENGINE_JARS) return {};
+  const def = ['h2', 'hsqldb', 'derby', 'derbyshared'].map((n) => path.join('D:', 'engines', 'jars', n + '.jar'));
+  return def.every((q) => fs.existsSync(q)) ? { ENGINE_JARS: def.join(path.delimiter) } : {};
+}
+
 const LABS = [
   { name: 'redteam-lab', desc: '红队评测：24 靶点（17 注入 + 7 安全对照，自起环境）', entry: 'e2e/redteam-lab/run-with-env.mjs', args: ['r2'], deps: [] },
   { name: 'retest-lab', desc: '单点重测接口端到端（自起靶场）', entry: 'e2e/retest-lab/verify.mjs', deps: [] },
-  { name: 'multi-engine-lab', desc: '多引擎 tamper A/B（真 JDBC：H2/HSQLDB/Derby）', entry: 'e2e/multi-engine-lab/verify.mjs', deps: ['java'], env: { ENGINE_JARS: 'D:\\engines\\jars\\h2.jar;D:\\engines\\jars\\hsqldb.jar;D:\\engines\\jars\\derby.jar;D:\\engines\\jars\\derbyshared.jar' } },
+  { name: 'multi-engine-lab', desc: '多引擎 tamper A/B（真 JDBC：H2/HSQLDB/Derby，挂 CRS）', entry: 'e2e/multi-engine-lab/verify.mjs', deps: ['java'], env: multiEngineJarEnv },
+  // [CI-FIX 2026-09-25] 同一份 verify 的 NO_WAF 档必须也注册。为什么两条不能合成一条：
+  //   CRS-on 档实测 36 格全空（≈PL3 把探针整档 403，MySQL 上也是这个形状），
+  //   所以 CI 上一轮虽然真的下载并校验了 4 个引擎 jar，跑的却是**唯一证不出任何事的那一档** ——
+  //   判定行印成 `tamper 收益 on(0) ≥ off(0)=✅`，0≥0 空转。检测/定库类断言只在无 WAF 档成立，
+  //   而那档此前只有我手动跑过、产物入库、门禁里没有它。产物文件名按档分开（.no-waf 后缀），不互相覆盖。
+  { name: 'multi-engine-lab-no-waf', desc: '多引擎覆盖面（同靶场去掉 CRS：布尔/UNION/回显定库，检测类断言挂这档）', entry: 'e2e/multi-engine-lab/verify.mjs', deps: ['java'], env: () => ({ ...multiEngineJarEnv(), NO_WAF: '1' }) },
+  // [CI-FIX 2026-09-25] 第三档：CRS **官方默认部署档 PL1**。这档才是 README 里
+  //   "这三库在 CRS 下可被检出"那句的唯一合法来源 —— 本机逐档量过：
+  //   PL1 = 三引擎 × 三场景 9/9 检出（布尔通道，h2/derby 另有 error）；PL2/PL3/PL4 = 0/9。
+  //   也就是说 PL1→PL2 之间是**断崖**，把 PL3 的 0/9 当成"这三库过不了 WAF"是读错了档。
+  //   产物写独立文件名（.pl1），不覆盖 ≈PL3 那份默认基线。
+  { name: 'multi-engine-lab-crs-pl1', desc: '多引擎 × CRS 默认部署档 PL1（实测 9/9 检出；"CRS 下可检出"只在这档成立）', entry: 'e2e/multi-engine-lab/verify.mjs', deps: ['java'], env: () => ({ ...multiEngineJarEnv(), CRS_PL: '1' }) },
+  // [CI-FIX 2026-09-25] 这个脚本 2026-09-22 起就在文档里写着"退出码 0 = 全通过 / 期望 PASS 16"，
+  //   但从来没进过 run-all，也没进过 CI —— 于是"H2/HSQLDB/Derby/MonetDB 的方言模板真机能跑"
+  //   这几句结论自那天起没有再被执行过一次。本机实测 1.6s、16 条全绿 ⇒ 挂进去的代价接近零。
+  //   它跑的是模板 SQL 在真引擎上的**可执行性 + 反证**（Derby 拒 GROUP_CONCAT、HSQLDB 拒 SEPARATOR CHAR），
+  //   与 multi-engine-lab 的检测通道覆盖不重叠。
+  { name: 'dialect-templates', desc: '方言模板真机可执行性 + 反证（H2/HSQLDB/Derby/MonetDB，真 JDBC）', entry: 'e2e/multi-engine-lab/verify-dialect-templates.mjs', deps: ['java'], env: multiEngineJarEnv },
   { name: 'tamper-matrix', desc: 'tamper × WAF 规则绕过矩阵', entry: 'e2e/tamper-matrix/tamper-test.mjs', deps: [] },
   { name: 'real-world-lab', desc: '拟真靶场（登录/搜索/上传，PGlite 内置）', entry: 'e2e/real-world-lab/verify.mjs', deps: [] },
   { name: 'real-mysql-lab', desc: '真实 MySQL 驱动靶场验证', entry: 'e2e/real-mysql-lab/verify.mjs', deps: ['sandbox'] },
@@ -131,6 +162,13 @@ async function depStatus(lab) {
 // 理由见 depStatus 内注释（宿主 3306 的短暂可达会造成行为不确定，实测已踩）。
 const needsSandbox = (lab) => lab.deps.includes('sandbox');
 
+// 单个靶场的墙钟上界。取值来自实测分布：本清单里最慢的是 redteam-lab ~91s，其余在秒级到
+// 几十秒 —— 5 分钟对"真在干活"的套件有 3 倍余量，对**挂死**则能在 CI 的 8 分钟步长内
+// 报出"卡在哪个靶场"。此前 runOne **完全没有超时**：任何一套挂死，run-all 就原地等，
+// CI 只能看到 job 被整体掐掉、连现场都没有（2026-09-25 A3 端到端挂死实测到这条）。
+// 超时按**失败**结算，不当"按设计跳过"——挂死不是跳过。
+const LAB_TIMEOUT_MS = Number(process.env.RUN_ALL_LAB_TIMEOUT_MS) || 300000;
+
 const runOne = (lab, useSandbox = false) =>
   new Promise((resolve) => {
     const t0 = Date.now();
@@ -143,13 +181,23 @@ const runOne = (lab, useSandbox = false) =>
       : [lab.entry, ...(lab.args || [])];
     const p = spawn(cmd, cmdArgs, {
       cwd: ROOT,
-      env: { ...process.env, NO_PROXY: '127.0.0.1,localhost', ...(lab.env || {}) },
+      // lab.env 允许是对象，也允许是函数（multiEngineJarEnv 要看进程环境里有没有 ENGINE_JARS，
+      // 有就必须让位 —— 否则无条件注入会把 CI 侧准备好的路径覆盖掉）。
+      env: {
+        ...process.env,
+        NO_PROXY: '127.0.0.1,localhost',
+        ...(typeof lab.env === 'function' ? lab.env() : lab.env || {}),
+      },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     let out = '';
-    p.stdout.on('data', (d) => { out += d; });
-    p.stderr.on('data', (d) => { out += d; });
-    p.on('exit', (code) => {
+    let timeoutNote = '';
+    let settled = false;
+    const finish = (code) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(hardTimer);
+      if (timeoutNote) out += timeoutNote;
       // 从输出里抓一眼关键字（各靶场格式不一，仅作提示，不作判定）
       const hint = out.split('\n').filter((l) => /done:|结论|误报|✅|❌|FAIL|PASS/i.test(l)).slice(-2).join(' | ').slice(0, 160);
       // [P1-FIX 2026-09-14] 区分「通过」与「按设计跳过」：
@@ -158,6 +206,28 @@ const runOne = (lab, useSandbox = false) =>
       const skipped = code === 0 && /\bSKIP\b/i.test(out);
       // [DIAG-FIX 2026-09-21] 保留**完整输出**（原先只留 3 行 tail 且没人打印，见下方失败分支）
       resolve({ code, skipped, ms: Date.now() - t0, hint, sandbox: useSandbox, tail: out.split('\n').filter(Boolean).slice(-3).join('\n'), full: out });
+    };
+    const hardTimer = setTimeout(() => {
+      timeoutNote = `\n[TIMEOUT] ${lab.name} 超过 ${LAB_TIMEOUT_MS}ms 未完成，已由 run-all 强杀（下面是它截止时被收到的全部输出）\n`;
+      try {
+        // win32 上 spawn 走 shell 时 kill 只打死外壳、孙进程仍持有管道；这里 stdio 是 pipe 且
+        // 不用 shell，但 python 包装层会再起 mysqld/node —— 连树杀才真能放掉端口。
+        if (process.platform === 'win32' && p.pid) {
+          spawn('taskkill', ['/pid', String(p.pid), '/T', '/F'], { stdio: 'ignore' });
+        } else {
+          p.kill('SIGKILL');
+        }
+      } catch { /* 杀不掉也要结算，见下面的兜底 */ }
+      setTimeout(() => finish(-2), 5000).unref();
+    }, LAB_TIMEOUT_MS);
+    p.stdout.on('data', (d) => { out += d; });
+    p.stderr.on('data', (d) => { out += d; });
+    p.on('exit', (code) => finish(code === null ? -3 : code));
+    // spawn 失败（ENOENT，如 pin 死的 python 路径不在这台机器上）走的是 'error' 而不是 'exit'：
+    // 没有监听器时它会抛未捕获异常、把整个 run-all 带走（上面的 hasJava 同理由才加了 error 分支）。
+    p.on('error', (e) => {
+      timeoutNote = `[spawn error] ${cmd}：${e.message}\n`;
+      finish(-1);
     });
   });
 

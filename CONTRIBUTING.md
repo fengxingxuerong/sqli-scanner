@@ -10,9 +10,9 @@ server/              后端引擎（Node + Express + 自研检测引擎）
   ├── src/engine/    检测引擎（9 种检测器 + Extractor + Exploiter + 指纹）
   ├── src/core/      核心模块（tamper 225 个 / WAF 62 指纹 / HttpClient / OOB 接收）
   ├── src/api/       REST 路由（scan / exploit / tamper / report-ai / sqlmap 桥）
-  └── tests/         服务端测试（node:test，~1249 用例）
+  └── tests/         服务端测试（node:test，~2355 用例）
 src-tauri/           Tauri 桌面壳（Rust，sidecar 启动本地引擎）
-e2e/                 端到端靶场（recall-lab 18 场景 / sqli-labs / tamper-matrix / waf-lab）
+e2e/                 端到端靶场（recall-lab 16–18 场景，差 2 条真 MySQL / sqli-labs / tamper-matrix / waf-lab）
 docs/                设计文档与对标分析
 ```
 
@@ -23,9 +23,15 @@ docs/                设计文档与对标分析
    - 后端：`npm run server`（监听 127.0.0.1:4567）
    - 前端：`npm run dev`（http://localhost:5173）
 3. **测试**：
-   - 前端：`npm test`（vitest，191 用例）
-   - 服务端：`cd server && npm test`（node:test，~1249 用例）
-   - 召回靶场：`npm run recall-e2e`（18 场景，含真实 SQLite/PG/MySQL）
+   - 前端：`npm test`（vitest，349 用例）
+   - 服务端：`cd server && npm test`（node:test，~2361 用例）
+   - 召回靶场：`npm run recall-e2e` ⇒ **16 条 + 2 条 SKIP**（真实 MySQL 组）。要跑满 18 条走隔离沙箱：
+     `python e2e/run-with-sandbox.py e2e/recall-lab/recall.e2e.js`（实测 18/18 通过；驱动端点由
+     `MYSQL_HOST/PORT/USER/PASSWORD` 注入，SKIP 时会打印究竟是哪一类原因）。
+     CI 的 `acceptance` job 里有 mysqld，故那一步带 `RECALL_REQUIRE_MYSQL=1` 跑满 18 条 ——
+     **这个开关的语义是"跳过按失败处理"**：步骤名写着 18 就必须真跑到 18，否则静默降级成 16
+     （首次 CI 实跑 2026-09-25：两条 MySQL 场景分别检出 `[union,error,boolean]` / `[boolean]`，该步 45s）
+   - 以上用例数以 `docs/_facts.json` 为准（`node scripts/facts-sync.mjs --refresh` 重采）
 
 ## 日志输出
 
@@ -66,6 +72,6 @@ docs/                设计文档与对标分析
 - [ ] `npx eslint .` 零错误
 - [ ] `npm test`（前端）全绿
 - [ ] `cd server && npm test`（服务端）全绿
-- [ ] 涉及检测/提取：`npm run recall-e2e` 18 场景全 PASS
-- [ ] 涉及 tamper/WAF：`npm run tamper-matrix` 与 `npm run waf-e2e`
+- [ ] 涉及检测/提取：`python e2e/run-with-sandbox.py e2e/recall-lab/recall.e2e.js` 18 场景全 PASS（直跑只有 16，MySQL 组 SKIP 不算绿）
+- [ ] 涉及 tamper/WAF：`npm run tamper-matrix` 与 `python e2e/waf-lab/compare-real.run.py`（真 MySQL 装置；`npm run waf-e2e` 指向的是 2026-09-18 已废弃的空壳靶场，别再用）。后者是**门禁**（0 通过 / 1 判据失败 / 2 连不上库），2026-09-25 起 CI 每次 push 也在 acceptance job 里直连该 job 自己的 mysqld 跑一遍，不必等周度矩阵
 - [ ] 更新 `README.md` 功能表与测试数字（如受影响）

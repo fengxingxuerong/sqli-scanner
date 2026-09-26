@@ -127,6 +127,47 @@ export function sanitizeCookieMap(v) {
 }
 
 /**
+ * 值是否为「没配」而非「配了但非法」。
+ * ⚠ null/undefined/空串/空数组/空对象都算"没配" —— 本仓语义里 `scope: []` 就是"不限范围"、
+ * `testFilter: ''` 就是"不过滤"，对它们报警会让合法 payload 长期刷屏，噪声会淹掉真信号。
+ * 字符串按 trim 后判空（`dbms: "  "` 与没发等价）。
+ */
+export function isTrivialValue(v) {
+  if (v === undefined || v === null) return true;
+  if (typeof v === 'string') return v.trim() === '';
+  if (Array.isArray(v)) return v.length === 0;
+  if (typeof v === 'object') return Object.keys(v).length === 0;
+  return false;
+}
+
+/**
+ * 差分「调用方发来的键」与「真正落到 config 里的键」，分成两类静默丢弃。
+ *
+ * 为什么要分两类：`未知字段`（键名根本不在白名单）早就喊了 warn，但**键名对、值形态不合**
+ * 的那一类一句不报 —— 而后果完全相同：调用方拿到 200 + scanId，报告写「未检出」，
+ * 那项设置其实没进引擎。这是本仓反复手工补过的同一个 bug 形状的另一半。
+ *
+ * 纯函数（不碰 logger、不碰 clamp 规则），所以两条判据能单独穷举。
+ *
+ * @param {object} cfg 调用方发来的 config
+ * @param {Set<string>} knownKeys 白名单（KNOWN_CFG_KEYS）
+ * @param {object} config sanitizeStart 已构建出的配置对象
+ * @param {Set<string>} [neverInConfigKeys] 设计上不会出现在 HTTP 模式 config 里的键（直连模式专用）
+ * @returns {{unknown: string[], shapeDropped: string[]}}
+ */
+export function diffDroppedConfigKeys(cfg, knownKeys, config, neverInConfigKeys = new Set()) {
+  const src = cfg && typeof cfg === 'object' ? cfg : {};
+  const out = config && typeof config === 'object' ? config : {};
+  const keys = Object.keys(src);
+  return {
+    unknown: keys.filter((k) => !knownKeys.has(k)),
+    shapeDropped: keys.filter(
+      (k) => knownKeys.has(k) && !neverInConfigKeys.has(k) && !(k in out) && !isTrivialValue(src[k])
+    ),
+  };
+}
+
+/**
  * 参数表（bodyParams / cookieParams）的长度 + 数量限制。
  *
  * [安全审计 P1] 防超大 body 注入 / 超多参数 DoS

@@ -16,6 +16,10 @@ import { ErrorCode } from '../shared/types';
 
 vi.mock('../shared/apiClient', () => ({
   API_BASE: 'http://test/api',
+  // 本文件聚焦"状态码 / MIME / 落盘"，鉴权头那一侧由 useScan.export.test.tsx 专门钉。
+  // 但 mock 必须**把 hook 用到的导出都补齐** —— 漏一个 getApiToken 会让被测代码
+  // 直接抛 TypeError，症状看起来像"导出坏了"，其实是夹具不完整。
+  getApiToken: () => '',
   ApiError: class MockApiError extends Error {
     code: number;
     constructor(code: number, message: string) {
@@ -196,7 +200,15 @@ describe('useScan · exportReport', () => {
   });
 
   it('成功时按格式映射 MIME 并经 tauriBridge.saveFile 落盘', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, text: () => Promise.resolve('CSV,DATA') }));
+    // 夹具必须带 Content-Disposition：后端成功分支一定会设文件名头（见
+    // server/tests/api.exportNotFound.test.js 里钉住的那条），而 hook 用它判别
+    // "这是产物还是错误信封"。不带 = 夹具在模拟一个线上不存在的响应。
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'content-disposition': 'attachment; filename="report_s1.csv"' }),
+      text: () => Promise.resolve('CSV,DATA'),
+    }));
     const { result } = renderHook(() => useScan());
     await result.current.exportReport('s1', 'csv');
     expect(tauriBridge.saveFile).toHaveBeenCalledWith('report_s1.csv', 'CSV,DATA', 'text/csv; charset=utf-8');

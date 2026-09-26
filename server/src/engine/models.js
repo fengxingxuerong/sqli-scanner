@@ -264,3 +264,24 @@ export function createReport(scanId, target) {
     summary: {},
   };
 }
+
+/**
+ * 按字段计数（`summary.byRisk` / `summary.byTechnique` 的唯一实现）。
+ *
+ * 为什么放在 models.js 而不是各自内联：本仓出过一整类"同一件事两处实现、只补一处"的缺陷，
+ * 而这两个计数此前只存在于 `ReportGenerator.build()` 那条**并行**路径里 —— 产品实际走的
+ * `createReport` + `finalize` 从来没算过，于是 `manifest.summary.byRisk/byTechnique`
+ * 恒为 null（实测产物：findings 里明明有 High/Medium，清单里两个键却是 null）。
+ * @param {Array<object>} arr
+ * @param {string} key
+ * @returns {Record<string, number>}
+ */
+export function countBy(arr, key) {
+  /** @type {Record<string, number>} */
+  const m = {};
+  for (const x of arr || []) {
+    const k = x[key];
+    m[k] = (m[k] || 0) + 1;
+  }
+  return m;
+}

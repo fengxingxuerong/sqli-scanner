@@ -13,9 +13,18 @@ export function hasDumpData(data: ExtractedData | null | undefined): boolean {
   );
 }
 
-// CSV 单元格转义：含逗号/引号/换行时加引号包裹，内部引号翻倍
+// CSV 单元格转义：公式前缀防护 + 含逗号/引号/换行时加引号包裹，内部引号翻倍
+//
+// 为什么必须有公式防护：本模块导出的是**拖库结果**，单元格内容 100% 来自目标数据库，
+// 而目标库里的值正是攻击者可控的。`username` 列存 `=cmd|'/c calc'!A1` 时，测试者把 CSV
+// 用 Excel/WPS 打开即触发公式执行 —— 扫描器自己成了把恶意数据送进 Office 的通道。
+// 前缀集与 server 侧 ReportGenerator.csvSafeCell / dumpFormat.escapeCsvCell 逐字一致，
+// 三处同源的守卫由 src/tests/csvFormulaParity.test.ts 钉住。
+const FORMULA_PREFIX_RE = /^[=+\-@\t\r]/;
+
 function csvCell(v: unknown): string {
-  const s = v === null || v === undefined ? '' : String(v);
+  let s = v === null || v === undefined ? '' : String(v);
+  if (FORMULA_PREFIX_RE.test(s)) s = `'${s}`;
   return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
@@ -33,7 +42,8 @@ export function dumpToCsv(data: ExtractedData): string {
     if (cols.length === 0) continue;
     lines.push('');
     lines.push(`## ${tableKey}`);
-    lines.push(cols.join(','));
+    // 表头同样过 csvCell：列名也是目标库可控数据（含逗号会切列、`=` 开头是公式）
+    lines.push(cols.map((c) => csvCell(c)).join(','));
     for (const obj of arr) {
       lines.push(cols.map((c) => csvCell((obj as Record<string, unknown>)[c])).join(','));
     }
@@ -54,7 +64,7 @@ export function tableToCsv(data: ExtractedData, tableKey: string): string {
   const cols = (data.columns && data.columns[tableKey]) || [];
   const rows = (data.rows && data.rows[tableKey]) || [];
   const names = cols.map((c) => String(c).split(':')[0]);
-  const lines: string[] = [names.join(',')];
+  const lines: string[] = [names.map((n) => csvCell(n)).join(',')];
   for (const obj of rows) {
     const rec = (obj || {}) as Record<string, unknown>;
     lines.push(names.map((n) => csvCell(rec[n])).join(','));

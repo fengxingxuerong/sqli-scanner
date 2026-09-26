@@ -91,7 +91,11 @@ export default function SqlmapOptions({
           value={config.proxy ?? ''}
           onChange={(e) => onChange({ proxy: e.target.value.trim() || null })} />
         <Stack direction="row" spacing={2}>
-          <TextField size="small" type="number" label={t('sqlmap.timeoutLabel')} value={config.timeoutMs}
+          {/* 单位是**毫秒**（与 DEFAULT_SQLMAP_CONFIG / 内置面板同口径），字段名刻意不提
+            sqlmap 的 --timeout：那个 flag 收的是**秒**，换算发生在服务端
+            （server/src/engine/sqlmapBridge.js）。旧标签写 "--timeout (ms)" 会让人按
+            sqlmap 语义填 30，而旧代码恰好又把它当秒透传 —— 于是"填错反而对"，掩盖了单位错。 */}
+        <TextField size="small" type="number" label={t('sqlmap.timeoutLabel')} value={config.timeoutMs}
             onChange={(e) => onChange({ timeoutMs: Number(e.target.value) || 0 })} sx={{ flex: 1 }} />
           <TextField size="small" type="number" label={t('sqlmap.retryLabel')} value={config.retry}
             onChange={(e) => onChange({ retry: Math.max(0, Number(e.target.value) || 0) })} sx={{ flex: 1 }} />

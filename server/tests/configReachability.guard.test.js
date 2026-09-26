@@ -46,7 +46,10 @@ const setMembers = (src, varName) => {
   return new Set(Array.from(m[1].matchAll(/'([^']+)'/g)).map((x) => x[1]));
 };
 
-const ROUTES_SRC = read('src/api/scanRoutes.js');
+// 2026-09-25：配置守卫整段搬到 api/scanConfigGuard.js（HTTP 与直连两条入口共用）。
+// 文本锚点于是必须覆盖【入口层这一整簇】——只读 scanRoutes 会让本守卫在搬移后
+// 静默找不到 clamp 收敛点（那正是它要防的"文档写了不存在的能力"的反面：假红/假绿都可能）。
+const ROUTES_SRC = read('src/api/scanRoutes.js') + read('src/api/scanConfigGuard.js');
 const KNOWN = setMembers(ROUTES_SRC, 'KNOWN_CFG_KEYS');
 const BACKFILL = setMembers(ROUTES_SRC, 'BACKFILL_SCALAR_KEYS');
 

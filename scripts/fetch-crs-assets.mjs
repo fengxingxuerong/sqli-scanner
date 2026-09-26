@@ -32,8 +32,21 @@ const RAW = 'https://raw.githubusercontent.com/coreruleset/coreruleset';
 // 族 → { dir: 上游回归目录, conf: 入库规则文件 }
 const FAMILIES = [
   { key: '942', dir: 'REQUEST-942-APPLICATION-ATTACK-SQLI', conf: 'crs/REQUEST-942-SQLI.conf', upstreamConf: 'rules/REQUEST-942-APPLICATION-ATTACK-SQLI.conf' },
-  // 930（LFI）规则原文已入库但执行器默认不加载，先只校验规则文件本身、不下用例
-  { key: '930', dir: 'REQUEST-930-APPLICATION-ATTACK-LFI', conf: 'crs/REQUEST-930.conf', upstreamConf: 'rules/REQUEST-930-APPLICATION-ATTACK-LFI.conf', tests: false },
+  // 930（LFI）：规则原文 2026-09 就入库了，但一直 `tests:false` 不下用例 ⇒ 执行器对它的
+  // 支持度**没有任何裁判**（`FILES:`、`XML:/*` 这两族变量只在 930 里出现，
+  // 于是"要不要实现 FILES"这类问题当时连讨论依据都没有）。2026-09-24 起一并取回归用例，
+  // 让 930 与 942 同样按官方用例计量（crs-equivalence.mjs 逐族出分）。
+  { key: '930', dir: 'REQUEST-930-APPLICATION-ATTACK-LFI', conf: 'crs/REQUEST-930.conf', upstreamConf: 'rules/REQUEST-930-APPLICATION-ATTACK-LFI.conf' },
+];
+
+// `@pmFromFile` 的词典。930120/930121 用 lfi-os-files.data、930130 用 restricted-files.data，
+// 三者合计占 930 应拦用例的 21/33 —— 词典不在，这三条规则就恒不匹配，而数字照常产出。
+// 上游把它们放在 `rules/`（与 conf 同目录），**必须保持同目录落盘**：执行器
+// （crs-engine.js:loadPmDict）按"operator 参数文件名 + conf 所在目录"解析，
+// 换目录等于把三条规则静默下线。字段名沿用 fam.conf/upstreamConf 以便复用同一段核对逻辑。
+const DICTIONARIES = [
+  { conf: 'crs/lfi-os-files.data', upstreamConf: 'rules/lfi-os-files.data' },
+  { conf: 'crs/restricted-files.data', upstreamConf: 'rules/restricted-files.data' },
 ];
 
 const sha256 = (buf) => createHash('sha256').update(buf).digest('hex');
@@ -110,7 +123,7 @@ async function verifyRules(online) {
   manifest.rules ||= {};
   let bad = 0;
   let bootstrapped = 0;
-  for (const fam of FAMILIES) {
+  for (const fam of [...FAMILIES, ...DICTIONARIES]) {
     const abs = resolve(ROOT, 'e2e/waf-real', fam.conf);
     if (!existsSync(abs)) { console.log(`  ❌ ${fam.conf} 不存在`); bad++; continue; }
     const local = sha256(readFileSync(abs));

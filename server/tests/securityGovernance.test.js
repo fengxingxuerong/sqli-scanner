@@ -13,6 +13,8 @@ import {
 } from '../src/api/scanRoutes.js';
 import { ErrorCode, AppError } from '../src/core/errors.js';
 import { isSafeSessionPath } from '../src/core/sessionStore.js';
+import { logger } from '../src/core/logger.js';
+import { TokenBucket } from '../src/core/http/tokenBucket.js';
 
 // 构造合法目标入参（config 可覆盖）
 function start(cfg) {
@@ -180,6 +182,36 @@ test('ratePerSec 不再 clamp：原样透传（P0-P1③）', () => {
   assert.equal(start({ ratePerSec: 1000 }).config.ratePerSec, 1000);
   assert.equal(start({ ratePerSec: 0.5 }).config.ratePerSec, 0.5);
   assert.equal(start({ ratePerSec: -3 }).config.ratePerSec, -3);
+});
+
+// 「不 clamp」不等于「类型也不管」。下游 createBucket/TokenBucket 用
+// `Number.isFinite(ratePerSec) && ratePerSec > 0` 严格判定，而 Number.isFinite **不做转换** ⇒
+// 数字字符串（curl / YAML / CSV 里最常见的 `"20"`）被判成 0，而 0 的语义是「**不限速**」
+// （tokenBucket.js 里 P0-FIX 特意定的）。于是刚设的闸门被静默关掉：键在、值也发了，
+// 唯独类型不对，所以连 dropped 告警都不会响。
+test('ratePerSec 数字字符串：入口归一类型，下游才不会被判成不限速', () => {
+  const r = start({ ratePerSec: '20' });
+  assert.equal(r.config.ratePerSec, 20);
+  assert.equal(typeof r.config.ratePerSec, 'number', '仍是字符串 ⇒ 桶那关 Number.isFinite 直接放行不了');
+  assert.equal(new TokenBucket(r.config.ratePerSec).ratePerSec, 20, '桶必须真的限速');
+  // 显式 0 / 负数仍是「不限速」——这个语义是 P0-FIX 定的，不许被归一顺手改掉
+  assert.equal(new TokenBucket(start({ ratePerSec: 0 }).config.ratePerSec).ratePerSec, 0);
+  assert.equal(new TokenBucket(start({ ratePerSec: -3 }).config.ratePerSec).ratePerSec, 0);
+});
+
+test('ratePerSec 非数字形态：不落地 + 喊出来，绝不解成"不限速"', () => {
+  const orig = logger.warn;
+  const seen = [];
+  logger.warn = (m) => { seen.push(String(m)); };
+  let r;
+  try {
+    r = start({ ratePerSec: 'abc' });
+  } finally {
+    logger.warn = orig;
+  }
+  assert.ok(!('ratePerSec' in r.config), `坏值仍写进了 config：${JSON.stringify(r.config.ratePerSec)}`);
+  assert.ok(seen.some((m) => m.includes('ratePerSec')),
+    `静默丢弃了坏值（调用方以为限速生效）：${JSON.stringify(seen)}`);
 });
 
 test('未知配置字段被忽略（不进 config、不报错）', () => {

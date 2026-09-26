@@ -53,7 +53,14 @@ e2e/recall-lab/results/
 # 但会把 `eslint .` 与 `git status` 搅浑（历史审计会话残留）。统一忽略，需要时自行处理。
 e2e/diag/
 e2e/waf-real/.sqlmap-waf/
-e2e/waf-real/results/
+# [2026-09-25] 这里从"整目录忽略"改成"只忽略非 md 产物"。原因：README 把 `npm run waf-real`
+# 叫作"对外唯一口径"，可那份报告根本不在仓库里 —— 客户 clone 下来看不到任何数字来源，
+# 而扫 md 的产物自洽守卫（server/tests/e2eArtifacts.consistency.test.js）在 CI 的干净
+# checkout 里连文件都找不到，等于对这份口径**永远不生效**。同目录的 json 继续忽略。
+e2e/waf-real/results/*
+# 例外只开给 CRS A/B 那几份报告（README 引它、自洽守卫在 CI 里要能找到它）；
+# 同目录其余 md（保真度明细、tamper 现场）仍按原政策留在本地，避免一次改规则引入六份新产物。
+!e2e/waf-real/results/waf-real-report*.md
 e2e/real-world-lab/results/
 e2e/recall-lab/.sqlmap-tmp/
 
@@ -67,10 +74,10 @@ e2e/waf-lab/results/.git-broken-20260906/
 e2e/redteam-lab/out/
 e2e/redteam-lab/sqlmap-out/
 
-# e2e ��ʱ��Ͻű���������������� scratch��������汾������
+# e2e 临时诊断脚本与运行输出（本地 scratch，不纳入版本管理）
 e2e/diag/
 
-# [������չ 2026-09-13] e2e ���в��� json ���⣨md ժҪ/���汣�����ۣ���ʷ�����ļ��� git rm --cached��
+# [策略扩展 2026-09-13] e2e 运行产物 json 出库（md 摘要/报告保留留痕；历史跟踪文件已 git rm --cached）
 e2e/detection-runner/results/*.json
 e2e/multi-engine-lab/results/*.json
 e2e/oob-real-lab/results/*.json
@@ -80,13 +87,13 @@ e2e/real-mysql-lab/.sqlmap-out/
 e2e/waf-lab/results/*.json
 e2e/redteam-lab/results-*.json
 
-# [P1] Tauri �����Զ����ɵ� schema��ԴΪ src-tauri/capabilities/default.json��tauri build/dev ʱ�ؽ���
+# [P1] Tauri 构建自动生成的 schema（源为 src-tauri/capabilities/default.json，tauri build/dev 时重建）
 src-tauri/gen/schemas/
 
-# [P1] UDF �������udf_sys.c + build-udf.py ����⣬DLL ���ؽ�������ɱ������⣩
+# [P1] UDF 构建产物（udf_sys.c + build-udf.py 已入库，DLL 可重建；避免杀软误报入库）
 e2e/udf-lab/*.dll
 
-# [.env ���Զ���] .env* Ĭ�ϲ���⣻��������Ϊ��������Ϣ�İ�ȫ�ļ����� VITE_API_BASE������ʽ������ʵ�ʸ���״̬һ��
+# [.env 策略对齐] .env* 默认不入库；以下两个为无敏感信息的安全文件（仅 VITE_API_BASE），显式放行与实际跟踪状态一致
 !.env.development
 !.env.tauri
 
@@ -150,3 +157,36 @@ e2e/.pg-ready-probe.cjs
 # 重建基线」那次恢复快照里被顺带扫进来的，一直跟踪到今天（同一批未配套的还有
 # server/data/ledger，见上文）。现补 `git rm --cached`：文件留在磁盘，只是不再入库。
 .workbuddy/
+# [2026-09-26] Agent 运行时目录与宿主产物标记（本机专属，不入库）
+# 三者都是"跑起来就有、与源码无关"的东西，此前长期挂在 `git status` 的未跟踪区，
+# 每轮都要重新判断一次"这是产物还是垃圾"——与 .workbuddy / e2e/run-with-pg.py 同源处置。
+# 已核实：这三个路径下**没有任何被 git 跟踪的文件**，故只需加规则，无需 `git rm --cached`。
+#   · .box-agent/            —— 宿主（Box-Agent）的会话/任务注册表运行时目录
+#   · .box-agent-scratch/    —— 运行时保留的临时区，由 runtime 自行安全回收，不手动 rm
+#   · *.artifact.json        —— 宿主为已发布产物生成的标记文件（本仓无入库先例）
+# 用 `*.artifact.json` 而非逐文件列举：它是宿主对**任意**交付物都会生成的东西，
+# 逐文件写会随交付物增减而腐烂（同族教训：登记表只增不减会变噪声源）。
+.box-agent/
+.box-agent-scratch/
+*.artifact.json
+
+# ─────────────────────────────────────────────────────────────────────────────
+# [2026-09-26 修复记录] 上文 5 行中文注释曾损坏为字面 U+FFFD（共 167 个替换字符）
+#
+# 根因：这些注释在某次写入时用了 **GB18030** 编码（不是 UTF-8），而仓库其余部分
+# 是 UTF-8。严格按 UTF-8 读那几行会得到替换字符 —— 由于是**已落盘的字面**
+# `EF BF BD`，任何后续转换都救不回来（git 的 19 个历史版本里同样是替换字符）。
+#
+# 修复方式：**不是按大意重写，而是从 git 历史里精确还原原文**。原始 GB18030 字节
+# 仍完整保存在 blob 中，用 GB18030 解码即得原句；还原后逐行做了 ASCII 骨架比对
+# （当前损坏行 vs 历史候选行，5/5 一致）以排除张冠李戴。
+#   还原来源：3627ae3「chore(repo): 运行产物与构建生成物出库 + .gitignore 策略对齐」
+#   涉及行：e2e/diag 注释、[策略扩展 2026-09-13]、[P1] Tauri schema、[P1] UDF、
+#           [.env 策略对齐]
+# 原文中的可验证事实已逐条复核：.env.development/.env.tauri 确仅含 VITE_API_BASE；
+# udf_sys.c / build-udf.py 确已入库；3627ae3 提交日期确为 2026-09-13。
+#
+# ⚠️ 遗留（未在本轮处理）：line 54 与 line 78 的 `e2e/diag/` 是**重复规则**。
+# 两次分别由 P2-HYGIENE 与本次还原的注释各自引入，语义相同、无行为差异。
+# 合并会改变 diff 归属、且可能踩到 blame 追溯，故只记录不动。
+# ─────────────────────────────────────────────────────────────────────────────

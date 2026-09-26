@@ -9,7 +9,7 @@
 // ============================================================================
 import * as eventBus from '../../core/eventBus.js';
 import { logger } from '../../core/logger.js';
-import { createVulnerability } from '../models.js';
+import { createVulnerability, countBy } from '../models.js';
 import { summarizeSkipped } from '../scanHelpers.js';
 import { dbmsEvidenceOf } from '../dbmsEvidence.js';
 import { publicReport } from '../scanHelpers.js';
@@ -152,8 +152,14 @@ export async function finalizeReport(run) {
   if (blockAdaptiveInfo?.triggered && report.summary.blockPolicy.action === 'none') {
     report.summary.blockPolicy = {
       action: blockAdaptiveInfo.mode === 'filterBypass' ? 'filterBypass' : 'adaptiveTamper',
+      // 标签必须与取值的语义对齐：filterBypass 形态只有 errorOnlyPoints（error 命中但数据面
+      // 全 miss 的点数），写成 blockHits 会让报告出现「blockHits=2」而日志里根本没有 2 次拦截。
       reason:
-        `本次实际出现拦截响应（blockHits=${blockAdaptiveInfo.blockHits ?? blockAdaptiveInfo.errorOnlyPoints ?? '?'}）` +
+        `本次实际出现拦截响应（${
+          blockAdaptiveInfo.blockHits != null
+            ? `blockHits=${blockAdaptiveInfo.blockHits}`
+            : `errorOnlyPoints=${blockAdaptiveInfo.errorOnlyPoints ?? '?'}`
+        }）` +
         `并已自动换链重跑：${JSON.stringify(blockAdaptiveInfo.chains?.[0] || [])}`,
       tamperHint: Array.isArray(blockAdaptiveInfo.chains?.[0]) ? [...blockAdaptiveInfo.chains[0]] : [],
       backoffMs: report.summary.blockPolicy.backoffMs,
@@ -167,6 +173,15 @@ export async function finalizeReport(run) {
     report.summary.blockPolicy.reason =
       '本次请求被大量拦截（validity.status=blocked），未执行自适应重跑（可能无未命中点可补）；结论可信度受抑制，详见 summary.validity';
   }
+  // [P0-FIX 2026-09-25] `summary.byRisk` / `byTechnique` 此前**只在并行的 `ReportGenerator.build()`
+  // 里算过**，而产品实际走的是 `createReport` → 本函数那条路 —— 于是机读清单
+  // （`scripts/one-click-scan.mjs` 取 `report.summary?.byRisk || null`）**恒为 null**。
+  // 实测产物 reports/127.0.0.1-2026-09-17T13-51-34/manifest.json：findings 三条
+  // （High/Medium 齐全），清单里 byRisk/byTechnique 却是 null，而同一层的 totalPoints/totalVulns
+  // 有值 —— 读的人会以为"这份扫描没有风险分布可言"。
+  // 计数放在报告本体而不是清单里现算：报告 JSON、REST /report、前端与 manifest 才共用同一份事实。
+  report.summary.byRisk = countBy(report.vulns, 'riskLevel');
+  report.summary.byTechnique = countBy(report.vulns, 'technique');
   // 会话落盘收尾（resume 模式可用同一 sessionFile 续跑/复核）：必须先 finalize 落盘完成，再置 completed，
   // 避免 resume 端在 status=completed 后、落盘前抢读到一个 vulns 为空的半成品会话。
   if (session) await session.finalize(report).catch(() => {});

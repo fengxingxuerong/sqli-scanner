@@ -28,6 +28,8 @@ export function parseArgs(argv) {
     scope: null, insecureTls: false, noValidationSkip: false,
     // [P0-FIX 2026-09-09] 生产护栏开关：高危池投放确认 / 脱离护栏 / 二阶写请求放行
     confirmDestructive: false, noProductionMode: false, allowSecondOrderWrites: false,
+    // [2026-09-24] 不可逆动作拒绝位：MSSQL 自动 sp_configure 开启 xp_cmdshell（实例级永久变更）
+    noXpAutoEnable: false,
     // —— HTTP 协议层（对标 sqlmap --force-ssl / --ignore-redirects / --hpp）——
     forceSsl: false, ignoreRedirects: false, hpp: false,
     ratePerSec: 50, concurrencyDet: 4,
@@ -59,6 +61,8 @@ export function parseArgs(argv) {
     randomAgent: false, where: null, paramDel: null,
     // 内部：从请求文件解析出的 header 对象（buildAuth 直接使用）
     headerObj: null,
+    // 无法识别的开关收集在此（不再静默忽略）：告警见循环末尾，硬拒见 unknownFlagError()
+    unknownFlags: [],
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -136,6 +140,7 @@ export function parseArgs(argv) {
     else if (a === '--confirm-destructive') args.confirmDestructive = true;
     else if (a === '--no-production-mode') args.noProductionMode = true;
     else if (a === '--allow-second-order-writes') args.allowSecondOrderWrites = true;
+    else if (a === '--no-xp-auto-enable') args.noXpAutoEnable = true;
     else if (a === '--auth') args.auth = next();
     else if (a === '--auth-type') args.authType = next();
     else if (a === '--rate' || a === '--ratePerSec') args.ratePerSec = Number(next()) || 50;
@@ -228,8 +233,37 @@ export function parseArgs(argv) {
           '参数已被忽略，扫描继续。'
       );
     }
+    // [UNKNOWN-FLAG 2026-09-25] 这条必须接在同一条 if/else 链的**尾巴**上。
+    //   原先这里是空的 else（拼错的开关被**静默丢弃**），而我第一版把它写成了链外的独立
+    //   语句 —— 结果每个 token 都被记成未识别（`-u` 也中招），当场被自己的测试打回：
+    //   "不该有未识别开关：-d,--driver,--scope,--sql-template,--tech,--risk"。
+    //   本文件对 --no-escape / --union-char 已写了「保留显式识别并给出可操作提示，避免用户
+    //   以为传了没生效而反复排查」—— 那是同一条政策的两个特例，其余上百个开关仍一声不响。
+    //   实测代价落在红线上（同一个意图、三种写法、三种结果）：
+    //     -d <dsn> --driver mysql  --scope 10.20.0.0/16 ⇒ 越界主机被拒（正确）
+    //     -d <dsn> --driver sqlite --scope 10.20.0.0/16 ⇒ 内嵌驱动放行（正确）
+    //     -d <dsn> --scope-typo 10.20.0.0/16            ⇒ 红线整个消失，命令还照常跑完
+    //   最后一条是**假安全**：退出码 0、看着像设了范围，实际一个约束都没生效。
+    else if (a.startsWith('-')) args.unknownFlags.push(a);
+  }
+  if (args.unknownFlags.length) {
+    console.error("[cli] 无法识别的参数（不会生效）：" + args.unknownFlags.join(" "));
   }
   return args;
+}
+
+/**
+ * 入口层的硬拒判据：有未识别开关时返回错误文案（由调用方打印并以非零退出）。
+ * 为什么不在 parseArgs 里直接 exit：它被单测与 one-click 复用，"要不要终止" 属于入口决定。
+ */
+export function unknownFlagError(args) {
+  const u = (args && args.unknownFlags) || [];
+  if (!u.length) return null;
+  return (
+    '无法识别的参数：' + u.join(' ') + '\n' +
+    '  这些开关不会生效，本次启动已拒绝 —— 宁可少跑一次，也不让「以为设了」变成实际没设。\n' +
+    '  用 --help 核对开关名（例如 --driver 而不是 --driver-type；--scope 而不是 --scopes）。'
+  );
 }
 
 

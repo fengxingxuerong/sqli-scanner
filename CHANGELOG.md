@@ -4,6 +4,1019 @@
 
 ## [Unreleased]
 
+### 2026-09-25 批次 · 补上"入库产物 = 当前代码跑出来的那份"这道外部一致性门禁
+
+前面几节反复出现同一个形状：**产物在说谎，而当轮 CI 全绿**。
+`e2eArtifacts.consistency.test.js` 查的是"结论列与同行测量列自不自洽"（内部一致性），
+它抓得住 09-20 那五天，却抓不住一份**内部自洽但与当前代码不符**的基线 ——
+比如靶场改了 payload、检测通道变了，而入库报告还是旧的那份。仓库里没有任何判据比这个。
+
+- 新增 `scripts/artifact-drift.mjs`（`npm run artifact:drift`）：把 HEAD 里那份与磁盘上那份
+  **只忽略时间戳**后逐行比。不用 `git diff --exit-code` 是因为产物必然带生成时间，
+  逐字节比 = 天天红。
+- 接进 CI 的 `e2e-self-contained`（该 job 刚真的重跑过那三个档 ⇒ 比的是"同一轮、当前代码"），
+  并同步进 `scripts/ci-local.mjs`。**只登记 multi-engine 三档**：waf-real 那几份要真 MySQL/真 MariaDB，
+  服务端小版本一变 error 通道文本指纹就变 ⇒ 现阶段是假红来源，等测过稳定度再加（脚本注释里写了理由）。
+- `server/tests/artifactDrift.wiring.test.js` 钉三处接线 + 覆盖面：少任何一处（package.json /
+  ci.yml 步骤 / ci-local 的 cmd / **ci-local 的 job id**）就红；漂移清单里的每份产物必须
+  ① 被 git 跟踪 ② 在 run-all 里有对应且**会真被重跑**的档 ③ 至少 3 份、每份至少 3 行表格。
+  最后一条是反空转 —— 本仓第一版守卫的目录过滤器写成恒假，就是被同类断言抓出来的。
+- 验证：漂移检查本身 3 次（未重跑绿 / 真重跑三份产物仍绿——证明归一化吃掉了真实 churn /
+  注入一句反向结论红 + 精确 diff）；接线守卫 **7 个变异逐个摘掉被保护物全部变红**。
+  其中"package.json 脚本"那条第一版锚点带了 `\n`，在本机 CRLF 文件上命中 0 次 ⇒
+  被判成无效变异而不是"通过"，改成不锚换行的替换后才成立。
+
+
+### 2026-09-25 批次 · CI 真跑的偏偏是唯一证不出事的那一档
+
+上一轮忙完，远端 run `09a5e92` 的日志第一次出现了 `▶ multi-engine-lab ... ✅ 通过 6.6s`
+（4 个引擎 jar 逐个 sha1 校验通过）。我当时把它当成果报给自己，但同一行里就写着：
+
+```
+[判定] 断言：safe 零误报=✅　tamper 收益 on(0) ≥ off(0)=✅　桥存活=✅
+```
+
+`0 ≥ 0` 空转成立。翻 `results/multi-engine-report.json`：CRS-on 档 **36 格全空**，连 `dbms`
+都是 null。也就是说 —— 下载 jar、校验 sha1、注入 `ENGINE_JARS` 这条链全在干活，跑的却是
+**唯一证不出任何事的那一档**（≈PL3 全规则档把探针整条 403；`acceptance.mjs:380` 对 MySQL
+早就记过同一件事：「PL3 下 off=on=0」）。真正有信息量的 `NO_WAF=1` 档只在我手动跑过一次，
+产物入了库，**门禁里没有它**。
+
+1. **补注册两档，都挂在同一个 java 依赖上**（`e2e/run-all.mjs`）：
+   `multi-engine-lab-no-waf`（`verify.mjs` + `NO_WAF=1`，检测/定库类断言只在这档成立）与
+   `dialect-templates`（`verify-dialect-templates.mjs`，16 条"方言模板在真引擎上可执行 + 反证"
+   —— 它 09-22 起就写在 `docs/P2-dialect-probe-2026-09-22.md` 的"退出码 0 = 全通过"里，
+   却从没进过任何门禁）。本机实测 6.4s / 4.4s / 1.5s。
+   顺手统一退出码口径：dialect 脚本缺 `ENGINE_JARS` 时原本退 2，而 run-all 的跳过判据是
+   `code===0 && /\[SKIP\]/` ⇒ 一台没放 jar 的机器会把"环境没配"报成"测试挂了"。改成 `[SKIP]` + 0。
+2. **接上一个从没被读过的字段**：`SCENARIOS[].must = ['boolean']` 自写下来没有任何一处引用它，
+   于是"某引擎退化到只剩 error 通道"照样 ✅。现在它进判定（且只在无 WAF 档进 —— CRS 档 0 检出时
+   挂它就是永久红）。变异：给 num 的 `must` 加一个不存在的 `stacked` ⇒ `rc=1` 且原因点名缺哪个通道。
+3. **定库从"印一行警告"变成断言**：新增 `expectDbms`，取值是这轮从产物里读出来的事实
+   （H2→`H2`、HSQLDB→`HSQLDB`、Derby→**null，即"当前定不出"**）。双向漂移都红：丢了 ⇒ 红；
+   Derby 哪天真定出来了 ⇒ 也红，并明确提示"把基线和 README 覆盖面一起改，别只改代码"。
+   两条变异各 `rc=1`。原来那句"定库与真实引擎不符 = 误判，比定不出库更糟"只 `console.log`，
+   现在同样进判定 —— 误判会直接写进交付报告的 DBMS 字段。
+4. **说明列学会了说"丢了一部分"**：上一版只分红 on 空/非空，于是 `derby/str`
+   （`off=union,error,boolean` → `on=error,boolean`，**union 被打掉**）印成「tamper 后检出」。
+   改成集合差分（`丢失 X` / `新增 X` / `技术位与 tamper 前一致`），并给表格加"定库 off/on"列
+   —— "哪条通道才带得出库名"此前只在控制台里，跑完就没。
+5. **档位不再由我手敲**：报告抬头的 `≈PL3` 原本是字面量，`CRS_PL=1` 跑出来的产物照样印 PL3；
+   现在取 `crs-engine` 的 `EFFECTIVE_PL`，且非默认档写独立文件名（`.pl1`），一次改档探索不会再
+   悄悄覆盖入库基线。判定行也自证：空转时印「✅（空转：两侧均 0，本档不证明绕过能力）」，
+   CRS 档直接写明"检测类断言本档不适用"。
+6. **撤下 README 那句没有证据的"× CRS"**：覆盖面表里 `H2、HSQLDB、Derby …… 仅布尔通道 × CRS`
+   溯到 2026-09-09 的 `results/p3-multi-engine-report.md`（那晚记的是"tamper 打穿 CRS 后
+   H2/Derby 的 error 通道检出"）。同一套设施今天复跑 = 0/9 ⇒ 那句结论**已不可复现**
+   （这些天 CRS 执行器改过保真度：`+`→空格、PL 区块截断、FILES 停止预解码，尺子变了）。
+   处置：P3 原件顶部加失效声明并**保留**（它记录的是那天的实验，删掉等于把负记录也扔了），
+   README 改成按档分开引 —— 无 WAF 档给覆盖面与定库，CRS 档只给"safe 零误报"。
+
+**收尾时顺手把档扫了一遍，结论翻转了半句**：把 `CRS_PL` 从 1 量到 4，
+PL1 = 三引擎 × 三场景 **9/9 检出**（布尔通道，h2/derby 另有 error），PL2/PL3/PL4 = **0/9**。
+所以"这三库过不了 CRS"根本不成立 —— 成立的是"过不了 PL2 以上的 CRS"，而 CRS 官方默认部署是 PL1
+（本仓 `waf-real` 的对外口径也在那一档上）。于是：
+`multi-engine-lab-crs-pl1` 也注册进清单（第三个档，产物 `.pl1.md`），README 的覆盖面那一栏
+改写成"三档分开引"，并把断崖写进去 —— 不许拿 PL1 说"任何 WAF 都能过"，也不许拿 PL3 说"过不了 WAF"。
+断言的挂载条件随之从"按档名"改成"按实测"：`MUST_ASSERT = NO_WAF || EFFECTIVE_PL === 1`、
+`DBMS_ASSERT = NO_WAF`（PL1 下 UNION 哨兵照样被吃，把定库基线挂上去只会把"没送达"报成"探针坏"）。
+四档本机耗时 6.4 + 4.4 + 4.9 + 1.5s。
+
+### 2026-09-25 批次 · 顺着"档位"摸到的四条：PL2 是全仓唯一有净收益的档、CRS 报告根本不在仓库里、3308 有两个主人、结论列按长度判
+
+上一节写完还剩一个没回答的问题：**高 paranoid 档到底是"过不了 WAF"还是"档太严"**。
+把 CRS 逐档量完之后，顺带挖出三个同类缺陷。
+
+1. **真 MySQL 的逐档数字（原来只有 PL1/PL3 两个点，中间是空的）**：
+   PL1 = off 8 / on 8 / 自动 8；**PL2 = off 0 / on 1 / 自动 0**；PL3 = 0/0/0；PL4 = 0/0/0。
+   ⇒ ① 断崖在 **PL1→PL2**，之后是平的（三个 Java 引擎在同一把尺子上同形）；
+   ② **PL2 是全仓目前唯一观测到"挂链有净收益"的档**（orderby 的 error 通道 0→1）——
+   以前所有档要么"探针本来就能过"要么"全拦"，tamper 的价值从来没被量出来过。
+   四个点写进 `waf-bits-baseline.json`（逐档逐字段，含 `复测` 命令），README 那张档位表补齐。
+2. **`e2e/waf-real/results/` 整目录被 .gitignore 排除** —— 而 README 管 `npm run waf-real` 叫
+   "对外唯一口径"。后果有两层：客户 clone 下来看不到任何数字来源；扫 md 的产物自洽守卫
+   在 CI 的干净 checkout 里**连文件都找不到**，对这份口径从来没生效过。
+   修：`results/` 从"整目录忽略"改成"忽略非 md"+ 白名单只开给 `waf-real-report*.md`
+   （其余 md 保持原政策，不一次性引入六份新产物）。守卫立刻抓到两条真缺陷（见第 4 点）。
+3. **改档跑一次，就把入库基线悄悄换掉**：`waf-verify.mjs` / `waf-auto-check.mjs` 写的是固定文件名，
+   而 CRS 档位是可变的 —— `CRS_PL=3 npm run waf-real` 会把"对外口径 PL1"那份产物覆盖成 0/0 那份。
+   同一天在 multi-engine-lab 上刚踩过同一个坑，这次是它的泛化。修：非默认档一律另起文件
+   （`.plN.md` / `.plN.json`），并把 `paranoiaLevel` 写进 json。
+   连带修掉 `waf-auto-check` 的一句撒谎话：它无论跑在哪一档都去读 PL1 那份产物当"人工挂链基线"，
+   实测打印过 `PL4 下 自动=0（人工挂链基线：off=8 on=8）`；现在按档找对应产物，档位对不上就明说不可比。
+4. **结论列按长度判 ⇒ 报喜不报忧**：`on.length > off.length ⇒ 绕过生效` 这一句同时写在
+   `waf-verify.mjs` 和 `mariadb-verify.mjs` 里。前者会把 `off=[boolean,error] / on=[error]`
+   （同为长度 2，丢了一整条通道）印成 "—"；后者入库那份 09-09 的 `mariadb-report.md` 里
+   `num`、`blind` 两行前后完全相同（`boolean`/`boolean`）也印"绕过生效"。
+   生成端改成集合差（`绕过生效（新增 X）` / `反而丢失 Y` / `技术位持平` / `全拦`），
+   并把守卫从"只看说明列"扩到"结论列 + A/B 两列同向"（B 类判据，六条合成用例 + 一条
+   **往真实产物注入撒谎结论**的用例 —— 只测合成分支不够，表头写法一变守卫就会静默跳过整张表）。
+   `mariadb-report.md` 没法重跑（本机 MariaDB 便携版没起），所以只**按本行两列重算结论列**、
+   测量列原样不动，并在文件顶部写清哪些话能引、哪些不能（09-19 执行器修准后未复跑）。
+5. **3308 端口有两个主人**：真 MariaDB 便携版（`mariadb-verify.mjs` 的靶的）和
+   `e2e/udf-lab/mysql_sandbox.py` 起的隔离 **MySQL 8** 沙箱共用 3308、同库名。
+   ⇒ 沙箱在的时候跑一次 mariadb-verify，就会把 MySQL 的数字写进标着 MariaDB 的产物里，
+   而且看起来完全可信。修：脚本开跑前读 `SELECT VERSION()`，不是 MariaDB 直接硬退（rc=2）。
+   实测覆盖：经 `run-with-sandbox.py` 起了真沙箱后跑 mariadb-verify ⇒ 当场拒绝、未产生任何扫描；
+   另"版本自报不是 MariaDB 就拒"那一支本轮**没有真发环境可测**（便携版没起），只有代码路径。
+6. **门禁口径统一**：`waf-auto` 的断言原来写 `?.auto ?? 0`，即"该档没记基线"= 下限 0 = 必过；
+   而同文件的 `waf-real` 对同一件事是 `基线缺该档 ⇒ FAIL`。两条判据不该一松一严，
+   现在 auto 缺字段也直接红（`WAF_GATE_PL=9 --only=waf-auto` 实测：FAIL + 原因 + 现场日志）。
+
+
+
+### 2026-09-25 批次 · multi-engine-lab：Linux 上必崩的 classpath、永远退 0 的"门禁"、以及印了五天的反向结论
+
+远端连着两次红都在同一步（`e2e-self-contained` → run-all → multi-engine-lab），
+报的是 `Error: write EPIPE`、0.5s、没有任何原因可看。查下去是三层问题叠在一起。
+
+1. **classpath 分隔符硬写了 `;`**（`lab-app.mjs` 的 `-cp "${ENGINE_JARS};${HERE}"`）。
+   Windows 用 `;`、POSIX 用 `:` ⇒ Linux 上整串被 JVM 当成**一个**条目 ⇒ 找不到主类
+   `EngineBridge` ⇒ JVM 立刻退出。而 `run-all.mjs` 给这个靶场配的 `ENGINE_JARS` 是
+   `D:\engines\jars\*.jar`（Windows 路径），CI 上 jar 根本不存在 —— 于是
+   **本机它能跑、Linux 上必崩**，且崩在"往已死进程 stdin 写"这种形态上。
+   修：分隔符改走 `path.delimiter`；加 `bridgePreflight()`（ENGINE_JARS 未设 / jar 不在
+   即前提不满足）⇒ 按设计 `[SKIP]` 退 0 并打印原因，run-all 记「跳过」而不是「失败」。
+   ⚠ 我第一版写成"`;` 和 `:` 都拆一下"，当场被自己的跑批打回：Windows 上
+   `D:\engines\jars\h2.jar` 会从**盘符冒号**处切成 `D` + `\engines\…` ⇒ 每个 jar 都"不存在"。
+   现在只按平台分隔符拆；跨平台复制错格式由 preflight 明确报错，不猜着拆。
+2. **`verify.mjs` 从头到尾没有一处设置失败退出码**，而它文件头写着
+   "断言：safe 永远零检出；tamper on 应 ≥ tamper off"。⇒ run-all 里这个靶场**恒记 ✅ 通过**，
+   一条断言都没落地；JVM 半路死掉也一样绿（本机模拟 `JAVA_BIN=node` ⇒ 全 0/3 且 RC=0）。
+   现在退出码真的承接判据：`0` 断言通过 / `1` 误报红线或收益为负 / `2` 前提失效（桥中途死）。
+   前提失效与断言失败**必须分开**：前者去修环境，后者才是真回归。启动处另加一次探针
+   （桥起不来 ⇒ `[SKIP]` + 原因，而不是扫完九个组合再交一堆废数字）。
+   同时补上 stdin / 子进程 'error' 监听（缺了就是未捕获异常）与 stderr 尾部留证 ——
+   CI 那两条红"没有原因"正是这么来的。
+3. **入库报告印的是反向结论**（这次才算清账）：表格"说明"列原本写
+   `${on ? '检出' : '未检出'}`，而 `on` 是拼接**字符串**，空的时候是 `'-'` —— 照样 truthy。
+   于是 `multi-engine-report.md` 与 `.no-waf.md` 两份基线的 9 行**全部**印"检出"，
+   而 off/on 两列都是 `-`。重跑两份产物后：
+   - WAF=on：off=0 / on=0 ⇒ 新加的"本档有效性"行明说"绕过收益无从判定，本档只验了误报红线；
+     'H2/HSQLDB/Derby 布尔通道被检出过'这句结论本档**不提供**证据"；
+   - `NO_WAF=1`：off=9 / on=9 ⇒ 检测能力本身没问题，是 CRS 档下 `dash2hash` 收益为 0。
+   旧基线里那 9 个"-"到底是"真没检出"还是"当时桥就是坏的"，已无法从产物判断 ——
+   这正好是把有效性写成行的理由：**下次不必再靠考古**。
+
+**下一步（本轮未做，只登记）**：CRS-on 档两侧全零说明"真 JDBC 引擎 × CRS"这个组合
+从没证明过任何绕过收益（`dash2hash` 只在 H2 的 MySQL 方言态投放）。要么换成"裸请求被 CRS 拦、
+挂 tamper 能过"的形态重做这档，要么把 README 里"部分通道验证：H2/HSQLDB/Derby"的范围
+说清只到"无 WAF 下布尔通道"。本轮只修**诚实性**，不动结论。
+
+**门禁**：`node --check` × 2、eslint 0 error、`refs:check` / `facts:check` 过；
+本机三向真跑：无 ENGINE_JARS ⇒ `[SKIP]` 退 0；带真 jar ⇒ 两档各退 0 且报告如实；
+`JAVA_BIN=node` ⇒ 退 2 并带 `JVM 退出（code=9）；输出尾部：node: bad option: -cp`。
+CI 侧的必崩条件（Linux 缺 jar）现在会走 `[SKIP]` —— 这条**本机不能代替远端验证**，
+以推上去后 `e2e-self-contained` 的实跑结论为准。
+
+**并把这类事故钉成机器判据**（`server/tests/e2eArtifacts.consistency.test.js`）：
+扫入库的 e2e 报告，凡"结论列说检出、同一行测量列全空"就红。为什么不"重跑再逐字节比对"：
+产物带时间戳，那样天天红；而这次事故的性质就是**同一行内部自相矛盾**，不重跑也能判。
+两条自己的错在过程中被当场抓住：
+① 第一版按位置取测量列 ⇒ 「场景」列也算数据 ⇒ 把撒谎的旧基线放回工作区都不红；
+   改成按表头文字选列（`tamper|off|on|命中|…`）后，变异验证两步都红、还原后绿。
+② 全仓那份的目录过滤写成恒假 ⇒ 扫到 0 个文件 —— 靠守卫自己那条"文件数不得少于阈值"
+   的防空转断言暴露，而不是静默假绿。
+**CI 现在真跑这一档，而不是永远 SKIP**（`e2e-self-contained` 新增前置步）：修完分隔符之后，
+Linux 上的结果只是从 ❌ 变成 ⏭ —— 远端日志实证：`⏭ 跳过（按设计）0.4s`、
+`[SKIP] ... ENGINE_JARS 中这些 jar 不存在：D、\engines\jars\h2.jar;D、…`（还是被 `:` 切碎的
+Windows 串）⇒ 也就是说 **H2/HSQLDB/Derby 的真引擎检测仍然从没在 CI 跑过一次**。
+新步按 Maven Central 官方 `.sha1` 逐个校验下载（4 件：h2 2.2.224 / hsqldb 2.7.3 /
+derby 10.16.1.1 / derbyshared），全对才 `ENGINE_JARS=…:$dir/…` 写进 `$GITHUB_ENV`；
+**任何一件不可信就不设** ⇒ 套件按 preflight 明确 SKIP（不假绿、也不把推送变成假红）。
+校验不是形式主义：本机经代理第一次取 h2 得到 285KB 的**合法 zip 头 + 错 sha1**（真身 2,614,933
+字节），只看 `curl` 退出码就会拿半截 jar 去跑。重试到第 1 次即全绿（4 件 sha1 全对）。
+
+配套修的是 `run-all.mjs` 里那条会**覆盖** CI 环境的写死值：`lab.env` 无条件注入
+`D:\engines\jars\*.jar`，排在 `...process.env` 之后 ⇒ 就算 CI 备好了 jar 也会被顶掉。
+现在 `ENGINE_JARS` 已存在就让位、默认路径必须真实存在才注入（否则交给 preflight 报"未设置"）。
+两条代码路径用可区分的方式验过（`NO_WAF=1`，同一命令只差 ENGINE_JARS）：
+- 继承单个 jar ⇒ `[判定] ... on(3) ≥ off(3)`（只有 H2 那台引擎能用 ⇒ 证明读的是继承值）
+- 不设 ⇒ `on(9) ≥ off(9)`（本机默认全套 ⇒ 证明 fallback 生效）
+`ENGINE_JARS` 指到刚下载的 jar 亦真跑通过（`✅ 通过 6.5s`）。
+CI 侧的"下载→校验→注入→真跑"这条**本机无法验证**（Linux 路径 + GitHub 网络），
+以下一次远端 `e2e-self-contained` 日志为准：期望看到 `▶ multi-engine-lab ... ✅ 通过`
+而不是 ⏭；若仍 ⏭，日志里会有 ❌/⚠ 的哪一件取不到。
+
+另记一条相关事实：CI 里没有"跑完测试后工作区必须干净"的门禁（`git diff --exit-code` 在
+`.github/workflows/ci.yml` 里零命中），而有 22 份 `results/` 产物是被跟踪的 ⇒
+"证据被改写后与仓库不一致"目前无人管；本轮只钉住了"证据会不会对自己撒谎"这半边。
+
+### 2026-09-25 批次 · CLI 的 `-d` 也归 scope 管了；顺带把"拼错的开关静默忽略"这条假安全关掉
+
+做 REST 直连那条红线时顺手核了第二条入口，结果是**真的不对称**：
+
+| 入口 | 之前 | 现在 |
+|---|---|---|
+| REST `mode:'direct'` | 按 DB 主机判 scope（09-25 上午刚补） | 同 |
+| CLI `bin/cli.js -d <dsn>` | `args.scope && **!args.direct**` ⇒ **完全不判** | 与 REST 共用 `core/scopeGuard.assertDirectDbInScope` |
+
+而 CLI 那三行注释同时自称"与 scanRoutes sanitizeStart 同步拦截同构" —— 同构那句在我改完
+REST 之后就变成假的：**同一个 `-d mysql://root@10.0.0.9/db`，从 REST 进被拒、从 CLI 进放行**。
+判据搬进 `scopeGuard`（两条入口共用一份），不在任何一条入口的文件里留第二套。
+
+### 附带挖出来的更贵的一条：CLI 解析器把无法识别的开关**静默丢弃**
+
+`bin/cli/args.js` 的循环原本没有兜底分支 —— 拼错的开关不报错、不告警，直接当没看见。
+同文件对 `--no-escape` / `--union-char` 却写着「保留显式识别并给出可操作提示，避免用户以为
+传了没生效而反复排查」：政策本来就有，只是只覆盖了两个特例，其余上百个开关仍然一声不响。
+代价实测落在红线上，同一个意图三种写法三种结果：
+
+- `--driver mysql --scope 10.20.0.0/16` ⇒ 越界主机被拒（对）
+- `--driver sqlite --scope …` ⇒ 内嵌驱动放行（对）
+- `--scope-typo 10.20.0.0/16` ⇒ **红线整个消失，命令照常跑完、退出码 0** ← 假安全
+
+现在：未识别开关收集进 `args.unknownFlags` ⇒ 循环结束打一条告警 ⇒ 两个入口
+（`bin/cli.js` 的 main、`scripts/one-click-scan.mjs`）以 `unknownFlagError()` **拒绝启动**（退 2）。
+`--no-escape` / `--union-char` 保持原政策（告警但继续），靠接在同一条 if/else 链**尾部**
+实现 —— 我第一版把它写成链外的独立语句，于是 `-u`、`-d`、`--scope` 全被记成未识别，
+被自己的新测试当场打回（"不该有未识别开关：-d,--driver,--scope,…"）。
+台账子命令 `ledger show <scanId>` 例外：nanoid 可能以 `-` 开头，不按开关判。
+
+**这次自查到的三处自己的错**（都靠 CI 等价命令抓回，没靠感觉）：
+1. 测试里我把 flag 写成 `--driver-type`（真名 `--driver`）与 `--tech`（真名 `--technique`）
+   —— 正是新硬拒该拦的那类错，于是新特性先把自己的测试拦红；连提示语里我也举了
+   `--driver-type` 当反例，改成用真名，免得教人用一个不存在的开关。
+2. `bin/cli.js` 用了 `unknownFlagError` 却没导入 ⇒ `tsc -p server` 与 `eslint` 各报一处
+   （**这条最阴**：缺导入让 `main()` 抛 ReferenceError 也退非 0，那条 spawn 测试当时
+   是"因为程序崩了所以通过"—— 补回导入后重跑才算数）。
+3. 变异验证确认这条断言真承重：把入口硬拒换成 `if (false && …)` ⇒ 恰好那条"真起 CLI"的用例红，
+   其余 4 条单测仍绿（它们只测纯函数，正是"只测被调函数→入口坏"的形态）；还原后重跑恢复绿。
+
+新增测试 11 条（`cli.directScope` 6 + `cli.unknownFlags` 5）。全量：server **2372 条 0 失败**
+（徽章 2720）、`tsc -p server` 零错、eslint 0 error、arch-guard 无新违规、refs/facts/readme 全过。
+顺序按上一批的教训走：**先 `git add` 新测试文件，再 `--refresh --coverage`** —— 数字采自跑测试
+（看得见磁盘），指纹采自 git 索引（= CI 视野），反过来必红。
+`docs/_facts*` 与 README 已随本次重采落盘（覆盖率 lines 90.46 / branch 77.35 / func 79.92）。
+
+### 2026-09-25 批次 · 搬运工具自己也得能干活：push-via-api 此前**删不掉远端文件**
+
+症状：把废弃夹具的产物 `e2e/waf-lab/results/compare.md` 从仓库里删掉后推送，脚本按设计
+拒绝更新 ref —— `⚠️ 远端多出 … / 本地 1410 / 远端 1411 条目，差异 4`。
+根因不是那道校验（它是对的），是它唯一的成立前提：**"这次推送里没有删除"**。
+脚本只上传"本地新引用到的对象 + 变更条目"，没有任何一步告诉远端"这条要摘掉" ⇒
+只要提交里含删除，就永远推不上去，而且报错方向还指着"你再核对一遍差异"。
+
+改法：根树那次 POST 带上 `{path, mode, type, sha:null}`（GitHub trees API 的删除语义），
+422 时退回 `{path, sha:null}` 重试一次。两道安全设计写进文件头：
+① **只对 blob 发 null** —— 目录由父树重建自然消失，逐个 null 目录才是能清空远端的动作；
+② `PUSH_MAX_DELETIONS`（默认 50）护栏：删除数异常多 ⇒ 大概率是 `--local` 取错了提交，
+宁可停下。`--dry-run` 现在先打印删除清单。
+
+端到端验过（不只看退出码）：dry-run 列出 1 条 ⇒ 真推后校验"本地 1410 / 远端 1410，差异 0"、
+ref 前进、那份文件在远端确实没了（此后远端树与本树条目数一致，含删除）。
+
+### 2026-09-25 批次 · 废弃入口不能再"跑满一分钟然后印一行 NO"
+
+`npm run waf-e2e` 指向 09-18 就判定失效的空壳夹具（`compare.e2e.js` 的 `/vuln` 端点纯字符串
+回显、不执行 SQL ⇒ 两侧检出恒为 0 ⇒ 判据 `detectRateB > detectRateA` 结构上不可能成立）。
+文件头当时写着"已失效、请勿据此判断"，但那**只是注释**：命令照旧能跑满约一分钟，
+再印一行 `NO ❌` 并以 1 退出。实测代价就是本仓反复踩的那个形状 ——
+读者从输出里读到的是"这个判据没通过"，而真因是"这个夹具不可能通过"，方向完全相反。
+
+现在这个入口直接说清三件事再以 2 退出：废在哪（一句）、用什么（三条等价命令，含刚挪进
+acceptance 的那份 CI 门禁）、历史实现在哪（`git log -- <本文件>`）。
+整段夹具**删除**而不是留着加 `if` —— 留着就会被再跑一次，而它每次产出的都是反向结论。
+
+顺手把这次发现的一条**可复用判据**写进文件头（当年 configB 为什么长那样）：
+`randomcase` 会随机化每个字母的大小写，把 `UnionDetector` 用于确认回显的标记
+`SQLISCANNER0` 打乱 ⇒ union 检测失效，表现为"开了 tamper 反而 0 检出"。
+这类"绕过插件恰好破坏检测锚点"的坑不看明白就会重踩。
+
+同时修 `e2e/README.md` 的索引表两行：
+- `waf-lab` 行原先只写 `compare.e2e.js`（照着跑就掉进上面那个坑）⇒ 改成指向
+  `compare-real.e2e.mjs` 并标空壳入口；
+- `mariadb-verify` 行的入口在本仓并不存在（`e2e/mariadb-verify.mjs`）⇒ 真路径是
+  `multi-engine-lab/mariadb-verify.mjs`（它不是独立靶场目录）。
+  这类"文档索引腐烂"与当年 ci.yml 两个指向不存在文件的 job 同族，所以补了一次性审计：
+  按表格逐行核入口是否存在 —— 13 行里第 1 版脚本报了 2 个，**其中一个是我自己的误报**
+  （`detection-runner/run.js` 实际存在，是脚本的路径候选写错），核实后只改 mariadb 那一行。
+
+**一处"先改文档后落事实"的自查**：`docs/waf_runbook.md` 收尾那条改成"旧产物已于 09-25 删除"时，
+那两个文件其实还在树里 ⇒ 这次真的 `git rm e2e/waf-lab/results/compare.md`（并删掉未跟踪的
+`compare.json`），让文档说的事实与树一致。
+另核一件事：`run-all` 的 `waf-lab` 条目指的是 `compare-real.e2e.mjs` 而不是这份废弃入口，
+所以把入口改成 exit 2 **不会**把任何门禁改红（也解释了这份夹具为什么能在没人察觉的
+状态下烂一周 —— 没有任何门禁指着它）。
+
+### 2026-09-25 批次 · WAF A/B 真 MySQL 门禁从"周度才有"挪到每次 push
+
+`e2e/waf-lab/compare-real.e2e.mjs` 是真断言门禁（0 通过 / 1 判据失败 / 2 连不上库），
+但它此前只挂在 `tamper-waf-matrix` job 上，而那个 job 的 `if:` 是
+`schedule || workflow_dispatch` —— 也就是说**每次 push 都不跑它**。改了 tamper/WAF/通道降级
+的代码，红线要等到下周一才可能亮，这跟"没有门禁"只差一句"反正会红"。
+
+挪法与同批的 recall-lab 一样：`acceptance` job 自己起了 docker mysqld 并有
+"初始化靶场库表"这一步，所以新步骤直连 3306 + `sqli_lab` 即可，不需要 Python 沙箱；
+周度矩阵里那份**保留**（它走 `compare-real.run.py` 的沙箱启动器，顺带验那个 launcher），
+并在两处都写了"这里不再是唯一执行处"，免得注释变成过期结论。
+
+本机按 CI 将用的同一条路径真跑过（不是按沙箱路径跑的）：
+连上 `8.0.28 @ 127.0.0.1:3306/sqli_lab`、`users` 行数=5、9.3s 跑完，
+判据①拦截率 79.4%→45.7% ✅、判据②高危命中 30→0（crs_942141/942142/942180）✅、
+有效性前置 A=1/1 B=1/1 ✅。失败方向也验过：`MYSQL_PORT=3399` ⇒ **RC=2** 并打印两种跑法，
+不会静默当成通过。
+
+这一步的"有效性前置"本身就是同日补的（见下面 A3 那条之前的 `evaluateAbExperiment` 一笔）：
+A3 通道降级初版把 configA 打到零检出时，旧判据仍然退出 0、报告照印 ✅。
+
+### 2026-09-25 批次 · recall-lab 的两条真实 MySQL 场景：自 09-10 写下起第一次进了自动门禁
+
+`e2e/recall-lab/recall.e2e.js` 有 18 条场景，其中 `real_mysql_numeric` / `real_mysql_str`
+需要外部 mysqld。它们此前的实况是：**任何自动路径都跑不到**——
+CI 的 `recall-lab` 独立 job 没有 mysqld（步骤名当时已如实写着"16 条"，另 2 条恒 SKIP），
+而端点写死 `127.0.0.1:3307` 意味着沙箱给的那个端口永远探测不到。
+今天早些时候把端点改成读 `MYSQL_HOST/PORT/USER/PASSWORD`（`real-lab-driver.js:mysqlEndpoint()`，
+默认值不变）之后，这条链路第一次能被指到别处；本轮把它接完：
+
+- **CI**：`recall-lab` 独立 job 删掉，整步并进 `acceptance`（那个 job 自己起 docker mysqld，
+  且 `npm run acceptance` 已经用同一套 `MYSQL_*` env）。建库不需要额外初始化 ——
+  `MYSQL_INIT_SQL` 自带 `CREATE DATABASE IF NOT EXISTS sqli_test`。
+- **判据（关键）**：只搬位置不够。步骤名写着"18 条"，而 mysqld 连不上时套件**仍然退出 0**、
+  只跑 16 条 —— 那个数字就又成了没人验证的宣称（正是这次要修的形状）。
+  所以加 `RECALL_REQUIRE_MYSQL`：声明了它就把"跳过"当失败；CI 那一步显式设 `1`。
+  默认口径不变（本机没起 mysqld 不是代码缺陷，仍然 SKIP + 退出 0）。
+
+**三个方向都真跑过**（新断言必须知道什么输入会让它红）：
+
+| 场景 | 结果 |
+|---|---|
+| 带开关 + 指到没监听的 3399 | RC=1，`[FAIL] real_mysql_* … 未执行`，原因带端口与沙箱命令 |
+| 带开关 + 指到可达的 3306 | RC=0，**18 条 `[PASS]`**（MySQL 两条分别检出 `[union,error,boolean]` / `[boolean]`） |
+| 不带开关 + 不可达 | RC=0，仍打印"跳过真实 MySQL 场景（不 fail）"（默认未变） |
+
+顺带修了收尾那句**误导性的归因**：它原先固定写"存在 must 未命中场景，回归失败"，
+而 `failed` 也可能来自"场景根本没执行"或 `status` 非 completed —— 三种故障查法完全不同，
+归成一句会让人去查一个不存在的问题。现在按明细说原因（`未执行：…` / `未达标：场景（status=…, must 未命中=[…]）`）。
+
+**另外更正一处历史文档**：`docs/optimization-report-2026-08-25.md` 第 101 行把
+"recall-lab 18 场景"当作 CI 结构完整的证据 —— 写的时候与之后很长一段时间里，
+CI 实际只跑 16 条。该报告是当时快照、按本仓口径不改正文，此处留这条为准。
+
+### 2026-09-25 批次 · 两条入口共用一个守卫：直连模式的 config 曾整段绕过 clamp
+
+收尾清单上挂了两次的那项（"抽公共 config 守卫让直连分支也吃 clamp"）本轮做掉了，
+顺带修掉同批挂着的 `manifest.summary.byRisk/byTechnique` 恒 null。
+
+**直连那条入口坏在哪**：`sanitizeStart` 里 `mode:'direct'` 是**早退分支**，
+返回的 `config` 曾是 `{...defaults, ...cfg}` —— HTTP 分支那 536 行 clamp / 形状校验 /
+白名单收敛**一条都没走**。实测会原样进引擎的值：`concurrency:9999`（9999 路并发打库）、
+`timeoutMs:99999999`、以及**带分号的 `dumpWhere`**（它会被原样拼进提取 SQL 的 WHERE 位，
+而 HTTP 分支正是为此拒分号）。同一分支还漏了第二条播报：`warnDroppedConfigKeys`
+只在 HTTP 分支调用，于是直连"传了个不生效的键"是**静默**的。
+
+**修法按"两条入口走同一个守卫函数"，不是"在第二条入口里手挑几个键 clamp"**
+（手挑 = 两张清单各自漂移，而漂移正是它当初被漏掉的机制原因）。整段守卫平移到
+`api/scanConfigGuard.js:buildGuardedConfig(cfg, scopeRules)`，HTTP 与直连各调一次：
+
+- 搬移前先用脚本核过块内依赖：只用到 `cfg` / `config` / `scopeRules` 与模块级导入，
+  HTTP 专有的 url/method/params 处理**全在块外** ⇒ 能整段平移、不夹带目标解析；
+- 随块搬走的还有 `PARAM_DEL_ALLOWED` / `EXTRACT_SCOPE_MODES` / `sanitizeIdentList` /
+  `sanitizeExtractScope`（只有块内用到），`sanitizeExtractScope` 由 scanRoutes re-export
+  保住既有引用路径；
+- `scanRoutes.js` **1190 → 589 行**（arch-guard 那条 1200 软线的债一次还清，留出一倍余量）。
+
+**同批修的输出层缺陷**：`summary.byRisk` / `byTechnique` 只在**并行的**
+`ReportGenerator.build()` 里算过，而产品实际走 `createReport` → `scan/finalize` ——
+于是机读清单 `scripts/one-click-scan.mjs` 的两个键恒 null。现场就是仓库里那份现成产物
+`reports/127.0.0.1-2026-09-17T13-51-34/manifest.json`：findings 三条（High/Medium 齐全），
+`summary.byRisk` 是 null，而同层 `totalPoints/totalVulns` 有值（那两个是清单自己现算的）。
+计数现在落在**报告本体**（`finalize`），并且与 `build()` 共用 `models.countBy` 一份实现。
+
+**验证**（三条新判据都能红，全部用变异跑过）：
+
+| 守卫 | 变异 | 结果 |
+|---|---|---|
+| `api.entryParity.test.js` 三条 | 把直连的守卫调用换回 `{...cfg}` | 恰好 3 条红，还原后绿 |
+| `report.summaryCounts.test.js` 两条 | 摘掉 `finalize` 里那两行赋值 | 2 条红（报"manifest 读到 null"） |
+| 直连 scope / `{INJECT}` 旧判据 | —— | 4 条全过，抽取未削弱 |
+
+搬移当场被**文本型守卫**咬到三处（`docs.configDefaults` / `configReachability.guard` /
+`configDroppedKeys.warn` 都按源码文本找 clamp 收敛点）。没有放宽它们，而是把扫描范围
+改成"入口层这一整簇"（scanRoutes + scanConfigGuard 并读）——这类守卫的价值就在于
+"改名/挪走时先红"，所以它必须跟着事实挪，而不是被删。
+
+**门禁**：server 全量 **2361 条 0 失败**（新增 6 条）、`tsc -p server` 零错、
+eslint 零错、arch-guard 无新循环依赖。搬移涉及每条扫描的启动路径，所以改完又跑了一轮
+**全量 `npm run acceptance`：15 PASS / 0 BLOCKED / 0 FAIL / 0 SKIP（15/15 跑出断言）**
+—— 比上一轮的 14 PASS + 1 SKIP 多一套件，是因为这次本机 PostgreSQL 在听，OOB 真机套件
+第一次在本地跑出断言（不是被跳过）。
+
+**这一笔推上去之后 CI 仍红了一次，红在门禁自己身上而不是代码**（`lint` job 的
+`facts:check`：`指纹采集于 …（315 个文件）→ 现在 317 个`）。机制是 `facts-sync` 两个面的
+**口径不对称**：用例数是"**跑**测试"得来的（看得见磁盘上的新文件），指纹却是
+`git ls-files`（只看得见已入库的）——我在两个新测试文件还没 `git add` 时采的数，
+于是 `_facts.json` 写着 2361（含新文件的量）而指纹写着 315（不含它们）。
+**本机 `--check` 当时是绿的**（本机的索引同样没有那两个文件）——这个红只有推上去才看得见。
+
+2026-09-22 那次修复（`TRACKED-ONLY`）处理的是**反方向**的洞（未跟踪文件污染指纹 ⇒
+红得修不掉），这次补的是剩下的这一半：`--refresh` 末尾主动比"磁盘 vs 索引"，
+有未入库测试源就**当场点名说清后果**（含"提交后 CI 会判采集源已改动、本机看不出来"）。
+新告警按判据真跑过一遍：临时放一个未入库的测试文件 ⇒ 它被算进 2362 却不进指纹（317），
+告警点名它；删掉再采 ⇒ 回到 2361 且告警静默。数字与指纹随后重新同批落盘（317 = CI 视野）。
+
+### 2026-09-25 批次 · A3 端到端第一次真跑：挂死被读成"输出格式变了"，一路挖出门禁层三个洞
+
+推上去之后远端 `acceptance` job 唯一的红是「WAF 通道降级编排（A3）端到端」，
+理由是 `取不到画像/决策行（输出格式变了？）`。**这句归因是错的**，而且它把我支使去了
+一个本来正确的方向之外：输出格式没变，是**套件一行输出都没有打出来**（它第一行正常输出
+在第 164 行，所以 50..163 任何一处卡死都长这样）。本地 `timeout 90` 复现：0 字节输出、RC=124；
+更关键的是**会话开始那一版（47b2768）同样挂死** —— 这不是本次改动的回归，而是这份 e2e
+自接线以来从未在任何环境真跑过（CI 这次是第一次）。
+
+用逐阶段打点的临时副本定位到三处，逐个修：
+
+1. **`listening` 竞态 ⇒ 永久挂死**（`waf-channel-degrade.e2e.mjs`）。两个靶场几乎同时 bind，
+   两条 `await new Promise(r => server.once('listening', r))` 的写法里，第二个的 `listening`
+   在等第一个期间就发完了 → 事件不重放 → 永不 resolve。改成**一次 `Promise.all` 等全部**
+   （监听器在同一同步批里挂完），并把 `error` 一起接住：端口被占时报 `[BLOCKED] 靶场未就绪…`
+   而不是无声挂死。变异验证：把这段还原成两条 await 的副本 → RC=124 零输出（改动确为承重）。
+2. **靶场解码不忠实 ⇒ 画像恒空**。`httpClient`/axios 把空格编成 `+`，线上形态是
+   `id=1%27+AND+1%3D1--+-`；靶场只做 `decodeURIComponent(originalUrl)`，于是黑名单词
+   `' and '`（带空格）**永远命不中** → 裸探针全放行 → `verifyTamperChains` 走"目标不敏感"
+   早退分支 → `blocked=[]`、`probed=0`。也就是说：修好竞态之后它会从"挂死"变成"全红"。
+   修法是给靶场补 `+`→空格折叠，与本仓 CRS 执行器同口径（`crs-engine.js` 的 `t:urlDecodeUni`
+   就是这么做的）。**这是夹具 fidelity 问题，不是把测试改绿**：真实 WAF 看的是解过码的 ARGS，
+   夹具替它少解一步，画像就是在量夹具。修后实测：双拦画像 `[and,or,union,select]`、
+   单拦 `[and,or,union]`，7 条断言全绿，两档各 12 个探针（预算纪律那条也终于有事实可断）。
+3. **门禁包装层的超时不结算**（`acceptance.mjs` 的 `run()`）。给这套件补了它该有的预算
+   （自包含、无 DB、真跑约 2s ⇒ 显式 `60000`，而不是躺在 900s 默认值里烧 CI 的 18 分钟），
+   补完立刻暴露：win32 上 `spawn(..., {shell:true})` 起的是 cmd.exe，`child.kill()` 只打死
+   shell，孙进程仍持有 stdout/stderr 管道 ⇒ `'close'` 不触发 ⇒ **带超时的包装层自己变成无限等待**
+   （实测：60s 早已到期，门禁在 200s 外还在原地等）。现在超时走 `taskkill /T /F` 连树杀 +
+   5s 兜底结算（输出里带 `[TIMEOUT]`，`code:-2`），正常路径行为不变。
+
+顺带把失败原因的归因写诚实：新增一条前置判据 —— 输出里连 `[channel-degrade]` 都没有时，
+报"套件未跑到打结论那行（挂死或提前崩溃）+ stdout 尾部"，不再让人去改解析正则。
+该分支用"故意挂死的桩"真跑过：60.8s 结算，理由是挂死而非格式。
+
+**这一批的共同形状**：三个洞都在**门禁驱动层**（不在产品代码里），而且都是"注册成功但从未
+在干活"——判据写了、套件接进来了、CI 也跑了，但没人看过它的真输出。教训记两条：
+接进 CI 的新套件必须**至少真跑一次并读它的输出行**，以及**包装层的超时要有兜底结算**，
+否则它只在坏的时候才第一次被测试。
+
+### 2026-09-25 批次 · 推上去才发现：我本地的"静态检查"没照抄 CI 范围，lint job 当场红
+
+推送完成后回读 CI，`lint` job **失败**（test-frontend / audit 过）。两条都是我本次改动造成的，
+而且都在**本地能提前抓到**：
+
+1. `tsc -p server/tsconfig.json` 报 `scanRoutes.js(1115)` TS2339 —— 我在 retest 里写的
+   `payload.url` 落在 `sanitizeStart` 返回类型的**联合**上（直连那半边没有 `url` 字段）。
+   我本地跑的是 `npx tsc --noEmit`：**根 tsconfig 不覆盖 server/**，所以那条错误根本没进视野。
+   本仓记忆里明明写着"静态检查照抄 CI 范围"，我这次是拿一个不同范围的命令当成了同一个门禁。
+2. `node scripts/arch-guard.mjs` 报"新债"：`scanRoutes.js` **1252 行** > 单文件 1200 上限。
+   会话开始前它是 1187 行 —— 是我今天几笔改动把它推过线的（不是既有欠账）。
+
+**修法按 arch-guard 的本意走：把代码搬出去，不是删注释凑数。** 两处抽取都是"本来就该在那儿"：
+
+- `api/directTarget.js`（新）：直连模式的入参校验 + 规范化 + **对 DB 主机的 scope 判定**。
+  它是纯函数，留在路由文件里没有理由；抽出来之后 `directScope` 那 8 条测试照过。
+  文件头记着为什么只补 scope、SSRF 那半为什么保留。
+- `scanConfigTuning.warnDroppedConfigKeys()`（新导出）：未知键 / 值形态不合的**播报壳**。
+  判据 `diffDroppedConfigKeys` 仍留在 `scanConfigUtils` 保持纯函数（这是它自己的设计约束），
+  挪走的只是打日志那一层 —— 与本文件既有的 hex/flushSession 播报同形状。
+
+顺带把 retest 那处的参数来源说准：`bodyParams/cookieParams/headerParams` 取自 base 报告，
+它们在原扫描启动时**已经过同一条守卫**，不必二次加工（我之前的注释说"顺带把 clamp 也拿到了"，
+那是夸大）。改完之后 `payload` 不再 spread 联合类型，TS 那条错误从根上消失，不需要 JSDoc 强转。
+
+结果：`scanRoutes.js` **1189 行**（比会话开始的 1187 只多 2 行 —— 今天的净增债基本还清），
+arch-guard 通过，`tsc -p server` 零错，eslint 零错。受影响测试 **71 条 0 失败**
+（configDroppedKeys / directScope / retestGuard / configReachability / configOrphanKeys /
+configWhitelist / securityGovernance / directMode 全部）。
+
+**流程上记一笔**：以后凡是动了 `server/**`，本地至少要跑 `npm run typecheck:server`（= CI 那条），
+不能只跑根 `tsc --noEmit`；而 arch-guard 的行数上限是**软线**，接近时应当主动抽取而不是继续往里加。
+
+
+### 2026-09-25 批次 · 直连模式把"两条红线"当成一条跳过了：配了 scope 仍能连任意数据库主机
+
+清单第 ③ 条。**执行复现**：`scope:['10.20.0.0/16']` 配置下，
+`sanitizeStart({mode:'direct', db:{driverType:'mysql', host:'10.0.0.9'}, ...})` 照样通过。
+
+起因是一句看起来很有道理的注释：`直连模式不发起 HTTP 请求，跳过 SSRF 校验（无 SSRF 面）`。
+**这句话一半对**——直连确实没有 SSRF 面（DB 连接是操作者明示意图，不是服务端被诱导去摸内网）；
+但它顺手把 **scope** 也免了，而本仓自己把这两条分得很清（`scopeGuard.js` 原话：
+SSRF 管"别打自己人"，scope 管"别打没授权的人"）。对渗透工具这是最贵的一类错位：
+授权书写的是"只许打这 3 个系统"，而换个入口（`-d` 直连数据库）范围约束就不存在了。
+
+**为什么这不是"既定取舍被推翻"**：09-08 那批审计把 scope 的覆盖点列成
+「目标 + safeUrl + 二阶触发页 + 每一跳重定向」，而**直连能力是 09-09 之后才加的** ——
+清单没跟着更新，不是有人决定豁免直连。带日期的那份记录不改（它是当时的事实），
+把活的清单补在 `scopeGuard.js` 头部。
+
+**修法只补 scope，SSRF 那半原样保留**。判定形状配了九个，因为"漏放"和"错杀"各有代价：
+范围内 / 范围外 / **未配 scope（必须与历史完全一致）** / 主机只出现在 `connectionString` 里
+（界内、越界各一）/ 内嵌驱动无主机（memory·sqljs·sqlite·pglite 不出网 ⇒ 不得误杀）/
+网络驱动解析不出主机（**fail closed**：配了 scope 就是期待"未知目标不放行"）/
+域名通配命中与不命中。错误码用 `SCOPE_VIOLATION(1004)` 而不是 `INVALID_TARGET`——
+调用方按码分支，"没授权"和"参数写错了"在 UI 上是两句话。
+
+新增 8 条断言（`api.directScope.test.js`），与既有 `directMode.test.js` 12 条同跑 20/20。
+变异验证：把新加的 `if (directScope.enabled)` 短路 ⇒ **4 红 4 绿**，而那 4 条绿的正好是
+"不该误杀"的形状（范围内 / 未配 scope / 内嵌驱动 / HTTP 分支未被弄坏）—— 说明这套断言
+既会抓漏放也会抓错杀，不是一个只会红的摆设。
+
+**同一条直连分支还有另一半没修，但已执行确认存在**：它的 `config: {...defaults, ...cfg}`
+**在所有 clamp 之前返回**，实测同一份输入直连分支送进引擎的是
+`{concurrency:9999, timeoutMs:99999999, ratePerSec:"20", dumpWhere:'id=1; DROP TABLE x',
+techniques:['union','__bogus__'], totallyBogusKey:1}`，而 HTTP 分支同一份输入收敛成
+`{ratePerSec:20, concurrency:10, timeoutMs:60000}`。正确的修法是**把 config 守卫抽成
+两条分支共用的函数**（就像 retest 那格复用 `sanitizeStart` 一样），而不是在直连分支里手挑
+几个键 clamp —— 后者正是本批刚批评过的"第二条路自己拼检查"。那是笔需要单独跑全量的重构，
+留到下一轮，不混进这个安全修复里。
+
+
+### 2026-09-25 批次 · 单点重测绕开了整条入口守卫：分号版 dumpWhere 曾经直送引擎
+
+清单第 ② 条，**执行复现**（express + 桩 ScanManager，把真正到达 `sm.start` 的 config 打出来）。
+`POST /api/scan/:id/point/:pointId/retest` 是 `merged 直送 sm.start`，绕开整条
+`sanitizeStart`。实测当时到达引擎的 config：
+
+```
+{concurrency:9999, timeoutMs:99999999, ratePerSec:"20",
+ dumpWhere:'id=1; DROP TABLE x', techniques:['union','__bogus__'], totallyBogusKey:1}
+```
+
+逐条对照主入口的守卫：concurrency 本该 clamp 到 1..10、timeoutMs 到 1000..60000、
+`ratePerSec` 字符串本该类型归一（否则下游按"不限速"建桶——就是本批另一格刚修的那个洞）、
+未知键本该 warn。**最重的一条是 `dumpWhere`**：它会拼进提取 SQL，而主入口的注释明写着
+"分号是把一个条件变成第二条语句的那一步"，因此明确拒收 —— 但重测这条路把它原样放了进去。
+非法 `techniques` 同理：主入口直接拒绝，这里静默透传。
+
+修法是**复用同一个函数**而不是在第二条路上补几个检查：`merged` 先过 `sanitizeStart`
+（顺带把 `bodyParams/cookieParams` 的 clamp 和 `headerParams` 头名黑名单也一起得到了，
+这些同样是重测原来没走的）。
+
+**这里有个不修就坏事的前提**：`onlyPoint` 刻意**不在** `KNOWN_CFG_KEYS` 白名单里 ——
+它是服务端从报告里的真实点位算出的跨文件内部字段（`tests/configOrphanKeys.guard.test.js`
+已把这类字段排除在名单外）。若直接把整条 config 塞进净化，`onlyPoint` 会被白名单丢掉，
+**重测就静默退化成整站重扫**（那个退化恰好是这条端点当初要避免的事，而且它有自己的测试）。
+所以顺序是：净化 → 贴回服务端算出的 `onlyPoint` → 删 `extractScope`。副产品是
+override 里伪造的 `onlyPoint` 也进不来了。
+
+**顺带修掉一处自报字段说谎**：回显里的 `configApplied.tamper` 读的是 `merged.tamper`，
+而内置引擎的 tamper 在 `config.wafEvasion.tamper`（顶层 `tamper` 只有 sqlmap 桥接层用）。
+⇒ 用户设了 tamper 复测，接口报 `tamper: null`（做了不说）；反过来若有人把 sqlmap 面板的
+顶层 `tamper` 串进来，它会被报成"已应用"而引擎根本没看它（**报了一个不存在的效果**，
+这一向更坏）。改成读引擎真正消费的键，两个方向各一条断言。
+
+测试 5 条（`server/tests/api.retestGuard.test.js`）。写桩时踩到两次"桩不完整"，都记下来
+免得下次再当成产品缺陷：① 不给 `bus.create` 返回会终结的 emitter ⇒ 模块级并发槽位不回收；
+② 不给 `sm.scans` ⇒ `scanGovernance.js:83` 读 `.get` 抛 TypeError，症状长得像端点坏了。
+变异验证：把净化整段退回旧的直送形状 ⇒ 5 条里 4 条红（第 3 条只测 onlyPoint 语义，
+两种形状下都该绿）。还原后 5/5。
+
+**方法论收获**：入口守卫的失效形状不是"某条路上少写一个检查"，而是**第二条路自己拼对象**。
+以后看到"从同一份数据派生的第二个入口"（重测 / 复跑 / 批量导入），第一个问题应该是
+"它有没有走同一个 `sanitize*`"，而不是"它校验够不够"。
+
+
+### 2026-09-25 批次 · sqlmap 的 `--timeout` 收的是秒：单位没问工具，是靠问它本身才定案的
+
+清单第 ① 条。这次不靠记忆判断单位，直接问**我们要调用的那个二进制**
+（本机 sqlmap 1.10.7，`sqlmap -hh` 原文）：
+
+```
+--timeout=TIMEOUT   Seconds to wait before timeout connection (default 30)
+```
+
+而本仓这个字段从头到尾是**毫秒**：`DEFAULT_SQLMAP_CONFIG.timeoutMs = 30000` 旁边注释写着
+「超时 30s」，内置面板的 slider 是 1000..60000ms。`sqlmapBridge` 却把毫秒原样推过去
+（`String(Math.round(timeoutMs))`）⇒ 默认值变成 `--timeout 30000`，**30000 秒 ≈ 8.3 小时**。
+后果不是"超时太短"而是相反：**单请求超时永远不会触发**，慢目标上改由本文件的
+`SQLMAP_MAX_RUNTIME_MS`（默认 30 分钟）**整场击杀**，连已经拿到的结果一起丢。
+用户设的这个值从来没按他设的意思生效过，而且偏的方向对扫描器是最坏的那一边。
+
+修法：桥接层一次性换算 `Math.max(1, Math.round(timeoutMs / 1000))`，
+入参守卫（1..600000ms）不动 ⇒ 亚秒级兜到 1 秒，不会发出 sqlmap 收不了的 `--timeout 0`。
+
+**顺手发现：光改换算会修出一个反向的 1000 倍陷阱。** UI 标签原文是
+`"超时 --timeout (ms)"` —— 既点名 sqlmap 的 flag（那个 flag 收**秒**）又标着 ms。
+按 flag 语义填 `30` 的人，在旧代码下**恰好蒙对**（30 被当秒透传）。只改换算而不改标签，
+这批人下一秒就会得到 `--timeout 1`。所以两处一起改：标签改成「请求超时 (毫秒)」，
+不再在 UI 里提外部 flag 名；换算只发生在服务端一处。
+
+**同一个契约被两处测试锁着**：改完后本文件的单位用例绿了，全跑却红在另一条
+「全部新参数与既有参数共存」上 —— 它也写死了 `'30000'`。只改一处，另一处就会继续
+替旧单位作证。现在两条都钉秒，并加一条 `!args.includes('30000')` 反向断言：
+单位换算再退回去，这条会直接指着毫秒原文报。
+
+**一条自查（未提交前就撤掉的结论）**：我一度把后果写成"redteam-lab 传的
+`--timeout 150000` 会进 sqlmap"。查了才知道 CLI 那个 `--timeout` 是**它自己轮询扫描状态的
+截止**（`bin/cli.js:238 args.timeoutMs`），根本不进 sqlmap 参数。所以本条只写经查证的
+面板/默认值路径。
+
+另：`grep -rn "byRisk\|byTechnique" server/src/` **零命中** ⇒ 清单第 ⑥ 条
+（manifest 自报这两个计数）成立了一半 —— 引擎确实从不产出，脚本读到的永远是 null。尚未修。
+
+
+### 2026-09-25 批次 · 导出这条路同时坏了两侧：错误信封被存成报告文件、设了 Token 就必 401
+
+清单里第 ④⑤ 条，**都执行复现过**（真 app + 真 `fetch`）后修掉。
+
+**复现**：起 `createApp()` 在临时端口上打下载端点，取一个不存在的 scanId ——
+`format=csv → status 200 | ct application/json | 有 Content-Disposition? null |
+body {"code":2001,…,"message":"扫描不存在或已结束"}`。而 `src/hooks/useScan.ts` 只判
+`res.ok` 就把 `res.text()` 交给 `tauriBridge.saveFile('report_<id>.csv', …)`
+⇒ **用户拿到一个装着错误 JSON 的"报告文件"**。症状会被读成"报告导出坏了/内容不对"，
+真因是那次扫描早已被回收 —— 归因方向整个错。
+第二处：设 `SCAN_API_TOKEN=secret123` 后 `裸 fetch → 401 / 带 x-api-token → 200`。
+而这条 fetch 是 **`src/` 里唯一一处绕开 `apiClient` 的**（它要拿原始响应体做另存盘，
+而 `apiClient` 的拦截器按 JSON 解包）⇒ 一旦启用 Token，**全部导出必失败**。
+
+**修法**：后端只在**下载**这一条端点上把缺扫描改成 `404`（`/scan/:id/diff` 那类 JSON 接口
+按 200+code 契约被前端正常解包，不动）；前端补发同一个 `getApiToken()`，并把
+"**响应有没有带 `Content-Disposition`**"当作"这是不是产物"的判别式——不带就抛错并带上
+服务端的 `message`，**任何情况下不落盘**。为什么用这个判别式而不是 content-type：
+`format=json` 成功时本来就是 `application/json`，只有文件名头能区分"产物"与"错误信封"。
+
+**测试分两层**（共 8 条）：`server/tests/api.exportNotFound.test.js` 用桩管理器起真路由，
+钉 ①缺扫描 404 ②成功路径必须仍带 `Content-Disposition`（前端判别式赖以成立的前提，
+谁把它去掉这条先红，而不是让前端静默退回老坑）③设 Token 时裸请求 401、带上才 200
+④接线守卫；`src/tests/useScan.export.test.tsx` 用 `renderHook` + 桩 `fetch` 钉真行为。
+
+**两次变异**：前端撤掉鉴权头 ⇒ "带 x-api-token 请求"红；把判别式改成恒不触发 ⇒
+"错误信封不存盘"红；其余两条不受影响（归因清楚）。
+
+**我自己写错的一条断言**：第 4 条测试原本写 `expect(init.headers).toBeUndefined()`，
+而我实现里无 token 时传的是 `headers: {}` —— 测的是实现细节而不是不变式。改成断言
+"**不许发出空的鉴权头**"（`headers['x-api-token']` 必须为 undefined），形状随便实现。
+
+清单里还剩 4 条未复现：sqlmap `--timeout` 单位 · retest 端点绕过 `sanitizeStart` ·
+`mode:'direct'` 绕过所有 clamp（含"无 SSRF 面"说法是否成立）· manifest 两个自报计数恒 null。
+
+
+### 2026-09-25 批次 · 产品侧入口/输出层审计：最坏的一条不是缺陷本身，而是"夹具替产品发明了字段"
+
+派两个只读代理分别审**入口层**（`sanitizeStart` 与路由）与**输出层**（报告/SARIF/CSV/下载），
+共交回 11 条候选。**我自己复现了 5 条并修掉；剩下 6 条我不写进结论也不动手**（见文末清单）。
+
+**输出层：SARIF 的两个映射一直是死的**，证据是仓库里那份真实产物
+`reports/127.0.0.1-2026-09-17T13-51-34/`：3 条 vuln 的 `riskLevel` 是 `High/High/Medium`，
+导出的 `report.sarif` 里 `level` 却**全是 error**；同一份 `report.json` 里 `vuln.url` 是
+`http://127.0.0.1:8130/items?cat=1`，导出的 `uri` 却**全是 "/"**。消费方（扫描平台 / IDE 插件）
+按 SARIF 的 level 做分诊 ⇒ Medium 被当严重项处理，而受影响地址彻底丢失。
+根因是两行读了不存在的字段：`v.severity`（模型写的是 `riskLevel`，全仓 `server/src` 没有任何
+一处给 vuln 赋 `severity`）与 `point.url || r.target.url`（真实字段是 `point.actionUrl` /
+`target.baseUrl`）。
+
+**最值得记的是为什么它一直绿**：`tests/report.sarif.test.js` 有一条
+「severity 映射 critical→error / medium→warning」的断言，而它的夹具是**手写字面量**，
+里面就写着 `severity` 和 `target.url` —— 夹具替产品发明了一套字段名，于是测试测的是那个
+想象中的产品。修法不能只是改映射：**夹具改成由真实工厂与真实富化函数生成**
+（`createInjectionPoint` / `createVulnerability` / `attachVulnContext`），再加一条夹具自检
+（必须带 `riskLevel`、必须**不带** `severity`、`url` 必须由富化填上）。以后谁再手写一个不存在的
+字段，夹具自检先红。
+（写这条夹具时我自己又踩一次：`attachVulnContext` 是 `touched ? {...report, vulns: out}`
+**返回新对象**，我第一版丢了返回值 ⇒ 富化等于没跑，症状是"地址断言红"。）
+
+**入口层两条**：
+
+1. `ratePerSec: "20"` 会**静默关掉限速**。下游 `createBucket`/`TokenBucket` 用
+   `Number.isFinite(x) && x > 0` 判定，而 `Number.isFinite` **不做类型转换** ⇒ 字符串被判成 0，
+   而 0 的语义恰恰是"不限速"（那是 P0-FIX 为 `--delay=0` 定的）。数字字符串是 curl/YAML/CSV
+   里最常见的形态，且因为"键在、值也发了、只是类型不对"，连 dropped 告警都不会响。
+   修法只在入口做**类型归一**（数字字符串→数字，仍不 clamp，既有「不 clamp」契约一字不动；
+   非数字形态不写进 config 并喊出来，绝不解成"不限速"）。显式 0/负数仍是"不限速"。
+2. 一处**假告警**：`diffDroppedConfigKeys` 算在 `BACKFILL_SCALAR_KEYS` 兜底透传**之前**，
+   于是那 18 个靠兜底才进 config 的键全体被喊「设置不会生效」。实测复现：六个键
+   （delay/testFilter/reqRate/maxReq/hpp/noCast）同时被报警、同时确实都在返回的 config 里。
+   假告警和静默丢弃是同级的错——它把排查的人支使去改一个本来正确的配置。修法是把比对推迟到
+   `return` 之前。新增的测试不是抽查几个键，而是**从源码抓全部兜底键**遍历，断言
+   「告警集 ∩ 落地集 = ∅」。
+   顺带看清了既有守卫为什么没拦住：它那条"噪声预算是硬约束"用例用的是**面板形态** payload，
+   里面 `testFilter:''` 属"空值不算丢弃"——形状写对了，却没覆盖真实调用方会发的第二种形态。
+
+**三次变异各自验红**：映射改回 `v.severity` ⇒ SARIF 断言红；入口去掉类型归一 ⇒ 字符串用例红；
+在兜底**之前**多调一次比对 ⇒ 不变式红，并精确复刻出「18 个键被丢弃…设置不会生效」那行历史日志。
+
+**没有自己复现、因此不写进结论也不修的 6 条**（代理自称已执行的 4 条同样待我复现）：
+sqlmap `--timeout` 疑似传毫秒（且被 30 分钟上限反向击杀）· `/scan/:id/point/:pointId/retest`
+疑似绕过整条 `sanitizeStart` · `mode:'direct'` 疑似在所有 clamp 之前返回（含"无 SSRF 面"那句
+说法是否成立）· 导出失败时前端疑似把 200 的 JSON 错误体另存成报告 · 设了 API token 时
+UI 全部导出疑似 401 · `manifest` 两个自报计数疑似恒 null。已开任务追踪。
+
+
+### 2026-09-25 批次 · 先撤回一个我上一轮的判断，再去补那格"从来没人验过的 18"
+
+**撤回**：上一轮我写"剩下最大的一块是 `XML:/*`"。两条依据当场都不成立：
+① 所谓"XML 用例"是**表单字段值里含 `<?xml` 字符串**（`var=foo'||(select extractvalue(xmltype('<?xml…`），
+不是 XML 请求体 —— 官方 942 回归集里几乎没有真正的 XML 体用例，实现了也不动任何数字；
+② 产品侧**没有任何模块 import `crs-engine`**（`grep` 只命中 scripts 里的路径字符串），
+所以这个执行器的 XML 盲区不影响扫描器行为，只影响保真度口径的完整性。
+⇒ 判据没错（`XML:/*` 确实不支持），**"最大的一块"是我没查影响面就排出来的**。
+
+**一条未决，写清楚而不是猜着改**：那 2 条误触（`942210-31/44`）这轮把触发形状定准了 —— body
+`pay%3D1+OR+2%2B` 里**没有字面 `=`**，于是整串进的是 `ARGS_NAMES`，规则自己的 `t:urlDecodeUni`
+把它解成 `pay=1 OR 2+` 才命中；此前"复现不出"是因为复核时把它当**值**喂。但本机没有
+ModSecurity 参照，"官方会不会也命中"判不了，而且存在**反向证据**：`930100-3` 要求解析期
+**不**解码，`942210` 看起来要求解析期**要**解码 —— 两条官方用例对同一件事的期望相互矛盾。
+没有裁判就不动，留未决 + 这条形状记录。
+
+**这轮真正补的是那格"从来没人验过的 18"**。`recall-lab` 有 2 条真实 MySQL 场景，代码里自
+09-10 就注着"从未真正跑通"。根因不是依赖：`real-lab-driver.js` 把端点**写死** `127.0.0.1:3307`，
+而 `e2e/run-with-sandbox.py` 起的是隔离 mysqld、注入的是**别的端口** ⇒ **本机不存在任何一条命令
+能让这 2 条跑起来**。而且它跳过时打印的是"mysql2 不可用"，把"驱动解析不到"和"服务端没起"
+混成一句话 —— 本轮我自己就被这句话误导了一次（驱动其实一直解析得好好的）。
+
+改三处：端点全部走 `MYSQL_HOST/PORT/USER/PASSWORD`（**默认值一字未改**）；探测的是**配置里那个
+端点**而不是写死的 3307；跳过原因分成两类并打印实际探测地址与可用命令。
+**实测**：`python e2e/run-with-sandbox.py e2e/recall-lab/recall.e2e.js` ⇒ **18 场景 18 通过**
+（`real_mysql_numeric` 检出 union/error/boolean，`real_mysql_str` 检出 boolean），
+产物 `recall.md` 从 16 行变 18 行；直跑仍是 16 + 一条说清原因的 SKIP。
+
+**CI 步骤名停止说谎**：那一步写着 `Recall-lab e2e (18 scenarios)`，而这个 job 没有 mysqld
+⇒ 结构上只可能跑 16 条，退出码还照样 0。改成实话，并写明要真跑 18 该并进哪个 job
+（下方 file-read/file-write 那个已经起了 docker mysqld）。**没有替 CI 做这个改动** ——
+共享基础设施在本机验证不了，不该由一次"顺手"来动它。
+
+
+### 2026-09-25 批次 · 夹具替规则解了一次码：两族数字同时变好，顺手撤回一条假归因
+
+**起点是上一批留下的那条分歧**。给 `930100-3` 写归因时做了个差分：同一载荷，
+**原文**喂进执行器 ⇒ 命中 930100，**预解码**喂进去 ⇒ 不命中。当时把它点名进基线了
+（理由写明"根因在夹具不在执行器"），本轮去改那个口径。
+
+**改的是裁判的输入，不是裁判的阈值**：`toReq` 一直用 `new URLSearchParams(search)` 建 ARGS，
+顺手就把 query 解码了一次；而 CRS 的规则自己声明 `t:urlDecodeUni` —— 解码本来就是**规则取值链
+的一环**。夹具先解，规则就会解**第二遍**：`%2527` 本该得到 `%27`，两遍之后得到 `'`。
+这不叫"方便"，这叫把二次编码载荷的判定条件改了（方向上更容易命中 ⇒ 偏假阳侧）。
+表单 body 与 cookies 同一口径改走原文（新增 `rawPairs`）。
+
+**两族数字同时变好**（改前数字本轮已锁在案：942 99.3%／930 97.0%）：
+
+| 族 | 改前 | 改后 | 收回的用例 |
+|---|---|---|---|
+| 942（805 例） | 99.3% | **99.6%** | 942500-3、942500-4 |
+| 930（38 例） | 97.0% | **100.0%** | 930100-3（几小时前刚被点名） |
+
+两份基线各收紧一次，并把收回过程写进各自的 `_收紧记录`。**其中一条归因被公开撤回**：
+942500-3/4 原来写着"本执行器的 `t:replaceComments` 先于 `@rx` 生效，把注释吃掉了"，
+而 942500 声明的变换只有 `t:none,t:urlDecodeUni`（conf 第 515 行）——**根本没有 replaceComments**，
+那句话是猜测。真机制（差分量出来的）：该规则要的是 optimizer hint 形态 `/*+` 里那个加号，
+夹具预解码时 `URLSearchParams` 已经把 `+` 变成空格，规则再解时形态已经不同。
+
+**为什么这不是"改测试让它变绿"**：改的是夹具喂给规则的**输入形状**，而两族的分歧数都是
+**下降**的（没有任何一条从一致变成分歧）；误触一侧 942 仍是 2、930 仍是 0。更实在的一点：
+条目从基线里删掉之后，回归会被抓到 —— **这句是实测过的**：临时把 `toReq` 改回预解码，
+942 与 930 两族门禁**各自 RC=1**，并逐条点名 `942500-3`、`942500-4`、`930100-3`
+（README 记分板那行也从反方向报了 `README=99.6% 本次实测=99.3%`）。收紧后的基线因此
+本身就是回归探测器，比把条目留在基线里"容忍"强。
+
+**门禁自己要求的回填**：942 跑完打印 `⚠ README L604 保真度：README=99.3% 本次实测=99.6%`
+（那条 WARN 是上一批装的，本轮第一次真的被用上）。据此回填 README 记分板与两处"805 条"
+的口径描述（现在是 942 + 930 两族）。**没有**给 930 在记分板加行 —— 那个核对只在裁 942 时跑，
+加一行没人核对的数字等于再造一个静默漂移点。
+
+**顺带**：`decodeSafe` 因不再解码而成为未使用符号，eslint 报 error 后删除。
+
+
+### 2026-09-25 批次 · 930 真正接进门禁：加一族受管，暴露的是"三处各写一份真相"
+
+**接着上一轮做**：词典 operator 落地后 930 是 90.9%，剩 3 例。本轮把该收的收掉、把门开开。
+
+**先补取值面**：`FILES` / `FILES_NAMES` 此前在执行器里根本没有这个 kind，而夹具的 `toReq`
+也不解析 multipart —— 上传文件名（`filename="../1.7z"`）从来没进过任何变量的取值面。
+补上后 **90.9% → 97.0%**（930110-10/-11 收回），普查里 `FILES` 归零（6 处→4 处）。
+有意**不动 ARGS 那三行**：multipart 体今天照旧落进 `args.__raw_body`，顺手"净化"它会改变
+942 那 720 例的输入面。
+
+**最后 1 例的机制是当场差分出来的，不是猜的**：`930100-3`（`0x2e.%000x2f…`）。930100 声明
+`t:none`，它的正则备选里全是 `%XX`/`0x` 形态 —— 也就是**按编码原文匹配**；而夹具构造 ARGS 时
+已经用 `URLSearchParams` 解码过一次。同一载荷两条喂法：原文 ⇒ 命中 930100，预解码 ⇒ 不命中。
+⇒ 根因在**夹具**不在执行器；修它要改 ARGS 的取值口径（ModSecurity 不自动解码参数），
+那会同时改动 942 门禁的输入面，属另一笔"必须先拿改前数字"的改动，本轮不做，条目进基线并写明机制。
+
+**接入门禁时发现三件必须先拆开的事**（都写成 `GATED ? … : …` 一个条件在管）：
+
+| 名义上管的事 | 实际混着的另一件事 | 改法 |
+|---|---|---|
+| 是否比对基线 | 基线文件按谁的用例标题命名 | 基线**按族分文件**，942 沿用无名那份 |
+| 报告文件名 | 哪一份是 README 引用的对外口径 | 命名按 `BASE_FAMILY` 判定，不按 GATED |
+| 是否核对 README 记分板 | 记分板那一行是 942 的数字 | 条件改为"族 == BASE_FAMILY" |
+
+不拆的后果很具体：**把 930 接进门禁的那一瞬间**，一次 930 测量会覆盖掉 README 引用的 942 报告、
+会拿 942 的用例标题基线去判 930（红得没有意义）、还会天天 WARN 一条没人能修的记分板漂移。
+
+**门禁名单在代码里、跑不跑在两份清单里 ⇒ 补了一道双向守卫**
+（`server/tests/crsGatedFamilies.wiring.test.js`，5 条）：① `GATED_FAMILIES` 每一族必须在
+ci.yml **和** ci-local.mjs 各有一步真跑它（并把 npm 脚本名解析到真实命令行，验 `--family=` 对得上）；
+② 清单里出现的 `--family=X` 必须确实受管（不给免检族发合格证）；③ 受管族必须已有本族基线文件、
+且每条分歧的理由自包含。为此加了跨平台的 `npm run waf-fidelity:930`
+（`CRS_EQUIV_FAMILIES=930 npm …` 那种前缀在 Windows 的 cmd 壳里不生效，而"受门禁管"必须意味着
+两台机器跑的是同一条命令）。**变异验红两次**：删掉 ci-local 那一行 ⇒ 守卫红（"它永远不会红"）；
+词典路径改坏 ⇒ 930 门禁 **RC=1、21 条未点名分歧**（失败现场留在 `/tmp` 日志里，不是口头保证）。
+
+**又抓到两处"结论句过期"**：`idleFamilies` 那句无条件印"非门禁族只报数不判红"，930 受管后
+等于给受管族发免检声明 ⇒ 改为从 `GATED_FAMILIES` 现算；以及 —— 守卫第一次跑就抓到
+`KNOWN_REASONS` 表与基线 JSON **已经不一致**（表里 `942210-44`/`942500-4` 还是"同上"，
+而 JSON 里前者早被改成整段完整记录）。这正是那份文件自己注释里预言的"两处各写一份理由必烂一处"。
+处理：**删掉整张表**，理由的唯一来源变成基线文件本身，生成骨架时一律写"待补理由"，
+由新守卫卡住（不许"同上"、不许空）；顺手把 942 基线里残留的那条"同上"补成自包含记录。
+
+**边界与现状**：942 复跑 99.3%／误触 2／基线 7 条点名全部仍成立（一字未动）。930 现为 97.0%、
+基线 1 条、红线仍 90%（余量 2 例）。XML 载荷仍不在检测面内（`XML:/*` 3 条），`REQUEST_URI_RAW`
+仍缺 —— 这两项是 930/942 共同的对外边界，别把 97.0% 外推到 XML 接口。
+
+
+### 2026-09-25 批次 · 930 从"没法裁"到 90.9%：@pmFromFile 词典接上，顺带抓出自己三道空转守卫
+
+**做了**：实现 `@pmFromFile`（`crs-engine.js:loadPmDict` + execOp 分支），并把上游两份词典
+（`lfi-os-files.data` 720 行 / `restricted-files.data` 275 行，CRS v4.1.0 `rules/` 同目录）
+入库、登记进 `tests/manifest.json` 的哈希账本 —— 走的是 conf 已经在用的那段核对逻辑
+（`fetch-crs-assets.mjs` 的校验循环只读 `conf`/`upstreamConf` 两个字段，加进列表即可复用；
+`.gitattributes` 的 `e2e/waf-real/crs/** -text` 也已覆盖 `.data`，否则 Windows 检出改行尾
+会把"逐字节与上游一致"变成假话）。
+
+**数字**（族 930，38 例 / 应拦 33，当场重测，非引用旧值）：
+
+| | 逐规则一致率 | 误触 | 缺口 |
+|---|---|---|---|
+| 词典前 | 27.3% | 0 | 21 例卡在 @pmFromFile |
+| 词典后 | **90.9%** | 0 | operator / 词典 / 空词典三类全归零 |
+
+原先写在报告里的"剔除词典规则后 75.0%"是对**上限**的估计，实测越过了它 —— 因为词典规则
+并不需要 `normalizePathWin`：上游条目按"最短可辨识路径"写，`....//....//etc/passwd` 里
+含 `/etc/passwd` 这个子串就够了。剩下的 3 例都有名字：2 例是 multipart 的 `FILES:`（普查
+本来就点名了），1 例是 `0x2e.%000x2f` 形态的 930100。**仍未接入门禁**：90.9% 距 90% 红线
+只有 1 例余量，且分歧基线文件是按 942 的用例标题建的（930 要进门禁得先按族分文件）。
+
+**抓出三道自己的空转守卫**（都是"实现了≠在干活"，只是这次的对象是我本轮刚写的代码）：
+
+1. **Set 用 `.length` 判空 ⇒ 恒假**。`parseCrsFile` 末尾把普查桶归一成数组，我没把新加的
+   `missingDicts`/`emptyDicts` 登记进去，它们留在 Set 形态；消费侧照兄弟桶的写法写
+   `if ((census.missingDicts || []).length)` —— Set 没有 `.length`，于是"词典缺失"这条告警
+   **永远不会响**。而同一段数据的 md 那行用的是 `[...]` 展开（Set 可迭代）⇒ 打印正常。
+   **一份数据、两个真相，撒谎的恰好是更安静的那边。** 用变异验出来的：把词典路径改坏，
+   md 报了缺失、控制台仍报"无缺口"，改完归一列表后两边一致。
+2. **硬编码结论行**：`crs-equivalence.mjs` 的控制台里钉着"930 的主缺口是 @pmFromFile 词典
+   规则未实现"，实现之后它会**继续每天印一遍已经不成立的事实**。改为按普查现算
+   （operator / 词典 / 变换三类缺口全从数据生成），md 里那句同类结论一并删掉。
+3. **标签与定义不符**：`idleFamilies` 的含义是"除本轮之外入库的族"，文案却写"已入库但
+   **未接入门禁**的族" —— 跑 930 时它打印 `未接入门禁的族：942`，而 942 恰恰是唯一受门禁管
+   的那一族，读者据此会得到一个完全反向的结论。措辞改为"未参与本轮评估"。
+
+**差分验证**（`e2e/waf-real/selftest.mjs`，跑在 `run-all` 的 `waf-real` 套件里 ⇒ CI 与
+`npm run ci:local` 都会跑到）：8 条端到端断言 + 6 条快照断言。把词典路径改坏 ⇒ **8 条红、
+退出码 1、930 一致率精确回到 27.3%**；反向对照（`/index.html`、`notes.txt`、`main.css` 必须
+不拦）钉住"恒返回命中"这种看起来更严的假绿。快照里钉了条目总数 936 —— 词典被人改薄也会红。
+
+**顺带**：`IMPLEMENTED_OPS` 上方那句"只实现了**这两个** operator"注释随登记同步；
+942 一族数字复跑一字未动（99.3% / 误触 2 / 720+85 例）。
+
+
+### 2026-09-25 批次 · 收摊时从一份"绿着的产物"里翻出门禁洞：无区分度 ≠ 可以不看
+
+**表面任务**：把工作区里 8 个被上一轮全量跑批改脏的 e2e 产物按信噪分掉归档。
+
+**信号不在 diff 的大小里，在语义里**：5 个文件只有时间戳和随机 token 在动（还原），
+2 个是真事实（`battery-history.jsonl` 的追加记录、`acceptance-report.md` 里误触
+4→2 与新增的 A2 套件行）。第 8 个 `waf-lab/results/compare-real.md` 一版**归零**：
+
+| | 注入点 | 检出 | 总请求 | 拦截率 | 高危命中 | `passed` |
+|---|---|---|---|---|---|---|
+| 已提交版（09-20） | 1 | 1 | 175 | 79.4%→45.7% | 30→0 | true |
+| 工作区版（09-25 01:06） | 1 | **0** | **246** | 74%→24.5% | 58→6 | **true** |
+
+两侧检出全零，报告照印「tamper 确已绕过 WAF ✅」、退出码 0。
+
+**归因链**（不靠猜：产物 mtime 01:06 早于 237849e 的 01:36）：那份产物是 **A3 通道
+降级初版还在工作区时**留下的现场，64c2576 的「同形态通道不得被记号画像判死」已经把
+检出修回来 —— 在 HEAD 上复跑，数字与 09-20 已提交版**逐字段相同**（175/139、79.4%→45.7%、
+30→0、1/1+1/1）。所以检出侧不是待修的回归；**待修的是它红了没人知道**。
+
+**根因是判据被"整条拿掉"而不是"降级成参考"**：`compare.e2e.js` 时代查出靶子是空壳
+回显、检出侧恒 0，09-18 于是把判据换成 WAF 侧两条 —— 当时的论证成立（单注入点上
+error/boolean 两侧同时触顶 100%，比较无区分度）。但落地时把检出侧从 `pass` 表达式里
+删干净了，它遂退化为一张永不为红的装饰性表格。零检出时"拦截率下降"完全可能只是
+"扫描器不再发可执行的东西" —— **结论方向反了也不会红**。
+
+**修法**：检出侧作为**有效性前置**接回，两侧均须 ≥1；逻辑抽成
+`metrics.js:evaluateAbExperiment()`（纯函数）供单测。健康路径行为一字不变（复跑对比过），
+新增的只有红路径。
+
+**两条变异各自验红**（`server/tests/waf.abCriteria.test.js`，8 条全绿）：
+摘掉 `passed: valid && …` 里的 `valid` ⇒ 3 条红（含"A3 初版现场复现"那条直接引用
+0/1 + 79.4%→45.7% 的旧产物数字）；把入口退回 `const pass = criterion1 && criterion2` ⇒
+接线守卫红。**第一次跑就抓到守卫自己钉错文件**（拿入口源码去匹配 `metrics.js` 里的
+实现），改完才绿 —— 守卫写错的方向和被守卫的缺陷同族。
+
+**诚实边界**：入口的**红路径本机无真实现场** —— 需要一个"两侧零检出"的靶况才能触发，
+本机造不出来。它由两层覆盖：纯函数用例（拿 09-25 旧产物数字直接喂）+ 静态接线守卫。
+能给出真实现场的是下一次 A3 型回归或 CI，届时"实验不成立"那句才第一次被印出来。
+
+**顺带修三处文档与代码互相矛盾**（都是"文档教用户走一条已经不通的路"）：
+- `docs/waf_runbook.md` §4 标题就叫"对比两次报告检出率"，正文预期"开 tamper 的 vulns
+  明显多于关"—— 那是 **09-18 已废弃的判据**；下一步又让用户编辑 `compare.e2e.js`
+  并 `npm run waf-e2e`，而那个文件的头部自 09-18 就标着「已失效，请勿据此判断 tamper
+  效果」。改指 `python e2e/waf-lab/compare-real.run.py`，并写清"两侧都必须 >0 是前提、
+  不是成绩"。
+- `CONTRIBUTING.md` 三处：`waf-e2e` 出现在**给贡献者的验收清单**里（同上，指向废弃夹具）；
+  用例数写 `~1249` 而 `_facts.json` 实测 **2320**、前端 191 → 345；`recall-e2e` 写
+  "18 场景全 PASS" —— 实为 **16 跑通 + 2 SKIP**（真实 MySQL 组需本机 3307 有 root/root
+  的 mysqld，`real-lab-driver.js:140` 自己记着"自 09-10 新增以来从未真正跑通"）。清单上
+  写一个本机复现不出的数字，等于让每个贡献者各自困惑一次。
+- 附带：游离的 `tmp_acc.bin`（215 字节的 Azure `BlobNotFound` 错误页，全仓无引用）删除。
+
+
+### 2026-09-25 批次 · 「注册成功」不等于「在干活」：一个 WAF 变换修了两次才真修好
+
+**表面任务**：补上执行器缺失的 `t:utf8toUnicode`（超长 UTF-8 折叠），它被
+`applyTransforms` 的 `.filter(t => T[t])` 静默丢掉，而 `droppedTransforms` 普查已经会把
+"丢了哪个变换"打印出来。
+
+**实际上这里有两层失效，第一层修完看起来像修好了**：
+
+1. **T 里没实现** —— 注册函数即可，这一步做完普查里 `utf8tounicode` 归零；
+2. **取名正则 `[a-zA-Z]+` 砍在数字上** —— `t:utf8toUnicode` 被截成 `utf` ⇒ 查不到 T ⇒
+   照样丢。而**普查用的是 `[a-zA-Z0-9]+`**，它看见"已注册"于是报"无缺口"。
+   ⇒ 出现最难查的状态：**报告说缺口已补，取值链上那个变换从未生效过**。
+   修法不是再补一处正则，而是让声明侧与普查侧**共用** `declaredTransforms()`（判据与执行同源）。
+
+顺带在第一版实现里查出第二个缺陷：`/((?:%XX){2,4})/` 的贪婪量词会把**下一个序列的字节**
+一起吃掉 —— `%c1%bc%c1%bc`（`||`）只折出一个 `|`。改成逐字节推进才对。
+
+**裁判看不见这类修复**：805 条官方回归用例里**没有一条**超长编码载荷，所以从"没实现"到
+"实现且正确"，保真度数字一字不动（99.3% / 误触 2 / 未点名 0 全程不变）。这类编码层修复
+不可能被那批用例裁决 ⇒ 改由 `selftest.mjs` 的 5 条**端到端差分断言**兜住：
+`overlong ||` / `<<` / `!=` 必须被 942120 拦下，规范 `%7c%7c`、`%25%20` 的判定必须一字不变
+（防过度折叠）。断言在**旧代码上跑红过**：摘掉 `T` 里那行注册 ⇒ 5 条同时 FAIL，留了失败现场。
+
+**普查桶"空"必须是 `[]` 而不是 `undefined`**（`parseCrsFile`）：三个桶原来只在命中时才建
+Set，补全之后字段直接消失 ⇒ 新写的"清单应为空"断言以 TypeError 退出，看上去像断言写错了，
+而真正该被看见的事实是"缺口没了"。
+
+**撤回上一轮的归因（同一个提交里写的结论被本次实测推翻）**：`crs-equivalence.mjs` 曾印着
+"930 一致率 13.2%，根因是缺 normalizePathWin / cmdLine / utf8toUnicode"，数字出自一个
+**用完就删掉的一次性探针**。现在把它做成命令（`CRS_EQUIV_FAMILIES=930 npm run waf-fidelity`），
+当场重测：**38 例、应拦 33、逐规则 27.3%，剔除 21 例 `@pmFromFile` 词典规则
+（930120/930121/930130）后 75.0%，误触 0** ⇒ 主因是**词典 operator 未实现**（占应拦侧 21/33），
+缺变换只是次要因素；而 13.2% 这个数本身也复现不出来。一次性探针留下的不只是不可复现的
+数字，还会有**跟着一起错的归因**。
+
+**顺带把裁判机制补齐**（都是同一族"两处各写一份真相"）：
+- 族 → conf 成对：`FAMILY_CONF` + 一次只裁一族；判定循环**显式传 `confPath`**
+  （原来不传就落到默认 942，跑 930 时普查按 930、判定按 942 ⇒ 一份报告两套真相）
+- "已点名的不支持项"从普查推导，不再写死 `942100/942101`（写死会让换族测量的分母含混）；
+  报告里 `@detectSQLi 需要 libinjection` 这类 942 专属解释也改为普查生成
+- 非门禁族（930）**只报数不判红**，产物另起文件名，不覆盖 README 引用的那份
+- `KNOWN_REASONS` 表里删掉两条已被真修掉的错误归因（942440-19/20），942210-31/44 改为
+  "归因未证实"并指向基线文件 —— 与基线 JSON 保持一致，不再有两份会各自烂掉的解释
+
+**README 的 WAF 数字此前无人核对**：`facts:check` 只管测试数/覆盖率，README 记分板那行
+（保真度 / 未点名 / 已消失 / 误触）不在任何门禁里 ⇒ 实测出「误触 4」而门禁早已是 **2**。
+回填为 2，并让 `waf-fidelity` 跑完后**当场核对这一行**、不符即点名行号与两边数字。
+只 WARN 不 FAIL：那张表里混着历史轮次存档，强制回填会诱使人去改历史数字。
+
+**环境**：`cargo clippy` 确定性抛 ICE（rustc 1.98 + `-C incremental` 坏缓存），清掉
+`src-tauri/target/debug/incremental/sqli_scanner_lib-*` 即恢复；与本批改动无关（零 Rust 改动）。
+
+### 2026-09-24 批次 · 「静默」本身就是一类缺陷：配置入口、报告出口、标定阈值三处收口
+
+**共同形状**：不是崩溃型 bug，而是"看起来一切正常、实际少做了一件事"。本轮七笔提交按同一
+判据（把**读取点**与**写入点**两边交叉，而不是靠人记）扫出来的结果：
+
+1. **浅合并下的嵌套配置组**（`69633c6` / `67871e9`）：`models.js:90,113` 是
+   `{...defaults, ...input.config}` 的**浅**合并，所以请求体里出现某个组，该组就整体替换
+   defaults 的同名对象；组内少转发一个子键，引擎看到的就是 `undefined`。REST 的
+   `wafEvasion`（9 键重建 4 键）、`blindRobust.extractVerify`（13 漏 1）、
+   `secondOrder.secondMethod/triggerMethod` 三处断口，加上 **CLI 是另一条独立入口**、
+   只修 REST 等于没修（`--tamper` 让 `filterAdaptive` 从 true 变 undefined，而引擎判据是
+   `=== true` ⇒ 关键词静默过滤型目标的自适应重跑整轮消失，扫描照常报绿）。
+   同批把 `compactErrorTemplates` 从 `defaults.wafEvasion` 移到引擎真正读取的顶层，
+   并删掉一个恒为真的死条件 `fullErrorTemplates`。
+2. **报告的 markdown / CSV 出口**（`bd9a65b`）：HTML 侧一直有转义，`.md` 侧只防拆表的 `|`
+   —— 参数名里的 `<img src=x onerror=…>` 原样进正文，而 pandoc / markdown-it 默认保留行内
+   HTML ⇒ 在**读报告的机器**上执行；行内代码用 `\`` 转义反引号在 CommonMark 里是空操作；
+   CSV 拖库列头是全仓最后一处无公式守卫的出口；`isInternalHost` 被
+   `[::ffff:127.0.0.1]`（URL 规范化成 `::ffff:7f00:1`）绕过 ⇒ 报告里留下可点的回环链接。
+3. **11 个"注释承诺可配、实际无人能设"的旋钮**（`ae38595` / `14fd87f`）：
+   `http2` / `disableKeepAlive` / `xpAutoEnable` / `noSql.concurrency` 加上一批提取与统计层
+   调优键。判据换成不依赖 CLI 的版本后新增 `server/tests/configOrphanKeys.guard.test.js`：
+   可达 = 白名单 ∪ defaults ∪ CLI 写入 ∪ 前端声明 ∪ 同文件内部字段，**新孤儿即红、
+   过期豁免也红**（它当场抓到我抄错的 5 条豁免）。`StackedDetector` 那个假旋钮
+   （`sleepSecs`）不配新钥匙，改成认已有的 `timeBlindSleepSec`。
+4. **白名单内"值形态不合被丢弃"也开始喊 warn**（`ad7da92`）：此前只有"键名写错"会 warn，
+   `matchCode:200` / `skipParams:"id,page"` 这类一声不响，而后果完全相同。判据抽成纯函数，
+   并钉住"一份合法的面板形态 payload 不产生任何丢弃告警"——加告警先算误报率。
+5. **时间盲注标定探针量纲错**（`8cc9757`）：拿**绝对耗时**去比**增量下限**，把页面自身基线 μ
+   白送给了探针。默认档可达：μ≈1.2s 的站上 1s 探针实测 1.5s 就"标定成功"，而判定需要
+   ≥ μ+absFloor = 2.0s ⇒ 之后每次采样恒判未延迟，**只在开了标定的慢站上漏报**（既有三支
+   测试的 base 都是 0，两种算法同解，故缺陷活到今天）。改成与检测实际阈值同量纲比较。
+6. **docs/api.md 与代码口径对齐 + 守卫**（`9e63bdb`）：`retry`「默认 2」实为 3、
+   `timeoutMs`「默认 10000」实为 30000、`maxColumnsGuess`「默认 10」实为 50。
+   README 有 `readme:check` 盯着，REST 配置表此前一道门禁都没有。
+
+**方法论（本轮四条硬教训）**：
+- 一条修复要**逐入口**验：REST 与 CLI 是两条独立通路，只修一半等于没修；
+- 断言不能只写"键存在"——`!== false` 型判据下 `undefined` 与默认开恰好同值，
+  必须断"等于 defaults"并**反向**逐键发非默认值；
+- 子代理给的引擎侧结论 4 条里 3 条不成立（`dumpTarget` 转义、`level=0`、`fillPayload`
+  非字符串），全部经实测撤回 ⇒ 结论一律先复现再修；
+- 新写的守卫必须**先在旧代码上跑红**再恢复修复（本批两支都留了失败现场）。
+
+
 ### 前端可达性：两条整通道 + 五个假暴露键接进面板；契约测试判据修正
 
 **病灶（两个，同一族）**：

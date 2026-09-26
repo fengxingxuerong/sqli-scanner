@@ -133,21 +133,41 @@ const summaryRows = SCENARIOS.filter((s) => !s.expectSafe).map((s) => ({
 }));
 // 口径必须随数字一起存档：不带 PL 的"绕过率 N/N"没有可比性（CRS 官方默认部署是 PL1）。
 const report = { generatedAt: genAt, crs: `OWASP CRS v4.1.0 (自实现 SecRule 执行器, ${PL_LABEL})`, paranoiaLevel: EFFECTIVE_PL, db: `MySQL ${MYSQL_CONF.host}:${MYSQL_CONF.port}/${MYSQL_CONF.database}`, matrix, summaryRows, safeControlFalsePositive: !safeOk };
-writeFileSync(resolve(RESULTS_DIR, 'waf-real-report.json'), JSON.stringify(report, null, 2));
+// 改档跑出来的产物**不能覆盖默认那份**（同一个坑今天在 multi-engine-lab 上刚踩过：
+// 抬头印的是当时档位，文件名却只有一个，于是 `CRS_PL=3` 的一次探索把对外口径的 PL1 基线
+// 换成了 0/0 那份，README 引用的数字悄悄变了口径而没有任何东西报出来）。
+// 默认档 = PL1（CRS 官方默认部署，也是本文件对外的唯一口径），其余档各写各的文件。
+const SUFFIX = EFFECTIVE_PL === 1 ? '' : `.pl${EFFECTIVE_PL}`;
+writeFileSync(resolve(RESULTS_DIR, `waf-real-report${SUFFIX}.json`), JSON.stringify(report, null, 2));
 const md = [
   '# 真实 CRS v4.1.0 下 tamper 开/关 A/B（对外唯一口径）',
   '',
-  `> 生成：${genAt}　｜　靶场：真实 MySQL 8.0.28（e2e/real-mysql-lab/lab-app）　｜　CRS：官方规则原文 + 自实现执行器，档位 **${PL_LABEL}**（改档：` + '`CRS_PL=1 npm run waf-real`' + `；CRS 官方默认部署为 PL1）`,
+  `> 生成：${genAt}　｜　靶场：真实 MySQL 8.0.28（e2e/real-mysql-lab/lab-app）　｜　CRS：官方规则原文 + 自实现执行器，档位 **${PL_LABEL}**（` +
+    `${SUFFIX ? `本档为 PL${EFFECTIVE_PL}（非默认口径），产物是独立文件、不是对外那份` : '本文件是**默认口径 PL1** 那份'}；` +
+    '改档 `CRS_PL=1..4 npm run waf-real` 各写各的文件，互不覆盖；CRS 官方默认部署为 PL1）',
   '',
   '| 场景 | tamper 关 | tamper 开 | 结论 |',
   '|---|---|---|---|',
-  ...summaryRows.map((r) => `| ${r.name} | ${r.tamperOff.join(',') || '-'} | ${r.tamperOn.join(',') || '-'} | ${r.tamperOn.length > r.tamperOff.length ? '绕过生效' : r.tamperOff.length === 0 && r.tamperOn.length === 0 ? '全拦' : '—'} |`),
+  // 结论列按**集合**判，不按长度判。原来写 `on.length > off.length ⇒ 绕过生效`，
+  //   于是 off=[boolean,error] / on=[error]（长度同为 2）会印 "—"，
+  //   而 on 少了一整条通道这件事在这张表里完全看不见 —— 与 multi-engine-lab 那份
+  //   连印五天「tamper 后检出」的缺陷同源（2026-09-25 同一批修）。
+  ...summaryRows.map((r) => {
+    const gained = r.tamperOn.filter((t) => !r.tamperOff.includes(t));
+    const lost = r.tamperOff.filter((t) => !r.tamperOn.includes(t));
+    const verdict = r.tamperOff.length === 0 && r.tamperOn.length === 0
+      ? '全拦'
+      : (gained.length ? `绕过生效（新增 ${gained.join(',')}）` : '') +
+        (gained.length && lost.length ? '；' : '') +
+        (lost.length ? `反而丢失 ${lost.join(',')}` : '') || '技术位持平';
+    return `| ${r.name} | ${r.tamperOff.join(',') || '-'} | ${r.tamperOn.join(',') || '-'} | ${verdict} |`;
+  }),
   '',
   `安全对照误拦：${safeOk ? '无' : '有（需修）'}`,
   '',
   '> ⚠️ 该执行器为简化版 ModSecurity（无 libinjection @detectSQLi、无排除集），检出强度略低于真实部署，绕过率据此略偏高；商业云 WAF 未实测，禁止据此声明可绕过。',
   '',
 ].join('\n');
-writeFileSync(resolve(RESULTS_DIR, 'waf-real-report.md'), md);
-console.log(`[report] ${resolve(RESULTS_DIR, 'waf-real-report.md')}`);
+writeFileSync(resolve(RESULTS_DIR, `waf-real-report${SUFFIX}.md`), md);
+console.log(`[report] ${resolve(RESULTS_DIR, `waf-real-report${SUFFIX}.md`)}${SUFFIX ? `（本档 PL${EFFECTIVE_PL}，非默认口径，写独立文件不覆盖 PL1 那份）` : ''}`);
 process.exit(0);
