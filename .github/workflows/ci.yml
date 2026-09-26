@@ -558,12 +558,14 @@ jobs:
     #    · `e2e/tamper-matrix/tamper-test.mjs` = **纯测量脚本**（输出绕过矩阵，无任何断言、
     #      不设退出码）。它本来就不是门禁 → 保留 continue-on-error（它恒为 0，去掉没意义），
     #      但**必须改掉"门禁"的暗示**，并把产物上传（否则数据取不回，等于白跑）。
-    #    · `e2e/waf-lab/compare-real.run.py` → `compare-real.e2e.mjs` = **真断言门禁**
-    #      （`process.exit(pass ? 0 : 1)`，内含 200/表空/靶场异常等硬断言；run.py 忠实透传 rc）。
+    #    · `e2e/waf-lab/compare-real.e2e.mjs` = **真断言门禁**
+    #      （`process.exit(pass ? 0 : 1)`，连不上 MySQL 时 exit 2 = 显式失败不静默降级）。
     #      → **去掉 continue-on-error**：它吞掉的正是真实的红。
-    #      注（2026-09-25）：这道门禁现在**每次 push 都在 acceptance job 里跑**（直连该 job
-    #      自己起的 docker mysqld），本 job 保留的是**经 Python 沙箱启动器**的那条路径 ——
-    #      两者入口同一个脚本， launcher 不同；这里不再是它唯一的执行处，别再按"周度才有"读。
+    #      注（2026-09-25）：这道门禁**每次 push 也在 acceptance job 里跑**（直连该 job 自己起的
+    #      docker mysqld），本 job 是**周度那份**，两者入口同一个脚本、launcher 不同。
+    #      ⚠️ 2026-09-27 更正：本 job 原先走 `compare-real.run.py`（Python 沙箱启动器），
+    #      但那个沙箱是 **Windows 专用**，在 ubuntu 上从未成功过（详见下面该步的注释）。
+    #      现改为与 acceptance 同款的 docker MySQL。
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     steps:
       - uses: actions/checkout@v4
@@ -573,12 +575,12 @@ jobs:
       - run: cd server && npm ci
       # [CI-FIX 2026-09-20] 两个入口文件路径是错的，指向了**不存在**的 run.js：
       #   · e2e/tamper-matrix/run.js  → 实际入口 tamper-test.mjs
-      #   · e2e/waf-lab/run.js        → 实际入口 compare-real.e2e.mjs（需真 MySQL，由 run.py 起沙箱）
+      #   · e2e/waf-lab/run.js        → 实际入口 compare-real.e2e.mjs（需真 MySQL，现由本 job 起 docker 实例）
       # 且两者都带 continue-on-error: true，于是 `node <不存在的文件>` 每次静默失败、
       # 从不拦人 —— 这两个 job **从未验证过任何东西**（空转门禁）。
-      # waf-lab 依赖真 MySQL：本机无 docker，CI 侧也没有起库步骤，直接调会 ECONNREFUSED；
-      # 故此处改为经 Python 沙箱启动器（它自己起隔离 mysqld，见 compare-real.run.py 注释）。
-      # 若 CI 环境无 python/mysqld，该步会明确报缺失依赖而非静默通过。
+      # waf-lab 依赖真 MySQL。⚠️ 2026-09-27 更正：此前这里写「改为经 Python 沙箱启动器」，
+      # 但那一步在 ubuntu 上**从未成功过**（沙箱是 Windows 专用）—— 详见下面 WAF 门禁步的注释。
+      # 现由该步自己起 docker MySQL。
       # 纯测量脚本（无断言、不设退出码）：产出绕过矩阵供人工研判，**不是门禁**。
       # 名字里写明「非门禁」避免读 CI 绿红时误以为这里验证过什么。
       - run: node e2e/tamper-matrix/tamper-test.mjs
@@ -588,10 +590,61 @@ jobs:
       # 真断言门禁（exit(pass?0:1)）：**故意不加 continue-on-error** ——
       # 之前它吞掉了真实的红（同族：`node <不存在的文件>` + continue-on-error = 空转门禁）。
       # 本 job 只跑 schedule/dispatch；同一道门禁**自 2026-09-25 起每次 push 也在 acceptance
-      # job 里直连跑一遍**（那条会真的拦 PR）。本步的价值是走 **Python 沙箱启动器**这条路，
-      # 顺带验 `compare-real.run.py` 自己 —— 红也会如实反映在本 job 结论里。
-      - run: python3 e2e/waf-lab/compare-real.run.py
-        name: WAF 规则实验室（真 MySQL 沙箱 A/B，断言门禁；push 侧另有一份直连）
+      # job 里直连跑一遍**（那条会真的拦 PR）。
+      # [CI-FIX 2026-09-27] 本步原先调 `compare-real.run.py`（走 Python 沙箱启动器），
+      # 在 ubuntu 上**必然失败**且从未成功过 —— 根因有两层，都不是被测代码的问题：
+      #
+      # ① `e2e/udf-lab/mysql_sandbox.py` 是 **Windows 专用**：`MYSQLD = MYSQL_HOME/"bin"/"mysqld.exe"`
+      #    硬编码 .exe、`MYSQL_HOME` 默认 `D:\mysql`、进程管理用 `tasklist`/`taskkill`，
+      #    且全文**零平台分支**（grep `sys.platform|os.name` = 0 处）。
+      #    ⇒ 在 ubuntu runner 上连 `--init` 都跑不起来（路径不存在，FileNotFoundError）。
+      # ② 就算它能在 Linux 跑，CI 也从没为它做过 `--init`，datadir 恒不存在。
+      #
+      # 为什么此前没被发现（这是本仓最贵的一类错：**假绿**）：
+      #   · 本 job 只在 schedule / workflow_dispatch 触发，push 时整 job skipped ⇒ 平时看不见；
+      #   · 该步曾带 `continue-on-error: true`（2026-09-22 去掉），失败被吞成绿；
+      #   · acceptance 里那条同类沙箱路径**只在宿主不放行 secure_file_priv 时才走**，
+      #     而 acceptance 起的 docker MySQL 已放行 ⇒ 沙箱重试从不触发 ⇒ ubuntu 上「没走到」被读成「能跑」。
+      #   实测佐证：workflow_dispatch 历史上只触发过 2 次（#82/#84），**两次都因同一原因红**。
+      #
+      # 修法：改用与 acceptance **同款**的 docker MySQL（ubuntu runner 原生可用），
+      # 并显式初始化 real-mysql-lab schema（compare-real.e2e.mjs 有 `users 表为空 → throw` 的硬前置）。
+      # 沙箱路径不是丢掉而是**回归它的适用范围**：Windows 本机跑 UDF/fileops 时仍用它。
+      # 注意：`compare-real.run.py` 本体保留（本机 Windows 仍可用），只是不再挂在 ubuntu CI 上。
+      - name: 启动 MySQL（docker，与 acceptance 同款）
+        run: |
+          docker run -d --name mysql-waf -p 3306:3306 \
+            -e MYSQL_ROOT_PASSWORD=root \
+            -e MYSQL_DATABASE=sqli_lab \
+            mysql:8.0
+      - name: 等待 MySQL 就绪
+        run: |
+          for i in $(seq 1 60); do
+            if docker exec mysql-waf mysqladmin ping -h 127.0.0.1 -uroot -proot --silent 2>/dev/null; then
+              echo "MySQL ready after ${i} attempts"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "MySQL 未在 120s 内就绪"
+          docker logs mysql-waf | tail -30
+          exit 1
+      - name: 初始化靶场库表
+        run: node e2e/real-mysql-lab/init-db.mjs
+        env:
+          MYSQL_PORT: 3306
+          MYSQL_USER: root
+          MYSQL_PASSWORD: root
+      # 真断言门禁（exit(pass?0:1)，连不上 MySQL 时 exit 2 = 显式失败不静默降级）。
+      # 直连 3306 用上面刚起的 docker 实例 + init-db 那份 schema。
+      - name: WAF 规则实验室（真 MySQL A/B，断言门禁）
+        run: node e2e/waf-lab/compare-real.e2e.mjs
+        env:
+          MYSQL_HOST: 127.0.0.1
+          MYSQL_PORT: 3306
+          MYSQL_USER: root
+          MYSQL_PASSWORD: root
+          MYSQL_DATABASE: sqli_lab
         timeout-minutes: 10
       # 测量产物必须能取回，否则这一步等于白跑。
       - name: 上传矩阵与 A/B 产物
