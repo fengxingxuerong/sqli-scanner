@@ -523,9 +523,18 @@ node e2e/blackbox-lab/sqlmap-bench.mjs                    # sqlmap 同题对照
 装载期普查探针与运行期 `execOp` **共用同一函数**，避免两套真相。缺陷注入复验：还原为不降级 →
 保真度跌到 13.2% / 600 条未点名 → 门禁 FAIL（不是崩，是红）。
 
-> 仍成立的边界：上表两档数字**只是「自实现执行器口径」**。真实 ModSecurity/Coraza/商业云 WAF **从未实测**
-> —— ❌ 禁止对外声明任何真实 WAF 环境下的绕过率。剩余 9 条已点名分歧（含 @detectSQLi 需 libinjection）
+> 仍成立的边界：上表两档数字**只是「自实现执行器口径」**。剩余 9 条已点名分歧（含 @detectSQLi 需 libinjection）
 > 记在 `e2e/waf-real/crs-known-divergences.json`。
+>
+> ✅ **2026-09-27 更新**：真实 ModSecurity 引擎**已首次实测**（job `modsec-live`，真
+> `owasp/modsecurity-crs:nginx` 容器，PL1/PL3 两档）。结论摘要：
+> 真机判「有绕过效果」的插件 **PL1 74 / PL3 72**，而自实现执行器只判 **10** ——
+> 分歧集中在编码族，方向是**我们低估了自己**；唯一反向分歧是 `charunicodeescape`
+> （自实现判放行、真机全拦）。安全对照 **0 误拦**。
+> ⚠️ 但**仍禁止对外声明真实 WAF 下的绕过率**：① 本轮只测「WAF 放不放行」（echo 靶站、
+> 无真库），放行 ≠ 能打穿；② CRS 版本与镜像 digest 首版取证失败 → 数字尚不可复现。
+> 全文与逐条数字见 `docs/WAF-真机对拍-2026-09-27.md`；逐插件矩阵在 CI artifact
+> `modsec-live-results` 里（`e2e/waf-real/results/` 属产物目录，已 gitignore，不入库）。
 
 旧口径的逐探针归因（942361 打的是参数值起始形状 `^[\W\d]+\s*?(?:alter|union)\b`，故 `1 UNION…` 必拦、
 `alice' UNION…` 放行）**测于执行器修复之前**：规则原文可复核，但由此得出的「数值点 union 拿不回来、

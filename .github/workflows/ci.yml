@@ -491,11 +491,19 @@ jobs:
           sleep 10
           docker ps --filter name=modsec --format "{{.Status}}"
       # 四要素取证（缺一不可，否则数字不可比）：镜像 tag / CRS 版本 / PARANOIA / 阻断阈值
+      # 四要素取证：镜像 tag / CRS 版本 / PARANOIA / 阻断阈值 —— 缺一项这份报告就不可复现、不可比。
+      # ⚠️ 首版踩的坑：`sh -c "...'正则'..."` 双层引号嵌套把正则吃掉了，容器里 grep 静默无输出，
+      #    报告里就写上了「未记录」—— 取证失败**看不出来**（不是红，只是少一行字）。
+      #    修法：容器内一律用 `sh -c '...'`（单引号包双层），正则放里面不再转义；
+      #    再补 CRS 规则目录的多个候选路径（镜像版本不同，安装位置会变）。
       - name: 取证四要素
         run: |
           docker exec modsec sh -c 'nginx -v 2>&1 | head -1' || true
-          echo "MODSEC_CRS_VERSION=$(docker exec modsec sh -c "grep -rhoE 'OWASP_CRS/[0-9.]+' /usr/local/owasp-crs 2>/dev/null | head -1" || echo unknown)" >> $GITHUB_ENV
-          docker exec modsec sh -c "grep -rEhi 'SecRuleEngine' /etc/modsecurity.d/*.conf 2>/dev/null | head -5" || true
+          CRS=$(docker exec modsec sh -c 'grep -rhoE "OWASP_CRS/[0-9.]+|crs_version [0-9.]+" /usr/local/owasp-crs /opt/owasp-crs /etc/modsecurity.d 2>/dev/null | head -1' || true)
+          echo "MODSEC_CRS_VERSION=${CRS:-unknown}" >> $GITHUB_ENV
+          docker exec modsec sh -c 'grep -rEhi "SecRuleEngine" /etc/modsecurity.d/*.conf 2>/dev/null | head -5' || true
+          echo "MODSEC_IMAGE=$(docker inspect -f '{{index .RepoTags 0}}' owasp/modsecurity-crs:nginx)" >> $GITHUB_ENV
+          echo "MODSEC_DIGEST=$(docker inspect -f '{{index .RepoDigests 0}}' owasp/modsecurity-crs:nginx)" >> $GITHUB_ENV
       - name: 对拍 PL1
         run: node e2e/waf-real/modsec-live.mjs
         env:
