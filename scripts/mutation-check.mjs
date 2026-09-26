@@ -80,6 +80,16 @@ const TARGETS = [
     file: 'src/engine/scan/detect.js',
     tests: ['tests/detect.orchestration.test.js'],
   },
+  {
+    // 拖库范围解析（449 行，此前零测试挂载，lines 67.6%）
+    file: 'src/engine/extractScope.js',
+    tests: ['tests/extractScope.modes.test.js'],
+  },
+  {
+    // 扫描收尾（188 行，此前零测试挂载，branch 48%）—— 交付报告的最后一道
+    file: 'src/engine/scan/finalize.js',
+    tests: ['tests/finalize.report.test.js'],
+  },
 ];
 
 /**

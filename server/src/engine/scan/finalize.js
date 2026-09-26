@@ -152,8 +152,14 @@ export async function finalizeReport(run) {
   if (blockAdaptiveInfo?.triggered && report.summary.blockPolicy.action === 'none') {
     report.summary.blockPolicy = {
       action: blockAdaptiveInfo.mode === 'filterBypass' ? 'filterBypass' : 'adaptiveTamper',
+      // 标签必须与取值的语义对齐：filterBypass 形态只有 errorOnlyPoints（error 命中但数据面
+      // 全 miss 的点数），写成 blockHits 会让报告出现「blockHits=2」而日志里根本没有 2 次拦截。
       reason:
-        `本次实际出现拦截响应（blockHits=${blockAdaptiveInfo.blockHits ?? blockAdaptiveInfo.errorOnlyPoints ?? '?'}）` +
+        `本次实际出现拦截响应（${
+          blockAdaptiveInfo.blockHits != null
+            ? `blockHits=${blockAdaptiveInfo.blockHits}`
+            : `errorOnlyPoints=${blockAdaptiveInfo.errorOnlyPoints ?? '?'}`
+        }）` +
         `并已自动换链重跑：${JSON.stringify(blockAdaptiveInfo.chains?.[0] || [])}`,
       tamperHint: Array.isArray(blockAdaptiveInfo.chains?.[0]) ? [...blockAdaptiveInfo.chains[0]] : [],
       backoffMs: report.summary.blockPolicy.backoffMs,
