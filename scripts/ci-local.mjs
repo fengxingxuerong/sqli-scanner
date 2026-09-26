@@ -157,6 +157,14 @@ const EXCLUDED_JOBS = {
     'tamper-test.mjs 是纯测量（非门禁，保留 continue-on-error）；' +
     'compare-real.run.py 是真断言门禁（已去掉 continue-on-error，红会如实报告）。',
   docker: '本机无 docker（实测 `docker --version` exit 127）',
+  // [2026-09-27] 真机 ModSecurity 对拍：整条链路的前提就是「真实 owasp/modsecurity-crs:nginx
+  // 容器」，本机无 docker 就没有任何等价替代（自实现 crs-engine 恰恰是它要**对照**的对象，
+  // 拿它跑一遍等于自己验自己）。触发方式与 tamper-waf-matrix 同款（schedule / 手动 dispatch）。
+  'modsec-live':
+    '真机 WAF 对拍：需要 docker 起 owasp/modsecurity-crs:nginx 容器（本机无 docker，exit 127）。' +
+    '本机可跑的只有**静态**那一半（`node e2e/waf-real/tamper-sweep.mjs`，走自实现 crs-engine），' +
+    '而本 job 的存在意义正是拿真引擎去对照静态口径 —— 没有容器就没有对照对象。' +
+    '想看结果：GitHub 上手动 dispatch 一次，报告以 artifact 形式下载。',
 };
 
 // GATES 覆盖到的 job 名（`typecheck` 不是 ci.yml 的 job 而是 lint job 内的步骤，一并计入无害）

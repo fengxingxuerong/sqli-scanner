@@ -452,6 +452,87 @@ jobs:
             e2e/results/last-failure-*.log
           if-no-files-found: warn
 
+  # [真机 WAF 2026-09-27] 唯一能救回「对外 WAF 可信度」的一步。
+  # 此前全部 WAF 结论都来自**自实现 CRS 执行器**（e2e/waf-real/crs-engine.js 跑官方规则原文），
+  # README 已诚实标注 —— 但那终究是「我们自己实现的规则引擎说我们过了」。
+  # 本 job 起真实 owasp/modsecurity-crs:nginx（含 libinjection），用**与静态扫描完全相同的一批样本**
+  # （e2e/waf-real/samples.mjs 单一来源）真发 HTTP 对拍，PL1 / PL3 两个档位各跑一遍。
+  #
+  # 触发：与 tamper-waf-matrix 同款（schedule / workflow_dispatch）—— 拉镜像 + 两档 × 228 插件 × 8 样本
+  # 在 push 上跑太重。但它是**真门禁**：自检不通过（WAF 不在位/后端没起来）直接 exit 1，
+  # 且**不加 continue-on-error** —— 那正是本仓反复修掉的「空转门禁」形态。
+  # 绕过数/误报数本身是**测量值**，不是成败判据（绕过少是 CRS 强，误报多是 CRS 的问题），
+  # 故只记录进报告，不拿来判红。
+  modsec-live:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: cd server && npm ci
+      # 靶站必须先于容器起来：nginx 启动时上游不在会有概率直接退出（失败现场会伪装成 WAF 不通）
+      - name: 起最小靶站后端
+        run: nohup node e2e/waf-real/modsec-target.mjs > /tmp/modsec-target.log 2>&1 &
+      - name: 拉镜像并记录 tag / digest
+        run: |
+          docker pull owasp/modsecurity-crs:nginx
+          echo "MODSEC_IMAGE=$(docker inspect -f '{{index .RepoTags 0}}' owasp/modsecurity-crs:nginx)" >> $GITHUB_ENV
+          echo "MODSEC_DIGEST=$(docker inspect -f '{{index .RepoDigests 0}}' owasp/modsecurity-crs:nginx)" >> $GITHUB_ENV
+      - name: 起 PL1 容器
+        run: |
+          docker rm -f modsec 2>/dev/null || true
+          docker run -d --name modsec --network host \
+            -e PARANOIA=1 -e ANOMALY_INBOUND=5 \
+            -e BACKEND=http://127.0.0.1:8151 \
+            owasp/modsecurity-crs:nginx
+          sleep 10
+          docker ps --filter name=modsec --format "{{.Status}}"
+      # 四要素取证（缺一不可，否则数字不可比）：镜像 tag / CRS 版本 / PARANOIA / 阻断阈值
+      - name: 取证四要素
+        run: |
+          docker exec modsec sh -c 'nginx -v 2>&1 | head -1' || true
+          echo "MODSEC_CRS_VERSION=$(docker exec modsec sh -c "grep -rhoE 'OWASP_CRS/[0-9.]+' /usr/local/owasp-crs 2>/dev/null | head -1" || echo unknown)" >> $GITHUB_ENV
+          docker exec modsec sh -c "grep -rEhi 'SecRuleEngine' /etc/modsecurity.d/*.conf 2>/dev/null | head -5" || true
+      - name: 对拍 PL1
+        run: node e2e/waf-real/modsec-live.mjs
+        env:
+          MODSEC_BASE: http://127.0.0.1:8080
+          MODSEC_LABEL: pl1
+          MODSEC_PARANOIA: "1"
+          MODSEC_ANOMALY_INBOUND: "5"
+      - name: 切 PL3 重跑
+        run: |
+          docker rm -f modsec 2>/dev/null || true
+          docker run -d --name modsec --network host \
+            -e PARANOIA=3 -e ANOMALY_INBOUND=5 \
+            -e BACKEND=http://127.0.0.1:8151 \
+            owasp/modsecurity-crs:nginx
+          sleep 10
+          docker ps --filter name=modsec --format "{{.Status}}"
+      - name: 对拍 PL3
+        run: node e2e/waf-real/modsec-live.mjs
+        env:
+          MODSEC_BASE: http://127.0.0.1:8080
+          MODSEC_LABEL: pl3
+          MODSEC_PARANOIA: "3"
+          MODSEC_ANOMALY_INBOUND: "5"
+      - name: 上传对拍报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: modsec-live-results
+          path: e2e/waf-real/results/modsec-docker-*.md
+          if-no-files-found: warn
+      # 自检失败时容器日志是唯一的归因线索，必须留下来
+      - name: 收摊（容器日志 + 清理）
+        if: always()
+        run: |
+          docker logs modsec 2>&1 | tail -40 || true
+          cat /tmp/modsec-target.log 2>/dev/null | tail -10 || true
+          docker rm -f modsec 2>/dev/null || true
   tamper-waf-matrix:
     runs-on: ubuntu-latest
     # [修复] 原 job 级 schedule:/workflow_dispatch: 为非法键（只能放顶层 on:），已移至顶层。
