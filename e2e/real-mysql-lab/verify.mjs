@@ -35,17 +35,13 @@ const SCENARIOS = [
   { name: 'like', desc: 'LIKE 上下文（%\' 闭合，P1-3 修复验证）', target: () => ({ url: `${BASE}/like?q=keyboard` }), must: ['boolean'], nice: ['error', 'union'] },
   { name: 'orderby', desc: 'ORDER BY 位置注入（子句轮需 level≥2）', target: () => ({ url: `${BASE}/orderby?sort=id` }), must: ['boolean'], nice: [], cfg: { level: 2 } },
   { name: 'blind', desc: '布尔盲注（错误吞掉，无回显）', target: () => ({ url: `${BASE}/blind?uid=1` }), must: ['boolean'], nice: [] },
-  // ⚠️ [FLAKY 2026-09-23 实测] 本场景在 CI（ubuntu + MySQL 8.0.46 容器）上**间歇失败**：
-  //   同一份代码，16:34 那轮 `检出=[time] miss=[boolean]`（FAIL，耗时 6345ms），
-  //   16:50 原地 rerun 同一 job → PASS=10/FAIL=0。即 `/noisy` 的 boolean 判定会随
-  //   **宿主负载/时序**抖动（强动态页本就靠差异稳定性判布尔，是最脆的一类）。
-  //   ⛔ 不要把它降级成 nice 了事 —— 那会让门禁对这块永远失明。正确处置是**修布尔判定的
-  //   抗噪性**（噪声页的采样数/阈值/去噪），并把本注释连同复跑证据一起删掉。
-  //   现状（如实）：门禁含 1 个已知 flaky 项，红灯出现时**先 rerun 再看**是否是它。
-  //   [FLAKY-RERUN 2026-09-27] 上述「先 rerun 再看」手工协议的机制化：已登记场景首跑失败时
-  //   原地复跑一次，判定只看第二次——连续两红才算真回归；单次翻绿记 flakyRetried=true 并把
-  //   首跑 miss 证据留在报告里（显性留痕，不静默吞掉）。白名单只收**已登记**的 flaky 场景：
-  //   新的偶发必须先红、登记、再入表，不允许预先豁免。抗噪性修复落地后整表撤销。
+  // [FLAKY 2026-09-23 → 2026-09-27 已根治] 本场景曾在 CI/负载下间歇漏检 boolean
+  //   （1/5 复现率；`检出=[time] miss=[boolean]`）。根因与修复见
+  //   e2e/real-mysql-lab/load-repro.mjs 头注释：fixed-offset 分块对「内容位移 + 块序打乱」
+  //   不鲁棒，过滤器在「全动态/半动态」两态间翻硬币。修复 = Detector.buildDynamicSimilar
+  //   在「HTML 形态 + 动态块占比 ≥0.3」时切换标签边界 token 袋骨架判定（statsHelper.js
+  //   buildTokenBagSimilarFn）。修复后 load-repro 12/12 轮（CPU 燃烧负载）零漏检、
+  //   noise=0.00 确定性，白名单已按预案撤销（FLAKY_SCENARIOS 置空）。
   { name: 'noisy', desc: '强动态页布尔盲注（todo#38：高密度动态内容 + 注入）', target: () => ({ url: `${BASE}/noisy?uid=1` }), must: ['boolean'], nice: [] },
   { name: 'time', desc: '时间盲注（内容恒定）', target: () => ({ url: `${BASE}/time?tid=1` }), must: ['time'], nice: [] },
   // stacked/inline 为 opt-in 技术（默认 techniques 不含），需显式指定
@@ -117,8 +113,10 @@ await new Promise((resolve, reject) => {
 console.log(`[verify] 靶场就绪 ${BASE}  sqlmap对拍=${process.argv.includes('--sqlmap') ? 'on' : 'off'}\n`);
 
 const sm = new ScanManager();
-// 已登记 flaky 场景白名单（登记依据见 SCENARIOS 内 [FLAKY 2026-09-23] 注释与台账）
-const FLAKY_SCENARIOS = new Set(['noisy']);
+// 已登记 flaky 场景白名单（2026-09-27 已随 noisy 抗噪性根治整表撤销）。
+// 机制保留：若未来再现新的负载敏感场景，流程是「先红 → 定位登记 → 再入表」，
+// 复跑判定只看第二次，翻绿记 flakyRetried 留痕；连续两红才算真回归。
+const FLAKY_SCENARIOS = new Set();
 const rows = [];
 let pass = 0;
 for (const sc of SCENARIOS) {

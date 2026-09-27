@@ -1,5 +1,5 @@
 import { obfuscateWithConfig } from '../core/tamper/applyTampers.js';
-import { chunkSimilarity, chunkHashes, dynamicBlockFilter } from '../core/statsHelper.js';
+import { chunkSimilarity, chunkHashes, dynamicBlockFilter, buildTokenBagSimilarFn } from '../core/statsHelper.js';
 import { buildInjectionRequest } from './injection.js';
 // [ECHO-FIX 2026-09-18] 闭合探测的相似判定需剔除被回显的 payload（见 probeBoundary 内注释）
 import { stripEchoedPayload } from './echoStrip.js';
@@ -693,12 +693,33 @@ export class Detector {
    * 自动动态块识别（深化 chunkedSimilar）：对基线两两比对，标记「高频差异块下标」为动态块，
    * 返回排除动态块后的相似判定函数（长度容差 + 非动态块相似率 ≥ 0.85）。
    * config.autoDynamicBlock === true 才启用；关闭或无动态块时返回 null（回落现状分块比对，默认路径不变）。
+   *
+   * [P1-FLAKY 2026-09-27] HTML 动态页切换「标签边界 token 袋」判定（noisy 布尔漏检根治）：
+   * fixed-offset 分块对内容位移不鲁棒——变长动态段之后的所有块边界错位，过滤器在
+   * 「全动态（similar 恒真，检测靠二级判据兜底）」与「半动态（噪声虚高 → 门槛抬高 →
+   * 漏检）」两态间翻硬币（load-repro 实测 noise=0.40/0.00 两态）。故当基线为 HTML 形态
+   * 且动态块占比 ≥ 30%（位移确实在发生）时，切换为标签边界 token 袋骨架判定
+   * （变长内容被关在单个 token 里不再传播位移，块洗牌由无序 bag 天然免疫）；
+   * 动态占比低（常见静态页，现有路径工作良好）或非 HTML 时维持现状，零行为变化。
    * @param {string[]} baselines 同一注入点的多次基线响应体
    * @param {object} config 检测配置（含 autoDynamicBlock 开关）
    * @returns {function|null} 排除动态块后的相似判定 (a, b) => boolean；关闭/无动态块返回 null
    */
   buildDynamicSimilar(baselines, config) {
     if (!config || config.autoDynamicBlock !== true) return null;
+    // 位移退化度量：动态块占基线最大块数的比例
+    const bodies = (baselines ?? []).map((b) => String(b ?? '')).filter((b) => b.length > 0);
+    if (bodies.length >= 2) {
+      const { dynamicIdx } = dynamicBlockFilter(bodies);
+      const maxChunks = Math.ceil(Math.max(...bodies.map((b) => b.length)) / 64);
+      const htmlShaped = bodies.every(
+        (b) => ((b.match(/</g) ?? []).length * 100) / Math.max(b.length, 1) >= 2
+      );
+      if (htmlShaped && maxChunks > 0 && dynamicIdx.size / maxChunks >= 0.3) {
+        const tokFn = buildTokenBagSimilarFn(bodies);
+        if (tokFn) return tokFn;
+      }
+    }
     return buildDynamicSimilarFn(baselines);
   }
 

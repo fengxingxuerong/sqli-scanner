@@ -186,6 +186,89 @@ export function dynamicBlockFilter(baselines, blockSize = 64) {
   return { dynamicIdx, hasDiff };
 }
 
+// ============================================================================
+// [P1-FLAKY 2026-09-27] HTML 动态页的「标签边界 token 袋」相似判定
+// （noisy 强动态页布尔漏检根治——登记于 real-mysql-lab verify.mjs [FLAKY 2026-09-23]，
+//   定位工具 e2e/real-mysql-lab/load-repro.mjs）
+//
+// 病根：fixed-offset 分块（dynamicBlockFilter / buildDynamicSimilarFn）对「内容位移」
+// 不鲁棒——变长动态段（时间戳/随机 hex/推荐位）一出现，其后所有 64B 块的边界全部错位，
+// 静态内容的块 hash 被动态字节污染；块序打乱（推荐位/广告位洗牌）再叠一层。
+// 实测两态翻硬币（load-repro 抓到）：过滤器退化成「全动态」时 similar 恒真（检测靠
+// 二级判据兜底），落到「半动态」时基线噪声率虚高（0.40）→ 门槛抬高 → 真样本对齐
+// 运气为 0 → 布尔漏检。
+//
+// 判据（与危害同源）：HTML 响应按标签边界（'<'）切 token——变长内容被关在单个 token
+// 里，不再向后续传播位移；把「在所有基线中都出现（按最低重数）」的 token 视为稳定骨架，
+// similar(a,b) = 骨架 bag 同时被 a 与 b 的 token 袋包含（无序，天然免疫块洗牌）。
+// 布尔信号在骨架语义下依然成立：基线是同内容请求，凡基线间变化的必是噪声；假条件
+// 缺结果行 → 结果行 token 不在假响应袋里 → 包含失败 → 判「不相似」。
+//
+// 边界与回退：
+//   · 仅当基线呈 HTML 形态（'<' 密度达标）才可用；非 HTML 由调用方回退 positional 现状。
+//   · 基线 < 2 或稳定骨架为空 → 返回 null（调用方回退现状，默认路径零变化）。
+//   · token 袋按 body 串做有界 memo（同一批采样会被反复比较），超限整体清空。
+// ============================================================================
+function fnv1a32(str) {
+  let h = 0x811c9dc5;
+  for (let j = 0; j < str.length; j++) {
+    h ^= str.charCodeAt(j);
+    h = Math.imul(h, 0x01000193);
+  }
+  return h >>> 0;
+}
+
+/** HTML 形态判据：'<' 密度 ≥ 2/100 字符（JSON/纯文本 API 回退现状） */
+function isHtmlShaped(body) {
+  if (!body || body.length < 8) return false;
+  return ((String(body).match(/</g) ?? []).length * 100) / body.length >= 2;
+}
+
+const TOKEN_BAG_MEMO_MAX = 512;
+const tokenBagMemo = new Map(); // body → Map(hash → count)
+
+function tokenBagOf(body) {
+  const hit = tokenBagMemo.get(body);
+  if (hit) return hit;
+  const bag = new Map();
+  for (const tok of String(body ?? '').split(/(?=<)/)) {
+    if (!tok) continue;
+    const h = fnv1a32(tok);
+    bag.set(h, (bag.get(h) ?? 0) + 1);
+  }
+  if (tokenBagMemo.size >= TOKEN_BAG_MEMO_MAX) tokenBagMemo.clear();
+  tokenBagMemo.set(body, bag);
+  return bag;
+}
+
+/**
+ * HTML 动态页的稳定骨架相似判定。
+ * @param {string[]} baselines 同一注入点的多次基线响应体（≥2 且均 HTML 形态）
+ * @returns {function|null} (a, b) => boolean；不可用时返回 null（调用方回退现状）
+ */
+export function buildTokenBagSimilarFn(baselines) {
+  const arr = (baselines || []).map((b) => String(b ?? '')).filter((b) => b.length > 0);
+  if (arr.length < 2 || !arr.every(isHtmlShaped)) return null;
+  const bags = arr.map((b) => tokenBagOf(b));
+  // 稳定骨架：在所有基线中都出现（按最低重数）的 token
+  const stable = new Map();
+  for (const [h, c] of bags[0]) {
+    let min = c;
+    for (let i = 1; i < bags.length && min > 0; i++) min = Math.min(min, bags[i].get(h) ?? 0);
+    if (min > 0) stable.set(h, min);
+  }
+  if (stable.size === 0) return null;
+  const containsStable = (bag) => {
+    for (const [h, c] of stable) {
+      if ((bag.get(h) ?? 0) < c) return false;
+    }
+    return true;
+  };
+  // similar(a, b)：骨架同时被 a、b 包含。基线之间构造性恒相似（噪声地板=0，
+  // adaptiveMinStable 落回下限——门槛语义不变）；假条件缺稳定 token → 包含失败 → 判不相似。
+  return (a, b) => containsStable(tokenBagOf(a)) && containsStable(tokenBagOf(b));
+}
+
 // 两比例 z 检验：判断"注入引起的变化率"是否显著高于"基线自然抖动率"（抗误报）。
 // rateA/nA = 观测组（如 false 条件响应偏离基线的比例与样本数）；
 // rateB/nB = 对照组（如基线两两自比较的差异比例与配对对数）。
