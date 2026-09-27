@@ -8,6 +8,7 @@ import ReportPage from '../pages/ReportPage';
 // ScanPage → ScanConfigPanel → WafTamperPanel 挂载即请求 /api/tampers，统一 mock
 vi.mock('../shared/apiClient', () => ({
   API_BASE: 'http://test/api',
+  getApiBase: () => 'http://test/api',
   apiClient: {
     tampers: vi.fn().mockResolvedValue([
       { name: 'space2comment', description: '空格转内联注释' },

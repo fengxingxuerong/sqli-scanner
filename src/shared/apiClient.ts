@@ -18,6 +18,10 @@ export class ApiError extends Error {
 // 前端 API base：Web 版为 /api（同源代理），Tauri 版为 http://127.0.0.1:4567。
 // [A3 2026-09-17] 运行期可覆盖：桌面版由 Rust sidecar 告知实际端口（4567 被占时随机端口），
 // 前端启动时经 tauriBridge.getEngineInfo() 调 setApiBase()，不再依赖编译期常量。
+// ⚠ 任何**自己拼 URL** 的出口（EventSource / 裸 fetch / 下载链接）一律用 getApiBase()，
+//   不要 import 这个常量：A3 那次就是只搬了 axios 拦截器，SSE 与报告导出还在拼它，
+//   于是随机端口下「扫描能起、进度永远不动、导出永远 404」。判据见
+//   src/tests/desktopRuntimeBase.test.tsx（该用例刻意不 mock 本模块）。
 export const API_BASE: string =
   (import.meta.env.VITE_API_BASE as string | undefined) ?? '/api';
 let runtimeBase: string | null = null;

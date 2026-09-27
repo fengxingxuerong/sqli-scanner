@@ -16,6 +16,7 @@ import { ErrorCode } from '../shared/types';
 
 vi.mock('../shared/apiClient', () => ({
   API_BASE: 'http://test/api',
+  getApiBase: () => 'http://test/api',
   // 本文件聚焦"状态码 / MIME / 落盘"，鉴权头那一侧由 useScan.export.test.tsx 专门钉。
   // 但 mock 必须**把 hook 用到的导出都补齐** —— 漏一个 getApiToken 会让被测代码
   // 直接抛 TypeError，症状看起来像"导出坏了"，其实是夹具不完整。

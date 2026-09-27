@@ -14,7 +14,7 @@
 
 import { useEffect } from 'react';
 import { useScanStore } from '../store/scanStore';
-import { API_BASE, apiClient } from '../shared/apiClient';
+import { apiClient, getApiBase } from '../shared/apiClient';
 import type { ScanEvent, SqlmapReportData, MethodType, ReportModel } from '../shared/types';
 import { ErrorCode } from '../shared/types';
 import { wrapSqlmapReport } from './useScan';
@@ -129,7 +129,9 @@ export function useEvents(scanId: string | null) {
       if (lastSeq > 0) qs.push(`lastEventId=${lastSeq}`);
       // [P2-FIX] 实例引用保护：onerror/onopen 回调按 current 判定归属，
       // 浏览器对已关闭实例补发的迟到 error 不会误关/误处理当前连接（防双连接/重复计数）。
-      const current = new EventSource(`${API_BASE}/${ns}/${scanId}/events${qs.length ? `?${qs.join('&')}` : ''}`);
+      // [桌面版断链修复] 必须走 getApiBase()：桌面 sidecar 端口不固定（4567 被占则随机），
+      // 运行期值只存在于 getApiBase() 里，拼编译期常量会让进度流永远连不上。
+      const current = new EventSource(`${getApiBase()}/${ns}/${scanId}/events${qs.length ? `?${qs.join('&')}` : ''}`);
       es = current;
 
       current.onopen = () => {

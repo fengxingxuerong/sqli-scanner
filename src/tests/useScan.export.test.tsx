@@ -18,6 +18,7 @@ import { tauriBridge } from '../shared/tauriBridge';
 
 vi.mock('../shared/apiClient', () => ({
   API_BASE: 'http://test/api',
+  getApiBase: () => 'http://test/api',
   apiClient: { get: vi.fn(), post: vi.fn() },
   ApiError: class ApiError extends Error {},
   getApiToken: vi.fn(() => 'tok123'),

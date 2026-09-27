@@ -31,6 +31,7 @@ vi.mock('../hooks/useEvents', () => ({ useEvents: vi.fn() }));
 
 vi.mock('../shared/apiClient', () => ({
   API_BASE: 'http://test/api',
+  getApiBase: () => 'http://test/api',
   ApiError: class extends Error {},
   apiClient: { get: vi.fn(), post: vi.fn(), tampers: vi.fn().mockResolvedValue([]) },
   exploitClient: { capabilities: vi.fn() },

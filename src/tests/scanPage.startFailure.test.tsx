@@ -39,6 +39,7 @@ vi.mock('../shared/apiClient', async () => {
   const actual = await vi.importActual<typeof import('../shared/apiClient')>('../shared/apiClient');
   return {
     API_BASE: 'http://test/api',
+    getApiBase: () => 'http://test/api',
     ApiError: actual.ApiError,
     apiClient: { get: vi.fn(), post: vi.fn(), tampers: vi.fn().mockResolvedValue([]) },
     exploitClient: { capabilities: vi.fn() },

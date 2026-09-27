@@ -24,6 +24,10 @@ struct EngineInfo(std::sync::Mutex<(u16, String)>);
 /// 选择引擎监听端口：优先 4567（便于人工排查），被占用则退回系统分配的空闲端口。
 /// 说明：bind→drop 之间存在极短的 TOCTOU 窗口，命中时 sidecar 会启动失败，
 /// 由前端「重启引擎」按钮重试（比让整个应用 panic 可控）。
+/// ⚠ 端口可变动的三处出口必须同步：本函数、`tauri.conf.json` 的 CSP
+/// `connect-src`（已放宽为 `http://127.0.0.1:*`，一次性 token 仍是使用门槛）、
+/// 以及前端拼 URL 的地方必须走 `getApiBase()` 而非编译期 `API_BASE`
+/// —— 断链判据见 `src/tests/desktopRuntimeBase.test.tsx`。
 fn pick_engine_port() -> u16 {
     if TcpListener::bind("127.0.0.1:4567").is_ok() {
         return 4567;

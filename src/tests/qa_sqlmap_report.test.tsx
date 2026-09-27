@@ -17,6 +17,7 @@ import type { ScanConfig, SqlmapReportData } from '../shared/types';
 // mock apiClient 模块：useEvents/useScan/ReportPage 均通过它访问后端
 vi.mock('../shared/apiClient', () => ({
   API_BASE: 'http://test/api',
+  getApiBase: () => 'http://test/api',
   apiClient: { get: vi.fn(), post: vi.fn() },
 }));
 

@@ -13,6 +13,7 @@ import type { ReportModel, HistoryRecord } from '../shared/types';
 // mock apiClient：useScan.startScan 经它向后端发起续跑
 vi.mock('../shared/apiClient', () => ({
   API_BASE: 'http://test/api',
+  getApiBase: () => 'http://test/api',
   apiClient: { get: vi.fn(), post: vi.fn() },
 }));
 

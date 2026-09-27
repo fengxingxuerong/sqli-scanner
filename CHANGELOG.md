@@ -4,6 +4,36 @@
 
 ## [Unreleased]
 
+### 2026-09-27 批次 · 桌面版随机端口断链：SSE 与报告导出还在拼编译期常量
+
+A3 那次加固（sidecar 端口「4567 被占则随机」+ 一次性 token）只搬了三样里的两样：
+壳选了端口、引擎生成了 token、前端有 `setApiBase()` —— 但**只有 axios 的两个拦截器**
+（`apiClient.ts:62/97`）读 `getApiBase()`。自己拼 URL 的两个出口拼的仍是编译期常量
+`API_BASE`（`.env.tauri` 把它钉成 `http://127.0.0.1:4567`）：
+
+| 出口 | 位置 | 症状 |
+|---|---|---|
+| SSE 订阅 | `src/hooks/useEvents.ts:132` | 扫描能起、进度永远不动 |
+| 报告另存盘 | `src/hooks/useScan.ts:263` | 导出永远 404 |
+
+再加一处同族：`src-tauri/tauri.conf.json` 的 CSP `connect-src` 只放行 `http://127.0.0.1:4567`，
+随机端口下连 axios 那条路径也会被 WebView 拦掉 ⇒ 放宽为 `http://127.0.0.1:*`
+（使用门槛仍是一次性 token，不是端口）。
+
+- 两个出口改走 `getApiBase()`；`API_BASE` 的注释与 `lib.rs` 的 `pick_engine_port` 文档
+  都写下「端口可变动的三处出口必须同步」，防下次只搬一半。
+- 新判据 `src/tests/desktopRuntimeBase.test.tsx`（3 条：回退路径 + SSE + 导出）。
+  **它刻意不 mock `../shared/apiClient`** —— 既有 `useEvents.test.tsx` / `useScan.export.test.tsx`
+  正是把该模块整个换成 `{API_BASE: 'http://test/api'}`，才让这个缺陷在 411 条前端用例全绿下活到今天；
+  把持有运行期值的模块 mock 掉，就看不见"没人读它"。用例另含一条"未注入运行期 base 时仍走 `/api`"，
+  防止修成恒取运行期值。
+- 顺带：10 个 mock 该模块的测试文件补 `getApiBase`（改法带命中数断言，逐文件确认恰好 1 处锚点）。
+- 验证：摘掉两处修复前新用例 **2 红 1 绿**，修复后 3 绿；前端全量 **53 文件 / 414 条全绿**
+  （基线 411 + 新增 3），`tsc --noEmit` 0 错、eslint 0 问题、`cargo fmt --check` 0 问题。
+- ⚠ **没真跑过桌面包**：CSP 端口通配符的浏览器行为与 sidecar 实连属配置级推理，
+  需 Windows 上 `npm run build:tauri` 出包后手点一遍（`cargo clippy` 本机易 ICE，未跑）。
+
+
 ### 2026-09-27 批次 · 时间通道的三处「判据与注释不同源」
 
 六路并行全栈审计里，引擎层是唯一一处**判据本身错**的层。挑出的三条都在时间/payload

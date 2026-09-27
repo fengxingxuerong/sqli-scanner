@@ -12,7 +12,7 @@ import { useCallback } from 'react';
 import { apiClient } from '../shared/apiClient';
 import { ApiError } from '../shared/apiClient';
 import { useScanStore } from '../store/scanStore';
-import { API_BASE, getApiToken } from '../shared/apiClient';
+import { getApiBase, getApiToken } from '../shared/apiClient';
 import { tauriBridge } from '../shared/tauriBridge';
 import { DEFAULT_CONFIG, DEFAULT_SQLMAP_CONFIG } from '../shared/constants';
 import { buildStartConfig } from '../shared/scanConfig';
@@ -260,7 +260,9 @@ export function useScan() {
     scanId: string,
     format: 'json' | 'html' | 'csv' | 'markdown' | 'db-json'
   ): Promise<void> => {
-    const url = `${API_BASE}/scan/${scanId}/report/export?format=${format}`;
+    // [桌面版断链修复] 同 SSE：这里是绕开 apiClient 的那一处 fetch，base 也必须取运行期值，
+    // 否则随机端口下导出永远 404（而界面其它部分看起来一切正常）。
+    const url = `${getApiBase()}/scan/${scanId}/report/export?format=${format}`;
     // 这是 src/ 里**唯一一处绕开 apiClient 的 fetch**（因为它要拿原始响应体做另存盘，
     // 而 apiClient 的拦截器按 JSON 解包）。代价是它历史上从不带鉴权头：一旦服务端设了
     // SCAN_API_TOKEN，所有导出直接 401（实测：裸 fetch 401 / 带 x-api-token 200）。
