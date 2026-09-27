@@ -209,8 +209,13 @@ export const DB_VERSION = {
   // 本机未实测到这条，但它与「MariaDB 必须排在 MySQL 前」是同一个机理，成本为零。
   // 换 exclusive 函数才是把判据从「sig 能不能区分」换成「**这个表达式只在它自己的库上能跑出结果**」。
   H2: { func: 'H2VERSION()', sig: /^\d+\.\d+/ },
-  // MySQL 负向约束：版本串若含 MariaDB 则判为 MariaDB（不让 MySQL 抢匹配）
-  MySQL: { func: 'version()', sig: /^\d+\.\d+\.\d+(?!.*MariaDB).*$/i },
+  // MySQL 负向约束：版本串若含 MariaDB/TiDB 则判为对应兼容库（不让 MySQL 抢匹配）。
+  // [P1-D 2026-09-27] 锚定收尾：原 sig 未锚定 `$`，ClickHouse 的 version() 探针值
+  //（4 段纯数字 "23.8.1.1"）会被这里吃下——而 CH 自己的条目排在后面，运行时表现就是
+  // 「CH 目标被判成 MySQL」（真实可达：version() 在 CH 上可执行）。锚定后 3 段以外的
+  // 形状（第 4 段 / 非后缀尾巴）落不进 MySQL，遍历继续走到 CH 自己的条目。
+  // 后缀允许任意 - 开头尾巴（-log / -0ubuntu0.18.04.1 / Percona 的 -19）。
+  MySQL: { func: 'version()', sig: /^\d+\.\d+\.\d+(?!(?:.*MariaDB|.*TiDB))(?:-\S.*)?\s*$/i },
   PostgreSQL: { func: 'version()', sig: /PostgreSQL\s+\d+/i },
   'SQL Server': { func: '@@version', sig: /(Microsoft SQL Server|SQL Server|Microsoft SQL)/i },
   SQLite: { func: 'sqlite_version()', sig: /^\d+\.\d+\.\d+$/ },
@@ -228,7 +233,10 @@ export const DB_VERSION = {
   // DB2 定库改由报错签名（DB2 SQL Error / SQLSTATE）与专属伪表承担。
   DB2: { func: "'DB2'", sig: /IBM\s+DB2|DB2\s+(?:SQL|Database|for\s)|DB2\/[A-Za-z0-9]/i },
   // Sybase（ASE）：@@version 含 "Adaptive Server Enterprise" 标识
-  Sybase: { func: '@@version', sig: /(Adaptive Server|Sybase|ASE)/i },
+  // [P1-D 2026-09-27] 裸 /ASE/i 是子串病（L46 的 Server:BaseHTTP 同款）：能命中
+  // "Datab**ase**"——Oracle/DM8/Access 的典型 banner 全中招（sig 层自检实测）。
+  // 加词边界后只认独立的 ASE 缩写；"Adaptive Server|Sybase" 两个主特征不受影响。
+  Sybase: { func: '@@version', sig: /(Adaptive Server|Sybase|\bASE\b)/i },
   // Firebird：rdb$get_context 返回引擎版本（数字串）
   Firebird: { func: "rdb$get_context('SYSTEM','ENGINE_VERSION')", sig: /^\d+\.\d+/ },
   // [P1-FIX 2026-09-16] Informix：同上 —— 常量串无区分度，收紧为需版本/产品特征文本

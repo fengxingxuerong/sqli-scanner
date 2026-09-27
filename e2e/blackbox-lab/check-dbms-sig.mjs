@@ -1,22 +1,34 @@
 // ============================================================================
-// blackbox-lab / check-dbms-sig.mjs —— 定库签名「区分度」自检
+// blackbox-lab / check-dbms-sig.mjs —— 定库签名「区分度」自检（P1-D 闭环版）
 //
-// 由来（P1 + A2 两个实例）：
+// 由来（P1 + A2 + P1-D 三个实例）：
 //   · DB2 用常量串 'DB2' 当指纹 → 任何支持 UNION 的库都能执行 SELECT 'DB2' 并原样返回
-//     → 前 9 个库没识别出来时必然命中 DB2（真 MySQL 被判 DB2）。
+//     → 前 9 个库没识别出来时必然命中 DB2（真 MySQL 被判 DB2）。【P1-C，已修】
 //   · ClickHouse 与 SQLite 的 sig 都是「纯版本号」→ 互相误命中（真 MySQL 被判 ClickHouse）。
+//   · [P1-D 2026-09-27 闭环] 旧版判据是「sig 层互斥」（某库的典型返回值只能命中自己的 sig），
+//     它把**运行时不可达**的冲突也算了进去（H2VERSION()/sqlite_version() 这类专属探针，
+//     别家引擎上根本执行不了 → 探针值不产生 → sig 写得再松也不会误判），导致 20 处
+//     「永远修不完」的假缺陷。本版判据改为**运行时可达性模型**，与危害同源：
 //
-// 判据（一条）：**某个库的典型返回值，只能命中它自己的 sig**。
-// 命中 ≥2 个 → 冲突；命中 0 个 → 该库定不回来（漏检）。
+//     【判据（一条）】对每个库 X 的每个典型返回值 v（由 X 自己的探针产生），
+//     按 DBFingerprinter 的真实遍历顺序（MariaDB 置首 + DB_VERSION 键序）模拟：
+//     只对「探针在 X 上可执行」的条目做 sig 匹配，首个命中即定库 —— 判定必须恰好是 X。
 //
-// [口径边界 2026-09-19] 本脚本只看 **sig 层**，不看运行时遍历：真实定库是「按 DB_VERSION 顺序
-// 逐条发 exclusive/common 探针，谁先命中自己 sig 谁赢」。因此这里的冲突数**不等于**运行时误判数
-// —— 例如 H2 改用 H2VERSION() 后，裸版本号 sig 与 MySQL/Firebird/MonetDB 的重叠在运行时已不可达
-// （那些库的探针在 H2 上报错、无标记回显）。运行时可达性要靠真引擎测（见 multi-engine-lab
-// 的 SQLI_UNION_DEBUG A/B），别拿本脚本的 20 处冲突当"线上会错 20 次"。
+//     模型依据的真实现（DBFingerprinter.js 版本回显通道）：逐库发**各自的**探针、
+//     值喂**各自的** sig、首个命中立即返回；探针在目标上报错 = 无标记回显 = 跳过。
+//     因此 sig 冲突只有在「双方探针在同一目标上都可执行」时才是真缺陷。
 //
-// 另外单独检查「func 是否跨库可执行」：常量串与通用函数在任何库上都能返回内容，
-// 区分度**只能**由 sig 承担 —— 这类条目是 sig 缺陷的高危区。
+//   · 升级时模型抓到并修复的真实可达缺陷（payloads/index.js）：
+//       ① ClickHouse 目标被判成 MySQL —— version() 在 CH 上可执行，MySQL 条目在前且
+//          旧 sig 未锚定 `$`，吃下了 CH 的 4 段版本号。修：MySQL sig 锚定收尾。
+//       ② TiDB 条目死代码 —— TiDB 的版本串先被 MySQL sig 吃下（无 TiDB 排除），
+//          遍历永远轮不到 TiDB 自己。修：MySQL sig 负向排除 TiDB。
+//       ③ Sybase 裸 /ASE/i 命中 "Datab**ase**"（L46 同款子串病，Oracle/DM8/Access
+//          的 banner 全中招）。修：\bASE\b 词边界。
+//
+//   [口径边界] 本脚本只模型 **版本回显通道**（DB_VERSION sig 层）；报错签名与时间向量
+//   定库是另外两条通道，各有自己的签名表与顺序，运行时可达性要靠真引擎测
+//   （multi-engine-lab / real-*-lab 的 SQLI_UNION_DEBUG A/B）。
 //
 // 用法：node e2e/blackbox-lab/check-dbms-sig.mjs
 // ============================================================================
@@ -52,62 +64,104 @@ const SAMPLES = {
   // 实测（multi-engine-lab JDBC）回显 `2.2.224`；旧样本是 version() 的带日期形式，已不再是被探测的值。
   H2: [['2.2.224', '实测 H2VERSION() 回显'], ['1.4.200', '文档/推断']],
   Access: [['Microsoft Access 2016'], ['Microsoft Office Access 2007'], ['Microsoft Access Database Engine']],
-  HSQLDB: [['2.7.2 (2023-06-28)', '项目 e2e 真 JDBC'], ['HSQLDB 2.5.0']],
-  Derby: [['10.16.1.1 - (1873585)', '项目 e2e 真 JDBC'], ['Apache Derby 10.15.2.0']],
+  // [P1-D 2026-09-27] 样本必须是**探针真实回显值**（判据与危害同源，EXCL-FIX 2026-09-20 同理）：
+  // HSQLDB/Derby 的拼接探针回显的是 "HSQLDB 103" / "DERBY 24"（multi-engine-lab 真 JDBC 实测），
+  // 不是 version() 形态的 banner。
+  HSQLDB: [['HSQLDB 103', '实测：探针回显'], ['HSQLDB 2.5.0', '文档（sig 同样覆盖）']],
+  Derby: [['DERBY 24', '实测：探针回显'], ['Apache Derby 10.15.2.0', '文档（sig 同样覆盖）']],
   MonetDB: [['11.47.11', '文档']],
 };
 
-const sigs = Object.entries(DB_VERSION).map(([dbms, v]) => [dbms, v.sig]);
+// 版本回显通道「按设计不自证」的条目（P1-C 教训的落地形态）：
+// 探针是常量串 → 任何库都能原样回显 → sig 必须**拒绝**这个常量（否则就是 DB2 误判事故的重演）。
+// 因此这三家的版本通道**不可能**自己定回自己，属有意设计而非缺陷——定库由报错签名
+//（DB2 SQL Error / Informix / Access 的 ODBC/Jet 特征）与专属伪表承担。模型跳过并显式说明。
+const VERSION_CHANNEL_EXEMPT = new Set(['DB2', 'Informix', 'Access']);
 
-console.log('=== 定库签名区分度自检 ===');
-console.log('判据：某库的典型返回值，只能命中它自己的 sig\n');
+// ── 运行时可达性模型 ─────────────────────────────────────────────────────────
+// 探针「在哪些目标引擎上可执行」。依据：
+//   · version()：MySQL 系标准函数，ClickHouse 亦原生支持（P1-D 抓到的误判通道即此）；
+//   · @@version：MySQL 系、SQL Server、Sybase（ASE）；
+//   · v$version banner：Oracle 与其兼容分支 DM8（DM8 条目因此存在）；
+//   · 其余条目 = 专属函数/专属 FROM（H2VERSION / sqlite_version / rdb$get_context /
+//     sys.version 视图 / HSQLDB·Derby 的系统表 FROM / 常量串已被 sig 拒收）——
+//     别家执行即报错，探针值不产生，sig 写得再松也不可达。
+const SHARED_PROBES = {
+  'version()': ['MariaDB', 'MySQL', 'PostgreSQL', 'TiDB', 'ClickHouse'],
+  '@@version': ['MariaDB', 'MySQL', 'PostgreSQL', 'TiDB', 'SQL Server', 'Sybase'],
+  '(SELECT banner FROM v$version WHERE rownum=1)': ['Oracle', 'DM8'],
+};
+const reachableOn = (target, dbms, func) => (SHARED_PROBES[String(func)] ?? [dbms]).includes(target);
 
-const conflicts = [];
-const misses = [];
+// 与 DBFingerprinter.js 版本回显通道完全一致的遍历顺序（MariaDB 置首）
+const order = ['MariaDB', ...Object.keys(DB_VERSION).filter((k) => k !== 'MariaDB')];
 
-for (const [dbms, samples] of Object.entries(SAMPLES)) {
+console.log('=== 定库签名区分度自检（P1-D 闭环版：运行时可达性模型） ===');
+console.log('判据：X 库的典型返回值，按真实遍历序模拟「首个 sig 命中即定库」，必须恰好定回 X\n');
+
+const violations = [];
+const sigLayerConflicts = [];
+
+for (const [target, samples] of Object.entries(SAMPLES)) {
+  if (VERSION_CHANNEL_EXEMPT.has(target)) {
+    console.log(`  [豁免] ${target}：版本探针是常量串（按设计 sig 拒收裸常量），定库由报错签名承担 —— 不进模型`);
+    continue;
+  }
   for (const [sample, src] of samples) {
-    const hits = sigs.filter(([, sig]) => sig.test(sample)).map(([d]) => d);
-    const self = hits.includes(dbms);
-    const others = hits.filter((d) => d !== dbms);
-    if (others.length) {
-      conflicts.push({ dbms, sample, hits, others, src: src || '' });
-      console.log('  [冲突] %s %j', dbms, sample);
-      console.log('           命中 %d 个: %s   ← 会误判为 %s', hits.length, hits.join(', '), others.join(', '));
-    } else if (!self) {
-      misses.push({ dbms, sample });
-      console.log('  [漏] %s %j → 自己的 sig 都没命中（该库定不回来）', dbms, sample);
+    let verdict = null;
+    const tried = [];
+    for (const dbms of order) {
+      const info = DB_VERSION[dbms];
+      if (!reachableOn(target, dbms, info.func)) continue; // 探针在 target 上跑不动 → 无回显 → 跳过
+      tried.push(dbms);
+      if (info.sig.test(sample)) { verdict = dbms; break; }
+    }
+    if (verdict !== target) {
+      violations.push({ target, sample, verdict, tried, src: src || '' });
+      console.log(`  [误判] 目标=${target.padEnd(11)} 样本=${JSON.stringify(sample)}`);
+      console.log(`          判成了：${verdict ?? '定库失败(null)'}（尝试链：${tried.join(' → ')}）`);
     }
   }
 }
 
-// 常量串 / 通用函数的跨库可执行性检查
-console.log('\n=== func 跨库可执行性（区分度只能由 sig 承担）===');
+// ── sig 层互撞参考表（仅信息展示，不影响退出码）──────────────────────────────
+// 保留旧判据的输出供参考：下面这些「sig 互撞」里，凡涉及专属探针的都在运行时不可达
+//（升级前它制造了 20 处假缺陷计数）；若某一行同时出现在上方 [误判] 里才是真缺陷。
+const sigs = Object.entries(DB_VERSION).map(([dbms, v]) => [dbms, v.sig]);
+for (const [dbms, samples] of Object.entries(SAMPLES)) {
+  for (const [sample] of samples) {
+    const hits = sigs.filter(([, sig]) => sig.test(sample)).map(([d]) => d);
+    const others = hits.filter((d) => d !== dbms);
+    if (others.length) sigLayerConflicts.push({ dbms, sample, others });
+  }
+}
+if (sigLayerConflicts.length) {
+  console.log('\n=== sig 层互撞（参考，运行时大多不可达，不进退出码）===');
+  for (const c of sigLayerConflicts) {
+    console.log('  [sig互撞] %s %j ← 也被 %s 命中', c.dbms, c.sample, c.others.join(', '));
+  }
+}
+
+// 常量串 / 通用函数的跨库可执行性检查（高危区说明，不影响退出码）
+console.log('\n=== func 跨库可执行性（区分度只能由 sig 承担的条目）===');
 const UNIVERSAL = /^\s*(?:'(?:[^']*)'|"(?:[^"]*)"\s*)$/; // 纯字面量
 const COMMON_FN = /^\s*(?:version\(\)|@@version|sqlite_version\(\))\s*$/i;
 for (const [dbms, v] of Object.entries(DB_VERSION)) {
   const f = String(v.func || '');
   if (UNIVERSAL.test(f)) {
-    console.log('  [无区分度] %s func=%s', dbms, f);
-    console.log('             常量字面量：任何支持 UNION 的库都能原样返回它 → sig 必须能拒绝「裸常量」');
+    console.log('  [无区分度] %s func=%s  → 常量字面量任何库都能原样返回，sig 必须能拒绝「裸常量」', dbms, f);
   } else if (COMMON_FN.test(f)) {
-    console.log('  [通用函数] %s func=%s  → 多库都能执行，返回各自版本，靠 sig 区分', dbms, f);
+    console.log('  [通用函数] %s func=%s  → 可执行面见 SHARED_PROBES，靠 sig/顺序区分', dbms, f);
   }
 }
 
 console.log('\n=== 汇总 ===');
-console.log('  sig 冲突（同一返回值命中多个库）: %d 处', conflicts.length);
-console.log('  sig 漏检（自己的值都命不中）: %d 处', misses.length);
-const badSig = Object.entries(DB_VERSION).filter(([, v]) => !(v.sig instanceof RegExp)).map(([d]) => d);
-if (badSig.length) console.log('  sig 类型异常: %s', badSig.join(','));
-
-if (conflicts.length) {
-  console.log('\n  冲突明细（按库聚合）:');
-  const byDbms = new Map();
-  for (const c of conflicts) {
-    if (!byDbms.has(c.dbms)) byDbms.set(c.dbms, new Set());
-    for (const o of c.others) byDbms.get(c.dbms).add(o);
-  }
-  for (const [d, others] of byDbms) console.log('    %s ⟷ %s', d, [...others].join(', '));
+console.log('  运行时可达误判（模型判定）: %d 处', violations.length);
+console.log('  sig 层互撞（参考）        : %d 处', sigLayerConflicts.length);
+if (violations.length) {
+  const byTarget = new Map();
+  for (const v of violations) byTarget.set(v.target, (byTarget.get(v.target) ?? 0) + 1);
+  console.log('\n  误判明细（按目标聚合）:');
+  for (const [t, n] of byTarget) console.log('    %s: %d 个样本被定成别家', t, n);
 }
-process.exit(conflicts.length || misses.length ? 1 : 0);
+process.exit(violations.length ? 1 : 0);
