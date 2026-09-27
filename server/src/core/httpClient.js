@@ -299,6 +299,14 @@ async function applyJitter(wafEvasion) {
   }
 }
 
+// [⑮] 扫描停止触发的请求取消错误（原 request() 内三处内联构造统一到此）
+function newAbortError() {
+  const abortErr = /** @type {NodeJS.ErrnoException} */ (new Error('请求已取消（扫描停止）'));
+  abortErr.name = 'AbortError';
+  abortErr.code = 'ERR_CANCELED';
+  return abortErr;
+}
+
 export class HttpClient {
   /**
    * @param {object} [opts]
@@ -798,189 +806,39 @@ export class HttpClient {
     // [三期拆分 2026-09-22] 该决策整体抽为纯函数 resolveEgressPolicy（含 socks5 本地解析提示）。
     const { insecureTls, proxyUrl, egress } = resolveEgressPolicy(opts);
     if (insecureTls) warnInsecureTls();
-    // P0-1：出口统一 SSRF 校验（直连模式 req.sql 无 URL，跳过）
-    // [P1-FIX ②] 已走代理且 ssrfViaProxy!=='off' → 解析/严格层判定下放至代理（硬底线段仍无条件拒）
-    if (opts.url) {
-      await assertSafeTargetForEgress(opts.url, egress).catch((e) => {
-        if (e instanceof AppError) throw e;
-        throw new AppError(ErrorCode.INVALID_PARAM, e.message || '目标 URL 校验失败');
-      });
-      // [P0-SEC] 授权范围（scope）逐请求校验：目标 URL 在 start 时校过，但爬虫/二阶/safeUrl/
-      // 手工构造的注入请求都可能指向另一个主机，统一在出口拦一次。
-      await assertScanScope(opts.scanId, opts.url);
-    }
+    // P0-1：出口统一 SSRF 校验 + [P0-SEC] scope 逐请求校验（阶段方法 _assertEgressAllowed）
+    await this._assertEgressAllowed(opts, egress);
 
-    // [P0-3] DNS 钉死：从缓存取已校验 IP，传给请求层避免二次解析（防 DNS rebinding）
-    // 仅在 assertSafeHttpTarget 已成功校验过该 URL 时生效
-    // [P0-FIX 2026-09-09] 逐次尝试重新取钉死 IP（原实现整条请求只算一次，重试必然又打同一个死 IP）。
-    const pinnedLookup = () => buildPinnedLookup(opts.url);
     // [P2-5] --ignore-redirects：跟随上限置 0 → 3xx 直接返回不跳转
     const redirectsLeft = opts.ignoreRedirects === true ? 0 : 5;
     // [sqlmap 对标] --reqrate：reqRate > 0 时覆盖 ratePerSec 作为 TokenBucket 速率
     const effectiveRate = (opts.reqRate && opts.reqRate > 0) ? opts.reqRate : opts.ratePerSec;
-    // [P0-FIX 2026-09-14] 限速语义对齐 TokenBucket：effectiveRate<=0 = 不限速（直通，不落桶）。
-    // 原实现把 <=0 交给 this.bucket（defaults 单例桶），显式 0 会被暗中按默认值限速——
-    // defaults 保守化后该错位直接打崩以 0 表达「不限速」的调用方（pentest-lab 实测 0/10）。
-    const bucket =
-      (opts.scanId && this.buckets.get(opts.scanId)) ||
-      (Number.isFinite(effectiveRate) && effectiveRate > 0
-        ? this.bucketForRate(effectiveRate)
-        : Number.isFinite(effectiveRate) && effectiveRate <= 0
-          ? null // 不限速：跳过令牌桶
-          : this.bucket); // 未配置 → 默认单例桶（defaults.ratePerSec）
+    const bucket = this._resolveRateBucket(opts, effectiveRate);
     // [P1-FIX ①②] 代理来源已在入口统一解析（含环境变量），insecureTls 一并决定 Agent 组合
     const proxyConf = buildProxyAgent(/** @type {string} */ (proxyUrl), { insecureTls });
     const disableKA = opts.disableKeepAlive === true || this.disableKeepAlive === true;
-    // 头合并（含 P2-8 头名黑名单过滤）
-    let headers = mergeAuthHeaders(opts.headers || {}, opts.auth ?? defaults.auth ?? null);
-    if (opts.wafEvasion && opts.wafEvasion.randomUA) {
-      // randomUA==='mobile'（CLI --mobile）→ 仅从移动端池取；其余真值 → 全池
-      headers['User-Agent'] = pickRandomUA(opts.wafEvasion.randomUA);
-    }
-    // [P1-FIX 2026-09-05] Cookie Jar：请求前合并扫描会话 cookie（用户显式 Cookie 优先，同名不覆盖；
-    // opts.cookieJar===false 关闭，对标无 jar 行为零回归）
-    if (opts.scanId && opts.cookieJar !== false && opts.url) {
-      try {
-        this.jarFor(opts.scanId).mergeInto(headers, opts.url);
-      } catch { /* jar 合并失败不阻断请求 */ }
-    }
-    // [P2-4] Digest 缓存 challenge 预附加：已持有 state 时发送前即带 Authorization（nc 单调递增），
-    // 避免「裸请求先吃一次 401 才用上缓存」的多余往返；无 state 时保持裸请求，
-    // 由下方 401 挑战-重放路径建立 state。用户显式 Authorization 优先，不干预。
-    let digestPreAttached = false;
-    {
-      const da0 = opts.auth ?? defaults.auth ?? null;
-      const pre = this._digestAuthHeader(opts.method || 'GET', opts.url, da0);
-      if (pre && pre.header && !headers['Authorization'] && !headers['authorization']) {
-        headers['Authorization'] = pre.header;
-        digestPreAttached = true;
-      }
-    }
-    // [P1-2026-09-14] NTLM 预附加：同主机已握过手（持有 Type2 challenge）时直接带 Type3，
-    // 省掉 Type1/Type2 两跳。无 state 时保持裸请求，由下方 401 握手重放建立 state。
-    {
-      const na0 = opts.auth ?? defaults.auth ?? null;
-      const ntlmPre = this._ntlm.preAuthHeader(opts.url, na0);
-      if (ntlmPre && !headers['Authorization'] && !headers['authorization']) {
-        headers['Authorization'] = ntlmPre;
-      }
-    }
+    // 头合并（含 P2-8 头名黑名单过滤 / randomUA / Cookie Jar / Digest·NTLM 预附加）
+    const { headers, digestPreAttached } = this._prepareHeaders(opts);
+    // 单次发送（HTTP/2 与 axios 两条通道 + 手动重定向跟随），重试与认证重放共用本闭包。
+    // [P0-3] DNS 钉死：从缓存取已校验 IP，传给请求层避免二次解析（防 DNS rebinding），
+    // 仅在 assertSafeHttpTarget 已成功校验过该 URL 时生效。
+    // [P0-FIX 2026-09-09] 钉死 IP 在每次派发瞬间重新获取（原实现整条请求只算一次，
+    // 重试必然又打同一个死 IP）——取 IP 的时机与原实现逐点一致。
+    const send = () =>
+      this._sendFollowRedirects(opts, headers, proxyConf, timeoutMs, disableKA, redirectsLeft, egress);
     let lastErr;
     for (let attempt = 0; attempt <= retry; attempt++) {
-      // [⑮] abort 检查：signal 已取消时不再发新请求（重试循环防漏）
-      if (opts.signal?.aborted) {
-        const abortErr = /** @type {NodeJS.ErrnoException} */ (new Error('请求已取消（扫描停止）'));
-        abortErr.name = 'AbortError';
-        abortErr.code = 'ERR_CANCELED';
-        throw abortErr;
-      }
-      // [sqlmap 对标] --max-requests：请求计数检查，达上限后拒绝新请求。
-      // 仅对归属明确（带 scanId）的请求计数：无 scanId 的请求无法在扫描结束时回收计数，
-      // 用统一 key 会导致 ① Map 无界增长 ② 达到上限后全局永久拒绝新请求（不可恢复）。
-      if (opts.maxReq && opts.maxReq > 0 && opts.scanId) {
-        const count = this._requestCounts.get(opts.scanId) || 0;
-        if (count >= opts.maxReq) {
-          throw new AppError(ErrorCode.HTTP_ERROR, `请求上限已达（maxReq=${opts.maxReq}），拒绝新请求`);
-        }
-        this._requestCounts.set(opts.scanId, count + 1);
-        this._evictRequestCounts(); // 兜底：防止异常退出残留的 scanId 条目累积
-      }
-      // [sqlmap 对标] --delay：每次请求前固定延时（秒），降低请求速率。
-      // 上限 60s 防误配（如把毫秒当秒传入导致请求挂起）；延时期间响应 abort signal，
-      // 避免「点了停止却要等完一个 delay 周期才生效」。
-      if (opts.delay > 0) {
-        await this._sleep(Math.min(Number(opts.delay) || 0, MAX_DELAY_SEC) * 1000, opts.signal);
-        // [P2-FIX] delay 期间可能被 abort（_sleep 响应 signal 提前返回），
-        // 复查 signal：已取消则不再发请求（原实现 sleep 后直接继续，浪费一次请求）
-        if (opts.signal?.aborted) {
-          const abortErr = /** @type {NodeJS.ErrnoException} */ (new Error('请求已取消（扫描停止）'));
-          abortErr.name = 'AbortError';
-          abortErr.code = 'ERR_CANCELED';
-          throw abortErr;
-        }
-      }
+      // 每次尝试前的闸门：abort 检查 / --max-requests 计数 / --delay 延时（见 _beforeAttempt）
+      await this._beforeAttempt(opts);
       try {
         await bucket?.acquire(); // [P0-FIX 2026-09-14] bucket 可为 null（不限速直通）
         await applyJitter(opts.wafEvasion);
         // networkTiming（MERGED: perf 版）：从「令牌获取完成之后」计网络耗时，供时间盲注判定
         // 剔除限速排队等待（限速低时并发采样的排队时间会被旧 __elapsed 计入，导致基线虚高）。
         const t0Net = opts.networkTiming === true ? performance.now() : null;
-        // [HTTP/2] 开启时走 undici（ALPN 协商 h2/h1.1）；否则沿用 axios HTTP/1.1（默认路径零变化）。
-        // HTTP/2 路径同样手动跟随重定向（逐跳 SSRF 校验 + 跨域剥离凭据头，见 _followRedirectsH2）。
-        let res;
-        if (opts.http2 === true) {
-          res = await this._followRedirectsH2(opts, headers, timeoutMs, redirectsLeft, egress);
-        } else {
-          const first = await this._rawRequest({ lookup: pinnedLookup() }, opts, headers, proxyConf, timeoutMs, disableKA);
-          res = await this._followRedirects(first, opts, headers, proxyConf, timeoutMs, disableKA, redirectsLeft, egress);
-        }
-        // [P2-4] Digest 挑战-重放：请求未显式带 Authorization 且收到 401+Digest challenge →
-        // 本轮构造响应头并重发一次（对标 curl --digest 的 challenge→response 往返）。
-        // ① 预附加的缓存 Digest 头被 401 拒绝 → 清 state，下次请求重新挑战（nonce 过期自愈）；
-        // ② 用户显式 Authorization（Basic/Bearer/自定义）→ 不干预；
-        // ③ digest 配置缺失 / 非 401 / 无 Digest challenge → 不干预；
-        // ④ 重发仍 401 → 返回该响应（凭据无效，语义与普通 401 一致，不死循环）。
-        if (res && res.status === 401 && digestPreAttached) {
-          // [P2-4] 服务端拒绝缓存的 Digest 凭据（nonce 过期/凭据变更）→ 清 state，下次请求重新挑战
-          try { this._digestStates.delete(new URL(opts.url).protocol + '//' + new URL(opts.url).host); } catch { /* ignore */ }
-        } else if (res && res.status === 401 && !headers['Authorization'] && !headers['authorization']) {
-          const da = opts.auth ?? defaults.auth ?? null;
-          if (da && typeof da === 'object') {
-            const need = this._digestAuthHeader(opts.method || 'GET', opts.url, da);
-            if (need && need.needChallenge) {
-              // 无缓存 challenge：首次裸请求返回 401 → 建立 state 并重放
-              const rp = this._digestReplay(opts.method || 'GET', opts.url, da, res);
-              if (rp.replay) {
-                headers['Authorization'] = /** @type {string} */ (rp.header);
-                if (opts.http2 === true) {
-                  res = await this._followRedirectsH2(opts, headers, timeoutMs, redirectsLeft, egress);
-                } else {
-                  const first2 = await this._rawRequest({ lookup: pinnedLookup() }, opts, headers, proxyConf, timeoutMs, disableKA);
-                  res = await this._followRedirects(first2, opts, headers, proxyConf, timeoutMs, disableKA, redirectsLeft, egress);
-                }
-                // 重放后仍 401 → 凭据无效/nonce 过期：清 state 防死循环（下次请求重新挑战）
-                if (res && res.status === 401 && opts.url) {
-                  try { this._digestStates.delete(new URL(opts.url).protocol + '//' + new URL(opts.url).host); } catch { /* ignore */ }
-                }
-              }
-            } else if (need && need.header) {
-              // 有缓存 challenge：直接带（mergeAuthHeaders 不处理 digest）
-              headers['Authorization'] = need.header;
-              if (opts.http2 === true) {
-                res = await this._followRedirectsH2(opts, headers, timeoutMs, redirectsLeft, egress);
-              } else {
-                const first2 = await this._rawRequest({ lookup: pinnedLookup() }, opts, headers, proxyConf, timeoutMs, disableKA);
-                res = await this._followRedirects(first2, opts, headers, proxyConf, timeoutMs, disableKA, redirectsLeft, egress);
-              }
-            }
-          }
-        }
-        // [P1-2026-09-14] NTLM 三步握手重放：最多 2 跳（Type1 → Type2 → Type3）。
-        // 与 Digest 单次重放不同——NTLM 要服务端先回 Type2 才能算 Type3，故这里是**有上限的循环**
-        // （hop<2 硬上限，且 done=true 后仍 401 即清 state 退出，双保险防死循环）。
-        // 仅当配置了 NTLM 凭据且响应仍是 401+NTLM 挑战时进入；用户显式 Authorization 优先不干预。
-        {
-          const na = opts.auth ?? defaults.auth ?? null;
-          if (res && res.status === 401 && na && typeof na === 'object' && this._ntlm.cred(na)) {
-            for (let hop = 0; hop < 2; hop++) {
-              const rp = this._ntlm.replay(opts.url, na, res);
-              if (!rp.replay || !rp.header) break;
-              headers['Authorization'] = rp.header;
-              if (opts.http2 === true) {
-                res = await this._followRedirectsH2(opts, headers, timeoutMs, redirectsLeft, egress);
-              } else {
-                const first2 = await this._rawRequest({ lookup: pinnedLookup() }, opts, headers, proxyConf, timeoutMs, disableKA);
-                res = await this._followRedirects(first2, opts, headers, proxyConf, timeoutMs, disableKA, redirectsLeft, egress);
-              }
-              if (!res || res.status !== 401) break; // 认证通过（或其它状态）→ 结束握手
-              if (rp.done) {
-                // 已发 Type3 仍 401 → 凭据无效：清 state，避免后续请求一直重试坏凭据
-                this._ntlm.clear(opts.url);
-                break;
-              }
-            }
-          }
-        }
+        let res = await send();
+        // 401 → Digest 挑战-重放 / NTLM 三步握手（可能内部经 send() 重发并返回最终响应）
+        res = await this._after401(res, opts, headers, send, digestPreAttached);
         if (t0Net !== null && res && typeof res === 'object') {
           // 非枚举属性：不污染任何 JSON 序列化/请求头透传路径
           // [P1-FIX ②] 计时点覆盖整条传输（含代理往返）：走 Burp/socks 时 __networkMs =
@@ -1005,91 +863,283 @@ export class HttpClient {
         return res;
       } catch (err) {
         lastErr = err;
-        // [P0-FIX] AppError（SSRF 拦截 / 参数校验失败）是确定性的安全拒绝，重试多少次结果都一样，
-        // 且每次重试都会重放整条重定向链（放大对禁止目标的探测）。必须立即抛出，不进入重试循环。
-        if (err instanceof AppError) throw err;
-        // [P0-FIX 2026-09-09] 连接层失败 → 拉黑刚用的出口 IP 并前移索引，使**本次重试**就打到另一个节点
-        // （CDN/多 A 记录目标里单节点宕机时，不必等整段扫描超时）。超时不计：目标被重载荷拖慢 ≠ 节点死。
-        if (err && err.code && IP_FAIL_CODES.has(err.code)) noteEgressIpFailure(opts.url, err.code);
-        // [⑮] AbortError/CanceledError：扫描停止触发的请求取消，不重试直接抛出
-        if (err.name === 'AbortError' || err.name === 'CanceledError' || err.code === 'ERR_CANCELED' || err.code === 'ABORT_ERR') {
-          throw err;
-        }
-        // [P1-FIX ①] 证书类错误此前只是「快速失败 → 扫不出」，用户无从知道是证书问题；
-        // 保留 NON_RETRYABLE 语义（重试无意义），但把逃生口与后果写进日志。
-        if (err && err.code && TLS_CERT_CODES.has(err.code)) {
-          logger.warn(
-            `TLS 证书校验失败（${err.code}）：目标可能使用自签/内网 CA 证书。` +
-              '如需扫描此类目标，设 insecureTls=true（关闭证书校验，报告须注明）；' +
-              '更推荐把内网根证书加入系统信任链。'
-          );
-        }
-        // [P1-FIX ④] axios 通道超限是「抛错」而非截断：明确记一条，避免被当成普通网络错误
-        // 重试耗尽后无痕（提取路径已按 opts.maxContentLength 放大，此处针对扫描主链路）。
-        if (isMaxContentLengthError(err)) {
-          const limit = opts.maxContentLength ?? MAX_BODY_BYTES;
-          logger.warn(
-            `响应体超过上限（SSRF_MAX_BODY_MB 当前 ${Math.round(limit / 1048576)}MB）：` +
-              `${logSafeUrl(opts.url || '')} 本次请求失败（未截断返回），差异比对在该点上不可用。`
-          );
-          // [P1-FIX 2026-09-09] 超限不重试：响应体积与重试无关，重试必然得到同一个错误，
-          // 但每次都要把响应缓冲到上限再丢弃——在文件下载/大列表页这类目标上，
-          // 相当于每个请求白烧 (retry+1) × 上限的内存与带宽（默认 4 × 15MB × 并发），
-          // 还会把「目标页面太大」的真因埋进「HTTP 请求失败」。立即失败后，上层（预筛/守卫）
-          // 能看到确定性的原因，而不是 4 次同构失败。
-          throw new AppError(
-            ErrorCode.HTTP_ERROR,
-            `响应体超过上限（${Math.round(limit / 1048576)}MB），已快速失败（不重试）：${logSafeUrl(opts.url || '')}`
-          );
-        }
-        const isTimeout = err.code === 'ECONNABORTED' || /timeout/i.test(err.message || '');
-        if (err && err.code && NON_RETRYABLE_CODES.has(err.code)) {
-          // [P0-FIX 2026-09-09] 区分「整个域名解析不出来」与「某个 IP 拒连」：
-          //   • ENOTFOUND/EAI_AGAIN：已校验的 IP 列表来自旧解析结果，可能已整体变更 → 清空缓存 + 清钉死状态；
-          //   • ECONNREFUSED：只可能是那一个节点的问题，上面 noteEgressIpFailure 已经拉黑该 IP 并前移索引。
-          //     原实现这里直接 dnsCache.delete(hostname) 会把**已校验通过**的 IP 列表一起丢掉，下次请求
-          //     重新解析又可能先拿到同一个死 IP，并在 60s 里反复重放整条 SSRF 校验 —— 死循环式浪费。
-          if (err.code === 'ENOTFOUND' || err.code === 'EAI_AGAIN') {
-            const hostname = opts.url ? new URL(opts.url).hostname : null;
-            if (hostname) {
-              dnsCache.delete(hostname);
-              clearHostPin(hostname);
-            }
-          }
-          logger.warn(`HTTP 不可重试错误（快速失败）：${err.code} ${err.message}`);
-          throw new AppError(ErrorCode.HTTP_ERROR, err.message || 'HTTP 请求失败');
-        }
-        if (isTimeout) {
-          // P2-5：日志 URL 打码（剥离 query 中的注入 payload/敏感参数）
-          // 文案区分「还会重试」与「最后一次尝试」（retry=0 时旧文案"第 1 次重试"误导）：
-          logger.warn(
-            attempt < retry
-              ? `HTTP 超时（第 ${attempt + 1}/${retry + 1} 次尝试，将重试）：${logSafeUrl(opts.url || '')}`
-              : `HTTP 超时（已达重试上限，放弃）：${logSafeUrl(opts.url || '')}`
-          );
-        } else {
-          logger.warn(
-            attempt < retry
-              ? `HTTP 错误（第 ${attempt + 1}/${retry + 1} 次尝试，将重试）：${logSafeUrl(opts.url || '')} ${err.message}`
-              : `HTTP 错误（已达重试上限，放弃）：${logSafeUrl(opts.url || '')} ${err.message}`
-          );
-        }
-        if (attempt < retry) {
-          const backoffMs = Math.min(BACKOFF_BASE_MS * 2 ** attempt, BACKOFF_MAX_MS);
-          // [P2-FIX] 退避期间响应 abort signal（_sleep 可中断）：点了停止不必等完 backoff
-          await this._sleep(backoffMs, opts.signal);
-          if (opts.signal?.aborted) {
-            const abortErr = /** @type {NodeJS.ErrnoException} */ (new Error('请求已取消（扫描停止）'));
-            abortErr.name = 'AbortError';
-            abortErr.code = 'ERR_CANCELED';
-            throw abortErr;
-          }
-          continue;
-        }
-        if (isTimeout) throw new AppError(ErrorCode.HTTP_TIMEOUT, '请求超时');
+        // [P0-FIX] 终态错误（SSRF 拒绝 / 取消 / 超限 / 不可重试码 / 最终超时）在
+        // _onRequestError 内直接抛出；可重试错误在此完成退避等待并正常返回
+        // → 进入下一轮 attempt（与原 catch 内 continue 语义一致）。
+        await this._onRequestError(err, opts, attempt, retry);
       }
     }
     throw new AppError(ErrorCode.HTTP_ERROR, lastErr?.message || 'HTTP 请求失败');
+  }
+
+  // ── request() 阶段拆分（2026-09-27 重构：只动结构不动行为） ─────────────────────
+  // request() 原为 300+ 行上帝方法，现只保留编排；各阶段拆为下列私有方法。
+  // 拆分原则：注释随代码迁移、判据与日志文案逐字保留，行为零变化由服务端全量
+  // 单测（含 httpClient / digestAuth / ntlm 契约用例）与 e2e 验收门禁守护。
+
+  /**
+   * [P0-1] 出口统一 SSRF 校验 + [P0-SEC] 授权范围（scope）逐请求校验。
+   * 直连模式（req.sql）无 URL，跳过。
+   * [P1-FIX ②] 已走代理且 ssrfViaProxy!=='off' → 解析/严格层判定下放至代理（硬底线段仍无条件拒）。
+   */
+  async _assertEgressAllowed(opts, egress) {
+    if (!opts.url) return;
+    await assertSafeTargetForEgress(opts.url, egress).catch((e) => {
+      if (e instanceof AppError) throw e;
+      throw new AppError(ErrorCode.INVALID_PARAM, e.message || '目标 URL 校验失败');
+    });
+    // [P0-SEC] 授权范围（scope）逐请求校验：目标 URL 在 start 时校过，但爬虫/二阶/safeUrl/
+    // 手工构造的注入请求都可能指向另一个主机，统一在出口拦一次。
+    await assertScanScope(opts.scanId, opts.url);
+  }
+
+  /**
+   * [P0-FIX 2026-09-14] 限速语义对齐 TokenBucket：effectiveRate<=0 = 不限速（直通，不落桶）。
+   * 原实现把 <=0 交给 this.bucket（defaults 单例桶），显式 0 会被暗中按默认值限速——
+   * defaults 保守化后该错位直接打崩以 0 表达「不限速」的调用方（pentest-lab 实测 0/10）。
+   */
+  _resolveRateBucket(opts, effectiveRate) {
+    return (opts.scanId && this.buckets.get(opts.scanId)) ||
+      (Number.isFinite(effectiveRate) && effectiveRate > 0
+        ? this.bucketForRate(effectiveRate)
+        : Number.isFinite(effectiveRate) && effectiveRate <= 0
+          ? null // 不限速：跳过令牌桶
+          : this.bucket); // 未配置 → 默认单例桶（defaults.ratePerSec）
+  }
+
+  /**
+   * 请求头准备：合并认证头（含 P2-8 头名黑名单过滤）→ randomUA → Cookie Jar 会话合并 →
+   * Digest/NTLM 预附加（已持有 state 时发送前即带 Authorization，省一次 401 往返；
+   * 用户显式 Authorization 优先，不干预）。
+   * @returns {{headers: object, digestPreAttached: boolean}}
+   */
+  _prepareHeaders(opts) {
+    let headers = mergeAuthHeaders(opts.headers || {}, opts.auth ?? defaults.auth ?? null);
+    if (opts.wafEvasion && opts.wafEvasion.randomUA) {
+      // randomUA==='mobile'（CLI --mobile）→ 仅从移动端池取；其余真值 → 全池
+      headers['User-Agent'] = pickRandomUA(opts.wafEvasion.randomUA);
+    }
+    // [P1-FIX 2026-09-05] Cookie Jar：请求前合并扫描会话 cookie（用户显式 Cookie 优先，同名不覆盖；
+    // opts.cookieJar===false 关闭，对标无 jar 行为零回归）
+    if (opts.scanId && opts.cookieJar !== false && opts.url) {
+      try {
+        this.jarFor(opts.scanId).mergeInto(headers, opts.url);
+      } catch { /* jar 合并失败不阻断请求 */ }
+    }
+    // [P2-4] Digest 缓存 challenge 预附加：已持有 state 时发送前即带 Authorization（nc 单调递增），
+    // 避免「裸请求先吃一次 401 才用上缓存」的多余往返；无 state 时保持裸请求，
+    // 由 401 挑战-重放路径（_after401）建立 state。
+    let digestPreAttached = false;
+    {
+      const da0 = opts.auth ?? defaults.auth ?? null;
+      const pre = this._digestAuthHeader(opts.method || 'GET', opts.url, da0);
+      if (pre && pre.header && !headers['Authorization'] && !headers['authorization']) {
+        headers['Authorization'] = pre.header;
+        digestPreAttached = true;
+      }
+    }
+    // [P1-2026-09-14] NTLM 预附加：同主机已握过手（持有 Type2 challenge）时直接带 Type3，
+    // 省掉 Type1/Type2 两跳。无 state 时保持裸请求，由 401 握手重放（_after401）建立 state。
+    {
+      const na0 = opts.auth ?? defaults.auth ?? null;
+      const ntlmPre = this._ntlm.preAuthHeader(opts.url, na0);
+      if (ntlmPre && !headers['Authorization'] && !headers['authorization']) {
+        headers['Authorization'] = ntlmPre;
+      }
+    }
+    return { headers, digestPreAttached };
+  }
+
+  /**
+   * 每次尝试前的闸门：① [⑮] signal 已取消时不再发新请求（重试循环防漏）；
+   * ② [sqlmap 对标] --max-requests 计数检查，达上限后拒绝新请求；③ [sqlmap 对标] --delay
+   * 固定延时（延时期间响应 abort signal，返回前复查取消）。
+   */
+  async _beforeAttempt(opts) {
+    // [⑮] abort 检查：signal 已取消时不再发新请求（重试循环防漏）
+    if (opts.signal?.aborted) throw newAbortError();
+    // [sqlmap 对标] --max-requests：请求计数检查，达上限后拒绝新请求。
+    // 仅对归属明确（带 scanId）的请求计数：无 scanId 的请求无法在扫描结束时回收计数，
+    // 用统一 key 会导致 ① Map 无界增长 ② 达到上限后全局永久拒绝新请求（不可恢复）。
+    if (opts.maxReq && opts.maxReq > 0 && opts.scanId) {
+      const count = this._requestCounts.get(opts.scanId) || 0;
+      if (count >= opts.maxReq) {
+        throw new AppError(ErrorCode.HTTP_ERROR, `请求上限已达（maxReq=${opts.maxReq}），拒绝新请求`);
+      }
+      this._requestCounts.set(opts.scanId, count + 1);
+      this._evictRequestCounts(); // 兜底：防止异常退出残留的 scanId 条目累积
+    }
+    // [sqlmap 对标] --delay：每次请求前固定延时（秒），降低请求速率。
+    // 上限 60s 防误配（如把毫秒当秒传入导致请求挂起）；延时期间响应 abort signal，
+    // 避免「点了停止却要等完一个 delay 周期才生效」。
+    if (opts.delay > 0) {
+      await this._sleep(Math.min(Number(opts.delay) || 0, MAX_DELAY_SEC) * 1000, opts.signal);
+      // [P2-FIX] delay 期间可能被 abort（_sleep 响应 signal 提前返回），
+      // 复查 signal：已取消则不再发请求（原实现 sleep 后直接继续，浪费一次请求）
+      if (opts.signal?.aborted) throw newAbortError();
+    }
+  }
+
+  /**
+   * 单次发送（含手动重定向跟随）：http2=true 走 undici（ALPN 协商 h2/h1.1，目标不支持
+   * 自动降级 HTTP/1.1），否则走 axios HTTP/1.1（默认路径零变化）。两条路径同样手动跟随
+   * 重定向（逐跳 SSRF 校验 + 跨域剥离凭据头 + 每跳 DNS 钉死，见 _followRedirects/_followRedirectsH2）。
+   * DNS 钉死 IP 在派发瞬间重新获取（重试/认证重放不复用上一次的死 IP）。
+   */
+  async _sendFollowRedirects(opts, headers, proxyConf, timeoutMs, disableKA, redirectsLeft, egress) {
+    if (opts.http2 === true) {
+      return this._followRedirectsH2(opts, headers, timeoutMs, redirectsLeft, egress);
+    }
+    const first = await this._rawRequest(
+      { lookup: buildPinnedLookup(opts.url) },
+      opts, headers, proxyConf, timeoutMs, disableKA,
+    );
+    return this._followRedirects(first, opts, headers, proxyConf, timeoutMs, disableKA, redirectsLeft, egress);
+  }
+
+  /**
+   * 401 响应的认证挑战处理（原 request() 内联逻辑迁移）：
+   * ① [P2-4] Digest 挑战-重放：请求未显式带 Authorization 且收到 401+Digest challenge →
+   *    本轮构造响应头并经 send() 重发一次（对标 curl --digest 的 challenge→response 往返）。
+   *    · 预附加的缓存 Digest 头被 401 拒绝 → 清 state，下次请求重新挑战（nonce 过期自愈）；
+   *    · 用户显式 Authorization（Basic/Bearer/自定义）→ 不干预；
+   *    · digest 配置缺失 / 非 401 / 无 Digest challenge → 不干预；
+   *    · 重发仍 401 → 返回该响应（凭据无效，语义与普通 401 一致，不死循环）。
+   * ② [P1-2026-09-14] NTLM 三步握手重放：最多 2 跳（Type1 → Type2 → Type3）——与 Digest
+   *    单次重放不同，NTLM 要服务端先回 Type2 才能算 Type3，故是**有上限的循环**
+   *    （hop<2 硬上限，且 done=true 后仍 401 即清 state 退出，双保险防死循环）。
+   * @returns {Promise<object>} 最终响应（可能与传入相同，也可能来自认证重发）
+   */
+  async _after401(res, opts, headers, send, digestPreAttached) {
+    if (res && res.status === 401 && digestPreAttached) {
+      // [P2-4] 服务端拒绝缓存的 Digest 凭据（nonce 过期/凭据变更）→ 清 state，下次请求重新挑战
+      try { this._digestStates.delete(new URL(opts.url).protocol + '//' + new URL(opts.url).host); } catch { /* ignore */ }
+    } else if (res && res.status === 401 && !headers['Authorization'] && !headers['authorization']) {
+      const da = opts.auth ?? defaults.auth ?? null;
+      if (da && typeof da === 'object') {
+        const need = this._digestAuthHeader(opts.method || 'GET', opts.url, da);
+        if (need && need.needChallenge) {
+          // 无缓存 challenge：首次裸请求返回 401 → 建立 state 并重放
+          const rp = this._digestReplay(opts.method || 'GET', opts.url, da, res);
+          if (rp.replay) {
+            headers['Authorization'] = /** @type {string} */ (rp.header);
+            res = await send();
+            // 重放后仍 401 → 凭据无效/nonce 过期：清 state 防死循环（下次请求重新挑战）
+            if (res && res.status === 401 && opts.url) {
+              try { this._digestStates.delete(new URL(opts.url).protocol + '//' + new URL(opts.url).host); } catch { /* ignore */ }
+            }
+          }
+        } else if (need && need.header) {
+          // 有缓存 challenge：直接带（mergeAuthHeaders 不处理 digest）
+          headers['Authorization'] = need.header;
+          res = await send();
+        }
+      }
+    }
+    // NTLM 与 Digest 相互独立：上面的分支无论是否命中，这里都按同一判据进入；
+    // 仅当配置了 NTLM 凭据且响应仍是 401+NTLM 挑战时生效；用户显式 Authorization 优先不干预。
+    {
+      const na = opts.auth ?? defaults.auth ?? null;
+      if (res && res.status === 401 && na && typeof na === 'object' && this._ntlm.cred(na)) {
+        for (let hop = 0; hop < 2; hop++) {
+          const rp = this._ntlm.replay(opts.url, na, res);
+          if (!rp.replay || !rp.header) break;
+          headers['Authorization'] = rp.header;
+          res = await send();
+          if (!res || res.status !== 401) break; // 认证通过（或其它状态）→ 结束握手
+          if (rp.done) {
+            // 已发 Type3 仍 401 → 凭据无效：清 state，避免后续请求一直重试坏凭据
+            this._ntlm.clear(opts.url);
+            break;
+          }
+        }
+      }
+    }
+    return res;
+  }
+
+  /**
+   * 请求失败分类（原 request() catch 体迁移）：终态错误直接抛出；可重试错误完成退避
+   * 等待后正常返回（调用方进入下一轮 attempt）——返回（不抛出）即代表「将重试」。
+   */
+  async _onRequestError(err, opts, attempt, retry) {
+    // [P0-FIX] AppError（SSRF 拦截 / 参数校验失败）是确定性的安全拒绝，重试多少次结果都一样，
+    // 且每次重试都会重放整条重定向链（放大对禁止目标的探测）。必须立即抛出，不进入重试循环。
+    if (err instanceof AppError) throw err;
+    // [P0-FIX 2026-09-09] 连接层失败 → 拉黑刚用的出口 IP 并前移索引，使**本次重试**就打到另一个节点
+    // （CDN/多 A 记录目标里单节点宕机时，不必等整段扫描超时）。超时不计：目标被重载荷拖慢 ≠ 节点死。
+    if (err && err.code && IP_FAIL_CODES.has(err.code)) noteEgressIpFailure(opts.url, err.code);
+    // [⑮] AbortError/CanceledError：扫描停止触发的请求取消，不重试直接抛出
+    if (err.name === 'AbortError' || err.name === 'CanceledError' || err.code === 'ERR_CANCELED' || err.code === 'ABORT_ERR') {
+      throw err;
+    }
+    // [P1-FIX ①] 证书类错误此前只是「快速失败 → 扫不出」，用户无从知道是证书问题；
+    // 保留 NON_RETRYABLE 语义（重试无意义），但把逃生口与后果写进日志。
+    if (err && err.code && TLS_CERT_CODES.has(err.code)) {
+      logger.warn(
+        `TLS 证书校验失败（${err.code}）：目标可能使用自签/内网 CA 证书。` +
+          '如需扫描此类目标，设 insecureTls=true（关闭证书校验，报告须注明）；' +
+          '更推荐把内网根证书加入系统信任链。'
+      );
+    }
+    // [P1-FIX ④] axios 通道超限是「抛错」而非截断：明确记一条，避免被当成普通网络错误
+    // 重试耗尽后无痕（提取路径已按 opts.maxContentLength 放大，此处针对扫描主链路）。
+    if (isMaxContentLengthError(err)) {
+      const limit = opts.maxContentLength ?? MAX_BODY_BYTES;
+      logger.warn(
+        `响应体超过上限（SSRF_MAX_BODY_MB 当前 ${Math.round(limit / 1048576)}MB）：` +
+          `${logSafeUrl(opts.url || '')} 本次请求失败（未截断返回），差异比对在该点上不可用。`
+      );
+      // [P1-FIX 2026-09-09] 超限不重试：响应体积与重试无关，重试必然得到同一个错误，
+      // 但每次都要把响应缓冲到上限再丢弃——在文件下载/大列表页这类目标上，
+      // 相当于每个请求白烧 (retry+1) × 上限的内存与带宽（默认 4 × 15MB × 并发），
+      // 还会把「目标页面太大」的真因埋进「HTTP 请求失败」。立即失败后，上层（预筛/守卫）
+      // 能看到确定性的原因，而不是 4 次同构失败。
+      throw new AppError(
+        ErrorCode.HTTP_ERROR,
+        `响应体超过上限（${Math.round(limit / 1048576)}MB），已快速失败（不重试）：${logSafeUrl(opts.url || '')}`
+      );
+    }
+    const isTimeout = err.code === 'ECONNABORTED' || /timeout/i.test(err.message || '');
+    if (err && err.code && NON_RETRYABLE_CODES.has(err.code)) {
+      // [P0-FIX 2026-09-09] 区分「整个域名解析不出来」与「某个 IP 拒连」：
+      //   • ENOTFOUND/EAI_AGAIN：已校验的 IP 列表来自旧解析结果，可能已整体变更 → 清空缓存 + 清钉死状态；
+      //   • ECONNREFUSED：只可能是那一个节点的问题，上面 noteEgressIpFailure 已经拉黑该 IP 并前移索引。
+      //     原实现这里直接 dnsCache.delete(hostname) 会把**已校验通过**的 IP 列表一起丢掉，下次请求
+      //     重新解析又可能先拿到同一个死 IP，并在 60s 里反复重放整条 SSRF 校验 —— 死循环式浪费。
+      if (err.code === 'ENOTFOUND' || err.code === 'EAI_AGAIN') {
+        const hostname = opts.url ? new URL(opts.url).hostname : null;
+        if (hostname) {
+          dnsCache.delete(hostname);
+          clearHostPin(hostname);
+        }
+      }
+      logger.warn(`HTTP 不可重试错误（快速失败）：${err.code} ${err.message}`);
+      throw new AppError(ErrorCode.HTTP_ERROR, err.message || 'HTTP 请求失败');
+    }
+    if (isTimeout) {
+      // P2-5：日志 URL 打码（剥离 query 中的注入 payload/敏感参数）
+      // 文案区分「还会重试」与「最后一次尝试」（retry=0 时旧文案"第 1 次重试"误导）：
+      logger.warn(
+        attempt < retry
+          ? `HTTP 超时（第 ${attempt + 1}/${retry + 1} 次尝试，将重试）：${logSafeUrl(opts.url || '')}`
+          : `HTTP 超时（已达重试上限，放弃）：${logSafeUrl(opts.url || '')}`
+      );
+    } else {
+      logger.warn(
+        attempt < retry
+          ? `HTTP 错误（第 ${attempt + 1}/${retry + 1} 次尝试，将重试）：${logSafeUrl(opts.url || '')} ${err.message}`
+          : `HTTP 错误（已达重试上限，放弃）：${logSafeUrl(opts.url || '')} ${err.message}`
+      );
+    }
+    if (attempt < retry) {
+      const backoffMs = Math.min(BACKOFF_BASE_MS * 2 ** attempt, BACKOFF_MAX_MS);
+      // [P2-FIX] 退避期间响应 abort signal（_sleep 可中断）：点了停止不必等完 backoff
+      await this._sleep(backoffMs, opts.signal);
+      if (opts.signal?.aborted) throw newAbortError();
+      return;
+    }
+    if (isTimeout) throw new AppError(ErrorCode.HTTP_TIMEOUT, '请求超时');
   }
 
   // [sqlmap 对标] --null-connection：发送 HEAD 请求（无响应体传输），用于布尔盲注快速判定。
