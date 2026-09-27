@@ -15,7 +15,7 @@
 // ============================================================================
 
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { SCAN_CONFIG_KEYS, SCAN_CONFIG_VALUE_TYPES, DEFAULT_CONFIG } from '../shared/constants';
 import { buildStartConfig, buildResumeConfig } from '../shared/scanConfig';
@@ -43,7 +43,17 @@ function backendKnownCfgKeys(): string[] {
 }
 
 describe('配置契约：面板 → 请求体 → 后端白名单', () => {
-  const panelSrc = read('../components/ScanConfigPanel.tsx');
+  // [2026-09-27 拆分适配] ScanConfigPanel 拆为主面板（编排）+ components/scanConfig/ 下的
+  // 分段组件与变更处理器工厂。「面板实际会写的键」以**整个目录 + 主面板文件**为取数源：
+  // 守卫强度不变（新增分段文件自动进入扫描范围），判据 ①⑦ 的语义与拆分前一致。
+  const PANEL_DIR = '../components/scanConfig';
+  const panelSrcFiles = [
+    '../components/ScanConfigPanel.tsx',
+    ...readdirSync(fileURLToPath(new URL(PANEL_DIR, import.meta.url)))
+      .filter((f) => /\.(ts|tsx)$/.test(f))
+      .map((f) => `${PANEL_DIR}/${f}`),
+  ];
+  const panelSrc = panelSrcFiles.map((rel) => read(rel)).join('\n');
   const BACKEND_KNOWN_CFG_KEYS = backendKnownCfgKeys();
 
   /** 面板实际会写的键：handle*('k') / store 直写 set('k', …) / 内联 onChange({ k: … }) 三类写法 */

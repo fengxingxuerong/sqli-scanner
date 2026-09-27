@@ -40,6 +40,8 @@ const walk = (dir) => {
 walk(join(SERVER, 'src'));
 
 const readSource = (f) => readFileSync(f, 'utf8');
+// 目录不存在时返回 null（拆分目录理论上恒存在，此处只防未来再挪动时的硬崩）
+const readdirSyncSafe = (dir) => { try { return readdirSync(dir); } catch { return null; } };
 
 // ── 入口侧：四个能"写进 config"的地方各算一份键集 ──────────────────────────
 const routesSrc = readSource(join(SERVER, 'src/api/scanRoutes.js'));
@@ -53,7 +55,19 @@ const cliSrc = ['bin/cli/config.js', 'bin/cli.js', 'bin/cli/args.js']
   .map((f) => readSource(join(SERVER, f))).join('\n');
 const cliWritten = new Set(Array.from(cliSrc.matchAll(/\bconfig\.([A-Za-z_][A-Za-z0-9_]*)\s*=[^=]/g)).map((m) => m[1]));
 
-const feSrc = ['src/shared/constants.ts', 'src/shared/scanConfig.ts', 'src/components/ScanConfigPanel.tsx']
+// [2026-09-27 拆分适配] ScanConfigPanel 拆为主面板 + src/components/scanConfig/ 下的分段组件
+// 与处理器工厂；「面板有没有入口」的取数源改为**整个目录 + 主面板 + 共享层**，
+// 新增分段文件自动进入扫描范围（守卫强度不变）。
+const feDir = join(ROOT, 'src/components/scanConfig');
+const feFiles = [
+  'src/shared/constants.ts',
+  'src/shared/scanConfig.ts',
+  'src/components/ScanConfigPanel.tsx',
+  ...(readdirSyncSafe(feDir)
+    ? readdirSyncSafe(feDir).filter((f) => /\.(ts|tsx)$/.test(f)).map((f) => `src/components/scanConfig/${f}`)
+    : []),
+];
+const feSrc = feFiles
   .map((f) => { try { return readSource(join(ROOT, f)); } catch { return ''; } }).join('\n');
 const feWritten = new Set([
   ...Array.from(feSrc.matchAll(/^\s*([A-Za-z_][A-Za-z0-9_]*)(\??):\s/gm)).map((m) => m[1]),
