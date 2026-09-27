@@ -53,7 +53,7 @@ node scripts/one-click-scan.mjs -u "http://target/page?id=1"
 | `report.csv` | 漏洞表 + 拖库数据，Excel 可开（`--formats` 显式指定时产出） |
 | `manifest.json` | 本次扫描结构化清单（元信息 + 漏洞索引 + 文件清单 + 授权声明） |
 
-常用选项（其余与 `bin/cli.js` 完全一致）：
+常用选项（其余与 `server/bin/cli.js` 完全一致）：
 
 ```bash
 -F, --formats html,json,markdown,sarif,csv   # 输出格式（默认 html,json,markdown）
@@ -202,7 +202,7 @@ admin-only 触发页 `/admin/panel`（users.admin 角色门禁 403）+ admin 会
 | **WAF 识别接口** | `--identify-waf`：仅识别 WAF 厂商并输出推荐 tamper 链，不发起注入检测（对标 sqlmap --identify-waf） |
 | **AI 漏洞报告** | 3 角色流水线（分析师→撰写→审阅），支持多 key 容灾，自动生成专业中文安全分析报告 |
 | **利用工具** | SQL Shell / 文件读写 / OS 命令执行（需授权）。⚠️ 验证状态见下文「利用能力实测口径」：**fileRead / fileWrite / UDF-os-shell 均已跑通真实闭环**（后者在隔离沙箱内），仅注册表仍为 mock 单测 |
-| **CLI 100+ 参数（原生引擎）** | 对标 sqlmap：--dbs/--tables/--dump/**--dump-all**/**--common-tables**/**--common-columns**/-D/-T/-C/--search/--users/--passwords/--prefix/--suffix/--time-sec/-r/--mobile/--parse-errors/--safe-url/--safe-freq/--delay/--current-user/--current-db/--hostname/--is-dba/**--identify-waf**/--skip-static/--predict-output/--test-headers/--test-path/**--hex**/--where/--param-del/**--advise**（扫描前风险评估）/**--confirm-extreme**（极高危第二道确认）等（`node bin/cli.js --help` 为准） |
+| **CLI 100+ 参数（原生引擎）** | 对标 sqlmap：--dbs/--tables/--dump/**--dump-all**/**--common-tables**/**--common-columns**/-D/-T/-C/--search/--users/--passwords/--prefix/--suffix/--time-sec/-r/--mobile/--parse-errors/--safe-url/--safe-freq/--delay/--current-user/--current-db/--hostname/--is-dba/**--identify-waf**/--skip-static/--predict-output/--test-headers/--test-path/**--hex**/--where/--param-del/**--advise**（扫描前风险评估）/**--confirm-extreme**（极高危第二道确认）等（`node server/bin/cli.js --help` 为准，从仓库根直接跑；`--dbs` 等参数说明在该 help 里） |
 | **sqlmap 桥接参数（非原生）** | `--csrf-url` / `--csrf-token` / `--eval` / `--skip-urlencode` / `--keep-alive` / `--null-connection`：**仅当转交外部 sqlmap 进程（sqlmapBridge）时才会被传递**，本项目自有引擎不消费这些键。请勿把上表与本节混用 |
 | **-r 请求文件** | 从 Burp/curl 请求文本导入 URL/method/headers/body |
 | **中英双语** | 全界面 i18n 支持中英切换 |
@@ -226,19 +226,37 @@ npm run acceptance      # 【门禁】全方位验收（15 套件，事实断言
 
 ## 后端 API
 
+下表由 `npm run readme:check` 与代码注册**双向核对**（`server/index.js` 的挂载点 + 各 router 的注册行）：
+表里写了不存在的端点会红，代码新增端点而表里漏写也会红。同一批路由双挂载在 `/`（Tauri 版），
+下表只列 `/api` 口径（Web 版）。
+
 | 端点 | 方法 | 说明 |
 |------|------|------|
 | `/api/health` | GET | 健康检查 |
-| `/api/scan/start` | POST | 启动扫描 |
-| `/api/scan/stop` | POST | 停止扫描 |
-| `/api/scan/:id/report` | GET | 获取报告 |
-| `/api/scan/:id/report/export` | GET | 导出报告 |
+| `/api/scan/start` | POST | 启动扫描（占一个并发槽；目标先过 SSRF 与 scope 校验） |
+| `/api/scan/:id` | GET | 实时报告快照 |
+| `/api/scan/:id/events` | GET | SSE 进度流（EventSource 无法设自定义头，token 可走 query） |
+| `/api/scan/:id/stop` | POST | 停止扫描 |
+| `/api/scan/:id/pause` | POST | 暂停扫描 |
+| `/api/scan/:id/resume` | POST | 恢复扫描 |
+| `/api/scan/:id/report` | GET | 获取报告（与导出同源，含可复制的 PoC） |
+| `/api/scan/:id/report/export` | GET | 导出报告（json / html / csv / markdown / db-json） |
+| `/api/scan/:id/report/ai` | POST | AI 报告生成（数据外发为 opt-in，未设端点即拒绝） |
+| `/api/scan/:id/report/ai/configs` | GET | AI 可用配置清单（不回显 Key） |
+| `/api/scan/:id/point/:pointId/retest` | POST | 单点复测（交付场景：修完要能证明确实修好了） |
+| `/api/scan/:id/diff` | GET | 两次扫描差异对比 |
+| `/api/payloads` | GET | payload 模板清单 |
 | `/api/tampers` | GET | tamper 插件清单 |
-| `/api/exploit/capabilities` | GET | 利用能力查询 |
-| `/api/exploit/sql` | POST | SQL 执行 |
-| `/api/exploit/file-read` | POST | 文件读取 |
-| `/api/exploit/file-write` | POST | 文件写入 |
-| `/api/exploit/os-shell` | POST | OS 命令执行 |
+| `/api/exploit/capabilities` | GET | 利用能力清单。⚠ 目前是手写列表，不由 Exploiter 方言表推导 |
+| `/api/exploit/sql` | POST | SQL 执行（需 `EXPLOIT_ENABLED=1` + 显式 authorized） |
+| `/api/exploit/file-read` | POST | 目标文件读取（同上） |
+| `/api/exploit/file-write` | POST | 目标文件写入（同上） |
+| `/api/exploit/os-shell` | POST | OS 命令执行（同上） |
+| `/api/sqlmap/status` | GET | sqlmap 是否可用（不返回脚本路径） |
+| `/api/sqlmap/start` | POST | 启动一次 sqlmap 桥接扫描 |
+| `/api/sqlmap/:id/events` | GET | sqlmap 扫描 SSE 事件流 |
+| `/api/sqlmap/:id/report` | GET | 取 sqlmap 扫描报告 |
+| `/api/sqlmap/:id/stop` | POST | 停止 sqlmap 扫描 |
 
 ## 环境变量
 

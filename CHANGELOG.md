@@ -4,6 +4,26 @@
 
 ## [Unreleased]
 
+### 2026-09-27 批次 · README 的 API 表与命令行示例：从"没人核"变成双向核对
+
+接着上一批的判据面，把两类"照抄就会错"的文档补上门禁。
+
+- **判据 ⑭ API 表双向核对**：取数源是 `server/index.js` 的 `app.use('/api…', xxxRoutes)` 挂载点 +
+  各 router 的注册行（同一批路由也挂 `/` 供 Tauri，只数 `/api` 一份）。实测双向都有错：
+  ① README 写了**不存在**的 `POST /api/scan/stop`（真路径带 `:id`）—— 照文档调用直接 404；
+  ② 代码注册 25 条，表里只列了 10 条真端点，**漏写 15 条**（`/scan/:id`、`/events`、
+  `pause`/`resume`、`point/:pointId/retest`、`diff`、`/payloads`、`/sqlmap/*` 五条、`/report/ai` 两条）。
+  README 表已按实注册集合重写为 25 行，并注明"由 readme:check 双向核对"。
+  `capabilities` 那一行顺手如实标注：**目前是手写列表，不由 Exploiter 方言表推导**（缺陷本体另批修）。
+- **判据 ⑮ 命令行路径存在性**：README 两处教 `node bin/cli.js --help`，而 CLI 真身在
+  `server/bin/cli.js` —— 从仓库根照抄就是 MODULE_NOT_FOUND（实跑对比：根路径 rc=1，
+  `node server/bin/cli.js --help` rc=0）。现规则要求 README 里每条 `node <仓库内路径>.{js,mjs,cjs}`
+  都真实存在；接入时全量 README 命中 12 条、**零假阳**，故判据形态可以放心做成"文件在不在"。
+  将来若要写构建产物路径，加进白名单并注明理由，不许把整条放宽成不检查。
+- 自证扩到 **26 类漂移样本全部被点名 + 5 类正确样本无误报**。
+- 门：`readme:check` ✓ `facts:check` ✓ `arch:guard` ✓ `refs:check` ✓ eslint ✓。
+
+
 ### 2026-09-27 批次 · 两条此前裸奔的对外数字：验收套件数与 tamper 官方分母
 
 上一轮全栈审计实测到 README 有对外数字与真值不符而**没有任何判据**，本轮把判据补上并收口。

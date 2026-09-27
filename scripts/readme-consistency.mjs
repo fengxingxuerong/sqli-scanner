@@ -39,7 +39,7 @@
 //   node scripts/readme-consistency.mjs --selftest # 自证判据
 // ============================================================================
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { VULN_TAXONOMY } from '../server/src/services/vulnTaxonomy.js';
@@ -235,6 +235,60 @@ function parseDocNumberTaboos(docs) {
   return hits;
 }
 
+/**
+ * 实注册的 REST 端点集合：server/index.js 的挂载点 + 各 router 的注册行。
+ * 只取 /api 前缀那一份（同一 router 会双挂载到 / 供 Tauri 用，数两遍会虚增）。
+ * 返回 `METHOD /api/path` 字符串集合，与 README 表格的写法同形。
+ */
+function collectRegisteredEndpoints() {
+  const idx = readFileSync(resolve(ROOT, 'server/index.js'), 'utf8');
+  const mounts = [...idx.matchAll(/app\.use\('([^']+)',\s*(\w+Routes)\)/g)]
+    .map(([, prefix, name]) => [prefix, name])
+    .filter(([prefix]) => prefix.startsWith('/api'));
+  if (!mounts.length) throw new Error('server/index.js 里找不到 app.use("/api", xxxRoutes) —— 判据取数源失效');
+  const out = new Set();
+  for (const [prefix, name] of mounts) {
+    const file = resolve(ROOT, 'server/src/api', `${name}.js`);
+    const src = readFileSync(file, 'utf8');
+    for (const m of src.matchAll(/(?:router|\w+Routes)\.(get|post|put|delete|patch)\(\s*'([^']*)'/g)) {
+      const p = m[2] === '/' ? '' : m[2];
+      out.add(`${m[1].toUpperCase()} ${prefix}${p}`);
+    }
+  }
+  if (!out.size) throw new Error('挂载点找到了但一个端点都没解析出来 —— 判据取数源失效');
+  return out;
+}
+
+/** README「## 后端 API」小节里的表格行：`| \`/api/xxx\` | METHOD | 说明 |` */
+function parseApiTable(lines) {
+  const start = lines.findIndex((l) => /^##\s+后端 API/.test(l));
+  if (start < 0) return { error: 'README 里找不到「## 后端 API」小节 —— 措辞改了要同步改判据，不能静默跳过' };
+  const rows = [];
+  for (let i = start + 1; i < lines.length && !/^##\s/.test(lines[i]); i++) {
+    const m = lines[i].match(/^\|\s*`(\/[^`]*)`\s*\|\s*(GET|POST|PUT|DELETE|PATCH)\s*\|/i);
+    if (m) rows.push({ line: i + 1, key: `${m[2].toUpperCase()} ${m[1]}` });
+  }
+  return { rows };
+}
+
+/**
+ * README 里教人执行的 `node <仓库内路径>.js|mjs|cjs` —— 路径必须真的存在。
+ * 实测触发过一次：README 两处教 `node bin/cli.js --help`，而 CLI 真身在 `server/bin/cli.js`，
+ * 从仓库根照抄就是 MODULE_NOT_FOUND。
+ * 判据形态是"文件在不在"，不随口径漂移；目前 12 处引用全部命中真实文件（零假阳）。
+ * 若将来要写构建产物路径（如 server/dist-engine/*），把它加进 ALLOW_MISSING 并注明理由，
+ * 别把整条判据放宽成不检查。
+ */
+function parseNodePathClaims(lines) {
+  const out = [];
+  lines.forEach((l, i) => {
+    for (const m of l.matchAll(/node\s+((?:[A-Za-z0-9_.-]+\/)*[A-Za-z0-9_.-]+\.(?:js|mjs|cjs))/g)) {
+      out.push({ line: i + 1, path: m[1] });
+    }
+  });
+  return out;
+}
+
 // ── 判据（纯函数，便于自证） ──────────────────────────────────────────────────
 /** @param code 代码侧取数源 */
 export function checkConsistency(input) {
@@ -381,6 +435,36 @@ export function checkConsistency(input) {
     );
   }
 
+  // ⑭ 后端 API 表双向核对：表里写的必须真存在，真存在的必须写进表
+  const apiRows = input.apiTable?.rows || [];
+  const registered = new Set(code.endpoints);
+  if (!apiRows.length) {
+    fails.push('⑭ README 的「后端 API」表一行都没解析出来 —— 表格格式或小节标题改了，判据已失效');
+  }
+  const ghost = apiRows.filter((r) => !registered.has(r.key));
+  if (ghost.length) {
+    fails.push(
+      `⑭ README 的 API 表写了 ${ghost.length} 个**不存在**的端点：${ghost.map((r) => `${r.key}（:${r.line}）`).join('、')}` +
+      ` — 路径或方法名与代码注册不符，照文档调用必然 404`,
+    );
+  }
+  const listed = new Set(apiRows.map((r) => r.key));
+  const undocumented = [...registered].filter((k) => !listed.has(k)).sort();
+  if (undocumented.length) {
+    fails.push(
+      `⑭ 代码注册了 ${registered.size} 个端点，README 表漏写 ${undocumented.length} 个：${undocumented.join('、')}`,
+    );
+  }
+
+  const missingPaths = (input.nodePaths || []).filter((p) => !code.existingPaths.has(p.path));
+  if (missingPaths.length) {
+    fails.push(
+      `⑮ README 教了 ${missingPaths.length} 个跑不通的命令行路径：` +
+      missingPaths.map((p) => `${p.path}（:${p.line}）`).join('、') +
+      ` — 照抄的人只会拿到 MODULE_NOT_FOUND`,
+    );
+  }
+
   return fails;
 }
 
@@ -402,10 +486,16 @@ const SAMPLE = () => ({
     { name: 'SECURITY.md', lines: ['- CI 强制：TypeScript、ESLint、前端覆盖率阈值、服务端测试（用例数见 docs/_facts.json）'] },
     { name: 'CONTRIBUTING.md', lines: ['   - 前端：`npm test`（vitest，用例数见 _facts.json）'] },
   ],
+  apiTable: {
+    rows: [{ line: 12, key: 'GET /api/health' }, { line: 13, key: 'POST /api/scan/start' }],
+  },
+  nodePaths: [{ line: 14, path: 'server/bin/cli.js' }],
   code: {
     techniques: ['union', 'error'], tamperCount: 228,
     payloadMain: 2, payloadClause: 1, payloadOob: 0, payloadRegistry: 681,
     acceptanceSuites: 15, upstreamTotal: 70, upstreamMissing: [], upstreamTag: '1.9.11',
+    endpoints: ['GET /api/health', 'POST /api/scan/start'],
+    existingPaths: new Set(['server/bin/cli.js']),
   },
 });
 
@@ -496,13 +586,27 @@ function selftest() {
   expectOk('二级文档写小数字的场景数（不该被 ⑬ 误伤）', (s) => {
     s.docs[0].lines = ['- recall-lab 18 场景、Rust fmt/clippy'];
   });
+  // ⑭ API 表双向核对（本轮实测：README 写了不存在的 /api/scan/stop，且漏写 14 个真端点）
+  expectFail('API 表写了代码里不存在的端点', (s) => {
+    s.apiTable.rows.push({ line: 14, key: 'POST /api/scan/stop' });
+  }, /⑭.*不存在/);
+  expectFail('代码新增端点而 API 表漏写', (s) => {
+    s.code.endpoints.push('GET /api/scan/:id/diff');
+  }, /⑭.*漏写/);
+  expectFail('API 表整段解析不出来（格式漂移）', (s) => {
+    s.apiTable = { rows: [] };
+  }, /⑭.*一行都没解析/);
+  // ⑮ 教了跑不通的命令行路径（本轮实测：README 两处写 node bin/cli.js，真身在 server/bin/cli.js）
+  expectFail('README 教的脚本路径不存在', (s) => {
+    s.nodePaths = [{ line: 14, path: 'bin/cli.js' }];
+  }, /⑮/);
 
   if (bad.length) {
     console.error('[readme] ✗ 自证失败 —— 判据存在空转或误报：');
     for (const b of bad) console.error('    · ' + b);
     return 1;
   }
-  console.log('[readme] ✓ 自证通过：22 类漂移样本全部被点名，5 类正确样本无误报（判据不空转）');
+  console.log('[readme] ✓ 自证通过：26 类漂移样本全部被点名，5 类正确样本无误报（判据不空转）');
   return 0;
 }
 
@@ -519,8 +623,10 @@ function main() {
   const payload = parsePayloadLine(lines);
   const suiteClaims = parseSuiteClaims(lines);
   const tamperUniverse = parseTamperUniverse(lines);
+  const apiTable = parseApiTable(lines);
+  const nodePaths = parseNodePathClaims(lines);
 
-  const parseErrors = [overview, tiers, customer, tech, tamperCounts, payload, tamperUniverse]
+  const parseErrors = [overview, tiers, customer, tech, tamperCounts, payload, tamperUniverse, apiTable]
     .map((r) => r && r.error)
     .filter(Boolean);
   if (parseErrors.length) {
@@ -546,10 +652,12 @@ function main() {
     upstreamTotal: upstream.total,
     upstreamMissing: upstream.missing,
     upstreamTag: upstream.tag,
+    endpoints: [...collectRegisteredEndpoints()],
+    existingPaths: new Set(nodePaths.map((p) => p.path).filter((p) => existsSync(resolve(ROOT, p)))),
   };
 
   const fails = checkConsistency({
-    overview, tiers, customer, tech, tamperCounts, payload, suiteClaims, tamperUniverse, docs, code,
+    overview, tiers, customer, tech, tamperCounts, payload, suiteClaims, tamperUniverse, docs, apiTable, nodePaths, code,
   });
   if (fails.length) {
     console.error(`[readme] ✗ README 声称与事实不符（${fails.length} 处）：`);
@@ -562,7 +670,10 @@ function main() {
   console.log(
     `[readme] ✓ 口径自洽：方言分层 ${a}+${b}+${c}=${overview.declared} 种（三处一致）· ` +
     `检测通道 ${tech.names.length} 条（= VULN_TAXONOMY）· tamper ${code.tamperCount} 个（= 运行期注册数，${tamperCounts.length} 处一致）· ` +
-    `payload 主库 ${code.payloadMain} + 子句 ${code.payloadClause} + OOB ${code.payloadOob} + 注册表 ${code.payloadRegistry}（= 代码实测）`,
+    `payload 主库 ${code.payloadMain} + 子句 ${code.payloadClause} + OOB ${code.payloadOob} + 注册表 ${code.payloadRegistry}（= 代码实测）· ` +
+    `API 表 ${apiTable.rows.length} 行（= 代码注册端点 ${code.endpoints.length} 条，双向已核）· ` +
+    `验收 ${code.acceptanceSuites} 套件 · tamper 官方分母 ${code.upstreamTotal}（外部真值）· ` +
+    `README 教的 ${nodePaths.length} 条 node <路径> 全部真实存在`,
   );
   return 0;
 }
