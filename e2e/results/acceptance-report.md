@@ -1,7 +1,7 @@
 # 全方位验收门禁报告
 
-> 生成：2026-09-27T13:02:36.044Z　｜　执行器：`node e2e/acceptance.mjs`　｜　Node v24.18.0
-> 代码版本：`63c9c89`　⚠️ **工作区 dirty**（跑验收前有 4 个未提交改动：e2e/detection-runner/results/detection-report.md、e2e/oob-real-lab/results/oob-real-report.md、e2e/results/acceptance-report.md 等）—— **本报告不对应任何提交**
+> 生成：2026-09-27T15:53:19.683Z　｜　执行器：`node e2e/acceptance.mjs`　｜　Node v24.18.0
+> 代码版本：`3aa51f1`（工作区 clean）
 > 套件范围：**15/15 跑出断言**　｜　判定：**全量**
 > 前置：MySQL 8.0.28 @127.0.0.1:3306；secure_file_priv="NULL"
 
