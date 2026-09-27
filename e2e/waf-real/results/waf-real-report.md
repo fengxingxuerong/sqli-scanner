@@ -1,6 +1,6 @@
 # 真实 CRS v4.1.0 下 tamper 开/关 A/B（对外唯一口径）
 
-> 生成：2026-09-25T15:02:44.471Z　｜　靶场：真实 MySQL 8.0.28（e2e/real-mysql-lab/lab-app）　｜　CRS：官方规则原文 + 自实现执行器，档位 **PL1**（本文件是**默认口径 PL1** 那份；改档 `CRS_PL=1..4 npm run waf-real` 各写各的文件，互不覆盖；CRS 官方默认部署为 PL1）
+> 生成：2026-09-27T13:00:55.465Z　｜　靶场：真实 MySQL 8.0.28（e2e/real-mysql-lab/lab-app）　｜　CRS：官方规则原文 + 自实现执行器，档位 **PL1**（本文件是**默认口径 PL1** 那份；改档 `CRS_PL=1..4 npm run waf-real` 各写各的文件，互不覆盖；CRS 官方默认部署为 PL1）
 
 | 场景 | tamper 关 | tamper 开 | 结论 |
 |---|---|---|---|
