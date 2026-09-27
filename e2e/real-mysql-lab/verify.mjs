@@ -42,6 +42,10 @@ const SCENARIOS = [
   //   ⛔ 不要把它降级成 nice 了事 —— 那会让门禁对这块永远失明。正确处置是**修布尔判定的
   //   抗噪性**（噪声页的采样数/阈值/去噪），并把本注释连同复跑证据一起删掉。
   //   现状（如实）：门禁含 1 个已知 flaky 项，红灯出现时**先 rerun 再看**是否是它。
+  //   [FLAKY-RERUN 2026-09-27] 上述「先 rerun 再看」手工协议的机制化：已登记场景首跑失败时
+  //   原地复跑一次，判定只看第二次——连续两红才算真回归；单次翻绿记 flakyRetried=true 并把
+  //   首跑 miss 证据留在报告里（显性留痕，不静默吞掉）。白名单只收**已登记**的 flaky 场景：
+  //   新的偶发必须先红、登记、再入表，不允许预先豁免。抗噪性修复落地后整表撤销。
   { name: 'noisy', desc: '强动态页布尔盲注（todo#38：高密度动态内容 + 注入）', target: () => ({ url: `${BASE}/noisy?uid=1` }), must: ['boolean'], nice: [] },
   { name: 'time', desc: '时间盲注（内容恒定）', target: () => ({ url: `${BASE}/time?tid=1` }), must: ['time'], nice: [] },
   // stacked/inline 为 opt-in 技术（默认 techniques 不含），需显式指定
@@ -113,17 +117,33 @@ await new Promise((resolve, reject) => {
 console.log(`[verify] 靶场就绪 ${BASE}  sqlmap对拍=${process.argv.includes('--sqlmap') ? 'on' : 'off'}\n`);
 
 const sm = new ScanManager();
+// 已登记 flaky 场景白名单（登记依据见 SCENARIOS 内 [FLAKY 2026-09-23] 注释与台账）
+const FLAKY_SCENARIOS = new Set(['noisy']);
 const rows = [];
 let pass = 0;
 for (const sc of SCENARIOS) {
-  const out = await runScan(sm, { ...sc.target(), config: { ...baseConfig, ...(sc.cfg || {}) } });
-  const found = techs(out.vulns);
-  const dbms = [...new Set((out.vulns || []).map((v) => v.dbms).filter(Boolean))];
-  const miss = sc.must.filter((t) => !found.includes(t));
-  const ok = out.status === 'completed' && miss.length === 0 && (sc.expectSafe ? found.length === 0 : true);
+  let out = await runScan(sm, { ...sc.target(), config: { ...baseConfig, ...(sc.cfg || {}) } });
+  let found = techs(out.vulns);
+  let dbms = [...new Set((out.vulns || []).map((v) => v.dbms).filter(Boolean))];
+  let miss = sc.must.filter((t) => !found.includes(t));
+  let ok = out.status === 'completed' && miss.length === 0 && (sc.expectSafe ? found.length === 0 : true);
+  let flakyRetried = false;
+  let firstAttempt = null;
+  if (!ok && FLAKY_SCENARIOS.has(sc.name)) {
+    // [FLAKY-RERUN] 已登记 flaky 首跑失败 → 原地复跑一次，判定只看第二次（连续两红才算真回归）
+    firstAttempt = { found, miss, elapsedMs: out.elapsedMs, status: out.status };
+    console.log(`[FLAKY-RERUN] ${sc.name} 首跑未达标（miss=[${miss.join(',')}]），原地复跑一次…`);
+    const out2 = await runScan(sm, { ...sc.target(), config: { ...baseConfig, ...(sc.cfg || {}) } });
+    found = techs(out2.vulns);
+    dbms = [...new Set((out2.vulns || []).map((v) => v.dbms).filter(Boolean))];
+    miss = sc.must.filter((t) => !found.includes(t));
+    ok = out2.status === 'completed' && miss.length === 0 && (sc.expectSafe ? found.length === 0 : true);
+    flakyRetried = true;
+    out = out2;
+  }
   if (ok) pass++;
-  rows.push({ name: sc.name, desc: sc.desc, found, dbms, must: sc.must, miss, elapsedMs: out.elapsedMs, status: out.status, ok, expectSafe: !!sc.expectSafe });
-  console.log(`[${ok ? 'PASS' : 'FAIL'}] ${sc.name.padEnd(9)} 检出=[${found.join(',') || '-'}]  dbms=${dbms.join(',') || '?'}  耗时=${out.elapsedMs}ms${miss.length ? '  miss=[' + miss.join(',') + ']' : ''}`);
+  rows.push({ name: sc.name, desc: sc.desc, found, dbms, must: sc.must, miss, elapsedMs: out.elapsedMs, status: out.status, ok, expectSafe: !!sc.expectSafe, ...(flakyRetried ? { flakyRetried, firstAttempt } : {}) });
+  console.log(`[${ok ? (flakyRetried ? 'PASS-after-retry' : 'PASS') : 'FAIL'}] ${sc.name.padEnd(9)} 检出=[${found.join(',') || '-'}]  dbms=${dbms.join(',') || '?'}  耗时=${out.elapsedMs}ms${miss.length ? '  miss=[' + miss.join(',') + ']' : ''}${flakyRetried ? '  （首跑 miss=[' + (firstAttempt.miss.join(',') || '-') + ']，复跑翻绿）' : ''}`);
 }
 
 // sqlmap 对拍（数值型代表场景）

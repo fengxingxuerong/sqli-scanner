@@ -7,3 +7,8 @@
 # 检出上立刻变成假话（而这正是新加的那条门禁要守住的东西）。
 e2e/waf-real/crs/** -text
 server/src/core/tamper/upstream-sqlmap-tamper.json -text
+
+# [CRLF-FIX 2026-09-27] CI 守卫（ciNightlyEngine.guard 等）按行边界文本扫描 workflows；
+# Windows 运行器检出时 LF→CRLF 会让 `:\n` 边界匹配失败 → jobBlock 吞到文件尾 → 假红。
+# 对 workflows 关闭换行改写（仓库内本就是 LF，检出保持字节原样；不产生任何入库 diff）。
+.github/workflows/** -text

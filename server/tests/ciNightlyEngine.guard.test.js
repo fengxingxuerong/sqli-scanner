@@ -27,7 +27,11 @@ const REPO = path.resolve(HERE, '..', '..');
 const CI_YML = path.join(REPO, '.github', 'workflows', 'ci.yml');
 const ENGINE_SCRIPT = 'e2e/waf-real/modsec-live.mjs';
 
-const ci = readFileSync(CI_YML, 'utf8');
+// [CRLF-FIX 2026-09-27] Windows 运行器 checkout 会把 LF 转成 CRLF（仓库 .gitattributes 只对
+// 上游资产关了换行改写）。本守卫按行边界切 job（`:\n`），CRLF 下 `:\r\n` 匹配不到 →
+// jobBlock 吞到文件尾、把别的 job 的 continue-on-error 误算进来（windows-latest 实测假红）。
+// 统一按 LF 归一后再解析；配合 .gitattributes 对 workflows 的 -text 规则双保险。
+const ci = readFileSync(CI_YML, 'utf8').replace(/\r\n/g, '\n');
 
 /** 顶层 on.schedule 里的所有 cron 表达式 */
 export function cronLines(text) {
