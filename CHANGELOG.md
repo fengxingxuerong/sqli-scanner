@@ -4,6 +4,36 @@
 
 ## [Unreleased]
 
+### 2026-09-28 批次 · 真机 WAF 对拍从「放行率」升级到「打穿率」
+
+首轮真机对拍（09-27）只证明了「WAF 放行」——靶站是 echo 后端，不碰数据库，所以那时的诚实边界
+写着「放行 ≠ 能打穿，禁止对外声明绕过率」。本批把那一环补上：同一条样本要同时满足
+①过了 WAF ②后端真 MySQL 真执行了注入并吐出证据，才记为一次「打穿」。
+
+- **靶站真库化**（`e2e/waf-real/modsec-target.mjs`）：新增 `MODSEC_TARGET_DB=1` 模式，把 id
+  **原样拼进** `SELECT ... WHERE id = <id>` 交给真 MySQL 执行，结果与错误都回显。
+  ⚠️ SQL 执行失败也回 **200**（body 前缀 `SQLERR:`）：若用 5xx，对拍脚本的「非 2xx = 被 WAF 拦」
+  会把「到后端了但 SQL 报错」误算成拦截——与「依赖真库但环境没起库 → ECONNREFUSED 被记成
+  产品 FAIL」是同一类假象。另加 `SET SESSION max_execution_time=1000`（SLEEP 样本不拖超时）
+  与 `/__mode` 探针（让对拍脚本能判定本轮口径是放行率还是打穿率）。
+- **判据分层并抽成可单测模块**（`e2e/waf-real/pwnVerdict.mjs`）：`blocked / echo / reached_sql /
+  pwn_result / pwn_error / unknown`。两条防假绿纪律：结果集证据**必须** `ROWS:` 前缀
+  （echo 后端会原样回显 payload，任何「body 里出现 payload」形态的判据在它底下恒真）；
+  报错证据只认 MySQL 自己生成的短语（`XPATH syntax error` / `Duplicate entry`）。
+- **加直连通道量「可打穿上界」**（`modsec-live.mjs`）：绕过 WAF 直接打靶站，得到「每条样本本身
+  能打穿到什么程度」。这才能把「变形把 payload 语义弄坏了」与「WAF 真拦住了」分开 ——
+  打穿率的分母是上界而不是样本总数。上界为 0 时硬失败（此时「经 WAF 打穿 0 条」不能归因于 WAF）。
+- **降级必须是可见的失败**：CI 里设 `MODSEC_REQUIRE_DB=1`，库没起来 / 靶站退回 echo 模式
+  → 对拍脚本 exit 1，不接受一份看着正常的「放行率」报告冒充绕过能力。
+- CI job `modsec-live` 接 `mysql:8.0`（复用 acceptance job 的 docker run 起法）并等待就绪，
+  timeout 30 → 45。
+- 守卫 `server/tests/modsecLive.wiring.test.js`（13 用例）：判据分层行为断言（含两条回显反例）
+  + 源码接线断言。缺陷注入 **6/6 杀**；期间揪出并修掉一处**自己的假绿** —— 判据原用
+  `match(/MODSEC_REQUIRE_DB/g).length >= 2` 计数，被上方**说明注释**里的同名变量名喂饱，
+  真把 PL1 的配置删掉依然全绿。已改成「每个档位 env 块各自紧邻匹配」后注入即杀。
+- 门：`typecheck:server` ✓ `facts:check` ✓ `readme:check` ✓ `arch:guard` ✓ `refs:check` ✓ eslint ✓。
+
+
 ### 2026-09-27 批次 · README 的 API 表与命令行示例：从"没人核"变成双向核对
 
 接着上一批的判据面，把两类"照抄就会错"的文档补上门禁。
