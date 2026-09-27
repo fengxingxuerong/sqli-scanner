@@ -309,31 +309,30 @@ SSE 实时进度流，事件结构 `{ type, scanId, ts, payload }`，事件类�
 
 #### `POST /scan/:id/report/ai`
 
-调用 AI 生成漏洞报告描述与修复建议。
+调用 AI 生成漏洞报告描述与修复建议。**不接受任何请求参数**——key/model 组合仅由服务端
+环境变量控制（防他人通过 API 选择不同 key 烧配额）。限速：每 IP 每分钟 3 次（429）。
 
 ```bash
-curl -X POST http://127.0.0.1:4567/api/scan/abc123/report/ai \
-  -H 'Content-Type: application/json' \
-  -d '{ "keyIndex": 0, "modelIndex": 0 }'
+curl -X POST http://127.0.0.1:4567/api/scan/abc123/report/ai
 ```
 
-| 参数 | 类型 | 说明 |
-|------|------|------|
-| `keyIndex` | 0-2 | 预置 API key 索引（默认 0） |
-| `modelIndex` | 0-2 | 模型索引：0=deepseek-v4-flash, 1=sensenova-6.8-flash-lite, 2=glm-5.2（默认 0） |
+环境变量（真实取数源 `server/src/services/ReportAI.js`）：`AI_REPORT_API_BASE`（OpenAI
+兼容 endpoint，数据外发 opt-in——未设置时返回 409，不会静默外发）+ `AI_REPORT_KEY_1..3`
+（至少 1 个即启用，失败/429 自动同角色降级再跨角色降级）。角色流水线固定为
+analyst→writer→reviewer；超时由路由硬编码 120s（`reportAiRoutes.js`）。
 
 ```json
-{ "code": 0, "data": { "success": true, "model": "deepseek-v4-flash", "content": "…", "usage": { "promptTokens": 500, "completionTokens": 200 } }, "message": "ok" }
+{ "code": 0, "data": { "success": true, "model": "deepseek-v4-flash→glm-5.2→sensenova-6.8-flash-lite", "content": "…", "reviewNote": "✅ 已经过安全审阅角色校验", "pipeline": "analyst→writer→reviewer", "usage": null }, "message": "ok" }
 ```
 
-可通过环境变量覆盖默认选择：`AI_REPORT_KEY_INDEX`（默认 0）、`AI_REPORT_MODEL_INDEX`（默认 0）、`AI_REPORT_TIMEOUT_MS`（默认 30000）。
+> 命中报告缓存（TTL 内同指纹复扫）时返回体额外带 `"cached": true`。
 
 #### `GET /scan/:id/report/ai/configs`
 
-返回所有 9 种 key+model 组合的配置预览（3 key × 3 model）。
+返回 3 个角色的固定配置预览（role→model 映射在服务端写死）。
 
 ```json
-{ "code": 0, "data": [ { "keyIndex": 0, "modelIndex": 0, "label": "Key#0 × deepseek-v4-flash", "model": "deepseek-v4-flash" }, … ], "message": "ok" }
+{ "code": 0, "data": [ { "role": "analyst", "model": "deepseek-v4-flash", "desc": "漏洞分析+风险评估", "label": "deepseek-v4-flash (漏洞分析+风险评估)" }, … ], "message": "ok" }
 ```
 
 ---

@@ -129,13 +129,14 @@ export const apiClient = {
   tampers: () => apiClient.get<TamperInfo[]>('/tampers'),
   // AI 报告生成
   report: {
-    /** 生成 AI 漏洞分析报告（POST /api/scan/:id/report/ai） */
-    ai: (scanId: string, config?: { keyIndex?: number; modelIndex?: number }) =>
+    /** 生成 AI 漏洞分析报告（POST /api/scan/:id/report/ai）。
+     *  不接受 key/model 参数：组合仅由服务端环境变量控制（reportAiRoutes.js） */
+    ai: (scanId: string) =>
       apiClient.post<{ success: boolean; model: string; content: string; usage?: object }>(
-        `/scan/${scanId}/report/ai`, config || {}),
-    /** 列出可用 AI 模型组合（GET /api/scan/:id/report/ai/configs） */
+        `/scan/${scanId}/report/ai`, {}),
+    /** 列出 3 个角色的固定配置（GET /api/scan/:id/report/ai/configs） */
     aiConfigs: (scanId: string) =>
-      apiClient.get<{ keyIndex: number; modelIndex: number; label: string; model: string }[]>(
+      apiClient.get<{ role: string; model: string; desc: string; label: string }[]>(
         `/scan/${scanId}/report/ai/configs`),
   },
 };

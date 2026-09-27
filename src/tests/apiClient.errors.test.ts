@@ -140,13 +140,6 @@ describe('apiClient 错误体系与端点封装', () => {
     await apiClient.report.ai('scan-9');
     expect(mocked.__instance.post).toHaveBeenCalledWith('/scan/scan-9/report/ai', {}, undefined);
 
-    await apiClient.report.ai('scan-9', { keyIndex: 1, modelIndex: 2 });
-    expect(mocked.__instance.post).toHaveBeenCalledWith(
-      '/scan/scan-9/report/ai',
-      { keyIndex: 1, modelIndex: 2 },
-      undefined
-    );
-
     await apiClient.report.aiConfigs('scan-9');
     expect(mocked.__instance.get).toHaveBeenCalledWith('/scan/scan-9/report/ai/configs', undefined);
   });

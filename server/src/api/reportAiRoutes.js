@@ -88,7 +88,7 @@ router.post('/:id/report/ai', async (req, res, next) => {
   }
 });
 
-// GET /api/scan/:id/report/ai/configs — 列出 9 种可用组合
+// GET /api/scan/:id/report/ai/configs — 列出 3 个角色的固定配置（role→model 服务端写死）
 router.get('/:id/report/ai/configs', (req, res) => {
   res.json({
     code: 0,
