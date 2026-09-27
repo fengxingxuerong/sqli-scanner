@@ -25,7 +25,7 @@ import { dirname, resolve, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import net from 'node:net';
 // [DECISION-2026-09-22] 套件状态判定（含「沙箱起不来」三形态识别）抽成可单测模块
-import { classifySuite } from './lib/suiteVerdict.mjs';
+import { classifySuite, evaluateExpect } from './lib/suiteVerdict.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, '..');
@@ -44,6 +44,13 @@ const SKIP_HEAVY = process.argv.includes('--skip-heavy');
 const ONLY = (() => {
   const a = process.argv.find((x) => x.startsWith('--only='));
   return a ? new Set(a.slice('--only='.length).split(',').map((s) => s.trim()).filter(Boolean)) : null;
+})();
+// --expect=fileRead,fileWrite —— 「本轮这些套件必须真跑到」。optional 套件缺环境只打 SKIP
+// 而退出码仍是 0，于是文件读写 / OOB 这类头条能力可以整轮不测而门禁仍绿；CI 用它把自己
+// 确实 provisioning 过的套件变成硬要求（判据在 lib/suiteVerdict.mjs:evaluateExpect）。
+const EXPECT = (() => {
+  const a = process.argv.find((x) => x.startsWith('--expect='));
+  return a ? a.slice('--expect='.length).split(',').map((s) => s.trim()).filter(Boolean) : [];
 })();
 const PORT_BASE = 8200 + (process.pid % 200); // 避开常驻端口，支持并行跑
 
@@ -823,5 +830,13 @@ for (const r of results) {
 // 里（该目录级 ignore 已于 2026-09-19 撤掉），所以 `tally is assigned but never used` 这条 error 谁也没看见。
 console.log(`\n${tally()}`);
 console.log(`套件范围：${trulyRan}/${SUITES.length} 跑出断言${isFullRun ? '' : '（**非全量**，未覆盖全量报告）'}`);
+// 「必须真跑到」清单：SKIP / BLOCKED / FAIL / 缺席都算未兑现 —— optional 套件不能被读成"跳过即通过"
+const expectViolations = evaluateExpect(EXPECT, results, SUITES);
+if (expectViolations.length) {
+  console.log(`\n⛔ --expect 未兑现（${expectViolations.length} 项，本门禁判红）：`);
+  for (const v of expectViolations) console.log(`   · ${v}`);
+} else if (EXPECT.length) {
+  console.log(`\n✅ --expect 全部兑现：${EXPECT.join('、')}`);
+}
 console.log(`报告：${relative(ROOT, reportPath)}`);
-process.exit(failed.length ? 1 : 0);
+process.exit(failed.length || expectViolations.length ? 1 : 0);

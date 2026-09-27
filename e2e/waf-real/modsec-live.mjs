@@ -166,6 +166,7 @@ async function main() {
   md.push('| 项 | 值 |');
   md.push('|---|---|');
   md.push(`| 镜像 | \`${process.env.MODSEC_IMAGE || 'owasp/modsecurity-crs:nginx（tag 未记录）'}\` |`);
+  md.push(`| 镜像 digest | \`${process.env.MODSEC_DIGEST || '未记录'}\` |`);
   md.push(`| CRS 版本 | ${process.env.MODSEC_CRS_VERSION || '未记录（容器内 /etc/modsecurity.d 取证失败）'} |`);
   md.push(`| PARANOIA | ${process.env.MODSEC_PARANOIA || '未记录'} |`);
   md.push(`| 阻断阈值 | ${process.env.MODSEC_ANOMALY_INBOUND || '未记录'} |`);

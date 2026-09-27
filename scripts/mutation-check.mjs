@@ -90,6 +90,11 @@ const TARGETS = [
     file: 'src/engine/scan/finalize.js',
     tests: ['tests/finalize.report.test.js'],
   },
+  {
+    // 注入点发现 + 点位准备（226 行，此前零测试挂载，func 31%）
+    file: 'src/engine/scan/discover.js',
+    tests: ['tests/discover.pipeline.test.js'],
+  },
 ];
 
 /**

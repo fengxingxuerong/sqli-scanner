@@ -7,9 +7,13 @@ on:
     branches: [main, master]
   # [修复] schedule/workflow_dispatch 是 workflow 级触发器，只能放在顶层 on: 下，
   # 原先写在 job 级属于非法键。schedule 触发时其余 job 通过 `if: github.event_name != 'schedule'` 跳过，
-  # 仅运行 tamper-waf-matrix（周度矩阵）；workflow_dispatch 允许手动触发任意 job。
+  # 仅运行 tamper-waf-matrix（矩阵档）与 modsec-live（真 ModSecurity 对拍）；
+  # workflow_dispatch 允许手动触发任意 job。
+  # [2026-09-27] 周度改**每日**：modsec-live 是对外 WAF 数字的唯一外部裁判（自实现
+  # crs-engine 判自己不算证据），一周一次意味着偏差最长有 7 天窗口无人看见。
+  # PR 时长不受影响（代价只落在 nightly）。判据见 server/tests/ciNightlyEngine.guard.test.js。
   schedule:
-    - cron: '0 3 * * 1'
+    - cron: '0 3 * * *'
   workflow_dispatch:
 
 jobs:
@@ -421,7 +425,13 @@ jobs:
           RECALL_REQUIRE_MYSQL: '1'
         timeout-minutes: 8
       - name: 全方位验收门禁（事实断言模式）
-        run: npm run acceptance
+        # --expect：本 job 已用「文件写入通道预检」那一步硬验过 INTO OUTFILE 可用
+        # （secure_file_priv 未放行时那条 SELECT 就会被拒 → 预检先红），所以文件读写
+        # 两个套件在这里**没有"环境不满足"的余地**。不写 --expect 的话，它们 SKIP 也只打一行
+        # 原因、退出码仍 0 —— 头条能力整轮不测而门禁仍绿（2026-09-27 审计实证）。
+        # oob-real / redteam 刻意不列入：它们的 PG 与靶场是 continue-on-error 拉的，
+        # 起不来属已知可能，纳入会把环境抖动变成长期红。
+        run: npm run acceptance -- --expect=file-read,file-write
         env:
           MYSQL_PORT: 3306
           MYSQL_USER: root

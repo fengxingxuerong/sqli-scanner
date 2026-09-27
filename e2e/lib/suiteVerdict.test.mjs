@@ -3,7 +3,7 @@
 // 判错了会把下一个人引向错误的排障方向（§G / §S 两次都栽在这里）。
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { isSandboxDead, classifySuite } from '../lib/suiteVerdict.mjs';
+import { isSandboxDead, classifySuite, evaluateExpect } from '../lib/suiteVerdict.mjs';
 
 // ── 三种「沙箱没起来」形态都必须被认出 ──
 const SHAPE_INNER = `[sandbox-run] node = node
@@ -100,4 +100,37 @@ test('classifySuite：断言失败且沙箱健在 → FAIL（真红不许被 BLO
 test('classifySuite：SKIP 优先于沙箱判据（跳过是显式声明，不该被改写成 BLOCKED）', () => {
   const r = classifySuite({ pass: true, skipped: true, skipReason: 'x' }, SHAPE_INNER, 0);
   assert.equal(r.status, 'SKIP');
+});
+
+// ── evaluateExpect：optional 套件"跳过即通过"的通道必须被堵住 ──────────────────
+const SUITES = [{ id: 'file-read' }, { id: 'file-write' }, { id: 'unit' }];
+
+test('evaluateExpect：要求真跑却 SKIP → 违规（这正是 exit 0 的假绿来源）', () => {
+  const bad = evaluateExpect(['file-read'], [{ id: 'file-read', status: 'SKIP', facts: { 原因: 'secure_file_priv 未放行' } }], SUITES);
+  assert.equal(bad.length, 1);
+  assert.match(bad[0], /SKIP/);
+  assert.match(bad[0], /secure_file_priv/, '违规说明要带上 SKIP 原因，否则下一个人还得去翻报告');
+});
+
+test('evaluateExpect：真跑到 PASS → 零违规（判据不是"一律红"）', () => {
+  assert.deepEqual(evaluateExpect(['file-read', 'file-write'], [{ id: 'file-read', status: 'PASS' }, { id: 'file-write', status: 'PASS' }], SUITES), []);
+});
+
+test('evaluateExpect：未知 id 也算违规 —— 套件改名后要求会永不兑现（空转）', () => {
+  const bad = evaluateExpect(['fileRead'], [{ id: 'file-read', status: 'PASS' }], SUITES);
+  assert.equal(bad.length, 1);
+  assert.match(bad[0], /不是已知套件 id/);
+});
+
+test('evaluateExpect：BLOCKED / FAIL / 缺席 三种都不算兑现', () => {
+  const one = (status) => evaluateExpect(['unit'], [{ id: 'unit', status }], SUITES).length;
+  assert.equal(one('BLOCKED'), 1);
+  assert.equal(one('FAIL'), 1);
+  assert.equal(one('SKIP'), 1);
+  assert.equal(evaluateExpect(['unit'], [], SUITES).length, 1, '压根没进结果集（--only 跑子集）也要判违规');
+});
+
+test('evaluateExpect：没传 --expect 时零违规（默认行为不变，向后兼容）', () => {
+  assert.deepEqual(evaluateExpect([], [{ id: 'unit', status: 'SKIP' }], SUITES), []);
+  assert.deepEqual(evaluateExpect(undefined, undefined, undefined), []);
 });

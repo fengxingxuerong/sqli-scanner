@@ -68,3 +68,41 @@ export function classifySuite(verdict, out, code) {
   }
   return { status: 'FAIL', reason: verdict.reason || `断言未通过（退出码 ${code}）` };
 }
+
+/**
+ * 「本轮必须真跑到」清单的判定（acceptance 的 `--expect=id1,id2`）。
+ *
+ * 危害（2026-09-27 全栈审计实证）：optional 套件缺依赖时只打 SKIP，而收尾是
+ * `process.exit(failed.length ? 1 : 0)` ⇒ fileRead / fileWrite / oob-real 这类
+ * **头条能力可以整轮不测而门禁仍然绿**。CI 里 PG 与红队靶场正是用 continue-on-error
+ * 拉起的 —— 起不来就落进这条静默通道。本函数把"调用方声明必须跑到"变成非零退出。
+ *
+ * 判据含反向一道：`--expect` 里出现未知 id 直接判违规。否则一次套件重命名就会把要求
+ * 变成永不兑现的空转（本仓同类守卫的"不空转"判据是同一个道理）。
+ *
+ * @param {string[]} expectIds 要求本轮真跑到的套件 id
+ * @param {Array<{id:string,status:string,facts?:object}>} results 本轮各套件结果
+ * @param {Array<{id:string}>} suites SUITES 全表（判"未知 id"用）
+ * @returns {string[]} 违规说明（空数组 = 全部兑现）
+ */
+export function evaluateExpect(expectIds, results, suites) {
+  const bad = [];
+  const known = new Set((suites || []).map((s) => s.id));
+  const byId = new Map((results || []).map((r) => [r.id, r]));
+  for (const id of expectIds || []) {
+    if (!known.has(id)) {
+      bad.push(`--expect 里的「${id}」不是已知套件 id —— 拼错或套件已删 ⇒ 这条要求永不兑现`);
+      continue;
+    }
+    const r = byId.get(id);
+    if (!r) {
+      bad.push(`要求「${id}」真跑，但它没进本轮结果（带 --only 跑子集时不该同时用 --expect）`);
+      continue;
+    }
+    if (r.status !== 'PASS') {
+      const why = (r.facts && (r.facts.原因 || r.facts.缺失依赖)) || '未记录原因';
+      bad.push(`要求「${id}」真跑，实际 ${r.status}：${why}`);
+    }
+  }
+  return bad;
+}
