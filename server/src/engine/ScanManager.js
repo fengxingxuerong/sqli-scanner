@@ -18,7 +18,7 @@ import { recommend } from '../core/waf/wafRecommend.js';
 import { ReportGenerator } from '../services/ReportGenerator.js';
 import { createTarget, createReport, createVulnerability } from './models.js';
 // [P0-FIX 2026-09-09] 生产护栏：扫描级高危池策略通过 AsyncLocalStorage 下发给 selectPayloads
-import { runWithDestructivePolicy, countDestructiveCandidates } from './payloadRegistry.js';
+import { runWithDestructivePolicy, countDestructiveCandidates, registryMode } from './payloadRegistry.js';
 import { TECHNIQUE_TYPES } from './payloads.js';
 import { defaults } from '../config/defaults.js';
 import * as eventBus from '../core/eventBus.js';
@@ -713,7 +713,7 @@ export function collectCapabilityConstraints(config = {}) {
   const confirmDestructive = config.confirmDestructive === true;
   const risk = Number(config.risk) || Number(defaults.risk) || 2;
   const level = Number(config.level) || Number(defaults.level) || 1;
-  const useRegistry = config.useRegistry === true;
+  const useRegistry = registryMode(config);
 
   if (productionMode && !confirmDestructive) {
     let n = 0;
@@ -735,6 +735,15 @@ export function collectCapabilityConstraints(config = {}) {
       '扁平 payload 路径（useRegistry=false）不经过注册表高危池门控：REST/UI 下高危向量根本不会投放'
         + '（只允许 CLI 的 --risk 3 + --confirm-destructive 显式合并到进程级 payload 池）。' +
         '要真正拿到 risk=3 语义请用 useRegistry=true（受本护栏约束）或走 CLI 双开关'
+    );
+  }
+  // testFilter/testSkip 是**注册表条目的属性**（按 entry.id 过滤）：扁平路径下这两个键没有任何读取点。
+  // 此前 time 通道默认走注册表（另三个走扁平），所以用户设了 --test-filter 会得到「只筛了一条通道」
+  // 的结果而无处可见。三通道判定点统一后，这里把「完全没生效」这一侧也讲明白。
+  if (!useRegistry && (config.testFilter || config.testSkip)) {
+    out.push(
+      `--test-filter/--test-skip 未生效（本次收到 ${config.testFilter ? `filter=${config.testFilter}` : ''}${config.testFilter && config.testSkip ? ' ' : ''}${config.testSkip ? `skip=${config.testSkip}` : ''}）：` +
+        '过滤条件作用于声明式注册表条目，扁平 payload 路径没有读取点。确需按 id 精选向量请同时设 useRegistry=true（CLI：--use-registry）'
     );
   }
   const so = config.secondOrder && typeof config.secondOrder === 'object' ? config.secondOrder : {};

@@ -1,7 +1,7 @@
 import { Detector } from '../Detector.js';
 import { createDetectionResult } from '../models.js';
 import { PAYLOADS, fillPayload, ERROR_SIG, ERROR_SIG_BY_DBMS, dbmsFromError, getClauseTemplates, CLAUSE_PAYLOADS } from '../payloads.js';
-import { selectPayloads, orderEntriesByBoundary } from '../payloadRegistry.js';
+import { selectPayloads, orderEntriesByBoundary, registryMode } from '../payloadRegistry.js';
 import { extractErrorContext, extractSqlFragment } from '../parseErrors.js';
 // [UNIFY 2026-09-23] 回显归一化/剔除的唯一实现。本文件原先自留一份私有副本，
 // 与 echoStrip.js 是同一设施的两个版本且不等价（副本多 SQL 转义变体），
@@ -40,7 +40,7 @@ export class ErrorDetector extends Detector {
     // useRegistry 路径（对标 sqlmap 声明式 <test> 筛选）：config.useRegistry===true 时改用
     // selectPayloads() 按 level/risk/dbms 从声明式注册表筛选，testFilter/testSkip 按 id 过滤；
     // 注册表的 clause 字段统一覆盖子句位置变体，不再单独遍历 CLAUSE_PAYLOADS。
-    const useRegistry = ctx.config?.useRegistry === true;
+    const useRegistry = registryMode(ctx.config);
     const templates = this._resolveErrorTemplates(ctx, dbms);
 
     let hit = await this._probeTemplates(ctx, templates, baseMatch);
@@ -116,7 +116,7 @@ export class ErrorDetector extends Detector {
    * @returns {string[]}
    */
   _resolveErrorTemplates(ctx, dbms) {
-    if (ctx.config?.useRegistry === true) {
+    if (registryMode(ctx.config)) {
       const cfg = ctx.config || {};
       const level = Number(cfg.level) > 0 ? Number(cfg.level) : undefined;
       const risk = Number(cfg.risk) > 0 ? Number(cfg.risk) : undefined;

@@ -275,3 +275,22 @@ export function selectPayloadsForCtx(ctx = {}, extra = {}) {
     testSkip: extra.testSkip ?? cfg.testSkip,
   });
 }
+
+/**
+ * 「声明式注册表 vs 扁平 payload 数组」的唯一判定点 —— 四个检测器、能力护栏与文档都取这一个结论。
+ *
+ * 为什么必须有单一真相：这个开关曾在 Boolean/Error 里判 `useRegistry === true`、在 TimeBlind 里判
+ * `useRegistry !== false` ⇒ 默认配置（false）下**同一次扫描**里 time 走注册表、其余通道走扁平，
+ * 于是 --test-filter/--test-skip/level/risk 只在其中一半通道生效 —— 调用方看到「参数被接受」，
+ * 看不到它只作用于一条通道（与 guards.production.test.js 记的那类「开关存在、语义不明」同形）。
+ *
+ * 统一方向取「显式 true 才切换」而不是反过来：两侧条目集互有增减（PG boolean 扁平 55 / 注册表 25，
+ * MySQL error 扁平 61 / 注册表 69），将默认切到注册表会静默换掉三条主通道向量集；
+ * 而 defaults.js 对该键的承诺本就是「false=扁平（默认，零回归）」。
+ *
+ * @param {object} [config] 扫描配置（target.config）
+ * @returns {boolean} true = 本次扫描**所有**检测通道都走声明式注册表
+ */
+export function registryMode(config = {}) {
+  return (config || {}).useRegistry === true;
+}

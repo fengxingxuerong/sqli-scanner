@@ -93,6 +93,22 @@ test('二阶启用但未放行写请求 → 记约束；enableExtract 给提示'
   assert.deepEqual(collectCapabilityConstraints({ risk: 2 }), []);
 });
 
+// ── 3) testFilter/testSkip 只在注册表路径有读取点：缺省档必须明说「没生效」 ──────
+test('扁平路径下设了 --test-filter：constraints 告知未生效（此前只有 time 通道偷偷读）', () => {
+  const notes = collectCapabilityConstraints({ risk: 2, testFilter: 'benchmark' });
+  assert.ok(notes.some((x) => /test-filter/.test(x) && /未生效/.test(x)), JSON.stringify(notes));
+  // 只有 testSkip 时同样要覆盖（判据不许只写一侧）
+  assert.ok(
+    collectCapabilityConstraints({ risk: 2, testSkip: 'stacked' }).some((x) => /test-skip/.test(x)),
+    'testSkip 单独设置时也要告知'
+  );
+  // 开注册表 → 该约束消失：过滤条件确实有了读取点
+  assert.ok(
+    !collectCapabilityConstraints({ risk: 2, testFilter: 'benchmark', useRegistry: true }).some((x) => /未生效/.test(x)),
+    'useRegistry=true 时不该再报「未生效」'
+  );
+});
+
 test('报告首屏渲染 constraints（HTML 转义、Markdown 成节）', () => {
   const rg = new ReportGenerator();
   const report = {

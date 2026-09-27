@@ -1,7 +1,7 @@
 import { Detector } from '../Detector.js';
 import { createDetectionResult } from '../models.js';
 import { PAYLOADS, fillPayload, getClauseTemplates } from '../payloads.js';
-import { selectPayloads, orderEntriesByBoundary } from '../payloadRegistry.js';
+import { selectPayloads, orderEntriesByBoundary, registryMode } from '../payloadRegistry.js';
 import { defaults } from '../../config/defaults.js';
 import { mean, std, effectiveThreshold, adaptiveTimeFloor } from '../../core/statsHelper.js';
 
@@ -92,14 +92,15 @@ export class TimeBlindDetector extends Detector {
   }
 
   /**
-   * 时间向量模板解析（声明式注册表默认路径）。
-   * 默认 true：使用 selectPayloads() 按 level/risk/dbms/testFilter/testSkip 筛选
-   * 声明式注册表条目（对标 sqlmap level/risk/dbms + --test-filter/--test-skip 过滤语义），
-   * 返回其 template 字段数组。
-   * config.useRegistry === false 时回退 PAYLOADS[dbms].time 扁平数组（向后兼容）。
+   * 时间向量模板解析。
    *
-   * 注册表未覆盖的 DBMS（ClickHouse/Sybase/H2/MonetDB 等仅有 PAYLOADS）自动回退 legacy 路径，
-   * 保证零回归。
+   * 与其余三个检测器**同一个**判定点（payloadRegistry.registryMode）：`useRegistry === true`
+   * 才改用 selectPayloads() 按 level/risk/dbms/testFilter/testSkip 筛选声明式注册表条目
+   * （对标 sqlmap <test> 过滤语义），返回其 template 字段数组；否则用 PAYLOADS[dbms].time 扁平数组。
+   *
+   * 这里曾是 `useRegistry !== false` —— 与其余三个检测器相反，导致默认配置下只有 time 通道
+   * 读注册表：--test-filter/--test-skip/level/risk 在 time 上生效、在布尔/报错上不生效，
+   * 而 config/defaults.js 承诺的是「false=扁平（默认）」。统一为跟随该承诺。
    *
    * {ORIG} 占位符不在本方法替换 — 由下游 _legacyDetect / _robustDetect 经 fillPayload() 填充。
    *
@@ -110,7 +111,7 @@ export class TimeBlindDetector extends Detector {
   _resolveTimeTemplates(ctx, dbms) {
     const cfg = ctx.config || {};
     let list = null;
-    if (cfg.useRegistry !== false) {
+    if (registryMode(cfg)) {
       const level = Number(cfg.level) > 0 ? Number(cfg.level) : undefined;
       const risk = Number(cfg.risk) > 0 ? Number(cfg.risk) : undefined;
       const testFilter = cfg.testFilter || undefined;

@@ -347,7 +347,10 @@ export async function prefilterPoints(deps, ctxBase, target, points) {
         const [base, quote, ...timed] = trio;
         // 保守：任一探测失败（网络错误/超时）→ 保留做完整检测，绝不因探测失败漏检
         if (!base || base.res == null || isUnusableResponse(base.res) || !quote || quote.res == null || isUnusableResponse(quote.res)) return;
-        if (timed.some((t) => !t || t.res == null || isUnusableResponse(t.res))) return;
+        // 探针集为空（SQLite 无服务端 sleep，timeProbeValues 返回 []）时，「时间向量无信号」
+        // 这一侧**无从判定**：下面两处的 .some() 在空数组上恒 false，会被读成「没延迟」→
+        // 整点剪掉 = 假阴性。空集与「探测失败」同类，一律保守保留。
+        if (timed.length === 0 || timed.some((t) => !t || t.res == null || isUnusableResponse(t.res))) return;
         // 探测① 单引号报错：闭合破坏 → 报错/空页/500 → 响应明显偏离基线 → 可疑保留
         const baseBody = String(base.res?.data ?? '');
         const baseStatus = base.res?.status ?? null;

@@ -4,6 +4,59 @@
 
 ## [Unreleased]
 
+### 2026-09-27 批次 · 时间通道的三处「判据与注释不同源」
+
+六路并行全栈审计里，引擎层是唯一一处**判据本身错**的层。挑出的三条都在时间/payload
+选择这条主判据链上，形状各不相同但根子相同：注释/文档写的是一个口径，代码做的是另一个。
+
+1. **时间盲注「提取」阶段从来没加基线**。`blindExtractor.js` 里那行注释一直写着
+   「以基线耗时 + timeThresholdMs 为准，避免目标本身慢造成误判」，代码却是
+   `thresholdMs = config.timeThresholdMs * 1` —— 基线没加。本仓另外三条时间路径**都**加了
+   （`TimeBlindDetector` 的 μ+z·σ、`StackedDetector` 的 `max(阈值, 基线+sleep/2)`、
+   `DBFingerprinter` 的 `baselineRtt + thresholdMs`），唯独拖库输出的这一段漏了。
+   后果不是「值偏一点」：自身响应慢于阈值的目标上「耗时 ≥ 阈值」对每个条件恒成立 ⇒
+   长度二分恒判真 → 顶到 `blindMaxLen` 上界 → 逐位置循环失控。
+   - 用例 `tests/extractor.timeBaseline.test.js` 三条都带 15s 截止时间：**未修复时第一轮
+     就跑不完**（现场打印「已发请求 218 个」），修复后 0.7/3.5/3.5s 通过。
+   - 基线取 3 次**串行**中位数（同 `StackedDetector` 的误报防护）：并发采样会把令牌桶排队
+     时间只算进基线，判据侧与基线侧必须同量。全失败回落 0 = 旧行为。
+   - 注入超时同步补基线（`StackedDetector` 的 ★FIX [P0] 同因）：否则慢站上「基线+sleep」
+     超 timeout → `_send` 返回 null → 全部条件判假 → 一次本可提取的值被误报「取不出」。
+   - `calibrateTimeSleep` 新增可选入参 = 判定侧已含基线的阈值，标定与判定同源；
+     未传时回落配置阈值（直调它的 T4 用例行为零变化）。
+
+2. **预筛选在空探针数组上恒判「无迹象」**。`timeProbeValues('SQLite')` 返回 `[]`
+   （SQLite 无服务端 sleep，这是诚实的），而 `prefilterPoints` 用 `timed.some(...)` 决定跳过
+   —— 空数组上 `.some()` 恒 false ⇒ 只要基线与单引号探针同构就整点剪掉。
+   与本模块文件头那条红线（「不可判定一律保守保留」）相反：这次不是探测失败，
+   是**判据落在不存在的探针上**。只在显式 `--dbms sqlite` 时命中（未定库走 default 分支有 3 条探针）。
+   - `tests/prefilter.emptyProbe.test.js` 两向都钉：SQLite 全保留（修复前 0/2 红）、
+     MySQL 与未定库无信号时**仍要剪**（别把 200+ 请求的剪枝收益一起赔掉）。
+
+3. **`useRegistry` 在兄弟检测器里被写成两种判据**：Boolean/Error 判 `=== true`、
+   TimeBlind 判 `!== false` ⇒ 默认配置下**同一次扫描**里 time 走声明式注册表、布尔/报错走扁平
+   ⇒ `--test-filter/--test-skip/level/risk` 只在一半通道生效，调用方只看到「参数被接受」。
+   `docs/项目评价-2026-09-23.md:225` 早就把这一类命名为「`useRegistry` 双拷贝漂移」，本轮收口。
+   - 新增 `payloadRegistry.registryMode(config)` 作唯一判定点，四处调用点全部改走它
+     （三个检测器 + `ScanManager` 的能力护栏）。统一方向取「显式 true 才切换」：
+     两侧向量集互有增减（MySQL boolean 扁平 69/注册表 49，MySQL error 扁平 61/注册表 69），
+     没有任何一侧免费，而 `defaults.js` 与 `docs/api.md:225` 的承诺本就是「false=扁平（默认）」。
+   - `tests/registryMode.contract.test.js` **不复制判据**（照抄 `=== true` 就成了自证），
+     而是从可观测结果反推每个通道实际用了哪个源，再断言三者一致 + 与 `registryMode` 一致；
+     含 `{useRegistry:'true'}` 字符串档。摘掉本次修复（time 改回 `!== false`）后
+     **4 条里红 3 条**，且「前置事实」那条自己报出观测退化 —— 反空转有效。
+   - 代价与实测：默认档下 time 通道由注册表 34 条改为扁平 31 条，**registry-only 的
+     `GET_LOCK`/`BENCHMARK` 变体缺省不再投放**，需要 `--use-registry`。
+     `e2e/detection-runner` 19 场景改前/改后逐条 diff 为空（含请求数：`time_only` 两侧都是 164），
+     统计同为 19 PASS / 0 FAIL / 0 SKIP / 1 WARN。
+   - `collectCapabilityConstraints` 补一条：扁平路径下设了 `--test-filter`/`--test-skip`
+     时明确写「未生效」，`useRegistry=true` 时该约束消失。守卫用例三个方向都覆盖
+     （含「只设 testSkip」，防判据只写一侧）。
+
+**未验证**：真 MySQL/真 PG 上的时间通道实测本轮没跑（需 `python e2e/run-with-sandbox.py` 起沙箱，
+直连宿主 3306 必红），`npm run acceptance` 全量同理 —— 这一半由远端 CI 的 acceptance job 覆盖。
+
+
 ### 2026-09-25 批次 · 补上"入库产物 = 当前代码跑出来的那份"这道外部一致性门禁
 
 前面几节反复出现同一个形状：**产物在说谎，而当轮 CI 全绿**。

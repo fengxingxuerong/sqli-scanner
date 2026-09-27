@@ -1,7 +1,7 @@
 import { Detector } from '../Detector.js';
 import { createDetectionResult } from '../models.js';
 import { PAYLOADS, fillPayload, buildClausePairs } from '../payloads.js';
-import { selectPayloads, orderEntriesByBoundary } from '../payloadRegistry.js';
+import { selectPayloads, orderEntriesByBoundary, registryMode } from '../payloadRegistry.js';
 import { similarityRate, twoProportionZ, isSignificant, baselineNoiseRate, adaptiveMinStable, chunkSimilarity } from '../../core/statsHelper.js';
 
 // 空白字符判定（对齐 JS /\s/ 语义，避免每次 new RegExp）：
@@ -128,7 +128,7 @@ export class BooleanBlindDetector extends Detector {
       });
     }
 
-    if (config && config.useRegistry === true) {
+    if (registryMode(config)) {
       // 注册表路径：按 level/risk/testFilter/testSkip 筛选声明式条目
       const level = Number(config.level) > 0 ? Number(config.level) : undefined;
       const entries = orderEntriesByBoundary(

