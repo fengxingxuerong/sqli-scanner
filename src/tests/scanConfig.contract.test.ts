@@ -158,6 +158,39 @@ describe('配置契约：面板 → 请求体 → 后端白名单', () => {
     expect('scope' in buildResumeConfig({ concurrency: 4 } as never)).toBe(false);
   });
 
+  // [2026-09-28 分支收口] normalizeScanValue 的类型归一口径（buildStartConfig 经它逐键归一）
+  describe('normalizeScanValue（经 buildStartConfig 观测）类型归一分支', () => {
+    const bodyOf = (cfg: Record<string, unknown>) => buildStartConfig(cfg as never);
+
+    it('boolean：字符串 "true"/"false" 与 1/0 归一；垃圾值丢弃', () => {
+      expect(bodyOf({ matchTitle: 'true' }).matchTitle).toBe(true);
+      expect(bodyOf({ matchTitle: 'false' }).matchTitle).toBe(false);
+      expect(bodyOf({ matchTitle: 1 }).matchTitle).toBe(true);
+      expect(bodyOf({ matchTitle: 0 }).matchTitle).toBe(false);
+      expect('matchTitle' in bodyOf({ matchTitle: 'yes' })).toBe(false, '非布尔字面量的垃圾值必须整个丢弃');
+    });
+
+    it('number：数字字符串归一为数字；非有限数丢弃', () => {
+      expect(bodyOf({ delay: '3' }).delay).toBe(3);
+      expect(bodyOf({ delay: '  ' }).delay).toBeUndefined();
+      expect('delay' in bodyOf({ delay: 'abc' })).toBe(false);
+    });
+
+    it('string：空白串省略（关闭态干净）', () => {
+      expect('matchString' in bodyOf({ matchString: '   ' })).toBe(false);
+    });
+
+    it('stringArray：逗号串容错归一为数组（CLI/历史快照同源）；垃圾元素过滤', () => {
+      expect(bodyOf({ scope: 'a.com, b.com' }).scope).toEqual(['a.com', 'b.com']);
+      expect(bodyOf({ scope: ['x.com', 3, '  '] }).scope).toEqual(['x.com']);
+    });
+
+    it('object：null 保留为 null（显式关闭），标量垃圾丢弃', () => {
+      expect(bodyOf({ auth: null }).auth).toBeNull();
+      expect('noSql' in bodyOf({ noSql: 'garbage' })).toBe(false);
+    });
+  });
+
 // ④ 反向守卫 [2026-09-23]：后端**可达**但前端**无入口**的键，必须显式登记在这里。
 //
 // 为什么必须有：上面三条都是单向的（前端发的 ⊆ 后端认的）。反向从未被守卫过，于是

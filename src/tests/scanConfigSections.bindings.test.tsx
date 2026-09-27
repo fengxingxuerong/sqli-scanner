@@ -216,3 +216,147 @@ describe('ScanConfigPanel 分段接线：OOB / 二阶 / NoSQL / 枚举拖库', (
     expect(onChange).toHaveBeenCalledWith({ extractScope: undefined });
   });
 });
+
+// ============================================================================
+// 分支覆盖收口（2026-09-28）：逐文件覆盖 pinpoint 出的「设过值/删除键/警告态」分支
+// ============================================================================
+describe('ScanConfigPanel 分段分支收口', () => {
+  let onChange: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    onChange = vi.fn();
+  });
+
+  const renderPanel = (over: Partial<ScanConfig> = {}) => {
+    render(<PanelHarness initial={makeConfig(over)} onChangeSpy={onChange} />);
+    fireEvent.click(screen.getByText(L('advanced')));
+  };
+
+  it('① 注入点范围：testPath / testHeaders 开关（默认 undefined → false）', () => {
+    renderPanel();
+    fireEvent.click(screen.getByLabelText(L('testPathLabel')));
+    expect(onChange).toHaveBeenCalledWith({ testPath: true });
+    fireEvent.click(screen.getByLabelText(L('testHeadersLabel')));
+    expect(onChange).toHaveBeenCalledWith({ testHeaders: true });
+  });
+
+  it('② 爬虫：crawlDepth=0 时 crawlForms 置灰；点击开启 → crawlDepth=2 且滑杆出现、crawlForms 解锁（默认配置 crawlDepth=1 开启）', () => {
+    renderPanel({ crawlDepth: 0 });
+    expect((screen.getByLabelText(L('crawlFormsLabel')) as HTMLInputElement).disabled).toBe(true);
+    fireEvent.click(screen.getByLabelText(L('enableCrawler')));
+    expect(onChange).toHaveBeenCalledWith({ crawlDepth: 2 });
+    expect(screen.getByLabelText(L('crawlDepth'))).toBeInTheDocument();
+    expect((screen.getByLabelText(L('crawlFormsLabel')) as HTMLInputElement).disabled).toBe(false);
+  });
+
+  it('③ maxReq 输入：正数写 maxReq，0/非法归 0（安全阀语义）', () => {
+    renderPanel();
+    const input = screen.getByLabelText(L('maxReqLabel')) as HTMLInputElement;
+    fireEvent.change(input, { target: { value: '30' } });
+    expect(onChange).toHaveBeenCalledWith({ maxReq: 30 });
+    onChange.mockClear();
+    fireEvent.change(input, { target: { value: '0' } });
+    expect(onChange).toHaveBeenCalledWith({ maxReq: 0 });
+  });
+
+  it('④ prefix / suffix 闭合控制：写入走 handleText（空串删键语义）', () => {
+    renderPanel({ prefix: undefined, suffix: undefined });
+    fireEvent.change(screen.getByLabelText(L('prefixLabel')), { target: { value: "')" } });
+    expect(onChange).toHaveBeenCalledWith({ prefix: "')" });
+    fireEvent.change(screen.getByLabelText(L('suffixLabel')), { target: { value: '#' } });
+    expect(onChange).toHaveBeenCalledWith({ suffix: '#' });
+  });
+
+  it('⑤ 网络认证：auth 删到只剩一个子键时保留该键；全部删空 → auth null', () => {
+    renderPanel({ auth: { basic: { username: 'u', password: 'p' }, cookie: 'sid=1' } });
+    const basic = screen.getByLabelText(L('basicAuthLabel')) as HTMLInputElement;
+    fireEvent.change(basic, { target: { value: '' } });
+    expect(onChange).toHaveBeenCalledWith({ auth: { cookie: 'sid=1' } });
+  });
+
+  it('⑥ 安全护栏：confirmDestructive=true 时高危警示可见（危险态必须显性）', () => {
+    renderPanel({ confirmDestructive: true });
+    expect(screen.getByText(L('confirmDestructiveWarning'))).toBeInTheDocument();
+  });
+
+  it('⑦ 传输安全：insecureTls=true 时警示可见', () => {
+    renderPanel({ insecureTls: true });
+    expect(screen.getByText(L('insecureTlsWarning'))).toBeInTheDocument();
+  });
+
+  it('⑧ 枚举动作 search：keyword 输入启用且写入；清空删键（needs 语义正向用例）', () => {
+    renderPanel({ extractScope: { mode: 'search' } });
+    const keyword = screen.getByLabelText(L('extractScopeKeyword')) as HTMLInputElement;
+    expect(keyword.disabled).toBe(false);
+    fireEvent.change(keyword, { target: { value: 'users' } });
+    expect(onChange).toHaveBeenCalledWith({ extractScope: { mode: 'search', keyword: 'users' } });
+    onChange.mockClear();
+    fireEvent.change(keyword, { target: { value: '' } });
+    expect(onChange).toHaveBeenCalledWith({ extractScope: { mode: 'search' } });
+  });
+
+  it('⑨ NoSQL：kinds 显式给部分集合时按集合显示勾选态', () => {
+    renderPanel({ noSql: { enabled: true, kinds: ['nosql'] } });
+    const kinds = zh.scanConfig.noSqlKind as Record<string, string>;
+    expect((screen.getByLabelText(kinds.nosql) as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByLabelText(kinds.graphql) as HTMLInputElement).checked).toBe(false);
+  });
+
+  it('⑩ OOB：dnsDomain 已配置时回显到输入框（受控值断言）', () => {
+    renderPanel({ oob: { enabled: true, dnsOob: true, dnsDomain: 'oob.example.com' } });
+    expect((screen.getByLabelText(L('oobDnsDomain')) as HTMLInputElement).value).toBe('oob.example.com');
+  });
+});
+
+// ?? 回退分支：DEFAULT 合并后永远走左侧，需显式 undefined 才能覆盖右侧（缺省渲染语义）
+describe('ScanConfigPanel 分段回退分支（显式 undefined）', () => {
+  let onChange: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    onChange = vi.fn();
+  });
+
+  const renderBare = (keys: string[], extra: Partial<ScanConfig> = {}) => {
+    const bare = { ...DEFAULT_CONFIG } as Record<string, unknown>;
+    for (const k of keys) bare[k] = undefined;
+    Object.assign(bare, extra);
+    render(<PanelHarness initial={bare as unknown as ScanConfig} onChangeSpy={onChange} />);
+    fireEvent.click(screen.getByText(L('advanced')));
+  };
+
+  it('testPath / testHeaders 为 undefined → 开关按 false 渲染且可交互', () => {
+    renderBare(['testPath', 'testHeaders']);
+    expect((screen.getByLabelText(L('testPathLabel')) as HTMLInputElement).checked).toBe(false);
+    fireEvent.click(screen.getByLabelText(L('testPathLabel')));
+    expect(onChange).toHaveBeenCalledWith({ testPath: true });
+  });
+
+  it('crawlDepth 为 undefined → 爬虫按「关」渲染，crawlForms 置灰', () => {
+    renderBare(['crawlDepth']);
+    expect((screen.getByLabelText(L('crawlFormsLabel')) as HTMLInputElement).disabled).toBe(true);
+  });
+
+  it('wafEvasion 为 undefined → WafTamperPanel 走缺省 tamper 形态（enabled=false）', () => {
+    renderBare(['wafEvasion']);
+    expect(screen.getByText(L('wafEvasion'))).toBeInTheDocument();
+  });
+
+  it('noSql.kinds 为 undefined → 三类全选显示（与后端 kinds 缺省兜底同义）', () => {
+    renderBare(['noSql'], { noSql: { enabled: true } });
+    const kinds = zh.scanConfig.noSqlKind as Record<string, string>;
+    for (const k of ['nosql', 'graphql', 'ssti']) {
+      expect((screen.getByLabelText(kinds[k]) as HTMLInputElement).checked).toBe(true);
+    }
+    // kinds 缺省 = 全选：点击任一类 → 从全集中移除该类
+    fireEvent.click(screen.getByLabelText(kinds.nosql));
+    expect(onChange).toHaveBeenCalledWith({ noSql: { enabled: true, kinds: ['graphql', 'ssti'] } });
+  });
+
+  it('noSql.kinds 部分集合下点击未选类 → 加入集合（补集分支）', () => {
+    renderBare([], { noSql: { enabled: true, kinds: ['nosql'] } });
+    const kinds = zh.scanConfig.noSqlKind as Record<string, string>;
+    expect((screen.getByLabelText(kinds.graphql) as HTMLInputElement).checked).toBe(false);
+    fireEvent.click(screen.getByLabelText(kinds.graphql));
+    expect(onChange).toHaveBeenCalledWith({ noSql: { enabled: true, kinds: ['nosql', 'graphql'] } });
+  });
+});
