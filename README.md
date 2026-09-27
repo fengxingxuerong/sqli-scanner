@@ -1,6 +1,6 @@
 # sqli-scanner
 
-[![Tests](https://img.shields.io/badge/tests-2879%20passing-brightgreen)](#测试)
+[![Tests](https://img.shields.io/badge/tests-2894%20passing-brightgreen)](#测试)
 [![Dependencies](https://img.shields.io/badge/dependencies-0%20known%20vulns-brightgreen)](#环境变量)
 
 > CI 徽章待仓库地址确定后启用（当前 `OWNER/REPO` 是占位，占位链接会显示成"通过"，属误导，
@@ -193,7 +193,7 @@ admin-only 触发页 `/admin/panel`（users.admin 角色门禁 403）+ admin 会
 请把结论视为**待复核线索**而非可用证据——报告会在 `summary.dbmsEvidence.caveat` 中自动声明这一点。
 （SQL Server 与 Oracle 已于 2026-09-14/15 升级 verified，2026-09-22 补齐产物与版本凭证，**不在本段范围**。）
 | **1920 条 payload 模板** | 含注释/编码/子句/嵌套闭合变体：主库 1769 + 子句 137 + OOB 14（口径：各库×各技术下的模板条目数，**同一模板跨库/技术重复计入**）+ 681 条声明式注册表（`payloads/registry.json`） |
-| **228 个 tamper 插件** | 覆盖 sqlmap 官方 tamper 全集（84/84）。⚠️ 绕过率口径见下文「WAF 绕过能力实测口径」 |
+| **228 个 tamper 插件** | 覆盖 sqlmap 官方 tamper 全集（70/70，分母取自 tag 1.9.11 上游清单；`npm run tamper:parity` 核对）。⚠️ 绕过率口径见下文「WAF 绕过能力实测口径」 |
 | **62 WAF 指纹** | 自动识别 WAF 类型并推荐 tamper 组合 |
 | **可视化报告** | 风险环形图 + 技术分布条形图 + 漏洞列表 + 数据提取树 + 检测摘要 |
 | **深度提取** | 分页聚合数据提取，绕过 UNION 限制 |
@@ -221,7 +221,7 @@ npm run waf-validate    # HTTP 实测验证 WAF 绕过
 npm run waf-e2e         # 运行 WAF e2e 对比测试
 npm run waf-real        # [对外口径] 真实 OWASP CRS v4.1.0 规则下 tamper 开/关 A/B
 npm run waf-auto        # CRS 下「引擎自动选链绕过」验收（不显式配 tamper）
-npm run acceptance      # 【门禁】全方位验收（12 套件，事实断言模式，可进 CI）
+npm run acceptance      # 【门禁】全方位验收（15 套件，事实断言模式，可进 CI）
 ```
 
 ## 后端 API
@@ -303,10 +303,10 @@ backend/  ← Express + Node.js
 ## 测试
 
 ```bash
-# 前端测试（411 个用例）
+# 前端测试（414 个用例）
 npm test
 
-# 服务端测试（2471 个用例）
+# 服务端测试（2483 个用例）
 cd server && npm test
 
 # 全部测试
@@ -331,8 +331,8 @@ npm run artifact:drift   # 入库的 e2e 基线产物必须等于当前代码跑
 ## 项目状态
 
 - TypeScript: 零错误
-- 前端测试: 411/411 通过（覆盖率门禁 stmts 91.21 / branch 81.70 / func 70.67，阈值 88/77/67）
-- 服务端测试: 2471 用例（2468 pass / 0 fail / 3 skip，并发口径 2026-09-26 复测；3 skip 为环境依赖显式跳过。覆盖率 lines 91.24 / branch 77.79 / func 80.60，阈值 85/69/72）
+- 前端测试: 414/414 通过（覆盖率门禁 stmts 91.21 / branch 81.70 / func 70.67，阈值 88/77/67）
+- 服务端测试: 2483 用例（2480 pass / 0 fail / 3 skip，并发口径 2026-09-27 复测；3 skip 为环境依赖显式跳过。覆盖率 lines 91.24 / branch 77.79 / func 80.60，阈值 85/69/72）
 - 一键扫描: `npm run scan -- -u <url>`（CLI 一条命令产出 HTML/JSON/Markdown 全套报告 + manifest，退出码可直接进 CI 门禁）
 - Tamper 插件: 228 个（含 v24 增量 20 个，对齐 sqlmap 官方 tamper 全集，含官方 CRS/libinjection 实测组合 uniontable+odbcbrace）
 - WAF 绕过能力: 200+ 插件链式组合，覆盖 62 个 WAF 厂商指纹识别 + 推荐
@@ -531,8 +531,9 @@ node e2e/blackbox-lab/sqlmap-bench.mjs                    # sqlmap 同题对照
 > 真机判「有绕过效果」的插件 **PL1 74 / PL3 72**，而自实现执行器只判 **10** ——
 > 分歧集中在编码族，方向是**我们低估了自己**；唯一反向分歧是 `charunicodeescape`
 > （自实现判放行、真机全拦）。安全对照 **0 误拦**。
-> ⚠️ 但**仍禁止对外声明真实 WAF 下的绕过率**：① 本轮只测「WAF 放不放行」（echo 靶站、
-> 无真库），放行 ≠ 能打穿；② CRS 版本与镜像 digest 首版取证失败 → 数字尚不可复现。
+> ⚠️ 但**仍禁止对外声明真实 WAF 下的绕过率**，三条理由：① 本轮只测「WAF 放不放行」
+> （echo 靶站、无真库），放行 ≠ 能打穿；② 真机跑的是 **CRS 4.29.0**、自实现执行器是
+> **4.1.0**，**两边不同代规则**，差里混着版本差，尚未分离；③ 镜像 digest 未记录。
 > 全文与逐条数字见 `docs/WAF-真机对拍-2026-09-27.md`；逐插件矩阵在 CI artifact
 > `modsec-live-results` 里（`e2e/waf-real/results/` 属产物目录，已 gitignore，不入库）。
 
@@ -595,9 +596,10 @@ sqlmap 误报的具体条目：`F18-safe-item`、`F20-safe-rand`、`F21-safe-500
 
 ### 验收门禁（`npm run acceptance`）
 
-12 套件一次跑完：服务端单测 → 独立刁钻靶场 → 检测回归 → 真 MySQL → 真 PG（含二阶）→
-**报告契约** → CRS 人工挂链 A/B → CRS 自动选链 → **CRS 执行器保真度（官方回归集）** →
-红队实战（真值对照）→ fileRead/fileWrite 真闭环。
+15 套件一次跑完（顺序即 `e2e/acceptance.mjs` 里 SUITES 的登记顺序）：服务端单测 → 独立刁钻靶场 →
+检测回归 → 真 MySQL → 真 PG（含二阶）→ OOB 带外通道真机 → 报告契约 → CRS 人工挂链 A/B →
+CRS 自动选链绕过 → CRS 执行器保真度（官方回归集）→ WAF 定向变异搜索（A2）端到端 →
+WAF 通道降级编排（A3）端到端 → 红队实战（真值对照 + sqlmap 同题）→ fileRead 真闭环 → fileWrite 真闭环。
 
 **判定纪律（关键）**：门禁**不采信任何套件自报的 PASS 字样**，只解析可独立核对的事实数字
 （漏洞场景数 / 安全误报数 / 技术位 / 文件是否真的存在），据此断言并决定退出码。

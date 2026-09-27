@@ -158,10 +158,87 @@ function parsePayloadLine(lines) {
   };
 }
 
+// ── 外部真值取数：验收套件数 / sqlmap 官方 tamper 分母 ──────────────────────────
+/**
+ * 验收门禁的套件数：数 e2e/acceptance.mjs 里 SUITES 数组的 `title:`。
+ * 口径注意：**必须同时接受单引号与反引号** —— 数组里有 2 条 title 是模板字面量
+ * （如 \`CRS 人工挂链 A/B（PL${WAF_GATE_PL} 档基线）\`），只匹配 ' 会把 15 数成 13。
+ * 数组边界取首个顶层 `\n];`，避免把文件其它位置的 title: 混进来。
+ */
+function countAcceptanceSuites() {
+  const src = readFileSync(resolve(ROOT, 'e2e/acceptance.mjs'), 'utf8');
+  const start = src.indexOf('const SUITES');
+  const end = src.indexOf('\n];', start);
+  if (start < 0 || end < 0) {
+    throw new Error('e2e/acceptance.mjs 里找不到 const SUITES 数组 —— 判据取数源已失效，必须修判据');
+  }
+  return (src.slice(start, end).match(/title:\s*['"`]/g) || []).length;
+}
+
+/** 上游 tamper 官方清单：分母与「本仓缺几条」都从这里算，README 不许手写。 */
+function readUpstreamTamper(registeredNames) {
+  const j = JSON.parse(
+    readFileSync(resolve(ROOT, 'server/src/core/tamper/upstream-sqlmap-tamper.json'), 'utf8')
+  );
+  // 数据源自洽：count 字段必须与 names 长度一致，否则 README 的分母会跟着生成器一起错。
+  if (j.count !== j.names.length) {
+    throw new Error(`upstream-sqlmap-tamper.json 自相矛盾：count=${j.count} names=${j.names.length}`);
+  }
+  const missing = j.names.filter((n) => !registeredNames.has(n));
+  return { total: j.names.length, missing, tag: j.tag };
+}
+
+/**
+ * README 里「能力口径」的套件数声称。
+ * 刻意只认两种固定措辞：`（N 套件，…）`（命令表）与 `N 套件一次跑完`（门禁小节）。
+ * 带日期标题的「N 套件全绿」是**某一轮的运行记录**（历史事实），不是当前口径 ——
+ * 把这类也纳入就等于要求"每次改文档都重跑 20 分钟门禁"，那是假红来源。
+ */
+function parseSuiteClaims(lines) {
+  const out = [];
+  lines.forEach((l, i) => {
+    for (const m of l.matchAll(/（(\d+) 套件，|(?<![\d.])(\d+) 套件一次跑完/g)) {
+      out.push({ line: i + 1, count: Number(m[1] ?? m[2]) });
+    }
+  });
+  return out;
+}
+
+/** README 的 tamper 覆盖声称「覆盖 sqlmap 官方 tamper 全集（N/M）」。 */
+function parseTamperUniverse(lines) {
+  for (let i = 0; i < lines.length; i++) {
+    const m = lines[i].match(/官方 tamper 全集（(\d+)\/(\d+)[^）]*）/);
+    if (m) return { line: i + 1, covered: Number(m[1]), declared: Number(m[2]) };
+  }
+  return {
+    error:
+      'README 里找不到「官方 tamper 全集（N/M）」这一行 —— 措辞改了要同步改判据，不能静默跳过这条对外数字',
+  };
+}
+
+/**
+ * 二级文档里不许再抄一份"会随代码变的计数"（SECURITY.md / CONTRIBUTING.md）。
+ * 危害实测：README 的数字有 facts-sync 与本脚本守，而这两份各抄了一份 ⇒ 每加一批测试要改 4 个文件，
+ * 漏改就长期说假数（本轮实测最狠的一处：SECURITY.md 写 1249，真值 2483，差了近一倍）。
+ * 判据形态刻意做成**"禁止出现这种写法"**而不是"数值相等"：
+ * 前者不随事实漂移，不会造成"改代码必须同时改文档"的假红；后者会把二级文档拖进同一套同步机器里。
+ */
+function parseDocNumberTaboos(docs) {
+  const hits = [];
+  const RE = /(\d{3,})\s*(?:个\s*)?(?:测试|用例)|tamper\s*(\d{3,})\s*个/;
+  for (const d of docs) {
+    d.lines.forEach((l, i) => {
+      const m = l.match(RE);
+      if (m) hits.push({ file: d.name, line: i + 1, text: l.trim().slice(0, 80) });
+    });
+  }
+  return hits;
+}
+
 // ── 判据（纯函数，便于自证） ──────────────────────────────────────────────────
 /** @param code 代码侧取数源 */
 export function checkConsistency(input) {
-  const { overview, tiers, customer, tech, tamperCounts, payload, code } = input;
+  const { overview, tiers, customer, tech, tamperCounts, payload, suiteClaims, tamperUniverse, code } = input;
   const fails = [];
   const tierCounts = TIER_KEYS.map((k) => tiers[k.id].names.length);
   const [a, b, c] = overview.triple;
@@ -267,6 +344,43 @@ export function checkConsistency(input) {
     }
   }
 
+  // ── C 类：对外能力口径与外部真值分母（此前完全无判据的两处数字） ──
+  if (!suiteClaims.length) {
+    fails.push('⑪ README 里没找到任何「（N 套件，」/「N 套件一次跑完」措辞 —— 判据取数点漂移，必须同步改判据');
+  }
+  for (const s of suiteClaims) {
+    if (s.count !== code.acceptanceSuites) {
+      fails.push(
+        `⑪ README.md:${s.line} 称「${s.count} 套件」，e2e/acceptance.mjs 的 SUITES 实为 ${code.acceptanceSuites} 个` +
+        ` — 增删套件后必须同步（README 里那条流水线列举的套件名也要一起补）`,
+      );
+    }
+  }
+
+  if (tamperUniverse.declared !== code.upstreamTotal) {
+    fails.push(
+      `⑫ README.md:${tamperUniverse.line} 的分母写「${tamperUniverse.declared}」，` +
+      `上游清单 upstream-sqlmap-tamper.json（tag ${code.upstreamTag}）实为 ${code.upstreamTotal} 条` +
+      ` — 分母是外部真值，不能手写；刷新用 npm run tamper:parity:refresh`,
+    );
+  }
+  const expectedCovered = code.upstreamTotal - code.upstreamMissing.length;
+  if (tamperUniverse.covered !== expectedCovered) {
+    fails.push(
+      `⑫ README.md:${tamperUniverse.line} 的分子写「${tamperUniverse.covered}」，实际覆盖 ` +
+      `${expectedCovered}/${code.upstreamTotal}` +
+      (code.upstreamMissing.length ? `（缺：${code.upstreamMissing.join('、')}）` : '（官方条目全覆盖）'),
+    );
+  }
+
+  const docTaboos = parseDocNumberTaboos(input.docs || []);
+  for (const t of docTaboos) {
+    fails.push(
+      `⑬ ${t.file}:${t.line} 抄了一份会随代码变的计数（用例数 / tamper 插件数）：「${t.text}」` +
+      ` — 请改成指向 docs/_facts.json 或 README 的说法，别在二级文档里留副本`,
+    );
+  }
+
   return fails;
 }
 
@@ -282,9 +396,16 @@ const SAMPLE = () => ({
   tech: { line: 6, declared: 2, names: ['union', 'error'] },
   tamperCounts: [{ line: 7, count: 228 }, { line: 8, count: 228 }],
   payload: { line: 9, total: 3, main: 2, clause: 1, oob: 0, registry: 681 },
+  suiteClaims: [{ line: 10, count: 15 }],
+  tamperUniverse: { line: 11, covered: 70, declared: 70 },
+  docs: [
+    { name: 'SECURITY.md', lines: ['- CI 强制：TypeScript、ESLint、前端覆盖率阈值、服务端测试（用例数见 docs/_facts.json）'] },
+    { name: 'CONTRIBUTING.md', lines: ['   - 前端：`npm test`（vitest，用例数见 _facts.json）'] },
+  ],
   code: {
     techniques: ['union', 'error'], tamperCount: 228,
     payloadMain: 2, payloadClause: 1, payloadOob: 0, payloadRegistry: 681,
+    acceptanceSuites: 15, upstreamTotal: 70, upstreamMissing: [], upstreamTag: '1.9.11',
   },
 });
 
@@ -347,13 +468,41 @@ function selftest() {
   expectFail('payload 注册表条数与代码不符（本次真缺陷 672→681 的形态）', (s) => {
     s.payload.registry = 672;
   }, /⑩/);
+  // C 类：本轮实测到的两处裸奔数字（README 写 12 套件 / 84 分母，真值 15 / 70）
+  expectFail('验收套件数与 SUITES 不符', (s) => {
+    s.suiteClaims = [{ line: 10, count: 12 }];
+  }, /⑪/);
+  expectFail('套件声称整段消失（措辞漂移＝判据会静默空转）', (s) => {
+    s.suiteClaims = [];
+  }, /⑪/);
+  expectFail('tamper 官方分母与上游清单不符', (s) => {
+    s.tamperUniverse = { line: 11, covered: 84, declared: 84 };
+  }, /⑫.*分母/);
+  expectFail('分母对了但分子虚高（缺条目未点名）', (s) => {
+    s.tamperUniverse = { line: 11, covered: 70, declared: 70 };
+    s.code.upstreamMissing = ['between'];
+  }, /⑫.*分子/);
+  expectOk('有缺失时分子如实写差值（合法形态）', (s) => {
+    s.code.upstreamMissing = ['between'];
+    s.tamperUniverse = { line: 11, covered: 69, declared: 70 };
+  });
+  // ⑬ 二级文档抄数字（本轮实测：SECURITY.md 的 1249 与真值差近一倍，且无人守）
+  expectFail('二级文档抄了用例数', (s) => {
+    s.docs[0].lines = ['- CI 强制：服务端 1249 测试'];
+  }, /⑬/);
+  expectFail('二级文档抄了 tamper 数', (s) => {
+    s.docs[1].lines = ['  ├── src/core/ 核心模块（tamper 225 个）'];
+  }, /⑬/);
+  expectOk('二级文档写小数字的场景数（不该被 ⑬ 误伤）', (s) => {
+    s.docs[0].lines = ['- recall-lab 18 场景、Rust fmt/clippy'];
+  });
 
   if (bad.length) {
     console.error('[readme] ✗ 自证失败 —— 判据存在空转或误报：');
     for (const b of bad) console.error('    · ' + b);
     return 1;
   }
-  console.log('[readme] ✓ 自证通过：16 类漂移样本全部被点名，3 类正确样本无误报（判据不空转）');
+  console.log('[readme] ✓ 自证通过：22 类漂移样本全部被点名，5 类正确样本无误报（判据不空转）');
   return 0;
 }
 
@@ -368,8 +517,10 @@ function main() {
   const tech = parseTechLine(lines);
   const tamperCounts = parseTamperCounts(lines);
   const payload = parsePayloadLine(lines);
+  const suiteClaims = parseSuiteClaims(lines);
+  const tamperUniverse = parseTamperUniverse(lines);
 
-  const parseErrors = [overview, tiers, customer, tech, tamperCounts, payload]
+  const parseErrors = [overview, tiers, customer, tech, tamperCounts, payload, tamperUniverse]
     .map((r) => r && r.error)
     .filter(Boolean);
   if (parseErrors.length) {
@@ -378,6 +529,12 @@ function main() {
     return 1;
   }
 
+  const upstream = readUpstreamTamper(new Set(tamperRegistry.list().map((t) => t.name)));
+  // 二级文档：只读来判"有没有抄数字"，不参与任何数值比对
+  const docs = ['SECURITY.md', 'CONTRIBUTING.md'].map((name) => ({
+    name,
+    lines: readFileSync(resolve(ROOT, name), 'utf8').split(/\r?\n/),
+  }));
   const code = {
     techniques: Object.keys(VULN_TAXONOMY),
     tamperCount: tamperRegistry.list().length,
@@ -385,9 +542,15 @@ function main() {
     payloadClause: countTemplates(CLAUSE_PAYLOADS),
     payloadOob: countTemplates(OOB_PAYLOADS),
     payloadRegistry: PAYLOAD_REGISTRY.length,
+    acceptanceSuites: countAcceptanceSuites(),
+    upstreamTotal: upstream.total,
+    upstreamMissing: upstream.missing,
+    upstreamTag: upstream.tag,
   };
 
-  const fails = checkConsistency({ overview, tiers, customer, tech, tamperCounts, payload, code });
+  const fails = checkConsistency({
+    overview, tiers, customer, tech, tamperCounts, payload, suiteClaims, tamperUniverse, docs, code,
+  });
   if (fails.length) {
     console.error(`[readme] ✗ README 声称与事实不符（${fails.length} 处）：`);
     for (const f of fails) console.error('    · ' + f);

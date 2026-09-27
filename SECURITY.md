@@ -55,6 +55,6 @@ sqli-scanner 是**攻击性安全工具**，自身也是攻击面的一部分。
 
 ## 测试与安全门禁
 
-- CI 强制：TypeScript、ESLint、前端覆盖率阈值、服务端 1249 测试、recall-lab 18 场景、Rust fmt/clippy
+- CI 强制：TypeScript、ESLint、前端覆盖率阈值、服务端测试（用例数与覆盖率以 `docs/_facts.json` 为准）、recall-lab 场景、Rust fmt/clippy
 - 改动涉及 HttpSClient/SSRF 逻辑必须补测试（`httpClient.*.test.js`）
 - 新增出站点/端点：确认默认关闭或受 EXPLOIT_ENABLED 门控
