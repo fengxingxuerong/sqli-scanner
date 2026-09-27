@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { HttpClient, assertSafeHttpTarget } from '../src/core/httpClient.js';
+import { HttpClient } from '../src/core/httpClient.js';
 
 // ===== [P2-5] --force-ssl =====
 test('forceSsl: http:// 目标改写为 https:// 后再发请求', async () => {

@@ -29,7 +29,6 @@ const TARGET = {
   cookieParams: {},
   headerParams: {},
 };
-const POINT = { id: 'p1', location: 'url', param: 'id', originalValue: '1' };
 
 test('sendInjection 透传治理三键（delay/reqRate/maxReq）到出口层', async () => {
   const { seen, client } = capture();

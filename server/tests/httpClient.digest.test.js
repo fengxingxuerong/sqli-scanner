@@ -185,7 +185,6 @@ function startDigestServer({ realm = 'sqli@test', requireQop = true, algorithm =
   const server = http.createServer((req, res) => {
     const authz = req.headers.authorization;
     if (!authz || !authz.startsWith('Digest ')) {
-      const qopStr = requireQop ? ', qop="auth"' : '';
       const waNoQop = requireQop ? '' : '';
       const wa = `Digest realm="${realm}", nonce="abc123nonce"${requireQop ? ', qop="auth"' : waNoQop}, algorithm=${algorithm}, opaque="opq123"`;
       res.writeHead(401, { 'WWW-Authenticate': wa });

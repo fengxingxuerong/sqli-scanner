@@ -94,7 +94,6 @@ test('混合类型（INT+TEXT+BOOL）：逐列文本先命中，不被 BOOL 列�
     for (let i = 0; i < exprs.length; i++) {
       const t = exprs[i];
       if (t === 'NULL') continue;
-      const isText = /^'[^']*'$/.test(t);
       const isNum = /^\d+$/.test(t);
       if (kinds[i] === 'text') echoed.push(t.replaceAll("'", ''));
       else if (kinds[i] === 'num' && isNum) echoed.push(t);

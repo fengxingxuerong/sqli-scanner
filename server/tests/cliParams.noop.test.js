@@ -2,7 +2,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { UnionDetector } from '../src/engine/detectors/UnionDetector.js';
-import { discoverEchoColumnsDetailed } from '../src/engine/injection.js';
 import { resolveFromClause, sanitizeUnionFrom, WRAP_NOCAST } from '../src/engine/DialectSqlBuilder.js';
 import { Extractor } from '../src/engine/Extractor.js';
 import { binaryGuessColumns } from '../src/engine/columnGuess.js';
