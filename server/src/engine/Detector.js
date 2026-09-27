@@ -41,6 +41,38 @@ export function buildDynamicSimilarFn(baselines) {
   };
 }
 
+/**
+ * [P1-FLAKY 2026-09-27] 门控版构建器——检测层（buildDynamicSimilar 方法）与提取层
+ * （blindExtractor._dynJudge）共用的**单一入口**。此前提取层直接调 buildDynamicSimilarFn
+ * 绕过门控，HTML 动态页上提取真值判定仍用位移敏感的 positional 过滤器（与检测层不对称）。
+ *
+ * 语义：config.autoDynamicBlock !== true → null（回退现状）；
+ * 基线为 HTML 形态且动态块占比 ≥0.3（位移确实在发生）→ 标签边界 token 袋骨架判定
+ * （变长内容被关在单个 token 里不再传播位移，块洗牌由无序 bag 天然免疫）；
+ * 其余（动态占比低的静态页 / 非 HTML）→ positional 动态块过滤（现状，零行为变化）。
+ *
+ * @param {string[]} baselines 同一注入点的多次基线响应体
+ * @param {object} config 检测配置（含 autoDynamicBlock 开关）
+ * @returns {function|null} 排除动态块后的相似判定 (a, b) => boolean；关闭/无动态块返回 null
+ */
+export function buildDynamicSimilarGated(baselines, config) {
+  if (!config || config.autoDynamicBlock !== true) return null;
+  // 位移退化度量：动态块占基线最大块数的比例
+  const bodies = (baselines ?? []).map((b) => String(b ?? '')).filter((b) => b.length > 0);
+  if (bodies.length >= 2) {
+    const { dynamicIdx } = dynamicBlockFilter(bodies);
+    const maxChunks = Math.ceil(Math.max(...bodies.map((b) => b.length)) / 64);
+    const htmlShaped = bodies.every(
+      (b) => ((b.match(/</g) ?? []).length * 100) / Math.max(b.length, 1) >= 2
+    );
+    if (htmlShaped && maxChunks > 0 && dynamicIdx.size / maxChunks >= 0.3) {
+      const tokFn = buildTokenBagSimilarFn(bodies);
+      if (tokFn) return tokFn;
+    }
+  }
+  return buildDynamicSimilarFn(baselines);
+}
+
 // 检测器接口/基类（策略模式）
 // 子类需实现 detect(ctx)，返回 DetectionResult。
 // ctx 约定：{ httpClient, target, point, dbms, config }
@@ -706,21 +738,7 @@ export class Detector {
    * @returns {function|null} 排除动态块后的相似判定 (a, b) => boolean；关闭/无动态块返回 null
    */
   buildDynamicSimilar(baselines, config) {
-    if (!config || config.autoDynamicBlock !== true) return null;
-    // 位移退化度量：动态块占基线最大块数的比例
-    const bodies = (baselines ?? []).map((b) => String(b ?? '')).filter((b) => b.length > 0);
-    if (bodies.length >= 2) {
-      const { dynamicIdx } = dynamicBlockFilter(bodies);
-      const maxChunks = Math.ceil(Math.max(...bodies.map((b) => b.length)) / 64);
-      const htmlShaped = bodies.every(
-        (b) => ((b.match(/</g) ?? []).length * 100) / Math.max(b.length, 1) >= 2
-      );
-      if (htmlShaped && maxChunks > 0 && dynamicIdx.size / maxChunks >= 0.3) {
-        const tokFn = buildTokenBagSimilarFn(bodies);
-        if (tokFn) return tokFn;
-      }
-    }
-    return buildDynamicSimilarFn(baselines);
+    return buildDynamicSimilarGated(baselines, config);
   }
 
   // 闭合探测的相似判定：锚点优先 → 状态码一致 + 分块比对（长度容差 + LCP + 分块相似率兜底）。

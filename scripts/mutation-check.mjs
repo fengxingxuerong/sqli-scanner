@@ -95,6 +95,12 @@ const TARGETS = [
     file: 'src/engine/scan/discover.js',
     tests: ['tests/discover.pipeline.test.js'],
   },
+  {
+    // [P1-FLAKY 2026-09-27] 布尔判定的统计核心（噪声地板/自适应门槛/token 袋骨架）——
+    // noisy 布尔漏检根因修复所在，纳入变异门禁钉死
+    file: 'src/core/statsHelper.js',
+    tests: ['tests/tokenBagSimilar.test.js', 'tests/booleanStability.test.js'],
+  },
 ];
 
 /**

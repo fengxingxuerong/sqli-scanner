@@ -14,7 +14,7 @@ import { resolveDbms, resolveFromClause, WRAP } from './DialectSqlBuilder.js';
 import {
   LEN_FN, SUB_FN, ASCII_FN, VERSION_EXPR, TIME_COND,
 } from './extractionMaps.js';
-import { buildDynamicSimilarFn } from './Detector.js';
+import { buildDynamicSimilarGated } from './Detector.js';
 import { binaryProbe } from './binaryProbe.js';
 import { responseSkeleton, stripEchoedPayload } from './echoStrip.js';
 
@@ -326,7 +326,10 @@ function _dynJudge(ex, ctx) {
     let similar; // undefined=未构建；null=已构建但无动态块（回退严格比较）；function=可用
     const ensureSimilar = () => {
       if (!enabled || similar !== undefined || baselines.length < 2) return similar ?? null;
-      similar = buildDynamicSimilarFn(baselines);
+      // [P1-FLAKY 2026-09-27] 与检测层共用门控构建器（token 袋骨架判定对内容位移/块洗牌
+      // 免疫）。此前这里直调 buildDynamicSimilarFn 绕过门控——提取真值判定在 HTML 动态页上
+      // 仍用位移敏感的 positional 过滤器，与检测层不对称。
+      similar = buildDynamicSimilarGated(baselines, config);
       return similar;
     };
     // [P1-FIX 2026-09-17] 判定前的「回显剔除」集中在**这里**做，而不是每个调用点各自处理。
