@@ -227,6 +227,13 @@
     "failed": "执行失败",
     "notAuthorized": "请勾选「已获授权」",
     "execFailed": "执行失败",
+    "needTargetOrScan": "请填写目标 URL，或填入扫描 scanId 直接接管扫描到的点位",
+    "scanRefHint": "填 scanId（可选 pointId）即可沿用扫描结果与登录态；留空则手工填写 target+point",
+    "scanIdLabel": "扫描 ID（scanId）",
+    "scanIdPlaceholder": "来自扫描报告，留空则手工填目标",
+    "pointIdLabel": "点位 ID（可选）",
+    "pointIdPlaceholder": "省略则用报告里第一个已确认点位",
+    "resolvedFrom": "服务端实际使用：scan {{scanId}} · 点位 {{location}}:{{param}} · 定库 {{dbms}}",
     "capabilities": "当前数据库支持：{{sql}} · {{read}} · {{write}} · {{os}}"
   },
   "targetForm": {
@@ -555,6 +562,7 @@
     "evidenceTitle": "证据（Evidence）",
     "requestTitle": "请求报文（复现）",
     "stackedWarning": "堆叠注入可进一步用于写文件 / 命令执行，危害极高（非本期自动利用，仅供确认）。",
+    "openInExploit": "在利用台打开此点位",
     "injectionPointField": "注入点：{{location}}",
     "originalValueSuffix": "（原始值 {{value}}）",
     "payloadLine": "Payload: {{payload}}",

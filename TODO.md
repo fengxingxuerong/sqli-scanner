@@ -5,6 +5,46 @@
 
 ---
 
+## 2026-09-28 新增 · 接口靶场（`e2e/api-range-lab`）暴露出的待办
+
+背景：新建的「HTTP 接口 × 真实靶场」套件（44 条用例 / 26 个端点）一轮就抱出 9 条接口层缺陷，
+已随本批修复（详见 CHANGELOG 同日批次）。以下是**故意留在后面**的项，每项写清验证口径。
+
+1. **History 页仍读浏览器 localStorage** —— 服务端现在有了 `GET /api/scans`（台账 + 在途合并），
+   但 `src/pages/HistoryPage.tsx` 的数据源还是 zustand 持久化的本地历史。
+   验证口径：改完后，清空浏览器存储在**同一台引擎**上仍能看到历史，且条目 `source` 与
+   `GET /api/scans` 一致；跨浏览器/跨机器可见。
+2. **`/exploit/capabilities` 仍是手写清单**（README 已标 ⚠）—— 应由 `Exploiter` 的方言表
+   （`FILE_READ` / `FILE_WRITE` / osShell 分支）推导，否则"清单说有、动作说没有"会长期漂移。
+   验证口径：删掉方言表里任一条目 ⇒ capabilities 对应用例必须变红（现在是恒绿的手抄列表）。
+3. **sqlmap 侧缺 `--file-write`，且 `/sqlmap/:id` 没有 diff/export** —— `capabilities.fileWrite`
+   声明的是内置引擎的能力，走 sqlmap 模式拿不到同一交付面。
+   验证口径：接口靶场在 `sqlmap.available=true` 的机器上补两条正向用例（真写文件、真导出）。
+4. **暂停对两支 ad-hoc 客户端仍不生效**（`server/src/engine/scan/detect.js:478` tamper 链验证、
+   `:505` 拦截驱动重跑）—— 它们绕过 `scanRunner` 的 ctxBase 包装直接 `getScanClient`。
+   本轮把它们包进 `_wrapWithSignal` 会打断 `detect.orchestration.test.js` 的 fake-sm 契约
+   （该测试断言客户端身份），故**保留原状**。
+   验证口径：把暂停闸收到 `getScanClient` 返回视图上，同时让接口靶场的暂停用例对
+   "开启 wafEvasion 自动选链"的目标也断言零流量；并复跑 orchestration 契约。
+5. **台账无保留策略** —— API 扫描终态自动落 `data/ledger/`，长期运行会无界增长。
+   需要 `SCAN_LEDGER_MAX`（按条目数或天数淘汰）+ 一条"淘汰后 `/scan/:id/report` 必须 404 而不是
+   返回半份数据"的用例。
+6. **`docs/api.md` 不在自动门禁里** —— `readme:check` 只双向核对 README 的端点表；
+   api.md 的字段口径（本轮手工重写）会随代码漂移。
+   验证口径：把 api.md 的 `#### \`METHOD /path\`` 标题集并入同一道双向核对（写了不存在的路径要红，
+   代码新增端点漏写也要红）。
+7. **采集脚本与并发改动互相踩** —— `facts:check` 在本轮出现两次"采集源已改动"的过期提示，
+   原因是采集期间我改了 `docs/api.md`（342 文件指纹含它）。
+   验证口径：`facts-sync` 在采集前把指纹写盘、采集后比对，若变动则**明确报"采集期间文件被改，
+   结果不可用"**并要求重跑，而不是留下一句可能来自上一轮的旧数字。
+8. **`ciWindowsOnly` 登记表用行号做锚点，一天内漂了两次**（177→182→186、216→221→254），
+   每次都要靠"自证③"红一遍才知道。改法：登记键换成**内容锚点**（如 `file:片段前 40 字符:kind`），
+   或让守卫在报"登记项失效"时直接给出该 kind 当前的真实行号，省一次人工 grep。
+   验证口径：在 `e2e/run-all.mjs` 顶部插 10 行注释 ⇒ 守卫应仍然通过（内容锚点不随行号移动），
+   而删掉那两条 Windows-only 行 ⇒ 守卫必须红。
+
+---
+
 ## 2026-09-28 新增 · 真机 WAF 对拍（真库化后）的三个待办
 
 背景：`e2e/waf-real/modsec-live.mjs` 已从「放行率」升级为**「打穿率」**（靶站接真 MySQL，

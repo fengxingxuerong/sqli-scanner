@@ -101,6 +101,10 @@ describe('ScanPage · 启动失败的四类归因（lines 84-97）', () => {
     expect(busyText).not.toContain('engine busy raw');
   });
 
+  // 20s：这条用例要在一个 it 里做**两次**完整 ScanPage 挂载 + store 重置，
+  // 默认 5s 在覆盖率档（`vitest run --coverage` 全 54 文件同跑）稳定超时
+  // —— 2026-09-28 facts 采集连续两轮挂在它身上（本机无并发其它任务时同样复现）。
+  // 不是断言坏了，是预算给小了：整文件单跑（关掉覆盖率）时它 1.5s 就过。
   it('RATE_LIMITED → 展示限流专有文案，且与 ENGINE_BUSY 文案不同', async () => {
     const busy = await startWithFailure(new ApiError(ErrorCode.ENGINE_BUSY, 'x'));
     useScanStore.setState({ status: 'pending' });
@@ -108,7 +112,7 @@ describe('ScanPage · 启动失败的四类归因（lines 84-97）', () => {
     expect(limited).toMatch(/频繁|限流|稍后/);
     // 判据①：两类可恢复错误必须可区分，否则分派等于空转
     expect(limited).not.toBe(busy);
-  });
+  }, 20000);
 
   it('其它 ApiError → 透传后端原始 message（后端知道得比前端多）', async () => {
     const text = await startWithFailure(new ApiError(ErrorCode.UNKNOWN, '目标返回 502 网关错误'));

@@ -4,6 +4,67 @@
 
 ## [Unreleased]
 
+### 2026-09-28 批次 · 接口靶场：26 条 HTTP 端点逐条在真 MySQL 靶站上验收
+
+此前的 e2e 几乎都 `import ScanManager` 直接驱动引擎，接口层（Express 路由、SSE、导出、鉴权闸门、
+利用、AI 外发、台账）从来没有一套"只走 HTTP + 真库靶站"的验收。补上 `e2e/api-range-lab/`
+（44 条用例，本机沙箱 MySQL 8.0.28 上 44/44、21.6s），并把它挂进 `e2e/run-all.mjs`
+与 `npm run e2e:api-range`。这套靶场的判据是**靶站侧计数**而不是接口自报，一轮就抱出 9 条接口层缺陷：
+
+- **`GET /api/health` 的版本是写死的 `1.0.0`**，包早已 `1.1.0`；而 `server/tests/engine.e2e.test.js`
+  把这个过期字面量**断言成契约** ⇒ 升版必红一条"看起来像产品坏了"的用例。改由
+  `core/version.js` 与 package.json 同源（① `ENGINE_VERSION` ②根 ③server ④如实报 unknown），
+  测试改为比对同一个来源。health 另补 `authEnabled/exploitEnabled/node` 等运维真正要看的布尔与计数。
+- **`GET /api/scan/:id` 快照里没有运行态**：`status` 记在扫描条目上而不在报告里，于是
+  "在不在跑 / 有没有暂停"在 HTTP 层只能靠 SSE 长连接推断，`pause` 的返回成了自证。
+  新增 `ScanManager.status()` 并在快照里同时回 `status` 与 `state`（sqlmap 侧 /report 早就带 status，
+  两个引擎的契约就此对齐）。
+- **暂停不冻流量**：`pause` 此前只在 `scan/detect.js` 的**点边界**生效，而一个点是几十上百个包
+  （实测按下暂停后 2.6s 内靶站又收到 5 个请求）。把等待下沉到唯一的请求出口
+  （`scanRunner.js` 的 ctxBase 包装层），暂停期间真的一个包都不发；测试以靶站计数为准。
+- **`POST /scan/:id/stop` 三态不分**：未知 id 也回 `code:0 + {stopped:false}`，且会把**已完成**的
+  扫描状态改写成 `stopped`（交付报告里一次正常跑完成了"被人中断"）。改为未知 → `2001`、
+  终态 → `alreadyFinished` 且不动状态机；`/sqlmap/:id/stop` 同口径对齐（并同步改掉钉住旧语义的用例）。
+- **`format=db-json` 在没拖库数据时回 200 + `"null"`**（4 字节附件），用户读成"导出坏了"。
+  改为 400 + 指明下一步（带 `config.extractScope` / `enableExtract` 重扫）。
+- **`cookieParams` / `headerParams` 静默不测**：cookie 需 `level≥2`、header 需 `level≥3`，
+  低 level 下调用方传了参数却 0 点位、报告写"未检出"。现写入 `report.summary.constraints`
+  （与既有"被抑制能力必须可见"机制同源），用例同时做正反两档断言。
+- **`config.extractScope` 是半截功能**：2026-09-23 收进白名单，但引擎只在 `enableExtract` 为真时才
+  进提取阶段 ⇒ REST 传枚举参数拿到 200 + 空 `data`。按 CLI 既有口径（`enableExtract: args.dump || enumActive`）
+  在配置守卫里补齐这条隐含关系，真库枚举/拖库在 API 侧第一次端到端可用。
+- **利用接口只能"手搓点位"**：`/exploit/*` 要求调用方自己拼 `target+point`，前端利用页因此把
+  `location` 硬编码成 `url`、让用户手抄 `originalValue`（body/cookie/header 与编码点位必然失真）。
+  新增 `scanId`(+`pointId`) 形态：服务端从扫描上下文解析 target/point/dbms 并**沿用该扫描的
+  HttpClient**（cookieJar / auth / CSRF / 限速桶），响应回 `resolvedFrom` 说明实际用了哪个点位；
+  前端利用页与报告页「在利用台打开此点位」接线到这条路径。
+- **`ok:true` 却取不到值**：`Exploiter.sqlShell` 对 SELECT 恒回 `ok:true`，即使标量提取为空。
+  改为「投递」与「取到值」分离（`ok:false + delivered:true + 原因 + 下一步`），CLI 与接口同步受益。
+- **两个安全口径缺口**：① `SSRF_ALLOW_PRIVATE=1` 把 `169.254.0.0/16`（云元数据）等**基础层**一起放行，
+  与 `egressGuard.js` 文件头"基础层无条件拒绝"的承诺矛盾（改：基础层不受该开关影响，
+  确要点名放行用 `SSRF_ALLOW_CIDRS`）；② sqlmap 入口 `--os-shell/--file-read` 不受
+  `EXPLOIT_ENABLED` 约束，而内置 `/exploit/*` 受 ⇒ 同一双刃剑能力两个入口一半有闸（共用
+  `core/exploitFlag.js`），且 `/sqlmap/start` 完全不读 `scope`（现与内置引擎同红线校验）。
+- **scope 不支持 `host:port`**：`127.0.0.1:8140` 被整串当主机名 ⇒ 永不匹配，而报错又把同一串
+  回显成"当前范围"，看起来像判据坏了。现支持带端口规则（主机相等 **且** 端口相等，只收紧不放宽），
+  端口不符时报错明确差在端口。
+- **接口侧完全没有服务端历史**：台账（`scanLedger`）只有 CLI 在写，REST 一条不落；而扫描上下文
+  完成后 30s 回收 ⇒ `GET /scan/:id/report` 在真实交付里迟早变成"扫描不存在"，Web 历史页其实是
+  浏览器 localStorage。本批：API 扫描终态自动落台账（`SCAN_LEDGER=0` 可关）、`/scan/:id`、
+  `/report`、`/report/export`、`/diff`、复测基线全部支持台账回读并如实标 `source: ledger`，
+  新增 `GET /api/scans`（台账+在途合并，需 token），回收窗口改为可配 `SCAN_RETIRE_TTL_MS`。
+- **`.env` 里的开关读不到**：`index.js` 的 `dotenv.config()` 排在 import 之后，被 import 的模块在
+  加载期取的环境变量一律为空（`EXPLOIT_ENABLED=1` 写进 `.env` 不生效，而 `.env.example` 正推荐这么配）。
+  抽出 `core/loadEnv.js` 作为第一条 import，并把利用开关改为每次请求现读（与 sqlmap 桥共用同一判据）。
+- **门禁驱动层的两处自伤**：44 个 e2e 脚本的超时分支写成 `sm.stop(scanId).catch(()=>{})`，
+  而 `stop()` 返回布尔 ⇒ 超时即 TypeError（不是"如实报超时"，是当场崩），已批量改为直接调用；
+  `facts-sync` 的前端解析只认 `N passed | M failed` 词序，而 vitest 失败时输出 `1 failed | 451 passed`
+  ⇒ 一条真用例失败被洗成"找不到 Tests 行"，改为两种词序都解析并如实记录 pass/fail/skipped
+  （本轮据此暴露出 `scanPage.startFailure` 在覆盖率档稳定超时，按其实际耗时把预算钉到 20s）。
+- 文档：`docs/api.md` 全面改写受影响章节（健康检查、`/scans`、快照运行态、停止三态、导出失败形态与
+  7 种格式、`scope` 全部写法含 `host:port`、`extractScope` 与 `enableExtract` 的耦合、参数级别与
+  "给了没测"、利用两种入参形态与结果口径）；README 新增「接口靶场」小节并把端点表补齐 26 条。
+
 ### 2026-09-28 批次 · 真机 WAF 对拍从「放行率」升级到「打穿率」
 
 首轮真机对拍（09-27）只证明了「WAF 放行」——靶站是 echo 后端，不碰数据库，所以那时的诚实边界

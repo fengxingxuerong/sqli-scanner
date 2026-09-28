@@ -1,6 +1,6 @@
 # sqli-scanner
 
-[![Tests](https://img.shields.io/badge/tests-2961%20passing-brightgreen)](#测试)
+[![Tests](https://img.shields.io/badge/tests-2967%20passing-brightgreen)](#测试)
 [![CI](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml/badge.svg)](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml)
 [![Dependencies](https://img.shields.io/badge/dependencies-0%20known%20vulns-brightgreen)](#环境变量)
 
@@ -222,15 +222,16 @@ npm run acceptance      # 【门禁】全方位验收（15 套件，事实断言
 
 | 端点 | 方法 | 说明 |
 |------|------|------|
-| `/api/health` | GET | 健康检查 |
+| `/api/health` | GET | 健康检查（版本与 package.json 同源，另回显鉴权/利用开关与 Node 版本） |
+| `/api/scans` | GET | 服务端历史清单：台账 + 在途扫描合并（需 token，含目标 URL） |
 | `/api/scan/start` | POST | 启动扫描（占一个并发槽；目标先过 SSRF 与 scope 校验） |
-| `/api/scan/:id` | GET | 实时报告快照 |
-| `/api/scan/:id/events` | GET | SSE 进度流（EventSource 无法设自定义头，token 可走 query） |
-| `/api/scan/:id/stop` | POST | 停止扫描 |
-| `/api/scan/:id/pause` | POST | 暂停扫描 |
+| `/api/scan/:id` | GET | 实时报告快照（含 `status`/`state` 运行态；上下文回收后回退台账并标 `source`） |
+| `/api/scan/:id/events` | GET | SSE 进度流（EventSource 无法设自定义头，token 可走 query；按 Last-Event-ID 回放） |
+| `/api/scan/:id/stop` | POST | 停止扫描（未知 id → SCAN_NOT_FOUND；已终态不改写状态） |
+| `/api/scan/:id/pause` | POST | 暂停扫描（暂停在**请求边界**生效：期间不再向目标发包） |
 | `/api/scan/:id/resume` | POST | 恢复扫描 |
-| `/api/scan/:id/report` | GET | 获取报告（与导出同源，含可复制的 PoC） |
-| `/api/scan/:id/report/export` | GET | 导出报告（json / html / csv / markdown / db-json） |
+| `/api/scan/:id/report` | GET | 获取报告（与导出同源，含可复制的 PoC；内存回收后读台账） |
+| `/api/scan/:id/report/export` | GET | 导出报告（json / html / csv / markdown / md / db-json / sarif；无拖库数据的 db-json → 400） |
 | `/api/scan/:id/report/ai` | POST | AI 报告生成（数据外发为 opt-in，未设端点即拒绝） |
 | `/api/scan/:id/report/ai/configs` | GET | AI 可用配置清单（不回显 Key） |
 | `/api/scan/:id/point/:pointId/retest` | POST | 单点复测（交付场景：修完要能证明确实修好了） |
@@ -238,10 +239,10 @@ npm run acceptance      # 【门禁】全方位验收（15 套件，事实断言
 | `/api/payloads` | GET | payload 模板清单 |
 | `/api/tampers` | GET | tamper 插件清单 |
 | `/api/exploit/capabilities` | GET | 利用能力清单。⚠ 目前是手写列表，不由 Exploiter 方言表推导 |
-| `/api/exploit/sql` | POST | SQL 执行（需 `EXPLOIT_ENABLED=1` + 显式 authorized） |
+| `/api/exploit/sql` | POST | SQL 执行（需 `EXPLOIT_ENABLED=1` + 显式 authorized）。两种入参：手工 `target+point+dbms`，或 `scanId`+`pointId` 直接沿用扫描点位、定库结果与会话 |
 | `/api/exploit/file-read` | POST | 目标文件读取（同上） |
 | `/api/exploit/file-write` | POST | 目标文件写入（同上） |
-| `/api/exploit/os-shell` | POST | OS 命令执行（同上） |
+| `/api/exploit/os-shell` | POST | OS 命令执行（同上；MySQL 需 sys_eval UDF，缺失时如实返回失败原因） |
 | `/api/sqlmap/status` | GET | sqlmap 是否可用（不返回脚本路径） |
 | `/api/sqlmap/start` | POST | 启动一次 sqlmap 桥接扫描 |
 | `/api/sqlmap/:id/events` | GET | sqlmap 扫描 SSE 事件流 |
@@ -307,10 +308,10 @@ backend/  ← Express + Node.js
 ## 测试
 
 ```bash
-# 前端测试（450 个用例）
+# 前端测试（452 个用例）
 npm test
 
-# 服务端测试（2514 个用例）
+# 服务端测试（2518 个用例）
 cd server && npm test
 
 # 全部测试
@@ -335,8 +336,8 @@ npm run artifact:drift   # 入库的 e2e 基线产物必须等于当前代码跑
 ## 项目状态
 
 - TypeScript: 零错误
-- 前端测试: 450/450 通过（覆盖率门禁 stmts 94.50 / branch 84.13 / func 77.32，阈值 88/77/67）
-- 服务端测试: 2514 用例（2511 pass / 0 fail / 3 skip，并发口径 2026-09-27 复测；3 skip 为环境依赖显式跳过。覆盖率 lines 91.21 / branch 77.90 / func 80.82，阈值 85/69/72）
+- 前端测试: 452/452 通过（覆盖率门禁 stmts 94.50 / branch 84.13 / func 77.32，阈值 88/77/67）
+- 服务端测试: 2518 用例（2515 pass / 0 fail / 3 skip，并发口径 2026-09-28 复测；3 skip 为环境依赖显式跳过。覆盖率 lines 90.79 / branch 77.57 / func 80.60，阈值 85/69/72）
 - 一键扫描: `npm run scan -- -u <url>`（CLI 一条命令产出 HTML/JSON/Markdown 全套报告 + manifest，退出码可直接进 CI 门禁）
 - Tamper 插件: 228 个（含 v24 增量 20 个，对齐 sqlmap 官方 tamper 全集，含官方 CRS/libinjection 实测组合 uniontable+odbcbrace）
 - WAF 绕过能力: 200+ 插件链式组合，覆盖 62 个 WAF 厂商指纹识别 + 推荐
@@ -427,6 +428,31 @@ sqlmap 误报的具体条目：`F18-safe-item`、`F20-safe-rand`、`F21-safe-500
 方向性差异，且可复现（两条命令都能跑）。调参后本工具 R2 为 19/19（100%）。
 
 已作为 `redteam` 套件纳入 `npm run acceptance`（需先起靶场；CI 里起不来则按 SKIP 处理，不假绿）。
+
+### 接口靶场（`npm run e2e:api-range`）
+
+其余 e2e 大多 `import ScanManager` 直接驱动引擎 —— 那验证的是**引擎**；这一套只走 HTTP，
+逐条核「接口有没有把能力交付到用户手上」。它自带一套真实靶场：
+真 MySQL 8.0.28（隔离沙箱）+ mysql2 直连靶站（url/body/cookie/header 四类注入位 + 会话依赖端点 +
+可"打补丁"开关）+ 本地 OpenAI 兼容假端点（AI 报告那条外发链路）。
+
+44 条用例覆盖 26 个端点：扫描生命周期（含 SSE 断线重连回放、暂停/续跑、停止三态、单点复测、
+diff、7 种导出格式）、三条入参路径、枚举/拖库、直连模式、四条利用动作（真库回显 / 真文件读写 /
+OS 能力缺失时如实失败）、sqlmap 入口、AI 三角色流水线与降级、鉴权与 CSRF/415/413 闸门、
+以及台账历史（`GET /api/scans`、上下文回收后回读）。
+
+判据纪律与验收门禁一致：**接口自报的布尔值不算证据**。暂停是否生效看靶站侧请求计数是否冻住、
+重测是否只打一个点看靶站收到的参数、凭据是否继承看受保护端点的 `authOk/authDenied` 计数、
+导出是否成产物看 Content-Disposition 与正文字节。台账写到 `logs/api-range-ledger/`（不污染仓库台账）。
+
+```bash
+npm run e2e:api-range                       # 全套（需要隔离 MySQL 沙箱，见 e2e/udf-lab/.mysql-sandbox）
+node e2e/api-range-lab/run.mjs --groups=meta,gates   # 只要无库依赖的两组（秒级）
+node e2e/api-range-lab/run.mjs --list        # 列出全部用例
+```
+
+最近一次真机结果（2026-09-28，本机沙箱 MySQL 8.0.28）：**44/44 PASS，21.6s**，退出码 0。
+它同时是 `npm run e2e:run-all` 里的 `api-range-lab` 一项（依赖 `sandbox`，缺沙箱则如实 SKIP）。
 
 ### 验收门禁（`npm run acceptance`）
 

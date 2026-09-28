@@ -66,7 +66,7 @@ async function runScan(target) {
   for (;;) {
     const s = sm.scans.get(id);
     if (s && (s.status === 'completed' || s.status === 'error')) break;
-    if (Date.now() - t0 > 180000) { sm.stop(id).catch(() => {}); return { techs: [], report: {}, ms: Date.now() - t0 }; }
+    if (Date.now() - t0 > 180000) { sm.stop(id); return { techs: [], report: {}, ms: Date.now() - t0 }; }
     await new Promise((r) => setTimeout(r, 30));
   }
   const rep = sm.getReport(id) || {};

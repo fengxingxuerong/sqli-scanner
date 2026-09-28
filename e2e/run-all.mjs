@@ -13,7 +13,7 @@
 //   node e2e/run-all.mjs --only multi-engine-lab,redteam-lab
 //   node e2e/run-all.mjs --all
 // ============================================================================
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import net from 'node:net';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -76,6 +76,11 @@ const LABS = [
   { name: 'tamper-matrix', desc: 'tamper × WAF 规则绕过矩阵', entry: 'e2e/tamper-matrix/tamper-test.mjs', deps: [] },
   { name: 'real-world-lab', desc: '拟真靶场（登录/搜索/上传，PGlite 内置）', entry: 'e2e/real-world-lab/verify.mjs', deps: [] },
   { name: 'real-mysql-lab', desc: '真实 MySQL 驱动靶场验证', entry: 'e2e/real-mysql-lab/verify.mjs', deps: ['sandbox'] },
+  // [2026-09-28] 其余靶场验证的是**引擎**（多数直接 import ScanManager），这一套只走 HTTP：
+  // 22 条对外端点 + 真 MySQL 靶站，逐条核"接口有没有把能力交付到用户手上"。
+  // 它自带的靶站会记录每一个到达的请求（pause/resume、retest、凭据继承这类承诺
+  // 只有靶站侧计数才算证据），并把扫描落进自己的台账目录（logs/ 下，不污染仓库台账）。
+  { name: 'api-range-lab', desc: 'HTTP 接口 × 真靶场全链路（扫描/利用/AI/sqlmap/台账）', entry: 'e2e/api-range-lab/run.mjs', deps: ['sandbox'] },
   { name: 'pentest-lab', desc: '渗透视角刁钻场景实测', entry: 'e2e/pentest-lab/verify.mjs', deps: ['sandbox'] },
   { name: 'waf-real', desc: '真实 CRS v4.1.0 规则验证（纯内存规则引擎，无需 DB）', entry: 'e2e/waf-real/selftest.mjs', deps: [] },
   { name: 'oob-real-lab', desc: 'OOB 带外全链路（PG COPY TO PROGRAM / MySQL UNC）', entry: 'e2e/oob-real-lab/verify.mjs', deps: ['pg', 'sandbox'] },
@@ -169,13 +174,46 @@ const needsSandbox = (lab) => lab.deps.includes('sandbox');
 // 超时按**失败**结算，不当"按设计跳过"——挂死不是跳过。
 const LAB_TIMEOUT_MS = Number(process.env.RUN_ALL_LAB_TIMEOUT_MS) || 300000;
 
+// ── 隔离沙箱的宿主：python 必须"真跑一次"才算可用 ────────────────────────────
+// 缺陷形状（2026-09-28 本机实测）：原先 runOne 里直接取 `process.env.PYTHON || <写死的本机绝对路径>`，
+// 而那个路径今天已经是死链 —— spawn 立刻失败，退出码 **3221225781**（0xC0000135 STATUS_DLL_NOT_FOUND），
+// run-all 把这份**环境故障**原样记成「api-range-lab ❌ 失败」，摘要里看不出少的是 python 不是产品能力。
+// 现在：① 候选顺序 = 显式 PYTHON > 本机默认路径 > PATH 上的 python/python3，逐个真执行
+// `-c print(1)` 才算可用（只看 existsSync 挡不住 DLL 缺失这一类）；
+//      ② 全都不可用 = 缺依赖 ⇒ 按本仓既定口径如实 SKIP + 原因，不冒充靶场失败。
+const PY_CANDIDATES = [
+  process.env.PYTHON,
+  'C:\\Users\\Admin（无密码）\\.workbuddy\\binaries\\python\\versions\\3.13.12\\python.exe',
+  'python',
+  'python3',
+].filter(Boolean);
+
+function pythonWorks(cmd) {
+  try {
+    const r = spawnSync(cmd, ['-c', 'print(1)'], { encoding: 'utf8', timeout: 20000 });
+    return r.status === 0 && String(r.stdout || '').trim() === '1';
+  } catch {
+    return false;
+  }
+}
+
+let PYTHON_BIN; // undefined = 未探测；null = 全部候选都不可用
+function resolvePython() {
+  if (PYTHON_BIN === undefined) {
+    PYTHON_BIN = PY_CANDIDATES.find(pythonWorks) || null;
+    if (!PYTHON_BIN) console.log(`[run-all] ⚠ 找不到可执行的 python（已尝试：${PY_CANDIDATES.join(' | ')}）`);
+    else console.log(`[run-all] python = ${PYTHON_BIN}`);
+  }
+  return PYTHON_BIN;
+}
+
 const runOne = (lab, useSandbox = false) =>
   new Promise((resolve) => {
     const t0 = Date.now();
     // useSandbox：经 e2e/run-with-sandbox.py 包一层，由它在**同一进程**内
     // 起隔离 MySQL 沙箱 → 跑靶场 → 停沙箱（宿主会回收后台进程，故不能先起后用）。
-    const py = process.env.PYTHON || 'C:\\Users\\Admin（无密码）\\.workbuddy\\binaries\\python\\versions\\3.13.12\\python.exe';
-    const cmd = useSandbox ? py : 'node';
+    const py = resolvePython();
+    const cmd = useSandbox ? py || process.env.PYTHON || 'python' : 'node';
     const cmdArgs = useSandbox
       ? [path.join(ROOT, 'e2e', 'run-with-sandbox.py'), lab.entry, ...(lab.args || [])]
       : [lab.entry, ...(lab.args || [])];
@@ -272,6 +310,13 @@ const results = [];
 for (const t of targets) {
   const useSandbox = needsSandbox(t.lab);
   process.stdout.write(`▶ ${t.lab.name}${useSandbox ? '（隔离沙箱）' : ''} ... `);
+  // 沙箱类靶场少的是 python 而不是产品能力 ⇒ 如实 SKIP + 原因（口径同 depStatus 的缺依赖），
+  // 不能让环境故障冒充成靶场失败（0xC0000135 那类退出码尤其读不出根因）。
+  if (useSandbox && !resolvePython()) {
+    console.log('⏭ 跳过（无可执行的 python，隔离 MySQL 沙箱无法启动）');
+    results.push({ name: t.lab.name, code: 0, ms: 0, skipped: true, hint: '缺可执行的 python' });
+    continue;
+  }
   if (!t.ok) console.log(`(缺依赖: ${t.missing.join(', ')})`);
   const r = await runOne(t.lab, useSandbox);
   results.push({ name: t.lab.name, ...r });

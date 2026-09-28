@@ -13,6 +13,7 @@ import * as eventBus from '../core/eventBus.js';
 import { ErrorCode, AppError } from '../core/errors.js';
 import { logger } from '../core/logger.js';
 import { assertSafeHttpTarget } from '../core/httpClient.js';
+import { parseScope, assertInScope } from '../core/scopeGuard.js';
 
 const bridge = new SqlmapBridge();
 
@@ -47,8 +48,16 @@ sqlmapRoutes.get('/status', (req, res) => {
 sqlmapRoutes.post('/start', async (req, res) => {
   try {
     const t = (req.body && req.body.target) || {};
-    if (typeof t.url === 'string' && t.url.trim()) {
-      await assertSafeHttpTarget(t.url);
+    const rawUrl = typeof t.url === 'string' ? t.url.trim() : '';
+    if (rawUrl) {
+      await assertSafeHttpTarget(rawUrl);
+      // [P0-SEC 2026-09-28 接口靶场] 授权范围红线必须与内置引擎同源：
+      //   /scan/start 早就按 config.scope 硬拦越界目标，而 sqlmap 入口此前**只看 SSRF**。
+      //   两条判据的分工本仓写得很清楚（scopeGuard.js：SSRF 管"别打自己人"，
+      //   scope 管"别打没授权的人"）——漏了后一条，等于"配了授权范围仍可借 sqlmap
+      //   模式打任意主机"，而这是用户显式配置过范围的情形，出事时最难自证清白。
+      const scopeRules = parseScope(req.body?.config?.scope ?? req.body?.scope);
+      if (scopeRules.enabled) assertInScope(rawUrl, scopeRules);
     }
     const scanId = bridge.start(req.body);
     res.json({ code: 0, data: { scanId }, message: 'ok' });
@@ -66,8 +75,15 @@ sqlmapRoutes.get('/:id/events', requireReport, (req, res) => {
 
 // POST /:id/stop —— 停止扫描（[审查修复] 挂报告护栏）
 sqlmapRoutes.post('/:id/stop', requireReport, (req, res) => {
+  // 与内置引擎 /scan/:id/stop 同一口径：未知 id 不能回 code:0。
+  // 两个引擎共用一套前端控制面（useScan 按 engine 选路径），一边报成功一边报未找到
+  // 会让"点了停止但还在跑"这类问题只在其中一条链路上暴露。
+  const known = bridge.scans.has(req.params.id);
   const ok = bridge.stop(req.params.id);
-  res.json({ code: 0, data: { stopped: ok }, message: 'ok' });
+  if (!ok && !known) {
+    return res.json({ code: ErrorCode.SCAN_NOT_FOUND, data: { stopped: false }, message: 'sqlmap 任务不存在或已结束' });
+  }
+  res.json({ code: 0, data: { stopped: ok }, message: ok ? 'ok' : '任务已处于终态，无需停止' });
 });
 
 // GET /:id/report —— 最终报告（[审查修复] 挂报告护栏）

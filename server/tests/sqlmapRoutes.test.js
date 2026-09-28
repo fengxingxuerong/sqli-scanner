@@ -48,8 +48,10 @@ test('GET /sqlmap/:id/report 不存在时返回 SCAN_NOT_FOUND', async () => {
   assert.equal(json.data, null);
 });
 
-test('POST /sqlmap/:id/stop 不存在时返回 {stopped: false}', async () => {
+// 与内置引擎 /scan/:id/stop 同一口径（2026-09-28 接口靶场）：不存在的任务不得回 code:0。
+// 前端 useScan 按 engine 选路径打同一个"停止"动作，两条链路必须给出同样的失败语义。
+test('POST /sqlmap/:id/stop 不存在时返回 SCAN_NOT_FOUND（不得报成功）', async () => {
   const { json } = await req(buildApp(), 'POST', '/sqlmap/no-such-id/stop');
-  assert.equal(json.code, 0);
+  assert.equal(json.code, 2001);
   assert.equal(json.data.stopped, false);
 });

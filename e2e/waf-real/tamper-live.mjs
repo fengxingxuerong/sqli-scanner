@@ -59,7 +59,7 @@ async function runScan(sm, target) {
   for (;;) {
     const s = sm.scans.get(scanId);
     if (s && (s.status === 'completed' || s.status === 'error')) break;
-    if (Date.now() - t0 > 120000) { sm.stop(scanId).catch(() => {}); return { vulns: [] }; }
+    if (Date.now() - t0 > 120000) { sm.stop(scanId); return { vulns: [] }; }
     await new Promise((r) => setTimeout(r, 25));
   }
   return { vulns: (sm.getReport(scanId) || {}).vulns || [] };

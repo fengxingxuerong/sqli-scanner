@@ -63,7 +63,7 @@ async function runOurs(sm, sc) {
     const s = sm.scans.get(scanId);
     if (s && (s.status === 'completed' || s.status === 'error')) break;
     if (Date.now() - t0 > OUR_TIMEOUT_MS) {
-      sm.stop(scanId).catch(() => {});
+      sm.stop(scanId);
       return { found: [], status: 'timeout', elapsedMs: Date.now() - t0 };
     }
     await new Promise((r) => setTimeout(r, 20));

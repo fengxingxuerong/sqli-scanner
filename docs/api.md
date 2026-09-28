@@ -83,8 +83,48 @@ curl http://127.0.0.1:4567/api/health
 ```
 
 ```json
-{ "code": 0, "data": { "status": "up", "version": "1.0.0" }, "message": "ok" }
+{
+  "code": 0,
+  "data": {
+    "status": "up",
+    "version": "1.1.0",
+    "versionSource": "package.json(root)",
+    "node": "24.18.0",
+    "authEnabled": true,
+    "exploitEnabled": false,
+    "ratePerSec": 10
+  },
+  "message": "ok"
+}
 ```
+
+`version` 与 `package.json` 同源（构建期/启动期解析，不再写死字面量）。
+字段口径：只放布尔与计数，不放绝对路径/环境变量原文 —— 这条端点是公开只读的。
+
+#### `GET /scans?limit=50`
+
+服务端历史清单（**需要 token**：清单含目标 URL 与结论）。数据来自两处合并，同名以内存为准：
+
+- 台账 `data/ledger/`（每次 API 扫描完成/停止时自动登记，`SCAN_LEDGER=0` 关闭）
+- 引擎内存里在途/刚结束的扫描
+
+```json
+{
+  "code": 0,
+  "data": {
+    "total": 2,
+    "scans": [
+      { "scanId": "…", "target": "http://…/item?id=1", "startedAt": "…", "finishedAt": "…",
+        "points": 1, "vulns": 1, "dbms": "MySQL", "verdict": "vulnerability_detected",
+        "status": "completed", "source": "ledger" }
+    ],
+    "ledgerRoot": "D:/…/server/data/ledger"
+  },
+  "message": "ok"
+}
+```
+
+`source` 区分 `live`（引擎内存）与 `ledger`（磁盘台账）。
 
 #### `GET /payloads?dbms=&technique=`
 
@@ -226,25 +266,71 @@ curl -X POST http://127.0.0.1:4567/api/scan/start \
 | `timeBlindCalibrate` | bool（默认 false） | 启用时间盲注标定探针，自动测量目标响应延迟基线 |
 | `timeBlindCalibrateMin` | 1-30（默认 1） | 时间盲注标定最小 sleep 秒数 |
 
-> 注：`timeProbeSleepSec`/`timeExtractSleepSec` 等时间标定字段未在 REST 白名单内，仅能通过服务端 defaults 定制。
+> 注：`timeProbeSleepSec` / `timeExtractSleepSec` / `timeBlindSleepSec` 已在 REST 白名单内（2026-09-24 接入），
+> 可直接在 `config` 里传；此前"只能改服务端 defaults"的说法已过期。
 
-**注入点精确标记**：参数值末尾加 `*`（URL 查询 / 路径段 / body / cookie / header 均可），引擎仅测试被标记参数（对标 sqlmap `-p`），`*` 剥离后作为原始值。例如 `"id": "1*"`、`?id=1*`、`/users/1*/profile`。
+**授权范围（`config.scope`）**：渗透第一红线，非空即硬拦（不提供"只告警"模式）。支持的条目写法：
+`example.com`（含子域）· `=example.com`（仅裸域）· `*.example.com` / `.example.com` · `10.0.0.0/8`（IPv4 CIDR）·
+`2001:db8::/32` · `https://a.example.com/portal`（主机 + 路径前缀）· **`127.0.0.1:8140`（主机 + 端口，端口必须相等）**。
+带端口的写法是描述本地/内网靶站的自然形式，此前会被整串当主机名而永不匹配。
+范围之外 → `code 1004` 且**不发出任何请求**；目标 302 出圈同样被逐跳拦截。
+
+SSRF 与 scope 是两条独立判据：`SSRF_ALLOW_PRIVATE=1`（打内网靶站时用）只豁免回环/私网，
+`0.0.0.0/8`、`169.254.0.0/16`（云元数据）、组播/保留段属硬底线，任何 `ALLOW_PRIVATE` 部署都不放行；
+确需点名放行某段用 `SSRF_ALLOW_CIDRS`。
+
+**枚举/拖库（`config.extractScope`）**：对标 sqlmap `--dbs/--tables/--columns/--dump/--current-db/…`
+（REST 侧 2026-09-23 才收进白名单）。形状：`{ mode, dbs?, tables?, cols?, keyword?, excludeSysdbs? }`，
+`mode` ∈ `dbs|tables|columns|dump|dumpAll|search|schema|users|passwords|currentDb|currentUser|hostname|isDba|privileges|roles|count|commonTables|commonColumns`。
+传了合法 `extractScope` 即隐含打开 `enableExtract`（与 CLI `enableExtract: args.dump || enumActive` 同一口径）——
+否则接口会回 200 + 空 `report.data`，把"没枚举"说成"库里没东西"。
+
+**参数级别与"给了没测"**：`cookieParams` 需 `level≥2`、`headerParams` 需 `level≥3`（或 `testHeaders:true`）
+才会被解析成注入点。低 level 下这些参数**不会**被测试，报告 `summary.constraints` 里必须出现
+"cookieParams 未被测试（收到 N 个…）"这类说明 —— 静默跳过比报错更贵，因为它产出的是一个看起来正常的阴性报告。
+
+#### `GET /scan/:id`
 
 **请求文件导入**：前端 TargetForm 提供「从请求文件导入」按钮，支持粘贴或上传 Burp/curl HTTP 请求文本，自动解析 URL、方法、请求头、请求体及 Cookie，无需手动填写；CLI 对应 `-r request.txt`。
 
 #### `GET /scan/:id`
 
-实时报告快照（扫描过程中）或完整报告（同 `/report` 结构）。
+实时报告快照 + **运行态**。运行态必须与报告同源可见：`ScanManager` 的状态（running/paused/…）
+记在扫描条目上而不在报告里，此前这条端点只回报告，于是"在不在跑/有没有暂停"在 HTTP 层
+无法观测（只能靠 SSE 长连接），`pause` 的返回就成了自证。
+
+```json
+{
+  "code": 0,
+  "data": {
+    "scanId": "abc123",
+    "status": "running",
+    "source": "live",
+    "state": { "scanId": "abc123", "status": "running", "paused": false, "retired": false,
+               "startedAt": "…", "finishedAt": null, "points": 1, "vulns": 1, "dbms": "MySQL", "elapsedMs": 4200 },
+    "target": {}, "points": [], "vulns": [], "data": null, "riskLevel": "…", "summary": {}
+  },
+  "message": "ok"
+}
+```
+
+上下文被回收（完成后 `SCAN_RETIRE_TTL_MS`，默认 30s）之后回读台账，此时 `source="ledger"`、
+`state.retired=true`。
 
 #### `GET /scan/:id/events`
 
-SSE 实时进度流，事件结构 `{ type, scanId, ts, payload }`，事件类型见 [§6](#6-sse-事件类型)。
+SSE 实时进度流，事件结构 `{ type, scanId, ts, payload, seq }`（帧内含 `id:` 行），事件类型见 [§6](#6-sse-事件类型)。
+断线重连带 `Last-Event-ID` 时回放游标之后缓冲的事件；终态事件（completed/error/stopped）后服务端主动收尾。
 
 #### `POST /scan/:id/stop`
 
 ```json
-{ "code": 0, "data": { "stopped": true }, "message": "ok" }
+{ "code": 0, "data": { "stopped": true, "status": "stopped" }, "message": "ok" }
 ```
+
+三种情形可区分（与 pause/resume 同一口径）：未知/已回收 → `code 2001`；
+已是终态（completed/error/stopped）→ `code 0` + `{ stopped:false, alreadyFinished:true, status }`，
+**不会**把正常跑完的扫描改写成"被停止"。
 
 #### `POST /scan/:id/point/:pointId/retest`
 
@@ -275,7 +361,9 @@ SSE 实时进度流，事件结构 `{ type, scanId, ts, payload }`，事件类�
 
 #### `GET /scan/:id/report`
 
-完整报告（`ReportModel`）：
+完整报告（`ReportModel`），附 `source`（`live` 内存 / `ledger` 台账回读）。
+扫描上下文完成后仅保留 `SCAN_RETIRE_TTL_MS`（默认 30s），之后由台账兜底 —— 历史报告的
+可读性不依赖浏览器缓存。
 
 ```json
 {
@@ -295,17 +383,27 @@ SSE 实时进度流，事件结构 `{ type, scanId, ts, payload }`，事件类�
 }
 ```
 
-#### `GET /scan/:id/report/export?format=json|html|csv|markdown|db-json`
+#### `GET /scan/:id/report/export?format=json|html|csv|markdown|md|db-json|sarif`
 
 导出报告，返回**裸内容**（非 `{code,data,message}` 包装），`Content-Disposition` 附带文件名。
+历史扫描（内存已回收）同样可导出：读台账里的原始报告，走同一条渲染路径，不另写一套格式。
 
 | format | 说明 |
 |------|------|
-| `json` | 完整报告 JSON |
+| `json` | 完整报告 JSON（`target` 脱敏形态） |
 | `html` | 内联样式单页 HTML |
-| `csv` | 漏洞表 + 拖库数据（BOM 头，Excel 不乱码） |
-| `markdown` | Markdown 报告（适合贴工单） |
+| `csv` | 漏洞表 + 拖库数据（BOM 头，Excel 不乱码；公式前缀转义） |
+| `markdown` / `md` | Markdown 报告（适合贴工单） |
 | `db-json` | 仅拖库数据部分（`report.data`） |
+| `sarif` | SARIF 2.1.0（供代码扫描平台/GHAS 消费） |
+
+失败形态（这是**文件下载**端点，不能用 200 表达失败，否则前端 `res.ok` 会把错误体存成报告文件）：
+
+| 情形 | 响应 |
+|------|------|
+| 扫描不存在/未落台账 | `404` `{code:2001}`，且**不带** `Content-Disposition` |
+| `format` 不在白名单 | `400` `{code:1002}` |
+| `db-json` 而本次没有枚举/拖库数据 | `400` + 指明下一步（带 `config.extractScope` 或 `enableExtract` 重扫）；不再回 200 + `"null"` 的 4 字节空附件 |
 
 #### `POST /scan/:id/report/ai`
 
@@ -382,26 +480,64 @@ analyst→writer→reviewer；超时由路由硬编码 120s（`reportAiRoutes.js
 
 ---
 
-### 4.4 利用模块（破坏性，需 `authorized: true`）
+### 4.4 利用模块（破坏性，需 `EXPLOIT_ENABLED=1` + `authorized: true`）
 
-所有 `POST /exploit/*` 端点强制校验 `authorized === true`，否则返回 `code: 6005`（`EXPLOIT_UNAUTHORIZED`）。
+四条动作端点（`/exploit/sql`、`/exploit/file-read`、`/exploit/file-write`、`/exploit/os-shell`）共用一套门槛：
 
-#### `POST /exploit/sql`
+1. 服务端 `EXPLOIT_ENABLED=1`（默认关闭；**每次请求现读**，改 `.env` 后无需猜是否生效）；
+2. 请求体 `authorized: true`（前端勾选语义，仅作审计，安全边界是 ①+ token）；
+3. 独立限速桶（默认 5 req/s，`EXPLOIT_RATE_PER_SEC` 可调）→ 超限回 `code: 4290`；
+4. 目标过 SSRF；scope 取请求体 `scope` 或该次扫描登记的范围。
+
+#### 形态 A：引用扫描结果（推荐）
+
+```json
+{ "scanId": "abc123", "pointId": "p1", "authorized": true, "sql": "SELECT VERSION()" }
+```
+
+服务端从该扫描上下文解析 `target` / `point`（含 `boundary`、`echoCols`、`encoding`）与定库结果，
+并**沿用扫描作用域的 HttpClient**（cookieJar / `auth` / CSRF / safeUrl / 限速桶）——
+需要登录态的目标，利用请求不会再被 401 弹回。响应额外带 `resolvedFrom`，说明实际用了哪个点位：
+
+```json
+{
+  "code": 0,
+  "data": { "ok": true, "type": "select", "delivered": true, "value": "8.0.28",
+            "resolvedFrom": { "scanId": "abc123", "pointId": "p1", "location": "header",
+                              "param": "x-section", "dbms": "MySQL", "sessionInherited": true } },
+  "message": "ok"
+}
+```
+
+扫描上下文已被回收时回 `code 2001` 并提示改用形态 B 或重扫（不静默降级成"猜一个点位"）。
+
+#### 形态 B：手工给 target + point
 
 ```json
 {
   "target": { "url": "…", "method": "GET" },
-  "point": { "originalValue": "1" },
+  "point": { "originalValue": "1", "location": "url", "param": "id" },
   "dbms": "MySQL",
   "authorized": true,
   "sql": "SELECT 1"
 }
 ```
 
+`point.location` / `point.param` 必填。⚠ 手工形态的 `location` 只能是调用方自己确定的一项，
+body/cookie/header 点位与编码点位建议走形态 A，否则等于让用户手抄报告里已有的字段。
+
+#### 结果口径
+
+- `sql-shell`：SELECT 类走标量提取。**`ok:true` 必须带回显值**；投递成功但取不到值时回
+  `ok:false` + `delivered:true` + 原因（无回显列 / UNION 打不进该上下文 / 被 WAF 半拦），
+  不再用 `ok:true, value:null` 这种自相矛盾的形态。
+- `file-read` / `file-write`：受目标 `secure_file_priv` 约束；写文件回读校验失败即 `verified:false`。
+- `os-shell`：MySQL 需 `sys_eval` UDF；能力不存在时如实失败并给原因（不是假成功）。
+
 #### `POST /exploit/file-read` / `POST /exploit/file-write` / `POST /exploit/os-shell`
 
 - `file-read`：额外字段 `path`。
-- `file-write`：额外字段 `content`、`remotePath`。
+- `file-write`：额外字段 `content`、`remotePath`（≤1MB）。
 - `os-shell`：额外字段 `cmd`。
 
 ---

@@ -31,7 +31,7 @@ const t0 = Date.now();
 for (;;) {
   const s = sm.scans.get(scanId);
   if (s && (s.status === 'completed' || s.status === 'error')) break;
-  if (Date.now() - t0 > 120000) { sm.stop(scanId).catch(() => {}); break; }
+  if (Date.now() - t0 > 120000) { sm.stop(scanId); break; }
   await new Promise((r) => setTimeout(r, 30));
 }
 const rep = sm.getReport(scanId) || {};

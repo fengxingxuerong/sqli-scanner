@@ -123,6 +123,11 @@ export async function runScanLoop(sm, scanId) {
             ...client,
             request: async (opts) => {
               // [⑮] 自动注入扫描级 signal，stop() 时中断在途请求
+              // [P0-FIX 2026-09-28 接口靶场] 暂停同样必须在**请求边界**生效：
+              //   pause 此前只在 scan/detect.js 的点边界等待，而一个点 = 几十上百个包，
+              //   单参数目标按下暂停后靶站依旧被打满（实测暂停窗口内又发了 5 个包）。
+              //   "目标报警了先停手"是暂停唯一的实战用途，这一步不生效等于没有暂停。
+              await sm._waitWhilePaused(scanId);
               // [P0-FIX 2026-09-08] 抛错/空响应必须回流可信度守卫后再原样抛出：
               // 返回值与 signal 行为不变（守卫只观察，不参与决策路径）
               let res = null;

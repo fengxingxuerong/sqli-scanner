@@ -227,6 +227,13 @@
     "failed": "Failed",
     "notAuthorized": "Please check \"I am authorized\"",
     "execFailed": "Execution failed",
+    "needTargetOrScan": "Fill in the target URL, or provide a scanId to reuse the scanned injection point",
+    "scanRefHint": "Provide scanId (optionally pointId) to reuse the scan result and its session; leave blank to fill target+point manually",
+    "scanIdLabel": "Scan ID (scanId)",
+    "scanIdPlaceholder": "From a scan report; leave blank for manual target",
+    "pointIdLabel": "Point ID (optional)",
+    "pointIdPlaceholder": "Omit to use the first confirmed point",
+    "resolvedFrom": "Server actually used: scan {{scanId}} · point {{location}}:{{param}} · dbms {{dbms}}",
     "capabilities": "Database capabilities: {{sql}} · {{read}} · {{write}} · {{os}}"
   },
   "targetForm": {
@@ -555,6 +562,7 @@
     "evidenceTitle": "Evidence",
     "requestTitle": "Request (Reproduction)",
     "stackedWarning": "Stacked injection can be further abused for file writes / command execution - extremely dangerous (not auto-exploited in this release; for confirmation only).",
+    "openInExploit": "Open this point in the exploit console",
     "injectionPointField": "Injection point: {{location}}",
     "originalValueSuffix": " (original value {{value}})",
     "payloadLine": "Payload: {{payload}}",

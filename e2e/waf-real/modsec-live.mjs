@@ -263,7 +263,7 @@ async function main() {
   const fp = [];
   for (const s of SAFE_SAMPLES) {
     const r = await hit(BASE, s);
-    if (blocked(r)) fp.push({ sample: s, status: r.status });
+    if (blocked(r)) fp.push({ sample: `${s.ctx}:${payloadOf(s)}`, status: r.status });
   }
   target.child?.kill('SIGTERM');
 

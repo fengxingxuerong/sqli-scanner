@@ -94,17 +94,31 @@ function run(cmd, cwd) {
 function collectFrontend({ coverage }) {
   const out = run(`npx vitest run${coverage ? ' --coverage' : ''}`, ROOT);
   const files = out.match(/Test Files\s+(\d+)\s+passed/);
-  const tests = out.match(/Tests\s+(\d+)\s+passed(?:\s*\|\s*(\d+)\s+failed)?/);
-  if (!tests) {
+  // vitest 的汇总行有两种词序，且**失败数排在前面**：
+  //   全绿：  Tests  452 passed (452)
+  //   有红：  Tests  1 failed | 451 passed (452)
+  // 原正则只认 `<n> passed [ | <m> failed]` 这一种词序 ⇒ 一旦有用例失败就解析不到 Tests 行，
+  // 抛出的却是"找不到 Tests 行"（2026-09-28 实测：连续两轮采集都这样把一条真失败吞成了脚本报错）。
+  // 现在两种词序都取，并把 failed 如实带进 pass/tests —— 采集器不许把红洗成"读不到"。
+  const line = out.match(/Tests\s+(.+?)\s*\((\d+)\)/);
+  if (!line) {
     console.error('── 前端测试输出尾部（未能解析 Tests 行）──');
     console.error(out.split('\n').slice(-40).join('\n'));
     throw new Error('前端测试输出里找不到 Tests 行');
   }
+  const numOf = (kind) => {
+    const m = new RegExp(`(\\d+)\\s+${kind}`).exec(line[1]);
+    return m ? Number(m[1]) : 0;
+  };
+  const fail = numOf('failed');
+  const skipped = numOf('skipped');
+  const total = Number(line[2]);
   const res = {
     files: files ? Number(files[1]) : null,
-    tests: Number(tests[1]) + (tests[2] ? Number(tests[2]) : 0),
-    pass: Number(tests[1]),
-    fail: tests[2] ? Number(tests[2]) : 0,
+    tests: total,
+    pass: total - fail - skipped,
+    fail,
+    skipped,
   };
   if (coverage) {
     // v8 text 报表的总计行：All files | 90.01 | 79.01 | 70.64 | 90.01 |

@@ -29,7 +29,7 @@ async function runScan(sm, target) {
   for (;;) {
     const s = sm.scans.get(scanId);
     if (s && (s.status === 'completed' || s.status === 'error')) break;
-    if (Date.now() - t0 > 120000) { sm.stop(scanId).catch(() => {}); return { status: 'timeout', vulns: [] }; }
+    if (Date.now() - t0 > 120000) { sm.stop(scanId); return { status: 'timeout', vulns: [] }; }
     await new Promise((r) => setTimeout(r, 30));
   }
   const rep = sm.getReport(scanId) || {};

@@ -49,6 +49,9 @@ server/dist-engine/
 # recall-lab run results (auto-generated, machine-specific, not committed)
 e2e/recall-lab/results/
 
+# api-range-lab（接口靶场）每轮产物：端口/耗时/台账路径都是机器相关的，不入库
+e2e/api-range-lab/out/
+
 # [P2-HYGIENE 2026-09-09] 一次性排障脚本与本地代理临时目录：不属于任何回归入项，
 # 但会把 `eslint .` 与 `git status` 搅浑（历史审计会话残留）。统一忽略，需要时自行处理。
 e2e/diag/

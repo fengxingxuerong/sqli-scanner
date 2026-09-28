@@ -69,10 +69,14 @@ const KNOWN_SAFE = new Map([
   ['e2e/redteam-lab/env.mjs:50:exe',
     '该行是**注释**（`// 硬等 60 秒才抛错。CI（ubuntu-latest）上 MYSQLD 默认值是 ...`），描述的正是这条 CI-FIX 本身'],
   ['e2e/redteam-lab/env.mjs:50:drive', '同上（同一行注释）'],
-  ['e2e/run-all.mjs:177:exe',
-    '`py` 变量**只在 useSandbox=true 时使用**（下一行 `const cmd = useSandbox ? py : "node"`）；而 useSandbox 由 `sandboxAvailable()` 决定，CI 上沙箱 datadir 不存在 ⇒ 该分支不进入'],
-  ['e2e/run-all.mjs:177:drive', '同上（同一行的 python 默认路径）'],
-  ['e2e/run-all.mjs:216:wincmd',
+  // ⚠ 行号锚点会随上游插入漂移，2026-09-28 一天内漂了两次（177→182→186、216→221→254）：
+  //   第一次是 run-all 的 LABS 清单新增 api-range-lab，第二次是 python 解析改成候选列表。
+  //   漂移由"自证③：登记表不得虚胖"抓到（它要求每个登记项都仍真实命中），所以改 run-all
+  //   这一带代码时必须同步核对行号 —— 删登记项等于给这条 Windows-only 依赖发免检牌。
+  ['e2e/run-all.mjs:186:exe',
+    '`PY_CANDIDATES` 里的本机默认路径；解析时**逐个真跑 `-c print(1)`** 才算可用（2026-09-28 实测：该路径已是 0xC0000135 死链，只看 existsSync 挡不住），全不可用则如实 SKIP'],
+  ['e2e/run-all.mjs:186:drive', '同上（同一行的 python 默认路径）'],
+  ['e2e/run-all.mjs:254:wincmd',
     '该 `taskkill` 在 `if (process.platform === "win32" && p.pid)` 之内（**上一行**）—— 平台守卫是跨行的，行级判据看不到，故此处显式登记'],
   ['e2e/waf-lab/compare-real.e2e.mjs:154:wincmd',
     '该行是**错误提示文案**（端口被占时的排查建议），不参与执行；同段紧邻的下一行已给出 POSIX 方案 `lsof -ti :PORT | xargs kill -9`'],

@@ -173,4 +173,47 @@ function isDirEntry(p) {
   }
 }
 
-export default { recordScan, listScans, getScan };
+/**
+ * 读取台账里的完整报告（report.json）。
+ *
+ * 为什么需要：台账早就存在（CLI / 一键扫描都写），而 **REST/Web 侧完全没接** ——
+ * 引擎的扫描上下文在完成后 30s 就被回收（ScanManager._retire），于是
+ * `GET /api/scan/:id/report` 在真实交付里迟早会变成"扫描不存在或已结束"：
+ * 使用者刷新页面、换台机器、或者只是隔夜再点开那条 finding，数据就没了
+ * （History 页当时显示的是浏览器 localStorage，不是服务端）。
+ * 本函数就是那条回退读取路径：读不到返回 null，不抛错——回退是增强，不是主链路。
+ * @param {string} scanId
+ * @returns {object|null} 台账中保存的报告（recordScan 落盘时已是 attachPoc 之后的形态）
+ */
+export function readReport(scanId) {
+  let id;
+  try {
+    id = safeScanId(scanId);
+  } catch {
+    return null; // 非法 id 与"没这条记录"同形：调用方按未找到处理，不额外暴露判据
+  }
+  const p = join(ledgerDir(), id, 'report.json');
+  if (!existsSync(p)) return null;
+  try {
+    const parsed = JSON.parse(readFileSync(p, 'utf-8'));
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch (e) {
+    consoleWarn(`台账 report.json 解析失败（${id}）：${e.message}`);
+    return null;
+  }
+}
+
+/** 台账根目录（响应里如实标注数据落在哪，便于归档与取证） */
+export function ledgerRoot() {
+  return ledgerDir();
+}
+
+function consoleWarn(msg) {
+  try {
+    console.warn(`[scanLedger] ${msg}`);
+  } catch {
+    /* 无控制台（打包进 sidecar）时忽略 */
+  }
+}
+
+export default { recordScan, listScans, getScan, readReport, ledgerRoot };

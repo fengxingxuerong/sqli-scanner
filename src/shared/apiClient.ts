@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { ApiResponse, ExploitTarget, ExploitResult, ExploitCapabilities, TamperInfo } from './types';
+import type { ApiResponse, ExploitRequest, ExploitResult, ExploitCapabilities, TamperInfo } from './types';
 
 /**
  * 携带后端错误码的异常类。
@@ -144,13 +144,13 @@ export const apiClient = {
 // 利用端点客户端（sql-shell / file-read / file-write / os-shell / capabilities）
 export const exploitClient = {
   capabilities: () => apiClient.get<ExploitCapabilities>('/exploit/capabilities'),
-  sqlShell: (req: ExploitTarget & { sql: string }) =>
+  sqlShell: (req: ExploitRequest & { sql: string }) =>
     apiClient.post<ExploitResult>('/exploit/sql', req),
-  fileRead: (req: ExploitTarget & { path: string }) =>
+  fileRead: (req: ExploitRequest & { path: string }) =>
     apiClient.post<ExploitResult>('/exploit/file-read', req),
-  fileWrite: (req: ExploitTarget & { content: string; remotePath: string }) =>
+  fileWrite: (req: ExploitRequest & { content: string; remotePath: string }) =>
     apiClient.post<ExploitResult>('/exploit/file-write', req),
-  osShell: (req: ExploitTarget & { cmd: string }) =>
+  osShell: (req: ExploitRequest & { cmd: string }) =>
     apiClient.post<ExploitResult>('/exploit/os-shell', req),
 };
 
