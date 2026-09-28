@@ -74,6 +74,11 @@ jobs:
       # 修法：npm run facts:refresh（实跑采集）→ npm run facts:fix（回写 README）
       - run: node scripts/facts-sync.mjs --check
         name: 文档数字口径（README ↔ docs/_facts.json）
+      # [ADD 2026-09-29] facts 采集判据的自证：采集期间若有人改了测试源码，产出的数字
+      # 不对应任何一版代码 ⇒ 必须拒绝写盘（见 scripts/facts-sync.mjs 的 diffDigests）。
+      # 这条自证钉的是**判据本身**，不是数字 —— 数字每次采集都在变，判据不能跟着变。
+      - run: node scripts/facts-sync.mjs --selftest
+        name: facts 采集前后指纹比对（自证判据不空转）
       # [P1-ADD 2026-09-23] README 内部口径自洽门禁：同一事实在 README 里被写了多处时，
       # 各处必须互相一致。实测到的第一例：方言分层在「功能表概览行（三数 + 方言清单）」
       # 「分层详表（三行）」「给客户的话（共 N 种）」三处各写一遍 —— Oracle / SQL Server
