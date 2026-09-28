@@ -18,6 +18,7 @@ import * as eventBus from '../core/eventBus.js';
 import { logger } from '../core/logger.js';
 import { AppError, ErrorCode } from '../core/errors.js';
 import { isAuthEnabled } from '../core/apiAuthState.js';
+import { isExploitEnabled } from '../core/exploitFlag.js';
 
 // SQLMAP_ALLOW_EVAL：是否允许把 --eval 透传给 sqlmap（默认关）。运行时读取，便于测试与运维动态开关。
 function isEvalAllowed() {
@@ -229,6 +230,19 @@ export function buildArgs(input) {
   // 破坏性操作：必须显式 opt-in，并打明确告警
   const destructive = [];
   if (c.dump) destructive.push('--dump');
+  // [P0 2026-09-28 接口靶场] --os-shell / --file-read 与内置引擎的 /exploit/* 是**同一个**
+  // 双刃剑能力的两个入口。内置侧受 EXPLOIT_ENABLED 门控（默认关），这里曾经不受 ⇒
+  // "默认部署不具备远程利用能力"这条承诺只守住了一半：调用方改走 /api/sqlmap/start
+  // 传 config.sqlmap.osShell=true 就能拿到交互 shell。判据必须同源（core/exploitFlag.js）。
+  if (c.osShell || c.fileRead) {
+    if (!isExploitEnabled()) {
+      throw new AppError(
+        ErrorCode.EXPLOIT_UNAUTHORIZED,
+        'sqlmap 的 --os-shell / --file-read 属利用动作，需服务端显式设置 EXPLOIT_ENABLED=1 才可用' +
+          '（与内置引擎 /api/exploit/* 同一开关；未满足时直接拒绝，不静默丢弃参数）'
+      );
+    }
+  }
   if (c.osShell) destructive.push('--os-shell');
   if (c.fileRead) {
     destructive.push('--file-read', clampLen(String(c.fileRead), 4096));

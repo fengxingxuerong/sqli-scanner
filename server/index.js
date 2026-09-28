@@ -9,9 +9,11 @@
 //   createApp 导出供测试无副作用 import
 // ============================================================================
 
+// 必须是第一条 import：把 .env 在任何业务模块求值前装进 process.env
+// （原因与优先级见 core/loadEnv.js）
+import './src/core/loadEnv.js';
 import express from 'express';
 import cors from 'cors';
-import dotenv from 'dotenv';
 import crypto from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -26,8 +28,6 @@ import { logger } from './src/core/logger.js';
 import { setAuthEnabled } from './src/core/apiAuthState.js';
 import { oobReceiver } from './src/core/oobReceiver.js';
 import { httpClient } from './src/core/httpClient.js';
-
-dotenv.config();
 
 // 仅监听本机回环地址（默认 127.0.0.1），避免引擎暴露到公网被当扫描放大器 / 拖库代理滥用。
 // 需局域网 / 容器访问时通过 HOST 环境变量显式指定（如 0.0.0.0），但务必同时设置

@@ -94,17 +94,31 @@ function run(cmd, cwd) {
 function collectFrontend({ coverage }) {
   const out = run(`npx vitest run${coverage ? ' --coverage' : ''}`, ROOT);
   const files = out.match(/Test Files\s+(\d+)\s+passed/);
-  const tests = out.match(/Tests\s+(\d+)\s+passed(?:\s*\|\s*(\d+)\s+failed)?/);
-  if (!tests) {
+  // vitest 的汇总行有两种词序，且**失败数排在前面**：
+  //   全绿：  Tests  452 passed (452)
+  //   有红：  Tests  1 failed | 451 passed (452)
+  // 原正则只认 `<n> passed [ | <m> failed]` 这一种词序 ⇒ 一旦有用例失败就解析不到 Tests 行，
+  // 抛出的却是"找不到 Tests 行"（2026-09-28 实测：连续两轮采集都这样把一条真失败吞成了脚本报错）。
+  // 现在两种词序都取，并把 failed 如实带进 pass/tests —— 采集器不许把红洗成"读不到"。
+  const line = out.match(/Tests\s+(.+?)\s*\((\d+)\)/);
+  if (!line) {
     console.error('── 前端测试输出尾部（未能解析 Tests 行）──');
     console.error(out.split('\n').slice(-40).join('\n'));
     throw new Error('前端测试输出里找不到 Tests 行');
   }
+  const numOf = (kind) => {
+    const m = new RegExp(`(\\d+)\\s+${kind}`).exec(line[1]);
+    return m ? Number(m[1]) : 0;
+  };
+  const fail = numOf('failed');
+  const skipped = numOf('skipped');
+  const total = Number(line[2]);
   const res = {
     files: files ? Number(files[1]) : null,
-    tests: Number(tests[1]) + (tests[2] ? Number(tests[2]) : 0),
-    pass: Number(tests[1]),
-    fail: tests[2] ? Number(tests[2]) : 0,
+    tests: total,
+    pass: total - fail - skipped,
+    fail,
+    skipped,
   };
   if (coverage) {
     // v8 text 报表的总计行：All files | 90.01 | 79.01 | 70.64 | 90.01 |
@@ -507,9 +521,97 @@ function buildFacts() {
   };
 }
 
+/**
+ * 比对两次采集源指纹：返回被增 / 删 / 改的文件清单。
+ *
+ * 存在的理由（2026-09-29）：`--refresh` 要跑几分钟测试（数字采自"跑测试"那一刻的磁盘）。
+ * 采集期间若有人改了测试源码（并发会话最常见），产出的数字就**既不代表采集前也不代表采集后**
+ * 的任何一版代码 —— 而旧行为会把这份数字连同"新指纹"一起落盘，于是 `_facts.json` 与
+ * `_facts.sources.json` 双双是新的、看起来完全正常，实际是**一次没人能复现的采集**。
+ * 判据与危害同源：数字必须对应**一个确定的代码版本**，做不到就明确报不可用。
+ *
+ * @param {{files?: Record<string,string>}} before
+ * @param {{files?: Record<string,string>}} after
+ */
+export function diffDigests(before, after) {
+  const b = before?.files || {};
+  const a = after?.files || {};
+  const changed = [];
+  const added = [];
+  const removed = [];
+  for (const [k, v] of Object.entries(a)) {
+    if (!(k in b)) added.push(k);
+    else if (b[k] !== v) changed.push(k);
+  }
+  for (const k of Object.keys(b)) if (!(k in a)) removed.push(k);
+  return { changed, added, removed };
+}
+
+/** --selftest：钉住 diffDigests（判据自己也得被验证不空转） */
+function selftest() {
+  const base = { files: { 'a.test.js': '111111111111', 'b.test.js': '222222222222' } };
+  const bad = [];
+  const expect = (name, cond, msg) => { if (!cond) bad.push(`${name}：${msg}`); };
+
+  expect('完全一致 → 无差异', (() => {
+    const d = diffDigests(base, { files: { ...base.files } });
+    return !d.changed.length && !d.added.length && !d.removed.length;
+  })(), '本应零差异');
+
+  expect('改一个文件 → 点名该文件', (() => {
+    const d = diffDigests(base, { files: { 'a.test.js': '333333333333', 'b.test.js': '222222222222' } });
+    return d.changed.length === 1 && d.changed[0] === 'a.test.js' && !d.added.length && !d.removed.length;
+  })(), '没点名被改的文件');
+
+  expect('新增文件 → 归入 added（不是 changed）', (() => {
+    const d = diffDigests(base, { files: { ...base.files, 'c.test.js': '444444444444' } });
+    return d.added.length === 1 && d.added[0] === 'c.test.js' && !d.changed.length;
+  })(), '新增没被识别');
+
+  expect('删除文件 → 归入 removed', (() => {
+    const d = diffDigests(base, { files: { 'a.test.js': '111111111111' } });
+    return d.removed.length === 1 && d.removed[0] === 'b.test.js' && !d.changed.length;
+  })(), '删除没被识别');
+
+  expect('空指纹（git 不可用）→ 不崩、且判为无差异（宁可漏报也不挂流程）', (() => {
+    const d = diffDigests({ files: {} }, { files: {} });
+    return !d.changed.length && !d.added.length && !d.removed.length;
+  })(), '空输入处理不对');
+
+  if (bad.length) {
+    console.error('[facts] ✗ 自证失败：');
+    for (const b of bad) console.error('    · ' + b);
+    return 1;
+  }
+  console.log('[facts] ✓ 自证通过：采集前后指纹比对的 5 类形态全部被正确识别');
+  return 0;
+}
+
 function main() {
+  if (args.has('--selftest')) return selftest();
+
   if (doRefresh) {
+    // ── 采集前快照：数字必须对应**一个确定的代码版本** ────────────────────────
+    // 不写盘的原因：写盘会造出一个"上次采集进行到一半"的中间态文件，而失败时我们本来就
+    // 不打算留下任何产物；同一进程内比对即可拿到同样（且更干净）的判据。
+    const before = collectSourceDigest();
     const facts = buildFacts();
+    const after = collectSourceDigest();
+    const drift = diffDigests(before, after);
+    const driftCount = drift.changed.length + drift.added.length + drift.removed.length;
+    if (driftCount) {
+      const fmt = (arr) => arr.slice(0, 8).join(', ') + (arr.length > 8 ? ` …(+${arr.length - 8})` : '');
+      console.error(
+        `[facts] ✗ **采集期间文件被改动，本次结果不可用** —— 数字采自"跑测试"那一刻的磁盘，` +
+        `若期间有人改了测试源码，这份数字既不对应采集前也不对应采集后的任何一版代码。\n` +
+        (drift.changed.length ? `[facts]   被改（${drift.changed.length}）：${fmt(drift.changed)}\n` : '') +
+        (drift.added.length ? `[facts]   新增（${drift.added.length}）：${fmt(drift.added)}\n` : '') +
+        (drift.removed.length ? `[facts]   被删（${drift.removed.length}）：${fmt(drift.removed)}\n` : '') +
+        `[facts]   已**拒绝**写盘（不留下一次没人能复现的采集）。\n` +
+        `[facts]   修法：改完这一批再重跑 node scripts/facts-sync.mjs --refresh${withCoverage ? ' --coverage' : ''}`
+      );
+      return 1;
+    }
     if (!facts.frontend.coverage || !facts.server.coverage) {
       console.error('[facts] 覆盖率数字缺失：请加 --coverage 重新采集（否则 README 覆盖率一栏无法校验）');
       return 1;

@@ -603,12 +603,52 @@ export interface ExploitTarget {
   authorized: boolean;
 }
 
+/**
+ * 引用某次扫描已确认的点位做利用（服务端从报告解析 target/point/dbms）。
+ * 为什么前端要有这条路：手工拼 target+point 时，location 只能填 url、boundary/echoCols
+ * 拿不到、body/cookie/header 点位与编码点位必然失真 —— 而报告里这些字段本来就全。
+ * 手工形态保留（用于"没扫过但已知注入点"的场景），两种形态由 ExploitRequest 并列表达。
+ */
+export interface ExploitScanRef {
+  scanId: string;
+  /** 报告里的点位 id；省略则由服务端取第一个已确认点位（响应 resolvedFrom 会说明用了哪个） */
+  pointId?: string;
+  /** 省略时沿用扫描的定库结果；扫描未定库成功时必须显式给 */
+  dbms?: DbmsType;
+  authorized: boolean;
+}
+
+export type ExploitRequest = ExploitTarget | ExploitScanRef;
+
+/** 服务端解析来源（scanId 形态才有，随结果回传供审计复放） */
+export interface ExploitResolvedFrom {
+  scanId: string;
+  pointId: string | null;
+  location: string | null;
+  param: string | null;
+  dbms: string;
+  sessionInherited?: boolean;
+}
+
 /** 利用能力清单（GET /exploit/capabilities） */
 export interface ExploitCapabilities {
   sqlShell: string[];
   fileRead: string[];
   fileWrite: string[];
   osShell: string[];
+  /** DBMS → 各能力明细（supported / risk / requiredPriv / note）。
+   *  服务端由能力表推导（2026-09-29 起不再是手写清单），前端暂只显示「有没有」。 */
+  matrix?: Record<
+    string,
+    Partial<
+      Record<
+        'sqlShell' | 'fileRead' | 'fileWrite' | 'osShell' | 'udf' | 'registry',
+        { supported: boolean; risk: string; requiredPriv?: string; note?: string }
+      >
+    >
+  >;
+  /** 利用总开关（EXPLOIT_ENABLED）当前是否开启 */
+  enabled?: boolean;
 }
 
 /** 利用结果（覆盖四动作返回形态，宽松结构） */
@@ -625,4 +665,8 @@ export interface ExploitResult {
   verified?: boolean;
   readback?: string | null;
   note?: string;
+  /** SQL 已投递但未取回值时为 true（配合 ok:false + error 阅读） */
+  delivered?: boolean;
+  /** scanId 形态：服务端实际用了哪个点位/定库结果 */
+  resolvedFrom?: ExploitResolvedFrom;
 }

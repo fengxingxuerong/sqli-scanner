@@ -546,8 +546,22 @@ export function buildGuardedConfig(cfg, scopeRules) {
   // 但必须喊出来——静默丢弃正是本仓库反复踩的那类假阴性。
   if ('extractScope' in cfg) {
     const scope = sanitizeExtractScope(cfg.extractScope);
-    if (scope) config.extractScope = scope;
-    else {
+    if (scope) {
+      config.extractScope = scope;
+      // [P0-FIX 2026-09-28 接口靶场] 显式枚举意图 ⇒ 必须真的进入提取阶段。
+      //   引擎只在 config.enableExtract 为真时才跑提取（scan/extract.js:32、
+      //   scan/finalize.js:45 的 report.data 同判据），而 REST 侧收了 extractScope
+      //   却不会顺带打开 enableExtract ⇒ 传 {mode:'dbs'} 拿到 200 + 空 data，
+      //   又一次"能力在、入口缺一半"的静默假阴性。
+      //   CLI 早就是这道口径：bin/cli/config.js:129 `enableExtract: args.dump || enumActive`
+      //   —— 这里与 CLI 对齐，而不是新发明一套语义。
+      if (!config.enableExtract) {
+        config.enableExtract = true;
+        logger.info(
+          `extractScope(mode=${scope.mode}) 已隐含开启 enableExtract：提取阶段将向目标发出大量读请求（受限速与 dumpMaxRows 约束）`
+        );
+      }
+    } else {
       logger.warn(
         `extractScope 形状非法已丢弃（不会执行任何枚举/拖库）：${JSON.stringify(cfg.extractScope).slice(0, 200)}` +
         `（mode 需为 ${[...EXTRACT_SCOPE_MODES].join('|')} 之一）`

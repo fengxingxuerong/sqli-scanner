@@ -19,8 +19,9 @@ import { logger } from '../logger.js';
 //     组播/保留/文档段 —— 对扫描器自身没有任何合法扫描价值，是 SSRF 最高价值目标。
 //   · 严格层（SSRF_STRICT=1 时追加）：回环 127.0.0.0/8、::1、私网 10/8、172.16/12、192.168/16、
 //     CGNAT 100.64/10、ULA fc00::/7 —— 面向「引擎暴露在非回环接口」的部署（容器/局域网/公网）。
-//   · 显式放行（优先级最高）：SSRF_ALLOW_PRIVATE=1 完全放行；SSRF_ALLOW_CIDRS=1.2.3.0/24,...
-//     逐段放行（供内部授权目标/测试使用）。
+//   · 显式放行：SSRF_ALLOW_CIDRS=1.2.3.0/24,... 逐段放行（优先级最高，供内部授权目标/演练用）；
+//     SSRF_ALLOW_PRIVATE=1 只豁免**严格层**（回环/私网），不豁免上面那条基础层——
+//     2026-09-28 接口靶场实测出这条不一致并把口径改正（详见 isBlockedIpv4 内注释）。
 const POLICY = (() => {
   const allowAll = process.env.SSRF_ALLOW_PRIVATE === '1' || process.env.SSRF_ALLOW_PRIVATE === 'true';
   const strict =
@@ -69,10 +70,15 @@ function isBlockedIpv4(ip, hardOnly = false) {
     const mask = bits === 0 ? 0 : (~0 << (32 - bits)) >>> 0;
     return (n & mask) === (base & mask);
   };
-  // 显式放行优先（硬底线模式不受放行清单影响）
-  if (hardOnly) { /* 硬底线：忽略 allowAll / allowCidrs */ }
-  else if (POLICY.allowAll) return false;
-  else if (POLICY.allowCidrs.some((cidr) => {
+  // 显式逐段放行优先（硬底线模式不受放行清单影响）。
+  // ⚠ SSRF_ALLOW_PRIVATE **不在这一层**：见下方"基础层"之后的处理。
+  //   原实现在这里 `else if (POLICY.allowAll) return false;`，于是 ALLOW_PRIVATE=1 会把
+  //   0.0.0.0/8、169.254.0.0/16（云元数据）、组播/保留段一起放行——与这个文件开头
+  //   「基础层（无条件拒绝）：…对扫描器自身没有任何合法扫描价值」的承诺直接矛盾（实测：
+  //   ALLOW_PRIVATE=1 下 POST /scan/start 指向 169.254.169.254 拿到 scanId 并真的发请求）。
+  //   ALLOW_PRIVATE 的合法用途是"我要打内网靶站"（回环/私网，属严格层），
+  //   不是"我要打元数据"；真要把某个元数据段纳入授权，请显式写进 SSRF_ALLOW_CIDRS。
+  if (!hardOnly && POLICY.allowCidrs.some((cidr) => {
     const [h, bitsStr] = cidr.split('/');
     const parts = (h || '').split('.').map(Number);
     if (parts.length !== 4) return false;
@@ -89,6 +95,9 @@ function isBlockedIpv4(ip, hardOnly = false) {
   if (inCidr(192, 0, 0, 0, 24) || inCidr(198, 18, 0, 0, 15)) return true; // IETF 保留/基准测试段
   if (inCidr(100, 64, 0, 0, 10)) return true; // CGNAT
   if (hardOnly) return false; // 硬底线到此为止：严格层（回环/私网）在代理模式下由代理侧判定
+  // SSRF_ALLOW_PRIVATE=1：放行回环/私网（打内网靶站的合法用途），
+  // 但上面那批基础层地址已经被无条件拒绝，不受本开关影响。
+  if (POLICY.allowAll) return false;
   // 严格层
   if (POLICY.strict) {
     if (inCidr(127, 0, 0, 0, 8)) return true; // 回环

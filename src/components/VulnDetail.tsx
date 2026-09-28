@@ -4,6 +4,7 @@ import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import CheckIcon from '@mui/icons-material/Check';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import { useTranslation } from 'react-i18next';
+import { Link } from 'react-router-dom';
 import type { Vulnerability, Target, InjectionPoint, VulnPoc } from '../shared/types';
 import { useScanStore } from '../store/scanStore';
 import i18n from '../i18n';
@@ -206,6 +207,20 @@ export default function VulnDetail({
           <Alert severity="error" variant="outlined" className="mt-2">
             {t('vulnDetail.stackedWarning')}
           </Alert>
+        )}
+        {/* 接管这条路必须一键：接口已支持按 scanId+pointId 沿用扫描点位与会话，
+            若还要用户从报告里手抄 URL/参数名/原始值，等于把新能力留在文档里 */}
+        {report?.scanId && (
+          <Button
+            component={Link}
+            to={`/exploit?scanId=${encodeURIComponent(report.scanId)}&pointId=${encodeURIComponent(vuln.pointId || '')}`}
+            size="small"
+            color="warning"
+            variant="outlined"
+            className="mt-2"
+          >
+            {t('vulnDetail.openInExploit')}
+          </Button>
         )}
       </Paper>
 

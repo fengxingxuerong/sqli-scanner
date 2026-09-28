@@ -59,6 +59,17 @@ import {
 export { urlHash, SYS_DBS, publicTarget, publicReport } from './scanHelpers.js';
 import { mapPool, mergeExtracted, mergeExtractedForResume, hasData, publicTarget } from './scanHelpers.js';
 
+// 扫描状态机的终态集合（stop/pause 与路由层共用一份，不要在两处各列一遍数组）
+export const TERMINAL_STATUSES = ['completed', 'stopped', 'error'];
+// 暂停轮询间隔：与 scan/detect.js 的点边界等待同量级，忙等与迟钝之间取个折中
+const PAUSE_POLL_MS = 100;
+
+/** 上下文回收窗口（毫秒）：非法值/未设置一律回落 30s，不设 0（0=立即回收会让报告永远读不到） */
+function _envRetireTtl() {
+  const n = Number(process.env.SCAN_RETIRE_TTL_MS);
+  return Number.isFinite(n) && n >= 1000 ? Math.round(n) : 30000;
+}
+
 // 扫描管理器（门面模式）：对外暴露 start/stop/getReport/exportReport，
 // 内部串起「发现→指纹→四检测器→提取→构造报告」，全程经 EventBus 推送进度。
 export class ScanManager {
@@ -73,7 +84,10 @@ export class ScanManager {
     this.httpClient = httpClient; // 统一 HttpClient（便于测试时注入 mock）
     this.parser = new TargetParser(this.httpClient);
     // 扫描上下文回收（P0-R1）：completed/stopped/error 后置 retiredAt，TTL 到期清 scans 条目
-    this.retireTtlMs = retireTtlMs ?? 30000; // 可测参数：测试可传短 TTL 验证回收
+    // [2026-09-28 接口靶场] 可经 SCAN_RETIRE_TTL_MS 配置：此前写死 30s，
+    //   意味着"扫完半小时再回来取报告"在接口层必然失败（台账回补上之后至少还能读，
+    //   但内存里那份的可见窗口完全不能调，长会议/夜班场景没法按现场节奏放宽）。
+    this.retireTtlMs = retireTtlMs ?? _envRetireTtl();
     this.maxScans = maxScans ?? 100; // scans Map 上限，超限淘汰最旧扫描
     this._scanClients = new Map(); // scanId -> 扫描作用域 HttpClient 视图（按 scanId 独立限速桶）
     // 检测器注册表：新增技术只加一个类并在此处登记（OobDetector 末位，作为盲注/无回显兜底）
@@ -122,7 +136,7 @@ export class ScanManager {
     // 就是错的——这类不实陈述在复盘里是要命的。
     try {
       report.summary = report.summary || {};
-      report.summary.constraints = collectCapabilityConstraints(target.config);
+      report.summary.constraints = collectCapabilityConstraints(target.config, target);
     } catch { /* 约束标注失败不影响扫描 */ }
     // 授权范围登记（未配置 scope 时为 no-op，零行为变化）：HttpClient 在每一跳重定向前取用。
     try {
@@ -151,10 +165,14 @@ export class ScanManager {
     return scanId;
   }
 
-  // 停止扫描
+  // 停止扫描（返回布尔；"为什么停不了"由 status() 给出，路由层据此区分三种情形）
+  // [P0-FIX 2026-09-28 接口靶场] 终态扫描不再被改写成 'stopped'：
+  //   旧实现对**已完成**的扫描也返回 true 并把 status 覆盖成 'stopped' —— 一次正常跑完的
+  //   扫描在报告里变成"被人停了"，交付时这句假陈述会误导复盘（"是谁中断的？"）。
   stop(scanId) {
     const s = this.scans.get(scanId);
     if (!s) return false;
+    if (TERMINAL_STATUSES.includes(s.status)) return false; // 已结束：不改状态、不重复回收
     s.cancelled = true;
     s.paused = false; // 清除暂停态
     s.status = 'stopped';
@@ -175,10 +193,34 @@ export class ScanManager {
   }
 
   // [⑮] 包装 httpClient：自动将扫描级 signal 注入到每次 request 调用
+  // [P0-FIX 2026-09-28 接口靶场] 顺带把**暂停**下沉到请求边界：
+  //   暂停此前只在 scan/detect.js 的「点边界」生效，而一个点的检测是几十上百个包
+  //   （布尔/时间盲注尤甚）。单参数目标按暂停键后靶站仍继续被打满，实测 2.6s 内又发了
+  //   5 个包 —— "暂停"在实战里的用途恰恰是"目标开始报警了先停手"，那一步必须真的停手。
+  //   挂在唯一一个所有探测请求都会经过的出口上（而不是去改每个检测器），
+  //   暂停期间不占用连接、不产生请求，resume 后原样继续。
   _wrapWithSignal(scanId, client) {
     const signal = this.getSignal(scanId);
     if (!signal || !client || typeof client.request !== 'function') return client;
-    return { ...client, request: (opts) => client.request({ ...opts, signal }) };
+    return {
+      ...client,
+      request: async (opts) => {
+        await this._waitWhilePaused(scanId);
+        return client.request({ ...opts, signal });
+      },
+    };
+  }
+
+  /**
+   * 暂停时阻塞到 resume/stop（与点边界等待同一语义：不终止在途请求、不回收上下文）。
+   * @param {string} scanId
+   */
+  async _waitWhilePaused(scanId) {
+    for (;;) {
+      const s = this.scans.get(scanId);
+      if (!s || !s.paused || s.cancelled) return;
+      await new Promise((resolve) => setTimeout(resolve, PAUSE_POLL_MS));
+    }
   }
 
   // [P0-FIX] 暂停扫描：设置 paused 标志（扫描循环在点边界检查并等待），
@@ -204,6 +246,37 @@ export class ScanManager {
   }
 
   // 获取实时报告（返回深拷贝，防 running 时序列化撕裂）
+  /**
+   * 扫描运行态（HTTP 层的可观测面）。
+   *
+   * 为什么必须有这个方法：`getReport()` 返回的是**报告快照**，而"扫描在不在跑、
+   * 有没有暂停"记在 scans 条目上、不在报告里 —— 于是 REST 客户端只能靠一条 SSE
+   * 长连接推断状态（断了就完全看不到）。pause/resume 的接口返回 `paused:true`
+   * 也只证明路由收到了，不证明状态机真的动了。sqlmap 那侧的 /report 早就带
+   * `status`，内置引擎对齐这个契约。
+   * @param {string} scanId
+   * @returns {{scanId:string,status:string,paused:boolean,retired:boolean,startedAt:?string,finishedAt:?string,points:number,vulns:number,dbms:?string,elapsedMs:number}|null}
+   */
+  status(scanId) {
+    const s = this.scans.get(scanId);
+    if (!s) return null;
+    const rep = s.report || {};
+    const startedAtMs = rep.startedAt ? Date.parse(String(rep.startedAt)) : NaN;
+    const finishedAtMs = rep.finishedAt ? Date.parse(String(rep.finishedAt)) : NaN;
+    return {
+      scanId,
+      status: s.status,
+      paused: Boolean(s.paused),
+      retired: Boolean(s._retired),
+      startedAt: rep.startedAt || null,
+      finishedAt: rep.finishedAt || null,
+      points: (rep.points || []).length,
+      vulns: (rep.vulns || []).length,
+      dbms: rep.dbms || null,
+      elapsedMs: Number.isFinite(startedAtMs) ? Math.max(0, (Number.isFinite(finishedAtMs) ? finishedAtMs : Date.now()) - startedAtMs) : 0,
+    };
+  }
+
   getReport(scanId) {
     const s = this.scans.get(scanId);
     if (!s || !s.report) return null;
@@ -215,16 +288,20 @@ export class ScanManager {
     }
   }
 
-  // 导出报告（json / html / csv / markdown / db-json）
-  exportReport(scanId, format = 'json') {
+  // 导出报告（json / html / csv / markdown / db-json / sarif）
+  // reportArg：允许把"台账里读回来的报告"喂进同一条渲染路径。
+  //   为什么需要参数而不是在路由里再写一个 switch：两种来源各自渲染一次，
+  //   就会出现"内存里的报告能导出、台账里那份少一个格式"的漂移（本仓反复出现的那族）。
+  exportReport(scanId, format = 'json', reportArg = undefined) {
     const s = this.scans.get(scanId);
-    if (!s) return null;
-    if (format === 'html') return this.reportGen.toHTML(s.report);
-    if (format === 'csv') return this.reportGen.toCSV(s.report);
-    if (format === 'markdown' || format === 'md') return this.reportGen.toMarkdown(s.report);
-    if (format === 'sarif') return this.reportGen.toSARIF(s.report); // [批次 9 2026-09-15] SARIF 2.1.0
-    if (format === 'db-json') return JSON.stringify(s.report.data); // 仅拖库数据（库/表/列/行）
-    return this.reportGen.toJSON(s.report);
+    const report = reportArg !== undefined ? reportArg : s && s.report;
+    if (!report) return null;
+    if (format === 'html') return this.reportGen.toHTML(report);
+    if (format === 'csv') return this.reportGen.toCSV(report);
+    if (format === 'markdown' || format === 'md') return this.reportGen.toMarkdown(report);
+    if (format === 'sarif') return this.reportGen.toSARIF(report); // [批次 9 2026-09-15] SARIF 2.1.0
+    if (format === 'db-json') return JSON.stringify(report.data); // 仅拖库数据（库/表/列/行）
+    return this.reportGen.toJSON(report);
   }
 
   // 选中技术集合：空/未定义 → 全部（含 stacked）；否则按所选
@@ -705,9 +782,10 @@ export class ScanManager {
  * 免得给人一条假线索去改无关开关。
  *
  * @param {object} config 扫描配置（target.config）
+ * @param {object} [target] 扫描目标（需要 cookieParams/headerParams 才能判断"参数给了但没测"）
  * @returns {string[]} 可读说明（空数组 = 本次无任何能力被抑制）
  */
-export function collectCapabilityConstraints(config = {}) {
+export function collectCapabilityConstraints(config = {}, target = {}) {
   const out = [];
   const productionMode = config.productionMode !== false;
   const confirmDestructive = config.confirmDestructive === true;
@@ -757,6 +835,26 @@ export function collectCapabilityConstraints(config = {}) {
     out.push(
       '本次开启拖库（enableExtract）：提取阶段会向目标发出大量读请求（受限速与行数上限约束）。' +
         '生产环境建议控制行数并避开业务高峰'
+    );
+  }
+  // [P0-FIX 2026-09-28 接口靶场] 调用方给了 cookieParams / headerParams，但 level 不够时
+  //   TargetParser 根本不会把它们变成注入点（cookie 需 level≥2、header 需 level≥3 或
+  //   testHeaders，见 engine/TargetParser.js:117-136）。后果是接口层最坏的一类形状：
+  //   请求 200、扫描跑完、报告写「未检出」，而"我明明传了 Cookie 参数"这一线索完全消失。
+  //   口径与 CLI 一致（--level 决定测不测 cookie/header），这里只负责把"没测"喊出来。
+  const levelNum = Number(level) || 1;
+  const cookieKeys = Object.keys(target.cookieParams || {});
+  if (cookieKeys.length && levelNum < 2) {
+    out.push(
+      `cookieParams 未被测试（收到 ${cookieKeys.length} 个：${cookieKeys.slice(0, 5).join(', ')}）：` +
+        `cookie 注入点需 level≥2，本次 level=${levelNum}。要测 Cookie 请设 config.level=2（CLI：--level 2）`
+    );
+  }
+  const headerKeys = Object.keys(target.headerParams || {});
+  if (headerKeys.length && levelNum < 3 && config.testHeaders !== true) {
+    out.push(
+      `headerParams 未被测试（收到 ${headerKeys.length} 个：${headerKeys.slice(0, 5).join(', ')}）：` +
+        `header 注入点需 level≥3（或 config.testHeaders=true），本次 level=${levelNum}`
     );
   }
   return out;

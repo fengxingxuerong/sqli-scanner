@@ -72,7 +72,7 @@ async function runOurs(sc, { ScanManager }) {
   for (;;) {
     const s = sm.scans.get(scanId);
     if (s && (s.status === 'completed' || s.status === 'error')) break;
-    if (Date.now() - startedAt > SM_TIMEOUT) { sm.stop(scanId).catch(() => {}); break; }
+    if (Date.now() - startedAt > SM_TIMEOUT) { sm.stop(scanId); break; }
     await new Promise((r) => setTimeout(r, 40));
   }
   const rep = sm.getReport(scanId) || {};

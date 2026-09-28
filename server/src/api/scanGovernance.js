@@ -18,6 +18,8 @@
 // 对象引用**，故测试读写的仍是本模块这份状态 —— 语义不变。
 // =====================================================================
 import { releaseScanScope } from '../core/scopeGuard.js';
+import { recordScan } from '../services/scanLedger.js';
+import { logger } from '../core/logger.js';
 
 // 并发扫描上限（环境变量可覆盖；非法值回落 8）
 const MAX_SCAN_API_CONCURRENT = (() => {
@@ -75,6 +77,7 @@ export function trackScanTerminal(sm, bus, scanId, release) {
   };
   const onEvent = (evt) => {
     if (evt && (evt.type === 'scan_completed' || evt.type === 'scan_error' || evt.type === 'scan_stopped')) {
+      persistScan(sm, scanId, evt.type);
       finish();
     }
   };
@@ -82,6 +85,43 @@ export function trackScanTerminal(sm, bus, scanId, release) {
   // 竞态：订阅前就已终结的扫描不会再来事件，这里补一次状态检查
   const s = sm.scans.get(scanId);
   if (s && (s.status === 'completed' || s.status === 'error')) finish();
+}
+
+/**
+ * 扫描终结 → 落台账（server/data/ledger/<scanId>/）。
+ *
+ * 为什么挂在终结事件上：`ScanManager` 在扫描完成后 30s 就回收上下文（_retire），
+ * 而台账是**唯一**能把"我到底扫了什么、结果如何"留在服务端的东西。
+ * 此前它只有 CLI 与一键扫描在写，REST/桌面侧一条都不落 ⇒ Web 的历史页其实是浏览器
+ * localStorage（换机器/清缓存/服务重启即丢），`GET /api/scan/:id/report` 过 30 秒必失败。
+ * scanLedger.recordScan 的既有口径在此复用，不另起一套落盘格式。
+ *
+ * 失败处理：台账写不进（只读盘/权限）不能影响扫描本身与终结回收 —— 只 warn 一条。
+ * 关闭方式：SCAN_LEDGER=0（默认开；写盘是同步的，用 setImmediate 挪出事件推送路径）。
+ */
+function persistScan(sm, scanId, kind) {
+  if (process.env.SCAN_LEDGER === '0') return;
+  if (kind === 'scan_error') return; // 出错扫描没有可交付结论，不污染台账
+  setImmediate(() => {
+    try {
+      const live = sm.getReport(scanId);
+      if (!live) return;
+      const rg = sm.reportGen;
+      // recordScan 明确要求传 attachPoc 之后的形态（poc 是惰性挂载且不改原对象），
+      // 直接把原始 report 传进去会得到 0 个 poc 文件 —— 这条口径见 scanLedger 头注释。
+      const withPoc = typeof rg?.attachPoc === 'function' ? rg.attachPoc(live) : live;
+      // 不传 docs.json：让 recordScan 落**原始报告**（与 CLI 的口径一致，见 bin/cli.js:569）。
+      // rg.toJSON() 是导出形态（_forExport 会截断 + 脱敏 target），存它会导致
+      // "台账回读的报告"与"内存里的报告"两种形状 —— 同一条 /scan/:id/report
+      // 会因扫描新旧程度返回不同结构，客户端必然踩到。
+      recordScan(withPoc, {
+        html: typeof rg?.toHTML === 'function' ? rg.toHTML(withPoc) : undefined,
+        markdown: typeof rg?.toMarkdown === 'function' ? rg.toMarkdown(withPoc) : undefined,
+      });
+    } catch (e) {
+      logger.warn(`扫描 ${scanId} 台账登记失败（不影响扫描结果）：${e.message}`);
+    }
+  });
 }
 
 /**

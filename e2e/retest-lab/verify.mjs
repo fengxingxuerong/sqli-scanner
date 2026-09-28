@@ -50,7 +50,7 @@ async function waitScan(sm, scanId) {
   for (;;) {
     const s = sm.scans.get(scanId);
     if (s && (s.status === 'completed' || s.status === 'error')) break;
-    if (Date.now() - t0 > 90000) { await sm.stop(scanId).catch(() => {}); break; }
+    if (Date.now() - t0 > 90000) { sm.stop(scanId); break; }
     await new Promise((r) => setTimeout(r, 30));
   }
   return sm.getReport(scanId) || {};

@@ -15,6 +15,11 @@ import assert from 'node:assert/strict';
 const SERVER_DIR = path.dirname(fileURLToPath(new URL('../index.js', import.meta.url)));
 const INDEX_JS = path.join(SERVER_DIR, 'index.js');
 
+// 版本契约的单一事实源：仓库根 package.json（与 /health 的取值口径一致）
+import { createRequire } from 'node:module';
+const _require = createRequire(import.meta.url);
+const EXPECTED_VERSION = _require('../../package.json').version;
+
 // [ENV-COUPLING-FIX 2026-09-19] 旧实现把引擎端口**写死 4567 且复用**该端口上已存在的进程：
 // 只要本机跑着一个带 SCAN_API_TOKEN 的实例（手动起的 server / 桌面版 sidecar / 上一次门禁残留），
 // 受保护端点就全部返 401，而本文件断言的是 2001 —— 稳定假红，且与被测代码毫无关系
@@ -187,7 +192,9 @@ test('API 契约：GET /health 与 /api/health', async () => {
   for (const h of [h1, h2]) {
     assert.equal(h.code, 0);
     assert.equal(h.data.status, 'up');
-    assert.equal(h.data.version, '1.0.0');
+    // 版本必须与 package.json 同源。此前这里断言字面量 '1.0.0'，而 /health 里也写死
+    // '1.0.0' —— 两边一起过期（包早已 1.1.0），升版时只会红一条"看起来像产品坏了"的用例。
+    assert.equal(h.data.version, EXPECTED_VERSION, `health.version 应等于 ${EXPECTED_VERSION}（root package.json）`);
     assert.equal(h.message, 'ok');
   }
 });

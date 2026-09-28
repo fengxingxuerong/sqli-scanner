@@ -4,6 +4,238 @@
 
 ## [Unreleased]
 
+### 2026-09-28 批次 · 接口靶场：26 条 HTTP 端点逐条在真 MySQL 靶站上验收
+
+此前的 e2e 几乎都 `import ScanManager` 直接驱动引擎，接口层（Express 路由、SSE、导出、鉴权闸门、
+利用、AI 外发、台账）从来没有一套"只走 HTTP + 真库靶站"的验收。补上 `e2e/api-range-lab/`
+（44 条用例，本机沙箱 MySQL 8.0.28 上 44/44、21.6s），并把它挂进 `e2e/run-all.mjs`
+与 `npm run e2e:api-range`。这套靶场的判据是**靶站侧计数**而不是接口自报，一轮就抱出 9 条接口层缺陷：
+
+- **`GET /api/health` 的版本是写死的 `1.0.0`**，包早已 `1.1.0`；而 `server/tests/engine.e2e.test.js`
+  把这个过期字面量**断言成契约** ⇒ 升版必红一条"看起来像产品坏了"的用例。改由
+  `core/version.js` 与 package.json 同源（① `ENGINE_VERSION` ②根 ③server ④如实报 unknown），
+  测试改为比对同一个来源。health 另补 `authEnabled/exploitEnabled/node` 等运维真正要看的布尔与计数。
+- **`GET /api/scan/:id` 快照里没有运行态**：`status` 记在扫描条目上而不在报告里，于是
+  "在不在跑 / 有没有暂停"在 HTTP 层只能靠 SSE 长连接推断，`pause` 的返回成了自证。
+  新增 `ScanManager.status()` 并在快照里同时回 `status` 与 `state`（sqlmap 侧 /report 早就带 status，
+  两个引擎的契约就此对齐）。
+- **暂停不冻流量**：`pause` 此前只在 `scan/detect.js` 的**点边界**生效，而一个点是几十上百个包
+  （实测按下暂停后 2.6s 内靶站又收到 5 个请求）。把等待下沉到唯一的请求出口
+  （`scanRunner.js` 的 ctxBase 包装层），暂停期间真的一个包都不发；测试以靶站计数为准。
+- **`POST /scan/:id/stop` 三态不分**：未知 id 也回 `code:0 + {stopped:false}`，且会把**已完成**的
+  扫描状态改写成 `stopped`（交付报告里一次正常跑完成了"被人中断"）。改为未知 → `2001`、
+  终态 → `alreadyFinished` 且不动状态机；`/sqlmap/:id/stop` 同口径对齐（并同步改掉钉住旧语义的用例）。
+- **`format=db-json` 在没拖库数据时回 200 + `"null"`**（4 字节附件），用户读成"导出坏了"。
+  改为 400 + 指明下一步（带 `config.extractScope` / `enableExtract` 重扫）。
+- **`cookieParams` / `headerParams` 静默不测**：cookie 需 `level≥2`、header 需 `level≥3`，
+  低 level 下调用方传了参数却 0 点位、报告写"未检出"。现写入 `report.summary.constraints`
+  （与既有"被抑制能力必须可见"机制同源），用例同时做正反两档断言。
+- **`config.extractScope` 是半截功能**：2026-09-23 收进白名单，但引擎只在 `enableExtract` 为真时才
+  进提取阶段 ⇒ REST 传枚举参数拿到 200 + 空 `data`。按 CLI 既有口径（`enableExtract: args.dump || enumActive`）
+  在配置守卫里补齐这条隐含关系，真库枚举/拖库在 API 侧第一次端到端可用。
+- **利用接口只能"手搓点位"**：`/exploit/*` 要求调用方自己拼 `target+point`，前端利用页因此把
+  `location` 硬编码成 `url`、让用户手抄 `originalValue`（body/cookie/header 与编码点位必然失真）。
+  新增 `scanId`(+`pointId`) 形态：服务端从扫描上下文解析 target/point/dbms 并**沿用该扫描的
+  HttpClient**（cookieJar / auth / CSRF / 限速桶），响应回 `resolvedFrom` 说明实际用了哪个点位；
+  前端利用页与报告页「在利用台打开此点位」接线到这条路径。
+- **`ok:true` 却取不到值**：`Exploiter.sqlShell` 对 SELECT 恒回 `ok:true`，即使标量提取为空。
+  改为「投递」与「取到值」分离（`ok:false + delivered:true + 原因 + 下一步`），CLI 与接口同步受益。
+- **两个安全口径缺口**：① `SSRF_ALLOW_PRIVATE=1` 把 `169.254.0.0/16`（云元数据）等**基础层**一起放行，
+  与 `egressGuard.js` 文件头"基础层无条件拒绝"的承诺矛盾（改：基础层不受该开关影响，
+  确要点名放行用 `SSRF_ALLOW_CIDRS`）；② sqlmap 入口 `--os-shell/--file-read` 不受
+  `EXPLOIT_ENABLED` 约束，而内置 `/exploit/*` 受 ⇒ 同一双刃剑能力两个入口一半有闸（共用
+  `core/exploitFlag.js`），且 `/sqlmap/start` 完全不读 `scope`（现与内置引擎同红线校验）。
+- **scope 不支持 `host:port`**：`127.0.0.1:8140` 被整串当主机名 ⇒ 永不匹配，而报错又把同一串
+  回显成"当前范围"，看起来像判据坏了。现支持带端口规则（主机相等 **且** 端口相等，只收紧不放宽），
+  端口不符时报错明确差在端口。
+- **接口侧完全没有服务端历史**：台账（`scanLedger`）只有 CLI 在写，REST 一条不落；而扫描上下文
+  完成后 30s 回收 ⇒ `GET /scan/:id/report` 在真实交付里迟早变成"扫描不存在"，Web 历史页其实是
+  浏览器 localStorage。本批：API 扫描终态自动落台账（`SCAN_LEDGER=0` 可关）、`/scan/:id`、
+  `/report`、`/report/export`、`/diff`、复测基线全部支持台账回读并如实标 `source: ledger`，
+  新增 `GET /api/scans`（台账+在途合并，需 token），回收窗口改为可配 `SCAN_RETIRE_TTL_MS`。
+- **`.env` 里的开关读不到**：`index.js` 的 `dotenv.config()` 排在 import 之后，被 import 的模块在
+  加载期取的环境变量一律为空（`EXPLOIT_ENABLED=1` 写进 `.env` 不生效，而 `.env.example` 正推荐这么配）。
+  抽出 `core/loadEnv.js` 作为第一条 import，并把利用开关改为每次请求现读（与 sqlmap 桥共用同一判据）。
+- **门禁驱动层的两处自伤**：44 个 e2e 脚本的超时分支写成 `sm.stop(scanId).catch(()=>{})`，
+  而 `stop()` 返回布尔 ⇒ 超时即 TypeError（不是"如实报超时"，是当场崩），已批量改为直接调用；
+  `facts-sync` 的前端解析只认 `N passed | M failed` 词序，而 vitest 失败时输出 `1 failed | 451 passed`
+  ⇒ 一条真用例失败被洗成"找不到 Tests 行"，改为两种词序都解析并如实记录 pass/fail/skipped
+  （本轮据此暴露出 `scanPage.startFailure` 在覆盖率档稳定超时，按其实际耗时把预算钉到 20s）。
+- 文档：`docs/api.md` 全面改写受影响章节（健康检查、`/scans`、快照运行态、停止三态、导出失败形态与
+  7 种格式、`scope` 全部写法含 `host:port`、`extractScope` 与 `enableExtract` 的耦合、参数级别与
+  "给了没测"、利用两种入参形态与结果口径）；README 新增「接口靶场」小节并把端点表补齐 26 条。
+
+### 2026-09-28 批次 · 真机 WAF 对拍从「放行率」升级到「打穿率」
+
+首轮真机对拍（09-27）只证明了「WAF 放行」——靶站是 echo 后端，不碰数据库，所以那时的诚实边界
+写着「放行 ≠ 能打穿，禁止对外声明绕过率」。本批把那一环补上：同一条样本要同时满足
+①过了 WAF ②后端真 MySQL 真执行了注入并吐出证据，才记为一次「打穿」。
+
+- **靶站真库化**（`e2e/waf-real/modsec-target.mjs`）：新增 `MODSEC_TARGET_DB=1` 模式，把 id
+  **原样拼进** `SELECT ... WHERE id = <id>` 交给真 MySQL 执行，结果与错误都回显。
+  ⚠️ SQL 执行失败也回 **200**（body 前缀 `SQLERR:`）：若用 5xx，对拍脚本的「非 2xx = 被 WAF 拦」
+  会把「到后端了但 SQL 报错」误算成拦截——与「依赖真库但环境没起库 → ECONNREFUSED 被记成
+  产品 FAIL」是同一类假象。另加 `SET SESSION max_execution_time=1000`（SLEEP 样本不拖超时）
+  与 `/__mode` 探针（让对拍脚本能判定本轮口径是放行率还是打穿率）。
+- **判据分层并抽成可单测模块**（`e2e/waf-real/pwnVerdict.mjs`）：`blocked / echo / reached_sql /
+  pwn_result / pwn_error / unknown`。两条防假绿纪律：结果集证据**必须** `ROWS:` 前缀
+  （echo 后端会原样回显 payload，任何「body 里出现 payload」形态的判据在它底下恒真）；
+  报错证据只认 MySQL 自己生成的短语（`XPATH syntax error` / `Duplicate entry`）。
+- **加直连通道量「可打穿上界」**（`modsec-live.mjs`）：绕过 WAF 直接打靶站，得到「每条样本本身
+  能打穿到什么程度」。这才能把「变形把 payload 语义弄坏了」与「WAF 真拦住了」分开 ——
+  打穿率的分母是上界而不是样本总数。上界为 0 时硬失败（此时「经 WAF 打穿 0 条」不能归因于 WAF）。
+- **降级必须是可见的失败**：CI 里设 `MODSEC_REQUIRE_DB=1`，库没起来 / 靶站退回 echo 模式
+  → 对拍脚本 exit 1，不接受一份看着正常的「放行率」报告冒充绕过能力。
+- **CI 实测（run #97，job `modsec-live` success，18 步）**：靶站 `模式 db`、直连打穿上界 1/8；
+  PL1 与 PL3 真机**打穿**插件各 **1** 个（`unionvaluesrow`），同口径**放行**的是 8 个 ——
+  「放行 ≠ 打穿」第一次被量化（差 **8 倍**）；安全对照 0 误拦。
+  ⚠️ 上界只有 1/8 ⇒ **仍禁止对外声明绕过率**（分母是 1，无统计意义）。与首轮 74/72 不可直接比，
+  且存在一处**未解释差异**（首轮同口径报 74、本轮 8）已登记待查。
+  见 [docs/WAF-真机对拍-2026-09-28.md](docs/WAF-真机对拍-2026-09-28.md)。
+- CI job `modsec-live` 接 `mysql:8.0`（复用 acceptance job 的 docker run 起法）并等待就绪，
+  timeout 30 → 45。
+- 守卫 `server/tests/modsecLive.wiring.test.js`（13 用例）：判据分层行为断言（含两条回显反例）
+  + 源码接线断言。缺陷注入 **6/6 杀**；期间揪出并修掉一处**自己的假绿** —— 判据原用
+  `match(/MODSEC_REQUIRE_DB/g).length >= 2` 计数，被上方**说明注释**里的同名变量名喂饱，
+  真把 PL1 的配置删掉依然全绿。已改成「每个档位 env 块各自紧邻匹配」后注入即杀。
+- 门：`typecheck:server` ✓ `facts:check` ✓ `readme:check` ✓ `arch:guard` ✓ `refs:check` ✓ eslint ✓。
+
+### 2026-09-28 批次 · 扩样本集：样本自带上下文（上界 1/8 的根因修复）
+
+上一批留下的问题：直连打穿上界只有 **1/8**，任何百分比都建立在单条样本上。本批定位到根因并修掉 ——
+**不是 WAF 强，是我们的尺子坏了**：靶站只有一处 `WHERE id = ${raw}`（数值、无引号），
+而样本集里多数是**字符串上下文**写法（`1' UNION …-- -`），拼进去是语法错误，只能算「抵达 SQL 层」。
+
+- **样本自带上下文**（`e2e/waf-real/samples.mjs`）：新增 `CONTEXTS` 作为拼接模板的**单一来源**
+  （靶站与对拍脚本共用），样本从裸字符串升级为 `{ ctx, payload, exfil?, note }`。三种形态覆盖
+  真实业务最常见的三种裸拼：`num`（数值无引号）/ `str`（字符串带引号）/ `in`（`IN (…)` 括号）。
+  样本 8 → 15 条，取数样本统一带注入标记并显式声明 `exfil: true`。
+- **靶站按 ctx 路由**（`modsec-target.mjs`）：路由表由 `Object.values(CONTEXTS)` 生成（不再手抄
+  一份 path），未知路径回 `NOROUTE`，防「打空端点」被记成注入失败。
+- **对拍脚本一律走 `sampleUrl()`**（`modsec-live.mjs`）：不再硬编码 `/num?id=`（那正是上界 1/8
+  的直接成因）；干净请求用 num 形态、裸注入自检改用 str 形态（后者在数值上下文里是语法错误，
+  会掺进一个与 WAF 无关的干扰项）。新增 `MODSEC_MIN_UPPER` 上界下限（CI 设 4，不够就硬失败），
+  上界 < 半数时告警；报告新增「注入点形态」段与逐样本 ctx 列。
+- **打穿判据收紧**（`pwnVerdict.mjs`）：`pwn_error` 从「只认 MySQL 短语」改为「MySQL 短语 **且**
+  带注入标记」。旧口径下 `XPATH syntax error: '~8.0.33'` 就算打穿，但它只证明报错通道通了，
+  证明不了注入者要的数据被带出来。
+- 静态侧 `tamper-sweep.mjs` 同步按 ctx 取 param/uri（两边同一批样本，否则又会分叉）。
+- 守卫：新增 ⑦b（按 ctx 打端点、禁止硬编码 `/num?id=`）／⑭（三种形态都有样本、靶站路由必须
+  由 CONTEXTS 生成）／⑮（`exfil: true` 必须带标记，**按声明字段筛**、不按 payload 形状筛 ——
+  形状筛在「标记被删掉」时正好把样本筛出集合，缺陷注入实测就是这么空转的）／④b（报错无标记
+  只算抵达 SQL 层）。样本规模断言改为 import 真实条数（源码数字符串会把 `ctx`/`note` 数进去）。
+- 本地验证：路由自检 19/19（echo 桩，不起真库）；缺陷注入 **4/4 杀**且各只红目标用例；
+  守卫 20/20、`typecheck:server` ✓ eslint ✓。⚠️ 上界真值待 CI `modsec-live` 取证（本机不起靶场）。
+
+### 2026-09-28 批次 · 第三轮 CI 取证：上界 1/8 → 7/15，并把「74 vs 8」结案为不许引用
+
+上一批把尺子修好了（样本自带上下文），这一批只是把真值取回来 —— 真机对拍的真值只有 CI 能给
+（本机既无 docker 也不起靶场）。取证通道：`GET /repos/{o}/{r}/actions/artifacts` 列出
+`modsec-live-results` → 下载 zip → 读 PL1/PL3 两份报告。
+
+- **数字**：直连打穿上界 **7/15**（`MODSEC_MIN_UPPER=4` 闸门通过，无需再"静默出数"）；
+  真机**打穿**插件 **1** 个（`unionvaluesrow`，2/15；它自己的直连上界同为 7/15 ⇒ 按可打穿样本
+  计 **2/7**）；同口径**放行** PL1 **24** / PL3 **23**；安全对照 **0 误拦**。
+  镜像 digest 与 CRS **4.29.0** 已固化进报告（四要素齐全，数字可复现）。
+- **三条可直接引用的口径**（每条都有报告行支撑）：
+  ① `encode2hex` 真机**放行 15/15**、直连上界 **0/15** —— WAF 一条没拦但语义被变形弄坏、一条
+  打不穿，是「放行 ≠ 打穿」最干净的标本；② `charunicodeescape` 自实现判放行 15/15、真机
+  **0/15** —— 反向的「高估自己」在新样本集上复现；③ 打穿数（2）远小于该链上界（7）⇒ 差距
+  归因于 WAF 而非样本质量。
+- **「74 → 8」结案**：只拿到后两轮的报告产物（均为旧 8 条样本、上界 1/8、放行 8），
+  **首轮（74/72）产物已不在**；三轮之间样本集、镜像 digest、PARANOIA/阈值、放行判据
+  （`status >= 400`）全部一致，剩下的唯一差别（靶站 echo vs db）又被第三轮数据**证伪** ——
+  `encode2hex` 在 db 靶站上必然产生 MySQL 语法错误响应却仍 15/15 放行，说明 CRS 出站数据泄漏
+  规则（`RESPONSE-951` 族 951230，匹配 `You have an error in your SQL syntax` / `XPATH syntax error:`）
+  在本镜像配置下未生效。⇒ **74 既不能复现也无产物佐证，两轮放行数都不许引用**；
+  README 09-27 那条已就地标注为「过程留痕，不可引用」。
+- 文档：`docs/WAF-真机对拍-2026-09-28.md` 新增第七节（数字表 + 三条口径 + 7.3 处置结论）。
+
+### 2026-09-29 批次 · 注入点形态 3 → 5：补上真实框架的另两个高频位置
+
+前三种形态（`WHERE id = ${raw}` / `WHERE name = '${raw}'` / `WHERE id IN (${raw})`）全都落在
+WHERE 的等值/枚举上。真实 Web 应用里搜索页与列表页排序的出现频率同样高，但**逃逸前提完全
+不同**，此前一个都没覆盖 ⇒ 结论只代表"等值/枚举那一类靶点"。
+
+- **新增 `like` 形态**（`/like?q=…`）：`WHERE name LIKE '%${raw}%'` —— PHP `"... LIKE '%" . $_GET['q'] . "%'"`、
+  Python `f"... LIKE '%{q}%'"`。逃逸要先闭合 `%'`，尾部还留着一个 `%'` 得用注释吃掉。
+  样本 2 条：union 取数 + extractvalue 报错取数。
+- **新增 `orderby` 形态**（`/order?sort=…`）：`... ORDER BY ${raw}` —— PHP `"... ORDER BY " . $_GET['sort']`、
+  Python `... ORDER BY %s" % sort`。它**不在 WHERE 里**，等值/union 那套「先闭合再 union」的前提
+  整个不成立，只剩「在表达式位置求值」的手法。样本 2 条：extractvalue 报错取数 + `IF(1=1,1,2)` 布尔。
+- **为什么按 SQL 拼接位置而不是按语言分形态**：PHP 与 Python 的差别只在字符串怎么拼
+  （`.` 拼接 / f-string / `%` 格式化），落到 SQL 是同一句 ⇒ 按语言分会得到重复形态、
+  只增加请求量不增加信息量。语言写法写在 CONTEXTS 注释里备查。
+- **代价控制**：请求量 = 插件 × 样本 × 双通道，样本 15 → 19（+27%）⇒ 只加真正改变逃逸前提的
+  位置，不为「看起来更全」堆形态。
+- 守卫：⑭ 的形态清单扩到 5 种；新增 **⑭b** —— 每个形态的 `sql` 模板必须真的把 raw 拼进去
+  （用哨兵值 `__RAW__` 验证，写死的模板 = 注入点根本不存在）。
+- 缺陷注入 **2/2 杀**且各只红目标用例：删掉 like 样本 → ⑭；orderby 模板写死 → ⑭b。
+- ⚠️ 教训（自己的坑）：注入后还原用了 `replace_all`（`'like' → 'str'` → 反向），
+  把两条**原本就是 str** 的样本一起改成了 like —— 形态分布从 `{num:7,str:5,...}` 变成
+  `{num:7,like:4,str:3,...}`，靠一次性路由自检脚本才发现。
+  **下次缺陷注入：先备份文件（`cp` 到 /tmp 之外的临时路径），还原用备份，不用反向 replace。**
+- 本机验证：5 种形态的路由/URL/SQL 模板与样本分布自检（一次性脚本，不起服务）；
+  服务端 2519（2516 pass / 0 fail / 3 skip）✓。⚠️ 新形态的真值仍以 CI `modsec-live` 为准
+  （本机不起靶场、也不起 MySQL）。
+
+### 2026-09-29 批次 · 第四轮 CI 取证：上界 7/15 → 10/19，且「形态变多 ≠ 绕过链变多」
+
+- **数字**（run #105/#106）：直连打穿上界 **10/19**；真机**打穿**插件 **1** 个
+  （`unionvaluesrow`，2/19，其直连上界 10/19 ⇒ **2/10**）；**放行** PL1 / PL3 各 **25**；
+  0 误拦。闸门 `MODSEC_MIN_UPPER=4` 仍通过。
+- **新形态 4 条里 3 条打穿**：`like` 的 union 取数与 extractvalue 各一条（`pwn_result` /
+  `pwn_error`），`orderby` 的 extractvalue 一条（`pwn_error`）——
+  **`ORDER BY` 位置能被报错取数打穿**，这类「不在 WHERE 里」的排序参数不是安全位置。
+  `orderby` 的布尔样本 `IF(1=1,1,2)` 记 `reached_sql`（设计上就不取数，只测放行）。
+- ⚠️ **形态变多 ≠ 绕过链变多**（本轮最不能漏读的一条）：靶点 3 → 5 类、分母 7 → 10，
+  改善的是**测量的代表性**；而真机打穿插件**仍然只有 1 个** —— **没有发现任何新的打穿链**。
+  下一步该提的是「打穿链数」（链侧能力），不是继续往样本集里堆形态（那只会加大请求量）。
+- 文档：`docs/WAF-真机对拍-2026-09-28.md` 新增第八节（8.1 数字 / 8.2 新形态逐条 / 8.3 上述
+  结论 / 8.4 诚实边界）。
+
+### 2026-09-29 批次 · 接口靶场遗留项：拆掉两处「自己证明自己」的假绿
+
+接口靶场（`e2e/api-range-lab`）暴露的 8 项里，先做掉最像假绿的两条 —— 共同形态是：
+**声明与真值分处两地，而接口报的就是那份声明本身，于是漂移永远查不出来。**
+
+- **`/exploit/capabilities` 从手写清单改为由方言表推导**。以前是四个硬编码数组
+  （还带 `MySQL(sys_eval UDF)` 这种注释式写法），能力表在 `Exploiter.TAKEOVER_CAPS` 另有一份
+  ⇒ 「清单说有、动作说没有」在接口层不可观测。现在：新增 `capabilityIndex()` 做反向索引，
+  路由返回 `...capabilityIndex()`（能力 → 支持的 DBMS）+ `matrix`（DBMS → supported / risk /
+  requiredPriv / note，供 UI 提示权限与风险）。只收 `supported === true` 的条目。
+  前端 `ExploitCapabilities` 类型补 `matrix` / `enabled`。
+- **`docs/api.md` 并入自动门禁（判据 ⑭b）**。api.md 是对外接口契约，此前零门禁：代码加了端点、
+  改了字段，文档不动也不红。现在与 README 那张表同一把尺子双向核对（判据自动补 `/api` 前缀、
+  剥掉查询串，避免两边永远对不上的假红）。**首跑即抓到 4 个真缺口**并补齐：
+  `POST /scan/:id/pause`、`POST /scan/:id/resume`、`GET /scan/:id/diff?base=`、`POST /exploit/sql`
+  —— 四个都早已上线，文档里没有。顺带把 capabilities 的响应样例改成推导后的真实形态。
+- 新增 `server/tests/exploitCapabilities.test.js`（5 条）：接口返回值逐条等于推导结果 /
+  推导与方言表双向自洽 / 关键能力钉真值（**方言表删条目 ⇒ 必须红**，能力下架要有人显式确认）/
+  源码不得再手抄清单 / `matrix` 字段完整。
+- 缺陷注入 **4/4 杀**：关掉 `MySQL.fileWrite` ⇒ ③；路由改回手写数组 ⇒ ①④⑤；
+  api.md 删掉 pause 标题 ⇒ 报漏写；api.md 加幽灵端点 ⇒ 报「不存在」。
+
+### 2026-09-29 批次 · facts 采集：数字必须对应**一个确定的代码版本**
+
+`--refresh` 要跑几分钟测试，数字采自「跑测试那一刻的磁盘」。采集期间若有人改了测试源码
+（并发会话最常见），产出的数字就**既不对应采集前也不对应采集后**的任何一版代码 ——
+而旧行为会把这份数字连同「新指纹」一起落盘，两个文件双双是新的、看起来完全正常，
+实际是一次**没人能复现的采集**。
+
+- **采集前后各取一次指纹**（`scripts/facts-sync.mjs`）：不一致即报
+  「**采集期间文件被改动，本次结果不可用**」，点名被改 / 新增 / 删除的文件，
+  **拒绝写盘**并退出 1（不再留下一句可能来自上一轮的旧数字）。
+- 抽成纯函数 `diffDigests()` + 新增 `--selftest`（5 类形态：无差异 / 改 / 增 / 删 / 空指纹），
+  CI lint job 已加该步骤 —— 钉的是**判据本身**，数字每次采集都在变，判据不能跟着变。
+- 不把「采集前指纹」写盘：写盘会造出「上次采集进行到一半」的中间态文件，而失败时本来就
+  不该留下任何产物；同一进程内比对即可拿到同样（且更干净）的判据。
+- **真实验证**：采集到第 40 秒改一个测试源 ⇒ 报「被改（1）：server/tests/exploitCapabilities.test.js」
+  + EXIT=1 + `_facts.json` 未被改写。
+- ⚠️ 实验过程中的一次误判：先拿 `docs/api.md` 试，**它不在指纹源里**（指纹源只有测试文件）
+  ⇒ 判据自然不报。验证「采集期改动」类判据前，先确认改动对象真在指纹源里。
+
+
 ### 2026-09-27 批次 · README 的 API 表与命令行示例：从"没人核"变成双向核对
 
 接着上一批的判据面，把两类"照抄就会错"的文档补上门禁。

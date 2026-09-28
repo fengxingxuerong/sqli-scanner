@@ -62,7 +62,7 @@ async function runScan(scenario) {
     const s = sm.scans.get(scanId);
     if (s && (s.status === 'completed' || s.status === 'error')) break;
     if (Date.now() - startedAt > SCENARIO_TIMEOUT_MS) {
-      sm.stop(scanId).catch(() => {});
+      sm.stop(scanId);
       return { status: 'timeout', vulns: [], elapsedMs: Date.now() - startedAt };
     }
     await new Promise((r) => setTimeout(r, 20));

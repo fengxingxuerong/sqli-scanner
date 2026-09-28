@@ -32,18 +32,19 @@ test('每个对拍脚本都从 samples.mjs 取样本（防两份数组各自漂�
   }
 });
 
-test('样本集自身非空且规模不缩水（防有人清空后守卫恒绿）', () => {
+test('样本集自身非空且规模不缩水（防有人清空后守卫恒绿）', async () => {
+  // 直接 import 取真实条数：源码正则数字符串会数进 ctx / note 这些非样本字符串，
+  // 样本改成 {ctx,payload} 之后那个数已经不再是「样本条数」（判据与危害不同源 = 假绿）。
+  const { SAMPLES: S, SAFE_SAMPLES: SAFE, CONTEXTS } = await import(new URL(SOURCE, import.meta.url));
+  assert.ok(S.length >= 8, `攻击样本只剩 ${S.length} 条（基线 8）—— 缩水会弱化对拍，别默默改小`);
+  assert.ok(SAFE.length >= 4, `安全样本只剩 ${SAFE.length} 条（基线 4）`);
+  for (const s of [...S, ...SAFE]) {
+    assert.ok(CONTEXTS[s.ctx], `样本 ctx「${s.ctx}」未在 CONTEXTS 登记 —— 打过去会打到不存在的端点`);
+    assert.ok(typeof s.payload === 'string' && s.payload.length > 0, '样本 payload 不得为空');
+  }
   const src = read(SOURCE);
-  const attack = src.match(/export const SAMPLES = \[([\s\S]*?)\];/);
-  const safe = src.match(/export const SAFE_SAMPLES = \[([\s\S]*?)\];/);
-  assert.ok(attack, 'samples.mjs 里找不到 SAMPLES —— 改名了，本守卫需同步');
-  assert.ok(safe, 'samples.mjs 里找不到 SAFE_SAMPLES —— 改名了，本守卫需同步');
-  // 数元素而不是数行：SAFE_SAMPLES 是单行写法，逐行数行会把 4 条读成 1 条（假红）。
-  const countStrings = (s) => (s.match(/(['"])(?:\\.|(?!\1)[^\\])*\1/g) || []).length;
-  const n1 = countStrings(attack[1]);
-  const n2 = countStrings(safe[1]);
-  assert.ok(n1 >= 8, `攻击样本只剩 ${n1} 条（基线 8）—— 缩水会弱化对拍，别默默改小`);
-  assert.ok(n2 >= 4, `安全样本只剩 ${n2} 条（基线 4）`);
+  assert.ok(/export const SAMPLES = \[/.test(src), 'samples.mjs 里找不到 SAMPLES —— 改名了，本守卫需同步');
+  assert.ok(/export const SAFE_SAMPLES = \[/.test(src), 'samples.mjs 里找不到 SAFE_SAMPLES —— 改名了，本守卫需同步');
 });
 
 test('样本必须覆盖 union / boolean / error / time 四类通道（防只测好过的那类）', () => {

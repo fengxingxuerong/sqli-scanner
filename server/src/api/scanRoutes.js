@@ -9,7 +9,7 @@
 
 import { Router } from 'express';
 import crypto from 'node:crypto';
-import { ScanManager } from '../engine/ScanManager.js';
+import { ScanManager, TERMINAL_STATUSES } from '../engine/ScanManager.js';
 import * as eventBus from '../core/eventBus.js';
 import { ErrorCode, AppError } from '../core/errors.js';
 import { PAYLOADS, FINGERPRINT } from '../engine/payloads.js';
@@ -29,6 +29,8 @@ import { acquireScanSlot, trackScanTerminal, _scanGovernance } from './scanGover
 import { buildDirectTarget } from './directTarget.js';
 // 配置守卫（两条入口共用；为何单独成文件见其文件头）
 import { buildGuardedConfig } from './scanConfigGuard.js';
+// 报告回退与历史列表的数据源（引擎上下文完成后 30s 回收，台账才是服务端那一份）
+import { readReport, listScans, ledgerRoot } from '../services/scanLedger.js';
 // 抽到守卫模块后仍从本文件 re-export，保住既有引用路径（与 acquireScanSlot 同一做法）
 export { sanitizeExtractScope } from './scanConfigGuard.js';
 
@@ -296,6 +298,22 @@ export function createRoutes({ scanManager, eventBus: bus = eventBus, reportToke
   const router = Router();
   const requireReport = createReportGuard(reportToken);
 
+  /**
+   * 报告读取（内存优先，台账兜底）。
+   * 为什么必须有台账这一路：ScanManager 完成后 30s 回收上下文，而台账才是服务端留存的
+   * 那一份。没有这条回退时，"扫完隔一会儿再打开报告"必然得到 扫描不存在或已结束，
+   * 交付场景（复审、出报告、换人接手）全都落在回收窗口之外。
+   * @param {string} scanId
+   * @returns {{report: object, source: 'live'|'ledger'}|null}
+   */
+  function reportWithFallback(scanId) {
+    const live = sm.getReport(scanId);
+    if (live) return { report: live, source: 'live' };
+    const persisted = readReport(scanId);
+    if (persisted) return { report: persisted, source: 'ledger' };
+    return null;
+  }
+
   // [P0-SEC 2026-09-08] scanId 形状校验：scanId 会被拼进导出响应的 Content-Disposition 文件名，
   // 且出现在日志里。引擎自身用 nanoid(10) 生成，但路由不得假定调用方传得对：
   // 带 CR/LF 的 id 可试响应头注入，带 ../ 的 id 会被任何后续“落盘/拉取”型逻辑当路径用。
@@ -385,11 +403,16 @@ export function createRoutes({ scanManager, eventBus: bus = eventBus, reportToke
 
   // [P2-11] 实时报告快照同样挂报告守卫（token 未设置时为 no-op，行为不变）
   router.get('/scan/:id', requireReport, (req, res) => {
-    const report = sm.getReport(req.params.id);
-    if (!report) {
+    const found = reportWithFallback(req.params.id);
+    if (!found) {
       return res.json({ code: ErrorCode.SCAN_NOT_FOUND, data: null, message: '扫描不存在或已结束' });
     }
-    res.json({ code: 0, data: report, message: 'ok' });
+    const st = found.source === 'live' ? sm.status(req.params.id) : { status: 'completed', paused: false, retired: true, persisted: true };
+    res.json({
+      code: 0,
+      data: { ...found.report, source: found.source, status: st?.status ?? null, state: st },
+      message: 'ok',
+    });
   });
 
   // [P2-11] SSE 进度流挂报告守卫（事件内容含扫描目标与完整报告，见 ScanManager 脱敏 patch）
@@ -398,8 +421,26 @@ export function createRoutes({ scanManager, eventBus: bus = eventBus, reportToke
   });
 
   router.post('/scan/:id/stop', requireReport, (req, res) => {
+    // 三种情形必须可区分（接口靶场实测：旧实现对不存在的 scanId 也返回 code:0 +
+    // {stopped:false}，调用方据此以为"已经停了"；而终态扫描被改写成 'stopped'，
+    // 交付报告里一次正常跑完的扫描成了"被人中断"）。
+    const st = sm.status(req.params.id);
+    if (!st) {
+      return res.json({
+        code: ErrorCode.SCAN_NOT_FOUND,
+        data: { stopped: false },
+        message: '扫描不存在或上下文已回收（完成 30s 后），无法停止',
+      });
+    }
+    if (TERMINAL_STATUSES.includes(st.status)) {
+      return res.json({
+        code: 0,
+        data: { stopped: false, alreadyFinished: true, status: st.status },
+        message: `扫描已处于终态 ${st.status}，无需停止`,
+      });
+    }
     const ok = sm.stop(req.params.id);
-    res.json({ code: 0, data: { stopped: ok }, message: 'ok' });
+    res.json({ code: ok ? 0 : ErrorCode.SCAN_NOT_FOUND, data: { stopped: ok, status: ok ? 'stopped' : st.status }, message: ok ? 'ok' : '停止失败' });
   });
 
   // [实战最高频动作] 单点重测：调完参（level/risk/tamper/technique…）只重跑某个注入点。
@@ -413,7 +454,8 @@ export function createRoutes({ scanManager, eventBus: bus = eventBus, reportToke
       return res.json({ code: ErrorCode.ENGINE_BUSY, data: null, message: '引擎忙：并发扫描已达上限，请稍后再试' });
     }
     try {
-      const base = sm.getReport(req.params.id);
+      const baseFound = reportWithFallback(req.params.id);
+      const base = baseFound?.report || null;
       if (!base) {
         release();
         return res.json({ code: ErrorCode.SCAN_NOT_FOUND, data: null, message: '基线扫描不存在' });
@@ -497,17 +539,20 @@ export function createRoutes({ scanManager, eventBus: bus = eventBus, reportToke
   });
 
   router.get('/scan/:id/report', requireReport, (req, res) => {
-    const report = sm.getReport(req.params.id);
-    if (!report) {
+    const found = reportWithFallback(req.params.id);
+    if (!found) {
       return res.json({ code: ErrorCode.SCAN_NOT_FOUND, data: null, message: '扫描不存在或已结束' });
     }
     // [P1-UX 2026-09-08] 查看报告同样带 PoC 证据（与导出同源、纯函数浅拷贝）：
     // 实战里「在界面上看到可复制的 curl」是开完台本后立刻要用的东西，不该为了一条命令再导一次报告。
-    let data = report;
-    try {
-      if (typeof sm.reportGen?.attachPoc === 'function') data = sm.reportGen.attachPoc(report);
-    } catch { /* PoC 是增强项，失败不影响报告主体 */ }
-    res.json({ code: 0, data, message: 'ok' });
+    let data = found.report;
+    // 台账里存的已经是 attachPoc 之后的形态；只对内存那份补挂，避免重复渲染。
+    if (found.source === 'live' && typeof sm.reportGen?.attachPoc === 'function') {
+      try {
+        data = sm.reportGen.attachPoc(found.report);
+      } catch { /* PoC 是增强项，失败不影响报告主体 */ }
+    }
+    res.json({ code: 0, data: { ...data, source: found.source }, message: 'ok' });
   });
 
   // [交付场景] 两次扫描差异对比：修完漏洞后要能证明「确实修好了」。
@@ -520,12 +565,12 @@ export function createRoutes({ scanManager, eventBus: bus = eventBus, reportToke
     if (!baseId) {
       return res.json({ code: ErrorCode.INVALID_ARGUMENT ?? 1, data: null, message: '缺少 base 参数（基线扫描 id）：/api/scan/<id>/diff?base=<scanId>' });
     }
-    const cur = sm.getReport(req.params.id);
-    const base = sm.getReport(baseId);
+    const cur = reportWithFallback(req.params.id);
+    const base = reportWithFallback(baseId);
     if (!cur) return res.json({ code: ErrorCode.SCAN_NOT_FOUND, data: null, message: '当前扫描不存在' });
     if (!base) return res.json({ code: ErrorCode.SCAN_NOT_FOUND, data: null, message: '基线扫描不存在' });
 
-    res.json({ code: 0, data: diffReports(base, cur), message: 'ok' });
+    res.json({ code: 0, data: diffReports(base.report, cur.report), message: 'ok' });
   });
 
   router.get('/scan/:id/report/export', requireReport, (req, res) => {
@@ -537,7 +582,14 @@ export function createRoutes({ scanManager, eventBus: bus = eventBus, reportToke
       return res.status(400).json({ code: ErrorCode.INVALID_PARAM, data: null, message: 'format 非法，仅支持 json/html/csv/markdown/md/db-json/sarif' });
     }
     const format = rawFormat;
-    const out = sm.exportReport(req.params.id, format);
+    // 渲染顺序 = 数据来源顺序：先内存（扫描还在上下文里），拿不到再回退台账（历史扫描也要能
+    // 重新导出一份交付文档）。不在前置就要求 getReport 命中：exportReport 自己知道怎么取报告，
+    // 这里再读一次等于把"报告从哪来"复制成两份真相（本仓反复出现过的那族缺陷）。
+    let out = sm.exportReport(req.params.id, format);
+    if (out == null) {
+      const persisted = readReport(req.params.id);
+      if (persisted) out = sm.exportReport(req.params.id, format, persisted);
+    }
     if (out == null) {
       // 必须是 4xx：这是一条**文件下载**端点。历史上它返回 200 + `application/json` 且不带
       // Content-Disposition，而前端只判 `res.ok` 就把响应体另存盘 ⇒ 用户拿到一个装着
@@ -545,6 +597,16 @@ export function createRoutes({ scanManager, eventBus: bus = eventBus, reportToke
       // 实际是扫描早已被回收。实测复现过（2026-09-25）。
       // 只改这一条端点的状态码：`/scan/:id/diff` 那类 JSON 接口按 200+code 契约被前端正常解包。
       return res.status(404).json({ code: ErrorCode.SCAN_NOT_FOUND, data: null, message: '扫描不存在或已结束' });
+    }
+    // [P0-FIX 2026-09-28 接口靶场] db-json 无数据时必须明确拒绝，而不是发一个 4 字节的
+    // "null" 附件：这是一条**下载**端点，用户看到的是 report_x.db.json 打不开/是空的，
+    // 真实原因是这次扫描没带 config.extractScope（没做枚举/拖库）。
+    if (format === 'db-json' && ['null', '{}', ''].includes(String(out).trim())) {
+      return res.status(400).json({
+        code: ErrorCode.INVALID_PARAM,
+        data: null,
+        message: '该扫描没有枚举/拖库数据，无可导出内容：请在 /scan/start 的 config 里带 extractScope（如 {mode:"dbs"}）或 enableExtract 后重扫',
+      });
     }
     const contentTypes = {
       html: 'text/html; charset=utf-8',
@@ -562,6 +624,39 @@ export function createRoutes({ scanManager, eventBus: bus = eventBus, reportToke
       `attachment; filename="report_${req.params.id}.${ext}"`
     );
     return res.send(out);
+  });
+
+  // GET /api/scans —— 历史与在途扫描清单（台账 + 内存合并，服务端才是事实源）
+  // 为什么必须有这条：Web/桌面端此前**没有**任何服务端历史可读 —— 上下文 30s 回收后
+  // 报告就取不到，History 页显示的是浏览器 localStorage（换机器/清缓存/服务重启即丢）。
+  // 台账（CLI 早就在写）第一次被接口暴露出来。注意它不在 PUBLIC_READONLY 里：
+  // 清单含目标 URL 与结论，属扫描数据，必须带 token。
+  router.get('/scans', requireReport, (req, res) => {
+    const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), 500);
+    const byId = new Map();
+    for (const row of listScans(limit)) {
+      if (!row || !row.scanId) continue;
+      byId.set(row.scanId, { ...row, source: 'ledger' });
+    }
+    // 内存里的在途/刚结束扫描覆盖台账同名条目（状态更新）
+    for (const [scanId, s] of sm.scans.entries()) {
+      const rep = s.report || {};
+      byId.set(scanId, {
+        scanId,
+        target: rep.target?.baseUrl || rep.target?.url || '-',
+        method: rep.target?.method || 'GET',
+        startedAt: rep.startedAt || null,
+        finishedAt: rep.finishedAt || null,
+        points: (rep.points || []).length,
+        vulns: (rep.vulns || []).length,
+        dbms: rep.dbms || null,
+        verdict: rep.summary?.verdict || null,
+        status: s.status,
+        source: 'live',
+      });
+    }
+    const rows = [...byId.values()].sort((a, b) => String(b.startedAt || b.finishedAt || '').localeCompare(String(a.startedAt || a.finishedAt || '')));
+    res.json({ code: 0, data: { total: rows.length, scans: rows.slice(0, limit), ledgerRoot: ledgerRoot() }, message: 'ok' });
   });
 
   // GET /api/payloads?dbms=&technique= —— 只读查看 Payload 模板

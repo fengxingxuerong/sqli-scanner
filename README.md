@@ -1,6 +1,6 @@
 # sqli-scanner
 
-[![Tests](https://img.shields.io/badge/tests-2948%20passing-brightgreen)](#测试)
+[![Tests](https://img.shields.io/badge/tests-2973%20passing-brightgreen)](#测试)
 [![CI](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml/badge.svg)](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml)
 [![Dependencies](https://img.shields.io/badge/dependencies-0%20known%20vulns-brightgreen)](#环境变量)
 
@@ -222,26 +222,27 @@ npm run acceptance      # 【门禁】全方位验收（15 套件，事实断言
 
 | 端点 | 方法 | 说明 |
 |------|------|------|
-| `/api/health` | GET | 健康检查 |
+| `/api/health` | GET | 健康检查（版本与 package.json 同源，另回显鉴权/利用开关与 Node 版本） |
+| `/api/scans` | GET | 服务端历史清单：台账 + 在途扫描合并（需 token，含目标 URL） |
 | `/api/scan/start` | POST | 启动扫描（占一个并发槽；目标先过 SSRF 与 scope 校验） |
-| `/api/scan/:id` | GET | 实时报告快照 |
-| `/api/scan/:id/events` | GET | SSE 进度流（EventSource 无法设自定义头，token 可走 query） |
-| `/api/scan/:id/stop` | POST | 停止扫描 |
-| `/api/scan/:id/pause` | POST | 暂停扫描 |
+| `/api/scan/:id` | GET | 实时报告快照（含 `status`/`state` 运行态；上下文回收后回退台账并标 `source`） |
+| `/api/scan/:id/events` | GET | SSE 进度流（EventSource 无法设自定义头，token 可走 query；按 Last-Event-ID 回放） |
+| `/api/scan/:id/stop` | POST | 停止扫描（未知 id → SCAN_NOT_FOUND；已终态不改写状态） |
+| `/api/scan/:id/pause` | POST | 暂停扫描（暂停在**请求边界**生效：期间不再向目标发包） |
 | `/api/scan/:id/resume` | POST | 恢复扫描 |
-| `/api/scan/:id/report` | GET | 获取报告（与导出同源，含可复制的 PoC） |
-| `/api/scan/:id/report/export` | GET | 导出报告（json / html / csv / markdown / db-json） |
+| `/api/scan/:id/report` | GET | 获取报告（与导出同源，含可复制的 PoC；内存回收后读台账） |
+| `/api/scan/:id/report/export` | GET | 导出报告（json / html / csv / markdown / md / db-json / sarif；无拖库数据的 db-json → 400） |
 | `/api/scan/:id/report/ai` | POST | AI 报告生成（数据外发为 opt-in，未设端点即拒绝） |
 | `/api/scan/:id/report/ai/configs` | GET | AI 可用配置清单（不回显 Key） |
 | `/api/scan/:id/point/:pointId/retest` | POST | 单点复测（交付场景：修完要能证明确实修好了） |
 | `/api/scan/:id/diff` | GET | 两次扫描差异对比 |
 | `/api/payloads` | GET | payload 模板清单 |
 | `/api/tampers` | GET | tamper 插件清单 |
-| `/api/exploit/capabilities` | GET | 利用能力清单。⚠ 目前是手写列表，不由 Exploiter 方言表推导 |
-| `/api/exploit/sql` | POST | SQL 执行（需 `EXPLOIT_ENABLED=1` + 显式 authorized） |
+| `/api/exploit/capabilities` | GET | 利用能力清单，**由 Exploiter 的接管能力表推导**（附 `matrix`：各能力的 risk / requiredPriv） |
+| `/api/exploit/sql` | POST | SQL 执行（需 `EXPLOIT_ENABLED=1` + 显式 authorized）。两种入参：手工 `target+point+dbms`，或 `scanId`+`pointId` 直接沿用扫描点位、定库结果与会话 |
 | `/api/exploit/file-read` | POST | 目标文件读取（同上） |
 | `/api/exploit/file-write` | POST | 目标文件写入（同上） |
-| `/api/exploit/os-shell` | POST | OS 命令执行（同上） |
+| `/api/exploit/os-shell` | POST | OS 命令执行（同上；MySQL 需 sys_eval UDF，缺失时如实返回失败原因） |
 | `/api/sqlmap/status` | GET | sqlmap 是否可用（不返回脚本路径） |
 | `/api/sqlmap/start` | POST | 启动一次 sqlmap 桥接扫描 |
 | `/api/sqlmap/:id/events` | GET | sqlmap 扫描 SSE 事件流 |
@@ -307,10 +308,10 @@ backend/  ← Express + Node.js
 ## 测试
 
 ```bash
-# 前端测试（450 个用例）
+# 前端测试（452 个用例）
 npm test
 
-# 服务端测试（2501 个用例）
+# 服务端测试（2524 个用例）
 cd server && npm test
 
 # 全部测试
@@ -335,8 +336,8 @@ npm run artifact:drift   # 入库的 e2e 基线产物必须等于当前代码跑
 ## 项目状态
 
 - TypeScript: 零错误
-- 前端测试: 450/450 通过（覆盖率门禁 stmts 94.50 / branch 84.13 / func 77.32，阈值 88/77/67）
-- 服务端测试: 2501 用例（2498 pass / 0 fail / 3 skip，并发口径 2026-09-27 复测；3 skip 为环境依赖显式跳过。覆盖率 lines 91.21 / branch 77.90 / func 80.82，阈值 85/69/72）
+- 前端测试: 452/452 通过（覆盖率门禁 stmts 94.50 / branch 84.13 / func 77.32，阈值 88/77/67）
+- 服务端测试: 2524 用例（2521 pass / 0 fail / 3 skip，并发口径 2026-09-28 复测；3 skip 为环境依赖显式跳过。覆盖率 lines 90.79 / branch 77.57 / func 80.60，阈值 85/69/72）
 - 一键扫描: `npm run scan -- -u <url>`（CLI 一条命令产出 HTML/JSON/Markdown 全套报告 + manifest，退出码可直接进 CI 门禁）
 - Tamper 插件: 228 个（含 v24 增量 20 个，对齐 sqlmap 官方 tamper 全集，含官方 CRS/libinjection 实测组合 uniontable+odbcbrace）
 - WAF 绕过能力: 200+ 插件链式组合，覆盖 62 个 WAF 厂商指纹识别 + 推荐
@@ -369,10 +370,42 @@ npm run artifact:drift   # 入库的 e2e 基线产物必须等于当前代码跑
   （`waf-real` / `waf-auto` 两套件，事实数字进报告）。
 - 执行器保真度门禁（`crs-fidelity`，CRS 官方回归集钉执行器自身）：**族 942 99.6% / 族 930 100.0%，
   两族各 0 未点名分歧 → PASS**。修复过程与缺陷注入复验见迁移文档。
-- ✅ **2026-09-27**：真实 ModSecurity 引擎已首次实测（真 `owasp/modsecurity-crs:nginx` 容器）——
-  真机判「有绕过效果」的插件 PL1 74 / PL3 72，方向是此前**低估了自己**；安全对照 0 误拦。
-  **仍禁止对外声明真实 WAF 下的绕过率**，逐条数字与三条理由见
-  [docs/WAF-真机对拍-2026-09-27.md](docs/WAF-真机对拍-2026-09-27.md)。
+- ⚠️ **2026-09-27**：真实 ModSecurity 引擎已首次实测（真 `owasp/modsecurity-crs:nginx` 容器）——
+  当时记录为真机判「有绕过效果」的插件 PL1 74 / PL3 72。**⚠️ 这两个数字现已禁止引用**：
+  09-28 复查时它的 CI 报告产物已不在（只保留了后两轮），而三轮之间样本集、镜像 digest、
+  PARANOIA/阈值、放行判据全部一致 ⇒ 无法复现、也无法解释它与后一轮的差 9 倍。此处保留仅作
+  过程留痕。**仍禁止对外声明真实 WAF 下的绕过率**，逐条数字与三条理由见
+  [docs/WAF-真机对拍-2026-09-27.md](docs/WAF-真机对拍-2026-09-27.md) 与
+  [2026-09-28 第七节](docs/WAF-真机对拍-2026-09-28.md) 的 7.3。
+- ✅ **2026-09-28**：靶站换真 MySQL，口径从「放行」升级为**「打穿」**——同一条样本要同时满足
+  过了 WAF **且** SQL 真的执行并吐出证据。PL1/PL3 真机**打穿**插件各 **1** 个（`unionvaluesrow`），
+  而同口径下**放行**的是 **8** 个：**「放行 ≠ 打穿」由此第一次被量化（差 8 倍）**；安全对照 0 误拦。
+  ⚠️ 本批样本的直连打穿上界只有 **1/8** ⇒ **仍禁止对外声明真实 WAF 下的绕过率**（分母是 1，
+  不具统计意义）；且 CI 里设 `MODSEC_REQUIRE_DB=1`，真库不在位时对拍直接失败、不降级出数。
+  数字、边界与一处待查差异见 [docs/WAF-真机对拍-2026-09-28.md](docs/WAF-真机对拍-2026-09-28.md)。
+  （上两条为**旧样本集**（8 条、单注入点）下的数字，与下一条不可横向比。）
+- ✅ **2026-09-28（第三轮）**：样本集扩到 **15 条并自带上下文**，靶站注入点从 1 种扩到 3 种
+  （`WHERE id = ${raw}` / `WHERE name = '${raw}'` / `WHERE id IN (${raw})`，对应真实业务里
+  最常见的三种裸拼写法）。起因是上一轮直连上界只有 1/8 —— 根因不是 WAF 强，而是
+  **样本与靶站形态不匹配**（字符串上下文的样本拼进数值注入点 = 语法错误）。同批把打穿判据
+  收紧为「报错里也必须出现注入标记」。
+  **CI `modsec-live` 已出数**（镜像 digest 与 CRS 4.29.0 随报告固化）：**直连打穿上界 7/15**
+  （闸门 `MODSEC_MIN_UPPER=4`，不够就红、不静默出数），真机**打穿**插件 **1** 个
+  （`unionvaluesrow`，2/15；它自己的直连上界同为 7/15，故按可打穿样本计 2/7），
+  同口径**放行** PL1 **24** / PL3 **23** 个 ⇒ **「放行 ≠ 打穿」差一个数量级**；安全对照 0 误拦。
+  ⚠️ 分母仍只有 7、打穿插件只有 1 个 ⇒ **依然禁止对外声明真实 WAF 下的绕过率**。
+  逐样本判定、逐链矩阵与三条口径见
+  [docs/WAF-真机对拍-2026-09-28.md](docs/WAF-真机对拍-2026-09-28.md) 第六、七节。
+- ✅ **2026-09-29（第四轮）**：注入点形态从 3 种扩到 **5 种** —— 补上真实业务里同样高频、
+  但**逃逸前提完全不同**的两处：搜索页 `LIKE '%q%'`（要先闭合 `%'`）与列表页排序
+  `ORDER BY ${sort}`（不在 WHERE 里，等值/union 那套前提整个不成立）。PHP 与 Python 的差别
+  只在字符串怎么拼，落到 SQL 是同一句 ⇒ 形态按 **SQL 拼接位置**划分。样本 15 → 19 条。
+  **CI 实测：直连上界 7/15 → 10/19**；新形态 4 条里 3 条打穿（like 的两条 + `ORDER BY` 的
+  报错取数 —— **排序位置不是安全位置**）；真机**打穿**插件**仍只有 1 个** `unionvaluesrow`
+  （2/19，其直连上界 10/19 ⇒ 2/10），**放行** PL1/PL3 各 **25** 个；0 误拦。
+  ⚠️ **形态变多 ≠ 绕过链变多**：本轮改善的是「尺子」（分母 7→10、靶点 3→5 类），
+  **没有发现任何新的打穿链**；分母仍只有 10 ⇒ **依旧禁止对外声明绕过率**。
+  详见 [docs/WAF-真机对拍-2026-09-28.md](docs/WAF-真机对拍-2026-09-28.md) 第八节。
 - `npm run waf-validate`（e2e/waf-lab，自写正则模拟器）的数字仅作插件自检，**禁止对外**。
 
 ### 红队实战评测（ground-truth 真值对照）
@@ -413,6 +446,31 @@ sqlmap 误报的具体条目：`F18-safe-item`、`F20-safe-rand`、`F21-safe-500
 方向性差异，且可复现（两条命令都能跑）。调参后本工具 R2 为 19/19（100%）。
 
 已作为 `redteam` 套件纳入 `npm run acceptance`（需先起靶场；CI 里起不来则按 SKIP 处理，不假绿）。
+
+### 接口靶场（`npm run e2e:api-range`）
+
+其余 e2e 大多 `import ScanManager` 直接驱动引擎 —— 那验证的是**引擎**；这一套只走 HTTP，
+逐条核「接口有没有把能力交付到用户手上」。它自带一套真实靶场：
+真 MySQL 8.0.28（隔离沙箱）+ mysql2 直连靶站（url/body/cookie/header 四类注入位 + 会话依赖端点 +
+可"打补丁"开关）+ 本地 OpenAI 兼容假端点（AI 报告那条外发链路）。
+
+44 条用例覆盖 26 个端点：扫描生命周期（含 SSE 断线重连回放、暂停/续跑、停止三态、单点复测、
+diff、7 种导出格式）、三条入参路径、枚举/拖库、直连模式、四条利用动作（真库回显 / 真文件读写 /
+OS 能力缺失时如实失败）、sqlmap 入口、AI 三角色流水线与降级、鉴权与 CSRF/415/413 闸门、
+以及台账历史（`GET /api/scans`、上下文回收后回读）。
+
+判据纪律与验收门禁一致：**接口自报的布尔值不算证据**。暂停是否生效看靶站侧请求计数是否冻住、
+重测是否只打一个点看靶站收到的参数、凭据是否继承看受保护端点的 `authOk/authDenied` 计数、
+导出是否成产物看 Content-Disposition 与正文字节。台账写到 `logs/api-range-ledger/`（不污染仓库台账）。
+
+```bash
+npm run e2e:api-range                       # 全套（需要隔离 MySQL 沙箱，见 e2e/udf-lab/.mysql-sandbox）
+node e2e/api-range-lab/run.mjs --groups=meta,gates   # 只要无库依赖的两组（秒级）
+node e2e/api-range-lab/run.mjs --list        # 列出全部用例
+```
+
+最近一次真机结果（2026-09-28，本机沙箱 MySQL 8.0.28）：**44/44 PASS，21.6s**，退出码 0。
+它同时是 `npm run e2e:run-all` 里的 `api-range-lab` 一项（依赖 `sandbox`，缺沙箱则如实 SKIP）。
 
 ### 验收门禁（`npm run acceptance`）
 

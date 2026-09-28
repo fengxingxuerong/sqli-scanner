@@ -74,6 +74,11 @@ jobs:
       # 修法：npm run facts:refresh（实跑采集）→ npm run facts:fix（回写 README）
       - run: node scripts/facts-sync.mjs --check
         name: 文档数字口径（README ↔ docs/_facts.json）
+      # [ADD 2026-09-29] facts 采集判据的自证：采集期间若有人改了测试源码，产出的数字
+      # 不对应任何一版代码 ⇒ 必须拒绝写盘（见 scripts/facts-sync.mjs 的 diffDigests）。
+      # 这条自证钉的是**判据本身**，不是数字 —— 数字每次采集都在变，判据不能跟着变。
+      - run: node scripts/facts-sync.mjs --selftest
+        name: facts 采集前后指纹比对（自证判据不空转）
       # [P1-ADD 2026-09-23] README 内部口径自洽门禁：同一事实在 README 里被写了多处时，
       # 各处必须互相一致。实测到的第一例：方言分层在「功能表概览行（三数 + 方言清单）」
       # 「分层详表（三行）」「给客户的话（共 N 种）」三处各写一遍 —— Oracle / SQL Server
@@ -476,16 +481,41 @@ jobs:
   modsec-live:
     runs-on: ubuntu-latest
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 24
       - run: cd server && npm ci
+      # 真库靶站（2026-09-28）：把「放行」升级成「打穿」—— 同一条样本要同时满足
+      # ①过了 WAF ②后端真 MySQL 真执行了注入并吐出证据。没有这一环，
+      # 「WAF 放行」只能说明请求到了后端，说不清 SQL 有没有跑、数据取没取到。
+      # 用 docker run 而非 service container：与 acceptance job 同一套起法（那套已长期跑通）。
+      - name: 启动 MySQL（真库靶站依赖）
+        run: |
+          docker run -d --name mysql-waf -p 3306:3306 \
+            -e MYSQL_ROOT_PASSWORD=root \
+            -e MYSQL_DATABASE=sqli_lab \
+            mysql:8.0
+      - name: 等待 MySQL 就绪
+        run: |
+          for i in $(seq 1 60); do
+            if docker exec mysql-waf mysqladmin ping -h 127.0.0.1 -uroot -proot --silent 2>/dev/null; then
+              echo "MySQL ready after ${i} attempts"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "MySQL 未在 120s 内就绪"
+          docker logs mysql-waf | tail -30
+          exit 1
+      # ⚠️ 判据「与危害同源」：靶站要求真库（MODSEC_REQUIRE_DB=1）。若库没起来、靶站
+      #    静默降级成 echo，本轮就只剩「放行率」——那正是上一轮被禁止对外引用的口径。
+      #    故降级必须是**可见的失败**（对拍脚本 exit 1），不能出一份看着正常的报告。
       # 靶站必须先于容器起来：nginx 启动时上游不在会有概率直接退出（失败现场会伪装成 WAF 不通）
       - name: 起最小靶站后端
-        run: nohup node e2e/waf-real/modsec-target.mjs > /tmp/modsec-target.log 2>&1 &
+        run: env MODSEC_TARGET_DB=1 MODSEC_DB_USER=root MODSEC_DB_PASSWORD=root MODSEC_DB_NAME=sqli_lab nohup node e2e/waf-real/modsec-target.mjs > /tmp/modsec-target.log 2>&1 &
       - name: 拉镜像并记录 tag / digest
         run: |
           docker pull owasp/modsecurity-crs:nginx
@@ -519,6 +549,10 @@ jobs:
         env:
           MODSEC_BASE: http://127.0.0.1:8080
           MODSEC_LABEL: pl1
+          MODSEC_REQUIRE_DB: "1"
+          # 上界下限：直连（绕过 WAF）都打不穿 4 条 → 分母太小，打穿率不可引用 → 硬失败。
+          # 这是**本仓样本集/靶站形态**的质量闸门，与 WAF 强弱无关（直连根本不经过 WAF）。
+          MODSEC_MIN_UPPER: "4"
           MODSEC_PARANOIA: "1"
           MODSEC_ANOMALY_INBOUND: "5"
       - name: 切 PL3 重跑
@@ -535,6 +569,8 @@ jobs:
         env:
           MODSEC_BASE: http://127.0.0.1:8080
           MODSEC_LABEL: pl3
+          MODSEC_REQUIRE_DB: "1"
+          MODSEC_MIN_UPPER: "4"
           MODSEC_PARANOIA: "3"
           MODSEC_ANOMALY_INBOUND: "5"
       - name: 上传对拍报告
@@ -551,6 +587,7 @@ jobs:
           docker logs modsec 2>&1 | tail -40 || true
           cat /tmp/modsec-target.log 2>/dev/null | tail -10 || true
           docker rm -f modsec 2>/dev/null || true
+          docker rm -f mysql-waf 2>/dev/null || true
   tamper-waf-matrix:
     runs-on: ubuntu-latest
     # [修复] 原 job 级 schedule:/workflow_dispatch: 为非法键（只能放顶层 on:），已移至顶层。

@@ -28,6 +28,21 @@
 import { AppError, ErrorCode } from './errors.js';
 
 /**
+ * parseScope 的规则集（一条 scope 配置解析后的完整形态）。
+ * 显式 typedef 而不是靠推断：portRules / paths[].port 是新加的字段，
+ * 消费方（isHostInScope / assertInScope / HttpClient 的逐跳校验）都按这份形状取用，
+ * 没有具名类型时 TS 会在 JSDoc 里退回旧形状，字段一多就说不清谁负责哪一段。
+ * @typedef {Object} ScopeRules
+ * @property {boolean} enabled 是否启用了范围约束（空列表 = 不启用，行为与历史一致）
+ * @property {Set<string>} hosts 精确主机名/IP
+ * @property {string[]} domains 域（含子域）
+ * @property {Array<{net:number[],bits:number,v6:boolean}>} cidrs IP 段
+ * @property {Array<{host:string, prefix:string, port:(number|null)}>} paths 主机+路径前缀（可带端口）
+ * @property {Array<{host:string, port:number, secureDefault:boolean}>} portRules 主机+端口（不含路径）
+ * @property {string[]} raw 原始条目（报错回显用）
+ */
+
+/**
  * 把用户输入（数组 / 逗号分隔串 / 单条）规整成规则集。
  * 支持形态：
  *   example.com            精确主机名（含其裸域）
@@ -37,17 +52,16 @@ import { AppError, ErrorCode } from './errors.js';
  *   192.168.1.50           精确 IP
  *   2001:db8::/32          IPv6 前缀（按前缀比特比较）
  *   https://a.example.com/ 主机 + 路径前缀（仅该路径下）
- * @param {string|string[]|undefined|null} entries
- * @returns {{enabled: boolean, hosts: Set<string>, domains: string[], cidrs: Array<{net:number[],bits:number,v6:boolean}>, paths: Array<{host:string,prefix:string}>, raw: string[]}}
+ *   127.0.0.1:8140         主机 + 端口（端口必须相等；开发者描述本地靶站的自然写法）
+ * @param {string|string[]|null|undefined} entries
+ * @returns {ScopeRules}
  */
 export function parseScope(entries) {
   const list = (Array.isArray(entries) ? entries : String(entries ?? '').split(','))
     .map((s) => String(s ?? '').trim())
     .filter(Boolean);
-  /** @type {{ enabled: boolean, hosts: Set<string>, domains: string[],
-   *           cidrs: Array<{net:number[],bits:number,v6:boolean}>,
-   *           paths: Array<{host: string, prefix: string}>, raw: string[] }} */
-  const scope = { enabled: list.length > 0, hosts: new Set(), domains: [], cidrs: [], paths: [], raw: list };
+  /** @type {ScopeRules} */
+  const scope = { enabled: list.length > 0, hosts: new Set(), domains: [], cidrs: [], paths: [], portRules: [], raw: list };
   for (const item0 of list) {
     // CIDR 先判（否则 `10.0.0.0/8` 会被下面的“host/path”切分误当成路径前缀）
     const cidrItem = /^\[?([0-9a-fA-F:.]+)\]?\/(\d{1,3})$/.exec(item0);
@@ -61,12 +75,21 @@ export function parseScope(entries) {
     const item = item0;
     let host = item;
     let path = '';
+    // 规则里的端口（`127.0.0.1:8140` / `http://h:8443/` / `[::1]:8080`）。
+    // 为什么必须支持：授权时开发者就是这么描述自己的目标的（localhost:3000、内网靶站带端口），
+    // 而旧实现把整串当主机名收进 scope.hosts ⇒ 永远匹配不上，报错 yet 回显同一串，
+    // 看上去像判据坏了（2026-09-28 接口靶场实测）。带端口的规则按"主机名相等 + 端口相等"匹配，
+    // 只会比无端口规则**更严**，不会放宽授权面。
+    let rulePort = null;
+    let ruleSecureDefault = false;
     if (/^[a-z][a-z0-9+.-]*:\/\//i.test(item)) {
       // 带 scheme 的整段 URL：取 host + pathname 前缀
       try {
         const u = new URL(item);
         host = u.hostname;
         path = u.pathname || '';
+        if (u.port) rulePort = Number(u.port);
+        ruleSecureDefault = u.protocol === 'https:';
       } catch {
         continue; // 非法 URL 条目直接忽略（宁可少放行也不误放行）
       }
@@ -74,6 +97,17 @@ export function parseScope(entries) {
       const i = item.indexOf('/');
       host = item.slice(0, i);
       path = item.slice(i);
+      const m = /^([^:\[\]]+):(\d{1,5})$/.exec(host);
+      if (m) {
+        host = m[1];
+        rulePort = Number(m[2]);
+      }
+    } else {
+      const m = /^([^:\[\]]+):(\d{1,5})$/.exec(host) || /^\[([^\]]+)\]:(\d{1,5})$/.exec(host);
+      if (m) {
+        host = m[1];
+        rulePort = Number(m[2]);
+      }
     }
     host = host.replace(/^\[|\]$/g, '').toLowerCase();
     if (!host) continue;
@@ -83,7 +117,11 @@ export function parseScope(entries) {
     if (host.startsWith('*.')) host = host.slice(2);
     if (host.startsWith('.')) host = host.slice(1);
     if (path && path !== '/') {
-      scope.paths.push({ host, prefix: path.replace(/\/$/, '') });
+      scope.paths.push({ host, prefix: path.replace(/\/$/, ''), port: rulePort });
+      continue;
+    }
+    if (rulePort) {
+      scope.portRules.push({ host, port: rulePort, secureDefault: ruleSecureDefault });
       continue;
     }
     const cidr = parseCidr(host);
@@ -173,8 +211,9 @@ function bitsMatch(a, b, bits) {
  * @param {string} host 主机名或 IP（不含端口）
  * @param {ReturnType<typeof parseScope>} scope
  * @param {string} [pathname] 请求路径（用于带路径前缀的规则）
+ * @param {number|string} [port] 目标端口；只有带端口的规则（host:port / scheme://host:port）会用到它
  */
-export function isHostInScope(host, scope, pathname = '') {
+export function isHostInScope(host, scope, pathname = '', port = undefined) {
   if (!scope || scope.enabled !== true) return true;
   const h = String(host ?? '').replace(/^\[|\]$/g, '').toLowerCase();
   if (!h) return false;
@@ -183,7 +222,17 @@ export function isHostInScope(host, scope, pathname = '') {
     if (h === d || h.endsWith(`.${d}`)) return true;
   }
   for (const p of scope.paths) {
-    if ((h === p.host || h.endsWith(`.${p.host}`)) && String(pathname || '/').startsWith(p.prefix)) return true;
+    if ((h === p.host || h.endsWith(`.${p.host}`)) && String(pathname || '/').startsWith(p.prefix)) {
+      // 路径规则也可能带端口（http://h:8443/portal）：带端口时必须端口相等才算命中
+      if (!p.port) return true;
+      if (Number(port) === p.port) return true;
+    }
+  }
+  // 带端口的规则：主机名匹配 **且**端口相等才算在范围内（比无端口规则更严，不会放宽授权）。
+  // 调用方没给端口时按"不匹配"处理（fail-closed）—— 带端口的规则本来就是要把范围收到一个端口上。
+  for (const r of scope.portRules || []) {
+    if (h !== r.host && !h.endsWith(`.${r.host}`)) continue;
+    if (Number(port) === r.port) return true;
   }
   if (scope.cidrs.length && isIpLiteral(h)) {
     const v6 = h.includes(':');
@@ -211,10 +260,18 @@ export function assertInScope(urlString, scope) {
   } catch {
     throw new AppError(ErrorCode.SCOPE_VIOLATION, `目标 URL 无法解析，无法确认授权范围，已拒绝：${urlString}`);
   }
-  if (!isHostInScope(u.hostname, scope, u.pathname)) {
+  const port = u.port ? Number(u.port) : u.protocol === 'https:' ? 443 : 80;
+  if (!isHostInScope(u.hostname, scope, u.pathname, port)) {
+    // 报错必须能指下一步。旧写法只回显 raw 列表，遇到 `127.0.0.1:8140` 这类**带端口**的规则
+    // 时会打印出一句自相矛盾的话（"目标 127.0.0.1:59320 不在范围，当前范围：127.0.0.1:59320"），
+    // 使用者只会怀疑判据坏了。主机相同、端口不同时，直接把"差在端口"说出来。
+    const sameHostRule = (scope.portRules || []).find((r) => u.hostname.toLowerCase() === r.host || u.hostname.toLowerCase().endsWith(`.${r.host}`));
+    const why = sameHostRule
+      ? `（主机 ${sameHostRule.host} 已授权，但仅限端口 ${sameHostRule.port}，本次目标端口 ${port}）`
+      : '';
     throw new AppError(
       ErrorCode.SCOPE_VIOLATION,
-      `目标 ${u.host} 不在授权范围（scope）内，已拒绝扫描。当前范围：${scope.raw.join(', ')}`
+      `目标 ${u.host} 不在授权范围（scope）内，已拒绝扫描。当前范围：${scope.raw.join(', ')}${why}`
     );
   }
 }
