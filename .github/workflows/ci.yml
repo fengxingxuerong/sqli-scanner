@@ -545,6 +545,9 @@ jobs:
           MODSEC_BASE: http://127.0.0.1:8080
           MODSEC_LABEL: pl1
           MODSEC_REQUIRE_DB: "1"
+          # 上界下限：直连（绕过 WAF）都打不穿 4 条 → 分母太小，打穿率不可引用 → 硬失败。
+          # 这是**本仓样本集/靶站形态**的质量闸门，与 WAF 强弱无关（直连根本不经过 WAF）。
+          MODSEC_MIN_UPPER: "4"
           MODSEC_PARANOIA: "1"
           MODSEC_ANOMALY_INBOUND: "5"
       - name: 切 PL3 重跑
@@ -562,6 +565,7 @@ jobs:
           MODSEC_BASE: http://127.0.0.1:8080
           MODSEC_LABEL: pl3
           MODSEC_REQUIRE_DB: "1"
+          MODSEC_MIN_UPPER: "4"
           MODSEC_PARANOIA: "3"
           MODSEC_ANOMALY_INBOUND: "5"
       - name: 上传对拍报告

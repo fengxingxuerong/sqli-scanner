@@ -38,7 +38,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { SAMPLES, SAFE_SAMPLES } from './samples.mjs';
+import { SAMPLES, SAFE_SAMPLES, CONTEXTS, payloadOf, sampleUrl } from './samples.mjs';
 import { evaluate } from './crs-engine.js';
 import { verdict, isPwn, atSql } from './pwnVerdict.mjs';
 
@@ -52,6 +52,12 @@ const LABEL = process.env.MODSEC_LABEL || 'pl1';
 const TARGET_PORT = Number(process.env.MODSEC_TARGET_PORT || 8151);
 const DIRECT = process.env.MODSEC_DIRECT_BASE || `http://127.0.0.1:${TARGET_PORT}`;
 const REQUIRE_DB = process.env.MODSEC_REQUIRE_DB === '1';
+/**
+ * 直连打穿上界的**下限**（默认 1：只要还测得动就出数）。
+ * 这是**本仓自己的**质量闸门，不是 WAF 的成败：直连通道绕过了 WAF，上界只取决于
+ * 「样本 × 靶站拼接形态」，低了就是我们的样本集/靶站没配好 → 打穿率不可引用。
+ */
+const MIN_UPPER = Number(process.env.MODSEC_MIN_UPPER || 1);
 const PER_CHAIN_DIRECT = process.env.MODSEC_DIRECT_PER_CHAIN !== '0';
 const OUT_DIR = resolve(here, 'results');
 const DATE = new Date().toISOString().slice(0, 10);
@@ -91,9 +97,11 @@ async function ensureTarget() {
   return { mode: 'down', reason: '自起靶站 10s 内未就绪', child, logs };
 }
 
-/** 打一发，返回 { status, text }；网络异常返回 { status: 0 } */
+/** 打一发，返回 { status, text }；网络异常返回 { status: 0 }
+ *  ⚠️ 走 sampleUrl（samples.mjs 单一来源）：样本自带 ctx → path/param 由它决定，
+ *     这里再手拼一遍 URL 就会出现「样本说 str、请求打 num」的错配（上界归零的根因）。 */
 async function hit(base, payload) {
-  const url = `${base}/num?id=${encodeURIComponent(payload)}`;
+  const url = sampleUrl(base, payload);
   try {
     const r = await fetch(url, { redirect: 'manual' });
     return { status: r.status, text: (await r.text()).slice(0, 400) };
@@ -115,11 +123,12 @@ const blocked = (r) => r.status >= 400;
 async function sweep(base, chain) {
   const vs = [];
   for (const s of SAMPLES) {
-    let t = s;
+    let t = payloadOf(s);
     try {
-      t = chain ? applyTampers(s, ctx, chain) : s;
+      t = chain ? applyTampers(payloadOf(s), ctx, chain) : payloadOf(s);
     } catch { /* 插件抛错 → 按原样发（与 tamper-sweep 同口径：错误单独记） */ }
-    vs.push(verdict(await hit(base, t)));
+    // ctx 跟着样本走：变形只改 payload，不改它该打哪个端点
+    vs.push(verdict(await hit(base, { ...s, payload: t })));
   }
   return vs;
 }
@@ -129,11 +138,18 @@ function staticSweep(chain) {
   let pass = 0;
   const rules = [];
   for (const s of SAMPLES) {
-    let t = s;
+    const c = CONTEXTS[s.ctx];
+    let t = payloadOf(s);
     try {
-      t = chain ? applyTampers(s, ctx, chain) : s;
+      t = chain ? applyTampers(payloadOf(s), ctx, chain) : payloadOf(s);
     } catch { /* 同上 */ }
-    const e = evaluate({ uri: '/num?id=1', queryString: `id=${encodeURIComponent(t)}`, args: { id: t }, cookies: {}, headers: {} });
+    const e = evaluate({
+      uri: `${c.path}?${c.param}=1`,
+      queryString: `${c.param}=${encodeURIComponent(t)}`,
+      args: { [c.param]: t },
+      cookies: {},
+      headers: {},
+    });
     if (!e.blocked) pass++;
     else rules.push(e.ruleId || '?');
   }
@@ -143,7 +159,9 @@ function staticSweep(chain) {
 // ── 自检：三条都必须成立，否则 exit 1 ───────────────────────────────────────
 // （WAF 在位 / 后端可达 / 靶站本身可注入 —— 少任何一条，下面的数字都不成立）
 async function selftest() {
-  const clean = await hit(BASE, '1');
+  // 干净请求用 num 形态（`WHERE id = 1`）；裸注入用 str 形态（`WHERE name = '1' AND 1=1-- -'`）——
+  // 后者在数值上下文里是语法错误，拿它验证「WAF 在不在位」会掺进一个与 WAF 无关的干扰项。
+  const clean = await hit(BASE, { ctx: 'num', payload: '1' });
   if (clean.status === 0) {
     console.error(`[自检失败] 连不上 ${BASE} —— 容器没起来或端口不对（${clean.text}）`);
     return null;
@@ -152,10 +170,10 @@ async function selftest() {
     console.error(`[自检失败] 干净请求 id=1 被拦（HTTP ${clean.status}）—— 被拦的是正常流量，说明 WAF 阈值/规则集不是我们要测的形态`);
     return null;
   }
-  const probe = await hit(BASE, "1' AND 1=1-- -");
+  const probe = await hit(BASE, { ctx: 'str', payload: "1' AND 1=1-- -" });
   if (!blocked(probe)) {
     console.error(
-      `[自检失败] 裸注入 id=1' AND 1=1-- - 未被拦（HTTP ${probe.status}）—— WAF 没在阻断` +
+      `[自检失败] 裸注入 name=1' AND 1=1-- - 未被拦（HTTP ${probe.status}）—— WAF 没在阻断` +
         `（常见成因：镜像默认 SecRuleEngine=DetectionOnly / 反代没走 ModSecurity / PARANOIA 环境变量名随版本变）。` +
         `不修这个就跑数字，等于在测一个不存在的 WAF。`
     );
@@ -177,10 +195,26 @@ async function selftest() {
   }
   if (upper === 0) {
     console.error(
-      `[自检失败] 直连靶站（绕过 WAF）8 条样本**一条都没打穿** —— 靶站或判据坏了，` +
+      `[自检失败] 直连靶站（绕过 WAF）${SAMPLES.length} 条样本**一条都没打穿** —— 靶站或判据坏了，` +
         `此时「经 WAF 打穿 0 条」不能归因于 WAF。逐条 verdict：${directVerdicts.join(', ')}`
     );
     return null;
+  }
+  // 上界过低 = 样本与靶站形态不匹配（2026-09-28 实测 1/8 就是这个病灶）→ 打穿率的分母太小，
+  // 任何百分比都建立在个别样本上。默认只告警（1 条以上就算测得了），CI 可用 MIN_UPPER 收紧。
+  if (upper < MIN_UPPER) {
+    console.error(
+      `[自检失败] 直连打穿上界 ${upper}/${SAMPLES.length}，低于要求 ${MIN_UPPER} —— ` +
+        `样本集分辨率不够（多半是样本与该上下文的拼接形态不匹配），此时打穿率不可引用。` +
+        `逐条 verdict：${directVerdicts.join(', ')}`
+    );
+    return null;
+  }
+  if (upper * 2 < SAMPLES.length) {
+    console.warn(
+      `[上界偏低] 直连只打穿 ${upper}/${SAMPLES.length} —— 打穿率的分母偏小，` +
+        `引用前先看报告「直连上界」那一列（哪几条样本本身取不到数）`
+    );
   }
   return { clean, probe, upper, directVerdicts };
 }
@@ -271,11 +305,17 @@ async function main() {
     );
   }
 
+  md.push('## 注入点形态（靶站拼接模板；样本按 ctx 打各自的端点）', '');
+  for (const [k, c] of Object.entries(CONTEXTS)) {
+    md.push(`- \`${k}\` → \`${c.path}?${c.param}=…\` · \`${c.sql('${raw}')}\``);
+  }
+  md.push('');
+
   md.push('## 直连上界（绕过 WAF 直接打靶站：每条样本本身能打穿到什么程度）', '');
-  md.push('| # | 样本 | 直连判定 |');
-  md.push('|---|---|---|');
+  md.push('| # | 上下文 | 样本 | 直连判定 |');
+  md.push('|---|---|---|---|');
   st.directVerdicts.forEach((v, i) => {
-    md.push(`| ${i + 1} | \`${SAMPLES[i].slice(0, 70)}\` | ${v} |`);
+    md.push(`| ${i + 1} | \`${SAMPLES[i].ctx}\` | \`${payloadOf(SAMPLES[i]).slice(0, 70)}\` | ${v} |`);
   });
   md.push(
     '',

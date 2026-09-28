@@ -6,7 +6,7 @@ import { createRequire } from 'node:module';
 import { evaluate } from './crs-engine.js';
 // [2026-09-27] 样本集上提到 samples.mjs：真机 ModSecurity 对拍（modsec-live.mjs）
 // 用同一批 payload，否则「自实现 vs 真引擎」的差异里会混进「样本不同」这个假差异。
-import { SAMPLES } from './samples.mjs';
+import { SAMPLES, CONTEXTS, payloadOf } from './samples.mjs';
 const require = createRequire(new URL('../../server/package.json', import.meta.url));
 const here = dirname(fileURLToPath(import.meta.url));
 const { applyTampers } = require(resolve(here, '../../server/src/core/tamper/applyTampers.js'));
@@ -18,9 +18,16 @@ const names = tamperRegistry.list().map((p) => (typeof p === 'string' ? p : p.na
 function score(chain) {
   let pass = 0;
   const rules = [];
-  for (const p of SAMPLES) {
-    const t = chain ? applyTampers(p, ctx, chain) : p;
-    const r = evaluate({ uri: '/num?id=1', queryString: `id=${encodeURIComponent(t)}`, args: { id: t }, cookies: {}, headers: {} });
+  for (const s of SAMPLES) {
+    const c = CONTEXTS[s.ctx];
+    const t = chain ? applyTampers(payloadOf(s), ctx, chain) : payloadOf(s);
+    const r = evaluate({
+      uri: `${c.path}?${c.param}=1`,
+      queryString: `${c.param}=${encodeURIComponent(t)}`,
+      args: { [c.param]: t },
+      cookies: {},
+      headers: {},
+    });
     if (!r.blocked) pass++;
     else rules.push(r.ruleId || '?');
   }

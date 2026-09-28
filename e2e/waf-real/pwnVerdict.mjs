@@ -22,6 +22,16 @@ export const EXFIL_RESULT = /__S__[^;|]*__E__|SQLISCANNER\d/;
 export const EXFIL_ERROR = /XPATH syntax error|Duplicate entry/i;
 
 /**
+ * ③ 注入标记：注入者**自己指定**的那串数据（`__S__…__E__` / `SQLISCANNER<n>`）。
+ *
+ * ⚠️ 2026-09-28 收紧：报错路径从「只认 MySQL 短语」升级为「MySQL 短语 **且** 带标记」。
+ * 旧口径下 `XPATH syntax error: '~8.0.33'` 就算打穿 —— 但它只证明「报错通道通了」，
+ * 证明不了「注入者想要的数据被带出来了」，而 echo 后端同样能让 payload 里的字样出现。
+ * 打穿 = 取到数据，判据就必须看见那串数据本身。
+ */
+export const EXFIL_MARK = /__S__|SQLISCANNER\d/;
+
+/**
  * 单次响应的判定层级：
  *   unknown      网络异常（status 0）
  *   blocked      被 WAF 拦（非 2xx）
@@ -36,7 +46,7 @@ export function verdict(r) {
   const b = r.text || '';
   if (!SQL_LAYER.test(b)) return 'echo';
   if (b.startsWith('ROWS:') && EXFIL_RESULT.test(b)) return 'pwn_result';
-  if (b.startsWith('SQLERR:') && EXFIL_ERROR.test(b)) return 'pwn_error';
+  if (b.startsWith('SQLERR:') && EXFIL_ERROR.test(b) && EXFIL_MARK.test(b)) return 'pwn_error';
   return 'reached_sql';
 }
 

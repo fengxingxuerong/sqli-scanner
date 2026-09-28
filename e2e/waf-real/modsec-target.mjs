@@ -29,6 +29,7 @@ import { createServer } from 'node:http';
 import { createRequire } from 'node:module';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { CONTEXTS } from './samples.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const require = createRequire(new URL('../../server/package.json', import.meta.url));
@@ -43,11 +44,13 @@ const DB_CFG = {
   database: process.env.MODSEC_DB_NAME || 'sqli_lab',
 };
 
-// 靶表列数 = 4：samples.mjs 里 `1' UNION SELECT NULL,CONCAT(...),NULL,NULL-- -`
-// 与 `1 UNION SELECT 'SQLISCANNER0'...'SQLISCANNER3'` 都是 4 列形态，
-// 让**至少一部分样本具备可打穿上界** —— 否则「打穿率」的分母恒为 0，测量没有意义。
+// 靶表列数 = 4：samples.mjs 里 4 列形态的 union 样本能直接取到数据，
+// 让**一部分样本具备可打穿上界** —— 否则「打穿率」的分母恒为 0，测量没有意义。
 // ⚠️ 2 列形态（`SQLISCANNER0','SQLISCANNER1'`）在这张表上必然报列数不匹配，
 //    这是**真实结果**而非缺陷：由 modsec-live 的直连上界如实记录，不挑端点、不放宽判据。
+// ⚠️ 2026-09-28：注入点从「只有一种」扩到三种（见 samples.mjs 的 CONTEXTS）。
+//    此前只有 `WHERE id = ${raw}`（数值、无引号），而多数样本是字符串上下文写法
+//    → 拼进去是语法错误、只算「抵达 SQL 层」，上界因此只有 1/8。三种形态按 path 路由。
 const TABLE = 'waf_items';
 const SEED_SQL = [
   `CREATE TABLE IF NOT EXISTS ${TABLE} (id INT PRIMARY KEY, name VARCHAR(64), note VARCHAR(64), extra VARCHAR(64))`,
@@ -82,9 +85,15 @@ const MODE = db.conn ? 'db' : 'echo';
 if (WANT_DB && !db.conn) console.warn(`[modsec-target] 真库模式不可用，降级为 echo：${db.reason}`);
 if (db.conn) console.log(`[modsec-target] 真库模式已就绪：${DB_CFG.user}@${DB_CFG.host}:${DB_CFG.port}/${DB_CFG.database} · max_execution_time=${MAX_EXEC_MS}ms`);
 
+/**
+ * 路由表：path → 注入点形态（拼接模板取自 samples.mjs 的 CONTEXTS，单一来源）
+ * 三种形态对应真实业务里最常见的三种裸拼写法，样本按 ctx 打各自的端点。
+ */
+const ROUTES = new Map(Object.values(CONTEXTS).map((c) => [c.path, c]));
+
 /** 原样拼接（这就是注入点）；结果/错误都回显，供对拍脚本判定「打穿到哪一层」 */
-async function queryDb(raw) {
-  const sql = `SELECT id, name, note, extra FROM ${TABLE} WHERE id = ${raw}`;
+async function queryDb(route, raw) {
+  const sql = route.sql(raw);
   try {
     const [rows] = await db.conn.query(sql);
     return `ROWS:${rows.map((r) => Object.values(r).join('|')).join(';')}`;
@@ -101,12 +110,18 @@ const server = createServer(async (req, res) => {
     res.end(JSON.stringify({ mode: MODE, reason: db.reason || null, port: PORT }));
     return;
   }
-  const id = u.searchParams.get('id') ?? '';
-  if (MODE === 'db') {
-    res.end(await queryDb(id));
+  const route = ROUTES.get(u.pathname);
+  if (!route) {
+    // 未知路径：echo 模式下仍回显，db 模式下明确告知（防「打空端点」被记成注入失败）
+    res.end(MODE === 'db' ? 'NOROUTE' : `OK unknown=${u.pathname}`);
     return;
   }
-  res.end(`OK id=${id}`);
+  const raw = u.searchParams.get(route.param) ?? '';
+  if (MODE === 'db') {
+    res.end(await queryDb(route, raw));
+    return;
+  }
+  res.end(`OK ${route.param}=${raw}`);
 });
 
 server.listen(PORT, '127.0.0.1', () => {

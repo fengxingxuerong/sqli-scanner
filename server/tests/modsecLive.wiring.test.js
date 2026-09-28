@@ -20,14 +20,20 @@ const read = (rel) => readFileSync(path.join(REPO, rel), 'utf8');
 const VERDICT_REL = 'e2e/waf-real/pwnVerdict.mjs';
 const LIVE_REL = 'e2e/waf-real/modsec-live.mjs';
 const TARGET_REL = 'e2e/waf-real/modsec-target.mjs';
+const SAMPLES_REL = 'e2e/waf-real/samples.mjs';
 
 const verdictSrc = read(VERDICT_REL);
 const liveSrc = read(LIVE_REL);
 const targetSrc = read(TARGET_REL);
+const samplesSrc = read(SAMPLES_REL);
 const ciYml = read('.github/workflows/ci.yml');
 
+// samples.mjs 是纯数据模块，导入即可断言（内容与靶站形态是否对得上靠它最准）
+const { SAMPLES, CONTEXTS } = await import(new URL(`../../${SAMPLES_REL}`, import.meta.url));
+
 // 判据模块导入即可（纯函数、无副作用）；不给 modsec-live 做 import —— 它会跑主流程
-const { verdict, isPwn, atSql } = await import(new URL(`../../${VERDICT_REL}`, import.meta.url));
+const verdictMod = await import(new URL(`../../${VERDICT_REL}`, import.meta.url));
+const { verdict, isPwn, atSql } = verdictMod;
 
 // ── 一、行为断言：判据本身 ───────────────────────────────────────────────────
 test('① echo 后端回显 payload **不算**打穿（巧合陷阱：回显型判据在 echo 下恒真）', () => {
@@ -54,13 +60,24 @@ test('③ 结果集里出现注入标记 → pwn_result', () => {
   assert.equal(verdict({ status: 200, text: 'ROWS:SQLISCANNER0|SQLISCANNER1|x|y' }), 'pwn_result');
 });
 
-test('④ 报错取数（extractvalue / floor-rand）→ pwn_error', () => {
-  assert.equal(verdict({ status: 200, text: `SQLERR:XPATH syntax error: '~8.0.28'` }), 'pwn_error');
+test('④ 报错取数（extractvalue / floor-rand）→ pwn_error（必须带注入标记）', () => {
+  // 2026-09-28 收紧：只报 MySQL 短语不算打穿 —— 那只能证明报错通道通了，证明不了数据被带出来
   assert.equal(
-    verdict({ status: 200, text: `SQLERR:Duplicate entry '8.0.28:1' for key 'group_key'` }),
+    verdict({ status: 200, text: `SQLERR:XPATH syntax error: '~__S__8.0.28__E__'` }),
+    'pwn_error',
+  );
+  assert.equal(
+    verdict({ status: 200, text: `SQLERR:Duplicate entry '__S__8.0.28__E__:1' for key 'group_key'` }),
     'pwn_error',
   );
   assert.equal(isPwn('pwn_error'), true);
+});
+
+test('④b 报错但**没有注入标记** → 只算抵达 SQL 层（打穿 = 取到数据，不是报错了）', () => {
+  const r = verdict({ status: 200, text: `SQLERR:XPATH syntax error: '~8.0.28'` });
+  assert.equal(r, 'reached_sql', '无标记的报错只能说明通道通了');
+  assert.equal(isPwn(r), false);
+  assert.equal(atSql(r), true);
 });
 
 test('⑤ WAF 拦 / 网络异常 / 空响应分别归类（不混入打穿）', () => {
@@ -93,6 +110,13 @@ test('⑦ modsec-live 真的 import 判据模块（判据被内联回去 = 单�
   // 判据模块自身也得留着防假绿的两条纪律（删了注释往往意味着判据被放宽）
   assert.match(verdictSrc, /startsWith\('ROWS:'\)/, '结果集证据必须要求 ROWS: 前缀');
   assert.match(verdictSrc, /XPATH syntax error/, '报错证据必须认 MySQL 短语');
+  assert.match(verdictSrc, /EXFIL_MARK/, '报错证据必须再要求注入标记（只报 MySQL 短语 ≠ 取到数据）');
+});
+
+test('⑦b 对拍脚本按样本自带 ctx 打端点（防「样本说 str、请求打 num」的错配把上界打回 0）', () => {
+  assert.match(liveSrc, /sampleUrl\(/, '必须用 samples.mjs 的 sampleUrl 拼 URL（唯一来源）');
+  assert.ok(!/\$\{base\}\/num\?id=/.test(liveSrc), '不许再硬编码 /num?id= —— 那是上界 1/8 的根因');
+  assert.match(liveSrc, /MODSEC_MIN_UPPER/, '必须有上界下限开关（上界太低时打穿率不可引用）');
 });
 
 test('⑧ 直连通道（绕过 WAF 量上界）+ 上界自检必须在位', () => {
@@ -109,7 +133,12 @@ test('⑨ 真库降级必须是可见的失败（MODSEC_REQUIRE_DB）', () => {
 
 test('⑩ 靶站：真库模式 + 原样拼接注入点 + SQL 错误也回 200', () => {
   assert.ok(targetSrc.includes('MODSEC_TARGET_DB'), '靶站必须有真库模式开关');
-  assert.match(targetSrc, /WHERE id = \$\{raw\}/, '注入点必须是「原样拼接」（靶点本体）');
+  // 拼接模板已上提到 samples.mjs 的 CONTEXTS（靶站与对拍脚本共用），靶站只负责按 ctx 路由
+  assert.match(targetSrc, /import\s*\{\s*CONTEXTS\s*\}\s*from\s*'\.\/samples\.mjs'/, '靶站必须从 samples.mjs 取拼接模板');
+  assert.match(targetSrc, /route\.sql\(raw\)/, '注入点必须是「原样拼接」（靶点本体）');
+  assert.match(samplesSrc, /WHERE id = \$\{raw\}/, '数值无引号形态必须存在');
+  assert.match(samplesSrc, /WHERE name = '\$\{raw\}'/, '字符串带引号形态必须存在');
+  assert.match(samplesSrc, /WHERE id IN \(\$\{raw\}\)/, 'IN 括号形态必须存在');
   assert.match(targetSrc, /SQLERR:\$\{/, 'SQL 错误要带 SQLERR: 前缀回显');
   assert.match(targetSrc, /SQLERR/, '错误路径必须存在');
   // ⚠️ 关键：错误**不能**用 5xx —— 否则对拍脚本的「非 2xx = 被 WAF 拦」会把它误算成拦截
@@ -138,6 +167,36 @@ test('⑫ CI 里真库链齐全：起库 → 等就绪 → 靶站接库 → 两�
   assert.match(job, /MODSEC_LABEL: pl1\r?\n\s+MODSEC_REQUIRE_DB: "1"/, 'PL1 档必须要求真库，否则静默退回「放行率」');
   assert.match(job, /MODSEC_LABEL: pl3\r?\n\s+MODSEC_REQUIRE_DB: "1"/, 'PL3 档必须要求真库');
   assert.match(job, /docker rm -f mysql-waf/, '收摊要清掉 MySQL 容器（残留会污染后续步骤）');
+  // 上界下限：直连都打不穿 → 打穿率的分母是 0/1，任何百分比都是造的（2026-09-28 实测 1/8 即此病灶）
+  assert.match(job, /MODSEC_MIN_UPPER: "4"/, 'CI 必须设直连上界下限，低于它要硬失败而不是静默出数');
+});
+
+test('⑭ 样本自带 ctx：全部登记 + 三种拼接形态都有样本（防上界塌回单一形态）', () => {
+  assert.ok(SAMPLES.length >= 8, `样本只剩 ${SAMPLES.length} 条`);
+  for (const s of SAMPLES) {
+    assert.ok(CONTEXTS[s.ctx], `样本「${s.payload.slice(0, 40)}」的 ctx「${s.ctx}」未登记`);
+    assert.ok(s.payload && s.payload.length > 0, '样本 payload 不得为空');
+  }
+  const used = new Set(SAMPLES.map((s) => s.ctx));
+  for (const k of ['num', 'str', 'in']) {
+    assert.ok(used.has(k), `没有 \`${k}\` 形态的样本 —— 少一种业务拼法，结论就只代表一种靶点`);
+  }
+  // 靶站路由必须由 CONTEXTS 生成（各自写一份 path → 两端分叉后请求会打到不存在的端点）
+  assert.match(targetSrc, /Object\.values\(CONTEXTS\)/, '靶站路由表必须由 CONTEXTS 生成，不能手抄一份');
+});
+
+test('⑮ 取数类样本必须携带注入标记（没标记 = 判据看不见数据 = 上界里永远躺着 0）', () => {
+  const { EXFIL_MARK } = verdictMod;
+  // ⚠️ 按**声明的** exfil 字段筛，不按 payload 形状筛：
+  //    形状筛（/UNION SELECT 1,CONCAT/ 之类）在「标记被删掉」时正好把该样本筛出集合，
+  //    断言因此恒绿 —— 缺陷注入实测过一次，就是这么空转的。
+  const exfil = SAMPLES.filter((s) => s.exfil === true);
+  assert.ok(exfil.length >= 8, `声明为取数的样本只有 ${exfil.length} 条 —— 上界分辨率不够`);
+  for (const s of exfil) {
+    assert.ok(EXFIL_MARK.test(s.payload), `取数样本未带标记：${s.payload.slice(0, 60)}`);
+  }
+  // 反向：没声明 exfil 的样本不参与上界（布尔/时间单请求取不到数），但必须仍然存在
+  assert.ok(SAMPLES.length - exfil.length >= 2, '布尔/时间通道样本也得留着（只测放行，不进上界）');
 });
 
 test('⑬ 报告口径不许把「放行」说成「绕过」', () => {
