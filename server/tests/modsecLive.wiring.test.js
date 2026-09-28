@@ -171,18 +171,29 @@ test('⑫ CI 里真库链齐全：起库 → 等就绪 → 靶站接库 → 两�
   assert.match(job, /MODSEC_MIN_UPPER: "4"/, 'CI 必须设直连上界下限，低于它要硬失败而不是静默出数');
 });
 
-test('⑭ 样本自带 ctx：全部登记 + 三种拼接形态都有样本（防上界塌回单一形态）', () => {
+test('⑭ 样本自带 ctx：全部登记 + 每种拼接形态都有样本（防上界塌回单一形态）', () => {
   assert.ok(SAMPLES.length >= 8, `样本只剩 ${SAMPLES.length} 条`);
   for (const s of SAMPLES) {
     assert.ok(CONTEXTS[s.ctx], `样本「${s.payload.slice(0, 40)}」的 ctx「${s.ctx}」未登记`);
     assert.ok(s.payload && s.payload.length > 0, '样本 payload 不得为空');
   }
   const used = new Set(SAMPLES.map((s) => s.ctx));
-  for (const k of ['num', 'str', 'in']) {
+  // 五种形态 = WHERE 等值/枚举（num / str / in）+ 真实框架另外两个高频位置（like / orderby）
+  for (const k of ['num', 'str', 'in', 'like', 'orderby']) {
     assert.ok(used.has(k), `没有 \`${k}\` 形态的样本 —— 少一种业务拼法，结论就只代表一种靶点`);
   }
   // 靶站路由必须由 CONTEXTS 生成（各自写一份 path → 两端分叉后请求会打到不存在的端点）
   assert.match(targetSrc, /Object\.values\(CONTEXTS\)/, '靶站路由表必须由 CONTEXTS 生成，不能手抄一份');
+});
+
+test('⑭b 每个形态的 sql 模板必须真的把 raw 拼进去（写死的模板 = 注入点不存在）', () => {
+  for (const [k, c] of Object.entries(CONTEXTS)) {
+    assert.ok(typeof c.sql === 'function', `形态 \`${k}\` 的 sql 必须是函数`);
+    // 用一段可识别的哨兵值，模板必须把它原样带出来（防有人把 raw 写死成常量）
+    const out = c.sql('__RAW__');
+    assert.ok(out.includes('__RAW__'), `形态 \`${k}\` 的 sql 没把 raw 拼进去：${out.slice(0, 80)}`);
+    assert.ok(c.path && c.param, `形态 \`${k}\` 缺 path/param`);
+  }
 });
 
 test('⑮ 取数类样本必须携带注入标记（没标记 = 判据看不见数据 = 上界里永远躺着 0）', () => {

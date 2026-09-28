@@ -1,6 +1,6 @@
 # sqli-scanner
 
-[![Tests](https://img.shields.io/badge/tests-2967%20passing-brightgreen)](#测试)
+[![Tests](https://img.shields.io/badge/tests-2968%20passing-brightgreen)](#测试)
 [![CI](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml/badge.svg)](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml)
 [![Dependencies](https://img.shields.io/badge/dependencies-0%20known%20vulns-brightgreen)](#环境变量)
 
@@ -311,7 +311,7 @@ backend/  ← Express + Node.js
 # 前端测试（452 个用例）
 npm test
 
-# 服务端测试（2518 个用例）
+# 服务端测试（2519 个用例）
 cd server && npm test
 
 # 全部测试
@@ -337,7 +337,7 @@ npm run artifact:drift   # 入库的 e2e 基线产物必须等于当前代码跑
 
 - TypeScript: 零错误
 - 前端测试: 452/452 通过（覆盖率门禁 stmts 94.50 / branch 84.13 / func 77.32，阈值 88/77/67）
-- 服务端测试: 2518 用例（2515 pass / 0 fail / 3 skip，并发口径 2026-09-28 复测；3 skip 为环境依赖显式跳过。覆盖率 lines 90.79 / branch 77.57 / func 80.60，阈值 85/69/72）
+- 服务端测试: 2519 用例（2516 pass / 0 fail / 3 skip，并发口径 2026-09-28 复测；3 skip 为环境依赖显式跳过。覆盖率 lines 90.79 / branch 77.57 / func 80.60，阈值 85/69/72）
 - 一键扫描: `npm run scan -- -u <url>`（CLI 一条命令产出 HTML/JSON/Markdown 全套报告 + manifest，退出码可直接进 CI 门禁）
 - Tamper 插件: 228 个（含 v24 增量 20 个，对齐 sqlmap 官方 tamper 全集，含官方 CRS/libinjection 实测组合 uniontable+odbcbrace）
 - WAF 绕过能力: 200+ 插件链式组合，覆盖 62 个 WAF 厂商指纹识别 + 推荐
@@ -396,6 +396,11 @@ npm run artifact:drift   # 入库的 e2e 基线产物必须等于当前代码跑
   ⚠️ 分母仍只有 7、打穿插件只有 1 个 ⇒ **依然禁止对外声明真实 WAF 下的绕过率**。
   逐样本判定、逐链矩阵与三条口径见
   [docs/WAF-真机对拍-2026-09-28.md](docs/WAF-真机对拍-2026-09-28.md) 第六、七节。
+- 🔧 **2026-09-29（进行中）**：注入点形态从 3 种扩到 **5 种** —— 补上真实业务里同样高频、
+  但**逃逸前提完全不同**的两处：搜索页 `LIKE '%q%'`（要先闭合 `%'`）与列表页排序
+  `ORDER BY ${sort}`（不在 WHERE 里，等值/union 那套前提整个不成立）。PHP 与 Python 的差别
+  只在字符串怎么拼，落到 SQL 是同一句 ⇒ 形态按 **SQL 拼接位置**划分。样本 15 → 19 条。
+  ⚠️ 新一轮上界/打穿数**以 CI `modsec-live` 报告为准**（本机不起靶场）。
 - `npm run waf-validate`（e2e/waf-lab，自写正则模拟器）的数字仅作插件自检，**禁止对外**。
 
 ### 红队实战评测（ground-truth 真值对照）

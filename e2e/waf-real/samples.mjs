@@ -18,6 +18,17 @@
 //   · 三种形态（数值无引号 / 字符串带引号 / IN 括号）同时覆盖 → 顺带回答「换一种
 //     业务拼接写法还能不能打穿」（对拍不再只代表一种靶点）。
 //
+// ── 2026-09-29 再补两种**真实框架高频位置** ──────────────────────────────────
+// 前三种都落在 WHERE 的等值/枚举上；而搜索页（`LIKE '%q%'`）与列表页排序
+// （`ORDER BY ${sort}`）是同样高频、逃逸前提却完全不同的两处：
+//   · LIKE 要先闭合 `%'`、尾部还留着一个 `%'` 要注释掉；
+//   · ORDER BY 根本不在 WHERE 里 —— 等值/union 那套「先闭合再 union」的前提整个不成立，
+//     只剩报错/布尔这类「在表达式位置求值」的手法。
+// PHP 与 Python 的差别只在字符串怎么拼（`."` 拼接 vs f-string / `%` 格式化），
+// 落到 SQL 上是同一句 ⇒ 形态按 **SQL 拼接位置**划分，语言写法写在 CONTEXTS 注释里备查。
+// ⚠️ 加形态的代价是请求量（插件 × 样本 × 双通道），所以只加真正改变逃逸前提的位置，
+//    不为「看起来更全」堆形态。
+//
 // ⚠️ 判据纪律：`exfil: true` 的样本**必须携带注入标记**（`__S__..__E__` 或 `SQLISCANNER<n>`）。
 //    没有标记，即使 MySQL 报了错也只能算「抵达 SQL 层」—— 详见 pwnVerdict.mjs。
 //    这条由 `server/tests/modsecLive.wiring.test.js` ⑮ 钉住：按 **声明的** exfil 字段查，
@@ -46,6 +57,26 @@ export const CONTEXTS = {
     path: '/in',
     param: 'id',
     sql: (raw) => `SELECT id, name, note, extra FROM waf_items WHERE id IN (${raw})`,
+  },
+  // ── 2026-09-29 补：真实业务里另外两种**高频**拼接位置 ──────────────────────
+  // 前三种都在 WHERE 的等值/枚举上，而搜索页与列表页排序是 Web 应用里出现频率
+  // 同样高、但**逃逸方式完全不同**的两处：前者要闭合 `%'`，后者根本不在 WHERE 里。
+  // （PHP/Python 的差别只体现在字符串怎么拼，SQL 形态是同一句 —— 所以这里按
+  //  **SQL 拼接位置**分形态，语言写法写在注释里备查。）
+  like: {
+    path: '/like',
+    param: 'q',
+    // PHP:   "... WHERE name LIKE '%" . $_GET['q'] . "%'"
+    // 或:    "... WHERE name LIKE '%$q%'"
+    // Py:    f"... WHERE name LIKE '%{q}%'"  /  "... WHERE name LIKE '%s'" % q
+    sql: (raw) => `SELECT id, name, note, extra FROM waf_items WHERE name LIKE '%${raw}%'`,
+  },
+  orderby: {
+    path: '/order',
+    param: 'sort',
+    // PHP:   "... ORDER BY " . $_GET['sort']          （列表页排序，几乎人人写过）
+    // Py:    f"... ORDER BY {sort}"  /  cursor.execute("... ORDER BY %s" % sort)
+    sql: (raw) => `SELECT id, name, note, extra FROM waf_items ORDER BY ${raw}`,
   },
 };
 
@@ -86,6 +117,14 @@ export const SAMPLES = [
   { ctx: 'in', exfil: true, payload: "1) UNION SELECT 'SQLISCANNER0','SQLISCANNER1','SQLISCANNER2','SQLISCANNER3'-- -", note: 'union（需闭合右括号）' },
   { ctx: 'in', exfil: true, payload: "1) UNION SELECT 1,CONCAT('__S__',version(),'__E__'),3,4-- -", note: 'union 取数（需闭合右括号）' },
   { ctx: 'in', exfil: true, payload: "1) AND extractvalue(1,concat(0x7e,(SELECT CONCAT('__S__',version(),'__E__'))))-- -", note: '报错取数（需闭合右括号）' },
+
+  // ── like（搜索页 `LIKE '%q%'`：要先闭合 `%'`，尾部还有个 `%'` 要注释掉）────────
+  { ctx: 'like', exfil: true, payload: "1%' UNION SELECT 1,CONCAT('__S__',version(),'__E__'),3,4-- -", note: 'union 取数（闭合 %\' 后 union，尾部 %\' 用注释吃掉）' },
+  { ctx: 'like', exfil: true, payload: "1%' AND extractvalue(1,concat(0x7e,(SELECT CONCAT('__S__',version(),'__E__'))))-- -", note: '报错取数 extractvalue（需闭合 %\'）' },
+
+  // ── orderby（列表页排序：不在 WHERE 里，等值/union 那套逃逸前提整个不成立）─────
+  { ctx: 'orderby', exfil: true, payload: "extractvalue(1,concat(0x7e,(SELECT CONCAT('__S__',version(),'__E__'))))", note: '报错取数 extractvalue（ORDER BY 表达式会被逐行求值）' },
+  { ctx: 'orderby', payload: 'IF(1=1,1,2)', note: '布尔通道（ORDER BY 位置只测放行，单请求不取数）' },
 ];
 
 /**
