@@ -272,6 +272,30 @@ function parseApiTable(lines) {
 }
 
 /**
+ * docs/api.md 的端点标题：`#### \`GET /health\``（也可一行写多个，如
+ * `#### \`GET /sqlmap/:id/events\` / \`POST /sqlmap/:id/stop\``）。
+ *
+ * ⚠️ api.md 里的路径**不带 `/api` 前缀**（文档按挂载后的相对路径写），而代码侧的
+ * 注册端点是 `GET /api/health` ⇒ 解析时统一补前缀，否则两边永远对不上（假红）。
+ * 查询串（`?limit=50` / `?format=...`）一律剥掉 —— 它不是路径的一部分。
+ */
+export function parseApiDocEndpoints(lines) {
+  const rows = [];
+  lines.forEach((l, i) => {
+    if (!/^#{3,4}\s/.test(l)) return;
+    for (const m of l.matchAll(/`(GET|POST|PUT|DELETE|PATCH)\s+(\/[^\s`]*)`/gi)) {
+      const raw = m[2].split('?')[0];
+      const p = raw.startsWith('/api') ? raw : `/api${raw}`;
+      rows.push({ line: i + 1, key: `${m[1].toUpperCase()} ${p}` });
+    }
+  });
+  if (!rows.length) {
+    return { error: 'docs/api.md 里解析不出任何「#### `METHOD /path`」端点标题 —— 格式改了要同步改判据，不能静默跳过' };
+  }
+  return { rows };
+}
+
+/**
  * README 里教人执行的 `node <仓库内路径>.js|mjs|cjs` —— 路径必须真的存在。
  * 实测触发过一次：README 两处教 `node bin/cli.js --help`，而 CLI 真身在 `server/bin/cli.js`，
  * 从仓库根照抄就是 MODULE_NOT_FOUND。
@@ -456,6 +480,30 @@ export function checkConsistency(input) {
     );
   }
 
+  // ⑭b docs/api.md 的端点标题集并入同一道双向核对。
+  // 理由：api.md 是接口字段口径的**对外契约**，此前完全没有门禁 —— 代码加了端点、
+  // 改了字段，文档不动也不会红，读到的人照抄就是 404。与 README 那张表同一把尺子。
+  const apiDocRows = input.apiDoc?.rows || [];
+  if (!apiDocRows.length) {
+    fails.push('⑭b docs/api.md 一个端点标题都没解析出来 —— 文档结构改了，判据已失效（不能静默跳过）');
+  }
+  const docGhost = apiDocRows.filter((r) => !registered.has(r.key));
+  if (docGhost.length) {
+    fails.push(
+      `⑭b docs/api.md 写了 ${docGhost.length} 个**不存在**的端点：` +
+      docGhost.map((r) => `${r.key}（:${r.line}）`).join('、') +
+      ` — 照文档调用必然 404（注意 api.md 不带 /api 前缀，判据已自动补）`,
+    );
+  }
+  const docListed = new Set(apiDocRows.map((r) => r.key));
+  const docMissing = [...registered].filter((k) => !docListed.has(k)).sort();
+  if (docMissing.length) {
+    fails.push(
+      `⑭b 代码注册了 ${registered.size} 个端点，docs/api.md 漏写 ${docMissing.length} 个：${docMissing.join('、')}` +
+      ` — 新增端点必须同步写进接口文档`,
+    );
+  }
+
   const missingPaths = (input.nodePaths || []).filter((p) => !code.existingPaths.has(p.path));
   if (missingPaths.length) {
     fails.push(
@@ -487,6 +535,9 @@ const SAMPLE = () => ({
     { name: 'CONTRIBUTING.md', lines: ['   - 前端：`npm test`（vitest，用例数见 _facts.json）'] },
   ],
   apiTable: {
+    rows: [{ line: 12, key: 'GET /api/health' }, { line: 13, key: 'POST /api/scan/start' }],
+  },
+  apiDoc: {
     rows: [{ line: 12, key: 'GET /api/health' }, { line: 13, key: 'POST /api/scan/start' }],
   },
   nodePaths: [{ line: 14, path: 'server/bin/cli.js' }],
@@ -596,6 +647,19 @@ function selftest() {
   expectFail('API 表整段解析不出来（格式漂移）', (s) => {
     s.apiTable = { rows: [] };
   }, /⑭.*一行都没解析/);
+  // ⑭b docs/api.md 并入同一把尺子（此前这份对外契约完全没人守）
+  expectFail('api.md 写了代码里不存在的端点', (s) => {
+    s.apiDoc.rows.push({ line: 20, key: 'POST /api/scan/stop' });
+  }, /⑭b.*不存在/);
+  expectFail('代码新增端点而 api.md 漏写', (s) => {
+    s.code.endpoints.push('POST /api/scan/:id/pause');
+  }, /⑭b.*漏写/);
+  expectFail('api.md 端点标题整段解析不出来', (s) => {
+    s.apiDoc = { rows: [] };
+  }, /⑭b.*解析不出|⑭b.*判据已失效/);
+  expectOk('api.md 与代码端点完全一致（合法形态）', (s) => {
+    s.code.endpoints = [...s.apiDoc.rows.map((r) => r.key)];
+  });
   // ⑮ 教了跑不通的命令行路径（本轮实测：README 两处写 node bin/cli.js，真身在 server/bin/cli.js）
   expectFail('README 教的脚本路径不存在', (s) => {
     s.nodePaths = [{ line: 14, path: 'bin/cli.js' }];
@@ -624,9 +688,10 @@ function main() {
   const suiteClaims = parseSuiteClaims(lines);
   const tamperUniverse = parseTamperUniverse(lines);
   const apiTable = parseApiTable(lines);
+  const apiDoc = parseApiDocEndpoints(readFileSync(resolve(ROOT, 'docs/api.md'), 'utf8').split(/\r?\n/));
   const nodePaths = parseNodePathClaims(lines);
 
-  const parseErrors = [overview, tiers, customer, tech, tamperCounts, payload, tamperUniverse, apiTable]
+  const parseErrors = [overview, tiers, customer, tech, tamperCounts, payload, tamperUniverse, apiTable, apiDoc]
     .map((r) => r && r.error)
     .filter(Boolean);
   if (parseErrors.length) {
@@ -657,7 +722,7 @@ function main() {
   };
 
   const fails = checkConsistency({
-    overview, tiers, customer, tech, tamperCounts, payload, suiteClaims, tamperUniverse, docs, apiTable, nodePaths, code,
+    overview, tiers, customer, tech, tamperCounts, payload, suiteClaims, tamperUniverse, docs, apiTable, apiDoc, nodePaths, code,
   });
   if (fails.length) {
     console.error(`[readme] ✗ README 声称与事实不符（${fails.length} 处）：`);
@@ -671,7 +736,7 @@ function main() {
     `[readme] ✓ 口径自洽：方言分层 ${a}+${b}+${c}=${overview.declared} 种（三处一致）· ` +
     `检测通道 ${tech.names.length} 条（= VULN_TAXONOMY）· tamper ${code.tamperCount} 个（= 运行期注册数，${tamperCounts.length} 处一致）· ` +
     `payload 主库 ${code.payloadMain} + 子句 ${code.payloadClause} + OOB ${code.payloadOob} + 注册表 ${code.payloadRegistry}（= 代码实测）· ` +
-    `API 表 ${apiTable.rows.length} 行（= 代码注册端点 ${code.endpoints.length} 条，双向已核）· ` +
+    `API 表 ${apiTable.rows.length} 行 + api.md ${apiDoc.rows.length} 条标题（= 代码注册端点 ${code.endpoints.length} 条，双向已核）· ` +
     `验收 ${code.acceptanceSuites} 套件 · tamper 官方分母 ${code.upstreamTotal}（外部真值）· ` +
     `README 教的 ${nodePaths.length} 条 node <路径> 全部真实存在`,
   );

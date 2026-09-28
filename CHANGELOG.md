@@ -194,6 +194,28 @@ WHERE 的等值/枚举上。真实 Web 应用里搜索页与列表页排序的�
 - 文档：`docs/WAF-真机对拍-2026-09-28.md` 新增第八节（8.1 数字 / 8.2 新形态逐条 / 8.3 上述
   结论 / 8.4 诚实边界）。
 
+### 2026-09-29 批次 · 接口靶场遗留项：拆掉两处「自己证明自己」的假绿
+
+接口靶场（`e2e/api-range-lab`）暴露的 8 项里，先做掉最像假绿的两条 —— 共同形态是：
+**声明与真值分处两地，而接口报的就是那份声明本身，于是漂移永远查不出来。**
+
+- **`/exploit/capabilities` 从手写清单改为由方言表推导**。以前是四个硬编码数组
+  （还带 `MySQL(sys_eval UDF)` 这种注释式写法），能力表在 `Exploiter.TAKEOVER_CAPS` 另有一份
+  ⇒ 「清单说有、动作说没有」在接口层不可观测。现在：新增 `capabilityIndex()` 做反向索引，
+  路由返回 `...capabilityIndex()`（能力 → 支持的 DBMS）+ `matrix`（DBMS → supported / risk /
+  requiredPriv / note，供 UI 提示权限与风险）。只收 `supported === true` 的条目。
+  前端 `ExploitCapabilities` 类型补 `matrix` / `enabled`。
+- **`docs/api.md` 并入自动门禁（判据 ⑭b）**。api.md 是对外接口契约，此前零门禁：代码加了端点、
+  改了字段，文档不动也不红。现在与 README 那张表同一把尺子双向核对（判据自动补 `/api` 前缀、
+  剥掉查询串，避免两边永远对不上的假红）。**首跑即抓到 4 个真缺口**并补齐：
+  `POST /scan/:id/pause`、`POST /scan/:id/resume`、`GET /scan/:id/diff?base=`、`POST /exploit/sql`
+  —— 四个都早已上线，文档里没有。顺带把 capabilities 的响应样例改成推导后的真实形态。
+- 新增 `server/tests/exploitCapabilities.test.js`（5 条）：接口返回值逐条等于推导结果 /
+  推导与方言表双向自洽 / 关键能力钉真值（**方言表删条目 ⇒ 必须红**，能力下架要有人显式确认）/
+  源码不得再手抄清单 / `matrix` 字段完整。
+- 缺陷注入 **4/4 杀**：关掉 `MySQL.fileWrite` ⇒ ③；路由改回手写数组 ⇒ ①④⑤；
+  api.md 删掉 pause 标题 ⇒ 报漏写；api.md 加幽灵端点 ⇒ 报「不存在」。
+
 
 ### 2026-09-27 批次 · README 的 API 表与命令行示例：从"没人核"变成双向核对
 

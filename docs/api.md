@@ -138,19 +138,33 @@ curl http://127.0.0.1:4567/api/health
 
 #### `GET /exploit/capabilities`
 
+**清单由服务端的接管能力表（`Exploiter` 的 `TAKEOVER_CAPS`）推导**，不再是手抄数组
+（2026-09-29 起）—— 手抄一份就会出现「清单说有、动作说没有」，而接口自己正是那份清单，
+这类漂移在接口层永远查不出来。
+
 ```json
 {
   "code": 0,
   "data": {
-    "sqlShell": ["MySQL", "MariaDB", "PostgreSQL", "SQL Server", "Oracle", "SQLite"],
-    "fileRead": ["MySQL", "MariaDB", "PostgreSQL", "SQL Server", "Oracle(需目录对象)"],
-    "fileWrite": ["MySQL", "MariaDB", "PostgreSQL", "SQL Server"],
-    "osShell": ["PostgreSQL(COPY PROGRAM)", "SQL Server(xp_cmdshell)", "MySQL(sys_eval UDF)"],
+    "sqlShell": ["MySQL", "PostgreSQL", "SQL Server", "Oracle", "SQLite", "ClickHouse"],
+    "fileRead": ["MySQL", "PostgreSQL", "SQL Server", "Oracle"],
+    "fileWrite": ["MySQL", "PostgreSQL", "SQL Server"],
+    "osShell": ["MySQL", "PostgreSQL", "SQL Server", "Oracle", "SQLite"],
+    "matrix": {
+      "MySQL": {
+        "fileWrite": { "supported": true, "risk": "HIGH", "requiredPriv": "FILE 权限 + secure_file_priv 放行（可写 webshell）" }
+      }
+    },
     "enabled": true
   },
   "message": "ok"
 }
 ```
+
+- 正向字段（能力 → 支持的 DBMS 列表）只收 `supported: true` 的条目；
+- `matrix` 是完整能力表（DBMS → 各能力的 `supported` / `risk` / `requiredPriv` / `note`），
+  调用方可据此在 UI 上给出「这条能力要什么权限、有多高危」；
+- `enabled` 是 `EXPLOIT_ENABLED` 开关的**当前值**（每次请求现读）。
 
 #### `GET /sqlmap/status`
 
@@ -332,6 +346,19 @@ SSE 实时进度流，事件结构 `{ type, scanId, ts, payload, seq }`（帧内
 已是终态（completed/error/stopped）→ `code 0` + `{ stopped:false, alreadyFinished:true, status }`，
 **不会**把正常跑完的扫描改写成"被停止"。
 
+#### `POST /scan/:id/pause` / `POST /scan/:id/resume`
+
+暂停在**请求边界**生效：暂停期间不再向目标发包。此前它只在「点边界」生效，而一个点是几十上百个
+包 —— 点了暂停流量照发，接口却回成功，这就是「自证」。
+
+```json
+{ "code": 0, "data": { "paused": true }, "message": "ok" }
+```
+
+- 未知 id / 上下文已回收 → `code 2001`（`SCAN_NOT_FOUND`）；
+- `pause` 打在不在运行中的扫描上 → `code 2001` + `{ "paused": false }`（"扫描不在运行中，无法暂停"）；
+- `resume` 打在未暂停的扫描上 → `code 2001` + `{ "resumed": false }`（"扫描未处于暂停状态"）。
+
 #### `POST /scan/:id/point/:pointId/retest`
 
 单点重测：带新 config 只重跑指定注入点（调参验证省分钟级等待）。`pointId` 需来自同一份报告；
@@ -404,6 +431,27 @@ SSE 实时进度流，事件结构 `{ type, scanId, ts, payload, seq }`（帧内
 | 扫描不存在/未落台账 | `404` `{code:2001}`，且**不带** `Content-Disposition` |
 | `format` 不在白名单 | `400` `{code:1002}` |
 | `db-json` 而本次没有枚举/拖库数据 | `400` + 指明下一步（带 `config.extractScope` 或 `enableExtract` 重扫）；不再回 200 + `"null"` 的 4 字节空附件 |
+
+#### `GET /scan/:id/diff?base=<scanId>`
+
+与**基线扫描**对比（复测场景：同一目标前后两次扫描差了什么）。`base` 必填 —— 缺失时回
+`code 1` 并指明正确写法 `/api/scan/<id>/diff?base=<scanId>`；任一份报告不存在 → `code 2001`
+（消息区分"当前扫描不存在"与"基线扫描不存在"）。
+
+```json
+{
+  "code": 0,
+  "data": {
+    "base": { "id": "…", "finishedAt": "…", "vulnCount": 3, "riskLevel": "high" },
+    "current": { "id": "…", "finishedAt": "…", "vulnCount": 1, "riskLevel": "medium" },
+    "fixed": [], "added": [], "remaining": []
+  },
+  "message": "ok"
+}
+```
+
+对比单位不是 `vuln.id`（跨扫描不稳定），而是**点位指纹**（`location:param` + 技术通道）：
+`fixed` = 基线有、这次没有；`added` = 这次新出现；`remaining` = 两边都有。
 
 #### `POST /scan/:id/report/ai`
 
@@ -533,6 +581,18 @@ body/cookie/header 点位与编码点位建议走形态 A，否则等于让用�
   不再用 `ok:true, value:null` 这种自相矛盾的形态。
 - `file-read` / `file-write`：受目标 `secure_file_priv` 约束；写文件回读校验失败即 `verified:false`。
 - `os-shell`：MySQL 需 `sys_eval` UDF；能力不存在时如实失败并给原因（不是假成功）。
+
+#### `POST /exploit/sql`
+
+任意 SQL 执行。入参形态与其它利用端点一致（形态 A：`scanId` + `pointId`；形态 B：手工
+`target` + `point` + `dbms`），额外字段 `sql`（上限 200000 字符）。
+
+```json
+{ "code": 0, "data": { "ok": true, "value": "8.0.33", "delivered": true }, "message": "ok" }
+```
+
+SELECT 类走标量提取：`value` 就是取回的值；语句投递成功但取不到值时回 `ok:false` +
+`delivered:true` + 原因（见上节「结果口径」）。
 
 #### `POST /exploit/file-read` / `POST /exploit/file-write` / `POST /exploit/os-shell`
 

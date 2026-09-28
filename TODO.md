@@ -14,9 +14,12 @@
    但 `src/pages/HistoryPage.tsx` 的数据源还是 zustand 持久化的本地历史。
    验证口径：改完后，清空浏览器存储在**同一台引擎**上仍能看到历史，且条目 `source` 与
    `GET /api/scans` 一致；跨浏览器/跨机器可见。
-2. **`/exploit/capabilities` 仍是手写清单**（README 已标 ⚠）—— 应由 `Exploiter` 的方言表
-   （`FILE_READ` / `FILE_WRITE` / osShell 分支）推导，否则"清单说有、动作说没有"会长期漂移。
-   验证口径：删掉方言表里任一条目 ⇒ capabilities 对应用例必须变红（现在是恒绿的手抄列表）。
+2. **`/exploit/capabilities` 是手写清单** —— ✅ **已修（2026-09-29）**：新增 `capabilityIndex()`
+   （`Exploiter.js`，由 `TAKEOVER_CAPS` 反向索引），路由改为 `...capabilityIndex()` + `matrix`，
+   手抄数组删除；前端类型补 `matrix` / `enabled`。
+   验证口径达成：`server/tests/exploitCapabilities.test.js`（5 条）—— 接口返回值必须逐条等于
+   推导结果、推导与方言表双向自洽、关键能力钉真值、源码不得再手抄清单。
+   **缺陷注入 2/2 杀**：关掉 `MySQL.fileWrite` ⇒ ③ 红；改回手写数组 ⇒ ①④⑤ 红。
 3. **sqlmap 侧缺 `--file-write`，且 `/sqlmap/:id` 没有 diff/export** —— `capabilities.fileWrite`
    声明的是内置引擎的能力，走 sqlmap 模式拿不到同一交付面。
    验证口径：接口靶场在 `sqlmap.available=true` 的机器上补两条正向用例（真写文件、真导出）。
@@ -29,10 +32,11 @@
 5. **台账无保留策略** —— API 扫描终态自动落 `data/ledger/`，长期运行会无界增长。
    需要 `SCAN_LEDGER_MAX`（按条目数或天数淘汰）+ 一条"淘汰后 `/scan/:id/report` 必须 404 而不是
    返回半份数据"的用例。
-6. **`docs/api.md` 不在自动门禁里** —— `readme:check` 只双向核对 README 的端点表；
-   api.md 的字段口径（本轮手工重写）会随代码漂移。
-   验证口径：把 api.md 的 `#### \`METHOD /path\`` 标题集并入同一道双向核对（写了不存在的路径要红，
-   代码新增端点漏写也要红）。
+6. **`docs/api.md` 不在自动门禁里** —— ✅ **已修（2026-09-29）**：`readme-consistency.mjs`
+   新增判据 **⑭b**，把 api.md 的 `#### \`METHOD /path\`` 标题集并入同一把尺子（判据会自动补
+   `/api` 前缀、剥掉查询串）。**首跑即抓到 4 个真缺口**：`POST /scan/:id/pause`、
+   `POST /scan/:id/resume`、`GET /scan/:id/diff`、`POST /exploit/sql` 都已上线但文档没写，已补齐。
+   **缺陷注入 2/2 杀**：删掉 pause 标题 ⇒ 报漏写；加一个幽灵端点 ⇒ 报"不存在"。
 7. **采集脚本与并发改动互相踩** —— `facts:check` 在本轮出现两次"采集源已改动"的过期提示，
    原因是采集期间我改了 `docs/api.md`（342 文件指纹含它）。
    验证口径：`facts-sync` 在采集前把指纹写盘、采集后比对，若变动则**明确报"采集期间文件被改，

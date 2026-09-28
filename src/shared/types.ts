@@ -636,6 +636,19 @@ export interface ExploitCapabilities {
   fileRead: string[];
   fileWrite: string[];
   osShell: string[];
+  /** DBMS → 各能力明细（supported / risk / requiredPriv / note）。
+   *  服务端由能力表推导（2026-09-29 起不再是手写清单），前端暂只显示「有没有」。 */
+  matrix?: Record<
+    string,
+    Partial<
+      Record<
+        'sqlShell' | 'fileRead' | 'fileWrite' | 'osShell' | 'udf' | 'registry',
+        { supported: boolean; risk: string; requiredPriv?: string; note?: string }
+      >
+    >
+  >;
+  /** 利用总开关（EXPLOIT_ENABLED）当前是否开启 */
+  enabled?: boolean;
 }
 
 /** 利用结果（覆盖四动作返回形态，宽松结构） */
