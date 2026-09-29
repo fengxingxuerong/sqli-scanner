@@ -38,7 +38,8 @@ export function resolveValidityMode(report: ReportModel | null | undefined): Val
   const negative = (report.vulns?.length ?? 0) === 0;
   if (verdict === 'inconclusive') return 'inconclusive';
   if (verdict === 'no_vulnerability_detected') {
-    // 引擎语义：有漏洞时 verdict 恒为 no_vulnerability_detected，仅 reliable 才提示 info
+    // 兼容两条：① 旧引擎报告（有漏洞时 verdict 也写 no_vulnerability_detected，2026-09-29
+    // 引擎侧已改为写 vulnerability_detected，见 scanRunner applyValidity）；② 显式阴性报告。
     if (negative) return 'negative';
     return validity?.reliable ? 'hit' : null;
   }

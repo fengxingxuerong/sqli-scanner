@@ -16,7 +16,7 @@ import { useScanStore } from '../store/scanStore';
 import i18n from '../i18n';
 import ReportExport from '../components/ReportExport';
 import VulnDetail from '../components/VulnDetail';
-import DbTree from '../components/DbTree';
+import DbTree, { extractedDbModel } from '../components/DbTree';
 import ReportSummarySection, { RISK_COLORS, TECHNIQUE_COLORS } from '../components/ReportSummarySection';
 import { resolveValidityMode } from '../components/ValidityBanner';
 import type { Vulnerability, SqlmapVulnEntry } from '../shared/types';
@@ -162,6 +162,9 @@ export default function ReportPage() {
 
   const vulns = report.vulns || [];
   const data = report.data;
+  // [E2-FIX 2026-09-29] 提取数据计数不再只认 data.databases：直拖模式（显式 dbs/tables）
+  // 下 databases 为空数组而 tables/rows 有完整结果 —— 旧口径把真数据显示成「0 库」
+  const extractedDbCount = extractedDbModel(data).length;
   // sqlmap 模式：漏洞来自 sqlmap.vulns（内置引擎报告无此字段）
   const isSqlmap = report.engine === 'sqlmap';
   const sqlmapVulns: SqlmapVulnEntry[] = (report.sqlmap?.vulns || []).filter((v) => !!v && !!v.raw);
@@ -247,7 +250,7 @@ export default function ReportPage() {
       <Paper variant="outlined" className="mb-4">
         <Tabs value={tab} onChange={(_, v) => setTab(v)} aria-label={t('report.title')}>
           <Tab label={t('report.vulnListTab', { count: effectiveVulnCount })} id="report-tab-0" aria-controls="report-tabpanel-0" />
-          <Tab label={t('report.extractedDataTab', { count: data?.databases?.length || 0 })} id="report-tab-1" aria-controls="report-tabpanel-1" />
+          <Tab label={t('report.extractedDataTab', { count: extractedDbCount })} id="report-tab-1" aria-controls="report-tabpanel-1" />
           <Tab label={t('report.summary')} id="report-tab-2" aria-controls="report-tabpanel-2" />
           {isSqlmap && <Tab label={t('report.sqlmapLogsTab', { count: sqlmapLogs.length })} id="report-tab-3" aria-controls="report-tabpanel-3" />}
         </Tabs>
@@ -329,7 +332,7 @@ export default function ReportPage() {
 
         {/* 提取数据 */}
         <TabPanel value={tab} index={1}>
-          {data && data.databases && data.databases.length > 0 ? (
+          {extractedDbCount > 0 ? (
             <DbTree data={data} />
           ) : (
             <Alert severity="info" variant="outlined">

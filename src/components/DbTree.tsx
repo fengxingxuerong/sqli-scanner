@@ -21,6 +21,37 @@ import type { ExtractedData } from '../shared/types';
 import { tableToCsv, tableToJson } from '../shared/dumpExport';
 import { tauriBridge } from '../shared/tauriBridge';
 
+// [E2-FIX 2026-09-29] 直拖模式（UI 显式给定 dbs/tables）的报告里 data.databases 是空数组，
+// 而 data.tables / data.rows / data.columns 装着完整拖库结果 —— 旧判据只认 databases ⇒
+// 报告页显示「提取数据 (0 库)」、树渲染成空态，真实拖到的数据被藏住（真机 E2 实测：
+// rows 里有 5 行 users 却显示 0 库）。这里统一从三个字段并集推导库清单，供 DbTree
+// 与 ReportPage 的 tab 计数共用，保证两处口径不再漂移。
+export function extractedDbModel(
+  data: ExtractedData | null | undefined,
+): Array<{ db: string; tables: string[] }> {
+  if (!data) return [];
+  const dbs = data.databases?.length
+    ? data.databases
+    : [
+        ...new Set([
+          ...Object.keys(data.tables ?? {}),
+          ...Object.keys(data.rows ?? {}).map((k) => k.split('.')[0]),
+        ]),
+      ].filter(Boolean);
+  return dbs.map((db) => ({
+    db,
+    tables:
+      data.tables?.[db] ??
+      [
+        ...new Set(
+          Object.keys(data.rows ?? {})
+            .filter((k) => k.startsWith(`${db}.`))
+            .map((k) => k.slice(db.length + 1)),
+        ),
+      ],
+  }));
+}
+
 // 递归树节点：数据库 → 表 → 列 / 数据
 // actions（可选）：节点行尾操作区（如单表导出按钮），点击不触发节点折叠。
 // defaultOpen（可选）：初始展开态，配合 key 变化可在搜索态自动展开。
@@ -181,26 +212,25 @@ export default function DbTree({ data }: { data: ExtractedData | null }) {
   const queryActive = queryLower !== '';
 
   // useMemo 必须在条件 return 之前调用（React Hooks 规则）
+  const model = useMemo(() => extractedDbModel(data), [data]);
   const filtered = useMemo(() => {
-    if (!data || data.databases.length === 0) return [];
-    if (!queryActive) {
-      return data.databases.map((db) => ({ db, tables: data.tables[db] || [] }));
-    }
-    return data.databases
-      .filter((db) => {
-        const tables = data.tables[db] || [];
-        return db.toLowerCase().includes(queryLower) || tables.some((tbl) => tbl.toLowerCase().includes(queryLower));
-      })
-      .map((db) => ({
+    if (!model.length) return [];
+    if (!queryActive) return model;
+    return model
+      .filter(
+        ({ db, tables }) =>
+          db.toLowerCase().includes(queryLower) || tables.some((tbl) => tbl.toLowerCase().includes(queryLower)),
+      )
+      .map(({ db, tables }) => ({
         db,
-        tables: (data.tables[db] || []).filter(
+        tables: tables.filter(
           (tbl) => db.toLowerCase().includes(queryLower) || tbl.toLowerCase().includes(queryLower),
         ),
       }));
-  }, [data, queryLower, queryActive]);
+  }, [model, queryLower, queryActive]);
 
   // 空态优化：data 为空时给出更友好的提示（在 hooks 之后 return 不违反规则）
-  if (!data || data.databases.length === 0) {
+  if (!data || model.length === 0) {
     return (
       <Box className="space-y-1" role="tree" aria-label={t('dbTree.treeLabel')}>
         <Typography variant="body2" color="text.secondary">
@@ -342,7 +372,8 @@ export default function DbTree({ data }: { data: ExtractedData | null }) {
       })}
       <Paper variant="outlined" className="p-2">
         <Typography variant="caption" color="text.secondary">
-          {t('dbTree.summary', { count: data.databases.length })}
+          {/* [E2-FIX 2026-09-29] 直拖模式下 databases 为空数组，摘要按推导出的库清单计数 */}
+          {t('dbTree.summary', { count: model.length })}
         </Typography>
       </Paper>
     </Box>

@@ -301,3 +301,42 @@ test('集成：健康目标（全 200）→ 零行为变化，verdict=no_vulnera
   assert.equal(requests, sm._detectCalls.length * 4, '守卫不得改变正常目标的请求数');
   assert.equal(sm._testedPoints.size, points.length, '健康目标每个点都应进入完整检测');
 });
+
+// [E2-FIX 2026-09-29] 有命中 ⇒ verdict 必须是 vulnerability_detected。
+// 真机 E2 实测到的缺陷：旧实现恒写 no_vulnerability_detected，报告本体出现
+// 「3 条 High/Medium 漏洞 + verdict=no_vulnerability_detected」的交付级自相矛盾
+// （台账 recordScan 与 Markdown/HTML 渲染层各自绕过过，根子在 applyValidity 本行）。
+test('集成：有命中 ⇒ verdict=vulnerability_detected（报告本体不得与 vulns 自相矛盾）', async () => {
+  const points = [
+    { id: 'p1', location: 'url', param: 'v', originalValue: '1' },
+  ];
+  const healthyMock = {
+    async request() {
+      return { status: 200, data: 'stable page content', headers: {} };
+    },
+  };
+  const sm = makeManager(points, healthyMock);
+  // union 检测器真产出一条命中（健康目标 + vulnerable=true ⇒ 判定成立且可信）
+  sm.detectors[0].detect = async (ctx) => {
+    for (let i = 0; i < 4; i++) {
+      await ctx.httpClient.request({ url: `${ctx.target.url}${i}` });
+    }
+    return {
+      pointId: ctx.point.id,
+      technique: 'union',
+      vulnerable: true,
+      dbms: 'MySQL',
+      evidence: 'mock union hit',
+      payloads: ['mock_union'],
+    };
+  };
+  const id = await runScan(sm);
+  const report = sm.getReport(id);
+  assert.equal(report.vulns.length, 1);
+  assert.equal(
+    report.summary.verdict,
+    'vulnerability_detected',
+    '有命中时报告本体不得写 no_vulnerability_detected',
+  );
+  assert.match(report.summary.verdictNote, /检出 1 条漏洞/);
+});

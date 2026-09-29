@@ -95,12 +95,22 @@ export async function runScanLoop(sm, scanId) {
       rep.summary.validity = v;
       const negative = (rep.vulns || []).length === 0;
       const inconclusive = !v.reliable && negative;
-      rep.summary.verdict = inconclusive ? 'inconclusive' : 'no_vulnerability_detected';
+      // [E2-FIX 2026-09-29] 有命中时 verdict 必须写 vulnerability_detected —— 旧实现恒写
+      // no_vulnerability_detected，报告本体「summary.verdict 与 vulns 自相矛盾」（真机 E2 实测：
+      // 3 条 High/Medium 漏洞与 no_vulnerability_detected 同文件共存）。此前台账（recordScan
+      // 覆写）与 Markdown/HTML 渲染层（有命中不展示 verdict）各自绕过过一次，根子在这里。
+      // 消费方影响面：UI ValidityBanner 对新值走既有 fall-through 分支（结论仍为 hit），
+      // 对旧报告的兼容分支保持不动；ledger 覆写成为一致口径的冗余防线，保留。
+      rep.summary.verdict = inconclusive
+        ? 'inconclusive'
+        : negative
+          ? 'no_vulnerability_detected'
+          : 'vulnerability_detected';
       rep.summary.verdictNote = inconclusive
         ? `未检出漏洞 ≠ 无漏洞：本次扫描 ${v.reason}；${v.inconclusivePoints.length} 个注入点未完成有效检测，阴性结论不成立，需按建议处置后复扫（${v.advice}）`
         : negative
           ? '目标在本次扫描窗口内可达、未被拦且会话有效，「未检出漏洞」的阴性结论可信度正常（仍建议对高风险参数人工复核）'
-          : `本次扫描检出 ${(rep.vulns || []).length} 条漏洞；verdict 仅描述「未检出」类阴性结论的可信度，命中详情见 vulns`;
+          : `本次扫描检出 ${(rep.vulns || []).length} 条漏洞，命中详情见 vulns`;
       if (!v.reliable) eventBus.emit(scanId, 'scan_validity', v);
       // 单注入点扫描可能根本不会再进入调度循环，abort 事件在收尾处补发（与 db-guard 同构），
       // 保证调用方一定能收到中止通知
