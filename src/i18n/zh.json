@@ -183,6 +183,11 @@
     "risk": "风险 {{level}}",
     "vulns": "{{count}} 个漏洞",
     "noVulns": "未发现漏洞",
+    "riskUnknown": "风险未知",
+    "sourceServer": "服务端",
+    "sourceLive": "进行中",
+    "sourceLocal": "仅本机",
+    "serverUnavailable": "服务端清单读取失败，当前显示的只是本机历史：{{message}}",
     "unknownTarget": "(未知)",
     "resumeDialog": {
       "title": "续跑前确认授权范围",

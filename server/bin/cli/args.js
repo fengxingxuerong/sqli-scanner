@@ -222,6 +222,12 @@ export function parseArgs(argv) {
     else if (a === '--hex') args.hex = true;
     else if (a === '--union-cols') args.unionCols = next();
     else if (a === '--union-from') args.unionFrom = next();
+    // —— 台账保留策略（SCAN_LEDGER_*）——
+    // [2026-09-29] 这两个开关由 `cli.js ledger prune` 子命令自己解析（见 cli.js 的 argOf），
+    // 本文件不消费。但**必须显式识别**：否则它们落到最后那条 else 里被记成 unknownFlag，
+    // 打印「无法识别的参数（不会生效）」—— 而它其实是生效的。那条警告变成在骗人，
+    // 比"静默丢弃"更糟（用户会以为没传进去，再去配一遍）。同理：被排到尾部候选之前。
+    else if (a === '--max' || a.startsWith('--max=') || a === '--days' || a.startsWith('--days=')) { void a; }
     // --no-escape / --union-char：已移除（详见 buildConfig 尾部注释）。
     // 保留显式识别并给出可操作提示，避免用户以为"传了没生效"而反复排查。
     else if (a === '--no-escape' || a === '--union-char') {

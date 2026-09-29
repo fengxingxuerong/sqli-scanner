@@ -460,7 +460,39 @@ async function main() {
       console.log(`目录: ${rec.dir}`);
       process.exit(0);
     }
-    console.error(`未知子命令: ledger ${sub}（支持 list / show）`);
+    // [2026-09-29] 手动运维入口：一次性收敛（不必常开自动策略）。
+    // 参数优先于环境变量；两者都没给就拒绝执行 —— 默认必须是不删东西。
+    if (sub === 'prune') {
+      const { pruneLedger, retentionPolicy } = await import('../src/services/scanLedger.js');
+      // [2026-09-29 收口] 等号与空格两种形态都要认：args.js 已把 --max/--days 登记为
+      // 「已识别」（见 cli.unknownFlags.test.js），这里若只认 --max=<N>，空格形态会被
+      // 静默忽略 —— 用户以为传上了，实际跑的是环境变量/默认值，比报错更糟。
+      const argOf = (name) => {
+        const eq = argvRaw.find((a) => a.startsWith(`--${name}=`));
+        if (eq !== undefined) return eq.slice(name.length + 3) || null; // '--name=' 共 name+3 个字符
+        const i = argvRaw.indexOf(`--${name}`);
+        if (i !== -1) {
+          const v = argvRaw[i + 1];
+          if (v !== undefined && !v.startsWith('--')) return v;
+        }
+        return null;
+      };
+      const cur = retentionPolicy();
+      const max = Number(argOf('max')) || cur.max;
+      const maxDays = Number(argOf('days')) || cur.maxDays;
+      if (!max && !maxDays) {
+        console.error('未指定保留策略：用 ledger prune --max=<N> / --days=<N>，或设置 SCAN_LEDGER_MAX / SCAN_LEDGER_MAX_DAYS');
+        process.exit(2);
+      }
+      const r = pruneLedger({ policy: { max, maxDays } });
+      console.log(`台账清理：保留 ${r.kept} 条，删除 ${r.removed} 条`);
+      if (r.removedIds.length) console.log(`  已删除: ${r.removedIds.join(', ')}`);
+      if (r.failed.length) {
+        console.log(`  删除失败 ${r.failed.length} 条: ${r.failed.map((f) => `${f.id}(${f.error})`).join(', ')}`);
+      }
+      process.exit(r.failed.length ? 1 : 0);
+    }
+    console.error(`未知子命令: ledger ${sub}（支持 list / show / prune）`);
     process.exit(1);
   }
   // 对标 sqlmap -r：请求文件优先于 -u，先应用再校验目标参数

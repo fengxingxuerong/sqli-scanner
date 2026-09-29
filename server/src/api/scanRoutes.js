@@ -30,7 +30,7 @@ import { buildDirectTarget } from './directTarget.js';
 // 配置守卫（两条入口共用；为何单独成文件见其文件头）
 import { buildGuardedConfig } from './scanConfigGuard.js';
 // 报告回退与历史列表的数据源（引擎上下文完成后 30s 回收，台账才是服务端那一份）
-import { readReport, listScans, ledgerRoot } from '../services/scanLedger.js';
+import { readReport, listScans, ledgerRoot, highestRisk } from '../services/scanLedger.js';
 // 抽到守卫模块后仍从本文件 re-export，保住既有引用路径（与 acquireScanSlot 同一做法）
 export { sanitizeExtractScope } from './scanConfigGuard.js';
 
@@ -636,7 +636,7 @@ export function createRoutes({ scanManager, eventBus: bus = eventBus, reportToke
     const byId = new Map();
     for (const row of listScans(limit)) {
       if (!row || !row.scanId) continue;
-      byId.set(row.scanId, { ...row, source: 'ledger' });
+      byId.set(row.scanId, { ...row, source: 'ledger', riskLevel: row.highestRisk ?? null });
     }
     // 内存里的在途/刚结束扫描覆盖台账同名条目（状态更新）
     for (const [scanId, s] of sm.scans.entries()) {
@@ -651,6 +651,8 @@ export function createRoutes({ scanManager, eventBus: bus = eventBus, reportToke
         vulns: (rep.vulns || []).length,
         dbms: rep.dbms || null,
         verdict: rep.summary?.verdict || null,
+        // 与 ledger 行走同一个 highestRisk，避免一份列表两种算法、色标随 source 跳变。
+        riskLevel: highestRisk(rep.vulns || []),
         status: s.status,
         source: 'live',
       });

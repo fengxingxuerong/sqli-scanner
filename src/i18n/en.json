@@ -183,6 +183,11 @@
     "risk": "Risk {{level}}",
     "vulns": "{{count}} vulnerabilities",
     "noVulns": "No vulnerabilities",
+    "riskUnknown": "Risk unknown",
+    "sourceServer": "Server",
+    "sourceLive": "Running",
+    "sourceLocal": "Local only",
+    "serverUnavailable": "Could not load the server-side list; showing local history only: {{message}}",
     "unknownTarget": "(Unknown)",
     "resumeDialog": {
       "title": "Confirm authorization scope before resuming",

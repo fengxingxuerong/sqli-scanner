@@ -115,8 +115,36 @@ http.interceptors.response.use(
   }
 );
 
+/** 服务端扫描清单行（GET /api/scans：台账 + 在途合并）。
+ *  ⚠️ riskLevel 可能为 null：台账 meta 里 2026-09-29 起才固化 highestRisk，
+ *  更早写下的台账没有这个字段。UI 必须能吃 null，不许兜底成 'Low' ——
+ *  没有就是没有，编一个出来会把历史结论降级/升级成假的。 */
+export interface ServerScanRow {
+  scanId: string;
+  target: string;
+  method: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+  points: number;
+  vulns: number;
+  payloadHits?: number;
+  riskLevel: string | null;
+  dbms: string | null;
+  verdict: string | null;
+  status?: string;
+  source: 'ledger' | 'live';
+}
+
+export interface ServerScanList {
+  total: number;
+  scans: ServerScanRow[];
+  ledgerRoot: string;
+}
+
 // 业务封装：自动解包 data
 export const apiClient = {
+  // 服务端历史清单（History 页的事实源：换机器/清缓存都能看到同一份）
+  scans: (limit = 50) => apiClient.get<ServerScanList>(`/scans?limit=${limit}`),
   async get<T>(url: string, config?: object): Promise<T> {
     const res = await http.get<ApiResponse<T>>(url, config);
     return res.data.data as T;

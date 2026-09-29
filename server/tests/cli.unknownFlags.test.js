@@ -56,6 +56,20 @@ test('裸位置参数不算开关（子命令/文件参数形态不被误判）'
   assert.deepEqual(a.unknownFlags, []);
 });
 
+test('ledger prune 的 --max/--days 不得被判为未识别（否则"不会生效"这句在骗人）', () => {
+  // [2026-09-29] 这两个开关由 cli.js 的 ledger prune 子命令自己消费，args.js 不解析。
+  // 若它们落到 unknownFlags，CLI 会打印「无法识别的参数（不会生效）」——可它偏偏是生效的：
+  // 用户以为没传进去，会照着再配一遍环境变量。危害性高于"静默丢弃"。
+  for (const argv of [
+    ['ledger', 'prune', '--max=1'],
+    ['ledger', 'prune', '--days=7'],
+    ['ledger', 'prune', '--max', '1'],
+  ]) {
+    const a = parseArgs(argv);
+    assert.deepEqual(a.unknownFlags, [], `${argv.join(' ')} ⇒ 不应有未识别开关：${a.unknownFlags.join(',')}`);
+  }
+});
+
 test('真起 CLI：拼错的开关 ⇒ 退出码非 0 且点名该开关（不只看函数，验入口接线）', () => {
   const r = spawnSync(process.execPath, [CLI, '-u', 'http://127.0.0.1:9/x', '--scope-typo', '10.20.0.0/16'], {
     encoding: 'utf8',

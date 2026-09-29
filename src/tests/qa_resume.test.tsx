@@ -11,10 +11,12 @@ import { apiClient } from '../shared/apiClient';
 import type { ReportModel, HistoryRecord } from '../shared/types';
 
 // mock apiClient：useScan.startScan 经它向后端发起续跑
+// [2026-09-29] HistoryPage 数据源改造后新增 apiClient.scans（服务端清单）；
+// mock 里缺了它 ⇒ useServerHistory 在 effect 里调 undefined ⇒ 组件崩，续跑断言全被连坐。
 vi.mock('../shared/apiClient', () => ({
   API_BASE: 'http://test/api',
   getApiBase: () => 'http://test/api',
-  apiClient: { get: vi.fn(), post: vi.fn() },
+  apiClient: { get: vi.fn(), post: vi.fn(), scans: vi.fn() },
 }));
 
 const HISTORY_KEY = 'sqli_scan_history_v1';
@@ -52,6 +54,9 @@ beforeEach(() => {
   useScanStore.setState({ history: [], report: null, status: 'pending', engine: 'builtin', scanId: null });
   vi.mocked(apiClient.get).mockReset();
   vi.mocked(apiClient.post).mockReset();
+  // 服务端清单默认给一份空单：这些用例只关心本地历史/续跑，不该被服务端清单的存在性干扰
+  vi.mocked(apiClient.scans).mockReset();
+  vi.mocked(apiClient.scans).mockResolvedValue({ total: 0, scans: [], ledgerRoot: '' });
 });
 
 afterEach(() => {
