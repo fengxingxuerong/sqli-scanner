@@ -1,18 +1,11 @@
 import { WAF_RULES } from './wafRules.js';
 import { detectGenericBlock } from './blockSignatures.js';
+// [2026-09-29 收敛] 响应头读取口径全仓唯一：core/getHeader.js。本文件原私有版最弱
+// （无 .get 方法支持、数组值原样透出），同一响应可能与 scanValidityGuard 结论不一致。
+import { getHeader } from '../getHeader.js';
 
 // 高置信 WAF 阈值：置信度 >= 此值才允许自动 tamper 重跑（防低置信/单特征误触发导致请求爆炸）。
 export const WAF_HIGH_CONFIDENCE = 0.8;
-
-// 大小写不敏感地取响应头值
-function getHeader(headers, key) {
-  if (!headers || typeof headers !== 'object') return undefined;
-  const target = String(key).toLowerCase();
-  for (const [k, v] of Object.entries(headers)) {
-    if (k.toLowerCase() === target) return v;
-  }
-  return undefined;
-}
 
 // 单条 matcher 匹配判定
 function matchOne(matcher, response) {

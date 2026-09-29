@@ -201,10 +201,38 @@ describe('配置契约：面板 → 请求体 → 后端白名单', () => {
 // 登记表的作用不是「允许它们缺失」，而是**把缺失变成可见且可执行的技术债**：
 //   · 新键忘了接 UI → ④ 立刻红；
 //   · 有人把某键接进了 UI 却没从表里移除 → ⑤ 立刻红（登记表不得腐烂）；
-//   · 表里列了一个不存在的后端键 → ⑥ 立刻红。
+//   · 表里列了一个不存在的后端键 → ⑥ 立刻红；
+//   · 能力缺失类混进未论证的新条目 → ⑧ 立刻红（只减不增）。
 //
 // 这不是要不要补 UI 的判断（那是产品决策），而是「缺口清单必须随时准确」。
-const KNOWN_MISSING_UI_KEYS = new Set([
+//
+// ── [2026-09-29 分类治理] 缺口按性质分两类，不再一个总数混着看（评估 §4）──────────
+// 两类的**代价完全不同**，混在一张 Set 里时缺口总数涨了也看不出性质变化：
+//   · 能力缺失类 CAPABILITY_GAP_KEYS —— 键默认关/空，关着 ⇒ 目标的一整类注入面测不了
+//     （假阴性）。最贵的一类，守卫 ⑧ 只减不增：要么接进 UI，要么逐键论证后降级，不许静默新增。
+//   · 调优参数类 TUNING_NO_UI_KEYS —— 默认值 = 引擎内部兜底/标准行为，不接不会造成假阴性
+//     （多为「覆盖型」旋钮：只有显式覆盖它才改变行为）。接不接是产品决策，本表让缺口可数。
+const CAPABILITY_GAP_KEYS = [
+  // CSRF 会话层（server/src/config/defaults.js:197-206，默认全关）。
+  // csrfUrl 为空 ⇒ 不取 token、每请求不带 ⇒ CSRF 防护目标的 POST 注入点被 403/419
+  // 全部打回，整类注入面测不出（报告只会写「未检出」）。CLI 侧是一等能力
+  // （交付文档快速上手即含 --csrf-url/--csrf-token 示例）。
+  'csrfUrl', 'csrfTokenName', 'csrfMethod', 'csrfRefreshFreq',
+  // 会话保活（defaults.js:196-209，safeUrl 为空时关闭）：长扫描被服务端踢会话后，
+  // 后半程所有响应都是登录页 ⇒ 全部判「无差异 → 不可注入」＝假阴性。
+  // （cookieJar / dropSetCookie / flushSession **不**属此类：引擎默认就在内存 jar 里
+  // 吸收 Cookie（httpClient.js:409/923），那几个键是「关掉标准行为」的开关 —— 调优类。）
+  'safeUrl', 'safeFreq',
+  // HPP（defaults.js:418-420，默认关）：query+body 双份提交是 WAF 对抗 / 备用代码路径
+  // 形态 —— 被拦目标上关着它 ⇒ 少一条能打穿的路径 ⇒ 假阴性（与 tamper 同性质的对抗能力）。
+  'hpp',
+  // 剥标签纯文本判定（defaults.js:142，默认关，对标 --text-only）：真/假页剥离 HTML
+  // 标签后比较。强模板噪声页面上 matchString 原文比对会失效 —— 它与 2026-09-26 接进
+  // UI 的 matchTitle/trueRegexp/falseRegexp 同族同判据（能力缺失），不能留在调优堆里。
+  'matchText',
+];
+
+const TUNING_NO_UI_KEYS = [
   // 提取 / 拖库治理
   'extractConcurrency', 'dumpConcurrency', 'dumpDatabaseConcurrency', 'dumpMaxRows', 'dumpRowLimit',
   'dumpStart', 'dumpStop', 'maxColumnsGuess',
@@ -213,14 +241,14 @@ const KNOWN_MISSING_UI_KEYS = new Set([
   'timeBlindSleepSec', 'timeProbeSleepSec', 'timeExtractSleepSec',
   // 布尔盲注二级判据 / 鲁棒性
   'boolStableDiff', 'boolStableDiffSamples', 'blindRobust',
-  // 会话 / CSRF / 保活 / cookie
-  // （crawlForms 已于 2026-09-26 接进「爬虫」分组 → 移出本表）
-  'safeUrl', 'safeFreq', 'csrfUrl', 'csrfTokenName', 'csrfMethod', 'csrfRefreshFreq',
+  // 会话 / cookie：能力型的 csrf* / safeUrl / safeFreq 已升入 CAPABILITY_GAP_KEYS。
+  // 余下三个是「关掉标准行为」的开关：引擎默认就在内存 jar 吸收 Cookie
+  // （httpClient.js:409/923），flushSession 只作用于 sqlmap 桥接会话 → 调优类。
   'cookieJar', 'dropSetCookie', 'flushSession',
   // 参数筛选 / 已知点 / 失效值
   'skipParams', 'knownPoint', 'invalidValue', 'excludeSysdbs', 'nullConnection', 'paramDel',
-  // HTTP 层行为
-  'forceSsl', 'ignoreRedirects', 'hpp', 'activeWafProbe', 'trustProxyEnv', 'ssrfViaProxy', 'proxyBypassLocal',
+  // HTTP 层行为（hpp 已升入 CAPABILITY_GAP_KEYS）
+  'forceSsl', 'ignoreRedirects', 'activeWafProbe', 'trustProxyEnv', 'ssrfViaProxy', 'proxyBypassLocal',
   // 限速：delay / maxReq 已于 2026-09-23 接进「请求控制」分组 → 移出本表。
   // reqRate **有意不接**：引擎语义是「> 0 时覆盖 ratePerSec」（ScanManager.js:284 /
   // httpClient.js:820），而 ratePerSec 早就在面板上。再暴露一个限速旋钮只会让使用者分不清
@@ -262,7 +290,10 @@ const KNOWN_MISSING_UI_KEYS = new Set([
   //    接进「payload 与响应判定调优」分组 → 移出本表（判据 ⑤ 会在忘记移除时红）。
   //    matchCode 只接了 { true, false } 精确期望形态；`true`（弱信号）形态前端类型层走不通，
   //    仍属无入口 —— 但它是**同一键的另一种取值**，不是独立键，故不单列（见 constants.ts 注释）。
-  'matchText', 'predictOutput',
+  // matchText 已升入 CAPABILITY_GAP_KEYS（同族同判据：默认关 ⇒ 少一条判定锚点）。
+  // predictOutput 默认 **true**（defaults.js:215）⇒ 不接 UI = 引擎默认已在生效，
+  // 「不暴露」不损失任何判定能力 ⇒ 留在调优类。
+  'predictOutput',
   // 动态块 / 错误原文留存
   'autoDynamicBlock', 'parseErrors', 'pocRedactAuth',
   // 生产护栏（高危池确认位）：productionMode / confirmDestructive 已于 2026-09-23
@@ -273,7 +304,9 @@ const KNOWN_MISSING_UI_KEYS = new Set([
   // 2026-09-20_CFG-REACH 那批「CLI 能设、引擎真读、REST 刚收」的键
   // （testPath / testHeaders 已于 2026-09-23 接进 ScanConfigPanel 的「注入点范围」分组 → 从本表移除）
   'noCast', 'dumpWhere', 'unionCols', 'hex', 'unionFrom',
-]);
+];
+
+const KNOWN_MISSING_UI_KEYS = new Set([...CAPABILITY_GAP_KEYS, ...TUNING_NO_UI_KEYS]);
 
   it('④ 后端可达但前端无入口的键，必须登记在 KNOWN_MISSING_UI_KEYS（防新增键静默断链）', () => {
     const uncovered = BACKEND_KNOWN_CFG_KEYS.filter(
@@ -303,6 +336,26 @@ const KNOWN_MISSING_UI_KEYS = new Set([
       KNOWN_MISSING_UI_KEYS.size,
       '实际缺口数与登记表条目数不一致 —— 有键接上 UI 或后端删了键，请同步本表'
     );
+  });
+
+  // ⑧ [2026-09-29 分类治理] 能力缺失类**只减不增**：
+  // 上面 8 个键是当前全部「不接 UI ⇒ 假阴性」的缺口，每个都带引擎语义证据（见表内注释）。
+  // ④ 只管「登记没登记」，管不了**性质**——新键落进能力类时总数 +1 毫不起眼，代价却是
+  // 又一整类注入面 Web 用户测不到。所以能力类单设一道门：新增必须改这份基线并写明机制，
+  // 静默混进调优堆 ⇒ 本判据红。移出（接进 UI / 论证后降级）不需要动基线 —— 只减不增。
+  it('⑧ 能力缺失类只减不增（新增能力型缺口必须显式论证，不许静默登记）', () => {
+    const CAPABILITY_BASELINE = new Set([
+      'csrfUrl', 'csrfTokenName', 'csrfMethod', 'csrfRefreshFreq',
+      'safeUrl', 'safeFreq', 'hpp', 'matchText',
+    ]);
+    const unargued = CAPABILITY_GAP_KEYS.filter((k) => !CAPABILITY_BASELINE.has(k));
+    expect(
+      unargued,
+      `这些键被新登记为「能力缺失类」但基线里没有：${unargued.join(', ')}\n` +
+        '先按判据核实（默认关/空 ⇒ 少测一整类注入面 ⇒ 假阴性），再更新本基线并在登记处写明机制。'
+    ).toEqual([]);
+    const overlap = CAPABILITY_GAP_KEYS.filter((k) => TUNING_NO_UI_KEYS.includes(k));
+    expect(overlap, `能力缺失类与调优参数类不得重叠：${overlap.join(', ')}`).toEqual([]);
   });
 
   // ⑦ [2026-09-23 UI-REACH] **登记在 SCAN_CONFIG_KEYS ≠ 面板真的有控件**。

@@ -72,24 +72,10 @@ export const SQL_ERROR_SIG =
 // 状态严重度排序（越大越严重）：判定与粘滞共用同一优先级。
 const SEVERITY = { ok: 0, target_error: 1, session_expired: 2, blocked: 3, unreachable: 4 };
 
-/**
- * 大小写不敏感取响应头（axios headers 可能是 AxiosHeaders / 普通对象 / Map 样对象）。
- * @param {object} headers
- * @param {string} key
- * @returns {string|undefined}
- */
-export function getHeader(headers, key) {
-  if (!headers || typeof headers !== 'object') return undefined;
-  const target = String(key).toLowerCase();
-  if (typeof headers.get === 'function') {
-    const v = headers.get(target);
-    if (v != null) return String(v);
-  }
-  for (const [k, v] of Object.entries(headers)) {
-    if (String(k).toLowerCase() === target) return v == null ? undefined : String(v);
-  }
-  return undefined;
-}
+// [2026-09-29 收敛] getHeader 全仓唯一实现在 core/getHeader.js（此前本文件、blockPolicy、
+// WafIdentifier 三处各持一份且已漂移）。这里导入供本模块自用，并原样再导出保住既有引用路径。
+import { getHeader } from './getHeader.js';
+export { getHeader };
 
 /**
  * 取响应状态码：无响应/无 status 一律视为 0（「请求失败」而非「某个 HTTP 结论」）。

@@ -15,6 +15,9 @@
 
 import { recommend } from './wafRecommend.js';
 import { RATE_LIMIT_STATUSES, GENERIC_BLOCK_VENDOR } from './blockSignatures.js';
+// [2026-09-29 收敛] 响应头读取口径全仓唯一：core/getHeader.js（原本文件私有版会取数组首元素，
+// 与 scanValidityGuard / WafIdentifier 的拼接口径不一致 —— 同一响应两处结论可能不同）。
+import { getHeader } from '../getHeader.js';
 
 // Retry-After 换算后的退避上限（30s）：超过部分截断，避免单次退避拖垮整轮扫描预算
 export const MAX_BACKOFF_MS = 30_000;
@@ -24,16 +27,6 @@ export const MAX_BACKOFF_MS = 30_000;
 // 下游就会拿 wafRecommend 的 `_default` 推荐链重跑全站未命中点（流量翻倍）。
 // 故本模块把它一票否决：action 只能 'none'、tamperHint 必为空（优先级高于 pause / preferTamper）。
 const UNTRUSTED_VENDORS = new Set(['unknown', 'unknown waf']);
-
-// 大小写不敏感取响应头值（与 WafIdentifier 同款小工具，避免依赖实现细节）
-function getHeader(headers, key) {
-  if (!headers || typeof headers !== 'object') return undefined;
-  const target = String(key).toLowerCase();
-  for (const [k, v] of Object.entries(headers)) {
-    if (k.toLowerCase() === target) return Array.isArray(v) ? v[0] : v;
-  }
-  return undefined;
-}
 
 // 截断到 [0, MAX_BACKOFF_MS]
 function clampBackoff(ms) {
