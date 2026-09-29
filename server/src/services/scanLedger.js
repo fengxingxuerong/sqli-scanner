@@ -30,7 +30,7 @@ function ledgerDir() {
  *   `if (!v.poc) continue` 全部命中 → poc/ 恒为空（2026-09-18 实测 163 次真实台账 0 个 poc 文件）。
  * @param {{html?:string, markdown?:string, json?:string}} [docs] 预渲染文档；缺省时只落 report.json
  * @param {{redactAuth?:boolean}} [opts] 预留（PoC 脱敏由 ReportGenerator 侧决定，此处不重复处理）
- * @returns {{dir:string, scanId:string, files:string[]}}
+ * @returns {{dir:string, scanId:string, files:string[], pruned:object|null}} prune 结果（未配策略时为对象，异常时为 null）
  */
 export function recordScan(report, docs = {}, opts = {}) {
   void opts; // 预留参数：脱敏在 ReportGenerator 完成，此处不参与，显式声明以免误读
@@ -218,7 +218,181 @@ export function readReport(scanId) {
   }
 }
 
-// =====================================================================/** 台账根目录（响应里如实标注数据落在哪，便于归档与取证） */
+// ============================================================================
+// 台账保留策略（retention）—— 2026-09-29
+//
+// 背景：每次 recordScan 都追加一行 index.jsonl 并落一整个目录（meta/report/html/md/poc），
+// 长期跑的实例只会单调增长，无上限也无淘汰（TODO「接口靶场遗留项」第 5 条）。
+//
+// 三条设计取舍：
+//   ① **默认关闭**：删用户扫描产物是有损操作，不能因为升了个版本就静默清历史。
+//      只有显式设 SCAN_LEDGER_MAX / SCAN_LEDGER_MAX_DAYS 才淘汰，未设 ⇒ 零行为变化。
+//   ② **目录与索引必须同批消失**：只删目录不删索引 ⇒ 列表里还在、点开 404；
+//      只删索引不删目录 ⇒ 磁盘不释放。二者在同一次 prune 内成对处理。
+//   ③ **先原子重写索引、再删目录**：顺序刻意倒过来（看似该先删数据再记账）。
+//      理由看失败模式——
+//        先删目录：目录删成功而索引重写失败 ⇒ 列表里有、读不到 ⇒ **半份数据**（最坏）。
+//        先写索引：索引已收敛而目录删除失败 ⇒ 磁盘泄漏 + 一条孤儿目录 ⇒ 列表干净、可重试。
+//      宁可泄漏也不能出现"不知道是不是删了一半"的状态。
+// ============================================================================
+
+/** 把 env 值解析成正整数；空/非法/负数一律 0（= 该维度不限制） */
+function positiveInt(v) {
+  const n = Number.parseInt(String(v ?? '').trim(), 10);
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+/**
+ * 当前生效的保留策略（环境变量驱动）。
+ * @returns {{max:number, maxDays:number}} 0 = 不限制
+ */
+export function retentionPolicy() {
+  return {
+    max: positiveInt(process.env.SCAN_LEDGER_MAX),
+    maxDays: positiveInt(process.env.SCAN_LEDGER_MAX_DAYS),
+  };
+}
+
+/**
+ * 台账记录的可排序时间戳（毫秒）。取不到时间字段 ⇒ -Infinity（视作最老，最优先被淘汰）。
+ * ⚠️ 不能兜底成 Date.now()/0：前者会让它永远最新（永远不淘汰 = 泄漏），
+ *    后者会让"没时间戳的新条目"被误杀。取负无穷的代价只是它排在最前被清 —— 缺时间戳者先走。
+ * @param {object} row 索引行
+ * @returns {number}
+ */
+function entryTs(row) {
+  const raw = row?.finishedAt ?? row?.recordedAt ?? row?.startedAt;
+  const t = Date.parse(String(raw ?? ''));
+  return Number.isFinite(t) ? t : -Infinity;
+}
+
+/**
+ * 按保留策略淘汰台账条目：删目录 + 从索引移除（成对）。
+ * @param {{dir?:string, policy?:{max?:number,maxDays?:number}, now?:number}} [opts]
+ * @returns {{removed:number, kept:number, removedIds:string[], keptIds:string[], failed:Array<{id:string,error:string}>, skipped:boolean, reason:string}}
+ */
+export function pruneLedger(opts = {}) {
+  /** @type {{removed:number, kept:number, removedIds:string[], keptIds:string[], failed:Array<{id:string,error:string}>, skipped:boolean, reason:string}} */
+  const res = { removed: 0, kept: 0, removedIds: [], keptIds: [], failed: [], skipped: false, reason: '' };
+  const dir = opts.dir || ledgerDir();
+  const policy = opts.policy || retentionPolicy();
+  const max = positiveInt(policy?.max);
+  const maxDays = positiveInt(policy?.maxDays);
+
+  if (!max && !maxDays) {
+    res.skipped = true;
+    res.reason = 'no-limit'; // 未配策略 = 不淘汰
+    return res;
+  }
+  const idxPath = join(dir, 'index.jsonl');
+  if (!existsSync(idxPath)) {
+    res.skipped = true;
+    res.reason = 'no-index';
+    return res;
+  }
+
+  // 解析索引：有效行去重（同 scanId 保留最新一行），坏行不参与判定但原样留回。
+  // 顺带修掉"重复登记"——recordScan 是 appendFileSync，同一 scanId 再记一次会多一行，
+  // 列表于是出现两条同名目。重写是唯一能收敛它的时机。
+  const rawLines = readFileSync(idxPath, 'utf-8').split('\n');
+  const byId = new Map();
+  const order = [];
+  const others = [];
+  let rowCount = 0; // 有效 JSON 行数（去重前）—— 与去重后行数对比得出「是否有重复登记」
+  for (const line of rawLines) {
+    if (!line.trim()) continue; // 空行不回写
+    let row = null;
+    try {
+      row = JSON.parse(line);
+    } catch {
+      others.push(line);
+      continue;
+    }
+    if (!row || typeof row !== 'object') { others.push(line); continue; }
+    const id = String(row.scanId ?? '');
+    if (!id) { others.push(line); continue; }
+    rowCount += 1;
+    if (byId.has(id)) byId.set(id, row); // 后写的更新 ⇒ 保留最后一次登记
+    else { byId.set(id, row); order.push(id); }
+  }
+  const rows = order.map((id) => byId.get(id));
+  const hasDuplicate = rowCount > rows.length;
+
+  const keep = new Set(rows.map((r) => String(r.scanId)));
+  // ① 天数维度：早于 cutoff 的直接出局
+  if (maxDays) {
+    const nowMs = Number.isFinite(opts.now) ? Number(opts.now) : Date.now();
+    const cutoff = nowMs - maxDays * 86400000;
+    for (const r of rows) {
+      if (entryTs(r) < cutoff) keep.delete(String(r.scanId));
+    }
+  }
+  // ② 条数维度：天数筛剩下的里按时间降序只留最新 max 条
+  if (max && keep.size > max) {
+    const survivors = rows
+      .filter((r) => keep.has(String(r.scanId)))
+      .sort((a, b) => entryTs(b) - entryTs(a));
+    for (const r of survivors.slice(max)) keep.delete(String(r.scanId));
+  }
+
+  const keepLines = rows.filter((r) => keep.has(String(r.scanId))).map((r) => JSON.stringify(r));
+  const dropIds = rows.map((r) => String(r.scanId)).filter((id) => !keep.has(id));
+  // ⚠️ 早退条件不能只看 dropIds：重复登记的行只能靠"重写索引"收敛，
+  //    此时一条都不用删、却必须重写。少了 `hasDuplicate` 这一项，索引里的重复项永远去不掉。
+  if (!dropIds.length && !hasDuplicate) {
+    res.kept = keep.size;
+    res.keptIds = [...keep];
+    res.reason = 'nothing-to-drop';
+    return res;
+  }
+
+  // ③ 先原子替换索引（rename 失败 ⇒ 索引保持原样，一个目录都不删）
+  const tmp = join(dir, 'index.jsonl.prune.tmp');
+  writeFileSync(tmp, [...others, ...keepLines].map((l) => `${l}\n`).join(''), 'utf-8');
+  try {
+    renameSync(tmp, idxPath);
+  } catch (e) {
+    res.skipped = true;
+    res.reason = `rewrite-index-failed: ${e?.message ?? e}`;
+    res.kept = keep.size;
+    consoleWarn(`台账索引重写失败，本次未删除任何历史目录（${res.reason}）`);
+    return res;
+  }
+
+  // ④ 再删目录：单条失败不算失败（记进 failed 供运维追），不影响其余条目
+  for (const id of dropIds) {
+    try {
+      rmSync(join(dir, safeScanId(id)), { recursive: true, force: true });
+      res.removed += 1;
+      res.removedIds.push(id);
+    } catch (e) {
+      res.failed.push({ id, error: String(e?.message ?? e) });
+    }
+  }
+  res.kept = keep.size;
+  res.keptIds = [...keep];
+  return res;
+}
+
+/**
+ * 取 vulns 里的最高风险等级。
+ * 只认四档规范值 —— 未知/缺字段一律跳过（返回 null），不猜也不兜底：
+ * 前端 `t('risk.' + lower)` 拿到规范外的值会渲染出 i18n key 原文，比显示"—"更难看。
+ * @param {Array<{riskLevel?:string}>} vulns
+ * @returns {string|null}
+ */
+const RISK_ORDER = ['Low', 'Medium', 'High', 'Critical'];
+export function highestRisk(vulns) {
+  let best = null;
+  for (const v of vulns || []) {
+    const r = v?.riskLevel;
+    if (!r || !RISK_ORDER.includes(r)) continue;
+    if (best === null || RISK_ORDER.indexOf(r) > RISK_ORDER.indexOf(best)) best = r;
+  }
+  return best;
+}
+
+/** 台账根目录（响应里如实标注数据落在哪，便于归档与取证） */
 export function ledgerRoot() {
   return ledgerDir();
 }
