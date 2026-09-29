@@ -137,6 +137,13 @@ export const SCAN_CONFIG_KEYS = [
   'proxy', 'auth', 'insecureTls', 'validationSkip', 'scope',
   // WAF 规避（tamper 链等整块配置）
   'wafEvasion',
+  // [2026-09-29 UI-REACH] 能力缺失类 8 键接进面板（登记表分类治理时由守卫⑧钉住的那批：
+  // 默认关/空 ⇒ 少测一整类注入面 ⇒ 假阴性，故接 UI 而不是记债）。
+  // CSRF 会话层：CSRF 防护目标的 POST 注入点没有 token 全被 403/419 打回；
+  // 会话保活：长扫描被踢会话 ⇒ 后半程全判「不可注入」；HPP：被拦目标少一条打穿路径；
+  // matchText：强噪声页上 matchString 原文比对失效时的同族判定锚点。
+  'csrfUrl', 'csrfTokenName', 'csrfMethod', 'csrfRefreshFreq',
+  'safeUrl', 'safeFreq', 'hpp', 'matchText',
 ] as const;
 
 /** 前端可控的扫描配置键名（由 SCAN_CONFIG_KEYS 推导，无手写重复） */
@@ -209,6 +216,17 @@ export const SCAN_CONFIG_VALUE_TYPES: Record<ScanConfigKey, ScanConfigValueType>
   secondOrder: 'object',
   wafEvasion: 'object',
   extractScope: 'object',
+  // [2026-09-29 UI-REACH] 能力缺失类 8 键的类型（与后端 clamp 口径对齐：
+  // csrfMethod 后端白名单只认 GET/POST；csrfRefreshFreq/safeFreq 后端 pickInt 1~10000；
+  // csrfUrl/safeUrl 后端再过 http(s) 校验 + scope 硬约束，非法/越界配置被静默丢弃）
+  csrfUrl: 'string',
+  csrfTokenName: 'string',
+  csrfMethod: 'string',
+  csrfRefreshFreq: 'number',
+  safeUrl: 'string',
+  safeFreq: 'number',
+  hpp: 'boolean',
+  matchText: 'boolean',
 };
 
 /**

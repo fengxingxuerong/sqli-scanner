@@ -1,13 +1,13 @@
 // 请求控制分段（timeout / concurrency / retry / ratePerSec / delay / maxReq / timeThresholdMs / prefix / suffix）
 // —— 2026-09-27 自 ScanConfigPanel 拆出，JSX 逐字迁移
 import { useTranslation } from 'react-i18next';
-import { Box, Typography, Slider, Stack } from '@mui/material';
+import { Box, Typography, Slider, Stack, FormControlLabel, Switch } from '@mui/material';
 import { createScanConfigActions } from './scanConfigActions';
 import type { ScanConfigSectionProps } from './sectionProps';
 
 export default function RequestControlSection({ config, onChange }: ScanConfigSectionProps) {
   const { t } = useTranslation();
-  const { handleNumber, handleText } = createScanConfigActions(config, onChange);
+  const { handleNumber, handleText, handleToggle } = createScanConfigActions(config, onChange);
 
   return (
     <Box>
@@ -104,6 +104,16 @@ export default function RequestControlSection({ config, onChange }: ScanConfigSe
             {t('scanConfig.payloadClosureHint')}
           </Typography>
         </Box>
+        {/* [2026-09-29 UI-REACH] hpp（对标 sqlmap --hpp，引擎默认关）：注入参数 query+body
+            双份提交。被 WAF 拦死的目标上这是备用代码路径/绕过形态 —— 关着 = 少一条能
+            打穿的路径（登记表分类治理时定为「能力缺失类」，守卫⑧跟踪的那批键之一）。 */}
+        <FormControlLabel
+          control={<Switch checked={config.hpp ?? false} onChange={handleToggle('hpp')} />}
+          label={t('scanConfig.hppLabel')}
+        />
+        <Typography variant="caption" color="text.disabled">
+          {t('scanConfig.hppHint')}
+        </Typography>
       </Stack>
     </Box>
   );

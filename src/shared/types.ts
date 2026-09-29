@@ -352,6 +352,24 @@ export interface ScanConfig {
   matchRegexp?: string;
   trueRegexp?: string;
   falseRegexp?: string;
+  // ── [2026-09-29 UI-REACH] 能力缺失类 8 键接进 UI（登记表分类治理时被守卫⑧钉住的那批）──
+  // CSRF 会话层（对标 --csrf-url/--csrf-token/--csrf-method/--csrf-freq）：
+  // csrfUrl 为空 ⇒ 不取 token、每请求不带 ⇒ CSRF 防护目标的 POST 注入点被 403/419 全部打回。
+  // 后端对 csrfUrl/safeUrl 同样执行 http(s) 校验 + 授权范围硬约束，越界配置会被丢弃。
+  csrfUrl?: string;
+  csrfTokenName?: string;
+  csrfMethod?: string; // 后端白名单只认 GET/POST（大写归一），非法值回落默认
+  csrfRefreshFreq?: number; // 每 N 个请求刷新一次 token（1-10000）
+  // 会话保活（对标 --safe-url/--safe-freq）：长扫描防会话被服务端踢掉 —— 后半程
+  // 若全变成登录页，所有点会判「无差异 → 不可注入」＝假阴性。safeFreq 依赖 safeUrl。
+  safeUrl?: string;
+  safeFreq?: number;
+  // HTTP 参数污染（对标 --hpp）：注入参数 query+body 双份提交 —— 被拦目标上的
+  // 备用代码路径/绕过形态。默认关。
+  hpp?: boolean;
+  // 剥标签纯文本判定（对标 --text-only）：真/假响应剥离 HTML 标签后比较 —— 强模板噪声
+  // 页面上 matchString 原文比对会失效时的同族锚点。默认关。
+  matchText?: boolean;
 }
 
 /** 扫描目标 */

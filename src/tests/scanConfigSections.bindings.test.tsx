@@ -360,3 +360,63 @@ describe('ScanConfigPanel 分段回退分支（显式 undefined）', () => {
     expect(onChange).toHaveBeenCalledWith({ noSql: { enabled: true, kinds: ['nosql', 'graphql'] } });
   });
 });
+
+// ============================================================================
+// [2026-09-29 UI-REACH] 能力缺失类 8 键接线补测（CSRF×4 / safeUrl+safeFreq / hpp / matchText）
+// ============================================================================
+describe('ScanConfigPanel 分段接线：CSRF 会话 / 保活 / HPP / 文本判定', () => {
+  let onChange: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    onChange = vi.fn();
+  });
+
+  const renderPanel = (over: Partial<ScanConfig> = {}) => {
+    render(<PanelHarness initial={makeConfig(over)} onChangeSpy={onChange} />);
+    fireEvent.click(screen.getByText(L('advanced')));
+  };
+
+  it('csrfUrl 写入；子字段未填时置灰（disabled），填后可交互', () => {
+    renderPanel();
+    const url = screen.getByLabelText(L('csrfUrlLabel')) as HTMLInputElement;
+    expect((screen.getByLabelText(L('csrfTokenNameLabel')) as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByLabelText(L('csrfMethodLabel')) as HTMLSelectElement).disabled).toBe(true);
+    fireEvent.change(url, { target: { value: ' http://target/login ' } });
+    expect(onChange).toHaveBeenCalledWith({ csrfUrl: 'http://target/login' });
+    expect((screen.getByLabelText(L('csrfTokenNameLabel')) as HTMLInputElement).disabled).toBe(false);
+  });
+
+  it('csrfMethod 只发 GET/POST（后端白名单口径）；csrfRefreshFreq 非法值 → 键省略', () => {
+    renderPanel({ csrfUrl: 'http://target/login' });
+    fireEvent.change(screen.getByLabelText(L('csrfMethodLabel')), { target: { value: 'POST' } });
+    expect(onChange).toHaveBeenCalledWith({ csrfMethod: 'POST' });
+    const freq = screen.getByLabelText(L('csrfFreqLabel')) as HTMLInputElement;
+    fireEvent.change(freq, { target: { value: '30' } });
+    expect(onChange).toHaveBeenCalledWith({ csrfRefreshFreq: 30 });
+    fireEvent.change(freq, { target: { value: '0' } });
+    expect(onChange).toHaveBeenCalledWith({ csrfRefreshFreq: undefined });
+  });
+
+  it('safeUrl 写入；safeFreq 未填 URL 时置灰、填后按 1-10000 口径写入', () => {
+    renderPanel();
+    expect((screen.getByLabelText(L('safeFreqLabel')) as HTMLInputElement).disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText(L('safeUrlLabel')), { target: { value: 'http://target/health' } });
+    expect(onChange).toHaveBeenCalledWith({ safeUrl: 'http://target/health' });
+    const freq = screen.getByLabelText(L('safeFreqLabel')) as HTMLInputElement;
+    expect(freq.disabled).toBe(false);
+    fireEvent.change(freq, { target: { value: '100' } });
+    expect(onChange).toHaveBeenCalledWith({ safeFreq: 100 });
+  });
+
+  it('hpp 开 → { hpp: true }（请求控制分段，对标 --hpp）', () => {
+    renderPanel();
+    fireEvent.click(screen.getByLabelText(L('hppLabel')));
+    expect(onChange).toHaveBeenCalledWith({ hpp: true });
+  });
+
+  it('matchText 开 → { matchText: true }（判定锚点族，对标 --text-only）', () => {
+    renderPanel();
+    fireEvent.click(screen.getByLabelText(L('matchTextLabel')));
+    expect(onChange).toHaveBeenCalledWith({ matchText: true });
+  });
+});

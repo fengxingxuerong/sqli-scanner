@@ -212,25 +212,11 @@ describe('配置契约：面板 → 请求体 → 后端白名单', () => {
 //     （假阴性）。最贵的一类，守卫 ⑧ 只减不增：要么接进 UI，要么逐键论证后降级，不许静默新增。
 //   · 调优参数类 TUNING_NO_UI_KEYS —— 默认值 = 引擎内部兜底/标准行为，不接不会造成假阴性
 //     （多为「覆盖型」旋钮：只有显式覆盖它才改变行为）。接不接是产品决策，本表让缺口可数。
-const CAPABILITY_GAP_KEYS = [
-  // CSRF 会话层（server/src/config/defaults.js:197-206，默认全关）。
-  // csrfUrl 为空 ⇒ 不取 token、每请求不带 ⇒ CSRF 防护目标的 POST 注入点被 403/419
-  // 全部打回，整类注入面测不出（报告只会写「未检出」）。CLI 侧是一等能力
-  // （交付文档快速上手即含 --csrf-url/--csrf-token 示例）。
-  'csrfUrl', 'csrfTokenName', 'csrfMethod', 'csrfRefreshFreq',
-  // 会话保活（defaults.js:196-209，safeUrl 为空时关闭）：长扫描被服务端踢会话后，
-  // 后半程所有响应都是登录页 ⇒ 全部判「无差异 → 不可注入」＝假阴性。
-  // （cookieJar / dropSetCookie / flushSession **不**属此类：引擎默认就在内存 jar 里
-  // 吸收 Cookie（httpClient.js:409/923），那几个键是「关掉标准行为」的开关 —— 调优类。）
-  'safeUrl', 'safeFreq',
-  // HPP（defaults.js:418-420，默认关）：query+body 双份提交是 WAF 对抗 / 备用代码路径
-  // 形态 —— 被拦目标上关着它 ⇒ 少一条能打穿的路径 ⇒ 假阴性（与 tamper 同性质的对抗能力）。
-  'hpp',
-  // 剥标签纯文本判定（defaults.js:142，默认关，对标 --text-only）：真/假页剥离 HTML
-  // 标签后比较。强模板噪声页面上 matchString 原文比对会失效 —— 它与 2026-09-26 接进
-  // UI 的 matchTitle/trueRegexp/falseRegexp 同族同判据（能力缺失），不能留在调优堆里。
-  'matchText',
-];
+// [2026-09-29 UI-REACH 批次] 原能力缺失类 8 键（csrf×4 / safeUrl+safeFreq / hpp / matchText）
+// 已全部接进面板（SessionSection / RequestControlSection / PayloadTuningSection）并按判据 ⑤
+// 移出登记表 —— 能力类**当前为空**是「债还清」的正常形态，不是登记表失效。
+// 新键再落入能力类时：在此登记 + 更新 ⑧ 的基线 + 在登记处写明「默认关 ⇒ 假阴性」的引擎机制。
+const CAPABILITY_GAP_KEYS: string[] = [];
 
 const TUNING_NO_UI_KEYS = [
   // 提取 / 拖库治理

@@ -123,6 +123,16 @@ export default function PayloadTuningSection({ config, onChange }: ScanConfigSec
           control={<Switch checked={config.matchTitle ?? false} onChange={handleToggle('matchTitle')} />}
           label={t('scanConfig.matchTitleLabel')}
         />
+        {/* [2026-09-29 UI-REACH] matchText（对标 --text-only，引擎默认关）：真/假响应剥离
+            HTML 标签后比较。强模板噪声页面上 matchString 原文比对会失效 —— 与 matchTitle/
+            matchCode/正则锚点同族同判据（能力缺失），2026-09-29 接进面板。 */}
+        <FormControlLabel
+          control={<Switch checked={config.matchText ?? false} onChange={handleToggle('matchText')} />}
+          label={t('scanConfig.matchTextLabel')}
+        />
+        <Typography variant="caption" color="text.disabled">
+          {t('scanConfig.matchTextHint')}
+        </Typography>
         <Box>
           <Typography variant="caption" color="text.secondary">{t('scanConfig.matchCodeLabel')}</Typography>
           <Stack direction="row" spacing={1} className="mt-1">
