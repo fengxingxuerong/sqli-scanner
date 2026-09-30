@@ -50,6 +50,31 @@ const FORBIDDEN_DEFS = [
     symbol: 'hasExtractedData',
     why: '「是否有提取数据」的唯一实现在 scanHelpers.js（导出名 hasData）。',
   },
+  // ── IP 解析与前缀比较（2026-09-29 SSRF IPv6 绕过事故）────────────────────────
+  // 起因：`egressGuard` 的 IPv6 判定是**字符串前缀匹配**（`/^f[cd]$/.test(首段)`），
+  // 对任何压缩写法都不命中 ⇒ `fd00::1`/`fe80::1`/`::ffff:7f00:1`/`fd00:ec2::254`
+  // 在 SSRF_STRICT=1 下全部放行（含 AWS IMDS 的 IPv6 端点）。
+  // 修法是把「解析 + 按位比较」收敛到 ipBytes.js 一份，两端共用。
+  // 这两条守卫的作用是：**不许再出现第二份 IP 解析/前缀比较实现** ——
+  // 一份修了另一份没修，正是这个缺陷能长期潜伏的原因。
+  {
+    rel: '../src/core/scopeGuard.js',
+    pattern: /^\s*function\s+ipv6ToBytes\s*\(/m,
+    symbol: 'ipv6ToBytes',
+    why: 'IP 解析的唯一真源在 core/http/ipBytes.js。scopeGuard 曾自带一份，其 `::` 展开对 `::ffff:127.0.0.1` 会把点分四段静默丢弃（解析出 ::ffff:0:0）——两份实现必然再次分叉。',
+  },
+  {
+    rel: '../src/core/scopeGuard.js',
+    pattern: /^\s*function\s+bitsMatch\s*\(/m,
+    symbol: 'bitsMatch',
+    why: '前缀按位比较的唯一真源在 core/http/ipBytes.js（bytesInPrefix）。',
+  },
+  {
+    rel: '../src/core/http/egressGuard.js',
+    pattern: /^\s*function\s+ipv6InPrefix\s*\(/m,
+    symbol: 'ipv6InPrefix',
+    why: '字符串前缀匹配判定 IPv6 网段已被证明是错的工具（见 ssh 绕过事故）。一律用 ipBytes.bytesInPrefix 做字节比较。',
+  },
 ];
 
 /** 现役实现必须存在 —— 防「把唯一的一份也删了」这种反向事故 */
@@ -73,6 +98,17 @@ const REQUIRED_DEFS = [
     rel: '../src/engine/scanHelpers.js',
     pattern: /export\s+function\s+hasData\s*\(/,
     symbol: 'hasData',
+  },
+  // IP 解析 / 前缀比较的唯一真源（防"把唯一的一份也删了"）
+  {
+    rel: '../src/core/http/ipBytes.js',
+    pattern: /export\s+function\s+ipv6ToBytes\s*\(/,
+    symbol: 'ipv6ToBytes',
+  },
+  {
+    rel: '../src/core/http/ipBytes.js',
+    pattern: /export\s+function\s+bytesInPrefix\s*\(/,
+    symbol: 'bytesInPrefix',
   },
 ];
 

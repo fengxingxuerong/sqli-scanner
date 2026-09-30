@@ -18,6 +18,9 @@ import { httpClient } from '../src/core/httpClient.js';
 // ReportGenerator 的 toCSV/toMarkdown/toHTML 与 REST /report/export 同源，直接复用。
 import { ReportGenerator } from '../src/services/ReportGenerator.js';
 import * as scanLedger from '../src/services/scanLedger.js';
+// [P1-1 收口 2026-09-29] 利用能力开关的**唯一判据**（与 REST 的 /exploit/*、
+// /exploit/capabilities、sqlmap 桥的 --os-shell 门控同源）。
+import { isExploitEnabled } from '../src/core/exploitFlag.js';
 // [P0-SEC 2026-09-09] --scope 接线：CLI 直走 ScanManager 不经 scanRoutes，需在本层完成
 // 「目标先校验 + 按 scanId 登记」，否则 --scope 是静默 no-op（httpClient 逐跳取用登记项）。
 import { parseScope, assertInScope, assertDirectDbInScope, registerScanScope, releaseScanScope } from '../src/core/scopeGuard.js';
@@ -264,16 +267,24 @@ async function runSingleScan(sm, url, args) {
 
 // 攻击操作（对标 sqlmap --os-cmd / --sql-shell / --file-read / --file-write）：
 // 复用引擎 Exploiter 对「首个命中注入点」执行。安全红线与 REST 层一致：
-//   ① 服务端 EXPLOIT_ENABLED=1 显式开启（双刃剑默认关闭）
+//   ① 服务端 EXPLOIT_ENABLED 显式开启（双刃剑默认关闭）
 //   ② CLI 需显式声明 --authorized（仅限已授权渗透场景）
 // 返回 { ok, ... } 或 null（条件不满足/无注入点时打印原因并返回 null）。
-async function runExploit(report, args) {
+//
+// ⚠️ [P1-1 收口 2026-09-29] 判据**必须**走 core/exploitFlag.isExploitEnabled()。
+// 本函数曾写 `process.env.EXPLOIT_ENABLED !== '1'` —— 只认 `1`，于是
+// `EXPLOIT_ENABLED=true`（REST 侧允许、.env.example 之外最自然的写法）在这里被拒，
+// 出现「同一台机器上 REST 能用、CLI 说没启用」的分歧。判据的取值语义（trim/lowercase、
+// 认 1 与 true）只有一处定义，见 core/exploitFlag.js 的头注释。
+// 导出供测试直接验证三入口一致性（本函数原为模块私有，测试只能用"读源码正则"这种
+// 弱判据；导出后可以直接调它，判据从"文本像不像"升级为"行为对不对"）。
+export async function runExploit(report, args) {
   if (!report || !report.vulns || !report.vulns.length) {
     console.error('[exploit] 未发现注入点，无法执行利用操作');
     return null;
   }
-  if (process.env.EXPLOIT_ENABLED !== '1') {
-    console.error('[exploit] 利用操作未启用：需设置环境变量 EXPLOIT_ENABLED=1（安全红线，与 REST 层一致）');
+  if (!isExploitEnabled()) {
+    console.error('[exploit] 利用操作未启用：需设置 EXPLOIT_ENABLED=1（或 true）（安全红线，与 REST 层同一判据）');
     return null;
   }
   if (!args.authorized) {
@@ -762,3 +773,5 @@ if (invokedDirectly) {
 
 // 导出供单测使用（仍在 cli.js 定义的符号；args 族的再导出见文件顶部）
 export { buildConfig, buildExtractScope, validateEnumArgs, printExtractView, runSingleScan, buildInjectionTargets, resolveBodyChannel };
+// 注：runExploit 已在定义处 `export async function` 导出，**不可**在此再列一次
+// （重复导出会被 module-loadable 门禁拦下：它会让整个 CLI 无法加载）。

@@ -26,6 +26,12 @@
 // ============================================================================
 
 import { AppError, ErrorCode } from './errors.js';
+// [2026-09-29] IP 解析与前缀比较的唯一真源（core/http/ipBytes.js）。
+// 本文件原先自带 ipv6ToBytes / bitsMatch，与 egressGuard 各一份 ⇒ 两份必然分叉：
+// 实测 egressGuard 那份的 `::` 展开对 `::ffff:127.0.0.1` 会把点分四段**静默丢弃**
+// （解析出 ::ffff:0:0），而 scopeGuard 这份的 `filter(Boolean)` 对 `fe80::` 会误判。
+// duplicateSymbol.guard.test.js 已钉住「不得再开第二份」。
+import { ipv4ToBytes as bytesIpv4, ipv6ToBytes as bytesIpv6, bytesInPrefix } from './http/ipBytes.js';
 
 /**
  * parseScope 的规则集（一条 scope 配置解析后的完整形态）。
@@ -153,7 +159,7 @@ function parseCidr(host) {
   const base = m[1];
   const bits = Number(m[2]);
   const v6 = base.includes(':');
-  const net = v6 ? ipv6ToBytes(base) : ipv4ToBytes(base);
+  const net = v6 ? bytesIpv6(base) : ipv4ToBytes(base);
   if (!net) return null;
   const max = v6 ? 128 : 32;
   if (!Number.isFinite(bits) || bits < 0 || bits > max) return null;
@@ -161,49 +167,7 @@ function parseCidr(host) {
 }
 
 function ipv4ToBytes(ip) {
-  const parts = String(ip).split('.');
-  if (parts.length !== 4) return null;
-  const n = parts.map((p) => Number(p));
-  if (n.some((p) => !Number.isInteger(p) || p < 0 || p > 255)) return null;
-  return n;
-}
-
-// IPv6 展开为 16 字节（支持 :: 缩写；不支持 zone id）
-function ipv6ToBytes(ip) {
-  const s = String(ip).split('%')[0];
-  if (!s.includes(':')) return null;
-  const [head, tail] = s.split('::');
-  const groupsOf = (seg) => (seg ? seg.split(':').filter(Boolean) : []);
-  const h = groupsOf(head);
-  const t = tail === undefined ? null : groupsOf(tail);
-  const expand = (g) =>
-    g.flatMap((x) => (x.length <= 4 ? [parseInt(x, 16)] : []));
-  let words;
-  if (t === null) {
-    words = expand(h);
-    if (words.length !== 8) return null;
-  } else {
-    const hw = expand(h);
-    const tw = expand(t);
-    const fill = 8 - hw.length - tw.length;
-    if (fill < 0) return null;
-    words = [...hw, ...new Array(fill).fill(0), ...tw];
-  }
-  if (words.length !== 8 || words.some((w) => !Number.isFinite(w) || w < 0 || w > 0xffff)) return null;
-  const bytes = [];
-  for (const w of words) bytes.push((w >> 8) & 0xff, w & 0xff);
-  return bytes;
-}
-
-function bitsMatch(a, b, bits) {
-  const len = Math.min(a.length, b.length);
-  for (let byteIdx = 0; byteIdx < len; byteIdx++) {
-    const remaining = bits - byteIdx * 8;
-    if (remaining <= 0) break;
-    const mask = remaining >= 8 ? 0xff : (0xff << (8 - remaining)) & 0xff;
-    if ((a[byteIdx] & mask) !== (b[byteIdx] & mask)) return false;
-  }
-  return true;
+  return bytesIpv4(ip);
 }
 
 /**
@@ -236,11 +200,11 @@ export function isHostInScope(host, scope, pathname = '', port = undefined) {
   }
   if (scope.cidrs.length && isIpLiteral(h)) {
     const v6 = h.includes(':');
-    const target = v6 ? ipv6ToBytes(h) : ipv4ToBytes(h);
+    const target = v6 ? bytesIpv6(h) : ipv4ToBytes(h);
     if (target) {
       for (const c of scope.cidrs) {
         if (c.v6 !== v6) continue;
-        if (bitsMatch(c.net, target, c.bits)) return true;
+        if (bytesInPrefix(target, c.net, c.bits)) return true;
       }
     }
   }

@@ -12,16 +12,38 @@ import { URL } from 'node:url';
 import { ErrorCode, AppError } from '../errors.js';
 import { logOnce, PROXY_DELEGATION_NOTE } from './logOnce.js';
 import { logger } from '../logger.js';
+// [P0-FIX 2026-09-29] IP 解析与前缀比较的唯一真源（字节级，不做字符串前缀匹配）。
+// 与 scopeGuard 共用 —— 本项目反复吃过「同一判据两份实现，一份修了另一份没修」的亏。
+import { ipv6ToBytes, bytesInPrefix, IPV6_BLOCKS, embeddedIpv4 } from './ipBytes.js';
 
 // ── SSRF 防护（P0-1）────────────────────────────────────────────────────────
-// 分层策略（按 env 决定拒绝集合）：
-//   · 基础层（无条件拒绝）：0.0.0.0/8、链路本地 169.254.0.0/16（含云元数据 169.254.169.254）、
-//     组播/保留/文档段 —— 对扫描器自身没有任何合法扫描价值，是 SSRF 最高价值目标。
-//   · 严格层（SSRF_STRICT=1 时追加）：回环 127.0.0.0/8、::1、私网 10/8、172.16/12、192.168/16、
-//     CGNAT 100.64/10、ULA fc00::/7 —— 面向「引擎暴露在非回环接口」的部署（容器/局域网/公网）。
+// 分层策略（按 env 决定拒绝集合）。IPv4 与 IPv6 **逐层对齐**（各段对应关系写在下面）：
+//   · 基础层（无条件拒绝，代理模式下也不放行）：对扫描器自身没有任何合法扫描价值，
+//     是 SSRF 最高价值目标。
+//       IPv4：0.0.0.0/8、链路本地 169.254.0.0/16（含云元数据 169.254.169.254）、
+//             组播 224/4、保留 240/4、文档段/基准测试段、CGNAT 100.64/10
+//       IPv6：::（未指定）、fe80::/10（链路本地，含云元数据 IPv6 变体）、
+//             fec0::/10（RFC 3879 废弃站点本地）、ff00::/8（组播）、
+//             2001:db8::/32（文档段）、fd00:ec2::/32（AWS IMDS 的 IPv6 端点 ——
+//             它落在 ULA 内，必须单列，否则会随"ULA 在代理模式放行"一起被放掉）、
+//             64:ff9b::/96 与 64:ff9b:1::/48（NAT64，可内嵌内网 IPv4）、
+//             ::/96 中 IPv4-compatible 的残余部分
+//   · 严格层（SSRF_STRICT=1 时追加；HOST 为非回环时自动进入）：面向「引擎暴露在非回环
+//     接口」的部署（容器/局域网/公网）。
+//       IPv4：回环 127.0.0.0/8、私网 10/8、172.16/12、192.168/16
+//       IPv6：回环 ::1、ULA fc00::/7
+//   · IPv4-mapped（::ffff:0:0/96）：**按内嵌 IPv4 走完整规则**（含 hardOnly 语义）。
+//     `::ffff:7f00:1` 就是 127.0.0.1、`::ffff:a9fe:a9fe` 就是 169.254.169.254。
+//     注意 URL 会把 `[::ffff:127.0.0.1]` 归一成 `[::ffff:7f00:1]`，两条路径必须同结论。
 //   · 显式放行：SSRF_ALLOW_CIDRS=1.2.3.0/24,... 逐段放行（优先级最高，供内部授权目标/演练用）；
 //     SSRF_ALLOW_PRIVATE=1 只豁免**严格层**（回环/私网），不豁免上面那条基础层——
 //     2026-09-28 接口靶场实测出这条不一致并把口径改正（详见 isBlockedIpv4 内注释）。
+//
+// ⚠️ 历史教训（2026-09-29）：上面这段承诺最初只按 IPv4 写、也只按 IPv4 验证过，IPv6 分支
+// 用的是**字符串前缀匹配**（`/^f[cd]$/.test(首段)`），对任何压缩写法都不命中 ⇒
+// `::ffff:7f00:1`、`fe80::1`、`fd00::1`、`fd00:ec2::254` 在 SSRF_STRICT=1 下全部放行。
+// 现在 IPv6 一律走 `ipBytes.js` 的**字节级前缀比较**，专项回归见 tests/ssrf.ipv6.test.js
+// （9 条目标 + hardOnly 路径 + 对称性 + 防过度拦截）。
 const POLICY = (() => {
   const allowAll = process.env.SSRF_ALLOW_PRIVATE === '1' || process.env.SSRF_ALLOW_PRIVATE === 'true';
   const strict =
@@ -41,19 +63,82 @@ function ipToLong(ip) {
   return ((parts[0] * 16777216 + parts[1] * 65536 + parts[2] * 256 + parts[3]) >>> 0);
 }
 
-// IPv6 判定：先处理 IPv4 映射（::ffff:x.x.x.x），再按前缀规则精确判断
-function ipv6InPrefix(ip, prefix, bits) {
-  const lower = ip.toLowerCase();
-  const mapped = lower.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
-  if (mapped) return isBlockedIpv4(mapped[1]);
-  if (bits === 128) return lower === prefix; // 精确匹配（如 ::1）
-  if (prefix === 'fe80::' && bits === 10) {
-    const first = lower.split(':')[0] || '';
-    return /^fe[89ab]$/.test(first); // fe80::/10
+// ── [P0-FIX 2026-09-29] IPv6 判定：**字节级前缀比较**（旧实现是字符串前缀匹配，被绕过）
+// ----------------------------------------------------------------------------
+// 实测（SSRF_STRICT=1，即 HOST!=127.0.0.1 的生产姿态）下列目标**全部放行**：
+//     http://[::ffff:7f00:1]:4567/   IPv4-mapped 回环（docker 单端口部署下就是引擎自身）
+//     http://[fe80::1]/              链路本地
+//     http://[fd00::1]:4567/         ULA 私网
+//     http://[fd00:ec2::254]/        AWS IMDS 的 IPv6 端点（云元数据）
+// 根因有三，全部在旧实现里：
+//   ① `ipv6InPrefix` 对 `::ffff:<点分>` 无条件 `return isBlockedIpv4(...)` —— 无视调用方
+//      问的是哪个前缀（越权回答）；而十六进制写法 `::ffff:7f00:1` 不匹配那条正则，落到
+//      `bits===128` 分支与 `'::1'` 比较 ⇒ 恒 false。
+//   ② ULA/链路本地用 `/^f[cd]$/`、`/^fe[89ab]$/` 匹配**首段字符串** ——
+//      `fd00::1`、`fe80::1` 的首段是 `fd00`/`fe80`，永远不命中（连注释里举的例子都没拦住）。
+//   ③ `hardOnly` 在严格层判定**之前** `return false`，使"ULA / ::1 永远拒绝"的注释承诺
+//      在代理模式下失效。
+// 现在一律：解析成 16 字节 → 按 bits 比较前缀。解析与比较的唯一真源在 `ipBytes.js`。
+const IPV6 = IPV6_BLOCKS;
+
+/**
+ * IPv6 黑名单判定。
+ *
+ * 判定顺序刻意显式（每条拒绝理由都能指出来源），并与 IPv4 侧**逐段对齐**：
+ *   · 「无条件拒绝段」= 对扫描器零合法价值 ⇒ 代理模式（hardOnly）也不放行；
+ *   · 「等价私网」（ULA ↔ RFC1918、::1 ↔ 127/8）= 授权打内网靶站的合法用途
+ *     ⇒ 仅在 hardOnly 下放行给代理侧判定（与 isBlockedIpv4 的严格层同语义）。
+ * @param {string} ip
+ * @param {boolean} hardOnly 硬底线模式（代理路径）
+ */
+function isBlockedIpv6(ip, hardOnly = false) {
+  const bytes = ipv6ToBytes(ip);
+  if (!bytes) return false; // 非法 IPv6 ⇒ net.isIP 已先行过滤，此处不越权判定
+
+  // ipv6ToBytes(b.prefix) 是常量字面量，解析失败会得 null ⇒ bytesInPrefix 按 fail-closed 返回 false
+  const inBlock = (b) => bytesInPrefix(bytes, ipv6ToBytes(b.prefix), b.bits);
+
+  // ① 无条件拒绝段（与 IPv4 基础层一一对应）
+  if (inBlock(IPV6.UNSPECIFIED)) return true;        // :: ↔ 0.0.0.0
+  if (inBlock(IPV6.LINK_LOCAL)) return true;         // fe80::/10 ↔ 169.254.0.0/16（含云元数据 IPv6 变体）
+  if (inBlock(IPV6.SITE_LOCAL)) return true;         // fec0::/10：RFC 3879 已废弃的站点本地
+  if (inBlock(IPV6.MULTICAST)) return true;          // ff00::/8 ↔ 224.0.0.0/4
+  if (inBlock(IPV6.DOCUMENTATION)) return true;      // 2001:db8::/32 ↔ 192.0.2.0/24 等文档段
+  // 云元数据 IPv6：AWS IMDS 的 `fd00:ec2::254`。落在 ULA 里，若不单列就会被
+  // 「ULA 在代理模式下放行」一起放掉 —— 而云元数据恰恰是 SSRF 最高价值目标，
+  // 不能因为"它长得像私网"就按私网对待（IPv4 侧同理：169.254.169.254 属基础层，不吃 ALLOW_PRIVATE）。
+  if (inBlock(IPV6.CLOUD_METADATA)) return true;     // fd00:ec2::/32
+  // NAT64：可把内网 IPv4 嵌进来（`64:ff9b::7f00:1` = 127.0.0.1），必须整段拒绝，
+  // 否则它是绕过全部 IPv4 段判定的现成通道。
+  if (inBlock(IPV6.NAT64)) return true;              // 64:ff9b::/96
+  if (inBlock(IPV6.NAT64_LOCAL)) return true;        // 64:ff9b:1::/48
+  // ② IPv4-mapped（::ffff:0:0/96）：**交给完整 IPv4 规则**（含 hardOnly 语义）。
+  //    `::ffff:7f00:1` 就是 127.0.0.1、`::ffff:a9fe:a9fe` 就是 169.254.169.254（云元数据）。
+  //    这一步是 real-world 最常被漏掉的绕过点：它为十六进制写法，字符串前缀匹配看不见。
+  if (inBlock(IPV6.IPV4_MAPPED)) {
+    const v4 = embeddedIpv4(ip);
+    if (v4) return isBlockedIpv4(v4.join('.'), hardOnly);
+    return true; // 解析不出内嵌 v4 的 mapped 形态：宁可拒绝
   }
-  if (prefix === 'fc00::' && bits === 7) {
-    const first = lower.split(':')[0] || '';
-    return /^f[cd]$/.test(first); // fc00::/7（ULA）
+  // ③ ::/96 里剩下的（IPv4-compatible，RFC 4291 已废弃）：`::7f00:1` 这类写法
+  //    能表达 127.0.0.1 却既不进 mapped 分支、也不是普通公网地址 ⇒ 整段拒绝。
+  //    注意 ::1（回环）也在此段内，但它在下面 ④ 单独判定以与 IPv4 的 127/8 对齐。
+  const isLoopback = inBlock(IPV6.LOOPBACK);
+  const isV4Compat = bytesInPrefix(bytes, ipv6ToBytes('::'), 96);
+  if (isV4Compat && !isLoopback) return true;
+
+  // ④ 等价私网/回环（严格层）：与 IPv4 侧**逐层对齐**
+  //    · 严格层（回环/私网）仅在 POLICY.strict 下拒绝 —— 非严格模式是为「本机/内网靶站」
+  //      留的开发姿态，IPv4 的 127/8、10/8、192.168/16 就是这么做的；IPv6 必须同语义，
+  //      否则同一个 localhost 会因解析成 127.0.0.1 还是 ::1 得到两种结论（实测踩到）。
+  //    · ULA（fc00::/7）保持**无条件拒绝**，与本文件的历史注释一致（"永远拒绝"）。
+  //      它比 IPv4 私网更严，不是漏洞；改严→宽的放松不在本次修复范围。
+  if (hardOnly) return false;
+  if (POLICY.strict) {
+    if (inBlock(IPV6.ULA)) return true;   // fc00::/7 ↔ RFC1918
+    if (isLoopback) return true;          // ::1 ↔ 127.0.0.0/8
+  } else if (inBlock(IPV6.ULA)) {
+    return true;                          // 非严格模式仍拒 ULA（历史语义，见上）
   }
   return false;
 }
@@ -111,15 +196,7 @@ function isBlockedIpv4(ip, hardOnly = false) {
 function isBlockedIp(ip, hardOnly = false) {
   const v = net.isIP(ip);
   if (v === 4) return isBlockedIpv4(ip, hardOnly);
-  if (v === 6) {
-    // 无条件拒绝：未指定 ::、回环 ::1 仅在严格层拒绝、链路本地 fe80::/10 与 ULA fc00::/7 永远拒绝
-    if (ipv6InPrefix(ip, 'fe80::', 10)) return true; // 链路本地（含云元数据 IPv6 变体）
-    if (ip === '::') return true; // 未指定
-    if (hardOnly) return false; // [P1-FIX ②] 硬底线模式：ULA fc00::/7 与 ::1 等价 v4 私网，下放代理侧判定
-    if (ipv6InPrefix(ip, 'fc00::', 7)) return true; // ULA（等价私网）
-    if (POLICY.strict && ipv6InPrefix(ip, '::1', 128)) return true; // 回环（严格层）
-    return false;
-  }
+  if (v === 6) return isBlockedIpv6(ip, hardOnly);
   return false;
 }
 

@@ -528,20 +528,34 @@ analyst→writer→reviewer；超时由路由硬编码 120s（`reportAiRoutes.js
 
 ---
 
-### 4.4 利用模块（破坏性，需 `EXPLOIT_ENABLED=1` + `authorized: true`）
+### 4.4 利用模块（破坏性，需 `EXPLOIT_ENABLED=1` + `authorized: true` + 声明授权范围）
 
 四条动作端点（`/exploit/sql`、`/exploit/file-read`、`/exploit/file-write`、`/exploit/os-shell`）共用一套门槛：
 
 1. 服务端 `EXPLOIT_ENABLED=1`（默认关闭；**每次请求现读**，改 `.env` 后无需猜是否生效）；
 2. 请求体 `authorized: true`（前端勾选语义，仅作审计，安全边界是 ①+ token）；
-3. 独立限速桶（默认 5 req/s，`EXPLOIT_RATE_PER_SEC` 可调）→ 超限回 `code: 4290`；
-4. 目标过 SSRF；scope 取请求体 `scope` 或该次扫描登记的范围。
+3. **声明授权范围**（`scope` 或 `scanId` 至少其一，否则 `code: 1007`）——
+   与 `SCOPE_VIOLATION(1004)` 是两件事：`1004` = 范围给了但目标越界，`1007` = 根本没给范围；
+4. 独立限速桶（默认 5 req/s，`EXPLOIT_RATE_PER_SEC` 可调）→ 超限回 `code: 4290`；
+5. 目标过 SSRF；给了 `scope` 时按 `scope` 校验，给了 `scanId` 时沿用该次扫描登记的范围。
+
+**写类端点额外加严**（`/exploit/file-write`、`/exploit/os-shell`，会不可逆地修改目标状态）：
+
+6. 必须提供**显式 `scope`** —— 不接受仅凭 `scanId` 间接推断范围（`scanId` 可能已回收、也可能指向另一台主机），否则 `1007`；
+7. 必须声明 `confirmDestructive: true`，否则 `6005`（与 `config.productionMode` / `confirmDestructive`、
+   `secondOrder.allowWrites` 同一口径）。
+
+> 读类端点（`sql` / `file-read`）只需第 1–5 条；`confirmDestructive` 对它们无意义，
+> 传了也不会改变行为。`/exploit/capabilities` 是公开只读端点，不受上述门槛约束。
 
 #### 形态 A：引用扫描结果（推荐）
 
 ```json
 { "scanId": "abc123", "pointId": "p1", "authorized": true, "sql": "SELECT VERSION()" }
 ```
+
+> `scanId` 形态可省 `scope`（沿用该次扫描登记的范围）——但**写类端点除外**：
+> `file-write` / `os-shell` 必须显式给 `scope` + `confirmDestructive: true`。
 
 服务端从该扫描上下文解析 `target` / `point`（含 `boundary`、`echoCols`、`encoding`）与定库结果，
 并**沿用扫描作用域的 HttpClient**（cookieJar / `auth` / CSRF / safeUrl / 限速桶）——
@@ -567,10 +581,12 @@ analyst→writer→reviewer；超时由路由硬编码 120s（`reportAiRoutes.js
   "point": { "originalValue": "1", "location": "url", "param": "id" },
   "dbms": "MySQL",
   "authorized": true,
+  "scope": ["target.example.com"],
   "sql": "SELECT 1"
 }
 ```
 
+手工形态**必须**带 `scope`（没有扫描上下文可沿用），否则回 `code: 1007`。
 `point.location` / `point.param` 必填。⚠ 手工形态的 `location` 只能是调用方自己确定的一项，
 body/cookie/header 点位与编码点位建议走形态 A，否则等于让用户手抄报告里已有的字段。
 

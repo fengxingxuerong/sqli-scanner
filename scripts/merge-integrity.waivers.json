@@ -1,0 +1,35 @@
+{
+  "_doc": [
+    "merge-integrity 门禁的豁免清单：登记**已发生且已修复**的历史损伤，避免区间模式永久报红。",
+    "为什么需要：门禁是回溯式的，区间内所有 merge 都会被检查，包括门禁建成之前就已发生的损伤。",
+    "没有豁免机制，一个历史坏 merge 会让门禁永久红 —— 而永久红的门禁最终会被人 `|| true` 掉，那才是真正的失效。",
+    "规矩：① 只豁免已修复的历史损伤，不得用于掩盖当前缺陷；② 必须写 reason 与 date；",
+    "      ③ 键 = merge 短 SHA + file + kind（kind 见 merge-integrity.mjs 的 findings）；④ 未登记的违规一律照常红。",
+    "本轮实例：684e4a3（2026-09-29 的 merge）已经是本仓唯一的 merge，其两处损伤均已在后续提交修复 ——",
+    "      ① scanLedger.js 的 174 行实现已从 d44ff82 恢复；② README.md 的 3 处换行粘连已修回。",
+    "      修好之后门禁若仍报这两处，说明门禁在校验历史而非当前代码，故登记豁免（而非删掉判据）。"
+  ],
+  "waivers": [
+    {
+      "merge": "684e4a3",
+      "file": "server/src/services/scanLedger.js",
+      "kind": "added-export-dropped",
+      "reason": "该 merge 把 d44ff82 新增的 exports（retentionPolicy/pruneLedger/highestRisk）连实现一起回退掉。已在本轮从 d44ff82 恢复（407 行，md5 742e2016），并有 server/tests/moduleLoadable.test.js 钉住。保留豁免是因为区间模式会永远看到这个历史 merge。",
+      "date": "2026-09-29"
+    },
+    {
+      "merge": "684e4a3",
+      "file": "server/src/services/scanLedger.js",
+      "kind": "added-lines-dropped",
+      "reason": "同上：174 行实现丢失，已恢复。",
+      "date": "2026-09-29"
+    },
+    {
+      "merge": "684e4a3",
+      "file": "README.md",
+      "kind": "lines-joined-in-merge",
+      "reason": "同一 merge 把 README 3 处相邻行粘成一行（徽章两行、测试代码块命令、项目状态两条列表项），字符未少只丢换行 —— 正是本判据要抓的形态。已人工修回并保持 CRLF（facts:check 已绿）。",
+      "date": "2026-09-29"
+    }
+  ]
+}

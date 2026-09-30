@@ -2,6 +2,12 @@ import { Router } from 'express';
 import { ENGINE_VERSION, VERSION_SOURCE } from '../core/version.js';
 import { isAuthEnabled } from '../core/apiAuthState.js';
 import { defaults } from '../config/defaults.js';
+// [P1-1 收口 2026-09-29] 利用能力开关的判据必须**唯一**：本文件曾自己写
+// `process.env.EXPLOIT_ENABLED === '1' || === 'true'`，而 `bin/cli.js` 写 `!== '1'`
+// —— 于是 `EXPLOIT_ENABLED=true`（.env.example 之外的常见写法）会出现
+// 「REST 可用 / CLI 拒绝 / 这里回显 false」三方不一致；而 /health 是给监控看的，
+// 它回显的状态与真实能力不符，等于把排障引向错误方向。
+import { isExploitEnabled } from '../core/exploitFlag.js';
 
 export const healthRoutes = Router();
 
@@ -18,7 +24,9 @@ healthRoutes.get('/health', (req, res) => {
       versionSource: VERSION_SOURCE,
       node: process.versions.node,
       authEnabled: isAuthEnabled(),
-      exploitEnabled: process.env.EXPLOIT_ENABLED === '1' || process.env.EXPLOIT_ENABLED === 'true',
+      // 每次请求现读（见 core/exploitFlag.js 的取值时机说明）：运维改完 env 不必重启，
+      // 且回显的就是**此刻**的真实能力，与 /exploit/* 的实际判定同源。
+      exploitEnabled: isExploitEnabled(),
       ratePerSec: defaults.ratePerSec,
     },
     message: 'ok',

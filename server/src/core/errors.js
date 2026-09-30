@@ -9,6 +9,11 @@ export const ErrorCode = {
   // 单独给错误码便于调用方（CI/流水线）区分「参数写错了」与「这个目标不允许碰」。
   SCOPE_VIOLATION: 1004, // 目标不在授权范围内
   SCAN_ID_INVALID: 1005, // scanId 格式非法（防响应头注入/路径穿越）
+  // [P2-1 收口 2026-09-29] 未**声明**授权范围：与 SCOPE_VIOLATION(1004) 是两件事——
+  //   1004 = 范围给了、目标越界（去核对自己范围写对没）；
+  //   1007 = 根本没给范围（去补 body.scope 或 body.scanId）。
+  // 两者的修法完全不同，且 CI/流水线要靠码值自动分类（见 1004 的注释），故不复用同一个码。
+  SCOPE_UNDECLARED: 1007,
   SCAN_NOT_FOUND: 2001, // 扫描不存在/已结束
   ENGINE_BUSY: 2002, // 引擎忙
   HTTP_TIMEOUT: 3001, // HTTP 超时

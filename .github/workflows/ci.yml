@@ -67,6 +67,37 @@ jobs:
       # 那两个 job 因此**从未验证过任何东西**。是靠人工 grep 才发现的，故立此闸门。
       - run: node scripts/ref-integrity.mjs
         name: 引用完整性（CI / scripts / e2e 入口路径存在性）
+      # [P0-ADD 2026-09-29] 模块引用完整性门禁（静态，不执行被检代码）。
+      # 起因：merge commit 684e4a3 把 server/src/services/scanLedger.js 回退成旧版本，
+      # d44ff82 新增的 5 个函数定义整段丢失，而调用点与 `export default {...}` 清单还在
+      # ⇒ 模块 import 即抛 ReferenceError → scanRoutes 具名 import 失败 → 引擎起不来、CLI 全崩。
+      # **2600+ 条测试一条都没拦住**：台账测试崩在 import 阶段（跑不到断言），而
+      # scanRoutes / index.js 从未被任何测试直接 import。故判据必须是"静态扫描全量 server/*.js"。
+      # 本步骤自带 --selftest，钉住"判据不空转"（喂合成样本必须有反应、合法样本零误报）。
+      - run: node scripts/module-loadable.mjs --selftest
+        name: 模块引用完整性自证（判据不空转）
+      - run: node scripts/module-loadable.mjs
+        name: 模块引用完整性（server/*.js 具名导入/导出必须可解析）
+      # [P0-ADD 2026-09-29] 合并态完整性门禁：专门拦"merge 解冲突把别人的实现回退了"。
+      # 与上一条的分工：上一条查"当前代码是否引用完整"，本一条查"相对三个版本是否丢了内容"
+      # —— 684e4a3 单看是一次普通合并，只有横向对比 base/ours/theirs 才能发现它吃掉了 174 行。
+      # --selftest 用**真实历史**复现该事故（base=00ce269/ours=cc5fd55/merge=684e4a3），
+      # 伪造样本容易顺着判据写，真历史不会。
+      - run: node scripts/merge-integrity.mjs --selftest
+        name: 合并态完整性自证（真实事故复现）
+      # 区间模式：一次 push/PR 区间内的**每个** merge 都查。只查 HEAD 会漏掉
+      # "HEAD 是普通提交、但区间中间夹着一个吃代码的 merge" 的情形。
+      # before 为全零（新建分支）或缺失时 rev-list 取不到 merge ⇒ 自然判为通过，不误报。
+      - name: 合并态完整性（merge 不得吃掉任一侧新增的导出/实现）
+        env:
+          MERGE_RANGE: ${{ github.event_name == 'pull_request' && format('{0}..{1}', github.event.pull_request.base.sha, github.event.pull_request.head.sha) || (github.event_name == 'push' && format('{0}..{1}', github.event.before, github.event.after)) || '' }}
+        run: |
+          if [ -n "$MERGE_RANGE" ]; then
+            echo "区间：$MERGE_RANGE"
+            node scripts/merge-integrity.mjs --range "$MERGE_RANGE"
+          else
+            node scripts/merge-integrity.mjs
+          fi
       # [P1-ADD 2026-09-18] 文档数字单一来源门禁：README 的测试数/覆盖率/阈值必须与
       # docs/_facts.json 一致。此前这些数字靠人手维护，实测同时存在 5 处漂移
       # （徽章写 2144 而实际 2172、服务端写 1850 而实际 1881，连当天写的评估报告都已过时）。
