@@ -1,6 +1,4 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import './utilities.css'; /* [2026-10-01 Tailwind 退役] 工具类自有化，见文件头说明 */
 
 /* 字体改由 index.html <link> 预连接加载（CSS @import 位置违规产生构建警告，且串行阻塞 CSS 解析） */
 

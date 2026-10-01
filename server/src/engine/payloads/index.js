@@ -343,8 +343,13 @@ export const SUPPORTED = {
 // negativeControl 才下结论 → 默认直接漏检（E15 靶点 250 请求全空）；同时对含 h2 的
 // 常规页面构成误报隐患。
 // 处置：库名一律要求带错误上下文（驱动类名/异常名/报错短语）才算报错特征。
+// [2026-10-01 收紧] 去掉两个裸词签名：
+//   ① 裸「syntax error」——任何前端框架/通用 5xx 页（JS syntax error、文档页）都含该短语，
+//      换成四个真实报错形态：PG「syntax error at or near」、MySQL extractvalue 回显
+//      「XPATH syntax error」、MSSQL「Incorrect syntax near」、SQLite「near "x": syntax error」。
+//   ② 裸「SQLSTATE」——正文/文档可出现该词，真实报错恒为 SQLSTATE[xxxxx] 带码形态。
 export const ERROR_SIG =
-  /(SQL syntax|mysql_fetch|ORA-\d{5}|Microsoft SQL Server|PostgreSQL.*ERROR|SQLite3|syntax error|unterminated quoted string|Unclosed quotation|extractvalue|updatexml|conversion failed|unknown column|Division by zero|SQL\d{4}[NRT]|DB2 SQL Error|SQLSTATE|Adaptive Server|Sybase\s*(?:error|message)|SQL error code|Firebird.*(?:error|exception)|isc_\d+|Informix\s+SQL|Informix.*(?:error|exception)|JdbcSQLException|org\.h2\.jdbc|Syntax error in SQL statement|org\.hsqldb|HSQLDB.*(?:error|exception)|org\.apache\.derby|Derby.*SQLException|Syntax error: Encountered|Cannot parse|Microsoft Access|ODBC|Jet.*Database|MonetDB.*(?:error|exception)|MonetDB\s+\d{5})/i;
+  /(SQL syntax|mysql_fetch|ORA-\d{5}|Microsoft SQL Server|PostgreSQL.*ERROR|SQLite3|syntax error at or near|XPATH syntax error|Incorrect syntax near|near\s+["'][^\n]{0,80}?["']\s*:\s*syntax error|unterminated quoted string|Unclosed quotation|extractvalue|updatexml|conversion failed|unknown column|Division by zero|SQL\d{4}[NRT]|DB2 SQL Error|SQLSTATE\s*\[|Adaptive Server|Sybase\s*(?:error|message)|SQL error code|Firebird.*(?:error|exception)|isc_\d+|Informix\s+SQL|Informix.*(?:error|exception)|JdbcSQLException|org\.h2\.jdbc|Syntax error in SQL statement|org\.hsqldb|HSQLDB.*(?:error|exception)|org\.apache\.derby|Derby.*SQLException|Syntax error: Encountered|Cannot parse|Microsoft Access|ODBC|Jet.*Database|MonetDB.*(?:error|exception)|MonetDB\s+\d{5})/i;
 
 // per-dbms 报错签名表（P1-D3）：由 ERROR_SIG 拆分，用于「报错回显反推 DBMS」。
 // 无回显/无响应头特征时，ErrorDetector 命中后按此表定库，避免 dbms 恒为 null。
@@ -371,7 +376,7 @@ export const ERROR_SIG_BY_DBMS = [
   // 注意：正则锚定 "unrecognized token" 前缀——MySQL 报错也含 near 但不含该短语，无冲突。
   { dbms: 'SQLite', sig: /(SQLite3|unrecognized token|no such (table|column|function)|SQLite)/i },
   { dbms: 'Oracle', sig: /(ORA-\d{5}|Oracle|PLS-\d+)/i },
-  { dbms: 'DB2', sig: /(DB2 SQL Error|SQLSTATE)/i },
+  { dbms: 'DB2', sig: /(DB2 SQL Error|SQLSTATE\s*\[)/i },
   { dbms: 'Sybase', sig: /(Adaptive Server|Sybase|SQL error code)/i },
   { dbms: 'Firebird', sig: /(Firebird|isc_|Dynamic SQL Error)/i },
   { dbms: 'Informix', sig: /(Informix)/i },

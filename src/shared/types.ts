@@ -281,6 +281,10 @@ export interface ScanConfig {
   scope?: string[];
   // 忽略自签/内网 CA 证书（insecureTls=true：关闭证书校验，失去中间人防护，报告须注明）。
   insecureTls?: boolean;
+  // [2026-10-01] mTLS 客户端证书 PEM 路径（对标 sqlmap --cert）：目标要求 TLS 双向认证时，
+  // 没有客户端证书连第一跳都被拒 —— 检测阶段之前就已出局。与 insecureTls 正交：
+  // 一个管「我信不信目标」，一个管「目标信不信我」。空串/未设 = 不启用。
+  clientCert?: string;
   // 输入校验跳过（默认开）：参数被白名单拦死时跳过 200+ 无效请求；false 可强制完整检测。
   validationSkip?: boolean;
   // ── [P0-FIX 2026-09-09] 后端已支持、UI 此前无入口的调优键 ──
@@ -308,6 +312,18 @@ export interface ScanConfig {
   // 使用者少测两类注入点，报告只会写「未检出」。
   testPath?: boolean;
   testHeaders?: boolean;
+  // ── [2026-10-01 UI-REACH §1.3] 高级注入面（对标 sqlmap --no-cast/--hex/--flush-session/
+  // --union-from/--union-cols/--param-del/--where）──
+  // CLI 能用、引擎真读、REST 白名单已收，此前内置引擎面板无入口（SqlmapOptions 的同名
+  // 控件只作用于 /sqlmap/start 桥接模式）。undefined = 关闭态：请求体省键、引擎走默认兜底，
+  // 前端不设「假默认值」，与引擎侧 falsy 兜底语义对齐。
+  noCast?: boolean; // 关闭数字/静态类型 CAST 包裹（防 CAST 形态触发 WAF）
+  hex?: boolean; // 盲注提取改走 hex 编码回传（防字符集/引号转义干扰）
+  flushSession?: boolean; // 丢弃既有会话缓存，重建注入基线
+  unionFrom?: string | null; // UNION 注入起始列（列数偏移的手动对齐位）
+  unionCols?: string | null; // 固定列数（跳过列数自动二分，1..200）
+  paramDel?: string | null; // 多参数 URL 的参数分隔符（;,|^~ 单字符）
+  dumpWhere?: string | null; // 拖库 SQL 追加的 WHERE 片段（如 id>100，后端拒分号）
   // ── [2026-09-23 UI-REACH] 授权与安全护栏（两键默认值即安全默认，但 UI 必须能看见并改）──
   // productionMode（默认 **true**）：把目标当**生产**系统 —— 高危池（写文件 / RCE / 永久改配置 /
   // DoS）只有在 confirmDestructive===true 时才投放，否则跳过并在 report.summary.constraints 记一条。

@@ -94,7 +94,13 @@ export async function runScanLoop(sm, scanId) {
       rep.summary = rep.summary || {};
       rep.summary.validity = v;
       const negative = (rep.vulns || []).length === 0;
-      const inconclusive = !v.reliable && negative;
+      // [2026-10-02 假阴性修复] 「0 个注入点」必须算不可判定，不能算无漏洞。
+      // 实战形态：批量扫 100 个目标，其中 30 个不通 ⇒ 每个都解析出 0 个注入点、一个请求都没发出去，
+      // 而 verdict 仍写 no_vulnerability_detected —— 使用者读到的却是「这 30 个站没有注入」。
+      // 这比整批报错更危险：**把「根本没测」写成了安全结论**（discover.js 早就打了
+      // noInjectionPoints 标记，但结论层一直没消费它，标记只活在 summary 里没人看）。
+      const nothingTested = negative && rep.summary?.noInjectionPoints === true;
+      const inconclusive = negative && (!v.reliable || nothingTested);
       // [E2-FIX 2026-09-29] 有命中时 verdict 必须写 vulnerability_detected —— 旧实现恒写
       // no_vulnerability_detected，报告本体「summary.verdict 与 vulns 自相矛盾」（真机 E2 实测：
       // 3 条 High/Medium 漏洞与 no_vulnerability_detected 同文件共存）。此前台账（recordScan
@@ -107,7 +113,12 @@ export async function runScanLoop(sm, scanId) {
           ? 'no_vulnerability_detected'
           : 'vulnerability_detected';
       rep.summary.verdictNote = inconclusive
-        ? `未检出漏洞 ≠ 无漏洞：本次扫描 ${v.reason}；${v.inconclusivePoints.length} 个注入点未完成有效检测，阴性结论不成立，需按建议处置后复扫（${v.advice}）`
+        ? (nothingTested
+          // 「0 注入点」与「测了但网络/会话不可靠」是两种不同处置，文案必须分开：
+          // 前者要人去确认目标可达性与 URL 是否带参数，后者要人去重扫未决点。
+          ? `本次扫描未发现任何可测注入点（${rep.summary.noInjectionPointsHint || '目标 URL 无参数且未启用请求头/path 段'}）——` +
+            '一次检测都没跑，「未检出」不构成任何结论。若目标是可达的 API，请确认 URL 带 query 参数或改用 --body / jsonBody / xmlBody 指定注入面'
+          : `未检出漏洞 ≠ 无漏洞：本次扫描 ${v.reason}；${v.inconclusivePoints.length} 个注入点未完成有效检测，阴性结论不成立，需按建议处置后复扫（${v.advice}）`)
         : negative
           ? '目标在本次扫描窗口内可达、未被拦且会话有效，「未检出漏洞」的阴性结论可信度正常（仍建议对高风险参数人工复核）'
           : `本次扫描检出 ${(rep.vulns || []).length} 条漏洞，命中详情见 vulns`;

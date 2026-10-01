@@ -44,6 +44,9 @@ SANDBOX_LABS = [
     # 召回基线里的 2 条真实 MySQL 场景：直跑会因"没有 mysqld 在监听"整组 SKIP（自 09-10
     # 起如此）。沙箱注入 MYSQL_HOST/PORT/USER/PASSWORD 后驱动就连得上 —— 实测 16 → 18 全绿。
     ("recall-lab", "e2e/recall-lab/recall.e2e.js"),
+    # [2026-10-01] E2 全链路（UI→REST→引擎→真实拖库一条链）：需真浏览器（Edge/Chrome，
+    # 无则按 SKIP 口径零断言退出）+ dist 生产构建（缺失时现场 vite build）
+    ("fullchain-lab", "e2e/fullchain-lab/run.mjs"),
 ]
 
 

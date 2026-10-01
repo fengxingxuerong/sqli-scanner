@@ -16,27 +16,16 @@ import { ColumnTypeEnumerator } from './ColumnTypeEnumerator.js';
 import { WafIdentifier } from '../core/waf/WafIdentifier.js';
 import { recommend } from '../core/waf/wafRecommend.js';
 import { ReportGenerator } from '../services/ReportGenerator.js';
-import { createTarget, createReport, createVulnerability } from './models.js';
+import { createTarget, createReport } from './models.js';
 // [P0-FIX 2026-09-09] 生产护栏：扫描级高危池策略通过 AsyncLocalStorage 下发给 selectPayloads
-import { runWithDestructivePolicy, countDestructiveCandidates, registryMode } from './payloadRegistry.js';
-import { TECHNIQUE_TYPES } from './payloads.js';
-import { defaults } from '../config/defaults.js';
+import { runWithDestructivePolicy } from './payloadRegistry.js';
 import * as eventBus from '../core/eventBus.js';
-import { withSafeUrl } from '../core/safeUrlKeeper.js';
-import { withCsrf } from '../core/csrfKeeper.js';
 import { httpClient } from '../core/httpClient.js';
-import { DirectConnector } from '../core/directConnector.js';
-import { oobReceiver } from '../core/oobReceiver.js';
 import { logger } from '../core/logger.js';
-// [大文件拆分 2026-09-20] `buildInjectionRequest` / `sendInjection` / `applyPrefixSuffix`
-// 与 `isUnusableResponse` 的 import 已随预过滤家族一起移入 scan/prefilter.js。
-// 其中那条 P0-FIX 说明（sendInjection 把失败降级为带 __netErr 的对象而非 null，
-// 预过滤若继续用 `res == null` 判断会把两次失败看成「同构」→ 新增假阴性）也一并搬到
-// prefilter.js 顶部，避免这条关键约束随搬移丢失。
 // [P0-SEC 2026-09-08] 扫描级 scope 登记：放在 ScanManager 而不是只放在 REST 路由里——
 // CLI（server/bin/cli.js）与测试/复用型调用不进路由，只放路由会造成「Web 有范围约束、
 // CLI 没有」的双标（而 CLI 才是渗透现场的主入口）。
-import { parseScope, registerScanScope, releaseScanScope } from '../core/scopeGuard.js';
+import { parseScope, registerScanScope } from '../core/scopeGuard.js';
 import { runScanLoop } from './scanRunner.js';
 import { extractAll, extractByScope } from './extractScope.js';
 // [大文件拆分 2026-09-20] 注入点预过滤家族（~390 行、9 个方法）外移至 scan/prefilter.js。
@@ -61,8 +50,22 @@ import { mapPool, mergeExtracted, mergeExtractedForResume, hasData, publicTarget
 
 // 扫描状态机的终态集合（stop/pause 与路由层共用一份，不要在两处各列一遍数组）
 export const TERMINAL_STATUSES = ['completed', 'stopped', 'error'];
-// 暂停轮询间隔：与 scan/detect.js 的点边界等待同量级，忙等与迟钝之间取个折中
-const PAUSE_POLL_MS = 100;
+
+// [五期拆分 2026-10-01] 类体只剩构造器、start/stop/pause/resume、报告面（status/getReport/
+// exportReport）、_run 与预过滤/提取薄委托；客户端工厂（scanClient）、指纹缓存（fingerprint）、
+// 暂停与回收（lifecycle）、技术位选择（techniqueSelect）、补充趟（supplemental）、能力抑制
+// 汇总（capabilityConstraints）物理搬移到 ./scan/*（函数体逐行原样，由 ScanManager.prototype
+// 挂载，this 语义不变）—— scanRunner/extractScope/discover 经实例成员的调用面与 30 个测试
+// 文件的导入面完全不变。
+import {
+  _wrapWithSignal, _waitWhilePaused, _retire, _disposeScan, _evictIfOverLimit,
+} from './scan/lifecycle.js';
+import { getConnector, _maybeClose, getScanClient } from './scan/scanClient.js';
+import { _fingerprintCached } from './scan/fingerprint.js';
+import { _selectedTechs, activeDetectors } from './scan/techniqueSelect.js';
+import { _runSecondOrder, _runNoSql } from './scan/supplementalRuns.js';
+import { collectCapabilityConstraints } from './scan/capabilityConstraints.js';
+export { collectCapabilityConstraints };
 
 /** 上下文回收窗口（毫秒）：非法值/未设置一律回落 30s，不设 0（0=立即回收会让报告永远读不到） */
 function _envRetireTtl() {
@@ -192,37 +195,6 @@ export class ScanManager {
     return this.scans.get(scanId)?.abortController?.signal || null;
   }
 
-  // [⑮] 包装 httpClient：自动将扫描级 signal 注入到每次 request 调用
-  // [P0-FIX 2026-09-28 接口靶场] 顺带把**暂停**下沉到请求边界：
-  //   暂停此前只在 scan/detect.js 的「点边界」生效，而一个点的检测是几十上百个包
-  //   （布尔/时间盲注尤甚）。单参数目标按暂停键后靶站仍继续被打满，实测 2.6s 内又发了
-  //   5 个包 —— "暂停"在实战里的用途恰恰是"目标开始报警了先停手"，那一步必须真的停手。
-  //   挂在唯一一个所有探测请求都会经过的出口上（而不是去改每个检测器），
-  //   暂停期间不占用连接、不产生请求，resume 后原样继续。
-  _wrapWithSignal(scanId, client) {
-    const signal = this.getSignal(scanId);
-    if (!signal || !client || typeof client.request !== 'function') return client;
-    return {
-      ...client,
-      request: async (opts) => {
-        await this._waitWhilePaused(scanId);
-        return client.request({ ...opts, signal });
-      },
-    };
-  }
-
-  /**
-   * 暂停时阻塞到 resume/stop（与点边界等待同一语义：不终止在途请求、不回收上下文）。
-   * @param {string} scanId
-   */
-  async _waitWhilePaused(scanId) {
-    for (;;) {
-      const s = this.scans.get(scanId);
-      if (!s || !s.paused || s.cancelled) return;
-      await new Promise((resolve) => setTimeout(resolve, PAUSE_POLL_MS));
-    }
-  }
-
   // [P0-FIX] 暂停扫描：设置 paused 标志（扫描循环在点边界检查并等待），
   // 不回收上下文、不终止请求。仅 running 状态可暂停。
   pause(scanId) {
@@ -304,218 +276,6 @@ export class ScanManager {
     return this.reportGen.toJSON(report);
   }
 
-  // 选中技术集合：空/未定义 → 全部（含 stacked）；否则按所选
-  // 若配置了 risk 级别，缩减高风险技术：
-  //   risk 1：仅 union/error/boolean（安全，无写请求/无长时间等待）
-  //   risk 2：全部（含 time/stacked/oob，默认）
-  //   risk 3：全部 + 额外 OR 变体（由 Detector 层消费 risk 字段）
-  _selectedTechs(config) {
-    const sel = config && config.techniques;
-    let techs = sel && sel.length ? sel : TECHNIQUE_TYPES;
-    // [P0 2026-09-09] knownPoint.techniques：已知注入点的技术位白名单（扫描级过滤，
-    // 与 config.techniques 取交集）——手工确认 union 注入后不再全技术位扫
-    const kpTechs = config && config.knownPoint && Array.isArray(config.knownPoint.techniques)
-      ? config.knownPoint.techniques
-      : null;
-    if (kpTechs && kpTechs.length) techs = techs.filter((t) => kpTechs.includes(t));
-    // risk 门控
-    const risk = (config && config.risk) != null ? config.risk : 2;
-    if (risk < 2) {
-      // risk 1：排除 time（慢速等待）、stacked（写操作风险）、oob（出站请求）
-      techs = techs.filter((t) => !['time', 'stacked', 'oob'].includes(t));
-    }
-    // risk 3 不需要额外过滤，因为 risk 3 的 OR 变体由 Detector 独立消费 risk 字段
-    return techs;
-  }
-
-  // 按技术选择过滤检测器（唯一过滤入口）
-  activeDetectors(config) {
-    const sel = this._selectedTechs(config);
-    return this.detectors.filter((d) => sel.includes(d.technique));
-  }
-
-  // 连接器选择：direct 目标用 DirectConnector 直连数据库，其余用统一 HttpClient 单例。
-  getConnector(target) {
-    return target && target.mode === 'direct' ? new DirectConnector(target) : this.httpClient;
-  }
-
-  // 关闭非单例的连接器（如直连 DirectConnector），避免连接泄漏；HttpClient 单例不关。
-  async _maybeClose(connector) {
-    if (connector && connector !== this.httpClient && connector.close) {
-      try {
-        await connector.close();
-      } catch {
-        /* ignore */
-      }
-    }
-  }
-
-  // 获取扫描作用域的 HttpClient 视图：http 目标包装为按 scanId 独立限速桶的客户端
-  // （前端 ratePerSec 设置由此生效，Detector/Extractor 无需改动），direct 目标原样返回。
-  getScanClient(scanId, target) {
-    const connector = this.getConnector(target);
-    if (connector !== this.httpClient || typeof connector.forScan !== 'function') return connector;
-    if (!this._scanClients.has(scanId)) {
-      // [sqlmap 对标] --reqrate：reqRate > 0 时覆盖 ratePerSec 作为 TokenBucket 速率
-      const reqRate = target.config && target.config.reqRate;
-      const ratePerSec = (reqRate && reqRate > 0 ? reqRate : (target.config && target.config.ratePerSec)) || undefined;
-      const sc = connector.forScan(scanId, ratePerSec);
-      // [sqlmap 对标] --safe-url/--safe-freq：配置了保活 URL 时包装客户端
-      // （SSRF 校验在 client.request 内逐请求执行；失败静默不影响扫描）
-      const cfg = (target && target.config) || {};
-      let view = sc;
-      if (typeof cfg.safeUrl === 'string' && /^https?:\/\//i.test(cfg.safeUrl)) {
-        view = /** @type {any} */ (withSafeUrl(sc, { safeUrl: cfg.safeUrl, safeFreq: cfg.safeFreq }));
-      }
-      // [sqlmap 对标 2026-09-14] --csrf-url/--csrf-token：CSRF 会话层（取页提取 token，
-      // 每请求自动携带 + 定期刷新）。挂在 safeUrl 之后：token 取页吃到保活/协议策略。
-      if (typeof cfg.csrfUrl === 'string' && /^https?:\/\//i.test(cfg.csrfUrl)) {
-        view = /** @type {any} */ (withCsrf(view, {
-          csrfUrl: cfg.csrfUrl,
-          csrfTokenName: cfg.csrfTokenName,
-          csrfMethod: cfg.csrfMethod,
-          refreshFreq: cfg.csrfRefreshFreq,
-        }));
-      }
-      // [P2-5] --force-ssl / --ignore-redirects：协议层策略注入每个请求（对标 sqlmap）。
-      // forceSsl：目标 http:// 强制升级 https（httpClient.request 消费改写）；
-      // ignoreRedirects：不跟随 3xx（httpClient.request 消费跳转上限 0）。
-      // 在 forScan 视图之上再包一层，Detector/Extractor/二阶/NoSQL/WAF 全路径统一生效，
-      // 且不影响未配协议策略的存量扫描（无配置时 view 原样返回零开销）。
-      // [P1-FIX 2026-09-08 接线补齐] 出口层三键走同一个注入点：
-      //   insecureTls / trustProxyEnv / ssrfViaProxy 此前只能靠 defaults 或环境变量——
-      //   Detector.send 等 7 个调用点只透传 `proxy/auth`，per-scan config 到不了 HttpClient，
-      //   于是「UI 勾了忽略自签证书」对实际发包无效（引擎已实现能力在 API 层不可达）。
-      //   在扫描级视图统一注入后，新增出口类配置只需改 defaults + 白名单 + 这一处，不再漏接线。
-      const egressPatch = {};
-      if (cfg.insecureTls === true) egressPatch.insecureTls = true;
-      if (cfg.trustProxyEnv !== undefined) egressPatch.trustProxyEnv = cfg.trustProxyEnv !== false;
-      if (cfg.ssrfViaProxy !== undefined) egressPatch.ssrfViaProxy = cfg.ssrfViaProxy;
-      const proto =
-        cfg.forceSsl === true || cfg.ignoreRedirects === true || Object.keys(egressPatch).length > 0
-          ? egressPatch
-          : null;
-      const baseHead = typeof view.headRequest === 'function' ? view.headRequest.bind(view) : null;
-      if (proto) {
-        const baseRequest = view.request.bind(view);
-        view = {
-          ...view,
-          request: (opts) => baseRequest({
-            ...opts,
-            ...(cfg.forceSsl === true ? { forceSsl: true } : {}),
-            ...(cfg.ignoreRedirects === true ? { ignoreRedirects: true } : {}),
-            ...egressPatch,
-          }),
-          // [P0-FIX 2026-09-09] headRequest（--null-connection）必须走同一层包装：
-          // 它不经过 view.request，以前只包 request 等于「HEAD 一路看不到 insecureTls/代理/scope 以外的出口语义」。
-          // 实战表现：自签目标上 GET 能扫、开了 --null-connection 就全量失败，现场极难归因。
-          ...(baseHead
-            ? {
-                headRequest: (url, opts = {}) =>
-                  baseHead(url, {
-                    ...opts,
-                    ...(cfg.forceSsl === true ? { forceSsl: true } : {}),
-                    ...(cfg.ignoreRedirects === true ? { ignoreRedirects: true } : {}),
-                    ...egressPatch,
-                  }),
-              }
-            : {}),
-        };
-      }
-      this._scanClients.set(scanId, view);
-    }
-    return this._scanClients.get(scanId);
-  }
-
-  // 指纹结果按目标缓存（同目标多注入点不重复跑 8-9 请求指纹）。
-  // fpCache 存 Promise：并发 worker 同时命中 miss 时共享同一 in-flight 指纹，杜绝重复请求。
-  // [CTX-FIX 2026-09-18] **判不出的结果不共享**：整轮指纹是用「触发它的那一个注入点」的上下文跑的
-  //   （闭合前缀与点位置直接决定探针能否执行）。开 --test-headers/--test-path 后排在最前的常常是
-  //   path/header 点，其上下文会把整轮指纹跑废，而 null 一旦被缓存就被后面每个点继承：
-  //   实测 blackbox-lab C2-blindtime（真 MySQL 时间盲注点）r2 档因此 dbms=null → time 通道按
-  //   未知方言投放 → 漏检；同一目标关掉 header/path 点单跑则 dbms=MySQL 正常命中。
-  //   现给「重跑」留预算：最多 FP_RETRY_MAX+1 次尝试，成功定库的目标零额外请求（行为与原来一致）。
-  async _fingerprintCached(fpCache, ctxBase, target, point) {
-    // [CTX-FIX 2026-09-18] 缓存键按「点类别」分桶，不再整台目标共享一份：
-    // path / header 点的探针上下文与 query/body 点往往完全不同（实测 /api/sleep 的 path 点
-    // 探针全部 404 → 整轮指纹 null），而检测是多点**并发**跑的（detect.js 里 Promise.all），
-    // 谁先跑谁定调 → 真能出结果的 query 点只能继承那份 null。
-    // 分桶后最多每类各跑一次指纹（query/body/cookie 仍共用 'main'，与原行为等价）。
-    const cls = point?.location === 'path' || point?.location === 'header' ? point.location : 'main';
-    const key = `${target.baseUrl || target.url || (target.mode === 'direct' ? 'direct' : 'target')}|${cls}`;
-    const FP_RETRY_MAX = 2;
-    let slot = fpCache.get(key);
-    if (!slot) {
-      slot = { promise: null, attempts: 0 };
-      fpCache.set(key, slot);
-    }
-    if (!slot.promise) {
-      slot.attempts++;
-      const allowRetry = slot.attempts <= FP_RETRY_MAX;
-      slot.promise = this.fp
-        .fingerprint({ ...ctxBase, target, point })
-        .catch((e) => {
-          logger.warn(`指纹识别失败：${e.message}`);
-          return null;
-        })
-        .then((res) => {
-          // 未定出库 → 撤下这条 in-flight 记录，让下一个注入点用自己的上下文再试
-          if (allowRetry && (!res || !res.dbms)) slot.promise = null;
-          return res;
-        });
-    }
-    return await slot.promise;
-  }
-
-  // 扫描上下文回收：completed/stopped/error 后置 retiredAt，TTL 到期清 scans 条目 + eventBus + 限速桶
-  _retire(scanId) {
-    const s = this.scans.get(scanId);
-    if (!s || s._retired) return;
-    s._retired = true;
-    s.retiredAt = new Date().toISOString();
-    const timer = setTimeout(() => {
-      this._disposeScan(scanId);
-    }, this.retireTtlMs);
-    if (typeof timer.unref === 'function') timer.unref(); // 不阻塞进程退出
-    s._retireTimer = timer;
-  }
-
-  // 立即清理某次扫描的全部上下文（TTL 到期 / 超限淘汰）
-  _disposeScan(scanId) {
-    // [P0-SEC] 同步回收 scope 登记（防同 id 复用旧范围，也防 Map 无界增长）
-    releaseScanScope(scanId);
-    const rec = this.scans.get(scanId);
-    this.scans.delete(scanId);
-    eventBus.dispose(scanId);
-    if (this._scanClients.has(scanId)) {
-      if (typeof this.httpClient.removeBucket === 'function') this.httpClient.removeBucket(scanId);
-      // [sqlmap 对标] --max-requests：清理请求计数（防 Map 无界增长）
-      if (typeof this.httpClient.removeRequestCount === 'function') this.httpClient.removeRequestCount(scanId);
-      // [P1-FIX 2026-09-05] Cookie Jar 随扫描退役清理（防跨扫描会话泄漏 + Map 无界增长）
-      if (typeof this.httpClient.clearJar === 'function') this.httpClient.clearJar(scanId);
-      this._scanClients.delete(scanId);
-    }
-    if (rec && rec._retireTimer) clearTimeout(rec._retireTimer);
-  }
-
-  // scans Map 容量上限：超限淘汰最旧扫描
-  // [MERGED: engine ★FIX-2] 只淘汰「非 running」的扫描：运行中的扫描若被淘汰，报告会立即
-  // 从 getReport 中消失（用户拿不到结果），而 _run 的请求仍在继续（脱离治理）。
-  // 全部 running 时宁可暂时超限也不淘汰在途扫描。
-  _evictIfOverLimit() {
-    if (this.scans.size <= this.maxScans) return;
-    let victim = null;
-    let oldestTs = Infinity;
-    for (const [id, rec] of this.scans) {
-      if (rec.status === 'running') continue; // 不淘汰运行中的扫描
-      const ts = rec.createdAt || 0;
-      if (ts < oldestTs) {
-        oldestTs = ts;
-        victim = id;
-      }
-    }
-    if (victim) this._disposeScan(victim);
-  }
   // 扫描流水线
   async _run(scanId) {
     // [P0-FIX 2026-09-09] 把生产护栏策略放进本次扫描的异步上下文：所有经 selectPayloads 的筛选
@@ -530,6 +290,7 @@ export class ScanManager {
       () => runScanLoop(this, scanId)
     );
   }
+
   // [B-perf] skip-static 参数预筛选（对标 sqlmap --skip-static，opt-in）：
   // 返回「需完整检测」的点集合；被判静态（同值重复 / 哨兵探测无差异）的点被过滤。
   // 两层判定（均保守，宁可多测不漏检）：
@@ -612,130 +373,6 @@ export class ScanManager {
     return prefilterSimilar(baseBody, baseStatus, body, status);
   }
 
-  // 二阶注入补充趟：在既有一阶聚合之后运行，对"每个存储点 × 每个触发页"调用独立 SecondOrderDetector。
-  // 门控（唯一硬门）：secondOrder.enabled && triggerUrls 非空 && 存在 isStorePoint 点；
-  // 否则直接 return []（零写、对一阶零侵入）。命中结果复用既有 foundByPoint → 聚合去重 → riskOf 通道。
-  async _runSecondOrder(scanId, target, points, dbms) {
-    const so = (target.config && target.config.secondOrder) || {};
-    if (!so.enabled) return []; // 未启用：直接跳过，对目标零写
-    const triggerUrls = Array.isArray(so.triggerUrls) ? so.triggerUrls : [];
-    if (triggerUrls.length === 0) return []; // 无候选触发页：跳过
-    const storePoints = points.filter((p) => p && p.isStorePoint);
-    if (storePoints.length === 0) return []; // 无存储点：跳过
-
-    // 告警：开启二阶检测即代表将对目标发起真实写请求（POST 注册/评论/资料）
-    logger.warn(
-      '二阶检测已开启：将对目标发起真实写请求（POST 注册/评论/资料），仅在你确认已授权目标时执行'
-    );
-
-    // 二阶 OOB 触发：oobTrigger 开启且 oob 启用时，确保带外接收端就绪（幂等；失败仅告警不阻断，
-    // 检测器侧会再以 OOB_DISABLED 拒绝未就绪分支，由下方 try/catch 捕获记录）
-    const oobCfg = (target.config && target.config.oob) || {};
-    if (so.oobTrigger === true && oobCfg.enabled) {
-      try {
-        await oobReceiver.start(oobCfg);
-      } catch (e) {
-        logger.warn(`二阶 OOB 接收端启动失败，OOB 触发判定将不可用：${e.message}`);
-      }
-    }
-
-    const collected = [];
-    // [P0-FIX 2026-09-06] ctxBase 补 dbms：缺失时 SecondOrderDetector._buildProbe 走
-    // SECOND_ORDER_PROBES[0]（单引号裸探针）而非该库报错模板 → 探针退化必漏（real-world-lab 实测）
-    const ctxBase = { httpClient: this._wrapWithSignal(scanId, this.getScanClient(scanId, target)), config: target.config, dbms };
-    // [P1-FIX 2026-09-07] 按「存储目标」分组调度：同一 actionUrl（同一张表单）的字段共享
-    // 同一份存储——并发检测时 A 点刚写入的探针会被 B 点的写入覆盖（实测 body 点探针被
-    // item_id 点阴性对照覆盖 → 触发页读到良性值 → 恒漏检）。故同组内严格串行，
-    // 不同 actionUrl（不同表单/不同存储）之间仍可并行。
-    const storeGroups = new Map();
-    for (const p of storePoints) {
-      const key = String(p.actionUrl || p.id);
-      if (!storeGroups.has(key)) storeGroups.set(key, []);
-      storeGroups.get(key).push(p);
-    }
-    const groups = [...storeGroups.values()];
-    // [MERGED: perf] 并发治理：旧实现双层 for 全串行（storePoints × triggerUrls 逐对 await），
-    // 10 存储点 × 3 触发页 = 30 次检测墙钟线性累加。现按「存储组」并行（_mapPool 限并发，
-    // 默认 2；组内存储点与触发页均串行——同一存储内并发写会相互污染读回判定）。
-    const concurrency = Math.max(1, Math.min(Number(so.concurrency) || 2, groups.length));
-    await this._mapPool(
-      groups,
-      async (group) => {
-        for (const point of group) {
-          const pointDbms = dbms || point.dbms; // 复用一阶已识别的 dbms（若有时）
-          for (const triggerUrl of triggerUrls) {
-            const ctx = { ...ctxBase, target, point, dbms: pointDbms, triggerUrl, scanId };
-            try {
-              const result = await this.secondOrderDetector.detect(ctx);
-              if (result.vulnerable) {
-                // 复用既有聚合/风险纳管通道：先经 ReportGenerator.riskOf 定级（second_order → High）
-                const risk = this.reportGen.riskOf([
-                  createVulnerability(point.id, 'second_order', 'Medium', result.payloads, result.evidence),
-                ]);
-                const vuln = createVulnerability(
-                  point.id,
-                  'second_order',
-                  risk,
-                  result.payloads,
-                  result.evidence
-                );
-                vuln.dbms = result.dbms;
-                collected.push(vuln);
-                eventBus.emit(scanId, 'detection_found', { ...result, riskLevel: risk });
-              }
-            } catch (e) {
-              logger.warn(`二阶检测失败（点 ${point.id} / 触发页 ${triggerUrl}）：${e.message}`);
-            }
-          }
-        }
-      },
-      concurrency
-    );
-    await this._maybeClose(ctxBase.httpClient);
-    return collected;
-  }
-
-  // 非 SQL 注入补充趟（NoSQL/GraphQL/SSTI）：门控 noSql.enabled 才运行，默认关闭（opt-in）。
-  // 对一阶流水线零侵入：仅在启用时对每个注入点 × 每个类别（nosql/graphql/ssti）调用独立 NoSqlInjectionDetector。
-  // 命中复用既有聚合/风险纳管通道（technique 统一记为 'nosql'，报告层按 noSqlKind 细分展示）。
-  async _runNoSql(scanId, target, points, dbms) {
-    const noSql = (target.config && target.config.noSql) || {};
-    if (!noSql.enabled) return []; // 未启用：直接跳过，对目标零额外请求
-    const kinds = Array.isArray(noSql.kinds) && noSql.kinds.length ? noSql.kinds : ['nosql', 'graphql', 'ssti'];
-    const collected = [];
-    const ctxBase = { httpClient: this._wrapWithSignal(scanId, this.getScanClient(scanId, target)), config: target.config };
-    logger.info(`非SQL注入检测已开启（类别：${kinds.join('/')}），将对 ${points.length} 个注入点逐一探测`);
-    // [MERGED: perf] 并发治理：旧实现点 × 类别双层串行；现按「注入点」并行（_mapPool 限并发 2），
-    // 同一注入点内类别仍串行（探测表按成本升序命中即停的短路语义不变）。
-    const concurrency = Math.max(1, Math.min(Number(noSql.concurrency) || 2, points.length));
-    await this._mapPool(
-      points,
-      async (point) => {
-        for (const kind of kinds) {
-          const ctx = { ...ctxBase, target, point, dbms: dbms || point.dbms, noSqlKind: kind };
-          try {
-            const result = await this.noSqlDetector.detect(ctx);
-            if (result.vulnerable) {
-              const risk = this.reportGen.riskOf([
-                createVulnerability(point.id, 'nosql', 'Medium', result.payloads, result.evidence),
-              ]);
-              const vuln = createVulnerability(point.id, 'nosql', risk, result.payloads, result.evidence);
-              vuln.dbms = null;
-              vuln.noSqlKind = kind; // 透传细分类别（NoSQL/GraphQL/SSTI）
-              collected.push(vuln);
-              eventBus.emit(scanId, 'detection_found', { ...result, riskLevel: risk });
-            }
-          } catch (e) {
-            logger.warn(`非SQL注入检测失败（点 ${point.id} / 类别 ${kind}）：${e.message}`);
-          }
-        }
-      },
-      concurrency
-    );
-    await this._maybeClose(ctxBase.httpClient);
-    return collected;
-  }
-
   // 完整拖库（库→表→列→数据）
   // extractScope 存在时（CLI --dbs/--tables/--columns/--dump/--current-db/--current-user/--count）
   // 走 _extractByScope 定向枚举；否则保留既有全量拖库逻辑（零回归）。
@@ -772,92 +409,19 @@ export class ScanManager {
   }
 }
 
-
-/**
- * [P0-FIX 2026-09-09] 汇总「本次扫描被抑住了什么能力」，写进 report.summary.constraints。
- *
- * 为什么需要：本项目反复出现同一类缺陷——开关存在、引擎支持、中间断链，而用户以为生效了。
- * 把「没做」显式写出来，质控与交付时才能回答「你到底测了什么」；一句「已按最高风险等级测试」
- * 在没投放高危池时就是不实陈述。仅记真实可抑制项：当前 level/risk 本来就投不到高危模板时不记，
- * 免得给人一条假线索去改无关开关。
- *
- * @param {object} config 扫描配置（target.config）
- * @param {object} [target] 扫描目标（需要 cookieParams/headerParams 才能判断"参数给了但没测"）
- * @returns {string[]} 可读说明（空数组 = 本次无任何能力被抑制）
- */
-export function collectCapabilityConstraints(config = {}, target = {}) {
-  const out = [];
-  const productionMode = config.productionMode !== false;
-  const confirmDestructive = config.confirmDestructive === true;
-  const risk = Number(config.risk) || Number(defaults.risk) || 2;
-  const level = Number(config.level) || Number(defaults.level) || 1;
-  const useRegistry = registryMode(config);
-
-  if (productionMode && !confirmDestructive) {
-    let n = 0;
-    try {
-      n = countDestructiveCandidates({ level, risk, testFilter: config.testFilter, testSkip: config.testSkip });
-    } catch {
-      n = 0;
-    }
-    if (n > 0) {
-      out.push(
-        `高危 payload 池（写文件/RCE/重运算类，本配置下候选 ${n} 条）已抑制：` +
-          'productionMode=true 且未 confirmDestructive=true。确需在已授权目标上投放时显式设 confirmDestructive=true；' +
-          '靶场/演练环境可整体关护栏（productionMode=false）'
-      );
-    }
-  }
-  if (!useRegistry && risk >= 3) {
-    out.push(
-      '扁平 payload 路径（useRegistry=false）不经过注册表高危池门控：REST/UI 下高危向量根本不会投放'
-        + '（只允许 CLI 的 --risk 3 + --confirm-destructive 显式合并到进程级 payload 池）。' +
-        '要真正拿到 risk=3 语义请用 useRegistry=true（受本护栏约束）或走 CLI 双开关'
-    );
-  }
-  // testFilter/testSkip 是**注册表条目的属性**（按 entry.id 过滤）：扁平路径下这两个键没有任何读取点。
-  // 此前 time 通道默认走注册表（另三个走扁平），所以用户设了 --test-filter 会得到「只筛了一条通道」
-  // 的结果而无处可见。三通道判定点统一后，这里把「完全没生效」这一侧也讲明白。
-  if (!useRegistry && (config.testFilter || config.testSkip)) {
-    out.push(
-      `--test-filter/--test-skip 未生效（本次收到 ${config.testFilter ? `filter=${config.testFilter}` : ''}${config.testFilter && config.testSkip ? ' ' : ''}${config.testSkip ? `skip=${config.testSkip}` : ''}）：` +
-        '过滤条件作用于声明式注册表条目，扁平 payload 路径没有读取点。确需按 id 精选向量请同时设 useRegistry=true（CLI：--use-registry）'
-    );
-  }
-  const so = config.secondOrder && typeof config.secondOrder === 'object' ? config.secondOrder : {};
-  if (so.enabled === true && productionMode && so.allowWrites !== true) {
-    out.push(
-      '二阶非幂等写请求（POST/PUT/PATCH/DELETE）已抑制：productionMode=true 时需 secondOrder.allowWrites=true。' +
-        '未放行时只跑幂等方法（GET/HEAD/OPTIONS），存储型写路径可能测不到'
-    );
-  }
-  if (config.enableExtract === true) {
-    out.push(
-      '本次开启拖库（enableExtract）：提取阶段会向目标发出大量读请求（受限速与行数上限约束）。' +
-        '生产环境建议控制行数并避开业务高峰'
-    );
-  }
-  // [P0-FIX 2026-09-28 接口靶场] 调用方给了 cookieParams / headerParams，但 level 不够时
-  //   TargetParser 根本不会把它们变成注入点（cookie 需 level≥2、header 需 level≥3 或
-  //   testHeaders，见 engine/TargetParser.js:117-136）。后果是接口层最坏的一类形状：
-  //   请求 200、扫描跑完、报告写「未检出」，而"我明明传了 Cookie 参数"这一线索完全消失。
-  //   口径与 CLI 一致（--level 决定测不测 cookie/header），这里只负责把"没测"喊出来。
-  const levelNum = Number(level) || 1;
-  const cookieKeys = Object.keys(target.cookieParams || {});
-  if (cookieKeys.length && levelNum < 2) {
-    out.push(
-      `cookieParams 未被测试（收到 ${cookieKeys.length} 个：${cookieKeys.slice(0, 5).join(', ')}）：` +
-        `cookie 注入点需 level≥2，本次 level=${levelNum}。要测 Cookie 请设 config.level=2（CLI：--level 2）`
-    );
-  }
-  const headerKeys = Object.keys(target.headerParams || {});
-  if (headerKeys.length && levelNum < 3 && config.testHeaders !== true) {
-    out.push(
-      `headerParams 未被测试（收到 ${headerKeys.length} 个：${headerKeys.slice(0, 5).join(', ')}）：` +
-        `header 注入点需 level≥3（或 config.testHeaders=true），本次 level=${levelNum}`
-    );
-  }
-  return out;
-}
+// —— 五期拆分（2026-10-01）：搬移的方法在原型上按原名挂载（与原类方法同调用风格，this 语义不变）——
+ScanManager.prototype._wrapWithSignal = _wrapWithSignal;
+ScanManager.prototype._waitWhilePaused = _waitWhilePaused;
+ScanManager.prototype._retire = _retire;
+ScanManager.prototype._disposeScan = _disposeScan;
+ScanManager.prototype._evictIfOverLimit = _evictIfOverLimit;
+ScanManager.prototype.getConnector = getConnector;
+ScanManager.prototype._maybeClose = _maybeClose;
+ScanManager.prototype.getScanClient = getScanClient;
+ScanManager.prototype._fingerprintCached = _fingerprintCached;
+ScanManager.prototype._selectedTechs = _selectedTechs;
+ScanManager.prototype.activeDetectors = activeDetectors;
+ScanManager.prototype._runSecondOrder = _runSecondOrder;
+ScanManager.prototype._runNoSql = _runNoSql;
 
 export default ScanManager;

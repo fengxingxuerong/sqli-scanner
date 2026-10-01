@@ -108,7 +108,8 @@ test('[P2] 显式 null 的方言（Derby）不得回落生成 ASCII(...) 探针'
 // ── ⑤ 源码契约：ASCII_FN 中不得再出现 unicode（Derby 专属）─────────────────
 test('[P2] 源码契约：ASCII_FN 不再对 Derby 使用 unicode()', async () => {
   const { readFileSync } = await import('node:fs');
-  const src = readFileSync(new URL('../src/engine/extractionMaps.js', import.meta.url), 'utf-8');
+  // [拆分 2026-10-01] ASCII_FN 随 extractionMaps 拆分移入 extraction/blindFns.js，契约同步改指向
+  const src = readFileSync(new URL('../src/engine/extraction/blindFns.js', import.meta.url), 'utf-8');
   // 定位 ASCII_FN 块，确认 Derby 不是 unicode(...)
   const m = /export const ASCII_FN\s*=\s*\{([\s\S]*?)\n\};/.exec(src);
   assert.ok(m, '应能定位 ASCII_FN 定义');

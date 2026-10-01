@@ -10,10 +10,18 @@
 背景：新建的「HTTP 接口 × 真实靶场」套件（44 条用例 / 26 个端点）一轮就抱出 9 条接口层缺陷，
 已随本批修复（详见 CHANGELOG 同日批次）。以下是**故意留在后面**的项，每项写清验证口径。
 
-1. **History 页仍读浏览器 localStorage** —— 服务端现在有了 `GET /api/scans`（台账 + 在途合并），
-   但 `src/pages/HistoryPage.tsx` 的数据源还是 zustand 持久化的本地历史。
-   验证口径：改完后，清空浏览器存储在**同一台引擎**上仍能看到历史，且条目 `source` 与
-   `GET /api/scans` 一致；跨浏览器/跨机器可见。
+1. **History 页仍读浏览器 localStorage** —— ✅ **已修（2026-09-29）**：改为
+   `useServerHistory()`（`src/hooks/useServerHistory.ts`）拉 `GET /api/scans`，经
+   `shared/historyMerge.ts` 做「服务端 ∪ 本地」合并（同名条目服务端胜出做展示，**但保留本地
+   快照引用** —— 续跑要读 `report.target.config`，服务端清单里没有报告全文）。
+   来源以 Chip 明示：`服务端` / `进行中` / `仅本机`，改造后不再出现"换台机器历史就空了"。
+   服务端取不到时**退回本地列表 + 如实提示**，不允许比改造前更差的白屏。
+   顺带把服务端清单缺的 `riskLevel` 补上（台账 meta 新增 `highestRisk` 字段；老台账没这个字段
+   ⇒ UI 显示"风险未知"，不猜不兜底 `Low`）。
+   纯服务端条目不给删除按钮 —— 服务端没有 DELETE 端点，给了按钮点了没反应等于骗人。
+   测试：`src/tests/historyMerge.test.ts`（7 条）+ `historyServerSource.test.tsx`（4 条）。
+   **缺陷注入 3/3 杀**：组件不接服务端数据 ⇒ 3 条红；`riskLevel` 兜底成 `'Low'` ⇒ 2 条红；
+   丢掉本地快照引用 ⇒ 1 条红。
 2. **`/exploit/capabilities` 是手写清单** —— ✅ **已修（2026-09-29）**：新增 `capabilityIndex()`
    （`Exploiter.js`，由 `TAKEOVER_CAPS` 反向索引），路由改为 `...capabilityIndex()` + `matrix`，
    手抄数组删除；前端类型补 `matrix` / `enabled`。
@@ -29,9 +37,20 @@
    （该测试断言客户端身份），故**保留原状**。
    验证口径：把暂停闸收到 `getScanClient` 返回视图上，同时让接口靶场的暂停用例对
    "开启 wafEvasion 自动选链"的目标也断言零流量；并复跑 orchestration 契约。
-5. **台账无保留策略** —— API 扫描终态自动落 `data/ledger/`，长期运行会无界增长。
-   需要 `SCAN_LEDGER_MAX`（按条目数或天数淘汰）+ 一条"淘汰后 `/scan/:id/report` 必须 404 而不是
-   返回半份数据"的用例。
+5. **台账无保留策略** —— ✅ **已修（2026-09-29）**：新增 `pruneLedger()` / `retentionPolicy()`
+   （`server/src/services/scanLedger.js`），`SCAN_LEDGER_MAX`（条目数）与
+   `SCAN_LEDGER_MAX_DAYS`（天数）可叠加，两维都未设 ⇒ **零淘汰**（默认值必须是不删东西）。
+   `recordScan()` 写完后自动收敛一次；CLI 新增 `ledger prune --max=<N> / --days=<N>` 手动入口
+   （无策略时 exit 2 拒绝执行）。
+   **顺序刻意是「先原子重写索引、再删目录」**：看失败模式定的 —— 反过来的话，目录删成功而
+   索引重写失败 ⇒ 列表里有、点开 404（半份数据，最坏）；现在的顺序下，索引已收敛而目录删除
+   失败 ⇒ 磁盘泄漏 + 一条孤儿目录，列表干净且可重试。
+   顺带治掉 `appendFileSync` 造成的**重复登记**（同 scanId 多行 ⇒ 列表出现两条同名条目）——
+   重写索引时按 scanId 收敛成最新一行。
+   测试 10 条，判据不采信 `pruneLedger` 自报的 removed，全部外加外部事实断言（目录存不存在、
+   索引行在不在、`readReport` 是否真的返回 null ⇒ `/scan/:id/report` 走 404）。
+   **缺陷注入 6/6 杀**：只删索引不删目录 / 不重写索引 / 缺时间戳伪装成最新 / 天淘汰方向反 /
+   切断 recordScan→prune 接线 / 早退跳过去重 —— 各杀 1~5 条。
 6. **`docs/api.md` 不在自动门禁里** —— ✅ **已修（2026-09-29）**：`readme-consistency.mjs`
    新增判据 **⑭b**，把 api.md 的 `#### \`METHOD /path\`` 标题集并入同一把尺子（判据会自动补
    `/api` 前缀、剥掉查询串）。**首跑即抓到 4 个真缺口**：`POST /scan/:id/pause`、

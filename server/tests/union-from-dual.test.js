@@ -47,7 +47,8 @@ function makeOracleMock(calls) {
       if (calls) calls.push(q);
       if (/ORDER BY \d+/.test(q)) {
         const n = Number(q.match(/ORDER BY (\d+)/)[1]);
-        return n > 3 ? { data: 'ERR', status: 200 } : { data: 'normal', status: 200 };
+        // 超列表报错必须是 500（200 短体拉不开判据 → capped → 猜列 null → UNION 放弃）
+        return n > 3 ? { data: 'ERR', status: 500 } : { data: 'normal', status: 200 };
       }
       if (/UNION SELECT/.test(q)) {
         // Oracle：不带 FROM dual → 报错
@@ -70,7 +71,8 @@ function makeMySQLMock(calls) {
       if (calls) calls.push(q);
       if (/ORDER BY \d+/.test(q)) {
         const n = Number(q.match(/ORDER BY (\d+)/)[1]);
-        return n > 3 ? { data: 'ERR', status: 200 } : { data: 'normal', status: 200 };
+        // 超列表报错必须是 500（200 短体拉不开判据 → capped → 猜列 null → UNION 放弃）
+        return n > 3 ? { data: 'ERR', status: 500 } : { data: 'normal', status: 200 };
       }
       if (/UNION SELECT/.test(q)) {
         return { data: `echo:${q}`, status: 200 };

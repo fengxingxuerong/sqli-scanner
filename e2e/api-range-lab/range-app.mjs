@@ -40,6 +40,9 @@ export function createRangeApp(pool, opts = {}) {
   const app = express();
   app.use(express.urlencoded({ extended: false }));
   app.use(express.json({ limit: '256kb' }));
+  // [2026-10-01] XML / SOAP 通道：声明 xml/soap 的 body 按**原文字符串**收（不能被 JSON
+  // 解析器吃掉）。放在 urlencoded/json 之后作兜底 —— 无 body 或已解析过的请求不受影响。
+  app.use(express.text({ type: ['text/xml', 'application/xml', 'application/soap+xml', '*/xml'], limit: '256kb' }));
 
   // ── 流量取证 ──────────────────────────────────────────────────────────────
   const state = {
@@ -140,6 +143,28 @@ export function createRangeApp(pool, opts = {}) {
     record(req, 'body', 'q', v);
     const [rows] = await runQuery(`SELECT * FROM products WHERE title LIKE '%${v}%'`);
     res.send(html('Search', table(rows)));
+  }));
+
+  // ── POST body：XML / SOAP（[2026-10-01] 竞品对标 ghauri 的 XML·SOAP 支持）──────
+  // 为什么要这个端点：JSON 嵌套通道早就有真目标（/search 表单 + jsonBody），XML 通道此前
+  // **没有任何真目标** —— 加通道不加靶场，等于把能力声明做成无证据的口号。
+  // 形态刻意做成真实 SOAP：XML 声明 + Envelope/Body 包裹 + 响应也是 XML。
+  // 注入面在 `<id>` 叶子（数值上下文，union/error/boolean 全可用）；
+  // 靶站侧自己用最小正则取叶子值（不 import 引擎的 xmlBody.js —— 靶站若与被验代码共用
+  // 解析器，解析对了也不能证明"引擎的解析对了"）。
+  app.post('/soap', wrap(async (req, res) => {
+    const raw = typeof req.body === 'string' ? req.body : String(req.body ?? '');
+    const m = /<id>([\s\S]*?)<\/id>/.exec(raw);
+    const v = m ? m[1] : '1';
+    record(req, 'body', 'id', v);
+    const [rows] = await runQuery(`SELECT id, username FROM users WHERE id = ${v}`, null, { swallow: true });
+    const items = rows.map((r) => `<item><id>${r.id}</id><username>${r.username}</username></item>`).join('');
+    res.type('text/xml').send(
+      `<?xml version="1.0" encoding="UTF-8"?>`
+      + `<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"><soap:Body>`
+      + `<GetUserResponse><count>${rows.length}</count>${items}</GetUserResponse>`
+      + `</soap:Body></soap:Envelope>`,
+    );
   }));
 
   // ── Cookie：需要会话 Cookie 才可达（验「会话是否被接口继承」） ──

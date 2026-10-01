@@ -16,7 +16,10 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const extractorSrc = readFileSync(join(__dirname, '../src/engine/extractionMaps.js'), 'utf-8');
+// [拆分 2026-10-01] extractionMaps.js 已按职责分片到 extraction/*：
+// TIME_COND → scalarExprs.js；LEN_FN/SUB_FN/ASCII_FN → blindFns.js。
+const blindFnsSrc = readFileSync(join(__dirname, '../src/engine/extraction/blindFns.js'), 'utf-8');
+const scalarExprsSrc = readFileSync(join(__dirname, '../src/engine/extraction/scalarExprs.js'), 'utf-8');
 
 // 从源码中提取常量定义（正则匹配）
 function extractConstMap(src, constName) {
@@ -38,10 +41,10 @@ function extractConstMap(src, constName) {
   return keys;
 }
 
-const TIME_COND_KEYS = extractConstMap(extractorSrc, 'TIME_COND');
-const LEN_FN_KEYS = extractConstMap(extractorSrc, 'LEN_FN');
-const SUB_FN_KEYS = extractConstMap(extractorSrc, 'SUB_FN');
-const ASCII_FN_KEYS = extractConstMap(extractorSrc, 'ASCII_FN');
+const TIME_COND_KEYS = extractConstMap(scalarExprsSrc, 'TIME_COND');
+const LEN_FN_KEYS = extractConstMap(blindFnsSrc, 'LEN_FN');
+const SUB_FN_KEYS = extractConstMap(blindFnsSrc, 'SUB_FN');
+const ASCII_FN_KEYS = extractConstMap(blindFnsSrc, 'ASCII_FN');
 
 // ─── 1. HIGH_FREQ_DBMS 覆盖全部 18 库 ───
 describe('[C-16] DBMS 覆盖率补全', () => {

@@ -216,7 +216,7 @@ jobs:
           path: node_modules
           key: ${{ runner.os }}-frontend-${{ hashFiles('package-lock.json') }}
       - run: npm ci
-      # [修复] 加 --coverage 使 vitest.config.ts 的 thresholds(78/68/56/78) 真正在 CI 生效
+      # [修复] 加 --coverage 使 vitest.config.ts 的 thresholds(88/77/67/88) 真正在 CI 生效
       - run: npx vitest run --coverage --reporter=verbose
         name: Frontend tests (with coverage gate)
       - run: npx vite build

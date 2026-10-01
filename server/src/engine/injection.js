@@ -7,6 +7,8 @@ import { buildEgressOpts, mustRethrowSendError, netFailureResponse } from './egr
 import { unionDebug } from './unionDebug.js';
 // [编码参数] payload 需按参数自身的传输编码（base64 / 0x-hex）编码后再发
 import { encodeForPoint } from './paramEncoding.js';
+// [2026-10-01] XML / SOAP body 通道（对标 ghauri 的 XML·SOAP 参数支持）
+import { cloneXmlTree, setXmlLeaf, serializeXml } from '../core/xmlBody.js';
 
 // [P1 批次 2026-09-08] JSON 点路径段 → 真实键匹配（buildInjectionRequest JSON 分支用）。
 // 三向匹配（与 TargetParser._discoverJsonLeaves 的路径生成互逆）：
@@ -192,6 +194,24 @@ export function buildInjectionRequest(target, point, value) {
     }
     req.url = u.toString();
   } else if (point.location === 'body') {
+    // [2026-10-01] XML / SOAP 叶子点（对标 ghauri XML·SOAP）：必须**先于**下面表单 /
+    // urlencoded 分支处理 —— 否则 req.data 会被摊成 `路径=值` 的 urlencoded 对象，
+    // 只吃 XML 的目标一个字段都解析不到 ⇒ 注入值从未进 SQL ⇒ 静默 0 检出
+    // （与 multipart 那次同型的失败模式：发送侧形态不对，检测侧再努力也白搭）。
+    // 命中即返回：尾部 HPP 只对 url 点生效，对 XML 点无副作用。
+    const _xmlTree = target && target.xmlTree;
+    if (_xmlTree && point.xmlPath === true && String(point.param).includes('.')) {
+      const clone = cloneXmlTree(_xmlTree);
+      if (setXmlLeaf(clone, point.param, injected)) {
+        req.data = serializeXml(clone);
+        // Content-Type：SOAP 1.1 要 text/xml、1.2 要 application/soap+xml，
+        // 原样保留调用方声明（改声明比不声明更危险），没声明才兜 application/xml。
+        const _ctKey = Object.keys(req.headers).find((k) => /^content-type$/i.test(k));
+        if (!_ctKey) req.headers['Content-Type'] = 'application/xml';
+        return req;
+      }
+      // 路径失效（树被外部改动/恢复快照不一致）→ 落到表单分支，至少发请求而不是抛错
+    }
     // 表单点：将表单全部字段并入 data（含 CSRF token），再把当前注入参数覆盖为注入值
     const formValues = point.formValues || {};
     req.data = { ...formValues };

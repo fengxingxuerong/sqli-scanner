@@ -96,6 +96,10 @@ export function parseArgs(argv) {
     else if (a === '-m' || a === '--batch') args.batch = next();
     else if (a === '--method') args.method = next();
     else if (a === '--body') args.body = next();
+    // [2026-10-01] XML / SOAP body 通道（对标 ghauri XML·SOAP）。--body 走 JSON 解析，
+    // XML 不是合法 JSON ⇒ 必须独立入口；--xml-body-file 便于多行 XML/SOAP 信封。
+    else if (a === '--xml-body') args.xmlBody = next();
+    else if (a === '--xml-body-file') args.xmlBodyFile = next();
     else if (a === '--cookie') args.cookie = next();
     else if (a === '--header' || a === '--headers') args.headers = next();
     else if (a === '--technique') args.technique = next();
@@ -136,6 +140,7 @@ export function parseArgs(argv) {
     else if (a === '--proxy') args.proxy = next();
     else if (a === '--scope') args.scope = next();
     else if (a === '--insecure') args.insecureTls = true;
+    else if (a === '--cert') args.clientCert = next(); // mTLS 客户端证书 PEM（sqlmap --cert 语义）
     else if (a === '--no-validation-skip') args.noValidationSkip = true;
     else if (a === '--confirm-destructive') args.confirmDestructive = true;
     else if (a === '--no-production-mode') args.noProductionMode = true;

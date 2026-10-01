@@ -134,7 +134,9 @@ export const SCAN_CONFIG_KEYS = [
   // 但前端只在 KNOWN_MISSING_UI_KEYS 里当债记着 → 界面用户永远测不到它们）
   'oob', 'secondOrder',
   // 出口层（代理 / 证书 / 授权范围）
-  'proxy', 'auth', 'insecureTls', 'validationSkip', 'scope',
+  // [2026-10-01] clientCert：mTLS 客户端证书 PEM 路径（sqlmap --cert）。目标要求双向认证时
+  // 没有证书连第一跳都过不去 ⇒ 整站测不了（能力缺失，不是便利开关），故接进面板。
+  'proxy', 'auth', 'insecureTls', 'clientCert', 'validationSkip', 'scope',
   // WAF 规避（tamper 链等整块配置）
   'wafEvasion',
   // [2026-09-29 UI-REACH] 能力缺失类 8 键接进面板（登记表分类治理时由守卫⑧钉住的那批：
@@ -144,6 +146,12 @@ export const SCAN_CONFIG_KEYS = [
   // matchText：强噪声页上 matchString 原文比对失效时的同族判定锚点。
   'csrfUrl', 'csrfTokenName', 'csrfMethod', 'csrfRefreshFreq',
   'safeUrl', 'safeFreq', 'hpp', 'matchText',
+  // [2026-10-01 UI-REACH §1.3] 高级注入面 7 键：CLI 能用（args.js --no-cast/--hex/
+  // --flush-session/--union-from/--union-cols/--param-del/--where）、引擎真读、REST 白名单
+  // 已收（noCast/unionFrom 走 BACKFILL 标量回填；hex/flushSession 严格布尔；unionCols/
+  // paramDel/dumpWhere 走 bespoke clamp），唯独内置引擎的 Web 面板没有入口 ——
+  // SqlmapOptions 里的同名控件只作用于 /sqlmap/start 桥接模式，内置引擎用户拿不到。
+  'noCast', 'hex', 'flushSession', 'unionFrom', 'unionCols', 'paramDel', 'dumpWhere',
 ] as const;
 
 /** 前端可控的扫描配置键名（由 SCAN_CONFIG_KEYS 推导，无手写重复） */
@@ -195,6 +203,8 @@ export const SCAN_CONFIG_VALUE_TYPES: Record<ScanConfigKey, ScanConfigValueType>
   enableExtract: 'boolean',
   sessionDefault: 'boolean',
   insecureTls: 'boolean',
+  // mTLS 证书路径：string（空 = 关闭态，从请求体省略；后端 clamp 同义）
+  clientCert: 'string',
   validationSkip: 'boolean',
   prefilter: 'boolean',
   skipStatic: 'boolean',
@@ -227,6 +237,19 @@ export const SCAN_CONFIG_VALUE_TYPES: Record<ScanConfigKey, ScanConfigValueType>
   safeFreq: 'number',
   hpp: 'boolean',
   matchText: 'boolean',
+  // [2026-10-01 UI-REACH §1.3] 高级注入面 7 键的类型（与后端 sanitizeStart 口径对齐：
+  // noCast/hex/flushSession 引擎按 `=== true` 严格判定 → 严格布尔；
+  // unionCols 后端收「1..200 整数的字符串形态」（Number(String(v).trim())）；
+  // unionFrom 走标量回填（引擎侧 resolveFromClause + sanitizeUnionFrom 再校验）；
+  // paramDel 必须 `;,|^~` 单字符；dumpWhere 原样拼进提取 SQL 的 WHERE 位、后端拒分号。
+  // 四个字符串键留空 = 关闭态整个省键，不与「引擎默认 false/null」产生中间态。
+  noCast: 'boolean',
+  hex: 'boolean',
+  flushSession: 'boolean',
+  unionFrom: 'string',
+  unionCols: 'string',
+  paramDel: 'string',
+  dumpWhere: 'string',
 };
 
 /**

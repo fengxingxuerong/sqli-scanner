@@ -114,6 +114,13 @@ export function effectiveInsecureTls(opts) {
   return v === true || v === 1 || v === '1' || v === 'true';
 }
 
+// mTLS 客户端证书路径（PEM 文件，证书+私钥同文件，对标 sqlmap --cert）：
+// opts 优先，defaults 兜底；空串/非字符串视为未配置。
+export function effectiveClientCert(opts) {
+  const v = opts && opts.clientCert !== undefined ? opts.clientCert : defaults.clientCert;
+  return typeof v === 'string' && v.trim() ? v.trim() : null;
+}
+
 // ── ④ 出口语义决策（P1-FIX 2026-09-08 ①②）─────────────────────────────────────
 /**
  * 由请求选项决定本次请求的「出口语义」（是否经代理 / 代理来源 / 是否关闭证书校验 /

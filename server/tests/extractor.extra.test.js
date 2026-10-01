@@ -33,7 +33,7 @@ function buildCtx(httpClient, dbms = 'MySQL') {
   return {
     httpClient,
     target: { method: 'GET', baseUrl: 'http://mock/?q=1', headerParams: {}, cookieParams: {} },
-    point: { id: 'p1', location: 'url', param: 'q', originalValue: '1', echoCols: [1], confirmed: true },
+    point: { id: 'p1', location: 'url', param: 'q', originalValue: '1', echoCols: [1], confirmed: true, columns: 2 },
     dbms,
     config: { timeoutMs: 5000, retry: 0, maxColumnsGuess: 10 },
   };

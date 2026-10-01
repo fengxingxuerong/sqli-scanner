@@ -329,6 +329,10 @@ export const defaults = {
   // 代价：失去中间人防护 —— 开启时引擎 logger.warn 一次，并在每个响应 __meta.insecureTls=true
   // 标记，报告必须注明「本次扫描未校验证书」。
   insecureTls: false,
+  // [2026-10-01] mTLS 客户端证书（对标 sqlmap --cert）：PEM 文件路径（证书+私钥同文件）。
+  // 目标要求 TLS 双向认证时没有证书连第一跳都过不去。null=不启用（默认，零行为变化）。
+  // 与 insecureTls 正交：一个管「我信不信目标证书」，一个管「目标信不信我」。
+  clientCert: null,
 
   // ── [P1-FIX 2026-09-08 ②] 代理环境变量信任（对标 curl / sqlmap）─────────────────
   // true（默认）：config.proxy 为空时按 HTTPS_PROXY → https_proxy → HTTP_PROXY → http_proxy →
@@ -390,6 +394,9 @@ export const defaults = {
     // 为什么必须有：二阶检测天然包含「真实写入」（存储阶段 POST 表单），一旦打到生产库就是脏数据 +
     // 业务侧可见的记录（评论/工单/订单）。开关的语义必须是「我知道我在写」，而不是「我勾了二阶就全放开」。
     allowWrites: false,
+    // 存储组（不同 actionUrl）之间的并行度（组内仍严格串行——同一张表单的字段共享存储，
+    // 并发写会相互污染读回判定）。supplementalRuns._runSecondOrder 真读本键。
+    concurrency: 2,
   },
 
   // [sqlmap 对标] --null-connection：盲注检测使用 HEAD 请求（无响应体传输），

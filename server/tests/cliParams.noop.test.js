@@ -59,7 +59,8 @@ test('unionCols 非法（0/负数/超上限）时回退自动二分', async () =
       if (/ORDER BY (\d+)/.test(q)) {
         orderCalls++;
         const n = Number(q.match(/ORDER BY (\d+)/)[1]);
-        return n > 3 ? { data: 'ERR', status: 200 } : { data: 'normal', status: 200 };
+        // 超列表报错必须是 500（200 短体拉不开判据 → capped → 猜列 null → UNION 放弃）
+        return n > 3 ? { data: 'ERR', status: 500 } : { data: 'normal', status: 200 };
       }
       if (/UNION SELECT/.test(q)) return { data: `echo:${q}`, status: 200 };
       return { data: 'normal', status: 200 };

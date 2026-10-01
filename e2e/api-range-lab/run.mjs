@@ -39,7 +39,8 @@ if (has('list')) {
 
 const groups = (flag('groups') || flag('only') || '').split(',').map((s) => s.trim()).filter(Boolean);
 const selected = groups.length ? CASES.filter((c) => groups.includes(c.group)) : CASES;
-const needsDb = selected.some((c) => ['scan', 'exploit', 'enum', 'direct', 'ai', 'persist'].includes(c.group));
+// [2026-10-01] xml 组要打真靶站的 /soap 端点（真 MySQL），故与 scan 同级需要 DB
+const needsDb = selected.some((c) => ['scan', 'exploit', 'enum', 'direct', 'ai', 'persist', 'xml'].includes(c.group));
 
 const pkgVersion = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version;
 const results = [];
@@ -103,6 +104,13 @@ try {
       AI_REPORT_KEY_2: 'sk-mock-2',
       AI_REPORT_KEY_3: 'sk-mock-3',
       SQLI_LEDGER_DIR: ledgerDir,
+      // [2026-10-01] 分钟级限流是**生产护栏**，但本套件一轮要起 40+ 次扫描 / 十几次利用，
+      // 默认配额（10 次/分）必然把后半程打成 429 —— 表现是「用例大面积红」，而真相是
+      // 护栏在正常工作、靶场没给它让路。故主实例显式放宽（env 与生产同源，不是旁路）。
+      // ⚠️ 限速本身仍被专项用例钉住：那条用例起的是**独立实例**（EXPLOIT_RATE_PER_SEC=1），
+      //    不受这里影响 —— 放宽配额不会把「限速有效」这条断言一起放掉。
+      RATE_LIMIT_SCAN_MAX: '500',
+      RATE_LIMIT_EXPLOIT_MAX: '500',
     },
   });
   console.log(`[env] 引擎 :${engine.port}  靶站 :${labPort}  LLM 假端点 :${llmPort}  token=***`);

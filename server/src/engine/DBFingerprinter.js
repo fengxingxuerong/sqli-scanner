@@ -6,7 +6,7 @@ import {
   obfuscateIfNeeded,
   discoverEchoColumns,
 } from './injection.js';
-import { binaryGuessColumns } from './columnGuess.js';
+import { binaryGuessColumns, colGuessExtra } from './columnGuess.js';
 // [P0-FIX 2026-09-09] 时间指纹必须区分「响应回来了但很快」与「根本没拿到响应」：
 // sendInjection 失败时现在返回带 __netErr 的对象（不再是 null），若仍只看 `res &&` 就会把
 // 「超时失败」当成「延迟命中」→ 误定库 → payload 族错配 → 整轮漏检。
@@ -58,7 +58,7 @@ export class DBFingerprinter {
           ctx,
           buildInjectionRequest(target, point, obf(`${point.originalValue || '1'}${boundary} ORDER BY ${n}-- -`))
         ),
-      { baseLen, maxCols, cache: _colGuessCache, cacheKey: colGuessScopeKey(target, point?.id) }
+      { baseLen, maxCols, cache: _colGuessCache, cacheKey: colGuessScopeKey(target, point?.id, colGuessExtra(ctx, boundary)) }
     );
 
     // 2) 响应头快速识别（命中即定库，无需 UNION）
@@ -72,6 +72,8 @@ export class DBFingerprinter {
     }
 
     // 3) 定位回显列（标记 UNION），无回显则无法走 UNION 指纹
+    // [2026-10-01] 猜列 capped → null：UNION 指纹整体放弃（响应头指纹在上面已独立跑过）。
+    if (columns == null) return { dbms: null, baseline: baselineResp };
     const echoCols = await discoverEchoColumns(httpClient, ctx, columns);
 
     // 4) 各库版本函数置于首个回显列，检测标记间版本特征

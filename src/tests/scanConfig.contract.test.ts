@@ -228,11 +228,11 @@ const TUNING_NO_UI_KEYS = [
   // 布尔盲注二级判据 / 鲁棒性
   'boolStableDiff', 'boolStableDiffSamples', 'blindRobust',
   // 会话 / cookie：能力型的 csrf* / safeUrl / safeFreq 已升入 CAPABILITY_GAP_KEYS。
-  // 余下三个是「关掉标准行为」的开关：引擎默认就在内存 jar 吸收 Cookie
-  // （httpClient.js:409/923），flushSession 只作用于 sqlmap 桥接会话 → 调优类。
-  'cookieJar', 'dropSetCookie', 'flushSession',
-  // 参数筛选 / 已知点 / 失效值
-  'skipParams', 'knownPoint', 'invalidValue', 'excludeSysdbs', 'nullConnection', 'paramDel',
+  // 余下两个是「关掉标准行为」的开关：引擎默认就在内存 jar 吸收 Cookie
+  // （httpClient.js:409/923）→ 调优类。flushSession 已于 2026-10-01 接进「高级注入面」分组。
+  'cookieJar', 'dropSetCookie',
+  // 参数筛选 / 已知点 / 失效值（paramDel 已于 2026-10-01 接进「高级注入面」分组）
+  'skipParams', 'knownPoint', 'invalidValue', 'excludeSysdbs', 'nullConnection',
   // HTTP 层行为（hpp 已升入 CAPABILITY_GAP_KEYS）
   'forceSsl', 'ignoreRedirects', 'activeWafProbe', 'trustProxyEnv', 'ssrfViaProxy', 'proxyBypassLocal',
   // 限速：delay / maxReq 已于 2026-09-23 接进「请求控制」分组 → 移出本表。
@@ -288,8 +288,9 @@ const TUNING_NO_UI_KEYS = [
   // 「二阶注入」「带外通道」分组 → 从本表移出，见判据 ⑦）
   'freshQueries',
   // 2026-09-20_CFG-REACH 那批「CLI 能设、引擎真读、REST 刚收」的键
-  // （testPath / testHeaders 已于 2026-09-23 接进 ScanConfigPanel 的「注入点范围」分组 → 从本表移除）
-  'noCast', 'dumpWhere', 'unionCols', 'hex', 'unionFrom',
+  // （testPath / testHeaders 已于 2026-09-23 接进「注入点范围」分组；
+  //   noCast / dumpWhere / unionCols / hex / unionFrom 已于 2026-10-01 接进「高级注入面」
+  //   分组 —— 内置引擎面板此前确实无入口，SqlmapOptions 的同名控件只作用于 sqlmap 桥接模式）
 ];
 
 const KNOWN_MISSING_UI_KEYS = new Set([...CAPABILITY_GAP_KEYS, ...TUNING_NO_UI_KEYS]);

@@ -32,7 +32,7 @@ function baseConfig() {
 }
 
 // 构造最小桩 sm：覆盖 runScanLoop 触及的全部实例成员
-function makeSm({ scanId, point, vulnerable }) {
+function makeSm({ scanId, point, vulnerable, points }) {
   const target = createTarget({
     url: 'http://mock/page?id=1',
     method: 'GET',
@@ -52,7 +52,8 @@ function makeSm({ scanId, point, vulnerable }) {
   const sm = {
     scans: new Map([[scanId, state]]),
     getScanClient: () => null,
-    parser: { discover: async () => [point] },
+    // points 显式传入 ⇒ 用它（0 注入点形态靠它构造）；否则退化为单注入点
+    parser: { discover: async () => (Array.isArray(points) ? points : [point]) },
     _selectedTechs: () => ['union'],
     _fingerprintCached: async () => ({ dbms: 'MySQL', baseline: { status: 200, headers: {}, body: '' } }),
     wafIdentifier: { identify: () => [] }, // shouldAutoRetry 缺省走 confidence 兜底，无 vendor 即不重跑
@@ -156,4 +157,39 @@ test('runScanLoop 用户中止：走 stopped 收尾，不再跑二阶趟', async
 test('runScanLoop 扫描不存在时静默返回', async () => {
   const { sm } = makeSm({ scanId: 'sr-test-5', point: makePoint('P1'), vulnerable: true });
   await runScanLoop(sm, 'no-such-scan'); // 不应抛出
+});
+
+// [2026-10-02 假阴性修复] 0 注入点 = 一个检测请求都没发 ⇒ 结论必须是 inconclusive。
+// 实战形态：批量扫 100 个目标，其中 30 个不通（或 URL 根本不带参数），每个都产出
+// 一份 points=0 的报告。旧实现 verdict 仍写 no_vulnerability_detected —— 使用者读到的是
+// 「这 30 个站没有注入」，**把「根本没测」写成了安全结论**，比整批报错更危险。
+test('runScanLoop 0 注入点：结论为 inconclusive（不得写成未检出漏洞）', async () => {
+  const scanId = 'sr-test-6';
+  const { sm, state } = makeSm({ scanId, point: makePoint('P1'), vulnerable: false, points: [] });
+
+  await collectEvents(scanId, () => runScanLoop(sm, scanId));
+
+  assert.equal(state.status, 'completed');
+  assert.deepEqual(state.report.points, [], '本形态的前提是 0 注入点');
+  assert.equal(state.report.summary.noInjectionPoints, true);
+  assert.equal(
+    state.report.summary.verdict,
+    'inconclusive',
+    '一次检测都没跑时，阴性结论不成立 —— 必须写 inconclusive',
+  );
+  // 文案要与「测过但不可靠」区分开：前者要人确认可达性/注入面，后者要人复扫未决点
+  assert.match(state.report.summary.verdictNote, /可测注入点|一次检测都没跑/);
+});
+
+// 反向钉子：有注入点、可信度正常且未命中时，**仍然**是 no_vulnerability_detected。
+// 防止上面那条修复把口径整体收紧成「一律 inconclusive」（那会让真实阴性结论失去意义）。
+test('runScanLoop 有注入点且未命中：结论仍为 no_vulnerability_detected', async () => {
+  const scanId = 'sr-test-7';
+  const { sm, state } = makeSm({ scanId, point: makePoint('P1'), vulnerable: false });
+
+  await collectEvents(scanId, () => runScanLoop(sm, scanId));
+
+  assert.equal((state.report.points || []).length, 1);
+  assert.equal(state.report.summary.noInjectionPoints, undefined);
+  assert.equal(state.report.summary.verdict, 'no_vulnerability_detected');
 });

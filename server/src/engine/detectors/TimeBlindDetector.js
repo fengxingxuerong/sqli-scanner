@@ -265,7 +265,12 @@ export class TimeBlindDetector extends Detector {
     const baselineReqs = [];
     for (let i = 0; i < rb.baselineSamples; i++) baselineReqs.push(this.buildRequest(target, point, orig));
     const baselineResps = await this.sendConcurrent(httpClient, ctx, baselineReqs, {}, concurrency);
-    const baselineElapsed = baselineResps.map((r) => ((r.__elapsed || 0) / 1000));
+    // [2026-10-01 修] 基线统计必须滤掉失败样本：失败项的 __elapsed 是失败本身耗时——
+    // 超时失败 ≈ timeoutMs（虚高 μ → 阈值飙天 → 时间通道全漏报），快速失败（拒连）≈0
+    // （压低 μ → 阈值贴地 → 误报）。注入侧循环已有 `!r.__error && r.resp != null` 护栏，
+    // 基线侧此前没有。全失败时 mean/std 空数组回落 0（等价旧固定阈值 absFloor）。
+    const baselineOk = baselineResps.filter((r) => !r.__error && r.resp != null);
+    const baselineElapsed = baselineOk.map((r) => ((r.__elapsed || 0) / 1000));
     const baselineExcerpts = baselineResps.map((r) => this._excerptOf(r));
     const mu = mean(baselineElapsed);
     const sigma = std(baselineElapsed);
@@ -346,7 +351,12 @@ export class TimeBlindDetector extends Detector {
       sigma,
       threshold,
       floor,
-      baselineSamples: baselineResps.map((r, i) => ({ idx: i, ms: Math.round(baselineElapsed[i] * 1000) / 1000, excerpt: baselineExcerpts[i] })),
+      baselineSamples: baselineResps.map((r, i) => ({
+        idx: i,
+        ms: Math.round(((r.__elapsed || 0) / 1000) * 1000) / 1000,
+        failed: !!r.__error || r.resp == null,
+        excerpt: baselineExcerpts[i],
+      })),
       injectSamples,
       stableRatio,
       decision: result.vulnerable ? 'vulnerable' : 'clean',

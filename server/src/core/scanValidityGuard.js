@@ -67,7 +67,7 @@ export const INJECTION_SIGS = [
 // 于是每次正常扫描都弹「结论不可信」——告警疲劳一旦形成，真被封时有谁会看。
 // 判据：注入形态请求 + 响应体带 SQL 报错签名 → 归为 selfInflicted（计入报告但不参与状态裁定）。
 export const SQL_ERROR_SIG =
-  /(SQL syntax|syntax error at or near|ORA-\d{5}|PG::|sqlite3\.|SQLSTATE|unclosed quotation|incorrect syntax near|unrecognized token)/i;
+  /(SQL syntax|syntax error at or near|ORA-\d{5}|PG::|sqlite3\.|SQLSTATE\s*\[|unclosed quotation|incorrect syntax near|unrecognized token)/i;
 
 // 状态严重度排序（越大越严重）：判定与粘滞共用同一优先级。
 const SEVERITY = { ok: 0, target_error: 1, session_expired: 2, blocked: 3, unreachable: 4 };

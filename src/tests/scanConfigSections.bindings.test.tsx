@@ -419,4 +419,54 @@ describe('ScanConfigPanel 分段接线：CSRF 会话 / 保活 / HPP / 文本判�
     fireEvent.click(screen.getByLabelText(L('matchTextLabel')));
     expect(onChange).toHaveBeenCalledWith({ matchText: true });
   });
+
+});
+
+// ── [2026-10-01 UI-REACH §1.3] 高级注入面分段（7 键）─────────────────────────────
+// 此前这批键只有 SqlmapOptions（sqlmap 桥接模式）有控件，内置引擎面板无入口。
+describe('ScanConfigPanel 分段接线：高级注入面（noCast/hex/flushSession/unionFrom/unionCols/paramDel/dumpWhere）', () => {
+  let onChange: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    onChange = vi.fn();
+  });
+
+  const renderPanel2 = (over: Partial<ScanConfig> = {}) => {
+    render(<PanelHarness initial={makeConfig(over)} onChangeSpy={onChange} />);
+    fireEvent.click(screen.getByText(L('advanced')));
+  };
+
+  it('noCast / hex / flushSession 三个严格布尔开关按引擎 `=== true` 口径写入', () => {
+    renderPanel2();
+    fireEvent.click(screen.getByLabelText(L('noCastLabel')));
+    expect(onChange).toHaveBeenCalledWith({ noCast: true });
+    fireEvent.click(screen.getByLabelText(L('hexLabel')));
+    expect(onChange).toHaveBeenCalledWith({ hex: true });
+    fireEvent.click(screen.getByLabelText(L('flushSessionLabel')));
+    expect(onChange).toHaveBeenCalledWith({ flushSession: true });
+  });
+
+  it('unionCols / unionFrom / paramDel / dumpWhere 填值即写入字符串形态', () => {
+    renderPanel2();
+    fireEvent.change(screen.getByLabelText(L('unionColsLabel')), { target: { value: '25' } });
+    expect(onChange).toHaveBeenCalledWith({ unionCols: '25' });
+    fireEvent.change(screen.getByLabelText(L('unionFromLabel')), { target: { value: '3' } });
+    expect(onChange).toHaveBeenCalledWith({ unionFrom: '3' });
+    fireEvent.change(screen.getByLabelText(L('paramDelLabel')), { target: { value: ';' } });
+    expect(onChange).toHaveBeenCalledWith({ paramDel: ';' });
+    fireEvent.change(screen.getByLabelText(L('dumpWhereLabel')), { target: { value: 'id>100' } });
+    expect(onChange).toHaveBeenCalledWith({ dumpWhere: 'id>100' });
+  });
+
+  it('关闭态省键：字符串留空发 undefined（buildStartConfig 同口径），布尔发 false', () => {
+    renderPanel2();
+    // 字符串键：清空输入 → handleText 发 undefined（键从请求体省略）
+    fireEvent.change(screen.getByLabelText(L('unionColsLabel')), { target: { value: '25' } });
+    fireEvent.change(screen.getByLabelText(L('unionColsLabel')), { target: { value: '' } });
+    expect(onChange).toHaveBeenLastCalledWith({ unionCols: undefined });
+    // 布尔键：开后关 → 发 false（引擎 `=== true` 判定下 false 就是关，必须如实发送）
+    fireEvent.click(screen.getByLabelText(L('noCastLabel')));
+    fireEvent.click(screen.getByLabelText(L('noCastLabel')));
+    expect(onChange).toHaveBeenLastCalledWith({ noCast: false });
+  });
 });

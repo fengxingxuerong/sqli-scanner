@@ -117,8 +117,36 @@ function sanitizeTargetForExport(target) {
   }
   delete out.cookieParams; // 目标会话 cookie 不导出
   delete out.headerParams; // 目标自定义头（可能含 Authorization）不导出
-  if (out.db && typeof out.db === 'object' && out.db.connectionString) {
-    out.db = { ...out.db, connectionString: '***' }; // 直连模式的连接串打码
+  if (out.db && typeof out.db === 'object') {
+    const masked = { ...out.db };
+    if (masked.connectionString) masked.connectionString = '***'; // 直连模式的连接串打码
+    // [2026-10-01] 补 db.password：分项直连配置（host/user/password 形态）此前只掩连接串，
+    // 口令原文随导出报告外发 —— 与 connectionString 同一敏感级，必须同口径打码。
+    if (masked.password) masked.password = '***';
+    out.db = masked;
+  }
+  return out;
+}
+
+// [2026-10-01] 「查看」口径的脱敏（/scan/:id 与 /scan/:id/report 用）：
+// 此前这两个端点返回**未脱敏**的原 report —— config.auth（Basic 凭据）/ proxy（可含口令）/
+// db.connectionString / db.password 原文随响应外发，而导出路径早就打码 ⇒ 同一份报告两条口径，
+// 更松的那条恰是前端每次打开报告都调的。
+// 与导出口径的差异：cookieParams / headerParams **不掩** —— 前端 VulnDetail 要用它们渲染
+// PoC curl，且 attachPoc 生成的 poc 字段本就含同一份值，掩 target 不掩 poc 是安全表演。
+// 真敏感且 UI 不消费的（auth/proxy/db.*）在此同源打码。
+function sanitizeTargetForView(target) {
+  if (!target || typeof target !== 'object') return target;
+  const out = { ...target };
+  if (out.config && typeof out.config === 'object') {
+    const { auth, proxy, ...rest } = out.config;
+    out.config = { ...rest, auth: null, proxy: null };
+  }
+  if (out.db && typeof out.db === 'object') {
+    const masked = { ...out.db };
+    if (masked.connectionString) masked.connectionString = '***';
+    if (masked.password) masked.password = '***';
+    out.db = masked;
   }
   return out;
 }
@@ -225,6 +253,12 @@ export class ReportGenerator {
    */
   attachPoc(report) {
     return this._attachPoc(report);
+  }
+
+  // 「查看」口径脱敏（/scan/:id 与 /scan/:id/report 共用，见模块级 sanitizeTargetForView 注释）
+  sanitizeForView(report) {
+    if (!report || typeof report !== 'object') return report;
+    return { ...report, target: sanitizeTargetForView(report.target) };
   }
 
   // [大文件拆分 2026-09-21] 实现已移至 services/reportPoC.js#attachPoc。

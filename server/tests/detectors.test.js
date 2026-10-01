@@ -52,7 +52,9 @@ function makeDetectorMock(mode) {
         if (/AND 1=2/.test(q) || /'1'='2/.test(q)) return { data: 'NO_RESULTS', status: 200 };
         if (/ORDER BY \d+/.test(q)) {
           const n = Number(q.match(/ORDER BY (\d+)/)[1]);
-          return n > 3 ? { data: 'ERR', status: 200 } : { data: 'normal', status: 200 };
+          // [2026-10-01] 超列表报错改 500：200+'ERR' 短体与基线长度拉不开判据（len<baseLen*0.5 不成立），
+          // 二分顶到上限 capped → 按新契约猜列返回 null → UNION 放弃（本用例一度因此假红）。
+          return n > 3 ? { data: 'ERR', status: 500 } : { data: 'normal', status: 200 };
         }
         return { data: `echo:${q}`, status: 200 };
       }

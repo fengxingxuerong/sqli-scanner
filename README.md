@@ -1,6 +1,6 @@
 # sqli-scanner
 
-[![Tests](https://img.shields.io/badge/tests-3040%20passing-brightgreen)](#测试)[![CI](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml/badge.svg)](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml)
+[![Tests](https://img.shields.io/badge/tests-3118%20passing-brightgreen)](#测试)[![CI](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml/badge.svg)](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml)
 [![Dependencies](https://img.shields.io/badge/dependencies-0%20known%20vulns-brightgreen)](#环境变量)
 
 > CI 徽章为真实状态（仓库地址已定，run#90 起全绿）。发布判定仍以 `CHANGELOG.md`
@@ -194,6 +194,8 @@ admin-only 触发页 `/admin/panel`（users.admin 角色门禁 403）+ admin 会
 | **CLI 100+ 参数（原生引擎）** | 对标 sqlmap：--dbs/--tables/--dump/**--dump-all**/**--common-tables**/**--common-columns**/-D/-T/-C/--search/--users/--passwords/--prefix/--suffix/--time-sec/-r/--mobile/--parse-errors/--safe-url/--safe-freq/--delay/--current-user/--current-db/--hostname/--is-dba/**--identify-waf**/--skip-static/--predict-output/--test-headers/--test-path/**--hex**/--where/--param-del/**--advise**（扫描前风险评估）/**--confirm-extreme**（极高危第二道确认）等（`node server/bin/cli.js --help` 为准，从仓库根直接跑；`--dbs` 等参数说明在该 help 里） |
 | **sqlmap 桥接参数（非原生）** | `--csrf-url` / `--csrf-token` / `--eval` / `--skip-urlencode` / `--keep-alive` / `--null-connection`：**仅当转交外部 sqlmap 进程（sqlmapBridge）时才会被传递**，本项目自有引擎不消费这些键。请勿把上表与本节混用 |
 | **-r 请求文件** | 从 Burp/curl 请求文本导入 URL/method/headers/body |
+| **结构化 body 通道（JSON 嵌套 / XML·SOAP）** | 两类现代 API body 都按**叶子路径**发现注入点，而不是把整份 body 当成一个参数：`jsonBody`（对象，如 `user.id` / `tags.0`）与 `xmlBody`（XML 字符串，如 `soap:Envelope.soap:Body.GetUser.id`；对标 ghauri 的 XML·SOAP 支持）。入口：REST `xmlBody` 字段、CLI `--xml-body` / `--xml-body-file`。⚠️ XML 通道只认「元素 + 文本」形态：注释 / CDATA / DOCTYPE / 正文处理指令一律**整体放弃**（宁可不发现，也不发畸形报文） |
+| **mTLS 客户端证书** | `clientCert`（PEM 路径，证书+私钥同文件，对标 sqlmap `--cert`）：目标要求 TLS 双向认证时没有证书连第一跳都被拒。与 `insecureTls` 正交（一个管「我信不信目标」，一个管「目标信不信我」） |
 | **中英双语** | 全界面 i18n 支持中英切换 |
 | **历史记录** | 扫描历史卡片式展示，支持续跑/删除 |
 | **真实 DBMS 验证** | SQLite + PostgreSQL + MySQL 三库真实执行验证 |
@@ -210,7 +212,7 @@ npm run waf-validate    # HTTP 实测验证 WAF 绕过
 npm run waf-e2e         # 运行 WAF e2e 对比测试
 npm run waf-real        # [对外口径] 真实 OWASP CRS v4.1.0 规则下 tamper 开/关 A/B
 npm run waf-auto        # CRS 下「引擎自动选链绕过」验收（不显式配 tamper）
-npm run acceptance      # 【门禁】全方位验收（15 套件，事实断言模式，可进 CI）
+npm run acceptance      # 【门禁】全方位验收（16 套件，事实断言模式，可进 CI）
 ```
 
 ## 后端 API
@@ -259,6 +261,13 @@ npm run acceptance      # 【门禁】全方位验收（15 套件，事实断言
 | `SCAN_API_ALLOW_NO_TOKEN` | `0` | 置 `1` 显式接受无鉴权（仅隔离网络；非回环时会打显著告警） |
 | `EXPLOIT_ENABLED` | `0` | 开启利用能力（=1 启用） |
 | `ALLOWED_ORIGINS` | `http://localhost:5173` | 跨域白名单 |
+| `SCAN_LEDGER_MAX` | 无 | 台账条目上限：保留最近 N 条，更老的连目录一起删除。**未设 = 不淘汰**（默认不清任何历史） |
+| `SCAN_LEDGER_MAX_DAYS` | 无 | 台账保留天数：按 `finishedAt` 淘汰过期条目。**未设 = 不淘汰** |
+
+> 台账保留策略默认关闭 —— 扫描产物是有损删除，不能因为升级静默清掉历史。
+> 需要时才配置上面两项（或手动 `node server/bin/cli.js ledger prune --max=50`）。
+> 淘汰是「目录 + 索引」成对移除：被淘汰的 `scanId` 不会再出现在 `GET /api/scans` 里，
+> `GET /scan/:id/report` 也如实返回 404，而不是留半份数据。
 
 ### 部署安全基线（2026-09-17 起，fail-closed）
 
@@ -307,10 +316,10 @@ backend/  ← Express + Node.js
 ## 测试
 
 ```bash
-# 前端测试（472 个用例）
+# 前端测试（475 个用例）
 npm test
 
-# 服务端测试（2571 个用例）
+# 服务端测试（2646 个用例）
 cd server && npm test
 
 # 全部测试
@@ -335,8 +344,8 @@ npm run artifact:drift   # 入库的 e2e 基线产物必须等于当前代码跑
 ## 项目状态
 
 - TypeScript: 零错误
-- 前端测试: 472/472 通过（覆盖率门禁 stmts 94.76 / branch 84.29 / func 78.08，阈值 88/77/67）
-- 服务端测试: 2571 用例（2568 pass / 0 fail / 3 skip，并发口径 2026-09-30 复测；3 skip 为环境依赖显式跳过。覆盖率 lines 90.51 / branch 77.57 / func 80.43，阈值 85/69/72）
+- 前端测试: 475/475 通过（覆盖率门禁 stmts 94.76 / branch 84.29 / func 78.08，阈值 88/77/67）
+- 服务端测试: 2646 用例（2643 pass / 0 fail / 3 skip，并发口径 2026-10-01 复测；3 skip 为环境依赖显式跳过。覆盖率 lines 90.85 / branch 77.91 / func 80.56，阈值 85/74/77）
 - 一键扫描: `npm run scan -- -u <url>`（CLI 一条命令产出 HTML/JSON/Markdown 全套报告 + manifest，退出码可直接进 CI 门禁）
 - Tamper 插件: 228 个（含 v24 增量 20 个，对齐 sqlmap 官方 tamper 全集，含官方 CRS/libinjection 实测组合 uniontable+odbcbrace）
 - WAF 绕过能力: 200+ 插件链式组合，覆盖 62 个 WAF 厂商指纹识别 + 推荐
@@ -473,8 +482,9 @@ node e2e/api-range-lab/run.mjs --list        # 列出全部用例
 
 ### 验收门禁（`npm run acceptance`）
 
-15 套件一次跑完（顺序即 `e2e/acceptance.mjs` 里 SUITES 的登记顺序）：服务端单测 → 独立刁钻靶场 →
-检测回归 → 真 MySQL → 真 PG（含二阶）→ OOB 带外通道真机 → 报告契约 → CRS 人工挂链 A/B →
+16 套件一次跑完（顺序即 `e2e/acceptance.mjs` 里 SUITES 的登记顺序）：服务端单测 → 独立刁钻靶场 →
+检测回归 → 真 MySQL → 真 PG（含二阶）→ **批量编排故障隔离（`-m`，真 SQLite 靶站 + 死目标）** → OOB 带外通道真机 →
+报告契约 → CRS 人工挂链 A/B →
 CRS 自动选链绕过 → CRS 执行器保真度（官方回归集）→ WAF 定向变异搜索（A2）端到端 →
 WAF 通道降级编排（A3）端到端 → 红队实战（真值对照 + sqlmap 同题）→ fileRead 真闭环 → fileWrite 真闭环。
 

@@ -105,6 +105,11 @@ const LABS = [
   { name: 'detection-runner', desc: '数据驱动检测测试', entry: 'e2e/detection-runner/run.js', deps: [] },
   { name: 'udf-lab', desc: 'UDF 接管真实验证（真 DLL，自起隔离沙箱）', entry: 'e2e/udf-lab/udf-takeover.e2e.mjs', deps: ['sandbox'] },
   { name: 'waf-lab', desc: 'WAF 绕过 A/B（真 MySQL 靶场，自起隔离沙箱）', entry: 'e2e/waf-lab/compare-real.e2e.mjs', deps: ['sandbox'] },
+  // [2026-10-02] 批量编排（-m）：deps:[] 是刻意的 —— 它验的是「编排」不是检出能力：
+  // 起真 SQLite（sql.js WASM）靶站 + 混进一个死目标，断言其余目标照常扫完、报告落盘、
+  // 死目标结论是 inconclusive 而不是「无漏洞」。不依赖宿主 MySQL ⇒ CI 的
+  // e2e-self-contained job（无 DB）能真跑，不会像 sandbox 套件那样被判 SKIP。
+  { name: 'batch-lab', desc: '批量编排故障隔离（-m，真 SQLite 靶站 + 死目标）', entry: 'e2e/batch-lab/run.mjs', deps: [] },
 ];
 
 const PROBES = {

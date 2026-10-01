@@ -14,7 +14,7 @@
 // ============================================================================
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { logger } from '../src/core/logger.js';
 import { sanitizeStart } from '../src/api/scanRoutes.js';
 import { diffDroppedConfigKeys, isTrivialValue } from '../src/api/scanConfigUtils.js';
@@ -109,7 +109,14 @@ const BACKFILL = (() => {
   // 2026-09-25：配置守卫整段搬到 api/scanConfigGuard.js（HTTP 与直连两条入口共用）。
 // 文本锚点于是必须覆盖【入口层这一整簇】——只读 scanRoutes 会让本守卫在搬移后
 // 静默找不到 clamp 收敛点（那正是它要防的"文档写了不存在的能力"的反面：假红/假绿都可能）。
-const src = readFileSync(new URL('../src/api/scanRoutes.js', import.meta.url), 'utf8') + readFileSync(new URL('../src/api/scanConfigGuard.js', import.meta.url), 'utf8');
+// [2026-10-01 六期拆分] 守卫 clamp 序列拆到 api/scanGuard/*，锚点扩成「入口层目录」全量拼接
+// （与前端 scanConfig.contract.test 的「面板目录为取数源」同一手法）。
+const GUARD_DIR_URL = new URL('../src/api/scanGuard/', import.meta.url);
+const src = [
+  readFileSync(new URL('../src/api/scanRoutes.js', import.meta.url), 'utf8'),
+  readFileSync(new URL('../src/api/scanConfigGuard.js', import.meta.url), 'utf8'),
+  ...readdirSync(GUARD_DIR_URL).filter((f) => f.endsWith('.js')).map((f) => readFileSync(new URL(`../src/api/scanGuard/${f}`, import.meta.url), 'utf8')),
+].join('\n');
   const m = src.match(/const BACKFILL_SCALAR_KEYS = new Set\(\[([\s\S]*?)\]\)/);
   assert.ok(m, '定位不到 BACKFILL_SCALAR_KEYS —— 名单被改名/挪走时本测试要先红');
   return new Set(Array.from(m[1].matchAll(/'([^']+)'/g)).map((x) => x[1]));

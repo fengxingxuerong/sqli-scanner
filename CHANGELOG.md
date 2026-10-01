@@ -4,6 +4,168 @@
 
 ## [Unreleased]
 
+### 2026-10-02 批次（第三批）· 批量编排收口（故障隔离）+ 集合目标生成（对标 sqlmap 2.0 OpenAPI）+ 「0 注入点」假阴性修复
+
+来源：接手上一会话的**在制品**（`batchPool.js` 已写、`cli.batch.test.js` 与 `e2e/batch-lab/`
+已写但未接线未提交），以及竞品坐标核实：ghauri 的批量**明确没有故障隔离**
+（"One unresponsive target can stall the entire queue"）、`-m` 只吃文本 URL、`-r` 只吃单请求；
+sqlmap 2.0(WIP) 正在做 **OpenAPI 目标生成**。本批把三件合流。
+
+**① 批量编排收口：故障隔离 + 结果不丢 + 摘要点名**
+
+- `server/bin/cli/batchPool.js`（新）：并发池 `runPool` 单个 worker 抛错**不中断整批**；
+  `runBatch` 把失败目标点名进 `failures`，成功目标的报告照常进 `results`；
+  `summarizeBatch` 给出 ok/failed/needsReview/byRisk/hasHigh/allFailed。
+- **退出码三分**：有高危 → 2（既有语义不变）；**全批失败 → 1**（与「扫了但没高危」区分开）；
+  部分失败仍 0（失败已在摘要里点名）。
+- `-m` 与 `-l` 两条批量路径由「两处粘贴复制的池」收敛到同一份实现。
+- 新增 `needsReview` 通道：报告产出了但**一个检测请求都没发**（0 注入点）的目标单独点名 ——
+  批量里这类最会骗人（退出码与成功目标一样）。
+
+**② 集合目标生成：`-m` 从「只认 URL 列表」扩到「也认请求集合」**
+
+- `server/bin/cli/batchTargets.js`（新）：`expandBatchTargets()` 自动识别
+  Burp XML / HAR / Postman / OpenAPI(JSON)，展开成 N 个目标，逐个保留 method/headers/body。
+  此前这三样各在一处：集合解析只服务 `-r`（**且只取第 1 条**）、`-m` 只吃文本 URL ⇒ 断的。
+- **跳过并点名**（而不是硬扫）的三类：非 http(s) 协议（解析器经原始报文往返会把它静默补成
+  http，扫出来的就不是用户写的那个目标）、`multipart/form-data`（JSON 化会塌成垃圾键，见 TODO §O）、
+  无法转 JSON 的 body。理由：带着坏 body 去扫 POST 端点 = 0 注入点 = 根本没测。
+- **真机抓到的缺陷**：urlencoded body 留到扫描期才 `JSON.parse` ⇒ 整条目标崩
+  （`Unexpected token 'a', "name=alice" is not valid JSON`）。修法是把 body 的 JSON 化
+  **前移到展开期**（复用 args.js 的 `bodyToJsonString`）。
+- 「识别成什么格式、展开几个目标」一律打到 stderr —— 静默降级是本仓反复踩的坑。
+
+**③ 「0 注入点」= 不可判定：结论层终于消费 `noInjectionPoints`**
+
+- `scanRunner.js`：0 注入点且无命中 ⇒ verdict 写 `inconclusive`（此前恒写
+  `no_vulnerability_detected`）。实战形态：批量扫 100 个目标，30 个不通 ⇒ 每个都产出
+  points=0 的报告，使用者读到的是「这 30 个站没有注入」——**把「根本没测」写成安全结论**。
+  `discover.js` 早就打了这个标记，结论层一直没消费它。
+- 文案与「测过但网络/会话不可靠」分开给（前者要人确认可达性/注入面，后者要人复扫未决点）。
+
+**④ 靶场与门禁**
+
+- `e2e/batch-lab/run.mjs`（新，deps:[]）：真 SQLite（sql.js WASM）靶站 + 真 CLI 进程。
+  A 场景：3 目标混 1 死目标 ⇒ 报告 3 份全落盘、死目标 verdict=inconclusive、摘要点名。
+  B 场景：OpenAPI 展开 2 目标（2 条真检出）+ HAR 的 POST 表单（body 保住，points=1 vulns=2）。
+- 三处接线：`e2e/run-all.mjs` LABS（CI 的 `e2e-self-contained` job 与 `ci-local` 都跑它）、
+  `e2e/acceptance.mjs` SUITES（第 16 套件）、`server/tests/batchLab.wiring.test.js`（源码文本守卫，
+  防条目被删 / 断言被放宽 / CLI 不走新模块）。
+- **缺陷注入 8/8 杀**（注入前 `cp` 备份、还原用备份并 `cmp`）：
+  scanRunner 的 `nothingTested` 置假（杀 1）／runPool 去 try-catch（杀 1）／
+  needsReview 不填（杀 1）／allFailed 去掉「成功数为 0」这一维（杀 1）／
+  batchTargets 恒走 URL 分支（杀 4）／丢非 http(s) 协议守卫（杀 1）／丢 cookie 映射（杀 1）。
+- 顺带修：`ciWindowsOnly` 登记表行号漂移（186→191、254→259，我插 LABS 条目导致下移），
+  并按 TODO §8 的建议让「登记项失效」的报错**直接给出该 kind 当前的真实行号**（省一次 grep）。
+  另修 `bespokeKeys.js` 一处死 import（`defaults`，eslint 0 的前提）。
+
+**⑤ 数字**：服务端 **2646**（2643/0/3）· 前端 **475/475** · 徽章 3118 ·
+门禁 lint/typecheck(双端)/arch/refs/modules/targets/merge/readme/facts 全 exit 0。
+
+---
+
+### 2026-10-01 批次（第二批）· XML/SOAP body 通道（竞品对标 ghauri）+ clientCert 接 UI + 接口靶场 46/46
+
+来源：竞品对标体检（sqlmap / ghauri / jsql 三条线）与本轮「用自建靶场把全套跑一遍」。
+三条线各自的结论：**JSON 嵌套早就有了，同类的 XML 形态完全空白** —— 政企/金融老接口
+（SOAP 1.1/1.2、XML-RPC、`application/xml` 内部网关）body 是 XML 时，此前只能把整份 XML
+当一个 body 参数 ⇒ 注入值从未进 SQL ⇒ 静默 0 检出。
+
+**① XML / SOAP body 通道（新增能力）**
+
+- `core/xmlBody.js`：零第三方依赖的「元素 + 文本」解析器 + 叶子路径发现 + 按路径写值 + 序列化。
+- `TargetParser` 3.55 步发现叶子注入点（param 用点路径，如 `soap:Envelope.soap:Body.GetUser.id`，
+  同名兄弟加数字下标），`injection.js` 在 **body 分支最前面**接管写回 —— 顺序是关键：
+  晚一步就会被表单分支摊成 `路径=值` 的 urlencoded，只吃 XML 的目标一个字段都解析不到。
+- 入口三端齐全：REST `xmlBody`（字符串 ≤10KB）、CLI `--xml-body` / `--xml-body-file`、
+  `createTarget` 透传。（JSON 通道 2026-09-08 就三端齐备，这次是补齐它的同族。）
+- **保守边界**：注释 / CDATA / DOCTYPE / 正文处理指令**整体放弃**（`ok:false` → 0 注入点）；
+  只剥开头的 XML 声明（真实 SOAP 报文每条都有，不剥就等于在真实目标上 100% 放弃）。
+  属性不做注入点（SOAP 参数都在元素文本里）。
+- 服务端 14 条单测（10 解析器/发送形态 + 4 CLI 接线，后者走 `runSingleScan` 捕获真 input）。
+  **缺陷注入 3/3 杀**：去掉 injection 的 XML 分支（杀 1）／TargetParser 不标 `xmlPath`（杀 2）／
+  序列化不转义（杀 2）—— 注入前 `cp` 备份、还原用备份并 `cmp` 逐字核对。
+
+**② clientCert（mTLS）接进 Web 面板 —— 收口上一批的半成品**
+
+- 后端（clientCert.js / agentFactory / REST 白名单 / CLI `--cert`）此前已写好但**前端没有入口**，
+  前端契约守卫 ④⑥ 因此红 2 条。现接进「授权范围与传输安全」分段（与 `insecureTls` 同段、
+  语义正交：一个管「我信不信目标」，一个管「目标信不信我」），登记 `SCAN_CONFIG_KEYS` +
+  值类型 `string` + 中英文案。前端 475/475。
+
+**③ 接口靶场（`e2e/api-range-lab`）本轮从 31/46 修到 46/46 —— 三处都是既有欠债**
+
+- **429 假红**：09-30 上线的分钟级限流（10 次/分）把一轮 40+ 次扫描打成 429，表现是「用例大面积红」，
+  真相是护栏在正常工作、靶场没给它让路。主实例显式放宽 `RATE_LIMIT_SCAN_MAX/EXPLOIT_MAX=500`；
+  ⚠️ 限速本身仍被专项用例钉住（那条用的是**独立实例** `EXPLOIT_RATE_PER_SEC=1`，不受影响）。
+- **1007 假红**：利用端点要求 `body.scope`（授权范围红线），`exploitBody()` 没跟 ⇒ 撞的是红线不是被测能力。
+- **6005 假红**：`file-write` / `os-shell` 是写类操作，缺 `confirmDestructive` 被护栏拦在能力判定之前，
+  ⇒ `data` 空对象，「失败必须给出原因」看到的是空壳。
+- 新增真靶点 `/soap`（真 MySQL + 真 XML 请求/响应）+ 2 条用例（正向检出 + 非法 XML 保守不发现）；
+  `needsDb` 补 `xml` 组（否则靶站根本不起，报的是 ECONNREFUSED 这种会误导人的错）。
+
+**④ 真靶场取证**
+
+- `python e2e/run-with-sandbox.py e2e/api-range-lab/run.mjs` → **46/46 PASS**（隔离 mysqld @3308）。
+- XML 用例的判据不采信接口自报：先手动打靶站 `/soap` 证明端点真查库回显，再要求引擎报告里的
+  注入点是**叶子点路径**且真检出漏洞，最后用靶站侧 `__range/stats` 确认请求真的到了 `/soap`。
+
+### 2026-10-01 批次 · 台账保留策略 + History 页改服务端数据源
+
+两项都属于「能力早就写好了，但没接到用户手上」的缺口（TODO 接口靶场遗留第 1 / 第 5 条）：
+服务端有 `GET /api/scans`，Web 页没接；台账会一直写，没有任何收敛手段。
+
+**① 台账保留策略 `SCAN_LEDGER_MAX` / `SCAN_LEDGER_MAX_DAYS`**
+
+- 长期运行的实例台账只增不减。`pruneLedger()` 在 `recordScan()` 之后自我收敛；CLI 另补
+  `ledger prune --max=<N> / --days=<N>` 手动入口（**没有任何策略时 exit 2 拒绝执行**）。
+- **默认关闭**：扫描产物是有损删除，不能因为升级静默清掉历史。两维都未设 ⇒ 一条不删。
+- **顺序刻意是「先原子重写索引、再删目录」**：反过来时，目录删成功而索引重写失败 ⇒
+  列表里有、点开 404（半份数据）；现在的顺序下失败模式是磁盘泄漏 + 孤儿目录，列表干净、可重试。
+- 淘汰是目录与索引**成对**消失，并要求 `readReport` 真的返回 null ⇒ `/scan/:id/report` 走 404。
+- 顺带治掉 `appendFileSync` 造成的重复登记（同 scanId 索引多行 ⇒ 列表出现两条同名条目）。
+- CLI 的 `--max` / `--days` 在 `args.js` 里显式登记为「已知但不消费」—— 否则会被记成
+  unknownFlag 打印「不会生效」，而它其实是生效的，这条警告会变成在骗人。
+- 服务端 10 条 + CLI 1 条单测。**缺陷注入 6/6 杀**：只删索引不删目录（杀 5）／不重写索引／
+  缺时间戳伪装成最新／天淘汰方向反／切断 recordScan→prune 接线／早退跳过去重 —— 各杀 1~5 条。
+
+**② History 页：由 localStorage 改为「服务端为主 + 本地兜底」**
+
+- 此前换机器 / 换浏览器 / 清缓存，历史就空了（同一批扫描在 CLI 那边一直看得到）。
+- 合并规则见 `src/shared/historyMerge.ts`：同名条目服务端行胜出做展示，**但保留本地快照引用**
+  （续跑要读 `report.target.config`，服务端清单只有摘要）；来源以 Chip 明示 `服务端`/`进行中`/`仅本机`。
+- 服务端缺 `riskLevel` ⇒ 台账 meta 新增 `highestRisk`（取最高、只认四档规范值）；
+  **老台账没这个字段 ⇒ UI 显示「风险未知」，不猜不兜底 `Low`**。
+- 服务端取不到清单时退回本地列表并如实提示，不允许出现比改造前更差的白屏。
+- 纯服务端条目不给删除按钮（服务端没有 DELETE 端点，给了按钮点了没反应等于骗人）。
+- 前端 11 条单测（7 条纯函数 + 4 条组件）。**缺陷注入 3/3 杀**：组件不接服务端数据 ⇒ 3 条红；
+  `riskLevel` 兜底成 `'Low'` ⇒ 2 条红；丢掉本地快照引用 ⇒ 1 条红。
+
+**⚠️ 顺手修了一个接管前就已存在的损坏**：`server/src/engine/extractionMaps.js` 处于语法错误
+状态（上一轮把 `SYS_QUERIES` 往 `server/src/engine/extraction/sysQueries.js` 迁时，
+`LEN_FN` 的起始行被一起删掉，且新文件自身也没闭合 `LEN_FN` ⇒ 两边都不可解析，服务端
+138 个测试因模块加载失败全红）。已 `git checkout HEAD` 恢复可用版本，两份半成品各自留档在
+`logs/tmpdiag/extractionMaps.BROKEN.js.bak` 与 `logs/tmpdiag/sysQueries.quarantine.js`，**未销毁**。
+
+- 门禁：lint ✓ typecheck(双端) ✓ arch ✓ refs ✓ facts ✓ readme ✓；服务端 2577（2574 pass / 0 fail / 3 skip）· 前端 472/472。
+
+### 2026-09-30 批次 · httpClient 四期拆分：TLS/代理 Agent 工厂独立成模块
+
+按「先搬无状态符号、再 re-export 回原文件」的顺序，把 `httpClient.js` 里的**模块级基础设施**
+（零 `this` 耦合）迁到 `core/http/agentFactory.js`：axios 侧 keep-alive 单例、按
+`{insecure, keepAlive}` 组合缓存的 Agent 工厂、代理 Agent 缓存（HTTP/SOCKS）。
+
+- **零行为变化**：`httpClient.js` 保留 `agentsForTls` / `buildProxyAgent` 同名再导出，
+  既有 import 路径（`p2.test` 等）全部不变。文件 63.5 KB → 58.6 KB。
+- **为什么值得单独拆**：这段是**安全语义的承载点** —— 共享 `httpsAgent` 一旦被 insecure 组合
+  复用，等于「一个自签目标关掉了全局证书校验」（原文件头部注释的原话）。此前只能经
+  `httpClient.p2.test` 间接覆盖，抽出来后可以直测：① 默认组合复用共享单例、② insecure 组合
+  新建且 `rejectUnauthorized=false`、③ 缓存按双维 key 不串用、④ 代理 socks 分流 /
+  内嵌凭据解码 / insecure|secure 分 key 缓存。
+- 新增 `server/tests/agentFactory.test.js`（6 条）。
+- 缺陷注入 **2/2 杀**：secure 组合改为每次新建 ⇒ ① 红；缓存 key 去掉 keepAlive 维度 ⇒ ③ 红。
+- 门禁：typecheck:server ✓ lint ✓ refs ✓ arch ✓ facts ✓；服务端 2577（2574 pass / 0 fail / 3 skip）。
+
 ### 2026-09-28 批次 · 接口靶场：26 条 HTTP 端点逐条在真 MySQL 靶站上验收
 
 此前的 e2e 几乎都 `import ScanManager` 直接驱动引擎，接口层（Express 路由、SSE、导出、鉴权闸门、

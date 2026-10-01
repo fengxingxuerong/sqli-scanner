@@ -22,7 +22,20 @@ const API_MD = readFileSync(new URL('../../docs/api.md', import.meta.url), 'utf8
 // 2026-09-25：配置守卫整段搬到 api/scanConfigGuard.js（HTTP 与直连两条入口共用）。
 // 文本锚点于是必须覆盖【入口层这一整簇】——只读 scanRoutes 会让本守卫在搬移后
 // 静默找不到 clamp 收敛点（那正是它要防的"文档写了不存在的能力"的反面：假红/假绿都可能）。
-const ROUTES = readFileSync(new URL('../src/api/scanRoutes.js', import.meta.url), 'utf8') + readFileSync(new URL('../src/api/scanConfigGuard.js', import.meta.url), 'utf8');
+// [2026-10-01 六期拆分] scanConfigGuard 的 550 行 clamp 序列再拆到 api/scanGuard/*（按域切
+// 函数），锚点范围随之扩成「入口层目录」——scanRoutes + scanConfigGuard(facade) + scanGuard/*
+// 全量拼接。与前端 scanConfig.contract.test 的「面板目录为取数源」同一手法：新增分段文件
+// 自动进入扫描范围，守卫强度不变。
+import { readdirSync } from 'node:fs';
+const GUARD_DIR = new URL('../src/api/scanGuard/', import.meta.url);
+const GUARD_SOURCES = readdirSync(GUARD_DIR)
+  .filter((f) => f.endsWith('.js'))
+  .map((f) => readFileSync(new URL(`../src/api/scanGuard/${f}`, import.meta.url), 'utf8'));
+const ROUTES = [
+  readFileSync(new URL('../src/api/scanRoutes.js', import.meta.url), 'utf8'),
+  readFileSync(new URL('../src/api/scanConfigGuard.js', import.meta.url), 'utf8'),
+  ...GUARD_SOURCES,
+].join('\n');
 
 // 表格行：`| \`timeoutMs\` | 1000-60000（默认 30000） | 说明 |`（区间可省略，默认值必须有）
 const ROW_RE = /^\|\s*`([A-Za-z][A-Za-z0-9_]*)`\s*\|\s*(?:(\d+)\s*-\s*(\d+))[^|]*（默认\s*(\d+)）/gm;

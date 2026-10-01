@@ -29,10 +29,11 @@ test('缓存命中：同 cacheKey 第二次调用不发 probe 请求', async () 
   let callCount = 0;
   const probe = async (n) => {
     callCount++;
-    return { status: 200, data: 'x'.repeat(200) };
+    // 收敛到 7 < maxCols（capped=false）：判据有效的正常形态
+    return n <= 7 ? { status: 200, data: 'x'.repeat(200) } : { status: 500, data: '' };
   };
   const first = await binaryGuessColumns(probe, { baseLen: 200, maxCols: 50, cache, cacheKey: 'p1' });
-  assert.ok(first >= 1);
+  assert.equal(first, 7);
   const firstCalls = callCount;
   const second = await binaryGuessColumns(probe, { baseLen: 200, maxCols: 50, cache, cacheKey: 'p1' });
   assert.equal(second, first);
@@ -52,11 +53,32 @@ test('maxColumnsGuess 参数控制上限', async () => {
     return { status: 200, data: 'x'.repeat(200) };
   };
   const cols = await binaryGuessColumns(probe, { baseLen: 200, maxCols: 10 });
-  assert.equal(cols, 10);
-  // [2026-09-17] 本用例的 mock 是「全 200 + 等长」——两个原判据（status>=500 / len<半基线）
-  // 都没有证据，会一路判成功并顶到 maxCols。这正是「判据可能失效」的可疑形态，
-  // 实现会额外探一次 maxCols+1 作为形态自检基准，因此允许 maxProbed 比 maxCols 大 1。
+  // [2026-10-01 契约变更] 本用例的 mock「全 200 + 等长」是判据失效形态：二分顶到 maxCols
+  // 且形态自检不可区分 ⇒ capped ⇒ 按 binaryProbe 调用方约定返回 null（UNION 放弃），
+  // 不再把 10 这个荒谬值交给下游。
+  assert.equal(cols, null, 'capped（判据失效顶到上限）必须返回 null');
+  // [2026-09-17] 判据失效时会额外探一次 maxCols+1 作为形态自检基准，允许 maxProbed 比 maxCols 大 1。
   assert.ok(maxProbed <= 10 + 1, `maxProbed=${maxProbed} 应 <= 11`);
+});
+
+// ── 2026-10-01 新增：capped 契约与缓存键形态维度 ────────────────────────────
+test('capped 结果【不写入缓存】（防跨扫描投毒）', async () => {
+  const cache = createColumnGuessCache();
+  const probe = async () => ({ status: 200, data: 'x'.repeat(200) }); // 判据失效 → capped
+  const cols = await binaryGuessColumns(probe, { baseLen: 200, maxCols: 10, cache, cacheKey: 'cap1' });
+  assert.equal(cols, null);
+  assert.equal(cache.has('cap1'), false, 'capped 结果不得写入缓存');
+});
+
+test('缓存键形态维度：colGuessExtra 区分 tamper/obfuscate/boundary', async () => {
+  const { colGuessExtra } = await import('../src/engine/columnGuess.js');
+  const base = colGuessExtra({ config: {} }, '');
+  const tampered = colGuessExtra({ config: { wafEvasion: { tamper: { enabled: true, plugins: ['space2comment'] } } } }, '');
+  const obf = colGuessExtra({ config: { wafEvasion: { obfuscate: true } } }, '');
+  const bounded = colGuessExtra({ config: {}, }, "')");
+  assert.notEqual(base, tampered, 'tamper 链变化必须改变缓存键');
+  assert.notEqual(base, obf, 'obfuscate 开关必须改变缓存键');
+  assert.notEqual(base, bounded, '闭合符变化必须改变缓存键');
 });
 
 test('createColumnGuessCache 返回新 Map', () => {

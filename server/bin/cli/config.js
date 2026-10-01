@@ -196,6 +196,8 @@ export function buildConfig(args) {
   }
   // --insecure：config.insecureTls=true（HttpClient 换用 rejectUnauthorized:false 专用 Agent）
   if (args.insecureTls) config.insecureTls = true;
+  // --cert：mTLS 客户端证书 PEM 路径（证书+私钥同文件；引擎加载时校验形状，失败抛错）
+  if (typeof args.clientCert === 'string' && args.clientCert) config.clientCert = args.clientCert;
   // --no-validation-skip：显式关闭输入校验短路（引擎默认开）；不影响预筛 prefilter
   if (args.noValidationSkip) config.validationSkip = false;
   // [P0-FIX 2026-09-09] --no-proxy-bypass-local：显式恢复「本地也走环境变量代理」

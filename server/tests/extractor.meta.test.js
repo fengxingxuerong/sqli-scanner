@@ -34,7 +34,10 @@ function buildCtx(httpClient, dbms = 'MySQL') {
   return {
     httpClient,
     target: { method: 'GET', baseUrl: 'http://mock/?q=1', headerParams: {}, cookieParams: {} },
-    point: { id: 'p1', location: 'url', param: 'q', originalValue: '1', echoCols: [1], confirmed: true },
+    // [2026-10-01] 补 columns:2 —— 模拟「检测期 UNION 实测确认的列数」。本文件的 mock
+    // 对 ORDER BY 无差别 200 等长回显，属猜列判据失效形态（capped → null），
+    // 没有确认列数时 extractScalar 按新契约直接判 UNION 通道不可用（不再空转）。
+    point: { id: 'p1', location: 'url', param: 'q', originalValue: '1', echoCols: [1], confirmed: true, columns: 2 },
     dbms,
     config: { timeoutMs: 5000, retry: 0, maxColumnsGuess: 10 },
   };

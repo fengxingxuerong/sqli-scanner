@@ -42,7 +42,8 @@ function makeCaseScrambledUnionMock() {
       if (/AND 1=2/.test(q) || /'1'='2/.test(q)) return { data: 'NO_RESULTS', status: 200 };
       if (/ORDER BY \d+/.test(q)) {
         const n = Number(q.match(/ORDER BY (\d+)/)[1]);
-        return n > 3 ? { data: 'ERR', status: 200 } : { data: 'normal', status: 200 };
+        // 超列表报错必须是 500（200 短体拉不开判据 → capped → 猜列 null → UNION 放弃）
+        return n > 3 ? { data: 'ERR', status: 500 } : { data: 'normal', status: 200 };
       }
       return { data: `echo:${scrambleMarkerCase(q)}`, status: 200 };
     },
@@ -57,7 +58,8 @@ function makePlainUnionMock() {
       if (/AND 1=2/.test(q) || /'1'='2/.test(q)) return { data: 'NO_RESULTS', status: 200 };
       if (/ORDER BY \d+/.test(q)) {
         const n = Number(q.match(/ORDER BY (\d+)/)[1]);
-        return n > 3 ? { data: 'ERR', status: 200 } : { data: 'normal', status: 200 };
+        // 超列表报错必须是 500（200 短体拉不开判据 → capped → 猜列 null → UNION 放弃）
+        return n > 3 ? { data: 'ERR', status: 500 } : { data: 'normal', status: 200 };
       }
       return { data: `echo:${q}`, status: 200 };
     },
@@ -89,7 +91,10 @@ test('UnionDetector 回显标记大小写被打乱(randomcase) 仍能判定 UNIO
   assert.equal(res.vulnerable, true);
   assert.equal(res.technique, 'union');
   // 大小写不敏感匹配下应定位到全部回显列
-  assert.deepEqual(ctx.point.echoCols, [0, 1, 2, 3]);
+  // [2026-10-01 订正] 本 mock 真实列数是 3（ORDER BY 4 报错）；此前期望 [0,1,2,3] 是靠
+  // 「超列表 200 短体 → 判据失效 → capped 仍照用 4 列」的垃圾路径通过的，
+  // capped→null 契约落地后按 mock 自己的真实列数断言。
+  assert.deepEqual(ctx.point.echoCols, [0, 1, 2]);
 });
 
 // ===== UnionDetector：对照组（无 tamper，标记大小写不变，不应回归）=====
@@ -98,7 +103,7 @@ test('UnionDetector 回显标记大小写不变时仍命中（零回归）', asy
   const ctx = buildCtx(makePlainUnionMock());
   const res = await d.detect(ctx);
   assert.equal(res.vulnerable, true);
-  assert.deepEqual(ctx.point.echoCols, [0, 1, 2, 3]);
+  assert.deepEqual(ctx.point.echoCols, [0, 1, 2]); // 同上：mock 真实列数 3
 });
 
 // ===== discoverEchoColumns（Extractor/DBFingerprinter 复用）：标记大小写打乱仍能定位 =====

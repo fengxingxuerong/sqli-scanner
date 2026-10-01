@@ -15,6 +15,8 @@ import { defaults } from '../config/defaults.js';
  * @property {string} [method]
  * @property {Record<string, any>} [bodyParams]
  * @property {object|null} [jsonBody]
+ * @property {string|null} [xmlBody] XML / SOAP body 原文（2026-10-01）
+ * @property {object|null} [xmlTree] xmlBody 解析后的树（TargetParser 惰性填充，供 injection 复用）
  * @property {Record<string, any>} [cookieParams]
  * @property {Record<string, any>} [headerParams]
  * @property {Record<string, any>} config
@@ -108,6 +110,11 @@ export function createTarget(input) {
     // 注入点（param 用点路径如 user.id），injection.js 按路径替换叶子值后重序列化发送。
     // 不与 bodyParams 互斥：jsonBody 存在时优先走 JSON 语义。
     jsonBody: input.jsonBody || null,
+    // [2026-10-01] XML / SOAP body 注入通道：传入 XML 字符串时 TargetParser 解析出叶子
+    // 注入点（param 用点路径如 soap:Envelope.soap:Body.GetUser.id），injection.js 按路径
+    // 替换叶子文本后重序列化发送。xmlTree 为解析后的树（首次发现时惰性填充，避免重复解析）。
+    xmlBody: typeof input.xmlBody === 'string' ? input.xmlBody : null,
+    xmlTree: null,
     cookieParams: input.cookieParams || {},
     headerParams: input.headerParams || {},
     config: { ...defaults, ...(input.config || {}) },

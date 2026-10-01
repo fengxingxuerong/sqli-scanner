@@ -44,7 +44,9 @@ function buildCtx(httpClient, dbms = 'MySQL') {
   return {
     httpClient,
     target: { method: 'GET', baseUrl: 'http://mock/?q=1', headerParams: {}, cookieParams: {} },
-    point: { id: 'p1', location: 'url', param: 'q', originalValue: '1', echoCols: [1], confirmed: true },
+    // [2026-10-01] 补 columns:2（检测期确认列数）：mock 对 ORDER BY 无差别回显属判据失效
+    // 形态（capped → 猜列 null），无确认列数时 extractScalar 按新契约判通道不可用。
+    point: { id: 'p1', location: 'url', param: 'q', originalValue: '1', echoCols: [1], confirmed: true, columns: 2 },
     dbms,
     config: { timeoutMs: 5000, retry: 0, maxColumnsGuess: 10 },
   };

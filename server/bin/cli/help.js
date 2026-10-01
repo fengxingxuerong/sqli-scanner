@@ -23,9 +23,18 @@ export function printHelp() {
   -l, --log-file <file>      从代理/Burp 日志文件批量扫描（对标 sqlmap -l）：
                              支持 Burp XML 导出与纯文本多请求日志，逐请求复用 -r 的字段映射
   -u, --url <url>            目标 URL
-  -m, --batch <file>         批量扫描文件（每行一个 URL）
+  -m, --batch <file>         批量扫描文件。两种来源，自动识别（会打印识别结果，不静默）：
+                             · URL 列表：每行一个 http(s) 地址
+                             · 请求集合：Burp XML 导出 · HAR · Postman 集合(v2.x) ·
+                               OpenAPI/Swagger（JSON；YAML 需先转 JSON）
+                               ⇒ 展开成 N 个目标，逐个保留 method/headers/body
+                               （对标 sqlmap 2.0 的 OpenAPI 目标生成）
+                             ⚠ OpenAPI 是**接口定义**不是抓包：参数值取自 example/default，
+                               缺失处是占位 '1'，扫之前请自行核对
   --method <GET|POST|...>    请求方法（默认 GET；支持 PUT/PATCH/DELETE）
   --body <json>              POST body（JSON 对象字符串）
+  --xml-body <xml>           XML / SOAP body 原文（注入点取叶子路径，如 soap:Envelope.soap:Body.GetUser.id）
+  --xml-body-file <path>     同上，从文件读（多行 SOAP 信封用这个）
   --cookie <str>             认证 Cookie 串（透传 config.auth.cookie，非注入点）
   --header <k:v,k:v>          额外请求头（冒号分隔，逗号分隔多组）
   --technique <BEUSTQ>       检测技术子集（union/error/boolean/time/stacked/oob/inline/second_order，逗号分隔；缺省=默认 4 类）

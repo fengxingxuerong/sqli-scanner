@@ -5,6 +5,8 @@ import { detectParamEncoding } from './paramEncoding.js';
 import { ErrorCode, AppError } from '../core/errors.js';
 import { httpClient as defaultHttpClient } from '../core/httpClient.js';
 import { LinkCrawler, attrValue } from './crawler.js';
+// [2026-10-01] XML / SOAP body 叶子发现（对标 ghauri XML·SOAP）
+import { parseXmlBody, xmlLeafPaths, getXmlLeaf } from '../core/xmlBody.js';
 
 // 反 CSRF 字段名正则（命中即记为 csrfTokenName）
 const CSRF_RE = /^(csrf|_token|__RequestVerificationToken|authenticity_token)$/i;
@@ -92,6 +94,25 @@ export class TargetParser {
     // 非对象（null/数组标量等）安全跳过。
     if (target.jsonBody != null && typeof target.jsonBody === 'object') {
       this._discoverJsonLeaves(target.jsonBody, [], points, 0);
+    }
+
+    // 3.55) XML / SOAP body 叶子注入点（level≥1，xmlBody 传入时生效）
+    // [2026-10-01 竞品对标 ghauri] JSON 通道 2026-09-08 就有了，同类的 XML 形态却完全空白：
+    // 政企/金融老接口（SOAP 1.1/1.2、XML-RPC、application/xml 内部网关）body 是 XML 时，
+    // 此前只能把整份 XML 当一个 body 参数 ⇒ 注入值从未进 SQL。
+    // 保守边界：解析器只认「元素 + 文本」，遇到注释/CDATA/DOCTYPE/处理指令**整体放弃**
+    // （宁可少发现，也不发畸形报文 —— 畸形会让目标解析失败，整轮判「不可注入」）。
+    // 与 jsonBody 互斥优先 JSON：两者同时给属于调用方误用，JSON 语义更明确。
+    if (typeof target.xmlBody === 'string' && target.xmlBody.trim() && target.jsonBody == null) {
+      if (!target.xmlTree) {
+        const parsed = parseXmlBody(target.xmlBody);
+        if (parsed.ok) target.xmlTree = parsed.tree; // 回写供 injection.js 复用（避免每请求重解析）
+      }
+      if (target.xmlTree) {
+        for (const path of xmlLeafPaths(target.xmlTree)) {
+          points.push(createInjectionPoint('body', path, getXmlLeaf(target.xmlTree, path) ?? '', { xmlPath: true }));
+        }
+      }
     }
 
     // 3.6) 二阶存储点标记（--second-order 显式开启时）

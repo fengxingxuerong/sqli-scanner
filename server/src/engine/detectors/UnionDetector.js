@@ -3,7 +3,7 @@
 // =====================================================================
 import { Detector } from '../Detector.js';
 import { createDetectionResult } from '../models.js';
-import { binaryGuessColumns } from '../columnGuess.js';
+import { binaryGuessColumns, colGuessExtra } from '../columnGuess.js';
 import { _colGuessCache, colGuessScopeKey } from '../Extractor.js';
 import { discoverEchoColumnsDetailed } from '../injection.js';
 import { unionDebug } from '../unionDebug.js';
@@ -155,8 +155,15 @@ export class UnionDetector extends Detector {
           return r;
         });
       },
-      { baseLen, maxCols, cache: _colGuessCache, cacheKey: colGuessScopeKey(target, point?.id), fixed: unionCols }
+      { baseLen, maxCols, cache: _colGuessCache, cacheKey: colGuessScopeKey(target, point?.id, colGuessExtra(ctx, boundary)), fixed: unionCols }
     );
+
+    // [2026-10-01] capped（判据失效顶到上限）→ null：UNION 照用荒谬列数只会空转，
+    // 按 binaryProbe 调用方约定放弃 UNION（不误报、不浪费请求）。
+    if (columns == null) {
+      unionDebug(`colGuess capped（判据失效） point=${point.id} → UNION 放弃`);
+      return result;
+    }
 
     // 2) 用标记字符串定位回显列（文本标记优先；严格类型库 / INT 回显列自动落数字标记双族交叉确认）
     // 修复对标 sqlmap 差距 D3：'SQLISCANNER<i>' 落在 INT 列上在 MSSQL/Oracle/PG 报类型错误 → 原先完全漏检

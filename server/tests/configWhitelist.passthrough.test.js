@@ -69,6 +69,8 @@ const PROBE = {
   // 通用透传放过 1/"true" 会变成"收了不生效"）——默认探针 1 被拒是**正确行为**。
   hex: true,
   flushSession: true,
+  // [2026-10-01] mTLS 客户端证书路径：默认探针 1 过不了字符串形状校验（正确行为）
+  clientCert: '/tmp/client-cert.pem',
   // [2026-09-23 E2] extractScope 的探针值：默认探针 1 过不了校验是**正确行为**——
   // 它是枚举/拖库动作族的配置对象，mode 必须在 18 个白名单值内（引擎 switch 的判据），
   // 形状校验见 scanRoutes 的 sanitizeExtractScope。这里给最小合法值，测「透传在不在」。

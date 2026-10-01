@@ -15,6 +15,7 @@ import type { ScanConfig, EngineType, WafSuggestion } from '../shared/types';
 import DetectionIntensitySection from './scanConfig/DetectionIntensitySection';
 import SafetyGuardSection from './scanConfig/SafetyGuardSection';
 import InjectionScopeSection from './scanConfig/InjectionScopeSection';
+import AdvancedInjectionSection from './scanConfig/AdvancedInjectionSection';
 import RequestControlSection from './scanConfig/RequestControlSection';
 import DataExtractionSection from './scanConfig/DataExtractionSection';
 import EnumerationSection from './scanConfig/EnumerationSection';
@@ -74,6 +75,11 @@ export default function ScanConfigPanel({ config, mode, onChange, wafSuggestion 
           <Divider />
 
           <InjectionScopeSection config={config} onChange={onChange} />
+
+          <Divider />
+
+          {/* [2026-10-01 UI-REACH §1.3] 高级注入面：CLI 侧 sqlmap 对标的 7 个注入形态键 */}
+          <AdvancedInjectionSection config={config} onChange={onChange} />
 
           <Divider />
 

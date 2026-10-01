@@ -74,5 +74,5 @@ test('C: ERROR_SIG 覆盖新 DBMS 报错特征', () => {
   assert.ok(ERROR_SIG.test('Adaptive Server message'));
   assert.ok(ERROR_SIG.test('Firebird SQL error code'));
   assert.ok(ERROR_SIG.test('Informix SQL -206'));
-  assert.ok(ERROR_SIG.test('H2 JDBC Syntax error'));
+  assert.ok(ERROR_SIG.test('org.h2.jdbc.JdbcSQLSyntaxErrorException: Syntax error in SQL statement'));
 });

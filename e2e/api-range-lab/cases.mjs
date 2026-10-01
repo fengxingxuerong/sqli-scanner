@@ -629,6 +629,9 @@ function exploitBody(ctx, report, over = {}) {
     point: { originalValue: point?.originalValue ?? '1', location: point?.location || 'url', param: point?.param || 'id' },
     dbms: report.dbms || 'MySQL',
     authorized: true,
+    // [2026-10-01] 授权范围是**利用端的硬红线**（缺它直接 1007 拒单）：靶场自身是回环地址，
+    // 这里显式声明靶站主机，否则用例撞的是红线而不是被测能力 —— 那才是真正的假红。
+    scope: ['127.0.0.1'],
     ...over,
   };
 }
@@ -736,7 +739,9 @@ test('exploit', 'POST /exploit/file-write：真实落盘并回读闭环', async 
   const target = `${SECURE_DIR}/api-range-filewrite-${Date.now()}.txt`;
   const payload = `API_RANGE_WRITE_${Date.now()}_marker_line\n`;
   const base = ctx.state.numScan?.report || (await scanUntilDone(ctx, { url: `${ctx.LAB}/num?id=1`, config: fastCfg() })).report;
-  const r = await ctx.post('/api/exploit/file-write', exploitBody(ctx, base, { content: payload, remotePath: target }));
+  // confirmDestructive：写类护栏（6005）与 config.productionMode / secondOrder.allowWrites 同口径，
+  // 不声明就被拦在能力判定之前 —— 那时 data 是空对象，测的就不是「能不能写」而是护栏文本。
+  const r = await ctx.post('/api/exploit/file-write', exploitBody(ctx, base, { content: payload, remotePath: target, confirmDestructive: true }));
   const d = r.json?.data || {};
   assert.equal(r.json?.code, 0, `file-write 应返回业务成功：${JSON.stringify(r.json).slice(0, 240)}`);
   const onDisk = fs.existsSync(target.replace(/\//g, path.sep)) ? fs.readFileSync(target.replace(/\//g, path.sep), 'utf8') : null;
@@ -750,7 +755,9 @@ test('exploit', 'POST /exploit/file-write：真实落盘并回读闭环', async 
 
 test('exploit', 'POST /exploit/os-shell：能力缺失时如实失败（不得假成功）', async (ctx) => {
   const base = ctx.state.numScan?.report || (await scanUntilDone(ctx, { url: `${ctx.LAB}/num?id=1`, config: fastCfg() })).report;
-  const r = await ctx.post('/api/exploit/os-shell', exploitBody(ctx, base, { cmd: 'id' }));
+  // 与 file-write 同口径：os-shell 也是写类操作，缺 confirmDestructive 会先撞 6005 护栏，
+  // 于是「失败必须给出原因」这条断言看到的是空 data（假红 —— 被测能力根本没被触达）。
+  const r = await ctx.post('/api/exploit/os-shell', exploitBody(ctx, base, { cmd: 'id', confirmDestructive: true }));
   const d = r.json?.data || {};
   if (d.ok === true) {
     // 装了 sys_eval UDF 的环境（e2e/udf-lab）应拿到真命令输出
@@ -801,7 +808,8 @@ test('exploit', '利用红线：authorized / 服务端开关 / 限速 / SSRF / s
         method: 'POST',
         path: '/api/exploit/sql',
         token: rl.token,
-        body: { target: { url: `${ctx.LAB}/num?id=1` }, dbms: 'MySQL', authorized: true, sql: 'SELECT 1' },
+        // scope 也要带：否则撞的是授权红线（1007）而不是限速桶，测错了闸门
+        body: { target: { url: `${ctx.LAB}/num?id=1` }, dbms: 'MySQL', authorized: true, scope: ['127.0.0.1'], sql: 'SELECT 1' },
       });
       codes.push(r.json?.code);
     }
@@ -1054,6 +1062,59 @@ test('persist', '上下文回收后：报告与导出走台账，且如实标注
   } finally {
     await eng.stop();
   }
+});
+
+// ── group: xml —— [2026-10-01] XML / SOAP body 通道（对标 ghauri XML·SOAP）────────
+// 判据全部落在「靶站侧取证 + 报告结构」上：
+//   · 注入点必须是**叶子点路径**（soap:Body.GetUser.id），不是整份 XML 当一个参数；
+//   · 靶站必须真的收到带注入值的 XML 请求（否则等于通道没打通、报告却说未检出）；
+//   · 必须真检出漏洞（通道打通但检测不出来 = 交付了一半）。
+test('xml', 'xmlBody 叶子路径成为注入点并在真靶站上检出', async (ctx) => {
+  await ctx.rangePost('/__range/reset', {});
+  const xml = '<?xml version="1.0" encoding="UTF-8"?>'
+    + '<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"><soap:Body>'
+    + '<GetUser><id>1</id><name>alice</name></GetUser></soap:Body></soap:Envelope>';
+  // 靶站自检（先证明端点本身可达且真查库，再谈引擎通道 —— 否则「未检出」分不清是谁的锅）
+  const labPort = new URL(ctx.LAB).port;
+  const self = await request({
+    port: labPort, method: 'POST', path: '/soap', body: xml,
+    // ⚠️ harness.request 判的是小写 'content-type'：传 'Content-Type' 会被它再补一个
+    // application/json，两个 CT 头同时发出去 ⇒ 靶站的 JSON 中间件先炸（500）。
+    headers: { 'content-type': 'text/xml' }, timeoutMs: 15000,
+  });
+  assert.equal(self.status, 200, `靶站 /soap 应 200，实得 ${self.status}，正文 ${self.text.slice(0, 300)}`);
+  assert.match(self.text, /<username>[^<]+<\/username>/, `靶站 /soap 应真查库并回显，实得 ${self.text.slice(0, 200)}`);
+
+  const scan = await scanUntilDone(ctx, {
+    url: `${ctx.LAB}/soap`,
+    method: 'POST',
+    xmlBody: xml,
+    config: fastCfg({ level: 1, techniques: ['union', 'error', 'boolean'] }),
+  });
+  const params = (scan.report?.points || []).map((p) => `${p.location}:${p.param}`);
+  const pt = (scan.report?.points || []).find((p) => p.location === 'body' && p.param === 'soap:Envelope.soap:Body.GetUser.id');
+  assert.ok(pt, `XML 叶子应成为 body 注入点（点路径），实得 ${JSON.stringify(params)}`);
+  // 每个 body 点都必须是**点路径叶子**，不允许「整份 XML 摊成一个参数」的畸形点
+  for (const p of (scan.report?.points || []).filter((x) => x.location === 'body')) {
+    assert.ok(String(p.param).includes('.'), `body 点应为叶子点路径，实得 ${p.param}`);
+  }
+  assert.ok((scan.report?.vulns || []).length >= 1, `XML 注入点应真检出漏洞，实得 vulns=${JSON.stringify((scan.report?.vulns || []).map((v) => v.technique))}`);
+  // 靶站侧取证：/soap 真的收到了请求（通道打通）
+  const stats = await rangeStats(ctx);
+  assert.ok((stats.byPath['/soap'] || 0) > 0, `靶站未收到 /soap 请求，实得 byPath=${JSON.stringify(stats.byPath)}`);
+});
+
+// 反向护栏：xmlBody 形状不合法时**如实不产生注入点**，而不是发畸形报文假装测过
+test('xml', '非法 xmlBody 不产生注入点（保守口径，不发畸形报文）', async (ctx) => {
+  await ctx.rangePost('/__range/reset', {});
+  const scan = await scanUntilDone(ctx, {
+    url: `${ctx.LAB}/soap`,
+    method: 'POST',
+    xmlBody: '<soap:Body><GetUser><id>1</id', // 未闭合
+    config: fastCfg({ level: 1, techniques: ['boolean'] }),
+  });
+  const xmlPoints = (scan.report?.points || []).filter((p) => String(p.param).includes('soap:'));
+  assert.deepEqual(xmlPoints, [], `未闭合 XML 不应产生注入点，实得 ${JSON.stringify(xmlPoints)}`);
 });
 
 export default CASES;

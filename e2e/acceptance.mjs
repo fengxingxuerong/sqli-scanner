@@ -341,6 +341,29 @@ const SUITES = [
     },
   },
   {
+    // [2026-10-02] 批量编排（-m / URL 列表）的故障隔离。为什么值得进 acceptance：
+    // 批量是「一次交付 N 个站点结论」的形态，而旧实现在**任一目标抛错时整批中断** ——
+    // 100 个目标里第 3 个不通 ⇒ 97 个白等，且已跑完的报告全丢。单测（cli.batch.test.js）
+    // 验的是池的语义，本套件验的是**真 CLI 进程跑完之后的外部事实**：退出码正常、
+    // 报告真的落盘 N 份、死目标的结论是 inconclusive（不是「无漏洞」）。
+    // deps 为空：靶站用 sql.js（SQLite WASM）自起，不需要宿主 MySQL。
+    id: 'batch-lab',
+    title: '批量编排故障隔离（-m：死目标不拖垮整批，结论不乱写）',
+    needs: [],
+    run: () => run('node', ['e2e/batch-lab/run.mjs'], {}),
+    assert: (out) => {
+      // 判据读文本而不是退出码：run.mjs 失败时自行 exit(1)，但「0 条断言被跑」与
+      // 「断言跑了且全过」在退出码上无法区分 —— 必须认 [PASS] 行。
+      const pass = (out.match(/\[PASS\]/g) || []).length;
+      const fail = (out.match(/\[FAIL\]/g) || []).length;
+      return {
+        facts: { PASS: pass, FAIL: fail },
+        pass: pass >= 1 && fail === 0,
+        reason: fail ? '批量故障隔离断言未通过（详见 run.mjs 输出）' : pass ? null : '解析不到 [PASS] 行（套件没真跑）',
+      };
+    },
+  },
+  {
     // [2026-09-23] OOB 带外通道此前**只在 run-all.mjs 里**（本地手工跑），acceptance 12 套件里没有它
     // —— 于是这条「唯一能在无回显+WAF 场景下可达」的通道从来没有常态化验收：
     // 改坏了不会红，只能靠人记得去跑。故纳入门禁。

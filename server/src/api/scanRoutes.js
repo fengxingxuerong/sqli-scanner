@@ -16,6 +16,10 @@ import { PAYLOADS, FINGERPRINT } from '../engine/payloads.js';
 import { logger } from '../core/logger.js';
 // [2026-09-24] 提取/统计层调优旋钮的入口收敛（11 键），见 api/scanConfigTuning.js。
 import { warnDroppedConfigKeys } from './scanConfigTuning.js';
+// [全方位优化建议 2026-09-30 §1.2] 持有 token 即可无限开新扫描是唯一明显的安全缺口：
+// POST /scan/start 挂分钟级配额（并发槽管「同时跑几个」，这里管「每分钟能开几个」）。
+// exploit/*（已有 5 req/s 桶）与 /report/ai（已有每 IP 每分钟 3 次内联限速）不在本档叠加。
+import { scanStartLimiter } from './rateLimit.js';
 import { assertSafeHttpTarget } from '../core/httpClient.js';
 // [交付场景] 两次扫描差异对比（纯函数，便于单测；见 tests/scanDiff.test.js）
 import { diffReports } from '../engine/scanDiff.js';
@@ -23,6 +27,7 @@ import { diffReports } from '../engine/scanDiff.js';
 // [大文件拆分 2026-09-21] releaseScanScope 随 trackScanTerminal 一并移至 scanGovernance.js
 // （本文件的唯一调用点就在那簇里），故此处不再 import。
 import { parseScope, assertInScope, registerScanScope } from '../core/scopeGuard.js';
+import { parseXmlBody } from '../core/xmlBody.js';
 // [大文件拆分 2026-09-21] 两簇外移后的引用（下方同时 re-export 保路径）
 import { clampParams } from './scanConfigUtils.js';
 import { acquireScanSlot, trackScanTerminal, _scanGovernance } from './scanGovernance.js';
@@ -75,7 +80,7 @@ const KNOWN_CFG_KEYS = new Set([
   // 10.0.0.0/8 / https://a.example.com/portal）；非空即强制，越界直接拒绝启动。
   'scope',
   // [P1-FIX 2026-09-08 实战批次] HTTP 层实战能力：自签证书目标 / 环境变量代理 / 代理下目标校验下放
-  'insecureTls', 'trustProxyEnv', 'ssrfViaProxy',
+  'insecureTls', 'trustProxyEnv', 'ssrfViaProxy', 'clientCert',
   // [P0-FIX 2026-09-09] 本地/私网目标绕过环境变量代理（默认 true）
   'proxyBypassLocal',
   // [2026-09-24] 引擎真读、此前**任何入口都设不了**的三键（见 sanitizeStart 内注释）：
@@ -229,6 +234,19 @@ export function sanitizeStart(body) {
       logger.warn('jsonBody 非法 JSON 对象，忽略');
     }
   }
+  // [2026-10-01] XML / SOAP body 注入通道透传（对标 ghauri XML·SOAP）：接受 XML **字符串**，
+  // 体积限制与 jsonBody 同级（10KB）。形状用引擎同一把解析器校验：解析失败即 warn 并置 null
+  // —— 静默收下再被引擎丢弃会让调用方以为自己在测 XML（与 bodyParams 嵌套那次同型陷阱）。
+  let xmlBody = null;
+  if (src.xmlBody != null) {
+    if (typeof src.xmlBody !== 'string') logger.warn('xmlBody 须为 XML 字符串，忽略');
+    else if (src.xmlBody.length > 10000) logger.warn('xmlBody 超 10KB 上限，忽略（防超大 body DoS）');
+    else {
+      const probe = parseXmlBody(src.xmlBody);
+      if (probe.ok) xmlBody = src.xmlBody;
+      else logger.warn(`xmlBody 解析失败（${probe.reason}），忽略 —— 本通道只支持「元素+文本」形态的 XML`);
+    }
+  }
   // [JSON-BODY-FIX 2026-09-20] bodyParams 里放嵌套对象 = 得到一个不可能注入的畸形点。
   // clampParams 对非字符串值做 String(v)（:696），于是 {user:{id:1}} 变成 body 参数
   // `user=[object Object]`，扫描照常跑完、报告写「未检出」—— 与同批修的「CLI 嵌套 body
@@ -250,6 +268,7 @@ export function sanitizeStart(body) {
     method,
     bodyParams: clampParams(src.bodyParams),
     jsonBody,
+    xmlBody,
     cookieParams: clampParams(src.cookieParams),
     headerParams,
     config,
@@ -325,7 +344,7 @@ export function createRoutes({ scanManager, eventBus: bus = eventBus, reportToke
     next();
   });
 
-  router.post('/scan/start', async (req, res) => {
+  router.post('/scan/start', scanStartLimiter, async (req, res) => {
     const release = acquireScanSlot();
     if (!release) {
       return res.json({
@@ -408,9 +427,12 @@ export function createRoutes({ scanManager, eventBus: bus = eventBus, reportToke
       return res.json({ code: ErrorCode.SCAN_NOT_FOUND, data: null, message: '扫描不存在或已结束' });
     }
     const st = found.source === 'live' ? sm.status(req.params.id) : { status: 'completed', paused: false, retired: true, persisted: true };
+    // [2026-10-01] 与导出同源脱敏（查看口径）：auth/proxy/db.* 打码；
+    // cookieParams/headerParams 不掩（前端 PoC 渲染需要，且 poc 字段本就含同值）。
+    const view = typeof sm.reportGen?.sanitizeForView === 'function' ? sm.reportGen.sanitizeForView(found.report) : found.report;
     res.json({
       code: 0,
-      data: { ...found.report, source: found.source, status: st?.status ?? null, state: st },
+      data: { ...view, source: found.source, status: st?.status ?? null, state: st },
       message: 'ok',
     });
   });
@@ -552,6 +574,8 @@ export function createRoutes({ scanManager, eventBus: bus = eventBus, reportToke
         data = sm.reportGen.attachPoc(found.report);
       } catch { /* PoC 是增强项，失败不影响报告主体 */ }
     }
+    // [2026-10-01] 与导出同源脱敏（查看口径，此前本端点返回未脱敏原 report ⇒ 两条口径）
+    if (typeof sm.reportGen?.sanitizeForView === 'function') data = sm.reportGen.sanitizeForView(data);
     res.json({ code: 0, data: { ...data, source: found.source }, message: 'ok' });
   });
 

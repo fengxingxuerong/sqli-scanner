@@ -1,0 +1,104 @@
+/* ============================================================================
+ * utilities.css —— 仓内自有工具类（2026-10-01 Tailwind 退役批次）
+ * 来源：dist 构建产物逐字提取，与退役前 Tailwind v3.4 JIT 输出等价 —— className
+ * 定义不变，仅移除 tailwindcss/postcss/autoprefixer 构建链与 tailwind.config.js。
+ * 级联位置不变（index.css 同一 import 点），特异性冲突解法不变。
+ * 依赖的 preflight 按本仓实际使用面收窄保留（表单元素继承 / 块级 margin 归零 /
+ * 通用 border 底线 / placeholder 颜色 / html 行高字体）。
+ * ========================================================================== */
+
+/* —— preflight 等价（收窄版）—— */
+*,:before,:after{box-sizing:border-box;border-width:0;border-style:solid;border-color:#e5e7eb}
+blockquote,dl,dd,h1,h2,h3,h4,h5,h6,hr,figure,p,pre{margin:0}
+button,input,optgroup,select,textarea{font-family:inherit;font-feature-settings:inherit;font-variation-settings:inherit;font-size:100%;font-weight:inherit;line-height:inherit;letter-spacing:inherit;color:inherit;margin:0;padding:0}
+input::placeholder,textarea::placeholder{opacity:1;color:#9ca3af}
+html,:host{line-height:1.5;-webkit-text-size-adjust:100%;-moz-tab-size:4;-o-tab-size:4;tab-size:4;font-family:ui-sans-serif,system-ui,sans-serif,"Apple Color Emoji","Segoe UI Emoji",Segoe UI Symbol,"Noto Color Emoji";font-feature-settings:normal;font-variation-settings:normal;-webkit-tap-highlight-color:transparent}
+body{margin:0;line-height:inherit}
+
+/* —— 工具类（与退役前产物逐字一致）—— */
+.\!min-w-0{min-width:0px!important}
+.\!ml-1{margin-left:.25rem!important}
+.\!p-0{padding:0!important}
+.\!px-1{padding-left:.25rem!important;padding-right:.25rem!important}
+.\!py-0{padding-top:0!important;padding-bottom:0!important}
+.\!text-xs{font-size:.75rem!important;line-height:1rem!important}
+.bg-gray-50{--tw-bg-opacity: 1;background-color:rgb(249 250 251 / var(--tw-bg-opacity, 1))}
+.block{display:block}
+.border{border-width:1px}
+.border-l{border-left-width:1px}
+.border-l-2{border-left-width:2px}
+.border-t{border-top-width:1px}
+.border-gray-200{--tw-border-opacity: 1;border-color:rgb(229 231 235 / var(--tw-border-opacity, 1))}
+.border-gray-300{--tw-border-opacity: 1;border-color:rgb(209 213 219 / var(--tw-border-opacity, 1))}
+.break-all{word-break:break-all}
+.cursor-pointer{cursor:pointer}
+@media (prefers-color-scheme:dark) { .dark\:bg-gray-800{--tw-bg-opacity: 1;background-color:rgb(31 41 55 / var(--tw-bg-opacity, 1))} }
+.flex{display:flex}
+.flex-wrap{flex-wrap:wrap}
+.focus\:border-blue-500:focus{--tw-border-opacity: 1;border-color:rgb(59 130 246 / var(--tw-border-opacity, 1))}
+.focus\:outline-none:focus{outline:2px solid transparent;outline-offset:2px}
+.font-medium{font-weight:500}
+.font-mono{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,Liberation Mono,Courier New,monospace}
+.font-semibold{font-weight:600}
+.gap-0\.5{gap:.125rem}
+.gap-1{gap:.25rem}
+.gap-2{gap:.5rem}
+.grid{display:grid}
+.grid-cols-2{grid-template-columns:repeat(2,minmax(0,1fr))}
+.grid-cols-3{grid-template-columns:repeat(3,minmax(0,1fr))}
+.items-center{align-items:center}
+.items-start{align-items:flex-start}
+.max-h-60{max-height:15rem}
+.max-h-72{max-height:18rem}
+.mb-1{margin-bottom:.25rem}
+.mb-2{margin-bottom:.5rem}
+.mb-3{margin-bottom:.75rem}
+.mb-4{margin-bottom:1rem}
+.mb-6{margin-bottom:1.5rem}
+.ml-1{margin-left:.25rem}
+.ml-4{margin-left:1rem}
+.ml-auto{margin-left:auto}
+.mr-1{margin-right:.25rem}
+.mr-6{margin-right:1.5rem}
+.mt-1{margin-top:.25rem}
+.mt-2{margin-top:.5rem}
+.mt-3{margin-top:.75rem}
+.mt-4{margin-top:1rem}
+.my-1{margin-top:.25rem;margin-bottom:.25rem}
+.my-2{margin-top:.5rem;margin-bottom:.5rem}
+.my-3{margin-top:.75rem;margin-bottom:.75rem}
+.opacity-60{opacity:.6}
+.overflow-auto{overflow:auto}
+.overflow-x-auto{overflow-x:auto}
+.p-1{padding:.25rem}
+.p-10{padding:2.5rem}
+.p-2{padding:.5rem}
+.p-3{padding:.75rem}
+.p-4{padding:1rem}
+.pl-2{padding-left:.5rem}
+.pt-2{padding-top:.5rem}
+.pt-3{padding-top:.75rem}
+.px-2{padding-left:.5rem;padding-right:.5rem}
+.px-3{padding-left:.75rem;padding-right:.75rem}
+.py-1{padding-top:.25rem;padding-bottom:.25rem}
+.py-10{padding-top:2.5rem;padding-bottom:2.5rem}
+.py-2{padding-top:.5rem;padding-bottom:.5rem}
+.py-3{padding-top:.75rem;padding-bottom:.75rem}
+.py-4{padding-top:1rem;padding-bottom:1rem}
+.py-6{padding-top:1.5rem;padding-bottom:1.5rem}
+.rounded{border-radius:.25rem}
+.select-none{-webkit-user-select:none;-moz-user-select:none;user-select:none}
+.space-y-1>:not([hidden])~:not([hidden]){--tw-space-y-reverse: 0;margin-top:calc(.25rem * calc(1 - var(--tw-space-y-reverse)));margin-bottom:calc(.25rem * var(--tw-space-y-reverse))}
+.space-y-2>:not([hidden])~:not([hidden]){--tw-space-y-reverse: 0;margin-top:calc(.5rem * calc(1 - var(--tw-space-y-reverse)));margin-bottom:calc(.5rem * var(--tw-space-y-reverse))}
+.space-y-3>:not([hidden])~:not([hidden]){--tw-space-y-reverse: 0;margin-top:calc(.75rem * calc(1 - var(--tw-space-y-reverse)));margin-bottom:calc(.75rem * var(--tw-space-y-reverse))}
+.space-y-4>:not([hidden])~:not([hidden]){--tw-space-y-reverse: 0;margin-top:calc(1rem * calc(1 - var(--tw-space-y-reverse)));margin-bottom:calc(1rem * var(--tw-space-y-reverse))}
+.space-y-5>:not([hidden])~:not([hidden]){--tw-space-y-reverse: 0;margin-top:calc(1.25rem * calc(1 - var(--tw-space-y-reverse)));margin-bottom:calc(1.25rem * var(--tw-space-y-reverse))}
+.text-\[11px\]{font-size:11px}
+.text-center{text-align:center}
+.text-gray-500{--tw-text-opacity: 1;color:rgb(107 114 128 / var(--tw-text-opacity, 1))}
+.text-gray-700{--tw-text-opacity: 1;color:rgb(55 65 81 / var(--tw-text-opacity, 1))}
+.text-red-600{--tw-text-opacity: 1;color:rgb(220 38 38 / var(--tw-text-opacity, 1))}
+.text-sm{font-size:.875rem;line-height:1.25rem}
+.text-xs{font-size:.75rem;line-height:1rem}
+.w-full{width:100%}
+.whitespace-pre-wrap{white-space:pre-wrap}

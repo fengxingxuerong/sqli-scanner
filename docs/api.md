@@ -183,6 +183,25 @@ curl http://127.0.0.1:4567/api/health
 - 文档契约形态：`{ "target": { "url", "method", "bodyParams", "cookieParams", "headerParams" }, "config": {} }`
 - 前端扁平形态：`{ "url", "method", "bodyParams", "cookieParams", "headerParams", "config": {} }`
 
+**两种结构化 body 通道**（嵌套结构的注入点只能走这两条，放进 `bodyParams` 会被 `String(v)` 摊成不可注入的畸形值）：
+
+| 入参 | 形态 | 注入点形态 | 说明 |
+|---|---|---|---|
+| `jsonBody` | JSON 对象（≤10KB） | 叶子点路径，如 `user.id` / `tags.0` | 2026-09-08 起支持，见 `_discoverJsonLeaves` |
+| `xmlBody` | XML **字符串**（≤10KB） | 叶子点路径，如 `soap:Envelope.soap:Body.GetUser.id` | 2026-10-01 起支持（对标 ghauri XML·SOAP）。只认「元素 + 文本」形态：注释 / CDATA / DOCTYPE / 正文处理指令一律**整体放弃**（解析失败记 warn 并置 null，不发畸形报文） |
+
+```bash
+# XML / SOAP 目标：注入点自动取叶子路径，不需要手工标注
+curl -X POST http://127.0.0.1:4567/api/scan/start \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "url": "http://target/soap",
+    "method": "POST",
+    "xmlBody": "<soap:Body><GetUser><id>1</id><name>alice</name></GetUser></soap:Body>",
+    "config": { "level": 1 }
+  }'
+```
+
 ```bash
 curl -X POST http://127.0.0.1:4567/api/scan/start \
   -H 'Content-Type: application/json' \

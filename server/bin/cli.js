@@ -2,6 +2,7 @@
 // CLI 模式（P1-U5）：无 UI 的命令行扫描入口，复用同一 ScanManager。
 // 用法：
 //   单目标：node bin/cli.js -u <url> [--method GET|POST] [--body '{"k":"v"}'] [--format json|html|csv|markdown]
+//   XML/SOAP：node bin/cli.js -u <url> --method POST --xml-body-file envelope.xml
 //   直连：  node bin/cli.js -d "sqlite://test.db" --sql-template "SELECT * FROM t WHERE id={INJECT}"
 //   批量：  node bin/cli.js -m <urls.txt> [--format json] [--concurrency 2]
 // 事件经 eventBus 订阅转控制台进度输出，扫描结束打印报告到 stdout 并可按 --format 导出到文件。
@@ -25,6 +26,8 @@ import { isExploitEnabled } from '../src/core/exploitFlag.js';
 // 「目标先校验 + 按 scanId 登记」，否则 --scope 是静默 no-op（httpClient 逐跳取用登记项）。
 import { parseScope, assertInScope, assertDirectDbInScope, registerScanScope, releaseScanScope } from '../src/core/scopeGuard.js';
 import { printHelp } from './cli/help.js';
+import { readFileSync } from 'node:fs';
+import { parseXmlBody, xmlLeafPaths } from '../src/core/xmlBody.js';
 import {
   parseArgs,
   parseLogFile,
@@ -33,7 +36,6 @@ import {
   bodyToJsonString,
   applyRequestFile,
   buildAuth,
-  readUrlList,
   checkTor,
   unknownFlagError,
 } from './cli/args.js';
@@ -176,6 +178,30 @@ async function runSingleScan(sm, url, args) {
     console.log('  [body] 检测到嵌套 JSON → 按 application/json 语义扫描，'
       + '注入点取自叶子路径（如 user.id / tags.0）；扁平 body 仍走 urlencoded。');
   }
+  // [2026-10-01] XML / SOAP body 通道（对标 ghauri XML·SOAP）：--xml-body 直接给原文，
+  // --xml-body-file 读文件（多行 SOAP 信封）。解析失败的原文**照样往下传** —— 由引擎按
+  // 「认不出即放弃」的保守口径处理，CLI 只负责如实提示（静默丢弃 = 用户以为在测 XML）。
+  let xmlBody = null;
+  if (typeof args.xmlBody === 'string' && args.xmlBody) xmlBody = args.xmlBody;
+  else if (typeof args.xmlBodyFile === 'string' && args.xmlBodyFile) {
+    try {
+      xmlBody = readFileSync(args.xmlBodyFile, 'utf8');
+    } catch (e) {
+      console.error(`  [xml-body] 文件不可读：${args.xmlBodyFile}（${e?.message || e}）`);
+      process.exitCode = 2;
+      return;
+    }
+  }
+  if (xmlBody) {
+    const probe = parseXmlBody(xmlBody);
+    if (probe.ok) {
+      const paths = xmlLeafPaths(probe.tree);
+      console.log(`  [xml-body] 解析成功，叶子注入点 ${paths.length} 个：${paths.slice(0, 5).join(', ')}${paths.length > 5 ? ' …' : ''}`);
+    } else {
+      console.warn(`  [xml-body] 解析失败（${probe.reason}）：本通道只支持「元素+文本」形态，`
+        + '注释/CDATA/DOCTYPE/处理指令一律不支持 —— 该 body 不会产生注入点。');
+    }
+  }
   const config = buildConfig(args);
   // [P0-SEC] 目标先过一遍 scope：越界直接报错，一个包都不发。
   //   HTTP 目标校 URL；**直连（-d）校数据库主机** —— 原先这里写 `&& !args.direct`
@@ -231,7 +257,7 @@ async function runSingleScan(sm, url, args) {
         sqlTemplate: args.sqlTemplate || 'SELECT * FROM users WHERE id={INJECT}',
         config,
       }
-    : { url, method: args.method, bodyParams, jsonBody, config, auth, ...injTarget };
+    : { url, method: args.method, bodyParams, jsonBody, xmlBody, config, auth, ...injTarget };
   const scanId = await sm.start(input);
   // [P0-SEC] scope 按 scanId 登记：httpClient 在每一跳（含重定向）前取用，防 302 出圈
   // 只给 HTTP 扫描登记：直连不发 HTTP 请求，逐跳校验没有对象可校（入口已按 DB 主机校过）
@@ -553,43 +579,74 @@ async function main() {
 
   // ---- 批量模式 ----
   if (args.batch) {
-    const urls = readUrlList(args.batch);
+    // [2026-10-02 竞品合并] `-m` 从「只认一行一个 URL」扩到「也认请求集合」
+    // （Burp XML / HAR / Postman / OpenAPI JSON）—— 对标 sqlmap 2.0 的 OpenAPI 目标生成。
+    // 此前这三样各在一处：集合解析归 `-r`（且只取第 1 条、其余打一句"请拆分文件"），
+    // 多目标归 `-m`（只吃文本 URL），刚补的并发池归 batchPool —— 接口清单这条最省事的
+    // 批量入口因此一直是断的。现在合流：集合 → N 个目标 → 批量池。
+    const { readFileSync: readBatchFile } = await import('node:fs');
+    const { expandBatchTargets, scanArgsFromRequest } = await import('./cli/batchTargets.js');
+    const expanded = expandBatchTargets(readBatchFile(args.batch, 'utf-8'));
+    const isCollection = expanded.kind === 'collection';
+    const urls = expanded.items;
+    // 「识别成什么格式、展开出几个目标」必须说出来：静默降级是本仓反复踩的坑
+    // （"根本没测"会被读成"测了且安全"）。
+    console.error(
+      `批量目标来源：${isCollection ? `请求集合（${expanded.format}）` : 'URL 列表'} ⇒ 展开 ${urls.length} 个目标`,
+    );
+    for (const w of expanded.warnings) console.error(`  [提示] ${w}`);
+    if (!urls.length) {
+      console.error('批量目标为空：URL 列表模式下每行须为 http(s) 地址；集合模式下未解析出可用请求。');
+      process.exit(1);
+    }
+    // 集合条目是对象（带 method/headers/body），URL 列表是字符串 —— 打印与落盘取名的统一入口
+    const urlOf = (it) => (it && typeof it === 'object' ? String(it.url || '') : String(it || ''));
     // [P1-2] 全局限速：每个扫描实例的 ratePerSec = 总速率 / 并发数
     // 确保多个并发扫描的总速率 ≤ ratePerSec，防止打爆目标
     const perScanRate = Math.max(1, Math.ceil(args.ratePerSec / args.concurrency));
     console.error(`批量扫描 ${urls.length} 个目标，并发 ${args.concurrency}，每扫描限速 ${perScanRate} req/s（总 ≤ ${args.ratePerSec} req/s）`);
-    const results = [];
     // [P1-2] 共享 HttpClient：批量模式所有 ScanManager 共用同一个 httpClient 单例
     // → 所有 scanId 的令牌桶都在同一个 buckets Map 中，forScan 时共享底层的串行化 Promise 链
     // 均分方案 + 共享 HttpClient = 总速率严格 ≤ ratePerSec
     // （原实现每 URL new ScanManager 但 ScanManager 构造器已用模块级 httpClient 单例，
     //  实际已共享；此注释确认此行为是正确设计而非巧合）
-    // 并发池：按 args.concurrency 限制并发数
-    const pool = async (items, worker, concurrency) => {
-      const queue = items.slice();
-      let cursor = 0;
-      const next = async () => {
-        while (cursor < queue.length) {
-          const item = queue[cursor++];
-          await worker(item);
-        }
-      };
-      await Promise.all(Array.from({ length: Math.min(concurrency, queue.length) }, () => next()));
-    };
-    await pool(urls, async (url) => {
-      const sm = new ScanManager();
-      // 用均分后的速率替换原始 ratePerSec
-      const scanArgs = { ...args, ratePerSec: perScanRate };
-      const report = await runSingleScan(sm, url, scanArgs);
-      results.push({ url, report, riskLevel: report?.riskLevel || 'error', vulns: report?.vulns?.length || 0 });
-      console.error(`[${results.length}/${urls.length}] ${url} → ${report?.riskLevel || '失败'}`);
-    }, args.concurrency);
+    // 并发池：按 args.concurrency 限制并发数（故障隔离见 cli/batchPool.js）
+    const { runBatch } = await import('./cli/batchPool.js');
+    const { results, failures, needsReview, summary } = await runBatch({
+      urls,
+      concurrency: args.concurrency,
+      labelOf: urlOf,
+      scanOne: async (item) => {
+        const sm = new ScanManager();
+        // 集合条目自带 method/headers/body ⇒ 逐目标派生（与 -l 同一映射口径）；
+        // URL 列表只有地址，沿用 args。两种形态都吃同一个均分速率。
+        const scanArgs = isCollection
+          ? { ...scanArgsFromRequest(args, item), ratePerSec: perScanRate }
+          : { ...args, ratePerSec: perScanRate };
+        return runSingleScan(sm, urlOf(item), scanArgs);
+      },
+      // 扫完了 ≠ 测过了：0 注入点（目标不通 / URL 没参数）时报告照样产出，但一个检测请求都没发，
+      // 结论是 inconclusive —— 批量里必须把这类目标单独点名，否则"100 个站点全绿"里可能
+      // 有 30 个根本没连上。
+      audit: (report) => (report?.points?.length === 0
+        ? '未发现可测注入点（一个检测请求都没发）：确认目标可达、URL 是否带参数，或改用 --body / --xml-body 指定注入面'
+        : null),
+    });
 
     // 聚合摘要
-    const byRisk = {};
-    for (const r of results) { byRisk[r.riskLevel] = (byRisk[r.riskLevel] || 0) + 1; }
-    console.error(`\n批量扫描完成：${results.length} 个目标`);
-    console.error(`  风险分布: ${Object.entries(byRisk).map(([k, v]) => `${k}=${v}`).join(' ')}`);
+    console.error(`\n批量扫描完成：${summary.ok} 个成功 / ${summary.failed} 个失败 / ${summary.needsReview} 个需复核（共 ${summary.total}）`);
+    console.error(`  风险分布: ${Object.entries(summary.byRisk).map(([k, v]) => `${k}=${v}`).join(' ') || '(无)'}`);
+    // 失败目标必须**点名**：只报一个数字等于把"哪个目标没扫"变成悬案
+    if (failures.length) {
+      console.error('  失败目标:');
+      for (const f of failures) console.error(`    - ${urlOf(f.url)}：${f.message.slice(0, 200)}`);
+    }
+    // 「需复核」= 报告产出了但结论不可信（典型：目标不通 ⇒ 0 注入点 ⇒ 一个请求都没发）。
+    // 这类最容易骗人：退出码与成功目标一样，只有点名才能让它浮出水面。
+    if (needsReview.length) {
+      console.error('  需复核（扫完了但可能什么都没测，结论不可作为无漏洞依据）:');
+      for (const n of needsReview) console.error(`    - ${urlOf(n.url)}：${n.why}`);
+    }
 
     if (args.out) {
       const { writeFileSync, mkdirSync } = await import('node:fs');
@@ -600,7 +657,9 @@ async function main() {
       const ext = fmt === 'markdown' || fmt === 'md' ? 'md' : fmt;
       for (const r of results) {
         if (r.report) {
-          const safeName = r.url.replace(/[^a-zA-Z0-9.-]/g, '_').slice(0, 100);
+          // 同名目标（集合里同 URL 不同 method）会互相覆盖 ⇒ 名字里带上方法，避免"少一份报告"
+          const nameBase = isCollection && r.url?.method ? `${urlOf(r.url)} ${r.url.method}` : urlOf(r.url);
+          const safeName = nameBase.replace(/[^a-zA-Z0-9.-]/g, '_').slice(0, 100);
           writeFileSync(join(args.out, `${safeName}.${ext}`), formatReport(r.report, fmt), 'utf-8');
           // [goal 批次 A-2] 扫描台账：每次扫描自动登记可追溯快照（meta/report/poc）
           // [FIX 2026-09-18] PoC 落盘此前恒为空：ReportGenerator 的 poc 是**惰性且不可变**挂载
@@ -618,11 +677,13 @@ async function main() {
       }
       console.error(`报告已写入 ${args.out}/（格式 ${fmt}）`);
     } else {
-      console.log(JSON.stringify(results.map(r => ({ url: r.url, riskLevel: r.riskLevel, vulns: r.vulns })), null, 2));
+      console.log(JSON.stringify(results.map(r => ({ url: urlOf(r.url), riskLevel: r.riskLevel, vulns: r.vulns })), null, 2));
     }
 
-    const hasHigh = results.some(r => r.riskLevel === 'Critical' || r.riskLevel === 'High');
-    process.exit(hasHigh ? 2 : 0);
+    // 退出码：有高危 → 2（既有语义不变）；**全批失败 → 1**（与"扫了但没高危"区分：
+    // 前者是编排/目标不可达，后者是结论）。部分失败仍为 0 —— 失败已在摘要里点名。
+    if (summary.allFailed) process.exit(1);
+    process.exit(summary.hasHigh ? 2 : 0);
   }
 
   // ---- 日志文件批量模式（对标 sqlmap -l） ----
@@ -634,46 +695,39 @@ async function main() {
     }
     const perScanRate = Math.max(1, Math.ceil(args.ratePerSec / args.concurrency));
     console.error(`日志批量 ${requests.length} 个请求，并发 ${args.concurrency}，每扫描限速 ${perScanRate} req/s（总 ≤ ${args.ratePerSec} req/s）`);
-    const results = [];
-    const pool = async (items, worker, concurrency) => {
-      const queue = items.slice();
-      let cursor = 0;
-      const next = async () => {
-        while (cursor < queue.length) {
-          const item = queue[cursor++];
-          await worker(item);
+    const { runBatch } = await import('./cli/batchPool.js');
+    const { results, failures, summary } = await runBatch({
+      urls: requests,
+      concurrency: args.concurrency,
+      scanOne: async (req) => {
+        const sm = new ScanManager();
+        // 每请求从 args 派生扫描参数：覆盖 url/method/body/headers/cookie（复用 -r 的字段映射逻辑）
+        const scanArgs = { ...args, ratePerSec: perScanRate };
+        scanArgs.url = req.url;
+        scanArgs.method = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method) ? req.method : 'GET';
+        if (req.body) {
+          const bodyJson = bodyToJsonString(req.body);
+          if (bodyJson) scanArgs.body = bodyJson;
         }
-      };
-      await Promise.all(Array.from({ length: Math.min(concurrency, queue.length) }, () => next()));
-    };
-    await pool(requests, async (req) => {
-      const sm = new ScanManager();
-      // 每请求从 args 派生扫描参数：覆盖 url/method/body/headers/cookie（复用 -r 的字段映射逻辑）
-      const scanArgs = { ...args, ratePerSec: perScanRate };
-      scanArgs.url = req.url;
-      scanArgs.method = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method) ? req.method : 'GET';
-      if (req.body) {
-        const bodyJson = bodyToJsonString(req.body);
-        if (bodyJson) scanArgs.body = bodyJson;
-      }
-      const cookieKey = Object.keys(req.headers).find(k => k.toLowerCase() === 'cookie');
-      if (cookieKey) scanArgs.cookie = req.headers[cookieKey];
-      const other = {};
-      for (const [k, v] of Object.entries(req.headers)) {
-        const kl = k.toLowerCase();
-        if (kl === 'cookie' || kl === 'host' || kl === 'content-length') continue;
-        other[k] = v;
-      }
-      if (Object.keys(other).length) scanArgs.headerObj = other;
-      const report = await runSingleScan(sm, req.url, scanArgs);
-      results.push({ url: req.url, report, riskLevel: report?.riskLevel || 'error', vulns: report?.vulns?.length || 0 });
-      console.error(`[${results.length}/${requests.length}] ${req.url} → ${report?.riskLevel || '失败'}`);
-    }, args.concurrency);
+        const cookieKey = Object.keys(req.headers).find((k) => k.toLowerCase() === 'cookie');
+        if (cookieKey) scanArgs.cookie = req.headers[cookieKey];
+        const other = {};
+        for (const [k, v] of Object.entries(req.headers)) {
+          const kl = k.toLowerCase();
+          if (kl === 'cookie' || kl === 'host' || kl === 'content-length') continue;
+          other[k] = v;
+        }
+        if (Object.keys(other).length) scanArgs.headerObj = other;
+        return runSingleScan(sm, req.url, scanArgs);
+      },
+    });
 
-    const byRisk = {};
-    for (const r of results) { byRisk[r.riskLevel] = (byRisk[r.riskLevel] || 0) + 1; }
-    console.error(`\n日志批量扫描完成：${results.length} 个请求`);
-    console.error(`  风险分布: ${Object.entries(byRisk).map(([k, v]) => `${k}=${v}`).join(' ')}`);
+    console.error(`\n日志批量扫描完成：${summary.ok} 个成功 / ${summary.failed} 个失败（共 ${summary.total}）`);
+    console.error(`  风险分布: ${Object.entries(summary.byRisk).map(([k, v]) => `${k}=${v}`).join(' ') || '(无)'}`);
+    if (failures.length) {
+      console.error('  失败目标:');
+      for (const f of failures) console.error(`    - ${f.url?.url || f.url}：${f.message.slice(0, 200)}`);
+    }
 
     if (args.out) {
       const { writeFileSync, mkdirSync } = await import('node:fs');
@@ -692,8 +746,9 @@ async function main() {
     } else {
       console.log(JSON.stringify(results.map(r => ({ url: r.url, riskLevel: r.riskLevel, vulns: r.vulns })), null, 2));
     }
-    const hasHigh = results.some(r => r.riskLevel === 'Critical' || r.riskLevel === 'High');
-    process.exit(hasHigh ? 2 : 0);
+    // 与 -m 同口径：全批失败 → 1，有高危 → 2，部分失败仍 0（失败已点名）
+    if (summary.allFailed) process.exit(1);
+    process.exit(summary.hasHigh ? 2 : 0);
   }
 
   // ---- 单目标模式（HTTP 或直连） ----
