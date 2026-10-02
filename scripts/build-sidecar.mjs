@@ -32,6 +32,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import http from 'node:http';
+import net from 'node:net';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -42,11 +43,44 @@ const skipSmoke = process.argv.includes('--skip-smoke');
 // sql.js 的 wasm 源文件（内联进 SEA asset 用）
 const SQLJS_WASM_SRC = path.join(ROOT, 'server', 'node_modules', 'sql.js', 'dist', 'sql-wasm.wasm');
 
+// ── 诊断落盘（2026-10-03 加）─────────────────────────────────────────────────
+// 由来：CI 的 `sidecar-build` job 红了（run #125）但 **job 日志不可下载**
+// （runs/{id}/jobs 一律 Not Found，annotations 只有一句 "exit code 1"）⇒ 只能靠猜。
+// 所以把「环境事实 + 各阶段产物 + 冒烟子进程输出」写成文件，由 ci.yml 上传为 artifact。
+// ⚠️ 冒烟子进程的输出是**关键证据**（exe 为什么起不来全在里面），只在 stdout 打是拿不到的。
+const DIAG_FILE = path.join(ROOT, 'sidecar-build-diag.txt');
+const DIAG = [];
+let smokeOut = '';
+const diag = (m) => {
+  DIAG.push(String(m));
+  log(m);
+};
+const flushDiag = () => {
+  const body = [
+    `node: ${process.version}`,
+    `platform: ${process.platform} ${process.arch}`,
+    `triple: ${targetTriple()}`,
+    '',
+    ...DIAG,
+    '',
+    '--- sidecar 子进程输出 ---',
+    smokeOut || '(无)',
+  ].join('\n');
+  try {
+    fs.writeFileSync(DIAG_FILE, body + '\n', 'utf8');
+  } catch {
+    /* 诊断写盘失败不能反过来让构建失败 */
+  }
+};
+
 const log = (m) => console.log(`[build-sidecar] ${m}`);
 const fail = (m) => {
   console.error(`[build-sidecar] ✗ ${m}`);
+  DIAG.push(`FAIL: ${m}`);
+  flushDiag();
   process.exit(1);
 };
+diag(`node: ${process.version}  platform: ${process.platform} ${process.arch}`);
 
 // ── 目标三元组（与 Tauri externalBin 命名约定一致）──────────────────────────
 function targetTriple() {
@@ -170,7 +204,7 @@ fs.writeFileSync(
 {
   const r = spawnSync(process.execPath, ['--experimental-sea-config', SEA_CONFIG], { cwd: ROOT, stdio: 'inherit' });
   if (r.status !== 0 || !fs.existsSync(blobPath)) fail('SEA blob 生成失败');
-  log(`SEA blob: ${path.relative(ROOT, blobPath)}（${(fs.statSync(blobPath).size / 1024 / 1024).toFixed(1)} MB）`);
+  diag(`SEA blob: ${path.relative(ROOT, blobPath)}（${(fs.statSync(blobPath).size / 1024 / 1024).toFixed(1)} MB）`);
   log(`  内嵌 asset: sql-wasm.wasm（${(fs.statSync(wasmForAsset).size / 1024).toFixed(1)} KB）← ${path.relative(ROOT, wasmForAsset)}`);
 }
 
@@ -178,7 +212,7 @@ fs.writeFileSync(
 const baseNode = process.env.NODE_SEA_BASE || process.execPath;
 if (!fs.existsSync(baseNode)) fail(`找不到 base 运行时：${baseNode}`);
 fs.copyFileSync(baseNode, exePath);
-log(`base 运行时：${baseNode} → ${exeName}`);
+diag(`base 运行时：${baseNode} → ${exeName}`);
 
 // ── 4) 注入 blob（postject）──────────────────────────────────────────────────
 {
@@ -203,7 +237,7 @@ log(`base 运行时：${baseNode} → ${exeName}`);
     fail('postject 注入失败。常见原因：exe 被占用（先关掉正在运行的 sidecar）、postject 缺失');
   }
 }
-log(`sidecar 产物：${path.relative(ROOT, exePath)}（${(fs.statSync(exePath).size / 1024 / 1024).toFixed(1)} MB）`);
+diag(`sidecar 产物：${path.relative(ROOT, exePath)}（${(fs.statSync(exePath).size / 1024 / 1024).toFixed(1)} MB）`);
 
 // ── 5) 冒烟：真的把 exe 跑起来（起服务 + token emit + 直连 SQLite 真扫）────────
 // 关键：cwd 用**全新空目录**，模拟 Tauri 把 exe 放到资源目录、旁边没有任何依赖的场景。
@@ -213,9 +247,18 @@ if (skipSmoke) {
   process.exit(0);
 }
 
-const PORT = 45999;
+// 端口从固定 45999 改为**动态分配**：CI runner 上端口被占用时冒烟会以「health 起不来」
+// 的形式失败，看着像产物坏了，其实是端口冲突 —— 这类假红最难查。
+const PORT = await new Promise((resolve, reject) => {
+  const probe = net.createServer();
+  probe.on('error', reject);
+  probe.listen(0, '127.0.0.1', () => {
+    const p = probe.address().port;
+    probe.close(() => resolve(p));
+  });
+});
 const emptyDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sqli-sidecar-smoke-'));
-log(`冒烟 cwd（空目录，验证零外部依赖）：${emptyDir}`);
+diag(`冒烟 cwd（空目录，验证零外部依赖）：${emptyDir}`);
 
 const child = spawn(exePath, [], {
   env: { ...process.env, HOST: '127.0.0.1', PORT: String(PORT), SCAN_API_TOKEN_EMIT: '1' },
@@ -223,8 +266,12 @@ const child = spawn(exePath, [], {
   cwd: emptyDir,
 });
 let out = '';
-child.stdout.on('data', (d) => (out += d.toString()));
-child.stderr.on('data', (d) => (out += d.toString()));
+const sink = (d) => {
+  out += d.toString();
+  smokeOut += d.toString(); // 同步进诊断，失败时随 artifact 一起出去
+};
+child.stdout.on('data', sink);
+child.stderr.on('data', sink);
 
 const alive = await new Promise((resolve) => {
   const deadline = Date.now() + 30000;
@@ -256,7 +303,7 @@ if (!tokenMatch) {
   fail('sidecar 冒烟失败：未捕获到 ENGINE_TOKEN（桌面端前端会拿不到 token → 全部 401）');
 }
 const token = tokenMatch[1];
-log('✓ 引擎启动、health=200、一次性 token 已回传');
+diag('✓ 引擎启动、health=200、一次性 token 已回传');
 
 // ── 5b) 直连 SQLite 真扫（B1 的核心验收）────────────────────────────────────
 // 起真实 sqlite 库（driverType=sqljs + initSql 建表），跑一次直连扫描。
@@ -380,3 +427,6 @@ if (!directOk) {
 }
 log('✓ 冒烟通过：引擎启动 + health=200 + 一次性 token + SEA 内联的 SQLite 直连真扫');
 log('提示：Tauri 打包前确认 tauri.conf.json 的 bundle.externalBin 含 "binaries/sqli-engine"');
+DIAG.push('RESULT: PASS');
+flushDiag();
+log(`诊断落盘：${path.relative(ROOT, DIAG_FILE)}`);

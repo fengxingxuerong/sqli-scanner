@@ -785,29 +785,14 @@ jobs:
         name: Install server deps
       - run: npm run build:sidecar
         name: Build sidecar (SEA) + smoke
-      # [2026-10-03] 本 job 在 ubuntu 上红过（run #125，conclusion=failure）但 job 日志不可下载
-      # （runs/{id}/jobs 一律 Not Found），CI 上只剩一句 "Process completed with exit code 1"
-      # ⇒ 没有取证通道就只能靠猜。以下两步把环境事实与构建产物落成 artifact。
-      # ⚠️ 注意与历史缺陷的区别：这里用的是 if: failure() 的**取证**步骤，不是 continue-on-error
-      # —— 结论不受影响，只是让失败原因可查（本仓曾因 continue-on-error 让门禁从未拦过人）。
-      - name: 失败取证：环境事实落盘
-        if: failure()
-        run: |
-          {
-            echo "node: $(node --version)"
-            echo "platform: $(uname -s) $(uname -m)"
-            echo "npm: $(npm --version)"
-            echo "--- sea-config.json ---"
-            cat sea-config.json || true
-            echo "--- dist ---"
-            ls -la dist || true
-            echo "--- dist-engine ---"
-            ls -la dist-engine || true
-            echo "--- server/node_modules/sql.js ---"
-            ls -la server/node_modules/sql.js 2>&1 || true
-          } > sidecar-build-diag.txt 2>&1
-      - name: 失败取证：上传诊断
-        if: failure()
+      # [2026-10-03] 本 job 在 ubuntu 上红过（run #125）但 **job 日志不可下载**
+      # （runs/{id}/jobs 一律 Not Found，annotations 只有 "Process completed with exit code 1"）
+      # ⇒ 没有取证通道就只能靠猜。现在由 build-sidecar.mjs 自己把「环境事实 + 各阶段产物 +
+      # 冒烟子进程输出」写进 sidecar-build-diag.txt（失败路径也会写），这里只负责上传。
+      # ⚠️ 与历史缺陷的区别：这是 if: always() 的**取证**步骤，不是 continue-on-error
+      # —— 结论不受影响（本仓曾因 continue-on-error 让门禁从未拦过人，别再犯）。
+      - name: 上传构建诊断（成功也传）
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: sidecar-build-diag
