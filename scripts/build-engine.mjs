@@ -160,7 +160,12 @@ async function main() {
     // 外部 require 直接抛 "No such built-in module: sql.js"，NODE_PATH 也无效（实测）。
     // 内联后 sql-wasm.js 变成 bundle 内的一等模块，其 wasm 由 initSqlJs({ wasmBinary }) 提供
     // （见 core/sqlJsLoader.js），因此不再依赖 __dirname 定位 wasm。
-    external: opts.inlineSqlJs ? [] : ['sql.js'],
+    // [2026-10-03] playwright 必须 external：它是**可选依赖**，`browserCrawler.js` 走
+    // `await import('playwright')` 且已有优雅降级（BrowserUnavailable → 回落 HTTP 爬虫）。
+    // 一旦被 esbuild 打进 bundle 就会顺着 `playwright-core/lib/coreBundle.js` 去解析
+    // `chromium-bidi/lib/cjs/*` —— 那是它的内部路径，解析不了 ⇒ 一堆 X [ERROR]
+    // （CI `sidecar-build` 的 SEA blob 失败就是它引起的；桌面版本来也不该带浏览器）。
+    external: [...(opts.inlineSqlJs ? [] : ['sql.js']), 'playwright', 'playwright-core'],
     // 内联 sql.js 时需让 esbuild 能在 server/node_modules 里解析它
     ...(opts.inlineSqlJs ? { nodePaths: [path.join(SERVER_DIR, 'node_modules')] } : {}),
     ...(format === 'cjs'

@@ -5,6 +5,6 @@
   "useSnapshot": false,
   "useCodeCache": false,
   "assets": {
-    "sql-wasm.wasm": "server/dist-engine/sql-wasm.wasm"
+    "sql-wasm.wasm": "server/node_modules/sql.js/dist/sql-wasm.wasm"
   }
 }

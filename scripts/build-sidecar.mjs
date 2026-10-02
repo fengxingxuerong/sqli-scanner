@@ -73,6 +73,25 @@ const flushDiag = () => {
   }
 };
 
+// 子进程输出捕获器（2026-10-03 加）：`stdio: 'inherit'` 的输出只进 job 日志，
+// 而 CI 的 job 日志**下载不到** ⇒ 失败时手里只剩一句 exit code。
+// 所有会决定成败的 spawn 都必须走这里，把 stdout/stderr 收进诊断。
+const runCapture = (label, file, args, opts = {}) => {
+  const r = spawnSync(process.execPath, [file, ...args], {
+    cwd: ROOT,
+    encoding: 'utf8',
+    ...opts,
+  });
+  const so = (r.stdout || '').trim();
+  const se = (r.stderr || '').trim();
+  if (so) diag(`${label} stdout: ${so.slice(-2000)}`);
+  if (se) DIAG.push(`${label} stderr: ${se.slice(-2000)}`);
+  if (r.status !== 0) DIAG.push(`${label} exit=${r.status} signal=${r.signal || '-'}`);
+  // 同步打一份到终端，本地排查时不必翻文件
+  if (se && r.status !== 0) console.error(`[build-sidecar] ${label} stderr:\n${se.slice(-2000)}`);
+  return r;
+};
+
 const log = (m) => console.log(`[build-sidecar] ${m}`);
 const fail = (m) => {
   console.error(`[build-sidecar] ✗ ${m}`);
@@ -160,11 +179,11 @@ const needBuild = (() => {
 if (needBuild) {
   log('生成 CJS bundle（node scripts/build-engine.mjs --format cjs --inline-sqljs）…');
   // [B1] 必须带 --inline-sqljs：SEA 里外部 require('sql.js') 会抛 No such built-in module。
-  const r = spawnSync(
-    process.execPath,
-    [path.join(ROOT, 'scripts', 'build-engine.mjs'), '--format', 'cjs', '--inline-sqljs'],
-    { cwd: ROOT, stdio: 'inherit' }
-  );
+  const r = runCapture('CJS bundle', path.join(ROOT, 'scripts', 'build-engine.mjs'), [
+    '--format',
+    'cjs',
+    '--inline-sqljs',
+  ]);
   if (r.status !== 0) fail('CJS bundle 生成失败（先修 build-engine.mjs 的报错）');
 } else {
   log(`复用已有 CJS bundle（${path.relative(ROOT, cjsEntry)}）`);
@@ -202,8 +221,8 @@ fs.writeFileSync(
   'utf-8'
 );
 {
-  const r = spawnSync(process.execPath, ['--experimental-sea-config', SEA_CONFIG], { cwd: ROOT, stdio: 'inherit' });
-  if (r.status !== 0 || !fs.existsSync(blobPath)) fail('SEA blob 生成失败');
+  const r = runCapture('SEA blob', '--experimental-sea-config', [SEA_CONFIG]);
+  if (r.status !== 0 || !fs.existsSync(blobPath)) fail(`SEA blob 生成失败（exit=${r.status}）`);
   diag(`SEA blob: ${path.relative(ROOT, blobPath)}（${(fs.statSync(blobPath).size / 1024 / 1024).toFixed(1)} MB）`);
   log(`  内嵌 asset: sql-wasm.wasm（${(fs.statSync(wasmForAsset).size / 1024).toFixed(1)} KB）← ${path.relative(ROOT, wasmForAsset)}`);
 }
@@ -226,12 +245,15 @@ diag(`base 运行时：${baseNode} → ${exeName}`);
   log('注入 SEA blob（postject）…');
   let r;
   if (fs.existsSync(localCli)) {
-    r = spawnSync(process.execPath, [localCli, ...args], { cwd: ROOT, stdio: 'inherit' });
+    r = runCapture('postject', localCli, args);
   } else {
     log('未找到本地 postject，回退 npx（建议 npm i -D postject 以便离线/CI 复现）');
-    r = spawnSync(process.platform === 'win32' ? 'npx.cmd' : 'npx', ['--yes', 'postject', ...args], {
-      cwd: ROOT, stdio: 'inherit',
+    const r2 = spawnSync(process.platform === 'win32' ? 'npx.cmd' : 'npx', ['--yes', 'postject', ...args], {
+      cwd: ROOT, encoding: 'utf8',
     });
+    if (r2.stdout) diag(`postject stdout: ${r2.stdout.trim().slice(-1000)}`);
+    if (r2.stderr) DIAG.push(`postject stderr: ${r2.stderr.trim().slice(-2000)}`);
+    r = r2;
   }
   if (r.status !== 0) {
     fail('postject 注入失败。常见原因：exe 被占用（先关掉正在运行的 sidecar）、postject 缺失');
