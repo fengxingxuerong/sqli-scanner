@@ -26,6 +26,43 @@ const ciYml = readFileSync(join(REPO, '.github/workflows/ci.yml'), 'utf8');
 const ciLocal = readFileSync(join(REPO, 'scripts/ci-local.mjs'), 'utf8');
 const runAll = readFileSync(join(REPO, 'e2e/run-all.mjs'), 'utf8');
 
+/**
+ * 从一个 job 片段里剥出所有 `run:` 的**指令体**（不含 YAML 键名本身，也不含 job 注释）。
+ * 支持两种形态：
+ *   · 单行 —— `run: node e2e/run-all.mjs`
+ *   · 块   —— `run: |` 后面缩进的内容，到缩进回退为止
+ * 为什么需要：直接在 jobBody 上做 `includes('run-all.mjs')` 会被**注释里的同一句话**骗过
+ * （本 job 的注释恰好大量提到 run-all），那种判据是假绿。
+ */
+function collectRunBodies(jobBody) {
+  // ⚠️ 别用「`run: |` 之后所有缩进行」的正则去抓块：本 job 的注释也是缩进的，
+  //   会被一路吃到 ⇒ 注释里恰好写了 `set -o pipefail` 就让判据假绿
+  //   （2026-10-03 实测踩到：这条守卫本是用来防「注释假绿」的，自己先栽在同一格）。
+  //   改按行解析，块的边界 = **缩进回退到 <= run 键本身的缩进**。
+  const lines = jobBody.split(/\r?\n/);
+  const out = [];
+  for (let i = 0; i < lines.length; i++) {
+    const m = /^([ \t]*)run:[ \t]*(\|[-+]?)?[ \t]*(.*)$/.exec(lines[i]);
+    if (!m) continue;
+    const [, indent, block, inline] = m;
+    if (block) {
+      const body = [];
+      for (let j = i + 1; j < lines.length; j++) {
+        const ln = lines[j];
+        if (/^[ \t]*$/.test(ln)) continue;
+        const curIndent = /^([ \t]*)/.exec(ln)[1];
+        if (curIndent.length <= indent.length) break; // 缩进回退 ⇒ 块结束
+        body.push(ln);
+        i = j;
+      }
+      out.push(body.join('\n'));
+    } else if (inline) {
+      out.push(inline);
+    }
+  }
+  return out;
+}
+
 /** 解析脚本里的 DEFAULT_PATHS 数组（只看声明那一段，避免把注释里的例子算进来）。 */
 function defaultPaths(src) {
   const at = src.indexOf('const DEFAULT_PATHS = [');
@@ -77,10 +114,27 @@ test('三处接线缺一不可：package.json 脚本 / ci.yml 步骤 / ci-local 
   const rest = ciYml.slice(jobAt);
   const nextJob = rest.search(/^\r?\n {2}[a-z0-9-]+:$/m);
   const jobBody = nextJob >= 0 ? rest.slice(0, nextJob) : rest;
-  assert.ok(/run: node e2e\/run-all\.mjs/.test(jobBody),
-    'e2e-self-contained 里没有 run-all 步骤 —— 产物不会被重跑，漂移检查放这儿没意义');
-  assert.ok(/run: node scripts\/artifact-drift\.mjs/.test(jobBody),
-    'e2e-self-contained 缺漂移检查步骤（脚本写好了但 CI 不跑 = 又一次"注册了没接线"）');
+  // [2026-10-03] 判据从「单行 `run: node e2e/run-all.mjs`」改为「run 指令体里真调了它」。
+  // 原因：run-all 步骤改成了块形态（`run: |` + `set -o pipefail` + `| tee run-all.log`），
+  // 旧判据按单行匹配 ⇒ 立刻红。但**不能直接把判据放宽成"jobBody 里出现 run-all.mjs"** ——
+  // jobBody 含大段注释，注释里也提到它，那样会通过注释假绿。
+  // 所以先剥出所有 `run:` 的指令体（单行形态 + `run: |` 块形态），只在指令体里找。
+  const runBodies = collectRunBodies(jobBody);
+  const runAllRun = runBodies.find((b) => /node e2e\/run-all\.mjs/.test(b));
+  assert.ok(runAllRun, 'e2e-self-contained 里没有 run-all 步骤 —— 产物不会被重跑，漂移检查放这儿没意义');
+  // 新守卫：用了管道（tee / grep 之类）就必须 pipefail。GitHub 的 bash 默认只有 `-e`、
+  // **不带 pipefail** ⇒ `node ... | tee` 的退出码是 tee 的，run-all 失败也会被记成通过。
+  // 这正是本仓最痛的「结论与真值分处两地」，必须钉住。
+  if (/\|/.test(runAllRun)) {
+    assert.match(
+      runAllRun,
+      /set -o pipefail/,
+      'run-all 步骤用了管道但没 set -o pipefail ⇒ 退出码被管道吞掉，失败会被记成通过'
+    );
+  }
+
+  const driftRun = runBodies.find((b) => /node scripts\/artifact-drift\.mjs/.test(b));
+  assert.ok(driftRun, 'e2e-self-contained 缺漂移检查步骤（脚本写好了但 CI 不跑 = 又一次"注册了没接线"）');
 
   assert.match(ciLocal, /cmd: 'node scripts\/artifact-drift\.mjs'/,
     'scripts/ci-local.mjs 的 GATES 缺同一条：本地门禁会静默少跑这一段（见其头部 job 覆盖自检的理由）');
