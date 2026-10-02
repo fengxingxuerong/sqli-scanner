@@ -861,7 +861,10 @@ jobs:
     runs-on: ubuntu-latest
     needs: [test-server]
     if: github.event_name != 'schedule'
-    timeout-minutes: 10
+    # [2026-10-03] 10 → 25 分钟：本 job 内部单步就有 `run-all` 8 分钟 + jar 下载 6 分钟，
+    # 再加两次 npm ci —— 总超时 10 分钟是**必然不够**的，任何一环慢一点就整 job 红，
+    # 而红的形态（exit 1 + 无 artifact）看不出是超时还是真失败。
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -916,9 +919,22 @@ jobs:
             echo "::warning::引擎 jar 未就绪 ⇒ multi-engine-lab 本轮按设计 SKIP（零断言，不计通过）"
           fi
         timeout-minutes: 6
+      # [2026-10-03] 同 sidecar-build 的道理：本 job 红了但 job 日志不可下载 ⇒ 先建取证通道。
+      # ⚠️ `| tee` 会吞掉退出码（GitHub 的 bash 默认只有 `-e`，**不带 pipefail**）
+      # ⇒ 必须显式 `set -o pipefail`，否则 run-all 失败也会被记成通过 —— 那就是本仓最痛的
+      # 「结论与真值分处两地」。*.log 已被 .gitignore 全局忽略，不会污染仓库。
       - name: run-all（依赖探测自动收敛到 6 套自足靶场）
-        run: node e2e/run-all.mjs
+        run: |
+          set -o pipefail
+          node e2e/run-all.mjs 2>&1 | tee run-all.log
         timeout-minutes: 8
+      - name: 上传 run-all 日志（失败时的唯一取证）
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-self-contained-runall-log
+          path: run-all.log
+          if-no-files-found: warn
       # [GATE-ADD 2026-09-25] 入库基线必须与"这一轮真跑出来的"一致（只忽略时间戳）。
       #   为什么放在这里而不是 test-server：本 job 刚刚真的重跑过那三个档，产物就在磁盘上，
       #   比的是"同一台机器、同一轮、当前代码"—— 外部一致性；
