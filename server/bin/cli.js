@@ -601,15 +601,18 @@ async function main() {
     }
     // 集合条目是对象（带 method/headers/body），URL 列表是字符串 —— 打印与落盘取名的统一入口
     const urlOf = (it) => (it && typeof it === 'object' ? String(it.url || '') : String(it || ''));
-    // [P1-2] 全局限速：每个扫描实例的 ratePerSec = 总速率 / 并发数
-    // 确保多个并发扫描的总速率 ≤ ratePerSec，防止打爆目标
-    const perScanRate = Math.max(1, Math.ceil(args.ratePerSec / args.concurrency));
-    console.error(`批量扫描 ${urls.length} 个目标，并发 ${args.concurrency}，每扫描限速 ${perScanRate} req/s（总 ≤ ${args.ratePerSec} req/s）`);
+    // [2026-10-03 共享组桶] 全局限速从「启动时均分」改为「整批共用一个令牌桶」。
+    //   旧方案：每扫描 ratePerSec = 总/并发，在批量启动那一刻算死 ⇒ 队列排空后剩下的目标
+    //   仍按 1/并发度 跑（并发 8、剩 1 个目标时它只有 1/8 预算，7/8 白白闲着）。
+    //   新方案：所有目标共用 rateGroup 桶，桶的速率就是总速率 ⇒
+    //     ① 总速率严格 ≤ ratePerSec —— 由**单桶**保证，不依赖均分算得准不准；
+    //     ② 谁在用谁就能拿到预算 —— 排空后剩下的目标自动吃满，无需运行期改桶速率。
+    //   ⚠ ratePerSec<=0（--rate 0 = 不限速）时组桶也是不限速，语义不变。
+    const rateGroup = `batch-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+    console.error(`批量扫描 ${urls.length} 个目标，并发 ${args.concurrency}，共享限速桶（总 ≤ ${args.ratePerSec} req/s，谁在用谁拿，排空后自动吃满）`);
     // [P1-2] 共享 HttpClient：批量模式所有 ScanManager 共用同一个 httpClient 单例
-    // → 所有 scanId 的令牌桶都在同一个 buckets Map 中，forScan 时共享底层的串行化 Promise 链
-    // 均分方案 + 共享 HttpClient = 总速率严格 ≤ ratePerSec
-    // （原实现每 URL new ScanManager 但 ScanManager 构造器已用模块级 httpClient 单例，
-    //  实际已共享；此注释确认此行为是正确设计而非巧合）
+    // → 组桶就建在这同一个 buckets Map 上（原实现每 URL new ScanManager，但 ScanManager
+    //   构造器已用模块级 httpClient 单例，实际已共享；此注释确认此行为是正确设计而非巧合）
     // 并发池：按 args.concurrency 限制并发数（故障隔离见 cli/batchPool.js）
     const { runBatch } = await import('./cli/batchPool.js');
     const { results, failures, needsReview, summary } = await runBatch({
@@ -620,9 +623,11 @@ async function main() {
         const sm = new ScanManager();
         // 集合条目自带 method/headers/body ⇒ 逐目标派生（与 -l 同一映射口径）；
         // URL 列表只有地址，沿用 args。两种形态都吃同一个均分速率。
+        // 组桶要求**所有成员传同一个 ratePerSec**（桶由第一个建桶者决定速率）⇒ 这里用总速率，
+        // 不再除以并发度 —— 总量由共享桶兜住。
         const scanArgs = isCollection
-          ? { ...scanArgsFromRequest(args, item), ratePerSec: perScanRate }
-          : { ...args, ratePerSec: perScanRate };
+          ? { ...scanArgsFromRequest(args, item), rateGroup }
+          : { ...args, rateGroup };
         return runSingleScan(sm, urlOf(item), scanArgs);
       },
       // 扫完了 ≠ 测过了：0 注入点（目标不通 / URL 没参数）时报告照样产出，但一个检测请求都没发，
@@ -693,8 +698,9 @@ async function main() {
       console.error('日志文件未解析出任何请求（支持 Burp XML 导出或纯文本多请求日志）');
       process.exit(1);
     }
-    const perScanRate = Math.max(1, Math.ceil(args.ratePerSec / args.concurrency));
-    console.error(`日志批量 ${requests.length} 个请求，并发 ${args.concurrency}，每扫描限速 ${perScanRate} req/s（总 ≤ ${args.ratePerSec} req/s）`);
+    // [2026-10-03] 与 -m 同一口径：共享组桶（谁在用谁拿），不再按并发度均分。
+    const rateGroup = `batch-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+    console.error(`日志批量 ${requests.length} 个请求，并发 ${args.concurrency}，共享限速桶（总 ≤ ${args.ratePerSec} req/s，排空后自动吃满）`);
     const { runBatch } = await import('./cli/batchPool.js');
     const { results, failures, summary } = await runBatch({
       urls: requests,
@@ -702,7 +708,7 @@ async function main() {
       scanOne: async (req) => {
         const sm = new ScanManager();
         // 每请求从 args 派生扫描参数：覆盖 url/method/body/headers/cookie（复用 -r 的字段映射逻辑）
-        const scanArgs = { ...args, ratePerSec: perScanRate };
+        const scanArgs = { ...args, rateGroup };
         scanArgs.url = req.url;
         scanArgs.method = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method) ? req.method : 'GET';
         if (req.body) {

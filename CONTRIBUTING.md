@@ -66,12 +66,38 @@ docs/                设计文档与对标分析
 - 提交信息建议：`feat(engine): ...` / `fix(api): ...` / `perf(extractor): ...` / `test(...)` / `docs: ...`
 - 大型改动请先运行 `npm run test:all` 确认前后端全绿
 
+## 批次收口：不留半批（2026-10-03 新增，针对复发事故）
+
+**事故形态**：一批工作做到「后端 + 单测」就停，前端接线 / e2e 收尾 / facts 刷新留到下一批
+⇒ 每一批结束时仓库都是红的。已复发两轮（2026-09-23 的 payload 声明式迁移、2026-10-03 的 rateGroup），
+**两轮都是同一个病根，不是能力问题**。
+
+2026-10-03 那轮的三处红，全部同源、全部是门禁自动抓到的（没有一处需要人肉发现）：
+
+| 红项 | 缺的那一步 |
+|---|---|
+| 前端契约测试 ④⑥ 红 | 后端新增 `rateGroup` 键，UI 无入口且未登记 |
+| `lint` 红（`e2e/batch-lab/run.mjs` `'base' is not defined`） | 新增场景引用了别处块作用域的变量，收尾没跑 lint |
+| `facts:check` 红 | 新增了测试文件但没重采 `docs/_facts.json` |
+
+**为什么不给这条加门禁**：它管的是「人有没有跑门禁」，机械判据只能检查「有没有写这段文档」，
+那是自证空转（本仓已踩过一次「登记 ≠ 有入口」）。真正有效的防线是下面 Checklist 里那两条
+**会让测试真的变红**的守卫 —— 它们已经在了，缺的是跑它们的动作。
+
 ## 新增/修改功能 Checklist
 
 - [ ] `npx tsc --noEmit` 零错误
 - [ ] `npx eslint .` 零错误
 - [ ] `npm test`（前端）全绿
 - [ ] `cd server && npm test`（服务端）全绿
+- [ ] **新增/改动了后端配置键**（`SCAN_CONFIG_KEYS` / REST 白名单）：二选一 ——
+      ① 接进 `ScanConfigPanel` 并登记进 `src/shared/constants.ts` 的 `SCAN_CONFIG_KEYS`；
+      ② 登记进 `src/tests/scanConfig.contract.test.ts` 的 `KNOWN_MISSING_UI_KEYS` 并写明论证。
+      漏了 ⇒ 契约测试 **④ 立刻红**（判据 ⑤⑥ 分别防「登记腐烂」与「登记虚胖」）
+- [ ] **`npm run facts:check` 绿**：README 的测试数/覆盖率由 `docs/_facts.json` 供给，
+      新增或改动测试文件后它会报「采集源已改动」。修法：改完**一批** → `git add` →
+      `node scripts/facts-sync.mjs --refresh` → `npm run facts:fix`（**一批只 refresh 一次**，约 4 分钟）
+- [ ] **新文件先 `git add` 再跑门禁**（`refs:check` 抓「本机有、库里没有」）
 - [ ] 涉及检测/提取：`python e2e/run-with-sandbox.py e2e/recall-lab/recall.e2e.js` 18 场景全 PASS（直跑只有 16，MySQL 组 SKIP 不算绿）
 - [ ] 涉及 tamper/WAF：`npm run tamper-matrix` 与 `python e2e/waf-lab/compare-real.run.py`（真 MySQL 装置；`npm run waf-e2e` 指向的是 2026-09-18 已废弃的空壳靶场，别再用）。后者是**门禁**（0 通过 / 1 判据失败 / 2 连不上库），2026-09-25 起 CI 每次 push 也在 acceptance job 里直连该 job 自己的 mysqld 跑一遍，不必等周度矩阵
 - [ ] 更新 `README.md` 功能表与测试数字（如受影响）

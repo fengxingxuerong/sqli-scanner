@@ -22,6 +22,15 @@ export function guardScalarsCore(config, cfg, scopeRules) {
     if (typeof n === 'number' && Number.isFinite(n)) config.ratePerSec = n;
     else logger.warn(`ratePerSec 值不可用作速率（${JSON.stringify(raw)}），已忽略并按默认限速治理；要不限速请显式传数字 0`);
   }
+  // [2026-10-03] rateGroup：批量共享限速桶的组 id（优化项，非能力开关）。
+  // 形态必须收紧：它会当 Map 的 key（组桶登记表），任意字符串 ⇒ 调用方可构造海量 key
+  // 把桶表撑爆，或拼出与既有 scanId 撞名的 key 去蹭别的扫描的桶。故只认 [A-Za-z0-9_-]，
+  // 非法形态**整体丢弃**并由 logger 喊出来（不静默降级：静默丢弃会让用户以为开了共享桶）。
+  if (cfg.rateGroup !== undefined && cfg.rateGroup !== null && cfg.rateGroup !== '') {
+    const g = clampStr(cfg.rateGroup, undefined, 64);
+    if (g && /^[A-Za-z0-9_-]{1,64}$/.test(g)) config.rateGroup = g;
+    else logger.warn(`rateGroup 形态非法（只认字母/数字/下划线/连字符，最长 64），已忽略：${JSON.stringify(cfg.rateGroup)}`);
+  }
   const concurrency = pickInt(cfg, 'concurrency', defaults.concurrency, 1, 10);
   if (concurrency !== undefined) config.concurrency = concurrency;
   const retry = pickInt(cfg, 'retry', defaults.retry, 0, 5);

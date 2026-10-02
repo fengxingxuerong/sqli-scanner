@@ -173,13 +173,29 @@ export class HttpClient {
     try { httpsAgent.destroy?.(); } catch { /* ignore */ }
   }
 
-  forScan(scanId, ratePerSec) {
-    this.createBucket(scanId, ratePerSec);
+  /**
+   * @param {string} scanId 扫描级上下文（Cookie Jar / SSRF 登记 / --max-requests 计数都按它）
+   * @param {number} ratePerSec 该视图的限速（<=0 = 不限速）
+   * @param {string} [rateKey] **共享限速桶的组 id**。给了就把这次扫描的令牌桶挂在组桶上，
+   *   而不是按 scanId 各自建一个 —— 批量模式下所有目标共用一个桶 ⇒ ① 总速率严格
+   *   ≤ ratePerSec（单桶天然保证，不依赖"均分"是否精确）；② 队列排空后剩下的目标
+   *   自动拿到全部预算（别的扫描没在用），不再是启动时算死的 1/并发度。
+   *   ⚠ 组桶的 rate 由**第一个**建桶的扫描决定：批量里必须给所有成员传同一个 ratePerSec。
+   */
+  forScan(scanId, ratePerSec, rateKey) {
+    const bucketKey = rateKey || scanId;
+    // ⚠ 组桶**已存在时必须沿用，不能重建**。`createBucket` 是 `buckets.set(key, new TokenBucket)`，
+    //   重建会同时丢掉两样东西：
+    //     ① 桶里已累积的令牌（后加入的扫描等于把先跑的那一批"重置"了一轮，表现为突然能突发）；
+    //     ② 更严重 —— TokenBucket 用 `_chain`（串行化 Promise 链）排队，重建后**已经在等待的
+    //        请求仍挂在旧桶的链上**，新桶从零开始 ⇒ 并发下的"总速率 ≤ ratePerSec"不再成立。
+    //   per-scan 分支保持原样（每次都建），既有行为不变。
+    if (!(rateKey && this.buckets.has(bucketKey))) this.createBucket(bucketKey, ratePerSec);
     const self = this;
     return {
-      request: (opts) => self.request({ ...opts, scanId }),
+      request: (opts) => self.request({ ...opts, scanId, rateKey: bucketKey }),
       // [sqlmap 对标] --null-connection：per-scan 客户端也暴露 headRequest，自动注入 scanId
-      headRequest: (url, opts) => self.headRequest(url, { ...opts, scanId }),
+      headRequest: (url, opts) => self.headRequest(url, { ...opts, scanId, rateKey: bucketKey }),
     };
   }
 

@@ -82,7 +82,10 @@ export function bucketForRate(ratePerSec) {
    * defaults 保守化后该错位直接打崩以 0 表达「不限速」的调用方（pentest-lab 实测 0/10）。
    */
 export function _resolveRateBucket(opts, effectiveRate) {
-    return (opts.scanId && this.buckets.get(opts.scanId)) ||
+    // [2026-10-03] rateKey 优先：批量共享组桶挂在组 id 上，scanId 桶查不到它。
+    //   顺序不能反 —— scanId 桶是**每扫描必有**的，反过来的话组桶永远拿不到。
+    return (opts.rateKey && this.buckets.get(opts.rateKey))
+      || (opts.scanId && this.buckets.get(opts.scanId)) ||
       (Number.isFinite(effectiveRate) && effectiveRate > 0
         ? this.bucketForRate(effectiveRate)
         : Number.isFinite(effectiveRate) && effectiveRate <= 0

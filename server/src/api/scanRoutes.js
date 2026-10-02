@@ -129,6 +129,8 @@ const KNOWN_CFG_KEYS = new Set([
   // [批次14 实战 P1-6] login：登录编排最小版对象（objectGroups.guardLogin 收紧形状；
   // 标准表单登录自动提交 + 会话过期自动重登，loginFlow.js 消费）。
   'login',
+  // [2026-10-03] rateGroup：批量共享限速桶的组 id（形态由 guardScalarsCore 收紧）。
+  'rateGroup',
   // hex / unionFrom 是这支守卫测试第一次跑就自己抱出来的——我先前手工 triage 时把 `hex`
   // 当成 grep 噪声丢了（`hex` 这个词在 server/src 有上百处无关命中）。教训：判据要能跑，
   // 不能靠人眼看 grep。unionFrom 无需在此再加校验——引擎侧 resolveFromClause 已经过

@@ -34,7 +34,13 @@ export function getScanClient(scanId, target) {
       // [sqlmap 对标] --reqrate：reqRate > 0 时覆盖 ratePerSec 作为 TokenBucket 速率
       const reqRate = target.config && target.config.reqRate;
       const ratePerSec = (reqRate && reqRate > 0 ? reqRate : (target.config && target.config.ratePerSec)) || undefined;
-      const sc = connector.forScan(scanId, ratePerSec);
+      // [2026-10-03] cfg.rateGroup：批量模式下所有目标共用**一个**限速桶（组桶）。
+      // 与「每扫描按 ratePerSec/concurrency 均分」的区别：均分是启动时算死的，队列排空后
+      // 剩下的目标仍按 1/并发度 跑（预算白白闲着）；组桶是动态的 —— 谁在用谁就能拿到，
+      // 总量由单桶保证。不给 rateGroup 时行为与原来完全一致（按 scanId 建桶）。
+      // ⚠ 这里不能用下面的 `cfg`（它在**之后**才声明，const 有 TDZ，提前引用会 ReferenceError）
+      const rateGroup = (target && target.config && target.config.rateGroup) || undefined;
+      const sc = connector.forScan(scanId, ratePerSec, rateGroup);
       // [sqlmap 对标] --safe-url/--safe-freq：配置了保活 URL 时包装客户端
       // （SSRF 校验在 client.request 内逐请求执行；失败静默不影响扫描）
       const cfg = (target && target.config) || {};

@@ -47,8 +47,11 @@ async function startSqliteTarget() {
     }
   };
 
+  // 每个请求的时间戳（限速测量用：全局平均速率 / 单目标峰值窗口）
+  const hits = [];
   const server = http.createServer((req, res) => {
     const u = new URL(req.url, 'http://127.0.0.1');
+    hits.push({ t: Date.now(), p: u.pathname });
     const reply = (r) => {
       const bodyHtml = r === null
         ? '<html><body><div class="card">error</div></body></html>'
@@ -67,6 +70,11 @@ async function startSqliteTarget() {
         const nm = new URLSearchParams(body).get('name') || 'alice';
         reply(run(`SELECT id, username, email FROM users WHERE username = '${nm}'`));
       });
+    } else if (u.pathname === '/empty') {
+      // 无参数的"立刻结束"端点：0 注入点 ⇒ 几乎不发请求。
+      // 场景 C3 用它把并发位占掉再迅速腾空，逼出「排空后剩下的目标能否吃满预算」。
+      hits.push({ t: Date.now(), p: '/empty' });
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end('<html><body>no params here</body></html>');
     } else {
       res.writeHead(404).end('not found');
     }
@@ -74,7 +82,7 @@ async function startSqliteTarget() {
   const port = await new Promise((resolve) => {
     server.listen(0, '127.0.0.1', () => resolve(server.address().port));
   });
-  return { port, stop: () => new Promise((r) => server.close(r)) };
+  return { port, hits, resetHits: () => (hits.length = 0), stop: () => new Promise((r) => server.close(r)) };
 }
 
 /** spawn 真 CLI 进程，收集 stdout/stderr 与退出码 */
@@ -95,6 +103,12 @@ const target = await startSqliteTarget();
 const outDir = path.join(ROOT, 'logs', 'batch-lab-out');
 fs.rmSync(outDir, { recursive: true, force: true });
 fs.mkdirSync(outDir, { recursive: true });
+
+// 靶站基址（单一真值源）。
+// ⚠️ 此前 `base` 只定义在「场景 B」的块作用域里，而场景 C1/C3 也引用它 —— ESLint no-undef
+// 早已报出（运行到那两个场景就是 ReferenceError，整套件崩）。
+// 修法不是在两个块里各抄一份，而是上提到此处，让所有场景共用同一个定义。
+const base = `http://127.0.0.1:${target.port}`;
 
 const fails = [];
 const check = (cond, msg) => { if (!cond) fails.push(msg); };
@@ -165,7 +179,6 @@ const note = (s) => console.log(`   ${s}`);
 // ============================================================================
 const B = { openapi: null, har: null, yaml: null };
 {
-  const base = `http://127.0.0.1:${target.port}`;
   // OpenAPI：两个 GET 端点（对标 sqlmap 2.0 的 OpenAPI 目标生成）
   const openapi = {
     openapi: '3.0.0',
@@ -293,6 +306,113 @@ const B = { openapi: null, har: null, yaml: null };
   check(yamlHits.length >= 1, `B-yaml: 展开的目标里应有真检出，实得 ${yamlHits.length}/${yamlFiles.length}`);
   B.yaml = { files: yamlFiles.length, hits: yamlHits.length };
   note(`B 场景（YAML）：${B.yaml.files} 份报告 / ${B.yaml.hits} 条检出`);
+}
+
+// ============================================================================
+// 场景 C：共享限速桶（2026-10-03）—— 总量上限 + 对照组 + 排空后自动吃满
+//   旧方案：启动时按并发度均分（rate/concurrency，算一次不再变）⇒ 队列排空后剩下的
+//   目标仍按 1/并发度 跑，预算白白闲着。新方案：整批共用一个令牌桶。
+//   三条判据都是**可证伪**的：C2 是 C1 的对照组（证明限制来自限速而非目标本来就慢），
+//   C3 用「均分方案下绝不可能达到的速率」来证明动态吃满确实发生。
+// ============================================================================
+const RATE = 6; // 总速率上限（req/s）
+const CONC = 3;
+const rateStats = (arr) => {
+  if (arr.length < 2) return { n: arr.length, mean: 0, peak: 0 };
+  const ts = arr.map((h) => h.t).sort((a, b) => a - b);
+  const span = (ts[ts.length - 1] - ts[0]) / 1000;
+  // 峰值：任意 1 秒滑窗内的最大请求数
+  let peak = 0;
+  for (let i = 0; i < ts.length; i++) {
+    let j = i;
+    while (j + 1 < ts.length && ts[j + 1] - ts[i] <= 1000) j++;
+    peak = Math.max(peak, j - i + 1);
+  }
+  return { n: arr.length, mean: span > 0 ? arr.length / span : 0, peak };
+};
+
+// —— C1：限速生效时的总量（3 个真目标）——
+{
+  target.resetHits();
+  const listFile = path.join(outDir, 'C-urls.txt');
+  fs.writeFileSync(
+    listFile,
+    [`${base}/num?id=1`, `${base}/str?name=alice`, `${base}/num?id=2`].join('\n') + '\n',
+    'utf8',
+  );
+  const o = path.join(outDir, 'C1');
+  const t0 = Date.now();
+  const r = await runCli([
+    '-m', listFile, '--out', o, '--format', 'json', '--concurrency', String(CONC),
+    '--level', '1', '--risk', '1', '--technique', 'boolean,error',
+    '--rate', String(RATE), '--timeout', '60000',
+  ]);
+  const elapsed = (Date.now() - t0) / 1000;
+  const st = rateStats(target.hits);
+  check(r.code === 0 || r.code === 2, `C1: 应正常退出（0 或 2），实得 ${r.code}；stderr 尾部：${r.stderr.slice(-400)}`);
+  check(st.n >= 20, `C1: 请求样本太少（${st.n}）不足以测速率 —— 套件在空转`);
+  // 令牌桶允许突发 capacity=rate，故判**平均**速率；留 25% 余量吸收进程启动与建连耗时
+  check(
+    st.mean <= RATE * 1.25,
+    `C1: 全局平均速率应 ≤ ${RATE} req/s（共享桶的总量保证），实得 ${st.mean.toFixed(2)}`
+    + `（${st.n} 个请求 / ${elapsed.toFixed(1)}s）`,
+  );
+  note(`C1 限速：${st.n} 请求 / ${elapsed.toFixed(1)}s ⇒ 平均 ${st.mean.toFixed(2)} req/s（上限 ${RATE}，均值判据 ≤ ${(RATE * 1.25).toFixed(1)}）`);
+}
+
+// —— C2：对照组 —— 同样命令但 --rate 0（不限速）⇒ 平均速率必须**明显高于** C1。
+//   没有这条，C1 的"没超标"可能只是因为目标本来就慢，限速根本没参与。
+{
+  target.resetHits();
+  const listFile = path.join(outDir, 'C-urls.txt');
+  const o = path.join(outDir, 'C2');
+  const t0 = Date.now();
+  const r = await runCli([
+    '-m', listFile, '--out', o, '--format', 'json', '--concurrency', String(CONC),
+    '--level', '1', '--risk', '1', '--technique', 'boolean,error',
+    '--rate', '0', '--timeout', '60000',
+  ]);
+  const elapsed = (Date.now() - t0) / 1000;
+  const st = rateStats(target.hits);
+  check(r.code === 0 || r.code === 2, `C2: 应正常退出（0 或 2），实得 ${r.code}`);
+  check(st.n >= 20, `C2: 请求样本太少（${st.n}）不足以做对照`);
+  check(
+    st.mean > RATE * 1.5,
+    `C2: 不限速时的平均速率应明显高于限速档（证明 C1 的限制来自限速，不是目标本来就慢），`
+    + `实得 ${st.mean.toFixed(2)} vs C1 上限 ${RATE}`,
+  );
+  note(`C2 对照（--rate 0）：${st.n} 请求 / ${elapsed.toFixed(1)}s ⇒ 平均 ${st.mean.toFixed(2)} req/s`);
+}
+
+// —— C3：排空后自动吃满 —— 均分方案下**绝不可能**达到的速率 ——
+//   3 个并发位里 2 个是「/empty」（无参数 ⇒ 0 注入点 ⇒ 几乎不发请求），
+//   均分方案下真目标被钉死在 rate/concurrency = 2 req/s；共享桶下它应能跑到接近 RATE。
+{
+  target.resetHits();
+  const listFile = path.join(outDir, 'C3-urls.txt');
+  fs.writeFileSync(listFile, [`${base}/empty`, `${base}/empty`, `${base}/num?id=1`].join('\n') + '\n', 'utf8');
+  const o = path.join(outDir, 'C3');
+  const r = await runCli([
+    '-m', listFile, '--out', o, '--format', 'json', '--concurrency', String(CONC),
+    '--level', '2', '--risk', '1', '--technique', 'boolean,error',
+    '--rate', String(RATE), '--timeout', '60000',
+  ]);
+  check(r.code === 0 || r.code === 2, `C3: 应正常退出（0 或 2），实得 ${r.code}`);
+  const numHits = target.hits.filter((h) => h.p === '/num');
+  const st = rateStats(numHits);
+  // 均分方案的硬上界是 RATE/CONC = 2 req/s ⇒ 峰值窗口取 3 即可证伪（>2），
+  // 取 4 是为了留出"刚好卡在边界"的争议空间。
+  const splitCap = RATE / CONC;
+  check(st.n >= 12, `C3: 真目标请求样本太少（${st.n}）不足以测速率`);
+  check(
+    st.peak > splitCap + 1,
+    `C3: 真目标的峰值窗口应超过均分方案的上界 ${splitCap.toFixed(1)} req/s（${splitCap + 1}），`
+    + `实得 ${st.peak} —— 未超过说明预算仍被启动时算死的份额钉住`,
+  );
+  // 总量保证在这条形态下仍要成立
+  const all = rateStats(target.hits);
+  check(all.mean <= RATE * 1.25, `C3: 总量保证仍须成立（≤ ${RATE}），实得 ${all.mean.toFixed(2)}`);
+  note(`C3 动态吃满：真目标峰值 ${st.peak} req/s（均分方案上界 ${splitCap.toFixed(1)}）；全局平均 ${all.mean.toFixed(2)}`);
 }
 
 await target.stop();
