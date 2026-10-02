@@ -20,6 +20,7 @@
 //   由调用方决定如何提示 —— 不给"静默返回空"留机会。
 // ============================================================================
 import { parseRequestFile } from './requestFileParser.js';
+import { parseYamlLite } from './yamlLite.js';
 
 /** 集合格式识别。返回 'har' | 'burp-xml' | 'postman' | 'openapi' | 'openapi-yaml' | 'unsupported' | 'raw' */
 export function detectRequestFormat(text) {
@@ -416,13 +417,36 @@ export function parseRequestCollection(text) {
   }
 
   if (format === 'openapi-yaml') {
+    // [2026-10-02] YAML 此前一律「请转 JSON」—— 而 OpenAPI 规范**绝大多数以 YAML 流通**
+    // （Swagger Editor / springdoc / FastAPI 默认导出都是 YAML），等于把这条入口堵死。
+    // 现在走 `core/yamlLite.js`（零依赖子集解析器）：能解析就展开，解析不了**如实报原因**
+    // 并保留转 JSON 的建议 —— 半解的 YAML 会展开出**错的**请求（少参数、少路径），
+    // 那比明确说"解析不了"危险得多。
+    const y = parseYamlLite(text);
+    if (!y.ok) {
+      return {
+        format,
+        requests: [],
+        warnings: [
+          `识别为 OpenAPI/Swagger 的 **YAML** 形式，但本工具的零依赖 YAML 子集解析器吃不下它`
+          + `（${y.reason}）。请转成 JSON 后重试：Swagger Editor 里 `
+          + 'File → Convert and save as JSON，或 `python -c "import yaml,json,sys;json.dump(yaml.safe_load(open(sys.argv[1])),open(sys.argv[2],\'w\'))" in.yaml out.json`',
+        ],
+      };
+    }
+    const obj = y.value;
+    if (!obj || typeof obj !== 'object' || !(obj.openapi || obj.swagger)) {
+      return { format, requests: [], warnings: ['YAML 解析成功，但顶层不是 OpenAPI/Swagger 文档（缺 openapi/swagger 键）'] };
+    }
+    const parsed = parseOpenApi(obj);
     return {
       format,
-      requests: [],
+      requests: parsed.requests,
+      // 展开成功也要说明来源与局限：YAML 走的是子集解析器，值与 JSON 路径同源但语法覆盖更窄
       warnings: [
-        '识别为 OpenAPI/Swagger 的 **YAML** 形式。本工具不引 YAML 依赖（只在 server 侧跑，'
-          + '装 yaml 会扩大依赖面）→ 请转成 JSON 后重试：'
-          + 'Swagger Editor 里 File → Convert and save as JSON，或 `python -c "import yaml,json,sys;json.dump(yaml.safe_load(open(sys.argv[1])),open(sys.argv[2],\'w\'))" in.yaml out.json`',
+        'OpenAPI **YAML** 走零依赖子集解析器展开（锚点/别名/块标量等构造不支持，'
+        + '遇到会如实报"解析不了"而不是半解）',
+        ...parsed.warnings,
       ],
     };
   }

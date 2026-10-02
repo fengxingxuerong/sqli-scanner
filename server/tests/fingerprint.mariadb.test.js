@@ -62,8 +62,10 @@ test('OOB_PAYLOADS 各支持库非空、SQLite 为空', () => {
     assert.ok(Array.isArray(OOB_PAYLOADS[db]) && OOB_PAYLOADS[db].length > 0, `${db} OOB 应为非空`);
   }
   assert.deepEqual(OOB_PAYLOADS.SQLite, []);
-  // 触发语句应含 {CALLBACK} 占位（OobDetector 会替换）
-  assert.ok(OOB_PAYLOADS.MySQL[0].includes('{CALLBACK}'));
+  // 触发语句应含回调占位（OobDetector 会替换）：UNC 类向量 2026-10-02 起用 {UNC}
+  //（裸主机 + share 名，Windows UNC 主机位不含 :port），HTTP 类向量保持 {CALLBACK}
+  assert.ok(OOB_PAYLOADS.MySQL[0].includes('{UNC}'));
+  assert.ok(OOB_PAYLOADS.PostgreSQL[0].includes('{CALLBACK}'));
 });
 
 // ===== 集成：DBFingerprinter 优先区分 MariaDB =====

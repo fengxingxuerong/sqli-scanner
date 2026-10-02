@@ -106,11 +106,52 @@ test('batchTargets: Burp XML 展开为集合', () => {
   assert.match(r.items[0].url, /t\.local\/num/);
 });
 
-// ⑥ YAML 的 OpenAPI 不能静默当成 URL 列表 ⇒ 必须给出可操作提示
-test('batchTargets: OpenAPI YAML 未展开且给出转 JSON 的提示', () => {
-  const r = expandBatchTargets('openapi: 3.0.0\ninfo:\n  title: t\n');
+// ⑥ OpenAPI 的 **YAML** 形式现在能展开（零依赖子集解析器）—— 规范绝大多数以 YAML 流通
+test('batchTargets: OpenAPI YAML 展开为样例请求', () => {
+  const yaml = [
+    'openapi: 3.0.0',
+    'info:',
+    '  title: batch-lab',
+    '  version: 1.0.0',
+    'servers:',
+    '  - url: http://t.local',
+    'paths:',
+    '  /num:',
+    '    get:',
+    '      parameters:',
+    '        - name: id',
+    '          in: query',
+    '          required: true',
+    '          schema:',
+    '            type: integer',
+    '          example: 1',
+    '  /str:',
+    '    get:',
+    '      parameters:',
+    '        - name: name',
+    '          in: query',
+    '          schema:',
+    '            type: string',
+    '          example: alice',
+    '',
+  ].join('\n');
+  const r = expandBatchTargets(yaml);
+  assert.equal(r.kind, 'collection');
   assert.equal(r.format, 'openapi-yaml');
-  assert.ok(r.warnings.some((w) => /YAML/.test(w)), `缺 YAML 提示：${JSON.stringify(r.warnings)}`);
+  assert.equal(r.items.length, 2, `YAML 应展开出 2 个目标，实得 ${r.items.length}：${JSON.stringify(r.items.map((i) => i.url))}`);
+  assert.ok(r.items.some((i) => /\/num/.test(i.url) && /id=1/.test(i.url)), `数值参数没带上 example：${JSON.stringify(r.items)}`);
+  assert.ok(r.items.some((i) => /\/str/.test(i.url) && /name=alice/.test(i.url)), `字符串参数没带上 example：${JSON.stringify(r.items)}`);
+  assert.ok(r.warnings.some((w) => /YAML/.test(w)), '应说明走的是 YAML 子集解析器');
+});
+
+// ⑥b 吃不下的 YAML 必须**如实报原因 + 转 JSON 建议**，绝不半解
+test('batchTargets: 含不支持构造的 YAML 拒绝展开并给出原因', () => {
+  const r = expandBatchTargets('openapi: 3.0.0\ninfo:\n  title: t\nx: &anchor\n  a: 1\n');
+  assert.equal(r.items.length, 0, '半解会展开出**错的**请求，比不展开危险 ⇒ 必须整体拒绝');
+  assert.ok(
+    r.warnings.some((w) => /锚点/.test(w) && /转 JSON|Convert/.test(w)),
+    `缺「原因 + 转 JSON 建议」：${JSON.stringify(r.warnings)}`,
+  );
 });
 
 // ⑦ 集合里的越界方法/非 http URL 要被过滤且计数（不然批量里会静默少目标）

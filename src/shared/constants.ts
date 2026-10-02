@@ -82,6 +82,10 @@ export const DEFAULT_CONFIG: ScanConfig = {
   // 因此这两个开关的语义是「在 level 门控之外**强制**追加」，不是「唯一入口」。
   testPath: false,
   testHeaders: false,
+  // [2026-10-02 竞品吸收] 参数挖掘（对标 Arjun）：默认关（opt-in，会向目标发额外探测请求）
+  paramMine: false,
+  // [2026-10-02 实战 P1-4] headless 浏览器爬取：默认关（opt-in，需 playwright + 系统浏览器）
+  crawlBrowser: false,
 };
 
 // ── [P0-FIX 2026-09-09] /api/scan/start 的 config 契约：单一事实来源 ────────────────
@@ -129,10 +133,15 @@ export const SCAN_CONFIG_KEYS = [
   // [2026-09-26 UI-REACH] crawlForms（对标 sqlmap --forms）：默认 false，关着就**只测 URL 上的
   // 参数**，页面里的表单（POST body / 隐藏字段）一个都不进注入点清单 —— 少测一整类注入面，
   // 且报告只会写「未检出」。属能力缺失，故接进面板（与 crawlDepth 同组，开了爬虫才生效）。
-  'crawlDepth', 'crawlForms', 'sessionFile', 'sessionDefault', 'noSql',
+  // [2026-10-02 竞品吸收] paramMine（对标 Arjun 参数发现）：默认 false，隐藏参数（URL/body
+  // 里看不到、服务端却拼进 SQL 的参数）整体漏检。与爬虫同属「发现注入点」阶段能力，同组。
+  // [2026-10-02 实战 P1-4] crawlBrowser（headless 浏览器爬取）：SPA 目标的 XHR 接口发现。
+  'crawlDepth', 'crawlForms', 'paramMine', 'crawlBrowser', 'sessionFile', 'sessionDefault', 'noSql',
   // [2026-09-23 UI-REACH] 两条**整通道**接进 UI（此前 REST 白名单与引擎都支持，
   // 但前端只在 KNOWN_MISSING_UI_KEYS 里当债记着 → 界面用户永远测不到它们）
   'oob', 'secondOrder',
+  // [批次14 实战 P1-6] login：登录编排最小版（标准表单登录自动提交 + 会话过期自动重登）
+  'login',
   // 出口层（代理 / 证书 / 授权范围）
   // [2026-10-01] clientCert：mTLS 客户端证书 PEM 路径（sqlmap --cert）。目标要求双向认证时
   // 没有证书连第一跳都过不去 ⇒ 整站测不了（能力缺失，不是便利开关），故接进面板。
@@ -179,6 +188,8 @@ export const SCAN_CONFIG_VALUE_TYPES: Record<ScanConfigKey, ScanConfigValueType>
   risk: 'number',
   crawlDepth: 'number',
   crawlForms: 'boolean',
+  paramMine: 'boolean',
+  crawlBrowser: 'boolean',
   techniques: 'stringArray',
   scope: 'stringArray',
   prefix: 'string',
@@ -224,6 +235,8 @@ export const SCAN_CONFIG_VALUE_TYPES: Record<ScanConfigKey, ScanConfigValueType>
   // 嵌套对象：子字段形状由后端逐项 clamp（oob 的回调地址/端口、secondOrder 的触发页列表）
   oob: 'object',
   secondOrder: 'object',
+  // [批次14 实战 P1-6] 登录编排对象（子字段由后端 guardLogin 逐项收紧）
+  login: 'object',
   wafEvasion: 'object',
   extractScope: 'object',
   // [2026-09-29 UI-REACH] 能力缺失类 8 键的类型（与后端 clamp 口径对齐：

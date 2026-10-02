@@ -32,6 +32,9 @@ const PROBE = {
   noSql: { enabled: false },
   secondOrder: { enabled: false },
   blindRobust: { enabled: true },
+  // [批次14 实战 P1-6] login 的探针值：guardLogin 只收 http(s) url + 对象形态，默认探针 1
+  // 过不了这道形状门是**正确行为**（负例见 loginFlow.test.js 的 guardLogin 组）。
+  login: { url: 'http://login.example.com/signin', username: 'u', password: 'p' },
   // 结论可信度守卫组：默认探针值 1 过不了 `typeof === 'object'` 那道形状门（那是正确行为），
   // 所以给它一个最小合法对象 —— 本守卫要验的是"键有没有透传"，不是形状宽容度。
   scanValidity: { enabled: false },

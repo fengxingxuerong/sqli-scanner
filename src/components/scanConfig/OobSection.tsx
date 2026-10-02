@@ -38,6 +38,10 @@ export default function OobSection({ config, onChange }: ScanConfigSectionProps)
                 onChange={(e) => patchNested('oob', 'callbackBase', e.target.value.trim() || undefined)}
               />
               <Typography variant="caption" color="text.disabled">{t('scanConfig.oobCallbackBaseHint')}</Typography>
+              {/* [实战分析 P1 2026-10-02] 通道边界显式化：UNC/SMB 向量内置接收端捕不到 */}
+              <Typography variant="caption" color="warning" className="block mt-1">
+                {t('scanConfig.oobSmbBoundary')}
+              </Typography>
             </Box>
             <FormControlLabel
               control={<Switch size="small" checked={config.oob?.dnsOob ?? false} onChange={(e) => patchNested('oob', 'dnsOob', e.target.checked)} />}

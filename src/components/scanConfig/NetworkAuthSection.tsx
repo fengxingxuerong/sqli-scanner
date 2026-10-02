@@ -1,4 +1,4 @@
-// 网络与认证分段（proxy / basic / cookie / headers）—— 2026-09-27 自 ScanConfigPanel 拆出，JSX 逐字迁移
+// 网络与认证分段（proxy / basic / cookie / headers / login 编排）—— 2026-09-27 自 ScanConfigPanel 拆出，JSX 逐字迁移
 import { useTranslation } from 'react-i18next';
 import { Box, Typography, Stack } from '@mui/material';
 import type { ScanConfig, AuthConfig } from '../../shared/types';
@@ -11,6 +11,16 @@ function authWithout(config: ScanConfig, onChange: OnPatch, key: 'basic' | 'cook
   const next = { ...(config.auth ?? {}) } as Record<string, unknown>;
   delete next[key];
   onChange({ auth: Object.keys(next).length ? (next as AuthConfig) : null });
+}
+
+/** [批次14 实战 P1-6] login 编排子字段更新；url/username/password 全空 = 整键删（关闭态干净） */
+function setLoginField(config: ScanConfig, onChange: OnPatch, field: 'url' | 'username' | 'password', value: string) {
+  const cur = { ...(config.login ?? {}) } as Record<string, unknown>;
+  const trimmed = value.trim();
+  if (!trimmed) delete cur[field];
+  else cur[field] = trimmed;
+  const hasAny = typeof cur.url === 'string' && !!cur.url;
+  onChange({ login: hasAny ? (cur as NonNullable<ScanConfig['login']>) : undefined });
 }
 
 export default function NetworkAuthSection({ config, onChange }: ScanConfigSectionProps) {
@@ -97,6 +107,46 @@ export default function NetworkAuthSection({ config, onChange }: ScanConfigSecti
             }}
           />
         </Box>
+        {/* [批次14 实战 P1-6] 登录编排最小版：url 有值即启用（username 建议同填，
+            后端包装门按 username 存在与否判定）。字段名默认由登录页自动探测。 */}
+        <Box>
+          <Typography variant="caption" color="text.secondary">{t('scanConfig.loginUrlLabel')}</Typography>
+          <input
+            className="mt-1 w-full px-3 py-2 border rounded text-sm"
+            placeholder={t('scanConfig.loginUrlPlaceholder')}
+            aria-label={t('scanConfig.loginUrlLabel')}
+            value={config.login?.url ?? ''}
+            onChange={(e) => setLoginField(config, onChange, 'url', e.target.value)}
+          />
+          <Typography variant="caption" color="text.disabled" className="block">
+            {t('scanConfig.loginUrlHint')}
+          </Typography>
+        </Box>
+        {(config.login?.url ?? '') !== '' && (
+          <Box>
+            <Typography variant="caption" color="text.secondary">{t('scanConfig.loginCredLabel')}</Typography>
+            <input
+              className="mt-1 w-full px-3 py-2 border rounded text-sm"
+              placeholder={t('scanConfig.loginCredPlaceholder')}
+              aria-label={t('scanConfig.loginCredLabel')}
+              value={config.login?.username ? `${config.login.username}:${config.login.password ?? ''}` : ''}
+              onChange={(e) => {
+                const v = e.target.value;
+                const idx = v.indexOf(':');
+                const user = idx >= 0 ? v.slice(0, idx) : v;
+                const pass = idx >= 0 ? v.slice(idx + 1) : '';
+                // 单次 patch 同时写 username/password：分两次会用同一个 stale config 互相覆盖
+                const cur = { ...(config.login ?? {}) } as Record<string, unknown>;
+                if (user.trim()) cur.username = user.trim();
+                else delete cur.username;
+                if (pass) cur.password = pass;
+                else delete cur.password;
+                const hasAny = typeof cur.url === 'string' && !!cur.url;
+                onChange({ login: hasAny ? (cur as NonNullable<ScanConfig['login']>) : undefined });
+              }}
+            />
+          </Box>
+        )}
       </Stack>
     </Box>
   );

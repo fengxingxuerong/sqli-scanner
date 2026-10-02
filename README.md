@@ -1,6 +1,6 @@
 # sqli-scanner
 
-[![Tests](https://img.shields.io/badge/tests-3118%20passing-brightgreen)](#测试)[![CI](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml/badge.svg)](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml)
+[![Tests](https://img.shields.io/badge/tests-3225%20passing-brightgreen)](#测试)[![CI](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml/badge.svg)](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml)
 [![Dependencies](https://img.shields.io/badge/dependencies-0%20known%20vulns-brightgreen)](#环境变量)
 
 > CI 徽章为真实状态（仓库地址已定，run#90 起全绿）。发布判定仍以 `CHANGELOG.md`
@@ -152,7 +152,14 @@ OWASP 分类统一为 `A03:2021-Injection`。**未收录的通道不会被静默
 [docs/检测与定库-实测口径.md](docs/检测与定库-实测口径.md)；下文「诚实边界」仍然有效。
 
 诚实边界：SQL Server xp_dirtree / Oracle UTL_HTTP 等其它库的 OOB 模板未真机验证；真实
-ModSecurity/商业云 WAF 环境未实测。CRS 保真度口径（门禁现管**两族**：942 的 805 条 + 930 的 38 条
+ModSecurity/商业云 WAF 环境未实测。
+**OOB 通道边界（2026-10-02 修正）**：UNC/SMB 类向量（MySQL/MariaDB/TiDB LOAD_FILE、
+SQL Server xp_dirtree）的回调路径已改为裸主机 + share 名（`<host>\oob\<token>`，token 在
+share 名里）——Windows UNC 主机位不含 `:port`，旧模板内嵌 `host:port` 在真实目标上永远
+解析不了。内置接收端只监听 HTTP+DNS、捕获不到 SMB 握手：收回 UNC 向量的 token 需
+自备外部 SMB 监听（Responder/Inveigh）或配置 `oob.dnsOob` 走 DNS 通道；HTTP 类向量
+（PG COPY PROGRAM / Oracle UTL_HTTP / MSSQL ping）不受影响。
+CRS 保真度口径（门禁现管**两族**：942 的 805 条 + 930 的 38 条
 官方回归用例）也只覆盖 **query / 表单 body**：静态普查显示 942 家族装载的 66 条规则里有 54 条声明读 `XML:/*`，而本仓库的执行器不解析 XML ⇒
 那 99.6%（942）/ 100.0%（930）的一致率不能外推到 XML 接口（`npm run waf-fidelity` 与
 `npm run waf-fidelity:930` 各自会打印这条普查，别只看结论行）。
@@ -212,7 +219,7 @@ npm run waf-validate    # HTTP 实测验证 WAF 绕过
 npm run waf-e2e         # 运行 WAF e2e 对比测试
 npm run waf-real        # [对外口径] 真实 OWASP CRS v4.1.0 规则下 tamper 开/关 A/B
 npm run waf-auto        # CRS 下「引擎自动选链绕过」验收（不显式配 tamper）
-npm run acceptance      # 【门禁】全方位验收（16 套件，事实断言模式，可进 CI）
+npm run acceptance      # 【门禁】全方位验收（17 套件，事实断言模式，可进 CI）
 ```
 
 ## 后端 API
@@ -316,10 +323,10 @@ backend/  ← Express + Node.js
 ## 测试
 
 ```bash
-# 前端测试（475 个用例）
+# 前端测试（485 个用例）
 npm test
 
-# 服务端测试（2646 个用例）
+# 服务端测试（2741 个用例）
 cd server && npm test
 
 # 全部测试
@@ -344,8 +351,8 @@ npm run artifact:drift   # 入库的 e2e 基线产物必须等于当前代码跑
 ## 项目状态
 
 - TypeScript: 零错误
-- 前端测试: 475/475 通过（覆盖率门禁 stmts 94.76 / branch 84.29 / func 78.08，阈值 88/77/67）
-- 服务端测试: 2646 用例（2643 pass / 0 fail / 3 skip，并发口径 2026-10-01 复测；3 skip 为环境依赖显式跳过。覆盖率 lines 90.85 / branch 77.91 / func 80.56，阈值 85/74/77）
+- 前端测试: 485/485 通过（覆盖率门禁 stmts 94.84 / branch 84.03 / func 77.74，阈值 88/77/67）
+- 服务端测试: 2741 用例（2740 pass / 0 fail / 1 skip，并发口径 2026-10-02 复测；1 skip 为环境依赖显式跳过。覆盖率 lines 91.09 / branch 78.49 / func 81.08，阈值 85/74/77）
 - 一键扫描: `npm run scan -- -u <url>`（CLI 一条命令产出 HTML/JSON/Markdown 全套报告 + manifest，退出码可直接进 CI 门禁）
 - Tamper 插件: 228 个（含 v24 增量 20 个，对齐 sqlmap 官方 tamper 全集，含官方 CRS/libinjection 实测组合 uniontable+odbcbrace）
 - WAF 绕过能力: 200+ 插件链式组合，覆盖 62 个 WAF 厂商指纹识别 + 推荐
@@ -482,9 +489,9 @@ node e2e/api-range-lab/run.mjs --list        # 列出全部用例
 
 ### 验收门禁（`npm run acceptance`）
 
-16 套件一次跑完（顺序即 `e2e/acceptance.mjs` 里 SUITES 的登记顺序）：服务端单测 → 独立刁钻靶场 →
+17 套件一次跑完（顺序即 `e2e/acceptance.mjs` 里 SUITES 的登记顺序）：服务端单测 → 独立刁钻靶场 →
 检测回归 → 真 MySQL → 真 PG（含二阶）→ **批量编排故障隔离（`-m`，真 SQLite 靶站 + 死目标）** → OOB 带外通道真机 →
-报告契约 → CRS 人工挂链 A/B →
+**登录编排自动重登（真表单登录 + 会话反复过期，含对照组）** → 报告契约 → CRS 人工挂链 A/B →
 CRS 自动选链绕过 → CRS 执行器保真度（官方回归集）→ WAF 定向变异搜索（A2）端到端 →
 WAF 通道降级编排（A3）端到端 → 红队实战（真值对照 + sqlmap 同题）→ fileRead 真闭环 → fileWrite 真闭环。
 
@@ -499,10 +506,14 @@ WAF 通道降级编排（A3）端到端 → 红队实战（真值对照 + sqlmap
 npm run acceptance                  # 全量（约 8 分钟）
 npm run acceptance -- --skip-heavy  # 跳过最慢的 CRS 组
 npm run acceptance -- --only=waf-auto,waf-real   # 改完某模块做定向门禁
+npm run acceptance:sandbox          # 同全量，但套隔离 MySQL 沙箱（3308）——宿主无 3306 MySQL 时的推荐跑法
 ```
 
 - 依赖缺失时输出 **SKIP + 原因**（不静默跳过、不假装通过）；任一必需套件失败 → 非零退出码。
 - 报告落盘 `e2e/results/acceptance-report.md`。
+- [2026-10-02 实测] `acceptance.mjs` 本就读 `MYSQL_HOST/PORT/USER/PASSWORD` 环境变量，
+  经 `run-with-sandbox.py` 注入沙箱连接信息后 16/16 全绿（含 fileRead/fileWrite 真闭环，
+  secure_file_priv 由沙箱放行）；直连宿主的旧口径在 3306 无 MySQL 时会把 6 个套件 BLOCKED。
 
 **最近一次全量结果（2026-09-20 01:00，本机：MySQL 8.0.28 @3306 + 红队靶场 @8231 均在线）**：
 **12 PASS / 0 BLOCKED / 0 FAIL / 0 SKIP**（12 套件全绿；改到盲注提取链路后复跑仍全绿）

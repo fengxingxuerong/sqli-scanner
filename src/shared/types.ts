@@ -269,6 +269,17 @@ export interface ScanConfig {
     secondMethod?: string;
     secondData?: string;
   };
+  // [批次14 实战 P1-6] 登录编排最小版：标准表单登录自动提交 + 会话过期（401/403/登录
+  // 跳转）自动重登一次并重试原请求（loginFlow.withLoginFlow 消费，挂在 per-scan 客户端
+  // 包装链上）。字段名默认由登录页 HTML 自动探测（detectLoginFields），可显式覆盖。
+  // 诚实边界：OAuth/JWT 刷新、SAML、验证码、JS 加密提交不支持。
+  login?: {
+    url: string; // 登录提交地址（http/https；SSRF/scope 由 per-scan client 逐请求校验）
+    username: string; // 必填：无凭据的登录编排没有意义（包装门按 username 存在与否判定）
+    password?: string;
+    usernameField?: string; // [A-Za-z0-9_-]，缺省自动探测
+    passwordField?: string;
+  };
   // 站内链接爬取深度（对标 sqlmap --crawl=<depth>）：0=关闭，1-3=深度
   crawlDepth?: number;
   // [2026-09-26 UI-REACH] 表单爬取（对标 sqlmap --forms）：默认 false → 只测 URL 参数，
@@ -276,6 +287,14 @@ export interface ScanConfig {
   // 一直读它，且已在 2026-09-13 与 level 解耦（独立开关），但前端此前无控件 → 一整类注入面
   // 对界面用户不可见。仅当 crawlDepth > 0 时才有意义（面板里据此置灰）。
   crawlForms?: boolean;
+  // [2026-10-02 竞品吸收] 参数挖掘总开关（对标 Arjun 参数发现）：对目标 URL 主动探测字典参数
+  // （分组发送+反射定位+二分收敛，请求预算硬顶），发现的隐藏参数自动加入注入点。
+  // 引擎 TargetParser 6.6 步消费；仅 GET/HEAD query 与 POST urlencoded 载体生效。
+  paramMine?: boolean;
+  // [2026-10-02 实战 P1-4] headless 浏览器爬取总开关：Playwright 渲染页面收集 SPA 的
+  // XHR/fetch 接口与 JS 动态链接为注入点（viaBrowser 标记来源）。playwright/浏览器
+  // 不可用时引擎自动降级为 HTTP 爬虫；深度沿用 crawlDepth（0=只渲染入口页）。
+  crawlBrowser?: boolean;
   // 授权范围（[P0-SEC] scope 硬约束）：CIDR/域名/URL 前缀列表；空/缺省 = 不启用。
   // 启用后目标与每一跳重定向都必须落在范围内，越界直接拒发（后端 scopeGuard 消费）。
   scope?: string[];

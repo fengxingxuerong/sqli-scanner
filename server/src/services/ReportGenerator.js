@@ -437,6 +437,12 @@ export class ReportGenerator {
             rules,
           },
         },
+        // [实战分析 P0-2 2026-10-02] 跳过点统计进 SARIF：GitHub Security/DefectDojo 的使用者
+        // 同样需要知道「有多少点没测」（否则 0 结果会被读成 0 风险）。run.properties 是
+        // SARIF 2.1.0 的标准扩展位，旧报告无该字段时省略，不污染 schema。
+        ...(r.summary && r.summary.skippedPoints && Number.isFinite(r.summary.skippedPoints.total) && r.summary.skippedPoints.total > 0
+          ? { properties: { skippedPoints: r.summary.skippedPoints } }
+          : {}),
         results,
       }],
     }, null, 2);
@@ -505,8 +511,35 @@ export class ReportGenerator {
     const constraints = Array.isArray(s.constraints)
       ? s.constraints.filter((x) => typeof x === 'string' && x.trim())
       : [];
-    if (!verdict && !note && !constraints.length) return null;
-    return { verdict, note, constraints };
+    // [实战分析 P0-2 2026-10-02] 跳过点汇总进交付叙事：skippedPoints 此前只有 JSON 整包与
+    // 前端逐点标注可见，导出的 md/HTML/SARIF 里「有多少点没测、为什么没测」不可见——
+    // 甲方验收追问「测全了吗」时对外格式答不上。skipped = { total, byReason }
+    // （scanHelpers.summarizeSkipped 产出；旧报告无此字段时整段照旧，向后兼容）。
+    const sp = s.skippedPoints;
+    const skipped =
+      sp && Number.isFinite(sp.total) && sp.total > 0 && sp.byReason && typeof sp.byReason === 'object'
+        ? { total: sp.total, byReason: sp.byReason }
+        : null;
+    if (!verdict && !note && !constraints.length && !skipped) return null;
+    return { verdict, note, constraints, skipped };
+  }
+
+  // 跳过点的一行人话摘要（md/html 共用取数，防两处口径漂移）。
+  // 原因码 → 现场语义：prefilter=预筛选、static=静态资源、input_validation=输入校验、
+  // user-skip=用户指定跳过；未知原因码原样透出（新增原因码不被静默吞掉）。
+  _skippedText(skipped) {
+    if (!skipped) return null;
+    const LABEL = {
+      prefilter: '预筛选（探针无信号）',
+      static: '静态资源',
+      input_validation: '输入校验（参数在进 SQL 前被拦死）',
+      'user-skip': '用户指定跳过',
+    };
+    const parts = Object.entries(skipped.byReason)
+      .filter(([, n]) => Number.isFinite(n) && n > 0)
+      .map(([k, n]) => `${LABEL[k] || k} ${n}`);
+    if (!parts.length) return null;
+    return `跳过的注入点：**${skipped.total}** 个（${parts.join('、')}）——这些点**未被测试**，不计入「未检出」结论。`;
   }
 
   // ============================================================================
@@ -681,6 +714,9 @@ export class ReportGenerator {
       out.push(`- 结论判定：**${c.verdict === 'inconclusive' ? '不可判定（inconclusive）' : c.verdict}**`);
     }
     if (c.note) out.push(`> ${c.note.replace(/\s*\n\s*/g, ' ')}`);
+    // [实战分析 P0-2 2026-10-02] 跳过点统计进交付叙事（与抑制项并列：都回答「没测的部分」）
+    const skippedLine = this._skippedText(c.skipped);
+    if (skippedLine) out.push(`- ${skippedLine}`);
     if (c.constraints.length) {
       out.push('', '- 本次被抑制的能力（不代表已测试）：');
       for (const x of c.constraints) out.push(`  - ${x}`);
@@ -707,6 +743,12 @@ export class ReportGenerator {
       <h2>${title}</h2>
       ${verdictLine}
       ${c.note ? `<p>${esc(c.note)}</p>` : ''}
+      ${(() => {
+        // [实战分析 P0-2 2026-10-02] 与 _conclusionMarkdown 同源：跳过点统计进交付叙事
+        // （先转义再去掉 markdown 加粗标记 —— 原因码虽是引擎字面量，出口消毒不设例外）
+        const line = this._skippedText(c.skipped);
+        return line ? `<p class="meta">${esc(line).replace(/\*\*/g, '')}</p>` : '';
+      })()}
       ${items ? `<p class="meta">本次被抑制的能力（不代表已测试）：</p><ul>${items}</ul>` : ''}
     </div>`;
   }

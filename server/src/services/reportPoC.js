@@ -205,10 +205,67 @@ export function pocEntries(r, deps = {}) {
         req: `${poc.method || 'GET'} ${poc.url || '-'}`.trim(),
         vulnId: v.id || '',
         label,
+        // [实战分析 P0-3 2026-10-02] 复核预期（检测时真实采样，非预测）：
+        // 布尔/时间通道复放后要靠响应差异判读——此前报告只有请求侧，复核人重放后要
+        // 自己抓真假响应逐字节比对。这里把检测器判定轮采到的样本摘要（trace.pairs /
+        // trace.injectSamples）带进 PoC，逐条 PoC 都可判读「复放后应看到什么」。
+        verify: pocVerifyHint(v),
       });
     }
   }
   return out;
+}
+
+// 响应片段清洗：去换行 + 截断。检测器采样 excerpt 本身 160 字符；进报告的摘录位是
+// 「一行说明」，换行会拆行、超长会淹没正文。内容仍是目标响应（与 evidence 字符串
+// 同级的既有暴露面），md/html 两侧行内文本，不含代码围栏，无围栏逃逸问题。
+function clip(s, max = 100) {
+  return String(s ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
+}
+
+/**
+ * 从漏洞的结构化判定轨迹（trace）摘出「复核预期」一行。
+ * 只读派生：trace 由检测器在判定轮真实采样（BooleanBlindDetector trace.pairs[].true/falseSamples、
+ * TimeBlindDetector trace.injectSamples/baselineSamples，命中/未命中均透传），这里不发包、
+ * 不预测。非布尔/时间技术（union/error 有回显，复放即见）返回 null，不渲染。
+ * @param {object} v 漏洞对象（含 trace）
+ * @returns {string|null}
+ */
+export function pocVerifyHint(v) {
+  const t = v && v.trace;
+  if (!t || typeof t !== 'object') return null;
+  if (t.technique === 'boolean') {
+    // 取首个带采样的判定对（决定性轮次；每轮真/假各并发采 2-3 样本）
+    const pair = Array.isArray(t.pairs)
+      ? t.pairs.find((p) => p && ((Array.isArray(p.trueSamples) && p.trueSamples.length) || (Array.isArray(p.falseSamples) && p.falseSamples.length)))
+      : null;
+    if (!pair) return null;
+    const first = (arr) => (Array.isArray(arr) && arr[0]) || null;
+    const ts = first(pair.trueSamples);
+    const fs = first(pair.falseSamples);
+    if (!ts && !fs) return null;
+    const one = (s, tag) =>
+      s && Number.isFinite(s.len)
+        ? `${tag}响应 len=${s.len}${s.excerpt ? `、片段「${clip(s.excerpt)}」` : ''}`
+        : null;
+    const bits = [one(ts, '真值'), one(fs, '假值')].filter(Boolean);
+    if (!bits.length) return null;
+    return `复核预期（检测时采样）：${bits.join('；')}。真/假响应差异可复现即确认注入。`;
+  }
+  if (t.technique === 'time') {
+    const msOf = (arr) =>
+      (Array.isArray(arr) ? arr : []).filter((s) => s && Number.isFinite(s.ms) && !s.failed).map((s) => s.ms);
+    const injMs = msOf(t.injectSamples);
+    if (!injMs.length) return null;
+    const avg = (a) => a.reduce((x, y) => x + y, 0) / a.length;
+    const parts = [];
+    const baseMs = msOf(t.baselineSamples);
+    if (baseMs.length) parts.push(`基线均值 ${avg(baseMs).toFixed(2)}s`);
+    parts.push(`注入采样 ${injMs.map((x) => `${x.toFixed(2)}s`).join('/')}`);
+    if (Number.isFinite(t.threshold)) parts.push(`判定阈值 ${Number(t.threshold).toFixed(2)}s`);
+    return `复核预期（检测时采样）：${parts.join('，')}。注入采样显著高于阈值即确认注入。`;
+  }
+  return null;
 }
 
 /**
@@ -234,6 +291,8 @@ export function pocMarkdown(r, deps = {}) {
     // 反引号叠成双围栏 —— 现统一由函数负责）
     out.push(`- 请求：${mdCode(it.req)}`);
     if (it.poc.payload) out.push(`- Payload：${mdCode(it.poc.payload)}`);
+    // [实战分析 P0-3 2026-10-02] 复核预期一行：让复放者不用再抓包对拍真/假响应
+    if (it.verify) out.push(`- ${it.verify}`);
     if (it.poc.note) out.push(`- 说明：${it.poc.note}`);
     out.push(`- 生成时间：${it.poc.generatedAt}`, '');
     if (it.poc.curl) {
@@ -270,6 +329,7 @@ export function pocHtml(r, deps = {}) {
         <h3>${esc(it.title)}</h3>
         <p class="meta">请求：<code>${esc(it.method)}</code> ${renderUrlLink(it.poc.url, it.poc.url || '-')}</p>
         <p class="meta">Payload：${it.poc.payload ? `<code>${esc(it.poc.payload)}</code>` : '-'}</p>
+        ${it.verify ? `<p class="meta">${esc(it.verify)}</p>` : ''}
         <p class="meta">${esc(it.poc.note || '')} · 生成于 ${esc(it.poc.generatedAt)}</p>
         ${curl}${raw}
       </div>`;

@@ -18,6 +18,8 @@ import {
   fillPayload,
   replaceAllLiteral,
 } from '../payloads.js';
+// [实战分析 P1 2026-10-02] 二阶 OOB 的 UNC/SMB 向量与一阶共用同一派生（裸主机 + share 名）
+import { deriveUncPath } from './OobDetector.js';
 import { oobReceiver } from '../../core/oobReceiver.js';
 import { ErrorCode, AppError } from '../../core/errors.js';
 // P1-11 收敛：表单/标签属性解析与 TargetParser/crawler 共用单一事实源（含正则缓存）
@@ -189,11 +191,17 @@ export class SecondOrderDetector extends Detector {
     const stored = [];
     for (const cdb of candidates) {
       for (const tpl of SECOND_ORDER_OOB_PROBES[cdb] || []) {
-        // OOB 探针不做 tamper（会破坏回调地址导致回连失败，与一阶 OobDetector 一致）
+        // OOB 探针不做 tamper（会破坏回调地址导致回连失败，与一阶 OobDetector 一致）。
+        // [实战分析 P1 2026-10-02] UNC/SMB 类向量填 {UNC}（裸主机 + share 名，不带端口；
+        // 与一阶 OobDetector.deriveUncPath 同一派生），HTTP 类向量照旧填 {CALLBACK}。
         const probe = replaceAllLiteral(
-          fillPayload(tpl, { orig: point.originalValue || '1' }),
-          '{CALLBACK}',
-          callback
+          replaceAllLiteral(
+            fillPayload(tpl, { orig: point.originalValue || '1' }),
+            '{CALLBACK}',
+            callback
+          ),
+          '{UNC}',
+          deriveUncPath(callbackBase, token)
         );
         await this._store(httpClient, ctx, probe);
         stored.push(probe);

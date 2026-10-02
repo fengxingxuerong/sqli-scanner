@@ -15,7 +15,9 @@ function makeMockWithCallback() {
   return {
     async request(opts) {
       const text = JSON.stringify(opts);
-      const m = text.match(/oob(?:%2[fF]|\/)([A-Za-z0-9_-]+)/i);
+      // [2026-10-02] UNC/SMB 向量走 share 名（oob\<token>，URL 编码为 oob%5Ctoken、
+      // JSON 转义后 oob\\\\token），HTTP 向量走路径（oob/<token>）
+      const m = text.match(/oob(?:%2[fF]|%5[cC]|\/|\\+)([A-Za-z0-9_-]+)/i);
       if (m) oobReceiver.receive(m[1]); // 目标 DBMS 执行带外回连
       return { data: '', status: 200 };
     },

@@ -48,7 +48,10 @@ export function expandBatchTargets(text) {
   // 注意 'raw' 也包含「JSON 解析失败」与「单请求文本」两种形态：前者本就是坏文件，
   // 后者（整份抓包）在批量语境下的正确解读是"逐请求"，但只有一个请求 ⇒ 展开成 1 个 URL 更直观。
   // 关键约束：**不在这里静默吞掉任何一行** —— 过滤掉的行数由调用方点名。
-  if (!format || format === 'raw' || format === 'unsupported' || format === 'openapi-yaml') {
+  // [2026-10-02] `openapi-yaml` 从"按 URL 列表处理"挪进集合分支：YAML 现在能展开
+  // （零依赖子集解析器），展开不了时 parseRequestCollection 会带原因的 warnings，
+  // items 为空 ⇒ 调用方照样会报"批量目标为空"并退出，不存在静默降级。
+  if (!format || format === 'raw' || format === 'unsupported') {
     const lines = text.split(/\r?\n/);
     const items = [];
     let skipped = 0;
@@ -59,12 +62,6 @@ export function expandBatchTargets(text) {
       else skipped++;
     }
     const warnings = [];
-    if (format === 'openapi-yaml') {
-      warnings.push(
-        '识别为 OpenAPI/Swagger 的 **YAML** 形式，本工具不引 YAML 依赖 ⇒ 未展开。'
-        + '请转成 JSON 后重试（Swagger Editor: File → Convert and save as JSON）。',
-      );
-    }
     if (format === 'unsupported') {
       warnings.push('识别为 XML 但不是 Burp 导出（<items>/<item>），已按「一行一个 URL」处理。');
     }

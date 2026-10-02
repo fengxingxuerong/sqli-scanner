@@ -17,7 +17,7 @@ export function printHelp() {
 选项:
   -r, --request-file <file>  导入请求（对标 sqlmap -r）。支持的来源：
                              · Burp/curl 文本报文   · Burp XML 导出   · HAR（浏览器 F12 / Charles）
-                             · Postman 集合(v2.x)   · OpenAPI/Swagger（JSON；YAML 需先转 JSON）
+                             · Postman 集合(v2.x)   · OpenAPI/Swagger（JSON 与 YAML 均可）
                              提取 URL/method/headers/body，覆盖 -u/--method/--body/--cookie/--header
                              集合文件含多个请求时只取第 1 个（会打印共几个，不静默）
   -l, --log-file <file>      从代理/Burp 日志文件批量扫描（对标 sqlmap -l）：
@@ -26,7 +26,8 @@ export function printHelp() {
   -m, --batch <file>         批量扫描文件。两种来源，自动识别（会打印识别结果，不静默）：
                              · URL 列表：每行一个 http(s) 地址
                              · 请求集合：Burp XML 导出 · HAR · Postman 集合(v2.x) ·
-                               OpenAPI/Swagger（JSON；YAML 需先转 JSON）
+                               OpenAPI/Swagger（JSON / YAML；YAML 走零依赖子集解析器，
+                               遇锚点·别名·块标量等构造会如实报"解析不了"并建议转 JSON）
                                ⇒ 展开成 N 个目标，逐个保留 method/headers/body
                                （对标 sqlmap 2.0 的 OpenAPI 目标生成）
                              ⚠ OpenAPI 是**接口定义**不是抓包：参数值取自 example/default，
@@ -52,6 +53,21 @@ export function printHelp() {
                              匹配前先做 HTML 实体 + URL 解码归一化并剔除被回显的 payload。
                              验证：安全点误报 6/7 → 0/7，真阳性保持命中，同点连跑 5 次无偶发。
                              详见 README「已知问题与修复记录」与 e2e/blackbox-lab/
+  --param-mine               参数挖掘（2026-10-02 竞品吸收，对标 Arjun 参数发现；默认关闭零回归）：
+                             对目标 URL 主动探测字典参数（分组发送+反射定位+二分收敛，请求预算硬顶
+                             150），发现的隐藏参数（如 ?debug=1 才触发 SQL 拼接的参数）自动加入注入点。
+                             仅支持 GET/HEAD query 与 POST urlencoded 载体；JSON/XML/multipart 目标跳过
+  --crawl-browser            headless 浏览器爬取（2026-10-02 实战 P1-4；默认关闭零回归）：用 Playwright
+                             （msedge/chrome/自带 chromium 自动探测）渲染页面，收集 SPA 的 XHR/fetch
+                             接口与 JS 动态链接为注入点——React/Vue 等前端渲染目标 HTTP 爬虫看不见
+                             /api/*，此开关补齐。需安装 playwright（devDeps 已含）；不可用时自动
+                             降级为 HTTP 爬虫。深度沿用 --crawl=<depth>（0=只渲染入口页）
+  --login-url <url>          登录编排最小版（2026-10-02 实战 P1-6；默认关闭）：标准表单登录自动提交
+                             （GET 登录页探测用户名/密码输入框名 + hidden/CSRF 透传 → POST 凭据），
+                             会话过期（401/403/登录跳转）自动重登一次并重试原请求。凭据用
+                             --auth user:pass；字段名可用 --login-user-field/--login-pass-field 覆盖。
+                             诚实边界：OAuth/JWT 刷新、SAML、验证码、JS 加密提交不支持——此类目标
+                             请人工取 cookie 走 --cookie 静态注入
   --use-registry             启用声明式 payload 注册表（检测器改用 PAYLOAD_REGISTRY 筛选，受 level/risk/test-filter/test-skip 控制）
   --dump                     启用数据提取（拖库，默认关闭对标 sqlmap 显式 opt-in）
   --dump-all                 全库拖库（对标 sqlmap --dump-all）：枚举所有库后逐库逐表拖，
@@ -117,7 +133,9 @@ export function printHelp() {
   --no-proxy-bypass-local    关闭本地/私网代理豁免（默认豁免：127.0.0.1/内网不走 *PROXY 环境变量，
                              避免系统代理掐断请求后被记成「无漏洞」）
   --auth <user:pass>         Basic 认证（user:password 形式）
-  --auth-type <Basic|Digest>  认证类型（默认 Basic；Digest 走 RFC 7616 挑战-响应，对标 sqlmap）
+  --auth-type <Basic|Digest|NTLM>  认证类型（默认 Basic；Digest 走 RFC 7616 挑战-响应；
+                             NTLM 走 Type1-3 握手（引擎完整实现），凭据用 DOMAIN\\user:pass
+                             形态对齐 sqlmap --auth-cred，domain 可省略）
   --rate <n>                 限速 req/s（默认 50）
   --threads <n>              检测并发数（默认 4）
   -f, --format <fmt>         报告格式 json|html|csv|markdown（默认 json）

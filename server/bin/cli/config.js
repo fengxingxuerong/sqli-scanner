@@ -8,7 +8,7 @@
 // cli.js 保留 import 与 export —— 6 个测试文件从 '../bin/cli.js' 导入 buildConfig 等，
 // 导入路径不变是硬约束。
 // ============================================================================
-import { parseHeaders } from './args.js';
+import { parseHeaders, parseAuth } from './args.js';
 import { logger } from '../../src/core/logger.js';
 import { defaults } from '../../src/config/defaults.js';
 import { PAYLOADS, enableDestructivePayloads } from '../../src/engine/payloads.js';
@@ -173,6 +173,26 @@ export function buildConfig(args) {
   // 注入点扩展开关（本期新增，默认关闭，零回归）：透传给 TargetParser 决定是否把请求头 / path 末段生成注入点
   if (args.testHeaders) config.testHeaders = true;
   if (args.testPath) config.testPath = true;
+  // [2026-10-02 竞品吸收] --param-mine：参数挖掘总开关（TargetParser 6.6 步，Arjun 式发现隐藏参数）
+  if (args.paramMine) config.paramMine = true;
+  // [2026-10-02 实战 P1-4] --crawl-browser：headless 浏览器爬取（TargetParser 6.55 步，SPA 接口发现）
+  if (args.crawlBrowser) config.crawlBrowser = true;
+  // [批次14 实战 P1-6] 登录编排最小版：--login-url 开启，凭据复用 --auth user:pass
+  //（basic/digest 形态解析出的 username/password 正是表单登录要的凭据）。
+  // 字段名默认由登录页 HTML 自动探测（loginFlow.detectLoginFields），显式 flag 可覆盖。
+  if (args.loginUrl) {
+    const cred = parseAuth(args.auth || '', 'basic');
+    if (!cred || !cred.basic || !cred.basic.username) {
+      throw new Error('--login-url 需要 --auth user:pass 提供登录凭据（表单登录无凭据没有意义）');
+    }
+    config.login = {
+      url: args.loginUrl,
+      username: cred.basic.username,
+      password: cred.basic.password,
+      ...(args.loginUserField ? { usernameField: args.loginUserField } : {}),
+      ...(args.loginPassField ? { passwordField: args.loginPassField } : {}),
+    };
+  }
   if (args.technique) {
     const valid = ['union', 'error', 'boolean', 'time', 'stacked', 'oob', 'inline', 'second_order'];
     const list = String(args.technique).split(',').map(s => s.trim().toLowerCase()).filter(t => valid.includes(t));

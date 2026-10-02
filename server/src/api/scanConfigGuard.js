@@ -27,7 +27,7 @@ import {
 } from './scanGuard/scalarsCore.js';
 import { guardScalarsEgress } from './scanGuard/scalarsEgress.js';
 import {
-  guardSecondOrder, guardWafEvasion, guardOob, guardNoSql, guardBlindRobust,
+  guardSecondOrder, guardWafEvasion, guardOob, guardNoSql, guardBlindRobust, guardLogin,
 } from './scanGuard/objectGroups.js';
 import { guardBespokeKeys } from './scanGuard/bespokeKeys.js';
 import { applyBackfill } from './scanGuard/backfill.js';
@@ -50,6 +50,7 @@ export function buildGuardedConfig(cfg, scopeRules) {
   guardOob(config, cfg);
   guardNoSql(config, cfg);
   guardBlindRobust(config, cfg);
+  guardLogin(config, cfg);
   guardBespokeKeys(config, cfg);
 
   // hex / flushSession 两个严格布尔位已随本批调优旋钮一起挪到 api/scanConfigTuning.js

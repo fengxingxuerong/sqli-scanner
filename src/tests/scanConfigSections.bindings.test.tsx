@@ -470,3 +470,59 @@ describe('ScanConfigPanel 分段接线：高级注入面（noCast/hex/flushSessi
     expect(onChange).toHaveBeenLastCalledWith({ noCast: false });
   });
 });
+
+// ============================================================================
+// [批次14 实战 P1-6] login 编排分段（NetworkAuthSection）接线补测
+// ============================================================================
+// 这条分段的典型失败形态不是「控件写错键」，而是**一次输入发两次 patch**：面板是受控的，
+// 两次 patch 闭包里的 config 是同一个旧值 ⇒ 第二次把第一次的键覆盖掉，界面填了用户名+密码、
+// 后端只收到其中一个键，扫描照跑、登录静默不发生。故断言「一次 change = 一次 onChange」
+// 且 patch 里 url/username/password 同现，外加关闭态不留空对象。
+// ============================================================================
+describe('ScanConfigPanel 分段接线：login 编排（自动登录 + 会话过期重登）', () => {
+  let onChange: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    onChange = vi.fn();
+  });
+
+  const renderPanel = (over: Partial<ScanConfig> = {}) => {
+    render(<PanelHarness initial={makeConfig(over)} onChangeSpy={onChange} />);
+    fireEvent.click(screen.getByText(L('advanced')));
+  };
+
+  const urlInput = () => screen.getByLabelText(L('loginUrlLabel')) as HTMLInputElement;
+  const credInput = () => screen.getByLabelText(L('loginCredLabel')) as HTMLInputElement;
+
+  it('未填登录地址时凭据行不出现；填地址（trim 生效）后出现', () => {
+    renderPanel();
+    expect(screen.queryByLabelText(L('loginCredLabel'))).toBeNull();
+    fireEvent.change(urlInput(), { target: { value: ' http://t.local/login ' } });
+    expect(onChange).toHaveBeenCalledWith({ login: { url: 'http://t.local/login' } });
+    expect(screen.queryByLabelText(L('loginCredLabel'))).not.toBeNull();
+  });
+
+  it('一次输入 user:pass 只发一次 patch，且 url/username/password 三键同现', () => {
+    renderPanel({ login: { url: 'http://t.local/login' } });
+    onChange.mockClear();
+    fireEvent.change(credInput(), { target: { value: 'admin:s3cret' } });
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenLastCalledWith({
+      login: { url: 'http://t.local/login', username: 'admin', password: 's3cret' },
+    });
+  });
+
+  it('已有凭据时改地址不丢 username/password（合并而非重建）', () => {
+    renderPanel({ login: { url: 'http://a.local/login', username: 'u1', password: 'p1' } });
+    fireEvent.change(urlInput(), { target: { value: 'http://b.local/login' } });
+    expect(onChange).toHaveBeenLastCalledWith({
+      login: { url: 'http://b.local/login', username: 'u1', password: 'p1' },
+    });
+  });
+
+  it('清空地址 → 整键删（关闭态不留空对象）', () => {
+    renderPanel({ login: { url: 'http://t.local/login', username: 'admin', password: 'p' } });
+    fireEvent.change(urlInput(), { target: { value: '' } });
+    expect(onChange).toHaveBeenLastCalledWith({ login: undefined });
+  });
+});

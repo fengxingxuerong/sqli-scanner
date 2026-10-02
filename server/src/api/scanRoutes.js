@@ -120,6 +120,15 @@ const KNOWN_CFG_KEYS = new Set([
   'dumpWhere', // --where：提取阶段的 WHERE 片段（extractScope 消费；会拼进 SQL，故下方拒分号）
   'unionCols', // --union-cols：固定列数、跳过 ORDER BY 二分（UnionDetector 消费）
   'paramDel', // --param-del：自定义参数分隔符（injection/TargetParser 消费，会进 URL，故下方强校验）
+  // [2026-10-02 竞品吸收] paramMine：参数挖掘总开关（TargetParser 6.6 步消费，Arjun 式
+  // 分组探测+二分收敛）。引擎按 `config.paramMine === true` 严格判定，默认关闭零回归。
+  'paramMine',
+  // [2026-10-02 实战 P1-4] crawlBrowser：headless 浏览器爬取总开关（TargetParser 6.55 步
+  // 消费，SPA 目标的 XHR 接口发现）。严格布尔，默认关闭零回归。
+  'crawlBrowser',
+  // [批次14 实战 P1-6] login：登录编排最小版对象（objectGroups.guardLogin 收紧形状；
+  // 标准表单登录自动提交 + 会话过期自动重登，loginFlow.js 消费）。
+  'login',
   // hex / unionFrom 是这支守卫测试第一次跑就自己抱出来的——我先前手工 triage 时把 `hex`
   // 当成 grep 噪声丢了（`hex` 这个词在 server/src 有上百处无关命中）。教训：判据要能跑，
   // 不能靠人眼看 grep。unionFrom 无需在此再加校验——引擎侧 resolveFromClause 已经过

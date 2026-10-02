@@ -73,13 +73,13 @@ const KNOWN_SAFE = new Map([
   //   第一次是 run-all 的 LABS 清单新增 api-range-lab，第二次是 python 解析改成候选列表。
   //   漂移由"自证③：登记表不得虚胖"抓到（它要求每个登记项都仍真实命中），所以改 run-all
   //   这一带代码时必须同步核对行号 —— 删登记项等于给这条 Windows-only 依赖发免检牌。
-  // [2026-10-02] 行号 186→191 / 254→259：run-all 的 LABS 里插了 batch-lab 条目，整体下移 5 行。
+  // [2026-10-02] 行号 186→195 / 254→263：run-all 的 LABS 里先后插了 batch-lab、login-lab 条目，整体下移 9 行。
   // 这是 TODO §8 记的老毛病（行号锚点一天漂两次）；下面的“自证③”现在会**顺带打印该 kind
   // 当前的真实行号**，下次再漂不用 grep。
-  ['e2e/run-all.mjs:191:exe',
+  ['e2e/run-all.mjs:195:exe',
     '`PY_CANDIDATES` 里的本机默认路径；解析时**逐个真跑 `-c print(1)`** 才算可用（2026-09-28 实测：该路径已是 0xC0000135 死链，只看 existsSync 挡不住），全不可用则如实 SKIP'],
-  ['e2e/run-all.mjs:191:drive', '同上（同一行的 python 默认路径）'],
-  ['e2e/run-all.mjs:259:wincmd',
+  ['e2e/run-all.mjs:195:drive', '同上（同一行的 python 默认路径）'],
+  ['e2e/run-all.mjs:263:wincmd',
     '该 `taskkill` 在 `if (process.platform === "win32" && p.pid)` 之内（**上一行**）—— 平台守卫是跨行的，行级判据看不到，故此处显式登记'],
   ['e2e/waf-lab/compare-real.e2e.mjs:154:wincmd',
     '该行是**错误提示文案**（端口被占时的排查建议），不参与执行；同段紧邻的下一行已给出 POSIX 方案 `lsof -ti :PORT | xargs kill -9`'],

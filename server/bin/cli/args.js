@@ -52,6 +52,12 @@ export function parseArgs(argv) {
     // --test-path：把 URL path 末段作为注入点（path 型注入点）。
     testHeaders: false,
     testPath: false,
+    // [2026-10-02 竞品吸收] --param-mine：参数挖掘总开关（默认关闭零回归）
+    paramMine: false,
+    // [2026-10-02 实战 P1-4] --crawl-browser：headless 浏览器爬取（默认关闭零回归）
+    crawlBrowser: false,
+    // [批次14 实战 P1-6] 登录编排：登录页 URL（默认 null 关闭；凭据复用 --auth）
+    loginUrl: null, loginUserField: null, loginPassField: null,
     checkTor: false,   // 对标 sqlmap --check-tor：校验 Tor 出口后继续
     // —— 攻击操作（对标 sqlmap --os-cmd/--sql-shell/--file-read/--file-write；需 EXPLOIT_ENABLED=1）——
     osCmd: null, sqlShell: null, fileRead: null, fileWrite: null, fileDest: null,
@@ -115,6 +121,14 @@ export function parseArgs(argv) {
     // —— 注入点扩展开关（本期新增，默认关闭，零回归）——
     else if (a === '--test-headers') args.testHeaders = true;
     else if (a === '--test-path') args.testPath = true;
+    // [2026-10-02 竞品吸收] --param-mine：参数挖掘总开关（对标 Arjun 参数发现，默认关闭零回归）
+    else if (a === '--param-mine') args.paramMine = true;
+    // [2026-10-02 实战 P1-4] --crawl-browser：headless 浏览器爬取（SPA 目标 XHR 接口发现）
+    else if (a === '--crawl-browser') args.crawlBrowser = true;
+    // [批次14 实战 P1-6] 登录编排：--login-url（凭据复用 --auth user:pass）
+    else if (a === '--login-url') args.loginUrl = next();
+    else if (a === '--login-user-field') args.loginUserField = next();
+    else if (a === '--login-pass-field') args.loginPassField = next();
     // —— 扫描前风险评估（--advise）：只打印建议，不执行；配 --yes 才继续扫描 ——
     else if (a === '--advise') args.advise = true;
     else if (a === '--yes') args.yes = true;
@@ -426,18 +440,34 @@ export function parseHeaders(str) {
 // 解析 --auth "user:pass" → auth.basic（--auth-type 决定 scheme）
 // 对标 sqlmap --auth-type=Basic|Digest|NTLM|PKI：默认 Basic（既有行为）；
 // Digest → 标 type:'digest'（httpClient 走 RFC 7616 挑战-响应）；
-// NTLM/PKI → 返回带标记但 httpClient 未实现，CLI 层报错提示（见 buildAuth）。
+// [P0-FIX 2026-10-02] NTLM 解禁：引擎 Type1-3 握手早已完整实现（ntlmAuth.js 自带
+// MD4+DES-L、ntlmHandshake.js 按 host 缓存状态，e2e/ntlm-lab 真机验证），
+// 此前 CLI 却按「未实现」拒收——报错文本与引擎现状相矛盾（实战分析 P0-1 查实）。
+// NTLM 凭据形态对齐 sqlmap --auth-cred：DOMAIN\username:password（domain 可省略），
+// 解析结果仍落 auth.basic，buildAuth 会按 --auth-type 挂 type:'ntlm'
+// （ntlmHandshake.cred 的约定形态：auth.type==='ntlm' ? auth.basic）。
+// PKI/未知 scheme 维持不支持（客户端证书走独立的 --client-cert）。
 export function parseAuth(str, type) {
   const t = type ? String(type).toLowerCase() : 'basic';
-  if (t !== 'basic' && t !== 'digest') {
+  if (t !== 'basic' && t !== 'digest' && t !== 'ntlm') {
     return { unsupported: true, type: t };
   }
   if (!str) return undefined;
-  const idx = str.indexOf(':');
+  let s = str;
+  let domain;
+  if (t === 'ntlm') {
+    const bs = s.indexOf('\\');
+    if (bs > 0) {
+      domain = s.slice(0, bs);
+      s = s.slice(bs + 1);
+    }
+  }
+  const idx = s.indexOf(':');
   const cred = idx < 0
-    ? { username: str, password: '' }
-    : { username: str.slice(0, idx), password: str.slice(idx + 1) };
+    ? { username: s, password: '' }
+    : { username: s.slice(0, idx), password: s.slice(idx + 1) };
   if (t === 'digest') return { digest: cred };
+  if (domain) cred.domain = domain;
   return { basic: cred };
 }
 
@@ -548,7 +578,9 @@ export function buildAuth(args) {
   if (args.auth) {
     const pa = parseAuth(args.auth, args.authType);
     if (pa && pa.unsupported) {
-      throw new Error(`--auth-type=${args.authType} 暂不支持（本引擎仅 Basic/Digest；NTLM 需 Type1-3 协商未实现）`);
+      // [P0-FIX 2026-10-02] NTLM 已解禁（引擎 Type1-3 握手完整，ntlm-lab 真机验证），
+      // 不支持面只剩 PKI/未知 scheme —— 客户端证书请走 --client-cert
+      throw new Error(`--auth-type=${args.authType} 暂不支持（本引擎支持 Basic/Digest/NTLM；PKI 类客户端证书请用 --client-cert）`);
     }
     auth = { ...auth, ...(pa || {}) };
     if (args.authType && String(args.authType).toLowerCase() !== 'basic') {

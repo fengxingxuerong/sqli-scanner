@@ -64,8 +64,8 @@ test('③b CI 只要求它确实 provisioning 过的套件（PG/红队是 contin
 // [2026-10-02] 15 → 16：新增 batch-lab（批量编排故障隔离）。
 // ⚠ 这个数字是「防空转」用的（解析不到 id 时上面的判据会拿空集合比 ⇒ 静默放行），
 //   所以加套件必须同步 +1，减套件必须同步 -1 —— 它不是装饰性计数。
-test('④ 不空转：SUITES 解析必须命中 16 个 id（否则上面几条可能在拿空集合比）', () => {
-  assert.equal(IDS.length, 16, `SUITES 解析到 ${IDS.length} 个 id：${IDS.join(', ')}`);
+test('④ 不空转：SUITES 解析必须命中 17 个 id（否则上面几条可能在拿空集合比）', () => {
+  assert.equal(IDS.length, 17, `SUITES 解析到 ${IDS.length} 个 id：${IDS.join(', ')}`);
   assert.ok(IDS.includes('file-read') && IDS.includes('file-write'), '文件读写两个套件不在 SUITES 里 —— 取数口径变了');
 });
 

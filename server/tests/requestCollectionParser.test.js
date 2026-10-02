@@ -403,9 +403,39 @@ test('OpenAPI：缺 servers/host → 明确报无法拼地址，不产出假请�
   assert.match(warnings[0], /servers/);
 });
 
-test('OpenAPI：YAML 形式给出「转成 JSON」的可操作指引，而不是当成 raw 报解析失败', () => {
-  const { format, requests, warnings } = parseRequestCollection('openapi: 3.0.0\ninfo:\n  title: t\npaths: {}\n');
+// [2026-10-02 能力变更] YAML 此前一律「请转 JSON」；现在走 core/yamlLite.js 的零依赖子集
+// 解析器**尝试展开**，只在吃不下时才退回「报原因 + 转 JSON 建议」。
+// ⚠ 这条用例改的是**能力方向**，不是放宽判据：两条子断言（能展开 / 吃不下要报原因 + 建议）
+// 一个都不能少 —— 少了第二条就等于允许"半解"，那会展开出**错的**请求。
+test('OpenAPI：YAML 形式能展开成真请求（零依赖子集解析器）', () => {
+  const yaml = [
+    'openapi: 3.0.0',
+    'info:',
+    '  title: t',
+    'servers:',
+    '  - url: http://api.test',
+    'paths:',
+    '  /user/{id}:',
+    '    get:',
+    '      parameters:',
+    '        - name: id',
+    '          in: path',
+    '          required: true',
+    '          example: 7',
+    '',
+  ].join('\n');
+  const { format, requests } = parseRequestCollection(yaml);
   assert.equal(format, 'openapi-yaml');
-  assert.equal(requests.length, 0);
-  assert.match(warnings[0], /JSON/);
+  assert.equal(requests.length, 1, `YAML 应展开出 1 个请求，实得 ${requests.length}`);
+  assert.match(requests[0].url, /^http:\/\/api\.test\/user\/7$/);
+});
+
+test('OpenAPI：YAML 吃不下时**整体拒绝**并给「原因 + 转 JSON」建议（绝不半解）', () => {
+  const { format, requests, warnings } = parseRequestCollection('openapi: 3.0.0\ninfo:\n  title: t\nx: &anchor\n  a: 1\n');
+  assert.equal(format, 'openapi-yaml');
+  assert.equal(requests.length, 0, '半解会展开出错的请求 ⇒ 必须整体拒绝');
+  assert.ok(
+    warnings.some((w) => /锚点/.test(w) && /JSON|Convert/.test(w)),
+    `缺「原因 + 转 JSON 建议」：${JSON.stringify(warnings)}`,
+  );
 });

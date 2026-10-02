@@ -63,6 +63,9 @@ test('③b 内容守卫：集合目标生成（对标 sqlmap 2.0 OpenAPI 生成�
   assert.match(lab, /请求集合（openapi）/, '丢了「点名识别为 openapi 集合」断言');
   assert.match(lab, /展开 2 个目标/, '丢了「openapi 展开出 2 个目标」断言');
   assert.match(lab, /请求集合（har）/, '丢了「点名识别为 har 集合」断言');
+  // OpenAPI 规范绝大多数以 YAML 流通 ⇒ YAML 这条不通，能力在实战里等于没有
+  assert.match(lab, /请求集合（openapi-yaml）/, '丢了「点名识别为 openapi-yaml」断言');
+  assert.match(lab, /展开 2 个目标/, '丢了「展开目标数」断言');
   // ★ 最关键的一条：POST 的 body 必须保住 —— 保不住就只剩 URL（无 query）⇒ 0 注入点 ⇒ 根本没测
   assert.match(lab, /POST body 未保住/, '丢了「POST body 保住」断言（这是集合展开唯一能假绿的形态）');
 });

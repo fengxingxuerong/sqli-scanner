@@ -127,6 +127,27 @@ export function guardNoSql(config, cfg) {
   }
 }
 
+// [批次14 实战 P1-6] 登录编排最小版（loginFlow.js 消费）：标准表单登录自动提交 +
+// 会话过期自动重登。形状收紧：url 必须 http(s)（SSRF/scope 由 per-scan client 逐请求
+// 校验兜底，这里只做协议白名单 + 长度上限，与 secondOrder.triggerUrls 同口径）；
+// 字段名只认 [A-Za-z0-9_-]（要拼进表单键）；username 必填（scanClient 的包装门也按
+// username 存在与否判定——无凭据的登录编排没有意义）。
+export function guardLogin(config, cfg) {
+  if (cfg.login && typeof cfg.login === 'object') {
+    const l = cfg.login;
+    if (typeof l.url !== 'string' || !/^https?:\/\//i.test(l.url)) return; // 非法形态整体丢弃
+    const fieldRe = /^[A-Za-z0-9_-]{1,64}$/;
+    const optField = (v) => (typeof v === 'string' && fieldRe.test(v) ? v : undefined);
+    config.login = {
+      url: l.url.slice(0, 2048),
+      username: typeof l.username === 'string' ? l.username.slice(0, 256) : '',
+      password: typeof l.password === 'string' ? l.password.slice(0, 256) : '',
+      usernameField: optField(l.usernameField),
+      passwordField: optField(l.passwordField),
+    };
+  }
+}
+
 export function guardBlindRobust(config, cfg) {
   if (cfg.blindRobust && typeof cfg.blindRobust === 'object') {
     const br = cfg.blindRobust;

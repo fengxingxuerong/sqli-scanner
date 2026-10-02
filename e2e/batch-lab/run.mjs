@@ -163,7 +163,7 @@ const note = (s) => console.log(`   ${s}`);
 // ============================================================================
 // 场景 B：`-m` 吃请求集合（OpenAPI / HAR）⇒ 展开成 N 个目标
 // ============================================================================
-const B = { openapi: null, har: null };
+const B = { openapi: null, har: null, yaml: null };
 {
   const base = `http://127.0.0.1:${target.port}`;
   // OpenAPI：两个 GET 端点（对标 sqlmap 2.0 的 OpenAPI 目标生成）
@@ -245,6 +245,54 @@ const B = { openapi: null, har: null };
   }
   B.har = { code: h.code, files: harFiles.length, points: harPoints, vulns: harVulns };
   note(`B 场景：openapi ${B.openapi.files} 份报告/${B.openapi.hits} 条检出；har points=${B.har.points} vulns=${B.har.vulns}`);
+
+  // —— OpenAPI **YAML**（零依赖子集解析器）：规范绝大多数以 YAML 流通，这条通不通
+  //    直接决定上面那个能力在实战里能不能用 ——
+  const yamlText = [
+    'openapi: 3.0.0',
+    'info:',
+    '  title: batch-lab',
+    '  version: 1.0.0',
+    'servers:',
+    `  - url: ${base}`,
+    'paths:',
+    '  /num:',
+    '    get:',
+    '      parameters:',
+    '        - name: id',
+    '          in: query',
+    '          required: true',
+    '          schema:',
+    '            type: integer',
+    '          example: 1',
+    '  /str:',
+    '    get:',
+    '      parameters:',
+    '        - name: name',
+    '          in: query',
+    '          schema:',
+    '            type: string',
+    '          example: alice',
+    '',
+  ].join('\n');
+  const yamlFile = path.join(outDir, 'openapi.yaml');
+  fs.writeFileSync(yamlFile, yamlText, 'utf8');
+  const yOut = path.join(outDir, 'B-yaml');
+  const y = await runCli([
+    '-m', yamlFile, '--out', yOut, '--format', 'json', '--concurrency', '2',
+    '--level', '2', '--risk', '2', '--rate', '0', '--req-rate', '0', '--timeout', '60000',
+  ]);
+  check(/请求集合（openapi-yaml）/.test(y.stderr), `B-yaml: 未点名识别出 openapi-yaml：${y.stderr.slice(0, 400)}`);
+  check(/展开 2 个目标/.test(y.stderr), `B-yaml: 未展开出 2 个目标：${y.stderr.slice(0, 400)}`);
+  check(y.code === 0 || y.code === 2, `B-yaml: 应正常退出（0 或 2），实得 ${y.code}；stderr 尾部：${y.stderr.slice(-600)}`);
+  const yamlFiles = fs.existsSync(yOut) ? fs.readdirSync(yOut).filter((f) => f.endsWith('.json')) : [];
+  check(yamlFiles.length >= 2, `B-yaml: 2 个目标都应有报告落盘，实得 ${yamlFiles.length}`);
+  const yamlHits = yamlFiles.filter((f) => {
+    try { return (JSON.parse(fs.readFileSync(path.join(yOut, f), 'utf8')).vulns || []).length > 0; } catch { return false; }
+  });
+  check(yamlHits.length >= 1, `B-yaml: 展开的目标里应有真检出，实得 ${yamlHits.length}/${yamlFiles.length}`);
+  B.yaml = { files: yamlFiles.length, hits: yamlHits.length };
+  note(`B 场景（YAML）：${B.yaml.files} 份报告 / ${B.yaml.hits} 条检出`);
 }
 
 await target.stop();
@@ -253,8 +301,8 @@ if (fails.length) {
   console.error(`[FAIL] 批量靶场：\n  - ${fails.join('\n  - ')}`);
   process.exit(1);
 }
-console.log('[PASS] 批量靶场：A 故障隔离（3 目标 2 成功 1 需复核，死目标结论 inconclusive）+ B 集合展开（openapi 2 目标 / har POST body 保住）');
+console.log('[PASS] 批量靶场：A 故障隔离（3 目标 2 成功 1 需复核，死目标结论 inconclusive）+ B 集合展开（openapi JSON/YAML 各 2 目标 + har POST body 保住）');
 console.log(`   A 失败点名与 inconclusive：已断言`);
-console.log(`   B openapi：${B.openapi.files} 份报告 / ${B.openapi.hits} 条检出；B har：points=${B.har.points} vulns=${B.har.vulns}`);
+console.log(`   B openapi(JSON)：${B.openapi.files} 份报告 / ${B.openapi.hits} 条检出；B openapi(YAML)：${B.yaml.files} 份 / ${B.yaml.hits} 条；B har：points=${B.har.points} vulns=${B.har.vulns}`);
 console.log('   检出数仅记录，不作对外口径（SQLite 与真 MySQL 不同源）');
 process.exit(0);

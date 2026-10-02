@@ -110,6 +110,10 @@ const LABS = [
   // 死目标结论是 inconclusive 而不是「无漏洞」。不依赖宿主 MySQL ⇒ CI 的
   // e2e-self-contained job（无 DB）能真跑，不会像 sandbox 套件那样被判 SKIP。
   { name: 'batch-lab', desc: '批量编排故障隔离（-m，真 SQLite 靶站 + 死目标）', entry: 'e2e/batch-lab/run.mjs', deps: [] },
+  // [2026-10-02] 登录编排（--login-url）：deps:[] —— 靶站自起（真 SQLite + 真表单登录 +
+  // 会话用 N 次即过期），不需要宿主 DB。带**对照组**（不给 --login-url 必须 0 检出），
+  // 否则"登录成功"证明不了任何事。
+  { name: 'login-lab', desc: '登录编排自动重登（真表单登录 + 会话反复过期，含对照组）', entry: 'e2e/login-lab/run.mjs', deps: [] },
 ];
 
 const PROBES = {

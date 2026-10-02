@@ -5,6 +5,12 @@ import { detectParamEncoding } from './paramEncoding.js';
 import { ErrorCode, AppError } from '../core/errors.js';
 import { httpClient as defaultHttpClient } from '../core/httpClient.js';
 import { LinkCrawler, attrValue } from './crawler.js';
+// [2026-10-02 竞品吸收] 参数挖掘（opt-in paramMine，Arjun 式：分组探测+反射定位+二分收敛）
+import { mineParams } from './discovery/paramMiner.js';
+import { logger } from '../core/logger.js';
+// [实战分析 P1-4 2026-10-02] headless 浏览器爬取（opt-in crawlBrowser）：playwright 仅在
+// collectRendered 内部动态 import —— 未安装时优雅降级，静态引入本模块零副作用
+import { collectRendered, BrowserUnavailable, isStaticEndpoint } from './discovery/browserCrawler.js';
 // [2026-10-01] XML / SOAP body 叶子发现（对标 ghauri XML·SOAP）
 import { parseXmlBody, xmlLeafPaths, getXmlLeaf } from '../core/xmlBody.js';
 
@@ -21,6 +27,8 @@ export class TargetParser {
   constructor(httpClient, crawler) {
     this.httpClient = httpClient || defaultHttpClient;
     this.crawler = crawler || new LinkCrawler({ httpClient: this.httpClient });
+    // [批次13] 测试注入点：headless 收集器替身（null = 用真实 collectRendered）
+    this._browserCollector = null;
   }
 
   /**
@@ -192,6 +200,69 @@ export class TargetParser {
     const crawlDepth = Number(config.crawlDepth) || 0;
     if (crawlDepth > 0) {
       await this._crawlLinks(target, points, crawlDepth);
+    }
+
+    // 6.55) [实战分析 P1-4] headless 浏览器爬取（opt-in config.crawlBrowser）：
+    //   depth=0 也渲染入口页（单页 SPA 的 XHR 接口就是主发现面，不需要链接深度）。
+    //   与 precision 标记互斥同 paramMine：显式指定注入点 = 用户意图优先，浏览器
+    //   预算（真实浏览器启动 + 逐页渲染）不该花在注定被过滤的点位上。
+    if (
+      config.crawlBrowser === true &&
+      target.baseUrl &&
+      !config.onlyPoint &&
+      !points.some((p) => typeof p.originalValue === 'string' && p.originalValue.endsWith('*'))
+    ) {
+      await this._crawlBrowser(target, points, crawlDepth);
+    }
+
+    // 6.6) 参数挖掘（opt-in config.paramMine，2026-10-02 竞品吸收批次，对标 Arjun 参数发现）：
+    //   TargetParser 此前只能发现「已出现在 URL/body/表单里的参数」；隐藏参数（?debug=1 才触发
+    //   SQL 拼接的那类）整体漏检。开启后对目标 URL 做一轮分组探测（预算内收敛），挖到的参数
+    //   合成注入点（originalValue '1'，mined: true 标记来源，报告/排查可见）。
+    // 边界（详见 paramMiner.js 文件头）：
+    //   · 只对主目标 URL 挖一次，不随爬虫扩散（请求预算优先收敛，crawler 发现的新 URL 的参数
+    //     已被 _crawlLinks 被动收录，属另一层发现）。
+    //   · 载体只认 GET/HEAD query 与 POST/PUT/PATCH urlencoded；JSON/XML/multipart 跳过——
+    //     注入侧对这类载体没有「新增键合入」的渲染路径，产出点位会发畸形请求。
+    //   · 用户精确标记（值尾 *）或 onlyPoint 单点重测时跳过：显式指定注入点 = 用户意图优先，
+    //     挖掘的请求预算不该花在注定被 _applyOnlyPoint/step7 过滤掉的点位上。
+    //   · 挖掘失败只 log 不抛：发现阶段是锦上添花，不能把主扫描拖死。
+    if (config.paramMine === true && target.baseUrl && !config.onlyPoint) {
+      const hasPrecisionMark = points.some(
+        (p) => typeof p.originalValue === 'string' && p.originalValue.endsWith('*')
+      );
+      const m = String(target.method || 'GET').toUpperCase();
+      const declaredHeaders = target.headerParams || {};
+      const declaredCtKey = Object.keys(declaredHeaders).find((k) => /^content-type$/i.test(k));
+      const declaredCt = declaredCtKey ? String(declaredHeaders[declaredCtKey]) : '';
+      const queryCarrier = m === 'GET' || m === 'HEAD';
+      const bodyCarrier =
+        (m === 'POST' || m === 'PUT' || m === 'PATCH') &&
+        target.jsonBody == null &&
+        typeof target.xmlBody !== 'string' &&
+        !/multipart|json/i.test(declaredCt);
+      if (!hasPrecisionMark && (queryCarrier || bodyCarrier)) {
+        try {
+          const result = await mineParams({
+            baseUrl: target.baseUrl,
+            method: target.method || 'GET',
+            bodyParams: target.bodyParams || {},
+            headers: target.headerParams || {},
+            client: this.httpClient, // per-scan 视图（discover 入口已注入）：限速/SSRF/scope 全程生效
+            existingParams: points.map((p) => p.param),
+            log: (msg) => logger.info(msg),
+          });
+          const loc = queryCarrier ? 'url' : 'body';
+          const have = new Set(points.map((p) => p.param));
+          for (const name of result.names) {
+            if (have.has(name)) continue;
+            points.push(createInjectionPoint(loc, name, '1', { mined: true }));
+          }
+        } catch (e) {
+          // 挖掘是增强能力，任何异常都不阻塞主扫描（假阴性只少测隐藏参数，不破坏既有检出）
+          logger.warn(`[paramMine] 挖掘失败（不影响主扫描）：${e?.message || e}`);
+        }
+      }
     }
 
     // 6.8) 编码参数识别（base64 / 0x-hex）—— 必须在所有注入点生成之后统一打标，
@@ -447,15 +518,60 @@ export class TargetParser {
   // 单页爬取失败跳过不阻断；与既有 points 合并去重（同 URL+参数不重复加）。
   async _crawlLinks(target, points, depth) {
     const config = target.config || {};
-    // 既有点的 key 集合，用于合并去重
-    const seen = new Set(points.map((p) => this._pointKey(p, target.baseUrl)));
     let result;
     try {
       result = await this.crawler.crawl({ baseUrl: target.baseUrl, config, depth });
     } catch {
       return; // 爬取失败/超时不阻断发现
     }
-    const { pages = [], links = [] } = result;
+    this._mergeCrawlFindings(target, points, result || {}, config);
+  }
+
+  // [实战分析 P1-4 2026-10-02] headless 浏览器爬取（opt-in config.crawlBrowser）：
+  //   SPA 目标（React/Vue/Angular）的静态 HTML 只有空壳——路由在前端、数据接口靠
+  //   XHR/fetch，HTTP 爬虫看不见。用 Playwright 渲染后收集：渲染后链接（JS 动态插入
+  //   的也算）、页面实际发出的同域请求（接口端点，SPA 的主发现面）、渲染后表单
+  //   （crawlForms 开启时经同一表单解析合并）。
+  //   降级语义：playwright 未安装 / 无可用浏览器 → 回落 HTTP 爬虫（不阻断发现阶段，
+  //   warn 一条说明）。depth 语义与 crawlDepth 一致：0 = 只渲染入口页（单页 SPA 就够），
+  //   1+ 追进同域链接。测试经 _browserCollector 注入替身。
+  async _crawlBrowser(target, points, depth) {
+    const config = target.config || {};
+    const collect = this._browserCollector || collectRendered;
+    let result;
+    try {
+      result = await collect({
+        baseUrl: target.baseUrl,
+        depth,
+        maxPages: 10,
+        pageTimeoutMs: 15000,
+        log: (msg) => logger.info(msg),
+      });
+    } catch (e) {
+      const reason = e instanceof BrowserUnavailable ? e.message : `${e?.message || e}`;
+      logger.warn(`[crawlBrowser] 不可用，降级为 HTTP 爬虫：${reason}`);
+      return this._crawlLinks(target, points, depth);
+    }
+    this._mergeCrawlFindings(target, points, result || {}, config);
+  }
+
+  // 爬取发现 → 注入点的共享合并（HTTP 爬虫与浏览器爬取同一口径，防两处漂移）：
+  //   ① links（含渲染后链接页）的 query 参数 → url 注入点
+  //   ② pages 的表单（仅 crawlForms 开启时解析，语义与 _crawlForms 一致）
+  //   ③ [批次13] endpoints（浏览器捕获的 XHR/fetch 端点）：带 query 的同域接口 → url
+  //      注入点（viaBrowser: true 标记来源；无 query 的端点没有可放注入值的位置，跳过）
+  /**
+   * 合并爬取产物（链接页 / 渲染后 URL / 接口端点）进注入点列表。
+   * 解构默认值在 checkJs 下会把三个键推成 `never[]`（调用方传真数组即红），
+   * 故这里必须显式声明 found 的形状，而不是在调用侧断言。
+   * @param {object} target
+   * @param {Array<object>} points
+   * @param {{pages?: Array<{url: string, html: string}>, links?: string[], endpoints?: string[]}} [found]
+   * @param {object} [config]
+   */
+  _mergeCrawlFindings(target, points, { pages = [], links = [], endpoints = [] } = {}, config) {
+    // 既有点的 key 集合，用于合并去重
+    const seen = new Set(points.map((p) => this._pointKey(p, target.baseUrl)));
     // 1) 所有发现的同域 URL（含未抓取链接页）的 query 参数 → url 注入点
     for (const rawUrl of links) {
       try {
@@ -495,6 +611,24 @@ export class TargetParser {
             );
           }
         }
+      }
+    }
+    // 3) [实战分析 P1-4] XHR/fetch 接口端点 → url 注入点（SPA 主发现面）
+    for (const rawUrl of endpoints) {
+      try {
+        const u = new URL(rawUrl);
+        // 静态资源过滤在合并层再来一遍：不信任上游收集器（注入式替身可能不过滤）
+        if (isStaticEndpoint(u)) continue;
+        for (const [k, v] of u.searchParams.entries()) {
+          const key = `url:${rawUrl}:${k}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          points.push(
+            createInjectionPoint('url', k, v, { actionUrl: rawUrl, crawledUrl: rawUrl, viaBrowser: true })
+          );
+        }
+      } catch {
+        // 端点 URL 解析失败则跳过
       }
     }
   }

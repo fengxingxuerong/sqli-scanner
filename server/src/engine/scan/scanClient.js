@@ -5,6 +5,8 @@
 // =====================================================================
 import { withSafeUrl } from '../../core/safeUrlKeeper.js';
 import { withCsrf } from '../../core/csrfKeeper.js';
+// [批次14 实战 P1-6] 登录编排：会话过期自动重登（挂在 csrf 之后——登录表单也可能要 csrf）
+import { withLoginFlow } from '../../core/loginFlow.js';
 import { DirectConnector } from '../../core/directConnector.js';
 
   // 连接器选择：direct 目标用 DirectConnector 直连数据库，其余用统一 HttpClient 单例。
@@ -49,6 +51,17 @@ export function getScanClient(scanId, target) {
           csrfMethod: cfg.csrfMethod,
           refreshFreq: cfg.csrfRefreshFreq,
         }));
+      }
+      // [批次14 实战 P1-6] 登录编排（cfg.login.url 显式开启）：标准表单登录自动提交 +
+      // 会话过期（401/403/登录跳转）自动重登一次并重试原请求。挂在 csrf 之后：登录
+      // 表单本身的 hidden csrf 字段由 loginFlow 自行探测透传。登录请求走同一 per-scan
+      // client —— SSRF/scope/限速逐请求照常生效。凭据错误时重登失败即放行原响应
+      // （authLost 统计按既有口径收尾），不会死循环。
+      if (
+        cfg.login && typeof cfg.login.url === 'string' &&
+        /^https?:\/\//i.test(cfg.login.url) && cfg.login.username
+      ) {
+        view = /** @type {any} */ (withLoginFlow(view, cfg.login));
       }
       // [P2-5] --force-ssl / --ignore-redirects：协议层策略注入每个请求（对标 sqlmap）。
       // forceSsl：目标 http:// 强制升级 https（httpClient.request 消费改写）；

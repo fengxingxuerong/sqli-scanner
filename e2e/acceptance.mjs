@@ -364,6 +364,26 @@ const SUITES = [
     },
   },
   {
+    // [2026-10-02] 登录编排（--login-url）。为什么进 acceptance：认证此前只有「静态注入 cookie」
+    // 与「会话失效**检测**」（scanValidityGuard 报 authLost 后让人手工重取）—— token 会过期的
+    // 目标扫到一半全变 401 ⇒ 后半程全判「不可注入」，且**报不出来原因**。本模块补自动重登+重试。
+    // 判据读文本：套件自带**对照组**（不给 --login-url 必须 0 检出），A/B 两条一起才算数 ——
+    // 只跑 A 的话，靶站若不真校验会话，它会天然绿。
+    id: 'login-lab',
+    title: '登录编排自动重登（真表单登录 + 会话反复过期，含「不给登录则 0 检出」对照）',
+    needs: [],
+    run: () => run('node', ['e2e/login-lab/run.mjs'], {}),
+    assert: (out) => {
+      const pass = (out.match(/\[PASS\]/g) || []).length;
+      const fail = (out.match(/\[FAIL\]/g) || []).length;
+      return {
+        facts: { PASS: pass, FAIL: fail },
+        pass: pass >= 1 && fail === 0,
+        reason: fail ? '登录编排断言未通过（详见 run.mjs 输出）' : pass ? null : '解析不到 [PASS] 行（套件没真跑）',
+      };
+    },
+  },
+  {
     // [2026-09-23] OOB 带外通道此前**只在 run-all.mjs 里**（本地手工跑），acceptance 12 套件里没有它
     // —— 于是这条「唯一能在无回显+WAF 场景下可达」的通道从来没有常态化验收：
     // 改坏了不会红，只能靠人记得去跑。故纳入门禁。

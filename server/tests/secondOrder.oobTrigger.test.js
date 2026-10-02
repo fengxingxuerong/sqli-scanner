@@ -40,7 +40,8 @@ function makeOobMock({ param = 'username', triggerOob = true } = {}) {
       if (opts.method === 'GET') {
         state.gets++;
         if (triggerOob) {
-          const m = String(state.stored).match(/oob(?:%2[fF]|\/)([A-Za-z0-9_-]+)/i);
+          // [2026-10-02] 兼容 UNC share 形态（oob\<token>，URL 编码 oob%5Ctoken / JSON 转义 oob\\token）
+          const m = String(state.stored).match(/oob(?:%2[fF]|%5[cC]|\/|\\+)([A-Za-z0-9_-]+)/i);
           if (m) fakeReceiver.receive(m[1]); // 模拟目标 DBMS 执行带外回连
         }
         return { data: '<html>triggered</html>', status: 200 };
@@ -142,9 +143,12 @@ test('oobTrigger 开启 + oob 启用 → 使用 OOB 探针，收到回调判定�
   assert.equal(res.dbms, 'MySQL');
   assert.ok(res.evidence.includes('OOB'), 'evidence 应含 OOB 外带确认');
   assert.ok(Array.isArray(res.payloads) && res.payloads.length > 0);
-  // 探针为 OOB 外带语句（非报错型），且嵌入带外回调路径
+  // 探针为 OOB 外带语句（非报错型），且嵌入带外回调路径（HTTP 的 /oob/ 或 SMB 的 \oob\）
   assert.ok(res.payloads.some((p) => p.includes('LOAD_FILE')), `探针应含 OOB 原语: ${res.payloads[0]}`);
-  assert.ok(res.payloads.some((p) => p.includes('/oob/')), '探针应嵌入带外回调路径');
+  assert.ok(
+    res.payloads.some((p) => p.includes('/oob/') || p.includes('\\oob\\')),
+    '探针应嵌入带外回调路径（HTTP 或 SMB share 形态）'
+  );
   // 存储与触发均已发生
   assert.ok(state.posts > 0 && state.gets > 0);
   // 与现有检测器一致：同步标记注入点

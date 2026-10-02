@@ -116,6 +116,15 @@ export function guardScalarsCore(config, cfg, scopeRules) {
   if (dumpDatabaseConcurrency !== undefined) config.dumpDatabaseConcurrency = dumpDatabaseConcurrency;
   const crawlForms = pickBool(cfg, 'crawlForms');
   if (crawlForms !== undefined) config.crawlForms = crawlForms;
+  // [2026-10-02 竞品吸收] paramMine 参数挖掘总开关（TargetParser 6.6 步按 === true 严格判定）。
+  // 走 pickBool 而非兜底透传（与 compactErrorTemplates 同理由）：`1`/`"true"` 若被收下，
+  // 引擎侧不生效，又成「白名单有、引擎收不到」的假开关。
+  const paramMine = pickBool(cfg, 'paramMine');
+  if (paramMine !== undefined) config.paramMine = paramMine;
+  // [2026-10-02 实战 P1-4] crawlBrowser：headless 浏览器爬取总开关（TargetParser 6.55 步
+  // 按 === true 严格判定），与 paramMine 同口径。
+  const crawlBrowser = pickBool(cfg, 'crawlBrowser');
+  if (crawlBrowser !== undefined) config.crawlBrowser = crawlBrowser;
   // [B-perf] skip-static 参数预筛选（对标 --skip-static）：boolean 化透传，默认关（opt-in）
   const skipStatic = pickBool(cfg, 'skipStatic');
   if (skipStatic !== undefined) config.skipStatic = skipStatic;

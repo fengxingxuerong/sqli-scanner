@@ -4,6 +4,153 @@
 
 ## [Unreleased]
 
+### 2026-10-02 批次（第八批）· headless 浏览器爬取（crawlBrowser，实战分析 P1-4）
+
+SPA 目标（React/Vue/Angular）的静态 HTML 只有空壳——路由在前端、数据接口靠 XHR/fetch，
+HTTP 爬虫（6 组标签属性正则）看不见 `/api/*`。新增 opt-in 的 `crawlBrowser`：
+
+- `engine/discovery/browserCrawler.js`（新）：Playwright 渲染页面后收集三类发现——
+  ① 渲染后同域链接（JS 动态插入的也算）；② 页面实际发出的 XHR/fetch 请求（**SPA 主
+  发现面**：接口 query 参数直接成为注入点，无需人工抓包导 HAR）；③ 渲染后 DOM 的
+  HTML（crawlForms 表单解析复用，JS 渲染出来的表单也收）。浏览器探测沿 e2e 既定模式
+  （msedge → chrome → 自带 chromium），Playwright 动态 import（未安装/无浏览器 →
+  **优雅降级 HTTP 爬虫**，不阻断发现）。资源护栏：总页数预算 10、每页导航超时 15s、
+  只入队同域、browser finally 关闭。
+- 合并层统一：`_crawlLinks` 与 `_crawlBrowser` 共享 `_mergeCrawlFindings`（链接/表单/
+  端点三源同一口径防漂移）；端点静态资源过滤在合并层兜底重做（不信任上游收集器）。
+  端点点位带 `viaBrowser: true` 溯源；无 query 的端点跳过（无可放注入值的位置）。
+- 四层接线：TargetParser 6.55 步（与 precision 标记/onlyPoint 互斥）+ REST 白名单
+  pickBool 严格布尔 + CLI `--crawl-browser` + 面板爬虫分段开关（zh/en）。
+- 测试 9 条：纯函数（同域/静态/去重/协议）、注入式集成（viaBrowser 溯源、无参端点、
+  默认关闭零调用、onlyPoint/精确标记跳过）、降级路径、**真浏览器 smoke**（本地 SPA 页
+  JS fetch `/api/items?page=1` → 端点捕获成功，浏览器缺失按 SKIP 口径早退不假绿）。
+
+---
+
+### 2026-10-02 批次（第七批）· 实战小刀：acceptance 沙箱口径固化 + OOB UNC 通道修正
+
+- **`acceptance:sandbox`**：`acceptance.mjs` 本就读 `MYSQL_*` 环境变量，经
+  `run-with-sandbox.py` 包装（隔离 MySQL @3308）后 16/16 全绿——固化为一等 npm script
+  并写入 README，宿主无 3306 MySQL 时的推荐跑法（直连口径 6 套件 BLOCKED）。
+- **OOB UNC/SMB 通道修正**（实战分析 §2-P1-5）：UNC 类向量（MySQL/MariaDB/TiDB
+  LOAD_FILE、SQL Server xp_dirtree）此前内嵌 `host:port` 回调地址——Windows UNC 主机位
+  不含 `:port`，真实目标上永远解析不了（报文发了但物理上不可能回连）。模板改用 `{UNC}`
+  占位符（裸主机 + share 名 `<host>\oob\<token>`，token 挪进 share 供外部 SMB 监听
+  Responder/Inveigh 读出），HTTP 类向量（PG COPY PROGRAM / Oracle UTL_HTTP / MSSQL
+  ping）不变；一阶 OobDetector 与二阶 SecondOrderDetector 同批修正。
+- **通道边界显式化**：投放 UNC 向量时引擎 log 一次提示（内置接收端只听 HTTP+DNS，
+  收回 token 的三条路径）；面板 OOB 分段新增 `oobSmbBoundary` 提示（zh/en）；README
+  「诚实边界」补通道边界说明。
+- **前端 flaky 定性**：`scanConfig.auth.test.tsx` 的一次偶发失败（facts 采集期）定性为
+  环境性根因——`@esbuild/win32-x64` 平台二进制被 npm 包装器装成 POSIX 形态（无 .exe），
+  `npm approve-scripts esbuild` + 重装恢复；用例连跑 8 次全绿，未改测试代码。
+
+新增 6 条单测（oobUnc.test.js）；OOB 全家桶 36 用例全绿（含一阶/二阶/接收端回归）。
+
+---
+
+### 2026-10-02 批次（第五批）· 竞品吸收：paramMine 参数挖掘（对标 Arjun）+ 扫描预设（对标 ZAP）
+
+调研 sqlmap/Arjun/Nuclei/ZAP 等同类项目并核差距后落地两项（全记录见
+`docs/竞品对照与吸收-2026-10-02.md`）：
+
+- **paramMine 参数挖掘**（opt-in `--param-mine` / 面板爬虫分段开关 / REST `paramMine`）：
+  TargetParser 只能发现「已出现在 URL/body/表单里的参数」，隐藏参数（`?debug=1` 才进 SQL
+  的那类）整体漏检。开启后对目标 URL 主动探测：内置 ~260 条字典按 30/组分组发送 →
+  反射定位/响应差异 → 二分收敛 → 单参复核；请求预算硬顶 150，全回显/过噪目标防噪护栏。
+  载体只认 GET/HEAD query 与 urlencoded POST；JSON/XML/multipart、精确标记（值尾 *）、
+  onlyPoint 均保守跳过。挖掘点带 `mined: true` 溯源标记。
+- **扫描预设 quick/standard/deep**：面板折叠头常驻 chips，一击切换检测强度
+  （= 既有键的 patch 快照，零新配置键、后端零改动；standard 与 DEFAULT_CONFIG 对齐由
+  测试钉死；刻意不含 paramMine——显式 opt-in 不被预设顺带打开）。
+
+新增 17 用例（paramMiner 11 + scanPresets 6）；靶场电池全绿（pentest 11/11、
+real-mysql 10/10、fullchain 全链路、api-range 46/46、acceptance 16/16 经沙箱包装）。
+
+### 2026-10-02 批次（第六批）· 实战 P0 三件：NTLM 解禁 / 跳过统计进交付格式 / PoC 复核预期
+承接同日《实战视角全面分析》（批次 10）的 P0 清单，三件小刀快跑（合计 ≈2 天估）：
+
+- **NTLM CLI 解禁**（P0-1）：引擎 NTLMv1 Type1-3 握手早已完整实现（`ntlmAuth.js` 自带
+  MD4+DES-L、`ntlmHandshake.js` 按 host 缓存，`e2e/ntlm-lab` 真机验证），CLI 却按
+  「未实现」拒收——报错与引擎现状矛盾。`parseAuth` 放开 ntlm，凭据形态对齐
+  sqlmap `--auth-cred`（`DOMAIN\user:pass`，domain 可省）；PKI 维持不支持（走 `--client-cert`）。
+  `--auth-type` 帮助文本同步。REST 侧 auth 对象本就整体透传，无需改。
+- **skippedPoints 进交付格式**（P0-2）：跳过点统计（有多少点没测、为什么没测）此前只有
+  JSON 整包与前端逐点标注可见，导出的 md/HTML/SARIF 客户看不到。现于「结论可信度与
+  本次抑制项」节渲染一行人话摘要（原因码→现场语义：预筛选/静态资源/输入校验/用户跳过），
+  SARIF 挂 `run.properties.skippedPoints`（0 结果 ≠ 0 风险的防线）；无跳过时零噪声、
+  旧报告向后兼容。
+- **布尔/时间通道 PoC 附「复核预期」**（P0-3）：这两类通道的 PoC 复放后要靠响应差异判读，
+  此前报告只有请求侧。现把检测器判定轮的**真实采样**（`trace.pairs[].true/falseSamples`、
+  `trace.injectSamples/baselineSamples`，非预测、不发包）摘成一行进每条 PoC：
+  真假响应 len+片段 / 基线均值+注入采样+判定阈值。union/error 等回显类技术不渲染（零噪声）。
+
+新增 26 条单测（cli.auth 12 + report.skippedPoints 7 + report.pocVerify 7）。
+教训留痕：help.js 帮助文本写裸 `DOMAIN\user` 使 `\u` 成为非法 Unicode 转义、
+CLI 全族测试崩——帮助文本里的反斜杠必须写 `\\`（esbuild 同日出现平台二进制缺失，
+`npm install` 恢复，与本仓代码无关）。
+
+---
+
+### 2026-10-02 批次（第五批）· 登录编排收口（批次14 在制品）+ 真靶场对照组 + 一处断言缺口
+
+接手上一会话的**在制品**（批次14 实战 P1-6 登录编排）：`loginFlow.js` 与两个测试文件
+已写完但**新文件未 `git add`**（本仓硬规则：新文件必须先 add 再跑门禁，否则 `refs:check`
+与其它门禁看到的不是同一份工作区）。本批做三件事：补断言缺口、建真靶场、收口接线。
+
+**① 缺陷注入抓到一处真缺口（不是形式主义）**
+
+把 `performLogin` 的「响应仍是登录页 ⇒ 登录失败」这条启发式去掉（`stillOnLogin = false`），
+**12 条用例全绿**。即：`ok` 这个返回值**没有任何测试直接钉住** —— 已有用例走的是包装层，
+「凭据错误不重试」那条断言（`res.status === 401`）在注入后恰好仍成立，判不出来。
+后果很具体：凭据错 / 被验证码打回时仍判「登录成功」⇒ 白重试一次，且 `withLoginFlow`
+拿不到「重登失败」信号去收尾。
+
+- 补 `performLogin` 三条直测：正确凭据 ok=true、**响应仍是登录页 ok=false 且 detail 点名原因**、
+  401 ok=false。注入复验：**杀**。
+- 另注入「重登失败也重试（会死循环）」⇒ 杀 1 条（这条原本就有覆盖）。
+
+**② 真靶场 `e2e/login-lab`（deps:[]）—— 带对照组**
+
+- 靶站：真 SQLite（sql.js）+ **真表单登录**（hidden csrf + 文本/密码框 + urlencoded 提交 +
+  Set-Cookie）+ **会话用 6 次即过期** ⇒ 强制走「自动重登」路径。真 CLI 进程 spawn。
+- 场景 A（给 `--login-url` + `--auth`）：退出码 2、**14 次成功自动重登**、
+  靶站计数 200=79 / 401=125、points=1 **vulns=2**。
+- 场景 B（**对照组**，不给 `--login-url`）：**0 检出**。
+  ⚠ 这条反例是套件的命根子 —— 靶站若不真校验会话，A 会天然绿，整套件等于没验任何东西。
+- 三处接线：`e2e/run-all.mjs` LABS（CI `e2e-self-contained` + `ci-local`）、
+  `e2e/acceptance.mjs` SUITES（第 17 套件）、`server/tests/loginFlow.wiring.test.js`（7 条源码文本守卫：
+  包装点 / guard 链 / REST 白名单 / CLI 三开关 / 前端类型 / **不得自建 HttpClient** / **凭据不落日志**）。
+
+**③ 顺带修**：`ciWindowsOnly` 登记表行号又漂了（我插 login-lab 条目 ⇒ 191→195、259→263）。
+上一批给守卫加的「**报失效时直接打印该 kind 当前的真实行号**」当场兑现：一眼拿到 195/263，
+一次改对（此前要人工 grep）。
+
+**④ 数字**：服务端 **2741**（2740 pass / 0 fail / 1 skip）· 前端 **485/485**（58 文件）· 门禁链全 0。
+
+---
+
+### 2026-10-02 批次（第四批）· OpenAPI **YAML** 目标生成（零依赖子集解析器）
+
+承接第三批刚上线的集合目标生成：**OpenAPI 规范绝大多数以 YAML 流通**（Swagger Editor /
+springdoc / FastAPI 默认导出都是 YAML），而解析器只认 JSON ⇒ 新能力在实战里等于没通。
+
+- `server/src/core/yamlLite.js`（新）：零依赖 YAML **子集**解析器。支持嵌套 map、
+  序列、`- key: value` 的序列项、行内流式 `[a,b]` / `{a:b}`、引号标量、数字/布尔/null、
+  URL 里的 `#`（不是注释）、文件开头的 `---`。
+- ⚠ **硬边界：解析不了就整体拒绝并给原因**（锚点 `&` / 别名 `*` / 标签 `!!` / 块标量
+  `|` `>` / 合并键 `<<` / TAB 缩进 / 复杂键 / 多文档）。**半解的 YAML 会展开出错的请求**
+  （少参数、少路径）⇒ 静默少测目标，比明确说"请转 JSON"危险得多。
+- `requestCollectionParser` 的 `openapi-yaml` 分支由「一律请转 JSON」改为「尝试展开，
+  失败则报原因 + 保留转 JSON 建议」；`batchTargets` 把该格式从 URL 列表分支挪进集合分支。
+- 服务端 **19 条**新单测（13 解析器 + 6 展开层）。**缺陷注入 2 次杀**：序列项不合并后续
+  同项字段（杀 3）、摘掉锚点规则（杀 1）。
+- 真靶场：`e2e/batch-lab` 增加 YAML 场景 ⇒ 展开 2 目标、**2 条真检出**、报告落盘 2 份。
+- 口径订正（交付文档 §7.8）：per-scan **独立令牌桶早就有了**（`forScan` 按 scanId 建桶），
+  真正缺的是**跨目标动态份额再分配** —— 上一版文档把这两件事混写成"独立桶未做"，已改。
+
+---
+
 ### 2026-10-02 批次（第三批）· 批量编排收口（故障隔离）+ 集合目标生成（对标 sqlmap 2.0 OpenAPI）+ 「0 注入点」假阴性修复
 
 来源：接手上一会话的**在制品**（`batchPool.js` 已写、`cli.batch.test.js` 与 `e2e/batch-lab/`
