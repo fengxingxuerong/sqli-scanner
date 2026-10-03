@@ -4,6 +4,28 @@
 
 ## [Unreleased]
 
+### 2026-10-04 批次 K · CI #143 新红定位：前端变异目标跑在没有前端依赖的 job 里
+
+上一批把 CI 从「lint 红」修绿了，`test-server` 却**新红**（#143）：
+
+```
+✗ 基线未通过：src/shared/htmlSanitize.ts —— 先修测试再跑变异
+Process completed with exit code 3
+```
+
+- **真根因（看 job 配置 + 实录，不猜）**：`test-server` job 只 `cd server && npm ci`，
+  **没有装根目录 node_modules** ⇒ `./node_modules/vitest/vitest.mjs` 不存在 ⇒
+  批次 J 新接进来的 frontend runner 连基线轮都起不来。
+  此前 mutation 门禁只有 server 目标，所以这个依赖面缺口一直没暴露 —— 属于「批次 J 没改 CI」留下的半截。
+- **修法（按职责分工，不靠加安装）**：给 `mutation-check.mjs` 加 `--runner=server|frontend`，
+  前端目标挪到**已经 `npm ci` 过**的 `test-frontend` job；`test-server` 限定 `--runner=server`。
+  比在 server job 里补装一套前端依赖快，且 job 职责不被稀释。
+- **顺手补上一个真实缺陷**：脚本基线失败时把 `stdio: 'pipe'` 的输出**全吞了**，日志里一行测试输出都没有。
+  这次只能把「文件名大小写 / 超时 / 依赖缺失」逐个排除才定位 —— 已改为打印测试输出尾部 40 行 + 运行器
+  与常见原因提示。**门禁失败必须留下现场**。
+- **验证**：`--list --runner=server` = 14 个目标 / `--runner=frontend` = 2 个；非法 runner ⇒ exit 2；
+  **缺陷注入复验**：把过滤条件改成恒真 ⇒ `--runner=server` 变成 16（含前端）⇒ 注入后从备份还原，`cmp` 一致。
+
 ### 2026-10-04 批次 I · CI `test-frontend` 偶发红定位与修复（FLAKY-FIX）+ 复评结论更正
 
 **先更正我自己复评里的一个错判**：v2 §四 #6 写「`--crawl` 是空壳，引擎层 `grep -c crawl` = 0」——

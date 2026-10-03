@@ -219,6 +219,14 @@ jobs:
       # [修复] 加 --coverage 使 vitest.config.ts 的 thresholds(88/77/67/88) 真正在 CI 生效
       - run: npx vitest run --coverage --reporter=verbose
         name: Frontend tests (with coverage gate)
+      # [K 2026-10-04] 前端变异 targets 必须跑在那个装了前端依赖的 job 里
+      #   mutation-check 的 frontend runner 要 `./node_modules/vitest/vitest.mjs`，
+      #   而 test-server job 只装了 server/node_modules（它的 dataset 里没有根依赖）
+      #   ⇒ 基线轮直接失败（CI #143 实录：`✗ 基线未通过：src/shared/htmlSanitize.ts`，
+      #   且当时脚本把测试输出全吞了，只能靠猜）。本 job 已 `npm ci`，故放在这里。
+      - run: node scripts/mutation-check.mjs --limit=8 --runner=frontend
+        name: Mutation gate (frontend targets, assertion sensitivity)
+        timeout-minutes: 10
       - run: npx vite build
         name: Frontend build
 
@@ -251,8 +259,10 @@ jobs:
       - run: cd server && npm run test:coverage
         name: Server coverage gate (core modules)
         timeout-minutes: 10
-      - run: node scripts/mutation-check.mjs --limit=8
-        name: Mutation gate (assertion sensitivity, quick tier)
+      # [K 2026-10-04] 限定 `--runner=server`：本 job **不装根目录 node_modules**，
+      #   前端目标（vitest）在这里跑会连基线都起不来 ⇒ 它们挂在 test-frontend job。
+      - run: node scripts/mutation-check.mjs --limit=8 --runner=server
+        name: Mutation gate (server targets, assertion sensitivity, quick tier)
         timeout-minutes: 10
 
   test-matrix:

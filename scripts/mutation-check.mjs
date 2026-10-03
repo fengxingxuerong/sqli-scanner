@@ -21,6 +21,8 @@
  *   node scripts/mutation-check.mjs                   全量（存活即 exit 1）
  *   node scripts/mutation-check.mjs --limit=6         每目标最多 6 个位点（快档）
  *   node scripts/mutation-check.mjs --file=src/core/scopeGuard.js
+ *   node scripts/mutation-check.mjs --runner=frontend     只跑前端 runner 的目标（CI 用它分工：
+ *      server job 没装根目录 node_modules ⇒ 前端目标必须去装了依赖的 job 跑，否则 vitest 起不来）
  *   node scripts/mutation-check.mjs --report          只报告存活，不因存活退出非零（开发期用）
  *
  * 三档超时（依据见 scripts/../docs 记录，实测后再调）：
@@ -195,9 +197,17 @@ const limit = flag('limit') ? Number(flag('limit')) : Infinity;
 const reportOnly = has('report');
 const verbose = has('verbose');
 
-const targets = onlyFile ? TARGETS.filter((t) => t.file.includes(onlyFile)) : TARGETS;
+// [K 2026-10-04] --runner=server|frontend：CI 里两个 job 分别跑各自的目标
+//   （起因：test-server job **没有装根目录 node_modules**，前端目标在那儿跑不了 vitest
+//    ⇒ CI #143 基线红；把前端目标挪去已经装了依赖的 test-frontend job，不额外加安装成本）
+const onlyRunner = flag('runner');
+const targets = TARGETS.filter(
+  (t) => (!onlyFile || t.file.includes(onlyFile)) && (!onlyRunner || (t.runner || 'server') === onlyRunner),
+);
 if (targets.length === 0) {
-  console.error(`没有匹配 --file=${onlyFile} 的目标，可用目标见 --list`);
+  console.error(
+    `没有匹配的目标（--file=${onlyFile || '-'} --runner=${onlyRunner || '-'}），可用目标见 --list`,
+  );
   process.exit(2);
 }
 
@@ -280,8 +290,18 @@ function runTests(target, testFiles, timeoutMs) {
     const out = `${err.stdout || ''}${err.stderr || ''}`;
     // 语法级破坏：模块加载就炸，测的不是行为 —— 单独归类，既不算杀死也不算存活
     const syntax = /SyntaxError|Unexpected token|Cannot use import statement|Failed to parse source/.test(out);
-    return { pass: false, syntax, timedOut: err.killed === true || /timed out/i.test(out) };
+    return { pass: false, syntax, timedOut: err.killed === true || /timed out/i.test(out), tail: tailOf(out) };
   }
+}
+
+/**
+ * [K 2026-10-04] 失败现场必须留下——CI #143 在 Ubuntu 上报「基线未通过 htmlSanitize」，
+ * 而日志里一行测试输出都没有（stdio: 'pipe' 全吞了），只能靠猜：文件名大小写、超时、
+ * 依赖缺失都怀疑过一遍才定位到「该 job 没装前端 node_modules」。以后基线红就打印尾部输出。
+ */
+function tailOf(text, keep = 40) {
+  const lines = String(text).split('\n').filter((l) => l.trim() !== '');
+  return lines.slice(-keep).join('\n');
 }
 
 // ---------- 主流程 ----------
@@ -311,6 +331,8 @@ for (const target of targets) {
   const baseMs = Date.now() - t0;
   if (!base.pass) {
     console.error(`✗ 基线未通过：${target.file} —— 先修测试再跑变异（否则存活/杀死都不可信）`);
+    console.error(`  运行器 = ${runnerOf(target)}；命令见 runTests()。常见原因：依赖没装（frontend 需要根目录 node_modules/vitest）、测试文件名大小写、超时。`);
+    if (base.tail) console.error(`  —— 测试输出尾部 ——\n${base.tail}\n  ————————————`);
     process.exit(3);
   }
   timing.push({ file: target.file, baseMs, mutants: mutants.length });
