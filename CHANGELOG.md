@@ -4,6 +4,23 @@
 
 ## [Unreleased]
 
+### 2026-10-04 批次 H · 曝光层落地（评价 v2 新增的第四条建议）
+
+复评 §五新增建议：「技术债已不是这个项目的瓶颈，**没人看得到才是**」。本批把它做掉。
+
+- **`description` / `topics` 补齐**：此前 `GET /repos/...` 实拉是 `description: null`、
+  `topics: []`、`homepage: null` ⇒ GitHub 搜索排序的最上游入口是空的，连第一屏都进不去。
+  现已写入 166 字符描述 + 20 个 topics，并**读回远端真值校验**（不采信写请求的 200）。
+- **数字全部从 README 派生，不手写**：GitHub 远端元数据**没有任何门禁能查**，手写即新增一个
+  永久无人校验的声明点 ⇒ `scripts/set-repo-metadata.mjs` 从 README 功能表抽
+  「N 种检测技术 / N 种数据库 / N 个 tamper 插件」，**抽不到就拒绝写入**（fail-closed）。
+- **新增分层口径 `verified`**：描述原为「18 dialects」，容易被读成「18 种都验证过」，
+  而 README 是 6 真机 + 3 部分通道 + 9 模板 ⇒ 改为 **`18 dialects (6 engine-verified)`**，
+  且这个 6 同样由 `**N 种真实引擎全链路验证**` 派生（措辞一改 ⇒ 脚本拒绝写，不会静默过期）。
+- **首个 Release `v1.1.0` 发布**（正文 5752 字符取自 CHANGELOG 该段）：此前仓库 0 个 Release。
+- topics 挑选纪律：只选与 sqlmap / nuclei 话题面重叠且**不误导**的词，
+  不写 `bug-bounty` / `exploit` 这类与产品定位不符的流量词。
+
 ### 2026-10-03 批次 G · 三处红一次收口：变异门禁接线守卫的路径基准 bug + 两个新端点补文档
 
 评价 v2（§五 #1）列的「半批不收口，第三次复发」—— 三处红（服务端 2 fail / readme / facts）同源，本批一次收干净。

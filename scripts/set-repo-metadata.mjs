@@ -57,13 +57,17 @@ function deriveNumbers() {
   return {
     techniques: pick(/^\|\s*\*\*(\d+)\s*种检测技术\*\*/m, 'N 种检测技术'),
     dialects: pick(/^\|\s*\*\*(\d+)\s*种数据库\*\*/m, 'N 种数据库'),
+    // 分层的「已验证」档也必须派生：光写 18 会被读成「18 种都验证过」，
+    // 而 README 是 6 真机 + 3 部分通道 + 9 模板 —— 门面数字与 README 必须同口径。
+    verified: pick(/\*\*(\d+)\s*种真实引擎全链路验证/m, 'N 种真实引擎全链路验证'),
     tampers: pick(/^\|\s*\*\*(\d+)\s*个 tamper 插件\*\*/m, 'N 个 tamper 插件'),
   };
 }
 const N = deriveNumbers();
 const DESCRIPTION =
   'Web UI + CLI + desktop SQL injection scanner with CI-ready delivery reports ' +
-  `(SARIF / CVSS / CWE). ${N.techniques} techniques - ${N.dialects} dialects - ${N.tampers} tamper plugins.`;
+  `(SARIF / CVSS / CWE). ${N.techniques} techniques - ${N.dialects} dialects ` +
+  `(${N.verified} engine-verified) - ${N.tampers} tamper plugins.`;
 
 // 20 个上限（GitHub 硬限制）。挑选原则：与 sqlmap / nuclei 的话题面重叠、
 // 且**不得误导** —— 不写 `bug-bounty` / `exploit` 这类与产品定位不符的流量词。
