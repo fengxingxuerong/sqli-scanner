@@ -545,6 +545,32 @@ analyst→writer→reviewer；超时由路由硬编码 120s（`reportAiRoutes.js
 }
 ```
 
+#### `GET /sqlmap/:id/report/export?format=json|markdown|md`
+
+导出为附件（`content-disposition`）。格式**白名单只有 json / markdown / md** ——
+html / csv / sarif 是内置引擎报告渲染器的交付面，桥侧不假装支持，传了返回 `400`（不做静默降级成 json）。
+
+```bash
+curl -OJ "http://127.0.0.1:4567/api/sqlmap/sq1/report/export?format=markdown"
+# → sqlmap-sq1.md
+```
+
+#### `GET /sqlmap/:id/diff?base=<scanId>`
+
+与内置 `/scan/:id/diff` 同契约：拿本次结果跟基线扫描比，输出 `added` / `removed` / `unchanged`，
+语义是「修好一个点后重扫一遍」的取证。
+
+sqlmap 桥的 vuln 形状是 `{ param, technique, raw }`，与内置报告的 points/vulns 不同构，
+故 diff 键取 **`param::technique`**（同键视为同一条发现）。
+
+- 缺 `base` ⇒ `INVALID_ARGUMENT`（提示正确写法，**不返回空 diff**）；
+- 任一侧扫描不存在 ⇒ `SCAN_NOT_FOUND`。
+
+```bash
+curl "http://127.0.0.1:4567/api/sqlmap/sq2/diff?base=sq1"
+# → { "code": 0, "data": { "added": [], "removed": [ "id::U" ], "unchanged": [ "cat::E" ] } }
+```
+
 ---
 
 ### 4.4 利用模块（破坏性，需 `EXPLOIT_ENABLED=1` + `authorized: true` + 声明授权范围）

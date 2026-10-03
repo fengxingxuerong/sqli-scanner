@@ -4,6 +4,34 @@
 
 ## [Unreleased]
 
+### 2026-10-03 批次 G · 三处红一次收口：变异门禁接线守卫的路径基准 bug + 两个新端点补文档
+
+评价 v2（§五 #1）列的「半批不收口，第三次复发」—— 三处红（服务端 2 fail / readme / facts）同源，本批一次收干净。
+
+- **真根因不是「目标表腐烂」，是路径基准写错**：并发批给 `scripts/mutation-check.mjs`
+  加了**前端**目标（`runner: 'frontend'`，路径基准 = 仓库根），而
+  `server/tests/mutationGate.wiring.test.js` 的 ②④ 仍按老的「一律 `server/` 基准」拼路径
+  ⇒ `src/shared/htmlSanitize.ts` 被拼成 `server/src/shared/htmlSanitize.ts` ⇒ 判据报
+  「目标模块不存在」（这就是那 2 个 fail）。
+  ⚠️ **两侧路径都以 `src/` 开头**（`server/src/engine/…` vs `src/shared/…`），
+  光看路径分不出来 ⇒ 基准只能靠 runner 字段 ⇒ 新增判据 ⑦ 专门钉这件事。
+- **修法**：目标表改按顶层 `{…}` 解析（先剥行注释再括号配对），每条带 `runner`
+  （缺省 `server`）⇒ `baseOf(entry)` 决定基准；②③④ 全部改用条目基准校验，报错里
+  带上 runner 与实际基准（下次再错能一眼看出是「模块没了」还是「基准错了」）。
+- **新判据 ⑦**：前端形态（`.ts` 目标或挂载落在 `src/tests/`）**必须显式**写
+  `runner: 'frontend'`；frontend 条目的挂载必须在 `src/tests/`（走 vitest）；
+  另带提取器自证（解析出的条目数 ≥8 —— 目标表被整段改写时上面几条才不会拿空集合比）。
+- **缺陷注入复验 2/2 杀**（均先备份、见红后用备份还原，未反向 replace）：
+  ① 删掉 `runner: 'frontend'` ⇒ ②③④⑦ 4 红，报错直指「runner=server，基准 …/server」；
+  ② 前端条目挂 server 风格路径 `tests/htmlSanitize.test.js` ⇒ ③⑦ 2 红。
+- **端点文档收口**：`GET /api/sqlmap/:id/diff`、`GET /api/sqlmap/:id/report/export`
+  此前**只在代码里注册**，README 端点表与 `docs/api.md` 都没写 ⇒ `readme:check` ⒁/⒁b 双红。
+  已补，并把契约写全：`?base=<scanId>` 的 added/removed/unchanged 语义与 diff 键
+  `param::technique`、缺 base 或任一侧不存在 ⇒ 显式错误码（不返回空 diff）、
+  export 的 format 白名单只有 json/markdown/md（html/csv/sarif 属内置渲染器，桥侧 400 而非静默降级）。
+- **facts 重采**：服务端 2833 用例 / **2830 pass / 0 fail** / 3 skip；前端 503；徽章 3333。
+- 门禁 8/8 全绿（readme / facts / refs / arch / modules / targets / lint / typecheck）。
+
 ### 2026-10-03 批次 D · 严格同题 sqlmap 对标：23 关 × 3 轮取中位的定版报告（评价 P2-12 收口）
 
 项目评价（2026-10-03）§六指出「P2-12 无严格同题对标 ❌ 未动」——旧报告是单轮数字，
