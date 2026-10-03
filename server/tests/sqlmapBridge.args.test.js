@@ -331,3 +331,64 @@ test('buildArgs: noCast/hex/noEscape 默认关闭（不透传）', () => {
   assert.ok(!args2.includes('--hex'), 'hex=false 不透传');
   assert.ok(!args2.includes('--no-escape'), 'no-escape=false 不透传');
 });
+
+// ── [F2 2026-10-03] --file-write / --file-dest：EXPLOIT_ENABLED 同源门控 + 成对 + fail-fast ──
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
+const withExploit = (enabled, fn) => {
+  const prev = process.env.EXPLOIT_ENABLED;
+  if (enabled) process.env.EXPLOIT_ENABLED = '1';
+  else delete process.env.EXPLOIT_ENABLED;
+  return Promise.resolve(fn()).finally(() => {
+    if (prev === undefined) delete process.env.EXPLOIT_ENABLED;
+    else process.env.EXPLOIT_ENABLED = prev;
+  });
+};
+
+test('buildArgs: fileWrite 在 EXPLOIT_ENABLED 未开时整体拒绝（不静默丢弃参数）', async () => {
+  await withExploit(false, () => {
+    assert.throws(
+      () => buildArgs(mkInput({ fileWrite: 'C:/nonexistent/a.txt', fileDest: '/var/www/a.txt' })),
+      /EXPLOIT_ENABLED/,
+      '与 --os-shell/--file-read 同一开关 —— 桥接模式不得成为利用能力的旁路',
+    );
+  });
+});
+
+test('buildArgs: fileWrite/fileDest 必须成对（只给一个是"调用方以为生效了"的静默半配置）', async () => {
+  await withExploit(true, () => {
+    assert.throws(() => buildArgs(mkInput({ fileWrite: 'C:/tmp/a.txt' })), /成对|fileDest/);
+    assert.throws(() => buildArgs(mkInput({ fileDest: '/var/www/a.txt' })), /成对|fileWrite/);
+    // 空字符串 = 未提供（与其他可选键同口径）：两个都空 ⇒ 整个 fileWrite 块不启用，不抛
+    assert.doesNotThrow(() => buildArgs(mkInput({ fileWrite: '', fileDest: '' })));
+  });
+});
+
+test('buildArgs: 本地文件不存在时 fail-fast（sqlmap 只会在输出流里报错，届时已"启动成功"）', async () => {
+  await withExploit(true, () => {
+    assert.throws(
+      () => buildArgs(mkInput({ fileWrite: path.join(os.tmpdir(), 'definitely-missing-f2.txt'), fileDest: '/var/www/a.txt' })),
+      /本地文件不存在/,
+    );
+  });
+});
+
+test('buildArgs: 合法 fileWrite ⇒ --file-write/--file-dest 成对入参（与 --file-read 同门控）', async () => {
+  await withExploit(true, () => {
+    const local = path.join(os.tmpdir(), `sqlmap-fw-${Date.now()}.txt`);
+    fs.writeFileSync(local, 'poc');
+    try {
+      const a = tail({ fileWrite: local, fileDest: '/var/www/html/a.txt' });
+      const i = a.indexOf('--file-write');
+      assert.ok(i >= 0, '应包含 --file-write');
+      assert.deepEqual(a.slice(i, i + 5), ['--file-write', local, '--file-dest', '/var/www/html/a.txt'], '两旗标必须成对相邻');
+      // fileRead 的既有门控行为不受影响（同一次调用两者可并存）
+      const b = tail({ fileRead: '/etc/passwd', fileWrite: local, fileDest: '/var/www/html/a.txt' });
+      assert.ok(b.includes('--file-read') && b.includes('--file-write'), 'fileRead 与 fileWrite 可同场');
+    } finally {
+      fs.unlinkSync(local);
+    }
+  });
+});

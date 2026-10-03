@@ -2,9 +2,9 @@
   "_comment": "采集源指纹：决定「跑哪些测试、多少条」的文件集合。由 scripts/facts-sync.mjs --refresh 生成，勿手改。",
   "_why": "README 与 _facts.json 互相一致不等于数字是新的 —— 两边可能双双停在旧值上。本文件是「数字采集于哪一版测试代码」的凭证，--check 时重算比对。",
   "_scope": "测试文件 + 驱动采集的配置（含覆盖率阈值来源）。不含依赖版本 / .env.test / 被测源码。",
-  "at": "2026-10-03T16:03:12+00:00",
+  "at": "2026-10-03T17:33:00+00:00",
   "count": 383,
-  "sha256": "b5686f9e9b06a9b6",
+  "sha256": "3840c909ede1933c",
   "files": {
     "server/package.json": "8e145de053dd",
     "server/tests/_setup.mjs": "925a154c35a3",
@@ -388,6 +388,6 @@
     "src/tests/validityBanner.test.tsx": "8fd9eff12c02",
     "src/tests/vulnDetail.poc.test.tsx": "824a78fa2b48",
     "src/tests/vulnDetail.request.test.tsx": "7e2f7e7b6fbd",
-    "vitest.config.ts": "b1468cbe3239"
+    "vitest.config.ts": "707d3e6c2517"
   }
 }

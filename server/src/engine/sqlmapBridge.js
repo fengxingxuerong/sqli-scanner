@@ -70,6 +70,48 @@ function tryParseVuln(line) {
   return { param, technique, raw: line.trim() };
 }
 
+/**
+ * [F2 2026-10-03] sqlmap 报告 diff（纯函数）：键 = param::technique。
+ * 输出 added（本次新增）/ removed（基线有、本次没有）/ unchanged（两侧都有）
+ * —— "修好一个点后再扫一遍"的取证语义与内置 /scan/:id/diff 一致。
+ * 缺字段的条目按 '-'/'unknown' 归一，不让畸形条目崩掉整个 diff。
+ * @param {Array<{param?:string|null, technique?:string}>} baseVulns
+ * @param {Array<{param?:string|null, technique?:string}>} curVulns
+ */
+export function diffSqlmapVulns(baseVulns = [], curVulns = []) {
+  const keyOf = (v) => `${v && v.param ? v.param : '-'}::${v && v.technique ? v.technique : 'unknown'}`;
+  const baseKeys = new Set(baseVulns.map(keyOf));
+  const curKeys = new Set(curVulns.map(keyOf));
+  return {
+    added: curVulns.filter((v) => !baseKeys.has(keyOf(v))),
+    removed: baseVulns.filter((v) => !curKeys.has(keyOf(v))),
+    unchanged: curVulns.filter((v) => baseKeys.has(keyOf(v))),
+  };
+}
+
+/**
+ * [F2 2026-10-03] sqlmap 报告 → markdown（纯函数）。表格单元格做 | 转义
+ * （报告内容来自 sqlmap 输出解析，param 可能含任意字符）。
+ * @param {{status?:string, vulns?:Array<{param?:string|null, technique?:string}>}} report
+ */
+export function renderSqlmapMarkdown(report) {
+  const vulns = report?.vulns || [];
+  const cell = (s) => String(s ?? '').replace(/\|/g, '\\|');
+  const vulnRows = vulns
+    .map((v) => `| ${cell(v.param || '-')} | ${cell(v.technique || 'unknown')} |`)
+    .join('\n');
+  return [
+    '# sqlmap 扫描报告',
+    '',
+    `- 状态：${report?.status ?? 'unknown'}`,
+    `- 发现：${vulns.length} 条`,
+    '',
+    '| 参数 | 技术 |',
+    '|---|---|',
+    vulnRows || '| - | （无发现） |',
+  ].join('\r\n');
+}
+
 // 安全构造 sqlmap 参数（数组形式，禁用 shell，杜绝命令注入）——原逻辑 + P2-13 clamp
 export function buildArgs(input) {
   const t = input.target || {};
@@ -252,6 +294,36 @@ export function buildArgs(input) {
   if (c.osShell) destructive.push('--os-shell');
   if (c.fileRead) {
     destructive.push('--file-read', clampLen(String(c.fileRead), 4096));
+  }
+  // [F2 2026-10-03 TODO 09-28 #3] --file-write / --file-dest：与 --file-read 同源门控。
+  //   capabilities.fileWrite 声明的是内置引擎的能力，桥接模式此前拿不到同一交付面。
+  //   语义：把**桥接进程所在机器**的本地文件经 SQL 注入写到**数据库服务器**的 fileDest
+  //   （sqlmap 侧走 INTO DUMPFILE）。fileWrite 与 fileDest 必须成对 —— 只给一个是
+  //   "调用方以为生效了"的静默半配置；本地文件不存在时 fail-fast —— sqlmap 只会在
+  //   输出流里报错，而那时任务已经"启动成功"，调用方看到的是假象。
+  if (c.fileWrite || c.fileDest) {
+    if (!isExploitEnabled()) {
+      throw new AppError(
+        ErrorCode.EXPLOIT_UNAUTHORIZED,
+        'sqlmap 的 --file-write 属利用动作，需服务端显式设置 EXPLOIT_ENABLED=1 才可用' +
+          '（与内置引擎 /api/exploit/* 同一开关；未满足时直接拒绝，不静默丢弃参数）'
+      );
+    }
+    const local = String(c.fileWrite || '').trim();
+    const dest = String(c.fileDest || '').trim();
+    if (!local || !dest) {
+      throw new AppError(
+        ErrorCode.INVALID_PARAM,
+        '--file-write 必须成对：fileWrite（桥接机本地源文件路径）与 fileDest（数据库服务器上的目标路径）缺一不可'
+      );
+    }
+    if (!fs.existsSync(local)) {
+      throw new AppError(
+        ErrorCode.INVALID_PARAM,
+        `fileWrite 本地文件不存在：${local}（sqlmap 对此只会在输出流里报错，届时任务已"启动成功"——必须 fail-fast）`
+      );
+    }
+    destructive.push('--file-write', clampLen(local, 4096), '--file-dest', clampLen(dest, 4096));
   }
   // --eval（Python 表达式动态求值参数）属最高危能力：会在**服务端**执行任意 Python 表达式。
   // [P0-SEC 2026-09-18] 从「显式 opt-in + 告警」升级为**默认禁用 + 双条件门控**：

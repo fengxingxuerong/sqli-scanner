@@ -45,6 +45,13 @@ export default defineConfig({
       : {
           threads: { singleThread: true },
         },
+    // [FLAKY-FIX 2026-10-04] 单用例超时 5s → 15s：CI runner 上**重渲染型**用例实测比本机慢
+    // 2–3 倍 —— `src/tests/scanPage.test.tsx` 的「显式关闭 enableExtract」在 CI（run #137）
+    // 跑了 5544ms 直接撞默认 5000ms 超时（同文件另两条 4053 / 3460ms 也贴线，
+    // scanConfigSections 多条 3.2–3.5s）。本机同一文件 8 条合计仅 9.4s。
+    // ⇒ 这是**渲染开销**不是断言失败：放宽的是天花板，不影响快用例，超时仍会红。
+    // 只放宽超时而不动用例写法，是因为慢的是 renderPage() 的组件树本身，不是等待策略。
+    testTimeout: 15000,
     coverage: {
       provider: 'v8',
       // 只统计前端业务源码，排除测试/配置/类型声明（v8 provider 默认已忽略 node_modules）

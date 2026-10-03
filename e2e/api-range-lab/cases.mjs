@@ -941,6 +941,80 @@ test('sqlmap', 'POST /api/sqlmap/start：环境缺 sqlmap 时如实失败（不�
   ctx.note('sqlmap.available', true);
 });
 
+// [F2 2026-10-03 TODO 09-28 #3] 两条正向用例：桥接模式的 file-write 与 export 交付面。
+// capabilities.fileWrite 此前只覆盖内置引擎，sqlmap 模式拿不到同一交付面 —— 本组收口。
+
+test('sqlmap', 'POST /api/sqlmap/start --file-write：真写文件到 secure_file_priv 目录（文件系统侧断言）', async (ctx) => {
+  const st = await ctx.get('/api/sqlmap/status');
+  if (st.json?.data?.available !== true || !SECURE_DIR) {
+    ctx.note('sqlmap.fileWrite', 'SKIP:缺 sqlmap 或 MYSQL_SECURE_FILE_DIR');
+    return;
+  }
+  const fs = await import('node:fs');
+  const path = await import('node:path');
+  const os = await import('node:os');
+  const stamp = Date.now();
+  const local = path.join(os.tmpdir(), `sqlmap-fw-src-${stamp}.txt`);
+  const payload = `SQLMAP_FILEWRITE_${stamp}_桥接真写闭环`;
+  fs.writeFileSync(local, payload, 'utf8');
+  // fileDest 必须落在 MySQL 的 secure_file_priv 内（沙箱把它锁在沙箱目录）——
+  // 路径给正斜杠：MySQL 在 Windows 上自行归一化。
+  const dest = `${SECURE_DIR}/sqlmap-fw-${stamp}.txt`;
+  const started = await ctx.post('/api/sqlmap/start', {
+    target: { url: `${ctx.LAB}/num?id=1` },
+    config: { sqlmap: { level: 1, fileWrite: local, fileDest: dest } },
+  });
+  try {
+    assert.equal(started.json?.code, 0, `fileWrite 任务应能启动（EXPLOIT_ENABLED 已在靶场引擎开启）：${JSON.stringify(started.json).slice(0, 240)}`);
+    const id = started.json.data.scanId;
+    // 轮询到终态：sqlmap 要先完成注入识别才能落盘（本机实测 ~20-60s）
+    let rep = null;
+    const t0 = Date.now();
+    for (;;) {
+      rep = await ctx.get(`/api/sqlmap/${id}/report`);
+      const s = rep.json?.data?.status;
+      if (s && s !== 'running') break;
+      if (Date.now() - t0 > 240000) break;
+      await sleep(2000);
+    }
+    const finalStatus = rep.json?.data?.status;
+    // 文件系统侧断言（金标准，同内置引擎 fileWrite 用例口径）：不采信 sqlmap 自报
+    const destPath = dest.replace(/\//g, path.sep);
+    assert.ok(fs.existsSync(destPath), `fileDest 必须真实落盘（status=${finalStatus}）`);
+    assert.equal(fs.readFileSync(destPath, 'utf8'), payload, '落盘内容必须与本地源文件逐字节一致');
+    ctx.state.sqlmapScan = { scanId: id, report: rep.json?.data };
+  } finally {
+    fs.rmSync(local, { force: true });
+    fs.rmSync(dest.replace(/\//g, path.sep), { force: true });
+  }
+});
+
+test('sqlmap', 'GET /api/sqlmap/:id/report/export 与 /diff：真实报告的导出与自比对（交付面对齐内置引擎）', async (ctx) => {
+  const scan = ctx.state.sqlmapScan;
+  if (!scan) {
+    ctx.note('sqlmap.export', 'SKIP:前置 fileWrite 用例未产出真实扫描（环境缺 sqlmap 或沙箱）');
+    return;
+  }
+  const id = scan.scanId;
+  const md = await ctx.get(`/api/sqlmap/${id}/report/export?format=md`);
+  assert.equal(md.status, 200, `md 导出应 200，实得 ${md.status}`);
+  assert.match(String(md.headers?.['content-type'] || md.headers?.get?.('content-type') || ''), /markdown/);
+  assert.match(String(md.text || ''), /# sqlmap 扫描报告/);
+
+  const json = await ctx.get(`/api/sqlmap/${id}/report/export?format=json`);
+  assert.equal(json.status, 200, `json 导出应 200，实得 ${json.status}`);
+  assert.equal(json.json?.engine, 'sqlmap', 'json 导出返回文档本体（与内置 /report/export 下载语义一致）');
+
+  const bad = await ctx.get(`/api/sqlmap/${id}/report/export?format=html`);
+  assert.equal(bad.status, 400, 'html 是内置渲染器的交付面，桥侧必须显式 400 而非静默降级');
+
+  // 自比对：added/removed 必须为空（同一条报告跟自己 diff），真实数据走一遍 diff 契约
+  const diff = await ctx.get(`/api/sqlmap/${id}/diff?base=${id}`);
+  assert.equal(diff.json?.code, 0, `自比对应成功：${JSON.stringify(diff.json).slice(0, 200)}`);
+  assert.equal(diff.json.data.added.length, 0);
+  assert.equal(diff.json.data.removed.length, 0);
+});
+
 // ── group: ai —— LLM 报告接口（真 HTTP 打到本地假端点） ──────────────────────
 async function llmConfig(ctx, mode) {
   const r = await ctx.llmPost('/__llm/config', { mode });

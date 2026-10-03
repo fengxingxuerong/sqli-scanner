@@ -4,6 +4,70 @@
 
 ## [Unreleased]
 
+### 2026-10-04 批次 I · CI `test-frontend` 偶发红定位与修复（FLAKY-FIX）+ 复评结论更正
+
+**先更正我自己复评里的一个错判**：v2 §四 #6 写「`--crawl` 是空壳，引擎层 `grep -c crawl` = 0」——
+**错的**（照抄了未核实的旧结论，没回源码看）。爬虫**已实现且接通**：
+
+- `engine/crawler.js`（187 行，`LinkCrawler` / `extractLinks` / `attrValue`）
+  + `engine/discovery/browserCrawler.js`（headless 版，playwright 不可用时降级）；
+- 消费点 `engine/TargetParser.js:200-215`（`crawlDepth > 0` ⇒ `_crawlLinks`，`crawlBrowser` ⇒ `_crawlBrowser`）；
+- 参数 `scalarsCore.js:194`（0–3）+ `defaults.js:314`（默认 0）+ CLI `--crawl-browser`；
+- 且 `crawlDepth` 已与 `--level` 解耦（`TargetParser.js:192-199`：原 `level>=5` 门槛会让它静默不生效）。
+  ★ 教训（本项目第三次同类）：**「现状」类结论必须回源码核实**，连自己前一天写的评价都会过期。
+
+**FLAKY-FIX**：`test-frontend` 在 CI 偶发红（#137），此前**没有日志通道**只能猜。本批用
+GH_TOKEN 打通了 `actions/runs/{id}/jobs` + `actions/jobs/{id}/logs`（以前一律 Not Found，
+是因为**缺认证**，不是接口没有），拿到真因：
+
+- 失败用例 = `src/tests/scanPage.test.tsx > 显式关闭 enableExtract：直接发起，无二次确认对话框`，
+  **`Test timed out in 5000ms`（实际 5544ms）** —— 是**超时**不是断言失败；
+- 同文件另两条 4053 / 3460ms，`scanConfigSections` 多条 3.2–3.5s，都贴着 5000ms 默认线；
+- 本机同一文件 8 条合计仅 **9.4s** ⇒ CI runner 上重渲染型用例比本机慢 **2–3 倍**。
+
+修法：`vitest.config.ts` 加 `testTimeout: 15000`。**放宽的是天花板，不影响快用例**，
+超时仍会红；不动用例写法，因为慢的是 `renderPage()` 的组件树渲染本身，不是等待策略
+（`waitFor` 只在条件满足时返回，没有可省的轮询）。
+
+- 缺陷注入复验（临时探针睡 6.5s，用完即删）：`15000` ⇒ **绿**；改回 `5000` ⇒ **红**
+  （`Test timed out in 5000ms`）⇒ 证明该配置真的生效，不是"改了个没接线的键"。
+- 附带产出：`D:\projects\_sqli-gitfix-2026-10-03\ci-job-log.mjs`（按 run 号 + job 名拉日志，
+  落盘到本地）—— 以后 CI 红了不用再猜。
+
+### 2026-10-04 收口 · 批次 J · 前端变异覆盖（承接并发会话在制品）
+
+`scripts/mutation-check.mjs` 的守卫面从 server 扩到 `src/`（此前前端**零变异覆盖**，
+503 条前端用例的断言是否敏感全靠信念）。本会话接手时代码已在工作区、**未登记**，本次补齐验证与记录。
+
+- 新增 `runner: 'frontend'`（`baseDirOf()` 决定路径基准 = 仓库根）+ `runTests()` 双跑分派。
+  ⚠️ 两个 runner 的单用例超时开关**不一样**：server 用 node `--test-timeout`（kebab），
+  前端 vitest 用 `--testTimeout`（**camelCase**，写成 kebab 会被静默忽略 —— 「没报错」≠「生效了」）。
+- 首批纳入 2 个模块（选入标准：安全关键 + 纯逻辑密集 + 离线专属测试）：
+  `src/shared/htmlSanitize.ts`（报告 HTML 注入 DOM 的唯一闸门）、
+  `src/shared/dumpExport.ts`（CSV 公式注入防护，挂 **4 个**真调用它的测试文件——少挂一个 = 假存活）。
+- **验证（本会话实跑）**：`--file=… --limit=3` 两个目标 **6 变异 6 杀死 0 存活**
+  （htmlSanitize 8.5s / dumpExport 19.2s），即新增目标确实有断言守护，不是拉进来充数。
+- CI（`mutation` job）跑的是 `--limit=8`，本次为省时只在本地抽验 2×3 个位点。
+
+### 2026-10-04 收口 · 批次 F2 · sqlmap 桥接模式补齐 file-write / diff / export（承接并发会话在制品）
+
+TODO 2026-09-28 #3：**`capabilities.fileWrite` 声明的是内置引擎的能力，走 sqlmap 模式拿不到同一交付面**。
+本会话接手时代码已在工作区、**未登记**，本次补齐验证与记录。
+
+- `buildArgs()` 新增 `--file-write / --file-dest`：与 `--file-read` 同源门控（`isExploitEnabled()`），
+  且 **fileWrite 与 fileDest 必须成对 + 本地文件必须存在 ⇒ fail-fast**
+  （sqlmap 对此只会在输出流里报错，届时任务已"启动成功" —— 那是调用方视角的假象）。
+- 新增纯函数 `diffSqlmapVulns()`（键 = `param::technique`，缺字段归一，畸形条目不崩）+ 
+  `renderSqlmapMarkdown()`（Markdown 单元格 `|` 转义 —— 内容来自 sqlmap 输出解析，param 可能含任意字符）。
+- 新增端点 `GET /api/sqlmap/:id/diff?base=<scanId>` 与 `GET /api/sqlmap/:id/report/export?format=json|markdown|md`
+  —— 齐内置 `/scan/:id/*` 的契约：**缺 base / 任一侧不存在 ⇒ 显式错误，不静默返回空 diff；
+  format 白名单外的 html/csv/sarif ⇒ 显式 400，不静默降级成 json**（那三种是内置渲染器的交付面，桥侧不假装支持）。
+- **验证（本会话实跑）**：`sqlmapBridge.args` + `sqlmapRoutes` + `mutationGate.wiring`
+  **52/52 PASS**（其中本批新增 15 条：fileWrite 门控 4 / diff 5 / export 4 / 纯函数 2）。
+- ⚠️ 未验证部分（诚实边界）：`e2e/api-range-lab/cases.mjs` 新增的 2 条**正向用例**
+  （`--file-write` 真写文件、文件系统侧断言）**依赖靶场 + 本机 sqlmap**，本机不具备且按规矩不起靶场
+  ⇒ 判据交给 CI `e2e-self-contained` job；本机未跑，不算已验证。
+
 ### 2026-10-04 批次 H · 曝光层落地（评价 v2 新增的第四条建议）
 
 复评 §五新增建议：「技术债已不是这个项目的瓶颈，**没人看得到才是**」。本批把它做掉。

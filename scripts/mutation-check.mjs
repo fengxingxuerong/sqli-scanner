@@ -5,9 +5,16 @@
  * 解决什么：测试全绿 ≠ 断言有效。本脚本把安全关键模块逐个「改坏一个位点」，
  * 若对应测试仍然全绿 —— 该位点没有任何断言守护（存活 = 缺口）。
  *
- * 覆盖范围（诚实记录）：只跑下面 TARGETS 里的模块子集，不是全仓。
+ * 覆盖范围（诚实记录）：只跑下面 TARGETS 里的模块子集，不是全仓。server 侧 14 个 + frontend 侧 2 个。
  * 选入标准 = 安全关键 + 纯逻辑密集 + 有专属测试 + 离线可跑（挂网络/靶场的测试不入选，
  * 否则门禁变成「网络好就绿」）。全仓会把门禁拉到小时级 = 等于没有门禁。
+ *
+ * 两种运行器（target.runner，缺省 'server'）：
+ *   server   —— node --test，cwd=server/，单用例超时 `--test-timeout`（**kebab**）
+ *   frontend —— vitest，cwd=仓库根，单用例超时 `--testTimeout`（**camelCase**，写 kebab 会被静默忽略）
+ * ⚠️ 两者都**不挂 tsc 预检**（类型错误本身是有效防线，别排除）。但 vitest **不做类型检查**
+ * ⇒ 只改类型不改行为的变异在 server 侧被 tsc 抓住、在 frontend 侧会存活。选目标时优先
+ * 逻辑密集的纯函数模块。
  *
  * 用法：
  *   node scripts/mutation-check.mjs --list            列出目标与位点
@@ -109,6 +116,30 @@ const TARGETS = [
     file: 'src/engine/extraction/hashAnalysis.js',
     tests: ['tests/hashAnalysis.test.js'],
   },
+
+  // ── 前端目标（runner: 'frontend'，走 vitest）────────────────────────────
+  // [2026-10-03] 前端此前**零变异覆盖** ⇒ src/ 下 503 条用例的断言是否敏感，全靠信念。
+  // 本批先把守卫面从 server 扩到 src/，只纳「安全关键 + 纯逻辑密集 + 离线专属测试」。
+  {
+    // XSS 净化：报告 HTML 注入 DOM 的唯一闸门。错一个字符就是一个漏洞。
+    // 挂载面已核：全仓只有 htmlSanitize.test.ts 直接/间接覆盖它（生产侧无第二处实现）。
+    runner: 'frontend',
+    file: 'src/shared/htmlSanitize.ts',
+    tests: ['src/tests/htmlSanitize.test.ts'],
+  },
+  {
+    // 拖库 CSV/JSON 导出：CSV 公式注入（`=cmd|...` 前缀转义）的防护点，产物直接进甲方表格软件。
+    // 挂载面已核：**4 个**测试文件都真的调它（dumpExport.behavior / csvFormulaParity /
+    // dbTree.export / qa_dump_export）—— 少挂一个，那部分断言不参与判定 = 假存活。
+    runner: 'frontend',
+    file: 'src/shared/dumpExport.ts',
+    tests: [
+      'src/tests/dumpExport.behavior.test.ts',
+      'src/tests/csvFormulaParity.test.ts',
+      'src/tests/dbTree.export.test.tsx',
+      'src/tests/qa_dump_export.test.tsx',
+    ],
+  },
 ];
 
 /**
@@ -171,6 +202,11 @@ if (targets.length === 0) {
 }
 
 // ---------- 位点枚举 ----------
+/** 目标所属测试运行器：缺省 server（node --test）；frontend 走 vitest。 */
+const runnerOf = (t) => t.runner || 'server';
+/** 目标源码与测试路径的基准目录：server 目标相对 server/，frontend 目标相对仓库根。 */
+const baseDirOf = (t) => (runnerOf(t) === 'frontend' ? ROOT : SERVER);
+
 function isCodeLine(src, index) {
   const lineStart = src.lastIndexOf('\n', index) + 1;
   const lineEnd = src.indexOf('\n', index);
@@ -179,7 +215,7 @@ function isCodeLine(src, index) {
 }
 
 function collectMutants(target) {
-  const abs = path.join(SERVER, target.file);
+  const abs = path.join(baseDirOf(target), target.file);
   const src = fs.readFileSync(abs, 'utf8');
   const out = [];
   for (const op of OPERATORS) {
@@ -203,25 +239,47 @@ function collectMutants(target) {
 }
 
 // ---------- 跑测试 ----------
-function runTests(testFiles, timeoutMs) {
+/**
+ * 按运行器分派。两者都**不挂 tsc 预检**（类型错误本身算有效防线，见技能记录）。
+ * ⚠️ 前端（vitest）**不做类型检查** ⇒ 只改类型不改行为的变异在 server 侧会被 tsc 抓住、
+ * 在 frontend 侧会存活。选目标时优先挑**逻辑密集**的纯函数模块，别只挑类型体操。
+ */
+function runTests(target, testFiles, timeoutMs) {
   try {
-    execFileSync(
-      process.execPath,
-      [
-        '--env-file=.env.test',
-        '--import=./tests/_setup.mjs',
-        '--test',
-        '--test-reporter=dot',
-        `--test-timeout=${TEST_TIMEOUT_MS}`,
-        ...testFiles,
-      ],
-      { cwd: SERVER, stdio: 'pipe', timeout: timeoutMs },
-    );
+    if (runnerOf(target) === 'frontend') {
+      // ⚠️ vitest 的单用例超时开关是 **camelCase** `--testTimeout`（kebab 会被静默忽略，
+      // 「没报错」不等于「生效了」）。server 侧 node 用的才是 `--test-timeout`。
+      execFileSync(
+        process.execPath,
+        [
+          './node_modules/vitest/vitest.mjs',
+          'run',
+          ...testFiles,
+          '--reporter=dot',
+          '--coverage.enabled=false',
+          `--testTimeout=${TEST_TIMEOUT_MS}`,
+        ],
+        { cwd: ROOT, stdio: 'pipe', timeout: timeoutMs, env: { ...process.env, CI: '1' } }
+      );
+    } else {
+      execFileSync(
+        process.execPath,
+        [
+          '--env-file=.env.test',
+          '--import=./tests/_setup.mjs',
+          '--test',
+          '--test-reporter=dot',
+          `--test-timeout=${TEST_TIMEOUT_MS}`,
+          ...testFiles,
+        ],
+        { cwd: SERVER, stdio: 'pipe', timeout: timeoutMs }
+      );
+    }
     return { pass: true };
   } catch (err) {
     const out = `${err.stdout || ''}${err.stderr || ''}`;
     // 语法级破坏：模块加载就炸，测的不是行为 —— 单独归类，既不算杀死也不算存活
-    const syntax = /SyntaxError|Unexpected token|Cannot use import statement/.test(out);
+    const syntax = /SyntaxError|Unexpected token|Cannot use import statement|Failed to parse source/.test(out);
     return { pass: false, syntax, timedOut: err.killed === true || /timed out/i.test(out) };
   }
 }
@@ -245,11 +303,11 @@ if (has('list')) {
 
 for (const target of targets) {
   const mutants = collectMutants(target);
-  const abs = path.join(SERVER, target.file);
+  const abs = path.join(baseDirOf(target), target.file);
   const original = fs.readFileSync(abs, 'utf8');
 
   const t0 = Date.now();
-  const base = runTests(target.tests, BASE_MS);
+  const base = runTests(target, target.tests, BASE_MS);
   const baseMs = Date.now() - t0;
   if (!base.pass) {
     console.error(`✗ 基线未通过：${target.file} —— 先修测试再跑变异（否则存活/杀死都不可信）`);
@@ -263,7 +321,7 @@ for (const target of targets) {
     let res;
     try {
       fs.writeFileSync(abs, m.mutate(), 'utf8');
-      res = runTests(target.tests, MUTANT_MS);
+      res = runTests(target, target.tests, MUTANT_MS);
     } finally {
       try { fs.writeFileSync(abs, original, 'utf8'); } catch { /* 由 restoreAll 兜底 */ }
       pending.delete(abs);

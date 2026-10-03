@@ -8,7 +8,7 @@
 
 import { Router } from 'express';
 import crypto from 'crypto';
-import { SqlmapBridge } from '../engine/sqlmapBridge.js';
+import { SqlmapBridge, diffSqlmapVulns, renderSqlmapMarkdown } from '../engine/sqlmapBridge.js';
 import * as eventBus from '../core/eventBus.js';
 import { ErrorCode, AppError } from '../core/errors.js';
 import { logger } from '../core/logger.js';
@@ -16,6 +16,9 @@ import { assertSafeHttpTarget } from '../core/httpClient.js';
 import { parseScope, assertInScope } from '../core/scopeGuard.js';
 
 const bridge = new SqlmapBridge();
+// [F2 2026-10-03] 命名导出：diff/export 的路由级测试需要往**同一个**单例里播种两条
+// 真实形状的报告（扫描 Map 是桥的公开面 —— stop 路由本来就在读 bridge.scans）。
+export { bridge };
 
 export const sqlmapRoutes = Router();
 
@@ -93,4 +96,51 @@ sqlmapRoutes.get('/:id/report', requireReport, (req, res) => {
     return res.json({ code: ErrorCode.SCAN_NOT_FOUND, data: null, message: '扫描不存在或已结束' });
   }
   res.json({ code: 0, data: report, message: 'ok' });
+});
+
+// [F2 2026-10-03 TODO 09-28 #3] GET /sqlmap/:id/diff?base=<sqlmapScanId>
+//   对齐内置 /scan/:id/diff 的契约（缺 base / 任一侧不存在 ⇒ 显式错误，不静默空 diff）。
+//   sqlmap 桥的 vuln 形状是 { param, technique, raw }，与内置报告的 points/vulns 不同构，
+//   故 diff 键 = param::technique（同键视为同一条发现），输出 added/removed/unchanged
+//   —— "修好一个点后再扫一遍"的取证语义与内置一致。
+sqlmapRoutes.get('/:id/diff', requireReport, (req, res) => {
+  const baseId = String(req.query.base || '').trim();
+  if (!baseId) {
+    return res.json({ code: ErrorCode.INVALID_ARGUMENT ?? 1, data: null, message: '缺少 base 参数（基线扫描 id）：/api/sqlmap/<id>/diff?base=<scanId>' });
+  }
+  const cur = bridge.getReport(req.params.id);
+  const base = bridge.getReport(baseId);
+  if (!cur) return res.json({ code: ErrorCode.SCAN_NOT_FOUND, data: null, message: '当前扫描不存在' });
+  if (!base) return res.json({ code: ErrorCode.SCAN_NOT_FOUND, data: null, message: '基线扫描不存在' });
+  res.json({ code: 0, data: diffSqlmapVulns(base.vulns, cur.vulns), message: 'ok' });
+});
+
+// [F2 2026-10-03 TODO 09-28 #3] GET /sqlmap/:id/report/export?format=json|markdown|md
+//   对齐内置 /scan/:id/report/export 的契约形态（format 白名单 + attachment 头）。
+//   桥的报告是 { engine, status, logs, vulns }，html/csv/sarif 是内置渲染器的交付面，
+//   桥侧不假装支持 —— 白名单只放 json/markdown，其余显式 400（不做静默降级成 json）。
+sqlmapRoutes.get('/:id/report/export', requireReport, (req, res) => {
+  const FORMAT_EXT = { json: 'json', markdown: 'markdown', md: 'markdown' };
+  const rawFormat = (req.query.format || 'json').toString().toLowerCase();
+  if (!Object.prototype.hasOwnProperty.call(FORMAT_EXT, rawFormat)) {
+    return res.status(400).json({
+      code: ErrorCode.INVALID_PARAM,
+      data: null,
+      message: 'format 非法，sqlmap 桥支持 json/markdown/md（html/csv/sarif 是内置引擎报告渲染器的交付面）',
+    });
+  }
+  const report = bridge.getReport(req.params.id);
+  if (!report) {
+    return res.json({ code: ErrorCode.SCAN_NOT_FOUND, data: null, message: '扫描不存在或已结束' });
+  }
+  // id 进 Content-Disposition 文件名：与内置 export 同款白名单清洗（防头字段闭合）
+  const safeId = String(req.params.id).replace(/[^A-Za-z0-9_-]/g, '').slice(0, 40) || 'report';
+  if (FORMAT_EXT[rawFormat] === 'json') {
+    res.setHeader('content-type', 'application/json; charset=utf-8');
+    res.setHeader('content-disposition', `attachment; filename="sqlmap-${safeId}.json"`);
+    return res.send(JSON.stringify(report, null, 2));
+  }
+  res.setHeader('content-type', 'text/markdown; charset=utf-8');
+  res.setHeader('content-disposition', `attachment; filename="sqlmap-${safeId}.md"`);
+  res.send(renderSqlmapMarkdown(report));
 });
