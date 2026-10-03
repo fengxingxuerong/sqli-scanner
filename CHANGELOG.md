@@ -4,6 +4,32 @@
 
 ## [Unreleased]
 
+### 2026-10-03 批次 3 · WAF 链侧能力：定向变异搜索器补「减标点补位 + 三链组合 + 有序去重」
+
+评价文档（`docs/项目评价-2026-10-03.md` §七.3）定性：提打穿链数必须动**链侧**，不是再写
+第 229 个 tamper。本批在 A2 既有架构（画像 → 语义索引 → 组合生成 → 探针验证）内修掉
+生成器的三个真实质量缺口：
+
+- **缺口①（最贵）**：`reducesPunct` 插件（dash2hash）covers=0，被 `.filter(covers > 0)`
+  挡在候选池外 ⇒ **CRS 标点预算方向（942460/942431）唯一实证有效项**（wafRecommend 实测
+  tamper on 2/5 → 5/5）从生成器里整体消失，实证首选链 dash2hash×hexliterals 不可能被产出。
+  修法：消除者（covers>0）与减标点补位（reducesPunct）分池 —— 补位者不占定向名额
+  （单独不产生单插件链），只作为第二/第三槽位与消除者组合，两个顺序都生成。
+- **缺口②**：被拦词族 ≥3 时（典型 CRS 画像 quote+space+comment）双链覆盖不满。
+  修法：**每类别取最优消除者**再跨类别组三链（⚠️ 不能用 pool 前 3 名两两配 ——
+  quote 被拦时前几名可能全是 LITERAL 类，同类别互相 skip ⇒ 三链恒空），有界 ≤3 个三元组。
+- **缺口③**：去重键用**排序后集合** —— 变换复合不可交换
+  （hexliterals∘dash2hash ≠ dash2hash∘hexliterals，静态表实证两种顺序都是首选），
+  旧键把两个顺序折叠成一条，静默丢掉另一序（`planChains.push` 与
+  `mergeCandidateChains` 两处同改有序键；后者此前连**静态表自己的两种顺序**都会吃掉一半）。
+- 语义边界不变：补位者不抢 covers（covers 仍只来自消除者）；机械检验扩展到新链形
+  （声称的 covers 必须被整链真实消除，不采信自报）；validateChain 链级守卫照走。
+- 预算纪律不变：纯函数零请求，验证总条数仍 MAX_CHAINS=3（2 静态 + 1 生成）。
+- 测试：`waf.bypassSearcher.test.js` +4 条（补位两序 / 补位者不单独占名额 / 三链全覆盖 /
+  新链形机械消除复验）。缺陷注入复验：撤掉补位实现 ⇒ 3 条新用例全红（杀）。
+- 端到端：`waf-bypass-search` e2e ✅（A 档 2 条生成链进验证流程 / B 档 0 / 预算 6:6）；
+  `waf-real`（CRS 执行器 PL1/PL3）exit 0、PL1 对外口径数字零变化；`tamper-matrix` exit 0。
+
 ### 2026-10-03 批次 2 · UI-REACH：拖库/提取治理 + 时间盲注标定 14 键接进面板（缺口 52 → 38）
 
 `KNOWN_MISSING_UI_KEYS` 里真实价值最高的两组调优键接进 Web/桌面面板（引擎真读、REST 白名单

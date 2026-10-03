@@ -251,6 +251,9 @@ export function emptyExtractedData() {
     currentUser: undefined,
     users: undefined,
     passwords: undefined,
+    // [--passwords 升级] 派生结构：哈希算法识别 + 强度/风险标注（extraction/hashAnalysis.js）。
+    // 与 passwords 同生命周期：原始串是事实，本字段是它的**解读**，报告读本字段。
+    passwordAnalysis: /** @type {import('./extraction/hashAnalysis.js').PasswordAnalysis | null | undefined} */ (undefined),
     counts: {},
     search: /** @type {any} */ (undefined), // 枚举模式回填（--search 结果树）
   };

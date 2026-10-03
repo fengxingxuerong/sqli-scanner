@@ -1,6 +1,6 @@
 # sqli-scanner
 
-[![Tests](https://img.shields.io/badge/tests-3240%20passing-brightgreen)](#测试)[![CI](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml/badge.svg)](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml)
+[![Tests](https://img.shields.io/badge/tests-3290%20passing-brightgreen)](#测试)[![CI](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml/badge.svg)](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml)
 [![Dependencies](https://img.shields.io/badge/dependencies-0%20known%20vulns-brightgreen)](#环境变量)
 
 > CI 徽章为真实状态（仓库地址已定，run#90 起全绿）。发布判定仍以 `CHANGELOG.md`
@@ -8,7 +8,7 @@
 
 **简体中文** | [English](README.en.md)
 
-一键式 SQL 注入检测工具。无需记忆命令行参数，打开浏览器即可使用。
+一键式 SQL 注入检测工具 —— Web 面板 / 桌面壳 / CLI 三端，**扫完即出可进 CI 的全套交付件**（SARIF 2.1.0 + CVSS/CWE + 授权声明清单 + 退出码 `0/1/2`）。无需记忆命令行参数，打开浏览器即可使用。
 
 ## 快速开始
 
@@ -65,7 +65,7 @@ node scripts/one-click-scan.mjs -u "http://target/page?id=1"
     --timeout <ms> --quiet --no-ledger
 ```
 
-退出码可直接用于 CI 门禁：`0` 未发现高危 / `2` 发现 Critical 或 High / `1` 执行失败。
+退出码可直接用于 CI 门禁：`0` 未发现高危 / `2` 发现 Critical 或 High / `1` 执行失败。完整 CI 接法（官方 composite action `action.yml`、GitHub Actions 示例 + SARIF 上传 + DefectDojo）见 [`docs/CI-集成.md`](docs/CI-集成.md)。
 
 > 内网/回环目标需显式放行：`SSRF_ALLOW_PRIVATE=1 node scripts/one-click-scan.mjs -u http://127.0.0.1:8130/...`
 
@@ -134,6 +134,8 @@ OWASP 分类统一为 `A03:2021-Injection`。**未收录的通道不会被静默
 |------|------|
 | **一键扫描** | 三种形态：Web UI（输入 URL → 点击开始 → 查看报告）/ **CLI 一条命令出全套报告**（`npm run scan -- -u <url>`）/ REST API。CLI 形态见「一键扫描」小节 |
 | **结构化漏洞报告** | HTML / JSON / Markdown / SARIF / CSV / manifest，每条漏洞含**漏洞类型(CWE·OWASP) / 风险等级(CVSS) / 受影响参数 / 利用证明(curl·原始报文) / 修复建议**，且明确标注扫描范围与结论可信度 |
+| **凭据风险标注** | `--passwords` 取回的账号哈希按**格式**识别算法（MySQL native / caching_sha2、PostgreSQL md5 / SCRAM-SHA-256、SQL Server 0x0100 / 0x0200、bcrypt / argon2 等）并标注强度与风险，报告新增「凭据风险」一节。判定**完全离线、不做爆破**，且报告**不回显原始哈希** |
+| **官方 GitHub Action** | 仓库根 `action.yml`（composite）：一条 `uses:` 跑完扫描 → 产出报告套件 → 上传 code scanning → 按退出码判红。引用方式与所需权限见 [docs/CI-集成.md](docs/CI-集成.md) |
 | **9 种检测技术** | union / error / boolean / time / stacked / oob / second_order / inline / nosql |
 | **18 种数据库** | MySQL / PostgreSQL / SQL Server / Oracle / SQLite / MariaDB / TiDB / DM8 / ClickHouse / DB2 / Sybase / Firebird / Informix / H2 / Access / HSQLDB / Derby / MonetDB | **6 种真实引擎全链路验证 + 3 种部分通道验证 + 9 种模板适配**（分层见下，口径自洽由 `npm run readme:check` 守护） |
 
@@ -328,7 +330,7 @@ backend/  ← Express + Node.js
 # 前端测试（485 个用例）
 npm test
 
-# 服务端测试（2758 个用例）
+# 服务端测试（2808 个用例）
 cd server && npm test
 
 # 全部测试
@@ -354,7 +356,7 @@ npm run artifact:drift   # 入库的 e2e 基线产物必须等于当前代码跑
 
 - TypeScript: 零错误
 - 前端测试: 485/485 通过（覆盖率门禁 stmts 94.84 / branch 84.03 / func 77.74，阈值 88/77/67）
-- 服务端测试: 2758 用例（2755 pass / 0 fail / 3 skip，并发口径 2026-10-03 复测；3 skip 为环境依赖显式跳过。覆盖率 lines 91.09 / branch 78.49 / func 81.08，阈值 85/74/77）
+- 服务端测试: 2808 用例（2805 pass / 0 fail / 3 skip，并发口径 2026-10-03 复测；3 skip 为环境依赖显式跳过。覆盖率 lines 91.20 / branch 78.74 / func 81.22，阈值 85/74/77）
 - 一键扫描: `npm run scan -- -u <url>`（CLI 一条命令产出 HTML/JSON/Markdown 全套报告 + manifest，退出码可直接进 CI 门禁）
 - Tamper 插件: 228 个（含 v24 增量 20 个，对齐 sqlmap 官方 tamper 全集，含官方 CRS/libinjection 实测组合 uniontable+odbcbrace）
 - WAF 绕过能力: 200+ 插件链式组合，覆盖 62 个 WAF 厂商指纹识别 + 推荐

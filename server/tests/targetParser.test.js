@@ -208,6 +208,7 @@ test('emptyExtractedData 结构', () => {
     currentUser: undefined,
     users: undefined,
     passwords: undefined,
+    passwordAnalysis: undefined,
     counts: {},
     search: undefined,
   });

@@ -61,6 +61,20 @@ export function mdText(s) {
 }
 
 /**
+ * Markdown **表格单元格**：竖线必须转义，否则会切列、把整张表拆散。
+ *
+ * [拆分 2026-10-03] 自 ReportGenerator.js 移到此处：reportSections.js 也需要它
+ * （凭据风险表），而两处各留一份「转义判据」正是本仓点名过的漂移源。
+ * 参数名/类型名/账号名都可能来自被测系统（不可信输入），一律经此出口。
+ * @param {unknown} s 单元格值（null/undefined → 标记为 '-'，空单元格会被读成「无影响」）
+ * @returns {string}
+ */
+export function mdCell(s) {
+  // `?? '-'` 的空单元格标记必须保留（注释见 ReportGenerator.vulnTypeText 处）
+  return mdText(s ?? '-').replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
+}
+
+/**
  * Markdown **代码位**（行内代码）：按内容里最长的反引号串决定围栏长度。
  *
  * 为什么不能用「反引号前加反斜杠」：CommonMark 明确规定行内代码内部**反斜杠没有转义

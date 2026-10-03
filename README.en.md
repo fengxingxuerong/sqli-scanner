@@ -54,7 +54,9 @@ instead of exposing an unauthenticated scanner.
 ### One-command scan (CLI)
 
 No server required. Validates the target, scans, writes a full report bundle, and emits an
-exit code you can gate CI on.
+exit code you can gate CI on (`0` clean / `2` Critical or High found / `1` run failure).
+A ready-to-copy GitHub Actions workflow with SARIF upload lives in
+[`docs/CI-集成.md`](docs/CI-集成.md) (Chinese).
 
 ```bash
 node scripts/one-click-scan.mjs -u "http://target/page?id=1"
@@ -90,6 +92,12 @@ from a single source of truth — there is no "field present in HTML but missing
 
 The affected-parameter fields are written back onto the finding itself, so a report remains
 readable after it has been detached from the original scan JSON.
+
+When credentials are dumped (`--passwords`), the report gains a **credential-risk** section. Each
+account's hash is identified by **format only** (MySQL native / caching_sha2, PostgreSQL md5 /
+SCRAM-SHA-256, SQL Server `0x0100` / `0x0200`, bcrypt / argon2, and the like), labelled by strength
+and flagged when weak. Identification is entirely offline — no cracking, no networking — and the
+raw hash is never echoed into the report.
 
 ---
 

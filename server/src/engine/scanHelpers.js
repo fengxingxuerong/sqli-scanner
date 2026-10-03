@@ -62,6 +62,9 @@ export function mergeExtracted(target, src) {
   if (src.currentUser !== undefined) target.currentUser = src.currentUser;
   if (src.users !== undefined) target.users = src.users;
   if (src.passwords !== undefined) target.passwords = src.passwords;
+  // [--passwords 升级] 派生字段跟原始串同进同出：本函数是逐字段白名单合并，
+  // 漏一个字段该功能在报告里就是空的（见下方 P0-FIX 注释的同源教训）。
+  if (src.passwordAnalysis !== undefined) target.passwordAnalysis = src.passwordAnalysis;
   if (src.counts) target.counts = { ...(target.counts || {}), ...src.counts };
   // 枚举模式专有字段（--hostname / --is-dba / --schema / --privileges / --roles）
   if (src.hostname !== undefined) target.hostname = src.hostname;
@@ -108,6 +111,7 @@ export function mergeExtractedForResume(current, restored) {
   if (restored.currentUser !== undefined && out.currentUser === undefined) out.currentUser = restored.currentUser;
   if (restored.users !== undefined && out.users === undefined) out.users = restored.users;
   if (restored.passwords !== undefined && out.passwords === undefined) out.passwords = restored.passwords;
+  if (restored.passwordAnalysis !== undefined && out.passwordAnalysis === undefined) out.passwordAnalysis = restored.passwordAnalysis;
   if (restored.counts) out.counts = { ...(restored.counts || {}), ...(out.counts || {}) };
   if (restored.hostname !== undefined && out.hostname === undefined) out.hostname = restored.hostname;
   if (restored.isDba !== undefined && out.isDba === undefined) out.isDba = restored.isDba;

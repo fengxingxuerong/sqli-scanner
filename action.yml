@@ -1,0 +1,198 @@
+# ============================================================================
+# action.yml —— 官方 GitHub Action（composite），把「CI 就绪」从口号变成可引用的一行
+# ============================================================================
+# 为什么是 composite 而不是 docker / node20：
+#   · 本仓是**私有未发布**的源码仓，没有 npm 包，也没有可拉的 docker 镜像；
+#     使用者以 `uses: <owner>/sqli-scanner@vX` 引用时，GitHub 会把这个仓 checkout 到
+#     runner 上，`github.action_path` 即指向该 checkout —— composite 能直接在其中构建/运行，
+#     node20/docker 反而要求本仓先发布产物。
+#   · 因此 action 不做「下载安装」，只做「安装依赖 → 跑 one-click → 上传 SARIF → 判退出码」。
+#
+# 判据一律走 `scripts/one-click-scan.mjs`：它是本仓**唯一**产出全套报告 + manifest +
+# 退出码三分（0/1/2）的入口；直接调 server/bin/cli.js 拿不到 `--formats` 与 manifest。
+# 该脚本引用的每个开关都由 server/tests/actionYaml.wiring.test.js 反向守卫
+# （开关改名/拼错 ⇒ 该测试红，避免 action 静默失效）。
+#
+# ⚠ 权限：upload-sarif 需要 `security-events: write`，见 docs/CI-集成.md。
+# ⚠ 目标可达性：action 只负责扫；被测服务需在 scan 步骤之前已经起来（同 job 或已部署）。
+# ============================================================================
+
+name: 'SQLi Scanner'
+description: 'CI-ready SQL injection scan — SARIF / CVSS / CWE report bundle with gate-friendly exit codes.'
+author: 'fengxingxuerong'
+
+branding:
+  icon: 'shield'
+  color: 'red'
+
+inputs:
+  target:
+    description: 'Target URL to scan, e.g. https://example.com/product?id=1'
+    required: true
+  scope:
+    description: 'Authorized scope, comma-separated domains / CIDRs. Empty = target origin only.'
+    required: false
+    default: ''
+  formats:
+    description: 'Report formats, comma-separated. Supported: html,json,markdown,sarif,csv'
+    required: false
+    default: 'sarif,markdown,json'
+  out:
+    description: 'Output directory, relative to the consumer workspace.'
+    required: false
+    default: 'sqli-report'
+  technique:
+    description: 'Technique subset, e.g. union,error,boolean,time. Empty = engine default pool.'
+    required: false
+    default: ''
+  level:
+    description: 'Detection level 1-5.'
+    required: false
+    default: '1'
+  risk:
+    description: 'Risk level 1-3 (higher enables time/stacked/oob).'
+    required: false
+    default: '1'
+  tamper:
+    description: 'Tamper plugin chain for WAF bypass, comma-separated.'
+    required: false
+    default: ''
+  authorization:
+    description: 'Declare authorization for exploit actions (--authorized). Scanning itself does not need it.'
+    required: false
+    default: 'false'
+  allow-private:
+    description: 'Allow loopback / private / link-local targets (SSRF_ALLOW_PRIVATE=1). For lab targets only.'
+    required: false
+    default: 'false'
+  extra-args:
+    description: 'Extra CLI arguments passed through verbatim, e.g. --test-headers --timeout 20000'
+    required: false
+    default: ''
+  node-version:
+    description: 'Node.js version used to run the scanner.'
+    required: false
+    default: '24'
+  install-deps:
+    description: 'Run npm ci for this action (root + server). Set false if you already installed them.'
+    required: false
+    default: 'true'
+  upload-sarif:
+    description: 'Upload report.sarif to GitHub code scanning. Requires permissions: security-events: write.'
+    required: false
+    default: 'true'
+  fail-on-findings:
+    description: 'Fail the job on Critical/High findings (scanner exit code 2).'
+    required: false
+    default: 'true'
+
+outputs:
+  exit-code:
+    description: 'Scanner exit code: 0 = no Critical/High, 2 = Critical/High found, 1 = run failed.'
+    value: ${{ steps.scan.outputs.exit-code }}
+  report-dir:
+    description: 'Absolute path of the report directory.'
+    value: ${{ steps.scan.outputs.report-dir }}
+  sarif-file:
+    description: 'Absolute path of report.sarif (empty when sarif is not in formats).'
+    value: ${{ steps.scan.outputs.sarif-file }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ inputs.node-version }}
+
+    - name: Install scanner dependencies
+      if: ${{ inputs.install-deps == 'true' }}
+      shell: bash
+      working-directory: ${{ github.action_path }}
+      run: |
+        npm ci --no-audit --no-fund
+        cd server && npm ci --no-audit --no-fund
+
+    - name: Run SQL injection scan
+      id: scan
+      shell: bash
+      working-directory: ${{ github.action_path }}
+      env:
+        SSRF_ALLOW_PRIVATE: ${{ inputs.allow-private == 'true' && '1' || '' }}
+      run: |
+        # set +e：扫描退出码是**产物**（0/1/2 三态都要读到），不能让它直接把 step 打断。
+        set +e
+
+        # --out 必须是绝对路径：本步骤的 cwd 是 action 自己的 checkout（github.action_path），
+        # 相对路径会把报告写进 action 目录、随 runner 一起被丢弃。
+        OUT_DIR="${{ github.workspace }}/${{ inputs.out }}"
+
+        ARGS=( -u "${{ inputs.target }}" -F "${{ inputs.formats }}" -o "$OUT_DIR" )
+
+        if [ -n "${{ inputs.scope }}" ]; then
+          ARGS+=( --scope "${{ inputs.scope }}" )
+        fi
+        if [ -n "${{ inputs.technique }}" ]; then
+          ARGS+=( --technique "${{ inputs.technique }}" )
+        fi
+        ARGS+=( --level "${{ inputs.level }}" --risk "${{ inputs.risk }}" )
+        if [ -n "${{ inputs.tamper }}" ]; then
+          ARGS+=( --tamper "${{ inputs.tamper }}" )
+        fi
+        if [ "${{ inputs.authorization }}" = "true" ]; then
+          ARGS+=( --authorized )
+        fi
+        if [ -n "${{ inputs.extra-args }}" ]; then
+          # extra-args 有意按空格切分（调用方负责不要塞带空格的引号值）
+          read -r -a EXTRA <<< "${{ inputs.extra-args }}"
+          ARGS+=( "${EXTRA[@]}" )
+        fi
+
+        echo "sqli-scanner: node scripts/one-click-scan.mjs ${ARGS[*]}"
+        node scripts/one-click-scan.mjs "${ARGS[@]}"
+        code=$?
+
+        echo "exit-code=$code" >> "$GITHUB_OUTPUT"
+        echo "report-dir=$OUT_DIR" >> "$GITHUB_OUTPUT"
+        case ",${{ inputs.formats }}," in
+          *,sarif,*) echo "sarif-file=$OUT_DIR/report.sarif" >> "$GITHUB_OUTPUT" ;;
+          *)         echo "sarif-file=" >> "$GITHUB_OUTPUT" ;;
+        esac
+
+        # 退出码一步不吞：交给后面的 enforce 步骤判定（那里才是「要不要红」的决策点）。
+        exit 0
+
+    - name: Upload SARIF to code scanning
+      if: ${{ always() && inputs.upload-sarif == 'true' && contains(inputs.formats, 'sarif') }}
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: ${{ github.workspace }}/${{ inputs.out }}/report.sarif
+        category: sqli-scanner
+
+    - name: Enforce scanner exit code
+      shell: bash
+      env:
+        SCAN_EXIT: ${{ steps.scan.outputs.exit-code }}
+        FAIL_ON_FINDINGS: ${{ inputs.fail-on-findings }}
+      run: |
+        # 三态语义（与 docs/CI-集成.md 一致）：
+        #   0 = 未发现 Critical/High       → 绿
+        #   2 = 发现 Critical/High         → fail-on-findings=false 时降级为 warning
+        #   1 = 扫描没跑成（目标不可达等） → **永远红**：把「没扫成」当绿是假安全
+        case "$SCAN_EXIT" in
+          0)
+            exit 0
+            ;;
+          2)
+            if [ "$FAIL_ON_FINDINGS" = "true" ]; then
+              echo "::error::sqli-scanner found Critical/High SQL injection findings."
+              exit 2
+            fi
+            echo "::warning::sqli-scanner found Critical/High findings, but fail-on-findings=false."
+            exit 0
+            ;;
+          *)
+            echo "::error::sqli-scanner did not complete (exit $SCAN_EXIT). See the scan log above — this is NOT a clean result."
+            exit "${SCAN_EXIT:-1}"
+            ;;
+        esac

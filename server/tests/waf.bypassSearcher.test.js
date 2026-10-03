@@ -17,6 +17,7 @@ import {
   isGeneratedChain,
   probeTokensToTokens,
 } from '../src/core/waf/bypass/searcher.js';
+import { buildSemanticIndex } from '../src/core/waf/bypass/semantics.js';
 
 /** token → 保证含该 token 的最小样本 */
 const SAMPLES = {
@@ -174,4 +175,69 @@ test('mergeCandidateChains：空输入安全（不抛、返回数组）', () => 
   assert.deepEqual(mergeCandidateChains(), []);
   assert.deepEqual(mergeCandidateChains(null, null), []);
   assert.deepEqual(mergeCandidateChains([], [null, { plugins: [] }]), []);
+});
+
+// ── [批次C 2026-10-03] 减标点补位 + 三链组合 ──────────────────────────────────
+// 背景：covers=0 的 reducesPunct 插件（dash2hash）此前被 `.filter(covers > 0)` 挡在
+// 候选池外 ⇒ CRS 标点预算方向（942460/942431）唯一实证有效项从生成器里消失，
+// 实证首选链 dash2hash×hexliterals（wafRecommend OPERATOR_SWAP_CHAINS[0]/[3] 两种
+// 顺序都在案）不可能被生成。以下用例钉住这两个维度，撤掉实现即红。
+
+test('★减标点补位：拦 quote 时必须生成实证首选形态（dash2hash×hexliterals 两个顺序）', () => {
+  const r = planChainsByProfile({ blockedTokens: ['quote'], maxChains: 12 });
+  const shapes = r.chains.map((c) => c.plugins.join('+'));
+  assert.ok(shapes.includes('hexliterals+dash2hash'), `缺 [hexliterals,dash2hash]：${shapes.join(' / ')}`);
+  assert.ok(shapes.includes('dash2hash+hexliterals'), `缺 [dash2hash,hexliterals]（实证两序都在案）：${shapes.join(' / ')}`);
+  // 覆盖声明不受补位影响：补位者只减标点，不抢 covers
+  const pair = r.chains.find((c) => c.plugins.join('+') === 'hexliterals+dash2hash');
+  assert.deepEqual(pair.covers, ["'"], '补位链的 covers 应来自消除者（quote）');
+  assert.equal(pair.source, 'pair+punct');
+});
+
+test('减标点插件单独不占定向名额（covers=0 ⇒ 不产生单插件链，那是盲试）', () => {
+  const r = planChainsByProfile({ blockedTokens: ['union'], maxChains: 20 });
+  const solo = r.chains.find((c) => c.plugins.length === 1 && c.plugins[0] === 'dash2hash');
+  assert.equal(solo, undefined, 'dash2hash 不消除任何被拦词，不得作为单插件候选');
+});
+
+test('★三链组合：三族同时被拦时能生成「消除者×2 + 减标点」的全覆盖链', () => {
+  // quote + space + comment：hexliterals（LITERAL，quote）/ space2comment（WHITESPACE，space）
+  // / dash2hash（标点）。'comment'（--）当前无消除者（dash2hash 被机械检验钉死为不消除
+  // '--'），故 covers 应为 quote+space 两族 —— 这正是「双链覆盖不满、需要三链」的形态。
+  const r = planChainsByProfile({ blockedTokens: ['quote', 'space', 'comment'], maxChains: 20 });
+  const triples = r.chains.filter((c) => c.plugins.length === 3);
+  assert.ok(triples.length > 0, `应有三链组合，实得：${r.chains.map((c) => c.plugins.join('+')).join(' / ')}`);
+  const best = triples[0];
+  assert.ok(best.covers.length >= 2, `三链组合覆盖数应 ≥2，实得 ${best.covers.join(',')}`);
+  // 三链必须异类别（一个消除者一个类别，补位者第三类）
+  const cats = best.plugins.map((p) => {
+    const idx = buildSemanticIndex();
+    return idx.get(p)?.category;
+  });
+  assert.equal(new Set(cats).size, 3, `三链应覆盖三个不同语义类别，实得 ${cats.join(',')}`);
+});
+
+test('★机械检验：补位链与三链声称的 covers 必须被整链真实消除（不采信自报）', () => {
+  const cases = [
+    { blocked: ['quote'], chain: 'hexliterals+dash2hash' },
+    { blocked: ['quote'], chain: 'dash2hash+hexliterals' },
+    { blocked: ['quote', 'space', 'comment'], anyTriple: true },
+  ];
+  let checked = 0;
+  for (const { blocked, chain, anyTriple } of cases) {
+    const r = planChainsByProfile({ blockedTokens: blocked, maxChains: 20 });
+    const target = anyTriple
+      ? r.chains.find((c) => c.plugins.length === 3)
+      : r.chains.find((c) => c.plugins.join('+') === chain);
+    assert.ok(target, `候选里找不到 ${chain || '三链'}：${r.chains.map((c) => c.plugins.join('+')).join(' / ')}`);
+    for (const token of target.covers) {
+      const sample = SAMPLES[token];
+      assert.ok(sample !== undefined, `token「${token}」缺样本映射`);
+      const re = new RegExp(token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+      const out = applyTampers(sample, { config: {} }, target.plugins);
+      assert.ok(!re.test(out), `链 [${target.plugins.join(',')}] 声称消除「${token}」，实测仍存在：${JSON.stringify(out)}`);
+      checked += 1;
+    }
+  }
+  assert.ok(checked >= 3, `实际检验的链-词组合只有 ${checked} 个，疑似断言被跳过`);
 });

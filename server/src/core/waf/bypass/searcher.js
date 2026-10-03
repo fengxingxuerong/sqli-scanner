@@ -14,6 +14,11 @@
 //   而不是"按黑名单从 228 个插件里组合"。本例：目标拦 `union`+`select` 时，
 //   静态表里可能根本没有"同时消除 union 与 select 且不引入新标点"的那条链。
 //   → 本模块用 semantics 索引（T1）作为弹药库，组合出候选并排序。
+//   [批次C 2026-10-03] 组合维度从「单/双」扩到「单/双/三 + 减标点补位」：
+//   covers=0 的 reducesPunct 插件（dash2hash，CRS 标点预算方向唯一实证有效项）此前
+//   进不了候选池，实证首选链 dash2hash×hexliterals（两序）不可能被生成；被拦词族 ≥3
+//   时双链覆盖不满。两个缺口同日修（新增用例见 waf.bypassSearcher.test.js 的
+//   「减标点补位」「三链组合」两条）。
 //
 // ■ 缺口 ②（链**有效性**验证）与 ③（交战记录入报告）不在本模块：②属 chainVerify 的
 //   判据扩展（需真靶场验收），③属报告层。两者均已在待办卡里单列，勿在此处夹带实现。
@@ -98,7 +103,7 @@ function scoreMeta(meta, blocked) {
  * @param {number} [p.maxChains] 最多返回多少条（默认 6；调用方通常再截到 MAX_CHAINS）
  * @param {number} [p.maxPairPool] 双插件组合的候选池上限（默认 8，防组合爆炸）
  * @param {string} [p.sample] 标点代价评估样本 payload
- * @returns {{chains: Array<{plugins:string[], covers:string[], punctDelta:number, source:'single'|'pair', isCodec:boolean}>, blocked:string[], emptyReason?:string}}
+ * @returns {{chains: Array<{plugins:string[], covers:string[], punctDelta:number, source:'single'|'pair'|'pair+punct'|'punct+pair'|'triple', isCodec:boolean}>, blocked:string[], emptyReason?:string}}
  */
 export function planChainsByProfile({
   blockedTokens = [],
@@ -137,7 +142,10 @@ export function planChainsByProfile({
   const chains = [];
   const seen = new Set();
   const push = (plugins, source, isCodec = false) => {
-    const key = [...plugins].sort().join('+');
+    // [批次C 2026-10-03] 去重键改为**有序**拼接 —— 变换复合不可交换
+    // （hexliterals∘dash2hash ≠ dash2hash∘hexliterals，wafRecommend 实证两种顺序都在案
+    // 且都是首选链）。旧的「排序后集合键」会把两个顺序折叠成一条，静默丢掉另一序的候选。
+    const key = plugins.join('+');
     if (seen.has(key)) return;
     // 交给既有守卫复核（terminal / 未注册 / dbms）—— 不自建第二套判据
     const v = tamperRegistry.validateChain(plugins, dbms ? { dbms } : {});
@@ -164,6 +172,52 @@ export function planChainsByProfile({
     for (let j = i + 1; j < pool.length; j++) {
       if (pool[i].category === pool[j].category) continue;
       push([pool[i].name, pool[j].name], 'pair', false);
+    }
+  }
+
+  // ── 减标点补位（2026-10-03 批次C）─────────────────────────────────────
+  // covers=0 的 reducesPunct 插件（dash2hash）此前被 `.filter(covers > 0)` 挡在候选池外，
+  // 而 CRS 系 WAF 真正卡人的是 942460/942431 的「标点预算」，wafRecommend 实测 dash2hash
+  // 是该方向唯一有效项（tamper on 2/5 → 5/5），实证首选链 ['dash2hash','hexliterals'] 与
+  // ['hexliterals','dash2hash'] **两个顺序都在案**（变换顺序影响输出形态，两种都赢过）。
+  // ⇒ 生成器必须能把「定向消除者」与「减标点补位」组到同一条链上，两个顺序都生成。
+  //    补位者单独不产生单插件链（covers=0 ⇒ 不进 singles，那是盲试）。
+  const punctPool = sel.usable
+    .filter((name) => (idx.get(name)?.reducesPunct) === true)
+    .slice(0, 2);
+  for (const s of pool.slice(0, 4)) {
+    for (const pn of punctPool) {
+      if ((idx.get(pn)?.category) === s.category) continue; // 同类别不互补（同上）
+      push([s.name, pn], 'pair+punct', false);
+      push([pn, s.name], 'punct+pair', false);
+    }
+  }
+
+  // ── 三链组合：被拦词族 ≥3 时双链覆盖不满 ──
+  // 典型 CRS 画像：quote + space + comment 同时被拦 —— 两个消除者 + 一个减标点补位
+  // 才是一条「全覆盖」链。⚠️ 不能直接用 pool 前 3 名两两配：quote 被拦时前几名可能
+  // 全是 LITERAL 类（hexliterals/quote2hex/…），同类别互相 skip ⇒ 三链恒空。
+  // 正确形态：**每个类别取它的最优消除者**，再跨类别取前 2 名组合（有界：≤3 类别 ⇒
+  // ≤3 个三元组；纯函数零请求，名额仍由调用方的 MAX_CHAINS 截断）。
+  const bestByCat = new Map();
+  for (const s of pairPool) {
+    const cur = bestByCat.get(s.category);
+    const better =
+      !cur ||
+      s.covers > cur.covers ||
+      (s.covers === cur.covers && s.punct < cur.punct) ||
+      (s.covers === cur.covers && s.punct === cur.punct && s.name.localeCompare(cur.name) < 0);
+    if (better) bestByCat.set(s.category, s);
+  }
+  const catBest = [...bestByCat.values()]
+    .sort((a, b) => (b.covers - a.covers) || (a.punct - b.punct) || a.name.localeCompare(b.name))
+    .slice(0, 3);
+  const pn0 = punctPool[0];
+  const pnCat = pn0 ? (idx.get(pn0)?.category) : undefined;
+  for (let i = 0; i < catBest.length; i++) {
+    for (let j = i + 1; j < catBest.length; j++) {
+      if (!pn0 || pnCat === catBest[i].category || pnCat === catBest[j].category) continue;
+      push([catBest[i].name, catBest[j].name, pn0], 'triple', false);
     }
   }
 
@@ -199,7 +253,10 @@ export function mergeCandidateChains(staticChains = [], generatedChains = []) {
   const seen = new Set();
   for (const c of [...(staticChains || []), ...(generatedChains || [])]) {
     if (!c || !Array.isArray(c.plugins) || c.plugins.length === 0) continue;
-    const key = [...c.plugins].sort().join('+');
+    // [批次C 2026-10-03] 与 planChains 的 push 同口径：**有序**去重（变换复合不可交换）。
+    // 旧的排序集合键会把静态表里实证过的两种顺序（OPERATOR_SWAP_CHAINS[0]/[3]）折叠成
+    // 一条 —— 静态链自身就被吃掉一半，与「保守回退」的初衷相悖。
+    const key = c.plugins.join('+');
     if (seen.has(key)) continue;
     seen.add(key);
     out.push({ vendor: c.vendor || (c.plugins.length ? `bypass:${c.plugins.join('+')}` : 'unknown'), plugins: [...c.plugins] });

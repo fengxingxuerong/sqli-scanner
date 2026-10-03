@@ -2,6 +2,7 @@ import { emptyExtractedData } from './models.js';
 import { logger } from '../core/logger.js';
 import { defaults } from '../config/defaults.js';
 import { SYS_DBS } from './scanHelpers.js';
+import { analyzePasswords } from './extraction/hashAnalysis.js';
 import * as eventBus from '../core/eventBus.js';
 
 /**
@@ -243,6 +244,11 @@ export async function extractByScope(sm, scanId, ctx, scope) {
       case 'passwords': {
         // 凭据收割（对标 sqlmap --passwords）：返回逗号分隔 user:hash 串或 null（权限不足静默降级）
         data.passwords = await ensureExtractor('enumeratePasswords')(ctx);
+        // 离线解读：原始串保持原样（既有契约不变），另挂一份**派生**结构 ——
+        // 算法识别 + 强度/风险标注，让「读到哈希」变成「知道这条凭据值多少」。
+        // 纯函数、不联网、不爆破（见 extraction/hashAnalysis.js 顶部诚实边界）；
+        // 提取不到（null）时同样为 null，可区分「未提取」与「提取为空」。
+        data.passwordAnalysis = analyzePasswords(data.passwords, { dbms: ctx?.dbms || null });
         break;
       }
       case 'hostname': {
