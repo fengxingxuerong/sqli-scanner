@@ -4,6 +4,36 @@
 
 ## [Unreleased]
 
+### 2026-10-03 批次 4 · 交付面：官方 composite Action + `--passwords` 凭据风险标注 + 报告章节拆分
+
+竞品对标（`docs/竞品对标分析-2026-10-03.md`）暴露的两条交付面缺口一次补齐，另按体积纪律清掉一个上帝对象。
+
+- **官方 GitHub Action（补上 CI 定位的空位）**：仓库根新增 `action.yml`（composite）—— 一条 `uses:`
+  跑完扫描 → 产出报告套件 → 上传 code scanning → 按退出码判红；15 inputs / 3 outputs。选 composite
+  而非 docker/node20：仓库未发布（无 npm 包 / 镜像），`github.action_path` 指向 checkout 可直接构建。
+  入口 `one-click-scan.mjs`，`--out` 取 `github.workspace` 绝对路径；SARIF 步 `if: always()` +
+  formats 门控；enforce 步三态（0 绿 / 2 由 `fail-on-findings` 决定 / 1 恒红）。
+- **`--passwords` 从「读到哈希」→「认哈希算法 + 标注风险」**：新增纯函数
+  `extraction/hashAnalysis.js`（`classifyHash` / `analyzePasswords`），按**格式**识别算法
+  （MySQL native / caching_sha2、PostgreSQL md5 / SCRAM-SHA-256、SQL Server `0x0100` / `0x0200`、
+  bcrypt / argon2 等）并逐条标强度 / 风险；`extractScope` 派生 `passwordAnalysis`（原始 `passwords`
+  串契约不变），`models` / `scanHelpers` 同步字段（含 resume 恢复）。**诚实边界**：判定完全离线、
+  不联网、不爆破，报告**不回显原始哈希**（文件头写明）。
+- **报告章节拆分（消上帝对象）**：`ReportGenerator` 的章节渲染器上提到 `reportSections.js`
+  （**52 → 36.5KB**），`mdCell` 移入 `reportHtml` 并 re-export（既有导入路径不变）；报告新增
+  「凭据风险」一节（md + html，账号 / 主机名过 `mdCell` / `esc` 转义）。无循环依赖。
+- **文档**：`README.md` 补两行 feature（凭据风险标注 / 官方 GitHub Action）+ CI 段；`README.en.md`
+  补英文对应段（按「数字只在中文 README 声明」的纪律，**不重复数字**）。
+- **测试**：新增 46 条 —— hashAnalysis 20 / passwords 接线 7 / 报告凭据风险 9 / `action.yml` 接线 10
+  （含自证守卫、每个 ARGS flag 都被 `parseArgs` 接受、inputs / outputs 引用闭合；不依赖 `yaml` 包，
+  因 CI test-server job 只装 `server/node_modules`）。缺陷注入复验 3 处（`--technique` 拼错 /
+  input `scope`→`scopes` / 移除 HTML 行 `esc(`），均见红后还原。
+- **门禁**：lint / typecheck / arch:guard / refs:check / modules:check / facts:check / readme:check /
+  merge:check 全绿；服务端 2805 pass / 0 fail。
+- **口径更正**：`ops-runbook.md` 旧列「仍待拆 `extractionMaps.js` 56KB（按 DBMS 拆）」为过期信息 ——
+  该文件 2026-10-01 已拆成 16 行 facade，`Exploiter.js` / `Detector.js` / `ScanManager.js` 亦已收口；
+  实测 `server/src` 现无文件超 100KB / 1200 行。
+
 ### 2026-10-03 批次 3 · WAF 链侧能力：定向变异搜索器补「减标点补位 + 三链组合 + 有序去重」
 
 评价文档（`docs/项目评价-2026-10-03.md` §七.3）定性：提打穿链数必须动**链侧**，不是再写
