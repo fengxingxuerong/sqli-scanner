@@ -128,6 +128,13 @@ export function buildConfig(args) {
     ratePerSec: args.ratePerSec,
     enableExtract: args.dump || enumActive,
   };
+  // [2026-10-03 CI #131] rateGroup 必须显式透传 —— buildConfig 是显式键清单，不加这行
+  // CLI 批量生成的组 id 就到不了 target.config，getScanClient 拿到 undefined ⇒ 每个目标
+  // 退化成独立的 per-scan 桶（实测 CI Linux：3 目标 × 6 req/s ≈ 18 req/s，「总量 ≤ rate」
+  // 的保证静默失效；本机因引擎 CPU 处理慢、自然发包率到不了桶上限而被掩盖）。
+  // 形态收紧与 REST 侧 scalarsCore 同口径：值由 cli.js 内部生成（batch-<base36>-<rand>，
+  // 落在 [A-Za-z0-9_-] 内），这里不做二次校验；若未来开放成 CLI 旗标，必须先加同款字符集收紧。
+  if (args.rateGroup) config.rateGroup = args.rateGroup;
   if (args.level != null) config.level = Math.max(1, Math.min(5, args.level));
   else if (args.crawl || args.forms) config.level = 5; // [UX] --crawl/--forms 隐含 level 5（TargetParser 要求）
   if (args.risk != null) config.risk = Math.max(1, Math.min(3, args.risk));

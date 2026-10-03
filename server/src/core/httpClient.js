@@ -112,6 +112,7 @@ import { _assertEgressAllowed } from './http/scanScope.js';
 import {
   createBucket, removeBucket, removeRequestCount,
   jarFor, clearJar, _captureCookies, _evictRequestCounts, bucketForRate, _resolveRateBucket,
+  releaseGroupBucket,
 } from './http/sessionState.js';
 import { undiciAgentInsecure, _rawRequest, _finishResponse, _rawUndici } from './http/transport.js';
 import { _followRedirects, _followRedirectsH2 } from './http/redirects.js';
@@ -128,6 +129,11 @@ export class HttpClient {
     this.bucket = new TokenBucket(defaults.ratePerSec);
     this.buckets = new Map();
     this.rateBuckets = new Map();
+    // [2026-10-03 CI #131] 组桶（rateGroup）引用计数：_scanRateKeys 记「哪个扫描挂在哪个组」，
+    // _groupRefs 记「每组还有几个活成员」——最后一个成员退役时 releaseGroupBucket 删桶，
+    // 防 REST 长驻进程里每批一个 TokenBucket 的无界泄漏。
+    this._scanRateKeys = new Map();
+    this._groupRefs = new Map();
     // [sqlmap 对标] --max-requests：按 scanId 跟踪请求计数，达上限后拒绝新请求
     this._requestCounts = new Map();
     // [P2-4 --auth-type=Digest] 每主机 Digest 挑战状态缓存：{ challenge, nc, username, password }
@@ -191,11 +197,20 @@ export class HttpClient {
     //        请求仍挂在旧桶的链上**，新桶从零开始 ⇒ 并发下的"总速率 ≤ ratePerSec"不再成立。
     //   per-scan 分支保持原样（每次都建），既有行为不变。
     if (!(rateKey && this.buckets.has(bucketKey))) this.createBucket(bucketKey, ratePerSec);
+    if (rateKey && !this._scanRateKeys.has(scanId)) {
+      // [2026-10-03 CI #131] 组桶引用计数注册（同一 scanId 重复 forScan 不重复计数 ——
+      // getScanClient 有缓存，这里只是防御）。退役时 releaseGroupBucket 按 scanId 回收。
+      this._scanRateKeys.set(scanId, rateKey);
+      this._groupRefs.set(rateKey, (this._groupRefs.get(rateKey) || 0) + 1);
+    }
     const self = this;
     return {
-      request: (opts) => self.request({ ...opts, scanId, rateKey: bucketKey }),
+      // ratePerSec 随视图注入：_resolveRateBucket 的组桶惰性重建（bucket 被外力清掉后的
+      // 自愈路径）要用它决定重建速率 —— 不带的话 effectiveRate=undefined ⇒ 重建成**不限速**
+      // 桶（rateGroup.test.js 惰性重建用例抓出来的，别删 ratePerSec）。
+      request: (opts) => self.request({ ...opts, scanId, rateKey: bucketKey, ratePerSec }),
       // [sqlmap 对标] --null-connection：per-scan 客户端也暴露 headRequest，自动注入 scanId
-      headRequest: (url, opts) => self.headRequest(url, { ...opts, scanId, rateKey: bucketKey }),
+      headRequest: (url, opts) => self.headRequest(url, { ...opts, scanId, rateKey: bucketKey, ratePerSec }),
     };
   }
 
@@ -362,6 +377,7 @@ export class HttpClient {
 HttpClient.prototype.undiciAgentInsecure = undiciAgentInsecure;
 HttpClient.prototype.createBucket = createBucket;
 HttpClient.prototype.removeBucket = removeBucket;
+HttpClient.prototype.releaseGroupBucket = releaseGroupBucket;
 HttpClient.prototype.removeRequestCount = removeRequestCount;
 HttpClient.prototype.jarFor = jarFor;
 HttpClient.prototype.clearJar = clearJar;

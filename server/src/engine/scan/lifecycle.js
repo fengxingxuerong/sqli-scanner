@@ -62,6 +62,9 @@ export function _disposeScan(scanId) {
     eventBus.dispose(scanId);
     if (this._scanClients.has(scanId)) {
       if (typeof this.httpClient.removeBucket === 'function') this.httpClient.removeBucket(scanId);
+      // [2026-10-03 CI #131] 共享组桶（rateGroup）引用计数回收：removeBucket 只删 per-scan 桶，
+      // 组桶挂在组 id 上删不到 ⇒ REST 长驻进程每批泄漏一个 TokenBucket。最后一个成员退役才删。
+      if (typeof this.httpClient.releaseGroupBucket === 'function') this.httpClient.releaseGroupBucket(scanId);
       // [sqlmap 对标] --max-requests：清理请求计数（防 Map 无界增长）
       if (typeof this.httpClient.removeRequestCount === 'function') this.httpClient.removeRequestCount(scanId);
       // [P1-FIX 2026-09-05] Cookie Jar 随扫描退役清理（防跨扫描会话泄漏 + Map 无界增长）

@@ -98,4 +98,56 @@ describe('[rateGroup] 限速解析优先级', () => {
     const onlyScan = c._resolveRateBucket({ scanId: 'scan-p' }, 10);
     assert.equal(onlyScan, c.buckets.get('scan-p'), '无 rateKey 时回落到 scanId 桶（既有行为）');
   });
+
+  // [2026-10-03 CI #131] 组桶查不到时**惰性重建**而不是回退 —— 旧行为是静默落到
+  // scanId/rate 桶，「单桶总量保证」在异常路径下悄悄变成每扫描各一个桶。
+  test('★组桶缺失时惰性重建：请求走完后组 key 下必须重新有桶（不回退 per-scan）', async () => {
+    const c = new HttpClient();
+    const a = c.forScan('scan-a', 10, 'grp-resurrect');
+    c.buckets.delete('grp-resurrect'); // 模拟组桶被外力清掉（如旧版本退役逻辑 / Map 被动过）
+    await a.request({ method: 'GET', url: `${baseUrl}/x` });
+    assert.ok(c.buckets.has('grp-resurrect'), '请求后组 key 必须重新有桶 —— 回退 per-scan/ rate 桶 = 总量保证失效');
+    assert.equal(c.buckets.get('scan-a'), undefined, '绝不能在 scanId 下建桶（那是共享语义的死亡）');
+    const rebuilt = c.buckets.get('grp-resurrect');
+    assert.equal(rebuilt.ratePerSec, 10, '重建桶的速率取 effectiveRate（与 forScan 建桶口径一致）');
+    // 重建后仍共享：b 视图（同组）扣的是同一个桶对象
+    const b = c.forScan('scan-b', 10, 'grp-resurrect');
+    const before = rebuilt.tokens;
+    await b.request({ method: 'GET', url: `${baseUrl}/y` });
+    assert.ok(rebuilt.tokens < before || c.buckets.get('grp-resurrect') === rebuilt, '重建后的组桶必须仍是同一个对象（共享不因重建断开）');
+  });
+});
+
+describe('[rateGroup] 组桶引用计数回收（2026-10-03 CI #131）', () => {
+  test('最后一个成员退役才删桶；先退出的不拆还在跑的桶', () => {
+    const c = new HttpClient();
+    c.forScan('scan-a', 10, 'grp-refs');
+    c.forScan('scan-b', 10, 'grp-refs');
+    const bucket = c.buckets.get('grp-refs');
+    assert.ok(bucket, '前提：组桶已建');
+    assert.equal(c.releaseGroupBucket('scan-a'), false, '还有成员在用 ⇒ 桶必须留着');
+    assert.equal(c.buckets.get('grp-refs'), bucket, '先退出者不得删除组桶对象');
+    assert.equal(c.releaseGroupBucket('scan-b'), true, '最后一个成员退役 ⇒ 桶删除（返回 true）');
+    assert.equal(c.buckets.get('grp-refs'), undefined, '组桶已从注册表移除（REST 长驻进程防泄漏）');
+  });
+
+  test('未注册的 scanId 释放是安全 no-op；同一 scanId 重复注册不重复计数', () => {
+    const c = new HttpClient();
+    assert.equal(c.releaseGroupBucket('scan-ghost'), false, '未注册 scanId ⇒ no-op，不抛错');
+    c.forScan('scan-dup', 10, 'grp-dup');
+    c.forScan('scan-dup', 10, 'grp-dup'); // 防御：getScanClient 有缓存，这里模拟意外重复调用
+    assert.equal(c.releaseGroupBucket('scan-dup'), true, '重复注册只计一次 ⇒ 一次释放即删');
+    assert.equal(c.buckets.get('grp-dup'), undefined);
+  });
+
+  test('组桶删光后新成员加入 ⇒ 建新桶照常共享（重建路径与 forScan 汇合）', () => {
+    const c = new HttpClient();
+    c.forScan('scan-e1', 10, 'grp-cycle');
+    c.releaseGroupBucket('scan-e1');
+    c.forScan('scan-e2', 10, 'grp-cycle');
+    c.forScan('scan-e3', 10, 'grp-cycle');
+    assert.ok(c.buckets.get('grp-cycle'), '新成员加入应重建组桶');
+    assert.equal(c.releaseGroupBucket('scan-e2'), false);
+    assert.equal(c.releaseGroupBucket('scan-e3'), true);
+  });
 });

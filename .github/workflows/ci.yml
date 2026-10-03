@@ -410,6 +410,12 @@ jobs:
           MYSQL_PASSWORD: root
           MYSQL_DATABASE: sqli_lab
         timeout-minutes: 6
+      # [2026-10-03] 该步会重写**被跟踪的** e2e/waf-lab/results/compare-real.md（每次跑数字
+      # 都不同）⇒ 之后的全量验收门禁自陈「工作区 dirty：本报告不对应任何提交」，版本凭证
+      # 永远失效。还原成 HEAD 版本：本地跑时作者自己决定提交哪份数字，CI 只做门禁不留痕。
+      - name: 还原 WAF A/B 重写的结果文件（防验收报告自陈 dirty）
+        if: always()
+        run: git checkout -- e2e/waf-lab/results/compare-real.md
       # 红队评测靶场（ground-truth 真值对照 + sqlmap 同题对比）：独立常驻进程，
       # CI 环境可能缺 PostgreSQL（D:/pg-smoke 类本地路径），故失败不阻塞——
       # 门禁会把该套件标为 SKIP，其余套件照常判定。

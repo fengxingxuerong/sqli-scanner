@@ -15,6 +15,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { guardScalarsCore } from '../src/api/scanGuard/scalarsCore.js';
+import { buildConfig } from '../bin/cli/config.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(HERE, '..', '..');
@@ -36,11 +37,20 @@ test('① 生产侧：forScan 支持第三参 rateKey，且组桶已存在时不
   );
 });
 
-test('② 限速解析：rateKey 优先于 scanId（顺序反了组桶永远拿不到）', () => {
-  assert.match(sessionState, /opts\.rateKey && this\.buckets\.get\(opts\.rateKey\)/, '_resolveRateBucket 没优先查 rateKey');
-  const pref = sessionState.indexOf('opts.rateKey && this.buckets.get(opts.rateKey)');
-  const scan = sessionState.indexOf('opts.scanId && this.buckets.get(opts.scanId)');
-  assert.ok(pref >= 0 && scan >= 0 && pref < scan, 'rateKey 的查询必须排在 scanId **之前**');
+test('② 限速解析：rateKey 独占优先 + 缺失时惰性重建（绝不回退 per-scan 桶）', () => {
+  // [2026-10-03 CI #131 加固] 旧形态「rateKey 查不到 → 落 scanId 桶」会把「单桶总量保证」
+  // 静默退化成每扫描各一个桶。新契约：rateKey 命中即返回；查不到就用同一个 key 惰性重建
+  // （与本组其它成员继续共享）；scanId 桶只在**没有** rateKey 时才可达。
+  assert.match(sessionState, /if \(opts\.rateKey\) \{/, '_resolveRateBucket 没有 rateKey 独占分支');
+  assert.match(
+    sessionState,
+    /this\.buckets\.get\(opts\.rateKey\) \|\| this\.createBucket\(opts\.rateKey/,
+    '组桶缺失时必须惰性重建（同 key），不允许回退 scanId/rate 桶',
+  );
+  const rateKeyBranch = sessionState.indexOf('if (opts.rateKey) {');
+  const scanLookup = sessionState.indexOf('opts.scanId && this.buckets.get(opts.scanId)');
+  assert.ok(rateKeyBranch >= 0 && scanLookup >= 0 && rateKeyBranch < scanLookup, 'rateKey 分支必须先于 scanId 回落（提前 return 才能保证独占）');
+  assert.match(sessionState, /export function releaseGroupBucket/, '组桶引用计数释放函数缺失（REST 长驻进程会泄漏 TokenBucket）');
 });
 
 test('③ 扫描视图：getScanClient 把 cfg.rateGroup 传给 forScan', () => {
@@ -60,6 +70,20 @@ test('⑤ CLI 批量：-m 与 -l 两条路径都开组桶（不是只有一条�
   assert.ok(hits >= 2, `批量两条路径都应建组桶，实得 ${hits} 处`);
   // 组桶要求所有成员传同一个 ratePerSec ⇒ 不能再除以并发度
   assert.doesNotMatch(cli, /ratePerSec: perScanRate/, '仍在按并发度均分 ⇒ 与组桶语义冲突（总量会被两道闸夹住）');
+});
+
+// [2026-10-03 CI #131] 本条就是本次事故的判据缺口：⑤ 只钉了「CLI 生成了组 id 变量」，
+// 没钉「组 id 进了 target.config」—— buildConfig 是显式键清单，漏一行透传就让组桶
+// 在 CLI 路径整体失效（3 目标各建各的桶，CI 实测 18 req/s > 上限 6）。
+// 判据用**行为**（真调 buildConfig），不只用源码文本 —— 文本能验「写了这行」，
+// 行为能验「这行真的接上了」。
+test('⑤b CLI buildConfig：rateGroup 必须透传进 config（漏了就是本次 CI 双红的根因）', () => {
+  const cfgSrc = read('server/bin/cli/config.js');
+  assert.match(cfgSrc, /args\.rateGroup/, 'buildConfig 没有透传 rateGroup —— CLI 批量的组桶在源头就被丢了');
+  const withGroup = buildConfig({ rateGroup: 'batch-abc_X1', level: 1, concurrencyDet: 1 });
+  assert.equal(withGroup.rateGroup, 'batch-abc_X1', 'rateGroup 必须原样进 config（getScanClient 从 target.config 读它）');
+  const noGroup = buildConfig({ level: 1 });
+  assert.equal(noGroup.rateGroup, undefined, '不给组 id 时不得凭空造键（getScanClient 靠 undefined 走 per-scan 旧路径）');
 });
 
 test('⑥ 行为：形态收紧 —— 合法收下，非法整体丢弃', () => {

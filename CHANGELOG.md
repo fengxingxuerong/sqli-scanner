@@ -4,6 +4,41 @@
 
 ## [Unreleased]
 
+### 2026-10-03 批次 · CI #131 双红收口：CLI 批量组桶断链（rateGroup 根因）+ 组桶生命周期补全
+
+CI #131（`e2e-self-contained` 与 `acceptance` 两个 job）同根失败：batch-lab C1 限速判据
+**3 目标 × 6 req/s ≈ 19.53 req/s（上限 6）**。取证（CI artifact）+ 速率账
+（237 请求 / 12.5s ≈ 3 个独立桶，共享桶应为 ≥39.5s）锁定根因：
+
+- **根因（交付级）**：`bin/cli/config.js` 的 `buildConfig()` 是显式键清单，CLI 批量生成的
+  组 id（`rateGroup`）**没有透传** ⇒ `getScanClient` 拿到 undefined ⇒ 每个目标各建一个
+  per-scan 桶，「整批共用一个令牌桶、总量 ≤ rate」的保证在 CLI 路径整体静默失效。
+  REST 路径（scanGuard scalarsCore）一直是对的 —— 断的只有 CLI。本机没红是**被 CPU 掩盖**：
+  引擎逐请求的处理开销把自然发包率压在判据之下，CI 的快机器才让它显形（与 09-09 代理
+  假阴性同款教训：单机绿 ≠ 判据验过）。
+- 修复：`buildConfig` 透传 `rateGroup`（值由 cli.js 内部生成，形态与 REST 收紧同口径）。
+- **接线守卫补判据缺口（⑤b）**：原 ⑤ 只钉「CLI 生成了组 id 变量」，没钉「组 id 进了
+  target.config」—— 又一次「登记 ≠ 有入口」。⑤b 改为**真调 buildConfig** 断言透传与
+  缺省不造键；缺陷注入复验：注释掉透传行 ⇒ ⑤b 红（杀）。
+- **_resolveRateBucket 惰性重建**：rateKey 查不到时不再静默回退 per-scan/rate 桶（回退 =
+  总量保证在异常路径下悄悄失效），改为同 key 惰性重建继续共享。forScan 视图现在把
+  `ratePerSec` 随请求注入 —— 单测抓出首版实现的重建成**不限速**桶缺陷（effectiveRate
+  为 undefined ⇒ createBucket 归一为 0）后补的，重建速率与建桶口径一致。
+- **组桶引用计数回收（防泄漏）**：`_disposeScan` 的 `removeBucket(scanId)` 删不到挂在组 id
+  上的桶 ⇒ REST 长驻进程每跑一批泄漏一个 TokenBucket。forScan 注册（scanId→rateKey +
+  组内计数），退役时 `releaseGroupBucket`：最后一个成员退役才删桶，先退出的不拆还在跑的
+  成员脚下的桶。
+- **CI 卫生**：acceptance job 的 WAF A/B 步骤会重写被跟踪的
+  `e2e/waf-lab/results/compare-real.md` ⇒ 验收报告每次自陈「工作区 dirty，不对应任何提交」，
+  版本凭证恒失效。步骤后 `git checkout --` 还原（`if: always()`）。
+- 测试：`rateGroup.test.js` +4 条（惰性重建不回退/重建速率正确、引用计数三态、重复注册
+  防御、删光后再入组）、`rateGroup.wiring.test.js` ②⑤ 更形 + 新增 ⑤b。
+- e2e 实测：batch-lab C1 **237 请求 / 39.2s ⇒ 6.16 req/s**（上限 6，判据 ≤7.5），
+  C2 对照 63.61 req/s（限制来自限速的证明），C3 动态吃满与总量保证均过，exit 0。
+- 环境取证附记：本机 `~/.local/bin/env` 是吞参数恒 0 的空壳，`env -u …` 前缀的命令
+  **从未真正执行**（本次会话实证）—— 靶场类命令直跑即可，引擎的 proxyBypassLocal
+  默认豁免回环目标，系统代理不污染 127.0.0.1 靶场。
+
 ### 2026-10-02 批次（第八批）· headless 浏览器爬取（crawlBrowser，实战分析 P1-4）
 
 SPA 目标（React/Vue/Angular）的静态 HTML 只有空壳——路由在前端、数据接口靠 XHR/fetch，

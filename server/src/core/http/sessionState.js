@@ -84,11 +84,35 @@ export function bucketForRate(ratePerSec) {
 export function _resolveRateBucket(opts, effectiveRate) {
     // [2026-10-03] rateKey 优先：批量共享组桶挂在组 id 上，scanId 桶查不到它。
     //   顺序不能反 —— scanId 桶是**每扫描必有**的，反过来的话组桶永远拿不到。
-    return (opts.rateKey && this.buckets.get(opts.rateKey))
-      || (opts.scanId && this.buckets.get(opts.scanId)) ||
+    //   [CI #131 加固] rateKey 查不到时**惰性重建**，绝不回退 scanId 桶 —— 回退会让
+    //   「单桶总量保证」静默退化成每扫描各一个桶（3 目标 × 6 req/s ≈ 18 req/s，
+    //   batch-lab C1 判据当场抓住）。重建走同一个 key ⇒ 仍与本组其它成员共享；
+    //   createBucket 的 <=0 归一（不限速）与 forScan 建桶口径一致。
+    if (opts.rateKey) {
+      return this.buckets.get(opts.rateKey) || this.createBucket(opts.rateKey, effectiveRate);
+    }
+    return (opts.scanId && this.buckets.get(opts.scanId)) ||
       (Number.isFinite(effectiveRate) && effectiveRate > 0
         ? this.bucketForRate(effectiveRate)
         : Number.isFinite(effectiveRate) && effectiveRate <= 0
           ? null // 不限速：跳过令牌桶
           : this.bucket); // 未配置 → 默认单例桶（defaults.ratePerSec）
+  }
+
+// [2026-10-03 CI #131] 组桶引用计数回收：批量/共享 rateGroup 的桶挂在组 id 上，
+// _disposeScan 的 removeBucket(scanId) 删不到它 ⇒ REST 长驻进程里每跑一批就泄漏一个
+// TokenBucket。forScan 注册（见 httpClient.forScan），扫描退役时释放；最后一个成员
+// 退役才真正删桶 —— 先退出的成员不会拆掉还在跑的成员脚下的桶。
+export function releaseGroupBucket(scanId) {
+    const rateKey = this._scanRateKeys.get(scanId);
+    if (!rateKey) return false;
+    this._scanRateKeys.delete(scanId);
+    const refs = (this._groupRefs.get(rateKey) || 1) - 1;
+    if (refs <= 0) {
+      this._groupRefs.delete(rateKey);
+      this.buckets.delete(rateKey);
+      return true;
+    }
+    this._groupRefs.set(rateKey, refs);
+    return false;
   }
