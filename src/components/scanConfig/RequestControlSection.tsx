@@ -7,7 +7,7 @@ import type { ScanConfigSectionProps } from './sectionProps';
 
 export default function RequestControlSection({ config, onChange }: ScanConfigSectionProps) {
   const { t } = useTranslation();
-  const { handleNumber, handleText, handleToggle } = createScanConfigActions(config, onChange);
+  const { handleNumber, handleText, handleToggle, handleIntInput } = createScanConfigActions(config, onChange);
 
   return (
     <Box>
@@ -75,6 +75,89 @@ export default function RequestControlSection({ config, onChange }: ScanConfigSe
           />
           <Typography variant="caption" color="text.disabled">
             {t('scanConfig.timeThresholdHint')}
+          </Typography>
+        </Box>
+        {/* [2026-10-03 UI-REACH] 时间盲注标定与采样 6 键（此前 CLI/REST 可设、面板无入口）。
+            全部是「覆盖型」旋钮：留空 = 引擎内部兜底（defaults），请求体省键零行为变化。
+            慢链路 / 高抖动目标是这组旋钮的用武之地 —— 默认样本数下链路抖动会把真延迟
+            稀释成「不可判定」，报告落「未检出」（假阴性），加样本 + 先标定是唯一对症手段。 */}
+        <Box>
+          <Typography variant="caption" color="text.secondary">{t('scanConfig.timeBlindTuning')}</Typography>
+          <Box className="grid grid-cols-2 gap-2 mt-1">
+            <Box>
+              <Typography variant="caption" color="text.secondary">{t('scanConfig.timeBlindSamplesLabel')}</Typography>
+              <input
+                type="number" min={3} max={10}
+                className="w-full px-3 py-2 border rounded text-sm"
+                aria-label={t('scanConfig.timeBlindSamplesLabel')}
+                placeholder="5"
+                value={config.timeBlindSamples ?? ''}
+                onChange={handleIntInput('timeBlindSamples')}
+              />
+            </Box>
+            <Box>
+              <Typography variant="caption" color="text.secondary">{t('scanConfig.timeBlindSleepSecLabel')}</Typography>
+              <input
+                type="number" min={1} max={60}
+                className="w-full px-3 py-2 border rounded text-sm"
+                aria-label={t('scanConfig.timeBlindSleepSecLabel')}
+                placeholder="5"
+                value={config.timeBlindSleepSec ?? ''}
+                onChange={handleIntInput('timeBlindSleepSec')}
+              />
+            </Box>
+          </Box>
+          <Typography variant="caption" color="text.disabled">
+            {t('scanConfig.timeBlindSamplesHint')}
+          </Typography>
+        </Box>
+        <Box>
+          <FormControlLabel
+            control={<Switch checked={config.timeBlindCalibrate ?? false} onChange={handleToggle('timeBlindCalibrate')} />}
+            label={t('scanConfig.timeBlindCalibrateLabel')}
+          />
+          <Typography variant="caption" color="text.disabled">
+            {t('scanConfig.timeBlindCalibrateHint')}
+          </Typography>
+          {config.timeBlindCalibrate === true && (
+            <Box className="mt-1">
+              <Typography variant="caption" color="text.secondary">{t('scanConfig.timeBlindCalibrateMinLabel')}</Typography>
+              <input
+                type="number" min={1} max={30}
+                className="w-full px-3 py-2 border rounded text-sm"
+                aria-label={t('scanConfig.timeBlindCalibrateMinLabel')}
+                placeholder="1"
+                value={config.timeBlindCalibrateMin ?? ''}
+                onChange={handleIntInput('timeBlindCalibrateMin')}
+              />
+            </Box>
+          )}
+        </Box>
+        <Box className="grid grid-cols-2 gap-2">
+          <Box>
+            <Typography variant="caption" color="text.secondary">{t('scanConfig.timeProbeSleepSecLabel')}</Typography>
+            <input
+              type="number" min={1} max={60}
+              className="w-full px-3 py-2 border rounded text-sm"
+              aria-label={t('scanConfig.timeProbeSleepSecLabel')}
+              placeholder={t('scanConfig.timeSleepOverridePh')}
+              value={config.timeProbeSleepSec ?? ''}
+              onChange={handleIntInput('timeProbeSleepSec')}
+            />
+          </Box>
+          <Box>
+            <Typography variant="caption" color="text.secondary">{t('scanConfig.timeExtractSleepSecLabel')}</Typography>
+            <input
+              type="number" min={1} max={60}
+              className="w-full px-3 py-2 border rounded text-sm"
+              aria-label={t('scanConfig.timeExtractSleepSecLabel')}
+              placeholder={t('scanConfig.timeSleepOverridePh')}
+              value={config.timeExtractSleepSec ?? ''}
+              onChange={handleIntInput('timeExtractSleepSec')}
+            />
+          </Box>
+          <Typography variant="caption" color="text.disabled" className="col-span-2">
+            {t('scanConfig.timeSleepOverrideHint')}
           </Typography>
         </Box>
         {/* [2026-09-23 UI-REACH] prefix / suffix：payload 闭合控制（对标 sqlmap --prefix/--suffix）。

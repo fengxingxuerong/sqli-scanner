@@ -405,6 +405,23 @@ export interface ScanConfig {
   // 剥标签纯文本判定（对标 --text-only）：真/假响应剥离 HTML 标签后比较 —— 强模板噪声
   // 页面上 matchString 原文比对会失效时的同族锚点。默认关。
   matchText?: boolean;
+  // ── [2026-10-03 UI-REACH] 拖库/提取治理 + 时间盲注标定（此前 CLI/REST 可设、面板无入口）──
+  // 全部是「覆盖型」旋钮：undefined = 引擎内部兜底（server defaults），请求体省键零行为变化；
+  // 范围由后端 scalarsCore 逐键 clamp（前端不复制上限逻辑，避免两处漂移）。
+  extractConcurrency?: number; // 提取阶段请求并发（1-16）
+  dumpConcurrency?: number; // 拖库单表列并发（1-16）
+  dumpDatabaseConcurrency?: number; // 跨库拖库并发（1-16）
+  dumpMaxRows?: number; // deepDump 每表行数硬顶（1-50000）
+  dumpRowLimit?: number; // 单次拖库返回行上限（1-1000）
+  dumpStart?: number; // 行区间起点（对标 --start，0-1000000）
+  dumpStop?: number; // 行区间终点（对标 --stop，0-1000000）
+  maxColumnsGuess?: number; // 列数猜测上界（1-100）
+  timeBlindSamples?: number; // 时间盲注每对采样次数（3-10；抖动链路加样本防误判）
+  timeBlindCalibrate?: boolean; // 扫描前先标定链路固有延迟（慢/抖动链路的假阴性防线）
+  timeBlindCalibrateMin?: number; // 标定用的最小 sleep 值（秒，1-30；仅 calibrate=true 时生效）
+  timeBlindSleepSec?: number; // 时间盲注 payload 的 sleep 秒数（1-60）
+  timeProbeSleepSec?: number; // 探测阶段覆盖值（1-60；不设沿用 timeBlindSleepSec）
+  timeExtractSleepSec?: number; // 提取阶段覆盖值（1-60；不设沿用 timeBlindSleepSec）
 }
 
 /** 扫描目标 */

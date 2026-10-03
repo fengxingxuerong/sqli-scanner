@@ -4,7 +4,31 @@
 
 ## [Unreleased]
 
-### 2026-10-03 批次 · CI #131 双红收口：CLI 批量组桶断链（rateGroup 根因）+ 组桶生命周期补全
+### 2026-10-03 批次 2 · UI-REACH：拖库/提取治理 + 时间盲注标定 14 键接进面板（缺口 52 → 38）
+
+`KNOWN_MISSING_UI_KEYS` 里真实价值最高的两组调优键接进 Web/桌面面板（引擎真读、REST 白名单
+早已收、此前只有 CLI/REST 能设的键）：
+
+- **拖库/提取治理 8 键 → DataExtractionSection**（`enableExtract=true` 才渲染 —— 提取没开时
+  这些旋钮没有消费方）：`dumpRowLimit`（单次行上限）/ `dumpMaxRows`（每表硬顶）/
+  `dumpStart`/`dumpStop`（行区间，对标 --start/--stop）/ `extractConcurrency` /
+  `dumpConcurrency` / `dumpDatabaseConcurrency`（三级并发）/ `maxColumnsGuess`（列数上界）。
+- **时间盲注标定 6 键 → RequestControlSection**（`timeThresholdMs` 旁边，同属时序判定）：
+  `timeBlindSamples`（每对采样 3-10）/ `timeBlindCalibrate`（先标定链路固有延迟）+
+  `timeBlindCalibrateMin` / `timeBlindSleepSec` / `timeProbeSleepSec` / `timeExtractSleepSec`。
+  慢链路/高抖动目标上，默认样本会把真延迟稀释成「不可判定」→ 报告落「未检出」（假阴性）；
+  加样本 + 先标定是对症手段，此前界面用户拿不到。
+- 接线四件套：`SCAN_CONFIG_KEYS` + `SCAN_CONFIG_VALUE_TYPES`（13 number + 1 boolean）+
+  `ScanConfig` 类型 + `handleIntInput` 处理器（空串/非法 ⇒ 删键，与「关闭态请求体省键」
+  全局口径一致；范围 clamp 留在后端 scalarsCore 单点把守，前端只做输入提示不做复制校验）。
+- i18n zh/en 各 +22 键；契约测试按判据 ⑤ 移出 14 键（登记表 52 → 38，能力类保持为空）。
+- 缺陷注入复验：把已接线的 `dumpRowLimit` 塞回登记表 ⇒ 判据 ⑤（登记腐烂）红（杀）。
+- 选键纪律：其余 38 键维持「显式承认的债」定性不动 —— http2/disableKeepAlive/xpAutoEnable
+  等键接 UI 是产品决策（会把「一键扫描」人群无法自行验证的旋钮塞进面板），登记表让缺口
+  可数即可，本批不越权替用户做这个决策。
+- 前端 485/485 全绿（含契约 20/20），tsc 0 错误，lint 0。
+
+### 2026-10-03 批次 1 · CI #131 双红收口：CLI 批量组桶断链（rateGroup 根因）+ 组桶生命周期补全
 
 CI #131（`e2e-self-contained` 与 `acceptance` 两个 job）同根失败：batch-lab C1 限速判据
 **3 目标 × 6 req/s ≈ 19.53 req/s（上限 6）**。取证（CI artifact）+ 速率账

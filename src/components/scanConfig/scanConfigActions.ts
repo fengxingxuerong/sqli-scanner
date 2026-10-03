@@ -24,6 +24,16 @@ export function createScanConfigActions(config: ScanConfig, onChange: OnPatch) {
     onChange({ [key]: val as number });
   };
 
+  // [2026-10-03 UI-REACH] 整数型调优键的文本输入处理器（拖库行数/并发族、时间盲注采样与
+  // sleep 族）。空串/非法 ⇒ 删键（undefined = 引擎走默认兜底，与「关闭态请求体省键」的
+  // 全局口径一致）；数字原样上送 —— 范围由后端 scalarsCore 的 pickInt clamp 把守，
+  // 前端不复制上限逻辑以免两处漂移（min/max 只出现在 <input> 上做输入提示）。
+  const handleIntInput = (key: keyof ScanConfig) => (e: ChangeEvent<HTMLInputElement>) => {
+    const v = e.target.value.trim();
+    const n = Number(v);
+    onChange({ [key]: v === '' || !Number.isFinite(n) ? undefined : Math.floor(n) } as Partial<ScanConfig>);
+  };
+
   // [P0-FIX 2026-09-09] 字符串型配置键统一走这里（matchString / notString / testFilter / testSkip）。
   // 这些键在后端是**字符串**（Detector.matchAnchors 用 text.includes()、payloadRegistry 用子串匹配），
   // 用布尔开关表达 = 勾了但传了错的类型，引擎侧静默按「真页含 'true'」这种荒谬规则跑。
@@ -75,7 +85,7 @@ export function createScanConfigActions(config: ScanConfig, onChange: OnPatch) {
   };
 
   return {
-    handleToggle, handleNumber, handleText, setMatchCode,
+    handleToggle, handleNumber, handleIntInput, handleText, setMatchCode,
     setScopeField, handleScopeChange, patchNested,
   };
 }

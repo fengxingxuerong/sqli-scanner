@@ -219,12 +219,12 @@ describe('配置契约：面板 → 请求体 → 后端白名单', () => {
 const CAPABILITY_GAP_KEYS: string[] = [];
 
 const TUNING_NO_UI_KEYS = [
-  // 提取 / 拖库治理
-  'extractConcurrency', 'dumpConcurrency', 'dumpDatabaseConcurrency', 'dumpMaxRows', 'dumpRowLimit',
-  'dumpStart', 'dumpStop', 'maxColumnsGuess',
-  // 时间盲注标定与采样
-  'timeBlindSamples', 'timeBlindCalibrate', 'timeBlindCalibrateMin',
-  'timeBlindSleepSec', 'timeProbeSleepSec', 'timeExtractSleepSec',
+  // [2026-10-03 UI-REACH] 提取/拖库治理 8 键（extractConcurrency/dumpConcurrency/
+  // dumpDatabaseConcurrency/dumpMaxRows/dumpRowLimit/dumpStart/dumpStop/maxColumnsGuess）
+  // 与时间盲注标定 6 键（timeBlindSamples/timeBlindCalibrate/timeBlindCalibrateMin/
+  // timeBlindSleepSec/timeProbeSleepSec/timeExtractSleepSec）已接进面板：
+  // 前者进 DataExtractionSection（enableExtract=true 才渲染），后者进 RequestControlSection
+  // （timeThresholdMs 旁边）—— 按判据 ⑤ 移出本表，判据 ⑦ 钉住「面板真的有控件」。
   // 布尔盲注二级判据 / 鲁棒性
   'boolStableDiff', 'boolStableDiffSamples', 'blindRobust',
   // 会话 / cookie：能力型的 csrf* / safeUrl / safeFreq 已升入 CAPABILITY_GAP_KEYS。

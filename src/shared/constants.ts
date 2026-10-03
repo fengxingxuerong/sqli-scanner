@@ -161,6 +161,15 @@ export const SCAN_CONFIG_KEYS = [
   // paramDel/dumpWhere 走 bespoke clamp），唯独内置引擎的 Web 面板没有入口 ——
   // SqlmapOptions 里的同名控件只作用于 /sqlmap/start 桥接模式，内置引擎用户拿不到。
   'noCast', 'hex', 'flushSession', 'unionFrom', 'unionCols', 'paramDel', 'dumpWhere',
+  // [2026-10-03 UI-REACH] 拖库/提取治理 8 键 + 时间盲注标定 6 键（调优类缺口 52 → 38）：
+  // 引擎真读、REST 白名单已收（scalarsCore 逐键 pickInt clamp），此前只有 CLI/REST 能设。
+  // dump 族只在 enableExtract=true 时有意义（面板内同条件渲染）；时间盲注族挂在
+  // RequestControlSection 的 timeThresholdMs 旁边（同属时序判定参数）。
+  // 全部是「覆盖型」旋钮：undefined = 引擎内部兜底，请求体省键零行为变化。
+  'extractConcurrency', 'dumpConcurrency', 'dumpDatabaseConcurrency', 'dumpMaxRows',
+  'dumpRowLimit', 'dumpStart', 'dumpStop', 'maxColumnsGuess',
+  'timeBlindSamples', 'timeBlindCalibrate', 'timeBlindCalibrateMin',
+  'timeBlindSleepSec', 'timeProbeSleepSec', 'timeExtractSleepSec',
 ] as const;
 
 /** 前端可控的扫描配置键名（由 SCAN_CONFIG_KEYS 推导，无手写重复） */
@@ -263,6 +272,23 @@ export const SCAN_CONFIG_VALUE_TYPES: Record<ScanConfigKey, ScanConfigValueType>
   unionCols: 'string',
   paramDel: 'string',
   dumpWhere: 'string',
+  // [2026-10-03 UI-REACH] 拖库/提取治理 + 时间盲注标定 14 键的类型（与后端 scalarsCore
+  // clamp 口径对齐：全是 pickInt 整数族 + timeBlindCalibrate 严格布尔；dumpStart/dumpStop
+  // 的 0 是合法值「从第 0 行起」，number 类型不会被当「未配置」丢掉）。
+  extractConcurrency: 'number',
+  dumpConcurrency: 'number',
+  dumpDatabaseConcurrency: 'number',
+  dumpMaxRows: 'number',
+  dumpRowLimit: 'number',
+  dumpStart: 'number',
+  dumpStop: 'number',
+  maxColumnsGuess: 'number',
+  timeBlindSamples: 'number',
+  timeBlindCalibrate: 'boolean',
+  timeBlindCalibrateMin: 'number',
+  timeBlindSleepSec: 'number',
+  timeProbeSleepSec: 'number',
+  timeExtractSleepSec: 'number',
 };
 
 /**
