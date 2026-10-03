@@ -136,8 +136,14 @@ export function buildArgs(input) {
     // 下限兜到 1 秒：sqlmap 收 `--timeout 0` 无意义，而亚秒级超时对连接也没价值
     args.push('--timeout', String(Math.max(1, Math.round(timeoutMs / 1000))));
   }
-  const retry = Number(c.retry);
-  if (Number.isFinite(retry) && retry >= 1 && retry <= 10) {
+  // [P0-FIX 2026-10-03] `retry: 0` 是**有效语义**（sqlmap `--retries 0` = 不重试），不是「忽略」。
+  // 旧实现写 `retry >= 1`，把 0 与负值一起丢掉 → 省略 `--retries` → sqlmap 回落**默认 3 次重试**，
+  // 用户「不重试」的意图被静默推翻。而面板明写「0 表示不重试」（src/shared/types.ts），内置引擎
+  // 也真支持（RequestControlSection 的 Slider min=0 + core/http/retry.js 明处理 retry=0）——
+  // 只有桥接这一层没跟上，是同一字段「两份实现只修了一处」的那族漂移。
+  // 用 `!= null` 先判「缺席」以区分 null/'' 与显式 0（与同函数 ignoreCode 的写法一致）。
+  const retry = c.retry == null || c.retry === '' ? NaN : Number(c.retry);
+  if (Number.isFinite(retry) && retry >= 0 && retry <= 10) {
     args.push('--retries', String(Math.round(retry)));
   }
   if (c.randomUA) args.push('--random-agent');

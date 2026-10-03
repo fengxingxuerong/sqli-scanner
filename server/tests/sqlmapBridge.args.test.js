@@ -1,6 +1,6 @@
 // S11 sqlmapBridge.buildArgs 参数透传补齐单测：
 //  - timeoutMs（**毫秒**，面板与 CLI 同单位）→ --timeout <**秒**>（>0 且 ≤600000 生效，非法值忽略）
-//  - retry → --retries <n>（>0 时透传，0/负/越界忽略）
+//  - retry → --retries <n>（0-10，**0 也透传** = 不重试；负/越界/非数字/缺席忽略）
 //  - randomUA → --random-agent（true 才透传）
 //  - prefix/suffix（ScanConfig 层）→ --prefix / --suffix（trim 非空才透传，长度 clamp ≤200）
 //  - 既有参数（level/risk/techniques/proxy/threads 等）不受影响
@@ -44,12 +44,17 @@ test('buildArgs: timeoutMs 是毫秒，必须换算成 sqlmap 的秒（原实现
   }
 });
 
-test('buildArgs: retry >0 透传为 --retries <n>，0/负/越界忽略', () => {
+test('buildArgs: retry 0-10 透传 --retries <n>（0 = 不重试，是有效语义）', () => {
   assert.deepEqual(tail({ retry: 3 }), ['--retries', '3']);
-  // 0 表示不重试 → 不生成
-  for (const bad of [0, -2, NaN, 11]) {
+  assert.deepEqual(tail({ retry: 10 }), ['--retries', '10']);
+  // [P0-FIX 2026-10-03] 0 = 不重试：必须发 `--retries 0`。
+  // 省略 flag **不等于**「不重试」—— sqlmap 会回落默认 3 次重试。旧实现正是这样误读了
+  // 「0 表示不重试」（面板可达 0：types.ts 注释 + 内置面板 Slider min=0 + retry.js 处理 retry=0）。
+  assert.deepEqual(tail({ retry: 0 }), ['--retries', '0']);
+  // 负 / 越界 / 非数字 / 缺席（null/''/undefined）→ 不生成
+  for (const bad of [-1, -2, 11, NaN, 'abc', null, '']) {
     const args = buildArgs(mkInput({ retry: bad }));
-    assert.ok(!args.includes('--retries'), `retry=${bad} 不应透传`);
+    assert.ok(!args.includes('--retries'), `retry=${JSON.stringify(bad)} 不应透传`);
   }
 });
 

@@ -4,6 +4,115 @@
 
 ## [Unreleased]
 
+### 2026-10-03 批次 F1 · 暂停闸下沉到扫描视图：detect.js 两支 ad-hoc 客户端不再绕过暂停
+
+TODO 09-28 #4 的兑现（安全控制缺口：按暂停后 tamper 链验证与拦截驱动重跑照常打靶——
+「目标报警了先停手」对这两条路径形同虚设）：
+
+- **修复形态**：暂停闸下沉到 `getScanClient` 返回视图本身（request 与 headRequest 都过闸）。
+  不动 detect.js ⇒ `detect.orchestration.test.js` 的 fake-sm 契约零改动（当初「在 detect.js
+  里包 `_wrapWithSignal`」正是被它打回的）；`branches` 测试的 fake 显式补
+  `_waitWhilePaused` no-op —— 契约缺件当场炸，不静默放行。语义与点边界一致：paused 阻塞
+  轮询、cancelled 放行（stop 的在途取消由 signal 负责）、条目回收后放行。
+- **单测** `scanClient.pause.test.js` 4 条：paused 期间 `view.request` 不发请求（靶站侧计数
+  为准，不采信客户端自报）、resume 后放行；headRequest 同样过闸（--null-connection 探针
+  不得绕过暂停）；cancelled 立即放行（收尾不被闸卡死）；源码钉住「detect.js 的 ad-hoc
+  客户端必经 sm.getScanClient」+「闸挂在视图 request 上」（挂到别的层 = 本判定失效）。
+  缺陷注入复验：撤闸 ⇒ ①红（杀）。
+- **接口靶场**：新增 `/wafnum` WAF 前置端点 + 事件锚定用例。相位锚点 = SSE 第一发
+  `point_testing(tamperRetry:true)`（重跑刚开始，暂停窗口必然落在重跑期内部，不受机器
+  快慢影响）。⚠️ /wafnum 只拦**原始签名**、刻意放行 tamper 变换形态 —— 全拦光会让链验证
+  3 条全废、引擎按「跳过自动重跑」收场，重跑根本不发生（首版踩过，案例见注释）。
+  16/16 PASS；**靶场级缺陷注入复验：撤闸重跑 ⇒ 该用例红（15/16）**。
+- 顺带修复的暗缺口：headRequest 此前在 ctxBase 包装层也不过暂停闸（--null-connection
+  探针可在暂停期间继续打靶）—— 视图层的闸把它一并盖住。
+
+### 2026-10-03 批次 7 · 全方面测试优化：查出一个真缺陷（sqlmap 桥 `retry=0` 被静默丢弃）+ 补齐该链零契约守卫
+
+按 `unwired-helper-detection` 的方法做测试质量排查：从**逐文件覆盖率**找最弱项
+（`SqlmapOptions.tsx` func 27.6% 离群）顺藤摸到 sqlmap 桥接链，发现一条**跨层漂移真缺陷**。
+
+- **真缺陷（跨层漂移，`retry` 一个键三段三个域）**：`SqlmapOptions` 的重试控件写
+  `Math.max(0, ·)`（可达 0），`types.ts` 明写「0 表示不重试」，内置引擎也真支持
+  （`RequestControlSection` 的 Slider `min=0` + `core/http/retry.js` 明处理 `retry=0`）——
+  但 `sqlmapBridge.buildArgs` 却写 `retry >= 1`，把 0 与负值一起丢弃 ⇒ 省略 `--retries`
+  ⇒ **sqlmap 回落默认 3 次重试**，用户「不重试」的意图被静默推翻。
+  实测复现：`buildArgs({retry:0})` → `--retries` 缺失。
+  旧测试的注释写着「0 表示不重试 → 不生成」，可见误解源头：**省略 flag ≠ 不重试**（那是默认值 3）。
+  修：改用 `c.retry == null || c.retry === '' ? NaN : …` 判「缺席」（与同函数 `ignoreCode` 同款写法），
+  允许 0-10，`retry === 0` 时显式发 `--retries 0`。
+- **新增跨层契约守卫 `src/tests/sqlmapConfig.contract.test.ts`**（4 条，源码级提取，不 import 后端模块图）：
+  ① 每个 `SqlmapConfig` 键都必须被 `buildArgs` 读取（否则面板有控件 = 静默 no-op）；
+  ② 每个键都必须有面板控件（否则类型加了键、用户永远设不了）；③ `retry` 三段都在的回归锚点；④ 提取器自证。
+  **这条链此前完全没有契约守卫** —— 对照内置引擎那侧早有 `scanConfig.contract.test.ts`。
+- **补齐面板逐控件契约测试**（`sqlmapOptions.test.tsx` +8 条）：此前 26 个 `onChange({键:值})`
+  回调只有 8 个被点过。现按「patch 的**键名** + **值形态**」逐控件钉：
+  retry 的 0/负/清空语义、`unionChar` 只留首字符、字符串类字段 trim 后空串回写 `null`、
+  可空数值清空回 `null` 且有值是**数字不是字符串**、10 个布尔开关的**值必须是 boolean**
+  （字符串 `"false"` 在后端是真值 ⇒ 关了等于没关）。
+- **变异门禁新增目标 `hashAnalysis.js`**（`--passwords` 的哈希算法识别 + 弱口令标注）：
+  21 处变异 **21 杀 / 0 存活**、5.8s ⇒ 断言敏感度合格（含「报告不回显原始哈希」这条安全边界）。
+- **守卫自证又抓出一个真洞**（第二次栽在同一类）：`sqlmapConfig.contract.test.ts` 首跑的
+  断言 ① 误报 `osShell`/`fileRead`「没被读取」。根因是我的 `stripComments` **先跑块注释正则**，
+  而 `sqlmapBridge` 的注释里有 `… 与内置引擎的 /exploit/* 是同一个`，其中 `/exploit/*` 的 `/*`
+  被当成块注释开头，**一路吞掉了 243–254 行的真实消费点**。
+  修：**先行注释、后块注释**（行注释抹掉整条，`/exploit/*` 不复存在）；并把该陷阱写进自证用例。
+  同批修正 `reportFormat.parity.test.ts` 的同款隐患（那里也是块注释在前）。
+- **验证**：受影响测试（前端 30 / 服务端 29 / 变异门禁接线 6）全绿；**缺陷注入复验 5 处**，均先红后还原——
+  还原旧 `retry >= 1` → 恰 1 红；去掉 `unionChar` 截断 → 恰 1 红；开关键写错成 `flushSession` → 恰 1 红；
+  `c.retry` 写成 `c.retries` → 恰 ①②③ 中 2 红；面板键改 `unionFromGone` → 恰 ② 红。
+- 门禁 8 项全 `exit 0`（lint/typecheck/arch:guard/refs:check/modules:check/facts:check/readme:check/merge:check）。
+  前端 **503 用例 / 60 文件**（+12）、服务端 **2816**（2813 pass / 0 fail / 3 skip）、徽章 **3316**。
+  前端函数覆盖率 77.86 → **83.06**（新面板测试真的点亮了此前从未执行的 handler）。
+  ⚠️ `retry` 修复仅**单元级**验证；真 sqlmap 二进制跑 `--retries 0` 的实际行为待 CI/靶场。
+### 2026-10-03 批次 6 · 暴露链：SARIF 接回前端导出 + 导出格式漂移守卫
+
+延续批次 5 勘查登记里的「SARIF 未接前端导出」——按「本地可完整验证 + 真价值」取下一项。
+
+- **缺口（`REST 有 → UI 无`）**：`sarif` 在后端全链早已就绪——`ReportGenerator.toSARIF` 有实现、
+  `scanRoutes.js` 的 `FORMAT_EXT` 白名单收它、`content-types` 给了 `application/sarif+json`——但前端
+  `ReportExport.tsx` 的 `ExportFormat` 联合类型与按钮都没有它 ⇒ **UI 用户永远拿不到** GitHub Security /
+  DefectDojo 认的标准格式（只能走 CLI/API）。
+- **修**：三处接线——`ReportExport.tsx` 补 `ExportFormat` 成员 + SARIF 按钮（`title` 提示去向）；
+  `useScan.exportReport` 补类型联合成员 + `mimeMap.sarif = 'application/sarif+json; charset=utf-8'`
+  （与后端 content-type 对齐，否则「另存为」会把 `.sarif` 当成匿名二进制）；`useScan` 顶部注释同步。
+  文件名后缀天然为 `.sarif`（`fileExt` 逻辑无需特判）。i18n 补 `reportExport.sarifHint`（zh/en 对称）。
+- **新增漂移守卫 `src/tests/reportFormat.parity.test.ts`**（源码级提取，不 import 后端模块图，沿用
+  `scanConfig.contract.test.ts` 同款手法）：① 前端能请求的格式 ⊆ 后端 `FORMAT_EXT`（否则一点就 400）；
+  ② `mimeMap` 覆盖 `ExportFormat` 每个成员（否则 MIME 为 `undefined`）；③ sarif 回归锚点。
+- **守卫自证抓出一个真洞**：首版提取器**不剥注释** —— 把一行 `// sarif: '...'` 注释掉后四条断言全绿
+  （等于没守住）。修：提取前 `stripComments`，并把「注释掉也必须抽不到」写成自证用例。
+- **验证**：本批前端测试 19/19；缺陷注入复验 3 处（改错 sarif MIME → 恰 1 红；按钮不渲染 → 恰 2 红；
+  联合类型塞 `xml` → 恰 ①② 红），均先红后还原；`lint`/`typecheck`/`arch:guard`/`refs:check`/
+  `modules:check`/`facts:check`/`readme:check`/`merge:check` 全 exit 0。
+  前端 491 用例（+6）、服务端 2816（2813 pass / 0 fail / 3 skip）、徽章 3304。
+  ⚠️ 仅单元级验证；真上传 SARIF 到 GitHub code scanning 待 CI。
+
+### 2026-10-03 批次 5 · 优化空间勘查：修 SQL 报错签名分叉 + WAF 推荐链落盘
+
+按 `codebase-optimization-survey` 做的勘查（三条并行只读勘察 → 逐条回源码复核），
+落 `docs/优化空间勘查-2026-10-03.md`。本批只动两条**文档未登记**的真缺口：
+
+- **正确性（本批最值钱）**：`scanValidityGuard.js` 的 `SQL_ERROR_SIG` 与
+  `engine/payloads/index.js` 的 `ERROR_SIG` **分叉** —— 后者 2026-10-01 收紧时加了
+  `XPATH syntax error`（MySQL `extractvalue`/`updatexml`）、SQLite `near "x": syntax error`、
+  DB2 `SQL0104N`，前者没跟。后果是一条静默误判链：error-based 用 extractvalue 打**有洞**目标
+  → 500 全是 XPATH 报错 → 未判「自己触发的」（`core/scanValidityGuard.js:280`）→ 计入 `serverErr`
+  → 裁定 `target_error` /「结论不可信」—— 正是 `P1-FIX 2026-09-08` 要防的告警疲劳，从这条缝漏了回来。
+  修：补齐为 `ERROR_SIG` 同集；新增**漂移守卫**（`tests/errorSig.specificity.test.js`：同一
+  `REAL_ERRORS` 语料两侧必须一致命中、`GENERIC_PAGES` 必须一致不命中，单向收紧即红）+ extractvalue 行为回归。
+- **暴露链**：WAF 推荐 tamper 链此前**只走实时 SSE**（`finalize.js` 只 `eventBus.emit`），
+  落盘的只有厂商（`summary.wafDetected`）⇒ 历史/导出的报告永远看不到「识别到 WAF 后建议用哪条链重跑」。
+  修：`finalize` 落盘 `summary.wafSuggestedChains` → `reportDelivery` 取数（形状归一 + 过滤空链）→
+  `reportSections` 的 md/html 渲染，`vendor`（目标可控）过 `mdCell`/`esc`。
+- **勘查同时登记**（未改，留待下批）：SARIF 未接前端导出、`--identify-waf`/`--udf-*`/`--advise` 仅 CLI、
+  3 个 REST 端点前端 0 调用、前端无 bodyJson 通道、`ctx.baseline` 死字段、`core↔engine` 包级环。
+  性能类条目**全部标注为未量化推断**，不写任何请求数结论。
+- **验证**：受影响测试 56/56；缺陷注入复验 3 处（还原窄签名 → 恰 2 红；`finalize` 落盘恒 false → 恰 ⑨a 红；
+  去掉渲染 `mdCell` → 恰转义用例红），均先红后还原；`lint`/`typecheck:server`/`arch:guard`/`refs:check`/
+  `modules:check`/`facts:check`/`readme:check` 全 exit 0。服务端 2816 用例（2813 pass / 0 fail / 3 skip）。
+  ⚠️ 签名修复仅**单元级**验证，真靶场 e2e 待 CI。
+
 ### 2026-10-03 批次 4 · 交付面：官方 composite Action + `--passwords` 凭据风险标注 + 报告章节拆分
 
 竞品对标（`docs/竞品对标分析-2026-10-03.md`）暴露的两条交付面缺口一次补齐，另按体积纪律清掉一个上帝对象。

@@ -113,6 +113,17 @@ export async function finalizeReport(run) {
     eventBus.emit(scanId, 'waf_detected', { vendors: wafVendors, suggestions });
     report.summary = report.summary || {};
     report.summary.wafDetected = wafVendors;
+    // [2026-10-03] 推荐 tamper 链此前**只走 SSE**（eventBus），不落盘 ⇒ 历史/导出的报告
+    // （JSON/md/html/csv/sarif）永远看不到「识别到 WAF 后建议用哪条链重跑」，实时流一过就没了。
+    // 现落盘为结构化数据，交付层（reportDelivery 的 waf 段）据此渲染。
+    // vendor 可能来自响应头/正文（目标可控）⇒ 渲染侧按不可信输入转义（mdCell / esc）。
+    const chains = (Array.isArray(suggestions) ? suggestions : [])
+      .map((s) => ({
+        vendor: String((s && s.vendor) || ''),
+        plugins: Array.isArray(s && s.plugins) ? s.plugins.map(String) : [],
+      }))
+      .filter((s) => s.plugins.length > 0);
+    if (chains.length) report.summary.wafSuggestedChains = chains;
   }
   // [P1-FIX 2026-09-10] 方言验证等级落盘：把「这个数据库我验证到什么程度」写进报告本体，
   // 交付时客户/复核人能自行判断结论可信度，而不是只存在于 README（实测发现报告层完全没有该声明）。

@@ -169,3 +169,133 @@ describe('SqlmapOptions 交互分支补充', () => {
   });
 });
 
+// ============================================================================
+// 面板 → patch 的**逐控件契约**（此前只覆盖了 8 个控件，其余 20+ 个回调从未被点过）。
+//
+// 为什么值得：面板类组件最高频的缺陷不是崩，而是「用户点了 A、patch 里改的是 B」
+// 或「值形态错（布尔发成字符串 → 后端 `"false"` 是真值，关了等于没关）」。
+// 这两类 TS 都拦不住 —— `{ flushSession: v }` 写成 `{ freshQueries: v }` 两个键都存在。
+//
+// ⚠️ TextField 是 `type="number"`：字母输入时 DOM value 被置空、React value tracker
+// 判定"没变"、onChange 根本不触发（场景在 UI 层不存在）→ 这里只测真会发生的数值语义。
+// ============================================================================
+describe('SqlmapOptions · 逐控件 patch 契约', () => {
+  let mockOnChange: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    mockOnChange = vi.fn();
+    vi.clearAllMocks();
+  });
+
+  const renderWith = (over: Partial<typeof DEFAULT_SQLMAP_CONFIG> = {}) => {
+    render(<SqlmapOptions config={{ ...DEFAULT_SQLMAP_CONFIG, ...over }} onChange={mockOnChange} />);
+  };
+  /** MUI TextField：通过 label 文本取原生 input */
+  const inputOf = (label: string | RegExp) => screen.getByLabelText(label) as HTMLInputElement;
+  /** MUI 开关/勾选框：FormControlLabel 的文本 → 其 input */
+  const switchOf = (labelText: string | RegExp) => {
+    const label = screen.getByText(labelText).closest('label');
+    return label!.querySelector('input[type="checkbox"]') as HTMLInputElement;
+  };
+  const type = (el: HTMLInputElement, value: string) => fireEvent.change(el, { target: { value } });
+  const lastPatch = () => mockOnChange.mock.calls.at(-1)?.[0] as Record<string, unknown>;
+
+  it('retry：0 必须原样发出（后端 2026-10-03 起认 0=不重试，省略 flag 会回落默认 3 次）', () => {
+    renderWith({ retry: 3 });
+    const el = inputOf('重试 --retries');
+    type(el, '0');
+    expect(lastPatch()).toEqual({ retry: 0 });
+  });
+
+  it('retry 数值语义：负数被 Math.max 兜到 0、清空也是 0', () => {
+    renderWith({ retry: 3 });
+    const el = inputOf('重试 --retries');
+    type(el, '-2');
+    expect(lastPatch()).toEqual({ retry: 0 });
+    type(el, '');
+    expect(lastPatch()).toEqual({ retry: 0 });
+    type(el, '7');
+    expect(lastPatch()).toEqual({ retry: 7 });
+  });
+
+  it('timeoutMs：毫秒数值透传（清空/0 → 0，由后端决定是否忽略）', () => {
+    renderWith();
+    const el = inputOf('请求超时 (毫秒)');
+    type(el, '15000');
+    expect(lastPatch()).toEqual({ timeoutMs: 15000 });
+    type(el, '');
+    expect(lastPatch()).toEqual({ timeoutMs: 0 });
+  });
+
+  it('unionChar：只留首字符（后端仅收单字符 [A-Za-z0-9]）', () => {
+    renderWith();
+    const el = inputOf('--union-char');
+    type(el, 'ab');
+    expect(lastPatch()).toEqual({ unionChar: 'a' });
+    type(el, ' ');
+    expect(lastPatch()).toEqual({ unionChar: null });
+  });
+
+  it('字符串类字段：trim 后空串一律回写 null（不是空串，避免后端收到 "" 与"未设置"混淆）', () => {
+    renderWith();
+    type(inputOf('代理地址 --proxy'), '  http://127.0.0.1:8080  ');
+    expect(lastPatch()).toEqual({ proxy: 'http://127.0.0.1:8080' });
+    type(inputOf('代理地址 --proxy'), '   ');
+    expect(lastPatch()).toEqual({ proxy: null });
+
+    type(inputOf('读文件 --file-read'), '  /etc/passwd ');
+    expect(lastPatch()).toEqual({ fileRead: '/etc/passwd' });
+
+    type(inputOf('--union-cols'), ' 1-15 ');
+    expect(lastPatch()).toEqual({ unionCols: '1-15' });
+
+    type(inputOf('--union-from'), ' information_schema.tables ');
+    expect(lastPatch()).toEqual({ unionFrom: 'information_schema.tables' });
+  });
+
+  // ⚠️ 分两个用例：onChange 是 mock，**不会**回写 config → 同一 render 里连续改同一字段时，
+  // 第二次输入的值若与 props 现值相同则 DOM 无变化、事件不触发（不是缺陷）。
+  it('可空数值字段：清空 → null', () => {
+    renderWith({ verbose: 6, timeSec: 30, ignoreCode: 404 });
+    type(inputOf('-v (0-6)'), '');
+    expect(lastPatch()).toEqual({ verbose: null });
+    type(inputOf('--time-sec'), '');
+    expect(lastPatch()).toEqual({ timeSec: null });
+    type(inputOf('--ignore-code'), '');
+    expect(lastPatch()).toEqual({ ignoreCode: null });
+  });
+
+  it('可空数值字段：有值 → 数字（不是字符串）', () => {
+    renderWith(); // 默认 null ⇒ 字段为空，输入非空值必触发 change
+    type(inputOf('-v (0-6)'), '6');
+    expect(lastPatch()).toEqual({ verbose: 6 });
+    type(inputOf('--time-sec'), '30');
+    expect(lastPatch()).toEqual({ timeSec: 30 });
+    type(inputOf('--ignore-code'), '404');
+    expect(lastPatch()).toEqual({ ignoreCode: 404 });
+  });
+
+  it('每个布尔开关：patch 的值必须是 boolean（字符串 "false" 在后端是真值 → 关了等于没关）', () => {
+    renderWith();
+    const cases: Array<[string, string]> = [
+      ['随机 UA --random-agent', 'randomUA'],
+      ['拖库 --dump', 'dump'],
+      ['OS Shell --os-shell', 'osShell'],
+      ['--exclude-sysdbs', 'excludeSysdbs'],
+      ['--flush-session', 'flushSession'],
+      ['--fresh-queries', 'freshQueries'],
+      ['--smart', 'smart'],
+      ['--no-cast', 'noCast'],
+      ['--hex', 'hex'],
+      ['--no-escape', 'noEscape'],
+    ];
+    for (const [label, key] of cases) {
+      mockOnChange.mockClear();
+      fireEvent.click(switchOf(label));
+      const patch = lastPatch();
+      expect(Object.keys(patch), `${label} 应只写 ${key}`).toEqual([key]);
+      expect(typeof patch[key], `${label} 的值必须是 boolean`).toBe('boolean');
+    }
+  });
+});
+

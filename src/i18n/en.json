@@ -705,6 +705,7 @@
     "noDumpData": "No dump data was extracted in this scan, cannot export",
     "exportReportFailed": "Failed to export report: {{detail}}",
     "exportDumpFailed": "Failed to export dump data: {{detail}}",
+    "sarifHint": "SARIF 2.1.0 standard, importable into GitHub Security / DefectDojo and similar platforms",
     "aiTitle": "AI Vulnerability Analysis Report",
     "aiGenerating": "Generating...",
     "aiAnalyze": "AI Analyze",

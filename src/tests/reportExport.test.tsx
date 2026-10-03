@@ -40,7 +40,7 @@ beforeEach(() => {
 describe('ReportExport · 无 scanId', () => {
   it('整份导出与 db-json 按钮禁用；无拖库数据时拖库导出禁用并提示', () => {
     render(<ReportExport />);
-    for (const label of ['JSON', 'HTML', 'CSV', 'Markdown']) {
+    for (const label of ['JSON', 'HTML', 'CSV', 'Markdown', 'SARIF']) {
       expect((screen.getByRole('button', { name: label }) as HTMLButtonElement).disabled).toBe(true);
     }
     expect((screen.getByRole('button', { name: '拖库 CSV' }) as HTMLButtonElement).disabled).toBe(true);
@@ -58,6 +58,17 @@ describe('ReportExport · 有 scanId', () => {
     render(<ReportExport />);
     fireEvent.click(screen.getByRole('button', { name: 'JSON' }));
     expect(exportReportMock).toHaveBeenCalledWith('s1', 'json');
+  });
+
+  // 暴露链回归：后端 ReportGenerator.toSARIF / scanRoutes 早已支持 sarif，
+  // 但前端此前没有入口 ⇒ 用户拿不到 GitHub Security/DefectDojo 标准格式。
+  // 用持久 mock 而非 *Once：本用例若在 getByRole 处先抛，未消费的 once 队列会泄漏给
+  // 下一用例的 rejection mock（mockClear 不清 once 队列），把别人的红伪装成本用例的锅。
+  it('点击 SARIF 走 exportReport(scanId, sarif)', () => {
+    exportReportMock.mockResolvedValue(undefined);
+    render(<ReportExport />);
+    fireEvent.click(screen.getByRole('button', { name: 'SARIF' }));
+    expect(exportReportMock).toHaveBeenCalledWith('s1', 'sarif');
   });
 
   it('导出失败渲染用户可见错误（P1-6）', async () => {

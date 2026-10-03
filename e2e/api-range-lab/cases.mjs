@@ -294,6 +294,64 @@ test('scan', 'pause/resume：靶站侧流量真的冻住（不接受自报 pause
   assert.equal(fin.status, 'stopped', `stop 后应为 stopped，实得 ${fin.status}`);
 });
 
+test('scan', 'pause/resume × wafEvasion 自适应链（ad-hoc 客户端在暂停期同样零发包）', async (ctx) => {
+  // F1 2026-10-03：TODO 09-28 #4 验证口径的兑现。自适应链验证与拦截驱动重跑两条路径的
+  // HTTP 走 detect.js 的两支 ad-hoc 客户端（裸 getScanClient 视图）—— 暂停闸若只挂
+  // ctxBase 包装层，这条路径在暂停期间照常打靶。确定性相位锚点 = SSE 里第一发
+  // `point_testing(tamperRetry:true)`：此刻重跑刚开始，暂停窗口必然落在重跑期内部。
+  // （单位测试 scanClient.pause.test.js 是机制级确定性击杀；本用例是链路级集成证明。）
+  await ctx.rangePost('/__range/reset', {});
+  const scanId = await startScan(ctx, {
+    url: `${ctx.LAB}/wafnum?id=1`,
+    // delay=0.3：把重跑的探测族拉长到 ~20s 量级，暂停窗口（3s）无论如何都落在其中；
+    // 全部探测被 /wafnum 的拦截判据吃掉 ⇒ 重跑不会提前收敛退出。
+    config: fastCfg({ delay: 0.3, techniques: ['boolean', 'error'], level: 1 }),
+  });
+  const sse = openSse({ port: ctx.engine.port, path: `/api/scan/${scanId}/events`, token: ctx.engine.token, timeoutMs: 150000 });
+  let sawRetry = null;
+  for (let i = 0; i < 900 && !sawRetry; i++) {
+    // eventBus 事件经 SSE 的形状：{ type, scanId, ts, seq, payload }
+    sawRetry = sse.events.find(
+      (e) => e.json?.type === 'point_testing' && e.json?.payload?.tamperRetry === true,
+    ) || null;
+    if (!sawRetry) await sleep(100);
+  }
+  assert.ok(
+    sawRetry,
+    '90s 内应观测到 tamperRetry 的 point_testing 事件（自适应重跑已启动）——没有则本用例没测到 ad-hoc 路径。'
+      + `已见事件类型：${JSON.stringify([...new Set(sse.events.map((e) => e.json?.type))])}，`
+      + `共 ${sse.events.length} 帧`,
+  );
+
+  const p = await ctx.post(`/api/scan/${scanId}/pause`, {});
+  assert.equal(p.json?.code, 0, `pause 应成功，实得 ${JSON.stringify(p.json)}`);
+  let paused = null;
+  for (let i = 0; i < 40 && !paused; i++) {
+    const s = await ctx.get(`/api/scan/${scanId}`);
+    if (s.json?.data?.status === 'paused') paused = true;
+    else await sleep(100);
+  }
+  assert.ok(paused, 'GET /scan/:id 必须能观测到 paused 状态');
+  await sleep(400); // 在途那一发落地（闸挂在发包前，不取消在途请求）
+  const t1 = (await rangeStats(ctx)).total;
+  await sleep(3000); // 重跑期正常应持续发包（boolean+error 探测族 × delay=0.3）
+  const t2 = (await rangeStats(ctx)).total;
+  assert.equal(
+    t2 - t1, 0,
+    `暂停期间自适应重跑路径（ad-hoc 客户端）也不得发包，实得 ${t2 - t1} 个 —— 暂停闸没有盖住 detect.js 的裸视图客户端`,
+  );
+
+  const r = await ctx.post(`/api/scan/${scanId}/resume`, {});
+  assert.equal(r.json?.code, 0, `resume 应成功，实得 ${JSON.stringify(r.json)}`);
+  await sleep(2500);
+  const t3 = (await rangeStats(ctx)).total;
+  assert.ok(t3 > t2, `resume 后流量必须恢复，实得增量 ${t3 - t2}`);
+
+  await ctx.post(`/api/scan/${scanId}/stop`, {});
+  const fin = await waitScan(ctx, scanId, { timeoutMs: 60000, want: ['stopped', 'completed', 'error'] });
+  assert.ok(['stopped', 'completed'].includes(fin.status), `收尾状态应可控，实得 ${fin.status}`);
+});
+
 test('scan', 'stop：终止 + 幂等语义 + 未知 id 不得报成功', async (ctx) => {
   const scanId = await startScan(ctx, { url: `${ctx.LAB}/blind?uid=1`, config: fastCfg({ delay: 1, techniques: ['boolean'] }) });
   await sleep(600);

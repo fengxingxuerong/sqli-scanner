@@ -48,6 +48,26 @@ test('注入请求引发的 500（含 SQL 报错签名）→ 状态保持 ok，�
   assert.equal(g.shouldAbort, false);
 });
 
+// [P1-B 2026-10-03] 回归：MySQL `extractvalue`/`updatexml` 是最常用的 error-based 手法之一，
+// 它引发的 5xx 里带的是「XPATH syntax error」而非「SQL syntax」。此前 SQL_ERROR_SIG 不认这条
+// （它没跟上 2026-10-01 对 ERROR_SIG 的收紧）⇒ 30 次真实自伤报错被计入 serverErr
+// ⇒ 判定翻成 target_error /「结论不可信」。本用例钉死这条路径。
+test('extractvalue 报错注入的 500（XPATH syntax error）→ 仍判 ok（不得误判目标异常）', () => {
+  const g = new ScanValidityGuard();
+  for (let i = 0; i < 30; i++) {
+    g.observe({
+      req: { url: "http://t/?id=1' AND extractvalue(1,concat(0x7e,version()))-- -", method: 'GET' },
+      res: { status: 500, data: "XPATH syntax error: '~8.0.28'", headers: {} },
+      error: null,
+    });
+  }
+  const v = g.summary();
+  assert.equal(v.status, 'ok', `XPATH 自伤报错不应裁定目标异常，实际：${v.status}`);
+  assert.equal(v.reliable, true);
+  assert.equal(v.counts.injection5xx, 30, 'XPATH 自伤 5xx 应计入 injection5xx');
+  assert.equal(v.counts.serverErr, 0);
+});
+
 test('良性请求的 500（无 SQL 签名）→ 仍判 target_error（不因精修而放过病态目标）', () => {
   const g = new ScanValidityGuard();
   for (let i = 0; i < 30; i++) {

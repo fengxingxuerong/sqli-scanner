@@ -31,7 +31,9 @@ function makeSelf() {
       return { scanId, ratePerSec, request, headRequest };
     },
   };
-  const self = { httpClient: base, _scanClients: new Map() };
+  // [F1 2026-10-03] 暂停闸已下沉到 getScanClient 视图（request/headRequest 都过闸），
+  //   fake 的 this 必须显式建模该契约 —— 缺 _waitWhilePaused 时视图构造当场抛错，而非静默放行。
+  const self = { httpClient: base, _scanClients: new Map(), _waitWhilePaused: async () => {} };
   self.getConnector = (target) => getConnector.call(self, target);
   return { self, captured };
 }

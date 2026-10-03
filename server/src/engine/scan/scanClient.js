@@ -116,6 +116,32 @@ export function getScanClient(scanId, target) {
             : {}),
         };
       }
+      // [F1 2026-10-03] 暂停闸下沉到**视图本身**（request 与 headRequest 都过闸）。
+      //   此前暂停只挂在 scanRunner 的 ctxBase 包装层，而 detect.js 的两支 ad-hoc 客户端
+      //   （tamper 链验证 / 拦截驱动重跑）直接调用 sm.getScanClient 拿裸视图 —— 暂停期间
+      //   它们照常发包，「目标报警了先停手」对这两条路径形同虚设（TODO 09-28 #4 的验证口径：
+      //   把暂停闸收到 getScanClient 返回视图上）。闸挂到视图后，所有经 getScanClient 的
+      //   消费方（ctxBase 包装、safeUrl/csrf/login 包装链、ad-hoc 客户端）统一在请求边界
+      //   等待；ctxBase 的闸保留 —— 双重等待幂等（外层先等，内层见非 paused 即过）。
+      //   语义与点边界一致：paused 阻塞轮询、cancelled 放行（stop 的在途取消由 signal 负责）、
+      //   扫描条目被回收（!s）也放行（退役后不再有新流量，闸不必拦）。
+      {
+        const waitWhilePaused = this._waitWhilePaused.bind(this);
+        if (typeof view.request === 'function') {
+          const req0 = view.request.bind(view);
+          view.request = async (opts) => {
+            await waitWhilePaused(scanId);
+            return req0(opts);
+          };
+        }
+        if (typeof view.headRequest === 'function') {
+          const head0 = view.headRequest.bind(view);
+          view.headRequest = async (url, opts) => {
+            await waitWhilePaused(scanId);
+            return head0(url, opts);
+          };
+        }
+      }
       this._scanClients.set(scanId, view);
     }
     return this._scanClients.get(scanId);

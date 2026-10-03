@@ -66,8 +66,19 @@ export const INJECTION_SIGS = [
 // 都回 500；若把这些 5xx 计入 serverErrRatio，则「扫到了洞但满屏 500」会被误判成 target_error，
 // 于是每次正常扫描都弹「结论不可信」——告警疲劳一旦形成，真被封时有谁会看。
 // 判据：注入形态请求 + 响应体带 SQL 报错签名 → 归为 selfInflicted（计入报告但不参与状态裁定）。
+//
+// [P1-B 2026-10-03] 与 engine 侧 `ERROR_SIG`（`engine/payloads/index.js`，2026-10-01 收紧）对齐。
+// 上一版只有 9 条形态，漏掉 MySQL `extractvalue`/`updatexml` 的「XPATH syntax error」、
+// SQLite 原生 `near "x": syntax error`、DB2 `SQL0104N` 等**真实报错**形态。
+// 后果是一条静默的误判链：error-based 用 extractvalue 打有洞目标 → 500 里全是 XPATH 报错
+// → 本签名不命中 → 未归 selfInflicted → 计入 serverErrRatio → 被判 target_error /「结论不可信」
+// —— 正是本 Fix 要防的那件事，却在 payload 收紧了签名之后从这里漏了回来。
+//
+// 两侧是**同一个语义需求**（「响应体在说这是数据库报错」），故此处补齐为 ERROR_SIG 的同集；
+// 由 `tests/errorSig.specificity.test.js` 的漂移守卫钉死：同一 REAL_ERRORS 语料两侧必须一致命中、
+// 同一 GENERIC_PAGES 语料两侧必须一致不命中。改一侧不改另一侧 → 该测试立刻红。
 export const SQL_ERROR_SIG =
-  /(SQL syntax|syntax error at or near|ORA-\d{5}|PG::|sqlite3\.|SQLSTATE\s*\[|unclosed quotation|incorrect syntax near|unrecognized token)/i;
+  /(SQL syntax|syntax error at or near|near\s+["'][^\n]{0,80}?["']\s*:\s*syntax error|XPATH syntax error|extractvalue|updatexml|mysql_fetch|ORA-\d{5}|PG::|PostgreSQL.*ERROR|sqlite3\.|SQLSTATE\s*\[|unclosed quotation|incorrect syntax near|unrecognized token|Microsoft SQL Server|conversion failed|unknown column|Division by zero|SQL\d{4}[NRT]|DB2 SQL Error|Adaptive Server|Sybase\s*(?:error|message)|SQL error code|Firebird.*(?:error|exception)|isc_\d+|Informix\s+SQL|JdbcSQLException|org\.h2\.jdbc|org\.hsqldb|org\.apache\.derby|Syntax error in SQL statement|Syntax error: Encountered|Cannot parse|Microsoft Access|Jet.*Database|ODBC|MonetDB.*(?:error|exception)|MonetDB\s+\d{5})/i;
 
 // 状态严重度排序（越大越严重）：判定与粘滞共用同一优先级。
 const SEVERITY = { ok: 0, target_error: 1, session_expired: 2, blocked: 3, unreachable: 4 };

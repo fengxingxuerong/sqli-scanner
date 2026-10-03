@@ -705,6 +705,7 @@
     "noDumpData": "本次扫描未提取到拖库数据，不可导出",
     "exportReportFailed": "导出报告失败：{{detail}}",
     "exportDumpFailed": "导出拖库数据失败：{{detail}}",
+    "sarifHint": "SARIF 2.1.0 标准格式，可导入 GitHub Security / DefectDojo 等漏洞管理平台",
     "aiTitle": "AI 漏洞分析报告",
     "aiGenerating": "生成中...",
     "aiAnalyze": "AI 分析",

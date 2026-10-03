@@ -253,12 +253,12 @@ export function useScan() {
     }
   }, []);
 
-  // 导出报告（json/html/csv/markdown/db-json）：统一走 tauriBridge.saveFile —— Web 版 blob 下载，Tauri 版 dialog 落盘。
+  // 导出报告（json/html/csv/markdown/db-json/sarif）：统一走 tauriBridge.saveFile —— Web 版 blob 下载，Tauri 版 dialog 落盘。
   // 直接 fetch 原始内容（导出端点返回裸内容，非 {code,data,message} 包装，故不走 apiClient 解包）。
   // db-json：仅拖库数据部分（report.data），对标 sqlmap --dump 产物。
   const exportReport = useCallback(async (
     scanId: string,
-    format: 'json' | 'html' | 'csv' | 'markdown' | 'db-json'
+    format: 'json' | 'html' | 'csv' | 'markdown' | 'db-json' | 'sarif'
   ): Promise<void> => {
     // [桌面版断链修复] 同 SSE：这里是绕开 apiClient 的那一处 fetch，base 也必须取运行期值，
     // 否则随机端口下导出永远 404（而界面其它部分看起来一切正常）。
@@ -292,6 +292,9 @@ export function useScan() {
       markdown: 'text/markdown; charset=utf-8',
       json: 'application/json; charset=utf-8',
       'db-json': 'application/json; charset=utf-8',
+      // SARIF 2.1.0：与后端 scanRoutes.js 的 content-type 保持一致（application/sarif+json），
+      // 否则「另存为」在部分环境会把 .sarif 当匿名二进制，下游平台导入时认不出。
+      sarif: 'application/sarif+json; charset=utf-8',
     } as const;
     const mime = mimeMap[format];
     const fileExt = format === 'db-json' ? 'db.json' : format;

@@ -228,6 +228,36 @@ test('⑩ blockPolicy 校正：已自适应重跑却仍写 action=none 时，必
   } finally { h.done(); }
 });
 
+// ⑨a [2026-10-03] 推荐链落盘：此前只 emit('waf_detected') 走 SSE，summary 里没有
+// ⇒ 导出/历史报告看不到「识别到 WAF 后建议用哪条链重跑」。本组钉死落盘 + 形状归一。
+test('⑨a 识别到 WAF：推荐 tamper 链落盘 summary.wafSuggestedChains（归一 + 过滤空链）', async () => {
+  const h = build({
+    wafAgg: new Map([['cloudflare', { vendor: 'cloudflare', confidence: 0.9 }]]),
+    suggestions: [
+      { vendor: 'cloudflare', plugins: ['randomcase', 'dash2hash'] },
+      { vendor: 'x', plugins: [] }, // 空链 → 过滤
+      { vendor: 'y' }, // 无 plugins → 过滤
+    ],
+  });
+  try {
+    await finalizeReport(h.run);
+    assert.deepEqual(h.report.summary.wafSuggestedChains, [
+      { vendor: 'cloudflare', plugins: ['randomcase', 'dash2hash'] },
+    ]);
+  } finally { h.done(); }
+});
+
+test('⑨a 反向：无推荐链时不写该字段（旧报告形状不变，避免无意义键）', async () => {
+  const h = build({
+    wafAgg: new Map([['cloudflare', { vendor: 'cloudflare', confidence: 0.9 }]]),
+    suggestions: [],
+  });
+  try {
+    await finalizeReport(h.run);
+    assert.equal('wafSuggestedChains' in (h.report.summary || {}), false);
+  } finally { h.done(); }
+});
+
 test('⑩ filterBypass 形态：mode 决定 action（不是一律 adaptiveTamper）', async () => {
   const h = build({
     blockPolicy: { action: 'none', reason: '无拦截证据' },

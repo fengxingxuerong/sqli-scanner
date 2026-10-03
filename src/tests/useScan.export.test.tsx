@@ -59,6 +59,21 @@ describe('useScan.exportReport', () => {
     expect(tauriBridge.saveFile).toHaveBeenCalledWith('report_s1.csv', CSV, expect.any(String));
   });
 
+  it('sarif：文件名后缀与 MIME 与后端 content-type 对齐（此前前端无入口）', async () => {
+    fetchMock.mockResolvedValue(
+      resp({ headers: { 'content-disposition': 'attachment; filename="report_s1.sarif"', 'content-type': 'application/sarif+json' }, body: '{"version":"2.1.0"}' })
+    );
+    const { result } = renderHook(() => useScan());
+    await result.current.exportReport('s1', 'sarif');
+    const [url] = fetchMock.mock.calls[0];
+    expect(String(url)).toBe('http://test/api/scan/s1/report/export?format=sarif');
+    expect(tauriBridge.saveFile).toHaveBeenCalledWith(
+      'report_s1.sarif',
+      '{"version":"2.1.0"}',
+      'application/sarif+json; charset=utf-8'
+    );
+  });
+
   it('401 时抛出，不写盘', async () => {
     fetchMock.mockResolvedValue(resp({ status: 401 }));
     const { result } = renderHook(() => useScan());

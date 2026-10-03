@@ -191,10 +191,18 @@ export function buildDelivery(report) {
   const vendors = Array.isArray(summary.wafDetected) ? summary.wafDetected : [];
   const blockHits = validity?.counts?.blockHits ?? null;
   const blockPolicy = summary.blockPolicy || null;
+  // 推荐 tamper 链：finalize 落盘的 summary.wafSuggestedChains（此前只走 SSE，报告里没有）
+  const suggestedChains = (Array.isArray(summary.wafSuggestedChains) ? summary.wafSuggestedChains : [])
+    .map((c) => ({
+      vendor: String((c && c.vendor) || ''),
+      plugins: Array.isArray(c && c.plugins) ? c.plugins.map(String) : [],
+    }))
+    .filter((c) => c.plugins.length > 0);
   const waf = {
     detected: vendors.map((v) => ({ vendor: v.vendor || v.name || '?', confidence: v.confidence })),
     blockHits,
     blockPolicy,
+    suggestedChains,
     engaged:
       vendors.length > 0 ||
       (blockHits != null && blockHits > 0) ||

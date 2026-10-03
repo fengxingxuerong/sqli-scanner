@@ -48,6 +48,22 @@ test('SQL_ERROR_SIG（scanValidityGuard）同步收紧：SQLSTATE 须带码', ()
   assert.ok(!SQL_ERROR_SIG.test('SQLSTATE reference documentation'), '裸词不应命中');
 });
 
+// [P1-B 2026-10-03] 漂移守卫：ERROR_SIG（payloads）与 SQL_ERROR_SIG（scanValidityGuard）
+// 是「响应体在说这是数据库报错」这**同一个语义需求**的两份实现。历史上 ERROR_SIG 于
+// 2026-10-01 收紧了真实报错形态，SQL_ERROR_SIG 没跟 ⇒ error-based(extractvalue) 打有洞目标
+// 的 500 不被判 selfInflicted，被误判 target_error。本测试把两侧钉在同一语料上：
+// 真实报错两侧都要命中，通用页面两侧都不许命中 —— 再出现单向收紧，这里立刻红。
+test('漂移守卫：真实报错两侧一致命中、通用页两侧一致不命中（ERROR_SIG ⇄ SQL_ERROR_SIG）', () => {
+  for (const s of REAL_ERRORS) {
+    assert.ok(ERROR_SIG.test(s), `ERROR_SIG 自身漏命中：${s}`);
+    assert.ok(SQL_ERROR_SIG.test(s), `SQL_ERROR_SIG 与 ERROR_SIG 分叉（漏命中）：${s}`);
+  }
+  for (const s of GENERIC_PAGES) {
+    assert.ok(!ERROR_SIG.test(s), `ERROR_SIG 误命中通用短语：${s}`);
+    assert.ok(!SQL_ERROR_SIG.test(s), `SQL_ERROR_SIG 误命中通用短语：${s}`);
+  }
+});
+
 test('dbmsFromError：PDO SQLSTATE 形态仍能定库', () => {
   assert.equal(dbmsFromError('SQLSTATE[42000]: [Microsoft][ODBC] SQL Server'), 'SQL Server');
 });

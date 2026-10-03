@@ -101,6 +101,14 @@ const TARGETS = [
     file: 'src/core/statsHelper.js',
     tests: ['tests/tokenBagSimilar.test.js', 'tests/booleanStability.test.js'],
   },
+  {
+    // [批次 2026-10-03] `--passwords` 的哈希算法识别（classifyHash）+ 弱口令风险标注
+    // （analyzePasswords）。纯函数、离线可跑、20 条专属测试。**安全边界**也在这里：
+    // 报告不得回显原始哈希、MySQL `user@host` 按最后一个 `@` 切、PG SCRAM 内部冒号不许
+    // 被当成 identity 分隔符 —— 这些断言一旦不敏感，报告就可能泄露凭据原文。
+    file: 'src/engine/extraction/hashAnalysis.js',
+    tests: ['tests/hashAnalysis.test.js'],
+  },
 ];
 
 /**

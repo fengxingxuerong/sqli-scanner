@@ -221,3 +221,67 @@ test('缺注入点上下文时降级为显式标注（不产出空单元格、�
   assert.match(md, /\| p1 \| （未记录参数名） · 未知位置 \|/);
   assert.ok(!md.includes('| p1 |  |'), '空单元格会被读成「无影响」，必须显式标注');
 });
+
+// ============================================================================
+// [2026-10-03] 暴露链缺口回归：WAF 推荐 tamper 链此前只走实时 SSE，任何报告格式都看不到
+// 背景：finalize.js 算出 wafRecommend 的建议链后只 emit('waf_detected')（SSE），summary 只存
+// wafDetected(vendors)；reportDelivery 也只读 vendors ⇒ JSON/md/html/csv/sarif 里永远没有
+// 「识别到 WAF 后建议用哪条链重跑」，实时流一过就没。修复：finalize 落盘
+// summary.wafSuggestedChains + 交付层取数 + 两侧渲染。
+// ============================================================================
+
+test('buildDelivery: 推荐链取数自 summary.wafSuggestedChains（形状归一 + 过滤空链）', () => {
+  const d = buildDelivery(
+    mkReport({
+      summary: {
+        wafDetected: [{ vendor: 'ModSecurity', confidence: 0.9 }],
+        wafSuggestedChains: [
+          { vendor: 'ModSecurity', plugins: ['space2comment', 'dash2hash'] },
+          { vendor: 'x', plugins: [] }, // 空 plugins → 过滤
+          { plugins: ['randomcase'] }, // 缺 vendor → 归一为 ''
+          null, // 脏数据 → 不抛错
+        ],
+      },
+    })
+  );
+  assert.deepEqual(d.waf.suggestedChains, [
+    { vendor: 'ModSecurity', plugins: ['space2comment', 'dash2hash'] },
+    { vendor: '', plugins: ['randomcase'] },
+  ]);
+});
+
+test('buildDelivery: 无 wafSuggestedChains → 空数组（向后兼容旧报告）', () => {
+  const d = buildDelivery(mkReport());
+  assert.deepEqual(d.waf.suggestedChains, []);
+});
+
+test('toMarkdown/toHTML: 渲染推荐 tamper 链（此前只在 SSE 里）', () => {
+  const report = mkReport({
+    summary: {
+      wafDetected: [{ vendor: 'ModSecurity', confidence: 0.9 }],
+      wafSuggestedChains: [{ vendor: 'ModSecurity', plugins: ['space2comment', 'dash2hash'] }],
+    },
+  });
+  const md = rg.toMarkdown(report);
+  assert.match(md, /推荐 tamper 链/);
+  assert.match(md, /space2comment → dash2hash/);
+
+  const html = rg.toHTML(report);
+  assert.match(html, /推荐 tamper 链/);
+  assert.match(html, /space2comment → dash2hash/);
+});
+
+test('安全：推荐链的 vendor 是目标可控输入 → markdown/html 均转义（不注入）', () => {
+  const report = mkReport({
+    summary: {
+      wafDetected: [{ vendor: 'ModSecurity', confidence: 0.9 }],
+      wafSuggestedChains: [{ vendor: '<img src=x onerror=alert(1)>|z', plugins: ['a<b'] }],
+    },
+  });
+  const html = rg.toHTML(report);
+  assert.ok(!html.includes('<img src=x onerror=alert(1)>'), 'HTML 必须转义 vendor');
+  assert.match(html, /&lt;img/);
+  const md = rg.toMarkdown(report);
+  assert.ok(!md.includes('<img src=x onerror=alert(1)>'), 'markdown 必须转义尖括号（裸 HTML 会执行）');
+  assert.ok(md.includes('\\|z'), 'markdown 必须转义竖线（否则拆表）');
+});

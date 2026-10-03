@@ -118,6 +118,23 @@ export function createRangeApp(pool, opts = {}) {
     res.send(html('User Detail', table(rows)));
   }));
 
+  // ── WAF 前置端点（F1 2026-10-03）：命中**原始签名**的探测一律 403，基线放行进 SQL ──
+  // 存在的目的：给「拦截证据驱动的自适应链验证 + 驱动重跑」一个真实触发源 —— 这两条
+  // 路径的 HTTP 走 detect.js 的两支 ad-hoc 客户端（裸 getScanClient 视图）。配合 cases.mjs
+  // 的「wafEvasion 目标暂停零流量」用例：暂停闸若只挂 ctxBase 包装层，这里就是漏网之鱼。
+  // ⚠️ 拦截判据只拦**原始签名**（' " -- AND OR UNION …），刻意放行 tamper 变换形态
+  // （&& / # / 0x.. / char( / /**/）—— 若把变换形态也拦光，链验证 3 条全被拦、引擎按
+  // 「跳过自动重跑」收场（省掉注定失败的整轮请求），重跑根本不发生，本用例就没有相位可锚。
+  app.get('/wafnum', wrap(async (req, res) => {
+    const v = req.query.id ?? '1';
+    record(req, 'url', 'id', v);
+    if (/('|"|--\s|\bAND\b|\bOR\b|\bUNION\b|\bSELECT\b|\bSLEEP\b|\bFROM\b|\/\*)/i.test(String(v))) {
+      return res.status(403).type('html').send('<!DOCTYPE html><html><body><p>blocked by waf rule 942100</p></body></html>');
+    }
+    const [rows] = await runQuery(`SELECT * FROM users WHERE id = ${v}`);
+    res.send(html('User Detail', table(rows)));
+  }));
+
   // ── url query：字符串型（' 闭合） ──
   app.get('/str', wrap(async (req, res) => {
     const v = req.query.name ?? 'alice';

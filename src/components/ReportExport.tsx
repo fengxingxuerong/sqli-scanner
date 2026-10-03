@@ -16,8 +16,10 @@ import { tauriBridge } from '../shared/tauriBridge';
 import { hasDumpData, dumpToCsv, dumpToJson } from '../shared/dumpExport';
 import { apiClient } from '../shared/apiClient';
 
-// 报告导出：JSON / HTML / CSV / Markdown（整份报告）
-export type ExportFormat = 'json' | 'html' | 'csv' | 'markdown' | 'db-json';
+// 报告导出：JSON / HTML / CSV / Markdown / SARIF（整份报告）
+// SARIF 2.1.0 对接 GitHub Security / DefectDojo / 甲方安全平台；后端早已支持（ReportGenerator.toSARIF），
+// 此处补齐前端入口，否则用户只能通过 CLI/API 拿到该格式。
+export type ExportFormat = 'json' | 'html' | 'csv' | 'markdown' | 'db-json' | 'sarif';
 
 export default function ReportExport() {
   const { t } = useTranslation();
@@ -102,6 +104,15 @@ export default function ReportExport() {
         </Button>
         <Button variant="outlined" size="small" disabled={!scanId} onClick={() => handleExport('markdown')}>
           Markdown
+        </Button>
+        <Button
+          variant="outlined"
+          size="small"
+          disabled={!scanId}
+          title={t('reportExport.sarifHint')}
+          onClick={() => handleExport('sarif')}
+        >
+          SARIF
         </Button>
       </Box>
 

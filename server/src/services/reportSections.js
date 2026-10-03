@@ -189,6 +189,9 @@ export function remediationMarkdown(d) {
   return out;
 }
 
+/** 每节最多列出的推荐 tamper 链数（防目标回显把段落撑爆） */
+const WAF_CHAIN_LIMIT = 8;
+
 /** markdown WAF 交战记录 */
 export function wafMarkdown(d) {
   const w = d.waf;
@@ -204,6 +207,15 @@ export function wafMarkdown(d) {
   if (w.blockPolicy) {
     const hint = Array.isArray(w.blockPolicy.tamperHint) && w.blockPolicy.tamperHint.length ? `；自动换用 tamper：${w.blockPolicy.tamperHint.join(', ')}` : '';
     out.push(`- 处置策略：${w.blockPolicy.action}——${w.blockPolicy.reason || ''}${hint}。`);
+  }
+  // [2026-10-03] 推荐 tamper 链（summary.wafSuggestedChains）此前只走实时 SSE，一过即失；
+  // 落盘后在此渲染。vendor 可能来自响应头/正文（**目标可控**）⇒ markdown 过 mdCell。
+  const chains = Array.isArray(w.suggestedChains) ? w.suggestedChains.slice(0, WAF_CHAIN_LIMIT) : [];
+  if (chains.length) {
+    out.push('- 推荐 tamper 链（识别到 WAF 后建议据此重跑未命中点）：');
+    for (const c of chains) {
+      out.push(`  - ${mdCell(c.vendor || '?')}：${mdCell(c.plugins.join(' → '))}`);
+    }
   }
   out.push('');
   return out;
@@ -276,7 +288,14 @@ export function wafHtml(d, esc) {
           : ''
       }。</p>`
     : '';
-  return `<h2>WAF 交战记录</h2><p class="meta">${vendorLine}被拦截请求数：${esc(w.blockHits ?? '-')}。</p>${policy}`;
+  const chains =
+    Array.isArray(w.suggestedChains) && w.suggestedChains.length
+      ? `<p>推荐 tamper 链（识别到 WAF 后建议据此重跑未命中点）：</p><ul>${w.suggestedChains
+          .slice(0, WAF_CHAIN_LIMIT)
+          .map((c) => `<li>${esc(c.vendor || '?')}：<code>${esc(c.plugins.join(' → '))}</code></li>`)
+          .join('')}</ul>`
+      : '';
+  return `<h2>WAF 交战记录</h2><p class="meta">${vendorLine}被拦截请求数：${esc(w.blockHits ?? '-')}。</p>${policy}${chains}`;
 }
 
 // ============================================================================

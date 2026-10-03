@@ -37,6 +37,14 @@
    （该测试断言客户端身份），故**保留原状**。
    验证口径：把暂停闸收到 `getScanClient` 返回视图上，同时让接口靶场的暂停用例对
    "开启 wafEvasion 自动选链"的目标也断言零流量；并复跑 orchestration 契约。
+   —— ✅ **已修（2026-10-03，批次 F1）**：暂停闸下沉到 `getScanClient` 返回视图本身
+   （request 与 headRequest 都过闸，`scanClient.js`）—— 不动 detect.js，orchestration 契约
+   零改动，branches 测试的 fake 补 `_waitWhilePaused` no-op（契约显式建模）。
+   验证三件套：① 单测 `scanClient.pause.test.js` 4 条（paused 挂闸 / HEAD 过闸 /
+   cancelled 放行 / 源码钉住 ad-hoc 必经 getScanClient），缺陷注入杀；② 接口靶场新增
+   `/wafnum`（只拦原始签名、放行 tamper 变换形态 —— 全拦光会让引擎「跳过自动重跑」、
+   重跑根本不发生）+ 事件锚定用例（SSE 第一发 `point_testing(tamperRetry:true)` 后暂停，
+   断言重跑路径零发包），16/16 PASS；③ 靶场级缺陷注入复验：撤闸重跑 ⇒ 该用例红（15/16）。
 5. **台账无保留策略** —— ✅ **已修（2026-09-29）**：新增 `pruneLedger()` / `retentionPolicy()`
    （`server/src/services/scanLedger.js`），`SCAN_LEDGER_MAX`（条目数）与
    `SCAN_LEDGER_MAX_DAYS`（天数）可叠加，两维都未设 ⇒ **零淘汰**（默认值必须是不删东西）。
