@@ -1,0 +1,580 @@
+{
+  "runs": 3,
+  "rows": [
+    {
+      "id": 1,
+      "desc": "GET 单引号字符串",
+      "ours": {
+        "hit": true,
+        "techs": [
+          "union",
+          "boolean",
+          "inline"
+        ],
+        "ms": 124,
+        "hitCount": 3,
+        "runs": 3
+      },
+      "smap": {
+        "hit": true,
+        "techs": [
+          "boolean",
+          "union"
+        ],
+        "ms": 2229,
+        "hitCount": 3,
+        "runs": 3
+      },
+      "agree": true
+    },
+    {
+      "id": 2,
+      "desc": "GET 数值型",
+      "ours": {
+        "hit": true,
+        "techs": [
+          "union",
+          "error",
+          "boolean"
+        ],
+        "ms": 169,
+        "hitCount": 3,
+        "runs": 3
+      },
+      "smap": {
+        "hit": true,
+        "techs": [
+          "boolean",
+          "union"
+        ],
+        "ms": 2186,
+        "hitCount": 3,
+        "runs": 3
+      },
+      "agree": true
+    },
+    {
+      "id": 3,
+      "desc": "GET 单引号+括号",
+      "ours": {
+        "hit": true,
+        "techs": [
+          "union",
+          "boolean",
+          "inline"
+        ],
+        "ms": 125,
+        "hitCount": 3,
+        "runs": 3
+      },
+      "smap": {
+        "hit": true,
+        "techs": [
+          "boolean",
+          "union"
+        ],
+        "ms": 2146,
+        "hitCount": 3,
+        "runs": 3
+      },
+      "agree": true
+    },
+    {
+      "id": 4,
+      "desc": "GET 双引号+括号",
+      "ours": {
+        "hit": true,
+        "techs": [
+          "union",
+          "error",
+          "boolean"
+        ],
+        "ms": 164,
+        "hitCount": 3,
+        "runs": 3
+      },
+      "smap": {
+        "hit": false,
+        "techs": [],
+        "ms": 2006,
+        "hitCount": 0,
+        "runs": 3
+      },
+      "agree": false
+    },
+    {
+      "id": 5,
+      "desc": "GET 双注入单引号",
+      "ours": {
+        "hit": true,
+        "techs": [
+          "union",
+          "boolean",
+          "inline"
+        ],
+        "ms": 123,
+        "hitCount": 3,
+        "runs": 3
+      },
+      "smap": {
+        "hit": true,
+        "techs": [
+          "boolean",
+          "union"
+        ],
+        "ms": 2055,
+        "hitCount": 3,
+        "runs": 3
+      },
+      "agree": true
+    },
+    {
+      "id": 6,
+      "desc": "GET 双注入双引号",
+      "ours": {
+        "hit": true,
+        "techs": [
+          "union",
+          "error",
+          "boolean"
+        ],
+        "ms": 92,
+        "hitCount": 3,
+        "runs": 3
+      },
+      "smap": {
+        "hit": false,
+        "techs": [],
+        "ms": 2085,
+        "hitCount": 0,
+        "runs": 3
+      },
+      "agree": false
+    },
+    {
+      "id": 8,
+      "desc": "GET 布尔盲注",
+      "ours": {
+        "hit": true,
+        "techs": [
+          "union",
+          "boolean",
+          "inline"
+        ],
+        "ms": 124,
+        "hitCount": 3,
+        "runs": 3
+      },
+      "smap": {
+        "hit": true,
+        "techs": [
+          "boolean",
+          "union"
+        ],
+        "ms": 2138,
+        "hitCount": 3,
+        "runs": 3
+      },
+      "agree": true
+    },
+    {
+      "id": 9,
+      "desc": "GET 时间盲注",
+      "ours": {
+        "hit": true,
+        "techs": [
+          "union",
+          "boolean",
+          "inline"
+        ],
+        "ms": 94,
+        "hitCount": 3,
+        "runs": 3
+      },
+      "smap": {
+        "hit": true,
+        "techs": [
+          "boolean",
+          "union"
+        ],
+        "ms": 2087,
+        "hitCount": 3,
+        "runs": 3
+      },
+      "agree": true
+    },
+    {
+      "id": 10,
+      "desc": "GET 时间盲注双引号",
+      "ours": {
+        "hit": true,
+        "techs": [
+          "union",
+          "error",
+          "boolean"
+        ],
+        "ms": 93,
+        "hitCount": 3,
+        "runs": 3
+      },
+      "smap": {
+        "hit": false,
+        "techs": [],
+        "ms": 2105,
+        "hitCount": 0,
+        "runs": 3
+      },
+      "agree": false
+    },
+    {
+      "id": 23,
+      "desc": "OR/AND 过滤",
+      "ours": {
+        "hit": true,
+        "techs": [
+          "error",
+          "inline"
+        ],
+        "ms": 170,
+        "hitCount": 3,
+        "runs": 3
+      },
+      "smap": {
+        "hit": false,
+        "techs": [],
+        "ms": 3197,
+        "hitCount": 0,
+        "runs": 3
+      },
+      "agree": false
+    },
+    {
+      "id": 25,
+      "desc": "注释过滤",
+      "ours": {
+        "hit": true,
+        "techs": [
+          "error",
+          "boolean",
+          "inline"
+        ],
+        "ms": 126,
+        "hitCount": 3,
+        "runs": 3
+      },
+      "smap": {
+        "hit": true,
+        "techs": [
+          "boolean"
+        ],
+        "ms": 2480,
+        "hitCount": 3,
+        "runs": 3
+      },
+      "agree": true
+    },
+    {
+      "id": 26,
+      "desc": "空格过滤",
+      "ours": {
+        "hit": true,
+        "techs": [
+          "error",
+          "boolean",
+          "inline"
+        ],
+        "ms": 124,
+        "hitCount": 3,
+        "runs": 3
+      },
+      "smap": {
+        "hit": false,
+        "techs": [],
+        "ms": 2249,
+        "hitCount": 0,
+        "runs": 3
+      },
+      "agree": false
+    },
+    {
+      "id": 28,
+      "desc": "UNION SELECT 过滤",
+      "ours": {
+        "hit": true,
+        "techs": [
+          "union",
+          "error",
+          "boolean",
+          "inline"
+        ],
+        "ms": 94,
+        "hitCount": 3,
+        "runs": 3
+      },
+      "smap": {
+        "hit": true,
+        "techs": [
+          "boolean",
+          "union"
+        ],
+        "ms": 2183,
+        "hitCount": 3,
+        "runs": 3
+      },
+      "agree": true
+    },
+    {
+      "id": 29,
+      "desc": "UNION 过滤",
+      "ours": {
+        "hit": true,
+        "techs": [
+          "error",
+          "inline"
+        ],
+        "ms": 124,
+        "hitCount": 3,
+        "runs": 3
+      },
+      "smap": {
+        "hit": false,
+        "techs": [],
+        "ms": 2651,
+        "hitCount": 0,
+        "runs": 3
+      },
+      "agree": false
+    },
+    {
+      "id": 30,
+      "desc": "UNION+注释过滤",
+      "ours": {
+        "hit": true,
+        "techs": [
+          "error",
+          "boolean",
+          "inline"
+        ],
+        "ms": 123,
+        "hitCount": 3,
+        "runs": 3
+      },
+      "smap": {
+        "hit": true,
+        "techs": [
+          "boolean"
+        ],
+        "ms": 2467,
+        "hitCount": 3,
+        "runs": 3
+      },
+      "agree": true
+    },
+    {
+      "id": 31,
+      "desc": "堆叠注入",
+      "ours": {
+        "hit": true,
+        "techs": [
+          "union",
+          "error",
+          "boolean"
+        ],
+        "ms": 93,
+        "hitCount": 3,
+        "runs": 3
+      },
+      "smap": {
+        "hit": true,
+        "techs": [
+          "boolean",
+          "union"
+        ],
+        "ms": 2034,
+        "hitCount": 3,
+        "runs": 3
+      },
+      "agree": true
+    },
+    {
+      "id": 32,
+      "desc": "宽字节",
+      "ours": {
+        "hit": true,
+        "techs": [
+          "union",
+          "boolean",
+          "inline"
+        ],
+        "ms": 93,
+        "hitCount": 3,
+        "runs": 3
+      },
+      "smap": {
+        "hit": true,
+        "techs": [
+          "boolean",
+          "union"
+        ],
+        "ms": 2080,
+        "hitCount": 3,
+        "runs": 3
+      },
+      "agree": true
+    },
+    {
+      "id": 38,
+      "desc": "堆叠+数值",
+      "ours": {
+        "hit": true,
+        "techs": [
+          "union",
+          "error",
+          "boolean"
+        ],
+        "ms": 92,
+        "hitCount": 3,
+        "runs": 3
+      },
+      "smap": {
+        "hit": true,
+        "techs": [
+          "boolean",
+          "union"
+        ],
+        "ms": 2059,
+        "hitCount": 3,
+        "runs": 3
+      },
+      "agree": true
+    },
+    {
+      "id": 46,
+      "desc": "ORDER BY 注入",
+      "ours": {
+        "hit": true,
+        "techs": [
+          "error"
+        ],
+        "ms": 94,
+        "hitCount": 3,
+        "runs": 3
+      },
+      "smap": {
+        "hit": false,
+        "techs": [],
+        "ms": 2122,
+        "hitCount": 0,
+        "runs": 3
+      },
+      "agree": false
+    },
+    {
+      "id": 47,
+      "desc": "ORDER BY 单引号",
+      "ours": {
+        "hit": true,
+        "techs": [
+          "error",
+          "inline"
+        ],
+        "ms": 125,
+        "hitCount": 3,
+        "runs": 3
+      },
+      "smap": {
+        "hit": false,
+        "techs": [],
+        "ms": 2223,
+        "hitCount": 0,
+        "runs": 3
+      },
+      "agree": false
+    },
+    {
+      "id": 54,
+      "desc": "无回显数值",
+      "ours": {
+        "hit": true,
+        "techs": [
+          "union",
+          "error",
+          "boolean"
+        ],
+        "ms": 93,
+        "hitCount": 3,
+        "runs": 3
+      },
+      "smap": {
+        "hit": true,
+        "techs": [
+          "boolean",
+          "union"
+        ],
+        "ms": 2088,
+        "hitCount": 3,
+        "runs": 3
+      },
+      "agree": true
+    },
+    {
+      "id": 61,
+      "desc": "挑战多过滤",
+      "ours": {
+        "hit": true,
+        "techs": [
+          "error",
+          "inline"
+        ],
+        "ms": 123,
+        "hitCount": 3,
+        "runs": 3
+      },
+      "smap": {
+        "hit": false,
+        "techs": [],
+        "ms": 2694,
+        "hitCount": 0,
+        "runs": 3
+      },
+      "agree": false
+    },
+    {
+      "id": 66,
+      "desc": "XML 注入",
+      "ours": {
+        "hit": true,
+        "techs": [
+          "union",
+          "boolean",
+          "inline"
+        ],
+        "ms": 93,
+        "hitCount": 3,
+        "runs": 3
+      },
+      "smap": {
+        "hit": true,
+        "techs": [
+          "boolean",
+          "union"
+        ],
+        "ms": 2111,
+        "hitCount": 3,
+        "runs": 3
+      },
+      "agree": true
+    }
+  ],
+  "summary": {
+    "oursRate": "100.0",
+    "smapRate": "60.9",
+    "agreeRate": "60.9",
+    "both": 14,
+    "oursOnly": 9,
+    "smapOnly": 0,
+    "neither": 0,
+    "oursAvgMs": 116,
+    "smapAvgMs": 2167
+  }
+}

@@ -29,6 +29,37 @@ const L3_MODE = process.argv.includes('--l3');
 const SMAP_LEVEL = L3_MODE ? 3 : 1;
 const SMAP_RISK = L3_MODE ? 2 : 1;
 const TAG = L3_MODE ? 'level3' : 'level1';
+
+// [--runs 2026-10-03 批次D] 严格同题对标：同靶点双方各跑 N 次，检出取**多数决**、
+// 耗时取**中位数**、技术取命中轮的并集。项目评价（2026-10-03）§三.B 的缺口：
+// 「没有一份同靶点、同档位、双方各跑 3 次取中位的定版对照」—— 单轮数字撑不起强断言，
+// 单机抖动（时间盲注尤其）会把结论带偏。N=1 时行为与旧版逐字节一致。
+const RUNS = Math.max(1, Number((process.argv.find((a) => a.startsWith('--runs=')) || '').split('=')[1]) || 1);
+const TAG2 = RUNS > 1 ? `${TAG}-runs${RUNS}` : TAG;
+
+/** 中位数（偶数个取中间两值均值——对耗时排序后取中位足够稳定） */
+function median(arr) {
+  const s = [...arr].sort((a, b) => a - b);
+  const mid = Math.floor(s.length / 2);
+  return s.length % 2 ? s[mid] : Math.round((s[mid - 1] + s[mid]) / 2);
+}
+
+/**
+ * 同一场景跑 N 次：检出=多数决（N 取奇数最稳），耗时=中位数，技术=命中轮并集。
+ * 返回里保留 hitCount —— 单轮抖动（2/3）与稳定命中（3/3）在报告里必须可分辨。
+ */
+async function runSideNTimes(fn, n) {
+  const runs = [];
+  for (let i = 0; i < n; i++) runs.push(await fn());
+  const hitRuns = runs.filter((r) => r.hit);
+  return {
+    hit: hitRuns.length > n / 2,
+    techs: [...new Set(hitRuns.flatMap((r) => r.techs))],
+    ms: median(runs.map((r) => r.ms)),
+    hitCount: hitRuns.length,
+    runs: n,
+  };
+}
 const baseConfig = {
   concurrency: 2, ratePerSec: 0, retry: 0, timeoutMs: 15_000,
   techniques: TECHNIQUES,
@@ -139,12 +170,13 @@ async function main() {
   const rows = [];
   try {
     for (const sc of SCENARIOS) {
-      const ours = await runOurs(sc, { ScanManager });
-      const smap = await runSqlmap(sc);
+      const ours = await runSideNTimes(() => runOurs(sc, { ScanManager }), RUNS);
+      const smap = await runSideNTimes(() => runSqlmap(sc), RUNS);
       const agree = ours.hit === smap.hit;
       rows.push({ id: sc.id, desc: sc.desc, ours, smap, agree });
       const flag = agree ? '==' : '!=';
-      console.log(`[${flag}] L${String(sc.id).padStart(2, '0')} ${sc.desc.padEnd(18)} | 我方: ${ours.hit ? ours.techs.join('/') : '未检出'} (${fmtMs(ours.ms)}) | sqlmap: ${smap.hit ? smap.techs.join('/') : '未检出'} (${fmtMs(smap.ms)})`);
+      const stability = RUNS > 1 ? ` [命中 ${ours.hitCount}/${RUNS} vs ${smap.hitCount}/${RUNS}]` : '';
+      console.log(`[${flag}] L${String(sc.id).padStart(2, '0')} ${sc.desc.padEnd(18)} | 我方: ${ours.hit ? ours.techs.join('/') : '未检出'} (${fmtMs(ours.ms)}) | sqlmap: ${smap.hit ? smap.techs.join('/') : '未检出'} (${fmtMs(smap.ms)})${stability}`);
     }
   } finally {
     pyProc.kill();
@@ -161,7 +193,7 @@ async function main() {
   const oursAvgMs = Math.round(rows.filter((r) => r.ours.hit).reduce((a, r) => a + r.ours.ms, 0) / Math.max(1, rows.filter((r) => r.ours.hit).length));
   const smapAvgMs = Math.round(rows.filter((r) => r.smap.hit).reduce((a, r) => a + r.smap.ms, 0) / Math.max(1, rows.filter((r) => r.smap.hit).length));
 
-  console.log(`\n==== [${TAG}] 对标汇总（${rows.length} 关，SQLite 靶场）====`);
+  console.log(`\n==== [${TAG2}] 对标汇总（${rows.length} 关${RUNS > 1 ? ` × ${RUNS} 轮，检出多数决/耗时中位` : ''}，SQLite 靶场）====`);
   console.log(`双方一致: ${both} | 仅我方: ${oursOnly} | 仅 sqlmap: ${smapOnly} | 双方未检出: ${neither}`);
   console.log(`我方命中率: ${oursRate}% | sqlmap 命中率: ${smapRate}% | 结论一致率: ${agreeRate}%`);
   console.log(`平均耗时（命中场景）: 我方 ${fmtMs(oursAvgMs)} vs sqlmap ${fmtMs(smapAvgMs)}`);
@@ -182,10 +214,25 @@ async function main() {
     '- 基准：sqli-labs Python 靶场（SQLite 后端，23 关）',
     '- 我方：ScanManager（union/error/boolean/time/stacked/inline，level3 等效）',
     '- sqlmap：1.10.7 --batch --level=1 --risk=1 --technique=BEUSQ --no-cast -p <param>',
+    RUNS > 1
+      ? `- 方法论：**同靶点双方各跑 ${RUNS} 次** —— 检出取多数决（标注命中轮次），耗时取中位数，技术取命中轮并集。`
+        + `这是 2026-10-03 项目评价指出的缺口收口：单轮数字受单机抖动影响，撑不起强断言；`
+        + `多轮中位才是可复现的定版口径。`
+      : '- 方法论：单轮（加 --runs=3 可得多轮中位的定版口径）',
     '',
-    '| 关卡 | 描述 | 我方检出 | 我方技术 | sqlmap 检出 | sqlmap 技术 | 一致 | 我方耗时 | sqlmap 耗时 |',
+    RUNS > 1
+      ? '| 关卡 | 描述 | 我方检出(命中轮) | 我方技术 | sqlmap 检出(命中轮) | sqlmap 技术 | 一致 | 我方耗时(中位) | sqlmap 耗时(中位) |'
+      : '| 关卡 | 描述 | 我方检出 | 我方技术 | sqlmap 检出 | sqlmap 技术 | 一致 | 我方耗时 | sqlmap 耗时 |',
     '|---|---|---|---|---|---|---|---|---|',
-    ...rows.map((r) => `| L${r.id} | ${r.desc} | ${r.ours.hit ? '✅' : '❌'} | ${r.ours.techs.join('/') || '-'} | ${r.smap.hit ? '✅' : '❌'} | ${r.smap.techs.join('/') || '-'} | ${r.agree ? '✅' : '❌'} | ${fmtMs(r.ours.ms)} | ${fmtMs(r.smap.ms)} |`),
+    ...rows.map((r) => {
+      const oursCell = RUNS > 1
+        ? `${r.ours.hit ? '✅' : '❌'}(${r.ours.hitCount}/${RUNS})`
+        : `${r.ours.hit ? '✅' : '❌'}`;
+      const smapCell = RUNS > 1
+        ? `${r.smap.hit ? '✅' : '❌'}(${r.smap.hitCount}/${RUNS})`
+        : `${r.smap.hit ? '✅' : '❌'}`;
+      return `| L${r.id} | ${r.desc} | ${oursCell} | ${r.ours.techs.join('/') || '-'} | ${smapCell} | ${r.smap.techs.join('/') || '-'} | ${r.agree ? '✅' : '❌'} | ${fmtMs(r.ours.ms)} | ${fmtMs(r.smap.ms)} |`;
+    }),
     '',
     `## 汇总`,
     '',
@@ -199,8 +246,8 @@ async function main() {
     '',
   ].join('\r\n');
 
-  writeFileSync(resolve(OUT_DIR, `sqlmap-benchmark-${new Date().toISOString().slice(0, 10)}-${TAG}.md`), md, 'utf8');
-  writeFileSync(resolve(OUT_DIR, `results-${TAG}.json`), JSON.stringify({ rows, summary: { oursRate, smapRate, agreeRate, both, oursOnly, smapOnly, neither, oursAvgMs, smapAvgMs } }, null, 2), 'utf8');
+  writeFileSync(resolve(OUT_DIR, `sqlmap-benchmark-${new Date().toISOString().slice(0, 10)}-${TAG2}.md`), md, 'utf8');
+  writeFileSync(resolve(OUT_DIR, `results-${TAG2}.json`), JSON.stringify({ runs: RUNS, rows, summary: { oursRate, smapRate, agreeRate, both, oursOnly, smapOnly, neither, oursAvgMs, smapAvgMs } }, null, 2), 'utf8');
   console.log(`\n报告已写入 ${resolve(OUT_DIR)}`);
 }
 
