@@ -80,10 +80,10 @@ export function probeTokensToTokens(ids = []) {
  * @param {Set<string>} blocked 被拦 token 集合
  * @returns {{covers:number, punct:number, isCodec:boolean}}
  */
-function scoreMeta(meta, blocked) {
+function scoreMeta(meta, blocked, fullBlocked) {
   let covers = 0;
   const isCodec = meta.eliminatesAll === true;
-  if (isCodec) covers += blocked.size;
+  if (isCodec) covers += fullBlocked.size; // 编码链覆盖整个 payload —— 与具体 token 无关，按全量计
   for (const t of meta.eliminates || []) if (blocked.has(t)) covers += 1;
   // 标点代价：把 introduces 里非词字符数当作增量的近似（精确值由 estimatePunctCost 实测）
   let punct = 0;
@@ -102,7 +102,7 @@ function scoreMeta(meta, blocked) {
  * @param {string} [p.dbms] 目标 DBMS（交由既有 registry 守卫复核 dbms 适用性）
  * @param {number} [p.maxChains] 最多返回多少条（默认 6；调用方通常再截到 MAX_CHAINS）
  * @param {number} [p.maxPairPool] 双插件组合的候选池上限（默认 8，防组合爆炸）
- * @param {string} [p.sample] 标点代价评估样本 payload
+ * @param {string|null} [p.sample] 标点代价评估样本 payload（缺省 null = 不按样本收敛）
  * @returns {{chains: Array<{plugins:string[], covers:string[], punctDelta:number, source:'single'|'pair'|'pair+punct'|'punct+pair'|'triple', isCodec:boolean}>, blocked:string[], emptyReason?:string}}
  */
 export function planChainsByProfile({
@@ -110,7 +110,7 @@ export function planChainsByProfile({
   dbms,
   maxChains = 6,
   maxPairPool = 8,
-  sample = "'1' UNION SELECT 1-- -",
+  sample = null,
 } = {}) {
   const blocked = probeTokensToTokens(blockedTokens);
   const blockedSet = new Set(blocked);
@@ -123,11 +123,30 @@ export function planChainsByProfile({
   const sel = selectByAvoiding(blocked, { dbms: dbms || undefined });
   const idx = buildSemanticIndex();
 
+  // [批次 D3 2026-10-04] 覆盖率只统计**真的出现在样本里的被拦词**。
+  //   画像说 WAF 拦 union/select，但验证探针（sample）里根本没有 select —— 为「消除
+  //   select」的插件花候选名额就是浪费（channelPolicy 用例实测：它把原本能过的编码链
+  //   挤出了唯一生成名额，整条链反而验证失败）。token 出现性按形态判：词形用  词边界，
+  //   符号形用 indexOf。
+  const tokenInSample = (t) => {
+    if (!sample) return true; // 未给样本 ⇒ 保守地视为全部相关（既有行为）
+    if (/^[a-z_]+$/.test(t)) {
+      const re = new RegExp('(?:^|[^a-z0-9_])' + t + '(?:$|[^a-z0-9_])', 'i');
+      return re.test(sample) || new RegExp('(^' + t + '$)', 'i').test(sample.trim());
+    }
+    return sample.includes(t);
+  };
+  const relevantBlocked = blocked.filter(tokenInSample);
+  const relevantSet = new Set(relevantBlocked);
+  // ⚠️ 不做「空相关早退」：编码兜底（eliminatesAll）的覆盖对象是**整个 payload**，
+  //    不依赖某个具体 token —— 相关词为空时它恰恰是唯一合理的候选（channelPolicy 用例）。
+  const punctSample = sample || "'1' UNION SELECT 1-- -";
+
   // ── 单插件候选 ──
   const singles = sel.usable
     .map((name) => {
       const meta = idx.get(name) || {};
-      const s = scoreMeta(meta, blockedSet);
+      const s = scoreMeta(meta, relevantSet, blockedSet);
       return { name, ...s, category: meta.category };
     })
     .filter((x) => x.covers > 0) // 不消除任何被拦词的插件不进候选（那是盲试）
@@ -152,11 +171,11 @@ export function planChainsByProfile({
     if (!v.ok || v.plugins.length !== plugins.length) return;
     seen.add(key);
     const covers = new Set();
-    for (const p of plugins) for (const t of (idx.get(p)?.eliminates) || []) if (blockedSet.has(t)) covers.add(t);
+    for (const p of plugins) for (const t of (idx.get(p)?.eliminates) || []) if (relevantSet.has(t)) covers.add(t);
     chains.push({
       plugins: [...plugins],
       covers: [...covers],
-      punctDelta: estimatePunctCost(plugins, sample).delta,
+      punctDelta: estimatePunctCost(plugins, punctSample).delta,
       source,
       isCodec,
     });
@@ -277,7 +296,7 @@ export function mergeCandidateChains(staticChains = [], generatedChains = []) {
  *
  * @param {Array<{vendor:string, plugins:string[]}>} staticChains wafRecommend 输出
  * @param {string[]} blockedTokens profileBlockedTokens 的输出（探针 id 列表）
- * @param {{dbms?:string, maxGenerated?:number}} [opts]
+ * @param {{dbms?:string, maxGenerated?:number, sample?:string|null}} [opts]
  * @returns {Array<{vendor:string, plugins:string[]}>}
  */
 export function buildCandidateChains(staticChains, blockedTokens, opts = {}) {
@@ -292,6 +311,7 @@ export function buildCandidateChains(staticChains, blockedTokens, opts = {}) {
     blockedTokens,
     dbms: opts.dbms || undefined,
     maxChains: opts.maxGenerated ?? 3,
+    sample: opts.sample ?? null,
   });
   return mergeCandidateChains(ranked, chains);
 }

@@ -124,6 +124,10 @@ export async function verifyTamperChains({
     const merged = buildCandidateChains(list, profile.blocked, {
       dbms: point?.dbms || undefined,
       maxGenerated: MAX_CHAINS,
+      // [批次 D3] 把真实探针文本交给定向生成：覆盖率只统计**出现在探针里**的被拦词。
+      // 画像拦 union/select 而探针里没有 select 时，为「消 select」的插件花唯一的
+      // 生成名额是浪费（channelPolicy 用例实测：编码链被挤出名额，整场验证反而失败）。
+      sample: probeValues.join(' '),
     });
     let ranked;
     if (bypassSearch) {
