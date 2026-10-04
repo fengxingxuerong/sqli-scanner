@@ -4,6 +4,35 @@
 
 ## [Unreleased]
 
+### 2026-10-04 批次 M · WAF 链漂移：新增插件抢走了唯一的生成名额（#154 剩下的 2 条红）
+
+批次 L 推送后 **#154 证明数量断言已转绿**（lint / test-frontend 绿），`test-server` 只剩 2 条：
+
+```
+✖ verifyTamperChains 返回值带出逐词画像（A3 的唯一输入）   → res = null
+✖ 画像 + 链覆盖 → planChannels 得出降级决策                 → TypeError: null.blocked
+```
+
+**这两条本机不复现**（本机单文件跑、全量跑都绿），只在 CI 上出现 —— 由用户定位真因、本会话补实测证据与收口：
+
+- 根因：**画像说「WAF 拦 union/select」，但验证探针里根本没有 select**。此时为「消除 select」的插件
+  打分是白花名额 —— 批次 D3 新增的 `scalarselectinline` 恰好就是"消 select"的插件，
+  它顶掉了唯一一个生成名额，把原本能过的**编码链挤出候选** ⇒ 没有任何链通过 ⇒ `res = null`。
+- 修法：`planChainsByProfile()` 的覆盖率只统计**探针样本里真出现**的被拦词（`sample` 由
+  `chainVerify` 传入真实探针文本；未给样本时保守地视为全部相关）。
+  词形按词边界判、符号形按 `indexOf`；不设「相关词为空就早退」—— 编码兜底（`eliminatesAll`）
+  的覆盖对象是**整个 payload**（与具体 token 无关），相关词为空时它恰恰是唯一合理候选。
+  ⚠️ 编码链（`isCodec`）的覆盖改为按 **`fullBlocked`**（画像全量）计，不再按过滤后的子集计，
+  否则它会被自己"消除所有词"的特性反噬。
+- **实测证据**（一次性脚本，未入库）：`blockedTokens=[union,select]`、样本 `"1' AND 1=1-- -"`（无 select）——
+  | | 候选第一名 |
+  |---|---|
+  | 修复前（`sample=null`） | `scalarselectinline`（抢走名额） |
+  | 修复后（真实探针） | `base64encode`（编码兜底回归），`chardoubleencode`/`charencode` 仍在列 |
+- 附带清理：`searcher.js` 里有一行 `console.error('[DBG] sample=…')` 调试输出已删。
+  ⚠️ 这类残留**门禁抓不到** —— `arch-guard` 的 console 判据刻意只禁 `log/debug/info`
+  （`error/warn` 属合法错误上报）⇒ 只能靠人删。
+
 ### 2026-10-04 批次 L · tamper 数量硬编码：每加一个插件就要改四个数字的缺陷收口
 
 **红的事实（本机可复现，不是 CI 玄学）**：`#150`/`#151`/`#152` 的 `test-server` 连续三红，失败 3 条，
