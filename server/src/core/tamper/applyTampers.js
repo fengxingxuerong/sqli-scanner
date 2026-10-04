@@ -246,6 +246,7 @@ import { sleep2hex } from './plugins/sleep2hex.js';
 import { uniontable } from './plugins/uniontable.js';
 import { unionvalues } from './plugins/unionvalues.js';
 import { unionvaluesrow } from './plugins/unionvaluesrow.js';
+import { scalarselectinline } from './plugins/scalarselectinline.js';
 import { dash2hash } from './plugins/dash2hash.js';
 
 // 导入即注册内置插件（幂等：重复导入不会重复注册，Map 以 name 去重）
@@ -500,6 +501,7 @@ tamperRegistry.registerMany([
   uniontable,
   unionvalues,
   unionvaluesrow,
+  scalarselectinline,
   dash2hash,
 ]);
 

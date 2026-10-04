@@ -257,6 +257,18 @@ export const CORE_SEMANTICS = {
     mutates: [],
     note: '关键字后追加额外空格，破「关键字紧邻」类规则',
   },
+  // [批次 D3 2026-10-04] FROM-less 标量子查询内联（原创，MySQL 8 语义等价）：
+  // (SELECT expr) → expr。真机数据（modsec-live #146）指出的方向 —— 错误注入形态的
+  // 指纹核心是子查询里的 SELECT（unionvaluesrow 已消掉 UNION 形态的）；
+  // 本插件消掉标量形态的。仅对**无 FROM** 的子查询生效（有 FROM 的没有无 SELECT
+  // 的等价形式，保持原样）；引号内的字面量不动。
+  scalarselectinline: {
+    category: SEMANTIC_CATEGORIES.SYNTACTIC,
+    eliminates: ['select'],
+    introduces: [],
+    applicablePattern: '仅 (SELECT expr) 且 expr 无 FROM 的标量形态（引擎报错取数模板全部命中）',
+    note: 'MySQL 语义等价内联：同一求值点产生相同值（version()/CONCAT() 等标量表达式），报错内容不变',
+  },
   dash2hash: {
     category: SEMANTIC_CATEGORIES.SYNTACTIC,
     // ⚠️ 它**不消除** `--`，而是把「4 连非词字符」规整为「3 连」：

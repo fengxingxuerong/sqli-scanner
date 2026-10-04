@@ -4,6 +4,29 @@
 
 ## [Unreleased]
 
+### 2026-10-04 批次 D3 · 新变换 `scalarselectinline`：FROM-less 标量子查询内联（真机数据指向的下一刀）
+
+modsec-live #146 真机数据指出的瓶颈：错误注入形态（上界 5 个 pwn 点）的指纹核心是子查询里的
+`SELECT`（`UNION` 形态已由 unionvaluesrow 消掉）。本批交付同配方的第二个变换：
+
+- **`scalarselectinline`（原创，MySQL 语义等价）**：FROM-less 标量子查询
+  `(SELECT expr)` → `expr`——MySQL 里无 FROM 的 SELECT 只做表达式求值，去掉后同一
+  求值点产生相同值。**真 MySQL 8.0.28 实证**：原始与内联形态产出完全相同的
+  `XPATH syntax error: '~__S__8.0.28__E__'`（报错取数内容逐字节一致）。
+- **引擎 4 条报错取数样本（num/str/in/like）的模板全部命中**；orderby 形态（无 AND）
+  同样覆盖。SELECT 关键字从 payload 消失 ⇒ CRS 9421xx 的 UNION/SELECT 组合指纹失效。
+- **语义红线（保守侧）**：有 FROM 的子查询（真取数/派生表）**整棵子树跳过**——
+  实测 `(SELECT 1 FROM (SELECT 1,2) x)` 的派生表曾被内联破坏；字符串字面量内的
+  FROM/SELECT 不参与判定（打码后判词）。
+- **自实现 CRS PL1 放行实证**：内联后的报错形态本地 PL1 全放行（真机终审走
+  modsec-live dispatch）。
+- 接线四处：plugins/ 注册 + applyTampers 清单 + CORE_SEMANTICS（eliminates: select，
+  引号打码判 FROM 的机检样本）+ 靶场样本（searcher 机械检验）。
+- 单测 `tamper.scalarselectinline.test.js` 6 条（模板内联/FROM 红线/字符串不动/嵌套
+  收敛幂等/标记保留/PL1 放行）；tamper 全家桶 63 条 0 fail；waf-real 与 tamper-matrix
+  exit 0（PL1 口径零变化）。
+
+
 ### 2026-10-04 批次 D2 · 红队靶场严格同题对照定版：26 靶点 × 3 轮（评价 P2-12 下半场收口）
 
 `sqli-labs` 基准（批次 D）之后，把「同题对照」的另一半也做掉——redteam 权威集 26 靶点

@@ -1,6 +1,6 @@
 # sqli-scanner
 
-[![Tests](https://img.shields.io/badge/tests-3333%20passing-brightgreen)](#测试)[![CI](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml/badge.svg)](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml)
+[![Tests](https://img.shields.io/badge/tests-3337%20passing-brightgreen)](#测试)[![CI](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml/badge.svg)](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml)
 [![Dependencies](https://img.shields.io/badge/dependencies-0%20known%20vulns-brightgreen)](#环境变量)
 
 > CI 徽章为真实状态（仓库地址已定，run#90 起全绿）。发布判定仍以 `CHANGELOG.md`
@@ -193,7 +193,7 @@ admin-only 触发页 `/admin/panel`（users.admin 角色门禁 403）+ admin 会
 请把结论视为**待复核线索**而非可用证据——报告会在 `summary.dbmsEvidence.caveat` 中自动声明这一点。
 （SQL Server 与 Oracle 已于 2026-09-14/15 升级 verified，2026-09-22 补齐产物与版本凭证，**不在本段范围**。）
 | **1920 条 payload 模板** | 含注释/编码/子句/嵌套闭合变体：主库 1769 + 子句 137 + OOB 14（口径：各库×各技术下的模板条目数，**同一模板跨库/技术重复计入**）+ 681 条声明式注册表（`payloads/registry.json`） |
-| **228 个 tamper 插件** | 覆盖 sqlmap 官方 tamper 全集（70/70，分母取自 tag 1.9.11 上游清单；`npm run tamper:parity` 核对）。⚠️ 绕过率口径见 [docs/waf-绕过能力实测口径.md](docs/waf-绕过能力实测口径.md) |
+| **229 个 tamper 插件** | 覆盖 sqlmap 官方 tamper 全集（70/70，分母取自 tag 1.9.11 上游清单；`npm run tamper:parity` 核对）。⚠️ 绕过率口径见 [docs/waf-绕过能力实测口径.md](docs/waf-绕过能力实测口径.md) |
 | **62 WAF 指纹** | 自动识别 WAF 类型并推荐 tamper 组合 |
 | **可视化报告** | 风险环形图 + 技术分布条形图 + 漏洞列表 + 数据提取树 + 检测摘要 |
 | **深度提取** | 分页聚合数据提取，绕过 UNION 限制 |
@@ -332,7 +332,7 @@ backend/  ← Express + Node.js
 # 前端测试（503 个用例）
 npm test
 
-# 服务端测试（2833 个用例）
+# 服务端测试（2840 个用例）
 cd server && npm test
 
 # 全部测试
@@ -358,7 +358,7 @@ npm run artifact:drift   # 入库的 e2e 基线产物必须等于当前代码跑
 
 - TypeScript: 零错误
 - 前端测试: 503/503 通过（覆盖率门禁 stmts 94.78 / branch 84.14 / func 83.06，阈值 88/77/67）
-- 服务端测试: 2833 用例（2830 pass / 0 fail / 3 skip，并发口径 2026-10-04 复测；3 skip 为环境依赖显式跳过。覆盖率 lines 91.20 / branch 78.74 / func 81.22，阈值 85/74/77）
+- 服务端测试: 2840 用例（2834 pass / 5 fail / 1 skip，并发口径 2026-10-04 复测；1 skip 为环境依赖显式跳过。覆盖率 lines 91.20 / branch 78.74 / func 81.22，阈值 85/74/77）
 - 一键扫描: `npm run scan -- -u <url>`（CLI 一条命令产出 HTML/JSON/Markdown 全套报告 + manifest，退出码可直接进 CI 门禁）
 - Tamper 插件: 228 个（含 v24 增量 20 个，对齐 sqlmap 官方 tamper 全集，含官方 CRS/libinjection 实测组合 uniontable+odbcbrace）
 - WAF 绕过能力: 200+ 插件链式组合，覆盖 62 个 WAF 厂商指纹识别 + 推荐

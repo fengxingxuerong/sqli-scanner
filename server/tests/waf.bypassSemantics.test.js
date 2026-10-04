@@ -38,6 +38,7 @@ const SAMPLES = {
   '\t': '1\tAND\t1',
   '\n': '1\nAND\n1',
   '/**/': '1/**/AND/**/1',
+  select: "1 AND (SELECT CONCAT('__S__',version()))",  // [D3] FROM-less 标量子查询形态
 };
 
 /** 断言"应用后该 token 消失"，且先自检样本有效（防空转假绿）。
