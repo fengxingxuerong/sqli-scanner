@@ -475,24 +475,32 @@ npm run redteam:report  # 汇总（含 sqlmap 同题对照）
 | R2 调参（level 3） | **19/19（100%）** | 全中 |
 | 安全对照（7 个安全点） | **误报 0** | 参数化/随机/500/403/重定向/静态资源 |
 
-### sqlmap 同题对照（当期实测）
+### sqlmap 同题对照（定版：26 靶点 × 3 轮，2026-10-04）
 
 ```bash
-npm run redteam:sqlmap   # 14 个漏洞用例 + 4 个安全用例，--level 1 --risk 1（与本工具 R1 档对齐）
+# 先起靶场环境（常驻），再跑两侧多轮对照
+node e2e/redteam-lab/env.mjs &
+node e2e/redteam-lab/sqlmap-bench.mjs --runs=3      # sqlmap 侧
+node e2e/redteam-lab/run-scan.mjs m1                 # 引擎侧默认档 × 3 轮（m2/m3 同）
+node e2e/redteam-lab/strict-compare.mjs --runs=3     # 合并出定版表
 ```
 
-| 指标 | sqli-scanner R1 | sqlmap（同档 level 1） | 口径说明 |
-|---|---|---|---|
-| 漏洞检出 | 18/19（95%） | 13/14（93%） | **分母不同**：sqlmap 用例未覆盖 D11-cookie / D14-D16 / E15 |
-| 安全点误报 | **0/7（0%）** | 3/4（75%） | **分母不同**：sqlmap 只跑 4 个安全用例（F18/F20/F21/F22） |
+| 指标（同分母：19 漏洞点 + 7 安全点） | sqli-scanner（默认档） | sqlmap 1.10.7（--level 1 --risk 1） |
+|---|---|---|
+| 漏洞检出 | **18/19** | 16/19 |
+| 安全点误报 | **0/7** | **6/7**（F18-F22、F24 全部 3/3 轮稳定误报） |
+| 命中场景中位耗时 | **1.0s** | 21.7s |
 
-sqlmap 误报的具体条目：`F18-safe-item`、`F20-safe-rand`、`F21-safe-500` 被判为注入；
-`F22-safe-403` 未误报。本工具 7 个安全点（含 F19/F23/F24）全部零误报。
+- 双方各跑 3 轮，检出取多数决、耗时取中位；**两侧结果全部逐轮稳定（零抖动）**。
+- 唯一漏项 `D11-cookie` **两家都漏**——浅档（level 1）不测 header 是共性盲区；
+  引擎升到 level 3 后 19/19（见上表 R2）。
+- 引擎的差异化能力点：`E15-second-order`（二阶跨角色）引擎 3/3 检出、sqlmap 0/3。
+- 完整逐靶点表与轮次明细：`docs/sqlmap-benchmark/redteam-strict-runs3.md`（由
+  `strict-compare.mjs` 从双侧多轮原始结果合成，可复现）。
 
-⚠️ 这不是严格同题对比（用例数量不同），**比率不可直接类比**；但「安全点误报 0 vs 3」是
-方向性差异，且可复现（两条命令都能跑）。调参后本工具 R2 为 19/19（100%）。
-
-已作为 `redteam` 套件纳入 `npm run acceptance`（需先起靶场；CI 里起不来则按 SKIP 处理，不假绿）。
+口径边界：SQLite 靶场 + 浅档对照（引擎侧刻意不用 R2 高档结果参与对比，档位须与
+sqlmap --level 1 对等）。已作为 `redteam` 套件纳入 `npm run acceptance`（需先起靶场；
+CI 里起不来则按 SKIP 处理，不假绿）。
 
 ### 接口靶场（`npm run e2e:api-range`）
 
