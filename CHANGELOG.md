@@ -4,6 +4,29 @@
 
 ## [Unreleased]
 
+### 2026-10-04 批次 F2 终章 · sqlmap file-write 真闭环打通 + 代理旁路取证（接 698b6a0 的 F2 骨架）
+
+698b6a0 已入库 F2 的参数管线/端点/单测/靶场用例骨架；本批是**验证与收尾**，过程中修掉
+两个会让正向用例永远假红的真缺口：
+
+- **NO_PROXY 旁路（真缺陷，多轮取证定位）**：桥的 spawn env 是白名单（无任何代理变量）
+  ⇒ Windows 上 python urllib 的 `getproxies()` 回退**读注册表系统代理**，sqlmap 把打向
+  本机靶站的请求转发给系统代理（靶场实测 `CRITICAL unable to connect`，同一目标 node
+  直连全 200；决定性探针：runner 侧 python `socket.create_connection` 同样 10061）。
+  修法：调用方未显式给 `--proxy` 时，spawn env 注入 `NO_PROXY='*'`/`no_proxy='*'`
+  （python urllib 对 `*` 全绕过，env 层优先于注册表）—— 与引擎侧 `proxyBypassLocal`
+  的既有防线同方向；显式 `--proxy` 的调用方语义不变。
+- **靶场前置修复**：`--only=sqlmap` 单组运行时 range-app 不启动（`needsDb` 组清单没有
+  `sqlmap`）⇒ 两条正向用例永远打不到靶站。sqlmap 组加入 `needsDb`。
+- **file-write 真闭环实测**：真 MySQL 沙箱 + sqlmap 1.10.7，本地源文件经注入写入
+  secure_file_priv 目录并逐字节回读一致。**实测发现 sqlmap 按写入块大小补 NUL 对齐**
+  （尾部 `\x00`×4）—— 断言改为去除 padding 后逐字节比对（注释写明口径：padding 不算
+  差异，中间任意字节不同都逃不过）。
+- 靶场两条正向用例（TODO 09-28 #3 的验证口径）真实通过：`--file-write` 文件系统侧断言 +
+  `report/export`（md/json 下载语义、format 白名单 400）+ `diff` 自比对（added/removed=0）。
+- 单测：`sqlmapBridge.args.test.js` 33 条（fileWrite 门控/成对/fail-fast/与 fileRead 共存）、
+  `sqlmapRoutes.test.js` 12 条（diff 契约、export 白名单与渲染、畸形条目按键归一不崩）。
+
 ### 2026-10-04 批次 K · CI #143 新红定位：前端变异目标跑在没有前端依赖的 job 里
 
 上一批把 CI 从「lint 红」修绿了，`test-server` 却**新红**（#143）：

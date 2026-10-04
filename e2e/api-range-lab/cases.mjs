@@ -962,7 +962,7 @@ test('sqlmap', 'POST /api/sqlmap/start --file-write：真写文件到 secure_fil
   const dest = `${SECURE_DIR}/sqlmap-fw-${stamp}.txt`;
   const started = await ctx.post('/api/sqlmap/start', {
     target: { url: `${ctx.LAB}/num?id=1` },
-    config: { sqlmap: { level: 1, fileWrite: local, fileDest: dest } },
+    config: { sqlmap: { level: 1, fileWrite: local, fileDest: dest, verbose: 6 } },
   });
   try {
     assert.equal(started.json?.code, 0, `fileWrite 任务应能启动（EXPLOIT_ENABLED 已在靶场引擎开启）：${JSON.stringify(started.json).slice(0, 240)}`);
@@ -980,8 +980,27 @@ test('sqlmap', 'POST /api/sqlmap/start --file-write：真写文件到 secure_fil
     const finalStatus = rep.json?.data?.status;
     // 文件系统侧断言（金标准，同内置引擎 fileWrite 用例口径）：不采信 sqlmap 自报
     const destPath = dest.replace(/\//g, path.sep);
-    assert.ok(fs.existsSync(destPath), `fileDest 必须真实落盘（status=${finalStatus}）`);
-    assert.equal(fs.readFileSync(destPath, 'utf8'), payload, '落盘内容必须与本地源文件逐字节一致');
+    const logs = (rep.json?.data?.logs || []).map((l) => l.text);
+    const logHead = logs.slice(14, 34).join(' ║ ');
+    const logTail = logs.slice(-6).join(' ║ ');
+    // 决定性探针：同一端口，python socket 直连（runner 进程 env）—— 与 engine 白名单 env
+    // 下的 sqlmap 对照。若 runner 的 python 能连而 sqlmap 不能 ⇒ 差异在 spawn env 形态。
+    let pyProbe = 'not-run';
+    try {
+      const { spawnSync } = await import('node:child_process');
+      const targetPort = new URL(ctx.LAB + '/').port;
+      const code = 'import socket\ntry:\n  s=socket.create_connection(("127.0.0.1",' + targetPort + '),3);s.close();print("PY-CONNECT-OK")\nexcept Exception as e:\n  print("PY-CONNECT-FAIL",e)';
+      const pr = spawnSync('python', ['-c', code], { encoding: 'utf8', timeout: 15000 });
+      pyProbe = String((pr.stdout || '') + (pr.stderr || '')).trim().split('\n').join(' ').slice(0, 140);
+    } catch (e) { pyProbe = 'probe-error:' + e.message; }
+    assert.ok(
+      fs.existsSync(destPath),
+      `fileDest 必须真实落盘（status=${finalStatus}；python直连探针=${pyProbe}）—— sqlmap 日志头：${logHead.slice(0, 500)} ｜尾：${logTail.slice(0, 600)}`
+    );
+    // sqlmap 按写入块大小把内容补 NUL 对齐（实测尾部  *4）—— 去除 padding 后必须逐字节一致，
+    // padding 本身不构成差异（二进制等价内容），但中间任意一字节不同都逃不过这把尺。
+    const written = fs.readFileSync(destPath, 'utf8').replace(/ +$/, '');
+    assert.equal(written, payload, '落盘内容（去除 sqlmap 的 NUL 对齐 padding 后）必须与本地源文件逐字节一致');
     ctx.state.sqlmapScan = { scanId: id, report: rep.json?.data };
   } finally {
     fs.rmSync(local, { force: true });

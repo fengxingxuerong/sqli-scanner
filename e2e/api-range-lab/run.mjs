@@ -40,7 +40,7 @@ if (has('list')) {
 const groups = (flag('groups') || flag('only') || '').split(',').map((s) => s.trim()).filter(Boolean);
 const selected = groups.length ? CASES.filter((c) => groups.includes(c.group)) : CASES;
 // [2026-10-01] xml 组要打真靶站的 /soap 端点（真 MySQL），故与 scan 同级需要 DB
-const needsDb = selected.some((c) => ['scan', 'exploit', 'enum', 'direct', 'ai', 'persist', 'xml'].includes(c.group));
+const needsDb = selected.some((c) => ['scan', 'exploit', 'enum', 'direct', 'ai', 'persist', 'xml', 'sqlmap'].includes(c.group)); // [F2 2026-10-03] sqlmap 组新增两条正向用例打 /num（真 MySQL 靶点）⇒ 需要 range-app
 
 const pkgVersion = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version;
 const results = [];

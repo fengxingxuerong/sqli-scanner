@@ -419,6 +419,13 @@ export class SqlmapBridge {
     args.push('--output-dir', outDir);
 
     this._running++;
+    // [F2 2026-10-03] 代理旁路：本 env 是白名单（没有 HTTP_PROXY 等）⇒ Windows 上 python
+    // urllib 的 getproxies() 会**回退读注册表系统代理**，把打向本机靶站的请求转发给系统代理
+    // （靶场实测：CRITICAL unable to connect to the target URL，而同一目标 node 直连全 200）。
+    // 与引擎侧 proxyBypassLocal 的既有防线对齐：调用方未显式给 --proxy 时，用
+    // NO_PROXY='*'（python urllib 对 '*' 全绕过，env 层优先于注册表）让 sqlmap 直连目标；
+    // 显式给了 proxy 则尊重调用方（sqlmap 自己的 --proxy 处理器接管），不注入旁路。
+    const wantsExplicitProxy = Boolean(input && input.config && input.config.sqlmap && input.config.sqlmap.proxy);
     const child = spawn(py, [script, ...args], {
       stdio: ['ignore', 'pipe', 'pipe'],
       // 安全：仅传 sqlmap 需要的环境变量，不泄露宿主机全部 env
@@ -433,6 +440,7 @@ export class SqlmapBridge {
         SQLMAP_OUTPUT_DIR: process.env.SQLMAP_OUTPUT_DIR || '',
         HOME: process.env.HOME || '',
         LANG: process.env.LANG || 'en_US.UTF-8',
+        ...(wantsExplicitProxy ? {} : { NO_PROXY: '*', no_proxy: '*' }),
       },
     });
     rec.child = /** @type {any} */ (child); // spawn 的 stdio 泛型与 rec.child 的声明不逐一匹配
