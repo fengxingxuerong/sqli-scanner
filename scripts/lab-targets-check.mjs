@@ -51,8 +51,8 @@ const LABS = [
     scanGaps: [], // 全覆盖
     subsets: [
       {
-        file: 'sqlmap-bench.mjs', baseline: 18, re: /\{\s*id:\s*'([^']+)'/g,
-        why: '只取 sqlmap 能跑通的形态；README「sqlmap 同题对照」已注明分母不同、比率不可直接类比',
+        file: 'sqlmap-bench.mjs', baseline: 26, re: /\{\s*id:\s*'([^']+)'/g,
+        why: '[批次 D2 2026-10-04] 已同题化：26/26 全覆盖权威集，启动时同题守卫把 CASES 与 ground-truth 钉死；分母与引擎权威集一致，比率可直比',
       },
       {
         file: 'verify-fix.mjs', baseline: 10, re: /\{\s*id:\s*'([^']+)'/g,
