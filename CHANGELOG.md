@@ -4,6 +4,38 @@
 
 ## [Unreleased]
 
+### 2026-10-04 批次 L · tamper 数量硬编码：每加一个插件就要改四个数字的缺陷收口
+
+**红的事实（本机可复现，不是 CI 玄学）**：`#150`/`#151`/`#152` 的 `test-server` 连续三红，失败 3 条，
+全是 `229 !== 228` —— 批次 D3 新增 `scalarselectinline` 后实际注册数到 229，而测试里写着 228：
+
+```
+server/tests/tamper.f20.test.js:134   GET /api/tampers 返回 228 项 tamper 清单
+server/tests/tamper.f20.test.js:142   tamperRegistry 单例与端点数据一致
+server/tests/tamper.test.js:288       v24+：全部 228 个 tamper 均已注册且可解析
+```
+
+- **为什么这类红会反复出现**：这四处的「计数沿革」注释本身就在记录它 —— 每次新增/移除插件，
+  都要同步 **4 个数字** + 标题文案，漏一处就红。README 侧其实早有更好的办法（判据⑨：
+  README 的「N 个 tamper 插件」↔ 运行期 `tamperRegistry` 实注册数），**精确值的单一真值源已经是它了**，
+  测试不该再重复钉同一个真值。
+- **修法**：测试改为两条不同职责的断言，互不重叠 ——
+  ① `端点返回 == tamperRegistry.list()`（注册表单例与端点的同一性）；
+  ② `数量 ≥ MIN_TAMPERS(228)`（历史基线，守「注册表不能塌」）。
+  以后新增 tamper **不必再改本文件**；精确值继续由判据⑨（`npm run readme:check`）守。
+- ★ **下界为什么必须留**：只剩①的话，注册表若塌成 0，端点也返回 0 ⇒ 「两端相等」变成恒真的自证假绿。
+- **缺陷注入复验 2/2**（先备份、注入后整份还原，`cmp` 校验）：
+  ① `MIN_TAMPERS` 抬到 9999 ⇒ **3 条红**（证明下界真在起作用）；
+  ② 生产侧把端点改成 `list().slice(0, 5)` ⇒ **1 条红**（证明「端点 == 单例」这条有响应）。
+
+### 2026-10-04 另外一个观察：别被「最后一次 run 是绿」骗了
+
+`#152` 红、`#153` **同 sha** `0c02373` 却结论 success —— 一度像是 flaky。看 event 才发现：
+**`#153` 是 `schedule` 触发**，而 CI 里 `lint` / `test-server` / `test-frontend` 都挂着
+`if: github.event_name != 'schedule'` ⇒ 那个 run 里它们**全部 skip**，run 级 success 不代表 job 真跑过点过。
+⇒ **判断「CI 是不是真绿」必须先看 event**，只看最后一行的 conclusion 会得出错误结论。
+（本机的旁证：本机全量服务端测试也红同样的这 3 条 —— 与 CI 一致，是真缺陷不是抖动。）
+
 ### 2026-10-04 批次 D3 · 新变换 `scalarselectinline`：FROM-less 标量子查询内联（真机数据指向的下一刀）
 
 modsec-live #146 真机数据指出的瓶颈：错误注入形态（上界 5 个 pwn 点）的指纹核心是子查询里的

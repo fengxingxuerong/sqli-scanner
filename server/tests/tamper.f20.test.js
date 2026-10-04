@@ -123,7 +123,17 @@ test('仅 legacy obfuscate 开启 → 走 obfuscatePayload（向后兼容）', (
 // [CRS-FIX 2026-09-09] 228 → 227：移除 logicalops（与 symboliclogical 逐字节重复，&& 被 CRS
 //   942120 定点检测）与 mysqlversioncomment（/*!50000KW*/ 被 CRS 942500 定点检测），
 //   新增 hexliterals（'abc' → 0x616263，消除引号锚点以绕开 CRS 942511 / 942200 / 942370）。
-test('GET /api/tampers 返回 228 项 tamper 清单（name+description）', async () => {
+// [L 2026-10-04] 以后新增/移除 tamper **不必再改这里的数字**：精确数量由
+// `scripts/readme-consistency.mjs` 判据⑨（README 的「N 个 tamper 插件」↔ 运行期
+// tamperRegistry 实注册数）守卫 —— 那是唯一的精确真值源。
+// ★ 但本处必须留下界：若只断言「端点 == 单例」，两者同时归零也会全绿 ⇒ 假绿。
+// 下界守的是「注册表不能塌」，精确值交给判据⑨，两边职责不重叠。
+// 计数沿革（历史复盘，新增插件时不必再动本行）：
+//   225 → 227（logicalops / mysqlversioncomment）→ 228（dash2hash）→ 227 → 228（keywordinterleave）
+//   → 229（scalarselectinline，批次 D3）
+const MIN_TAMPERS = 228;
+
+test('GET /api/tampers 返回完整 tamper 清单（name+description，精确数量由判据⑨守）', async () => {
   const app = express();
   app.use('/api', tamperRoutes);
   const server = app.listen(0);
@@ -131,15 +141,22 @@ test('GET /api/tampers 返回 228 项 tamper 清单（name+description）', asyn
   try {
     const { json } = await getJson(`http://127.0.0.1:${port}/api/tampers`);
     assert.equal(json.code, 0);
-    assert.equal(json.data.length, 228);
+    assert.equal(json.data.length, tamperRegistry.list().length, '端点返回的 tamper 清单必须就是注册表单例本身');
+    assert.ok(
+      json.data.length >= MIN_TAMPERS,
+      `tamper 注册表只有 ${json.data.length} 项（历史基线 ${MIN_TAMPERS}）—— 同时低于下界就说明注册链路塌了，不能算通过`,
+    );
     assert.ok(json.data.every((t) => typeof t.name === 'string' && typeof t.description === 'string'));
   } finally {
     server.close();
   }
 });
 
-test('tamperRegistry 单例与端点数据一致', () => {
-  assert.equal(tamperRegistry.list().length, 228);
+test('tamperRegistry 单例数量不低于历史基线（精确真值由判据⑨守）', () => {
+  assert.ok(
+    tamperRegistry.list().length >= MIN_TAMPERS,
+    `tamperRegistry 只剩 ${tamperRegistry.list().length} 项（历史基线 ${MIN_TAMPERS}）`,
+  );
 });
 
 // ── 3) ScanManager 报告标注（tamper + WAF 识别）──────────────────────────────

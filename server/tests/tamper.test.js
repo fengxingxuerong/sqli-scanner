@@ -284,8 +284,14 @@ test('tamper 绕过 WAF：symboliclogical 将逻辑关键字变形绕过', () =>
 // [CRS-FIX 2026-09-09] 227：移除 logicalops（与 symboliclogical 逐字节重复，且 && 被 CRS 942120 定点检测）
 //   与 mysqlversioncomment（/*!50000KW*/ 被 CRS 942500 定点检测，启用后反而多命中一条规则），
 //   新增 hexliterals（'abc'→0x616263，消除引号锚点以绕开 CRS 942511/942200/942370）。
-test('v24+：全部 228 个 tamper 均已注册且可解析', () => {
-  assert.equal(tamperRegistry.list().length, 228);
+// [L 2026-10-04] 同 tests/tamper.f20.test.js：精确数量由 readme 判据⑨守，这里只钉下界
+// （防止注册链路塌掉时「数量一致」变成自证假绿）。新增 tamper 不必改本文件。
+const MIN_TAMPERS = 228;
+test('v24+：全部已注册 tamper 均已注册且可解析（数量 ≥ 历史基线）', () => {
+  assert.ok(
+    tamperRegistry.list().length >= MIN_TAMPERS,
+    `tamperRegistry 只剩 ${tamperRegistry.list().length} 项（历史基线 ${MIN_TAMPERS}）`,
+  );
   for (const n of ALL_NAMES) {
     assert.equal(tamperRegistry.resolve([n]).length, 1, `无法解析: ${n}`);
   }
