@@ -13,10 +13,11 @@ modsec-live #162（链对拍首发）的两个关键发现转化为代码与数�
   实测背离，定版对照入库：`docs/WAF-真机链对拍-2026-10-05.md`（results/ 下原始 md 走 gitignore）。
 - **unionvaluesrow 系链是唯一真机有效形态**（2/19 打穿、3/19 放行，+dash2hash/+hexliterals
   补位不增不减）；scalarselectinline 在链里不帮不碍（2/19 持平）。
-- **wafRecommend 推荐表按真机证据重排**：`['unionvaluesrow','dash2hash']` 提为第一顺位
-  （真机打穿形态），旧首选链降至第二；symboliclogical（真机负收益）降出 MAX_CHAINS 名额；
-  新增 `['scalarselectinline','unionvaluesrow','dash2hash']` 备选。TAMPER_COVERS 补
-  unionvaluesrow/scalarselectinline 的 token 映射（rankChainsByProfile 按画像重排用）。
+- **wafRecommend 重排经真机证据提出后已被 drift 门禁当场回退**：把 unionvaluesrow 系
+  提为通用首选后，multi-engine PL1 lab 的 tamper 腿在 H2/HSQLDB 上 union 技术丢失
+  （VALUES ROW 是 MySQL 8 语法）——通用链表必须服务所有 DBMS。顺序已回退；真机证据与
+  「DBMS 感知链选择」待办保留在 docs/WAF-真机链对拍-2026-10-05.md。TAMPER_COVERS 补
+  unionvaluesrow/scalarselectinline 的 token 映射（保留，供 DBMS 感知选择使用）。
 - 验证：waf-real/waf-auto exit 0（本地口径零回归）、recall 18 场景全 PASS（真 PG/真 MySQL
   检出形态不变）、全量 2842 用例 0 fail、WAF/Wiring 守卫 59 条 0 fail。
 - 口径注记：本地自实现引擎在 VALUES ROW 形态上比真 CRS 严格（PL3 规则 vs 真机 PL1 放行）
