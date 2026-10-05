@@ -60,6 +60,7 @@
     "scan": "node scripts/one-click-scan.mjs",
     "server": "cd server && node index.js",
     "sqlmap-benchmark": "node e2e/recall-lab/sqlmap-benchmark.e2e.js",
+    "docs:index": "node scripts/gen-docs-index.mjs",
     "tamper-matrix": "node e2e/tamper-matrix/tamper-test.mjs",
     "tamper:parity": "node scripts/verify-tamper-parity.mjs",
     "tamper:parity:refresh": "node scripts/verify-tamper-parity.mjs --refresh",
