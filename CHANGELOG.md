@@ -4,6 +4,26 @@
 
 ## [Unreleased]
 
+### 2026-10-05 批次 D4 终章 · 真机链对拍数据落库 + 推荐表按真机证据重排
+
+modsec-live #162（链对拍首发）的两个关键发现转化为代码与数据：
+
+- **实证首选链真机现形**：dash2hash×hexliterals（本仓 CRS 口径下的首选链）在真 CRS PL1
+  下 **0/19 打穿、0/19 放行**——本地自实现口径（tamper on 5/5）与真机天花板首次出现
+  实测背离，定版对照入库：`docs/WAF-真机链对拍-2026-10-05.md`（results/ 下原始 md 走 gitignore）。
+- **unionvaluesrow 系链是唯一真机有效形态**（2/19 打穿、3/19 放行，+dash2hash/+hexliterals
+  补位不增不减）；scalarselectinline 在链里不帮不碍（2/19 持平）。
+- **wafRecommend 推荐表按真机证据重排**：`['unionvaluesrow','dash2hash']` 提为第一顺位
+  （真机打穿形态），旧首选链降至第二；symboliclogical（真机负收益）降出 MAX_CHAINS 名额；
+  新增 `['scalarselectinline','unionvaluesrow','dash2hash']` 备选。TAMPER_COVERS 补
+  unionvaluesrow/scalarselectinline 的 token 映射（rankChainsByProfile 按画像重排用）。
+- 验证：waf-real/waf-auto exit 0（本地口径零回归）、recall 18 场景全 PASS（真 PG/真 MySQL
+  检出形态不变）、全量 2842 用例 0 fail、WAF/Wiring 守卫 59 条 0 fail。
+- 口径注记：本地自实现引擎在 VALUES ROW 形态上比真 CRS 严格（PL3 规则 vs 真机 PL1 放行）
+  —— modsec 报告的「放行(自实现)」列是默认档（≈PL3），与真机 PL1 列并排阅读时要注意
+  档位差；真机口径以链对拍节为准。
+
+
 ### 2026-10-05 批次 D4 · modsec-live 新增「链的联合指纹对拍」——引擎实际部署形态首次上真机
 
 D3 终审指出：modsec-live 此前只测**单插件**，而引擎部署的是**链**——联合指纹效应

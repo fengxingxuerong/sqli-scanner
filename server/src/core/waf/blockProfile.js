@@ -88,6 +88,8 @@ export const TAMPER_COVERS = {
   chardoubleencode: ['quote', 'space', 'paren', 'comma', 'cmp'],
   percentage: ['quote', 'space', 'paren', 'comma'],
   unionalltounion: ['union'],
+  unionvaluesrow: ['union', 'select'], // [D4] MySQL 表值构造器消 SELECT（真机打穿链 #162）
+  scalarselectinline: ['select'], // [D3] FROM-less 标量子查询内联
   lowercase: ['union', 'select', 'and', 'or', 'sleep'],
   uppercase: ['union', 'select', 'and', 'or', 'sleep'],
   randomcase: ['union', 'select', 'and', 'or', 'sleep'],

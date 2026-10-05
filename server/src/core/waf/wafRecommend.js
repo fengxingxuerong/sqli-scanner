@@ -21,13 +21,26 @@ export const OPERATOR_SWAP_CHAINS = [
   // union 的标记回显探测（`1 UNION SELECT 'SQLISCANNER0'#`）正好命中该形态，实测 403 942300，
   // 导致数值型场景（num/blind）union 面缺失。叠加 `hexliterals`（`'abc'` → `0x616263`，
   // 两插件均已声明 markerSafe）后标记无引号锚点 → 942300 不命中。故把该组合提为首选链。
+  // [批次 D4 2026-10-05 真机链对拍（modsec-live #162，modsec-docker-pl1-2026-10-05.md）]
+  // 真机数据推翻了旧的隐含排序：dash2hash×hexliterals（旧首选）在真 CRS PL1 下
+  // **0/19 打穿、0/19 放行**——本地自实现口径（PL1 放行、tamper on 5/5）与真机天花板
+  // 出现了实测背离；而 unionvaluesrow 系链真机 2/19 打穿、3/19 放行，是唯一真机有效的形态。
+  // 故真机打穿链提为第一顺位；旧的减标点链保留在第二/三顺位（自实现口径下仍有效，
+  // 且 union 的标记回显探测依赖 hexliterals 的引号锚点消除——见下条实测注释）。
+  ['unionvaluesrow', 'dash2hash'],
   ['dash2hash', 'hexliterals'],
   ['dash2hash'],
+  // ↑ 前三条进 chainVerify 的 MAX_CHAINS=3。
+  //   链1=真机实证打穿链（MySQL 表值构造器消 SELECT + 减标点）；
+  //   链2=CRS 内容规则（减标点 + 去引号锚点，自实现口径首选）；
+  //   链3=通用减标点。
   ['symboliclogical'],
-  // ↑ 恰好三条：chainVerify 的 MAX_CHAINS=3 只验前三条。
-  //   链1=CRS 内容规则（减标点 + 去引号锚点）；链2=通用减标点；
-  //   链3=关键词级黑名单（自研/云 WAF 的 strip 规则，symboliclogical 换算子才有效）。
+  // 关键词级黑名单（自研/云 WAF 的 strip 规则，symboliclogical 换算子才有效）——
+  // 真机 CRS 下为负收益（942120 正则含 && / ||），降到第四位不占 MAX_CHAINS 名额。
   ['hexliterals', 'dash2hash'],
+  ['scalarselectinline', 'unionvaluesrow', 'dash2hash'],
+  // [D4 真机] scalarselectinline 组合链同样 2/19 打穿（#162 链对拍），备选；
+  // 单独的 scalarselectinline 只消标量子查询的 SELECT，须配合 unionvaluesrow 才覆盖 UNION 形态。
 ];
 
 /**
