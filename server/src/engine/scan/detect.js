@@ -18,7 +18,7 @@ import { decideBlockPolicy, isUntrustedVendor } from '../../core/waf/blockPolicy
 // [A3-2026-09-25] 通道降级编排：把逐词拦截画像翻译成「哪些通道还值得跑」。
 import { planChannels } from '../../core/waf/channelPolicy.js';
 import { coveredTokens } from '../../core/waf/blockProfile.js';
-import { OPERATOR_SWAP_CHAINS, FILTER_BYPASS_CHAINS } from '../../core/waf/wafRecommend.js';
+import { OPERATOR_SWAP_CHAINS, FILTER_BYPASS_CHAINS, MYSQL_DBMS_CHAINS } from '../../core/waf/wafRecommend.js';
 import { GENERIC_BLOCK_VENDOR } from '../../core/waf/blockSignatures.js';
 import { isNetworkFailureError } from '../../core/scanValidityGuard.js';
 import { emptyExtractedData } from '../models.js';
@@ -426,6 +426,14 @@ export async function detectPhase(run) {
       // （关键词级黑名单改编码/注释无效，换算子才有效，见 wafRecommend.OPERATOR_SWAP_CHAINS）
       if (blockAdaptive) {
         suggestions.length = 0;
+        // [批次 D5 2026-10-05] DBMS 感知链选择：指纹确认 MySQL 时，真机打穿链
+        // （unionvaluesrow 系，modsec-live #162 链对拍 2/19，通用链真机 0/19）前置进候选；
+        // 非 MySQL / 指纹未命中 ⇒ 不加（VALUES ROW 在其它引擎上是语法错误）。
+        if (dbms === 'MySQL') {
+          for (const plugins of MYSQL_DBMS_CHAINS) {
+            suggestions.push({ vendor: GENERIC_BLOCK_VENDOR, plugins: [...plugins] });
+          }
+        }
         for (const plugins of OPERATOR_SWAP_CHAINS) {
           suggestions.push({ vendor: GENERIC_BLOCK_VENDOR, plugins: [...plugins] });
         }

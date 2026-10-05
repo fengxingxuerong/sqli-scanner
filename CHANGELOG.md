@@ -4,6 +4,24 @@
 
 ## [Unreleased]
 
+### 2026-10-05 批次 D5 · DBMS 感知链选择：真机打穿链在 MySQL 目标上自动化启用
+
+D4 留下的待办落地——真机打穿的 unionvaluesrow 系链（2/19，通用链真机 0/19）此前只能
+手动指定，现在指纹确认 MySQL 时**自动前置**进候选：
+
+- **unionvaluesrow 声明 `dbms: ['MySQL']`**：validateChain 对非 MySQL 目标告警 + ok=false
+  （searcher 会丢弃该候选）；applyTampers 同样拒绝。回退 D4 时留的「DBMS 感知」待办兑现。
+- **wafRecommend 导出 `MYSQL_DBMS_CHAINS`**（真机打穿形态两条，注释带 #162 证据链）；
+  通用 OPERATOR_SWAP_CHAINS 保持 DBMS 无关（不含 MySQL 专用链）。
+- **detect.js blockAdaptive 路径**：`dbms === 'MySQL'` 时把 MYSQL_DBMS_CHAINS **前置**进
+  suggestions（真机打穿链优先于通用链被验证）；非 MySQL / 指纹未命中 ⇒ 不加（VALUES ROW
+  在其它引擎上是语法错误——multi-engine 回归实证过）。
+- **lab 零回归**：multi-engine 三档重跑 + drift 检查一致（H2/HSQLDB/Derby 的链选择回到
+  通用链）；WAF/守卫 63 条 0 fail。
+- 守卫 `waf.dbmsAwareChains.test.js` 4 条：dbms 声明 + H2 拒绝、真机形态在案、通用表
+  DBMS 无关、detect 前置顺序（源码守卫）。
+
+
 ### 2026-10-05 批次 D4 终章 · 真机链对拍数据落库 + 推荐表按真机证据重排
 
 modsec-live #162（链对拍首发）的两个关键发现转化为代码与数据：

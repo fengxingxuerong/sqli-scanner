@@ -46,6 +46,17 @@ export const OPERATOR_SWAP_CHAINS = [
  * 顺序依据实测（e2e/pentest-lab/bl）：插入式双写 + 注释符换 `#` 一条即可命中布尔面；
  * 单用 `keywordinterleave` 会因 `--` 被删而语法错误，故 dash2hash 必须同链。
  */
+// [批次 D5 2026-10-05] MySQL 目标专属链（真机打穿形态，modsec-live #162 链对拍：
+//   unionvaluesrow+dash2hash 真机 2/19 打穿，而通用首选链 dash2hash×hexliterals 真机
+//   0 打穿 0 放行——见 docs/WAF-真机链对拍-2026-10-05.md）。
+//   ⚠️ 仅当 DBMS 指纹确认 MySQL 时由 detect.js 前置进候选（VALUES ROW 是 MySQL 8.0.19+
+//   语法，MariaDB 明确拒绝、H2/HSQLDB/Derby 不认——multi-engine lab 回归实证）。
+//   通用链表 OPERATOR_SWAP_CHAINS 保持 DBMS 无关。
+export const MYSQL_DBMS_CHAINS = [
+  ['unionvaluesrow', 'dash2hash'],
+  ['unionvaluesrow', 'dash2hash', 'hexliterals'],
+];
+
 export const FILTER_BYPASS_CHAINS = [
   ['keywordinterleave', 'dash2hash'],
   ['keywordinterleave'],

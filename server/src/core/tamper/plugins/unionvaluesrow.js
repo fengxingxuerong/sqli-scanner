@@ -5,6 +5,11 @@
 export const unionvaluesrow = {
   name: 'unionvaluesrow',
   description: 'UNION SELECT cols → UNION VALUES ROW(cols)（MySQL 表值构造器，消除 SELECT）',
+  // [批次 D5 2026-10-05] VALUES ROW 是 MySQL 8.0.19+ 语法：真机打穿链（modsec-live #162
+  // 链对拍 2/19）但 **MariaDB 明确拒绝 ROW 关键字**、H2/HSQLDB/Derby 亦不认 ——
+  // dbms 声明让 validateChain / applyTampers 在非 MySQL 目标上拒绝它（真机回归实测见
+  // docs/WAF-真机链对拍-2026-10-05.md 的 multi-engine PL1 漂移记录）。
+  dbms: ['MySQL'],
   doctests: [
     { input: '-1 UNION ALL SELECT NULL,CONCAT(0x71,0x41),NULL-- -', output: '-1 UNION ALL VALUES ROW(NULL,CONCAT(0x71,0x41),NULL)-- -' },
     { input: '-1 UNION SELECT 45,45#', output: '-1 UNION VALUES ROW(45,45)#' },
