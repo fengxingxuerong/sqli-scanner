@@ -177,6 +177,26 @@ test('mergeCandidateChains：空输入安全（不抛、返回数组）', () => 
   assert.deepEqual(mergeCandidateChains([], [null, { plugins: [] }]), []);
 });
 
+// ── [批次 D3 2026-10-04] 探针相关性：覆盖率只统计出现在样本里的被拦词 ──────────
+// channelPolicy 用例实测的教训：画像拦 union/select 而验证探针里没有 select 时，
+// 为「消 select」的插件花唯一的生成名额，会把原本能过的编码链挤出候选 —— 整场验证失败。
+test('★探针相关性：样本里不存在的被拦词不产生定向候选（编码兜底不受影响）', () => {
+  const sample = "1' AND 1=1-- - 1' AND '1'='1"; // 与 chainVerify 真实探针同款
+  const r = planChainsByProfile({ blockedTokens: ['union', 'select'], maxChains: 10, sample });
+  const names = r.chains.flatMap((c) => c.plugins);
+  assert.ok(!names.includes('scalarselectinline'), '样本里没有 SELECT，内联插件不得占候选名额');
+  assert.ok(r.chains.some((c) => c.isCodec), '编码兜底（覆盖整个 payload）必须仍在候选里');
+});
+
+test('★探针相关性：样本里真的有 SELECT 时，内联插件进入候选', () => {
+  const sample = "1 AND extractvalue(1,concat(0x7e,(SELECT CONCAT('__S__',version(),'__E__'))))";
+  const r = planChainsByProfile({ blockedTokens: ['and', 'select'], maxChains: 10, sample });
+  const names = r.chains.flatMap((c) => c.plugins);
+  assert.ok(names.includes('scalarselectinline'), '样本含 (SELECT …) ⇒ 内联插件必须进候选');
+  const chain = r.chains.find((c) => c.plugins.includes('scalarselectinline'));
+  assert.ok(chain.covers.includes('select'), 'covers 应声明 select');
+});
+
 // ── [批次C 2026-10-03] 减标点补位 + 三链组合 ──────────────────────────────────
 // 背景：covers=0 的 reducesPunct 插件（dash2hash）此前被 `.filter(covers > 0)` 挡在
 // 候选池外 ⇒ CRS 标点预算方向（942460/942431）唯一实证有效项从生成器里消失，

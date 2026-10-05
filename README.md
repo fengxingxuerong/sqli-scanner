@@ -332,7 +332,7 @@ backend/  ← Express + Node.js
 # 前端测试（503 个用例）
 npm test
 
-# 服务端测试（2840 个用例）
+# 服务端测试（2842 个用例）
 cd server && npm test
 
 # 全部测试
@@ -358,7 +358,7 @@ npm run artifact:drift   # 入库的 e2e 基线产物必须等于当前代码跑
 
 - TypeScript: 零错误
 - 前端测试: 503/503 通过（覆盖率门禁 stmts 94.78 / branch 84.14 / func 83.06，阈值 88/77/67）
-- 服务端测试: 2840 用例（2839 pass / 0 fail / 1 skip，并发口径 2026-10-04 复测；1 skip 为环境依赖显式跳过。覆盖率 lines 91.37 / branch 78.94 / func 81.57，阈值 85/74/77）
+- 服务端测试: 2842 用例（2839 pass / 0 fail / 3 skip，并发口径 2026-10-05 复测；3 skip 为环境依赖显式跳过。覆盖率 lines 91.37 / branch 78.94 / func 81.57，阈值 85/74/77）
 - 一键扫描: `npm run scan -- -u <url>`（CLI 一条命令产出 HTML/JSON/Markdown 全套报告 + manifest，退出码可直接进 CI 门禁）
 - Tamper 插件: 229 个（含批次 D3 新增 scalarselectinline；含 v24 增量 20 个，对齐 sqlmap 官方 tamper 全集，含官方 CRS/libinjection 实测组合 uniontable+odbcbrace）
 - WAF 绕过能力: 200+ 插件链式组合，覆盖 62 个 WAF 厂商指纹识别 + 推荐

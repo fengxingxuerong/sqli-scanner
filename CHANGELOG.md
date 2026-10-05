@@ -112,6 +112,15 @@ modsec-live #146 真机数据指出的瓶颈：错误注入形态（上界 5 个
 - 单测 `tamper.scalarselectinline.test.js` 6 条（模板内联/FROM 红线/字符串不动/嵌套
   收敛幂等/标记保留/PL1 放行）；tamper 全家桶 63 条 0 fail；waf-real 与 tamper-matrix
   exit 0（PL1 口径零变化）。
+- **连带修出搜索器的真质量缺口（探针相关性）**：channelPolicy 契约用例回归暴露——画像拦
+  union/select 而验证探针里没有 select 时，为「消 select」的插件花唯一的生成名额，把原本
+  能过的编码链挤出候选，整场验证反而失败。修法：`planChainsByProfile` 新增 sample 语义，
+  **覆盖率只统计出现在验证探针里的被拦词**（词形  词边界/符号形 indexOf）；编码兜底
+  （eliminatesAll 覆盖整个 payload）不受相关性过滤影响，永远留在候选里。chainVerify 把
+  两条真实探针文本传下去。回归守卫 2 条：样本无 select ⇒ 内联插件不占名额；样本有
+  (SELECT …) ⇒ 内联插件必须进候选。
+- 全量服务端 2842 用例 2839 pass / 0 fail / 3 skip；README 插件数 229（readme:check 抓到
+  两处漏改，含项目状态区）。
 
 
 ### 2026-10-04 批次 D2 · 红队靶场严格同题对照定版：26 靶点 × 3 轮（评价 P2-12 下半场收口）
