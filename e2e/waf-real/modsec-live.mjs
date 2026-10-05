@@ -134,6 +134,12 @@ async function sweep(base, chain) {
 }
 
 /** 静态侧（自实现 crs-engine）对同一批样本、同一条链的判定 → 分歧归因用 */
+// [批次 D5 补终 2026-10-05] 自实现引擎的档位必须与真机 LABEL 对齐（pl1 ⇒ PL1）：
+//   此前不传 paranoiaLevel ⇒ 默认 ≈PL3 ⇒ 「放行(自实现)」列与真机 PL1 列档位错位，
+//   unionvaluesrow「真机放行 3/19、自实现 0/19」的假象即源于此（VALUES ROW 形态
+//   PL1 放行、PL3 被 942200 等拦——档位对齐后两列才可直读）。
+const SELF_PL = Number((LABEL.match(/pl(\d)/) || [])[1]) || 3;
+
 function staticSweep(chain) {
   let pass = 0;
   const rules = [];
@@ -149,7 +155,7 @@ function staticSweep(chain) {
       args: { [c.param]: t },
       cookies: {},
       headers: {},
-    });
+    }, { paranoiaLevel: SELF_PL });
     if (!e.blocked) pass++;
     else rules.push(e.ruleId || '?');
   }
@@ -364,6 +370,7 @@ async function main() {
   md.push(`真机**放行**（未拦）的插件（${anyPass.length}）：${anyPass.length ? anyPass.map((r) => `\`${r.label}\``).join(', ') : '（无）'}`, '');
   // [D3 2026-10-05] 全零行（真机全拦 + 自实现全拦）不进矩阵——但「测过且被拦」与
   // 「没测」必须是两种可见的状态，否则插件数与矩阵行数的差会被读成异常。
+  // [D5 补终] 「放行(自实现)」列的档位已与真机 LABEL 对齐（pl1 报告 = 自实现 PL1）。
   const silenced = rows.filter((r) => r.kind === 'plugin' && r.wafPass === 0 && r.static.pass === 0 && r.wafPwn === 0);
   md.push(`其余被测插件 ${silenced.length} 个：真机 + 自实现引擎**全拦**（名单：${silenced.map((r) => `\`${r.label}\``).join(', ') || '（无）'}）。`, '');
 
