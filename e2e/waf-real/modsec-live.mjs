@@ -338,6 +338,10 @@ async function main() {
   md.push(`真机**打穿**的插件（${winners.length}）：${winners.length ? winners.map((r) => `\`${r.label}\``).join(', ') : '（无）'}`, '');
   const anyPass = rows.filter((r) => r.wafPass > 0 && r.label !== '(off) 不做变形');
   md.push(`真机**放行**（未拦）的插件（${anyPass.length}）：${anyPass.length ? anyPass.map((r) => `\`${r.label}\``).join(', ') : '（无）'}`, '');
+  // [D3 2026-10-05] 全零行（真机全拦 + 自实现全拦）不进矩阵——但「测过且被拦」与
+  // 「没测」必须是两种可见的状态，否则插件数与矩阵行数的差会被读成异常。
+  const silenced = rows.filter((r) => r.label !== '(off) 不做变形' && r.wafPass === 0 && r.static.pass === 0 && r.wafPwn === 0);
+  md.push(`其余被测插件 ${silenced.length} 个：真机 + 自实现引擎**全拦**（名单：${silenced.map((r) => `\`${r.label}\``).join(', ') || '（无）'}）。`, '');
 
   md.push('## 安全对照（期望 0 误拦）', '');
   md.push(fp.length ? fp.map((x) => `- \`${x.sample}\` → HTTP ${x.status}（CRS 误报，非本工具回归）`).join('\n') : '- 0 误拦 ✅');
