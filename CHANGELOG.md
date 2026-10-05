@@ -4,6 +4,22 @@
 
 ## [Unreleased]
 
+### 2026-10-05 批次 D4 · modsec-live 新增「链的联合指纹对拍」——引擎实际部署形态首次上真机
+
+D3 终审指出：modsec-live 此前只测**单插件**，而引擎部署的是**链**——联合指纹效应
+（A 消掉的词补上 B 的盲区）从未被真机检验，连 wafRecommend 的实证首选链
+（dash2hash×hexliterals）都没上过真机。本批给 modsec-live 加链扫描阶段：
+
+- **链候选三来源（7 条）**：① 实证首选链 dash2hash×hexliterals（两种顺序）；
+  ② 唯一打穿插件 unionvaluesrow 的补位组合（+dash2hash / +hexliterals / 双补）；
+  ③ 批次 D3 新变换 scalarselectinline 的组合（+dash2hash / +unionvaluesrow+dash2hash）。
+- **报告新增「链的联合指纹对拍」一节**：每条链打穿/放行/直连上界/自实现放行逐项入表
+  （全零链也入表——「该组合的真机天花板」本身是数据）；插件矩阵与三个汇总改为只统计
+  插件行，链行单独呈现（避免把链的数字混进插件口径）。
+- 运行时增量：7 链 × 19 样本 × (WAF+直连) × PL1/PL3 ≈ +1000 请求（约 +5 分钟）。
+- 守卫：modsecLive.wiring 18 条 0 fail；lint/refs 绿。
+
+
 ### 2026-10-05 批次 J · WAF：语义族离线筛选 —— 用数据解释「打穿链数为什么上不去」
 
 新增 `npm run waf:screen`（`scripts/waf-semantic-screen.mjs`）**纯本地**（CRS 规则 + JS 执行器，

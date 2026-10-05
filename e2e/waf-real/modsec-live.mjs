@@ -242,10 +242,11 @@ async function main() {
   const names = tamperRegistry.list().map((p) => (typeof p === 'string' ? p : p.name)).sort();
   const rows = [];
 
-  const run = async (label, chain) => {
+  const run = async (label, chain, kind = 'plugin') => {
     const wafV = await sweep(BASE, chain); // 经 WAF
     const directV = PER_CHAIN_DIRECT || chain === null ? await sweep(DIRECT, chain) : null; // 绕过 WAF
     rows.push({
+      kind,
       label,
       wafPass: wafV.filter((v) => v !== 'blocked' && v !== 'unknown').length,
       wafPwn: wafV.filter(isPwn).length,
@@ -256,8 +257,30 @@ async function main() {
     });
   };
 
-  await run('(off) 不做变形', null);
-  for (const n of names) await run(n, [n]);
+  await run('(off) 不做变形', null, 'off');
+  for (const n of names) await run(n, [n], 'plugin');
+
+  // ── [批次 D4 2026-10-05] 链的联合指纹对拍 ──
+  // 引擎实际部署的是**链**而非单插件；modsec-live 此前只测单插件 ⇒ 联合指纹效应
+  // （A 消掉的词补上 B 的盲区）从未被真机检验过。候选三来源：
+  //   ① wafRecommend 实证链（本仓首选链从未上过真机）；
+  //   ② 批次 D3 新变换 scalarselectinline 与减标点插件的组合；
+  //   ③ 唯一打穿插件 unionvaluesrow 的补位组合（它打穿的 2/19 形态能否扩大）。
+  const CHAINS = [
+    ['dash2hash', 'hexliterals'],
+    ['hexliterals', 'dash2hash'],
+    ['unionvaluesrow', 'dash2hash'],
+    ['unionvaluesrow', 'hexliterals'],
+    ['unionvaluesrow', 'dash2hash', 'hexliterals'],
+    ['scalarselectinline', 'dash2hash'],
+    ['scalarselectinline', 'unionvaluesrow', 'dash2hash'],
+  ];
+  const chainRows = [];
+  const runChain = async (chain) => {
+    await run(`chain: ${chain.join('+')}`, chain, 'chain');
+    chainRows.push(rows[rows.length - 1]);
+  };
+  for (const ch of CHAINS) await runChain(ch);
 
   // 安全对照：期望 0 误拦；有就记录（是 CRS 的误报，不是我们的回归 → 不红）
   const fp = [];
@@ -268,7 +291,7 @@ async function main() {
   target.child?.kill('SIGTERM');
 
   rows.sort((a, b) => b.wafPwn - a.wafPwn || b.wafPass - a.wafPass || a.label.localeCompare(b.label));
-  const winners = rows.filter((r) => r.wafPwn > 0 && r.label !== '(off) 不做变形');
+  const winners = rows.filter((r) => r.kind === 'plugin' && r.wafPwn > 0);
   const dbMode = st.upper !== null;
 
   console.log(`\n插件 ${names.length} 个 · 样本 ${SAMPLES.length} 条 · LABEL=${LABEL} · 靶站模式=${target.mode}`);
@@ -328,6 +351,7 @@ async function main() {
   md.push('| 链 | 打穿(真机) | 放行(真机) | 直连上界 | 放行(自实现) | 自实现命中规则 |');
   md.push('|---|---|---|---|---|---|');
   for (const r of rows) {
+    if (r.kind !== 'plugin') continue; // 链行在「链的联合指纹对拍」一节单独呈现
     if (r.wafPass === 0 && r.static.pass === 0 && r.wafPwn === 0) continue;
     md.push(
       `| \`${r.label}\` | ${dbMode ? `${r.wafPwn}/${SAMPLES.length}` : '不可判定'} | ${r.wafPass}/${SAMPLES.length} | ` +
@@ -336,12 +360,26 @@ async function main() {
   }
   md.push('');
   md.push(`真机**打穿**的插件（${winners.length}）：${winners.length ? winners.map((r) => `\`${r.label}\``).join(', ') : '（无）'}`, '');
-  const anyPass = rows.filter((r) => r.wafPass > 0 && r.label !== '(off) 不做变形');
+  const anyPass = rows.filter((r) => r.kind === 'plugin' && r.wafPass > 0);
   md.push(`真机**放行**（未拦）的插件（${anyPass.length}）：${anyPass.length ? anyPass.map((r) => `\`${r.label}\``).join(', ') : '（无）'}`, '');
   // [D3 2026-10-05] 全零行（真机全拦 + 自实现全拦）不进矩阵——但「测过且被拦」与
   // 「没测」必须是两种可见的状态，否则插件数与矩阵行数的差会被读成异常。
-  const silenced = rows.filter((r) => r.label !== '(off) 不做变形' && r.wafPass === 0 && r.static.pass === 0 && r.wafPwn === 0);
+  const silenced = rows.filter((r) => r.kind === 'plugin' && r.wafPass === 0 && r.static.pass === 0 && r.wafPwn === 0);
   md.push(`其余被测插件 ${silenced.length} 个：真机 + 自实现引擎**全拦**（名单：${silenced.map((r) => `\`${r.label}\``).join(', ') || '（无）'}）。`, '');
+
+  // [批次 D4] 链的联合指纹对拍（单独一节：全零链也是数据 —— 它证明该组合的真机天花板）
+  md.push('', '## 链的联合指纹对拍（引擎实际部署形态）', '');
+  md.push('| 链 | 打穿(真机) | 放行(真机) | 直连上界 | 放行(自实现) |', '|---|---|---|---|---|');
+  for (const r of chainRows) {
+    md.push(
+      `| \`${r.label.replace('chain: ', '')}\` | ${r.wafPwn}/${SAMPLES.length} | ${r.wafPass}/${SAMPLES.length} | ` +
+        `${r.directPwn === null ? '—' : `${r.directPwn}/${SAMPLES.length}`} | ${r.static.pass}/${SAMPLES.length} |`
+    );
+  }
+  const chainWinners = chainRows.filter((r) => r.wafPwn > 0);
+  md.push('', chainWinners.length
+    ? `真机**打穿**的链（${chainWinners.length}）：${chainWinners.map((r) => `\`${r.label.replace('chain: ', '')}\``).join(', ')}`
+    : '真机打穿的链：**（无）** —— 单插件全拦的联合指纹效应未出现', '');
 
   md.push('## 安全对照（期望 0 误拦）', '');
   md.push(fp.length ? fp.map((x) => `- \`${x.sample}\` → HTTP ${x.status}（CRS 误报，非本工具回归）`).join('\n') : '- 0 误拦 ✅');
