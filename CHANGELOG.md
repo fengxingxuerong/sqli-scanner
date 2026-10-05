@@ -4,6 +4,26 @@
 
 ## [Unreleased]
 
+### 2026-10-05 批次 D6 · Cookie 点位生成门修复：testHeaders 显式开启时任档位生效（检出 18/19 → 19/19）
+
+D2 定版表的「唯一漏项 D11-cookie」根因定位并修复——这不是浅档共性盲区，是**本引擎的
+接线缺陷**（sqlmap 带 --test-headers 也漏是它自己的问题）：
+
+- **根因**：`--header "cookie: uid=1"` 被 CLI 归入 `cookieParams`，而 Cookie 点位生成门
+  是 `level >= 2`（TargetParser 第 4 节）——`--test-headers` 只放开第 5 节的 header 点。
+  用户显式传了 cookie 又显式开了 testHeaders，level 1 下却**静默生成 0 个点位**
+  （verdict 还是 inconclusive 而非「没测到点」的明确说明）。
+- **修复**：第 4 节门改为 `level >= 2 || config.testHeaders`——显式 opt-in 的语义对齐
+  （Cookie 本就是 header 子集）。默认路径零变化（无 flag 仍是 level≥2）。
+- **端到端实证**：修复前同参数 level 1 → 0 点位/inconclusive；修复后 → cookie 点生成、
+  union/error/boolean 三技术检出（真 MySQL 靶场）。
+- **定版升级**：redteam 26 靶点三轮复测，引擎 **19/19 漏洞检出、0/7 误报、中位 747ms**
+  （修复前 18/19）——同分母对照下对 sqlmap（16/19、6/7 误报）形成全指标领先。
+  定版表 `docs/sqlmap-benchmark/redteam-strict-runs3.md` 已重新生成。
+- 回归守卫 2 条：testHeaders+level1 ⇒ cookie 点必须生成；默认路径（无 flag）零变化。
+- 附带：TargetParser 的点位生成本体测试此前缺失（register 侧只测 CLI 映射），本批补上。
+
+
 ### 2026-10-05 批次 D5 · DBMS 感知链选择：真机打穿链在 MySQL 目标上自动化启用
 
 D4 留下的待办落地——真机打穿的 unionvaluesrow 系链（2/19，通用链真机 0/19）此前只能

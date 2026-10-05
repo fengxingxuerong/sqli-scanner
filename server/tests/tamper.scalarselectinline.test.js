@@ -74,3 +74,36 @@ test('⑥ 自实现 CRS PL1：内联后的报错取数形态放行', () => {
     assert.equal(v.blocked, false, `PL1 应放行（${raw.slice(0, 40)}…）：被 ${v.ruleId} 拦`);
   }
 });
+
+// ── [批次 D6 2026-10-05] TargetParser：testHeaders 必须同时放开 cookie 点位 ──
+// redteam D11 三轮漏检的根因：--header "cookie: uid=1" 进 cookieParams，而 cookie 点位
+// 的门是 level≥2、testHeaders 只放开 header 点 ⇒ 显式 opt-in 被静默忽略。
+import { TargetParser } from '../src/engine/TargetParser.js';
+
+test('D6: testHeaders + level 1 + cookieParams ⇒ cookie 注入点必须生成', async () => {
+  const tp = new TargetParser();
+  const target = {
+    url: 'http://t.local/shop/cookie',
+    baseUrl: 'http://t.local/shop/cookie',
+    method: 'GET',
+    cookieParams: { uid: '1' },
+    config: { testHeaders: true, level: 1 },
+  };
+  const points = await tp.discover(target);
+  const cookiePoint = points.find((p) => p.location === 'cookie' && p.param === 'uid');
+  assert.ok(cookiePoint, `testHeaders 显式开启时 cookie 点必须生成，实得：${JSON.stringify(points.map((p) => p.location))}`);
+});
+
+test('D6: 默认路径零变化——level 1 无 testHeaders 时 cookie 点仍不生成', async () => {
+  const tp = new TargetParser();
+  const target = {
+    url: 'http://t.local/shop/cookie',
+    baseUrl: 'http://t.local/shop/cookie',
+    method: 'GET',
+    cookieParams: { uid: '1' },
+  };
+  const points = await tp.discover({ ...target, config: { level: 1 } });
+  assert.equal(points.find((p) => p.location === 'cookie'), undefined, '默认档（无 flag）行为不变');
+  const level2 = await tp.discover({ ...target, config: { level: 2 } });
+  assert.ok(level2.find((p) => p.location === 'cookie'), 'level≥2 既有行为不变');
+});

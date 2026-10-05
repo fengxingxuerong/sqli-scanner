@@ -143,8 +143,13 @@ export class TargetParser {
       }
     }
 
-    // 4) Cookie 参数（level≥2）
-    if (level >= 2) {
+    // 4) Cookie 参数（level≥2，或 testHeaders 显式开启）
+    // [批次 D6 2026-10-05] testHeaders 此前只放开第 5 节的 header 点 —— 用户显式传了
+    // cookie（--header "cookie: uid=1" → cookieParams）又显式开了 --test-headers，
+    // level 1 下却静默生成 0 个点位（redteam D11 三轮漏检的根因，sqlmap 同 flag 同样漏）。
+    // Cookie 本就是 header 的子集，显式 opt-in 的语义应当一致：testHeaders 开 ⇒ cookie 点
+    // 任意档位都生成。默认路径（不给 flag）零变化（仍是 level≥2）。
+    if (level >= 2 || config.testHeaders) {
       for (const [k, v] of Object.entries(target.cookieParams || {})) {
         points.push(createInjectionPoint('cookie', k, String(v)));
       }

@@ -1,6 +1,6 @@
 # sqli-scanner
 
-[![Tests](https://img.shields.io/badge/tests-3346%20passing-brightgreen)](#测试)[![CI](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml/badge.svg)](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml)
+[![Tests](https://img.shields.io/badge/tests-3350%20passing-brightgreen)](#测试)[![CI](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml/badge.svg)](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml)
 [![Dependencies](https://img.shields.io/badge/dependencies-0%20known%20vulns-brightgreen)](#环境变量)
 
 > CI 徽章为真实状态（仓库地址已定，run#90 起全绿）。发布判定仍以 `CHANGELOG.md`
@@ -332,7 +332,7 @@ backend/  ← Express + Node.js
 # 前端测试（503 个用例）
 npm test
 
-# 服务端测试（2846 个用例）
+# 服务端测试（2848 个用例）
 cd server && npm test
 
 # 全部测试
@@ -358,7 +358,7 @@ npm run artifact:drift   # 入库的 e2e 基线产物必须等于当前代码跑
 
 - TypeScript: 零错误
 - 前端测试: 503/503 通过（覆盖率门禁 stmts 94.78 / branch 84.14 / func 83.06，阈值 88/77/67）
-- 服务端测试: 2846 用例（2843 pass / 0 fail / 3 skip，并发口径 2026-10-05 复测；3 skip 为环境依赖显式跳过。覆盖率 lines 91.37 / branch 78.94 / func 81.57，阈值 85/74/77）
+- 服务端测试: 2848 用例（2847 pass / 0 fail / 1 skip，并发口径 2026-10-05 复测；1 skip 为环境依赖显式跳过。覆盖率 lines 91.37 / branch 78.94 / func 81.57，阈值 85/74/77）
 - 一键扫描: `npm run scan -- -u <url>`（CLI 一条命令产出 HTML/JSON/Markdown 全套报告 + manifest，退出码可直接进 CI 门禁）
 - Tamper 插件: 229 个（含批次 D3 新增 scalarselectinline；含 v24 增量 20 个，对齐 sqlmap 官方 tamper 全集，含官方 CRS/libinjection 实测组合 uniontable+odbcbrace）
 - WAF 绕过能力: 200+ 插件链式组合，覆盖 62 个 WAF 厂商指纹识别 + 推荐
@@ -500,13 +500,14 @@ node e2e/redteam-lab/strict-compare.mjs --runs=3     # 合并出定版表
 
 | 指标（同分母：19 漏洞点 + 7 安全点） | sqli-scanner（默认档） | sqlmap 1.10.7（--level 1 --risk 1） |
 |---|---|---|
-| 漏洞检出 | **18/19** | 16/19 |
+| 漏洞检出 | **19/19** | 16/19 |
 | 安全点误报 | **0/7** | **6/7**（F18-F22、F24 全部 3/3 轮稳定误报） |
-| 命中场景中位耗时 | **1.0s** | 21.7s |
+| 命中场景中位耗时 | **0.7s** | 21.7s |
 
 - 双方各跑 3 轮，检出取多数决、耗时取中位；**两侧结果全部逐轮稳定（零抖动）**。
-- 唯一漏项 `D11-cookie` **两家都漏**——浅档（level 1）不测 header 是共性盲区；
-  引擎升到 level 3 后 19/19（见上表 R2）。
+- 引擎 19/19 为 2026-10-05 修复 cookie 点位生成门（testHeaders 显式开启时任档位生效）
+  后的三轮复测；修复前 18/19（D11-cookie 与 sqlmap 同漏，见 CHANGELOG 批次 D6）。
+- 引擎的差异化能力点：`E15-second-order`（二阶跨角色）引擎 3/3 检出、sqlmap 0/3。
 - 引擎的差异化能力点：`E15-second-order`（二阶跨角色）引擎 3/3 检出、sqlmap 0/3。
 - 完整逐靶点表与轮次明细：`docs/sqlmap-benchmark/redteam-strict-runs3.md`（由
   `strict-compare.mjs` 从双侧多轮原始结果合成，可复现）。
