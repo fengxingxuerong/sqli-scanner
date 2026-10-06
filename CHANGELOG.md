@@ -4,6 +4,22 @@
 
 ## [Unreleased]
 
+### 2026-10-06 批次 D11 · CI audit 转红：proxy-addr critical（IP 欺骗）升 2.0.7 → 2.0.8
+
+- CI run **#172** 上唯一红的 job 是 `audit`（`cd server && npm audit --audit-level=high`）：
+  `proxy-addr 1.1.0 - 2.0.7` **critical**（GHSA-jqcg-44mw-7w3h —— IPv4-mapped IPv6 trust subnet 的
+  IP 欺骗）。本批未动依赖（`package.json` 只加了脚本）⇒ 是 **advisory 新出**，不是本批引入；
+  #170/#171 在同一 base（`6efaaba`）上仍 success 可佐证。
+- 修法：`npm audit fix`（**非** `--force`）⇒ `server/package-lock.json` **+14/−10**，express 4.22.3 的
+  传递依赖 `proxy-addr` 2.0.7 → **2.0.8**。`npm audit --audit-level=high` 复跑 exit 0。
+- **可达性核查（决定要不要再多做）**：本仓**没有** `app.set('trust proxy', …)` —— grep 命中的
+  `trustProxyEnv` 是本仓自己的「是否信任环境代理变量」开关，与 Express 的 trust proxy 不是一回事
+  ⇒ proxy-addr 的欺骗路径在本仓默认配置下**不可达**。升级照做（供应链基线），但危害面不夸大。
+- **明确不做**：剩余 3 条 moderate（`sprintf-js` ← `tedious` ← `mssql`，GHSA-hp3w-g68c-fv3c）
+  只有 `audit fix --force` 一条路，而它会把 `mssql` 降到 **4.2.0（breaking）** ⇒ 不动；
+  它也不阻塞 `--audit-level=high` 这道门。
+- 回归：服务端全量 **3093**（3090 pass / 0 fail / 3 skip）；本地 `npm audit --audit-level=high` exit 0。
+
 ### 2026-10-06 批次 D10 · 竞品吸收：base64url 编码态载体（含一条我自己的假结论撤回）
 
 **先撤回**：上一轮我在报告里写"本仓 base64 注入面 0 处理"——**错的**。`paramEncoding.js` 早在
