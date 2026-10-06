@@ -41,6 +41,13 @@ export default [
       // scratch / 调试脚本（不入库，gitignore 已排除，无需 lint）
       'debug-target.mjs',
       'live-scan-demo.mjs',
+      // [2026-10-05] 排障/注入验证用的临时脚本统一用 .tmp-* 前缀（.gitignore 已覆盖，
+      // 不会被提交）。此前是逐个文件名加 ignore（fix-eslint.mjs / debug-target.mjs 等），
+      // 那种做法必然漏：每写一个新临时脚本就会让 `npm run lint` 假红，而这类假红很
+      // 容易被误当成"代码有问题"，或被加 ignore 绕过 —— 与第 29-35 行记录的历史教训同型。
+      // 故改成通配符覆盖整个临时文件族。
+      '.tmp-*',
+      '**/.tmp-*',
     ],
   },
 

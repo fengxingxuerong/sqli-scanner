@@ -7,6 +7,35 @@
 // =====================================================================
 
 export function applyBackfill(config, cfg) {
+  // [P0-FIX 2026-10-05] 限速三键必须夹取到与 exploitRoutes **完全相同**的区间。
+  //
+  // 缺陷：同一语义（--delay / --reqrate / --max-requests），两个 REST 入口两套契约 ——
+  //   exploitRoutes.js:211-213   numOpt(v, 0, { min:0, max:60/1000/1e6 })  ← 有夹取
+  //   本文件下方通用分支         Number.isFinite(v) 即原样透传             ← 无夹取
+  //
+  // 实测（直接调用 applyBackfill）：
+  //   delay=-5     → -5       负延时，行为等同 0 ⇒ 用户设的延时静默失效
+  //   delay=99999  → 99999    实际被 retry.js 的 Math.min(…, MAX_DELAY_SEC) 夹到 60
+  //   reqRate=50000→ 50000    实际被 TokenBucket 的 Math.min(…, 10000) 夹到 10000
+  //
+  // 注意危害的准确定性：这三键**不会**造成限速绕过 —— 消费端 retry.js 与
+  // TokenBucket 各自都有上限兜底（防御纵深，所以现在还没出事）。真正的危害是
+  // **静默失真**：用户设的值与实际生效的值不一致，且没有任何提示。
+  // 而"当前靠下游三处兜底才没出事"本身就是契约该写在入口的证据：
+  // 任何一层重构时都可能悄悄丢掉一层，届时就成了真绕过。
+  //
+  // 为什么夹取而不是丢弃：clampStr/pickInt 对"非法值"的契约是丢弃，但用户填
+  // delay=120 的本意是"慢一点"，夹到 60 保留了意图；丢弃则退化成"不延时"，
+  // 限速反而凭空消失 —— 比夹取更危险。
+  //
+  // ⚠️ 两处区间必须同步维护。改动任一侧都要改另一侧，
+  //    由 tests/configRateLimitClamp.test.js + tests/configReachability.guard.test.js 钉住。
+  const RATE_LIMIT_BOUNDS = {
+    delay: [0, 60],
+    reqRate: [0, 1000],
+    maxReq: [0, 1_000_000],
+  };
+
   // [P0-FIX 2026-09-09] 白名单标量键兜底透传（**显式名单**，不是“所有未处理的白名单键”）。
   // 发现原因：configWhitelist.passthrough 守卫抱出 13 个「进了 KNOWN_CFG_KEYS 但 sanitizeStart
   // 根本没透传」的键——delay / reqRate / maxReq（限速与请求预算治理）、excludeSysdbs /
@@ -36,7 +65,12 @@ export function applyBackfill(config, cfg) {
     const v = cfg[k];
     if (v === undefined || v === null) continue;
     if (typeof v === 'boolean') { config[k] = v; continue; }
-    if (typeof v === 'number' && Number.isFinite(v)) { config[k] = v; continue; }
+    if (typeof v === 'number' && Number.isFinite(v)) {
+      // 限速三键夹取；其余键保持原样透传（夹取只对有明确上下界的键做，不外溢）
+      const bounds = RATE_LIMIT_BOUNDS[k];
+      config[k] = bounds ? Math.min(Math.max(v, bounds[0]), bounds[1]) : v;
+      continue;
+    }
     if (typeof v === 'string' && v !== '') { config[k] = v.slice(0, 2000); continue; }
     // 其余形态（对象/数组/空串）不兜底：交由逐项 clamp 处理，不绕过现有校验
   }

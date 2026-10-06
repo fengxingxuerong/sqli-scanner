@@ -70,7 +70,38 @@ export function wrapSqlmapReport(
   } as ReportModel;
 }
 
-// 扫描控制 Hook：封装 start/stop/getReport/export（混合架构：自带引擎 / sqlmap 后端）
+// ── 引擎 → 端点前缀：单一真源 ───────────────────────────────────────────────
+// [DRY-2026-10-06] 此前 `engine === 'sqlmap' ? '/sqlmap' : '/scan'` 在本文件里
+// **逐字出现 4 次**（stopScan / pauseScan / resumeScan / getReport），而
+// `st.scanId === scanId && st.scanEngine ? st.scanEngine : st.engine` 这段
+// 引擎判定出现 3 次。同一判据多份实现 ⇒ 改路由策略必然漏改一处，
+// 而漏改的后果是「UI 显示成功、后端根本没收到那条请求」。
+//
+// ⚠️ 注意 getReport 的 engine 判定是**三级优先级**（比其余三处多一步 history 回溯），
+//   本轮**刻意不合并**那部分：把它塞进下面的 pickEngine 会悄悄丢掉
+//   「历史快照按记录内 engine 回溯」这条能力（sqlmap 历史记录回溯不再误发 /scan）。
+//   差异登记在 src/tests/useScanEngineRouting.test.ts。
+
+/** 引擎对应的 REST 端点前缀（stop / pause / resume / report 共用） */
+export function engineBase(engine: EngineType): '/sqlmap' | '/scan' {
+  return engine === 'sqlmap' ? '/sqlmap' : '/scan';
+}
+
+/**
+ * 当前会话的引擎：会话 id 匹配且有启动时快照时用快照，否则回退 UI 当前选择。
+ *
+ * 语义（stopScan / pauseScan / resumeScan 三处共用）：
+ *   · 停/暂停/恢复的都是「当前会话那次扫描」⇒ 必须用**启动时**的引擎快照，
+ *     否则用户在扫描期间切了 UI 引擎，请求就会发到另一套后端路由上。
+ *   · 不是当前会话（历史记录里的 id）⇒ 没有快照可依，回退 UI 选择。
+ */
+export function pickEngine(
+  st: { scanId?: string | null; scanEngine?: EngineType | null; engine: EngineType },
+  scanId: string,
+): EngineType {
+  return st.scanId === scanId && st.scanEngine ? st.scanEngine : st.engine;
+}
+
 export function useScan() {
   // 启动扫描（按 engine 选择后端与请求体）
   // [P0-FIX] 所有函数用 useCallback([]) 包裹：它们内部全部通过 useScanStore.getState()
@@ -169,9 +200,7 @@ export function useScan() {
   // 停止扫描（P0-1：按启动时引擎快照选端点，而非当前 UI 选择）
   const stopScan = useCallback(async (scanId: string): Promise<void> => {
     const st = useScanStore.getState();
-    // 仅当停的是「当前会话扫描」时用 scanEngine 快照；否则回退 UI 选择
-    const engine = st.scanId === scanId && st.scanEngine ? st.scanEngine : st.engine;
-    const base = engine === 'sqlmap' ? '/sqlmap' : '/scan';
+    const base = engineBase(pickEngine(st, scanId));
     try {
       await apiClient.post(`${base}/${scanId}/stop`);
     } catch {
@@ -183,8 +212,7 @@ export function useScan() {
   // [P0-FIX] 暂停扫描（仅内置引擎支持；sqlmap 模式暂停透传后端 sqlmapRoutes 若实现）
   const pauseScan = useCallback(async (scanId: string): Promise<void> => {
     const st = useScanStore.getState();
-    const engine = st.scanId === scanId && st.scanEngine ? st.scanEngine : st.engine;
-    const base = engine === 'sqlmap' ? '/sqlmap' : '/scan';
+    const base = engineBase(pickEngine(st, scanId));
     try {
       await apiClient.post(`${base}/${scanId}/pause`);
       st.setStatus('paused');
@@ -196,8 +224,7 @@ export function useScan() {
   // 恢复暂停的扫描
   const resumeScan = useCallback(async (scanId: string): Promise<void> => {
     const st = useScanStore.getState();
-    const engine = st.scanId === scanId && st.scanEngine ? st.scanEngine : st.engine;
-    const base = engine === 'sqlmap' ? '/sqlmap' : '/scan';
+    const base = engineBase(pickEngine(st, scanId));
     try {
       await apiClient.post(`${base}/${scanId}/resume`);
       st.setStatus('running');
@@ -232,7 +259,7 @@ export function useScan() {
       const rec = st.history.find((h) => h.scanId === scanId);
       if (rec?.report?.engine) engine = rec.report.engine;
     }
-    const base = engine === 'sqlmap' ? '/sqlmap' : '/scan';
+    const base = engineBase(engine);
     try {
       let r: ReportModel;
       if (engine === 'sqlmap') {

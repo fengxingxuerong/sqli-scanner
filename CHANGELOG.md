@@ -4,6 +4,139 @@
 
 ## [Unreleased]
 
+### 2026-10-06 批次 D10 · 竞品吸收：base64url 编码态载体（含一条我自己的假结论撤回）
+
+**先撤回**：上一轮我在报告里写"本仓 base64 注入面 0 处理"——**错的**。`paramEncoding.js` 早在
+2026-09-11 就实现了"解码 → 注入 → 按同规则重编码"（红队 D14 靶点 `/shop/b64?id=MQ==`，真值表在册、
+单测在册）。漏看的机制：我用 `grep -i base64 server/src | head -8`，`paramEncoding.js` 排在第 9 条被
+`head` 截掉 ⇒ **采集面缩了之后的"0 命中"不是能力缺失**。与上一批"无爬虫"误报同型，已写进
+`docs/竞品吸收-tamper语义对上游-2026-10-06.md` §十一 留痕。
+
+- **真缺口 = base64url**：标准分支要求长度是 4 的倍数 + 字母表 `+/`，而 URL-safe 形态常**不带补齐**
+  （`?user=dXNlcg`）且字母表是 `-_`（明文 `~~~` → 线上 `fn5-`）。`paramEncoding.js` 新增该分支：
+  刻意排在标准 base64 之后、且要求串内无 `+`/`/` —— 错标成 base64url 会让该点请求全带 `-_`，
+  严格解码的服务端直接解坏 ⇒ 正常点被打不动（比漏识别贵）。`encodeForPoint` 同步加 URL-safe 分支
+  （Node 输出不带补齐，与线上形态往返一致）。
+- 新单测 6 条并入 `paramEncoding.test.js`（共 13 条）：正例、**误标反例集**（`order-1024`/`test-1`/
+  `2024-01-15`/`my_file.txt`… 12 个真实形态一律不认）、**字母表重叠护栏**（`U0VDUkVULVRPS0VO` 必须判
+  base64）、往返一致且无 `=`/`+`/`/`、注入链路解回来正是语义 payload、以及把"长度 floor=4"这个
+  **刻意保守的取舍钉成断言**（要放宽必须先拿出反例集不被误标的证据）。
+- **一次自我否决（重要）**：新靶点 `/b64url` 首版"解不出明文就按原值拼 SQL"，跑出 11/11 PASS，
+  但报告里 `base64url` 标记**一次都没出现** ⇒ 通过的是回退分支（原始 payload 的引号本来就能 breakout），
+  特性没参与。改成**严格解码**后做成能区分的测试：特性开 ⇒ `[PASS] b64url 检出=[union,boolean]`；
+  把识别分支短路 ⇒ `[FAIL] miss=[boolean]`（其余 10 场景不动）；还原 ⇒ 11/11。真 MySQL **8.0.28** 沙箱实测。
+- **交付面**：`poc.payload` 是解码后的语义形态、`url/curl/raw` 是重编码后的线上形态 —— 不标注就会让人
+  拿 payload 直接发（打不中）并把"引擎做对了"读成"PoC 少了一步"。`pocBuilder` 现给带 `point.encoding`
+  的点补 note 指路；新判据 `server/tests/poc.encodedCarrier.test.js`（3 条）钉住"三处线上形态必须是
+  编码串 + note 必须说清"，变异自证：摘掉 note ⇒ ①③ 红、②（非编码点零变化）仍绿。
+- **明确不做**：JWT 分段注入（可注入面在 payload 段内部叶子，拼到 JSON 文本尾部是非法 JSON，
+  与"宁可不发现也不发畸形报文"冲突；要做得复用 JSON 叶子机制 + 验签语义 ⇒ 独立一批）。
+- 回归：服务端全量 **3093 用例（3090 pass / 0 fail / 3 skip）**，徽章 3629；
+  `lint` `typecheck:server` `arch:guard` `nesting:guard(+selftest)` `refs:check` `modules:check`
+  `merge:check` `readme:check` `facts:check` `tamper:parity` `tamper:examples` 全 exit 0。
+  ⚠️ 仅代表本地工作树；未推送 ⇒ 不代表远端 CI。
+
+### 2026-10-06 批次 D9 · 竞品吸收：版本特定语法族进注册表（补丁级版本门 + 真 MySQL 差分实测）
+
+D8 把版本门的入口接上之后，这一批才谈得上"喂条目"。来源：Tas9er/ByPassTamperPlus（按 DBMS 版本
+定制的语法族，2026-02 仍在更新）+ sqlmap 1.10 的 `unionvalues*` 系（本仓真机唯一打穿链同族）
++ ghauri。**只吸收语法思想，零代码复制**（GPLv2 → MIT 既定纪律）。
+
+- **先补地基**：`versionAtLeast/versionBelow` 此前只比到 `major.minor` ⇒ 声称 `8.0.21` 会被读成 `8.0`，
+  条目会投放到 8.0.0-8.0.20 拿运行时错误。现支持**补丁级**：`patch` 取自 `ver.patch`，缺省时从
+  `ver.raw` 的第三段数字现算（解析函数一直带着 `raw`，所以**不动 8 个解析返回点**）。
+  `payloadSchema` 同步收紧：数字形态只到次版本，`8.019` 这种写法**当场拒**（会被一位小数编码静默读成 8.0）。
+- **5 条 MySQL 8 布尔差分条目**入 `payloads/registry.versioned.json`（递归 CTE / 窗口函数 ROW_NUMBER /
+  LATERAL 派生表 / VALUES ROW 表值构造器 / JSON_VALUE），下限分别 8.0.0 / 8.0.0 / 8.0.14 / 8.0.19 / 8.0.21。
+  为什么不加进 `registry.json`：它 150.1 KB 在 `arch:guard` 基线里是"**已承认的债、只减不增**"，
+  为加条目去 `arch:baseline` 等于把门禁改成橡皮章。合并发生在 `payloadRegistry.js` 一处，
+  下游仍看到**单一真源** `PAYLOAD_REGISTRY`（id 唯一性自检原样生效）。
+- **实测而不是声称**：新靶场 `e2e/real-mysql-lab/versionedForms.e2e.mjs` 从注册表取条目、用引擎
+  自己的 `fillPayload` 渲染后在真库跑真假差分（**与执行同源**，不是另抄一份 SQL）。
+  沙箱实测 MySQL **8.0.28**：**5/5 有差分**（真=1 行 / 假=0 行）。
+  顺手用同一次跑批回答"能不能扩到引号上下文"——**不能**（4 条无差分、JSON_VALUE 直接 1064），
+  所以条目只声明 `boundary: [""]`，并有判据钉住"声明的边界 == 实测过的边界"。
+- 踩到并钉住的坑：窗口函数里写 `ORDER BY 1` 报 `ER_WINDOW_ILLEGAL_ORDER_BY`（裸数字被当列序号）
+  ⇒ 改 `ORDER BY NOW()`，坑留在靶场候选区里当反向对照。
+- 新判据 `server/tests/payloadVersion.patch.test.js`（5 条）：补丁级进出（8.0.13/14/20/21 各自判对）、
+  旧语义零回归（数字形态仍只到次版本、未知版本保守投放）、schema 拒 `8.019`、
+  **投放矩阵**（8.0.28 五条全投 / 8.0.19 四条 / 8.0.14 三条 / 8.0.0 两条 / 5.7 零条 —— 每条都必须在
+  某些版本退场，防"写了 minVersion 形同没写"）、渲染后单引号奇偶自检。
+- 指纹基线按纪律同步：`EXPECTED_COUNT` 681 → **686**、两条 SHA 换新值（**抄测试自己打印的 actual**，
+  不是自己算的），并把"先 git diff registry.json"的指引改成点名两份数据文件。
+- 回归：服务端全量套件 exit 0；`arch:guard`（含 .json 字节判据）/ `nesting:guard` / `modules:check` /
+  `typecheck:server` / `readme:check`（注册表 686 = 代码实测）全 0；
+  事实数字重采 **前端 539 / 服务端 3084（3081 pass / 0 fail / 3 skip）/ 徽章 3620**。
+- **未做**：这 5 条形态的**真机 WAF 打穿率**（本地自实现 CRS 口径不足以判，见 D7 §六 T-6 同一证据要求）
+  ⇒ 归 modsec-live 下一轮；MariaDB/TiDB 的同族形态（版本号体系不同，`minVersion:8` 会错配 MariaDB 10.x
+  ⇒ 本批刻意只声明 `dbms:["MySQL"]`）。
+
+### 2026-10-06 批次 D8 · 入口断链：注册表版本门此前恒不生效（+ HEAD 上两处 typecheck 红）
+
+对上游做语义对拍时顺手验了「版本门有没有接到真值」，结论比 tamper 那批更严重：**判据对、入口断**。
+
+- `payloadRegistry.js:160-161` 的 `minVersion/maxVersion` 过滤逻辑本身正确，`payloadVersion.test.js`
+  也长期绿 —— 因为它**直接调被调函数、自己传 `dbmsVersion`**。而四个生产调用点
+  （`BooleanBlindDetector.js:84`/`:135`、`ErrorDetector.js:126`、`TimeBlindDetector.js:120`）
+  **都没传这个键** ⇒ 参数恒为 `undefined` ⇒ 版本门恒不生效：注册表里 5 条 `minVersion`
+  （MySQL 5.7 JSON 报错 / MariaDB 10.3 集合运算 / PG 9.6 `SLEEP FOR` / Oracle 12 `JSON_VALUE`）
+  对所有版本照投，送到 MySQL 5.6 上就是语法错误 —— 报错通道拿到的是"目标不认这个函数"而不是
+  "不认这个注入"。`detect.js:228` 早已把 `dbmsVersion` 随 ctx 下发，**断的只是最后一跳**。
+- 修法：四个调用点各补 `dbmsVersion: ctx.dbmsVersion`。
+- 新判据 `server/tests/payloadVersion.wiring.test.js`（4 条）源码级钉住"每个 `selectPayloads({`
+  的实参必须含 `dbmsVersion`"，含采集面下限（调用点数 ≥4，防判据因采集面缩而静默变绿）、
+  合成源码反向对照、`selectPayloadsForCtx` 转发同钉、以及端到端"喂了版本才投放/退场"。
+  **变异自证**：摘掉 `ErrorDetector` 的该键 ⇒ ① 红并点名文件；还原 4/4 绿。
+- 另两处红**是在提交代码上、不是本批引入**（按"留一棵绿的树"清单补跑 `typecheck:server` 才发现，
+  此前我只跑了 lint/测试）：`quoteScan.js:88` TS2322（`const segs = []` 被推成 `kind: string`，
+  与 `@returns` 的字面量联合类型不符 ⇒ 补 `/** @type */`）；`similarity.js:21` TS8024 ——
+  散文里写了字面量 `@param {string}` 被 TS 当真 JSDoc 标签解析（改写散文）。
+  ⇒ 教训入册：**`tsc -p server/tsconfig.json` 不在根 `tsc --noEmit` 的覆盖面上**，只跑前端会漏。
+- 事实数字已按纪律重采（**先 `git add` 新测试**再 `--refresh --coverage` → `--fix` → `--check`）：
+  前端 539 / 服务端 3079（3076 pass / 0 fail / 3 skip）/ 徽章 **3615**，覆盖率为同批采集值。
+- 全部门禁 exit 0：`lint` `arch:guard` `nesting:guard(+selftest)` `refs:check` `modules:check`
+  `merge:check` `readme:check` `facts:check` `version:check` `typecheck:server`
+  `tamper:parity` `tamper:examples` + 服务端全量套件。仅代表本地工作树，不代表远端 CI（未推送）。
+- **A1 刻意停在半截**：版本门现在真在干活，但"喂更多版本族条目"卡在一个架构取舍 ——
+  `registry.json` 150.1 KB 在 arch 基线里是"已承认的债、只减不增"，不能为加条目去自签新债。
+  三条路（另立文件 / 拆注册表 / 先真机验价值再定落点）写在
+  `docs/竞品吸收-tamper语义对上游-2026-10-06.md` §十，属路线选择，留给用户定。
+
+### 2026-10-06 批次 D7 · 竞品吸收：tamper 语义反测上游官方 doctest（对齐分母 1.9.11 → 1.10.10）
+
+外部判据补位。此前关于 tamper 的两道门都是**自报的**：`tamper:parity` 只证「官方有的本仓有同名」，
+`tamper.doctest.test.js` 只证「transform 符合本仓自己写的期望」⇒ 把 `A→B` 译成 `A→C` 并把期望
+也写成 `C`，两道门能同时绿。本批把 sqlmap docstring 里的 `>>> tamper(输入)/期望输出`
+（tag 1.10.10，79 插件 / 126 条）做成门禁：`npm run tamper:examples`（离线读入库快照，CI 无需网络）。
+
+- **对齐分母升档**：上游 tamper 70 → **84**，本仓 84/84 全覆盖；`SQLMAP_TAG`、parity 快照、
+  `tamper-parity-baseline.json`、README 声明同步升档（README 的 `N/M` 由 `readme:check` 从快照推导，
+  升档后不改 README 就红 ⇒ 已实测这条联动是活的）。
+- **修 4 条语义漂移**（116 条官方示例里 25 条不一致 ⇒ 4 条修、21 条逐条记因）：
+  ① `equaltorlike` 把 `id=1` 变成 **`idRLIKE1`**（非法 SQL：三 token 融成一个标识符，比较整个消失；
+  兄弟件 `equaltolike` 早在 `[T4]` 已补空格，本件漏改）；
+  ② `between` 缺 `=` 分支（`x = y ⟺ x BETWEEN y AND y` 严格等价）且不消费两侧空白 ⇒ 叠双空格；
+  ③ `least` 缺 `>` 分支（上游 `LEAST(a,b+1)=b+1`，本仓既有 `<` 分支不回退）；
+  ④ `informationschemacomment` 替换串写死小写 ⇒ 把 `INFORMATION_SCHEMA` 改成小写，
+  MySQL 看不出来，**Oracle/PG 引用标识符区分大小写 = 静默换对象名**。
+- **元缺陷留痕**：`server/tests/tamper.test.js:434` 原断言 `transform('1=1') === '1RLIKE1'` ——
+  自写测试把非法 SQL 钉成了期望。已改 `'1 RLIKE 1'`。自写 doctest 与自写测试同源，正是"全绿而行为坏"的成因。
+- **新判据** `server/tests/tamper.tokenBoundary.test.js`（5 条）：不检"出现了什么词"
+  （`NULLIF`/`LEAST(` 会误报），只检"输入里的操作数在输出里是否仍是独立 token"。
+  变异自证 2/2 杀：`equaltorlike` 改回 `'RLIKE'` ⇒ ①③ 红；`least` 摘掉 `>` 分支 ⇒ ④ 红。
+- **豁免账会过期**：本仓输出已与上游一致、或上游已无该示例 ⇒ 门点名"豁免失效"并提示 `--prune-baseline`
+  （注入一条假豁免实测会被点名）。随机型插件逐条点名跳过（本轮 10 条），不静默。
+- **回归面声明**（写在 `docs/竞品吸收-tamper语义对上游-2026-10-06.md` §七）：`between`/`equaltorlike`
+  在 `wafRecommendMap.js` 的 11 条厂商链里，这些链的绕过率数字是**改前测的**；本批不动数字，
+  复测归 modsec-live / waf-real 下一轮。待办 T-1…T-10 逐条标了「等什么证据 / 谁能验证」，
+  其中版本注释族（T-6）与双反斜杠族（T-4）**本地口径判不了**，必须真机 A/B。
+- 门禁：`tamper:parity` / `tamper:examples` / `readme:check` / `arch:guard` / `artifact:drift` /
+  全仓 `lint` / 服务端 tamper 全套 + 新判据文件 全 exit 0。⚠️ `facts:check` 本批**红**（新增 5 条用例，
+  README 数字待重采）——未跑 `facts:refresh` 的原因：`README.md`、`docs/_facts.json`、
+  `docs/_facts.sources.json` 在本会话开始时已被暂存（useEvents 重连守卫那一批 WIP），重采会把本批
+  数字写进别人那一批的产物。
+- 许可证口径：GPLv2 上游 ⇒ 只吸收行为语义与判据，零代码复制。
+
 ### 2026-10-05 批次 D6 · Cookie 点位生成门修复：testHeaders 显式开启时任档位生效（检出 18/19 → 19/19）
 
 D2 定版表的「唯一漏项 D11-cookie」根因定位并修复——这不是浅档共性盲区，是**本引擎的

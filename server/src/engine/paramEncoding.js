@@ -13,7 +13,7 @@
 /**
  * 识别参数值的编码形态。
  * @param {*} value 参数原始值
- * @returns {{encoding:'base64'|'hex', decoded:string}|null}
+ * @returns {{encoding:'base64'|'base64url'|'hex', decoded:string}|null}
  */
 export function detectParamEncoding(value) {
   const s = String(value ?? '');
@@ -21,8 +21,17 @@ export function detectParamEncoding(value) {
 
   // —— base64 ——（标准字母表 + 末尾补齐）
   if (s.length % 4 === 0 && /^[A-Za-z0-9+/]+={0,2}$/.test(s)) {
-    const dec = safeDecodeBase64(s);
+    const dec = safeDecode('base64', s);
     if (dec && isPlausiblePlaintext(dec, s)) return { encoding: 'base64', decoded: dec };
+  }
+
+  // —— base64url ——（URL-safe 字母表，**常不带补齐**：token / 移动端 ID 常见 `?id=MQ`、`user-X3Rlc3Q`）
+  // 刻意排在标准 base64 之后，且要求字母表里不出现 `+` `/`：两族只差在 62/63 两个字符，
+  // 让"看着像标准 base64"的值继续走上面那条 —— 错标成 base64url 的后果是该点所有请求
+  // 都带上 `-`/`_`，严格解码的服务端直接解坏 ⇒ 一个正常可注入点被打不动（比漏识别更贵）。
+  if (!/[+/]/.test(s) && /^[A-Za-z0-9_-]+={0,2}$/.test(s)) {
+    const dec = safeDecode('base64url', s);
+    if (dec && isPlausiblePlaintext(dec, s)) return { encoding: 'base64url', decoded: dec };
   }
 
   // —— 0x 前缀 hex ——（不做裸 hex：长数字串会被误判成十六进制）
@@ -38,11 +47,14 @@ export function detectParamEncoding(value) {
   return null;
 }
 
-function safeDecodeBase64(s) {
+/**
+ * 解码并做**回编码一致性**校验：Buffer 对非法输入很宽容，回编码不等于原串就说明它
+ * 不是规范的同族编码（宁可漏识别，不可误识别）。
+ */
+function safeDecode(algo, s) {
   try {
-    const buf = Buffer.from(s, 'base64');
-    // Buffer.from 对非法输入是宽容的：回编码必须一致，否则说明不是规范 base64
-    if (buf.toString('base64').replace(/=+$/, '') !== s.replace(/=+$/, '')) return null;
+    const buf = Buffer.from(s, algo);
+    if (buf.toString(algo).replace(/=+$/, '') !== s.replace(/=+$/, '')) return null;
     return buf.toString('utf8');
   } catch {
     return null;
@@ -67,6 +79,7 @@ function isPlausiblePlaintext(dec, original) {
  */
 export function encodeForPoint(payload, encoding) {
   if (encoding === 'base64') return Buffer.from(String(payload), 'utf8').toString('base64');
+  if (encoding === 'base64url') return Buffer.from(String(payload), 'utf8').toString('base64url');
   if (encoding === 'hex') {
     const hex = Buffer.from(String(payload), 'utf8').toString('hex');
     return `0x${hex}`;

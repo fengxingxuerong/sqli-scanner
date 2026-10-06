@@ -125,6 +125,7 @@ export class ErrorDetector extends Detector {
       const entries = orderEntriesByBoundary(
         selectPayloads({
           dbms,
+          dbmsVersion: ctx.dbmsVersion, // [E1] 版本门喂真值：此前漏传 ⇒ mysql-err-json-* 的 minVersion=5.7 形同不存在
           technique: 'error',
           level,
           risk,

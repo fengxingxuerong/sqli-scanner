@@ -296,7 +296,10 @@ async function _sendBatch(ex, ctx, values) {
         // 不检这一点的话：上限错误在 Extractor._send 被统一吞成 null，worker 会继续
         // 全速调用，每次都在发送前被拒又立刻重试 —— 实测空转 327,875 次 / 33 秒 CPU，
         // 且把 validity 污染成 unreachable（目标实际完全可达）。上限是终止信号，不是单点失败。
-        if (/** @type {any} */ (ex)._limitHit) break;
+        // [2026-10-05] 读取侧不再需要 `/** @type {any} */` 逃逸：字段已在 Extractor 构造器
+        //   正式声明（原先只在 catch 里动态挂载，两侧都靠 any 绕过了类型检查）。
+        //   该标志由每次提取入口的 _resetLimitHit() 复位，避免跨注入点泄漏熔断状态。
+        if (ex._limitHit) break;
         const i = cursor++;
         out[i] = await ex._send(ctx, values[i]);
       }

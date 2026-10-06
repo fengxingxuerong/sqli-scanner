@@ -35,6 +35,10 @@ const SCENARIOS = [
   { name: 'like', desc: 'LIKE 上下文（%\' 闭合，P1-3 修复验证）', target: () => ({ url: `${BASE}/like?q=keyboard` }), must: ['boolean'], nice: ['error', 'union'] },
   { name: 'orderby', desc: 'ORDER BY 位置注入（子句轮需 level≥2）', target: () => ({ url: `${BASE}/orderby?sort=id` }), must: ['boolean'], nice: [], cfg: { level: 2 } },
   { name: 'blind', desc: '布尔盲注（错误吞掉，无回显）', target: () => ({ url: `${BASE}/blind?uid=1` }), must: ['boolean'], nice: [] },
+  // [A2/D10 同族] 参数值是 **无补齐 base64url**（`user=YWxpY2U` = 'alice'）：直接投 payload 服务端解出
+  // 乱码 ⇒ 真假两分支都空页 ⇒ 漏检；只有"解码→注入→按同规则重编码"这条链路才打得动。
+  // must 只写 boolean：本路由刻意吞掉报错且无数据回显 ⇒ error/union 结构上不该期望（期望了就是假期望）。
+  { name: 'b64url', desc: 'URL-safe base64 无补齐编码态载体（解码注入重编码链路）', target: () => ({ url: `${BASE}/b64url?user=YWxpY2U` }), must: ['boolean'], nice: [] },
   // [FLAKY 2026-09-23 → 2026-09-27 已根治] 本场景曾在 CI/负载下间歇漏检 boolean
   //   （1/5 复现率；`检出=[time] miss=[boolean]`）。根因与修复见
   //   e2e/real-mysql-lab/load-repro.mjs 头注释：fixed-offset 分块对「内容位移 + 块序打乱」

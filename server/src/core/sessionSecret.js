@@ -13,12 +13,16 @@
 //
 // 密钥来源优先级与后果：
 //   ① `SCAN_SESSION_KEY`（推荐，能跨重启续跑）
-//   ② `SCAN_API_TOKEN` 派生（容器部署通常已有；改了 token 则旧会话不可解 → 自动重扫该点）
+//   ② 由 API token 派生（容器部署通常已有；改了 token 则旧会话不可解 → 自动重扫该点）
+//      —— token 本身按 `SCAN_API_TOKEN_FILE` 优先、`SCAN_API_TOKEN` 次之读取，
+//      与 index.js 的 resolveApiToken 同口径（2026-10-05 修正：原先此处漏了 _FILE，
+//      导致容器按推荐的 secret 挂载部署时会静默降级到③，重启后续跑全失效）。
 //   ③ 进程随机（**仅本进程内可解**，重启后旧会话解不开 → 该点标记为待重扫，不会崩）
 //
 // 解密失败不抛异常：旧明文会话、换过 key 的会话都必须能继续被读入（降级为"该点待重扫"）。
 // ============================================================================
 import crypto from 'node:crypto';
+import { readFileSync } from 'node:fs';
 
 const PREFIX = 'enc:v1:';
 const SALT = 'sqli-scanner/session-secret/v1';
@@ -26,10 +30,38 @@ const SALT = 'sqli-scanner/session-secret/v1';
 let cachedKey = null;
 let cachedKeySource = null;
 
+/**
+ * 读取当前生效的 API token 材质。
+ *
+ * [2026-10-05] 补 `SCAN_API_TOKEN_FILE` —— 原实现只看 `process.env.SCAN_API_TOKEN`，
+ * 于是**容器部署的默认推荐路径会静默降级**：
+ *   · docker-compose.yml 与 Dockerfile 都把 `SCAN_API_TOKEN_FILE=/run/secrets/scan_token`
+ *     列为正式方案②（env 方案之外的第一选择，且是 K8s/Docker secret 的标准做法）；
+ *   · 而这里读不到它 ⇒ secretKeySource() 落到 `process-random`
+ *   ⇒ 容器重启后**所有已落盘会话都解不开**，注入点被标记为「待重扫」。
+ * 症状是"续跑功能随机失效"，且没有任何报错（降级路径本就设计成静默）。
+ *
+ * 口径必须与 index.js 的 resolveApiToken 一致：**file 优先于 env**。
+ * 两处各读一套是这类漂移的根源（与 EXPLOIT_ENABLED 那次分叉同族）。
+ */
+function readApiTokenMaterial() {
+  const file = String(process.env.SCAN_API_TOKEN_FILE || '').trim();
+  if (file) {
+    try {
+      const v = readFileSync(file, 'utf8').trim();
+      if (v) return v;
+    } catch {
+      // 读不到就退回 env（与 resolveApiToken 同样的容错：warn 后继续找下一来源）
+    }
+  }
+  const direct = String(process.env.SCAN_API_TOKEN || '').trim();
+  return direct || '';
+}
+
 /** 当前生效的密钥来源（供日志/诊断用，不含密钥本身） */
 export function secretKeySource() {
   if (process.env.SCAN_SESSION_KEY) return 'env:SCAN_SESSION_KEY';
-  if (process.env.SCAN_API_TOKEN) return 'derived:SCAN_API_TOKEN';
+  if (readApiTokenMaterial()) return 'derived:SCAN_API_TOKEN';
   return 'process-random';
 }
 
@@ -43,7 +75,7 @@ function getKey() {
   if (cachedKey && cachedKeySource === src) return cachedKey;
   let key;
   if (src === 'env:SCAN_SESSION_KEY') key = deriveKey(process.env.SCAN_SESSION_KEY);
-  else if (src === 'derived:SCAN_API_TOKEN') key = deriveKey(process.env.SCAN_API_TOKEN);
+  else if (src === 'derived:SCAN_API_TOKEN') key = deriveKey(readApiTokenMaterial());
   else key = crypto.randomBytes(32); // 进程随机：本进程可解，重启即失效（降级为待重扫）
   cachedKey = key;
   cachedKeySource = src;

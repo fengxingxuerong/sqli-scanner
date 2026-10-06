@@ -2,6 +2,7 @@
 // 引号状态机（P3）：跳过字符串字面量（'...'/"..."/`...`）内的空格与注释区，避免破坏 payload 语义。
 // 修复场景：`'foo bar'` 原实现会变成 `'foo/**/bar'`（改写了字符串值）；行注释 `-- -` 后的
 // 空格被替换也会让注释失效。现在引号内/注释区内空格一律保留原样。
+import { isQuoteEscaped } from '../quoteScan.js';
 export const space2comment = {
   name: 'space2comment',
   description: '将空格替换为内联注释 /**/，绕过空格过滤（引号状态机保护字符串字面量）',
@@ -40,17 +41,22 @@ export const space2comment = {
       }
       if (inSingle) {
         out += ch;
-        if (ch === "'" && prev !== '\\') inSingle = false;
+        // [quoteScan] 奇偶判定而非"前一字符是不是反斜杠"：'a\\' 的结尾引号**未**被转义
+        // （反斜杠已被 \\ 成对消费）。旧写法 src[i-1] !== '\\' 把它误判为转义 ⇒
+        // 引号状态永不闭合 ⇒ 其后全部字符被当作字面量，空格替换整体失效。
+        if (ch === "'" && !isQuoteEscaped(src, i)) inSingle = false;
         continue;
       }
       if (inDouble) {
         out += ch;
-        if (ch === '"' && prev !== '\\') inDouble = false;
+        if (ch === '"' && !isQuoteEscaped(src, i)) inDouble = false;
         continue;
       }
       if (inBacktick) {
         out += ch;
-        if (ch === '`' && prev !== '\\') inBacktick = false;
+        // 反引号是 MySQL 标识符引用符，默认**不**支持反斜杠转义；
+        // 仍按统一判据处理，保持与另两态同口径（对标 sqlmap 行为一致）。
+        if (ch === '`' && !isQuoteEscaped(src, i)) inBacktick = false;
         continue;
       }
 

@@ -1,1 +1,87 @@
+#!/usr/bin/env sh
+# ============================================================================
+# .husky/pre-commit —— 提交前的**廉价**闸门（秒级）
+#
+# ── 为什么只有这几条 ────────────────────────────────────────────────────────
+# 本仓的门禁有二十多条，全量在 `npm run check:all` / `node scripts/ci-local.mjs`。
+# 但历史上栽过的那一格是：**判据写好了、也进了 CI，可它在开发机上要 10~40 分钟才能跑完**，
+# 于是每个人本地都不跑，红灯只在 push 后由别人或由 CI 发现——
+# "门禁"退化成"事后通知"，修复成本从 1 分钟变成一轮往返。
+#
+# 所以这里的取舍标准不是"覆盖最多"，而是**「每次提交都愿意付的代价」**。
+# 2026-10-05 实测耗时（Windows 本机，决定这一组时按实测选而非估算）：
+#   arch-guard                0.3s
+#   nesting-guard             0.2s
+#   ref-integrity             0.2s
+#   module-loadable           0.4s
+#   version-sync              0.1s
+#   ────────────────────────────────
+#   合计                      ≈1.2s
+#   （对比：前端 typecheck 4.2s；服务端全量 2848 条测试数分钟；coverage 数十分钟）
+#
+# 这四条全是**纯静态**判据：不执行被检代码、不连数据库、不起服务、无副作用，
+# 因此在 pre-commit 位置运行是安全的（不会因环境缺失而误红）。
+# 慢的、需要环境的，仍由 CI 与 ci-local 承担——它们不属于"提交前"这一档。
+#
+# ── 与 lint-staged 的分工 ────────────────────────────────────────────────────
+#   lint-staged  ：只看**暂存区**被改动的文件，逐个过 eslint（按需 --fix）。
+#   本文件       ：看**整个仓库**，跑与"改了哪些文件"无关的一致性判据。
+# 两者不能互相替代：eslint 通过不代表版本号三处一致（事实副本问题），
+# 反之全局判据也不该逐文件重复跑。
+#
+# ── 逃生阀 ────────────────────────────────────────────────────────────────────
+# `SKIP_PRECOMMIT=1 git commit` 可跳过（仅用于明知会红、需先落盘分批改的场合）。
+# ⚠️ 该开关**刻意不接线到任何检查**：一旦它被 gate 住（比如要求 CI 也跑一遍），
+#   就变成了必须绕过的障碍，于是所有人都会去改脚本而不是修问题——这正是
+#   本仓 "空转门禁"事故的成因（CI job 指向不存在的文件 + continue-on-error）。
+#   与其加一个半开的闸门，不如让跳过动作在提交历史里**可见**（reflog / CI 报告差异）。
+# ============================================================================
+
+# 0. 逃生阀（前置，一次 shell 变量传递即可）
+if [ "${SKIP_PRECOMMIT:-}" = "1" ]; then
+  echo "⚠️  SKIP_PRECOMMIT=1 —— 跳过全部 pre-commit 门禁"
+  echo "    请确认这不是在绕过已知问题（版本一致性/引用完整性红了应先修）"
+  exit 0
+fi
+
+# 1. 暂存区的 lint（原有行为，放在最前：失败最快、反馈最直接）
 npx lint-staged
+
+# 2. 全仓库一致性门禁。任一失败即中止提交。
+#    每条都单独跑（不串成 npm run check:all）——后者含 cargo/clippy/coverage，
+#    那是"提交前"档位放不下的，混在一起会让本钩子慢到被人加 --no-verify 绕过。
+run_gate() {
+  _name="$1"; shift
+  echo "── 门禁：$_name"
+  if "$@"; then
+    return 0
+  fi
+  echo ""
+  echo "❌ pre-commit 门禁未通过：$_name"
+  echo "   （提交已被阻止。若确认是误报请修判据，不要加 --no-verify 常态化绕过）"
+  echo "   确需跳过：SKIP_PRECOMMIT=1 git commit ..."
+  return 1
+}
+
+# 2a. 架构门禁：单文件体积上限 / ESM 循环依赖 / 生产代码 console 回归
+run_gate "架构门禁（体积/循环依赖/console）" node scripts/arch-guard.mjs || exit 1
+
+# 2a'. 嵌套深度：与 2a 管的是**独立**维度 —— 200 行的文件也能套 8 层 if/for/try。
+#      存量登记在 docs/_nesting-baseline.json（只许持平或变浅）；新文件超软上限 7 即失败。
+run_gate "嵌套深度（存量只许持平或变浅）" node scripts/nesting-guard.mjs || exit 1
+
+# 2b. 引用完整性：CI/配置里写的本地路径必须**已入库**。
+#     这条挡的是「本机有、库里没有」——开发机一切正常，CI 上 Cannot find module。
+#     真实拦截记录见本文件生成当日：新增 scripts/version-sync.mjs 未 git add 时即变红。
+run_gate "引用完整性（CI/配置引用的路径必须已入库）" node scripts/ref-integrity.mjs || exit 1
+
+# 2c. 模块引用完整性（静态、不执行被检代码）：具名导入/导出必须可解析。
+#     起因：merge 曾把某模块实现回退而调用点还在 ⇒ import 即抛 ReferenceError、
+#     引擎起不来，而 2600+ 条测试没拦住（崩在 import 阶段且该文件从未被测试直接 import）。
+run_gate "模块引用完整性（server/*.js 全量静态扫描）" node scripts/module-loadable.mjs || exit 1
+
+# 2d. 版本号三处一致（package.json / tauri.conf.json / Cargo.toml）。
+#     与 2b 同族：同一事实多份副本。不同步时桌面安装包对外报的版本与 npm 包对不上。
+run_gate "版本号三处一致" node scripts/version-sync.mjs || exit 1
+
+echo "✅ pre-commit 门禁通过"

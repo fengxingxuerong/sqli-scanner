@@ -59,18 +59,45 @@ export class UnionDetector extends Detector {
     const commentSuffix = commentSuffixFor(ctx.dbms, {
       tamperEnabled: !!ctx.config?.wafEvasion?.tamper?.enabled,
     });
+    // [P0-FIX 2026-10-05] 失败样本护栏：发送后先判可用性，不可用的重发一次。
+    //
+    // 缺陷：原实现直接 `String((await this.send(...))?.data ?? '')`，把**网络失败**
+    // 折成空串参与真假比对。空串 vs 正常页面必然"不相似" ⇒ 门控放行 ⇒
+    // 网络抖动被当成 SQL 真假分化，门控本该防的参数反射误报从这里漏出去。
+    // 实测：真探针超时 + 假探针正常 ⇒ pass=true（假阳性来源）。
+    //
+    // 同族检测器早有这道闸（口径统一在 egressOpts.isUnusableResponse）：
+    //   BooleanBlindDetector:266/333/431  this.unusableOf(rTrue) || this.unusableOf(rFalse)
+    //   TimeBlindDetector:171             this.unusableOf(baseRes) || this.unusableOf(injectRes)
+    //   StackedDetector:75/148            !r.__error && r.resp != null
+    //   prefilter.js:24 甚至写了纪律「本模块统一用 isUnusableResponse(res)，
+    //                                **不要**改回 res == null」——Union 是唯一漏掉的。
+    //
+    // 为什么是"重发"而不是"直接拒绝"：直接拒绝会把假阳性修成假阴性，
+    // 违反「不得降低检出能力」。重发命中失败样本同样无效的场合才拒绝，
+    // 与同族检测器同口径。代价：仅在失败时多 1 个请求，正常场景零开销。
+    const sendUsable = async (payload) => {
+      const req = this.buildRequest(target, point, this.obfuscateValue(ctx, payload));
+      let res = await this.send(httpClient, ctx, req, ctx);
+      if (!this.unusableOf(res)) return { res, body: String(res?.data ?? '') };
+      unionDebug(`gate 探针失败(${this.unusableOf(res)})，重发一次 payload=${JSON.stringify(payload)}`);
+      res = await this.send(httpClient, ctx, req, ctx);
+      if (!this.unusableOf(res)) return { res, body: String(res?.data ?? '') };
+      return { res, body: null };   // 重发仍失败：交由调用方保守处理
+    };
     // 真探针：AND 1=1（SQL 上下文中恒真）
-    const trueBody = String((await this.send(
-      httpClient, ctx,
-      this.buildRequest(target, point, this.obfuscateValue(ctx, `${orig}${boundary} AND 1=1${commentSuffix}`)),
-      ctx
-    ))?.data ?? '');
+    const t = await sendUsable(`${orig}${boundary} AND 1=1${commentSuffix}`);
     // 假探针：AND 1=2（SQL 上下文中恒假，应改变响应）
-    const falseBody = String((await this.send(
-      httpClient, ctx,
-      this.buildRequest(target, point, this.obfuscateValue(ctx, `${orig}${boundary} AND 1=2${commentSuffix}`)),
-      ctx
-    ))?.data ?? '');
+    const f = await sendUsable(`${orig}${boundary} AND 1=2${commentSuffix}`);
+    // 失败样本不参与判定：宁可不启用 UNION，也不能拿网络抖动当注入信号。
+    // （此前两侧都失败会因都是 '' 而"恰好"判相似 → 保守拒绝，属巧合正确；
+    //   换成单边失败就崩。现改为显式按失败标志判定，不依赖巧合。）
+    if (t.body === null || f.body === null) {
+      unionDebug(`gate 探针不可用（true=${t.body === null} false=${f.body === null}）→ 保守拒绝`);
+      return false;
+    }
+    const trueBody = t.body;
+    const falseBody = f.body;
     // 真假互相不相似 = 注入信号（SQL 真假分化改变了响应）
     // 真假互相相似 = 反射（输入只是文本回显，结构相同）或无注入
     // [P0-DIAG 2026-09-10] 门控是 union 唯一静默失败点，输出实际探针与响应长度便于排障
@@ -89,19 +116,16 @@ export class UnionDetector extends Detector {
     // OR 型不受此影响：`OR 1=1` 命中全表（有数据）、`OR 1=2` 回到原空集 → 真假必然分化。
     // 成本：仅在 AND 型判「相似」后才追加 2 个请求（正常场景零额外开销）。
     const orProbe = (n) => `${orig}${boundary} OR 1=${n}${commentSuffix}`;
-    const orTrue = String((await this.send(
-      httpClient, ctx,
-      this.buildRequest(target, point, this.obfuscateValue(ctx, orProbe(1))),
-      ctx
-    ))?.data ?? '');
-    const orFalse = String((await this.send(
-      httpClient, ctx,
-      this.buildRequest(target, point, this.obfuscateValue(ctx, orProbe(2))),
-      ctx
-    ))?.data ?? '');
-    const orSimilar = this._similar(orTrue, orFalse);
+    const ot = await sendUsable(orProbe(1));
+    const of = await sendUsable(orProbe(2));
+    // 同上：OR 复判的失败样本同样不得参与判定
+    if (ot.body === null || of.body === null) {
+      unionDebug(`gate OR 复判探针不可用 → 保守拒绝`);
+      return false;
+    }
+    const orSimilar = this._similar(ot.body, of.body);
     unionDebug(
-      `gate point=${point.id} OR 复判 payload=${JSON.stringify(orProbe(1))} orTrueLen=${orTrue.length} orFalseLen=${orFalse.length} similar=${orSimilar}`
+      `gate point=${point.id} OR 复判 payload=${JSON.stringify(orProbe(1))} orTrueLen=${ot.body.length} orFalseLen=${of.body.length} similar=${orSimilar}`
     );
     return !orSimilar;
   }

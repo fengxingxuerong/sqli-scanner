@@ -9,7 +9,27 @@ services:
       - "127.0.0.1:4567:4567"
     environment:
       - NODE_ENV=production
-      - HOST=127.0.0.1
+      # [P0-FIX 2026-10-05] HOST 必须是 0.0.0.0，而不是 127.0.0.1。
+      #
+      # 此前这里写的是 `HOST=127.0.0.1`，注释还说"仅绑定 127.0.0.1，避免暴露到所有网络接口"——
+      # 那条注释把**两个不同的绑定**搞混了，它们是两层、互不相干：
+      #   · 本文件的 `ports: 127.0.0.1:4567:4567` —— 决定**宿主**上哪个网卡能连进来（安全边界在此）；
+      #   · 环境变量 HOST          —— 决定**容器内**进程 bind 到哪个地址（决定端口映射能否成立）。
+      # `server/index.js` 是 `app.listen(PORT, HOST)`，故 HOST 写 127.0.0.1 等于让引擎只绑 lo。
+      # 而 Docker 的端口映射靠 DNAT 把流量送到容器 **eth0** 地址；只听 lo 的 socket 收不到来自
+      # 网桥的流量 ⇒ 宿主 `curl localhost:4567` 连不上。
+      #
+      # 隐蔽之处：容器内 healthcheck 打的是 `http://127.0.0.1:4567/api/health`（走 lo，**照常通过**），
+      # 于是 compose 报 healthy 而外部根本访问不到 —— 典型的"门禁全绿、服务不可用"。
+      # Docker 镜像里本就是 `ENV HOST=0.0.0.0`（见 Dockerfile:40），这里把它改回去与镜像对齐。
+      #
+      # ⚠️ 未在本机实测：本机无 docker，无法当场跑起容器验证。判断依据是
+      #   server/index.js:356 `app.listen(PORT, HOST)` 与 TCP bind 语义（已用 net.createServer
+      #   验证 bind 到 127.0.0.1 时 address().address 确为 127.0.0.1，即只监听回环）。
+      #   首次部署请人工确认宿主可访问；`npm run release:check` 会静态核对该行不被改回 127.0.0.1。
+      #
+      # 对外暴露面仍由 ports 的 127.0.0.1 绑定 + SCAN_API_TOKEN 鉴权控制，与 HOST 无关。
+      - HOST=0.0.0.0
       - PORT=4567
       - EXPLOIT_ENABLED=0
       - ALLOWED_ORIGINS=http://localhost:4567,http://127.0.0.1:4567

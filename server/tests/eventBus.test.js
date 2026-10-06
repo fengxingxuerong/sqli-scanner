@@ -70,7 +70,7 @@ test('toSSE 按 lastEventId 查询参数回放之后的事件', () => {
   eventBus.create('scanReplay');
   eventBus.emit('scanReplay', 'point_discovered', { n: 1 }); // seq=S1
   eventBus.emit('scanReplay', 'http_request', { n: 2 }); // seq=S2
-  const s1 = eventBus.create('scanReplay')._replayBuffer?.[0]?.seq;
+  const s1 = eventBus._peekReplayBuffer('scanReplay')?.[0]?.seq;
 
   // 捕获清理钩子：toSSE 会注册 15s 心跳定时器，必须触发 close 才不会让测试进程悬挂
   const hooks = [];
@@ -95,9 +95,13 @@ test('toSSE 按 lastEventId 查询参数回放之后的事件', () => {
 test('dispose 后回放缓冲一并回收', () => {
   eventBus.create('scanDisposeBuf');
   eventBus.emit('scanDisposeBuf', 'x', {});
+  assert.ok(eventBus._peekReplayBuffer('scanDisposeBuf')?.length === 1,
+    'dispose 前应能读到 1 条回放');
   eventBus.dispose('scanDisposeBuf');
-  eventBus.emit('scanDisposeBuf', 'y', {}); // 未 create 不应抛错
-  assert.ok(true);
+  assert.equal(eventBus._peekReplayBuffer('scanDisposeBuf'), undefined,
+    'dispose 后命名空间应被移除，回放缓冲随之不可达');
+  // 未 create 的命名空间 emit 不抛错（原实现的既有契约，不得因改造而变）
+  assert.doesNotThrow(() => eventBus.emit('scanDisposeBuf', 'y', {}));
 });
 
 // [r2-01 H1] 回归守卫：终态事件只允许出现一次（listener 跳过终态，terminalListener 独写并收尾）

@@ -2,6 +2,8 @@
 // MySQL UNCOMPRESS() 期望的是 zlib 容器（RFC1950，0x78 前缀），而非 gzip 容器（RFC1952，0x1f8b 前缀）——
 // 早期实现误用 gzipSync 导致 UNCOMPRESS() 报错「Invalid data」，已修正为 deflateSync。
 import { deflateSync } from 'node:zlib';
+import { readSqlLiteral, isQuoteEscaped } from '../quoteScan.js';
+
 
 export const gzip = {
   name: 'gzip',
@@ -16,35 +18,27 @@ export const gzip = {
     let out = '';
     let inSingle = false, inDouble = false;
     for (let i = 0; i < src.length; i++) {
-      const ch = src[i], prev = src[i - 1];
+      const ch = src[i];
       if (inSingle) {
-        if (ch === "'" && prev !== '\\') { inSingle = false; out += ch; }
+        if (ch === "'" && !isQuoteEscaped(src, i)) { inSingle = false; out += ch; }
         else out += ch;
         continue;
       }
       if (inDouble) {
-        if (ch === '"' && prev !== '\\') { inDouble = false; out += ch; }
+        if (ch === '"' && !isQuoteEscaped(src, i)) { inDouble = false; out += ch; }
         else out += ch;
         continue;
       }
       if (ch === "'") {
         inSingle = true;
         let str = '';
-        for (let j = i + 1; j < src.length; j++) {
-          const c = src[j];
-          if (c === "'" && src[j - 1] !== '\\') { i = j; break; }
-          str += c;
-        }
+        { const lit = readSqlLiteral(src, i, "'"); if (!lit.closed) { out += src.slice(i); return out; } i = lit.end; str = lit.body; }
         const compressed = deflateSync(Buffer.from(str)).toString('base64');
         out += `UNCOMPRESS(FROM_BASE64('${compressed}'))`;
       } else if (ch === '"') {
         inDouble = true;
         let str = '';
-        for (let j = i + 1; j < src.length; j++) {
-          const c = src[j];
-          if (c === '"' && src[j - 1] !== '\\') { i = j; break; }
-          str += c;
-        }
+        { const lit = readSqlLiteral(src, i, '"'); if (!lit.closed) { out += src.slice(i); return out; } i = lit.end; str = lit.body; }
         const compressed = deflateSync(Buffer.from(str)).toString('base64');
         out += `UNCOMPRESS(FROM_BASE64('${compressed}'))`;
       } else {

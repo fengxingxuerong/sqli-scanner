@@ -32,6 +32,25 @@ const DNS_DOMAIN = process.env.OOB_DNS_DOMAIN || '';
 // DNS 报文解析常量
 const DNS_HEADER_SIZE = 12;
 
+// [B-9 2026-10-05] token 白名单的**唯一真源**（HTTP 与 DNS 双通道共用）。
+//   起因：HTTP 通道有校验（见 _handleHttp），DNS 通道此前**直接把子域标签当 token 存进
+//   _received** —— 两条入口对同一份输入给出不同的严格度，这正是本仓反复吃亏的那类形状
+//   （本文件历史上已因"一份修了另一份没修"返工过，见 ipBytes.js 的教训）。
+//   收紧理由（与 HTTP 侧同源，非臆断）：
+//     · 合法性：合法 token 由 nanoid 生成，字母表恒为 A-Za-z0-9_-，且长度固定；
+//       含其它字符的标签**必然不是**本进程签发的 token，收进来只是噪声。
+//     · 内存面：DNS 单标签最大 63 字节（RFC 1035），但**标签数量无上限**——一个 qname
+//       可以塞进成百上千个标签，每个都是一次 Map 插入（_received 上限 10000 条 LRU，
+//       攻击者可用几百个查询把它冲掉）。白名单 + 限长把这条面关掉。
+//   注意：`_` 开头的系统查询（_acme-challenge 等）的过滤在 _handleDns 里，
+//   位置在白名单**之前**——顺序有意为之，系统名不该落进日志与计数。
+const TOKEN_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
+
+/** token 是否为本接收端签发的合法形态。两条入口共用，避免判据分叉。 */
+function isValidToken(token) {
+  return typeof token === 'string' && TOKEN_PATTERN.test(token);
+}
+
 class OobReceiver {
   constructor() {
     this._server = null;       // HTTP server
@@ -199,8 +218,8 @@ class OobReceiver {
       return;
     }
     // token 白名单：仅 URL-safe 字符且限长（合法 token 由 nanoid 生成，字母表即 A-Za-z0-9_-），
-    // 同时封死超长 token 的内存面滥用。
-    if (!/^[A-Za-z0-9_-]{1,64}$/.test(token)) {
+    // 同时封死超长 token 的内存面滥用。判据与 DNS 通道共用 TOKEN_PATTERN（唯一真源）。
+    if (!isValidToken(token)) {
       res.statusCode = 400;
       res.end('bad token');
       return;
@@ -270,6 +289,13 @@ class OobReceiver {
         const suffix = this._dnsDomain.replace(/^\./, '');
         if (!qname.endsWith('.' + suffix) && qname !== suffix) return;
       }
+
+      // [B-9 2026-10-05] token 白名单：与 HTTP 通道同源判据（TOKEN_PATTERN）。
+      //   此前此处直接 receive(firstLabel)，DNS 通道是两条入口里唯一不做形状校验的一条；
+      //   而「合法 token 恒为 nanoid 的 A-Za-z0-9_-」这条前提对两条入口同样成立。
+      //   拒绝时**不**计入命中、也不打 debug 日志——非法形状的查询不是本进程签发的回带，
+      //   记它只会污染日志与 _received。
+      if (!isValidToken(firstLabel)) return;
 
       // 将子域名作为 token 注册
       logger.debug(`DNS OOB 收到查询：${qname} (${ip})`);

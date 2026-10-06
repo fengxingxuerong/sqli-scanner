@@ -66,17 +66,39 @@ export function parseDbmsVersion(dbms, raw) {
 }
 
 /**
- * 版本下界比较：ver >= min（major.minor 数值比较）
+ * 版本下界比较：ver >= min
+ *   · 支持到**补丁级**（MySQL 的能力分界大量落在补丁号：LATERAL 8.0.14、VALUES ROW 8.0.19、
+ *     JSON_VALUE 8.0.21）—— patch 取自 ver.patch，缺省时从 ver.raw 的第三个数字现算
+ *     （parseDbmsVersion 一直把原始版本串带在 raw 里，所以解析侧不用改）。
+ *   · min 为数字时只到次版本（5.7 → major=5, minor=7）；要表达补丁级下限必须用对象形态
+ *     {major, minor?, patch?} —— 8.019 这种小数会被"一位小数"编码静默读成 8.0，schema 已拒。
  * 版本未知（major=null）→ 返回 true（保守按"支持"处理，不因未知版本砍掉 payload）
  */
 export function versionAtLeast(ver, min) {
   if (!ver || ver.major == null) return true;
-  // 数字入参支持带次版本（5.7 → major=5, minor=7）；对象入参透传 {major, minor}
-  const floor = typeof min === 'number'
-    ? { major: Math.floor(min), minor: Math.round((min - Math.floor(min)) * 10) }
-    : (min || {});
-  if (ver.major !== floor.major) return ver.major > floor.major;
-  return (ver.minor ?? 0) >= (floor.minor ?? 0);
+  const v = parts(ver);
+  const f = parts(typeof min === 'number' ? numToParts(min) : (min || {}));
+  for (let i = 0; i < 3; i++) {
+    if (v[i] !== f[i]) return v[i] > f[i];
+  }
+  return true;
+}
+
+/** 取 [major, minor, patch]；patch 缺失时从 raw 现算（`8.0.28` → 28） */
+function parts(o) {
+  const major = Number(o?.major ?? 0);
+  const minor = Number(o?.minor ?? 0);
+  let patch = Number(o?.patch ?? 0);
+  if (o?.patch == null) {
+    const m = /(\d+)\.(\d+)\.(\d+)/.exec(String(o?.raw ?? ''));
+    if (m) patch = Number(m[3]);
+  }
+  return [major, minor, patch];
+}
+
+/** 数字形态的下限（只到次版本）：5.7 → {major:5, minor:7} */
+function numToParts(n) {
+  return { major: Math.floor(n), minor: Math.round((n - Math.floor(n)) * 10) };
 }
 
 /**
@@ -85,11 +107,12 @@ export function versionAtLeast(ver, min) {
  */
 export function versionBelow(ver, max) {
   if (!ver || ver.major == null) return false;
-  const ceil = typeof max === 'number'
-    ? { major: Math.floor(max), minor: Math.round((max - Math.floor(max)) * 10) }
-    : (max || {});
-  if (ver.major !== ceil.major) return ver.major < ceil.major;
-  return (ver.minor ?? 0) < (ceil.minor ?? 0);
+  const v = parts(ver);
+  const c = parts(typeof max === 'number' ? numToParts(max) : (max || {}));
+  for (let i = 0; i < 3; i++) {
+    if (v[i] !== c[i]) return v[i] < c[i];
+  }
+  return false;
 }
 
 export default parseDbmsVersion;

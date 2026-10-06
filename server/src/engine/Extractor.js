@@ -1,18 +1,12 @@
 // =====================================================================
 // Extractor.fixed.js —— 代码审查修复版（原文件 server/src/engine/Extractor.js）
-// 改动点（相对原文件，均标注 ★FIX）：
-//   ★FIX-1 [P1] extractBoolean 批处理把「请求失败(null)」当空串参与比较：真条件失败 →
-//          ''≠falseData 误判「条件为真」；假基准失败 → 所有条件「成立」。修复：失败=不可判定，
-//          位置回插重试（≤3 次），超限放弃该字节(置 0)，杜绝网络抖动污染提取数据。
-//   ★FIX-2 [P1] extractTime.timedTrue 把请求超时（elapsed≈timeoutMs≥threshold）恒判为真：
-//          修复为失败重试一次、仍失败按假处理（宁漏不误）。
-//   ★FIX-3 [P1] SYS_QUERIES 把库名/表名直接拼进 SQL（来自目标 DB 自身内容，可含引号等
-//          特殊字符）→ 加各方言标识符/字符串转义，防止提取 SQL 被破坏/被二次改写。
-//   ★FIX-4 [P1] extractScalar 的 UNION payload 未拼 point.boundary（与布尔/时间检测器
-//          不一致）：字符串上下文注入点上 UNION 提取永不执行。修复：拼 boundary 前缀。
-//   ★FIX-5 [P2] guessColumns 是 columnGuess.binaryGuessColumns 的第三份拷贝：改为委托，
-//          消除判据漂移（UnionDetector/DBFingerprinter 已收敛到 binaryGuessColumns）。
-// 其余逻辑与原文件一致，未做任何其它改动。
+// ⚠️ 本段 ★FIX 清单是**历史留档**，不是现状说明（2026-10-05 注释瘦身时核实）：
+//   仍成立：★FIX-1（请求失败须判为不可判定并回插重试）、★FIX-2（超时不得恒判为真）、
+//           ★FIX-4（UNION payload 须拼 boundary）、★FIX-5（guessColumns 已委托 binaryGuessColumns）。
+//   **已失效**：★FIX-3（原「SYS_QUERIES 直接拼库名/表名」）—— 转义早已搬到
+//           DialectSqlBuilder.escSql，本文件改走 resolveSysQueries，不再直接构造
+//           SYS_QUERIES 字符串。别再据这条推断本文件在做标识符转义。
+// 其余：2026-09-14 起 blindExtractor.js 是本文件盲注部分的**纯搬移**（`this` → 首参 `ex`）。
 // =====================================================================
 import { nullSequence } from './payloads.js';
 import { discoverEchoColumns, buildInjectionRequest } from './injection.js';
@@ -58,30 +52,69 @@ import {
   SEARCH_COLUMNS_QUERY, SEARCH_TABLES_QUERY, COUNT_WHERE_QUERY,
   resolveSysQueries,
 } from './extractionMaps.js';
-// [大文件拆分 2026-09-20] 拖库结果格式化（纯函数，无 this/无 I/O）外移至独立模块。
-// 注意：import 名与类内方法名**故意同名**（formatDumpData/formatSql 等）。
-// 这不冲突：类内 `this.formatDumpData()` 解析到原型方法（薄委托），
-// 裸 `formatDumpData(...)` 解析到本 import —— 正是薄委托要的写法，无需别名。
+// [大文件拆分 2026-09-20] 拖库结果格式化（纯函数，无 this/无 I/O）外移至独立模块
+//   dumpFormat.js：formatDumpData / formatCsv / escapeCsvCell / formatSql / formatHtml。
+// [2026-10-05] 本文件曾 import 这 5 个符号**仅为**喂类上的同名薄委托；薄委托既已删除
+//   （全仓零调用，见类体末尾 DEAD-CODE 说明），import 随之整体移除。
+//   ⚠️ 别再把格式化逻辑搬回本文件：实现在 dumpFormat.js，其契约（'json' 返回原始数组、
+//   空数据返回格式骨架、未知 format 抛错不静默回落）由 dumpFormat.test.js 直接钉在那边。
 // 注：原 AppError/ErrorCode import 随之移走 —— 本文件已无抛错点（唯一的
-// `throw new AppError(INVALID_PARAM)` 在 formatDumpData 的 default 分支，现已外移）。
-import {
-  formatDumpData,
-  formatCsv,
-  escapeCsvCell,
-  formatSql,
-  formatHtml,
-} from './dumpFormat.js';
+//   `throw new AppError(INVALID_PARAM)` 现落在 dumpFormat.js 的 formatDumpData default 分支）。
 
 // 数据提取器：基于确认的可回显注入点做库/表/列/数据枚举；
 // 盲注场景退化为布尔/时间二分提取（受 config 约束）。
+
+/**
+ * --start/--stop 行偏移量的归一化（**唯一真源**，2026-10-05 上提）。
+ *
+ * 起因：此前 `dumpData()` 与 `_applySearchLimits()` 各自内联了一份**逐字相同**的
+ * `_posInt`。两份副本的真正风险不在"多写了四行"，而是：改上限（1000000）
+ * 或改边界语义（>0 才算有效）时只改一处 ⇒ 拖库与搜索对同一份配置给出**不同**的行区间，
+ * 而这类不一致只在特定参数组合下显现，测试很难抓到。
+ * 本仓已因"同一判据两份实现、一份修了另一份没修"反复吃亏（见 ipBytes.js），
+ * 故此处上提为模块级单一真源，两个调用点共用。
+ *
+ * 语义保持不变（0 = 不限/未设置，负数与 NaN 一律归 0，上限 100 万行）：
+ *   n 非法或 ≤0 → 0（调用方据此视为"未指定"）
+ *   合法正数 → 向下取整，且不超过 MAX_RANGE_ROWS
+ */
+const MAX_RANGE_ROWS = 1000000;
+function posInt(v) {
+  const n = Number(v);
+  return Number.isFinite(n) && n > 0 ? Math.floor(Math.min(n, MAX_RANGE_ROWS)) : 0;
+}
+
 export class Extractor {
   constructor() {
     this.colTypeEnum = null;
+    // [P1-FIX 2026-09-17] 请求上限（--max-requests）命中标志：终止信号，不是单点失败。
+    //
+    // [2026-10-05] 原先此字段**根本不存在于构造器**，只在 _send 的 catch 里用
+    //   `/** @type {any} */ (this)._limitHit = true` 动态挂上去，读取侧 blindExtractor
+    //   也靠同样的 any 逃逸。两处都在绕过类型检查，说明当时就知道它不属于这个类。
+    // 真正的缺陷是**状态泄漏**：
+    //   ScanManager 持有**一个** Extractor 实例（ScanManager.js:118），跨多个注入点、
+    //   多轮提取复用；而该标志置位后**永不复位** ⇒ 一旦某个注入点撞上限，
+    //   同一实例后续**所有**注入点的提取 worker 都会立刻 break（blindExtractor.js:299），
+    //   表现为"后面的注入点静默提不出任何数据"，且没有任何错误提示。
+    //   反向同样有坑：若在构造器初始化为 false 而不复位，就退化成"全局熔断"——
+    //   熔断本意是终止**本次**提取流程，不是让整个扫描实例瘫痪。
+    //
+    // 处置：显式声明（类型正确、读取侧不再需要 any），并在每次提取开始时复位，
+    // 使其严格等价于原意图"停止本批/本次提取"。复位点见 extractBoolean/extractProof 等入口
+    // 统一走的 _resetLimitHit()。
+    this._limitHit = false;
     // 盲注提取结果缓存（对标 sqlmap --predict-output / 常见值缓存）：
     // WeakMap<target, Map<`${scanId}:${dbms}:${expr}`, value>>，按目标对象身份隔离——
     // 同目标（+同 scanId）内同表达式（version()/database()/current_user 等常见值）跨注入点复用，
     // 命中后直接返回不再重复二分；不同目标/不同扫描互不串数据（避免跨目标污染）。
     this._extractCache = new WeakMap();
+  }
+
+  // 复位"请求上限已命中"标志（每次提取开始时调用）。
+  // 见构造函数注释：Extractor 实例被 ScanManager 复用，不复位会跨注入点泄漏熔断状态。
+  _resetLimitHit() {
+    this._limitHit = false;
   }
 
   // 注入列类型枚举器（由 ScanManager 设置）
@@ -128,7 +161,7 @@ export class Extractor {
       // 并把 validity 判定污染成 unreachable（目标其实完全可达，真实请求仅 203 次）。
       // 置位后由 _sendBatch 的 worker 检出并停止本批，后续批次同样因该标志不再发包。
       if (e && typeof e.message === 'string' && e.message.indexOf('请求上限已达') >= 0) {
-        /** @type {any} */ (this)._limitHit = true;
+        this._limitHit = true;
       }
       // [审计 P3] 提取请求失败时记录原因，便于运维定位（不改变静默降级语义）
       logger.debug(`[extractor._send] 提取请求失败：${e && e.message ? e.message : e}`);
@@ -207,6 +240,7 @@ export class Extractor {
 
   // 通过 UNION 提取单个标量值（用标记包裹，返回标记间内容）
   async extractScalar(ctx, sql, columns) {
+    this._resetLimitHit(); // 与盲注入口同因：本次提取的终止信号，实例复用故需复位（见构造函数）
     const { point, dbms } = ctx;
     // [P0-FIX 2026-09-12] 列数优先用「检测期 UNION 实测确认」的 point.columns：
     //   传入的 columns 来自 _guessColumnsCached（ORDER BY 二分），而 **ORDER BY 在字符串
@@ -291,12 +325,9 @@ export class Extractor {
     const where = opts.where || null;
     // [sqlmap 对标] 行范围导出（--start/--stop）：起始偏移 dumpStart；结束行 dumpStop（绝对，0=不限）。
     // 区间行数 rangeCap 与全量上限 maxRows 取更严者。
-    const _posInt = (v) => {
-      const n = Number(v);
-      return Number.isFinite(n) && n > 0 ? Math.floor(Math.min(n, 1000000)) : 0;
-    };
-    const startRow = _posInt(ctx.config?.dumpStart);
-    const stopRow = _posInt(ctx.config?.dumpStop);
+    // 归一化口径见文件头 posInt（唯一真源，此前此处与 _applySearchLimits 各有一份拷贝）。
+    const startRow = posInt(ctx.config?.dumpStart);
+    const stopRow = posInt(ctx.config?.dumpStop);
     const rangeCap = stopRow > startRow ? stopRow - startRow : null;
     // [P2-2] 版本分支：MySQL<5.7 / MSSQL<2017 走降级查询变体
     const SQ = resolveSysQueries(edb, ctx.dbmsVersion) || SYS_QUERIES[edb];
@@ -729,12 +760,9 @@ export class Extractor {
 
   // 搜索结果 --start/--stop 限制（内部辅助）
   _applySearchLimits(results, opts, ctx) {
-    const _posInt = (v) => {
-      const n = Number(v);
-      return Number.isFinite(n) && n > 0 ? Math.floor(Math.min(n, 1000000)) : 0;
-    };
-    const start = _posInt(opts.start ?? ctx.config?.dumpStart);
-    const stop = _posInt(opts.stop ?? ctx.config?.dumpStop);
+    // 归一化口径复用 posInt（与 dumpData 共用同一份判据，避免两处对同一配置给出不同区间）
+    const start = posInt(opts.start ?? ctx.config?.dumpStart);
+    const stop = posInt(opts.stop ?? ctx.config?.dumpStop);
     let r = results;
     if (start > 0) r = r.slice(start);
     // stop 必须大于 start：否则 stop-start 为负，slice(0, 负数) 会误删末尾元素而非返回空
@@ -753,37 +781,19 @@ export class Extractor {
   //   (b) 等接线时接口就位。真行为保证在 dumpFormat.test.js（直接测实现，27 例），
   //   不在这层委托上。
 
-  /**
-   * 将提取的行数据格式化为指定格式（对标 sqlmap --dump-format）。
-   * @param {object[]} rows 行数组
-   * @param {string[]} [columns] 列名
-   * @param {string} [table] 表名（仅 sql 格式使用）
-   * @param {string} [format] 'json'(默认,返回原始数组) | 'csv' | 'sql' | 'html'
-   * @returns {any} json 返回原始数组，其余返回字符串
-   */
-  formatDumpData(rows, columns, table, format = 'json') {
-    return formatDumpData(rows, columns, table, format);
-  }
-
-  // CSV 格式化：表头 + 行数据，逗号分隔，含逗号/引号/换行的字段用双引号包裹
-  _formatCsv(rows, columns) {
-    return formatCsv(rows, columns);
-  }
-
-  // CSV 单元格转义：含逗号/引号/换行/首尾空格的字段用双引号包裹，内部引号双写
-  _escapeCsvCell(v) {
-    return escapeCsvCell(v);
-  }
-
-  // SQL INSERT 语句格式化：INSERT INTO table (cols) VALUES (vals);
-  _formatSql(rows, columns, table) {
-    return formatSql(rows, columns, table);
-  }
-
-  // HTML 表格格式化：<table><thead>...<tbody>...，所有值做 HTML 实体编码
-  _formatHtml(rows, columns) {
-    return formatHtml(rows, columns);
-  }
+  // [DEAD-CODE 2026-10-05] 此处原有 5 个薄委托：formatDumpData / _formatCsv /
+  //   _escapeCsvCell / _formatSql / _formatHtml。已删除。
+  // 依据（全仓 grep 核实，非推测）：
+  //   · 唯一调用形态是 `this.formatDumpData(...)`，全仓（含 src/、e2e/、server/tests/）
+  //     除本文件注释外**零命中**；
+  //   · 所有测试都直接 import dumpFormat.js 的函数本身（dumpFormat.test.js、
+  //     dumpFormat.formula.test.js），不经过类方法。
+  // 真正的实现与它的 JSDoc 契约（全在 dumpFormat.js）：'json' 返回原始数组、
+  //   空数据返回格式骨架、未知 format 抛错不静默回落。
+  // 为什么该删而不是留：薄委托的唯一价值是"未来会有人用"。而它同时制造了一个
+  //   **会漂移的接口**——委派签名与实现签名是两处独立声明，改一边不会编译报错；
+  //   事实上这 5 个方法里 formatDumpData 自己又写了一遍 `format = 'json'` 默认值，
+  //   与 dumpFormat.js 的默认值构成第二处副本（当前恰好相同，但无任何机制保证它）。
 
   // 并发多表拖库：同库内表级并发（受 dumpConcurrency 约束），单表失败不影响其他表
   async dumpDatabase(ctx, db, opts = {}) {
@@ -860,13 +870,21 @@ export class Extractor {
   }
 
   // ===== 盲注/时间/内联提取：实现已抽至 engine/blindExtractor.js（薄包装保持调用方零改动） =====
-  async extractBoolean(ctx, expr) { return extractBooleanImpl(this, ctx, expr); }
-  async extractProof(ctx) { return extractProofImpl(this, ctx); }
-  async extractTimeProof(ctx) { return extractTimeProofImpl(this, ctx); }
-  async extractTime(ctx, expr) { return extractTimeImpl(this, ctx, expr); }
-  async calibrateTimeSleep(ctx, base, condFn) { return calibrateTimeSleepImpl(this, ctx, base, condFn); }
-  async extractInline(ctx, sql) { return extractInlineImpl(this, ctx, sql); }
-  async extractInlineProof(ctx) { return extractInlineProofImpl(this, ctx); }
+  //
+  // [2026-10-05] 每个入口先 _resetLimitHit()。原因见构造函数里 _limitHit 的说明：
+  // 本实例被 ScanManager 复用（跨注入点/多轮提取），"请求上限已命中"是**本次提取**的
+  // 终止信号，不复位会让第一次撞上限后，后续所有注入点的 worker 直接 break，
+  // 表现为"后面的注入点静默提不出数据"且无任何报错。
+  // 放在薄包装这一层而非各实现内部，是为了让"进入提取即复位"成为一条**结构上无法绕过**的规则：
+  // 实现函数（blindExtractor.js 里的 *Impl）是被抽出去的纯函数，将来若有人直接在别处
+  // 调 *Impl，包装层的复位不会生效；因此 *Impl 本身不得被当作对外入口使用。
+  async extractBoolean(ctx, expr) { this._resetLimitHit(); return extractBooleanImpl(this, ctx, expr); }
+  async extractProof(ctx) { this._resetLimitHit(); return extractProofImpl(this, ctx); }
+  async extractTimeProof(ctx) { this._resetLimitHit(); return extractTimeProofImpl(this, ctx); }
+  async extractTime(ctx, expr) { this._resetLimitHit(); return extractTimeImpl(this, ctx, expr); }
+  async calibrateTimeSleep(ctx, base, condFn) { this._resetLimitHit(); return calibrateTimeSleepImpl(this, ctx, base, condFn); }
+  async extractInline(ctx, sql) { this._resetLimitHit(); return extractInlineImpl(this, ctx, sql); }
+  async extractInlineProof(ctx) { this._resetLimitHit(); return extractInlineProofImpl(this, ctx); }
 }
 
 export default Extractor;

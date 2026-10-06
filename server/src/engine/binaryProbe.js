@@ -47,6 +47,37 @@ export async function binaryProbe(probe, {
   lo, hi, judge, shape, trackReliable = false, direction = 'gt',
   shapeTrueAt, shapeFalseAt,
 }) {
+  // ── [2026-10-06 修] 空区间（lo > hi）必须与「顶到上界」区别对待 ──────────
+  //
+  // 原来这里直接进 runOnce，而 runOnce 是：
+  //     let a = lo, b = hi, ans = lo - 1;
+  //     while (a <= b) { ... }        ← lo > hi 时循环体一次都不执行
+  //     return { n: ans };            ← ans = lo - 1
+  //
+  // 当 lo = hi + 1 时 ans = lo - 1 = hi，于是外层的
+  //     if (r.n < hi) return { ...r, capped: false };
+  // 判定为假 ⇒ **"一个探测点都没做过"被报告成"顶到上限、判据可能已失效"**，
+  // 进而触发第 2 段形态自检，多发 probe(lo)/probe(hi) 两个请求 ——
+  // 而 probe(lo) 里的 lo > hi，根本不是合法候选点，拿它当"判据为真"的基准
+  // 在语义上就是错的。
+  //
+  // 实测（columnGuess 传越界 maxCols，两个调用点都可达）：
+  //     maxCols=0   ⇒ 探测序列 [1, 0]    ← 后两个正是 endShape 的 lo/hi
+  //     maxCols=-1  ⇒ 探测序列 [1, -1]
+  //     maxCols=NaN ⇒ 探测序列 [1, NaN]
+  //     blindExtractor 的 range.lo ?? 0 / range.hi ?? 255 同理
+  //
+  // 为什么要当成缺陷而不只是浪费：调用方约定 capped = "顶到上界且备份判据
+  // 不可区分 ⇒ 判据已失效，调用方须放弃"。columnGuess 是 `if (capped) return null`
+  // —— 列数直接变 null，UNION 放弃。而空区间**根本没探测过**，判据既没被
+  // 验证也没失效，却因这个假 capped 被当成"失效"处理 ⇒ 无谓放弃一条本可
+  // 走通的路径。返回的 n = lo - 1 还恰好等于 hi，下游无法分辨真假。
+  //
+  // 修法：空区间直接返回 n = lo - 1 且 capped=false（该值本就表示"没找到"，
+  // lo===hi 的单点区间不受影响 —— 它会正常探测一次并按真顶界处理）。
+  if (!(lo <= hi)) {
+    return { n: lo - 1, reliable: false, capped: false };
+  }
   const runOnce = async (backupShape) => {
     let a = lo;
     let b = hi;

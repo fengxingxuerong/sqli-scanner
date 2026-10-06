@@ -287,29 +287,16 @@ export const DB_VERSION = {
 
 export const DBMS_LIST = ['MySQL', 'PostgreSQL', 'SQL Server', 'SQLite', 'Oracle', 'MariaDB', 'TiDB', 'DM8', 'ClickHouse', 'DB2', 'Sybase', 'Firebird', 'Informix', 'H2', 'Access', 'HSQLDB', 'Derby', 'MonetDB'];
 
-// DBMS 验证状态标注（诚实标注：4 真实验证 + 14 最小适配待验证）
-// 真实验证：经过真实 DBMS 引擎的靶场场景验证
-// 最小适配：有 payload 模板但未经真实 DBMS 验证，方言可能有偏差
-export const DBMS_VERIFIED = {
-  MySQL: 'verified',        // 真实 MySQL 8.0.28（e2e/real-mysql-lab 9/9：union/error/boolean/time/stacked 全通道 + 安全点零误报）
-  PostgreSQL: 'verified',   // PGlite WASM 真实验证（PG 18.3，e2e/real-world-lab 9/9）
-  SQLite: 'verified',       // sql.js WASM 真实验证
-  MariaDB: 'verified',      // MariaDB 便携真实验证
-  'SQL Server': 'unverified', // 有模板，无真实 MSSQL 验证
-  Oracle: 'unverified',     // 有模板，无真实 Oracle 验证
-  TiDB: 'unverified',       // 复用 MySQL 模板，无真实 TiDB 验证
-  DM8: 'unverified',        // 复用 Oracle 模板，无真实 DM8 验证
-  ClickHouse: 'unverified',
-  DB2: 'unverified',
-  Sybase: 'unverified',
-  Firebird: 'unverified',
-  Informix: 'unverified',
-  H2: 'unverified',
-  Access: 'unverified',
-  HSQLDB: 'unverified',
-  Derby: 'unverified',
-  MonetDB: 'unverified',
-};
+// [2026-10-05 删除 DBMS_VERIFIED] 原先此处有一份 DBMS 验证状态标注，声称"诚实标注：
+// 4 真实验证 + 14 最小适配"，并把 'SQL Server' 与 Oracle 标成 unverified。删除理由有二：
+//   ① **与唯一事实来源冲突且已过期**：server/src/engine/dbmsEvidence.js 自称"单一事实来源"，
+//      已把 SQL Server（e2e/mssql-lab，SQL Server 2022 Express 真机）与
+//      Oracle（e2e/oracle-lab，Oracle 26ai Free 真机）升级为 verified。
+//      两份事实副本并存且互相矛盾，正是本仓反复治理的"同一事实多份副本"病灶。
+//   ② **全仓无人引用**：server/src、server/tests、scripts、e2e 均无导入，属预留未接线。
+// 保留一个没人用、还会骗人的副本，比删掉更糟 —— 后者会让读代码的人以为
+// "SQL Server 没真实验证"，而仓库里明明有真机靶场报告。
+// 需要该信息时请一律从 dbmsEvidence.js 的 DBMS_EVIDENCE 取值（含 evidence 路径）。
 
 // 各 DBMS 支持的技术（Oracle 不支持时间盲注，故 time=false）
 // oob：带外通道支持标记（MySQL/MariaDB/PostgreSQL/SQL Server/Oracle 支持，SQLite 无原生带外故 false）

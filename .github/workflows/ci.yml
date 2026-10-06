@@ -58,6 +58,18 @@ jobs:
       # 新增任何一项即失败——防止 httpClient（原 1943 行）这类上帝对象重新长回来。
       - run: node scripts/arch-guard.mjs
         name: 架构门禁（体积 / 循环依赖 / console）
+      # [ADD 2026-10-05] 嵌套深度门禁：arch-guard 管体积（行数+字节），但没有门禁管**嵌套深度**。
+      # 两者独立：200 行的文件也能套 8 层 if/for/try，而「改一个分支忘了另一分支」这类 bug
+      # 在深嵌套里发生率显著更高——因为「这个 if 属于哪个循环」要靠数缩进才能确认。
+      # 检测编排类代码（switch→case→for→try→if）天然易堆到 8~10 层，当前最深 10 层
+      # （extractScope.js）。存量 32 个 ≥7 层的文件登记在 docs/_nesting-baseline.json，
+      # **只许持平或变浅**；新文件超过软上限 7 即失败。
+      # 度量是词法精确的（跳过字符串/模板串/注释后再计深度）——本仓大量使用 `${db}.${t}`
+      # 这类模板串，朴素数 '{' 会虚高（实测 10 层被报成 11）。
+      - run: node scripts/nesting-guard.mjs --selftest
+        name: 嵌套深度门禁自证（判据不空转）
+      - run: node scripts/nesting-guard.mjs
+        name: 嵌套深度（存量只许持平或变浅）
       # [P0-ADD 2026-09-20] 引用完整性门禁：本文件 / package.json / e2e 靶场注册表里
       # 写的本地入口路径，必须真实存在。
       # 起因（同一天的实测教训）：本 job 之外的 tamper-waf-matrix job 曾写
@@ -120,6 +132,26 @@ jobs:
       # 复现：npm run readme:check（自证：node scripts/readme-consistency.mjs --selftest）
       - run: node scripts/readme-consistency.mjs
         name: README 内部口径自洽（方言分层三处表述）
+      # [ADD 2026-10-05] 版本号三处互校门禁。同族事故：版本号手工维护在 package.json /
+      #   tauri.conf.json / Cargo.toml 三处且**无任何门禁** ⇒ 实测 Cargo.toml 孤悬 1.0.0，
+      #   而另两处是 1.1.0。后果不是"不好看"，而是**桌面安装包对外报的版本与 npm 包对不上**，
+      #   用户装到的壳比 Web 前端旧一个小版本，且没有任何地方提示。
+      # 形状与 facts-sync / artifact-drift 完全一致（同一事实多份副本，缺一道互校），
+      #   故按同一规格接线：既跑检查，也跑 selftest 自证判据非空转。
+      # 复现：npm run version:check（自证：node scripts/version-sync.mjs --selftest）
+      - run: node scripts/version-sync.mjs
+        name: 版本号三处一致（package.json / tauri.conf.json / Cargo.toml）
+      - run: node scripts/version-sync.mjs --selftest
+        name: 版本号判据自证（对合成漂移样本必须有反应）
+      # [ADD 2026-10-05] 发布前一致性门禁 + Docker compose 的 HOST 静态核对。
+      #   前者判「即将发布的东西对不对得上」（版本三处一致 / 工作区干净 / tag↔版本一致），
+      #   属发布入口的收口，与 test/lint 无关，单独一步便于失败时定位。
+      #   后者针对本轮实测出的缺陷：compose 曾写 HOST=127.0.0.1，而 server/index.js 是
+      #   `app.listen(PORT, HOST)` ⇒ 容器内只绑回环，端口映射的流量到不了该 socket；
+      #   而 healthcheck 打的是容器内 127.0.0.1（照常通过）⇒ compose 报 healthy 但外部不可达。
+      #   该判据静态核对配置文本，无需 docker（放在 lint job，与 ci-local 的 docker 排除无关）。
+      - run: node scripts/release-check.mjs --selftest
+        name: 发布门禁判据自证（对合成分支必须有反应）
       # [P1-ADD 2026-09-19] CRS 执行器保真度门禁。本仓所有 WAF 绕过数字都出自**自实现的
       # SecRule 执行器**（crs-engine.js）——执行器若与官方规则不等价，那些数字全部无意义。
       # 判据不来自我们自己：跑 CRS 项目官方回归集（942 是 805 条带「该拦/不该拦」期望的用例），
@@ -142,6 +174,10 @@ jobs:
       # 清单快照 upstream-sqlmap-tamper.json 已入库 → 无网络也能跑；缺失集合走只减不增基线。
       - run: npm run tamper:parity
         name: tamper 对齐 sqlmap 官方清单
+      # [2026-10-06 竞品吸收批次] 名字对上 ≠ 行为对上：本仓 doctest 是自写的，翻译错了能自洽。
+      # 这里用上游 docstring 里的 `>>> tamper(输入)/期望输出`（tag 1.10.10，快照已入库）反测我们。
+      - run: npm run tamper:examples
+        name: tamper 语义对齐上游官方示例
       # [P1-ADD 2026-09-20] 红队靶点清单一致性：redteam-lab 的检出率/误报结论建立在一条
       # **真值链**上（run-scan 决定"扫哪些" ↔ selftest 决定"标定哪些" ↔ ground-truth.json 真值表），
       # 而这三份清单**各自手写**、彼此之间没有任何判据。不同步的后果是**不对称**的：

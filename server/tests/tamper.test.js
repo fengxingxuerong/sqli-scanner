@@ -67,16 +67,35 @@ const ALL_NAMES = [
   'keyword2decimal', 'string2binary', 'string2octal', 'string2decimal',
   'space2unicode', 'space2widechar', 'nonempty', 'unparen', 'unhtmlencode',
   'num2hex',
-  // v24 新增 20 个（补齐 sqlmap 官方 tamper 全集，内置总数 205 → 225）
+  // v24 新增 20 个（补齐 sqlmap 官方 tamper 全集；注释里的「205 → 225」同样已失实，
+  // 当前真值以运行时为准，见 tamperPluginCount.guard.test.js）
   'blindbinary', 'castprefix', 'dollarquote', 'ord2ascii', 'overlongutf8more',
   'quote2ltat', 'sign', 'infoschema2innodb', 'mssqlnosemicolon', 'odbcbrace',
   'oraclequote', 'luanginx', 'luanginxmore', 'mid2leftright',
   'substring2leftright', 'sleep2getlock', 'sleep2hex', 'uniontable',
   'unionvalues', 'unionvaluesrow',
+  // [2026-10-05 补齐] 此前遗漏的 10 个 —— 实测「目录 229 / ALL_NAMES 219」。
+  // 遗漏的危害不是少测一次：原断言是「对 ALL_NAMES 里每个名字 get(n) 非空」，
+  // 只保证"列出的都在"，**不保证"该在的都列出了"** ⇒ 新插件忘加进来时该测试照样全绿，
+  // 而"这条新插件到底测过没有"被静默跳过。keywordSplit / hexliterals / safedog
+  // 都是绕 WAF 的主力插件，此前不在基线覆盖内。
+  'dash2hash', 'halfversionedmysql', 'hexliterals', 'keywordinterleave',
+  'keywordSplit', 'modsecurityversionedkeywords', 'safedog',
+  'scalarselectinline', 'yundun', '_360waf',
 ];
 
 test('全部内置 tamper 已注册', () => {
   for (const n of ALL_NAMES) assert.ok(tamperRegistry.get(n), `未注册: ${n}`);
+});
+
+test('[反向] 已注册的插件都在 ALL_NAMES 里（防止新增插件漏登记）', () => {
+  // 上面那条断言方向是「列表 → 注册表」，单靠它抓不到"新插件忘了加进列表"。
+  // 这条把方向反过来，构成双向对账：新增插件时两处都要更新，否则当场红。
+  // 判据用运行时注册表（真源），不依赖目录扫描 —— 注册表才是"实际可被链引用"的集合。
+  const listed = new Set(ALL_NAMES);
+  const missing = tamperRegistry.list().map((p) => p.name).filter((n) => !listed.has(n));
+  assert.deepEqual(missing, [],
+    `以下插件已注册但未列入 ALL_NAMES（新增插件请补进本列表）：\n  ${missing.join('\n  ')}`);
 });
 
 test('space2plus 空格转 +', () => {
@@ -411,8 +430,12 @@ test('plus2fnconcat: + 拼接转 {fn CONCAT()} 左嵌套', () => {
     'SELECT {fn CONCAT({fn CONCAT(CHAR(113),CHAR(114))},CHAR(115))} FROM DUAL');
 });
 
-test('equaltorlike: = 转 RLIKE', () => {
-  assert.equal(tamperRegistry.get('equaltorlike').transform('1=1'), '1RLIKE1');
+test('equaltorlike: = 转 RLIKE（两侧补空格，直换产出非法 SQL）', () => {
+  // [2026-10-06 竞品吸收批次] 此断言原先钉的是 **`1RLIKE1`** —— 上游 doctest（tag 1.10.10）
+  //   给的是 `1 RLIKE 1`；`idRLIKE1` 不是合法 SQL，等于把缺陷钉成了期望。
+  //   兄弟件 equaltolike 早在 [T4] 就改成了带空格形态，本件当时漏改。
+  assert.equal(tamperRegistry.get('equaltorlike').transform('1=1'), '1 RLIKE 1');
+  assert.equal(tamperRegistry.get('equaltorlike').transform('a>=1'), 'a>=1'); // 复合运算符保护
 });
 
 test('0eunion: <数字> UNION 转 <数字>e0UNION', () => {

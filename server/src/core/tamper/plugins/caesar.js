@@ -1,5 +1,7 @@
 // Caesar 密码编码：将字符串字面量中的字母用 Caesar 移位编码（对标 sqlmap caesar.py）
 // 移位量在 1-25 之间随机，通过 CHAR() 函数解码还原
+import { readSqlLiteral, isQuoteEscaped } from '../quoteScan.js';
+
 export const caesar = {
   name: 'caesar',
   description: 'Caesar 移位编码字符串字面量，绕过 WAF 字符串检测',
@@ -14,25 +16,21 @@ export const caesar = {
     let out = '';
     let inSingle = false, inDouble = false;
     for (let i = 0; i < src.length; i++) {
-      const ch = src[i], prev = src[i - 1];
+      const ch = src[i];
       if (inSingle) {
-        if (ch === "'" && prev !== '\\') { inSingle = false; out += ch; }
+        if (ch === "'" && !isQuoteEscaped(src, i)) { inSingle = false; out += ch; }
         else out += ch;
         continue;
       }
       if (inDouble) {
-        if (ch === '"' && prev !== '\\') { inDouble = false; out += ch; }
+        if (ch === '"' && !isQuoteEscaped(src, i)) { inDouble = false; out += ch; }
         else out += ch;
         continue;
       }
       if (ch === "'") {
         inSingle = true;
         let str = '';
-        for (let j = i + 1; j < src.length; j++) {
-          const c = src[j];
-          if (c === "'" && src[j - 1] !== '\\') { i = j; break; }
-          str += c;
-        }
+        { const lit = readSqlLiteral(src, i, "'"); if (!lit.closed) { out += src.slice(i); return out; } i = lit.end; str = lit.body; }
         const encoded = str.split('').map(c => {
           if (/[a-zA-Z]/.test(c)) {
             const code = c.charCodeAt(0);
@@ -45,11 +43,7 @@ export const caesar = {
       } else if (ch === '"') {
         inDouble = true;
         let str = '';
-        for (let j = i + 1; j < src.length; j++) {
-          const c = src[j];
-          if (c === '"' && src[j - 1] !== '\\') { i = j; break; }
-          str += c;
-        }
+        { const lit = readSqlLiteral(src, i, '"'); if (!lit.closed) { out += src.slice(i); return out; } i = lit.end; str = lit.body; }
         const encoded = str.split('').map(c => {
           if (/[a-zA-Z]/.test(c)) {
             const code = c.charCodeAt(0);

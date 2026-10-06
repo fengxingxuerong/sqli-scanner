@@ -9,6 +9,48 @@ import {
 } from '../../core/statsHelper.js';
 
 /**
+ * 响应体的归一化：**没有 body 就是空响应**（""），不是字符串 "null"/"undefined"。
+ *
+ * [2026-10-06 加] 两份相似度判据（chunkedSimilar / buildDynamicSimilarFn）
+ * 曾各写各的：`String(a ?? '')` 归一为 ""，而 chunkedSimilar 直接读 `a.length`
+ * —— null/undefined 会抛 TypeError。实测 chunkedSimilar(null, 'x') 崩。
+ *
+ * ⚠️ 诚实标注可达性：两个现有调用点（boundary.js:203 / :269）都先经
+ * stripEchoedPayload，它把 null 归一为 ""（实测 stripEchoedPayload(null) === ""），
+ * 故该崩溃**当前不可达**。但 chunkedSimilar 挂在 Detector.prototype 上是
+ * 公共 API，声明了 `{string}` 入参却无运行时防护，与同文件另一份判据
+ * 口径不一致 —— 属防御性缺口，此处一并补齐。
+ *
+ * ⚠️ 不能用 `String(v)`：`String(null) === "null"`（4 字符）会把"缺失"
+ * 误当成一段真实的 4 字符正文去比对。
+ * @param {unknown} v
+ * @returns {string}
+ */
+export function normBody(v) {
+  return v == null ? '' : String(v);
+}
+
+/**
+ * 长度容差判据 —— **单一真源**。
+ *
+ * [2026-10-06 收敛] 原先 chunkedSimilar 与 buildDynamicSimilarFn 各写一份
+ * 逐字相同的 `Math.abs(la-lb) > Math.max(24, Math.max(la,lb)*0.12)`
+ * （仅变量名不同）。实测长度网格 0..200 × 0..200 共 40401 组两种写法逐点
+ * 等价，证明是同一判据的两份实现 —— 改阈值会漏改一处。
+ * 这正是 core/http/ipBytes.js 注释里警告过的形态。
+ *
+ * ⚠️ 阈值 0.12 不是拍脑袋的常数，但 24 是**下限**：
+ * 容差 = max(24, max(la,lb) × 0.12)，只有 max(la,lb) < 200 时才等于 24
+ * （24 / 0.12 = 200）。写守卫时别把它当固定值。
+ *
+ * @returns {boolean} 长度差在容差内
+ */
+export function lenTolerable(la, lb) {
+  if (la === lb) return true;
+  return Math.abs(la - lb) <= Math.max(24, Math.max(la, lb) * 0.12);
+}
+
+/**
  * [P0 导出] 排除动态块的相似判定构建器（独立函数）。
  * 供 Detector.buildDynamicSimilar 与 Extractor 提取阶段（_dynJudge）共用，
  * 保证检测与提取两层的动态内容感知逻辑不漂移。
@@ -19,10 +61,10 @@ export function buildDynamicSimilarFn(baselines) {
   const { dynamicIdx } = dynamicBlockFilter(baselines);
   if (!dynamicIdx || dynamicIdx.size === 0) return null;
   return (a, b) => {
-    const sa = String(a ?? '');
-    const sb = String(b ?? '');
+    const sa = normBody(a);
+    const sb = normBody(b);
     if (sa === sb) return true;
-    if (Math.abs(sa.length - sb.length) > Math.max(24, Math.max(sa.length, sb.length) * 0.12)) return false;
+    if (!lenTolerable(sa.length, sb.length)) return false;
     const ha = chunkHashes(sa);
     const hb = chunkHashes(sb);
     const n = Math.max(ha.length, hb.length, 1);
@@ -80,10 +122,15 @@ export function buildDynamicSimilarGated(baselines, config) {
    * @returns {boolean} 是否判相似
    */
 export function chunkedSimilar(a, b) {
-    if (a === b) return true;
-    const la = a.length;
-    const lb = b.length;
-    if (Math.abs(la - lb) > Math.max(24, Math.max(la, lb) * 0.12)) return false;
+    const sa = normBody(a);
+    const sb = normBody(b);
+    if (sa === sb) return true;
+    const la = sa.length;
+    const lb = sb.length;
+    // 长度容差走 lenTolerable（单一真源，见该函数注释）
+    if (!lenTolerable(la, lb)) return false;
+    // ⚠️ 空值分支未被容差覆盖，不得合并：la=0,lb=5 时长度差 5 ≤ 容差 24
+    // ⇒ 容差判据放行，但这里仍须按"空 vs 非空 = 不相似"收口。
     if (la === 0 || lb === 0) return la === lb;
     if (la > 65536 || lb > 65536) {
       // 大 body 快速路径：首尾各取 256 字符采样；均匹配（同长度时含尾段）→ 判相似（省整串 hash）；
@@ -91,16 +138,16 @@ export function chunkedSimilar(a, b) {
       const m = Math.min(la, lb);
       const head = 256;
       const tail = 256;
-      const headOk = a.slice(0, head) === b.slice(0, head);
-      const tailOk = la !== lb || a.slice(m - tail) === b.slice(m - tail);
+      const headOk = sa.slice(0, head) === sb.slice(0, head);
+      const tailOk = la !== lb || sa.slice(m - tail) === sb.slice(m - tail);
       if (headOk && tailOk) return true;
-      return chunkSimilarity(a, b) >= 0.85;
+      return chunkSimilarity(sa, sb) >= 0.85;
     }
     const m = Math.min(la, lb);
     let common = 0;
-    while (common < m && a[common] === b[common]) common++;
+    while (common < m && sa[common] === sb[common]) common++;
     if (common >= m * 0.85) return true;
-    return chunkSimilarity(a, b) >= 0.85;
+    return chunkSimilarity(sa, sb) >= 0.85;
   }
 
   /**

@@ -69,7 +69,29 @@ test('组间稳定差异：真组内部不一致（偶尔抖动） → 不命中
 });
 
 // —— 配置开关 ——
-test('配置 boolStableDiff=false 时 legacy 路径不进入二级判据（判定形式被跳过）', () => {
-  // 仅验证默认值开启，关闭语义由 detect() 的 `ctx.config?.boolStableDiff !== false` 门控保证
-  assert.equal(undefined, undefined); // 占位：门控在 detect 内联，单测聚焦 _stableDiffJudge 本身
+// [2026-10-05] 原此处是空测试：`assert.equal(undefined, undefined); // 占位` ——
+// 它绿着但什么都没验证，而注释自陈"门控在 detect 内联"恰好说明**门控本身无人验证**。
+// 门控散在 BooleanBlindDetector 的三处（_stableDiff 路径 262 行、legacy 差异路径 421 行、
+// 411 行的时间探测路径 611 行）。三处任一被漏改，用户设 boolStableDiff=false 就会
+// 在某条路径上照旧进入二级判据 ⇒ "关闭开关"行为不一致，且无报错。
+// 本测试不试图驱动完整 detect（三处都依赖真实请求/响应），改为**守卫门控本身存在且写法一致**：
+// 判据是"三处都用 !== false 的显式关闭语义"，这正是"只认 false 为关闭、其余默认开"的实现。
+test('配置 boolStableDiff=false 门控：detect 内三处判定写法一致（防漏改致开关失效）', async () => {
+  const { readFileSync } = await import('node:fs');
+  const src = readFileSync(new URL('../src/engine/detectors/BooleanBlindDetector.js', import.meta.url), 'utf8');
+  const gates = src.match(/ctx\.config\?\.boolStableDiff\s*!==\s*false/g) || [];
+  assert.ok(gates.length >= 3,
+    `boolStableDiff=false 的门控应至少出现 3 处（_stableDiff / legacy 差异 / 时间探测三条路径），实际 ${gates.length} 处。\n` +
+    '若确有理由减少，请同步修改本守卫并写明原因；否则说明某条路径漏了开关。');
+  // 反向：不得出现把 true 解读为"关闭"的写法（如 === true 才启用、|| false 兜底）
+  assert.ok(!/boolStableDiff\s*===\s*true/.test(src),
+    '不得用 `=== true` 判定启用：null/undefined 会被误判为关闭 —— 开关语义应是"仅显式 false 才关"');
+  assert.ok(!/boolStableDiff\s*\|\|\s*false/.test(src),
+    '不得用 `|| false` 兜底：空串等假值会被静默当成关闭');
+});
+
+test('配置 boolStableDiff 默认值为 true（关闭需显式表达）', async () => {
+  const { defaults } = await import('../src/config/defaults.js');
+  assert.equal(defaults.boolStableDiff, true,
+    '默认必须开启（漏报根治的判据），关闭只能由用户显式设 false');
 });

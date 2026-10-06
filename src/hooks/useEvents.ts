@@ -23,6 +23,24 @@ import i18n from '../i18n';
 // P1-3：重连退避上限（连续失败次数；每次成功连接后归零）
 const MAX_RETRIES = 5;
 
+// [P0-FIX 2026-10-06] 判定「这次连接算不算成功」的稳定期阈值（毫秒）。
+//
+// 原实现在 onopen 里**无条件** `retryCount = 0`。这在「先断线、后恢复」时是对的，
+// 但服务端「接受连接后立刻断开」时会失效 —— 会话已回收、后端不再持有该扫描时
+// `/scan/:id/events` 很可能就是这个形态。此时每次尝试都是
+// onopen（归零）→ onerror（retryCount=1）⇒ **永远达不到 MAX_RETRIES**：
+//
+//     实测状态机（现状逻辑，观察 60 次尝试）：仍在重连，从不终止
+//     ⇒ 无限重连、UI 永久停在 running、**没有任何报错**
+//
+// 而这恰恰是最需要报错的那种故障。
+//
+// 修法：连接**稳定存活 STABLE_MS 后**才把计数归零。短暂抖动（< 阈值）
+// 不清零，退避照常累加 ⇒ 第 6 次必定置 error 并提示用户。
+// 阈值取 3s：既跨得过一次网络抖动（典型 < 1s），又短到不会让真正的长连接
+// 被误判为失败（扫描进度事件持续流入，不存在 3s 静默）。
+const STABLE_OPEN_MS = 3000;
+
 // SSE 订阅 Hook：订阅指定扫描的实时进度事件并写入 store
 export function useEvents(scanId: string | null) {
   // P1-4：仅订阅稳定 action 引用（zustand create() 创建一次后引用恒定，选择器不触发重渲染）
@@ -66,6 +84,7 @@ export function useEvents(scanId: string | null) {
     let disposed = false;
     let es: EventSource | null = null;
     let backoffTimer: number | null = null;
+    let stableTimer: number | null = null;
     let retryCount = 0;
     let firstOpen = true;
     // P2-SSE：已收到的最大事件序号（跨重连保留），0 表示从头订阅
@@ -136,7 +155,17 @@ export function useEvents(scanId: string | null) {
 
       current.onopen = () => {
         if (es !== current) return; // 已被替换/关闭
-        retryCount = 0;
+        // [P0-FIX 2026-10-06] 不在这里无条件归零 —— 等连接稳定存活 STABLE_OPEN_MS
+        // 再归零（见文件头说明）。若这次连接随即断开，稳定定时器会被 onerror 清掉，
+        // retryCount 照常累加，于是「连上又断」的形态也能在第 6 次终止。
+        if (stableTimer !== null) {
+          window.clearTimeout(stableTimer);
+          stableTimer = null;
+        }
+        stableTimer = window.setTimeout(() => {
+          stableTimer = null;
+          if (es === current) retryCount = 0; // 稳定连接确实成立
+        }, STABLE_OPEN_MS);
         if (!firstOpen) {
           // 非首次打开 = 重连成功：对账，可能补回断线期间错过的终态
           void reconcile();
@@ -234,6 +263,11 @@ export function useEvents(scanId: string | null) {
         if (es !== current) return; // 旧实例的迟到回调（当前连接已被替换/关闭），忽略
         es?.close();
         es = null;
+        // [P0-FIX] 这次连接没能稳定存活 ⇒ 取消待归零的定时器，让 retryCount 继续累加
+        if (stableTimer !== null) {
+          window.clearTimeout(stableTimer);
+          stableTimer = null;
+        }
         retryCount += 1;
         if (retryCount > MAX_RETRIES) {
           const cur = useScanStore.getState();
@@ -264,6 +298,11 @@ export function useEvents(scanId: string | null) {
       if (backoffTimer !== null) {
         window.clearTimeout(backoffTimer);
         backoffTimer = null;
+      }
+      // [P0-FIX] 同理清理稳定期定时器：组件卸载后它再触发就成了一次无主写入
+      if (stableTimer !== null) {
+        window.clearTimeout(stableTimer);
+        stableTimer = null;
       }
     };
   }, [scanId, addEvent, setStatus, setReport, clearEvents, saveScanToHistory, setWafSuggestion, clearWafSuggestion]);

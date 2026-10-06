@@ -71,8 +71,13 @@ export class StackedDetector extends Detector {
     const baseReqs = [];
     for (let i = 0; i < baseSamples; i++) baseReqs.push(this.buildRequest(target, point, orig));
     const baseResps = await this.sendConcurrent(httpClient, ctx, baseReqs, { timeoutMs: baseTimeoutMs }, baseSamples);
+    // [2026-10-05 修] 基线统计也必须滤掉截断响应。
+    // 截断的基线样本耗时往往偏长（传输了 maxBytes 才停），混进中位数会把
+    // baselineMs 抬高 → effectiveThreshold 跟着抬高 → 真实延迟样本够不到阈值
+    // ⇒ **漏报**。与下面样本筛选那道校验是同一个理由的两面：
+    // 截断响应对延迟判定既不能当证据，也不能当水位。
     const baseElapsed = baseResps
-      .filter((r) => !r.__error && r.resp != null)
+      .filter((r) => !r.__error && r.resp != null && !this.unusableOf(r.resp))
       .map((r) => r.__elapsed)
       .sort((a, b) => a - b);
     const baselineMs = baseElapsed.length
@@ -146,6 +151,21 @@ export class StackedDetector extends Detector {
       for (let i = 0; i < n; i++) {
         const r = resps[i] || {};
         if (r.__error || r.resp == null) continue; // 超时/网络错误：未触发延迟
+        // [2026-10-05 修] 截断响应不得计入延迟证据。
+        // 原先只有上面一道"网络失败 / 无响应"把关，`resp` 非空就照收。
+        // 但**响应体被截断**（__meta.truncated，判据见 egressOpts.isTruncatedResponse）
+        // 的样本同样"耗时够长 + resp 非空"—— 而这在堆叠注入上是高频现象，不是边角：
+        // 注入真生效后常返回超大结果集，被 maxBytes 砍断。
+        // 实测（tests/stackedTruncatedResponse.test.js，修前）：
+        //   基线 29ms、注入样本 2s 且全部截断
+        //     → vulnerable=true，证据「连续 5/5 次响应延迟 ≥ 1500ms」
+        // 一次不可信的慢响应被当成了注入证据 ⇒ 误报。
+        //
+        // ⚠️ 这里只挡截断、**不挡空响应体和 5xx**：实测 isUnusableResponse 对
+        // {data:''} 与 {status:500} 都判 false —— 注入生效但查询 0 行、
+        // 服务端处理完才回包都是**正常业务响应**，在延迟通道上完全可用。
+        // 一并毙掉会把真实的延迟注入判成未触发，反而漏报（契约-3 守住这条）。
+        if (this.unusableOf(r.resp)) continue;
         if (r.__elapsed >= effectiveThreshold) {
           stable++;
           matchedPayloads.push(payloads[i]);

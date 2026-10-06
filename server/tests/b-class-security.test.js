@@ -1,6 +1,7 @@
 // B 类安全收尾修复测试（⑧~⑫）
 //
 // ⑧ DNS OOB qname 不校验 dnsDomain → oobReceiver 校验 qname 归属
+// ⑧-bis DNS OOB token 无白名单 → 与 HTTP 通道共用同一份判据（2026-10-05 加固）
 // ⑨ requestFileParser 三缺口 → https 推断 + POST body 参数 + 无 HTTP 版本
 // ⑩ logger 脱敏三缺口 → private_key/access_key + Token/JWT scheme + x-api-key 头名
 // ⑪ AI analyst JSON 未校验 → validateAnalysisJson 校验+降级
@@ -8,6 +9,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { oobReceiver } from '../src/core/oobReceiver.js';
 import { redact, redactHeaders } from '../src/core/logger.js';
 import { parseRequestFile } from '../src/core/requestFileParser.js';
@@ -72,6 +74,101 @@ test('8-3) 未配置 dnsDomain 时仍接受所有查询（向后兼容）', () =
 
   assert.equal(oobReceiver._received.size, 1, '未配置 dnsDomain 时应接受所有查询');
   oobReceiver._dnsDomain = ''; // 清理
+});
+
+// ═════════ ⑧-bis DNS OOB token 白名单（2026-10-05 加固）═════════
+//
+// 起因：DNS 通道此前是两条入口里**唯一不做 token 形状校验**的一条 ——
+// HTTP 通道有 `/^[A-Za-z0-9_-]{1,64}$/`，DNS 通道直接把子域标签 receive()。
+// 「一份入口修了、另一份没修」正是本仓反复吃亏的形状（见 ipBytes.js 教训）。
+//
+// 为什么这个测试不能省：它钉的是**判据本身**，不是某个具体输入。
+// 若日后有人把白名单删掉或放宽，下面每条都会红 —— 那正是我们要的。
+
+test('8-4) DNS 通道：非法形状的标签不注册 token（与 HTTP 通道同源判据）', () => {
+  oobReceiver._received.clear();
+  oobReceiver._ipBuckets.clear();
+  oobReceiver._dnsDomain = '';
+
+  // 合法 token 由 nanoid 生成，字母表恒为 A-Za-z0-9_-。
+  // 以下标签字符集不在该字母表内 ⇒ 必然不是本进程签发的 token。
+  //
+  // ⚠️ **不要用点号**做非法样本：qname 本就以 `.` 分隔标签，
+  // `abc.def.example.com` 的首标签是 `abc`（合法），整条查询合法。
+  // 取的是点号之外、确实进不了 nanoid 字母表的字符。
+  for (const bad of ['abc$def', 'abc%20def', 'abc def', 'abc/def', 'abc:def', 'abc\\def', 'abc@def']) {
+    oobReceiver._received.clear();
+    const msg = buildDnsQuery(`${bad}.example.com`, 1);
+    oobReceiver._handleDns(msg, { address: '127.0.0.1', port: 12345 });
+    assert.equal(
+      oobReceiver._received.size, 0,
+      `非法 token "${bad}" 不应被注册（DNS 通道必须与 HTTP 通道同一份白名单）`
+    );
+  }
+  oobReceiver._dnsDomain = '';
+});
+
+test('8-5) DNS 通道：超长标签不注册 token（封死 qname 塞满标签冲 LRU 的面）', () => {
+  oobReceiver._received.clear();
+  oobReceiver._ipBuckets.clear();
+  oobReceiver._dnsDomain = '';
+
+  // RFC 1035 允许单标签 63 字节；白名单限长 64。
+  // 超长者既不是合法 token，也会成为一次无意义的 Map 插入。
+  const tooLong = 'a'.repeat(65);
+  const msg = buildDnsQuery(`${tooLong}.example.com`, 1);
+  oobReceiver._handleDns(msg, { address: '127.0.0.1', port: 12345 });
+
+  assert.equal(oobReceiver._received.size, 0, '超长 token 不应被注册');
+  oobReceiver._dnsDomain = '';
+});
+
+test('8-6) DNS 通道：合法 token 仍全部放行（加固不得误伤 OOB 能力）', () => {
+  oobReceiver._received.clear();
+  oobReceiver._ipBuckets.clear();
+  oobReceiver._dnsDomain = '';
+
+  // nanoid 默认字母表 A-Za-z0-9_- 全域抽样：加固若写窄了，这里必红。
+  // ⚠️ 不含 `_x` / `x_` 这类**以 `_` 开头**的样本 —— `_` 前缀是系统查询过滤
+  // （_acme-challenge 等），在白名单**之前**生效，与本条测的白名单是两道独立的闸。
+  // 下划线出现在非首位时仍属合法（见 a-b_c / x_ / trail-）。
+  for (const ok of ['abc', 'a-b_c', 'A1b2C3', 'x_', 'trail-', '-lead', '0123456789abcdef']) {
+    oobReceiver._received.clear();
+    const msg = buildDnsQuery(`${ok}.example.com`, 1);
+    oobReceiver._handleDns(msg, { address: '127.0.0.1', port: 12345 });
+    assert.equal(oobReceiver._received.size, 1, `合法 token "${ok}" 必须仍被注册`);
+    assert.ok(oobReceiver._received.has(ok), `token 应以原样存入："${ok}"`);
+  }
+  oobReceiver._dnsDomain = '';
+});
+
+test('8-7) DNS 通道：_ 前缀系统查询仍被过滤，且不因白名单而改变顺序', () => {
+  oobReceiver._received.clear();
+  oobReceiver._ipBuckets.clear();
+  oobReceiver._dnsDomain = '';
+
+  // `_` 本身在白名单内（合法 token 可含下划线），因此这条断言的是
+  // **系统查询过滤仍在白名单之前生效** —— 顺序有意为之：系统名不该落进计数与日志。
+  const msg = buildDnsQuery('_acme-challenge.example.com', 1);
+  oobReceiver._handleDns(msg, { address: '127.0.0.1', port: 12345 });
+
+  assert.equal(oobReceiver._received.size, 0, '_ 前缀系统查询不应注册 token');
+  oobReceiver._dnsDomain = '';
+});
+
+test('8-8) 判据不空转：DNS 与 HTTP 两条通道共用同一份白名单（防再次分叉）', () => {
+  // 不 import 内部函数，改用**行为**证明两条入口同源：
+  // 同一个非法 token，HTTP 通道与 DNS 通道必须给出**同样的拒绝结论**。
+  const src = readFileSync(new URL('../src/core/oobReceiver.js', import.meta.url), 'utf8');
+
+  // 只允许出现一处白名单字面量（唯一真源）；出现第二处即已分叉。
+  const literals = src.match(/A-Za-z0-9_-\]\{1,64\}/g) || [];
+  assert.equal(literals.length, 1, `白名单字面量应只出现 1 次（唯一真源），实际 ${literals.length} 次`);
+  assert.ok(/const TOKEN_PATTERN = \/\^/.test(src), '白名单应提为具名常量 TOKEN_PATTERN');
+  assert.ok(/if \(!isValidToken\(firstLabel\)\) return;/.test(src),
+    'DNS 通道必须调用 isValidToken —— 否则两条入口又分叉了');
+  assert.ok(/if \(!isValidToken\(token\)\) \{/.test(src),
+    'HTTP 通道必须调用 isValidToken');
 });
 
 // ═════════ ⑨ requestFileParser 三缺口 ═════════

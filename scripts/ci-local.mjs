@@ -76,6 +76,11 @@ const GATES = [
   { id: 'typecheck', name: 'TypeScript 前后端（= CI 两条类型步骤）', cmd: 'npm run typecheck' },
   { id: 'lint', name: 'ESLint', cmd: 'npm run lint' },
   { id: 'lint', name: '架构门禁（体积/循环依赖/console）', cmd: 'node scripts/arch-guard.mjs' },
+  // 嵌套深度：arch-guard 管体积，但没有门禁管深度。200 行的文件也能套 8 层，
+  // 而「改一个分支忘了另一分支」在深嵌套里发生率显著更高。
+  // 存量登记在 docs/_nesting-baseline.json（只许持平或变浅），新文件超软上限 7 即失败。
+  { id: 'lint', name: '嵌套深度门禁自证（判据不空转）', cmd: 'node scripts/nesting-guard.mjs --selftest' },
+  { id: 'lint', name: '嵌套深度（存量只许持平或变浅）', cmd: 'node scripts/nesting-guard.mjs' },
   // 引用完整性：ci.yml / package.json / run-all.mjs 里写的本地路径必须真实存在。
   // 起因：ci.yml 两个 job 写着不存在的 run.js，又带 continue-on-error → 静默失败、从不拦人，
   // 那两个 job 从未验证过任何东西，靠人工 grep 才发现。这道闸门防的就是同类复发。
@@ -100,6 +105,12 @@ const GATES = [
   // 实测第一例：方言分层的三处表述在 Oracle/MSSQL 升级后只改了两处，概览行残留
   // 「4 种真实 + 11 种模板」→ 对外低估自己，且两个三元组和都等于 18，肉眼看不出破绽。
   { id: 'lint', name: 'README 内部口径自洽（方言分层三处表述）', cmd: 'node scripts/readme-consistency.mjs' },
+  // 发布前一致性：版本三处一致 / 工作区干净 / tag↔版本对应 / compose 的 HOST 不是 127.0.0.1。
+  // 归在 lint 组（纯静态、秒级、无需 docker）——它与"代码自洽"无关，但必须在本地清单里可见，
+  // 否则只剩 CI 才知道；本仓栽过好几次"只在某一份清单里、另一份漏了"。
+  // 注：check 模式会因**本地工作区必然有未提交改动**而红（那是设计如此），故本地清单只跑 selftest；
+  // 真实 check 由 package:mac / package:win 在发布前触发。
+  { id: 'lint', name: '发布门禁判据自证', cmd: 'node scripts/release-check.mjs --selftest' },
   // CRS 执行器保真度：本仓 WAF 数字全部出自自实现 SecRule 执行器（本机无 Docker/Go，跑不了真
   // ModSecurity/Coraza），所以"执行器像不像 CRS"必须有外部真值兜住 —— 这里用 CRS 官方回归集。
   // 不需要 MySQL，故与 lint 同组（真 CI 里也应放在 lint job）。
@@ -112,6 +123,7 @@ const GATES = [
   // tamper 覆盖率同样是对外口径：README 写"覆盖 sqlmap 官方 tamper 全集"，那就对上游清单核一次
   // （清单快照已入库，离线可跑；缺失集合走"只减不增"基线）。
   { id: 'lint', name: 'tamper 对齐 sqlmap 官方清单', cmd: 'npm run tamper:parity' },
+  { id: 'lint', name: 'tamper 语义对齐上游官方示例', cmd: 'npm run tamper:examples' },
   // [DECISION-2026-09-22] e2e 辅助模块单测：决定「红」记到环境还是代码头上，判错代价不对称。
   // e2e/ 下的 *.test.mjs 不在 server/tests / src/tests 的发现范围里 —— 不接线就等于没写。
   // 必须用 glob：Node 的 `--test <目录>/` 会把目录当模块 require（实测 1 fail），不是扫描目录。

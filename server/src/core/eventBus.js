@@ -39,11 +39,27 @@ const SSE_REPLAY_MAX = (() => {
 // 全局单调事件序号：SSE id 行 + 回放续传游标
 let seqCounter = 0;
 
+// [2026-10-05] 回放缓冲从「any 挂到 emitter 实例上」改为 WeakMap 独立持有。
+//
+// 为什么改：原实现是 `/** @type {any} */ (em)._replayBuffer = []` —— 把自有状态动态
+// 挂到 Node 内建的 EventEmitter 实例上，两处都要逃逸类型检查（写入点 any、读取点也 any）。
+// 读取侧还有 `if (buf) {...}`：一旦缓冲缺失就**静默跳过**（这是当初加这个 if 的原因——
+// 因为类型上它就可能是 undefined），表现是"断线重连拿不到回放"，且没有任何线索。
+//
+// 为什么 WeakMap 能让问题消失：emit/create 的配对关系已由代码结构保证（两个真实入口
+// ScanManager.js:149 与 sqlmapBridge.js:399 都先 create 再 emit），改为
+//   · create 时必然写入一条记录；
+//   · emit 时 get 返回值类型仍是 `ReplayEvent[] | undefined`，但**结构上不再可能
+//     出现"创建了却没写入"的状态**（不再依赖动态挂载成功）。
+// 读取侧保留 undefined 判断，但语义从"字段可能被动态挂掉"变成"命名空间尚未创建"
+// ——后者在 emit 开头 `if (!em) return;` 已经拦掉了，故此处等价于必非空。
+const replayBuffers = new WeakMap();
+
 export function create(scanId) {
   if (!emitters.has(scanId)) {
     const em = new EventEmitter();
     em.setMaxListeners(100);
-    /** @type {any} */ (em)._replayBuffer = []; // [P3-SSE] 环形回放缓冲，dispose 时随命名空间一起回收
+    replayBuffers.set(em, []); // [P3-SSE] 环形回放缓冲，dispose 时随命名空间一起回收
     emitters.set(scanId, em);
   }
   return emitters.get(scanId);
@@ -56,7 +72,7 @@ export function emit(scanId, type, payload) {
   // [P3-SSE] 写入回放缓冲（超限丢弃最旧），供重连续传
   // [P2-FIX] 批量裁剪：原实现每次 emit 都 splice(0, n) O(n) 头部移位，
   // 高频 emit 时 5000 上限有开销。改为增长到 1.5× 上限才裁剪一次（摊薄 O(n)）。
-  const buf = em._replayBuffer;
+  const buf = replayBuffers.get(em);
   if (buf) {
     buf.push(evt);
     if (buf.length > SSE_REPLAY_MAX * 1.5) buf.splice(0, buf.length - SSE_REPLAY_MAX);
@@ -149,7 +165,7 @@ export function toSSE(scanId, req, res) {
     const TERMINAL_TYPES = new Set(['scan_completed', 'scan_error', 'scan_stopped']);
     let replayed = [];
     try {
-      replayed = (em._replayBuffer || []).filter((e) => e.seq > lastSeq);
+      replayed = (replayBuffers.get(em) || []).filter((e) => e.seq > lastSeq);
       for (const evt of replayed) {
         res.write(`id: ${evt.seq}\ndata: ${JSON.stringify(evt)}\n\n`);
       }
@@ -215,6 +231,19 @@ export function dispose(scanId) {
     emitters.delete(scanId);
   }
   activeConnections.delete(scanId);
+}
+
+/**
+ * 只读访问某命名空间的回放缓冲（供测试断言回放内容用）。
+ * 以前测试靠读 `em._replayBuffer` 这个动态挂上去的内部字段来拿 seq，
+ * 那等于把实现细节写进了断言——内部表示一改，测试就红（本次改为 WeakMap 时即如此）。
+ * 提供这个访问器后，测试断言的是「回放内容」这个契约，而不是「缓冲挂在哪」。
+ * @param {string} scanId
+ * @returns {Array<{seq:number,type:string}>|undefined}
+ */
+export function _peekReplayBuffer(scanId) {
+  const em = emitters.get(scanId);
+  return em ? replayBuffers.get(em) : undefined;
 }
 
 export default { create, emit, toSSE, dispose };

@@ -110,7 +110,12 @@ try {
       // ⚠️ 限速本身仍被专项用例钉住：那条用例起的是**独立实例**（EXPLOIT_RATE_PER_SEC=1），
       //    不受这里影响 —— 放宽配额不会把「限速有效」这条断言一起放掉。
       RATE_LIMIT_SCAN_MAX: '500',
-      RATE_LIMIT_EXPLOIT_MAX: '500',
+      // ⚠️ [2026-10-05 修正] 原先这里是 RATE_LIMIT_EXPLOIT_MAX=500，那个 env 从未生效 ——
+      //   exploit 档的限速由 exploitRoutes.js 的令牌桶实现，读的是 EXPLOIT_RATE_PER_SEC；
+      //   RATE_LIMIT_EXPLOIT_MAX 属于 rateLimit.js 里那个从未被挂载的 exploitLimiter，
+      //   已随死代码清理删除（见 server/src/api/rateLimit.js 末尾注释）。
+      //   即：这一行过去只是"看起来在放宽限流"，实际什么也没做。换成真正生效的 env。
+      EXPLOIT_RATE_PER_SEC: '100',
     },
   });
   console.log(`[env] 引擎 :${engine.port}  靶站 :${labPort}  LLM 假端点 :${llmPort}  token=***`);

@@ -119,6 +119,13 @@ export function buildPocRequest(target, point, payload) {
     req = null;
   }
 
+  // [A2 2026-10-06] 编码态载体必须在交付件里说清：`payload` 字段是**解码后的语义形态**（引擎据此
+  // 构造注入串），而 url/curl/raw 是按同规则重编码后的**线上形态**。不写这一句，读者会拿 payload
+  // 直接发（打不中），并把"引擎做对了"读成"PoC 少了一步"。
+  if (point && point.encoding) {
+    notes.push(`参数值以 ${point.encoding} 传输：payload 是解码后的语义形态，url/curl/raw 已按同规则重新编码，复现请直接用 curl/raw`);
+  }
+
   // 直连模式（对标 sqlmap -d）：没有 HTTP 请求可言，SQL 语句本身就是 PoC。
   if (req && !req.url && req.sql != null) {
     return {

@@ -1,5 +1,7 @@
 // 反转字符串：将字符串字面量反转后通过 REVERSE() 还原（对标 sqlmap reversestring.py）
 // 例如：'admin' → REVERSE('nimda')
+import { readSqlLiteral, isQuoteEscaped } from '../quoteScan.js';
+
 export const reversestring = {
   name: 'reversestring',
   description: '将字符串字面量反转后用 REVERSE() 还原，绕过 WAF 字符串检测',
@@ -13,34 +15,26 @@ export const reversestring = {
     let out = '';
     let inSingle = false, inDouble = false;
     for (let i = 0; i < src.length; i++) {
-      const ch = src[i], prev = src[i - 1];
+      const ch = src[i];
       if (inSingle) {
-        if (ch === "'" && prev !== '\\') { inSingle = false; out += ch; }
+        if (ch === "'" && !isQuoteEscaped(src, i)) { inSingle = false; out += ch; }
         else out += ch;
         continue;
       }
       if (inDouble) {
-        if (ch === '"' && prev !== '\\') { inDouble = false; out += ch; }
+        if (ch === '"' && !isQuoteEscaped(src, i)) { inDouble = false; out += ch; }
         else out += ch;
         continue;
       }
       if (ch === "'") {
         inSingle = true;
         let str = '';
-        for (let j = i + 1; j < src.length; j++) {
-          const c = src[j];
-          if (c === "'" && src[j - 1] !== '\\') { i = j; break; }
-          str += c;
-        }
+        { const lit = readSqlLiteral(src, i, "'"); if (!lit.closed) { out += src.slice(i); return out; } i = lit.end; str = lit.body; }
         out += `REVERSE('${str.split('').reverse().join('')}')`;
       } else if (ch === '"') {
         inDouble = true;
         let str = '';
-        for (let j = i + 1; j < src.length; j++) {
-          const c = src[j];
-          if (c === '"' && src[j - 1] !== '\\') { i = j; break; }
-          str += c;
-        }
+        { const lit = readSqlLiteral(src, i, '"'); if (!lit.closed) { out += src.slice(i); return out; } i = lit.end; str = lit.body; }
         out += `REVERSE("${str.split('').reverse().join('')}")`;
       } else {
         out += ch;

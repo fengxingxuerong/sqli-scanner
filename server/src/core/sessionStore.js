@@ -188,7 +188,12 @@ export class ScanSession {
         await withFileLock(this.filePath, () => fs.writeFile(this.filePath, data, 'utf-8'));
       }
     } catch (e) {
-      // 落盘失败不阻断扫描主流程（与 sqlmap session 容错一致）
+      // 落盘失败不阻断扫描主流程（与 sqlmap session 容错一致）。
+      // [2026-10-05] 补 warn：原先此处**完全静默**，注释只说明了"为什么不阻断"，
+      // 却没说"失败了"。后果是排查时毫无线索 —— 用户报"session 没生效"，
+      // 而日志里连一行都没有，只能靠加临时打印去猜是路径、权限还是磁盘满。
+      // 注意只记路径与消息，绝不记 data 内容（session 里可能含 Cookie/凭据）。
+      logger.warn(`session 落盘失败（已忽略，不阻断扫描）：path=${this.filePath} err=${e?.message ?? e}`);
     }
   }
 

@@ -64,3 +64,60 @@ test('--param-del：自定义分隔符下只替换目标参数，其余参数原
   assert.ok(q.includes('id=2%20AND%201%3D1') || q.includes('id=2 AND 1=1'), '目标参数应被替换为注入值');
   assert.ok(!q.includes('&'), '不应退化回 & 分隔');
 });
+
+// ———— base64url（[A2/D10] 真缺口：标准 base64 要求长度是 4 的倍数且字母表是 +/，
+//      而 URL-safe 形态**常不带补齐**（`?id=dXNlcg`）、字母表是 -_（明文 `~~~` → 线上 `fn5-`）————
+
+test('base64url 正例：无补齐的 URL-safe 值被识别，且解码到语义值', () => {
+  for (const [v, dec] of [['dXNlcg', 'user'], ['dXNlciE', 'user!'], ['fn5-', '~~~'], ['Zm9vYmFy', 'foobar']]) {
+    const r = detectParamEncoding(v);
+    assert.ok(r, `${v} 应被识别`);
+    assert.equal(r.decoded, dec, `${v} 解码结果`);
+  }
+});
+
+test('base64url 反例：真实业务里带连字符/下划线的值一律不得误标（误标=该点打不动）', () => {
+  for (const v of [
+    'order-1024', 'test-1', 'user-name', 'hello-world', 'product-42',
+    'session-abc123', '2024-01-15', 'my_file.txt', 'cafe-babe', '1234567', 'abc-', 'alice',
+  ]) {
+    assert.equal(detectParamEncoding(v), null, `${v} 不应被识别为编码`);
+  }
+});
+
+test('字母表重叠护栏：像标准 base64 的值必须标 base64，不许被 base64url 抢走', () => {
+  // `U0VDUkVULVRPS0VO`（明文 'SECRET-TOKEN'）长度是 4 的倍数、串内没有 +/ ⇒
+  // 两条分支都能解出可打印明文。错标成 base64url 的后果：payload 发出去带 -_，
+  // 严格 base64 解码的服务端直接解坏 ⇒ 一个正常可注入点被打不动（比漏识别贵）。
+  for (const v of ['U0VDUkVULVRPS0VO', 'dXNlcg==', 'MQ==', 'aHR0cHM6Ly9leGFtcGxlLmNvbS9jYWxsYmFjaz9pZD0x']) {
+    assert.equal(detectParamEncoding(v).encoding, 'base64', `${v} 应判 base64`);
+  }
+});
+
+test('encodeForPoint base64url：与线上形态往返一致，且**不带补齐**、不含 +/', () => {
+  assert.equal(encodeForPoint('user', 'base64url'), 'dXNlcg');
+  assert.equal(encodeForPoint('~~~', 'base64url'), 'fn5-');
+  const enc = encodeForPoint("1' AND '1'='1", 'base64url');
+  assert.ok(!/=/.test(enc), `URL-safe 输出不该有补齐：${enc}`);
+  assert.ok(!/[+/]/.test(enc), `URL-safe 输出不该有 + /：${enc}`);
+  assert.equal(Buffer.from(enc, 'base64url').toString('utf8'), "1' AND '1'='1");
+});
+
+test('注入请求链路：base64url 点的线上值是 URL-safe 编码，解码回来正是语义 payload', () => {
+  const target = createTarget({ url: 'http://lab/api?id=dXNlcg', config: {} });
+  const point = { location: 'url', param: 'id', originalValue: 'user', rawValue: 'dXNlcg', encoding: 'base64url' };
+  const req = buildInjectionRequest(target, point, "user' UNION SELECT 1,2,3-- -");
+  const sent = new URL(req.url).searchParams.get('id');
+  assert.ok(!/[+/]/.test(sent), `发出去不该含标准字母表字符：${sent}`);
+  assert.equal(Buffer.from(sent, 'base64url').toString('utf8'), "user' UNION SELECT 1,2,3-- -");
+});
+
+test('刻意保守的下限留痕：短于 4 字符的值不识别（连 `MQ` = base64url 的 1 也不认）', () => {
+  // 这不是漏做：长度 floor 降到 2 会把大量两三个字符的正常值（`a-`、`1_`、`MT`）
+  // 卷进误标面，而误标的代价是"整点打不动"、漏标的代价只是"少一条通道"。
+  // 用断言把这个取舍钉住 —— 要放宽必须先拿出反例集不被误标的证据。
+  assert.equal(detectParamEncoding('MQ'), null);
+  assert.equal(detectParamEncoding('MT'), null);
+  assert.equal(detectParamEncoding('a-'), null);
+});
+

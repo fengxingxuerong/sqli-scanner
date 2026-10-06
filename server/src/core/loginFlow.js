@@ -25,13 +25,33 @@ const USER_FIELD_RE = /^(user(name)?|login|log|email|account|acct|mail|uid|nick(
 const MAX_HIDDEN = 20;
 /** hidden 字段值截断（csrf token 不会太长） */
 const MAX_HIDDEN_VALUE = 512;
+/**
+ * input 采集硬上限（防恶意页面塞爆：正则扫描 + 属性解析都要付出代价）。
+ *
+ * [2026-10-06 修] 原先是**总 input 数**上限 100，写在 parseInputs 的循环条件里：
+ *   while ((m = re.exec(html)) !== null && inputs.length < 100)
+ * 真实登录页上 CSRF / 多步表单塞几十个 hidden 完全正常（多段 token、
+ * __VIEWSTATE 之类），于是**排在它们后面的用户名框和密码框根本不会被采集**：
+ *   扫满 100 个后停 → `findIndex(type === 'password')` 返回 -1 → 返回 null
+ *   → performLogin 用硬编码字面量 'password' 提交，**用户名字段整个丢失**
+ *   → 登录必然失败，而结果报的是 { ok: true }（失败被报告成成功）
+ *
+ * 实测（99 个 hidden 在前 + username + pass 在后）：
+ *   detectLoginFields → null，实际 POST body = `password=pw`
+ *
+ * ⚠️ 这里只放宽**采集**上限，不放宽**丢弃**上限：
+ *   · 采集：要看到登录字段（MAX_INPUTS 只是资源护栏，不是语义判据）
+ *   · 丢弃：hidden 仍受 MAX_HIDDEN=20 约束（契约-3/4 钉住）
+ * 两者是不同的维度，调大采集上限不影响防滥用那道闸。
+ */
+const MAX_INPUTS = 2000;
 
 /** 解析 <input> 标签的属性（轻量正则：登录页表单结构远比整页解析简单） */
 function parseInputs(html) {
   const inputs = [];
   const re = /<input\b([^>]*)>/gi;
   let m;
-  while ((m = re.exec(html)) !== null && inputs.length < 100) {
+  while ((m = re.exec(html)) !== null && inputs.length < MAX_INPUTS) {
     const attrs = {};
     const are = /([a-zA-Z-]+)\s*=\s*("([^"]*)"|'([^']*)'|([^\s"'>]+))/g;
     let a;

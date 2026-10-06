@@ -19,7 +19,8 @@
 // 改注记不该要求改指纹（下面有一条测试专门钉这个解耦）。
 //
 // 指纹变了怎么办（数据改动是正常维护动作，不是错误）：
-//   1) `git diff server/src/engine/payloads/registry.json` —— per-line 格式，能直接看到改了哪条；
+//   1) `git diff server/src/engine/payloads/registry.json server/src/engine/payloads/registry.versioned.json`
+//      —— per-line 格式，能直接看到改了哪条（[D9] 起数据分两份：主注册表 + 版本门条目）；
 //   2) 确认改动符合意图；
 //   3) 把本文件里的 EXPECTED_* 换成测试报错里显示的 actual 值（assert 会把 actual 打出来）。
 // ============================================================================
@@ -29,9 +30,13 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { PAYLOAD_REGISTRY } from '../src/engine/payloadRegistry.js';
 
-const EXPECTED_COUNT = 681;
-const EXPECTED_DATA_SHA = 'af113d87f60450c98315a77b3524b041311959b6e41f229f168e1981a9cd9379';
-const EXPECTED_ID_SHA = '20106156250fa04a6c2f5b107b6c7d45ebd1ac42bbb4f675fb831e18c6dc60fb';
+const EXPECTED_COUNT = 686;
+// [D9 2026-10-06] 681 → 686：新增 5 条版本门条目（MySQL 8 递归 CTE / 窗口函数 / LATERAL /
+//   VALUES ROW / JSON_VALUE），落在 payloads/registry.versioned.json —— registry.json 的体积是
+//   arch 基线里"已承认的债、只减不增"，加条目不能去自签新债。真库差分实测见
+//   e2e/real-mysql-lab/versionedForms.e2e.mjs（8.0.28 上 5/5 有真假差分）。
+const EXPECTED_DATA_SHA = '02a133372d3119f1df176fbf4a00e9b9649a8d3aa074c6272d1d4d588763cedf';
+const EXPECTED_ID_SHA = '6b30a883bb505b287d2ba269da2d266ec1b2287b3a1228ef14b5d01cead18cc4';
 
 /** 去掉 note 后的条目（note 是知识字段，不进行为指纹） */
 const strip = (e) => {
@@ -69,7 +74,7 @@ test('③ 内容指纹：任何字段任何字符变化都会红', () => {
   assert.equal(
     sha(dataOf(PAYLOAD_REGISTRY)),
     EXPECTED_DATA_SHA,
-    '注册表内容与基线不一致。先 `git diff server/src/engine/payloads/registry.json`（每条一行，能直接定位）确认改动是否符合意图；确认后更新 EXPECTED_DATA_SHA。',
+    '注册表内容与基线不一致。先 `git diff server/src/engine/payloads/registry.json server/src/engine/payloads/registry.versioned.json`（两份都是每条一行，能直接定位）确认改动是否符合意图；确认后更新 EXPECTED_DATA_SHA。',
   );
 });
 

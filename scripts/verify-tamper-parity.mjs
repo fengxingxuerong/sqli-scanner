@@ -19,7 +19,7 @@ import { fileURLToPath } from 'node:url';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, '..');
-const SQLMAP_TAG = '1.9.11'; // 钉死版本：升级时改这里并复核对齐率
+const SQLMAP_TAG = '1.10.10'; // 钉死版本：升级时改这里并复核对齐率（2026-10-06 竞品吸收批次由 1.9.11 升上来；上游 tamper/ 70 → 84）
 const SNAPSHOT = resolve(ROOT, 'server/src/core/tamper/upstream-sqlmap-tamper.json');
 const BASELINE = resolve(ROOT, 'server/src/core/tamper/tamper-parity-baseline.json');
 const PLUGINS_DIR = resolve(ROOT, 'server/src/core/tamper/plugins');

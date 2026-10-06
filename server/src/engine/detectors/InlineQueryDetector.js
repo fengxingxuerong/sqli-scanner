@@ -1,4 +1,5 @@
 import { Detector } from '../Detector.js';
+import { logger } from '../../core/logger.js';
 import { createDetectionResult } from '../models.js';
 import { INLINE_CONCAT, fromDummy } from '../DialectSqlBuilder.js';
 
@@ -36,11 +37,18 @@ export class InlineQueryDetector extends Detector {
     if (!reqs) return result;
 
     try {
-      const base = await this.send(httpClient, ctx, this.buildRequest(target, point, reqs.base));
-      const test = await this.send(httpClient, ctx, this.buildRequest(target, point, reqs.test));
+      // [P0-FIX 2026-10-05] 基线与测试同样先判可用性：
+      // 折成空串时 `!baseBody.includes(MARK)` 恒真 ⇒ 页面固有标记这条防线
+      // （契约-5）被绕过。基线不可用时同样无法区分"固有标记"与"反射"。
+      const base = await this._sendUsable(httpClient, ctx, target, point, reqs.base);
+      const test = await this._sendUsable(httpClient, ctx, target, point, reqs.test);
+      if (base === null || test === null) {
+        result.evidence = '内联探测未结论：基线或测试响应不可用（网络失败，重发后仍失败）';
+        return result;
+      }
 
-      const baseBody = String(base?.data ?? '');
-      const testBody = String(test?.data ?? '');
+      const baseBody = String(base.data ?? '');
+      const testBody = String(test.data ?? '');
 
       // 命中条件：测试响应含内联标记，且基线响应不含（排除"标记本来就出现在正常页面"的误报）
       // D6: includes 改为大小写不敏感，免疫 lowercase/uppercase/mixedcase tamper 破坏标记
@@ -49,8 +57,20 @@ export class InlineQueryDetector extends Detector {
         // ★FIX [误报防护] 反射门控（对标 UnionDetector._gateInjection）：
         // 回显型页面会把任意输入原样返回——上面的命中条件对它恒真（标记字面量随注入串被反射）。
         // 补一发纯文本探针（不经 SQL 求值）：若同样被回显，说明只是参数反射而非子查询结果 → 拒绝。
-        const refl = await this.send(httpClient, ctx, this.buildRequest(target, point, REFLECTION_PROBE));
-        const reflBody = String(refl?.data ?? '');
+        //
+        // [P0-FIX 2026-10-05] 探针失败时不得当作"未反射"：
+        // 原实现 String(refl?.data ?? '') 把网络失败折成空串，includes 恒 false
+        // ⇒ 直接走 _hit 放行。方向与 Union/NoSQL 相反：**门控自身失败反而放行**，
+        // 恰是门控最不该有的行为。实测：base 正常 + test 含标记 + 探针超时
+        // ⇒ vulnerable=true，evidence 写「子查询结果随响应回显」。
+        // 失败样本重发一次；仍失败则不产出结论（本条不算检出，也不算排除）。
+        const refl = await this._sendUsable(httpClient, ctx, target, point, REFLECTION_PROBE);
+        if (refl === null) {
+          result.evidence =
+            '内联探测未结论：反射门控探针不可用（网络失败，重发后仍失败），无法区分参数反射与子查询求值';
+          return result;
+        }
+        const reflBody = String(refl.data ?? '');
         if (reflBody.toLowerCase().includes(REFLECTION_PROBE.toLowerCase())) {
           result.evidence =
             '内联候选被反射门控拒绝：纯文本探针同样回显，标记来自输入反射而非 SQL 子查询求值';
@@ -60,8 +80,40 @@ export class InlineQueryDetector extends Detector {
       }
       return result;
     } catch (e) {
-      return result; // 单次失败不致命
+      // [2026-10-05] 补 debug 日志：原先 `catch (e) { return result; }` 完全静默，
+      // 连 e 都没用。后果是内联通道探测失败时，无法区分"目标真的不支持内联查询"
+      // （合法负结论）与"我们的探测自己抛了"（假阴性）。
+      // 扫描器里后者更贵：它会被写成"该点无内联通道"，用户据此判断后才决定换不换注入手法。
+      // 用 debug 而非 warn：单点探测失败是常态（大量目标本就无内联），warn 会刷屏。
+      // ⚠️ point 是个对象，直接插值会得到 `[object Object]`（注入验证时才发现），
+      //   对定位毫无帮助 —— 必须打 point.id。
+      logger.debug(`内联查询探测失败（按"该点无内联通道"处理）：point=${point?.id} err=${e?.message ?? e}`);
+      return result;
     }
+  }
+
+  /**
+   * [P0-FIX 2026-10-05] 发送请求并返回响应；不可用的重发一次。
+   *
+   * 缺陷：原先各处 `String((await this.send(...))?.data ?? '')` 把网络失败
+   * 折成空串，空串对"是否包含标记"的判定一律给出安全但错误的方向：
+   *   - 反射探针失败 ⇒ 判"未反射" ⇒ **放行**（误报，门控失败反而放行）
+   *   - 基线失败     ⇒ 判"基线不含标记" ⇒ 绕过页面固有标记这道防线
+   * 方向与 Union 门控、NoSQL 探测同源（未用统一判据 unusableOf），
+   * 是本轮扫描找到的第三处遗漏。
+   *
+   * 失败后重发而非直接放弃：直接放弃会把假阳性修成假阴性，违反
+   * 「不得降低检出能力」；重发可救回偶发抖动。
+   *
+   * @returns {Promise<object|null>} null = 重发后仍不可用，调用方应不下结论
+   */
+  async _sendUsable(httpClient, ctx, target, point, payload) {
+    const req = this.buildRequest(target, point, payload);
+    let res = await this.send(httpClient, ctx, req);
+    if (!this.unusableOf(res)) return res;
+    res = await this.send(httpClient, ctx, req);
+    if (!this.unusableOf(res)) return res;
+    return null;
   }
 
   _hit(result, point, evidence, payloads) {

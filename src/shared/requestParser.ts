@@ -114,10 +114,27 @@ export function extractBodyFields(
   const bodyFields: Record<string, string> = {};
   if (!body) return { params, bodyFields };
   const ct = contentType || '';
+  // [BODY-EOL 2026-10-06] 行结束符归一：CRLF → LF。
+  //
+  // 之前 multipart 分段用的是 `part.indexOf('\n\n')`，而 CRLF 下头体之间的空行
+  // 是 "\r\n\r\n" —— 两个 \n 之间夹着 \r ⇒ 永远返回 -1 ⇒ head=整块、val='' ⇒
+  // `if (val)` 永假 ⇒ **一个字段都提取不到**（实测 CRLF 得 {}、LF 得 {id,q}）。
+  //
+  // 为什么以前没暴露：本文件里 parseRequestFile 自己逐行拼 body 时用的是 '\n'，
+  // 传给 extractBodyFields 的已经是 LF 了。而服务端那份之所以安全，是因为
+  // requestFileParser 里有 `bodyParts.join('\n')` 做同样的归一 —— 也就是说
+  // 两端的安全性来自**不同原因**，这正是容易分叉的形态。
+  //
+  // 现在归一下沉到本函数入口：**无论调用方传什么行结束符都一致**，
+  // 也与服务端那份同口径（服务端那条 join 在更外层，效果等价）。
+  //
+  // ⚠️ 只归一行结束符，不动内容：body 里的 \r\n 出现在值中间时会被换成 \n，
+  //     这与 parseRequestFile 既有行为（逐行取行后用 \n 拼接）完全一致。
+  const src = /\r\n/.test(body) ? body.replace(/\r\n/g, '\n') : body;
 
   if (/application\/x-www-form-urlencoded/i.test(ct)) {
     try {
-      for (const pair of body.split('&')) {
+      for (const pair of src.split('&')) {
         if (!pair) continue;
         const eq = pair.indexOf('=');
         if (eq > 0) {
@@ -139,7 +156,7 @@ export function extractBodyFields(
     const bm = /boundary=(?:"([^"]+)"|([^;\s]+))/i.exec(ct);
     const boundary = bm ? (bm[1] || bm[2]) : null;
     if (boundary) {
-      const parts = body.split('--' + boundary);
+      const parts = src.split('--' + boundary);
       for (const part of parts) {
         if (!part || part.trim() === '--' || part.trim() === '') continue;
         const ci = part.indexOf('\n\n');
@@ -163,7 +180,7 @@ export function extractBodyFields(
 
   if (/application\/json/i.test(ct)) {
     try {
-      const obj = JSON.parse(body);
+      const obj = JSON.parse(src);
       const flat = (o: unknown, prefix: string) => {
         for (const [k, v] of Object.entries((o ?? {}) as Record<string, unknown>)) {
           const key = prefix ? prefix + '.' + k : k;

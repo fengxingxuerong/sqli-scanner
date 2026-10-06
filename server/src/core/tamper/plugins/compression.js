@@ -1,6 +1,8 @@
 // 压缩编码：将字符串字面量用 COMPRESS() 编码（对标 sqlmap compression.py）
 // 适用于支持 COMPRESS/UNCOMPRESS 函数的 MySQL/MariaDB
 import { deflateSync } from 'node:zlib';
+import { readSqlLiteral, isQuoteEscaped } from '../quoteScan.js';
+
 
 export const compression = {
   name: 'compression',
@@ -15,35 +17,27 @@ export const compression = {
     let out = '';
     let inSingle = false, inDouble = false;
     for (let i = 0; i < src.length; i++) {
-      const ch = src[i], prev = src[i - 1];
+      const ch = src[i];
       if (inSingle) {
-        if (ch === "'" && prev !== '\\') { inSingle = false; out += ch; }
+        if (ch === "'" && !isQuoteEscaped(src, i)) { inSingle = false; out += ch; }
         else out += ch;
         continue;
       }
       if (inDouble) {
-        if (ch === '"' && prev !== '\\') { inDouble = false; out += ch; }
+        if (ch === '"' && !isQuoteEscaped(src, i)) { inDouble = false; out += ch; }
         else out += ch;
         continue;
       }
       if (ch === "'") {
         inSingle = true;
         let str = '';
-        for (let j = i + 1; j < src.length; j++) {
-          const c = src[j];
-          if (c === "'" && src[j - 1] !== '\\') { i = j; break; }
-          str += c;
-        }
+        { const lit = readSqlLiteral(src, i, "'"); if (!lit.closed) { out += src.slice(i); return out; } i = lit.end; str = lit.body; }
         const compressed = deflateSync(Buffer.from(str)).toString('base64');
         out += `COMPRESS(FROM_BASE64('${compressed}'))`;
       } else if (ch === '"') {
         inDouble = true;
         let str = '';
-        for (let j = i + 1; j < src.length; j++) {
-          const c = src[j];
-          if (c === '"' && src[j - 1] !== '\\') { i = j; break; }
-          str += c;
-        }
+        { const lit = readSqlLiteral(src, i, '"'); if (!lit.closed) { out += src.slice(i); return out; } i = lit.end; str = lit.body; }
         const compressed = deflateSync(Buffer.from(str)).toString('base64');
         out += `COMPRESS(FROM_BASE64('${compressed}'))`;
       } else {

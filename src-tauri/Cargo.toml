@@ -1,6 +1,11 @@
 [package]
 name = "sqli-scanner"
-version = "1.0.0"
+# [2026-10-05] 版本号对齐 1.1.0（此前孤悬 1.0.0，与 package.json / tauri.conf.json 不同步）。
+#   桌面安装包的元数据取自本文件与 tauri.conf.json；不同步会让交付给客户的壳
+#   对不上 npm 包版本，而没有任何地方提示。
+#   现由 scripts/version-sync.mjs 三处互校：改任意一处而不改另两处会红
+#   （`npm run version:check`；修齐用 `npm run version:fix`）。
+version = "1.1.0"
 description = "SQL 注入检测工具桌面壳（Tauri v2）"
 authors = ["高见远"]
 edition = "2021"

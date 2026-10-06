@@ -26,12 +26,17 @@ function makeBooleanOracle(secret) {
       const q = extractQuery(opts);
       if (q.includes('1=2')) return { data: '', status: 200 };
       // 长度探测：(LENGTH((X)))>N 或 (LEN((X)))>N（外层括号由 makeCond 包裹，用 )+ 兼容）
-      const lenM = q.match(/(?:LENGTH|LEN)\(\(.*?\)+\s*>\s*(\d+)/);
+      // [2026-10-05] 补**前后**词边界：只补尾部不够 —— `OCTET_` 的下划线本身
+      //   就是非单词字符，`(?![A-Za-z0-9_])` 在它后面照样成立。
+      //   ⇒ 不补前边界时，`OCTET_LENGTH` / `MY_LENGTH` / `XLEN` 全被误判为命中，
+      //   预言机于是对**并未变化**的构造也返回判据值，把"失配"伪装成"命中"。
+      //   过宽与过窄同样危险。实测记录见 oracleLiveness.guard.test.js。
+      const lenM = q.match(/(?<![A-Za-z0-9_])(?:LENGTH|LEN)(?![A-Za-z0-9_])\(\(.*?\)+\s*>\s*(\d+)/);
       if (lenM) {
         return { data: Number(lenM[1]) < secret.length ? 'OK' : '', status: 200 };
       }
       // 字符探测：ASCII(SUBSTRING((X),i,1))>C 或 SUBSTR
-      const charM = q.match(/SUBSTR(?:ING)?\(\(.*?,\s*(\d+),\s*1\)+\s*>\s*(\d+)/);
+      const charM = q.match(/(?<![A-Za-z0-9_])SUBSTR(?:ING)?(?![A-Za-z0-9_])\(\(.*?,\s*(\d+),\s*1\)+\s*>\s*(\d+)/);
       if (charM) {
         const i = Number(charM[1]);
         const c = Number(charM[2]);

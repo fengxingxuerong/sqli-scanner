@@ -117,7 +117,7 @@ export class TimeBlindDetector extends Detector {
       const testFilter = cfg.testFilter || undefined;
       const testSkip = cfg.testSkip || undefined;
       const entries = orderEntriesByBoundary(
-        selectPayloads({ dbms, technique: 'time', level, risk, testFilter, testSkip }),
+        selectPayloads({ dbms, dbmsVersion: ctx.dbmsVersion, technique: 'time', level, risk, testFilter, testSkip }), // [E1] 版本门喂真值（pg-time-sleepfor-1 的 minVersion=9.6 此前不生效）
         ctx.point?.boundary
       ); // [G1] 按探测闭合族排序（与下方 real-MySQL 选族重排互补：元数据级排序先落位，正则重排兜底）
       if (entries.length > 0) {
@@ -291,7 +291,7 @@ export class TimeBlindDetector extends Detector {
       const probeTimeout = (cfg.timeoutMs || 5000) + calibrateMin * 1000;
       try {
         const t0 = Date.now();
-        await this.send(httpClient, ctx, this.buildRequest(target, point, probePayload), { timeoutMs: probeTimeout });
+        const probeRes = await this.send(httpClient, ctx, this.buildRequest(target, point, probePayload), { timeoutMs: probeTimeout });
         const elapsed = Date.now() - t0;
         // [2026-09-24 修] 原来这里比的是 `cfg.timeThresholdMs || 5000`，两处偏离本函数的规格：
         //   ① defaults.js 对 timeBlindCalibrate 的说明是"实测该 sleep 耗时能否稳定超过
@@ -304,7 +304,26 @@ export class TimeBlindDetector extends Detector {
         //      而且只在开了标定开关的慢站上发生（正是这个开关服务的那类目标）。
         //   ② `|| 5000` 与 defaults 的 1500 不同源（显式配 0 也会被顶成 5000）。
         // 改成与判定式同量纲：探针必须真的越过本次检测要用的那条 threshold。
-        // 语义仍然是"标定不成就回退原 sleep"，所以只会更少地缩短延时，不会更激进。
+        // [2026-10-05 修] 但"标定不成立"原先只覆盖了抛错，漏了**请求回来了、
+        // 只是这个响应不能用**的情况 —— 探针返回值本来被直接丢弃，只看 elapsed。
+        // 实测（tests/timeBlindCalibrationUsableResponse.test.js）：
+        //   WAF 返回 403 拦截页、耗时 2.2s ≥ threshold
+        //     → 判成"标定成功" → sleep 由 2s 缩到 calibrateMin=1s
+        //     → 后续采样耗时 = μ + 1s，恒低于含 μ 与 zσ 的 threshold
+        //     → 时间通道在该目标上**必然漏报**（采样永远够不到阈值）。
+        // 关键：探针"耗时够长"和"注入真的生效了"是两件事 —— 拦截页排队、
+        // 500 错误处理、连接池等待都能凑出耗时。必须先确认响应可用才认这次标定。
+        //
+        // 判据用「网络失败/截断」+「WAF 拦截页」两道，而不是只看状态码：
+        //   · unusableOf 覆盖连接失败/超时/截断（探针根本没打到注入语句）
+        //   · _isWafBlockPage 覆盖"回来了但是拦截页"（detectGenericBlock 要求
+        //     状态码门槛**且**命中文案特征，裸 403 业务错误页不会误伤）
+        // 裸 5xx 不单独拦截：服务端处理完才回包是常态，时间盲注站点上同样会发生，
+        // 单看状态码会把真实可用的响应也毙掉，反而加剧漏报。
+        const probeBad = this.unusableOf(probeRes) || (this._isWafBlockPage?.(probeRes) ? 'WAF 拦截页' : '');
+        if (probeBad) {
+          throw new Error(`标定探针响应不可用（${probeBad}）`);
+        }
         if (elapsed / 1000 >= threshold) {
           effectiveSleep = calibrateMin;
         }

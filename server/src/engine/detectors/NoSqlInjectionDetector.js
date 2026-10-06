@@ -62,6 +62,35 @@ export class NoSqlInjectionDetector extends Detector {
   }
 
   /**
+   * [P0-FIX 2026-10-05] 发送探针并取响应体；不可用的重发一次。
+   *
+   * 缺陷：原实现各处直接 `String((await this.send(...))?.data ?? '')`，
+   * 把**网络失败**折成空串参与差异判定。实测（跑 _detectNosql，非推理）：
+   *   真侧超时 + 假侧正常 → vulnerable=true，evidence 写「真长 0 ≠ 假长 17」
+   *   真侧正常 + 假侧超时 → vulnerable=true，「真长 45 ≠ 假长 0」
+   *   全部超时          → vulnerable=false（双边空串恰好相同，**巧合**正确）
+   * 单边失败一律误报，且报告把「超时」写成「真条件返回空」——结论污染。
+   *
+   * 与 Union 门控同源（那里漏掉 unusableOf），口径统一在
+   * egressOpts.isUnusableResponse（Detector.prototype.unusableOf 即其包装）。
+   * BooleanBlind/TimeBlind/Stacked/prefilter 早已有这道闸，本类与 Union 是仅有的两处遗漏。
+   *
+   * 失败后**重发**而不是直接放弃：直接放弃会把假阳性修成假阴性，
+   * 违反「不得降低检出能力」。重发仍失败才让该探针跳过（continue）。
+   * 偶发抖动因此可被救回，纯失败则退化为「本次不报」，与原行为最接近。
+   *
+   * @returns {Promise<{body: string}|null>} null = 重发后仍不可用，调用方应跳过该探针
+   */
+  async _sendBody(httpClient, ctx, target, point, payload) {
+    const req = this.buildRequest(target, point, payload);
+    let res = await this.send(httpClient, ctx, req);
+    if (!this.unusableOf(res)) return { body: String(res?.data ?? '') };
+    res = await this.send(httpClient, ctx, req);
+    if (!this.unusableOf(res)) return { body: String(res?.data ?? '') };
+    return null;
+  }
+
+  /**
    * MongoDB 运算符注入：按成本升序遍历操作符矩阵（$gt/$ne 优先，命中即停），
    * 每组先发 primary 真/假，内容差异命中后再发 confirm 等价真/假做二次确认。
    */
@@ -71,17 +100,23 @@ export class NoSqlInjectionDetector extends Detector {
     for (const probe of NOSQL_OPERATOR_PROBES) {
       const pTrue = this._nosqlPayload(orig, probe.primary.true);
       const pFalse = this._nosqlPayload(orig, probe.primary.false);
-      const tBody = String((await this.send(httpClient, ctx, this.buildRequest(target, point, pTrue)))?.data ?? '');
-      const fBody = String((await this.send(httpClient, ctx, this.buildRequest(target, point, pFalse)))?.data ?? '');
+      // 失败样本不参与判定：单边失败会把「超时」误读成「真条件返回空」⇒ 直接误报。
+      const t = await this._sendBody(httpClient, ctx, target, point, pTrue);
+      if (t === null) continue;                       // 重发仍失败 → 跳过本探针
+      const f = await this._sendBody(httpClient, ctx, target, point, pFalse);
+      if (f === null) continue;
+      const tBody = t.body, fBody = f.body;
       // 首轮：真/假需有实质内容差异，且至少其一与基线可区分
       if (!this._contentDiff(tBody, fBody)) continue;
       if (!this._distinctFromBase(tBody, fBody, baseBody)) continue;
       // 二次确认：换一组等价 payload（同操作符、不同取值），两次一致才报
       const cTrue = this._nosqlPayload(orig, probe.confirm.true);
       const cFalse = this._nosqlPayload(orig, probe.confirm.false);
-      const ctBody = String((await this.send(httpClient, ctx, this.buildRequest(target, point, cTrue)))?.data ?? '');
-      const cfBody = String((await this.send(httpClient, ctx, this.buildRequest(target, point, cFalse)))?.data ?? '');
-      if (!this._contentDiff(ctBody, cfBody)) continue; // 确认不一致 → 视作抖动，弃
+      const ct = await this._sendBody(httpClient, ctx, target, point, cTrue);
+      if (ct === null) continue;
+      const cf = await this._sendBody(httpClient, ctx, target, point, cFalse);
+      if (cf === null) continue;
+      if (!this._contentDiff(ct.body, cf.body)) continue; // 确认不一致 → 视作抖动，弃
       return this._hit(
         result,
         point,
@@ -101,7 +136,11 @@ export class NoSqlInjectionDetector extends Detector {
     const orig = point.originalValue || '1';
     for (const probe of SSTI_PROBES) {
       const payload = `${orig}${probe.expr}`;
-      const body = String((await this.send(httpClient, ctx, this.buildRequest(target, point, payload)))?.data ?? '');
+      // 同 _detectNosql：失败样本不参与判定（此处方向是漏报而非误报 ——
+      // 空串必然匹配不上 sig，靠的是巧合而非判据；重发可挽回偶发失败）
+      const r = await this._sendBody(httpClient, ctx, target, point, payload);
+      if (r === null) continue;
+      const body = r.body;
       // 求值判定：响应含 sig（49/config/<class> 等），且基线不含该特征（排除原样回显未求值）
       if (probe.sig.test(body) && !probe.sig.test(baseBody)) {
         return this._hit(result, point, 'ssti', `SSTI（${probe.engine}）：${probe.expr} 表达式被求值回显`, [payload]);
@@ -116,8 +155,10 @@ export class NoSqlInjectionDetector extends Detector {
   async _detectGraphql(ctx, point, baseBody, result) {
     const { httpClient, target } = ctx;
     for (const probe of GRAPHQL_PROBES) {
-      const body = String((await this.send(httpClient, ctx, this.buildRequest(target, point, probe.query)))?.data ?? '');
-      if (probe.sig.test(body) && !probe.sig.test(baseBody)) {
+      // 同上：失败样本不参与判定
+      const r = await this._sendBody(httpClient, ctx, target, point, probe.query);
+      if (r === null) continue;
+      if (probe.sig.test(r.body) && !probe.sig.test(baseBody)) {
         return this._hit(result, point, 'graphql', `GraphQL 注入（${probe.name}）：${probe.query} → 回显确认`, [probe.query]);
       }
     }

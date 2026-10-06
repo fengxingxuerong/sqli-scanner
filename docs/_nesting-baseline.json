@@ -1,0 +1,19 @@
+{
+  "_comment": "嵌套深度基线：存量文件的最深层级。只许持平或变浅，不许加深。",
+  "_generatedBy": "node scripts/nesting-guard.mjs --fix-baseline",
+  "files": {
+    "scripts/build-sidecar.mjs": 7,
+    "server/src/core/http/auth.js": 7,
+    "server/src/engine/Extractor.js": 7,
+    "server/src/engine/blindExtractor.js": 7,
+    "server/src/engine/detectors/BooleanBlindDetector.js": 7,
+    "server/src/engine/discovery/browserCrawler.js": 7,
+    "server/src/engine/extractScope.js": 9,
+    "server/src/engine/scan/detect.js": 9,
+    "server/src/engine/scan/prefilter.js": 9,
+    "src/components/scanConfig/EnumerationSection.tsx": 7,
+    "src/hooks/useEvents.ts": 10,
+    "src/pages/HistoryPage.tsx": 7,
+    "src/pages/HomePage.tsx": 7
+  }
+}

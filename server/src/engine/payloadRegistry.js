@@ -32,6 +32,12 @@ import { DESTRUCTIVE_PAYLOADS } from './payloads/destructive.js';
 // [E5-2 2026-09-23] 数据外置：681 条声明式条目改从 registry.json 加载（原先内联在本文件 98-817 行）。
 // 条目上方的行内注释已按 id 迁移到各条的 note 字段（生成器：scripts/migrate-payload-registry.mjs）。
 import registryData from './payloads/registry.json' with { type: 'json' };
+// [D9 2026-10-06 竞品吸收] 版本特定语法族（MySQL 8 CTE/LATERAL/VALUES ROW/JSON_VALUE）另立一份
+//   数据文件，**不是**为了少写代码：`registry.json` 的体积在 `arch:guard` 基线里是"已承认的债、
+//   只减不增"，往里加条目就等于用基线自签新债（既有原则：超预算要拆模块，不能 arch:baseline 收编）。
+//   合并发生在这一处，下游（selectPayloads / 高危门 / boundary 排序 / schema 校验 / 指纹测试）
+//   看到的仍是**单一真源** PAYLOAD_REGISTRY，不需要知道磁盘上有两份文件。
+import versionedData from './payloads/registry.versioned.json' with { type: 'json' };
 
 // ============================================================================
 // [P0-FIX 2026-09-09] 高危（destructive）池投放策略 —— productionMode 硬门
@@ -81,11 +87,6 @@ export function runWithDestructivePolicy(policy, fn) {
   return destructivePolicyStore.run({ ...(policy || {}) }, fn);
 }
 
-/** 读取当前上下文的高危池策略（非扫描上下文返回 null） */
-export function currentDestructivePolicy() {
-  return destructivePolicyStore.getStore() || null;
-}
-
 /**
  * 解析本次筛选的高危池放行结论。返回 null = 不施加门禁（无策略上下文且调用方未显式传参）。
  * @param {{productionMode?:boolean, confirmDestructive?:boolean}} args selectPayloads 入参
@@ -108,7 +109,7 @@ function resolveDestructiveGate(args = {}) {
  *  clause:string[], boundary:string[], template:string, falseTemplate?:string, where:string,
  *  minVersion?:number|{major:number,minor?:number}, maxVersion?:number|{major:number,minor?:number},
  *  note?:string}>} */
-export const PAYLOAD_REGISTRY = registryData;
+export const PAYLOAD_REGISTRY = [...registryData, ...versionedData];
 
 // id 唯一性自检（声明期校验，防止手写重复 id 静默吞掉条目）
 {

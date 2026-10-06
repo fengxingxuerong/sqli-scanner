@@ -39,17 +39,66 @@ test('守卫：defaults.js 顶层键全部被 KNOWN_CFG_KEYS 覆盖（防手工�
   );
 });
 
-test('守卫（反向）：KNOWN_CFG_KEYS 无 defaults 不存在的幽灵键（白名单腐化检测）', async () => {
+test('守卫（反向）：KNOWN_CFG_KEYS 每个键都有落地方（白名单腐化检测）', async () => {
   const { readFileSync } = await import('node:fs');
-  const src = readFileSync(new URL('../src/api/scanRoutes.js', import.meta.url), 'utf8');
-  const m = src.match(/const KNOWN_CFG_KEYS = new Set\(\[([\s\S]*?)\]\)/);
+  const scanRoutesSrc = readFileSync(new URL('../src/api/scanRoutes.js', import.meta.url), 'utf8');
+  const m = scanRoutesSrc.match(/const KNOWN_CFG_KEYS = new Set\(\[([\s\S]*?)\]\)/);
+  assert.ok(m, '解析不到 KNOWN_CFG_KEYS —— scanRoutes.js 结构变了，请同步本守卫');
   const listed = Array.from(m[1].matchAll(/'([^']+)'/g)).map((x) => x[1]);
-  // 白名单允许含非 defaults 键（如 secondOrder 等结构化配置），但标量键应在 defaults 有默认值
-  // ——此方向仅统计，不做硬断言（结构化键是合法存在）。
-  const ghost = listed.filter((k) => !(k in defaults) && !INTERNAL_KEYS.has(k));
-  // 幽灵键清单仅告警不失败：结构化配置键（wafEvasion/secondOrder 等）合法。
-  if (ghost.length) {
-    console.log(`[info] 白名单中 defaults 无默认值的结构化键（合法）: ${ghost.join(', ')}`);
+  assert.ok(listed.length > 0, '白名单解析为空 —— 判据可能空转');
+
+  // [2026-10-05 修正判据方向] 原判据假设"白名单里的键都应是 defaults.js 的顶层标量键"，
+  // 报错时才发现那是错的：本仓配置键的**默认值与落地方分散在多处**，白名单键多数不在 defaults.js。
+  // 实测分布（这才是真实落点，判据必须覆盖全部）：
+  //   · defaults.js                 顶层标量（ratePerSec、boolStableDiff…）
+  //   · api/scanGuard/scalarsCore.js pickInt/pickBool 的第 2 参数（dumpMaxRows、unionCols…）
+  //   · api/scanGuard/bespokeKeys.js 需自定义校验的键（cookieJar、unionCols、dumpWhere、
+  //     extractScope、sessionFile、dbms…）
+  //   · api/scanGuard/objectGroups.js 结构化组键（wafEvasion、secondOrder…）
+  //   · api/scanGuard/backfill.js    从 target 字段回填的键（testPath、testHeaders、noCast…）
+  //   · INTERNAL_KEYS                不经 REST 下发的引擎私有键（豁免）
+  // 所以"腐化"的正确判据是**反向**的：白名单里的键必须在上述任一处有落地方，
+  // 否则它会被 KNOWN_CFG_KEYS 放行却无人消费 ⇒ 静默无效，配置语义漂移零提示。
+  // 落地方有两种写法，都必须匹配到：
+  //   ① 带引号：pickInt(cfg, 'dumpMaxRows', …)、boolKey 数组里写 'flushSession'
+  //   ② 点号访问：if (cfg.login …)、config.rateGroup = g —— 更常见，且正则里最容易漏
+  //     （本测试初版只认 ①，于是误报 7 个键：login/rateGroup/hex/flushSession 等全是 ② 型）
+  const { readdirSync } = await import('node:fs');
+  // 扫描范围定为**整个 api/ 目录**（不是 api/scanGuard/）：部分旋钮的落地方并不在
+  //   scanGuard/ 里 —— 实测 flushSession 在 api/scanConfigTuning.js，
+  //   prefilterBudgetMs / maxExtractBodyBytes / scanValidity 亦然（strictBoolKeys 那批）。
+  //   只扫 scanGuard/ 会把它们全报成"无落地方"——这正是本测试连续三轮误报的直接原因。
+  //
+  // ⚠️ 必须**排除 scanRoutes.js 自身**：白名单的键名就写在这个文件里，
+  //   若把它当语料，任何新键都能在定义处匹配到自己 ⇒ 判据恒绿、永不报错。
+  //   （这正是注入验证抓到的：塞进 __ghostKeyProbe__ 后守卫仍显示通过。）
+  //   "落地方"的定义是**消费**该键的代码，不是声明该键的白名单。
+  const SELF = 'scanRoutes.js';
+  const guardSrc = (function walk(dirUrl, depth = 0) {
+    if (depth > 3) return '';
+    const parts = [];
+    for (const e of readdirSync(dirUrl, { withFileTypes: true })) {
+      const child = new URL(e.name + (e.isDirectory() ? '/' : ''), dirUrl);
+      if (e.isDirectory()) parts.push(walk(child, depth + 1));
+      else if (e.name.endsWith('.js') && e.name !== SELF) parts.push(readFileSync(child, 'utf8'));
+    }
+    return parts.join('\n');
+  })(new URL('../src/api/', import.meta.url));
+  assert.ok(guardSrc.length > 1000,
+    `扫到的 api/ 源码仅 ${guardSrc.length} 字节 —— 语料为空会让 hasLanding 恒假、反向守卫变成"全员孤儿"假红（或在空语料下恒真），判据不可信`);
+
+  const hasLanding = (k) =>
+    (k in defaults)
+    || new RegExp(`['"\`]${k}['"\`]`).test(guardSrc)
+    || new RegExp(`\\b(?:cfg|config|c)\\s*\\.\\s*${k}\\b`).test(guardSrc)
+    || INTERNAL_KEYS.has(k);
+
+  const orphans = listed.filter((k) => !hasLanding(k));
+  const structured = listed.filter((k) => !(k in defaults) && INTERNAL_KEYS.has(k));
+  if (structured.length) {
+    console.log(`[info] 白名单中的结构化配置键（合法，已在 INTERNAL_KEYS 豁免）: ${structured.join(', ')}`);
   }
-  assert.ok(true);
+  assert.deepEqual(orphans, [],
+    `以下键在 KNOWN_CFG_KEYS 里但无任何落地方（既不在 defaults.js、也不在 api/ 任何校验器、也不在 INTERNAL_KEYS 豁免）：${orphans.join(', ')}\n` +
+    '后果：REST 传入该键会被 KNOWN_CFG_KEYS 放行，却没有任何代码消费它 ⇒ 静默无效，配置语义漂移零提示。');
 });

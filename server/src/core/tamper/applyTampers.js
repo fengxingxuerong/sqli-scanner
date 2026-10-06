@@ -34,6 +34,9 @@ import { chardoubleencode } from './plugins/chardoubleencode.js';
 import { unmagicquotes } from './plugins/unmagicquotes.js';
 import { appendnullbyte } from './plugins/appendnullbyte.js';
 import { randomwhitespace } from './plugins/randomwhitespace.js';
+// [2026-10-05] 以下 v9…v21 各行的「内置总数 X → Y」是**历史演进记录，已失实**
+// （当前真值 229，且下方 registerMany 处另有一份不一致的副本）。以运行时为准 ——
+// 见下方 registerMany 处的说明与 tests/tamperPluginCount.guard.test.js。
 // v9 新增 34 个 WAF 绕过插件（覆盖 sqlmap 常见 tamper 剩余子集，内置总数 28 → 62）
 import { apostrophemask } from './plugins/apostrophemask.js';
 import { apostrophenullencode } from './plugins/apostrophenullencode.js';
@@ -250,6 +253,24 @@ import { scalarselectinline } from './plugins/scalarselectinline.js';
 import { dash2hash } from './plugins/dash2hash.js';
 
 // 导入即注册内置插件（幂等：重复导入不会重复注册，Map 以 name 去重）
+//
+// [2026-10-05 ⚠️ 下面各处「内置总数 X → Y」注释已失实，不要当作当前真值读]
+//
+// 实测：运行时 tamperRegistry.list().length = **229**，而注释里最大的"末端总数"是 200。
+// 更麻烦的是这份演进链**被复制成了两份**：
+//   · import 块（本文件第 37–206 行）走 …76→88→90→102…
+//   · registerMany 列表（第 342–461 行）直接从 76→90，**没有 76→88 这一环**
+// 即同一个注册列表被割成两块，两块各写各的总数，且互相矛盾 —— 于是
+// "内置插件有多少个"从注释里根本读不出来。
+//
+// 为什么不直接把这些数字改对：总数被写在 24 处、没有任何东西校验它，
+// 改对一次下次加插件照样漂移（本仓在 keyword2hexall「覆盖全部关键字」、
+// swapcase「大小写混淆」上已反复吃亏）。故改为由
+// tests/tamperPluginCount.guard.test.js 直接向运行时取真值并双向对账
+// （目录 ⇄ 注册表），注释里的数字降级为**历史演进记录**，不再是当前断言。
+//
+// 新增插件时只需：① 在 plugins/ 建文件 ② 在下方 import ③ 加入 registerMany 列表。
+// 漏了任何一步，守卫测试当场红。
 tamperRegistry.registerMany([
   space2comment,
   randomcase,
@@ -339,6 +360,8 @@ tamperRegistry.registerMany([
   dunion,
   schemasplit,
   space2morehash,
+  // [2026-10-05] 本块是上方 import 块那份演进链的**副本**，且从 76→90 起跳
+  //（少了 76→88 一环），两份互相矛盾。数字已失实，以运行时为准。
   // v12 新增 14 个 WAF 绕过插件（对标 sqlmap 更多高频 tamper，内置总数 76 → 90）
   backslash2forward,
   binary,

@@ -91,6 +91,26 @@ export function createMysqlLabApp(pool, preMiddleware = null) {
     }
   }));
 
+  // —— [A2/D10 同族] URL-safe base64 编码态载体（无补齐）——
+  // 与 /blind 同构（错误吞掉回空页、真假页差异），区别只在参数是 **base64url**：
+  //   直接投 payload ⇒ 服务端解出乱码 ⇒ 两分支都空页 ⇒ 无差异（漏检）；
+  //   必须"解码 → 注入 → 按同规则重编码"才打得动。刻意选无补齐形态（`YWxpY2U`，长度非 4 倍数），
+  //   这样标准 base64 分支不会命中，只有 base64url 识别路径能解出来。
+  app.get('/b64url', wrap(async (req, res) => {
+    const raw = req.query.user || 'YWxpY2U'; // base64url('alice')
+    // 严格解码，**不留"解不出来就用原值"的后路**：
+    // 留着那条路，一个完全不懂编码的引擎也能靠原始 payload 里的引号打中（首版就踩到了：
+    // 11/11 PASS 但报告里一个 base64url 标记都没有 —— 通过的是回退分支，不是特性）。
+    // 只有"解码→注入→按同规则重编码"的引擎才可能在这里产生真假差异。
+    const name = Buffer.from(String(raw), 'base64url').toString('utf8');
+    try {
+      const [rows] = await pool.query(`SELECT * FROM users WHERE id IN (SELECT id FROM users WHERE username = '${name}')`);
+      res.send(html('Dashboard', rows.length ? table(rows) : '<p>empty</p>'));
+    } catch {
+      res.send(html('Dashboard', '<p>empty</p>'));
+    }
+  }));
+
   // —— 时间盲注：内容恒定，SLEEP 生效 ——
   app.get('/time', wrap(async (req, res) => {
     const tid = req.query.tid || '1';

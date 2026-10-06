@@ -117,13 +117,27 @@ export function validatePayloadEntry(e) {
     if (!Array.isArray(e.boundary)) errors.push('boundary 必须是数组');
     else if (e.boundary.some((b) => typeof b !== 'string')) errors.push('boundary 内必须是字符串');
   }
-  // 版本区间：数字 或 {major, minor?}
+  // 版本区间：数字（只到次版本）或 {major, minor?, patch?}
   for (const key of ['minVersion', 'maxVersion']) {
     const v = e[key];
     if (v === undefined) continue;
     const okNum = typeof v === 'number' && Number.isFinite(v);
     const okObj = isPlainObj(v) && typeof v.major === 'number';
     if (!okNum && !okObj) errors.push(`${key} 必须是数字或 {major, minor?}（实际：${JSON.stringify(v)}）`);
+    if (okNum) {
+      // 8.019 会被"一位小数"编码静默读成 8.0 ⇒ 补丁级下限用数字形态就是错的，当场拒
+      const frac = String(v).split('.')[1];
+      if (frac && frac.length > 1) {
+        errors.push(`${key}=${v}：数字形态只到次版本（5.7 可以，8.019 不行）—— 补丁级请用 {major,minor,patch}`);
+      }
+    }
+    if (okObj) {
+      for (const k of ['minor', 'patch']) {
+        if (v[k] !== undefined && (typeof v[k] !== 'number' || !Number.isFinite(v[k]) || v[k] < 0)) {
+          errors.push(`${key}.${k} 必须是非负数字（实际：${JSON.stringify(v[k])}）`);
+        }
+      }
+    }
   }
 
   // —— 一致性（warning，不阻塞）——

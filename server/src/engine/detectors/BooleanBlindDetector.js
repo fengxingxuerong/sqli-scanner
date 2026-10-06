@@ -83,6 +83,7 @@ export class BooleanBlindDetector extends Detector {
       try {
         const clauseEntries = selectPayloads({
           dbms: ctx.dbms,
+          dbmsVersion: ctx.dbmsVersion, // [E1] 版本门要收得到版本：此前 4 个调用点都没传 ⇒ minVersion/maxVersion 恒不生效
           technique: 'boolean',
           clause: ['orderby', 'groupby', 'having', 'limit'],
           testFilter: cfg.testFilter,
@@ -134,6 +135,7 @@ export class BooleanBlindDetector extends Detector {
       const entries = orderEntriesByBoundary(
         selectPayloads({
           dbms: ctx.dbms,
+          dbmsVersion: ctx.dbmsVersion, // [E1] 见上：注册表路径的版本门
           technique: 'boolean',
           level,
           risk,

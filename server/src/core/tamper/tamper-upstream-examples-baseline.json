@@ -1,0 +1,32 @@
+{
+  "_comment": "verify-tamper-upstream-examples 的豁免账：逐条点名，只减不增。每条必须写「为什么不是我们的错」或「是错但为什么要等（等什么证据）」。kind 取值：variant=有意变体（机制不同，各有靶面）/ cosmetic=形态差异（空格、大小写等不影响可执行性）/ queued=确认是缺陷或覆盖缺口，改动需要额外证据 ⇒ 已挂待办编号。基线失效（本仓输出已变成与上游一致）时脚本会照样绿，但应当从本账里删掉该行 —— 用 --prune-baseline 查。",
+  "sqlmapTag": "1.10.10",
+  "at": "2026-10-06",
+  "drift": {
+    "binary#0": "[queued T-1] 本仓 binary 只编码字符串字面量内的字符，上游给值前加 MySQL `binary` 关键字（改 token 分类，清 libinjection 判定）。对无字面量的 payload 本件等于空转发包 ⇒ 覆盖缺口；动它要先确认与既有 keyword2binary / 字面量编码族的重叠面，别把两条通道做成同一条。",
+    "binary#1": "[queued T-1] 同 binary#0（`1 AND 2>1` → 上游 `binary 2>binary 1`，本仓原样发出）。",
+    "binary#2": "[queued T-1] 同 binary#0（CASE WHEN 形态）。",
+    "bluecoat#0": "[variant] 上游只在关键字**前**插 %09 并把 = 转 LIKE；本仓对所有「关键字后空格」插 %09 且保留原空格 ⇒ 两侧都能执行，机制族不同（本仓属 %09 空白替换族，LIKE 转换已由 equaltolike 独立成件）。差异点：本仓会在原空格旁叠出双空白 ⇒ [queued T-2] 复核双空白是否触发 multiplespaces 型规则。",
+    "charunicodeencode#0": "[variant+queued T-3] 两处差异：① 本仓十六进制用小写 `%u004c`，上游用大写 `%u004C` —— 大小写直接影响按字面匹配的 WAF 规则，属可对齐项（挂 T-3）；② 本仓不重复编码输入里已存在的 `%20`，上游会重编 ⇒ 这是有意的防二次编码护栏，保留。",
+    "charunicodeescape#0": "[queued T-4] 上游输出双反斜杠 `\\\\u00XX`（其 payload 还要过一层反转义中间件），本仓输出单反斜杠 `\\u00XX`（本仓请求构造层不做二次转义）。谁对取决于目标侧解几层 ⇒ 必须在真机靶面 A/B 后再定，不许凭 README 换默认。",
+    "concat2concatws#0": "[queued T-5] 上游分隔符写成 `MID(CHAR(0),0,0)`（避免分隔符本身以 CHAR(32)/空格形态命中规则），本仓用 `CHAR(32)` ⇒ 可对齐的绕过增强，改动会动 tamper-matrix 里本件的绕过率基线。",
+    "escapequotes#0": "[queued T-4] 与 charunicodeescape 同因（双/单反斜杠），同一批真机证据到位后一起定。",
+    "halfversionedmorekeywords#0": "[queued T-6] 版本注释形态系统性不同：本仓 `/*!50540 UNION*/`（注释内含空格），上游 `/*!0UNION/*!0`（无空格、逐 token 重开注释）。上游形态是 CRS 社区实测产物，而本仓 2026-10-05 真机对拍里**版本注释族 0 打穿** ⇒ 这一族必须走 modsec-live 真机 A/B，本地自实现口径不足以判（README 已记录本地绿≠真机绿）；且它会动 wafRecommend 链与已入库绕过率基线。",
+    "modsecurityversioned#0": "[queued T-6] 同族：上游把整段塞进 `/*!30963AND 2>1*/`，本仓只把关键字包进 `/*! AND */` ⇒ 覆盖面与本仓 misunion/versioned 族重叠，需真机判。",
+    "modsecurityzeroversioned#0": "[queued T-6] 同族（`/*!00000...*/`）。",
+    "versionedkeywords#0": "[queued T-6] 上游逐关键字包注释且**不遗漏**；本仓输出里 `ALL` 未被包裹 ⇒ 同族内不自洽，属真缺陷，但改动面与 T-6 同一批证据。",
+    "versionedmorekeywords#0": "[queued T-6] 同上（上游包裹 CONCAT/CHAR/IFNULL 等全部函数名，本仓漏 CONCAT）。",
+    "htmlencode#1": "[queued T-7] 真缺陷（非幂等）：本仓把已编码实体的 `&`/`;` 再编码一次（`&#39;` → `&#38;#39&#59;`），上游编码集不含 &/; ⇒ 二次输入原样透传。修它要重跑 tamper-matrix（htmlencode 的绕过率基线在案）。",
+    "ifnull2casewhenisnull#0": "[queued T-8] 上游给 CASE 分支加括号 `THEN (2) ELSE (1)`，本仓不加 ⇒ 分支为复合表达式时有算子优先级风险。低风险，可与 T-7 同批做。",
+    "ifnull2ifisnull#0": "[cosmetic] 本仓保留原文 `, 2` 里的空格、上游去掉 ⇒ 仅字节数差异（长度型规则场景可能相关），不影响可执行性。",
+    "misunion#0": "[variant] 机制不同：上游把 `1 UNION` 改成 `1-.1UNION`（打断「数字+UNION」token 邻接，清 CRS 942270 一类），本仓拆词 `UNI/**/ON`（另一族）。两者都合法、各有命中面，本仓形态已在 CRS 离线门禁下测量。",
+    "misunion#1": "[variant] 同 misunion#0（引号开头形态）。",
+    "multiplespaces#0": "[variant] 本仓只在 UNION/SELECT 等关键字后加 2 空格，上游对所有 token 间加 4 空格 ⇒ 强度差异。更激进形态应作为**新增插件**而不是改默认（改默认会重排链选择基线）。",
+    "overlongutf8#0": "[queued T-9] 上游把空格与比较符做过长 UTF-8 编码（`%C0%A0` / `%C0%BE`），本仓只对字面量内字符做 ⇒ 覆盖缺口，本件对 `SELECT ... WHERE 2>1` 空转发包。",
+    "randomcomments#0": "[queued T-10] 上游在单词**内部**随机插 `/**/`（`INSERT` → `I/**/NS/**/ERT`），本仓只在 token 之间插 ⇒ 单词内拆分面缺失（该面已由 keywordSplit 族部分覆盖，需确认重叠）。本件输出含随机性，字面比对本身不适用。",
+    "scientific#0": "[variant] 上游把 token 间空白替换成 `1.e(` 形态（打空白规则），本仓把数字替换成 `1.0e0` 科学计数法字面量（打数字字面量指纹）⇒ 同名不同族，两条都有价值，本仓形态不做回退。",
+    "sp_password#0": "[cosmetic] 本仓保留输入尾部空格再追加 `sp_password` ⇒ 双空格；MySQL 注释语义不受影响。",
+    "symboliclogical#0": "[variant] 上游输出 URL 编码后的 `%26%26`，本仓输出裸 `&&` —— 本仓的 URL 编码在请求构造层统一完成，传输形态等价；若在 tamper 里再编码会变成双重编码。",
+    "unmagicquotes#0": "[variant] 上游 `1' AND 1=1` → `1%bf%27-- -`（宽字节**并截断尾部 + 追加注释**），本仓只替换引号 ⇒ 尾部截断属注入上下文语义，本仓由 boundary/suffix 通道负责，不在 tamper 层重复实现（两处都做会互相吃掉点位形态）。"
+  }
+}

