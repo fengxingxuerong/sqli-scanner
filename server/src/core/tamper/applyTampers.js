@@ -228,6 +228,12 @@ import { yundun } from './plugins/yundun.js';
 // v23 新增 WAF 绕过插件 — 补齐 sqlmap 高频 tamper 剩余缺口（modsecurityversionedkeywords / halfversionedmysql）
 import { modsecurityversionedkeywords } from './plugins/modsecurityversionedkeywords.js';
 import { halfversionedmysql } from './plugins/halfversionedmysql.js';
+// D13 新增 —— 上游形态变体（T-6 版本注释族，真机 A/B 用；不动默认链，判决见 CHANGELOG）
+import { versionedkeywordsnospace } from './plugins/versionedkeywordsnospace.js';
+import { versionedmorekeywordsnospace } from './plugins/versionedmorekeywordsnospace.js';
+import { halfversionedmorekeywordsopen } from './plugins/halfversionedmorekeywordsopen.js';
+import { modsecurityversionedblock } from './plugins/modsecurityversionedblock.js';
+import { modsecurityzeroversionedblock } from './plugins/modsecurityzeroversionedblock.js';
 // v24 新增 20 个 WAF 绕过插件 — 补齐 sqlmap 官方 tamper 全集（205 → 225）
 import { blindbinary } from './plugins/blindbinary.js';
 import { castprefix } from './plugins/castprefix.js';
@@ -526,6 +532,12 @@ tamperRegistry.registerMany([
   unionvaluesrow,
   scalarselectinline,
   dash2hash,
+  // D13 —— 上游形态变体（T-6，真机 A/B 用，不动默认链）
+  versionedkeywordsnospace,
+  versionedmorekeywordsnospace,
+  halfversionedmorekeywordsopen,
+  modsecurityversionedblock,
+  modsecurityzeroversionedblock,
 ]);
 
 /**

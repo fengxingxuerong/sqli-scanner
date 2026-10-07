@@ -28,10 +28,41 @@ const SNAPSHOT = resolve(ROOT, 'server/src/core/tamper/upstream-sqlmap-doctests.
 const BASELINE = resolve(ROOT, 'server/src/core/tamper/tamper-upstream-examples-baseline.json');
 const TARBALL_URL = `https://codeload.github.com/sqlmapproject/sqlmap/tar.gz/refs/tags/${SQLMAP_TAG}`;
 
+// ---------- docstring 编译层反斜杠还原 ----------
+// [2026-10-07 D13] 上游 tamper/*.py 的 docstring 是**普通**三引号字符串（非 raw）：Python 编译
+// 时会先对整个 docstring 做一层转义处理，doctest 看到的是处理后的文本；随后 doctest 再把
+// 「期望输出行」当 Python 字面量解析。此前只实现了第二层 ⇒ 含 `\\` 的 doctest
+// （escapequotes / charunicodeescape）被多算一层，上游的**单**反斜杠形态被快照记成双反斜杠
+// —— T-4 的两条「漂移」实为幻影（ast.get_docstring 实证）。本函数补第一层：
+// 按 Python 规则映射已知转义；未知转义保留「反斜杠+字符」（与 Python 行为一致）；
+// `\N{...}` 命名转义与行尾续行不支持 ⇒ 返回 null，调用方回退原文（绝不猜）。
+function unescapeDocstringLine(s) {
+  let out = '';
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (c !== '\\') { out += c; continue; }
+    const n = s[++i];
+    if (n === undefined) return null;
+    const simple = { n: '\n', t: '\t', r: '\r', b: '\b', f: '\f', v: '\v', a: '\x07', "'": "'", '"': '"', '\\': '\\', '\n': '\n' };
+    if (n in simple) { out += simple[n]; continue; }
+    if (/[0-7]/.test(n)) { // \ooo 八进制（\0 是其一）
+      let oct = n;
+      while (oct.length < 3 && /[0-7]/.test(s[i + 1] ?? '')) oct += s[++i];
+      out += String.fromCharCode(parseInt(oct, 8));
+      continue;
+    }
+    if (n === 'x') { const h = s.slice(i + 1, i + 3); if (!/^[0-9a-fA-F]{2}$/.test(h)) return null; out += String.fromCharCode(parseInt(h, 16)); i += 2; continue; }
+    if (n === 'u') { const h = s.slice(i + 1, i + 5); if (!/^[0-9a-fA-F]{4}$/.test(h)) return null; out += String.fromCharCode(parseInt(h, 16)); i += 4; continue; }
+    if (n === 'U') { const h = s.slice(i + 1, i + 9); if (!/^[0-9a-fA-F]{8}$/.test(h)) return null; out += String.fromCodePoint(parseInt(h, 16)); i += 8; continue; }
+    if (n === 'N') return null;
+    out += '\\' + n;
+  }
+  return out;
+}
+
 // ---------- Python 字符串字面量 → JS 字符串 ----------
 // 只处理 doctest 里出现的形态：'x' / "x" / u'x' / rb'x' 加常见转义；解析不了返回 null（绝不猜）。
-function parsePyLiteral(src) {
-  let s = src.trim();
+function parsePyLiteral(src) {  let s = src.trim();
   const prefix = s.match(/^([a-zA-Z]{1,2})(?=['"])/);
   if (prefix) {
     if (!/^(u|b|r|rb|br|ur|f)?$/i.test(prefix[1])) return null;
@@ -79,7 +110,12 @@ function parsePyLiteral(src) {
 // 所以不靠缩进/后缀猜边界，而是**逐行累加、第一个能解析成 Python 字面量的累积即答案**；
 // 一个都解析不出来 ⇒ 这条示例直接放弃（绝不猜）。
 function extractFromSource(name, src) {
-  const lines = src.split(/\r?\n/);
+  const rawLines = src.split(/\r?\n/);
+  // 先过 docstring 编译层（见 unescapeDocstringLine 注释）：还原失败 ⇒ 回退原文行（绝不猜）
+  const lines = rawLines.map((l) => {
+    const u = unescapeDocstringLine(l);
+    return u === null ? l : u;
+  });
   const pairs = [];
   for (let i = 0; i < lines.length; i++) {
     const m = lines[i].match(/^\s*>>>\s*tamper\((.*)\)\s*(?:#.*)?$/);

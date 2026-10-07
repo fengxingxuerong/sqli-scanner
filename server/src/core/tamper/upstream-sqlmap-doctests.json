@@ -1,7 +1,7 @@
 {
   "_comment": "上游 sqlmap docstring 里的 >>> tamper(输入)/期望输出 对，按 tag 钉死。这是外部判据，不许手工编辑：改动只允许来自 --refresh。",
   "tag": "1.10.10",
-  "at": "2026-10-06T10:57:06.190Z",
+  "at": "2026-10-07T14:56:44.211Z",
   "plugins": 79,
   "examples": 126,
   "perPlugin": {
@@ -134,7 +134,7 @@
     "charunicodeescape": [
       {
         "input": "SELECT FIELD FROM TABLE",
-        "output": "\\\\u0053\\\\u0045\\\\u004C\\\\u0045\\\\u0043\\\\u0054\\\\u0020\\\\u0046\\\\u0049\\\\u0045\\\\u004C\\\\u0044\\\\u0020\\\\u0046\\\\u0052\\\\u004F\\\\u004D\\\\u0020\\\\u0054\\\\u0041\\\\u0042\\\\u004C\\\\u0045"
+        "output": "\\u0053\\u0045\\u004C\\u0045\\u0043\\u0054\\u0020\\u0046\\u0049\\u0045\\u004C\\u0044\\u0020\\u0046\\u0052\\u004F\\u004D\\u0020\\u0054\\u0041\\u0042\\u004C\\u0045"
       }
     ],
     "commalesslimit": [
@@ -194,7 +194,7 @@
     "escapequotes": [
       {
         "input": "1\" AND SLEEP(5)#",
-        "output": "1\\\\\" AND SLEEP(5)#"
+        "output": "1\\\" AND SLEEP(5)#"
       }
     ],
     "greatest": [

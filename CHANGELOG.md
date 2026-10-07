@@ -4,6 +4,53 @@
 
 ## [Unreleased]
 
+### 2026-10-07 批次 D13 · T-4 幻影漂移撤回（判据缺陷）+ T-6 上游形态变体 5 件入库（真机 A/B 前置）
+
+**先撤一条重要的：T-4「双反斜杠族」（charunicodeescape / escapequotes）整条撤回 —— 不是语义漂移，
+是外部判据自身的提取缺陷。**
+
+- 疑点来自上游源码对拍：`charunicodeescape.py` 的**代码**只发单反斜杠（`"\\u00%s"`、`"\\u%04X"`），
+  它的 docstring doctest 却显示双反斜杠 —— 上游自己「代码 vs 卷子」矛盾。
+- 裁决（ast.get_docstring，等价 Python 编译器行为）：docstring 是**普通**三引号字符串（非 raw），
+  Python 编译时先对整个 docstring 做一层转义（`\\\\`→`\\`），doctest 再把输出行当字面量解析
+  （第二层）。两层走完，上游**真实期望 = 单反斜杠**（`1\"` / `\u0053`），与本仓现有实现
+  **逐字节一致** —— T-4 的两条「漂移」自始不存在。
+- 根因：`verify-tamper-upstream-examples.mjs` 的提取器只实现了第二层（parsePyLiteral），
+  少做 docstring 编译层 ⇒ 快照把上游形态多算一层反斜杠。全快照仅这两条 doctest 含反斜杠，
+  恰好就是 T-4 那两条 —— 其余 124 条不受影响。
+- 修法：提取器补 `unescapeDocstringLine`（按 Python 规则映射已知转义；未知转义保留「反斜杠+字符」
+  与 Python 一致；`\N{}` 命名转义与行尾续行不支持 ⇒ 回退原文，绝不猜）→ `--refresh` 重采快照
+  （diff 仅此两条 + 时间戳）→ `--prune-baseline` 撤回两条。字面一致 **98/114 → 100/114**，
+  豁免账 16 → **14**。T-4 从「等真机证据」改判「无需做」。
+
+**T-6 版本注释族：5 件「上游形态变体」入库 —— 不动默认链，真机 A/B 后才判决**
+
+路线文档 §六 T-6 的证据要求是「只能 modsec-live 真机 A/B」（作者注记"本会话跑不了"——dispatch
+通道本轮已打通，卡点解除）。本批先把上游形态做成**新增插件**让真机矩阵自动测到它们；
+是否替换默认 = 看 dispatch 真机数字，本批不预判。
+
+| 变体（新） | 对标默认件 | 上游形态差异 |
+|---|---|---|
+| `versionedkeywordsnospace` | `versionedkeywords` | 贴字 `/*!KEYWORD*/` 无空格 + 只包「裸词」（后随 `(` 的函数调用不包） |
+| `versionedmorekeywordsnospace` | `versionedmorekeywords` | 贴字 + **函数名也包**（CONCAT/CHAR/IFNULL…），排除 IGNORE_SPACE_AFFECTED_KEYWORDS（CAST( 不包裹正是它） |
+| `halfversionedmorekeywordsopen` | `halfversionedmorekeywords` | 前插 `/*!0` **不闭合**（上游 doctest 全程无 `*/`，整段尾巴处于版本注释内） |
+| `modsecurityversionedblock` | `modsecurityversioned` | 首词后**整段**包进单条 `/*!30XXX...*/`（随机 3 位，走 ctx.rng 仓规） |
+| `modsecurityzeroversionedblock` | `modsecurityzeroversioned` | 整段单条零版本注释 `/*!00000...*/`（确定性） |
+
+- **关键词面取上游运行期真值**：`upstreamKeywords.js`（data/txt/keywords.txt 1018 词 +
+  IGNORE_SPACE_AFFECTED_KEYWORDS 13 词，纯数据引用）—— 变体与上游在同一样本面上行为可比。
+  零代码复制（GPLv2 纪律）：只取数据与形态，实现按本仓房规重写（doctests 契约 + ctx.rng 注入）。
+- 判据：各插件 doctests 字段锚上游 doctest 逐字节形态（tamper.doctest.test.js 自动复验）；
+  新增 `tamper.upstreamVariants.test.js`（6 条）钉结构性不变量（贴字无空格 / 不闭合不引入 `*/` /
+  整段恰一 /*! 一 `*//` / rng 注入确定 / CAST 排除可见 / 默认件原样在册）。
+- **离线矩阵先行**（本地 CRS 离线 12 类，默认 vs 变体）：`versionedkeywords` 2/12·16.7% →
+  nospace **3/12·25.0%**；`versionedmorekeywords` 3/12·19.4% → nospace **4/12·33.3%**；
+  `halfversionedmorekeywords` 3/12·19.4% → open 3/12·19.4%（持平）；
+  `modsecurity*versioned` 2/12·16.7% → block **0/12·0%**（整段单注释在离线 12 类上全军覆没，
+  离线口径反而变差）。⚠️ 离线只说明规则命中；**判决以真机为准**，见下一条 dispatch 留痕。
+- 顺带修：插件总数 229 → 234（README 两处口径），tamper.test.js 的 ALL_NAMES 防漏登记守卫
+  按"新增必补"的既有设计补入 5 名。
+
 ### 2026-10-07 批次 D12 · 竞品吸收 T-1…T-10 里「本地可判」的 8 条：按上游 1.10.10 源码逐条对拍
 
 来源不是"再写一遍期望"，而是把上游 `tamper/*.py`（tag 1.10.10，raw.githubusercontent 取回）的

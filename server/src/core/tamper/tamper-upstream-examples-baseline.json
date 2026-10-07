@@ -1,11 +1,9 @@
 {
-  "_comment": "verify-tamper-upstream-examples 的豁免账：逐条点名，只减不增（2026-10-07 由 25 → 16：本仓已改为与上游一致的 8 项已删，randomcomments#0 移入 excluded）。每条必须写「为什么不是我们的错」或「是错但为什么要等（等什么证据）」。kind 取值：variant=有意变体（机制不同，各有靶面）/ cosmetic=形态差异（空格、大小写等不影响可执行性）/ queued=确认是缺陷或覆盖缺口，改动需要额外证据 ⇒ 已挂待办编号。基线失效（本仓输出已变成与上游一致）时脚本会照样绿，但应当从本账里删掉该行 —— 用 --prune-baseline 查。excluded 段 = 整件豁免：kind=nondeterministic 表示插件输出含随机性 ⇒ 与上游「单次采样」的字面比对原理上不适用；随机插件若只靠门禁的「双跑判异」隐式兜底，双跑撞车（Σp²）时会误判成确定性并必然翻红 ⇒ 必须在此显式点名，不靠运气。",
+  "_comment": "verify-tamper-upstream-examples 的豁免账：逐条点名，只减不增（2026-10-07 由 25 → 16 → 14：本仓已改为与上游一致的 8 项已删，randomcomments#0 移入 excluded；charunicodeescape#0 / escapequotes#0 两项系提取器缺陷造成的幻影漂移，D13 撤回——上游真实形态与本仓一致，见 CHANGELOG 批次 D13）。每条必须写「为什么不是我们的错」或「是错但为什么要等（等什么证据）」。kind 取值：variant=有意变体（机制不同，各有靶面）/ cosmetic=形态差异（空格、大小写等不影响可执行性）/ queued=确认是缺陷或覆盖缺口，改动需要额外证据 ⇒ 已挂待办编号。基线失效（本仓输出已变成与上游一致）时脚本会照样绿，但应当从本账里删掉该行 —— 用 --prune-baseline 查。excluded 段 = 整件豁免：kind=nondeterministic 表示插件输出含随机性 ⇒ 与上游「单次采样」的字面比对原理上不适用；随机插件若只靠门禁的「双跑判异」隐式兜底，双跑撞车（Σp²）时会误判成确定性并必然翻红 ⇒ 必须在此显式点名，不靠运气。",
   "sqlmapTag": "1.10.10",
   "at": "2026-10-07",
   "drift": {
     "charunicodeencode#0": "[variant] 2026-10-07 T-3 已对齐：十六进制改用**大写**（%u004C），与上游字面形态一致。剩余差异是两处有意保留：① 只编码字母、不编码数字与符号（上游对整串逐字符编码，要求目标对整串做 %u 解码，上游标注仅适用 ASP/ASP.NET）；② 不重复编码输入里已存在的 %20（上游会重编成 %u0020）—— 二次编码护栏，给已编码点位再编一层会让请求彻底解不开。",
-    "charunicodeescape#0": "[queued T-4] 上游输出双反斜杠 `\\\\u00XX`（其 payload 还要过一层反转义中间件），本仓输出单反斜杠 `\\u00XX`（本仓请求构造层不做二次转义）。谁对取决于目标侧解几层 ⇒ 必须在真机靶面 A/B 后再定，不许凭 README 换默认。",
-    "escapequotes#0": "[queued T-4] 与 charunicodeescape 同因（双/单反斜杠），同一批真机证据到位后一起定。",
     "halfversionedmorekeywords#0": "[queued T-6] 版本注释形态系统性不同：本仓 `/*!50540 UNION*/`（注释内含空格），上游 `/*!0UNION/*!0`（无空格、逐 token 重开注释）。上游形态是 CRS 社区实测产物，而本仓 2026-10-05 真机对拍里**版本注释族 0 打穿** ⇒ 这一族必须走 modsec-live 真机 A/B，本地自实现口径不足以判（README 已记录本地绿≠真机绿）；且它会动 wafRecommend 链与已入库绕过率基线。",
     "modsecurityversioned#0": "[queued T-6] 同族：上游把整段塞进 `/*!30963AND 2>1*/`，本仓只把关键字包进 `/*! AND */` ⇒ 覆盖面与本仓 misunion/versioned 族重叠，需真机判。",
     "modsecurityzeroversioned#0": "[queued T-6] 同族（`/*!00000...*/`）。",
@@ -20,7 +18,7 @@
     "symboliclogical#0": "[variant] 上游输出 URL 编码后的 `%26%26`，本仓输出裸 `&&` —— 本仓的 URL 编码在请求构造层统一完成，传输形态等价；若在 tamper 里再编码会变成双重编码。",
     "unmagicquotes#0": "[variant] 上游 `1' AND 1=1` → `1%bf%27-- -`（宽字节**并截断尾部 + 追加注释**），本仓只替换引号 ⇒ 尾部截断属注入上下文语义，本仓由 boundary/suffix 通道负责，不在 tamper 层重复实现（两处都做会互相吃掉点位形态）。"
   },
-  "_prunedAt": "2026-10-06T17:26:38.274Z",
+  "_prunedAt": "2026-10-07T14:57:08.942Z",
   "excluded": {
     "randomcomments": {
       "kind": "nondeterministic",

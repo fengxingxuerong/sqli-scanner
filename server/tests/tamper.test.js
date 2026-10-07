@@ -82,6 +82,10 @@ const ALL_NAMES = [
   'dash2hash', 'halfversionedmysql', 'hexliterals', 'keywordinterleave',
   'keywordSplit', 'modsecurityversionedkeywords', 'safedog',
   'scalarselectinline', 'yundun', '_360waf',
+  // D13 —— 上游形态变体（T-6，真机 A/B 用，不动默认链）
+  'versionedkeywordsnospace', 'versionedmorekeywordsnospace',
+  'halfversionedmorekeywordsopen', 'modsecurityversionedblock',
+  'modsecurityzeroversionedblock',
 ];
 
 test('全部内置 tamper 已注册', () => {
