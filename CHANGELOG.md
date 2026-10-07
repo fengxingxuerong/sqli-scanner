@@ -30,6 +30,26 @@
 ⚠️ 本矩阵是**离线规则**口径：只说明"没被这 12 类规则命中"，不等于真机打穿（真机口径只有 CI 的
 `modsec-live`，且本批未推 ⇒ 未跑）。
 
+### 真机补验（同日 dispatch run 37632563420，sha fd58dce）：13/13 job 全绿，含 modsec-live + tamper-waf-matrix
+
+- **离线矩阵独立复测逐项相符**：CI 里 `tamper-matrix`（CRS 离线 12 类）测得八件 = 本地 A/B 数字
+  逐位一致（overlongutf8 11/12 · 91.7%，randomcomments 6/12 · 50%，binary 2/12 · 11.2%，
+  htmlencode 10/12 · 83.3%，bluecoat 4/12 · 27.8%，charunicodeencode 8/12 · 66.7%，
+  concat2concatws / ifnull2casewhenisnull 0/12 · 0%）。
+- **真机（CRS 4.30.0，PL1+PL3，db 靶站）：打穿格局零变化** —— 唯一打穿链仍是 `unionvaluesrow`
+  2/19，八件无一件改变真机打穿数（对照 = 同日晨 nightly 37604696911，改前内容，同镜像 digest）。
+  逐件对拍出三个值得留痕的信号：
+  - `binary` 直连上界 **0 → 10/19**：T-1 语义修复被真机证实 —— 旧实现产出的 payload 在真
+    MySQL 上根本执行不了（上界 0），现在真的能到 SQL 了；WAF 仍全拦 ⇒ 修的是"有洞拿不到数据"，
+    不是绕过率。
+  - `overlongutf8` 真机放行 **0 → 18/19**：CRS 对该变换整体失明（与离线 91.7% 同向）；但现代
+    MySQL 拒收超长 UTF-8 ⇒ 直连上界仍 0/19，**本靶上无实际打穿** —— 放行 ≠ 打穿，分母看上界。
+  - `randomcomments` 直连上界 **10 → 0**：上游词内拆分（注释插进关键字内部）在真 MySQL 上破坏
+    解析 ⇒ 离线绕过率升（16.7% → 50%）的代价是本靶上"隐形但失效"。这是该上游技术自带的语义
+    代价，链选择上它不在真机打穿链里 ⇒ 保留（离线靶面有价值），但真机推荐链不含它。
+  - 其余五件（`concat2concatws` / `ifnull2casewhenisnull` / `bluecoat` / `charunicodeencode` /
+    `htmlencode`）真机表逐行不变。
+
 ### 撤回：`equaltolike` / `equaltorlike` 的「字面量内 `=` 不替换」（试过，有红灯为证）
 
 上一版给这两件加了"字符串字面量内的 `=` 属于取值、不参与替换"（比上游严）。缺陷注入阶段被
