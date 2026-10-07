@@ -213,6 +213,10 @@ const unexpected = mismatch.filter((m) => !m.known);
 const staleKeys = Object.keys(baseline.drift || {}).filter((k) => {
   if (!k.includes('#')) return false;
   const [name, idx] = k.split('#');
+  // [2026-10-07] 随机性插件的"是否仍漂移"只能靠单次采样判 ⇒ 会随运气翻牌
+  // （实测 randomcomments#0 在 ~1/16 的概率下恰好撞出上游那条形态 ⇒ 被误报"已失效"）。
+  // 已在 `excluded` 里声明 nondeterministic 的插件，其 drift 行不参与失效判定。
+  if (baseline.excluded?.[name]?.kind === 'nondeterministic') return false;
   const pairs = snap.perPlugin[name];
   if (!pairs) return true; // 上游已没有这个插件/示例 ⇒ 账项失效
   const p = pairs[Number(idx)];
@@ -234,6 +238,11 @@ if (process.argv.includes('--prune-baseline')) {
 console.log(`=== tamper 语义对齐上游官方示例（tag ${snap.tag}，快照 ${snap.at?.slice(0, 10)}）===`);
 console.log(`  上游示例覆盖插件 ${Object.keys(snap.perPlugin).length} 个｜字面比对 ${checked} 条，一致 ${ok} 条`);
 if (skippedRandom.length) console.log(`  随机性跳过 ${skippedRandom.length} 条（逐条点名，不静默）`);
+// [2026-10-07] 双跑判异只是隐式兜底：两跑撞出同一形态（概率 Σp²）时会漏判成确定性插件并进入
+// 字面比对 ⇒ 必然翻红（实测 space2mysqlblank#0 触发过）。凡命中随机跳过却未登记 excluded 的，
+// 点名提醒登记 —— 别让下一批人再踩同一个翻牌。
+const unregisteredRandom = [...new Set(skippedRandom.filter((s) => !baseline.excluded?.[s.name]).map((s) => s.name))];
+if (unregisteredRandom.length) console.log(`  ⚠️ 以下插件输出含随机性但未登记 excluded/kind=nondeterministic（双跑判异有撞车漏检率，会随运气翻红）：${unregisteredRandom.join(', ')}`);
 if (skippedNoPlugin.length) console.log(`  本仓无同名插件 ${skippedNoPlugin.length}: ${skippedNoPlugin.join(', ')}`);
 if (skippedError.length) console.log(`  调用抛错 ${skippedError.length}: ${skippedError.join(' | ')}`);
 for (const m of mismatch) {

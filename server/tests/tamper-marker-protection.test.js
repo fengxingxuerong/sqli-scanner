@@ -52,7 +52,9 @@ test('4) 有 SQLISCANNER0 标记 + charunicodeencode → 标记被保护（不�
   const payload = "1 UNION SELECT 'SQLISCANNER0'";
   const out = applyTampers(payload, ctx, ['charunicodeencode']);
   // SQL 字母应被编码为 %uXXXX
-  assert.ok(out.includes('%u0055%u004e%u0049%u004f%u004e'), 'UNION 应被编码');
+  // [T-3 2026-10-07] 十六进制由小写改**大写**（对齐上游 sqlmap 1.10.10：`%u` 编码只按字面匹配，
+  //   WAF 规则写大写形态时小写变体照样命中）。本行的期望值随之改写，就地留痕勿复原。
+  assert.ok(out.includes('%u0055%u004E%u0049%u004F%u004E'), 'UNION 应被编码');
   // 标记应保持原样（占位符是纯数字，charunicodeencode 只编码字母）
   assert.ok(out.includes('SQLISCANNER0'), '标记应保持原样不被编码');
   assert.ok(!/7331999/.test(out), '不应有占位符残留');

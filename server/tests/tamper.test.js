@@ -276,9 +276,12 @@ test('space2nbsp: 空格 → %a0', () => {
 test('space2blank: 空格 → %0b', () => {
   assert.equal(tamperRegistry.get('space2blank').transform('a b'), 'a%0bb');
 });
+// [T-8 2026-10-07] 期望由 `CASE WHEN ISNULL(a) THEN b ELSE a END` 改为 **带括号**
+// `THEN (b) ELSE (a)` —— 对齐上游 sqlmap 1.10.10（分支为复合表达式时不加括号会被
+// 算子优先级吞掉）。旧期望是"本仓自己写的、且抄错了"的那类断言，就地留痕勿复原。
 test('ifnull2casewhenisnull: IFNULL → CASE WHEN', () => {
   assert.equal(tamperRegistry.get('ifnull2casewhenisnull').transform('IFNULL(a,b)'),
-    'CASE WHEN ISNULL(a) THEN b ELSE a END');
+    'CASE WHEN ISNULL(a) THEN (b) ELSE (a) END');
 });
 test('apostrophe2char: 单引号 → CHAR(39)', () => {
   assert.equal(tamperRegistry.get('apostrophe2char').transform("a'b"), 'aCHAR(39)b');
