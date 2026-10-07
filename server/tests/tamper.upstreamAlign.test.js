@@ -198,19 +198,33 @@ test('⑪ equaltolike / equaltorlike：维持上游口径，字面量内的 = �
   assert.equal(rlike.transform('a!=1', {}), 'a!=1');
 });
 
-// ── ⑩ T-10 randomcomments：词内拆分（ctx.rng 注入 ⇒ 确定性） ────────────────────
-test('⑩ randomcomments：在关键字**词内**插 /**/（随机性走 ctx.rng）', () => {
+// ── ⑩ randomcomments：默认件必须**词后追加**，绝不在词内切分（真机反向钉子） ──────
+//    D12 曾按上游改成词内随机切分：离线 12 类矩阵 16.7% → 50%，但 CI dispatch 真机
+//    实测**直连上界 10/19 → 0/19**（MySQL 把注释当分隔符，`SEL/**/ECT` 是两个标识符）。
+//    ⇒ 离线"规则命中"涨了、真机"还能不能执行"归零。故还原词后追加，并把"不得词内切分"
+//    钉成断言：以后任何人再照上游改这一件，这里先红。
+test('⑩ randomcomments：词后追加，且不得在关键字词内插注释（真机证伪后的反向钉子）', () => {
   const p = getPlugin('randomcomments');
-  const always = () => 0;      // rng() < 0.5 恒真 ⇒ 每个内部位置都插
-  const never = () => 0.9;     // 恒假 ⇒ 走"至少切一刀"兜底
-  // 与上游同一循环边界（内部位置 1..len-2），末字符前不插 ⇒ 末两字母恒相邻
-  assert.equal(p.transform('INSERT', { rng: always }), 'I/**/N/**/S/**/E/**/RT');
-  const fallback = String(p.transform('INSERT', { rng: never }));
-  assert.ok(fallback.includes('/**/'), `兜底分支必须保证形态改变，实际 ${fallback}`);
-  // 结构性：/**/ 必须落在词内（旧实现只在词后追加 ⇒ 结尾一定是 /**/）
-  assert.ok(!/\/\*\*\/$/.test(fallback), `注释不能只在词尾（那是旧行为）：${fallback}`);
-  assert.ok(/^[A-Za-z]/.test(fallback) && /[A-Za-z]$/.test(fallback),
-    `词内拆分应保留首尾字母：${fallback}`);
-  // 非关键字不受影响
-  assert.equal(p.transform('foo bar', { rng: always }), 'foo bar');
+  assert.equal(p.transform('SELECT 1', {}), 'SELECT/**/ 1');
+  assert.equal(p.transform('INSERT', {}), 'INSERT/**/');
+  assert.equal(p.transform('foo bar', {}), 'foo bar', '非关键字不受影响');
+
+  const samples = [
+    'SELECT 1',
+    '1 UNION ALL SELECT NULL, NULL, NULL',
+    "1' AND SLEEP(5)#",
+    '1 ORDER BY 3-- -',
+    'INSERT INTO t VALUES(1)',
+    'WHERE id = 1 AND x = 2',
+  ];
+  for (const s of samples) {
+    const out = String(p.transform(s, {}));
+    // 结构性不变量：任何 /**/ 的两侧不得同时是字母（词内切分的判据）
+    assert.ok(!/[A-Za-z]\/\*\*\/[A-Za-z]/.test(out),
+      `出现词内切分（真机必然语法错误）：${JSON.stringify(s)} → ${JSON.stringify(out)}`);
+    // 且形态确实变了（至少一处关键字被动过）
+    assert.ok(out.includes('/**/'), `关键字后应插入 /**/：${JSON.stringify(s)} → ${JSON.stringify(out)}`);
+    // 去掉 /**/ 后必须能还原原文（纯插入，不删改任何原字符）
+    assert.equal(out.replace(/\/\*\*\//g, ''), s, '只做插入，不得改动原串');
+  }
 });

@@ -193,7 +193,7 @@ admin-only 触发页 `/admin/panel`（users.admin 角色门禁 403）+ admin 会
 请把结论视为**待复核线索**而非可用证据——报告会在 `summary.dbmsEvidence.caveat` 中自动声明这一点。
 （SQL Server 与 Oracle 已于 2026-09-14/15 升级 verified，2026-09-22 补齐产物与版本凭证，**不在本段范围**。）
 | **1920 条 payload 模板** | 含注释/编码/子句/嵌套闭合变体：主库 1769 + 子句 137 + OOB 14（口径：各库×各技术下的模板条目数，**同一模板跨库/技术重复计入**）+ 686 条声明式注册表（`payloads/registry.json` 681 + `payloads/registry.versioned.json` 5 条版本门条目） |
-| **234 个 tamper 插件** | 覆盖 sqlmap 官方 tamper 全集（84/84，分母取自 tag 1.10.10 上游清单；`npm run tamper:parity` 核对名字、`npm run tamper:examples` 用**上游 docstring 里的官方示例**反测语义——同名不等于同行为，当前 100/114 条字面一致（另有 12 条因输出含随机性不适用字面比对、判据逐条点名跳过），其余 14 条逐条记因于 `tamper-upstream-examples-baseline.json`；含批次 D13 新增 5 件「上游形态变体」——真机 A/B 用，不动默认链）。⚠️ 绕过率口径见 [docs/waf-绕过能力实测口径.md](docs/waf-绕过能力实测口径.md) |
+| **234 个 tamper 插件** | 覆盖 sqlmap 官方 tamper 全集（84/84，分母取自 tag 1.10.10 上游清单；`npm run tamper:parity` 核对名字、`npm run tamper:examples` 用**上游 docstring 里的官方示例**反测语义——同名不等于同行为，当前 100/115 条字面一致（另有 11 条因输出含随机性不适用字面比对、判据逐条点名跳过），其余 15 条逐条记因于 `tamper-upstream-examples-baseline.json`；含批次 D13 新增 5 件「上游形态变体」——真机 A/B 用，不动默认链）。⚠️ 绕过率口径见 [docs/waf-绕过能力实测口径.md](docs/waf-绕过能力实测口径.md) |
 | **62 WAF 指纹** | 自动识别 WAF 类型并推荐 tamper 组合 |
 | **可视化报告** | 风险环形图 + 技术分布条形图 + 漏洞列表 + 数据提取树 + 检测摘要 |
 | **深度提取** | 分页聚合数据提取，绕过 UNION 限制 |
