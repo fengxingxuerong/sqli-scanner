@@ -4,6 +4,28 @@
 
 ## [Unreleased]
 
+### 2026-10-08 批次 D14 真机复验（CI dispatch run 37653985121，head `50237e5`）
+
+D14 推送后 dispatch 跑完整 `ci.yml`（CRS 4.30.0 / PARANOIA 1 与 3 / 靶站 db 模式，样本 19 条）：
+
+| 判据 | 结论 |
+|---|---|
+| `randomcomments` **直连上界** | **10/19** ✅ —— D12 把它打到 0/19，D14 还原后回到改前水平，语义活力确认恢复 |
+| 唯一真机打穿的链 | 仍是 `unionvaluesrow` 系列（2/19）；本批未改变打穿格局（与 D12 补验一致） |
+| `lint` / `test-frontend` / `audit` / `tamper-waf-matrix` | 全 success |
+| `tamper-waf-matrix` 独立复测的离线 12 类 | 与本地 A/B **逐位一致**（randomcomments 6/12·50%、overlongutf8 11/12·91.7%、binary 2/12·11.2%、htmlencode 10/12·83.3%） |
+
+**T-6 判决（D13 入库的 5 件版本注释族变体，真机 A/B 到此为止）**
+
+| 变体 | 真机 PL1 | 判 |
+|---|---|---|
+| `versionedkeywordsnospace` / `versionedmorekeywordsnospace` / `modsecurityversionedblock` / `modsecurityzeroversionedblock` | 真机 + 自实现**全拦**（放行 0/19，与各自默认件同） | **无增益 ⇒ 不替换默认件** |
+| `halfversionedmorekeywordsopen` | 打穿 0/19、放行 0/19、**直连上界 0/19** | ⚠️ 上界归零 —— `/*!0` 不闭合把整段留在版本注释里，真 MySQL 上根本解析不了。**与 randomcomments 词内形态同型（真机证伪）** |
+
+⇒ 5 件变体真机**全部零增益**，其中 1 件还把上界打到 0。故：默认件一律不动；
+`halfversionedmorekeywordsopen` 的处置（加"语义不可用"标记并从候选池/推荐链中排除，
+与 D7 判 `equaltorlike` 为废插件同一条标准）列为下一批 D15，本批不做半截。
+
 ### 2026-10-08 批次 D14 · randomcomments 真机回归修复：离线涨的那 33pp 不是词内拆分挣的
 
 D12 把 `randomcomments` 改成上游的**词内**随机切分（`INSERT` → `I/**/NS/**/ERT`），离线 12 类矩阵
