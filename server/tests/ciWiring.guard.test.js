@@ -124,3 +124,37 @@ test('② 不空转：两侧声明的每个 e2e 模式都必须至少命中 1 �
       '这类门禁永远不会红 —— 要么修正模式，要么删掉该行。',
   );
 });
+
+// [D22 2026-10-09] 「失败可见化」守卫 —— `tamper-waf-matrix` 的 summary 必须真的连着 outcome。
+//
+// 背景（TODO 的 K 条「job 红了没人知道」）：该 job 只在 schedule / workflow_dispatch 跑，
+// 平时没人盯。复核后确认 2026-09-22 那轮已把**真断言门禁**的 continue-on-error 去掉
+// （那个开关本来就不阻塞 PR ⇒ 只买到"失败报成绿"），所以剩下的是**观察面**问题：
+// 失败要在 job summary 里一眼可见。
+//
+// 判据不是"有没有那个 step"，而是**配对**：summary 读的 `steps.<id>.outcome` 必须与真实存在的
+// `id:` 对得上。少一个 id ⇒ summary 恒显示"未跑" ⇒ 比没有 summary 更糟（它看起来像在工作）。
+// 两个方向都钉：id 必须在、summary 必须读它。
+test('★ D22：tamper-waf-matrix 的失败可见化 summary 与其 step id 严格配对', () => {
+  const raw = readFileSync(path.join(REPO, '.github/workflows/ci.yml'), 'utf8');
+  // 先切出该 job 的片段（下一个顶层 job 定义作为右边界），避免拿别的 job 的 id 蒙混
+  const start = raw.indexOf('\n  tamper-waf-matrix:');
+  assert.ok(start > 0, '找不到 tamper-waf-matrix job（ci.yml 结构变了？）');
+  const rest = raw.slice(start + 1);
+  const nextRel = rest.slice(1).search(/\n {2}[a-zA-Z0-9_-]+:\n/);
+  const seg = nextRel > 0 ? rest.slice(0, nextRel + 1) : rest;
+  // 分母守卫：切错片段（比如切空）会让后面全部"通过"
+  assert.ok(seg.length > 3000, `job 段提取异常（${seg.length} 字符）⇒ 片段切分逻辑变了`);
+
+  assert.match(seg, /门禁结果汇总（失败可见化）/, '缺少失败可见化 summary step（K 条的解法）');
+  assert.match(seg, /GITHUB_STEP_SUMMARY/, 'summary 必须写进 job summary，否则等于没写');
+
+  for (const id of ['matrix_measure', 'waf_gate']) {
+    assert.match(seg, new RegExp(`^\\s+id: ${id}\\s*$`, 'm'), `step id \`${id}\` 缺失`);
+    assert.match(
+      seg,
+      new RegExp(`steps\\.${id}\\.outcome`),
+      `summary 必须读 \`steps.${id}.outcome\` —— 漏读会让该步结论恒显示"未跑"（比没有 summary 更误导）`,
+    );
+  }
+});
