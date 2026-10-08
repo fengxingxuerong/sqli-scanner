@@ -340,7 +340,10 @@ export function buildConfig(args) {
   // ErrorDetector 消费，opt-in 默认关闭）
   if (args.parseErrors) config.parseErrors = true;
   // —— 对标 sqlmap 增强参数透传（引擎消费同名字段）——
-  if (args.randomUA) config.randomUA = true;
+  // [D21 2026-10-09] 此处原有 `if (args.randomUA) config.randomUA = true;` —— **死代码**：
+  //   args.js 里 `--random-agent` 被两条 else-if 重复解析，后者永不执行 ⇒ `args.randomUA`
+  //   恒 undefined；且顶层 `config.randomUA` 在 server/src 内 0 个读取点。
+  //   真正的 UA 随机化走 `wafEvasion.randomUA`（见上面 `if (args.randomAgent && !args.mobile)`）。
   if (args.flushSession) config.flushSession = true;
   if (args.freshQueries) config.freshQueries = true;
   if (args.noCast) config.noCast = true;

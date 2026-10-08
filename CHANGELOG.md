@@ -4,6 +4,50 @@
 
 ## [Unreleased]
 
+### 2026-10-09 批次 D21 · TODO 真实性审计：清 3 处过期条目 + 修 `--random-agent` 重复解析（死代码）
+
+**起因**：本次会话里我**两次**被 `TODO.md` 的过期条目误导 ——
+① 把 A3 当成"未开工"（实际早交付）；② 据「9 个键在 Web/Tauri 无处可设」准备重做 UI
+（实际 9 键**全部已有 UI 入口**）。⇒ 对 TODO 做一次真实性审计，并把过期条目标掉。
+
+#### ① 审计方法（可复现）
+
+`grep -n '^#\{3,4\} ' TODO.md | grep -v '✅\|已修\|已完成\|已结案\|已实测'` 抽出**未标注完成**的条目，
+再逐条到代码/CI 里核实。结论：**功能与工程待办基本已清空**，剩下的是两类需先定口径的取舍
+（`K. tamper-waf-matrix 红无信号` —— 要告警还是要安静；`T. udf-lab 沙箱抖动` —— 消不消）。
+
+#### ② 顺手修掉一个**真缺陷**：`--random-agent` 被解析两次
+
+审计中发现 `server/bin/cli/args.js` 把 `--random-agent` **写进了同一条 else-if 链两次**
+（`:148 args.randomAgent = true` 与 `:237 args.randomUA = true`）⇒ **第二个分支永不执行**
+⇒ `args.randomUA` 恒 `undefined` ⇒ `config.js` 里 `if (args.randomUA) config.randomUA = true;`
+是**死代码**（另证：顶层 `config.randomUA` 在 `server/src` 内 0 个读取点）。
+
+危害为 0 属侥幸 —— 「**重复分支静默吞掉后来者**」这个形状才是要防的：下一个被重复的 flag
+若正好是有效开关，改动会像"没接线"一样静默失效。已删两处（真开关 `wafEvasion.randomUA`
+由 `args.randomAgent` 驱动，保持不动）。
+
+#### ③ 新增守卫 + 一次真实的自我踩坑
+
+守卫：**同一条 else-if 链里同一 flag 只允许出现一次**（含分母守卫：提取数须 >100，
+防正则失效后恒绿）。
+
+⚠️ **首跑就假红** —— 判据把**注释里**的反面示例 `else if (a === '--random-agent')...` 当成了真分支。
+这正是本仓反复强调的「**判据的文本源必须排除注释**」。已改为先剥整行注释再匹配。
+
+#### ④ 缺陷注入复验（cp 备份还原）
+
+把重复分支加回 `args.js` ⇒ 守卫红、精确点名 `--random-agent` ✓；还原后 7/7 绿。
+
+#### ⑤ TODO 清理（3 处，全部标注日期与证据）
+
+| 条目 | 处理 |
+|---|---|
+| `L` 剩余待办 1：9 键无 UI 入口 | 标为**已做**（`AdvancedInjectionSection.tsx` + `InjectionScopeSection.tsx`），并注明"它误导过我" |
+| `L` 剩余待办 2：`randomUA` 空转写入 | 标为**已清**（本批，含更深的根因） |
+| 真实 ModSecurity 章：`compare-real.run.py` datadir | 标为**已按第二选项处理**（CI 改用 docker MySQL，脚本保留给本机），2026-10-09 复核该 job 每轮 success |
+| `8. 前端测试环境差异固化`：剩余动作 | 标为**已完成**（CI 已实跑数十轮，Linux 无平台性失败） |
+
 ### 2026-10-09 批次 D20 · 把"兜底靠排序蒙对"换成**显式保底**（清 D18 的死分支）+ COVERS 口径守卫
 
 **一句话**：D19 修好了 `waf403`，但它依赖的是 `chardoubleencode` **恰好**被排序排到静态链第 1；
