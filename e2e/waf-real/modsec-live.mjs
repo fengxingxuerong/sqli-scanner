@@ -149,20 +149,29 @@ async function sweep(base, chain) {
  * ⇒ 「该链直连打穿数 ≈ 它 nop 样本里的基线打穿数」就是**变换零贡献/变坏**的信号，
  *    不能读成「变换可用」。这一列就是给这个判读留的。
  */
+function changedMask(chain) {
+  if (!chain) return SAMPLES.map(() => false);
+  return SAMPLES.map((s) => {
+    const raw = payloadOf(s);
+    try {
+      return String(applyTampers(raw, ctx, chain)) !== String(raw);
+    } catch {
+      return false; // 抛错 ⇒ 按原样发（与 sweep 同口径）⇒ 不算改动
+    }
+  });
+}
+
+/**
+ * 该链对样本**无作用**（payload 原样送出）的条数。
+ *
+ * [D17 2026-10-08] 只数条数还不够 —— 关键是把打穿**按"改动 / 未改动"分组**：
+ *   · **未改动样本**打穿 = 基线（原 payload 本来就能过，与该变换无关）；
+ *   · **改动样本**打穿 = 该变换的**真贡献**。
+ * misunion 这类"无条件词内切分"的插件在未改动样本上照样打出 5/19，分组后才看得出它的改动样本是 0。
+ */
 function nopCount(chain) {
   if (!chain) return SAMPLES.length;
-  let n = 0;
-  for (const s of SAMPLES) {
-    const raw = payloadOf(s);
-    let t = raw;
-    try {
-      t = applyTampers(raw, ctx, chain);
-    } catch {
-      continue; // 抛错 ⇒ 不算 nop（该样本没原样送出）
-    }
-    if (String(t) === String(raw)) n += 1;
-  }
-  return n;
+  return changedMask(chain).filter((c) => !c).length;
 }
 
 /** 静态侧（自实现 crs-engine）对同一批样本、同一条链的判定 → 分歧归因用 */
@@ -283,6 +292,10 @@ async function main() {
   const run = async (label, chain, kind = 'plugin') => {
     const wafV = await sweep(BASE, chain); // 经 WAF
     const directV = PER_CHAIN_DIRECT || chain === null ? await sweep(DIRECT, chain) : null; // 绕过 WAF
+    const chgMask = changedMask(chain);
+    /** 在「改动 = wantChanged」的那批样本里打穿的条数（vs 的索引与 SAMPLES 对齐） */
+    const pwnIn = (vs, wantChanged) =>
+      vs ? vs.filter((v, i) => isPwn(v) && chgMask[i] === wantChanged).length : null;
     rows.push({
       kind,
       label,
@@ -292,6 +305,12 @@ async function main() {
       unknown: wafV.filter((v) => v === 'unknown').length,
       directPwn: directV ? directV.filter(isPwn).length : null,
       nop: nopCount(chain),
+      chg: chgMask.filter(Boolean).length,
+      // ★ 变换真贡献：payload **确实被改动过**的样本里经 WAF 打穿的条数。
+      //   它与 `nop` 样本贡献分开记 —— 见 nopCount 的说明（D17）。
+      wafPwnChg: pwnIn(wafV, true),
+      wafPwnNop: pwnIn(wafV, false),
+      directPwnChg: pwnIn(directV, true),
       static: staticSweep(chain),
     });
   };
@@ -334,11 +353,13 @@ async function main() {
   const dbMode = st.upper !== null;
 
   console.log(`\n插件 ${names.length} 个 · 样本 ${SAMPLES.length} 条 · LABEL=${LABEL} · 靶站模式=${target.mode}`);
-  console.log('打穿(真机) | 放行(真机) | 直连打穿(本链) | nop | 放行(自实现) | 链');
+  console.log('打穿(真机) | 真贡献 | 放行(真机) | 直连打穿(本链) | nop | 放行(自实现) | 链');
   for (const r of rows.slice(0, 25)) {
     const flag = r.wafPwn > 0 ? '  ★' : '   ';
+    const contrib = r.chg ? `${r.wafPwnChg}/${r.chg}` : '—';
     console.log(
       `${flag} ${String(r.wafPwn).padStart(2)}/${SAMPLES.length}        ` +
+        `${contrib.padStart(6)}        ` +
         `${String(r.wafPass).padStart(2)}/${SAMPLES.length}        ` +
         `${r.directPwn === null ? '  —  ' : `${String(r.directPwn).padStart(2)}/${SAMPLES.length}`}        ` +
         `${String(r.nop).padStart(2)}/${SAMPLES.length}        ` +
@@ -388,13 +409,15 @@ async function main() {
   );
 
   md.push('## 对拍矩阵（真机 vs 自实现 crs-engine）', '');
-  md.push('| 链 | 打穿(真机) | 放行(真机) | 直连打穿(本链) | nop | 放行(自实现) | 自实现命中规则 |');
-  md.push('|---|---|---|---|---|---|---|');
+  md.push('| 链 | 打穿(真机) | **真贡献** | 放行(真机) | 直连打穿(本链) | nop | 放行(自实现) | 自实现命中规则 |');
+  md.push('|---|---|---|---|---|---|---|---|');
   for (const r of rows) {
     if (r.kind !== 'plugin') continue; // 链行在「链的联合指纹对拍」一节单独呈现
     if (r.wafPass === 0 && r.static.pass === 0 && r.wafPwn === 0) continue;
     md.push(
-      `| \`${r.label}\` | ${dbMode ? `${r.wafPwn}/${SAMPLES.length}` : '不可判定'} | ${r.wafPass}/${SAMPLES.length} | ` +
+      `| \`${r.label}\` | ${dbMode ? `${r.wafPwn}/${SAMPLES.length}` : '不可判定'} | ` +
+        `${dbMode ? (r.chg ? `**${r.wafPwnChg}/${r.chg}**` : '—') : '不可判定'} | ` +
+        `${r.wafPass}/${SAMPLES.length} | ` +
         `${r.directPwn === null ? '—' : `${r.directPwn}/${SAMPLES.length}`} | ${r.nop}/${SAMPLES.length} | ` +
         `${r.static.pass}/${SAMPLES.length} | ${r.static.rules.join(', ') || '—'} |`
     );
@@ -406,6 +429,11 @@ async function main() {
     '> 判读规则：若「直连打穿(本链)」≈ 「nop 样本里的基线打穿数」⇒ **变换零贡献**，',
     '> 打穿的那些样本根本没被它改动过（实例：`misunion` 5/19 全部来自 nop 的 5 条，',
     '> 它真正改动的 7 条一条都没打穿）。别把它读成「这个变换能打穿」。',
+    '',
+    '> ★ **「真贡献」列**（[D17] 新增）= `打穿(真机) 中 payload 确实被该链改动过的条数 / 改动样本数`。',
+    '> 分母是**改动样本数**（≠19），与其余各列的 `/19` 不同口径 —— 这正是它的意义：',
+    '> 把「打穿」拆成 **真贡献（改动后仍打穿）** 与 **基线（nop 样本本来就打穿）**。',
+    '> 该列为 `0/n` ⇒ 这条链的变换**没有把任何一条样本救过 WAF**，它的打穿全来自 nop 样本。',
     ''
   );
   md.push(`真机**打穿**的插件（${winners.length}）：${winners.length ? winners.map((r) => `\`${r.label}\``).join(', ') : '（无）'}`, '');
@@ -419,10 +447,11 @@ async function main() {
 
   // [批次 D4] 链的联合指纹对拍（单独一节：全零链也是数据 —— 它证明该组合的真机天花板）
   md.push('', '## 链的联合指纹对拍（引擎实际部署形态）', '');
-  md.push('| 链 | 打穿(真机) | 放行(真机) | 直连打穿(本链) | nop | 放行(自实现) |', '|---|---|---|---|---|---|');
+  md.push('| 链 | 打穿(真机) | **真贡献** | 放行(真机) | 直连打穿(本链) | nop | 放行(自实现) |', '|---|---|---|---|---|---|---|');
   for (const r of chainRows) {
     md.push(
-      `| \`${r.label.replace('chain: ', '')}\` | ${r.wafPwn}/${SAMPLES.length} | ${r.wafPass}/${SAMPLES.length} | ` +
+      `| \`${r.label.replace('chain: ', '')}\` | ${r.wafPwn}/${SAMPLES.length} | ` +
+        `${r.chg ? `**${r.wafPwnChg}/${r.chg}**` : '—'} | ${r.wafPass}/${SAMPLES.length} | ` +
         `${r.directPwn === null ? '—' : `${r.directPwn}/${SAMPLES.length}`} | ${r.nop ?? '—'}/${SAMPLES.length} | ${r.static.pass}/${SAMPLES.length} |`
     );
   }
@@ -430,6 +459,12 @@ async function main() {
   md.push('', chainWinners.length
     ? `真机**打穿**的链（${chainWinners.length}）：${chainWinners.map((r) => `\`${r.label.replace('chain: ', '')}\``).join(', ')}`
     : '真机打穿的链：**（无）** —— 单插件全拦的联合指纹效应未出现', '');
+  // ★ [D17] 把「打穿」拆成**真贡献**与**基线**：只有被改动过的样本里打穿，才算这条链的本事
+  const realContrib = chainRows.filter((r) => r.wafPwnChg > 0);
+  md.push('', realContrib.length
+    ? `★ **变换真有贡献的链**（改动样本里经 WAF 打穿 > 0）：` +
+      realContrib.map((r) => `\`${r.label.replace('chain: ', '')}\`(${r.wafPwnChg}/${r.chg})`).join(', ')
+    : '★ **没有任何链的变换真正把样本救过 WAF** —— 所有打穿都来自 nop 样本（原 payload 本来就过）。');
 
   md.push('## 安全对照（期望 0 误拦）', '');
   md.push(fp.length ? fp.map((x) => `- \`${x.sample}\` → HTTP ${x.status}（CRS 误报，非本工具回归）`).join('\n') : '- 0 误拦 ✅');
@@ -445,6 +480,12 @@ async function main() {
     '   后者要配合 `nop` 列读：`直连打穿(本链)` ≈ nop 样本里的基线打穿数 ⇒ 变换零贡献。',
     '   [2026-10-08 实例] 曾据 `misunion` 的 5/19 误判「它的变换可用、判据误杀」，',
     '   核对后那 5 条全部是 nop 样本（不含 UNION），它改动的 7 条一条没打穿 —— 判据实际是对的。'
+  );
+  md.push(
+    '6. ★ **「真贡献」列是唯一能回答「这个变换到底有没有用」的列**（[D17] 新增）：',
+    '   分子 = 「打穿(真机)」里 payload **确实被改动过**的条数，分母 = 改动样本数（不是 19）。',
+    '   其余各列的分母都含 nop 样本 ⇒ 单看它们无法区分「变换把 payload 救过了 WAF」与',
+    '   「原 payload 本来就能过、这条链其实什么都没干」。该列为 `0/n` ⇒ 变换零贡献。'
   );
   mkdirSync(OUT_DIR, { recursive: true });
   const out = resolve(OUT_DIR, `modsec-docker-${LABEL}-${DATE}.md`);
