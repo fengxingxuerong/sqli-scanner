@@ -133,6 +133,38 @@ async function sweep(base, chain) {
   return vs;
 }
 
+/**
+ * 该链对样本**无作用**（payload 原样送出）的条数。
+ *
+ * [D16 2026-10-08] 为什么必须显式记这一列 —— 一次真实的误读：
+ * 报告里「直连上界」这个列名在第①节（逐样本）与第②节（逐链）**含义不同**：
+ *   · 第①节 = 原样本不经 WAF 能打穿几条（全局基线，如 10/19）；
+ *   · 第②节 = **该链变换后**不经 WAF 能打穿几条。
+ * 混读会得出完全相反的结论。实例：`misunion` 的链级直连上界是 5/19，看着"能用"，
+ * 而它的变换是把 `UNION` 从**词中间**插入块注释（`UNI` + 注释 + `ON`，词内切分 ⇒
+ * 真 MySQL 把注释当分隔符 ⇒ 两个标识符 ⇒ 语法错）。核对后：
+ * 那 5 条**全部来自 nop 样本**（`4,10,15,17,18`，本就不含 UNION），
+ * 它真正改动的 7 条（`1,2,3,8,13,14,16`）**一条都没打穿** ⇒ 变换零贡献。
+ * `lad` 同型（nop 2 条里打穿 1 条 = 它的 1/19；改动的 17 条全打不穿）。
+ * ⇒ 「该链直连打穿数 ≈ 它 nop 样本里的基线打穿数」就是**变换零贡献/变坏**的信号，
+ *    不能读成「变换可用」。这一列就是给这个判读留的。
+ */
+function nopCount(chain) {
+  if (!chain) return SAMPLES.length;
+  let n = 0;
+  for (const s of SAMPLES) {
+    const raw = payloadOf(s);
+    let t = raw;
+    try {
+      t = applyTampers(raw, ctx, chain);
+    } catch {
+      continue; // 抛错 ⇒ 不算 nop（该样本没原样送出）
+    }
+    if (String(t) === String(raw)) n += 1;
+  }
+  return n;
+}
+
 /** 静态侧（自实现 crs-engine）对同一批样本、同一条链的判定 → 分歧归因用 */
 // [批次 D5 补终 2026-10-05] 自实现引擎的档位必须与真机 LABEL 对齐（pl1 ⇒ PL1）：
 //   此前不传 paranoiaLevel ⇒ 默认 ≈PL3 ⇒ 「放行(自实现)」列与真机 PL1 列档位错位，
@@ -259,6 +291,7 @@ async function main() {
       wafSql: wafV.filter(atSql).length,
       unknown: wafV.filter((v) => v === 'unknown').length,
       directPwn: directV ? directV.filter(isPwn).length : null,
+      nop: nopCount(chain),
       static: staticSweep(chain),
     });
   };
@@ -301,13 +334,14 @@ async function main() {
   const dbMode = st.upper !== null;
 
   console.log(`\n插件 ${names.length} 个 · 样本 ${SAMPLES.length} 条 · LABEL=${LABEL} · 靶站模式=${target.mode}`);
-  console.log('打穿(真机) | 放行(真机) | 直连上界 | 放行(自实现) | 链');
+  console.log('打穿(真机) | 放行(真机) | 直连打穿(本链) | nop | 放行(自实现) | 链');
   for (const r of rows.slice(0, 25)) {
     const flag = r.wafPwn > 0 ? '  ★' : '   ';
     console.log(
       `${flag} ${String(r.wafPwn).padStart(2)}/${SAMPLES.length}        ` +
         `${String(r.wafPass).padStart(2)}/${SAMPLES.length}        ` +
         `${r.directPwn === null ? '  —  ' : `${String(r.directPwn).padStart(2)}/${SAMPLES.length}`}        ` +
+        `${String(r.nop).padStart(2)}/${SAMPLES.length}        ` +
         `${String(r.static.pass).padStart(2)}/${SAMPLES.length}        ${r.label}`
     );
   }
@@ -354,17 +388,26 @@ async function main() {
   );
 
   md.push('## 对拍矩阵（真机 vs 自实现 crs-engine）', '');
-  md.push('| 链 | 打穿(真机) | 放行(真机) | 直连上界 | 放行(自实现) | 自实现命中规则 |');
-  md.push('|---|---|---|---|---|---|');
+  md.push('| 链 | 打穿(真机) | 放行(真机) | 直连打穿(本链) | nop | 放行(自实现) | 自实现命中规则 |');
+  md.push('|---|---|---|---|---|---|---|');
   for (const r of rows) {
     if (r.kind !== 'plugin') continue; // 链行在「链的联合指纹对拍」一节单独呈现
     if (r.wafPass === 0 && r.static.pass === 0 && r.wafPwn === 0) continue;
     md.push(
       `| \`${r.label}\` | ${dbMode ? `${r.wafPwn}/${SAMPLES.length}` : '不可判定'} | ${r.wafPass}/${SAMPLES.length} | ` +
-        `${r.directPwn === null ? '—' : `${r.directPwn}/${SAMPLES.length}`} | ${r.static.pass}/${SAMPLES.length} | ${r.static.rules.join(', ') || '—'} |`
+        `${r.directPwn === null ? '—' : `${r.directPwn}/${SAMPLES.length}`} | ${r.nop}/${SAMPLES.length} | ` +
+        `${r.static.pass}/${SAMPLES.length} | ${r.static.rules.join(', ') || '—'} |`
     );
   }
   md.push('');
+  md.push(
+    '> ⚠️ **「直连打穿(本链)」≠「变换可用」**。本列是**该链变换后**直连打穿的条数，',
+    '> `nop` 是**该链对样本无作用**的条数（payload 原样送出）。',
+    '> 判读规则：若「直连打穿(本链)」≈ 「nop 样本里的基线打穿数」⇒ **变换零贡献**，',
+    '> 打穿的那些样本根本没被它改动过（实例：`misunion` 5/19 全部来自 nop 的 5 条，',
+    '> 它真正改动的 7 条一条都没打穿）。别把它读成「这个变换能打穿」。',
+    ''
+  );
   md.push(`真机**打穿**的插件（${winners.length}）：${winners.length ? winners.map((r) => `\`${r.label}\``).join(', ') : '（无）'}`, '');
   const anyPass = rows.filter((r) => r.kind === 'plugin' && r.wafPass > 0);
   md.push(`真机**放行**（未拦）的插件（${anyPass.length}）：${anyPass.length ? anyPass.map((r) => `\`${r.label}\``).join(', ') : '（无）'}`, '');
@@ -376,11 +419,11 @@ async function main() {
 
   // [批次 D4] 链的联合指纹对拍（单独一节：全零链也是数据 —— 它证明该组合的真机天花板）
   md.push('', '## 链的联合指纹对拍（引擎实际部署形态）', '');
-  md.push('| 链 | 打穿(真机) | 放行(真机) | 直连上界 | 放行(自实现) |', '|---|---|---|---|---|');
+  md.push('| 链 | 打穿(真机) | 放行(真机) | 直连打穿(本链) | nop | 放行(自实现) |', '|---|---|---|---|---|---|');
   for (const r of chainRows) {
     md.push(
       `| \`${r.label.replace('chain: ', '')}\` | ${r.wafPwn}/${SAMPLES.length} | ${r.wafPass}/${SAMPLES.length} | ` +
-        `${r.directPwn === null ? '—' : `${r.directPwn}/${SAMPLES.length}`} | ${r.static.pass}/${SAMPLES.length} |`
+        `${r.directPwn === null ? '—' : `${r.directPwn}/${SAMPLES.length}`} | ${r.nop ?? '—'}/${SAMPLES.length} | ${r.static.pass}/${SAMPLES.length} |`
     );
   }
   const chainWinners = chainRows.filter((r) => r.wafPwn > 0);
@@ -396,6 +439,13 @@ async function main() {
   md.push('2. **放行 ≠ 打穿**。放行只说明请求到了后端，不代表 SQL 执行、更不代表取到数据。');
   md.push('3. 判定只采信 MySQL 自己生成的证据（结果集标记 / MySQL 报错短语），', '   不使用「响应里出现 payload」这类回显型判据 —— echo 后端下它会恒真。');
   md.push('4. 本轮为**测量**，不是通过/失败判据；唯一让本脚本退出 1 的是「自检不通过」', '   （WAF 不在位 / 靶站不可注入 / 要求真库却没有真库）。');
+  md.push(
+    '5. ⚠️ **两个「直连」口径不同，别混读**：第①节「直连上界」= **原样本**不经 WAF 的打穿数',
+    '   （全局基线，如 10/19）；对拍矩阵里的「直连打穿(本链)」= **该链变换后**的条数。',
+    '   后者要配合 `nop` 列读：`直连打穿(本链)` ≈ nop 样本里的基线打穿数 ⇒ 变换零贡献。',
+    '   [2026-10-08 实例] 曾据 `misunion` 的 5/19 误判「它的变换可用、判据误杀」，',
+    '   核对后那 5 条全部是 nop 样本（不含 UNION），它改动的 7 条一条没打穿 —— 判据实际是对的。'
+  );
   mkdirSync(OUT_DIR, { recursive: true });
   const out = resolve(OUT_DIR, `modsec-docker-${LABEL}-${DATE}.md`);
   writeFileSync(out, md.join('\n'), 'utf8');

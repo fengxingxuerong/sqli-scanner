@@ -175,18 +175,34 @@ export const INVARIANTS = [
 /**
  * 单插件审计：实测派生 + 不变量检查。
  * @param {string} name 插件名
- * @returns {{name:string, exists:boolean, changed:number, eliminates:string[], introduces:string[], eliminatesAll:boolean, violations:Array<{id:string, evidence:string[]}>, error?:string}}
+ * @returns {{name:string, exists:boolean, changed:number, brokenOn:number, eliminates:string[], introduces:string[], eliminatesAll:boolean, violations:Array<{id:string, evidence:string[], onCorpus:number}>, error?:string}}
  */
 export function auditPlugin(name) {
   const p = tamperRegistry.get(name);
   if (!p || typeof p.transform !== 'function') {
-    return { name, exists: false, changed: 0, eliminates: [], introduces: [], eliminatesAll: false, violations: [] };
+    return { name, exists: false, changed: 0, brokenOn: 0, eliminates: [], introduces: [], eliminatesAll: false, violations: [] };
   }
   const eliminated = new Set();
   const introduced = new Set();
   const violations = [];
   let changed = 0;
   let error;
+  /**
+   * 至少命中一个不变量的**语料条数**（**诊断字段，不参与出局判据**）。
+   *
+   * 与 `changed` 一起给出"覆盖率"视图，回答"这件弹药是件件都坏，还是只坏一部分形态"：
+   * `brokenOn === changed` ⇒ 它改动过的每一条语料都被破坏。
+   *
+   * [D16 2026-10-08 真机复核 —— 一次被推翻的改动动机，留此备查]
+   * 曾打算按覆盖率把判据从「∃ 一条命中就出局」放宽为「全命中才出局」，依据是真机报告里
+   * `misunion` 直连上界 5/19、`lad` 1/19（看着像"部分可用 ⇒ 误杀"）。**复核后反转**：
+   * 那两个数字**全部由 nop 样本贡献** —— `misunion` 未改动的 12 条样本里打穿 5 条，
+   * 而它真正改动的 7 条**一条都没打穿**；`lad` 同型（nop 2 条里打穿 1 条，改动的 17 条全挂）。
+   * ⇒ 真机证据**支持**原判据（12/12 全对），没有误杀。放宽反而会放进 `randomboundary`
+   * 这类"部分命中但真机 0/19 打穿"的噪声件。
+   * ⇒ 出局判据保持原样；本字段只作诊断，以及将来做"链/样本级过滤"时的输入。
+   */
+  let brokenOn = 0;
   /** 整串消除计数：在多少条语料上「输入里的关键词**全部**消失」 */
   let allGoneOn = 0;
 
@@ -201,6 +217,7 @@ export function auditPlugin(name) {
     out = String(out);
     if (out === input) continue; // 该语料上没作用，不参与派生（形态不匹配，不是没本事）
     changed += 1;
+    let brokenHere = false; // 本语料是否被任一不变量判为破坏
     // 字面是否还在 → 看**解码后**的形态（见 normalizeForToken 的踩坑说明）
     const seen = normalizeForToken(out);
     const presentIn = DERIVE_KEYWORDS.filter((k) => wordRe(k).test(input));
@@ -219,19 +236,23 @@ export function auditPlugin(name) {
       //    会被解析进**内层** if（dangling else）⇒ 首次命中（cur 为 undefined）永不入账，
       //    表现为"检测函数明明命中、violations 却是空的"。2026-10-08 实测踩到。
       if (ev.length) {
+        brokenHere = true;
         const cur = violations.find((v) => v.id === inv.id);
         if (cur) {
+          cur.onCorpus += 1;
           for (const e of ev) if (!cur.evidence.includes(e)) cur.evidence.push(e);
         } else {
-          violations.push({ id: inv.id, evidence: [...ev] });
+          violations.push({ id: inv.id, evidence: [...ev], onCorpus: 1 });
         }
       }
     }
+    if (brokenHere) brokenOn += 1;
   }
   return {
     name,
     exists: true,
     changed,
+    brokenOn,
     eliminates: [...eliminated].sort(),
     introduces: [...introduced].sort(),
     // 兜底弹药标记：与 CORE_SEMANTICS 的 eliminatesAll 同义（整串编码/转义）。
@@ -261,7 +282,12 @@ export function auditAll(opts = {}) {
 /**
  * 语义不可用名单：命中任一「结构性必然破坏」不变量的插件。
  * 这些插件过了 WAF 也拼不出可执行的 SQL ⇒ 不进定向搜索的候选池（D14/D15 同一条标准）。
- * @returns {Map<string, Array<{id:string, evidence:string[]}>>}
+ *
+ * [D16 2026-10-08] 出局判据 = **命中任一不变量**（不做覆盖率放宽），已过真机复核：
+ * CI run 37788832263 的 PL1 报告逐件核对 12 件 → 判据 12/12 正确（含此前被怀疑的
+ * `misunion` 与 `lad` —— 它们各自的"直连上界"全部来自 nop 样本，变换生效的样本全打不穿）。
+ * 复核方法与读法见 `e2e/waf-real/modsec-live.mjs` 的 `nopCount` 与报告「口径」第 5 条。
+ * @returns {Map<string, Array<{id:string, evidence:string[], onCorpus:number}>>}
  */
 export function semanticUnsafeRegistry() {
   const out = new Map();
