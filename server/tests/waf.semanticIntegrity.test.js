@@ -73,6 +73,27 @@ test('inword-split 的判据本身：词内命中、词间不命中', () => {
 
 // ── 二、注释未闭合 ────────────────────────────────────────────────────────
 
+test('★ 真机复核钉子（D16）：12 件名单逐件成立，含被怀疑过的 misunion / lad', async () => {
+  // 依据：CI run 37788832263 的 PL1 真机报告（CRS 4.30.0 / PL1 / 靶站 db 模式）逐件核对。
+  //
+  // ⚠️ 读那份报告时**必须**先读它的「口径」第 5 条：「直连打穿(本链)」一列会被
+  //    **nop 样本**污染 —— 该链没改动过的样本本来就打穿，不能算它的功劳。
+  //    实测复核（本机可复现）：
+  //      · misunion：报告值 5/19 …但未改动的 12 条里打穿 5 条、它真正改动的 7 条**全挂**
+  //      · lad    ：报告值 1/19 …未改动的 2 条里打穿 1 条、真正改动的 17 条**全挂**
+  //    ⇒ 真机证据**支持**判据（不是误杀）。本钉子防的就是"看到 >0 就放宽判据"这类改动。
+  const names = [
+    'keywordSplit', 'misunion', 'sap', 'lad', 'dhs', 'accessfilter', 'aspjetty',
+    'nullencode', 'squiggle',
+    'randomboundary', 'halfversionedmysql', 'halfversionedmorekeywordsopen',
+  ];
+  assert.equal(names.length, 12, '名单规模变了 ⇒ 必须重新做一轮真机复核再改这里');
+  const unsafe = semanticUnsafeRegistry();
+  for (const n of names) {
+    assert.ok(unsafe.has(n), `${n} 应被判语义不可用（真机已复核该判定成立）`);
+  }
+});
+
 test('命中：块注释未闭合必须被抓到（整段留在注释里，MySQL 解析不到）', () => {
   const unsafe = semanticUnsafeRegistry();
   for (const n of ['halfversionedmysql', 'halfversionedmorekeywordsopen']) {
