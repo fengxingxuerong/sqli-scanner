@@ -4,6 +4,63 @@
 
 ## [Unreleased]
 
+### 2026-10-09 批次 D19 · 真正修好 `acceptance` 的 `waf403` 漏检（D18 修复无效，本批给出真根因）
+
+> ⚠️ **先更正 D18**：D18 的「codec 兜底链占名额」**对生产输入无效**（CI run #191 acceptance 仍红）。
+> 原因是我用**简化输入**自证（只喂 `planChainsByProfile` 的输出），而生产链路里
+> `mergeCandidateChains` 会把空 vendor 填成 `bypass:<plugins>` ⇒ 我判定的"codec 在 statics 里"**从不成立**
+> ⇒ 那个保底分支恒不触发。**教训：修复必须用与生产一致的输入自证。**
+
+#### ① 真根因（真实链路 A/B：detect.js 真实构造的 suggestions + 失败现场画像）
+
+`acceptance` 的 `waf403`（关键字即拦）期望"换 boolean 通道重跑"，前提是候选链里有一条能过该 WAF。
+靶场是 `if (WAF_RE.test(解码一次后的值)) 403` ⇒ **双重 URL 编码**（`chardoubleencode`）能过，
+单编码（`encode2hex` 等）解码后是明文 ⇒ 必拦。
+
+| 版本 | chainVerify 实际会验的 3 条 |
+|---|---|
+| D14 | `unionvaluesrow+dash2hash` / `...+hexliterals` / **`chardoubleencode`** ✅ |
+| HEAD（D15–D18） | 同样前 2 条 / `modsecurityversionedkeywords` ❌ |
+
+差异全在那 1 个"生成名额"。逐层定位：
+
+1. `chardoubleencode` **在候选池里**（`selectByAvoiding` 的 usable、`eliminatesAll=true`）；
+2. 但它**只靠 `planChainsByProfile` 动态生成**进候选，D15 放行 41 件未分类弹药后，编码族里一批
+   冷门项按 `scoreMeta` 的 covers/punct 打分排到它前面 ⇒ 它掉到 codec 序列 **第 30+**；
+3. `chainVerify` 的兜底名额只取 `codecs[0]` ⇒ 拿不到它；
+4. 即使把它放进静态候选表也救不回来 —— `rankChainsByProfile` 按 `TAMPER_COVERS` 算"覆盖了几个被拦词"，
+   而 `TAMPER_COVERS.chardoubleencode` 当时只列了**标点类**（`quote/space/paren/comma/cmp`），
+   与画像的关键词类（`comment/and/or/union/select/sleep`）**交集为 0** ⇒ hit=0 ⇒ 被排到静态链最后。
+
+#### ② 修复（三处，最小面）
+
+1. `blockProfile.js` `TAMPER_COVERS.chardoubleencode`：补上 `union/select/and/or/comment` ——
+   口径同 `searcher.scoreMeta` 的 `eliminatesAll`（**整串编码 ⇒ 明文关键词一起消失**，故覆盖全部被拦 token）。
+2. `wafRecommend.js` 新增 `ENCODING_FALLBACK_CHAINS = [['chardoubleencode']]` ——
+   它是**有真机证据**的链（D14 复验 acceptance 全绿靠的正是它），却只靠动态生成 ⇒
+   登记为静态候选（与 `unionvaluesrow` 系同等纪律：**有证据就登记，不靠排序争**）。
+3. `detect.js` 在 `blockAdaptive` 路径把 `ENCODING_FALLBACK_CHAINS` 接进 `suggestions`
+   （**放在 MySQL 分支之外** —— 纯 URL 编码、DBMS 无关）。
+
+**不需要动 `MAX_CHAINS`**（仍是 3）：修完 `chardoubleencode` 的 hit 最高（6）⇒ `rankChainsByProfile`
+把它排到静态链**第 1** ⇒ 稳进 2 个静态名额。
+
+#### ③ 本地验证（真实链路，非简化输入）
+
+```
+静态链顺序（画像 = comment/and/or/union/select/sleep）：
+  chardoubleencode | unionvaluesrow+dash2hash | unionvaluesrow+dash2hash+hexliterals | symboliclogical | …
+chainVerify 实际会验 3 条（maxChains=3）：
+  chardoubleencode | unionvaluesrow+dash2hash | modsecurityversionedkeywords   ← ✅ 含编码兜底，且保留真机唯一打穿链
+```
+
+#### ④ 诚实边界
+
+- 编码兜底链**只解决"候选里有没有能过的链"**；能不能过仍由真机决定（靶场 WAF 只解一次码，
+  `chardoubleencode` 才有效 —— 换成解两次码的实现它同样会失效，那时需要更深的编码）。
+- 本批同时影响 `blockProfile` 的打分表与候选构造 ⇒ 必须全量 CI 复验
+  （`acceptance` 16 套件 + `tamper-waf-matrix` + `modsec-live`），已 dispatch。
+
 ### 2026-10-08 批次 D18 · 修复 D15 引入的真回归：codec 兜底链被挤出验证名单（CI `acceptance` 红）
 
 **一句话**：CI `acceptance` 连续 3 个 run（#184/#186/#188）**同一场景**红 ——

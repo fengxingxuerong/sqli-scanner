@@ -41,6 +41,24 @@ export const OPERATOR_SWAP_CHAINS = [
   // ['unionvaluesrow', 'dash2hash'] —— 真机打穿证据见 docs/WAF-真机链对拍-2026-10-05.md
 ];
 
+// [D19 2026-10-09] 「编码兜底」静态候选 —— 为什么必须有它、且必须在这一层显式给出：
+//
+// 背景：`e2e/pentest-lab` 的 `waf403`（关键字即拦；靶场是 `if (WAF_RE.test(解码一次后的值)) 403`）
+// 期望引擎换 boolean 通道重跑，前提是**候选链里至少有一条能过该 WAF**。
+// 实测归因（`acceptance` 连续 3 个 run 红 → D18/D19）：那条链一直是 `chardoubleencode`
+// （**双重 URL 编码**：WAF 只解一次码 ⇒ 它仍是编码态；单编码如 `encode2hex` 解码后是明文 ⇒ 必拦），
+// 而它此前只靠 `planChainsByProfile` 的**动态生成**进候选 —— D15 放行 41 件未分类弹药后，
+// 编码族里一批冷门项按 `scoreMeta` 的 covers/punct 打分排到它前面，它掉到 codec 序列第 30+，
+// 而 chainVerify 的兜底名额只取 `codecs[0]` ⇒ **被静默挤出**。
+//
+// ⇒ 它**有真机证据**（D14 复验 head `50237e5` 时 acceptance 全绿，靠的正是它），
+//   却没有任何显式位置 ⇒ 登记进静态候选表（与 unionvaluesrow 系同等对待：有证据就登记，不靠排序争）。
+// ⚠️ 与 OPERATOR_SWAP_CHAINS 分开放：那不是"算子替换"而是"传输层编码"，语义不同。
+//   通用性：纯 URL 编码、不依赖 DBMS，对所有引擎/靶场都安全。
+export const ENCODING_FALLBACK_CHAINS = [
+  ['chardoubleencode'],
+];
+
 /**
  * 关键词「静默过滤」场景的候选链（删除型规则：不返 403，只把 union/select/and/-- 删掉）。
  * 顺序依据实测（e2e/pentest-lab/bl）：插入式双写 + 注释符换 `#` 一条即可命中布尔面；
