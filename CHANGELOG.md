@@ -4,6 +4,58 @@
 
 ## [Unreleased]
 
+### 2026-10-08 批次 D18 · 修复 D15 引入的真回归：codec 兜底链被挤出验证名单（CI `acceptance` 红）
+
+**一句话**：CI `acceptance` 连续 3 个 run（#184/#186/#188）**同一场景**红 ——
+`独立刁钻靶场` 的 `waf403`（关键字即拦）从「有链可过 → 换 boolean 通道重跑 → 命中」变成**漏检**。
+根因是 D15 的候选池扩大把 **codec 兜底链挤出了「要花预算验证的链」名单**。
+
+#### ① 取证链（不是猜的）
+
+| 步 | 证据 |
+|---|---|
+| 是本批引入？ | ❌ 不是 —— #184(D15)/#186(D16)/#188(D17) 三次**同一场景同一失败**；D14 复验（head `50237e5`）acceptance **success** |
+| 哪个场景 | `[FAIL(漏检)] waf403 检出=[-] miss=[boolean]`，三次日志逐字相同 |
+| 失败现场 | `WAF 链验证：3 条候选链探针均被拦截，跳过自动重跑（画像被拦：comment/and/or/union/select/sleep）` |
+| 定位 | `chainVerify.js` 的 `ranked = statics.slice(0, MAX_CHAINS-GENERATED_SLOTS) + generated.slice(0,1)` |
+
+#### ② A/B 快照对比（`git worktree` 检出 D14，同输入纯计算）
+
+输入取自失败现场画像 `[comment,and,or,union,select,sleep]` + 两条探针：
+
+| 版本 | `planChainsByProfile` 输出 | chainVerify 实际会验 | codec 在名单 |
+|---|---|---|---|
+| **D14**（`c968c41`） | symboliclogical / **chardoubleencode**(codec) / charencode(codec) | symboliclogical + **chardoubleencode** | ✅ 是 |
+| **HEAD**（D15+） | modsecurityversionedkeywords / nonrecursivereplace / encode2hex(codec) | 前两者 | ❌ **否** |
+
+⇒ D14 的「验的链里含 codec」是**巧合**（codec 恰好排第 2）；D15 让 41 件 unclassified 弹药进池后
+非 codec 链占满前 2 ⇒ codec 落到第 3 位被切片丢掉 ⇒ 候选链全被拦 ⇒ 跳过重跑 ⇒ 漏检。
+
+#### ③ 修复：把巧合变成保证
+
+- 新增导出纯函数 **`pickChainsToVerify(merged, {maxChains, generatedSlots})`**，
+  名额分配 = 非 codec 静态链 `slots-1` 条 + **codec 兜底链 1 条** + 生成链 `generatedSlots` 条
+  （总数恒等于预算）。
+- 与 `planChainsByProfile` 的兜底逻辑**同源纪律**：**兜底能力必须显式留名额，不能靠排序争**。
+  `planChainsByProfile` 已留；`chainVerify` 是它的下游切片，此前没跟上。
+- `server/tests/waf.chainVerify.test.js` 加 3 条单测（含反向钉子：无 codec 时行为不变、
+  生成链名额不被挤占）。
+- 真代码链路验证（非复制逻辑）：`planChainsByProfile` → `pickChainsToVerify` ⇒
+  名单从 `[modsecurityversionedkeywords, nonrecursivereplace]` 变为
+  `[modsecurityversionedkeywords, **encode2hex**]` ✅
+
+#### ④ 缺陷注入复验（cp 备份还原）
+
+把 codec 分支退回 `statics.slice(0, slots)` ⇒ **13→11 pass / 2 fail** ✓
+（失败信息精确复现回归态 `[{modsecurityversionedkeywords},{nonrecursivereplace}]`）。
+
+#### ⑤ 诚实边界
+
+- 本批**改变了链验证的候选构成** ⇒ 必须全量真机/CI 复验（尤其 acceptance 的 16 套件与
+  `tamper-waf-matrix`），不能只看本地单测。已 dispatch 验收。
+- `pickChainsToVerify` 保证的是「codec 链**有机会被验证**」，**不保证**它在真机上一定放行 ——
+  放行与否仍由真机决定。
+
 ### 2026-10-08 批次 D17 · 「变换真贡献」量化 —— 把打穿拆成**真贡献**与 **nop 基线**
 
 **一句话**：D16 只做到"能看出打穿里有 nop 污染"，但"这个变换到底有没有用"仍要靠人推。

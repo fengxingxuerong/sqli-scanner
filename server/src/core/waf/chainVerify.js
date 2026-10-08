@@ -30,6 +30,40 @@ const MAX_CHAINS = 3; // 最多验证 3 条候选链（预算约束）
 const GENERATED_SLOTS = 1;
 
 /**
+ * 从合并后的候选链里挑出**要花预算验证**的那几条（纯函数，独立可测）。
+ *
+ * 名额分配（总数恒为 `maxChains`，预算纪律）：非 codec 静态链 `slots-1` 条 +
+ * **codec 兜底链 1 条** + 生成链 `generatedSlots` 条。
+ *
+ * [D18 2026-10-08] 为什么 codec 必须显式占名额 —— 一次真回归（CI acceptance 实测）：
+ *   D14 时下游 `statics.slice(0, 2)` 取到的 2 条里**恰好**有一条 codec
+ *   （`chardoubleencode`）⇒ `waf403`（关键字即拦）场景靠它证明「有链可过」→ 换算子族重跑
+ *   → boolean 命中。D15 让 41 件 unclassified 弹药进池后，非 codec 链占满前 2 ⇒
+ *   codec 落到第 3 位被切掉 ⇒ 3 条候选链探针全被拦 ⇒ 跳过重跑 ⇒ **漏检**
+ *   （连续 3 个 CI run 同一场景红）。D14 的「含 codec」是巧合，不是保证；这里把它变成保证。
+ *   ⚠️ 与 `planChainsByProfile` 的兜底逻辑**同源纪律**：兜底能力必须显式留名额，不能靠排序争。
+ *
+ * @param {Array<{plugins:string[], vendor:string, isCodec?:boolean}>} merged 合并后的候选链
+ * @param {{maxChains?:number, generatedSlots?:number}} [opts]
+ * @returns {Array<{plugins:string[], vendor:string, isCodec?:boolean}>}
+ */
+export function pickChainsToVerify(merged, opts = {}) {
+  const maxChains = opts.maxChains ?? MAX_CHAINS;
+  const generatedSlots = opts.generatedSlots ?? GENERATED_SLOTS;
+  const list = Array.isArray(merged) ? merged.filter((c) => c && Array.isArray(c.plugins) && c.plugins.length) : [];
+  const slots = Math.max(0, maxChains - generatedSlots);
+  const statics = list.filter((c) => !isGeneratedChain(c.vendor));
+  const generated = list.filter((c) => isGeneratedChain(c.vendor));
+  const plainStatics = statics.filter((c) => !c.isCodec);
+  const codecStatics = statics.filter((c) => c.isCodec);
+  const picked =
+    codecStatics.length && plainStatics.length >= slots
+      ? [...plainStatics.slice(0, Math.max(1, slots - 1)), codecStatics[0]]
+      : statics.slice(0, slots);
+  return [...picked, ...generated.slice(0, generatedSlots)];
+}
+
+/**
  * 对候选 tamper 链做探针验证。
  * @param {object} p
  * @param {object} p.httpClient 扫描作用域 httpClient（request(opts)）
@@ -131,9 +165,8 @@ export async function verifyTamperChains({
     });
     let ranked;
     if (bypassSearch) {
-      const statics = merged.filter((c) => !isGeneratedChain(c.vendor));
-      const generated = merged.filter((c) => isGeneratedChain(c.vendor));
-      ranked = [...statics.slice(0, MAX_CHAINS - GENERATED_SLOTS), ...generated.slice(0, GENERATED_SLOTS)];
+      // [D18] 名额分配抽成纯函数 `pickChainsToVerify`（codec 兜底链显式占位，见其 JSDoc）
+      ranked = pickChainsToVerify(merged, { maxChains: MAX_CHAINS, generatedSlots: GENERATED_SLOTS });
     } else {
       // 关闭档 = 只有静态链（既有 A2-1 的按画像重排），用于 A/B 对照与回归定位
       ranked = rankChainsByProfile(list, profile.blocked).slice(0, MAX_CHAINS);

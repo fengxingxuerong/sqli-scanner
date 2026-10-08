@@ -8,7 +8,7 @@
 //   对未闭合引号 payload 空转，不适合做 mock 链）；链2 charencode → 原始 URL 含 %2527。
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { verifyTamperChains } from '../src/core/waf/chainVerify.js';
+import { verifyTamperChains, pickChainsToVerify } from '../src/core/waf/chainVerify.js';
 import { TOKEN_PROBES } from '../src/core/waf/blockProfile.js';
 
 const target = { url: 'http://mock.test/?id=1', baseUrl: 'http://mock.test/?id=1', method: 'GET' };
@@ -174,4 +174,44 @@ test('对照：画像未拦任何词 → 仍按原序取前 3 条 → 唯一的�
   // 这一条正是"定向选链"的价值证明：同样的客户端、同样的 4 条候选，
   // 仅因画像为空而退回按序截断(c1/c2/c3)，唯一的可放行链 c4 就进不了验证名单。
   assert.equal(out, null);
+});
+
+// ── D18：codec 兜底链必须**显式占**一个验证名额 ──────────────────────────────
+// 真回归（CI acceptance 连续 3 个 run 同一场景红）：`waf403`（关键字即拦）场景要靠
+// 「候选中有一条能过 WAF」才换 boolean 通道重跑。D14 时验的 2 条静态链里**恰好**含一条
+// codec（chardoubleencode）⇒ 有链可过；D15 让 41 件未分类弹药进池后，非 codec 链占满前 2 ⇒
+// codec 落到第 3 位被切片丢掉 ⇒ 候选链全被拦 ⇒ 跳过重跑 ⇒ 漏检。
+// ⇒ D14 的"含 codec"是巧合，这里把它变成保证（与 planChainsByProfile 同源纪律）。
+
+test('★ D18：codec 兜底链必须进验证名单（D15 回归的根因；不能靠排序争名额）', () => {
+  // 输入形态取自失败现场：planChainsByProfile 的输出（vendor 为空、codec 排第 3）
+  const merged = [
+    { plugins: ['modsecurityversionedkeywords'] },
+    { plugins: ['nonrecursivereplace'] },
+    { plugins: ['encode2hex'], isCodec: true },
+  ];
+  const picked = pickChainsToVerify(merged, { maxChains: 3, generatedSlots: 1 });
+  assert.ok(
+    picked.some((c) => c.isCodec),
+    `codec 兜底链被挤出验证名单 ⇒ 关键字即拦的场景会漏检：${JSON.stringify(picked)}`,
+  );
+  assert.ok(picked.length <= 3, `验证条数不得超过预算：${picked.length}`);
+});
+
+test('D18 反向钉子：候选里没有 codec 时行为不变（仍是前 slots 条，不凭空造链）', () => {
+  const merged = [{ plugins: ['a'] }, { plugins: ['b'] }, { plugins: ['c'] }];
+  const picked = pickChainsToVerify(merged, { maxChains: 3, generatedSlots: 1 });
+  assert.deepEqual(picked.map((c) => c.plugins[0]), ['a', 'b']);
+});
+
+test('D18 生成链名额不被 codec 保底挤占（总数仍等于预算）', () => {
+  const merged = [
+    { plugins: ['a'] }, { plugins: ['b'] },
+    { plugins: ['encode2hex'], isCodec: true },
+    { plugins: ['g1'], vendor: 'bypass:auto' },
+  ];
+  const picked = pickChainsToVerify(merged, { maxChains: 3, generatedSlots: 1 });
+  assert.equal(picked.length, 3, `名额总数应为 3：${JSON.stringify(picked.map((c) => c.plugins[0]))}`);
+  assert.ok(picked.some((c) => c.isCodec), 'codec 必须在名单里');
+  assert.ok(picked.some((c) => c.vendor === 'bypass:auto'), '生成链名额必须保留');
 });
