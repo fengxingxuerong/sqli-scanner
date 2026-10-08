@@ -32,6 +32,7 @@ import {
   selectByAvoiding,
   buildSemanticIndex,
   estimatePunctCost,
+  isSemanticallyUnsafe,
   SEMANTIC_CATEGORIES,
 } from './semantics.js';
 // [接线 2026-09-23] 复用既有「按画像重排」判据 —— 不重写第二套排序。
@@ -161,6 +162,11 @@ export function planChainsByProfile({
   const chains = [];
   const seen = new Set();
   const push = (plugins, source, isCodec = false) => {
+    // [D15 2026-10-08] 链上任一插件命中「结构性破坏 SQL」不变量 ⇒ 不生成。
+    //   selectByAvoiding 已经在单插件层过滤过一轮，这里是**链级**双保险：防止
+    //   后续有人从别处（静态表合并、新来源）把这类插件带进来。
+    //   ⚠️ 静态推荐表不走这条（真机对拍证据优先于结构判据，见 buildCandidateChains）。
+    if (plugins.some(isSemanticallyUnsafe)) return;
     // [批次C 2026-10-03] 去重键改为**有序**拼接 —— 变换复合不可交换
     // （hexliterals∘dash2hash ≠ dash2hash∘hexliterals，wafRecommend 实证两种顺序都在案
     // 且都是首选链）。旧的「排序后集合键」会把两个顺序折叠成一条，静默丢掉另一序的候选。
@@ -249,7 +255,19 @@ export function planChainsByProfile({
       a.plugins.join().localeCompare(b.plugins.join()),
   );
 
-  const out = chains.slice(0, Math.max(1, maxChains));
+  // [D15] 兜底弹药**显式留一个名额**：候选池扩大后（实测派生把 48 件未分类弹药拉进来），
+  //   非 codec 链轻易就能占满 maxChains，而编码兜底恰恰排在最后 ⇒ 会被静默挤出
+  //   （用例「拦 and/or 时应有编码兜底链」当场抓到）。
+  //   它的价值只在"针对性消除全都消不掉"时才兑现，名额必须留，不能靠排序争。
+  //   （与既有纪律同源：A2 保守回退必须显式留名额，否则生成链永不验证。）
+  const head = chains.filter((c) => !c.isCodec);
+  const codecs = chains.filter((c) => c.isCodec);
+  let out;
+  if (head.length >= maxChains && codecs.length) {
+    out = [...head.slice(0, Math.max(1, maxChains - 1)), codecs[0]];
+  } else {
+    out = [...head, ...codecs].slice(0, Math.max(1, maxChains));
+  }
   return {
     chains: out,
     blocked,

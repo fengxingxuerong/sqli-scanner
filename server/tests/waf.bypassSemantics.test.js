@@ -22,6 +22,7 @@ import {
   estimatePunctCost,
   assertIndexIntegrity,
   SEMANTIC_CATEGORIES,
+  isSemanticallyUnsafe,
 } from '../src/core/waf/bypass/semantics.js';
 
 /** token → 保证含该 token 的最小样本（用于 eliminates 声明的实测检验） */
@@ -183,26 +184,62 @@ test('选弹：黑名单命中 eliminates 的插件进入 boosted（正面对抗
 
 test('选弹：mutates 命中黑名单的插件被排除（该词字面仍在，简单正则仍会匹配）', () => {
   const r = selectByAvoiding(['union']);
-  for (const n of ['misunion', 'union2no', 'dunion', '0eunion']) {
+  for (const n of ['union2no', 'dunion', '0eunion']) {
     assert.ok(
       r.dropped.some((d) => d.name === n && d.reason.startsWith('mutates:')),
       `${n} 的 mutates 含 union，应被排除`,
     );
     assert.ok(!r.usable.includes(n), `${n} 不应出现在 usable 里`);
   }
+  // [D15] misunion 已从本条移出：它同样是"词内切分"假弹药
+  //   （`UNI/**/ON` —— MySQL 把注释当分隔符 ⇒ 两个标识符），被语义完整性判据拦下。
+  //   它仍然**必须出局**，只是出局理由变了（结构判据优先于 mutates 分类）。
+  const mis = r.dropped.find((d) => d.name === 'misunion');
+  assert.ok(mis, 'misunion 应被排除');
+  assert.match(mis.reason, /^semantic-unsafe:/, `misunion 应因语义不可用出局，实际：${mis.reason}`);
+  assert.ok(!r.usable.includes('misunion'), 'misunion 不应出现在 usable 里');
 });
 
-test('选弹：unclassified 在黑名单非空时必须被排除（不认识的不敢用，避免盲试噪声）', () => {
+test('选弹：**无 token 信息**的 unclassified 在黑名单非空时被排除（不认识的不敢用）', () => {
+  // [D15 纪律变更] 旧断言是「所有 unclassified 一律排除」。实测代价：234 个插件里
+  // 111 个（47%）是 unclassified，其中包含真机**唯一**打穿的 unionvaluesrow / unionvalues
+  // —— 一刀切等于定向搜索器永远生成不出那条链。
+  // ⇒ 排除的理由本应是「不知道它动什么 ⇒ 盲试噪声」，而不是「没人给它归类」。
+  //    有实测派生 token 信息的 unclassified 已经有了机器可用的依据，不该再被挡。
   const r = selectByAvoiding(['select']);
-  const unclassified = indexCoverage().unclassifiedNames;
-  if (unclassified.length) {
-    for (const n of unclassified) {
-      assert.ok(r.dropped.some((d) => d.name === n && d.reason === 'unclassified'), `${n} 是未分类项，应被排除`);
-    }
+  const idx = buildSemanticIndex();
+  const noInfo = [...idx.values()].filter((e) => {
+    if (e.category !== 'unclassified') return false;
+    // 语义不可用的先被结构判据拦下（reason 是 semantic-unsafe:...），不属本条范围
+    if (isSemanticallyUnsafe(e.name)) return false;
+    const n = (e.eliminates || []).length + (e.introduces || []).length + (e.mutates || []).length +
+      (e.eliminatesAll ? 1 : 0) + (e.reducesPunct ? 1 : 0);
+    return n === 0;
+  });
+  assert.ok(noInfo.length > 0, '应存在一批无信息的未分类插件（否则本条空转）');
+  for (const e of noInfo) {
+    assert.ok(
+      r.dropped.some((d) => d.name === e.name && d.reason === 'unclassified'),
+      `${e.name} 没有任何 token 信息，应被排除`,
+    );
   }
   // 反向：黑名单为空时不做保守排除（保持既有行为）
   const r0 = selectByAvoiding([]);
   assert.equal(r0.dropped.filter((d) => d.reason === 'unclassified').length, 0);
+});
+
+test('★ 回归钉子：真机唯一打穿的 unionvaluesrow/unionvalues 必须进得了候选池', () => {
+  // 这两件是**未分类**插件，旧纪律（unclassified 一律排除）下它们永远进不了定向搜索，
+  // 只能靠人工对拍写进静态推荐表（D4）。本条钉住：实测派生必须把它们拉进 usable。
+  const r = selectByAvoiding(['select']);
+  for (const n of ['unionvaluesrow', 'unionvalues']) {
+    assert.ok(r.usable.includes(n), `${n} 消除 select，应可用（否则真机唯一有效链生成不出来）`);
+    assert.ok(!r.dropped.some((d) => d.name === n), `${n} 不应被丢弃`);
+    assert.ok(r.boosted.includes(n), `${n} 的 eliminates 命中黑名单 select，应被加分`);
+  }
+  // 派生本身也必须成立（不是"进了池但没信息"）
+  const meta = buildSemanticIndex().get('unionvaluesrow');
+  assert.ok((meta.eliminates || []).includes('select'), `unionvaluesrow 应派生 eliminates:['select']，实际 ${JSON.stringify(meta.eliminates)}`);
 });
 
 test('选弹：usable 里每个名字都已注册，且**不得**因清单含 terminal 插件而被截断', () => {

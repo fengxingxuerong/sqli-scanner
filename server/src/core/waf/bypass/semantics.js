@@ -51,6 +51,9 @@
 import { tamperRegistry } from '../../tamper/TamperRegistry.js';
 import '../../tamper/applyTampers.js'; // 副作用：注册内置插件
 import { logger } from '../../logger.js';
+// [批次 D15 2026-10-08] 实测派生 + 语义完整性：给"没名分但有本事"的弹药补 token 信息，
+// 并把"过了 WAF 但 SQL 必挂"的插件标为不可用。只**补位**不覆盖人工精标。
+import { auditAll, semanticUnsafeRegistry, isSemanticallyUnsafe } from './semanticIntegrity.js';
 
 /** 变换的语义类别 */
 export const SEMANTIC_CATEGORIES = {
@@ -396,16 +399,34 @@ let _index = null;
 export function buildSemanticIndex() {
   if (_index) return _index;
   const idx = new Map();
+  const audit = auditAll();
   for (const p of tamperRegistry.all()) {
     const core = CORE_SEMANTICS[p.name];
+    // 人工精标优先：它是有证据的结论（含 CRS_NEGATIVE 这类实测方向），实测不覆盖它。
     if (core) {
       idx.set(p.name, { name: p.name, source: 'curated', ...core });
       continue;
     }
     const rule = FAMILY_RULES.find((r) => r.test.test(p.name));
-    idx.set(p.name, rule
+    /** @type {{name:string, source:string, category:string, eliminates?:string[], introduces?:string[], mutates?:string[], eliminatesAll?:boolean, reducesPunct?:boolean, note?:string, derived?:{changed:number}}} */
+    const base = rule
       ? { name: p.name, source: 'family', ...rule.tie }
-      : { name: p.name, source: 'unclassified', category: 'unclassified' });
+      : { name: p.name, source: 'unclassified', category: 'unclassified' };
+    // 实测补位 —— **只补 unclassified**，不动族派生条目。
+    //   族规则的 eliminates 是既有纪律在守的声明（waf.bypassSemantics 的机械检验会逐条
+    //   兑现），再叠一层实测口径只会两边打架；而 unclassified 是**整批被排除**的那一半，
+    //   它没有任何声明可守，补位才是净收益 —— 里面躺着真机唯一打穿的
+    //   unionvaluesrow / unionvalues，不补位定向搜索器永远生成不出那条链。
+    if (!rule) {
+      const d = audit.get(p.name);
+      if (d && d.exists) {
+        if (d.eliminates.length) base.eliminates = d.eliminates;
+        if (d.introduces.length) base.introduces = d.introduces;
+        if (d.eliminatesAll) base.eliminatesAll = true;
+        base.derived = { changed: d.changed };
+      }
+    }
+    idx.set(p.name, base);
   }
   _index = idx;
   return idx;
@@ -478,14 +499,30 @@ export function maxNonWordRun(s) {
 export function selectByAvoiding(blocked = [], ctx = {}) {
   const words = (blocked || []).map((w) => String(w).toLowerCase()).filter(Boolean);
   const idx = buildSemanticIndex();
+  const unsafeMap = semanticUnsafeRegistry();
   const usable = [];
   const dropped = [];
   const boosted = [];
 
   for (const p of tamperRegistry.all()) {
     const meta = idx.get(p.name);
-    // dbms 不匹配者交由既有 registry 守卫告警（不在本模块重复实现该判据）
-    if (meta.category === 'unclassified' && words.length > 0) {
+    // ① [D15] 语义不可用优先出局 —— 与"认不认识"无关：curated 里也有假货
+    //    （misunion / keywordSplit 是词内切分，与 D14 真机证伪的 randomcomments 同型）。
+    const unsafe = unsafeMap.get(p.name);
+    if (unsafe && unsafe.length) {
+      dropped.push({ name: p.name, reason: `semantic-unsafe:${unsafe.map((v) => v.id).join('|')}` });
+      continue;
+    }
+    // ② 排除的真正含义是「不知道它动什么」⇒ 盲试噪声。有实测派生的 unclassified
+    //    已经有了机器可用的 token 信息，不该再被一刀切（旧行为把 47% 弹药挡在门外）。
+    //    dbms 不匹配者交由既有 registry 守卫告警（不在本模块重复实现该判据）
+    const hasInfo =
+      (meta.eliminates || []).length +
+      (meta.introduces || []).length +
+      (meta.mutates || []).length +
+      (meta.eliminatesAll ? 1 : 0) +
+      (meta.reducesPunct ? 1 : 0);
+    if (meta.category === 'unclassified' && hasInfo === 0 && words.length > 0) {
       dropped.push({ name: p.name, reason: 'unclassified' });
       continue;
     }
@@ -568,5 +605,7 @@ if (process.env.WAF_BYPASS_SEMANTICS_VERBOSE === '1') {
   const c = indexCoverage();
   logger.info(`语义索引就绪：总 ${c.total} / 精标 ${c.curated} / 族派生 ${c.family} / 未分类 ${c.unclassified}`);
 }
+
+export { isSemanticallyUnsafe, semanticUnsafeRegistry };
 
 export default { buildSemanticIndex, selectByAvoiding, listSemantics, indexCoverage };

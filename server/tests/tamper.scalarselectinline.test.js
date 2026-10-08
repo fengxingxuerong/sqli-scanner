@@ -60,6 +60,22 @@ test('⑤ applyTampers 全链路：提取标记原样保留', () => {
   assert.ok(!/\bselect\b/i.test(out), 'SELECT 应已内联');
 });
 
+test('⑦ 逃逸闭合符 ≠ 字符串开始：带引号的注入 payload 必须照常内联（2026-10-08 修复）', () => {
+  // 缺陷注入复验：把引号状态机改回「遇引号即进字符串态」⇒ 本条立刻红。
+  // 背景：字符串型注入点（`WHERE name='$x'`）必须先闭合引号才能逃逸，payload 里的
+  // `1'` 在**本片段内没有配对** ⇒ 旧逻辑把它当字符串开始、再也找不到第二个引号
+  // ⇒ 整串被吞 ⇒ 这条插件在最需要它的那一类 payload 上 100% 空转，且无测试发现。
+  const cases = [
+    ["1' AND (SELECT version())-- -", "1' AND version()-- -"],
+    ["1' AND extractvalue(1,concat(0x7e,(SELECT version())))-- -", "1' AND extractvalue(1,concat(0x7e,version()))-- -"],
+    ["1' AND extractvalue(1,concat(0x7e,(SELECT CONCAT('a',version()))))-- -", "1' AND extractvalue(1,concat(0x7e,CONCAT('a',version())))-- -"],
+    ['1" AND (SELECT version())-- -', '1" AND version()-- -'],
+  ];
+  for (const [input, want] of cases) {
+    assert.equal(transform(input), want, `实得 ${JSON.stringify(transform(input))}`);
+  }
+});
+
 test('⑥ 自实现 CRS PL1：内联后的报错取数形态放行', () => {
   const cases = [
     "1 AND extractvalue(1,concat(0x7e,(SELECT CONCAT('__S__',version(),'__E__'))))",

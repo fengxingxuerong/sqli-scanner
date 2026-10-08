@@ -10,6 +10,7 @@ import assert from 'node:assert/strict';
 import { verifyTamperChains } from '../src/core/waf/chainVerify.js';
 import { buildCandidateChains, planChainsByProfile } from '../src/core/waf/bypass/searcher.js';
 import { TOKEN_PROBES } from '../src/core/waf/blockProfile.js';
+import { buildSemanticIndex, isSemanticallyUnsafe } from '../src/core/waf/bypass/semantics.js';
 
 const target = { url: 'http://mock.test/?id=1', baseUrl: 'http://mock.test/?id=1', method: 'GET' };
 const point = { id: 'p1', location: 'url', param: 'id', originalValue: '1' };
@@ -155,6 +156,10 @@ test('关闭开关（bypassSearch=false）→ 生成链不进池（回归到 202
 test('接线生效：静态链全被拦时，定向生成的链能顶上并被采纳', async () => {
   // 场景：裸探针全被拦（触发画像）→ 画像只拦 and/or → 静态链 equaltolike 也被拦
   //       → 生成链 symboliclogical（含 &&）放行 → 应被采纳
+  // ⚠️ fallback 从默认 OK 改成 **BLOCKED**：原写法下，任何"不含 AND/OR/LIKE 字样"的
+  //   生成链都会落到 baseline 分支被放行 ⇒ 采纳它可能只是"它什么都没做"，是假通过。
+  //   改成默认被拦后，只有**真把 and/or 消掉**的形态（`&&` ⇒ gen-and）才放行，
+  //   "静态链全被拦、生成链顶上"这个意图才被真正测到。
   const client = makeClient({
     baseline: OK,
     raw: BLOCKED,      // 两条裸探针都被拦
@@ -162,7 +167,7 @@ test('接线生效：静态链全被拦时，定向生成的链能顶上并被�
     'tok-or': BLOCKED,  // or 被拦
     static: BLOCKED,    // 静态链被拦
     'gen-and': OK,      // 生成链放行
-  });
+  }, BLOCKED);
 
   const picked = await verifyTamperChains({
     httpClient: client,
@@ -174,13 +179,22 @@ test('接线生效：静态链全被拦时，定向生成的链能顶上并被�
 
   assert.ok(picked, '应当选出一条链（生成链应顶上）');
   assert.ok(
-    picked.plugins.includes('symboliclogical'),
-    `应采纳定向生成的 symboliclogical，实际：${JSON.stringify(picked.plugins)}`,
-  );
-  assert.ok(
     String(picked.vendor || '').startsWith('bypass:'),
     `生成链的 vendor 应带 bypass: 标记（便于报告里区分来源），实际：${picked.vendor}`,
   );
+  // [D15] 不钉**具体插件名**：实测派生把 48 件未分类弹药拉进候选池后，第一名会变
+  //   （本例从 symboliclogical 变成 modsecurityversionedkeywords，后者同样消除 and）。
+  //   钉名字是过拟合；真正要钉的是「它确实是冲着被拦词来的定向生成链」。
+  const idx = buildSemanticIndex();
+  const covers = picked.plugins.flatMap((p) => idx.get(p)?.eliminates || []);
+  assert.ok(
+    covers.includes('and') || covers.includes('or'),
+    `生成链应消除被拦词 and/or，实际覆盖 ${JSON.stringify(covers)}（链：${JSON.stringify(picked.plugins)}）`,
+  );
+  // [D15] 采纳的链不得含语义不可用插件（过了 WAF 也拼不出可执行 SQL 的假弹药）
+  for (const p of picked.plugins) {
+    assert.ok(!isSemanticallyUnsafe(p), `${p} 是语义不可用插件，不应被采纳`);
+  }
 });
 
 test('保守回退：静态链先被验证，生成链只在之后（顺序不颠倒）', async () => {
