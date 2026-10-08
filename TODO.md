@@ -443,12 +443,16 @@ CLI 侧 `config.X =` ∧ 引擎侧 `config.X` / `ctx.config?.X` − KNOWN_CFG_KE
 `BACKFILL_SCALAR_KEYS` 的透传循环**不看 KNOWN_CFG_KEYS**，所以白名单对这批键其实只管
 告警不管放行——把 `testPath` 从 KNOWN 里删掉，它照样能透传到引擎。缺陷注入实测确认了这点。
 
-**剩余待办（本条只修了 REST 可达性，没修 UI 可达性）**
-1. 这 9 个键在 Web 面板 / Tauri 桌面版仍然无处可设：前端只发 `SCAN_CONFIG_KEYS`
-   推导出来的 16 个键。**桌面版用户拿到的能力面小于 CLI**，与"同一引擎"的承诺不符。
-2. `--random-agent` 在 CLI 侧同时写 `config.wafEvasion.randomUA`（活）和顶层
-   `config.randomUA`（`server/src` 内 0 个读取点，空转冗余）。已在守卫豁免清单注明，
-   但该清的是删掉那次空转写入。
+**剩余待办（✅ 两条均已清，2026-10-09 复核）**
+1. ~~这 9 个键在 Web 面板 / Tauri 桌面版仍然无处可设~~ —— **✅ 已做**：9 键全部有 UI 入口
+   （`AdvancedInjectionSection.tsx` 渲染 noCast/hex/flushSession/unionFrom/unionCols/paramDel/dumpWhere；
+   `InjectionScopeSection.tsx` 渲染 testPath/testHeaders），且都登记在 `SCAN_CONFIG_KEYS`（契约测试守着）。
+   ⚠️ **本条原描述已过期，2026-10-09 复核时它把我误导过一次**（据它准备重做 UI，勘探后才发现早已完成）。
+2. ~~`--random-agent` 在 CLI 侧同时写 `wafEvasion.randomUA`（活）和顶层 `randomUA`（空转冗余）~~
+   —— **✅ 已清（D21 2026-10-09）**：根因比"冗余"更深 —— `args.js` 里 `--random-agent` 在
+   **同一条 else-if 链里被解析两次** ⇒ 第二个分支永不执行 ⇒ `args.randomUA` 恒 undefined
+   ⇒ `config.js` 那次写入是**死代码**（顶层 `randomUA` 在 server/src 内 0 读取点）。
+   两处已删，并加了「同一 flag 不得出现两条分支」守卫。
 3. ~~CLI `--body` 的 JSON 会摊平成顶层 `bodyParams`，嵌套叶子（`user.id`、`items.0.name`）
    只有 REST 的 `jsonBody` 路径能发现 → **CLI 用户在嵌套 JSON 目标上恒漏注入点**。~~
    **已修 2026-09-20**，见 §N。REST 侧同坑（`bodyParams` 里塞对象）也已补提示。
@@ -1145,7 +1149,10 @@ services:
 - 为什么以前没看见：该 job 仅在 `schedule || workflow_dispatch` 时跑 → **push 时恒 skipped**，
   所以 CI 一直绿。它不是新引入的红，是**一直存在、只是没人触发**。
 - 与 `modsec-live` 无关（后者两轮均 success）。
-- 待办：修 `compare-real.run.py` 在 GitHub runner 上的 datadir 初始化（或明确标注该路径在 CI 上不支持）。
+- ~~待办：修 `compare-real.run.py` 在 GitHub runner 上的 datadir 初始化（或明确标注该路径在 CI 上不支持）~~
+  —— **✅ 已按第二选项处理（2026-09-27）**：CI 侧改用与 acceptance 同款的 docker MySQL
+  （走 `compare-real.e2e.mjs`），`compare-real.run.py` 本体保留给本机 Windows 用、不再挂 ubuntu CI
+  （见 `ci.yml` tamper-waf-matrix 段注释）。**2026-10-09 复核：该 job 每轮 dispatch 均 success。**
 
 ### 2. NTLM 接线 HttpClient（✅ 已完成）
 - **✅ 已接线（commit f5c40ae）**：独立模块 `core/ntlmHandshake.js`（NtlmHandshake 状态机：cred/preAuthHeader/replay/clear），HttpClient 请求前预附加 Type3（已握手主机免重复挑战）+ 401+NTLM 挑战时三步握手重放（上限 2 跳）；NTLM 模式不发 Basic 头
@@ -1336,7 +1343,9 @@ services:
 - 提醒：本地裸仓能防 `.git` 损坏，**防不了磁盘故障**，不等于异地备份。
 
 ### 8. 前端测试环境差异固化
-- ~~已修 `vitest.config.ts` 强制 `NODE_ENV=test`（jsdom 下 React production build 导致 246 个假失败）+ 契约测试 `@vitest-environment node`~~（已完成）；**CI 已搭建**（`.github/workflows/ci.yml`，2026-09-13）：lint/typecheck + 前端 vitest + 服务端 1767 用例 + `run-all` 自足 6 套靶场，ubuntu/Node 24。**剩余动作：push 后观察首次 CI 实跑**——Linux 与 Windows 的路径/换行差异（e2e 脚本/测试断言）只有真跑才能暴露，若单测在 Linux 出现平台性失败按最小修复处理
+- ~~已修 `vitest.config.ts` 强制 `NODE_ENV=test`（jsdom 下 React production build 导致 246 个假失败）+ 契约测试 `@vitest-environment node`~~（已完成）；**CI 已搭建**（`.github/workflows/ci.yml`，2026-09-13）：lint/typecheck + 前端 vitest + 服务端 1767 用例 + `run-all` 自足 6 套靶场，ubuntu/Node 24。~~**剩余动作：push 后观察首次 CI 实跑**~~（Linux 与 Windows 的路径/换行差异只有真跑才能暴露）
+—— **✅ 已完成**：CI 已实跑数十轮（含 ubuntu 双平台 matrix 与 e2e 套件），Linux 侧无平台性失败。
+**2026-10-09 复核：本条不再有待办。**
 
 ---
 

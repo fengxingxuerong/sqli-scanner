@@ -234,7 +234,11 @@ export function parseArgs(argv) {
     else if (a === '--tor') args.tor = true;
     else if (a === '--mobile') args.mobile = true;
     // —— 对标 sqlmap 增强参数（不改变引擎行为，仅控制采样/编码）——
-    else if (a === '--random-agent') args.randomUA = true;
+    // [D21 2026-10-09] `--random-agent` 的解析**只在上面 [对标 sqlmap --random-agent] 那处**，
+    //   此处曾重复一条 `else if (a === '--random-agent') args.randomUA = true;` ——
+    //   同一条 else-if 链里第二个分支**永不执行** ⇒ `args.randomUA` 恒为 undefined ⇒
+    //   config.js 里 `if (args.randomUA) config.randomUA = true` 是死代码（顶层 randomUA 在
+    //   server/src 内 0 个读取点）。真开关是 `wafEvasion.randomUA`，由 args.randomAgent 驱动。
     else if (a === '--flush-session') args.flushSession = true;
     else if (a === '--fresh-queries') args.freshQueries = true;
     else if (a === '--no-cast') args.noCast = true;

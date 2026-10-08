@@ -107,3 +107,31 @@ test('分母守卫：defaults 里新增嵌套组必须进本清单（否则新�
   const actual = Object.keys(D).filter((k) => D[k] && typeof D[k] === 'object' && !Array.isArray(D[k]));
   assert.deepEqual([...NESTED_GROUPS].sort(), actual.sort());
 });
+
+// [D21 2026-10-09] CLI flag 去重守卫。
+// 起因（实测）：`--random-agent` 在 `args.js` 的**同一条 else-if 链**里出现两次
+//   ⇒ 第二个分支永不执行 ⇒ `args.randomUA` 恒 `undefined`
+//   ⇒ `config.js` 里 `if (args.randomUA) config.randomUA = true;` 是**死代码**
+//     （另证：顶层 `config.randomUA` 在 `server/src` 内 0 个读取点）。
+// 危害为 0 属侥幸 —— "重复分支静默吞掉后来者"这个**形状**才是要防的：
+// 下一个被重复的 flag 若正好是有效开关，改动会像"没接线"一样静默失效。
+test('★ D21：args.js 里同一 flag 不得出现在两条 else-if 分支（后者永不执行 = 死代码）', () => {
+  const raw = readFileSync(new URL('../bin/cli/args.js', import.meta.url), 'utf8');
+  // ⚠️ 必须先剥掉整行注释：本判据第一次跑就抓到「注释里的示例代码」——
+  //    上面那条 D21 说明注释本身写了 `else if (a === '--random-agent')...` 作为反面例子，
+  //    于是判据把它当成真分支 ⇒ 假红。（本仓纪律：**判据的文本源必须排除注释**。）
+  const src = raw
+    .split('\n')
+    .filter((l) => !/^\s*\/\//.test(l))
+    .join('\n');
+  const flags = [...src.matchAll(/else if \(a === '(--[A-Za-z0-9-]+)'\)/g)].map((m) => m[1]);
+  // 分母守卫：正则或源码结构变了会静默变空 ⇒ 断言恒绿。127 是 2026-10-09 实测值，取宽松下限。
+  assert.ok(flags.length > 100, `flag 提取数异常（${flags.length}，预期 >100）⇒ 正则或源码结构变了`);
+  const seen = new Set();
+  const dup = [];
+  for (const f of flags) {
+    if (seen.has(f)) dup.push(f);
+    seen.add(f);
+  }
+  assert.deepEqual(dup, [], `重复的 flag 分支（后者永不执行，是死代码）：${dup.join(', ')}`);
+});
