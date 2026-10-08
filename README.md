@@ -585,6 +585,11 @@ npm run acceptance:sandbox          # 同全量，但套隔离 MySQL 沙箱（33
 | 红队实战评测（真值对照） | 19/19（100%），安全点 7，误报 0 |
 | fileRead / fileWrite 真闭环 | PASS（文件落盘=true，隔离沙箱重试） |
 
+> ⚠️ **误报率的证据边界（2026-10-09 补）**：上表的「误报 0 / 19/19」全部产自**自建靶场**
+> （`e2e/` 下 37 个靶场，唯一第三方卷子是 `sqli-labs`）。**未在任何第三方复杂应用上验证**
+> （DVWA / Juice Shop / OWASP Benchmark 一类「真框架 + 真 ORM + 复杂拼接」）⇒ 该数字
+> **不可外推为通用误报率**。WAF 侧同理：只验了 ModSecurity+CRS 一家。
+
 **本轮 0 FAIL。** 此前两轮 FAIL 的定位与修复（CRS 执行器 `(?i:…)` 兼容性、`engine.e2e` 环境耦合假红）、
 「11 PASS / 0 SKIP 假绿」事故、门禁自身的两处缺陷修复与缺陷注入验证记录，已迁至
 [docs/验收门禁-判定纪律与事故记录.md](docs/验收门禁-判定纪律与事故记录.md)。
@@ -621,7 +626,11 @@ MySQL 8 **默认 `secure_file_priv=NULL`（彻底禁用）**——实测默认�
 `{ ok:false, value:null }`，即**该能力在生产默认配置下不可用**，属合规的安全默认值。
 仅当目标管理员显式放行（`secure_file_priv=''` 或指定目录）时才可能成功。
 
-真实 ModSecurity/Coraza（含 libinjection）与商业云 WAF 未实测，上述数字仅在自实现执行器口径内成立。
+**真实 ModSecurity 已实测**：CI `modsec-live` job 每轮 dispatch 起官方 `owasp/modsecurity-crs:nginx`
+镜像（真 ModSecurity + libinjection + CRS 4.30.0）跑 PL1/PL3 双档，真机报告见
+[docs/WAF-真机对拍-2026-09-28.md](docs/WAF-真机对拍-2026-09-28.md)（最新一轮：19 样本、直连上界
+10/19、真机打穿链 **1 个**）。**未实测的是 Coraza 与商业云 WAF** —— 本节自实现执行器口径的数字
+不能外推到它们。
 复现：`MYSQL_PORT=3306 node e2e/waf-real/waf-verify.mjs`（人工挂链 A/B）与
 `node e2e/waf-real/waf-auto-check.mjs`（自动路径验收）。
 - 直连模式（对标 sqlmap -d）：支持 SQLite 直连（sql.js）+ 真实驱动注册接口（mysql2/pg/mssql/oracle 等需用户自备）
