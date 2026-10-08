@@ -9,6 +9,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { verifyTamperChains, pickChainsToVerify } from '../src/core/waf/chainVerify.js';
+import { ENCODING_FALLBACK_VENDOR } from '../src/core/waf/wafRecommend.js';
 import { TOKEN_PROBES } from '../src/core/waf/blockProfile.js';
 
 const target = { url: 'http://mock.test/?id=1', baseUrl: 'http://mock.test/?id=1', method: 'GET' };
@@ -176,42 +177,62 @@ test('对照：画像未拦任何词 → 仍按原序取前 3 条 → 唯一的�
   assert.equal(out, null);
 });
 
-// ── D18：codec 兜底链必须**显式占**一个验证名额 ──────────────────────────────
-// 真回归（CI acceptance 连续 3 个 run 同一场景红）：`waf403`（关键字即拦）场景要靠
-// 「候选中有一条能过 WAF」才换 boolean 通道重跑。D14 时验的 2 条静态链里**恰好**含一条
-// codec（chardoubleencode）⇒ 有链可过；D15 让 41 件未分类弹药进池后，非 codec 链占满前 2 ⇒
-// codec 落到第 3 位被切片丢掉 ⇒ 候选链全被拦 ⇒ 跳过重跑 ⇒ 漏检。
-// ⇒ D14 的"含 codec"是巧合，这里把它变成保证（与 planChainsByProfile 同源纪律）。
+// ── D20：编码兜底链必须**显式占**一个验证名额 ────────────────────────────────
+// 真回归（CI acceptance 连续 3 个 run 同场景红，D19 修好）：`waf403`（关键字即拦）要靠
+// 「候选中有一条能过 WAF」才换 boolean 通道重跑。那条链一直是 `chardoubleencode`（双重 URL 编码，
+// 靶场只解一次码 ⇒ 能过）。D14 时它"恰好"排在静态链前 2 里 ⇒ 蒙对；D15 放行 41 件未分类弹药后
+// 它掉到 codec 序列第 30+ ⇒ 被切片丢掉 ⇒ 漏检。
+// ⇒ 结论：**兜底能力必须显式保底，不能靠排序争**（与 planChainsByProfile 同源纪律）。
+// ⚠️ D18 试过用 `chain.isCodec` 识别 —— 无效，因为该字段只由**动态生成的链**携带，
+//    静态链（来自静态候选表）没有它 ⇒ 保底分支恒不触发。现改为**显式 vendor 标记**。
 
-test('★ D18：codec 兜底链必须进验证名单（D15 回归的根因；不能靠排序争名额）', () => {
-  // 输入形态取自失败现场：planChainsByProfile 的输出（vendor 为空、codec 排第 3）
+test('★ D20：编码兜底链必须进验证名单（按显式标记识别，不靠排序）', () => {
+  const V = ENCODING_FALLBACK_VENDOR;
   const merged = [
-    { plugins: ['modsecurityversionedkeywords'] },
-    { plugins: ['nonrecursivereplace'] },
-    { plugins: ['encode2hex'], isCodec: true },
+    { vendor: 'generic_block', plugins: ['modsecurityversionedkeywords'] },
+    { vendor: 'generic_block', plugins: ['nonrecursivereplace'] },
+    { vendor: V, plugins: ['chardoubleencode'] },
   ];
   const picked = pickChainsToVerify(merged, { maxChains: 3, generatedSlots: 1 });
   assert.ok(
-    picked.some((c) => c.isCodec),
-    `codec 兜底链被挤出验证名单 ⇒ 关键字即拦的场景会漏检：${JSON.stringify(picked)}`,
+    picked.some((c) => c.vendor === V),
+    `兜底链被挤出验证名单 ⇒ 关键字即拦的场景会漏检：${JSON.stringify(picked)}`,
   );
-  assert.ok(picked.length <= 3, `验证条数不得超过预算：${picked.length}`);
+  // 名额来自 slots（3-1=2）；本用例没有生成链 ⇒ 总数就是 2（不能凭空多出）
+  assert.equal(picked.length, 2, `不得超预算：实得 ${picked.length}`);
 });
 
-test('D18 反向钉子：候选里没有 codec 时行为不变（仍是前 slots 条，不凭空造链）', () => {
-  const merged = [{ plugins: ['a'] }, { plugins: ['b'] }, { plugins: ['c'] }];
+test('D20 反向钉子：候选里没有兜底链时行为不变（仍是前 slots 条，不凭空造链）', () => {
+  const merged = [
+    { vendor: 'generic_block', plugins: ['a'] },
+    { vendor: 'generic_block', plugins: ['b'] },
+    { vendor: 'generic_block', plugins: ['c'] },
+  ];
   const picked = pickChainsToVerify(merged, { maxChains: 3, generatedSlots: 1 });
   assert.deepEqual(picked.map((c) => c.plugins[0]), ['a', 'b']);
 });
 
-test('D18 生成链名额不被 codec 保底挤占（总数仍等于预算）', () => {
+test('D20 兜底链已在名单内时**不改顺序**（先试最有希望的 ⇒ 省请求）', () => {
+  const V = ENCODING_FALLBACK_VENDOR;
   const merged = [
-    { plugins: ['a'] }, { plugins: ['b'] },
-    { plugins: ['encode2hex'], isCodec: true },
-    { plugins: ['g1'], vendor: 'bypass:auto' },
+    { vendor: V, plugins: ['chardoubleencode'] },
+    { vendor: 'generic_block', plugins: ['a'] },
+    { vendor: 'generic_block', plugins: ['b'] },
+  ];
+  const picked = pickChainsToVerify(merged, { maxChains: 3, generatedSlots: 1 });
+  assert.deepEqual(picked.map((c) => c.plugins[0]), ['chardoubleencode', 'a'], '顺序不得被改动');
+});
+
+test('D20 生成链名额不被兜底保底挤占（总数仍等于预算）', () => {
+  const V = ENCODING_FALLBACK_VENDOR;
+  const merged = [
+    { vendor: 'generic_block', plugins: ['a'] },
+    { vendor: 'generic_block', plugins: ['b'] },
+    { vendor: V, plugins: ['chardoubleencode'] },
+    { vendor: 'bypass:auto', plugins: ['g1'] },
   ];
   const picked = pickChainsToVerify(merged, { maxChains: 3, generatedSlots: 1 });
   assert.equal(picked.length, 3, `名额总数应为 3：${JSON.stringify(picked.map((c) => c.plugins[0]))}`);
-  assert.ok(picked.some((c) => c.isCodec), 'codec 必须在名单里');
+  assert.ok(picked.some((c) => c.vendor === V), '兜底链必须在名单里');
   assert.ok(picked.some((c) => c.vendor === 'bypass:auto'), '生成链名额必须保留');
 });

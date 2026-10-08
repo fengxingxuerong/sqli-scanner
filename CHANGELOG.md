@@ -4,6 +4,51 @@
 
 ## [Unreleased]
 
+### 2026-10-09 批次 D20 · 把"兜底靠排序蒙对"换成**显式保底**（清 D18 的死分支）+ COVERS 口径守卫
+
+**一句话**：D19 修好了 `waf403`，但它依赖的是 `chardoubleencode` **恰好**被排序排到静态链第 1；
+本批把它变成**显式保证**，并补一条守卫防止 `TAMPER_COVERS` 的口径再出岔子。
+
+#### ① 清掉 D18 的死分支（它"看起来在保底，其实从不触发"）
+
+D18 的 `pickChainsToVerify` 用 `chain.isCodec` 认兜底链 —— 但那个字段**只由 `planChainsByProfile`
+动态生成的链携带**，静态链（来自静态候选表）没有它 ⇒ `codecStatics` 恒空 ⇒ 分支永不触发。
+本批改为**显式 vendor 标记**：
+
+- `wafRecommend.js` 新增 `ENCODING_FALLBACK_VENDOR = 'encoding_fallback'`；
+- `detect.js` 给编码兜底链打这个 vendor（不再用泛用的 `GENERIC_BLOCK_VENDOR`）；
+- `pickChainsToVerify` 按该标记识别：**兜底链若没进名单，替换掉最后一条**（保序、预算不变）。
+  · 为什么是"替换"而不是"加名额"：预算必须恒定（运维纪律）。
+  · 为什么保序：`chardoubleencode` 现在 hit 最高、本来就排第 1，**先试它最省请求**；
+    只在它被挤出时才替换，避免无谓地改动"先试谁"。
+
+#### ② 新增 COVERS 口径守卫（防同类回归复发）
+
+`TAMPER_COVERS` 决定 `rankChainsByProfile` 的排序，而"整串编码"类插件（`eliminatesAll`）
+会让**明文关键词一起消失** ⇒ 对关键词类同样有覆盖。D19 的回归正是 `chardoubleencode`
+只登记了标点类导致 hit=0。新守卫：**静态候选表里凡 `eliminatesAll` 的插件，其 COVERS 必须含
+关键词类**（`union/select/and/or/comment`）。探测确认当前**0 违例**（唯一命中的 `chardoubleencode`
+已在 D19 补齐），所以它纯防未来。
+
+#### ③ 缺陷注入复验（cp 备份还原）
+
+| 注入 | 目标 | 结果 |
+|---|---|---|
+| `detect.js` 把兜底链 vendor 退回 `GENERIC_BLOCK_VENDOR` | ③ 接线守卫 | **6→5 pass / 1 fail** ✓（'编码兜底链必须带显式 vendor 标记'） |
+
+#### ④ 关于"C：D15 判据缺缺陷注入复验"
+
+复核后**不需要补** —— D16 的注入②（`semanticUnsafeRegistry` 白名单掉 `misunion`，
+★12 件钉子 14→13 pass）**就是** D15 判据的缺陷注入复验。
+
+#### ⑤ 行为不变性
+
+真实链路复验（`detect.js` 真实构造的 suggestions + 失败现场画像）：
+```
+chainVerify 实际会验 3 条 = chardoubleencode | unionvaluesrow+dash2hash | modsecurityversionedkeywords
+```
+与 D19 完全一致 ⇒ 本批只把"蒙对"变成"保证"，**不改变当前行为**。
+
 ### 2026-10-09 批次 D19 · 真正修好 `acceptance` 的 `waf403` 漏检（D18 修复无效，本批给出真根因）
 
 > ⚠️ **先更正 D18**：D18 的「codec 兜底链占名额」**对生产输入无效**（CI run #191 acceptance 仍红）。
