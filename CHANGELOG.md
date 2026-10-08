@@ -4,6 +4,37 @@
 
 ## [Unreleased]
 
+### 2026-10-09 批次 D22 · `tamper-waf-matrix` 失败可见化（TODO K 条的观察面解）
+
+**一句话**：给这个"只在 schedule/dispatch 跑、平时没人盯"的 job 加 job summary 汇总，
+并**订正 K 条的前提** —— 它的严重性早已被 2026-09-22 那轮降级。
+
+#### ① 先订正前提（避免照旧描述做错方向）
+
+TODO K 原文写「`continue-on-error: true` 是**有意设计**，代价是失败时没有任何显式信号」。
+复核后：该开关**只对纯测量脚本**（`tamper-test.mjs`，无断言、不设退出码）保留是合理的；
+**真断言门禁**（`compare-real.e2e.mjs`，`exit(pass?0:1)`）的 `continue-on-error` **已在 2026-09-22 去掉**
+—— 而且本 job 压根不在 PR/push 上跑，那个开关**买不到任何"不阻塞"的好处**，只买到"失败报成绿"。
+⇒ 真问题从"失败被吞"降级为"**失败没人主动看**"。
+
+#### ② 改动
+
+- `tamper-waf-matrix` 的两个被测住 step 加 `id`（`matrix_measure` / `waf_gate`）；
+- job 末尾新增「门禁结果汇总（失败可见化）」step（`if: always()`）：把两步 `outcome` 写成
+  markdown 表进 `$GITHUB_STEP_SUMMARY`，门禁失败时附"这是真回归、不是环境抖动 + 排障 artifact 名"。
+
+#### ③ 守卫（钉**配对**，不是钉"有没有"）
+
+新增守卫：summary 读的 `steps.<id>.outcome` 必须与真实存在的 `id:` 对得上。
+**少一个 id ⇒ summary 恒显示"未跑" —— 那比没有 summary 更误导**，所以两个方向都钉。
+含分母守卫（job 片段长度须 >3000，防片段切分逻辑失效后恒绿）。
+
+缺陷注入复验（cp 备份还原）：删掉 `id: waf_gate` ⇒ 守卫红、精确报「step id `waf_gate` 缺失」✓
+
+#### ④ 仍待决（保留在 TODO）
+
+失败时是否**自动开 issue**（推送式告警）—— 会产生通知噪音，需先定「要推送还是只看板」。目前不做。
+
 ### 2026-10-09 批次 D21 · TODO 真实性审计：清 3 处过期条目 + 修 `--random-agent` 重复解析（死代码）
 
 **起因**：本次会话里我**两次**被 `TODO.md` 的过期条目误导 ——

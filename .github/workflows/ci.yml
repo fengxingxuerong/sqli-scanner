@@ -715,6 +715,7 @@ jobs:
       # 名字里写明「非门禁」避免读 CI 绿红时误以为这里验证过什么。
       - run: node e2e/tamper-matrix/tamper-test.mjs
         name: Tamper 绕过矩阵（测量，非门禁）
+        id: matrix_measure
         timeout-minutes: 10
         continue-on-error: true
       # 真断言门禁（exit(pass?0:1)）：**故意不加 continue-on-error** ——
@@ -768,6 +769,7 @@ jobs:
       # 真断言门禁（exit(pass?0:1)，连不上 MySQL 时 exit 2 = 显式失败不静默降级）。
       # 直连 3306 用上面刚起的 docker 实例 + init-db 那份 schema。
       - name: WAF 规则实验室（真 MySQL A/B，断言门禁）
+        id: waf_gate
         run: node e2e/waf-lab/compare-real.e2e.mjs
         env:
           MYSQL_HOST: 127.0.0.1
@@ -786,6 +788,35 @@ jobs:
             e2e/tamper-matrix/results/
             e2e/waf-lab/results/
           if-no-files-found: warn
+      # [D22 2026-10-09] **失败可见化**：本 job 只在 schedule / workflow_dispatch 跑，平时没人盯 ⇒
+      # 把各门禁的 outcome 写进 job summary，红了在 workflow 列表页也能一眼看到。
+      # 起因是 TODO 的 K 条（「job 红了没人知道」）。复核后确认：2026-09-22 那轮已把**真断言门禁**
+      # 的 continue-on-error 去掉（它本来就不阻塞 PR ⇒ 那个开关只买到"失败报成绿"），
+      # 所以现在剩下的只是**观察面**问题（没人主动看），不是"失败被吞"。
+      # ⚠️ 故意**不自动开 issue**：那会产生通知噪音，属需要先定口径的取舍（TODO K 挂账）。
+      - name: 门禁结果汇总（失败可见化）
+        if: always()
+        run: |
+          m='${{ steps.matrix_measure.outcome }}'
+          g='${{ steps.waf_gate.outcome }}'
+          {
+            echo "## tamper-waf-matrix 门禁结果"
+            echo ""
+            echo "| 步骤 | 结论 | 性质 |"
+            echo "|---|---|---|"
+            echo "| Tamper 绕过矩阵 | ${m:-未跑} | 测量（非门禁，恒绿属正常） |"
+            echo "| WAF 规则实验室 | ${g:-未跑} | **真断言门禁**（红 = 真回归） |"
+            echo ""
+            if [ "$g" = "failure" ]; then
+              echo "> ⚠️ **WAF 规则实验室门禁失败** —— 它是真断言门禁（\`compare-real.e2e.mjs\` 退出码即结论），"
+              echo "> 不是环境抖动。排障入口：本 job 的 \`tamper-waf-artifacts\`。"
+            elif [ "$g" = "success" ]; then
+              echo "> ✅ WAF 规则实验室门禁通过。"
+            else
+              echo "> ⓘ WAF 规则实验室未跑（outcome=${g:-空}）—— 若上游步骤（npm ci / 起库）失败会走到这里，"
+              echo "> 请连同上游步骤的结论一起读。"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
 
   # [发布冒烟 2026-09-18] 与 acceptance 互补：acceptance 覆盖"依赖真实 DB 的 e2e"，
   # 本 job 覆盖"生产配置组合"——带 token + Express 托管 dist + 引擎常驻，
