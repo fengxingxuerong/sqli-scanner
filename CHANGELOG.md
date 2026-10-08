@@ -4,6 +4,94 @@
 
 ## [Unreleased]
 
+### 2026-10-08 批次 D15 · WAF 弹药库实测派生 + 语义完整性（含 D15 原定任务的推广落地）
+
+**一句话**：弹药库里 **47% 的插件（111/234）从来没进过候选池**，其中包含真机**唯一**打穿的
+`unionvaluesrow` / `unionvalues`；与此同时一批"过了 WAF 但 SQL 必挂"的假弹药一直在占名额。
+本批用**插件自己的 transform 实测**同时解决两头，全部判据本机可复现（`npm run waf:audit`）。
+
+#### ① 弹药库体检（新脚本 `scripts/waf-ammunition-audit.mjs`，`npm run waf:audit`）
+
+| 项 | 数字 |
+|---|---:|
+| 总插件 | 234（人工精标 46 / 族派生 77 / **未分类 111**） |
+| 实测派生后**进池** | **41** 件 |
+| 判为**语义不可用**出局 | **12** 件 |
+| 仍无信息（盲试，保持排除） | 61 件 |
+
+报告：`docs/WAF-弹药库审计-2026-10-08.md`。
+
+#### ② 真缺口：真机唯一打穿的弹药被纪律挡在门外
+
+`selectByAvoiding` 原判据是「`unclassified` 一律排除（不认识的不敢用）」。代价是
+**111 件（47%）永不进池**，而 `unionvaluesrow` / `unionvalues` 正在其中 —— 它们只能通过
+D4 的人工真机对拍写进**静态推荐表**才出现，定向搜索器**永远生成不出**那条链。
+
+⇒ 纪律改为：**排除的理由是「不知道它动什么 ⇒ 盲试噪声」，不是「没人给它归类」**。
+有实测派生的 token 信息即视为已知（`waf.bypassSemantics.test.js` 新增回归钉子：
+这两件必须进 `usable` 且进 `boosted`）。
+
+#### ③ 假弹药：12 件标为 `semanticUnsafe` 并请出候选池
+
+新模块 `server/src/core/waf/bypass/semanticIntegrity.js`，两条**结构性**不变量
+（不收启发式，只收"必然破坏"）：
+
+| 不变量 | 命中件 | 证据形态 |
+|---|---|---|
+| `inword-split`（标识符内部被插分隔符） | keywordSplit · misunion · sap · lad · dhs · accessfilter · aspjetty · nullencode · squiggle（9） | `UN/**/ION` `SEL[/**/]ECT` `UN[%00]ION` `UN[~~]ION` |
+| `unclosed-comment`（块注释未闭合） | randomboundary · halfversionedmysql · halfversionedmorekeywordsopen（3） | `/*!0UNION` 无 `*/` |
+
+机理：MySQL 把注释当**分隔符**，`UN/**/ION` 是两个标识符 ⇒ 整条语法错误。与 D14 真机证伪的
+`randomcomments` 词内形态**同型**，正是「放行 19/19、打穿 0/19」的来源。
+⚠️ `misunion` / `keywordSplit` 是**人工精标**条目 —— 精标也会错，所以判据对 curated 同样生效。
+
+判据细节（易踩坑，已写进测试）：不能写成"出现 字母-注释-字母 就算"——那会把合法的
+`UNION/**/SELECT`（词**间**插入）误杀。正确判据是「插入点前后文拼起来能在原文里**连续**找到」。
+
+#### ④ 顺带修掉两个真缺陷
+
+1. **`scalarselectinline` 在所有带引号 payload 上 100% 空转**（D3 原创插件）。
+   引号状态机把逃逸闭合符（`1'`）当成字符串开始 ⇒ 找不到第二个引号 ⇒ 整串被吞。
+   而字符串型注入点（`WHERE name='$x'`）恰恰必须带引号才能逃逸 —— 空转的正是最需要它的那一类。
+   修法：引号后紧跟 SQL 关键字 / 行注释 / 右括号 / 行尾 ⇒ 判为逃逸闭合符（代码层）。
+   既有保守行为不变（有 FROM、派生表、字符串字面量内均保持原样，doctest 全绿）。
+2. **`if (cur) for (...) if (x) A; else B;` 的 dangling else**：`else` 绑定到了**内层** if
+   ⇒ 首次命中永不入账（表现为"检测函数明明命中、violations 却是空的"）。已加大括号。
+
+#### ⑤ 兜底弹药显式留名额
+
+候选池从"3 条静态链"扩到 41 件派生弹药后，编码兜底链（排序最末）会被静默挤出 `maxChains`
+（`waf.bypassSearcher.test.js` 当场抓到）。改为**显式留 1 个名额**（与 A2 保守回退同源纪律）。
+
+#### 诚实边界（别拿本批数字当战力）
+
+- 本批判的是「变换是否**破坏 SQL 结构**」，**不判**能否过 WAF、能否取到数据。
+  **打穿仍然只有真机（modsec-live + 真 MySQL）能判** —— 真机 A/B 待 dispatch 验收。
+- "消除某词"只说明该词字面消失，**不证明语义等价**；等价性仍由插件单测与真机对拍负责。
+- `misunion` 等被判不可用的条目若真机 A/B 显示可用，应以真机为准并回退本判据。
+
+### 2026-10-08 批次 D14 真机复验（CI dispatch run 37653985121，head `50237e5`）
+
+D14 推送后 dispatch 跑完整 `ci.yml`（CRS 4.30.0 / PARANOIA 1 与 3 / 靶站 db 模式，样本 19 条）：
+
+| 判据 | 结论 |
+|---|---|
+| `randomcomments` **直连上界** | **10/19** ✅ —— D12 把它打到 0/19，D14 还原后回到改前水平，语义活力确认恢复 |
+| 唯一真机打穿的链 | 仍是 `unionvaluesrow` 系列（2/19）；本批未改变打穿格局（与 D12 补验一致） |
+| `lint` / `test-frontend` / `audit` / `tamper-waf-matrix` | 全 success |
+| `tamper-waf-matrix` 独立复测的离线 12 类 | 与本地 A/B **逐位一致**（randomcomments 6/12·50%、overlongutf8 11/12·91.7%、binary 2/12·11.2%、htmlencode 10/12·83.3%） |
+
+**T-6 判决（D13 入库的 5 件版本注释族变体，真机 A/B 到此为止）**
+
+| 变体 | 真机 PL1 | 判 |
+|---|---|---|
+| `versionedkeywordsnospace` / `versionedmorekeywordsnospace` / `modsecurityversionedblock` / `modsecurityzeroversionedblock` | 真机 + 自实现**全拦**（放行 0/19，与各自默认件同） | **无增益 ⇒ 不替换默认件** |
+| `halfversionedmorekeywordsopen` | 打穿 0/19、放行 0/19、**直连上界 0/19** | ⚠️ 上界归零 —— `/*!0` 不闭合把整段留在版本注释里，真 MySQL 上根本解析不了。**与 randomcomments 词内形态同型（真机证伪）** |
+
+⇒ 5 件变体真机**全部零增益**，其中 1 件还把上界打到 0。故：默认件一律不动；
+`halfversionedmorekeywordsopen` 的处置（加"语义不可用"标记并从候选池/推荐链中排除，
+与 D7 判 `equaltorlike` 为废插件同一条标准）列为下一批 D15，本批不做半截。
+
 ### 2026-10-08 批次 D14 · randomcomments 真机回归修复：离线涨的那 33pp 不是词内拆分挣的
 
 D12 把 `randomcomments` 改成上游的**词内**随机切分（`INSERT` → `I/**/NS/**/ERT`），离线 12 类矩阵
