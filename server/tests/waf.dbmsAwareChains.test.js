@@ -17,8 +17,9 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { tamperRegistry } from '../src/core/tamper/TamperRegistry.js';
 import '../src/core/tamper/applyTampers.js';
-import { MYSQL_DBMS_CHAINS, OPERATOR_SWAP_CHAINS, ENCODING_FALLBACK_CHAINS } from '../src/core/waf/wafRecommend.js';
-import { rankChainsByProfile } from '../src/core/waf/blockProfile.js';
+import { MYSQL_DBMS_CHAINS, OPERATOR_SWAP_CHAINS, ENCODING_FALLBACK_CHAINS, FILTER_BYPASS_CHAINS } from '../src/core/waf/wafRecommend.js';
+import { rankChainsByProfile, TAMPER_COVERS } from '../src/core/waf/blockProfile.js';
+import { auditPlugin } from '../src/core/waf/bypass/semanticIntegrity.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(HERE, '..', '..');
@@ -65,6 +66,9 @@ test('③ detect.js：dbms=MySQL 时真机链前置进 blockAdaptive 候选（�
   // [D19 2026-10-09] 编码兜底链也必须真接进候选 —— 它此前只靠动态生成，被 D15 的池子扩张
   // 挤到 codec 第 30+，导致 acceptance 的 waf403 连续 3 个 run 漏检（见 CHANGELOG D19）。
   assert.match(src, /for \(const plugins of ENCODING_FALLBACK_CHAINS\)/, '编码兜底链必须接进 blockAdaptive 候选');
+  // [D20] 且必须带**显式标记**（vendor: ENCODING_FALLBACK_VENDOR）—— chainVerify 靠它认出兜底链
+  // 才能保底名额；用泛用 vendor 会让保底识别失效（D18 的教训：靠 chain.isCodec 识别不行）。
+  assert.match(src, /vendor: ENCODING_FALLBACK_VENDOR/, '编码兜底链必须带显式 vendor 标记');
 });
 
 // [D19 2026-10-09] 行为断言（比源码文本强）：画像拦**关键词**时，编码兜底链必须排到链首。
@@ -90,4 +94,31 @@ test('★ D19：画像拦关键词时编码兜底链（chardoubleencode）必须
   const plain = rankChainsByProfile(chains, []);
   assert.equal(plain[0].plugins.join('+'), 'chardoubleencode', '空画像下保持入参序（它本就在最前）');
   assert.equal(plain.length, chains.length, '重排不得增删链');
+});
+
+// [D20 2026-10-09] COVERS 口径一致性守卫。
+// `TAMPER_COVERS` 决定 `rankChainsByProfile` 的"覆盖了几个被拦词" ⇒ 直接决定排序。
+// 「整串编码」类插件（`eliminatesAll`）会让**明文关键词一起消失**，所以它对关键词类同样有覆盖；
+// 若表里只登记标点类，画像拦关键词时它 hit=0 ⇒ 排到静态链最后 ⇒ 被 chainVerify 的名额切掉。
+// D19 的真回归正是这么发生的（`chardoubleencode` 只登记 quote/space/paren/comma/cmp）。
+// 本守卫把口径钉住：**只要进了静态候选表，它就必须在当前口径下排得上**。
+test('★ D20：静态候选表里的 eliminatesAll 插件必须在 TAMPER_COVERS 覆盖关键词类', () => {
+  const KEYWORDS = ['union', 'select', 'and', 'or', 'comment'];
+  const tables = { MYSQL_DBMS_CHAINS, ENCODING_FALLBACK_CHAINS, OPERATOR_SWAP_CHAINS, FILTER_BYPASS_CHAINS };
+  const bad = [];
+  for (const [tname, chains] of Object.entries(tables)) {
+    for (const chain of chains || []) {
+      for (const p of chain) {
+        if (!auditPlugin(p).eliminatesAll) continue; // 只盯「整串编码」族
+        const cov = TAMPER_COVERS[p];
+        if (!cov) bad.push(`${tname}:${p}（未登记）`);
+        else if (!KEYWORDS.some((k) => cov.includes(k))) bad.push(`${tname}:${p}（${JSON.stringify(cov)}）`);
+      }
+    }
+  }
+  assert.deepEqual(
+    bad,
+    [],
+    `这些"整串编码"插件的 COVERS 缺关键词类 ⇒ 画像排序会给 hit=0 ⇒ 排到静态链末尾被切掉：${bad.join(', ')}`,
+  );
 });

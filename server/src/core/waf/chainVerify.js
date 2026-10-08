@@ -20,6 +20,8 @@ import { looksBlocked, profileBlockedTokens } from './blockProfile.js';
 // 故**静态链整体保持在前** —— 新逻辑无效时前 MAX_CHAINS 条与改造前完全一致（保守回退）。
 import { buildCandidateChains, isGeneratedChain } from './bypass/searcher.js';
 import { rankChainsByProfile } from './blockProfile.js';
+// [D20 2026-10-09] 兜底链的显式标记（识别它才能给名额保底；此前 D18 误用 chain.isCodec 而失效）
+import { ENCODING_FALLBACK_VENDOR } from './wafRecommend.js';
 
 const MAX_CHAINS = 3; // 最多验证 3 条候选链（预算约束）
 // [A2-ENDPOINT 2026-09-23] 定向生成的链占用几个验证名额。
@@ -44,22 +46,27 @@ const GENERATED_SLOTS = 1;
  *   ⚠️ 与 `planChainsByProfile` 的兜底逻辑**同源纪律**：兜底能力必须显式留名额，不能靠排序争。
  *
  * @param {Array<{plugins:string[], vendor:string, isCodec?:boolean}>} merged 合并后的候选链
- * @param {{maxChains?:number, generatedSlots?:number}} [opts]
+ * @param {{maxChains?:number, generatedSlots?:number, fallbackVendor?:string}} [opts]
  * @returns {Array<{plugins:string[], vendor:string, isCodec?:boolean}>}
  */
 export function pickChainsToVerify(merged, opts = {}) {
   const maxChains = opts.maxChains ?? MAX_CHAINS;
   const generatedSlots = opts.generatedSlots ?? GENERATED_SLOTS;
+  const fallbackVendor = opts.fallbackVendor ?? ENCODING_FALLBACK_VENDOR;
   const list = Array.isArray(merged) ? merged.filter((c) => c && Array.isArray(c.plugins) && c.plugins.length) : [];
   const slots = Math.max(0, maxChains - generatedSlots);
-  const statics = list.filter((c) => !isGeneratedChain(c.vendor));
   const generated = list.filter((c) => isGeneratedChain(c.vendor));
-  const plainStatics = statics.filter((c) => !c.isCodec);
-  const codecStatics = statics.filter((c) => c.isCodec);
-  const picked =
-    codecStatics.length && plainStatics.length >= slots
-      ? [...plainStatics.slice(0, Math.max(1, slots - 1)), codecStatics[0]]
-      : statics.slice(0, slots);
+  // 保序取前 slots 条静态链（**先试最有希望的** ⇒ 省请求）
+  const picked = list.filter((c) => !isGeneratedChain(c.vendor)).slice(0, slots);
+  // ★ [D20] 兜底链**显式保底**：若它没进名单，替换掉最后一条（而不是凭空加名额 ⇒ 预算不变）。
+  //   为什么不能只靠排序：D18 就是赌"它会排前"，池子一改（D15 放行 41 件）就失效。
+  //   为什么用 vendor 而不是 `chain.isCodec`：后者只由**动态生成的链**携带，静态链没有（D18 栽在这）。
+  const fallback = list.filter((c) => c.vendor === fallbackVendor);
+  if (fallback.length && picked.length && !picked.some((c) => c.vendor === fallbackVendor)) {
+    picked[picked.length - 1] = fallback[0];
+  } else if (fallback.length && !picked.length && slots > 0) {
+    picked.push(fallback[0]);
+  }
   return [...picked, ...generated.slice(0, generatedSlots)];
 }
 

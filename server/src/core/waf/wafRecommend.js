@@ -60,6 +60,19 @@ export const ENCODING_FALLBACK_CHAINS = [
 ];
 
 /**
+ * 编码兜底链在候选里的 **vendor 标记**（[D20 2026-10-09]）。
+ *
+ * 为什么需要一个专门的标记值：`chainVerify.pickChainsToVerify` 的名额分配需要**认出**兜底链
+ * 才能给它保底（"兜底能力必须显式留名额，不能靠排序争" —— 与 OPERATOR/GENERATED 同源纪律）。
+ *
+ * ⚠️ 此前 D18 想靠 `chain.isCodec` 识别，但那个字段**只由 `planChainsByProfile` 动态生成的链携带**，
+ * 静态链（来自本表）没有它 ⇒ 保底分支恒不触发（D18 因此无效，见 CHANGELOG）。
+ * 现在改为**显式 vendor 标记**，静态链也认得出来。
+ * 注意：它不以 `bypass:` 开头 ⇒ `isGeneratedChain` 仍判它**不是**生成链（不占生成名额）。
+ */
+export const ENCODING_FALLBACK_VENDOR = 'encoding_fallback';
+
+/**
  * 关键词「静默过滤」场景的候选链（删除型规则：不返 403，只把 union/select/and/-- 删掉）。
  * 顺序依据实测（e2e/pentest-lab/bl）：插入式双写 + 注释符换 `#` 一条即可命中布尔面；
  * 单用 `keywordinterleave` 会因 `--` 被删而语法错误，故 dash2hash 必须同链。
