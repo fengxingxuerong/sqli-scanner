@@ -85,7 +85,12 @@ export const TAMPER_COVERS = {
   dash2hash: ['comment'],
   charencode: ['quote', 'space', 'paren', 'comma', 'cmp'],
   charcode: ['quote', 'space', 'paren', 'comma', 'cmp'],
-  chardoubleencode: ['quote', 'space', 'paren', 'comma', 'cmp'],
+  // [D19 2026-10-09] 原表只列了标点类（对 942460/942431 标点预算那类规则有效），
+  // 但**整串 URL 编码同时让明文关键词消失** ⇒ 画像拦 `union/select/and/or/comment` 时它同样有覆盖。
+  // 只列标点会让 `rankChainsByProfile` 给它 hit=0 ⇒ 被排到静态链最后、
+  // 再被 chainVerify 的 2 个静态名额切掉 ⇒ `waf403`（关键字即拦）场景没有可过的链（真回归，见 CHANGELOG D19）。
+  // 口径同 `searcher.scoreMeta` 的 `eliminatesAll`：整串编码 ⇒ 覆盖全部被拦 token。
+  chardoubleencode: ['quote', 'space', 'paren', 'comma', 'cmp', 'union', 'select', 'and', 'or', 'comment'],
   percentage: ['quote', 'space', 'paren', 'comma'],
   unionalltounion: ['union'],
   unionvaluesrow: ['union', 'select'], // [D4] MySQL 表值构造器消 SELECT（真机打穿链 #162）

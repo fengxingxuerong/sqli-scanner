@@ -18,7 +18,7 @@ import { decideBlockPolicy, isUntrustedVendor } from '../../core/waf/blockPolicy
 // [A3-2026-09-25] 通道降级编排：把逐词拦截画像翻译成「哪些通道还值得跑」。
 import { planChannels } from '../../core/waf/channelPolicy.js';
 import { coveredTokens } from '../../core/waf/blockProfile.js';
-import { OPERATOR_SWAP_CHAINS, FILTER_BYPASS_CHAINS, MYSQL_DBMS_CHAINS } from '../../core/waf/wafRecommend.js';
+import { OPERATOR_SWAP_CHAINS, FILTER_BYPASS_CHAINS, MYSQL_DBMS_CHAINS, ENCODING_FALLBACK_CHAINS } from '../../core/waf/wafRecommend.js';
 import { GENERIC_BLOCK_VENDOR } from '../../core/waf/blockSignatures.js';
 import { isNetworkFailureError } from '../../core/scanValidityGuard.js';
 import { emptyExtractedData } from '../models.js';
@@ -433,6 +433,14 @@ export async function detectPhase(run) {
           for (const plugins of MYSQL_DBMS_CHAINS) {
             suggestions.push({ vendor: GENERIC_BLOCK_VENDOR, plugins: [...plugins] });
           }
+        }
+        for (const plugins of ENCODING_FALLBACK_CHAINS) {
+          // [D19 2026-10-09] 编码兜底（双重 URL 编码）—— DBMS 无关，故放在 MySQL 分支**之外**。
+          // 它的位置（MYSQL 系之后、OPERATOR 系之前）+ `TAMPER_COVERS` 的口径修正
+          // （整串编码 ⇒ 覆盖全部被拦 token）合起来保证：画像拦关键词时它的 hit 最高、
+          // `rankChainsByProfile` 会把它排到静态链第 1 ⇒ 稳进 chainVerify 的 2 个静态名额。
+          // 起因见 CHANGELOG D19（acceptance 的 waf403 连续 3 个 run 漏检）。
+          suggestions.push({ vendor: GENERIC_BLOCK_VENDOR, plugins: [...plugins] });
         }
         for (const plugins of OPERATOR_SWAP_CHAINS) {
           suggestions.push({ vendor: GENERIC_BLOCK_VENDOR, plugins: [...plugins] });
