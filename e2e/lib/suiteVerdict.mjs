@@ -106,3 +106,29 @@ export function evaluateExpect(expectIds, results, suites) {
   }
   return bad;
 }
+
+/**
+ * 「这个套件本轮根本没执行断言」判定 —— e2e/run-all.mjs 的汇总用它。
+ *
+ * 起因（2026-10-09 D29 实测）：run-all 原来写的是 `code === 0 && /\bSKIP\b/i.test(out)`，
+ * 于是 detection-runner 自己打的汇总行
+ *     [runner] 统计：19 PASS / 0 FAIL / 0 SKIP / 0 WARN
+ * 里的 "0 SKIP" 也算命中 —— **跑了 19 条断言的套件被标成「跳过（按设计）」**，
+ * 汇总横幅还跟着说「本套件未执行任何断言」：一句假话进了门禁输出，且把真实覆盖面报少了。
+ * 反方向同样要防：只喊了"跳过"、一条断言都没跑的套件不能算通过。
+ *
+ * 判据（两档，都偏保守）：
+ *   ① 有统计行 ⇒ 只有「PASS=0 且 FAIL=0 且 SKIP>0」才算没执行；
+ *   ② 没有统计行 ⇒ 要求「出现 SKIP 字样且完全没有 PASS 字样」才算没执行
+ *     （有 PASS 就当它执行过 —— 宁可少报跳过，不可把真跑过的套件说成没跑）。
+ * 只用 ASCII 标记，理由与本文件顶部一致（cp936 控制台下中文会成乱码）。
+ */
+export function executedNothing(out) {
+  const s = String(out ?? '');
+  const stats = /(\d+)\s*PASS[^\d]*?(\d+)\s*FAIL[^\d]*?(\d+)\s*SKIP/i.exec(s);
+  if (stats) {
+    const [, pass, fail, skip] = stats;
+    return Number(pass) === 0 && Number(fail) === 0 && Number(skip) > 0;
+  }
+  return /\bSKIP\b/i.test(s) && !/\bPASS\b/i.test(s);
+}

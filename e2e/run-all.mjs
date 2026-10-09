@@ -18,6 +18,7 @@ import net from 'node:net';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { executedNothing } from './lib/suiteVerdict.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..');
@@ -247,10 +248,12 @@ const runOne = (lab, useSandbox = false) =>
       if (timeoutNote) out += timeoutNote;
       // 从输出里抓一眼关键字（各靶场格式不一，仅作提示，不作判定）
       const hint = out.split('\n').filter((l) => /done:|结论|误报|✅|❌|FAIL|PASS/i.test(l)).slice(-2).join(' | ').slice(0, 160);
-      // [P1-FIX 2026-09-14] 区分「通过」与「按设计跳过」：
-      // 部分套件（如 udf-lab 因 secure_file_priv=NULL）退出码为 0，输出里一行 [SKIP] 就结束了。
-      // 旧汇总把它算进「全部通过」—— 15/15 里其实只有 14 个真跑。数字比没有更误导。
-      const skipped = code === 0 && /\bSKIP\b/i.test(out);
+      // [P1-FIX 2026-09-14 → D29 收紧 2026-10-09] 区分「通过」与「按设计跳过」。
+      // 09-14 的原判据 `/\bSKIP\b/i.test(out)` 方向对但太粗：detection-runner 的汇总行
+      // 「19 PASS / 0 FAIL / 0 SKIP」里的 "0 SKIP" 也命中 ⇒ **跑了 19 条断言的套件被标成跳过**，
+      // 横幅还跟着说"本套件未执行任何断言"（假话）。判定交给 suiteVerdict.executedNothing：
+      // 有统计行按计数判，没统计行才退回"见 SKIP 且完全无 PASS"的保守形态。
+      const skipped = code === 0 && executedNothing(out);
       // [DIAG-FIX 2026-09-21] 保留**完整输出**（原先只留 3 行 tail 且没人打印，见下方失败分支）
       resolve({ code, skipped, ms: Date.now() - t0, hint, sandbox: useSandbox, tail: out.split('\n').filter(Boolean).slice(-3).join('\n'), full: out });
     };

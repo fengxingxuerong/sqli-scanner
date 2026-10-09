@@ -1446,6 +1446,30 @@ services:
   定完之后需要一次真壳验证：本机跑 `npm run tauri dev` 点一次导出、一次导入
   （Web 侧走桩与浏览器下载分支，测不到这条路径，这是已知盲区）。
 
+### 15. 真机靶场跑出来的三笔欠账（⚠️ 2026-10-09 D29 开，均需决策或定位）
+背景：本轮把 run-all 能跑的 27 套真靶场跑满（25 绿 / 2 确定性红），下列三笔是跑出来的账。
+
+1. **pentest-lab `waf403` 的 `must:['boolean']` 确定性拿不到**（三轮一致，非抖动）。
+   已用单变量实验排除 D24–D28：把 D25 改过的 3 个 tamper 插件回退到改前 ⇒ 仍然红。
+   机理已定位到"链选对了放行、没验语义"：`/waf` 服务端不做二次解码，而引擎给该点选的
+   `chardoubleencode` 过 WAF 后落到 MySQL 是碎片 ⇒ error 有信号、boolean 物理不可达。
+   **要定的事**：是引擎选链该加一次"语义等价复核"（改引擎，收益是所有 WAF 场景），
+   还是这条钉值本身用错了链（改判据，必须先给"当时为什么能过"的证据）。
+   **禁止**为了变绿把 `must` 改掉。复现：`node e2e/run-all.mjs --only pentest-lab`（走隔离沙箱）。
+2. **api-range-lab 两条 `[ai]` 用例确定性 404 / code 2001「扫描任务不存在」**。
+   用例取 id 是 `ctx.state.numScan || await scanUntilDone(...)`（跨用例缓存）。
+   下一步只差一步：把用例用的 scanId 与当场 `/api/scans` 的清单对一下，
+   即可分清"用例间状态泄漏"还是"完成后 30s TTL 回收"。
+   复现：`node e2e/run-all.mjs --only api-range-lab`（约 57s，含沙箱启动）。
+3. **这两套都不在 CI 里**：`ci.yml` 对 `pentest-lab` / `api-range-lab` 零引用，
+   `e2e-self-contained` 只收敛 `deps: []` 的 6 套，而它们依赖 MySQL 沙箱（CI 无 mysqld）。
+   ⇒ 上面两笔红从第一次跑到现在没人看见。**顺序必须是：先定位/修，再接进 CI**
+   （直接接进去只会得到一个天天红、然后被人加 `continue-on-error` 关掉的 job —— 那是 K 条的老路）。
+4. **PG 那 3 套的解锁（顺带记这里）**：`D:/pg-smoke` 与 `D:/engines/jars` 本机都在，缺的是组合入口
+   —— 给 `e2e/run-with-sandbox.py` 加 `--with-pg`（同一进程内两套引擎"起→用→停"），
+   并让 `run-all` 的 `pg` 探测像 `sandbox` 那样"能自起就不算缺依赖"。
+   `pg-osshell` 现在就能单跑：`python e2e/run-with-pg.py e2e/oob-real-lab/pg-osshell.e2e.mjs`。
+
 ## 环境清理备忘（一次性）
 
 - [x] NRPT 规则 `.ooblab.test` / `.oob-lab.local` 已提权移除（2026-09-11 完成，`Get-DnsClientNrptRule` 确认清零）

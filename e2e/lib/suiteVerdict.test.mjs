@@ -3,7 +3,7 @@
 // 判错了会把下一个人引向错误的排障方向（§G / §S 两次都栽在这里）。
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { isSandboxDead, classifySuite, evaluateExpect } from '../lib/suiteVerdict.mjs';
+import { isSandboxDead, classifySuite, evaluateExpect, executedNothing } from '../lib/suiteVerdict.mjs';
 
 // ── 三种「沙箱没起来」形态都必须被认出 ──
 const SHAPE_INNER = `[sandbox-run] node = node
@@ -133,4 +133,24 @@ test('evaluateExpect：BLOCKED / FAIL / 缺席 三种都不算兑现', () => {
 test('evaluateExpect：没传 --expect 时零违规（默认行为不变，向后兼容）', () => {
   assert.deepEqual(evaluateExpect([], [{ id: 'unit', status: 'SKIP' }], SUITES), []);
   assert.deepEqual(evaluateExpect(undefined, undefined, undefined), []);
+});
+
+// ── executedNothing：D29（2026-10-09）新增，样本取自当场真跑的输出 ──
+test('executedNothing：跑过断言的套件不许因为输出里有 "0 SKIP" 就被判成跳过', () => {
+  // 真样本：e2e/detection-runner 在 2026-10-09 的实际输出
+  const real = '[PASS] ua_union（UNION 联合查询注入）检出=[union] 请求=6 耗时=88ms\n'
+    + '[runner] 统计：19 PASS / 0 FAIL / 0 SKIP / 0 WARN';
+  assert.equal(executedNothing(real), false, '19 条断言真跑了 —— 旧判据在这条上误标成"跳过"');
+  assert.equal(executedNothing('[runner] 统计：12 PASS / 3 FAIL / 0 SKIP'), false, '有 FAIL 也算执行过');
+  assert.equal(executedNothing('[runner] 统计：0 PASS / 0 FAIL / 5 SKIP / 0 WARN'), true, '一条没跑，判跳过');
+});
+
+test('executedNothing：无统计行时保留 09-14 那个反向教训（只喊 SKIP 不算跑过）', () => {
+  assert.equal(executedNothing('[SKIP] secure_file_priv=NULL，无法真跑文件读写'), true);
+  assert.equal(
+    executedNothing('[SKIP] 前置探测失败\n[PASS] 其余 3 条断言通过'),
+    false,
+    '只要有任何 PASS 字样就说明执行过，宁可少报跳过'
+  );
+  assert.equal(executedNothing(''), false, '空输出不该被判成"按设计跳过"（那是没跑，不是跳过）');
 });

@@ -4,6 +4,75 @@
 
 ## [Unreleased]
 
+### 2026-10-09 批次 D29 · 真机靶场全量跑一遍：27 套全覆盖 = 25 绿 / 2 确定性红，另修一处门禁误标
+
+**一句话**：把 `e2e/run-all.mjs` 能跑的真靶场**一轮跑满**（27 套，另 3 套被 PG 组合缺口挡住），
+结果里有两个确定性红是 **CI 从来没跑过的**，还有一处门禁把"跑了 19 条断言"报成"未执行任何断言"。
+
+#### ① 覆盖面（本机真跑，判成败只看退出码）
+
+| 组 | 结果 |
+|---|---|
+| CRS 保真门禁 | 942 族 **99.6%**（误触 2、已点名分歧 5、新增 0）／930 族 **100.0%** ⇒ D25 的 tamper 改动无回归 |
+| tamper × WAF | tamper-matrix ✅（真链矩阵）、waf-real ✅（selftest 10/10）、waf-lab ✅（真 MySQL + CRS A/B） |
+| 真 MySQL（沙箱） | real-mysql-lab ✅ 11/11、file-read ✅、file-write ✅、udf-lab ✅（真 DLL）、csrf/crawl/login/batch ✅ |
+| 真 JDBC 引擎 | multi-engine-lab ✅、no-waf ✅、crs-pl1 ✅、dialect-templates ✅ 16/16 |
+| 异构库 | mssql-lab ✅、mssql-oshell ✅、mssql-dump ✅、oracle-lab ✅ |
+| 检出面 | redteam-lab ✅（24 靶点）、random-battery ✅、recall-lab ✅、detection-runner ✅ 19/19、retest ✅、real-world ✅ |
+| **确定性红** | **pentest-lab ❌**（waf403）、**api-range-lab ❌**（两条 `[ai]`） |
+| 未跑 | oob-real-lab、pg-osshell、concurrent-isolation —— 见 ⑤ |
+
+#### ② pentest-lab `waf403`：`must:['boolean']` 确定性拿不到
+
+三轮输出完全一致：`[FAIL(miss=boolean)] waf403 检出=[error] miss=[boolean]` ⇒ 不是抖动。
+**单变量实验排除了本会话**：把 D25 改过的 3 个 tamper 插件回退到改前版本 ⇒ 仍然红。
+机理（读靶场定义 + 当场日志）：`/waf` 只对**原始 query 值**跑 `WAF_RE`、服务端**不做二次解码**；
+引擎自适应选中的链是 `[chardoubleencode]`，"放行"是真的（探针 2ms 通过），但双编码串经一次解码
+落到 MySQL 是 `%61%6e%64` 这类碎片 ⇒ error 通道有信号，而 boolean 要的"真/假两侧同形且结果不同"
+**物理上拿不到**。
+⇒ 这条红要么指引擎选链缺陷（**只验"能不能过 WAF"，不验"过完之后语义是否还等价"**），
+要么指 09-29 钉值时选的是另一条链。**没有为了让它绿去改 `must`** —— 那等于把判据改成能过的样子。
+
+#### ③ api-range-lab：两条 `[ai]` 用例确定性 404
+
+`AI 报告应 200，实得 404 {"code":2001,"message":"扫描任务不存在"}`，两轮一致。
+用例取 id 的写法是 `ctx.state.numScan || await scanUntilDone(...)` ⇒ **跨用例缓存的 scanId**
+可能属于已被回收（完成后 30s TTL）或已换过服务实例的扫描，属本仓已知的"用例间状态泄漏"一类。
+根因尚未定位（下一步很轻：把该用例用的 scanId 与当场 `/api/scans` 列出的 id 对一下，
+就能分清"状态泄漏"与"TTL 回收"）。
+
+#### ④ 门禁自身的两处问题（一处已修）
+
+- **误标已修**：`run-all` 判"按设计跳过"用的是 `code === 0 && /\bSKIP\b/i.test(out)` ——
+  detection-runner 自己打的汇总行 `19 PASS / 0 FAIL / 0 SKIP` 里的 "0 SKIP" 也命中，
+  于是**跑了 19 条断言的套件被标成 ⏭ 跳过**，横幅还宣称"本套件未执行任何断言"（假话，且把覆盖面报少）。
+  判定收进既有的 `e2e/lib/suiteVerdict.mjs`：新导出 `executedNothing`，两档保守
+  （有统计行按 PASS/FAIL/SKIP 计数判；没有统计行才要求"见 SKIP 且完全无 PASS"，
+  保住 09-14 那个"只喊 SKIP 不算跑过"的反向教训）。补 6 条断言单测，样本用当场真输出。
+  端到端证明：同一套件的 `hint` 一字未变，重跑从 `⏭ 跳过` 变成 `✅ 通过 14.3s / 跳过 0`。
+- **CI 覆盖缺口（未修，记 TODO）**：`pentest-lab` 与 `api-range-lab` 在 `ci.yml` 里**零引用**，
+  而 `e2e-self-contained` 那个 job 只收敛 `deps: []` 的 6 套 ⇒ 上面两个确定性红，
+  CI 从第一次跑到现在一眼都没看过。**"本机 run-all 才看得到"的红，等于没有红。**
+
+#### ⑤ PG 那 3 套：不是没环境，是没有组合入口
+
+本机 `D:/pg-smoke`（真 PG16 + 已初始化 datadir）和 `D:/engines/jars` 四支 jar 都在。
+但 `run-with-pg.py` 只管 PG、`run-with-sandbox.py` 只管 MySQL：
+`pg-osshell`（只要 PG）能直接跑，`oob-real-lab` / `concurrent-isolation`（PG + MySQL 沙箱同时要）
+**没有组合入口**，在 `--list` 里长期 ⛔。
+解锁路径已量清：给 `run-with-sandbox.py` 加 `--with-pg`（同一进程内"两套引擎 起→用→停"，
+沿用宿主会回收后台进程那条纪律），并让 run-all 的 `pg` 探测像 `sandbox` 那样"能自起就不算缺依赖"。
+
+#### ⑥ 本批我自己造成的一次损失（照实记）
+
+收尾复原被跑批写脏的入库产物时，我用了 `git checkout HEAD -- $(git status … | awk …)`，
+清单里除产物外**还含本批改好的三个源文件**（`e2e/lib/suiteVerdict.mjs`、其单测、`e2e/run-all.mjs`）
+⇒ 已写好并验证过的修复被一起回退。仓库记忆里正是这条教训（撤销只能用逆操作，
+批量 checkout 会连本轮特性一起删），我还是踩了。按原样重放三处改动后**重新验证**：
+单测 23/23、`eslint` RC=0、端到端那条误标再次翻回 ✅。
+今后复原产物必须逐文件名点名，并先把"产物"和"源码"分成两张清单，绝不用命令替换喂给 checkout。
+
+
 ### 2026-10-09 批次 D28 · 桌面版「导出报告 / 导入请求文件」发货即坏：包压根没装，而三层防护被同一个写法废掉
 
 **一句话**：`tauriBridge.ts` 用「变量形式的动态导入 + `as any`」去绕"插件包没装"，
