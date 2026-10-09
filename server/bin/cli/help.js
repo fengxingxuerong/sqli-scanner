@@ -108,6 +108,8 @@ export function printHelp() {
   -T, --table <tablename>   表（枚举目标）
   -C, --columns-list <c1,c2>  列子集（配合 --dump -T）
   --tamper <name,name>       tamper 插件链（逗号分隔，对标 sqlmap --tamper）；传 .js 文件路径可加载自定义插件
+  --payload-file <file.json>  追加自定义检测条目（与 registry.json 同 schema，见 docs/自定义检测条目.md）；
+                             只追加、不允许覆盖内置条目；不传即与内置基线完全一致
   --identify-waf             仅识别 WAF 厂商并给出推荐 tamper 链，不发起注入检测
                              （对标 sqlmap --identify-waf；用于扫描前先摸清对面是什么 WAF）
   --smart                    智能启发式（别名，等价 prefilter: true，跳过非注入参数）

@@ -28,6 +28,9 @@ import { parseScope, assertInScope, assertDirectDbInScope, registerScanScope, re
 import { printHelp } from './cli/help.js';
 import { readFileSync } from 'node:fs';
 import { parseXmlBody, xmlLeafPaths } from '../src/core/xmlBody.js';
+// [D24 2026-10-09 扩展生态] 自定义检测条目：validate（纯校验）+ merge（冲突拒绝）+ ALS 注入
+import { validateCustomEntries, mergeCustomEntries } from '../src/engine/payloads/customPayloads.js';
+import { PAYLOAD_REGISTRY, runWithCustomPayloads } from '../src/engine/payloadRegistry.js';
 import {
   parseArgs,
   parseLogFile,
@@ -168,7 +171,17 @@ function printExtractView(report) {
   }
 }
 
+// [D24 2026-10-09] 外层只负责把自定义条目挂进本次扫描的异步上下文；不传 --payload-file 时
+// 直接走 Inner，与旧调用路径逐位相同（无 ALS 开销、无行为差异）。
 async function runSingleScan(sm, url, args) {
+  const custom = Array.isArray(args.payloadEntries) && args.payloadEntries.length > 0
+    ? args.payloadEntries
+    : null;
+  if (custom) return runWithCustomPayloads(custom, () => runSingleScanInner(sm, url, args));
+  return runSingleScanInner(sm, url, args);
+}
+
+async function runSingleScanInner(sm, url, args) {
   const parsedBody = args.body ? JSON.parse(args.body) : {};
   // [JSON-BODY-FIX 2026-09-20] 判定本体在 cli/config.js 的 resolveBodyChannel（带完整理由注释）：
   // 含嵌套的 --body 走 jsonBody（引擎 _discoverJsonLeaves 取叶子路径），扁平 body 继续
@@ -552,6 +565,24 @@ async function main() {
   // 自定义 tamper 文件（--tamper=path/to/custom.js）异步加载注册（buildConfig 消费 tamperResolved）
   if (args.tamper) {
     args.tamperResolved = await resolveTamperPlugins(args.tamper);
+  }
+  // [D24 2026-10-09 扩展生态] 自定义检测条目：硬失败优先（静默忽略比报错危险 —— 用户会以为生效了）
+  if (args.payloadFile) {
+    try {
+      const parsed = JSON.parse(readFileSync(args.payloadFile, 'utf8'));
+      const { entries, errors } = validateCustomEntries(parsed);
+      if (errors.length > 0) {
+        console.error(`  [payload-file] ${args.payloadFile} 校验失败，不继续扫描：\n    - ${errors.join('\n    - ')}`);
+        process.exit(2);
+      }
+      // 冲突检查（与内置 id 比对）；不允许覆盖内置条目，抛错即拒
+      mergeCustomEntries(PAYLOAD_REGISTRY, entries);
+      args.payloadEntries = entries;
+      console.log(`  [payload-file] 已追加 ${entries.length} 条自定义条目（${args.payloadFile}），仅本次扫描生效`);
+    } catch (e) {
+      console.error(`  [payload-file] 加载失败：${args.payloadFile}（${e?.message || e}）`);
+      process.exit(2);
+    }
   }
   // 对标 sqlmap --check-tor：先验证 Tor 出口（失败退出，不发起任何扫描）
   if (args.checkTor) {
