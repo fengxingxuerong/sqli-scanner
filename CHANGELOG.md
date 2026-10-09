@@ -4,6 +4,76 @@
 
 ## [Unreleased]
 
+### 2026-10-09 批次 D28 · 桌面版「导出报告 / 导入请求文件」发货即坏：包压根没装，而三层防护被同一个写法废掉
+
+**一句话**：`tauriBridge.ts` 用「变量形式的动态导入 + `as any`」去绕"插件包没装"，
+代价是 **Vite 不做静态分析、TS 拿不到模块类型、依赖表里查无此包** —— 三条路全都静默。
+构建产物里逐字留着 `import("@tauri-apps/plugin-dialog")`，桌面壳按 origin 解析必然失败。
+
+#### ① 取证（不靠推断）
+
+- npm 侧：`package.json` 与 `package-lock.json` 里 `@tauri-apps/plugin-dialog` / `@tauri-apps/plugin-fs`
+  **零命中**；`node_modules/@tauri-apps/` 只有 `api`/`cli`/`cli-win32-x64-msvc`；
+  `require.resolve` 两个都 `MODULE_NOT_FOUND`。
+- Rust 侧反而是齐的：`Cargo.toml` 有 crate、`lib.rs` 有 `.plugin(tauri_plugin_dialog::init())`
+  与 `tauri_plugin_fs::init()`、`capabilities/default.json` 给了 `dialog:default` + `fs:default`
+  ⇒ 缺陷只在 JS 那一半，而那一半没人看得到。
+- 旧产物：`dist/assets/index-*.js` 里能原样 grep 到
+  `await import("@tauri-apps/plugin-dialog")` ⇒ 运行时裸解析，不是打包期问题。
+- **为什么一直没被发现**：vitest 把这两个 specifier alias 到测试桩（`src/tests/stubs/`），
+  唯一会走到这条分支的自动化测试跑的是**桩**；`npm run build` 只看构建成败，
+  而"能不能解析"要运行时才知道 ⇒ 门禁链上每一环都恰好放过它。
+
+#### ② 修
+
+- 两个包进 `dependencies`（dialog 2.8.1 / fs 2.6.0）。装完先核对**真实签名**再改代码：
+  `save(options?): Promise<string | null>`、`readTextFile(path: string | URL, opts?): Promise<string>`
+  ⇒ 与代码假设一致，**没有 API 漂移**，缺陷纯粹是"包没装"。
+- `tauriBridge.ts`：动态导入改回**字面量**；删掉 `(dialog as any)` / `(fs as any)`；
+  `(invoke as any)` 换成显式泛型 `invoke<{ port?; token? } | null>`。
+  ⚠️ 一摘 `any` 就露出 `invoke` 的默认返回类型是 `{}`（那正是它当初被 any 掉的原因）——
+  标注比 any 强：壳那边改了形态，这边编译就过不去。
+- Web 侧不必担心体积：调用点前面有 `if (!tauriAvailable) return`，这个 chunk 永不被加载。
+  实测重新 `npm run build` RC=0，且**产物里不再有裸 import，而 `plugin:dialog` / `plugin:fs`
+  的 IPC 名被真正打进 chunk**（前后各 grep 一次为证）。
+
+#### ③ 守卫 `server/tests/tauriPluginWiring.guard.test.js`（5 条，注入复验 4/4）
+
+| 条 | 判据 |
+|---|---|
+| ① | 源码引用的每个 `@tauri-apps/*` 包必须在 package.json 依赖里 —— **就是本缺陷** |
+| ② | 依赖里每个 plugin 包必须在 Cargo.toml 有 crate + lib.rs 有 `init()`（反向：只装 JS 会得到"命令不存在"，而那条路径外面套着 catch ⇒ 静默降级成"看起来没这功能"） |
+| ③ | 禁止"变量形式的动态导入"：轻量数据流判定（该变量确实被赋成 `@tauri-apps/*` 字面量才算），仓库里其它 `import(变量)` 不误伤 |
+| ④ | 桌面 `fs.*` 调用 ↔ capabilities 授权范围配对；欠账用**显式豁免表**钉住 —— 还掉却不删登记也红 |
+
+注入复验（全部逆操作还原，还原后 `git status` 对应文件 0 处脏）：
+还原变量形式 ⇒ ③ 红并点名 `src/shared/tauriBridge.ts:82` ✓；从 package.json 删两包 ⇒ ① 红 ✓；
+塞一个没注册的 `@tauri-apps/plugin-store` ⇒ ② 红 ✓；给 capabilities 加 `fs:allow-write-text-file`
+⇒ ④ 红「欠账已还，删掉登记」✓。
+
+判据自己那两次假红也留档：守卫**第一跑扫到了自己的合成样本**（反面例子写着
+`const dialogSpec = '@tauri-apps/plugin-dialog'` ⇒ 三条全红 ⇒ 排除 `SELF`，与 D25 的口径 ⑤ 同形）；
+④ 第一版把 Node 的 `fs.readFileSync` 也算成桌面调用 ⇒ 限定为"真的 import 了 plugin-fs 的文件"。
+
+#### ④ 还剩一半，而且是要人拍板的那一半
+
+`src-tauri/gen/schemas/acl-manifests.json` 里 `fs.default_permission` 的原文是：default 只给
+**应用目录的读**。而保存/打开对话框返回的是**用户任选的绝对路径**（`D:\reports\x.md`、
+`~/Downloads\x.txt`）⇒ 即使包修好，`writeTextFile` 仍会被 capability 范围拒。
+**放开哪一类范围是安全决策，本批没有替你改**，三个候选记在 TODO：
+(a) `fs:allow-write-text-file` + `$DOWNLOAD/**`；(b) 只放 `$HOME/**`；
+(c) 不动范围，改成"导出落应用目录 + 对话框只做另存提示"。
+④ 的豁免表把这笔账钉住了：真去改 capabilities 却不来删豁免，守卫直接红。
+
+#### ⑤ 本批状态
+
+全量服务端 **3176 用例 / 3172 pass / 0 fail / 4 skip**，前端 **556 / 556 pass / 0 fail**，
+徽章 3728（`facts:refresh --coverage` 实采）；本仓六条守卫合计 **24 条断言全绿、0 skip**；
+`npm run build` RC=0；`eslint .` 与三支 typecheck（frontend / tests / server）、
+`facts:check`/`refs:check`/`readme:check`/`arch`/`nesting`/`modules`/`version` 全 RC=0。
+依赖变更核对过：`package.json` 只 +2 行，`package-lock.json` +23/−3，无夹带。
+
+
 ### 2026-10-09 批次 D27 · 「进了检查范围」≠「真在被检查」：摘掉 26 行主动关闭 + 一个只减不增的棘轮
 
 **一句话**：D26 把 `src/tests` 纳入类型检查之后，真正的尾巴是**测试里还有 117 行

@@ -1427,6 +1427,25 @@ services:
   入参本来就合法就直接摘；非法值用 `@ts-expect-error`（注意它只管**紧挨的下一行**，
   且多余属性检查只作用于字面量直接进形参那种写法）。
 
+### 14. 桌面导出/导入的授权范围（⚠️ **需要一次决策，D28 只修了一半**）
+- **已修（D28）**：`@tauri-apps/plugin-dialog` / `plugin-fs` 从没进过 `package.json`，
+  而"变量形式动态导入 + `as any`"把 Vite、TS、依赖表三层防护同时废掉 ⇒ 桌面「导出报告」
+  「导入请求文件」两条功能**发货即坏**（旧产物里能原样 grep 到裸 `import("@tauri-apps/plugin-dialog")`）。
+  现已入依赖、改回字面量导入、摘掉 3 处 `as any`，重新构建后 IPC 名被真正打进 chunk。
+- **未修（要你定）**：`src-tauri/gen/schemas/acl-manifests.json` 里 `fs.default_permission` 只给
+  **应用目录的读**；而对话框返回的是用户任选的绝对路径（`D:\reports\x.md`、`~/Downloads\x.txt`）
+  ⇒ `writeTextFile` 仍会被 capability 范围拒。三个候选：
+  - (a) 加 `fs:allow-write-text-file` + scope `$DOWNLOAD/**`（最小可用，用户默认就在下载目录找）；
+  - (b) 只放 `$HOME/**`（方便但等于把整个家目录交给壳）；
+  - (c) **不放开范围**：导出固定落应用数据目录，对话框只当"另存提示"，或在 Rust 侧加一条
+        写文件的 command（把写权限收进自己的命令而不是交给前端任意路径）。
+  我的倾向：(a) 或 (c)。(b) 的问题是把"选一个文件"扩成"家目录任意写"。
+- **验证口径**：`server/tests/tauriPluginWiring.guard.test.js` 第 ④ 条已经把这笔账钉住
+  （`KNOWN_UNGRANTED` 里登记着 `writeTextFile` / `readTextFile`）。**真去 capabilities 加上
+  对应权限后，那条判据会红着要求你把豁免删掉** —— 欠账不会因为没人记得而悄悄还在。
+  定完之后需要一次真壳验证：本机跑 `npm run tauri dev` 点一次导出、一次导入
+  （Web 侧走桩与浏览器下载分支，测不到这条路径，这是已知盲区）。
+
 ## 环境清理备忘（一次性）
 
 - [x] NRPT 规则 `.ooblab.test` / `.oob-lab.local` 已提权移除（2026-09-11 完成，`Get-DnsClientNrptRule` 确认清零）
