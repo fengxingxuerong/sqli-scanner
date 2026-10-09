@@ -48,6 +48,22 @@ async function scanUntilDone(ctx, body, { timeoutMs = 90000 } = {}) {
 
 const fastCfg = (over = {}) => ({ concurrency: 4, ratePerSec: 0, retry: 0, timeoutMs: 15000, ...over });
 
+/**
+ * 复用"编号扫描"夹具时的**年龄闸**。
+ * `ctx.state.numScan` 背后是 ScanManager 的**内存上下文**：扫描 completed/stopped/error 后
+ * 进入 retiredAt，默认 30s 就被回收（`server/src/engine/ScanManager.js` 的 retireTtlMs，
+ * 可用 SCAN_RETIRE_TTL_MS 配置）。而 AI 路由查的正是这张表（`sm.scans.get(id)` 拿不到就
+ * 404 / code 2001「扫描任务不存在」）。
+ * 全序跑到 ai 组时早已过 30s ⇒ 无条件复用等于**赌机器快慢**：
+ * 实测「只跑 --groups=ai」6/6 通过（1.8s），全序跑到 ai 组时 2 条确定性 404。
+ * 上限取 15s（默认 30s 的一半，给慢机器留出余量）。
+ */
+const NUM_SCAN_MAX_AGE_MS = 15000;
+function cachedNumScan(ctx) {
+  const c = ctx.state.numScan;
+  return c && typeof c.at === 'number' && Date.now() - c.at < NUM_SCAN_MAX_AGE_MS ? c : null;
+}
+
 async function rangeStats(ctx) {
   const r = await ctx.rangeGet('/__range/stats');
   assert.equal(r.status, 200, `靶站取证端点应 200，实得 ${r.status}`);
@@ -216,7 +232,7 @@ test('scan', 'POST /scan/start + 轮询 + 报告：真库检出', async (ctx) =>
   assert.match(String(report.dbms || ''), /MySQL/i, `定库应为 MySQL，实得 ${JSON.stringify(report.dbms)}`);
   assert.ok((report.points || []).length >= 1, '注入点列表不应为空');
   ctx.note('num.scanId', scanId);
-  ctx.state.numScan = { scanId, report };
+  ctx.state.numScan = { scanId, report, at: Date.now() };
 });
 
 test('scan', 'GET /scan/:id/events：SSE 帧序列含进度与终态', async (ctx) => {
@@ -416,7 +432,7 @@ test('scan', 'diff?base=：修好一个点必须报 fixed（真靶站开关取�
 });
 
 test('scan', 'report 与 export 七种格式：内容类型/文件名/正文逐项核对', async (ctx) => {
-  const { scanId, report } = ctx.state.numScan || (await scanUntilDone(ctx, { url: `${ctx.LAB}/num?id=1`, config: fastCfg() }));
+  const { scanId, report } = cachedNumScan(ctx) || (await scanUntilDone(ctx, { url: `${ctx.LAB}/num?id=1`, config: fastCfg() }));
   // 报告正文必须带可复放 PoC（实战开台本第一件要用的东西）
   const withPoc = (report.vulns || []).filter((v) => v.poc);
   assert.ok(withPoc.length >= 1, 'GET /scan/:id/report 应附带 poc（与导出同源）');
@@ -705,7 +721,7 @@ test('exploit', 'POST /exploit/sql：真库执行 SELECT VERSION() 并回显', a
 });
 
 test('exploit', 'POST /exploit/sql：只需 scanId+pointId 即可接管扫描结果', async (ctx) => {
-  const { scanId, report } = ctx.state.numScan || (await scanUntilDone(ctx, { url: `${ctx.LAB}/num?id=1`, config: fastCfg() }));
+  const { scanId, report } = cachedNumScan(ctx) || (await scanUntilDone(ctx, { url: `${ctx.LAB}/num?id=1`, config: fastCfg() }));
   const point = pointOf(report, 'id');
   assert.ok(point?.id, '基线扫描必须给出可引用的 pointId');
   const r = await ctx.post('/api/exploit/sql', {
@@ -1041,7 +1057,7 @@ async function llmConfig(ctx, mode) {
 }
 
 test('ai', 'POST /scan/:id/report/ai：三角色流水线跑通且外发内容可控', async (ctx) => {
-  const { scanId } = ctx.state.numScan || (await scanUntilDone(ctx, { url: `${ctx.LAB}/num?id=1`, config: fastCfg() }));
+  const { scanId } = cachedNumScan(ctx) || (await scanUntilDone(ctx, { url: `${ctx.LAB}/num?id=1`, config: fastCfg() }));
   await llmConfig(ctx, 'ok');
   await ctx.llmPost('/__llm/reset', {});
   const r = await ctx.post(`/api/scan/${scanId}/report/ai`, {});
@@ -1065,7 +1081,7 @@ test('ai', 'POST /scan/:id/report/ai：三角色流水线跑通且外发内容�
 });
 
 test('ai', 'analyst 返回非 JSON：跨角色注入防护与降级形态', async (ctx) => {
-  const { scanId } = ctx.state.numScan || (await scanUntilDone(ctx, { url: `${ctx.LAB}/num?id=1`, config: fastCfg() }));
+  const { scanId } = cachedNumScan(ctx) || (await scanUntilDone(ctx, { url: `${ctx.LAB}/num?id=1`, config: fastCfg() }));
   await llmConfig(ctx, 'nonjson');
   const r = await ctx.post(`/api/scan/${scanId}/report/ai`, {});
   assert.equal(r.json?.code, 0, `降级后仍应产出报告（不能整条 500），实得 ${r.status} ${r.text.slice(0, 200)}`);
@@ -1076,7 +1092,7 @@ test('ai', 'analyst 返回非 JSON：跨角色注入防护与降级形态', asyn
 });
 
 test('ai', 'LLM 全部 500：错误必须如实外显（不得假成功）', async (ctx) => {
-  const { scanId } = ctx.state.numScan || (await scanUntilDone(ctx, { url: `${ctx.LAB}/num?id=1`, config: fastCfg() }));
+  const { scanId } = cachedNumScan(ctx) || (await scanUntilDone(ctx, { url: `${ctx.LAB}/num?id=1`, config: fastCfg() }));
   await llmConfig(ctx, 'fail');
   const r = await ctx.post(`/api/scan/${scanId}/report/ai`, {});
   // 三级角色全挂 → 必须是非 0 业务码或明确 502；不能是 code:0 + 空内容
@@ -1106,7 +1122,7 @@ test('ai', '未显式信任外发端点的实例必须 409（默认不外发）'
     env: { AI_REPORT_API_BASE: '', AI_REPORT_KEY_1: '', AI_REPORT_KEY_2: '', AI_REPORT_KEY_3: '' },
   });
   try {
-    const { scanId } = ctx.state.numScan || (await scanUntilDone(ctx, { url: `${ctx.LAB}/num?id=1`, config: fastCfg() }));
+    const { scanId } = cachedNumScan(ctx) || (await scanUntilDone(ctx, { url: `${ctx.LAB}/num?id=1`, config: fastCfg() }));
     const r = await request({ port: off.port, method: 'POST', path: `/api/scan/${scanId}/report/ai`, token: off.token, body: {} });
     assert.equal(r.status, 409, `未启用外发应 409（区别于下游故障 502），实得 ${r.status}：${r.text.slice(0, 200)}`);
     assert.ok(r.json?.code, '409 应带业务码');
@@ -1116,7 +1132,7 @@ test('ai', '未显式信任外发端点的实例必须 409（默认不外发）'
 });
 
 test('ai', 'AI 报告限速：每分钟第 4 次必须 429', async (ctx) => {
-  const { scanId } = ctx.state.numScan || (await scanUntilDone(ctx, { url: `${ctx.LAB}/num?id=1`, config: fastCfg() }));
+  const { scanId } = cachedNumScan(ctx) || (await scanUntilDone(ctx, { url: `${ctx.LAB}/num?id=1`, config: fastCfg() }));
   await llmConfig(ctx, 'ok');
   const statuses = [];
   for (let i = 0; i < 5; i++) {

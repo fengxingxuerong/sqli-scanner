@@ -1456,19 +1456,33 @@ services:
    **要定的事**：是引擎选链该加一次"语义等价复核"（改引擎，收益是所有 WAF 场景），
    还是这条钉值本身用错了链（改判据，必须先给"当时为什么能过"的证据）。
    **禁止**为了变绿把 `must` 改掉。复现：`node e2e/run-all.mjs --only pentest-lab`（走隔离沙箱）。
-2. **api-range-lab 两条 `[ai]` 用例确定性 404 / code 2001「扫描任务不存在」**。
-   用例取 id 是 `ctx.state.numScan || await scanUntilDone(...)`（跨用例缓存）。
-   下一步只差一步：把用例用的 scanId 与当场 `/api/scans` 的清单对一下，
-   即可分清"用例间状态泄漏"还是"完成后 30s TTL 回收"。
-   复现：`node e2e/run-all.mjs --only api-range-lab`（约 57s，含沙箱启动）。
+2. **api-range-lab 两条 `[ai]` 用例确定性 404 / code 2001「扫描任务不存在」** —— ✅ **已修（2026-10-09 D30）**。
+   根因**不是**用例写法，是 TTL：`ctx.state.numScan` 背后是 ScanManager 的**内存上下文**，
+   扫描终态后进入 `retiredAt`、**默认 30s 回收**，而 AI 路由查的正是这张表
+   （`sm.scans.get(id)` 拿不到就 404 / code 2001）。全序跑到 ai 组时早已过 30s
+   ⇒ 无条件复用 = 赌机器快慢（只跑 `--groups=ai` 6/6 通过，全序必红）。
+   修法：给缓存加**年龄闸**（`NUM_SCAN_MAX_AGE_MS = 15000`，默认 TTL 的一半），过期就重新扫。
+   全序 **49/49 PASS**。
+   **缺陷注入 3/3 杀**：把闸改成无条件复用 ⇒ 2 条 `[ai]` 404 + 1 条 `[exploit] POST /exploit/sql`
+   （吃同一个缓存）—— 也就是说这口闸同时保住了 exploit 组，D29 只记了 2 条红是记少了。
+   ⚠️ 留下的尾巴：`ScanManager` 的回收 TTL 是**产品行为**（不是测试缺陷）；用例侧加了年龄闸
+   只是让判据不再赌运气。若以后 AI 报告需要对**已完成较久**的扫描也能出，那是产品侧要改的
+   （例如落盘台账可回读），别在用例里加长 TTL 去绕。
 3. **这两套都不在 CI 里**：`ci.yml` 对 `pentest-lab` / `api-range-lab` 零引用，
    `e2e-self-contained` 只收敛 `deps: []` 的 6 套，而它们依赖 MySQL 沙箱（CI 无 mysqld）。
    ⇒ 上面两笔红从第一次跑到现在没人看见。**顺序必须是：先定位/修，再接进 CI**
    （直接接进去只会得到一个天天红、然后被人加 `continue-on-error` 关掉的 job —— 那是 K 条的老路）。
-4. **PG 那 3 套的解锁（顺带记这里）**：`D:/pg-smoke` 与 `D:/engines/jars` 本机都在，缺的是组合入口
-   —— 给 `e2e/run-with-sandbox.py` 加 `--with-pg`（同一进程内两套引擎"起→用→停"），
-   并让 `run-all` 的 `pg` 探测像 `sandbox` 那样"能自起就不算缺依赖"。
-   `pg-osshell` 现在就能单跑：`python e2e/run-with-pg.py e2e/oob-real-lab/pg-osshell.e2e.mjs`。
+4. **PG 那 3 套的解锁** —— ✅ **已修（2026-10-09 D30）**：`run-with-sandbox.py --with-pg`
+   （同进程内两套引擎"起→用→停"）+ `run-all` 的 `pg` 探测改成"能自起就不算缺依赖"。
+   三套**首次真跑通**：`pg-osshell` 17.6s、`oob-real-lab` 36.3s、`concurrent-isolation` 25.7s。
+   配套修掉三个静默缺陷（详见 CHANGELOG D30 段）：探针连不存在的业务库 `sqli_lab`、
+   `start_pg` 超时仍返回半死进程、`run-all` 的 `spawnSync` 在本机撞 EBUSY 把沙箱类全误标 SKIP。
+   ⚠️ 顺带把 `e2e/run-with-pg.py` **从 `.gitignore` 里放出来并入库**（它 09-18 被故意排除）：
+   不入库则上面两条路径在任何 clone 上都是坏的；`refs:check` 天然守着这条。
+   **剩下的账（未做）**：① 这三套**不在 CI 里**（与下面第 3 条同源：CI 无 PG/MySQL，
+   且 `e2e-self-contained` 只收敛 `deps: []`）⇒ 本机跑通 ≠ CI 看得见；
+   ② `ensure_database` / `pg_ready` 这一层**没有单测**（纯 Python + 真 PG，目前只有端到端证据），
+   若下次再出现"静默半起"，仍要靠人读日志归因。
 
 ## 环境清理备忘（一次性）
 

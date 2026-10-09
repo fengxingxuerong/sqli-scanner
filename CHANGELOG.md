@@ -4,6 +4,67 @@
 
 ## [Unreleased]
 
+### 2026-10-09 批次 D30 · PG 三套靶场从「长期 ⛔」到真机跑通，外加三个「判据自己错了」的缺陷
+
+**一句话**：D29 留下的问题是「3 套 PG 靶场因为没有组合入口长期跑不到」。入口补上之后一跑，
+暴露出来的不是产品缺陷，而是**三个环境判据自己错了** —— 而且每一个都错在「静默」上。
+
+#### ① 覆盖面：PG 0/3 → 3/3（本机真跑，判成败只看退出码）
+
+| 靶场 | 结果 | 证据 |
+|---|---|---|
+| `pg-osshell` | ✅ 17.6s | `[PASS] PG os-shell 真机闭环：COPY FROM PROGRAM 落表 → 回显 marker=命中` |
+| `oob-real-lab` | ✅ 36.3s | `OOB 通道检出：全链路回连命中`（隔离 MySQL 沙箱 + 本机 PG **同进程起停**） |
+| `concurrent-isolation` | ✅ 25.7s | `各自命中 union、dbms 归属正确、互不串扰` |
+
+组合入口的做法（D29 已量清的路径）：`run-with-sandbox.py --with-pg` 在同一进程内
+「起两套引擎 → 跑靶场 → 一起收摊」，`run-all` 的 `pg` 探测改成与 `sandbox` 同口径
+（**能自起就不算缺依赖**）—— 此前覆盖面取决于「有没有人碰巧手动起过 PG」，那不是判据，是运气。
+
+#### ② 三个真缺陷，全都错在静默
+
+- **(a) 就绪探针连的是不存在的业务库。** 探针连 `PGDATABASE=sqli_lab`，而 datadir 里
+  **根本没有这个库** ⇒ 端口通、能认证，但永远 `PG_NOT_READY database "sqli_lab" does not exist`
+  ⇒ 60s 超时。判「PG 能不能用」必须连 **PG 自带的 `postgres` 库**；业务库改成就绪之后
+  `ensure_database()` 去备（没有就建，有了就复用）。上一轮 21:2x 那次就是这么静默失败的。
+- **(b) `start_pg` 超时后照样把进程返回去。** 调用方拿到「起来了」的假信号 ⇒ 靶场在半死
+  状态下开跑，拿到 `the database system is in recovery mode` 而 SKIP —— **环境问题被读成产品结果**。
+  现在超时就是起不来：返回 `None` + 当场 `stop_pg()` 收摊（不带病继续，也不留后台进程）。
+- **(c) `run-all` 的 python 探测被本机 pipe 陷阱打掉。** `pythonWorks` 用 `spawnSync`，
+  而本机同步 pipe 对**任何**可执行文件都可能抛 `EBUSY`（同族问题在服务端测试里要靠
+  `cp-pipe-shim` 才跑得动）⇒ 明明存在的 python 被判不可用 ⇒ 所有沙箱类靶场 **0.0s 误标 SKIP**
+  （`oob-real-lab` 实测），而 `runOne` 里真去 spawn 同一个 python 却是好的。
+  判据换异步 `spawn`，语义不变（仍是真执行 `-c print(1)`），只是不再被同步 pipe 带走。
+
+#### ③ `e2e/run-with-pg.py` 从「故意不入库」改为**入库**
+
+它 2026-09-18 被写进 `.gitignore`（附两条理由），今天两条都已解除：
+① 未端到端验证 → 三套实测全过；② 硬编码 `D:/pg-smoke` → 保留为默认值，但
+`PG_BIN` / `PG_DATA` / `PG_PORT` 均可覆盖（没有 PG 的机器上 `pgSandboxAvailable()` 为假 ⇒ 退回既有的「缺依赖跳过」）。
+**必须入库的理由**：`run-all` 的 pg 路由与 `--with-pg` 都要调它，不入库的话这两条路径在
+**任何 clone 出来的机器上都是坏的**。`refs:check` 天然守着这件事（它校验 `run-all` 引用的
+文件是否被 git 跟踪，本轮 170 处全过）。
+
+#### ④ api-range-lab 两条 `[ai]` 404：真根因是 TTL，不是「取 id 的写法」
+
+`ctx.state.numScan` 背后是 ScanManager 的**内存上下文**：扫描终态后进入 `retiredAt`，
+默认 **30s 回收**，而 AI 路由查的正是这张表（`sm.scans.get(id)` 拿不到就 404 / code 2001）。
+全序跑到 ai 组时早已过 30s ⇒ **无条件复用等于赌机器快慢**（只跑 `--groups=ai` 6/6 通过，全序就红）。
+修法是给缓存加**年龄闸**（15s = 默认 TTL 的一半）：过期就重新扫，不再赌。全序 **49/49 PASS**。
+
+**缺陷注入复验**：把闸改成无条件复用（旧行为）⇒ **3 条 FAIL** —— 2 条 `[ai]` 404，
+外加 1 条 `[exploit] POST /exploit/sql`（它吃的是同一个缓存）。D29 只记了 2 条红，注入态下
+实际是 3 条 ⇒ 这口闸同时保住了 exploit 组。还原后复跑 49/49。
+
+#### ⑤ 未解决（沿用 TODO 15，本批没动）
+
+`pentest-lab` 的 `waf403` 与「两套不在 CI 里」两笔账原样保留 —— 顺序仍是先定位/修，再接 CI。
+
+#### ⑥ 本批门禁
+
+`eslint`（改动文件）RC=0、`node --test "e2e/lib/*.test.mjs"` **23/23**、`refs:check` 170 处全入库、
+`facts:check` 一致、两端 `ast`/`node --check` 通过、`node e2e/run-all.mjs --list` 里三套 PG 靶场由 ⛔ 变 ✅。
+
 ### 2026-10-09 批次 D29 · 真机靶场全量跑一遍：27 套全覆盖 = 25 绿 / 2 确定性红，另修一处门禁误标
 
 **一句话**：把 `e2e/run-all.mjs` 能跑的真靶场**一轮跑满**（27 套，另 3 套被 PG 组合缺口挡住），
