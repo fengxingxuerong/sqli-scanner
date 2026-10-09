@@ -67,7 +67,15 @@ export function pickChainsToVerify(merged, opts = {}) {
   } else if (fallback.length && !picked.length && slots > 0) {
     picked.push(fallback[0]);
   }
-  return [...picked, ...generated.slice(0, generatedSlots)];
+  const out = [...picked, ...generated.slice(0, generatedSlots)];
+  // ⚠️ 返回值**必须**恒 ≤ maxChains —— 下游 `verifyTamperChains` 还有一道
+  //   `ranked.slice(0, MAX_CHAINS)`（第 194 行）。超出预算的条目会被那一刀**静默切掉**，
+  //   于是"保底链进了名单"在单测里绿、在真机上却一次都没被验证。
+  //   [实测 2026-10-10] 曾把本函数改成"兜底追加在末尾"（返回 4 条）：单测全绿，
+  //   但第 194 行的二次截断把第 4 条切掉 ⇒ 兜底彻底失效，比替换式保底更糟。
+  //   ⇒ 保底只能**占名额**（替换末条），不能靠追加。该不变式由
+  //   `server/tests/waf.chainVerify.test.js` 的「输出不得超预算」用例守着。
+  return out.slice(0, maxChains);
 }
 
 /**

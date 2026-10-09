@@ -198,7 +198,8 @@ test('★ D20：编码兜底链必须进验证名单（按显式标记识别，�
     picked.some((c) => c.vendor === V),
     `兜底链被挤出验证名单 ⇒ 关键字即拦的场景会漏检：${JSON.stringify(picked)}`,
   );
-  // 名额来自 slots（3-1=2）；本用例没有生成链 ⇒ 总数就是 2（不能凭空多出）
+  // 名额来自 slots（3-1=2）：本用例没有生成链 ⇒ 总数就是 2（不能凭空多出）。
+  // 兜底链不在前 slots 内 ⇒ 走"替换末条"保底 ⇒ 仍是 2。
   assert.equal(picked.length, 2, `不得超预算：实得 ${picked.length}`);
 });
 
@@ -236,3 +237,67 @@ test('D20 生成链名额不被兜底保底挤占（总数仍等于预算）', (
   assert.ok(picked.some((c) => c.vendor === V), '兜底链必须在名单里');
   assert.ok(picked.some((c) => c.vendor === 'bypass:auto'), '生成链名额必须保留');
 });
+
+// ── 不变式：输出**恒不超预算**（防下游二次截断静默吃掉保底）────────────────────
+// [实测 2026-10-10] 曾把 pickChainsToVerify 改成"兜底追加在末尾"（返回 4 条）：
+//   本文件的纯函数用例全绿，但 `verifyTamperChains` 第 194 行还有一道
+//   `ranked.slice(0, MAX_CHAINS)` ⇒ 第 4 条（正是兜底链）被**静默切掉**，真机上保底彻底失效
+//   ——比"替换末条"更糟（替换至少保证了兜底在预算内被验证）。
+// ⇒ 教训：保底只能**占名额**，不能靠追加；且"返回值长度"这条不变式必须有测试守着，
+//   否则纯函数测试绿、生产路径坏（本仓第三次栽在同一类"两层之间无守卫"上）。
+test('★ 不变式：pickChainsToVerify 输出在任何入参下都不得超过 maxChains', () => {
+  const V = ENCODING_FALLBACK_VENDOR;
+  const pools = [
+    [], // 空池
+    [{ vendor: 'generic_block', plugins: ['a'] }],
+    // 兜底在池尾 + 有生成链（最容易被"追加"实现撑爆的组合）
+    [
+      { vendor: 'generic_block', plugins: ['a'] },
+      { vendor: 'generic_block', plugins: ['b'] },
+      { vendor: 'generic_block', plugins: ['c'] },
+      { vendor: V, plugins: ['chardoubleencode'] },
+      { vendor: 'bypass:auto', plugins: ['g1'] },
+      { vendor: 'bypass:auto', plugins: ['g2'] },
+    ],
+  ];
+  for (const merged of pools) {
+    for (const [maxChains, generatedSlots] of [[3, 1], [4, 1], [5, 2], [2, 1], [1, 1], [3, 0]]) {
+      const picked = pickChainsToVerify(merged, { maxChains, generatedSlots });
+      assert.ok(
+        picked.length <= maxChains,
+        `超预算 ⇒ 多出的条目会被 verifyTamperChains 的 slice 静默切掉：` +
+          `maxChains=${maxChains} generatedSlots=${generatedSlots} 实得 ${picked.length} ` +
+          JSON.stringify(picked.map((c) => c.plugins[0])),
+      );
+    }
+  }
+});
+
+test('★ 兜底不在前 slots 时，保底必须落在预算**内**（追加式实现会让它在真机上被切掉）', () => {
+  const V = ENCODING_FALLBACK_VENDOR;
+  const merged = [
+    { vendor: 'generic_block', plugins: ['a'] },
+    { vendor: 'generic_block', plugins: ['b'] },
+    { vendor: V, plugins: ['chardoubleencode'] }, // 静态链第 3 位 ⇒ slots=2 取不到
+    { vendor: 'bypass:auto', plugins: ['g1'] },
+  ];
+  const picked = pickChainsToVerify(merged, { maxChains: 3, generatedSlots: 1 });
+  assert.equal(picked.length, 3, `必须是 3（预算内），追加式实现会返回 4 然后被 slice 切掉：实得 ${picked.length}`);
+  assert.ok(picked.some((c) => c.vendor === V), '兜底链必须在**会被真正验证**的那几条里');
+  assert.ok(picked.some((c) => c.vendor === 'bypass:auto'), '生成链名额必须保留');
+});
+
+// ── 已知缺口（不是本文件能修的，见 TODO 15.1）────────────────────────────────
+// `e2e/pentest-lab` 的 `waf403` 场景（关键字即拦，靶场服务端只解一次码）：
+//   · 真实逐词画像被拦 = [comment, and, or, union, select, sleep]；
+//   · `chardoubleencode` 因 D19 把它的 TAMPER_COVERS 补成"关键词全覆盖"，
+//     hit 最高 ⇒ 排序后**稳居池子第 0**，是第一条被验证、也第一条放行的链 ⇒ 被选中重跑；
+//   · 但它过了 WAF 之后落到 MySQL 是 `%61%6e%64` 这类碎片（服务端只解一次码）
+//     ⇒ error 通道有信号，boolean 要的"真/假两侧同形且结果不同"物理不可达
+//     ⇒ waf403 的 must:['boolean'] 确定性红（D29 三轮一致，非抖动）。
+//   · 真正能用的是 `symboliclogical`（AND→&& / OR→||，语义等价），显式指定时
+//     实测 842ms 拿到 boolean；但它是静态链**第 3** 位，而 slots = maxChains - generatedSlots = 2
+//     ⇒ 它根本进不了验证名单（与保底逻辑无关，保底分支在真实池子下从未触发）。
+// ⚠️ 由此得到的判据：**不是"能不能过 WAF"，而是"过了还能不能用"**。
+//   任何"让兜底链排得更前"的改动都在加剧这个缺口；反过来要让语义等价链进得了 slots，
+//   必须动 COVERS 口径（D19 的支点，有回归风险）⇒ 单独立项真机验证，不在此处顺手改。
