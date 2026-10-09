@@ -27,8 +27,8 @@
     }
   },
   "server": {
-    "tests": 3176,
-    "pass": 3172,
+    "tests": 3178,
+    "pass": 3174,
     "fail": 0,
     "skip": 4,
     "coverage": {
@@ -43,6 +43,6 @@
     }
   },
   "badge": {
-    "testsPassing": 3728
+    "testsPassing": 3730
   }
 }

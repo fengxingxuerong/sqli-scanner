@@ -4,6 +4,73 @@
 
 ## [Unreleased]
 
+### 2026-10-10 批次 D31 · 废掉一笔「纯函数测试全绿、生产路径有害」的改动 + 加上防复发守卫
+
+**一句话**：工作区里躺着一版未提交的改动（把 WAF 编码兜底链从「替换末条」改成「追加末尾」）。
+用**与生产一致的输入**实测后证明它是**空改动**（在真实场景下一次都没触发）**且有害**
+（在另一种分支下让保底彻底失效）。已废弃，本批交付的是两道防复发守卫与 waf403 的真根因定位。
+
+#### ① 它是空改动：真实池子下两条实现返回逐字相同的名单
+
+复现方式：照 `detect.js` 的 `blockAdaptive` 分支组装真实 `suggestions`（MySQL 目标），
+喂真实逐词画像 `[comment, and, or, union, select, sleep]`，走完
+`buildCandidateChains → pickChainsToVerify → slice(0, MAX_CHAINS)` 全链路打印：
+
+| 环节 | 结果 |
+|---|---|
+| 排序后池子第 0 位 | `chardoubleencode`（D19 把它的 `TAMPER_COVERS` 补成关键词全覆盖 ⇒ hit 最高） |
+| `pickChainsToVerify` 输出 | `[chardoubleencode, unionvaluesrow+dash2hash, modsecurityversionedkeywords]` |
+| 真机实际验证（二次截断后） | 同上，逐字一致 |
+
+兜底链**本来就稳居第 0** ⇒ 「替换末条」与「追加末尾」的保底分支**都不触发**
+（两者的前置判断都是"兜底不在名单内"）。⇒ 该改动对 waf403 场景**零影响**。
+
+#### ② 它有害：下游还有一道 `slice(0, MAX_CHAINS)` 会把追加的那条静默切掉
+
+`verifyTamperChains` 第 194 行对 `ranked` 再做一次 `slice(0, MAX_CHAINS)`。改成"追加"后
+`pickChainsToVerify` 返回 4 条 ⇒ 第 4 条（正是兜底链）被切掉 ⇒ **保底彻底失效**
+——比"替换末条"更糟（替换至少保证了兜底落在预算内、真被验证）。
+
+⚠️ 这也是本仓第三次栽在同一类错上：**两层之间没有守卫**（前两次：判据采集面 ≠ 校验面、
+`continue-on-error` 空转 job）。纯函数单测看着它返回 4 条、断言"兜底在名单里"就绿了，
+而真机上那一条根本没被发出去。
+
+#### ③ 本批交付：两道守卫（均经缺陷注入复验）
+
+| 守卫 | 钉住什么 | 注入 D31 旧实现后 |
+|---|---|---|
+| `★ 不变式：pickChainsToVerify 输出在任何入参下都不得超过 maxChains` | 6 组 `(maxChains, generatedSlots)` × 3 种池子，输出恒 ≤ 预算 | 红 |
+| `★ 兜底不在前 slots 时，保底必须落在预算**内**` | 保底必须**占名额**，追加式实现返回 4 条即红 | 红 |
+
+实现侧同时加了硬截断 `return out.slice(0, maxChains)` + 注释写明"为什么保底只能占名额、不能靠追加"，
+把这次的实测归因留在代码里，避免后人再走一遍。
+
+**缺陷注入复验**：把备份的 D31 实现拷回 ⇒ `waf.chainVerify.test.js` **4 条红**（含新增的 2 条）；
+还原 ⇒ **16/16 绿**。
+
+#### ④ 顺带定位到 waf403 的真根因（未修，留给下一批，见 TODO 15.1）
+
+判据不是「能不能过 WAF」，而是「**过了还能不能用**」：
+
+- `chardoubleencode` 靠 D19 补的 COVERS 全覆盖排池子第 0 ⇒ 它是第一条被验证、也第一条放行的链
+  ⇒ 被选中重跑；但靶场服务端只解一次码 ⇒ 落库是 `%61%6e%64` 碎片 ⇒ error 有信号、
+  boolean 要的"真/假两侧同形且结果不同"物理不可达 ⇒ `must:['boolean']` 确定性红。
+- 真正能用的是 `symboliclogical`（AND→&& / OR→||，语义等价，显式指定实测 842ms 拿到 boolean），
+  但它是静态链**第 3** 位，而 `slots = maxChains - generatedSlots = 2` ⇒ **根本进不了验证名单**
+  （与保底逻辑无关）。
+
+⚠️ 由此得出的方向性结论：**任何"让兜底链排得更前"的改动都在加剧这个缺口**。
+要让语义等价链进得了 slots，必须动 `TAMPER_COVERS` 口径 —— 而那正是 D19 修 acceptance
+11/11 的支点，**有回归风险，必须真机验证后单独决策**，不在本批顺手改。
+
+#### ⑤ 环境说明（如实记录）
+
+本次 `refs:check` 与 `facts:*` 在本机会话内**跑不了**：node 无法 spawn 任何子进程
+（`git`/`node`/`cmd` 一律 `EBUSY`，与路径无关，bash 与 PowerShell 两条通道同症状）。
+已完成的替代动作：门禁能跑的 8 项全绿（lint / typecheck:server / arch / nesting / modules /
+merge / version / tamper:parity / tamper:examples / readme）；facts 的数字与采集源指纹
+按 `facts-sync.mjs` 的同一算法手工重算回填（脚本本身未改）。两项待 CI 复核。
+
 ### 2026-10-09 批次 D30 · PG 三套靶场从「长期 ⛔」到真机跑通，外加三个「判据自己错了」的缺陷
 
 **一句话**：D29 留下的问题是「3 套 PG 靶场因为没有组合入口长期跑不到」。入口补上之后一跑，
