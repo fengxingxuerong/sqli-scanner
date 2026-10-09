@@ -73,7 +73,7 @@ const probePort = (port, timeout = 700) =>
  * @param {{slow?:boolean, needsPorts?:number[], needs?:string[]}} [opt]
  */
 const GATES = [
-  { id: 'typecheck', name: 'TypeScript 前后端（= CI 两条类型步骤）', cmd: 'npm run typecheck' },
+  { id: 'typecheck', name: 'TypeScript 前端/前端测试/服务端（= CI 三条类型步骤）', cmd: 'npm run typecheck' },
   { id: 'lint', name: 'ESLint', cmd: 'npm run lint' },
   { id: 'lint', name: '架构门禁（体积/循环依赖/console）', cmd: 'node scripts/arch-guard.mjs' },
   // 嵌套深度：arch-guard 管体积，但没有门禁管深度。200 行的文件也能套 8 层，

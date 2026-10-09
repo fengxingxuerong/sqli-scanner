@@ -62,6 +62,21 @@ function makeType2(challengeBytes = [1, 2, 3, 4, 5, 6, 7, 8]) {
   return b;
 }
 
+// 原语已知答案向量：NT response 全靠 des-ecb 的子密钥分段，原语错位会产出
+// 「结构合法、值全错」的响应 —— 结构断言抓不到，必须钉一个公开 KAT。
+describe('DES-ECB 原语：KAT', () => {
+  test(
+    '零 key 加密零块 = 8ca64eca4a19e3b8',
+    { skip: !desAvailable() && 'des-ecb 需 --openssl-legacy-provider' },
+    () => {
+      const c = crypto.createCipheriv('des-ecb', Buffer.alloc(8), null);
+      c.setAutoPadding(false);
+      const out = Buffer.concat([c.update(Buffer.alloc(8)), c.final()]).toString('hex');
+      assert.equal(out, '8ca64eca4a19e3b8');
+    }
+  );
+});
+
 describe('ntlmAuth：Type1 构造', () => {
   test('Type1 输出合法 base64，解码后 sig=NTLMSSP、type=1、长度 ≥32', () => {
     const t1 = createType1Message({});

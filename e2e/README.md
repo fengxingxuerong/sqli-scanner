@@ -43,7 +43,7 @@ node e2e/run-all.mjs --all                    # 强制全跑（缺依赖的会�
 | `detection-runner` | 数据驱动检测测试 | `run.js` | 无 |
 | `udf-lab` | UDF 接管真实验证（真 DLL） | `udf-takeover.e2e.mjs` | MySQL |
 | `waf-lab` | WAF 规则对比实验 | **门禁看 `compare-real.e2e.mjs`**（真 MySQL；本机经 `compare-real.run.py` 沙箱，CI 每次 push 直连 mysqld 跑）。⚠️ `compare.e2e.js` 是 2026-09-18 已废弃的空壳夹具（其 `/vuln` 端点不执行 SQL ⇒ 判据恒为 NO），只作历史保留、不作入口 | 无 |
-| `sqli-labs` | sqli-labs 靶场适配与诊断脚本 | 各 `diag*.mjs` | 需 sqli-labs 环境 |
+| `sqli-labs` | sqli-labs 靶场适配 | `sqli-labs-runner.mjs`（75 关黄金标准 runner，靶场由 `sqli-labs.py` 起） | 需 sqli-labs 环境 |
 
 ## 常用工具
 
@@ -52,6 +52,22 @@ node e2e/run-all.mjs --all                    # 强制全跑（缺依赖的会�
 | `redteam-lab/diff-reports.mjs <beforeDir> <afterDir> <ids>` | **行为等价性对比**：归一化时间戳/随机 id/请求数后比对两次扫描报告的结论字段。重构后证明"行为没变"用它，退出码可作 CI 门禁 |
 | `redteam-lab/env.mjs` | 一键拉起 MySQL + PG + 靶场并常驻 |
 | `redteam-lab/results/`、各靶场 `results/` | 报告落盘位置 |
+
+### 本地手动探针（**不进 CI**，改动相关链路时自行复跑）
+
+这批脚本没有退出码门禁、也不在 `run-all.mjs` 里，靠下面这张表被找到；
+`server/tests/orphanScripts.guard.test.js` 会钉住"新增脚本必须在这里或某个执行入口登记过"。
+
+| 工具 | 用途 | 依赖 |
+|---|---|---|
+| `python e2e/run-with-sandbox.py e2e/pentest-lab/probe-limit-expr.mjs` | LIMIT 裸数字位的可注入性：逐条验证 `CASE WHEN`/`PROCEDURE ANALYSE` 等"无引号变体"在真 MySQL 上全部语法错 ⇒ 该位不可达是 SQL 语法的**客观边界**，不是引擎缺陷 | 真 MySQL（沙箱） |
+| `node e2e/waf-real/inject-check.mjs` | 真机对拍链路的**缺陷注入复验**：把判据改坏看是否红，跑完自动还原源文件 | 真 MySQL（沙箱） |
+| `node e2e/waf-real/tamper-live.mjs` | tamper 链在真 MySQL + CRS v4.1.0 下的**动态** A/B（与静态 `tamper-sweep.mjs` 互补：静态只看 CRS 拦不拦，这条看语义是否还破得了） | 真 MySQL（沙箱） |
+| `node e2e/waf-real/dialect-audit.mjs` | 方言浪费审计：目标是 MySQL 却投放 MSSQL/Oracle payload 的请求逐条计数 | 真 MySQL（沙箱） |
+| `node e2e/waf-real/header-channel.mjs` | 请求头注入通道端到端验证（CRS 942 系多数规则只覆盖 ARGS/ARGS_NAMES/COOKIES/XML，头通道是否真被放过） | 真 MySQL（沙箱） |
+| `node e2e/waf-real/probe-hex.mjs` | hexliterals 专项：插件 doctest + 真 MySQL 语义等价 + CRS 静态绕过 + 与 `quote2hex` 的安全性对比 | 真 MySQL（沙箱） |
+| `python e2e/udf-lab/sandbox.py --script _sandbox_adversarial_probe.mjs --probe` | 沙箱对抗性压测：量出沙箱"实际拦住了什么"而非声称什么都拦得住，结果原样输出由上层判 | MySQL 沙箱 |
+| `python e2e/udf-lab/verify-all.py` | UDF 验证的**一键回归**（隔离边界 / 负向拦截 / 直连基线 / 注入通道注册 4 步）；第 5 步 `sys_eval` 真执行系统命令，**只在显式加 `--with-command-exec` 时跑** | MySQL 沙箱 |
 
 ## 约定
 

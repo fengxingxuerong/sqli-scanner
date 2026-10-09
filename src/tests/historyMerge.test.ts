@@ -48,9 +48,11 @@ describe('mergeHistory', () => {
   it('同一 scanId：服务端行胜出做展示，但必须保住本地快照（续跑要用它）', () => {
     const rows = mergeHistory([serverRow({ scanId: 'same' })], [localRow('same')]);
     expect(rows.length).toBe(1);
-    expect(rows[0].target).toBe('http://server-target', '展示用服务端那条（跨设备一致）');
-    expect(rows[0].vulns).toBe(3, '漏洞数取自服务端摘要');
-    expect(rows[0].local?.scanId).toBe('same', '本地快照必须留着，否则续跑配置无处可取');
+    // 说明文字必须挂在 expect 上：`toBe(x, '说明')` 的第二参数被 vitest 静默丢弃
+    // （实测：SENTINEL 只有写成 expect(v, msg) 才会出现在失败输出里）
+    expect(rows[0].target, '展示用服务端那条（跨设备一致）').toBe('http://server-target');
+    expect(rows[0].vulns, '漏洞数取自服务端摘要').toBe(3);
+    expect(rows[0].local?.scanId, '本地快照必须留着，否则续跑配置无处可取').toBe('same');
     expect(rows[0].source).toBe('ledger');
   });
 
@@ -73,7 +75,7 @@ describe('mergeHistory', () => {
     // 服务端脏值 + 本地也没有 ⇒ null，而不是悄悄塞一个 Low
     expect(mergeHistory([serverRow({ riskLevel: 'weird' })], [])[0].riskLevel).toBe(null);
     expect(mergeHistory([serverRow({ riskLevel: null })], [])[0].riskLevel).toBe(null);
-    expect(mergeHistory([serverRow({ riskLevel: 'Low' })], [])[0].riskLevel).toBe('Low', '规范值要照常透传');
+    expect(mergeHistory([serverRow({ riskLevel: 'Low' })], [])[0].riskLevel, '规范值要照常透传').toBe('Low');
   });
 
   it('按时间降序排序；缺时间的排最后（不假装它是最新的）', () => {

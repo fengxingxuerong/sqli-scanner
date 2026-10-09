@@ -13,6 +13,11 @@ export const versionedkeywordsnospace = {
       input: '1 UNION ALL SELECT NULL, NULL, CONCAT(CHAR(58,104,116,116,58),IFNULL(CAST(CURRENT_USER() AS CHAR),CHAR(32)),CHAR(58,100,114,117,58))#',
       output: '1/*!UNION*//*!ALL*//*!SELECT*//*!NULL*/,/*!NULL*/, CONCAT(CHAR(58,104,116,116,58),IFNULL(CAST(CURRENT_USER()/*!AS*//*!CHAR*/),CHAR(32)),CHAR(58,100,114,117,58))#',
     },
+    {
+      // 句尾边界回归（2026-10-09）：关键词落在 payload 最后一个字符时也必须被包裹
+      input: "1' UNION ALL SELECT USER",
+      output: "1'/*!UNION*//*!ALL*//*!SELECT*//*!USER*/",
+    },
   ],
   dbms: ['MySQL'], // [P1-FIX] 方言限定：异构库下无效，运行时告警
   /**
@@ -21,7 +26,9 @@ export const versionedkeywordsnospace = {
    */
   transform(payload) {
     const out = String(payload ?? '').replace(
-      /(?:^|(?<=\W))([A-Za-z_]+)(?=[^\w(]|\Z)/g,
+      // 上游 Python 原文写 `\Z`（串尾），JS 里 `\Z` 是**字面量 Z** ⇒ 句尾关键词永不包裹。
+      // 边界要的是串尾，JS 对应 `$`。
+      /(?:^|(?<=\W))([A-Za-z_]+)(?=[^\w(]|$)/g,
       (word) => (SQL92_KEYWORDS.has(word.toUpperCase()) ? `/*!${word}*/` : word)
     );
     // 上游收尾：剥掉注释标记旁的空格（Python str.replace 全量替换 ⇒ 这里用 /g）

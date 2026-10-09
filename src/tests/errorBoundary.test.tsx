@@ -3,7 +3,8 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import ErrorBoundary from '../components/ErrorBoundary';
 
 // 故意抛错的子组件（模拟渲染期异常）
-function Bomb({ message }: { message?: string }) {
+// 返回类型必须写：函数体只会 throw，TS 推不出 JSX.Element ⇒ <Bomb/> 会被判"不能当组件用"
+function Bomb({ message }: { message?: string }): JSX.Element {
   throw new Error(message ?? 'boom-render');
 }
 

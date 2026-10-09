@@ -86,10 +86,10 @@ describe('桌面版运行期 base 贯通（SSE + 导出）', () => {
     setApiBase(RUNTIME);
     renderHook(() => useEvents('s1'));
     await waitFor(() => expect(MockEventSource.instances.length).toBeGreaterThan(0));
-    expect(MockEventSource.instances[0].url.startsWith(RUNTIME)).toBe(
-      true,
+    expect(
+      MockEventSource.instances[0].url.startsWith(RUNTIME),
       `SSE 仍在拼编译期常量，桌面版端口退回随机时进度永远不动。实际 URL=${MockEventSource.instances[0].url}`
-    );
+    ).toBe(true);
   });
 
   it('★断链★ setApiBase 之后报告导出必须打运行期端口', async () => {
@@ -97,9 +97,9 @@ describe('桌面版运行期 base 贯通（SSE + 导出）', () => {
     const { result } = renderHook(() => useScan());
     await result.current.exportReport('s1', 'csv');
     const url = String(fetchMock.mock.calls[0][0]);
-    expect(url.startsWith(RUNTIME)).toBe(
-      true,
+    expect(
+      url.startsWith(RUNTIME),
       `导出 URL 仍拼编译期常量，随机端口下永远 404。实际 URL=${url}`
-    );
+    ).toBe(true);
   });
 });

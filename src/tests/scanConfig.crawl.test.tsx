@@ -2,10 +2,13 @@ import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import ScanConfigPanel from '../components/ScanConfigPanel';
 import { DEFAULT_CONFIG } from '../shared/constants';
-import type { ScanConfig } from '../shared/types';
+import type { ScanConfig, EngineType } from '../shared/types';
 
+// `mode` 是 ScanConfigPanelProps 的**必填** prop（引擎切换决定一批控件的显隐）；
+// 缺它时组件在 jsdom 里照样渲染，于是这个文件曾经测的是"mode=undefined 的分支"。
 const BASE_PROPS = {
   config: { ...DEFAULT_CONFIG } as ScanConfig,
+  mode: 'builtin' as EngineType,
   onChange: () => undefined,
 };
 

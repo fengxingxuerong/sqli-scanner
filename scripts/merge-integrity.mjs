@@ -100,7 +100,7 @@ function git(args, opts = {}) {
     return execFileSync('git', args, { cwd: ROOT, encoding: 'utf-8', maxBuffer: 64 * 1024 * 1024, ...opts }).trim();
   } catch (e) {
     if (opts.allowFail) return null;
-    throw new Error(`git ${args.join(' ')} 失败：${e.message}`);
+    throw new Error(`git ${args.join(' ')} 失败：${e.message}`, { cause: e });
   }
 }
 

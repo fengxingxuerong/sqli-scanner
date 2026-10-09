@@ -62,7 +62,7 @@ async function get(url, asText = true) {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return { body: asText ? await res.text() : Buffer.from(await res.arrayBuffer()) };
     } catch (e) {
-      if (attempt === 3) throw new Error(`取不到 ${url}（3 次重试）：${e.message}`);
+      if (attempt === 3) throw new Error(`取不到 ${url}（3 次重试）：${e.message}`, { cause: e });
       await new Promise((r) => setTimeout(r, 800 * attempt));
     }
   }

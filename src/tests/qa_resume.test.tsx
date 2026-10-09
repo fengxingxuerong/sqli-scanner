@@ -27,6 +27,8 @@ function makeReport(scanId: string, cfg: Partial<ReportModel['target']['config']
     scanId,
     engine: 'builtin',
     target: {
+      // Target.id 是必填（types.ts:428）—— 原先缺它，是被末尾那层 `as ReportModel` 吞掉的
+      id: `t-${scanId}`,
       baseUrl: `http://target/?id=${scanId}`,
       method: 'GET',
       bodyParams: { id: '1' },
@@ -42,7 +44,9 @@ function makeReport(scanId: string, cfg: Partial<ReportModel['target']['config']
     data: null,
     riskLevel: 'Low',
     summary: {},
-  } as ReportModel;
+    // 不写 `as ReportModel`：那层 cast 会把"夹具与真实报告形态不符"这件事完全吞掉
+    // （TS2352 就是在说两者根本不重叠）。让返回类型直接判。
+  };
 }
 
 function makeRecord(scanId: string, report: ReportModel): HistoryRecord {

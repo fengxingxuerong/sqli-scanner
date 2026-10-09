@@ -1,7 +1,10 @@
 // ScanWizard 组件测试：渲染 / 开始回调 / 停止按钮 / 引擎切换 / 高级展开收起
 import { describe, it, expect, vi } from 'vitest';
+import type { ComponentProps } from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
 import ScanWizard from '../components/ScanWizard';
+import { DEFAULT_CONFIG, DEFAULT_SQLMAP_CONFIG } from '../shared/constants';
+import type { ScanConfig, SqlmapConfig } from '../shared/types';
 
 // ── mock 子组件，隔离 ScanWizard 自身逻辑 ──
 vi.mock('../components/TargetForm', () => ({
@@ -25,27 +28,34 @@ vi.mock('../shared/apiClient', () => ({
 }));
 
 // ── 默认 props 工厂 ──
-const BASE_CONFIG = {
-  concurrency: 4, timeoutMs: 5000, retry: 2, timeThresholdMs: 3000, ratePerSec: 5,
-  enableExtract: false, proxy: null, auth: null,
-  wafEvasion: { randomUA: false, jitterMs: 0, obfuscate: false, tamper: { enabled: false, plugins: [], intensity: 'medium' } },
+// 手抄的 config 字面量会随 ScanConfig 演进而变成"不存在的形态"（本文件的 techniques 曾被推成
+// string[]、且缺了一批必填键，全靠 makeProps 那层宽松类型没报）。改成从真实默认值派生 + 显式标注。
+const BASE_CONFIG: ScanConfig = {
+  ...DEFAULT_CONFIG,
+  concurrency: 4,
+  timeoutMs: 5000,
+  retry: 2,
+  timeThresholdMs: 3000,
+  ratePerSec: 5,
+  enableExtract: false,
   techniques: ['boolean'],
 };
-const BASE_SQLMAP = {
-  level: 1, risk: 1, techniques: ['B'], tamper: [], dbms: null, threads: 1,
-  dump: false, osShell: false, fileRead: null, proxy: null, timeoutMs: 5000, retry: 0, randomUA: false,
-};
+const BASE_SQLMAP: SqlmapConfig = { ...DEFAULT_SQLMAP_CONFIG };
 
-function makeProps(over: Record<string, any> = {}) {
+// 返回类型显式钉成组件 props（ScanWizardProps 未导出 ⇒ 用 ComponentProps 取，不动生产代码）：
+// 新增必填 prop 时（本批就是 onPause/onResume），错在这一个工厂函数里报一次，
+// 而不是 5 个 render 各报一次；且不再有"缺 prop 也能渲染"的漏网。
+function makeProps(over: Partial<ComponentProps<typeof ScanWizard>> = {}): ComponentProps<typeof ScanWizard> {
   return {
     url: '', method: 'GET', bodyText: '', cookieText: '', headerText: '',
     config: BASE_CONFIG, sqlmapConfig: BASE_SQLMAP,
     engine: 'builtin', running: false, starting: false, error: '',
-    wafSuggestion: null, report: null, status: 'pending', scanId: null,
+    wafSuggestion: null, status: 'pending',
     onUrlChange: vi.fn(), onMethodChange: vi.fn(), onBodyTextChange: vi.fn(),
     onCookieTextChange: vi.fn(), onHeaderTextChange: vi.fn(),
     onConfigChange: vi.fn(), onSqlmapConfigChange: vi.fn(),
     onEngineChange: vi.fn(), onErrorClear: vi.fn(), onStart: vi.fn(), onStop: vi.fn(),
+    onPause: vi.fn(), onResume: vi.fn(),
     ...over,
   };
 }

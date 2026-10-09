@@ -1,6 +1,6 @@
 # sqli-scanner
 
-[![Tests](https://img.shields.io/badge/tests-3688%20passing-brightgreen)](#测试)[![CI](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml/badge.svg)](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml)
+[![Tests](https://img.shields.io/badge/tests-3723%20passing-brightgreen)](#测试)[![CI](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml/badge.svg)](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml)
 [![Dependencies](https://img.shields.io/badge/dependencies-0%20known%20vulns-brightgreen)](#环境变量)
 
 > CI 徽章为真实状态（仓库地址已定，run#90 起全绿）。发布判定仍以 `CHANGELOG.md`
@@ -207,6 +207,7 @@ admin-only 触发页 `/admin/panel`（users.admin 角色门禁 403）+ admin 会
 | **-r 请求文件** | 从 Burp/curl 请求文本导入 URL/method/headers/body |
 | **结构化 body 通道（JSON 嵌套 / XML·SOAP）** | 两类现代 API body 都按**叶子路径**发现注入点，而不是把整份 body 当成一个参数：`jsonBody`（对象，如 `user.id` / `tags.0`）与 `xmlBody`（XML 字符串，如 `soap:Envelope.soap:Body.GetUser.id`；对标 ghauri 的 XML·SOAP 支持）。入口：REST `xmlBody` 字段、CLI `--xml-body` / `--xml-body-file`。⚠️ XML 通道只认「元素 + 文本」形态：注释 / CDATA / DOCTYPE / 正文处理指令一律**整体放弃**（宁可不发现，也不发畸形报文） |
 | **mTLS 客户端证书** | `clientCert`（PEM 路径，证书+私钥同文件，对标 sqlmap `--cert`）：目标要求 TLS 双向认证时没有证书连第一跳都被拒。与 `insecureTls` 正交（一个管「我信不信目标」，一个管「目标信不信我」） |
+| **自定义检测条目（扩展点）** | `--payload-file <file.json>`：追加用户自己的 payload 条目（与 `registry.json` 同 schema），**只追加、不允许覆盖内置**，且同样受高危池硬门管辖；不传即与内置基线逐位一致。见 [docs/自定义检测条目.md](docs/自定义检测条目.md) |
 | **中英双语** | 全界面 i18n 支持中英切换 |
 | **历史记录** | 扫描历史卡片式展示，支持续跑/删除 |
 | **真实 DBMS 验证** | SQLite + PostgreSQL + MySQL 三库真实执行验证 |
@@ -332,7 +333,7 @@ backend/  ← Express + Node.js
 # 前端测试（556 个用例）
 npm test
 
-# 服务端测试（3135 个用例）
+# 服务端测试（3171 个用例）
 cd server && npm test
 
 # 全部测试
@@ -358,7 +359,7 @@ npm run artifact:drift   # 入库的 e2e 基线产物必须等于当前代码跑
 
 - TypeScript: 零错误
 - 前端测试: 556/556 通过（覆盖率门禁 stmts 94.79 / branch 84.52 / func 83.15，阈值 88/77/67）
-- 服务端测试: 3135 用例（3132 pass / 0 fail / 3 skip，并发口径 2026-10-08 复测；3 skip 为环境依赖显式跳过。覆盖率 lines 92.63 / branch 81.35 / func 82.92，阈值 85/74/77）
+- 服务端测试: 3171 用例（3167 pass / 0 fail / 4 skip，并发口径 2026-10-09 复测；4 skip 为环境依赖显式跳过。覆盖率 lines 92.81 / branch 81.56 / func 84.18，阈值 85/74/77）
 - 一键扫描: `npm run scan -- -u <url>`（CLI 一条命令产出 HTML/JSON/Markdown 全套报告 + manifest，退出码可直接进 CI 门禁）
 - Tamper 插件: 234 个（含批次 D3 新增 scalarselectinline；含 v24 增量 20 个，对齐 sqlmap 官方 tamper 全集，含官方 CRS/libinjection 实测组合 uniontable+odbcbrace；含批次 D13 新增 5 件上游形态变体 *nospace/*open/*block，真机 A/B 判决前不进默认链）
 - WAF 绕过能力: 200+ 插件链式组合，覆盖 62 个 WAF 厂商指纹识别 + 推荐

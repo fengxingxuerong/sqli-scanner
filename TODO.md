@@ -1358,6 +1358,75 @@ services:
 
 ---
 
+### 10. 「脚本写了但没人能发现」的固化（✅ 已完成 2026-10-09，批次 D24）
+- **普查结论**：`e2e/**` + `scripts/**` 的 197 个可执行脚本里 **47 个零引用**（口径：token 边界匹配；
+  `CHANGELOG.md`/`TODO.md`/`AUDIT-SEC-2026.md` 属追加式历史**不算接线**；代码注释行不算；
+  **自引用不算** —— 实测抓到 `scripts/probe-blob-400.mjs` 靠自己的 `'User-Agent'` tag 把自己接上线）。
+- **处置**：删 39（30 个一次性根因诊断 + 5 个 payload-registry 迁移前的改码补丁 + 4 个已被单测接管的验证脚本），
+  登记 8 个真还在用的本地工具进 `e2e/README.md`「本地手动探针」表（含依赖列）。
+  ⚠️ 删 `verify-tamper-breakage.mjs` 前真跑过一次：`通过 4 / 失败 2`（des-ecb 在 OpenSSL 3 下 unsupported）
+  ⇒ 它的 `exit(1)` 早就必红，只因没接线，这个红从没被看见。
+- **守卫**：`server/tests/orphanScripts.guard.test.js` 四向（覆盖 / 分母不空转 / 取词自证 / 正反对照），
+  `git ls-files` 不可用时**显式 skip**。缺陷注入 4/4 杀，其中第 2 条正是本项目反复出现的那类：
+  把候选分类改坏后**主判据仍绿**，只有分母守卫会红 —— 分母不是形式主义。
+  第 4 条是**真红不是注入**：`git add` 之后在全量套件里红一条，根因是**守卫文件自己贡献的 token
+  把自己要抓的样本名接上了线** ⇒ 口径加了一条「守卫自己不当接线源」。
+  ⚠️ 症状长得像"加了 git add 就红＝环境问题"，先单独复现再定位才敢定论。
+- **留口**：门禁只管 `e2e/**` 与 `scripts/**`，`docs/**` 下的脚本未纳入；
+  生产代码侧（`src/` + `server/src/`）同一口径 **0 命中**，所以本批没动生产代码。
+- **验证口径**：改完任何 e2e/scripts 脚本后 `cd server && npm test` 里那条守卫必须绿；
+  新增本地工具只有两条路 —— 进执行入口（ci.yml + ci-local.mjs 两处，见 `ciWiring.guard.test.js`），
+  或写进 `e2e/README.md` 的表。名字埋在战报里不算登记。
+
+### 11. lint 的上限与作用域（✅ 已完成 2026-10-09，批次 D25）
+- **上限**：从「手挑 12 条」改为 **eslint:recommended 全集**，7 条例外逐条带实测数字与理由
+  （98 处 `no-useless-assignment` / 86 处 U+3000 / 11 处控制字节 / 4 处"就是要匹配两个空格" /
+  1 处"case 里只有取证注释" / 13 处字符类冗余转义 / 9 处空 catch）。
+  换来约 45 条规则，其中 `no-dupe-else-if` 正是 D21 `--random-agent` 那类缺陷的形状。
+- **作用域**：实测 `eslint .` 处理 1128 个文件而仓库只有 1094 个 —— 多管 35 个本机排障现场、
+  静默吞掉 1 个入库 `.d.ts`。现由 `server/tests/lintScope.guard.test.js` 三向钉住
+  （入库文件不许被吞 / 豁免理由不许变僵尸 / 本机现场必须继续排除）。
+- **抓到的真缺陷**：3 个 tamper 插件把 Python 的 `\Z`（串尾）当 JS 断言 ⇒ 句尾关键词永不变形，
+  且既有 doctest 一条都抓不到（样本全都不以关键词收尾）。
+- **How to apply（今后动 lint 配置时）**：加例外必须给「实测 N 处 + 为什么在这里只产噪音」，
+  不许只写"太严"；开任何一条新规则前先跑 `npx eslint -c <临时配置> .` 量一遍再决定；
+  改配置后手动跑一次 `npx eslint . --format json` 与 `git ls-files` 对账（守卫只做静态比对）。
+- **仍未清**：98 处 `no-useless-assignment`、86 处全角空格 —— 目前没有「改了能修什么缺陷」的例子，
+  不为清零而清零。
+
+### 12. 前端测试纳入类型检查（✅ 已完成 2026-10-09，批次 D26）+ **下一项：摘掉测试里的主动关闭**
+- **本批**：`tsconfig.json` 的 `exclude: ["src/tests"]` 让 64 个前端测试文件**从没被任何静态检查看过**
+  （vitest 用 esbuild 转译，类型错了照样绿）。新增 `tsconfig.tests.json` + `npm run typecheck:tests`
+  并收进 `typecheck` 组合脚本（CI / ci-local / check:all 一处改完全链生效），
+  打开即暴 **45 处**漂移：12 处 `expect(x).toBe(v,'说明')` 的说明被 vitest 静默丢弃、
+  ScanWizard 夹具缺 `onPause/onResume` 又多传两个已不存在的 prop、
+  ProgressView 用引擎不会发的事件类型 `'detect'` 与 `points:[{},{},{}]` 喂组件 … 已全修（45→0）。
+- **下一项（D27 头一项）**：测试里现存 **37 处 `as never` / 42 处 `as any` / 37 处 `as unknown as` /
+  5 处 `@ts-expect-error`** —— 每一处都是主动把刚建起来的检查关掉。逐处问"这层 cast 掩盖了什么"再摘，
+  **不要为清零而清零**。已拿到的线索：`buildStartConfig(config?: Partial<ScanConfig> | null)`
+  能接受 `ScanConfig`，调用点却写 `DEFAULT_CONFIG as never` ⇒ 多余 cast。
+- **How to apply**：改任何 tsconfig 的 include/exclude 后跑
+  `node scripts/../server/tests/typecheckScope.guard.test.js` 那条守卫（`cd server && npm test` 会带上），
+  它钉的是「每个入库前端文件至少被一份根级 tsconfig 覆盖」+「typecheck 组合脚本与 CI/ci-local 两侧都串上」。
+
+### 13. 「进了检查范围」≠「真在被检查」：cast 棘轮（✅ 已完成 2026-10-09，批次 D27）
+- **本批**：D26 打开 `src/tests` 类型检查后，测试里仍有 **117 行** `as never` / `as any` /
+  `as unknown as` 在原地关掉检查。摘掉打在**被测函数入参**上的那一批（3 个文件、−26 行 → 91 行），
+  故意喂非法值的那几处换成**自反的 `@ts-expect-error`**（那行若没错了，指令自己报错）。
+- **棘轮**：`server/tests/castBudget.guard.test.js` 按行计，`src/tests` ≤ 91、`src` 生产码 ≤ 11，
+  只减不增；含自证与分母（判据扫不到 cast 必须红）。注入复验 2/2。
+- **基线必须由判据自己产出**：先用 grep 量到 102 当基线，注入一条 cast 却不红 ——
+  grep 把"注释里讨论 as never"的行也算进去了，判据剥注释后是 91。
+  ⇒ 把基线临时设 0、从失败消息里读数，别用旁路探针。
+- **下一项（若继续）**：剩余 91 行里 **`as any` 占 64 行**；但按 `mock`/`vi.fn`/`spyOn`/`stub`
+  的启发式筛，只有 **20 行**真是 mock 管线（`(apiClient.get as any).mockResolvedValue(…)` 那种），
+  另外 44 行是什么必须先分类再决定摘不摘——不要笼统说成"mock 写法，动不得"。
+  （⚠️ 本条数字为剥注释后现测：早前用 `grep -cF "as any"` 量到的 69 含注释行，已作废。）
+  生产码那 11 行本批未动，只钉住不许增长。
+- **How to apply**：新增测试里要写 `as never`/`as any` 之前，先问"这层关闭掩盖了什么"；
+  入参本来就合法就直接摘；非法值用 `@ts-expect-error`（注意它只管**紧挨的下一行**，
+  且多余属性检查只作用于字面量直接进形参那种写法）。
+
 ## 环境清理备忘（一次性）
 
 - [x] NRPT 规则 `.ooblab.test` / `.oob-lab.local` 已提权移除（2026-09-11 完成，`Get-DnsClientNrptRule` 确认清零）

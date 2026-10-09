@@ -1,6 +1,19 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { useScanStore } from '../store/scanStore';
-import type { ReportModel } from '../shared/types';
+import type { ReportModel, InjectionPoint } from '../shared/types';
+
+// 与 SSE 协议同形的最小夹具（types.ts 的 ScanEventPayloads / InjectionPoint）——
+// 本用例测的是"聚合与滑窗截断解耦"，用的入参仍必须是引擎真会发的那种事件，
+// 否则将来 addEvent 改了取数路径（比如按 technique 计数）这条用例会静默失去意义。
+const point = (id: string): InjectionPoint => ({
+  id,
+  location: 'url',
+  param: 'id',
+  originalValue: '1',
+  confirmed: false,
+  technique: null,
+  dbms: null,
+});
 
 // 构造最小 ReportModel 快照（供 saveScanToHistory 使用）
 function makeReport(scanId: string): ReportModel {
@@ -52,12 +65,18 @@ describe('scanStore', () => {
     const { addEvent } = useScanStore.getState();
     addEvent({
       type: 'point_discovered', scanId: 's1', ts: '',
-      payload: { points: [{ id: 'p1' }, { id: 'p2' }, { id: 'p3' }] },
-    } as never);
-    addEvent({ type: 'point_testing', scanId: 's1', ts: '', payload: { pointId: 'p1' } } as never);
-    addEvent({ type: 'detection_found', scanId: 's1', ts: '', payload: { pointId: 'p2' } } as never);
+      payload: { points: [point('p1'), point('p2'), point('p3')] },
+    });
+    addEvent({ type: 'point_testing', scanId: 's1', ts: '', payload: { pointId: 'p1', technique: 'union' } });
+    addEvent({
+      type: 'detection_found', scanId: 's1', ts: '',
+      payload: {
+        pointId: 'p2', technique: 'union', vulnerable: true, dbms: 'MySQL',
+        evidence: 'x', payloads: ['x'], riskLevel: 'High',
+      },
+    });
     // 重复 pointId 不重复计数
-    addEvent({ type: 'point_skipped', scanId: 's1', ts: '', payload: { pointId: 'p2' } } as never);
+    addEvent({ type: 'point_skipped', scanId: 's1', ts: '', payload: { pointId: 'p2', reason: 'prefilter' } });
 
     let s = useScanStore.getState();
     expect(s.progressTotal).toBe(3);
@@ -65,7 +84,10 @@ describe('scanStore', () => {
 
     // 灌满滑窗触发截断（>300 条），早期 point_discovered 被挤出
     for (let i = 0; i < 320; i++) {
-      addEvent({ type: 'http_request', scanId: 's1', ts: '', payload: {} } as never);
+      addEvent({
+        type: 'http_request', scanId: 's1', ts: '',
+        payload: { method: 'GET', url: `http://t/?i=${i}`, status: 200 },
+      });
     }
     s = useScanStore.getState();
     expect(s.events.length).toBe(300);
@@ -85,6 +107,8 @@ describe('scanStore', () => {
     const { setScanId, setStatus, setReport } = useScanStore.getState();
     setScanId('abc');
     setStatus('running');
+    // 这里**保留**一处主动绕过：setReport 只是把值存进 store，用例断言的也只是"存进去取得出"。
+    // 造一份完整 ReportModel 会把这条用例变成 ReportModel 的形态测试（另一条用例的职责）。
     setReport({ scanId: 'abc' } as unknown as ReportModel);
     const s = useScanStore.getState();
     expect(s.scanId).toBe('abc');

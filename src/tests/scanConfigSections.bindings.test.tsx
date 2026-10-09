@@ -20,7 +20,8 @@ vi.mock('../shared/apiClient', () => ({
   apiClient: { tampers: vi.fn().mockResolvedValue([]), get: vi.fn(), post: vi.fn() },
 }));
 
-const L = (k: string) => (zh.scanConfig as Record<string, string>)[k];
+// 键用 keyof 钉住（不存在的键编译期报错），返回值收窄成 string（该命名空间混有数组型文案）。
+const L = (k: keyof typeof zh.scanConfig) => zh.scanConfig[k] as string;
 
 function PanelHarness({
   initial,
@@ -196,7 +197,7 @@ describe('ScanConfigPanel 分段接线：OOB / 二阶 / NoSQL / 枚举拖库', (
 
   it('⑬b dbs 动作 needs=[] → 所有输入置灰（自动枚举不需要任何子输入）', () => {
     renderPanel({ extractScope: { mode: 'dbs' } });
-    for (const key of ['extractScopeDbs', 'extractScopeKeyword']) {
+    for (const key of ['extractScopeDbs', 'extractScopeKeyword'] as const) {
       expect((screen.getByLabelText(L(key)) as HTMLInputElement).disabled).toBe(true);
     }
   });
@@ -503,7 +504,8 @@ describe('ScanConfigPanel 分段接线：login 编排（自动登录 + 会话过
   });
 
   it('一次输入 user:pass 只发一次 patch，且 url/username/password 三键同现', () => {
-    renderPanel({ login: { url: 'http://t.local/login' } });
+    // login.username 是必填键（types.ts：无凭据的登录编排没有意义，包装门按它是否存在判定）
+    renderPanel({ login: { url: 'http://t.local/login', username: '', password: '' } });
     onChange.mockClear();
     fireEvent.change(credInput(), { target: { value: 'admin:s3cret' } });
     expect(onChange).toHaveBeenCalledTimes(1);
