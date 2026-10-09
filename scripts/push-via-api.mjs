@@ -263,6 +263,15 @@ for (const sha of owned) {
 localTrees.sort((a, b) => b.path.split('/').length - a.path.split('/').length);
 
 const uploadedTree = new Map();
+// [FIX 2026-10-09 D30] 只有**真的 POST 过**的树才算"变更条目"。
+// 原写法在 `entries.length === 0` 时把**本地 sha 原样登记为已上传** —— 那一支本意是
+// "这棵子树没变化，直接用原 sha"，但删除文件会让它不成立：父目录的内容确实变了
+// （少一个条目）⇒ 本地 sha 远端根本不存在（本例 `e2e/blackbox-lab` = 5b7eff59，
+// 因 D24–D27 删了里面的 diag-*.mjs），于是根树拿一个从未上传的 tree sha 去 POST ⇒
+// `422 tree.sha … is not a valid tree`。
+// 正确语义：子树无变更条目 ⇒ 沿用**远端同名路径的那棵树**，让根层那批 `sha:null`
+// 去摘掉被删的文件（删除只在根层做，见 plannedDeletes 处注释）。
+const treePushed = new Set();
 
 function changedEntries(entries) {
   const out = [];
@@ -270,7 +279,10 @@ function changedEntries(entries) {
     let sha = e.sha;
     let isChanged = !remoteObjs.has(e.sha);
     if (e.type === 'blob' && uploadedBlob.has(e.sha)) { sha = uploadedBlob.get(e.sha); isChanged = true; }
-    else if (e.type === 'tree' && uploadedTree.has(e.sha)) { sha = uploadedTree.get(e.sha); isChanged = true; }
+    else if (e.type === 'tree' && uploadedTree.has(e.sha)) {
+      sha = uploadedTree.get(e.sha);
+      isChanged = treePushed.has(e.sha);
+    }
     if (isChanged) out.push({ path: e.name, mode: e.mode, type: e.type, sha });
   }
   return out;
@@ -278,12 +290,18 @@ function changedEntries(entries) {
 
 for (const t of localTrees) {
   const entries = changedEntries(listTree(t.sha));
-  if (!entries.length) { uploadedTree.set(t.sha, t.sha); continue; }
+  if (!entries.length) {
+    // 无变更条目 ⇒ 沿用远端同名路径的那棵树（存在性由 remotePaths 保证；
+    // 远端要是没有这条路径，说明它是本地新增的目录，下面 entries 必然非空，走不到这里）。
+    uploadedTree.set(t.sha, remotePaths.get(t.path) || t.sha);
+    continue;
+  }
   const body = { tree: entries };
   const bt = remotePaths.get(t.path);
   if (bt) body.base_tree = bt;
   const res = await api('POST', '/git/trees', body);
   uploadedTree.set(t.sha, res.sha);
+  treePushed.add(t.sha);
   console.log(`  tree ${t.path} ${t.sha.slice(0, 8)} -> ${res.sha.slice(0, 8)}${res.sha === t.sha ? ' ✅' : ''}`);
 }
 
