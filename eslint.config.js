@@ -1,6 +1,11 @@
 // ESLint flat config（eslint v9+/v10 原生格式）
-// 规则策略：克制。error 级只保留「真正有价值的」——未使用变量、明显 bug 类规则、
-// react-hooks 钩子规则；exhaustive-deps 等启发式规则降为 warn，避免过度阻塞。
+// 规则策略（2026-10-09 D25 改版）：**基线 = eslint:recommended 全集**，只对本仓实测证明
+// 「会产出噪音而不是缺陷」的规则逐条开例外并写明理由；例外必须是少数、可核、带实测数字。
+// 改版前这里是「手挑 12 条 bug 规则」，实测差距：recommended 全集在本仓只暴 8 个族 229 处，
+// 其中 6 个族是合法惯用法（见下例外），2 个族（no-sparse-arrays / preserve-caught-error）
+// 是真该修的 ⇒ 修 7 处，换来约 45 条规则的后续保护（含 no-dupe-else-if —— 批次 D21 那个
+// `--random-agent` 重复分支缺陷，正是这条规则要抓的形状）。
+import js from '@eslint/js';
 import tseslint from 'typescript-eslint';
 import reactHooks from 'eslint-plugin-react-hooks';
 import globals from 'globals';
@@ -26,6 +31,21 @@ export default [
       '**/.trash/**',
       // 一次性排障脚本目录（e2e/diag）：不入库也不参与 lint
       'e2e/diag/**',
+      // [D25 2026-10-09] **lint 的作用域必须等于仓库**。实测改版前 `eslint .` 处理 1128 个文件，
+      // 其中 **35 个根本没入库**：`.box-agent-scratch/**`（上一次拆分的旧副本，里面躺着
+      // ScanManager.orig.js 与几份 `*.new.js`）、`.workbuddy/tmp/**`（Exploiter.bak.js 等备份）、
+      // `.mock/**`、`.acl-recovery/**`、`kanban-check-*/**`。后果不是"多扫了不相干的文件"这么轻：
+      // 门禁的红绿会取决于**本机磁盘上恰好躺着哪些排障现场**，而 recommended 全集一开，
+      // 这些旧副本立刻暴出 5 处违规 —— 那既不是仓库的问题，也不该由仓库修。
+      // 上面 29–35 行的历史教训是「不要为了躲报错而加 ignore」；这里相反：
+      // 被 ignore 的都不是入库文件，且新增一条就有 `server/tests/lintScope.guard.test.js`
+      // 反向钉住「任何入库代码文件都不许被 ignore 吞掉」。
+      '.box-agent-scratch/**',
+      '.workbuddy/**',
+      '.mock/**',
+      '.acl-recovery/**',
+      'kanban-check-*/**',
+      '.tmp-chk/**',
       // [LINT-FIX 2026-09-19] 原先这里另有 9 条目录/文件级 ignore（multi-engine-lab / ntlm-lab /
       // oob-real-lab / redteam-lab / retest-lab / waf-real / acceptance.mjs / l46-fp-stage /
       // verify-tamper-breakage），理由是「子代理引入的 unused import 不阻塞主 CI」。
@@ -51,11 +71,12 @@ export default [
     ],
   },
 
-  // 2) 全量基础：对 JS/TS 统一开启的核心 bug 类规则
+  // 2) 全量基础：recommended 全集 + 本仓实测例外（例外逐条带理由与数字）
   {
     files: ['**/*.{js,mjs,cjs,ts,tsx}'],
     rules: {
-      // 明显 bug 类（error）
+      ...js.configs.recommended.rules,
+      // 明显 bug 类（error）—— 保留显式声明，recommended 之后仍可逐条覆盖
       'no-const-assign': 'error', // 给 const 重新赋值
       'no-dupe-args': 'error', // 函数重复参数名
       'no-dupe-class-members': 'error', // 类成员重复定义
@@ -67,6 +88,35 @@ export default [
       'no-unreachable': 'error', // 不可达代码
       // 未使用变量（error，新代码必须干净；存量问题单独清）
       'no-unused-vars': 'off', // JS 与 TS 各自单独开启，见下
+
+      // ── 例外（每条都是"实测过它在本仓产出的是噪音而不是缺陷"）──────────────────
+      'no-useless-assignment': 'off',
+      // 实测 98 处、65 处在 server/src：全是 `let x = 初值; try { x = await … } catch { x = 兜底 }`
+      // 这种两条分支都赋值的形状。改掉不修任何缺陷，只制造 98 处无意义改动，
+      // 而且改错一处就是把兜底路径丢掉。
+      'no-irregular-whitespace': 'off',
+      // 实测 86 处全是 U+3000 全角空格，用在报告文案的排版分隔。另跑了一次定向探针：
+      // 1093 个入库代码文件里 **0 处**全角空格落进比较/匹配语句 ⇒ 它现在不掩盖任何断言，
+      // 开这条只会逼人把中文排版改成半角。
+      'no-control-regex': 'off',
+      // 实测 11 处：WAF/tamper 与协议解析**刻意**构造控制字节（本仓的被测对象之一就是
+      // 带 \x00 的请求），报的全是设计。
+      'no-regex-spaces': 'off',
+      // 实测 4 处里 3 处**就是要匹配两个空格**：`tamper.tokenBoundary` 的"不叠出双空格"判据、
+      // `ciNightlyEngine` 的 YAML 缩进锚点。这条规则在这里是反语义的。
+      'no-fallthrough': 'off',
+      // 实测唯一命中在 `DialectSqlBuilder.escCols`：分支全部以 return 收尾，只是 case 之间夹了
+      // 长取证注释。已用最小复现证明 eslint 把"只有注释的 case"当作有语句而报（见 CHANGELOG D25）
+      // ⇒ 开它等于逼人把取证注释搬走，那是反收益。
+      'no-useless-escape': 'off',
+      // 实测 13 处里 7 处在 `[^:\[\]]` / 反引号双引号方括号 这类字符类里 —— 转义多余但更好读
+      // （含 scopeGuard 的主机端口解析，动它的正则本身才是风险）。
+      // ⚠️ 但本批**真缺陷**正是这条规则报出来的：3 个 tamper 插件把 Python 的 `\Z`（串尾）
+      // 抄进 JS 正则，JS 里它是字面字母 Z ⇒ 句尾关键词永不变形。规则没开，缺陷已修，
+      // 并由 `server/tests/pythonRegexEscapes.guard.test.js` 独立钉住这一族。
+      'no-empty': ['error', { allowEmptyCatch: true }],
+      // 实测 9 处全是 catch 空块惯用法（URL 解析失败退回 params/body、健康探测失败继续轮询、
+      // unlink 尽力而为）⇒ 放行空 catch，仍拦住空的 if/块/循环。
     },
   },
 

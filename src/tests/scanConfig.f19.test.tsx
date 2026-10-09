@@ -2,10 +2,12 @@ import { describe, it, expect } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import ScanConfigPanel from '../components/ScanConfigPanel';
 import { DEFAULT_CONFIG } from '../shared/constants';
-import type { ScanConfig } from '../shared/types';
+import type { ScanConfig, EngineType } from '../shared/types';
 
+// `mode` 必填：缺它时渲染的是 mode=undefined 的分支，不是应用里任何一种真实形态。
 const BASE_PROPS = {
   config: { ...DEFAULT_CONFIG } as ScanConfig,
+  mode: 'builtin' as EngineType,
   onChange: () => undefined,
 };
 

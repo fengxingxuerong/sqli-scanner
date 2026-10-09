@@ -1,0 +1,11 @@
+{
+  "//": "前端测试文件的类型检查专用配置。为什么单独一份：tsconfig.json 同时服务 npm run build（tsc --noEmit && vite build），把 src/tests 纳进去会让「测试文件的类型问题」挡住「发布应用」。2026-10-09 实测：这批文件此前 0 静态检查，一打开就暴 45 处 fixture 漂移（含 12 处 expect(x).toBe(v,'说明') 的说明文字被 vitest 静默丢弃）。",
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": ["node", "vite/client"],
+    "allowJs": true
+  },
+  "include": ["src", "vitest.setup.ts"],
+  "exclude": []
+}

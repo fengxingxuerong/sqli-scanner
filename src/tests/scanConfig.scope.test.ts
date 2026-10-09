@@ -32,16 +32,20 @@ describe('parseScopeList: 授权范围输入解析', () => {
   it('空 / 纯空白 / null / undefined → 空数组（留空 = 不启用范围限制）', () => {
     expect(parseScopeList('')).toEqual([]);
     expect(parseScopeList('   ')).toEqual([]);
-    expect(parseScopeList(undefined as unknown as string)).toEqual([]);
-    expect(parseScopeList(null as unknown as string)).toEqual([]);
+    // @ts-expect-error 故意喂 undefined：签名是 raw: string，测的是容错分支
+    expect(parseScopeList(undefined)).toEqual([]);
+    // @ts-expect-error 故意喂 null（同上）
+    expect(parseScopeList(null)).toEqual([]);
   });
 
   it('数字等非字符串输入经 String() 兜底（宽容转换，钉住行为防漂移）', () => {
     // 实现是 String(raw ?? '')：数字会变成一段普通文本而不是被丢弃。这不构成范围语义
     // （"123" 匹配不到任何主机），但行为必须被钉住——将来若改成「非字符串一律 []」，
     // 本断言会先炸，提醒改的人确认调用方没有依赖。
-    expect(parseScopeList(123 as unknown as string)).toEqual(['123']);
-    expect(parseScopeList(0 as unknown as string)).toEqual(['0']);
+    // @ts-expect-error 故意喂数字 123：实现是 String(raw ?? '')
+    expect(parseScopeList(123)).toEqual(['123']);
+    // @ts-expect-error 故意喂 0（falsy 但非空，走的是同一条兜底）
+    expect(parseScopeList(0)).toEqual(['0']);
   });
 
   it('CIDR 与 URL 前缀条目原样保留（不被分隔符合误切）', () => {
@@ -51,55 +55,63 @@ describe('parseScopeList: 授权范围输入解析', () => {
 
 describe('buildStartConfig: stringArray 归一化（scope / techniques）', () => {
   it('scope 传逗号串 → 归一化为数组（后端只认数组）', () => {
-    const out = buildStartConfig({ scope: 'a.com,b.com' } as never);
+    // @ts-expect-error 故意传 string（声明是 string[]）：测的正是"面板里那种一行的写法"能否归一
+    const out = buildStartConfig({ scope: 'a.com,b.com' });
     expect(out.scope).toEqual(['a.com', 'b.com']);
   });
 
   it('techniques 传字符串 → 同样归一化为数组', () => {
-    const out = buildStartConfig({ techniques: 'union,error' } as never);
+    // @ts-expect-error 故意传 string
+    const out = buildStartConfig({ techniques: 'union,error' });
     expect(out.techniques).toEqual(['union', 'error']);
   });
 
   it('传数组 → 过滤空串与纯空白项', () => {
-    const out = buildStartConfig({ scope: ['a.com', '', '   '] } as never);
+    // 这个入参是**合法类型**（string[]），不需要 cast —— 原先写成 `as never`
+    // 会把"参数类型以后再变"这件事一起关掉。
+    const out = buildStartConfig({ scope: ['a.com', '', '   '] });
     expect(out.scope).toEqual(['a.com']);
   });
 
   it('空串 → 空数组（关闭态，不污染请求体）', () => {
-    const out = buildStartConfig({ scope: '' } as never);
+    // @ts-expect-error 故意传 ''
+    const out = buildStartConfig({ scope: '' });
     expect(out.scope).toEqual([]);
   });
 
   it('类型非法的键被整体剔除，而不是带着错值发出去', () => {
     // level 声明为 number：'abc' 无法归一化 → 必须从请求体删除
-    const out = buildStartConfig({ level: 'abc' } as never);
+    // @ts-expect-error 故意传 string
+    const out = buildStartConfig({ level: 'abc' });
     expect('level' in out).toBe(false);
   });
 });
 
 describe('buildResumeConfig: 续跑配置的授权范围继承', () => {
+  // 以下入参全部落在签名 `Partial<ScanConfig> | null` 内 —— 原先那 7 个 `as never`
+  // 是把参数类型整个关掉：以后 buildResumeConfig 改了签名，这些用例会照样绿。
   it('显式 patch 为 undefined → 该键被删除（可主动清除范围）', () => {
-    const out = buildResumeConfig({ scope: ['a.com'] } as never, { scope: undefined } as never);
+    const out = buildResumeConfig({ scope: ['a.com'] }, { scope: undefined });
     expect('scope' in out).toBe(false);
   });
 
   it('patch 覆写 scope', () => {
-    const out = buildResumeConfig({ scope: ['old.com'] } as never, { scope: ['new.com'] } as never);
+    const out = buildResumeConfig({ scope: ['old.com'] }, { scope: ['new.com'] });
     expect(out.scope).toEqual(['new.com']);
   });
 
   it('开了断点续跑但未给会话文件名 → 回退默认会话名', () => {
-    const out = buildResumeConfig({ sessionDefault: true } as never);
+    const out = buildResumeConfig({ sessionDefault: true });
     expect(out.sessionFile).toBe('sqli-session-latest.json');
   });
 
   it('已显式给会话文件名时不回退覆盖', () => {
-    const out = buildResumeConfig({ sessionDefault: true, sessionFile: 'mine.json' } as never);
+    const out = buildResumeConfig({ sessionDefault: true, sessionFile: 'mine.json' });
     expect(out.sessionFile).toBe('mine.json');
   });
 
   it('saved 为 null/undefined 不抛错（返回 patch 本身）', () => {
-    expect(buildResumeConfig(null, { scope: ['a.com'] } as never).scope).toEqual(['a.com']);
-    expect(buildResumeConfig(undefined, { scope: ['b.com'] } as never).scope).toEqual(['b.com']);
+    expect(buildResumeConfig(null, { scope: ['a.com'] }).scope).toEqual(['a.com']);
+    expect(buildResumeConfig(undefined, { scope: ['b.com'] }).scope).toEqual(['b.com']);
   });
 });

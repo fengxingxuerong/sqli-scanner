@@ -252,7 +252,8 @@ for (const sha of owned) {
     uploadedBlob.set(sha, r.sha);
   } catch (e) {
     throw new Error(
-      `blob ${sha}（${buf.length}B，${git('cat-file', '-t', sha)}，head=${buf.subarray(0, 32).toString('hex')}）上传失败：${e.message}`
+      `blob ${sha}（${buf.length}B，${git('cat-file', '-t', sha)}，head=${buf.subarray(0, 32).toString('hex')}）上传失败：${e.message}`,
+      { cause: e }
     );
   }
   console.log(`  blob ${sha.slice(0, 8)} ${buf.length}B`);

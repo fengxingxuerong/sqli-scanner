@@ -21,7 +21,9 @@ vi.mock('../shared/apiClient', () => ({
   apiClient: { tampers: vi.fn().mockResolvedValue([]), get: vi.fn(), post: vi.fn() },
 }));
 
-const L = (k: string) => (zh.scanConfig as Record<string, string>)[k];
+// 键用 keyof 钉住（不存在的键编译期就报错），返回值收窄成 string ——
+// scanConfig 命名空间里混有数组/对象型文案，不窄化会让每个 expect 调用都撞 TS2769。
+const L = (k: keyof typeof zh.scanConfig) => zh.scanConfig[k] as string;
 
 function PanelHarness({
   initial,

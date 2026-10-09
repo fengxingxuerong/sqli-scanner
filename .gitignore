@@ -105,16 +105,17 @@ e2e/udf-lab/*.dll
 # agent 临时诊断脚本
 **/.openclaw-*.mjs
 
-# [2026-09-18] PG 靶场运行器：上一批次**明确决定不提交**，但文件留在磁盘上备用。
-# 记在这里而不只记在会话笔记里，是因为它长期挂在 `git status` 的未跟踪区，
-# 每一轮都要重新判断一次「这是产物还是垃圾」。不提交的两条理由：
-#   ① 未端到端验证 —— 就绪探测（pg_ready）判定一直失败，且 `PG_DB` 默认值
-#      `sqli_lab` 在 pg-smoke 里可能根本不存在（会报 database does not exist）；
-#   ② 硬编码 `D:/pg-smoke` 路径 —— 恰好违反同一轮学到的「配置不能依赖环境遗留」。
-# 另注：跑它会弹出控制台窗口（本机反感），默认不执行。要跑 PG 系三个套件
-# （oob-real-lab / pg-osshell / concurrent-isolation）改用 `npm run lab:redteam`，
-# 它的 env.mjs 已经在同进程里把 PostgreSQL 拉起来了。
-e2e/run-with-pg.py
+# [2026-09-18 → 2026-10-09 D30 解除] `e2e/run-with-pg.py` 原在忽略列表里（理由见下），
+# 现**已入库** —— 因为 `e2e/run-all.mjs` 的 pg 路由与 `run-with-sandbox.py --with-pg`
+# 都要在同进程里调它起停 PostgreSQL；不入库的话这两条路径在**任何 clone 出来**的机器上
+# 都是坏的（文件不存在 ⇒ 覆盖面退回"看有没有人碰巧起过 PG"）。两条旧理由的解除情况：
+#   ① 未端到端验证 —— 2026-10-09 实测三套全通过：pg-osshell 17.6s（marker 命中）、
+#      oob-real-lab 36.3s（OOB 回连命中）、concurrent-isolation 25.7s（双库互不串扰）。
+#      顺带修掉两个真缺陷：探针连的是**不存在的业务库** sqli_lab（判"PG 能用"必须连
+#      PG 自带的 postgres 库），以及 start_pg 超时仍返回半死进程（现改为返回 None + 收摊）。
+#   ② 硬编码 D:/pg-smoke —— 保留为默认值，但 `PG_BIN` / `PG_DATA` / `PG_PORT` 均可覆盖；
+#      机器上没有 PG 时 run-all 的 pgSandboxAvailable() 为假 ⇒ 退回既有的"缺依赖跳过"。
+# （跑它会拉起 postgres.exe 这条没变；起法是既有的 DETACHED_PROCESS，本批未新增弹窗行为。）
 
 # blackbox-lab 独立评测靶场产物（扫描输出 + 依赖目录链接）
 e2e/blackbox-lab/out/
@@ -156,6 +157,10 @@ e2e/udf-lab/__pycache__/
 # [2026-09-18] PG 靶场运行器（e2e/run-with-pg.py）的就绪探针生成物。
 # 每次运行按内联模板落盘，属派生文件，不入库。
 e2e/.pg-ready-probe.cjs
+
+# [2026-10-09 D30] 同款派生文件：备库脚本（ensure_database 落盘后再执行）。
+e2e/.pg-ensure-db.cjs
+e2e/__pycache__/
 
 # 本机工作记忆（WorkBuddy 会话上下文，非项目源码，不入库）
 # [2026-09-18] 规则加在 e97082d，但 `memory/2026-09-09.md` 是在 6f7b728「对象库损毁后

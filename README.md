@@ -1,6 +1,6 @@
 # sqli-scanner
 
-[![Tests](https://img.shields.io/badge/tests-3688%20passing-brightgreen)](#测试)[![CI](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml/badge.svg)](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml)
+[![Tests](https://img.shields.io/badge/tests-3728%20passing-brightgreen)](#测试)[![CI](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml/badge.svg)](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml)
 [![Dependencies](https://img.shields.io/badge/dependencies-0%20known%20vulns-brightgreen)](#环境变量)
 
 > CI 徽章为真实状态（仓库地址已定，run#90 起全绿）。发布判定仍以 `CHANGELOG.md`
@@ -207,6 +207,7 @@ admin-only 触发页 `/admin/panel`（users.admin 角色门禁 403）+ admin 会
 | **-r 请求文件** | 从 Burp/curl 请求文本导入 URL/method/headers/body |
 | **结构化 body 通道（JSON 嵌套 / XML·SOAP）** | 两类现代 API body 都按**叶子路径**发现注入点，而不是把整份 body 当成一个参数：`jsonBody`（对象，如 `user.id` / `tags.0`）与 `xmlBody`（XML 字符串，如 `soap:Envelope.soap:Body.GetUser.id`；对标 ghauri 的 XML·SOAP 支持）。入口：REST `xmlBody` 字段、CLI `--xml-body` / `--xml-body-file`。⚠️ XML 通道只认「元素 + 文本」形态：注释 / CDATA / DOCTYPE / 正文处理指令一律**整体放弃**（宁可不发现，也不发畸形报文） |
 | **mTLS 客户端证书** | `clientCert`（PEM 路径，证书+私钥同文件，对标 sqlmap `--cert`）：目标要求 TLS 双向认证时没有证书连第一跳都被拒。与 `insecureTls` 正交（一个管「我信不信目标」，一个管「目标信不信我」） |
+| **自定义检测条目（扩展点）** | `--payload-file <file.json>`：追加用户自己的 payload 条目（与 `registry.json` 同 schema），**只追加、不允许覆盖内置**，且同样受高危池硬门管辖；不传即与内置基线逐位一致。见 [docs/自定义检测条目.md](docs/自定义检测条目.md) |
 | **中英双语** | 全界面 i18n 支持中英切换 |
 | **历史记录** | 扫描历史卡片式展示，支持续跑/删除 |
 | **真实 DBMS 验证** | SQLite + PostgreSQL + MySQL 三库真实执行验证 |
@@ -332,7 +333,7 @@ backend/  ← Express + Node.js
 # 前端测试（556 个用例）
 npm test
 
-# 服务端测试（3135 个用例）
+# 服务端测试（3176 个用例）
 cd server && npm test
 
 # 全部测试
@@ -358,7 +359,7 @@ npm run artifact:drift   # 入库的 e2e 基线产物必须等于当前代码跑
 
 - TypeScript: 零错误
 - 前端测试: 556/556 通过（覆盖率门禁 stmts 94.79 / branch 84.52 / func 83.15，阈值 88/77/67）
-- 服务端测试: 3135 用例（3132 pass / 0 fail / 3 skip，并发口径 2026-10-08 复测；3 skip 为环境依赖显式跳过。覆盖率 lines 92.63 / branch 81.35 / func 82.92，阈值 85/74/77）
+- 服务端测试: 3176 用例（3172 pass / 0 fail / 4 skip，并发口径 2026-10-09 复测；4 skip 为环境依赖显式跳过。覆盖率 lines 92.81 / branch 81.56 / func 84.18，阈值 85/74/77）
 - 一键扫描: `npm run scan -- -u <url>`（CLI 一条命令产出 HTML/JSON/Markdown 全套报告 + manifest，退出码可直接进 CI 门禁）
 - Tamper 插件: 234 个（含批次 D3 新增 scalarselectinline；含 v24 增量 20 个，对齐 sqlmap 官方 tamper 全集，含官方 CRS/libinjection 实测组合 uniontable+odbcbrace；含批次 D13 新增 5 件上游形态变体 *nospace/*open/*block，真机 A/B 判决前不进默认链）
 - WAF 绕过能力: 200+ 插件链式组合，覆盖 62 个 WAF 厂商指纹识别 + 推荐
@@ -585,6 +586,11 @@ npm run acceptance:sandbox          # 同全量，但套隔离 MySQL 沙箱（33
 | 红队实战评测（真值对照） | 19/19（100%），安全点 7，误报 0 |
 | fileRead / fileWrite 真闭环 | PASS（文件落盘=true，隔离沙箱重试） |
 
+> ⚠️ **误报率的证据边界（2026-10-09 补）**：上表的「误报 0 / 19/19」全部产自**自建靶场**
+> （`e2e/` 下 37 个靶场，唯一第三方卷子是 `sqli-labs`）。**未在任何第三方复杂应用上验证**
+> （DVWA / Juice Shop / OWASP Benchmark 一类「真框架 + 真 ORM + 复杂拼接」）⇒ 该数字
+> **不可外推为通用误报率**。WAF 侧同理：只验了 ModSecurity+CRS 一家。
+
 **本轮 0 FAIL。** 此前两轮 FAIL 的定位与修复（CRS 执行器 `(?i:…)` 兼容性、`engine.e2e` 环境耦合假红）、
 「11 PASS / 0 SKIP 假绿」事故、门禁自身的两处缺陷修复与缺陷注入验证记录，已迁至
 [docs/验收门禁-判定纪律与事故记录.md](docs/验收门禁-判定纪律与事故记录.md)。
@@ -621,7 +627,11 @@ MySQL 8 **默认 `secure_file_priv=NULL`（彻底禁用）**——实测默认�
 `{ ok:false, value:null }`，即**该能力在生产默认配置下不可用**，属合规的安全默认值。
 仅当目标管理员显式放行（`secure_file_priv=''` 或指定目录）时才可能成功。
 
-真实 ModSecurity/Coraza（含 libinjection）与商业云 WAF 未实测，上述数字仅在自实现执行器口径内成立。
+**真实 ModSecurity 已实测**：CI `modsec-live` job 每轮 dispatch 起官方 `owasp/modsecurity-crs:nginx`
+镜像（真 ModSecurity + libinjection + CRS 4.30.0）跑 PL1/PL3 双档，真机报告见
+[docs/WAF-真机对拍-2026-09-28.md](docs/WAF-真机对拍-2026-09-28.md)（最新一轮：19 样本、直连上界
+10/19、真机打穿链 **1 个**）。**未实测的是 Coraza 与商业云 WAF** —— 本节自实现执行器口径的数字
+不能外推到它们。
 复现：`MYSQL_PORT=3306 node e2e/waf-real/waf-verify.mjs`（人工挂链 A/B）与
 `node e2e/waf-real/waf-auto-check.mjs`（自动路径验收）。
 - 直连模式（对标 sqlmap -d）：支持 SQLite 直连（sql.js）+ 真实驱动注册接口（mysql2/pg/mssql/oracle 等需用户自备）

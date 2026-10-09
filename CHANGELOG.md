@@ -4,6 +4,527 @@
 
 ## [Unreleased]
 
+### 2026-10-09 批次 D30 · PG 三套靶场从「长期 ⛔」到真机跑通，外加三个「判据自己错了」的缺陷
+
+**一句话**：D29 留下的问题是「3 套 PG 靶场因为没有组合入口长期跑不到」。入口补上之后一跑，
+暴露出来的不是产品缺陷，而是**三个环境判据自己错了** —— 而且每一个都错在「静默」上。
+
+#### ① 覆盖面：PG 0/3 → 3/3（本机真跑，判成败只看退出码）
+
+| 靶场 | 结果 | 证据 |
+|---|---|---|
+| `pg-osshell` | ✅ 17.6s | `[PASS] PG os-shell 真机闭环：COPY FROM PROGRAM 落表 → 回显 marker=命中` |
+| `oob-real-lab` | ✅ 36.3s | `OOB 通道检出：全链路回连命中`（隔离 MySQL 沙箱 + 本机 PG **同进程起停**） |
+| `concurrent-isolation` | ✅ 25.7s | `各自命中 union、dbms 归属正确、互不串扰` |
+
+组合入口的做法（D29 已量清的路径）：`run-with-sandbox.py --with-pg` 在同一进程内
+「起两套引擎 → 跑靶场 → 一起收摊」，`run-all` 的 `pg` 探测改成与 `sandbox` 同口径
+（**能自起就不算缺依赖**）—— 此前覆盖面取决于「有没有人碰巧手动起过 PG」，那不是判据，是运气。
+
+#### ② 三个真缺陷，全都错在静默
+
+- **(a) 就绪探针连的是不存在的业务库。** 探针连 `PGDATABASE=sqli_lab`，而 datadir 里
+  **根本没有这个库** ⇒ 端口通、能认证，但永远 `PG_NOT_READY database "sqli_lab" does not exist`
+  ⇒ 60s 超时。判「PG 能不能用」必须连 **PG 自带的 `postgres` 库**；业务库改成就绪之后
+  `ensure_database()` 去备（没有就建，有了就复用）。上一轮 21:2x 那次就是这么静默失败的。
+- **(b) `start_pg` 超时后照样把进程返回去。** 调用方拿到「起来了」的假信号 ⇒ 靶场在半死
+  状态下开跑，拿到 `the database system is in recovery mode` 而 SKIP —— **环境问题被读成产品结果**。
+  现在超时就是起不来：返回 `None` + 当场 `stop_pg()` 收摊（不带病继续，也不留后台进程）。
+- **(c) `run-all` 的 python 探测被本机 pipe 陷阱打掉。** `pythonWorks` 用 `spawnSync`，
+  而本机同步 pipe 对**任何**可执行文件都可能抛 `EBUSY`（同族问题在服务端测试里要靠
+  `cp-pipe-shim` 才跑得动）⇒ 明明存在的 python 被判不可用 ⇒ 所有沙箱类靶场 **0.0s 误标 SKIP**
+  （`oob-real-lab` 实测），而 `runOne` 里真去 spawn 同一个 python 却是好的。
+  判据换异步 `spawn`，语义不变（仍是真执行 `-c print(1)`），只是不再被同步 pipe 带走。
+
+#### ③ `e2e/run-with-pg.py` 从「故意不入库」改为**入库**
+
+它 2026-09-18 被写进 `.gitignore`（附两条理由），今天两条都已解除：
+① 未端到端验证 → 三套实测全过；② 硬编码 `D:/pg-smoke` → 保留为默认值，但
+`PG_BIN` / `PG_DATA` / `PG_PORT` 均可覆盖（没有 PG 的机器上 `pgSandboxAvailable()` 为假 ⇒ 退回既有的「缺依赖跳过」）。
+**必须入库的理由**：`run-all` 的 pg 路由与 `--with-pg` 都要调它，不入库的话这两条路径在
+**任何 clone 出来的机器上都是坏的**。`refs:check` 天然守着这件事（它校验 `run-all` 引用的
+文件是否被 git 跟踪，本轮 170 处全过）。
+
+#### ④ api-range-lab 两条 `[ai]` 404：真根因是 TTL，不是「取 id 的写法」
+
+`ctx.state.numScan` 背后是 ScanManager 的**内存上下文**：扫描终态后进入 `retiredAt`，
+默认 **30s 回收**，而 AI 路由查的正是这张表（`sm.scans.get(id)` 拿不到就 404 / code 2001）。
+全序跑到 ai 组时早已过 30s ⇒ **无条件复用等于赌机器快慢**（只跑 `--groups=ai` 6/6 通过，全序就红）。
+修法是给缓存加**年龄闸**（15s = 默认 TTL 的一半）：过期就重新扫，不再赌。全序 **49/49 PASS**。
+
+**缺陷注入复验**：把闸改成无条件复用（旧行为）⇒ **3 条 FAIL** —— 2 条 `[ai]` 404，
+外加 1 条 `[exploit] POST /exploit/sql`（它吃的是同一个缓存）。D29 只记了 2 条红，注入态下
+实际是 3 条 ⇒ 这口闸同时保住了 exploit 组。还原后复跑 49/49。
+
+#### ⑤ 未解决（沿用 TODO 15，本批没动）
+
+`pentest-lab` 的 `waf403` 与「两套不在 CI 里」两笔账原样保留 —— 顺序仍是先定位/修，再接 CI。
+
+#### ⑥ 本批门禁
+
+`eslint`（改动文件）RC=0、`node --test "e2e/lib/*.test.mjs"` **23/23**、`refs:check` 170 处全入库、
+`facts:check` 一致、两端 `ast`/`node --check` 通过、`node e2e/run-all.mjs --list` 里三套 PG 靶场由 ⛔ 变 ✅。
+
+### 2026-10-09 批次 D29 · 真机靶场全量跑一遍：27 套全覆盖 = 25 绿 / 2 确定性红，另修一处门禁误标
+
+**一句话**：把 `e2e/run-all.mjs` 能跑的真靶场**一轮跑满**（27 套，另 3 套被 PG 组合缺口挡住），
+结果里有两个确定性红是 **CI 从来没跑过的**，还有一处门禁把"跑了 19 条断言"报成"未执行任何断言"。
+
+#### ① 覆盖面（本机真跑，判成败只看退出码）
+
+| 组 | 结果 |
+|---|---|
+| CRS 保真门禁 | 942 族 **99.6%**（误触 2、已点名分歧 5、新增 0）／930 族 **100.0%** ⇒ D25 的 tamper 改动无回归 |
+| tamper × WAF | tamper-matrix ✅（真链矩阵）、waf-real ✅（selftest 10/10）、waf-lab ✅（真 MySQL + CRS A/B） |
+| 真 MySQL（沙箱） | real-mysql-lab ✅ 11/11、file-read ✅、file-write ✅、udf-lab ✅（真 DLL）、csrf/crawl/login/batch ✅ |
+| 真 JDBC 引擎 | multi-engine-lab ✅、no-waf ✅、crs-pl1 ✅、dialect-templates ✅ 16/16 |
+| 异构库 | mssql-lab ✅、mssql-oshell ✅、mssql-dump ✅、oracle-lab ✅ |
+| 检出面 | redteam-lab ✅（24 靶点）、random-battery ✅、recall-lab ✅、detection-runner ✅ 19/19、retest ✅、real-world ✅ |
+| **确定性红** | **pentest-lab ❌**（waf403）、**api-range-lab ❌**（两条 `[ai]`） |
+| 未跑 | oob-real-lab、pg-osshell、concurrent-isolation —— 见 ⑤ |
+
+#### ② pentest-lab `waf403`：`must:['boolean']` 确定性拿不到
+
+三轮输出完全一致：`[FAIL(miss=boolean)] waf403 检出=[error] miss=[boolean]` ⇒ 不是抖动。
+**单变量实验排除了本会话**：把 D25 改过的 3 个 tamper 插件回退到改前版本 ⇒ 仍然红。
+机理（读靶场定义 + 当场日志）：`/waf` 只对**原始 query 值**跑 `WAF_RE`、服务端**不做二次解码**；
+引擎自适应选中的链是 `[chardoubleencode]`，"放行"是真的（探针 2ms 通过），但双编码串经一次解码
+落到 MySQL 是 `%61%6e%64` 这类碎片 ⇒ error 通道有信号，而 boolean 要的"真/假两侧同形且结果不同"
+**物理上拿不到**。
+⇒ 这条红要么指引擎选链缺陷（**只验"能不能过 WAF"，不验"过完之后语义是否还等价"**），
+要么指 09-29 钉值时选的是另一条链。**没有为了让它绿去改 `must`** —— 那等于把判据改成能过的样子。
+
+#### ③ api-range-lab：两条 `[ai]` 用例确定性 404
+
+`AI 报告应 200，实得 404 {"code":2001,"message":"扫描任务不存在"}`，两轮一致。
+用例取 id 的写法是 `ctx.state.numScan || await scanUntilDone(...)` ⇒ **跨用例缓存的 scanId**
+可能属于已被回收（完成后 30s TTL）或已换过服务实例的扫描，属本仓已知的"用例间状态泄漏"一类。
+根因尚未定位（下一步很轻：把该用例用的 scanId 与当场 `/api/scans` 列出的 id 对一下，
+就能分清"状态泄漏"与"TTL 回收"）。
+
+#### ④ 门禁自身的两处问题（一处已修）
+
+- **误标已修**：`run-all` 判"按设计跳过"用的是 `code === 0 && /\bSKIP\b/i.test(out)` ——
+  detection-runner 自己打的汇总行 `19 PASS / 0 FAIL / 0 SKIP` 里的 "0 SKIP" 也命中，
+  于是**跑了 19 条断言的套件被标成 ⏭ 跳过**，横幅还宣称"本套件未执行任何断言"（假话，且把覆盖面报少）。
+  判定收进既有的 `e2e/lib/suiteVerdict.mjs`：新导出 `executedNothing`，两档保守
+  （有统计行按 PASS/FAIL/SKIP 计数判；没有统计行才要求"见 SKIP 且完全无 PASS"，
+  保住 09-14 那个"只喊 SKIP 不算跑过"的反向教训）。补 6 条断言单测，样本用当场真输出。
+  端到端证明：同一套件的 `hint` 一字未变，重跑从 `⏭ 跳过` 变成 `✅ 通过 14.3s / 跳过 0`。
+- **CI 覆盖缺口（未修，记 TODO）**：`pentest-lab` 与 `api-range-lab` 在 `ci.yml` 里**零引用**，
+  而 `e2e-self-contained` 那个 job 只收敛 `deps: []` 的 6 套 ⇒ 上面两个确定性红，
+  CI 从第一次跑到现在一眼都没看过。**"本机 run-all 才看得到"的红，等于没有红。**
+
+#### ⑤ PG 那 3 套：不是没环境，是没有组合入口
+
+本机 `D:/pg-smoke`（真 PG16 + 已初始化 datadir）和 `D:/engines/jars` 四支 jar 都在。
+但 `run-with-pg.py` 只管 PG、`run-with-sandbox.py` 只管 MySQL：
+`pg-osshell`（只要 PG）能直接跑，`oob-real-lab` / `concurrent-isolation`（PG + MySQL 沙箱同时要）
+**没有组合入口**，在 `--list` 里长期 ⛔。
+解锁路径已量清：给 `run-with-sandbox.py` 加 `--with-pg`（同一进程内"两套引擎 起→用→停"，
+沿用宿主会回收后台进程那条纪律），并让 run-all 的 `pg` 探测像 `sandbox` 那样"能自起就不算缺依赖"。
+
+#### ⑥ 本批我自己造成的一次损失（照实记）
+
+收尾复原被跑批写脏的入库产物时，我用了 `git checkout HEAD -- $(git status … | awk …)`，
+清单里除产物外**还含本批改好的三个源文件**（`e2e/lib/suiteVerdict.mjs`、其单测、`e2e/run-all.mjs`）
+⇒ 已写好并验证过的修复被一起回退。仓库记忆里正是这条教训（撤销只能用逆操作，
+批量 checkout 会连本轮特性一起删），我还是踩了。按原样重放三处改动后**重新验证**：
+单测 23/23、`eslint` RC=0、端到端那条误标再次翻回 ✅。
+今后复原产物必须逐文件名点名，并先把"产物"和"源码"分成两张清单，绝不用命令替换喂给 checkout。
+
+
+### 2026-10-09 批次 D28 · 桌面版「导出报告 / 导入请求文件」发货即坏：包压根没装，而三层防护被同一个写法废掉
+
+**一句话**：`tauriBridge.ts` 用「变量形式的动态导入 + `as any`」去绕"插件包没装"，
+代价是 **Vite 不做静态分析、TS 拿不到模块类型、依赖表里查无此包** —— 三条路全都静默。
+构建产物里逐字留着 `import("@tauri-apps/plugin-dialog")`，桌面壳按 origin 解析必然失败。
+
+#### ① 取证（不靠推断）
+
+- npm 侧：`package.json` 与 `package-lock.json` 里 `@tauri-apps/plugin-dialog` / `@tauri-apps/plugin-fs`
+  **零命中**；`node_modules/@tauri-apps/` 只有 `api`/`cli`/`cli-win32-x64-msvc`；
+  `require.resolve` 两个都 `MODULE_NOT_FOUND`。
+- Rust 侧反而是齐的：`Cargo.toml` 有 crate、`lib.rs` 有 `.plugin(tauri_plugin_dialog::init())`
+  与 `tauri_plugin_fs::init()`、`capabilities/default.json` 给了 `dialog:default` + `fs:default`
+  ⇒ 缺陷只在 JS 那一半，而那一半没人看得到。
+- 旧产物：`dist/assets/index-*.js` 里能原样 grep 到
+  `await import("@tauri-apps/plugin-dialog")` ⇒ 运行时裸解析，不是打包期问题。
+- **为什么一直没被发现**：vitest 把这两个 specifier alias 到测试桩（`src/tests/stubs/`），
+  唯一会走到这条分支的自动化测试跑的是**桩**；`npm run build` 只看构建成败，
+  而"能不能解析"要运行时才知道 ⇒ 门禁链上每一环都恰好放过它。
+
+#### ② 修
+
+- 两个包进 `dependencies`（dialog 2.8.1 / fs 2.6.0）。装完先核对**真实签名**再改代码：
+  `save(options?): Promise<string | null>`、`readTextFile(path: string | URL, opts?): Promise<string>`
+  ⇒ 与代码假设一致，**没有 API 漂移**，缺陷纯粹是"包没装"。
+- `tauriBridge.ts`：动态导入改回**字面量**；删掉 `(dialog as any)` / `(fs as any)`；
+  `(invoke as any)` 换成显式泛型 `invoke<{ port?; token? } | null>`。
+  ⚠️ 一摘 `any` 就露出 `invoke` 的默认返回类型是 `{}`（那正是它当初被 any 掉的原因）——
+  标注比 any 强：壳那边改了形态，这边编译就过不去。
+- Web 侧不必担心体积：调用点前面有 `if (!tauriAvailable) return`，这个 chunk 永不被加载。
+  实测重新 `npm run build` RC=0，且**产物里不再有裸 import，而 `plugin:dialog` / `plugin:fs`
+  的 IPC 名被真正打进 chunk**（前后各 grep 一次为证）。
+
+#### ③ 守卫 `server/tests/tauriPluginWiring.guard.test.js`（5 条，注入复验 4/4）
+
+| 条 | 判据 |
+|---|---|
+| ① | 源码引用的每个 `@tauri-apps/*` 包必须在 package.json 依赖里 —— **就是本缺陷** |
+| ② | 依赖里每个 plugin 包必须在 Cargo.toml 有 crate + lib.rs 有 `init()`（反向：只装 JS 会得到"命令不存在"，而那条路径外面套着 catch ⇒ 静默降级成"看起来没这功能"） |
+| ③ | 禁止"变量形式的动态导入"：轻量数据流判定（该变量确实被赋成 `@tauri-apps/*` 字面量才算），仓库里其它 `import(变量)` 不误伤 |
+| ④ | 桌面 `fs.*` 调用 ↔ capabilities 授权范围配对；欠账用**显式豁免表**钉住 —— 还掉却不删登记也红 |
+
+注入复验（全部逆操作还原，还原后 `git status` 对应文件 0 处脏）：
+还原变量形式 ⇒ ③ 红并点名 `src/shared/tauriBridge.ts:82` ✓；从 package.json 删两包 ⇒ ① 红 ✓；
+塞一个没注册的 `@tauri-apps/plugin-store` ⇒ ② 红 ✓；给 capabilities 加 `fs:allow-write-text-file`
+⇒ ④ 红「欠账已还，删掉登记」✓。
+
+判据自己那两次假红也留档：守卫**第一跑扫到了自己的合成样本**（反面例子写着
+`const dialogSpec = '@tauri-apps/plugin-dialog'` ⇒ 三条全红 ⇒ 排除 `SELF`，与 D25 的口径 ⑤ 同形）；
+④ 第一版把 Node 的 `fs.readFileSync` 也算成桌面调用 ⇒ 限定为"真的 import 了 plugin-fs 的文件"。
+
+#### ④ 还剩一半，而且是要人拍板的那一半
+
+`src-tauri/gen/schemas/acl-manifests.json` 里 `fs.default_permission` 的原文是：default 只给
+**应用目录的读**。而保存/打开对话框返回的是**用户任选的绝对路径**（`D:\reports\x.md`、
+`~/Downloads\x.txt`）⇒ 即使包修好，`writeTextFile` 仍会被 capability 范围拒。
+**放开哪一类范围是安全决策，本批没有替你改**，三个候选记在 TODO：
+(a) `fs:allow-write-text-file` + `$DOWNLOAD/**`；(b) 只放 `$HOME/**`；
+(c) 不动范围，改成"导出落应用目录 + 对话框只做另存提示"。
+④ 的豁免表把这笔账钉住了：真去改 capabilities 却不来删豁免，守卫直接红。
+
+#### ⑤ 本批状态
+
+全量服务端 **3176 用例 / 3172 pass / 0 fail / 4 skip**，前端 **556 / 556 pass / 0 fail**，
+徽章 3728（`facts:refresh --coverage` 实采）；本仓六条守卫合计 **24 条断言全绿、0 skip**；
+`npm run build` RC=0；`eslint .` 与三支 typecheck（frontend / tests / server）、
+`facts:check`/`refs:check`/`readme:check`/`arch`/`nesting`/`modules`/`version` 全 RC=0。
+依赖变更核对过：`package.json` 只 +2 行，`package-lock.json` +23/−3，无夹带。
+
+
+### 2026-10-09 批次 D27 · 「进了检查范围」≠「真在被检查」：摘掉 26 行主动关闭 + 一个只减不增的棘轮
+
+**一句话**：D26 把 `src/tests` 纳入类型检查之后，真正的尾巴是**测试里还有 117 行
+`as never` / `as any` / `as unknown as`，每一行都在原地把刚建起来的检查关掉**。
+本批摘掉 26 行，并装一个不许回头的棘轮。
+
+#### ① 先分清「关掉的到底是谁」，不为一键清零
+
+- **`as any` 64 行（本批未动）**：按 `mock` / `vi.fn` / `spyOn` / `stub` 的启发式筛，只有 **20 行**
+  真是 mock 管线（`(apiClient.get as any).mockResolvedValue(...)` 那种，硬摘只会把断言变成 `any` 的海洋）；
+  剩下 **44 行**混着几种不同的东西，必须先分类再决定：`addEvent(e as any)`（ProgressView.logs，
+  与本批摘掉的 `as never` 同族）、`exploitClient.sqlShell({ sql: 'SELECT 1' } as any)`（错误路径）、
+  `(document as any).execCommand`（DOM lib 里就没这个）、`setState({ report: {…} as any })`（setter 的局部桩）、
+  `(body as any).url`（读通用 JSON）。**笼统说成"mock 写法，动不得"是不成立的。**
+  ⚠️ 这个分类还先纠正了一件事：早前用 `grep -cF` 量的"69 行 as any"含注释行，实测剥注释后是 **64**。
+- **打在「被测函数入参」上的 `as never`（本批目标）**：这一类才是真关掉契约检查的——
+  参数类型以后再变，用例照样绿。
+- **`@ts-expect-error` 不算关闭**：它自反（那行要是没错了，指令自己报错），
+  所以不计入预算，而且本批**主动把一批 `as never` 换成它**。
+
+#### ② 摘掉的三个文件，每类都留了判据
+
+1. `scanConfig.scope.test.ts`（15 处）：`parseScopeList(undefined/null/123/0)` 与
+   `buildStartConfig({ scope: 'a.com,b.com' })` 是**故意喂非法值**（测容错/归一分支）⇒ 换 `@ts-expect-error`；
+   而 `buildResumeConfig(...)` 那 7 处 `as never` 的入参**本来就落在 `Partial<ScanConfig> | null` 里** ⇒ 直接摘。
+2. `scanConfig.contract.test.ts`（8 处）：`buildStartConfig(DEFAULT_CONFIG as never)` ——
+   `DEFAULT_CONFIG` 本来就是 `ScanConfig`，那层 cast 纯属多余（D26 留给下一批的线索就是它）。
+   ⚠️ 顺手实测到一个语义差别：**多余属性检查只作用于「字面量直接进形参」**。
+   `const saved = {…}` 先赋值再传参就不报 ⇒ 我按第一反应在那儿加了 `@ts-expect-error`，
+   tsc 当场回一条 `TS2578 Unused '@ts-expect-error' directive` —— 指令不是装饰，放错位置会被自己判错。
+3. `scanStore.test.ts`（5 处）：`addEvent({ type:'point_testing', payload:{ pointId } } as never)`
+   与 D26 的 ProgressView 同族（payload 缺 `technique`、`points` 是 `{id}` 假对象、`http_request` 传 `{}`）。
+   按 `ScanEventPayloads` 补成协议形态。这条的价值不是"类型过了"，而是**将来 `addEvent`
+   改了取数路径（例如按 technique 分账）时，用例会红，而不是继续绿着测一个不存在的世界**。
+
+#### ③ 棘轮 `server/tests/castBudget.guard.test.js`
+
+按**行**计（一行最多算一次），两个 scope 各自只减不增：`src/tests` = 91、`src` 生产码 = 11。
+含自证 + 分母（判据扫不到任何 cast 时必须红 —— "清零"和"判据瞎了"长得一模一样）。
+
+缺陷注入复验 2/2（都逆操作还原，还原后 `git status` 该文件 0 处脏）：
+- 往 `src/tests` 加一行 `as never` ⇒ ① 红，报 `92 > 基线 91` 并附 per-file 前八名 ✓
+- 把三个模式改瞎 ⇒ 自证与 ② **双红**，而 ① **仍然绿** ⇒ 又一次实测"分母守卫不是形式主义"
+
+#### ④ 基线差点被我写错（值得记的一条）
+
+先用 `grep -nE "as never|as any|as unknown as" | wc -l` 量到 **102** 当基线，注入一条 cast 却**不红**。
+差在：grep 把「注释里讨论 as never」的行也算进去了（本批新写的注释正说着 `as never`），
+而判据按 D21 那条纪律剥注释 ⇒ 真实数字是 **91**。
+⇒ **基线必须由判据自己产出**（把基线临时设 0、从失败消息里读那个数），旁路探针代劳不了。
+同一口径回量 HEAD：本轮开工前 **117** 行 → 现在 **91** 行（**−26**）。
+
+#### ⑤ 本批状态
+
+全量服务端 **3171 用例 / 3167 pass / 0 fail / 4 skip**，前端 **64 文件 / 556 用例 / 556 pass / 0 fail**，
+徽章 3723（`facts:refresh --coverage` 实采）；`tsc -p tsconfig.tests.json` 0 错误；
+`eslint .`、`typecheck` 组合、`refs:check`/`readme:check`/`facts:check`/`arch`/`nesting`/`modules`/`version`
+全 RC=0。生产码的 11 行 cast 本批未动（只钉住不许增长），`src/tests` 剩余 91 行的分类见 ①。
+
+
+### 2026-10-09 批次 D26 · 64 个前端测试文件此前**不在任何静态检查范围内**：打开就暴 45 处漂移
+
+**一句话**：`tsconfig.json` 是 `include: src` + **`exclude: src/tests`**，而 vitest 走 esbuild 转译
+不做类型判定 ⇒ 前端测试的类型错了**没有任何东西会报**。补一份 `tsconfig.tests.json` 接进门禁，
+第一次跑报出 **45 处**。
+
+#### ① 三类「测试还在跑，但已经不测它声称测的东西」
+
+1. **12 处失败说明文字从来没生效**：`expect(x).toBe(v, '说明')` 是 chai/jest 写法，
+   vitest 只认 matcher 的第一个参数 ⇒ 那些解释被**静默丢弃**。
+   实测两个哨兵（临时跑一个探针文件，跑完即删）：
+   ```
+   expect(1, 'SENTINEL-MESSAGE').toBe(2)   → 输出：→ SENTINEL-MESSAGE: expected 1 to be 2   ✓ 生效
+   expect(1).toBe(2, 'CHINA-STYLE-MSG')    → 输出：→ expected 1 to be 2                     ✗ 只在回显源码帧里出现
+   ```
+   ⇒ 本仓像「续跑丢限速 = 第二轮比第一轮更凶」「本地快照必须留着，否则续跑配置无处可取」
+   这类写在第二参数上的判据说明，**从写下那天起就没进过失败现场**。
+   修法是把它挪回 `expect(value, msg)`（实测生效），不是删掉文字。
+2. **夹具比组件契约旧**：`ScanWizard.makeProps()` 缺组件后来新增的必填 props
+   `onPause` / `onResume`，还多传两个早已不是 props 的键（`report` / `scanId`）——
+   全靠工厂返回宽松类型（`Record<string, any>`）没报。
+   修法是显式钉成 `ComponentProps<typeof ScanWizard>`（该组件的 Props 接口没导出，
+   不为此动生产代码）；钉上之后 TS 立刻反过来说明 `report`/`scanId` 不是 props ⇒ 删死键。
+   同时 `BASE_CONFIG`/`BASE_SQLMAP` 从 `DEFAULT_CONFIG`/`DEFAULT_SQLMAP_CONFIG` 派生
+   （手抄的 config 字面量会随 `ScanConfig` 演进而变成"引擎里不存在的那个形态"）。
+3. **事件夹具是虚构的**：`ProgressView` 用 `type: 'detect'`（`EventType` 里没这个值）、
+   `payload: '字符串'`（真实形态是 `ScanEventPayloads` 里逐类型的对象）、
+   `points: [{},{},{},{}]`（`InjectionPoint` 有 7 个必填键）喂组件。
+   组件恰好把 payload 直接 stringify ⇒ 断言全绿，**测的是引擎永远不会发的一条事件**。
+   改成按 types.ts 的映射构造：`scan_started` 的 `target:{url,method}`、
+   `point_testing` 必带 `technique`、`detection_found` 用整条 `DetectionResult + riskLevel`。
+   同族另有一处：`useScan` 的 sqlmap 夹具写了 `SqlmapVulnEntry` 上没有的 `id` 键；
+   `qa_resume` 的 `as ReportModel` 掩盖了夹具缺 `Target.id`（摘掉那层 cast 才看得见）。
+
+#### ② 门禁接线：一份配置 + 一条作用域守卫
+
+- 新增 `tsconfig.tests.json`（extends 主配置 + `allowJs`，让跨语言 parity 测试真的吃到服务端类型——
+  原先 `import '../../server/src/core/requestFileParser.js'` 是 `implicitly any`），
+  加 `npm run typecheck:tests` 并**收进 `typecheck` 组合脚本** ⇒ CI 的 lint job、`test-matrix`、
+  `scripts/ci-local.mjs`、`check:all` 一处改完全链生效；ci.yml 另加独立一步
+  `TypeScript check (frontend tests)`，并把该 job 上方那句"typecheck = frontend && server"的
+  过期公式一起订正。
+  单独一份而不是改主配置：主配置服务 `npm run build`，不该让"测试文件的类型问题"挡住"发布应用"。
+- `server/tests/typecheckScope.guard.test.js` 三向：
+  ① 每个入库前端文件（`src/**`、`vitest.setup.ts`）至少被**某一份**根级 tsconfig 覆盖；
+  ② 每支 `typecheck:*` 都必须被组合脚本串上，且 CI 与 ci-local 两侧都有对应步骤（只写一处=另一处空转）；
+  ③ 分母：tests 配置覆盖 ≥50 个测试文件、总覆盖 ≥100，且 tsconfig **解析失败必须红**而不是跳过。
+  含 `coversEntry` 目录/单文件语义自证。
+  缺陷注入复验：把 `"exclude": ["src/tests"]` 抄回 tests 配置 ⇒ ①③ 双红，①点名 66 个文件 ✓（逆操作还原）。
+
+#### ③ 两条判据自身的错（都被自己的机制抓到）
+
+- `tracked.filter(CODE_FILE.test)` —— 把 RegExp 方法当回调传，`filter` 给的是无 receiver 的函数
+  ⇒ `TypeError: RegExp.prototype.test called on incompatible receiver undefined`，两处都写了。
+- 判据忘了与「本条只管前端」这个范围求交 ⇒ 第一跑报"823 个文件没覆盖"，那 823 个是服务端 JS，
+  归另一条门禁管。**报出一个大数不等于抓到了东西，先问这个数应该是谁。**
+- 另：本批新写的守卫在 catch 里 rethrow 没带 `cause`，被 D25 刚启用的 `preserve-caught-error`
+  当场判红 ⇒ 即改即修。那是那条规则第一次抓到**新写的**代码（而不是存量）。
+
+#### ④ 现在的状态与**没有**做成的事
+
+- `npx tsc -p tsconfig.tests.json` **0 错误**（45 → 0）；全量前端 **64 文件 / 556 用例 / 556 pass / 0 fail**，
+  服务端 3168 用例（3164 pass / 0 fail / 4 skip），徽章 3720（均为 `facts:refresh` 实采值）。
+  `eslint .`、`refs:check`、`readme:check`、`facts:check`、`arch`/`nesting`/`modules`/`version`、
+  `typecheck:frontend`/`typecheck:server` 全 RC=0。
+- ⚠️ **覆盖 ≠ 严格**：测试里现存 **37 处 `as never`、42 处 `as any`、37 处 `as unknown as`、
+  5 处 `@ts-expect-error`**（实测命令：`grep -rn -F "as never" src/tests/ | wc -l` 等），
+  每一处都是**主动**把类型检查关掉。本批**没有**动这些 —— 清它们要逐处问"这处 cast 掩盖了什么"，
+  为清零而清零只会造出更难读的断言。已列作下一批（D27）的头一项，并且已经拿到一个线索：
+  `buildStartConfig(config?: Partial<ScanConfig> | null)` 明明能接受 `ScanConfig`，
+  调用点却写 `DEFAULT_CONFIG as never` ⇒ 那层 cast 是多余的，去掉后能恢复对未来的约束力。
+
+
+### 2026-10-09 批次 D25 · lint 的上限与作用域：抬上去第一件事就抓出一个「句尾关键词永不变形」
+
+**一句话**：`npm run lint` 原本是「手挑 12 条规则 + 作用域里混着本机垃圾」；改成
+**recommended 全集（例外逐条带实测理由）+ 作用域精确等于仓库**，第一跑就报出一条
+`no-useless-escape`：三个 tamper 插件把 Python 的 `\Z`（串尾）当 JS 断言抄了进来。
+
+#### ① 真缺陷：`\Z` 在 JS 里是字面字母 Z，不是「串尾」
+
+上游 sqlmap 1.10.10 的 `halfversionedmorekeywords.py` / `versionedkeywords.py` /
+`versionedmorekeywords.py` 是 **Python**，`\Z` 表示字符串末尾。本仓三个「上游形态变体」插件
+把正则逐字符抄成 JS：`(?=\W|\Z)`（halfversionedmorekeywordsopen、versionedmorekeywordsnospace）
+与 `(?=[^\w(]|\Z)`（versionedkeywordsnospace）。
+
+JS 里 `\Z` 匹配的是字母 `Z` ⇒ 关键词落在 payload **最后一个字符**时边界永不成立 ⇒ 那一个词永不变形。
+实测（改前 → 改后）：
+
+```
+1' UNION ALL SELECT USER  →  1'/*!0UNION/*!0ALL/*!0SELECT USER    （改后 …SELECT/*!0USER）
+admin UNION SELECT        →  /*!admin*//*!UNION*/SELECT           （改后 …*//*!SELECT*/）
+```
+
+危害中低（只漏尾词，前面的词照常变形），但形状贵：**正则照样编译、插件照样跑、
+既有 doctest 全绿** —— 那三条 doctest 的输入都以引号或 `#` 收尾，恰好一个「关键词在句尾」
+的样本都没有。这类缺陷现有判据一条都抓不到。
+修法：`\Z` → `$`（3 处），并给每个插件的 `doctests` 补一条句尾样本；期望值**抄探针实际打印的输出**，不自己算。
+
+#### ② 不止步于「修完」：`server/tests/pythonRegexEscapes.guard.test.js`
+
+`\A \Z \z \G` 在 JS 里都不是断言，出现即违规（不分正则字面量还是字符串 —— 字符串里同样静默变形）。
+两条口径都是踩出来的：
+- **判据文本源必须排除注释**（D21 老教训复用）—— 修完后这三个插件的说明注释里都写着 `\Z`，
+  不剥注释这条守卫第一跑就假红。
+- **剥注释不能用块正则**：本仓 tamper 插件里满地是版本注释的起始/收尾序列，
+  `/\*[\s\S]*?\*\//` 会把它们当块注释配对、一口吃掉跨几行的真代码 ⇒ 改成按行判 + 行尾从双斜杠截断。
+  ⚠️ 顺带自曝：本批写守卫时**两次**因为块注释里含「星杠」序列（glob 的 `**/*.d.ts`、
+  tamper 的收尾符）而写出语法错 —— 第二次才记得是自己刚写下的那条教训。
+- **自证首跑就抓到主判据是假绿**：正则源拼接少写一层转义（`BS + '[AZzG]'` 拼出的是
+  「字面左括号…」而不是「反斜杠后接 AZzG」）⇒ 主判据一条都匹配不到却报绿。修成 `BS + BS`。
+  这条不是防御性摆设：没有自证，本批会带着一个恒绿的守卫进 CI。
+
+缺陷注入复验：把其中一个插件的正则改回 `\Z` ⇒ 守卫红 ✓（逆操作还原后复绿 ✓）。
+
+#### ③ lint 上限：手挑 12 条 → recommended 全集，例外逐条带实测数字
+
+| 例外规则 | 实测 | 为什么不开 |
+|---|---|---|
+| `no-useless-assignment` | 98 处（65 在 `server/src`） | 全是 `let x = 初值; try { x = await … } catch { x = 兜底 }` 的双分支赋值形状；改掉不修任何缺陷，还容易把兜底改丢 |
+| `no-irregular-whitespace` | 86 处 | 全是 U+3000 中文全角空格，用在报告文案排版。另跑定向探针：**1093 个入库代码文件里 0 处**落进比较/匹配语句 ⇒ 它现在不掩盖任何断言 |
+| `no-control-regex` | 11 处 | WAF/tamper 与协议解析**刻意**构造控制字节（带 `\x00` 的请求就是被测对象） |
+| `no-regex-spaces` | 4 处 | 其中 3 处**就是要匹配两个空格**（`tamper.tokenBoundary` 的「不叠出双空格」判据、`ciNightlyEngine` 的 YAML 缩进锚点） |
+| `no-fallthrough` | 1 处 | `DialectSqlBuilder.escCols` 分支全部以 return 收尾，只是 case 间夹了取证注释；已用最小复现证明 eslint 把「只有注释的 case」算作有语句 |
+| `no-useless-escape` | 13 处 | 7 处在 `[^:\[\]]` 这类字符类里，转义多余但更好读（含 scopeGuard 的主机端口解析，动它的正则才是风险） |
+| `no-empty` | 9 处 | 配 `allowEmptyCatch: true`：9 处全是「换下一种取值方式 / 重试 / 尽力而为」的 catch；仍拦住空的 if/块/循环 |
+
+换来约 45 条 recommended 规则的后续保护，其中 **`no-dupe-else-if` 正是 D21 那个
+`--random-agent` 重复分支缺陷**要抓的形状（那次靠手写守卫补的，以后由 lint 兜）。
+
+真修掉的 7 处：
+- 3 个 `(/re/.exec(out) || [, 'fallback'])[1]` 稀疏数组（`e2e/acceptance.mjs` 的 skipReason）→ `?.[1] ??`。
+  等价性用 7 个样本实测（空串 / 标记后无内容 / 尾随空格 / 全角开头 / 无标记）⇒ **0 处差异**。
+- 4 处 `throw new Error(... ${e.message})` 丢 cause → 补 `{ cause: e }`：
+  `ReportAI.js`（AI 超时）+ 三个**门禁脚本**（`fetch-crs-assets` / `merge-integrity` / `push-via-api`）
+  —— 后三个正是「门禁必须留失败现场」那类，原本只留一句转述、把原始堆栈丢了。
+
+⚠️ 关键一句：**`\Z` 那 3 处正是 `no-useless-escape` 报出来的**。这条规则最终没开（其余 7 处是噪音），
+但缺陷是它带出来的 —— 别让「没开这条规则」读成「没找到东西」。
+
+#### ④ lint 作用域：实测它今天看了 35 个没入库的文件
+
+`npx eslint . --format json` 与 `git ls-files` 对账：入库代码 1094 个 / eslint 实际处理 1128 个。
+- **多管 35 个**：`.box-agent-scratch/**`（躺着 `ScanManager.orig.js` 与几份 `*.new.js` 旧副本）、
+  `.workbuddy/tmp/**`、`.mock/**`、`.acl-recovery/**`、`kanban-check-*/**`。
+  后果不是「多扫了不相干文件」这么轻：**门禁红绿取决于本机磁盘上恰好躺着什么** ——
+  一开 recommended 这批旧副本就暴 5 处违规，那既不是仓库的问题，也不该由仓库修。
+- **漏检 1 个**：`src/vite-env.d.ts` 被 `**/*.d.ts` 吞掉 —— 声明文件确实无可 lint，
+  但改成**显式登记 + 理由**，而不是靠通配符静默吞。
+
+新增 `server/tests/lintScope.guard.test.js` 三向：① 入库代码文件不许被 ignores 命中（除登记清单）；
+② 清单里每条理由必须仍然成立（防僵尸豁免）；③ 已知本机现场必须继续被排除（防有人"顺手清理"配置）。
+含 glob 匹配器自证（`**` 跨目录 / `*` 不跨 / 无前导斜杠只命中根）。
+缺陷注入复验 2/2：ignores 加 `server/src/**` ⇒ ① 红 ✓；摘掉 `.box-agent-scratch/**` ⇒ ③ 红 ✓（均逆操作还原）。
+**诚实边界**：这条守卫是静态比对配置与 git 索引，**不是真跑 eslint**（真跑一次 3–4 分钟，
+塞进单测会把 `cd server && npm test` 拖成十分钟级）；完整实证命令写在文件头，改配置时手动跑一次。
+
+#### ⑤ 本批未做（留口）
+
+- 98 处 `no-useless-assignment`、86 处全角空格按上表保持现状 —— 真要清得先给出「改了能修什么缺陷」的例子，目前没有。
+- `server/src/engine/payloads/registry.json` 150.1 KB 仍挂在 arch 基线上（同 D24 留口）。
+- 生产代码改动只在服务端（3 个插件 + ReportAI + 3 个 scripts/门禁脚本）；前端 `src/` 本次只受 lint 配置全局影响。
+
+
+### 2026-10-09 批次 D24 · 工程回收：47 个「写了但没人能发现」的脚本，删 39 / 登记 8 + 一条防复发守卫
+
+**一句话**：`e2e/**` 与 `scripts/**` 共 197 个可执行脚本里，**47 个在全部执行入口与当前文档中都找不到一次引用**。
+一次性根因诊断删掉；真还在用的本地工具登记进 `e2e/README.md`；再补一条守卫把「写了没人跑第二次」这个形状钉住。
+
+#### ① 普查口径（三次自我修正，每次都改变了结论）
+
+判据形态：按 token 边界（切词后比整词）匹配脚本名，**不用子串** —— 子串会让 `tamper` 命中
+`tamper-live`/`tamper-sweep`、`diag` 命中几十个名字。
+
+1. **首版探针作废**：用「剥块注释 → 正则抓 import」找引用，在 TSX 上把整文件吃掉
+   （JSX 的 `{/* … */}` 被当成块注释起点），结果 39 条"死模块"里 32 条是假阳性
+   （`src/components/scanConfig/*.tsx` 全都活着，被 `ScanConfigPanel.tsx` 静态 import）。
+   ⇒ 判据换成全仓 token 普查，并**先跑正面对照**再读结论。
+2. **`CHANGELOG.md` / `TODO.md` / `AUDIT-SEC-2026.md` 不算接线**。它们是追加式历史，
+   提一次只代表"当时说过"。放宽这一条时孤儿是 42，严格后是 **45**，多出的
+   `probe-nounion` / `probe-union-shape` / `probe-union-ws` 恰好是只在 §I 战报里留过名字的三个
+   （实测：三者 CHANGELOG 各 1 次、TODO 1–2 次、代码里 0 次）。
+   照旧口径写守卫，等于每次写完战报就自动放行一个死脚本。
+3. **自引用不算接线**（这一条是守卫首版被判红后补的）：`scripts/probe-blob-400.mjs`
+   靠自己的 `'User-Agent': 'probe-blob-400'` 一行把自己接上线；`e2e/udf-lab/verify-all.py` 同理。
+   不排除自引用，任何孤儿都能在日志 tag 里把自己救回来。补上后又抓出 2 个 ⇒ 47。
+
+另：代码文件的注释行不参与取词（注释里提名字不叫接线），但**文档全文参与** ——
+`.md` 的 `#` 是标题不是注释，所以剥注释只对代码扩展名开。
+
+#### ② 删的 39 个，分三类，每类都给了"结论由谁接住"
+
+| 类别 | 数量 | 结论接住方 |
+|---|---|---|
+| e2e 一次性根因诊断（`diag-*.mjs` / `probe-*.mjs` / `l46-*.mjs` / `*-diag.mjs` / `manual-probe`） | 30 | §I（union 起始形状）、§3b（redteam env 死亡＝连接风暴）、todo#38/#39（DM8 误判、L46）均已有真测试或已结案条目 |
+| `scripts/archived/patch-*.mjs` / `fix-*.mjs` | 5 | payload-registry 迁移**之前**的一次性改码补丁，内部写死 `D:/projects/...` 绝对路径 |
+| `scripts/verify-tamper-breakage.mjs` / `verify-tamper-mark-protect.mjs` / `diag-waf.mjs` / `probe-blob-400.mjs` | 4 | 见下 |
+
+- `verify-tamper-mark-protect.mjs`：`tamper-marker-protection.test.js` 第 13 条就是
+  「全部编码类 tamper 扫一遍，标记要么完好还原、要么整体回退」，覆盖它的场景 6 且带真断言。
+- `verify-tamper-breakage.mjs`：**实测而非推理** —— 本机真跑输出 `通过 4 / 失败 2`
+  （`error:0308010C … des-ecb unsupported`），它的 `process.exit(fail?1:0)` 早就必红，
+  只是因为没接线，这个"红"从来没被任何人看见。非 DES 的 4 项（md4/Type1/Type2/extractNtlmChallenge）
+  `ntlmAuth.test.js` 全部覆盖且 CI 每次跑。
+
+#### ③ 留 8 个并登记，而不是"顺手删干净"
+
+`probe-limit-expr`（LIMIT 裸数字位的**客观边界证据**，删了就等于把"这不是引擎缺陷"的复现路径弄丢）、
+`inject-check`（对拍链的缺陷注入复验）、`tamper-live`（真 MySQL + CRS 动态 A/B，与静态 `tamper-sweep` 互补）、
+`dialect-audit`、`header-channel`、`probe-hex`、`_sandbox_adversarial_probe`、
+`verify-all.py`（UDF 一键回归 5 步；第 5 步真执行系统命令，**只有显式 `--with-command-exec` 才跑**）
+—— 这批需要真 MySQL/沙箱，进不了 PR 门禁，但不该静默躺着。
+统一写进 `e2e/README.md` 新增的「本地手动探针」表（含依赖列）；该表本身就是守卫认的接线源。
+顺带订正同文件一行过期结论：`sqli-labs` 的入口写着「各 `diag*.mjs`」（diag 已回收，真入口是 `sqli-labs-runner.mjs`）。
+
+#### ④ 补掉一处只存在于死脚本里的断言
+
+DES-ECB 已知答案向量（零 key 加密零块 = `8ca64eca4a19e3b8`）此前**只在** `verify-tamper-breakage.mjs` 里。
+移植进 `ntlmAuth.test.js`。**诚实标注**：本机与 CI 默认 OpenSSL 下它仍是 `skip`
+（des-ecb 需 `--openssl-legacy-provider`，同文件 Type3 那条早就是这个状态）。
+净收益是把「console.log 型、本机必红、没人跑」换成「CI 视野里的显式 skip」，**不是"跑起来了"**。
+
+#### ⑤ 守卫 `server/tests/orphanScripts.guard.test.js`（四向，实测 1.8s）
+
+| 向 | 判据 | 分母/下限 |
+|---|---|---|
+| 覆盖 | 候选脚本零孤儿 | 候选 ≥120（实 158） |
+| 不空转 | 接线源/token 数不得萎缩 | 源 ≥400（实 1394）、token ≥10000（实 5.4 万） |
+| 自证 | 取词吃 `import './foo.js'`、不吃代码注释、吃 md 反引号 | — |
+| 对照 | 正向：`arch-guard`/`run-all`/`tamper-sweep`/`crs-equivalence` 必须判非孤儿；反向：零引用与"只被自己引用"都必须抓 | — |
+
+`git ls-files` 不可用时**显式 skip**（拿不到清单时这条什么都判不了，不许算绿）。
+
+**缺陷注入复验 4/4**：
+1. 删掉 README 中 `probe-hex` 那行 ⇒ 主判据红且**点名** `e2e/waf-real/probe-hex.mjs` ✓（逆操作还原后复绿 ✓）
+2. 把候选分类正则改成匹配不到任何目录 ⇒ 主判据**仍绿**、自证②红「候选脚本只剩 0 个」✓
+   —— 这条演示了分母守卫为什么必须在：分类失效是静默的，红只可能来自分母。
+3. 把自引用排除改回 `return true` ⇒ 自证④红、主判据仍绿 ✓
+4. **本文件自己贡献的 token 也算接线** ⇒ 这条不是注入出来的，是**真红出来的**：
+   `git add` 之前独立跑 5/5 绿，`git add` 之后在全量套件（`# tests 3157 / # pass 3152 / # fail 1`）里红，
+   红点是自证④的反向对照 —— 文件里的样本名 `zz-not-a-real-script-9001` 由**本文件**贡献成 token，
+   于是这条测试亲手把"零引用样本"接上了线（正向对照那四个真名字也是同一隐患：会被自己坐实）。
+   ⇒ 修法是加口径 ⑤「守卫自己不当接线源」（`isWiringSource` 里 `f === SELF` 直接排除），
+   不是把断言放宽。**症状是"加了 git add 就红"，但那不是证据** —— 先复现（`git add` 后单独跑仍红）
+   再定位到 token 来源，才敢说是判据的问题而不是环境的。
+
+#### ⑥ 本批没做（留口，别以为已经做了）
+
+- 生产代码侧同一口径**零命中**（`src/` 与 `server/src/` 无零引用模块）⇒ 本批只回收了 e2e/scripts。
+  "工程质量"里没被碰到的部分：`server/src/engine/payloads/registry.json` 150.1 KB 仍在 arch 基线里挂着。
+- 门禁只覆盖 `e2e/**` + `scripts/**`。`docs/**` 下的脚本没纳入（那里多数 .md/.json 是证据而非入口）。
+- 本机杂物（gitignore 内、不进 CI 视野）：删掉根目录 **122 个 `.tmp-*.mjs` 探针** + `.tmp-msg.txt`，
+  以及三处"备份"目录/文件 —— 删前逐个证过**可从 git 恢复**而不是凭印象：
+  `.tmp-bk-plugins/`（48 个 tamper 插件的 T-1 改写前版本，抽 4 个与 `84cd83b` 的 blob 归一化 CRLF 后逐字节相同）、
+  `.tmp-pu-backup.tsx`（与当前 `src/components/progress/progressUtils.tsx` 相同）、
+  `.tmp-puTest-backup.ts`（与 `67a2045:src/tests/progressUtils.boundary.test.ts` 相同）、
+  `.tmp-rpout/`（`src/shared/requestParser.ts` 的编译产物）。
+  **保留** `e2e/diag/`（60 个文件 / 740 KB，内含两份人写的报告；未跟踪文件的删除不可逆）、
+  `.git.broken-20261005/`、`.workbuddy/`、`.acl-recovery/` 等来历未核实的目录 —— 没查证就不动。
+
+
 ### 2026-10-09 批次 D22 · `tamper-waf-matrix` 失败可见化（TODO K 条的观察面解）
 
 **一句话**：给这个"只在 schedule/dispatch 跑、平时没人盯"的 job 加 job summary 汇总，

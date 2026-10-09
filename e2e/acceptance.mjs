@@ -510,7 +510,7 @@ const SUITES = [
         return {
           pass: false,
           skipped: true,
-          skipReason: (/\[BLOCKED\] (.+)/.exec(out) || [, 'CRS 未生效，未执行断言'])[1].trim(),
+          skipReason: (/\[BLOCKED\] (.+)/.exec(out)?.[1] ?? 'CRS 未生效，未执行断言').trim(),
         };
       }
       const on = num(/生成链验证 A档=(\d+) 条/, out);
@@ -547,7 +547,7 @@ const SUITES = [
         return {
           pass: false,
           skipped: true,
-          skipReason: (/\[BLOCKED\] (.+)/.exec(out) || [, '靶场未生效，未执行断言'])[1].trim(),
+          skipReason: (/\[BLOCKED\] (.+)/.exec(out)?.[1] ?? '靶场未生效，未执行断言').trim(),
         };
       }
       // 只吃事实数字：画像内容 + 两档决策结果（正则取自脚本自己的输出行）
@@ -596,7 +596,7 @@ const SUITES = [
     assert: (out) => {
       // 自起失败（典型：本机没 PG）→ 报 SKIP 而不是 FAIL：没测过不该判红，但也不能算通过
       if (/\[SKIP\]/.test(out) && !/\[redteam\] round=r2/.test(out)) {
-        return { pass: false, skipped: true, skipReason: (/\[SKIP\] (.+)/.exec(out) || [, '红队靶场未就绪'])[1].trim() };
+        return { pass: false, skipped: true, skipReason: (/\[SKIP\] (.+)/.exec(out)?.[1] ?? '红队靶场未就绪').trim() };
       }
       // 只吃事实数字：gate-check 算好的真值（分母只含已确认 vuln，误报只数 safe 点）
       const m = /\[redteam\] round=r2 vuln=(\d+) hit=(\d+) rate=(\d+)% safe=(\d+) fp=(\d+)/.exec(out) || [];

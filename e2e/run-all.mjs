@@ -13,11 +13,13 @@
 //   node e2e/run-all.mjs --only multi-engine-lab,redteam-lab
 //   node e2e/run-all.mjs --all
 // ============================================================================
-import { spawn, spawnSync } from 'node:child_process';
+// D30：spawnSync 已不再使用（同步 pipe 在本机会 EBUSY，python 探测改异步 spawn，见 resolvePython 处注释）
+import { spawn } from 'node:child_process';
 import net from 'node:net';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { executedNothing } from './lib/suiteVerdict.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..');
@@ -29,7 +31,12 @@ const ROOT = path.resolve(HERE, '..');
 //   'sandbox'  —— 需要真 MySQL，但**可由隔离沙箱提供**（e2e/udf-lab/mysql_sandbox.py
 //                 起在 3308）。宿主 3306 不通时自动改走 e2e/run-with-sandbox.py，
 //                 不再标记为「缺依赖」而跳过。
-//   其余（mssql/oracle/pg/java）语义不变。
+//   其余（mssql/oracle/java）语义不变：只探测端口，不自起。
+//   'pg'（2026-10-09 D30 改）—— 端口没在听时**不再直接判缺依赖**：本机有可自起的 PG
+//                 （默认 D:/pg-smoke，可用 PG_BIN/PG_DATA 覆盖）就改走 run-with-pg.py
+//                 （与 MySQL 沙箱双依赖者走 run-with-sandbox.py --with-pg），同进程起→用→停。
+//                 动机：之前 3 套 PG 靶场在"装有真 PG 但没人手动起过"的机器上长期 ⛔，
+//                 覆盖面取决于有没有人碰巧起过 PG —— 那不是判据，是运气。
 //
 // 依赖误标的修正记录（2026-09-18 实测）：
 //   · waf-real：原标 deps:['mysql']，但其入口 selftest.mjs 只解析 CRS 规则做纯内存
@@ -133,6 +140,21 @@ const PROBES = {
 const SANDBOX_DIR = path.join(ROOT, 'e2e', 'udf-lab', '.mysql-sandbox');
 const sandboxAvailable = () => fs.existsSync(path.join(SANDBOX_DIR, 'data'));
 
+// PostgreSQL 的同款判定（2026-10-09 D30）：本机 D:/pg-smoke 装有真 PG（datadir 已初始化），
+// 由 e2e/run-with-pg.py 或 run-with-sandbox.py --with-pg 在**同一进程**内起停。
+// 口径与 sandbox 一致：能自起就不算缺依赖 —— 此前 'pg' 只看 5432 在不在听，
+// 于是 3 套 PG 靶场（oob-real-lab / pg-osshell / concurrent-isolation）在有一台真 PG 的机器上
+// 仍然长期 ⛔，等于"覆盖面取决于有没有人手动起过 PG"。
+// 路径与 run-with-pg.py 同源，可用 PG_BIN / PG_DATA 覆盖。
+const PG_BIN_DIR = process.env.PG_BIN || path.join('D:', 'pg-smoke', 'bin', 'bin');
+const PG_DATA_DIR = process.env.PG_DATA || path.join('D:', 'pg-smoke', 'data');
+const pgSandboxAvailable = () => {
+  const exe = ['postgres.exe', 'postgres'].some((n) => fs.existsSync(path.join(PG_BIN_DIR, n)));
+  return exe && fs.existsSync(PG_DATA_DIR);
+};
+// 宿主 5432 是否已在听：由 depStatus 在探测时写，路由时读（避免重复探测造成行为不一致）。
+let pgLivePortOpen = false;
+
 const probePort = (port, timeout = 800) =>
   new Promise((resolve) => {
     const s = net.connect(port, '127.0.0.1');
@@ -166,7 +188,13 @@ async function depStatus(lab) {
       }
     } else {
       const pr = PROBES[d];
-      if (!(await probePort(pr.port))) missing.push(pr.label);
+      const live = await probePort(pr.port);
+      if (d === 'pg') pgLivePortOpen = live;
+      if (!live) {
+        // pg 允许自起 ⇒ 不算缺依赖（起停交给 run-with-pg.py / run-with-sandbox.py --with-pg）
+        if (d === 'pg' && pgSandboxAvailable()) continue;
+        missing.push(pr.label);
+      }
     }
   }
   return missing;
@@ -175,6 +203,8 @@ async function depStatus(lab) {
 // 判定该靶场是否改由隔离沙箱驱动：凡声明 sandbox 依赖者**一律**走沙箱，不看宿主 3306。
 // 理由见 depStatus 内注释（宿主 3306 的短暂可达会造成行为不确定，实测已踩）。
 const needsSandbox = (lab) => lab.deps.includes('sandbox');
+// 需要 PG 且宿主没有现成 PG ⇒ 由 runner 自己起一个（不依赖"有没有人手动起过"）
+const needsLocalPg = (lab) => lab.deps.includes('pg') && !pgLivePortOpen && pgSandboxAvailable();
 
 // 单个靶场的墙钟上界。取值来自实测分布：本清单里最慢的是 redteam-lab ~91s，其余在秒级到
 // 几十秒 —— 5 分钟对"真在干活"的套件有 3 倍余量，对**挂死**则能在 CI 的 8 分钟步长内
@@ -197,34 +227,57 @@ const PY_CANDIDATES = [
   'python3',
 ].filter(Boolean);
 
+// [FIX 2026-10-09 D30] 判据不能用 spawnSync：本机 Git Bash 环境下 spawnSync 对**任何**
+// 可执行文件都可能抛 `EBUSY`（同族问题在服务端测试里也见过，要靠 cp-pipe-shim 才跑得动），
+// 于是明明存在的 python 被判"不可用" ⇒ 所有沙箱类靶场被误标 SKIP（oob-real-lab 实测 0.0s 跳过），
+// 而 runOne 里真正 spawn 同一个 python 却是好的（pg-osshell 用它跑通了 17.6s）。
+// 判据换异步 spawn：同一次"真执行 -c print(1)"的语义不变，只是不再被同步 pipe 的 EBUSY 带走。
 function pythonWorks(cmd) {
-  try {
-    const r = spawnSync(cmd, ['-c', 'print(1)'], { encoding: 'utf8', timeout: 20000 });
-    return r.status === 0 && String(r.stdout || '').trim() === '1';
-  } catch {
-    return false;
-  }
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (v) => { if (!done) { done = true; resolve(v); } };
+    let p;
+    try {
+      p = spawn(cmd, ['-c', 'print(1)'], { stdio: ['ignore', 'pipe', 'pipe'] });
+    } catch {
+      return finish(false);
+    }
+    let out = '';
+    p.stdout.on('data', (d) => { out += d; });
+    p.stderr.on('data', () => { /* 判据只看 stdout，stderr 不参与 */ });
+    p.on('error', () => finish(false));
+    p.on('exit', (code) => finish(code === 0 && out.trim() === '1'));
+    setTimeout(() => { try { p.kill('SIGKILL'); } catch { /* 已退出 */ } finish(false); }, 20000).unref();
+  });
 }
 
 let PYTHON_BIN; // undefined = 未探测；null = 全部候选都不可用
-function resolvePython() {
+async function resolvePython() {
   if (PYTHON_BIN === undefined) {
-    PYTHON_BIN = PY_CANDIDATES.find(pythonWorks) || null;
+    PYTHON_BIN = null;
+    for (const c of PY_CANDIDATES) {
+      if (await pythonWorks(c)) { PYTHON_BIN = c; break; }
+    }
     if (!PYTHON_BIN) console.log(`[run-all] ⚠ 找不到可执行的 python（已尝试：${PY_CANDIDATES.join(' | ')}）`);
     else console.log(`[run-all] python = ${PYTHON_BIN}`);
   }
   return PYTHON_BIN;
 }
 
-const runOne = (lab, useSandbox = false) =>
-  new Promise((resolve) => {
+const runOne = async (lab, useSandbox = false, useLocalPg = false) => {
+  const py = await resolvePython();
+  return new Promise((resolve) => {
     const t0 = Date.now();
     // useSandbox：经 e2e/run-with-sandbox.py 包一层，由它在**同一进程**内
     // 起隔离 MySQL 沙箱 → 跑靶场 → 停沙箱（宿主会回收后台进程，故不能先起后用）。
-    const py = resolvePython();
-    const cmd = useSandbox ? py || process.env.PYTHON || 'python' : 'node';
-    const cmdArgs = useSandbox
-      ? [path.join(ROOT, 'e2e', 'run-with-sandbox.py'), lab.entry, ...(lab.args || [])]
+    // useLocalPg：同理起本机 PostgreSQL —— 只要 MySQL 就用 MySQL 那个 runner；
+    // 两者都要时用 `run-with-sandbox.py --with-pg`（两套引擎起在同一个进程里，一起收摊）。
+    const viaPy = useSandbox || useLocalPg;
+    const cmd = viaPy ? py || process.env.PYTHON || 'python' : 'node';
+    const runner = useSandbox ? 'run-with-sandbox.py' : 'run-with-pg.py';
+    const preArgs = useSandbox && useLocalPg ? ['--with-pg'] : [];
+    const cmdArgs = viaPy
+      ? [path.join(ROOT, 'e2e', runner), ...preArgs, lab.entry, ...(lab.args || [])]
       : [lab.entry, ...(lab.args || [])];
     const p = spawn(cmd, cmdArgs, {
       cwd: ROOT,
@@ -247,12 +300,14 @@ const runOne = (lab, useSandbox = false) =>
       if (timeoutNote) out += timeoutNote;
       // 从输出里抓一眼关键字（各靶场格式不一，仅作提示，不作判定）
       const hint = out.split('\n').filter((l) => /done:|结论|误报|✅|❌|FAIL|PASS/i.test(l)).slice(-2).join(' | ').slice(0, 160);
-      // [P1-FIX 2026-09-14] 区分「通过」与「按设计跳过」：
-      // 部分套件（如 udf-lab 因 secure_file_priv=NULL）退出码为 0，输出里一行 [SKIP] 就结束了。
-      // 旧汇总把它算进「全部通过」—— 15/15 里其实只有 14 个真跑。数字比没有更误导。
-      const skipped = code === 0 && /\bSKIP\b/i.test(out);
+      // [P1-FIX 2026-09-14 → D29 收紧 2026-10-09] 区分「通过」与「按设计跳过」。
+      // 09-14 的原判据 `/\bSKIP\b/i.test(out)` 方向对但太粗：detection-runner 的汇总行
+      // 「19 PASS / 0 FAIL / 0 SKIP」里的 "0 SKIP" 也命中 ⇒ **跑了 19 条断言的套件被标成跳过**，
+      // 横幅还跟着说"本套件未执行任何断言"（假话）。判定交给 suiteVerdict.executedNothing：
+      // 有统计行按计数判，没统计行才退回"见 SKIP 且完全无 PASS"的保守形态。
+      const skipped = code === 0 && executedNothing(out);
       // [DIAG-FIX 2026-09-21] 保留**完整输出**（原先只留 3 行 tail 且没人打印，见下方失败分支）
-      resolve({ code, skipped, ms: Date.now() - t0, hint, sandbox: useSandbox, tail: out.split('\n').filter(Boolean).slice(-3).join('\n'), full: out });
+      resolve({ code, skipped, ms: Date.now() - t0, hint, sandbox: useSandbox, localPg: useLocalPg, tail: out.split('\n').filter(Boolean).slice(-3).join('\n'), full: out });
     };
     const hardTimer = setTimeout(() => {
       timeoutNote = `\n[TIMEOUT] ${lab.name} 超过 ${LAB_TIMEOUT_MS}ms 未完成，已由 run-all 强杀（下面是它截止时被收到的全部输出）\n`;
@@ -277,6 +332,7 @@ const runOne = (lab, useSandbox = false) =>
       finish(-1);
     });
   });
+};
 
 const argv = process.argv.slice(2);
 const listMode = argv.includes('--list');
@@ -318,16 +374,19 @@ console.log(`=== 开始运行 ${targets.length} 个靶场 ===`);
 const results = [];
 for (const t of targets) {
   const useSandbox = needsSandbox(t.lab);
-  process.stdout.write(`▶ ${t.lab.name}${useSandbox ? '（隔离沙箱）' : ''} ... `);
+  const useLocalPg = needsLocalPg(t.lab);
+  // D30：PG 侧同样由 python runner 托管（起→用→停），少 python 一样是环境缺项，同口径 SKIP。
+  const viaPy = useSandbox || useLocalPg;
+  process.stdout.write(`▶ ${t.lab.name}${useSandbox ? '（隔离沙箱）' : ''}${useLocalPg ? '（本机PG）' : ''} ... `);
   // 沙箱类靶场少的是 python 而不是产品能力 ⇒ 如实 SKIP + 原因（口径同 depStatus 的缺依赖），
   // 不能让环境故障冒充成靶场失败（0xC0000135 那类退出码尤其读不出根因）。
-  if (useSandbox && !resolvePython()) {
-    console.log('⏭ 跳过（无可执行的 python，隔离 MySQL 沙箱无法启动）');
+  if (viaPy && !(await resolvePython())) {
+    console.log('⏭ 跳过（无可执行的 python，隔离 MySQL 沙箱 / 本机 PG 无法起停）');
     results.push({ name: t.lab.name, code: 0, ms: 0, skipped: true, hint: '缺可执行的 python' });
     continue;
   }
   if (!t.ok) console.log(`(缺依赖: ${t.missing.join(', ')})`);
-  const r = await runOne(t.lab, useSandbox);
+  const r = await runOne(t.lab, useSandbox, useLocalPg);
   results.push({ name: t.lab.name, ...r });
   const verdict = r.code !== 0 ? `❌ 失败(code=${r.code})` : r.skipped ? '⏭ 跳过（按设计）' : '✅ 通过';
   console.log(`${verdict}  ${(r.ms / 1000).toFixed(1)}s  ${r.hint}`);
@@ -363,7 +422,7 @@ console.log('');
 console.log('=== 汇总 ===');
 for (const r of results) {
   const mark = r.code !== 0 ? '❌' : r.skipped ? '⏭' : '✅';
-  const tag = r.sandbox ? '  [隔离沙箱]' : '';
+  const tag = r.sandbox && r.localPg ? '  [隔离沙箱+本机PG]' : r.sandbox ? '  [隔离沙箱]' : r.localPg ? '  [本机PG]' : '';
   console.log(`${mark} ${r.name.padEnd(20)} ${(r.ms / 1000).toFixed(1)}s${r.skipped ? '  (跳过)' : ''}${tag}`);
 }
 const failed = results.filter((r) => r.code !== 0);

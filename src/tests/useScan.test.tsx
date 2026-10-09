@@ -219,7 +219,12 @@ describe('useScan · exportReport', () => {
 
 describe('wrapSqlmapReport 纯函数', () => {
   it('vulns 非空 → High；日志容错（非数组→空）；meta 目标回填', () => {
-    const r = wrapSqlmapReport('m1', { status: 'completed', vulns: [{ id: 1 }] }, { targetUrl: 'http://t/' });
+    // SqlmapVulnEntry 的真实形态是 {param, technique, raw}（types.ts）——
+    // 原先写的是 `{ id: 1 }`，那个键根本不存在，测试只是在数长度所以一直没红。
+    const r = wrapSqlmapReport('m1', {
+      status: 'completed',
+      vulns: [{ param: 'id', technique: 'AND boolean-based', raw: 'Parameter: id' }],
+    }, { targetUrl: 'http://t/' });
     expect(r.engine).toBe('sqlmap');
     expect(r.riskLevel).toBe('High');
     expect(r.target.baseUrl).toBe('http://t/');

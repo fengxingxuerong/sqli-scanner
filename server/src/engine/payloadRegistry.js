@@ -38,6 +38,8 @@ import registryData from './payloads/registry.json' with { type: 'json' };
 //   合并发生在这一处，下游（selectPayloads / 高危门 / boundary 排序 / schema 校验 / 指纹测试）
 //   看到的仍是**单一真源** PAYLOAD_REGISTRY，不需要知道磁盘上有两份文件。
 import versionedData from './payloads/registry.versioned.json' with { type: 'json' };
+// [D24 2026-10-09 扩展生态] 用户自定义条目的合并逻辑（纯函数，见该文件头的三条硬约束）
+import { mergeCustomEntries } from './payloads/customPayloads.js';
 
 // ============================================================================
 // [P0-FIX 2026-09-09] 高危（destructive）池投放策略 —— productionMode 硬门
@@ -111,6 +113,28 @@ function resolveDestructiveGate(args = {}) {
  *  note?:string}>} */
 export const PAYLOAD_REGISTRY = [...registryData, ...versionedData];
 
+// ==================== [D24 2026-10-09] 用户自定义条目的作用域 ====================
+// 与 destructivePolicyStore 同构（不用进程级可变全局）：自定义条目只在「一次扫描」的异步上下文
+// 里可见，REST 侧并发扫描互不污染；不传 --payload-file 时 store 为空 ⇒ activeRegistry() 直接
+// 返回 PAYLOAD_REGISTRY **同一个引用**（逐位零变化，指纹测试与 facts 数字不受影响）。
+const customPayloadStore = new AsyncLocalStorage();
+
+/** 当前生效的注册表：内置 + （本次扫描上下文内的）自定义条目。 */
+function activeRegistry() {
+  const custom = customPayloadStore.getStore();
+  if (!custom || custom.length === 0) return PAYLOAD_REGISTRY;
+  return /** @type {typeof PAYLOAD_REGISTRY} */ (mergeCustomEntries(PAYLOAD_REGISTRY, custom));
+}
+
+/**
+ * 在「追加了自定义条目」的上下文中执行 fn（CLI --payload-file 的接线入口）。
+ * @param {Array<Record<string, any>>} entries 已校验的自定义条目（空数组 = 不注入）
+ * @param {() => any} fn
+ */
+export function runWithCustomPayloads(entries, fn) {
+  return customPayloadStore.run(entries || [], fn);
+}
+
 // id 唯一性自检（声明期校验，防止手写重复 id 静默吞掉条目）
 {
   const seen = new Set();
@@ -151,7 +175,7 @@ export function selectPayloads({ dbms, technique, level, risk, clause, boundary,
     ? String(testSkip).split(',').map((s) => s.trim().toLowerCase()).filter(Boolean)
     : [];
 
-  return PAYLOAD_REGISTRY.filter((p) => {
+  return activeRegistry().filter((p) => {
     if (dbms && !p.dbms.includes(dbms)) return false;
     if (technique && p.technique !== technique) return false;
     if (level && p.level > level) return false;
@@ -195,7 +219,7 @@ export function countDestructiveCandidates({ level, risk, testFilter, testSkip }
     ? String(testSkip).split(',').map((s) => s.trim().toLowerCase()).filter(Boolean)
     : [];
   let n = 0;
-  for (const p of PAYLOAD_REGISTRY) {
+  for (const p of activeRegistry()) {
     if (!isDestructivePayload(p)) continue;
     if (level && p.level > level) continue;
     if (risk && p.risk > risk) continue;
@@ -251,7 +275,7 @@ export function orderEntriesByBoundary(entries, boundary) {
  * @returns {typeof PAYLOAD_REGISTRY}
  */
 export function listRegistry() {
-  return PAYLOAD_REGISTRY;
+  return activeRegistry();
 }
 
 /**

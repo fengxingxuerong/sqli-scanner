@@ -308,7 +308,7 @@ async function callLLM(cfg, systemPrompt, userPrompt, timeoutMs = 60000) {
   } catch (e) {
     if (e.name === 'AbortError') {
       markKeyFail(cfg.keyIdx, false);
-      throw new Error(`角色 ${cfg.role} 请求超时（${timeoutMs / 1000}s）`);
+      throw new Error(`角色 ${cfg.role} 请求超时（${timeoutMs / 1000}s）`, { cause: e });
     }
     throw e;
   } finally {

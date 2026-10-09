@@ -19,6 +19,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { SCAN_CONFIG_KEYS, SCAN_CONFIG_VALUE_TYPES, DEFAULT_CONFIG } from '../shared/constants';
 import { buildStartConfig, buildResumeConfig } from '../shared/scanConfig';
+import type { ScanConfig } from '../shared/types';
 
 // [audit-FIX 2026-09-13] 本套件只读源码文本，不需要 DOM。原默认 jsdom 环境下
 // node:url/node:path 的函数导出在本机 Node 24 上被覆盖为 undefined（fileURLToPath/
@@ -100,7 +101,7 @@ describe('配置契约：面板 → 请求体 → 后端白名单', () => {
     // matchString/notString 必须是字符串语义：历史上被当布尔用过，引擎于是按「页面含 'true'」判真假
     expect(types.matchString).toBe('string');
     expect(types.notString).toBe('string');
-    expect(typeof (DEFAULT_CONFIG as Record<string, unknown>).matchString !== 'boolean').toBe(true);
+    expect(typeof DEFAULT_CONFIG.matchString !== 'boolean').toBe(true);
     // [2026-09-26] 判定锚点族的类型必须与后端 guard 的解析口径一致，否则「面板能填、引擎读不到」：
     //   matchTitle/crawlForms → 严格布尔（引擎 `=== true` 才启用）；
     //   matchCode            → 对象 { true, false }（guard 走 clampInt(mc.true/false, 100-599)）；
@@ -114,60 +115,70 @@ describe('配置契约：面板 → 请求体 → 后端白名单', () => {
   });
 
   it('buildStartConfig：DEFAULT_CONFIG 里已定义的登记键全部出现在请求体', () => {
-    const body = buildStartConfig(DEFAULT_CONFIG as never);
+    // DEFAULT_CONFIG 本来就是 ScanConfig ⇒ 不需要 cast（原先的 `as never` 把
+    // "参数以后改成别的类型"这件事一起关掉了）
+    const body = buildStartConfig(DEFAULT_CONFIG);
     const lost = SCAN_CONFIG_KEYS.filter(
-      (k) => (DEFAULT_CONFIG as Record<string, unknown>)[k] !== undefined && body[k] === undefined
+      // 登记表键集是字符串集合，ScanConfig 没有索引签名 ⇒ 必须经 unknown 中转做动态取值
+      (k) => (DEFAULT_CONFIG as unknown as Record<string, unknown>)[k] !== undefined && body[k] === undefined
     );
     expect(lost, `这些键在默认配置下有值却没进请求体：${lost.join(', ')}`).toEqual([]);
   });
 
   it('buildStartConfig：前端未建模的键原样透传（历史回显/CLI 配置不被吃掉）', () => {
-    const body = buildStartConfig({ delay: 3, reqRate: 5, blindRobust: true } as never);
+    // @ts-expect-error 这三个键前端类型里没有，"原样透传"就是本条用例的被测语义
+    const body = buildStartConfig({ delay: 3, reqRate: 5, blindRobust: true });
     expect(body.delay).toBe(3);
     expect(body.reqRate).toBe(5);
     expect(body.blindRobust).toBe(true);
   });
 
   it('buildStartConfig：布尔的 false 必须照发，空串必须省略', () => {
-    const body = buildStartConfig({ prefilter: false, matchString: '   ', retry: 0 } as never);
-    expect(body.prefilter).toBe(false, '「关掉预筛」是一个动作，false 不发就等于没发');
-    expect('matchString' in body).toBe(false, '空串锚点应省略（后端 clampStr 同义），否则会污染判定');
-    expect(body.retry).toBe(0, '0 是合法值，不能被当成未配置丢掉');
+    // 入参全部合法 ⇒ 不写 cast（原先 `as never` 让这条用例对签名变化完全盲）
+    const body = buildStartConfig({ prefilter: false, matchString: '   ', retry: 0 });
+    expect(body.prefilter, '「关掉预筛」是一个动作，false 不发就等于没发').toBe(false);
+    expect('matchString' in body, '空串锚点应省略（后端 clampStr 同义），否则会污染判定').toBe(false);
+    expect(body.retry, '0 是合法值，不能被当成未配置丢掉').toBe(0);
   });
 
   it('buildStartConfig：matchCode 以对象形态发（后端 guard 按 { true, false } 逐侧 clamp）', () => {
-    const body = buildStartConfig({ matchCode: { true: 200, false: 500 } } as never);
+    const body = buildStartConfig({ matchCode: { true: 200, false: 500 } });
     expect(body.matchCode).toEqual({ true: 200, false: 500 });
     // 两侧都清空 = 不启用 → 整个键必须省略（不能发空对象让后端拿到一个「什么都没配」的锚点）
-    const off = buildStartConfig({ matchCode: undefined } as never);
+    const off = buildStartConfig({ matchCode: undefined });
     expect('matchCode' in off).toBe(false);
   });
 
   it('buildResumeConfig：续跑必须带上 scope（授权范围不能在最常见路径上被丢掉）', () => {
+    // 快照里带前端未建模的 delay 键 —— 续跑必须把它保住。
+    // 这里**不需要**任何 cast：`saved` 是先赋值再传参，多余属性检查只作用于"字面量直接进
+    // 形参"那种写法（第 126 行那条就必须要指令）。原先的 `as never` 属于照着别处抄的多余关闭。
     const saved = {
       scope: ['app.example.com'],
       delay: 2,
       sessionDefault: true,
       concurrency: 8,
-    } as never;
+    };
     const cfg = buildResumeConfig(saved);
     expect(cfg.scope).toEqual(['app.example.com']);
-    expect(cfg.delay).toBe(2, '续跑丢限速 = 第二轮比第一轮更凶');
+    expect(cfg.delay, '续跑丢限速 = 第二轮比第一轮更凶').toBe(2);
     expect(cfg.sessionFile).toBe('sqli-session-latest.json');
     // 快照里没有 scope 时不得凭空造一个「看起来受限制」的值
-    expect('scope' in buildResumeConfig({ concurrency: 4 } as never)).toBe(false);
+    expect('scope' in buildResumeConfig({ concurrency: 4 })).toBe(false);
   });
 
   // [2026-09-28 分支收口] normalizeScanValue 的类型归一口径（buildStartConfig 经它逐键归一）
   describe('normalizeScanValue（经 buildStartConfig 观测）类型归一分支', () => {
-    const bodyOf = (cfg: Record<string, unknown>) => buildStartConfig(cfg as never);
+    // 这一族的语义就是"值可以是任意类型"，所以入参必须绕开类型：但绕开要**指名目标类型**
+    // （`as never` 连"参数是不是 Partial<ScanConfig>"都一起关掉，签名再变也不会报）
+    const bodyOf = (cfg: Record<string, unknown>) => buildStartConfig(cfg as unknown as Partial<ScanConfig>);
 
     it('boolean：字符串 "true"/"false" 与 1/0 归一；垃圾值丢弃', () => {
       expect(bodyOf({ matchTitle: 'true' }).matchTitle).toBe(true);
       expect(bodyOf({ matchTitle: 'false' }).matchTitle).toBe(false);
       expect(bodyOf({ matchTitle: 1 }).matchTitle).toBe(true);
       expect(bodyOf({ matchTitle: 0 }).matchTitle).toBe(false);
-      expect('matchTitle' in bodyOf({ matchTitle: 'yes' })).toBe(false, '非布尔字面量的垃圾值必须整个丢弃');
+      expect('matchTitle' in bodyOf({ matchTitle: 'yes' }), '非布尔字面量的垃圾值必须整个丢弃').toBe(false);
     });
 
     it('number：数字字符串归一为数字；非有限数丢弃', () => {
@@ -326,10 +337,10 @@ const KNOWN_MISSING_UI_KEYS = new Set([...CAPABILITY_GAP_KEYS, ...TUNING_NO_UI_K
     const actualUncovered = BACKEND_KNOWN_CFG_KEYS.filter(
       (k) => !(SCAN_CONFIG_KEYS as readonly string[]).includes(k)
     );
-    expect(actualUncovered.length).toBe(
-      KNOWN_MISSING_UI_KEYS.size,
+    expect(
+      actualUncovered.length,
       '实际缺口数与登记表条目数不一致 —— 有键接上 UI 或后端删了键，请同步本表'
-    );
+    ).toBe(KNOWN_MISSING_UI_KEYS.size);
   });
 
   // ⑧ [2026-09-29 分类治理] 能力缺失类**只减不增**：

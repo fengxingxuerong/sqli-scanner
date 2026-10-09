@@ -34,7 +34,9 @@ export const tauriBridge = {
     if (!tauriAvailable) return null;
     try {
       const { invoke } = await import('@tauri-apps/api/core');
-      const info = await (invoke as any)('get_engine_info');
+      // invoke 的默认返回类型是 {} —— 原先靠 `as any` 抹平，改成显式泛型：
+      // Rust 侧 get_engine_info 的返回形态在这里被写进类型，改壳不改这里就会编译不过。
+      const info = await invoke<{ port?: number; token?: string } | null>('get_engine_info');
       if (info && typeof info.port === 'number') {
         return { port: info.port, token: String(info.token || '') };
       }
@@ -68,14 +70,19 @@ export const tauriBridge = {
       return;
     }
     // 桌面版：选择路径并写入
-    // 使用变量形式的动态导入，避免 Web 构建时解析未安装的 Tauri 插件模块
-    const dialogSpec = '@tauri-apps/plugin-dialog';
-    const dialog = await import(dialogSpec);
-    const path = await (dialog as any).save({ defaultPath: name });
+    // ⚠️ 这里必须用**字面量**动态导入：以前写成变量形式（`const spec = '@tauri-apps/…'`）
+    //    是为了绕开"插件包没装、Web 构建解析不了"，代价有三层，全是静默的：
+    //    ① TS 拿不到模块类型 ⇒ 只能 `(dialog as any)`，插件改签名也不会报；
+    //    ② Vite 不静态分析 ⇒ 产物里留下运行时裸 import("@tauri-apps/plugin-dialog")，
+    //       桌面壳里按 origin 解析 ⇒ 导出/导入两条功能**发货即坏**（2026-10-09 实测取证）；
+    //    ③ 依赖表里没有这两个包，任何人装依赖都不会把它们带进来。
+    //    现在包已入 dependencies ⇒ 用字面量导入，类型与打包都恢复正常；
+    //    Web 侧靠上面的 `if (!tauriAvailable)` 提前 return，这个 chunk 永不被加载。
+    const dialog = await import('@tauri-apps/plugin-dialog');
+    const path = await dialog.save({ defaultPath: name });
     if (path) {
-      const fsSpec = '@tauri-apps/plugin-fs';
-      const fs = await import(fsSpec);
-      await (fs as any).writeTextFile(path, content);
+      const fs = await import('@tauri-apps/plugin-fs');
+      await fs.writeTextFile(path, content);
     }
   },
 
@@ -99,17 +106,15 @@ export const tauriBridge = {
         input.click();
       });
     }
-    // 桌面版：dialog 选文件 + fs 读文本
-    const dialogSpec = '@tauri-apps/plugin-dialog';
-    const dialog = await import(dialogSpec);
-    const path = await (dialog as any).open({
+    // 桌面版：dialog 选文件 + fs 读文本（同上：字面量导入，不再用 as any 蒙住签名）
+    const dialog = await import('@tauri-apps/plugin-dialog');
+    const path = await dialog.open({
       multiple: false,
       filters: [{ name: 'HTTP Request', extensions: ['txt', 'req', 'http'] }],
     });
     if (typeof path !== 'string') return null;
-    const fsSpec = '@tauri-apps/plugin-fs';
-    const fs = await import(fsSpec);
-    return await (fs as any).readTextFile(path);
+    const fs = await import('@tauri-apps/plugin-fs');
+    return await fs.readTextFile(path);
   },
 };
 

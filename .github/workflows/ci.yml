@@ -43,9 +43,20 @@ jobs:
       # 于是「本地 npm run typecheck」与「CI 的类型门禁」是两份命令：本地那条只覆盖前端，
       # 服务端的 36.7k 行 JS 在开发机上从未被检查 —— 一处 TS2339（新加 {BD} 占位符没同步
       # clampTimeVars 的 JSDoc 返回类型）就这么进了提交。现在两侧跑的是同一份定义：
-      #   typecheck = typecheck:frontend && typecheck:server
+      #   typecheck = typecheck:frontend && typecheck:tests && typecheck:server
       - run: npm run typecheck:frontend
         name: TypeScript check (frontend)
+      # [D26 2026-10-09] 前端测试文件此前**完全不在任何静态检查范围内**：
+      # tsconfig.json 的 include 是 src、exclude 是 src/tests ⇒ 64 个测试文件 0 类型检查
+      # （vitest 走 esbuild 转译，不做类型判定，所以类型错了也照样跑）。
+      # 一打开就暴 45 处：12 处 `expect(x).toBe(v,'说明')` 的说明文字被 vitest 静默丢弃、
+      # ScanWizard 夹具缺组件新增的必填 props（onPause/onResume）还多传了两个早已不存在的 prop、
+      # ProgressView 用引擎根本不会发的事件类型 ('detect') 与 `points:[{},{},{}]` 喂组件、
+      # sqlmap 夹具写了 SqlmapVulnEntry 上没有的 `id` ……详见 CHANGELOG D26。
+      # 单独一份 tsconfig.tests.json 而不是改主配置：主配置服务 `npm run build`，
+      # 不该让"测试文件的类型问题"挡住"发布应用"。
+      - run: npm run typecheck:tests
+        name: TypeScript check (frontend tests)
       # [P1-ADD 2026-09-13] 服务端此前**零类型覆盖**：tsconfig 的 include 只有前端 src，
       # 几万行 server JS 无任何静态检查，重构没有安全网。本次建立 server/tsconfig.json
       # （allowJs + checkJs + noEmit）并把基线 110 个错误全部清零后接入门禁。

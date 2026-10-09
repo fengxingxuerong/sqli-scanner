@@ -56,6 +56,27 @@ def _find_node() -> str:
     return str(cands[0]) if cands else "node"
 
 
+def _load_pg_runner():
+    """按路径加载 e2e/run-with-pg.py（文件名带连字符，不能 import）。
+    那个模块顶层只有常量与函数定义（main 由 __main__ 守卫），exec_module 不会启动 PG。"""
+    import importlib.util
+
+    p = HERE / "run-with-pg.py"
+    spec = importlib.util.spec_from_file_location("run_with_pg", p)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+PG_ENV_KEYS = ("PGHOST", "PGPORT", "PGUSER", "PGDATABASE", "PGPASSWORD", "PG_BASE_JSON")
+
+
+def with_pg_env(mod, port: int) -> dict:
+    """只取 PG 那几个键 —— 整份 env 拿来会把我们注入的 MYSQL_* 冲掉。"""
+    full = mod._pg_env(port)
+    return {k: full[k] for k in PG_ENV_KEYS if k in full}
+
+
 def sandbox_env(inst: dict) -> dict:
     """把沙箱连接信息注入环境变量，供靶场读取。"""
     env = dict(os.environ)
@@ -86,6 +107,12 @@ def main() -> int:
     ap.add_argument("--list", action="store_true", help="列出推荐用沙箱跑的靶场")
     ap.add_argument("--drop-dir", action="store_true", help="退出时销毁沙箱 datadir")
     ap.add_argument("--extra-arg", action="append", default=[], help="透传给靶场的额外参数")
+    ap.add_argument(
+        "--with-pg",
+        action="store_true",
+        help="同时起本机 PostgreSQL（复用 e2e/run-with-pg.py 的起→真就绪探测→停），"
+        "给「PG + 隔离 MySQL 沙箱」双依赖的靶场用（oob-real-lab / concurrent-isolation）",
+    )
     args = ap.parse_args()
 
     if args.list:
@@ -109,11 +136,39 @@ def main() -> int:
     with mysql_sandbox.launch(keep_dir=not args.drop_dir) as inst:
         print(f"[sandbox-run] 沙箱就绪：{inst['host']}:{inst['port']} "
               f"user={inst['user']} db=sqli_lab")
-        cmd = [node, str(entry_path), *args.extra_arg]
-        proc = subprocess.run(cmd, env=sandbox_env(inst),
-                              cwd=str(PROJECT), text=True)
-        print(f"[sandbox-run] 退出码 = {proc.returncode}")
-        rc = proc.returncode
+
+        # PG 侧：起不来就**直接失败**，不带病继续 —— 否则靶场会在"缺 PG"的状态下报错，
+        # 那会被读成产品缺陷（本仓 §S 的教训：环境问题记成 FAIL 与反过来，两种都要防）。
+        pg = None
+        pg_proc = None
+        env = sandbox_env(inst)
+        if args.with_pg:
+            pg = _load_pg_runner()
+            probe_js = pg._materialize_probe()
+            pg_proc = pg.start_pg(PROJECT / "logs" / "pg-composed.log", probe_js)
+            if pg_proc is None:
+                print(
+                    "[sandbox-run] --with-pg 但 PostgreSQL 没起来 ⇒ 本轮不跑"
+                    "（缺的是环境，不是被测代码；日志见 logs/pg-composed.log）",
+                    file=sys.stderr,
+                )
+                return 2
+            if not pg.ensure_database(pg.PG_PORT, pg.PG_DB):
+                print("[sandbox-run] --with-pg 但备库失败 ⇒ 本轮不跑", file=sys.stderr)
+                pg.stop_pg(pg_proc)
+                return 2
+            env.update(with_pg_env(pg, pg.PG_PORT))
+            print(f"[sandbox-run] PostgreSQL 就绪：127.0.0.1:{pg.PG_PORT} db={pg.PG_DB}")
+
+        try:
+            cmd = [node, str(entry_path), *args.extra_arg]
+            proc = subprocess.run(cmd, env=env,
+                                  cwd=str(PROJECT), text=True)
+            print(f"[sandbox-run] 退出码 = {proc.returncode}")
+            rc = proc.returncode
+        finally:
+            if pg is not None and pg_proc is not None:
+                pg.stop_pg(pg_proc)
     print("[sandbox-run] 沙箱实例已停止")
     return rc
 

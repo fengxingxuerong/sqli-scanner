@@ -151,6 +151,9 @@ export function parseArgs(argv) {
     // [对标 sqlmap --param-del] 自定义参数分隔符（默认 &，用于 a=1;b=2 这类非标准站点）
     else if (a === '--param-del') args.paramDel = next();
     else if (a === '--tamper') args.tamper = next();
+    // [D24 2026-10-09 扩展生态] 追加自定义检测条目（JSON 文件，与 registry.json 同 schema）。
+    // 只追加不覆盖；加载/校验失败一律硬失败（不静默忽略，否则用户以为自定义生效了）。
+    else if (a === '--payload-file') args.payloadFile = next();
     else if (a === '--proxy') args.proxy = next();
     else if (a === '--scope') args.scope = next();
     else if (a === '--insecure') args.insecureTls = true;

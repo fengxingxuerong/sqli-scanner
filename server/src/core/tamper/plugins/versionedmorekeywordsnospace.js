@@ -13,6 +13,11 @@ export const versionedmorekeywordsnospace = {
       input: '1 UNION ALL SELECT NULL, NULL, CONCAT(CHAR(58,122,114,115,58),IFNULL(CAST(CURRENT_USER() AS CHAR),CHAR(32)),CHAR(58,115,114,121,58))#',
       output: '1/*!UNION*//*!ALL*//*!SELECT*//*!NULL*/,/*!NULL*/,/*!CONCAT*/(/*!CHAR*/(58,122,114,115,58),/*!IFNULL*/(CAST(/*!CURRENT_USER*/()/*!AS*//*!CHAR*/),/*!CHAR*/(32)),/*!CHAR*/(58,115,114,121,58))#',
     },
+    {
+      // 句尾边界回归（2026-10-09）：关键词落在 payload 最后一个字符时也必须被包裹
+      input: "1' UNION ALL SELECT USER",
+      output: "1'/*!UNION*//*!ALL*//*!SELECT*//*!USER*/",
+    },
   ],
   dbms: ['MySQL'], // [P1-FIX] 方言限定：异构库下无效，运行时告警
   /**
@@ -21,7 +26,9 @@ export const versionedmorekeywordsnospace = {
    */
   transform(payload) {
     const out = String(payload ?? '').replace(
-      /(?:^|(?<=\W))([A-Za-z_]+)(?=\W|\Z)/g,
+      // 上游 Python 原文写 `\Z`（串尾），JS 里 `\Z` 是**字面量 Z** ⇒ 句尾关键词永不加前缀。
+      // 边界要的是串尾，JS 对应 `$`。
+      /(?:^|(?<=\W))([A-Za-z_]+)(?=\W|$)/g,
       (word) => {
         const up = word.toUpperCase();
         return (SQL92_KEYWORDS.has(up) && !IGNORE_SPACE_AFFECTED_KEYWORDS.has(up)) ? `/*!${word}*/` : word;
