@@ -21,6 +21,8 @@
 // ============================================================================
 import { buildInjectionRequest } from '../../engine/injection.js';
 import { logger } from '../logger.js';
+// [D38] 语义索引（手工精标 + 机械校验）：对症模式的 applicablePattern，不按插件名猜
+import { CORE_SEMANTICS } from './bypass/semantics.js';
 
 const BLOCKED_STATUSES = new Set([403, 406, 429, 501, 503]);
 
@@ -204,18 +206,58 @@ export async function profileBlockedTokens({
  * @param {string[]} blockedTokens profileBlockedTokens 的输出
  * @returns {Array<{vendor: string, plugins: string[]}>} 重排后的新数组（不改原数组）
  */
+// [D38 2026-10-11] 拦截模式 → 对症性 tie-break。
+// 背景：`hit`（覆盖了多少个被拦 token）是个**计数**，它分不出"对症"与"沾边"。
+// 真机反例（waf403，画像 [comment, and, or, union, select, sleep]）：
+//   · `unionvaluesrow+dash2hash`（covers union/select）hit=2，
+//   · `symboliclogical`（covers and/or）hit=2，
+//   两者同分 ⇒ 稳定排序让**原序在前**的 unionvaluesrow 系占住 `slots=2` 的两个名额，
+//   而真正对症（本点缺的是 boolean 通道要的 and/or 等价替换）的 symboliclogical 排在第 3 ⇒
+//   结构性进不了验证名单 ⇒ waf403 拿不到 boolean（D29 三轮一致的确定性红）。
+// 判据：被拦 token 里**关键字类**占多数 ⇒ 判定为"关键词级黑名单"，
+// 这时 `applicablePattern === 'keyword-blacklist'` 的链在同分下优先。
+// 代价：**零额外请求**（只改同分时的次序，不动 MAX_CHAINS 预算）。
+const KEYWORD_TOKENS = new Set(['and', 'or', 'union', 'select', 'sleep']);
+
+/** 由逐词画像判定拦截模式（拿不准就返回 null ⇒ 不做对症加权） */
+export function blockedPatternOf(blockedTokens) {
+  if (!Array.isArray(blockedTokens) || blockedTokens.length === 0) return null;
+  let kw = 0;
+  let other = 0;
+  for (const t of blockedTokens) (KEYWORD_TOKENS.has(t) ? (kw += 1) : (other += 1));
+  return kw > 0 && kw >= other ? 'keyword-blacklist' : null;
+}
+
 export function rankChainsByProfile(chains, blockedTokens) {
   const list = Array.isArray(chains) ? chains.filter((c) => c && Array.isArray(c.plugins) && c.plugins.length) : [];
   if (!Array.isArray(blockedTokens) || blockedTokens.length === 0 || list.length === 0) return list.slice();
   const set = new Set(blockedTokens);
+  const pattern = blockedPatternOf(blockedTokens);
   return list
     .map((c, idx) => {
       const covered = coveredTokens(c.plugins);
+      // 关键词级黑名单模式下**只数关键字**：否则"顺带覆盖了 comment 的链"会靠杂项拿到高分
+      // （实测 `unionvaluesrow+dash2hash` = union/select/comment ⇒ hit 3，压过 hit 2 的
+      //  symboliclogical）⇒ 对症性 tie-break 永远轮不到触发。
+      //
+      // 同时：整串编码链（eliminatesAll）的关键字覆盖**一律不计分**。
+      // 它让明文"消失"靠的是把整串转成编码态，语义是否还在取决于**服务端会不会再解一次码**；
+      // 只解一次的目标拿到 `%61%6e%64` 这类碎片 ⇒ error 有信号而 boolean 物理不可达
+      // （waf403 真机：它探针 14ms 放行，却被选中重跑 ⇒ 只有 error）。
+      // 不给它折价时它 hits 满分、稳居第 0 ⇒ 第一条被验证也第一条放行 ⇒ 永远赢。
+      const discounted = c.plugins.some((p) => CORE_SEMANTICS[p]?.eliminatesAll === true);
+      const scored = pattern === 'keyword-blacklist'
+        ? (discounted ? [] : [...set].filter((t) => KEYWORD_TOKENS.has(t)))
+        : [...set];
       let hit = 0;
-      for (const t of set) if (covered.has(t)) hit++;
-      return { c, idx, hit };
+      for (const t of scored) if (covered.has(t)) hit++;
+      const fit = pattern
+        ? (c.plugins.some((p) => CORE_SEMANTICS[p]?.applicablePattern === pattern) ? 1 : 0)
+        : 0;
+      return { c, idx, hit, fit };
     })
-    .sort((a, b) => (b.hit - a.hit) || (a.idx - b.idx)) // 命中多者优先；同分按原序（稳定）
+    // 命中多者优先 → **同分则对症优先** → 仍同分按原序（稳定）
+    .sort((a, b) => (b.hit - a.hit) || (b.fit - a.fit) || (a.idx - b.idx))
     .map((x) => x.c);
 }
 

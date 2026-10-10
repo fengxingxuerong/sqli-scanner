@@ -4,6 +4,68 @@
 
 ## [Unreleased]
 
+### 2026-10-11 批次 D38 · 修掉 `pentest-lab waf403` 的确定性红：选链不该只问「能不能过 WAF」
+
+**一句话**：这条红从 D29 起三轮一致。真机上 `boolean` **是可达的**（显式指定 `symboliclogical`
+842ms 就拿得到），问题是按画像排序时，最能"过 WAF"的那条链（`chardoubleencode`）稳居第一，
+而它过完之后**语义已经碎了**。本批把判据从"能不能过"改成"**过了还能不能用**"。
+
+#### ① 真机归因（不是推断，四配置对比 + 真实验证名单）
+
+`python e2e/run-with-sandbox.py e2e/pentest-lab/waf-diag.mjs`：
+
+| 配置 | 检出 | 耗时 |
+|---|---|---|
+| 默认 | `error` | 3083ms |
+| autoRetry + tamper 全开 | `-`（inconclusive） | 984ms |
+| **`tamper=symboliclogical`** | **`boolean`** ✅ | 842ms |
+
+真实验证名单（临时 DIAG，已还原）：
+`[unionvaluesrow+dash2hash, chardoubleencode, bypass:modsecurityversionedkeywords]` ——
+`symboliclogical` **根本不在里面**。两层原因：
+
+- **排序层**：`chardoubleencode` 因 D19 补的 `TAMPER_COVERS` 关键词全覆盖 ⇒ hit 满分稳居第 0
+  ⇒ 它是第一条被验证、也第一条放行的链 ⇒ 被选中重跑；而靶场只解一次码 ⇒ 落库是
+  `%61%6e%64` 碎片 ⇒ error 有信号，boolean 要的"真/假两侧同形且结果不同"物理拿不到。
+- **结构层**：`symboliclogical` 是静态链第 3 位，而 `slots = MAX_CHAINS - GENERATED_SLOTS = 2`
+  ⇒ 排序进前 2 才轮得到它。且同分的 `unionvaluesrow+dash2hash` 靠顺带覆盖 `comment`
+  拿到 hit 3 压过它（hit 2）。
+
+#### ② 修法：三处配合，且**零额外请求**（不动 MAX_CHAINS 预算）
+
+| 改动 | 作用 |
+|---|---|
+| 关键词模式识别（`blockedPatternOf`） | 被拦 token 里关键字占多数 ⇒ `keyword-blacklist`；拿不准返回 `null` ⇒ 不加权 |
+| 关键词模式下**只数关键字** | 否则"顺带覆盖 comment 的链"靠杂项拿高分 ⇒ 对症链永远同不了分 |
+| 整串编码链（`eliminatesAll`）的关键字覆盖**不计分** | 它让明文"消失"靠转编码态，语义取决于服务端会不会再解一次码 |
+| 同分时**对症优先**（新增 `applicablePattern`） | `symboliclogical` 标 `keyword-blacklist`（真机证据写进语义索引），同分即胜 |
+
+排序后：`symboliclogical` 第 1、`chardoubleencode` 退到第 2 —— **保底没丢**（D20 的"替换末条"
+仍把它留在预算内；真机前 3 = `symboliclogical | chardoubleencode | dash2hash+hexliterals`）。
+
+#### ③ 结果
+
+- `pentest-lab`：**12/12 PASS**（此前 11/11 + waf403 红），waf403 `检出=[boolean]` 577ms，
+  验链日志 `[symboliclogical] 探针放行（2ms）`。
+- CRS 保真门禁：**99.6%**（剔除已点名不支持项后），新增未点名分歧 **0**。
+- 单测：WAF 相关 **52/52**；`facts` 已 refresh（服务端 3298 用例）。
+
+#### ④ 一条既有断言按证据改了形态（不是为了让测试变绿）
+
+`waf.dbmsAwareChains.test.js` 的 D19 用例原断言"编码兜底链**必须排链首**"。改后它排第 2
+（仍在验证名额内）⇒ 该断言与本修复直接对立。**判据真正要保证的是"它在候选里、前面全拦时
+轮得到它"**（由 D20 显式保底保证），"排链首"反而是有害的：链首 = 第一条被验证并放行 = 被选中重跑。
+⇒ 断言改为"必须在真会被验证的前 2 条内"，理由与真机证据写在用例注释里。
+
+**缺陷注入 4/4 杀**：① 去掉"只数关键字 + 编码链折价" ⇒ 2 条红；② 只去掉折价 ⇒ 2 条红；
+③ 去掉对症 tie-break ⇒ 1 条红；④ 删掉语义索引的 `applicablePattern` ⇒ 1 条红。
+
+#### ⑤ 顺带确认（不是我打的）
+
+全量里另有两条红与本次改动无关，已回退到基线逐个确认：
+`d-class ⑲ waf-lab-v2 cross-env`（**基线就红**）、`extractor.timeBaseline` 慢目标用例
+（单独跑 3/3 绿 ⇒ 全量并发下负载敏感，flaky）。
+
 ### 2026-10-10 批次 D36 —— Bearer/Token 自动续期，以及靶场一跑就掉出来的三处「根本没接上」
 
 **一句话**：P0-2 的账本来只是"补一个续期调用"。真机靶场跑第一轮，抱出来的却是三条

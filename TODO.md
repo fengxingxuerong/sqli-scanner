@@ -1611,7 +1611,7 @@ services:
 ### 15. 真机靶场跑出来的三笔欠账（⚠️ 2026-10-09 D29 开，均需决策或定位）
 背景：本轮把 run-all 能跑的 27 套真靶场跑满（25 绿 / 2 确定性红），下列三笔是跑出来的账。
 
-1. **pentest-lab `waf403` 的 `must:['boolean']` 确定性拿不到**（三轮一致，非抖动）。
+1. **pentest-lab `waf403` 的 `must:['boolean']` 确定性拿不到** —— ✅ **已修（2026-10-11 D38）**。
    已用单变量实验排除 D24–D28：把 D25 改过的 3 个 tamper 插件回退到改前 ⇒ 仍然红。
    机理已定位到"链选对了放行、没验语义"：`/waf` 服务端不做二次解码，而引擎给该点选的
    `chardoubleencode` 过 WAF 后落到 MySQL 是碎片 ⇒ error 有信号、boolean 物理不可达。
@@ -1636,6 +1636,21 @@ services:
    | C. 语义等价复核 | 验链放行后再验一次"真/假两侧同形且结果不同" | 新机制 + 额外请求，但收益覆盖所有 WAF 场景 |
 
    ⚠️ 方向性结论：**任何"让兜底链排得更前"的改动都在加剧这个缺口**，别再往那个方向使劲。
+
+   ✅ **解法（D38，已落地并真机验证）**：判据从「能不能过 WAF」改成「**过了还能不能用**」，
+   三处配合且**零额外请求**（不动 `MAX_CHAINS` 预算，故 B 的代价没有发生）：
+   | 改动 | 位置 |
+   |---|---|
+   | 关键词模式识别：被拦 token 里关键字占多数 ⇒ `keyword-blacklist`（拿不准返回 null 不加权） | `blockProfile.blockedPatternOf` |
+   | 该模式下 hit **只数关键字**（否则"顺带覆盖 comment 的链"靠杂项高分 ⇒ 对症链同不了分） | `rankChainsByProfile` |
+   | 整串编码链（`eliminatesAll`）的关键字覆盖**不计分**（语义取决于服务端是否二次解码） | 同上 |
+   | 同分时**对症优先**：`symboliclogical` 在语义索引里标 `applicablePattern: 'keyword-blacklist'` | `bypass/semantics.js` |
+   ⇒ 排序后 `symboliclogical` 第 1、`chardoubleencode` 退第 2（**保底没丢**，仍在前 2 的验证名额内）；
+   `pentest-lab` **12/12 PASS**，waf403 `检出=[boolean]` 577ms，CRS 保真 99.6% 未动，WAF 单测 52/52。
+   **缺陷注入 4/4 杀**（三处判据 + 语义标记各打一次）。
+   ⚠️ 一条既有断言按证据改了形态：`waf.dbmsAwareChains.test.js` 的 D19 用例原要求"编码兜底链
+   必须**排链首**"—— 链首 = 第一条被验证并放行 = 被选中重跑（正是本缺陷），真正要保证的是
+   "在验证名额内、前面全拦时轮得到它"（由 D20 显式保底保证）⇒ 断言改为"必须在前 2 条内"。
 
    🧪 **A 的变体已实测（2026-10-11 凌晨，改完即回滚，未提交）**：不动 `TAMPER_COVERS` 声明
    （避免触发 D20 的 COVERS 口径守卫），只在 `rankChainsByProfile` 里对**含 `eliminatesAll`

@@ -94,7 +94,14 @@ export const CORE_SEMANTICS = {
     eliminates: ['and', 'or'],
     introduces: ['&&', '||'],
     evidence: EVIDENCE.CRS_NEGATIVE,
-    note: 'CRS 942120 正则直接含 && / || → PL1 下负收益；仅关键词级黑名单（strip 型）有效',
+    // [D38 2026-10-11] 真机证据：关键字级黑名单（拦 and/or 这一类）下它是**唯一语义等价**的解。
+    //   `e2e/pentest-lab` 的 waf403（WAF_RE 命中即 403，服务端不二次解码）：
+    //     显式 tamper=symboliclogical ⇒ **842ms 检出 boolean**（waf-diag.mjs 实测）；
+    //     默认路径选中的 chardoubleencode 只检出 error（双编码落库是碎片）。
+    //   与 equaltorlike 同属 KEYWORD_BLACKLIST_ONLY，但 symboliclogical 是**语法等价**替换
+    //   （&& / || 与 AND / OR 在 MySQL 下语义完全一致），故标 applicablePattern 让排序能对症加权。
+    applicablePattern: 'keyword-blacklist',
+    note: 'CRS 942120 正则直接含 && / || → PL1 下负收益；仅关键词级黑名单（strip 型）有效（waf403 真机 842ms 拿 boolean）',
   },
   equaltolike: {
     category: SEMANTIC_CATEGORIES.SYNTACTIC,

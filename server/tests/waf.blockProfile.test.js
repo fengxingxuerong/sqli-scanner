@@ -14,6 +14,7 @@ import {
   coveredTokens,
   rankChainsByProfile,
   profileBlockedTokens,
+  blockedPatternOf,
   TOKEN_PROBES,
 } from '../src/core/waf/blockProfile.js';
 
@@ -130,4 +131,59 @@ test('画像：缺 httpClient/target/point 时返回空并给 error（不抛）'
   assert.equal(r.probed, 0);
   assert.ok(r.error);
   assert.deepEqual(r.blocked, []);
+});
+
+// ── D38：关键词级黑名单下的对症排序（waf403 真回归）─────────────────────────
+// 真机归因（e2e/pentest-lab 的 waf403，`must:['boolean']` 确定性红三轮）：
+//   · 画像 [comment, and, or, union, select, sleep] —— 关键词占多数 ⇒ keyword-blacklist；
+//   · 改前排序：`chardoubleencode`（D19 补的 COVERS 全覆盖 ⇒ hit 5）稳居第 0，
+//     它是第一条被验证、也第一条放行的链 ⇒ 被选中重跑 ⇒ 双编码落库是碎片 ⇒ 只有 error；
+//   · 唯一能拿到 boolean 的是 `symboliclogical`（AND→&& / OR→||，语义等价，真机 842ms），
+//     但它 hit 2、`unionvaluesrow+dash2hash` 靠顺带覆盖 comment 拿到 hit 3 ⇒ 排在第 3，
+//     而 slots=2 ⇒ **结构性进不了验证名单**。
+// 三处配合才成立：① 关键词模式只数关键字；② 整串编码链的关键字覆盖不计分；③ 同分对症优先。
+const KW_BLOCKED = ['comment', 'and', 'or', 'union', 'select', 'sleep'];
+const REAL_POOL = () => [
+  { vendor: 'generic_block', plugins: ['unionvaluesrow', 'dash2hash'] },
+  { vendor: 'generic_block', plugins: ['unionvaluesrow', 'dash2hash', 'hexliterals'] },
+  { vendor: 'encoding_fallback', plugins: ['chardoubleencode'] },
+  { vendor: 'generic_block', plugins: ['dash2hash', 'hexliterals'] },
+  { vendor: 'generic_block', plugins: ['dash2hash'] },
+  { vendor: 'generic_block', plugins: ['symboliclogical'] },
+  { vendor: 'generic_block', plugins: ['hexliterals', 'dash2hash'] },
+];
+
+test('D38 拦截模式判定：关键字占多数才算 keyword-blacklist（拿不准返回 null，不做加权）', () => {
+  assert.equal(blockedPatternOf(KW_BLOCKED), 'keyword-blacklist');
+  assert.equal(blockedPatternOf(['comment', 'hash', 'space', 'and']), null, '标点为主 ⇒ 不判定');
+  assert.equal(blockedPatternOf([]), null);
+  assert.equal(blockedPatternOf(null), null);
+});
+
+test('★ D38：关键词黑名单下，语义等价的 symboliclogical 必须排到能被验证的位置', () => {
+  const names = rankChainsByProfile(REAL_POOL(), KW_BLOCKED).map((c) => c.plugins.join('+'));
+  assert.equal(names[0], 'symboliclogical', `第 1 条应是对症的算子替换链：${names}`);
+  // 它必须在前 slots（= 2）内，否则 chainVerify 根本不会验证它（waf403 就拿不到 boolean）
+  assert.ok(
+    names.slice(0, 2).includes('symboliclogical'),
+    `symboliclogical 掉出前 2 ⇒ 进不了验证名单：${names}`,
+  );
+});
+
+test('D38：整串编码链的关键字覆盖在关键词模式下不计分（不再稳居第 0）', () => {
+  const names = rankChainsByProfile(REAL_POOL(), KW_BLOCKED).map((c) => c.plugins.join('+'));
+  assert.ok(
+    names.indexOf('chardoubleencode') > names.indexOf('symboliclogical'),
+    `编码链靠"全覆盖"压过语义等价链 ⇒ waf403 会选中过得了 WAF 却语义破碎的链：${names}`,
+  );
+});
+
+test('D38 反向钉子：非关键词模式（标点/注释为主）行为与改动前一致', () => {
+  // 改动只在 pattern === 'keyword-blacklist' 时生效：那时 scored 仍是完整 set、fit 恒 0
+  // ⇒ 排序与改动前**逐字等价**。标点模式下覆盖最广的仍是整串编码链（quote/space）⇒ 它排第 1，
+  // 这正是改动前的既有行为（不能因为"编码链在关键词模式下被折价"就顺手改掉这里）。
+  const punctBlocked = ['comment', 'hash', 'space', 'quote'];
+  const names = rankChainsByProfile(REAL_POOL(), punctBlocked).map((c) => c.plugins.join('+'));
+  assert.equal(names[0], 'chardoubleencode', `标点模式下排序必须与改动前一致：${names}`);
+  assert.equal(blockedPatternOf(punctBlocked), null, '标点为主 ⇒ 不进入关键词模式');
 });
