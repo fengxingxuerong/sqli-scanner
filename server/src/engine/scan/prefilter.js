@@ -275,6 +275,10 @@ export async function skipStaticPoints(deps, ctxBase, target, points) {
  */
 export async function prefilterPoints(deps, ctxBase, target, points) {
   const cfg = ctxBase.config || {};
+  // [D35] 本次扫描是否启用了自定义请求变换（取可信度守卫上的同一个开关 —— 它就是
+  // 变换层回传判定的那个对象，两处永远同源，不会出现"一边认为开着、一边认为关着"）。
+  // 生效时"输入校验甄别"这条剪枝必须停用，理由见下方使用处的长注释。
+  const transformActive = ctxBase.validity?.transformActive === true;
   if (target.mode === 'direct' || !points || points.length === 0) return points || [];
   const httpClient = ctxBase.httpClient;
   // [P0 2026-09-09] knownPoint 直通点不参与预筛选（手工确认的可注入点不需要
@@ -368,7 +372,17 @@ export async function prefilterPoints(deps, ctxBase, target, points) {
           // 与良性非法值天然同构——若不限定状态码会把布尔差异型注入点误跳过（实测漏检）。
           // 200 空结果页不受影响（走正常信号判定保留完整检测），仅牺牲 200 自定义错误页
           // 目标的削减收益（保守换取零漏检）。
-          if (quoteStatus != null && quoteStatus >= 400) {
+          // [D35 实战 P0-1 补] **启用请求变换时不做这条甄别**。
+          // 理由不是性能而是语义：这条判据成立的前提是"良性非法值也被拒 ⇒ 那是输入白名单在报错"。
+          // 但在签名/加密型接口上，"改一个字段就连良性值一起被拒"恰恰是**签名没覆盖 / 密文没重算**
+          // 的定义，不是输入校验 —— 此时剪掉该点，就把本仓最贵的那类失效（静默假阴性）
+          // 又往上挪了一层：连攒够 transform_rejected 的样本都不会发生。
+          // 实测出处（e2e/signed-api-lab B2）：加密目标上 prefilter 在第 4 次同构 400 后剪点，
+          // 整轮只发 5 条请求 ⇒ injectRejects 恒 < 8 ⇒ 判据永不成立、verdict 落成
+          // "no_vulnerability_detected" —— 而 transform_rejected 的阈值本来就是照"注入请求全被拒"
+          // 设计的，两类目标（单点 + 早剪）叠加时那条判据是**不可达**的。
+          // 保守方向：多测一些点只花请求预算，少测则是把"没测"写成"没有洞"。
+          if (quoteStatus != null && quoteStatus >= 400 && transformActive !== true) {
             try {
               const benign = await probe(`${orig}zz9qx0`);
               if (benign && benign.res != null) {
@@ -433,6 +447,10 @@ export async function validationGuardedSkipPoints(deps, ctxBase, target, points)
   const budgetMs =
     Number.isFinite(cfg.prefilterBudgetMs) && cfg.prefilterBudgetMs > 0 ? cfg.prefilterBudgetMs : 1500;
   const skip = new Map();
+  // [D35] 同 prefilterPoints：启用自定义请求变换时，"输入校验甄别"这条剪枝必须停用。
+  // 实测出处 `e2e/signed-api-lab` B2 —— 加密目标上这里把唯一的注入点剪掉后整轮只发 5 条请求，
+  // transform_rejected 的样本（injectRejects≥8）根本攒不齐，结论照常落成"未检出"。
+  const transformActive = ctxBase.validity?.transformActive === true;
 
   await deps.mapPool(points, async (point) => {
     const orig = point.originalValue || '1';
@@ -461,6 +479,9 @@ export async function validationGuardedSkipPoints(deps, ctxBase, target, points)
       const quoteBody = norm(quote, `${orig}'`);
       // ② 单引号必须偏离基线（与基线同构说明连报错都没有，交给常规流程）
       if (prefilterSimilar(rawBody(base), baseStatus, quoteBody, quoteStatus)) return;
+      // [D35] 变换生效 ⇒ 到此为止，不再判"输入校验"（保守保留该点，走完整检测）。
+      // 放在发那三路探针**之前**：既然不打算据此剪点，就不该再花 3 条请求去凑判据。
+      if (transformActive) return;
       const rest = await Promise.all([
         probe(`${orig}zz9qx0`),
         probe(`${orig}' OR '1'='1`),

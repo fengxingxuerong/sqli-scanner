@@ -15,6 +15,16 @@ import crypto from 'node:crypto';
 export const KEY = 'lab-secret-key';
 
 /**
+ * 防重放接口（/api/tick）的密钥 —— 与业务接口分开，真实项目也是这么配的。
+ * 放在这里而不是脚本里：靶站要验、`tick-fresh`/`tick-stale` 两个脚本要产，
+ * 三处必须同一个值（同上一条纪律：算法与密钥只有一份定义）。
+ */
+export const TICK_KEY = 'lab-tick-key';
+
+/** /api/tick 的时钟窗（毫秒）：窗外一律拒 —— 抓包重放几秒钟就死就是这个词 */
+export const TICK_WINDOW_MS = 60000;
+
+/**
  * 规范串：参数按名字典序排列，拼 `k=v` 用 `&` 连接，末尾接密钥。
  * @param {Iterable<[string, string]>} entries 参数对（含重复名时按出现顺序保留）
  * @param {string} key 密钥

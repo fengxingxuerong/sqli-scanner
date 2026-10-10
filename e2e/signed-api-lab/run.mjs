@@ -28,7 +28,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-import { KEY, buildSign, paramsOf } from './sign-scheme.mjs';
+import { KEY, TICK_KEY, TICK_WINDOW_MS, buildSign, paramsOf } from './sign-scheme.mjs';
+import { encryptString, decryptString } from './enc-scheme.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..', '..');
@@ -47,7 +48,15 @@ const measured = [];
 
 function startTarget() {
   // 同步启动包装：sql.js 是异步加载，故外层用 async IIFE（见文件尾 await）
-  const sessions = { signChecked: 0, signRejected: 0, reachedSql: 0, reachedPayload: 0, blockedByFilter: 0 };
+  // signChecked/signRejected 是**通用准入闸**计数（验签 / 解密 / 时钟窗 / nonce 都算这一关），
+  // 后面三个是拒因细分 —— 报告里说"被目标拒"时必须能说出被谁、为什么拒。
+  const sessions = {
+    signChecked: 0, signRejected: 0,
+    reachedSql: 0, reachedPayload: 0, blockedByFilter: 0,
+    decryptFailed: 0, staleClock: 0, nonceReused: 0,
+    /** 加密端点收到的去重原始报文（最多 6 份）—— 诊断地面真相，见 handleEnc */
+    bodies: [],
+  };
   let db;
   let server;
 
@@ -103,28 +112,104 @@ function startTarget() {
     res.end(s);
   };
 
-  const handle = (req, res) => {
-    const u = new URL(req.url, 'http://127.0.0.1');
-    const route = u.pathname;
-    if (!['/api/item', '/api/safe', '/api/mixed'].includes(route)) return reply(res, 404, { msg: 'no such api' });
+  /**
+   * 抵达业务逻辑的统一计数口。
+   * `changed`（取值已被改动 = 这条是注入请求）是 B/C/D2 三个场景的**真正裁判**：
+   * 引擎自报的"检出/没检出"只是它对响应的判断，而"注入到底有没有进到 SQL"只有目标能回答。
+   * ⚠️ 不要用 `reachedSql===0` 当裁判 —— 签名对未改动的基线本来就成立，
+   *   基线抵达 SQL 是正确行为（D34 第一版就把这条断言写错过，见 CHANGELOG）。
+   */
+  const markReached = (changed) => {
+    sessions.reachedSql += 1;
+    if (changed) sessions.reachedPayload += 1;
+  };
 
-    const got = String(u.searchParams.get('sign') || '');
-    const want = buildSign(paramsOf(req.url), KEY);
+  /** 用过的 nonce（一次性）：真实防重放就是这张表，重复即拒 */
+  const nonces = new Set();
+
+  /**
+   * `/api/tick`：防重放三关（D35 补的第二族）。检查顺序**刻意是这样**，否则判据成因会糊：
+   *   ① 时钟窗（窗外即拒，记 staleClock）→ ② nonce 一次性（重复即拒，记 nonceReused）
+   *   → ③ sign 覆盖 id/t/n（记 signRejected）。
+   * `tick-stale-clock.mjs` 用固定过期时间戳 ⇒ 必然在第 ① 关被拒（连基线也是），
+   * 稳定落到 `transform_rejected(kind='baseline')`，且 advice 指向"时钟/一次性凭据"这一族。
+   */
+  const handleTick = (res, u, id) => {
     sessions.signChecked += 1;
-    // ★ 验签在最前面：签名不对 ⇒ 业务代码根本不执行（真实网关/框架中间件就是这个位置）
-    if (got !== want) {
+    const t = Number(u.searchParams.get('t'));
+    const n = String(u.searchParams.get('n') || '');
+    if (!Number.isFinite(t) || Math.abs(Date.now() - t) > TICK_WINDOW_MS) {
+      sessions.staleClock += 1;
+      sessions.signRejected += 1;
+      return reply(res, 400, { code: 4004, msg: 'timestamp expired' });
+    }
+    if (!n || nonces.has(n)) {
+      sessions.nonceReused += 1;
+      sessions.signRejected += 1;
+      return reply(res, 400, { code: 4005, msg: 'nonce replayed' });
+    }
+    if (String(u.searchParams.get('sign') || '') !== buildSign(paramsOf(`${u.pathname}${u.search}`), TICK_KEY)) {
       sessions.signRejected += 1;
       return reply(res, 400, { code: 4001, msg: 'sign invalid' });
     }
+    nonces.add(n);
+    markReached(id !== '1');
+    return html(res, page(runRaw(`SELECT id,name,price FROM items WHERE id = ${id}`)));
+  };
+
+  /**
+   * `/api/enc`：整包字段级加密（D35 补的第一族）。
+   * 服务端**先解密 `meta.enc` 再拼进 SQL** —— 解不开就是"请求非法"，
+   * 业务代码根本不执行（与真实前端的 CryptoJS + 后端过滤器同位）。
+   *
+   * `bodies` 记录前 6 份**去重后的原始报文**：这条是诊断用的地面真相 ——
+   * 第一版 D2/B2 出现「0 次解密失败、16 次都以明文=1 抵达 SQL」，
+   * 只看计数分不清"引擎没改 body.data"还是"改了但没送到"，把收到的报文打出来一眼定案。
+   */
+  const handleEnc = (req, res) => {
+    let raw = '';
+    req.on('data', (c) => (raw += c));
+    req.on('end', () => {
+      sessions.signChecked += 1;
+      if (sessions.bodies.length < 6 && !sessions.bodies.includes(raw)) sessions.bodies.push(raw);
+      let obj = null;
+      try {
+        obj = JSON.parse(raw);
+      } catch {
+        obj = null;
+      }
+      const cipher = obj && obj.meta ? String(obj.meta.enc ?? '') : '';
+      // 明文（未加密）也走"解不开"这一支：base64 解不出合法密文 ⇒ 与真实服务端一致地拒
+      const plain = cipher ? decryptString(cipher) : null;
+      if (plain === null) {
+        sessions.decryptFailed += 1;
+        sessions.signRejected += 1;
+        return reply(res, 400, { code: 4003, msg: 'decrypt failed' });
+      }
+      markReached(plain !== '1');
+      return html(res, page(runRaw(`SELECT id,name,price FROM items WHERE id = ${plain}`)));
+    });
+  };
+
+  const handle = (req, res) => {
+    const u = new URL(req.url, 'http://127.0.0.1');
+    const route = u.pathname;
+    if (route === '/api/enc') return handleEnc(req, res);
+    if (!['/api/item', '/api/safe', '/api/mixed', '/api/tick'].includes(route)) {
+      return reply(res, 404, { msg: 'no such api' });
+    }
     const id = String(u.searchParams.get('id') ?? '1');
-    /** 抵达 SQL 的请求里，取值已被改动的（=注入请求）单独计数：B/C 的裁判就是这个数 */
-    const markReached = () => {
-      sessions.reachedSql += 1;
-      if (id !== '1') sessions.reachedPayload += 1;
-    };
+    if (route === '/api/tick') return handleTick(res, u, id);
+
+    // ★ 验签在最前面：签名不对 ⇒ 业务代码根本不执行（真实网关/框架中间件就是这个位置）
+    sessions.signChecked += 1;
+    if (String(u.searchParams.get('sign') || '') !== buildSign(paramsOf(req.url), KEY)) {
+      sessions.signRejected += 1;
+      return reply(res, 400, { code: 4001, msg: 'sign invalid' });
+    }
 
     if (route === '/api/safe') {
-      markReached();
+      markReached(id !== '1');
       const r = runBound('SELECT id,name,price FROM items WHERE id = ?', [Number.isFinite(Number(id)) ? Number(id) : -1]);
       return reply(res, 200, { items: r.error ? [{ error: r.error }] : r.rows });
     }
@@ -135,11 +220,11 @@ function startTarget() {
         sessions.blockedByFilter += 1;
         return reply(res, 400, { code: 4002, msg: 'illegal keyword in parameter' });
       }
-      markReached();
+      markReached(id !== '1');
       return html(res, page(runRaw(`SELECT id,name,price FROM items WHERE id = ${id}`)));
     }
     // /api/item：数值上下文直接拼接 —— 真注入点
-    markReached();
+    markReached(id !== '1');
     return html(res, page(runRaw(`SELECT id,name,price FROM items WHERE id = ${id}`)));
   };
 
@@ -163,6 +248,10 @@ function startTarget() {
       sessions.reachedSql = 0;
       sessions.reachedPayload = 0;
       sessions.blockedByFilter = 0;
+      sessions.decryptFailed = 0;
+      sessions.staleClock = 0;
+      sessions.nonceReused = 0;
+      sessions.bodies = [];
     },
     stop: () => new Promise((r) => server.close(r)),
   };
@@ -201,10 +290,10 @@ const COMMON = [
  * 计数一律取自 report.validity.counts.transform —— 那是**判据成立那一刻**的冻结快照
  * （scanValidityGuard 在状态成立时 _counters() 落一份），正是阈值标定要的数。
  */
-async function scenario(name, { urlPath, signer, expectReport = true }) {
+async function scenario(name, { urlPath, signer, extraArgs = [], envExtra = {}, expectReport = true }) {
   const o = path.join(outDir, `${name}.json`);
-  const args = ['-u', `${base}${urlPath}`, '--out', o, ...COMMON];
-  const env = {};
+  const args = ['-u', `${base}${urlPath}`, '--out', o, ...COMMON, ...extraArgs];
+  const env = { ...envExtra };
   if (signer) {
     env.REQUEST_SCRIPT_DIR = SIGNERS;
     args.push('--request-script', path.join(SIGNERS, signer));
@@ -239,14 +328,36 @@ async function scenario(name, { urlPath, signer, expectReport = true }) {
     total: Number(v?.counts?.total ?? 0),
     transform: t,
     constraints: (rep?.summary?.constraints || []).join(' | '),
-    lab: { checked, rejected, reached, reachedPayload, blocked: target.sessions.blockedByFilter - before.blockedByFilter },
+    raw: rep,
+    lab: {
+      checked, rejected, reached, reachedPayload,
+      blocked: target.sessions.blockedByFilter - before.blockedByFilter,
+      decryptFailed: target.sessions.decryptFailed - before.decryptFailed,
+      staleClock: target.sessions.staleClock - before.staleClock,
+      nonceReused: target.sessions.nonceReused - before.nonceReused,
+      bodies: [...target.sessions.bodies],
+    },
   };
   measured.push(out);
+  // 拒因必须分开印：只写"被目标拒 N 次"会把签名错、解密失败、时钟过期三件事混成一条，
+  // 而它们的修法完全不同（本套件存在的意义就是把这类混谈拆开）。
+  const why = [
+    out.lab.blocked ? `关键字过滤 ${out.lab.blocked}` : '',
+    out.lab.decryptFailed ? `解密失败 ${out.lab.decryptFailed}` : '',
+    out.lab.staleClock ? `时钟过期 ${out.lab.staleClock}` : '',
+    out.lab.nonceReused ? `nonce 复用 ${out.lab.nonceReused}` : '',
+  ].filter(Boolean).join('/');
   note(
     `${name}：退出码=${out.code} 检出=${out.vulns} 点=${out.points} verdict=${out.verdict || '-'} `
     + `status=${out.status || '-'} kind=${out.kind ?? '-'} 请求总数=${out.total}｜`
-    + `靶站：验签 ${checked} 次/拒 ${rejected} 次/抵达 SQL=${reached}（其中改了取值的注入请求 ${reachedPayload}）`,
+    + `靶站：准入 ${checked} 次/拒 ${rejected} 次${why ? `（${why}）` : ''}/`
+    + `抵达 SQL=${reached}（其中改了取值的注入请求 ${reachedPayload}）`,
   );
+  if (out.lab.bodies.length) {
+    // 靶站真的收到了什么报文 —— 计数分不清"引擎没改"与"改了没送到"时，这条能一眼定案
+    note(`   靶站收到的去重报文（前 ${out.lab.bodies.length} 份）：`
+      + out.lab.bodies.slice(0, 3).map((b) => JSON.stringify(String(b).slice(0, 70))).join(' '));
+  }
   if (out.status === 'transform_rejected' || out.verdict === 'inconclusive') {
     note(`   transform 计数（判据成立那一刻）：${JSON.stringify(t)}`);
   }
@@ -341,6 +452,119 @@ check(
   `E: 健康扫描里天然存在的 4xx 不得判成签名被拒，实得 status=${E.status} kind=${E.kind ?? '(空)'}`,
 );
 
+// ============================================================================
+// D35 补的两族症状（D34 只覆盖了 `sign=`）：整包字段级加密 / timestamp+nonce 防重放
+//   两者与签名族同形（目标在业务代码之前就把请求拒掉），但脚本写法完全不同：
+//   加密族要"把叶子加密回去"，防重放族要"每条现算时钟与 nonce"。
+// ============================================================================
+
+// 靶场初始密文 = 明文 '1' 的密文。**必须现算，不许抄常量**：
+// B2（透传不加密）成立的前提是"基线那份密文服务端解得开"，而密文由 key/IV 决定 ——
+// 写死常量会在改 key 时静默变成"基线也被拒"，于是 kind 从 injection 悄悄滑向 baseline，
+// 而这两种成因的 advice 文案完全不同（一个改覆盖、一个改密钥/时钟）。
+const ENC_INITIAL = encryptString('1');
+/**
+ * 加密报文：**整个报文只留一个叶子**（meta.enc）。
+ * ⚠️ 这是实测换来的教训。第一版是 `{head:{appId,t}, body:{data}}` 三个叶子，
+ * 打出的报文证实引擎把 payload 注进了 `head.appId`（`"appId":"lab-app' AND SLEEP(2)-- -"`），
+ * 而靶站只读 `body.data` ⇒ 三个场景测的全是"引擎在改别的参数"，与加密链路无关；
+ * 更糟的是当时 A2"检出 1 条"是**脚本二次加密**造出来的假信号
+ * （基线密文被再加密 ⇒ 解出来是 base64 ⇒ 拼进 SQL 语法错 ⇒ error 通道命中）。
+ * 单叶子才是这类目标在实战里的真实形状：整个报文就是那一团密文，没有第二个可注字段。
+ * 仍需**嵌套** —— 扁平 JSON 会被 CLI 的 resolveBodyChannel 判为表单、以 urlencoded 发出（§N）。
+ */
+const encBodyJson = (value) => JSON.stringify({ meta: { enc: value } });
+const ENC_BODY = encBodyJson(ENC_INITIAL);
+const ENC_ARGS = ['--method', 'POST', '--body', ENC_BODY];
+
+note('— D2 对照组：加密接口不带脚本（第二族同样会静默"未检出"）');
+const D2 = await scenario('D2-enc-no-script', { urlPath: '/api/enc', extraArgs: ENC_ARGS });
+check(D2.lab.reachedPayload === 0, `D2: 不带脚本时明文不该被解开，实得抵达 SQL 的注入请求 ${D2.lab.reachedPayload}`);
+check(D2.lab.decryptFailed > 0, `D2: 应真的出现"解密失败"（否则靶站没在验密文，本对照组空转）。实得 ${D2.lab.decryptFailed}`);
+check(D2.vulns === 0, `D2: 不带脚本应当 0 检出，实得 ${D2.vulns}`);
+check(
+  D2.verdict === 'no_vulnerability_detected',
+  `D2: 本场景钉的是"加密族在没有扩展点时的静默假阴性"。实得 verdict=${D2.verdict || '(空)'} `
+  + `status=${D2.status} —— 若已成 inconclusive，说明无脚本场景也被识别了，改期望并同步文档`,
+);
+
+note('— A2 加密接口 + 正确脚本（把 meta.enc 叶子加密回去）');
+const A2 = await scenario('A2-enc-correct', { urlPath: '/api/enc', signer: 'enc-correct.mjs', extraArgs: ENC_ARGS });
+check(A2.lab.decryptFailed === 0, `A2: 正确脚本下不该有解密失败，实得 ${A2.lab.decryptFailed} —— 脚本没加密回去？`);
+check(A2.lab.reachedPayload > 0, `A2: 正确脚本下注入请求应抵达 SQL，实得 ${A2.lab.reachedPayload}`);
+check(A2.vulns > 0, `A2: 加密接口配正确脚本必须真检出，实得 ${A2.vulns}`);
+check(A2.status !== 'transform_rejected', `A2: 正确脚本不得判被拒，实得 ${A2.status}`);
+
+note('— B2 加密接口 + 透传脚本（漏覆盖 meta.enc：基线仍过，注入变明文 ⇒ 恒 400）');
+const B2 = await scenario('B2-enc-passthrough', { urlPath: '/api/enc', signer: 'enc-plain-passthrough.mjs', extraArgs: ENC_ARGS });
+check(B2.lab.reachedPayload === 0, `B2: 明文注入不该抵达 SQL，实得 ${B2.lab.reachedPayload}`);
+check(
+  B2.status === 'transform_rejected' && B2.kind === 'injection',
+  `B2: 应判 transform_rejected(kind=injection)，实得 status=${B2.status} kind=${B2.kind ?? '(空)'}`
+  + '（若 kind=baseline，说明连基线也被拒 —— 初始密文或密钥漂了）',
+);
+check(B2.verdict === 'inconclusive', `B2: 结论必须 inconclusive，实得 ${B2.verdict}`);
+
+// ⚠️ 两个参数（id + src）是**刻意**的：`validity.shouldAbort` 的粒度是"每个注入点开始前"
+//   （`scan/detect.js` 在 scheduler 回调顶部判），单点目标没有任何"剩余点"可跳过 ⇒
+//   早停省不下预算（第一版 C2 用 `/api/tick?id=1` 实测跑满 75 条，正是这个形状）。
+//   要验"早停生效"就必须给一个多点目标；单点目标上早停无从生效这件事记进文档 §8。
+note('— A3 防重放接口 + 每条现算时钟与 nonce');
+const A3 = await scenario('A3-tick-fresh', { urlPath: '/api/tick?id=1&src=web', signer: 'tick-fresh.mjs' });
+check(A3.lab.staleClock === 0, `A3: 新鲜时钟不应有过期拒，实得 ${A3.lab.staleClock}`);
+check(A3.lab.nonceReused === 0, `A3: 每条换新 nonce 不应有复用拒，实得 ${A3.lab.nonceReused}`);
+check(A3.lab.reachedPayload > 0, `A3: 防重放接口配正确脚本应把注入送进 SQL，实得 ${A3.lab.reachedPayload}`);
+check(A3.vulns > 0, `A3: 防重放接口配正确脚本必须检出，实得 ${A3.vulns}`);
+
+// 靶站的防重放**本身**必须可证 —— 否则 A3 的"0 次复用拒"可能只是因为根本不查 nonce。
+// 手工把同一条合法报文连发两次：第一次必须过，第二次必须因 nonce 被拒。
+{
+  const u = new URL(`${base}/api/tick?id=1&src=web`);
+  u.searchParams.set('t', String(Date.now()));
+  u.searchParams.set('n', 'probe-nonce-1');
+  u.searchParams.set('sign', buildSign([...u.searchParams.entries()], TICK_KEY));
+  const first = await fetch(u.toString());
+  const second = await fetch(u.toString());
+  check(first.status === 200, `防重放自证：首次报文应通过，实得 ${first.status}`);
+  check(second.status === 400, `防重放自证：同一 nonce 重放必须被拒，实得 ${second.status} —— 靶站没在防重放，A3 的绿是白送的`);
+}
+
+note('— C2 防重放接口 + 沿用抓包时的过期时钟（连基线都被拒）');
+const C2 = await scenario('C2-tick-stale-clock', { urlPath: '/api/tick?id=1&src=web', signer: 'tick-stale-clock.mjs' });
+check(C2.lab.reached === 0, `C2: 过期时钟下不应有任何请求抵达业务，实得 ${C2.lab.reached}`);
+check(C2.lab.staleClock > 0, `C2: 拒因必须是"时钟过期"，实得 staleClock=${C2.lab.staleClock}`);
+check(
+  C2.status === 'transform_rejected' && C2.kind === 'baseline',
+  `C2: 应判 transform_rejected(kind=baseline)，实得 status=${C2.status} kind=${C2.kind ?? '(空)'}`,
+);
+check(
+  C2.total < A3.total / 2,
+  `C2: 基线被拒应早停。实得 C2=${C2.total} vs A3=${A3.total} —— 早停没生效，白烧预算`,
+);
+
+// ============================================================================
+// X 利用阶段组合（D32 留的账：--request-script 与 --dbs/--dump 从没在一起测过）
+//   Exploiter 复用 Extractor._send ⇒ 结构上应经 per-scan 视图，但"结构上应该"不等于事实。
+//   裁判仍是靶站侧计数：**被拒数必须为 0** —— 只要利用阶段有任何一条绕过变换层，
+//   目标就会把它当非法请求拒掉，这个数立刻非 0（比去猜报告字段名可靠得多）。
+// ============================================================================
+note('— X 利用阶段组合（--dbs + 正确签名脚本）');
+const X = await scenario('X-exploit-dbs', {
+  urlPath: '/api/item?id=1&t=1',
+  signer: 'sign-correct.mjs',
+  extraArgs: ['--dbs', '--current-db'],
+  envExtra: { EXPLOIT_ENABLED: '1' },
+});
+check(
+  X.lab.rejected === 0,
+  `X: 利用阶段的请求也必须带签名（被拒 ${X.lab.rejected} 次说明有一条绕过了变换层）。`
+  + ` 抵达 SQL=${X.lab.reached}（注入 ${X.lab.reachedPayload}）`,
+);
+check(X.lab.reachedPayload > 0, `X: 利用阶段应有请求抵达 SQL，实得 ${X.lab.reachedPayload}`);
+// 枚举结果只打印不硬断言：SQLite 的 --dbs 语义不是本用例要验的东西（那由 blackbox-lab 的
+// dump-verify 背书），这里要回答的只有"利用阶段的请求有没有被正确签名"。
+note(`   X: 退出码=${X.code}，枚举产物=${JSON.stringify(X.raw?.data ?? X.raw?.extracted ?? X.raw?.summary?.extracted ?? null).slice(0, 220)}`);
+
 await target.stop();
 
 // ============================================================================
@@ -364,8 +588,13 @@ if (fails.length) {
   process.exit(1);
 }
 console.log(
-  `[PASS] signed-api-lab：D（无脚本）0 检出且结论自认"正常"＝静默假阴性现场；`
-  + `A（正确脚本）检出 ${A.vulns} 条、抵达 SQL ${A.lab.reached} 次、安全点 0；`
-  + `B kind=injection / C kind=baseline（C 早停：${C.total} < A ${A.total}/2）；E 不误报`,
+  `[PASS] signed-api-lab（三族 × ${measured.length} 场景）：`
+  + `签名族 D 无脚本=0 检出且自认"正常"（静默假阴性现场）/ A 正确脚本检出 ${A.vulns} 条`
+  + `（抵达 SQL ${A.lab.reached}，安全点 0）/ B kind=${B.kind} / C kind=${C.kind} 且早停（${C.total} < A ${A.total}/2）/ E 不误报；`
+  + `加密族 D2 无脚本=${D2.verdict} / A2 检出 ${A2.vulns} 条（注入抵达 SQL ${A2.lab.reachedPayload}）`
+  + ` / B2 kind=${B2.kind}（解密失败 ${B2.lab.decryptFailed} 次、注入抵达 ${B2.lab.reachedPayload}）；`
+  + `防重放族 A3 检出 ${A3.vulns} 条（nonce 复用拒 ${A3.lab.nonceReused}）`
+  + `/ C2 kind=${C2.kind} 且早停（${C2.total} < A3 ${A3.total}/2）；`
+  + `利用组合 X（--dbs）被拒 ${X.lab.rejected} 次、注入抵达 ${X.lab.reachedPayload} 条 ⇒ 利用阶段同样经变换层`,
 );
 process.exit(0);
