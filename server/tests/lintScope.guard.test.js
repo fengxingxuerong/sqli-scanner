@@ -34,6 +34,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
@@ -97,12 +98,73 @@ try {
   gitSkip = 'git ls-files 不可用：' + (e && e.message ? e.message : String(e));
 }
 
-async function loadIgnores() {
-  const modPath = new URL('../../eslint.config.js', import.meta.url).href;
-  const cfg = (await import(modPath)).default;
-  const blocks = Array.isArray(cfg) ? cfg : [cfg];
-  const ign = blocks.flatMap((b) => (b && Array.isArray(b.ignores) ? b.ignores : []));
+/**
+ * 从 eslint.config.js 的**源码文本**里静态读出全局 `ignores` 数组。
+ *
+ * [D40 2026-10-11] 为什么不再 `import()` 根配置：
+ *   CI 的 `test-server` job 只做 `cd server && npm ci`，而 root 专属依赖（`@eslint/js`、
+ *   `typescript-eslint`、`eslint-plugin-react-hooks`、`globals`）**一个都没装** ⇒
+ *   从 server 侧 import 根 `eslint.config.js` 必然 `ERR_MODULE_NOT_FOUND`
+ *   ⇒ 本文件 ①②③ 三条在 CI 上**恒红**（run #200/#201/#202 实测），本机却因 root
+ *   `node_modules` 存在而恒绿 —— **判据的采集面与校验面不一致**（本仓老病，同族：
+ *   facts 的"工作区 vs checkout"、continue-on-error 空转 job）。
+ *   更根本的是：本文件顶部注释已写明这条守卫「**不是真跑 eslint**」，而 `import()`
+ *   恰恰把配置真跑了一遍 —— 实现越过了判据。改文本解析后两者对齐。
+ *
+ * 解析规则：**先跳注释再取字符串字面量**（`//` 与 `/* *\/`）。
+ * ⚠️ 不能简单地"按行剥 //"—— `'node_modules/**'` 这类条目本身含 `//`，会被误伤。
+ * ⚠️ 本仓纪律：判据的文本源必须排除注释（D21 的教训 —— 注释里的反面示例被当成真分支）。
+ *
+ * @param {string} src eslint.config.js 全文
+ * @returns {string[]} ignores 条目
+ */
+function extractIgnores(src) {
+  const key = src.indexOf('ignores: [');
+  assert.ok(key >= 0, 'eslint.config.js 里找不到 `ignores: [` —— 配置结构变了，本守卫的读取方式要跟着改');
+  const out = [];
+  let depth = 0;
+  let i = src.indexOf('[', key);
+  while (i < src.length) {
+    const ch = src[i];
+    if (ch === "'" || ch === '"' || ch === '`') {
+      let j = i + 1;
+      let buf = '';
+      while (j < src.length && src[j] !== ch) {
+        if (src[j] === '\\') { buf += src[j + 1] ?? ''; j += 2; continue; }
+        buf += src[j];
+        j += 1;
+      }
+      out.push(buf);
+      i = j + 1;
+      continue;
+    }
+    if (ch === '/' && src[i + 1] === '/') {
+      const nl = src.indexOf('\n', i);
+      i = nl < 0 ? src.length : nl;
+      continue;
+    }
+    if (ch === '/' && src[i + 1] === '*') {
+      const end = src.indexOf('*/', i + 2);
+      i = end < 0 ? src.length : end + 2;
+      continue;
+    }
+    if (ch === '[') depth += 1;
+    if (ch === ']') {
+      depth -= 1;
+      if (depth === 0) break;
+    }
+    i += 1;
+  }
+  return out;
+}
+
+function loadIgnores() {
+  const cfgPath = fileURLToPath(new URL('../../eslint.config.js', import.meta.url));
+  const ign = extractIgnores(readFileSync(cfgPath, 'utf8'));
   assert.ok(ign.length >= 15, `只读到 ${ign.length} 条 ignores —— 配置结构变了，本守卫的读取方式要跟着改`);
+  // 静态解析的边界：模板串/变量拼出的条目读不到真值 ⇒ 必须显式报，不许静默漏读
+  const dynamic = ign.filter((s) => s.includes('${'));
+  assert.deepEqual(dynamic, [], `ignores 里出现模板串 ⇒ 静态解析读不到真值，必须改回真值读取：${dynamic.join(', ')}`);
   return ign;
 }
 
@@ -120,8 +182,8 @@ test('自证：glob 匹配器语义（** 跨目录、* 不跨、无前导斜杠�
   assert.ok(!globToRe('kanban-check-*/**').test('kanban-x/a.js'), '目录名前缀不能靠子串蒙对');
 });
 
-test('① 入库代码文件不得被 lint 静默忽略（除显式登记的一份清单）', { skip: gitSkip }, async () => {
-  const ignores = await loadIgnores();
+test('① 入库代码文件不得被 lint 静默忽略（除显式登记的一份清单）', { skip: gitSkip }, () => {
+  const ignores = loadIgnores();
   const swallowed = trackedCode.filter(
     (f) => isIgnoredBy(f, ignores) && !ALLOWED_IGNORED.some((a) => a.file === f)
   );
@@ -135,8 +197,8 @@ test('① 入库代码文件不得被 lint 静默忽略（除显式登记的一�
   assert.ok(trackedCode.length >= 900, `入库代码文件只剩 ${trackedCode.length} 个，文件集采集可能已坏`);
 });
 
-test('② 显式登记的每一条理由都必须还成立（防清单变成僵尸豁免）', { skip: gitSkip }, async () => {
-  const ignores = await loadIgnores();
+test('② 显式登记的每一条理由都必须还成立（防清单变成僵尸豁免）', { skip: gitSkip }, () => {
+  const ignores = loadIgnores();
   for (const a of ALLOWED_IGNORED) {
     assert.ok(trackedCode.includes(a.file), `清单里的 ${a.file} 已不在库，该把这条豁免一起删掉`);
     assert.ok(
@@ -147,8 +209,8 @@ test('② 显式登记的每一条理由都必须还成立（防清单变成僵�
   }
 });
 
-test('③ 本机排障现场必须继续被排除（lint 的红绿不许取决于磁盘上躺着什么）', { skip: gitSkip }, async () => {
-  const ignores = await loadIgnores();
+test('③ 本机排障现场必须继续被排除（lint 的红绿不许取决于磁盘上躺着什么）', { skip: gitSkip }, () => {
+  const ignores = loadIgnores();
   const mustIgnore = [
     '.box-agent-scratch/**',
     '.workbuddy/**',

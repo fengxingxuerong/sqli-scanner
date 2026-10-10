@@ -4,6 +4,42 @@
 
 ## [Unreleased]
 
+### 2026-10-11 批次 D40 · lintScope 守卫的判据采集从 `import()` 改成静态文本解析（修 test-server CI 恒红）
+
+**一句话**：`server/tests/lintScope.guard.test.js` 的 ①②③ 三条主判据在 CI 的 `test-server` job 上**恒红**
+（run #200/#201/#202 实测），本机却恒绿 —— 本仓老病再犯：**判据的采集面与校验面不一致**
+（同族：facts 的「工作区 vs checkout」、continue-on-error 空转 job）。
+
+#### ① 根因
+
+CI 的 `test-server` job 只做 `cd server && npm ci`，root 专属依赖（`@eslint/js`、`typescript-eslint`、
+`eslint-plugin-react-hooks`、`globals`）**一个都不装** ⇒ 守卫旧实现从 server 侧 `import()` 根
+`eslint.config.js` 必然 `ERR_MODULE_NOT_FOUND`。更根本的是：本守卫的口径边界早已写明「**不是真跑
+eslint**」（真跑要 3–4 分钟，见文件头），而 `import()` 恰恰把配置真执行了一遍 —— **实现越过了判据**。
+
+#### ② 修法
+
+新增 `extractIgnores()`：从配置**源码文本**静态读出全局 `ignores` 数组 —— 先跳 `//` 与块注释再取
+字符串字面量（不能按行剥 `//`：`'node_modules/**'` 这类条目本身含 `//`，会被误伤；D21 教训同款，
+注释里的反面示例不许被当成真分支）。三处失败必须显式炸、不许静默漏读：找不到 `ignores: [`、
+读出条目 <15（配置结构变了）、条目含模板串（静态解析读不到真值 ⇒ 必须改回真值读取）。
+顺带清掉同步化后 ①②③ 残留的三处 `await`。
+
+#### ③ 验证口径
+
+- 本机全量：`cd server && npm test` 3298 条 —— 3294 pass / 4 skip / 0 fail；守卫文件单独跑 4/4 绿。
+- 静态解析对当前配置的适配性：`eslint.config.js` 里 `ignores` 全文仅 1 处（L23，真实全局块），
+  无注释假起点、无正则字面量干扰。
+- **未验证**：CI 侧首跑 —— 原红需要「root 依赖缺席」才复现，本机 root `node_modules` 恒在；
+  但修法本身已消除对模块解析的依赖（改 `readFileSync` + 文本断言），依赖缺失场景不再可达。
+
+#### ④ 顺手收一笔
+
+根级 `sqli-session-*.json` 补进 `.gitignore`：discover.js 派生的 `sqli-session-<urlHash8>.json`
+是**相对进程 cwd** 落盘的裸文件名，从仓库根起扫描（e2e/脚本）时就落在根级 —— 此前只登记了
+server/ 侧与根级 latest，根级带哈希后缀的会话文件漏网，一直挂在 `git status` 未跟踪区
+（本轮现场：`sqli-session-0240af6f.json`，已核实内容为脱敏后的扫描进度，无凭据）。
+
 ### 2026-10-11 批次 D39 · 把两套「CI 一眼都没看过」的靶场接进门禁（TODO 15.3）
 
 **一句话**：D29 那次全量普查翻出的两个确定性红（`pentest-lab` 的 waf403、`api-range-lab` 两条 `[ai]`），
