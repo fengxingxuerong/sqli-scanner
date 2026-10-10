@@ -344,6 +344,14 @@ export const defaults = {
   //   详见 core/requestTransform.js 文件头四条硬约束。
   requestScript: '',
 
+  // [D36 实战 P0-2] Bearer/Token 自动续期：`{ url, refreshToken?, tokenField?, method?, bodyField?,
+  // bodyFormat?, headerTemplate?, headerName?, eager? }`。null=不启用（默认，零行为变化）。
+  // 治的是"access token 半小时过期 ⇒ 后半程全 401 ⇒ 那些参数全被判不可注入"：
+  // loginFlow 只覆盖标准 HTML 表单登录，而现代 API 主流是 Bearer + refresh 端点。
+  // 拿到新 token 之前不动用户从抓包里带来的 Authorization；一次挑战只重试一次；并发去重；
+  // 续期失败会进可信度守卫（不会把 401 半程写成"无漏洞"）。详见 core/bearerKeeper.js。
+  bearerRefresh: null,
+
   // ── [P1-FIX 2026-09-08 ②] 代理环境变量信任（对标 curl / sqlmap）─────────────────
   // true（默认）：config.proxy 为空时按 HTTPS_PROXY → https_proxy → HTTP_PROXY → http_proxy →
   // ALL_PROXY 顺序取代理，NO_PROXY 命中目标 host（支持 * 与逗号分隔域名后缀）时不走代理；

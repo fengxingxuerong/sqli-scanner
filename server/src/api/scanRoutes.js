@@ -132,6 +132,8 @@ const KNOWN_CFG_KEYS = new Set([
   // [批次14 实战 P1-6] login：登录编排最小版对象（objectGroups.guardLogin 收紧形状；
   // 标准表单登录自动提交 + 会话过期自动重登，loginFlow.js 消费）。
   'login',
+  // [D36 实战 P0-2] Bearer/Token 自动续期（bearerKeeper.js 消费）
+  'bearerRefresh',
   // [2026-10-03] rateGroup：批量共享限速桶的组 id（形态由 guardScalarsCore 收紧）。
   'rateGroup',
   // hex / unionFrom 是这支守卫测试第一次跑就自己抱出来的——我先前手工 triage 时把 `hex`

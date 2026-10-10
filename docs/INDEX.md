@@ -1,10 +1,11 @@
 # docs 导航索引
 
 > 由 `node scripts/gen-docs-index.mjs` 生成（2026-10-10），
-> 覆盖 docs/ 下 77 篇 md。文档增删后重跑即可；标题取各文件的一级标题。
+> 覆盖 docs/ 下 78 篇 md。文档增删后重跑即可；标题取各文件的一级标题。
 
-## 其它（专题笔记与过程记录）（10）
+## 其它（专题笔记与过程记录）（11）
 
+- [Bearer令牌续期.md](./Bearer%E4%BB%A4%E7%89%8C%E7%BB%AD%E6%9C%9F.md) — Bearer/Token 自动续期（长扫描的会话维持）
 - [CI-集成.md](./CI-%E9%9B%86%E6%88%90.md) — 在 CI 里用 sqli-scanner 当 SQLi 门禁
 - [blackbox-lab-已知问题与修复记录.md](./blackbox-lab-%E5%B7%B2%E7%9F%A5%E9%97%AE%E9%A2%98%E4%B8%8E%E4%BF%AE%E5%A4%8D%E8%AE%B0%E5%BD%95.md) — 黑盒评测：已知问题与修复记录
 - [optimization-report-2026-08-25.md](./optimization-report-2026-08-25.md) — sqli-scanner 全面优化分析报告（2026-08-25）

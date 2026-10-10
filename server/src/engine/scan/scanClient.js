@@ -9,6 +9,8 @@ import { withCsrf } from '../../core/csrfKeeper.js';
 import { withLoginFlow } from '../../core/loginFlow.js';
 // [D32 实战 P0-1] 自定义请求变换（签名/加密参数）扩展点
 import { applyScanTransform, notifyTransformOutcome, transformActiveForScan } from '../../core/requestTransform.js';
+// [D36 实战 P0-2] Bearer/Token 自动续期
+import { refreshActiveForScan, withBearerRefresh } from '../../core/bearerKeeper.js';
 import { DirectConnector } from '../../core/directConnector.js';
 
   // 连接器选择：direct 目标用 DirectConnector 直连数据库，其余用统一 HttpClient 单例。
@@ -142,6 +144,13 @@ export function getScanClient(scanId, target) {
         /^https?:\/\//i.test(cfg.login.url) && cfg.login.username
       ) {
         view = /** @type {any} */ (withLoginFlow(view, cfg.login));
+      }
+      // [D36 实战 P0-2] Bearer/Token 自动续期（cfg.bearerRefresh.url 显式开启）。
+      // 挂在 loginFlow 之后：表单登录换的是会话 Cookie，Bearer 换的是 access token，
+      // 两者可以共存（目标同时用 cookie 会话 + API bearer），且续期请求要吃到
+      // csrf/登录这两层的会话准备。与 loginFlow 同一纪律：一次挑战只重试一次、并发去重。
+      if (cfg.bearerRefresh && refreshActiveForScan(scanId)) {
+        view = /** @type {any} */ (withBearerRefresh(view, scanId));
       }
       // [P2-5] --force-ssl / --ignore-redirects：协议层策略注入每个请求（对标 sqlmap）。
       // forceSsl：目标 http:// 强制升级 https（httpClient.request 消费改写）；

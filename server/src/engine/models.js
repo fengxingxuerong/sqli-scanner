@@ -100,6 +100,14 @@ export function createTarget(input) {
   if (!['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
     throw new AppError(ErrorCode.UNSUPPORTED_METHOD, `不支持的请求方法：${method}`);
   }
+  // [D36 实战 P0-3 2026-10-10] `input.auth` 必须落进 `config.auth`。
+  // 引擎侧所有读取点都在 config 下（egressOpts.js:85 / TargetParser.js:392 / crawler.js:176
+  // 都是 `config?.auth`），而 CLI 从把参数交给扫描起就一直把 auth 作为**顶层字段**传进来
+  // （bin/cli.js:273）—— 两条路从未接上：实测 `--auth alice:secret --header 'Authorization: Bearer T'`
+  // 到出口的请求**一个认证头都没有**，整站 401 的扫描照样报「未检出 + 结论可信」。
+  // 优先级：显式写在 config 里的赢（REST 侧 sanitizeStart 就是这么给的），顶层作兜底。
+  const cfgIn = input.config || {};
+  const authIn = cfgIn.auth ?? (input.auth && typeof input.auth === 'object' ? input.auth : null);
   return {
     id: nanoid(10),
     mode: 'http',
@@ -117,7 +125,7 @@ export function createTarget(input) {
     xmlTree: null,
     cookieParams: input.cookieParams || {},
     headerParams: input.headerParams || {},
-    config: { ...defaults, ...(input.config || {}) },
+    config: { ...defaults, ...cfgIn, auth: authIn },
   };
 }
 

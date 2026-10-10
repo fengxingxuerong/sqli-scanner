@@ -142,6 +142,10 @@ export const SCAN_CONFIG_KEYS = [
   'oob', 'secondOrder',
   // [批次14 实战 P1-6] login：登录编排最小版（标准表单登录自动提交 + 会话过期自动重登）
   'login',
+  // [D36 实战 P0-2] bearerRefresh：Bearer/Token 自动续期（refresh 端点换新 access token）。
+  // 与 login 同类且同组渲染：长扫描里 access token 半程过期 ⇒ 后半程全 401 ⇒ 报告写「未检出」，
+  // 是假阴性而不是"没洞"，所以必须有界面入口。
+  'bearerRefresh',
   // 出口层（代理 / 证书 / 授权范围）
   // [2026-10-01] clientCert：mTLS 客户端证书 PEM 路径（sqlmap --cert）。目标要求双向认证时
   // 没有证书连第一跳都过不去 ⇒ 整站测不了（能力缺失，不是便利开关），故接进面板。
@@ -252,6 +256,9 @@ export const SCAN_CONFIG_VALUE_TYPES: Record<ScanConfigKey, ScanConfigValueType>
   secondOrder: 'object',
   // [批次14 实战 P1-6] 登录编排对象（子字段由后端 guardLogin 逐项收紧）
   login: 'object',
+  // [D36 实战 P0-2] Bearer 续期编排对象（子字段由后端 guardBearerRefresh 逐项收紧；
+  // 面板只暴露 url/tokenField/refreshToken 三项，其余走 REST/CLI —— 与 login 的暴露面一致）
+  bearerRefresh: 'object',
   wafEvasion: 'object',
   extractScope: 'object',
   // [2026-09-29 UI-REACH] 能力缺失类 8 键的类型（与后端 clamp 口径对齐：

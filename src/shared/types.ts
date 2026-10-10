@@ -291,6 +291,23 @@ export interface ScanConfig {
     usernameField?: string; // [A-Za-z0-9_-]，缺省自动探测
     passwordField?: string;
   };
+  // [D36 实战 P0-2] Bearer/Token 自动续期（bearerKeeper.withBearerRefresh 消费）。
+  // 与 login 的分工：login 是「表单换会话 cookie」，这里是「refresh 端点换新 access token」；
+  // 挑战判定也不同（表单失效常 302 跳登录页，Bearer 失效是 401/403）。
+  // 一次挑战只续一次、拿到新 token 前不动用户带来的 Authorization（模块头四条口径）。
+  bearerRefresh?: {
+    url: string; // 续期端点（http/https）
+    method?: string; // 缺省 POST
+    refreshToken?: string; // 缺省不带 ⇒ 目标从会话 Cookie 里取
+    bodyField?: string; // refreshToken 放进 body 的哪个字段（缺省 refreshToken）
+    bodyFormat?: 'json' | 'form'; // 缺省 json
+    body?: Record<string, unknown>; // 额外固定字段（clientId / scope 之类）
+    tokenField?: string; // 点路径取新 token（缺省按常见字段自动探测）
+    headerName?: string; // 缺省 Authorization
+    headerTemplate?: string; // 缺省 `Bearer {token}`；自定义头名时缺省 `{token}`
+    headers?: Record<string, string>;
+    eager?: boolean; // true = 首条请求前置一次续期（目标对无 token 请求不回挑战时）
+  };
   // 站内链接爬取深度（对标 sqlmap --crawl=<depth>）：0=关闭，1-3=深度
   crawlDepth?: number;
   // [2026-09-26 UI-REACH] 表单爬取（对标 sqlmap --forms）：默认 false → 只测 URL 参数，

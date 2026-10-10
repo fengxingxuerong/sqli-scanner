@@ -229,6 +229,14 @@ export function buildConfig(args) {
   // 与 --cert 同层级（出口层），但加载失败是**硬失败**：ScanManager.start 里抛错、扫描不启动
   //（静默忽略脚本 = 跑一整轮全被目标拒的请求，最后产出「未检出」）。
   if (typeof args.requestScript === 'string' && args.requestScript) config.requestScript = args.requestScript;
+  // [D36 实战 P0-2] --refresh-url：Bearer 自动续期。只给 URL 也能用（刷新凭据走会话 Cookie）；
+  // --refresh-token / --refresh-field 是可选精调。非法 URL 由入口 guard 丢弃并 warn（不静默启用半套）。
+  if (typeof args.refreshUrl === 'string' && args.refreshUrl.trim()) {
+    const br = { url: args.refreshUrl.trim() };
+    if (typeof args.refreshToken === 'string' && args.refreshToken.trim()) br.refreshToken = args.refreshToken.trim();
+    if (typeof args.refreshField === 'string' && args.refreshField.trim()) br.tokenField = args.refreshField.trim();
+    config.bearerRefresh = br;
+  }
   // --no-validation-skip：显式关闭输入校验短路（引擎默认开）；不影响预筛 prefilter
   if (args.noValidationSkip) config.validationSkip = false;
   // [P0-FIX 2026-09-09] --no-proxy-bypass-local：显式恢复「本地也走环境变量代理」

@@ -7,6 +7,8 @@ import { DbHealthGuard } from '../core/dbHealthGuard.js';
 import { ScanValidityGuard } from '../core/scanValidityGuard.js';
 // [D32 实战 P0-1] 自定义请求变换：判据开关取登记表，判定素材由变换层回传（理由见下方接线处）
 import { setTransformObserver, transformActiveForScan } from '../core/requestTransform.js';
+// [D36 实战 P0-2] Bearer 续期：结果回传可信度守卫
+import { refreshActiveForScan, setRefreshObserver } from '../core/bearerKeeper.js';
 import { HTTP_LOG_THROTTLE_MS } from './scan/constants.js';
 // [拆分第一批 2026-09-12] runScanLoop 阶段外移（纯搬移，行为不变）
 // [audit-2026-09-13] 清理搬移后残留的死 import（20 项，eslint no-unused-vars 29→0 前置）：
@@ -73,7 +75,12 @@ export async function runScanLoop(sm, scanId) {
     //（ensureScanTransform 失败会在 start 里抛出，这里是双保险）时，按 config 判会让守卫
     // 在没有变换请求的情况下统计出一堆 4xx —— 那就是自己造出来的假红。
     const transformOn = transformActiveForScan(scanId);
-    const validity = new ScanValidityGuard({ ...validityCfg, transformActive: transformOn });
+    const refreshOn = refreshActiveForScan(scanId);
+    const validity = new ScanValidityGuard({
+      ...validityCfg,
+      transformActive: transformOn,
+      refreshActive: refreshOn,
+    });
     const observeValidity = validityEnabled
       ? (ev) => {
           try {
@@ -96,6 +103,15 @@ export async function runScanLoop(sm, scanId) {
         try {
           validity.observeTransform(ev);
         } catch { /* 守卫故障不得影响检测主流程 */ }
+      });
+    }
+    // [D36 实战 P0-2] 续期结果回传守卫：配了 bearerRefresh 却没拿到 token 时，
+    // "后半程全 401" 必须被写成「你配的续期端点没生效」，而不是笼统的"重新登录"。
+    if (refreshOn) {
+      setRefreshObserver(scanId, (ev) => {
+        try {
+          validity.observeRefresh(ev);
+        } catch { /* 守卫故障不得影响发包 */ }
       });
     }
     // [P0-FIX 2026-09-08] 可信度摘要与「阴性结论」裁定（completed / stopped 两条收尾路径共用）。

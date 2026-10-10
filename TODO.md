@@ -13,7 +13,7 @@
 | # | 缺口 | 状态 |
 |---|---|---|
 | P0-1 | 加密/签名参数接口无扩展点（`sign=`、整参加密、timestamp+nonce） | ✅ **D32 扩展点 + 判据**，✅ **D34 真机闭环**（`e2e/signed-api-lab` 五场景三轮一致）；⚠️ 只覆盖**签名**形态，整包 AES / 防重放没有靶点（见本节第 7 条） |
-| P0-2 | 认证只覆盖标准 HTML 表单登录（`loginFlow.js` 自承不做 OAuth/JWT 刷新/验证码/前端加密提交） | ⏳ 未做 |
+| P0-2 | 认证只覆盖标准 HTML 表单登录（`loginFlow.js` 自承不做 OAuth/JWT 刷新/验证码/前端加密提交） | ✅ **D36 Bearer/Token 自动续期**（`bearerKeeper` + `--refresh-url` + 面板 + 真机 `e2e/bearer-lab` 六场景三轮一致）。仍不做：OAuth2 授权码流程 / SSO / 验证码 / 解析 JWT `exp` 做前瞻性续期（见下面 D36 节的账） |
 | P1-3 | OOB 通道在真实目标上拿不到（`oobReceiver` 默认绑 127.0.0.1、DNS 需自建域+占 53；无 interactsh/Collaborator 对接） | ⏳ 未做 |
 | P1-4 | WAF 结论只有 CRS 一家（62 厂商指纹只做「识别」，推荐链无实测背书） | ⏳ 未做 |
 | P2-5 | 写副作用无自动清理/回滚（只有 `docs/pentest-handover/05` 的人工条款 R5/R6） | ⏳ 未做 |
@@ -92,6 +92,63 @@ scope/SSRF 逐跳校验。
    建议（未做）：给它加一条"逐键用 `defaults[key]` 再走一次 `sanitizeStart`"，
    这样任何"默认值与入口校验互相不认"在键写入当天就红，而不是等 e2e。
    已做的只是点状补测：`server/tests/requestScript.guard.test.js` 对这一个键钉了该性质。
+10. **包装链上的三个会话层会把 `headRequest` 整个丢掉**（D36 做 bearer 续期时撞见，未修）。
+    `withSafeUrl` / `withCsrf` / `withLoginFlow` 都 `return { request }`，**不带 `headRequest`**。
+    而 `engine/scan/scanClient.js` 里两处都按"有没有这个方法"决定行为：
+    `const baseHead = typeof view.headRequest === 'function' ? … : null`（协议层包装）与
+    F1 那批加的暂停闸（`if (typeof view.headRequest === 'function')`）。
+    ⇒ 只要配了 `--safe-url` / `--csrf-url` / `--login-url` 任意一个：
+    · `--null-connection` 的 HEAD 通道**静默退化成 GET**（`detectorSupport/egress.js` 的
+      `sendHead()` 有 `typeof httpClient.headRequest !== 'function' → 回退 send` 的兜底，所以不报错）；
+    · F1 的"暂停期间零发包"承诺对 HEAD 路径失效（因为 HEAD 路径没了）。
+    危害不高（方向是"多发 GET"不是漏测），但形状是本仓最典型的一类：**能力没了而没有任何东西变红**。
+    修法：四个会话层包装（含 D36 新增的 bearer 续期）统一返回 `{ ...client, request, headRequest }`，
+    且 `headRequest` 必须走**同一套**加工（csrf token 要挂上、bearer 头要挂上、401/403 同样续期
+    一次并重试）—— 只把方法名透传过去等于 HEAD 绕过加工，比现状更糟（现状是 HEAD 不存在、
+    退回带 token 的 GET）。
+    验证口径：① 三个开关各配一个，断言 `getScanClient(...).headRequest` 是函数；
+    ② 断言 HEAD 实收参数里带着 csrf token / bearer 头（从内层视图捕获比对）；
+    ③ `--null-connection` + `--csrf-url` 在真靶站上仍能检出（这条组合现在是静默降级）。
+
+    ⚠ 状态更新（2026-10-10 D36）：**第四个包装（bearer 续期）没有复制这条缺陷** —— 它保留并加工
+    `headRequest`（`bearerKeeper.test.js` / `bearerKeeper.wiring.test.js` 各钉一条，
+    把 `typeof client.headRequest === 'function'` 改成常量会当场红）。
+    所以本条现在只剩**三个旧包装**，修法不变（一起改，别留一条不一致的路）。
+
+### D36 · Bearer/Token 自动续期（P0-2）做完之后剩下的账
+
+1. **`--login-url` / `--csrf-url` / `--safe-url` 三个包装仍丢 `headRequest`**（就是上面第 10 条，
+   本批只保证新增的那个不丢）。危害方向是"HEAD 静默退化成 GET"，不是漏测。
+2. **面板只暴露三个子键**（`url` / `tokenField` / `refreshToken`）。`bodyFormat=form`、
+   `body={client_id…}`、`headerName` / `headerTemplate`、`eager` 这五项目前只能走 REST/CLI。
+   判据要不要接：`eager` 与 `bodyFormat` 是"目标形状"而不是"调优旋钮"，缺了它们那类目标配不上；
+   接线成本是 NetworkAuthSection 再长一截 + `scanConfigSections.bindings` 各补一条。
+3. **`expiredMidScan` / `neverAuthenticated` 都不中止扫描**（只降级结论）。
+   与 `transform_rejected(kind=baseline)` 的区别是刻意的：后者"我们自己发出的东西不合法"，
+   继续跑注定零产出；前者可能只是某个点位需要认证，其它点位仍可能是公开的。
+   要不要加一条"整轮零业务响应即中止剩余点位"的预算闸门，需要先拿到真实分布
+   （目前只有靶场里 71 条请求这一个样本，不足以定阈值）。
+4. **`neverAuthenticated` 与 `blocked` 的分界靠"403 算业务响应"这一条约定**。
+   用 403 表达令牌过期的目标（不少网关就是这么干的）落点是 `blocked` 而不是 `session_expired`，
+   本批只在 `blocked` 的 advice 里加了一句指向续期的话。**更彻底的做法**是给 `blocked` 也做
+   成因分支（WAF 特征 vs 令牌过期），但那要先有能区分的证据位（比如响应体里的
+   `error="invalid_token"` / `WWW-Authenticate` 头），目前没实现。
+5. **JWT `exp` 的前瞻性续期没做**（只在收到挑战后续）。文档里给的出路是 `eager: true`
+   或自己写 `--request-script` 现算 —— 后者其实能覆盖，但需要脚本自己判 `r.url` 并给
+   `/oauth/token` 也签名，这条组合没有靶点（signed-api-lab 与 bearer-lab 是两个靶场，
+   没有"签名 + Bearer 续期"同时开的场景）。**这是本批留的最实在的一条空档**。
+6. **`e2e/bearer-lab` 没有 `--request-script` 组合场景**（同上）。接线级证据有
+   （`bearerKeeper.wiring.test.js` 钉了"续期请求也过变换层"），真机级没有。
+7. **凭据有效期与扫描规模的关系没有量化输出**。报告会说"续期尝试 N 次失败 M 次"，
+   但不会说"这轮扫描跑了多久、令牌在第几条请求失效"。交付时甲方问"你们的扫描会不会
+   扫到一半掉登录"，现在只能靠 reason 文本反推。方向：`summary.validity.counts.refresh`
+   已经在了，缺的是首次挑战发生在第几条请求（一个 int 就够）。
+8. **`bearerRefresh` 没进 `docs/api.md` 的 `/scan/start` 示例**。核对过：api.md 里连 `login`
+   都没有（`grep -n "login\b" docs/api.md` = 0 命中），所以这不是"本批漏了一条"而是
+   **整张 config 键表在 api.md 里不存在** —— 现在的口径是"键的用法在各专题文档里"
+   （`docs/Bearer令牌续期.md` §3 有完整 REST 形状与子键表）。要补的话应该补一张
+   「config 键 → 所在专题文档」的索引表，而不是往示例里塞一个键。
+   `refs:check` 只钉链接有效性，钉不住"新键有没有文档"。
 
 
 ## 2026-09-28 新增 · 接口靶场（`e2e/api-range-lab`）暴露出的待办

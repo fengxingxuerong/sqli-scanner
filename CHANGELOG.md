@@ -4,6 +4,156 @@
 
 ## [Unreleased]
 
+### 2026-10-10 批次 D36 —— Bearer/Token 自动续期，以及靶场一跑就掉出来的三处「根本没接上」
+
+**一句话**：P0-2 的账本来只是"补一个续期调用"。真机靶场跑第一轮，抱出来的却是三条
+比续期本身更值钱的东西：**CLI 的认证参数从来没到过出口**、**续期换来的新令牌被旧令牌就地盖回**、
+以及本仓第三例**判据在它最该管的目标形态上永不可达**（`session_expired` 要求"基线请求不 401"，
+而令牌过期时基线同样吃 401 ⇒ 反证恒成立 ⇒ 那条判据在这类目标上一次都没生效过）。
+
+#### ① 断链一：`--auth` / `--header` / `--cookie` 到不了出口层（入口层，P0）
+
+`bin/cli.js` 一直把 `buildAuth()` 的结果作为**顶层字段**交给 `sm.start(input)`，
+而 `createTarget()` 只展开 `input.config` ⇒ `input.auth` 原地被丢；
+引擎侧三个读取点（`egressOpts.js:85` / `TargetParser.js:392` / `crawler.js:176`）读的都是 `config.auth`。
+
+实测形状（探针脚本，非推演）：`--auth alice:secret --header X-Api-Key: kk123` 打到靶站
+**42 条请求、零个认证头**；`--header 'Authorization: Bearer <token>'` 同样为 0。
+于是"目标要求认证"的整站扫描 = 全部 401，而报告写「未检出 + 结论可信」。
+
+既有 `tests/cli.auth.test.js` 全绿了三个月 —— 它断的是 `buildAuth()` 的**返回形态**，
+而坏的是下一环。⇒ 新增 `tests/cli.auth.reach.test.js`（8 条）把判据挪到"合完之后线上那一个值"：
+`parseArgs → buildAuth → createTarget → buildEgressOpts → mergeAuthHeaders`，
+另钉 `config.auth` 优先、未配时为 `null`、直连模式不受影响。
+
+#### ② 断链二：新令牌被 `auth.headers` 就地盖回（出口层，P0）
+
+`mergeAuthHeaders` 的既有语义是 **`auth.headers` 最后覆盖 per-request 头**
+（`cli.js` 的注入点剔键逻辑正是照它写的）。而抓包重建带来的 `Authorization` 走的就是这条路 ⇒
+续期只把新令牌写进 `opts.headers` 的话：日志说"已取到新 token"、靶站收到的还是旧令牌。
+
+实测出处：`e2e/bearer-lab` B 场景第一轮 —— **续期请求 26 次、26 次全成功、签发 26 枚新令牌，
+而靶站仍收到 94 条"过期"拒**。修法是 `applyBearer` 在这条请求上摘掉 `auth.headers` 里的同名键
+（只改副本，绝不原地动共享的 `config.auth`），判据写在 `bearerKeeper.wiring.test.js`
+（把**真的** `mergeAuthHeaders` 接进假客户端，断出口那一个值）与 `bearerKeeper.test.js` 的单元用例两侧。
+
+#### ③ 判据不可达第三例：会话失效的两种形态此前无人接手
+
+既有 `authLost` = 「注入请求连续 ≥3 次 401/跳登录 **而基线请求没有**」。这条反证是为了不把
+"整站本来就要登录"误写成"扫到一半会话过期"，它是对的 —— 问题是排除之后没有第二条判据接住：
+
+| 形态 | 新判据 | 修前的报告 |
+| --- | --- | --- |
+| 整轮**零业务响应**（全 401） | `neverAuthenticated`：`nonChallengeHits===0 且 authChallengeHits≥8` | `no_vulnerability_detected` + `reliable=true` |
+| 进去过、此后**连续出不去**（不分注入与否） | `expiredMidScan`：`nonChallengeHits>0 且 authChallengeStreak≥8` | 同上（实测 71 条请求里 69 条 401、**61 条是白打的注入 payload**） |
+
+两者都落 `session_expired`（处置同为"把凭据带对再复扫"），但 reason/advice 分三支写清是哪一种；
+配了 `bearerRefresh` 时再追加「续期尝试 N 次里失败 M 次（最后一次：<原因>）」并把建议指向
+`bearerRefresh.url` / `tokenField`。阈值取 8 而不是沿用 3：这两条**不分注入与否**，
+而"自动续期正在工作"的正常纹理就是 `401 → 重试 200` 交替，下限 3 会把健康目标打成失效
+（`validity.refresh.test.js` 有一条专门钉这个反例：交替 30 次必须仍 `ok`）。
+
+顺带把 403 的归属写死在文案里：本守卫 **403 属 `blocked` 族**（不算认证挑战），
+而 `bearerKeeper` 把 403 当挑战去续期 —— 很多 API 正是用 403 表达"令牌过期"。
+两套判据不合并，所以 `blocked` 的 advice 在"配过续期且失败"时会先说一句
+「目标用 403 表达令牌过期时，上面的拦截特征其实是会话失效，先修 bearerRefresh 再谈 WAF」，
+再保留完整的 WAF 出路。
+
+#### ④ 能力本身：`bearerKeeper`（四条口径 + 三处入口 + 一条回收）
+
+新模块 `server/src/core/bearerKeeper.js`，挂在包装链**最外**（loginFlow 之后）——
+挂在里面就永远看不见 401。四条口径：拿到新 token 之前不动用户带来的 `Authorization`、
+一次挑战只续一次（不给客户认证服务加压）、并发去重（in-flight 共享）、失败必须显形。
+配置面 `config.bearerRefresh`（子键 `url/method/refreshToken/bodyField/bodyFormat/body/
+tokenField/headerName/headerTemplate/headers/eager`）三处入口全接：REST 白名单 +
+`guardBearerRefresh` 逐项收紧、CLI `--refresh-url/--refresh-token/--refresh-field`、
+面板「网络与认证」分段（与 `login` 同组渲染，`url` 有值即启用、清空即整键删）。
+回收挂 `lifecycle._disposeScan`（那是持有 token 的条目，不是缓存）。
+
+子键可达性另加一条守卫：`bearerRefresh` 的关闭态是 `defaults.bearerRefresh = null`（同 `login`），
+所以它**不在** `configWhitelist.passthrough.test.js` 那条数据驱动的嵌套守卫的分母里
+（那边的分母是 defaults 的对象组）⇒ 「引擎读 `spec.method` 而入口只转发 url」这类断口没人看守。
+本批补一条逐键转发守卫，**判据来源用 `normalizeRefreshConfig` 的出参键集**（不手抄清单），
+以后加一个可配子键自动进分母；变异验证（把 `out.eager` 的转发摘掉）确实红。
+
+`configOrphanKeys.guard` 第一次报这 9 个键时，正确的修法**不是**加豁免：豁免会把
+"子键其实没有入口"这件事永久静音。改法是两处 ——
+① `bearerKeeper` 里的子配置对象一律命名 `spec` 而不是 `cfg`（本仓 `cfg` 指**顶层扫描配置**，
+混名会让守卫把组内子键误报成顶层旋钮，也让读代码的人以为续期配置是全局的）；
+② 上面那条逐键转发守卫，把"确实有入口"变成可执行的事实。
+
+#### ⑤ 靶场：`e2e/bearer-lab`（6 场景 + 差分档，三轮逐字一致）
+
+真 HTTP 靶站 + 真 SQLite（sql.js）+ 真 HS256 JWT 验签 + 真刷新端点 + 真 CLI 子进程，`deps: []`
+⇒ CI 的 `e2e-self-contained` 自动收。裁判是**靶站侧计数**（`refreshHits` / `issued` /
+`payloadAfterExpired`），不是引擎自报 —— "续期成功"必须由端点真的被打过、且新令牌真的被收到来证明。
+
+| 场景 | 靶站（认证通过 / 401 / 续期 / 过期后白打的注入） | 引擎 refresh | 报告 |
+| --- | --- | --- | --- |
+| A 不配续期 | 2 / 69 / 0 / **61** | attempts=0 | `session_expired` + inconclusive |
+| B body 带 refreshToken | 70 / 1 / 1 / **0** | 1/1 成功 | 检出 2 条 · vulnerability_detected |
+| C1 续期端点 5xx | 2 / 69 / 24 / 61 | attempts=3 failures=3 | inconclusive，reason 指名续期 + 状态码 |
+| C2 端点 200 但无可用 token | 2 / 69 / 24 / 61 | attempts=3 failures=3 | inconclusive，reason 给出试过的字段与**响应顶层键** |
+| D 凭据只在 Cookie（不配 `--refresh-token`） | 70 / 1 / 1 / 0 | 1/1 成功 | 检出 2 条 |
+| SAFE 参数化对照（配续期） | 89 / 1 / 1 / 0 | 1/1 成功 | 0 条 **且 reliable=true**（真的测过才允许阴性成立） |
+
+令牌"何时失效"由靶站的**虚拟时钟**（每条业务请求拨快 20s）决定，不用真实 TTL ——
+靠 sleep 的靶场在 CI 上是抛硬币，快慢两种情况测的根本不是同一件事。
+差分档 `node e2e/bearer-lab/run.mjs --break-chain`：把 B 的 `--refresh-url` 摘掉重跑
+⇒ 检出从 2 掉回 0、白打注入从 0 涨回 61、续期请求 0 次（证明 B 那套证据不是白送的）。
+
+靶场自身也返工过三处（都是"夹具不像真目标"）：① `--cookie` 静态塞刷新凭据 → 改成靶站
+`Set-Cookie` 下发（真实实现靠会话 jar，而 `--cookie` 会被当注入面、由检测器拼头，
+续期请求走 `client.request` 那条路根本不经过它）；② 每轮必须复位 `cookieIssued`
+（不复位则第二轮起靶站再也不发 cookie，症状长得像引擎坏了：续期全 400 + 报告 session_expired）；
+③ 初始那枚短命、续期那枚长命（两边都短会把 A/B 的差别淹成"每 3 条续一次期"的同一种纹理）。
+
+#### ⑥ 门禁与测试（数字来自当场命令）
+
+- 新增 **71 条断言**（数字取自当场命令）：新文件 4 个 = `bearerKeeper.test.js` 24 +
+  `bearerKeeper.wiring.test.js` 14 + `validity.refresh.test.js` 17 + `cli.auth.reach.test.js` 8；
+  落在既有文件里的 8 条 = `configWhitelist.passthrough` 的 bearerRefresh 子键守卫 1、
+  `scanValidity.test.js` 的认证三形态 3（替换掉原来那条"整站 401 不判"）、
+  前端 `scanConfigSections.bindings` 的分段接线 5。
+- 变异验证：`src/core/bearerKeeper.js` 进 `scripts/mutation-check.mjs` 的 TARGETS（并把 D32 漏挂的
+  `validity.transformReject.test.js` 与本批 `validity.refresh.test.js` 补进 `scanValidityGuard.js`
+  那条目标的挂载面 —— 少挂一个文件 = 那部分断言不参与判定 = 假存活）。
+  `bearerKeeper.js` **65 个位点全杀 / 0 存活**（含 applyBearer 摘掉 auth.headers 冲突键之后重跑）。
+  `scanValidityGuard.js` **没能用门禁跑**：见下方⑦，本机对它做变异会在第一次写文件就崩，
+  所以新增判据的敏感度改用**手写定向变异 7 处**逐条确认变红：
+  neverAuthenticated 判据恒假 / expiredMidScan 恒假 / 挑战计数恒零 / 两形态合并（expired 抢先）/
+  业务响应不清零连续段 / 连续段单向增长 / 传输失败被算成"进去过" —— 7/7 红，每轮之后都复核过
+  文件行数与 `export default` 计数（第 2 条那次 GREEN 是我的锚点打到了构造器的同名初始化行，
+  不是断言不敏感；换成带缩进的锚点后当场变红）。
+  另有 5 处对 `bearerKeeper` 的手写定向变异（去掉"续期失败即放行" / 并发去重失效 / eager 失效 /
+  丢掉 headRequest / 无挑战也续期）逐条确认变红。
+- 全量：`cd server && npm test` **3294 条 / 3290 pass / 4 skipped / 0 fail**（exit 0）；
+  前端 `npx vitest run` **64 个文件 / 561 条全绿**（含本批新增的分段接线 5 条与两处契约判据）。
+- 门禁 `npm run check:all` 全绿（lint / typecheck×3 / arch / nesting / refs / modules /
+  facts / readme / version / release-selftest / lint:rust），`node e2e/run-all.mjs --list`
+  里 `bearer-lab` 已在列（`deps: []` ⇒ 自包含 CI job 自动收）。
+
+#### ⑦ 一条环境事故（值得单独记，因为它会把源码写坏）
+
+`scripts/mutation-check.mjs --file=src/core/scanValidityGuard.js` 在本机**两次**于第一次
+`writeFileSync` 处崩掉（`errno -4094 UNKNOWN, syscall 'open'`），且两次都把源文件留成
+**两份拼接**（第一次 1343 行 / 两个 header，第二次 1532 行）—— 崩在写 mutants 的那一步，
+所以文件里既不是原始也不是变异体，而是"copy1 + copy2 接缝处被吃掉两个字符"。
+同目录的 `bearerKeeper.js` 每次都能正常跑完 65 个位点 ⇒ 不是全局写不了，是这个文件。
+
+处置口径（本批用的就是这套）：
+① 变异门禁跑完**不能只看退出码**，必须复核行数、`export default` 计数、header 计数；
+② 还原用**逆操作**（按接缝切回单份 + 复位首行 banner + 归一 CRLF），
+   **不要 `git checkout -- 文件`** —— 那会把本批对同一文件的其它改动一起删掉
+   （本批对这个文件有 refresh 计数、三形态文案、两条新判据共 152 行改动）；
+③ 切完必须 `node --check` + 跑该文件的全部相关测试，再对照 `git diff` 确认只剩预期改动。
+
+尚未归因：为什么只有这个文件的写入会崩（怀疑是杀软按文件名/体积实时扫描时独占句柄；
+同一份内容手工 `writeFileSync` 连写 8 次都成功，所以不是文件属性或磁盘问题）。
+CI（ubuntu）上没这个现象，所以门禁本身不受影响 —— 但**本机跑 targeted 变异要当心**。
+
+
+
 ### 2026-10-10 批次 D35 —— 加密族与防重放族靶点，顺带挖出「签名被拒判据在这类目标上不可达」
 
 **一句话**：D34 留的账是"只有签名形态有靶点"。补上整包 AES 与 timestamp+nonce 两族之后，

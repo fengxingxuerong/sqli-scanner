@@ -6,6 +6,7 @@
 import * as eventBus from '../../core/eventBus.js';
 import { releaseScanScope } from '../../core/scopeGuard.js';
 import { releaseScanTransform } from '../../core/requestTransform.js';
+import { releaseScanRefresh } from '../../core/bearerKeeper.js';
 
 // 暂停轮询间隔：与 scan/detect.js 的点边界等待同量级，忙等与迟钝之间取个折中
 const PAUSE_POLL_MS = 100;
@@ -62,6 +63,9 @@ export function _disposeScan(scanId) {
     // 「每加一种 per-scan 状态就多一处要记得清」的清单越长越容易漏，能并到已有 lifecycle
     // 里就不要另开一条路径（本仓的桶/jar/scope 泄漏全是因为各自记各自的）。
     releaseScanTransform(scanId);
+    // [D36] 续期状态（拿到的 token、in-flight 去重 promise）同样随扫描回收，
+    // 否则长驻服务里每轮扫描留一个持有 token 的条目 —— 那是要被清掉的凭据，不是缓存。
+    releaseScanRefresh(scanId);
     const rec = this.scans.get(scanId);
     this.scans.delete(scanId);
     eventBus.dispose(scanId);

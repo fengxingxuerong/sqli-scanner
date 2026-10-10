@@ -66,8 +66,18 @@ export function printHelp() {
                              （GET 登录页探测用户名/密码输入框名 + hidden/CSRF 透传 → POST 凭据），
                              会话过期（401/403/登录跳转）自动重登一次并重试原请求。凭据用
                              --auth user:pass；字段名可用 --login-user-field/--login-pass-field 覆盖。
-                             诚实边界：OAuth/JWT 刷新、SAML、验证码、JS 加密提交不支持——此类目标
-                             请人工取 cookie 走 --cookie 静态注入
+                             诚实边界：SAML、验证码、JS 加密提交不支持——此类目标
+                             请人工取 cookie 走 --cookie 静态注入。
+                             API 侧的 Bearer/Token 过期不在此列，用下面的 --refresh-url
+  --refresh-url <url>        Bearer/Token 自动续期（2026-10-10 实战 P0-2；默认关闭）：请求吃
+                             401/403 时 POST 该地址换新 access token，成功后重试原请求一次
+                             （并发只刷一次；拿到新 token 之前不动你从抓包带来的 Authorization）。
+                             access token 半小时过期的目标上不给它 = 后半程全 401 ⇒ 那些参数
+                             全被判「不可注入」，而报告写的是「未检出」。续期失败会把结论降级为
+                             inconclusive 并在 reason 里给出失败原因与响应顶层键名
+  --refresh-token <token>    刷新凭据（不填则依赖会话 Cookie，多数实现如此）
+  --refresh-field <path>     续期响应里取 token 的字段路径（如 data.access_token）；
+                             不填按 access_token / token / data.token 等常见形态探测
   --use-registry             启用声明式 payload 注册表（检测器改用 PAYLOAD_REGISTRY 筛选，受 level/risk/test-filter/test-skip 控制）
   --dump                     启用数据提取（拖库，默认关闭对标 sqlmap 显式 opt-in）
   --dump-all                 全库拖库（对标 sqlmap --dump-all）：枚举所有库后逐库逐表拖，
