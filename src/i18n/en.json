@@ -116,6 +116,7 @@
         "blocked": "Likely WAF-blocked/banned",
         "unreachable": "Target unreachable",
         "session_expired": "Session expired",
+        "transform_rejected": "Request transform rejected by target",
         "target_error": "Target persistently 5xx"
       }
     },
@@ -381,6 +382,9 @@
     "clientCertLabel": "Client certificate PEM path (clientCert, mTLS mutual auth)",
     "clientCertPlaceholder": "e.g. /etc/certs/client.pem (single file holding both cert and key; empty = disabled)",
     "clientCertHint": "When the target requires mutual TLS (corporate/finance gateways), no certificate means the very first request is rejected. Orthogonal to ignoring self-signed certs: that one is 'do I trust the target', this one is 'does the target trust me'",
+    "requestScriptLabel": "Custom request-transform script path (requestScript, signed/encrypted APIs)",
+    "requestScriptPlaceholder": "e.g. /opt/signers/sign.mjs (must live inside REQUEST_SCRIPT_DIR on the engine host; empty = disabled)",
+    "requestScriptHint": "On targets with a sign= parameter or an encrypted body, the injected value breaks the signature, so every request gets a 400 and the report just says 'not detected' - which is not the same as 'not vulnerable'. This script re-signs / re-encrypts each request at the very last step of the scan/detect phase (keep-alive, CSRF page fetches and logins included; the crawl used to discover injection points does not go through it). Note: it is a path on the engine host, not in your browser; the report records which script was used (with sha256), and PoC curl commands do not include the recomputed signature",
     "validationSkipLabel": "Input-validation skip (short-circuit whitelist-blocked params)",
     "validationSkipHint": "When on, whitelist-blocked params skip 200+ futile requests; when off, full detection still runs (audit/control scenario)",
     "payloadTuning": "Payload & Response-Match Tuning",

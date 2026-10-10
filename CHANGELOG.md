@@ -4,6 +4,118 @@
 
 ## [Unreleased]
 
+### 2026-10-10 批次 D33 · 收下一笔**已在 HEAD 上红着**的门禁账（`ciWindowsOnly` 登记表第三次漂移）
+
+**发现方式**：跑 D32 的全量服务端套件时红了两条（`自证③` + `① 检出`）。
+**先归因再动手**：用 `git worktree add --detach … HEAD` 在**不含本批任何改动**的干净检出上
+复跑同一份守卫 ⇒ 同样 2 条红 ⇒ 判定为既有红（D30 遗留），不是 D32 引入的。
+（只看"我改完它红了"就会把别人的账接到自己头上，反之亦然。）
+
+**根因**：D30 给 `e2e/run-all.mjs` 加「能自起 PG 就不算缺依赖」时插入了新代码，
+把登记表赖以定位的**行号锚点**顶掉了（195→225、263→318），并新增一处未登记命中（152）。
+它为什么当时没红：`run-all` 不在 acceptance 的收敛集里，要等下一次全量服务端套件才撞上。
+
+**修法**：按真实行号重新登记，三条例外**逐条读码核实**（登记理由必须是事实，不是"已检查"）：
+
+| 命中 | 为什么在 ubuntu 上安全 |
+|---|---|
+| `run-all.mjs:152` `postgres.exe` | 同一表达式里并列试 POSIX 名 `postgres`，且整体包在 `fs.existsSync(...)` 里 ⇒ 两者都不存在时返回 false ⇒ PG 类靶场按口径如实 SKIP（不把环境问题记成靶场失败） |
+| `run-all.mjs:225` `C:\Users\…\python.exe` | 是 `PY_CANDIDATES` 的**一个候选**，逐个真跑 `-c print(1)` 才算可用，列表尾部是 PATH 上的 `python`/`python3` ⇒ ubuntu 落到它们 |
+| `run-all.mjs:318` `taskkill` | 在 `if (process.platform === 'win32' && p.pid)` 之内（守卫在**上一行**，行级判据看不见），else 分支走 `p.kill('SIGKILL')` |
+
+**没有做的事**：TODO §8 提的正解（把登记键换成**内容锚点**）没做 —— 本批只把账收平。
+⇒ 下次上游插入仍会漂；这条已从「一天漂两次」升到「三个月漂三次」，判据形态本身该改。
+验证口径与两种改法写在 TODO §8（插 10 行注释必须仍绿、删掉那两行必须红）。
+
+**结果**：`node --test tests/ciWindowsOnly.guard.test.js` → 5/5 绿。
+
+
+### 2026-10-10 批次 D32 · 实战 P0-1：签名/加密参数接口的请求变换扩展点（功能与判据成对交付）
+
+**一句话**：目标接口带 `sign=` 签名、整参加密或 timestamp+nonce 防重放时，扫描器改一个字段就破坏签名
+⇒ 目标恒回 400 ⇒ 报告写「未检出」，而使用者读到的是**一句安全结论**。本批补上「让请求重新合法」的
+扩展点（`--request-script` / `config.requestScript`），并同时补上「它其实没让请求合法」的显形判据
+（`transform_rejected`）—— 只做前者会造出一个新的静默假阴性来源。
+
+需求来源：渗透实战视角的缺口盘点（本会话），排在第一位的判据是「这条通道失效时是否让整场测试零产出」
+—— 加密/签名参数是唯一让**所有**检测通道一起出局的一类。
+
+#### ① 扩展点：挂在包装链最内层的最后一道加工
+
+`server/src/core/requestTransform.js`（新）+ 接线 `engine/scan/scanClient.js`。
+
+| 决策 | 理由 |
+|---|---|
+| 挂在 `forScan` 之后、safeUrl/csrf/login 之前（**最内层**） | ① 签名必须是最后一道加工：那三层都往请求里加东西（保活 cookie、csrf token、登录会话），挂在它们之外 ⇒ 后加的内容不在签名范围内；② 那三层的**自发请求**（取页、登录 POST）调的是传给它们的那一层视图，挂外层会整批绕过签名。实测：`withSafeUrl(sc, …)` 改成 `withSafeUrl(view, …)`，否则保活页永远不带签名 |
+| 变换在 SSRF/scope 校验**之前** | 校验作用于变换后的 URL。反过来挂，这个扩展点立刻变成 SSRF 跳板 |
+| 只允许替换 `url/method/headers/data/params` | `signal`（stop/暂停）、`scanId`、`rateGroup`、`retry` 是合规闸门；否则一句 `return {...req, signal: undefined}` 就把「随时能停手」摘了 |
+| 传副本、不回写入参 | HttpClient 重试/认证重放**复用同一个 opts 对象**，原地签一次 = 第二次签在已签名报文上（恒错） |
+| 脚本失败 ⇒ **不发**（`REQUEST_SCRIPT_FAILED` 6008） | 「算不出签名就发没签名的」正是本条要消灭的静默假阴性；错误经 ctxBase 回流，该点按既有网络失败语义记未决 |
+| HEAD 用**变换后的** URL 作第一个实参 | `HttpClient.headRequest(url, opts)` 用显式 url 覆盖 opts.url —— 只改 opts 等于白签 |
+| 脚本必须位于 `REQUEST_SCRIPT_DIR` 内（CLI 与 REST 同一道闸） | 出口层的代码注入面，且同一引擎既跑终端也跑长驻服务；按「谁调用的」分别放行迟早漏一处 |
+| `start()` 里加载失败即抛（扫描不启动） | 与 `customPayloads` 的「校验失败即硬失败」同口径；REST 得 `code=6007`，不会变成「200 + 扫完说未检出」 |
+| `summary.constraints` 自动写一条 PoC 警示（含脚本 sha256） | 报告里的 PoC curl **不含**重算后的签名，客户复制即失败；这句不写就是不实交付 |
+
+#### ② 新判据 `transform_rejected`：两种成因分开定罪
+
+`server/src/core/scanValidityGuard.js`。素材由变换层在**加密之前**打标回传（`setTransformObserver`）——
+整包加密后 `looksLikeInjection(密文)` 恒 false，守卫已经分不出基线与注入，而那恰是本判据的核心区分。
+
+| 观测 | 成因 | 后果 |
+|---|---|---|
+| 未注入的基线请求连续 ≥2 次被判非法（400/415/422）且从未成功 | `baseline`：脚本与目标不匹配（密钥/字段集/顺序） | `status=transform_rejected`、`reliable=false`、`shouldAbort=true`、verdict→`inconclusive` |
+| 基线正常而注入请求 ≥8 次全被拒且无一次成功 | `injection`：签名没覆盖被注入的那个参数 | 同上，`advice` 换成「把参数纳入签名范围」 |
+
+被拒族只收 400/415/422：403/406/429/503 属既有 `blocked`、401 属会话族、5xx 属 `target_error`/error
+技术自身产物，连不上单独记 `netErr`（连不上 ≠ 签名错）。四套判据各管一件事，混用必互踩。
+`transformActive=false`（未用扩展点）时 `observeTransform` 直接返回 ⇒ 存量判定路径零改动。
+严重度排在 `blocked` 之上（5 > 3）：blocked 是「对面有 WAF 挡着」，本状态是「我们自己发的东西不合法」。
+
+#### ③ 测试与缺陷注入（新增 42 条用例 / 21 处变异）
+
+`server/tests/requestTransform.test.js`（19）· `requestTransform.wiring.test.js`（10）·
+`validity.transformReject.test.js`（13）。接线套件从 `sm.getScanClient` 进、从内层客户端**实际收到的
+请求**出（§O/§N/§L 那一族「被调函数是对的、调用链下一环是坏的」）。
+
+变异结果：**20 处各杀且仅杀 1 条**（fail-closed 降级发送、允许改任意 opts 键、原地回写、injected
+后置、白名单根包含判定失效、未设根也放行、校验失败静默返回 null、退役不回收、HEAD 用原 URL、
+safeUrl/csrf/login 三层各自的挂载点退回 `sc`、4xx 全算被拒、传输失败当被拒、严重度调低、
+不中止、连续段不复位、注入成功过仍判被拒、基线成功过仍判配错…），1 处（变换层整层不接线）杀 5 条。
+**挂载点三条尤其值得记**：`withSafeUrl/withCsrf/withLoginFlow` 各自把实参从 `view` 改回 `sc`
+都会让对应那条用例单独变红 ⇒ 「挂在包装链最内层」不是写法偏好，是被逐层钉住的结论。
+每次变异后按字节还原并校验 sha256 一致。
+
+**两处「测试自己不够格」的现场**（不修就是假绿）：
+1. 「未设 `REQUEST_SCRIPT_DIR` 应拒绝」这条**第一次没杀掉变异**：把 root 判据摘掉后，
+   `existsSync('')` 为 false 会落到「目录不存在」那一支，而断言只按 `/REQUEST_SCRIPT_DIR/` 匹配 ⇒ 照样绿。
+   改成断言该支独有的文案（`拒绝加载任何脚本`）后才杀。⇒ 与「判据少一侧」同族：**多分支共用一句
+   关键词时，断言必须取那一支独有的文本**。
+2. 包含判定用「不存在的路径」测 ⇒ 「不存在」分支先命中，包含判定坏没坏看不出来。
+   改为在根**之外**真写一个存在的脚本。
+
+另：既有 `summary 契约字段齐全` 断言当场把新增的 `counts.transform` 判红（它按固定字段名 deepEqual），
+已把 `transform` 及其子键集一并钉进契约，并同步前端 `ScanValidity.status` 与两处状态标签映射
+（`ValidityBanner` / `progressUtils`；后者对未知状态 fallback 到 `ok`，漏一条就会把「签名被拒」显示成「正常」）。
+
+#### ④ 入口与文档
+
+CLI `--request-script`（`args.js`/`config.js`/`help.js`）· REST `config.requestScript`
+（`KNOWN_CFG_KEYS` + `scalarsEgress` 形状校验）· 面板新增字段（`ScopeSecuritySection`，紧邻 clientCert）·
+`defaults.requestScript=''`（默认关，零行为变化）· 新文档 `docs/请求变换脚本.md`（含上手检查表与
+「没做什么」节：不做签名算法逆向、不做 OAuth/验证码）· README 功能表与环境变量表各补一行。
+
+**诚实边界（两条，写文档时都逐字核对过）**：
+1. 本批全部为**单元 + 接线级**验证，未接真机靶场 —— 仓库内没有带签名参数的靶点，
+   `transform_rejected` 的两个阈值（基线连续 2 次、注入 8 次）来自既有 `blockMinHits`/`authStreak` 的
+   同族口径而非实测分布。下一步若要引数字，需先造一个「只认正确 sign、改字段即 400」的靶点进 `e2e/`。
+2. **覆盖面 = per-scan 视图的流量**，不含注入点发现阶段的爬虫/表单收集（那一路用
+   `ScanManager` 构造时的模块级单例 `httpClient`，调用时不带 scanId，也因此此前同样不受暂停闸与
+   per-scan 限速桶约束 —— 既有架构属性，不是本批新造的洞）。
+   ⇒ 初稿在 README/文档/help/报告文案里写的「每条出站请求」是** overstated**，已逐处改为
+   「扫描/检测阶段经 per-scan 客户端发出的每条请求」，并把爬虫例外写进文档 §7 与 TODO 第 6 条。
+   这条是本批唯一一处「自己写完才发现说法比事实大」，按原样留在案发现场。
+
+
 ### 2026-10-10 批次 D31 · 废掉一笔「纯函数测试全绿、生产路径有害」的改动 + 加上防复发守卫
 
 **一句话**：工作区里躺着一版未提交的改动（把 WAF 编码兜底链从「替换末条」改成「追加末尾」）。

@@ -56,12 +56,20 @@ export const LOG_COLOR: Record<string, string> = {
 type TFunc = ReturnType<typeof useTranslation>['t'];
 
 // 可信度状态 → 中文短标签（与 ValidityBanner 同一组 i18n 键，防漂移）
-const VALIDITY_STATUS_KEY: Record<string, string> = {
+// ⚠ 键类型钉成 ScanValidity['status'] 而不是 string：本表下方对未知状态 **回退显示「可信度正常」**，
+//   后端新增状态若忘了在这里登记，界面上就会出现一条"被目标判非法的扫描显示成正常"——
+//   钉成完整联合类型后，漏登记在 `npm run typecheck` 就红，而不是等到人盯界面。
+type ValidityStatus = ScanValidity['status'];
+const VALIDITY_STATUS_KEY: Record<ValidityStatus, string> = {
   ok: 'report.validity.status.ok',
   blocked: 'report.validity.status.blocked',
   unreachable: 'report.validity.status.unreachable',
   session_expired: 'report.validity.status.session_expired',
   target_error: 'report.validity.status.target_error',
+  // [D32] 与 ValidityBanner 同一组键；漏一条就会在时间线里显示成 "ok"（fallback 到 ok 是
+  // 本表 `|| 'report.validity.status.ok'` 的既有行为）—— 把「签名被拒」显示成「正常」，
+  // 正是这条判据要防的那件事。漏登记的形态已由 TS2741 实测抓到（本行删掉后 typecheck 即红）。
+  transform_rejected: 'report.validity.status.transform_rejected',
 };
 
 // scan_validity / scan_validity_abort 共用渲染：状态标签 + 实测原因（+ 中止时的未完成点数）

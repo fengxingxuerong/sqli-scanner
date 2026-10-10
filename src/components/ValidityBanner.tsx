@@ -21,6 +21,8 @@ export const VALIDITY_STATUS_LABEL_KEY: Record<ScanValidity['status'], string> =
   unreachable: 'report.validity.status.unreachable',
   session_expired: 'report.validity.status.session_expired',
   target_error: 'report.validity.status.target_error',
+  // [D32 实战 P0-1] 自定义请求变换被目标判非法（签名/加密接口）
+  transform_rejected: 'report.validity.status.transform_rejected',
 };
 
 export type ValidityMode = 'inconclusive' | 'negative' | 'hit';

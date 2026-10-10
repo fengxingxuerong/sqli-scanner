@@ -81,6 +81,9 @@ const KNOWN_CFG_KEYS = new Set([
   'scope',
   // [P1-FIX 2026-09-08 实战批次] HTTP 层实战能力：自签证书目标 / 环境变量代理 / 代理下目标校验下放
   'insecureTls', 'trustProxyEnv', 'ssrfViaProxy', 'clientCert',
+  // [D32 实战 P0-1] 自定义请求变换脚本路径（签名/加密接口）。⚠ 只到「形状合法」为止，
+  // 真正加载在 ScanManager.start（ensureScanTransform），失败即不启动扫描。
+  'requestScript',
   // [P0-FIX 2026-09-09] 本地/私网目标绕过环境变量代理（默认 true）
   'proxyBypassLocal',
   // [2026-09-24] 引擎真读、此前**任何入口都设不了**的三键（见 sanitizeStart 内注释）：

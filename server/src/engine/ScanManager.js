@@ -26,6 +26,8 @@ import { logger } from '../core/logger.js';
 // CLI（server/bin/cli.js）与测试/复用型调用不进路由，只放路由会造成「Web 有范围约束、
 // CLI 没有」的双标（而 CLI 才是渗透现场的主入口）。
 import { parseScope, registerScanScope } from '../core/scopeGuard.js';
+// [D32 实战 P0-1] 自定义请求变换（签名/加密参数）扩展点；回收挂在 lifecycle._disposeScan
+import { ensureScanTransform } from '../core/requestTransform.js';
 import { runScanLoop } from './scanRunner.js';
 import { extractAll, extractByScope } from './extractScope.js';
 // [大文件拆分 2026-09-20] 注入点预过滤家族（~390 行、9 个方法）外移至 scan/prefilter.js。
@@ -145,6 +147,23 @@ export class ScanManager {
     try {
       registerScanScope(scanId, parseScope(target.config && target.config.scope));
     } catch { /* 登记失败不阻断扫描（入口侧已校过一次） */ }
+    // [D32 实战 P0-1] 自定义请求变换（签名/加密参数）。**失败即不启动扫描**（await 抛出）：
+    // 与 customPayloads 同口径 —— 静默忽略脚本会让使用者以为自定义签名生效了，
+    // 然后在目标上跑一整轮全被拒的请求，最后产出一份「未检出」。
+    // 登记成功后必须把「用了脚本」写进 summary.constraints：报告里的 PoC curl
+    // **没有**重算签名，直接复制必然失败，这句不写就是不实交付。
+    const xform = await ensureScanTransform(scanId, target.config);
+    if (xform) {
+      report.summary = report.summary || {};
+      const list = Array.isArray(report.summary.constraints) ? report.summary.constraints : [];
+      list.push(
+        `本次扫描/检测阶段的每条出站请求都经过自定义变换脚本 ${xform.file}` +
+        `（sha256=${xform.sha256.slice(0, 16)}…，含保活/CSRF 取页/登录这些非注入请求；` +
+        '注入点发现阶段的爬虫请求不经此层）：报告中的 PoC curl 未重算签名，' +
+        '直接复制会因签名/加密不匹配而失败，复现必须带同一脚本重放',
+      );
+      report.summary.constraints = list;
+    }
     this.scans.set(scanId, { target, report, status: 'running', cancelled: false, createdAt: Date.now(), abortController: new AbortController() });
     eventBus.create(scanId);
     // [MERGED: security] 事件脱敏：SSE 不再携带 target 凭据（auth/cookie/header）

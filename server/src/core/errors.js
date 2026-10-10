@@ -32,6 +32,9 @@ export const ErrorCode = {
   EXPLOIT_UNAUTHORIZED: 6005,
   RATE_LIMITED: 4290, // 限速（AI 报告等高频接口）
   AI_REPORT_DISABLED: 6006, // AI 报告未启用（未显式设置 AI_REPORT_API_BASE，拒绝默认外发）
+  // [D32 实战 P0-1] 自定义请求变换（签名/加密参数扩展点）
+  REQUEST_SCRIPT_INVALID: 6007, // 脚本路径/导出形态非法 —— 扫描不启动（不降级为「忽略脚本继续扫」）
+  REQUEST_SCRIPT_FAILED: 6008, // 脚本执行异常或产出非法请求 —— 该请求不发（fail-closed）
 };
 
 // 统一错误：携带 code 便于路由层映射响应

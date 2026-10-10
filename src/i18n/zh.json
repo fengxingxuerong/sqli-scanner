@@ -116,6 +116,7 @@
         "blocked": "疑似被 WAF/封禁",
         "unreachable": "目标不可达",
         "session_expired": "会话已失效",
+        "transform_rejected": "请求变换被目标判非法",
         "target_error": "目标持续 5xx"
       }
     },
@@ -381,6 +382,9 @@
     "clientCertLabel": "客户端证书 PEM 路径（clientCert，mTLS 双向认证）",
     "clientCertPlaceholder": "如 C:\\certs\\client.pem（单文件同时含证书与私钥；留空=不启用）",
     "clientCertHint": "目标要求 TLS 双向认证时（企业内网/金融网关）没有证书连第一跳都被拒。与「忽略自签证书」正交：那条管我信不信目标，这条管目标信不信我",
+    "requestScriptLabel": "自定义请求变换脚本路径（requestScript，签名/加密接口）",
+    "requestScriptPlaceholder": "如 D:\\signers\\sign.mjs（必须位于引擎侧环境变量 REQUEST_SCRIPT_DIR 之内；留空=不启用）",
+    "requestScriptHint": "目标带 sign= 签名或整参加密时，注入值会破坏签名 ⇒ 目标恒回 400，而报告只会写「未检出」——那不等于没有洞。本脚本在扫描/检测阶段每条出站请求的最后一环重算签名/重新加密（含保活、CSRF 取页、登录；注入点发现阶段的爬虫请求不经此层）。⚠ 是引擎所在机器的路径，不是本浏览器的；报告会自动标注启用了哪个脚本（含 sha256），PoC curl 未含重算后的签名",
     "validationSkipLabel": "输入校验跳过（参数被白名单拦死时短路跳过）",
     "validationSkipHint": "开启时对被拦死的参数可省 200+ 无效请求；关闭后仍照跑完整检测（审计/对照场景）",
     "payloadTuning": "payload 与响应判定调优",

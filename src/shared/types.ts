@@ -112,7 +112,7 @@ export type EventType =
 
 /** 结论可信度摘要（report.validity / report.summary.validity / scan_validity* 事件同构） */
 export interface ScanValidity {
-  status: 'ok' | 'blocked' | 'unreachable' | 'session_expired' | 'target_error';
+  status: 'ok' | 'blocked' | 'unreachable' | 'session_expired' | 'target_error' | 'transform_rejected';
   reliable: boolean; // false = 阴性结论（未检出）不成立，UI 必须显式提示
   reason: string; // 后端给出的一句话原因（中文，含实测数字）
   counts: {
@@ -121,6 +121,17 @@ export interface ScanValidity {
     blockHits: number; // 窗口内拦截特征命中次数
     serverErr: number; // 窗口内 5xx 次数
     authLostHits: number; // 会话失效命中次数
+    // [D32 实战 P0-1] 自定义请求变换（签名/加密）一族的计数；未启用时全 0，字段恒存在
+    // （报告契约不随配置漂移）。kind 区分两种处置：baseline=脚本本身配错，injection=签名没覆盖被注入的参数
+    transform?: {
+      baselineRejects: number;
+      baselineRejectStreak: number;
+      baselineOk: number;
+      injectRejects: number;
+      injectOk: number;
+      netErr: number;
+      kind: 'baseline' | 'injection' | null;
+    };
   };
   blockRatio: number; // 拦截占比（0~1）
   suggestBackoffMs: number | null; // Retry-After 实测值（无则 null）
@@ -304,6 +315,12 @@ export interface ScanConfig {
   // 没有客户端证书连第一跳都被拒 —— 检测阶段之前就已出局。与 insecureTls 正交：
   // 一个管「我信不信目标」，一个管「目标信不信我」。空串/未设 = 不启用。
   clientCert?: string;
+  // [D32 实战 P0-1] 自定义请求变换脚本路径（签名/加密参数接口）：扫描/检测阶段每条出站请求的
+  // 最后一环调用其 transform(req) 重算 sign / 重新加密整包（含保活、CSRF 取页、登录提交；
+  // 注入点发现阶段的爬虫请求不经此层）。不带它，注入值会破坏签名 ⇒ 目标恒回 400
+  // ⇒ 报告写「未检出」，而那不等于没有洞。⚠ 指引擎所在机器的路径，且必须位于服务端
+  // REQUEST_SCRIPT_DIR 内；空串/未设 = 不启用（零行为变化）。详见 server/src/core/requestTransform.js
+  requestScript?: string;
   // 输入校验跳过（默认开）：参数被白名单拦死时跳过 200+ 无效请求；false 可强制完整检测。
   validationSkip?: boolean;
   // ── [P0-FIX 2026-09-09] 后端已支持、UI 此前无入口的调优键 ──

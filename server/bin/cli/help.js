@@ -110,6 +110,14 @@ export function printHelp() {
   --tamper <name,name>       tamper 插件链（逗号分隔，对标 sqlmap --tamper）；传 .js 文件路径可加载自定义插件
   --payload-file <file.json>  追加自定义检测条目（与 registry.json 同 schema，见 docs/自定义检测条目.md）；
                              只追加、不允许覆盖内置条目；不传即与内置基线完全一致
+  --request-script <file.js>  自定义请求变换脚本（签名/加密参数接口）：扫描/检测阶段每条出站请求
+                             的最后一环调用其 transform(req) 重算 sign / 重新加密整包
+                             （含保活/CSRF 取页/登录；注入点发现阶段的爬虫请求不经此层）。
+                             目标带签名或加密参数时
+                             不带本开关的结果是「未检出」，而那**不等于没有洞**——注入值破坏了签名，
+                             从未抵达 SQL。脚本必须位于环境变量 REQUEST_SCRIPT_DIR 指定的目录内
+                             （出口层的代码注入面，故不给自由路径）；加载/执行失败一律硬失败，
+                             不会退化成「发没签名的原始请求」。用法见 docs/请求变换脚本.md
   --identify-waf             仅识别 WAF 厂商并给出推荐 tamper 链，不发起注入检测
                              （对标 sqlmap --identify-waf；用于扫描前先摸清对面是什么 WAF）
   --smart                    智能启发式（别名，等价 prefilter: true，跳过非注入参数）

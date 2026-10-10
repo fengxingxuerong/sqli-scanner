@@ -54,10 +54,31 @@ export default function ScopeSecuritySection({ config, onChange }: ScanConfigSec
             {t('scanConfig.clientCertHint')}
           </Typography>
         </Box>
+        {/* ── [D32 实战 P0-1] 自定义请求变换（签名/加密参数接口）──────────────────
+            与 clientCert 同类：缺了它整站「扫不出」属能力缺失，不是便利开关。
+            面板必须说清两件事：① 路径在**引擎所在机器**上（不是浏览器这一侧）；
+            ② 必须位于服务端 REQUEST_SCRIPT_DIR 之内 —— 填错会得到一句硬错误
+            （扫描不启动），而不是静默按无签名继续扫、最后产出满屏「未检出」。 */}
+        <Box>
+          <Typography variant="caption" color="text.secondary">{t('scanConfig.requestScriptLabel')}</Typography>
+          <input
+            className="mt-1 w-full px-3 py-2 border rounded text-sm"
+            placeholder={t('scanConfig.requestScriptPlaceholder')}
+            aria-label={t('scanConfig.requestScriptLabel')}
+            value={config.requestScript ?? ''}
+            onChange={handleText('requestScript')}
+          />
+          <Typography variant="caption" color="text.disabled">
+            {t('scanConfig.requestScriptHint')}
+          </Typography>
+        </Box>
         <FormControlLabel
           control={<Switch checked={config.validationSkip !== false} onChange={handleToggle('validationSkip')} />}
           label={t('scanConfig.validationSkipLabel')}
         />
+        <Typography variant="caption" color="text.disabled">
+          {t('scanConfig.validationSkipHint')}
+        </Typography>
         <Typography variant="caption" color="text.disabled">
           {t('scanConfig.validationSkipHint')}
         </Typography>

@@ -334,6 +334,16 @@ export const defaults = {
   // 与 insecureTls 正交：一个管「我信不信目标证书」，一个管「目标信不信我」。
   clientCert: null,
 
+  // [D32 实战 P0-1] 自定义请求变换脚本（CLI --request-script）：签名/加密型接口的扩展点。
+  // ''=不启用（默认，零行为变化）。非空时，扫描/检测阶段每条出站请求在出口的**最后一环**交给该模块的
+  // transform(req) 重算签名/重新加密（含保活、CSRF 取页、登录提交；注入点发现阶段的爬虫不走 ——
+  // 那一路用的是 ScanManager 持有的模块级单例客户端）。目标带 sign=、整包 AES、timestamp+nonce
+  // 防重放时，不改写请求的扫描器只会拿到 400「签名错误」，然后把它写成「未检出」（静默假阴性）。
+  // ⚠ 这是出口层的代码注入面 ⇒ 脚本必须位于环境变量 REQUEST_SCRIPT_DIR 指定的目录内；
+  //   加载失败/执行异常一律硬失败（扫描不启动 / 该请求不发），不降级为"忽略脚本继续扫"。
+  //   详见 core/requestTransform.js 文件头四条硬约束。
+  requestScript: '',
+
   // ── [P1-FIX 2026-09-08 ②] 代理环境变量信任（对标 curl / sqlmap）─────────────────
   // true（默认）：config.proxy 为空时按 HTTPS_PROXY → https_proxy → HTTP_PROXY → http_proxy →
   // ALL_PROXY 顺序取代理，NO_PROXY 命中目标 host（支持 * 与逗号分隔域名后缀）时不走代理；

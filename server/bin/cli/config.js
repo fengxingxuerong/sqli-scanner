@@ -225,6 +225,10 @@ export function buildConfig(args) {
   if (args.insecureTls) config.insecureTls = true;
   // --cert：mTLS 客户端证书 PEM 路径（证书+私钥同文件；引擎加载时校验形状，失败抛错）
   if (typeof args.clientCert === 'string' && args.clientCert) config.clientCert = args.clientCert;
+  // [D32 实战 P0-1] --request-script：自定义请求变换脚本（签名/加密参数接口）。
+  // 与 --cert 同层级（出口层），但加载失败是**硬失败**：ScanManager.start 里抛错、扫描不启动
+  //（静默忽略脚本 = 跑一整轮全被目标拒的请求，最后产出「未检出」）。
+  if (typeof args.requestScript === 'string' && args.requestScript) config.requestScript = args.requestScript;
   // --no-validation-skip：显式关闭输入校验短路（引擎默认开）；不影响预筛 prefilter
   if (args.noValidationSkip) config.validationSkip = false;
   // [P0-FIX 2026-09-09] --no-proxy-bypass-local：显式恢复「本地也走环境变量代理」

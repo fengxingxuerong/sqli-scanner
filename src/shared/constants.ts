@@ -146,6 +146,10 @@ export const SCAN_CONFIG_KEYS = [
   // [2026-10-01] clientCert：mTLS 客户端证书 PEM 路径（sqlmap --cert）。目标要求双向认证时
   // 没有证书连第一跳都过不去 ⇒ 整站测不了（能力缺失，不是便利开关），故接进面板。
   'proxy', 'auth', 'insecureTls', 'clientCert', 'validationSkip', 'scope',
+  // [D32 实战 P0-1] requestScript：自定义请求变换脚本（签名/加密接口）。与 clientCert 同类：
+  // 缺了它整站「扫不出」是能力缺失而非便利开关 —— 但它指的是**引擎所在机器**上的路径，
+  // 且必须位于服务端环境变量 REQUEST_SCRIPT_DIR 内（面板填错会得到一句硬错误，不会静默继续）。
+  'requestScript',
   // WAF 规避（tamper 链等整块配置）
   'wafEvasion',
   // [2026-09-29 UI-REACH] 能力缺失类 8 键接进面板（登记表分类治理时由守卫⑧钉住的那批：
@@ -225,6 +229,8 @@ export const SCAN_CONFIG_VALUE_TYPES: Record<ScanConfigKey, ScanConfigValueType>
   insecureTls: 'boolean',
   // mTLS 证书路径：string（空 = 关闭态，从请求体省略；后端 clamp 同义）
   clientCert: 'string',
+  // [D32] 请求变换脚本路径：string（空 = 不启用；后端 sanitize 只收非空串）
+  requestScript: 'string',
   validationSkip: 'boolean',
   prefilter: 'boolean',
   skipStatic: 'boolean',

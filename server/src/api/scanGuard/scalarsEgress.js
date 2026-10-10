@@ -43,6 +43,16 @@ export function guardScalarsEgress(config, cfg) {
     }
     config.clientCert = cfg.clientCert.trim();
   }
+  // [D32 实战 P0-1] requestScript：自定义请求变换脚本路径（签名/加密参数接口）。
+  // 入口只做形状（非空字符串 + 长度上限）；存在性、REQUEST_SCRIPT_DIR 白名单根、
+  // 导出形态三道校验在 ScanManager.start 的 ensureScanTransform 里**硬失败**（扫描不启动），
+  // 因为「收了路径却没加载成功」若降级继续，产出的是整轮静默假阴性。
+  if (cfg.requestScript !== undefined && cfg.requestScript !== null) {
+    if (typeof cfg.requestScript !== 'string' || !cfg.requestScript.trim() || cfg.requestScript.length > 1024) {
+      throw new AppError(ErrorCode.INVALID_PARAM, 'requestScript 须为非空脚本路径（≤1024 字符）');
+    }
+    config.requestScript = cfg.requestScript.trim();
+  }
   const trustProxyEnv = pickBool(cfg, 'trustProxyEnv');
   if (trustProxyEnv !== undefined) config.trustProxyEnv = trustProxyEnv;
   // [P0-FIX 2026-09-09] 生产护栏透传：productionMode 默认 true（按生产环境对待遇），

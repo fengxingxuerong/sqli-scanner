@@ -32,11 +32,18 @@ export const VALIDITY_DEFAULTS = {
   authStreak: 3, // 注入请求连续 401/登录跳转次数阈值
   serverErrRatio: 0.8, // 窗口内 5xx 占比阈值
   minSamples: 10, // 比例类判定的最小样本数
+  // [D32 实战 P0-1] 自定义请求变换（签名/加密）生效时的两条显形阈值。
+  // ⚠ 全部只在 transformActive 时参与判定 ⇒ 未用扩展点的扫描一个计数都不动。
+  transformBaselineRejects: 2, // 基线（未注入）请求连续被拒达此数且从未成功 → 脚本与目标不匹配
+  transformInjectRejects: 8, // 注入请求被拒绝对次数下限（防小样本误判，与 blockMinHits 同构）
 };
 
 // 明确的拦截状态码：403 Forbidden / 406 不可接受（ModSecurity 常用）/
 // 429 限速封禁 / 503 服务不可用（WAF 过载拦截常以此返回）。
 export const BLOCK_STATUSES = new Set([403, 406, 429, 503]);
+
+// [D32 实战 P0-1] 「请求本身被目标判非法」的状态码（签名/加密参数被破坏后的典型回包）。
+export const REQUEST_REJECT_STATUSES = new Set([400, 415, 422]);
 
 // 通用拦截页文案（保守正则，仅在 status>=400 时才参与判定）。
 // 不追求识别厂商，只求「这次请求被中间设备拒了」——厂商指纹由 waf/WafIdentifier 负责。
@@ -81,7 +88,17 @@ export const SQL_ERROR_SIG =
   /(SQL syntax|syntax error at or near|near\s+["'][^\n]{0,80}?["']\s*:\s*syntax error|XPATH syntax error|extractvalue|updatexml|mysql_fetch|ORA-\d{5}|PG::|PostgreSQL.*ERROR|sqlite3\.|SQLSTATE\s*\[|unclosed quotation|incorrect syntax near|unrecognized token|Microsoft SQL Server|conversion failed|unknown column|Division by zero|SQL\d{4}[NRT]|DB2 SQL Error|Adaptive Server|Sybase\s*(?:error|message)|SQL error code|Firebird.*(?:error|exception)|isc_\d+|Informix\s+SQL|JdbcSQLException|org\.h2\.jdbc|org\.hsqldb|org\.apache\.derby|Syntax error in SQL statement|Syntax error: Encountered|Cannot parse|Microsoft Access|Jet.*Database|ODBC|MonetDB.*(?:error|exception)|MonetDB\s+\d{5})/i;
 
 // 状态严重度排序（越大越严重）：判定与粘滞共用同一优先级。
-const SEVERITY = { ok: 0, target_error: 1, session_expired: 2, blocked: 3, unreachable: 4 };
+// [D32] transform_rejected 排在 blocked 之上：blocked 是「对面有 WAF 挡着」（至少请求合法、
+// 判定素材真实存在，只是被中间设备吃掉）；transform_rejected 是「我们自己发出的东西不合法」
+// ⇒ 整轮一个注入都没抵达业务逻辑，阴性结论的失效程度更彻底，必须盖过其它标签显示出来。
+const SEVERITY = {
+  ok: 0,
+  target_error: 1,
+  session_expired: 2,
+  blocked: 3,
+  unreachable: 4,
+  transform_rejected: 5,
+};
 
 // [2026-09-29 收敛] getHeader 全仓唯一实现在 core/getHeader.js（此前本文件、blockPolicy、
 // WafIdentifier 三处各持一份且已漂移）。这里导入供本模块自用，并原样再导出保住既有引用路径。
@@ -114,6 +131,22 @@ export function isBlockedResponse(res) {
   const text = String(res.data ?? res.body ?? '');
   if (!text) return false;
   return GENERIC_BLOCK_SIG.test(text);
+}
+
+/**
+ * [D32 实战 P0-1] 是否为「这个请求本身被目标判为非法」：400 / 415 / 422。
+ *
+ * 为什么单列一族（而不是并进 isBlockedResponse）：签名/加密型接口拒绝被改过的请求时，
+ * 回的是**应用层**的「请求非法 / 签名错误」（400 系），不是中间设备的拦截页（403/406/429/503）。
+ * 两者含义完全不同：后者要人去对付 WAF，前者要人去修自己的签名脚本。
+ * 故意不收 401/403（认证与拦截各有各的既有判定）、不收 404（path 段的 404 是正常产物，
+ * 收进来会把大量真实扫描判成签名被拒）。
+ * @param {{status?: number}|null} res
+ * @returns {boolean}
+ */
+export function isRequestReject(res) {
+  if (!res) return false;
+  return REQUEST_REJECT_STATUSES.has(pickStatus(res));
 }
 
 /**
@@ -221,6 +254,25 @@ export function evaluateStatus(m) {
 }
 
 /**
+ * [D32 实战 P0-1] 由变换计数判出签名被拒状态（纯函数，便于单测）。
+ *
+ * 两种成因必须分开（处置完全不同，reason 文案也分开）：
+ *   'baseline'  —— 连**未注入**的基线请求都被拒 ⇒ 脚本本身与目标不匹配（密钥/字段集/编码顺序错了），
+ *                  这一轮所有请求都是废的，继续扫只是白烧预算。
+ *   'injection' —— 基线正常、只有注入了 payload 的请求被拒 ⇒ 脚本没覆盖被改的那个字段
+ *                  （常见于只对内层明文签名、或签名串里漏了注入的那个参数）⇒ 注入值从未抵达 SQL。
+ * @param {{baselineRejects:number, baselineRejectStreak:number, baselineOk:number,
+ *          injectRejects:number, injectOk:number}} t
+ * @param {{transformBaselineRejects:number, transformInjectRejects:number}} cfg
+ * @returns {null|'baseline'|'injection'}
+ */
+export function evaluateTransformStatus(t, cfg) {
+  if (t.baselineRejectStreak >= cfg.transformBaselineRejects && t.baselineOk === 0) return 'baseline';
+  if (t.injectRejects >= cfg.transformInjectRejects && t.injectOk === 0) return 'injection';
+  return null;
+}
+
+/**
  * 单次扫描的可信度守卫。
  * 用法：scanRunner 创建 → ctxBase.httpClient.request/headRequest 包装里 observe 回流。
  */
@@ -230,9 +282,15 @@ export class ScanValidityGuard {
    *                        authStreak/serverErrRatio/minSamples）
    */
   constructor(opts = {}) {
+    // [D32] transformActive 是布尔开关而不是阈值：必须在下面的 Number 循环之前摘出来，
+    // 否则 `Number(true) === 1 > 0` 会把它当成一个阈值塞进 cfg（多出一个语义不明的键，
+    // 而且 cfg 会被写进报告 counts.windowSize 那一片，读的人会以为它是可调参数）。
+    this.transformActive = opts?.transformActive === true;
+    const thresholds = { ...(opts || {}) };
+    delete thresholds.transformActive;
     this.cfg = { ...VALIDITY_DEFAULTS };
     for (const k of Object.keys(VALIDITY_DEFAULTS)) {
-      const v = Number(opts?.[k]);
+      const v = Number(thresholds?.[k]);
       if (Number.isFinite(v) && v > 0) this.cfg[k] = v;
     }
     this.total = 0; // 累计观察数（含窗口外），供报告展示「本次扫描共发多少请求」
@@ -256,6 +314,18 @@ export class ScanValidityGuard {
     // 不会触发任何阈值——过去它们被 runLayer 的 catch 吞成「已检测、无漏洞」，是假阴性主因。
     this.netErrPoints = [];
     this.netErrSeen = new Set();
+    // [D32 实战 P0-1] 自定义请求变换（签名/加密参数）生效时才启用的一族计数。
+    // transformActive=false（未用扩展点）⇒ observeTransform 直接返回，存量判定路径零改动。
+    this.transform = {
+      baselineRejects: 0, // 基线（未注入）请求被判非法的次数
+      baselineRejectStreak: 0, // 连续次数（用连续而非总数：脚本配错是系统性故障，2 条足以定性）
+      baselineOk: 0, // 基线请求成功过 → 反证「脚本没配错」，此时只有注入被拒才是签名覆盖不全
+      injectRejects: 0,
+      injectOk: 0,
+      netErr: 0, // 传输层失败单独记账：不得算进「被拒」（连不上 ≠ 签名错）
+      /** @type {'baseline'|'injection'|null} 成因（两种处置不同，文案也分开） */
+      kind: null,
+    };
   }
 
   /** 窗口内聚合比例 */
@@ -330,6 +400,15 @@ export class ScanValidityGuard {
       cfg: this.cfg,
     });
     // 粘滞：取历史最严重状态；新状态更严重时冻结其计数快照
+    this._stick(nextStatus, r);
+  }
+
+  /**
+   * 粘滞登记（observe 与 observeTransform 共用同一条优先级规则，避免两处各写一份而漂移）。
+   * @param {string} nextStatus
+   * @param {{blockRatio:number, serverErrRatio:number, samples:number}} r
+   */
+  _stick(nextStatus, r) {
     if (SEVERITY[nextStatus] > SEVERITY[this.stickyStatus]) {
       this.stickyStatus = nextStatus;
       this.stickySnapshot = this._counters(r);
@@ -348,7 +427,53 @@ export class ScanValidityGuard {
       serverErrRatio: r ? r.serverErrRatio : 0,
       samples: r ? r.samples : 0,
       windowSize: this.cfg.windowSize,
+      // [D32] 变换计数随快照一起冻结：结论与数字同源（事后恢复不会把「连基线都被拒」洗白）
+      transform: { ...this.transform },
     };
+  }
+
+  /**
+   * [D32 实战 P0-1] 观察一条「已经过自定义请求变换」的请求结果。
+   *
+   * 素材由变换层在**加密/签名之前**打标（`injected`）—— 整包加密后 looksLikeInjection
+   * 在密文上恒为 false，靠请求内容已经分不出基线与注入，而那正是本判据的核心区分。
+   *
+   * 这条通道只更新 transform 一族计数，不写入共享滑动窗口 samples ⇒
+   * 同一条请求被 ctxBase 的 observe() 与本方法各看一次，两次职责不重叠，
+   * 既有 blocked/target_error/session_expired 的阈值语义完全不受影响。
+   * @param {{injected?: boolean, res?: object|null, error?: any}} ev
+   */
+  observeTransform(ev = {}) {
+    if (!this.transformActive) return;
+    const { res = null, error = null } = ev || {};
+    if (error && isCanceledError(error)) return; // 用户 stop() 取消，与签名无关
+    const status = pickStatus(res);
+    if (!res || status === 0 || error) {
+      this.transform.netErr += 1;
+      return; // 传输失败不是「被目标判非法」，两件事不许混
+    }
+    const t = this.transform;
+    const rejected = isRequestReject(res);
+    if (ev.injected === true) {
+      if (rejected) {
+        t.injectRejects += 1;
+      } else {
+        t.injectOk += 1;
+      }
+      // 基线一旦成功过，说明脚本本身能用 ⇒ 基线连续段清零，改由 injection 成因判定
+    } else {
+      if (rejected) {
+        t.baselineRejects += 1;
+        t.baselineRejectStreak += 1;
+      } else {
+        t.baselineOk += 1;
+        t.baselineRejectStreak = 0;
+      }
+    }
+    const kind = evaluateTransformStatus(t, this.cfg);
+    if (!kind) return;
+    t.kind = kind;
+    this._stick('transform_rejected', this._ratios());
   }
 
   /**
@@ -376,9 +501,14 @@ export class ScanValidityGuard {
     }
     this.addInconclusive(id);
   }
-  /** 是否应中止剩余注入点检测（仅「目标彻底不可达」才中止，其余状态只标注） */
+  /**
+   * 是否应中止剩余注入点检测。
+   * [D32] transform_rejected 也中止：签名/加密不匹配时后面每一条请求都必然同样被拒，
+   * 继续跑只是白烧预算，而且会把「一个合法注入都没送达」的扫描写成满屏「未检出」。
+   * @returns {boolean}
+   */
   get shouldAbort() {
-    return this.stickyStatus === 'unreachable';
+    return this.stickyStatus === 'unreachable' || this.stickyStatus === 'transform_rejected';
   }
 
   /**
@@ -418,6 +548,8 @@ export class ScanValidityGuard {
       authLostHits: base.authLostHits,
       // 「网络失败导致未测」的点数：哪怕整体状态 ok，这几个点的阴性结论也不成立
       netErrPoints: this.netErrPoints.length,
+      // [D32] 自定义请求变换的计数（未启用时全 0，字段仍固定存在 —— 报告契约不随配置漂移）
+      transform: base.transform || { ...this.transform },
     };
     const netErrCount = this.netErrPoints.length;
     const blockRatio = round2(base.blockRatio ?? r.blockRatio);
@@ -441,6 +573,20 @@ export class ScanValidityGuard {
         reason = `近 ${win} 次请求中 5xx 共 ${counts.serverErr} 次（占比 ${round2(base.serverErrRatio)}），目标自身处于错误状态`;
         advice = '先看目标应用日志/DB 连接池，确认服务健康后复扫；5xx 期间的响应差异无判定意义（若同时命中 dbHealth 熔断，先降并发避免持续伤害）';
         break;
+      case 'transform_rejected': {
+        const t = counts.transform || {};
+        reason = t.kind === 'baseline'
+          ? `自定义请求变换（签名/加密）产出的请求中，连**未注入的基线请求**都连续 ${t.baselineRejectStreak} 次被目标判非法` +
+            `（400/415/422，累计 ${t.baselineRejects} 次且从未成功）—— 脚本与目标不匹配，本次一个合法请求都没送达业务逻辑`
+          : `自定义请求变换生效下，基线请求正常而注入请求 ${t.injectRejects} 次全部被目标判非法` +
+            '（400/415/422）—— 注入值破坏了签名/加密，payload 从未抵达 SQL 拼接点';
+        advice = t.kind === 'baseline'
+          ? '核对变换脚本的密钥、参与签名的字段集合与拼接顺序（拿一次真实抓包逐字节对：脚本产出的报文必须与浏览器/客户端发出的等价）；' +
+            '修好前本次「未检出」不成立，不得写进交付结论'
+          : '把被注入的参数纳入签名范围（或在明文层注入、由脚本重新加密整包后重算签名）；' +
+            '本次「未检出」不等于「无漏洞」——这些请求在目标校验层就被拒了，检测从未开始';
+        break;
+      }
       default:
         reason = `目标可达性与会话状态正常：累计 ${counts.total} 次请求，无连续失败/拦截/会话失效/持续 5xx 迹象`;
         advice = '无需处置';

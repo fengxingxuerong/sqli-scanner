@@ -181,11 +181,21 @@ test('summary 契约字段齐全（前端/报告按固定字段名消费）', ()
   // counts 契约（[P1-FIX 2026-09-08] 新增 injection5xx：注入请求引发的 5xx 计数问）：
   // 不参与状态裁定（那是 error 技术的正常产物），但必须可见——不能与「目标本身在报错」混为一谈。
   // [P0-FIX 2026-09-09] 新增 netErrPoints：网络层失败导致未测成的点数（该点阴性结论不成立）。
+  // [D32 实战 P0-1] 新增 transform：自定义请求变换（签名/加密）一族的计数。
+  //   未启用时也必须存在（全 0）—— 契约字段随配置有无而增减，消费方就得每次判空，
+  //   而漏判一次就是把「签名被拒」读成「没洞」。
   assert.deepEqual(
     Object.keys(s.counts).sort(),
-    ['authLostHits', 'blockHits', 'failStreak', 'injection5xx', 'netErrPoints', 'serverErr', 'total'].sort()
+    ['authLostHits', 'blockHits', 'failStreak', 'injection5xx', 'netErrPoints', 'serverErr', 'total', 'transform'].sort()
   );
-  assert.ok(['ok', 'blocked', 'unreachable', 'session_expired', 'target_error'].includes(s.status));
+  assert.deepEqual(
+    Object.keys(s.counts.transform).sort(),
+    ['baselineOk', 'baselineRejectStreak', 'baselineRejects', 'injectOk', 'injectRejects', 'kind', 'netErr'].sort()
+  );
+  assert.ok(
+    ['ok', 'blocked', 'unreachable', 'session_expired', 'target_error', 'transform_rejected'].includes(s.status),
+    '状态名必须在这份封闭清单内（新增状态要同时改前端 ScanValidity.status）'
+  );
   assert.equal(typeof s.reliable, 'boolean');
   assert.equal(typeof s.reason, 'string');
   assert.ok(s.reason.length > 0 && typeof s.advice === 'string' && s.advice.length > 0);

@@ -76,11 +76,20 @@ const KNOWN_SAFE = new Map([
   // [2026-10-02] 行号 186→195 / 254→263：run-all 的 LABS 里先后插了 batch-lab、login-lab 条目，整体下移 9 行。
   // 这是 TODO §8 记的老毛病（行号锚点一天漂两次）；下面的“自证③”现在会**顺带打印该 kind
   // 当前的真实行号**，下次再漂不用 grep。
-  ['e2e/run-all.mjs:195:exe',
-    '`PY_CANDIDATES` 里的本机默认路径；解析时**逐个真跑 `-c print(1)`** 才算可用（2026-09-28 实测：该路径已是 0xC0000135 死链，只看 existsSync 挡不住），全不可用则如实 SKIP'],
-  ['e2e/run-all.mjs:195:drive', '同上（同一行的 python 默认路径）'],
-  ['e2e/run-all.mjs:263:wincmd',
-    '该 `taskkill` 在 `if (process.platform === "win32" && p.pid)` 之内（**上一行**）—— 平台守卫是跨行的，行级判据看不到，故此处显式登记'],
+  // [2026-10-10 复核 D33] 第三次漂移（195→225、263→318）+ 一处新命中（152），来自 D30 给
+  //   run-all 加「能自起 PG 就不算缺依赖」那一段。**症状值得记**：这两条在 D30 当轮没红，
+  //   因为 run-all 不在 acceptance 的收敛集里；直到下一次全量服务端套件才撞上，
+  //   而那时红会看着像「新改动引入的」。⇒ 行号锚点的登记表在**任何**上游插入后都必须复核。
+  ['e2e/run-all.mjs:152:exe',
+    '`pgSandboxAvailable()` 同时试 `postgres.exe` 与 POSIX 名 `postgres`，且整个判定包在 ' +
+    '`fs.existsSync(path.join(PG_BIN_DIR, n))` 里 —— ubuntu 上两者都不存在 ⇒ 返回 false ⇒ ' +
+    '依赖探测把 PG 标成缺依赖、按本仓口径如实 SKIP（不是把环境问题记成靶场失败）。' +
+    'PG_BIN_DIR 本身可经环境变量 PG_BIN 覆盖，默认值才带 .exe 字样'],
+  ['e2e/run-all.mjs:225:exe',
+    '`PY_CANDIDATES` 里的本机默认路径；解析时**逐个真跑 `-c print(1)`** 才算可用（2026-09-28 实测：该路径已是 0xC0000135 死链，只看 existsSync 挡不住），候选列表随后是 PATH 上的 `python`/`python3` ⇒ ubuntu 落到它们；全不可用则如实 SKIP'],
+  ['e2e/run-all.mjs:225:drive', '同上（同一行的 python 默认路径）'],
+  ['e2e/run-all.mjs:318:wincmd',
+    '该 `taskkill` 在 `if (process.platform === "win32" && p.pid)` 之内（**上一行**）—— 平台守卫是跨行的，行级判据看不到，故此处显式登记；else 分支走 `p.kill("SIGKILL")`'],
   ['e2e/waf-lab/compare-real.e2e.mjs:154:wincmd',
     '该行是**错误提示文案**（端口被占时的排查建议），不参与执行；同段紧邻的下一行已给出 POSIX 方案 `lsof -ti :PORT | xargs kill -9`'],
 ]);
