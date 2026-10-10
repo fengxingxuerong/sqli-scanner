@@ -1677,7 +1677,18 @@ services:
    ⚠️ 留下的尾巴：`ScanManager` 的回收 TTL 是**产品行为**（不是测试缺陷）；用例侧加了年龄闸
    只是让判据不再赌运气。若以后 AI 报告需要对**已完成较久**的扫描也能出，那是产品侧要改的
    （例如落盘台账可回读），别在用例里加长 TTL 去绕。
-3. **这两套都不在 CI 里**：`ci.yml` 对 `pentest-lab` / `api-range-lab` 零引用，
+3. **这两套都不在 CI 里** —— ✅ **已接（2026-10-11 D39）**：`ci.yml` 的 `acceptance` job 新增两步
+   （`node e2e/pentest-lab/verify.mjs` 与 `node e2e/api-range-lab/run.mjs`，各配 `MYSQL_*` env 直连
+   该 job 已起的 docker MySQL 3306）。不需要 Python 沙箱（沙箱只解决"本机没 mysqld"）；
+   `init-db` 建的 `users`/`products` 正好覆盖两套，api-range-lab 缺表时还会自己再跑一次 init-db。
+   本机验证：两套的"env 直连"路径已跑通（沙箱注入的就是同一组变量）⇒ pentest-lab 12/12、
+   api-range-lab 49/49；`refs:check` 174 处全入库、读 ci.yml 的 5 个守卫 27/27、YAML 解析通过。
+   **待确认**：CI 侧**首跑**（Linux + 容器 mysqld 与本机组合不同，本机无 docker 无法先验）；
+   判据是退出码，环境出问题会显式 FAIL 而不是静默 SKIP。
+   `scripts/ci-local.mjs` 未同步（它只整步跑 `npm run acceptance`，本机这两套走
+   `node e2e/run-all.mjs --only=...`，覆盖面不缺）。
+   ⚠️ 若并发会话随后推送（基于不含本提交的树）⇒ 这两步会被覆盖，按 CHANGELOG D39 段重放。
+   （原条目：）`ci.yml` 对 `pentest-lab` / `api-range-lab` 零引用，
    `e2e-self-contained` 只收敛 `deps: []` 的 6 套，而它们依赖 MySQL 沙箱（CI 无 mysqld）。
    ⇒ 上面两笔红从第一次跑到现在没人看见。**顺序必须是：先定位/修，再接进 CI**
    （直接接进去只会得到一个天天红、然后被人加 `continue-on-error` 关掉的 job —— 那是 K 条的老路）。
