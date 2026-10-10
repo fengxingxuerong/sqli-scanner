@@ -4,6 +4,43 @@
 
 ## [Unreleased]
 
+### 2026-10-11 批次 D39 · 把两套「CI 一眼都没看过」的靶场接进门禁（TODO 15.3）
+
+**一句话**：D29 那次全量普查翻出的两个确定性红（`pentest-lab` 的 waf403、`api-range-lab` 两条 `[ai]`），
+两套在 `ci.yml` 里**零引用** —— 本机的红，等于没有红。两个红都已修（D38 / D30），本批把它们接入。
+
+#### ① 接在哪、为什么能直连
+
+放进既有的 `acceptance` job（那里已经用 `docker run mysql:8.0` 起了 MySQL，3306 root/root，
+并跑过 `e2e/real-mysql-lab/init-db.mjs` 建库表）：
+
+```yaml
+- name: pentest-lab 刁钻场景（真 MySQL，门禁）
+  run: node e2e/pentest-lab/verify.mjs
+  env: { MYSQL_HOST: 127.0.0.1, MYSQL_PORT: 3306, MYSQL_USER: root, MYSQL_PASSWORD: root, MYSQL_DATABASE: sqli_lab }
+- name: api-range-lab 接口层靶场（真 MySQL，门禁）
+  run: node e2e/api-range-lab/run.mjs        # 同一组 env
+```
+
+**不需要 Python 沙箱**：沙箱解决的是"本机没有 mysqld"，而 CI 的 mysqld 由 docker 提供。
+表也够：`init-db` 建的正是 `users` / `products`，两套只用这两张表（api-range-lab 在缺表时
+还会自己再跑一次 `init-db.mjs`）。
+
+#### ② 验证到哪一步（诚实边界）
+
+- **已验证**：两套的"靠 `MYSQL_*` env 直连"路径本机跑通 —— 沙箱注入的正是同一组变量
+  （`pentest-lab` 12/12 PASS、`api-range-lab` 49/49 PASS）。`refs:check` 174 处全入库（含新增的两个引用）；
+  读取 `ci.yml` 的 5 个守卫测试 **27/27**；YAML 解析通过（acceptance job 19 步）。
+- **未验证**：CI 侧的**首跑** —— Linux + 容器 mysqld 与本机（Windows + 沙箱）不是同一组合；
+  且本机无 docker，无法先验。判据是退出码（两套都是非 0 即红），即便环境出问题也会显式 FAIL 而非静默 SKIP。
+
+#### ③ 遗留
+
+- `scripts/ci-local.mjs` 没同步：它只整步跑 `npm run acceptance`（不逐步骤模拟 CI），
+  本机跑这两套走 `node e2e/run-all.mjs --only=...`（自带沙箱），覆盖面不缺。
+- ⚠️ 本批改的是 `ci.yml`，而本仓**有并发会话在活动** —— 若他们随后推送（基于不含本提交的树），
+  这两步会被覆盖。已立即推送；若消失，按本段重放即可。
+
 ### 2026-10-11 批次 D38 · 修掉 `pentest-lab waf403` 的确定性红：选链不该只问「能不能过 WAF」
 
 **一句话**：这条红从 D29 起三轮一致。真机上 `boolean` **是可达的**（显式指定 `symboliclogical`

@@ -473,6 +473,32 @@ jobs:
       - name: 还原 WAF A/B 重写的结果文件（防验收报告自陈 dirty）
         if: always()
         run: git checkout -- e2e/waf-lab/results/compare-real.md
+      # [2026-10-11 D39] 把两套「此前 CI 一眼都没看过」的靶场接进门禁。
+      #   由来：D29 把 run-all 能跑的 27 套全跑了一遍，翻出两个确定性红（pentest-lab 的 waf403、
+      #   api-range-lab 两条 [ai]），而这两套在 ci.yml 里**零引用** —— 本机的红，等于没有红。
+      #   现在两个红都已修（waf403 见 D38、ai 那两条见 D30 的年龄闸），正是接进来的窗口。
+      #   为什么能直连、不需要 Python 沙箱：沙箱解决的是「本机没有 mysqld」，而本 job 的
+      #   mysqld 是 docker 给的（3306 root/root），init-db 那份 schema 已含两套要用的
+      #   users / products（api-range-lab 缺表时还会自己再跑一次 init-db）。
+      #   两套的退出码都是判据（pentest-lab：must 声明的技术没命中就非 0；api-range-lab：有失败即 1）。
+      - name: pentest-lab 刁钻场景（真 MySQL，门禁）
+        run: node e2e/pentest-lab/verify.mjs
+        env:
+          MYSQL_HOST: 127.0.0.1
+          MYSQL_PORT: 3306
+          MYSQL_USER: root
+          MYSQL_PASSWORD: root
+          MYSQL_DATABASE: sqli_lab
+        timeout-minutes: 6
+      - name: api-range-lab 接口层靶场（真 MySQL，门禁）
+        run: node e2e/api-range-lab/run.mjs
+        env:
+          MYSQL_HOST: 127.0.0.1
+          MYSQL_PORT: 3306
+          MYSQL_USER: root
+          MYSQL_PASSWORD: root
+          MYSQL_DATABASE: sqli_lab
+        timeout-minutes: 8
       # 红队评测靶场（ground-truth 真值对照 + sqlmap 同题对比）：独立常驻进程，
       # CI 环境可能缺 PostgreSQL（D:/pg-smoke 类本地路径），故失败不阻塞——
       # 门禁会把该套件标为 SKIP，其余套件照常判定。
