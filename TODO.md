@@ -5,6 +5,152 @@
 
 ---
 
+## 2026-10-10 新增 · 实战视角缺口盘点（渗透工程师口径）与批次 D32
+
+盘点结论：工程纪律（门禁/真值链/口径）已足够厚，剩下的缺口集中在**入口层**——
+「发不出合法请求」与「拿不到回调」，而不是检测算法。按「失效时是否让整场测试零产出」排序：
+
+| # | 缺口 | 状态 |
+|---|---|---|
+| P0-1 | 加密/签名参数接口无扩展点（`sign=`、整参加密、timestamp+nonce） | ✅ **D32 扩展点 + 判据**，✅ **D34 真机闭环**（`e2e/signed-api-lab` 五场景三轮一致）；⚠️ 只覆盖**签名**形态，整包 AES / 防重放没有靶点（见本节第 7 条） |
+| P0-2 | 认证只覆盖标准 HTML 表单登录（`loginFlow.js` 自承不做 OAuth/JWT 刷新/验证码/前端加密提交） | ✅ **D36 Bearer/Token 自动续期**（`bearerKeeper` + `--refresh-url` + 面板 + 真机 `e2e/bearer-lab` 六场景三轮一致）。仍不做：OAuth2 授权码流程 / SSO / 验证码 / 解析 JWT `exp` 做前瞻性续期（见下面 D36 节的账） |
+| P1-3 | OOB 通道在真实目标上拿不到（`oobReceiver` 默认绑 127.0.0.1、DNS 需自建域+占 53；无 interactsh/Collaborator 对接） | ⏳ 未做 |
+| P1-4 | WAF 结论只有 CRS 一家（62 厂商指纹只做「识别」，推荐链无实测背书） | ⏳ 未做 |
+| P2-5 | 写副作用无自动清理/回滚（只有 `docs/pentest-handover/05` 的人工条款 R5/R6） | ⏳ 未做 |
+| P2-6 | 真实弱网下的召回衰减没有数（e2e 全跑本地回环） | ⏳ 未做 |
+
+已在、**别再当待办推**的：批量 `-m`（含 Burp/HAR/Postman/OpenAPI 集合展开 + 共享限速桶）、HPP、
+宽字节 `unmagicquotes`、multipart 收/发两侧、链接爬虫与 headless 爬取、csrfKeeper、SARIF/`action.yml`、
+scope/SSRF 逐跳校验。
+
+### D32 · 请求变换扩展点（P0-1）做完之后剩下的账
+
+1. **⚠️ 没有真靶场证据。** —— ✅ **已补（2026-10-10 D34）：`e2e/signed-api-lab`**
+   （真 SQLite + 真 md5 验签中间件 + 真 CLI 子进程，`deps: []` ⇒ CI 的 `e2e-self-contained` 自动收）。
+   五场景 D/A/B/C/E 三轮逐字一致，实测表与结论见 `docs/请求变换脚本.md` §8。
+   **阈值这两笔账的结果和预期不同，值得记**：
+   · 原本想回答"8 / 2 该不该调"，实测回答的是"**这两个数不承载安全性**"——
+     E 场景（正确签名 + 目标按关键字回 400）一次健康扫描里天然就有 **19 次**注入请求被拒，
+     只数被拒条数的判据会当场误报；守住不误报的是 `injectOk===0` / `baselineOk===0` 那半边。
+     ⇒ 8 / 2 保留，但角色改成"多快停手"（早停实测：C 用 11 条收摊，同目标健康扫描 83 条）。
+   · 新增靶点时的前置检查（本批踩过）：**先确认 `prefilter` 不会把你的靶点判成"输入校验"**——
+     第一版靶站用 `500 + {"error":"unrecognized token: X"}` 回显，两个靶点都被安全跳过，
+     看着像"引擎 0 检出"，实际该修的是靶站（改成 sqli-labs 式 200 页内回显后即正常）。
+   **仍未覆盖**：整包 AES 加密、timestamp+nonce 两种形态没有对应靶点（症状同、脚本写法不同）；
+   `--request-script` 与 `--dbs`/`--dump` 等利用阶段的组合未测。
+2. **`e2e/api-range-lab` 未加 `requestScript` 用例。** 接口靶场是这条链路唯一的「从 HTTP 入口进」
+   的验证面；本批只在 `sm.start()` 一层测了失败闸门。
+   验证口径：加两条 —— REST 传非法路径得 `code=6007` 且**不产生 scanId**；
+   传合法路径且目标拒绝时报告 `summary.verdict='inconclusive'`（而不是 `no_vulnerability_detected`）。
+3. **sqlmap 桥接侧没有等价能力**（同 §3 那批欠账的形状：内置引擎有、sqlmap 模式没有交付面）。
+   需要定口径：`--eval` 是既有桥接参数、语义接近但不等价（`--eval` 只改 payload 字符串，不改整条报文）。
+4. **面板字段无 UI 测试。** `ScopeSecuritySection` 新增的输入框没有组件级用例（前端契约测试只钉
+   「面板键 ⊆ SCAN_CONFIG_KEYS ⊆ 后端白名单」，不钉渲染）。要么补一条渲染断言，要么按 §13 的
+   口径明确记「UI 侧未覆盖」。
+5. **`REQUEST_SCRIPT_DIR` 只做了目录包含判定，没做「脚本内容变更」留痕。** 台账里存了 sha256，
+   但没有「同一个 scanId 的报告与脚本当前版本是否一致」的判据 ⇒ 事后改签名脚本，旧报告的 PoC
+   可复现性无法证明。方向：把 sha256 与脚本副本一起进台账目录（体积要限）。
+6. **注入点发现阶段的爬虫不经变换层**（D32 复核时发现，已写进 `docs/请求变换脚本.md` §7）。
+   根因不是漏接线，是既有的客户端归属问题：`ScanManager` 构造时
+   `this.parser = new TargetParser(this.httpClient)` 拿的是**模块级单例**，`LinkCrawler` 再继承它，
+   调用时不带 `scanId` ⇒ 同一一路请求此前也**不受暂停闸与 per-scan 限速桶约束**
+   （F1 那批修的是「经 `getScanClient` 的 ad-hoc 客户端」，这一路连 `getScanClient` 都不走）。
+   后果：签名型 API 上 `--crawl` / `crawlForms` 爬不到东西（目标按非法请求拒），
+   注入点发现只能靠 URL / `--body` / `-r` 抓包显式给出。
+   改法（二选一，都要真机验证，别只让单测变绿）：
+   ① 把 `TargetParser`/`LinkCrawler` 换成按 scanId 取视图（顺带把暂停闸与限速桶一起收进来，
+      那是同一个断口的另一半）；② 不改，但在报告里把「发现阶段未签名 ⇒ 爬取结果为空
+      **不代表**目标没有可爬的表单」写成显式标注。
+   验证口径：带签名的靶点上，爬虫发出的请求必须**真的**带上签名（①），
+   或报告必须能看见那句标注（②）；两者都没有就是第三个静默假阴性来源。
+7. **只有签名形态的靶点，另两种症状没有**（D34 复核时明确）。—— ✅ **已补（2026-10-10 D35）**：
+   `e2e/signed-api-lab` 现有三族（签名 / 整包 AES 字段级加密 / timestamp+nonce 防重放），
+   加密族是「整个报文只有一个叶子是密文」的形状，防重放族带**靶站侧可证的防重放**
+   （同一条合法报文连发两次，第二次必须因 nonce 被拒 —— 否则 A3 的"0 次复用拒"是白送的）。
+   **本条挖出的真问题（比补靶点更值钱）**：加密族上 `transform_rejected` **永不成立** ——
+   `validationGuardedSkipPoints` 的"输入校验甄别"会在 4 次同构 400 后把唯一的注入点剪掉，
+   整轮只发 5 条请求 ⇒ `injectRejects` 永远到不了 8 ⇒ 结论照常落成「未检出」。
+   即 D34 认定的"安全边际在 `injectOk===0` 那半边"这条结论，**前提是有足够样本**；
+   单点 + 早剪的目标上判据不可达。
+   修法（已做）：**启用请求变换时停用该剪枝** —— 在签名/加密目标上，
+   "改一个字段连良性值一起被拒"恰恰是签名没覆盖/密文没重算的定义，不是输入校验拦截。
+   差分单测钉住两侧（`prefilter.validation.test.js`：未启用仍 5 请求削减、启用则 2 探即保留）。
+   ⚠ 没有降阈值来"修绿"—— 那会把 D34 的实测结论抹掉。
+   **仍未覆盖**：`--request-script` 与 `--dump`（真拖数据）未测（本批只测了 `--dbs`/`--current-db`，
+   SQLite 上 `--dbs` 语义本身不是重点，要回答的是"利用阶段的请求有没有被签名"，答案是拒 0 次）；
+   防重放族的"nonce 复用 ⇒ 判被拒"只做了靶站自证，未做成扫描器侧场景。
+8. **早停粒度是"点边界"，单点目标省不下预算**（D35 实测：`/api/tick?id=1` 单点时
+   `transform_rejected` 成立后仍跑满 75 条）。`validity.shouldAbort` 只在
+   `scan/detect.js` 的 scheduler 回调顶部判（每个点开始前），所以一个点内部无从打断。
+   与 F1 那批"暂停只在点边界"是同一个形状。要不要给"签名被拒"加一层**通道边界**的早停
+   （一个点内也有几十上百条请求，签名不匹配时全然是白烧）需要先定口径：
+   验证口径 = 造一个单点加密目标，断言总请求数显著低于同形态健康扫描（现在这两个数是 5/86 与 75/83）。
+9. **给 config 加键时，缺省值本身必须过一次入口校验**（D35 由 api-range-lab 抓到：
+   `requestScript` 的"必须非空"撞上了它自己的默认值 `''`，而只有「单点重测/续跑」这类
+   **配置回放**入口会撞上 —— 单目标扫描永远看不见）。
+   现状：`configWhitelist.passthrough.test.js` 的探针值是**手写的合法值**，不测默认值。
+   建议（未做）：给它加一条"逐键用 `defaults[key]` 再走一次 `sanitizeStart`"，
+   这样任何"默认值与入口校验互相不认"在键写入当天就红，而不是等 e2e。
+   已做的只是点状补测：`server/tests/requestScript.guard.test.js` 对这一个键钉了该性质。
+10. **包装链上的三个会话层会把 `headRequest` 整个丢掉**（D36 做 bearer 续期时撞见，未修）。
+    `withSafeUrl` / `withCsrf` / `withLoginFlow` 都 `return { request }`，**不带 `headRequest`**。
+    而 `engine/scan/scanClient.js` 里两处都按"有没有这个方法"决定行为：
+    `const baseHead = typeof view.headRequest === 'function' ? … : null`（协议层包装）与
+    F1 那批加的暂停闸（`if (typeof view.headRequest === 'function')`）。
+    ⇒ 只要配了 `--safe-url` / `--csrf-url` / `--login-url` 任意一个：
+    · `--null-connection` 的 HEAD 通道**静默退化成 GET**（`detectorSupport/egress.js` 的
+      `sendHead()` 有 `typeof httpClient.headRequest !== 'function' → 回退 send` 的兜底，所以不报错）；
+    · F1 的"暂停期间零发包"承诺对 HEAD 路径失效（因为 HEAD 路径没了）。
+    危害不高（方向是"多发 GET"不是漏测），但形状是本仓最典型的一类：**能力没了而没有任何东西变红**。
+    修法：四个会话层包装（含 D36 新增的 bearer 续期）统一返回 `{ ...client, request, headRequest }`，
+    且 `headRequest` 必须走**同一套**加工（csrf token 要挂上、bearer 头要挂上、401/403 同样续期
+    一次并重试）—— 只把方法名透传过去等于 HEAD 绕过加工，比现状更糟（现状是 HEAD 不存在、
+    退回带 token 的 GET）。
+    验证口径：① 三个开关各配一个，断言 `getScanClient(...).headRequest` 是函数；
+    ② 断言 HEAD 实收参数里带着 csrf token / bearer 头（从内层视图捕获比对）；
+    ③ `--null-connection` + `--csrf-url` 在真靶站上仍能检出（这条组合现在是静默降级）。
+
+    ⚠ 状态更新（2026-10-10 D36）：**第四个包装（bearer 续期）没有复制这条缺陷** —— 它保留并加工
+    `headRequest`（`bearerKeeper.test.js` / `bearerKeeper.wiring.test.js` 各钉一条，
+    把 `typeof client.headRequest === 'function'` 改成常量会当场红）。
+    所以本条现在只剩**三个旧包装**，修法不变（一起改，别留一条不一致的路）。
+
+### D36 · Bearer/Token 自动续期（P0-2）做完之后剩下的账
+
+1. **`--login-url` / `--csrf-url` / `--safe-url` 三个包装仍丢 `headRequest`**（就是上面第 10 条，
+   本批只保证新增的那个不丢）。危害方向是"HEAD 静默退化成 GET"，不是漏测。
+2. **面板只暴露三个子键**（`url` / `tokenField` / `refreshToken`）。`bodyFormat=form`、
+   `body={client_id…}`、`headerName` / `headerTemplate`、`eager` 这五项目前只能走 REST/CLI。
+   判据要不要接：`eager` 与 `bodyFormat` 是"目标形状"而不是"调优旋钮"，缺了它们那类目标配不上；
+   接线成本是 NetworkAuthSection 再长一截 + `scanConfigSections.bindings` 各补一条。
+3. **`expiredMidScan` / `neverAuthenticated` 都不中止扫描**（只降级结论）。
+   与 `transform_rejected(kind=baseline)` 的区别是刻意的：后者"我们自己发出的东西不合法"，
+   继续跑注定零产出；前者可能只是某个点位需要认证，其它点位仍可能是公开的。
+   要不要加一条"整轮零业务响应即中止剩余点位"的预算闸门，需要先拿到真实分布
+   （目前只有靶场里 71 条请求这一个样本，不足以定阈值）。
+4. **`neverAuthenticated` 与 `blocked` 的分界靠"403 算业务响应"这一条约定**。
+   用 403 表达令牌过期的目标（不少网关就是这么干的）落点是 `blocked` 而不是 `session_expired`，
+   本批只在 `blocked` 的 advice 里加了一句指向续期的话。**更彻底的做法**是给 `blocked` 也做
+   成因分支（WAF 特征 vs 令牌过期），但那要先有能区分的证据位（比如响应体里的
+   `error="invalid_token"` / `WWW-Authenticate` 头），目前没实现。
+5. **JWT `exp` 的前瞻性续期没做**（只在收到挑战后续）。文档里给的出路是 `eager: true`
+   或自己写 `--request-script` 现算 —— 后者其实能覆盖，但需要脚本自己判 `r.url` 并给
+   `/oauth/token` 也签名，这条组合没有靶点（signed-api-lab 与 bearer-lab 是两个靶场，
+   没有"签名 + Bearer 续期"同时开的场景）。**这是本批留的最实在的一条空档**。
+6. **`e2e/bearer-lab` 没有 `--request-script` 组合场景**（同上）。接线级证据有
+   （`bearerKeeper.wiring.test.js` 钉了"续期请求也过变换层"），真机级没有。
+7. **凭据有效期与扫描规模的关系没有量化输出**。报告会说"续期尝试 N 次失败 M 次"，
+   但不会说"这轮扫描跑了多久、令牌在第几条请求失效"。交付时甲方问"你们的扫描会不会
+   扫到一半掉登录"，现在只能靠 reason 文本反推。方向：`summary.validity.counts.refresh`
+   已经在了，缺的是首次挑战发生在第几条请求（一个 int 就够）。
+8. **`bearerRefresh` 没进 `docs/api.md` 的 `/scan/start` 示例**。核对过：api.md 里连 `login`
+   都没有（`grep -n "login\b" docs/api.md` = 0 命中），所以这不是"本批漏了一条"而是
+   **整张 config 键表在 api.md 里不存在** —— 现在的口径是"键的用法在各专题文档里"
+   （`docs/Bearer令牌续期.md` §3 有完整 REST 形状与子键表）。要补的话应该补一张
+   「config 键 → 所在专题文档」的索引表，而不是往示例里塞一个键。
+   `refs:check` 只钉链接有效性，钉不住"新键有没有文档"。
+
+
 ## 2026-09-28 新增 · 接口靶场（`e2e/api-range-lab`）暴露出的待办
 
 背景：新建的「HTTP 接口 × 真实靶场」套件（44 条用例 / 26 个端点）一轮就抱出 9 条接口层缺陷，
@@ -77,6 +223,22 @@
    或让守卫在报"登记项失效"时直接给出该 kind 当前的真实行号，省一次人工 grep。
    验证口径：在 `e2e/run-all.mjs` 顶部插 10 行注释 ⇒ 守卫应仍然通过（内容锚点不随行号移动），
    而删掉那两条 Windows-only 行 ⇒ 守卫必须红。
+   —— ✅ **两种改法都已落地（2026-10-10 D34，内容锚点为正解）**。触发点是第四次漂移：
+   本批只是**往 run-all 的 LABS 里加一个靶场**（+7 行）就把三个键全顶歪
+   （152→159、225→232、318→325）—— 而这恰是最常见的正常操作，说明"每次上游插入都靠人记得核对"
+   本身就是判据失效的形状。
+   新键 `path:kind:内容锚点`（整行去空白后前 60 字符）；键由 `regKey()` 生成，
+   登记表头写明「别手抄、别用行号」。同时把 §8 的两条验证口径变成**长期断言**（不只是文档里的期望）：
+   · `自证⑤`：合成文件顶部插 10 行注释 ⇒ 同一处仍被豁免且登记项不陈旧；删掉命中行 ⇒ 登记项必须报「已不存在」。
+   · `自证⑥`：同一锚点命中 2 行 ⇒ 必须报错（一张免检牌不许盖多处，否则新加的违规被静默放过）。
+   · 真机复验（用一次性变异器跑完即还原，逐次断言替换命中数=1 且字节还原一致）：
+     往 `run-all.mjs` 真加一行未登记的 `.exe` ⇒ ① 红；顶部真插 10 行注释 ⇒ 7/7 仍绿。
+   —— ✅ **第二条改法已做（打印真实行号）；本条仍未结**：2026-10-10 复核又漂了**第三次**
+   （195→225、263→318，外加 D30 新增的 152 一处未登记），已按真实行号重新登记并逐条核过代码
+   （existsSync 前置 / 候选列表含 PATH 上的 python / `process.platform==='win32'` 守卫在上一行）。
+   ⚠️ 值得记的是**它为什么没在 D30 当轮红**：`run-all` 不在 acceptance 的收敛集里，
+   要等下一次全量服务端套件才撞上 —— 那时看着就像"新改动引入的"。
+   ⇒ 内容锚点（第一种改法）仍是正解：行号锚点每次上游插入都要人记得去核对，这本身就是判据失效的形状。
 
 ---
 
@@ -1474,6 +1636,20 @@ services:
    | C. 语义等价复核 | 验链放行后再验一次"真/假两侧同形且结果不同" | 新机制 + 额外请求，但收益覆盖所有 WAF 场景 |
 
    ⚠️ 方向性结论：**任何"让兜底链排得更前"的改动都在加剧这个缺口**，别再往那个方向使劲。
+
+   🧪 **A 的变体已实测（2026-10-11 凌晨，改完即回滚，未提交）**：不动 `TAMPER_COVERS` 声明
+   （避免触发 D20 的 COVERS 口径守卫），只在 `rankChainsByProfile` 里对**含 `eliminatesAll`
+   插件的链**把 `and/or/union/select/sleep/comment/hash` 这几类 token **不计入 hit**。
+   - 排序层**确实生效**：离线同输入复现 ⇒ `chardoubleencode` 从第 0 掉到末位，
+     `symboliclogical` 升到……**第 3 位**（前两位是 `unionvaluesrow+dash2hash[+hexliterals]`，
+     它们 covers 含 union/select ⇒ 同样 hit=2，靠稳定排序的原序占先）。
+   - 但 `slots = 2` ⇒ symboliclogical **依然进不了验证名单**；端到端 `pentest-lab` 仍是
+     `FAIL(miss=boolean)`，验证名单实测为
+     `[unionvaluesrow+dash2hash → chardoubleencode（D20 替换末条）→ bypass:modsecurityversionedkeywords]`。
+   ⇒ **结论：A 单独修不好 waf403。** 它只能消除"编码链靠伪装覆盖压过语义等价链"这一层，
+     第二层（slots=2 与"真机打穿链占前两位"）必须靠 B 或 C 一起解。别再单独试 A。
+   ⚠️ 另一条已验证**无效**的路（勿重复）：把兜底改成"追加在末尾" —— `verifyTamperChains`
+     第 194 行还有一道 `ranked.slice(0, MAX_CHAINS)`，第 4 条会被**静默切掉** ⇒ 兜底比替换式更糟。
 2. **api-range-lab 两条 `[ai]` 用例确定性 404 / code 2001「扫描任务不存在」** —— ✅ **已修（2026-10-09 D30）**。
    根因**不是**用例写法，是 TTL：`ctx.state.numScan` 背后是 ScanManager 的**内存上下文**，
    扫描终态后进入 `retiredAt`、**默认 30s 回收**，而 AI 路由查的正是这张表

@@ -1,10 +1,11 @@
 # docs 导航索引
 
-> 由 `node scripts/gen-docs-index.mjs` 生成（2026-10-06），
-> 覆盖 docs/ 下 74 篇 md。文档增删后重跑即可；标题取各文件的一级标题。
+> 由 `node scripts/gen-docs-index.mjs` 生成（2026-10-10），
+> 覆盖 docs/ 下 78 篇 md。文档增删后重跑即可；标题取各文件的一级标题。
 
-## 其它（专题笔记与过程记录）（8）
+## 其它（专题笔记与过程记录）（11）
 
+- [Bearer令牌续期.md](./Bearer%E4%BB%A4%E7%89%8C%E7%BB%AD%E6%9C%9F.md) — Bearer/Token 自动续期（长扫描的会话维持）
 - [CI-集成.md](./CI-%E9%9B%86%E6%88%90.md) — 在 CI 里用 sqli-scanner 当 SQLi 门禁
 - [blackbox-lab-已知问题与修复记录.md](./blackbox-lab-%E5%B7%B2%E7%9F%A5%E9%97%AE%E9%A2%98%E4%B8%8E%E4%BF%AE%E5%A4%8D%E8%AE%B0%E5%BD%95.md) — 黑盒评测：已知问题与修复记录
 - [optimization-report-2026-08-25.md](./optimization-report-2026-08-25.md) — sqli-scanner 全面优化分析报告（2026-08-25）
@@ -13,6 +14,8 @@
 - [实战视角全面分析-2026-10-02.md](./%E5%AE%9E%E6%88%98%E8%A7%86%E8%A7%92%E5%85%A8%E9%9D%A2%E5%88%86%E6%9E%90-2026-10-02.md) — 实战视角全面分析 —— 渗透工程师视角（2026-10-02）
 - [性能基线-2026-10-03.md](./%E6%80%A7%E8%83%BD%E5%9F%BA%E7%BA%BF-2026-10-03.md) — 性能端到端基线（2026-10-03）
 - [服务端类型化.md](./%E6%9C%8D%E5%8A%A1%E7%AB%AF%E7%B1%BB%E5%9E%8B%E5%8C%96.md) — 服务端类型化档案（checkJs → strictNullChecks）
+- [自定义检测条目.md](./%E8%87%AA%E5%AE%9A%E4%B9%89%E6%A3%80%E6%B5%8B%E6%9D%A1%E7%9B%AE.md) — 自定义检测条目（`--payload-file`）
+- [请求变换脚本.md](./%E8%AF%B7%E6%B1%82%E5%8F%98%E6%8D%A2%E8%84%9A%E6%9C%AC.md) — 自定义请求变换脚本（签名 / 加密参数接口）
 
 ## 设计文档与 PRD（为什么这么设计）（17）
 
@@ -45,8 +48,9 @@
 - [实战能力实测评估-2026-09-09.md](./%E5%AE%9E%E6%88%98%E8%83%BD%E5%8A%9B%E5%AE%9E%E6%B5%8B%E8%AF%84%E4%BC%B0-2026-09-09.md) — sqli-scanner 实战能力实测评估（渗透工程师视角）
 - [检测与定库-实测口径.md](./%E6%A3%80%E6%B5%8B%E4%B8%8E%E5%AE%9A%E5%BA%93-%E5%AE%9E%E6%B5%8B%E5%8F%A3%E5%BE%84.md) — 检测与定库：实测口径（真机靶场记录）
 
-## WAF 真机对拍与绕过能力（对外口径的唯一来源）（10）
+## WAF 真机对拍与绕过能力（对外口径的唯一来源）（11）
 
+- [WAF-弹药库审计-2026-10-08.md](./WAF-%E5%BC%B9%E8%8D%AF%E5%BA%93%E5%AE%A1%E8%AE%A1-2026-10-08.md) — WAF 弹药库体检
 - [WAF-真机对拍-2026-09-27.md](./WAF-%E7%9C%9F%E6%9C%BA%E5%AF%B9%E6%8B%8D-2026-09-27.md) — 真机 ModSecurity 对拍（首次）—— 2026-09-27
 - [WAF-真机对拍-2026-09-28.md](./WAF-%E7%9C%9F%E6%9C%BA%E5%AF%B9%E6%8B%8D-2026-09-28.md) — 真机 ModSecurity 对拍（第二轮：真库靶站）—— 2026-09-28
 - [WAF-真机链对拍-2026-10-05.md](./WAF-%E7%9C%9F%E6%9C%BA%E9%93%BE%E5%AF%B9%E6%8B%8D-2026-10-05.md) — 真机 ModSecurity 链对拍（2026-10-05，modsec-live #162）

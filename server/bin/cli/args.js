@@ -158,6 +158,12 @@ export function parseArgs(argv) {
     else if (a === '--scope') args.scope = next();
     else if (a === '--insecure') args.insecureTls = true;
     else if (a === '--cert') args.clientCert = next(); // mTLS 客户端证书 PEM（sqlmap --cert 语义）
+    // [D32 实战 P0-1] 自定义请求变换脚本（签名/加密接口）；须位于 REQUEST_SCRIPT_DIR 内
+    else if (a === '--request-script') args.requestScript = next();
+    // [D36 实战 P0-2] Bearer/Token 自动续期（--refresh-url 为主开关，另两个是可选形状）
+    else if (a === '--refresh-url') args.refreshUrl = next();
+    else if (a === '--refresh-token') args.refreshToken = next();
+    else if (a === '--refresh-field') args.refreshField = next();
     else if (a === '--no-validation-skip') args.noValidationSkip = true;
     else if (a === '--confirm-destructive') args.confirmDestructive = true;
     else if (a === '--no-production-mode') args.noProductionMode = true;

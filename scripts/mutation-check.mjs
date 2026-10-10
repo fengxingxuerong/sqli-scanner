@@ -69,7 +69,22 @@ const TARGETS = [
   },
   {
     file: 'src/core/scanValidityGuard.js',
-    tests: ['tests/scanValidity.test.js', 'tests/scanValidity.selfInflicted.test.js', 'tests/netErrGuard.test.js'],
+    tests: [
+      'tests/scanValidity.test.js',
+      'tests/scanValidity.selfInflicted.test.js',
+      'tests/netErrGuard.test.js',
+      // [D32/D36] 这两族是后来加在同一个守卫上的判定：少挂一个，「签名被拒」与「续期失败」
+      // 两条文案分支的断言就不参与变异判定 = 假存活。
+      'tests/validity.transformReject.test.js',
+      'tests/validity.refresh.test.js',
+    ],
+  },
+  {
+    // [D36 实战 P0-2] Bearer 自动续期：四条纪律（不覆盖用户 Authorization / 一次挑战只续一次 /
+    // 并发去重 / 失败显形）全是布尔与早退位点，正是变异敏感的形状。
+    // 挂载面：纯逻辑单测 + 接线端到端都挂上（wiring 那半改坏链上任何一环也该红）。
+    file: 'src/core/bearerKeeper.js',
+    tests: ['tests/bearerKeeper.test.js', 'tests/bearerKeeper.wiring.test.js'],
   },
   {
     file: 'src/engine/secondOrderMethod.js',

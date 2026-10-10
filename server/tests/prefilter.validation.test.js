@@ -33,10 +33,38 @@ function makeSm(handler) {
   return sm;
 }
 
-async function skipCheck(sm, points = POINTS, config = {}) {
-  const ctxBase = { httpClient: sm.httpClient, config, target: TARGET };
+async function skipCheck(sm, points = POINTS, config = {}, extras = {}) {
+  const ctxBase = { httpClient: sm.httpClient, config, target: TARGET, ...extras };
   return sm._validationGuardedSkipPoints(ctxBase, TARGET, points);
 }
+
+// [D35 实战 P0-1 补] 「启用了请求变换」与「没启用」必须是两种语义 —— 差分用例，一次跑两边。
+// 为什么必须停用这条剪枝：在签名/加密型目标上，"改一个字段就连良性值一起被拒"
+// 正是**签名没覆盖 / 密文没重算**的定义，而不是输入校验拦截。照旧剪点的后果是
+// 整轮只发几条请求就收工，transform_rejected 的样本（injectRejects≥8）根本攒不齐，
+// 结论安静地落成「未检出」—— 实弹出处：e2e/signed-api-lab 的 B2 场景（第一版 5 请求即结束）。
+test('变换生效 ⇒ 同构 400 不再判为输入校验（保留完整检测）；未启用时仍照旧削减', async () => {
+  // 白名单校验形态：数字才回 200，其余一律同构 400 —— 与上面第一条用例完全同一份 handler
+  const handler = (q) =>
+    /^\d+$/.test(q)
+      ? { status: 200, data: `<h1>Item #${q}</h1>` }
+      : { status: 400, data: '<h1>400 Bad Request</h1><p>id 必须为数字</p>' };
+
+  const off = makeSm(handler);
+  const { candidate: offCand, skipped: offSkip } = await skipCheck(off);
+  assert.equal(offCand.length, 0, '未启用变换时行为必须不变（这条削减是 fp_strict 类目标的性能底线）');
+  assert.equal(offSkip[0].reason, 'input_validation');
+  assert.equal(off._requests(), 5, `未启用时应发满 5 次探测，实得 ${off._requests()}`);
+
+  const on = makeSm(handler);
+  const { candidate: onCand, skipped: onSkip } = await skipCheck(on, POINTS, {}, {
+    validity: { transformActive: true },
+  });
+  assert.equal(onCand.length, 1, '变换生效时必须保守保留该点，否则签名/加密目标会静默"未检出"');
+  assert.equal(onSkip.length, 0, '不得留下 input_validation 跳过记录');
+  // 早退位置也钉住：既然不打算据此剪点，就不该再花那 3 条探针请求
+  assert.equal(on._requests(), 2, `变换生效应只发基线+单引号两探即保留，实得 ${on._requests()} 次`);
+});
 
 test('输入校验型目标（探针同构 400）→ 判定跳过，且只发 5 个廉价请求', async () => {
   const sm = makeSm((q) =>

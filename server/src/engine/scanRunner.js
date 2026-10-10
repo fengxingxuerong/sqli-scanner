@@ -5,6 +5,10 @@ import * as eventBus from '../core/eventBus.js';
 import { logger } from '../core/logger.js';
 import { DbHealthGuard } from '../core/dbHealthGuard.js';
 import { ScanValidityGuard } from '../core/scanValidityGuard.js';
+// [D32 实战 P0-1] 自定义请求变换：判据开关取登记表，判定素材由变换层回传（理由见下方接线处）
+import { setTransformObserver, transformActiveForScan } from '../core/requestTransform.js';
+// [D36 实战 P0-2] Bearer 续期：结果回传可信度守卫
+import { refreshActiveForScan, setRefreshObserver } from '../core/bearerKeeper.js';
 import { HTTP_LOG_THROTTLE_MS } from './scan/constants.js';
 // [拆分第一批 2026-09-12] runScanLoop 阶段外移（纯搬移，行为不变）
 // [audit-2026-09-13] 清理搬移后残留的死 import（20 项，eslint no-unused-vars 29→0 前置）：
@@ -66,7 +70,17 @@ export async function runScanLoop(sm, scanId) {
     // 未动 defaults.js；config.scanValidity.enabled === false 为逃生口（观察完全关闭）。
     const validityCfg = (target.config && target.config.scanValidity) || {};
     const validityEnabled = validityCfg.enabled !== false;
-    const validity = new ScanValidityGuard(validityCfg);
+    // [D32 实战 P0-1] 变换层是否生效决定「签名被拒」一族判据是否运行。
+    // ⚠ 判据取**登记表**而不是取 config.requestScript：config 里有路径但脚本没登记成功
+    //（ensureScanTransform 失败会在 start 里抛出，这里是双保险）时，按 config 判会让守卫
+    // 在没有变换请求的情况下统计出一堆 4xx —— 那就是自己造出来的假红。
+    const transformOn = transformActiveForScan(scanId);
+    const refreshOn = refreshActiveForScan(scanId);
+    const validity = new ScanValidityGuard({
+      ...validityCfg,
+      transformActive: transformOn,
+      refreshActive: refreshOn,
+    });
     const observeValidity = validityEnabled
       ? (ev) => {
           try {
@@ -79,6 +93,27 @@ export async function runScanLoop(sm, scanId) {
     run.validity = validity;
     run.validityEnabled = validityEnabled;
     run.observeValidity = observeValidity;
+    // [D32 实战 P0-1] 「签名/加密被拒」显形：把变换层的结果回传给可信度守卫。
+    // 必须由变换层回传 —— 整包加密后守卫看到的 req 是密文，looksLikeInjection 恒 false，
+    // 分不出基线与注入，而「基线就被拒（脚本配错）」与「只有注入被拒（签名没覆盖该参数）」
+    // 是两种不同处置。变换层在加密之前还看得见明文 payload，故由它打标。
+    // 观察故障绝不影响发包（与 observeValidity 同一条纪律）。
+    if (transformOn) {
+      setTransformObserver(scanId, (ev) => {
+        try {
+          validity.observeTransform(ev);
+        } catch { /* 守卫故障不得影响检测主流程 */ }
+      });
+    }
+    // [D36 实战 P0-2] 续期结果回传守卫：配了 bearerRefresh 却没拿到 token 时，
+    // "后半程全 401" 必须被写成「你配的续期端点没生效」，而不是笼统的"重新登录"。
+    if (refreshOn) {
+      setRefreshObserver(scanId, (ev) => {
+        try {
+          validity.observeRefresh(ev);
+        } catch { /* 守卫故障不得影响发包 */ }
+      });
+    }
     // [P0-FIX 2026-09-08] 可信度摘要与「阴性结论」裁定（completed / stopped 两条收尾路径共用）。
     // 核心语义：reliable===false 且 vulns 为空时，报告必须显式声明「未检出 ≠ 无漏洞」，
     // 否则使用者会把「目标挂了/被封/会话过期」读成「这个站没有注入」。

@@ -124,11 +124,40 @@ test('注入请求连续 401 → session_expired；302 跳登录页同样命中'
   assert.equal(isLoginRedirect({ status: 302, headers: { location: '/item/2' } }), false);
 });
 
-test('整站都 401（基线请求也 401）不判会话过期（那是缺凭据，不是会话失效）', () => {
+test('整站 401：小样本（6 次）仍不判，达到下限（8 次）判 neverAuthenticated —— D36 改的就是这条空档', () => {
+  // 旧口径（2026-09 起）：baselineAuthHits>0 ⇒ 反证"那是缺凭据不是会话失效" ⇒ 状态恒 ok。
+  // 反证本身是对的（不把缺凭据误写成"扫到一半会话过期"），但**排除之后没有第二条判据接手**，
+  // 于是 e2e/bearer-lab 实测到最危险的形态：70 条请求全 401、零业务响应，报告却写
+  // verdict=no_vulnerability_detected + reliable=true。D36 补 neverAuthenticated 判据。
   const g = new ScanValidityGuard();
   obs(g, 6, () => ({ req: { url: 'http://t.test/item?id=1' }, res: { status: 401, data: '', headers: {} } }));
-  assert.equal(g.summary().status, 'ok');
+  assert.equal(g.summary().status, 'ok', '未达 unauthMinRequests 不得下结论（与 blockMinHits 同构的保守位）');
   assert.equal(g.baselineAuthHits, 6);
+  assert.equal(g.summary().counts.neverAuthenticated, false);
+
+  obs(g, 2, () => ({ req: { url: 'http://t.test/item?id=1' }, res: { status: 401, data: '', headers: {} } }));
+  const s = g.summary();
+  assert.equal(s.status, 'session_expired');
+  assert.equal(s.reliable, false);
+  assert.equal(s.counts.neverAuthenticated, true);
+  assert.match(s.reason, /没有任何一次得到过业务响应/);
+  assert.match(s.advice, /--auth|requestFile|--header/, '建议要给出具象的凭据入口，不能只说"带凭据"');
+});
+
+test('neverAuthenticated 的反例：只要有过一次业务响应（哪怕 404/5xx）就不成立', () => {
+  const g = new ScanValidityGuard();
+  g.observe({ req: { url: 'http://t.test/item?id=1' }, res: { status: 404, data: 'not found', headers: {} } });
+  obs(g, 20, () => ({ req: { url: INJ_URL }, res: { status: 401, data: '', headers: {} } }));
+  assert.equal(g.summary().counts.neverAuthenticated, false, '404 证明请求过了认证这道门，属另一类问题');
+  assert.equal(g.summary().status, 'session_expired', '此时由既有 authLost 判据接手（注入连续 401 而基线没有）');
+});
+
+test('neverAuthenticated 的反例：满屏 403 属 blocked 族，403 不算认证挑战', () => {
+  const g = new ScanValidityGuard();
+  obs(g, 30, () => ({ req: { url: INJ_URL }, res: { status: 403, data: 'Forbidden', headers: {} } }));
+  assert.equal(g.summary().counts.authChallengeHits, 0);
+  assert.equal(g.summary().counts.neverAuthenticated, false);
+  assert.equal(g.summary().status, 'blocked');
 });
 
 test('拦截文案出现在 200 页面不得判 blocked（防误判回归）', () => {
@@ -181,11 +210,30 @@ test('summary 契约字段齐全（前端/报告按固定字段名消费）', ()
   // counts 契约（[P1-FIX 2026-09-08] 新增 injection5xx：注入请求引发的 5xx 计数问）：
   // 不参与状态裁定（那是 error 技术的正常产物），但必须可见——不能与「目标本身在报错」混为一谈。
   // [P0-FIX 2026-09-09] 新增 netErrPoints：网络层失败导致未测成的点数（该点阴性结论不成立）。
+  // [D32 实战 P0-1] 新增 transform：自定义请求变换（签名/加密）一族的计数。
+  //   未启用时也必须存在（全 0）—— 契约字段随配置有无而增减，消费方就得每次判空，
+  //   而漏判一次就是把「签名被拒」读成「没洞」。
+  // [D32] 新增 transform；[D36] 新增 refresh（Bearer 续期计数）与四本认证账
+  //   （authChallengeHits / nonChallengeHits / authChallengeStreak + 两个判定位点
+  //   neverAuthenticated / expiredMidScan）——「整轮没进业务逻辑」与「进去后出不来」的数字
+  //   必须与结论同源进报告，不能只活在 reason 字符串里（否则报告读者无法复核判据）。
+  // 未启用时也必须存在（全 0/false）—— 契约字段随配置有无而增减，消费方就得每次判空。
   assert.deepEqual(
     Object.keys(s.counts).sort(),
-    ['authLostHits', 'blockHits', 'failStreak', 'injection5xx', 'netErrPoints', 'serverErr', 'total'].sort()
+    ['authChallengeHits', 'authChallengeStreak', 'authLostHits', 'blockHits', 'expiredMidScan', 'failStreak', 'injection5xx', 'netErrPoints', 'neverAuthenticated', 'nonChallengeHits', 'refresh', 'serverErr', 'total', 'transform'].sort()
   );
-  assert.ok(['ok', 'blocked', 'unreachable', 'session_expired', 'target_error'].includes(s.status));
+  assert.deepEqual(
+    Object.keys(s.counts.transform).sort(),
+    ['baselineOk', 'baselineRejectStreak', 'baselineRejects', 'injectOk', 'injectRejects', 'kind', 'netErr'].sort()
+  );
+  assert.deepEqual(
+    Object.keys(s.counts.refresh).sort(),
+    ['attempts', 'failures', 'lastWhy', 'successes'].sort()
+  );
+  assert.ok(
+    ['ok', 'blocked', 'unreachable', 'session_expired', 'target_error', 'transform_rejected'].includes(s.status),
+    '状态名必须在这份封闭清单内（新增状态要同时改前端 ScanValidity.status）'
+  );
   assert.equal(typeof s.reliable, 'boolean');
   assert.equal(typeof s.reason, 'string');
   assert.ok(s.reason.length > 0 && typeof s.advice === 'string' && s.advice.length > 0);

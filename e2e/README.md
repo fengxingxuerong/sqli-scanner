@@ -38,6 +38,7 @@ node e2e/run-all.mjs --all                    # 强制全跑（缺依赖的会�
 | `waf-real` | 真实 CRS v4.1.0 规则绕过验证 | `selftest.mjs` | MySQL |
 | `real-world-lab` | 拟真靶场（登录/搜索/上传等业务面） | `verify.mjs` | PGlite（内置） |
 | `pentest-lab` | 渗透视角「刁钻场景」实测 | `verify.mjs` | MySQL |
+| `signed-api-lab` | **签名/加密参数接口**的请求变换闭环（`--request-script`）：真 md5 验签中间件 + 四形态（正确签名 / 只覆盖抓包副本的字段 / 密钥错 / 关键字过滤），裁判是靶站计数的 `reachedPayload`（改了取值的请求是否抵达 SQL）。D 对照组钉住"不做扩展点时的静默假阴性"，E 钉住"不误报" | `run.mjs`（五场景连跑三轮逐字一致；摘掉变换接线 ⇒ 6 条红） | 无（真 SQLite + 真 CLI 进程） |
 | `recall-lab` | **两个入口，别混**：`false-positive.e2e.js` = 安全靶场零误报（run-all 里那个叫 "recall-lab" 的条目指它）；`recall.e2e.js` = 18 条召回基线（含 2 条真实 MySQL，CI 在 acceptance job 里带 `RECALL_REQUIRE_MYSQL=1` 每次 push 跑满 18） | 见左列 | PGlite + 真 MySQL |
 | `tamper-matrix` | tamper × WAF 规则绕过矩阵 | `tamper-test.mjs` | 无 |
 | `detection-runner` | 数据驱动检测测试 | `run.js` | 无 |

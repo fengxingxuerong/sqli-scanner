@@ -66,8 +66,18 @@ export function printHelp() {
                              （GET 登录页探测用户名/密码输入框名 + hidden/CSRF 透传 → POST 凭据），
                              会话过期（401/403/登录跳转）自动重登一次并重试原请求。凭据用
                              --auth user:pass；字段名可用 --login-user-field/--login-pass-field 覆盖。
-                             诚实边界：OAuth/JWT 刷新、SAML、验证码、JS 加密提交不支持——此类目标
-                             请人工取 cookie 走 --cookie 静态注入
+                             诚实边界：SAML、验证码、JS 加密提交不支持——此类目标
+                             请人工取 cookie 走 --cookie 静态注入。
+                             API 侧的 Bearer/Token 过期不在此列，用下面的 --refresh-url
+  --refresh-url <url>        Bearer/Token 自动续期（2026-10-10 实战 P0-2；默认关闭）：请求吃
+                             401/403 时 POST 该地址换新 access token，成功后重试原请求一次
+                             （并发只刷一次；拿到新 token 之前不动你从抓包带来的 Authorization）。
+                             access token 半小时过期的目标上不给它 = 后半程全 401 ⇒ 那些参数
+                             全被判「不可注入」，而报告写的是「未检出」。续期失败会把结论降级为
+                             inconclusive 并在 reason 里给出失败原因与响应顶层键名
+  --refresh-token <token>    刷新凭据（不填则依赖会话 Cookie，多数实现如此）
+  --refresh-field <path>     续期响应里取 token 的字段路径（如 data.access_token）；
+                             不填按 access_token / token / data.token 等常见形态探测
   --use-registry             启用声明式 payload 注册表（检测器改用 PAYLOAD_REGISTRY 筛选，受 level/risk/test-filter/test-skip 控制）
   --dump                     启用数据提取（拖库，默认关闭对标 sqlmap 显式 opt-in）
   --dump-all                 全库拖库（对标 sqlmap --dump-all）：枚举所有库后逐库逐表拖，
@@ -110,6 +120,14 @@ export function printHelp() {
   --tamper <name,name>       tamper 插件链（逗号分隔，对标 sqlmap --tamper）；传 .js 文件路径可加载自定义插件
   --payload-file <file.json>  追加自定义检测条目（与 registry.json 同 schema，见 docs/自定义检测条目.md）；
                              只追加、不允许覆盖内置条目；不传即与内置基线完全一致
+  --request-script <file.js>  自定义请求变换脚本（签名/加密参数接口）：扫描/检测阶段每条出站请求
+                             的最后一环调用其 transform(req) 重算 sign / 重新加密整包
+                             （含保活/CSRF 取页/登录；注入点发现阶段的爬虫请求不经此层）。
+                             目标带签名或加密参数时
+                             不带本开关的结果是「未检出」，而那**不等于没有洞**——注入值破坏了签名，
+                             从未抵达 SQL。脚本必须位于环境变量 REQUEST_SCRIPT_DIR 指定的目录内
+                             （出口层的代码注入面，故不给自由路径）；加载/执行失败一律硬失败，
+                             不会退化成「发没签名的原始请求」。用法见 docs/请求变换脚本.md
   --identify-waf             仅识别 WAF 厂商并给出推荐 tamper 链，不发起注入检测
                              （对标 sqlmap --identify-waf；用于扫描前先摸清对面是什么 WAF）
   --smart                    智能启发式（别名，等价 prefilter: true，跳过非注入参数）

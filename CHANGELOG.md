@@ -4,6 +4,432 @@
 
 ## [Unreleased]
 
+### 2026-10-10 批次 D36 —— Bearer/Token 自动续期，以及靶场一跑就掉出来的三处「根本没接上」
+
+**一句话**：P0-2 的账本来只是"补一个续期调用"。真机靶场跑第一轮，抱出来的却是三条
+比续期本身更值钱的东西：**CLI 的认证参数从来没到过出口**、**续期换来的新令牌被旧令牌就地盖回**、
+以及本仓第三例**判据在它最该管的目标形态上永不可达**（`session_expired` 要求"基线请求不 401"，
+而令牌过期时基线同样吃 401 ⇒ 反证恒成立 ⇒ 那条判据在这类目标上一次都没生效过）。
+
+#### ① 断链一：`--auth` / `--header` / `--cookie` 到不了出口层（入口层，P0）
+
+`bin/cli.js` 一直把 `buildAuth()` 的结果作为**顶层字段**交给 `sm.start(input)`，
+而 `createTarget()` 只展开 `input.config` ⇒ `input.auth` 原地被丢；
+引擎侧三个读取点（`egressOpts.js:85` / `TargetParser.js:392` / `crawler.js:176`）读的都是 `config.auth`。
+
+实测形状（探针脚本，非推演）：`--auth alice:secret --header X-Api-Key: kk123` 打到靶站
+**42 条请求、零个认证头**；`--header 'Authorization: Bearer <token>'` 同样为 0。
+于是"目标要求认证"的整站扫描 = 全部 401，而报告写「未检出 + 结论可信」。
+
+既有 `tests/cli.auth.test.js` 全绿了三个月 —— 它断的是 `buildAuth()` 的**返回形态**，
+而坏的是下一环。⇒ 新增 `tests/cli.auth.reach.test.js`（8 条）把判据挪到"合完之后线上那一个值"：
+`parseArgs → buildAuth → createTarget → buildEgressOpts → mergeAuthHeaders`，
+另钉 `config.auth` 优先、未配时为 `null`、直连模式不受影响。
+
+#### ② 断链二：新令牌被 `auth.headers` 就地盖回（出口层，P0）
+
+`mergeAuthHeaders` 的既有语义是 **`auth.headers` 最后覆盖 per-request 头**
+（`cli.js` 的注入点剔键逻辑正是照它写的）。而抓包重建带来的 `Authorization` 走的就是这条路 ⇒
+续期只把新令牌写进 `opts.headers` 的话：日志说"已取到新 token"、靶站收到的还是旧令牌。
+
+实测出处：`e2e/bearer-lab` B 场景第一轮 —— **续期请求 26 次、26 次全成功、签发 26 枚新令牌，
+而靶站仍收到 94 条"过期"拒**。修法是 `applyBearer` 在这条请求上摘掉 `auth.headers` 里的同名键
+（只改副本，绝不原地动共享的 `config.auth`），判据写在 `bearerKeeper.wiring.test.js`
+（把**真的** `mergeAuthHeaders` 接进假客户端，断出口那一个值）与 `bearerKeeper.test.js` 的单元用例两侧。
+
+#### ③ 判据不可达第三例：会话失效的两种形态此前无人接手
+
+既有 `authLost` = 「注入请求连续 ≥3 次 401/跳登录 **而基线请求没有**」。这条反证是为了不把
+"整站本来就要登录"误写成"扫到一半会话过期"，它是对的 —— 问题是排除之后没有第二条判据接住：
+
+| 形态 | 新判据 | 修前的报告 |
+| --- | --- | --- |
+| 整轮**零业务响应**（全 401） | `neverAuthenticated`：`nonChallengeHits===0 且 authChallengeHits≥8` | `no_vulnerability_detected` + `reliable=true` |
+| 进去过、此后**连续出不去**（不分注入与否） | `expiredMidScan`：`nonChallengeHits>0 且 authChallengeStreak≥8` | 同上（实测 71 条请求里 69 条 401、**61 条是白打的注入 payload**） |
+
+两者都落 `session_expired`（处置同为"把凭据带对再复扫"），但 reason/advice 分三支写清是哪一种；
+配了 `bearerRefresh` 时再追加「续期尝试 N 次里失败 M 次（最后一次：<原因>）」并把建议指向
+`bearerRefresh.url` / `tokenField`。阈值取 8 而不是沿用 3：这两条**不分注入与否**，
+而"自动续期正在工作"的正常纹理就是 `401 → 重试 200` 交替，下限 3 会把健康目标打成失效
+（`validity.refresh.test.js` 有一条专门钉这个反例：交替 30 次必须仍 `ok`）。
+
+顺带把 403 的归属写死在文案里：本守卫 **403 属 `blocked` 族**（不算认证挑战），
+而 `bearerKeeper` 把 403 当挑战去续期 —— 很多 API 正是用 403 表达"令牌过期"。
+两套判据不合并，所以 `blocked` 的 advice 在"配过续期且失败"时会先说一句
+「目标用 403 表达令牌过期时，上面的拦截特征其实是会话失效，先修 bearerRefresh 再谈 WAF」，
+再保留完整的 WAF 出路。
+
+#### ④ 能力本身：`bearerKeeper`（四条口径 + 三处入口 + 一条回收）
+
+新模块 `server/src/core/bearerKeeper.js`，挂在包装链**最外**（loginFlow 之后）——
+挂在里面就永远看不见 401。四条口径：拿到新 token 之前不动用户带来的 `Authorization`、
+一次挑战只续一次（不给客户认证服务加压）、并发去重（in-flight 共享）、失败必须显形。
+配置面 `config.bearerRefresh`（子键 `url/method/refreshToken/bodyField/bodyFormat/body/
+tokenField/headerName/headerTemplate/headers/eager`）三处入口全接：REST 白名单 +
+`guardBearerRefresh` 逐项收紧、CLI `--refresh-url/--refresh-token/--refresh-field`、
+面板「网络与认证」分段（与 `login` 同组渲染，`url` 有值即启用、清空即整键删）。
+回收挂 `lifecycle._disposeScan`（那是持有 token 的条目，不是缓存）。
+
+子键可达性另加一条守卫：`bearerRefresh` 的关闭态是 `defaults.bearerRefresh = null`（同 `login`），
+所以它**不在** `configWhitelist.passthrough.test.js` 那条数据驱动的嵌套守卫的分母里
+（那边的分母是 defaults 的对象组）⇒ 「引擎读 `spec.method` 而入口只转发 url」这类断口没人看守。
+本批补一条逐键转发守卫，**判据来源用 `normalizeRefreshConfig` 的出参键集**（不手抄清单），
+以后加一个可配子键自动进分母；变异验证（把 `out.eager` 的转发摘掉）确实红。
+
+`configOrphanKeys.guard` 第一次报这 9 个键时，正确的修法**不是**加豁免：豁免会把
+"子键其实没有入口"这件事永久静音。改法是两处 ——
+① `bearerKeeper` 里的子配置对象一律命名 `spec` 而不是 `cfg`（本仓 `cfg` 指**顶层扫描配置**，
+混名会让守卫把组内子键误报成顶层旋钮，也让读代码的人以为续期配置是全局的）；
+② 上面那条逐键转发守卫，把"确实有入口"变成可执行的事实。
+
+#### ⑤ 靶场：`e2e/bearer-lab`（6 场景 + 差分档，三轮逐字一致）
+
+真 HTTP 靶站 + 真 SQLite（sql.js）+ 真 HS256 JWT 验签 + 真刷新端点 + 真 CLI 子进程，`deps: []`
+⇒ CI 的 `e2e-self-contained` 自动收。裁判是**靶站侧计数**（`refreshHits` / `issued` /
+`payloadAfterExpired`），不是引擎自报 —— "续期成功"必须由端点真的被打过、且新令牌真的被收到来证明。
+
+| 场景 | 靶站（认证通过 / 401 / 续期 / 过期后白打的注入） | 引擎 refresh | 报告 |
+| --- | --- | --- | --- |
+| A 不配续期 | 2 / 69 / 0 / **61** | attempts=0 | `session_expired` + inconclusive |
+| B body 带 refreshToken | 70 / 1 / 1 / **0** | 1/1 成功 | 检出 2 条 · vulnerability_detected |
+| C1 续期端点 5xx | 2 / 69 / 24 / 61 | attempts=3 failures=3 | inconclusive，reason 指名续期 + 状态码 |
+| C2 端点 200 但无可用 token | 2 / 69 / 24 / 61 | attempts=3 failures=3 | inconclusive，reason 给出试过的字段与**响应顶层键** |
+| D 凭据只在 Cookie（不配 `--refresh-token`） | 70 / 1 / 1 / 0 | 1/1 成功 | 检出 2 条 |
+| SAFE 参数化对照（配续期） | 89 / 1 / 1 / 0 | 1/1 成功 | 0 条 **且 reliable=true**（真的测过才允许阴性成立） |
+
+令牌"何时失效"由靶站的**虚拟时钟**（每条业务请求拨快 20s）决定，不用真实 TTL ——
+靠 sleep 的靶场在 CI 上是抛硬币，快慢两种情况测的根本不是同一件事。
+差分档 `node e2e/bearer-lab/run.mjs --break-chain`：把 B 的 `--refresh-url` 摘掉重跑
+⇒ 检出从 2 掉回 0、白打注入从 0 涨回 61、续期请求 0 次（证明 B 那套证据不是白送的）。
+
+靶场自身也返工过三处（都是"夹具不像真目标"）：① `--cookie` 静态塞刷新凭据 → 改成靶站
+`Set-Cookie` 下发（真实实现靠会话 jar，而 `--cookie` 会被当注入面、由检测器拼头，
+续期请求走 `client.request` 那条路根本不经过它）；② 每轮必须复位 `cookieIssued`
+（不复位则第二轮起靶站再也不发 cookie，症状长得像引擎坏了：续期全 400 + 报告 session_expired）；
+③ 初始那枚短命、续期那枚长命（两边都短会把 A/B 的差别淹成"每 3 条续一次期"的同一种纹理）。
+
+#### ⑥ 门禁与测试（数字来自当场命令）
+
+- 新增 **71 条断言**（数字取自当场命令）：新文件 4 个 = `bearerKeeper.test.js` 24 +
+  `bearerKeeper.wiring.test.js` 14 + `validity.refresh.test.js` 17 + `cli.auth.reach.test.js` 8；
+  落在既有文件里的 8 条 = `configWhitelist.passthrough` 的 bearerRefresh 子键守卫 1、
+  `scanValidity.test.js` 的认证三形态 3（替换掉原来那条"整站 401 不判"）、
+  前端 `scanConfigSections.bindings` 的分段接线 5。
+- 变异验证：`src/core/bearerKeeper.js` 进 `scripts/mutation-check.mjs` 的 TARGETS（并把 D32 漏挂的
+  `validity.transformReject.test.js` 与本批 `validity.refresh.test.js` 补进 `scanValidityGuard.js`
+  那条目标的挂载面 —— 少挂一个文件 = 那部分断言不参与判定 = 假存活）。
+  `bearerKeeper.js` **65 个位点全杀 / 0 存活**（含 applyBearer 摘掉 auth.headers 冲突键之后重跑）。
+  `scanValidityGuard.js` **没能用门禁跑**：见下方⑦，本机对它做变异会在第一次写文件就崩，
+  所以新增判据的敏感度改用**手写定向变异 7 处**逐条确认变红：
+  neverAuthenticated 判据恒假 / expiredMidScan 恒假 / 挑战计数恒零 / 两形态合并（expired 抢先）/
+  业务响应不清零连续段 / 连续段单向增长 / 传输失败被算成"进去过" —— 7/7 红，每轮之后都复核过
+  文件行数与 `export default` 计数（第 2 条那次 GREEN 是我的锚点打到了构造器的同名初始化行，
+  不是断言不敏感；换成带缩进的锚点后当场变红）。
+  另有 5 处对 `bearerKeeper` 的手写定向变异（去掉"续期失败即放行" / 并发去重失效 / eager 失效 /
+  丢掉 headRequest / 无挑战也续期）逐条确认变红。
+- 全量：`cd server && npm test` **3294 条 / 3290 pass / 4 skipped / 0 fail**（exit 0）；
+  前端 `npx vitest run` **64 个文件 / 561 条全绿**（含本批新增的分段接线 5 条与两处契约判据）。
+- 门禁 `npm run check:all` 全绿（lint / typecheck×3 / arch / nesting / refs / modules /
+  facts / readme / version / release-selftest / lint:rust），`node e2e/run-all.mjs --list`
+  里 `bearer-lab` 已在列（`deps: []` ⇒ 自包含 CI job 自动收）。
+
+#### ⑦ 一条环境事故（值得单独记，因为它会把源码写坏）
+
+`scripts/mutation-check.mjs --file=src/core/scanValidityGuard.js` 在本机**两次**于第一次
+`writeFileSync` 处崩掉（`errno -4094 UNKNOWN, syscall 'open'`），且两次都把源文件留成
+**两份拼接**（第一次 1343 行 / 两个 header，第二次 1532 行）—— 崩在写 mutants 的那一步，
+所以文件里既不是原始也不是变异体，而是"copy1 + copy2 接缝处被吃掉两个字符"。
+同目录的 `bearerKeeper.js` 每次都能正常跑完 65 个位点 ⇒ 不是全局写不了，是这个文件。
+
+处置口径（本批用的就是这套）：
+① 变异门禁跑完**不能只看退出码**，必须复核行数、`export default` 计数、header 计数；
+② 还原用**逆操作**（按接缝切回单份 + 复位首行 banner + 归一 CRLF），
+   **不要 `git checkout -- 文件`** —— 那会把本批对同一文件的其它改动一起删掉
+   （本批对这个文件有 refresh 计数、三形态文案、两条新判据共 152 行改动）；
+③ 切完必须 `node --check` + 跑该文件的全部相关测试，再对照 `git diff` 确认只剩预期改动。
+
+尚未归因：为什么只有这个文件的写入会崩（怀疑是杀软按文件名/体积实时扫描时独占句柄；
+同一份内容手工 `writeFileSync` 连写 8 次都成功，所以不是文件属性或磁盘问题）。
+CI（ubuntu）上没这个现象，所以门禁本身不受影响 —— 但**本机跑 targeted 变异要当心**。
+
+
+
+### 2026-10-10 批次 D35 —— 加密族与防重放族靶点，顺带挖出「签名被拒判据在这类目标上不可达」
+
+**一句话**：D34 留的账是"只有签名形态有靶点"。补上整包 AES 与 timestamp+nonce 两族之后，
+真正的产出不是"多两个场景"，而是**一条判据被证实在它最该生效的目标形态上永远不会成立**。
+
+#### ① 判据不可达（本批的核心发现）
+
+`e2e/signed-api-lab` 的 B2（加密目标 + 漏覆盖 `meta.enc` 的脚本）第一版实测：
+整轮**只发 5 条请求**就收工 ⇒ `injectRejects` 永远到不了阈值 8 ⇒ 报告落成
+`no_vulnerability_detected`（而不是 `inconclusive`）。
+根因在 `scan/prefilter.js` 的"输入校验甄别"：基线 200、四路探针同构 400 且无 SQL 报错签名
+⇒ 判为「参数在进 SQL 前被白名单拦死」⇒ 安全跳过该点（这条削减本身是对的，实测省下 fp_strict 类目标 206 请求）。
+**但在签名/加密目标上，那个"同构 400"就是签名没覆盖 / 密文没重算的定义**，不是输入校验。
+两类判据在同一份证据上互相否决，而先动手的是 prefilter ⇒ `transform_rejected` 连样本都攒不到。
+
+⇒ 修法是语义而不是数字：**启用请求变换时停用这条剪枝**（`ctxBase.validity.transformActive` 与
+   变换层回传判定的那个对象同源，不会出现两边读数不一致）。
+   **没有降阈值来把测试做绿** —— 那等于把 D34 刚拿到的实测结论抹掉。
+   副作用为零：未启用变换时行为逐字不变（差分单测两侧都钉：未启用仍 5 探削减，启用则 2 探即保留）。
+   修后 B2 实测：94 请求 / 84 次解密失败 / `kind=injection` / verdict=`inconclusive` / 注入抵达 SQL **0** 次。
+
+⚠ 这条也修正 D34 的表述：当时写"安全边际来自 `injectOk===0` 那半边，不是来自 8"。
+补一句前提 —— **前提是样本够**；单点 + 早剪的目标上 8 这个数本身就是不可达的。
+
+#### ② 三族靶点与它们的"非空转"证据
+
+| 族 | 端点 | 脚本 | 场景与判据 |
+|---|---|---|---|
+| 签名 | `/api/item`（+`/api/safe`、`/api/mixed`） | 正确 / 抓包副本 / 错密钥 / 关键字过滤 | D（无脚本 0 检出且自认正常）、A（检出 3）、B（injection）、C（baseline+早停）、E（不误报） |
+| 整包 AES | `/api/enc`（POST，**整个报文只有一个叶子是密文**） | `enc-correct`（幂等）/ `enc-plain-passthrough` | D2 静默假阴性、A2 检出 1、B2 见上 |
+| 防重放 | `/api/tick`（时钟窗 + 一次性 nonce + 三者参与 sign） | `tick-fresh`（每条现算）/ `tick-stale-clock` | A3 检出 3 且 nonce 复用 0；**靶站自证**：同一报文连发两次第二次必拒；C2 `kind=baseline` 且早停（11 < 83/2） |
+| 利用组合 | `/api/item` + `--dbs --current-db` | 正确签名 | X：被拒 **0** 次、注入抵达 67 条 ⇒ 利用阶段确实经 per-scan 视图（`Exploiter` 复用 `Extractor._send`，这条以前只是"结构上应该"） |
+
+#### ③ 三次「靶站不像真目标 / 说法大于事实」（全部由实测翻出）
+
+1. **加密报文必须只有一个叶子**。第一版 `{head:{appId,t}, body:{data}}` 三叶子，
+   靶站收到的去重报文显示引擎把 payload 注进了 `head.appId`（`"appId":"lab-app' AND SLEEP(2)-- -"`），
+   `body.data` 全程未改 ⇒ 三个场景测的是"引擎在改别的参数"。为此在靶站加了**收到的去重报文打印**
+   —— 计数分不清"没改"与"改了没送到"时，这一行一眼定案。
+2. **A2 当时"检出 1 条"是我脚本造出来的假信号**：无条件 `encryptString(v)` 把**基线那份密文**又加密一遍
+   ⇒ 服务端解出 base64 串 ⇒ 拼进 SQL 语法错 ⇒ error 通道命中。
+   真实 SDK 不会这样（它加密的始终是自己那份明文副本），而挂在扫描链上的脚本面对的是明文与密文混合流量
+   ⇒ 改成"已是合法密文就不再加密"，并把这条写进脚本注释。
+3. **Node 的 base64 解码静默忽略非法字符** ⇒ `密文 + " AND 1=1-- -"` 解出与原文**同样的字节**，
+   靶站于是"吃掉了"每一次注入（0 次解密失败、76 条全以明文 `1` 抵达 SQL、检出 0）。
+   ⇒ `decryptString` 加严格校验（字符集 / 4 字节对齐 / **解码后再编码必须等于原串** / 整块长度），
+   与真实后端的行为一致。这条属于"fixture 太宽容导致目标看起来无解"，判据一行没改。
+
+#### ④ 顺手记的一条既有限制
+
+早停粒度是**点边界**（`scan/detect.js` 在 scheduler 回调顶部判 `validity.shouldAbort`），
+单点目标内部几十上百条请求无从打断 —— 第一版 C2 用 `/api/tick?id=1` 实测跑满 75 条正是这个形状。
+不是 D35 引入的（与 F1 那批"暂停只在点边界"同族），已记 TODO §8，并把 C2 的目标改成两个参数
+让"早停生效"这件事真的可观测。
+
+**验证**：`e2e/signed-api-lab` 全 11 场景 PASS；prefilter 五个套件 47/47；
+其余门禁见提交说明。
+
+### 追加（同日 D35 复核）· 三个 run-all 红里有一个是我自己带的，而且单测全绿
+
+跑全套 run-all：`通过 24 / 失败 3`。逐个定性（不靠"看着像已知红"）：
+
+| 红 | 定性 | 依据 |
+|---|---|---|
+| `pentest-lab waf403` | **既有确定性红** | 输出即 `FAIL(miss=boolean) waf403 检出=[error]`，与 TODO §15.1 记的同一形态（机理已在 D31 定位到"过了还能不能用"，方案三选一待决） |
+| `udf-lab` | **环境** | `EBUSY: resource busy or locked, copyfile …\udf_sys.dll → .mysql-sandbox\plugin\`（上一轮 mysqld 还占着 DLL），未进一条断言 |
+| `api-range-lab 48/49` | **D32 我带的** | 现场 `retest 启动失败：{"code":1003,"message":"requestScript 须为非空脚本路径（≤1024 字符）"}` |
+
+**缺陷形状**：D32 把 `requestScript` 的入口校验写成"必须非空"，而它的**默认关闭态就是空串**
+（`defaults.requestScript = ''`）。单目标扫描永远看不见这条 —— 只有「单点重测」这种
+**把整份基线配置原样回放**进 `/scan/start` 的路径才会撞上。
+对照 `clientCert` 为什么可以要求非空：那个的关闭态是 `null`，空串不是它的合法值。
+⇒ 同一种校验写法在两个键上一个安全一个有害，差别只在**默认值是什么**。
+
+**修法**：空白串按"未启用"放行（不落键），非字符串/超长仍明确拒绝（收了不生效比报错难查）。
+`server/tests/requestScript.guard.test.js`（5 条）钉住空值语义，其中⭐那条是
+「**从 defaults 取值整份回放**」而不是手写 `''` —— 以后有人改默认值形态，这条会说话。
+修后 `api-range-lab` 实测回到 **49/49**。
+
+⚠️ 值得记的是这道防线的位置：它不在单测里，在 e2e 接口靶场里。
+D32 当时给这个键配了 passthrough 探针（值是合法路径）、给了形状校验的负例（值是 `123`），
+**唯独没测"默认值自己能不能过自己的校验"** —— 而配置回放是这个项目真实存在的入口
+（重测、续跑、批量派生都走它）。以后给 config 加键，缺省值本身必须进一次入口。
+
+
+### 2026-10-10 批次 D34 · signed-api-lab：把 D32 那句「只到单元+接线级」换成真机证据
+
+**一句话**：D32 交付时自己在 CHANGELOG 里写着「没有真靶场证据、两个阈值是拍的」。本批补上
+`e2e/signed-api-lab`（真 SQLite + 真 md5 验签中间件 + 真 CLI 子进程 + 真签名脚本文件），
+五场景三轮逐字一致，并由此**换掉两条原本靠同族惯例拍的结论**。
+
+#### ① 裁判放在靶站侧，不放引擎侧
+
+新增计数 `reachedPayload`＝「**改了取值的**请求真的被拼进 SQL」的次数。
+为什么必须有：引擎报「检出/没检出」是它自己的判断，而"注入到底有没有抵达业务逻辑"只有目标能回答。
+| 场景 | 签名脚本 | 请求总数 | 抵达 SQL（其中注入） | 报告结论 |
+|---|---|---|---|---|
+| D 对照 | 不带 `--request-script` | 11 | 0（0） | `no_vulnerability_detected` + `reliable=true` ⇐ **静默假阴性的现场被钉成事实** |
+| A | 正确 | 83 | 83（67） | 检出 3 条；参数化查询的安全对照点 131 请求 **0 检出** |
+| B | 只对抓包副本签名 | 13 | 3（**0**） | `transform_rejected` / `kind=injection` / `inconclusive` |
+| C | 密钥错 | 11 | 0（0） | `transform_rejected` / `kind=baseline` / `inconclusive` + **早停** |
+| E | 正确 + 目标按关键字回 400 | 91 | 72（56） | **不误报**，仍检出 2 条 |
+
+#### ② 两条被换掉的结论
+
+1. **阈值 8 / 2 的角色被纠正**。D32 里它们是照 `blockMinHits`/`authStreak` 的同族惯例拍的；
+   实测后发现的不是"数字对不对"，而是**安全边际根本不在它们身上**：E 场景一次健康扫描里
+   天然就有 **19 次**注入请求被 4xx 拒 —— 只数被拒条数的判据会当场误报。
+   真正守住不误报的是 `baselineOk===0` / `injectOk===0` 那半边条件。
+   ⇒ 保留 8 / 2，但把它们的作用重新定性为「多快停手」而非「是否可信」；
+   早停实测有效：C 用 11 条请求收摊，同目标健康扫描要 83 条。
+2. **"套件不是空转"有反证**：把 `getScanClient` 的变换层摘掉（`if (false && transformActiveForScan(...))`）
+   重跑本套件 ⇒ **6 条断言变红**，五场景全退化成"11 请求 / 0 检出 / verdict=未检出"
+   —— 正是 D 钉的那个失效形状。还原后回到上表（`git status` 确认文件已回原位再复跑）。
+
+#### ③ 过程中两处「看着像工具漏检，其实是我自己搭错」
+
+- **第一版靶站把自己的靶点剪掉了**：`/api/item` 原本 `500 + {"error":"unrecognized token: X"}`，
+  A 场景 0 检出、只发 12 条。查下来 `prefilterSimilar(单引号探针, 良性非法值探针) === true`
+  ⇒ SQLite 只回显肇事 token，两种报错同构 ⇒ prefilter 判"这是输入白名单在报错"**并安全跳过**。
+  **prefilter 没错**，是靶站不像真实可注入目标；改成 sqli-labs 的「200 页面内回显错误」后，
+  状态码不 ≥400 不走那条甄别，完整检测照常执行，A 检出 3 条。
+  ⇒ 写进文档 §8 附录：加新靶点先确认 prefilter 不会把你的靶点判成"输入校验"。
+- **B 场景第一版断言写错**：原本断言 `reached===0`，实测得 3 —— 因为 B 的签名对**未改动的基线**
+  本来就成立，基线抵达 SQL 是正确行为。若按原断言"修"到绿，就会把判据的语义改坏。
+  改成断言 `reachedPayload===0`（只有注入请求不得抵达）。
+
+#### ④ 门禁接入与两处杂项
+
+- 注册进 `e2e/run-all.mjs`，`deps: []` ⇒ CI 的 `e2e-self-contained` 自动收（无需改 CI 步骤）。
+- `ci.yml` 里「自动收敛到 **6 套**自足靶场 + 一份名单」的散文实测已过期（现在 10 套，
+  且名单里的 `waf-lab` 早就是 `deps:['sandbox']`）⇒ 改成「清单以 `e2e/run-all.mjs` 为唯一来源」，
+  不再数个数（同 §U「两处声明都会漂」那一族）。
+- `sign-scheme.mjs`：靶站验签与"正确脚本"产签**共用同一份代码**，否则改一处算法就会让 A 场景
+  红得与能力无关（§D/§W「靶场注释与实现不符把排查带向错误方向」的同类防线）。
+- `paramsOf` 第一版 `new URL(req.url)` 在靶站侧直接抛 `ERR_INVALID_URL` 打死整个进程
+  （Node 的 `req.url` 只有 path+query）⇒ 改为容忍相对形态，用固定占位 origin 解析，
+  两侧取到的参数集逐字相同。
+- `orphanScripts.guard` / `refs:check` / `check:all` 全绿；新靶场目录 5 个文件均有归宿。
+
+#### ⑤ 顺手把 TODO §8 那笔「行号锚点」的账做掉了（本批自己就被它咬了一次）
+
+加这个靶场只往 `e2e/run-all.mjs` 的 LABS 插了 5 行 ⇒ `ciWindowsOnly` 的三个登记键全漂
+（152→159、225→232、318→325），**这是三个月内第四次**，而触发条件是本仓最常见的正常操作。
+⇒ 不再改第四次数字，而是换成 §8 写的正解：**内容锚点键** `path:kind:整行去空白前 60 字符`，
+由 `regKey()` 生成（表头写明「别手抄、别用行号」）。
+
+同时把 §8 的两条验证口径从"文档里的期望"变成**长期断言**：
+| 新自证 | 钉住什么 |
+|---|---|
+| `自证⑤` | 合成文件顶部插 10 行注释 ⇒ 同一处仍被豁免、登记项不陈旧；**删掉命中行 ⇒ 必须报「已不存在」**（否则免检牌指向不存在的代码 = 假绿） |
+| `自证⑥` | 同一锚点命中 2 行 ⇒ 必须报错（一张免检牌不许盖多处，否则新加的那处真违规被静默放过）；并反向自证判据确实能扫出这两行 |
+| 自证③ 改造 | 由"该行号仍命中"改为"该锚点**恰好**命中一行"，且文件缺失时名下所有登记项都算陈旧（不静默通过） |
+
+真机复验（一次性变异，逐次断言替换命中数=1 并按字节还原一致）：
+往 `run-all.mjs` 真加一行未登记的 `.exe` ⇒ ① 红；真插 10 行注释 ⇒ 7/7 仍绿。
+`ci.yml` 里「自动收敛到 **6 套**自足靶场」那句散文同样过期（实测 10 套，且名单里的
+`waf-lab` 早就是 `deps:['sandbox']`）⇒ 改成「清单以 `e2e/run-all.mjs` 为唯一来源」，不再数个数。
+
+**仍未覆盖（如实记）**：本靶场只做**签名**形态；整包 AES 加密、timestamp+nonce 防重放
+两种症状相同但脚本写法不同，没有对应靶点。`--request-script` 与 `dbs`/`dump` 这类利用阶段的
+组合也未测（利用阶段走同一 per-scan 视图，结构上应覆盖，但没证据）。
+
+
+### 2026-10-10 批次 D33 · 收下一笔**已在 HEAD 上红着**的门禁账（`ciWindowsOnly` 登记表第三次漂移）
+
+**发现方式**：跑 D32 的全量服务端套件时红了两条（`自证③` + `① 检出`）。
+**先归因再动手**：用 `git worktree add --detach … HEAD` 在**不含本批任何改动**的干净检出上
+复跑同一份守卫 ⇒ 同样 2 条红 ⇒ 判定为既有红（D30 遗留），不是 D32 引入的。
+（只看"我改完它红了"就会把别人的账接到自己头上，反之亦然。）
+
+**根因**：D30 给 `e2e/run-all.mjs` 加「能自起 PG 就不算缺依赖」时插入了新代码，
+把登记表赖以定位的**行号锚点**顶掉了（195→225、263→318），并新增一处未登记命中（152）。
+它为什么当时没红：`run-all` 不在 acceptance 的收敛集里，要等下一次全量服务端套件才撞上。
+
+**修法**：按真实行号重新登记，三条例外**逐条读码核实**（登记理由必须是事实，不是"已检查"）：
+
+| 命中 | 为什么在 ubuntu 上安全 |
+|---|---|
+| `run-all.mjs:152` `postgres.exe` | 同一表达式里并列试 POSIX 名 `postgres`，且整体包在 `fs.existsSync(...)` 里 ⇒ 两者都不存在时返回 false ⇒ PG 类靶场按口径如实 SKIP（不把环境问题记成靶场失败） |
+| `run-all.mjs:225` `C:\Users\…\python.exe` | 是 `PY_CANDIDATES` 的**一个候选**，逐个真跑 `-c print(1)` 才算可用，列表尾部是 PATH 上的 `python`/`python3` ⇒ ubuntu 落到它们 |
+| `run-all.mjs:318` `taskkill` | 在 `if (process.platform === 'win32' && p.pid)` 之内（守卫在**上一行**，行级判据看不见），else 分支走 `p.kill('SIGKILL')` |
+
+**没有做的事**：TODO §8 提的正解（把登记键换成**内容锚点**）没做 —— 本批只把账收平。
+⇒ 下次上游插入仍会漂；这条已从「一天漂两次」升到「三个月漂三次」，判据形态本身该改。
+验证口径与两种改法写在 TODO §8（插 10 行注释必须仍绿、删掉那两行必须红）。
+
+**结果**：`node --test tests/ciWindowsOnly.guard.test.js` → 5/5 绿。
+
+
+### 2026-10-10 批次 D32 · 实战 P0-1：签名/加密参数接口的请求变换扩展点（功能与判据成对交付）
+
+**一句话**：目标接口带 `sign=` 签名、整参加密或 timestamp+nonce 防重放时，扫描器改一个字段就破坏签名
+⇒ 目标恒回 400 ⇒ 报告写「未检出」，而使用者读到的是**一句安全结论**。本批补上「让请求重新合法」的
+扩展点（`--request-script` / `config.requestScript`），并同时补上「它其实没让请求合法」的显形判据
+（`transform_rejected`）—— 只做前者会造出一个新的静默假阴性来源。
+
+需求来源：渗透实战视角的缺口盘点（本会话），排在第一位的判据是「这条通道失效时是否让整场测试零产出」
+—— 加密/签名参数是唯一让**所有**检测通道一起出局的一类。
+
+#### ① 扩展点：挂在包装链最内层的最后一道加工
+
+`server/src/core/requestTransform.js`（新）+ 接线 `engine/scan/scanClient.js`。
+
+| 决策 | 理由 |
+|---|---|
+| 挂在 `forScan` 之后、safeUrl/csrf/login 之前（**最内层**） | ① 签名必须是最后一道加工：那三层都往请求里加东西（保活 cookie、csrf token、登录会话），挂在它们之外 ⇒ 后加的内容不在签名范围内；② 那三层的**自发请求**（取页、登录 POST）调的是传给它们的那一层视图，挂外层会整批绕过签名。实测：`withSafeUrl(sc, …)` 改成 `withSafeUrl(view, …)`，否则保活页永远不带签名 |
+| 变换在 SSRF/scope 校验**之前** | 校验作用于变换后的 URL。反过来挂，这个扩展点立刻变成 SSRF 跳板 |
+| 只允许替换 `url/method/headers/data/params` | `signal`（stop/暂停）、`scanId`、`rateGroup`、`retry` 是合规闸门；否则一句 `return {...req, signal: undefined}` 就把「随时能停手」摘了 |
+| 传副本、不回写入参 | HttpClient 重试/认证重放**复用同一个 opts 对象**，原地签一次 = 第二次签在已签名报文上（恒错） |
+| 脚本失败 ⇒ **不发**（`REQUEST_SCRIPT_FAILED` 6008） | 「算不出签名就发没签名的」正是本条要消灭的静默假阴性；错误经 ctxBase 回流，该点按既有网络失败语义记未决 |
+| HEAD 用**变换后的** URL 作第一个实参 | `HttpClient.headRequest(url, opts)` 用显式 url 覆盖 opts.url —— 只改 opts 等于白签 |
+| 脚本必须位于 `REQUEST_SCRIPT_DIR` 内（CLI 与 REST 同一道闸） | 出口层的代码注入面，且同一引擎既跑终端也跑长驻服务；按「谁调用的」分别放行迟早漏一处 |
+| `start()` 里加载失败即抛（扫描不启动） | 与 `customPayloads` 的「校验失败即硬失败」同口径；REST 得 `code=6007`，不会变成「200 + 扫完说未检出」 |
+| `summary.constraints` 自动写一条 PoC 警示（含脚本 sha256） | 报告里的 PoC curl **不含**重算后的签名，客户复制即失败；这句不写就是不实交付 |
+
+#### ② 新判据 `transform_rejected`：两种成因分开定罪
+
+`server/src/core/scanValidityGuard.js`。素材由变换层在**加密之前**打标回传（`setTransformObserver`）——
+整包加密后 `looksLikeInjection(密文)` 恒 false，守卫已经分不出基线与注入，而那恰是本判据的核心区分。
+
+| 观测 | 成因 | 后果 |
+|---|---|---|
+| 未注入的基线请求连续 ≥2 次被判非法（400/415/422）且从未成功 | `baseline`：脚本与目标不匹配（密钥/字段集/顺序） | `status=transform_rejected`、`reliable=false`、`shouldAbort=true`、verdict→`inconclusive` |
+| 基线正常而注入请求 ≥8 次全被拒且无一次成功 | `injection`：签名没覆盖被注入的那个参数 | 同上，`advice` 换成「把参数纳入签名范围」 |
+
+被拒族只收 400/415/422：403/406/429/503 属既有 `blocked`、401 属会话族、5xx 属 `target_error`/error
+技术自身产物，连不上单独记 `netErr`（连不上 ≠ 签名错）。四套判据各管一件事，混用必互踩。
+`transformActive=false`（未用扩展点）时 `observeTransform` 直接返回 ⇒ 存量判定路径零改动。
+严重度排在 `blocked` 之上（5 > 3）：blocked 是「对面有 WAF 挡着」，本状态是「我们自己发的东西不合法」。
+
+#### ③ 测试与缺陷注入（新增 42 条用例 / 21 处变异）
+
+`server/tests/requestTransform.test.js`（19）· `requestTransform.wiring.test.js`（10）·
+`validity.transformReject.test.js`（13）。接线套件从 `sm.getScanClient` 进、从内层客户端**实际收到的
+请求**出（§O/§N/§L 那一族「被调函数是对的、调用链下一环是坏的」）。
+
+变异结果：**20 处各杀且仅杀 1 条**（fail-closed 降级发送、允许改任意 opts 键、原地回写、injected
+后置、白名单根包含判定失效、未设根也放行、校验失败静默返回 null、退役不回收、HEAD 用原 URL、
+safeUrl/csrf/login 三层各自的挂载点退回 `sc`、4xx 全算被拒、传输失败当被拒、严重度调低、
+不中止、连续段不复位、注入成功过仍判被拒、基线成功过仍判配错…），1 处（变换层整层不接线）杀 5 条。
+**挂载点三条尤其值得记**：`withSafeUrl/withCsrf/withLoginFlow` 各自把实参从 `view` 改回 `sc`
+都会让对应那条用例单独变红 ⇒ 「挂在包装链最内层」不是写法偏好，是被逐层钉住的结论。
+每次变异后按字节还原并校验 sha256 一致。
+
+**两处「测试自己不够格」的现场**（不修就是假绿）：
+1. 「未设 `REQUEST_SCRIPT_DIR` 应拒绝」这条**第一次没杀掉变异**：把 root 判据摘掉后，
+   `existsSync('')` 为 false 会落到「目录不存在」那一支，而断言只按 `/REQUEST_SCRIPT_DIR/` 匹配 ⇒ 照样绿。
+   改成断言该支独有的文案（`拒绝加载任何脚本`）后才杀。⇒ 与「判据少一侧」同族：**多分支共用一句
+   关键词时，断言必须取那一支独有的文本**。
+2. 包含判定用「不存在的路径」测 ⇒ 「不存在」分支先命中，包含判定坏没坏看不出来。
+   改为在根**之外**真写一个存在的脚本。
+
+另：既有 `summary 契约字段齐全` 断言当场把新增的 `counts.transform` 判红（它按固定字段名 deepEqual），
+已把 `transform` 及其子键集一并钉进契约，并同步前端 `ScanValidity.status` 与两处状态标签映射
+（`ValidityBanner` / `progressUtils`；后者对未知状态 fallback 到 `ok`，漏一条就会把「签名被拒」显示成「正常」）。
+
+#### ④ 入口与文档
+
+CLI `--request-script`（`args.js`/`config.js`/`help.js`）· REST `config.requestScript`
+（`KNOWN_CFG_KEYS` + `scalarsEgress` 形状校验）· 面板新增字段（`ScopeSecuritySection`，紧邻 clientCert）·
+`defaults.requestScript=''`（默认关，零行为变化）· 新文档 `docs/请求变换脚本.md`（含上手检查表与
+「没做什么」节：不做签名算法逆向、不做 OAuth/验证码）· README 功能表与环境变量表各补一行。
+
+**诚实边界（两条，写文档时都逐字核对过）**：
+1. 本批全部为**单元 + 接线级**验证，未接真机靶场 —— 仓库内没有带签名参数的靶点，
+   `transform_rejected` 的两个阈值（基线连续 2 次、注入 8 次）来自既有 `blockMinHits`/`authStreak` 的
+   同族口径而非实测分布。下一步若要引数字，需先造一个「只认正确 sign、改字段即 400」的靶点进 `e2e/`。
+2. **覆盖面 = per-scan 视图的流量**，不含注入点发现阶段的爬虫/表单收集（那一路用
+   `ScanManager` 构造时的模块级单例 `httpClient`，调用时不带 scanId，也因此此前同样不受暂停闸与
+   per-scan 限速桶约束 —— 既有架构属性，不是本批新造的洞）。
+   ⇒ 初稿在 README/文档/help/报告文案里写的「每条出站请求」是** overstated**，已逐处改为
+   「扫描/检测阶段经 per-scan 客户端发出的每条请求」，并把爬虫例外写进文档 §7 与 TODO 第 6 条。
+   这条是本批唯一一处「自己写完才发现说法比事实大」，按原样留在案发现场。
+
+
 ### 2026-10-10 批次 D31 · 废掉一笔「纯函数测试全绿、生产路径有害」的改动 + 加上防复发守卫
 
 **一句话**：工作区里躺着一版未提交的改动（把 WAF 编码兜底链从「替换末条」改成「追加末尾」）。

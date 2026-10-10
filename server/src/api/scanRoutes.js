@@ -81,6 +81,9 @@ const KNOWN_CFG_KEYS = new Set([
   'scope',
   // [P1-FIX 2026-09-08 实战批次] HTTP 层实战能力：自签证书目标 / 环境变量代理 / 代理下目标校验下放
   'insecureTls', 'trustProxyEnv', 'ssrfViaProxy', 'clientCert',
+  // [D32 实战 P0-1] 自定义请求变换脚本路径（签名/加密接口）。⚠ 只到「形状合法」为止，
+  // 真正加载在 ScanManager.start（ensureScanTransform），失败即不启动扫描。
+  'requestScript',
   // [P0-FIX 2026-09-09] 本地/私网目标绕过环境变量代理（默认 true）
   'proxyBypassLocal',
   // [2026-09-24] 引擎真读、此前**任何入口都设不了**的三键（见 sanitizeStart 内注释）：
@@ -129,6 +132,8 @@ const KNOWN_CFG_KEYS = new Set([
   // [批次14 实战 P1-6] login：登录编排最小版对象（objectGroups.guardLogin 收紧形状；
   // 标准表单登录自动提交 + 会话过期自动重登，loginFlow.js 消费）。
   'login',
+  // [D36 实战 P0-2] Bearer/Token 自动续期（bearerKeeper.js 消费）
+  'bearerRefresh',
   // [2026-10-03] rateGroup：批量共享限速桶的组 id（形态由 guardScalarsCore 收紧）。
   'rateGroup',
   // hex / unionFrom 是这支守卫测试第一次跑就自己抱出来的——我先前手工 triage 时把 `hex`

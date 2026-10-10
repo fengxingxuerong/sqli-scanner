@@ -74,6 +74,12 @@ const PROBE = {
   flushSession: true,
   // [2026-10-01] mTLS 客户端证书路径：默认探针 1 过不了字符串形状校验（正确行为）
   clientCert: '/tmp/client-cert.pem',
+  // [D32 实战 P0-1] 自定义请求变换脚本路径：同上，默认探针 1 过不了字符串形状校验（正确行为），
+  // 这里给合法路径只测「透传在不在」（加载与白名单根校验在 ensureScanTransform）。
+  requestScript: '/opt/signers/sign.mjs',
+  // [D36 实战 P0-2] bearerRefresh 是对象组：默认探针 1 会被 guardBearerRefresh 整体丢弃
+  // （非对象），所以这里给合法形状，测的是「整组有没有转发到引擎」。
+  bearerRefresh: { url: 'http://auth.test/refresh', tokenField: 'data.access_token' },
   // [2026-09-23 E2] extractScope 的探针值：默认探针 1 过不了校验是**正确行为**——
   // 它是枚举/拖库动作族的配置对象，mode 必须在 18 个白名单值内（引擎 switch 的判据），
   // 形状校验见 scanRoutes 的 sanitizeExtractScope。这里给最小合法值，测「透传在不在」。
@@ -316,6 +322,63 @@ test('守卫（scanValidity 组带底）：只发一个阈值时其余阈值必�
   });
   assert.equal(clamped.config.scanValidity.blockRatio, 1, 'blockRatio 越界未被 clamp');
   assert.equal(clamped.config.scanValidity.minSamples, 1, 'minSamples=0 会让比例判定失去分母');
+});
+
+// [D36 实战 P0-2] bearerRefresh 子键转发守卫。
+// 为什么单独写一条：上面那条数据驱动的嵌套守卫**分母是 defaults 的对象组**，而本组的
+// 关闭态是 `defaults.bearerRefresh = null`（同 login）⇒ 它天然不在 NESTED_GROUPS 里。
+// 于是「引擎读 cfg.method，而入口只转发 url」这类断口没人看守 —— 而这类断口的表现
+// 恰好是最难查的一种：200 + 一次正常跑完的扫描 + 续期根本没开。
+// 判据来源用 normalizeRefreshConfig 的**出参键集**（引擎侧真正认的键），不手抄清单：
+// 以后加一个可配子键，它自动进分母；漏写转发即红。
+const { normalizeRefreshConfig } = await import('../src/core/bearerKeeper.js');
+const REFRESH_FULL = {
+  url: 'http://auth.test/refresh',
+  method: 'POST',
+  refreshToken: 'rt-1',
+  bodyField: 'refresh_token',
+  bodyFormat: 'form',
+  body: { scope: 'sqli' },
+  tokenField: 'data.access_token',
+  headerName: 'X-Api-Key',
+  headerTemplate: 'Token {token}',
+  headers: { 'X-Tenant': 't1' },
+  eager: true,
+};
+const REFRESH_SPEC_KEYS = Object.keys(normalizeRefreshConfig(REFRESH_FULL));
+
+test('守卫（bearerRefresh 子键）：引擎认的每个子键都必须活到 config.bearerRefresh', () => {
+  // 先自证分母非空且够大：normalizeRefreshConfig 改了形状/正则失效时，本条会空转全绿
+  assert.deepEqual(
+    REFRESH_SPEC_KEYS.slice().sort(),
+    ['body', 'bodyField', 'bodyFormat', 'eager', 'headerName', 'headerTemplate', 'headers', 'method', 'refreshToken', 'tokenField', 'url'].sort(),
+    `bearerRefresh 的子键集合变了（现算到 ${REFRESH_SPEC_KEYS.length} 个）—— 请同步本守卫与文档`
+  );
+  for (const k of REFRESH_SPEC_KEYS) {
+    if (k === 'url') continue; // url 是启用开关本身，缺它整组被丢弃（负例见 bearerKeeper 单测）
+    const out = sanitizeStart({
+      target: { url: 'http://shop.example.com/item?id=1' },
+      config: { bearerRefresh: { url: REFRESH_FULL.url, [k]: REFRESH_FULL[k] } },
+    });
+    const got = out.config?.bearerRefresh;
+    assert.ok(got && typeof got === 'object', `bearerRefresh 整组没落地（子键 ${k} 的测试前提不成立）`);
+    assert.deepEqual(
+      got[k],
+      normalizeRefreshConfig(REFRESH_FULL)[k],
+      `bearerRefresh.${k} 在入口被丢弃或改写：发了 ${JSON.stringify(REFRESH_FULL[k])}，引擎拿到 ${JSON.stringify(got[k])} ⇒ ` +
+        '续期按默认形状跑（或直接不启用），而调用方会以为配置生效了'
+    );
+  }
+  // 反向：入口侧不得比引擎多出键（多出来说明两层清单已经分叉，其中一层是死的）
+  const all = sanitizeStart({
+    target: { url: 'http://shop.example.com/item?id=1' },
+    config: { bearerRefresh: REFRESH_FULL },
+  });
+  assert.deepEqual(
+    Object.keys(all.config.bearerRefresh).sort(),
+    REFRESH_SPEC_KEYS.slice().sort(),
+    'guardBearerRefresh 与 normalizeRefreshConfig 的子键清单不一致'
+  );
 });
 
 test('守卫（八个"注释承诺过但没人接"的旋钮）：显式值必须活到引擎', () => {

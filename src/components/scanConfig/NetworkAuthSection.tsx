@@ -23,6 +23,21 @@ function setLoginField(config: ScanConfig, onChange: OnPatch, field: 'url' | 'us
   onChange({ login: hasAny ? (cur as NonNullable<ScanConfig['login']>) : undefined });
 }
 
+/** [D36 实战 P0-2] bearerRefresh 子字段更新；url 空 = 整键删（关闭态干净，与 setLoginField 同口径） */
+function setRefreshField(
+  config: ScanConfig,
+  onChange: OnPatch,
+  field: 'url' | 'tokenField' | 'refreshToken',
+  value: string,
+) {
+  const cur = { ...(config.bearerRefresh ?? {}) } as Record<string, unknown>;
+  const trimmed = value.trim();
+  if (!trimmed) delete cur[field];
+  else cur[field] = trimmed;
+  const hasUrl = typeof cur.url === 'string' && !!cur.url;
+  onChange({ bearerRefresh: hasUrl ? (cur as NonNullable<ScanConfig['bearerRefresh']>) : undefined });
+}
+
 export default function NetworkAuthSection({ config, onChange }: ScanConfigSectionProps) {
   const { t } = useTranslation();
 
@@ -145,6 +160,50 @@ export default function NetworkAuthSection({ config, onChange }: ScanConfigSecti
                 onChange({ login: hasAny ? (cur as NonNullable<ScanConfig['login']>) : undefined });
               }}
             />
+          </Box>
+        )}
+        {/* [D36 实战 P0-2] Bearer/Token 自动续期：与上面的表单登录是两条独立的路
+            （login = 用户名密码换会话 cookie；这里 = refresh 端点换新 access token）。
+            url 有值即启用；tokenField 留空则按常见字段名自动探测，探测不到时报告会写明
+            「试过哪些字段 + 响应顶层有哪些键」。 */}
+        <Box>
+          <Typography variant="caption" color="text.secondary">{t('scanConfig.refreshUrlLabel')}</Typography>
+          <input
+            className="mt-1 w-full px-3 py-2 border rounded text-sm"
+            placeholder={t('scanConfig.refreshUrlPlaceholder')}
+            aria-label={t('scanConfig.refreshUrlLabel')}
+            value={config.bearerRefresh?.url ?? ''}
+            onChange={(e) => setRefreshField(config, onChange, 'url', e.target.value)}
+          />
+          <Typography variant="caption" color="text.disabled" className="block">
+            {t('scanConfig.refreshUrlHint')}
+          </Typography>
+        </Box>
+        {(config.bearerRefresh?.url ?? '') !== '' && (
+          <Box className="grid grid-cols-2 gap-2">
+            <Box>
+              <Typography variant="caption" color="text.secondary">{t('scanConfig.refreshTokenFieldLabel')}</Typography>
+              <input
+                className="mt-1 w-full px-3 py-2 border rounded text-sm"
+                placeholder="data.access_token"
+                aria-label={t('scanConfig.refreshTokenFieldLabel')}
+                value={config.bearerRefresh?.tokenField ?? ''}
+                onChange={(e) => setRefreshField(config, onChange, 'tokenField', e.target.value)}
+              />
+            </Box>
+            <Box>
+              <Typography variant="caption" color="text.secondary">{t('scanConfig.refreshTokenLabel')}</Typography>
+              <input
+                className="mt-1 w-full px-3 py-2 border rounded text-sm"
+                placeholder={t('scanConfig.refreshTokenPlaceholder')}
+                aria-label={t('scanConfig.refreshTokenLabel')}
+                value={config.bearerRefresh?.refreshToken ?? ''}
+                onChange={(e) => setRefreshField(config, onChange, 'refreshToken', e.target.value)}
+              />
+              <Typography variant="caption" color="text.disabled" className="block">
+                {t('scanConfig.refreshTokenHint')}
+              </Typography>
+            </Box>
           </Box>
         )}
       </Stack>

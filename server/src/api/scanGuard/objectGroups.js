@@ -6,6 +6,7 @@
 // =====================================================================
 import { clampInt, clampNum, boolOf, pickInt, pickBool, sanitizeCookieMap } from '../scanConfigUtils.js';
 import { defaults } from '../../config/defaults.js';
+import { logger } from '../../core/logger.js';
 
 export function guardSecondOrder(config, cfg) {
   if (cfg.secondOrder) {
@@ -146,6 +147,56 @@ export function guardLogin(config, cfg) {
       passwordField: optField(l.passwordField),
     };
   }
+}
+
+// [D36 实战 P0-2] Bearer/Token 自动续期（bearerKeeper.js 消费）。
+// 形状收紧与 guardLogin 同一口径：url 必须 http(s)（SSRF/scope 由 per-scan client 逐请求兜底）；
+// 字段名/模板限长；`headerTemplate` 必须含 {token} 占位（不含就是"把头设成常量"，
+// 那是配置错误而不是用法 —— 静默收下会让每条请求带同一串字面量，比报错难查得多）。
+// ⚠ 与 requestScript 相反的一条：这里**空 url 整体丢弃**而不是报错 ——
+//   配置回放（重测/续跑）会带着 defaults 的 null 走一遍入口，null 在上一行已被挡住，
+//   走到这里说明人给的是一个坏 url；坏 url 与"没配"在后果上等价（都不会续期），
+//   但只有前者该被看见，所以丢弃时留一行 warn。
+export function guardBearerRefresh(config, cfg) {
+  const br = cfg.bearerRefresh;
+  if (!br) return;
+  if (typeof br === 'string') {
+    const url = br.trim();
+    if (/^https?:\/\//i.test(url)) config.bearerRefresh = { url: url.slice(0, 2048) };
+    else logger.warn('[scanGuard] bearerRefresh 字符串形态必须是 http(s) 地址，已丢弃');
+    return;
+  }
+  if (typeof br !== 'object' || Array.isArray(br)) {
+    logger.warn('[scanGuard] bearerRefresh 须为对象或 URL 字符串，已丢弃（设置不会生效）');
+    return;
+  }
+  const url = typeof br.url === 'string' ? br.url.trim() : '';
+  if (!/^https?:\/\//i.test(url)) {
+    logger.warn('[scanGuard] bearerRefresh.url 缺失或非 http(s) 地址，已丢弃（不会启用续期）');
+    return;
+  }
+  const out = { url: url.slice(0, 2048) };
+  if (typeof br.method === 'string' && /^[A-Z]{3,10}$/.test(br.method.trim().toUpperCase())) {
+    out.method = br.method.trim().toUpperCase();
+  }
+  if (typeof br.refreshToken === 'string' && br.refreshToken.trim()) out.refreshToken = br.refreshToken.trim().slice(0, 4096);
+  if (typeof br.bodyField === 'string' && /^[\w.-]{1,64}$/.test(br.bodyField.trim())) out.bodyField = br.bodyField.trim();
+  if (br.bodyFormat === 'form' || br.bodyFormat === 'json') out.bodyFormat = br.bodyFormat;
+  if (br.body && typeof br.body === 'object' && !Array.isArray(br.body)) {
+    out.body = Object.fromEntries(Object.entries(br.body).slice(0, 20).map(([k, v]) => [String(k).slice(0, 64), v]));
+  }
+  if (typeof br.tokenField === 'string' && /^[\w.[-]{1,128}$/.test(br.tokenField.trim())) out.tokenField = br.tokenField.trim();
+  if (typeof br.headerName === 'string' && /^[\w-]{1,64}$/.test(br.headerName.trim())) out.headerName = br.headerName.trim();
+  if (typeof br.headerTemplate === 'string' && br.headerTemplate.includes('{token}')) {
+    out.headerTemplate = br.headerTemplate.slice(0, 512);
+  } else if (typeof br.headerTemplate === 'string' && br.headerTemplate.trim()) {
+    logger.warn('[scanGuard] bearerRefresh.headerTemplate 必须含 {token} 占位，已忽略该键（回用默认 Bearer {token}）');
+  }
+  if (br.headers && typeof br.headers === 'object' && !Array.isArray(br.headers)) {
+    out.headers = Object.fromEntries(Object.entries(br.headers).slice(0, 20).map(([k, v]) => [String(k).slice(0, 64), v]));
+  }
+  if (br.eager === true) out.eager = true;
+  config.bearerRefresh = out;
 }
 
 export function guardBlindRobust(config, cfg) {

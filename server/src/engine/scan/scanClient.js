@@ -7,6 +7,10 @@ import { withSafeUrl } from '../../core/safeUrlKeeper.js';
 import { withCsrf } from '../../core/csrfKeeper.js';
 // [批次14 实战 P1-6] 登录编排：会话过期自动重登（挂在 csrf 之后——登录表单也可能要 csrf）
 import { withLoginFlow } from '../../core/loginFlow.js';
+// [D32 实战 P0-1] 自定义请求变换（签名/加密参数）扩展点
+import { applyScanTransform, notifyTransformOutcome, transformActiveForScan } from '../../core/requestTransform.js';
+// [D36 实战 P0-2] Bearer/Token 自动续期
+import { refreshActiveForScan, withBearerRefresh } from '../../core/bearerKeeper.js';
 import { DirectConnector } from '../../core/directConnector.js';
 
   // 连接器选择：direct 目标用 DirectConnector 直连数据库，其余用统一 HttpClient 单例。
@@ -41,12 +45,84 @@ export function getScanClient(scanId, target) {
       // ⚠ 这里不能用下面的 `cfg`（它在**之后**才声明，const 有 TDZ，提前引用会 ReferenceError）
       const rateGroup = (target && target.config && target.config.rateGroup) || undefined;
       const sc = connector.forScan(scanId, ratePerSec, rateGroup);
-      // [sqlmap 对标] --safe-url/--safe-freq：配置了保活 URL 时包装客户端
-      // （SSRF 校验在 client.request 内逐请求执行；失败静默不影响扫描）
       const cfg = (target && target.config) || {};
       let view = sc;
+      // [D32 实战 P0-1] 自定义请求变换（签名/加密参数）—— 挂在包装链的**最内层**，两个理由缺一不可：
+      //   ① 签名必须是最后一道加工。safeUrl/csrf/login 三层都往请求里加东西（保活 cookie、
+      //      csrf token、登录会话），加在它们之上(外) ⇒ 后加的内容不在签名范围内 ⇒ 目标照样拒。
+      //      挂最内 = 每个加工方先写完、脚本最后签。
+      //   ② 内层自发的请求也要合法。csrfKeeper 取页、loginFlow 的登录 GET/POST 调的是
+      //      **传给它们的那一层视图**，不经过外层 ⇒ 挂外层这些请求会绕过签名。
+      // ⚠ 不变量：本层改写 URL 发生在 HttpClient.request 的 SSRF/scope 校验**之前**，
+      //   所以校验作用于变换之后的 URL。反过来挂（先校验再变换）= 脚本可把已授权请求
+      //   改写到内网元数据地址，这个扩展点立刻变成 SSRF 跳板。
+      // ⚠ fail-closed：脚本抛错/产出非法请求 ⇒ AppError 上抛、**原始请求绝不发出去**。
+      //   「算不出签名就发没签名的」会把一次必然被目标拒绝的请求记成「已检测」，
+      //   而那正是本扩展点要消灭的静默假阴性。错误经 ctxBase 的 observeValidity 回流，
+      //   该点按既有网络失败语义记为未决（不是「未检出」）。
+      // 未配置 --request-script 时 transformActiveForScan 为 false ⇒ 零包装、零行为变化。
+      if (transformActiveForScan(scanId)) {
+        const baseReq = view.request.bind(view);
+        const baseHead = typeof view.headRequest === 'function' ? view.headRequest.bind(view) : null;
+        const notify = (prepared, ev) =>
+          notifyTransformOutcome(scanId, { injected: prepared.injected, ...ev });
+        view = {
+          ...view,
+          request: async (opts) => {
+            let prepared;
+            try {
+              prepared = await applyScanTransform(scanId, opts);
+            } catch (e) {
+              // 脚本自身故障：一条都没发出去 ⇒ 不伪造 injected，直接上抛
+              notify({ injected: false }, { error: e });
+              throw e;
+            }
+            try {
+              const res = await baseReq(prepared.opts);
+              notify(prepared, { res });
+              return res;
+            } catch (e) {
+              notify(prepared, { error: e });
+              throw e;
+            }
+          },
+          // HEAD（--null-connection）必须走同一层：F1 那批的教训是「只包 request 等于 HEAD
+          // 一路看不到出口语义」—— 自签目标上 GET 能扫、开 --null-connection 就全量失败。
+          // ⚠ 变换后的 URL 必须作为第一个实参传给 baseHead：HttpClient.headRequest(url, opts)
+          //   用显式 url 覆盖 opts.url，只改 opts 会让签名算完又被原 URL 顶掉。
+          ...(baseHead
+            ? {
+                headRequest: async (url, opts = {}) => {
+                  let prepared;
+                  try {
+                    prepared = await applyScanTransform(scanId, { ...opts, url });
+                  } catch (e) {
+                    notify({ injected: false }, { error: e });
+                    throw e;
+                  }
+                  const target = typeof prepared.opts.url === 'string' && prepared.opts.url
+                    ? prepared.opts.url
+                    : url;
+                  try {
+                    const res = await baseHead(target, prepared.opts);
+                    notify(prepared, { res });
+                    return res;
+                  } catch (e) {
+                    notify(prepared, { error: e });
+                    throw e;
+                  }
+                },
+              }
+            : {}),
+        };
+      }
+
+      // [sqlmap 对标] --safe-url/--safe-freq：配置了保活 URL 时包装客户端
+      // （SSRF 校验在 client.request 内逐请求执行；失败静默不影响扫描）
+      // ⚠ 必须包 `view` 而不是 `sc`：D32 的请求变换层可能已经挂在 sc 上，
+      //   直取 sc 会让保活/取页/csrf/登录这几层的请求全部绕过签名（变换层被跳过）。
       if (typeof cfg.safeUrl === 'string' && /^https?:\/\//i.test(cfg.safeUrl)) {
-        view = /** @type {any} */ (withSafeUrl(sc, { safeUrl: cfg.safeUrl, safeFreq: cfg.safeFreq }));
+        view = /** @type {any} */ (withSafeUrl(view, { safeUrl: cfg.safeUrl, safeFreq: cfg.safeFreq }));
       }
       // [sqlmap 对标 2026-09-14] --csrf-url/--csrf-token：CSRF 会话层（取页提取 token，
       // 每请求自动携带 + 定期刷新）。挂在 safeUrl 之后：token 取页吃到保活/协议策略。
@@ -68,6 +144,13 @@ export function getScanClient(scanId, target) {
         /^https?:\/\//i.test(cfg.login.url) && cfg.login.username
       ) {
         view = /** @type {any} */ (withLoginFlow(view, cfg.login));
+      }
+      // [D36 实战 P0-2] Bearer/Token 自动续期（cfg.bearerRefresh.url 显式开启）。
+      // 挂在 loginFlow 之后：表单登录换的是会话 Cookie，Bearer 换的是 access token，
+      // 两者可以共存（目标同时用 cookie 会话 + API bearer），且续期请求要吃到
+      // csrf/登录这两层的会话准备。与 loginFlow 同一纪律：一次挑战只重试一次、并发去重。
+      if (cfg.bearerRefresh && refreshActiveForScan(scanId)) {
+        view = /** @type {any} */ (withBearerRefresh(view, scanId));
       }
       // [P2-5] --force-ssl / --ignore-redirects：协议层策略注入每个请求（对标 sqlmap）。
       // forceSsl：目标 http:// 强制升级 https（httpClient.request 消费改写）；

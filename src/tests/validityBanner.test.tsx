@@ -237,12 +237,13 @@ describe('§B 渲染 · 语义必须体现在 severity 与文案上', () => {
     expect(screen.queryByText(/处置建议/)).toBeNull();
   });
 
-  it('B8 五种 status 都能映射到 i18n 键（映射表无缺项，防新增 status 时漏配）', () => {
-    const statuses: ScanValidity['status'][] = ['ok', 'blocked', 'unreachable', 'session_expired', 'target_error'];
+  it('B8 六种 status 都能映射到 i18n 键（映射表无缺项，防新增 status 时漏配）', () => {
+    const statuses: ScanValidity['status'][] = ['ok', 'blocked', 'unreachable', 'session_expired', 'target_error', 'transform_rejected'];
     expect(Object.keys(VALIDITY_STATUS_LABEL_KEY).sort()).toEqual([...statuses].sort());
     const zh: Record<string, string> = {
       ok: '可信度正常', blocked: '疑似被 WAF/封禁', unreachable: '目标不可达',
       session_expired: '会话已失效', target_error: '目标持续 5xx',
+      'transform_rejected': '请求变换被目标判非法',
     };
     for (const s of statuses) {
       // 每个键都必须真能在 i18n 里取到文案（不是指向不存在的键 → 界面显示原始 key）

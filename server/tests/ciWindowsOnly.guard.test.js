@@ -54,36 +54,101 @@ const WINDOWS_ONLY = [
 
 /**
  * 已核实的合法例外。**每条都必须写清"为什么安全"** —— 只写"已检查"等于没写。
- * key = `${相对路径}:${行号}:${模式id}`
+ * key = `${相对路径}:${模式id}:${内容锚点}`（锚点＝那一行去空白后的前 60 字符，见 snippetOf）
+ * ⚠ 新增/修改登记项的正确姿势：把那行原文交给 regKey() 生成，**不要手抄**，
+ *   也不要再用行号 —— 行号键三个月漂过四次，第四次是加一个靶场就触发。
  */
 const KNOWN_SAFE = new Map([
-  ['e2e/redteam-lab/env.mjs:17:exe',
+  ['e2e/redteam-lab/env.mjs:exe:const MYSQLD = process.env.MYSQLD_PATH || \'D:/mysql/bin/mysq',
     '默认值，但下方（同函数 try/catch 内）有 `existsSync(MYSQLD)` 前置 + `[SKIP]` + exit 0 —— 见该文件 2026-09-21 的 CI-FIX 注释；CI 上实测输出 `[SKIP] 未找到 mysqld 二进制`，按设计跳过'],
-  ['e2e/redteam-lab/env.mjs:17:drive', '同上（同一行的路径默认值）'],
-  ['e2e/redteam-lab/env.mjs:18:drive',
+  ['e2e/redteam-lab/env.mjs:drive:const MYSQLD = process.env.MYSQLD_PATH || \'D:/mysql/bin/mysq', '同上（同一行的路径默认值）'],
+  ['e2e/redteam-lab/env.mjs:drive:const MYSQL_CWD = process.env.MYSQL_CWD || \'D:/mysql\';',
     'MYSQL_CWD 默认值，仅与 MYSQLD 配套使用；MYSQLD 不存在时不会走到 spawn'],
-  ['e2e/redteam-lab/env.mjs:24:exe',
+  ['e2e/redteam-lab/env.mjs:exe:const PG_EXE = process.env.PG_EXE || \'D:/pg-smoke/bin/bin/po',
     'PG_EXE 默认值；同文件对 PostgreSQL 有「已监听则复用」+ 缺失时的 SKIP 路径（CI 日志实测为跳过而非失败）'],
-  ['e2e/redteam-lab/env.mjs:24:drive', '同上（同一行的路径默认值）'],
-  ['e2e/redteam-lab/env.mjs:25:drive', 'PG_DATA 默认值，仅与 PG_EXE 配套'],
-  ['e2e/redteam-lab/env.mjs:50:exe',
-    '该行是**注释**（`// 硬等 60 秒才抛错。CI（ubuntu-latest）上 MYSQLD 默认值是 ...`），描述的正是这条 CI-FIX 本身'],
-  ['e2e/redteam-lab/env.mjs:50:drive', '同上（同一行注释）'],
-  // ⚠ 行号锚点会随上游插入漂移，2026-09-28 一天内漂了两次（177→182→186、216→221→254）：
-  //   第一次是 run-all 的 LABS 清单新增 api-range-lab，第二次是 python 解析改成候选列表。
-  //   漂移由"自证③：登记表不得虚胖"抓到（它要求每个登记项都仍真实命中），所以改 run-all
-  //   这一带代码时必须同步核对行号 —— 删登记项等于给这条 Windows-only 依赖发免检牌。
-  // [2026-10-02] 行号 186→195 / 254→263：run-all 的 LABS 里先后插了 batch-lab、login-lab 条目，整体下移 9 行。
-  // 这是 TODO §8 记的老毛病（行号锚点一天漂两次）；下面的“自证③”现在会**顺带打印该 kind
-  // 当前的真实行号**，下次再漂不用 grep。
-  ['e2e/run-all.mjs:195:exe',
-    '`PY_CANDIDATES` 里的本机默认路径；解析时**逐个真跑 `-c print(1)`** 才算可用（2026-09-28 实测：该路径已是 0xC0000135 死链，只看 existsSync 挡不住），全不可用则如实 SKIP'],
-  ['e2e/run-all.mjs:195:drive', '同上（同一行的 python 默认路径）'],
-  ['e2e/run-all.mjs:263:wincmd',
-    '该 `taskkill` 在 `if (process.platform === "win32" && p.pid)` 之内（**上一行**）—— 平台守卫是跨行的，行级判据看不到，故此处显式登记'],
-  ['e2e/waf-lab/compare-real.e2e.mjs:154:wincmd',
+  ['e2e/redteam-lab/env.mjs:drive:const PG_EXE = process.env.PG_EXE || \'D:/pg-smoke/bin/bin/po', '同上（同一行的路径默认值）'],
+  ['e2e/redteam-lab/env.mjs:drive:const PG_DATA = process.env.PG_DATA || \'D:/pg-smoke/data\';', 'PG_DATA 默认值，仅与 PG_EXE 配套'],
+  ['e2e/redteam-lab/env.mjs:exe:// 硬等 60 秒才抛错。CI（ubuntu-latest）上 MYSQLD 默认值是 `D:/mysql/bin/m',
+    '该行是**注释**（描述的正是这条 CI-FIX 本身），不参与执行'],
+  ['e2e/redteam-lab/env.mjs:drive:// 硬等 60 秒才抛错。CI（ubuntu-latest）上 MYSQLD 默认值是 `D:/mysql/bin/m', '同上（同一行注释）'],
+  // ── 键格式变更（2026-10-10 D34，TODO §8 的正解）───────────────────────────────
+  //   旧键 `path:行号:kind` 三个月漂了四次，第四次是**往 run-all 的 LABS 里加一个靶场**触发的
+  //   （177→182→186、216→221→254、195→225/263→318、152→159/225→232/318→325）。
+  //   新键 `path:kind:内容锚点`（整行去空白后前 60 字符）不随行号移动，且 自证⑤ 两种口径都钉着：
+  //   插 10 行注释必须仍绿、删掉命中行必须红；自证⑥ 另钉"一张牌不许盖多行"。
+  //   ⚠ 改这些键的正确姿势：把该行原文交给 regKey() 生成，别手抄（手抄一个空格就静默失效）。
+  ["e2e/run-all.mjs:exe:const exe = ['postgres.exe', 'postgres'].some((n) => fs.exis",
+    '`pgSandboxAvailable()` 同时试 `postgres.exe` 与 POSIX 名 `postgres`，且整体包在 ' +
+    '`fs.existsSync(path.join(PG_BIN_DIR, n))` 里 —— ubuntu 上两者都不存在 ⇒ 返回 false ⇒ ' +
+    'PG 类靶场按口径如实 SKIP（不把环境问题记成靶场失败）。PG_BIN_DIR 本身可经环境变量 PG_BIN 覆盖'],
+  ["e2e/run-all.mjs:exe:'C:\\\\Users\\\\Admin（无密码）\\\\.workbuddy\\\\binaries\\\\python\\\\versio",
+    '`PY_CANDIDATES` 里的本机默认路径；解析时**逐个真跑 `-c print(1)`** 才算可用（2026-09-28 实测：该路径已是 0xC0000135 死链，只看 existsSync 挡不住），候选列表随后是 PATH 上的 `python`/`python3` ⇒ ubuntu 落到它们；全不可用则如实 SKIP'],
+  ["e2e/run-all.mjs:drive:'C:\\\\Users\\\\Admin（无密码）\\\\.workbuddy\\\\binaries\\\\python\\\\versio", '同上（同一行的 python 默认路径）'],
+  ['e2e/run-all.mjs:wincmd:spawn(\'taskkill\', [\'/pid\', String(p.pid), \'/T\', \'/F\'], { std',
+    '该 `taskkill` 在 `if (process.platform === "win32" && p.pid)` 之内（**上一行**）—— 平台守卫是跨行的，行级判据看不到，故此处显式登记；else 分支走 `p.kill("SIGKILL")`'],
+  ['e2e/waf-lab/compare-real.e2e.mjs:wincmd:` Windows: netstat -ano | findstr :${LAB_PORT} 然后 taskkill /',
     '该行是**错误提示文案**（端口被占时的排查建议），不参与执行；同段紧邻的下一行已给出 POSIX 方案 `lsof -ti :PORT | xargs kill -9`'],
 ]);
+
+/**
+ * 登记键的**内容锚点**（TODO §8 的正解，2026-10-10 D34 落地）。
+ *
+ * 为什么换：旧键是 `path:行号:kind`，行号随上游插入必然漂 —— 实测三个月漂了四次
+ * （177→182→186、216→221→254、195→225/263→318、本批又 152→159/225→232/318→325），
+ * 而且**第四次的触发条件是"往 run-all 的 LABS 里加一个靶场"** —— 那是本仓最常见的正常操作。
+ * 每次漂移都要人记得去核对行号，这本身就是判据失效的形状（忘了核对 = 免检牌发到不存在的行上，
+ * 而那条真正的 Windows-only 依赖变成"未登记"→ 要么假红要么假绿）。
+ *
+ * 锚点取「整行去空白后前 60 字符」：足够定位到具体那一处，又不会因为缩进/换行风格而变。
+ */
+export function snippetOf(line) {
+  return String(line ?? '').trim().replace(/\s+/g, ' ').slice(0, 60);
+}
+
+/** 登记键：`路径:kind:内容锚点` */
+export function regKey(rel, modeId, line) {
+  return `${rel}:${modeId}:${snippetOf(line)}`;
+}
+
+/**
+ * 登记表健康检查（纯函数，便于用合成文本反证）：
+ * 每个登记项必须**恰好命中一行**。0 行 = 腐烂（免检牌指向已经不存在的代码）；
+ * ≥2 行 = 一张牌覆盖了多处（其中可能藏着新加的那处真违规）。
+ * @param {string} rel 相对路径（仅用于报错文案）
+ * @param {string[]} lines 该文件按行切开的文本
+ * @param {Map<string,string>} knownSafe 登记表
+ * @returns {string[]} 问题清单（空 = 健康）
+ */
+export function staleRegistrations(rel, lines, knownSafe = KNOWN_SAFE) {
+  const out = [];
+  for (const key of knownSafe.keys()) {
+    if (!key.startsWith(`${rel}:`)) continue;
+    const rest = key.slice(rel.length + 1);
+    const sep = rest.indexOf(':');
+    const modeId = rest.slice(0, sep);
+    const anchor = rest.slice(sep + 1);
+    const pat = WINDOWS_ONLY.find((p) => p.id === modeId);
+    if (!pat) { out.push(`${key} —— kind "${modeId}" 不在模式表里（登记项格式错）`); continue; }
+    const matched = [];
+    lines.forEach((l, i) => {
+      if (pat.re.test(l) && snippetOf(l) === anchor) matched.push(i + 1);
+    });
+    if (matched.length === 0) {
+      const now = lines.map((l, i) => (pat.re.test(l) ? i + 1 : 0)).filter(Boolean);
+      out.push(
+        `${key} —— 这条内容锚点在该文件里已不存在（代码变了，登记项该删或重新核对）`
+        + `；该 kind 当前命中行：${now.length ? now.join(', ') : '（无）'}`,
+      );
+    } else if (matched.length > 1) {
+      out.push(
+        `${key} —— 内容锚点命中 ${matched.length} 行（${matched.join(', ')}）：`
+        + '一张免检牌覆盖多处 = 新加的那处真违规也会被静默放过。请把锚点写得更具体（加长片段），'
+        + '或为每一行分别登记并各写理由',
+      );
+    }
+  }
+  return out;
+}
 
 /** 抽 ci.yml 里「会指向本仓脚本」的命令 token（只认 node/python + 脚本扩展名）。 */
 export function extractScriptInvocations(ymlText) {
@@ -146,7 +211,7 @@ export function scanText(rel, text, knownSafe = KNOWN_SAFE) {
   for (const [i, line] of lines.entries()) {
     for (const pat of WINDOWS_ONLY) {
       if (!pat.re.test(line)) continue;
-      const key = `${rel}:${i + 1}:${pat.id}`;
+      const key = regKey(rel, pat.id, line);
       if (knownSafe.has(key)) continue;
       hits.push({ key, line: i + 1, id: pat.id, desc: pat.desc, text: line.trim().slice(0, 90) });
     }
@@ -190,32 +255,55 @@ test('自证②：判据对合成反例必须敏感（防断言空转 —— 本
   assert.ok(hits.some((h) => h.id === 'wincmd'), '未命中 Windows 命令模式');
 });
 
-test('自证③：登记表不得虚胖 —— 每个登记项必须仍真实命中（防腐烂）', () => {
-  const cache = new Map();
+test('自证③：登记表不得虚胖 —— 每个登记项必须仍**恰好**命中一行（防腐烂，也不许一张牌盖多处）', () => {
+  const rels = [...new Set([...KNOWN_SAFE.keys()].map((k) => k.slice(0, k.indexOf(':'))))];
+  assert.ok(rels.length >= 3, `登记表只覆盖 ${rels.length} 个文件 —— 判据可能已经空转`);
   const stale = [];
-  for (const key of KNOWN_SAFE.keys()) {
-    const m = /^(.*):(\d+):([a-z]+)$/.exec(key);
-    assert.ok(m, `登记项格式非法（应为 path:line:modeId）：${key}`);
-    const [, rel, lineStr, modeId] = m;
+  for (const rel of rels) {
     const abs = path.join(REPO, rel);
-    if (!existsSync(abs)) { stale.push(`${key} —— 文件已不存在`); continue; }
-    if (!cache.has(rel)) cache.set(rel, readFileSync(abs, 'utf8').split(/\r?\n/));
-    const line = cache.get(rel)[Number(lineStr) - 1];
-    if (line === undefined) { stale.push(`${key} —— 行号超出范围（文件变短了？）`); continue; }
-    const pat = WINDOWS_ONLY.find((p) => p.id === modeId);
-    if (!pat.re.test(line)) {
-      // [2026-10-02] 行号锚点必然漂移（TODO §8）。与其让人去 grep，不如**直接报出该 kind
-      // 在这份文件里当前的真实行号** —— 一次就能把登记项改对。
-      const now = cache.get(rel)
-        .map((l, idx) => (pat.re.test(l) ? idx + 1 : 0))
-        .filter(Boolean);
-      stale.push(
-        `${key} —— 该行已不再命中「${pat.desc}」（代码变了，登记项该删）`
-        + `；该 kind 在 ${rel} 里当前命中行：${now.length ? now.join(', ') : '（无）'}`,
-      );
+    if (!existsSync(abs)) {
+      // 文件没了 ⇒ 它名下每个登记项都算陈旧（"缺失即报错"，同 facts 的口径，不静默通过）
+      for (const k of [...KNOWN_SAFE.keys()].filter((x) => x.startsWith(`${rel}:`))) {
+        stale.push(`${k} —— 文件已不存在`);
+      }
+      continue;
     }
+    stale.push(...staleRegistrations(rel, readFileSync(abs, 'utf8').split(/\r?\n/)));
   }
-  assert.deepEqual(stale, [], `登记表腐烂了（${stale.length} 项）：\n  ${stale.join('\n  ')}`);
+  assert.deepEqual(stale, [], `登记表有问题（${stale.length} 项）：\n  ${stale.join('\n  ')}`);
+});
+
+test('自证⑤：内容锚点不随**行号漂移**失效（TODO §8 的验证口径，两种都要）', () => {
+  const rel = 'SYNTHETIC-drift.mjs';
+  const target = "  const exe = ['postgres.exe', 'postgres'].some((n) => existsSync(n));";
+  const one = `${target}\n  spawn('taskkill', ['/pid', String(p.pid)]);\n`;
+  const reg = new Map([[regKey(rel, 'exe', target), '合成：仅供自证']]);
+  // 基线：登记项只豁免它那一处，另一处仍必须报 ⇒ 判据没有整体放水
+  assert.deepEqual(scanText(rel, one, reg).map((h) => h.id), ['wincmd'], '基线应只剩 wincmd 未登记');
+  assert.deepEqual(staleRegistrations(rel, one.split('\n'), reg), [], '合成登记项本应健康');
+  // 口径①：文件顶部插 10 行注释 ⇒ 行号整体下移 ⇒ 锚点必须仍然成立（旧的 path:行号:kind 键在这里必红）
+  const shifted = `${'// 插入的注释行\n'.repeat(10)}${one}`;
+  assert.deepEqual(
+    scanText(rel, shifted, reg).map((h) => h.id),
+    ['wincmd'],
+    '插 10 行注释后同一处又被报成违规 ⇒ 锚点还在随行号失效',
+  );
+  assert.deepEqual(staleRegistrations(rel, shifted.split('\n'), reg), [], '插注释不该让登记项变陈旧');
+  // 口径②：把那行 Windows-only 代码删掉 ⇒ 登记项必须立刻陈旧（否则免检牌指向不存在的代码）
+  const stale = staleRegistrations(rel, "  spawn('taskkill', ['/pid', String(p.pid)]);\n".split('\n'), reg);
+  assert.equal(stale.length, 1, '删掉命中行后登记项仍"健康" = 假绿');
+  assert.match(stale[0], /已不存在/);
+});
+
+test('自证⑥：同一锚点覆盖多行时必须报错（一张免检牌不许盖住新加的违规）', () => {
+  const rel = 'SYNTHETIC-dup.mjs';
+  const dup = "  const exe = 'mysqld.exe';";
+  const reg = new Map([[regKey(rel, 'exe', dup), '合成：故意让两行同形']]);
+  const stale = staleRegistrations(rel, `${dup}\n${dup}\n`.split('\n'), reg);
+  assert.equal(stale.length, 1, '两处同形命中应报"一张牌盖多处"，实得 0 ⇒ 新加的那处会被静默放过');
+  assert.match(stale[0], /命中 2 行/);
+  // 反方向自证：若判据本身连这两行都扫不出来，上面那条就是空转
+  assert.equal(scanText(rel, `${dup}\n${dup}\n`, new Map()).filter((h) => h.id === 'exe').length, 2);
 });
 
 test('① 检出：ci.yml 指向的本仓脚本（含一层 import 链）不得含未登记的 Windows-only 依赖', () => {

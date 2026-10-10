@@ -1,6 +1,6 @@
 # sqli-scanner
 
-[![Tests](https://img.shields.io/badge/tests-3730%20passing-brightgreen)](#测试)[![CI](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml/badge.svg)](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml)
+[![Tests](https://img.shields.io/badge/tests-3851%20passing-brightgreen)](#测试)[![CI](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml/badge.svg)](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml)
 [![Dependencies](https://img.shields.io/badge/dependencies-0%20known%20vulns-brightgreen)](#环境变量)
 
 > CI 徽章为真实状态（仓库地址已定，run#90 起全绿）。发布判定仍以 `CHANGELOG.md`
@@ -207,6 +207,8 @@ admin-only 触发页 `/admin/panel`（users.admin 角色门禁 403）+ admin 会
 | **-r 请求文件** | 从 Burp/curl 请求文本导入 URL/method/headers/body |
 | **结构化 body 通道（JSON 嵌套 / XML·SOAP）** | 两类现代 API body 都按**叶子路径**发现注入点，而不是把整份 body 当成一个参数：`jsonBody`（对象，如 `user.id` / `tags.0`）与 `xmlBody`（XML 字符串，如 `soap:Envelope.soap:Body.GetUser.id`；对标 ghauri 的 XML·SOAP 支持）。入口：REST `xmlBody` 字段、CLI `--xml-body` / `--xml-body-file`。⚠️ XML 通道只认「元素 + 文本」形态：注释 / CDATA / DOCTYPE / 正文处理指令一律**整体放弃**（宁可不发现，也不发畸形报文） |
 | **mTLS 客户端证书** | `clientCert`（PEM 路径，证书+私钥同文件，对标 sqlmap `--cert`）：目标要求 TLS 双向认证时没有证书连第一跳都被拒。与 `insecureTls` 正交（一个管「我信不信目标」，一个管「目标信不信我」） |
+| **Bearer/Token 自动续期** | `--refresh-url`（`config.bearerRefresh`，面板「网络与认证」同址）：API 的 access token 通常 15 分钟～1 小时过期，而一次扫描动辄几千条请求几十分钟 —— 后半程全 401 时检测层看到的是"响应没有差异"，报告写「未检出」，**而那半程一个注入都没进业务逻辑**。配上它：请求吃 401/403 ⇒ POST 刷新端点换新令牌 ⇒ 重试原请求一次。四条口径：① 拿到新 token 之前**不动**你从抓包带来的 `Authorization`；② 一次挑战只续一次（不循环打客户认证服务）；③ 并发去重（几十条同时 401 只发一次续期）；④ 续期失败必须显形 —— 结论降级为 **inconclusive**，reason 里给出「尝试 N 次失败 M 次 + 最后一次原因」（取不到 token 时会写明试过哪些字段、响应顶层有哪些键）。同批补了 `session_expired` 的两种此前无人接手的形态：**整轮零业务响应**（从来没进去过）与**进去过之后连续出不去**（中途失效）—— 既有判据要求"基线请求不 401"，而令牌过期时基线同样吃 401，那条判据在这类目标上永不可达。不实现 OAuth2 授权码 / SSO / 验证码。见 [docs/Bearer令牌续期.md](docs/Bearer%E4%BB%A4%E7%89%8C%E7%BB%AD%E6%9C%9F.md) |
+| **自定义请求变换（扩展点）** | `--request-script <file.js>`（`config.requestScript`）：目标接口带 `sign=` 签名、整参加密或 timestamp+nonce 防重放时，注入值会破坏签名 ⇒ 目标恒回 400 ⇒ 报告写「未检出」，**而那不等于没有洞**。脚本在**扫描/检测阶段**每条出站请求的最后一环重算签名/重新加密（含保活页、CSRF 取页、登录提交这些非注入请求；⚠️ 注入点发现阶段的爬虫请求不经此层，见文档 §7）。四条硬约束：① 变换在 SSRF/scope 校验之前完成（校验作用于变换后的 URL）；② 脚本失败即**不发**该请求（绝不退化成"发没签名的原始请求"）；③ 只能改 `url/method/headers/data/params`，`signal/scanId/限速` 等引擎控制权不可被脚本摘掉；④ 脚本必须位于环境变量 `REQUEST_SCRIPT_DIR` 内（出口层的代码注入面）。配套判据 `transform_rejected`：连基线请求都被拒 ⇒ 判「脚本配错」并中止；基线正常而注入全被拒 ⇒ 判「签名没覆盖该参数」，两种都强制把结论降级为 **inconclusive**。用法见 [docs/请求变换脚本.md](docs/请求变换脚本.md) |
 | **自定义检测条目（扩展点）** | `--payload-file <file.json>`：追加用户自己的 payload 条目（与 `registry.json` 同 schema），**只追加、不允许覆盖内置**，且同样受高危池硬门管辖；不传即与内置基线逐位一致。见 [docs/自定义检测条目.md](docs/自定义检测条目.md) |
 | **中英双语** | 全界面 i18n 支持中英切换 |
 | **历史记录** | 扫描历史卡片式展示，支持续跑/删除 |
@@ -277,6 +279,7 @@ npm run acceptance      # 【门禁】全方位验收（17 套件，事实断言
 | `ALLOWED_ORIGINS` | `http://localhost:5173` | 跨域白名单 |
 | `SCAN_LEDGER_MAX` | 无 | 台账条目上限：保留最近 N 条，更老的连目录一起删除。**未设 = 不淘汰**（默认不清任何历史） |
 | `SCAN_LEDGER_MAX_DAYS` | 无 | 台账保留天数：按 `finishedAt` 淘汰过期条目。**未设 = 不淘汰** |
+| `REQUEST_SCRIPT_DIR` | 无 | 自定义请求变换脚本（`--request-script` / `config.requestScript`）的**白名单根目录**。未设时一律拒绝加载任何脚本 —— 脚本会改写 URL 与报文、且运行在持有客户凭据与出口策略的那一层，属代码注入面，故不给自由路径 |
 
 > 台账保留策略默认关闭 —— 扫描产物是有损删除，不能因为升级静默清掉历史。
 > 需要时才配置上面两项（或手动 `node server/bin/cli.js ledger prune --max=50`）。
@@ -330,10 +333,10 @@ backend/  ← Express + Node.js
 ## 测试
 
 ```bash
-# 前端测试（556 个用例）
+# 前端测试（561 个用例）
 npm test
 
-# 服务端测试（3178 个用例）
+# 服务端测试（3294 个用例）
 cd server && npm test
 
 # 全部测试
@@ -358,8 +361,8 @@ npm run artifact:drift   # 入库的 e2e 基线产物必须等于当前代码跑
 ## 项目状态
 
 - TypeScript: 零错误
-- 前端测试: 556/556 通过（覆盖率门禁 stmts 94.79 / branch 84.52 / func 83.15，阈值 88/77/67）
-- 服务端测试: 3178 用例（3174 pass / 0 fail / 4 skip，并发口径 2026-10-09 复测；4 skip 为环境依赖显式跳过。覆盖率 lines 92.81 / branch 81.56 / func 84.18，阈值 85/74/77）
+- 前端测试: 561/561 通过（覆盖率门禁 stmts 94.79 / branch 84.52 / func 83.15，阈值 88/77/67）
+- 服务端测试: 3294 用例（3290 pass / 0 fail / 4 skip，并发口径 2026-10-10 复测；4 skip 为环境依赖显式跳过。覆盖率 lines 92.89 / branch 81.89 / func 84.46，阈值 85/74/77）
 - 一键扫描: `npm run scan -- -u <url>`（CLI 一条命令产出 HTML/JSON/Markdown 全套报告 + manifest，退出码可直接进 CI 门禁）
 - Tamper 插件: 234 个（含批次 D3 新增 scalarselectinline；含 v24 增量 20 个，对齐 sqlmap 官方 tamper 全集，含官方 CRS/libinjection 实测组合 uniontable+odbcbrace；含批次 D13 新增 5 件上游形态变体 *nospace/*open/*block，真机 A/B 判决前不进默认链）
 - WAF 绕过能力: 200+ 插件链式组合，覆盖 62 个 WAF 厂商指纹识别 + 推荐

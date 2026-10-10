@@ -142,10 +142,18 @@ export const SCAN_CONFIG_KEYS = [
   'oob', 'secondOrder',
   // [批次14 实战 P1-6] login：登录编排最小版（标准表单登录自动提交 + 会话过期自动重登）
   'login',
+  // [D36 实战 P0-2] bearerRefresh：Bearer/Token 自动续期（refresh 端点换新 access token）。
+  // 与 login 同类且同组渲染：长扫描里 access token 半程过期 ⇒ 后半程全 401 ⇒ 报告写「未检出」，
+  // 是假阴性而不是"没洞"，所以必须有界面入口。
+  'bearerRefresh',
   // 出口层（代理 / 证书 / 授权范围）
   // [2026-10-01] clientCert：mTLS 客户端证书 PEM 路径（sqlmap --cert）。目标要求双向认证时
   // 没有证书连第一跳都过不去 ⇒ 整站测不了（能力缺失，不是便利开关），故接进面板。
   'proxy', 'auth', 'insecureTls', 'clientCert', 'validationSkip', 'scope',
+  // [D32 实战 P0-1] requestScript：自定义请求变换脚本（签名/加密接口）。与 clientCert 同类：
+  // 缺了它整站「扫不出」是能力缺失而非便利开关 —— 但它指的是**引擎所在机器**上的路径，
+  // 且必须位于服务端环境变量 REQUEST_SCRIPT_DIR 内（面板填错会得到一句硬错误，不会静默继续）。
+  'requestScript',
   // WAF 规避（tamper 链等整块配置）
   'wafEvasion',
   // [2026-09-29 UI-REACH] 能力缺失类 8 键接进面板（登记表分类治理时由守卫⑧钉住的那批：
@@ -225,6 +233,8 @@ export const SCAN_CONFIG_VALUE_TYPES: Record<ScanConfigKey, ScanConfigValueType>
   insecureTls: 'boolean',
   // mTLS 证书路径：string（空 = 关闭态，从请求体省略；后端 clamp 同义）
   clientCert: 'string',
+  // [D32] 请求变换脚本路径：string（空 = 不启用；后端 sanitize 只收非空串）
+  requestScript: 'string',
   validationSkip: 'boolean',
   prefilter: 'boolean',
   skipStatic: 'boolean',
@@ -246,6 +256,9 @@ export const SCAN_CONFIG_VALUE_TYPES: Record<ScanConfigKey, ScanConfigValueType>
   secondOrder: 'object',
   // [批次14 实战 P1-6] 登录编排对象（子字段由后端 guardLogin 逐项收紧）
   login: 'object',
+  // [D36 实战 P0-2] Bearer 续期编排对象（子字段由后端 guardBearerRefresh 逐项收紧；
+  // 面板只暴露 url/tokenField/refreshToken 三项，其余走 REST/CLI —— 与 login 的暴露面一致）
+  bearerRefresh: 'object',
   wafEvasion: 'object',
   extractScope: 'object',
   // [2026-09-29 UI-REACH] 能力缺失类 8 键的类型（与后端 clamp 口径对齐：

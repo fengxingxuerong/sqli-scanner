@@ -43,6 +43,30 @@ export function guardScalarsEgress(config, cfg) {
     }
     config.clientCert = cfg.clientCert.trim();
   }
+  // [D32 实战 P0-1] requestScript：自定义请求变换脚本路径（签名/加密参数接口）。
+  // 入口只做形状（长度上限 + 类型）；存在性、REQUEST_SCRIPT_DIR 白名单根、
+  // 导出形态三道校验在 ScanManager.start 的 ensureScanTransform 里**硬失败**（扫描不启动），
+  // 因为「收了路径却没加载成功」若降级继续，产出的是整轮静默假阴性。
+  //
+  // ⚠️ **空白串 = 未启用，必须放行**（D35 由 api-range-lab 实测抓到）：
+  //   defaults.requestScript 的关闭态就是 ''，而「单点重测」这类接口会把**整份基线配置原样回放**
+  //   进 /scan/start —— 于是"要求非空"的写法把默认值判成了 1003，retest 直接启动失败。
+  //   与 clientCert 的区别就在默认值：那个是 null（空串不是它的合法关闭态），这个是 ''。
+  //   方向选择：宁可让"传了个空白串"静默当未启用（与默认值同义），也不能拒绝默认值本身。
+  if (cfg.requestScript !== undefined && cfg.requestScript !== null) {
+    if (typeof cfg.requestScript !== 'string') {
+      throw new AppError(ErrorCode.INVALID_PARAM, 'requestScript 须为脚本路径字符串');
+    }
+    const trimmed = cfg.requestScript.trim();
+    if (trimmed) {
+      // 超长是明确的写错（路径不可能 1KB），静默丢弃就变成"收了不生效"——本仓最忌的那类；
+      // 而空白串不是写错，它就是默认关闭态（见上），所以只给它放行。
+      if (trimmed.length > 1024) {
+        throw new AppError(ErrorCode.INVALID_PARAM, 'requestScript 路径过长（>1024 字符）');
+      }
+      config.requestScript = trimmed;
+    }
+  }
   const trustProxyEnv = pickBool(cfg, 'trustProxyEnv');
   if (trustProxyEnv !== undefined) config.trustProxyEnv = trustProxyEnv;
   // [P0-FIX 2026-09-09] 生产护栏透传：productionMode 默认 true（按生产环境对待遇），

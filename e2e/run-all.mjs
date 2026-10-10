@@ -121,6 +121,22 @@ const LABS = [
   // 会话用 N 次即过期），不需要宿主 DB。带**对照组**（不给 --login-url 必须 0 检出），
   // 否则"登录成功"证明不了任何事。
   { name: 'login-lab', desc: '登录编排自动重登（真表单登录 + 会话反复过期，含对照组）', entry: 'e2e/login-lab/run.mjs', deps: [] },
+  // [2026-10-10 D34] 签名/加密参数接口（--request-script）真机闭环：deps:[] —— 靶站自起
+  // （真 SQLite sql.js + 真 md5 验签中间件），不需要宿主 DB ⇒ CI 的 e2e-self-contained 自动收。
+  // 五个场景里三个是"必须红"的反例：D 不带脚本 ⇒ 钉住静默假阴性的现场；
+  // B/C ⇒ 必须判 transform_rejected（分别 injection / baseline 两种成因）；
+  // E ⇒ 必须**不**误报（健康扫描里天然有 19 次 4xx，只数被拒条数就会打它）。
+  // 本批实测摘掉变换接线后整套件 6 条红（不是空转门禁）。
+  { name: 'signed-api-lab', desc: '签名/加密接口请求变换闭环（正确/漏字段/错密钥/关键字过滤四形态）', entry: 'e2e/signed-api-lab/run.mjs', deps: [] },
+  // [2026-10-10 D36] Bearer/Token 自动续期真机闭环：靶站自起（真 SQLite + 真 HS256 JWT 验签
+  // + 真刷新端点），deps:[] ⇒ CI 的 e2e-self-contained 自动收。
+  // 六个场景里三个是反例：A 不配续期 ⇒ 后半程 61 条注入白打（且必须被认成 session_expired，
+  // 这条判据是本批补的：既有 authLost 要求"基线不 401"，而令牌过期时基线同样吃 401 ⇒ 永不可达）；
+  // C1/C2 续期失败（端点 5xx / 响应里没有可用 token）⇒ 必须 inconclusive 且 reason 指名续期链路。
+  // `--break-chain` 档把 --refresh-url 摘掉重跑 B：检出从 2 掉到 0，证明 B 的证据不是白送。
+  // 本批另外两处实测抓到的缺陷（CLI 顶层 auth 被 createTarget 丢掉、续期新令牌被 auth.headers 盖回）
+  // 各由 server/tests/cli.auth.reach.test.js 与 bearerKeeper.wiring.test.js 钉住。
+  { name: 'bearer-lab', desc: 'Bearer/Token 自动续期闭环（无续期对照/body 形态/Cookie 形态/端点5xx/无字段/安全对照点）', entry: 'e2e/bearer-lab/run.mjs', deps: [] },
 ];
 
 const PROBES = {

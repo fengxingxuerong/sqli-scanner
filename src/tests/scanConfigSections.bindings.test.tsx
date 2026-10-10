@@ -528,3 +528,67 @@ describe('ScanConfigPanel 分段接线：login 编排（自动登录 + 会话过
     expect(onChange).toHaveBeenLastCalledWith({ login: undefined });
   });
 });
+
+// ============================================================================
+// [D36 实战 P0-2] bearerRefresh 续期分段（NetworkAuthSection）接线补测
+// ============================================================================
+// 与 login 同一缺陷类（一次输入发两次 patch ⇒ 受控闭包用同一个 stale config 互相覆盖），
+// 外加本组特有的一条：**url 是整组的启用开关**，清空后必须整键删 —— 留下
+// `{ bearerRefresh: { tokenField } }` 会让后端 guard 因缺 url 丢弃整组并 warn，
+// 而界面上看着"填过了"，续期其实从未启用（假暴露的界面版）。
+// ============================================================================
+describe('ScanConfigPanel 分段接线：bearerRefresh（Bearer 自动续期）', () => {
+  let onChange: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    onChange = vi.fn();
+  });
+
+  const renderPanel = (over: Partial<ScanConfig> = {}) => {
+    render(<PanelHarness initial={makeConfig(over)} onChangeSpy={onChange} />);
+    fireEvent.click(screen.getByText(L('advanced')));
+  };
+
+  const urlInput = () => screen.getByLabelText(L('refreshUrlLabel')) as HTMLInputElement;
+  const fieldInput = () => screen.getByLabelText(L('refreshTokenFieldLabel')) as HTMLInputElement;
+  const rtInput = () => screen.getByLabelText(L('refreshTokenLabel')) as HTMLInputElement;
+
+  it('未填续期地址时子字段不出现；填地址（trim 生效）后出现且只发一次 patch', () => {
+    renderPanel();
+    expect(screen.queryByLabelText(L('refreshTokenFieldLabel'))).toBeNull();
+    fireEvent.change(urlInput(), { target: { value: ' http://t.local/oauth/token ' } });
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenLastCalledWith({ bearerRefresh: { url: 'http://t.local/oauth/token' } });
+    expect(screen.queryByLabelText(L('refreshTokenFieldLabel'))).not.toBeNull();
+  });
+
+  it('填子字段不丢已填的 url（合并而非重建），且一次 change 一次 patch', () => {
+    renderPanel({ bearerRefresh: { url: 'http://t.local/oauth/token' } });
+    onChange.mockClear();
+    fireEvent.change(fieldInput(), { target: { value: 'data.access_token' } });
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenLastCalledWith({
+      bearerRefresh: { url: 'http://t.local/oauth/token', tokenField: 'data.access_token' },
+    });
+  });
+
+  it('refreshToken 与 tokenField 互不覆盖（两次输入按序合并）', () => {
+    renderPanel({ bearerRefresh: { url: 'http://t.local/oauth/token', tokenField: 'access_token' } });
+    fireEvent.change(rtInput(), { target: { value: 'RT-1' } });
+    expect(onChange).toHaveBeenLastCalledWith({
+      bearerRefresh: { url: 'http://t.local/oauth/token', tokenField: 'access_token', refreshToken: 'RT-1' },
+    });
+  });
+
+  it('清空地址 → 整键删（不留只有子字段的空壳：后端会因缺 url 丢弃整组）', () => {
+    renderPanel({ bearerRefresh: { url: 'http://t.local/oauth/token', tokenField: 'access_token' } });
+    fireEvent.change(urlInput(), { target: { value: '' } });
+    expect(onChange).toHaveBeenLastCalledWith({ bearerRefresh: undefined });
+  });
+
+  it('清空子字段只删该键（url 仍在 ⇒ 整组保持启用）', () => {
+    renderPanel({ bearerRefresh: { url: 'http://t.local/oauth/token', tokenField: 'access_token' } });
+    fireEvent.change(fieldInput(), { target: { value: '   ' } });
+    expect(onChange).toHaveBeenLastCalledWith({ bearerRefresh: { url: 'http://t.local/oauth/token' } });
+  });
+});
