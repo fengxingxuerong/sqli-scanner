@@ -60,6 +60,11 @@ const PROBE = {
   csrfMethod: 'GET',
   csrfRefreshFreq: 30,
   skipParams: ['debug', 'logout'],
+  // [D41 2026-10-11] 注入点筛选三件套探针值（默认探针 1 过不了键自身校验——数组/串形状）：
+  // paramFilter 走 normalizeParamFilter（未知位置在闸口整体丢弃），这里给合法位置串。
+  testParameter: ['id', 'name'],
+  paramExclude: 'ses|csrf',
+  paramFilter: 'get,post',
   // [P0 2026-09-09 实战批次] 新键探针值（默认探针 1 过不了键自身校验）
   invalidValue: 'bignum',
   knownPoint: { param: 'id' },

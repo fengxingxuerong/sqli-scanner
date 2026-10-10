@@ -4,6 +4,62 @@
 
 ## [Unreleased]
 
+### 2026-10-11 批次 D41 · 同源项目优点吸收第一波（参数筛选三件套 / 配置档案 / CLI 补线）+ --skip 静默失效修复
+
+**一句话**：按「吸取同类 GitHub 项目全部优点」的三路调研（sqlmap 全量参数面 / ghauri·jSQL·wafw00f
+等同类工具 / nuclei·dalfox·semgrep 工程化实践，盘点与 D42+ 队列见 `TODO.md` 顶部），本批落地
+高价值低风险的四件事，顺带揪出一个「传了没生效」级老 bug。
+
+#### ① 参数筛选三件套（对标 sqlmap `-p` / `--param-exclude` / `--param-filter`）
+
+- 新增 `engine/paramSelection.js`（单一归一化 + 收口）：`-p id,name` 只测指定参数、
+  `--param-exclude "ses|csrf"` 正则排除、`--param-filter get,post` 按位置筛选
+  （位置别名 GET/POST/URI/query/form/headers/cookies 全收，归一到 url/body/header/cookie/path）。
+- 收口点在 TargetParser 注入点发现尾部（`*` 精确标记之后、onlyPoint 之前），CLI / REST /
+  `--config` 档案三路同源；**筛光点位即 `INVALID_PARAM` 硬拒并列出可用点位**——0 点扫描
+  =「没测」，不许伪装成「未检出」（与 unknownFlag 硬拒同一条政策）。
+- REST 侧：`testParameter`/`paramExclude`/`paramFilter` 进 `KNOWN_CFG_KEYS` 与
+  `scalarsCore` 闸（clamp 32/200/8），未知位置在闸口丢弃并告警。
+
+#### ② 配置档案（对标 sqlmap `-c`/`--save` + ffuf `-config`）
+
+- `--config <file.json>`：档案作底预载参数（argv > 档案 > 内置默认），键=长参数名去前导 `--`；
+  **档案含未知键拒绝启动**（键注册表 `bin/cli/configFile.js` = parseArgs 默认键 ∪ 动态键显式登记，
+  内部键 headerObj/unknownFlags 等永不入档）。
+- `--save-config <file.json>`：把本次实际生效参数的**增量**（相对内置默认）落盘，下次
+  `--config` 复扫；写完照常继续扫描。认证档案属敏感文件，help 已提示入库注意权限。
+
+#### ③ CLI 补接既有引擎键
+
+- `--retries <0-5>` / `--http-timeout <1000-60000ms>`：`config.retry`/`config.timeoutMs` 引擎与
+  REST 白名单早已有，CLI 一直缺入口。命名刻意避开 `--timeout`（那是整场扫描等待上限）。
+
+#### ④ 修复：`--skip` 不配 `--csrf-url` 时静默失效
+
+- `buildConfig` 里 skipParams 映射嵌在 `csrfUrl` 的 if 块内——**不配 `--csrf-url` 时
+  `--skip` 完全不生效**（用户以为排除了会话参数，实际照扫）。移出块外无条件生效，
+  回归钉在 `paramSelection.test.js`（「--skip 不配 --csrf-url 也生效」）。
+- 缩进是骗人的，`}` 的位置才是事实——同一形状此前已栽过（unknownFlag 那批）。
+
+#### ⑤ AGENTS.md（新增）
+
+- AI 代理 / CI 机器人的驱动契约：授权红线、CLI/REST 最小闭环、结果判读三陷阱
+  （verdict=inconclusive ≠ 未检出、dbmsEvidence.caveat 必须随报告外发）、工程纪律索引。
+  对标 dalfox/semgrep 的 agent-facing 文档实践；MCP server 在 D42+ 队列（第 17 条）。
+
+#### ⑥ 验证口径
+
+- 新增测试：`tests/paramSelection.test.js` 19 条（归一化/收口/硬拒/CLI/REST 闸/defaults 过闸）
+  + `tests/cli.configFile.test.js` 7 条（预载优先级/未知键硬拒/增量落盘 round-trip）。
+- `--skip` 修复与 `--retries` 接线含 CLI→config 断言；`help.js`/README 同批更新。
+- `--config`/`--save-config` **双入口同源**：bin/cli.js 与 scripts/one-click-scan.mjs 共用
+  `presetFromArgv`/`saveConfigFile` 助手（one-click 有自己的入口流程，只接 cli.js 会造成
+  CI 入口静默忽略 --config —— 同一红线不给两个答案）。
+- 仓库自带守卫当场抓过一次：`configWhitelist.passthrough` 要求白名单键必须给出合法探针值
+  并真实落进 sanitizeStart 产物 —— 新三键已补 PROBE（testParameter/paramExclude/paramFilter）。
+- 未做（诚实边界）：三件套未在真靶场跑 e2e（引擎收口处是纯点位过滤，不触网；真机回归
+  归入 real-world-lab 下一轮）。
+
 ### 2026-10-11 批次 D40 · lintScope 守卫的判据采集从 `import()` 改成静态文本解析（修 test-server CI 恒红）
 
 **一句话**：`server/tests/lintScope.guard.test.js` 的 ①②③ 三条主判据在 CI 的 `test-server` job 上**恒红**

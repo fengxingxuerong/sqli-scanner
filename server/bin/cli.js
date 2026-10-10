@@ -51,6 +51,8 @@ import {
   parseCookiePairs,
   resolveBodyChannel,
 } from './cli/config.js';
+// [D41 2026-10-11] 配置档案（对标 sqlmap -c/--save）：--config 预载 + --save-config 增量落盘
+import { presetFromArgv, saveConfigFile } from './cli/configFile.js';
 // 再导出：8 个测试文件从 ../bin/cli.js 导入这些符号，路径不能变
 export {
   parseArgs,
@@ -474,7 +476,28 @@ async function runIdentifyWaf(args) {
 }
 
 async function main() {
-  const args = parseArgs(process.argv.slice(2));
+  // [D41 2026-10-11] --config 预扫：档案值作为参数底（argv 显式开关仍优先）。
+  // 预扫必须在 parseArgs 之前 —— preset 要在 parseArgs 内部合并进 args 底。
+  // 共享助手在 configFile.js（one-click-scan 同源复用，防两入口口径分叉）。
+  const argvAll = process.argv.slice(2);
+  let preset;
+  try {
+    preset = presetFromArgv(argvAll, parseArgs);
+  } catch (e) {
+    console.error(`[cli] ${e?.message || e}`);
+    process.exit(2);
+  }
+  const args = parseArgs(argvAll, preset);
+  // [D41] --save-config：把本次实际生效的参数增量（相对内置默认）落盘，然后照常继续扫描。
+  if (args.saveConfigFile) {
+    try {
+      const n = saveConfigFile(args.saveConfigFile, args, parseArgs);
+      console.log(`  [save-config] 已写 ${args.saveConfigFile}（${n} 个非默认参数）。复扫：node cli.js --config ${args.saveConfigFile}`);
+    } catch (e) {
+      console.error(`  [save-config] 写入失败：${args.saveConfigFile}（${e?.message || e}）`);
+      process.exit(2);
+    }
+  }
   // [goal 批次 A-2] 台账检索子命令：node cli.js ledger list | ledger show <scanId>
   const argvRaw = process.argv.slice(2);
   // [UNKNOWN-FLAG 2026-09-25] 无法识别的开关 ⇒ 拒绝启动（判据与理由在 cli/args.js:unknownFlagError）。

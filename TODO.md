@@ -5,6 +5,66 @@
 
 ---
 
+## 2026-10-11 新增 · 同源项目优点盘点（吸收路线图）与批次 D41
+
+> 应「吸取同类 GitHub 项目全部优点」的盘点：三路调研（sqlmap 全量参数面逐条比对
+> `lib/parse/cmdline.py`；ghauri/jsSQL/DSSS/SQLiDetector/wafw00f/backslash-powered 等
+> 同类工具的独有优点；nuclei/dalfox/ffuf/ZAP/semgrep/trivy 的工程化实践），每条都已
+> 与本仓现状核对（README 已有项不重复推荐）。**本批 D41 先落地高价值低风险项**，
+> 其余按批次排队如下。
+
+### D41 已落地（2026-10-11）
+
+| 项 | 内容 | 验证 |
+|---|---|---|
+| 参数筛选三件套 | `-p/--test-param`、`--param-exclude <re>`、`--param-filter <place>`（对标 sqlmap 同名）：TargetParser 收口（`engine/paramSelection.js` 单一归一化，CLI/REST/档案三路同源），筛光点位即硬拒并列出可用点位——0 点扫描不许伪装成「未检出」 | `tests/paramSelection.test.js` 19/19 |
+| CLI 补接既有键 | `--retries`（0-5）/ `--http-timeout`（1s-60s）：引擎 `config.retry/timeoutMs` 与 REST 白名单早已有、CLI 一直缺入口 | 同上 |
+| `--skip` 错位修复 | `buildConfig` 里 skipParams 映射嵌在 `csrfUrl` 块内——不配 `--csrf-url` 时 `--skip` **静默失效**（「传了没生效」红线；顺带踩实：缩进撒谎，`} ` 才是事实） | 同上（回归钉） |
+| 配置档案 | `--config <file>` 预载（argv > 档案 > 默认，未知键硬拒）+ `--save-config <file>` 增量落盘可复扫（对标 sqlmap -c/--save + ffuf -config）。键注册表在 `bin/cli/configFile.js`（默认键 ∪ 动态键显式登记） | `tests/cli.configFile.test.js` 7/7 |
+| AGENTS.md | AI 代理/CI 驱动契约：授权红线、CLI/REST 最小闭环、结果判读三陷阱、工程纪律（对标 dalfox/semgrep 的 agent-facing 文档实践） | 静态文档 |
+
+### D42+ 吸收队列（按 价值×可行性 排序；每批落地前先在 TODO 本节登记口径）
+
+**检测可靠性族（ghauri 派）**
+
+1. **布尔/时间盲注字符复核 `--verify`**（ghauri）：提取字符逐位（或抽样）复验一次再落库，弱网/限速目标的拖库假字符防线。接缝：`engine/extraction/blindFns.js` 二分收敛处；验证口径：mock 抖动靶点，开/关对照假字符率。代价 S，价值 High。
+2. **`--fetch-using=between/in`**（ghauri）：布尔提取算子策略切换（`<>`/`=` 被过滤时换 `BETWEEN`/`IN`，兼省请求）。接缝：blindFns 算子模板化。代价 S，价值 Med。
+3. **多比特提取（jSQL Strategy 6）**：多值渲染目标 3 bit/请求。需先造「7 值 7 页」靶点，接缝同上。代价 M，价值 Med。
+4. **时间通道动态基线**（BlindSQL）：每靶点先测 N 条基线 RTT，阈值=基线+k·σ，扫描中重标定。本仓 `autoDynamicBlock` 只管内容噪声，时延噪声还没有对偶物。接缝：time 探测标定段（`timeBlindCalibrate` 旁）。代价 S，价值 Med。
+
+**发现/判定族**
+
+5. **wafw00f 式通用差分判定**：对 62 指纹未命中的目标发 4-5 路差分探针（正常/恶意 UA、XSS/LFI/SQLi 探针的状态码/Server 头/cookie 漂移、连接级阻断识别），把「WAF: unknown」变成「疑似有拦截器+证据」。接缝：`core/waf/` 探测器旁路，`--identify-waf` 输出复用。代价 M，价值 High（补 62 指纹的长尾）。
+6. **backslash-powered 变换探针**（PortSwigger）：良性 vs 异常变换对（`\`、`\\`、`%00`、引号族）差分，先摸清服务端解码/归一化行为再选 tamper；顺带覆盖后端参数名爆破（差分响应）。接缝：prefilter 阶段前置探针族。代价 M，价值 High。
+7. **参数名注入**（SQLiDetector）：注入点类型加「参数名本身」（列名/排序名拼接场景）。接缝：TargetParser `createInjectionPoint` 新 location + buildInjectionRequest 换位。代价 S，价值 Med。
+8. **静态错误正则普查先行**（SQLiDetector 152-regex 形态）：error 通道前置一轮「1 payload × 正则库」的廉价相 0。本仓报错定库已强（`dbmsFromError` 带护栏），这条只做**排序**不做判定。代价 S，价值 Low-Med。
+
+**OOB 族（对应本表 2026-10-10 盘点的 P1-3）**
+
+9. **interactsh 公网协作端客户端**：零自建域名/服务器拿 OOB 回调（Node 内置 crypto RSA-OAEP + fetch 即可实现协议；注册→轮询→token 匹配进既有 `oobReceiver` 的 token 判定）。配置走 `config.oob.interactsh = { server? }`，与 `oob.dnsOob` 并列。**验证需公网/可通外网环境，本机离线只做协议 mock 单测，真机验证另起批次**。代价 M，价值 High。
+10. **Collaborator-Everywhere 式普遍外带**：对所有未显式测的头/参数播撒 OOB 标记（非侵入），把 OOB 从 opt-in 通道变背景哨兵。依赖第 9 条先落地。代价 M，价值 Med。
+
+**SQL 面补齐族（sqlmap 派，全部已核对本仓 args.js 确认缺位）**
+
+11. `--ignore-code <codes>`：跳过指定错误码继续扫。接缝已勘明：`engine/egressOpts.js isUnusableResponse` + `core/scanValidityGuard.js`（BLOCK_STATUSES/authLost 判定要认 ignoreCodes 白名单）。代价 S，价值 Med。
+12. `--randomize <params>`：非注入参数每请求随机化防锁定。接缝：buildInjectionRequest 出站前替换列表内参数的 original 值。需真靶场验证（防锁定行为本身）。代价 S，价值 Med。
+13. `--second-req <file>`：二阶触发页从「URL」升级为「完整请求文件」（复用 `-r` 解析器，支持 POST+头+CSRF 的触发页）。接缝：`secondOrder.triggerUrls` 旁加 `triggerRequest`。代价 S，价值 Med。
+14. `--dump-format` 接线：`engine/dumpFormat.js` 四格式化函数与 27 条测试早在，链路未接（Extractor.js 头部注释自证「ctx.config.dumpFormat 都未被接线」，2026-10-05 死代码清理后接口就位）。接法：报告 dump 区渲染与 `report.csv` 落盘处按 `config.dumpFormat` 调 `formatDumpData`。代价 S，价值 Med。
+15. `-b/--banner`、`--statements`、`--procs`、`-U <user>`、`--exclude <db>`：枚举面补齐（方言查询目录在 `extraction/sysQueries.js` 已有底子）。每条代价 S-M，价值 Med。
+16. `--chunked`（Transfer-Encoding 分块发 body，WAF 不缓冲不检的真向量）、`--safe-post/--safe-req`（POST 保活）、`--load-cookies/--live-cookies`（会话接力）、`--crawl-exclude <re>`、`--postprocess <file.js>`（响应侧解密，与 `--request-script` 对偶）：各自代价 S，价值 Med（`--postprocess` High，加密响应目标现状是静默比对失败）。
+
+**工程化族（nuclei/dalfox/ZAP/semgrep/trivy 派）**
+
+17. **原生 MCP server**：`node cli.js mcp`（stdio JSON-RPC，零依赖），工具集 run_scan/get_progress/get_findings/pause/resume/stop/list_scans/preflight（对标 dalfox `mcp` 子命令 + semgrep 并入主二进制的终局形态；`preflight` 不发 payload 只探可达性与参数发现，是代理安全用枪的关键）。2026-10 现状：dalfox/semgrep/trivy/ZAP 官方均已内置 MCP，nuclei 仅社区版，sqlmap 无——这是同类里**本仓可率先补齐**的差异面。代价 M，价值 High。
+18. **diff-aware CI 报告**（semgrep `ci` 语义）：PR 模式只对新增发现判红（台账已有 fingerprint 基础），存量噪声不阻塞无关 PR。代价 M，价值 High（安全 CI 被弃用的第一原因是存量噪声）。
+19. **扫描计划文件**（ZAP Automation Framework 语义）：`--plan plan.json`（目标/认证/批次/阈值声明式可评审），配 autogen 模板与 schema。与 --config 的区别：config 是参数档案，plan 是**战役编排**。代价 M，价值 Med。
+20. **发布信任链**：`release.yml` 上 SBOM + `actions/attest-build-provenance`（SLSA L2）+ cosign，README 写 `gh attestation verify` 验法。SEA 单二进制目前无第三方可验证来源。代价 M，价值 Med-High。
+21. payload 包生态（nuclei-templates 形态：独立 packs 仓 + 安装器 + 校验门）、文档站（CLI 参考自动生成）、winget/scoop/brew 渠道、canary 通道、`--ai-triage`（AI 流水线扩展）：更后置，见工程化调研原文（本节只留索引）。
+
+**明确不吸收**（与既有架构冲突，调研代理逐条点名过的）：MSF 运行时集成（--os-pwn/--priv-esc/--os-bof）、Windows 注册表族（--reg-*）、原生 `--eval`（红线：requestScript 的沙箱白名单架构）、GUI/TUI 向导（Web 面板已占位）、`--union-char/--no-escape`（P0-D3 高危区，args.js 已留拒绝提示）、Google dork 拉目标（ToS/脆弱）。
+
+---
+
 ## 2026-10-10 新增 · 实战视角缺口盘点（渗透工程师口径）与批次 D32
 
 盘点结论：工程纪律（门禁/真值链/口径）已足够厚，剩下的缺口集中在**入口层**——

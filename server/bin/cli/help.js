@@ -43,6 +43,15 @@ export function printHelp() {
   --risk <1-3>               风险等级（1 安全，2 标准，3 含 OR 变体）
   --test-filter <str>        仅运行 id 匹配的测试（逗号分隔子串，大小写不敏感，对标 sqlmap --test-filter）
   --test-skip <str>          跳过 id 匹配的测试（逗号分隔子串，大小写不敏感，对标 sqlmap --test-skip）
+  -p, --test-param <p1,p2>   只测指定参数（[D41] 对标 sqlmap -p；参数名精确匹配，大小写不敏感。
+                             复测/CI 定向回归用：大 body 只测可疑参数，不再全量投 payload。
+                             一个都没匹配到时拒绝启动并列出可用点位 —— 0 点扫描=「没测」，不许伪装成「未检出」）
+  --param-exclude <regex>    按正则排除参数（[D41] 对标 sqlmap --param-exclude，大小写不敏感）：
+                             会话/CSRF/风控噪声参数一个表达式全排除（如 --param-exclude "ses|csrf"）。
+                             排除到 0 点时同样拒绝启动
+  --param-filter <place,...> 按位置筛选注入点（[D41] 对标 sqlmap --param-filter）：
+                             url/query/get、body/post/form、header、cookie、path（大小写不敏感）。
+                             例：--param-filter body —— 只测 body 参数（query 已签名/已被 CDN 固定时）
   --test-headers             把显式传入的请求头（--header 或 -r 请求文件中的头，如 Cookie / X-Forwarded-For）
                              作为注入点测试（默认关闭：保持现有行为，头仅作会话透传）。授权的渗透测试中，
                              服务端按请求头取值拼 SQL 的场景（如 SELECT ... WHERE id=\${x_forwarded_for}）必须开启才能检出
@@ -162,6 +171,10 @@ export function printHelp() {
   -o, --out <path>           报告输出文件（批量模式输出到目录）
   -c, --concurrency <n>     批量并发扫描数（默认 1）
   --timeout <ms>             单次扫描等待上限（默认 0 = 无限制）
+  --retries <n>              单请求连接失败重试次数（[D41] 对标 sqlmap --retries，0-5，默认 3；
+                             此前只有 REST 能配，CLI 无入口）
+  --http-timeout <ms>        单请求超时（[D41] 1000-60000，默认 30000）。命名避开 --timeout
+                             （那是整场扫描的等待上限）：慢目标（30s+ 才响应）从这里放宽
 
 高级检测（对标 sqlmap）:
   --prefix <str>            注入闭合前缀（如 "')"）
@@ -192,6 +205,12 @@ export function printHelp() {
   --forms                  收集页面表单注入点（需配 --level 5 才生效）
   --crawl <depth>           站内链接爬取深度（1-3，默认 0=不爬取）
   --session-file <path>     会话文件路径（断点续跑）
+  --config <file>           从 JSON 配置档案预载参数（[D41] 对标 sqlmap -c + ffuf -config）：
+                            键=长参数名（去前导 --，如 {"url":"…","level":5,"tamper":"space2comment"}），
+                            CLI 显式开关优先生效（argv > 档案 > 内置默认）。档案含未知键时拒绝启动；
+                            认证档案属敏感文件，注意权限与入库（.gitignore）
+  --save-config <file>      把本次实际生效的参数增量（相对内置默认的差异）写成 JSON 档案，
+                            下次 --config 复用；写完照常继续扫描
   --time-sec <n>            时间盲注 sleep 秒数（对标 sqlmap --time-sec）
   --delay <ms>              请求间**随机**延迟毫秒（WAF 规避，映射 wafEvasion.jitterMs）
   --delay-sec <n>           请求间**固定**延迟秒数（对标 sqlmap --delay，上限 60s）

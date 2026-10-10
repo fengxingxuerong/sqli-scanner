@@ -200,6 +200,12 @@ export const defaults = {
   // （csrf_token/_csrf/token/authenticity_token 等），显式 csrfTokenName 优先。
   // [sqlmap 对标 2026-09-14] --skip：排除指定参数（逗号分隔参数名）
   skipParams: [],
+  // [D41 2026-10-11 对标 sqlmap -p/--param-exclude/--param-filter] 注入点筛选三件套。
+  // 判据统一在 engine/paramSelection.js（TargetParser 收口；筛光即硬拒，绝不跑 0 点扫描）：
+  //   testParameter：参数名白名单（-p）；paramExclude：参数名黑名单正则；paramFilter：位置白名单。
+  testParameter: [],
+  paramExclude: '',
+  paramFilter: [],
   csrfUrl: '',
   csrfTokenName: '',
   csrfMethod: 'GET',

@@ -18,7 +18,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 
-export function parseArgs(argv) {
+export function parseArgs(argv, preset) {
   /** @type {any} */
   const args = {
     url: null, batch: null, method: 'GET', body: null, cookie: null, headers: null,
@@ -52,6 +52,8 @@ export function parseArgs(argv) {
     // --test-path：把 URL path 末段作为注入点（path 型注入点）。
     testHeaders: false,
     testPath: false,
+    // [D41 2026-10-11 对标 sqlmap -p/--param-exclude/--param-filter] 注入点筛选三件套
+    testParam: null, paramExclude: null, paramFilter: null,
     // [2026-10-02 竞品吸收] --param-mine：参数挖掘总开关（默认关闭零回归）
     paramMine: false,
     // [2026-10-02 实战 P1-4] --crawl-browser：headless 浏览器爬取（默认关闭零回归）
@@ -70,6 +72,10 @@ export function parseArgs(argv) {
     // 无法识别的开关收集在此（不再静默忽略）：告警见循环末尾，硬拒见 unknownFlagError()
     unknownFlags: [],
   };
+  // [D41 2026-10-11] --config 配置档案预载（对标 sqlmap -c + ffuf -config）：
+  // 档案键作为底、内置默认之上、argv 之下 —— 循环里任何显式传入的开关都会覆盖档案值。
+  // preset 来自 configFile.loadConfigFile（内部键已剔除、未知键已在上游硬拒），不再校验。
+  if (preset && typeof preset === 'object') Object.assign(args, preset);
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const next = () => argv[++i];
@@ -176,6 +182,11 @@ export function parseArgs(argv) {
     else if (a === '--format' || a === '-f') args.format = next();
     else if (a === '--out' || a === '-o') args.out = next();
     else if (a === '--timeout') args.timeoutMs = Number(next()) || 0;
+    // [D41 2026-10-11] --retries / --http-timeout：单请求层的重试次数与超时（config.retry / config.timeoutMs，
+    //   引擎与 REST 白名单早已消费这两键，此前只有 REST 能配 —— CLI 侧一直缺入口）。
+    //   命名刻意避开既有 --timeout（那是整场扫描的轮询上限，cli.js:293 消费）。
+    else if (a === '--retries') args.retries = Number(next());
+    else if (a === '--http-timeout') args.httpTimeoutMs = Number(next());
     else if (a === '--concurrency' || a === '-c') args.concurrency = Number(next()) || 1;
     // —— HTTP 协议层（对标 sqlmap --force-ssl / --ignore-redirects / --hpp）——
     else if (a === '--force-ssl') args.forceSsl = true;
@@ -219,6 +230,10 @@ export function parseArgs(argv) {
     else if (a === '--forms') args.forms = true;
     else if (a === '--crawl') args.crawl = Number(next()) || 1;
     else if (a === '--session-file') args.sessionFile = next();
+    // [D41 2026-10-11 对标 sqlmap -c/--save + ffuf -config] 配置档案：--config 从 JSON 文件预载参数，
+    //   CLI 显式传入的开关优先生效；--save-config 把本次实际生效的参数增量写回 JSON（可复扫）。
+    else if (a === '--config') args.configFile = next();
+    else if (a === '--save-config') args.saveConfigFile = next();
     else if (a === '--time-sec') args.timeSec = Number(next()) || null;
     // 注意：--delay 是毫秒级随机抖动（wafEvasion.jitterMs，WAF 规避）；
     // 固定请求间隔（秒）用 --delay-sec（对应 config.delay，对标 sqlmap --delay）。
@@ -239,6 +254,12 @@ export function parseArgs(argv) {
   else if (a === '--csrf-method') args.csrfMethod = String(next()).toUpperCase();
   else if (a === '--csrf-refresh') args.csrfRefreshFreq = Number(next()) || 50;
   else if (a === '--skip') args.skipParams = String(next()).split(',').map((s) => s.trim()).filter(Boolean);
+  // [D41 2026-10-11 对标 sqlmap -p] 只测指定参数（逗号分隔；config.js → config.testParameter）
+  else if (a === '-p' || a === '--test-param') args.testParam = next();
+  // [D41 2026-10-11 对标 sqlmap --param-exclude] 按正则排除参数（paramSelection.js 消费）
+  else if (a === '--param-exclude') args.paramExclude = next();
+  // [D41 2026-10-11 对标 sqlmap --param-filter] 按位置筛选（url/body/header/cookie/path 及 GET/POST 别名）
+  else if (a === '--param-filter') args.paramFilter = next();
     // —— 对标 sqlmap 最后两个参数（--tor/--mobile）——
     else if (a === '--tor') args.tor = true;
     else if (a === '--mobile') args.mobile = true;
