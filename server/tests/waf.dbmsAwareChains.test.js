@@ -77,17 +77,22 @@ test('③ detect.js：dbms=MySQL 时真机链前置进 blockAdaptive 候选（�
 // 排不到前 2 就等于没进候选。此前 `TAMPER_COVERS.chardoubleencode` 只列标点类
 // （quote/space/paren/comma/cmp），与关键词画像交集为 0 ⇒ hit=0 ⇒ 排静态链最后 ⇒ 被切掉 ⇒
 // acceptance 的 waf403（关键字即拦）连续 3 个 run 漏检。
-test('★ D19：画像拦关键词时编码兜底链（chardoubleencode）必须排链首（进得了 2 个静态名额）', () => {
+test('★ D19：画像拦关键词时编码兜底链（chardoubleencode）必须进得了验证名单', () => {
   const V = 'generic_block';
   const chains = [
     ...ENCODING_FALLBACK_CHAINS.map((c) => ({ vendor: V, plugins: [...c] })),
     ...OPERATOR_SWAP_CHAINS.map((c) => ({ vendor: V, plugins: [...c] })),
   ];
   const ranked = rankChainsByProfile(chains, ['comment', 'and', 'or', 'union', 'select', 'sleep']);
-  assert.equal(
-    ranked[0].plugins.join('+'),
-    'chardoubleencode',
-    `编码兜底链没排到链首 ⇒ 会被 chainVerify 的 2 个静态名额切掉 ⇒ 关键字即拦场景漏检。实际前 3：` +
+  // [D38 2026-10-11] 断言形态从「排链首」改为「在真会被验证的前 2 条内」——
+  // 为什么必须改：**排链首是有害的**。链首意味着它第一条被验证、也第一条放行 ⇒ 被选中重跑，
+  // 而靶场只解一次码 ⇒ 双编码落库是碎片 ⇒ 只有 error（`e2e/pentest-lab` 的 waf403 实测：
+  // 它探针 14ms 放行、却把整场重跑带成 error-only）。真正要保证的是「它在候选里、
+  // 前面全拦时轮得到它」—— 那由 D20 的显式保底（替换末条）保证，不靠排序争第一。
+  // 真机佐证：改后排第 2（symboliclogical 第一）⇒ waf403 检出 boolean、pentest-lab 12/12 PASS。
+  assert.ok(
+    ranked.slice(0, 2).map((c) => c.plugins.join('+')).includes('chardoubleencode'),
+    `编码兜底链掉出前 2 ⇒ 会被 chainVerify 的 2 个静态名额切掉 ⇒ 关键字即拦场景漏检。实际前 3：` +
       ranked.slice(0, 3).map((c) => c.plugins.join('+')).join(' | '),
   );
   // 对照：画像为空时不重排（保持原序）—— 防"无条件把它提到第一"
