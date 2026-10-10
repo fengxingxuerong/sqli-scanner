@@ -32,6 +32,11 @@ logs/
 sqli-session-latest.json
 server/sqli-session-latest.json
 server/sqli-session-*.json
+# [2026-10-11 D40] discover.js 派生的 sqli-session-<urlHash8>.json 是**相对进程 cwd** 落盘的
+# 裸文件名：从仓库根起扫描（e2e/脚本等）时就落在根级，此前只登记了 server/ 侧与根级
+# latest —— 根级带哈希后缀的会话文件漏网，一直挂在 git status 未跟踪区（同族：
+# 逐路径登记会腐烂，这里按 sqli-session-*.json 形态收口根级）。
+sqli-session-*.json
 server/*.err
 # 错误日志产物（根级 + 任意层级）
 *.err
