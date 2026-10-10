@@ -941,9 +941,10 @@ jobs:
       - run: cd server && npm audit --audit-level=high
         name: Server npm audit (high+)
   # ============================================================================
-  # [audit 新增 2026-09-13] 自足 e2e 批量回归：run-all.mjs 依赖探测自动收敛到
-  # deps:[] 的 6 套靶场（retest-lab / tamper-matrix / real-world-lab(PGlite) /
-  # recall-lab（=false-positive.e2e.js，假阳性那套）/ detection-runner / waf-lab）。
+  # [audit 新增 2026-09-13] 自足 e2e 批量回归：run-all.mjs 依赖探测自动收敛到所有
+  # deps:[] 的靶场。**清单以 e2e/run-all.mjs 的 LABS 为唯一来源**，不在这里数个数 ——
+  # 旧版本写死「6 套 + 一份名单」，而 2026-10-10 实测已有 10 套（redteam / batch /
+  # login / signed-api 陆续加入，waf-lab 早就改成 deps:['sandbox']），那句散文成了假陈述。
   # 本 job 是「无 Docker 前提」的 e2e 基线；依赖真实 DB 的套件由 acceptance job
   # （docker run mysql + init-db）覆盖 —— 2026-09-25 起 `recall.e2e.js` 也在那里跑
   # （原先它是本 job 之外的独立 recall-lab job，那台 runner 没有 mysqld ⇒ 18 条里
@@ -1017,7 +1018,7 @@ jobs:
       # ⚠️ `| tee` 会吞掉退出码（GitHub 的 bash 默认只有 `-e`，**不带 pipefail**）
       # ⇒ 必须显式 `set -o pipefail`，否则 run-all 失败也会被记成通过 —— 那就是本仓最痛的
       # 「结论与真值分处两地」。*.log 已被 .gitignore 全局忽略，不会污染仓库。
-      - name: run-all（依赖探测自动收敛到 6 套自足靶场）
+      - name: run-all（依赖探测自动收敛到全部 deps:[] 自足靶场，清单以 e2e/run-all.mjs 为准）
         run: |
           set -o pipefail
           node e2e/run-all.mjs 2>&1 | tee run-all.log
