@@ -13,6 +13,8 @@ import { logger } from '../core/logger.js';
 import { collectRendered, BrowserUnavailable, isStaticEndpoint } from './discovery/browserCrawler.js';
 // [2026-10-01] XML / SOAP body 叶子发现（对标 ghauri XML·SOAP）
 import { parseXmlBody, xmlLeafPaths, getXmlLeaf } from '../core/xmlBody.js';
+// [D41 2026-10-11 对标 sqlmap -p/--param-exclude/--param-filter] 注入点筛选三件套
+import { applyParamSelection } from './paramSelection.js';
 
 // 反 CSRF 字段名正则（命中即记为 csrfTokenName）
 const CSRF_RE = /^(csrf|_token|__RequestVerificationToken|authenticity_token)$/i;
@@ -299,10 +301,10 @@ export class TargetParser {
         p.originalValue = p.originalValue.slice(0, -1); // 剥离尾部 *
         p.precisionMarked = true;
       }
-      return this._applyOnlyPoint(marked, config);
+      return this._applyOnlyPoint(applyParamSelection(marked, config), config);
     }
 
-    return this._applyOnlyPoint(points, config);
+    return this._applyOnlyPoint(applyParamSelection(points, config), config);
   }
 
   /**

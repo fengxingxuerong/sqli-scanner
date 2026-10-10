@@ -250,6 +250,12 @@ export function buildConfig(args) {
     so.triggerUrls = [...(so.triggerUrls || []), args.secondOrderUrl];
   }
   if (args.smart) config.prefilter = true;
+  // [D41 2026-10-11 对标 sqlmap -p/--param-exclude/--param-filter] 注入点筛选三件套。
+  // 归一化/硬拒判据统一在 engine/paramSelection.js（TargetParser 收口）；CLI 只做形态透传。
+  const _testParam = args.testParam != null ? String(args.testParam).split(',').map((s) => s.trim()).filter(Boolean).slice(0, 32) : null;
+  if (_testParam && _testParam.length) config.testParameter = _testParam;
+  if (args.paramExclude != null && String(args.paramExclude).trim()) config.paramExclude = String(args.paramExclude).slice(0, 200);
+  if (args.paramFilter != null && String(args.paramFilter).trim()) config.paramFilter = String(args.paramFilter).slice(0, 200);
   // [P0 2026-09-09 实战批次] 失效值替换（对标 sqlmap --invalid-bignum/--invalid-logical/--invalid-string）：
   // 布尔盲注的有效值前缀替换为随机大数/恒真逻辑式/随机串，规避缓存页/静态页噪声
   if (args.invalidBignum) config.invalidValue = 'bignum';
@@ -322,7 +328,15 @@ export function buildConfig(args) {
     if (args.csrfTokenName) config.csrfTokenName = args.csrfTokenName;
     if (args.csrfMethod) config.csrfMethod = args.csrfMethod;
     if (args.csrfRefreshFreq > 0) config.csrfRefreshFreq = Math.min(args.csrfRefreshFreq, 10000);
+  }
+  // [D41 修复] --skip 原本嵌在 csrfUrl 块内 —— 不配 --csrf-url 时 --skip 静默失效
+  //（「传了没生效」红线：用户以为排除了会话参数，实际照扫）。移出块外，无条件生效。
   if (Array.isArray(args.skipParams) && args.skipParams.length) config.skipParams = args.skipParams.slice(0, 64);
+  // [D41 2026-10-11] --retries / --http-timeout：单请求层重试与超时（引擎 config.retry/timeoutMs
+  //   既有键；REST 侧 scalarsCore clamp 0-5 / 1000-60000，这里同口径）。
+  if (Number.isFinite(args.retries)) config.retry = Math.max(0, Math.min(5, Math.floor(args.retries)));
+  if (Number.isFinite(args.httpTimeoutMs) && args.httpTimeoutMs > 0) {
+    config.timeoutMs = Math.max(1000, Math.min(60000, Math.floor(args.httpTimeoutMs)));
   }
   // --tor：Tor 本地代理（默认 socks5://127.0.0.1:9050）；已设 --proxy 时不覆盖
   if (args.tor && !config.proxy) config.proxy = 'socks5://127.0.0.1:9050';

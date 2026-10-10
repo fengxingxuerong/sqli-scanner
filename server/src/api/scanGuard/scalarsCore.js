@@ -8,6 +8,8 @@ import { clampInt, clampStr, pickInt, pickBool } from '../scanConfigUtils.js';
 import { defaults } from '../../config/defaults.js';
 import { logger } from '../../core/logger.js';
 import { filterInScope } from '../../core/scopeGuard.js';
+// [D41 2026-10-11] 注入点筛选三件套的归一化（与 TargetParser 同源，防两处口径漂移）
+import { normalizeParamFilter, normalizeTestParameter } from '../../engine/paramSelection.js';
 
 export function guardScalarsCore(config, cfg, scopeRules) {
   // —— 网络/调度 ——
@@ -118,6 +120,28 @@ export function guardScalarsCore(config, cfg, scopeRules) {
   if (Array.isArray(cfg.skipParams)) {
     const sp = [...new Set(cfg.skipParams.map((s) => String(s).trim()).filter(Boolean))].slice(0, 64);
     if (sp.length) config.skipParams = sp;
+  }
+  // [D41 2026-10-11 对标 sqlmap -p/--param-exclude/--param-filter] 注入点筛选三件套（REST 口径）。
+  // 归一化/硬拒判据在 engine/paramSelection.js（TargetParser 收口）；这里只做形态收紧：
+  //   testParameter：字符串数组（clamp 32）；paramExclude：单串 clamp 200（正则合法性由引擎判，
+  //   这里不 pre-parse —— JS RegExp 无内联 flag，提前编译两次只会制造口径分叉）；
+  //   paramFilter：接受逗号串或数组，归一化走 normalizeParamFilter（未知位置在这里就拒）。
+  if (Array.isArray(cfg.testParameter)) {
+    const tp = cfg.testParameter.map((s) => String(s).trim()).filter(Boolean).slice(0, 32);
+    if (tp.length) config.testParameter = tp;
+  } else if (typeof cfg.testParameter === 'string' && cfg.testParameter.trim()) {
+    const tp = normalizeTestParameter(cfg.testParameter);
+    if (tp) config.testParameter = tp;
+  }
+  const paramExclude = clampStr(cfg.paramExclude, '', 200);
+  if (paramExclude) config.paramExclude = paramExclude;
+  if (cfg.paramFilter != null) {
+    try {
+      const pf = normalizeParamFilter(cfg.paramFilter);
+      if (pf) config.paramFilter = pf;
+    } catch (e) {
+      logger.warn(`paramFilter 形态非法，已忽略（${e?.message || e}）`);
+    }
   }
   const dumpConcurrency = pickInt(cfg, 'dumpConcurrency', defaults.dumpConcurrency, 1, 16);
   if (dumpConcurrency !== undefined) config.dumpConcurrency = dumpConcurrency;

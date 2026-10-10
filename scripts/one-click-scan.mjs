@@ -41,6 +41,9 @@ import { defaults as DEFAULT_CONFIG } from '../server/src/config/defaults.js';
 import * as scanLedger from '../server/src/services/scanLedger.js';
 import { buildConfig } from '../server/bin/cli/config.js';
 import { parseArgs, applyRequestFile, resolveTamperPlugins, unknownFlagError } from '../server/bin/cli/args.js';
+// [D41 2026-10-11] 配置档案：与 bin/cli.js 同源预载（--config）/落盘（--save-config），
+// 防两入口口径分叉 —— one-click 是 CI 入口，静默忽略 --config 比报错危险。
+import { presetFromArgv, saveConfigFile } from '../server/bin/cli/configFile.js';
 import { runSingleScan } from '../server/bin/cli.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -108,6 +111,11 @@ function printHelp() {
       --timeout <ms>           扫描超时（默认 0 = 不限）
       --test-headers           把请求头作为注入点测试
       --test-path              把 URL path 末段作为注入点测试
+  -p, --test-param <p1,p2>     只测指定参数（对标 sqlmap -p；复测/CI 定向回归）
+      --param-exclude <regex>  按正则排除参数（对标 sqlmap --param-exclude）
+      --param-filter <places>  按位置筛选（url/body/header/cookie/path，对标 sqlmap --param-filter）
+      --config <file.json>     从配置档案预载参数（argv > 档案 > 默认；未知键拒绝启动）
+      --save-config <file>     把本次非默认参数增量落盘，下次 --config 复扫
       --dump / --dbs ...       数据提取（显式 opt-in，对标 sqlmap）
 
 支持的注入类型（引擎内置技术通道）:
@@ -177,13 +185,31 @@ async function main() {
 
   if (rest.includes('-h') || rest.includes('--help')) { printHelp(); process.exit(0); }
 
-  const args = parseArgs(rest);
+  // [D41 2026-10-11] --config 预载（与 bin/cli.js 同一助手/同一硬拒），argv 显式开关仍优先
+  let preset;
+  try {
+    preset = presetFromArgv(rest, parseArgs);
+  } catch (e) {
+    console.error(`[one-click] ${e?.message || e}`);
+    process.exit(2);
+  }
+  const args = parseArgs(rest, preset);
   // [UNKNOWN-FLAG 2026-09-25] 与 bin/cli.js 同一道硬拒：一键扫描是给 CI/工单用的入口，
   //   拼错的开关若被静默吞掉（尤其 --scope / --authorized），退出码 0 就成了假安全。
   {
     const flagErr = unknownFlagError(args);
     if (flagErr) {
       console.error(flagErr);
+      process.exit(2);
+    }
+  }
+  // [D41] --save-config：把本次实际生效参数增量落盘后照常扫描（与 bin/cli.js 同语义）
+  if (args.saveConfigFile) {
+    try {
+      const n = saveConfigFile(args.saveConfigFile, args, parseArgs);
+      console.log(`  [save-config] 已写 ${args.saveConfigFile}（${n} 个非默认参数）。复扫：node scripts/one-click-scan.mjs --config ${args.saveConfigFile}`);
+    } catch (e) {
+      console.error(`  [save-config] 写入失败：${args.saveConfigFile}（${e?.message || e}）`);
       process.exit(2);
     }
   }
