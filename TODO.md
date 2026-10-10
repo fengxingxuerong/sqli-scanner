@@ -1636,6 +1636,20 @@ services:
    | C. 语义等价复核 | 验链放行后再验一次"真/假两侧同形且结果不同" | 新机制 + 额外请求，但收益覆盖所有 WAF 场景 |
 
    ⚠️ 方向性结论：**任何"让兜底链排得更前"的改动都在加剧这个缺口**，别再往那个方向使劲。
+
+   🧪 **A 的变体已实测（2026-10-11 凌晨，改完即回滚，未提交）**：不动 `TAMPER_COVERS` 声明
+   （避免触发 D20 的 COVERS 口径守卫），只在 `rankChainsByProfile` 里对**含 `eliminatesAll`
+   插件的链**把 `and/or/union/select/sleep/comment/hash` 这几类 token **不计入 hit**。
+   - 排序层**确实生效**：离线同输入复现 ⇒ `chardoubleencode` 从第 0 掉到末位，
+     `symboliclogical` 升到……**第 3 位**（前两位是 `unionvaluesrow+dash2hash[+hexliterals]`，
+     它们 covers 含 union/select ⇒ 同样 hit=2，靠稳定排序的原序占先）。
+   - 但 `slots = 2` ⇒ symboliclogical **依然进不了验证名单**；端到端 `pentest-lab` 仍是
+     `FAIL(miss=boolean)`，验证名单实测为
+     `[unionvaluesrow+dash2hash → chardoubleencode（D20 替换末条）→ bypass:modsecurityversionedkeywords]`。
+   ⇒ **结论：A 单独修不好 waf403。** 它只能消除"编码链靠伪装覆盖压过语义等价链"这一层，
+     第二层（slots=2 与"真机打穿链占前两位"）必须靠 B 或 C 一起解。别再单独试 A。
+   ⚠️ 另一条已验证**无效**的路（勿重复）：把兜底改成"追加在末尾" —— `verifyTamperChains`
+     第 194 行还有一道 `ranked.slice(0, MAX_CHAINS)`，第 4 条会被**静默切掉** ⇒ 兜底比替换式更糟。
 2. **api-range-lab 两条 `[ai]` 用例确定性 404 / code 2001「扫描任务不存在」** —— ✅ **已修（2026-10-09 D30）**。
    根因**不是**用例写法，是 TTL：`ctx.state.numScan` 背后是 ScanManager 的**内存上下文**，
    扫描终态后进入 `retiredAt`、**默认 30s 回收**，而 AI 路由查的正是这张表
