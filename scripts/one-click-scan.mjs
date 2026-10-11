@@ -33,6 +33,10 @@ import { ScanManager } from '../server/src/engine/ScanManager.js';
 import { ReportGenerator } from '../server/src/services/ReportGenerator.js';
 // [D42 2026-10-11 对标 sqlmap --dump-format] 拖库数据独立产物格式化（27 条既有单测钉行为）
 import { formatDumpData } from '../server/src/engine/dumpFormat.js';
+// [D45 2026-10-11] diff-aware CI 门禁：diff 计算与 REST /api/scan/:id/diff 同源（scanDiff），
+// 基线解析与退出码裁决在 diffGate（纯函数，单测钉死三种出口）
+import { diffReports } from '../server/src/engine/scanDiff.js';
+import { findBaselineScanId, resolveBaselineReport, decideDiffExit } from '../server/src/services/diffGate.js';
 import { cvssFor } from '../server/src/services/reportDelivery.js';
 import { VULN_TAXONOMY } from '../server/src/services/vulnTaxonomy.js';
 import { parseScope } from '../server/src/core/scopeGuard.js';
@@ -76,6 +80,17 @@ function splitOwnArgs(argv) {
     }
     if (a === '--no-ledger') { opts.ledger = false; continue; }
     if (a === '--quiet') { opts.quiet = true; continue; }
+    // [D45 2026-10-11] diff-aware CI 门禁（semgrep 语义）：--diff-base <scanId|auto>，
+    // 只对新增发现判红（exit 2），存量发现不阻塞（exit 0），结论不可信 → exit 1。
+    if (a === '--diff-base') {
+      const v = String(argv[++i] || '').trim();
+      if (!v) return { opts, rest, error: '--diff-base 需要值：<baselineScanId> 或 auto（按目标自动找台账里最近一次同目标扫描）' };
+      if (v !== 'auto' && !/^[A-Za-z0-9_-]{1,64}$/.test(v)) {
+        return { opts, rest, error: `--diff-base 形态非法：${v}（scanId 只认 [A-Za-z0-9_-]{1,64}，或 auto）` };
+      }
+      opts.diffBase = v;
+      continue;
+    }
     rest.push(a);
   }
   return { opts, rest, error: null };
@@ -92,6 +107,10 @@ function printHelp() {
 
 本脚本专属选项:
   -F, --formats <list>   输出格式，逗号分隔（默认 html,json,markdown；可选 sarif,csv）
+      --diff-base <id|auto>  diff 门禁（[D45] semgrep 语义：只对新增发现判红）。与基线扫描
+                             比对（auto=台账中最近一次同目标扫描），新增发现 → exit 2；
+                             存量仍在 → exit 0（不阻塞无关 PR）；本次结论不可信或无基线可认
+                             → exit 1（拒绝认证，不假绿）。产出 diff.json + manifest.diff
   -o, --out <dir>        输出目录（默认 reports/<主机名>-<时间戳>/）
       --no-ledger        不写扫描台账快照
       --quiet            精简输出（只打最终摘要）
@@ -296,6 +315,40 @@ async function main() {
     }
   }
 
+  // [D45 2026-10-11] diff-aware CI 门禁（semgrep 语义）：--diff-base 给出时，与基线扫描
+  // 比 diff（与 REST /api/scan/:id/diff 同源 scanDiff 模块），**只对新增发现判红**——
+  // 存量发现已暴露在基线里，不该阻塞无关 PR。结论不可信（validity.reliable=false）→ exit 1
+  //（不判红也不假绿：verdict=inconclusive ≠ 未检出）。无基线可认 → exit 1（拒绝认证）。
+  let diffInfo = null;
+  if (opts.diffBase) {
+    const rows = scanLedger.listScans(500);
+    const curTarget = report.target?.url || report.target?.baseUrl || target;
+    const baseScanId = findBaselineScanId({
+      diffBase: opts.diffBase,
+      currentScanId: report.scanId,
+      currentTarget: curTarget,
+      rows,
+    });
+    if (!baseScanId) {
+      console.error(
+        `[diff-gate] 找不到基线扫描（--diff-base ${opts.diffBase}` +
+        `${opts.diffBase === 'auto' ? '：台账中无同目标历史扫描' : ''}）。` +
+        '\n  门禁拒绝在无基线时认证「无新增」——先跑一次建立基线（同一目标 URL），或显式给出基线 scanId。'
+      );
+      process.exit(1);
+    }
+    const baseReport = resolveBaselineReport({ baseScanId, scanManager: null });
+    if (!baseReport) {
+      console.error(`[diff-gate] 基线扫描 ${baseScanId} 的报告不可读（台账缺失/损坏）——门禁拒绝认证`);
+      process.exit(1);
+    }
+    const diff = diffReports(baseReport, report);
+    const decision = decideDiffExit({ diff, newReport: report });
+    diffInfo = { baseScanId, diff, decision };
+    writeFileSync(join(outDir, 'diff.json'), JSON.stringify(diff, null, 2), 'utf-8');
+    files.push('diff.json');
+  }
+
   // ---- 结构化清单（机器消费入口：CI / 工单系统 / 汇总看板）----
   const pocReport = (() => { try { return rg.attachPoc(report); } catch { return report; } })();
   const manifest = {
@@ -336,6 +389,18 @@ async function main() {
         : null,
     })),
     files: files.map((f) => join(outDir, f)),
+    // [D45] diff 门禁结果（--diff-base 给出时）：机器消费的「新增计数 + 裁决原因」
+    diff: diffInfo
+      ? {
+          baseScanId: diffInfo.baseScanId,
+          baselineVulns: diffInfo.diff.base.vulnCount,
+          added: diffInfo.diff.new.length,
+          fixed: diffInfo.diff.fixed.length,
+          remaining: diffInfo.diff.remaining.length,
+          summary: diffInfo.diff.summary,
+          decision: { code: diffInfo.decision.code, reason: diffInfo.decision.reason },
+        }
+      : null,
     authorization: AUTHORIZATION_NOTE,
   };
   writeFileSync(join(outDir, 'manifest.json'), JSON.stringify(manifest, null, 2), 'utf-8');
@@ -352,6 +417,15 @@ async function main() {
   }
 
   printReportBrief(report, files, outDir);
+  // [D45] --diff-base 给出时，退出码由 diff 门禁裁决（新增才判红），替代 risky 规则
+  if (diffInfo) {
+    console.log('');
+    console.log('  diff 门禁（--diff-base）：');
+    console.log(`  基线扫描 : ${diffInfo.baseScanId}`);
+    console.log(`  ${diffInfo.diff.summary}`);
+    console.log(`  裁决     : exit ${diffInfo.decision.code} —— ${diffInfo.decision.reason}`);
+    process.exit(diffInfo.decision.code);
+  }
   const risky = report.riskLevel === 'Critical' || report.riskLevel === 'High';
   process.exit(risky ? 2 : 0);
 }

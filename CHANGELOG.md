@@ -4,6 +4,43 @@
 
 ## [Unreleased]
 
+### 2026-10-11 批次 D45 · diff-aware CI 门禁（`--diff-base auto`，只对新增发现判红）——修「安全 CI 被存量噪声杀死」的第一病因
+
+**一句话**：吸收路线图第 18 条（semgrep `ci` 的核心语义）：`node scripts/one-click-scan.mjs
+-u <url> --diff-base auto` —— 与台账中最近一次**同目标**扫描自动比对，**只对新增发现判红**。
+安全 CI 被团队弃用的第一原因是存量噪声（基线里那几个已知漏洞每天把 job 打红，第三天所有人
+无脑重试，第六天有人把 job 禁了）；本批把退出码门禁从「有没有漏洞」升级为「有没有**新**漏洞」。
+
+#### ① 语义（`services/diffGate.js` 纯函数，单测钉死）
+
+| 情形 | 退出码 | 理由 |
+|---|---|---|
+| 新增发现（基线没有的 `location:param:technique`） | `2` | 本次变更引入的新风险 |
+| 仅存量仍在（remaining） | `0` | 已暴露在基线中，PR 未引入新风险；`report.json` 全量照常交付 |
+| 本次结论不可信（`summary.validity.reliable=false`） | `1` | 门禁拒绝认证「无新增」——verdict=inconclusive ≠ 未检出，**不判红也不假绿** |
+| 无基线可认（auto 无同目标历史 / 显式 scanId 不存在 / 基线即自身） | `1` | 拒绝在无基线时认证，宁可拒绝也不假绿 |
+
+#### ② 复用与产物
+
+- diff 计算与 REST `GET /api/scan/:id/diff` **同一模块**（`engine/scanDiff.js`，比对键
+  `location:param:technique`——pointId 每次扫描重新生成不能做键）；基线报告内存（同进程
+  复测）后台账（历史扫描常态）两级回落。
+- 产物：报告目录 `diff.json`（fixed/new/remaining 完整明细）+ `manifest.json` 新增 `diff`
+  字段（基线 id/新增计数/裁决原因，机器消费）。`--diff-base auto` 按**归一化目标 URL**
+  （去 hash）在台账 index（新→旧）里找最近一次同目标扫描，自动排除本次自身。
+- 无 `--diff-base` 时行为一字不变（`risky ? 2 : 0` 规则原样）。
+
+#### ③ 验证口径与顺手修正
+
+- 新增 `tests/diffGate.test.js` 9 条：normalizeTarget / auto 基线解析（排除自身、取最近）/
+  显式 scanId / 自身为基线拒绝 / 新增判红列点位 / 存量放行 / 不可信 exit 1 / **台账集成**
+  （临时 `SQLI_LEDGER_DIR`：同目标复扫 exit 0 → 目标新增 q 参数注入 exit 2 → 换目标无基线
+  exit 1 路径）。
+- 顺手修正 `docs/CI-集成.md` 一条陈旧断言：可信度边界表写「官方 GitHub Action ❌ 尚无」，
+  而 `action.yml` 早已在仓库根（与 README 矛盾）——按现状改为 ✅ 并留修正说明。
+- 未做（诚实边界）：workflow YAML 示例仍未在真实 Actions 端到端跑过（该行保持 ⚠️ 如实标注）；
+  `-m` 批量模式与 `--diff-base` 的组合未定义语义（批量逐目标各自对基线 diff 属后续批次）。
+
 ### 2026-10-11 批次 D44 · 主动 WAF 探测升级为 wafw00f 式多向量差分（+XSS/LFI 向量 / Server 头漂移 / 连接级阻断识别）+ --active-waf-probe CLI 入口
 
 **一句话**：吸收路线图第 5 条。勘缝发现 `WafIdentifier.activeProbe` 本就是 wafw00f 式差分

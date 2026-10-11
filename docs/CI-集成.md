@@ -95,20 +95,54 @@ SARIF 解析器、或任何支持 SARIF 的聚合平台。机器可读的完整�
 node .sqli-scanner/scripts/one-click-scan.mjs -m targets.txt -F json,sarif -o scan-out
 ```
 
-## 五、可信度边界（诚实标注，勿外推）
+## 五、diff-aware 门禁（只对新增发现判红，[D45]）
+
+安全 CI 被弃用的第一原因是**存量噪声**：基线里那几个已知漏洞每天把 job 打红，第三天所有人
+无脑点重试，第六天有人把 job 禁了。`--diff-base` 给出门禁的 semgrep 语义——**只对新增发现判红**：
+
+```bash
+# 首次：建立基线（同目标 URL，正常退出码语义）
+node scripts/one-click-scan.mjs -u "http://target/page?id=1" -F json
+
+# 之后每次（PR/定时）：与台账中最近一次同目标扫描自动比对
+node scripts/one-click-scan.mjs -u "http://target/page?id=1" --diff-base auto
+#   exit 2 = 有新增发现（本次 PR/环境引入的新注入点，diff.json 里有明细）
+#   exit 0 = 无新增（存量仍在 —— 已暴露在基线中，不阻塞；diff.json 里可看 remaining）
+#   exit 1 = 无法认证：本次结论不可信（validity，如会话失效/签名被拒）或找不到基线
+```
+
+语义细则（与 [`services/diffGate.js`](../server/src/services/diffGate.js) 一致，单测钉死）：
+
+| 情形 | 退出码 | 理由 |
+|---|---|---|
+| 新增发现（基线没有的 `location:param:technique`） | `2` | 本次变更引入的新风险，必须人工处理 |
+| 仅存量仍在（`remaining`） | `0` | 已暴露在基线中，PR 没有引入新风险（`report.json` 全量照常交付） |
+| 本次结论不可信（`summary.validity.reliable=false`） | `1` | 门禁拒绝认证「无新增」——verdict=inconclusive ≠ 未检出，**不判红也不假绿** |
+| 找不到基线（`auto` 无同目标历史 / 显式 scanId 不存在） | `1` | 拒绝在无基线时认证，宁可拒绝也不假绿 |
+
+产出：报告目录内 `diff.json`（完整 diff：fixed/new/remaining 明细）+ `manifest.json` 的
+`diff` 字段（新增计数 + 裁决原因，机器消费）。显式指定基线：`--diff-base <scanId>`；
+基线必须来自台账（`cli.js ledger list` 可查）。diff 计算与 REST `GET /api/scan/:id/diff`
+**同一模块**（`engine/scanDiff.js`，比对键 `location:param:technique`——pointId 每次扫描
+重新生成，不能做键）。
+
+## 六、可信度边界（诚实标注，勿外推）
 
 | 断言 | 状态 |
 |---|---|
-| 退出码 `0/1/2` 语义 | ✅ 已实现并本机验证（`cli.js:690-691`，README 首屏有真机实测样例） |
-| `report.sarif`（SARIF 2.1.0） | ✅ 已实现（`ReportGenerator.js:430`），`--formats` 含 `sarif` 时产出 |
+| 退出码 `0/1/2` 语义 | ✅ 已实现并本机验证（README 首屏有真机实测样例） |
+| `report.sarif`（SARIF 2.1.0） | ✅ 已实现（`ReportGenerator.js`），`--formats` 含 `sarif` 时产出 |
 | `manifest.json` 含授权声明 | ✅ 已实现（README「结构化漏洞报告」段） |
+| diff 门禁（`--diff-base`） | ✅ 已实现（`diffGate.js` + one-click 接线，`tests/diffGate.test.js` 9 条钉语义：新增判红/存量放行/不可信 exit 1/无基线 exit 1） |
 | 上面的 **workflow YAML 本身** | ⚠️ **示例，未在本仓 CI 里端到端跑过**。它引用的每个开关都在 CLI 开关表内，但"Actions 真跑通"没有证据 |
-| 官方 GitHub Action（`action.yml`） | ❌ **尚无**。当前必须 checkout 本仓再 `node server/bin/cli.js`。这是"CI 就绪"定位上的**已知空位**，也是后续候选 |
+| 官方 GitHub Action（`action.yml`） | ✅ 仓库根 `action.yml`（composite action，见本文档第二节的引用方式与所需权限） |
 
 > 纪律说明：本仓反复栽在"把声明当真值"上（见 `竞品对标分析-2026-10-03.md` 的两条自我更正）。
 > 所以这里把"已实现"和"未验证"分开列 —— 前者给源码位置，后者直说没跑过，不拿示例冒充能力。
+> （[D45] 修正：原表中「官方 GitHub Action ❌ 尚无」为陈旧信息——`action.yml` 已在仓库根，
+> 与 README「官方 GitHub Action」行矛盾，已按现状改正。）
 
-## 六、复现命令
+## 七、复现命令
 
 ```bash
 # 本地验退出码（需一个授权目标）
@@ -118,6 +152,12 @@ echo $?   # 2 = 发现 High
 # 确认 sarif 产出
 ls reports/*/report.sarif
 
+# diff 门禁复现（第二次同目标扫描应 exit 0 —— 无新增）
+node scripts/one-click-scan.mjs -u "http://127.0.0.1:8130/items?cat=1" --diff-base auto
+echo $?   # 0 = 无新增；2 = 有新增（对照 reports/*/diff.json）
+ls reports/*/diff.json
+
 # 确认 CLI 开关存在（workflow 示例引用的都应在内）
 node server/bin/cli.js --help | grep -E -- '-F|--formats|--scope'
+node scripts/one-click-scan.mjs --help | grep -E -- '--diff-base'
 ```
