@@ -1792,24 +1792,29 @@ services:
   入参本来就合法就直接摘；非法值用 `@ts-expect-error`（注意它只管**紧挨的下一行**，
   且多余属性检查只作用于字面量直接进形参那种写法）。
 
-### 14. 桌面导出/导入的授权范围（⚠️ **需要一次决策，D28 只修了一半**）
+### 14. 桌面导出/导入的授权范围 —— ✅ **已决策并修完（D49，决策 = (a) `$DOWNLOAD/**`）**
 - **已修（D28）**：`@tauri-apps/plugin-dialog` / `plugin-fs` 从没进过 `package.json`，
   而"变量形式动态导入 + `as any`"把 Vite、TS、依赖表三层防护同时废掉 ⇒ 桌面「导出报告」
   「导入请求文件」两条功能**发货即坏**（旧产物里能原样 grep 到裸 `import("@tauri-apps/plugin-dialog")`）。
   现已入依赖、改回字面量导入、摘掉 3 处 `as any`，重新构建后 IPC 名被真正打进 chunk。
-- **未修（要你定）**：`src-tauri/gen/schemas/acl-manifests.json` 里 `fs.default_permission` 只给
-  **应用目录的读**；而对话框返回的是用户任选的绝对路径（`D:\reports\x.md`、`~/Downloads\x.txt`）
-  ⇒ `writeTextFile` 仍会被 capability 范围拒。三个候选：
-  - (a) 加 `fs:allow-write-text-file` + scope `$DOWNLOAD/**`（最小可用，用户默认就在下载目录找）；
-  - (b) 只放 `$HOME/**`（方便但等于把整个家目录交给壳）；
-  - (c) **不放开范围**：导出固定落应用数据目录，对话框只当"另存提示"，或在 Rust 侧加一条
-        写文件的 command（把写权限收进自己的命令而不是交给前端任意路径）。
-  我的倾向：(a) 或 (c)。(b) 的问题是把"选一个文件"扩成"家目录任意写"。
-- **验证口径**：`server/tests/tauriPluginWiring.guard.test.js` 第 ④ 条已经把这笔账钉住
-  （`KNOWN_UNGRANTED` 里登记着 `writeTextFile` / `readTextFile`）。**真去 capabilities 加上
-  对应权限后，那条判据会红着要求你把豁免删掉** —— 欠账不会因为没人记得而悄悄还在。
-  定完之后需要一次真壳验证：本机跑 `npm run tauri dev` 点一次导出、一次导入
-  （Web 侧走桩与浏览器下载分支，测不到这条路径，这是已知盲区）。
+- ✅ **已决策 + 已修（D49）**：选 **(a)** —— `src-tauri/capabilities/default.json` 给
+  `fs:allow-write-text-file` / `fs:allow-read-text-file` 各登记 `allow: [{ "path": "$DOWNLOAD/**" }]`。
+  四个不确定点都是读本机 `~/.cargo/registry` 里的**真源码**定的，不是靠文档记忆：
+  - `tauri-2.11.5/src/scope/fs.rs:419` `is_allowed()` = `allowed_patterns.any(matches)` ⇒
+    **空 allow 列表恒 false** ⇒ 只加裸标识 `"fs:allow-…"` 等于**什么都没放开**，必须写**对象形态**；
+  - `tauri-utils-2.9.3/src/acl/resolved.rs:313` `commands.allow.extend(...)` 无条件执行 ⇒
+    对象形态**既授命令又加 scope**，不必再重复一遍裸标识；
+  - `fs.rs:471` 对**不存在**的路径不 canonicalize（原样返回）⇒ 导出**新文件**照样过匹配；
+  - `tauri-plugin-fs-2.5.2/src/commands.rs:1122-1136` 无 options 时默认 `create: true` ⇒ **不用**额外授 `fs:allow-create`。
+- ✅ **守卫升级（同批）**：`server/tests/tauriPluginWiring.guard.test.js` 第 ④ 条从"标识在不在"
+  扩成"**标识 + 范围**"三查，并新增 `EXPECTED_FS_SCOPE = '$DOWNLOAD/**'` —— 范围本身就是决策，
+  谁把它换成 `$HOME/**` 会红着要求回来改常量并同步 TODO/CHANGELOG。`KNOWN_UNGRANTED` 已**清空**（豁免销账）。
+  缺陷注入四发全中：退回 D28 / **只加裸标识不给 allow**（旧判据 `caps.has(perm)` 恰好看不出这个，会绿）/ 豁免不删 / 偷改范围 ⇒ 逐个红；还原后 5/5 绿。
+- ⚠️ **残留限制（范围决策的代价，未修）**：`readTextFile` 同样只放开 `$DOWNLOAD/**` ⇒ 导入请求文件
+  **只能从下载目录选**，用户在桌面/项目目录里选 `.req` 仍会被 scope 拒。要覆盖任意位置 ⇒ 升级到 (b) `$HOME/**`
+  （属范围变更，按守卫要求得连 `EXPECTED_FS_SCOPE` 一起改）。另外越界时是裸抛 `forbidden path: …`，UI 无专门提示语（未做友好化）。
+- ⚠️ **真壳验证仍欠**：`npm run tauri dev` 点一次导出、一次导入 —— 本机无 Tauri 桌面构建/运行环境
+  （且"本机不起常驻/后台进程"是硬约束）⇒ 目前只有**源码级 + 守卫级**证据，**没有真机往返证据**，不许冒充已验。
 
 ### 15. 真机靶场跑出来的三笔欠账（⚠️ 2026-10-09 D29 开，均需决策或定位）
 背景：本轮把 run-all 能跑的 27 套真靶场跑满（25 绿 / 2 确定性红），下列三笔是跑出来的账。

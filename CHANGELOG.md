@@ -4,6 +4,58 @@
 
 ## [Unreleased]
 
+### 2026-10-12 批次 D49 · 桌面导出/导入授权范围：按决策 (a) 放开 `$DOWNLOAD/**`，并堵掉守卫的「只看标识」假绿（TODO 第 14 条）
+
+**一句话**：D28 只修了一半 —— 插件包进了依赖，但 `capabilities` 只给 `fs:default`（应用目录**只读**），
+保存/打开对话框返回的**任意绝对路径**仍会被 scope 拒 ⇒ 导出/导入「发货即坏」。
+本次按 TODO 第 14 条决策 **(a)** 给 `writeTextFile` / `readTextFile` 各登记 `$DOWNLOAD/**`；
+同时把守卫从「标识在不在」升级为「标识 + 范围」—— 因为旧判据存在一种**必然绿但根本没修好**的形态。
+
+#### ① 先拿 Rust 源码把四个不确定点定死（不靠猜、不靠文档记忆）
+
+本机 `~/.cargo/registry` 里有真源码，逐条读到实现：
+
+| 不确定点 | 源码依据 | 结论 |
+|---|---|---|
+| 只写裸标识 `"fs:allow-write-text-file"`，是"全放行"还是"全拒绝"？ | `tauri-2.11.5/src/scope/fs.rs:419` `is_allowed()` 本体 = `allowed_patterns.iter().any(matches)` | **空 allow 列表恒 false ⇒ 全拒绝**。所以裸标识既不是放行、也不是修好 |
+| 对象形态 `{identifier, allow}` 是"只加 scope"还是"也授命令"？ | `tauri-utils-2.9.3/src/acl/resolved.rs:281-314`：`commands.allow.extend(...)` 在第 313 行**无条件**执行 | **既授命令又加 scope** ⇒ 写对象形态一条就够，不必再重复裸标识 |
+| 导出的是**新文件**（原本不存在），scope 匹配会不会因 canonicalize 失败而拒？ | `tauri-2.11.5/src/scope/fs.rs:471` `try_resolve_symlink_and_canonicalize()` 对不存在路径**原样返回** | 不会 ⇒ 新文件同样过匹配 |
+| 写新文件要不要额外授 `fs:allow-create`？ | `tauri-plugin-fs-2.5.2/src/commands.rs:1122-1136`：`write_file_inner` 无 options 时默认 `create: true` | 不需要 |
+
+第一行是本批最值钱的一条：它说明**"权限看着给了"与"功能真的好了"是两件事**，
+而旧判据恰好只测前者。
+
+#### ② 改动
+
+- `src-tauri/capabilities/default.json`：新增两条对象形态权限，各带 `allow: [{ "path": "$DOWNLOAD/**" }]`。
+- `server/tests/tauriPluginWiring.guard.test.js`：
+  - `KNOWN_UNGRANTED` **清空**（D28 那两条豁免登记销账 —— TODO 原文要求"还掉就必须删登记"）；
+  - 抽出 `parsePermissions()` 纯函数（判据与自证共用），把"裸字符串 vs 对象形态"区分开；
+  - ④ 从"标识在不在"扩成三查：没授且没登记 ⇒ 红；授了还留豁免 ⇒ 红；**授了却没 allow 路径 ⇒ 红**；
+  - 新增 `EXPECTED_FS_SCOPE = '$DOWNLOAD/**'`：范围本身就是决策，谁把它换成 `$HOME/**` 必须回来改常量并同步文档。
+
+#### ③ 缺陷注入复验（四个注入点，逐个真红过）
+
+| 注入 | 预期红法 | 实测 |
+|---|---|---|
+| A 退回 D28（只有 `fs:default`） | "没授、也没登记欠账" | ④ 红，4 pass / 1 fail ✓ |
+| B **只加裸字符串、不给 allow** | "授了命令却没登记任何 allow 路径" | ④ 红 ✓（**旧判据只有 `caps.has(perm)` 一行，恰好看不出这个 ⇒ 会绿**） |
+| C 权限已授但豁免没删 | "欠账已还，删掉登记" | ④ 红 ✓ |
+| D 范围偷偷改成 `$HOME/**` | "与已决策的 $DOWNLOAD/** 不一致" | ④ 红 ✓ |
+
+还原（用备份 `cp`，不反向 replace_all）后复跑 5/5 绿。
+
+#### ④ 未验证项与残留限制（如实标注）
+
+- **真壳验证本机做不了**：TODO 第 14 条要求"跑 `npm run tauri dev` 点一次导出、一次导入"。
+  本机不具备 Tauri 桌面构建/运行环境（且"本机不起常驻进程"是硬约束）⇒ 本批只有**源码级 + 守卫级**证据，
+  **没有真机往返证据**。这笔账要等有桌面环境时补，不冒充已验。
+- **残留限制**：`readTextFile` 同样只放开 `$DOWNLOAD/**` ⇒ 导入请求文件**只能从下载目录选**；
+  用户在桌面/项目目录里选 `.req` 仍会被 scope 拒。要覆盖任意位置需升级到决策 (b) `$HOME/**` ——
+  那是范围变更，按守卫要求得连 `EXPECTED_FS_SCOPE` 一起改。
+- **失败形态未做友好化**：选到范围外的路径时 `writeTextFile` / `readTextFile` 会直接抛
+  `forbidden path: …`（debug 构建）/ `Error::PathForbidden`（release），UI 目前没有专门提示语。
+
 ### 2026-10-12 批次 D48 · 沙箱「端口亮着 ≠ 本沙箱在跑」：修掉 udf-lab 周期性跑挂的假绿（TODO T 条）
 
 **一句话**：`do_start()` 原先只判 `_port_open(3308)` ⇒ 端口被任何进程占用都返回「已在运行」，

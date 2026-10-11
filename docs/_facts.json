@@ -5,7 +5,7 @@
     "frontend.tests": "vitest 用例总数（含失败）",
     "server.tests": "node:test 用例总数（含 skip/fail）"
   },
-  "generatedAt": "2026-10-11T18:45:26+00:00",
+  "generatedAt": "2026-10-11T19:10:17+00:00",
   "coverageCollected": true,
   "frontend": {
     "files": 64,
@@ -15,7 +15,7 @@
     "skipped": 0,
     "coverage": {
       "statements": 94.69,
-      "branches": 84.48,
+      "branches": 84.49,
       "functions": 83.28,
       "lines": 94.69
     },
@@ -32,8 +32,8 @@
     "fail": 0,
     "skip": 4,
     "coverage": {
-      "lines": 93.04,
-      "branches": 81.72,
+      "lines": 92.95,
+      "branches": 81.68,
       "functions": 84.71
     },
     "thresholds": {
