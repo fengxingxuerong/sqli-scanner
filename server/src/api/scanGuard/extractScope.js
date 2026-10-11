@@ -22,6 +22,8 @@ export const EXTRACT_SCOPE_MODES = new Set([
   'dbs', 'tables', 'columns', 'dump', 'dumpAll', 'commonTables', 'commonColumns', 'search',
   'currentDb', 'currentUser', 'hostname', 'isDba', 'users', 'passwords',
   'schema', 'privileges', 'roles', 'count',
+  // [D46 2026-10-11 对标 sqlmap -b/--statements/--procs] 运维侦察三模式
+  'banner', 'statements', 'procs',
 ]);
 
 /** 字符串数组：去空、去重、拒控制字符、限长、限数量（超限截断而非整体丢弃） */
@@ -59,6 +61,14 @@ export function sanitizeExtractScope(raw) {
     const kw = raw.keyword.trim();
     if (kw && kw.length <= 128 && !/[\u0000-\u001f\u007f]/.test(kw)) out.keyword = kw;
   }
+  // [D46] -U 用户过滤（引擎 extractScope 客户端侧过滤 users/passwords 聚合串；形状同 keyword）
+  if (typeof raw.user === 'string') {
+    const u = raw.user.trim();
+    if (u && u.length <= 128 && !/[\u0000-\u001f\u007f]/.test(u)) out.user = u;
+  }
+  // [D46] --exclude 库排除（标识符清单，与 dbs 同一 sanitize 闸）
+  const excludeDbs = sanitizeIdentList(raw.excludeDbs, 16);
+  if (excludeDbs) out.excludeDbs = excludeDbs;
   // 系统库过滤开关：默认 true（与 CLI buildExtractScope 的 ex() 一致）
   if (typeof raw.excludeSysdbs === 'boolean') out.excludeSysdbs = raw.excludeSysdbs;
   return out;

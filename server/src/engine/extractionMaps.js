@@ -7,7 +7,7 @@
 //   schema/privileges/roles）· searchQueries（--search/--count-where）
 //   · sysQueriesVersioned（resolveSysQueries 版本分支 + MSSQL <2017 降级）
 // =====================================================================
-export { SYS_QUERIES } from './extraction/sysQueries.js';
+export { SYS_QUERIES, STATEMENTS_QUERY, PROCS_QUERY } from './extraction/sysQueries.js';
 export { LEN_FN, SUB_FN, ASCII_FN } from './extraction/blindFns.js';
 export { VERSION_EXPR, TIME_COND, CURRENT_DB_EXPR, CURRENT_USER_EXPR } from './extraction/scalarExprs.js';
 export { HOSTNAME_QUERY, ISDBA_QUERY, SCHEMA_QUERY, PRIVILEGES_QUERY, ROLES_QUERY } from './extraction/identityQueries.js';

@@ -51,6 +51,9 @@ import {
   CURRENT_USER_EXPR,
   SEARCH_COLUMNS_QUERY, SEARCH_TABLES_QUERY, COUNT_WHERE_QUERY,
   resolveSysQueries,
+  STATEMENTS_QUERY, PROCS_QUERY,
+  // [D46] 服务器横幅（--banner）：版本表达式与盲注指纹同源（scalarExprs.js VERSION_EXPR）
+  VERSION_EXPR,
 } from './extractionMaps.js';
 // [大文件拆分 2026-09-20] 拖库结果格式化（纯函数，无 this/无 I/O）外移至独立模块
 //   dumpFormat.js：formatDumpData / formatCsv / escapeCsvCell / formatSql / formatHtml。
@@ -545,6 +548,30 @@ export class Extractor {
   async enumerateIsDba(ctx) {
     const db = resolveDbms(ctx.dbms);
     return this._enumScalar(ctx, ISDBA_QUERY[db], { fallback: null });
+  }
+
+  // [D46 2026-10-11 对标 sqlmap -b] 服务器横幅：版本表达式与盲注指纹同源（VERSION_EXPR）。
+  // 键缺失/null（SQLite 无 version() 标量位之外的结构性差异）→ null（诚实降级，不投无效 SQL）。
+  async enumerateBanner(ctx) {
+    const edb = resolveDbms(ctx.dbms);
+    const expr = Object.prototype.hasOwnProperty.call(VERSION_EXPR, edb) ? VERSION_EXPR[edb] : null;
+    return this._enumScalar(ctx, expr, { fallback: null });
+  }
+
+  // [D46 对标 sqlmap --statements] 当前正在执行的 SQL 语句（应用侧侦察：第二注入点/表名）。
+  // 方言目录见 sysQueries.js STATEMENTS_QUERY（全部带 LIMIT 硬上界；null=结构性不支持）。
+  async enumerateStatements(ctx) {
+    const edb = resolveDbms(ctx.dbms);
+    const q = Object.prototype.hasOwnProperty.call(STATEMENTS_QUERY, edb) ? STATEMENTS_QUERY[edb] : null;
+    return this._enumScalar(ctx, q, { fallback: null });
+  }
+
+  // [D46 对标 sqlmap --procs] 存储过程/函数清单（提权侦察 + 可注入过程入口）。
+  // 方言目录见 sysQueries.js PROCS_QUERY（同样硬上界 100；null=结构性不支持）。
+  async enumerateProcs(ctx) {
+    const edb = resolveDbms(ctx.dbms);
+    const q = Object.prototype.hasOwnProperty.call(PROCS_QUERY, edb) ? PROCS_QUERY[edb] : null;
+    return this._enumScalar(ctx, q, { fallback: null });
   }
 
   // 枚举 schema（表结构/列定义，对标 sqlmap --schema）：

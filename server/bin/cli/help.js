@@ -141,6 +141,20 @@ export function printHelp() {
   --count -D <db> -T <t>    表行数统计（对标 sqlmap --count）
   --search <keyword>        按关键字搜索包含该词的库/表/列名（对标 sqlmap --search；自动限 3 库×10 表防请求爆炸）
   --exclude-sysdbs          枚举时排除系统库（默认 true；--no-exclude-sysdbs 关闭）
+  -b, --banner              数据库横幅/版本串（[D46] 对标 sqlmap -b）：方言版本表达式与盲注指纹
+                            同源；不支持的结构性方言诚实返回 null
+  --statements              当前正在执行的 SQL 语句（[D46] 对标 sqlmap --statements）：应用侧侦察
+                            （第二注入点/表名）。MySQL processlist / PG pg_stat_activity /
+                            MSSQL dm_exec_requests / Oracle v$sql，硬上界 20 条；
+                            其余方言结构性不支持（诚实降级）
+  --procs                   存储过程/函数清单（[D46] 对标 sqlmap --procs）：提权侦察 + 可注入
+                            过程入口。information_schema.ROUTINES / pg_proc /
+                            INFORMATION_SCHEMA.ROUTINES / ALL_OBJECTS，硬上界 100 条
+  -U, --user <name>         用户过滤（[D46] 对标 sqlmap -U）：仅 --users/--passwords 模式生效，
+                            从聚合结果中筛出该用户的条目（客户端侧过滤，大小写不敏感）。
+                            --privileges/--roles 只覆盖当前用户，-U 对它们不适用（显式报错）
+  --exclude <db,db>         枚举时排除指定库（[D46] 对标 sqlmap --exclude，最多 16 个）：
+                            跳过已知巨大的/噪声库；与 --exclude-sysdbs 正交（点名排除优先）
    --start <n>               拖库起始行偏移（对标 sqlmap --start，0 起）
    --stop <n>                拖库结束行号（对标 sqlmap --stop，绝对行号，0=不限）
    --safe-url <url>          保活 URL：扫描期间定期 GET 维持会话（对标 sqlmap --safe-url）

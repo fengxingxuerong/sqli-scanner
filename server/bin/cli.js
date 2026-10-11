@@ -896,6 +896,6 @@ if (invokedDirectly) {
 }
 
 // 导出供单测使用（仍在 cli.js 定义的符号；args 族的再导出见文件顶部）
-export { buildConfig, buildExtractScope, validateEnumArgs, printExtractView, runSingleScan, buildInjectionTargets, resolveBodyChannel };
+export { buildConfig, isEnumMode, buildExtractScope, validateEnumArgs, printExtractView, runSingleScan, buildInjectionTargets, resolveBodyChannel };
 // 注：runExploit 已在定义处 `export async function` 导出，**不可**在此再列一次
 // （重复导出会被 module-loadable 门禁拦下：它会让整个 CLI 无法加载）。

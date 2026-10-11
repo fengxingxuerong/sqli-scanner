@@ -71,7 +71,13 @@ jSQL 多比特 ≈ 本仓 `blindBitwise` 位平面提取（8 位并行，MySQL/T
 12. ~~`--randomize <params>`~~ —— ✅ **D42**（buildInjectionRequest 出站随机化；JSON/XML body 不覆盖已如实标注）。
 13. ~~`--second-req <file>`~~ —— ✅ **D42**（secondOrder.triggerRequest 全链路 + SSRF 同级校验）。
 14. ~~`--dump-format` 接线~~ —— ✅ **D42**（一键扫描产物层接通 `dump.<ext>`；报告内嵌区不变）。
-15. `-b/--banner`、`--statements`、`--procs`、`-U <user>`、`--exclude <db>`：枚举面补齐（方言查询目录在 `extraction/sysQueries.js` 已有底子）。每条代价 S-M，价值 Med。
+15. ~~`-b/--banner`、`--statements`、`--procs`、`-U <user>`、`--exclude <db>`：枚举面补齐~~ —— ✅ **D46**：
+    三模式方言目录在 `extraction/sysQueries.js`（STATEMENTS_QUERY/PROCS_QUERY，全部硬上界
+    20/100，SQLite 等结构性不支持方**诚实 null** 不回落 MySQL 语法）；`-U` 对 users/passwords
+    做客户端聚合串过滤（双口径：用户段或完整 user@host 均命中；--privileges/--roles 只覆盖
+    当前用户，-U 显式报错）；`--exclude` 与 excludeSysdbs 正交（点名排除优先）。钉在
+    `tests/enumSurface.test.js`（9 条）。**诚实边界**：--statements/--procs 未在真机逐库验证
+    （查询形态沿用 SYS_QUERIES 同族聚合惯用法，真机验证归 real-mysql-lab 下一轮）。
 16. `--chunked`（Transfer-Encoding 分块发 body，WAF 不缓冲不检的真向量）、`--safe-post/--safe-req`（POST 保活）、`--load-cookies/--live-cookies`（会话接力）、`--crawl-exclude <re>`、`--postprocess <file.js>`（响应侧解密，与 `--request-script` 对偶）：各自代价 S，价值 Med（`--postprocess` High，加密响应目标现状是静默比对失败）。
 
 **工程化族（nuclei/dalfox/ZAP/semgrep/trivy 派）**

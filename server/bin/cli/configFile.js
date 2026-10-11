@@ -56,6 +56,8 @@ export function buildKnownArgKeys(parseArgsFn) {
     'secondReq', 'ignoreCode', 'randomize', 'dumpFormat', 'extractVerify',
     // —— [D44] 主动 WAF 探测 ——
     'activeWafProbe',
+    // —— [D46] 运维侦察枚举（-b/--statements/--procs）+ -U/--exclude 过滤 ——
+    'banner', 'statements', 'procs', 'user', 'exclude',
   ];
   const known = new Set(Object.keys(parseArgsFn([])));
   for (const k of dyn) known.add(k);

