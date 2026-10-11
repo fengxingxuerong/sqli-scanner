@@ -36,6 +36,27 @@
 （每次 push 都被上游 test-server 那条红连带跳过）。**只有推送且 lint/test-server 转绿后才有 CI 首跑**，
 那才是 D39 真正的验收点。
 
+### ⚠️ `test-server` 是整条 CI 的单点瓶颈（2026-10-12 静态排查得出）
+
+`acceptance` / `e2e-self-contained` / `release-smoke` / `sidecar-build` / `docker` / `audit`
+**六个 job 全部 `needs: [test-server]`**（其中前两个还叠加 `if != schedule`）。⇒ 后果：
+
+1. `test-server` 一红 ⇒ **6 个下游 job 全部静默 skipped**，run 只报失败、看不出"半个门禁没跑"；
+2. 实测从 run #200（D30 前后）到 #206，`test-server` 持续红 ⇒ 这 6 个 job **连续多轮从未真跑**
+   （`acceptance` 里就含 D39 新接入的两套真靶场）；
+3. 夜跑（schedule）里它们又因 `if` 跳过，只剩两个外部裁判 ⇒ **run 报 success**
+   ⇒ **CI 徽章绿 ≠ 核心门禁绿**。读徽章必须看 job 明细。
+
+**解锁顺序**：修 `test-server` → 下游 6 job 才会真跑 → 才有 acceptance / e2e 的真证据。
+
+### D40 的修复已静态可证（无需跑 CI）
+
+`server/tests/lintScope.guard.test.js` 已改为**从 `eslint.config.js` 的源码文本静态解析 `ignores`**
+（该文件注释里写明根因：CI 的 `test-server` job 只装 `server/node_modules`，root 专属的
+`@eslint/js` / `typescript-eslint` / `eslint-plugin-react-hooks` / `globals` 一个都没装 ⇒
+从 server 侧 `import()` 根配置必然 `ERR_MODULE_NOT_FOUND`）。文件内已无对根 `eslint.config.js`
+的动态导入 ⇒ **`@eslint/js` 那条红的根因已消除**，推送后应转绿（仍待 CI 复验）。
+
 ### 推送前的动作序列（顺序不可跳）
 
 1. `node scripts/facts-sync.mjs --refresh --coverage`（一批只 refresh 一次）
@@ -1285,7 +1306,7 @@ process.exit(0);          // ← 漏检 / 误报 / must 未命中，一律退 0
 |---|---|---|
 | `lint` | ① 指纹门禁没做 **EOL 规范化**：本机 CRLF / CI LF → 69 文件假报"改动"（同 `git archive` 假阳性那一课，踩了两次）；② 修完指纹后仍红 → **Tauri 在 Linux 编译缺 GTK 系统库**（glib-sys 找不到 glib-2.0.pc → clippy exit 101），本地 Windows 是另一套依赖链 | ✅ 已修（hashFile 规范化 `b64e772` + apt 装 Tauri 依赖），待下轮验证 |
 | `acceptance` | **三个套件各自独立**（靠 `last-failure-*.log` 现场定位）：<br>① **CRS 保真度** = `ERR_MODULE_NOT_FOUND: Cannot find package 'yaml'` —— acceptance job 只跑 `cd server && npm ci`，而 `yaml` 在 **root 的 devDependencies**；本机 node_modules 里早就有它（隐式依赖）→ **已修** `0fbbfaf`<br>② **fileWrite** = 落盘路径写死 Windows（`remotePath=D:/tmp/...`、`wrote:true` 但 `verified:false`）—— **✅ 已修 2026-09-21（`5e5aa2b`）**：兜底改 `tmpdir()` 派生 + CI docker 挂载卷 + `FILE_WRITE_DIR`<br>③ **fileRead** = 隔离沙箱 `datadir 未初始化` → BLOCKED（判据语义正确）→ **✅ 已决策 2026-09-22**：判 **BLOCKED（进 failed）**，既非 SKIP 也非 FAIL。理由：① 不该 SKIP —— SKIP 不进 failed，等于让这项能力的覆盖**静默归零**（本仓最贵的一类错）；② 不该 FAIL —— 一条断言都没执行，记 FAIL 会把下一个人引去查产品代码（§G 重演）；③ BLOCKED 与 FAIL 一样非零退出，区别只在标签。同时把判据抽成可单测的 `e2e/lib/suiteVerdict.mjs`，并**扩了两种漏检形态**（详见 §Y-b） |
-| `e2e-self-contained` | redteam-lab 跑 90.6s 失败、multi-engine-lab 0.4s 秒败（疑似 CI 容器缺依赖） | ⏳ 待查 |
+| `e2e-self-contained` | redteam-lab 跑 90.6s 失败、multi-engine-lab 0.4s 秒败（疑似 CI 容器缺依赖） | ⏳ 待查 —— **来源澄清（2026-10-12）**：这条来自 **CI 首跑**（run `35513609939` / `ee14dd5`，2026-09-20），不是本机记录；此后该 job 因 `needs:[test-server]` 被上游红**连带 skipped，一次都没再真跑过** ⇒ 只有推送并使 test-server 转绿后才会复跑，届时才能判断这条是否还红（见本节上方 2026-10-12 新增节） |
 
 **过程教训（两条）**：
 1. 我的监视脚本把「jobs 列表为空」（run 还在 queued 的正常中间态）当成了「全部完成」
