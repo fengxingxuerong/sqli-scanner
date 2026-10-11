@@ -218,9 +218,10 @@ test('summary 契约字段齐全（前端/报告按固定字段名消费）', ()
   //   neverAuthenticated / expiredMidScan）——「整轮没进业务逻辑」与「进去后出不来」的数字
   //   必须与结论同源进报告，不能只活在 reason 字符串里（否则报告读者无法复核判据）。
   // 未启用时也必须存在（全 0/false）—— 契约字段随配置有无而增减，消费方就得每次判空。
+  // [D42] ignoredHits：--ignore-code 命中数，同样固定存在（未配置恒 0）。
   assert.deepEqual(
     Object.keys(s.counts).sort(),
-    ['authChallengeHits', 'authChallengeStreak', 'authLostHits', 'blockHits', 'expiredMidScan', 'failStreak', 'injection5xx', 'netErrPoints', 'neverAuthenticated', 'nonChallengeHits', 'refresh', 'serverErr', 'total', 'transform'].sort()
+    ['authChallengeHits', 'authChallengeStreak', 'authLostHits', 'blockHits', 'expiredMidScan', 'failStreak', 'ignoredHits', 'injection5xx', 'netErrPoints', 'neverAuthenticated', 'nonChallengeHits', 'refresh', 'serverErr', 'total', 'transform'].sort()
   );
   assert.deepEqual(
     Object.keys(s.counts.transform).sort(),

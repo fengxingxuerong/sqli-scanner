@@ -78,6 +78,8 @@ export async function runScanLoop(sm, scanId) {
     const refreshOn = refreshActiveForScan(scanId);
     const validity = new ScanValidityGuard({
       ...validityCfg,
+      // [D42 2026-10-11 对标 sqlmap --ignore-code] 忽略状态码集（顶层 config 键，非 scanValidity 组内）
+      ignoreCodes: Array.isArray(target.config?.ignoreCodes) ? target.config.ignoreCodes : [],
       transformActive: transformOn,
       refreshActive: refreshOn,
     });

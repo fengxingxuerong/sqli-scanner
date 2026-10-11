@@ -31,6 +31,8 @@ import { fileURLToPath } from 'node:url';
 
 import { ScanManager } from '../server/src/engine/ScanManager.js';
 import { ReportGenerator } from '../server/src/services/ReportGenerator.js';
+// [D42 2026-10-11 对标 sqlmap --dump-format] 拖库数据独立产物格式化（27 条既有单测钉行为）
+import { formatDumpData } from '../server/src/engine/dumpFormat.js';
 import { cvssFor } from '../server/src/services/reportDelivery.js';
 import { VULN_TAXONOMY } from '../server/src/services/vulnTaxonomy.js';
 import { parseScope } from '../server/src/core/scopeGuard.js';
@@ -114,6 +116,10 @@ function printHelp() {
   -p, --test-param <p1,p2>     只测指定参数（对标 sqlmap -p；复测/CI 定向回归）
       --param-exclude <regex>  按正则排除参数（对标 sqlmap --param-exclude）
       --param-filter <places>  按位置筛选（url/body/header/cookie/path，对标 sqlmap --param-filter）
+      --second-req <file>      二阶触发页整请求文件（对标 sqlmap --second-req；POST/头/Cookie 触发页）
+      --ignore-code <codes>    忽略指定 HTTP 错误码（对标 sqlmap --ignore-code）
+      --randomize <params>     注入请求随机化指定参数值（对标 sqlmap --randomize，防锁定）
+      --dump-format <fmt>      拖库数据独立产物格式 csv/sql/html/json（对标 sqlmap --dump-format）
       --config <file.json>     从配置档案预载参数（argv > 档案 > 默认；未知键拒绝启动）
       --save-config <file>     把本次非默认参数增量落盘，下次 --config 复扫
       --dump / --dbs ...       数据提取（显式 opt-in，对标 sqlmap）
@@ -268,6 +274,25 @@ async function main() {
     for (const [name, render] of renderers[fmt]) {
       writeFileSync(join(outDir, name), render(), 'utf-8');
       files.push(name);
+    }
+  }
+
+  // [D42 2026-10-11 对标 sqlmap --dump-format] 拖库数据独立产物：config.dumpFormat（csv/sql/html/json）
+  // 配置且有拖库数据时写 dump.<ext>。此前 dumpFormat 四个格式化函数与 27 条测试早已存在，
+  // 但链路从未接通（Extractor.js 头部注释自证「ctx.config.dumpFormat 都未被接线」）。
+  // 边界：只影响**独立产物文件**，报告内嵌的拖库区（数据提取树 / report.csv 内嵌表）不变。
+  if (cfg.dumpFormat) {
+    const rows = report.data?.rows || {};
+    const tables = Object.entries(rows).filter(([, arr]) => Array.isArray(arr) && arr.length);
+    if (tables.length) {
+      const parts = tables.map(([table, arr]) =>
+        String(formatDumpData(arr, Object.keys(arr[0]), table, cfg.dumpFormat))
+      );
+      let content = parts.join('\n');
+      if (cfg.dumpFormat === 'csv') content = '\uFEFF' + content; // Excel BOM（与 report.csv 同口径）
+      const dumpName = `dump.${cfg.dumpFormat}`;
+      writeFileSync(join(outDir, dumpName), content, 'utf-8');
+      files.push(dumpName);
     }
   }
 

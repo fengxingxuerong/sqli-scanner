@@ -298,6 +298,16 @@ export class ScanValidityGuard {
     //（cfg 会被当可调参数读，且会随 counts 一起进报告）。
     this.transformActive = opts?.transformActive === true;
     this.refreshActive = opts?.refreshActive === true;
+    // [D42 2026-10-11 对标 sqlmap --ignore-code] 忽略状态码集：列表内的状态码不再参与
+    // 「拦截 / 会话失效 / 服务器错误」三类可信度判定（响应本身照常参与内容比对）。
+    // 用途：注入点确实坐在 401/500 后面的目标（单点鉴权接口、常态报错页）——不忽略时
+    // 这些响应会把结论拖成 blocked/session_expired/inconclusive，而那不是目标的真实健康度。
+    // 只认 100-599 整数（防把 0「网络失败」也忽略掉——那是另一类不可用，语义不该混）。
+    this.ignoreCodes = new Set(
+      (Array.isArray(opts?.ignoreCodes) ? opts.ignoreCodes : [])
+        .map(Number)
+        .filter((n) => Number.isInteger(n) && n >= 100 && n <= 599)
+    );
     const thresholds = { ...(opts || {}) };
     delete thresholds.transformActive;
     delete thresholds.refreshActive;
@@ -307,6 +317,7 @@ export class ScanValidityGuard {
       if (Number.isFinite(v) && v > 0) this.cfg[k] = v;
     }
     this.total = 0; // 累计观察数（含窗口外），供报告展示「本次扫描共发多少请求」
+    this.ignoredHits = 0; // [D42] ignoreCodes 命中数（不计入任何健康账本，仅报告口径展示）
     this.samples = []; // 滑动窗口样本：{ fail, blocked, serverErr, auth }
     this.failStreak = 0; // 连续失败（res==null 或 status===0）
     this.maxFailStreak = 0; // 最长连续失败（粘滞展示用：目标恢复后 failStreak 会归零，但结论需保留真实峰值）
@@ -382,9 +393,13 @@ export class ScanValidityGuard {
     this.total += 1;
     const status = pickStatus(res);
     const failed = !res || status === 0 || !!error;
-    const blocked = !failed && isBlockedResponse(res);
-    const serverErr = !failed && status >= 500 && status <= 599;
-    const authHit = !failed && (status === 401 || isLoginRedirect(res));
+    // [D42] ignoreCodes：被忽略的状态码按「应用在回应」计账（走下方 nonChallengeHits 分支），
+    // 不参与 blocked / serverErr / authHit 三本账。仍计数进 ignoredHits 供报告展示口径。
+    const ignored = !failed && this.ignoreCodes.has(status);
+    if (ignored) this.ignoredHits += 1;
+    const blocked = !failed && !ignored && isBlockedResponse(res);
+    const serverErr = !failed && !ignored && status >= 500 && status <= 599;
+    const authHit = !failed && !ignored && (status === 401 || isLoginRedirect(res));
     const injection = looksLikeInjection(req);
     // 自己触发的 SQL 报错（error 技术的正常产物）不计入「目标处于错误状态」
     const selfInflicted =
@@ -633,6 +648,8 @@ export class ScanValidityGuard {
       expiredMidScan: base.expiredMidScan === true,
       // 「网络失败导致未测」的点数：哪怕整体状态 ok，这几个点的阴性结论也不成立
       netErrPoints: this.netErrPoints.length,
+      // [D42] ignoreCodes 命中数（未配置时恒 0，字段固定存在 —— 报告契约不随配置漂移）
+      ignoredHits: this.ignoredHits,
       // [D32] 自定义请求变换的计数（未启用时全 0，字段仍固定存在 —— 报告契约不随配置漂移）
       transform: base.transform || { ...this.transform },
       // [D36] Bearer 续期计数

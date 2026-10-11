@@ -65,6 +65,10 @@ export function parseArgs(argv, preset) {
     osCmd: null, sqlShell: null, fileRead: null, fileWrite: null, fileDest: null,
     // —— 强制 DBMS / 二阶触发页 / 授权声明 ——
     dbms: null, secondOrderUrl: null, authorized: false,
+    // [D42 2026-10-11 对标 sqlmap] --second-req：二阶触发页从抓包请求文件导入（整请求形态）
+    secondReq: null,
+    // [D42 2026-10-11 对标 sqlmap] --ignore-code / --randomize / --dump-format / --verify
+    ignoreCode: null, randomize: null, dumpFormat: null, extractVerify: null,
     dumpAll: false, identifyWaf: false, commonTables: null, commonColumns: null,
     randomAgent: false, where: null, paramDel: null,
     // 内部：从请求文件解析出的 header 对象（buildAuth 直接使用）
@@ -100,6 +104,9 @@ export function parseArgs(argv, preset) {
     // —— 强制 DBMS / 二阶触发页 / 授权声明 ——
     else if (a === '--dbms') args.dbms = next();
     else if (a === '--second-order') args.secondOrderUrl = next();
+    // [D42 2026-10-11 对标 sqlmap --second-req] 二阶触发页整请求文件（-r 同源解析器）：
+    // 触发页需要 POST + 头 + CSRF 时 --second-order <url> 表达不了，这里吃完整抓包。
+    else if (a === '--second-req') args.secondReq = next();
     else if (a === '--authorized') args.authorized = true;
     else if (a === '-u' || a === '--url') args.url = next();
     else if (a === '-d' || a === '--direct') args.direct = next();
@@ -260,6 +267,16 @@ export function parseArgs(argv, preset) {
   else if (a === '--param-exclude') args.paramExclude = next();
   // [D41 2026-10-11 对标 sqlmap --param-filter] 按位置筛选（url/body/header/cookie/path 及 GET/POST 别名）
   else if (a === '--param-filter') args.paramFilter = next();
+  // —— [D42 2026-10-11 对标 sqlmap 四件] ——
+  // --ignore-code：忽略指定 HTTP 错误码（不再计入拦截/会话失效/服务器错误判定）
+  else if (a === '--ignore-code') args.ignoreCode = next();
+  // --randomize：每条注入请求随机化指定参数的值（防反爆破/风控锁定）
+  else if (a === '--randomize') args.randomize = next();
+  // --dump-format：拖库数据产物格式（csv/sql/html/json；产物层用，不影响内嵌报告）
+  else if (a === '--dump-format') args.dumpFormat = next();
+  // --verify / --no-verify：盲注提取复核开关（引擎默认开：每字节等值确认 + 完整值复验）
+  else if (a === '--verify') args.extractVerify = true;
+  else if (a === '--no-verify') args.extractVerify = false;
     // —— 对标 sqlmap 最后两个参数（--tor/--mobile）——
     else if (a === '--tor') args.tor = true;
     else if (a === '--mobile') args.mobile = true;

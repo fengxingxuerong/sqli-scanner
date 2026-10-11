@@ -309,12 +309,19 @@ export class SecondOrderDetector extends Detector {
    */
   async _trigger(httpClient, ctx, url) {
     const so = (ctx.config && ctx.config.secondOrder) || {};
+    // [D42 2026-10-11 对标 sqlmap --second-req] 整请求形态的触发页（CLI/REST 组装自 -r 同源
+    // 解析器）：URL/method/headers/body 整体来自用户抓包。优先级高于 secondUrl/secondMethod/
+    // secondData（抓包是用户显式给的完整意图）；幂等门照走 resolveSecondOrderMethod，
+    // 会话 cookie 合并照做（抓包 Cookie 优先，会话补缺失键——与 headerParams 同优先级语义）。
+    const tr = so.triggerRequest && typeof so.triggerRequest === 'object' && typeof so.triggerRequest.url === 'string'
+      ? so.triggerRequest
+      : null;
     // --second-url：读写分离场景，读取发往独立的 secondUrl
-    const readUrl = so.secondUrl || url;
+    const readUrl = tr ? tr.url : (so.secondUrl || url);
     // [P0-FIX 2026-09-09] 触发读请求的方法必须过白名单与幂等门。旧写法 `so.secondMethod || 'GET'`
     // 把用户字符串直送 HTTP 层（TRACE/CONNECT/含 CRLF 均照发）；而「只读复核」在 productionMode 下
     // 只对 GET/HEAD 成立——非幂等方法必须 secondOrder.allowWrites=true 才放行。
-    const trig = resolveSecondOrderMethod(so.secondMethod, {
+    const trig = resolveSecondOrderMethod(tr ? tr.method : so.secondMethod, {
       productionMode: ctx.config?.productionMode,
       allowWrites: so.allowWrites,
     });
@@ -327,7 +334,9 @@ export class SecondOrderDetector extends Detector {
     // [P0-FIX 2026-09-06] 触发页请求带上 target.cookieParams 会话：触发页常为 requireAuth
     // 页面（如 /panel），不带会话 → 401 未登录页 → 永远无报错回显 → 二阶必漏（real-world-lab 实测）。
     // 用户显式 headerParams 的 Cookie 优先（同名不覆盖），会话 cookie 合并补充。
-    const headers = { ...(ctx.target.headerParams || {}) };
+    const headers = tr && tr.headers && typeof tr.headers === 'object'
+      ? { ...tr.headers }
+      : { ...(ctx.target.headerParams || {}) };
     const sessCookies = ctx.target.cookieParams || {};
     // [todo#39] 跨角色触发：触发页读取使用 triggerCookies 指定身份（高权读出方）。
     // 优先级：用户显式 headerParams Cookie > triggerCookies > 会话 cookieParams 合并补充。
@@ -349,7 +358,9 @@ export class SecondOrderDetector extends Detector {
       method,
       url: readUrl,
       params: {},
-      data: so.secondData != null ? so.secondData : {},
+      data: tr
+        ? (tr.body != null && tr.body !== '' ? tr.body : {})
+        : (so.secondData != null ? so.secondData : {}),
       headers,
     };
     const res = await this.send(httpClient, ctx, req);
