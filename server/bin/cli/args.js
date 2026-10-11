@@ -42,6 +42,9 @@ export function parseArgs(argv, preset) {
     hostname: false, isDba: false, schema: false, privileges: false, roles: false,
     search: null, // --search <keyword>
     excludeSysdbs: true,
+    // [D46 2026-10-11 对标 sqlmap] 运维侦察枚举：-b/--banner · --statements · --procs
+    // 与 -U/--user（用户过滤）、--exclude（库排除）
+    banner: false, statements: false, procs: false, user: null, exclude: null,
     smart: false,
     requestFile: null, // 对标 sqlmap -r：从请求文件导入
     logFile: null,     // 对标 sqlmap -l：从代理/Burp 日志批量导入请求
@@ -209,6 +212,12 @@ export function parseArgs(argv, preset) {
     else if (a === '--dbs') args.dbs = true;
     else if (a === '--tables') args.tables = true;
     else if (a === '--columns') args.columns = true;
+    // [D46 对标 sqlmap] 运维侦察枚举 + 过滤
+    else if (a === '-b' || a === '--banner') args.banner = true;
+    else if (a === '--statements') args.statements = true;
+    else if (a === '--procs') args.procs = true;
+    else if (a === '-U' || a === '--user') args.user = next();
+    else if (a === '--exclude') args.exclude = next();
     else if (a === '-D' || a === '--db') args.db = next();
     else if (a === '-T' || a === '--table') args.table = next();
     else if (a === '-C' || a === '--columns-list') args.columnsList = next();

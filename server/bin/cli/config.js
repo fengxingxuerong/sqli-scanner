@@ -449,7 +449,9 @@ export function buildConfig(args) {
 // 是否处于枚举模式（任一枚举开关开启）
 export function isEnumMode(args) {
   return !!(args.dbs || args.tables || args.columns || args.currentDb || args.currentUser || args.count || args.users || args.passwords || args.hostname || args.isDba || args.schema || args.privileges || args.roles || !!args.search
-    || args.dumpAll || args.commonTables || args.commonColumns);
+    || args.dumpAll || args.commonTables || args.commonColumns
+    // [D46] 运维侦察三模式
+    || args.banner || args.statements || args.procs);
 }
 
 // 构造 extractScope（对标 sqlmap 枚举模式）：
@@ -469,13 +471,26 @@ export function isEnumMode(args) {
 //   --count   -D db -T t → { mode:'count', dbs:[db], tables:[t] }
 // 无枚举开关返回 undefined（--dump 走既有全量拖库分支）
 export function buildExtractScope(args) {
-  const ex = scope => ({ excludeSysdbs: args.excludeSysdbs !== false, ...scope });
+  // [D46] -U / --exclude 挂到任何枚举模式上（引擎按模式语义消费；不适用的模式由 extractScope 警告）
+  const excludeDbs = args.exclude
+    ? String(args.exclude).split(',').map((s) => s.trim()).filter(Boolean).slice(0, 16)
+    : [];
+  const ex = (scope) => ({
+    excludeSysdbs: args.excludeSysdbs !== false,
+    ...scope,
+    ...(args.user && String(args.user).trim() ? { user: String(args.user).trim().slice(0, 128) } : {}),
+    ...(excludeDbs.length ? { excludeDbs } : {}),
+  });
   // 全库拖库优先（对标 sqlmap --dump-all：忽略 -D/-T，直接枚举全部库并拖）
   if (args.dumpAll) return ex({ mode: 'dumpAll' });
   // 字典爆破：表名/列名（对标 sqlmap --common-tables / --common-columns）
   // information_schema 不可用时（WAF 拦截 / 权限不足 / 非 MySQL）继续推进枚举的唯一路径。
   if (args.commonTables) return ex({ mode: 'commonTables', dbs: args.db ? [args.db] : [] });
   if (args.commonColumns) return ex({ mode: 'commonColumns', dbs: args.db ? [args.db] : [], tables: args.table ? [args.table] : [] });
+  // [D46 对标 sqlmap -b/--statements/--procs] 运维侦察三模式
+  if (args.banner) return ex({ mode: 'banner' });
+  if (args.statements) return ex({ mode: 'statements' });
+  if (args.procs) return ex({ mode: 'procs' });
   if (args.search) return ex({ mode: 'search', keyword: args.search });
   if (args.dbs) return ex({ mode: 'dbs' });
   if (args.tables) return ex({ mode: 'tables', dbs: args.db ? [args.db] : (args.excludeSysdbs ? [] : []) });
@@ -509,5 +524,9 @@ export function validateEnumArgs(args) {
   if (args.schema && (!args.db || !args.table)) return '使用 --schema 需指定：-D <dbname> -T <table>';
   if (args.columnsList && !args.table) return '使用 -C/--columns-list 需配合 -T <table>';
   if (args.columnsList && !args.dump) return '-C/--columns-list 仅在 --dump 模式下生效';
+  // [D46] -U 只对用户/凭据枚举有意义（权限/角色枚举仅覆盖当前用户，库/表枚举无用户维度）
+  if (args.user && String(args.user).trim() && !args.users && !args.passwords) {
+    return '-U/--user 仅在 --users / --passwords 模式下生效（--privileges/--roles 只覆盖当前用户；库/表枚举无用户维度）';
+  }
   return null;
 }

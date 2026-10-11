@@ -4,6 +4,45 @@
 
 ## [Unreleased]
 
+### 2026-10-11 批次 D46 · 枚举面补齐（`-b/--banner` · `--statements` · `--procs` · `-U` · `--exclude`，对标 sqlmap）
+
+**一句话**：吸收路线图第 15 条（SQL 面补齐族）落地：三个运维侦察枚举模式 + 两个枚举过滤器，
+全部走既有 `_enumScalar` + 方言目录骨架，形状约定与本仓「诚实降级」口径一致。
+
+#### ① 三个侦察模式（`extraction/sysQueries.js` 新增 STATEMENTS_QUERY / PROCS_QUERY 目录）
+
+- **`-b/--banner`**：数据库版本横幅——复用盲注指纹同源的 `VERSION_EXPR` 表，零新 SQL 面。
+- **`--statements`**：当前正在执行的 SQL（应用侧侦察：第二注入点/表名最快通道）——
+  MySQL processlist / PG pg_stat_activity / MSSQL dm_exec_requests / Oracle v$sql，**硬上界 20 条**。
+- **`--procs`**：存储过程/函数清单（提权侦察 + 可注入过程入口）——information_schema.ROUTINES /
+  pg_proc（含 prokind 归类）/ INFORMATION_SCHEMA.ROUTINES / ALL_OBJECTS，**硬上界 100 条**。
+- 方言覆盖：6 个主库有查询；**SQLite/DM8/ClickHouse 等 12 方言显式 `null`（结构性不支持，
+  诚实降级）——绝不 `|| MySQL` 回落**（目标不认识的函数名只会报错 → 判定恒假 → 静默失败，
+  blindExtractor 同一条教训）。聚合形态与 SYS_QUERIES 同款（单标量 + 0x1E/CHR(30) 行分隔）。
+
+#### ② 两个枚举过滤器
+
+- **`-U/--user <name>`**：`--users`/`--passwords` 结果的客户端侧过滤——SYS_QUERIES 的凭据收割
+  是单标量聚合串（5 方言 × 2 类查询形态各异），在 SQL 里加 WHERE 要改十处；客户端过滤一条
+  判据全覆盖且可单测。双口径匹配：`-U app`（命中用户段）与 `-U app@host`（同 host 多账号
+  精确点名）都是合法语义。`--privileges`/`--roles` 只覆盖当前用户，-U 组合**显式报错**
+  （validateEnumArgs）而非静默无效果。
+- **`--exclude <db,...>`**：枚举时点名排除库（跳过已知巨大/噪声库），与 `--exclude-sysdbs`
+  **正交**（excludeSysdbs=false 时点名排除依然生效——用户点名优先于一切）；最多 16 个，
+  大小写不敏感。CLI/REST（extractScope 闸 `user`/`excludeDbs`）双侧接线。
+
+#### ③ 验证口径
+
+- 新增 `tests/enumSurface.test.js` 9 条：方言目录形状（18 方言覆盖 + 主库硬上界 + null 诚实
+  降级）/ Extractor 三方法（`_enumScalar` 打桩不触网，含未知方言与 SQLite 路径）/
+  extractScope 三模式分发 + `-U` 双口径过滤（user@host 与 user:hash 两种条目形态）/
+  `--exclude` 正交语义 / CLI 接线（isEnumMode/buildExtractScope/validateEnumArgs）/ REST 闸。
+- **诚实边界**：--statements/--procs 未在真机逐库验证——查询形态沿用 SYS_QUERIES 同族聚合
+  惯用法与既有转义器（escSql/escBacktick/escBracket），真机验证归 real-mysql-lab 下一轮；
+  `-U` 未做 SQL 端 WHERE 下推（客户端过滤语义等价，条目形态已在测试钉住）。
+- **未吸收**（同族，记因）：`--pivot-column`（本仓 dump 走 LIMIT/OFFSET 分页，值属场景性）、
+  `--union-values`（类型猜测失败时的利基兜底，与 knownPoint 通道重叠）。
+
 ### 2026-10-11 批次 D45 · diff-aware CI 门禁（`--diff-base auto`，只对新增发现判红）——修「安全 CI 被存量噪声杀死」的第一病因
 
 **一句话**：吸收路线图第 18 条（semgrep `ci` 的核心语义）：`node scripts/one-click-scan.mjs

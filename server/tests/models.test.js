@@ -84,6 +84,10 @@ test('emptyExtractedData 结构正确', () => {
     roles: undefined,
     currentDb: undefined,
     currentUser: undefined,
+    // [D46] 运维侦察字段（-b/--statements/--procs）
+    banner: undefined,
+    statements: undefined,
+    procs: undefined,
     users: undefined,
     passwords: undefined,
     passwordAnalysis: undefined,

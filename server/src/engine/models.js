@@ -257,6 +257,10 @@ export function emptyExtractedData() {
     // 枚举模式字段（--current-db / --current-user / --users / --passwords / --count / --search）
     currentDb: undefined,
     currentUser: undefined,
+    // [D46] 运维侦察字段（-b/--banner · --statements · --procs）：null=方言结构性不支持（诚实降级）
+    banner: undefined,
+    statements: undefined,
+    procs: undefined,
     users: undefined,
     passwords: undefined,
     // [--passwords 升级] 派生结构：哈希算法识别 + 强度/风险标注（extraction/hashAnalysis.js）。

@@ -95,8 +95,43 @@ export async function extractByScope(sm, scanId, ctx, scope) {
   const excludeSysdbs = scope.excludeSysdbs !== undefined
     ? scope.excludeSysdbs !== false
     : (ctx.target?.config?.excludeSysdbs ?? defaults.excludeSysdbs);
+  // [D46 2026-10-11 对标 sqlmap --exclude] 用户显式排除的库（大小写不敏感）：
+  // 与系统库过滤正交（excludeSysdbs=false 时 excludeDbs 依然生效——用户点名排除优先于一切）。
+  const excludeSet = new Set(
+    (Array.isArray(scope.excludeDbs) ? scope.excludeDbs : [])
+      .map((s) => String(s).trim().toLowerCase())
+      .filter(Boolean)
+  );
   const filterDbs = (dbs) =>
-    excludeSysdbs ? dbs.filter((d) => !SYS_DBS.has(String(d).toLowerCase())) : dbs;
+    dbs.filter((d) => {
+      const l = String(d).toLowerCase();
+      if (excludeSysdbs && SYS_DBS.has(l)) return false;
+      if (excludeSet.has(l)) return false;
+      return true;
+    });
+  // [D46 对标 sqlmap -U] 用户过滤（--users/--passwords 模式）：客户端侧按条目过滤——
+  // SYS_QUERIES 的 users/passwords 是**单标量聚合串**（GROUP_CONCAT/string_agg/FOR XML，
+  // 各方言分隔符与条目形态不同），在 SQL 里加 WHERE 要改 5 个方言 × 2 类查询，
+  // 客户端过滤一条判据全覆盖且行为可单测。
+  const userFilter = typeof scope.user === 'string' && scope.user.trim() ? scope.user.trim() : null;
+  const filterUserEntries = (joined) => {
+    if (!userFilter || !joined) return joined;
+    const want = userFilter.toLowerCase();
+    // 条目形态：users 为 user 或 user@host；passwords 为 user@host:hash / user:hash。
+    // 匹配双口径：-U <user>（命中用户段）或 -U <user@host>（命中完整 host 限定形态，同 host 多
+    // 账号场景可精确点名）——两种写法都是 sqlmap -U 的合法语义。
+    const all = String(joined).split(',').map((s) => s.trim()).filter(Boolean);
+    const kept = all.filter((entry) => {
+      const beforeHash = String(entry).split(':')[0].trim().toLowerCase(); // user@host 或 user
+      const userPart = beforeHash.split('@')[0];
+      return beforeHash === want || userPart === want;
+    });
+    if (!kept.length) {
+      logger.warn(`-U ${userFilter}：枚举结果中无匹配用户（共 ${all.length} 条）`);
+      return '';
+    }
+    return kept.join(',');
+  };
 
   const ensureExtractor = (name) => {
     const fn = sm.extractor && sm.extractor[name];
@@ -236,14 +271,35 @@ export async function extractByScope(sm, scanId, ctx, scope) {
         data.currentUser = await ensureExtractor('currentUser')(ctx);
         break;
       }
+      // [D46 2026-10-11 对标 sqlmap -b/--statements/--procs] 运维侦察三模式：
+      // null 也是有效结果（方言结构性不支持时诚实降级），无条件记录以便区分「未提取」与「提取为空」
+      case 'banner': {
+        data.banner = await ensureExtractor('enumerateBanner')(ctx);
+        break;
+      }
+      case 'statements': {
+        data.statements = await ensureExtractor('enumerateStatements')(ctx);
+        break;
+      }
+      case 'procs': {
+        data.procs = await ensureExtractor('enumerateProcs')(ctx);
+        break;
+      }
       case 'users': {
         // 凭据收割（对标 sqlmap --users）：返回逗号分隔用户串或 null（权限不足静默降级）
-        data.users = await ensureExtractor('enumerateUsers')(ctx);
+        let users = await ensureExtractor('enumerateUsers')(ctx);
+        users = filterUserEntries(users);
+        if (userFilter && !users && typeof users === 'string') {
+          logger.warn('-U 提示：权限/角色枚举（--privileges/--roles）只覆盖当前用户，-U 对它们不适用');
+        }
+        data.users = users;
         break;
       }
       case 'passwords': {
         // 凭据收割（对标 sqlmap --passwords）：返回逗号分隔 user:hash 串或 null（权限不足静默降级）
-        data.passwords = await ensureExtractor('enumeratePasswords')(ctx);
+        let passwords = await ensureExtractor('enumeratePasswords')(ctx);
+        passwords = filterUserEntries(passwords);
+        data.passwords = passwords;
         // 离线解读：原始串保持原样（既有契约不变），另挂一份**派生**结构 ——
         // 算法识别 + 强度/风险标注，让「读到哈希」变成「知道这条凭据值多少」。
         // 纯函数、不联网、不爆破（见 extraction/hashAnalysis.js 顶部诚实边界）；
