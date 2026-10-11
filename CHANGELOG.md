@@ -4,6 +4,37 @@
 
 ## [Unreleased]
 
+### 2026-10-12 批次 D47 · 销掉 CI 战报里唯一的剩账：facts 过期导致的 `lint` 恒红
+
+**一句话**：D40 之后 `test-server` 转绿，但 `lint` 一直红 —— 红因是 facts 采集源过期
+（测试源 441 → 448 个文件），战报里明确写着「需换会话跑 `facts-sync --refresh --coverage` + `--fix`」。
+本批把它跑完了，本机 `lint` 转绿。
+
+#### ① 为什么之前跑不了 —— 以及这次为什么能跑
+
+本机 `node` 的 `child_process` 全程 `EBUSY`（`execFileSync` 一律失败），而 `facts-sync.mjs`
+内部要 `git ls-files`、要 `npm run` 跑测试 ⇒ 裸跑必崩。
+✅ 解法（runbook「环境陷阱」第 96 行早有，本次踩实）：
+`NODE_OPTIONS="--require=D:/projects/_sqli-gitfix-2026-10-03/cp-pipe-shim.cjs"` ⇒ spawn 恢复正常，
+`--refresh --coverage`（6m41s）与 `--fix` 都是**正规流程跑出来的**，不是手工回填。
+
+#### ② 采集结果（全量重采，含覆盖率）
+
+| 项 | 值 |
+|---|---|
+| 前端 | **561** 用例 / 64 文件，0 fail |
+| 服务端 | **3373** 用例（3369 pass / **0 fail** / 4 skip） |
+| 徽章 | **3930**（561 + 3369） |
+| 采集源指纹 | 448 个文件，`abe5035ea1121e0b` |
+
+`--fix` 修正 README 5 处（含一处覆盖率偏差 0.25pt：`lines 92.89 → 93.03`）；
+复跑 `--check` 通过（「README 与 _facts.json 一致」+「采集源未改动」）；本机 `lint` exit 0。
+
+#### ③ 交付纪律
+
+改动仅 3 个文件（`README.md` / `docs/_facts.json` / `docs/_facts.sources.json`），
+**未改任何判据、未改任何产品代码** —— 本批纯粹是「把过期的数字重新采一遍」。
+
 ### 2026-10-11 批次 D46 · 枚举面补齐（`-b/--banner` · `--statements` · `--procs` · `-U` · `--exclude`，对标 sqlmap）
 
 **一句话**：吸收路线图第 15 条（SQL 面补齐族）落地：三个运维侦察枚举模式 + 两个枚举过滤器，
