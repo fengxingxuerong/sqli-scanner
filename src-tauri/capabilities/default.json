@@ -1,12 +1,20 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "主窗口默认权限（core + shell sidecar + dialog + fs）",
+  "description": "主窗口默认权限（core + shell sidecar + dialog + fs：应用目录读 + $DOWNLOAD 读写）",
   "windows": ["main"],
   "permissions": [
     "core:default",
     "shell:allow-spawn",
     "dialog:default",
-    "fs:default"
+    "fs:default",
+    {
+      "identifier": "fs:allow-write-text-file",
+      "allow": [{ "path": "$DOWNLOAD/**" }]
+    },
+    {
+      "identifier": "fs:allow-read-text-file",
+      "allow": [{ "path": "$DOWNLOAD/**" }]
+    }
   ]
 }

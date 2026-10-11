@@ -131,39 +131,106 @@ test('自证：取词与"变量形式"识别（判据瞎了就会一路恒绿）
   const found = findVarFormInText(fake);
   assert.deepEqual(found.map((x) => x.line), [2], '第 2 行才算违规（第 3、4 行是合法形态）');
   assert.equal(found[0].varName, 'dialogSpec');
+
+  // ④ 的权限解析（判据与自证调同一个 parsePermissions，不另写副本）：
+  // 裸字符串"授命令不带 scope"，对象形态才带 —— 这个区分就是 D49 堵住的那个假绿缺口。
+  const perms = parsePermissions({
+    permissions: [
+      'fs:default',
+      { identifier: 'fs:allow-write-text-file', allow: [{ path: '$DOWNLOAD/**' }] },
+      { identifier: 'fs:allow-read-text-file', allow: [{ path: '$DOWNLOAD/**' }, { path: 'C:/tmp/x' }] },
+      { identifier: 'fs:allow-exists', allow: [{}] },
+    ],
+  });
+  assert.deepEqual(
+    perms.map((p) => p.id),
+    ['fs:default', 'fs:allow-write-text-file', 'fs:allow-read-text-file', 'fs:allow-exists'],
+    '四种形态都要解析出标识'
+  );
+  assert.deepEqual(perms[0].allow, [], '裸字符串形态不带 scope ⇒ ④ 必须判为"授了命令但没放开路径"');
+  assert.deepEqual(perms[1].allow, ['$DOWNLOAD/**']);
+  assert.deepEqual(perms[2].allow, ['$DOWNLOAD/**', 'C:/tmp/x'], '同一权限的多条 allow 都要取到');
+  assert.deepEqual(perms[3].allow, [], 'allow 项缺 path 的当作没登记，不许当成"有范围"');
 });
 
 /**
  * ④ fs 调用与 capabilities 授权范围的配对表。
- * 现状（本机 src-tauri/gen/schemas/acl-manifests.json 里 fs.default_permission 的原文）：
- *   "This default permission set enables **read** access to the application specific
- *    directories (AppConfig, AppData, AppLocalData, AppCache, AppLog)…"
- * 而 capabilities/default.json 只写了 "fs:default" ⇒ 用户在保存/打开对话框里选的
- * **任意绝对路径**（D:\\reports\\x.md、~/Downloads/x.txt）既不在读范围也不在写范围。
- * 也就是说：本批修好了"包没装"，但桌面导出/导入还有第二半没修 —— 那是**安全范围决策**
- * （要不要放开 $DOWNLOAD/** 或 $HOME/**，还是改成只允许写入应用目录），需要人来定。
- * 所以这里用一张**显式豁免表**把欠账钉住：
+ *
+ * 【这笔账已于 D49 还掉（2026-10-12），决策 = TODO 第 14 条 (a)】：
+ *   capabilities/default.json 给 `fs:allow-write-text-file` / `fs:allow-read-text-file`
+ *   各登记了 `allow: [{ path: "$DOWNLOAD/**" }]` ⇒ 保存/打开对话框选到下载目录里的
+ *   任意路径都能真正落盘/读出，不再被 capability 范围拒。
+ *
+ * 【为什么判据不能只查"标识在不在"—— 源码级依据（本机 cargo registry 实测）】
+ *   · tauri-2.11.5/src/scope/fs.rs:419 `Scope::is_allowed()` 的本体是
+ *       `allowed_patterns.iter().any(|p| p.matches_path_with(...))`
+ *     ⇒ **allow 列表为空时恒 false**，即"授了命令但没给 scope"= 处处被拒，**不是**处处放行。
+ *     所以 `capabilities` 里写个裸字符串 `"fs:allow-write-text-file"` 看着"权限给了"，
+ *     功能其实一点没修好 —— 只看标识的判据会绿着放行（假绿）。
+ *   · tauri-utils-2.9.3/src/acl/resolved.rs:281-314：`PermissionEntry::ExtendedPermission`
+ *     （对象形态 `{ identifier, allow }`）**既授予命令又登记 scope** —— `commands.allow.extend(...)`
+ *     在第 313 行无条件执行。⇒ 写对象形态一条就够，不必再重复一遍裸标识。
+ *   · tauri-plugin-fs-2.5.2/src/commands.rs:1122-1136：`write_file_inner` 在无 options 时
+ *     默认 `create: true` ⇒ 导出的**新文件**不需要额外 `fs:allow-create`；
+ *     tauri-2.11.5/src/scope/fs.rs:471 `try_resolve_symlink_and_canonicalize()` 对**不存在**
+ *     的路径是原样返回（不 canonicalize）⇒ 新文件同样能过 scope 匹配。
+ *
+ * 【守卫现在同时盯三件事】
  *   · 代码用到某函数、权限没授、也没在表里 ⇒ 红（新增未授权的 fs 用法）；
- *   · 权限已经授了、表里还留着豁免 ⇒ 红（豁免过期，必须删 —— 逼着这笔账真被还掉）。
+ *   · 权限授了、表里还留着豁免 ⇒ 红（豁免过期，必须删 —— 逼着这笔账真被还掉）；
+ *   · 权限授了却没登记任何 allow 路径 ⇒ 红（上面的源码依据：等于什么都没放开）。
  */
 const FS_PERMS = {
   writeTextFile: 'fs:allow-write-text-file',
   readTextFile: 'fs:allow-read-text-file',
 };
-const KNOWN_UNGRANTED = {
-  writeTextFile: 'D28 已知欠账：保存对话框返回任意绝对路径，fs:default 不含 ⇒ 需产品决策放开范围还是改写应用目录（见 TODO D28）',
-  readTextFile: 'D28 已知欠账：打开对话框同理 ⇒ 与写同一笔决策',
-};
 
-function capabilityPermissions() {
+/**
+ * 已登记的欠账表。**D49 之后应为恒空** —— 它是一条"欠账登记表"，不是默认值：
+ * 谁再新增一个未经授权的 fs 用法，必须在这里写明原因与还账计划，
+ * 等权限真补上后，判据会反过来红着要求把这条删掉。
+ */
+const KNOWN_UNGRANTED = {};
+
+/**
+ * 产品决策落在**范围**上，不只是落在"授没授"。改范围 = 改决策 ⇒ 必须回来改这个常量，
+ * 并同时更新 TODO 第 14 条与 CHANGELOG，不能悄悄把 `$DOWNLOAD` 换成 `$HOME`。
+ */
+const EXPECTED_FS_SCOPE = '$DOWNLOAD/**';
+
+/**
+ * 纯函数：把一份 capability JSON 解析成 `{ id, allow[] }` 列表。
+ * 判据与自证都调它，避免"判据一套、自证另一套"。
+ *
+ * 两种形态都认（Tauri v2 Capability 的 PermissionEntry）：
+ *   · 字符串 `"fs:default"` —— 授命令，不带 scope（allow 为空）；
+ *   · 对象 `{ identifier, allow: [{ path }] }` —— 授命令 + 登记 scope。
+ */
+function parsePermissions(json) {
+  const out = [];
+  for (const p of json.permissions || []) {
+    if (typeof p === 'string') {
+      out.push({ id: p, allow: [] });
+    } else if (p && typeof p.identifier === 'string') {
+      out.push({
+        id: p.identifier,
+        allow: (p.allow || []).map((e) => (e && typeof e.path === 'string' ? e.path : null)).filter(Boolean),
+      });
+    }
+  }
+  return out;
+}
+
+function capabilityEntries() {
   const dir = path.join(REPO, 'src-tauri', 'capabilities');
   if (!existsSync(dir)) return null;
-  const all = new Set();
+  const out = [];
   for (const f of readdirSync(dir).filter((x) => /\.json$/.test(x))) {
-    const j = JSON.parse(readFileSync(path.join(dir, f), 'utf8'));
-    for (const p of j.permissions || []) all.add(typeof p === 'string' ? p : p?.identifier);
+    for (const e of parsePermissions(JSON.parse(readFileSync(path.join(dir, f), 'utf8')))) {
+      out.push({ file: f, ...e });
+    }
   }
-  return all;
+  return out;
 }
 
 /**
@@ -181,8 +248,8 @@ function fsFunctionsUsedInSource() {
 }
 
 test('④ 桌面 fs 调用与 capabilities 范围必须配对（欠账要么还掉、要么显式登记）', { skip: gitSkip }, () => {
-  const caps = capabilityPermissions();
-  if (caps === null) {
+  const entries = capabilityEntries();
+  if (entries === null) {
     // capabilities 目录没了 = 桌面壳结构变了，这条判据无法判定 ⇒ 明确红，不许静默通过
     assert.fail('src-tauri/capabilities/ 不存在 —— 无法核对桌面 fs 授权范围，判据需要跟着改');
   }
@@ -191,6 +258,7 @@ test('④ 桌面 fs 调用与 capabilities 范围必须配对（欠账要么还�
   // 扫到 0 个不叫"没问题"，叫"限定条件写坏了 ⇒ 这条恒绿"。
   assert.ok(used.size >= 2, `只从导入 plugin-fs 的文件里扫到 ${used.size} 个 fs.* 调用（应 ≥2）`);
   const problems = [];
+  const scopes = new Set();
   for (const fn of used) {
     const perm = FS_PERMS[fn];
     if (!perm) {
@@ -198,8 +266,9 @@ test('④ 桌面 fs 调用与 capabilities 范围必须配对（欠账要么还�
       continue;
     }
     // 只认**具体权限标识**在不在 capabilities 里。`fs:default` 不等于"都给了"——
-    // 它是"应用目录只读"那一组，把用户任选路径的读写都排除在外（正是上面那段描述）。
-    const granted = caps.has(perm);
+    // 它是"应用目录只读"那一组，把用户任选路径的读写都排除在外。
+    const mine = entries.filter((e) => e.id === perm);
+    const granted = mine.length > 0;
     const exempt = Object.prototype.hasOwnProperty.call(KNOWN_UNGRANTED, fn);
     if (!granted && !exempt) {
       problems.push(`fs.${fn}() 需要 ${perm}，capabilities 没授、也没登记欠账`);
@@ -207,6 +276,24 @@ test('④ 桌面 fs 调用与 capabilities 范围必须配对（欠账要么还�
     if (granted && exempt) {
       problems.push(`${perm} 已经在 capabilities 里了，但 KNOWN_UNGRANTED 还挂着 fs.${fn} 的豁免 ⇒ 欠账已还，删掉登记`);
     }
+    // ★ 授了命令却没给 allow 路径 ⇒ 按 is_allowed() 的实现等于处处被拒（源码依据见上方注释）。
+    //   只查"标识在不在"的判据看不出这个，必须单独盯住。
+    if (granted && !exempt && !mine.some((e) => e.allow.length > 0)) {
+      problems.push(
+        `${perm} 只以裸字符串形式授权、没登记任何 allow 路径 ⇒ ` +
+          `tauri Scope::is_allowed() 对空 allow 列表恒 false，功能一点没修好而旧判据会绿。` +
+          `必须写成对象形态 { "identifier": "${perm}", "allow": [{ "path": "..." }] }`
+      );
+    }
+    for (const e of mine) for (const p of e.allow) scopes.add(p);
+  }
+  // 范围本身也是决策：不是 $DOWNLOAD/** 就得回来改常量并说明原因（见 EXPECTED_FS_SCOPE 注释）
+  const unexpected = [...scopes].filter((p) => p !== EXPECTED_FS_SCOPE);
+  if (unexpected.length) {
+    problems.push(
+      `桌面 fs 授权范围是 ${[...scopes].join(', ')}，与已决策的 ${EXPECTED_FS_SCOPE} 不一致 ⇒ ` +
+        `这是产品决策变更（TODO 第 14 条），必须回来改 EXPECTED_FS_SCOPE 常量并同步 TODO/CHANGELOG`
+    );
   }
   assert.deepEqual(problems, [], problems.join('\n'));
 });
