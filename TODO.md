@@ -66,6 +66,23 @@
    **不要用 `git commit`**（本机 husky 曾让对象库损坏加剧、也曾删掉 `.git`）
 5. `node scripts/push-via-api.mjs`（需 `GH_TOKEN`，幂等，约 2.5 分钟）
 
+### CI 解锁战报（run #208–#210，2026-10-12）—— 近两周第一次拿到完整 CI 证据
+
+解锁链：**推送（`0ff772c`→`8a8430d1`，11 个提交，全部 1703/1703 零失真）→ `test-server` 转绿
+→ 6 个下游 job 首次真跑**。
+
+| job | run #208 / #210 | 说明 |
+|---|---|---|
+| `test-server` | ✅ / ✅ | **D40 的修复（lintScope 守卫改静态文本解析）被 CI 复验成立** —— `@eslint/js` 那条红消失 |
+| `test-frontend` | ❌ / ✅ | ❌ 是**真缺陷**：D41/D42 新增 5 个后端可达键没走收口二选一（`testParameter`/`paramExclude`/`paramFilter`/`ignoreCodes`/`randomize`），判据 ④ 报未登记、⑥ 报 43 ≠ 38。已登记进 `TUNING_NO_UI_KEYS`（覆盖型旋钮 ⇒ 调优类，非能力缺失）⇒ run #209 转绿 |
+| `acceptance` | ❌ / ⏳ | 唯一红 = `[gates] 未知 API 路径返回 404 JSON`，实际收到 `text/html`。**根因是位置写错**：那段 `/api` 404 JSON 被包在 `if (existsSync(dist/index.html))` 里 ⇒ 有 dist 走 JSON（本机绿）、无 dist 落到 Express 默认 HTML（CI 红）。已在 dist 块之外无条件兜一层（提交 `a7793bb`） |
+| `e2e-self-contained` | ✅ / ✅ | 挂了 22 天的老待查**销账**（见 §Y） |
+| `release-smoke` / `sidecar-build` / `docker` / `audit` | ✅ | 都是首次真跑（此前被连带 skipped） |
+| `lint` | ❌ / ❌ | facts 过期（唯一剩账）：指纹 441 → 448 文件。**需换会话跑 `facts-sync --refresh --coverage` + `--fix`** |
+
+⚠️ 本机 `node` 的 `child_process` 全程 EBUSY（`execFileSync` 一律失败），三笔修复**均未经本地测试验证**，
+判据全部交给 CI。**教训：不能本地验证时，就把"未经本地验证"写进提交信息，别假装验过。**
+
 ### 下一批候选口径（登记用，**不占批次号**；落地时按本地 `git log` 最新编号顺延）
 
 | 方向 | 代价 | 验证口径 / 前提 |
@@ -1306,7 +1323,7 @@ process.exit(0);          // ← 漏检 / 误报 / must 未命中，一律退 0
 |---|---|---|
 | `lint` | ① 指纹门禁没做 **EOL 规范化**：本机 CRLF / CI LF → 69 文件假报"改动"（同 `git archive` 假阳性那一课，踩了两次）；② 修完指纹后仍红 → **Tauri 在 Linux 编译缺 GTK 系统库**（glib-sys 找不到 glib-2.0.pc → clippy exit 101），本地 Windows 是另一套依赖链 | ✅ 已修（hashFile 规范化 `b64e772` + apt 装 Tauri 依赖），待下轮验证 |
 | `acceptance` | **三个套件各自独立**（靠 `last-failure-*.log` 现场定位）：<br>① **CRS 保真度** = `ERR_MODULE_NOT_FOUND: Cannot find package 'yaml'` —— acceptance job 只跑 `cd server && npm ci`，而 `yaml` 在 **root 的 devDependencies**；本机 node_modules 里早就有它（隐式依赖）→ **已修** `0fbbfaf`<br>② **fileWrite** = 落盘路径写死 Windows（`remotePath=D:/tmp/...`、`wrote:true` 但 `verified:false`）—— **✅ 已修 2026-09-21（`5e5aa2b`）**：兜底改 `tmpdir()` 派生 + CI docker 挂载卷 + `FILE_WRITE_DIR`<br>③ **fileRead** = 隔离沙箱 `datadir 未初始化` → BLOCKED（判据语义正确）→ **✅ 已决策 2026-09-22**：判 **BLOCKED（进 failed）**，既非 SKIP 也非 FAIL。理由：① 不该 SKIP —— SKIP 不进 failed，等于让这项能力的覆盖**静默归零**（本仓最贵的一类错）；② 不该 FAIL —— 一条断言都没执行，记 FAIL 会把下一个人引去查产品代码（§G 重演）；③ BLOCKED 与 FAIL 一样非零退出，区别只在标签。同时把判据抽成可单测的 `e2e/lib/suiteVerdict.mjs`，并**扩了两种漏检形态**（详见 §Y-b） |
-| `e2e-self-contained` | redteam-lab 跑 90.6s 失败、multi-engine-lab 0.4s 秒败（疑似 CI 容器缺依赖） | ⏳ 待查 —— **来源澄清（2026-10-12）**：这条来自 **CI 首跑**（run `35513609939` / `ee14dd5`，2026-09-20），不是本机记录；此后该 job 因 `needs:[test-server]` 被上游红**连带 skipped，一次都没再真跑过** ⇒ 只有推送并使 test-server 转绿后才会复跑，届时才能判断这条是否还红（见本节上方 2026-10-12 新增节） |
+| `e2e-self-contained` | redteam-lab 跑 90.6s 失败、multi-engine-lab 0.4s 秒败（疑似 CI 容器缺依赖） | ✅ **已销账（2026-10-12：run #208 与 #210 均 success）**。**过程比结论值钱**：① 来源是 **CI 首跑**（run `35513609939` / `ee14dd5`，2026-09-20），不是本机记录；② 此后因 `needs:[test-server]` 被上游红**连带 skipped，一次都没再真跑过** ⇒ **被 skipped 的 job 既不能证明"修好了"也不能证明"没修好"** —— 它挂 22 天不是因为一直红，而是根本没有判据；③ test-server 转绿后首次复跑即 success |
 
 **过程教训（两条）**：
 1. 我的监视脚本把「jobs 列表为空」（run 还在 queued 的正常中间态）当成了「全部完成」
