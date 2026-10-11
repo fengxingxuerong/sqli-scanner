@@ -338,10 +338,43 @@ def _init_lab_schema() -> None:
         print("[mysql-sandbox] 靶场初始化失败：", out[-500:])
 
 
+def _sandbox_alive() -> tuple[bool, str]:
+    """判断 3308 上的实例**是不是本沙箱**且能服务。
+
+    [T 2026-10-12] 为什么要问这一句：端口亮着只说明"有人在听"，说明不了"是谁在听"。
+    判据取 `@@datadir` —— 本沙箱的 datadir 路径里必含 `.mysql-sandbox`（`SB` 的目录名），
+    主库是 `D:\\mysql\\data` ⇒ 连错了会立刻被认出来。
+
+    顺带防住一个隐患：`_mysql_exec` 的连接候选里 `--pipe` 排在最前，命名管道有可能
+    绕开 `-P` 打到主库上 —— 用 datadir 校验后，这种"连错库"会被当成身份不符拒绝掉，
+    而不是把沙箱的 provision / DROP 打到主库。
+
+    @returns (是否本沙箱且可服务, 证据文本)
+    """
+    rc, out = _mysql_exec("SELECT @@datadir;", user=SANDBOX_USER, password=SANDBOX_PASSWORD)
+    text = (out or "").strip()
+    if rc != 0:
+        return False, f"探针失败 rc={rc}：{text[:120]}"
+    if ".mysql-sandbox" not in text.lower():
+        return False, f"连到的实例不是本沙箱（@@datadir={text[:120]}）"
+    return True, text.splitlines()[-1][:120]
+
+
 def do_start(wait_sec: int = 45) -> int:
     if _port_open(SANDBOX_PORT):
-        print(f"[mysql-sandbox] 已在运行（端口 {SANDBOX_PORT} 已监听）")
-        return 0
+        # [T 2026-10-12] 端口在监听 **不等于** 本沙箱在跑 —— 必须验明正身再用。
+        # 只判 `_port_open` 时，端口被任何进程占用（上一套件残留的、正在关闭中的、
+        # 甚至别的程序）都会立刻返回「已在运行」，靶场于是拿一个**身份不明的实例**
+        # 跑完全程 —— 这正是 TODO T 条「udf-lab 约一半概率跑挂」的机理。
+        # 复用前先问一句「你是谁」；答不上来或不是本沙箱 ⇒ 拒绝复用并写明怎么修。
+        ok, detail = _sandbox_alive()
+        if ok:
+            print(f"[mysql-sandbox] 已在运行且身份正确（{detail}）")
+            return 0
+        print(f"[mysql-sandbox] ⚠ 端口 {SANDBOX_PORT} 已被占用，但其上的实例不是本沙箱：{detail}")
+        print("[mysql-sandbox] 拒绝复用 —— 拿身份不明的实例跑完再报错，比一开始就失败难查得多。")
+        print(f"[mysql-sandbox] 处理：python {Path(__file__).name} --stop（停不掉就 --destroy 后 --init）")
+        return 3
     if not is_initialized():
         print("[mysql-sandbox] datadir 未初始化，请先 --init")
         return 2
@@ -361,8 +394,12 @@ def do_start(wait_sec: int = 45) -> int:
     t0 = time.time()
     while time.time() - t0 < wait_sec:
         if _port_open(SANDBOX_PORT):
-            print(f"[mysql-sandbox] 已就绪（{round(time.time()-t0,1)}s）")
-            return 0
+            # 端口刚开 ≠ 能服务：mysqld 监听在前、初始化在后，此刻连上去可能被拒。
+            # 与上面的复用分支同口径 —— 只有身份探针通过才算「已就绪」。
+            ok, detail = _sandbox_alive()
+            if ok:
+                print(f"[mysql-sandbox] 已就绪（{round(time.time()-t0,1)}s）")
+                return 0
         time.sleep(0.5)
 
     print(f"[mysql-sandbox] 启动超时（{wait_sec}s）。错误日志尾部：")
@@ -616,6 +653,82 @@ def _isolation_checks() -> tuple[bool, list]:
     return all(c["pass"] for c in checks), checks
 
 
+def do_selftest() -> int:
+    """不起任何进程，只验 `do_start` 的分支判据（外部依赖全部用桩替换）。
+
+    [T 2026-10-12] 为什么单独有这个入口：do_start 的关键分支（"端口亮着到底能不能复用"）
+    靠真跑很难稳定复现 —— 它只在"上一套件残留 / 实例正在关闭"时才发生。
+    用桩把四种情形钉死，判据就能在**不起 mysqld** 的前提下被反复验证。
+
+    四个场景：
+      A 端口空闲 → 启动 → 探针认出本沙箱        ⇒ 0（就绪）
+      B 端口被占，探针答"我是主库"（D:\\mysql\\data）⇒ 3（拒绝复用，不得拿主库跑）
+      C 端口被占，探针答不上来（半死实例）        ⇒ 3（拒绝复用）
+      D 反向钉子：端口被占，探针确认是本沙箱      ⇒ 0（正常复用，别把功能也关掉）
+
+    @returns 0 = 全部通过；1 = 有场景不符
+    """
+    global _port_open, _mysql_exec, is_initialized
+
+    saved = (_port_open, _mysql_exec, is_initialized, subprocess.Popen, write_ini)
+    fails: list[str] = []
+    SANDBOX_DATADIR = str(DATADIR).lower()
+    HOST_DATADIR_TXT = r"D:\mysql\data"
+
+    def start_call(port_open_seq, exec_result):
+        """跑一次 do_start，返回 rc。"""
+        seq = list(port_open_seq)
+
+        def fake_port_open(port=3308, host="127.0.0.1", timeout=1.0):
+            return seq.pop(0) if len(seq) > 1 else seq[0]
+
+        globals()["_port_open"] = fake_port_open
+        globals()["_mysql_exec"] = lambda *a, **k: exec_result
+        globals()["is_initialized"] = lambda: True
+        globals()["write_ini"] = lambda **k: 0
+        subprocess.Popen = lambda *a, **k: None  # 真启动被桩掉：本自测不起任何进程
+        try:
+            return do_start(wait_sec=2)
+        finally:
+            globals()["_port_open"], globals()["_mysql_exec"] = saved[0], saved[1]
+            globals()["is_initialized"] = saved[2]
+            subprocess.Popen = saved[3]
+            globals()["write_ini"] = saved[4]
+
+    try:
+        # A：端口空闲 → 起来后探针认出本沙箱（第一次 False 走启动分支，其后 True 表示已监听）
+        rc = start_call([False, True], (0, SANDBOX_DATADIR))
+        if rc != 0:
+            fails.append(f"A 正常就绪：期望 0，实得 {rc}")
+
+        # B：端口被占且是主库 ⇒ 必须拒绝（拿主库跑沙箱用例是事故级）
+        rc = start_call([True], (0, HOST_DATADIR_TXT))
+        if rc != 3:
+            fails.append(f"B 占用者是主库：期望 3（拒绝），实得 {rc}")
+
+        # C：端口被占但连不上（半死实例）⇒ 必须拒绝，不能当"已在运行"
+        rc = start_call([True], (1, "ERROR 2003 (HY000): Can't connect"))
+        if rc != 3:
+            fails.append(f"C 半死实例：期望 3（拒绝），实得 {rc}")
+
+        # D：反向钉子 —— 确实本沙箱时仍要能复用（别把功能关掉）
+        rc = start_call([True], (0, SANDBOX_DATADIR))
+        if rc != 0:
+            fails.append(f"D 反向钉子（本沙箱应可复用）：期望 0，实得 {rc}")
+    finally:
+        globals()["_port_open"], globals()["_mysql_exec"], globals()["is_initialized"] = saved[0], saved[1], saved[2]
+        subprocess.Popen = saved[3]
+        globals()["write_ini"] = saved[4]
+
+    if fails:
+        print("[mysql-sandbox] --selftest ❌ 失败：")
+        for f in fails:
+            print(f"  · {f}")
+        return 1
+    print("[mysql-sandbox] --selftest ✅ 4/4 通过（A 就绪 / B 主库拒绝 / C 半死拒绝 / D 本沙箱可复用）")
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="隔离 MySQL 沙箱实例管理")
     g = ap.add_mutually_exclusive_group(required=True)
@@ -629,12 +742,16 @@ def main() -> int:
                    help="自起自用自停的隔离验证（本机推荐方式）")
     g.add_argument("--print-ini", action="store_true",
                    help="只打印将生成的 my-sandbox.ini 内容（不落盘、不启动任何进程）")
+    g.add_argument("--selftest", action="store_true",
+                   help="不起进程地自测 do_start 的分支判据（四种端口/身份情形）")
     ap.add_argument("--force", action="store_true", help="配合 --init：清空旧 datadir 重来")
     a = ap.parse_args()
 
     if a.print_ini:
         print(render_ini(), end="")
         return 0
+    if a.selftest:
+        return do_selftest()
     if a.init:
         return do_init(force=a.force)
     if a.start:
