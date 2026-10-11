@@ -165,7 +165,14 @@ export function printHelp() {
                              （出口层的代码注入面，故不给自由路径）；加载/执行失败一律硬失败，
                              不会退化成「发没签名的原始请求」。用法见 docs/请求变换脚本.md
   --identify-waf             仅识别 WAF 厂商并给出推荐 tamper 链，不发起注入检测
-                             （对标 sqlmap --identify-waf；用于扫描前先摸清对面是什么 WAF）
+                             （对标 sqlmap --identify-waf；用于扫描前先摸清对面是什么 WAF）。
+                             两阶段：被动指纹（62 厂商签名 + 通用拦截页）→ 无果时多向量主动探测
+                             （[D44] wafw00f 式：sqli-union/sqli-quote/xss/lfi 四向量 + Server 头
+                             差分 + 连接级阻断识别——断连型 WAF 此前被 .catch 吞掉看不见）。
+                             evidence 给结构化信号（哪些向量被拦/头漂移），可复核
+  --active-waf-probe         扫描期开启主动 WAF 探测（[D44]；默认关）：被动指纹未命中的目标
+                             在检测前发 5-9 条探测请求，命中拦截即把「unknown 拦截器 + 证据」
+                             写进报告 WAF 节。预算：良性 1 + 向量 4（连接级失败向量重试一次）
   --smart                    智能启发式（别名，等价 prefilter: true，跳过非注入参数）
   --proxy <url>              代理（http://host:port 或 socks5://host:port）
   --scope <cidr/域名,...>    授权范围硬约束（[P0-SEC] 如 10.0.0.0/24,target.example.com）：

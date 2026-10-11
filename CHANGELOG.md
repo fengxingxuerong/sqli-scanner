@@ -4,6 +4,46 @@
 
 ## [Unreleased]
 
+### 2026-10-11 批次 D44 · 主动 WAF 探测升级为 wafw00f 式多向量差分（+XSS/LFI 向量 / Server 头漂移 / 连接级阻断识别）+ --active-waf-probe CLI 入口
+
+**一句话**：吸收路线图第 5 条。勘缝发现 `WafIdentifier.activeProbe` 本就是 wafw00f 式差分
+骨架（良性 vs 恶意探针 → 状态码差分 → 拦截响应复用 62 指纹 → 行为兜底），本批补齐与其的
+剩余差距——其中「连接级阻断被 `.catch(()=>null)` 整个吞掉」是**真缺口**：断连型 WAF
+（RST on malicious input）此前完全不可见。
+
+#### ① activeProbe 多向量差分升级
+
+- **+2 探测向量**：xss（`<script>alert(1)</script>`）、lfi（`../../etc/passwd`），与既有
+  sqli-union/sqli-quote 组成四向量（对标 wafw00f 的 xssAttack/lfiAttack 探针族）。多向量的
+  价值：分得清「SQLi 专项规则」与「全站拦截」，且多一路硬证据。
+- **连接级阻断识别**（wafw00f genericdetect 判据①）：探测请求网络失败且基线正常 →
+  **先重试一次再分类**（偶发抖动不该成为 WAF 证据——本仓红线：宁可少一档置信，不做不实指控）；
+  重试仍失败才计入 `connection-level` 信号。
+- **Server 头差分**（判据②）：良性 vs 被拦响应的 `server` 头漂移进 evidence
+  （如 `nginx→xywall/2.0（xss）`——拦截面换出口/设备的可复核线索）。
+- **429 补进拦截码集**（与 scanValidityGuard.BLOCK_STATUSES 同口径）。
+- 返回形状**只增不改**：新增 `vectorsBlocked[]` / `connectionBlocked` / 结构化 `evidence`
+  （如 `status-shift vectors: sqli-union,xss; server-header shift: nginx→waf/1.0（xss）`），
+  source/confidence 语义与 blockPolicy 门控完全不变。
+
+#### ② CLI 入口补齐
+
+- `--active-waf-probe`：扫描期主动探测总开关（默认关）。此前只有 REST 键
+  `activeWafProbe` 与 `--identify-waf` 能触发探测，扫描期在 CLI 侧不可达——
+  configReachability 同族的「能力在、入口不在」。
+- `--identify-waf` 与扫描内探测的 evidence 均透传结构化信号（不再一律写 'active probe'）
+  —— 报告里「为什么认定有拦截器」必须可复核。
+
+#### ③ 验证口径
+
+- 新增 `tests/waf.activeProbe.test.js` 7 条（本地 mock WAF，零外部依赖）：全向量被拦
+  （behavior 0.6 + 四向量齐报）/ 仅拦 SQLi（专项规则语义）/ 连接级阻断（断连重试仍失败 →
+  hard 证据）/ **连接级偶发抖动不计为 WAF 证据**（防误报钉）/ 429 + Server 头漂移进
+  evidence / 无 WAF 不误报 / 被拦响应带厂商签名直接命名（Cloudflare 头）。
+- 未采纳（non-goal）：wafw00f 的 UA 差分（第④判据——需再 +2 请求且对国内设备命中率低）；
+  mock 未覆盖「被拦页命中通用拦截页签名」路径（该路径由既有 blockSignatures 测试覆盖）。
+- 未做（诚实边界）：真实云 WAF / ModSecurity 环境未实测（README「诚实边界」既有条目不变）。
+
 ### 2026-10-11 批次 D43 · 原生 MCP server（`cli.js mcp`，stdio，零依赖）——AI 代理直驱扫描器的第一等公民入口
 
 **一句话**：吸收路线图第 17 条（工程化族最高位）落地：`node server/bin/cli.js mcp` 起 stdio

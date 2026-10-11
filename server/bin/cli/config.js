@@ -308,6 +308,9 @@ export function buildConfig(args) {
   if (args.extractVerify === true) patchGroup(config, 'blindRobust', { extractVerify: true });
   else if (args.extractVerify === false) patchGroup(config, 'blindRobust', { extractVerify: false });
   if (args.smart) config.prefilter = true;
+  // [D44 2026-10-11] --active-waf-probe：扫描期主动 WAF 探测总开关（REST 同名键既有，
+  // 白名单在 scanRoutes.js:104；探测请求预算 = 良性 1 + 向量 4（连接级失败向量重试 +1））
+  if (args.activeWafProbe) config.activeWafProbe = true;
   // [D41 2026-10-11 对标 sqlmap -p/--param-exclude/--param-filter] 注入点筛选三件套。
   // 归一化/硬拒判据统一在 engine/paramSelection.js（TargetParser 收口）；CLI 只做形态透传。
   const _testParam = args.testParam != null ? String(args.testParam).split(',').map((s) => s.trim()).filter(Boolean).slice(0, 32) : null;

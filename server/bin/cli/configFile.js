@@ -54,6 +54,8 @@ export function buildKnownArgKeys(parseArgsFn) {
     'testParam', 'paramExclude', 'paramFilter', 'configFile', 'saveConfigFile',
     // —— [D42] 对标 sqlmap 四件 + --verify 开关 ——
     'secondReq', 'ignoreCode', 'randomize', 'dumpFormat', 'extractVerify',
+    // —— [D44] 主动 WAF 探测 ——
+    'activeWafProbe',
   ];
   const known = new Set(Object.keys(parseArgsFn([])));
   for (const k of dyn) known.add(k);
