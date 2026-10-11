@@ -77,7 +77,11 @@ jSQL 多比特 ≈ 本仓 `blindBitwise` 位平面提取（8 位并行，MySQL/T
 **工程化族（nuclei/dalfox/ZAP/semgrep/trivy 派）**
 
 17. ~~**原生 MCP server**~~ —— ✅ **D43**：`node cli.js mcp`（stdio NDJSON，零依赖），9 工具（run_scan/get_scan_status/get_findings/get_report/list_scans/stop/pause/resume/**preflight**），与 REST 同一条 sanitizeStart 白名单与 SSRF/scope 护栏；真靶场端到端 + stdio spawn 冒烟见 `tests/mcp.server.test.js`。AGENTS.md §4 已给宿主配置。
-18. **diff-aware CI 报告**（semgrep `ci` 语义）：PR 模式只对新增发现判红（台账已有 fingerprint 基础），存量噪声不阻塞无关 PR。代价 M，价值 High（安全 CI 被弃用的第一原因是存量噪声）。
+18. ~~**diff-aware CI 报告**（semgrep `ci` 语义）~~ —— ✅ **D45**：one-click `--diff-base <scanId|auto>`，
+    diff 计算与 REST `/api/scan/:id/diff` 同源（scanDiff，键 location:param:technique）；
+    新增发现 exit 2 / 存量仍在 exit 0 / 结论不可信或无基线 exit 1（不判红也不假绿）；
+    产出 diff.json + manifest.diff。裁决语义钉在 `tests/diffGate.test.js`（9 条）。
+    顺带修正 `docs/CI-集成.md` 一条陈旧断言（「官方 GitHub Action ❌ 尚无」——action.yml 早已在仓库根）。
 19. **扫描计划文件**（ZAP Automation Framework 语义）：`--plan plan.json`（目标/认证/批次/阈值声明式可评审），配 autogen 模板与 schema。与 --config 的区别：config 是参数档案，plan 是**战役编排**。代价 M，价值 Med。
 20. **发布信任链**：`release.yml` 上 SBOM + `actions/attest-build-provenance`（SLSA L2）+ cosign，README 写 `gh attestation verify` 验法。SEA 单二进制目前无第三方可验证来源。代价 M，价值 Med-High。
 21. payload 包生态（nuclei-templates 形态：独立 packs 仓 + 安装器 + 校验门）、文档站（CLI 参考自动生成）、winget/scoop/brew 渠道、canary 通道、`--ai-triage`（AI 流水线扩展）：更后置，见工程化调研原文（本节只留索引）。
