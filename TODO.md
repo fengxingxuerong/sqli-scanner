@@ -78,7 +78,7 @@
 | `acceptance` | ❌ / ⏳ | 唯一红 = `[gates] 未知 API 路径返回 404 JSON`，实际收到 `text/html`。**根因是位置写错**：那段 `/api` 404 JSON 被包在 `if (existsSync(dist/index.html))` 里 ⇒ 有 dist 走 JSON（本机绿）、无 dist 落到 Express 默认 HTML（CI 红）。已在 dist 块之外无条件兜一层（提交 `a7793bb`） |
 | `e2e-self-contained` | ✅ / ✅ | 挂了 22 天的老待查**销账**（见 §Y） |
 | `release-smoke` / `sidecar-build` / `docker` / `audit` | ✅ | 都是首次真跑（此前被连带 skipped） |
-| `lint` | ❌ / ❌ | facts 过期（唯一剩账）：指纹 441 → 448 文件。**需换会话跑 `facts-sync --refresh --coverage` + `--fix`** |
+| `lint` | ❌ / ✅ | ~~facts 过期（唯一剩账）：指纹 441 → 448 文件。需换会话跑 `facts-sync --refresh --coverage` + `--fix`~~ ✅ **已销账（2026-10-12 D47）**：本机 `node` 的 `child_process` 全程 EBUSY 是**有解法的** —— `NODE_OPTIONS="--require=D:/projects/_sqli-gitfix-2026-10-03/cp-pipe-shim.cjs"` ⇒ spawn 恢复，正规跑完 refresh+fix（6m41s）：前端 561、服务端 3373（3369 pass/0 fail/4 skip）、徽章 3930、指纹 448 文件。本机 `lint` exit 0。**⚠️ 记牢：下次再遇到"本机 spawn 不了"，先上 shim，别直接把活推给 CI** |
 
 ⚠️ 本机 `node` 的 `child_process` 全程 EBUSY（`execFileSync` 一律失败），三笔修复**均未经本地测试验证**，
 判据全部交给 CI。**教训：不能本地验证时，就把"未经本地验证"写进提交信息，别假装验过。**
