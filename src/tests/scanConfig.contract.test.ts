@@ -244,6 +244,14 @@ const TUNING_NO_UI_KEYS = [
   'cookieJar', 'dropSetCookie',
   // 参数筛选 / 已知点 / 失效值（paramDel 已于 2026-10-01 接进「高级注入面」分组）
   'skipParams', 'knownPoint', 'invalidValue', 'excludeSysdbs', 'nullConnection',
+  // [2026-10-12] D41 参数筛选三件套 + D42 两枚（CLI 定向复测形态，Web UI 单目标面板没有对应控件）：
+  //   testParameter / paramExclude / paramFilter —— 只对「筛哪些点位」做加减，默认 = 全测；
+  //   ignoreCodes —— 只改「忽略码不进拦截/会话失效/5xx 三本账」的计账口径，默认 = 不计；
+  //   randomize —— 只给非注入点的伴随参数加随机值，默认 = 原样发送。
+  // 五者同为「显式覆盖才改变行为」的覆盖型旋钮：默认路径与该键存在之前**逐字一致**
+  // ⇒ 按判据归调优类（不接不会造成假阴性），而不是能力缺失。CI run #208 的 ④ 报这 5 键
+  // 未登记、⑥ 报 38 ≠ 43，正是本批新增键没走收口二选一。
+  'testParameter', 'paramExclude', 'paramFilter', 'ignoreCodes', 'randomize',
   // HTTP 层行为（hpp 已升入 CAPABILITY_GAP_KEYS）
   'forceSsl', 'ignoreRedirects', 'activeWafProbe', 'trustProxyEnv', 'ssrfViaProxy', 'proxyBypassLocal',
   // 限速：delay / maxReq 已于 2026-09-23 接进「请求控制」分组 → 移出本表。
