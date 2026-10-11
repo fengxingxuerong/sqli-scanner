@@ -312,6 +312,19 @@ export function createApp() {
     }
   } catch { /* dist 不存在时跳过（开发模式） */ }
 
+  // 未知 API 路径一律返回 404 JSON —— **不依赖 dist 是否存在**。
+  // 由来（CI acceptance run #208 实证）：上面那段 /api 404 写在 `if (existsSync(indexPath))` 里，
+  // 于是「有没有 build 前端」决定了 /api/unknown 的响应形态 —— 有 dist ⇒ JSON 404（本机绿）；
+  // 没有 dist ⇒ 落到 Express 默认 404 HTML（CI acceptance 红，判据
+  // `[gates] 未知 API 路径返回 404 JSON（不落 SPA fallback）` 拿到 text/html）。
+  // API 的 404 语义不应由前端产物是否落盘决定，故在此无条件兜一层。
+  app.use((req, res, next) => {
+    if (req.path.startsWith('/api') || req.path.startsWith('/sqlmap')) {
+      return res.status(404).json({ code: 404, data: null, message: 'Not Found' });
+    }
+    return next();
+  });
+
   // 兜底错误处理
   app.use((err, req, res, next) => {
     // [交付缺口修复 2026-09-16] body-parser 错误分流：客户端输入问题按 400/413 语义化返回，
