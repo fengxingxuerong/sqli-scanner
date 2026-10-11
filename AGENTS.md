@@ -60,8 +60,19 @@ node scripts/one-click-scan.mjs -u "http://target/page?id=1"   # 一条命令出
 - 引擎**有意零运行时 npm 依赖**（server 的 runtime deps 除外）；给引擎加能力请用 Node 内置能力。
 - 检测判据/定库签名的测试是校准过的——不要为了让测试变绿而放宽断言；行为变化必须有靶场证据。
 
-## 4. MCP（规划中）
+## 4. MCP（已落地，D43）
 
-原生 MCP server（stdio 模式暴露 run_scan/get_progress/get_findings 等工具）在吸收路线图
-`TODO.md`「同源项目优点盘点」批次内（对标 dalfox `dalfox mcp` / semgrep `semgrep mcp` 的
-「MCP 是 CLI 的一个模式」形态）。落地前请用 1.1/1.2 的两种方式驱动。
+AI 代理宿主（Cursor / Claude Code / VS Code 等）可经 **MCP stdio** 直接驱动扫描器——
+「MCP 是 CLI 的一个模式」（对标 dalfox `dalfox mcp` / semgrep `semgrep mcp`）：
+
+```json
+{ "command": "node", "args": ["<repo>/server/bin/cli.js", "mcp"] }
+```
+
+工具集（9 个）：`run_scan`（异步启动，返回 scanId；走与 REST 同一条 sanitizeStart 白名单 +
+SSRF/scope 护栏）/ `get_scan_status` / `get_findings`（CWE·CVSS·受影响参数·PoC curl）/
+`get_report`（json|markdown|html|csv|sarif）/ `list_scans` / `stop_scan` / `pause_scan` /
+`resume_scan` / **`preflight`**（零 payload 侦察：可达性 + 注入点发现——**开打前先跑这个**）。
+
+红线不变：`risk=3` 需显式 `confirmDestructive=true`（用户同意后才设）；`verdict=inconclusive`
+不等于「未检出」（get_findings 的 verdictNote 会提示）。落地前请用 1.1/1.2 的两种方式驱动。

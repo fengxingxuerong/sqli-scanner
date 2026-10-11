@@ -568,6 +568,14 @@ async function main() {
     console.error(`未知子命令: ledger ${sub}（支持 list / show / prune）`);
     process.exit(1);
   }
+  // [D43 2026-10-11] MCP server 模式（对标 dalfox mcp / semgrep mcp：「MCP 是 CLI 的一个模式」）：
+  //   node cli.js mcp —— stdio NDJSON，供 AI 代理宿主（Cursor/Claude/VS Code 等）直连。
+  //   必须在 help/url 门之前接管（mcp 是子命令不是旗标，parseArgs 会把它当无值噪音）。
+  if (argvRaw[0] === 'mcp') {
+    const { runMcpStdio } = await import('../src/mcp/index.js');
+    await runMcpStdio();
+    process.exit(0);
+  }
   // 对标 sqlmap -r：请求文件优先于 -u，先应用再校验目标参数
   if (args.requestFile && !applyRequestFile(args)) process.exit(1);
   // 对标 sqlmap -l / -m：日志文件与批量文件同样可替代 -u

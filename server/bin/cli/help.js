@@ -14,6 +14,15 @@ export function printHelp() {
   请求文件 node bin/cli.js -r request.txt [选项]
   批量    node bin/cli.js -m <urls.txt> [选项]
 
+子命令:
+  mcp                        MCP server 模式（[D43] 对标 dalfox mcp / semgrep mcp）：stdio NDJSON，
+                             供 AI 代理宿主（Cursor / Claude Code / VS Code 等）直连。工具集：
+                             run_scan / get_scan_status / get_findings / get_report / list_scans /
+                             stop_scan / pause_scan / resume_scan / preflight（零 payload 侦察）。
+                             与 REST 同一配置白名单与 SSRF/scope 护栏——MCP 不是旁路。
+                             宿主配置示例（claude_desktop_config.json / .mcp.json）：
+                             {"command":"node","args":["<repo>/server/bin/cli.js","mcp"]}
+
 选项:
   -r, --request-file <file>  导入请求（对标 sqlmap -r）。支持的来源：
                              · Burp/curl 文本报文   · Burp XML 导出   · HAR（浏览器 F12 / Charles）
