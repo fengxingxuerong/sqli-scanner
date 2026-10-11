@@ -59,6 +59,8 @@ const KNOWN_CFG_KEYS = new Set([
   // [D41 2026-10-11 对标 sqlmap -p/--param-exclude/--param-filter] 注入点筛选三件套
   //（scalarsCore 归一化 → engine/paramSelection.js 在 TargetParser 收口，筛光即硬拒）
   'testParameter', 'paramExclude', 'paramFilter',
+  // [D42 2026-10-11 对标 sqlmap] --ignore-code / --randomize（--dump-format 为 CLI 产物层选项，不进 REST）
+  'ignoreCodes', 'randomize',
   'secondOrder', 'wafEvasion', 'oob', 'noSql', 'blindRobust', 'sessionFile',
   // [P0-FIX 2026-09-10] 布尔盲注二级判据：组间稳定差异（boolStableDiff 总开关 + 采样数）
   'boolStableDiff', 'boolStableDiffSamples',
@@ -415,6 +417,19 @@ export function createRoutes({ scanManager, eventBus: bus = eventBus, reportToke
         } catch (e) {
           logger.warn(`二阶读取页 ${secondUrl} 未通过 SSRF/授权范围校验，已清空（回退触发页）：${e.message}`);
           sanitized.config.secondOrder.secondUrl = '';
+        }
+      }
+      // [D42 2026-10-11] --second-req 整请求触发页与 secondUrl **同级**：它同样携带（抓包带来的）
+      // 会话 Cookie 发出真实请求。校验不过就整体丢弃该请求（回落 URL 触发源），不带病进引擎。
+      const trigReq = sanitized.config?.secondOrder?.triggerRequest;
+      if (trigReq && typeof trigReq.url === 'string' && trigReq.url) {
+        try {
+          await assertSafeHttpTarget(trigReq.url);
+          const trScopeRules = parseScope(sanitized.config?.scope);
+          if (trScopeRules.enabled) assertInScope(trigReq.url, trScopeRules);
+        } catch (e) {
+          logger.warn(`二阶触发请求 ${trigReq.url} 未通过 SSRF/授权范围校验，已整体丢弃（回落 URL 触发源）：${e.message}`);
+          sanitized.config.secondOrder.triggerRequest = null;
         }
       }
       const scanId = await sm.start(sanitized);

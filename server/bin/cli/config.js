@@ -9,9 +9,12 @@
 // 导入路径不变是硬约束。
 // ============================================================================
 import { parseHeaders, parseAuth } from './args.js';
+import { readFileSync } from 'node:fs';
 import { logger } from '../../src/core/logger.js';
 import { defaults } from '../../src/config/defaults.js';
 import { PAYLOADS, enableDestructivePayloads } from '../../src/engine/payloads.js';
+// [D42 2026-10-11] --second-req：二阶触发页抓包文件解析（与 -r 同源归一化）
+import { parseRequestCollection } from '../../src/core/requestCollectionParser.js';
 
 /**
  * Cookie 串（`a=1; b=2`）→ 键值对象；无 `=` 的片段忽略。
@@ -249,6 +252,61 @@ export function buildConfig(args) {
     const so = patchGroup(config, 'secondOrder', { enabled: true });
     so.triggerUrls = [...(so.triggerUrls || []), args.secondOrderUrl];
   }
+  // [D42 2026-10-11 对标 sqlmap --second-req] 二阶触发页整请求文件：
+  // 触发页常需 POST + 认证头 + CSRF —— --second-order <url> 只有 URL，表达不了这些。
+  // 与 -r 共用同一解析器（Burp/curl/HAR 集合格式都吃）；方法/头/体原样进
+  // secondOrder.triggerRequest，幂等门与 SSRF 校验仍由引擎/路由层执行（不在此放行）。
+  if (typeof args.secondReq === 'string' && args.secondReq) {
+    let coll;
+    try {
+      coll = parseRequestCollection(readFileSync(args.secondReq, 'utf-8'));
+    } catch (e) {
+      throw new Error(`--second-req 文件读取失败：${args.secondReq}（${e?.message || e}）`, { cause: e });
+    }
+    if (!coll.requests.length) {
+      throw new Error(`--second-req 请求文件解析失败（未见合法请求行）：${args.secondReq}`);
+    }
+    const r0 = coll.requests[0];
+    if (coll.requests.length > 1) {
+      logger.warn(`--second-req 识别出 ${coll.requests.length} 个请求，只取第 1 个：${r0.label || r0.url}`);
+    }
+    if (!/^https?:\/\//i.test(r0.url)) {
+      throw new Error(`--second-req 第 1 个请求不是 http(s) URL：${r0.url}`);
+    }
+    const so = patchGroup(config, 'secondOrder', { enabled: true });
+    so.triggerRequest = {
+      url: r0.url,
+      method: String(r0.method || 'GET').toUpperCase(),
+      headers: r0.headers && typeof r0.headers === 'object' ? r0.headers : {},
+      body: typeof r0.body === 'string' ? r0.body : '',
+    };
+  }
+  // [D42 2026-10-11 对标 sqlmap --ignore-code] 忽略指定 HTTP 错误码（100-599，clamp 16 个）
+  if (args.ignoreCode != null && String(args.ignoreCode).trim()) {
+    const codes = String(args.ignoreCode)
+      .split(',')
+      .map((s) => Number(s.trim()))
+      .filter((n) => Number.isInteger(n) && n >= 100 && n <= 599)
+      .slice(0, 16);
+    if (codes.length) config.ignoreCodes = [...new Set(codes)];
+    else throw new Error(`--ignore-code 无法解析出合法状态码（100-599，逗号分隔）：${args.ignoreCode}`);
+  }
+  // [D42 2026-10-11 对标 sqlmap --randomize] 注入请求随机化指定参数值（防锁定）
+  if (args.randomize != null && String(args.randomize).trim()) {
+    const list = String(args.randomize).split(',').map((s) => s.trim()).filter(Boolean).slice(0, 16);
+    if (list.length) config.randomize = list;
+  }
+  // [D42 2026-10-11 对标 sqlmap --dump-format] 拖库产物格式（产物层消费；非法直接拒启动）
+  if (args.dumpFormat != null && String(args.dumpFormat).trim()) {
+    const fmt = String(args.dumpFormat).trim().toLowerCase();
+    if (!['csv', 'sql', 'html', 'json'].includes(fmt)) {
+      throw new Error(`--dump-format 只认 csv/sql/html/json，收到：${args.dumpFormat}`);
+    }
+    config.dumpFormat = fmt;
+  }
+  // [D42 2026-10-11] --verify / --no-verify：盲注提取复核（引擎默认开，这里补显式开关）
+  if (args.extractVerify === true) patchGroup(config, 'blindRobust', { extractVerify: true });
+  else if (args.extractVerify === false) patchGroup(config, 'blindRobust', { extractVerify: false });
   if (args.smart) config.prefilter = true;
   // [D41 2026-10-11 对标 sqlmap -p/--param-exclude/--param-filter] 注入点筛选三件套。
   // 归一化/硬拒判据统一在 engine/paramSelection.js（TargetParser 收口）；CLI 只做形态透传。

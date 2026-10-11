@@ -67,6 +67,11 @@ const CLI_ONLY_KEYS = new Map([
   ['randomUA', '顶层 config.randomUA 在 server/src 内 0 个读取点；活路径是 wafEvasion.randomUA'
     + '（sanitizeStart 从 we 上取）。CLI 的 --random-agent 同时写了这两个，顶层那个是空转冗余，'
     + '已记入 TODO 待清（不是 REST 缺口，所以此处豁免）'],
+  // [D42 2026-10-11] dumpFormat：引擎不消费（config 只被 deepMerge 透传进 target.config），
+  // 消费点在**交付产物层**（scripts/one-click-scan.mjs 按 cfg.dumpFormat 写 dump.<ext>）；
+  // REST 侧没有对应产物写出口（/report/export 的 format 是另一套枚举）——加白名单反而是
+  // 「白名单有、无人消费」的假开关，故按 CLI 专属豁免。若未来 REST 导出接 dump 产物，移出此表。
+  ['dumpFormat', '消费点在 one-click 产物层（dump.<ext> 独立文件），REST 导出走另一套 format 枚举'],
 ]);
 
 const cliWritten = new Set();

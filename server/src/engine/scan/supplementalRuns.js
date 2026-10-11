@@ -16,7 +16,13 @@ export async function _runSecondOrder(scanId, target, points, dbms) {
     const so = (target.config && target.config.secondOrder) || {};
     if (!so.enabled) return []; // 未启用：直接跳过，对目标零写
     const triggerUrls = Array.isArray(so.triggerUrls) ? so.triggerUrls : [];
-    if (triggerUrls.length === 0) return []; // 无候选触发页：跳过
+    // [D42 2026-10-11 对标 sqlmap --second-req] 整请求形态的触发页（triggerRequest）：
+    // 与 triggerUrls 并列的第二个触发源（本批只支持单份抓包触发页）。
+    const triggerRequest = so.triggerRequest && typeof so.triggerRequest === 'object'
+      && typeof so.triggerRequest.url === 'string' && /^https?:\/\//i.test(so.triggerRequest.url)
+      ? so.triggerRequest
+      : null;
+    if (triggerUrls.length === 0 && !triggerRequest) return []; // 无候选触发页：跳过
     const storePoints = points.filter((p) => p && p.isStorePoint);
     if (storePoints.length === 0) return []; // 无存储点：跳过
 
@@ -60,7 +66,9 @@ export async function _runSecondOrder(scanId, target, points, dbms) {
       async (group) => {
         for (const point of group) {
           const pointDbms = dbms || point.dbms; // 复用一阶已识别的 dbms（若有时）
-          for (const triggerUrl of triggerUrls) {
+          // [D42] 触发源：URL 列表 ∪ 整请求抓包（triggerRequest 只有一份，占一个槽位）
+          const triggerSources = triggerRequest ? [...triggerUrls, triggerRequest.url] : triggerUrls;
+          for (const triggerUrl of triggerSources) {
             const ctx = { ...ctxBase, target, point, dbms: pointDbms, triggerUrl, scanId };
             try {
               const result = await this.secondOrderDetector.detect(ctx);

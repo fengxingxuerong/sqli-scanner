@@ -52,6 +52,8 @@ export function buildKnownArgKeys(parseArgsFn) {
     'advise', 'yes',
     // —— [D41] 注入点筛选三件套 / 配置档案 ——
     'testParam', 'paramExclude', 'paramFilter', 'configFile', 'saveConfigFile',
+    // —— [D42] 对标 sqlmap 四件 + --verify 开关 ——
+    'secondReq', 'ignoreCode', 'randomize', 'dumpFormat', 'extractVerify',
   ];
   const known = new Set(Object.keys(parseArgsFn([])));
   for (const k of dyn) known.add(k);

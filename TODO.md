@@ -20,14 +20,28 @@
 | 参数筛选三件套 | `-p/--test-param`、`--param-exclude <re>`、`--param-filter <place>`（对标 sqlmap 同名）：TargetParser 收口（`engine/paramSelection.js` 单一归一化，CLI/REST/档案三路同源），筛光点位即硬拒并列出可用点位——0 点扫描不许伪装成「未检出」 | `tests/paramSelection.test.js` 19/19 |
 | CLI 补接既有键 | `--retries`（0-5）/ `--http-timeout`（1s-60s）：引擎 `config.retry/timeoutMs` 与 REST 白名单早已有、CLI 一直缺入口 | 同上 |
 | `--skip` 错位修复 | `buildConfig` 里 skipParams 映射嵌在 `csrfUrl` 块内——不配 `--csrf-url` 时 `--skip` **静默失效**（「传了没生效」红线；顺带踩实：缩进撒谎，`} ` 才是事实） | 同上（回归钉） |
-| 配置档案 | `--config <file>` 预载（argv > 档案 > 默认，未知键硬拒）+ `--save-config <file>` 增量落盘可复扫（对标 sqlmap -c/--save + ffuf -config）。键注册表在 `bin/cli/configFile.js`（默认键 ∪ 动态键显式登记） | `tests/cli.configFile.test.js` 7/7 |
+| 配置档案 | `--config <file>` 预载（argv > 档案 > 默认，未知键硬拒）+ `--save-config <file>` 增量落盘可复扫（对标 sqlmap -c/--save + ffuf -config）。键注册表在 `bin/cli/configFile.js`（默认键 ∪ 动态键显式登记） | `tests/cli.configFile.test.js` 8/8 |
 | AGENTS.md | AI 代理/CI 驱动契约：授权红线、CLI/REST 最小闭环、结果判读三陷阱、工程纪律（对标 dalfox/semgrep 的 agent-facing 文档实践） | 静态文档 |
+
+### D42 已落地（2026-10-11，同日第二波）
+
+| 项 | 内容 | 验证 |
+|---|---|---|
+| `--second-req <file>` | 二阶触发页整请求（对标 sqlmap 同名）：`-r` 同源解析器 → `secondOrder.triggerRequest {url,method,headers,body}`；`_trigger` 优先消费（幂等门 `resolveSecondOrderMethod` 照走、会话 cookie 合并照做），编排门与 URL 触发源并列；REST 闸 clamp + SSRF/scope 校验与 `secondUrl` 同级 | `tests/d42.sqlmapParity.test.js` 15/15 |
+| `--ignore-code <codes>` | 忽略码不参与「拦截/会话失效/5xx」三本账（内容照常比对），按业务响应计账 + `counts.ignoredHits` 透出；`ScanValidityGuard.observe` 单缝 + scanRunner 透传 + CLI/REST | 同上 |
+| `--randomize <params>` | 注入请求随机化指定参数（URL query/Cookie/请求头/表单伴随字段），注入点自身与传输关键头（Host/CL/CT/Authz/Cookie）永不随机化；JSON/XML body 不覆盖（诚实边界写在 help 与代码注释） | 同上 |
+| `--dump-format` 接线 | `engine/dumpFormat.js` 四格式化函数与 27 条既有单测早已在、链路从未接通（Extractor 头部注释自证）——一键扫描产物层接通：有拖库数据时产出 `dump.<ext>`（csv 带 BOM 与 report.csv 同口径）；报告内嵌拖库区不变 | 同上 + one-click |
+| `--verify`/`--no-verify` CLI 开关 | **勘缝发现第 1 条路线图项已被本仓超前实现**：`blindRobust.extractVerify`（每字节等值确认 + 完整值复验 + 失败重测，布尔/时间双通道，默认开）——本批只补 CLI 显式开关与文档口径 | 同上 |
+
+**勘缝时的口径修正（防后人重复调研）**：ghauri `--verify` ≈ 本仓 `blindRobust.extractVerify`（更全）；
+jSQL 多比特 ≈ 本仓 `blindBitwise` 位平面提取（8 位并行，MySQL/TiDB 族）；sqlmap `--charset`
+思路 ≈ 本仓字符类收窄（cls-digits/cls-lower 探测）。这三条从队列销掉。
 
 ### D42+ 吸收队列（按 价值×可行性 排序；每批落地前先在 TODO 本节登记口径）
 
 **检测可靠性族（ghauri 派）**
 
-1. **布尔/时间盲注字符复核 `--verify`**（ghauri）：提取字符逐位（或抽样）复验一次再落库，弱网/限速目标的拖库假字符防线。接缝：`engine/extraction/blindFns.js` 二分收敛处；验证口径：mock 抖动靶点，开/关对照假字符率。代价 S，价值 High。
+1. ~~**布尔/时间盲注字符复核 `--verify`**（ghauri）~~ —— ✅ **勘缝发现已被本仓超前实现**（`blindRobust.extractVerify`：每字节等值确认 + 完整值复验 + 失败重测，默认开），D42 只补了 CLI 开关（`--verify`/`--no-verify`）。
 2. **`--fetch-using=between/in`**（ghauri）：布尔提取算子策略切换（`<>`/`=` 被过滤时换 `BETWEEN`/`IN`，兼省请求）。接缝：blindFns 算子模板化。代价 S，价值 Med。
 3. **多比特提取（jSQL Strategy 6）**：多值渲染目标 3 bit/请求。需先造「7 值 7 页」靶点，接缝同上。代价 M，价值 Med。
 4. **时间通道动态基线**（BlindSQL）：每靶点先测 N 条基线 RTT，阈值=基线+k·σ，扫描中重标定。本仓 `autoDynamicBlock` 只管内容噪声，时延噪声还没有对偶物。接缝：time 探测标定段（`timeBlindCalibrate` 旁）。代价 S，价值 Med。
@@ -46,10 +60,10 @@
 
 **SQL 面补齐族（sqlmap 派，全部已核对本仓 args.js 确认缺位）**
 
-11. `--ignore-code <codes>`：跳过指定错误码继续扫。接缝已勘明：`engine/egressOpts.js isUnusableResponse` + `core/scanValidityGuard.js`（BLOCK_STATUSES/authLost 判定要认 ignoreCodes 白名单）。代价 S，价值 Med。
-12. `--randomize <params>`：非注入参数每请求随机化防锁定。接缝：buildInjectionRequest 出站前替换列表内参数的 original 值。需真靶场验证（防锁定行为本身）。代价 S，价值 Med。
-13. `--second-req <file>`：二阶触发页从「URL」升级为「完整请求文件」（复用 `-r` 解析器，支持 POST+头+CSRF 的触发页）。接缝：`secondOrder.triggerUrls` 旁加 `triggerRequest`。代价 S，价值 Med。
-14. `--dump-format` 接线：`engine/dumpFormat.js` 四格式化函数与 27 条测试早在，链路未接（Extractor.js 头部注释自证「ctx.config.dumpFormat 都未被接线」，2026-10-05 死代码清理后接口就位）。接法：报告 dump 区渲染与 `report.csv` 落盘处按 `config.dumpFormat` 调 `formatDumpData`。代价 S，价值 Med。
+11. ~~`--ignore-code <codes>`~~ —— ✅ **D42**（observe() 单缝 + ignoredHits 透出）。
+12. ~~`--randomize <params>`~~ —— ✅ **D42**（buildInjectionRequest 出站随机化；JSON/XML body 不覆盖已如实标注）。
+13. ~~`--second-req <file>`~~ —— ✅ **D42**（secondOrder.triggerRequest 全链路 + SSRF 同级校验）。
+14. ~~`--dump-format` 接线~~ —— ✅ **D42**（一键扫描产物层接通 `dump.<ext>`；报告内嵌区不变）。
 15. `-b/--banner`、`--statements`、`--procs`、`-U <user>`、`--exclude <db>`：枚举面补齐（方言查询目录在 `extraction/sysQueries.js` 已有底子）。每条代价 S-M，价值 Med。
 16. `--chunked`（Transfer-Encoding 分块发 body，WAF 不缓冲不检的真向量）、`--safe-post/--safe-req`（POST 保活）、`--load-cookies/--live-cookies`（会话接力）、`--crawl-exclude <re>`、`--postprocess <file.js>`（响应侧解密，与 `--request-script` 对偶）：各自代价 S，价值 Med（`--postprocess` High，加密响应目标现状是静默比对失败）。
 

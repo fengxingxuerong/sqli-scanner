@@ -56,6 +56,21 @@ export function guardSecondOrder(config, cfg) {
       // 过滤 __proto__/constructor/prototype 等危险键（对象字面量展开会沿原型链污染）。
       storeCookies: sanitizeCookieMap(so.storeCookies),
       triggerCookies: sanitizeCookieMap(so.triggerCookies),
+      // [D42 2026-10-11 对标 sqlmap --second-req] 整请求形态触发页（CLI 从 -r 同源解析器组装）。
+      // 形状 clamp：url 协议白名单（SSRF/授权校验在路由 handler async 层，与 secondUrl 同链）、
+      // method 长度 clamp（单一真相在引擎 resolveSecondOrderMethod，含白名单+幂等门，不在此重复）、
+      // headers 复用 sanitizeCookieMap（string:string + 原型污染键过滤）、body 字符串 clamp 16K。
+      triggerRequest: so.triggerRequest && typeof so.triggerRequest === 'object'
+        && typeof so.triggerRequest.url === 'string' && /^https?:\/\//i.test(so.triggerRequest.url)
+        ? {
+            url: so.triggerRequest.url.slice(0, 2048),
+            method: typeof so.triggerRequest.method === 'string' && so.triggerRequest.method.trim()
+              ? so.triggerRequest.method.split(/[\r\n]/)[0].trim().toUpperCase().slice(0, 16)
+              : 'GET',
+            headers: sanitizeCookieMap(so.triggerRequest.headers) || {},
+            body: typeof so.triggerRequest.body === 'string' ? so.triggerRequest.body.slice(0, 16384) : '',
+          }
+        : defaults.secondOrder.triggerRequest,
     };
   }
 }

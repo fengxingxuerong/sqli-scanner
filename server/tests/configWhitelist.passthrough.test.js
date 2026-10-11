@@ -65,6 +65,9 @@ const PROBE = {
   testParameter: ['id', 'name'],
   paramExclude: 'ses|csrf',
   paramFilter: 'get,post',
+  // [D42 2026-10-11] --ignore-code / --randomize 探针值（默认探针 1 过不了数组形状校验）
+  ignoreCodes: [401, 403],
+  randomize: ['csrf', 'page'],
   // [P0 2026-09-09 实战批次] 新键探针值（默认探针 1 过不了键自身校验）
   invalidValue: 'bignum',
   knownPoint: { param: 'id' },
@@ -217,6 +220,13 @@ const EXPLICIT_ALT = {
   'secondOrder.secondMethod': 'POST',
   'secondOrder.triggerMethod': 'POST',
   'secondOrder.secondData': { id: 7 },
+  // [D42] triggerRequest 有协议白名单（url 必须 http(s)），通用 {alt:true} 会被合法拒绝
+  'secondOrder.triggerRequest': {
+    url: 'http://shop.example.com/trigger',
+    method: 'POST',
+    headers: { cookie: 's=1' },
+    body: 'a=1',
+  },
   'oob.callbackBase': 'oob.example.com:9100',
   'oob.dnsDomain': 'dns.example.com',
   'wafEvasion.tamper': { enabled: true, plugins: ['spacev2'], intensity: 'high' },

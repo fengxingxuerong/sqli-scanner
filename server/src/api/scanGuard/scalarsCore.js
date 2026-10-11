@@ -143,6 +143,18 @@ export function guardScalarsCore(config, cfg, scopeRules) {
       logger.warn(`paramFilter 形态非法，已忽略（${e?.message || e}）`);
     }
   }
+  // [D42 2026-10-11 对标 sqlmap --ignore-code / --randomize]（REST 口径，clamp 与 CLI 同源）
+  if (Array.isArray(cfg.ignoreCodes)) {
+    const codes = cfg.ignoreCodes
+      .map((n) => Number(n))
+      .filter((n) => Number.isInteger(n) && n >= 100 && n <= 599)
+      .slice(0, 16);
+    if (codes.length) config.ignoreCodes = [...new Set(codes)];
+  }
+  if (Array.isArray(cfg.randomize)) {
+    const list = cfg.randomize.map((s) => String(s).trim()).filter(Boolean).slice(0, 16);
+    if (list.length) config.randomize = list;
+  }
   const dumpConcurrency = pickInt(cfg, 'dumpConcurrency', defaults.dumpConcurrency, 1, 16);
   if (dumpConcurrency !== undefined) config.dumpConcurrency = dumpConcurrency;
   const dumpDatabaseConcurrency = pickInt(cfg, 'dumpDatabaseConcurrency', defaults.dumpDatabaseConcurrency, 1, 16);

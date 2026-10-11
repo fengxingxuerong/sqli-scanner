@@ -52,6 +52,24 @@ export function printHelp() {
   --param-filter <place,...> 按位置筛选注入点（[D41] 对标 sqlmap --param-filter）：
                              url/query/get、body/post/form、header、cookie、path（大小写不敏感）。
                              例：--param-filter body —— 只测 body 参数（query 已签名/已被 CDN 固定时）
+  --second-req <file>        二阶触发页整请求文件（[D42] 对标 sqlmap --second-req）：从 Burp/curl
+                             抓包导入 URL/method/headers/body（与 -r 同一解析器）。触发页需要
+                             POST + 认证头 + Cookie 时 --second-order <url> 表达不了——认证触发页
+                             不带会话必 401，二阶必漏。方法仍过幂等门：productionMode 下 POST 触发
+                             读取需 --allow-second-order-writes
+  --ignore-code <c1,c2>      忽略指定 HTTP 错误码（[D42] 对标 sqlmap --ignore-code，100-599）：
+                             这些状态码不再计入「拦截/会话失效/服务器错误」可信度判定（响应内容
+                             照常参与比对）。注入点确实坐在 401/500 后面的目标（单点鉴权接口）
+                             不配它，结论会被拖成 blocked/session_expired 而不是照常检测
+  --randomize <p1,p2>        每条注入请求随机化指定参数的值（[D42] 对标 sqlmap --randomize）：
+                             长枚举/拖库时防止反爆破计数把出口 IP 锁死。覆盖 URL query / Cookie /
+                             请求头 / 表单伴随字段；注入点自身永不随机化；JSON/XML body 不覆盖
+  --dump-format <fmt>        拖库数据独立产物格式（[D42] 对标 sqlmap --dump-format，csv/sql/html/json）：
+                             有拖库数据时产出 dump.<ext>（一键扫描目录内）。只影响独立产物，
+                             报告内嵌的拖库区不变。非法格式拒绝启动
+  --no-verify                关闭盲注提取复核（[D42]；默认开：每字节收敛后等值确认 + 完整值
+                             整体复验，失败自动重测——弱网/限速目标的拖库假字符防线，开销约
+                             +1 请求/字节）。--verify 显式开启（与默认一致，幂等）
   --test-headers             把显式传入的请求头（--header 或 -r 请求文件中的头，如 Cookie / X-Forwarded-For）
                              作为注入点测试（默认关闭：保持现有行为，头仅作会话透传）。授权的渗透测试中，
                              服务端按请求头取值拼 SQL 的场景（如 SELECT ... WHERE id=\${x_forwarded_for}）必须开启才能检出

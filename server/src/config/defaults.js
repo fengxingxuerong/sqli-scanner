@@ -220,6 +220,15 @@ export const defaults = {
   // 等常见表达式的二分提取结果跨注入点复用，命中后直接返回，减少重复二分请求。false 关闭缓存。
   predictOutput: true,
 
+  // [D42 2026-10-11 对标 sqlmap --randomize] 注入请求随机化指定参数值（防反爆破锁定）
+  randomize: [],
+  // [D42 2026-10-11 对标 sqlmap --ignore-code] 忽略的 HTTP 错误码（不参与拦截/会话失效/5xx 判定）
+  ignoreCodes: [],
+  // 注：--dump-format 不进 defaults —— 它是 CLI/一键扫描**产物层**选项（one-click 按
+  // cfg.dumpFormat 写 dump.<ext>），引擎不消费；进 defaults 会被「defaults 全量 ⊆ 白名单」
+  // 守卫逼着进 REST 白名单，而 REST 导出没有对应消费路径（configReachability.guard 的
+  // CLI_ONLY_KEYS 豁免已注明理由）。
+
   // WAF 规避（默认全部关闭，开启会改变请求形态与时序）
   wafEvasion: {
     randomUA: false, // 随机 User-Agent 池
@@ -410,6 +419,10 @@ export const defaults = {
     secondUrl: '', // 读取触发页 URL（空=沿用 triggerUrl，保持现有行为）
     secondMethod: 'GET', // 读取触发页的 HTTP 方法（默认 GET；[P0-FIX 2026-09-09] 走白名单归一化，非法值回落 GET）
     secondData: null, // 读取触发页的请求体（可选，POST 场景使用）
+    // [D42 2026-10-11 对标 sqlmap --second-req] 二阶触发页整请求（-r 同源解析）：触发页需要
+    // POST + 认证头 + CSRF 时，URL 型 triggerUrls/secondUrl 表达不了。null=未配置（零回归）；
+    // 形状 { url, method, headers, body }，幂等门仍由 resolveSecondOrderMethod 执行。
+    triggerRequest: null,
     // [P0-FIX 2026-09-09] 触发页读取方法（此前硬编码 GET 的那处：_refreshCsrf 取 actionUrl 的页面）。
     // 默认 GET（零回归）；同样只接受 HTTP 方法白名单，非法值回落 GET。
     triggerMethod: 'GET',

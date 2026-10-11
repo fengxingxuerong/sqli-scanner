@@ -4,6 +4,69 @@
 
 ## [Unreleased]
 
+### 2026-10-11 批次 D42 · 同源项目优点吸收第二波（--second-req / --ignore-code / --randomize / --dump-format 接线）+ --verify 口径修正
+
+**一句话**：吸收路线图（D42+ 队列）第二波四件 + 一条重要勘缝结论——ghauri `--verify`
+语义本仓**早已超前实现**（`blindRobust.extractVerify`），本批只补 CLI 开关；jSQL 多比特 ≈
+本仓 `blindBitwise` 位平面，sqlmap `--charset` ≈ 本仓字符类收窄，三条队列项当场销账。
+
+#### ① `--second-req <file>`（对标 sqlmap --second-req）
+
+- 二阶触发页从「URL」升级为「整请求」：`-r` 同源解析器（Burp/curl/HAR）→
+  `secondOrder.triggerRequest {url, method, headers, body}`。认证触发页（POST + Cookie/CSRF）
+  此前只有 `--second-order <url>`，不带会话必 401 → 二阶必漏。
+- 引擎：`SecondOrderDetector._trigger` 优先消费 triggerRequest（优先级高于 secondUrl/
+  secondMethod/secondData）；**幂等门照走**（productionMode 下非幂等触发读取需
+  `--allow-second-order-writes`）；会话 cookie 合并照做（抓包 Cookie 优先）。
+- 编排门（supplementalRuns）与 URL 触发源并列；REST 闸 clamp（method 大写化/headers
+  原型污染键过滤/body 16K）；**SSRF + 授权范围校验与 secondUrl 同级**（不过即整体丢弃，
+  不带病进引擎）。
+
+#### ② `--ignore-code <codes>`（对标 sqlmap --ignore-code）
+
+- 指定状态码不再参与「拦截 / 会话失效 / 服务器错误」三本账（响应内容照常参与比对），
+  按「应用在回应」计账；`counts.ignoredHits` 固定透出（报告契约不随配置漂移）。
+- 单缝实现：`ScanValidityGuard.observe()` + scanRunner 透传 `config.ignoreCodes`；
+  构造器只收 100-599 整数（**0「网络失败」不可忽略**——那是另一类不可用，语义不混）。
+- 用途：注入点确实坐在 401/500 后面的目标（单点鉴权接口）不配它，结论会被拖成
+  blocked/session_expired 而不是照常检测。
+
+#### ③ `--randomize <p1,p2>`（对标 sqlmap --randomize）
+
+- 每条注入请求随机化指定参数值（buildInjectionRequest 按请求调用，天然每请求新鲜），
+  长枚举/拖库防反爆破锁定。覆盖 URL query / Cookie / 请求头 / 表单伴随字段；
+  **注入点自身永不随机化**（打断判定）；Host/Content-Length/Content-Type/Authorization/Cookie
+  头永不随机化（打碎报文框架或自断会话）。
+- 诚实边界（help 与代码注释同文）：JSON/XML body 叶子不随机化（顶层键与点路径归属有
+  歧义）；`--param-del` 自定义分隔符 URL 不随机化。
+
+#### ④ `--dump-format <csv|sql|html|json>` 接线（对标 sqlmap --dump-format）
+
+- `engine/dumpFormat.js` 四个格式化函数与 27 条既有单测早已在、**链路从未接通**
+  （Extractor.js 头部注释自证「ctx.config.dumpFormat 都未被接线」）。本批在一键扫描
+  产物层接通：有拖库数据时产出 `dump.<ext>`（csv 带 Excel BOM，与 report.csv 同口径）。
+- 边界：只影响独立产物文件，报告内嵌拖库区（数据提取树 / report.csv 内嵌表）不变；
+  非法格式拒绝启动（不静默降级）。
+
+#### ⑤ `--verify` / `--no-verify` CLI 开关
+
+- 勘缝结论：路线图第 1 条（ghauri --verify 字符复核）本仓**已超前实现**——
+  `blindRobust.extractVerify` 默认开：每字节收敛后等值确认、失败回退重测（≤2 次）、
+  完整值整体复验（P2-P2/P2-P7），布尔与时间双通道。本批补 CLI 显式开关与 help 口径
+  （+约 1 请求/字节，`--no-verify` 换速度）。
+
+#### ⑥ 验证口径
+
+- 新增 `tests/d42.sqlmapParity.test.js` 15 条：second-req（CLI 组装/失败硬拒/REST clamp/
+  非法 URL 回落）、ignore-code（三本账豁免 + ignoredHits + 非法形态过滤 + 零回归钉）、
+  randomize（三位置随机化 + 零回归钉 + 注入点/关键头保护 + 表单字段）、dump-format
+  （CLI 归一化硬拒 + formatDumpData 三格式）、verify 开关。
+- configWhitelist.passthrough 补 ignoreCodes/randomize 探针值；`configFile.js` 键注册表
+  补 5 个新旗标（--save-config 增量与 --config 预载自动覆盖它们）。
+- 未做（诚实边界）：`--second-req` 未在真靶场跑双身份 e2e（建议归入 real-world-lab
+  下一轮：抓包触发页 + triggerCookies 场景）；`--randomize` 防锁定效果本身需要真 WAF/风控
+  靶场才可证（本批只证「每请求变值 + 不破坏请求形态」）。
+
 ### 2026-10-11 批次 D41 · 同源项目优点吸收第一波（参数筛选三件套 / 配置档案 / CLI 补线）+ --skip 静默失效修复
 
 **一句话**：按「吸取同类 GitHub 项目全部优点」的三路调研（sqlmap 全量参数面 / ghauri·jSQL·wafw00f

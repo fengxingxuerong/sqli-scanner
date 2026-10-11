@@ -121,6 +121,33 @@ export function buildInjectionRequest(target, point, value) {
     headers: { ...(target.headerParams || {}) },
   };
   const cookies = { ...(target.cookieParams || {}) };
+  // [D42 2026-10-11 对标 sqlmap --randomize] 随机化非注入参数（防反爆破/风控锁定）：
+  // config.randomize 列出的参数名在本函数产出的**每一条请求**上换成随机值（本函数按请求
+  // 调用，天然每请求新鲜）。注入点自身（point.param）永不随机化——那会打断检测判定。
+  // 覆盖面（诚实边界）：URL query / Cookie / 请求头 / 表单伴随字段四处「伴随参数」；
+  // JSON body（jsonBody）与 XML 叶子不随机化（顶层键与点路径归属有歧义）；
+  // --param-del 自定义分隔符的 URL 不随机化（query 按裸串重建，避开写出畸形请求）。
+  // 未配置（默认）时 rndNames=null，全路径零行为变化。
+  const rndNames = target && target.config && Array.isArray(target.config.randomize) && target.config.randomize.length
+    ? target.config.randomize.map((s) => String(s).toLowerCase())
+    : null;
+  const rndVal = () => `r${Math.random().toString(36).slice(2, 10)}`; // 字母数字：URL/头/体/cookie 全安全
+  const rndHit = (name) => {
+    if (!rndNames) return false;
+    const k = String(name).toLowerCase();
+    return rndNames.includes(k) && k !== String((point && point.param) || '').toLowerCase();
+  };
+  // 传输/安全关键头不随机化：Content-Length/Host 随机会打碎报文框架，Authorization/
+  // Content-Type/Cookie 随机等于自断会话与编码——要动它们请走 --header 显式覆盖。
+  const RND_HEADER_DENY = new Set(['host', 'content-length', 'content-type', 'authorization', 'cookie']);
+  if (rndNames) {
+    for (const k of Object.keys(req.headers)) {
+      if (!RND_HEADER_DENY.has(k.toLowerCase()) && rndHit(k)) req.headers[k] = rndVal();
+    }
+    for (const k of Object.keys(cookies)) {
+      if (rndHit(k)) cookies[k] = rndVal();
+    }
+  }
   // [P0-FIX 2026-09-07] cookieParams = 会话上下文，必须无条件携带到所有 HTTP 注入点的
   // 请求上——登录后才可见的后台/用户中心是注入重灾区，此前仅 cookie 注入点分支会写
   // Cookie 头，url/body/header 注入点的请求全部裸奔（实测 80 请求 0 个带 sid，
@@ -138,6 +165,15 @@ export function buildInjectionRequest(target, point, value) {
   }
   if (point.location === 'url') {
     const u = new URL(req.url);
+    // [D42] randomize：URL query 的非注入参数（大小写敏感——URL query 参数语义上区分大小写；
+    // --param-del 分支不走这里，见上方覆盖面说明）
+    if (rndNames) {
+      for (const name of rndNames) {
+        if (name !== String(point.param || '').toLowerCase() && u.searchParams.has(name)) {
+          u.searchParams.set(name, rndVal());
+        }
+      }
+    }
     // [P0-FIX 2026-09-06] 已编码 payload 跳过二次编码：charencode/chardoubleencode 类
     // tamper 的输出本身就是 URL 编码形态，searchParams.set 会把 % 再编码为 %25（双重编码）
     // → 服务器单次解码后 payload 仍是编码形态 → SQL 层收到乱码、回显标记失配
@@ -215,6 +251,13 @@ export function buildInjectionRequest(target, point, value) {
     // 表单点：将表单全部字段并入 data（含 CSRF token），再把当前注入参数覆盖为注入值
     const formValues = point.formValues || {};
     req.data = { ...formValues };
+    // [D42] randomize：表单伴随字段（CSRF token 也在 formValues 里——用户把 token 名列进
+    // --randomize 是自断会话，按用户指令执行；注入点自身已被 rndHit 排除）
+    if (rndNames) {
+      for (const k of Object.keys(req.data)) {
+        if (rndHit(k)) req.data[k] = rndVal();
+      }
+    }
     req.data[point.param] = injected;
     // [P1 2026-09-22] multipart 目标：目标请求头声明了 multipart/form-data 时，
     // 必须以 multipart 形态重建报文 —— 否则发成 urlencoded / JSON，只吃 multipart 的目标
