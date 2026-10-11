@@ -4,6 +4,58 @@
 
 ## [Unreleased]
 
+### 2026-10-11 批次 D43 · 原生 MCP server（`cli.js mcp`，stdio，零依赖）——AI 代理直驱扫描器的第一等公民入口
+
+**一句话**：吸收路线图第 17 条（工程化族最高位）落地：`node server/bin/cli.js mcp` 起 stdio
+MCP 服务（对标 dalfox `mcp` / semgrep 并入主二进制的终局形态——**MCP 是 CLI 的一个模式**，
+不是独立服务）。2026-10 同类现状：dalfox/semgrep/trivy/ZAP 官方已内置，nuclei 仅社区版，
+sqlmap 没有——本仓率先在 SQLi 赛道补齐。
+
+#### ① 形态与工具集（9 个）
+
+- `run_scan`（异步启动返回 scanId）/ `get_scan_status` / `get_findings`（CWE·CVSS·
+  受影响参数·PoC curl 的紧凑四要素，与 manifest findings 同源口径）/ `get_report`
+  （json/markdown/html/csv/sarif，超 20 万字符截断）/ `list_scans`（内存在途 + 台账归档合并）/
+  `stop_scan` / `pause_scan` / `resume_scan` / **`preflight`**（零 payload 侦察：1 次基线 GET
+  探可达性 + TargetParser 注入点发现——AI 代理安全用枪的第一步，对标 dalfox `preflight_dalfox`）。
+- 取数口径与 REST 同源：内存上下文回收后回落台账（`scanLedger.readReport`），不存在
+  「REST 有、MCP 没有」的面漂移。
+
+#### ② 护栏继承（红线：MCP 不是旁路）
+
+- `run_scan` 走 **REST 同一条 `sanitizeStart` 闸**（KNOWN_CFG_KEYS 白名单 + clamp），
+  SSRF/scope 由 HttpClient 逐跳执行（与 CLI/REST 相同，MCP 不加闸也不拆闸）。
+- `confirmDestructive` 必须**显式传参**且工具描述写明「用户同意后才能设 true，代理不得代答」；
+  工具结果内嵌授权注记与「verdict=inconclusive ≠ 未检出」提示（get_findings 的 verdictNote）。
+- 业务错误（目标不可达 / 配置被闸拒绝）按 MCP 语义转 `isError` **结果**（调用方拿到可读原因），
+  只有实现 bug 才升级为协议层 INTERNAL_ERROR。
+
+#### ③ 实现（零运行时依赖）
+
+- `src/mcp/protocol.js`：纯协议层（JSON-RPC 2.0 信封 + initialize/ping/tools.list/tools.call；
+  protocolVersion 回显受支持版本、未知回落最新）。协议与 IO 分离——不 import 引擎，单测喂行断行。
+- `src/mcp/tools.js`：工具层（sanitizeStart 闸 + ScanManager/台账取数 + preflight）。
+- `src/mcp/index.js`：stdio 循环（readline NDJSON；**stdout 只写 MCP 消息、日志一律 stderr**
+  —— 混流是 stdio 服务头号事故源；单条消息失败不杀循环）。
+- 入口：`cli.js` 新增 `mcp` 子命令（与 `ledger` 同级的子命令形态，非旗标）。
+
+#### ④ 验证口径
+
+- 新增 `tests/mcp.server.test.js` 8 条：协议单测（握手回显/tools.list/未知工具 -32602/
+  工具抛错转 isError/坏行 -32700/通知不回复）+ 工具单测（假 ScanManager：sanitizeStart 闸
+  逐键断言 + 业务错误 isError + findings 四要素）+ **真靶场端到端**（in-process ScanManager +
+  本地 sqli-labs 形态靶点：preflight 发现 id 参数 → run_scan → 轮询至 completed →
+  get_findings 检出 error 注入 · CWE-89）+ stdio 装配冒烟（spawn 子进程走完整握手与 tools/list）。
+- 本批测试自踩的两个坑（记下防复发）：① **终态值是 `completed` 不是 `finished`**
+  （ScanManager.s.status，status() 直通）——轮询词写错会让测试挂满超时后断言崩、清理被跳过、
+  进程永不退出（listening server 钉住事件循环），修复 = finally 里无条件 close+closeAllConnections；
+  ② **靶点报错文案必须是真实引擎报错形态**——裸 "unrecognized token" 是指纹表专属签名
+  （2026-10-01 收紧，防前端 5xx 误报），通用 ERROR_SIG 不收，靶点必须用
+  `sqlite3.OperationalError:` 真前缀。**没有为让测试变绿而放宽引擎判据**。
+- 未做（诚实边界）：MCP 通知推送（进度经 get_scan_status 轮询而非 notifications/progress，
+  代理侧轮询语义已可闭环）；resources/prompts 面（tools 已覆盖代理用枪全链路）；
+  直连模式（`-d`）的 MCP 形态（run_scan 目前 HTTP 目标口径，direct 走 CLI 入口）。
+
 ### 2026-10-11 批次 D42 · 同源项目优点吸收第二波（--second-req / --ignore-code / --randomize / --dump-format 接线）+ --verify 口径修正
 
 **一句话**：吸收路线图（D42+ 队列）第二波四件 + 一条重要勘缝结论——ghauri `--verify`
