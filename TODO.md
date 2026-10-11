@@ -5,6 +5,59 @@
 
 ---
 
+## 2026-10-12 新增 · 推送前置链（只读盘点）与下一批候选口径
+
+> 本轮**未落地任何代码**，只做仓库状态与 CI 取证（网络可用、本机无法 spawn 子进程期间的静态排查）。
+> 结论：当前**唯一的前置动作是推送**，其余事项几乎全被它阻塞。登记在此防重复调研。
+
+### 状态事实（判据与坑）
+
+| 项 | 事实 |
+|---|---|
+| 远端真 HEAD | `1da1017` = **D39** ⇒ 本地 **D40–D46 共 7 个提交未推送** |
+| 判同步**三不靠** | ① `refs/remotes/origin/*` 陈旧（fetch 不落 ref）；② `git ls-remote`（本机 PATH 上的 Git 缺 `remote-https`）；③ `git rev-list <远端sha>..HEAD`（API 建的 commit **sha 与本地不同** ⇒ 报 bad object）。**正解**：`curl api.github.com/repos/OWNER/REPO/commits?per_page=5` 取远端 HEAD 的 **message**，按提交标题对齐本地 `git log` |
+| facts 状态 | `docs/_facts.json` 采集于 `2026-10-10T18:33:48Z`，其后 **13 个 `server/tests/*` 被改**（D40–D46）⇒ 指纹过期、README 徽章 3855 是旧数（README 与 facts 一致**只说明文档没漂移**，不代表数字是新的） |
+
+### CI 两条红（run #206，push 触发）—— 已定位，非本机环境问题
+
+| job | 红因 |
+|---|---|
+| `lint` | `facts:check` 报采集源已改动（`server/tests/lintScope.guard.test.js`）⇒ 指纹过期即 exit 1 |
+| `test-server` | `lintScope.guard.test.js` 三条 `ERR_MODULE_NOT_FOUND: '@eslint/js'` —— CI 只装 `server/node_modules`，而 `@eslint/js` 在**根** node_modules ⇒ 守卫真加载 `eslint.config.js` 必崩。**D40 的修法（判据采集改静态文本解析）正对此，但从未被 CI 复验**（未推送） |
+
+⚠️ **读 CI 徽章要分两种 skipped**（别混为一谈）：
+
+- **run #206（push）**：lint + test-server FAIL ⇒ 依赖 `test-server` 的下游 job（`acceptance` /
+  `release-smoke` / `sidecar-build` / `docker` / `audit`）**连锁 skipped** —— 这是上游失败的连带。
+- **run #207（schedule）**：ci.yml 每个 job 都有 `if: github.event_name != 'schedule'` ⇒ 10 个 job 跳过，
+  只剩 `tamper-waf-matrix` 与 `modsec-live`（两者 success）⇒ **run 结论 success（夜跑语义，不是全量绿）**。
+
+⇒ **推论**：D39 接进 `acceptance` 的 `pentest-lab` / `api-range-lab` **在 CI 上一次都没真跑过**
+（每次 push 都被上游 test-server 那条红连带跳过）。**只有推送且 lint/test-server 转绿后才有 CI 首跑**，
+那才是 D39 真正的验收点。
+
+### 推送前的动作序列（顺序不可跳）
+
+1. `node scripts/facts-sync.mjs --refresh --coverage`（一批只 refresh 一次）
+2. `node scripts/facts-sync.mjs --fix`
+3. `npm run lint && npm run typecheck && npm run test`
+4. 提交走 **plumbing**（`git add` → `write-tree` → `commit-tree -p <base> -F -` → `update-ref`），
+   **不要用 `git commit`**（本机 husky 曾让对象库损坏加剧、也曾删掉 `.git`）
+5. `node scripts/push-via-api.mjs`（需 `GH_TOKEN`，幂等，约 2.5 分钟）
+
+### 下一批候选口径（登记用，**不占批次号**；落地时按本地 `git log` 最新编号顺延）
+
+| 方向 | 代价 | 验证口径 / 前提 |
+|---|---|---|
+| `--fetch-using=between/in`（ghauri） | S | blindFns 算子模板化；靶点需「`<>`/`=` 被过滤」场景 |
+| 参数名注入（SQLiDetector） | S | TargetParser 新增 location + buildInjectionRequest 换位（列名 / 排序名拼接场景） |
+| 时间通道动态基线（BlindSQL） | S | 每靶点先测 N 条基线 RTT，阈值 = 基线 + k·σ；与 `autoDynamicBlock` 对偶（后者只管内容噪声） |
+| `--postprocess` 响应侧解密 | S–M | 与 `--request-script` 对偶；加密响应目标现状是**静默比对失败**，价值 High |
+| backslash-powered 变换探针 | M | prefilter 阶段前置探针族（`\`、`\\`、`%00`、引号族差分） |
+| interactsh OOB | M | ⚠️ **需公网**：本机离线只能做协议 mock 单测 ⇒ 真机验证另起批次，**建议后置**（否则再留一条未验证账） |
+
+---
+
 ## 2026-10-11 新增 · 同源项目优点盘点（吸收路线图）与批次 D41
 
 > 应「吸取同类 GitHub 项目全部优点」的盘点：三路调研（sqlmap 全量参数面逐条比对
