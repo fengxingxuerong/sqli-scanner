@@ -48,7 +48,14 @@ jSQL 多比特 ≈ 本仓 `blindBitwise` 位平面提取（8 位并行，MySQL/T
 
 **发现/判定族**
 
-5. **wafw00f 式通用差分判定**：对 62 指纹未命中的目标发 4-5 路差分探针（正常/恶意 UA、XSS/LFI/SQLi 探针的状态码/Server 头/cookie 漂移、连接级阻断识别），把「WAF: unknown」变成「疑似有拦截器+证据」。接缝：`core/waf/` 探测器旁路，`--identify-waf` 输出复用。代价 M，价值 High（补 62 指纹的长尾）。
+5. ~~**wafw00f 式通用差分判定**~~ —— ⚠️ **勘缝发现大半已被本仓实现**：`WafIdentifier.activeProbe`
+   本就是「良性 vs 恶意探针 → 状态码差分 → 拦截响应复用指纹 → 行为兜底」的 wafw00f 骨架，
+   且 identify() 已带通用拦截页签名层（generic_block）。**D44 补齐了与 wafw00f 的剩余差距**：
+   +xss/lfi 两向量（区分「SQLi 专项规则」与「全站拦截」）、Server 头差分（genericdetect 判据②）、
+   **连接级阻断识别**（旧实现 `.catch(()=>null)` 把断连型 WAF 整个吞掉——真缺口，现重试一次后
+   分类，防偶发抖动误报）、429 补进拦截码集、evidence 结构化透传；顺带补 `--active-waf-probe`
+   CLI 旗标（扫描期主动探测此前只有 REST 入口）。未采纳：wafw00f 的 UA 差分（第④判据，需要
+   再 +2 请求且国内设备命中率低，记为 non-goal）。
 6. **backslash-powered 变换探针**（PortSwigger）：良性 vs 异常变换对（`\`、`\\`、`%00`、引号族）差分，先摸清服务端解码/归一化行为再选 tamper；顺带覆盖后端参数名爆破（差分响应）。接缝：prefilter 阶段前置探针族。代价 M，价值 High。
 7. **参数名注入**（SQLiDetector）：注入点类型加「参数名本身」（列名/排序名拼接场景）。接缝：TargetParser `createInjectionPoint` 新 location + buildInjectionRequest 换位。代价 S，价值 Med。
 8. **静态错误正则普查先行**（SQLiDetector 152-regex 形态）：error 通道前置一轮「1 payload × 正则库」的廉价相 0。本仓报错定库已强（`dbmsFromError` 带护栏），这条只做**排序**不做判定。代价 S，价值 Low-Med。

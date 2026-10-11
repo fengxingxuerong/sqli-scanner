@@ -204,14 +204,22 @@ export async function detectPhase(run) {
         if (!prev || c.confidence > prev.confidence) wafAgg.set(c.vendor, c);
       }
       // [sqlmap 对标] 主动 WAF 探测：被动识别无果且 config.activeWafProbe 开启时，
-      // 主动发送 WAF 触发 payload 观察拦截响应以识别厂商。仅 direct 模式外触发。
+      // 主动发送多向量探测请求观察拦截行为以识别厂商。仅 direct 模式外触发。
       if (wafCands.length === 0 && cfg.activeWafProbe === true && target.mode !== 'direct') {
         try {
           const probeResult = await sm.wafIdentifier.activeProbe(target, ctxBase.httpClient);
           if (probeResult.detected) {
             const vendor = probeResult.vendor || 'unknown';
-            wafAgg.set(vendor, { vendor, confidence: probeResult.confidence, evidence: 'active probe' });
-            logger.info(`主动 WAF 探测命中：${vendor}（confidence=${probeResult.confidence}）`);
+            // [D44] evidence 透传结构化差分信号（向量被拦/连接级阻断/Server 头漂移），
+            // 不再一律写 'active probe' —— 报告里「为什么认定有拦截器」必须可复核。
+            wafAgg.set(vendor, {
+              vendor,
+              confidence: probeResult.confidence,
+              evidence: probeResult.evidence || 'active probe',
+            });
+            logger.info(
+              `主动 WAF 探测命中：${vendor}（confidence=${probeResult.confidence}${probeResult.evidence ? `；${probeResult.evidence}` : ''}）`
+            );
           }
         } catch (e) {
           logger.warn(`主动 WAF 探测失败：${e.message}`);

@@ -447,7 +447,8 @@ async function runIdentifyWaf(args) {
       const v = probe.vendor || 'unknown';
       const prev = vendors.get(v);
       if (!prev || (probe.confidence || 0) > (prev.confidence || 0)) {
-        vendors.set(v, { vendor: v, confidence: probe.confidence, evidence: 'active probe' });
+        // [D44] evidence 透传结构化差分信号（向量被拦/连接级阻断/Server 头漂移）
+        vendors.set(v, { vendor: v, confidence: probe.confidence, evidence: probe.evidence || 'active probe' });
       }
     }
   } catch (e) {

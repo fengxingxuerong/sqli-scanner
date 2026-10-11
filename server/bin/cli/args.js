@@ -153,6 +153,10 @@ export function parseArgs(argv, preset) {
     else if (a === '--dump-all') args.dumpAll = true;
     // [对标 sqlmap --identify-waf] 主动识别 WAF 厂商并给出推荐 tamper 链（不触发注入检测）
     else if (a === '--identify-waf') args.identifyWaf = true;
+    // [D44 2026-10-11] --active-waf-probe：扫描期主动 WAF 探测（被动指纹未命中时发多向量
+    // 探针观察拦截行为）。此前只有 REST（config.activeWafProbe）与 --identify-waf 能触发，
+    // 扫描期在 CLI 侧不可达（configReachability 同族的「能力在、入口不在」）。
+    else if (a === '--active-waf-probe') args.activeWafProbe = true;
     // [对标 sqlmap --common-tables / --common-columns] 字典爆破表名/列名
     //   （information_schema 被 WAF 拦 / 权限不足 / 非 MySQL 时的唯一出路）
     else if (a === '--common-tables') args.commonTables = '1';

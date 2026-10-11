@@ -120,23 +120,27 @@ export class WafIdentifier {
   }
 
   /**
-   * [sqlmap 对标] 主动 WAF 探测：被动指纹识别无果时，主动发送 WAF 触发 payload
-   * 观察拦截响应以识别 WAF 厂商。仅当 config.activeWafProbe 为 true 且被动识别
+   * [sqlmap 对标] 主动 WAF 探测：被动指纹识别无果时，主动发送多向量探测请求
+   * 观察拦截行为以识别 WAF。仅当 config.activeWafProbe 为 true 且被动识别
    * 返回空结果时由调用方触发。
    *
-   * 探测流程：
+   * 探测流程（[D44 2026-10-11] 升级为 wafw00f 式多向量差分）：
    *   1) GET /?id=1（良性请求）→ 基线响应
-   *   2) GET /?id=1 AND 1=1 UNION SELECT NULL,NULL,NULL（WAF 触发）→ 观察拦截
-   *   3) GET /?id=1' OR '1'='1（WAF 触发）→ 观察拦截
-   *   4) 比较：良性请求成功但触发请求被拦截（403/406/503）→ WAF 存在
-   *   5) 在被拦截响应上复用 wafRules.js 匹配器识别厂商
-   *   6) 无厂商匹配但行为差异显著（body 长度缩减 >50%）→ 标记 "unknown WAF"（confidence 0.5 不变，
-   *      但额外标注 source:'none'：无任何签名证据；调用侧据此在 blockPolicy 里一票否决发包形态变更）
+   *   2) 四个探测向量（多向量是 wafw00f 的核心经验：只发 SQLi 只能回答「拦不拦 SQLi」，
+   *      分不清「SQLi 专项规则」与「全站拦截」，也少一路证据）：
+   *        sqli-union / sqli-quote（既有）+ xss / lfi（新增，对标 wafw00f 的 xssAttack/lfiAttack）
+   *   3) 每向量三分类：被拦（403/406/429/503）/ 连接级阻断（请求直接网络失败——
+   *      旧实现 .catch(()=>null) 把断连型 WAF 整个吞掉，这是真缺口）/ 正常响应
+   *   4) 差分信号：① 状态码漂移 ② Server 头漂移（benign vs 被拦响应，wafw00f genericdetect
+   *      同款判据）③ 正文长度缩减 >50%（软信号）
+   *   5) 在被拦响应上复用 wafRules.js + 通用拦截页签名识别厂商
+   *   6) 无厂商匹配但有硬证据（向量被拦/连接级阻断）→ "unknown WAF"（source:'behavior'，
+   *      confidence 0.6；调用侧 blockPolicy 据此一票否决发包形态变更）
    *
    * @param {object} target 目标对象（含 baseUrl 或 url）
    * @param {object} httpClient 统一 HttpClient 实例
-   * @returns {Promise<{detected:boolean, vendor:string|null, confidence:number, source?:string, evidence?:string}>}
-   *   source 取值：wafRules（厂商签名）/ generic_block（通用拦截页）/ behavior（仅行为差异）/
+   * @returns {Promise<{detected:boolean, vendor:string|null, confidence:number, source?:string, evidence?:string, vectorsBlocked?:string[], connectionBlocked?:boolean}>}
+   *   source 取值：wafRules（厂商签名）/ generic_block（通用拦截页）/ behavior（仅行为差分）/
    *   none（无任何证据）—— 调用方 blockPolicy 依此决定是否允许变更发包形态。
    */
   async activeProbe(target, httpClient) {
@@ -152,7 +156,8 @@ export class WafIdentifier {
       } catch { return null; }
     };
 
-    const BLOCKED_STATUSES = new Set([403, 406, 503]);
+    // [D44] 429 补进拦截码集（与 scanValidityGuard.BLOCK_STATUSES 同口径——限频也是中间设备在拦）
+    const BLOCKED_STATUSES = new Set([403, 406, 429, 503]);
     const isBlocked = (res) => !!res && BLOCKED_STATUSES.has(res.status);
 
     // 将 axios/undici 响应归一化为 identify() 需要的 { status, headers, body }
@@ -169,58 +174,109 @@ export class WafIdentifier {
       const benignRes = await httpClient.request({ method: 'GET', url: benignUrl });
       // 良性请求本身被拦截 → 无法区分 WAF 与正常行为，不判定
       if (isBlocked(benignRes)) return { detected: false, vendor: null, confidence: 0 };
+      const benignServer = getHeader(benignRes?.headers, 'server');
+      const benignLen = String(benignRes?.data ?? '').length;
 
-      // 2) WAF 触发请求 1：UNION SELECT
-      const trigger1Url = buildUrl('1 AND 1=1 UNION SELECT NULL,NULL,NULL');
-      const trigger1Res = trigger1Url
-        ? await httpClient.request({ method: 'GET', url: trigger1Url }).catch(() => null)
-        : null;
+      // 2)+3) 多向量探测与三分类（网络失败不再吞成 null——那是连接级阻断的证据）
+      const vectors = [
+        { id: 'sqli-union', value: '1 AND 1=1 UNION SELECT NULL,NULL,NULL' },
+        { id: 'sqli-quote', value: "1' OR '1'='1" },
+        { id: 'xss', value: '<script>alert(1)</script>' },
+        { id: 'lfi', value: '../../../../etc/passwd' },
+      ];
+      /** @type {string[]} 被状态码拦下的向量 */
+      const vectorsBlocked = [];
+      /** @type {string[]} 连接级阻断的向量（请求直接网络失败） */
+      const connectionBlocked = [];
+      /** @type {any[]} 被拦响应（供厂商识别复用） */
+      const blockedResponses = [];
+      /** @type {string[]} Server 头漂移证据 */
+      const serverShifts = [];
+      let shrunkenVector = false;
 
-      // 3) WAF 触发请求 2：引号 OR
-      const trigger2Url = buildUrl("1' OR '1'='1");
-      const trigger2Res = trigger2Url
-        ? await httpClient.request({ method: 'GET', url: trigger2Url }).catch(() => null)
-        : null;
-
-      // 4) 比较：良性成功但触发被拦截 → WAF 存在
-      const trigger1Blocked = isBlocked(trigger1Res);
-      const trigger2Blocked = isBlocked(trigger2Res);
-
-      if (trigger1Blocked || trigger2Blocked) {
-        // 5) 在被拦截响应上复用 wafRules.js 匹配器识别厂商
-        for (const triggerRes of [trigger1Res, trigger2Res]) {
-          if (!triggerRes) continue;
-          if (!isBlocked(triggerRes)) continue;
-          const candidates = this.identify(toResponse(triggerRes));
-          if (candidates.length > 0) {
-            const best = candidates[0];
-            // source 透传：让调用方能区分「厂商签名命中」与「仅通用拦截页命中」（generic_block）。
-            // 注意本分支只在被动识别为空时才跑，此时 identify() 已含通用层→ 不会再把有证据的拦截
-            // 降级成无名的 'unknown'。
-            return { detected: true, vendor: best.vendor, confidence: best.confidence, source: best.source || 'wafRules' };
+      for (const vec of vectors) {
+        const probeUrl = buildUrl(vec.value);
+        if (!probeUrl) continue;
+        let res = null;
+        try {
+          res = await httpClient.request({ method: 'GET', url: probeUrl });
+        } catch (err) {
+          // [D44] 请求级网络失败且基线正常 → 疑似连接级阻断（wafw00f genericdetect 判据①：
+          // "Blocking is being done at connection/packet level"）。**先重试一次再分类**：
+          // 偶发抖动不该成为 WAF 证据（本仓红线：宁可少一档置信，不做不实指控）。
+          try {
+            res = await httpClient.request({ method: 'GET', url: probeUrl });
+          } catch {
+            connectionBlocked.push(vec.id);
           }
+          continue;
         }
-        // 6) 被拦截但无厂商匹配 → unknown WAF（有硬证据：触发请求被拦而良性请求没被拦）
-        return { detected: true, vendor: null, confidence: 0.6, source: 'behavior' };
+        if (isBlocked(res)) {
+          vectorsBlocked.push(vec.id);
+          blockedResponses.push(res);
+          // [D44] Server 头差分（wafw00f genericdetect 判据②：拦截面可能换出口/设备，头会变）
+          const srv = getHeader(res?.headers, 'server');
+          if (benignServer && srv && String(srv) !== String(benignServer)) {
+            serverShifts.push(`${String(benignServer)}→${String(srv)}（${vec.id}）`);
+          }
+          continue;
+        }
+        // 行为兜底：无显式拦截但 body 长度缩减 > 50% → 软信号
+        const len = String(res?.data ?? '').length;
+        if (benignLen > 0 && len < benignLen * 0.5) shrunkenVector = true;
+      }
+
+      const signals = [];
+      if (vectorsBlocked.length) signals.push(`status-shift vectors: ${vectorsBlocked.join(',')}`);
+      if (connectionBlocked.length) signals.push(`connection-level: ${connectionBlocked.join(',')}`);
+      if (serverShifts.length) signals.push(`server-header shift: ${serverShifts.join(' | ')}`);
+
+      // 5) 在被拦响应上复用 wafRules.js 匹配器识别厂商（保留既有语义：identify() 已含通用层）
+      for (const blockedRes of blockedResponses) {
+        const candidates = this.identify(toResponse(blockedRes));
+        if (candidates.length > 0) {
+          const best = candidates[0];
+          return {
+            detected: true,
+            vendor: best.vendor,
+            confidence: best.confidence,
+            source: best.source || 'wafRules',
+            evidence: signals.join('; ') || 'active probe',
+            vectorsBlocked,
+            connectionBlocked: connectionBlocked.length > 0,
+          };
+        }
+      }
+
+      // 6) 被拦/连接级阻断但无厂商匹配 → unknown WAF（有硬证据）
+      if (vectorsBlocked.length > 0 || connectionBlocked.length > 0) {
+        return {
+          detected: true,
+          vendor: null,
+          confidence: 0.6,
+          source: 'behavior',
+          evidence: signals.join('; ') || 'behavior-only: probes blocked without vendor signature',
+          vectorsBlocked,
+          connectionBlocked: connectionBlocked.length > 0,
+        };
       }
 
       // 行为兜底：无显式拦截但 body 长度缩减 > 50% → 疑似 WAF
-      const benignLen = String(benignRes?.data ?? '').length;
-      for (const triggerRes of [trigger1Res, trigger2Res]) {
-        if (!triggerRes) continue;
-        const triggerLen = String(triggerRes.data ?? '').length;
-        if (benignLen > 0 && triggerLen < benignLen * 0.5) {
-          // 裸 unknown 兜底：只有「正文变短了」这一条间接线索，没有任何拦截状态码/文案证据。
-          // 置信度维持 0.5 不变（既有语义，autoRetry 门控本就要求 >= 0.8，0.5 不会触发重跑；
-          // 降值无收益反而会让「行为差异」与「无信号」失去可比性）。真正需要防的是另一条路径：
-          // 调用侧 `probeResult.vendor || 'unknown'` 会把无厂商结论写成 vendor='unknown'，若那时被
-          // 当成可信任命中就会拿 wafRecommend 的 _default 链重跑全站。为此显式标注 source:'none'，
-          // 并把否决权固化到 blockPolicy.decideBlockPolicy（vendor==='unknown' → action 只能 'none'）。
-          return { detected: true, vendor: null, confidence: 0.5, source: 'none', evidence: 'behavior-only: body length shrunk >50%, no block status' };
-        }
+      if (shrunkenVector) {
+        // 裸 unknown 兜底：只有「正文变短了」这一条间接线索，没有任何拦截状态码/文案证据。
+        // 置信度维持 0.5 不变（既有语义，autoRetry 门控本就要求 >= 0.8，0.5 不会触发重跑；
+        // 降值无收益反而会让「行为差异」与「无信号」失去可比性）。真正需要防的是另一条路径：
+        // 调用侧 `probeResult.vendor || 'unknown'` 会把无厂商结论写成 vendor='unknown'，若那时被
+        // 当成可信任命中就会拿 wafRecommend 的 _default 链重跑全站。为此显式标注 source:'none'，
+        // 并把否决权固化到 blockPolicy.decideBlockPolicy（vendor==='unknown' → action 只能 'none'）。
+        return {
+          detected: true, vendor: null, confidence: 0.5, source: 'none',
+          evidence: 'behavior-only: body length shrunk >50%, no block status',
+          vectorsBlocked, connectionBlocked: false,
+        };
       }
 
-      return { detected: false, vendor: null, confidence: 0 };
+      return { detected: false, vendor: null, confidence: 0, vectorsBlocked, connectionBlocked: false };
     } catch {
       return { detected: false, vendor: null, confidence: 0 };
     }
