@@ -18,11 +18,15 @@
 // 两条都不占 ⇒ exit 1。反向也查：登记了却已接线、或目录已不存在 ⇒ 清单腐烂 ⇒ exit 1
 // （理由：白名单会让人停止检查，腐烂的白名单比没有白名单更危险）。
 //
+// ⚠️ 候选目录只取 **`git ls-files` 里已跟踪的**（2026-10-13 补）：未跟踪目录还在开发中，
+// 不该被当成仓库资产 —— 详见 `trackedE2eDirs()` 的注释，那是本门禁作者自己踩过的坑。
+//
 // 用法：
 //   node scripts/e2e-wiring-check.mjs            （退出码即结论）
 //   node scripts/e2e-wiring-check.mjs --selftest 自证判据不空转
 // ============================================================================
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { dirname, resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -75,6 +79,35 @@ function isWiredIn(name, sources) {
 }
 
 // ---------- 采集 ----------
+/**
+ * 只把**已跟踪**的目录当靶场。
+ *
+ * [2026-10-13 实测教训] 起因：并发会话的 WIP 目录 `e2e/cross-module-lab/` 在本机存在但
+ * 未提交。把它登记进白名单 ⇒ **CI 报「清单腐烂」**（CI 上没有该目录）；不登记 ⇒ 本机报
+ * 「未处置」。两边都是误导，因为**未跟踪的目录根本不是本仓库的资产** —— 读者在仓库里
+ * 看不到它，也就不可能把它的结论当覆盖证据引用（本门禁的原始动机）。
+ * 顺带：这正是 `refs:check` 治的那类「本机有、库里没有」错误形态，我在这里踩了一次 ——
+ * 而今回过头看，门禁**抓到了它自己作者犯的错**，算是判据有效性的一个实证。
+ *
+ * git 不可用（非仓库环境）时返回 null ⇒ 回退全量扫描并打印说明，不静默放行。
+ */
+function trackedE2eDirs() {
+  try {
+    // 不传 encoding ⇒ 返回 Buffer（传 'buffer' 会 ERR_UNKNOWN_ENCODING，实测踩过）
+    const out = execFileSync('git', ['ls-files', '-z', '--', 'e2e/'], { cwd: ROOT });
+    const names = new Set();
+    for (const p of out.toString('utf8').split('\0')) {
+      const m = p.match(/^e2e\/([^/]+)\//);
+      if (m) names.add(m[1]);
+    }
+    return names.size ? names : null;
+  } catch {
+    return null;
+  }
+}
+
+const tracked = trackedE2eDirs();
+
 const dirs = readdirSync(E2E, { withFileTypes: true })
   .filter((d) => d.isDirectory())
   .map((d) => d.name)
@@ -102,8 +135,16 @@ let labs = 0;
 let wired = 0;
 let declared = 0;
 
+if (tracked === null) {
+  console.log('  ℹ git 不可用（非仓库环境？）⇒ 未跟踪过滤已关闭，按磁盘全量扫描。');
+}
+
 for (const name of dirs) {
   if (NON_LAB_DIRS.has(name)) continue;
+  if (tracked && !tracked.has(name)) {
+    info.push(`  · ${name}：未跟踪（不在仓库里）⇒ 不作为本仓库的靶场资产检查`);
+    continue;
+  }
   const entries = readdirSync(join(E2E, name));
   const hasEntry = entries.some((f) => ENTRY_RE.test(f));
   const wiredNow = isWiredIn(name, sources);
@@ -139,9 +180,16 @@ for (const name of dirs) {
   }
 }
 
-// 反向：白名单里登记了但目录已不存在
+// 反向：白名单里登记了，但它在**仓库里**不存在（目录没了，或压根没提交）
+// ⚠️ 判据同样基于 tracked（已跟踪）而不是磁盘：只按磁盘判会放过「本地有、库里没有」
+// 的登记项 —— 那正是 2026-10-13 lint 在 CI 上红过的形态（本地绿、CI 红）。
 for (const w of whitelist) {
-  if (!dirs.includes(w.name)) problems.push(`${w.name}：在 reference-labs.json 里，但 e2e/${w.name}/ 已不存在（清单腐烂）`);
+  const existsInRepo = tracked ? tracked.has(w.name) : dirs.includes(w.name);
+  if (!existsInRepo) {
+    problems.push(
+      `${w.name}：在 reference-labs.json 里，但 e2e/${w.name}/ 在仓库里不存在（清单腐烂或未提交）`,
+    );
+  }
 }
 if (whitelistErr) problems.push(`e2e/reference-labs.json 解析失败：${whitelistErr}`);
 
@@ -183,6 +231,7 @@ function selftest() {
   if (!isWiredIn('redteam-lab', fake)) failed.push('isWiredIn 对明确出现的名字应返回 true');
   if (isWiredIn('definitely-not-a-lab', fake)) failed.push('isWiredIn 对不存在的名字必须返回 false（恒真 = 门禁空转）');
   if (labs === 0) failed.push('靶场采集为空（判据失效，应 exit 2 而不是走到这里）');
+  if (tracked === null) failed.push('git ls-files 不可用 ⇒ 未跟踪过滤被关闭（selftest 要求本次运行里它是可用的）');
   for (const w of whitelist) {
     if (!w.name) failed.push('白名单条目缺 name');
     if (!String(w.why || '').trim()) failed.push(`白名单条目 ${w.name} 缺 why`);
