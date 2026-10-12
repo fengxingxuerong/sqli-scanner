@@ -304,6 +304,14 @@ export function buildConfig(args) {
     }
     config.dumpFormat = fmt;
   }
+  // [D50 2026-10-12] --fetch-using：盲注提取比较算子（非法直接拒启动，不静默回落）
+  if (args.fetchUsing != null && String(args.fetchUsing).trim()) {
+    const op = String(args.fetchUsing).trim().toLowerCase();
+    if (!['gt', 'between'].includes(op)) {
+      throw new Error(`--fetch-using 只认 gt/between，收到：${args.fetchUsing}`);
+    }
+    config.fetchUsing = op;
+  }
   // [D42 2026-10-11] --verify / --no-verify：盲注提取复核（引擎默认开，这里补显式开关）
   if (args.extractVerify === true) patchGroup(config, 'blindRobust', { extractVerify: true });
   else if (args.extractVerify === false) patchGroup(config, 'blindRobust', { extractVerify: false });

@@ -114,6 +114,11 @@ export const defaults = {
   // 8 位收敛后仍走 extractVerify 等值验证，失败整体回落二分（保守，零漏提取）。
   // 默认关：改了提取请求形状，需要在真目标上按 targetProfile 逐例确认后开启。
   blindBitwise: false,
+  // [D50 2026-10-12] 盲注提取比较算子（--fetch-using）：'gt'（默认，`x > mid` 二分）|
+  // 'between'（`x BETWEEN lo AND mid` 窄化）。动机：`>`/`<` 被 WAF 过滤而 BETWEEN 仍放行的
+  // 目标上，默认算子让长度/字节二分全程判假（cls 类探测早已单方面依赖 BETWEEN 可用）。
+  // 默认 gt ⇒ 既有行为零回归；'in' 不实现（IN 为假时无法定位区间，TODO 已留证）。
+  fetchUsing: 'gt',
   // 盲注单字段长度上界（超过则不再延伸）。Engine 侧判据是 `> 255` 才采纳，否则回落 4096。
   // 4096 的来历：单字段超 4K 属异常，拿 65531 去逐字节提取会把一次扫描拖成十几分钟（实测）。
   blindMaxLen: 4096,

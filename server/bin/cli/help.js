@@ -79,6 +79,11 @@ export function printHelp() {
   --no-verify                关闭盲注提取复核（[D42]；默认开：每字节收敛后等值确认 + 完整值
                              整体复验，失败自动重测——弱网/限速目标的拖库假字符防线，开销约
                              +1 请求/字节）。--verify 显式开启（与默认一致，幂等）
+  --fetch-using <gt|between> 盲注提取比较算子（[D50]，默认 gt=历史行为）：> / < 被 WAF 过滤
+                             而 BETWEEN 仍放行的目标上，between 把长度/字节二分换成
+                             x BETWEEN lo AND mid 窄化（cls 字符类探测本就只用 BETWEEN）。
+                             探测次数与 gt 同阶；提取结果经等值复验后应一致。'in' 不支持
+                             （IN 为假时无法定位区间）。非法值拒绝启动
   --test-headers             把显式传入的请求头（--header 或 -r 请求文件中的头，如 Cookie / X-Forwarded-For）
                              作为注入点测试（默认关闭：保持现有行为，头仅作会话透传）。授权的渗透测试中，
                              服务端按请求头取值拼 SQL 的场景（如 SELECT ... WHERE id=\${x_forwarded_for}）必须开启才能检出

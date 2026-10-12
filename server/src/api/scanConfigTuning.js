@@ -69,6 +69,14 @@ export function applyTuningKnobs(config, cfg) {
   // 位平面提取（每字符 1 轮请求，仅 MySQL/MariaDB/TiDB 族；失败整体回落二分）
   const blindBitwise = pickBool(cfg, 'blindBitwise');
   if (blindBitwise !== undefined) config.blindBitwise = blindBitwise;
+  // [D50] 提取比较算子（--fetch-using）：枚举 gt|between。与布尔位不同——非法值不能
+  // 静默回落 gt（"传了没生效"红线），必须在入口喊出来并丢弃；引擎侧 resolveFetchUsing
+  // 对漏网非法值仍会抛错（双保险，见 blindExtractor.js）。
+  if ('fetchUsing' in cfg) {
+    const v = cfg.fetchUsing;
+    if (v === 'gt' || v === 'between') config.fetchUsing = v;
+    else logger.warn(`fetchUsing 需为 'gt' | 'between'（收到 ${JSON.stringify(v)}），已丢弃——该键决定盲注提取的比较算子，非法值不静默回落`);
+  }
   // 布尔通道的「空基线」OR 型兜底对：关掉省 2 请求/点，代价是少一条漏报防线
   const booleanOrFallback = pickBool(cfg, 'booleanOrFallback');
   if (booleanOrFallback !== undefined) config.booleanOrFallback = booleanOrFallback;

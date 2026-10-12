@@ -72,6 +72,8 @@ export function parseArgs(argv, preset) {
     secondReq: null,
     // [D42 2026-10-11 对标 sqlmap] --ignore-code / --randomize / --dump-format / --verify
     ignoreCode: null, randomize: null, dumpFormat: null, extractVerify: null,
+    // [D50 2026-10-12] --fetch-using：盲注提取比较算子（gt|between，默认 gt）
+    fetchUsing: null,
     dumpAll: false, identifyWaf: false, commonTables: null, commonColumns: null,
     randomAgent: false, where: null, paramDel: null,
     // 内部：从请求文件解析出的 header 对象（buildAuth 直接使用）
@@ -287,6 +289,10 @@ export function parseArgs(argv, preset) {
   else if (a === '--randomize') args.randomize = next();
   // --dump-format：拖库数据产物格式（csv/sql/html/json；产物层用，不影响内嵌报告）
   else if (a === '--dump-format') args.dumpFormat = next();
+  // [D50 2026-10-12] --fetch-using：盲注提取比较算子。> / < 被 WAF 过滤而 BETWEEN
+  // 仍放行的目标上，between 让长度/字节二分继续收敛（cls 类探测早已单方面依赖 BETWEEN
+  // 可用）。默认 gt（历史行为）；'in' 不实现（IN 为假时无法定位区间，TODO 已留证）。
+  else if (a === '--fetch-using') args.fetchUsing = next();
   // --verify / --no-verify：盲注提取复核开关（引擎默认开：每字节等值确认 + 完整值复验）
   else if (a === '--verify') args.extractVerify = true;
   else if (a === '--no-verify') args.extractVerify = false;
