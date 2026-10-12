@@ -190,14 +190,21 @@ export function buildTools(ctx) {
     },
     {
       name: 'get_report',
-      description: '取完整报告文本（format=json|markdown|md|html|csv|sarif；默认 json）。超 20 万字符截断。',
+      description: '取完整报告文本（format=json|markdown|md|html|csv|sarif|db-json；默认 json）。超 20 万字符截断。',
       inputSchema: {
         type: 'object',
         required: ['scanId'],
-        properties: { scanId: { type: 'string' }, format: { type: 'string', enum: ['json', 'markdown', 'md', 'html', 'csv', 'sarif'] } },
+        // [2026-10-12 §A3] 补 db-json（与 REST FORMAT_EXT / CLI --format 对齐；此前三缺一）
+        properties: { scanId: { type: 'string' }, format: { type: 'string', enum: ['json', 'markdown', 'md', 'html', 'csv', 'sarif', 'db-json'] } },
       },
       run: async ({ scanId, format }) => {
+        // 未知格式显式报错，不静默回落 JSON（exportReport 的兜底是 toJSON —— 对 MCP 调用方
+        // 那是"要了 db-json 拿到整份报告"的静默不一致；enum 已声明，越界即调用方 bug）
+        const MCP_FORMATS = ['json', 'markdown', 'md', 'html', 'csv', 'sarif', 'db-json'];
         const fmt = typeof format === 'string' && format ? format : 'json';
+        if (!MCP_FORMATS.includes(fmt)) {
+          return text({ error: `format 非法：${fmt}（仅支持 ${MCP_FORMATS.join('|')}）` }, { isError: true });
+        }
         const report = loadReport(ctx, String(scanId));
         if (!report) return text({ error: `找不到扫描 ${scanId}` }, { isError: true });
         let out = ctx.scanManager.exportReport(String(scanId), fmt, report);

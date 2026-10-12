@@ -41,8 +41,40 @@ test('formatReport: md 别名与 markdown 等价', () => {
   assert.equal(formatReport(report, 'md'), formatReport(report, 'markdown'));
 });
 
-test('formatReport: 未知格式回退 json（与 REST 宽容行为一致）', () => {
-  assert.equal(formatReport(report, 'xml'), formatReport(report, 'json'));
+// [2026-10-12 优化空间勘查 §A3] 行为反转：未知格式从「静默回退 JSON」改为**抛错**。
+// 旧用例曾断言 `formatReport(report,'xml') === formatReport(report,'json')` —— 那正是
+// 「--format db-json 写出普通 JSON」这类"传了没生效"的根因（REST 侧对未知格式是 400，
+// 两者口径本就该一致：宁可拒绝，不静默降级）。cli.js main 另有入口早校验（扫前拒绝）。
+test('formatReport: 未知格式抛错而不是静默回退 JSON（治"传了没生效"）', () => {
+  // 空值（''/null/undefined）按「未传」走默认 json，与 args 层 `--format` 无值语义一致，不属此列
+  for (const bad of ['xml', 'yaml', 'db_json', 'DB-JSON ', '123']) {
+    assert.throws(
+      () => formatReport(report, bad),
+      /仅支持 json\|csv\|markdown\|md\|html\|sarif\|db-json/,
+      `format=${JSON.stringify(bad)} 应被拒绝`,
+    );
+  }
+  // 显式 json 仍走默认路径（不含在抛出集里）
+  assert.equal(formatReport(report, 'json'), formatReport(report));
+});
+
+// [2026-10-12 §A3] db-json：仅拖库数据。此前 CLI/MCP 枚举缺这一项 ⇒ REST/UI 独有的格式。
+// 单源在 ReportGenerator.toDBJSON（ScanManager.exportReport 共用同一方法）。
+test('formatReport: db-json 只含拖库数据（report.data），不含报告包装', () => {
+  const out = formatReport(report, 'db-json');
+  const parsed = JSON.parse(out);
+  assert.ok(!('vulns' in parsed) && !('points' in parsed) && !('scanId' in parsed),
+    'db-json 不应含 vulns/points/scanId 等报告包装字段');
+  assert.deepEqual(parsed, report.data, 'db-json 应逐字等于 report.data');
+  // 无拖库数据时输出 null 而不是 undefined/崩溃（扫描没开 --dump 是常态）
+  assert.equal(formatReport({ scanId: 's2' }, 'db-json'), 'null');
+});
+
+// [2026-10-12 §A3] sarif 早已实现但 help 只写 json|html|csv|markdown ⇒ 补钉，防回归。
+test('formatReport: sarif 可导出（SARIF 2.1.0 文档形状）', () => {
+  const out = JSON.parse(formatReport(report, 'sarif'));
+  assert.ok(out.version, 'sarif 应有 version 字段');
+  assert.ok(Array.isArray(out.runs), 'sarif 应有 runs 数组');
 });
 
 // [P1-REGRESSION 2026-09-13] 锁住「同一份 report 多次渲染必须逐字节一致」。

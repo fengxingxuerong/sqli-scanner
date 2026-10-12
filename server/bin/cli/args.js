@@ -76,6 +76,13 @@ export function parseArgs(argv, preset) {
     fetchUsing: null,
     dumpAll: false, identifyWaf: false, commonTables: null, commonColumns: null,
     randomAgent: false, where: null, paramDel: null,
+    // [2026-10-12 优化空间勘查 §A2] NoSQL / OOB 两个**默认关的整通道**开关。
+    // 缺口实录：这两个通道引擎早有（ScanManager._runNoSql / oobReceiver），UI（constants.ts
+    // 「带外注入(OOB)」分组）与 REST（KNOWN_CFG_KEYS）都可达，唯独 CLI 一无旗标、二不在
+    // configFile 登记表 ⇒ --config 档案也会被未知键硬拒 ⇒ CLI/脚本用户**完全开不了**。
+    // 布尔 = 只开总开关；子键（oob.callbackHost/dnsPort、noSql.kinds/concurrency）
+    // 走 --config 档案整组透传（见 buildConfig 的 patchGroup 分支）。
+    noSql: false, oob: false,
     // 内部：从请求文件解析出的 header 对象（buildAuth 直接使用）
     headerObj: null,
     // 无法识别的开关收集在此（不再静默忽略）：告警见循环末尾，硬拒见 unknownFlagError()
@@ -127,6 +134,12 @@ export function parseArgs(argv, preset) {
     else if (a === '--cookie') args.cookie = next();
     else if (a === '--header' || a === '--headers') args.headers = next();
     else if (a === '--technique') args.technique = next();
+    // [2026-10-12 §A2] NoSQL / OOB 默认关通道总开关（子键走 --config 档案，见 help）。
+    // 与 --no-cast 同族命名（noSql → --no-sql）；oob 与 --technique oob 正交：
+    // technique 只决定"测不测"，oob.enabled 决定"起不起接收端"（defaults.js:292-293 明写
+    // 「即使 techniques 含 oob，也需此处开启接收端才启动」）——这正是此前 CLI 不可达的那半。
+    else if (a === '--no-sql') args.noSql = true;
+    else if (a === '--oob') args.oob = true;
     // [P0 2026-09-09 实战批次] 失效值替换 + 已知注入点直通（对标 sqlmap --invalid-*）
     else if (a === '--invalid-bignum') args.invalidBignum = true;
     else if (a === '--invalid-logical') args.invalidLogical = true;

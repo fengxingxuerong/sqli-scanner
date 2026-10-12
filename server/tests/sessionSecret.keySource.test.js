@@ -129,3 +129,59 @@ test('容错-7) _FILE 存在但内容为空 ⇒ 退回 env（与 resolveApiToken
     cleanup();
   }
 });
+
+// ── 令牌材料缓存（2026-10-12 优化空间勘查 §C2）────────────────────────────────
+// 原实现在 getKey() 里**先**算 source 才查密钥缓存，而 source 判定本身要读令牌文件
+// ⇒ 每个注入点/每次落盘都读一次文件（实测 200 次 sealSecret ⇒ 201 次 readFileSync）。
+// 但真正致命的不是性能，而是**稳定性**：source 每次现算，文件一次抖动（权限/挂载瞬断）
+// 就让这次 source 变成 process-random ⇒ 与 cachedKeySource 不符 ⇒ 重新派生随机密钥
+// ⇒ 此前封存的会话值**全部解不开**，而降级路径本就静默（＝"续跑随机失效"）。
+//
+// 缓存策略是「只缓存成功结果」：读失败/读到空**不缓存**，保留后续重试的恢复口
+// （容器启动早期 secret 尚未挂载完是常态，不能把一次瞬断固化成整个进程降级）。
+// 下面两条分别钉这两个方向，缺一条都会让改动退回无覆盖状态。
+// ─────────────────────────────────────────────────────────────────────────────
+test('缓存-8) 令牌文件读取抖动不得让已封存会话解不开（source 不得退化成 process-random）', () => {
+  const { p, cleanup } = tmpTokenFile('file-token-value');
+  try {
+    withEnv({ SCAN_API_TOKEN_FILE: p, SCAN_API_TOKEN: undefined, SCAN_SESSION_KEY: undefined }, () => {
+      assert.equal(secretKeySource(), 'derived:SCAN_API_TOKEN');
+      const sealed = sealSecret('Cookie: admin=secret-session');
+
+      // 模拟挂载瞬断：令牌文件在进程运行期间变得不可读
+      rmSync(p, { force: true });
+
+      assert.equal(secretKeySource(), 'derived:SCAN_API_TOKEN',
+        '文件抖一下就退化成 process-random ⇒ 已封存会话全解不开（续跑静默失效，本测试的核心）');
+      assert.equal(openSecret(sealed), 'Cookie: admin=secret-session',
+        '抖动前后必须是同一把密钥：已封存值仍要能解');
+      assert.notEqual(secretKeySource(), 'process-random');
+    });
+  } finally {
+    cleanup();
+  }
+});
+
+test('缓存-9) 首次读取失败**不缓存** ⇒ secret 稍后挂载完成后可恢复为派生（不得固化成降级）', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'session-secret-late-'));
+  const p = join(dir, 'token');
+  try {
+    withEnv({ SCAN_API_TOKEN_FILE: p, SCAN_API_TOKEN: undefined, SCAN_SESSION_KEY: undefined }, () => {
+      // 阶段一：容器刚起来，secret 还没挂上
+      assert.equal(secretKeySource(), 'process-random', '挂载前确实是兜底（这一步不是本测试的目标）');
+      assert.equal(openSecret(sealSecret('early')), 'early', '进程随机在本进程内仍可往返');
+
+      // 阶段二：secret 挂载完成（同路径出现文件），env 配置本身没变
+      writeFileSync(p, 'late-mounted-token');
+
+      assert.equal(secretKeySource(), 'derived:SCAN_API_TOKEN',
+        '失败结果不能被缓存：否则一次瞬断会把整个进程永久钉死在 process-random');
+      const sealedLate = sealSecret('Cookie: admin=late');
+      assert.equal(openSecret(sealedLate), 'Cookie: admin=late', '恢复派生后封存/解封应正常');
+      // 说明：阶段一用进程随机封的值此刻解不开是**预期**语义（随机 key 本就跨源不可解），
+      // 这里不断言它，避免把设计与缺陷混在一起。
+    });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

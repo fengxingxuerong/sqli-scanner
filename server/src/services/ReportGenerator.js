@@ -366,6 +366,15 @@ export class ReportGenerator {
     return '\uFEFF' + lines.join('\n');
   }
 
+  // 导出「仅拖库数据」JSON（db-json）：库/表/列/行裸数据，不含报告包装。
+  // [2026-10-12 优化空间勘查 §A3] 该格式此前只有 ScanManager.exportReport 内联一份
+  // （`JSON.stringify(report.data)`），CLI 与 MCP 的 format 枚举都没有它 ⇒ CLI 用户
+  // 传 --format db-json 会静默回退 JSON（"传了没生效"）。收敛为本方法单一实现，
+  // ScanManager / CLI / MCP 三处共用；语义与 REST FORMAT_EXT 一致（扩展名 db.json）。
+  toDBJSON(report) {
+    return JSON.stringify(report?.data ?? null);
+  }
+
   // 导出 Markdown（原逻辑不变，仅 target 脱敏由 _forExport 覆盖）
   // [2026-09-13] 交付化（只增小节）：报告元信息/执行摘要/修复建议/WAF 交战 + 漏洞表 CVSS 列
   // [批次 9 2026-09-15] SARIF 2.1.0 导出：对接 GitHub Security / DefectDojo / 甲方安全平台。

@@ -15,6 +15,12 @@
 //    全在字面量里，**空格替换完全不生效**（实测 300 次替换 0 个空格）。
 //    改用 splitByLiteral 的段序列，段奇偶天然表达开/闭。
 import { splitByLiteral } from '../quoteScan.js';
+
+// [2026-10-12 性能] 关键字双写表与正则模块级预编译（原 transform 内 4 次 new RegExp/call，
+// 零行为变化；论证见 keyword2hex.js 同批注释）
+const DOUBLE_MAP = { SELECT: 'SELSELECTECT', UNION: 'UNUNIONION', WHERE: 'WHWHEREERE', FROM: 'FRFROMOM' };
+const DOUBLE_RES = Object.entries(DOUBLE_MAP).map(([kw, replacement]) => ({ re: new RegExp(`\\b${kw}\\b`, 'gi'), replacement }));
+
 export const safedog = {
   name: 'safedog',
   description: '针对 安全狗 WAF：tab+newline 混合空格 + 关键字双写（SELECT→SELSELECTECT）',
@@ -50,9 +56,7 @@ export const safedog = {
     }
     s = chars.join('');
     // 2) 关键字双写（SELECT → SELSELECTECT, UNION → UNUNIONION）
-    const doubleMap = { SELECT: 'SELSELECTECT', UNION: 'UNUNIONION', WHERE: 'WHWHEREERE', FROM: 'FRFROMOM' };
-    for (const [kw, replacement] of Object.entries(doubleMap)) {
-      const re = new RegExp(`\\b${kw}\\b`, 'gi');
+    for (const { re, replacement } of DOUBLE_RES) {
       s = s.replace(re, replacement);
     }
     return s;

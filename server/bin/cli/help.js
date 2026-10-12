@@ -48,6 +48,15 @@ export function printHelp() {
   --cookie <str>             认证 Cookie 串（透传 config.auth.cookie，非注入点）
   --header <k:v,k:v>          额外请求头（冒号分隔，逗号分隔多组）
   --technique <BEUSTQ>       检测技术子集（union/error/boolean/time/stacked/oob/inline/second_order，逗号分隔；缺省=默认 4 类）
+  --no-sql                   [2026-10-12 §A2] 开启 NoSQL 注入通道（nosql/graphql/ssti 三类，默认关）。
+                             ★ 与 --technique 正交：technique 决定「测不测」，本开关决定「通道起不起」——
+                             此前 UI/REST 可达而 CLI 完全无入口（连 --config 档案都被未知键硬拒）。
+                             子键（noSql.kinds / noSql.concurrency）走 --config 档案：
+                             {"noSql":{"enabled":true,"kinds":["nosql"]}}
+  --oob                      [2026-10-12 §A2] 开启 OOB 带外通道接收端（默认关；即使 --technique 含 oob，
+                             接收端不起也拿不到回调 —— defaults.js:292 明示）。子键走 --config 档案：
+                             {"oob":{"enabled":true,"callbackHost":"your.domain","dnsPort":53}}
+                             回连地址需公网可达（自建域或 interactsh 类协作端）
   --level <1-5>              检测等级（1 默认，5 最深，对应注入点边界/子句变体）
   --risk <1-3>               风险等级（1 安全，2 标准，3 含 OR 变体）
   --test-filter <str>        仅运行 id 匹配的测试（逗号分隔子串，大小写不敏感，对标 sqlmap --test-filter）
@@ -229,7 +238,10 @@ export function printHelp() {
                              形态对齐 sqlmap --auth-cred，domain 可省略）
   --rate <n>                 限速 req/s（默认 50）
   --threads <n>              检测并发数（默认 4）
-  -f, --format <fmt>         报告格式 json|html|csv|markdown（默认 json）
+  -f, --format <fmt>         报告格式 json|csv|markdown|md|html|sarif|db-json（默认 json）。
+                             md = markdown 别名；sarif = SARIF 2.1.0（GitHub Security/DefectDojo）；
+                             db-json = 仅拖库数据（库/表/列/行，扩展名 db.json，与 REST 导出同源）。
+                             未知格式**拒绝启动**（旧行为静默回退 JSON 已修，"传了没生效"红线）
   -o, --out <path>           报告输出文件（批量模式输出到目录）
   -c, --concurrency <n>     批量并发扫描数（默认 1）
   --timeout <ms>             单次扫描等待上限（默认 0 = 无限制）

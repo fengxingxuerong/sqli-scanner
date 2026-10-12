@@ -200,6 +200,14 @@ jobs:
       # 纯本地解析，不需要 MySQL（故与其它 lint 类门禁同组）。
       - run: npm run targets:check
         name: 红队靶点清单一致性（真值链）
+      # [2026-10-12 优化空间勘查 D2] e2e 靶场接线状态：曾实锤 6 个靶场「有入口、从不执行」
+      # （不在 run-all / acceptance / ci.yml 任一处），而 README 与报告会把它们当覆盖证据引用。
+      # 口径二选一：接线执行，或在 e2e/reference-labs.json 登记为参考靶场并写清理由 ——
+      # 不许维持「看似资产」。纯静态解析，无外部依赖。
+      - run: npm run e2e:wiring
+        name: e2e 靶场接线状态（已接线 ⇄ 已正名）
+      - run: npm run e2e:wiring:selftest
+        name: e2e 接线判据自证（不恒真）
       - run: npx eslint .
         name: ESLint
       # [DECISION-2026-09-22] e2e 辅助模块的单测（纯 Node，无 MySQL 依赖）。

@@ -12,6 +12,8 @@
     "acceptance:sandbox": "python e2e/run-with-sandbox.py e2e/acceptance.mjs",
     "arch:baseline": "node scripts/arch-guard.mjs --update",
     "arch:guard": "node scripts/arch-guard.mjs",
+    "e2e:wiring": "node scripts/e2e-wiring-check.mjs",
+    "e2e:wiring:selftest": "node scripts/e2e-wiring-check.mjs --selftest",
     "nesting:guard": "node scripts/nesting-guard.mjs",
     "nesting:baseline": "node scripts/nesting-guard.mjs --fix-baseline",
     "nesting:selftest": "node scripts/nesting-guard.mjs --selftest",

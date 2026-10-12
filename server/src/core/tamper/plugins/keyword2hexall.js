@@ -6,6 +6,11 @@
 // 时间盲注是本仓检出能力的主通道之一（payloads/index.js TIME_VECTORS 全部含 {SLEEP}），
 // 而 WAF 对 SLEEP/BENCHMARK 的拦截恰恰最严。tamper 链选中本插件却让 SLEEP 原样发出，
 // 等于最贵的那个关键字没被混淆。参照 keywordSplit 的覆盖集补齐（它一直含 SLEEP）。
+// [2026-10-12 性能] 关键字表与正则模块级预编译（原 transform 内 72 次 new RegExp/call，
+// 零行为变化；论证见 keyword2hex.js 同批注释）
+const KEYWORDS = ['SELECT', 'UNION', 'WHERE', 'FROM', 'AND', 'OR', 'ORDER', 'GROUP', 'HAVING', 'LIMIT', 'INSERT', 'UPDATE', 'DELETE', 'INTO', 'VALUES', 'SET', 'CREATE', 'DROP', 'ALTER', 'EXEC', 'EXECUTE', 'ALL', 'AS', 'BETWEEN', 'BY', 'CASE', 'CAST', 'CONVERT', 'COUNT', 'DISTINCT', 'ELSE', 'END', 'EXISTS', 'FALSE', 'FOR', 'IF', 'IN', 'IS', 'LIKE', 'NOT', 'NULL', 'OFFSET', 'ON', 'OUTER', 'REPLACE', 'RETURN', 'SOME', 'TABLE', 'THEN', 'TO', 'TRUE', 'UNIQUE', 'USING', 'WHEN', 'WITH', 'SLEEP', 'BENCHMARK', 'CONCAT', 'VERSION', 'DATABASE', 'SCHEMA', 'SUBSTRING', 'LENGTH', 'ASCII', 'EXTRACTVALUE', 'UPDATEXML', 'WAITFOR', 'DELAY', 'PG_SLEEP', 'ROWS', 'TOP'];
+const RES = KEYWORDS.map((kw) => new RegExp(`\\b${kw}\\b`, 'gi'));
+
 export const keyword2hexall = {
   name: 'keyword2hexall',
   description: '将所有 SQL 关键字编码为十六进制 0xHEX，绕过 WAF 关键字检测',
@@ -15,10 +20,8 @@ export const keyword2hexall = {
    * @returns {string}
    */
   transform(payload, ctx) {
-    const keywords = ['SELECT', 'UNION', 'WHERE', 'FROM', 'AND', 'OR', 'ORDER', 'GROUP', 'HAVING', 'LIMIT', 'INSERT', 'UPDATE', 'DELETE', 'INTO', 'VALUES', 'SET', 'CREATE', 'DROP', 'ALTER', 'EXEC', 'EXECUTE', 'ALL', 'AS', 'BETWEEN', 'BY', 'CASE', 'CAST', 'CONVERT', 'COUNT', 'DISTINCT', 'ELSE', 'END', 'EXISTS', 'FALSE', 'FOR', 'IF', 'IN', 'IS', 'LIKE', 'NOT', 'NULL', 'OFFSET', 'ON', 'OUTER', 'REPLACE', 'RETURN', 'SOME', 'TABLE', 'THEN', 'TO', 'TRUE', 'UNIQUE', 'USING', 'WHEN', 'WITH', 'SLEEP', 'BENCHMARK', 'CONCAT', 'VERSION', 'DATABASE', 'SCHEMA', 'SUBSTRING', 'LENGTH', 'ASCII', 'EXTRACTVALUE', 'UPDATEXML', 'WAITFOR', 'DELAY', 'PG_SLEEP', 'ROWS', 'TOP'];
     let s = String(payload ?? '');
-    for (const kw of keywords) {
-      const re = new RegExp(`\\b${kw}\\b`, 'gi');
+    for (const re of RES) {
       s = s.replace(re, (match) => {
         const hex = Buffer.from(match.toLowerCase()).toString('hex');
         return `0x${hex}`;

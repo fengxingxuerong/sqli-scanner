@@ -53,7 +53,28 @@ test('SQL_ERROR_SIG（scanValidityGuard）同步收紧：SQLSTATE 须带码', ()
 // 2026-10-01 收紧了真实报错形态，SQL_ERROR_SIG 没跟 ⇒ error-based(extractvalue) 打有洞目标
 // 的 500 不被判 selfInflicted，被误判 target_error。本测试把两侧钉在同一语料上：
 // 真实报错两侧都要命中，通用页面两侧都不许命中 —— 再出现单向收紧，这里立刻红。
-test('漂移守卫：真实报错两侧一致命中、通用页两侧一致不命中（ERROR_SIG ⇄ SQL_ERROR_SIG）', () => {
+//
+// [2026-10-12 单源化升级] 语料守卫暴露过它的盲区：它只钉"固定语料上行为一致"，
+// **不校验集合相等** ⇒ 2026-10-03 之后两侧仍持续分叉（PG::/unrecognized token 仅 guard 侧、
+// unterminated quoted string/HSQLDB·Derby·Informix exception 形态仅 engine 侧），
+// 分叉项不在语料里 ⇒ 零覆盖。现两侧已收敛为 core/errorSig.js 的同一正则对象，
+// 本测试加判据①：**两侧必须是同一个对象**（谁把字面量抄回任何一侧，立刻红）。
+// 判据②（断言敏感性自检）：证明①不是空转 —— 拿一个"抄了一遍但改坏一项"的副本，
+// 同一判据必须能抓住它与真源不同。
+test('漂移守卫：两侧同一正则对象 + 语料行为一致（ERROR_SIG ⇄ SQL_ERROR_SIG）', () => {
+  // ① 单源身份：集合层面不可能再分叉（对象级判据，比 source 串比对更严）
+  assert.equal(ERROR_SIG, SQL_ERROR_SIG,
+    'ERROR_SIG 与 SQL_ERROR_SIG 必须是 core/errorSig.js 的同一正则对象（单源）；' +
+    '返回两份字面量说明有人把实现抄回了本地 —— 请改 core/errorSig.js 一处。');
+  assert.equal(ERROR_SIG.source, SQL_ERROR_SIG.source, '两侧 source 不一致（单源被破坏）');
+  assert.equal(ERROR_SIG.flags, SQL_ERROR_SIG.flags, '两侧 flags 不一致（单源被破坏）');
+
+  // ② 断言敏感性自检：判据①对"分叉副本"必须敏感（否则可能是碰巧通过的空转断言）
+  const divergentCopy = new RegExp(ERROR_SIG.source.replace('unrecognized token', 'ZZZ_not_a_real_sig'), ERROR_SIG.flags);
+  assert.notEqual(divergentCopy.source, SQL_ERROR_SIG.source,
+    '敏感性自检失败：判据①对分叉副本不敏感 ⇒ 断言可能空转');
+
+  // ③ 语料行为（原守卫保留）：真实报错两侧都要命中，通用页面两侧都不许命中
   for (const s of REAL_ERRORS) {
     assert.ok(ERROR_SIG.test(s), `ERROR_SIG 自身漏命中：${s}`);
     assert.ok(SQL_ERROR_SIG.test(s), `SQL_ERROR_SIG 与 ERROR_SIG 分叉（漏命中）：${s}`);
@@ -61,6 +82,22 @@ test('漂移守卫：真实报错两侧一致命中、通用页两侧一致不�
   for (const s of GENERIC_PAGES) {
     assert.ok(!ERROR_SIG.test(s), `ERROR_SIG 误命中通用短语：${s}`);
     assert.ok(!SQL_ERROR_SIG.test(s), `SQL_ERROR_SIG 误命中通用短语：${s}`);
+  }
+});
+
+// [2026-10-12] 单源化的回归锚点：历史分叉项（仅一侧有的形态）现在两侧都必须认。
+// 这条同时是"并集决策"的钉子 —— 将来若要从并集里删某项，必须来这里改断言，
+// 逼使删除动作有一次显式评审（而不是悄悄少一项）。
+test('单源并集锚点：历史分叉形态两侧均命中（PG:: / unrecognized token / HSQLDB exception 族）', () => {
+  for (const s of [
+    'ERROR: invalid input syntax for type integer: "abc" (PG::SyntaxError)', // PG::（仅 guard 侧有过）
+    'sqlite3.OperationalError: unrecognized token: "\\"1\\""', // unrecognized token（仅 guard 侧有过）
+    'org.hsqldb.HsqlException: HSQLDB exception: user lacks privilege or object not found', // HSQLDB exception 族
+    'Apache Derby: Derby SQLException: Syntax error', // Derby exception 族（engine 侧独有过）
+    'unterminated quoted string at or near "\'x"', // unterminated quoted string（engine 侧独有过）
+  ]) {
+    assert.ok(ERROR_SIG.test(s), `单源后仍应命中：${s}`);
+    assert.ok(SQL_ERROR_SIG.test(s), `单源后仍应命中：${s}`);
   }
 });
 

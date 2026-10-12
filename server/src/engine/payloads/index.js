@@ -328,22 +328,15 @@ export const SUPPORTED = {
   MonetDB: { union: true, error: true, boolean: true, time: true, oob: false, second_order: true },
 };
 
-// 报错特征正则（跨库常见报错关键字）：提升为共享常量，
-// 供 ErrorDetector 与 SecondOrderDetector 触发页判定复用（避免重复定义）。
-// [P0-FIX 2026-09-10 实测] 收紧「裸库名」签名：原正则含裸词 H2 / Derby / Sybase / Firebird /
-// Informix / MonetDB / HSQLDB / JDBC，大小写不敏感 → 普通 HTML 页面里的 <h2> 标题、
-// "Derby" 之类的正文用词都会被判成「数据库报错」。实测二阶注入因此完全失效：
-// 触发页含 <h2> → 基线被误判「本就报错」→ 判定走「基线噪声路径」→ 该路径要求显式
-// negativeControl 才下结论 → 默认直接漏检（E15 靶点 250 请求全空）；同时对含 h2 的
-// 常规页面构成误报隐患。
-// 处置：库名一律要求带错误上下文（驱动类名/异常名/报错短语）才算报错特征。
-// [2026-10-01 收紧] 去掉两个裸词签名：
-//   ① 裸「syntax error」——任何前端框架/通用 5xx 页（JS syntax error、文档页）都含该短语，
-//      换成四个真实报错形态：PG「syntax error at or near」、MySQL extractvalue 回显
-//      「XPATH syntax error」、MSSQL「Incorrect syntax near」、SQLite「near "x": syntax error」。
-//   ② 裸「SQLSTATE」——正文/文档可出现该词，真实报错恒为 SQLSTATE[xxxxx] 带码形态。
-export const ERROR_SIG =
-  /(SQL syntax|mysql_fetch|ORA-\d{5}|Microsoft SQL Server|PostgreSQL.*ERROR|SQLite3|syntax error at or near|XPATH syntax error|Incorrect syntax near|near\s+["'][^\n]{0,80}?["']\s*:\s*syntax error|unterminated quoted string|Unclosed quotation|extractvalue|updatexml|conversion failed|unknown column|Division by zero|SQL\d{4}[NRT]|DB2 SQL Error|SQLSTATE\s*\[|Adaptive Server|Sybase\s*(?:error|message)|SQL error code|Firebird.*(?:error|exception)|isc_\d+|Informix\s+SQL|Informix.*(?:error|exception)|JdbcSQLException|org\.h2\.jdbc|Syntax error in SQL statement|org\.hsqldb|HSQLDB.*(?:error|exception)|org\.apache\.derby|Derby.*SQLException|Syntax error: Encountered|Cannot parse|Microsoft Access|ODBC|Jet.*Database|MonetDB.*(?:error|exception)|MonetDB\s+\d{5})/i;
+// 报错特征正则（跨库常见报错关键字）：**单源化**（2026-10-12，优化空间勘查 §A1）。
+// 真源在 core/errorSig.js；此处 re-export 保持 `ERROR_SIG` 的既有导出路径不变
+// （ErrorDetector / SecondOrderDetector / parseErrors / prefilter 及测试均从这里 import）。
+// 历史：本常量 2026-10-01 收紧（去裸词），core/scanValidityGuard.js 的 SQL_ERROR_SIG
+// 2026-10-03 "对齐"时漏了几项，两侧集合持续分叉且无集合相等守卫 ⇒ 收敛为同一正则对象。
+// 收紧/新增形态只改 core/errorSig.js 一处；tests/errorSig.specificity.test.js 的漂移守卫
+// 断言两侧是同一对象（ERROR_SIG === SQL_ERROR_SIG），抄回字面量立刻红。
+import { SQL_ERROR_SIG } from '../../core/errorSig.js';
+export const ERROR_SIG = SQL_ERROR_SIG;
 
 // per-dbms 报错签名表（P1-D3）：由 ERROR_SIG 拆分，用于「报错回显反推 DBMS」。
 // 无回显/无响应头特征时，ErrorDetector 命中后按此表定库，避免 dbms 恒为 null。

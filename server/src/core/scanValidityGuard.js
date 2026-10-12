@@ -88,11 +88,15 @@ export const INJECTION_SIGS = [
 // → 本签名不命中 → 未归 selfInflicted → 计入 serverErrRatio → 被判 target_error /「结论不可信」
 // —— 正是本 Fix 要防的那件事，却在 payload 收紧了签名之后从这里漏了回来。
 //
-// 两侧是**同一个语义需求**（「响应体在说这是数据库报错」），故此处补齐为 ERROR_SIG 的同集；
-// 由 `tests/errorSig.specificity.test.js` 的漂移守卫钉死：同一 REAL_ERRORS 语料两侧必须一致命中、
-// 同一 GENERIC_PAGES 语料两侧必须一致不命中。改一侧不改另一侧 → 该测试立刻红。
-export const SQL_ERROR_SIG =
-  /(SQL syntax|syntax error at or near|near\s+["'][^\n]{0,80}?["']\s*:\s*syntax error|XPATH syntax error|extractvalue|updatexml|mysql_fetch|ORA-\d{5}|PG::|PostgreSQL.*ERROR|sqlite3\.|SQLSTATE\s*\[|unclosed quotation|incorrect syntax near|unrecognized token|Microsoft SQL Server|conversion failed|unknown column|Division by zero|SQL\d{4}[NRT]|DB2 SQL Error|Adaptive Server|Sybase\s*(?:error|message)|SQL error code|Firebird.*(?:error|exception)|isc_\d+|Informix\s+SQL|JdbcSQLException|org\.h2\.jdbc|org\.hsqldb|org\.apache\.derby|Syntax error in SQL statement|Syntax error: Encountered|Cannot parse|Microsoft Access|Jet.*Database|ODBC|MonetDB.*(?:error|exception)|MonetDB\s+\d{5})/i;
+// [2026-10-12 单源化] 上述"补齐为同集"只对齐了当时注意到的几条，两侧集合持续分叉
+// （PG:: / unrecognized token 仅本侧有；unterminated quoted string / HSQLDB·Derby·Informix
+//  exception 形态仅 engine 侧有），且漂移守卫不校验集合相等 ⇒ 分叉零覆盖。
+// 现收敛为 **core/errorSig.js 唯一真源**，本文件与原 engine/payloads/index.js 的 ERROR_SIG
+// 均为它的 re-export（同一正则对象）。教训：两份实现"互相看齐"一次不等于永远同集，
+// 能单源就必须单源。历史取证见 docs/优化空间勘查-2026-10-12.md §A1。
+import { SQL_ERROR_SIG } from './errorSig.js';
+// 保持既有导出面：本模块的 import 方（scanValidityGuard 自身 + 测试）继续从这里取。
+export { SQL_ERROR_SIG };
 
 // 状态严重度排序（越大越严重）：判定与粘滞共用同一优先级。
 // [D32] transform_rejected 排在 blocked 之上：blocked 是「对面有 WAF 挡着」（至少请求合法、

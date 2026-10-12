@@ -99,6 +99,11 @@ const GATES = [
   // run-scan 多一个点而 selftest 少一个 → 该点不进真值表 → 完全不计入分母 → 静默
   // （结论看着更漂亮）；反向则会被拉低而变红。故与引用完整性并列成一条可跑判据。
   { id: 'lint', name: '红队靶点清单一致性（真值链）', cmd: 'npm run targets:check' },
+  // [2026-10-12 优化空间勘查 D2] e2e 靶场接线状态：曾实锤 6 个靶场「有入口、从不执行」
+  // （不在 run-all/acceptance/ci.yml 任一处），而 README 与报告会把它们当覆盖证据引用。
+  // 每个靶场必须二选一：接线执行，或登记为参考靶场并写清理由 —— 不许维持「看似资产」。
+  { id: 'lint', name: 'e2e 靶场接线状态（已接线 ⇄ 已正名）', cmd: 'npm run e2e:wiring' },
+  { id: 'lint', name: 'e2e 接线判据自证（不恒真）', cmd: 'npm run e2e:wiring:selftest' },
   { id: 'lint', name: '文档数字口径（README ↔ _facts.json）', cmd: 'npm run facts:check' },
   // README **内部**口径自洽：同一事实被写多处时必须互相一致（与上一条互补 ——
   // facts:check 管的是「README ↔ 实测采集」，本条管的是「README 内部各处之间」）。
