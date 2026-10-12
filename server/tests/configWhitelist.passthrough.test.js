@@ -88,6 +88,10 @@ const PROBE = {
   // [D32 实战 P0-1] 自定义请求变换脚本路径：同上，默认探针 1 过不了字符串形状校验（正确行为），
   // 这里给合法路径只测「透传在不在」（加载与白名单根校验在 ensureScanTransform）。
   requestScript: '/opt/signers/sign.mjs',
+  // [D52] postprocess：自定义响应解密脚本路径。与 requestScript 同款——默认探针 1 过不了
+  // 字符串形状校验（正确行为），给合法路径只测「透传在不在」（存在性/白名单根/导出形态
+  // 三道校验在 ScanManager.start 的 ensureResponseTransform 里硬失败）。
+  postprocess: '/opt/decryptors/dec.mjs',
   // [D36 实战 P0-2] bearerRefresh 是对象组：默认探针 1 会被 guardBearerRefresh 整体丢弃
   // （非对象），所以这里给合法形状，测的是「整组有没有转发到引擎」。
   bearerRefresh: { url: 'http://auth.test/refresh', tokenField: 'data.access_token' },

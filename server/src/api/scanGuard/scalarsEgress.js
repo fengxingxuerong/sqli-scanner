@@ -67,6 +67,24 @@ export function guardScalarsEgress(config, cfg) {
       config.requestScript = trimmed;
     }
   }
+  // [D52] postprocess：自定义响应解密脚本路径（与 requestScript 逐条对偶）。
+  // 入口只做形状（长度上限 + 类型）；存在性、RESPONSE_SCRIPT_DIR 白名单根、导出形态
+  // 三道校验在 ScanManager.start 的 ensureResponseTransform 里**硬失败**（扫描不启动）——
+  // 「收了路径却没加载成功」若降级继续，产出的是整轮密文比对的静默假阴性。
+  // ⚠️ 空白串 = 未启用，必须放行（与 requestScript 同因：默认关闭态就是 ''，单点重测
+  //   会把整份基线配置原样回放，要求非空会把默认值判成 INVALID_PARAM）。
+  if (cfg.postprocess !== undefined && cfg.postprocess !== null) {
+    if (typeof cfg.postprocess !== 'string') {
+      throw new AppError(ErrorCode.INVALID_PARAM, 'postprocess 须为脚本路径字符串');
+    }
+    const trimmed = cfg.postprocess.trim();
+    if (trimmed) {
+      if (trimmed.length > 1024) {
+        throw new AppError(ErrorCode.INVALID_PARAM, 'postprocess 路径过长（>1024 字符）');
+      }
+      config.postprocess = trimmed;
+    }
+  }
   const trustProxyEnv = pickBool(cfg, 'trustProxyEnv');
   if (trustProxyEnv !== undefined) config.trustProxyEnv = trustProxyEnv;
   // [P0-FIX 2026-09-09] 生产护栏透传：productionMode 默认 true（按生产环境对待遇），

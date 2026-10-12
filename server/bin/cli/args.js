@@ -182,6 +182,9 @@ export function parseArgs(argv, preset) {
     else if (a === '--cert') args.clientCert = next(); // mTLS 客户端证书 PEM（sqlmap --cert 语义）
     // [D32 实战 P0-1] 自定义请求变换脚本（签名/加密接口）；须位于 REQUEST_SCRIPT_DIR 内
     else if (a === '--request-script') args.requestScript = next();
+    // [D52] 自定义响应解密脚本（加密/编码响应体）；须位于 RESPONSE_SCRIPT_DIR 内。
+    // 与 --request-script 对偶：那个治「发不出合法请求」，这个治「读不懂合法响应」。
+    else if (a === '--postprocess') args.postprocess = next();
     // [D36 实战 P0-2] Bearer/Token 自动续期（--refresh-url 为主开关，另两个是可选形状）
     else if (a === '--refresh-url') args.refreshUrl = next();
     else if (a === '--refresh-token') args.refreshToken = next();

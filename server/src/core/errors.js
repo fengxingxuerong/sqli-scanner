@@ -35,6 +35,9 @@ export const ErrorCode = {
   // [D32 实战 P0-1] 自定义请求变换（签名/加密参数扩展点）
   REQUEST_SCRIPT_INVALID: 6007, // 脚本路径/导出形态非法 —— 扫描不启动（不降级为「忽略脚本继续扫」）
   REQUEST_SCRIPT_FAILED: 6008, // 脚本执行异常或产出非法请求 —— 该请求不发（fail-closed）
+  // [D52] 自定义响应解密（--postprocess，与 requestScript 对偶）
+  RESPONSE_SCRIPT_INVALID: 6009, // 脚本路径/导出形态非法 —— 扫描不启动（与 requestScript 同口径）
+  RESPONSE_SCRIPT_FAILED: 6010, // 脚本执行异常或产出非法形态 —— 该响应按失败处理（fail-closed）
 };
 
 // 统一错误：携带 code 便于路由层映射响应

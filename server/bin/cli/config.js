@@ -232,6 +232,9 @@ export function buildConfig(args) {
   // 与 --cert 同层级（出口层），但加载失败是**硬失败**：ScanManager.start 里抛错、扫描不启动
   //（静默忽略脚本 = 跑一整轮全被目标拒的请求，最后产出「未检出」）。
   if (typeof args.requestScript === 'string' && args.requestScript) config.requestScript = args.requestScript;
+  // [D52] --postprocess：自定义响应解密脚本。与 requestScript 同口径——入口只透传路径，
+  // 存在性/RESPONSE_SCRIPT_DIR 白名单/导出形态三道校验在 ScanManager.start 硬失败。
+  if (typeof args.postprocess === 'string' && args.postprocess) config.postprocess = args.postprocess;
   // [D36 实战 P0-2] --refresh-url：Bearer 自动续期。只给 URL 也能用（刷新凭据走会话 Cookie）；
   // --refresh-token / --refresh-field 是可选精调。非法 URL 由入口 guard 丢弃并 warn（不静默启用半套）。
   if (typeof args.refreshUrl === 'string' && args.refreshUrl.trim()) {

@@ -59,69 +59,79 @@ export const TRANSFORMABLE_KEYS = Object.freeze(['url', 'method', 'headers', 'da
 const registry = new Map();
 
 /**
- * 脚本路径合法性校验：后缀 + 存在 + 普通文件 + **必须落在 REQUEST_SCRIPT_DIR 之内**。
+ * 脚本路径合法性校验：后缀 + 存在 + 普通文件 + **必须落在白名单根目录之内**。
  *
  * 为什么 CLI 也要这道闸（与既有 `--tamper <file>.js` 不同）：
  *   tamper 插件只改写 payload 字符串；本脚本改写的是**整条出站请求**（URL/报文），
  *   并且运行在持有客户凭据、授权范围与出口策略的那一层 —— 它是出口层的代码注入面，
  *   而同一个引擎既跑在操作者终端也跑在长驻 HTTP 服务里。用一个显式目录把「能加载什么」
  *   钉死，比在每个入口各写一遍「这是 API 还是 CLI」的判据可靠得多（后者漏一处就全废）。
+ *
+ * [D52] envVar/label/invalidCode 三个可选参数：响应解密脚本（--postprocess）复用本函数的
+ *   全部路径判据，只把白名单根换成 RESPONSE_SCRIPT_DIR、文案换成「响应解密脚本」、
+ *   错误码换成 RESPONSE_SCRIPT_INVALID。缺省值即原行为，既有调用者零影响。
  * @param {string} rawPath 用户给的路径
- * @param {{allowedDir?: string}} [opts] 覆盖白名单根（单测用）；缺省读 REQUEST_SCRIPT_DIR
+ * @param {{allowedDir?: string, envVar?: string, label?: string, invalidCode?: number}} [opts]
+ *   allowedDir 覆盖白名单根（单测用）；envVar 白名单根对应的环境变量名；label 文案主语；
+ *   invalidCode 路径类错误码（缺省 REQUEST_SCRIPT_INVALID）
  * @returns {{resolved: string, allowedDir: string}} 已 realpath 的绝对路径
- * @throws {AppError} REQUEST_SCRIPT_INVALID
+ * @throws {AppError} invalidCode（缺省 REQUEST_SCRIPT_INVALID）
  */
-export function assertScriptPath(rawPath, { allowedDir } = {}) {
-  const root = String(allowedDir ?? process.env.REQUEST_SCRIPT_DIR ?? '').trim();
+export function assertScriptPath(rawPath, {
+  allowedDir, envVar = 'REQUEST_SCRIPT_DIR', label = '请求变换脚本',
+  invalidCode = ErrorCode.REQUEST_SCRIPT_INVALID,
+} = {}) {
+  const root = String(allowedDir ?? process.env[envVar] ?? '').trim();
   if (!root) {
     throw new AppError(
-      ErrorCode.REQUEST_SCRIPT_INVALID,
-      '未设置 REQUEST_SCRIPT_DIR（请求变换脚本的白名单根目录），拒绝加载任何脚本。' +
-      '这是出口层的代码注入面（脚本可改写 URL 与报文），必须先划一个只放可信脚本的目录：' +
-      'REQUEST_SCRIPT_DIR=D:\\work\\signers',
+      invalidCode,
+      `未设置 ${envVar}（${label}的白名单根目录），拒绝加载任何脚本。` +
+      '这是引擎的代码注入面（脚本由引擎在扫描流程内执行，请求侧可改写 URL 与报文、' +
+      '响应侧可读全部响应体），必须先划一个只放可信脚本的目录：' +
+      `${envVar}=D:\\work\\signers`,
     );
   }
   if (!existsSync(root)) {
-    throw new AppError(ErrorCode.REQUEST_SCRIPT_INVALID, `REQUEST_SCRIPT_DIR 指向的目录不存在：${root}`);
+    throw new AppError(invalidCode, `${envVar} 指向的目录不存在：${root}`);
   }
   let rootReal;
   try {
     rootReal = realpathSync(root);
   } catch (e) {
-    throw new AppError(ErrorCode.REQUEST_SCRIPT_INVALID, `REQUEST_SCRIPT_DIR 无法解析：${root}（${e.message}）`);
+    throw new AppError(invalidCode, `${envVar} 无法解析：${root}（${e.message}）`);
   }
   if (!statSync(rootReal).isDirectory()) {
-    throw new AppError(ErrorCode.REQUEST_SCRIPT_INVALID, `REQUEST_SCRIPT_DIR 必须是目录：${rootReal}`);
+    throw new AppError(invalidCode, `${envVar} 必须是目录：${rootReal}`);
   }
 
   const p = String(rawPath ?? '').trim();
-  if (!p) throw new AppError(ErrorCode.REQUEST_SCRIPT_INVALID, '请求变换脚本路径为空');
+  if (!p) throw new AppError(invalidCode, `${label}路径为空`);
   if (!SCRIPT_EXT_RE.test(p)) {
     throw new AppError(
-      ErrorCode.REQUEST_SCRIPT_INVALID,
-      `请求变换脚本必须是 .js/.mjs/.cjs 文件，收到：${p}`,
+      invalidCode,
+      `${label}必须是 .js/.mjs/.cjs 文件，收到：${p}`,
     );
   }
   if (!existsSync(p)) {
     // 只报「在白名单根下没找到」，不回显候选路径之外的信息：路径探测本身是信息泄漏面
-    throw new AppError(ErrorCode.REQUEST_SCRIPT_INVALID, `请求变换脚本不存在：${p}`);
+    throw new AppError(invalidCode, `${label}不存在：${p}`);
   }
   let resolved;
   try {
     resolved = realpathSync(p);
   } catch (e) {
-    throw new AppError(ErrorCode.REQUEST_SCRIPT_INVALID, `请求变换脚本路径无法解析：${p}（${e.message}）`);
+    throw new AppError(invalidCode, `${label}路径无法解析：${p}（${e.message}）`);
   }
   const st = statSync(resolved);
   if (!st.isFile()) {
-    throw new AppError(ErrorCode.REQUEST_SCRIPT_INVALID, `请求变换脚本不是普通文件：${resolved}`);
+    throw new AppError(invalidCode, `${label}不是普通文件：${resolved}`);
   }
   const rel = path.relative(rootReal, resolved);
   const inside = rel === '' || (!!rel && !rel.startsWith('..') && !path.isAbsolute(rel));
   if (!inside) {
     throw new AppError(
-      ErrorCode.REQUEST_SCRIPT_INVALID,
-      `请求变换脚本不在 REQUEST_SCRIPT_DIR（${rootReal}）之内：${resolved}`,
+      invalidCode,
+      `${label}不在 ${envVar}（${rootReal}）之内：${resolved}`,
     );
   }
   return { resolved, allowedDir: rootReal };

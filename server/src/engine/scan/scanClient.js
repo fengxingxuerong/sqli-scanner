@@ -9,6 +9,8 @@ import { withCsrf } from '../../core/csrfKeeper.js';
 import { withLoginFlow } from '../../core/loginFlow.js';
 // [D32 实战 P0-1] 自定义请求变换（签名/加密参数）扩展点
 import { applyScanTransform, notifyTransformOutcome, transformActiveForScan } from '../../core/requestTransform.js';
+// [D52] 自定义响应解密（--postprocess，与请求变换对偶）：密文响应体的解密点
+import { applyResponseTransform, responseTransformActiveForScan } from '../../core/responseTransform.js';
 // [D36 实战 P0-2] Bearer/Token 自动续期
 import { refreshActiveForScan, withBearerRefresh } from '../../core/bearerKeeper.js';
 import { DirectConnector } from '../../core/directConnector.js';
@@ -112,6 +114,31 @@ export function getScanClient(scanId, target) {
                     throw e;
                   }
                 },
+              }
+            : {}),
+        };
+      }
+
+      // [D52] 响应解密（--postprocess）—— 与请求变换挂在**同一层（最内层）**，理由对偶：
+      //   ① 解密必须是最外层的读者之前、最内层的生产者之后：safeUrl/csrf/login 各层都要看
+      //      明文（csrf 取页读 body 提 token、loginFlow 读登录响应），挂在它们外层这些
+      //      层看到的还是密文；挂在最内层 ⇒ 每个加工方读到的都是解密后的响应。
+      //   ② 只包经 getScanClient 的请求（与请求变换的覆盖边界逐字一致：不含爬虫阶段的
+      //      表单收集请求）。
+      // ⚠ fail-closed：脚本抛错/产出非法形态 ⇒ AppError 上抛，该响应按「请求失败」处理
+      //   （_send 记 null、位置重试/放弃，与网络失败同义）。绝不「解不动就用密文继续比」
+      //   —— 那正是本扩展点要消灭的静默假阴性。
+      // 未配置 --postprocess 时 responseTransformActiveForScan 为 false ⇒ 零包装、零行为变化。
+      if (responseTransformActiveForScan(scanId)) {
+        const baseReq2 = view.request.bind(view);
+        const baseHead2 = typeof view.headRequest === 'function' ? view.headRequest.bind(view) : null;
+        view = {
+          ...view,
+          request: async (opts) => applyResponseTransform(scanId, await baseReq2(opts)),
+          ...(baseHead2
+            ? {
+                headRequest: async (url, opts = {}) =>
+                  applyResponseTransform(scanId, await baseHead2(url, opts)),
               }
             : {}),
         };

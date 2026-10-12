@@ -5,6 +5,40 @@
 
 ---
 
+## 2026-10-12 批次 D52 · 响应解密扩展点 --postprocess（与 --request-script 对偶）
+
+**动机**：`--request-script` 治「发不出合法请求」，D52 治对偶面「读不懂合法响应」——目标把响应体
+加密/编码后返回时（AES 信封、自定义 Base64 变体、自研 RPC 序列化），检测层拿到的全是密文，
+真/假条件的响应差异被加密抹平 ⇒ 报告写「未检出」。是与「这个站没有注入」长得一模一样的静默假阴性。
+
+### 已落地
+
+| 面 | 内容 |
+|---|---|
+| 引擎 | `core/responseTransform.js`：`assertResponseScriptPath`（白名单根 `RESPONSE_SCRIPT_DIR`，复用 assertScriptPath——后者加 envVar/label/invalidCode 三可选参数，缺省即原行为）；`applyResponseTransform` 只替换 data、fail-closed |
+| 接线 | scanClient 最内层（与请求变换同层：safeUrl/csrf/login 都要看明文）；lifecycle 回收；ScanManager.start 硬失败 + constraints 写明判读基于解密后响应 |
+| 入口 | CLI `--postprocess` + 档案键 + REST 白名单 + scalarsEgress 形状校验 + defaults；TUNING_NO_UI_KEYS 登记 |
+| 判据 | `tests/responsePostprocess.test.js` 15 条，killer = AES-CBC 随机 IV 模拟 oracle：不配脚本 extractBoolean 诚实 null，配脚本正确提取；接线 GET/HEAD 两条；4 发缺陷注入全杀 |
+
+### 设计口径（防后人改错）
+
+1. **只换 data**：status/headers 是可信度判账（拦截/会话失效/5xx）的输入，脚本改不了——
+   放行 status 覆写等于让脚本把一次 403 洗成 200。
+2. **fail-closed**：脚本炸 ⇒ 该响应按失败处理（_send 记 null、重试/放弃，与网络失败同义）。
+   绝不「解不动就用密文继续比」——那正是本扩展点要消灭的静默假阴性。
+3. **挂最内层**：与请求变换同层。挂外层会让 safeUrl/csrf/login 各层读到密文
+   （csrf 取页读 body 提 token 会直接失败）。
+4. **边界**：只覆盖经 getScanClient 的扫描/检测请求（含保活/CSRF/登录），**不含**注入点
+   发现阶段的爬虫请求（与 requestTransform 逐字一致的边界，文档不许含混）。
+
+### 未验证（如实标注）
+
+- **真机**：全部判据为离线 mock oracle（随机 IV 模拟 + 接线层 stub），未经真实加密目标验证；
+  真机验证需自建加密响应靶场（归 e2e 下一轮）。
+- **盲区**：脚本同步/异步、流式响应体、超大响应体的解密成本未测（mock 均为小体量字符串）。
+
+---
+
 ## 2026-10-12 批次 D50 · --fetch-using=between（提取比较算子）
 
 **上游归属更正（先读这个）**：本项原登记于「下一批候选口径」表，写作「`--fetch-using=between/in`（ghauri）」。
@@ -205,7 +239,7 @@ jSQL 多比特 ≈ 本仓 `blindBitwise` 位平面提取（8 位并行，MySQL/T
     当前用户，-U 显式报错）；`--exclude` 与 excludeSysdbs 正交（点名排除优先）。钉在
     `tests/enumSurface.test.js`（9 条）。**诚实边界**：--statements/--procs 未在真机逐库验证
     （查询形态沿用 SYS_QUERIES 同族聚合惯用法，真机验证归 real-mysql-lab 下一轮）。
-16. `--chunked`（Transfer-Encoding 分块发 body，WAF 不缓冲不检的真向量）、`--safe-post/--safe-req`（POST 保活）、`--load-cookies/--live-cookies`（会话接力）、`--crawl-exclude <re>`、`--postprocess <file.js>`（响应侧解密，与 `--request-script` 对偶）：各自代价 S，价值 Med（`--postprocess` High，加密响应目标现状是静默比对失败）。
+16. `--chunked`（Transfer-Encoding 分块发 body，WAF 不缓冲不检的真向量）、`--safe-post/--safe-req`（POST 保活）、`--load-cookies/--live-cookies`（会话接力）、`--crawl-exclude <re>`：各自代价 S，价值 Med。~~`--postprocess <file.js>`（响应侧解密，与 `--request-script` 对偶）~~ —— ✅ **已落地为 D52（2026-10-12）**：15 条判据（含 AES-CBC 随机 IV 模拟 oracle 的 killer 用例）+ 4 发缺陷注入全杀；真机验证待自建加密响应靶场。
 
 **工程化族（nuclei/dalfox/ZAP/semgrep/trivy 派）**
 
