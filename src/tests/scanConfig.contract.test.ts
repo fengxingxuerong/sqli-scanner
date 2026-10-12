@@ -258,6 +258,11 @@ const TUNING_NO_UI_KEYS = [
   // 早已单方面依赖 BETWEEN 可用）——那是显式覆盖场景，不覆盖不损失任何能力。
   // 与 D41/D42 五键同族：CLI/REST 可达，Web UI 单目标面板无对应控件，显式登记为债。
   'fetchUsing',
+  // [2026-10-12] D52 响应解密脚本路径（--postprocess，与 --request-script 对偶）：
+  // 默认 '' = 不启用，不配不损失任何判定能力（显式配置才改变行为）⇒ 调优类。
+  // 脚本须位于 RESPONSE_SCRIPT_DIR 白名单目录内；加载失败扫描不启动（硬失败），
+  // 执行异常时该响应按失败处理（fail-closed）。CLI/REST 可达，面板无对应控件。
+  'postprocess',
   // HTTP 层行为（hpp 已升入 CAPABILITY_GAP_KEYS）
   'forceSsl', 'ignoreRedirects', 'activeWafProbe', 'trustProxyEnv', 'ssrfViaProxy', 'proxyBypassLocal',
   // 限速：delay / maxReq 已于 2026-09-23 接进「请求控制」分组 → 移出本表。

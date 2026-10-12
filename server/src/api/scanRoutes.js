@@ -89,6 +89,9 @@ const KNOWN_CFG_KEYS = new Set([
   // [D32 实战 P0-1] 自定义请求变换脚本路径（签名/加密接口）。⚠ 只到「形状合法」为止，
   // 真正加载在 ScanManager.start（ensureScanTransform），失败即不启动扫描。
   'requestScript',
+  // [D52] 自定义响应解密脚本路径（--postprocess，与 requestScript 对偶）。同样只做形状，
+  // 真正加载在 ScanManager.start（ensureResponseTransform），失败即不启动扫描。
+  'postprocess',
   // [P0-FIX 2026-09-09] 本地/私网目标绕过环境变量代理（默认 true）
   'proxyBypassLocal',
   // [2026-09-24] 引擎真读、此前**任何入口都设不了**的三键（见 sanitizeStart 内注释）：

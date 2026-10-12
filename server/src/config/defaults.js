@@ -363,6 +363,14 @@ export const defaults = {
   //   加载失败/执行异常一律硬失败（扫描不启动 / 该请求不发），不降级为"忽略脚本继续扫"。
   //   详见 core/requestTransform.js 文件头四条硬约束。
   requestScript: '',
+  // [D52] 自定义响应解密（--postprocess，与 requestScript 对偶）：`<脚本路径>`，''=不启用。
+  // 治的是对偶面的静默假阴性——目标把响应体加密/编码后返回时，检测层拿到的全是密文，
+  // 真/假条件的响应差异被加密抹平 ⇒ 报告写「未检出」。脚本导出 transform(res)->res，
+  // 只允许替换 data（响应体文本）；挂在 per-scan 客户端视图最内层，检测/提取/可信度
+  // 守卫看到的都是解密后的明文。⚠ 这是入口层的代码注入面 ⇒ 脚本必须位于环境变量
+  //   RESPONSE_SCRIPT_DIR 指定的目录内；加载失败硬失败（扫描不启动），执行异常时
+  //   该响应按失败处理（fail-closed，宁漏不误）。详见 core/responseTransform.js 文件头。
+  postprocess: '',
 
   // [D36 实战 P0-2] Bearer/Token 自动续期：`{ url, refreshToken?, tokenField?, method?, bodyField?,
   // bodyFormat?, headerTemplate?, headerName?, eager? }`。null=不启用（默认，零行为变化）。

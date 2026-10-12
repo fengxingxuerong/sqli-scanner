@@ -28,6 +28,8 @@ import { logger } from '../core/logger.js';
 import { parseScope, registerScanScope } from '../core/scopeGuard.js';
 // [D32 实战 P0-1] 自定义请求变换（签名/加密参数）扩展点；回收挂在 lifecycle._disposeScan
 import { ensureScanTransform } from '../core/requestTransform.js';
+// [D52] 自定义响应解密（--postprocess，与请求变换对偶）；回收同样挂在 lifecycle._disposeScan
+import { ensureResponseTransform } from '../core/responseTransform.js';
 // [D36 实战 P0-2] Bearer/Token 自动续期（回收同样挂在 lifecycle._disposeScan）
 import { normalizeRefreshConfig, registerScanRefresh } from '../core/bearerKeeper.js';
 import { runScanLoop } from './scanRunner.js';
@@ -163,6 +165,22 @@ export class ScanManager {
         `（sha256=${xform.sha256.slice(0, 16)}…，含保活/CSRF 取页/登录这些非注入请求；` +
         '注入点发现阶段的爬虫请求不经此层）：报告中的 PoC curl 未重算签名，' +
         '直接复制会因签名/加密不匹配而失败，复现必须带同一脚本重放',
+      );
+      report.summary.constraints = list;
+    }
+    // [D52] 自定义响应解密（--postprocess，与 requestScript 对偶）。**失败即不启动扫描**
+    // （await 抛出）—— 与 requestScript/customPayloads 同口径：「收了路径却没加载成功」
+    // 若降级继续，产出的是整轮密文比对的静默假阴性。登记成功后同样写进
+    // summary.constraints：报告判读基于解密后的响应体，这句不写就是不实交付。
+    const pp = await ensureResponseTransform(scanId, target.config);
+    if (pp) {
+      report.summary = report.summary || {};
+      const list = Array.isArray(report.summary.constraints) ? report.summary.constraints : [];
+      list.push(
+        `本次扫描/检测阶段比较的每条响应体都经过自定义解密脚本 ${pp.file}` +
+        `（sha256=${pp.sha256.slice(0, 16)}…，含保活/CSRF 取页/登录这些非注入请求；` +
+        '注入点发现阶段的爬虫请求不经此层）：检测/提取判据作用于解密后的明文，' +
+        '脚本执行失败时该响应按失败处理（宁漏不误），不会用密文继续比对',
       );
       report.summary.constraints = list;
     }

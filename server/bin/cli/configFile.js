@@ -48,6 +48,8 @@ export function buildKnownArgKeys(parseArgsFn) {
     'csrfUrl', 'csrfTokenName', 'csrfMethod', 'csrfRefreshFreq', 'skipParams',
     'tor', 'mobile', 'retries', 'httpTimeoutMs', 'refreshUrl', 'refreshToken', 'refreshField',
     'requestScript', 'clientCert', 'xmlBody', 'xmlBodyFile',
+    // —— [D52] 响应解密脚本（与 requestScript 对偶）——
+    'postprocess',
     // —— 入口控制 ——
     'advise', 'yes',
     // —— [D41] 注入点筛选三件套 / 配置档案 ——

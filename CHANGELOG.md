@@ -4,6 +4,19 @@
 
 ## [Unreleased]
 
+### 2026-10-12 批次 D52 · 响应解密扩展点 --postprocess（与 --request-script 对偶）
+
+**一句话**：给「读得懂合法响应」补上扩展点——目标把响应体加密/编码后返回时，检测层拿到的全是密文，真/假条件的差异被加密抹平 ⇒ 报告写「未检出」（静默假阴性）；`--postprocess` 让用户在 per-scan 客户端视图最内层对每条响应体解密，之后检测/提取/可信度守卫看到的都是明文。默认不配 = 零行为变化，15 条新判据 + 4 发缺陷注入全杀。
+
+| 面 | 变更 |
+|---|---|
+| 引擎 | 新建 `server/src/core/responseTransform.js`（与 requestTransform 逐条对偶）：`assertResponseScriptPath`（白名单根 `RESPONSE_SCRIPT_DIR`，复用 assertScriptPath 全部路径判据——后者加 `envVar/label/invalidCode` 三个可选参数，缺省即原行为，D32 调用者零影响）；`applyResponseTransform` 只替换 `data`（status/headers 不可改——那是可信度判账的输入），fail-closed（脚本炸 ⇒ 该响应按失败处理，宁漏不误） |
+| 接线 | `scanClient.js`：解密层与请求变换挂**同一层（最内层）**——safeUrl/csrf/login 各层都要看明文；`lifecycle._disposeScan` 回收登记；`ScanManager.start` 硬失败加载 + summary.constraints 写明「判读基于解密后响应」 |
+| 入口 | CLI `--postprocess`（args/help/config 三件）+ `--config` 档案键 + REST 白名单 + scalarsEgress 形状校验（空白串=未启用放行，同 requestScript 的 D35 教训）+ defaults `postprocess:''`；新键登记进前端契约 `TUNING_NO_UI_KEYS` |
+| 错误码 | errors.js 新增 `RESPONSE_SCRIPT_INVALID: 6009` / `RESPONSE_SCRIPT_FAILED: 6010` |
+| 判据 | `server/tests/responsePostprocess.test.js` 15 条：路径白名单/导出形态/只换 data/fail-closed/未登记零拷贝/登记生命周期；**killer：模拟 AES-CBC 随机 IV 的加密 oracle（相同明文也产出不同密文）上，不配脚本 ⇒ extractBoolean 诚实返回 null（不拿密文差异造值），配脚本 ⇒ 正确提取 secret**；接线两条（GET/HEAD 经 getScanClient 出来的响应真是解密后的，内层原始响应不被原地改写）。变换家族既有 62 例 + passthrough + scanClient/ScanManager 44 例回归全绿 |
+| 缺陷注入 | 4 发全杀：解密层整个不挂（3 杀）/ fail-open 用密文继续（boom 用例精确命中）/ data 类型校验放宽 / 白名单目录校验恒真（D32 自带测试同时抓住——共享校验器没被静默削弱） |
+
 ### 2026-10-12 批次 D50 · 盲注提取比较算子 --fetch-using=between
 
 **一句话**：给盲注提取加「BETWEEN 窄化」算子开关——`>`/`<` 被 WAF 过滤而 BETWEEN 仍放行的目标上，长度/字节二分从「全程判假」变为照常收敛；默认 gt 行为零回归，11 条新判据 + 5 发缺陷注入全杀。
