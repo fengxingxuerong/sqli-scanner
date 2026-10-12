@@ -24,6 +24,7 @@
  *   node scripts/mutation-check.mjs --runner=frontend     只跑前端 runner 的目标（CI 用它分工：
  *      server job 没装根目录 node_modules ⇒ 前端目标必须去装了依赖的 job 跑，否则 vitest 起不来）
  *   node scripts/mutation-check.mjs --report          只报告存活，不因存活退出非零（开发期用）
+ *   node scripts/mutation-check.mjs --selftest        自证判据不空转（[D1 2026-10-12]）
  *
  * 三档超时（依据见 scripts/../docs 记录，实测后再调）：
  *   基线轮  BASE_MS   —— 回答「这套测试本来是好的吗」，值得等
@@ -335,6 +336,126 @@ if (has('list')) {
   }
   process.exit(0);
 }
+
+/**
+ * [D1 2026-10-12] --selftest：自证「改坏一个位点会被看见」，而不是靠信念。
+ *
+ * 本门禁是**断言敏感度的最后一层防线**——它自己空转的话，全仓「改坏了还绿」就无人发现，
+ * 且症状是恒绿（最坏的一种：看起来最有安全感）。空转有两种形态，各给一发判据：
+ *
+ *   ① 位点枚举空转：算子失配 / 目标文件路径漂移 ⇒ collectMutants 返回 0 ⇒ 变异 0 处
+ *      ⇒ 报告「PASS：无存活变异」。**门禁越空越绿**，正是 lab-targets-check 那类
+ *      「空集合必须 exit 2」要堵的口子。
+ *   ② 判定链路空转：mutate() 产出与原文相同 / 变异写完立刻还原 / runTests 恒真
+ *      ⇒ 跑的其实是原文件 ⇒ 全存活（或全绿）⇒ 判据对差异不敏感。
+ *
+ * 判据 ② 用**自造哨兵**（临时模块 + 临时测试）端到端走一遍真实链路（枚举→写入→跑测试→
+ * 检出差异）。为什么不复用现有目标：现有目标的敏感度恰恰是**被测对象**，拿它当判据等于
+ * 自证自 —— 哨兵必须是「已知必死」的独立样本。
+ *
+ * ⚠️ 本机跑需带 spawn shim（runbook：node child_process EBUSY）：
+ *    NODE_OPTIONS="--require=.../cp-pipe-shim.cjs" node scripts/mutation-check.mjs --selftest
+ */
+function selftest() {
+  let failed = 0;
+  const fail = (msg) => {
+    console.error(`✗ selftest 失败：${msg}`);
+    failed += 1;
+  };
+
+  // ── ① 每个真实目标：文件在、位点非空、mutate() 真的改了内容 ──────────────────
+  for (const t of TARGETS) {
+    const abs = path.join(baseDirOf(t), t.file);
+    if (!fs.existsSync(abs)) {
+      fail(`目标文件不存在 ⇒ 位点必然归零 ⇒ 恒绿：${t.file}`);
+      continue;
+    }
+    const src = fs.readFileSync(abs, 'utf8');
+    const ms = collectMutants(t);
+    if (ms.length === 0) {
+      fail(`位点枚举为 0 ⇒ 该目标在门禁里等于不存在（恒绿形态）：${t.file}`);
+      continue;
+    }
+    const unchanged = ms.filter((m) => m.mutate() === src).length;
+    if (unchanged > 0) {
+      fail(`${t.file} 有 ${unchanged} 个位点的 mutate() 产出与原文相同（假变异，测试跑的是原文件）`);
+    }
+  }
+
+  // ── ② 端到端哨兵：已知必死的变异必须被「杀死」 ────────────────────────────────
+  const modRel = 'src/core/__mutation_selftest_target__.js';
+  const testRel = 'tests/__mutation_selftest__.test.js';
+  const modAbs = path.join(SERVER, modRel);
+  const testAbs = path.join(SERVER, testRel);
+  // 位点刻意铺满多种算子：`&&` / `>` / `<` / `return true` / `return false`
+  const MOD_SRC = [
+    '/** 哨兵模块（selftest 临时生成，跑完即删） */',
+    'export function inRange(v) {',
+    '  if (v > 0 && v < 10) return true;',
+    '  return false;',
+    '}',
+    '',
+  ].join('\n');
+  const TEST_SRC = [
+    "import { test } from 'node:test';",
+    "import assert from 'node:assert/strict';",
+    "import { inRange } from '../src/core/__mutation_selftest_target__.js';",
+    "test('哨兵：区间判定', () => {",
+    '  assert.equal(inRange(5), true);',
+    '  assert.equal(inRange(50), false);',
+    '  assert.equal(inRange(-1), false);',
+    '});',
+    '',
+  ].join('\n');
+
+  const sentinel = { file: modRel, tests: [testRel] };
+  fs.writeFileSync(modAbs, MOD_SRC, 'utf8');
+  fs.writeFileSync(testAbs, TEST_SRC, 'utf8');
+  try {
+    const base = runTests(sentinel, sentinel.tests, BASE_MS);
+    if (!base.pass) {
+      fail(`哨兵基线未通过 ⇒ 判定链路本身跑不起来，后面的存活/杀死都不可信\n${base.tail || ''}`);
+    }
+    const ms = collectMutants(sentinel);
+    if (ms.length === 0) fail('哨兵位点枚举为 0 ⇒ 算子对最朴素的代码都失配');
+
+    const original = fs.readFileSync(modAbs, 'utf8');
+    let killedSentinel = 0;
+    let syntaxSentinel = 0;
+    for (const m of ms) {
+      fs.writeFileSync(modAbs, m.mutate(), 'utf8');
+      try {
+        const res = runTests(sentinel, sentinel.tests, MUTANT_MS);
+        if (res.syntax) syntaxSentinel += 1;
+        else if (!res.pass) killedSentinel += 1;
+      } finally {
+        fs.writeFileSync(modAbs, original, 'utf8');
+      }
+    }
+    // 只要有**一处**改坏被看见，就证明「枚举→写入→跑测试→检出差异」这条链是通的
+    if (killedSentinel === 0) {
+      fail(
+        `哨兵 ${ms.length} 处变异全部存活（语法破坏 ${syntaxSentinel} 处）⇒ 判定链路看不见「改坏」` +
+          ' ⇒ 本门禁等价于空转',
+      );
+    } else {
+      console.log(`   哨兵：${ms.length} 处变异，杀死 ${killedSentinel} 处（语法破坏 ${syntaxSentinel} 处）`);
+    }
+  } finally {
+    // 哨兵文件必须清干净：留在 server/src/core 会被 modules:check 当成新模块
+    try { fs.unlinkSync(modAbs); } catch { /* noop */ }
+    try { fs.unlinkSync(testAbs); } catch { /* noop */ }
+  }
+
+  if (failed > 0) {
+    console.error(`\nFAIL：mutation-check selftest 有 ${failed} 项未通过`);
+    process.exit(1);
+  }
+  console.log(`✔ mutation-check selftest 通过（${TARGETS.length} 个目标位点非空且 mutate() 有效；哨兵变异可被杀死）`);
+  process.exit(0);
+}
+
+if (has('selftest')) selftest();
 
 for (const target of targets) {
   const mutants = collectMutants(target);

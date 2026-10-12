@@ -7,6 +7,10 @@ const KEYWORDS = [
   'CAST', 'GROUP', 'HAVING', 'LIMIT', 'DATABASE', 'SCHEMA',
 ];
 
+// [2026-10-12 性能] 正则模块级预编译（原 transform 内 21 次 new RegExp/call，零行为变化；
+// 论证见 keyword2hex.js 同批注释）
+const RES = KEYWORDS.map((kw) => new RegExp(`\\b${kw}\\b`, 'gi'));
+
 export const keywordSplit = {
   name: 'keywordSplit',
   description: '在 SQL 关键字内部插入 /*!*/ 注释，破坏关键字完整匹配',
@@ -17,8 +21,7 @@ export const keywordSplit = {
    */
   transform(payload, ctx) {
     let out = payload;
-    for (const kw of KEYWORDS) {
-      const re = new RegExp(`\\b${kw}\\b`, 'gi');
+    for (const re of RES) {
       out = out.replace(re, (m) => {
         // 从中间（至少偏右 1 字符）切开，避免切出空段
         const mid = Math.max(1, Math.floor(m.length / 2));

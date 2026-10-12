@@ -44,18 +44,37 @@ let cachedKeySource = null;
  * 口径必须与 index.js 的 resolveApiToken 一致：**file 优先于 env**。
  * 两处各读一套是这类漂移的根源（与 EXPLOIT_ENABLED 那次分叉同族）。
  */
+// 令牌材料缓存（[2026-10-12 优化空间勘查 §C2]）：
+// 原实现在 getKey() 里**先**调 secretKeySource() 才查密钥缓存 —— 而 source 判定本身要读文件
+// ⇒ 即使密钥已缓存，每次 seal/open（= 每个注入点、每次快照落盘）仍读 1~2 次令牌文件。
+// 更糟的是它带来的**稳定性**问题：source 每次现算，令牌文件一次抖动（权限/挂载瞬断/读取
+// 竞态）就让这一次的 source 变成 process-random ⇒ 与 cachedKeySource 不符 ⇒ 重新派生随机密钥
+// ⇒ 此前封存的会话值全部解不开（续跑功能静默失效，正是本文件头部描述的那个故障形态）。
+// 缓存策略：**只缓存成功结果**（读到非空值）。失败/空不缓存 —— 首次读取失败仍可在后续调用
+// 重试恢复（容器启动早期 secret 尚未挂载完是常态），避免把一次瞬断固化成整个进程降级。
+let cachedMaterial = null;
+
 function readApiTokenMaterial() {
+  if (cachedMaterial) return cachedMaterial;
   const file = String(process.env.SCAN_API_TOKEN_FILE || '').trim();
   if (file) {
     try {
       const v = readFileSync(file, 'utf8').trim();
-      if (v) return v;
+      if (v) {
+        cachedMaterial = v;
+        return v;
+      }
     } catch {
       // 读不到就退回 env（与 resolveApiToken 同样的容错：warn 后继续找下一来源）
+      // 注意：这里**不缓存**失败 ⇒ 下次调用会重试（secret 挂载竞态的恢复口）。
     }
   }
   const direct = String(process.env.SCAN_API_TOKEN || '').trim();
-  return direct || '';
+  if (direct) {
+    cachedMaterial = direct;
+    return direct;
+  }
+  return '';
 }
 
 /** 当前生效的密钥来源（供日志/诊断用，不含密钥本身） */
@@ -82,10 +101,14 @@ function getKey() {
   return key;
 }
 
-/** 测试钩子：清除密钥缓存（切换 env 后重新派生） */
+/**
+ * 测试钩子：清除密钥缓存与令牌材料缓存（切换 env 后重新派生）。
+ * 必须同时清 cachedMaterial —— 否则换 env 后材料仍是旧值，source 判定失真。
+ */
 export function _resetSecretKeyForTest() {
   cachedKey = null;
   cachedKeySource = null;
+  cachedMaterial = null;
 }
 
 /** @returns {boolean} 该值是否已是封存形态 */

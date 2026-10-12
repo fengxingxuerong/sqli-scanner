@@ -49,8 +49,12 @@ function kwsOfFile(fileUrl) {
   return [...m[1].matchAll(/'([A-Z][A-Z_]+)'/g)].map((x) => x[1]);
 }
 
-const HEX = kwsOf(keyword2hex);
-const HEX_ALL = kwsOf(keyword2hexall);
+// [2026-10-12] 三个插件的关键字表均已提升到模块级 const KEYWORDS（正则预编译批次，
+// 见 docs/优化空间勘查-2026-10-12.md §C1）⇒ 统一走 kwsOfFile。
+// 保留 kwsOf（transform 体内抽取）以防将来有人把列表挪回函数内 —— 那时本抽取会静默
+// 返回 []，由「自证-0」的 length>10 断言当场抓住（不会假绿）。
+const HEX = kwsOfFile(new URL('../src/core/tamper/plugins/keyword2hex.js', import.meta.url));
+const HEX_ALL = kwsOfFile(new URL('../src/core/tamper/plugins/keyword2hexall.js', import.meta.url));
 // keywordSplit 的列表在模块级 const KEYWORDS（keywordSplit.js:4），
 // 不在 transform 体内 ⇒ 必须扫文件内容，否则抽到 0 项。
 const SPLIT = kwsOfFile(new URL('../src/core/tamper/plugins/keywordSplit.js', import.meta.url));

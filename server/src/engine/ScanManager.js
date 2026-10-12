@@ -329,7 +329,7 @@ export class ScanManager {
     if (format === 'csv') return this.reportGen.toCSV(report);
     if (format === 'markdown' || format === 'md') return this.reportGen.toMarkdown(report);
     if (format === 'sarif') return this.reportGen.toSARIF(report); // [批次 9 2026-09-15] SARIF 2.1.0
-    if (format === 'db-json') return JSON.stringify(report.data); // 仅拖库数据（库/表/列/行）
+    if (format === 'db-json') return this.reportGen.toDBJSON(report); // 仅拖库数据（库/表/列/行；[2026-10-12] 单源化到 ReportGenerator.toDBJSON）
     return this.reportGen.toJSON(report);
   }
 

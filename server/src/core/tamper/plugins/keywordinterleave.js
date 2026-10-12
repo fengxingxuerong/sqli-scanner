@@ -14,6 +14,12 @@ const KEYWORDS = [
   'LIMIT', 'INSERT', 'UPDATE', 'DELETE', 'CONCAT', 'SLEEP', 'BENCHMARK', 'SUBSTRING',
 ];
 
+// [2026-10-12 性能] 正则模块级预编译（原 transform 内 17 次 new RegExp/call；本插件在
+// wafRecommend.js:91-95 的 FILTER_BYPASS_CHAINS 里，属默认就会走的自动重跑路径）。
+// 注意：原正则**只有 'g' 没有 'i'**（大小写不敏感匹配由词界+替换函数保留原样承担），
+// 预编译必须逐字保留旗标，否则行为变化。
+const RES = KEYWORDS.map((kw) => new RegExp(`\\b${kw}\\b`, 'g'));
+
 export const keywordinterleave = {
   name: 'keywordinterleave',
   description: '关键词插入式双写（AND→ANANDD），同时扛「删一次」与「全局删」两类关键词过滤',
@@ -27,9 +33,7 @@ export const keywordinterleave = {
    */
   transform(payload) {
     let out = String(payload ?? '');
-    for (const kw of KEYWORDS) {
-      // 词界匹配 + 大小写保留原样；中点插入自身
-      const re = new RegExp(`\\b${kw}\\b`, 'g');
+    for (const re of RES) {
       out = out.replace(re, (m) => {
         const cut = Math.ceil(m.length / 2);
         return m.slice(0, cut) + m + m.slice(cut);

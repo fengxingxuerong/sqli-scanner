@@ -68,8 +68,13 @@ export {
   unknownFlagError,
 } from './cli/args.js';
 
-// --format 分发（json|csv|markdown|html）：单目标 -o 与批量目录导出共用。
-// 未知格式回退 json（与 REST /report/export 的宽容行为一致）。
+// --format 分发（json|csv|markdown|md|html|sarif|db-json）：单目标 -o 与批量目录导出共用。
+// [2026-10-12 优化空间勘查 §A3] 两处修：
+//   ① 补 db-json（仅拖库数据）——该格式 REST/UI 早有，CLI 与 MCP 的枚举却没有；
+//   ② **未知格式从"静默回退 JSON"改为抛错**。旧行为下 `--format db-json` 会写出一个
+//      名为 report.db-json 的普通 JSON —— "传了没生效"正是本仓红线（宁可拒绝启动，
+//      也不让"以为设了"变成实际没设；与 --config 未知键硬拒同一条政策）。
+//   格式集与 REST FORMAT_EXT / MCP get_report enum 同源对齐（parity 有守卫）。
 export function formatReport(report, fmt = 'json') {
   const f = String(fmt || 'json').toLowerCase();
   if (f === 'csv' || f === 'markdown' || f === 'md' || f === 'html') {
@@ -82,7 +87,15 @@ export function formatReport(report, fmt = 'json') {
     // [批次 9 2026-09-15] SARIF 2.1.0：GitHub Security / DefectDojo 对接
     return new ReportGenerator().toSARIF(report);
   }
-  return JSON.stringify(report, null, 2);
+  if (f === 'db-json') {
+    // 仅拖库数据（库/表/列/行）；单源在 ReportGenerator.toDBJSON（ScanManager 共用）
+    return new ReportGenerator().toDBJSON(report);
+  }
+  if (f === 'json') return JSON.stringify(report, null, 2);
+  throw new Error(
+    `--format 未知格式：${fmt}（仅支持 json|csv|markdown|md|html|sarif|db-json）\n` +
+    '  旧行为是静默回退 JSON —— 那会让"以为设了 db-json"实际拿到普通 JSON，故改为拒绝。'
+  );
 }
 
 // 极简参数解析（避免引入 commander 依赖）
@@ -584,6 +597,16 @@ async function main() {
     printHelp();
     process.exit(args.help ? 0 : 1);
   }
+  // [2026-10-12 优化空间勘查 §A3] --format 早校验：格式非法必须在**发起任何扫描之前**拒绝。
+  // formatReport 内的硬拒是最后防线（防"传了没生效"），但只在落盘那一刻触发 ⇒ 扫完几十分钟
+  // 才崩。这里提前到入口，与 --config 未知键硬拒同一条政策（宁可拒绝启动，不静默降级）。
+  {
+    const fmt = String(args.format || 'json').toLowerCase();
+    if (!['json', 'csv', 'markdown', 'md', 'html', 'sarif', 'db-json'].includes(fmt)) {
+      console.error(`[cli] --format 未知格式：${args.format}（仅支持 json|csv|markdown|md|html|sarif|db-json）`);
+      process.exit(2);
+    }
+  }
   // [P1 2026-09-15] --advise：扫描前风险评估。
   // 刻意放在 checkTor/扫描之前 —— 评估**不发起任何请求**，只看 URL 与参数。
   // 默认打印后退出；加 --yes 才继续（把「人看过建议」变成显式动作）。
@@ -722,7 +745,8 @@ async function main() {
       mkdirSync(args.out, { recursive: true });
       // [P1-FIX 2026-09-05] 批量模式同样按 --format 分发（每 URL 一份，扩展名随格式）
       const fmt = String(args.format || 'json').toLowerCase();
-      const ext = fmt === 'markdown' || fmt === 'md' ? 'md' : fmt;
+      // 扩展名与 REST FORMAT_EXT 对齐（md 别名归一；db-json → db.json）
+      const ext = fmt === 'markdown' || fmt === 'md' ? 'md' : fmt === 'db-json' ? 'db.json' : fmt;
       for (const r of results) {
         if (r.report) {
           // 同名目标（集合里同 URL 不同 method）会互相覆盖 ⇒ 名字里带上方法，避免"少一份报告"
@@ -804,7 +828,8 @@ async function main() {
       mkdirSync(args.out, { recursive: true });
       // [P1-FIX 2026-09-05] 批量模式同样按 --format 分发（每 URL 一份，扩展名随格式）
       const fmt = String(args.format || 'json').toLowerCase();
-      const ext = fmt === 'markdown' || fmt === 'md' ? 'md' : fmt;
+      // 扩展名与 REST FORMAT_EXT 对齐（md 别名归一；db-json → db.json）
+      const ext = fmt === 'markdown' || fmt === 'md' ? 'md' : fmt === 'db-json' ? 'db.json' : fmt;
       for (const r of results) {
         if (r.report) {
           const safeName = r.url.replace(/[^a-zA-Z0-9.-]/g, '_').slice(0, 100);
@@ -841,7 +866,7 @@ async function main() {
       const { mkdirSync } = await import('node:fs');
       const { join: pj } = await import('node:path');
       mkdirSync(args.out, { recursive: true });
-      writeFileSync(pj(args.out, `report.${fmt === 'markdown' || fmt === 'md' ? 'md' : fmt}`), formatReport(report, fmt), 'utf-8');
+      writeFileSync(pj(args.out, `report.${fmt === 'markdown' || fmt === 'md' ? 'md' : fmt === 'db-json' ? 'db.json' : fmt}`), formatReport(report, fmt), 'utf-8');
       if (fmt === 'html') writeFileSync(pj(args.out, 'report.md'), formatReport(report, 'markdown'), 'utf-8');
       if (fmt === 'markdown' || fmt === 'md') writeFileSync(pj(args.out, 'report.html'), formatReport(report, 'html'), 'utf-8');
     } else {

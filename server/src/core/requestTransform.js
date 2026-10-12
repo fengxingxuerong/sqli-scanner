@@ -178,10 +178,9 @@ export function registerScanTransform(scanId, entry) {
   registry.set(scanId, { ...entry });
 }
 
-/** @param {string} scanId */
-export function getScanTransform(scanId) {
-  return scanId ? registry.get(scanId) || null : null;
-}
+// [2026-10-12 优化空间勘查 §B1] 删除 getScanTransform：全仓（含 tests / e2e / scripts /
+// dist 之外的全部源码）零引用，读取路径统一用 applyScanTransform（scanClient.js:74,98）。
+// 留着只会让人误以为「登记表可直读」—— 与「死代码=下一个分叉点」同族。
 
 /** @param {string} scanId */
 export function releaseScanTransform(scanId) {

@@ -62,6 +62,10 @@ export function buildKnownArgKeys(parseArgsFn) {
     'activeWafProbe',
     // —— [D46] 运维侦察枚举（-b/--statements/--procs）+ -U/--exclude 过滤 ——
     'banner', 'statements', 'procs', 'user', 'exclude',
+    // —— [2026-10-12 §A2] 默认关通道组：旗标只开总开关，整组子键经档案透传 ——
+    // 漏登记的后果不是"少一个旗标"：--config 档案写 {"oob":{"enabled":true}} 会被
+    // 未知键硬拒（policy：宁可拒绝启动也不静默忽略）⇒ CLI 用户对该通道零可达。
+    'noSql', 'oob',
   ];
   const known = new Set(Object.keys(parseArgsFn([])));
   for (const k of dyn) known.add(k);

@@ -208,6 +208,16 @@ export function buildConfig(args) {
     const list = String(args.technique).split(',').map(s => s.trim().toLowerCase()).filter(t => valid.includes(t));
     if (list.length) config.techniques = list;
   }
+  // [2026-10-12 优化空间勘查 §A2] NoSQL / OOB 两个默认关通道的 CLI 入口（旗标 + 档案整组透传）：
+  //   ① --no-sql / --oob：只开总开关（enabled=true），子键保持引擎默认；
+  //   ② args.noSql / args.oob 为对象（来自 --config 档案）：带底合并进 config ——
+  //      必须走 patchGroup 而不是整体赋值，否则该组其余子键在引擎侧变 undefined
+  //      （wafEvasion 曾因此静默丢掉整轮自适应重跑，见 patchGroup 头部取证）。
+  // REST/UI 早已可达（KNOWN_CFG_KEYS 有 oob/noSql）；本条补的是 CLI/脚本侧。
+  if (args.noSql === true) patchGroup(config, 'noSql', { enabled: true });
+  else if (args.noSql && typeof args.noSql === 'object') patchGroup(config, 'noSql', args.noSql);
+  if (args.oob === true) patchGroup(config, 'oob', { enabled: true });
+  else if (args.oob && typeof args.oob === 'object') patchGroup(config, 'oob', args.oob);
   if (args.tamper) {
     // 自定义 tamper 文件已在 main() 经 resolveTamperPlugins 异步解析（args.tamperResolved）
     const plugins = Array.isArray(args.tamperResolved) && args.tamperResolved.length

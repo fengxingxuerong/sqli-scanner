@@ -4,6 +4,23 @@
 
 ## [Unreleased]
 
+### 2026-10-12 批次 · 优化空间勘查落地（A1/A2/A3/B1/C1/C2/D1/D2/F 九项）
+
+**一句话**：按 `docs/优化空间勘查-2026-10-12.md` 落地九项——修掉一条已静默分叉的正确性漂移（`ERROR_SIG`）、补上 CLI 对 NoSQL/OOB 两个整通道的零可达、把两个门禁（变异敏感度 / e2e 靶场接线）从「靠信念」变成「会自证」，外加两处白烧。40 文件；性能项附量化、缺陷项附缺陷注入复验，门禁结论取实跑退出码。
+
+| 面 | 变更 |
+|---|---|
+| 正确性 A1 | `ERROR_SIG`（engine/payloads）与 `SQL_ERROR_SIG`（core/scanValidityGuard）两份实现已**静默分叉**（`PG::`/`unrecognized token` 仅 guard 侧；`unterminated quoted string`/HSQLDB·Derby·Informix exception 形态仅 engine 侧），而漂移守卫只钉固定语料、**不校验集合相等** ⇒ 分叉项零覆盖。收敛为 `server/src/core/errorSig.js` 唯一真源（并集）；守卫升级为①对象级身份相等 ②断言敏感性自检 ③并集锚点 |
+| 可达性 A2 | CLI 此前**完全无法**开启 NoSQL/OOB 两个默认关通道（连 `--config` 档案都被未知键硬拒）：补 `--no-sql` / `--oob` 旗标 + configFile 动态键登记 + `buildConfig` 走 `patchGroup` 带底合并（整体赋值会让该组其余子键在引擎侧变 undefined，wafEvasion 有前例） |
+| 可达性 A3 | `db-json` 补进 CLI 与 MCP 枚举（`ReportGenerator.toDBJSON` 单源，扩展名 db.json 与 REST 对齐）；CLI 未知格式从**静默回退 JSON** 改为拒绝启动 + `main()` 入口早校验（exit 2，扫前拒绝）；MCP 越界显式报错（不静默回落整份报告） |
+| 性能 C1 | tamper 11 个插件正则模块级预编译（消除 transform 内逐关键字 `new RegExp`）：**15.87 → 6.34 µs/call（-60%）**；`keywordinterleave` 原正则只有 `g` 无 `i`，逐字保留旗标。`tamper:parity` / `tamper:examples` 双 exit 0，194 条 tamper 测试全过 |
+| 性能/稳定性 C2 | `sessionSecret` 令牌材料缓存：原实现**先算 source（读令牌文件）才查密钥缓存** ⇒ 200 次 seal 读文件 201 次、164.3 ms ⇒ 缓存后 **1 次、49.2 ms**。更要紧的是稳定性：source 每次现算，令牌文件一次抖动（权限/挂载瞬断）就让 source 变 `process-random` ⇒ 与 `cachedKeySource` 不符 ⇒ 重新派生随机密钥 ⇒ 此前封存的会话值**全解不开**（续跑静默失效）。策略为**只缓存成功结果**（失败/空不缓存，保留 secret 挂载竞态的恢复口） |
+| 门禁 D1 | `mutation-check --selftest`：本门禁是「断言敏感度」的最后一层，它自己空转 = 全仓「改坏了还绿」无人发现。判据：① 23 个目标位点非空 + `mutate()` 产出必≠原文；② 自造哨兵端到端走「枚举→写入→跑测试→检出差异」（5/5 杀死）。注入复验：`runTests` 恒真 ⇒ 报「全部存活」；目标路径漂移 ⇒ 报「位点归零 ⇒ 恒绿」 |
+| 门禁 D2 | 新建 `scripts/e2e-wiring-check.mjs` + `e2e/reference-labs.json`：曾实锤 **6 个靶场有入口、从不执行**（不在 run-all/acceptance/ci.yml 任一处），而 README 与报告会把它们当覆盖证据引用。口径二选一（接线 / 登记为参考靶场并写清理由）+ 双向查白名单腐烂 + 空集合 exit 2 + `--selftest`；现状 **31 靶场 = 25 已接线 + 6 已登记**（blackbox / ntlm / sqli-labs / fullchain / sqlmap-benchmark / cross-module）。接进 `package.json`（`e2e:wiring[:selftest]`）、ci-local GATES、ci.yml lint job |
+| 死代码 B1 | 删 `requestTransform.getScanTransform`（全仓零引用已 grep；读取路径统一 `applyScanTransform`） |
+| 文档 F1–F3 | README「真实 DBMS 验证 = SQLite+PostgreSQL+MySQL 三库」行与「18 种数据库」/「6+3+9」分层自相矛盾 ⇒ 改正；tamper 注释里写死的 229（`readme:check` 实测已 234，且会继续漂）⇒ 指向唯一真源（运行时 `list().length` == `plugins/*.js` 数，守卫③双向对账）；`.gitignore` 补 `src/__coverage_calibrate__/` |
+| 未做（顺延） | E2 retest/diff 的 UI/MCP 入口（跨三端，独立批次）· headRequest 三包装丢失（TODO D36 遗留账）· A1 的运行时影响实测（需真库构造三种报错形态，交 CI） |
+
 ### 2026-10-12 批次 D52 · 响应解密扩展点 --postprocess（与 --request-script 对偶）
 
 **一句话**：给「读得懂合法响应」补上扩展点——目标把响应体加密/编码后返回时，检测层拿到的全是密文，真/假条件的差异被加密抹平 ⇒ 报告写「未检出」（静默假阴性）；`--postprocess` 让用户在 per-scan 客户端视图最内层对每条响应体解密，之后检测/提取/可信度守卫看到的都是明文。默认不配 = 零行为变化，15 条新判据 + 4 发缺陷注入全杀。
