@@ -252,6 +252,12 @@ const TUNING_NO_UI_KEYS = [
   // ⇒ 按判据归调优类（不接不会造成假阴性），而不是能力缺失。CI run #208 的 ④ 报这 5 键
   // 未登记、⑥ 报 38 ≠ 43，正是本批新增键没走收口二选一。
   'testParameter', 'paramExclude', 'paramFilter', 'ignoreCodes', 'randomize',
+  // [2026-10-12] D50 提取比较算子（--fetch-using）：'gt'（默认，`x > mid` 二分）|
+  // 'between'（`x BETWEEN lo AND mid` 窄化）。默认 gt = 历史行为逐字一致 ⇒ 调优类。
+  // 唯一受益场景是「`>`/`<` 被 WAF 过滤而 BETWEEN 仍放行」的目标（本仓 cls 字符类探测
+  // 早已单方面依赖 BETWEEN 可用）——那是显式覆盖场景，不覆盖不损失任何能力。
+  // 与 D41/D42 五键同族：CLI/REST 可达，Web UI 单目标面板无对应控件，显式登记为债。
+  'fetchUsing',
   // HTTP 层行为（hpp 已升入 CAPABILITY_GAP_KEYS）
   'forceSsl', 'ignoreRedirects', 'activeWafProbe', 'trustProxyEnv', 'ssrfViaProxy', 'proxyBypassLocal',
   // 限速：delay / maxReq 已于 2026-09-23 接进「请求控制」分组 → 移出本表。

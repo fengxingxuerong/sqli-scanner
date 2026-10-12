@@ -68,6 +68,9 @@ const PROBE = {
   // [D42 2026-10-11] --ignore-code / --randomize 探针值（默认探针 1 过不了数组形状校验）
   ignoreCodes: [401, 403],
   randomize: ['csrf', 'page'],
+  // [D50 2026-10-12] --fetch-using 探针值：枚举 gt|between，默认探针 1 过不了校验是
+  // **正确行为**（非法值不静默回落 gt）。这里给合法值只测「透传在不在」。
+  fetchUsing: 'between',
   // [P0 2026-09-09 实战批次] 新键探针值（默认探针 1 过不了键自身校验）
   invalidValue: 'bignum',
   knownPoint: { param: 'id' },

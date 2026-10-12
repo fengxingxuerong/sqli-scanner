@@ -4,6 +4,20 @@
 
 ## [Unreleased]
 
+### 2026-10-12 批次 D50 · 盲注提取比较算子 --fetch-using=between
+
+**一句话**：给盲注提取加「BETWEEN 窄化」算子开关——`>`/`<` 被 WAF 过滤而 BETWEEN 仍放行的目标上，长度/字节二分从「全程判假」变为照常收敛；默认 gt 行为零回归，11 条新判据 + 5 发缺陷注入全杀。
+
+| 面 | 变更 |
+|---|---|
+| 引擎 | `blindExtractor.js`：`resolveFetchUsing`（gt\|between，非法值抛错不静默回落）；字节二分 between 窄化（`x BETWEEN lo AND mid`，不变式 x∈[lo,hi]，lo===hi 收敛）；长度二分/延伸预检/时间通道同构切换（BETWEEN 上界取提取长度上限——用段上界会让 >255 长值恒假误判长度 0，开发中实测踩到并修掉，判据已钉） |
+| 入口 | CLI `--fetch-using <gt\|between>`（args/help/config 三件，非法拒启动）；`--config` 档案键登记；REST `KNOWN_CFG_KEYS` + scanConfigTuning 枚举校验（非法丢弃并告警）；defaults `fetchUsing: 'gt'` |
+| 收口 | 新键登记进前端契约 `TUNING_NO_UI_KEYS`（覆盖型旋钮，默认=历史行为）；README CLI 表 + TODO 候选口径更正同步 |
+| 判据 | `server/tests/fetchUsing.test.js` 11 条：gt 回归 / between 等价 / 探针算子审计（比较位无 `>`，采集面下限）/ **WAF 过滤 `>` 模拟下 gt 诚实返回 null、between 照常提取** / 长值延伸段双模式一致 / 时间通道三连 / 非法配置值硬拒；截止时间包装把「收敛条件写错→死循环」转成断言失败 |
+| 缺陷注入 | 5 发全杀：窄化方向反转（4 杀）/ between 误用 gt 收敛条件（挂死形态，已补截止时间包装）/ cap 退回段上界（长值测试精确命中）/ 非法值静默回落 / 时间通道 between 失效 |
+| 上游更正 | 候选原登记"对标 ghauri --fetch-using"——对 ghauri v1.0.5 与 v1.0.1#dev 整包取证 `--fetch-using`/`fetch_using` **0 命中**（仅无关方法名），ghauri 无此参数；按技术本身价值落地，不称对标。`in` 不实现：IN 为假时无法定位区间（k+1 个缺口全都可能），单值 IN 退化为线性扫描 |
+| 诚实边界 | 等值验证与 false 基准仍用 `=`（`=` 被过滤时整条通道本就不要命）；between 未经真机靶场验证（离线 mock oracle 双口径 + WAF 模拟），真机验证归 real-mysql-lab 下一轮 |
+
 ### 2026-10-12 批次 D49 · 桌面导出/导入授权范围：按决策 (a) 放开 `$DOWNLOAD/**`，并堵掉守卫的「只看标识」假绿（TODO 第 14 条）
 
 **一句话**：D28 只修了一半 —— 插件包进了依赖，但 `capabilities` 只给 `fs:default`（应用目录**只读**），

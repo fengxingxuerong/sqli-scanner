@@ -54,6 +54,8 @@ export function buildKnownArgKeys(parseArgsFn) {
     'testParam', 'paramExclude', 'paramFilter', 'configFile', 'saveConfigFile',
     // —— [D42] 对标 sqlmap 四件 + --verify 开关 ——
     'secondReq', 'ignoreCode', 'randomize', 'dumpFormat', 'extractVerify',
+    // —— [D50] 提取比较算子 ——
+    'fetchUsing',
     // —— [D44] 主动 WAF 探测 ——
     'activeWafProbe',
     // —— [D46] 运维侦察枚举（-b/--statements/--procs）+ -U/--exclude 过滤 ——

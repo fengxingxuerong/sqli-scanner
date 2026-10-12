@@ -5,6 +5,42 @@
 
 ---
 
+## 2026-10-12 批次 D50 · --fetch-using=between（提取比较算子）
+
+**上游归属更正（先读这个）**：本项原登记于「下一批候选口径」表，写作「`--fetch-using=between/in`（ghauri）」。
+2026-10-12 对 ghauri **v1.0.5 与 `v1.0.1#dev` 两个 tag 整包取证**（codeload 下载 + grep）：
+`--fetch-using` / `fetch_using` **0 命中**（仅 `fetch_using_error_based_vector` 方法名无关）⇒
+**ghauri 没有这个参数**，原调研归属错误。能力本身有独立价值，按技术价值落地，**不称对标 ghauri**。
+
+### 已落地
+
+| 面 | 内容 |
+|---|---|
+| 引擎 | `resolveFetchUsing`（gt\|between，非法值抛错）；字节二分 BETWEEN 窄化；长度二分/延伸预检/时间通道同构 |
+| 入口 | CLI `--fetch-using` + 档案键 + REST 白名单（scanConfigTuning 枚举校验）+ defaults |
+| 收口 | TUNING_NO_UI_KEYS 登记；README/CHANGELOG 同步 |
+| 判据 | `tests/fetchUsing.test.js` 11 条（含 WAF 过滤 `>` 模拟：gt 诚实 null、between 照常提取）；5 发缺陷注入全杀 |
+
+### 关键设计口径（防后人改错）
+
+1. **BETWEEN 上界必须取提取长度上限（lenCap），不能用当前段上界**：`x BETWEEN n+1 AND 255`
+   在 x>255 时恒假 ⇒ 260 字符长值被判长度 0（开发中实测踩到）。用 lenCap 后
+   `x ∈ (n, lenCap]` ⇔ `x > n` 恒成立，顶界语义交回 capped/延伸段。
+2. **两模式收敛判定不同，别合并**：between 不变式 x∈[lo,hi] ⇒ `lo>=hi` 收敛（candidate=lo）；
+   gt 不变式 x∈[lo,hi+1] ⇒ `lo>hi` 才收敛（candidate=hi+1）。gt 下 lo===hi 是未收敛中间态，
+   误判会丢候选值。且收敛判定必须在窄化**之后**算。
+3. **`in` 不实现（有证据地不做）**：`x IN (v1..vk)` 为假时只说明 x 不在名单内，无法定位到
+   k+1 个缺口中的哪一个，驱动不了窄化；单值 IN 退化为相等判断（最坏 256 次线性扫描）。
+
+### 未验证（如实标注）
+
+- **真机**：between 全部判据为离线 mock oracle（确定性 + WAF 模拟），**未经真库靶场验证**；
+  真机验证归 real-mysql-lab 下一轮（本机不起常驻进程是硬约束）。
+- **边界**：等值验证（extractVerify）与 false 基准（1=2）仍用 `=`——`=` 被过滤时整条通道
+  本就不要命，非本开关可救；blindBitwise 位平面路径无比较算子，天然兼容两模式。
+
+---
+
 ## 2026-10-12 新增 · 推送前置链（只读盘点）与下一批候选口径
 
 > 本轮**未落地任何代码**，只做仓库状态与 CI 取证（网络可用、本机无法 spawn 子进程期间的静态排查）。
@@ -87,7 +123,7 @@
 
 | 方向 | 代价 | 验证口径 / 前提 |
 |---|---|---|
-| `--fetch-using=between/in`（ghauri） | S | blindFns 算子模板化；靶点需「`<>`/`=` 被过滤」场景 |
+| ~~`--fetch-using=between/in`（ghauri）~~ | S | ⚠️ **候选前提不实（2026-10-12 上游取证）**：ghauri v1.0.5 与 `v1.0.1#dev` 全仓 `--fetch-using`/`fetch_using` **0 命中**（codeload 整包 grep，仅 `fetch_using_error_based_vector` 方法名含 fetch_using，与 CLI 参数无关）⇒ **ghauri 没有这个参数**，原调研归属错误。能力本身（BETWEEN 窄化二分）仍有独立价值（比较算子 `>`/`<` 被 WAF 过滤时本仓 cls 类探测早已单方面依赖 BETWEEN 可用），**按技术本身价值落地为 D50**，不称"对标 ghauri"；`in` 不做（见 D50 节证据） |
 | 参数名注入（SQLiDetector） | S | TargetParser 新增 location + buildInjectionRequest 换位（列名 / 排序名拼接场景） |
 | 时间通道动态基线（BlindSQL） | S | 每靶点先测 N 条基线 RTT，阈值 = 基线 + k·σ；与 `autoDynamicBlock` 对偶（后者只管内容噪声） |
 | `--postprocess` 响应侧解密 | S–M | 与 `--request-script` 对偶；加密响应目标现状是**静默比对失败**，价值 High |
@@ -133,7 +169,7 @@ jSQL 多比特 ≈ 本仓 `blindBitwise` 位平面提取（8 位并行，MySQL/T
 **检测可靠性族（ghauri 派）**
 
 1. ~~**布尔/时间盲注字符复核 `--verify`**（ghauri）~~ —— ✅ **勘缝发现已被本仓超前实现**（`blindRobust.extractVerify`：每字节等值确认 + 完整值复验 + 失败重测，默认开），D42 只补了 CLI 开关（`--verify`/`--no-verify`）。
-2. **`--fetch-using=between/in`**（ghauri）：布尔提取算子策略切换（`<>`/`=` 被过滤时换 `BETWEEN`/`IN`，兼省请求）。接缝：blindFns 算子模板化。代价 S，价值 Med。
+2. ~~**`--fetch-using=between/in`**（ghauri）~~ —— ✅ **已落地为 D50（2026-10-12）**：布尔+时间双通道 between 窄化，11 条判据 + 5 发缺陷注入全杀。上游归属已更正（ghauri 无此参数，见本节 D50 节）；`in` 不实现（IN 为假时无法定位区间）。
 3. **多比特提取（jSQL Strategy 6）**：多值渲染目标 3 bit/请求。需先造「7 值 7 页」靶点，接缝同上。代价 M，价值 Med。
 4. **时间通道动态基线**（BlindSQL）：每靶点先测 N 条基线 RTT，阈值=基线+k·σ，扫描中重标定。本仓 `autoDynamicBlock` 只管内容噪声，时延噪声还没有对偶物。接缝：time 探测标定段（`timeBlindCalibrate` 旁）。代价 S，价值 Med。
 
