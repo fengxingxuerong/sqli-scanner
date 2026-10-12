@@ -11,7 +11,7 @@
 
 import { test, after, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, rmSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -91,7 +91,11 @@ describe('路径白名单（RESPONSE_SCRIPT_DIR）', () => {
     const entry = await loadResponseScript(f);
     assert.equal(typeof entry.fn, 'function');
     assert.match(entry.sha256, /^[0-9a-f]{64}$/);
-    assert.equal(entry.source, f);
+    // entry.source 是 **realpath 后**的路径：assertResponseScriptPath 的白名单判据含 realpath
+    // （防 symlink 绕过目录白名单），语义正确。macOS 的 /tmp → /private/tmp 是 symlink，
+    // 直接拿原始 tmpdir 路径比较会多出 /private 前缀 ⇒ test-matrix(macos) 红（#220 实测）。
+    // 两边都 realpath 后比较：无 symlink 的平台（Linux/Windows）恒等，零行为变化。
+    assert.equal(entry.source, realpathSync(f));
   });
 });
 
