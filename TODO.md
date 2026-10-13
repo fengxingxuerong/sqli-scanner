@@ -1977,9 +1977,29 @@ services:
    `start_pg` 超时仍返回半死进程、`run-all` 的 `spawnSync` 在本机撞 EBUSY 把沙箱类全误标 SKIP。
    ⚠️ 顺带把 `e2e/run-with-pg.py` **从 `.gitignore` 里放出来并入库**（它 09-18 被故意排除）：
    不入库则上面两条路径在任何 clone 上都是坏的；`refs:check` 天然守着这条。
-   **剩下的账（未做）**：① 这三套**不在 CI 里**（与下面第 3 条同源：CI 无 PG/MySQL，
-   且 `e2e-self-contained` 只收敛 `deps: []`）⇒ 本机跑通 ≠ CI 看得见；
-   ② `ensure_database` / `pg_ready` 这一层**没有单测**（纯 Python + 真 PG，目前只有端到端证据），
+   **剩下的账**：
+   ① 这三套不在 CI 里 —— ✅ **已接（2026-10-12 D50）**：`.github/workflows/ci.yml` 的 acceptance job
+      起 runner 自带 PostgreSQL 16.15（`sudo systemctl start postgresql.service`，**不用 docker** ——
+      OOB 链路是 PG 服务进程执行 `COPY (SELECT '') TO PROGRAM 'curl …'`，curl 必须在 PG 那一侧，
+      宿主 PG 天然满足、容器镜像不保证装了 curl），三套以 `run: node <entry>` + `PG_*` env 直连。
+      ⚠️ **接之前先修了两个假绿源**（否则接进去只会买到恒绿）：
+        · `oob-real-lab/verify.mjs` 结尾是**无条件 `process.exit(0)`** —— OOB 没命中、对照组误报
+          都只打一行"需排查"，退出码照样 0 ⇒ 任何接它的门禁都是恒绿。现改为 `exit(pass ? 0 : 1)`；
+        · `pg-osshell.e2e.mjs` 把 PG 连接**写死** 127.0.0.1:5432/postgres/postgres（不读 `PG_*`），
+          且 PG 连不上/非超管时 `exit(0)` 静默 SKIP。现统一从 `lab-app.mjs` 的 `PG_CONF` 取，
+          并加 `PG_REQUIRE=1` 开关（口径同 `RECALL_REQUIRE_MYSQL`：默认 SKIP 不是代码缺陷，
+          但"已经专门起了 PG 的门禁里跳过"= 降级 = 必须红）。
+      **本机实测（不起任何数据库）**：默认 ⇒ `[SKIP]` + 退出码 0；`PG_REQUIRE=1` ⇒ `[FAIL]` + 退出码 1；
+      `PGPORT=59999` ⇒ 报错端口随之变成 59999（证明真读了 env，不再写死）。
+      **守卫（新增 ③④ 于 `server/tests/ciWiring.guard.test.js`）**：③ 三套必须在 ci.yml 接线；
+      ④ 三套最后一个 `process.exit` 不得是字面量 0、不得写死 PG 端口/口令、SKIP 必须受 `PG_REQUIRE`
+      控制。缺陷注入 **5 发全中**（退回无条件 exit(0) / 退回硬编码 / 删接线 / 删开关 / 开关不分支）。
+      ⚠️ 其中「删开关」一发**第一版判据没红**：用 `includes('PG_REQUIRE')` 查，删掉代码后注释里
+      还写着 `PG_REQUIRE=1` ⇒ 绿着放行（本仓第三次栽在"判据文本源没排注释"）。已改成查
+      `process.env.PG_REQUIRE` + `if (PG_REQUIRE) {` 两个**代码形态**。
+      ⚠️ **待确认**：CI 首跑（本机无 PG/docker 无法先验）。若 runner 的 PG 起不来，三套会**红**
+      （不是悄悄 SKIP）—— 这正是本批的目的：让"没跑过"这件事看得见。
+   ② `ensure_database` / `pg_ready` 这一层**没有单测**（纯 Python + 真 PG，目前只有端到端证据） —— **未做**，
    若下次再出现"静默半起"，仍要靠人读日志归因。
 5. **⛔ 已证伪的方向：扩注入点形态到 `LIMIT` 位**（2026-10-10 复核，别再当待办推）。
    曾有提议把注入点形态扩到 `LIMIT ${raw}` / `HAVING` / `GROUP BY`，前置条件是先验证

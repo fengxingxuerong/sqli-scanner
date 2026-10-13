@@ -93,6 +93,14 @@ const GATES = [
   { id: 'lint', name: '模块引用完整性（server/*.js 全量）', cmd: 'node scripts/module-loadable.mjs' },
   { id: 'lint', name: '合并态完整性自证（真实事故复现）', cmd: 'node scripts/merge-integrity.mjs --selftest' },
   { id: 'lint', name: '合并态完整性（merge 不得吃掉新增导出/实现）', cmd: 'node scripts/merge-integrity.mjs' },
+  // [D-GREENGUARD 2026-10-12] 恒绿门禁检测：静态扫描门禁脚本的退出码路径，
+  // 标记"无论结果都 exit; exit(0)"的嫌疑（spec 5.1.1 规则 8）。
+  { id: 'lint', name: '恒绿门禁检测自证（判据不空转）', cmd: 'node scripts/greenguard-check.mjs --selftest' },
+  { id: 'lint', name: '恒绿门禁检测（扫描 scripts/ 下所有门禁）', cmd: 'node scripts/greenguard-check.mjs' },
+  // [D-GATE-RECORDER 2026-10F12] 门禁运行记录器自证：三态可区分（spec 5.1.1 规则 9）。
+  { id: 'lint', name: '门禁运行记录器自证（三态可区分）', cmd: 'node scripts/gate-recorder.mjs --selftest' },
+  // [D-COVERAGE-CALIB 2026-10-12] 覆盖率回归校准：验证 thresholds 配置合理 + 门禁会拦（spec 5.1.1 规则 6）
+  { id: 'lint', name: '覆盖率阈值校准（配置合理 + 门禁有效）', cmd: 'node scripts/coverage-calibration.mjs' },
   // 靶点清单一致性：redteam-lab 的检出率/误报结论依赖一条**真值链**
   // （run-scan 决定扫哪些 ↔ selftest 决定标定哪些 ↔ ground-truth.json 真值表），
   // 而三份清单各自手写、彼此之间没有判据。不同步的后果**不对称**：
@@ -298,4 +306,12 @@ console.log('注：本机覆盖不到的部分以启动时「job 覆盖自检」
 console.log('    仍需真远端才能验证：docker job、test-matrix 的 macOS 腿、'
   + '以及 acceptance 在 CI 里「docker 起 MySQL + 放行 secure_file_priv」的干净环境前置。');
 if (fail.length || blocked.length) console.log('SKIP 与 BLOCKED 都不算通过。');
+// [D-CI-SKIP 2026-10-12] 前置门禁失败时显式标注后续结果可能不可信（与 ci.yml 的 if: always() + 前置检查同步）
+if (fail.length) {
+  const failedIds = [...new Set(fail.map((f) => f.id))];
+  const affected = results.filter((r) => r.state === 'PASS' && failedIds.some((fid) => r.id !== fid));
+  if (affected.length) {
+    console.log(`⚠ 前置门禁失败（${failedIds.join(', ')}），后续 ${affected.length} 条门禁的结果可能不可信（依赖前置环境/产物）。`);
+  }
+}
 process.exit(fail.length || blocked.length ? 1 : 0);

@@ -15,14 +15,16 @@
 //   ③ 鉴权/CSRF 在中间件链上游（index.js），被 401/403/415 拒绝的请求到不了这里，
 //      不消耗配额——未持有 token 的攻击者无法用 429 枯竭受害者的合法配额。
 //
-// 计额 key：token 前 8 位（x-api-token / x-scan-token / Bearer）|| req.ip。
-// 与审计 §1.2 的 keyGenerator 一致；不同 token 独立计额，同一 token 共享配额。
+// 计额 key：token 的 SHA-256 摘要前 16 hex 位（x-api-token / x-scan-token / Bearer）|| req.ip。
+// [D-QUOTA 2026-10-12] 旧实现取前 8 位原文有碰撞面（同前缀不同 token 共享配额，spec 5.2.1 规则 5）；
+// 改为 SHA-256 摘要：不暴露完整凭据、无前缀碰撞、不同凭据独立计额。
 //
 // 环境变量：RATE_LIMIT_SCAN_MAX（默认 10 / 分钟；显式设 0 = 关闭，本地压测用）。
 //   RATE_LIMIT_EXPLOIT_MAX / RATE_LIMIT_AI_MAX 随 2026-10-05 的死代码清理一并移除，
 //   它们此前从未生效（见文件末尾）。exploit 档请改用 EXPLOIT_RATE_PER_SEC。
 // ============================================================================
 
+import { createHash } from 'node:crypto';
 import { ErrorCode } from '../core/errors.js';
 import { logger } from '../core/logger.js';
 
@@ -39,8 +41,10 @@ export function tokenKeyOf(req) {
     req.headers['x-scan-token'] ||
     String(req.headers['authorization'] || '').replace(/^Bearer\s+/i, '') ||
     '';
-  const prefix = String(token).trim().slice(0, 8);
-  return prefix || req.ip || 'anonymous';
+  const t = String(token).trim();
+  if (!t) return req.ip || 'anonymous';
+  // [D-QUOTA 2026-10-12] SHA-256 摘要前 16 hex（64 位）作键：无前缀碰撞，不暴露完整凭据。
+  return 'h:' + createHash('sha256').update(t).digest('hex').slice(0, 16);
 }
 
 /**

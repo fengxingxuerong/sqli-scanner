@@ -125,6 +125,107 @@ test('② 不空转：两侧声明的每个 e2e 模式都必须至少命中 1 �
   );
 });
 
+// ============================================================================
+// [D50 2026-10-12] PG 三套真机靶场的「进门禁」守卫（TODO 15.4 的剩账 ①）
+//
+// 背景：oob-real-lab / pg-osshell / concurrent-isolation 三套的 deps 含 pg，而 CI 从未起 PG
+// ⇒ 自写下起**从未在任何自动门禁里执行过**。能隐形成功，是因为这里缺两道闸：
+//   ① 没人要求它们在 ci.yml 里接线（本文件原来的 ①② 只盯 `*.test.mjs`，这三套是
+//      `*.e2e.mjs` / `verify.mjs`，压根不在视野里）；
+//   ② 就算接了线，其中两套的**退出码恒 0** —— 断言失败也返回成功（verify.mjs 结尾是
+//      无条件 `process.exit(0)`；pg-osshell 在 PG 连不上时 SKIP 也是 `exit(0)`）。
+//      ⇒ 接进去只会得到一个「天天绿、一次没真跑」的 step，比天天红更糟。
+// 所以两件事必须一起钉：**接线要在** + **退出码要真**。
+// ============================================================================
+const PG_SUITES = [
+  'e2e/oob-real-lab/pg-osshell.e2e.mjs',
+  'e2e/oob-real-lab/verify.mjs',
+  'e2e/concurrent-isolation/e2e.mjs',
+];
+
+/** 纯函数：取文本里**最后一个** `process.exit(...)` 的实参（trim 过）。判据与自证共用。 */
+function lastExitArg(text) {
+  const hits = [...text.matchAll(/process\.exit\(([^)]*)\)/g)];
+  if (!hits.length) return null;
+  return hits[hits.length - 1][1].trim();
+}
+
+/** 纯函数：是否把 PG 端口/口令写死了（不读 PG_* env ⇒ 换个端口的 PG 永远连不上）。 */
+function hasHardcodedPg(text) {
+  return /port:\s*5432/.test(text) || /password:\s*['"]postgres['"]/.test(text);
+}
+
+test('③ PG 三套必须在 ci.yml 里接线（写了却永不跑第二次 = 隐形能力）', () => {
+  const yml = readFileSync(CI_YML, 'utf8');
+  const missing = PG_SUITES.filter(
+    (f) => !new RegExp('node\\s+' + f.replace(/\//g, '\\/')).test(yml)
+  );
+  assert.deepEqual(
+    missing,
+    [],
+    `这 ${missing.length} 套依赖真 PG 的靶场没有在 ci.yml 里接线：\n  ${missing.join('\n  ')}\n` +
+      '它们本机跑通过，但本机跑通 ≠ CI 看得见 —— 不接线就等于「写完再没人执行第二次」。\n' +
+      '修法：在 acceptance job 起一个 PostgreSQL（runner 自带 16.15，`sudo systemctl start postgresql.service`），\n' +
+      '再用 `run: node <entry>` + PG_* env 直连。**不要**只加 step 而不修退出码（见下一条）。'
+  );
+});
+
+test('④ 这三套的退出码必须反映断言结果（否则接进 CI 只是买到恒绿）', () => {
+  const problems = [];
+  for (const f of PG_SUITES) {
+    const text = readFileSync(path.join(REPO, f), 'utf8');
+    const last = lastExitArg(text);
+    if (last === null) {
+      problems.push(`${f} 结尾没有 process.exit(…) ⇒ 退出码全靠异常，判据不可控`);
+      continue;
+    }
+    if (last === '0') {
+      problems.push(
+        `${f} 最后一个 process.exit 是**字面量 0** ⇒ 断言失败也返回成功。` +
+          '接进 CI 后这一步恒绿，跑没跑过、过没过都看不出来 —— 这正是本批接进去之前必须先修的东西。'
+      );
+    }
+    if (hasHardcodedPg(text)) {
+      problems.push(
+        `${f} 把 PG 端口/口令写死了（不读 PG_* 环境变量）⇒ PG 不在默认 5432/postgres 时永远连不上，` +
+          '而连不上会走 SKIP ⇒ 又是恒绿。统一从 e2e/oob-real-lab/lab-app.mjs 的 PG_CONF 取。'
+      );
+    }
+  }
+  // 「环境缺项」的跳过必须能被显式要求变成失败：已经专门起了 PG 的门禁里跳过 = 降级。
+  // 口径同仓库既有的 RECALL_REQUIRE_MYSQL / MODSEC_REQUIRE_DB。
+  //
+  // ⚠ 判据必须查**代码形态**（`process.env.PG_REQUIRE` + 真的拿它分支），不能只查
+  //   `text.includes('PG_REQUIRE')` —— 缺陷注入实测：删掉那行代码后，注释里还写着
+  //   「已设 PG_REQUIRE=1」，includes 照样通过 ⇒ 守卫绿着放行（2026-10-12 实测踩到）。
+  //   这是本仓第三次栽在「判据的文本源没排注释」上，凡是查"有没有提到某个开关"的地方
+  //   一律要查代码引用而不是字面出现。
+  const osshell = readFileSync(path.join(REPO, 'e2e/oob-real-lab/pg-osshell.e2e.mjs'), 'utf8');
+  const readsFlag = /process\.env\.PG_REQUIRE/.test(osshell);
+  const branchesOnFlag = /if\s*\(\s*PG_REQUIRE\s*\)\s*\{/.test(osshell);
+  if (!readsFlag || !branchesOnFlag) {
+    problems.push(
+      `pg-osshell 的 SKIP 路径没有真正受 PG_REQUIRE 控制（读开关=${readsFlag} / 按开关分支=${branchesOnFlag}）` +
+        ' ⇒ 在「已经起了 PG」的门禁里跳过也判绿。默认 SKIP 是对的（本机没 PG 不是代码缺陷），' +
+        '但必须有开关能把跳过变成失败，且要在代码里真的读它、真的按它分支（光写在注释里不算）。'
+    );
+  }
+  assert.deepEqual(problems, [], problems.join('\n'));
+});
+
+test('自证：③④ 的取词与判据在合成样本上确实会红（不是恒绿的摆设）', () => {
+  // 最后一个 exit 是字面量 0 ⇒ 必须被抓
+  assert.equal(lastExitArg('process.exit(ok ? 0 : 1);\nprocess.exit(0);'), '0');
+  // 最后一个 exit 依赖判定 ⇒ 不算违规
+  assert.equal(lastExitArg('process.exit(0);\nprocess.exit(pass ? 0 : 1);'), 'pass ? 0 : 1');
+  // 完全没有 exit ⇒ 判据报"不可控"而不是放过
+  assert.equal(lastExitArg('console.log("done")'), null);
+  // 写死形态 / 正确形态
+  assert.equal(hasHardcodedPg("new Client({ host: '127.0.0.1', port: 5432, password: 'postgres' })"), true);
+  assert.equal(hasHardcodedPg('const PG_ADMIN = { ...PG_CONF, database: \'postgres\' };'), false);
+  assert.equal(hasHardcodedPg("password: process.env.PGPASSWORD ?? 'postgres'"), false, '有 env 兜底的不算写死');
+});
+
 // [D22 2026-10-09] 「失败可见化」守卫 —— `tamper-waf-matrix` 的 summary 必须真的连着 outcome。
 //
 // 背景（TODO 的 K 条「job 红了没人知道」）：该 job 只在 schedule / workflow_dispatch 跑，

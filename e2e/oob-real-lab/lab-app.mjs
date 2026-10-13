@@ -16,7 +16,7 @@ const { Client, Pool } = pg;
 // [2026-09-18] 连接参数改读环境变量：默认值不变（127.0.0.1:5432/postgres/postgres），
 // 但可指向其他 PG 部署（如 e2e/run-with-pg.py 拉起的本机 pg-smoke 实例，
 // 其 pg_hba.conf 为 trust 认证，密码被忽略）。
-const PG_CONF = {
+export const PG_CONF = {
   host: process.env.PGHOST || '127.0.0.1',
   port: Number(process.env.PGPORT) || 5432,
   user: process.env.PGUSER || 'postgres',

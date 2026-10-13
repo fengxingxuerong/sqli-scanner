@@ -98,6 +98,21 @@ function isBlockedIpv6(ip, hardOnly = false) {
   // ipv6ToBytes(b.prefix) 是常量字面量，解析失败会得 null ⇒ bytesInPrefix 按 fail-closed 返回 false
   const inBlock = (b) => bytesInPrefix(bytes, ipv6ToBytes(b.prefix), b.bits);
 
+  // 显式逐段放行优先（与 IPv4 侧 isBlockedIpv4 对齐）。
+  // [D-SSRF-IPV6-CIDR 2026-10-12] 扩展支持 IPv6 CIDR（如 2001:db8::/32），
+  // 复用 ipBytes 的字节级前缀比较。非法/IPv4 CIDR 项在此跳过（不放宽策略）。
+  if (!hardOnly && POLICY.allowCidrs.some((cidr) => {
+    const slash = cidr.indexOf('/');
+    if (slash < 0) return false;
+    const h = cidr.slice(0, slash);
+    if (!h.includes(':')) return false; // IPv4 CIDR 由 isBlockedIpv4 判定
+    const cidrBytes = ipv6ToBytes(h);
+    if (!cidrBytes) return false; // 非法 IPv6 ⇒ 忽略，不放宽
+    const bits = parseInt(cidr.slice(slash + 1), 10);
+    if (!Number.isFinite(bits) || bits < 0 || bits > 128) return false;
+    return bytesInPrefix(bytes, cidrBytes, bits);
+  })) return false;
+
   // ① 无条件拒绝段（与 IPv4 基础层一一对应）
   if (inBlock(IPV6.UNSPECIFIED)) return true;        // :: ↔ 0.0.0.0
   if (inBlock(IPV6.LINK_LOCAL)) return true;         // fe80::/10 ↔ 169.254.0.0/16（含云元数据 IPv6 变体）
@@ -412,4 +427,15 @@ export async function assertSafeTargetForEgress(urlString, egress = null) {
 
 // 注：assertSafeHttpTarget / assertSafeTargetForEgress / noteEgressIpFailure 在搬移体内已是
 // `export function`，此处只补导出「原文件内部使用、httpClient 仍需消费」的符号。
-export { isBlockedIp, isBlockedIpv4, resolveHost, buildPinnedLookup, clearHostPin, dnsCache, IP_FAIL_CODES };
+// [D-SSRF-IPV6-CIDR 2026-10-12] getEgressPolicy：出站策略态摘要，供 /health 可观测（spec 5.4.1 规则 5）。
+// level=relaxed 当 SSRF_ALLOW_PRIVATE=1 或 allowCidrs 非空；cloudMetadataBlocked 恒 true（基础层无条件拒绝）。
+function getEgressPolicy() {
+  const relaxed = POLICY.allowAll || POLICY.allowCidrs.length > 0;
+  return {
+    level: relaxed ? 'relaxed' : 'strict',
+    allowCidrs: POLICY.allowCidrs,
+    cloudMetadataBlocked: true,
+  };
+}
+
+export { isBlockedIp, isBlockedIpv4, resolveHost, buildPinnedLookup, clearHostPin, dnsCache, IP_FAIL_CODES, getEgressPolicy };

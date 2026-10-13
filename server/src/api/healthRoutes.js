@@ -8,6 +8,9 @@ import { defaults } from '../config/defaults.js';
 // 「REST 可用 / CLI 拒绝 / 这里回显 false」三方不一致；而 /health 是给监控看的，
 // 它回显的状态与真实能力不符，等于把排障引向错误方向。
 import { isExploitEnabled } from '../core/exploitFlag.js';
+// [D-SSRF-IPV6-CIDR 2026-10-12] 出站策略态可观测（spec 5.4.1 规则 5）：
+// 配置了内网放行 → 暴露"策略放宽"信号，运维一眼看出 SSRF 严格层被打开。
+import { getEgressPolicy } from '../core/http/egressGuard.js';
 
 export const healthRoutes = Router();
 
@@ -28,6 +31,9 @@ healthRoutes.get('/health', (req, res) => {
       // 且回显的就是**此刻**的真实能力，与 /exploit/* 的实际判定同源。
       exploitEnabled: isExploitEnabled(),
       ratePerSec: defaults.ratePerSec,
+      // 出站策略态：strict=基础层+严格层全开；relaxed=SSRF_ALLOW_PRIVATE 或 allowCidrs 非空。
+      // cloudMetadataBlocked 恒 true（云元数据属基础层，不可被任何配置豁免）。
+      egressPolicy: getEgressPolicy(),
     },
     message: 'ok',
   });

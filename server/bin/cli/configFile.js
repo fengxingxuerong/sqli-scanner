@@ -50,6 +50,8 @@ export function buildKnownArgKeys(parseArgsFn) {
     'requestScript', 'clientCert', 'xmlBody', 'xmlBodyFile',
     // —— [D52] 响应解密脚本（与 requestScript 对偶）——
     'postprocess',
+    // —— [D53] 时间提取基线漂移重采样间隔 ——
+    'timeBaselineEvery',
     // —— 入口控制 ——
     'advise', 'yes',
     // —— [D41] 注入点筛选三件套 / 配置档案 ——

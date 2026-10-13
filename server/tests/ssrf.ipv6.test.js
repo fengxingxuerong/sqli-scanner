@@ -210,3 +210,72 @@ test('ipBytes 原语：前缀比较按位算（含非 8 倍数前缀）', () => 
   assert.equal(embeddedIpv4('::ffff:a9fe:a9fe')?.join('.'), '169.254.169.254', '内嵌 IPv4 必须能提取（云元数据的十六进制写法）');
   assert.ok(IPV6_BLOCKS.CLOUD_METADATA, '云端元数据段必须显式登记（不得只靠"落在 ULA 里"间接覆盖）');
 });
+// ============================================================================
+// [D-SSRF-IPV6-CIDR 2026-10-12] IPv6 CIDR 逐段放行 + 云元数据不可豁免（spec 5.4.1 规则 3/4/5）
+// POLICY 在模块加载时固化 ⇒ 每个用例用独立 query string 动态 import 取独立实例。
+// ============================================================================
+test('IPv6 CIDR 逐段放行：配置的网段放行，未配置的内网段仍被拒', async () => {
+  process.env.SSRF_STRICT = '1';
+  process.env.SSRF_ALLOW_CIDRS = '2001:db8::/32';
+  delete process.env.SSRF_ALLOW_PRIVATE;
+  try {
+    const { isBlockedIp } = await import('../src/core/http/egressGuard.js?ssrf-ipv6-cidr=1');
+    assert.equal(isBlockedIp('2001:db8::1'), false, '2001:db8::1 在放行的 2001:db8::/32 内');
+    assert.equal(isBlockedIp('2001:db8:ffff::1'), false, '2001:db8:ffff::1 仍在 /32 内');
+    assert.equal(isBlockedIp('fd00::1'), true, 'fd00::1 不在放行清单，仍被拒');
+    assert.equal(isBlockedIp('fe80::1'), true, 'fe80::1 链路本地仍被拒（基础层）');
+    assert.equal(isBlockedIp('::1'), true, '::1 回环仍被拒（严格层）');
+  } finally {
+    delete process.env.SSRF_ALLOW_CIDRS;
+  }
+});
+
+test('IPv6 CIDR：非法 CIDR 项忽略不放宽策略', async () => {
+  process.env.SSRF_STRICT = '1';
+  process.env.SSRF_ALLOW_CIDRS = 'not-a-cidr,::1/999';
+  delete process.env.SSRF_ALLOW_PRIVATE;
+  try {
+    const { isBlockedIp } = await import('../src/core/http/egressGuard.js?ssrf-ipv6-cidr-invalid=1');
+    assert.equal(isBlockedIp('fd00::1'), true, '非法 CIDR 不放宽：fd00::1 仍被拒');
+    assert.equal(isBlockedIp('::1'), true, '非法 CIDR 不放宽：::1 仍被拒');
+  } finally {
+    delete process.env.SSRF_ALLOW_CIDRS;
+  }
+});
+
+test('云元数据不可豁免：SSRF_ALLOW_PRIVATE=1 时云元数据仍被拒（spec 5.4.1 规则 4）', async () => {
+  process.env.SSRF_ALLOW_PRIVATE = '1';
+  delete process.env.SSRF_STRICT;
+  delete process.env.SSRF_ALLOW_CIDRS;
+  try {
+    const { isBlockedIp } = await import('../src/core/http/egressGuard.js?ssrf-cloud-meta=1');
+    assert.equal(isBlockedIp('169.254.169.254'), true, 'IPv4 云元数据必须被拒（基础层不可豁免）');
+    assert.equal(isBlockedIp('fd00:ec2::254'), true, 'IPv6 云元数据必须被拒（基础层不可豁免）');
+    assert.equal(isBlockedIp('fe80::1'), true, '链路本地必须被拒（基础层不可豁免）');
+    assert.equal(isBlockedIp('127.0.0.1'), false, 'ALLOW_PRIVATE=1 放行回环（严格层被豁免）');
+    assert.equal(isBlockedIp('10.0.0.1'), false, 'ALLOW_PRIVATE=1 放行私网（严格层被豁免）');
+  } finally {
+    delete process.env.SSRF_ALLOW_PRIVATE;
+  }
+});
+
+test('getEgressPolicy：策略态可观测（spec 5.4.1 规则 5）', async () => {
+  process.env.SSRF_STRICT = '1';
+  delete process.env.SSRF_ALLOW_PRIVATE;
+  delete process.env.SSRF_ALLOW_CIDRS;
+  try {
+    const strictMod = await import('../src/core/http/egressGuard.js?ssrf-policy-strict=1');
+    const strictPolicy = strictMod.getEgressPolicy();
+    assert.equal(strictPolicy.level, 'strict', '无放行配置 ⇒ level=strict');
+    assert.equal(strictPolicy.cloudMetadataBlocked, true, '云元数据恒被拒');
+
+    process.env.SSRF_ALLOW_CIDRS = '10.0.0.0/8';
+    const relaxedMod = await import('../src/core/http/egressGuard.js?ssrf-policy-relaxed=1');
+    const relaxedPolicy = relaxedMod.getEgressPolicy();
+    assert.equal(relaxedPolicy.level, 'relaxed', 'allowCidrs 非空 ⇒ level=relaxed');
+    assert.equal(relaxedPolicy.cloudMetadataBlocked, true, '云元数据恒被拒（即使策略放宽）');
+    assert.ok(Array.isArray(relaxedPolicy.allowCidrs) && relaxedPolicy.allowCidrs.length > 0, 'allowCidrs 暴露放行清单');
+  } finally {
+    delete process.env.SSRF_ALLOW_CIDRS;
+  }
+});

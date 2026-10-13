@@ -198,6 +198,9 @@ export function parseArgs(argv, preset) {
     // [D52] 自定义响应解密脚本（加密/编码响应体）；须位于 RESPONSE_SCRIPT_DIR 内。
     // 与 --request-script 对偶：那个治「发不出合法请求」，这个治「读不懂合法响应」。
     else if (a === '--postprocess') args.postprocess = next();
+    // [D53] 时间提取基线漂移重采样间隔（个探针，0=关闭跟踪）：健康提取靠判假探针的
+    // 免费 RTT 样本连续跟踪，连续 N 个探针没拿到干净样本时才补发一次基线请求。
+    else if (a === '--time-baseline-every') args.timeBaselineEvery = next();
     // [D36 实战 P0-2] Bearer/Token 自动续期（--refresh-url 为主开关，另两个是可选形状）
     else if (a === '--refresh-url') args.refreshUrl = next();
     else if (a === '--refresh-token') args.refreshToken = next();
@@ -305,7 +308,7 @@ export function parseArgs(argv, preset) {
   else if (a === '--randomize') args.randomize = next();
   // --dump-format：拖库数据产物格式（csv/sql/html/json；产物层用，不影响内嵌报告）
   else if (a === '--dump-format') args.dumpFormat = next();
-  // [D50 2026-10-12] --fetch-using：盲注提取比较算子。> / < 被 WAF 过滤而 BETWEEN
+  // [D50 2026-10-12] --fetch-using：盲注提取比较算子。`>`/`<` 被 WAF 过滤而 BETWEEN
   // 仍放行的目标上，between 让长度/字节二分继续收敛（cls 类探测早已单方面依赖 BETWEEN
   // 可用）。默认 gt（历史行为）；'in' 不实现（IN 为假时无法定位区间，TODO 已留证）。
   else if (a === '--fetch-using') args.fetchUsing = next();

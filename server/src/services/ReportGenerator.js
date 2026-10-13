@@ -26,6 +26,8 @@ import {
   pointById,
   pocRedactedForExport,
 } from './reportPoC.js';
+// [D-REDACT 2026-10-12] 统一脱敏管道（spec 5.3.1）：全格式导出前必经 redactReport。
+import { redactReport } from './reportRedaction.js';
 // [2026-09-17] 交付缺口修复：vuln 只有内部 pointId hash，报告读者无法自解「哪个参数中招」。
 // attachVulnContext 兜底给漏洞条目补 param/location/url/method/vulnType（幂等浅拷贝），
 // 使「受影响参数」与「漏洞类型(CWE/OWASP)」成为报告的自包含字段——
@@ -293,8 +295,16 @@ export class ReportGenerator {
   // （cli.format 的 md/markdown 等价断言与 poc.evidence 的确定性用例锁此行为）。
   // 兜底对象：引擎产出的报告已由 finalize 回填，这里只为历史快照/外部构造的报告补齐
   // 「受影响参数 / 漏洞类型」字段，是幂等操作（已有字段不覆盖）。
-  _forExport(report) {
-    const r = this._truncate(this._attachPoc(this._enrich(report)));
+  _forExport(report, redactOpts) {
+    const base = this._truncate(this._attachPoc(this._enrich(report)));
+    // [D-REDACT 2026-10-12] 统一脱敏管道：opts 缺省时零行为变化（spec 5.3.1 规则 1）。
+    // redactOpts 可由调用方显式传，或由 report._redactOpts 携带（API 层注入，不改 to* 签名）。
+    const opts = redactOpts || report?._redactOpts;
+    let r = base;
+    if (opts) {
+      r = redactReport(r, opts);
+      delete r._redactOpts;
+    }
     if (!r.target) return r;
     return { ...r, target: sanitizeTargetForExport(r.target) };
   }

@@ -5,7 +5,7 @@
     "frontend.tests": "vitest 用例总数（含失败）",
     "server.tests": "node:test 用例总数（含 skip/fail）"
   },
-  "generatedAt": "2026-10-12T18:18:43+00:00",
+  "generatedAt": "2026-10-13T08:49:34+00:00",
   "coverageCollected": true,
   "frontend": {
     "files": 64,
@@ -14,10 +14,10 @@
     "fail": 0,
     "skipped": 0,
     "coverage": {
-      "statements": 94.62,
-      "branches": 84.63,
-      "functions": 83.28,
-      "lines": 94.62
+      "statements": 94.59,
+      "branches": 84.5,
+      "functions": 83.37,
+      "lines": 94.59
     },
     "thresholds": {
       "statements": 88,
@@ -27,14 +27,14 @@
     }
   },
   "server": {
-    "tests": 3413,
-    "pass": 3408,
+    "tests": 3481,
+    "pass": 3477,
     "fail": 0,
-    "skip": 5,
+    "skip": 4,
     "coverage": {
-      "lines": 92.9,
-      "branches": 81.77,
-      "functions": 84.95
+      "lines": 91.22,
+      "branches": 81.29,
+      "functions": 83.46
     },
     "thresholds": {
       "lines": 85,
@@ -43,7 +43,6 @@
     }
   },
   "badge": {
-    "testsPassing": 3969
-  },
-  "_note": "2026-10-13：server.pass/fail 与两端覆盖率取自 CI run #218（tree 与本地提交一致）。本机隔离环境采集时，5 条「仓库守卫型」测试（scope 行数基线 / 串界转义扫描 / udf-lab do_start 三条）因新 init 的 git 仓库与 junction node_modules 而假红，非代码缺陷 —— 同一棵树在 CI 上 3408 pass / 0 fail。指纹部分由隔离采集生成（451 个测试源文件，与 CI 视角一致）。"
+    "testsPassing": 4038
+  }
 }

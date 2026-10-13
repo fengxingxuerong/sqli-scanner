@@ -245,6 +245,18 @@ export function buildConfig(args) {
   // [D52] --postprocess：自定义响应解密脚本。与 requestScript 同口径——入口只透传路径，
   // 存在性/RESPONSE_SCRIPT_DIR 白名单/导出形态三道校验在 ScanManager.start 硬失败。
   if (typeof args.postprocess === 'string' && args.postprocess) config.postprocess = args.postprocess;
+  // [D53] --time-baseline-every：时间提取基线漂移重采样间隔（非负整数，0=关闭跟踪）。
+  // 非法值**拒启动**（与 --fetch-using 同口径）：静默回落等于用户以为关了实际没关（或反之）。
+  // ⚠ 判据用 `!= null` 而不是「非空串才校验」：给了开关却给空值属于**输入错误**，
+  // 静默当成没给 ⇒ 用户以为关了（或设了）实际相反，正是「传了没生效」红线。
+  if (args.timeBaselineEvery != null) {
+    const raw = String(args.timeBaselineEvery).trim();
+    const n = /^\d+$/.test(raw) ? Number(raw) : NaN;
+    if (!Number.isInteger(n)) {
+      throw new Error(`--time-baseline-every 只认非负整数（0=关闭漂移跟踪），收到：${args.timeBaselineEvery}`);
+    }
+    config.timeBaselineEvery = n;
+  }
   // [D36 实战 P0-2] --refresh-url：Bearer 自动续期。只给 URL 也能用（刷新凭据走会话 Cookie）；
   // --refresh-token / --refresh-field 是可选精调。非法 URL 由入口 guard 丢弃并 warn（不静默启用半套）。
   if (typeof args.refreshUrl === 'string' && args.refreshUrl.trim()) {

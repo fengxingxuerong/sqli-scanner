@@ -109,4 +109,5 @@ writeFileSync(resolve(RESULTS_DIR, 'oob-real-report.md'), md);
 console.log(`[report] ${RESULTS_DIR}`);
 
 try { await oobReceiver.stop?.(); } catch { /* 未启动时忽略 */ }
-process.exit(0);
+const ok = oobHit && controlZero;
+process.exit(ok ? 0 : 1);
