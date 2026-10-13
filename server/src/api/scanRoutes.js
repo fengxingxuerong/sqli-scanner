@@ -92,6 +92,9 @@ const KNOWN_CFG_KEYS = new Set([
   // [D52] 自定义响应解密脚本路径（--postprocess，与 requestScript 对偶）。同样只做形状，
   // 真正加载在 ScanManager.start（ensureResponseTransform），失败即不启动扫描。
   'postprocess',
+  // [D53] 时间提取基线漂移重采样间隔（0=关闭）。不登记 ⇒ REST 传了被白名单滤掉、
+  // 调用方拿到 200 + scanId 却跑出「未检出」的静默假阴性（configReachability 守卫口径）。
+  'timeBaselineEvery',
   // [P0-FIX 2026-09-09] 本地/私网目标绕过环境变量代理（默认 true）
   'proxyBypassLocal',
   // [2026-09-24] 引擎真读、此前**任何入口都设不了**的三键（见 sanitizeStart 内注释）：
@@ -156,7 +159,7 @@ const KNOWN_CFG_KEYS = new Set([
   // 但 X 在 defaults / 本白名单 / CLI / 面板**四处都没有** ⇒ 那承诺只有写单测的人能兑现。
   // 默认值逐个等于引擎内部兜底，故零行为变化；细节见 defaults.js 同批注释。
   'blindBitwise', 'blindMaxLen', 'booleanOrFallback', 'unionSkipGate',
-  // [D50 2026-10-12] 盲注提取比较算子（--fetch-using）：gt|between。> / < 被 WAF
+  // [D50 2026-10-12] 盲注提取比较算子（--fetch-using）：gt|between。`>`/`<` 被 WAF
   // 过滤而 BETWEEN 仍放行的目标上，between 让长度/字节二分继续收敛（cls 类探测早已
   // 单方面依赖 BETWEEN 可用）。非法值在 scanConfigTuning 入口即丢弃并告警（不静默回落）。
   'fetchUsing',
@@ -291,6 +294,8 @@ export function sanitizeStart(body) {
     );
   }
   warnDroppedConfigKeys(cfg, KNOWN_CFG_KEYS, config, DIRECT_ONLY_CFG_KEYS);
+  // [D-REDACT 2026-10-12] redactPasswords 开关（spec 5.3.1 规则 1/2，默认 false 向后兼容）
+  const redactPasswords = b.redactPasswords === true || cfg.redactPasswords === true;
   return {
     url: u.toString(),
     method,
@@ -300,6 +305,7 @@ export function sanitizeStart(body) {
     cookieParams: clampParams(src.cookieParams),
     headerParams,
     config,
+    redactPasswords,
   };
 }
 
@@ -650,10 +656,12 @@ export function createRoutes({ scanManager, eventBus: bus = eventBus, reportToke
     // 渲染顺序 = 数据来源顺序：先内存（扫描还在上下文里），拿不到再回退台账（历史扫描也要能
     // 重新导出一份交付文档）。不在前置就要求 getReport 命中：exportReport 自己知道怎么取报告，
     // 这里再读一次等于把"报告从哪来"复制成两份真相（本仓反复出现过的那族缺陷）。
-    let out = sm.exportReport(req.params.id, format);
+    // [D-REDACT 2026-10-12] ?redactPasswords=1 运行时覆盖（spec 5.3.1 规则 2）
+    const redactOverride = String(req.query.redactPasswords || '') === '1' ? { redactPasswords: true } : {};
+    let out = sm.exportReport(req.params.id, format, undefined, redactOverride);
     if (out == null) {
       const persisted = readReport(req.params.id);
-      if (persisted) out = sm.exportReport(req.params.id, format, persisted);
+      if (persisted) out = sm.exportReport(req.params.id, format, persisted, redactOverride);
     }
     if (out == null) {
       // 必须是 4xx：这是一条**文件下载**端点。历史上它返回 200 + `application/json` 且不带

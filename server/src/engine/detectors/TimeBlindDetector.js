@@ -4,6 +4,7 @@ import { PAYLOADS, fillPayload, getClauseTemplates } from '../payloads.js';
 import { selectPayloads, orderEntriesByBoundary, registryMode } from '../payloadRegistry.js';
 import { defaults } from '../../config/defaults.js';
 import { mean, std, effectiveThreshold, adaptiveTimeFloor } from '../../core/statsHelper.js';
+import { getTimingBaseline, updateTimingBaseline, MIN_SAMPLES as TB_MIN_SAMPLES } from '../detectorSupport/timingBaseline.js';
 
 // 时间盲注检测器
 // 思路：注入 SLEEP/pg_sleep/WAITFOR 等延迟 Payload，比对响应耗时是否 ≥ 阈值且稳定多次
@@ -273,7 +274,20 @@ export class TimeBlindDetector extends Detector {
     const baselineElapsed = baselineOk.map((r) => ((r.__elapsed || 0) / 1000));
     const baselineExcerpts = baselineResps.map((r) => this._excerptOf(r));
     const mu = mean(baselineElapsed);
-    const sigma = std(baselineElapsed);
+    let sigma = std(baselineElapsed);
+
+    // [D-TIMING-BASELINE 2026-10-12] 目标级动态基线增强（spec 5.6.1 规则 1 / 模块 6.2）
+    // 扫描内样本不足时，用目标级 EWMA 基线的 σ 兜底（更稳的抖动估计）
+    // 样本足够时仍用扫描内 σ（更贴近当前网络状况）；两种情况都更新目标级基线
+    const hostBaseline = getTimingBaseline(target.url || target);
+    let baselineSource = 'scan';
+    if (hostBaseline && baselineOk.length < TB_MIN_SAMPLES) {
+      const sigmaHost = hostBaseline.std / 1000; // ms → s
+      if (sigmaHost > sigma) {
+        sigma = sigmaHost;
+        baselineSource = 'host-ewma';
+      }
+    }
 
     // 2) 分布感知阈值：μ + z·σ 为主，叠加自适应绝对下限（σ=0 退化为 μ+absFloor ≡ legacy 固定阈值）。
     //    自适应下限 = absFloor + scale·σ：稳定目标(σ≈0)与现状一致；抖动目标(σ 大)下限更宽，抑制微抖动误报。
@@ -379,7 +393,13 @@ export class TimeBlindDetector extends Detector {
       injectSamples,
       stableRatio,
       decision: result.vulnerable ? 'vulnerable' : 'clean',
+      baselineSource,
+      hostBaseline: hostBaseline ? { count: hostBaseline.count, meanMs: Math.round(hostBaseline.mean), stdMs: Math.round(hostBaseline.std) } : null,
     };
+    // [D-TIMING-BASELINE] 用本次扫描内基线样本更新目标级 EWMA 基线（5.6.1 规则 1）
+    for (const r of baselineOk) {
+      updateTimingBaseline(target.url || target, r.__elapsed || 0);
+    }
     return result;
   }
 

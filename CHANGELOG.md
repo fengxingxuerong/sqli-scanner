@@ -4,6 +4,51 @@
 
 ## [Unreleased]
 
+### 2026-10-13 文档 · docs/ 分两层：39 篇「某一天的快照」进 archive/，现行入口收敛到 21 篇
+
+**一句话**：`docs/` 根原来躺 60 篇 md/html，其中 39 篇是带日期的评估/审计/批次战报，同主题还并存 3–4 个版本（项目评价 ×3、WAF 真机对拍 ×3、优化空间勘查 ×3）——想知道"今天什么状态"要跨 5 个文件自己投票。现在 `docs/` 根只留现行文档，快照一律进 `docs/archive/`，并给归档区做了一份**带取代指向**的单页索引。
+
+| 面 | 内容 |
+|---|---|
+| 归档判据 | **文件名带 `YYYY-MM-DD` ⇒ 它是那一天的快照**（不是现行口径）；同系列有更晚一份、或结论已被后续批次推翻 ⇒ 移进 archive。据此移 39 篇（项目评价 ×2、优化推进纪要 ×5、实战审计 ×4、优化空间勘查/评估 ×3、竞品对照、发布就绪/终检、性能基线、状态收拢、runScanLoop 拆分、大文件拆分复盘、安全与架构审计 ×2、假绿排查、待办 ×2、接口缺口、WAF 真机对拍 09-27（README 已明令禁止引用其数字）等）。**归档 ≠ 删除**：原文与当时的数字（含后来被证伪的）一字未改，只改链接路径 |
+| 链接改写 | 全仓 174 个 `.md/.html` 里的相对链接按引用方位置逐类改写（根文件 `docs/X`→`docs/archive/X`；docs 内 `](./X)`→`](./archive/X)`；docs 子目录 `../X`→`../archive/X`；被移动文件自己的出链补 `../`）。共 47 处 / 29 个文件 |
+| 索引 | `docs/INDEX.md` 重新生成（`npm run docs:index`，78 篇 → 42 篇）；新建 `docs/archive/INDEX.md` 40 行，每行 = 文件名 + **取自该文件自己一级标题的原文**（不事后编描述）+ 同系列更晚一份的可点链接 |
+| 判据（可跑） | 一次性链接核对器：解析全部被跟踪 md/html 的 `]()` 与 `src=/href=`，相对链接必须落到**被跟踪文件**（外部 URL/锚点/mailto 跳过）。**移动前基线 6 条断链 → 移动后 4 条**，且 4 条全是存量误报（目录链接 `docs`、正文里的 ``[English](README.en.md)`` 示例、`/assets/...` 占位、`index.html` 的构建期 `/fonts/fonts.css`）⇒ **零新增断链**；顺带修掉 2 条真实的存量缺陷：`实战审计 09-08 ↔ 09-09` 互相用 `D:/projects/…` 绝对路径链接（换台机器必断）→ 改同级相对 |
+| 回归 | 10 道静态门禁退出码全 0：`readme:check` `facts:check` `refs:check` `version:check` `arch:guard` `nesting:guard` `modules:check` `e2e:wiring` `greenguard` `targets:check`；真读 docs 路径的 6 个测试文件分两轮定向跑（两轮有重叠文件，不加总）：**第一轮 11/11 绿**（`configOrphanKeys.guard` + `docs.configDefaults` + `e2eArtifacts.consistency` + `dbmsEvidence`）、**第二轮 18/18 绿**（`docs.configDefaults` + `orphanScripts.guard` + `nestingGuard.wiring` + `e2eArtifacts.consistency`）⇒ 归档没把读 docs 的守卫砸了 |
+| ★过程缺陷 | 归档脚本第一版在 `git mv` 之后仍按**旧路径**回写文件 ⇒ 39 个移动已生效、链接只改了一半（ENOENT 崩在中途）。处置：`git reset --hard`（当时工作树除脚本产物外为空）后按新路径重写再跑。另修一处同类 bug：两个**都被移动**的文件互相链接时被判成"入链"改成了 `./archive/X`，而它们已是同级 —— 这条正是链接核对器抓出来的，不是人眼看到的 |
+| 未做 | 没给"markdown 相对链接完整性"加常驻门禁（本轮用一次性核对器验收）。这个判据值得常驻 —— 它与 `refs:check` 同型（refs 管代码里的路径，这条管文档里的路径），但加门禁要同时动 `package.json`/`ci.yml`/`ci-local`/接线守卫四处，属独立批次 |
+
+
+### 2026-10-13 实测 · sqlmap 同题对照重跑（拿到今天的数，并撤回一条写歪的旧行）
+
+**一句话**：把 README 引以为据的「23/23 vs 15/23、335ms/关」拿来在**同一台机器上按定版口径重跑**（双方各 3 轮、检出多数决、耗时中位），结果是 **23/23 vs 14/23、101ms vs 2.2s**——数字本身站得住（与 2026-10-03 那份同口径产物逐位一致），但 README 那一行**引用的是更旧的两轮产物**，于是把「sqlmap 少测一轮」写成了「sqlmap 多检出一关」。
+
+| 面 | 内容 |
+|---|---|
+| 实测 | `node e2e/sqlmap-benchmark/run.mjs --runs=3` → 我方 100.0%（23/23）、sqlmap 1.10.7 60.9%（**14/23**）、仅我方命中 9 / 仅 sqlmap 0 / 双方均未检出 0、命中场景平均耗时 101ms vs 2.2s。产物 `docs/sqlmap-benchmark/sqlmap-benchmark-2026-10-13-level1-runs3.md` + `results-level1-runs3.json` 同步更新 |
+| 复现性 | 与 2026-10-03 产物**逐位相同**（同 23/23、同 14/23、同 2.2s；我方 116ms → 101ms）⇒ 这条对照在 10 天间隔上是可复现测量，不是一次性快照。sqlmap 侧本机在位（`sqlmap 1.10.7#pip`），版本与 README 声明一致 |
+| 撤回 | README 速度行原写「产物 2026-09-16：约 6× 快，23/23 vs 15/23」⇒ 改为 2026-10-13 定版（22× 快、14/23），并写明旧行为何错：09-16 那份是**两轮口径**，10-03 的三轮定版已一致给出 14/23，旧行把口径差读成了能力差 |
+| 真值边界 | 同处补一句硬边界：靶站是 `e2e/sqli-labs/sqli-labs.py`（本项目自写的 223 行 Python 复刻，http.server + SQLite），**不是**上游 PHP 仓库 ⇒ 这是同题对照、不是外部裁判（`e2e/reference-labs.json` 对同一目录的旧描述「PHP+MySQL、第三方仓库、需 phpstudy」同步改正；README 原称「唯一第三方卷子是 sqli-labs」撤回，第三方卷子实为 0） |
+| ★仓库卫生 | sqlmap 的 `--output-dir` 指在仓库内且该目录**被 git 跟踪**（`docs/sqlmap-benchmark/sqlmap-raw/127.0.0.1/{log,session.sqlite,target.txt}`）⇒ 每跑一次对照就把 3 个被跟踪文件写脏，而**没有任何测试能抓**（缺陷类型：全绿却把被跟踪文件写脏）。处置：`git rm -r --cached` + `.gitignore` 登记并写清理由；证据一律看 `*.md` 与 `results-*.json`，raw 只有本机调试价值 |
+| 未做 | 真·外部靶场（官方 PHP sqli-labs / DVWA / Juice Shop）本机起不来：无 Docker、无 PHP、3306/5432 均关。⇒ **README 里那组数至今仍无第三方真值背书**，能做的只是把「自证」标注清楚 + 把同题对照做成可复现测量。要拿到外部真值得在有容器/PHP 的机器上跑，或授权一个真实目标后实测 |
+
+
+### 2026-10-13 批次 D53 · 时间提取基线漂移跟踪 + 本批收口（三处实修）
+
+**一句话**：把时间盲注提取的判定阈值从「开头采 3 个样本、整条链共用」改为「随判假探针的免费 RTT 样本实时重算」；收口时修掉三处本批自带的缺陷——其中一处是**测试找出来的真缺陷**（判据先行、实现只落地一半）。
+
+| 面 | 变更 |
+|---|---|
+| 引擎 | `blindExtractor.js` 新增 `createBaselineTracker`（环形 5 样本 + 非对称估计：上行跟最新样本、下行由中位数兜底）；`extractTime` 的 `thresholdMs`/`timeoutMs` 每次探针重算，连续 `timeBaselineEvery` 个探针没拿到干净样本才补发一次原值请求（健康提取零额外请求）；`resolveTimeBaselineEvery` 非法值硬拒不静默回落 |
+| 入口 | `timeBaselineEvery` 进 CLI/档案/REST 白名单/scalarsCore/defaults（默认 16，`0` = 整条跟踪关闭，留给故障复现用） |
+| ★本批实修 1 | **失败探针的 elapsed 污染判定**：`timedTrue` 里 `t0` 在重试前不重置 ⇒「首次超时、重试成功」的探针 elapsed ≈ `timeoutMs + 真实 RTT`，这个混合值既不是 RTT 也不是失败，却必然 ≥ 阈值 ⇒ **该次被判成「条件为真」**。表现是长度二分在真值之上多收敛几位、产出 `"8036\u0000\u0000\u0000\u0000"`（尾 NUL = 越界位置 `ASCII('')`）——一个看着像数据的错值，正是文件头标注的危险形态 ②。修法：重试前重置 `t0`，失败分支只 `skip()` 不入样。★这条是 `extractor.timeDrift.test.js` 的判据**当场判红抓出来的**（提交前 3/3 确定性红）；A/B 复验：摘掉 `t0` 重置 ⇒ 10/11 红，装上 ⇒ 11/11 绿 |
+| ★本批实修 2 | `blindExtractor.js:714` 残留一行未还原的缺陷注入标记 `tracker.observe(elapsed); // INJECT-2`（全仓 grep 仅此一处）。它让「失败也入样」这条被注入的缺陷留在了工作树里；已按判据本意还原为 `skip()`，并同步改正测试文件里对根因的归因（原注释写「入样抬阈值 ⇒ 后续一切判假」，实测根因是混合耗时被直接判真） |
+| ★本批实修 3 | `greenguard-check.mjs --selftest` 把夹具写在 `scripts/`（= 它自己的扫描面）并在 `try` 里 `process.exit()` —— **Node 的 `process.exit` 同步终止，`finally` 不执行** ⇒ 夹具 `scripts/.greenguard-selftest-fake.mjs` 永久残留，而它恰好是判据 ① 的样本 ⇒ 下一轮 `greenguard` 自己判红。修法：夹具落 `os.tmpdir()` + 退出走 `process.exitCode`（两条都改：漏清也伤不到门禁，且 finally 真会跑） |
+| 接线 | `e2e/cross-module-lab/run.e2e.mjs` 登记进 `e2e/reference-labs.json`（CHANGELOG D2 行早就写了「6 已登记（含 cross-module）」但 JSON 没跟上 ⇒ 典型的硬编码结论句过期）。登记理由据实写明：该 runner 的 5 个场景里 4 个是逐条复跑 `server/tests/*`（已由 CI `test-server` 全量执行），脚本里的 `AUTH_DECLARATION_STRICT=lenient` 是装饰性的（被调测试文件自己 set/delete 该变量）；唯一非重复部分的两个 selftest **目前 ci.yml 一步都没跑**，属 CI 与 `scripts/ci-local.mjs` 的门禁漂移，另批处置 |
+| 文档数字 | `facts:refresh --coverage` 重采并回写 README（徽章 3969 → **4037**；服务端 **3481 用例 / 3477 pass / 0 fail / 4 skip**；覆盖率 lines **92.90 → 91.21**、branch 81.21、func 83.42 —— 本批新增 5 个源文件带下来的真实摊薄，不是测量口径变了） |
+| 门禁退出码 | 全绿：`refs:check`（此前 9 处「本机有、库里没有」）· `facts:check` · `readme:check` · `greenguard[:selftest]` · `arch:guard` · `nesting:guard` · `modules:check` · `version:check` · `e2e:wiring[:selftest]` · 前端 vitest 561/561 · 服务端 3481 用例 0 fail |
+
+
 ### 2026-10-12 批次 · 优化空间勘查落地（A1/A2/A3/B1/C1/C2/D1/D2/F 九项）
 
 **一句话**：按 `docs/优化空间勘查-2026-10-12.md` 落地九项——修掉一条已静默分叉的正确性漂移（`ERROR_SIG`）、补上 CLI 对 NoSQL/OOB 两个整通道的零可达、把两个门禁（变异敏感度 / e2e 靶场接线）从「靠信念」变成「会自证」，外加两处白烧。40 文件；性能项附量化、缺陷项附缺陷注入复验，门禁结论取实跑退出码。
@@ -47,6 +92,132 @@
 | 缺陷注入 | 5 发全杀：窄化方向反转（4 杀）/ between 误用 gt 收敛条件（挂死形态，已补截止时间包装）/ cap 退回段上界（长值测试精确命中）/ 非法值静默回落 / 时间通道 between 失效 |
 | 上游更正 | 候选原登记"对标 ghauri --fetch-using"——对 ghauri v1.0.5 与 v1.0.1#dev 整包取证 `--fetch-using`/`fetch_using` **0 命中**（仅无关方法名），ghauri 无此参数；按技术本身价值落地，不称对标。`in` 不实现：IN 为假时无法定位区间（k+1 个缺口全都可能），单值 IN 退化为线性扫描 |
 | 诚实边界 | 等值验证与 false 基准仍用 `=`（`=` 被过滤时整条通道本就不要命）；between 未经真机靶场验证（离线 mock oracle 双口径 + WAF 模拟），真机验证归 real-mysql-lab 下一轮 |
+
+### 2026-10-12 批次 D51 · 全维度优化（门禁/授权/脱敏/SSRF/检测增强）
+
+**一句话**：按 spec 5.1-5.6 六个能力模块全维度优化，覆盖 CI 门禁可靠性、授权可审计与配额防护、
+报告凭据脱敏、出站地址策略扩展、检测能力增强，新增 7 个源文件 + 6 个测试文件，47 条新测试全绿。
+
+#### 模块 1：CI 门禁可靠性加固
+
+| 子项 | 变更 |
+|---|---|
+| 1.1 | ci.yml 6 个有 `needs` 的下游 job 加 `if: always()` + 前置门禁检查步骤，前置失败时显式标注"前置未通过"而非静默跳过 |
+| 1.2 | package.json 新增 `quality:all` 脚本（指向 ci-local.mjs） |
+| 1.3 | 新建 `scripts/greenguard-check.mjs`（恒绿门禁检测器，支持 --selftest + waivers） |
+| 1.4 | 新建 `scripts/gate-recorder.mjs`（门禁运行记录器，三态 passed/failed/not_run） |
+| 1.5 | mutation-check.mjs 前端 runner 增加 tsc --noEmit 预检 |
+| 1.6 | mutation-check.mjs TARGETS 扩展前端目标 2→8 |
+| 1.7 | 新建 `scripts/coverage-calibration.mjs`（覆盖率回归校准，--selftest 验证门禁会拦） |
+
+#### 模块 2：授权可审计与配额防护
+
+| 子项 | 变更 |
+|---|---|
+| 2.1 | 新建 `server/src/core/authDeclaration.js`（validateDeclaration/extractDeclaration） |
+| 2.2 | 新建 `server/src/api/quotaMiddleware.js`（checkQuota/release，目标数 + 扇出配额） |
+| 2.3 | rateLimit.js tokenKeyOf 改为 SHA-256 摘要前 16 hex（消除 slice(0,8) 碰撞面） |
+| 2.4 | 新建 `server/src/services/authAudit.js`（recordAuthEvent，append-only auth.jsonl） |
+| 2.5 | exploitFlag.js 新增 checkExploitAuthorization；exploitRoutes.js requireAuth 接入授权声明→配额→审计三道门 |
+
+新增环境变量：`AUTH_DECLARATION_STRICT`（默认 strict，lenient 兼容旧布尔 authorized:true）、`QUOTA_TARGET_MAX`（20）、`QUOTA_FANOUT_MAX`（5）、`QUOTA_WINDOW_MS`（3600000）、`AUDIT_SINK_FAIL_MODE`（strict/lenient）
+
+#### 模块 3：报告凭据脱敏
+
+| 子项 | 变更 |
+|---|---|
+| 3.1 | 新建 `server/src/services/reportRedaction.js`（redactReport 统一脱敏管道） |
+| 3.2 | ReportGenerator._forExport 接入 redactReport（opts 缺省时零行为变化） |
+| 3.3 | sanitizeStart 新增 redactPasswords 开关；ScanManager.exportReport 注入 _redactOpts；报告导出路由支持 ?redactPasswords=1 |
+
+#### 模块 4：出站地址策略扩展
+
+| 子项 | 变更 |
+|---|---|
+| 4.1 | egressGuard.js IPv6 CIDR 逐段放行（复用 ipBytes 字节级前缀比较） |
+| 4.2 | healthRoutes.js 新增 egressPolicy 字段（level/allowCidrs/cloudMetadataBlocked） |
+| 4.3 | 云元数据不可豁免回归用例（SSRF_ALLOW_PRIVATE=1 时仍拒绝 169.254.169.254） |
+
+#### 模块 6：检测能力增强
+
+| 子项 | 变更 |
+|---|---|
+| 6.1 | 新建 `server/src/engine/detectorSupport/timingBaseline.js`（目标级 EWMA 动态基线，LRU 淘汰） |
+| 6.2 | TimeBlindDetector._robustDetect 接入目标级基线（扫描内样本不足时用 EWMA σ 兜底） |
+| 6.5 | verdictGuard.test.js 守卫：不可靠/0注入点/WAF全拦 → inconclusive（不得为 no_vulnerability_detected） |
+
+#### 新增测试（47 条全绿）
+
+- `server/tests/authQuota.test.js`（18 条：授权声明 + 配额 + 审计 + SHA-256 计额键）
+- `server/tests/exploitRoutes.authDeclaration.test.js`（5 条：严格模式集成）
+- `server/tests/reportRedaction.test.js`（8 条：脱敏管道）
+- `server/tests/reportRedaction.integration.test.js`（4 条：exportReport 接入）
+- `server/tests/ssrf.ipv6.test.js`（7 条：IPv6 CIDR + 云元数据 + 策略态）
+- `server/tests/timingBaseline.test.js`（7 条：EWMA + LRU + 降级）
+- `server/tests/verdictGuard.test.js`（5 条：结论不夸大守卫）
+
+#### 待后续（需外部依赖）
+
+- 6.3 真机验证矩阵（需 MySQL/PG/TiDB 等靶场）
+- 6.4 WAF 绕过基准（需 ModSecurity + CRS 容器）
+
+### 2026-10-12 批次 D50 · PG 三套真机靶场首次进 CI：先拆掉两个「接进去只会买到恒绿」的假绿源（TODO 15.4 剩账 ①）
+
+**一句话**：`oob-real-lab` / `pg-osshell` / `concurrent-isolation` 三套的 deps 含 pg，CI 从未起过 PG
+⇒ 自写下起**从未在任何自动门禁里执行过**。但**直接接线是错的**：其中两套的退出码恒 0
+（一个结尾无条件 `exit(0)`，一个"PG 连不上"静默 SKIP），接进去只会得到一个「天天绿、一次没真跑」
+的 step —— 比天天红更糟。故本批的顺序是：**先修判据，再接线，最后上守卫**。
+
+#### ① 两个假绿源（都是真读代码读出来的，不是猜的）
+
+| 文件 | 缺陷 | 后果 |
+|---|---|---|
+| `e2e/oob-real-lab/verify.mjs` | 结尾**无条件** `process.exit(0)` | OOB 没命中、对照组误报都只打一行「需排查」，退出码照样 0 ⇒ 接它的门禁**恒绿** |
+| `e2e/oob-real-lab/pg-osshell.e2e.mjs` | PG 连接**写死** `127.0.0.1:5432` / `postgres` / `postgres`（不读 `PG_*`）；且 PG 连不上 / 非 superuser 时 `exit(0)` SKIP | PG 不在默认端口就永远连不上 ⇒ 走 SKIP ⇒ 又是恒绿。两个缺陷叠加，比单独一个更隐蔽 |
+
+修法：
+- `verify.mjs`：`process.exit(pass ? 0 : 1)`，断言落到退出码上；
+- `pg-osshell`：连接统一取自 `lab-app.mjs` 的 `PG_CONF`（本批把它导出，单一来源，不再各读一套），
+  并加 `PG_REQUIRE=1` 开关 —— 口径同仓库既有的 `RECALL_REQUIRE_MYSQL` / `MODSEC_REQUIRE_DB`：
+  **默认 SKIP 是对的**（本机没 PG 不是代码缺陷），但"已经专门起了 PG 的门禁里跳过"= 降级 = 必须红。
+
+#### ② 接线：用 runner 自带的 PG，不用 docker
+
+`ubuntu-24.04` runner 预装 **PostgreSQL 16.15**（服务默认关闭，`sudo systemctl start postgresql.service`）。
+选宿主 PG 而非容器的**唯一理由**是 OOB 链路的形态：由 **PG 服务进程**执行
+`COPY (SELECT '') TO PROGRAM 'curl {CALLBACK}'` ⇒ curl 必须存在于"PG 所在那一侧"，
+宿主天然满足，官方 postgres 镜像不保证装了 curl。
+同时把原「尝试启动 PostgreSQL（失败不阻塞）」那一步从 `continue-on-error` 改成**阻塞 + 三条取证**
+（①TCP 可连 ②是 superuser，COPY FROM PROGRAM 仅限超管 ③PG 那一侧有 curl）——
+既然三套已修成真判据，这一步再吞掉失败就只剩一个坏处：真正的现场被 `|| true` 抹平。
+
+#### ③ 本机实测（**不起任何数据库**，用生产一致输入）
+
+| 场景 | 实测输出 |
+|---|---|
+| 不设开关（本机无 PG） | `[SKIP] PG 不可连（127.0.0.1:5432）… 属环境缺项` + **退出码 0** ✓ |
+| `PG_REQUIRE=1` | `[FAIL] … 已设 PG_REQUIRE=1，跳过即降级 ⇒ 判失败` + **退出码 1** ✓ |
+| `PG_REQUIRE=1 PGPORT=59999` | 报错端口**随之变成 59999** ✓ —— 证明真读了 env，不再写死 5432 |
+
+第三行是最硬的证据：旧代码会忽略 `PGPORT`、永远连 5432。
+
+#### ④ 守卫（`server/tests/ciWiring.guard.test.js` 新增 ③④ + 一条自证）
+
+- ③ 三套必须在 ci.yml 里以 `node <entry>` 接线（**原来根本没有这道闸** —— 本文件的 ①② 只盯
+  `*.test.mjs`，这三套是 `*.e2e.mjs` / `verify.mjs`，压根不在视野里，这就是它们能隐形的原因）；
+- ④ 三套最后一个 `process.exit` 不得是字面量 `0`、不得写死 PG 端口/口令、
+  SKIP 必须真受 `PG_REQUIRE` 控制。
+- 缺陷注入 **5 发全中**：退回无条件 `exit(0)` / 退回硬编码连接 / 删掉 ci.yml 接线 /
+  删掉读开关那行 / 保留读开关但不再按它分支。还原（备份 `cp`）后 8/8 绿。
+- ⚠️ 其中「删掉读开关」一发**第一版判据没红**：原本用 `includes('PG_REQUIRE')` 查，删掉代码后
+  注释里还写着 `PG_REQUIRE=1` ⇒ 守卫绿着放行。已改成查 `process.env.PG_REQUIRE` 与
+  `if (PG_REQUIRE) {` 两个**代码形态**。这是本仓第三次栽在"判据的文本源没排注释"上。
+
+#### ⑤ 未验证项（如实标注）
+
+- **CI 首跑未确认**：本机无 PG、无 docker，无法先验。若 runner 的 PG 起不来，三套会**红**
+  （而不是悄悄 SKIP）—— 这正是本批要的结果：让"从没跑过"这件事第一次变得可见。
+- 15.4 的剩账 **②（`ensure_database` / `pg_ready` 无单测）仍未做**。
 
 ### 2026-10-12 批次 D49 · 桌面导出/导入授权范围：按决策 (a) 放开 `$DOWNLOAD/**`，并堵掉守卫的「只看标识」假绿（TODO 第 14 条）
 
@@ -2856,7 +3027,7 @@ TODO 09-28 #4 的兑现（安全控制缺口：按暂停后 tamper 链验证与�
 ### 2026-10-03 批次 5 · 优化空间勘查：修 SQL 报错签名分叉 + WAF 推荐链落盘
 
 按 `codebase-optimization-survey` 做的勘查（三条并行只读勘察 → 逐条回源码复核），
-落 `docs/优化空间勘查-2026-10-03.md`。本批只动两条**文档未登记**的真缺口：
+落 `docs/archive/优化空间勘查-2026-10-03.md`。本批只动两条**文档未登记**的真缺口：
 
 - **正确性（本批最值钱）**：`scanValidityGuard.js` 的 `SQL_ERROR_SIG` 与
   `engine/payloads/index.js` 的 `ERROR_SIG` **分叉** —— 后者 2026-10-01 收紧时加了
@@ -2910,7 +3081,7 @@ TODO 09-28 #4 的兑现（安全控制缺口：按暂停后 tamper 链验证与�
 
 ### 2026-10-03 批次 3 · WAF 链侧能力：定向变异搜索器补「减标点补位 + 三链组合 + 有序去重」
 
-评价文档（`docs/项目评价-2026-10-03.md` §七.3）定性：提打穿链数必须动**链侧**，不是再写
+评价文档（`docs/archive/项目评价-2026-10-03.md` §七.3）定性：提打穿链数必须动**链侧**，不是再写
 第 229 个 tamper。本批在 A2 既有架构（画像 → 语义索引 → 组合生成 → 探针验证）内修掉
 生成器的三个真实质量缺口：
 
@@ -3041,7 +3212,7 @@ HTTP 爬虫（6 组标签属性正则）看不见 `/api/*`。新增 opt-in 的 `
 ### 2026-10-02 批次（第五批）· 竞品吸收：paramMine 参数挖掘（对标 Arjun）+ 扫描预设（对标 ZAP）
 
 调研 sqlmap/Arjun/Nuclei/ZAP 等同类项目并核差距后落地两项（全记录见
-`docs/竞品对照与吸收-2026-10-02.md`）：
+`docs/archive/竞品对照与吸收-2026-10-02.md`）：
 
 - **paramMine 参数挖掘**（opt-in `--param-mine` / 面板爬虫分段开关 / REST `paramMine`）：
   TargetParser 只能发现「已出现在 URL/body/表单里的参数」，隐藏参数（`?debug=1` 才进 SQL
@@ -3642,7 +3813,7 @@ A3 那次加固（sidecar 端口「4567 被占则随机」+ 一次性 token）�
 3. **`useRegistry` 在兄弟检测器里被写成两种判据**：Boolean/Error 判 `=== true`、
    TimeBlind 判 `!== false` ⇒ 默认配置下**同一次扫描**里 time 走声明式注册表、布尔/报错走扁平
    ⇒ `--test-filter/--test-skip/level/risk` 只在一半通道生效，调用方只看到「参数被接受」。
-   `docs/项目评价-2026-09-23.md:225` 早就把这一类命名为「`useRegistry` 双拷贝漂移」，本轮收口。
+   `docs/archive/项目评价-2026-09-23.md:225` 早就把这一类命名为「`useRegistry` 双拷贝漂移」，本轮收口。
    - 新增 `payloadRegistry.registryMode(config)` 作唯一判定点，四处调用点全部改走它
      （三个检测器 + `ScanManager` 的能力护栏）。统一方向取「显式 true 才切换」：
      两侧向量集互有增减（MySQL boolean 扁平 69/注册表 49，MySQL error 扁平 61/注册表 69），
@@ -3704,7 +3875,7 @@ A3 那次加固（sidecar 端口「4567 被占则随机」+ 一次性 token）�
 1. **补注册两档，都挂在同一个 java 依赖上**（`e2e/run-all.mjs`）：
    `multi-engine-lab-no-waf`（`verify.mjs` + `NO_WAF=1`，检测/定库类断言只在这档成立）与
    `dialect-templates`（`verify-dialect-templates.mjs`，16 条"方言模板在真引擎上可执行 + 反证"
-   —— 它 09-22 起就写在 `docs/P2-dialect-probe-2026-09-22.md` 的"退出码 0 = 全通过"里，
+   —— 它 09-22 起就写在 `docs/archive/P2-dialect-probe-2026-09-22.md` 的"退出码 0 = 全通过"里，
    却从没进过任何门禁）。本机实测 6.4s / 4.4s / 1.5s。
    顺手统一退出码口径：dialect 脚本缺 `ENGINE_JARS` 时原本退 2，而 run-all 的跳过判据是
    `code===0 && /\[SKIP\]/` ⇒ 一台没放 jar 的机器会把"环境没配"报成"测试挂了"。改成 `[SKIP]` + 0。
@@ -4008,7 +4179,7 @@ CI 的 `recall-lab` 独立 job 没有 mysqld（步骤名当时已如实写着"16
 而 `failed` 也可能来自"场景根本没执行"或 `status` 非 completed —— 三种故障查法完全不同，
 归成一句会让人去查一个不存在的问题。现在按明细说原因（`未执行：…` / `未达标：场景（status=…, must 未命中=[…]）`）。
 
-**另外更正一处历史文档**：`docs/optimization-report-2026-08-25.md` 第 101 行把
+**另外更正一处历史文档**：`docs/archive/optimization-report-2026-08-25.md` 第 101 行把
 "recall-lab 18 场景"当作 CI 结构完整的证据 —— 写的时候与之后很长一段时间里，
 CI 实际只跑 16 条。该报告是当时快照、按本仓口径不改正文，此处留这条为准。
 

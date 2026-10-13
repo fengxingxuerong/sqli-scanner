@@ -202,7 +202,7 @@ export class ScanManager {
         report.summary.constraints = list2;
       }
     }
-    this.scans.set(scanId, { target, report, status: 'running', cancelled: false, createdAt: Date.now(), abortController: new AbortController() });
+    this.scans.set(scanId, { target, report, status: 'running', cancelled: false, createdAt: Date.now(), abortController: new AbortController(), redactPasswords: !!input.redactPasswords });
     eventBus.create(scanId);
     // [MERGED: security] 事件脱敏：SSE 不再携带 target 凭据（auth/cookie/header）
     eventBus.emit(scanId, 'scan_started', { scanId, target: publicTarget(target) });
@@ -321,10 +321,14 @@ export class ScanManager {
   // reportArg：允许把"台账里读回来的报告"喂进同一条渲染路径。
   //   为什么需要参数而不是在路由里再写一个 switch：两种来源各自渲染一次，
   //   就会出现"内存里的报告能导出、台账里那份少一个格式"的漂移（本仓反复出现的那族）。
-  exportReport(scanId, format = 'json', reportArg = undefined) {
+  exportReport(scanId, format = 'json', reportArg = undefined, opts = {}) {
     const s = this.scans.get(scanId);
     const report = reportArg !== undefined ? reportArg : s && s.report;
     if (!report) return null;
+    // [D-REDACT 2026-10-12] 注入脱敏 opts：扫描启动时 redactPasswords 或导出时 opts.redactPasswords
+    if (((s && s.redactPasswords) || opts.redactPasswords) && !report._redactOpts) {
+      report._redactOpts = { redactPasswords: true, redactAuth: true, redactTarget: true };
+    }
     if (format === 'html') return this.reportGen.toHTML(report);
     if (format === 'csv') return this.reportGen.toCSV(report);
     if (format === 'markdown' || format === 'md') return this.reportGen.toMarkdown(report);

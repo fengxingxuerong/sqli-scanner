@@ -20,7 +20,7 @@ node e2e/run-all.mjs --all                    # 强制全跑（缺依赖的会�
 |---|---|---|
 | **MySQL 8 + PostgreSQL 16.2 + 红队靶场** | `node e2e/redteam-lab/env.mjs` | 常驻脚本（单进程拉起三者，进程活着服务就活着）。⚠️ 跨会话后进程会被回收，需重跑 |
 | **Java + 引擎 jar** | 本机 Temurin 21 + `D:\engines\jars\` | 多引擎靶场（H2/HSQLDB/Derby）用，无外部 DB 服务 |
-| **MariaDB** | 需自备并监听 `3308` | `mariadb-verify.mjs` 用；**当前环境未装**，该项无法复现（见 `docs/dbms-验证复核-2026-09-12.md`） |
+| **MariaDB** | 需自备并监听 `3308` | `mariadb-verify.mjs` 用；**当前环境未装**，该项无法复现（见 `docs/archive/dbms-验证复核-2026-09-12.md`） |
 
 ## 靶场清单
 

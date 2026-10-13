@@ -41,6 +41,11 @@ export function guardScalarsCore(config, cfg, scopeRules) {
   if (timeoutMs !== undefined) config.timeoutMs = timeoutMs;
   const timeThresholdMs = pickInt(cfg, 'timeThresholdMs', defaults.timeThresholdMs, 100, 60000);
   if (timeThresholdMs !== undefined) config.timeThresholdMs = timeThresholdMs;
+  // [D53] 时间提取基线漂移重采样间隔（0=关闭跟踪）。上限 1000 是防「写成 999999 等于永不补采」
+  // 的静默失效：真要关就用 0，别用一个大到等于关的值（那和 --postprocess 传个不存在的路径一样
+  // 属于「传了没生效」）。非法值由引擎侧 resolveTimeBaselineEvery 硬失败兜底。
+  const timeBaselineEvery = pickInt(cfg, 'timeBaselineEvery', defaults.timeBaselineEvery, 0, 1000);
+  if (timeBaselineEvery !== undefined) config.timeBaselineEvery = timeBaselineEvery;
   const level = pickInt(cfg, 'level', defaults.level, 1, 5);
   if (level !== undefined) config.level = level;
   const risk = pickInt(cfg, 'risk', defaults.risk, 1, 3);

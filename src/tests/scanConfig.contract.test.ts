@@ -263,6 +263,10 @@ const TUNING_NO_UI_KEYS = [
   // 脚本须位于 RESPONSE_SCRIPT_DIR 白名单目录内；加载失败扫描不启动（硬失败），
   // 执行异常时该响应按失败处理（fail-closed）。CLI/REST 可达，面板无对应控件。
   'postprocess',
+  // [2026-10-12] D53 时间提取基线漂移重采样间隔（--time-baseline-every，默认 16，0=关闭）：
+  // 默认行为即修复后的行为（健康提取零额外请求），显式配置只调「多久补采一次」⇒ 调优类。
+  // 非法值拒启动/引擎硬失败，不静默回落。CLI/REST 可达，面板无对应控件。
+  'timeBaselineEvery',
   // HTTP 层行为（hpp 已升入 CAPABILITY_GAP_KEYS）
   'forceSsl', 'ignoreRedirects', 'activeWafProbe', 'trustProxyEnv', 'ssrfViaProxy', 'proxyBypassLocal',
   // 限速：delay / maxReq 已于 2026-09-23 接进「请求控制」分组 → 移出本表。

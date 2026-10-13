@@ -24,24 +24,29 @@ const pg = _require('pg');
 
 const { ScanManager } = await import(pathToFileURL(resolve(ROOT, 'server/src/engine/ScanManager.js')).href);
 const { Exploiter } = await import(pathToFileURL(resolve(ROOT, 'server/src/engine/Exploiter.js')).href);
-const { initDb, createOobLabApp } = await import(pathToFileURL(resolve(HERE, 'lab-app.mjs')).href);
+const { initDb, createOobLabApp, PG_CONF } = await import(pathToFileURL(resolve(HERE, 'lab-app.mjs')).href);
 
 const PORT = Number(process.env.PG_OSHELL_PORT) || 8271;
 const BASE = `http://127.0.0.1:${PORT}`;
+const PG_REQUIRE = process.env.PG_REQUIRE === '1' || process.env.PG_REQUIRE === 'true';
 
 // 前置检查：PG 可连且为 superuser
-const admin = new pg.Client({ host: '127.0.0.1', port: 5432, user: 'postgres', password: 'postgres', database: 'postgres' });
+const admin = new pg.Client({ ...PG_CONF, database: 'postgres' });
 try {
   await admin.connect();
   const { rows } = await admin.query('SELECT rolsuper FROM pg_roles WHERE rolname = current_user');
   if (!rows[0]?.rolsuper) {
-    console.log('[SKIP] PG 当前用户非 superuser → COPY FROM PROGRAM 不可用（这是 PG 的权限边界，非引擎缺陷）');
+    const msg = '[SKIP] PG 当前用户非 superuser → COPY FROM PROGRAM 不可用（这是 PG 的权限边界，非引擎缺陷）';
+    console.log(msg);
     await admin.end();
+    if (PG_REQUIRE) { console.error('[FAIL] PG_REQUIRE=1 但 superuser 不可用'); process.exit(1); }
     process.exit(0);
   }
-  console.log('[pre] PG superuser=ok @ 127.0.0.1:5432');
+  console.log(`[pre] PG superuser=ok @ ${PG_CONF.host}:${PG_CONF.port}`);
 } catch (e) {
-  console.log(`[SKIP] PG 不可连（${e.message}）—— 本机 5432 未起时属环境缺项`);
+  const msg = `[SKIP] PG 不可连（${e.message}）—— 本机 ${PG_CONF.port} 未起时属环境缺项`;
+  console.log(msg);
+  if (PG_REQUIRE) { console.error('[FAIL] PG_REQUIRE=1 但 PG 不可连'); process.exit(1); }
   process.exit(0);
 }
 

@@ -92,6 +92,10 @@ const PROBE = {
   // 字符串形状校验（正确行为），给合法路径只测「透传在不在」（存在性/白名单根/导出形态
   // 三道校验在 ScanManager.start 的 ensureResponseTransform 里硬失败）。
   postprocess: '/opt/decryptors/dec.mjs',
+  // [D53] timeBaselineEvery：时间提取基线漂移重采样间隔。默认探针 1 虽是合法整数，但取的是
+  // 「所有键共用一个探针值」的口径，这里显式给一个落在 clamp 区间内、又不等于默认值的数，
+  // 才能测出「透传在不在」（若被白名单滤掉，引擎侧拿到的是默认值 16 而非 32）。
+  timeBaselineEvery: 32,
   // [D36 实战 P0-2] bearerRefresh 是对象组：默认探针 1 会被 guardBearerRefresh 整体丢弃
   // （非对象），所以这里给合法形状，测的是「整组有没有转发到引擎」。
   bearerRefresh: { url: 'http://auth.test/refresh', tokenField: 'data.access_token' },

@@ -4,7 +4,7 @@
 > 却长期以「绿」或「跳过」两种形态存在。根因是那一步调的
 > `e2e/udf-lab/mysql_sandbox.py` 是 **Windows 专用**（`mysqld.exe` 硬编码、`MYSQL_HOME`
 > 默认 `D:\mysql`、`tasklist`/`taskkill`，全文零平台分支）⇒ ubuntu 上连 `--init` 都跑不起来。
-> 详见 `docs/优化空间评估-2026-09-26.md` 与 commit `98bd55c`。
+> 详见 `docs/archive/优化空间评估-2026-09-26.md` 与 commit `98bd55c`。
 >
 > **本文做两件事**：① 用同一判据扫一遍其余 schedule/dispatch-only job；
 > ② 把这个「假绿」模式固化成可复跑的守卫，避免同类第三次复发。

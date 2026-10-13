@@ -90,7 +90,7 @@ e2e/waf-lab/results/compare.json / compare.md / validate.json / validate.md
 - `.github/workflows/ci.yml` 的 `test-frontend` job 执行 `npx vitest run --reporter=verbose`——**无 `--coverage` 标志**。vitest 的 `coverage.thresholds`（vitest.config.ts: 60/55/45/60）只在启用 coverage 收集时才评估，普通 run 直接跳过。test-matrix job 同样裸跑 `npx vitest run`。→ **门槛形同虚设，确认属实**。
 - 覆盖率仅能通过本地 `npm run test:coverage`（scripts/run-coverage.mjs wrapper）触发，无 CI 强制。
 - 服务端：`server/package.json` 的 `test:coverage` 用 `--test-coverage-include` 只圈定 **3 个文件**（`src/core/httpClient.js`、`src/engine/Detector.js`、`src/engine/ScanManager.js`），阈值 lines 80 / branches 70 / functions 75 仅约束这 3 个文件；Extractor/Exploiter/9 个 detector/tamper 链/sessionStore/Scheduler 均不在覆盖统计内。且 CI 的 test-server job 只跑 `npm test`，连这 3 文件的覆盖率门槛也不执行。
-- 附带发现：`docs/optimization-report-2026-08-25.md`（未跟踪的新文件）第 4 节已独立指出同一问题，与本报告结论一致。
+- 附带发现：`docs/archive/optimization-report-2026-08-25.md`（未跟踪的新文件）第 4 节已独立指出同一问题，与本报告结论一致。
 
 ---
 
@@ -100,7 +100,7 @@ e2e/waf-lab/results/compare.json / compare.md / validate.json / validate.md
 2. **[中] `docs/optimization-report-2026-08-20.md` 是空文件**（0 字符）却被 git 跟踪。应删除或补内容。
 3. **[低] `docs/archive/api-audit.md` 日期为占位符**「生成日期：2026-01-xx」。归档文档可接受，但占位日期削弱可信度。
 4. **[低] README 架构描述漂移**：README 写 `frontend/`+`backend/` 目录结构，实际是根目录 `src/` + `server/src/`；README 未提 CLI 入口 `server/bin/cli.js`（43+ 参数是其宣传点）与 e2e 实验室的运行方式。
-5. **[低] docs/optimization-report-2026-08-25.md 尚未入库**（untracked），其中含真实 API key 泄露的高危结论，建议尽快提交并按其处置建议执行。
+5. **[低] docs/archive/optimization-report-2026-08-25.md 尚未入库**（untracked），其中含真实 API key 泄露的高危结论，建议尽快提交并按其处置建议执行。
 
 ---
 

@@ -327,8 +327,21 @@ jobs:
         os: [windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     needs: [lint, test-frontend, test-server]
-    if: github.event_name != 'schedule'
+    if: always() && github.event_name != 'schedule'
     steps:
+      - name: 前置门禁检查（前置失败时显式标注而非静默跳过）
+        env:
+          LINT_RESULT: ${{ needs.lint.result }}
+          TF_RESULT: ${{ needs.test-frontend.result }}
+          TS_RESULT: ${{ needs.test-server.result }}
+        run: |
+          for r in "$LINT_RESULT" "$TF_RESULT" "$TS_RESULT"; do
+            if [ "$r" = "failure" ] || [ "$r" = "cancelled" ]; then
+              echo "::error::前置门禁未通过（lint=$LINT_RESULT, test-frontend=$TF_RESULT, test-server=$TS_RESULT）"
+              exit 1
+            fi
+          done
+          echo "前置门禁全部通过"
       - uses: actions/checkout@v4
       # [CI-FIX 2026-09-20] macOS 默认只配了 127.0.0.1，而 Linux 是整个 127.0.0.0/8 可用。
       # server/tests/httpClient.egressHardening.test.js 需要绑定 **127.0.0.2**
@@ -373,9 +386,18 @@ jobs:
   acceptance:
     runs-on: ubuntu-latest
     needs: [test-server]
-    if: github.event_name != 'schedule'
+    if: always() && github.event_name != 'schedule'
     timeout-minutes: 25
     steps:
+      - name: 前置门禁检查（前置失败时显式标注而非静默跳过）
+        env:
+          TS_RESULT: ${{ needs.test-server.result }}
+        run: |
+          if [ "$TS_RESULT" = "failure" ] || [ "$TS_RESULT" = "cancelled" ]; then
+            echo "::error::前置门禁未通过（test-server=$TS_RESULT）"
+            exit 1
+          fi
+          echo "前置门禁全部通过"
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
@@ -515,16 +537,30 @@ jobs:
       # 不能像 real-world-lab 那样退回自包含引擎。ubuntu-latest 镜像预装 PG 但默认未启动，
       # 故显式拉起并把 postgres 口令设成靶场默认值（oob-real-lab/lab-app.mjs 的缺省）。
       # 失败不阻塞：门禁会把 oob-real 标为 SKIP 并写明「缺 PG」，既不判红也不假绿。
-      - name: 尝试启动 PostgreSQL（OOB 套件需要，失败不阻塞）
-        continue-on-error: true
+      # [D50 2026-10-12] 从「失败不阻塞」改成**阻塞**：本 job 现在有三套真机靶场
+      # （pg-osshell / oob-real-lab / concurrent-isolation）依赖 PG，而这三套的判据本批已修成
+      # 「断言落到退出码」—— PG 起不来时它们会**红**，不再悄悄 SKIP。既然如此，这一步再吞掉
+      # 失败就只剩一个坏处：真正的现场（为什么起不来）被 `|| true` 抹平，三套各自以不同的
+      # "连不上 / 没命中"收场，事后归因要猜。故撤销 continue-on-error，并把三条前置取证
+      # 集中在这一步：①TCP 可连 ②是 superuser（COPY FROM PROGRAM 仅限超管）③PG 那一侧有 curl。
+      - name: 启动 PostgreSQL（三套 PG 靶场依赖；runner 自带 16.15，服务默认关闭）
         run: |
-          sudo systemctl start postgresql || sudo service postgresql start || true
-          for i in $(seq 1 30); do
-            if pg_isready -h 127.0.0.1 -p 5432; then echo "pg ready"; break; fi
+          sudo systemctl start postgresql.service || sudo service postgresql start
+          sudo -u postgres psql -c "ALTER USER postgres PASSWORD 'postgres'"
+          for i in $(seq 1 60); do
+            if pg_isready -h 127.0.0.1 -p 5432 -U postgres >/dev/null 2>&1; then
+              echo "PostgreSQL ready after ${i} attempts"; break
+            fi
             sleep 2
           done
-          sudo -u postgres psql -c "ALTER USER postgres PASSWORD 'postgres';" || true
-          pg_isready -h 127.0.0.1 -p 5432 || echo "PostgreSQL 未就绪 —— oob-real 套件将 SKIP"
+          # ① TCP 可连（连不上 ⇒ psql 直接非零退出，本步红）
+          # ② 必须是 superuser —— 非超管时 COPY FROM PROGRAM 静默不可用，三套会白跑
+          PGPASSWORD=postgres psql -h 127.0.0.1 -p 5432 -U postgres -d postgres -tAc \
+            "SELECT current_user || ' rolsuper=' || rolsuper FROM pg_roles WHERE rolname = current_user"
+          # ③ PG **服务进程**所在那一侧必须有 curl：OOB 回连是 PG 执行
+          #    `COPY (SELECT '') TO PROGRAM 'curl {CALLBACK}'`。用 runner 自带的宿主 PG 而非
+          #    容器，正是为了保证这一点（官方 postgres 镜像不保证装了 curl）。
+          command -v curl
       - name: 尝试拉起红队评测靶场（可选，失败不阻塞）
         continue-on-error: true
         run: |
@@ -583,6 +619,47 @@ jobs:
           MYSQL_PORT: 3306
           MYSQL_USER: root
           MYSQL_PASSWORD: root
+      # [D50 2026-10-12] PG 由上面「启动 PostgreSQL」那一步起（同一个 runner 自带实例，
+      #   本批把它从"失败不阻塞"改成阻塞 + 三条取证）。下面这三套是真机靶场接线，
+      #   由 server/tests/ciWiring.guard.test.js 的 ③ 钉住不许再被摘掉。
+      - name: PG os-shell 真机闭环（COPY FROM PROGRAM 落表 → 回显 marker）
+        run: node e2e/oob-real-lab/pg-osshell.e2e.mjs
+        timeout-minutes: 6
+        env:
+          PGHOST: 127.0.0.1
+          PGPORT: 5432
+          PGUSER: postgres
+          PGPASSWORD: postgres
+          PGDATABASE: oob_lab
+          # ⚠ 没有它，PG 连不上 / 非超管时脚本会「SKIP + exit 0」⇒ 门禁恒绿而一次没真跑。
+          #   口径同 RECALL_REQUIRE_MYSQL：本 job 已经专门起了 PG，在这里跳过就是降级。
+          PG_REQUIRE: '1'
+      - name: OOB 带外通道真机验证（PG COPY TO PROGRAM → curl 回连 127.0.0.1:8899）
+        # 接收端在本进程内（127.0.0.1:8899），不需要外网入站 ⇒ runner 上可真跑。
+        run: node e2e/oob-real-lab/verify.mjs
+        timeout-minutes: 8
+        env:
+          PGHOST: 127.0.0.1
+          PGPORT: 5432
+          PGUSER: postgres
+          PGPASSWORD: postgres
+          PGDATABASE: oob_lab
+      - name: 并发多扫描隔离性（PG + MySQL 混扫不串扰）
+        # MySQL 侧用本 job 已起的 docker mysqld(3306) + init-db 那份 schema；
+        # 该套件自带环境自检：库里没表会 BLOCKED(exit 2)，不会把环境问题判成"并发串扰"。
+        run: node e2e/concurrent-isolation/e2e.mjs
+        timeout-minutes: 8
+        env:
+          PGHOST: 127.0.0.1
+          PGPORT: 5432
+          PGUSER: postgres
+          PGPASSWORD: postgres
+          PGDATABASE: oob_lab
+          MYSQL_HOST: 127.0.0.1
+          MYSQL_PORT: 3306
+          MYSQL_USER: root
+          MYSQL_PASSWORD: root
+          MYSQL_DATABASE: sqli_lab
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -871,9 +948,18 @@ jobs:
   release-smoke:
     runs-on: ubuntu-latest
     needs: [test-server]
-    if: github.event_name != 'schedule'
+    if: always() && github.event_name != 'schedule'
     timeout-minutes: 15
     steps:
+      - name: 前置门禁检查（前置失败时显式标注而非静默跳过）
+        env:
+          TS_RESULT: ${{ needs.test-server.result }}
+        run: |
+          if [ "$TS_RESULT" = "failure" ] || [ "$TS_RESULT" = "cancelled" ]; then
+            echo "::error::前置门禁未通过（test-server=$TS_RESULT）"
+            exit 1
+          fi
+          echo "前置门禁全部通过"
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
@@ -900,9 +986,18 @@ jobs:
   sidecar-build:
     runs-on: ubuntu-latest
     needs: [test-server]
-    if: github.event_name != 'schedule'
+    if: always() && github.event_name != 'schedule'
     timeout-minutes: 12
     steps:
+      - name: 前置门禁检查（前置失败时显式标注而非静默跳过）
+        env:
+          TS_RESULT: ${{ needs.test-server.result }}
+        run: |
+          if [ "$TS_RESULT" = "failure" ] || [ "$TS_RESULT" = "cancelled" ]; then
+            echo "::error::前置门禁未通过（test-server=$TS_RESULT）"
+            exit 1
+          fi
+          echo "前置门禁全部通过"
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
@@ -930,8 +1025,20 @@ jobs:
   docker:
     runs-on: ubuntu-latest
     needs: [test-frontend, test-server]
-    if: (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master') && github.event_name != 'schedule'
+    if: always() && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master') && github.event_name != 'schedule'
     steps:
+      - name: 前置门禁检查（前置失败时显式标注而非静默跳过）
+        env:
+          TF_RESULT: ${{ needs.test-frontend.result }}
+          TS_RESULT: ${{ needs.test-server.result }}
+        run: |
+          for r in "$TF_RESULT" "$TS_RESULT"; do
+            if [ "$r" = "failure" ] || [ "$r" = "cancelled" ]; then
+              echo "::error::前置门禁未通过（test-frontend=$TF_RESULT, test-server=$TS_RESULT）"
+              exit 1
+            fi
+          done
+          echo "前置门禁全部通过"
       - uses: actions/checkout@v4
       - name: Build Docker image
         run: docker build -t sqli-scanner .
@@ -989,12 +1096,21 @@ jobs:
   e2e-self-contained:
     runs-on: ubuntu-latest
     needs: [test-server]
-    if: github.event_name != 'schedule'
+    if: always() && github.event_name != 'schedule'
     # [2026-10-03] 10 → 25 分钟：本 job 内部单步就有 `run-all` 8 分钟 + jar 下载 6 分钟，
     # 再加两次 npm ci —— 总超时 10 分钟是**必然不够**的，任何一环慢一点就整 job 红，
     # 而红的形态（exit 1 + 无 artifact）看不出是超时还是真失败。
     timeout-minutes: 25
     steps:
+      - name: 前置门禁检查（前置失败时显式标注而非静默跳过）
+        env:
+          TS_RESULT: ${{ needs.test-server.result }}
+        run: |
+          if [ "$TS_RESULT" = "failure" ] || [ "$TS_RESULT" = "cancelled" ]; then
+            echo "::error::前置门禁未通过（test-server=$TS_RESULT）"
+            exit 1
+          fi
+          echo "前置门禁全部通过"
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:

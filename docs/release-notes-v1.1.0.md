@@ -75,7 +75,7 @@
 
 ## 文档
 
-- 新增 `CHANGELOG.md`、`docs/安全与架构全面审计-2026-09-17.md`、`docs/发布就绪度评估-2026-09-18.md`。
+- 新增 `CHANGELOG.md`、`docs/archive/安全与架构全面审计-2026-09-17.md`、`docs/archive/发布就绪度评估-2026-09-18.md`。
 
 ---
 

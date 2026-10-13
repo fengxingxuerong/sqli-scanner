@@ -35,7 +35,7 @@
 ## 二、WAF 指纹库（wafRules.js 62 条 + WafIdentifier / wafRecommend.js）
 
 ### 2.1 头注释漂移（已确认）
-- wafRules.js:4 头注释仍写「**覆盖 7 类常见 WAF：Cloudflare / ModSecurity / AWS WAF / 阿里云 WAF / 百度云加速 / 安全狗 / 腾讯云 WAF**」，实际 `Object.keys(WAF_RULES).length === 62`（运行时验证）。56 行「以下 23 项为 WAF-v2 新增」与 210 行「以下 32 项为 WAF-v3 新增…总 62 项」的段内注释是对的，但顶部总述从未回改。docs/optimization-report-2026-08-25.md §9 已记录同一问题，尚未修复。
+- wafRules.js:4 头注释仍写「**覆盖 7 类常见 WAF：Cloudflare / ModSecurity / AWS WAF / 阿里云 WAF / 百度云加速 / 安全狗 / 腾讯云 WAF**」，实际 `Object.keys(WAF_RULES).length === 62`（运行时验证）。56 行「以下 23 项为 WAF-v2 新增」与 210 行「以下 32 项为 WAF-v3 新增…总 62 项」的段内注释是对的，但顶部总述从未回改。docs/archive/optimization-report-2026-08-25.md §9 已记录同一问题，尚未修复。
 
 ### 2.2 matcher 结构一致性
 - 全量目测 + 抽查确认：62 条规则的 matchers 仅使用 `type:'header'|'body'|'status'` 三种；cookie 特征一律表达为 `header(set-cookie)`（如 F5_BIG_IP 的 `bigipserver`、华为云 `/^HWWAFSESID=/i`、Airlock `/^al[_-]?(sess|lb)=/i`），与 57-59/211-212 行铁律注释一致。

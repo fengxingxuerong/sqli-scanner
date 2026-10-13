@@ -1,6 +1,6 @@
 # sqli-scanner
 
-[![Tests](https://img.shields.io/badge/tests-3969%20passing-brightgreen)](#测试)[![CI](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml/badge.svg)](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml)
+[![Tests](https://img.shields.io/badge/tests-4038%20passing-brightgreen)](#测试)[![CI](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml/badge.svg)](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml)
 [![Dependencies](https://img.shields.io/badge/dependencies-0%20known%20vulns-brightgreen)](#环境变量)
 
 > CI 徽章为真实状态（仓库地址已定，run#90 起全绿）。发布判定仍以 `CHANGELOG.md`
@@ -238,6 +238,7 @@ npm run waf-e2e         # 运行 WAF e2e 对比测试
 npm run waf-real        # [对外口径] 真实 OWASP CRS v4.1.0 规则下 tamper 开/关 A/B
 npm run waf-auto        # CRS 下「引擎自动选链绕过」验收（不显式配 tamper）
 npm run acceptance      # 【门禁】全方位验收（17 套件，事实断言模式，可进 CI）
+npm run quality:all     # 【门禁】一键全量质量校验（测试/覆盖率/变异/验收/类型/架构/嵌套/引用/文档/版本，等价于 ci:local）
 ```
 
 ## 后端 API
@@ -248,16 +249,16 @@ npm run acceptance      # 【门禁】全方位验收（17 套件，事实断言
 
 | 端点 | 方法 | 说明 |
 |------|------|------|
-| `/api/health` | GET | 健康检查（版本与 package.json 同源，另回显鉴权/利用开关与 Node 版本） |
+| `/api/health` | GET | 健康检查（版本与 package.json 同源，另回显鉴权/利用开关与 Node 版本；含 `egressPolicy`：`{ level, allowCidrs, cloudMetadataBlocked }` 出站策略态） |
 | `/api/scans` | GET | 服务端历史清单：台账 + 在途扫描合并（需 token，含目标 URL） |
-| `/api/scan/start` | POST | 启动扫描（占一个并发槽；目标先过 SSRF 与 scope 校验） |
+| `/api/scan/start` | POST | 启动扫描（占一个并发槽；目标先过 SSRF 与 scope 校验；body 可含 `redactPasswords: true` 开启报告凭据脱敏） |
 | `/api/scan/:id` | GET | 实时报告快照（含 `status`/`state` 运行态；上下文回收后回退台账并标 `source`） |
 | `/api/scan/:id/events` | GET | SSE 进度流（EventSource 无法设自定义头，token 可走 query；按 Last-Event-ID 回放） |
 | `/api/scan/:id/stop` | POST | 停止扫描（未知 id → SCAN_NOT_FOUND；已终态不改写状态） |
 | `/api/scan/:id/pause` | POST | 暂停扫描（暂停在**请求边界**生效：期间不再向目标发包） |
 | `/api/scan/:id/resume` | POST | 恢复扫描 |
 | `/api/scan/:id/report` | GET | 获取报告（与导出同源，含可复制的 PoC；内存回收后读台账） |
-| `/api/scan/:id/report/export` | GET | 导出报告（json / html / csv / markdown / md / db-json / sarif；无拖库数据的 db-json → 400） |
+| `/api/scan/:id/report/export` | GET | 导出报告（json / html / csv / markdown / md / db-json / sarif；无拖库数据的 db-json → 400；`?redactPasswords=1` 运行时覆盖脱敏） |
 | `/api/scan/:id/report/ai` | POST | AI 报告生成（数据外发为 opt-in，未设端点即拒绝） |
 | `/api/scan/:id/report/ai/configs` | GET | AI 可用配置清单（不回显 Key） |
 | `/api/scan/:id/point/:pointId/retest` | POST | 单点复测（交付场景：修完要能证明确实修好了） |
@@ -265,10 +266,12 @@ npm run acceptance      # 【门禁】全方位验收（17 套件，事实断言
 | `/api/payloads` | GET | payload 模板清单 |
 | `/api/tampers` | GET | tamper 插件清单 |
 | `/api/exploit/capabilities` | GET | 利用能力清单，**由 Exploiter 的接管能力表推导**（附 `matrix`：各能力的 risk / requiredPriv） |
-| `/api/exploit/sql` | POST | SQL 执行（需 `EXPLOIT_ENABLED=1` + 显式 authorized）。两种入参：手工 `target+point+dbms`，或 `scanId`+`pointId` 直接沿用扫描点位、定库结果与会话 |
+| `/api/exploit/sql` | POST | SQL 执行（需 `EXPLOIT_ENABLED=1` + 显式 authorized）。两种入参：手工 `target+point+dbms`，或 `scanId`+`pointId` 直接沿用扫描点位、定库结果与会话。严格模式下需 `authDeclaration`（operator/scope/timestamp/validWindowMs） |
 | `/api/exploit/file-read` | POST | 目标文件读取（同上） |
 | `/api/exploit/file-write` | POST | 目标文件写入（同上） |
 | `/api/exploit/os-shell` | POST | OS 命令执行（同上；MySQL 需 sys_eval UDF，缺失时如实返回失败原因） |
+
+> **授权声明**（`authDeclaration`）：利用操作在 `AUTH_DECLARATION_STRICT=strict`（默认）下需结构化授权声明 `{ operator, scope, timestamp, validWindowMs }`——`scope` 覆盖目标、`timestamp` 在有效窗内。`lenient` 模式兼容旧 `authorized: true` 布尔自证。配额超限返回 `QUOTA_TARGET_EXCEEDED` / `QUOTA_FANOUT_EXCEEDED`；声明问题返回 `AUTH_DECLARATION_MISSING` / `AUTH_DECLARATION_INVALID` / `AUTH_SCOPE_MISMATCH` / `AUTH_DECLARATION_EXPIRED`。审计落盘 `ledger/auth.jsonl`。
 | `/api/sqlmap/status` | GET | sqlmap 是否可用（不返回脚本路径） |
 | `/api/sqlmap/start` | POST | 启动一次 sqlmap 桥接扫描 |
 | `/api/sqlmap/:id/events` | GET | sqlmap 扫描 SSE 事件流 |
@@ -286,7 +289,17 @@ npm run acceptance      # 【门禁】全方位验收（17 套件，事实断言
 | `SCAN_API_TOKEN` | 无 | API 认证 Token（**非回环监听时必填**，见下） |
 | `SCAN_API_TOKEN_FILE` | 无 | 从文件读取 Token（Docker/K8s secret 挂载优先于此项） |
 | `SCAN_API_ALLOW_NO_TOKEN` | `0` | 置 `1` 显式接受无鉴权（仅隔离网络；非回环时会打显著告警） |
-| `EXPLOIT_ENABLED` | `0` | 开启利用能力（=1 启用） |
+| `SSRF_ALLOW_PRIVATE` | `0` | 置 `1` 豁免严格层（回环/私网），不豁免基础层（云元数据仍拒） |
+| `SSRF_ALLOW_CIDRS` | 无 | 逐段放行 CIDR（逗号分隔，支持 IPv4 与 IPv6，如 `10.0.0.0/8,2001:db8::/32`）；非法项忽略并告警 |
+| `EXPLOIT_ENABLED` | `0` | 开启利用能力（=1 启用）；开启后仍需结构化授权声明（`authDeclaration`）或 `AUTH_DECLARATION_STRICT=lenient` 兼容旧布尔 `authorized:true` |
+| `AUTH_DECLARATION_STRICT` | `strict` | 授权声明严格模式：`strict` 要求结构化 `authDeclaration`（operator/scope/timestamp）；`lenient` 兼容旧 `authorized:true` 布尔自证 |
+| `QUOTA_TARGET_MAX` | `20` | 单凭据时间窗内最多不同目标数（超限 → `QUOTA_TARGET_EXCEEDED`） |
+| `QUOTA_FANOUT_MAX` | `5` | 单凭据同时最多活跃扫描数（超限 → `QUOTA_FANOUT_EXCEEDED`） |
+| `QUOTA_WINDOW_MS` | `3600000` | 配额时间窗（毫秒，下限 60000） |
+| `AUDIT_SINK_FAIL_MODE` | `strict` | 审计 sink 不可写时：`strict` 拒绝执行（不静默放行）；`lenient` 告警但放行（仅本地开发） |
+| `TIMING_BASELINE_MIN_SAMPLES` | `5` | 目标级时间基线返回所需最少样本数（不足时降级为扫描内基线） |
+| `TIMING_BASELINE_MAX_HOSTS` | `1000` | 目标级时间基线 LRU 上限（超限淘汰最旧 host） |
+| `TIMING_BASELINE_EWMA_ALPHA` | `0.3` | 时间基线 EWMA 平滑因子（0-1，越大越偏向新样本） |
 | `ALLOWED_ORIGINS` | `http://localhost:5173` | 跨域白名单 |
 | `SCAN_LEDGER_MAX` | 无 | 台账条目上限：保留最近 N 条，更老的连目录一起删除。**未设 = 不淘汰**（默认不清任何历史） |
 | `SCAN_LEDGER_MAX_DAYS` | 无 | 台账保留天数：按 `finishedAt` 淘汰过期条目。**未设 = 不淘汰** |
@@ -347,7 +360,7 @@ backend/  ← Express + Node.js
 # 前端测试（561 个用例）
 npm test
 
-# 服务端测试（3413 个用例）
+# 服务端测试（3481 个用例）
 cd server && npm test
 
 # 全部测试
@@ -372,8 +385,8 @@ npm run artifact:drift   # 入库的 e2e 基线产物必须等于当前代码跑
 ## 项目状态
 
 - TypeScript: 零错误
-- 前端测试: 561/561 通过（覆盖率门禁 stmts 94.79 / branch 84.52 / func 83.15，阈值 88/77/67）
-- 服务端测试: 3413 用例（3408 pass / 0 fail / 5 skip，并发口径 2026-10-12 复测；5 skip 为环境依赖显式跳过。覆盖率 lines 92.90 / branch 81.77 / func 84.95，阈值 85/74/77）
+- 前端测试: 561/561 通过（覆盖率门禁 stmts 94.59 / branch 84.50 / func 83.37，阈值 88/77/67）
+- 服务端测试: 3481 用例（3477 pass / 0 fail / 4 skip，并发口径 2026-10-13 复测；4 skip 为环境依赖显式跳过。覆盖率 lines 91.21 / branch 81.21 / func 83.42，阈值 85/74/77）
 - 一键扫描: `npm run scan -- -u <url>`（CLI 一条命令产出 HTML/JSON/Markdown 全套报告 + manifest，退出码可直接进 CI 门禁）
 - Tamper 插件: 234 个（含批次 D3 新增 scalarselectinline；含 v24 增量 20 个，对齐 sqlmap 官方 tamper 全集，含官方 CRS/libinjection 实测组合 uniontable+odbcbrace；含批次 D13 新增 5 件上游形态变体 *nospace/*open/*block，真机 A/B 判决前不进默认链）
 - WAF 绕过能力: 200+ 插件链式组合，覆盖 62 个 WAF 厂商指纹识别 + 推荐
@@ -401,8 +414,14 @@ npm run perf:budget    # 打印分检测器明细 + 跨检测器重复请求 + �
 干净场景零损失，但 CRS PL1 技术位会掉 2 个。本仓口径是**不用检出能力换请求数**，
 任何性能优化的验收都必须包含 WAF 场景。
 
-**速度对照（sqli-labs 23 关，产物 2026-09-16）**：本工具平均 **335ms/关**，
-sqlmap（`--level=1 --risk=1`）平均 2.0s/关 —— 约 **6× 快**，且 23/23 vs 15/23。
+**速度对照（sqli-labs 复刻靶场 23 关，产物 2026-10-13，双方各 3 轮 · 检出多数决 · 耗时取中位）**：
+本工具平均 **101ms/关**，sqlmap 1.10.7（`--level=1 --risk=1 --technique=BEUSQ`）平均 **2.2s/关**
+—— 约 **22× 快**，检出 **23/23 vs 14/23**（仅我方命中 9、仅 sqlmap 命中 0、双方均未检出 0）。
+⚠️ 与 2026-10-03 那份同口径产物**逐位复现**（同为 23/23 vs 14/23，我方 116ms→101ms）⇒ 这条数字可复跑、不是一次性快照。
+⚠️ 此前本行写的是「产物 2026-09-16：335ms/关、23/23 vs 15/23」——那是两轮口径的旧产物，
+仓库里更新的 10-03 定版已是一致地 **14/23**；旧行把「sqlmap 少一轮测量」写成了「sqlmap 多检出一关」。
+⚠️ 靶站是 `e2e/sqli-labs/sqli-labs.py`（本项目自写的 Python 复刻，非上游 PHP 仓库），
+双方同靶站同条件 ⇒ 这是**同题对照**而不是外部真值；复跑：`node e2e/sqlmap-benchmark/run.mjs --runs=3`。
 
 ### ⚠️ 已知问题与修复记录（黑盒评测）
 
@@ -437,7 +456,7 @@ sqlmap（`--level=1 --risk=1`）平均 2.0s/关 —— 约 **6× 快**，且 23/
   09-28 复查时它的 CI 报告产物已不在（只保留了后两轮），而三轮之间样本集、镜像 digest、
   PARANOIA/阈值、放行判据全部一致 ⇒ 无法复现、也无法解释它与后一轮的差 9 倍。此处保留仅作
   过程留痕。**仍禁止对外声明真实 WAF 下的绕过率**，逐条数字与三条理由见
-  [docs/WAF-真机对拍-2026-09-27.md](docs/WAF-真机对拍-2026-09-27.md) 与
+  [docs/archive/WAF-真机对拍-2026-09-27.md](docs/archive/WAF-真机对拍-2026-09-27.md) 与
   [2026-09-28 第七节](docs/WAF-真机对拍-2026-09-28.md) 的 7.3。
 - ✅ **2026-09-28**：靶站换真 MySQL，口径从「放行」升级为**「打穿」**——同一条样本要同时满足
   过了 WAF **且** SQL 真的执行并吐出证据。PL1/PL3 真机**打穿**插件各 **1** 个（`unionvaluesrow`），
@@ -501,7 +520,10 @@ npm run redteam:report  # 汇总（含 sqlmap 同题对照）
 | R2 调参（level 3） | **19/19（100%）** | 全中 |
 | 安全对照（7 个安全点） | **误报 0** | 参数化/随机/500/403/重定向/静态资源 |
 
-> docs/ 下 70+ 篇设计/实测/纪要文档的分组导航见 [docs/INDEX.md](docs/INDEX.md)（`npm run docs:index` 重新生成）。
+> docs/ 下文档的分组导航见 [docs/INDEX.md](docs/INDEX.md)（`npm run docs:index` 重新生成）。
+> **2026-10-13 起分两层**：`docs/` 根只放**现行**文档（42 篇：设计/PRD/实测口径/手册/门禁纪律），
+> 「某一天的评估、审计、批次战报」一律进 [docs/archive/](docs/archive/INDEX.md)（40 篇，含同系列
+> 更晚一份的取代指向）。归档规则与"为什么不删"见该索引页首——归档 ≠ 删除，被证伪的旧结论原样留着。
 
 ### sqlmap 同题对照（定版：26 靶点 × 3 轮，2026-10-04）
 
@@ -600,10 +622,14 @@ npm run acceptance:sandbox          # 同全量，但套隔离 MySQL 沙箱（33
 | 红队实战评测（真值对照） | 19/19（100%），安全点 7，误报 0 |
 | fileRead / fileWrite 真闭环 | PASS（文件落盘=true，隔离沙箱重试） |
 
-> ⚠️ **误报率的证据边界（2026-10-09 补）**：上表的「误报 0 / 19/19」全部产自**自建靶场**
-> （`e2e/` 下 37 个靶场，唯一第三方卷子是 `sqli-labs`）。**未在任何第三方复杂应用上验证**
-> （DVWA / Juice Shop / OWASP Benchmark 一类「真框架 + 真 ORM + 复杂拼接」）⇒ 该数字
-> **不可外推为通用误报率**。WAF 侧同理：只验了 ModSecurity+CRS 一家。
+> ⚠️ **误报率的证据边界（2026-10-09 补，2026-10-13 更正）**：上表的「误报 0 / 19/19」全部产自**自建靶场**
+> （`e2e/` 下 37 个靶场）。**第三方卷子 = 0**：本节此前写「唯一第三方卷子是 `sqli-labs`」，
+> 那次核对错了对象 —— `e2e/sqli-labs/` 里躺着的是本项目自己写的 223 行 Python 复刻
+> （`sqli-labs.py`，http.server + SQLite，runner 直接 spawn 它），不是上游那个 PHP+MySQL 仓库；
+> 同目录的 sqlmap 对照（`e2e/sqlmap-benchmark/run.mjs`）双方跑的就是这个复刻靶站，所以它是
+> **「同一自建靶场上的双方同题对照」，不是外部真值**。⇒ 该数字**不可外推为通用误报率**。
+> **未在任何第三方复杂应用上验证**（DVWA / Juice Shop / OWASP Benchmark 一类「真框架 +
+> 真 ORM + 复杂拼接」）。WAF 侧同理：只验了 ModSecurity+CRS 一家。
 
 **本轮 0 FAIL。** 此前两轮 FAIL 的定位与修复（CRS 执行器 `(?i:…)` 兼容性、`engine.e2e` 环境耦合假红）、
 「11 PASS / 0 SKIP 假绿」事故、门禁自身的两处缺陷修复与缺陷注入验证记录，已迁至

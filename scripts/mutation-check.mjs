@@ -158,6 +158,44 @@ const TARGETS = [
       'src/tests/qa_dump_export.test.tsx',
     ],
   },
+  // [D-MUT-FE 2026-10-12] 扩展前端变异目标至 ≥8（spec 5.1.1 规则 7）：
+  // 选入标准 = 纯逻辑密集 + 有专属测试 + 离线可跑。安全关键优先（配置白名单/请求解析）。
+  {
+    // 请求文件解析：Burpsuite/Postman 集成的入口，解析错误 = 漏扫注入点。
+    runner: 'frontend',
+    file: 'src/shared/requestParser.ts',
+    tests: ['src/tests/requestParser.test.ts', 'src/tests/requestParserBodyFieldsParity.test.ts'],
+  },
+  {
+    // 扫描配置白名单：前端侧的 sanitizeStart 镜像，未知键丢弃逻辑是安全面。
+    runner: 'frontend',
+    file: 'src/shared/scanConfig.ts',
+    tests: ['src/tests/scanConfig.contract.test.ts', 'src/tests/scanConfig.scope.test.ts'],
+  },
+  {
+    // 扫描预设：纯函数，预设展开/合并逻辑。
+    runner: 'frontend',
+    file: 'src/shared/scanPresets.ts',
+    tests: ['src/tests/scanPresets.test.ts'],
+  },
+  {
+    // 历史合并：纯函数，多源历史合并/去重/上限裁剪。
+    runner: 'frontend',
+    file: 'src/shared/historyMerge.ts',
+    tests: ['src/tests/historyMerge.test.ts'],
+  },
+  {
+    // 进度聚合：阶段/计数/百分比计算，纯逻辑密集。
+    runner: 'frontend',
+    file: 'src/components/progress/progressUtils.tsx',
+    tests: ['src/tests/progressUtils.test.tsx', 'src/tests/progressUtils.boundary.test.ts'],
+  },
+  {
+    // zustand store：状态转移 + localStorage 持久化脱敏（sanitizeReportForStorage）。
+    runner: 'frontend',
+    file: 'src/store/scanStore.ts',
+    tests: ['src/tests/scanStore.test.ts'],
+  },
 ];
 
 /**
@@ -300,9 +338,23 @@ function runTests(target, testFiles, timeoutMs) {
         ],
         { cwd: SERVER, stdio: 'pipe', timeout: timeoutMs }
       );
-    }
-    return { pass: true };
-  } catch (err) {
+      }
+      // [D-MUT-TSC 2026-10-12] 前端变异 tsc 预检（spec 5.1.1 规则 5）：
+      // vitest 不做类型检查 ⇒ 只改类型不改行为的变体会存活。vitest 通过后再跑 tsc，
+      // 类型错误即判变体无效（被杀灭），不记为存活。server 侧已由 checkJs 覆盖。
+      if (runnerOf(target) === 'frontend') {
+        try {
+          execFileSync(
+            process.execPath,
+            ['./node_modules/typescript/bin/tsc', '--noEmit', '-p', 'tsconfig.tests.json'],
+            { cwd: ROOT, stdio: 'pipe', timeout: timeoutMs }
+          );
+        } catch {
+          return { pass: false, syntax: true, tail: 'tsc 预检失败：变体引入类型错误，判为无效' };
+        }
+      }
+      return { pass: true };
+    } catch (err) {
     const out = `${err.stdout || ''}${err.stderr || ''}`;
     // 语法级破坏：模块加载就炸，测的不是行为 —— 单独归类，既不算杀死也不算存活
     const syntax = /SyntaxError|Unexpected token|Cannot use import statement|Failed to parse source/.test(out);

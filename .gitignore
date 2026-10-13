@@ -226,6 +226,16 @@ AUDIT-SEC-*.json
 # 合并会改变 diff 归属、且可能踩到 blame 追溯，故只记录不动。
 # ─────────────────────────────────────────────────────────────────────────────
 
+# [D-GATE-RECORDER 2026-10-12] 门禁运行记录（运行时产物）
+gate-records/
+
 # [2026-10-12 优化空间勘查 F3] 覆盖率标定脚本的中间产物目录（由覆盖率标定流程生成）。
 # 前端 vitest include 只收 src/tests/** 故不进测试，但覆盖率采集按 src/** 收 ⇒ 会污染覆盖率数字。
 src/__coverage_calibrate__/
+
+# [2026-10-13 实测暴露] sqlmap 自己的会话暂存目录（--output-dir 指进仓库里）。
+# 它记录的是「上一次跑的人的机器/参数/时序」，每跑一次对照就把 3 个被跟踪文件写脏
+# （log / session.sqlite / target.txt）⇒ 任何测量都让工作树变脏，而没有任何测试能抓
+# （缺陷类型：全绿却把被跟踪文件写脏）。证据/结论一律看 docs/sqlmap-benchmark/*.md 与
+# results-*.json，raw 目录只有本机调试价值，不该入库。
+docs/sqlmap-benchmark/sqlmap-raw/
