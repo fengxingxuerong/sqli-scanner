@@ -11,7 +11,7 @@
           "boolean",
           "inline"
         ],
-        "ms": 124,
+        "ms": 123,
         "hitCount": 3,
         "runs": 3
       },
@@ -21,7 +21,7 @@
           "boolean",
           "union"
         ],
-        "ms": 2229,
+        "ms": 2274,
         "hitCount": 3,
         "runs": 3
       },
@@ -37,7 +37,7 @@
           "error",
           "boolean"
         ],
-        "ms": 169,
+        "ms": 94,
         "hitCount": 3,
         "runs": 3
       },
@@ -47,7 +47,7 @@
           "boolean",
           "union"
         ],
-        "ms": 2186,
+        "ms": 2059,
         "hitCount": 3,
         "runs": 3
       },
@@ -63,7 +63,7 @@
           "boolean",
           "inline"
         ],
-        "ms": 125,
+        "ms": 95,
         "hitCount": 3,
         "runs": 3
       },
@@ -73,7 +73,7 @@
           "boolean",
           "union"
         ],
-        "ms": 2146,
+        "ms": 2106,
         "hitCount": 3,
         "runs": 3
       },
@@ -89,14 +89,14 @@
           "error",
           "boolean"
         ],
-        "ms": 164,
+        "ms": 94,
         "hitCount": 3,
         "runs": 3
       },
       "smap": {
         "hit": false,
         "techs": [],
-        "ms": 2006,
+        "ms": 2049,
         "hitCount": 0,
         "runs": 3
       },
@@ -112,7 +112,7 @@
           "boolean",
           "inline"
         ],
-        "ms": 123,
+        "ms": 93,
         "hitCount": 3,
         "runs": 3
       },
@@ -122,7 +122,7 @@
           "boolean",
           "union"
         ],
-        "ms": 2055,
+        "ms": 2128,
         "hitCount": 3,
         "runs": 3
       },
@@ -138,14 +138,14 @@
           "error",
           "boolean"
         ],
-        "ms": 92,
+        "ms": 91,
         "hitCount": 3,
         "runs": 3
       },
       "smap": {
         "hit": false,
         "techs": [],
-        "ms": 2085,
+        "ms": 2062,
         "hitCount": 0,
         "runs": 3
       },
@@ -161,7 +161,7 @@
           "boolean",
           "inline"
         ],
-        "ms": 124,
+        "ms": 93,
         "hitCount": 3,
         "runs": 3
       },
@@ -171,7 +171,7 @@
           "boolean",
           "union"
         ],
-        "ms": 2138,
+        "ms": 2111,
         "hitCount": 3,
         "runs": 3
       },
@@ -197,7 +197,7 @@
           "boolean",
           "union"
         ],
-        "ms": 2087,
+        "ms": 2134,
         "hitCount": 3,
         "runs": 3
       },
@@ -220,7 +220,7 @@
       "smap": {
         "hit": false,
         "techs": [],
-        "ms": 2105,
+        "ms": 2060,
         "hitCount": 0,
         "runs": 3
       },
@@ -235,14 +235,14 @@
           "error",
           "inline"
         ],
-        "ms": 170,
+        "ms": 125,
         "hitCount": 3,
         "runs": 3
       },
       "smap": {
         "hit": false,
         "techs": [],
-        "ms": 3197,
+        "ms": 3277,
         "hitCount": 0,
         "runs": 3
       },
@@ -258,7 +258,7 @@
           "boolean",
           "inline"
         ],
-        "ms": 126,
+        "ms": 93,
         "hitCount": 3,
         "runs": 3
       },
@@ -267,7 +267,7 @@
         "techs": [
           "boolean"
         ],
-        "ms": 2480,
+        "ms": 2213,
         "hitCount": 3,
         "runs": 3
       },
@@ -283,14 +283,14 @@
           "boolean",
           "inline"
         ],
-        "ms": 124,
+        "ms": 125,
         "hitCount": 3,
         "runs": 3
       },
       "smap": {
         "hit": false,
         "techs": [],
-        "ms": 2249,
+        "ms": 2155,
         "hitCount": 0,
         "runs": 3
       },
@@ -307,7 +307,7 @@
           "boolean",
           "inline"
         ],
-        "ms": 94,
+        "ms": 93,
         "hitCount": 3,
         "runs": 3
       },
@@ -317,7 +317,7 @@
           "boolean",
           "union"
         ],
-        "ms": 2183,
+        "ms": 2166,
         "hitCount": 3,
         "runs": 3
       },
@@ -339,7 +339,7 @@
       "smap": {
         "hit": false,
         "techs": [],
-        "ms": 2651,
+        "ms": 2827,
         "hitCount": 0,
         "runs": 3
       },
@@ -355,7 +355,7 @@
           "boolean",
           "inline"
         ],
-        "ms": 123,
+        "ms": 93,
         "hitCount": 3,
         "runs": 3
       },
@@ -364,7 +364,7 @@
         "techs": [
           "boolean"
         ],
-        "ms": 2467,
+        "ms": 2460,
         "hitCount": 3,
         "runs": 3
       },
@@ -390,7 +390,7 @@
           "boolean",
           "union"
         ],
-        "ms": 2034,
+        "ms": 2052,
         "hitCount": 3,
         "runs": 3
       },
@@ -416,7 +416,7 @@
           "boolean",
           "union"
         ],
-        "ms": 2080,
+        "ms": 2186,
         "hitCount": 3,
         "runs": 3
       },
@@ -432,7 +432,7 @@
           "error",
           "boolean"
         ],
-        "ms": 92,
+        "ms": 93,
         "hitCount": 3,
         "runs": 3
       },
@@ -442,7 +442,7 @@
           "boolean",
           "union"
         ],
-        "ms": 2059,
+        "ms": 1988,
         "hitCount": 3,
         "runs": 3
       },
@@ -463,7 +463,7 @@
       "smap": {
         "hit": false,
         "techs": [],
-        "ms": 2122,
+        "ms": 2147,
         "hitCount": 0,
         "runs": 3
       },
@@ -485,7 +485,7 @@
       "smap": {
         "hit": false,
         "techs": [],
-        "ms": 2223,
+        "ms": 2131,
         "hitCount": 0,
         "runs": 3
       },
@@ -511,7 +511,7 @@
           "boolean",
           "union"
         ],
-        "ms": 2088,
+        "ms": 2112,
         "hitCount": 3,
         "runs": 3
       },
@@ -526,14 +526,14 @@
           "error",
           "inline"
         ],
-        "ms": 123,
+        "ms": 126,
         "hitCount": 3,
         "runs": 3
       },
       "smap": {
         "hit": false,
         "techs": [],
-        "ms": 2694,
+        "ms": 2755,
         "hitCount": 0,
         "runs": 3
       },
@@ -549,7 +549,7 @@
           "boolean",
           "inline"
         ],
-        "ms": 93,
+        "ms": 92,
         "hitCount": 3,
         "runs": 3
       },
@@ -559,7 +559,7 @@
           "boolean",
           "union"
         ],
-        "ms": 2111,
+        "ms": 2191,
         "hitCount": 3,
         "runs": 3
       },
@@ -574,7 +574,7 @@
     "oursOnly": 9,
     "smapOnly": 0,
     "neither": 0,
-    "oursAvgMs": 116,
-    "smapAvgMs": 2167
+    "oursAvgMs": 101,
+    "smapAvgMs": 2156
   }
 }
