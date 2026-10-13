@@ -114,7 +114,11 @@ export function registerResponseTransform(scanId, entry) {
   registry.set(scanId, { ...entry });
 }
 
-/** @param {string} scanId */
+/**
+ * 取回某扫描登记的响应解密脚本。
+ * @public
+ * @param {string} scanId
+ */
 export function getResponseTransform(scanId) {
   return scanId ? registry.get(scanId) || null : null;
 }

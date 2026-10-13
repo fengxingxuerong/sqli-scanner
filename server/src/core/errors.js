@@ -45,11 +45,13 @@ export class AppError extends Error {
   /**
    * @param {number} code 错误码
    * @param {string} message 中文错误信息
+   * @param {*} [cause] 原始错误（可选，便于保留超时/网络错误的上下文）
    */
-  constructor(code = ErrorCode.UNKNOWN, message = '未知错误') {
+  constructor(code = ErrorCode.UNKNOWN, message = '未知错误', cause) {
     super(message);
     this.name = 'AppError';
     this.code = code;
+    if (cause !== undefined) this.cause = cause;
   }
 }
 

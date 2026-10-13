@@ -6,6 +6,7 @@
 // =====================================================================
 import crypto from 'node:crypto';
 import { logger } from '../core/logger.js';
+import { mergeFields } from './extractMerge.js';
 
 // 目标 URL -> 8 字符 hex 哈希，用于派生默认会话文件名。同一 URL 始终生成相同哈希，
 // 不同 URL 哈希碰撞概率极低（16^8 ~ 43 亿分一），避免 sessionDefault 并发扫描互踩文件。
@@ -49,78 +50,20 @@ export function publicReport(report) {
 
 // 合并提取数据：将 src 的字段合并到 target（原 ScanManager._mergeExtracted）
 // 防御：提取返回结构残缺（如桩/部分失败）时不抛错，仅合并已有字段
+// [D56] 逐字段白名单收口至 extractMerge.js 字段清单单点化（design §2.1.3.9）
 export function mergeExtracted(target, src) {
   if (!src) return;
-  for (const db of (src.databases || [])) {
-    if (!target.databases.includes(db)) target.databases.push(db);
-  }
-  for (const [k, v] of Object.entries(src.tables || {})) target.tables[k] = v;
-  for (const [k, v] of Object.entries(src.columns || {})) target.columns[k] = v;
-  for (const [k, v] of Object.entries(src.rows || {})) target.rows[k] = v;
-  // 枚举模式专有字段（--current-db / --current-user / --count）
-  if (src.currentDb !== undefined) target.currentDb = src.currentDb;
-  if (src.currentUser !== undefined) target.currentUser = src.currentUser;
-  if (src.users !== undefined) target.users = src.users;
-  if (src.passwords !== undefined) target.passwords = src.passwords;
-  // [--passwords 升级] 派生字段跟原始串同进同出：本函数是逐字段白名单合并，
-  // 漏一个字段该功能在报告里就是空的（见下方 P0-FIX 注释的同源教训）。
-  if (src.passwordAnalysis !== undefined) target.passwordAnalysis = src.passwordAnalysis;
-  if (src.counts) target.counts = { ...(target.counts || {}), ...src.counts };
-  // 枚举模式专有字段（--hostname / --is-dba / --schema / --privileges / --roles）
-  if (src.hostname !== undefined) target.hostname = src.hostname;
-  if (src.isDba !== undefined) target.isDba = src.isDba;
-  if (src.userPrivs !== undefined) target.userPrivs = src.userPrivs;
-  if (src.roles !== undefined) target.roles = src.roles;
-  if (src.schemas) target.schemas = { ...(target.schemas || {}), ...src.schemas };
-  // [P0-FIX 2026-09-12] 本函数是**逐字段白名单**合并：漏一个字段，该功能在报告里就是空的。
-  //   --search 的结果此前就断在这里——extractByScope 明明产出了 data.search
-  //   {keyword, matchedTables, matchedColumns}，但此处没有对应分支 → 报告里 data.search 恒为 null，
-  //   用户以为"搜不到"，实际是结果被合并层丢了（实测 --search user 命中 0 条，直连提取层却有数据）。
-  //   meta（dumpUnconfirmed 等）同源丢失，一并补上。
-  if (src.search) {
-    const prev = target.search || {};
-    const uniq = (a, b) => [...new Set([...(a || []), ...(b || [])])];
-    target.search = {
-      keyword: src.search.keyword ?? prev.keyword ?? null,
-      matchedTables: uniq(prev.matchedTables, src.search.matchedTables),
-      matchedColumns: uniq(prev.matchedColumns, src.search.matchedColumns),
-    };
-  }
-  if (src.meta) target.meta = { ...(target.meta || {}), ...src.meta };
+  mergeFields(target, src, { onConflict: 'overwrite' });
 }
 
 // [P0-FIX] resume 合并提取数据：将历史会话的 extracted 合并到当前提取结果。
 // 历史库/表/列/行检查已存在则不覆盖（当前扫描已提取到的新数据优先）。
+// [D56] 逐字段白名单收口至 extractMerge.js 字段清单单点化（design §2.1.3.9）
 export function mergeExtractedForResume(current, restored) {
   if (!restored) return current;
   if (!current) return structuredClone(restored);
   const out = structuredClone(current);
-  for (const db of (restored.databases || [])) {
-    if (!out.databases.includes(db)) out.databases.push(db);
-  }
-  for (const [k, v] of Object.entries(restored.tables || {})) {
-    if (!out.tables[k]) out.tables[k] = v;
-  }
-  for (const [k, v] of Object.entries(restored.columns || {})) {
-    if (!out.columns[k]) out.columns[k] = v;
-  }
-  for (const [k, v] of Object.entries(restored.rows || {})) {
-    if (!out.rows[k]) out.rows[k] = v;
-  }
-  if (restored.currentDb !== undefined && out.currentDb === undefined) out.currentDb = restored.currentDb;
-  if (restored.currentUser !== undefined && out.currentUser === undefined) out.currentUser = restored.currentUser;
-  if (restored.users !== undefined && out.users === undefined) out.users = restored.users;
-  if (restored.passwords !== undefined && out.passwords === undefined) out.passwords = restored.passwords;
-  if (restored.passwordAnalysis !== undefined && out.passwordAnalysis === undefined) out.passwordAnalysis = restored.passwordAnalysis;
-  if (restored.counts) out.counts = { ...(restored.counts || {}), ...(out.counts || {}) };
-  if (restored.hostname !== undefined && out.hostname === undefined) out.hostname = restored.hostname;
-  if (restored.isDba !== undefined && out.isDba === undefined) out.isDba = restored.isDba;
-  if (restored.userPrivs !== undefined && out.userPrivs === undefined) out.userPrivs = restored.userPrivs;
-  if (restored.roles !== undefined && out.roles === undefined) out.roles = restored.roles;
-  if (restored.schemas) out.schemas = { ...(restored.schemas || {}), ...(out.schemas || {}) };
-  // [P0-FIX 2026-09-12] 与 mergeExtracted 同源：白名单漏 search/meta → resume 后搜索结果消失
-  if (restored.search && !out.search) out.search = structuredClone(restored.search);
-  if (restored.meta) out.meta = { ...(restored.meta || {}), ...(out.meta || {}) };
+  mergeFields(out, restored, { onConflict: 'keep' });
   return out;
 }
 

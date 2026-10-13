@@ -81,6 +81,41 @@ jobs:
         name: 嵌套深度门禁自证（判据不空转）
       - run: node scripts/nesting-guard.mjs
         name: 嵌套深度（存量只许持平或变浅）
+      # [D53 2026-10-13] 函数级复杂度门禁：arch-guard 管文件体积、nesting-guard 管嵌套深度，
+      # 但没有门禁管**函数**——单函数几百行、圈复杂度几十的"巨兽"对两者都透明。
+      # 存量登记在 docs/_complexity-baseline.json（只许持平或下降），新函数超软上限即失败。
+      - run: node scripts/complexity-guard.mjs --selftest
+        name: 函数级复杂度门禁自证（判据不空转）
+      - run: node scripts/complexity-guard.mjs
+        name: 函数级复杂度（存量只许持平或下降）
+      # [D55 2026-10-13] JSDoc 类型覆盖门禁：独立于编译器开关，以 @param/@returns 标注率
+      # 度量类型安全推进度。基线只升不降。
+      - run: node scripts/typecoverage-guard.mjs --selftest
+        name: JSDoc 类型覆盖门禁自证（判据不空转）
+      - run: node scripts/typecoverage-guard.mjs
+        name: JSDoc 类型覆盖（基线只升不降）
+      # [D56 2026-10-13] 令牌级重复代码门禁：跨文件克隆检测（FNV-1a + 精确比对）。
+      # 存量登记在 docs/_dup-baseline.json（只许持平或下降）。
+      - run: node scripts/duplication-guard.mjs --selftest
+        name: 重复代码门禁自证（判据不空转）
+      - run: node scripts/duplication-guard.mjs
+        name: 重复代码（存量只许持平或下降）
+      # [D58 2026-10-13] 未使用导出门禁：符号收集 → 引用收集 → 差集 → 扣减用途标记与基线豁免。
+      # 存量登记在 docs/_deadcode-baseline.json（只减不增）。
+      - run: node scripts/deadcode-guard.mjs --selftest
+        name: 死代码门禁自证（判据不空转）
+      - run: node scripts/deadcode-guard.mjs
+        name: 死代码（未使用导出只减不增）
+      # [D59 2026-10-13] 错误形态一致性门禁：受限目录裸 Error 必须为 0，非受限只减不增。
+      - run: node scripts/error-contract-guard.mjs --selftest
+        name: 错误形态门禁自证（判据不空转）
+      - run: node scripts/error-contract-guard.mjs
+        name: 错误形态（受限裸 Error=0，非受限只减不增）
+      # [D61 2026-10-13] 技术债标记格式门禁：新增标记必须用统一格式。
+      - run: node scripts/debt-guard.mjs --selftest
+        name: 技术债门禁自证（判据不空转）
+      - run: node scripts/debt-guard.mjs
+        name: 技术债标记（新增必须统一格式）
       # [P0-ADD 2026-09-20] 引用完整性门禁：本文件 / package.json / e2e 靶场注册表里
       # 写的本地入口路径，必须真实存在。
       # 起因（同一天的实测教训）：本 job 之外的 tamper-waf-matrix job 曾写

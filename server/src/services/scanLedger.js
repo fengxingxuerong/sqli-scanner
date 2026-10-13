@@ -13,6 +13,7 @@
 import { mkdirSync, writeFileSync, appendFileSync, existsSync, readFileSync, readdirSync, rmSync, renameSync } from 'node:fs';
 import { join, dirname, resolve as pathResolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { AppError, ErrorCode } from '../core/errors.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_DIR = pathResolve(HERE, '../../data/ledger');
@@ -34,7 +35,7 @@ function ledgerDir() {
  */
 export function recordScan(report, docs = {}, opts = {}) {
   void opts; // 预留参数：脱敏在 ReportGenerator 完成，此处不参与，显式声明以免误读
-  if (!report || typeof report !== 'object') throw new Error('recordScan: report required');
+  if (!report || typeof report !== 'object') throw new AppError(ErrorCode.INVALID_PARAM, 'recordScan: report required');
   // [FIX 2026-09-18] scanId 会拼进落盘路径，必须收敛为单层目录名（原先 `../x` 可在
   // ledger 根目录之外创建目录，实测复现）。scanId 缺省时的自动生成值不受影响。
   const scanId = safeScanId(report.scanId || report.id || `scan-${Date.now()}`);
@@ -138,7 +139,7 @@ export function listScans(limit = 50) {
 function safeScanId(scanId) {
   const s = String(scanId ?? '');
   if (!s || s === '.' || s === '..' || /[\\/]/.test(s) || path_isAbsolute(s) || s.includes('\0')) {
-    throw new Error(`scanLedger: 非法 scanId（不得包含路径分隔符或 ..）：${s.slice(0, 80)}`);
+    throw new AppError(ErrorCode.SCAN_ID_INVALID, `scanLedger: 非法 scanId（不得包含路径分隔符或 ..）：${s.slice(0, 80)}`);
   }
   return s;
 }

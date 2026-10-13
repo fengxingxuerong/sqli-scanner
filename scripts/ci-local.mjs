@@ -81,6 +81,31 @@ const GATES = [
   // 存量登记在 docs/_nesting-baseline.json（只许持平或变浅），新文件超软上限 7 即失败。
   { id: 'lint', name: '嵌套深度门禁自证（判据不空转）', cmd: 'node scripts/nesting-guard.mjs --selftest' },
   { id: 'lint', name: '嵌套深度（存量只许持平或变浅）', cmd: 'node scripts/nesting-guard.mjs' },
+  // [D53 2026-10-13] 函数级复杂度门禁：arch-guard 管文件体积、nesting-guard 管嵌套深度，
+  // 但没有门禁管**函数**——单函数几百行、圈复杂度几十的"巨兽"对两者都透明。
+  // 存量登记在 docs/_complexity-baseline.json（只许持平或下降），新函数超软上限即失败。
+  { id: 'lint', name: '函数级复杂度门禁自证（判据不空转）', cmd: 'node scripts/complexity-guard.mjs --selftest' },
+  { id: 'lint', name: '函数级复杂度（存量只许持平或下降）', cmd: 'node scripts/complexity-guard.mjs' },
+  // [D55 2026-10-13] JSDoc 类型覆盖门禁：独立于编译器开关，以 @param/@returns 标注率
+  // 度量类型安全推进度。基线只升不降，首批选 server/src/services 归零。
+  { id: 'lint', name: 'JSDoc 类型覆盖门禁自证（判据不空转）', cmd: 'node scripts/typecoverage-guard.mjs --selftest' },
+  { id: 'lint', name: 'JSDoc 类型覆盖（基线只升不降）', cmd: 'node scripts/typecoverage-guard.mjs' },
+  // [D56 2026-10-13] 令牌级重复代码门禁：跨文件克隆检测（FNV-1a 滚动哈希 + 精确比对）。
+  // 存量登记在 docs/_dup-baseline.json（只许持平或下降），新增重复段即失败。
+  { id: 'lint', name: '重复代码门禁自证（判据不空转）', cmd: 'node scripts/duplication-guard.mjs --selftest' },
+  { id: 'lint', name: '重复代码（存量只许持平或下降）', cmd: 'node scripts/duplication-guard.mjs', slow: true },
+  // [D58 2026-10-13] 未使用导出门禁：符号收集 → 引用收集 → 差集 → 扣减用途标记与基线豁免。
+  // 存量登记在 docs/_deadcode-baseline.json（只减不增），新增未使用导出即失败。
+  { id: 'lint', name: '死代码门禁自证（判据不空转）', cmd: 'node scripts/deadcode-guard.mjs --selftest' },
+  { id: 'lint', name: '死代码（未使用导出只减不增）', cmd: 'node scripts/deadcode-guard.mjs', slow: true },
+  // [D59 2026-10-13] 错误形态一致性门禁：受限目录（api/services）裸 Error 必须为 0；
+  // 非受限目录按文件计数与基线比对、只减不增。
+  { id: 'lint', name: '错误形态门禁自证（判据不空转）', cmd: 'node scripts/error-contract-guard.mjs --selftest' },
+  { id: 'lint', name: '错误形态（受限裸 Error=0，非受限只减不增）', cmd: 'node scripts/error-contract-guard.mjs' },
+  // [D61 2026-10-13] 技术债标记格式门禁：新增标记必须用统一格式 // [TODO YYYY-MM-DD D##] 简述。
+  // 存量登记在 docs/_debt-baseline.json（只减不增），新增裸标记即失败。
+  { id: 'lint', name: '技术债门禁自证（判据不空转）', cmd: 'node scripts/debt-guard.mjs --selftest' },
+  { id: 'lint', name: '技术债标记（新增必须统一格式）', cmd: 'node scripts/debt-guard.mjs' },
   // 引用完整性：ci.yml / package.json / run-all.mjs 里写的本地路径必须真实存在。
   // 起因：ci.yml 两个 job 写着不存在的 run.js，又带 continue-on-error → 静默失败、从不拦人，
   // 那两个 job 从未验证过任何东西，靠人工 grep 才发现。这道闸门防的就是同类复发。

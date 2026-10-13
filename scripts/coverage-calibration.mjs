@@ -49,6 +49,42 @@ function validateThresholds(t) {
   return errors;
 }
 
+// [D55 §3.5] server 侧覆盖率阈值只读校验：server/package.json 的 test:coverage /
+// test:coverage:core 命令行里的 --test-coverage-lines/branches/functions 必须存在且 0<v<100。
+function readServerThresholds() {
+  const pkgPath = join(ROOT, 'server', 'package.json');
+  if (!existsSync(pkgPath)) throw new Error('server/package.json 不存在');
+  const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'));
+  const result = {};
+  for (const scriptName of ['test:coverage', 'test:coverage:core']) {
+    const cmd = pkg.scripts?.[scriptName];
+    if (!cmd) { result[scriptName] = null; continue; }
+    const extract = (flag) => {
+      const m = cmd.match(new RegExp(`${flag}=(\\d+(?:\\.\\d+)?)`));
+      return m ? parseFloat(m[1]) : null;
+    };
+    result[scriptName] = {
+      lines: extract('--test-coverage-lines'),
+      branches: extract('--test-coverage-branches'),
+      functions: extract('--test-coverage-functions'),
+    };
+  }
+  return result;
+}
+
+function validateServerThresholds(t) {
+  const errors = [];
+  for (const [script, vals] of Object.entries(t)) {
+    if (vals === null) { errors.push(`${script} 脚本缺失`); continue; }
+    for (const [k, v] of Object.entries(vals)) {
+      if (v === null) errors.push(`${script}: ${k} 缺失`);
+      else if (v <= 0) errors.push(`${script}: ${k}=${v} ≤ 0（等于没有门禁）`);
+      else if (v >= 100) errors.push(`${script}: ${k}=${v} ≥ 100（不可能达到）`);
+    }
+  }
+  return errors;
+}
+
 if (!selftest) {
   const t = readThresholds();
   const errors = validateThresholds(t);
@@ -58,7 +94,18 @@ if (!selftest) {
     for (const e of errors) console.error(`  · ${e}`);
     process.exit(1);
   }
-  console.log('✅ 阈值配置合理（全部 > 0 且 < 100）');
+  console.log('✅ 前端阈值配置合理（全部 > 0 且 < 100）');
+
+  // [D55 §3.5] server 侧覆盖率阈值只读校验
+  const st = readServerThresholds();
+  const serverErrors = validateServerThresholds(st);
+  console.log('server 覆盖率阈值配置：', JSON.stringify(st));
+  if (serverErrors.length) {
+    console.error('❌ server 阈值配置不合理：');
+    for (const e of serverErrors) console.error(`  · ${e}`);
+    process.exit(1);
+  }
+  console.log('✅ server 阈值配置合理（全部 > 0 且 < 100）');
   process.exit(0);
 }
 

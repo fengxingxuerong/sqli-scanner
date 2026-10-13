@@ -127,6 +127,20 @@ const TARGETS = [
     tests: ['tests/tokenBagSimilar.test.js', 'tests/booleanStability.test.js'],
   },
   {
+    // [D54 2026-10-13] 盲注字节级提取：拆分后的子过程（_resolveExtractPlan /
+    // _extractLength / _extractBytesBitwise / _extractBytesBisect / _finalizeExtract）
+    // 的等价性由这些校准测试守住 —— 变异任一子过程的判定/请求序列/缓存逻辑即红。
+    // 注：blindRobust.test.js 含 Time 鲁棒慢测试（>5s 超 TEST_TIMEOUT_MS），不纳入；
+    // 其布尔鲁棒断言由 blindBitwise + blindExtractSubprocess 覆盖。
+    file: 'src/engine/blindExtractor.js',
+    tests: [
+      'tests/blindBitwise.test.js',
+      'tests/blindLenCapped.test.js',
+      'tests/blindFnsDialect.test.js',
+      'tests/blindExtractSubprocess.test.js',
+    ],
+  },
+  {
     // [批次 2026-10-03] `--passwords` 的哈希算法识别（classifyHash）+ 弱口令风险标注
     // （analyzePasswords）。纯函数、离线可跑、20 条专属测试。**安全边界**也在这里：
     // 报告不得回显原始哈希、MySQL `user@host` 按最后一个 `@` 切、PG SCRAM 内部冒号不许
@@ -195,6 +209,19 @@ const TARGETS = [
     runner: 'frontend',
     file: 'src/store/scanStore.ts',
     tests: ['src/tests/scanStore.test.ts'],
+  },
+  {
+    // [D57 2026-10-13] literalWalk 遍历抽象：48 个 tamper 插件的共享遍历内核。
+    // 变异遍历逻辑（分段/未闭合 abort/行注释跳过）即红 —— 三闸守等价。
+    file: 'src/core/tamper/literalWalk.js',
+    tests: ['tests/literalWalk.test.js'],
+  },
+  {
+    // [D60 2026-10-13] useServerHistory：服务端扫描清单读取钩子。
+    // 变异 alive 守卫 / error 提取 / rows 填充即红 —— 三分支直接用例钉住。
+    runner: 'frontend',
+    file: 'src/hooks/useServerHistory.ts',
+    tests: ['src/tests/useServerHistory.test.ts'],
   },
 ];
 
