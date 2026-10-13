@@ -37,6 +37,24 @@
  *      删除数异常多 ⇒ 大概率是 `--local` 取错了提交/目录，宁可停下也不清空远端树。
  *      ⚠ 只对 blob 发 null；目录由父树重建自然消失，逐个 null 才是真正危险的动作。
  *
+ *   ⑤ **变更判定必须按「路径」不能只按「blob sha」**（2026-10-13 补，此前从没暴露）：
+ *      只问"这个对象远端有没有"的话，**重命名 / 移动到另一条路径**的条目会被判成未变更
+ *      而漏发（内容没变 ⇒ blob 早就在远端），那棵目录就按 base_tree（远端的旧目录）重建，
+ *      被移动的文件**在远端整批凭空消失**。实测：docs/ 根 39 篇带日期文档移入
+ *      docs/archive/ 那一次，远端建出的 docs/archive 只剩 base 里原有的 1 个文件，
+ *      末尾校验报「本地 1726 / 远端 1700，差异 28」并**拒绝更新 ref** —— 是 fail-closed
+ *      把公开仓库救了一次，否则当场少 39 个文件。⇒ 判定式 = `sha 不在远端` **或**
+ *      `该路径不在远端`，两者任一成立都要发条目（`remoteAll` 那张 path→sha 表就是为此）。
+ *
+ *   ⑥ **`--base` 的取值别信本地跟踪 ref**（同日实测）：主流程解析 base 的顺序是
+ *      `--base` → `git rev-parse refs/remotes/<remote>/<branch>` → `ls-remote` → API。
+ *      本机 `refs/remotes/origin/master` 曾指向一个**只存在于本地**的提交（Contents API
+ *      造的提交 sha 与本地不同，这个 ref 是被某次操作写歪的），于是第二步拿到远端根本没有的
+ *      sha、`GET /git/commits/<它>` 直接 404 退出。⇒ 推之前先
+ *      `GET /repos/<o>/<r>/commits?per_page=1` 取真实远端 HEAD 并显式传 `--base`；
+ *      那条假 ref 已删（`git update-ref -d refs/remotes/origin/master`，删后 `git status -sb`
+ *      如实显示 `[gone]`，比显示一个不存在的同步点好）。
+ *
  * 其它：
  *   - **message 尾部换行**：GitHub 建 commit 时给 message 末尾补一个 `\n`，
  *     本地 commit 的 message 已自带 → 需先 `replace(/\n+$/,'')`。
@@ -185,9 +203,11 @@ if (baseTree === rootTree && !FORCE_COMMIT) {
 const remoteTreeResp = await api('GET', `/git/trees/${baseTree}?recursive=1`);
 if (remoteTreeResp.truncated) console.warn('⚠️ 远端树 truncated=true，判断可能不准');
 const remotePaths = new Map();  // path → tree sha（用于 base_tree）
+const remoteAll = new Map(); // **全部**路径（blob+tree）→ sha：变更判定的路径面
 const remoteObjs = new Set([baseTree]); // 远端已有对象 sha
 for (const e of remoteTreeResp.tree) {
   remoteObjs.add(e.sha);
+  remoteAll.set(`${e.type}:${e.path}`, e.sha);
   if (e.type === 'tree') remotePaths.set(e.path, e.sha);
 }
 console.log(`远端对象 ${remoteObjs.size} 个 / 树路径 ${remotePaths.size} 个（基于 ${baseTree.slice(0, 8)}）`);
@@ -273,15 +293,24 @@ const uploadedTree = new Map();
 // 去摘掉被删的文件（删除只在根层做，见 plannedDeletes 处注释）。
 const treePushed = new Set();
 
-function changedEntries(entries) {
+function changedEntries(entries, dirPath) {
   const out = [];
   for (const e of entries) {
     let sha = e.sha;
-    let isChanged = !remoteObjs.has(e.sha);
+    // ★ 变更判定必须**两条并列**，不能只看 blob sha：
+    //   `!remoteObjs.has(sha)` 只回答"这个对象远端有没有"，而**重命名/移动到同仓库另一条路径**
+    //   时内容不变 ⇒ blob sha 远端早就有 ⇒ 条目被当成"未变更"漏发 ⇒ 那棵树按 base_tree
+    //   （远端的旧目录）重建，被移动的**所有文件在远端凭空消失**。
+    //   2026-10-13 实测：docs/ 根 39 篇带日期文档移进 docs/archive/（blob 全部已存在），
+    //   远端建出的 docs/archive 只剩 base 里原有的 1 个文件，校验报「28 处差异、远端 <缺失>」
+    //   并拒绝更新 ref —— fail-closed 挡住了，否则公开仓库当场少 39 个文件。
+    //   历史推送从没走过"同 blob 换路径"，所以这个洞一直没被踩到。
+    const fullPath = dirPath ? `${dirPath}/${e.name}` : e.name;
+    let isChanged = !remoteObjs.has(e.sha) || !remoteAll.has(`${e.type}:${fullPath}`);
     if (e.type === 'blob' && uploadedBlob.has(e.sha)) { sha = uploadedBlob.get(e.sha); isChanged = true; }
     else if (e.type === 'tree' && uploadedTree.has(e.sha)) {
       sha = uploadedTree.get(e.sha);
-      isChanged = treePushed.has(e.sha);
+      isChanged = treePushed.has(e.sha) || !remoteAll.has(`tree:${fullPath}`);
     }
     if (isChanged) out.push({ path: e.name, mode: e.mode, type: e.type, sha });
   }
@@ -289,7 +318,7 @@ function changedEntries(entries) {
 }
 
 for (const t of localTrees) {
-  const entries = changedEntries(listTree(t.sha));
+  const entries = changedEntries(listTree(t.sha), t.path);
   if (!entries.length) {
     // 无变更条目 ⇒ 沿用远端同名路径的那棵树（存在性由 remotePaths 保证；
     // 远端要是没有这条路径，说明它是本地新增的目录，下面 entries 必然非空，走不到这里）。
@@ -307,7 +336,7 @@ for (const t of localTrees) {
 
 // 根树
 {
-  const entries = changedEntries(listTree(rootTree));
+  const entries = changedEntries(listTree(rootTree), '');
   // 删除条目与"变更条目"一起发（GitHub 的 trees API：base_tree + `{path, sha:null}` 摘除）。
   // 422 时退回到最简形态（只给 path + sha:null）——mode/type 在有 base_tree 时是可选的，
   // 但一旦 API 对带 type 的 null 条目挑剔，退一步比整次推送失败好。
