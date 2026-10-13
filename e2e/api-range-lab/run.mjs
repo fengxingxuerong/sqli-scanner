@@ -171,7 +171,18 @@ try {
     }
     const s = Date.now();
     try {
-      await c.run(ctx);
+      const out = await c.run(ctx);
+      // [2026-10-13 CI #225 实测] SKIP 协议有两种写法：`throw Object.assign(new Error(),{__skip:true})`
+      // 与 `return Object.assign(new Error(),{__skip:true})`。原实现只在 catch 里认 __skip，
+      // 于是 return 形态的跳过被当成 **PASS 计入通过数**：secure_file_priv 未注入时，
+      // file-read / file-write 两条根本没发过包却报 [PASS] (0.0s)，汇总写 44/49 PASS
+      // （44+5FAIL=49 ⇒ 没有一条记成 SKIP）。"缺前置"与"有缺陷"混在一起报正是本文件
+      // 下面那句注释要防的事。两种形态都必须走 SKIP。
+      if (out instanceof Error && out.__skip) {
+        results.push({ group: c.group, name: c.name, status: 'SKIP', reason: out.message, ms: Date.now() - s });
+        console.log(`[SKIP] ${name} —— ${out.message}`);
+        continue;
+      }
       results.push({ group: c.group, name: c.name, status: 'PASS', ms: Date.now() - s });
       console.log(`[PASS] ${name}  (${((Date.now() - s) / 1000).toFixed(1)}s)`);
     } catch (e) {
@@ -190,8 +201,14 @@ try {
   }
 
   const pass = results.filter((r) => r.status === 'PASS').length;
+  const skipped = results.filter((r) => r.status === 'SKIP');
   const failed = results.filter((r) => r.status === 'FAIL');
-  console.log(`\n[汇总] ${pass}/${results.length} PASS  用时 ${((Date.now() - t0) / 1000).toFixed(1)}s`);
+  // 汇总必须把 SKIP 单列：只报「pass/总数」会把跳过读成通过（上面那条缺陷的下游症状）。
+  console.log(
+    `\n[汇总] PASS ${pass} / FAIL ${failed.length} / SKIP ${skipped.length}（判定分母 ${pass + failed.length}，共 ${results.length} 条）  ` +
+      `用时 ${((Date.now() - t0) / 1000).toFixed(1)}s`
+  );
+  for (const k of skipped) console.log(`  ○ SKIP [${k.group}] ${k.name} —— ${k.reason}`);
   for (const f of failed) console.log(`  ✗ [${f.group}] ${f.name}\n    ${f.error}`);
 
   if (process.env.API_RANGE_ENGINE_LOG_TAIL || failed.length) {
