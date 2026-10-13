@@ -4,6 +4,21 @@
 
 ## [Unreleased]
 
+### 2026-10-13 文档 · docs/ 分两层：39 篇「某一天的快照」进 archive/，现行入口收敛到 21 篇
+
+**一句话**：`docs/` 根原来躺 60 篇 md/html，其中 39 篇是带日期的评估/审计/批次战报，同主题还并存 3–4 个版本（项目评价 ×3、WAF 真机对拍 ×3、优化空间勘查 ×3）——想知道"今天什么状态"要跨 5 个文件自己投票。现在 `docs/` 根只留现行文档，快照一律进 `docs/archive/`，并给归档区做了一份**带取代指向**的单页索引。
+
+| 面 | 内容 |
+|---|---|
+| 归档判据 | **文件名带 `YYYY-MM-DD` ⇒ 它是那一天的快照**（不是现行口径）；同系列有更晚一份、或结论已被后续批次推翻 ⇒ 移进 archive。据此移 39 篇（项目评价 ×2、优化推进纪要 ×5、实战审计 ×4、优化空间勘查/评估 ×3、竞品对照、发布就绪/终检、性能基线、状态收拢、runScanLoop 拆分、大文件拆分复盘、安全与架构审计 ×2、假绿排查、待办 ×2、接口缺口、WAF 真机对拍 09-27（README 已明令禁止引用其数字）等）。**归档 ≠ 删除**：原文与当时的数字（含后来被证伪的）一字未改，只改链接路径 |
+| 链接改写 | 全仓 174 个 `.md/.html` 里的相对链接按引用方位置逐类改写（根文件 `docs/X`→`docs/archive/X`；docs 内 `](./X)`→`](./archive/X)`；docs 子目录 `../X`→`../archive/X`；被移动文件自己的出链补 `../`）。共 47 处 / 29 个文件 |
+| 索引 | `docs/INDEX.md` 重新生成（`npm run docs:index`，78 篇 → 42 篇）；新建 `docs/archive/INDEX.md` 40 行，每行 = 文件名 + **取自该文件自己一级标题的原文**（不事后编描述）+ 同系列更晚一份的可点链接 |
+| 判据（可跑） | 一次性链接核对器：解析全部被跟踪 md/html 的 `]()` 与 `src=/href=`，相对链接必须落到**被跟踪文件**（外部 URL/锚点/mailto 跳过）。**移动前基线 6 条断链 → 移动后 4 条**，且 4 条全是存量误报（目录链接 `docs`、正文里的 ``[English](README.en.md)`` 示例、`/assets/...` 占位、`index.html` 的构建期 `/fonts/fonts.css`）⇒ **零新增断链**；顺带修掉 2 条真实的存量缺陷：`实战审计 09-08 ↔ 09-09` 互相用 `D:/projects/…` 绝对路径链接（换台机器必断）→ 改同级相对 |
+| 回归 | 10 道静态门禁退出码全 0：`readme:check` `facts:check` `refs:check` `version:check` `arch:guard` `nesting:guard` `modules:check` `e2e:wiring` `greenguard` `targets:check`；真读 docs 路径的 6 个测试文件分两轮定向跑（两轮有重叠文件，不加总）：**第一轮 11/11 绿**（`configOrphanKeys.guard` + `docs.configDefaults` + `e2eArtifacts.consistency` + `dbmsEvidence`）、**第二轮 18/18 绿**（`docs.configDefaults` + `orphanScripts.guard` + `nestingGuard.wiring` + `e2eArtifacts.consistency`）⇒ 归档没把读 docs 的守卫砸了 |
+| ★过程缺陷 | 归档脚本第一版在 `git mv` 之后仍按**旧路径**回写文件 ⇒ 39 个移动已生效、链接只改了一半（ENOENT 崩在中途）。处置：`git reset --hard`（当时工作树除脚本产物外为空）后按新路径重写再跑。另修一处同类 bug：两个**都被移动**的文件互相链接时被判成"入链"改成了 `./archive/X`，而它们已是同级 —— 这条正是链接核对器抓出来的，不是人眼看到的 |
+| 未做 | 没给"markdown 相对链接完整性"加常驻门禁（本轮用一次性核对器验收）。这个判据值得常驻 —— 它与 `refs:check` 同型（refs 管代码里的路径，这条管文档里的路径），但加门禁要同时动 `package.json`/`ci.yml`/`ci-local`/接线守卫四处，属独立批次 |
+
+
 ### 2026-10-13 实测 · sqlmap 同题对照重跑（拿到今天的数，并撤回一条写歪的旧行）
 
 **一句话**：把 README 引以为据的「23/23 vs 15/23、335ms/关」拿来在**同一台机器上按定版口径重跑**（双方各 3 轮、检出多数决、耗时中位），结果是 **23/23 vs 14/23、101ms vs 2.2s**——数字本身站得住（与 2026-10-03 那份同口径产物逐位一致），但 README 那一行**引用的是更旧的两轮产物**，于是把「sqlmap 少测一轮」写成了「sqlmap 多检出一关」。
@@ -3012,7 +3027,7 @@ TODO 09-28 #4 的兑现（安全控制缺口：按暂停后 tamper 链验证与�
 ### 2026-10-03 批次 5 · 优化空间勘查：修 SQL 报错签名分叉 + WAF 推荐链落盘
 
 按 `codebase-optimization-survey` 做的勘查（三条并行只读勘察 → 逐条回源码复核），
-落 `docs/优化空间勘查-2026-10-03.md`。本批只动两条**文档未登记**的真缺口：
+落 `docs/archive/优化空间勘查-2026-10-03.md`。本批只动两条**文档未登记**的真缺口：
 
 - **正确性（本批最值钱）**：`scanValidityGuard.js` 的 `SQL_ERROR_SIG` 与
   `engine/payloads/index.js` 的 `ERROR_SIG` **分叉** —— 后者 2026-10-01 收紧时加了
@@ -3066,7 +3081,7 @@ TODO 09-28 #4 的兑现（安全控制缺口：按暂停后 tamper 链验证与�
 
 ### 2026-10-03 批次 3 · WAF 链侧能力：定向变异搜索器补「减标点补位 + 三链组合 + 有序去重」
 
-评价文档（`docs/项目评价-2026-10-03.md` §七.3）定性：提打穿链数必须动**链侧**，不是再写
+评价文档（`docs/archive/项目评价-2026-10-03.md` §七.3）定性：提打穿链数必须动**链侧**，不是再写
 第 229 个 tamper。本批在 A2 既有架构（画像 → 语义索引 → 组合生成 → 探针验证）内修掉
 生成器的三个真实质量缺口：
 
@@ -3197,7 +3212,7 @@ HTTP 爬虫（6 组标签属性正则）看不见 `/api/*`。新增 opt-in 的 `
 ### 2026-10-02 批次（第五批）· 竞品吸收：paramMine 参数挖掘（对标 Arjun）+ 扫描预设（对标 ZAP）
 
 调研 sqlmap/Arjun/Nuclei/ZAP 等同类项目并核差距后落地两项（全记录见
-`docs/竞品对照与吸收-2026-10-02.md`）：
+`docs/archive/竞品对照与吸收-2026-10-02.md`）：
 
 - **paramMine 参数挖掘**（opt-in `--param-mine` / 面板爬虫分段开关 / REST `paramMine`）：
   TargetParser 只能发现「已出现在 URL/body/表单里的参数」，隐藏参数（`?debug=1` 才进 SQL
@@ -3798,7 +3813,7 @@ A3 那次加固（sidecar 端口「4567 被占则随机」+ 一次性 token）�
 3. **`useRegistry` 在兄弟检测器里被写成两种判据**：Boolean/Error 判 `=== true`、
    TimeBlind 判 `!== false` ⇒ 默认配置下**同一次扫描**里 time 走声明式注册表、布尔/报错走扁平
    ⇒ `--test-filter/--test-skip/level/risk` 只在一半通道生效，调用方只看到「参数被接受」。
-   `docs/项目评价-2026-09-23.md:225` 早就把这一类命名为「`useRegistry` 双拷贝漂移」，本轮收口。
+   `docs/archive/项目评价-2026-09-23.md:225` 早就把这一类命名为「`useRegistry` 双拷贝漂移」，本轮收口。
    - 新增 `payloadRegistry.registryMode(config)` 作唯一判定点，四处调用点全部改走它
      （三个检测器 + `ScanManager` 的能力护栏）。统一方向取「显式 true 才切换」：
      两侧向量集互有增减（MySQL boolean 扁平 69/注册表 49，MySQL error 扁平 61/注册表 69），
@@ -3860,7 +3875,7 @@ A3 那次加固（sidecar 端口「4567 被占则随机」+ 一次性 token）�
 1. **补注册两档，都挂在同一个 java 依赖上**（`e2e/run-all.mjs`）：
    `multi-engine-lab-no-waf`（`verify.mjs` + `NO_WAF=1`，检测/定库类断言只在这档成立）与
    `dialect-templates`（`verify-dialect-templates.mjs`，16 条"方言模板在真引擎上可执行 + 反证"
-   —— 它 09-22 起就写在 `docs/P2-dialect-probe-2026-09-22.md` 的"退出码 0 = 全通过"里，
+   —— 它 09-22 起就写在 `docs/archive/P2-dialect-probe-2026-09-22.md` 的"退出码 0 = 全通过"里，
    却从没进过任何门禁）。本机实测 6.4s / 4.4s / 1.5s。
    顺手统一退出码口径：dialect 脚本缺 `ENGINE_JARS` 时原本退 2，而 run-all 的跳过判据是
    `code===0 && /\[SKIP\]/` ⇒ 一台没放 jar 的机器会把"环境没配"报成"测试挂了"。改成 `[SKIP]` + 0。
@@ -4164,7 +4179,7 @@ CI 的 `recall-lab` 独立 job 没有 mysqld（步骤名当时已如实写着"16
 而 `failed` 也可能来自"场景根本没执行"或 `status` 非 completed —— 三种故障查法完全不同，
 归成一句会让人去查一个不存在的问题。现在按明细说原因（`未执行：…` / `未达标：场景（status=…, must 未命中=[…]）`）。
 
-**另外更正一处历史文档**：`docs/optimization-report-2026-08-25.md` 第 101 行把
+**另外更正一处历史文档**：`docs/archive/optimization-report-2026-08-25.md` 第 101 行把
 "recall-lab 18 场景"当作 CI 结构完整的证据 —— 写的时候与之后很长一段时间里，
 CI 实际只跑 16 条。该报告是当时快照、按本仓口径不改正文，此处留这条为准。
 
