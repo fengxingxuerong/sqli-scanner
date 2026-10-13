@@ -1,0 +1,670 @@
+{
+  "_comment": "未使用导出基线：只减不增。新增未使用导出不得进入基线。",
+  "_generatedBy": "node scripts/deadcode-guard.mjs --fix-baseline",
+  "symbols": {
+    "server/src/api/quotaMiddleware.js::TARGET_MAX": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "server/src/api/quotaMiddleware.js::FANOUT_MAX": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "server/src/api/quotaMiddleware.js::WINDOW_MS": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "server/src/api/reportAiRoutes.js::reportAiRoutes": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "server/src/core/dbDrivers.js::PgDriver": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "server/src/core/dbDrivers.js::MysqlDriver": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "server/src/core/dbDrivers.js::SqlJsDriver": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "server/src/core/digestAuth.js::splitChallenges": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "server/src/core/eventBus.js::emit": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "server/src/core/eventBus.js::toSSE": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "server/src/core/eventBus.js::dispose": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "server/src/core/eventBus.js::_peekReplayBuffer": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "server/src/core/http/egressGuard.js::isBlockedIpv4": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "server/src/core/http/ipBytes.js::prefixBytesFromString": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "server/src/core/http/proxy.js::PROXY_SCHEMES": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "server/src/core/http/requestContext.js::FORBIDDEN_HEADERS": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "server/src/core/http/responseCodec.js::toBuffer": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "server/src/core/http/responseCodec.js::detectResponseCharset": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "server/src/core/http/responseCodec.js::getResMeta": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "server/src/core/ntlmAuth.js::NTLM_FLAGS": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "server/src/core/scanValidityGuard.js::BLOCK_STATUSES": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "server/src/core/scanValidityGuard.js::REQUEST_REJECT_STATUSES": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "server/src/core/scanValidityGuard.js::GENERIC_BLOCK_SIG": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "server/src/core/scanValidityGuard.js::LOGIN_REDIRECT_SIG": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "server/src/core/scanValidityGuard.js::INJECTION_SIGS": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "server/src/core/scanValidityGuard.js::pickStatus": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "server/src/core/scanValidityGuard.js::isCanceledError": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "server/src/core/scopeGuard.js::directDbHost": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "server/src/core/tamper/marker.js::MARKER_RE": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "server/src/core/tamper/marker.js::PH_PREFIX": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "server/src/core/tamper/marker.js::PLACEHOLDER_RE": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "server/src/core/tamper/marker.js::STASH_START": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "server/src/core/tamper/marker.js::STASH_END": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "server/src/core/tamper/marker.js::STASH_RE": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "server/src/core/tamper/marker.js::isStashChar": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "server/src/core/tamper/marker.js::stash": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "server/src/core/tamper/TamperRegistry.js::TamperRegistry": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "server/src/core/waf/bypass/semanticIntegrity.js::DERIVE_KEYWORDS": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "server/src/core/waf/bypass/semantics.js::EVIDENCE": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "server/src/core/waf/bypass/semantics.js::FAMILY_RULES": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "server/src/core/xmlBody.js::escapeXmlText": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "server/src/core/xmlBody.js::xmlNodeText": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "server/src/engine/detectorSupport/similarity.js::lenTolerable": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "server/src/engine/detectorSupport/timingBaseline.js::MAX_HOSTS": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "server/src/engine/detectorSupport/timingBaseline.js::ALPHA": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "server/src/engine/detectorSupport/timingBaseline.js::TTL_MS": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "server/src/engine/discovery/browserCrawler.js::launchBrowser": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "server/src/engine/discovery/paramMiner.js::MINE_DEFAULTS": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "server/src/engine/dumpFormat.js::FORMULA_PREFIX_RE": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "server/src/engine/egressOpts.js::EGRESS_KEYS": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "server/src/engine/egressOpts.js::classifyNetError": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "server/src/engine/egressOpts.js::isNetFailure": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "server/src/engine/egressOpts.js::netErrKind": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "server/src/engine/egressOpts.js::isTruncatedResponse": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "server/src/engine/exploit/stacked.js::buildOracleClobSegSql": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "server/src/engine/payloadRegistry.js::selectPayloadsForCtx": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "server/src/engine/payloads/customPayloads.js::CUSTOM_WHERE_VALUES": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "server/src/engine/payloads/index.js::RANDOMBLOB_MAX_BYTES": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "server/src/engine/payloadSchema.js::LEVEL_RANGE": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "server/src/engine/payloadSchema.js::RISK_RANGE": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "server/src/engine/payloadSchema.js::DESTRUCTIVE_ID_MARK": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "server/src/engine/pocBuilder.js::shellQuote": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "server/src/engine/pocBuilder.js::maskSensitiveHeaders": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "server/src/engine/secondOrderMethod.js::SECOND_ORDER_IDEMPOTENT_METHODS": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "server/src/mcp/index.js::runMcpStdio": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "server/src/mcp/protocol.js::SUPPORTED_PROTOCOL_VERSIONS": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "server/src/mcp/protocol.js::RPC_ERRORS": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "server/src/mcp/tools.js::buildTools": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "server/src/services/authAudit.js::AUTH_AUDIT_PATH": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "server/src/services/diffGate.js::recentScanRows": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "server/src/services/reportDelivery.js::REMEDIATION_BY_TECHNIQUE": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "server/src/services/reportSections.js::conclusion": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "server/src/services/reportSections.js::skippedText": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "server/src/services/scanLedger.js::getScan": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "server/src/services/scanLedger.js::retentionPolicy": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "server/src/services/scanLedger.js::pruneLedger": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "server/src/services/vulnTaxonomy.js::OWASP_INJECTION": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "server/src/services/vulnTaxonomy.js::LOCATION_TEXT": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "src/components/progress/progressUtils.tsx::EVENT_STYLE": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "src/components/progress/progressUtils.tsx::LOG_COLOR": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "src/shared/apiClient.ts::API_BASE": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "src/__coverage_calibrate__/calibrate.ts::uncovered1": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "src/__coverage_calibrate__/calibrate.ts::uncovered2": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "src/__coverage_calibrate__/calibrate.ts::uncovered3": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "scripts/complexity-guard.mjs::measureFunctions": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "scripts/complexity-guard.mjs::judge": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "scripts/coverage-calibration.mjs::uncovered1": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "scripts/coverage-calibration.mjs::uncovered2": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "scripts/coverage-calibration.mjs::uncovered3": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "scripts/deadcode-guard.mjs::findUnusedExports": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "scripts/deadcode-guard.mjs::judge": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "scripts/debt-guard.mjs::scanDebtMarkers": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "scripts/debt-guard.mjs::judge": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "scripts/duplication-guard.mjs::findClones": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "scripts/duplication-guard.mjs::judge": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "scripts/error-contract-guard.mjs::findInconsistentThrows": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "scripts/error-contract-guard.mjs::judge": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "scripts/facts-sync.mjs::diffDigests": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "scripts/merge-integrity.mjs::detectMergeContext": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "scripts/merge-integrity.mjs::detectMergeContextsInRange": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "scripts/merge-integrity.mjs::exportedSymbols": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "scripts/merge-integrity.mjs::checkFileAcrossMerge": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "scripts/merge-integrity.mjs::selfTest": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "scripts/module-loadable.mjs::walkJs": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "scripts/module-loadable.mjs::runCheck": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "scripts/module-loadable.mjs::analyzeAll": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "scripts/module-loadable.mjs::resolveImport": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "scripts/module-loadable.mjs::selfTest": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "scripts/nesting-guard.mjs::analyzeNesting": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "scripts/nesting-guard.mjs::measureAll": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "scripts/nesting-guard.mjs::judge": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "scripts/readme-consistency.mjs::countTemplates": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "scripts/readme-consistency.mjs::parseApiDocEndpoints": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "scripts/readme-consistency.mjs::checkConsistency": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "scripts/release-check.mjs::judge": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "scripts/release-check.mjs::checkComposeHost": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "scripts/typecoverage-guard.mjs::measureCoverage": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "scripts/typecoverage-guard.mjs::judge": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "e2e/api-range-lab/range-app.mjs::LAB_SESSION_COOKIE": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "e2e/api-range-lab/range-app.mjs::LAB_AUTH_HEADER": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "e2e/bearer-lab/jwt-scheme.mjs::JWT_SECRET": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "e2e/blackbox-lab/lab-app.mjs::app": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "e2e/blackbox-lab/lab-app.mjs::server": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "e2e/blackbox-lab/lab-app.mjs::pool": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "e2e/detection-runner/second-order-lab.js::createSecondOrderLab": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "e2e/lib/dbProbe.mjs::connectMssqlOrSkip": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "e2e/lib/dbProbe.mjs::getOracleConnectionOrSkip": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "e2e/multi-engine-lab/lab-app.mjs::bridgePreflight": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "e2e/multi-engine-lab/lab-app.mjs::createMultiEngineApp": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "e2e/oob-real-lab/lab-app.mjs::PG_CONF": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "e2e/oob-real-lab/lab-app.mjs::initDb": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "e2e/oob-real-lab/lab-app.mjs::createOobLabApp": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "e2e/oob-real-lab/mysql-lab-app.mjs::createMysqlOobLabApp": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "e2e/recall-lab/lab-server.js::DB": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "e2e/recall-lab/lab-server.js::tokenize": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "e2e/recall-lab/lab-server.js::analyzeStmts": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "e2e/recall-lab/lab-server.js::createRecallLab": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "e2e/recall-lab/real-lab-driver.js::INIT_SQL": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "e2e/recall-lab/real-lab-driver.js::CONTEXT_TEMPLATES": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "e2e/recall-lab/real-lab-driver.js::buildTarget": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "e2e/recall-lab/real-lab-driver.js::sqljsAvailable": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "e2e/recall-lab/real-lab-driver.js::PG_INIT_SQL": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "e2e/recall-lab/real-lab-driver.js::PG_CONTEXT_TEMPLATES": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "e2e/recall-lab/real-lab-driver.js::buildPgTarget": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "e2e/recall-lab/real-lab-driver.js::pgAvailable": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "e2e/recall-lab/real-lab-driver.js::mysqlEndpoint": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "e2e/recall-lab/real-lab-driver.js::MYSQL_INIT_SQL": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "e2e/recall-lab/real-lab-driver.js::buildMysqlTarget": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "e2e/recall-lab/real-lab-driver.js::mysqlAvailable": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "e2e/recall-lab/safe-lab-server.js::createSafeLab": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "e2e/signed-api-lab/sign-scheme.mjs::canonical": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "e2e/signed-api-lab/signers/enc-correct.mjs::transform": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "e2e/signed-api-lab/signers/enc-plain-passthrough.mjs::transform": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "e2e/signed-api-lab/signers/sign-correct.mjs::transform": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "e2e/signed-api-lab/signers/sign-partial-fields.mjs::transform": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "e2e/signed-api-lab/signers/sign-wrong-key.mjs::transform": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "e2e/signed-api-lab/signers/tick-fresh.mjs::transform": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "e2e/signed-api-lab/signers/tick-stale-clock.mjs::transform": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "e2e/waf-lab/waf-profiles.js::CLOUDFLARE_WAF": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "e2e/waf-lab/waf-profiles.js::ALL_IN_ONE": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "e2e/waf-real/crs-engine.js::classifyVar": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "e2e/waf-real/crs-engine.js::EFFECTIVE_PL": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "e2e/waf-real/pwnVerdict.mjs::SQL_LAYER": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "e2e/waf-real/pwnVerdict.mjs::EXFIL_RESULT": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "e2e/waf-real/pwnVerdict.mjs::EXFIL_ERROR": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    },
+    "e2e/waf-real/pwnVerdict.mjs::EXFIL_MARK": {
+      "reason": "待清理或加用途标注",
+      "status": "open"
+    }
+  }
+}

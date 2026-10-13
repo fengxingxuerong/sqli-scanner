@@ -1,0 +1,25 @@
+{
+  "_comment": "错误形态基线：受限目录裸 Error 必须为 0；非受限只减不增。",
+  "_generatedBy": "node scripts/error-contract-guard.mjs --fix-baseline",
+  "bareErrorByFile": {
+    "server/src/core/dbDrivers.js": 9,
+    "server/src/core/http/responseCodec.js": 2,
+    "server/src/core/ntlmAuth.js": 1,
+    "server/src/core/sqlJsLoader.js": 1,
+    "server/src/core/waf/assertTamperNames.js": 1,
+    "server/src/core/waf/bypass/semantics.js": 1,
+    "server/src/core/waf/wafRules.js": 6,
+    "server/src/engine/blindExtractor.js": 2,
+    "server/src/engine/Detector.js": 1,
+    "server/src/engine/detectors/TimeBlindDetector.js": 1,
+    "server/src/engine/extractScope.js": 2,
+    "server/src/engine/hexLiteral.js": 1,
+    "server/src/engine/payloadRegistry.js": 1,
+    "server/src/engine/payloads/customPayloads.js": 1,
+    "server/src/engine/payloads/destructive.js": 1,
+    "server/src/engine/pocBuilder.js": 1,
+    "server/src/engine/scan/detect.js": 1,
+    "server/src/engine/sqlmapBridge.js": 5,
+    "server/src/mcp/tools.js": 1
+  }
+}

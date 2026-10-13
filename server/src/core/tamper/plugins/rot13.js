@@ -1,6 +1,17 @@
 // ROT13 编码：将字符串字面量中的字母用 ROT13 编码（对标 sqlmap rot13.py）
 // 通过 CHAR() 函数解码还原
-import { readSqlLiteral, isQuoteEscaped } from '../quoteScan.js';
+import { walkLiterals } from '../literalWalk.js';
+
+function rot13Encode(str) {
+  return str.split('').map(c => {
+    if (/[a-zA-Z]/.test(c)) {
+      const code = c.charCodeAt(0);
+      const base = code >= 97 ? 97 : 65;
+      return String.fromCharCode(base + ((code - base + 13) % 26));
+    }
+    return c;
+  }).join('');
+}
 
 export const rot13 = {
   name: 'rot13',
@@ -11,52 +22,9 @@ export const rot13 = {
    * @returns {string}
    */
   transform(payload, ctx) {
-    const src = String(payload ?? '');
-    let out = '';
-    let inSingle = false, inDouble = false;
-    for (let i = 0; i < src.length; i++) {
-      const ch = src[i];
-      if (inSingle) {
-        if (ch === "'" && !isQuoteEscaped(src, i)) { inSingle = false; out += ch; }
-        else out += ch;
-        continue;
-      }
-      if (inDouble) {
-        if (ch === '"' && !isQuoteEscaped(src, i)) { inDouble = false; out += ch; }
-        else out += ch;
-        continue;
-      }
-      if (ch === "'") {
-        inSingle = true;
-        let str = '';
-        { const lit = readSqlLiteral(src, i, "'"); if (!lit.closed) { out += src.slice(i); return out; } i = lit.end; str = lit.body; }
-        const encoded = str.split('').map(c => {
-          if (/[a-zA-Z]/.test(c)) {
-            const code = c.charCodeAt(0);
-            const base = code >= 97 ? 97 : 65;
-            return String.fromCharCode(base + ((code - base + 13) % 26));
-          }
-          return c;
-        }).join('');
-        out += `CONCAT(CHAR(61),'${encoded}')`;
-      } else if (ch === '"') {
-        inDouble = true;
-        let str = '';
-        { const lit = readSqlLiteral(src, i, '"'); if (!lit.closed) { out += src.slice(i); return out; } i = lit.end; str = lit.body; }
-        const encoded = str.split('').map(c => {
-          if (/[a-zA-Z]/.test(c)) {
-            const code = c.charCodeAt(0);
-            const base = code >= 97 ? 97 : 65;
-            return String.fromCharCode(base + ((code - base + 13) % 26));
-          }
-          return c;
-        }).join('');
-        out += `CONCAT(CHAR(61),'${encoded}')`;
-      } else {
-        out += ch;
-      }
-    }
-    return out;
+    return walkLiterals(payload, {
+      onLiteral: (body) => `CONCAT(CHAR(61),'${rot13Encode(body)}')`,
+    });
   },
 };
 export default rot13;

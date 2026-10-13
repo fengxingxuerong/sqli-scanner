@@ -3,6 +3,7 @@
   "_generatedBy": "node scripts/nesting-guard.mjs --fix-baseline",
   "files": {
     "scripts/build-sidecar.mjs": 7,
+    "scripts/duplication-guard.mjs": 8,
     "server/src/core/http/auth.js": 7,
     "server/src/engine/Extractor.js": 7,
     "server/src/engine/blindExtractor.js": 7,

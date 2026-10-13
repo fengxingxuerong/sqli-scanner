@@ -70,6 +70,31 @@ run_gate "架构门禁（体积/循环依赖/console）" node scripts/arch-guard
 #      存量登记在 docs/_nesting-baseline.json（只许持平或变浅）；新文件超软上限 7 即失败。
 run_gate "嵌套深度（存量只许持平或变浅）" node scripts/nesting-guard.mjs || exit 1
 
+# 2a''. 函数级复杂度：与 2a'/2a 管的是**独立**维度 —— 文件不超 1200 行、嵌套不超 7 层，
+#       但单函数几百行、圈复杂度几十的"巨兽"对两者都透明。实测 0.9s。
+#       存量登记在 docs/_complexity-baseline.json（只许持平或下降）；新函数超软上限即失败。
+run_gate "函数级复杂度（存量只许持平或下降）" node scripts/complexity-guard.mjs || exit 1
+
+# 2a'''. JSDoc 类型覆盖：独立于编译器开关，以 @param/@returns 标注率度量类型安全推进度。
+#        基线只升不降（docs/_typecoverage-baseline.json）。实测 <0.5s。
+run_gate "JSDoc 类型覆盖（基线只升不降）" node scripts/typecoverage-guard.mjs || exit 1
+
+# 2a'''. 令牌级重复代码门禁：跨文件克隆检测（FNV-1a 滚动哈希 + 精确比对）。
+#        存量登记在 docs/_dup-baseline.json（只许持平或下降）。
+run_gate "重复代码（存量只许持平或下降）" node scripts/duplication-guard.mjs || exit 1
+
+# 2a''''. 未使用导出门禁：符号收集 → 引用收集 → 差集 → 扣减用途标记与基线豁免。
+#         存量登记在 docs/_deadcode-baseline.json（只减不增）。
+run_gate "死代码（未使用导出只减不增）" node scripts/deadcode-guard.mjs || exit 1
+
+# 2a'''''. 错误形态一致性门禁：受限目录（api/services）裸 Error 必须为 0，
+#           非受限目录按文件计数与基线比对、只减不增。
+run_gate "错误形态（受限裸 Error=0，非受限只减不增）" node scripts/error-contract-guard.mjs || exit 1
+
+# 2a''''''. 技术债标记格式门禁：新增标记必须用统一格式 // [TODO YYYY-MM-DD D##] 简述。
+#            存量登记在 docs/_debt-baseline.json（只减不增）。
+run_gate "技术债标记（新增必须统一格式）" node scripts/debt-guard.mjs || exit 1
+
 # 2b. 引用完整性：CI/配置里写的本地路径必须**已入库**。
 #     这条挡的是「本机有、库里没有」——开发机一切正常，CI 上 Cannot find module。
 #     真实拦截记录见本文件生成当日：新增 scripts/version-sync.mjs 未 git add 时即变红。

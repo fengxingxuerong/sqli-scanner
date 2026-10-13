@@ -457,26 +457,47 @@ export class BooleanBlindDetector extends Detector {
   // 基线 + 每对真假采样均改为限并发（sendConcurrent），抵消 v2 串行 await 的 ~2.8× 开销；
   // trace 每个样本存 excerpt 片段，每对存逐采样真假差异（lenDelta/firstDiffOffset/changedSnippet），供前端展开审计。
   async _robustDetect(ctx, result, templates, rb) {
-    const { httpClient, target, point, dbms } = ctx;
-    const orig = point.originalValue || '1';
-    const sigZ = rb.booleanSignificanceZ ?? 1.645;
     const concurrency = rb.concurrency || 4;
 
-    // 1) 基线指纹集（并发采样，比 legacy 串行更稳更快）
-    // [FIX 2026-09-21 失败样本污染] 两条要求必须同时满足，缺一不可：
-    //
-    // ① **失败/超时样本必须剔除**：`_bodyOf` 对失败项返回 ''（空串）。空串混进 baselines 后，
-    //   `dynamicBlockFilter` 拿它跟每个正常响应两两比对 —— 空串没有任何块，于是**每一块**
-    //   都与它不同 → 所有块 diffCount 被整体抬高 → `diffCount[k]/pairs > 0.5` 把**全部块**
-    //   判成动态块 → buildDynamicSimilarFn 里 `total === 0` 直接 return true →
-    //   **真/假一律判"相似"** → boolean 系统性漏报。
-    //
-    // ② **只剔除不重试同样会失败**：`dynamicBlockFilter` 在 `baselines.length < 2` 时返回空
-    //   动态块集 → 回落到不带动态块排除的严格比对 → 噪声页上真值也≠基线 → 依然漏报。
-    //   （这一条是我先只做剔除、被单测直接打脸后补上的 —— 剔除必须配补足。）
-    //
-    // 实测形态：CI 上 `real-mysql-lab` 的 noisy 场景 `检出=[time] miss=[boolean]` ——
-    // 慢机器上并发失败率升高，正踩在这条链上（本地 2385ms 通过、CI 6241ms 失败）。
+    const baselines = await this._collectRobustBaselines(ctx, rb, concurrency);
+    const judges = this._buildRobustJudges(baselines, ctx, rb);
+    const tracePairs = [];
+    await this._probeBooleanPairs(ctx, result, templates, rb, judges, concurrency, tracePairs, baselines);
+
+    // 未命中也透传轨迹（说明"为何判干净"），便于前端展示证据链
+    if (!result.trace) {
+      result.trace = {
+        technique: 'boolean',
+        adaptive: !!rb.adaptive,
+        baselineNoiseRate: judges.baselineNoiseRate,
+        minStable: judges.minRatio,
+        baselineSamples: baselines.map((b, i) => ({ idx: i, len: b.length, likeBaseline: true, excerpt: this._excerpt(b) })),
+        pairs: tracePairs,
+        decision: 'clean',
+      };
+    }
+    return result;
+  }
+
+  // ── _robustDetect 子过程（D54 §2.2：按职责拆分，检测判据逐字不动）────────────
+  // 1) 基线指纹集（并发采样，比 legacy 串行更稳更快）
+  // [FIX 2026-09-21 失败样本污染] 两条要求必须同时满足，缺一不可：
+  //
+  // ① **失败/超时样本必须剔除**：`_bodyOf` 对失败项返回 ''（空串）。空串混进 baselines 后，
+  //   `dynamicBlockFilter` 拿它跟每个正常响应两两比对 —— 空串没有任何块，于是**每一块**
+  //   都与它不同 → 所有块 diffCount 被整体抬高 → `diffCount[k]/pairs > 0.5` 把**全部块**
+  //   判成动态块 → buildDynamicSimilarFn 里 `total === 0` 直接 return true →
+  //   **真/假一律判"相似"** → boolean 系统性漏报。
+  //
+  // ② **只剔除不重试同样会失败**：`dynamicBlockFilter` 在 `baselines.length < 2` 时返回空
+  //   动态块集 → 回落到不带动态块排除的严格比对 → 噪声页上真值也≠基线 → 依然漏报。
+  //   （这一条是我先只做剔除、被单测直接打脸后补上的 —— 剔除必须配补足。）
+  //
+  // 实测形态：CI 上 `real-mysql-lab` 的 noisy 场景 `检出=[time] miss=[boolean]` ——
+  // 慢机器上并发失败率升高，正踩在这条链上（本地 2385ms 通过、CI 6241ms 失败）。
+  async _collectRobustBaselines(ctx, rb, concurrency) {
+    const { httpClient, target, point } = ctx;
+    const orig = point.originalValue || '1';
     const baselines = [];
     const wanted = Math.max(2, rb.baselineSamples || 2);
     let attempt = 0;
@@ -495,6 +516,11 @@ export class BooleanBlindDetector extends Detector {
       }
       if (got === 0) break; // 整轮全败 → 目标不可达，别继续烧请求
     }
+    return baselines;
+  }
+
+  // 2) 动态块判定协作：构建相似度/差异/噪声率/自适应门槛
+  _buildRobustJudges(baselines, ctx, rb) {
     // 自动动态块识别（T2）：开启时排除基线动态块，相似度/噪声率/真假差异均按动态块过滤
     const dynSimilar = this.buildDynamicSimilar(baselines, ctx.config);
     const similarToBaseline = dynSimilar
@@ -503,25 +529,29 @@ export class BooleanBlindDetector extends Detector {
     const meaningfulDiff = dynSimilar
       ? (a, b) => !dynSimilar(a, b)
       : (a, b) => this._isMeaningfulDiff(a, b);
-
     // 1.1) 基线自然抖动率（"噪声地板"）
     const baselineNoiseRateVal = dynSimilar
       ? baselineNoiseRate(baselines, (a, b) => dynSimilar(a, b))
       : baselineNoiseRate(baselines, (a, b) => this._similar(a, b));
-
     // 1.2) 自适应一致率门槛：稳定目标落回下限(严格控误报)，抖动目标抬高门槛(要求更清晰信号)
     const minRatio = rb.adaptive
       ? adaptiveMinStable(baselineNoiseRateVal, rb.adaptiveHeadroom, rb.minStableRatioFloor, rb.minStableRatioCap)
       : rb.minStableRatio;
-
-    // 2) 遍历真假对，首个稳定对即 break（保留短路语义）
+    const sigZ = rb.booleanSignificanceZ ?? 1.645;
     // 自适应采样：基线噪声高时多采 1 次，提升抖动目标上的估计可靠性（有上限，控性能）
     const effSamples = rb.adaptive && baselineNoiseRateVal > 0.3
       ? Math.min(rb.booleanSamples + 1, 6)
       : rb.booleanSamples;
+    return { dynSimilar, similarToBaseline, meaningfulDiff, baselineNoiseRate: baselineNoiseRateVal, minRatio, sigZ, effSamples };
+  }
+
+  // 3) 遍历真假对，首个稳定对即 break（保留短路语义）
+  async _probeBooleanPairs(ctx, result, templates, rb, judges, concurrency, tracePairs, baselines) {
+    const { httpClient, target, point, dbms } = ctx;
+    const orig = point.originalValue || '1';
+    const { similarToBaseline, meaningfulDiff, baselineNoiseRate: baselineNoiseRateVal, minRatio, sigZ, effSamples } = judges;
     // 统一真假对获取（boundary 感知对优先 + 注册表/索引对）
     const pairs = this._getBooleanPairs(ctx, templates);
-    const tracePairs = [];
     for (const p of pairs) {
       const { ti, fi } = p;
       if (ti >= 0 && (!templates[ti] || !templates[fi])) continue;
@@ -640,19 +670,6 @@ export class BooleanBlindDetector extends Detector {
         }
       }
     }
-    // 未命中也透传轨迹（说明"为何判干净"），便于前端展示证据链
-    if (!result.trace) {
-      result.trace = {
-        technique: 'boolean',
-        adaptive: !!rb.adaptive,
-        baselineNoiseRate: baselineNoiseRateVal,
-        minStable: minRatio,
-        baselineSamples: baselines.map((b, i) => ({ idx: i, len: b.length, likeBaseline: true, excerpt: this._excerpt(b) })),
-        pairs: tracePairs,
-        decision: 'clean',
-      };
-    }
-    return result;
   }
 
   // 从 sendConcurrent 的返回元素安全取响应体（并发失败降级空串，不影响一致率计算）

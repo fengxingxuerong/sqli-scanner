@@ -1,0 +1,1362 @@
+{
+  "_comment": "函数级复杂度基线：只减不增。value 不得被提高；新超限函数不得进入基线。",
+  "_generatedBy": "node scripts/complexity-guard.mjs --fix-baseline",
+  "functions": {
+    "scripts/build-engine.mjs::main": {
+      "lines": 94,
+      "complexity": 17,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "scripts/complexity-guard.mjs::fixBaseline": {
+      "lines": 33,
+      "complexity": 27,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "scripts/complexity-guard.mjs::judge": {
+      "lines": 33,
+      "complexity": 19,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "scripts/deadcode-guard.mjs::findUnusedExports": {
+      "lines": 44,
+      "complexity": 17,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "scripts/duplication-guard.mjs::findClones": {
+      "lines": 62,
+      "complexity": 22,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "scripts/facts-sync.mjs::main": {
+      "lines": 89,
+      "complexity": 23,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "scripts/merge-integrity.mjs::checkFileAcrossMerge": {
+      "lines": 90,
+      "complexity": 35,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "scripts/merge-integrity.mjs::exportedSymbols": {
+      "lines": 28,
+      "complexity": 17,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "scripts/module-loadable.mjs::analyzeSource": {
+      "lines": 73,
+      "complexity": 36,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "scripts/one-click-scan.mjs::main": {
+      "lines": 195,
+      "complexity": 70,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "scripts/typecoverage-guard.mjs::fixBaseline": {
+      "lines": 34,
+      "complexity": 16,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "scripts/typecoverage-guard.mjs::measureCoverage": {
+      "lines": 40,
+      "complexity": 16,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "scripts/verify-tamper-upstream-examples.mjs::unescapeDocstringLine": {
+      "lines": 23,
+      "complexity": 16,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/bin/cli.js::main": {
+      "lines": 312,
+      "complexity": 123,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/bin/cli.js::printExtractView": {
+      "lines": 63,
+      "complexity": 64,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/bin/cli.js::runExploit": {
+      "lines": 61,
+      "complexity": 23,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/bin/cli.js::runIdentifyWaf": {
+      "lines": 53,
+      "complexity": 24,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/bin/cli.js::runSingleScanInner": {
+      "lines": 90,
+      "complexity": 48,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/bin/cli/advise.js::buildAdvice": {
+      "lines": 101,
+      "complexity": 28,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/bin/cli/args.js::applyRequestFile": {
+      "lines": 53,
+      "complexity": 24,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/bin/cli/args.js::parseArgs": {
+      "lines": 227,
+      "complexity": 214,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/bin/cli/args.js::parseLogFile": {
+      "lines": 45,
+      "complexity": 16,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/bin/cli/batchPool.js::runBatch": {
+      "lines": 34,
+      "complexity": 16,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/bin/cli/batchPool.js::summarizeBatch": {
+      "lines": 17,
+      "complexity": 18,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/bin/cli/batchTargets.js::expandBatchTargets": {
+      "lines": 77,
+      "complexity": 42,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/bin/cli/config.js::buildConfig": {
+      "lines": 104,
+      "complexity": 65,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/bin/cli/config.js::buildExtractScope": {
+      "lines": 40,
+      "complexity": 45,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/bin/cli/config.js::isEnumMode": {
+      "lines": 5,
+      "complexity": 20,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/bin/cli/config.js::validateEnumArgs": {
+      "lines": 12,
+      "complexity": 20,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/bin/cli/help.js::printHelp": {
+      "lines": 314,
+      "complexity": 1,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/api/exploitRoutes.js::buildCtxFromScan": {
+      "lines": 65,
+      "complexity": 37,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/api/exploitRoutes.js::sanitizeTarget": {
+      "lines": 59,
+      "complexity": 43,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/api/reportAiRoutes.js::<arrow@41>": {
+      "lines": 38,
+      "complexity": 21,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/api/scanConfigTuning.js::applyTuningKnobs": {
+      "lines": 49,
+      "complexity": 27,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/api/scanGuard/bespokeKeys.js::guardBespokeKeys": {
+      "lines": 75,
+      "complexity": 42,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/api/scanGuard/extractScope.js::sanitizeExtractScope": {
+      "lines": 24,
+      "complexity": 19,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/api/scanGuard/objectGroups.js::guardSecondOrder": {
+      "lines": 41,
+      "complexity": 19,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/api/scanGuard/scalarsCore.js::guardScalarsCore": {
+      "lines": 65,
+      "complexity": 37,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/api/scanRoutes.js::<arrow@381>": {
+      "lines": 68,
+      "complexity": 34,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/api/scanRoutes.js::<arrow@520>": {
+      "lines": 65,
+      "complexity": 30,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/api/scanRoutes.js::<arrow@707>": {
+      "lines": 27,
+      "complexity": 26,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/api/scanRoutes.js::createReportGuard": {
+      "lines": 20,
+      "complexity": 16,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/api/scanRoutes.js::createRoutes": {
+      "lines": 300,
+      "complexity": 138,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/api/scanRoutes.js::sanitizeStart": {
+      "lines": 79,
+      "complexity": 32,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/core/authDeclaration.js::isTargetInScope": {
+      "lines": 21,
+      "complexity": 16,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/core/authDeclaration.js::validateDeclaration": {
+      "lines": 26,
+      "complexity": 18,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/core/cookieJar.js::CookieJar._parseSetCookie": {
+      "lines": 35,
+      "complexity": 18,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/core/csrfKeeper.js::withCsrf": {
+      "lines": 56,
+      "complexity": 24,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/core/digestAuth.js::buildDigestHeader": {
+      "lines": 49,
+      "complexity": 17,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/core/directConnector.js::DirectConnector.request": {
+      "lines": 41,
+      "complexity": 18,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/core/eventBus.js::toSSE": {
+      "lines": 92,
+      "complexity": 21,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/core/http/auth.js::_after401": {
+      "lines": 40,
+      "complexity": 37,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/core/http/egressGuard.js::assertSafeTargetForEgress": {
+      "lines": 42,
+      "complexity": 19,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/core/http/egressGuard.js::isBlockedIpv4": {
+      "lines": 33,
+      "complexity": 27,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/core/http/egressGuard.js::isBlockedIpv6": {
+      "lines": 40,
+      "complexity": 27,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/core/http/ipBytes.js::ipv6ToBytes": {
+      "lines": 47,
+      "complexity": 23,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/core/http/proxy.js::resolveProxy": {
+      "lines": 37,
+      "complexity": 18,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/core/http/requestContext.js::mergeAuthHeaders": {
+      "lines": 32,
+      "complexity": 19,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/core/http/retry.js::_onRequestError": {
+      "lines": 57,
+      "complexity": 31,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/core/http/transport.js::_rawUndici": {
+      "lines": 77,
+      "complexity": 22,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/core/httpClient.js::HttpClient.close": {
+      "lines": 8,
+      "complexity": 17,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/core/httpClient.js::_prepareHeaders": {
+      "lines": 28,
+      "complexity": 22,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/core/ntlmAuth.js::parseType2Message": {
+      "lines": 28,
+      "complexity": 17,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/core/ntlmMd4.js::md4Pure": {
+      "lines": 55,
+      "complexity": 16,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/core/oobReceiver.js::OobReceiver._handleDns": {
+      "lines": 48,
+      "complexity": 24,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/core/requestCollectionParser.js::<arrow@232>": {
+      "lines": 55,
+      "complexity": 42,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/core/requestCollectionParser.js::detectRequestFormat": {
+      "lines": 24,
+      "complexity": 18,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/core/requestCollectionParser.js::parseBurpXml": {
+      "lines": 50,
+      "complexity": 18,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/core/requestCollectionParser.js::parseHar": {
+      "lines": 33,
+      "complexity": 18,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/core/requestCollectionParser.js::parseOpenApi": {
+      "lines": 53,
+      "complexity": 34,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/core/requestCollectionParser.js::parsePostman": {
+      "lines": 72,
+      "complexity": 55,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/core/requestCollectionParser.js::parseRequestCollection": {
+      "lines": 67,
+      "complexity": 18,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/core/requestCollectionParser.js::schemaExample": {
+      "lines": 14,
+      "complexity": 17,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/core/requestTransform.js::applyScanTransform": {
+      "lines": 45,
+      "complexity": 18,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/core/requestTransform.js::assertScriptPath": {
+      "lines": 54,
+      "complexity": 17,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/core/scopeGuard.js::isHostInScope": {
+      "lines": 30,
+      "complexity": 28,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/core/scopeGuard.js::parseScope": {
+      "lines": 74,
+      "complexity": 29,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/core/sessionStore.js::ScanSession.load": {
+      "lines": 40,
+      "complexity": 17,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/core/statsHelper.js::dynamicBlockFilter": {
+      "lines": 36,
+      "complexity": 20,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/core/tamper/literalWalk.js::walkLiterals": {
+      "lines": 53,
+      "complexity": 18,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/core/tamper/plugins/if2case.js::transform": {
+      "lines": 35,
+      "complexity": 19,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/core/tamper/plugins/ifnull2casewhenisnull.js::transform": {
+      "lines": 30,
+      "complexity": 19,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/core/tamper/plugins/jsonescape.js::transform": {
+      "lines": 38,
+      "complexity": 27,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/core/tamper/plugins/noequals.js::transform": {
+      "lines": 25,
+      "complexity": 18,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/core/tamper/plugins/space2comment.js::transform": {
+      "lines": 62,
+      "complexity": 26,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/core/tamper/plugins/space2morehash.js::transform": {
+      "lines": 64,
+      "complexity": 28,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/core/tamper/plugins/uniontable.js::transform": {
+      "lines": 23,
+      "complexity": 19,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/core/tamper/plugins/unparen.js::transform": {
+      "lines": 25,
+      "complexity": 17,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/core/tamper/plugins/xforwardedfor.js::isReservedIpv4": {
+      "lines": 14,
+      "complexity": 19,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/core/waf/WafIdentifier.js::WafIdentifier.activeProbe": {
+      "lines": 103,
+      "complexity": 42,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/core/waf/blockPolicy.js::decideBlockPolicy": {
+      "lines": 57,
+      "complexity": 22,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/core/waf/blockProfile.js::rankChainsByProfile": {
+      "lines": 22,
+      "complexity": 17,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/core/waf/bypass/searcher.js::planChainsByProfile": {
+      "lines": 116,
+      "complexity": 54,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/core/waf/bypass/semanticIntegrity.js::auditPlugin": {
+      "lines": 61,
+      "complexity": 23,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/core/waf/bypass/semantics.js::assertIndexIntegrity": {
+      "lines": 15,
+      "complexity": 16,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/core/waf/bypass/semantics.js::selectByAvoiding": {
+      "lines": 43,
+      "complexity": 20,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/core/waf/chainVerify.js::verifyTamperChains": {
+      "lines": 78,
+      "complexity": 33,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/core/yamlLite.js::unquote": {
+      "lines": 33,
+      "complexity": 21,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/engine/DBFingerprinter.js::DBFingerprinter._fingerprintByTime": {
+      "lines": 33,
+      "complexity": 21,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/engine/DBFingerprinter.js::DBFingerprinter.fingerprint": {
+      "lines": 73,
+      "complexity": 41,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/engine/Extractor.js::Extractor.dumpData": {
+      "lines": 109,
+      "complexity": 65,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/engine/Extractor.js::Extractor.extractScalar": {
+      "lines": 22,
+      "complexity": 21,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/engine/ScanManager.js::ScanManager.start": {
+      "lines": 66,
+      "complexity": 17,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/engine/TargetParser.js::TargetParser._mergeCrawlFindings": {
+      "lines": 56,
+      "complexity": 18,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/engine/TargetParser.js::TargetParser._parseForms": {
+      "lines": 41,
+      "complexity": 27,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/engine/TargetParser.js::TargetParser.discover": {
+      "lines": 162,
+      "complexity": 90,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/engine/binaryProbe.js::binaryProbe": {
+      "lines": 55,
+      "complexity": 21,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/engine/blindExtractor.js::_binarySearch": {
+      "lines": 31,
+      "complexity": 18,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/engine/blindExtractor.js::_extendLength": {
+      "lines": 17,
+      "complexity": 20,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/engine/blindExtractor.js::_extractBytesBisect": {
+      "lines": 106,
+      "complexity": 32,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/engine/blindExtractor.js::_extractBytesBitwise": {
+      "lines": 58,
+      "complexity": 33,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/engine/blindExtractor.js::_resolveExtractPlan": {
+      "lines": 21,
+      "complexity": 20,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/engine/crawler.js::LinkCrawler.crawl": {
+      "lines": 43,
+      "complexity": 19,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/engine/dbmsVersion.js::parseDbmsVersion": {
+      "lines": 30,
+      "complexity": 17,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/engine/detectorSupport/matchMetrics.js::_matchByRegexp": {
+      "lines": 26,
+      "complexity": 22,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/engine/detectors/BooleanBlindDetector.js::BooleanBlindDetector._clauseRound": {
+      "lines": 74,
+      "complexity": 38,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/engine/detectors/BooleanBlindDetector.js::BooleanBlindDetector._getBooleanPairs": {
+      "lines": 65,
+      "complexity": 23,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/engine/detectors/BooleanBlindDetector.js::BooleanBlindDetector._legacyDetect": {
+      "lines": 75,
+      "complexity": 41,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/engine/detectors/BooleanBlindDetector.js::BooleanBlindDetector._probeBooleanPairs": {
+      "lines": 102,
+      "complexity": 33,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/engine/detectors/ErrorDetector.js::ErrorDetector.detect": {
+      "lines": 62,
+      "complexity": 20,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/engine/detectors/ErrorDetector.js::compactErrorTemplates": {
+      "lines": 34,
+      "complexity": 16,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/engine/detectors/OobDetector.js::OobDetector.detect": {
+      "lines": 104,
+      "complexity": 42,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/engine/detectors/SecondOrderDetector.js::SecondOrderDetector._detectOob": {
+      "lines": 52,
+      "complexity": 19,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/engine/detectors/SecondOrderDetector.js::SecondOrderDetector._trigger": {
+      "lines": 46,
+      "complexity": 32,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/engine/detectors/SecondOrderDetector.js::SecondOrderDetector.detect": {
+      "lines": 57,
+      "complexity": 25,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/engine/detectors/StackedDetector.js::StackedDetector.detect": {
+      "lines": 35,
+      "complexity": 17,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/engine/detectors/TimeBlindDetector.js::TimeBlindDetector._extendedRound": {
+      "lines": 54,
+      "complexity": 19,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/engine/detectors/TimeBlindDetector.js::TimeBlindDetector._legacyDetect": {
+      "lines": 48,
+      "complexity": 16,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/engine/detectors/TimeBlindDetector.js::TimeBlindDetector._resolveTimeTemplates": {
+      "lines": 33,
+      "complexity": 17,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/engine/detectors/TimeBlindDetector.js::TimeBlindDetector._robustDetect": {
+      "lines": 95,
+      "complexity": 43,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/engine/detectors/UnionDetector.js::UnionDetector._gateInjection": {
+      "lines": 42,
+      "complexity": 16,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/engine/detectors/UnionDetector.js::UnionDetector.detect": {
+      "lines": 63,
+      "complexity": 19,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/engine/discovery/paramMiner.js::mineParams": {
+      "lines": 71,
+      "complexity": 27,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/engine/egressOpts.js::classifyNetError": {
+      "lines": 16,
+      "complexity": 18,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/engine/exploit/fileWrite.js::fileWrite": {
+      "lines": 43,
+      "complexity": 19,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/engine/exploit/stacked.js::buildStackPageSql": {
+      "lines": 47,
+      "complexity": 21,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/engine/exploit/stacked.js::deepDump": {
+      "lines": 52,
+      "complexity": 21,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/engine/exploit/udf.js::udfInstall": {
+      "lines": 82,
+      "complexity": 37,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/engine/extractScope.js::extractAll": {
+      "lines": 62,
+      "complexity": 28,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/engine/extractScope.js::extractByScope": {
+      "lines": 370,
+      "complexity": 139,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/engine/extraction/hashAnalysis.js::classifyHash": {
+      "lines": 46,
+      "complexity": 25,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/engine/models.js::createTarget": {
+      "lines": 41,
+      "complexity": 25,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/engine/paramEncoding.js::detectParamEncoding": {
+      "lines": 21,
+      "complexity": 16,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/engine/payloadRegistry.js::<arrow@178>": {
+      "lines": 16,
+      "complexity": 26,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/engine/payloadRegistry.js::selectPayloads": {
+      "lines": 25,
+      "complexity": 28,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/engine/payloadSchema.js::validatePayloadEntry": {
+      "lines": 69,
+      "complexity": 53,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/engine/payloads/customPayloads.js::<arrow@45>": {
+      "lines": 47,
+      "complexity": 23,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/engine/payloads/customPayloads.js::validateCustomEntries": {
+      "lines": 56,
+      "complexity": 24,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/engine/scan/capabilityConstraints.js::collectCapabilityConstraints": {
+      "lines": 65,
+      "complexity": 28,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/engine/scan/detect.js::<arrow@546>": {
+      "lines": 79,
+      "complexity": 28,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/engine/scan/detect.js::<arrow@79>": {
+      "lines": 162,
+      "complexity": 80,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/engine/scan/detect.js::detectPhase": {
+      "lines": 449,
+      "complexity": 200,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/engine/scan/discover.js::discoverPoints": {
+      "lines": 130,
+      "complexity": 61,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/engine/scan/extract.js::<arrow@34>": {
+      "lines": 62,
+      "complexity": 27,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/engine/scan/extract.js::extractPhase": {
+      "lines": 74,
+      "complexity": 31,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/engine/scan/finalize.js::finalizeReport": {
+      "lines": 134,
+      "complexity": 69,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/engine/scan/prefilter.js::<arrow@225>": {
+      "lines": 22,
+      "complexity": 16,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/engine/scan/prefilter.js::<arrow@333>": {
+      "lines": 43,
+      "complexity": 35,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/engine/scan/prefilter.js::<arrow@455>": {
+      "lines": 45,
+      "complexity": 33,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/engine/scan/prefilter.js::prefilterPoints": {
+      "lines": 83,
+      "complexity": 58,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/engine/scan/prefilter.js::skipStaticPoints": {
+      "lines": 59,
+      "complexity": 29,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/engine/scan/prefilter.js::validationGuardedSkipPoints": {
+      "lines": 59,
+      "complexity": 42,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/engine/scan/scanClient.js::getScanClient": {
+      "lines": 85,
+      "complexity": 30,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/engine/scan/supplementalRuns.js::_runSecondOrder": {
+      "lines": 68,
+      "complexity": 28,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/engine/scanDiff.js::diffReports": {
+      "lines": 31,
+      "complexity": 18,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/engine/scanHelpers.js::hasData": {
+      "lines": 18,
+      "complexity": 23,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/engine/scanRunner.js::<arrow@122>": {
+      "lines": 34,
+      "complexity": 21,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/engine/scanRunner.js::runScanLoop": {
+      "lines": 188,
+      "complexity": 69,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/engine/sqlmapBridge.js::SqlmapBridge.start": {
+      "lines": 115,
+      "complexity": 38,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/engine/vulnEnrich.js::enrichVuln": {
+      "lines": 20,
+      "complexity": 19,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/mcp/protocol.js::createMcpServer": {
+      "lines": 78,
+      "complexity": 26,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/mcp/protocol.js::handle": {
+      "lines": 72,
+      "complexity": 21,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/mcp/tools.js::<arrow@102>": {
+      "lines": 50,
+      "complexity": 30,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/mcp/tools.js::<arrow@283>": {
+      "lines": 51,
+      "complexity": 25,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/mcp/tools.js::buildTools": {
+      "lines": 263,
+      "complexity": 81,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/services/ReportGenerator.js::toCSV": {
+      "lines": 50,
+      "complexity": 19,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/services/ReportGenerator.js::toHTML": {
+      "lines": 118,
+      "complexity": 7,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/services/ReportGenerator.js::toSARIF": {
+      "lines": 68,
+      "complexity": 40,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/services/reportAttackPath.js::buildAttackPath": {
+      "lines": 101,
+      "complexity": 44,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/services/reportDelivery.js::buildDelivery": {
+      "lines": 75,
+      "complexity": 71,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/services/reportPoC.js::attachPoc": {
+      "lines": 28,
+      "complexity": 22,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/services/reportPoC.js::pocEntries": {
+      "lines": 38,
+      "complexity": 20,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/services/reportPoC.js::pocVerifyHint": {
+      "lines": 35,
+      "complexity": 25,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/services/reportSections.js::conclusion": {
+      "lines": 15,
+      "complexity": 16,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/services/scanLedger.js::pruneLedger": {
+      "lines": 86,
+      "complexity": 30,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/services/scanLedger.js::recordScan": {
+      "lines": 62,
+      "complexity": 42,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "src/App.tsx::AppThemeProvider": {
+      "lines": 168,
+      "complexity": 28,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "src/components/BlindTraceTimeline.tsx::BlindTraceTimeline": {
+      "lines": 147,
+      "complexity": 32,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "src/components/DbTree.tsx::Node": {
+      "lines": 54,
+      "complexity": 18,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "src/components/ProgressView.tsx::ProgressView": {
+      "lines": 128,
+      "complexity": 36,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "src/components/ReportExport.tsx::ReportExport": {
+      "lines": 157,
+      "complexity": 24,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "src/components/ReportSummarySection.tsx::ReportSummarySection": {
+      "lines": 214,
+      "complexity": 31,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "src/components/ScanConfigPanel.tsx::ScanConfigPanel": {
+      "lines": 107,
+      "complexity": 13,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "src/components/ScanWizard.tsx::ScanWizardInner": {
+      "lines": 197,
+      "complexity": 50,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "src/components/SqlmapOptions.tsx::SqlmapOptions": {
+      "lines": 174,
+      "complexity": 37,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "src/components/TargetForm.tsx::TargetForm": {
+      "lines": 158,
+      "complexity": 16,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "src/components/TopBar.tsx::TopBar": {
+      "lines": 131,
+      "complexity": 9,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "src/components/ValidityBanner.tsx::ValidityBanner": {
+      "lines": 56,
+      "complexity": 17,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "src/components/VulnDetail.tsx::VulnDetail": {
+      "lines": 77,
+      "complexity": 18,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "src/components/WafTamperPanel.tsx::WafTamperPanel": {
+      "lines": 190,
+      "complexity": 24,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "src/components/progress/progressUtils.tsx::renderSecondary": {
+      "lines": 59,
+      "complexity": 26,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "src/components/scanConfig/DataExtractionSection.tsx::DataExtractionSection": {
+      "lines": 121,
+      "complexity": 11,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "src/components/scanConfig/NetworkAuthSection.tsx::NetworkAuthSection": {
+      "lines": 170,
+      "complexity": 43,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "src/components/scanConfig/PayloadTuningSection.tsx::PayloadTuningSection": {
+      "lines": 179,
+      "complexity": 20,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "src/components/scanConfig/RequestControlSection.tsx::RequestControlSection": {
+      "lines": 195,
+      "complexity": 16,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "src/components/scanConfig/SecondOrderSection.tsx::SecondOrderSection": {
+      "lines": 95,
+      "complexity": 19,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "src/components/scanConfig/SessionSection.tsx::SessionSection": {
+      "lines": 116,
+      "complexity": 14,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "src/hooks/useEvents.ts::<arrow@101>": {
+      "lines": 39,
+      "complexity": 25,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "src/hooks/useEvents.ts::<arrow@142>": {
+      "lines": 117,
+      "complexity": 43,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "src/hooks/useEvents.ts::<arrow@176>": {
+      "lines": 66,
+      "complexity": 28,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "src/hooks/useEvents.ts::<arrow@55>": {
+      "lines": 199,
+      "complexity": 82,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "src/hooks/useEvents.ts::useEvents": {
+      "lines": 208,
+      "complexity": 82,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "src/hooks/useScan.ts::<arrow@119>": {
+      "lines": 60,
+      "complexity": 24,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "src/hooks/useScan.ts::useScan": {
+      "lines": 161,
+      "complexity": 48,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "src/pages/ExploitPage.tsx::<arrow@48>": {
+      "lines": 29,
+      "complexity": 18,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "src/pages/ExploitPage.tsx::ExploitPage": {
+      "lines": 195,
+      "complexity": 49,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "src/pages/HistoryPage.tsx::HistoryPage": {
+      "lines": 169,
+      "complexity": 28,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "src/pages/HomePage.tsx::HomePage": {
+      "lines": 253,
+      "complexity": 24,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "src/pages/ReportPage.tsx::ReportPage": {
+      "lines": 320,
+      "complexity": 69,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "src/pages/ScanPage.tsx::ScanPage": {
+      "lines": 187,
+      "complexity": 32,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "src/shared/apiClient.ts::<arrow@84>": {
+      "lines": 27,
+      "complexity": 23,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "src/tests/exploitPage.test.tsx::<arrow@49>": {
+      "lines": 110,
+      "complexity": 1,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "src/tests/scanConfig.contract.test.ts::<arrow@61>": {
+      "lines": 190,
+      "complexity": 7,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "src/tests/scanConfigSections.bindings.test.tsx::<arrow@66>": {
+      "lines": 126,
+      "complexity": 3,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "src/tests/scanStore.test.ts::<arrow@34>": {
+      "lines": 112,
+      "complexity": 8,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "src/tests/sqlmapOptions.test.tsx::<arrow@182>": {
+      "lines": 102,
+      "complexity": 3,
+      "limitLines": 100,
+      "limitComplexity": 15
+    }
+  }
+}

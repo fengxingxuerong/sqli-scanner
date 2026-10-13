@@ -35,6 +35,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { lex } from './lib/jsLexer.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const BASELINE_FILE = path.join(ROOT, 'docs', '_nesting-baseline.json');
@@ -55,83 +56,22 @@ const GRACE = 0;
  * @returns {{max:number, maxLine:number, hotlines:number[]}}
  */
 export function analyzeNesting(src) {
-  const n = src.length;
-  let i = 0, line = 1, depth = 0, max = 0, maxLine = 0;
+  // [D53 2026-10-13] 词法内核抽取到 scripts/lib/jsLexer.mjs，本函数改为复用。
+  // 输出契约（max/maxLine/hotlines）逐字节不变 —— 判据细节（跳字符串/模板串/
+  // 注释、对象字面量 vs 代码块）搬到 jsLexer.lex，那里是唯一真源，避免四类新门禁
+  // 各写一份扫描器重蹈误算。
+  const { maxDepth, maxDepthLine, tokens } = lex(src);
   const hotlines = [];
-  // 配对栈：每遇到一个 '{' 压入「是否代码块」，遇 '}' 弹出对应项。
-  // 不用它的话，对象字面量的 '}' 会误减深度 ⇒ 后面真正的嵌套被算浅。
-  const braceStack = [];
-  while (i < n) {
-    const c = src[i];
-    if (c === '\n') { line++; i++; continue; }
-    // 行注释
-    if (c === '/' && src[i + 1] === '/') { while (i < n && src[i] !== '\n') i++; continue; }
-    // 块注释（跳过，但计行以免行号错位）
-    if (c === '/' && src[i + 1] === '*') {
-      i += 2;
-      while (i < n && !(src[i] === '*' && src[i + 1] === '/')) { if (src[i] === '\n') line++; i++; }
-      i += 2;
-      continue;
+  let depth = 0;
+  for (const t of tokens) {
+    if (t.type !== 'brace') continue;
+    if (t.value === '{') {
+      if (t.block) { depth++; if (depth >= SOFT_MAX) hotlines.push(t.line); }
+    } else if (t.block) {
+      depth--;
     }
-    // 字符串 / 模板串（模板串内的 ${} 表达式按代码算深度，此处保守跳过整个串）
-    if (c === '"' || c === "'" || c === '`') {
-      const q = c;
-      i++;
-      while (i < n) {
-        if (src[i] === '\\') { i += 2; continue; }
-        if (src[i] === '\n') line++;
-        if (src[i] === q) { i++; break; }
-        i++;
-      }
-      continue;
-    }
-    if (c === '{') {
-      // 判断是对象字面量还是控制流块。二者都吃缩进，但只有后者是「嵌套」——
-      // 混算会让基线虚高：实测 injection.js 因 `Array.from({ length: columns })`
-      // 这类实参对象被记成 7 层，实际控制流只有 5 层。基线虚高等于门禁被放宽。
-      // ── 对象字面量 vs 代码块 ──────────────────────────────────────────────────
-      // 两者都吃缩进，但只有后者是「嵌套」。直接按"上下文启发式"判断很脆：
-      //   `function f() {` 与 `f({...})` 的前一字符都是 ')'，靠回看要区分
-      //   参数列表 vs 实参列表；靠 `return` 关键字又会漏 `=> ({...})`。
-      // 更稳的做法是看 **`{` 之后紧跟什么**：
-      //   对象字面量 ⇒ 紧跟 属性名 / 字符串键 / 展开 ... / 方法名 / getter / 逗号 / 收尾 }
-      //   代码块     ⇒ 紧跟 语句（if/for/while/return/const/.../裸标识符表达式）或空 { }
-      // 这里采用一个**保守合并**的判据：`{` 后紧跟 `:` , `}` , `...` , 字符串/标识符+`:`，
-      // 或是 `get/set/async/*` ⇒ 对象字面量；否则算代码块。
-      // 保守方向说明：宁可高估（算成代码块）也不低估 —— 低估会让基线虚高，
-      // 而基线虚高 = 门禁被放宽（实测 injection.js 曾因此记成 7 而实际 5）。
-      const peek = src.slice(i + 1).match(/^\s*([^\n]{0,24})/);
-      const after = peek ? peek[1] : '';
-      const looksLikeObject = /^(\.\.\.|,|\})/.test(after)
-        || /^(['"`])/.test(after)
-        || /^[A-Za-z_$][\w$]*\s*[:,(]/.test(after)
-        || /^(get|set|async|static|\*)\b/.test(after);
-      // 但赋值语境下的 `{ a: 1 }` 必须是对象而非块：`const o = {` 的 after 是 "a: 1 }"，
-      // 上面的属性名规则已覆盖。纯语句块如 `{ foo(); }` 的 after 是 "foo(); }"，
-      // `foo(` 会被属性名规则误判为方法 —— 故要求"名字后面是 : 或 ,"才是对象。
-      const afterIsNameThenColonOrComma = /^[A-Za-z_$][\w$]*\s*[:,]/.test(after);
-      const isObjectLiteral = looksLikeObject && (afterIsNameThenColonOrComma
-        || /^(\.\.\.|,|\})/.test(after)
-        || /^(['"`])/.test(after)
-        || /^(get|set|async|static|\*)\b/.test(after));
-      braceStack.push(!isObjectLiteral); // true = 代码块（参与深度），false = 对象字面量
-      if (!isObjectLiteral) {
-        depth++;
-        if (depth > max) { max = depth; maxLine = line; }
-        if (depth >= SOFT_MAX) hotlines.push(line);
-      }
-      i++;
-      continue;
-    }
-    if (c === '}') {
-      // 只有配对的是"代码块"才减深度；对象字面量的收尾不参与
-      if (braceStack.pop() !== false) depth--;
-      i++;
-      continue;
-    }
-    i++;
   }
-  return { max, maxLine, hotlines };
+  return { max: maxDepth, maxLine: maxDepthLine, hotlines };
 }
 
 function collect(rel, exts, out) {

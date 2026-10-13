@@ -9,6 +9,8 @@
 // 容灾策略：某角色失败/429 → 自动切换到同角色其他 key → 跨角色降级
 // ============================================================================
 
+import { AppError, ErrorCode } from '../core/errors.js';
+
 // [P2-FIX 2026-09-05] 默认外发 opt-in：旧实现 API_BASE 默认指向 https://token.sensenova.cn，
 // 只要用户配了 key 就会把漏洞报告（含脱敏目标 URL/参数/证据）发往第三方，属默认外发。
 // 改为：必须显式设置 AI_REPORT_API_BASE 才启用外发；只配 key 未设 base → 明确报错拒绝外发。
@@ -55,12 +57,12 @@ function getRoleConfig(roleIdx) {
   if (!API_ENDPOINT_OPT_IN) {
     // 数据外发 opt-in 护栏：默认拒绝外发，不静默回落第三方
     if (API_KEYS.length === 0) {
-      throw new Error('AI 报告功能未配置。请设置 AI_REPORT_API_BASE（数据外发目标端点）与 AI_REPORT_KEY_1（或 AI_REPORT_KEY_2/3）启用。');
+      throw new AppError(ErrorCode.AI_REPORT_DISABLED, 'AI 报告功能未配置。请设置 AI_REPORT_API_BASE（数据外发目标端点）与 AI_REPORT_KEY_1（或 AI_REPORT_KEY_2/3）启用。');
     }
-    throw new Error('AI 报告功能未启用数据外发：已检测到 AI_REPORT_KEY，但未设置 AI_REPORT_API_BASE。为避免将漏洞报告默认发送至第三方，必须显式设置 AI_REPORT_API_BASE 指向信任的 AI 服务端点后才可启用。');
+    throw new AppError(ErrorCode.AI_REPORT_DISABLED, 'AI 报告功能未启用数据外发：已检测到 AI_REPORT_KEY，但未设置 AI_REPORT_API_BASE。为避免将漏洞报告默认发送至第三方，必须显式设置 AI_REPORT_API_BASE 指向信任的 AI 服务端点后才可启用。');
   }
   if (API_KEYS.length === 0) {
-    throw new Error('AI 报告功能未配置。请设置 AI_REPORT_KEY_1 环境变量（或 AI_REPORT_KEY_2/3）启用。');
+    throw new AppError(ErrorCode.AI_REPORT_DISABLED, 'AI 报告功能未配置。请设置 AI_REPORT_KEY_1 环境变量（或 AI_REPORT_KEY_2/3）启用。');
   }
   const role = ROLES[roleIdx];
   // 优先用角色指定的 key，不可用时遍历其他 key
@@ -76,7 +78,7 @@ function getRoleConfig(roleIdx) {
       };
     }
   }
-  throw new Error(`角色 ${role.name} 无可用 key（全部冷却中，请稍后重试）`);
+  throw new AppError(ErrorCode.RATE_LIMITED, `角色 ${role.name} 无可用 key（全部冷却中，请稍后重试）`);
 }
 
 // ── 构建 LLM Prompt（按角色分 prompt）──────────────────────────────────────
@@ -295,12 +297,12 @@ async function callLLM(cfg, systemPrompt, userPrompt, timeoutMs = 60000) {
     });
     if (res.status === 429) {
       markKeyFail(cfg.keyIdx, true);
-      throw new Error(`角色 ${cfg.role} 的 key${cfg.keyIdx + 1} 触发 429 限流，已冷却 60s`);
+      throw new AppError(ErrorCode.RATE_LIMITED, `角色 ${cfg.role} 的 key${cfg.keyIdx + 1} 触发 429 限流，已冷却 60s`);
     }
     if (!res.ok) {
       const errText = await res.text().catch(() => '');
       markKeyFail(cfg.keyIdx, false);
-      throw new Error(`LLM API ${res.status}: ${errText.slice(0, 200)}`);
+      throw new AppError(ErrorCode.UNKNOWN, `LLM API ${res.status}: ${errText.slice(0, 200)}`);
     }
     /** @type {any} */
     const data = await res.json(); // OpenAI 兼容响应：choices[0].message.content
@@ -308,7 +310,7 @@ async function callLLM(cfg, systemPrompt, userPrompt, timeoutMs = 60000) {
   } catch (e) {
     if (e.name === 'AbortError') {
       markKeyFail(cfg.keyIdx, false);
-      throw new Error(`角色 ${cfg.role} 请求超时（${timeoutMs / 1000}s）`, { cause: e });
+      throw new AppError(ErrorCode.HTTP_TIMEOUT, `角色 ${cfg.role} 请求超时（${timeoutMs / 1000}s）`, { cause: e });
     }
     throw e;
   } finally {

@@ -4,6 +4,119 @@
 
 ## [Unreleased]
 
+### 2026-10-14 批次收口 · D54–D61 八个批次（本机门禁全绿，CI 待复跑）
+
+**一句话**：把 10-13 落地但**从未入库**的八个批次一次收口（93 文件 +7079/-1847），并修掉收口门禁暴露的
+7 处真实缺陷——其中 3 处是 D57 迁移留下的**不可达死代码**，2 处是 D54 拆分留下的未使用解构。
+
+| 面 | 内容 |
+|---|---|
+| 入库 | D53 复杂度门禁+词法内核 · D54 复杂度热点拆分 · D55 类型覆盖门禁 · D56 重复代码门禁+合并单核 · D57 tamper 遍历收口（48 插件）· D58 死代码门禁 · D59 错误形态门禁 · D60 覆盖率盲区 · D61 技术债门禁 |
+| 真缺陷 1（D57 残留） | `dbase64encode` / `decimal2char` / `json` 三个插件迁移到 `walkLiterals` 后残留 `return out;` —— `out` 未定义且在 `return` 之后（unreachable，运行期不执行但 eslint `no-undef`+`no-unreachable` 红）。已删 |
+| 真缺陷 2（D54 残留） | `blindExtractor._finalizeExtract` 解构了未使用的 `scanId`；`BooleanBlindDetector._robustDetect` 解构了未使用的 `target`/`point`/`dbms`（拆分后子过程整体收 `ctx`）。已删 |
+| 真缺陷 3（TS） | `ReportAI.js:313` 给 `AppError` 传了第 3 个参数 `{ cause }`，而构造函数只声明 2 个 ⇒ `TS2554`。修法是**扩展构造函数**（新增可选 `cause`，有值才挂 `this.cause`），不是删掉调用方的上下文 |
+| 未使用符号 | `literalWalk.js` 导入未用的 `isQuoteEscaped`；`debt-guard.mjs` 定义未用的 `DEBT_TYPES` ⇒ 删（后者连带 3 个基线条目行号 -1，已同步修正而不是调基线） |
+| cast 预算 | D60 新增的 `useServerHistory.test.ts` 用 `as any` 绕过 mock 类型 ⇒ `src/tests` cast 数 92 > 基线 91。按守卫自述口径**补齐合法 `ServerScanRow` 字面量摘掉 cast**（92→91），**没有调基线** |
+| 基线重生成 | `duplication` 基线 41402 → 41404。A/B 实证：把本次全部 7 处修复逐个临时还原后检出数**仍是 41404** ⇒ +2 与本次修复无关，41402 是批次落地中途生成的中间值，收口时按真值重生成 |
+| 环境 | 本机 `node_modules/@esbuild/win32-x64` **只有 package.json、没有 esbuild.exe** ⇒ vite/vitest 根本起不来（此前"前端跑不了"的真因）。删目录重装后恢复，前端 565/565 首次在本机跑出数字 |
+
+### 2026-10-13 批次 D61 · 技术债闭环 + 可读性
+
+**一句话**：新增技术债标记格式门禁——新增标记必须用统一格式 `// [TODO YYYY-MM-DD D##] 简述`，存量 25 个标记入基线只减不增。
+
+| 面 | 内容 |
+|---|---|
+| 新增 | `scripts/debt-guard.mjs`（技术债门禁）；`docs/_debt-baseline.json`（25 个标记基线）；`server/tests/debtGuard.wiring.test.js`（6/6 接线守护） |
+| 修改 | `scripts/ci-local.mjs`（GATES +2）；`package.json`（+3 脚本，check:all 串入）；CI ci.yml + pre-commit hook |
+| 约束 | 新增标记必须统一格式；基线只减不增；类型 ∈ TODO/FIXME/HACK/XXX |
+| 回归 | `node scripts/debt-guard.mjs --selftest` 4/4 全绿 |
+
+### 2026-10-13 批次 D60 · 覆盖率盲区 + 跳过可观测 + 阈值收紧
+
+**一句话**：补 `useServerHistory` 四分支直接用例；`run-coverage.mjs` 显式呈现 skipped 计数（跳过 ≠ 通过）；修复 `bearerKeeper.js` 内容重复追加导致的语法错误。
+
+| 面 | 内容 |
+|---|---|
+| 新增 | `src/tests/useServerHistory.test.ts`（4 分支直接用例） |
+| 修改 | `scripts/run-coverage.mjs`（skipped 醒目摘要）；`scripts/mutation-check.mjs`（+1 frontend 目标）；`server/src/core/bearerKeeper.js`（修复损坏：585→293 行） |
+| 回归 | `cd server && npm test` 3548/3552 全绿；`test:coverage` 通过（91.18%/80.83%/84.13%） |
+
+### 2026-10-13 批次 D59 · 错误形态一致性 + 显式 any 收敛
+
+**一句话**：新增错误形态一致性门禁——受限目录（api/services）裸 `Error` 必须为 0，非受限只减不增；`scanLedger.js`/`ReportAI.js` 共 9 处裸 `Error` 收敛为 `AppError`。
+
+| 面 | 内容 |
+|---|---|
+| 新增 | `scripts/error-contract-guard.mjs`（错误形态门禁）；`docs/_errorstyle-baseline.json`（19 文件 39 处基线）；`server/tests/errorContractGuard.wiring.test.js`（6/6 接线守护） |
+| 修改 | `server/src/services/scanLedger.js`（2 处裸 Error→AppError）；`server/src/services/ReportAI.js`（7 处裸 Error→AppError）；`scripts/ci-local.mjs`（GATES +2）；`package.json`（+3 脚本，check:all 串入）；CI ci.yml + pre-commit hook |
+| 约束 | 受限目录裸 Error=0；非受限只减不增；错误码取值沿用既有（不改码） |
+| 回归 | `node scripts/error-contract-guard.mjs --selftest` 5/5 全绿；`cd server && npm test` 3542/3542 全绿 |
+
+### 2026-10-13 批次 D58 · 死代码门禁 + 清理
+
+**一句话**：新增未使用导出门禁——符号收集 → 引用收集 → 差集 → 扣减用途标记与基线豁免，基线只减不增；`getResponseTransform` 加 `@public` 标注。
+
+| 面 | 内容 |
+|---|---|
+| 新增 | `scripts/deadcode-guard.mjs`（死代码门禁）；`docs/_deadcode-baseline.json`（162 个未使用导出基线）；`server/tests/deadcodeGuard.wiring.test.js`（6/6 接线守护） |
+| 修改 | `server/src/core/responseTransform.js`（`getResponseTransform` 加 `@public` 标注）；`scripts/ci-local.mjs`（GATES +2）；`package.json`（+3 脚本，check:all 串入）；CI ci.yml + pre-commit hook |
+| 约束 | 基线只减不增；用途标记（@public/@used-by/@test-only/@dynamic）豁免；namespace 导入自动豁免 |
+| 回归 | `node scripts/deadcode-guard.mjs --selftest` 5/5 全绿；`refs:check` / `modules:check` 仍绿 |
+
+### 2026-10-13 批次 D57 · tamper 字面量遍历收口
+
+**一句话**：新增 `literalWalk.js` 共享遍历抽象，迁移 48 个 tamper 插件（33 space2* + 15 编码族）消除重复的 inSingle/inDouble 扫描循环，三闸等价验证通过。
+
+| 面 | 内容 |
+|---|---|
+| 新增 | `server/src/core/tamper/literalWalk.js`（遍历抽象）；`server/tests/literalWalk.test.js`（11/11）；`server/tests/tamperLiteralWalk.guard.test.js`（2/2 迁移守卫） |
+| 修改 | 48 个 tamper 插件改为 `walkLiterals` 回调（33 space2* + 15 编码族）；`scripts/mutation-check.mjs`（+1 目标）；`docs/_dup-baseline.json`（42660→41368，-1292） |
+| 约束 | 遍历器只提供遍历、不提供行为分支（禁止多态开关，spec 5.2.4）；未闭合字面量 → onAbort 原样输出 |
+| 回归 | 三闸全绿（tamper:parity / tamper:examples / tamper-matrix）；`cd server && npm test` 3534/3534 全绿 |
+
+### 2026-10-13 批次 D56 · 重复代码门禁 + 提取合并单核
+
+**一句话**：新增令牌级重复代码门禁——跨文件克隆检测（FNV-1a 滚动哈希 + 精确比对），基线只减不增；同时把 `mergeExtracted`/`mergeExtractedForResume` 两份逐字段白名单收口为单核 `extractMerge.js`，字段清单单点化。
+
+| 面 | 内容 |
+|---|---|
+| 新增 | `scripts/duplication-guard.mjs`（重复代码门禁）；`docs/_dup-baseline.json`（42660 个跨文件重复块）；`server/src/engine/extractMerge.js`（合并单核：`FIELD_TABLE` + `mergeFields`）；`server/tests/extractMerge.test.js`（12/12 等价性）；`server/tests/duplicationGuard.wiring.test.js`（6/6） |
+| 修改 | `server/src/engine/scanHelpers.js`（`mergeExtracted`/`mergeExtractedForResume` 变薄包装）；`scripts/ci-local.mjs`（GATES lint 组 +2）；`package.json`（+3 脚本 + `check:all`）；`.github/workflows/ci.yml`（+2 步）；`.husky/pre-commit`（+1 gate） |
+| 约束 | 对外签名不变：`mergeExtracted` 就地修改返回 `undefined`；`mergeExtractedForResume` 返回新对象；字段语义不变（spec 4.5.2） |
+| 回归 | `cd server && npm test` 3505/3505 全绿（4 skip 环境缺依赖） |
+
+### 2026-10-13 批次 D55 · JSDoc 类型覆盖门禁 + 隐性 any 分批启动
+
+**一句话**：新增 JSDoc 类型覆盖门禁——独立于编译器开关，以 `@param`/`@returns` 标注率度量类型安全推进度，按目录批次基线锁定只升不降。
+
+| 面 | 内容 |
+|---|---|
+| 新增 | `scripts/typecoverage-guard.mjs`（类型覆盖门禁）；`docs/_typecoverage-baseline.json`（4 批次基线：core 49.1% / engine 29.3% / api 21.9% / services 21.9%）；`server/tests/typecoverageGuard.wiring.test.js`（6/6） |
+| 修改 | `scripts/coverage-calibration.mjs`（新增 server 侧阈值只读校验）；`scripts/ci-local.mjs`（GATES lint 组 +2）；`package.json`（+3 脚本 + `check:all`）；`.github/workflows/ci.yml`（+2 步）；`.husky/pre-commit`（+1 gate） |
+| 待推进 | `server/src/services` 首批 JSDoc 标注归零（13 文件，当前 21.9%）——门禁已就位，标注工作下一轮推进 |
+
+### 2026-10-13 批次 D54 · 复杂度热点拆分
+
+**一句话**：把 D53 门禁量化出的两个复杂度热点按职责拆分——`extractBoolean`（271→11 行）拆 5 个子过程，`_robustDetect`（197→20 行）拆 3 个子过程。等价搬移，行为逐字不变。
+
+| 面 | 内容 |
+|---|---|
+| 修改 | `server/src/engine/blindExtractor.js`（`extractBoolean` 拆为 `_resolveExtractPlan`/`_extractLength`/`_extractBytesBitwise`/`_extractBytesBisect`/`_finalizeExtract`）；`server/src/engine/detectors/BooleanBlindDetector.js`（`_robustDetect` 拆为 `_collectRobustBaselines`/`_buildRobustJudges`/`_probeBooleanPairs`）；`scripts/mutation-check.mjs`（新增 `blindExtractor.js` 变异目标）；`docs/_complexity-baseline.json`（260 个函数，净 +2） |
+| 新增 | `server/tests/blindExtractSubprocess.test.js`（5/5 定点单测：端到端提取/缓存命中/结构性不支持/位平面 opt-in/空值不缓存） |
+| 约束 | 等价搬移：请求序列、判据、置信度写入时机、缓存键结构逐字不变；子过程仅传数据不共享可变状态 |
+| 回归 | `cd server && npm test` 3494/3498 全绿；`node scripts/mutation-check.mjs --runner=server --limit=1` PASS 无存活变异 |
+
+### 2026-10-13 批次 D53 · 函数级复杂度门禁 + 共享词法内核
+
+**一句话**：新增第四道体积类门禁——函数级复杂度（有效行数 + 圈复杂度），填补 arch-guard（文件体积）与 nesting-guard（嵌套深度）之间的盲区：单函数几百行、圈复杂度几十的"巨兽"对两者都透明。
+
+| 面 | 内容 |
+|---|---|
+| 新增 | `scripts/lib/jsLexer.mjs`（共享词法内核：`lex`/`findFunctions`/`countBranches`/`effectiveBodyLines`）；`scripts/complexity-guard.mjs`（函数级复杂度门禁）；`docs/_complexity-baseline.json`（258 个存量函数基线）；`server/tests/jsLexer.guard.test.js`（10/10）；`server/tests/complexityGuard.wiring.test.js`（7/7） |
+| 修改 | `scripts/nesting-guard.mjs`（`analyzeNesting` 改为复用 `lex`，全仓 778 文件输出逐字节不变）；`scripts/ci-local.mjs`（GATES lint 组新增两条）；`package.json`（新增 `complexity:guard`/`:selftest`/`:baseline` + `check:all` 串入）；`.github/workflows/ci.yml`（selftest + 检查各一步）；`.husky/pre-commit`（0.9s） |
+| 阈值 | 软上限 100 行 / 复杂度 15（新代码不得从超限起步）；硬上限 200 行 / 复杂度 25（存量超者进基线，只许持平或下降） |
+| 判据 | 有效行数剔除纯空白/纯注释行；圈复杂度基数 1，计数 if/for/while/case/catch/&&/\|\|/??/?. /三目 ?；函数边界由 `findFunctions` 保守识别，不确定者不判定 |
+
 ### 2026-10-13 推送后 CI 实测 · api-range 的 exploit 组：一条被 6005 顶掉的限速断言，和两条"没发过包却报 PASS"
 
 **一句话**：批次推上去 CI 的 `lint` 转绿（连红 6 轮的唯一红点销账），但 `acceptance` 的
