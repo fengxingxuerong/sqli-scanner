@@ -369,6 +369,11 @@ jobs:
           LINT_RESULT: ${{ needs.lint.result }}
           TF_RESULT: ${{ needs.test-frontend.result }}
           TS_RESULT: ${{ needs.test-server.result }}
+        # [CI-FIX 2026-10-14] 必须显式 `shell: bash`：本 job 是跨平台矩阵，windows runner
+        # 默认 shell 是 pwsh，下面这段 bash 语法会被 pwsh 解析成
+        # `ParserError: Missing opening '(' after keyword 'for'` ⇒ 一步没跑就 exit 1。
+        # （同 job 里「Recreate server/.env.test」那步早就带了 shell: bash，本步漏了。）
+        shell: bash
         run: |
           for r in "$LINT_RESULT" "$TF_RESULT" "$TS_RESULT"; do
             if [ "$r" = "failure" ] || [ "$r" = "cancelled" ]; then

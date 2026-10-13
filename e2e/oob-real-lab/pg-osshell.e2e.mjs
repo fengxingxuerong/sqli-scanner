@@ -98,10 +98,33 @@ const ctx = {
 // 4) osShell 闭环：marker 必须原样回来（COPY FROM PROGRAM 落表 → UNION 回显读出）
 const exploiter = new Exploiter();
 const marker = `pgshell_${Date.now() % 100000}`;
-const osRes = await exploiter.osShell(ctx, `cmd /c echo ${marker}`);
+// [2026-10-14 FIX] 命令必须按**执行方**（PG 服务所在宿主，本脚本与它同机）的平台选：
+// PG 的 COPY ... FROM PROGRAM 由服务端 shell 执行，CI 的 acceptance 跑 ubuntu-latest，
+// 而这里原本写死 Windows 的 `cmd /c echo` ⇒ Linux 上是 `cmd: not found` ⇒ COPY 失败、
+// cmd_out 无行 ⇒ 回显空串；而 pgOsShell 无条件返回 ok:true ⇒ 表面只看到「marker 未命中」，
+// 看不出到底是权限问题还是命令压根不存在。与 osShell.js 里 Oracle Java 分支同一口径。
+// ⚠ 前提：PG 与脚本同机。若将来 PG 跑在远端/容器里，platform 要换成"PG 宿主平台"。
+const shellCmd = process.platform === 'win32' ? `cmd /c echo ${marker}` : `echo ${marker}`;
+const osRes = await exploiter.osShell(ctx, shellCmd);
 const outVal = String(osRes.value ?? '');
 const ok = osRes.ok === true && outVal.includes(marker);
-console.log(`[step4] osShell → ${JSON.stringify({ ok: osRes.ok, value: outVal.slice(0, 60), note: osRes.note ?? null, error: osRes.error ?? null })}`);
+console.log(`[step4] osShell（${shellCmd}）→ ${JSON.stringify({ ok: osRes.ok, value: outVal.slice(0, 60), note: osRes.note ?? null, error: osRes.error ?? null })}`);
+
+if (!ok) {
+  // 取证：把「COPY 压根没执行」与「执行了但回显通道没读出」分开，否则下次红还是只能猜。
+  try {
+    const exists = await admin.query("SELECT to_regclass('oob_lab.cmd_out') IS NOT NULL AS t");
+    const tableExists = !!exists.rows[0]?.t;
+    let rows = 'n/a';
+    if (tableExists) {
+      const n = await admin.query('SELECT count(*)::int AS n FROM oob_lab.cmd_out');
+      rows = String(n.rows[0]?.n);
+    }
+    console.log(`[diag] cmd_out 表存在=${tableExists} 行数=${rows}（表不存在/0 行 ⇒ COPY 未执行，多半是命令或权限；有行 ⇒ 回显提取通道的问题）`);
+  } catch (e) {
+    console.log(`[diag] cmd_out 取证查询失败：${e.message}`);
+  }
+}
 console.log(`\n[${ok ? 'PASS' : 'FAIL'}] PG os-shell 真机闭环：COPY FROM PROGRAM 落表 → 回显 marker=${ok ? '命中' : '未命中'}`);
 
 // 清理 cmd_out 表（保持靶场库整洁）
