@@ -4,6 +4,24 @@
 
 ## [Unreleased]
 
+### 2026-10-13 推送后 CI 实测 · api-range 的 exploit 组：一条被 6005 顶掉的限速断言，和两条"没发过包却报 PASS"
+
+**一句话**：批次推上去 CI 的 `lint` 转绿（连红 6 轮的唯一红点销账），但 `acceptance` 的
+`api-range-lab` 步骤红 5 条 —— 红因是本批新加的**授权声明严格模式**把用例挡在能力之前；
+顺着排查还挖出更糟的一条：`secure_file_priv` 未注入时 `file-read`/`file-write` **根本没发包**
+却被计成 PASS。两条都是"门禁在测护栏文本 / 把缺前置读成通过"，不是靶场写坏了。
+
+| 面 | 内容 |
+|---|---|
+| CI 事实 | run #225（commit `bbba3142`，tree 与本地 HEAD 一致）：`lint` ✅（facts 那一步过了）· `test-server` ✅ · `test-frontend` ✅ · `docker` ✅ · `e2e-self-contained` ✅ · `release-smoke` ✅ · `sidecar-build` ✅ · `audit` ✅；红在 `acceptance`（步骤 `api-range-lab 接口层靶场（真 MySQL，门禁）`，汇总 44/49 PASS）与 `test-matrix (windows-latest)` 的「前置门禁检查」步（该步的语义就是"前置红则显式标注"，属连带信号，不是独立缺陷）；`test-matrix (macos-latest)` = cancelled（被下一次推送打断） |
+| 5 条红的根因 | `AUTH_DECLARATION_STRICT` 默认 `strict`（spec 5.2.1 规则 7）之后，`exploitBody` 只带布尔 `authorized:true` ⇒ `/exploit/sql`、`/exploit/os-shell`、scanId 接管、凭据继承、以及**限速断言**全部先撞 6005。最典型的是「限速应回 RATE_LIMITED(4290)，实得 6005」—— 授权门把限速门整个盖掉了，那条用例测的根本不是它声称测的东西 |
+| 修法（不放宽任何断言） | 正向用例改为**发结构化声明**（新增 `labDeclaration()`：operator/scope.hosts/timestamp/15 分钟窗，scope 显式覆盖回环靶站，与既有 `scope:['127.0.0.1']` 两道门各管一道）；红线用例 ① 从「authorized:false 必须拒」改为**现形态的红线**「缺声明必须拒」并钉住拒绝理由；**新增 ①b**：lenient 实例下 `authorized:false` 仍必须拒（否则兼容分支零覆盖）；③ 限速体与 ④ SSRF 体补声明；④ 额外把断言从"非 0"升级为**必须命中 SSRF 闸门**（`/SSRF\|禁止访问\|元数据/`），因为原写法在授权门先拒时照样绿 |
+| ★真缺陷 2（更该记的一条） | `run.mjs` 的 SKIP 协议只在 **catch（throw）** 分支认 `e.__skip`，而 `file-read`/`file-write` 用的是 **`return Object.assign(new Error('SKIP:…'), {__skip:true})`** ⇒ 返回值被丢弃、用例记为 **PASS** 并计入通过数。证据：两条都是 `0.0s`、零引擎活动，而汇总 `44/49 PASS` 中 44+5(FAIL)=49 ⇒ **没有一条被记成 SKIP**。后果：`MYSQL_SECURE_FILE_DIR` 不在 CI 环境里（grep ci.yml 0 命中）时，这两条长期是"没测过但报通过"。修法：返回值也查 `__skip`；汇总改为 `PASS n / FAIL m / SKIP k（判定分母 n+m）` 并逐条列出 SKIP 理由 |
+| 前提验到（不靠推理） | 临时探针直调 `core/exploitFlag.checkExploitAuthorization`，9 条分支逐条对期望：带声明放行 / 只带布尔→`AUTH_DECLARATION_MISSING` / `EXPLOIT_ENABLED=0`→`EXPLOIT_UNAUTHORIZED`（先于声明）/ lenient+布尔true→legacy 放行 / lenient+布尔false→拒 / ④ 声明 scope 覆盖元数据 IP→放行、**反证**不覆盖→`AUTH_SCOPE_MISMATCH`（这就是为什么 ④ 的声明 scope 必须写成目标 IP，否则测的是 scope 门不是 SSRF）/ 过期与未来时间戳→`AUTH_DECLARATION_EXPIRED`。首轮探针 1 条不成立，查出是**探针自己**没复刻 cases.mjs 的声明形态，补正后 9/9 成立 |
+| 本机边界（如实标注） | api-range 要真 MySQL，本机无 docker/PHP/3306 关 ⇒ **这 5 条修复本机无法端到端验证**，只能验前提（上面那 9 条）与语法/门禁；判决交 CI 复跑。SKIP 那条的现场证据来自 CI #225 的日志与汇总计数 |
+| 未做 | ① `acceptance` 的 `assert` 只数 `[PASS]`/`[FAIL]`，SKIP 既不加分也不减分 ⇒ 「SKIP 计入通过率分母」这件事在验收层仍是软的，应改为逐组报三计数；② `ci.yml` 未导出 `MYSQL_SECURE_FILE_DIR` 给 api-range 步骤，而 MySQL 已经放行 `secure_file_priv`（步骤 422 行的预检就是为它）⇒ 这两条本该真跑，补一个 env 就能把"能测而没测"变成"测了"；两项都属独立批次，本轮不夹带 |
+
+
 ### 2026-10-13 推送 · `push-via-api.mjs` 的「按 blob 判变更」漏掉重命名 —— fail-closed 挡下一次会丢 39 个文件的推送
 
 **一句话**：推送文档归档那一批时，远端建出来的 `docs/archive/` 只剩 base 里原有的 1 个文件，

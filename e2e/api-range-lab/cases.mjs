@@ -696,6 +696,23 @@ function pointOf(report, param) {
   return (report.points || []).find((pt) => pt.param === param) || (report.points || [])[0];
 }
 
+/**
+ * 本靶场的授权声明（[D51] spec 5.2.1 规则 1/7）。
+ * 靶场跑在回环地址上，scope 显式覆盖 127.0.0.1 —— 与下面 `scope: ['127.0.0.1']` 同义，
+ * 两处都要给：前者是**授权门**的声明，后者是**扫描范围门**（requireScopeDeclaration）的入参，
+ * 两道门各自独立，缺任一道都会把"测能力"变成"测护栏文本"。
+ * timestamp 每次现取：声明带 15 分钟有效窗，长跑（本靶场全套约 45s，但 CI 机器慢）不至于过半就过期，
+ * 也不至于写成一个"永久有效"的假声明。
+ */
+function labDeclaration() {
+  return {
+    operator: 'api-range-lab@ci',
+    scope: { hosts: ['127.0.0.1'] },
+    timestamp: Date.now(),
+    validWindowMs: 15 * 60 * 1000,
+  };
+}
+
 function exploitBody(ctx, report, over = {}) {
   const point = pointOf(report, 'id');
   return {
@@ -703,6 +720,10 @@ function exploitBody(ctx, report, over = {}) {
     point: { originalValue: point?.originalValue ?? '1', location: point?.location || 'url', param: point?.param || 'id' },
     dbms: report.dbms || 'MySQL',
     authorized: true,
+    // [2026-10-13 CI #225 实测] AUTH_DECLARATION_STRICT 默认 strict 之后，只带布尔 authorized:true
+    // 会被 6005 挡在能力之前 ⇒ exploit 组 5 条红（连"限速应回 4290"都被 6005 盖掉）。
+    // 布尔自证已不构成充分条件，所以正向用例必须发结构化声明，才能真的打到被测能力上。
+    authDeclaration: labDeclaration(),
     // [2026-10-01] 授权范围是**利用端的硬红线**（缺它直接 1007 拒单）：靶场自身是回环地址，
     // 这里显式声明靶站主机，否则用例撞的是红线而不是被测能力 —— 那才是真正的假红。
     scope: ['127.0.0.1'],
@@ -728,6 +749,7 @@ test('exploit', 'POST /exploit/sql：只需 scanId+pointId 即可接管扫描结
     scanId,
     pointId: point.id,
     authorized: true,
+    authDeclaration: labDeclaration(),
     sql: 'SELECT DATABASE()',
   });
   assert.equal(
@@ -762,6 +784,7 @@ test('exploit', '凭据/会话继承：需要 X-Auth 的 header 点位沿用扫�
     scanId: hdr.scanId,
     pointId: point.id,
     authorized: true,
+    authDeclaration: labDeclaration(),
     sql: 'SELECT USER()',
   });
   assert.equal(r.json?.code, 0, `沿用扫描凭据应能用，实得 ${JSON.stringify(r.json).slice(0, 300)}`);
@@ -844,12 +867,35 @@ test('exploit', 'POST /exploit/os-shell：能力缺失时如实失败（不得�
   ctx.note('exploit.osShell', d.error);
 });
 
-test('exploit', '利用红线：authorized / 服务端开关 / 限速 / SSRF / scope', async (ctx) => {
+test('exploit', '利用红线：授权声明 / 服务端开关 / 限速 / SSRF / scope', async (ctx) => {
   const base = ctx.state.numScan?.report || (await scanUntilDone(ctx, { url: `${ctx.LAB}/num?id=1`, config: fastCfg() })).report;
 
-  // ① 缺 authorized:true
-  const noAuth = await ctx.post('/api/exploit/sql', { ...exploitBody(ctx, base, { sql: 'SELECT 1' }), authorized: false });
-  assert.notEqual(noAuth.json?.code, 0, 'authorized 缺失必须拒绝');
+  // ① 只带布尔 authorized、不带结构化声明 ⇒ 必须拒（spec 5.2.1 规则 7）。
+  //    [2026-10-13] 本条原来测的是「authorized:false 必须拒」，但 strict 模式下布尔字段
+  //    **根本不参与判定**（见 core/exploitFlag.js 的 checkExploitAuthorization）——给 exploitBody
+  //    补上声明后，这一条会变成"带声明却被 expected 拒"的错判据。红线的现形态是「缺声明」。
+  const noDecl = { ...exploitBody(ctx, base, { sql: 'SELECT 1' }), authorized: false };
+  delete noDecl.authDeclaration;
+  const missing = await ctx.post('/api/exploit/sql', noDecl);
+  assert.notEqual(missing.json?.code, 0, '缺结构化授权声明必须拒绝');
+  assert.match(String(missing.json?.message || ''), /授权声明/, `拒绝原因必须是「缺声明」而不是别的闸门，实得 ${JSON.stringify(missing.json).slice(0, 200)}`);
+
+  // ①b 兼容模式（AUTH_DECLARATION_STRICT=lenient）下，布尔红线仍然有效：authorized:false 必须拒。
+  //     不补这一条的话，lenient 分支（生产里有人会配）就是零覆盖。
+  const lenient = await startEngine({ name: 'exploit-lenient', env: { EXPLOIT_ENABLED: '1', AUTH_DECLARATION_STRICT: 'lenient' } });
+  try {
+    const legacyNoAuth = await request({
+      port: lenient.port,
+      method: 'POST',
+      path: '/api/exploit/sql',
+      token: lenient.token,
+      body: { ...noDecl, authorized: false },
+    });
+    assert.notEqual(legacyNoAuth.json?.code, 0, `lenient 模式下 authorized:false 仍必须拒，实得 ${JSON.stringify(legacyNoAuth.json).slice(0, 200)}`);
+    assert.match(String(legacyNoAuth.json?.message || ''), /authorized/, `拒绝理由应落回布尔自证这一道，实得 ${JSON.stringify(legacyNoAuth.json).slice(0, 200)}`);
+  } finally {
+    await lenient.stop();
+  }
 
   // ② 服务端 EXPLOIT_ENABLED=0 的实例：即便 authorized:true 也必须拒绝
   const off = await startEngine({ name: 'exploit-off', env: { EXPLOIT_ENABLED: '0' } });
@@ -883,7 +929,15 @@ test('exploit', '利用红线：authorized / 服务端开关 / 限速 / SSRF / s
         path: '/api/exploit/sql',
         token: rl.token,
         // scope 也要带：否则撞的是授权红线（1007）而不是限速桶，测错了闸门
-        body: { target: { url: `${ctx.LAB}/num?id=1` }, dbms: 'MySQL', authorized: true, scope: ['127.0.0.1'], sql: 'SELECT 1' },
+        // authDeclaration 同理（[D51] strict 默认后缺它先撞 6005，CI #225 实测把 4290 顶掉了）
+        body: {
+          target: { url: `${ctx.LAB}/num?id=1` },
+          dbms: 'MySQL',
+          authorized: true,
+          scope: ['127.0.0.1'],
+          authDeclaration: labDeclaration(),
+          sql: 'SELECT 1',
+        },
       });
       codes.push(r.json?.code);
     }
@@ -895,14 +949,22 @@ test('exploit', '利用红线：authorized / 服务端开关 / 限速 / SSRF / s
   }
 
   // ④ SSRF：利用端点同样不得打云元数据
+  //    带有效声明：否则拒的是授权门（6005）而不是 SSRF —— 那样 SSRF 防护被摘掉这条照样绿。
   const meta = await ctx.post('/api/exploit/sql', {
     target: { url: 'http://169.254.169.254/latest/meta-data/', method: 'GET' },
     point: { originalValue: '1', location: 'url', param: 'id' },
     dbms: 'MySQL',
     authorized: true,
+    scope: ['169.254.169.254'],
+    authDeclaration: { ...labDeclaration(), scope: { hosts: ['169.254.169.254'] } },
     sql: 'SELECT 1',
   });
   assert.notEqual(meta.json?.code, 0, '利用端点必须过 SSRF 校验');
+  assert.match(
+    String(meta.json?.message || ''),
+    /SSRF|禁止访问|元数据/,
+    `④ 必须测到 SSRF 闸门本身（授权门与 scope 门都已显式放行），实得 ${JSON.stringify(meta.json).slice(0, 220)}`
+  );
 
   // ⑤ scope：显式声明范围后越界目标必须拒
   const scoped = await ctx.post('/api/exploit/sql', {
