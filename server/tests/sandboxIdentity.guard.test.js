@@ -28,7 +28,11 @@ function codeOnly(src) {
   return src.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
 }
 
-const src = readFileSync(SB, 'utf8');
+// [CI-FIX 2026-10-14] CRLF 归一：windows runner 检出的 mysql_sandbox.py 是 CRLF，
+// 而下面截函数体用 `/def do_start\([\s\S]*?\n\ndef /` —— 边界写的是**连续两个 `\n`**，
+// CRLF 下是 `\r\n\r\n`（中间夹着 `\r`）⇒ 永远匹配不到，三条断言全报「截不到函数体」
+// （CI windows 实测 3 红）。归一后两平台同判。
+const src = readFileSync(SB, 'utf8').replace(/\r\n/g, '\n');
 const code = codeOnly(src);
 
 test('分母守卫：读到的确实是 mysql_sandbox.py 且内容非空', () => {

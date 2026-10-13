@@ -79,7 +79,10 @@ function scan() {
     if (!st.isFile() || st.size > 2 * 1024 * 1024) continue;
     let text;
     try {
-      text = readFileSync(abs, 'utf8');
+      // [CI-FIX 2026-10-14] CRLF 归一：windows runner 的工作区是 CRLF，而 codePart 的
+      // 行尾注释截断用 `/\/\/.*$/` —— `.` 不匹配 `\r`、`$` 被行尾 `\r` 挡住 ⇒ 注释里的
+      // `\Z` 被当成代码命中（实测 CI windows 报 3 处，全是本文件自证夹具的行尾注释）。
+      text = readFileSync(abs, 'utf8').replace(/\r\n/g, '\n');
     } catch {
       continue;
     }
