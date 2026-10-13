@@ -69,7 +69,13 @@ function countSuppressiveLines(files) {
       continue;
     }
     if (!st.isFile()) continue;
-    const n = countLines(readFileSync(abs, 'utf8'));
+    // [CI-FIX 2026-10-14] CRLF 归一：windows runner 检出的工作区是 CRLF，而本判据剥注释
+    // 用 `/\/\/.*$/` —— `.` 不匹配 `\r`（CR 是 LineTerminator）、非 multiline 的 `$` 又被
+    // 行尾 `\r` 挡住 ⇒ 剥离整条失效，注释里「讨论 cast」的行被计入预算。实测同一提交
+    // LF=91（绿）/ CRLF=102（红），CI 的 test-matrix(windows) 首次跑到这条守卫就红。
+    // 归一后两平台同判；不改正则是因为本文件下还有别的按行/跨行判据，归一治的是一族。
+    const normalized = readFileSync(abs, 'utf8').replace(/\r\n/g, '\n');
+    const n = countLines(normalized);
     if (n) perFile.set(f, n);
     lines += n;
   }

@@ -4,6 +4,20 @@
 
 ## [Unreleased]
 
+### 2026-10-14 批次 D63 · 三条仓库守卫的 CRLF 兼容（windows 腿首跑暴露）
+
+**一句话**：修掉 `shell: bash` 后 windows 腿首次跑到 `Server tests`，当场抓出**三条守卫的正则在 CRLF 下
+判据退化**——同一个根因家族：**剥注释/跨行边界依赖 `$` 与 `.`，而行尾 `\r` 把这些匹配全挡掉了**。
+
+| 面 | 内容 |
+|---|---|
+| 暴露路径 | D62 修掉 test-matrix 的 `shell: bash` 后，windows 腿第一次跑到 step 11（此前一直被前置检查步挡住）⇒ 5 红：castBudget ① · pythonRegexEscapes · sandboxIdentity 三条 |
+| 根因（一处说清） | JS 的 `.` **不匹配** `\r`（CR 是 LineTerminator），非 multiline 的 `$` 只匹配字符串真末尾 ⇒ 行 `"… // 注释\r"` 上 `/\/\/.*$/` **整条匹配失败**、注释没被剥；`/def do_start\([\s\S]*?\n\ndef /` 要的连续两个 `\n` 在 CRLF 里被 `\r` 隔开 ⇒ 永远匹配不到 |
+| 实测证据（A/B） | `countLines` 对同一文件：LF=2 / CRLF=6（castBudget）；把 4 个被测文件转 CRLF 后本机复现 **11 用例 5 红**，与 CI windows **逐条同名**；三个守卫各加一行 CRLF 归一后，**同一 CRLF 态 11/11 全绿**；还原 LF 再跑仍 11/11 |
+| 修法 | 三处 `readFileSync` 后 `.replace(/\r\n/g, '\n')`（**归一治的是一族判据**，比逐条改正则稳）；不改判据、不放宽断言、不动基线 |
+| 影响面 | 只影响 CRLF 工作区（windows runner / 开了 autocrlf 的检出）；LF 环境行为逐字不变（归一为恒等变换） |
+| 顺带 | facts 指纹随 3 个测试文件刷新（前端 565 · 服务端 3558/3554 pass/0 fail/4 skip · 徽章 4119） |
+
 ### 2026-10-14 批次 D62 · CI 两条红的修复（windows shell + PG os-shell 平台命令）
 
 **一句话**：`test-matrix (windows)` 红在一个漏写的 `shell: bash`（bash 语法被 pwsh 解析）；
