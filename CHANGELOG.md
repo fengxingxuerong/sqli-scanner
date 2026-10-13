@@ -4,6 +4,23 @@
 
 ## [Unreleased]
 
+### 2026-10-14 批次 D62 · CI 两条红的修复（windows shell + PG os-shell 平台命令）
+
+**一句话**：`test-matrix (windows)` 红在一个漏写的 `shell: bash`（bash 语法被 pwsh 解析）；
+`acceptance` 的 PG os-shell 红在**脚本写死 Windows 命令 `cmd /c echo`，而 acceptance 跑 ubuntu-latest**
+——PG 的 `COPY ... FROM PROGRAM` 由服务端 shell 执行，`cmd` 在 Linux 上不存在 ⇒ COPY 失败、
+`cmd_out` 空 ⇒ 回显空串，而 `pgOsShell` 无条件返回 `ok:true`，表面只看到「marker 未命中」。
+
+| 面 | 内容 |
+|---|---|
+| 红 1 根因 | ci.yml `test-matrix` 的「前置门禁检查」step 用 bash 语法但**没指定 shell**，windows runner 默认 pwsh ⇒ `ParserError: Missing opening '(' after keyword 'for'`，一步没跑就 exit 1（同 job 的「Recreate server/.env.test」那步早带了 `shell: bash`，本步漏了） |
+| 红 1 修法 | 补 `shell: bash`。其余 job（acceptance/release-smoke/sidecar-build…）都是 `ubuntu-latest`，bash 语法无碍，未动 |
+| 红 2 定性（修正先前推断） | 先前怀疑是 D51 授权契约不同步 —— **不对**：`pgOsShell` 直调引擎、不经 REST 授权门。用 `git log -S pg-osshell -- ci.yml` 证实该步骤是 **D51 新接进 CI** 的（run #222 时还不存在），#222 acceptance = success ⇒ 不是回归，是**新步骤首次跑就红** |
+| 红 2 修法 | 按**执行方**（PG 服务所在宿主，与脚本同机）平台选命令：`process.platform === 'win32' ? 'cmd /c echo …' : 'echo …'`，与 `osShell.js` 里 Oracle Java 分支同口径。断言一条没放宽（仍要求 marker 命中） |
+| 取证增强 | 失败时补查 `oob_lab.cmd_out` 的**表是否存在 + 行数**，把「COPY 未执行」与「执行了但回显通道没读出」分开，避免下次红仍只能猜 |
+| 已知设计缺陷（未动） | `pgOsShell` 无论 COPY 是否成功都返回 `ok:true`，且 `note` 是常量「需 COPY PROGRAM 权限」⇒ 失败也会自报成功。e2e 判据不看 `ok`、只认 marker 命中，所以判据仍有效；改 `ok` 语义属行为变更，留给独立批次 |
+| 本机边界 | 本机无 PG（5432 未监听）⇒ 只验到脚本可加载、前置 SKIP 路径 exit 0；**Linux 侧命令是否真通、COPY 是否真执行，交 CI 复跑** |
+
 ### 2026-10-14 批次收口 · D54–D61 八个批次（本机门禁全绿，CI 待复跑）
 
 **一句话**：把 10-13 落地但**从未入库**的八个批次一次收口（93 文件 +7079/-1847），并修掉收口门禁暴露的
