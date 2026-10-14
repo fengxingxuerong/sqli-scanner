@@ -41,12 +41,12 @@
     },
     {
       "id": "tamper-versioned-parity",
-      "claim": "（已知为假）versioned 关键字族与上游 sqlmap 等价",
+      "claim": "versioned 关键字族与上游 sqlmap 等价",
       "status": "refuted",
-      "evidence": "上游 doctest 字面比对：versionedkeywords 漏包 ALL、versionedmorekeywords 漏 CONCAT（同族内不自洽）；modsecurityversioned / modsecurityzeroversioned / halfversionedmorekeywords 版本注释形态与上游系统性不同",
-      "refute_cmd": "node scripts/verify-tamper-upstream-examples.mjs（drift 字段 [queued] 条目）",
-      "recheck_batch": "T-6",
-      "caveat": "★ 已知未修。README 的「字面一致 100/115」计数含这几条缺陷，不得据此宣称 tamper 全族等价"
+      "evidence": "上游 doctest 字面比对：versionedkeywords 漏包 ALL、versionedmorekeywords 漏 CONCAT/CHAR/IFNULL/CAST/CURRENT_USER（同族内不自洽）——【T6 2026-10-14 已修 2 条真缺陷：补 ALL + 补函数名，关键字表收敛为单一真源 server/src/core/tamper/versionedKeywords.js】；【剩余 3 条形态差异未关闭：本仓 /*! X */ 含空格 vs 上游 /*!X*/，halfversioned 版本号 50540 vs 上游 0】",
+      "refute_cmd": "node scripts/verify-tamper-upstream-examples.mjs（drift 字段；[T-6 已修]/[T-6 未动] 标记）",
+      "recheck_batch": "待真机 A/B（modsec-live job 加对照组）",
+      "caveat": "★ 真缺陷已修但**字面一致数仍是 100/115**——形态差异未消除。不得据此宣称该族与上游等价；形态取舍属行为变化，须真机证据（2026-10-05 真机对拍该族 0 打穿 ⇒ 现状本身也不构成绕过承诺）"
     },
     {
       "id": "tamper-parity-names",
