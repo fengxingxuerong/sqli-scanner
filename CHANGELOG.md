@@ -4,6 +4,16 @@
 
 ## [Unreleased]
 
+### 2026-10-14 批次 D76 · sea-config.json 同步构建工具实际输出（wasm 资产路径 node_modules → dist-engine）
+
+**动机**：`npm run package:win` 的 `release:check` 拦住发布——工作区有未提交改动。核查后两处：
+`src-tauri/Cargo.toml` 仅被 touch（内容哈希与 HEAD 相同），`sea-config.json` 是真实 diff：
+`build-sidecar.mjs` 把 SEA 资产 `sql-wasm.wasm` 的路径从 `server/node_modules/sql.js/dist/`
+改写为 `server/dist-engine/`（`build:engine` 的产物目录）。入库的这份停在旧路径 ⇒ **每次跑
+sidecar 构建都会把工作区写脏**，`release:check` 的「脏工作区」判据此前的告警部分是这条
+路径漂移造成的假信号。处置：提交构建工具实际写出的内容（一行），让「脏 = 真的脏」。
+
+
 ### 2026-10-14 批次 D75 · 工具链修复：tauri dev 两起本机起不来（rustup 默认链损坏 / vite 监视撞 cargo）
 
 **动机**：要跑桌面端 UI，本机 `npm run tauri dev` 连续失败两次，根因都是环境/配置问题而非代码问题，
