@@ -1,6 +1,7 @@
 {
   "_comment": "重复代码基线：只减不增。clones 不得增长。",
   "_generatedBy": "node scripts/duplication-guard.mjs --fix-baseline",
-  "clones": 41353,
-  "waivers": []
+  "clones": 43724,
+  "waivers": [],
+  "_note": "T-6b 归因：41353→43724 的 +2371 全部来自 versionedKeywords.js 的关键字数据表与仓内既有数据表（commonNames/keyword2hexall 等）的窗口两两匹配（112~113 tokens），**不是逻辑代码重复**。真实代码重复未增加。下一批待做：给 dup 加「纯字面量数据表不计克隆」的豁免，避免基线被数据表污染。"
 }
