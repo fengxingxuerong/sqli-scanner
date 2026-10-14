@@ -11,8 +11,15 @@
 // 故本模块是**唯一真源**：nesting-guard 改为复用本内核，输出契约逐字节不变。
 //
 // ── 保真约束（关键）────────────────────────────────────────────────────────
-// 1. 本内核**刻意不处理正则字面量**：原 analyzeNesting 也没处理，为满足
-//    「抽取前后逐字节一致」的验收，行为必须与抽取前完全对齐，不得顺手"改进"。
+// 1. 正则字面量（D66 2026-10-14 补）：原内核刻意不处理，因为抽取验收要求与
+//    analyzeNesting 输出逐字节一致。但该盲区会**静默吞代码**——正则体里的引号
+//    （`/[\\"]/g`）被当字符串开，扫到"下一个引号"（不存在）⇒ 后续整个文件被
+//    当字符串，函数全部丢失（实测：jsonescape.js 的 transform 在 typecoverage
+//    统计中蒸发，core 覆盖率 48.7→48.5 触发 CI 红）。现补正则分支：
+//    位置白名单（只在「期待表达式」位识别，除法不受影响）+ 转义对消费
+//    （`\` + 下一字符成对跳过，天然满足奇偶性）+ 字符类（`[...]` 内的 `/`
+//    不结束正则）。对**不含正则字面量**的文件输出逐字节不变（白名单位置判据
+//    未命中时回落既有路径）。
 // 2. 对象字面量 vs 代码块的判据逐行照搬 nesting-guard（保守高估方向），
 //    因为它的基线就是照此口径建立的，改判据=改基线=门禁被放宽。
 // 3. 扫描只产出 token 与「代码块括号配对」；对象字面量括号不进配对栈。
@@ -21,6 +28,52 @@
 const IDENT_START = /[A-Za-z_$]/;
 const IDENT_PART = /[\w$]/;
 const DIGIT = /[0-9]/;
+
+// 正则位置白名单（D66）：正则字面量只能出现在「期待表达式」的位置。
+// 上一个 token 是 ident/num/str/)/]/} 时是除法或属性访问，不在白名单。
+const REGEX_PREV_KEYWORDS = new Set([
+  'return', 'typeof', 'case', 'in', 'of', 'new', 'delete', 'void',
+  'instanceof', 'do', 'else', 'yield', 'await',
+]);
+const REGEX_PREV_PUNCT = new Set([
+  '=', '(', ',', '[', '{', ';', ':', '!', '&', '|', '?', '+', '-', '*', '%',
+  '<', '>', '~', '^', '=>', '&&', '||', '??', '+=', '-=', '*=', '%=', '&=',
+  '|=', '^=', '==', '!=', '<=', '>=', '===', '!==', '...',
+]);
+
+/** 该位置（基于已产出的 token 流）是否可能开始一个正则字面量。 */
+function isRegexPos(tokens) {
+  const prev = tokens[tokens.length - 1];
+  if (!prev) return true; // 文件开头（注释/空白不计 token）
+  if (prev.type === 'ident') return REGEX_PREV_KEYWORDS.has(prev.value);
+  if (prev.type === 'punct') return REGEX_PREV_PUNCT.has(prev.value);
+  return false; // num / str / regex / brace
+}
+
+/**
+ * 从 startI（`/` 的下标）尝试扫描一个正则字面量（含 flags）。
+ * 转义对消费（`\` + 下一字符成对跳过，天然满足奇偶性）；`[...]` 字符类内
+ * 的 `/` 不结束正则；换行即未闭合。
+ * @param {string} src 源码
+ * @param {number} startI `/` 的下标
+ * @returns {{end:number, closed:boolean}} closed 时 end 为结束后一位（含 flags）；否则调用方回落
+ */
+function scanRegexLiteral(src, startI) {
+  const n = src.length;
+  let j = startI + 1, inClass = false, closed = false;
+  while (j < n) {
+    const ch = src[j];
+    if (ch === '\n') break;
+    if (ch === '\\') { j += 2; continue; }
+    if (inClass) { if (ch === ']') inClass = false; j++; continue; }
+    if (ch === '[') { inClass = true; j++; continue; }
+    if (ch === '/') { j++; closed = true; break; }
+    j++;
+  }
+  if (!closed) return { end: startI + 1, closed: false };
+  while (j < n && src[j] >= 'a' && src[j] <= 'z') j++; // flags（gimsuyv）
+  return { end: j, closed: true };
+}
 
 // 多字符运算符（按长度降序尝试）。覆盖门槛判据只需 && || ?? ?. 三目 ? ，
 // 但为让 findFunctions 能正确切分 `=>`、`...`、`?.`，此处给全常见形态。
@@ -62,6 +115,17 @@ export function lex(src) {
       }
       i += 2; col += 2;
       continue;
+    }
+    // ── 正则字面量（D66 补，见头部注释 1）──────────────────────────────────
+    // 未闭合（换行前找不到结束 `/`）⇒ 不进本分支，回落既有逐字符路径（保守）。
+    if (c === '/' && isRegexPos(tokens)) {
+      const r = scanRegexLiteral(src, i);
+      if (r.closed) {
+        push('regex', src.slice(i, r.end), line, col);
+        col += r.end - i;
+        i = r.end;
+        continue;
+      }
     }
     // 字符串 / 模板串（模板串内的 ${} 表达式保守整体跳过，与原内核一致）
     if (c === '"' || c === "'" || c === '`') {

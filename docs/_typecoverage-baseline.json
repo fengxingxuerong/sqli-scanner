@@ -62,18 +62,15 @@
       ]
     },
     "server/src/core": {
-      "coverage": 48.7,
-      "paramsTotal": 1056,
-      "paramsTyped": 538,
-      "returnsTotal": 739,
-      "returnsTyped": 336,
+      "coverage": 48.9,
+      "paramsTotal": 1164,
+      "paramsTyped": 594,
+      "returnsTotal": 836,
+      "returnsTyped": 383,
       "untypedHotspots": [
         "server/src/core/apiAuthState.js:16 setAuthEnabled(@v)",
         "server/src/core/apiAuthState.js:16 setAuthEnabled()→?",
         "server/src/core/apiAuthState.js:26 _resetAuthStateForTest()→?",
-        "server/src/core/authDeclaration.js:20 isTargetInScope(@target)",
-        "server/src/core/authDeclaration.js:20 isTargetInScope(@scope)",
-        "server/src/core/authDeclaration.js:20 isTargetInScope()→?",
         "server/src/core/bearerKeeper.js:47 pickField(@obj)",
         "server/src/core/bearerKeeper.js:47 pickField(@pathStr)",
         "server/src/core/bearerKeeper.js:47 pickField()→?",
@@ -91,17 +88,13 @@
         "server/src/core/bearerKeeper.js:173 notify(@entry)",
         "server/src/core/bearerKeeper.js:173 notify(@ev)",
         "server/src/core/bearerKeeper.js:173 notify()→?",
-        "server/src/core/bearerKeeper.js:225 applyBearer(@opts)",
-        "server/src/core/bearerKeeper.js:225 applyBearer(@spec)",
-        "server/src/core/bearerKeeper.js:225 applyBearer(@token)",
-        "server/src/core/bearerKeeper.js:225 applyBearer()→?",
-        "server/src/core/bearerKeeper.js:261 <arrow@261>()→?",
-        "server/src/core/bearerKeeper.js:263 <arrow@263>()→?",
-        "server/src/core/bearerKeeper.js:266 <arrow@266>(@opts)",
-        "server/src/core/bearerKeeper.js:266 <arrow@266>(@via)",
-        "server/src/core/bearerKeeper.js:266 <arrow@266>()→?",
-        "server/src/core/bearerKeeper.js:285 <arrow@285>(@o)",
-        "server/src/core/bearerKeeper.js:285 <arrow@285>()→?",
+        "server/src/core/bearerKeeper.js:267 <arrow@267>()→?",
+        "server/src/core/bearerKeeper.js:269 <arrow@269>()→?",
+        "server/src/core/bearerKeeper.js:272 <arrow@272>(@opts)",
+        "server/src/core/bearerKeeper.js:272 <arrow@272>(@via)",
+        "server/src/core/bearerKeeper.js:272 <arrow@272>()→?",
+        "server/src/core/bearerKeeper.js:291 <arrow@291>(@o)",
+        "server/src/core/bearerKeeper.js:291 <arrow@291>()→?",
         "server/src/core/cookieJar.js:15 CookieJar.constructor()→?",
         "server/src/core/cookieJar.js:20 CookieJar.setFromResponse(@url)",
         "server/src/core/cookieJar.js:20 CookieJar.setFromResponse(@setCookieHeaders)",
@@ -117,15 +110,22 @@
         "server/src/core/cookieJar.js:102 CookieJar._parseSetCookie(@isHttps)",
         "server/src/core/cookieJar.js:102 CookieJar._parseSetCookie()→?",
         "server/src/core/cookieJar.js:141 CookieJar._defaultPath(@reqPath)",
-        "server/src/core/cookieJar.js:141 CookieJar._defaultPath()→?"
+        "server/src/core/cookieJar.js:141 CookieJar._defaultPath()→?",
+        "server/src/core/cookieJar.js:147 CookieJar._domainMatch(@host)",
+        "server/src/core/cookieJar.js:147 CookieJar._domainMatch(@domain)",
+        "server/src/core/cookieJar.js:147 CookieJar._domainMatch()→?",
+        "server/src/core/cookieJar.js:151 CookieJar._pathMatch(@reqPath)",
+        "server/src/core/cookieJar.js:151 CookieJar._pathMatch(@cookiePath)",
+        "server/src/core/cookieJar.js:151 CookieJar._pathMatch()→?",
+        "server/src/core/cookieJar.js:159 CookieJar._evictExpired()→?"
       ]
     },
     "server/src/engine": {
-      "coverage": 29.1,
-      "paramsTotal": 1066,
-      "paramsTyped": 322,
-      "returnsTotal": 545,
-      "returnsTyped": 147,
+      "coverage": 29.5,
+      "paramsTotal": 1163,
+      "paramsTyped": 358,
+      "returnsTotal": 592,
+      "returnsTyped": 160,
       "untypedHotspots": [
         "server/src/engine/binaryProbe.js:49 binaryProbe(@probe)",
         "server/src/engine/binaryProbe.js:49 binaryProbe()→?",
@@ -180,11 +180,11 @@
       ]
     },
     "server/src/services": {
-      "coverage": 21.9,
-      "paramsTotal": 156,
-      "paramsTyped": 34,
-      "returnsTotal": 132,
-      "returnsTyped": 29,
+      "coverage": 23.4,
+      "paramsTotal": 179,
+      "paramsTyped": 41,
+      "returnsTotal": 150,
+      "returnsTyped": 36,
       "untypedHotspots": [
         "server/src/services/authAudit.js:21 failMode()→?",
         "server/src/services/authAudit.js:63 readAuthEvents(@maxLines)",
@@ -233,9 +233,9 @@
         "server/src/services/reportAttackPath.js:58 techniquesOf()→?",
         "server/src/services/reportAttackPath.js:105 <arrow@105>(@pid)",
         "server/src/services/reportAttackPath.js:105 <arrow@105>()→?",
-        "server/src/services/reportDelivery.js:88 severityOf(@score)",
-        "server/src/services/reportDelivery.js:88 severityOf()→?",
-        "server/src/services/reportDelivery.js:105 <arrow@105>(@s)"
+        "server/src/services/reportAttackPath.js:215 <arrow@215>(@s)",
+        "server/src/services/reportAttackPath.js:215 <arrow@215>(@i)",
+        "server/src/services/reportAttackPath.js:215 <arrow@215>()→?"
       ]
     }
   }

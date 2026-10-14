@@ -221,7 +221,13 @@ export async function refreshOnce(scanId, client) {
   return { ok: true, why: '' };
 }
 
-/** 把新 token 挂进请求头（模板可换：默认 `Bearer {token}`；也可只填裸 token 或改头名） */
+/**
+ * 把新 token 挂进请求头（模板可换：默认 `Bearer {token}`；也可只填裸 token 或改头名）。
+ * @param {object} opts 请求选项（含 headers 与可选 auth.headers）
+ * @param {{headerName?:string, headerTemplate?:string}} spec 挂头规格
+ * @param {string} token 新取到的令牌；空值原样返回 opts
+ * @returns {object} 新 opts（副本；同步摘掉 auth.headers 里的同名旧令牌，不动共享配置）
+ */
 export function applyBearer(opts, spec, token) {
   if (!token) return opts;
   const headerName = spec.headerName || 'Authorization';
