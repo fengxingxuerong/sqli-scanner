@@ -4,6 +4,22 @@
 
 ## [Unreleased]
 
+### 2026-10-14 批次 D69 · --help 补全 + 门禁加 ⑰，并修 ⑯ 的一处假绿
+
+**一句话**：D68 补了 README，但 `--help` 自己仍不完整——**用户第一眼看到的帮助缺 11 个旗标**。
+本批补全并加判据钉死；顺带修掉 ⑯ 的一个假绿（子串匹配）。
+
+| 面 | 内容 |
+|---|---|
+| **自我更正** | D68 说「help 漏 32 个」是**用错口径**（拿"行首提取"与"全文提取"比，把正文顺口提及算成缺失）⇒ 真实值是 **11 个** |
+| help 补全 | `--os-shell`（交互式 os-shell）· `--udf-hex` / `--udf-install`（MSSQL UDF 通道）· `--cert`（mTLS）· `--proxy-bypass-local` · `--flush-session` / `--fresh-queries`（对标 sqlmap）· `--concurrency-det`（`--threads` 别名）· `--max` / `--days`（**扫描侧占位**，并注明与 `ledger prune --max=N` 子命令参数同名不同义）⇒ 覆盖率 **168/168** |
+| 门禁 ⑰ | `--help` 文本必须覆盖解析器每一个旗标（数据源 = D68 提出来的 `HELP_TEXT`） |
+| **⑯ 假绿** | 子串匹配让 `--max` 被 `--max-requests` 满足、`--user` 被其它词命中 ⇒ 改**词边界**匹配（`mentionsFlag`）。实测：子串口径 0 缺失（假绿），词边界口径 4 缺失（真值：`--user` `--db` `--table` `--skip` 四个 sqlmap 兼容长名）⇒ README 已补 |
+| selftest | +5 条：⑰ 漏写必报 / 合法不误报 / `mentionsFlag` 三种边界（`--max` 不被 `--max-requests` 满足、独立 `--max` 命中、`xx--maxx` 不算） |
+| 缺陷注入复验 | 删 help 里 `--udf-install` ⇒ 报「⑰ 缺 1 个」+ exit 1；还原全绿 |
+| 验证 | cli 161/161 · readme 门禁 + selftest 全绿 · lint/facts/typecheck 0 |
+
+
 ### 2026-10-14 批次 D68 · CLI 能力清单收全 + readme 门禁加 ⑯ 反向核对
 
 **一句话**：复核台账两条 unverified 时撞见的**系统性门面缺口**——能力清单只存在于 `--help`。

@@ -46,6 +46,9 @@ import { VULN_TAXONOMY } from '../server/src/services/vulnTaxonomy.js';
 import { tamperRegistry } from '../server/src/core/tamper/index.js';
 import { PAYLOADS, CLAUSE_PAYLOADS, OOB_PAYLOADS } from '../server/src/engine/payloads.js';
 import { PAYLOAD_REGISTRY } from '../server/src/engine/payloadRegistry.js';
+// [D69 2026-10-14] ⑰ 的数据源：CLI 帮助文本（D68 已把它提为可查询常量）。
+//   D69 实测：解析器 168 个旗标，help 原本只覆盖 157 个 ⇒ **用户第一眼看到的帮助本身不完整**。
+import { HELP_TEXT } from '../server/bin/cli/help.js';
 // [D68 2026-10-14] CLI 旗标清单的**真源是 args.js 的解析分支**（`a === '--xxx'`），
 //   不是 help 文本：实测 args.js 有 168 个可解析旗标，help 只写了 136 个（help 自己就漏 32 个）
 //   ⇒ 用 help 当真源等于「拿不完整的清单当完整」。README 与 user-guide 都只覆盖一部分，
@@ -68,6 +71,17 @@ const TIER_KEYS = [
  * @param {string} helpText
  * @returns {string[]}
  */
+/**
+ * 文本里是否**作为完整旗标**出现（词边界：`--max` 不算被 `--max-requests` 命中）。
+ * @param {string} text
+ * @param {string} flag 含前导 `--`
+ * @returns {boolean}
+ */
+export function mentionsFlag(text, flag) {
+  const esc = String(flag).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`(^|[^\\w-])${esc}(?![\\w-])`, 'm').test(String(text));
+}
+
 export function parseCliFlags(argsSource) {
   // 口径：只认**解析分支** `a === '--xxx'` / `case '--xxx':`，不认说明文字与错误信息
   const out = [];
@@ -503,6 +517,16 @@ export function checkConsistency(input) {
   // ⑯ [D68] CLI 旗标反向核对（与 ⑭ 同构：能力清单 ↔ 门面；⑮ 已被「教的脚本路径」占用）
   const flags = input.cliFlags || [];
   const missingFlags = input.missingCliFlags || [];
+  // ⑰ [D69] help 文本覆盖全部旗标（--help 是用户第一眼；D69 实测原本缺 11 个）
+  const missHelp = input.missingHelpFlags || [];
+  if (flags.length && missHelp.length) {
+    fails.push(
+      `⑰ CLI 有 ${flags.length} 个旗标，--help 文本缺 ${missHelp.length} 个（用户第一眼看不到这些能力）：` +
+      `${missHelp.slice(0, 20).join('、')}${missHelp.length > 20 ? ` …等 ${missHelp.length} 个` : ''} — ` +
+      `修法：在 server/bin/cli/help.js 的 HELP_TEXT 补对应条目`,
+    );
+  }
+
   if (flags.length && missingFlags.length) {
     fails.push(
       `⑯ CLI 有 ${flags.length} 个旗标，README 漏写 ${missingFlags.length} 个（能力清单只存在于 --help，客户与新读者看不到）：` +
@@ -705,6 +729,30 @@ function selftest() {
     s.cliFlags = ['--os-cmd', '--file-read'];
     s.missingCliFlags = [];
   });
+  // ⑰ [D69] help 文本漏旗标必报（本轮实测原本缺 11 个）
+  expectFail('--help 漏写旗标', (s) => {
+    s.cliFlags = ['--alpha', '--beta'];
+    s.missingCliFlags = [];
+    s.missingHelpFlags = ['--beta'];
+  }, /⑰/);
+  expectOk('--help 收录全部旗标（合法形态）', (s) => {
+    s.cliFlags = ['--alpha', '--beta'];
+    s.missingCliFlags = [];
+    s.missingHelpFlags = [];
+  });
+  // mentionsFlag 词边界：`--max` 不算被 `--max-requests` 命中（D69 抓到的门禁假绿）
+  {
+    if (mentionsFlag('命令里有 --max-requests 上限', '--max')) {
+      bad.push('mentionsFlag 应按词边界判：`--max` 不该被 `--max-requests` 满足');
+    }
+    if (!mentionsFlag('参数 --max 与 --max-requests 不同义', '--max')) {
+      bad.push('mentionsFlag 漏判：文本里确有独立出现的 `--max`');
+    }
+    if (mentionsFlag('前缀 xx--maxx', '--max')) {
+      bad.push('mentionsFlag 应拒绝把 `xx--maxx` 当作 `--max` 出现');
+    }
+  }
+
   // parseCliFlags 口径：只认**解析分支**，说明文字与错误信息里的 --xxx 不算
   {
     const src = [
@@ -782,11 +830,15 @@ function main() {
   //   （实测：136 个旗标里 README 缺 76 个、user-guide 缺 123 个），而门禁一直绿。
   const cliFlags = parseCliFlags(readFileSync(resolve(ROOT, 'server/bin/cli/args.js'), 'utf8'));
   const readmeText = lines.join('\n');
-  const missingCliFlags = cliFlags.filter((f) => !readmeText.includes(f));
+  // ⚠️ 词边界匹配：子串匹配会让 `--max` 被 `--max-requests` 满足、`--user` 被别的词命中
+  //   （D69 实测：子串口径 0 缺失 = 假绿，词边界口径 4 缺失 = 真值）
+  const missingCliFlags = cliFlags.filter((f) => !mentionsFlag(readmeText, f));
+  // ⑰ [D69] help 文本也必须覆盖全部旗标（--help 是用户第一眼，漏一个 = 能力不可见）
+  const missingHelpFlags = cliFlags.filter((f) => !mentionsFlag(HELP_TEXT, f));
 
   const fails = checkConsistency({
     overview, tiers, customer, tech, tamperCounts, payload, suiteClaims, tamperUniverse, docs, apiTable, apiDoc, nodePaths, code,
-    cliFlags, missingCliFlags,
+    cliFlags, missingCliFlags, missingHelpFlags,
   });
   if (fails.length) {
     console.error(`[readme] ✗ README 声称与事实不符（${fails.length} 处）：`);
