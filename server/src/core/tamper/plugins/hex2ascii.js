@@ -1,6 +1,7 @@
 // 十六进制 → ASCII 编码：将字符串字面量编码为十六进制 ASCII 表示（对标 sqlmap hex2ascii.py）
 // 例如：'admin' → 0x61646d696e
-import { readSqlLiteral, isQuoteEscaped } from '../quoteScan.js';
+// [D57] 字面量遍历统一走 literalWalk（单一抽象），不再手写引号状态机。
+import { walkLiterals } from '../literalWalk.js';
 
 export const hex2ascii = {
   name: 'hex2ascii',
@@ -11,36 +12,9 @@ export const hex2ascii = {
    * @returns {string}
    */
   transform(payload, ctx) {
-    const src = String(payload ?? '');
-    let out = '';
-    let inSingle = false, inDouble = false;
-    for (let i = 0; i < src.length; i++) {
-      const ch = src[i];
-      if (inSingle) {
-        if (ch === "'" && !isQuoteEscaped(src, i)) { inSingle = false; out += ch; }
-        else out += ch;
-        continue;
-      }
-      if (inDouble) {
-        if (ch === '"' && !isQuoteEscaped(src, i)) { inDouble = false; out += ch; }
-        else out += ch;
-        continue;
-      }
-      if (ch === "'") {
-        inSingle = true;
-        let str = '';
-        { const lit = readSqlLiteral(src, i, "'"); if (!lit.closed) { out += src.slice(i); return out; } i = lit.end; str = lit.body; }
-        out += `0x${Buffer.from(str).toString('hex')}`;
-      } else if (ch === '"') {
-        inDouble = true;
-        let str = '';
-        { const lit = readSqlLiteral(src, i, '"'); if (!lit.closed) { out += src.slice(i); return out; } i = lit.end; str = lit.body; }
-        out += `0x${Buffer.from(str).toString('hex')}`;
-      } else {
-        out += ch;
-      }
-    }
-    return out;
+    return walkLiterals(payload, {
+      onLiteral: (body) => `0x${Buffer.from(body).toString('hex')}`,
+    });
   },
 };
 export default hex2ascii;

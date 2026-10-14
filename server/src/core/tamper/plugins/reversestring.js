@@ -1,6 +1,7 @@
 // 反转字符串：将字符串字面量反转后通过 REVERSE() 还原（对标 sqlmap reversestring.py）
-// 例如：'admin' → REVERSE('nimda')
-import { readSqlLiteral, isQuoteEscaped } from '../quoteScan.js';
+// 例如：'admin' → REVERSE('nimda')。输出引号跟随原字面量。
+// [D57] 字面量遍历统一走 literalWalk（单一抽象），不再手写引号状态机。
+import { walkLiterals } from '../literalWalk.js';
 
 export const reversestring = {
   name: 'reversestring',
@@ -11,36 +12,9 @@ export const reversestring = {
    * @returns {string}
    */
   transform(payload, ctx) {
-    const src = String(payload ?? '');
-    let out = '';
-    let inSingle = false, inDouble = false;
-    for (let i = 0; i < src.length; i++) {
-      const ch = src[i];
-      if (inSingle) {
-        if (ch === "'" && !isQuoteEscaped(src, i)) { inSingle = false; out += ch; }
-        else out += ch;
-        continue;
-      }
-      if (inDouble) {
-        if (ch === '"' && !isQuoteEscaped(src, i)) { inDouble = false; out += ch; }
-        else out += ch;
-        continue;
-      }
-      if (ch === "'") {
-        inSingle = true;
-        let str = '';
-        { const lit = readSqlLiteral(src, i, "'"); if (!lit.closed) { out += src.slice(i); return out; } i = lit.end; str = lit.body; }
-        out += `REVERSE('${str.split('').reverse().join('')}')`;
-      } else if (ch === '"') {
-        inDouble = true;
-        let str = '';
-        { const lit = readSqlLiteral(src, i, '"'); if (!lit.closed) { out += src.slice(i); return out; } i = lit.end; str = lit.body; }
-        out += `REVERSE("${str.split('').reverse().join('')}")`;
-      } else {
-        out += ch;
-      }
-    }
-    return out;
+    return walkLiterals(payload, {
+      onLiteral: (body, quote) => `REVERSE(${quote}${body.split('').reverse().join('')}${quote})`,
+    });
   },
 };
 export default reversestring;

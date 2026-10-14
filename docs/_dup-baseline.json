@@ -1,6 +1,6 @@
 {
   "_comment": "重复代码基线：只减不增。clones 不得增长。",
   "_generatedBy": "node scripts/duplication-guard.mjs --fix-baseline",
-  "clones": 41404,
+  "clones": 41267,
   "waivers": []
 }

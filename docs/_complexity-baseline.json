@@ -494,18 +494,6 @@
       "limitLines": 100,
       "limitComplexity": 15
     },
-    "server/src/core/tamper/plugins/jsonescape.js::transform": {
-      "lines": 38,
-      "complexity": 27,
-      "limitLines": 100,
-      "limitComplexity": 15
-    },
-    "server/src/core/tamper/plugins/noequals.js::transform": {
-      "lines": 25,
-      "complexity": 18,
-      "limitLines": 100,
-      "limitComplexity": 15
-    },
     "server/src/core/tamper/plugins/space2comment.js::transform": {
       "lines": 62,
       "complexity": 26,
@@ -521,12 +509,6 @@
     "server/src/core/tamper/plugins/uniontable.js::transform": {
       "lines": 23,
       "complexity": 19,
-      "limitLines": 100,
-      "limitComplexity": 15
-    },
-    "server/src/core/tamper/plugins/unparen.js::transform": {
-      "lines": 25,
-      "complexity": 17,
       "limitLines": 100,
       "limitComplexity": 15
     },

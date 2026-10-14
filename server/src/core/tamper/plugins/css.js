@@ -1,6 +1,8 @@
 // CSS 编码：将字符串字面量用 CSS 反斜杠编码绕过（对标 sqlmap css.py）
-// 适用于 ASP.NET 等使用 CSS 解析器的 WAF
-import { isQuoteEscaped, readSqlLiteral } from '../quoteScan.js';
+// 适用于 ASP.NET 等使用 CSS 解析器的 WAF。输出引号跟随原字面量。
+// [D57] 字面量遍历统一走 literalWalk（单一抽象），不再手写引号状态机。
+import { walkLiterals } from '../literalWalk.js';
+
 export const css = {
   name: 'css',
   description: '将字符串字面量用 CSS 反斜杠十六进制编码，绕过 ASP.NET WAF',
@@ -10,40 +12,10 @@ export const css = {
    * @returns {string}
    */
   transform(payload, ctx) {
-    const src = String(payload ?? '');
-    let out = '';
-    let inSingle = false, inDouble = false;
-    for (let i = 0; i < src.length; i++) {
-      const ch = src[i];
-      if (inSingle) {
-        if (ch === "'" && !isQuoteEscaped(src, i)) { inSingle = false; out += ch; }
-        else out += `\\${ch.charCodeAt(0).toString(16).padStart(2, '0')} `;
-        continue;
-      }
-      if (inDouble) {
-        if (ch === '"' && !isQuoteEscaped(src, i)) { inDouble = false; out += ch; }
-        else out += `\\${ch.charCodeAt(0).toString(16).padStart(2, '0')} `;
-        continue;
-      }
-      if (ch === "'") {
-        // [quoteScan] 未闭合字面量：原样透传剩余。原实现把尾部当普通字符逐个变换，
-        // 对字面量编码型插件等于把 payload 尾部整个吃掉（SLEEP 关键字消失、
-        // 注入语义被摧毁且不报错）。口径与 quoteScan.js 及其余已迁移插件一致。
-        const _lit = readSqlLiteral(src, i, "'");
-        if (!_lit.closed) { out += src.slice(i); return out; }
-        inSingle = true; out += ch;
-      }
-      else if (ch === '"') {
-        // [quoteScan] 未闭合字面量：原样透传剩余。原实现把尾部当普通字符逐个变换，
-        // 对字面量编码型插件等于把 payload 尾部整个吃掉（SLEEP 关键字消失、
-        // 注入语义被摧毁且不报错）。口径与 quoteScan.js 及其余已迁移插件一致。
-        const _lit = readSqlLiteral(src, i, '"');
-        if (!_lit.closed) { out += src.slice(i); return out; }
-        inDouble = true; out += ch;
-      }
-      else out += ch;
-    }
-    return out;
+    return walkLiterals(payload, {
+      onLiteral: (body, quote) =>
+        `${quote}${body.split('').map((c) => `\\${c.charCodeAt(0).toString(16).padStart(2, '0')} `).join('')}${quote}`,
+    });
   },
 };
 export default css;
