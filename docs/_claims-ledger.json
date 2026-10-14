@@ -68,19 +68,19 @@
       "id": "waf-fingerprint-coverage",
       "claim": "62 个 WAF 指纹识别",
       "status": "unverified",
-      "evidence": "——",
+      "evidence": "62 条 matcher 在 core/waf/wafRules.js + 判据单测（waf.abCriteria / activeProbe / blockProfile / blockSignature / bypassSearcher / bypassSemantics / tamper.wafVendor 等）；**真机样本仅 1 例**（e2e/waf-real 的真 ModSecurity）",
       "refute_cmd": "npm run waf-validate（自写正则模拟器口径，禁止对外）",
-      "recheck_batch": "下一批",
-      "caveat": "★ 只有自实现模拟器口径，缺真机识别准确率实测；对外引用前必须补真机样本"
+      "recheck_batch": "待排期（需真 WAF 样本）",
+      "caveat": "★ D68 复核结论：真机命中率证据只有 ModSecurity 1/62，其余 61 条无真机样本。折中补证方案（待执行）：抽 8-10 个常见 WAF（Cloudflare / F5 BIG-IP / 阿里云 / 腾讯云 / AWS WAF…）取真实响应样本做命中率对拍。未补证前对外只能说「62 条规则 + 判据单测」，不得说「识别准确率」。"
     },
     {
       "id": "paramminer-superiority",
       "claim": "参数挖掘（Arjun 式）强于 sqlmap",
       "status": "unverified",
-      "evidence": "仅有本仓 11 用例自测 + 算法描述",
+      "evidence": "11 用例覆盖五种目标形态（反射型命中 / 静态页零发现 / 全回显防噪 / 预算硬顶 / POST 载体）；引擎侧 TargetParser 6.6 步消费并打 mined 溯源标记",
       "refute_cmd": "node --test server/tests/paramMiner.test.js",
-      "recheck_batch": "下一批",
-      "caveat": "★ 「强于 sqlmap」缺同题对照；sqlmap 侧无挖掘能力（硬编码 -p），但本仓的召回率/误报率无实测"
+      "recheck_batch": "待排期（需同题对照）",
+      "caveat": "★ D68 复核结论：**sqlmap 没有主动挖掘能力**（只收 -p/--param-del 等显式参数）⇒ 严格表述应是「提供 sqlmap 所没有的能力」，不是「更强」。本仓自身的召回率/误报率**无同题量化**。补证方案：对同一组目标分别跑本仓 paramMine 与 sqlmap -p 全量，比「发现的真实可注入参数数」。措辞修正前不得对外说「更强」。"
     }
   ]
 }
