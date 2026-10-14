@@ -81,3 +81,42 @@ test('lex：brace token 带 block 标记（对象字面量 vs 代码块）', () 
   assert.equal(braceOpens.filter((t) => t.block).length, 1, 'if 的块是 block');
   assert.equal(braceOpens.filter((t) => !t.block).length, 1, '对象字面量不是 block');
 });
+
+// ── [D66 2026-10-14] 正则字面量分支的回归判据 ────────────────────────────────
+// 修复动机：此前正文不处理正则，`/[\\"]/` 里的引号被当字符串开 ⇒ 吞到文件尾，
+// 后续函数全部丢失（jsonescape.js 的 transform 在 typecoverage 统计中蒸发）。
+
+test('lex：正则体里的引号不再吞代码（D66 修复的动机场景）', () => {
+  const src = 'const R = /[\\\\"]/g;\nfunction f(a){ return a; }\n';
+  const { functions } = findFunctions(src);
+  assert.ok(functions.some((fn) => fn.name === 'f'), '正则后的函数应被识别（此前被吞）');
+});
+
+test('lex：除法不误判为正则（a / b / c 三个 ident 相邻）', () => {
+  const src = 'function g(a, b) { return a / b / 2; }\nfunction h(c) { return c/2; }\n';
+  const { functions } = findFunctions(src);
+  assert.equal(functions.length, 2, '除法场景两个函数都应识别');
+  // 若 `/` 被误判为正则，`b / 2; }...` 会被当正则吞掉，函数边界损坏
+  assert.equal(countBranches(lex(src).tokens), 0, '除法不产生分支');
+});
+
+test('lex：字符类内的 / 不结束正则（/[a/]/）', () => {
+  const src = 'const R = /[a/]/;\nfunction f(x) { return x; }\n';
+  const { functions } = findFunctions(src);
+  assert.ok(functions.some((fn) => fn.name === 'f'), '字符类内的 / 不应提前结束正则');
+});
+
+test('lex：正则位置白名单（return /re/ 识别；`) / 2` 按除法走）', () => {
+  const okSrc = 'function f() { return /ab+c/gi.test(s); }\n';
+  assert.ok(findFunctions(okSrc).functions.some((fn) => fn.name === 'f'), 'return 后的正则应被识别');
+  // 除法：`) / x` 处 `/` 前是 `)`，不在正则位置
+  const divSrc = 'function g(a) { return (a + 1) / 2; }\n';
+  assert.equal(countBranches(lex(divSrc).tokens), 0, '`) / 2` 不应形成任何分支/吞并');
+  assert.ok(findFunctions(divSrc).functions.some((fn) => fn.name === 'g'), '除法后的函数结构完好');
+});
+
+test('lex：未闭合正则（换行即断）回落为普通 token，不吞后续行', () => {
+  const src = 'const a = 1;\nconst bad = /foo\nfunction after() { return 1; }\n';
+  const { functions } = findFunctions(src);
+  assert.ok(functions.some((fn) => fn.name === 'after'), '未闭合正则不应吞掉后续函数');
+});

@@ -4,6 +4,24 @@
 
 ## [Unreleased]
 
+### 2026-10-14 批次 D66 · jsLexer 正则字面量盲区修复 + 五门禁口径重标定
+
+**一句话**：D57-II 的 CI 红（typecoverage 48.5 < 48.7）根因是**词法内核的既有盲区**——
+`jsLexer` 自 D54 抽取起「刻意不处理正则字面量」，`/[\\"]/g` 里的引号被当字符串开、吞到
+文件尾，**函数静默丢失**（jsonescape.js 的 transform 在统计中蒸发）。修复后全仓 65 个
+文件的统计口径变化，五道门禁的基线按新口径重标定。
+
+| 面 | 内容 |
+|---|---|
+| 修复 | `lex()` 新增正则字面量分支：**位置白名单**（只在「期待表达式」位识别，除法不受影响）+ **转义对消费**（`\`+下一字符成对跳过，天然满足奇偶性）+ **字符类**（`[...]` 内 `/` 不结束正则）+ flags；未闭合回落既有路径。正则扫描抽为 `scanRegexLiteral`（lex 圈复杂度 63→53） |
+| 暴露 | A/B 全仓扫描（新旧 lexer 对比）：**65 个文件** maxDepth/函数数变化。典型：DbTree.tsx 深度 3→8（真实 8 层嵌套首次可见）、dbDrivers.js 函数 3→25、scanValidityGuard 0→23、readme-consistency 10→61 |
+| complexity 对账 | 52 处违规全部归因（新口径首跑）：`--fix-baseline --force` 收录 39 个存量新增 + 下调 10 个（旧口径虚高）+ **重标定 8 个**（6 项词法修正：guardScalarsCore 37→94 / buildConfig 65→169 / StackedDetector.detect 17→45 / getScanClient 30→53 / resolveProxy 18→19 / _resolveTimeTemplates 17→21；2 项历史漂移：parseScope+2 行 / parseLogFile+2 行） |
+| nesting 对账 | 基线 14→17：+scalarselectinline(7) / +StackedDetector(7) / **+DbTree.tsx(8，超软上限的存量)**；prefilter 9→8（变浅 ✅） |
+| dup 对账 | 41267→41353（+86）。**A/B 实证**：同代码旧 lexer 41267 / 新 lexer 41353 ⇒ 全为口径切换；抽样 151 个新增块全是真实重复（requestFileParser≈requestParser、debt/typecoverage/deadcode 三门禁脚本间的 collect 族） |
+| typecoverage 对账 | **补 2 个真实函数的 JSDoc**（authDeclaration.isTargetInScope / bearerKeeper.applyBearer，都是 D51 授权链核心）⇒ core 48.6→48.9、engine 29.5、services 23.4；基线上调锁定新水位 |
+| 测试 | jsLexer.guard 10→**15**（+5 条 D66 回归：含引号正则不吞代码 / 除法不误判 / 字符类内 `/` / 位置白名单 / 未闭合回落）；全守卫 selftest + wiring 全绿（complexity/dup/deadcode/nesting/typecov/debt） |
+| 归因纪律 | **「CI 从未用新 lexer 跑过」**——52 处不是回归，是统计口径修正后存量债首次可见（与 windows 腿首跑、macOS 首跑同形）。下一批候选：拆重标定暴露的巨兽（buildConfig 169 圈 / guardScalarsCore 94 圈 / getScanClient 53 圈） |
+
 ### 2026-10-14 批次 D65 · 技术债门禁判据收紧：基线 26→0（引用不是债）
 
 **一句话**：D61 的 26 条基线经逐项审阅，**全部是词法误报**——注释里讨论历史条目（`TODO.md §C`、

@@ -38,6 +38,24 @@
       "limitLines": 100,
       "limitComplexity": 15
     },
+    "scripts/lib/jsLexer.mjs::<arrow@322>": {
+      "lines": 16,
+      "complexity": 21,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "scripts/lib/jsLexer.mjs::findFunctions": {
+      "lines": 99,
+      "complexity": 76,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "scripts/lib/jsLexer.mjs::lex": {
+      "lines": 99,
+      "complexity": 53,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
     "scripts/merge-integrity.mjs::checkFileAcrossMerge": {
       "lines": 90,
       "complexity": 35,
@@ -47,6 +65,12 @@
     "scripts/merge-integrity.mjs::exportedSymbols": {
       "lines": 28,
       "complexity": 17,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "scripts/migrate-payload-registry.mjs::extractNotesFromSource": {
+      "lines": 61,
+      "complexity": 23,
       "limitLines": 100,
       "limitComplexity": 15
     },
@@ -62,6 +86,18 @@
       "limitLines": 100,
       "limitComplexity": 15
     },
+    "scripts/readme-consistency.mjs::checkConsistency": {
+      "lines": 176,
+      "complexity": 41,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "scripts/readme-consistency.mjs::selftest": {
+      "lines": 114,
+      "complexity": 7,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
     "scripts/typecoverage-guard.mjs::fixBaseline": {
       "lines": 34,
       "complexity": 16,
@@ -71,6 +107,24 @@
     "scripts/typecoverage-guard.mjs::measureCoverage": {
       "lines": 40,
       "complexity": 16,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "scripts/verify-tamper-upstream-examples.mjs::extractFromSource": {
+      "lines": 42,
+      "complexity": 22,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "scripts/verify-tamper-upstream-examples.mjs::parsePyLiteral": {
+      "lines": 37,
+      "complexity": 29,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "scripts/verify-tamper-upstream-examples.mjs::splitTopLevel": {
+      "lines": 21,
+      "complexity": 17,
       "limitLines": 100,
       "limitComplexity": 15
     },
@@ -129,7 +183,7 @@
       "limitComplexity": 15
     },
     "server/bin/cli/args.js::parseLogFile": {
-      "lines": 45,
+      "lines": 47,
       "complexity": 16,
       "limitLines": 100,
       "limitComplexity": 15
@@ -148,13 +202,13 @@
     },
     "server/bin/cli/batchTargets.js::expandBatchTargets": {
       "lines": 77,
-      "complexity": 42,
+      "complexity": 41,
       "limitLines": 100,
       "limitComplexity": 15
     },
     "server/bin/cli/config.js::buildConfig": {
-      "lines": 104,
-      "complexity": 65,
+      "lines": 248,
+      "complexity": 169,
       "limitLines": 100,
       "limitComplexity": 15
     },
@@ -218,6 +272,12 @@
       "limitLines": 100,
       "limitComplexity": 15
     },
+    "server/src/api/scanGuard/objectGroups.js::guardBearerRefresh": {
+      "lines": 41,
+      "complexity": 31,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
     "server/src/api/scanGuard/objectGroups.js::guardSecondOrder": {
       "lines": 41,
       "complexity": 19,
@@ -225,8 +285,14 @@
       "limitComplexity": 15
     },
     "server/src/api/scanGuard/scalarsCore.js::guardScalarsCore": {
-      "lines": 65,
-      "complexity": 37,
+      "lines": 172,
+      "complexity": 94,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/api/scanGuard/scalarsEgress.js::guardScalarsEgress": {
+      "lines": 74,
+      "complexity": 41,
       "limitLines": 100,
       "limitComplexity": 15
     },
@@ -278,6 +344,12 @@
       "limitLines": 100,
       "limitComplexity": 15
     },
+    "server/src/core/bearerKeeper.js::normalizeRefreshConfig": {
+      "lines": 28,
+      "complexity": 27,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
     "server/src/core/cookieJar.js::CookieJar._parseSetCookie": {
       "lines": 35,
       "complexity": 18,
@@ -287,6 +359,12 @@
     "server/src/core/csrfKeeper.js::withCsrf": {
       "lines": 56,
       "complexity": 24,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/core/dbDrivers.js::getDriver": {
+      "lines": 39,
+      "complexity": 20,
       "limitLines": 100,
       "limitComplexity": 15
     },
@@ -340,13 +418,13 @@
     },
     "server/src/core/http/proxy.js::resolveProxy": {
       "lines": 37,
-      "complexity": 18,
+      "complexity": 19,
       "limitLines": 100,
       "limitComplexity": 15
     },
     "server/src/core/http/requestContext.js::mergeAuthHeaders": {
       "lines": 32,
-      "complexity": 19,
+      "complexity": 18,
       "limitLines": 100,
       "limitComplexity": 15
     },
@@ -362,15 +440,33 @@
       "limitLines": 100,
       "limitComplexity": 15
     },
+    "server/src/core/httpClient.js::HttpClient._prepareHeaders": {
+      "lines": 28,
+      "complexity": 22,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
     "server/src/core/httpClient.js::HttpClient.close": {
       "lines": 8,
       "complexity": 17,
       "limitLines": 100,
       "limitComplexity": 15
     },
-    "server/src/core/httpClient.js::_prepareHeaders": {
-      "lines": 28,
-      "complexity": 22,
+    "server/src/core/httpClient.js::HttpClient.request": {
+      "lines": 49,
+      "complexity": 23,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/core/loginFlow.js::detectLoginFields": {
+      "lines": 30,
+      "complexity": 26,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/core/loginFlow.js::performLogin": {
+      "lines": 33,
+      "complexity": 24,
       "limitLines": 100,
       "limitComplexity": 15
     },
@@ -400,12 +496,6 @@
     },
     "server/src/core/requestCollectionParser.js::detectRequestFormat": {
       "lines": 24,
-      "complexity": 18,
-      "limitLines": 100,
-      "limitComplexity": 15
-    },
-    "server/src/core/requestCollectionParser.js::parseBurpXml": {
-      "lines": 50,
       "complexity": 18,
       "limitLines": 100,
       "limitComplexity": 15
@@ -440,6 +530,12 @@
       "limitLines": 100,
       "limitComplexity": 15
     },
+    "server/src/core/requestFileParser.js::parseRequestFile": {
+      "lines": 124,
+      "complexity": 66,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
     "server/src/core/requestTransform.js::applyScanTransform": {
       "lines": 45,
       "complexity": 18,
@@ -452,6 +548,18 @@
       "limitLines": 100,
       "limitComplexity": 15
     },
+    "server/src/core/scanValidityGuard.js::ScanValidityGuard.observe": {
+      "lines": 62,
+      "complexity": 39,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/core/scanValidityGuard.js::ScanValidityGuard.summary": {
+      "lines": 130,
+      "complexity": 33,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
     "server/src/core/scopeGuard.js::isHostInScope": {
       "lines": 30,
       "complexity": 28,
@@ -459,8 +567,8 @@
       "limitComplexity": 15
     },
     "server/src/core/scopeGuard.js::parseScope": {
-      "lines": 74,
-      "complexity": 29,
+      "lines": 76,
+      "complexity": 27,
       "limitLines": 100,
       "limitComplexity": 15
     },
@@ -494,6 +602,12 @@
       "limitLines": 100,
       "limitComplexity": 15
     },
+    "server/src/core/tamper/plugins/scalarselectinline.js::transform": {
+      "lines": 61,
+      "complexity": 29,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
     "server/src/core/tamper/plugins/space2comment.js::transform": {
       "lines": 62,
       "complexity": 26,
@@ -503,12 +617,6 @@
     "server/src/core/tamper/plugins/space2morehash.js::transform": {
       "lines": 64,
       "complexity": 28,
-      "limitLines": 100,
-      "limitComplexity": 15
-    },
-    "server/src/core/tamper/plugins/uniontable.js::transform": {
-      "lines": 23,
-      "complexity": 19,
       "limitLines": 100,
       "limitComplexity": 15
     },
@@ -566,9 +674,15 @@
       "limitLines": 100,
       "limitComplexity": 15
     },
-    "server/src/core/yamlLite.js::unquote": {
-      "lines": 33,
-      "complexity": 21,
+    "server/src/core/xmlBody.js::parseXmlBody": {
+      "lines": 39,
+      "complexity": 17,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/core/yamlLite.js::scalar": {
+      "lines": 27,
+      "complexity": 27,
       "limitLines": 100,
       "limitComplexity": 15
     },
@@ -580,7 +694,25 @@
     },
     "server/src/engine/DBFingerprinter.js::DBFingerprinter.fingerprint": {
       "lines": 73,
-      "complexity": 41,
+      "complexity": 40,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/engine/DialectSqlBuilder.js::<arrow@126>": {
+      "lines": 15,
+      "complexity": 18,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/engine/DialectSqlBuilder.js::escCols": {
+      "lines": 19,
+      "complexity": 20,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/engine/DialectSqlBuilder.js::nnExpr": {
+      "lines": 31,
+      "complexity": 17,
       "limitLines": 100,
       "limitComplexity": 15
     },
@@ -592,7 +724,7 @@
     },
     "server/src/engine/Extractor.js::Extractor.extractScalar": {
       "lines": 22,
-      "complexity": 21,
+      "complexity": 20,
       "limitLines": 100,
       "limitComplexity": 15
     },
@@ -610,7 +742,7 @@
     },
     "server/src/engine/TargetParser.js::TargetParser._parseForms": {
       "lines": 41,
-      "complexity": 27,
+      "complexity": 24,
       "limitLines": 100,
       "limitComplexity": 15
     },
@@ -656,6 +788,12 @@
       "limitLines": 100,
       "limitComplexity": 15
     },
+    "server/src/engine/blindExtractor.js::extractTime": {
+      "lines": 105,
+      "complexity": 55,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
     "server/src/engine/crawler.js::LinkCrawler.crawl": {
       "lines": 43,
       "complexity": 19,
@@ -664,7 +802,7 @@
     },
     "server/src/engine/dbmsVersion.js::parseDbmsVersion": {
       "lines": 30,
-      "complexity": 17,
+      "complexity": 16,
       "limitLines": 100,
       "limitComplexity": 15
     },
@@ -735,8 +873,8 @@
       "limitComplexity": 15
     },
     "server/src/engine/detectors/StackedDetector.js::StackedDetector.detect": {
-      "lines": 35,
-      "complexity": 17,
+      "lines": 110,
+      "complexity": 45,
       "limitLines": 100,
       "limitComplexity": 15
     },
@@ -754,7 +892,7 @@
     },
     "server/src/engine/detectors/TimeBlindDetector.js::TimeBlindDetector._resolveTimeTemplates": {
       "lines": 33,
-      "complexity": 17,
+      "complexity": 21,
       "limitLines": 100,
       "limitComplexity": 15
     },
@@ -788,6 +926,12 @@
       "limitLines": 100,
       "limitComplexity": 15
     },
+    "server/src/engine/exploit/fileRead.js::oracleFileRead": {
+      "lines": 47,
+      "complexity": 19,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
     "server/src/engine/exploit/fileWrite.js::fileWrite": {
       "lines": 43,
       "complexity": 19,
@@ -808,7 +952,7 @@
     },
     "server/src/engine/exploit/udf.js::udfInstall": {
       "lines": 82,
-      "complexity": 37,
+      "complexity": 36,
       "limitLines": 100,
       "limitComplexity": 15
     },
@@ -826,7 +970,19 @@
     },
     "server/src/engine/extraction/hashAnalysis.js::classifyHash": {
       "lines": 46,
-      "complexity": 25,
+      "complexity": 24,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/engine/injection.js::_probeWithFromClause": {
+      "lines": 85,
+      "complexity": 24,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/engine/injection.js::buildInjectionRequest": {
+      "lines": 167,
+      "complexity": 91,
       "limitLines": 100,
       "limitComplexity": 15
     },
@@ -957,8 +1113,8 @@
       "limitComplexity": 15
     },
     "server/src/engine/scan/scanClient.js::getScanClient": {
-      "lines": 85,
-      "complexity": 30,
+      "lines": 148,
+      "complexity": 53,
       "limitLines": 100,
       "limitComplexity": 15
     },
@@ -994,7 +1150,13 @@
     },
     "server/src/engine/sqlmapBridge.js::SqlmapBridge.start": {
       "lines": 115,
-      "complexity": 38,
+      "complexity": 37,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/engine/sqlmapBridge.js::buildArgs": {
+      "lines": 179,
+      "complexity": 110,
       "limitLines": 100,
       "limitComplexity": 15
     },
@@ -1034,19 +1196,19 @@
       "limitLines": 100,
       "limitComplexity": 15
     },
-    "server/src/services/ReportGenerator.js::toCSV": {
+    "server/src/services/ReportGenerator.js::ReportGenerator.toCSV": {
       "lines": 50,
       "complexity": 19,
       "limitLines": 100,
       "limitComplexity": 15
     },
-    "server/src/services/ReportGenerator.js::toHTML": {
+    "server/src/services/ReportGenerator.js::ReportGenerator.toHTML": {
       "lines": 118,
       "complexity": 7,
       "limitLines": 100,
       "limitComplexity": 15
     },
-    "server/src/services/ReportGenerator.js::toSARIF": {
+    "server/src/services/ReportGenerator.js::ReportGenerator.toSARIF": {
       "lines": 68,
       "complexity": 40,
       "limitLines": 100,
@@ -1061,6 +1223,24 @@
     "server/src/services/reportDelivery.js::buildDelivery": {
       "lines": 75,
       "complexity": 71,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/services/reportHtml.js::expandIpv6Groups": {
+      "lines": 28,
+      "complexity": 16,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/services/reportHtml.js::isInternalHost": {
+      "lines": 19,
+      "complexity": 19,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/services/reportHtml.js::isInternalIpv4Octets": {
+      "lines": 10,
+      "complexity": 18,
       "limitLines": 100,
       "limitComplexity": 15
     },
@@ -1109,6 +1289,12 @@
     "src/components/BlindTraceTimeline.tsx::BlindTraceTimeline": {
       "lines": 147,
       "complexity": 32,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "src/components/DbTree.tsx::DbTree": {
+      "lines": 168,
+      "complexity": 19,
       "limitLines": 100,
       "limitComplexity": 15
     },
@@ -1316,8 +1502,8 @@
       "limitLines": 100,
       "limitComplexity": 15
     },
-    "src/tests/scanConfig.contract.test.ts::<arrow@61>": {
-      "lines": 190,
+    "src/tests/scanConfig.contract.test.ts::<arrow@46>": {
+      "lines": 200,
       "complexity": 7,
       "limitLines": 100,
       "limitComplexity": 15
