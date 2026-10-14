@@ -12,6 +12,15 @@
 // · 老标记全部进基线，只对**新增**标记判格式
 // · 基线内标记消失 → 提示可下调
 //
+// ── 判据口径（2026-10-14 D65 收紧，此前 26 项基线全是词法误报）──────────────
+// 只有**行首标记位**的词才算技术债标记：`// TYPE`、`* TYPE`、`/* TYPE`、
+// `// [批次] TYPE`（统一格式）。**行中引用不检出**——注释里讨论历史条目
+// （`见 TODO.md §C`、`TODO 09-28 #3 的验证口径`、反引号内的 `XXX.MySQL`、
+// 格式示例 `[F2 2026-10-03 TODO 09-28 #3]`）是文档锚点，不是待办，此前被
+// 宽松全词检测误收进基线豁免，掩盖了"引用不是债"这个事实。副作用：行中
+// 真待办（`// 顺手 TODO 修一下`）不再检出——标记就该写在标记位，写行中
+// 本身就是格式问题，报出来才对。
+//
 // 用法：
 //   node scripts/debt-guard.mjs               # 检查
 //   node scripts/debt-guard.mjs --selftest    # 自证判据不空转
@@ -31,8 +40,11 @@ const EXT = ['.js', '.ts', '.tsx', '.mjs'];
 
 // 统一格式正则：// [TODO 2026-10-13 D53] 简述
 const UNIFIED_RE = /^\s*\/\/\s*\[(TODO|FIXME|HACK|XXX)\s+(\d{4}-\d{2}-\d{2})\s+(D\d+|[A-Z][-A-Z0-9]*)\]\s+(.+)/;
-// 宽松检测：任何注释行含 TODO/FIXME/HACK/XXX 全词（不匹配 XXX.MySQL 等）
-const LOOSE_RE = /\b(TODO|FIXME|HACK|XXX)\b/;
+// 标记位判定（2026-10-14 D65 收紧）：类型词必须紧跟注释引导符（// 、*、/*），
+// 可隔一个 [批次标签]，允许前导缩进（缩进块注释 ` * FIXME` 是合法标记位）。
+// 行中引用（TODO.md §C、TODO 09-28 #3、XXX.MySQL、格式示例）前面有其他字符，
+// 前缀锚定天然排除。负向断言排除 TODO.md / XXX.MySQL 等点号接续。
+const MARKER_RE = /^\s*(?:\/\/+|\/\*+|\*+)\s*(?:\[[^\]]*\]\s*)?(TODO|FIXME|HACK|XXX)\b(?![.\w])/;
 
 function collectFiles(rel, out) {
   const abs = path.isAbsolute(rel) ? rel : path.join(ROOT, rel);
@@ -63,7 +75,9 @@ export function scanDebtMarkers(scanDirs) {
       try { src = fs.readFileSync(abs, 'utf8'); } catch { continue; }
       const lines = src.split('\n');
       for (let i = 0; i < lines.length; i++) {
-        const line = lines[i];
+        // [D63 家族教训] CRLF 归一：UNIFIED_RE 的 (.+) 与 MARKER_RE 的前缀锚定
+        // 都假定行尾无 \r，拆行后统一剥掉。
+        const line = lines[i].replace(/\r$/, '');
         const trimmed = line.trim();
         // Skip non-comment lines (must be // or * or /* to be a comment)
         if (!trimmed.startsWith('//') && !trimmed.startsWith('*') && !trimmed.startsWith('/*')) continue;
@@ -75,7 +89,7 @@ export function scanDebtMarkers(scanDirs) {
           markers.push({ type: um[1], file: f, line: i + 1, date: um[2], batch: um[3], summary: um[4], unified: true });
           continue;
         }
-        const lm = line.match(LOOSE_RE);
+        const lm = line.match(MARKER_RE);
         if (lm) {
           markers.push({ type: lm[1].toUpperCase(), file: f, line: i + 1, unified: false });
         }
@@ -241,6 +255,36 @@ function selftestMain() {
       const r = judge(found, { markers: { [`${badFile.file}::${badFile.line}`]: { type: 'TODO', status: 'open' } } });
       const badErrors = r.errors.filter((e) => e.includes('bad.js'));
       ok(badErrors.length === 0, '基线内裸标记应豁免');
+    });
+
+    // ⑤ [D65] 行中引用 → 不检出（此前 26 项基线全是这类误报）
+    write('refs.js', [
+      '// 口径见 TODO.md §C 与 TODO 09-28 #3 的验证口径（TODO 已留证）。',
+      '// 必须直接降级，不得用 `|| XXX.MySQL` 回落成 MySQL 语法。',
+      '// [F2 2026-10-03 TODO 09-28 #3] GET /sqlmap/:id/diff —— 行首批次标签内的引用',
+      '// · 统一格式示例：`// [TODO 2026-10-13 D53] 一句话简述`（行中示例不是标记）',
+      '// 另记 TODO。句末引用。',
+    ].join('\n'));
+    t('⑤ 行中引用/标签内引用/格式示例 → 不检出', () => {
+      const found = scanDebtMarkers([dir]);
+      const refMarkers = found.markers.filter((m) => m.file.includes('refs.js'));
+      ok(refMarkers.length === 0, `行中引用不应检出，实际 ${refMarkers.length} 条：${JSON.stringify(refMarkers)}`);
+    });
+
+    // ⑥ [D65] `*` 与 `/*` 标记位仍是标记位（块注释内的待办不许漏）
+    write('block.js', [
+      '/* TODO 补上参数校验 */',
+      'function f() {}',
+      '// eslint 描述行',
+      '/*',
+      ' * FIXME 空函数体是占位',
+      ' */',
+    ].join('\n'));
+    t('⑥ 块注释标记位（/* 与 *）→ 检出', () => {
+      const found = scanDebtMarkers([dir]);
+      const block = found.markers.filter((m) => m.file.includes('block.js'));
+      ok(block.length === 2, `块注释两个标记位应各检出 1 条，实际 ${block.length}`);
+      ok(block.every((m) => !m.unified), '块注释裸标记应 unified=false');
     });
 
     console.log(failed ? `\n❌ selftest ${failed} 条失败` : '\n✅ selftest 全绿');
