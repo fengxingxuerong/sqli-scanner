@@ -10,6 +10,7 @@
   "scripts": {
     "acceptance": "node e2e/acceptance.mjs",
     "acceptance:sandbox": "python e2e/run-with-sandbox.py e2e/acceptance.mjs",
+    "gate:close": "node scripts/gate-close.mjs",
     "arch:baseline": "node scripts/arch-guard.mjs --update",
     "arch:guard": "node scripts/arch-guard.mjs",
     "e2e:wiring": "node scripts/e2e-wiring-check.mjs",
