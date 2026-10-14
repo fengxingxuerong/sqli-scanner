@@ -80,7 +80,55 @@ function fnv1a(str) {
  * @param {{minTokens?:number}} [opts]
  * @returns {Array<{tokens:number,pairs:Array<{file:string,startLine:number,endLine:number}>}>}
  */
+// ── 数据表豁免（2026-10-14 T-6b 起因）─────────────────────────────────────────
+// 按 token 窗口判重时，**同一类数据的不同副本**（SQL 关键字表、常见名表…）必然互相
+// 命中：实测一张 MORE_VERSIONED_WORDS 表与仓内既有数据表产生 2370 条「重复」，而真实
+// 代码重复一条没多。这些噪声把基线刷成几万条，**反而掩盖真正的代码重复**。
+//
+// 判据刻意保守：窗口内**全部** token 必须是 str / num 或结构分隔符，任何
+// ident / 运算符 / 调用出现即不豁免 ⇒ 只放过「纯字面量数据表」，绝不放过逻辑代码。
+// 效果方向是**基线下调**（门禁对真代码重复更严），不是放宽。
+const LITERAL_TABLE_PUNCT = new Set([',', '(', ')', '[', ']', '{', '}', ';', ':', '.']);
+
+/**
+ * 该克隆窗口是否「纯字面量数据表」（可豁免）。
+ *
+ * 允许**一个表头**（`const NAME = [` / `export const NAME = [` / `let` / `var`）——
+ * 真实数据表都长这样，若把表头也算进窗口，任何表都豁免不了（selftest ④ 抓过这个）。
+ * 表头之后必须**全是 str / num / 结构分隔符**；任何 ident / 运算符 / 调用即不豁免
+ * ⇒ 只放过「纯字面量数据表」，绝不放过逻辑代码。
+ * @param {Array<{type:string,value:string}>} tokens 窗口内的 token
+ * @returns {boolean}
+ */
+export function isLiteralTableWindow(tokens) {
+  const isIdent = (t) => !!t && t.type === 'ident';
+  const isPunct = (t, v) => !!t && t.type === 'punct' && t.value === v;
+  let i = 0;
+  if (isIdent(tokens[i])) {
+    i++; // export / const / let / var
+    if (isIdent(tokens[i])) i++; // default / const / NAME
+    if (isIdent(tokens[i])) i++; // const / NAME
+    if (isPunct(tokens[i], '=')) i++;
+    if (isPunct(tokens[i], '[')) i++;
+  }
+  const rest = tokens.slice(i);
+  if (!rest.length) return false;
+  return rest.every(
+    (t) => t.type === 'str' || t.type === 'num' || (t.type === 'punct' && LITERAL_TABLE_PUNCT.has(t.value))
+  );
+}
+
 export function findClones(files, opts = {}) {
+  return findClonesWithStats(files, opts).clones;
+}
+
+/**
+ * 同 findClones，但额外返回被数据表豁免的条数（供 --json 审计）。
+ * @param {string[]} files
+ * @param {{minTokens?:number}} [opts]
+ * @returns {{clones:Array<object>, literalTableSkipped:number}}
+ */
+export function findClonesWithStats(files, opts = {}) {
   const minTokens = opts.minTokens ?? MIN_TOKENS;
   // 每个文件的指纹序列 + 行号表
   const fileData = new Map();
@@ -92,7 +140,8 @@ export function findClones(files, opts = {}) {
     if (tokens.length < minTokens) continue;
     const fps = fingerprintTokens(tokens);
     const lines = tokens.map((t) => t.line);
-    fileData.set(file, { fps, lines });
+    // [T-6b] 留 token 引用（不复制）：数据表豁免判定要按行区间取回窗口内的 token
+    fileData.set(file, { fps, lines, tokens });
   }
   // 每个文件：hash → [startIdx, ...]
   const fileHashMaps = new Map();
@@ -144,7 +193,33 @@ export function findClones(files, opts = {}) {
     }
   }
   clones.sort((a, b) => b.tokens - a.tokens);
-  return clones;
+  // [T-6b] 数据表豁免：两处窗口都是「纯字面量表」才豁免（任一侧含逻辑即保留）
+  // ⚠️ 取区间用**行号二分**（lex 产出的 tokens 按 line 递增），不用全量 filter ——
+  //   4 万+ 克隆 × 全文件 token 数 = 4 亿次，跑到分钟级；二分后每次 O(log n + 窗口)
+  const windowTokens = (d, s, e) => {
+    let lo = 0, hi = d.tokens.length;
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (d.tokens[mid].line < s) lo = mid + 1; else hi = mid; }
+    const start = lo;
+    hi = d.tokens.length;
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (d.tokens[mid].line <= e) lo = mid + 1; else hi = mid; }
+    return d.tokens.slice(start, lo);
+  };
+  const kept = [];
+  const skippedSamples = [];
+  let literalTableSkipped = 0;
+  for (const c of clones) {
+    const pureLiteral = c.pairs.every((p) => {
+      const d = fileData.get(p.file);
+      if (!d || !d.tokens) return false;
+      return isLiteralTableWindow(windowTokens(d, p.startLine, p.endLine));
+    });
+    if (pureLiteral) {
+      literalTableSkipped++;
+      // [T-6b] 留样本：豁免量必须可核对（「全是数据表」这句话要能被抽查）
+      if (skippedSamples.length < 10) skippedSamples.push(c);
+    } else kept.push(c);
+  }
+  return { clones: kept, literalTableSkipped, skippedSamples };
 }
 
 function flushClone(out, fileData, fileA, idxAStart, idxAEnd, fileB, idxBStart, idxBEnd, minTokens) {
@@ -209,14 +284,15 @@ function main() {
   const jsonOut = args.includes('--json');
 
   const files = SCAN_DIRS.flatMap((d) => collect(d, EXT, []));
-  const clones = findClones(files);
+  const { clones, literalTableSkipped, skippedSamples } = findClonesWithStats(files);
   const baseline = loadBaseline();
 
   if (fix) return fixBaseline(clones);
 
   const { errors, notes } = judge(clones, baseline);
   if (jsonOut) {
-    console.log(JSON.stringify({ clones, errors, notes }, null, 2));
+    // [T-6b] literalTableSkipped 一并输出：数据表豁免量必须可审计，不许静默
+    console.log(JSON.stringify({ clones, literalTableSkipped, skippedSamples, errors, notes }, null, 2));
     return errors.length ? 1 : 0;
   }
   if (clones.length > 0) {
@@ -226,6 +302,8 @@ function main() {
     }
     if (clones.length > 10) console.log(`    ... 还有 ${clones.length - 10} 个`);
   }
+  // [T-6b] 豁免量始终打印（不是只在出错时）：让「数据表不算重复」这条口径本身可见
+  console.log(`  数据表豁免 ${literalTableSkipped} 条（纯字面量窗口，两侧皆表才豁免）`);
   for (const n of notes) console.log(`  ⚠ ${n}`);
   if (errors.length) {
     console.error(`❌ 重复代码门禁：${errors.length} 处违规`);
@@ -302,7 +380,34 @@ function selftestMain() {
       ok(clones.length === 0, `单段不应报重复，实际 ${clones.length}`);
     });
 
-    // ④ 基线裁定：重复数增长 → 失败
+    // ④ [T-6b] 纯字面量数据表（两张同构关键字表）→ 豁免不报，且豁免量可审计
+    const wordTable = (prefix) => [
+      `const ${prefix} = [`,
+      ...['SELECT', 'UNION', 'ALL', 'DISTINCT', 'FROM', 'WHERE', 'AND', 'OR', 'ORDER', 'BY',
+        'GROUP', 'HAVING', 'LIMIT', 'OFFSET', 'INSERT', 'UPDATE', 'DELETE', 'INTO', 'VALUES', 'SET',
+        'DROP', 'CREATE', 'TABLE', 'DATABASE', 'VERSION', 'JOIN', 'ON', 'BETWEEN', 'LIKE', 'NULL',
+        'IS', 'IN', 'NOT', 'AS', 'GROUP_CONCAT', 'CURRENT_USER', 'SESSION_USER', 'SUBSTRING', 'CONCAT',
+        'IFNULL', 'NULLIF', 'COALESCE', 'BENCHMARK', 'CONVERT', 'SLEEP', 'CHAR', 'CAST', 'COUNT',
+        'ASCII', 'BINARY', 'SCHEMA', 'MID', 'ORD', 'USER', 'IF'].map((w) => `  "${w}",`),
+      '];',
+    ].join('\n') + '\n';
+    write('t1.js', wordTable('A'));
+    write('t2.js', wordTable('B'));
+    t('④ 纯字面量数据表 → 豁免不报（豁免量可审计）', () => {
+      const r = findClonesWithStats([path.join(dir, 't1.js'), path.join(dir, 't2.js')]);
+      ok(r.clones.length === 0, `两张同构数据表不应报重复，实际 ${r.clones.length}`);
+      ok(r.literalTableSkipped >= 1, `应记录豁免量，实际 ${r.literalTableSkipped}`);
+    });
+
+    // ⑤ [T-6b] 表里混进一个 ident（函数调用）→ 不豁免（判据不得过宽，把逻辑重复放过）
+    write('t3.js', wordTable('C') + 'export function pick(list) { return list[0]; }\n');
+    write('t4.js', wordTable('D') + 'export function take(list) { return list[0]; }\n');
+    t('⑤ 数据表里含 ident → 仍判重复（豁免不得过宽）', () => {
+      const r = findClonesWithStats([path.join(dir, 't3.js'), path.join(dir, 't4.js')]);
+      ok(r.clones.length > 0, `含逻辑的同构窗口仍应报重复，实际 ${r.clones.length}`);
+    });
+
+    // ⑥ 基线裁定：重复数增长 → 失败
     t('④ 重复数增长被判失败', () => {
       const r = judge([{ tokens: 40, pairs: [] }, { tokens: 40, pairs: [] }], { clones: 1 });
       ok(r.errors.length >= 1, '重复 2 > 基线 1 应报错');
