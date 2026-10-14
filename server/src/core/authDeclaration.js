@@ -19,8 +19,9 @@ const DEFAULT_VALID_WINDOW_MS = 60 * 60 * 1000; // 1 小时
 /**
  * 判定目标 host 是否在授权 scope 内。
  * @param {string|URL|object} target 目标（URL 串、URL 对象或 request target）
- * @param {string[]|string} scope 授权 scope（域名清单或逗号分隔串）
- * @returns {boolean} 在 scope 内（或 host 不可提取的宽放情形）为 true
+ * @param {{hosts?:string[], domains?:string[]}} scope 授权 scope 对象
+ *        （hosts 精确匹配 / domains 后缀匹配；两者皆空 = 不限制目标）
+ * @returns {boolean} 在 scope 内（或 scope 为空、host 不可提取的宽放情形）为 true
  */
 function isTargetInScope(target, scope) {
   let host;
