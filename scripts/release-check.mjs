@@ -19,6 +19,12 @@
 //   ② 工作区干净：脏工作区意味着「源码 ≠ 将被打进包的内容」，发出去的版本不可复现；
 //   ③ 当前 tag（若存在）与 package.json 版本对应 —— tag 是发布产物唯一标识，
 //      版本号与 tag 对不上时，下游按 tag 拉到的代码与自己以为的版本不是一回事。
+//   ④ npm 端 @tauri-apps/* 与 src-tauri 的 Rust crate 必须同 major/minor 线 ——
+//      tauri build 只在打包**末尾**才验这项，不一致要等几分钟编译后才炸；而根因
+//      （npm 用 ^ 范围漂移、Rust 锁 Cargo.lock）在改动当天就存在，CI 又不构建 Tauri
+//      ⇒ 提前到发布入口拦。D77 实测过一次：api 漂到 2.12.2 / crate 锁 2.11.5。
+//      判据取数刻意用**两个 lock 文件**（package-lock.json / Cargo.lock，均已入库）：
+//      fresh clone 没有 node_modules 也能查，且与 tauri build 自己读的是同一份事实。
 //
 // ── 用法 ─────────────────────────────────────────────────────────────────────
 //   node scripts/release-check.mjs            # 检查（有问题退出码 1）
@@ -119,6 +125,122 @@ export function checkComposeHost(text) {
   return null;
 }
 
+// ── npm ↔ Rust crate 版本线判据（拆出来以便 selftest 注入样本） ───────────────
+/**
+ * 同线判定只认 **major.minor**：tauri 的 patch 号在 npm 与 crate 两侧不同步
+ * （实测 @tauri-apps/api 2.11 线最高 2.11.1，而 tauri crate 在 2.11.5）。
+ * 任一侧读不到版本 ⇒ 报 error（parser 失效时宁可红，不许静默通过——
+ * 与 artifact-drift「一个文件都没检查就不返回通过」同一条纪律）。
+ * @param {Array<{npm:string, crate:string, npmVer:string|null, crateVer:string|null}>} pairs
+ * @returns {{level:'error'|'warn', msg:string}[]}
+ */
+function judgeTauriLines(pairs) {
+  const problems = [];
+  const drift = [];
+  const unknown = [];
+  for (const p of pairs) {
+    if (!p.npmVer || !p.crateVer) {
+      unknown.push(`${p.npm}↔${p.crate}（npm=${p.npmVer ?? '读不到'} / crate=${p.crateVer ?? '读不到'}）`);
+      continue;
+    }
+    const line = (v) => v.split('.').slice(0, 2).join('.');
+    if (line(p.npmVer) !== line(p.crateVer)) {
+      drift.push(`${p.npm}@${p.npmVer} ↔ crate ${p.crate}@${p.crateVer}`);
+    }
+  }
+  if (unknown.length) {
+    problems.push({
+      level: 'error',
+      msg: `读不到以下 npm↔crate 版本，判据失效（不许静默通过）：${unknown.join('；')}。\n` +
+        '    package-lock.json 缺对应条目，或 Cargo.lock 结构变了 ⇒ 修采集，不是放行。',
+    });
+  }
+  if (drift.length) {
+    problems.push({
+      level: 'error',
+      msg: `Tauri npm 包与 Rust crate 不同线（${drift.length} 对）：${drift.join('；')}。\n` +
+        '    tauri build 会在打包末尾才拦这项；根因多半是 npm 端 ^ 范围漂移。\n' +
+        '    对齐方向：把 npm 端收敛到 crate 线（~ 范围），或更新 Cargo.lock 后重编。',
+    });
+  }
+  return problems;
+}
+
+/** npm 包名 ↔ src-tauri 里的 crate 名（tauri build 自己的对拍表同源） */
+const TAURI_LINE_PAIRS = [
+  { npm: '@tauri-apps/api', crate: 'tauri' },
+  { npm: '@tauri-apps/plugin-dialog', crate: 'tauri-plugin-dialog' },
+  { npm: '@tauri-apps/plugin-fs', crate: 'tauri-plugin-fs' },
+];
+
+/**
+ * 从 Cargo.lock 文本取指定 crate 的 version（块级精确匹配，近似名不命中）。
+ * 只认 `[[package]]` 块内的 `name = "x"` + `version = "y"`；依赖数组里的裸字符串
+ * （`dependencies = ["tauri-runtime"]`）不构成 `name = ` 行，天然不会误命中。
+ * @param {string} lockText
+ * @param {string} crateName
+ * @returns {string|null}
+ */
+function cargoCrateVersion(lockText, crateName) {
+  for (const block of String(lockText).split('[[package]]')) {
+    const name = /^\s*name\s*=\s*"([^"]+)"/m.exec(block);
+    if (!name || name[1] !== crateName) continue;
+    const ver = /^\s*version\s*=\s*"([^"]+)"/m.exec(block);
+    return ver ? ver[1] : null;
+  }
+  return null;
+}
+
+/**
+ * 从 package-lock.json 取 npm 包的实际安装版本（取 lock 而非 node_modules：
+ * fresh clone 无 node_modules 也能查，且 tauri build 读的就是这份事实）。
+ * @param {string} lockText
+ * @param {string} npmPkg
+ * @returns {string|null}
+ */
+function npmLockVersion(lockText, npmPkg) {
+  try {
+    const lock = JSON.parse(lockText);
+    return lock.packages?.[`node_modules/${npmPkg}`]?.version ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 采集 npm↔crate 版本对（从两个 lock 文件文本；任一侧空文本 ⇒ null，
+ * 由 judgeTauriLines 报「判据失效」而不是静默通过）。
+ * @param {string} lockText package-lock.json 文本
+ * @param {string} cargoText Cargo.lock 文本
+ * @returns {Array<{npm:string, crate:string, npmVer:string|null, crateVer:string|null}>}
+ */
+function collectTauriPairs(lockText, cargoText) {
+  return TAURI_LINE_PAIRS.map((p) => ({
+    ...p,
+    npmVer: lockText ? npmLockVersion(lockText, p.npm) : null,
+    crateVer: cargoText ? cargoCrateVersion(cargoText, p.crate) : null,
+  }));
+}
+
+/**
+ * Tauri 版本线段（④）：从两个 lock 文件采集 → 打印 → 判定。
+ * 单独成函数而非塞进 main：main 已近复杂度软上限，且「读文件/打印/判定」
+ * 是与版本三处核对、脏工作区并列的一道独立判据，本就该有自己的名字。
+ * @param {string} root 仓库根
+ * @returns {{level:'error'|'warn', msg:string}[]}
+ */
+function checkTauriLines(root) {
+  const readIf = (p) => {
+    const abs = path.join(root, p);
+    return fs.existsSync(abs) ? fs.readFileSync(abs, 'utf8') : '';
+  };
+  const pairs = collectTauriPairs(readIf('package-lock.json'), readIf('src-tauri/Cargo.lock'));
+  for (const p of pairs) {
+    console.log(`  · Tauri 线 ${`${p.npm} ↔ ${p.crate}`.padEnd(42)} ${p.npmVer ?? '?'} ↔ ${p.crateVer ?? '?'}`);
+  }
+  return judgeTauriLines(pairs);
+}
+
 function selftest() {
   const clean = { versions: [
     { label: 'package.json', version: '1.1.0' },
@@ -162,6 +284,45 @@ function selftest() {
     console.log(`${ok ? '✔' : '✖'} selftest: ${c.name}（期望 error ${c.wantErr}，实际 ${got}）`);
   }
 
+  // Tauri 版本线判据自证（D77 实测过的漂移形态：crate 2.11.5 ↔ npm 2.12.2）
+  const mkPairs = (npmVer, crateVer) => TAURI_LINE_PAIRS.map((p) => ({ ...p, npmVer, crateVer }));
+  const tauriCases = [
+    { name: '同 minor 线（patch 不同也放行：npm 2.11.1 ↔ crate 2.11.5）⇒ 无 error',
+      pairs: mkPairs('2.11.1', '2.11.5'), wantErr: 0 },
+    { name: 'npm 漂到下一 minor（2.12.2 ↔ crate 2.11.5，D77 实测形态）⇒ 报 error',
+      pairs: mkPairs('2.12.2', '2.11.5'), wantErr: 1 },
+    { name: '任一侧版本读不到 ⇒ 报 error（判据失效不许静默通过）',
+      pairs: mkPairs(null, '2.11.5'), wantErr: 1 },
+    { name: 'crate 侧读不到 ⇒ 报 error', pairs: mkPairs('2.11.1', undefined), wantErr: 1 },
+  ];
+  for (const c of tauriCases) {
+    const got = judgeTauriLines(c.pairs).filter((p) => p.level === 'error').length;
+    const ok = got === c.wantErr;
+    if (!ok) failed++;
+    console.log(`${ok ? '✔' : '✖'} selftest: Tauri 线 ${c.name}（期望 error ${c.wantErr}，实际 ${got}）`);
+  }
+
+  // Cargo.lock 采集器自证：从真实格式的文本里取指定 crate 的版本，
+  // 取错块/取不到都会让判据失真 —— 这里钉住「取对块、拒绝近似名」。
+  const fakeLock = [
+    '[[package]]', 'name = "tauri-plugin-dialog"', 'version = "2.7.3"', '',
+    '[[package]]', 'name = "tauri"', 'version = "2.11.5"',
+    'dependencies = [', ' "tauri-runtime",', ']', '',
+    '[[package]]', 'name = "tauri-plugin-fs"', 'version = "2.5.2"', '',
+  ].join('\n');
+  const cg = [
+    { name: 'Cargo.lock 取 crate 版本（真实格式）', crate: 'tauri', want: '2.11.5' },
+    { name: '取另一个 crate 不串块', crate: 'tauri-plugin-dialog', want: '2.7.3' },
+    { name: '近似名不得命中（tauri-plugin-fs ≠ tauri-plugin）', crate: 'tauri-plugin', want: null },
+    { name: '不存在的 crate 返回 null', crate: 'wry', want: null },
+  ];
+  for (const c of cg) {
+    const got = cargoCrateVersion(fakeLock, c.crate);
+    const ok = got === c.want;
+    if (!ok) failed++;
+    console.log(`${ok ? '✔' : '✖'} selftest: ${c.name}（期望 ${c.want}，实际 ${got}）`);
+  }
+
   if (failed) {
     console.error(`\nrelease-check selftest 失败：${failed} 条判据对合成样本无反应`);
     process.exit(1);
@@ -192,6 +353,9 @@ function main() {
   console.log(`  · 当前 tag                ${tag ?? '(无，开发态)'}`);
   console.log(`  · 未提交改动              ${dirty.length} 处`);
   for (const e of versions) console.log(`  · ${e.label.padEnd(26)} ${e.version ?? '(读取失败)'}`);
+
+  // ④ npm ↔ crate 同线（两个 lock 文件采集；fresh clone 无 node_modules 也能查）
+  problems.push(...checkTauriLines(ROOT));
 
   const errors = problems.filter((p) => p.level === 'error');
   const warns = problems.filter((p) => p.level === 'warn');

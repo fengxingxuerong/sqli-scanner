@@ -4,6 +4,20 @@
 
 ## [Unreleased]
 
+### 2026-10-14 批次 D78 · release:check 新增「Tauri npm↔crate 同线」判据（D77 待办落地）
+
+**动机**：D77 遗留建议——把「npm ↔ crate 同线」从 tauri build 的**末尾拦截**提前到发布入口。
+
+| 面 | 内容 |
+|---|---|
+| 判据 | `scripts/release-check.mjs` ④：`@tauri-apps/api↔tauri`、`plugin-dialog↔tauri-plugin-dialog`、`plugin-fs↔tauri-plugin-fs` 三对的 **major.minor 必须同线**（patch 不同放行：npm 2.11 线最高 2.11.1 而 crate 在 2.11.5，版本号两侧不同步是 tauri 的既有事实） |
+| 取数 | **两个 lock 文件**（package-lock.json / Cargo.lock，均已入库）而非 node_modules ⇒ fresh clone 无依赖也能查，且与 tauri build 自己读的是同一份事实 |
+| 不空转 | 任一侧版本读不到 ⇒ **报 error（判据失效不许静默通过）**，与 artifact-drift「一个文件都没检查就不返回通过」同纪律 |
+| 自证 | selftest 9 条新用例：同线（patch 差）放行 / D77 实测漂移形态（2.12.2↔2.11.5）报错 / 两侧读不到各报错 / Cargo.lock 块级采集 4 条（取对块、不串块、近似名不命中、不存在返回 null） |
+| 端到端反证 | selftest 之外另做：把 lock 里 api 改 2.12.2 实跑 ⇒ 红且点名这对；还原 ⇒ 恢复 |
+| 踩到的两道门禁 | ① **complexity**：新增采集逻辑把 `main()` 推到 17 圈（软上限 15）⇒ 按职责拆出 `checkTauriLines()/collectTauriPairs()`（读文件/打印/判定居各自函数，main 只留一行调用），非机械搬移；② **deadcode**：4 个新导出只被同文件 selftest 用 ⇒ 命中 D71 记录过的「漏判同文件引用」缺陷，按该批先例**去 export**（基线只减不增，不加豁免） |
+
+
 ### 2026-10-14 批次 D77 · tauri 打包版本对齐：npm 端收敛到 Rust crate 线（CI 从不构建 Tauri 的盲区）
 
 **动机**：`npm run package:win` 被 tauri build 拦下：「Found version mismatched Tauri packages：
