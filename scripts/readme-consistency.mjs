@@ -46,6 +46,10 @@ import { VULN_TAXONOMY } from '../server/src/services/vulnTaxonomy.js';
 import { tamperRegistry } from '../server/src/core/tamper/index.js';
 import { PAYLOADS, CLAUSE_PAYLOADS, OOB_PAYLOADS } from '../server/src/engine/payloads.js';
 import { PAYLOAD_REGISTRY } from '../server/src/engine/payloadRegistry.js';
+// [D68 2026-10-14] CLI 旗标清单的**真源是 args.js 的解析分支**（`a === '--xxx'`），
+//   不是 help 文本：实测 args.js 有 168 个可解析旗标，help 只写了 136 个（help 自己就漏 32 个）
+//   ⇒ 用 help 当真源等于「拿不完整的清单当完整」。README 与 user-guide 都只覆盖一部分，
+//   能力对外不可见。本门禁据此加**反向核对**：README 必须收录 CLI 的每一个旗标。
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const README_PATH = resolve(ROOT, 'README.md');
@@ -57,6 +61,22 @@ const TIER_KEYS = [
 ];
 
 /** 递归数出「字符串数组」的条目总数（含跨库/技术重复）—— payload 计数口径见文件头 */
+/**
+ * 从 CLI 帮助文本提取旗标清单（行首缩进后的 `--xxx`，去重、保持出现序）。
+ * ⚠️ 口径只认「独立成行的旗标」——正文里举例出现的 `--foo` 不算，避免把描述性文字
+ * 当成能力。分号/逗号续行（`--a, --b`）里第二个旗标不在行首，需一并认（实测 CLI 有此写法）。
+ * @param {string} helpText
+ * @returns {string[]}
+ */
+export function parseCliFlags(argsSource) {
+  // 口径：只认**解析分支** `a === '--xxx'` / `case '--xxx':`，不认说明文字与错误信息
+  const out = [];
+  const re = /(?:a\s*===\s*|case\s+)'(--[a-z0-9][a-z0-9-]*)'/g;
+  let m;
+  while ((m = re.exec(String(argsSource))) !== null) if (!out.includes(m[1])) out.push(m[1]);
+  return out;
+}
+
 export function countTemplates(v) {
   let n = 0;
   const walk = (x) => {
@@ -480,6 +500,17 @@ export function checkConsistency(input) {
     );
   }
 
+  // ⑯ [D68] CLI 旗标反向核对（与 ⑭ 同构：能力清单 ↔ 门面；⑮ 已被「教的脚本路径」占用）
+  const flags = input.cliFlags || [];
+  const missingFlags = input.missingCliFlags || [];
+  if (flags.length && missingFlags.length) {
+    fails.push(
+      `⑯ CLI 有 ${flags.length} 个旗标，README 漏写 ${missingFlags.length} 个（能力清单只存在于 --help，客户与新读者看不到）：` +
+      `${missingFlags.slice(0, 20).join('、')}${missingFlags.length > 20 ? ` …等 ${missingFlags.length} 个` : ''} — ` +
+      `修法：在 README「能力速查」里按用途分组补齐`,
+    );
+  }
+
   // ⑭b docs/api.md 的端点标题集并入同一道双向核对。
   // 理由：api.md 是接口字段口径的**对外契约**，此前完全没有门禁 —— 代码加了端点、
   // 改了字段，文档不动也不会红，读到的人照抄就是 404。与 README 那张表同一把尺子。
@@ -665,6 +696,31 @@ function selftest() {
     s.nodePaths = [{ line: 14, path: 'bin/cli.js' }];
   }, /⑮/);
 
+  // ⑯ [D68] CLI 旗标反向核对：本轮实测 README 漏 73/136 个旗标（能力清单只存在于 --help）
+  expectFail('README 漏写 CLI 旗标', (s) => {
+    s.cliFlags = ['--os-cmd', '--file-read'];
+    s.missingCliFlags = ['--file-read'];
+  }, /⑯/);
+  expectOk('README 收录全部 CLI 旗标（合法形态）', (s) => {
+    s.cliFlags = ['--os-cmd', '--file-read'];
+    s.missingCliFlags = [];
+  });
+  // parseCliFlags 口径：只认**解析分支**，说明文字与错误信息里的 --xxx 不算
+  {
+    const src = [
+      "if (a === '--alpha') args.alpha = true;",
+      "else if (a === '--beta') args.beta = 1;",
+      "switch (x) { case '--gamma': break; }",
+      "// 说明里提到 --not-a-flag 不算",
+      "throw new Error('未知参数 --norway');",
+    ].join('\n');
+    const got = parseCliFlags(src);
+    const want = ['--alpha', '--beta', '--gamma'];
+    if (JSON.stringify(got) !== JSON.stringify(want)) {
+      bad.push(`parseCliFlags 应只提取解析分支旗标，实际 ${JSON.stringify(got)}（期望 ${JSON.stringify(want)}）`);
+    }
+  }
+
   if (bad.length) {
     console.error('[readme] ✗ 自证失败 —— 判据存在空转或误报：');
     for (const b of bad) console.error('    · ' + b);
@@ -721,8 +777,16 @@ function main() {
     existingPaths: new Set(nodePaths.map((p) => p.path).filter((p) => existsSync(resolve(ROOT, p)))),
   };
 
+  // [D68 2026-10-14] 反向核对：README 必须收录 CLI 帮助文本里的**每一个**旗标。
+  //   危害与本门禁同源——「能力清单只存在于 --help」会让客户与新读者看不到一半能力
+  //   （实测：136 个旗标里 README 缺 76 个、user-guide 缺 123 个），而门禁一直绿。
+  const cliFlags = parseCliFlags(readFileSync(resolve(ROOT, 'server/bin/cli/args.js'), 'utf8'));
+  const readmeText = lines.join('\n');
+  const missingCliFlags = cliFlags.filter((f) => !readmeText.includes(f));
+
   const fails = checkConsistency({
     overview, tiers, customer, tech, tamperCounts, payload, suiteClaims, tamperUniverse, docs, apiTable, apiDoc, nodePaths, code,
+    cliFlags, missingCliFlags,
   });
   if (fails.length) {
     console.error(`[readme] ✗ README 声称与事实不符（${fails.length} 处）：`);

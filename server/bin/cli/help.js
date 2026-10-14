@@ -6,8 +6,9 @@
 // 注：bin/ 不在 arch-guard 的 console 检查范围内 —— CLI 用 stdout 输出是本职。
 // ============================================================================
 
-export function printHelp() {
-  console.log(`sqli-scanner CLI（对标 sqlmap 的 Node 引擎命令行入口）
+// [D68 2026-10-14] 帮助文本提为可查询数据：readme-consistency 门禁要比对
+// 「README 是否收录了全部 CLI 旗标」，靠 import 本常量（零子进程、零 console 捕获）。
+export const HELP_TEXT = `sqli-scanner CLI（对标 sqlmap 的 Node 引擎命令行入口）
 
 用法:
   单目标  node bin/cli.js -u <url> [选项]
@@ -327,5 +328,8 @@ export function printHelp() {
 退出码：
   0 = 扫描完成、无高危命中
   2 = 命中 Critical/High 风险（便于 CI gate）
-  1 = 参数错误/扫描失败`);
+  1 = 参数错误/扫描失败`;
+
+export function printHelp() {
+  console.log(HELP_TEXT);
 }
