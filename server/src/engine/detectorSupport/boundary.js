@@ -98,7 +98,7 @@ export async function _boundaryBaseline(ctx, orig) {
     const baseStatus = baseRes?.status ?? null;
     // 首请求自动学习页面特征：提取 <title> 供后续 matchTitle 使用
     point._baselineTitle = this._extractTitle(baseBody);
-    // [TODO §C 2026-09-20] 路径点（--test-path）基线 4xx 时**直接跳过闭合探测**。
+    // 路径点（--test-path）基线 4xx 时**直接跳过闭合探测**（口径沿 TODO.md §C，2026-09-20 定）。
     // 语义：闭合前缀是「如何跳出 SQL 字符串字面量」的概念，前提是这个路径**真的执行了 SQL**。
     // 路径不存在（404）时后端根本没路由到查询代码，13 个候选拿到的只是同一张 404 页
     // （Express 默认错误页还会回显请求 URL），剔除回显后仍偶有同形判定 → 噪声 boundary
