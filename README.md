@@ -241,6 +241,33 @@ npm run acceptance      # 【门禁】全方位验收（17 套件，事实断言
 npm run quality:all     # 【门禁】一键全量质量校验（测试/覆盖率/变异/验收/类型/架构/嵌套/引用/文档/版本，等价于 ci:local）
 ```
 
+## CLI 能力速查（按用途分组）
+
+> 完整口径以 `node server/bin/cli.js --help` 为准（那是**唯一真源**，本节与它由
+> `npm run readme:check` 的 ⑯ 判据钉死双向一致：README 少写一个旗标即红）。
+> 下表按**用途**归组，不是按 help 的机械顺序；`--authorized` 是所有高危通道的前置。
+
+| 用途 | 旗标 |
+|---|---|
+| 目标输入 | `--url` `--request-file` `--batch` `--direct` `--headers` `--log-file` |
+| 注入请求构造 | `--method` `--body` `--cookie` `--header` `--session-file` `--known-point` |
+| 认证与会话 | `--auth` `--auth-type` `--login-url` `--login-user-field` `--login-pass-field` `--refresh-token` `--refresh-field` `--csrf-method` `--csrf-refresh` |
+| 检测控制 | `--test-filter` `--test-skip` `--no-verify` `--use-registry` `--smart` `--time-baseline-every` `--param-mine` `--crawl-browser` `--forms` `--crawl` |
+| 并发与调度 | `--concurrency` `--concurrency-det` |
+| 枚举与拖库 | `--columns` `--columns-list` `--schema` `--privileges` `--roles` `--count` `--exclude-sysdbs` `--no-exclude-sysdbs` `--start` `--stop` `--dbms` `--union-cols` `--union-from` `--no-cast` `--sql-template` |
+| 提取与重放 | `--verify` `--flush-session` `--fresh-queries` `--days` |
+| 响应匹配（高级检测） | `--string` `--not-string` `--code` `--text-only` `--titles` `--regexp` `--invalid-bignum` `--invalid-logical` `--invalid-string` |
+| 利用通道（**需 `--authorized` + `EXPLOIT_ENABLED=1`**） | `--os-cmd` `--os-shell` `--sql-shell` `--udf-hex` `--udf-install` `--file-read` `--file-write` `--file-dest` `--driver` |
+| 网络与协议 | `--proxy` `--proxy-bypass-local` `--no-proxy-bypass-local` `--insecure` `--rate` `--threads` `--retries` `--http-timeout` `--delay-sec` `--req-rate` `--max-requests` `--tor` `--check-tor` `--random-agent` `--force-ssl` `--ignore-redirects` `--hpp` |
+| 安全护栏与授权 | `--authorized` `--confirm-destructive` `--no-production-mode` `--no-xp-auto-enable` `--no-validation-skip` `--yes` |
+| 已移除的占位参数（**收参数但不生效**，仅为兼容旧命令行） | `--no-escape` `--union-char` |
+
+**三处必须知道的口径**（README 别的章节也有展开）：
+
+- **`--authorized` 是红线**：`--os-cmd` / `--sql-shell` / `--file-read` / `--file-write` 四个利用通道**双闸门**——必须显式声明已获授权，且进程环境设 `EXPLOIT_ENABLED=1`；缺一即拒启动。
+- **`--risk 3` 默认不放高危 payload**：`--confirm-destructive` 是显式放行口；靶场/自建演练用 `--no-production-mode` 等价声明。
+- **`--insecure` 会关闭 TLS 校验**（失去中间人防护），报告与会话会告警。
+
 ## 后端 API
 
 下表由 `npm run readme:check` 与代码注册**双向核对**（`server/index.js` 的挂载点 + 各 router 的注册行）：
