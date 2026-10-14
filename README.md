@@ -249,18 +249,20 @@ npm run quality:all     # 【门禁】一键全量质量校验（测试/覆盖�
 
 | 用途 | 旗标 |
 |---|---|
-| 目标输入 | `--url` `--request-file` `--batch` `--direct` `--headers` `--log-file` |
+| 目标输入 | `--url` `--request-file` `--batch` `--direct` `--headers` `--header` `--log-file` |
 | 注入请求构造 | `--method` `--body` `--cookie` `--header` `--session-file` `--known-point` |
 | 认证与会话 | `--auth` `--auth-type` `--login-url` `--login-user-field` `--login-pass-field` `--refresh-token` `--refresh-field` `--csrf-method` `--csrf-refresh` |
 | 检测控制 | `--test-filter` `--test-skip` `--no-verify` `--use-registry` `--smart` `--time-baseline-every` `--param-mine` `--crawl-browser` `--forms` `--crawl` |
 | 并发与调度 | `--concurrency` `--concurrency-det` |
+| sqlmap 兼容长名（短名的长形式，脚本可移植用） | `--user` `--db` `--table` `--skip` `--headers` `--concurrency-det` |
 | 枚举与拖库 | `--columns` `--columns-list` `--schema` `--privileges` `--roles` `--count` `--exclude-sysdbs` `--no-exclude-sysdbs` `--start` `--stop` `--dbms` `--union-cols` `--union-from` `--no-cast` `--sql-template` |
 | 提取与重放 | `--verify` `--flush-session` `--fresh-queries` `--days` |
 | 响应匹配（高级检测） | `--string` `--not-string` `--code` `--text-only` `--titles` `--regexp` `--invalid-bignum` `--invalid-logical` `--invalid-string` |
 | 利用通道（**需 `--authorized` + `EXPLOIT_ENABLED=1`**） | `--os-cmd` `--os-shell` `--sql-shell` `--udf-hex` `--udf-install` `--file-read` `--file-write` `--file-dest` `--driver` |
 | 网络与协议 | `--proxy` `--proxy-bypass-local` `--no-proxy-bypass-local` `--insecure` `--rate` `--threads` `--retries` `--http-timeout` `--delay-sec` `--req-rate` `--max-requests` `--tor` `--check-tor` `--random-agent` `--force-ssl` `--ignore-redirects` `--hpp` |
 | 安全护栏与授权 | `--authorized` `--confirm-destructive` `--no-production-mode` `--no-xp-auto-enable` `--no-validation-skip` `--yes` |
-| 已移除的占位参数（**收参数但不生效**，仅为兼容旧命令行） | `--no-escape` `--union-char` |
+| 已移除的占位参数（**收参数但不生效**，仅为兼容旧命令行） | `--no-escape` `--union-char` `--max` `--days` |
+> ⚠️ 上表 `--max` / `--days` 指**扫描侧**的占位（收下即丢弃，无效果）。`node server/bin/cli.js ledger prune --max=N` 是 **ledger 子命令自己的参数**，仍然有效，两者同名不同义。
 
 **三处必须知道的口径**（README 别的章节也有展开）：
 

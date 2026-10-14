@@ -220,9 +220,11 @@ export const HELP_TEXT = `sqli-scanner CLI（对标 sqlmap 的 Node 引擎命令
                              写进报告 WAF 节。预算：良性 1 + 向量 4（连接级失败向量重试一次）
   --smart                    智能启发式（别名，等价 prefilter: true，跳过非注入参数）
   --proxy <url>              代理（http://host:port 或 socks5://host:port）
+  --proxy-bypass-local       本地/私网**也**走环境变量代理（默认豁免 127.0.0.1 与内网）
   --scope <cidr/域名,...>    授权范围硬约束（[P0-SEC] 如 10.0.0.0/24,target.example.com）：
                              启用后目标与每一跳重定向均须在范围内，越界直接拒发；留空不启用
   --insecure                 忽略自签/内网 CA 证书（关闭 TLS 校验，失去中间人防护，报告须注明）
+  --cert <path>              mTLS 客户端证书 PEM（证书+私钥同文件，形状非法时引擎侧硬失败）
   --no-validation-skip       关闭「输入校验短路」（参数被白名单拦死也照跑完整检测，审计/对照用）
   --confirm-destructive      确认投放高危 payload 池（--risk 3 默认只「选风险」不「放行写操作」；无本开关时高危向量一条不发）
   --advise                   扫描前风险评估：**不发起任何请求**，只按目标 URL 与参数给出
@@ -245,7 +247,7 @@ export const HELP_TEXT = `sqli-scanner CLI（对标 sqlmap 的 Node 引擎命令
                              NTLM 走 Type1-3 握手（引擎完整实现），凭据用 DOMAIN\\user:pass
                              形态对齐 sqlmap --auth-cred，domain 可省略）
   --rate <n>                 限速 req/s（默认 50）
-  --threads <n>              检测并发数（默认 4）
+  --threads <n>              检测并发数（默认 4）；别名 --concurrency-det（同义）
   -f, --format <fmt>         报告格式 json|csv|markdown|md|html|sarif|db-json（默认 json）。
                              md = markdown 别名；sarif = SARIF 2.1.0（GitHub Security/DefectDojo）；
                              db-json = 仅拖库数据（库/表/列/行，扩展名 db.json，与 REST 导出同源）。
@@ -277,7 +279,10 @@ export const HELP_TEXT = `sqli-scanner CLI（对标 sqlmap 的 Node 引擎命令
 
 利用操作（对标 sqlmap --os-cmd/--sql-shell/--file-read/--file-write；需环境变量 EXPLOIT_ENABLED=1 且显式 --authorized）:
   --authorized              声明已获授权（安全红线，仅限授权渗透场景）
-  --os-cmd <cmd>            执行系统命令（os-shell 通道）
+  --os-cmd <cmd>            执行系统命令（os-shell 通道，入口形态）
+  --os-shell [cmd]          同 --os-cmd：不带值则走交互式 os-shell（等价 --os-shell=true）
+  --udf-hex <src>           UDF 十六进制投放（MSSQL 用；写入目标文件后 CREATE FUNCTION）
+  --udf-install             UDF 一键安装（写入 + 建函数 + 调用，需 --udf-hex）
   --sql-shell <sql>         执行任意 SQL
   --file-read <path>        读取目标文件
   --file-write <content>    写入目标文件（需配合 --file-dest <远程路径>）
@@ -287,6 +292,8 @@ export const HELP_TEXT = `sqli-scanner CLI（对标 sqlmap 的 Node 引擎命令
   --forms                  收集页面表单注入点（需配 --level 5 才生效）
   --crawl <depth>           站内链接爬取深度（1-3，默认 0=不爬取）
   --session-file <path>     会话文件路径（断点续跑）
+  --flush-session           每次请求前清会话 Cookie（对标 sqlmap --flush-session）
+  --fresh-queries           每个 payload 换一个随机查询串，规避目标侧缓存（对标 sqlmap --fresh-queries）
   --config <file>           从 JSON 配置档案预载参数（[D41] 对标 sqlmap -c + ffuf -config）：
                             键=长参数名（去前导 --，如 {"url":"…","level":5,"tamper":"space2comment"}），
                             CLI 显式开关优先生效（argv > 档案 > 内置默认）。档案含未知键时拒绝启动；
@@ -328,7 +335,13 @@ export const HELP_TEXT = `sqli-scanner CLI（对标 sqlmap 的 Node 引擎命令
 退出码：
   0 = 扫描完成、无高危命中
   2 = 命中 Critical/High 风险（便于 CI gate）
-  1 = 参数错误/扫描失败`;
+  1 = 参数错误/扫描失败
+已移除的占位参数（收下即丢弃、无效果，仅为兼容旧命令行 —— 不是能力）:
+  --no-escape / --union-char    历史保留接口，已无对应实现
+  --max / --days                扫描侧占位；⚠️ 与 ledger 子命令的 ledger prune --max=N 同名不同义
+  --headers / --concurrency-det  上列 --header / --threads 的同义别名，仍有效
+
+`;
 
 export function printHelp() {
   console.log(HELP_TEXT);
