@@ -25,11 +25,11 @@ import {
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
 import BugReportIcon from '@mui/icons-material/BugReport';
 import HistoryIcon from '@mui/icons-material/History';
-import SecurityIcon from '@mui/icons-material/Security';
 import TravelExploreIcon from '@mui/icons-material/TravelExplore';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import { useTranslation } from 'react-i18next';
 import { useScanStore } from '../store/scanStore';
+import HomeHero from '../components/HomeHero';
 import i18n from '../i18n';
 import type { RiskLevel } from '../shared/types';
 
@@ -83,97 +83,15 @@ export default function HomePage() {
     { label: t('home.stats.targets'), value: targetCount, icon: <TravelExploreIcon />, color: '#10b981' },
   ];
 
-  const goScan = () => navigate('/scan');
+
 
   return (
     <Container maxWidth="lg" className="py-6">
       {/* 点阵背景 */}
       <div className="dot-grid" />
 
-      {/* ── Hero：赛博玻璃风 ── */}
-      <Box
-        className="glass"
-        sx={{
-          borderRadius: 4,
-          p: { xs: 4, md: 8 },
-          position: 'relative',
-          overflow: 'hidden',
-          animation: `${fadeInUp} 0.55s ease-out both`,
-          boxShadow: '0 0 60px rgba(0, 212, 255, 0.06)',
-          '&::before': {
-            content: '""', position: 'absolute', top: 0, left: 0, right: 0, height: '2px',
-            background: 'linear-gradient(90deg, transparent 10%, #00d4ff 40%, #8b5cf6 60%, transparent 90%)',
-            boxShadow: '0 0 8px rgba(0, 212, 255, 0.3)',
-          },
-        }}
-      >
-        <Stack spacing={1.5} alignItems="flex-start" sx={{ position: 'relative', zIndex: 1 }}>
-          <Chip
-            icon={<SecurityIcon />}
-            label={t('app.title')}
-            size="small"
-            sx={{
-              color: '#00d4ff',
-              borderColor: 'rgba(0, 212, 255, 0.3)',
-              bgcolor: 'rgba(0, 212, 255, 0.08)',
-              '& .MuiChip-icon': { color: '#00d4ff' },
-              fontFamily: '"JetBrains Mono", monospace',
-            }}
-            variant="outlined"
-          />
-          <Typography
-            component="h1"
-            fontWeight={800}
-            sx={{
-              fontSize: { xs: 28, md: 44 },
-              letterSpacing: '-0.03em',
-              lineHeight: 1.1,
-              background: 'linear-gradient(135deg, #00d4ff 0%, #8b5cf6 100%)',
-              WebkitBackgroundClip: 'text',
-              WebkitTextFillColor: 'transparent',
-              backgroundClip: 'text',
-            }}
-          >
-            {t('home.hero')}
-          </Typography>
-          <Typography variant="body1" sx={{ color: 'rgba(148, 163, 184, 0.9)', maxWidth: 560 }}>
-            {t('app.tagline')}
-          </Typography>
-          <Button
-            variant="contained"
-            size="large"
-            endIcon={<ArrowForwardIcon />}
-            onClick={goScan}
-            sx={{
-              mt: 2,
-              px: { xs: 4, md: 5 },
-              py: 1.4,
-              borderRadius: 2,
-              fontSize: '1rem',
-              fontWeight: 700,
-              color: '#0a0e16',
-              background: 'linear-gradient(135deg, #00d4ff 0%, #8b5cf6 100%)',
-              boxShadow: '0 0 24px rgba(0, 212, 255, 0.3)',
-              transition: 'transform 0.2s, box-shadow 0.2s',
-              '&:hover': {
-                transform: 'translateY(-2px)',
-                background: 'linear-gradient(135deg, #33dfff 0%, #a78bfa 100%)',
-                boxShadow: '0 0 32px rgba(0, 212, 255, 0.5)',
-              },
-            }}
-          >
-            {t('home.startScan')}
-          </Button>
-        </Stack>
-
-        {/* 右下角装饰：盾牌光晕 */}
-        <Box sx={{
-          position: 'absolute', right: { xs: -40, md: 20 }, bottom: -20,
-          opacity: 0.06, fontSize: { xs: 120, md: 200 }, pointerEvents: 'none',
-        }}>
-          <SecurityIcon sx={{ fontSize: 'inherit', color: '#00d4ff' }} />
-        </Box>
-      </Box>
+      {/* ── Hero：赛博玻璃风（D79 拆至 ../components/HomeHero）── */}
+      <HomeHero />
 
       {/* ── 快速统计 ── */}
       <Grid container spacing={3} sx={{ mt: 1 }}>

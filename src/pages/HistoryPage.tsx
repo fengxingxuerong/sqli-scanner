@@ -13,13 +13,13 @@ import {
 } from '@mui/material';
 import DeleteIcon from '@mui/icons-material/Delete';
 import ReplayIcon from '@mui/icons-material/Replay';
-import HistoryIcon from '@mui/icons-material/History';
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
 import { useTranslation } from 'react-i18next';
 import { useScanStore } from '../store/scanStore';
 import { useScan } from '../hooks/useScan';
 import { useServerHistory } from '../hooks/useServerHistory';
 import { mergeHistory, type MergedHistoryRow } from '../shared/historyMerge';
+import HistoryEmpty from '../components/HistoryEmpty';
 import { buildResumeConfig } from '../shared/scanConfig';
 import i18n from '../i18n';
 import type { HistoryRecord, RiskLevel } from '../shared/types';
@@ -124,15 +124,7 @@ export default function HistoryPage() {
       )}
 
       {rows.length === 0 ? (
-        <Box className="p-10 text-center" sx={{ border: 1, borderColor: 'divider', borderRadius: 2 }}>
-          <HistoryIcon sx={{ fontSize: 48, color: 'text.disabled', mb: 2 }} />
-          <Typography color="text.secondary" gutterBottom>
-            {t('history.empty')}
-          </Typography>
-          <Button variant="contained" onClick={() => navigate('/scan')} className="mt-2">
-            {t('history.firstScan')}
-          </Button>
-        </Box>
+        <HistoryEmpty />
       ) : (
         <Stack spacing={2}>
           {rows.map((row) => {

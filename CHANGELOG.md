@@ -4,6 +4,25 @@
 
 ## [Unreleased]
 
+### 2026-10-14 批次 D79 · UI 优化：对比度修复 + 密度提升（扫描页双栏 / 历史页紧凑空态）+ 三块组件拆出
+
+**动机**：连看四个页面的实际渲染（release 包截图 + CDP 计算样式取证）后发现两类真问题：
+① **对比度**：Hero 强调色是暗底假定的硬编码（cyan `#00d4ff` / slate-400），而默认主题是
+浅色 ⇒ Chip 文字 ~1.9:1、副标题 ~2.5:1，均不达 WCAG AA；② **密度**：扫描/历史页
+`maxWidth="md"`（900px）配居中表单，1216px 窗口下右侧 ~300px 死白 + 下方大面积留白。
+
+| 面 | 改动 | 取证 |
+|---|---|---|
+| 对比度 | `HomeHero` 按 `effectiveMode` 分流取色：暗色保留赛博原色，浅色换同色相深变体（标题渐变 `#0284c7→#6d28d9`、Chip 文字 `#0369a1`、副标题 `text.secondary`） | CDP 计算样式：浅色 Chip `rgb(3,105,161)`（was `rgb(0,212,255)`）、副标题 `rgb(15,23,42)`（was `rgba(148,163,184,.9)`）；暗色 `rgb(0,212,255)` 与 body `rgb(10,14,22)` 不变（原设计保留） |
+| 扫描页 | 容器 `md→lg`，双栏 `1.9fr 1fr`：左向导 + 右信息栏（sticky）——「授权与扫描边界」（同源默认 / 重定向逐跳 / SSRF 默认拒内网）与「CI 门禁退出码」（0/1/2 语义 + diff-base 只判新增）。信息全部来自既定口径，非新事实 | 截图确认右侧死白消失；565 用例无契约冲突 |
+| 历史页 | 空态 `p-10` 全宽盒 → `p-6` + `maxWidth 640` 居中，补一行台账说明 | 截图确认紧凑 |
+| 结构 | 按复杂度门禁要求「按职责拆分」（非机械搬移）：`HomeHero` / `ScanSidebar` / `ScanConfirmDialogs` / `HistoryEmpty` 四个新组件——原三个页面组件体均已超基线（ScanPage 227>187、HomePage 259>253 且圈 29>24、HistoryPage 175>169） | complexity exit 0（633 文件扫描）；tsc 0 错；vitest 565/565 |
+
+i18n：`scan.sidebar.*`（10 键）与 `history.emptyHint` 中英同步新增（parity 测试保障）。
+未动：顶栏三主题按钮（qa_theme 的 F-18 契约钉死，非缺陷）；截图流程经 CDP
+（`WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port`）完成，未向仓库加任何调试代码。
+
+
 ### 2026-10-14 批次 D78 · release:check 新增「Tauri npm↔crate 同线」判据（D77 待办落地）
 
 **动机**：D77 遗留建议——把「npm ↔ crate 同线」从 tauri build 的**末尾拦截**提前到发布入口。

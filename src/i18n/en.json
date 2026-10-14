@@ -77,6 +77,17 @@
       "body": "You have enabled dump / OS Shell / file read. sqlmap will perform write/read/command operations on the target. Only continue on authorized targets.",
       "confirm": "I Understand, Continue",
       "cancel": "Cancel"
+    },
+    "sidebar": {
+      "scopeTitle": "Authorization & Scan Boundary",
+      "scopeSameOrigin": "Same-origin only by default (scheme + host + port): out-of-scope targets are rejected before the first request",
+      "scopeRedirect": "Every redirect hop is re-validated: a 302 to an unauthorized host stops all following requests",
+      "scopeSsrf": "Private / loopback / cloud-metadata addresses are refused by default; authorized internal targets need SSRF_ALLOW_PRIVATE=1",
+      "exitTitle": "CI Gate Exit Codes",
+      "exit0": "0 — no high-risk finding",
+      "exit2": "2 — Critical / High found",
+      "exit1": "1 — execution failed or verdict not trustworthy",
+      "exitDiff": "With --diff-base auto, only new findings fail the gate; existing ones never block a PR"
     }
   },
   "scanResult": {
@@ -176,6 +187,7 @@
     "title": "Scan History",
     "subtitle": "{{count}} records. Click to view report details.",
     "empty": "No scan records yet",
+    "emptyHint": "Scans are kept in the local ledger (deletable at any time); every report carries vuln type / CVSS / affected parameter / PoC / remediation — delivery-ready",
     "firstScan": "Start Your First Scan",
     "resume": "Resume",
     "resumeFailed": "Resume failed",

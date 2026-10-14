@@ -77,6 +77,17 @@
       "body": "你已开启拖库 / OS Shell / 读文件，sqlmap 将对目标执行写/读/命令操作。请仅在已授权目标上继续，否则可能违法或造成破坏。",
       "confirm": "我已知晓，继续",
       "cancel": "取消"
+    },
+    "sidebar": {
+      "scopeTitle": "授权与扫描边界",
+      "scopeSameOrigin": "默认只打目标同源（scheme + host + port）：越界目标在发第一个请求前就会被拒",
+      "scopeRedirect": "重定向每一跳都重新校验范围：302 到未授权主机，后续请求立即停",
+      "scopeSsrf": "内网 / 回环 / 云元数据地址默认拒绝；授权内网目标需 SSRF_ALLOW_PRIVATE=1",
+      "exitTitle": "CI 门禁退出码",
+      "exit0": "0 — 未发现高危漏洞",
+      "exit2": "2 — 发现 Critical / High",
+      "exit1": "1 — 执行失败或结论不可信",
+      "exitDiff": "配 --diff-base auto 只对新增发现判红，存量不阻塞 PR"
     }
   },
   "scanResult": {
@@ -176,6 +187,7 @@
     "title": "扫描历史",
     "subtitle": "共 {{count}} 条记录，点击可查看报告详情",
     "empty": "还没有扫描记录",
+    "emptyHint": "扫描记录留存本机台账（可随时删除）；每份报告带漏洞类型 / CVSS / 受影响参数 / PoC / 修复建议，扫完即可交付",
     "firstScan": "开始第一次扫描",
     "resume": "续跑",
     "resumeFailed": "续跑失败",

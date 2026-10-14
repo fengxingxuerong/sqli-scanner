@@ -4,10 +4,11 @@ import { useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import {
-  Container, Paper, LinearProgress, Divider, Chip, Stack, Typography,
-  Dialog, DialogTitle, DialogContent, DialogContentText, DialogActions, Button,
+  Container, Paper, LinearProgress, Divider, Chip, Stack, Typography, Box,
 } from '@mui/material';
 import ScanWizard from '../components/ScanWizard';
+import ScanSidebar from '../components/ScanSidebar';
+import ScanConfirmDialogs from '../components/ScanConfirmDialogs';
 import ScanResult from '../components/ScanResult';
 import ProgressView from '../components/ProgressView';
 import { useScan } from '../hooks/useScan';
@@ -136,35 +137,51 @@ export default function ScanPage() {
     setSqlmapConfig((c) => ({ ...c, ...patch })), []);
 
   return (
-    <Container maxWidth="md" className="py-6">
-      <ScanWizard
-        url={url}
-        method={method}
-        bodyText={bodyText}
-        cookieText={cookieText}
-        headerText={headerText}
-        config={config}
-        sqlmapConfig={sqlmapConfig}
-        engine={engine}
-        running={running}
-        starting={starting}
-        error={error}
-        wafSuggestion={wafSuggestion}
-        status={status}
-        onUrlChange={setUrl}
-        onMethodChange={setMethod}
-        onBodyTextChange={setBodyText}
-        onCookieTextChange={setCookieText}
-        onHeaderTextChange={setHeaderText}
-        onConfigChange={handleConfigChange}
-        onSqlmapConfigChange={handleSqlmapConfigChange}
-        onEngineChange={setEngine}
-        onErrorClear={handleErrorClear}
-        onStart={handleStartStable}
-        onStop={handleStop}
-        onPause={handlePause}
-        onResume={handleResume}
-      />
+    <Container maxWidth="lg" className="py-6">
+      {/* 双栏：左扫描向导，右授权边界 / CI 退出码信息栏（sticky，宽屏下消除右侧死白） */}
+      <Box
+        sx={{
+          display: 'grid',
+          gridTemplateColumns: { xs: '1fr', md: '1.9fr 1fr' },
+          gap: 3,
+          alignItems: 'start',
+        }}
+      >
+        <Box sx={{ minWidth: 0 }}>
+          <ScanWizard
+            url={url}
+            method={method}
+            bodyText={bodyText}
+            cookieText={cookieText}
+            headerText={headerText}
+            config={config}
+            sqlmapConfig={sqlmapConfig}
+            engine={engine}
+            running={running}
+            starting={starting}
+            error={error}
+            wafSuggestion={wafSuggestion}
+            status={status}
+            onUrlChange={setUrl}
+            onMethodChange={setMethod}
+            onBodyTextChange={setBodyText}
+            onCookieTextChange={setCookieText}
+            onHeaderTextChange={setHeaderText}
+            onConfigChange={handleConfigChange}
+            onSqlmapConfigChange={handleSqlmapConfigChange}
+            onEngineChange={setEngine}
+            onErrorClear={handleErrorClear}
+            onStart={handleStartStable}
+            onStop={handleStop}
+            onPause={handlePause}
+            onResume={handleResume}
+          />
+        </Box>
+
+        <Stack spacing={2} sx={{ position: { md: 'sticky' }, top: { md: 88 } }}>
+          <ScanSidebar />
+        </Stack>
+      </Box>
 
       {scanId && (
         <Paper variant="outlined" className="mt-4 p-4" sx={{ borderRadius: 3 }}>
@@ -193,47 +210,23 @@ export default function ScanPage() {
         navigate={navigate}
       />
 
-      {/* 自带引擎拖库二次确认 */}
-      <Dialog open={confirmOpen} onClose={() => setConfirmOpen(false)}>
-        <DialogTitle>{t('scan.confirmExtract.title')}</DialogTitle>
-        <DialogContent>
-          <DialogContentText>
-            {t('scan.confirmExtract.body')}
-          </DialogContentText>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setConfirmOpen(false)}>{t('scan.confirmExtract.cancel')}</Button>
-          <Button variant="contained" color="warning"
-            onClick={() => {
-              setConfirmOpen(false);
-              const parsed = parseForm();
-              if (parsed) void handleDoStart(parsed.bodyParams, parsed.cookieParams, parsed.headerParams);
-            }}>
-            {t('scan.confirmExtract.confirm')}
-          </Button>
-        </DialogActions>
-      </Dialog>
-
-      {/* sqlmap 破坏性操作二次确认 */}
-      <Dialog open={sqlConfirmOpen} onClose={() => setSqlConfirmOpen(false)}>
-        <DialogTitle>{t('scan.confirmSqlmap.title')}</DialogTitle>
-        <DialogContent>
-          <DialogContentText>
-            {t('scan.confirmSqlmap.body')}
-          </DialogContentText>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setSqlConfirmOpen(false)}>{t('scan.confirmSqlmap.cancel')}</Button>
-          <Button variant="contained" color="error"
-            onClick={() => {
-              setSqlConfirmOpen(false);
-              const parsed = parseForm();
-              if (parsed) void handleDoStart(parsed.bodyParams, parsed.cookieParams, parsed.headerParams);
-            }}>
-            {t('scan.confirmSqlmap.confirm')}
-          </Button>
-        </DialogActions>
-      </Dialog>
+      {/* 两类破坏性操作二次确认（D79 拆至 ../components/ScanConfirmDialogs） */}
+      <ScanConfirmDialogs
+        extractOpen={confirmOpen}
+        sqlmapOpen={sqlConfirmOpen}
+        onCloseExtract={() => setConfirmOpen(false)}
+        onConfirmExtract={() => {
+          setConfirmOpen(false);
+          const parsed = parseForm();
+          if (parsed) void handleDoStart(parsed.bodyParams, parsed.cookieParams, parsed.headerParams);
+        }}
+        onCloseSqlmap={() => setSqlConfirmOpen(false)}
+        onConfirmSqlmap={() => {
+          setSqlConfirmOpen(false);
+          const parsed = parseForm();
+          if (parsed) void handleDoStart(parsed.bodyParams, parsed.cookieParams, parsed.headerParams);
+        }}
+      />
     </Container>
   );
 }
