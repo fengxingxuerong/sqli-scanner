@@ -93,7 +93,7 @@ export const INJECTION_SIGS = [
 //  exception 形态仅 engine 侧有），且漂移守卫不校验集合相等 ⇒ 分叉零覆盖。
 // 现收敛为 **core/errorSig.js 唯一真源**，本文件与原 engine/payloads/index.js 的 ERROR_SIG
 // 均为它的 re-export（同一正则对象）。教训：两份实现"互相看齐"一次不等于永远同集，
-// 能单源就必须单源。历史取证见 docs/优化空间勘查-2026-10-12.md §A1。
+// 能单源就必须单源。历史取证见 docs/archive/优化空间勘查-2026-10-12.md §A1。
 import { SQL_ERROR_SIG } from './errorSig.js';
 // 保持既有导出面：本模块的 import 方（scanValidityGuard 自身 + 测试）继续从这里取。
 export { SQL_ERROR_SIG };
