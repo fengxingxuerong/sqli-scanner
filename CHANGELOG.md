@@ -4,6 +4,21 @@
 
 ## [Unreleased]
 
+### 2026-10-14 批次 T-6 · versioned 族真缺陷修复（推翻协议首个落地批次）
+
+**一句话**：按 AGENTS.md §3.5 的推翻协议处理台账第一笔欠债——`tamper:examples` 反测出的
+15 条字面不一致，逐条审阅后：**2 条是真缺陷（已修）、3 条是形态差异（未关闭，如实挂着）**。
+
+| 面 | 内容 |
+|---|---|
+| 真缺陷① | `versionedkeywords` 关键字表**漏 `ALL`**（UNION ALL SELECT 的必需组成，上游基础版含它）⇒ 同族内不自洽，已补 + 加 doctest 钉住 |
+| 真缺陷② | morekeywords 族（versionedmorekeywords / halfversionedmorekeywords）**漏包全部函数名**（上游同族包 CONCAT/CHAR/IFNULL/CAST/CURRENT_USER…）⇒ 已补 22 个函数名 |
+| 顺带治本 | 两件套的关键字表**逐字相同**却各存一份（同「同一判据多份实现」病灶）⇒ 收敛为单一真源 `server/src/core/tamper/versionedKeywords.js`（含长词优先约束：`GROUP_CONCAT` 先于 `COUNT`、`CURRENT_USER` 先于 `USER`） |
+| **推翻上一轮结论** | drift 记录里 5 条写作「[queued T-6] **属真缺陷**」——实操证明其中 3 条（modsecurityversioned / zeroversioned / halfversionedmorekeywords）是**形态差异不是缺陷**：上游把整段塞进 `/*!30963AND 2>1*/`、本仓逐词包裹，两者都让 WAF 看不见 AND 而 MySQL 看见，**无"漏"可言**。已改写定性记录 |
+| **未关闭的部分** | 3 条形态差异**仍未关闭**（本仓 `/*! X */` 含空格 vs 上游 `/*!X*/`；halfversioned 用版本号 50540 vs 上游 0）——形态取舍属行为变化，按项目纪律须真机 A/B 证据；且 2026-10-05 真机对拍该族 **0 打穿**，现状本身不构成绕过承诺 |
+| 口径同步 | README tamper 段改写：说明 15 条已逐条定性、2 条已修、**3 条形态差异不得据此宣称该族等价**；台账 `tamper-versioned-parity` 保持 `refuted`（不谎报关闭） |
+| 验证 | examples 门禁 0 · tamper-matrix（真机链 e2e）0 · parity 0 · tamper 全套 **209/209** · doctest 8/8 · lint 0 |
+
 ### 2026-10-14 批次 D67 · 四个巨兽拆分（D66 重标定暴露：169→2 / 94→1 / 53→18 / 45→25 圈）
 
 **一句话**：D66 词法口径修正后暴露的四个存量巨兽按职责拆分（逐字搬移、零行为变化），
