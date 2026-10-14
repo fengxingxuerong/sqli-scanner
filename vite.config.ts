@@ -12,6 +12,13 @@ export default defineConfig({
   },
   server: {
     port: 5173,
+    // Tauri 桌面开发（tauri dev）：cargo 会持续写 src-tauri/target/debug/deps/*.dll，
+    // vite 的文件监视与它对撞 ⇒ Windows 上 EBUSY（-4082）直接崩掉 beforeDevCommand，
+    // 表现为「tauri dev 起不来、\`The beforeDevCommand terminated with a non-zero status code\`」。
+    // 排除后 watcher 不再碰构建产物目录（只影响 dev 期热更新监听，不影响代理与构建）。
+    watch: {
+      ignored: ['**/src-tauri/target/**', '**/node_modules/**', '**/dist/**'],
+    },
     proxy: {
       '/api': {
         target: 'http://localhost:4567',

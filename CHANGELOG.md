@@ -4,6 +4,20 @@
 
 ## [Unreleased]
 
+### 2026-10-14 批次 D75 · 工具链修复：tauri dev 两起本机起不来（rustup 默认链损坏 / vite 监视撞 cargo）
+
+**动机**：要跑桌面端 UI，本机 `npm run tauri dev` 连续失败两次，根因都是环境/配置问题而非代码问题，
+修复过程留痕（下一个人在本机跑 tauri dev 会再撞上）。
+
+| # | 症状 | 根因 | 修法 |
+|---|---|---|---|
+| 1 | `tauri dev` 启动即 panic：`interface/rust.rs:1166 Option::unwrap() on None` | tauri-cli 2.11.4 在 target 未显式指定时跑 `rustc -vV` 取 host 行；本机 rustup **默认工具链 stable 组件缺失**（`cargo` 报 "not applicable to the 'stable-x86_64-pc-windows-msvc' toolchain"）⇒ 输出无 `host:` ⇒ unwrap None | 用仓库 `src-tauri/rust-toolchain.toml` 锁定的版本显式运行：`RUSTUP_TOOLCHAIN=1.98.0 npm run tauri dev`（1.98.0 已装且 cargo/rustc 正常）。⚠️ 未改本机 rustup 默认链（属用户环境，不动） |
+| 2 | panic 修复后 vite 崩溃：`EBUSY: resource busy or locked, watch ...src-tauri\target\debug\deps\sqli_scanner_lib.dll`，表现为 `The "beforeDevCommand" terminated with a non-zero status code` | vite watcher 监视整个项目根，与 cargo 持续写 target/debug 构建产物对撞（Windows 文件锁） | `vite.config.ts` `server.watch.ignored` 增加 `**/src-tauri/target/**`（连同 node_modules/dist 一并显式登记）。只影响 dev 期热更新监听，不影响代理/构建 |
+
+**顺带确认的资产新鲜度**：`npm run build:engine && npm run build:sidecar` 重建 sidecar 并通过冒烟
+（health=200 + 一次性 token + SEA 内联 SQLite 直连真扫 detection_found=3）⇒ 桌面端跑的是当前代码。
+
+
 ### 2026-10-14 批次 D74 · 文档瘦身：四篇过期快照按归档规则移入 archive（42→38 篇）
 
 **动机**：10-03 评价把「文档体量负担」列为低分项。瘦身前提是本仓自己的归档规则
