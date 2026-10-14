@@ -32,6 +32,36 @@
 //    TIGHT 档余量 25ms ⇒ 约 2ms/探针；实测 drift=8ms/探针 @ 余量 25ms **仍会失控**
 //    （下方用例只钉「关掉跟踪会失控」，没钉「开着一定救得回来」——救不回来就不许吹）。
 //    默认 timeThresholdMs=1500ms 时容限约 150ms/探针，远超真实业务的漂移速率。
+//
+// ── 墙钟预算与截止时间（2026-10-14 D64，CI windows 实测后重标）────────────────
+// 事故：同一份代码，CI windows #228 故障② 6.7s 通过、#229 同一条用例 30s 截止没跑完
+// （超时时已发 142 个请求还在发）。算一笔账就明白为什么「本机 6.2s / 截止 30s」的
+// 4.8 倍余量是假的：oracle 的单请求延迟 = 60 + 2×请求数（累计漂移）随计数线性增长，
+//    Σ(60+2i), i=1..142 ≈ 28.8s + 真侧附加 ≈ 30s+ —— **零通胀下二次项本身就吃满 30s**。
+// 请求数一发散，墙钟随即爆管。发散机制（本机噪声模型复现 + 算账双重确认）：
+//   TIGHT 档 25ms 余量在**长度二分阶段只剩 5-9ms 净空**（漂移在请求 10-12 时已吃掉
+//   大半余量，而长度探针就在那几个请求上）⇒ runner 噪声（windows 2 vCPU 共享 +
+//   Defender 实时扫描 + 定时器粒度，本机实测各模型 ±10~40ms）翻面长度探针 ⇒
+//   长度收敛虚高（L≈30）⇒ 位置数翻 5 倍 ⇒ 请求数 47 → 200+。请求数呈**重尾分布**
+//   （本机/ubuntu 47~54，windows 观测到 142+，合成最坏 212），截止必须按尾部定。
+// 修法（只重定截止时间；不碰断言、不碰标定、不碰 oracle 模型）：
+//  故障② 30s→90s（覆盖 ~300 请求 ≈ 85s，即观测尾部的 2 倍）；故障③ 20s→60s
+//   （REALISTIC 档单请求 ~1s，正常 17 请求就要 ~17s，原 20s 截止余量近零，
+//    本机 stall 模型实测一次停顿就双杀）；修复③ 20s→45s（同档预防）。
+//  修复① 保持 30s：跟踪开启后 CI 三平台实测 8.4~8.7s 零通胀，3.4 倍余量足够——
+//  故意不放宽，跟踪器回归要能快速红。失控形态的快速探测由故障① 的 6s hangs
+//  负责，故障侧的 90s/60s 截止只是防挂死 suite，不是失控判据。
+//
+// ⚠ 试过并**驳回**的方案（记录在此免得后人再走一遍）：
+//  ① 给累计漂移封顶（driftMs × min(N, CAP)）：CAP=25 时初始基线采样被噪声抬高
+//     +30ms ⇒ 阈值（119ms）高于平台期延迟（110ms）⇒ 永不交叉 ⇒ 提取正确 ⇒
+//     「没打到故障」。**不封顶的无界增长是「故障必然复现」的承重墙**，封顶把它拆了。
+//     且按请求数封顶对 REALISTIC 档（drift=30ms/探针）给出 +3000ms 的荒谬上限。
+//  ② 故障侧关 per-byte 等值验证（去重试乘数）：本机实测对尾部无效（长度通胀与
+//     验证无关，seed 99 仍 212 请求），还把修复① 的自愈承重墙拆了（它开始产出错值）。
+//  ③ 放大 TIGHT 余量抗噪声：长度阶段是稳健了，但真/假侧间隔从 65ms 压到 30ms，
+//     字节阶段开始翻面——把一个脆弱换成另一个脆弱，且要连带改两个标定常数，证据不足。
+//   结论：二次项与长度通胀是 oracle 模型+标定的固有属性，靠截止时间兜底。
 // ============================================================================
 
 import { test } from 'node:test';
@@ -165,7 +195,9 @@ test('★故障②★ 关闭跟踪、慢漂移 ⇒ 产出「看着像数据的�
   const secret = '5.7.40';
   const oracle = makeDriftOracle(secret, { driftMs: 2 });
   const ctx = buildCtx(oracle, 'drift-off-slow', { absMs: TIGHT.absMs, timeBaselineEvery: 0 });
-  const out = await extractWithDeadline(new Extractor(), ctx, oracle, 'version()');
+  // [D64] 截止 90s：CI windows 实测请求数重尾（47~142+），按尾部而非中位数定；
+  // 失控形态由故障① 的 6s hangs 探测器负责，这里的截止只是防挂死 suite。
+  const out = await extractWithDeadline(new Extractor(), ctx, oracle, 'version()', 90000);
   assert.notEqual(
     out,
     secret,
@@ -178,7 +210,8 @@ test('★故障③★ 真实余量档（300ms）下同样出错：不是只在�
   const secret = '8';
   const oracle = makeDriftOracle(secret, { driftMs: 30, trueExtraMs: REALISTIC.trueExtraMs });
   const ctx = buildCtx(oracle, 'real-off', { absMs: REALISTIC.absMs, timeBaselineEvery: 0 });
-  const out = await extractWithDeadline(new Extractor(), ctx, oracle, 'version()', 20000);
+  // [D64] 截止 20s→60s：REALISTIC 档单请求 ~1s，正常 17 请求 ~17s，原截止余量近零
+  const out = await extractWithDeadline(new Extractor(), ctx, oracle, 'version()', 60000);
   assert.notEqual(out, secret, `真实余量档关闭跟踪时应出错，实际却拿到 ${JSON.stringify(out)}`);
 });
 
@@ -204,7 +237,8 @@ test('★修复③★ 真实余量档（300ms @ 30ms/探针）：跟踪后提取
   const secret = '8';
   const oracle = makeDriftOracle(secret, { driftMs: 30, trueExtraMs: REALISTIC.trueExtraMs });
   const ctx = buildCtx(oracle, 'real-on', { absMs: REALISTIC.absMs, timeBaselineEvery: 16 });
-  const out = await extractWithDeadline(new Extractor(), ctx, oracle, 'version()', 20000);
+  // [D64] 截止 20s→45s：同故障③——REALISTIC 档单请求 ~1s，原截止余量近零
+  const out = await extractWithDeadline(new Extractor(), ctx, oracle, 'version()', 45000);
   assert.equal(out, secret, `真实余量档应正确提取，实际 ${JSON.stringify(out)}`);
 });
 
