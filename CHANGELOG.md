@@ -4,6 +4,22 @@
 
 ## [Unreleased]
 
+### 2026-10-14 批次 D71 · `gate:close`：把收口清单固化成一条命令（防第四次漏项）
+
+**背景**：收口清单已漏三次（D66 typecheck / D70 五道门禁 / D70b wiring），**每次都是 CI 先抓到**。
+靠记忆执行清单不可靠 ⇒ 本批把它固化成 `npm run gate:close`。
+
+| 面 | 内容 |
+|---|---|
+| 脚本 | `scripts/gate-close.mjs`：**18 项**（五道门禁 + 各自 selftest + readme + readme/flag selftest + **wiring 34 个测试文件** + facts + refs + typecheck + lint）。失败即停（与 CI 的 `bash -e` 一致）+ 打印失败项输出尾部 + 收尾行「N/M 项通过」 |
+| 用法 | `npm run gate:close`（全清单）· `--quick`（跳过最慢的 lint/typecheck）· `--list`（只打印清单）· `--selftest`（自证） |
+| 自证 | 清单必须含 AGENTS.md §3 约定的每一项；每道门禁都要有 selftest 条目；wiring 匹配口径须 ≥5 个文件；最慢的 lint 必须排在 wiring 之后（失败早停要省时间） |
+| **当场自证有效** | 首次跑就抓到 **`scripts/gate-close.mjs` 未 git add**（refs 门禁：`本机有但未入库`）——正是它存在的理由 |
+| user-guide 口径更正 | D68 说「user-guide 缺 123 个旗标是缺口」，**这是判据用错地方**：user-guide 是**上手指南**（212 行讲流程与配置），本就不该列全 168 个开关 ⇒ 正确处置是**加一句指向**（README 速查节 / `--help`），不重复全表以免两处漂移 |
+| 又撞 deadcode 缺陷 | `closeGateList` 只在同文件 selftest 里用，仍被判「未使用导出」⇒ **再次实证 D70 记录的「deadcode 漏判同文件引用」缺陷**（本批不改判据，仅记录） |
+
+
+
 ### 2026-10-14 批次 D70 · CI #242/#243 的 5 处复杂度违规（根因：我收口时漏跑了五道门禁）
 
 **一句话**：#243 的 lint 报「函数级复杂度 5 处违规」，本机却是绿的——**根因是 D68/D69 收口时
