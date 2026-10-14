@@ -1,0 +1,86 @@
+{
+  "_comment": "结论台账 —— 对外结论的可复核状态。协议见 AGENTS.md §3.5（永远质疑 + 推翻协议）。",
+  "_protocol": "status: verified=有可复现命令+落盘产物 | unverified=无证据的对外声明（默认不可引用）| refuted=已验证为假、待推翻重做",
+  "_rules": [
+    "新结论一律先记 unverified，拿到复现命令后才能转 verified",
+    "发现任一 refuted 证据 → 按 AGENTS.md §3.5 二节走推翻协议，不许打补丁",
+    "每批 D 批次至少复核 1 条 unverified/refuted"
+  ],
+  "claims": [
+    {
+      "id": "detect-benchmark-redteam-26",
+      "claim": "红队靶场 26 靶点：检出 19/19、误报 0/7、命中中位 747ms（sqlmap 1.10.7 为 16/19、6/7、21.7s）",
+      "status": "verified",
+      "evidence": "docs/sqlmap-benchmark/redteam-strict-runs3.md（同题各 3 轮，检出多数决 + 耗时中位）",
+      "refute_cmd": "node e2e/redteam-lab/bench-compare.mjs（数字随靶场/引擎版本变，复跑即失效）",
+      "caveat": "SQLite 靶场 + 浅档口径；不是互联网真实目标"
+    },
+    {
+      "id": "detect-benchmark-sqli-labs-23",
+      "claim": "sqli-labs 23 关：23/23 vs sqlmap 14/23",
+      "status": "verified",
+      "evidence": "docs/sqlmap-benchmark/sqlmap-benchmark-2026-10-13-level1-runs3.md",
+      "refute_cmd": "npm run bench -- --suite sqli-labs",
+      "caveat": "2026-10-13 口径；引擎此后经 D54-D67 多批改动，数字需复跑才可再引"
+    },
+    {
+      "id": "waf-crs-pl1-bypass",
+      "claim": "tamper 链对真 ModSecurity CRS 的绕过效果",
+      "status": "verified",
+      "evidence": "docs/WAF-真机链对拍-2026-10-05.md（CRS 4.29/PARANOIA 1/阈值 5/真 MySQL，19 样本）",
+      "refute_cmd": "WAF_GATE_PL=1 npm run acceptance（waf-real/waf-auto 两套件）",
+      "caveat": "★ 最好链 2/19、旧首选链 0/19；直连上界仅 10/19。禁止对外声明绕过率"
+    },
+    {
+      "id": "waf-bypass-legacy-claim",
+      "claim": "（已作废）tamper 挂链可有效绕过 CRS：PL2 8→9",
+      "status": "refuted",
+      "evidence": "执行器保真度实测仅 60.7%（`(?i)` 内联标记被吃、TX/MATCHED_VARS 未实现）⇒ 修复后保真度 99.3%，同一批探针结论全变（PL1 无增益 / PL3/PL4 全零）",
+      "refute_cmd": "node e2e/waf-real/crs-fidelity.mjs（保真度门禁）",
+      "history": "原口径出自 docs/waf-绕过能力实测口径.md，2026-09-19 整体推翻；旧数字保留作历史，禁止引用"
+    },
+    {
+      "id": "tamper-versioned-parity",
+      "claim": "（已知为假）versioned 关键字族与上游 sqlmap 等价",
+      "status": "refuted",
+      "evidence": "上游 doctest 字面比对：versionedkeywords 漏包 ALL、versionedmorekeywords 漏 CONCAT（同族内不自洽）；modsecurityversioned / modsecurityzeroversioned / halfversionedmorekeywords 版本注释形态与上游系统性不同",
+      "refute_cmd": "node scripts/verify-tamper-upstream-examples.mjs（drift 字段 [queued] 条目）",
+      "recheck_batch": "T-6",
+      "caveat": "★ 已知未修。README 的「字面一致 100/115」计数含这几条缺陷，不得据此宣称 tamper 全族等价"
+    },
+    {
+      "id": "tamper-parity-names",
+      "claim": "tamper 插件覆盖 sqlmap 官方全集 84/84（名字口径）",
+      "status": "verified",
+      "evidence": "node scripts/verify-tamper-parity.mjs —— 官方有而本仓没有：0 个",
+      "refute_cmd": "npm run tamper:parity",
+      "caveat": "同名 ≠ 同行为；行为等价见 tamper:examples（存在 refuted 条目）"
+    },
+    {
+      "id": "dbms-support-levels",
+      "claim": "18 种数据库：6 真引擎验证 / 3 部分通道 / 9 模板适配",
+      "status": "verified",
+      "evidence": "server/src/engine/dbmsEvidence.js + README 分层表（由 npm run readme:check 守护口径自洽）",
+      "refute_cmd": "npm run readme:check",
+      "caveat": "9 种模板适配方言语法/报错文本可能有偏差；每份报告的 summary.dbmsEvidence.caveat 必须随结论引用"
+    },
+    {
+      "id": "waf-fingerprint-coverage",
+      "claim": "62 个 WAF 指纹识别",
+      "status": "unverified",
+      "evidence": "——",
+      "refute_cmd": "npm run waf-validate（自写正则模拟器口径，禁止对外）",
+      "recheck_batch": "下一批",
+      "caveat": "★ 只有自实现模拟器口径，缺真机识别准确率实测；对外引用前必须补真机样本"
+    },
+    {
+      "id": "paramminer-superiority",
+      "claim": "参数挖掘（Arjun 式）强于 sqlmap",
+      "status": "unverified",
+      "evidence": "仅有本仓 11 用例自测 + 算法描述",
+      "refute_cmd": "node --test server/tests/paramMiner.test.js",
+      "recheck_batch": "下一批",
+      "caveat": "★ 「强于 sqlmap」缺同题对照；sqlmap 侧无挖掘能力（硬编码 -p），但本仓的召回率/误报率无实测"
+    }
+  ]
+}
