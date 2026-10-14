@@ -26,12 +26,6 @@
       "limitLines": 100,
       "limitComplexity": 15
     },
-    "scripts/duplication-guard.mjs::findClones": {
-      "lines": 3,
-      "complexity": 1,
-      "limitLines": 100,
-      "limitComplexity": 15
-    },
     "scripts/facts-sync.mjs::main": {
       "lines": 89,
       "complexity": 23,
@@ -221,12 +215,6 @@
     "server/bin/cli/config.js::validateEnumArgs": {
       "lines": 12,
       "complexity": 20,
-      "limitLines": 100,
-      "limitComplexity": 15
-    },
-    "server/bin/cli/help.js::printHelp": {
-      "lines": 3,
-      "complexity": 1,
       "limitLines": 100,
       "limitComplexity": 15
     },
@@ -1519,5 +1507,5 @@
       "complexity": 17
     }
   },
-  "_note": "2026-10-14 D70：① printHelp / findClones 因 D68/D69 抽出内容而大降，基线随之下调（更严）；② checkConsistency 上调 1 行（176→177）：⑯⑰ 判据本体已移入 scripts/readme-flag-coverage.mjs，此处只剩一次调用，门禁不该因判据增强而欠债；③ matchAcrossFiles（50 行/17 圈）登记为存量：**算法性复杂度**（两两文件 × 滑窗哈希 × delta 分组），已尝试拆分两次仅降 1 圈，不再拆 —— 拆不动就登记，不假装达标。"
+  "_note": "2026-10-14 D70：① printHelp / findClones 实测已低于软限（3 行 / 1 圈）⇒ 按「防虚高」判据**移出基线**（收进基线无意义，会被形态-6 判据判红 —— D67 的先例，我这次忘了）；② checkConsistency 176→177 行（⑯⑰ 判据已移入 readme-flag-coverage.mjs，此处只剩调用点，如实标注）；③ matchAcrossFiles（50 行/17 圈）登记为存量：**算法性复杂度**（两两文件 × 滑窗哈希 × delta 分组），已尝试拆分两次仅降 1 圈，拆不动就登记，不假装达标。"
 }

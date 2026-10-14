@@ -17,7 +17,8 @@
 | 处置② | `findClonesWithStats` 拆为 `collectFileFingerprints` + `matchAcrossFiles`（31 → 22 → 18 → 主函数无分支）；`matchAcrossFiles` 自身 17 圈属**算法性复杂度**（两两文件 × 滑窗哈希 × delta 分组），已尝试拆两次仅降 1 圈 ⇒ **登记为存量，不假装达标** |
 | 处置③ | 基线随真实值调整：`printHelp` 314→3 行、`findClones` 62→3 行/22→1 圈（**下调 = 更严**）；`checkConsistency` 176→177 行（判据已移出，只剩一次调用点，如实标注） |
 | **顺带抓到的两个门禁缺陷** | ① **deadcode 漏判同文件引用**：`findClonesWithStats` 被同文件两处调用仍被判「未使用导出」⇒ 改判据风险大（本批不动），该函数已去 export 绕过 ② **effectiveBodyLines 剔除纯注释行** ⇒ 「精简注释来降行数」对门禁无效（本批实测踩到） |
-| **收口纪律（补进 AGENTS.md）** | 收口清单升级为：`lint` + **`typecheck`** + **五道门禁逐道跑** + **各门禁 selftest** + `readme` + `facts` + `refs` —— 少一条都会被 CI 抓 |
+| **D70b 补丁（#246）** | CI 抓到「形态-6 基线文件合法」红：我把**已低于软限**的 `printHelp`(3 行) / `findClones`(3 行/1 圈)「下调收进」了基线 ⇒ 防虚高判据要求低于软限者必须**移出**基线（D67 先例，这次忘了）⇒ 已移出，基线函数数 252→251，wiring 15/15 + 全 guard wiring 230/230 绿 |
+| **收口纪律（补进 AGENTS.md）** | 收口清单升级为：`lint` + **`typecheck`** + **五道门禁逐道跑** + **各门禁 selftest** + `readme` + `facts` + `refs` + **门禁 wiring 测试** —— 已漏三次（D66 typecheck / D70 五门禁 / D70b wiring），都被 CI 先抓到 |
 
 
 ### 2026-10-14 批次 D69 · --help 补全 + 门禁加 ⑰，并修 ⑯ 的一处假绿
