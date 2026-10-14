@@ -100,7 +100,7 @@ const LITERAL_TABLE_PUNCT = new Set([',', '(', ')', '[', ']', '{', '}', ';', ':'
  * @param {Array<{type:string,value:string}>} tokens 窗口内的 token
  * @returns {boolean}
  */
-export function isLiteralTableWindow(tokens) {
+function isLiteralTableWindow(tokens) {
   const isIdent = (t) => !!t && t.type === 'ident';
   const isPunct = (t, v) => !!t && t.type === 'punct' && t.value === v;
   let i = 0;
@@ -128,9 +128,48 @@ export function findClones(files, opts = {}) {
  * @param {{minTokens?:number}} [opts]
  * @returns {{clones:Array<object>, literalTableSkipped:number}}
  */
-export function findClonesWithStats(files, opts = {}) {
-  const minTokens = opts.minTokens ?? MIN_TOKENS;
-  // 每个文件的指纹序列 + 行号表
+/**
+ * 把克隆列表按「纯字面量数据表」豁免规则分区（[T-6b]）。
+ * 判据见 isLiteralTableWindow；取窗口 token 用行号二分（lex 的 tokens 按 line 递增）。
+ * @param {Array<object>} clones 原始克隆
+ * @param {Map<string,{tokens:Array<object>}>} fileData 每文件的 token 序列
+ * @returns {{clones:Array<object>, literalTableSkipped:number, skippedSamples:Array<object>}}
+ */
+function partitionLiteralTables(clones, fileData) {
+  const windowTokens = (d, s, e) => {
+    let lo = 0, hi = d.tokens.length;
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (d.tokens[mid].line < s) lo = mid + 1; else hi = mid; }
+    const start = lo;
+    hi = d.tokens.length;
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (d.tokens[mid].line <= e) lo = mid + 1; else hi = mid; }
+    return d.tokens.slice(start, lo);
+  };
+  const kept = [];
+  const skippedSamples = [];
+  let literalTableSkipped = 0;
+  for (const c of clones) {
+    // 两处窗口都是「纯字面量表」才豁免（任一侧含逻辑即保留）
+    const pureLiteral = c.pairs.every((p) => {
+      const d = fileData.get(p.file);
+      if (!d || !d.tokens) return false;
+      return isLiteralTableWindow(windowTokens(d, p.startLine, p.endLine));
+    });
+    if (pureLiteral) {
+      literalTableSkipped++;
+      // 留样本：豁免量必须可核对（「全是数据表」这句话要能被抽查）
+      if (skippedSamples.length < 10) skippedSamples.push(c);
+    } else kept.push(c);
+  }
+  return { clones: kept, literalTableSkipped, skippedSamples };
+}
+
+/**
+ * 逐文件读入并算指纹序列（读不到 / token 数不足的文件直接跳过）。
+ * @param {string[]} files
+ * @param {number} minTokens 少于它的文件不参与克隆检测
+ * @returns {Map<string,{fps:string[], lines:number[], tokens:Array<object>}>}
+ */
+function collectFileFingerprints(files, minTokens) {
   const fileData = new Map();
   for (const file of files) {
     const abs = path.isAbsolute(file) ? file : path.join(ROOT, file);
@@ -138,12 +177,21 @@ export function findClonesWithStats(files, opts = {}) {
     try { src = fs.readFileSync(abs, 'utf8'); } catch { continue; }
     const { tokens } = lex(src);
     if (tokens.length < minTokens) continue;
-    const fps = fingerprintTokens(tokens);
-    const lines = tokens.map((t) => t.line);
-    // [T-6b] 留 token 引用（不复制）：数据表豁免判定要按行区间取回窗口内的 token
-    fileData.set(file, { fps, lines, tokens });
+    fileData.set(file, { fps: fingerprintTokens(tokens), lines: tokens.map((t) => t.line), tokens });
   }
-  // 每个文件：hash → [startIdx, ...]
+  return fileData;
+}
+
+/**
+ * 建逐文件 hash 表并做跨文件匹配（[D70] 自 findClonesWithStats 拆出：原来「收集 / 匹配 /
+ * 分区」三件事挤在一个函数里，圈复杂度顶到 18）。
+ * @param {string[]} files
+ * @param {Map<string,object>} fileData collectFileFingerprints 的产物
+ * @param {number} minTokens
+ * @returns {{fileHashMaps:Map<string,Map<string,number[]>>, clones:Array<object>}}
+ */
+function matchAcrossFiles(files, fileData, minTokens) {
+
   const fileHashMaps = new Map();
   for (const [file, { fps }] of fileData) {
     const hm = new Map();
@@ -154,7 +202,7 @@ export function findClonesWithStats(files, opts = {}) {
     }
     fileHashMaps.set(file, hm);
   }
-  // 跨文件匹配：按 (fileA, fileB, delta) 分组，合并连续 idxA
+  // 每个文件：hash → [startIdx, ...]
   const fileList = [...fileHashMaps.keys()];
   const clones = [];
   for (let fi = 0; fi < fileList.length; fi++) {
@@ -193,33 +241,14 @@ export function findClonesWithStats(files, opts = {}) {
     }
   }
   clones.sort((a, b) => b.tokens - a.tokens);
-  // [T-6b] 数据表豁免：两处窗口都是「纯字面量表」才豁免（任一侧含逻辑即保留）
-  // ⚠️ 取区间用**行号二分**（lex 产出的 tokens 按 line 递增），不用全量 filter ——
-  //   4 万+ 克隆 × 全文件 token 数 = 4 亿次，跑到分钟级；二分后每次 O(log n + 窗口)
-  const windowTokens = (d, s, e) => {
-    let lo = 0, hi = d.tokens.length;
-    while (lo < hi) { const mid = (lo + hi) >> 1; if (d.tokens[mid].line < s) lo = mid + 1; else hi = mid; }
-    const start = lo;
-    hi = d.tokens.length;
-    while (lo < hi) { const mid = (lo + hi) >> 1; if (d.tokens[mid].line <= e) lo = mid + 1; else hi = mid; }
-    return d.tokens.slice(start, lo);
-  };
-  const kept = [];
-  const skippedSamples = [];
-  let literalTableSkipped = 0;
-  for (const c of clones) {
-    const pureLiteral = c.pairs.every((p) => {
-      const d = fileData.get(p.file);
-      if (!d || !d.tokens) return false;
-      return isLiteralTableWindow(windowTokens(d, p.startLine, p.endLine));
-    });
-    if (pureLiteral) {
-      literalTableSkipped++;
-      // [T-6b] 留样本：豁免量必须可核对（「全是数据表」这句话要能被抽查）
-      if (skippedSamples.length < 10) skippedSamples.push(c);
-    } else kept.push(c);
-  }
-  return { clones: kept, literalTableSkipped, skippedSamples };
+  return { fileHashMaps, clones };
+}
+
+function findClonesWithStats(files, opts = {}) {
+  const minTokens = opts.minTokens ?? MIN_TOKENS;
+  const fileData = collectFileFingerprints(files, minTokens);
+  const { clones } = matchAcrossFiles(files, fileData, minTokens);
+  return partitionLiteralTables(clones, fileData);
 }
 
 function flushClone(out, fileData, fileA, idxAStart, idxAEnd, fileB, idxBStart, idxBEnd, minTokens) {

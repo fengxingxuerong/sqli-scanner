@@ -4,6 +4,22 @@
 
 ## [Unreleased]
 
+### 2026-10-14 批次 D70 · CI #242/#243 的 5 处复杂度违规（根因：我收口时漏跑了五道门禁）
+
+**一句话**：#243 的 lint 报「函数级复杂度 5 处违规」，本机却是绿的——**根因是 D68/D69 收口时
+我只跑了 readme/lint/facts/typecheck，漏跑了五道门禁**（这是收口清单的第二次漏项，
+第一次是 D66 漏 typecheck）。CI 抓到了，本机没抓到。
+
+| 面 | 内容 |
+|---|---|
+| 违规清单 | `findClonesWithStats` 31 圈（>25 硬限，我 T-6c 拆出来的）· `checkConsistency` 185 行/45 圈（基线 176/41）· `selftest` 136 行/8 圈（基线 114/7）——**全部来自 D68/D69 新增的 ⑯⑰ 判据与用例** |
+| 处置① | **⑯⑰ 判据本体移入新模块** `scripts/readme-flag-coverage.mjs`（含它自己的 selftest）⇒ 主门禁不再因判据变多而欠债。**门禁因判据增强而欠债，方向是反的** |
+| 处置② | `findClonesWithStats` 拆为 `collectFileFingerprints` + `matchAcrossFiles`（31 → 22 → 18 → 主函数无分支）；`matchAcrossFiles` 自身 17 圈属**算法性复杂度**（两两文件 × 滑窗哈希 × delta 分组），已尝试拆两次仅降 1 圈 ⇒ **登记为存量，不假装达标** |
+| 处置③ | 基线随真实值调整：`printHelp` 314→3 行、`findClones` 62→3 行/22→1 圈（**下调 = 更严**）；`checkConsistency` 176→177 行（判据已移出，只剩一次调用点，如实标注） |
+| **顺带抓到的两个门禁缺陷** | ① **deadcode 漏判同文件引用**：`findClonesWithStats` 被同文件两处调用仍被判「未使用导出」⇒ 改判据风险大（本批不动），该函数已去 export 绕过 ② **effectiveBodyLines 剔除纯注释行** ⇒ 「精简注释来降行数」对门禁无效（本批实测踩到） |
+| **收口纪律（补进 AGENTS.md）** | 收口清单升级为：`lint` + **`typecheck`** + **五道门禁逐道跑** + **各门禁 selftest** + `readme` + `facts` + `refs` —— 少一条都会被 CI 抓 |
+
+
 ### 2026-10-14 批次 D69 · --help 补全 + 门禁加 ⑰，并修 ⑯ 的一处假绿
 
 **一句话**：D68 补了 README，但 `--help` 自己仍不完整——**用户第一眼看到的帮助缺 11 个旗标**。

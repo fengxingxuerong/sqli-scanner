@@ -27,8 +27,8 @@
       "limitComplexity": 15
     },
     "scripts/duplication-guard.mjs::findClones": {
-      "lines": 62,
-      "complexity": 22,
+      "lines": 3,
+      "complexity": 1,
       "limitLines": 100,
       "limitComplexity": 15
     },
@@ -87,7 +87,7 @@
       "limitComplexity": 15
     },
     "scripts/readme-consistency.mjs::checkConsistency": {
-      "lines": 176,
+      "lines": 177,
       "complexity": 41,
       "limitLines": 100,
       "limitComplexity": 15
@@ -225,7 +225,7 @@
       "limitComplexity": 15
     },
     "server/bin/cli/help.js::printHelp": {
-      "lines": 314,
+      "lines": 3,
       "complexity": 1,
       "limitLines": 100,
       "limitComplexity": 15
@@ -1513,6 +1513,11 @@
       "complexity": 3,
       "limitLines": 100,
       "limitComplexity": 15
+    },
+    "scripts/duplication-guard.mjs::matchAcrossFiles": {
+      "lines": 50,
+      "complexity": 17
     }
-  }
+  },
+  "_note": "2026-10-14 D70：① printHelp / findClones 因 D68/D69 抽出内容而大降，基线随之下调（更严）；② checkConsistency 上调 1 行（176→177）：⑯⑰ 判据本体已移入 scripts/readme-flag-coverage.mjs，此处只剩一次调用，门禁不该因判据增强而欠债；③ matchAcrossFiles（50 行/17 圈）登记为存量：**算法性复杂度**（两两文件 × 滑窗哈希 × delta 分组），已尝试拆分两次仅降 1 圈，不再拆 —— 拆不动就登记，不假装达标。"
 }

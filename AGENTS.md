@@ -55,7 +55,8 @@ node scripts/one-click-scan.mjs -u "http://target/page?id=1"   # 一条命令出
 ## 3. 仓库工程纪律（改代码前必读）
 
 - 每批改动走 **D 编号批次**（见 `TODO.md` 顶部），一次批次 = 代码 + 测试 + README/CHANGELOG 同步 + 门禁全绿。
-- `npm run readme:check`：README 参数/API 表与代码**双向核对**，加了开关不写文档会红。
+- `npm run readme:check`：README 与代码**双向核对**。数字类口径（方言分层 / tamper 数 / payload / 端点表）自 D53 起核对；**CLI 旗标类（D68 的 ⑯ / D69 的 ⑰）自 2026-10-14 起才真正双向**——此前门禁只核数字，「加了开关不写文档」一直没人守，实测 CLI 168 个旗标里 README 曾漏 73 个、user-guide 漏 123 个、**`--help` 自己漏 11 个**。判据实现在 `scripts/readme-consistency.mjs`（⑯⑰ 在 `scripts/readme-flag-coverage.mjs`）。
+- **收口清单（2026-10-14 升级，漏一条都会被 CI 抓）**：`npm run lint` + **`npm run typecheck`** + **五道门禁逐道跑**（`node scripts/{complexity,nesting,duplication,deadcode,debt}-guard.mjs`）+ **各门禁 `--selftest`** + `npm run readme:check` + `npm run facts:check` + `node scripts/ref-integrity.mjs`。D66 漏 typecheck、D70 漏五道门禁，两次都是 CI 先抓到。
 - `npm run acceptance`：17 套件验收门禁，提级提交前必跑。
 - 引擎**有意零运行时 npm 依赖**（server 的 runtime deps 除外）；给引擎加能力请用 Node 内置能力。
 - 检测判据/定库签名的测试是校准过的——不要为了让测试变绿而放宽断言；行为变化必须有靶场证据。
