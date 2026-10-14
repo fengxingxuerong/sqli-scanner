@@ -4,6 +4,33 @@
 
 ## [Unreleased]
 
+### 2026-10-14 批次 D77 · tauri 打包版本对齐：npm 端收敛到 Rust crate 线（CI 从不构建 Tauri 的盲区）
+
+**动机**：`npm run package:win` 被 tauri build 拦下：「Found version mismatched Tauri packages：
+tauri(v2.11.5) : @tauri-apps/api(v2.12.2)、plugin-dialog(v2.7.3) : (v2.8.1)、plugin-fs(v2.5.2) : (v2.6.0)」。
+
+**根因**：npm 三包用 `^2.x` 范围，某次安装漂到 2.12 线；Rust 侧锁在 Cargo.lock 的 2.11 线。
+**CI 从不构建 Tauri**（`ci.yml` 无 `tauri build`/`package:win`，只有 sidecar-build）⇒ 这个不一致
+在 CI 里永远看不见，只在真正打包那天炸——「本地/CI 全绿但发布不了」的又一形态。
+⚠️ npm 与 Rust crate 的版本号不同步：`@tauri-apps/api` 的 2.11 线最高只有 **2.11.1**
+（Rust tauri 2.11.5 ↔ npm 2.11.1），拿 2.11.5 去装会 ETARGET 且 npm 会**静默丢掉该依赖**。
+
+| 包 | 旧（漂移） | 新（对齐 Rust crate 线） |
+|---|---|---|
+| `@tauri-apps/api` | ^2.0.0 → 2.12.2 | **~2.11.1** |
+| `@tauri-apps/plugin-dialog` | ^2.8.1 → 2.8.1 | **~2.7.3**（= crate 2.7.3） |
+| `@tauri-apps/plugin-fs` | ^2.6.0 → 2.6.0 | **~2.5.2**（= crate 2.5.2） |
+| `@tauri-apps/cli` | ^2.0.0 → 2.11.4 | **~2.11.4** |
+
+用 `~`（patch-only）而非 `^`：再漂到 2.12 线就会重演本批。对齐后复验：`tsc --noEmit` 0 错
+（前端无 2.12-only API 使用）、`eslint` 0 error、`npm audit --omit=dev` 0 漏洞。
+顺带记录：`npm audit` 全量报 5 漏洞（2 moderate/1 high/2 critical）全在 devDep 工具链
+（vitest/tinypool/source-map-js），**与本批无关**（改动前同样 5 个），README 徽章口径本就是 prod。
+
+**遗留建议（未做，登记待办）**：把「npm ↔ crate 版本同线」加成 `release-check.mjs` 的一条判据——
+本次是 tauri build 自己拦的，但它只在打包末尾才验；更早就该在 release:check 里红。
+
+
 ### 2026-10-14 批次 D76 · sea-config.json 同步构建工具实际输出（wasm 资产路径 node_modules → dist-engine）
 
 **动机**：`npm run package:win` 的 `release:check` 拦住发布——工作区有未提交改动。核查后两处：
