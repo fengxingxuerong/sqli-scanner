@@ -32,7 +32,11 @@ function AppThemeProvider({ children }: { children: ReactNode }) {
       const saved = window.localStorage.getItem(THEME_KEY);
       if (saved === 'light' || saved === 'system' || saved === 'dark') return saved;
     }
-    return 'light';
+    // [D80 2026-10-14] 默认主题改暗色：视觉语言（点阵/霓虹描边/青色辉光/毛玻璃）整套按暗底
+    // 设计，浅色只是附加项；原默认 light 让用户第一眼看到的是"灰色 SaaS"，赛博资产
+    // （.glass/.dot-grid/.neon-border/.scanline-active）反而只在暗色下现身。
+    // 已存过 sqli_theme 的历史用户不受影响（读存档优先）。
+    return 'dark';
   });
   const [systemDark, setSystemDark] = useState(false);
 

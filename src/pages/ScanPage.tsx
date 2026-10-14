@@ -4,13 +4,14 @@ import { useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import {
-  Container, Paper, LinearProgress, Divider, Chip, Stack, Typography, Box,
+  Container, Stack, Box,
 } from '@mui/material';
 import ScanWizard from '../components/ScanWizard';
 import ScanSidebar from '../components/ScanSidebar';
 import ScanConfirmDialogs from '../components/ScanConfirmDialogs';
+import ScanProgress from '../components/ScanProgress';
+import { useScanActivity } from '../hooks/useScanActivity';
 import ScanResult from '../components/ScanResult';
-import ProgressView from '../components/ProgressView';
 import { useScan } from '../hooks/useScan';
 import { useEvents } from '../hooks/useEvents';
 import { useScanStore } from '../store/scanStore';
@@ -26,10 +27,6 @@ function parseJson(text: string): Record<string, string> {
   return JSON.parse(text);
 }
 
-const STATUS_COLOR: Record<string, 'default' | 'info' | 'success' | 'warning' | 'error'> = {
-  pending: 'default', running: 'info', paused: 'warning', completed: 'success', stopped: 'warning', error: 'error',
-};
-
 export default function ScanPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -44,10 +41,8 @@ export default function ScanPage() {
   const wafSuggestion = useScanStore((s) => s.wafSuggestion);
   // H3：不再订阅 events 数组 —— SSE 高峰期整页（含向导表单树）随每个事件重渲染的
   // 问题就此消除。进度展示只消费 store 增量维护的聚合值（H2），仅在点级事件时更新。
-  const progressTotal = useScanStore((s) => s.progressTotal);
-  // [P1-FIX] 订阅增量数字而非 processedPointIds 对象：对象每事件新引用 → 整页重渲染，
-  // 且 Object.keys().length 为 O(n) 扫描；数字订阅只在计数变化时触发一次重渲染。
-  const processedCount = useScanStore((s) => s.processedCount);
+  // [D80] progressTotal/processedCount 不再于页面级订阅：进度展示（含 H2 聚合值消费）
+  // 已随 ProgressView 整体在 ScanProgress 内，子组件自订阅比重排整页更贴 H3 初衷。
   useEvents(scanId);
 
   const [url, setUrl] = useState('');
@@ -63,9 +58,8 @@ export default function ScanPage() {
   const [starting, setStarting] = useState(false);
 
   const running = status === 'running';
-  const total = progressTotal;
-  const processed = processedCount;
-  const pct = total > 0 ? Math.round((processed / total) * 100) : null;
+  // progressTotal/processedCount 由 ProgressView 自行订阅（H2 聚合值），此处不再中转
+  // [D80] pct/progressValue 已随进度条留在 ProgressView（单一真源），此处不再重复计算
   const sqlDestructive = engine === 'sqlmap' && (sqlmapConfig.dump || sqlmapConfig.osShell || !!sqlmapConfig.fileRead);
 
   const doStart = async (
@@ -131,6 +125,9 @@ export default function ScanPage() {
   const handleResume = useCallback(() => { if (scanId) void resumeScan(scanId); }, [scanId, resumeScan]);
   const handleErrorClear = useCallback(() => setError(''), []);
 
+  // [D80] 扫描过程全可见：进度区滚入视口 + 全局扫描线（hook 见 useScanActivity）
+  const progressRef = useScanActivity(scanId, running);
+
   const handleConfigChange = useCallback((patch: Partial<ScanConfig>) =>
     setConfig((c) => ({ ...c, ...patch })), []);
   const handleSqlmapConfigChange = useCallback((patch: Partial<SqlmapConfig>) =>
@@ -184,24 +181,7 @@ export default function ScanPage() {
       </Box>
 
       {scanId && (
-        <Paper variant="outlined" className="mt-4 p-4" sx={{ borderRadius: 3 }}>
-          <Stack direction="row" justifyContent="space-between" alignItems="center" className="mb-2">
-            <Typography variant="h6" fontWeight={700}>{t('scan.progress')}</Typography>
-            <Chip label={t(`status.${status}`)} color={STATUS_COLOR[status]} size="small" />
-          </Stack>
-          <LinearProgress
-            variant={running ? (pct == null ? 'indeterminate' : 'determinate') : 'determinate'}
-            value={running ? (pct == null ? undefined : pct) : 100}
-            sx={{ height: 8, borderRadius: 4 }}
-          />
-          {running && pct != null && (
-            <Typography variant="caption" color="text.secondary" className="mt-1">
-              {t('scan.pointsProcessed', { processed, total, pct })}
-            </Typography>
-          )}
-          <Divider className="my-3" />
-          <ProgressView />
-        </Paper>
+        <ScanProgress ref={progressRef} running={running} />
       )}
 
       <ScanResult

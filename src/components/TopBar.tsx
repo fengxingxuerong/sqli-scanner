@@ -2,7 +2,6 @@ import {
   AppBar,
   Toolbar,
   Typography,
-  Button,
   Box,
   ToggleButton,
   ToggleButtonGroup,
@@ -12,20 +11,16 @@ import BugReportIcon from '@mui/icons-material/BugReport';
 import WbSunnyIcon from '@mui/icons-material/WbSunny';
 import DarkModeIcon from '@mui/icons-material/DarkMode';
 import SettingsBrightnessIcon from '@mui/icons-material/SettingsBrightness';
-import HomeIcon from '@mui/icons-material/Home';
-import { Link as RouterLink, useLocation } from 'react-router-dom';
+import { Link as RouterLink } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useThemeMode } from '../shared/themeMode';
+import TopNav from './TopNav';
 
-// 顶栏：应用标题 + 导航 + 主题切换 + 语言切换
+// 顶栏：应用标题 + 导航（TopNav）+ 主题切换 + 语言切换
 export default function TopBar() {
   const { mode, setMode } = useThemeMode();
   const { t, i18n } = useTranslation();
-  const location = useLocation();
   const currentLang = i18n.language;
-
-  const isActive = (path: string) =>
-    path === '/' ? location.pathname === '/' : location.pathname.startsWith(path);
 
   const switchLang = (lang: string) => {
     i18n.changeLanguage(lang);
@@ -65,45 +60,7 @@ export default function TopBar() {
           </Typography>
         </Box>
 
-        <Box className="flex gap-1">
-          <Button
-            component={RouterLink}
-            to="/"
-            color="inherit"
-            variant={isActive('/') ? 'outlined' : 'text'}
-            size="small"
-          >
-            <HomeIcon fontSize="small" className="mr-1" />
-            {t('nav.home')}
-          </Button>
-          <Button
-            component={RouterLink}
-            to="/scan"
-            color="inherit"
-            variant={isActive('/scan') ? 'outlined' : 'text'}
-            size="small"
-          >
-            {t('nav.scan')}
-          </Button>
-          <Button
-            component={RouterLink}
-            to="/history"
-            color="inherit"
-            variant={isActive('/history') ? 'outlined' : 'text'}
-            size="small"
-          >
-            {t('nav.history')}
-          </Button>
-          <Button
-            component={RouterLink}
-            to="/exploit"
-            color="inherit"
-            variant={isActive('/exploit') ? 'outlined' : 'text'}
-            size="small"
-          >
-            {t('nav.exploit')}
-          </Button>
-        </Box>
+        <TopNav />
 
         <Box className="ml-auto flex items-center gap-1">
           {/* 语言切换 */}

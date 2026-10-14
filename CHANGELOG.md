@@ -4,6 +4,25 @@
 
 ## [Unreleased]
 
+### 2026-10-14 批次 D80 · 赛博风格成本体（默认暗色 + 全局点阵）+ 扫描过程全可见（直播控制台）
+
+**动机**：实际渲染四个页面后确认：赛博资产（`.glass`/`.dot-grid`/`.neon-border`/
+`.scanline-active`/`.terminal-block`）在 index.css 里沉睡已久，但**默认主题是浅色、
+且只有首页挂 dot-grid** ⇒ 用户第一眼看到的是"灰色 SaaS"，扫描过程还藏在表单下方。
+D80 把视觉语言统一到暗色赛博，并把扫描过程拉到"想看不见都难"。
+
+| 面 | 改动 | 取证 |
+|---|---|---|
+| 默认主题 | `sqli_theme` 回落值 `light → dark`（历史用户读存档优先，不受影响）；qa_theme 契约同步改为默认 dark | vitest 565/565 |
+| 全局点阵 | `.dot-grid` 从首页-only 上移到 Layout（router.tsx）⇒ 四页统一赛博底 | 截图比对 |
+| 直播控制台 | EventTimeline 重写：**全量事件**（去掉 50 条倒序截断）+ 时间序终端渲染（`.terminal-block` 等宽字体 + 事件类型着色）+ **自动跟随**（上翻暂停、回底恢复、「跳到最新」）+ 运行呼吸灯 | 无测试钉 50 上限（已核）；565 用例无冲突 |
+| 过程全可见 | ① `useScanActivity` hook：scanId 出现即把进度区滚进视口（jsdom 无 scrollIntoView，用可选调用）；② 运行期给 body 挂 `.scanline-active` 全局扫描线；③ 顶栏「SCANNING」呼吸灯（TopNav，data-driven）；④ 进度卡运行态霓虹描边 | scanPage 级测试原样通过 |
+| 结构 | 复杂度门禁驱动的按职责拆分：`TopNav`（四项导航+呼吸灯，数据驱动消除 4 份重复条件样式）、`ScanProgress`（Paper 外壳+ref 转发+运行态样式）、`useScanActivity`（两个视效副作用） | complexity/dup/lint 全过 |
+| 踩到的真 bug | 中途把进度条+状态 Chip 搬进 ScanProgress，与 ProgressView 原有渲染构成**双重渲染**（两份进度条同时出现）——被 duplication 门禁实锤（104 token 克隆 3331>3330）⇒ 收敛为「外壳归外壳、内容归内容」：ScanProgress 只拥有容器与运行态样式，内容单一真源留在 ProgressView。复跑 3328≤基线 | dup exit 0 |
+
+i18n：`topbar.scanning`（中：扫描中 / EN：SCANNING）、`scan.jumpToLatest` 中英同步。
+
+
 ### 2026-10-14 批次 D79 · UI 优化：对比度修复 + 密度提升（扫描页双栏 / 历史页紧凑空态）+ 三块组件拆出
 
 **动机**：连看四个页面的实际渲染（release 包截图 + CDP 计算样式取证）后发现两类真问题：

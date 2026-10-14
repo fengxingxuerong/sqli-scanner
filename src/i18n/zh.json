@@ -9,6 +9,9 @@
     "history": "历史",
     "exploit": "利用工具"
   },
+  "topbar": {
+    "scanning": "扫描中"
+  },
   "home": {
     "hero": "开始你的安全巡检",
     "startScan": "开始扫描",
@@ -55,6 +58,7 @@
     "pointsProcessed": "已处理 {{processed}}/{{total}} 个注入点（{{pct}}%）",
     "events": "实时事件",
     "noEvents": "暂无事件，开始扫描后这里会实时显示进度",
+    "jumpToLatest": "跳到最新",
     "copyLogs": "复制日志",
     "downloadLogs": "下载日志",
     "eventsCount": "{{count}} 条事件",

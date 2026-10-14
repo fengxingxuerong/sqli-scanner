@@ -41,6 +41,8 @@ const Layout = () => {
   const { t } = useTranslation();
   return (
     <>
+      {/* [D80] 全局赛博点阵背景：原仅首页挂 .dot-grid，其余页面是纯色底 ⇒ 视觉语言不统一 */}
+      <div className="dot-grid" />
       <a href="#main-content" className="skip-link">{t('common.skipToContent')}</a>
       <TopBar />
       <ErrorBoundary>

@@ -9,6 +9,9 @@
     "history": "History",
     "exploit": "Exploit"
   },
+  "topbar": {
+    "scanning": "SCANNING"
+  },
   "home": {
     "hero": "Start Your Security Audit",
     "startScan": "Start Scan",
@@ -55,6 +58,7 @@
     "pointsProcessed": "Processed {{processed}}/{{total}} injection points ({{pct}}%)",
     "events": "Live Events",
     "noEvents": "No events yet. Start a scan to see real-time progress here.",
+    "jumpToLatest": "Jump to latest",
     "copyLogs": "Copy Logs",
     "downloadLogs": "Download Logs",
     "eventsCount": "{{count}} events",

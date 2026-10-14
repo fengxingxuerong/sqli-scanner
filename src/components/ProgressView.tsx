@@ -106,11 +106,7 @@ export default function ProgressView() {
       .catch((err) => setDownloadError(t('progress.downloadFailed', { detail: err?.message || t('progress.unknownError') })));
   };
 
-  // 最近 50 条事件（倒序，最新的在前）
-  const recentEvents = useMemo(() => {
-    const reversed = [...events].reverse();
-    return reversed.slice(0, 50);
-  }, [events]);
+  // [D80] 直播控制台消费全量事件（倒序 50 条截断会藏过程）；自动跟随在组件内处理
 
   return (
     <Box className="space-y-3">
@@ -167,8 +163,8 @@ export default function ProgressView() {
 
       <Divider />
 
-      {/* 事件时间线 */}
-      <EventTimeline events={events} recentEvents={recentEvents} />
+      {/* 事件直播控制台（D80：全量 + 自动跟随 + 终端配色） */}
+      <EventTimeline events={events} running={running} />
     </Box>
   );
 }
