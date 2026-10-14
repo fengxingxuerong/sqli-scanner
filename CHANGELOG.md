@@ -4,6 +4,22 @@
 
 ## [Unreleased]
 
+### 2026-10-14 批次 D57-II · tamper literalWalk 迁移收口（白名单 25→4）
+
+**一句话**：D57 第一批迁走 48 个后，剩余 25 个"复杂"插件经逐个源码审查，**21 个实为可机械迁移**
+（循环目的就是字面量分段），真正超出 literalWalk 语义的只有 4 个。A/B 快照验证顺带抓出并修正
+旧状态机的一个真 bug。
+
+| 面 | 内容 |
+|---|---|
+| 迁移 21 个 | onText 组 5（backslash2forward / dpayload / randomcaseall / noequals / unparen）· 整体替换组 10（brotli / compression / gzip / hex2ascii / str2hex / string2binary / string2hexall / reversestring / lpad / djson）· 逐字符编码组 6（bin2ascii / char2ascii / char2hex / coffee / css / jsonescape）——全部改为 `walkLiterals` 回调，删除手写引号状态机 |
+| 留白名单 4 个（写明理由） | if2case / ifnull2casewhenisnull（while 多遍 + 括号深度定位函数参数，循环目的不是字面量分段）· space2comment（反引号 + 块注释状态，literalWalk 不支持，扩展属独立批次）· space2morehash（两遍扫描：关键字聚合 + 空格替换，第一遍语义不同） |
+| **A/B 快照验证** | 迁移前对旧实现采 18 case × 21 插件输出快照，迁移后逐条对比：onText 组 + 逐字符组 **逐字等价**（随机类按大小写规范化）；整体替换组抓出 **54 处差异，单一根因 = 旧状态机真 bug**（见下行） |
+| **修正的真 bug** | 旧状态机处理完字面量后 `inSingle = true` **从不复位**（直接 `i = lit.end` 跳过 body），下一个字面量的开引号被误当闭合、再下一个引号触发未闭合 abort 吞尾 ⇒ `CONCAT('a','b')` 产出 `CONCAT(0x61,'b')`（第二个字面量漏处理）。单字面量场景遗留态只透传 ⇒ bug 不可见，此前门禁全绿是有盲区的 |
+| 三闸 | tamper:parity ✅ / tamper:examples ✅（上游 doctest 不钉旧行为，新行为与上游对齐）/ tamper-matrix ✅；tamper 相关 19 套件 **200/200**；迁移守卫白名单 25→4（防腐烂机制按设计起效逼出本次更新） |
+| 重复门禁 | 重复块 41404→41267（-137），基线已下调 |
+| 边界 | mutation selftest 25 目标全绿 · lint 0 · README 无需同步（未涉及迁移进度） |
+
 ### 2026-10-14 批次 D64 · timeDrift 墙钟预算重标（CI windows 抖动红的根治）
 
 **一句话**：CI windows 上 `extractor.timeDrift.test.js` 故障② 间歇性 30s 截止超时（run #229，

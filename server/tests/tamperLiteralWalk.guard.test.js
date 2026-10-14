@@ -13,32 +13,17 @@ import { fileURLToPath } from 'node:url';
 const pluginsUrl = new URL('../src/core/tamper/plugins/', import.meta.url);
 const pluginsPath = fileURLToPath(pluginsUrl);
 
+// [D57 第二阶段] 21 个插件已迁移到 walkLiterals（onText/onLiteral 回调），
+// 从白名单移除。保留的 4 个是「多遍结构定位/反引号/块注释/关键字聚合」类，
+// 其循环目的不是字面量分段，超出 literalWalk 语义，不迁：
+//   · if2case / ifnull2casewhenisnull —— while 多遍 + 括号深度定位函数参数
+//   · space2comment —— 反引号 + 块注释状态（literalWalk 不支持，扩展属独立批次）
+//   · space2morehash —— 两遍扫描（关键字聚合 + 空格替换），第一遍语义不同
 const WHITELIST = new Set([
-  'backslash2forward.js',
-  'bin2ascii.js',
-  'brotli.js',
-  'char2ascii.js',
-  'char2hex.js',
-  'coffee.js',
-  'compression.js',
-  'css.js',
-  'djson.js',
-  'dpayload.js',
-  'gzip.js',
-  'hex2ascii.js',
   'if2case.js',
   'ifnull2casewhenisnull.js',
-  'jsonescape.js',
-  'lpad.js',
-  'noequals.js',
-  'randomcaseall.js',
-  'reversestring.js',
   'space2comment.js',
   'space2morehash.js',
-  'str2hex.js',
-  'string2binary.js',
-  'string2hexall.js',
-  'unparen.js',
 ]);
 
 test('已迁移插件不得再出现 inSingle/inDouble（防回退）', () => {

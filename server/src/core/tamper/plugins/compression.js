@@ -1,8 +1,8 @@
 // 压缩编码：将字符串字面量用 COMPRESS() 编码（对标 sqlmap compression.py）
-// 适用于支持 COMPRESS/UNCOMPRESS 函数的 MySQL/MariaDB
+// 适用于支持 COMPRESS/UNCOMPRESS 函数的 MySQL/MariaDB。输出固定单引号包裹（历史口径）。
+// [D57] 字面量遍历统一走 literalWalk（单一抽象），不再手写引号状态机。
 import { deflateSync } from 'node:zlib';
-import { readSqlLiteral, isQuoteEscaped } from '../quoteScan.js';
-
+import { walkLiterals } from '../literalWalk.js';
 
 export const compression = {
   name: 'compression',
@@ -13,38 +13,10 @@ export const compression = {
    * @returns {string}
    */
   transform(payload, ctx) {
-    const src = String(payload ?? '');
-    let out = '';
-    let inSingle = false, inDouble = false;
-    for (let i = 0; i < src.length; i++) {
-      const ch = src[i];
-      if (inSingle) {
-        if (ch === "'" && !isQuoteEscaped(src, i)) { inSingle = false; out += ch; }
-        else out += ch;
-        continue;
-      }
-      if (inDouble) {
-        if (ch === '"' && !isQuoteEscaped(src, i)) { inDouble = false; out += ch; }
-        else out += ch;
-        continue;
-      }
-      if (ch === "'") {
-        inSingle = true;
-        let str = '';
-        { const lit = readSqlLiteral(src, i, "'"); if (!lit.closed) { out += src.slice(i); return out; } i = lit.end; str = lit.body; }
-        const compressed = deflateSync(Buffer.from(str)).toString('base64');
-        out += `COMPRESS(FROM_BASE64('${compressed}'))`;
-      } else if (ch === '"') {
-        inDouble = true;
-        let str = '';
-        { const lit = readSqlLiteral(src, i, '"'); if (!lit.closed) { out += src.slice(i); return out; } i = lit.end; str = lit.body; }
-        const compressed = deflateSync(Buffer.from(str)).toString('base64');
-        out += `COMPRESS(FROM_BASE64('${compressed}'))`;
-      } else {
-        out += ch;
-      }
-    }
-    return out;
+    return walkLiterals(payload, {
+      onLiteral: (body) =>
+        `COMPRESS(FROM_BASE64('${deflateSync(Buffer.from(body)).toString('base64')}'))`,
+    });
   },
 };
 export default compression;
