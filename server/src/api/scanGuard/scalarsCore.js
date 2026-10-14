@@ -3,6 +3,10 @@
 // 自 scanConfigGuard.js 拆出（纯搬移）：逐键 clamp 序列整段平移为函数，config 原地写。
 // 依赖入参 scopeRules（safeUrl/csrf 的授权范围约束）——调用方保证顺序：
 //   本函数先于 bespokeKeys（extractScope 隐含开 enableExtract 依赖此处已落的 enableExtract）。
+//
+// [D67 2026-10-14] 单函数（94 圈/172 行）按主题拆为 12 个 helper（逐字搬移，
+// 零行为变化）：ratePerSec/rateGroup 由不同的「静默失效防护」理由驱动，各自成段；
+// 段与段之间共享 config/cfg 原地写、键间无依赖，调用顺序 = 原语句顺序（守恒）。
 // =====================================================================
 import { clampInt, clampStr, pickInt, pickBool } from '../scanConfigUtils.js';
 import { defaults } from '../../config/defaults.js';
@@ -11,28 +15,40 @@ import { filterInScope } from '../../core/scopeGuard.js';
 // [D41 2026-10-11] 注入点筛选三件套的归一化（与 TargetParser 同源，防两处口径漂移）
 import { normalizeParamFilter, normalizeTestParameter } from '../../engine/paramSelection.js';
 
-export function guardScalarsCore(config, cfg, scopeRules) {
-  // —— 网络/调度 ——
-  // [REVERTED P2-3] ratePerSec 不 clamp（既有契约「原样透传 P0-P1③」），限速治理归
-  // httpClient/defaults。但不 clamp ≠ 不管类型：下游用 Number.isFinite 严格判定而它**不转
-  // 类型** ⇒ 数字字符串 "20" 被判成 0，而 0 的语义是「不限速」（tokenBucket.js:23）——
-  // 刚设的闸门被静默关掉，且"键在值也在"所以 dropped 告警不响。这里只做类型归一：
-  // 数字字符串→数字；非数字形态不写入 config（按 defaults 治理）并喊出来，绝不降级成不限速。
+/**
+ * —— 网络/调度：ratePerSec 类型归一 + rateGroup 形态收紧 ——
+ * [REVERTED P2-3] ratePerSec 不 clamp（既有契约「原样透传 P0-P1③」），限速治理归
+ * httpClient/defaults。但不 clamp ≠ 不管类型：下游用 Number.isFinite 严格判定而它**不转
+ * 类型** ⇒ 数字字符串 "20" 被判成 0，而 0 的语义是「不限速」（tokenBucket.js:23）——
+ * 刚设的闸门被静默关掉，且"键在值也在"所以 dropped 告警不响。这里只做类型归一：
+ * 数字字符串→数字；非数字形态不写入 config（按 defaults 治理）并喊出来，绝不降级成不限速。
+ * [2026-10-03] rateGroup：批量共享限速桶的组 id（优化项，非能力开关）。
+ * 形态必须收紧：它会当 Map 的 key（组桶登记表），任意字符串 ⇒ 调用方可构造海量 key
+ * 把桶表撑爆，或拼出与既有 scanId 撞名的 key 去蹭别的扫描的桶。故只认 [A-Za-z0-9_-]，
+ * 非法形态**整体丢弃**并由 logger 喊出来（不静默降级：静默丢弃会让用户以为开了共享桶）。
+ * @param {object} config 目标 config（原地写）
+ * @param {object} cfg 请求载荷
+ */
+function applyRateGovernance(config, cfg) {
   if (cfg.ratePerSec !== undefined && cfg.ratePerSec !== null) {
     const raw = cfg.ratePerSec;
     const n = typeof raw === 'string' ? Number(raw.trim()) : raw;
     if (typeof n === 'number' && Number.isFinite(n)) config.ratePerSec = n;
     else logger.warn(`ratePerSec 值不可用作速率（${JSON.stringify(raw)}），已忽略并按默认限速治理；要不限速请显式传数字 0`);
   }
-  // [2026-10-03] rateGroup：批量共享限速桶的组 id（优化项，非能力开关）。
-  // 形态必须收紧：它会当 Map 的 key（组桶登记表），任意字符串 ⇒ 调用方可构造海量 key
-  // 把桶表撑爆，或拼出与既有 scanId 撞名的 key 去蹭别的扫描的桶。故只认 [A-Za-z0-9_-]，
-  // 非法形态**整体丢弃**并由 logger 喊出来（不静默降级：静默丢弃会让用户以为开了共享桶）。
   if (cfg.rateGroup !== undefined && cfg.rateGroup !== null && cfg.rateGroup !== '') {
     const g = clampStr(cfg.rateGroup, undefined, 64);
     if (g && /^[A-Za-z0-9_-]{1,64}$/.test(g)) config.rateGroup = g;
     else logger.warn(`rateGroup 形态非法（只认字母/数字/下划线/连字符，最长 64），已忽略：${JSON.stringify(cfg.rateGroup)}`);
   }
+}
+
+/**
+ * 调度/扫描级标量：并发、重试、超时、时间阈值、基线漂移重采样、level/risk、前后缀、提取总开关。
+ * @param {object} config 目标 config（原地写）
+ * @param {object} cfg 请求载荷
+ */
+function applySchedulingScalars(config, cfg) {
   const concurrency = pickInt(cfg, 'concurrency', defaults.concurrency, 1, 10);
   if (concurrency !== undefined) config.concurrency = concurrency;
   const retry = pickInt(cfg, 'retry', defaults.retry, 0, 5);
@@ -55,15 +71,22 @@ export function guardScalarsCore(config, cfg, scopeRules) {
   const suffix = clampStr(cfg.suffix, '', 200);
   if (suffix !== undefined) config.suffix = suffix;
   config.enableExtract = !!cfg.enableExtract;
+}
 
-  // —— P0-S3 新增显式收编字段（原逻辑不变）——
+/**
+ * —— P0-S3 新增显式收编字段（原逻辑不变）——提取/导出族标量。
+ * [T4 标定] 时间盲注自适应标定（--time-sec 自适应）+ 探测/提取 sleep 参数化透传。
+ * [sqlmap 对标] 行范围导出：--start/--stop → dumpStart/dumpStop（绝对行号，clamp 0~1000000）。
+ * @param {object} config 目标 config（原地写）
+ * @param {object} cfg 请求载荷
+ */
+function applyExtractScalars(config, cfg) {
   const extractConcurrency = pickInt(cfg, 'extractConcurrency', defaults.extractConcurrency, 1, 16);
   if (extractConcurrency !== undefined) config.extractConcurrency = extractConcurrency;
   const dumpMaxRows = pickInt(cfg, 'dumpMaxRows', 50000, 1, 50000);
   if (dumpMaxRows !== undefined) config.dumpMaxRows = dumpMaxRows;
   const timeBlindSamples = pickInt(cfg, 'timeBlindSamples', defaults.timeBlindSamples, 3, 10);
   if (timeBlindSamples !== undefined) config.timeBlindSamples = timeBlindSamples;
-  // [T4 标定] 时间盲注自适应标定（--time-sec 自适应）+ 探测/提取 sleep 参数化透传
   const timeBlindCalibrate = pickBool(cfg, 'timeBlindCalibrate');
   if (timeBlindCalibrate !== undefined) config.timeBlindCalibrate = timeBlindCalibrate;
   const timeBlindCalibrateMin = pickInt(cfg, 'timeBlindCalibrateMin', defaults.timeBlindCalibrateMin, 1, 30);
@@ -78,16 +101,23 @@ export function guardScalarsCore(config, cfg, scopeRules) {
   if (maxColumnsGuess !== undefined) config.maxColumnsGuess = maxColumnsGuess;
   const dumpRowLimit = pickInt(cfg, 'dumpRowLimit', defaults.dumpRowLimit, 1, 1000);
   if (dumpRowLimit !== undefined) config.dumpRowLimit = dumpRowLimit;
-  // [sqlmap 对标] 行范围导出：--start/--stop → dumpStart/dumpStop（绝对行号，clamp 0~1000000）
   const dumpStart = pickInt(cfg, 'dumpStart', defaults.dumpStart, 0, 1000000);
   if (dumpStart !== undefined) config.dumpStart = dumpStart;
   const dumpStop = pickInt(cfg, 'dumpStop', defaults.dumpStop, 0, 1000000);
   if (dumpStop !== undefined) config.dumpStop = dumpStop;
-  // [sqlmap 对标] 保活探测：--safe-url 仅放行 http(s)（SSRF 在 client.request 内逐请求校验）；
-  // safeFreq clamp 1~10000。非法协议静默丢弃（不阻断启动）。
+}
+
+/**
+ * [sqlmap 对标] 保活探测：--safe-url 仅放行 http(s)（SSRF 在 client.request 内逐请求校验）；
+ * safeFreq clamp 1~10000。非法协议静默丢弃（不阻断启动）。
+ * [P0-SEC 2026-09-08] safeUrl 也受授权范围约束：保活探测页常是另一个主机（/health 走网关），
+ * 不校就等于开了一个「扫描器自己往圈外发请求」的旁路，而且会携带 Cookie/Authorization。
+ * @param {object} config 目标 config（原地写）
+ * @param {object} cfg 请求载荷
+ * @param {object} scopeRules 授权范围规则（enabled + 域名清单）
+ */
+function applySafeUrlGuard(config, cfg, scopeRules) {
   if (typeof cfg.safeUrl === 'string' && /^https?:\/\//i.test(cfg.safeUrl.trim())) {
-    // [P0-SEC 2026-09-08] safeUrl 也受授权范围约束：保活探测页常是另一个主机（/health 走网关），
-    // 不校就等于开了一个「扫描器自己往圈外发请求」的旁路，而且会携带 Cookie/Authorization。
     const safeUrlInScope = !scopeRules.enabled || filterInScope([cfg.safeUrl.trim()], scopeRules).allowed.length > 0;
     if (!safeUrlInScope) {
       logger.warn(`safeUrl ${cfg.safeUrl.trim()} 越出授权范围（scope），已丢弃该配置`);
@@ -97,11 +127,19 @@ export function guardScalarsCore(config, cfg, scopeRules) {
       if (safeFreq !== undefined) config.safeFreq = safeFreq;
     }
   }
-  // [批次 5 补遗 2026-09-14] CSRF 会话层透传（KNOWN_CFG_KEYS 守卫要求：白名单键必须在
-  // sanitizeStart 落地，否则 REST/API 路径收不到——CLI 单独走自己的映射不受影响）。
-  // csrfUrl 与 safeUrl 同款：仅放行 http(s) + 受授权范围约束。
-  // [位置修复 2026-09-14] 原插入落在 safeUrl 的 else 分支内 → 单独配置 csrfUrl（不带
-  // safeUrl）时透传不执行，契约守卫 FAIL（5 键全 miss）。移出到顶层平级。
+}
+
+/**
+ * [批次 5 补遗 2026-09-14] CSRF 会话层透传（KNOWN_CFG_KEYS 守卫要求：白名单键必须在
+ * sanitizeStart 落地，否则 REST/API 路径收不到——CLI 单独走自己的映射不受影响）。
+ * csrfUrl 与 safeUrl 同款：仅放行 http(s) + 受授权范围约束。
+ * [位置修复 2026-09-14] 原插入落在 safeUrl 的 else 分支内 → 单独配置 csrfUrl（不带
+ * safeUrl）时透传不执行，契约守卫 FAIL（5 键全 miss）。移出到顶层平级。
+ * @param {object} config 目标 config（原地写）
+ * @param {object} cfg 请求载荷
+ * @param {object} scopeRules 授权范围规则
+ */
+function applyCsrfGuard(config, cfg, scopeRules) {
   if (typeof cfg.csrfUrl === 'string' && cfg.csrfUrl.trim()) {
     const csrfUrl = cfg.csrfUrl.trim();
     if (!/^https?:\/\//i.test(csrfUrl)) {
@@ -121,16 +159,23 @@ export function guardScalarsCore(config, cfg, scopeRules) {
       if (csrfFreq !== undefined) config.csrfRefreshFreq = csrfFreq;
     }
   }
-  // --skip：参数名数组（去重、去空、clamp 64，字符串化校验）
+}
+
+/**
+ * --skip 参数名数组 + [D41 2026-10-11 对标 sqlmap -p/--param-exclude/--param-filter]
+ * 注入点筛选三件套（REST 口径）。归一化/硬拒判据在 engine/paramSelection.js
+ * （TargetParser 收口）；这里只做形态收紧：
+ *   testParameter：字符串数组（clamp 32）；paramExclude：单串 clamp 200（正则合法性由引擎判，
+ *   这里不 pre-parse —— JS RegExp 无内联 flag，提前编译两次只会制造口径分叉）；
+ *   paramFilter：接受逗号串或数组，归一化走 normalizeParamFilter（未知位置在这里就拒）。
+ * @param {object} config 目标 config（原地写）
+ * @param {object} cfg 请求载荷
+ */
+function applyParamSelection(config, cfg) {
   if (Array.isArray(cfg.skipParams)) {
     const sp = [...new Set(cfg.skipParams.map((s) => String(s).trim()).filter(Boolean))].slice(0, 64);
     if (sp.length) config.skipParams = sp;
   }
-  // [D41 2026-10-11 对标 sqlmap -p/--param-exclude/--param-filter] 注入点筛选三件套（REST 口径）。
-  // 归一化/硬拒判据在 engine/paramSelection.js（TargetParser 收口）；这里只做形态收紧：
-  //   testParameter：字符串数组（clamp 32）；paramExclude：单串 clamp 200（正则合法性由引擎判，
-  //   这里不 pre-parse —— JS RegExp 无内联 flag，提前编译两次只会制造口径分叉）；
-  //   paramFilter：接受逗号串或数组，归一化走 normalizeParamFilter（未知位置在这里就拒）。
   if (Array.isArray(cfg.testParameter)) {
     const tp = cfg.testParameter.map((s) => String(s).trim()).filter(Boolean).slice(0, 32);
     if (tp.length) config.testParameter = tp;
@@ -148,7 +193,14 @@ export function guardScalarsCore(config, cfg, scopeRules) {
       logger.warn(`paramFilter 形态非法，已忽略（${e?.message || e}）`);
     }
   }
-  // [D42 2026-10-11 对标 sqlmap --ignore-code / --randomize]（REST 口径，clamp 与 CLI 同源）
+}
+
+/**
+ * [D42 2026-10-11 对标 sqlmap --ignore-code / --randomize]（REST 口径，clamp 与 CLI 同源）。
+ * @param {object} config 目标 config（原地写）
+ * @param {object} cfg 请求载荷
+ */
+function applyIgnoreAndRandomize(config, cfg) {
   if (Array.isArray(cfg.ignoreCodes)) {
     const codes = cfg.ignoreCodes
       .map((n) => Number(n))
@@ -160,48 +212,68 @@ export function guardScalarsCore(config, cfg, scopeRules) {
     const list = cfg.randomize.map((s) => String(s).trim()).filter(Boolean).slice(0, 16);
     if (list.length) config.randomize = list;
   }
+}
+
+/**
+ * 导出/爬取并发 + [2026-10-02 竞品吸收] 各 opt-in 开关（paramMine/crawlBrowser/
+ * skipStatic/validationSkip/pocRedactAuth/prefilterSinglePoint）。
+ * [2026-10-02 竞品吸收] paramMine 参数挖掘总开关（TargetParser 6.6 步按 === true 严格判定）。
+ * 走 pickBool 而非兜底透传（与 compactErrorTemplates 同理由）：`1`/`"true"` 若被收下，
+ * 引擎侧不生效，又成「白名单有、引擎收不到」的假开关。
+ * [2026-10-02 实战 P1-4] crawlBrowser：headless 浏览器爬取总开关（TargetParser 6.55 步
+ * 按 === true 严格判定），与 paramMine 同口径。
+ * [B-perf] skip-static 参数预筛选（对标 --skip-static）：boolean 化透传，默认关（opt-in）。
+ * [P1-PERF 2026-09-08] 输入校验跳过的开关（默认 true，需能透传 false 才能关）。
+ * [P0-SEC 2026-09-08] PoC 凭据脱敏开关（交付型报告建议开）。
+ * [perf-FIX 2026-09-07] 单点目标 opt-in 预筛选：默认关闭（不配置时单点不预筛，行为与历史一致）。
+ * @param {object} config 目标 config（原地写）
+ * @param {object} cfg 请求载荷
+ */
+function applyConcurrencyAndMine(config, cfg) {
   const dumpConcurrency = pickInt(cfg, 'dumpConcurrency', defaults.dumpConcurrency, 1, 16);
   if (dumpConcurrency !== undefined) config.dumpConcurrency = dumpConcurrency;
   const dumpDatabaseConcurrency = pickInt(cfg, 'dumpDatabaseConcurrency', defaults.dumpDatabaseConcurrency, 1, 16);
   if (dumpDatabaseConcurrency !== undefined) config.dumpDatabaseConcurrency = dumpDatabaseConcurrency;
   const crawlForms = pickBool(cfg, 'crawlForms');
   if (crawlForms !== undefined) config.crawlForms = crawlForms;
-  // [2026-10-02 竞品吸收] paramMine 参数挖掘总开关（TargetParser 6.6 步按 === true 严格判定）。
-  // 走 pickBool 而非兜底透传（与 compactErrorTemplates 同理由）：`1`/`"true"` 若被收下，
-  // 引擎侧不生效，又成「白名单有、引擎收不到」的假开关。
   const paramMine = pickBool(cfg, 'paramMine');
   if (paramMine !== undefined) config.paramMine = paramMine;
-  // [2026-10-02 实战 P1-4] crawlBrowser：headless 浏览器爬取总开关（TargetParser 6.55 步
-  // 按 === true 严格判定），与 paramMine 同口径。
   const crawlBrowser = pickBool(cfg, 'crawlBrowser');
   if (crawlBrowser !== undefined) config.crawlBrowser = crawlBrowser;
-  // [B-perf] skip-static 参数预筛选（对标 --skip-static）：boolean 化透传，默认关（opt-in）
   const skipStatic = pickBool(cfg, 'skipStatic');
   if (skipStatic !== undefined) config.skipStatic = skipStatic;
-  // [P1-PERF 2026-09-08] 输入校验跳过的开关（默认 true，需能透传 false 才能关）
   const validationSkip = pickBool(cfg, 'validationSkip');
   if (validationSkip !== undefined) config.validationSkip = validationSkip;
-  // [P0-SEC 2026-09-08] PoC 凭据脱敏开关（交付型报告建议开）
   const pocRedactAuth = pickBool(cfg, 'pocRedactAuth');
   if (pocRedactAuth !== undefined) config.pocRedactAuth = pocRedactAuth;
-  // [perf-FIX 2026-09-07] 单点目标 opt-in 预筛选：默认关闭（不配置时单点不预筛，行为与历史一致）
   const prefilterSinglePoint = pickBool(cfg, 'prefilterSinglePoint');
   if (prefilterSinglePoint !== undefined) config.prefilterSinglePoint = prefilterSinglePoint;
-  // [B-perf] 响应相似度锚点（对标 --string / --not-string）：Detector.matchAnchors / _boundarySimilar
-  // 消费 config.matchString / config.notString（此前不在白名单被静默丢弃）。字符串截断到 500。
+}
+
+/**
+ * [B-perf] 响应相似度锚点（对标 --string / --not-string）：Detector.matchAnchors / _boundarySimilar
+ * 消费 config.matchString / config.notString（此前不在白名单被静默丢弃）。字符串截断到 500。
+ * [主代理收尾] 盲注响应匹配多指标布尔开关（严格 === true 才启用）。
+ * @param {object} config 目标 config（原地写）
+ * @param {object} cfg 请求载荷
+ */
+function applyResponseAnchors(config, cfg) {
   const matchString = clampStr(cfg.matchString, undefined, 500);
   if (matchString !== undefined) config.matchString = matchString;
   const notString = clampStr(cfg.notString, undefined, 500);
   if (notString !== undefined) config.notString = notString;
-  // [主代理收尾] 盲注响应匹配多指标（二轮增强已实现，Detector.matchText/_matchByCode/
-  // _matchByRegexp/_matchByTitle 消费，此前不在白名单被静默丢弃）：
-  //   matchText/matchTitle = 布尔开关（严格 === true 才启用）；
-  //   matchCode = true（弱信号：真假状态码不同）或 { true, false } 期望状态码（100-599）；
-  //   matchRegexp/trueRegexp/falseRegexp = 正则源文本（500 截断，非法正则引擎侧回落）。
   const matchText = pickBool(cfg, 'matchText');
   if (matchText !== undefined) config.matchText = matchText;
   const matchTitle = pickBool(cfg, 'matchTitle');
   if (matchTitle !== undefined) config.matchTitle = matchTitle;
+}
+
+/**
+ * [主代理收尾] matchCode = true（弱信号：真假状态码不同）或 { true, false } 期望状态码（100-599）。
+ * @param {object} config 目标 config（原地写）
+ * @param {object} cfg 请求载荷
+ */
+function applyMatchCode(config, cfg) {
   if (cfg.matchCode !== undefined && cfg.matchCode !== null) {
     const mc = cfg.matchCode;
     if (mc === true) {
@@ -215,17 +287,32 @@ export function guardScalarsCore(config, cfg, scopeRules) {
       if (Object.keys(expected).length) config.matchCode = expected;
     }
   }
+}
+
+/**
+ * [主代理收尾] matchRegexp/trueRegexp/falseRegexp = 正则源文本（500 截断，非法正则引擎侧回落）。
+ * @param {object} config 目标 config（原地写）
+ * @param {object} cfg 请求载荷
+ */
+function applyRegexpAnchors(config, cfg) {
   const matchRegexp = clampStr(cfg.matchRegexp, undefined, 500);
   if (matchRegexp !== undefined) config.matchRegexp = matchRegexp;
   const trueRegexp = clampStr(cfg.trueRegexp, undefined, 500);
   if (trueRegexp !== undefined) config.trueRegexp = trueRegexp;
   const falseRegexp = clampStr(cfg.falseRegexp, undefined, 500);
   if (falseRegexp !== undefined) config.falseRegexp = falseRegexp;
-  // [sqlmap 对标] 动态内容块自动排除 + 提取常见值缓存：此前未透传 → ctx.config 永远缺此字段，
-  // 检测器/提取器一律走 null/默认路径，对标能力形同虚设。透传 + 用 defaults 作默认值落地。
+}
+
+/**
+ * 尾部开关：[sqlmap 对标] 动态内容块自动排除 + 提取常见值缓存（此前未透传 → ctx.config
+ * 永远缺此字段，检测器/提取器一律走 null/默认路径，对标能力形同虚设。透传 + defaults 落地）。
+ * [P0-FIX 2026-09-10] 布尔盲注二级判据（组间稳定差异）开关 + 采样数。
+ * @param {object} config 目标 config（原地写）
+ * @param {object} cfg 请求载荷
+ */
+function applyTailSwitches(config, cfg) {
   const autoDynamicBlock = pickBool(cfg, 'autoDynamicBlock');
   config.autoDynamicBlock = autoDynamicBlock !== undefined ? autoDynamicBlock : defaults.autoDynamicBlock;
-  // [P0-FIX 2026-09-10] 布尔盲注二级判据（组间稳定差异）开关 + 采样数：透传 + 用 defaults 作默认值落地
   const boolStableDiff = pickBool(cfg, 'boolStableDiff');
   config.boolStableDiff = boolStableDiff !== undefined ? boolStableDiff : defaults.boolStableDiff;
   const boolStableDiffSamples = pickInt(cfg, 'boolStableDiffSamples', defaults.boolStableDiffSamples, 2, 4);
@@ -234,4 +321,25 @@ export function guardScalarsCore(config, cfg, scopeRules) {
   if (predictOutput !== undefined) config.predictOutput = predictOutput;
   const crawlDepth = pickInt(cfg, 'crawlDepth', defaults.crawlDepth, 0, 3);
   if (crawlDepth !== undefined) config.crawlDepth = crawlDepth;
+}
+
+/**
+ * 逐键 clamp 主序列（D67 拆分为按主题的 helper；调用顺序 = 原语句顺序）。
+ * @param {object} config 目标 config（原地写）
+ * @param {object} cfg 请求载荷
+ * @param {object} scopeRules 授权范围规则（safeUrl/csrf 段消费）
+ */
+export function guardScalarsCore(config, cfg, scopeRules) {
+  applyRateGovernance(config, cfg); // —— 网络/调度 ——
+  applySchedulingScalars(config, cfg);
+  applyExtractScalars(config, cfg); // —— P0-S3 显式收编字段 ——
+  applySafeUrlGuard(config, cfg, scopeRules);
+  applyCsrfGuard(config, cfg, scopeRules);
+  applyParamSelection(config, cfg);
+  applyIgnoreAndRandomize(config, cfg);
+  applyConcurrencyAndMine(config, cfg);
+  applyResponseAnchors(config, cfg);
+  applyMatchCode(config, cfg);
+  applyRegexpAnchors(config, cfg);
+  applyTailSwitches(config, cfg);
 }

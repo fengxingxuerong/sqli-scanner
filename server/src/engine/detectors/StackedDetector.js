@@ -12,6 +12,25 @@ import { defaults } from '../../config/defaults.js';
 //   - 已知 DBMS → 仅投放该库专属堆叠模板
 //   - DBMS 未知/未识别 → 遍历全部常见库（MySQL/PostgreSQL/SQL Server/SQLite）模板投放
 //   - Oracle 标准驱动不支持堆叠查询 → 直接返回未命中，不投放
+//
+// [D67 2026-10-14] detect 的嵌套箭头（probeFamily）与基线采样段提升为类方法/模块函数
+//（纯搬移，零行为变化）：复杂度门禁按行范围统计 token，嵌套箭头的分支会全部计入
+// 外层函数 —— 提升后 detect 从 45 圈降到装配量级，判定逻辑各自独立可读。
+
+/**
+ * [B2-FIX] 模板选族：按注入点上下文选布尔族——boundary/orig 含引号 → 自闭合族
+ * （`{ORIG}'...`），否则裸拼接族（`{ORIG};...`）；族内取第一条模板贯穿全部 samples。
+ * @param {string[]} tpls 候选模板
+ * @param {boolean} quoted 是否字符串上下文（自闭合族）
+ * @returns {string} 选中的模板
+ */
+function pickTemplate(tpls, quoted) {
+  const fam = quoted
+    ? tpls.filter((t) => /^\{ORIG\}'/.test(t))
+    : tpls.filter((t) => /^\{ORIG\};/.test(t));
+  return fam[0] || tpls[0];
+}
+
 export class StackedDetector extends Detector {
   constructor() {
     super('stacked');
@@ -33,6 +52,119 @@ export class StackedDetector extends Detector {
     }
     // 未识别：遍历全部已知支持堆叠的库（排除 Oracle）
     return ['MySQL', 'PostgreSQL', 'SQL Server', 'SQLite'];
+  }
+
+  /**
+   * ★FIX [误报防护] 基线补偿：测无注入基线耗时，返回有效阈值与注入超时。
+   * 堆叠判定与注释声称的 TimeBlind「同构」但缺了基线对照——固定阈值下，
+   * 正常响应 ≥ 阈值的慢站上任意点都会被误报为堆叠注入并强制 Critical 定级。
+   * [OPT-FIX 2026-09-08] 基线 3 次并发采样取中位数：单次基线对网络抖动/目标瞬时排队
+   * 敏感（一次偶然慢响应 → effectiveThreshold 虚高 → 漏报；一次偶然快响应 → 阈值偏低 →
+   * 并发采样排队被误判为延迟命中 → 误报）。中位数对瞬时毛刺稳健，且 sendConcurrent
+   * 3 样本并发只花 1 轮 RTT 墙钟。全部失败 → 退化仅用配置阈值（与旧行为一致）。
+   * [2026-10-05 修] 基线统计也必须滤掉截断响应。
+   * 截断的基线样本耗时往往偏长（传输了 maxBytes 才停），混进中位数会把
+   * baselineMs 抬高 → effectiveThreshold 跟着抬高 → 真实延迟样本够不到阈值
+   * ⇒ **漏报**。与样本筛选那道校验是同一个理由的两面：
+   * 截断响应对延迟判定既不能当证据，也不能当水位。
+   * @param {object} httpClient 客户端
+   * @param {object} ctx 检测上下文
+   * @param {{target:object, point:object, orig:string, baseTimeoutMs:number, sleep:number, thresholdMs:number}} p 参数包
+   * @returns {Promise<{baselineMs:number, effectiveThreshold:number, timeoutMs:number}>}
+   */
+  async _measureBaseline(httpClient, ctx, p) {
+    const { target, point, orig, baseTimeoutMs, sleep, thresholdMs } = p;
+    const baseSamples = 3;
+    const baseReqs = [];
+    for (let i = 0; i < baseSamples; i++) baseReqs.push(this.buildRequest(target, point, orig));
+    const baseResps = await this.sendConcurrent(httpClient, ctx, baseReqs, { timeoutMs: baseTimeoutMs }, baseSamples);
+    const baseElapsed = baseResps
+      .filter((r) => !r.__error && r.resp != null && !this.unusableOf(r.resp))
+      .map((r) => r.__elapsed)
+      .sort((a, b) => a - b);
+    const baselineMs = baseElapsed.length
+      ? baseElapsed[Math.floor(baseElapsed.length / 2)] // 中位数
+      : 0;
+    // 有效阈值：取「配置阈值」与「基线 + 半个预期延迟」的较大者，
+    // 保证命中样本的耗时必须显著高于该点自身正常水位，而非仅高于全局常数。
+    const effectiveThreshold = Math.max(thresholdMs, baselineMs + (sleep * 1000) / 2);
+    // ★FIX [P0]：注入超时 = 有效阈值 + 完整延迟 + 安全余量。
+    // 旧实现 timeoutMs 在基线前固定为 baseTimeout + sleep，未补偿 baselineMs →
+    // 慢站上注入后耗时（baseline + sleep）超过 timeout → catch → continue →
+    // 全部样本被跳过 → 堆叠注入漏报。
+    const timeoutMs = effectiveThreshold + sleep * 1000;
+    return { baselineMs, effectiveThreshold, timeoutMs };
+  }
+
+  /**
+   * 单族采样：全部样本用同一模板，返回 { stable, matchedPayloads }。
+   * [perf-FIX 2026-09-07] 串行→限并发：原 for 循环逐个 await，samples×(RTT+sleep) 全额累加
+   * （默认 5 样本 × 2s sleep ≈ 10s+ 墙钟，e2e stacked 场景实测 6s）。改走基类 sendConcurrent
+   * （与 TimeBlindDetector._robustDetect 同一通道）：并发度取 blindRobust.concurrency（默认 4），
+   * 墙钟 ≈ ceil(samples/并发)×sleep。语义不变：每样本独立生成 payload（保留 obfuscate/tamper
+   * 逐样本语义）、独立计时（__elapsed 优先纯网络耗时）、超时/失败仍计为未触发延迟。
+   * [OPT-FIX 2026-09-08] opts.serial=true + samplesOverride：串行复验模式（确认命中前消除
+   * 并发排队对计时的干扰），样本数可覆写（复验只发 1 次）。
+   * @param {object} httpClient 客户端
+   * @param {object} ctx 检测上下文
+   * @param {object} env 探测环境（target/point/orig/sleep/samples/effectiveThreshold/timeoutMs/stackedConcurrency）
+   * @param {string} tpl 贯穿本轮的模板
+   * @param {{serial?:boolean, samplesOverride?:number}} [opts] 复验选项
+   * @returns {Promise<{stable:number, matchedPayloads:string[]}>}
+   */
+  async _probeFamily(httpClient, ctx, env, tpl, opts = {}) {
+    const { target, point, orig, sleep, samples, effectiveThreshold, timeoutMs, stackedConcurrency } = env;
+    const serial = opts.serial === true;
+    const n = Math.min(Math.max(1, opts.samplesOverride ?? samples), serial ? 1 : samples);
+    const reqs = [];
+    const payloads = [];
+    for (let i = 0; i < n; i++) {
+      const payload = this.obfuscateValue(ctx, fillPayload(tpl, { orig, sleep }));
+      payloads.push(payload);
+      reqs.push(this.buildRequest(target, point, payload));
+    }
+    let resps;
+    if (serial) {
+      // 串行复验：逐个 await，无并发排队干扰，计时可信
+      resps = [];
+      for (const req of reqs) {
+        const t0 = Date.now();
+        try {
+          const resp = await this.send(httpClient, ctx, req, { timeoutMs });
+          resps.push({ resp, __elapsed: resp?.__networkMs ?? (Date.now() - t0) });
+        } catch (e) {
+          resps.push({ __error: e, __elapsed: Date.now() - t0 });
+        }
+      }
+    } else {
+      resps = await this.sendConcurrent(httpClient, ctx, reqs, { timeoutMs }, stackedConcurrency);
+    }
+    let stable = 0;
+    const matchedPayloads = [];
+    for (let i = 0; i < n; i++) {
+      const r = resps[i] || {};
+      if (r.__error || r.resp == null) continue; // 超时/网络错误：未触发延迟
+      // [2026-10-05 修] 截断响应不得计入延迟证据。
+      // 原先只有上面一道"网络失败 / 无响应"把关，`resp` 非空就照收。
+      // 但**响应体被截断**（__meta.truncated，判据见 egressOpts.isTruncatedResponse）
+      // 的样本同样"耗时够长 + resp 非空"—— 而这在堆叠注入上是高频现象，不是边角：
+      // 注入真生效后常返回超大结果集，被 maxBytes 砍断。
+      // 实测（tests/stackedTruncatedResponse.test.js，修前）：
+      //   基线 29ms、注入样本 2s 且全部截断
+      //     → vulnerable=true，证据「连续 5/5 次响应延迟 ≥ 1500ms」
+      // 一次不可信的慢响应被当成了注入证据 ⇒ 误报。
+      //
+      // ⚠️ 这里只挡截断、**不挡空响应体和 5xx**：实测 isUnusableResponse 对
+      // {data:''} 与 {status:500} 都判 false —— 注入生效但查询 0 行、
+      // 服务端处理完才回包都是**正常业务响应**，在延迟通道上完全可用。
+      // 一并毙掉会把真实的延迟注入判成未触发，反而漏报（契约-3 守住这条）。
+      if (this.unusableOf(r.resp)) continue;
+      if (r.__elapsed >= effectiveThreshold) {
+        stable++;
+        matchedPayloads.push(payloads[i]);
+      }
+    }
+    return { stable, matchedPayloads };
   }
 
   /**
@@ -60,37 +192,10 @@ export class StackedDetector extends Detector {
     const baseTimeoutMs = ctx.config?.timeoutMs ?? defaults.timeoutMs;
     const orig = point.originalValue || '1';
 
-    // ★FIX [误报防护] 基线补偿：测无注入基线耗时。
-    // 堆叠判定与注释声称的 TimeBlind「同构」但缺了基线对照——固定阈值下，
-    // 正常响应 ≥ 阈值的慢站上任意点都会被误报为堆叠注入并强制 Critical 定级。
-    // [OPT-FIX 2026-09-08] 基线 3 次并发采样取中位数：单次基线对网络抖动/目标瞬时排队
-    // 敏感（一次偶然慢响应 → effectiveThreshold 虚高 → 漏报；一次偶然快响应 → 阈值偏低 →
-    // 并发采样排队被误判为延迟命中 → 误报）。中位数对瞬时毛刺稳健，且 sendConcurrent
-    // 3 样本并发只花 1 轮 RTT 墙钟。全部失败 → 退化仅用配置阈值（与旧行为一致）。
-    const baseSamples = 3;
-    const baseReqs = [];
-    for (let i = 0; i < baseSamples; i++) baseReqs.push(this.buildRequest(target, point, orig));
-    const baseResps = await this.sendConcurrent(httpClient, ctx, baseReqs, { timeoutMs: baseTimeoutMs }, baseSamples);
-    // [2026-10-05 修] 基线统计也必须滤掉截断响应。
-    // 截断的基线样本耗时往往偏长（传输了 maxBytes 才停），混进中位数会把
-    // baselineMs 抬高 → effectiveThreshold 跟着抬高 → 真实延迟样本够不到阈值
-    // ⇒ **漏报**。与下面样本筛选那道校验是同一个理由的两面：
-    // 截断响应对延迟判定既不能当证据，也不能当水位。
-    const baseElapsed = baseResps
-      .filter((r) => !r.__error && r.resp != null && !this.unusableOf(r.resp))
-      .map((r) => r.__elapsed)
-      .sort((a, b) => a - b);
-    const baselineMs = baseElapsed.length
-      ? baseElapsed[Math.floor(baseElapsed.length / 2)] // 中位数
-      : 0;
-    // 有效阈值：取「配置阈值」与「基线 + 半个预期延迟」的较大者，
-    // 保证命中样本的耗时必须显著高于该点自身正常水位，而非仅高于全局常数。
-    const effectiveThreshold = Math.max(thresholdMs, baselineMs + (sleep * 1000) / 2);
-    // ★FIX [P0]：注入超时 = 有效阈值 + 完整延迟 + 安全余量。
-    // 旧实现 timeoutMs 在基线前固定为 baseTimeout + sleep，未补偿 baselineMs →
-    // 慢站上注入后耗时（baseline + sleep）超过 timeout → catch → continue →
-    // 全部样本被跳过 → 堆叠注入漏报。
-    const timeoutMs = effectiveThreshold + sleep * 1000;
+    // ★FIX [误报防护] 基线补偿（判定逻辑见 _measureBaseline）
+    const { baselineMs, effectiveThreshold, timeoutMs } = await this._measureBaseline(httpClient, ctx, {
+      target, point, orig, baseTimeoutMs, sleep, thresholdMs,
+    });
 
     // 逐个 DBMS 尝试；首个命中即确认（避免无谓请求）
     // [B2-FIX] 模板选族 + 单一模板贯穿（对标 TimeBlindDetector 的单模板策略）：
@@ -102,89 +207,23 @@ export class StackedDetector extends Detector {
     const origStr = String(orig);
     const quoteCtx =
       /['"]/.test(String(point.boundary || '')) || !/^[\d.]+$/.test(origStr);
-    const pickTemplate = (tpls, quoted) => {
-      const fam = quoted
-        ? tpls.filter((t) => /^\{ORIG\}'/.test(t))
-        : tpls.filter((t) => /^\{ORIG\};/.test(t));
-      return fam[0] || tpls[0];
-    };
-    // 单族采样：全部样本用同一模板，返回 { stable, matchedPayloads }
-    // [perf-FIX 2026-09-07] 串行→限并发：原 for 循环逐个 await，samples×(RTT+sleep) 全额累加
-    // （默认 5 样本 × 2s sleep ≈ 10s+ 墙钟，e2e stacked 场景实测 6s）。改走基类 sendConcurrent
-    // （与 TimeBlindDetector._robustDetect 同一通道）：并发度取 blindRobust.concurrency（默认 4），
-    // 墙钟 ≈ ceil(samples/并发)×sleep。语义不变：每样本独立生成 payload（保留 obfuscate/tamper
-    // 逐样本语义）、独立计时（__elapsed 优先纯网络耗时）、超时/失败仍计为未触发延迟。
-    // [OPT-FIX 2026-09-08] opts.serial=true + samplesOverride：串行复验模式（确认命中前消除
-    // 并发排队对计时的干扰），样本数可覆写（复验只发 1 次）。
     const stackedConcurrency = Math.max(
       1,
       Math.min(ctx.config?.blindRobust?.concurrency ?? 4, samples)
     );
-    const probeFamily = async (tpl, opts = {}) => {
-      const serial = opts.serial === true;
-      const n = Math.min(Math.max(1, opts.samplesOverride ?? samples), serial ? 1 : samples);
-      const reqs = [];
-      const payloads = [];
-      for (let i = 0; i < n; i++) {
-        const payload = this.obfuscateValue(ctx, fillPayload(tpl, { orig, sleep }));
-        payloads.push(payload);
-        reqs.push(this.buildRequest(target, point, payload));
-      }
-      let resps;
-      if (serial) {
-        // 串行复验：逐个 await，无并发排队干扰，计时可信
-        resps = [];
-        for (const req of reqs) {
-          const t0 = Date.now();
-          try {
-            const resp = await this.send(httpClient, ctx, req, { timeoutMs });
-            resps.push({ resp, __elapsed: resp?.__networkMs ?? (Date.now() - t0) });
-          } catch (e) {
-            resps.push({ __error: e, __elapsed: Date.now() - t0 });
-          }
-        }
-      } else {
-        resps = await this.sendConcurrent(httpClient, ctx, reqs, { timeoutMs }, stackedConcurrency);
-      }
-      let stable = 0;
-      const matchedPayloads = [];
-      for (let i = 0; i < n; i++) {
-        const r = resps[i] || {};
-        if (r.__error || r.resp == null) continue; // 超时/网络错误：未触发延迟
-        // [2026-10-05 修] 截断响应不得计入延迟证据。
-        // 原先只有上面一道"网络失败 / 无响应"把关，`resp` 非空就照收。
-        // 但**响应体被截断**（__meta.truncated，判据见 egressOpts.isTruncatedResponse）
-        // 的样本同样"耗时够长 + resp 非空"—— 而这在堆叠注入上是高频现象，不是边角：
-        // 注入真生效后常返回超大结果集，被 maxBytes 砍断。
-        // 实测（tests/stackedTruncatedResponse.test.js，修前）：
-        //   基线 29ms、注入样本 2s 且全部截断
-        //     → vulnerable=true，证据「连续 5/5 次响应延迟 ≥ 1500ms」
-        // 一次不可信的慢响应被当成了注入证据 ⇒ 误报。
-        //
-        // ⚠️ 这里只挡截断、**不挡空响应体和 5xx**：实测 isUnusableResponse 对
-        // {data:''} 与 {status:500} 都判 false —— 注入生效但查询 0 行、
-        // 服务端处理完才回包都是**正常业务响应**，在延迟通道上完全可用。
-        // 一并毙掉会把真实的延迟注入判成未触发，反而漏报（契约-3 守住这条）。
-        if (this.unusableOf(r.resp)) continue;
-        if (r.__elapsed >= effectiveThreshold) {
-          stable++;
-          matchedPayloads.push(payloads[i]);
-        }
-      }
-      return { stable, matchedPayloads };
-    };
+    const env = { target, point, orig, sleep, samples, effectiveThreshold, timeoutMs, stackedConcurrency };
 
     for (const dbmsKey of dbmsList) {
       const templates = (PAYLOADS[dbmsKey] && PAYLOADS[dbmsKey].stacked) || [];
       if (!templates.length) continue; // 该库无堆叠模板（如 Oracle）
 
       const tpl = pickTemplate(templates, quoteCtx);
-      let { stable, matchedPayloads } = await probeFamily(tpl);
+      let { stable, matchedPayloads } = await this._probeFamily(httpClient, ctx, env, tpl);
       // 主族零命中且存在异族模板 → 用异族模板补一轮（选族误判兜底）
       if (stable === 0) {
         const altTpl = pickTemplate(templates, !quoteCtx);
         if (altTpl !== tpl) {
-          const alt = await probeFamily(altTpl);
+          const alt = await this._probeFamily(httpClient, ctx, env, altTpl);
           stable = alt.stable;
           matchedPayloads = alt.matchedPayloads;
         }
@@ -195,7 +234,7 @@ export class StackedDetector extends Detector {
         // 连接池/应用排队同时拖慢，elapsed 达标但非真实延迟。复验用同模板串行发 1 次——
         // 无排队干扰下若仍延迟达标，确认注入；复验未达标（视为偶发排队）→ 降级不计命中，
         // 继续尝试其余库。复验失败不消耗该库的命中计数（stable 已达半数，仅此一轮作废）。
-        const reverify = await probeFamily(tpl, { serial: true, samplesOverride: 1 });
+        const reverify = await this._probeFamily(httpClient, ctx, env, tpl, { serial: true, samplesOverride: 1 });
         if (reverify.stable < 1) {
           continue; // 复验未通过：偶发排队，不确认，尝试下一个 DBMS
         }

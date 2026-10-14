@@ -4,6 +4,26 @@
 
 ## [Unreleased]
 
+### 2026-10-14 批次 D67 · 四个巨兽拆分（D66 重标定暴露：169→2 / 94→1 / 53→18 / 45→25 圈）
+
+**一句话**：D66 词法口径修正后暴露的四个存量巨兽按职责拆分（逐字搬移、零行为变化），
+各自有现成测试套件当安全网；拆完成后基线里的"虚高项"按门禁防虚高机制自动清理。
+
+| 巨兽 | 拆前 | 拆后 | 拆法 | 安全网 |
+|---|---|---|---|---|
+| `buildConfig`（cli/config.js） | 248 行 / 169 圈 | **26 行 / 2 圈** | 按语义拆 17 个 `apply*` helper（CLI 是显式键清单式透传；调用顺序=原语句顺序，跨段依赖写成注释约束：--tor 依赖 config.proxy） | cli.* 17 套件 178/178 |
+| `guardScalarsCore`（api/scanGuard） | 172 行 / 94 圈 | **14 行 / 1 圈** | 按主题拆 12 个 helper（ratePerSec/rateGroup 的静默失效防护各成段） | configWhitelist/d42/paramSelection/rateGroup 44/44 |
+| `getScanClient`（engine/scan） | 148 行 / 53 圈 | **36 行 / 18 圈** | 5 个包装层 helper（请求变换/响应解密/出口层/暂停闸/桶参数）+ 主链保留「顺序即契约」的装配可见性；wrapEgressLayer 再拆 buildEgressPatch/mergeEgressOpts（16→≤11） | branches+pause 13/13（含真机暂停闸） |
+| `StackedDetector.detect`（engine/detectors） | 110 行 / 45 圈 | **57 行 / 25 圈** | 嵌套箭头 probeFamily 提升为 `_probeFamily` 方法 + 基线采样段提为 `_measureBaseline` + pickTemplate 提为模块函数（嵌套函数的分支此前全部计入外层——这是四个巨兽圈数的共同膨胀机制） | f19+截断 10/10 |
+
+| 面 | 内容 |
+|---|---|
+| 基线维护 | 4 项下调（getScanClient 53→18 / detect 45→25；buildConfig 与 guardScalarsCore 已全低于软限**从基线移除**——门禁的防虚高 wiring 测试（形态-6/形态-8）自动抓出，不是手工判断） |
+| nesting | StackedDetector 7→6 层（方法提升减少嵌套）⇒ 出基线（低于软限） |
+| typecoverage | 拆分顺手补的 helper JSDoc 拉高覆盖率：api 21.9→**28.5%**、engine 29.5→**30.8%**，基线上调 |
+| dup / deadcode | 净变化 0（41353 持平）/ 通过 |
+| 门禁 | 四门禁 selftest + wiring 15/15；complexity/nesting/dup/typecov/deadcode 全 0；lint 0 |
+
 ### 2026-10-14 批次 D66 · jsLexer 正则字面量盲区修复 + 五门禁口径重标定
 
 **一句话**：D57-II 的 CI 红（typecoverage 48.5 < 48.7）根因是**词法内核的既有盲区**——

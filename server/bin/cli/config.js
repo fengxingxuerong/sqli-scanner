@@ -7,6 +7,11 @@
 //
 // cli.js 保留 import 与 export —— 6 个测试文件从 '../bin/cli.js' 导入 buildConfig 等，
 // 导入路径不变是硬约束。
+//
+// [D67 2026-10-14] buildConfig（169 圈/248 行）按语义拆为 16 个 apply* helper
+//（逐字搬移，零行为变化）：CLI 是**显式键清单**式透传，段与段之间共享 config 原地写；
+// 调用顺序 = 原语句顺序（守恒）——个别键有跨段顺序依赖（如 --tor 依赖 config.proxy
+// 已由段 3 落值），改序前先读对应 helper 的注释。
 // ============================================================================
 import { parseHeaders, parseAuth } from './args.js';
 import { readFileSync } from 'node:fs';
@@ -123,20 +128,22 @@ function patchTamper(config, patch) {
   return waf.tamper;
 }
 
-// 构建 config：透传 level/risk/technique/dump/tamper/proxy/rate/threads
-export function buildConfig(args) {
-  const enumActive = isEnumMode(args);
-  const config = {
-    concurrency: args.concurrencyDet,
-    ratePerSec: args.ratePerSec,
-    enableExtract: args.dump || enumActive,
-  };
-  // [2026-10-03 CI #131] rateGroup 必须显式透传 —— buildConfig 是显式键清单，不加这行
-  // CLI 批量生成的组 id 就到不了 target.config，getScanClient 拿到 undefined ⇒ 每个目标
-  // 退化成独立的 per-scan 桶（实测 CI Linux：3 目标 × 6 req/s ≈ 18 req/s，「总量 ≤ rate」
-  // 的保证静默失效；本机因引擎 CPU 处理慢、自然发包率到不了桶上限而被掩盖）。
-  // 形态收紧与 REST 侧 scalarsCore 同口径：值由 cli.js 内部生成（batch-<base36>-<rand>，
-  // 落在 [A-Za-z0-9_-] 内），这里不做二次校验；若未来开放成 CLI 旗标，必须先加同款字符集收紧。
+// ── buildConfig 的 apply* helper（D67 自 127-480 行的单函数逐段搬移）────────────
+
+/**
+ * 扫描级别/风险/授权位：rateGroup、level、risk、productionMode/confirmDestructive、
+ * xpAutoEnable、二阶写开关，以及 --risk=3 的高危池投放硬门。
+ * [2026-10-03 CI #131] rateGroup 必须显式透传 —— buildConfig 是显式键清单，不加这行
+ * CLI 批量生成的组 id 就到不了 target.config，getScanClient 拿到 undefined ⇒ 每个目标
+ * 退化成独立的 per-scan 桶（实测 CI Linux：3 目标 × 6 req/s ≈ 18 req/s，「总量 ≤ rate」
+ * 的保证静默失效；本机因引擎 CPU 处理慢、自然发包率到不了桶上限而被掩盖）。
+ * 形态收紧与 REST 侧 scalarsCore 同口径：值由 cli.js 内部生成（batch-<base36>-<rand>，
+ * 落在 [A-Za-z0-9_-] 内），这里不做二次校验；若未来开放成 CLI 旗标，必须先加同款字符集收紧。
+ * --risk=3 注释见下方块内（[P0-FIX 2026-09-09] 高危池投放硬门）。
+ * @param {object} config 目标 config（原地写）
+ * @param {object} args CLI 参数
+ */
+function applyScanLevelAndRisk(config, args) {
   if (args.rateGroup) config.rateGroup = args.rateGroup;
   if (args.level != null) config.level = Math.max(1, Math.min(5, args.level));
   else if (args.crawl || args.forms) config.level = 5; // [UX] --crawl/--forms 隐含 level 5（TargetParser 要求）
@@ -169,13 +176,22 @@ export function buildConfig(args) {
         enableDestructivePayloads(PAYLOADS, config.risk);
         logger.warn(
           '⚠️ --risk=3 + 已确认：高危 payload 池已投放（含文件读写 / 命令执行 / 外连探测 / 资源消耗型向量）。' +
-          '仅在已获书面授权的渗透测试中使用，且注意本进程内其他扫描会共享同一份 payload 池。'
+            '仅在已获书面授权的渗透测试中使用，且注意本进程内其他扫描会共享同一份 payload 池。'
         );
       } catch (e) {
         logger.error(`高危 payload 池启用失败：${e.message}`);
       }
     }
   }
+}
+
+/**
+ * 检测族开关：testFilter/testSkip/useRegistry + 注入点扩展开关（testHeaders/testPath）
+ * + 参数挖掘/浏览器爬取。
+ * @param {object} config 目标 config（原地写）
+ * @param {object} args CLI 参数
+ */
+function applyTestFilterSwitches(config, args) {
   // --test-filter / --test-skip / --use-registry（对标 sqlmap --test-filter / --test-skip）
   if (args.testFilter) config.testFilter = args.testFilter;
   if (args.testSkip) config.testSkip = args.testSkip;
@@ -187,9 +203,17 @@ export function buildConfig(args) {
   if (args.paramMine) config.paramMine = true;
   // [2026-10-02 实战 P1-4] --crawl-browser：headless 浏览器爬取（TargetParser 6.55 步，SPA 接口发现）
   if (args.crawlBrowser) config.crawlBrowser = true;
-  // [批次14 实战 P1-6] 登录编排最小版：--login-url 开启，凭据复用 --auth user:pass
-  //（basic/digest 形态解析出的 username/password 正是表单登录要的凭据）。
-  // 字段名默认由登录页 HTML 自动探测（loginFlow.detectLoginFields），显式 flag 可覆盖。
+}
+
+/**
+ * 登录编排 + 技术位限定（--technique 白名单过滤）。
+ * [批次14 实战 P1-6] 登录编排最小版：--login-url 开启，凭据复用 --auth user:pass
+ *（basic/digest 形态解析出的 username/password 正是表单登录要的凭据）。
+ * 字段名默认由登录页 HTML 自动探测（loginFlow.detectLoginFields），显式 flag 可覆盖。
+ * @param {object} config 目标 config（原地写）
+ * @param {object} args CLI 参数
+ */
+function applyLoginAndTechnique(config, args) {
   if (args.loginUrl) {
     const cred = parseAuth(args.auth || '', 'basic');
     if (!cred || !cred.basic || !cred.basic.username) {
@@ -208,16 +232,39 @@ export function buildConfig(args) {
     const list = String(args.technique).split(',').map(s => s.trim().toLowerCase()).filter(t => valid.includes(t));
     if (list.length) config.techniques = list;
   }
-  // [2026-10-12 优化空间勘查 §A2] NoSQL / OOB 两个默认关通道的 CLI 入口（旗标 + 档案整组透传）：
-  //   ① --no-sql / --oob：只开总开关（enabled=true），子键保持引擎默认；
-  //   ② args.noSql / args.oob 为对象（来自 --config 档案）：带底合并进 config ——
-  //      必须走 patchGroup 而不是整体赋值，否则该组其余子键在引擎侧变 undefined
-  //      （wafEvasion 曾因此静默丢掉整轮自适应重跑，见 patchGroup 头部取证）。
-  // REST/UI 早已可达（KNOWN_CFG_KEYS 有 oob/noSql）；本条补的是 CLI/脚本侧。
+}
+
+/**
+ * [2026-10-12 优化空间勘查 §A2] NoSQL / OOB 两个默认关通道的 CLI 入口（旗标 + 档案整组透传）：
+ *   ① --no-sql / --oob：只开总开关（enabled=true），子键保持引擎默认；
+ *   ② args.noSql / args.oob 为对象（来自 --config 档案）：带底合并进 config ——
+ *      必须走 patchGroup 而不是整体赋值，否则该组其余子键在引擎侧变 undefined
+ *      （wafEvasion 曾因此静默丢掉整轮自适应重跑，见 patchGroup 头部取证）。
+ * REST/UI 早已可达（KNOWN_CFG_KEYS 有 oob/noSql）；本条补的是 CLI/脚本侧。
+ * @param {object} config 目标 config（原地写）
+ * @param {object} args CLI 参数
+ */
+function applyChannelToggles(config, args) {
   if (args.noSql === true) patchGroup(config, 'noSql', { enabled: true });
   else if (args.noSql && typeof args.noSql === 'object') patchGroup(config, 'noSql', args.noSql);
   if (args.oob === true) patchGroup(config, 'oob', { enabled: true });
   else if (args.oob && typeof args.oob === 'object') patchGroup(config, 'oob', args.oob);
+}
+
+/**
+ * tamper + 出口/代理层：--tamper、--proxy、--scope、--insecure、--cert、
+ * --request-script、--postprocess。
+ * [P0-SEC] --scope：授权范围硬约束（CIDR/域名/URL 前缀，逗号分隔）；空=不启用（零行为变化）。
+ * 引擎侧 scopeGuard 在目标解析与每一跳重定向前校验，越界直接拒发。
+ * [D32 实战 P0-1] --request-script：自定义请求变换脚本（签名/加密参数接口）。
+ * 与 --cert 同层级（出口层），但加载失败是**硬失败**：ScanManager.start 里抛错、扫描不启动
+ *（静默忽略脚本 = 跑一整轮全被目标拒的请求，最后产出「未检出」）。
+ * [D52] --postprocess：自定义响应解密脚本。与 requestScript 同口径——入口只透传路径，
+ * 存在性/RESPONSE_SCRIPT_DIR 白名单/导出形态三道校验在 ScanManager.start 硬失败。
+ * @param {object} config 目标 config（原地写）
+ * @param {object} args CLI 参数
+ */
+function applyTamperAndEgress(config, args) {
   if (args.tamper) {
     // 自定义 tamper 文件已在 main() 经 resolveTamperPlugins 异步解析（args.tamperResolved）
     const plugins = Array.isArray(args.tamperResolved) && args.tamperResolved.length
@@ -228,8 +275,6 @@ export function buildConfig(args) {
     }
   }
   if (args.proxy) config.proxy = args.proxy;
-  // [P0-SEC] --scope：授权范围硬约束（CIDR/域名/URL 前缀，逗号分隔）；空=不启用（零行为变化）。
-  // 引擎侧 scopeGuard 在目标解析与每一跳重定向前校验，越界直接拒发。
   if (args.scope) {
     const rules = String(args.scope).split(',').map(s => s.trim()).filter(Boolean);
     if (rules.length) config.scope = rules;
@@ -238,17 +283,24 @@ export function buildConfig(args) {
   if (args.insecureTls) config.insecureTls = true;
   // --cert：mTLS 客户端证书 PEM 路径（证书+私钥同文件；引擎加载时校验形状，失败抛错）
   if (typeof args.clientCert === 'string' && args.clientCert) config.clientCert = args.clientCert;
-  // [D32 实战 P0-1] --request-script：自定义请求变换脚本（签名/加密参数接口）。
-  // 与 --cert 同层级（出口层），但加载失败是**硬失败**：ScanManager.start 里抛错、扫描不启动
-  //（静默忽略脚本 = 跑一整轮全被目标拒的请求，最后产出「未检出」）。
   if (typeof args.requestScript === 'string' && args.requestScript) config.requestScript = args.requestScript;
-  // [D52] --postprocess：自定义响应解密脚本。与 requestScript 同口径——入口只透传路径，
-  // 存在性/RESPONSE_SCRIPT_DIR 白名单/导出形态三道校验在 ScanManager.start 硬失败。
   if (typeof args.postprocess === 'string' && args.postprocess) config.postprocess = args.postprocess;
-  // [D53] --time-baseline-every：时间提取基线漂移重采样间隔（非负整数，0=关闭跟踪）。
-  // 非法值**拒启动**（与 --fetch-using 同口径）：静默回落等于用户以为关了实际没关（或反之）。
-  // ⚠ 判据用 `!= null` 而不是「非空串才校验」：给了开关却给空值属于**输入错误**，
-  // 静默当成没给 ⇒ 用户以为关了（或设了）实际相反，正是「传了没生效」红线。
+}
+
+/**
+ * 时间基线漂移重采样 + Bearer 续期 + 输入校验开关。
+ * [D53] --time-baseline-every：时间提取基线漂移重采样间隔（非负整数，0=关闭跟踪）。
+ * 非法值**拒启动**（与 --fetch-using 同口径）：静默回落等于用户以为关了实际没关（或反之）。
+ * ⚠ 判据用 `!= null` 而不是「非空串才校验」：给了开关却给空值属于**输入错误**，
+ * 静默当成没给 ⇒ 用户以为关了（或设了）实际相反，正是「传了没生效」红线。
+ * [D36 实战 P0-2] --refresh-url：Bearer 自动续期。只给 URL 也能用（刷新凭据走会话 Cookie）；
+ * --refresh-token / --refresh-field 是可选精调。非法 URL 由入口 guard 丢弃并 warn（不静默启用半套）。
+ * --no-validation-skip：显式关闭输入校验短路（引擎默认开）；不影响预筛 prefilter。
+ * [P0-FIX 2026-09-09] --no-proxy-bypass-local：显式恢复「本地也走环境变量代理」。
+ * @param {object} config 目标 config（原地写）
+ * @param {object} args CLI 参数
+ */
+function applyTimeAndRefresh(config, args) {
   if (args.timeBaselineEvery != null) {
     const raw = String(args.timeBaselineEvery).trim();
     const n = /^\d+$/.test(raw) ? Number(raw) : NaN;
@@ -257,30 +309,33 @@ export function buildConfig(args) {
     }
     config.timeBaselineEvery = n;
   }
-  // [D36 实战 P0-2] --refresh-url：Bearer 自动续期。只给 URL 也能用（刷新凭据走会话 Cookie）；
-  // --refresh-token / --refresh-field 是可选精调。非法 URL 由入口 guard 丢弃并 warn（不静默启用半套）。
   if (typeof args.refreshUrl === 'string' && args.refreshUrl.trim()) {
     const br = { url: args.refreshUrl.trim() };
     if (typeof args.refreshToken === 'string' && args.refreshToken.trim()) br.refreshToken = args.refreshToken.trim();
     if (typeof args.refreshField === 'string' && args.refreshField.trim()) br.tokenField = args.refreshField.trim();
     config.bearerRefresh = br;
   }
-  // --no-validation-skip：显式关闭输入校验短路（引擎默认开）；不影响预筛 prefilter
   if (args.noValidationSkip) config.validationSkip = false;
-  // [P0-FIX 2026-09-09] --no-proxy-bypass-local：显式恢复「本地也走环境变量代理」
   if (args.proxyBypassLocal === true) config.proxyBypassLocal = true;
   else if (args.proxyBypassLocal === false) config.proxyBypassLocal = false;
-  // [对标 sqlmap --dbms] 强制指定 DBMS（scanRunner 消费：跳过指纹直接按指定库检测）
+}
+
+/**
+ * DBMS 指定 + 二阶触发（URL 与整请求文件两条入口）。
+ * [对标 sqlmap --dbms] 强制指定 DBMS（scanRunner 消费：跳过指纹直接按指定库检测）。
+ * [D42 2026-10-11 对标 sqlmap --second-req] 二阶触发页整请求文件：
+ * 触发页常需 POST + 认证头 + CSRF —— --second-order <url> 只有 URL，表达不了这些。
+ * 与 -r 共用同一解析器（Burp/curl/HAR 集合格式都吃）；方法/头/体原样进
+ * secondOrder.triggerRequest，幂等门与 SSRF 校验仍由引擎/路由层执行（不在此放行）。
+ * @param {object} config 目标 config（原地写）
+ * @param {object} args CLI 参数
+ */
+function applyDbmsAndSecondOrder(config, args) {
   if (args.dbms) config.dbms = String(args.dbms).trim();
-  // [对标 sqlmap --second-order] 二阶触发页（写入后回访触发判定）
   if (args.secondOrderUrl && /^https?:\/\//i.test(args.secondOrderUrl)) {
     const so = patchGroup(config, 'secondOrder', { enabled: true });
     so.triggerUrls = [...(so.triggerUrls || []), args.secondOrderUrl];
   }
-  // [D42 2026-10-11 对标 sqlmap --second-req] 二阶触发页整请求文件：
-  // 触发页常需 POST + 认证头 + CSRF —— --second-order <url> 只有 URL，表达不了这些。
-  // 与 -r 共用同一解析器（Burp/curl/HAR 集合格式都吃）；方法/头/体原样进
-  // secondOrder.triggerRequest，幂等门与 SSRF 校验仍由引擎/路由层执行（不在此放行）。
   if (typeof args.secondReq === 'string' && args.secondReq) {
     let coll;
     try {
@@ -306,7 +361,15 @@ export function buildConfig(args) {
       body: typeof r0.body === 'string' ? r0.body : '',
     };
   }
-  // [D42 2026-10-11 对标 sqlmap --ignore-code] 忽略指定 HTTP 错误码（100-599，clamp 16 个）
+}
+
+/**
+ * [D42 2026-10-11] 对标 sqlmap 的码/格式族：--ignore-code / --randomize /
+ * --dump-format / --fetch-using（非法一律拒启动，不静默回落）。
+ * @param {object} config 目标 config（原地写）
+ * @param {object} args CLI 参数
+ */
+function applyD42CodesAndFormats(config, args) {
   if (args.ignoreCode != null && String(args.ignoreCode).trim()) {
     const codes = String(args.ignoreCode)
       .split(',')
@@ -316,12 +379,10 @@ export function buildConfig(args) {
     if (codes.length) config.ignoreCodes = [...new Set(codes)];
     else throw new Error(`--ignore-code 无法解析出合法状态码（100-599，逗号分隔）：${args.ignoreCode}`);
   }
-  // [D42 2026-10-11 对标 sqlmap --randomize] 注入请求随机化指定参数值（防锁定）
   if (args.randomize != null && String(args.randomize).trim()) {
     const list = String(args.randomize).split(',').map((s) => s.trim()).filter(Boolean).slice(0, 16);
     if (list.length) config.randomize = list;
   }
-  // [D42 2026-10-11 对标 sqlmap --dump-format] 拖库产物格式（产物层消费；非法直接拒启动）
   if (args.dumpFormat != null && String(args.dumpFormat).trim()) {
     const fmt = String(args.dumpFormat).trim().toLowerCase();
     if (!['csv', 'sql', 'html', 'json'].includes(fmt)) {
@@ -337,61 +398,87 @@ export function buildConfig(args) {
     }
     config.fetchUsing = op;
   }
-  // [D42 2026-10-11] --verify / --no-verify：盲注提取复核（引擎默认开，这里补显式开关）
+}
+
+/**
+ * 提取复核/预筛/WAF 探测 + [D41 2026-10-11 对标 sqlmap -p/--param-exclude/--param-filter]
+ * 注入点筛选三件套（CLI 侧只做形态透传，归一化在 engine/paramSelection.js）。
+ * @param {object} config 目标 config（原地写）
+ * @param {object} args CLI 参数
+ */
+function applyVerifyAndParamSelection(config, args) {
   if (args.extractVerify === true) patchGroup(config, 'blindRobust', { extractVerify: true });
   else if (args.extractVerify === false) patchGroup(config, 'blindRobust', { extractVerify: false });
   if (args.smart) config.prefilter = true;
   // [D44 2026-10-11] --active-waf-probe：扫描期主动 WAF 探测总开关（REST 同名键既有，
   // 白名单在 scanRoutes.js:104；探测请求预算 = 良性 1 + 向量 4（连接级失败向量重试 +1））
   if (args.activeWafProbe) config.activeWafProbe = true;
-  // [D41 2026-10-11 对标 sqlmap -p/--param-exclude/--param-filter] 注入点筛选三件套。
-  // 归一化/硬拒判据统一在 engine/paramSelection.js（TargetParser 收口）；CLI 只做形态透传。
   const _testParam = args.testParam != null ? String(args.testParam).split(',').map((s) => s.trim()).filter(Boolean).slice(0, 32) : null;
   if (_testParam && _testParam.length) config.testParameter = _testParam;
   if (args.paramExclude != null && String(args.paramExclude).trim()) config.paramExclude = String(args.paramExclude).slice(0, 200);
   if (args.paramFilter != null && String(args.paramFilter).trim()) config.paramFilter = String(args.paramFilter).slice(0, 200);
-  // [P0 2026-09-09 实战批次] 失效值替换（对标 sqlmap --invalid-bignum/--invalid-logical/--invalid-string）：
-  // 布尔盲注的有效值前缀替换为随机大数/恒真逻辑式/随机串，规避缓存页/静态页噪声
+}
+
+/**
+ * [P0 2026-09-09 实战批次] 失效值替换（对标 sqlmap --invalid-bignum/--invalid-logical/--invalid-string）：
+ * 布尔盲注的有效值前缀替换为随机大数/恒真逻辑式/随机串，规避缓存页/静态页噪声。
+ * @param {object} config 目标 config（原地写）
+ * @param {object} args CLI 参数
+ */
+function applyInvalidValue(config, args) {
   if (args.invalidBignum) config.invalidValue = 'bignum';
   else if (args.invalidLogical) config.invalidValue = 'logical';
   else if (args.invalidString) config.invalidValue = 'string';
-  // [P0 2026-09-09 实战批次] 已知注入点直通：--known-point "param=id;quote=';paren=);techniques=union,error"
-  // 键值对用 ; 分隔（techniques 值内含逗号，与 --technique 同名法）
-  // 手工确认的可注入参数跳过预筛选与闭合探测；techniques 限定技术位
-  if (args.knownPoint) {
-    try {
-      const kp = {};
-      for (const pair of String(args.knownPoint).split(';')) {
-        const i = pair.indexOf('=');
-        if (i <= 0) continue;
-        const k = pair.slice(0, i).trim();
-        const v = pair.slice(i + 1).trim();
-        if (k === 'param') kp.param = v;
-        else if (k === 'quote') kp.quote = v;
-        else if (k === 'paren') kp.paren = v;
-        else if (k === 'techniques') kp.techniques = v;
-      }
-      if (kp.param) {
-        config.knownPoint = { param: kp.param };
-        if (kp.quote != null) config.knownPoint.quote = kp.quote;
-        if (kp.paren != null) config.knownPoint.paren = kp.paren;
-        if (kp.techniques) {
-          const valid = ['union', 'error', 'boolean', 'time', 'stacked', 'oob', 'inline', 'second_order'];
-          const list = String(kp.techniques).split(',').map((s) => s.trim().toLowerCase()).filter((t) => valid.includes(t));
-          if (list.length) config.knownPoint.techniques = list;
-        }
-      } else {
-        logger.warn('--known-point 缺少 param= 键，已忽略（示例：--known-point "param=id,quote=\',techniques=union"）');
-      }
-    } catch (e) {
-      logger.warn(`--known-point 解析失败，已忽略：${e.message}`);
+}
+
+/**
+ * [P0 2026-09-09 实战批次] 已知注入点直通：--known-point "param=id;quote=';paren=);techniques=union,error"
+ * 键值对用 ; 分隔（techniques 值内含逗号，与 --technique 同名法）
+ * 手工确认的可注入参数跳过预筛选与闭合探测；techniques 限定技术位。
+ * @param {object} config 目标 config（原地写）
+ * @param {object} args CLI 参数
+ */
+function applyKnownPoint(config, args) {
+  if (!args.knownPoint) return;
+  try {
+    const kp = {};
+    for (const pair of String(args.knownPoint).split(';')) {
+      const i = pair.indexOf('=');
+      if (i <= 0) continue;
+      const k = pair.slice(0, i).trim();
+      const v = pair.slice(i + 1).trim();
+      if (k === 'param') kp.param = v;
+      else if (k === 'quote') kp.quote = v;
+      else if (k === 'paren') kp.paren = v;
+      else if (k === 'techniques') kp.techniques = v;
     }
+    if (kp.param) {
+      config.knownPoint = { param: kp.param };
+      if (kp.quote != null) config.knownPoint.quote = kp.quote;
+      if (kp.paren != null) config.knownPoint.paren = kp.paren;
+      if (kp.techniques) {
+        const valid = ['union', 'error', 'boolean', 'time', 'stacked', 'oob', 'inline', 'second_order'];
+        const list = String(kp.techniques).split(',').map((s) => s.trim().toLowerCase()).filter((t) => valid.includes(t));
+        if (list.length) config.knownPoint.techniques = list;
+      }
+    } else {
+      logger.warn('--known-point 缺少 param= 键，已忽略（示例：--known-point "param=id,quote=\',techniques=union"）');
+    }
+  } catch (e) {
+    logger.warn(`--known-point 解析失败，已忽略：${e.message}`);
   }
-  // 限速三件套（对标 sqlmap --delay / --reqrate / --max-requests）
+}
+
+/**
+ * 限速三件套（对标 sqlmap --delay / --reqrate / --max-requests）+ 高级检测参数
+ *（对标 sqlmap --prefix/--suffix/--string/--not-string/--code/--text-only/--titles/--regexp）。
+ * @param {object} config 目标 config（原地写）
+ * @param {object} args CLI 参数
+ */
+function applyThrottleAndAdvanced(config, args) {
   if (args.delaySec > 0) config.delay = Math.min(Number(args.delaySec) || 0, 60);
   if (args.reqRate > 0) config.reqRate = Number(args.reqRate) || 0;
   if (args.maxRequests > 0) config.maxReq = Number(args.maxRequests) || 0;
-  // 高级检测参数（对标 sqlmap --prefix/--suffix/--string/--not-string/--code/--text-only/--titles/--regexp）
   if (args.prefix) config.prefix = args.prefix;
   if (args.suffix) config.suffix = args.suffix;
   if (args.string) config.matchString = args.string;
@@ -400,7 +487,14 @@ export function buildConfig(args) {
   if (args.textOnly) config.matchText = true; // [P1-3] 引擎消费 matchText（非 textOnly）
   if (args.titles) config.matchTitle = true;
   if (args.regexp) config.matchRegexp = args.regexp;
-  // 爬虫/表单/会话/延迟参数（对标 sqlmap --forms/--crawl/--session-file/--time-sec/--delay/--predict-output/--skip-static）
+}
+
+/**
+ * 爬虫/表单/会话/延迟参数（对标 sqlmap --forms/--crawl/--session-file/--time-sec/--delay/--predict-output/--skip-static）。
+ * @param {object} config 目标 config（原地写）
+ * @param {object} args CLI 参数
+ */
+function applyCrawlAndAnchorSwitches(config, args) {
   if (args.forms) config.crawlForms = true; // [验证] 引擎消费 crawlForms（TargetParser.js:94）
   if (args.crawl) config.crawlDepth = args.crawl;
   if (args.sessionFile) config.sessionFile = args.sessionFile;
@@ -409,44 +503,84 @@ export function buildConfig(args) {
   if (args.delay) patchGroup(config, 'wafEvasion', { jitterMs: args.delay });
   if (args.predictOutput) config.predictOutput = true;
   if (args.skipStatic) config.skipStatic = true;
-  // —— 行范围导出 + 保活探测（对标 sqlmap --start/--stop/--safe-url/--safe-freq）——
+}
+
+/**
+ * —— 行范围导出 + 保活探测（对标 sqlmap --start/--stop/--safe-url/--safe-freq）——
+ * [sqlmap 对标 2026-09-14] CSRF 会话层。
+ * ⚠ 依赖 config.proxy：本段须在 applyTamperAndEgress 之后（无直接依赖，顺序守恒）。
+ * @param {object} config 目标 config（原地写）
+ * @param {object} args CLI 参数
+ */
+function applyDumpRangeAndSessionUrls(config, args) {
   if (args.startRow > 0) config.dumpStart = Math.min(args.startRow, 1000000);
   if (args.stopRow > 0) config.dumpStop = Math.min(args.stopRow, 1000000);
   if (args.safeUrl && /^https?:\/\//i.test(args.safeUrl)) {
     config.safeUrl = args.safeUrl;
     config.safeFreq = args.safeFreq > 0 ? args.safeFreq : 1;
   }
-  // [sqlmap 对标 2026-09-14] CSRF 会话层
   if (args.csrfUrl && /^https?:\/\//i.test(args.csrfUrl)) {
     config.csrfUrl = args.csrfUrl;
     if (args.csrfTokenName) config.csrfTokenName = args.csrfTokenName;
     if (args.csrfMethod) config.csrfMethod = args.csrfMethod;
     if (args.csrfRefreshFreq > 0) config.csrfRefreshFreq = Math.min(args.csrfRefreshFreq, 10000);
   }
-  // [D41 修复] --skip 原本嵌在 csrfUrl 块内 —— 不配 --csrf-url 时 --skip 静默失效
-  //（「传了没生效」红线：用户以为排除了会话参数，实际照扫）。移出块外，无条件生效。
+}
+
+/**
+ * --skip + [D41 2026-10-11] --retries / --http-timeout：单请求层重试与超时
+ *（引擎 config.retry/timeoutMs 既有键；REST 侧 scalarsCore clamp 0-5 / 1000-60000，这里同口径）。
+ * [D41 修复] --skip 原本嵌在 csrfUrl 块内 —— 不配 --csrf-url 时 --skip 静默失效
+ *（「传了没生效」红线：用户以为排除了会话参数，实际照扫）。移出块外，无条件生效。
+ * @param {object} config 目标 config（原地写）
+ * @param {object} args CLI 参数
+ */
+function applySkipAndRequestLayer(config, args) {
   if (Array.isArray(args.skipParams) && args.skipParams.length) config.skipParams = args.skipParams.slice(0, 64);
-  // [D41 2026-10-11] --retries / --http-timeout：单请求层重试与超时（引擎 config.retry/timeoutMs
-  //   既有键；REST 侧 scalarsCore clamp 0-5 / 1000-60000，这里同口径）。
   if (Number.isFinite(args.retries)) config.retry = Math.max(0, Math.min(5, Math.floor(args.retries)));
   if (Number.isFinite(args.httpTimeoutMs) && args.httpTimeoutMs > 0) {
     config.timeoutMs = Math.max(1000, Math.min(60000, Math.floor(args.httpTimeoutMs)));
   }
-  // --tor：Tor 本地代理（默认 socks5://127.0.0.1:9050）；已设 --proxy 时不覆盖
+}
+
+/**
+ * --tor / --mobile / --random-agent + [对标 sqlmap --where/--param-del]。
+ * --tor：Tor 本地代理（默认 socks5://127.0.0.1:9050）；已设 --proxy 时不覆盖
+ * ⚠ 依赖 config.proxy（由 applyTamperAndEgress 落值）——顺序不得前移。
+ * --mobile：随机移动端 UA 池
+ * randomUA 在这里是**字符串**（'mobile' / 'desktop'）：httpClient.js:836 按
+ * 「==='mobile' 只取移动池，其余真值取全池」消费，所以窄语义在 CLI 路径上是有效的。
+ * 注意 REST 侧（scanRoutes 的 pickBool）会把它压成 true —— 想在 Web/桌面端表达
+ * 「只要移动池」需要另设显式键，不能照抄这个字符串形态。
+ * [对标 sqlmap --random-agent] 随机桌面/移动 UA（--mobile 更窄，两者都给时 --mobile 优先）。
+ * @param {object} config 目标 config（原地写）
+ * @param {object} args CLI 参数
+ */
+function applyTorUaAndDumpOpts(config, args) {
   if (args.tor && !config.proxy) config.proxy = 'socks5://127.0.0.1:9050';
-  // --mobile：随机移动端 UA 池
-  // randomUA 在这里是**字符串**（'mobile' / 'desktop'）：httpClient.js:836 按
-  // 「==='mobile' 只取移动池，其余真值取全池」消费，所以窄语义在 CLI 路径上是有效的。
-  // 注意 REST 侧（scanRoutes 的 pickBool）会把它压成 true —— 想在 Web/桌面端表达
-  // 「只要移动池」需要另设显式键，不能照抄这个字符串形态。
   if (args.mobile) patchGroup(config, 'wafEvasion', { randomUA: 'mobile' });
-  // [对标 sqlmap --random-agent] 随机桌面/移动 UA（--mobile 更窄，两者都给时 --mobile 优先）
   if (args.randomAgent && !args.mobile) patchGroup(config, 'wafEvasion', { randomUA: 'desktop' });
-  // [对标 sqlmap --where] 拖库条件过滤（透传 extractScope → dumpData opts.where）
   if (args.where) config.dumpWhere = String(args.where);
-  // [对标 sqlmap --param-del] 自定义参数分隔符（TargetParser 按该分隔符切 query）
   if (args.paramDel) config.paramDel = String(args.paramDel).slice(0, 1);
-  // —— HTTP 协议层（对标 sqlmap --force-ssl / --ignore-redirects / --hpp）——
+}
+
+/**
+ * —— HTTP 协议层（对标 sqlmap --force-ssl / --ignore-redirects / --hpp）——
+ * + 对标 sqlmap 增强参数透传（引擎消费同名字段）。
+ * [D21 2026-10-09] 此处原有 `if (args.randomUA) config.randomUA = true;` —— **死代码**：
+ *   args.js 里 `--random-agent` 被两条 else-if 重复解析，后者永不执行 ⇒ `args.randomUA`
+ *   恒 undefined；且顶层 `config.randomUA` 在 server/src 内 0 个读取点。
+ *   真正的 UA 随机化走 `wafEvasion.randomUA`（见 applyTorUaAndDumpOpts）。
+ * [对标 sqlmap --hex] 字符常量十六进制化：作用于 --search 的 LIKE 模式
+ *   （Extractor.searchColumnData → hexLiteral.buildLikePattern）。
+ *   仅 MySQL/MariaDB/TiDB/SQLServer/PostgreSQL/SQLite 有明确写法，其余方言提取时告警并回退。
+ * 注：--no-escape / --union-char 已移除（原为"保留接口"= 收参数不生效）。
+ *   --union-char 若要实现，需改 marker.js 的 MARKER_RE 与 tamper 保护链（P0-D3 高危区），
+ *   评估后判定风险 > 收益；--no-escape 与本项目的转义实现不同源，语义无法对齐。
+ * @param {object} config 目标 config（原地写）
+ * @param {object} args CLI 参数
+ */
+function applyProtocolAndMisc(config, args) {
   // forceSsl：目标 http:// 强制升级 https（对标 sqlmap --force-ssl，httpClient.request 消费）
   if (args.forceSsl) config.forceSsl = true;
   // ignoreRedirects：不跟随 3xx 跳转，直接返回跳转响应（对标 sqlmap --ignore-redirects；
@@ -459,23 +593,40 @@ export function buildConfig(args) {
   // parseErrors：解析错误响应原文 + SQL 上下文进证据链（对标 sqlmap --parse-errors，
   // ErrorDetector 消费，opt-in 默认关闭）
   if (args.parseErrors) config.parseErrors = true;
-  // —— 对标 sqlmap 增强参数透传（引擎消费同名字段）——
-  // [D21 2026-10-09] 此处原有 `if (args.randomUA) config.randomUA = true;` —— **死代码**：
-  //   args.js 里 `--random-agent` 被两条 else-if 重复解析，后者永不执行 ⇒ `args.randomUA`
-  //   恒 undefined；且顶层 `config.randomUA` 在 server/src 内 0 个读取点。
-  //   真正的 UA 随机化走 `wafEvasion.randomUA`（见上面 `if (args.randomAgent && !args.mobile)`）。
   if (args.flushSession) config.flushSession = true;
   if (args.freshQueries) config.freshQueries = true;
   if (args.noCast) config.noCast = true;
-  // [对标 sqlmap --hex] 字符常量十六进制化：作用于 --search 的 LIKE 模式
-  //   （Extractor.searchColumnData → hexLiteral.buildLikePattern）。
-  //   仅 MySQL/MariaDB/TiDB/SQLServer/PostgreSQL/SQLite 有明确写法，其余方言提取时告警并回退。
   if (args.hex) config.hex = true;
   if (args.unionCols) config.unionCols = String(args.unionCols).slice(0, 16);
   if (args.unionFrom) config.unionFrom = String(args.unionFrom).slice(0, 100);
-  // 注：--no-escape / --union-char 已移除（原为"保留接口"= 收参数不生效）。
-  //   --union-char 若要实现，需改 marker.js 的 MARKER_RE 与 tamper 保护链（P0-D3 高危区），
-  //   评估后判定风险 > 收益；--no-escape 与本项目的转义实现不同源，语义无法对齐。
+}
+
+// 构建 config：透传 level/risk/technique/dump/tamper/proxy/rate/threads
+export function buildConfig(args) {
+  const enumActive = isEnumMode(args);
+  const config = {
+    concurrency: args.concurrencyDet,
+    ratePerSec: args.ratePerSec,
+    enableExtract: args.dump || enumActive,
+  };
+  // [D67] 调用顺序 = 原语句顺序（逐段搬移的守恒约束；跨段依赖见各 helper 注释）
+  applyScanLevelAndRisk(config, args);
+  applyTestFilterSwitches(config, args);
+  applyLoginAndTechnique(config, args);
+  applyChannelToggles(config, args);
+  applyTamperAndEgress(config, args);
+  applyTimeAndRefresh(config, args);
+  applyDbmsAndSecondOrder(config, args);
+  applyD42CodesAndFormats(config, args);
+  applyVerifyAndParamSelection(config, args);
+  applyInvalidValue(config, args);
+  applyKnownPoint(config, args);
+  applyThrottleAndAdvanced(config, args);
+  applyCrawlAndAnchorSwitches(config, args);
+  applyDumpRangeAndSessionUrls(config, args);
+  applySkipAndRequestLayer(config, args);
+  applyTorUaAndDumpOpts(config, args);
+  applyProtocolAndMisc(config, args);
   return config;
 }
 

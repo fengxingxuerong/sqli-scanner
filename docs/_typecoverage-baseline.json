@@ -3,10 +3,10 @@
   "_generatedBy": "node scripts/typecoverage-guard.mjs --fix-baseline",
   "batches": {
     "server/src/api": {
-      "coverage": 21.9,
-      "paramsTotal": 174,
-      "paramsTyped": 43,
-      "returnsTotal": 100,
+      "coverage": 28.5,
+      "paramsTotal": 200,
+      "paramsTyped": 72,
+      "returnsTotal": 112,
       "returnsTyped": 17,
       "untypedHotspots": [
         "server/src/api/exploitRoutes.js:35 numOpt(@value)",
@@ -121,11 +121,11 @@
       ]
     },
     "server/src/engine": {
-      "coverage": 29.5,
-      "paramsTotal": 1163,
-      "paramsTyped": 358,
-      "returnsTotal": 592,
-      "returnsTyped": 160,
+      "coverage": 30.8,
+      "paramsTotal": 1183,
+      "paramsTyped": 380,
+      "returnsTotal": 600,
+      "returnsTyped": 170,
       "untypedHotspots": [
         "server/src/engine/binaryProbe.js:49 binaryProbe(@probe)",
         "server/src/engine/binaryProbe.js:49 binaryProbe()→?",

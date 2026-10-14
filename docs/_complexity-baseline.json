@@ -206,12 +206,6 @@
       "limitLines": 100,
       "limitComplexity": 15
     },
-    "server/bin/cli/config.js::buildConfig": {
-      "lines": 248,
-      "complexity": 169,
-      "limitLines": 100,
-      "limitComplexity": 15
-    },
     "server/bin/cli/config.js::buildExtractScope": {
       "lines": 40,
       "complexity": 45,
@@ -281,12 +275,6 @@
     "server/src/api/scanGuard/objectGroups.js::guardSecondOrder": {
       "lines": 41,
       "complexity": 19,
-      "limitLines": 100,
-      "limitComplexity": 15
-    },
-    "server/src/api/scanGuard/scalarsCore.js::guardScalarsCore": {
-      "lines": 172,
-      "complexity": 94,
       "limitLines": 100,
       "limitComplexity": 15
     },
@@ -873,8 +861,8 @@
       "limitComplexity": 15
     },
     "server/src/engine/detectors/StackedDetector.js::StackedDetector.detect": {
-      "lines": 110,
-      "complexity": 45,
+      "lines": 57,
+      "complexity": 25,
       "limitLines": 100,
       "limitComplexity": 15
     },
@@ -1113,8 +1101,8 @@
       "limitComplexity": 15
     },
     "server/src/engine/scan/scanClient.js::getScanClient": {
-      "lines": 148,
-      "complexity": 53,
+      "lines": 36,
+      "complexity": 18,
       "limitLines": 100,
       "limitComplexity": 15
     },
