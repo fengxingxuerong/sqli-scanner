@@ -4,12 +4,14 @@ import { useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import {
-  Container, Paper, LinearProgress, Divider, Chip, Stack, Typography,
-  Dialog, DialogTitle, DialogContent, DialogContentText, DialogActions, Button,
+  Container, Stack, Box,
 } from '@mui/material';
 import ScanWizard from '../components/ScanWizard';
+import ScanSidebar from '../components/ScanSidebar';
+import ScanConfirmDialogs from '../components/ScanConfirmDialogs';
+import ScanProgress from '../components/ScanProgress';
+import { useScanActivity } from '../hooks/useScanActivity';
 import ScanResult from '../components/ScanResult';
-import ProgressView from '../components/ProgressView';
 import { useScan } from '../hooks/useScan';
 import { useEvents } from '../hooks/useEvents';
 import { useScanStore } from '../store/scanStore';
@@ -25,10 +27,6 @@ function parseJson(text: string): Record<string, string> {
   return JSON.parse(text);
 }
 
-const STATUS_COLOR: Record<string, 'default' | 'info' | 'success' | 'warning' | 'error'> = {
-  pending: 'default', running: 'info', paused: 'warning', completed: 'success', stopped: 'warning', error: 'error',
-};
-
 export default function ScanPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -43,10 +41,8 @@ export default function ScanPage() {
   const wafSuggestion = useScanStore((s) => s.wafSuggestion);
   // H3：不再订阅 events 数组 —— SSE 高峰期整页（含向导表单树）随每个事件重渲染的
   // 问题就此消除。进度展示只消费 store 增量维护的聚合值（H2），仅在点级事件时更新。
-  const progressTotal = useScanStore((s) => s.progressTotal);
-  // [P1-FIX] 订阅增量数字而非 processedPointIds 对象：对象每事件新引用 → 整页重渲染，
-  // 且 Object.keys().length 为 O(n) 扫描；数字订阅只在计数变化时触发一次重渲染。
-  const processedCount = useScanStore((s) => s.processedCount);
+  // [D80] progressTotal/processedCount 不再于页面级订阅：进度展示（含 H2 聚合值消费）
+  // 已随 ProgressView 整体在 ScanProgress 内，子组件自订阅比重排整页更贴 H3 初衷。
   useEvents(scanId);
 
   const [url, setUrl] = useState('');
@@ -62,9 +58,8 @@ export default function ScanPage() {
   const [starting, setStarting] = useState(false);
 
   const running = status === 'running';
-  const total = progressTotal;
-  const processed = processedCount;
-  const pct = total > 0 ? Math.round((processed / total) * 100) : null;
+  // progressTotal/processedCount 由 ProgressView 自行订阅（H2 聚合值），此处不再中转
+  // [D80] pct/progressValue 已随进度条留在 ProgressView（单一真源），此处不再重复计算
   const sqlDestructive = engine === 'sqlmap' && (sqlmapConfig.dump || sqlmapConfig.osShell || !!sqlmapConfig.fileRead);
 
   const doStart = async (
@@ -72,7 +67,9 @@ export default function ScanPage() {
   ) => {
     setStarting(true);
     try {
-      await tauriBridge.startEngine();
+      // [D81] 不能只 invoke start_engine：它会 kill 旧引擎再拉新的（端口/token 都变），
+      // 必须用重启后重取的实连信息，否则后续请求全带旧 token（401 → Network Error）。
+      await tauriBridge.restartEngineAndApply();
       await startScan({
         engine, url: url.trim(), method,
         bodyParams: bp, cookieParams: cp, headerParams: hp,
@@ -130,61 +127,63 @@ export default function ScanPage() {
   const handleResume = useCallback(() => { if (scanId) void resumeScan(scanId); }, [scanId, resumeScan]);
   const handleErrorClear = useCallback(() => setError(''), []);
 
+  // [D80] 扫描过程全可见：进度区滚入视口 + 全局扫描线（hook 见 useScanActivity）
+  const progressRef = useScanActivity(scanId, running);
+
   const handleConfigChange = useCallback((patch: Partial<ScanConfig>) =>
     setConfig((c) => ({ ...c, ...patch })), []);
   const handleSqlmapConfigChange = useCallback((patch: Partial<SqlmapConfig>) =>
     setSqlmapConfig((c) => ({ ...c, ...patch })), []);
 
   return (
-    <Container maxWidth="md" className="py-6">
-      <ScanWizard
-        url={url}
-        method={method}
-        bodyText={bodyText}
-        cookieText={cookieText}
-        headerText={headerText}
-        config={config}
-        sqlmapConfig={sqlmapConfig}
-        engine={engine}
-        running={running}
-        starting={starting}
-        error={error}
-        wafSuggestion={wafSuggestion}
-        status={status}
-        onUrlChange={setUrl}
-        onMethodChange={setMethod}
-        onBodyTextChange={setBodyText}
-        onCookieTextChange={setCookieText}
-        onHeaderTextChange={setHeaderText}
-        onConfigChange={handleConfigChange}
-        onSqlmapConfigChange={handleSqlmapConfigChange}
-        onEngineChange={setEngine}
-        onErrorClear={handleErrorClear}
-        onStart={handleStartStable}
-        onStop={handleStop}
-        onPause={handlePause}
-        onResume={handleResume}
-      />
+    <Container maxWidth="lg" className="py-6">
+      {/* 双栏：左扫描向导，右授权边界 / CI 退出码信息栏（sticky，宽屏下消除右侧死白） */}
+      <Box
+        sx={{
+          display: 'grid',
+          gridTemplateColumns: { xs: '1fr', md: '1.9fr 1fr' },
+          gap: 3,
+          alignItems: 'start',
+        }}
+      >
+        <Box sx={{ minWidth: 0 }}>
+          <ScanWizard
+            url={url}
+            method={method}
+            bodyText={bodyText}
+            cookieText={cookieText}
+            headerText={headerText}
+            config={config}
+            sqlmapConfig={sqlmapConfig}
+            engine={engine}
+            running={running}
+            starting={starting}
+            error={error}
+            wafSuggestion={wafSuggestion}
+            status={status}
+            onUrlChange={setUrl}
+            onMethodChange={setMethod}
+            onBodyTextChange={setBodyText}
+            onCookieTextChange={setCookieText}
+            onHeaderTextChange={setHeaderText}
+            onConfigChange={handleConfigChange}
+            onSqlmapConfigChange={handleSqlmapConfigChange}
+            onEngineChange={setEngine}
+            onErrorClear={handleErrorClear}
+            onStart={handleStartStable}
+            onStop={handleStop}
+            onPause={handlePause}
+            onResume={handleResume}
+          />
+        </Box>
+
+        <Stack spacing={2} sx={{ position: { md: 'sticky' }, top: { md: 88 } }}>
+          <ScanSidebar />
+        </Stack>
+      </Box>
 
       {scanId && (
-        <Paper variant="outlined" className="mt-4 p-4" sx={{ borderRadius: 3 }}>
-          <Stack direction="row" justifyContent="space-between" alignItems="center" className="mb-2">
-            <Typography variant="h6" fontWeight={700}>{t('scan.progress')}</Typography>
-            <Chip label={t(`status.${status}`)} color={STATUS_COLOR[status]} size="small" />
-          </Stack>
-          <LinearProgress
-            variant={running ? (pct == null ? 'indeterminate' : 'determinate') : 'determinate'}
-            value={running ? (pct == null ? undefined : pct) : 100}
-            sx={{ height: 8, borderRadius: 4 }}
-          />
-          {running && pct != null && (
-            <Typography variant="caption" color="text.secondary" className="mt-1">
-              {t('scan.pointsProcessed', { processed, total, pct })}
-            </Typography>
-          )}
-          <Divider className="my-3" />
-          <ProgressView />
-        </Paper>
+        <ScanProgress ref={progressRef} running={running} />
       )}
 
       <ScanResult
@@ -193,47 +192,23 @@ export default function ScanPage() {
         navigate={navigate}
       />
 
-      {/* 自带引擎拖库二次确认 */}
-      <Dialog open={confirmOpen} onClose={() => setConfirmOpen(false)}>
-        <DialogTitle>{t('scan.confirmExtract.title')}</DialogTitle>
-        <DialogContent>
-          <DialogContentText>
-            {t('scan.confirmExtract.body')}
-          </DialogContentText>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setConfirmOpen(false)}>{t('scan.confirmExtract.cancel')}</Button>
-          <Button variant="contained" color="warning"
-            onClick={() => {
-              setConfirmOpen(false);
-              const parsed = parseForm();
-              if (parsed) void handleDoStart(parsed.bodyParams, parsed.cookieParams, parsed.headerParams);
-            }}>
-            {t('scan.confirmExtract.confirm')}
-          </Button>
-        </DialogActions>
-      </Dialog>
-
-      {/* sqlmap 破坏性操作二次确认 */}
-      <Dialog open={sqlConfirmOpen} onClose={() => setSqlConfirmOpen(false)}>
-        <DialogTitle>{t('scan.confirmSqlmap.title')}</DialogTitle>
-        <DialogContent>
-          <DialogContentText>
-            {t('scan.confirmSqlmap.body')}
-          </DialogContentText>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setSqlConfirmOpen(false)}>{t('scan.confirmSqlmap.cancel')}</Button>
-          <Button variant="contained" color="error"
-            onClick={() => {
-              setSqlConfirmOpen(false);
-              const parsed = parseForm();
-              if (parsed) void handleDoStart(parsed.bodyParams, parsed.cookieParams, parsed.headerParams);
-            }}>
-            {t('scan.confirmSqlmap.confirm')}
-          </Button>
-        </DialogActions>
-      </Dialog>
+      {/* 两类破坏性操作二次确认（D79 拆至 ../components/ScanConfirmDialogs） */}
+      <ScanConfirmDialogs
+        extractOpen={confirmOpen}
+        sqlmapOpen={sqlConfirmOpen}
+        onCloseExtract={() => setConfirmOpen(false)}
+        onConfirmExtract={() => {
+          setConfirmOpen(false);
+          const parsed = parseForm();
+          if (parsed) void handleDoStart(parsed.bodyParams, parsed.cookieParams, parsed.headerParams);
+        }}
+        onCloseSqlmap={() => setSqlConfirmOpen(false)}
+        onConfirmSqlmap={() => {
+          setSqlConfirmOpen(false);
+          const parsed = parseForm();
+          if (parsed) void handleDoStart(parsed.bodyParams, parsed.cookieParams, parsed.headerParams);
+        }}
+      />
     </Container>
   );
 }

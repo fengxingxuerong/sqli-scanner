@@ -4,6 +4,311 @@
 
 ## [Unreleased]
 
+### 2026-10-16 批次 D84 · 桌面版渲染门禁：引擎就绪前不渲染路由（修冷启动深链「未找到报告」）
+
+**动机**：报告页视觉核查时撞到——**冷启动直达深链** `/report/:id`（历史列表点开一条旧报告、
+或用上次会话的链接重进）时报「未找到报告」，而同 scanId 的 `/api/scan/:id/report` 直连返回
+200、`/api/scans` 也列得出来。不是后端丢了报告，是**前端抢跑**：引擎实连信息（随机端口 +
+一次性 token）是 App 挂载时异步向 Rust 问来的，旧实现里 `RouterProvider` 先渲染、
+ReportPage 的 fetch 比实连信息先发出 ⇒ 拿默认 base 打过去 ⇒ 404 ⇒ UI 报「未找到报告」。
+（D81 修的是 token 换掉之后还用旧 token 发请求，这批修的是**新信息还没到就先发请求**——同一接缝的另一半。）
+
+| 面 | 改动 |
+|---|---|
+| 渲染门禁 | `App.tsx`：`engineReady` state（初值 `!tauriBridge.isTauri`，web/测试环境天然放行），挂载后 `restartEngineAndApply()`（D83 的两段式，有界等待）落定实连信息才 `setEngineReady(true)` ⇒ 路由推迟到有正确 base 之后渲染，**覆盖所有深链页**而不是给每个页面各打一个补丁 |
+| 失败兜底 | 引擎最终没起来**也渲染**（`.finally` 无条件放行）——默认 base 兜底至少给出可见反馈，好过停在白屏 |
+| 结构 | 载入态 JSX 抽为 `EngineGate` 组件：`AppThemeProvider` 本就在复杂度基线豁免名单上，让它继续长胖不合适 ⇒ 函数体 **168→165 行**、圈复杂度 **28→26**（合规方向：持平或变浅，**没抬基线**） |
+| 测试 | `src/tests/appMount.engineGate.test.tsx`（新建 3 例）：未就绪期间路由不在（Gate 未开 ⇒ TopBar 不渲染）/ 已就绪快路径放行且不碰 `start_engine`（钉住 D83 幂等语义）/ web 初值契约（源码字面 `useState(!tauriBridge.isTauri)`）。判据选 TopBar 的语言切换按钮（`aria-label='Chinese'`）——TopBar 只经路由渲染，比匹配聚合文案稳 |
+
+**顺带压回去的两处技术债**（都是本批改动本身触发的基线红线，没走"抬基线"这条路）：
+
+- `castBudget` 守卫红（src/tests 92→93，新用例里两处 `(window as any)`）⇒ 改为给 `Window`
+  加**具名可选**类型槽（`declare global`），预算**保持 91 不增**。`as any` 会当场把
+  「这里到底是什么类型」整个关掉，而这次缺的只是一个类型声明。
+- `complexityGuard.wiring` 形态-7 红（`AppThemeProvider` 168→169）⇒ 抽组件降回 165，同上。
+
+**验证**（本批收口实测）：vitest **574/574**（覆盖率 94.83 / 85.01 / 84.33，阈值 88/77/67）·
+服务端 **3567 用例（3563 pass / 0 fail / 4 skip）** · `npm run typecheck` 三段全绿 ·
+`npm run lint` 0 error（2 条既有 warning 不在本批改动面）· wiring **230/230**（两条原本红的
+守卫由「红」转绿）· **`npm run gate:close` 18/18** · README 的事实数字由 `facts:refresh` →
+`facts:fix` 自动回写（571→574、覆盖率三项随之更新），未手改。
+
+> 📌 本批实测还推翻了 D83 自证的一句「tsc/lint 0」（见该条下的批注，旧数字保留）：
+> **D83 的提交上 `npm run typecheck` 直接 exit 2**。又一次证明 vitest 全绿不能替 typecheck 出席。
+
+### 2026-10-15 批次 D83 · 引擎启动幂等化：取消「开扫即重启引擎」（D81 两条 bug 的总源头）
+
+**动机**：D81/D81 热修都是在给「开扫即重启」打补丁——`ScanPage.doStart` 每次开扫先
+`startEngine()`，Rust `spawn_engine` 无条件 kill 旧 sidecar 再拉新的，端口与一次性
+token 都变，前端不同步刷新就 401（Network Error）；engine-exit 横幅还是这次自杀触发的。
+本批按 D81 留下的候选直接修总源头。
+
+**评估结论**：重启没有必要。引擎由壳在启动时拉起且设计上常驻；「每次开扫重启」既不
+提速也不保洁，只平白换 token、断 SSE、制造竞态。
+
+| 面 | 改动 |
+|---|---|
+| Rust（lib.rs） | spawn_engine **幂等**：EngineChild 有在跑句柄直接返回；Terminated 分支清空 EngineChild 句柄 + EngineInfo——进程真死后下次调用才能重拉，且 get_engine_info 不会把死引擎的陈旧信息当就绪返回（否则前端重连轮询会误判成功） |
+| 前端（tauriBridge） | restartEngineAndApply 改**两段式**：先探 get_engine_info，已就绪（port>0 且 token 非空，D83 起该状态只在引擎真在跑时成立）则**零 invoke 直接落地**；未就绪才 start_engine + 有界轮询。开扫路径从此不碰引擎 |
+| 测试 | tauriBridge 组重写为 5 例：在跑零 invoke / 未就绪才重启并落地 / 半就绪继续轮询 / 始终不就绪有界放弃 / 重启窗口标志；**顺带修测试基建**——D81 热修拆 describe 时丢了 beforeEach 的 spy 隔离，调用记录跨测试累积（病征：not.toHaveBeenCalledWith 被上一个 describe 的历史调用误触红） |
+
+**验证**（原文保留）：vitest **571** 全过、tsc/lint 0、cargo fmt --check + clippy -D warnings 干净、
+gate:close 16/16。Rust release 重编 + 真机双扫演示（引擎 PID 与 token 跨扫描稳定）见提交后验证。
+> ⚠️ **2026-10-16 实测推翻（保留旧数字，别删）**：上行的「tsc/lint 0」不成立——
+> `npm run typecheck` 在 D83 的提交上就是**红的**（exit 2）：`src/tests/tauriBridge.tauri.test.ts:189`
+> 的 `mockImplementation((cmd: string) => …)` 形参未使用 ⇒ `TS6133`。可见本批**漏跑了 typecheck**
+> （D66 之后第二次栽在同一条上）。已由 D84 顺手修掉；教训写进批次收口清单：typecheck 不能被
+> 「只跑了 vitest 且全绿」替代，两者检查的对象根本不同（单测跑的是**转译后**的行为，
+> typecheck 查的是**类型**，`tsc -p tsconfig.tests.json` 是唯一能看见 src/tests 那双的眼睛）。
+
+
+
+### 2026-10-15 批次 D82 · 修交付契约缺口：引擎原始 report.json 补 CVSS 回填（核查真扫产物时实锤）
+
+**动机**：用户要求核查「扫描结论是否正确」。逐层验证结论无误（3 命中全部为真、PoC 可重放、
+定库正确、靶场死时如实报 unreachable），但**核查中发现一个契约缺口**：
+README 交付契约写「每条漏洞必含 风险等级 + CVSS v3.1，**全部格式**」，实测
+report.md / report.html 有（union 8.2 / boolean 7.5），**引擎台账的 report.json 三条
+vulns 全无 cvss 字段**——CVSS 只活在渲染链路（reportDelivery.buildDelivery），
+引擎回填链路（vulnEnrich）漏了。机读消费方（REST/CI/MCP）拿 JSON 的没有 CVSS。
+
+| 面 | 改动 |
+|---|---|
+| 修复 | `enrichVuln` 回填 affectedParam 的同一处补 `withCvss()`（复用 `cvssFor()` 单一真源）：条目无 cvss 则补、显式给定不覆盖（幂等）、不写回输入（poc.evidence 契约不破） |
+| 结构 | CVSS 回填报成 `withCvss` 辅助函数而非 inline：`enrichVuln` 有复杂度基线锁定（只许持平或变浅），inline 会顶穿（实测 inline 版直接触发 wiring 形态-7 红） |
+| 测试 | 新增 `server/tests/vulnEnrich.cvss.test.js` ×4：三件套齐全（union 8.2/High）/ 幂等不覆盖 + 未知技术保守默认 5.3 / 不写回输入 / attachVulnContext 整报告路径 |
+| 顺带修一个守卫误报 | `tauriPluginWiring.guard` ④ 的「文本包含 @tauri-apps/plugin-fs」口径把本仓 `release-check.mjs` 配置表里的**字面量**当成插件消费者，进而把它自己读文件的 `fs.existsSync/readFileSync` 报成「桌面 fs 没授权」⇒ 收紧为真实 import 匹配（`FS_IMPORT_RE`）。修判据而非绕过（本仓纪律） |
+
+**验证**：服务端 **3567 用例（3563 pass / 0 fail / 4 skip）**、artifact-drift 三份基线零漂移、
+gate:close 16/16、lint/tsc 全过。
+
+**留证**：这是本仓「单测全绿但产物违约」的又一实例——`cvssFor` 自己有测试、
+delivery 契约测试也绿（它只测渲染链路），缺口在**引擎原始报告**这条没人对过账的路径上。
+教训：交付契约的核对对象必须是**落盘产物**，不是渲染函数的入参。
+
+
+
+### 2026-10-15 批次 D81 热修 · 打破引擎重启循环（D81 修完当天真机演示时暴露的附带缺陷）
+
+**症状**：D81 提交后重跑真机扫描演示，横幅从「已停止」变成永远停在**「引擎重启中，
+正在自动重连…」**（15s+ 不消失），扫描依旧 Network Error。
+
+**根因**：`start_engine` 会 kill 旧 sidecar ⇒ engine-exit 事件；而 D81 的
+engine-exit 处理器对该事件**无条件再发起一次重启** ⇒ 重启→杀旧引擎→exit→重启→…
+**无限重启循环**。每次循环恰好都在轮询新 token 的 12s 窗口内，所以横幅永不落定。
+
+**修法**（前端 3 行 + 1 个测试）：
+- `tauriBridge` 加模块级 `engineRestarting` 标志（`restartEngineAndApply` 进出时置位/复位）
+  与 `isRestartingEngine()` 查询；
+- `useEngineRecovery` 的 engine-exit 处理器：**我们自己的重启进行中 ⇒ 跳过**（in-flight
+  的那次重启本来就负责重取新信息），只有意外退出才重连。
+
+**回归测试**：`isRestartingEngine` 窗口语义（重启中 true / 结束 false，fake timers 推进）。
+vitest **569** 全过、gate:close 16/16。
+
+**留证**：这是「修一个接缝 bug 拆出下一个接缝 bug」的连续第二层——单测全绿两次，
+两次都靠真跑才暴露。D82 候选不变且更重要了：**评估取消「开扫即重启引擎」**
+（现状：每扫必杀再生产引擎 + 换 token，是这一串 bug 的总源头；若改为「引擎不在线才拉起」，
+D81/热修两层都可大幅简化）。
+
+### 2026-10-15 批次 D81 · 桌面壳引擎重连修复：开扫即断 token 的真 bug（D80 演示时实网撞到）
+
+**动机**：D80 收尾时用 CDP 真跑一次扫描做演示，连续撞见「开扫后 Network Error +
+'检测引擎已停止运行'横幅不消」。逐层剥开是一条**真链路 bug**，非环境问题（sidecar 单独跑
+完全正常，368 行日志比对 + 直接打 52651 端口 health=200 证实引擎活着）。
+
+**根因链**（三层全断，任意一层都致命）：
+1. `ScanPage.doStart` 每次开扫先调 `startEngine()`，而 Rust `spawn_engine` **先 kill 旧
+   sidecar 再拉新的**（lib.rs:82-88）⇒ 端口与一次性 token 都变；
+2. 前端 `apiBase/token` 只在 App 挂载时取过一次（App.tsx 旧 useEffect，无重取路径）
+   ⇒ 之后的扫描请求全带**旧 token** → 401 → UI 报 Network Error；
+3. `engine-exit` 横幅只置位不清除（手动点「重启引擎」也不重取信息）⇒ 横幅常亮；
+   且这个横幅还是第 1 步的 startEngine 自己杀旧引擎触发的——**自残链**。
+
+**修法**（前端收口，Rust 未动）：
+
+| 面 | 改动 |
+|---|---|
+| 桥接 | `tauriBridge.restartEngineAndApply()`：`start_engine` → **有界轮询**（24×500ms）等新 `get_engine_info` 就绪（port>0 且 token 非空，Rust 收到 ENGINE_TOKEN 后才写 EngineInfo）→ `setApiBase/setApiToken` 落地 → 返回新信息 |
+| 扫描链路 | `ScanPage.doStart` 改调 `restartEngineAndApply()`（替代裸 `startEngine`）——重启后必须用新实连信息，否则等于白重启 |
+| 掉线恢复 | `useEngineRecovery` hook（D80 拆出的第四块）：engine-exit → 自动重连并落地新信息 → 成功即清横幅；**只有自动恢复失败才保留横幅 + 手动按钮**；横幅分「重连中(info)/已失败(error)」两态 |
+| 结构 | AppThemeProvider 体量/圈复杂度超基线（186/32）⇒ 引擎生命周期 UI 抽出为独立 hook（职责：与主题无关） |
+
+**测试**：`tauriBridge.tauri.test.ts` +3（D81 独立 describe）——新 token 落地 apiClient /
+半就绪状态(port=0)不采用继续轮询 / 始终不就绪有界放弃返回 null（fake timers 推进 15s）；
+scanPage 两组 mock 补 `restartEngineAndApply`。vitest **568**（565+3）全过，
+gate:close 16/16、tsc/lint/dup 全绿。
+
+**留证**：本批是「演示驱动测试」的又一实例——功能在单测里全绿，真跑一次才暴露
+接缝处的 token 生命周期问题（单测的 bridge mock 从不换 token）。已登记：D82 候选
+= 评估「开扫即重启引擎」是否必要（现状每扫必杀再生产引擎，既慢又无谓地换了 token）。
+
+
+### 2026-10-14 批次 D80 · 赛博风格成本体（默认暗色 + 全局点阵）+ 扫描过程全可见（直播控制台）
+
+**动机**：实际渲染四个页面后确认：赛博资产（`.glass`/`.dot-grid`/`.neon-border`/
+`.scanline-active`/`.terminal-block`）在 index.css 里沉睡已久，但**默认主题是浅色、
+且只有首页挂 dot-grid** ⇒ 用户第一眼看到的是"灰色 SaaS"，扫描过程还藏在表单下方。
+D80 把视觉语言统一到暗色赛博，并把扫描过程拉到"想看不见都难"。
+
+| 面 | 改动 | 取证 |
+|---|---|---|
+| 默认主题 | `sqli_theme` 回落值 `light → dark`（历史用户读存档优先，不受影响）；qa_theme 契约同步改为默认 dark | vitest 565/565 |
+| 全局点阵 | `.dot-grid` 从首页-only 上移到 Layout（router.tsx）⇒ 四页统一赛博底 | 截图比对 |
+| 直播控制台 | EventTimeline 重写：**全量事件**（去掉 50 条倒序截断）+ 时间序终端渲染（`.terminal-block` 等宽字体 + 事件类型着色）+ **自动跟随**（上翻暂停、回底恢复、「跳到最新」）+ 运行呼吸灯 | 无测试钉 50 上限（已核）；565 用例无冲突 |
+| 过程全可见 | ① `useScanActivity` hook：scanId 出现即把进度区滚进视口（jsdom 无 scrollIntoView，用可选调用）；② 运行期给 body 挂 `.scanline-active` 全局扫描线；③ 顶栏「SCANNING」呼吸灯（TopNav，data-driven）；④ 进度卡运行态霓虹描边 | scanPage 级测试原样通过 |
+| 结构 | 复杂度门禁驱动的按职责拆分：`TopNav`（四项导航+呼吸灯，数据驱动消除 4 份重复条件样式）、`ScanProgress`（Paper 外壳+ref 转发+运行态样式）、`useScanActivity`（两个视效副作用） | complexity/dup/lint 全过 |
+| 踩到的真 bug | 中途把进度条+状态 Chip 搬进 ScanProgress，与 ProgressView 原有渲染构成**双重渲染**（两份进度条同时出现）——被 duplication 门禁实锤（104 token 克隆 3331>3330）⇒ 收敛为「外壳归外壳、内容归内容」：ScanProgress 只拥有容器与运行态样式，内容单一真源留在 ProgressView。复跑 3328≤基线 | dup exit 0 |
+
+i18n：`topbar.scanning`（中：扫描中 / EN：SCANNING）、`scan.jumpToLatest` 中英同步。
+
+
+### 2026-10-14 批次 D79 · UI 优化：对比度修复 + 密度提升（扫描页双栏 / 历史页紧凑空态）+ 三块组件拆出
+
+**动机**：连看四个页面的实际渲染（release 包截图 + CDP 计算样式取证）后发现两类真问题：
+① **对比度**：Hero 强调色是暗底假定的硬编码（cyan `#00d4ff` / slate-400），而默认主题是
+浅色 ⇒ Chip 文字 ~1.9:1、副标题 ~2.5:1，均不达 WCAG AA；② **密度**：扫描/历史页
+`maxWidth="md"`（900px）配居中表单，1216px 窗口下右侧 ~300px 死白 + 下方大面积留白。
+
+| 面 | 改动 | 取证 |
+|---|---|---|
+| 对比度 | `HomeHero` 按 `effectiveMode` 分流取色：暗色保留赛博原色，浅色换同色相深变体（标题渐变 `#0284c7→#6d28d9`、Chip 文字 `#0369a1`、副标题 `text.secondary`） | CDP 计算样式：浅色 Chip `rgb(3,105,161)`（was `rgb(0,212,255)`）、副标题 `rgb(15,23,42)`（was `rgba(148,163,184,.9)`）；暗色 `rgb(0,212,255)` 与 body `rgb(10,14,22)` 不变（原设计保留） |
+| 扫描页 | 容器 `md→lg`，双栏 `1.9fr 1fr`：左向导 + 右信息栏（sticky）——「授权与扫描边界」（同源默认 / 重定向逐跳 / SSRF 默认拒内网）与「CI 门禁退出码」（0/1/2 语义 + diff-base 只判新增）。信息全部来自既定口径，非新事实 | 截图确认右侧死白消失；565 用例无契约冲突 |
+| 历史页 | 空态 `p-10` 全宽盒 → `p-6` + `maxWidth 640` 居中，补一行台账说明 | 截图确认紧凑 |
+| 结构 | 按复杂度门禁要求「按职责拆分」（非机械搬移）：`HomeHero` / `ScanSidebar` / `ScanConfirmDialogs` / `HistoryEmpty` 四个新组件——原三个页面组件体均已超基线（ScanPage 227>187、HomePage 259>253 且圈 29>24、HistoryPage 175>169） | complexity exit 0（633 文件扫描）；tsc 0 错；vitest 565/565 |
+
+i18n：`scan.sidebar.*`（10 键）与 `history.emptyHint` 中英同步新增（parity 测试保障）。
+未动：顶栏三主题按钮（qa_theme 的 F-18 契约钉死，非缺陷）；截图流程经 CDP
+（`WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port`）完成，未向仓库加任何调试代码。
+
+
+### 2026-10-14 批次 D78 · release:check 新增「Tauri npm↔crate 同线」判据（D77 待办落地）
+
+**动机**：D77 遗留建议——把「npm ↔ crate 同线」从 tauri build 的**末尾拦截**提前到发布入口。
+
+| 面 | 内容 |
+|---|---|
+| 判据 | `scripts/release-check.mjs` ④：`@tauri-apps/api↔tauri`、`plugin-dialog↔tauri-plugin-dialog`、`plugin-fs↔tauri-plugin-fs` 三对的 **major.minor 必须同线**（patch 不同放行：npm 2.11 线最高 2.11.1 而 crate 在 2.11.5，版本号两侧不同步是 tauri 的既有事实） |
+| 取数 | **两个 lock 文件**（package-lock.json / Cargo.lock，均已入库）而非 node_modules ⇒ fresh clone 无依赖也能查，且与 tauri build 自己读的是同一份事实 |
+| 不空转 | 任一侧版本读不到 ⇒ **报 error（判据失效不许静默通过）**，与 artifact-drift「一个文件都没检查就不返回通过」同纪律 |
+| 自证 | selftest 9 条新用例：同线（patch 差）放行 / D77 实测漂移形态（2.12.2↔2.11.5）报错 / 两侧读不到各报错 / Cargo.lock 块级采集 4 条（取对块、不串块、近似名不命中、不存在返回 null） |
+| 端到端反证 | selftest 之外另做：把 lock 里 api 改 2.12.2 实跑 ⇒ 红且点名这对；还原 ⇒ 恢复 |
+| 踩到的两道门禁 | ① **complexity**：新增采集逻辑把 `main()` 推到 17 圈（软上限 15）⇒ 按职责拆出 `checkTauriLines()/collectTauriPairs()`（读文件/打印/判定居各自函数，main 只留一行调用），非机械搬移；② **deadcode**：4 个新导出只被同文件 selftest 用 ⇒ 命中 D71 记录过的「漏判同文件引用」缺陷，按该批先例**去 export**（基线只减不增，不加豁免） |
+
+
+### 2026-10-14 批次 D77 · tauri 打包版本对齐：npm 端收敛到 Rust crate 线（CI 从不构建 Tauri 的盲区）
+
+**动机**：`npm run package:win` 被 tauri build 拦下：「Found version mismatched Tauri packages：
+tauri(v2.11.5) : @tauri-apps/api(v2.12.2)、plugin-dialog(v2.7.3) : (v2.8.1)、plugin-fs(v2.5.2) : (v2.6.0)」。
+
+**根因**：npm 三包用 `^2.x` 范围，某次安装漂到 2.12 线；Rust 侧锁在 Cargo.lock 的 2.11 线。
+**CI 从不构建 Tauri**（`ci.yml` 无 `tauri build`/`package:win`，只有 sidecar-build）⇒ 这个不一致
+在 CI 里永远看不见，只在真正打包那天炸——「本地/CI 全绿但发布不了」的又一形态。
+⚠️ npm 与 Rust crate 的版本号不同步：`@tauri-apps/api` 的 2.11 线最高只有 **2.11.1**
+（Rust tauri 2.11.5 ↔ npm 2.11.1），拿 2.11.5 去装会 ETARGET 且 npm 会**静默丢掉该依赖**。
+
+| 包 | 旧（漂移） | 新（对齐 Rust crate 线） |
+|---|---|---|
+| `@tauri-apps/api` | ^2.0.0 → 2.12.2 | **~2.11.1** |
+| `@tauri-apps/plugin-dialog` | ^2.8.1 → 2.8.1 | **~2.7.3**（= crate 2.7.3） |
+| `@tauri-apps/plugin-fs` | ^2.6.0 → 2.6.0 | **~2.5.2**（= crate 2.5.2） |
+| `@tauri-apps/cli` | ^2.0.0 → 2.11.4 | **~2.11.4** |
+
+用 `~`（patch-only）而非 `^`：再漂到 2.12 线就会重演本批。对齐后复验：`tsc --noEmit` 0 错
+（前端无 2.12-only API 使用）、`eslint` 0 error、`npm audit --omit=dev` 0 漏洞。
+顺带记录：`npm audit` 全量报 5 漏洞（2 moderate/1 high/2 critical）全在 devDep 工具链
+（vitest/tinypool/source-map-js），**与本批无关**（改动前同样 5 个），README 徽章口径本就是 prod。
+
+**遗留建议（未做，登记待办）**：把「npm ↔ crate 版本同线」加成 `release-check.mjs` 的一条判据——
+本次是 tauri build 自己拦的，但它只在打包末尾才验；更早就该在 release:check 里红。
+
+
+### 2026-10-14 批次 D76 · sea-config.json 同步构建工具实际输出（wasm 资产路径 node_modules → dist-engine）
+
+**动机**：`npm run package:win` 的 `release:check` 拦住发布——工作区有未提交改动。核查后两处：
+`src-tauri/Cargo.toml` 仅被 touch（内容哈希与 HEAD 相同），`sea-config.json` 是真实 diff：
+`build-sidecar.mjs` 把 SEA 资产 `sql-wasm.wasm` 的路径从 `server/node_modules/sql.js/dist/`
+改写为 `server/dist-engine/`（`build:engine` 的产物目录）。入库的这份停在旧路径 ⇒ **每次跑
+sidecar 构建都会把工作区写脏**，`release:check` 的「脏工作区」判据此前的告警部分是这条
+路径漂移造成的假信号。处置：提交构建工具实际写出的内容（一行），让「脏 = 真的脏」。
+
+
+### 2026-10-14 批次 D75 · 工具链修复：tauri dev 两起本机起不来（rustup 默认链损坏 / vite 监视撞 cargo）
+
+**动机**：要跑桌面端 UI，本机 `npm run tauri dev` 连续失败两次，根因都是环境/配置问题而非代码问题，
+修复过程留痕（下一个人在本机跑 tauri dev 会再撞上）。
+
+| # | 症状 | 根因 | 修法 |
+|---|---|---|---|
+| 1 | `tauri dev` 启动即 panic：`interface/rust.rs:1166 Option::unwrap() on None` | tauri-cli 2.11.4 在 target 未显式指定时跑 `rustc -vV` 取 host 行；本机 rustup **默认工具链 stable 组件缺失**（`cargo` 报 "not applicable to the 'stable-x86_64-pc-windows-msvc' toolchain"）⇒ 输出无 `host:` ⇒ unwrap None | 用仓库 `src-tauri/rust-toolchain.toml` 锁定的版本显式运行：`RUSTUP_TOOLCHAIN=1.98.0 npm run tauri dev`（1.98.0 已装且 cargo/rustc 正常）。⚠️ 未改本机 rustup 默认链（属用户环境，不动） |
+| 2 | panic 修复后 vite 崩溃：`EBUSY: resource busy or locked, watch ...src-tauri\target\debug\deps\sqli_scanner_lib.dll`，表现为 `The "beforeDevCommand" terminated with a non-zero status code` | vite watcher 监视整个项目根，与 cargo 持续写 target/debug 构建产物对撞（Windows 文件锁） | `vite.config.ts` `server.watch.ignored` 增加 `**/src-tauri/target/**`（连同 node_modules/dist 一并显式登记）。只影响 dev 期热更新监听，不影响代理/构建 |
+
+**顺带确认的资产新鲜度**：`npm run build:engine && npm run build:sidecar` 重建 sidecar 并通过冒烟
+（health=200 + 一次性 token + SEA 内联 SQLite 直连真扫 detection_found=3）⇒ 桌面端跑的是当前代码。
+
+
+### 2026-10-14 批次 D74 · 文档瘦身：四篇过期快照按归档规则移入 archive（42→38 篇）
+
+**动机**：10-03 评价把「文档体量负担」列为低分项。瘦身前提是本仓自己的归档规则
+（`docs/archive/INDEX.md` 首：「文件名带日期 ⇒ 某天快照；有更晚同系列或已被推翻 ⇒ 移入 archive」）
+—— 本轮发现 4 篇**早就该归档却还在根目录**的快照，其中两篇的数字已过期一旬以上。
+
+| 文件 | 为什么归档 | 同系列更晚的一份 |
+|---|---|---|
+| `交付文档.md` | 10-02 批次快照；用例数（2741/485）、tamper 数（228）、CRS 版本、sqli-labs「75 关」**全部过期**，与 `_facts.json` 差一旬以上——正是本仓「现状段过期」病的实例，留在根目录会误导 | 无（现口径 = README 项目状态 + `_facts.json`） |
+| `使用手册与交接文档.md` | 09-16 版（`master @ 14c0f26`），「1815 用例 / 21 套靶场 / 228 tamper」均已过期 | `docs/user-guide.md`（现行手册）+ `pentest-handover/` |
+| `release-notes-v1.1.0.md` | 与 CHANGELOG [1.1.0] 段重复；README 早已注明「发布判定以 CHANGELOG 为准」⇒ 该文件非唯一真源 | CHANGELOG [1.1.0] 段 |
+| `优化空间勘查-2026-10-12.md` | 所列九项（A1 ERROR_SIG 分叉 / A2 CLI NoSQL·OOB 零可达 / A3 db-json / B1 死导出 / C1 正则预编译 / C2 令牌缓存顺序）**已全部由 D53 起落地并缺陷注入复验**；快照的行动项已闭环 | CHANGELOG D53 起逐条记录 |
+
+配套动作（归档 = 只改路径不改数字）：4 处活引用同步更新（CHANGELOG ×1、代码注释 ×3——
+`scanValidityGuard.js`/`keyword2hex.js`/`tamperKeywordCoverage.test.js`、`pentest-handover/06` ×1）；
+`docs/archive/INDEX.md` 增 4 行并把两条 `../` 同系列指针改为 `./`；`docs/INDEX.md` 重生成（42→38 篇）。
+
+**顺带修掉一条口径漂移**：`npm run facts:fix` 重采时发现**服务端「1 fail」已不存在**——
+同日晨采（10:34）记为 1 fail / 4 skip，本轮连续两轮全量复跑均 **0 fail / 5 skip**（3558/3563）。
+该失败为并发口径下的偶发（晨间日志未留，未能逐条定位到具体用例），README 项目状态行已由
+`facts:fix` 自动改写。复查纪律追加一条：**偶发失败要当漂移处理——重采复跑两轮再定论**，
+不把「本轮绿」当「没问题」。
+
+**评估后未采纳的两项**（记录理由，免得下轮重复讨论）：
+① **拆分 CHANGELOG**（6405 行，单篇最大）——不拆：全部历史都在近 2.5 个月内，且它是
+AGENTS.md §3.5 推翻协议指定的证据链载体（「原结论→反证→新结论，保留旧数字」），
+归档旧内容只会让「当初为什么错」变难查。② **深删 README**（710 行）——只做微订正：
+`readme:check` 的 ⑯⑰ 判据把 CLI 旗标表/API 端点表与代码**双向钉死**，删表格即红；
+README 的「厚」大部分是被门禁钉住的现行口径，不是冗余。
+
+
+### 2026-10-14 批次 D73 · WAF 口径对齐：现行口径文档补立「真机现行版」+ 09-27 块补标禁止引用
+
+**动机**：10-03 评价与 10-12 勘查都把「宣称 > 证据」列为优先项；本轮逐条核对 WAF 对外口径，
+无 Docker ⇒ 真机 A/B 本轮不可跑（`modsec-live` 只能靠 CI dispatch），故做**可做的部分：
+口径文档与证据链对齐**（AGENTS.md §3.5「每批至少复核 1 条」= 复核 `waf-fingerprint-coverage`）。
+
+| 面 | 发现 | 处置 |
+|---|---|---|
+| `docs/waf-绕过能力实测口径.md` 真机段**过期** | 该文最新一块是 09-27「✅ 更新」，其 **74/72 数字早已被 README 标为禁止引用**（产物不在、无法复现、与 09-28 差 9 倍），**本文却漏标**；09-28→10-05→D14 的六轮结论（打穿口径、10/19 上界、链对拍、D14 A/B）只在 README，本文一片空白 | ① 09-27 块按推翻协议补 ⛔「过程留痕、数字禁止引用」标记（旧数字原样保留）；② 文末补「真机口径现行版」一节：判定口径三条（打穿≠放行 / 真分母是直连上界 / 版本逐轮记录）+ 六轮结论链表 + 现行禁令与引用分级（对外只能说"打穿链 1 条 2/19、上界 10/19"，不能说任何比率） |
+| README CRS 版本表述 | 「（… + CRS 4.30.0）」写成常驻事实，但 `modsec-live` 镜像 tag **未钉死**、版本逐轮浮动 | 改为「版本逐轮记录在报告里（09-28 起 4.29.0，D14 起 4.30.0）；跨轮比较先确认同 digest」 |
+| 台账 `waf-crs-pl1-bypass` | evidence 停在 10-05 轮 | 补 D14 run 37632563420（CRS 4.30.0、同 digest 对照、八件 A/B 格局零变化）+ 指向新立的现行版一节 |
+| 台账 `waf-fingerprint-coverage` 复核 | D68 结论：真机命中率仅 1/62 | **维持 unverified**（不联网取证第三方目标，不擅自"补证"）；增量记录：`waf_rules_v2/v3.test.js` 已逐 vendor 断言构造样本识别准确 + 零误报 + 数量护栏 + 推荐映射合法（12 例，样本取自真实拦截页特征）——「规则存在」升级为「构造样本上逐条可识别」，**真机命中率仍 1/62**，对外仍不得说「识别准确率」 |
+| 文档索引 | H1 更新 | `docs/INDEX.md` 重生成（标题随 H1 更新，门禁 `docs:index` 产物一致） |
+
+一条仍未关闭的真问题（本轮记录、下批候选）：**真机 A/B 依赖 CI dispatch，本机无 Docker**——
+`modsec-live` 的复现路径不在开发者本机，WAF 结论的更新频率受发布节奏限制。
+
+
+### 2026-10-14 批次 D72 · 仓库卫生：本机产物清理 + 坏 ref 修复 + deliverables-demo 陈旧性声明
+
+**动机**：10-03 评价（`docs/项目评价-2026-10-03-v2.md`）与 `AUDIT-SEC-2026.md` 两处都点名过
+「仓库卫生」；本轮按可执行的粒度收口。
+
+| 面 | 内容 |
+|---|---|
+| 本机产物清理 | `logs/`(26M)、`coverage/`(3M)、`dist/`、`gate-records/`、`.mock/`、`kanban-check-2026-09-30/`(1.1M)、`reports/`、根级 `_tsc.log`/`sqli-session-*.json`/`.push-via-api-result.json` 全部为 gitignore 覆盖的本机派生数据，直接删除（不进 git） |
+| git 坏 ref | `refs/remotes/origin/HEAD` 指向不存在的 `origin/master`（invalid sha1 pointer，`git fsck` 每跑必报）⇒ `git update-ref -d` 删除；当前 `git fsck` 无错（仅 dangling，正常） |
+| ~~deliverables-demo 出库~~ → **改判：保留入库 + 加陈旧性声明** | 初判「生成物不该入库」，核查后改判：16 份 `report.*` 被 `docs/竞品对标分析-2026-10-03.md` 引为对标证据，按本仓先例（`waf-real/results/*.md` 因被引为对外口径而特意保留）——**被引用的产物必须随仓库分发**。生成于 2026-09-11，早于 v1.1.0 多轮语义演进，且 CI 无法复现（需真 MySQL）不能进 artifact-drift ⇒ 在 `deliverables-demo/README.md` 顶部加陈旧性声明（生成时间、出处 commit、重跑命令、对外引用前必须重跑），声明本身即该目录的防漂移措施 |
+| 未动 / 现场去留 | `.git.broken-20261005/`(5.3M 旧库备份) 经人工确认**保留**（恢复保险）；`.acl-recovery/`(4KB，Windows 权限修复的 DACL 备份) 已删除 |
+
+
 ### 2026-10-14 批次 D71 · `gate:close`：把收口清单固化成一条命令（防第四次漏项）
 
 **背景**：收口清单已漏三次（D66 typecheck / D70 五道门禁 / D70b wiring），**每次都是 CI 先抓到**。
@@ -425,7 +730,7 @@
 
 ### 2026-10-12 批次 · 优化空间勘查落地（A1/A2/A3/B1/C1/C2/D1/D2/F 九项）
 
-**一句话**：按 `docs/优化空间勘查-2026-10-12.md` 落地九项——修掉一条已静默分叉的正确性漂移（`ERROR_SIG`）、补上 CLI 对 NoSQL/OOB 两个整通道的零可达、把两个门禁（变异敏感度 / e2e 靶场接线）从「靠信念」变成「会自证」，外加两处白烧。40 文件；性能项附量化、缺陷项附缺陷注入复验，门禁结论取实跑退出码。
+**一句话**：按 `docs/archive/优化空间勘查-2026-10-12.md` 落地九项——修掉一条已静默分叉的正确性漂移（`ERROR_SIG`）、补上 CLI 对 NoSQL/OOB 两个整通道的零可达、把两个门禁（变异敏感度 / e2e 靶场接线）从「靠信念」变成「会自证」，外加两处白烧。40 文件；性能项附量化、缺陷项附缺陷注入复验，门禁结论取实跑退出码。
 
 | 面 | 变更 |
 |---|---|

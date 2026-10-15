@@ -1,6 +1,6 @@
 # sqli-scanner
 
-[![Tests](https://img.shields.io/badge/tests-4123%20passing-brightgreen)](#测试)[![CI](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml/badge.svg)](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml)
+[![Tests](https://img.shields.io/badge/tests-4137%20passing-brightgreen)](#测试)[![CI](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml/badge.svg)](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml)
 [![Dependencies](https://img.shields.io/badge/dependencies-0%20known%20vulns-brightgreen)](#环境变量)
 
 > CI 徽章为真实状态（仓库地址已定，run#90 起全绿）。发布判定仍以 `CHANGELOG.md`
@@ -386,10 +386,10 @@ backend/  ← Express + Node.js
 ## 测试
 
 ```bash
-# 前端测试（565 个用例）
+# 前端测试（574 个用例）
 npm test
 
-# 服务端测试（3563 个用例）
+# 服务端测试（3567 个用例）
 cd server && npm test
 
 # 全部测试
@@ -414,8 +414,8 @@ npm run artifact:drift   # 入库的 e2e 基线产物必须等于当前代码跑
 ## 项目状态
 
 - TypeScript: 零错误
-- 前端测试: 565/565 通过（覆盖率门禁 stmts 94.59 / branch 84.63 / func 83.37，阈值 88/77/67）
-- 服务端测试: 3563 用例（3558 pass / 1 fail / 4 skip，并发口径 2026-10-14 复测；4 skip 为环境依赖显式跳过。覆盖率 lines 91.13 / branch 80.54 / func 84.28，阈值 85/74/77）
+- 前端测试: 574/574 通过（覆盖率门禁 stmts 94.83 / branch 85.01 / func 84.33，阈值 88/77/67）
+- 服务端测试: 3567 用例（3563 pass / 0 fail / 4 skip，并发口径 2026-10-15 复测；4 skip 为环境依赖显式跳过。覆盖率 lines 91.13 / branch 80.54 / func 84.28，阈值 85/74/77）
 - 一键扫描: `npm run scan -- -u <url>`（CLI 一条命令产出 HTML/JSON/Markdown 全套报告 + manifest，退出码可直接进 CI 门禁）
 - Tamper 插件: 234 个（含批次 D3 新增 scalarselectinline；含 v24 增量 20 个，对齐 sqlmap 官方 tamper 全集，含官方 CRS/libinjection 实测组合 uniontable+odbcbrace；含批次 D13 新增 5 件上游形态变体 *nospace/*open/*block，真机 A/B 判决前不进默认链）
 - WAF 绕过能力: 200+ 插件链式组合，覆盖 62 个 WAF 厂商指纹识别 + 推荐
@@ -697,10 +697,11 @@ MySQL 8 **默认 `secure_file_priv=NULL`（彻底禁用）**——实测默认�
 仅当目标管理员显式放行（`secure_file_priv=''` 或指定目录）时才可能成功。
 
 **真实 ModSecurity 已实测**：CI `modsec-live` job 每轮 dispatch 起官方 `owasp/modsecurity-crs:nginx`
-镜像（真 ModSecurity + libinjection + CRS 4.30.0）跑 PL1/PL3 双档，真机报告见
+镜像（真 ModSecurity + libinjection）跑 PL1/PL3 双档，真机报告见
 [docs/WAF-真机对拍-2026-09-28.md](docs/WAF-真机对拍-2026-09-28.md)（最新一轮：19 样本、直连上界
-10/19、真机打穿链 **1 个**）。**未实测的是 Coraza 与商业云 WAF** —— 本节自实现执行器口径的数字
-不能外推到它们。
+10/19、真机打穿链 **1 个**）。镜像 tag **未钉死 ⇒ CRS 版本逐轮记录在报告里**（09-28 起 4.29.0，
+D14 轮起 4.30.0）；跨轮数字比较前先确认同镜像 digest。**未实测的是 Coraza 与商业云 WAF** ——
+本节自实现执行器口径的数字不能外推到它们。
 复现：`MYSQL_PORT=3306 node e2e/waf-real/waf-verify.mjs`（人工挂链 A/B）与
 `node e2e/waf-real/waf-auto-check.mjs`（自动路径验收）。
 - 直连模式（对标 sqlmap -d）：支持 SQLite 直连（sql.js）+ 真实驱动注册接口（mysql2/pg/mssql/oracle 等需用户自备）

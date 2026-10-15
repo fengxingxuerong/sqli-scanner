@@ -35,15 +35,15 @@ afterEach(() => {
 });
 
 describe('F-18 暗色主题', () => {
-  it('缺失 sqli_theme 时回退默认 light 并持久化到 localStorage', () => {
+  it('缺失 sqli_theme 时回退默认 dark 并持久化到 localStorage（D80 起默认暗色）', () => {
     mockMatchMedia(false);
     render(<App />);
-    // 挂载后持久化默认 light
-    expect(localStorage.getItem('sqli_theme')).toBe('light');
-    // 浅色按钮被选中
-    expect(screen.getByRole('button', { name: 'Light theme' }).getAttribute('aria-pressed')).toBe('true');
-    // 非暗色：body 不应有暗色背景（MUI 的 emotion 全局样式常驻 head，检查 body 样式更可靠）
-    expect(getComputedStyle(document.body).backgroundColor).not.toBe('rgb(15, 23, 42)');
+    // 挂载后持久化默认 dark
+    expect(localStorage.getItem('sqli_theme')).toBe('dark');
+    // 暗色按钮被选中
+    expect(screen.getByRole('button', { name: 'Dark theme' }).getAttribute('aria-pressed')).toBe('true');
+    // 暗色 background.default=#0a0e16 → rgb(10, 14, 22)（MUI emotion 全局样式的 body 计算样式）
+    expect(getComputedStyle(document.body).backgroundColor).toBe('rgb(10, 14, 22)');
   });
 
   it('写入 dark 后能读回，点击可切回 light（写回 localStorage）', () => {

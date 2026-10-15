@@ -15,6 +15,7 @@ vi.mock('@tauri-apps/api/event', () => ({ listen: h.listen }));
 vi.mock('@tauri-apps/api/core', () => ({ invoke: h.invoke }));
 
 import { tauriBridge } from '../shared/tauriBridge';
+import { getApiBase } from '../shared/apiClient';
 import { save as dialogSave, open as dialogOpen } from './stubs/tauriPluginDialog';
 import { writeTextFile, readTextFile } from './stubs/tauriPluginFs';
 
@@ -112,5 +113,108 @@ describe('tauriBridge 桌面分支（__TAURI_INTERNALS__）', () => {
     dialogOpen.mockResolvedValue(undefined);
     await expect(tauriBridge.openTextFile()).resolves.toBeNull();
   });
+
 });
 
+describe('tauriBridge D81：引擎重启重连（restartEngineAndApply）', () => {
+  // 与第一个 describe 同款的隔离：缺了它，spy 调用记录与 mockImplementation 会跨测试累积
+  // （实测病征：not.toHaveBeenCalledWith('start_engine') 被上一个 describe 的历史调用误触红）。
+  beforeEach(() => {
+    h.listen.mockReset().mockResolvedValue(() => undefined);
+    h.invoke.mockReset().mockResolvedValue(undefined);
+  });
+
+  it('isRestartingEngine：重启窗口内为 true、结束后回落 false（无限重启循环的破除点）', async () => {
+    vi.useFakeTimers();
+    try {
+      h.invoke.mockImplementation((cmd: string) =>
+        cmd === 'start_engine' ? Promise.resolve('ok') : Promise.resolve({ port: 0, token: '' }));
+      const p = tauriBridge.restartEngineAndApply();
+      // 首轮 500ms 轮询之前：重启窗口内（engine-exit 处理器据此跳过「再重启一次」）。
+      // 推进 100ms < 500ms 首个轮询点，标志必为 true。
+      await vi.advanceTimersByTimeAsync(100);
+      expect(tauriBridge.isRestartingEngine()).toBe(true);
+      await vi.advanceTimersByTimeAsync(15_000);
+      await p;
+      expect(tauriBridge.isRestartingEngine()).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  }, 20_000);
+
+
+  // ── D81/D83：restartEngineAndApply（确保引擎在线 + 落地当前实连信息）────────
+  // D83 改幂等后分两档：信息已就绪 ⇒ 零 invoke（旧实现每次开扫重启引擎、换 token，
+  // 是 D81 两条 bug 的总源头）；未就绪 ⇒ start_engine 拉起 + 有界轮询等就绪。
+  it('D83：引擎已在跑（信息就绪）⇒ 不 invoke 任何命令，直接落地返回', async () => {
+    h.invoke.mockImplementation((cmd: string) =>
+      Promise.resolve(cmd === 'start_engine' ? 'ok' : { port: 4567, token: 'tok' }));
+    const info = await tauriBridge.restartEngineAndApply();
+    expect(info).toEqual({ port: 4567, token: 'tok' });
+    // 关键断言：根本不碰 start_engine —— 不开扫即重启，token 不变，D81 病征无从复发
+    expect(h.invoke).not.toHaveBeenCalledWith('start_engine');
+    expect(getApiBase()).toBe('http://127.0.0.1:4567/api');
+  });
+
+  it('D83：信息未就绪（port=0）⇒ 才 invoke start_engine，拿到新 port/token 后落地', async () => {
+    let infoCalls = 0;
+    h.invoke.mockImplementation((cmd: string) => {
+      if (cmd === 'start_engine') return Promise.resolve('ok');
+      infoCalls += 1;
+      // 第 1 次（就绪探测）未就绪；重启后第 2 次拿到新实连信息
+      return Promise.resolve(infoCalls < 2 ? { port: 0, token: '' } : { port: 5300, token: 't-new' });
+    });
+    const info = await tauriBridge.restartEngineAndApply();
+    expect(info).toEqual({ port: 5300, token: 't-new' });
+    expect(h.invoke).toHaveBeenCalledWith('start_engine');
+    expect(getApiBase()).toBe('http://127.0.0.1:5300/api');
+  });
+
+  it('D81：token 未就绪（port=0）时继续轮询，不采用半就绪状态', async () => {
+    let infoCalls = 0;
+    h.invoke.mockImplementation((cmd: string) => {
+      if (cmd === 'start_engine') return Promise.resolve('ok');
+      infoCalls += 1;
+      // 第 1 轮就绪探测 + 前两轮轮询均未就绪（Rust 侧 recv_timeout 5s），第 4 次拿到
+      return Promise.resolve(infoCalls < 4 ? { port: 0, token: '' } : { port: 5300, token: 't2' });
+    });
+    const info = await tauriBridge.restartEngineAndApply();
+    expect(info).toEqual({ port: 5300, token: 't2' });
+    expect(infoCalls).toBeGreaterThanOrEqual(4);
+  });
+
+  it('D81：引擎始终不就绪 ⇒ 有界轮询后放弃返回 null（不无限等）', async () => {
+    vi.useFakeTimers();
+    try {
+      // [D84 顺带修 HEAD 遗留] 形参 `cmd` 本例不分支用 ⇒ TS6133（`npm run typecheck:tests` 红）
+      h.invoke.mockImplementation(() => Promise.resolve({ port: 0, token: '' }));
+      const p = tauriBridge.restartEngineAndApply();
+      await vi.advanceTimersByTimeAsync(15_000); // 24 轮 × 500ms = 12s 上界
+      await expect(p).resolves.toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  }, 20_000);
+
+  it('isRestartingEngine：重启窗口内为 true、结束后回落 false（无限重启循环的破除点）', async () => {
+    vi.useFakeTimers();
+    try {
+      let calls = 0;
+      h.invoke.mockImplementation((cmd: string) => {
+        if (cmd === 'start_engine') return Promise.resolve('ok');
+        calls += 1;
+        return Promise.resolve(calls < 2 ? { port: 0, token: '' } : { port: 4567, token: 't' });
+      });
+      const p = tauriBridge.restartEngineAndApply();
+      // 首轮 500ms 轮询之前：重启窗口内（engine-exit 处理器据此跳过「再重启一次」）。
+      // 推进 100ms < 500ms 首个轮询点，标志必为 true。
+      await vi.advanceTimersByTimeAsync(100);
+      expect(tauriBridge.isRestartingEngine()).toBe(true);
+      await vi.advanceTimersByTimeAsync(15_000);
+      await p;
+      expect(tauriBridge.isRestartingEngine()).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  }, 20_000);
+});

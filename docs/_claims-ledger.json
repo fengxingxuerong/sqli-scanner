@@ -27,9 +27,9 @@
       "id": "waf-crs-pl1-bypass",
       "claim": "tamper 链对真 ModSecurity CRS 的绕过效果",
       "status": "verified",
-      "evidence": "docs/WAF-真机链对拍-2026-10-05.md（CRS 4.29/PARANOIA 1/阈值 5/真 MySQL，19 样本）",
+      "evidence": "docs/WAF-真机链对拍-2026-10-05.md（CRS 4.29/PARANOIA 1/阈值 5/真 MySQL，19 样本）；D14 补验 run 37632563420（CRS 4.30.0，同镜像 digest 对照，八件 tamper A/B：打穿格局零变化）",
       "refute_cmd": "WAF_GATE_PL=1 npm run acceptance（waf-real/waf-auto 两套件）",
-      "caveat": "★ 最好链 2/19、旧首选链 0/19；直连上界仅 10/19。禁止对外声明绕过率"
+      "caveat": "★ 最好链 2/19、旧首选链 0/19；直连上界仅 10/19。禁止对外声明绕过率；逐轮口径链见 docs/waf-绕过能力实测口径.md「真机口径现行版」（2026-10-14 D73 补立）"
     },
     {
       "id": "waf-bypass-legacy-claim",
@@ -70,8 +70,8 @@
       "status": "unverified",
       "evidence": "62 条 matcher 在 core/waf/wafRules.js + 判据单测（waf.abCriteria / activeProbe / blockProfile / blockSignature / bypassSearcher / bypassSemantics / tamper.wafVendor 等）；**真机样本仅 1 例**（e2e/waf-real 的真 ModSecurity）",
       "refute_cmd": "npm run waf-validate（自写正则模拟器口径，禁止对外）",
-      "recheck_batch": "待排期（需真 WAF 样本）",
-      "caveat": "★ D68 复核结论：真机命中率证据只有 ModSecurity 1/62，其余 61 条无真机样本。折中补证方案（待执行）：抽 8-10 个常见 WAF（Cloudflare / F5 BIG-IP / 阿里云 / 腾讯云 / AWS WAF…）取真实响应样本做命中率对拍。未补证前对外只能说「62 条规则 + 判据单测」，不得说「识别准确率」。"
+      "recheck_batch": "D73 复核（2026-10-14，仍需真 WAF 样本）",
+      "caveat": "★ D68 复核结论：真机命中率证据只有 ModSecurity 1/62，其余 61 条无真机样本。折中补证方案（待执行）：抽 8-10 个常见 WAF（Cloudflare / F5 BIG-IP / 阿里云 / 腾讯云 / AWS WAF…）取真实响应样本做命中率对拍。未补证前对外只能说「62 条规则 + 判据单测」，不得说「识别准确率」。D73 增量：waf_rules_v2/v3.test.js 已逐 vendor 断言「代表性样本识别准确 + 零误报 + 数量护栏 + 推荐映射合法」（12 例，样本取自真实拦截页特征，node --test server/tests/waf_rules_v*.test.js 复跑）——把「规则存在」升级为「构造样本上逐条可识别」，但**真机命中率仍 1/62**（未联网取证第三方目标，不擅自补），故维持 unverified；readme:check 对 62 这个数**刻意不设守卫**（WAF_RECOMMEND_MAP 64 键有歧义，判据脆弱性大于收益，见 scripts/readme-consistency.mjs 注释）"
     },
     {
       "id": "paramminer-superiority",

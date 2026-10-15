@@ -7,7 +7,7 @@
 // tests/tamperKeywordCoverage.test.js 钉住这条包含关系与两者的向量关键字覆盖。
 // [2026-10-12 性能] 关键字表与正则**模块级预编译**：原实现在 transform 内对 30 个关键字
 // 逐个 new RegExp，按 payload×请求频次全量重编译（实测 15.87µs/call，见
-// docs/优化空间勘查-2026-10-12.md §C1）。正则只读、无状态消耗，提升到模块级零行为变化
+// docs/archive/优化空间勘查-2026-10-12.md §C1）。正则只读、无状态消耗，提升到模块级零行为变化
 // （String.replace 对全局正则自带 lastIndex 复位，跨调用复用安全）。
 const KEYWORDS = ['SELECT', 'UNION', 'WHERE', 'FROM', 'AND', 'OR', 'ORDER', 'GROUP', 'HAVING', 'LIMIT', 'INSERT', 'UPDATE', 'DELETE', 'INTO', 'VALUES', 'SET', 'CREATE', 'DROP', 'ALTER', 'EXEC', 'EXECUTE', 'SLEEP', 'BENCHMARK', 'CONCAT', 'DATABASE', 'SCHEMA', 'VERSION', 'SUBSTRING', 'LENGTH', 'WAITFOR', 'DELAY', 'PG_SLEEP'];
 const RES = KEYWORDS.map((kw) => new RegExp(`\\b${kw}\\b`, 'gi'));

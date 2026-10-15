@@ -9,6 +9,9 @@
     "history": "History",
     "exploit": "Exploit"
   },
+  "topbar": {
+    "scanning": "SCANNING"
+  },
   "home": {
     "hero": "Start Your Security Audit",
     "startScan": "Start Scan",
@@ -55,6 +58,7 @@
     "pointsProcessed": "Processed {{processed}}/{{total}} injection points ({{pct}}%)",
     "events": "Live Events",
     "noEvents": "No events yet. Start a scan to see real-time progress here.",
+    "jumpToLatest": "Jump to latest",
     "copyLogs": "Copy Logs",
     "downloadLogs": "Download Logs",
     "eventsCount": "{{count}} events",
@@ -77,6 +81,17 @@
       "body": "You have enabled dump / OS Shell / file read. sqlmap will perform write/read/command operations on the target. Only continue on authorized targets.",
       "confirm": "I Understand, Continue",
       "cancel": "Cancel"
+    },
+    "sidebar": {
+      "scopeTitle": "Authorization & Scan Boundary",
+      "scopeSameOrigin": "Same-origin only by default (scheme + host + port): out-of-scope targets are rejected before the first request",
+      "scopeRedirect": "Every redirect hop is re-validated: a 302 to an unauthorized host stops all following requests",
+      "scopeSsrf": "Private / loopback / cloud-metadata addresses are refused by default; authorized internal targets need SSRF_ALLOW_PRIVATE=1",
+      "exitTitle": "CI Gate Exit Codes",
+      "exit0": "0 — no high-risk finding",
+      "exit2": "2 — Critical / High found",
+      "exit1": "1 — execution failed or verdict not trustworthy",
+      "exitDiff": "With --diff-base auto, only new findings fail the gate; existing ones never block a PR"
     }
   },
   "scanResult": {
@@ -176,6 +191,7 @@
     "title": "Scan History",
     "subtitle": "{{count}} records. Click to view report details.",
     "empty": "No scan records yet",
+    "emptyHint": "Scans are kept in the local ledger (deletable at any time); every report carries vuln type / CVSS / affected parameter / PoC / remediation — delivery-ready",
     "firstScan": "Start Your First Scan",
     "resume": "Resume",
     "resumeFailed": "Resume failed",
@@ -742,6 +758,7 @@
     "skipToContent": "Skip to main content",
     "engineRestart": "Restart Engine",
     "engineStopped": "Detection engine has stopped",
+    "engineReconnecting": "Engine restarting, reconnecting automatically…",
     "pageErrorTitle": "Page render error",
     "refreshPage": "Refresh Page",
     "scanRunning": "A scan is already running. Please stop it first.",

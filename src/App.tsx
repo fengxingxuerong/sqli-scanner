@@ -1,4 +1,4 @@
-import { CssBaseline, ThemeProvider, createTheme, Snackbar, Alert, Button } from '@mui/material';
+import { CssBaseline, ThemeProvider, createTheme, Snackbar, Alert, Button, Box, CircularProgress } from '@mui/material';
 import {
   useState,
   useEffect,
@@ -11,7 +11,7 @@ import { useTranslation } from 'react-i18next';
 import router, { PageFallback } from './router';
 import DisclaimerDialog from './components/DisclaimerDialog';
 import { tauriBridge } from './shared/tauriBridge';
-import { setApiBase, setApiToken } from './shared/apiClient';
+import { useEngineRecovery } from './hooks/useEngineRecovery';
 import './i18n';
 
 // 主题模式：浅色 / 跟随系统 / 暗色
@@ -24,15 +24,31 @@ import { THEME_KEY, ThemeModeContext } from './shared/themeMode';
 export type { ThemeMode } from './shared/themeMode';
 export { useThemeMode } from './shared/themeMode';
 
+// [D84] 引擎就绪门禁的载入态单独成组件：这段 JSX 是一次性的容器 markup，挪出后可让
+// AppThemeProvider 变浅 —— 它本就在复杂度基线的豁免名单上，再长胖不合适（只许持平或变浅）。
+function EngineGate({ ready, children }: { ready: boolean; children: ReactNode }) {
+  if (ready) return <>{children}</>;
+  return (
+    <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
+      <CircularProgress size={28} />
+    </Box>
+  );
+}
+
 // 顶层主题 Provider：动态 createTheme，主题模式持久化到 localStorage
 function AppThemeProvider({ children }: { children: ReactNode }) {
   const { t } = useTranslation();
+  const { engineDown, engineRecovering, restartEngine } = useEngineRecovery();
   const [mode, setModeState] = useState<ThemeMode>(() => {
     if (typeof window !== 'undefined') {
       const saved = window.localStorage.getItem(THEME_KEY);
       if (saved === 'light' || saved === 'system' || saved === 'dark') return saved;
     }
-    return 'light';
+    // [D80 2026-10-14] 默认主题改暗色：视觉语言（点阵/霓虹描边/青色辉光/毛玻璃）整套按暗底
+    // 设计，浅色只是附加项；原默认 light 让用户第一眼看到的是"灰色 SaaS"，赛博资产
+    // （.glass/.dot-grid/.neon-border/.scanline-active）反而只在暗色下现身。
+    // 已存过 sqli_theme 的历史用户不受影响（读存档优先）。
+    return 'dark';
   });
   const [systemDark, setSystemDark] = useState(false);
 
@@ -53,33 +69,20 @@ function AppThemeProvider({ children }: { children: ReactNode }) {
 
   // [A3 2026-09-17] 桌面版：向 Rust 询问 sidecar 实际端口与一次性 token。
   // 引擎不再固定 4567（端口被占时随机），且带鉴权 token，前端必须按实况连接。
+  // [D84] 这里还加了**渲染门禁**：引擎实连信息是异步取得的，深链路由（冷启动直达 /report/:id）
+  // 在旧实现下页面比它先发请求 ⇒ 用默认 base 打 404 ⇒ 「未找到报告」（而报告其实好好的在）。
+  // 现在：等引擎就绪（有界等待）后再渲染路由，覆盖所有深链页；web/测试环境立即就绪（isTauri=false 不开门禁）。
+  const [engineReady, setEngineReady] = useState(!tauriBridge.isTauri);
   useEffect(() => {
     if (!tauriBridge.isTauri) return;
     let cancelled = false;
-    (async () => {
-      const info = await tauriBridge.getEngineInfo();
-      if (cancelled || !info) return;
-      setApiBase(`http://127.0.0.1:${info.port}/api`);
-      if (info.token) setApiToken(info.token);
-    })();
+    void tauriBridge.restartEngineAndApply().finally(() => {
+      if (!cancelled) setEngineReady(true); // 即使引擎最终没起来也渲染（默认 base 兜底给出可见反馈，好过停在白屏）
+    });
     return () => { cancelled = true; };
   }, []);
 
-  // Tauri 桌面版：监听引擎崩溃/退出，Snackbar 提示用户可重启
-  const [engineDown, setEngineDown] = useState(false);
-  useEffect(() => {
-    if (!tauriBridge.isTauri) return;
-    const unlisten = tauriBridge.onEngineExit(() => {
-      setEngineDown(true);
-    });
-    return () => { if (unlisten) unlisten(); };
-  }, []);
-
-  const restartEngine = () => {
-    setEngineDown(false);
-    tauriBridge.startEngine().catch(() => undefined);
-  };
-
+  // [D81] 引擎生命周期 UI（自动重连 + 手动重启 + 横幅）抽至 useEngineRecovery
   const effectiveMode: 'light' | 'dark' =
     mode === 'system' ? (systemDark ? 'dark' : 'light') : mode;
 
@@ -193,14 +196,24 @@ function AppThemeProvider({ children }: { children: ReactNode }) {
 
   return (
     <ThemeModeContext.Provider value={{ mode, effectiveMode, setMode }}>
-      <ThemeProvider theme={theme}>{children}</ThemeProvider>
-      {/* Tauri 桌面版：引擎退出提示 */}
+      <ThemeProvider theme={theme}>
+        {/* [D84] 引擎就绪前不渲染路由：否则深链页会提前发请求、打默认 base。
+            web/测试环境 engineReady 初值即 true，看不到这个加载态。 */}
+        <EngineGate ready={engineReady}>{children}</EngineGate>
+      </ThemeProvider>
+      {/* Tauri 桌面版：引擎退出提示（D81：重连中/已失败两态） */}
       {tauriBridge.isTauri && (
         <Snackbar open={engineDown} autoHideDuration={null} anchorOrigin={{ vertical: 'top', horizontal: 'center' }}>
-          <Alert severity="error" variant="filled" action={
-            <Button color="inherit" size="small" onClick={restartEngine}>{t('common.engineRestart')}</Button>
-          }>
-            {t('common.engineStopped')}
+          <Alert
+            severity={engineRecovering ? 'info' : 'error'}
+            variant="filled"
+            action={
+              engineRecovering ? undefined : (
+                <Button color="inherit" size="small" onClick={restartEngine}>{t('common.engineRestart')}</Button>
+              )
+            }
+          >
+            {engineRecovering ? t('common.engineReconnecting') : t('common.engineStopped')}
           </Alert>
         </Snackbar>
       )}

@@ -19,6 +19,11 @@
 // ============================================================================
 
 import { vulnTypeOf, locationText } from '../services/vulnTaxonomy.js';
+// [D82] CVSS 回填：报告契约（README「每条漏洞必含 风险等级 + CVSS v3.1，全部格式」）
+// 原先只有渲染链路（reportDelivery.buildDelivery）算 CVSS，引擎原始 report.json 的
+// vulns 没有该字段——实测一次真扫交付物发现（report.md/html 有 8.2/7.5、report.json 没有）。
+// 取数复用 cvssFor 单一真源；引擎报告与交付格式从此一致。
+import { cvssFor } from '../services/reportDelivery.js';
 
 /**
  * 取该注入点的「受影响请求」地址。
@@ -60,6 +65,20 @@ export function affectedParamLabel(param, location, point) {
 }
 
 /**
+ * [D82] CVSS v3.1 回填：条目尚无 cvss 时补 cvssFor(vuln)（单一真源复用，
+ * 与 affectedParam 同一处落地）。外部显式给定不覆盖（幂等）；cvssFor 永不抛
+ * （未知技术走保守默认 5.3）。抽成独立函数而非 inline：enrichVuln 有复杂度
+ * 基线锁定（只许持平或变浅），inline 会直接顶穿。
+ * @param {object} out 已增强的浅拷贝
+ * @param {object} vuln 原始条目（取 technique）
+ * @returns {object} out（原地挂 cvss 后返回）
+ */
+function withCvss(out, vuln) {
+  if (out.cvss == null) out.cvss = cvssFor(vuln);
+  return out;
+}
+
+/**
  * 给单条漏洞补上下文。已存在的非空字段不覆盖（幂等，可重复调用）。
  * @param {object} vuln
  * @param {object|null} point 该漏洞对应的注入点（可能为 null：历史快照/外部构造报告）
@@ -83,7 +102,7 @@ export function enrichVuln(vuln, point, target) {
     }
     if (out.method == null) out.method = affectedMethodOf(point, target);
     if (out.affectedParam == null) out.affectedParam = affectedParamLabel(out.param ?? param, location, point);
-    return out;
+    return withCvss(out, vuln);
   } catch {
     return vuln; // 增强是增益项：任何异常都不让报告生成失败
   }

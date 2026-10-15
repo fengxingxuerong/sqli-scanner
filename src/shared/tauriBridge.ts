@@ -10,6 +10,12 @@ try {
   tauriAvailable = false;
 }
 
+// [D81 热修] 我们自己的重启进行中标志：Rust start_engine 会 kill 旧 sidecar ⇒ 触发
+// engine-exit 事件。若 engine-exit 处理器对此无条件再发起一次重启，就会
+// 「重启→杀旧引擎→exit→重启→…」无限循环（实测：横幅永远停在「重连中」）。
+// 该标志让处理器能区分「意外退出」与「我们自己重启的副作用」。
+let engineRestarting = false;
+
 export const tauriBridge = {
   isTauri: tauriAvailable,
 
@@ -49,6 +55,50 @@ export const tauriBridge = {
     if (!tauriAvailable) return;
     const { invoke } = await import('@tauri-apps/api/core');
     await invoke('start_engine').catch(() => undefined);
+  },
+
+  // [D81/D83] 确保引擎在线并把**当前**实连信息应用到 apiClient。
+  // D83 起语义分两档（Rust 侧 EngineInfo 在进程退出时即被清空，故「拿到有效
+  // port+token」即可判定引擎在跑）：
+  //   ① 现连信息已就绪 ⇒ **完全不 invoke**（旧实现每次开扫都重启引擎、换 token，
+  //      是 D81 两条 bug 的总源头）；② 未就绪 ⇒ start_engine 拉起 + 有界轮询等就绪。
+  // Web 版为 no-op（无 sidecar 概念）。
+  async restartEngineAndApply(): Promise<{ port: number; token: string } | null> {
+    if (!tauriAvailable) return null;
+    const { invoke } = await import('@tauri-apps/api/core');
+    const { setApiBase, setApiToken } = await import('./apiClient');
+    const apply = (info: { port: number; token: string }) => {
+      setApiBase(`http://127.0.0.1:${info.port}/api`);
+      setApiToken(info.token);
+    };
+    // ① 已在跑：直接落地返回，不碰引擎
+    const current = await this.getEngineInfo();
+    if (current && current.port > 0 && current.token) {
+      apply(current);
+      return current;
+    }
+    // ② 未就绪：拉起 + 有界轮询等新就绪信息
+    engineRestarting = true;
+    try {
+      await invoke('start_engine').catch(() => undefined);
+      for (let i = 0; i < 24; i++) {
+        await new Promise((r) => setTimeout(r, 500));
+        const info = await this.getEngineInfo();
+        if (info && info.port > 0 && info.token) {
+          apply(info);
+          return info;
+        }
+      }
+    } finally {
+      engineRestarting = false;
+    }
+    return null;
+  },
+
+  // [D81 热修] 我们自己的重启是否在进行中：engine-exit 处理器据此跳过
+  // 「意外退出才重启」逻辑，避免重启→exit→重启的无限循环。
+  isRestartingEngine(): boolean {
+    return engineRestarting;
   },
 
   // 停止本地引擎

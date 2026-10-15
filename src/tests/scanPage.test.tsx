@@ -39,7 +39,7 @@ vi.mock('../shared/apiClient', () => ({
 }));
 
 vi.mock('../shared/tauriBridge', () => ({
-  tauriBridge: { startEngine: vi.fn(), stopEngine: vi.fn(), saveFile: vi.fn() },
+  tauriBridge: { startEngine: vi.fn(), restartEngineAndApply: vi.fn().mockResolvedValue(null), stopEngine: vi.fn(), saveFile: vi.fn() },
 }));
 
 function renderPage() {
