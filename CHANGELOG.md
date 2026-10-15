@@ -4,6 +4,29 @@
 
 ## [Unreleased]
 
+### 2026-10-15 批次 D81 热修 · 打破引擎重启循环（D81 修完当天真机演示时暴露的附带缺陷）
+
+**症状**：D81 提交后重跑真机扫描演示，横幅从「已停止」变成永远停在**「引擎重启中，
+正在自动重连…」**（15s+ 不消失），扫描依旧 Network Error。
+
+**根因**：`start_engine` 会 kill 旧 sidecar ⇒ engine-exit 事件；而 D81 的
+engine-exit 处理器对该事件**无条件再发起一次重启** ⇒ 重启→杀旧引擎→exit→重启→…
+**无限重启循环**。每次循环恰好都在轮询新 token 的 12s 窗口内，所以横幅永不落定。
+
+**修法**（前端 3 行 + 1 个测试）：
+- `tauriBridge` 加模块级 `engineRestarting` 标志（`restartEngineAndApply` 进出时置位/复位）
+  与 `isRestartingEngine()` 查询；
+- `useEngineRecovery` 的 engine-exit 处理器：**我们自己的重启进行中 ⇒ 跳过**（in-flight
+  的那次重启本来就负责重取新信息），只有意外退出才重连。
+
+**回归测试**：`isRestartingEngine` 窗口语义（重启中 true / 结束 false，fake timers 推进）。
+vitest **569** 全过、gate:close 16/16。
+
+**留证**：这是「修一个接缝 bug 拆出下一个接缝 bug」的连续第二层——单测全绿两次，
+两次都靠真跑才暴露。D82 候选不变且更重要了：**评估取消「开扫即重启引擎」**
+（现状：每扫必杀再生产引擎 + 换 token，是这一串 bug 的总源头；若改为「引擎不在线才拉起」，
+D81/热修两层都可大幅简化）。
+
 ### 2026-10-15 批次 D81 · 桌面壳引擎重连修复：开扫即断 token 的真 bug（D80 演示时实网撞到）
 
 **动机**：D80 收尾时用 CDP 真跑一次扫描做演示，连续撞见「开扫后 Network Error +

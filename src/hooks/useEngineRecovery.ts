@@ -22,6 +22,10 @@ export function useEngineRecovery(): EngineRecovery {
 
   // 重连并落地：重启 sidecar → 有界轮询等新就绪信息 → 应用到 apiClient → 清横幅
   const recover = useCallback(() => {
+    // [D81 热修] 我们自己的重启杀旧引擎也会触发 engine-exit：此时 in-flight 的
+    // restartEngineAndApply 正在重取新信息，再叠一次重启就是无限循环
+    // （实测：横幅永远停在「重连中」）⇒ 跳过，交给 in-flight 的那次落地。
+    if (tauriBridge.isRestartingEngine()) return;
     setEngineDown(true);
     setEngineRecovering(true);
     void tauriBridge.restartEngineAndApply()

@@ -10,6 +10,12 @@ try {
   tauriAvailable = false;
 }
 
+// [D81 热修] 我们自己的重启进行中标志：Rust start_engine 会 kill 旧 sidecar ⇒ 触发
+// engine-exit 事件。若 engine-exit 处理器对此无条件再发起一次重启，就会
+// 「重启→杀旧引擎→exit→重启→…」无限循环（实测：横幅永远停在「重连中」）。
+// 该标志让处理器能区分「意外退出」与「我们自己重启的副作用」。
+let engineRestarting = false;
+
 export const tauriBridge = {
   isTauri: tauriAvailable,
 
@@ -61,18 +67,29 @@ export const tauriBridge = {
     if (!tauriAvailable) return null;
     const { invoke } = await import('@tauri-apps/api/core');
     const { setApiBase, setApiToken } = await import('./apiClient');
-    await invoke('start_engine').catch(() => undefined);
-    // 轮询等新引擎就绪：port>0 且 token 非空（Rust 在收到 ENGINE_TOKEN 后才写 EngineInfo）
-    for (let i = 0; i < 24; i++) {
-      await new Promise((r) => setTimeout(r, 500));
-      const info = await this.getEngineInfo();
-      if (info && info.port > 0 && info.token) {
-        setApiBase(`http://127.0.0.1:${info.port}/api`);
-        setApiToken(info.token);
-        return info;
+    engineRestarting = true;
+    try {
+      await invoke('start_engine').catch(() => undefined);
+      // 轮询等新引擎就绪：port>0 且 token 非空（Rust 在收到 ENGINE_TOKEN 后才写 EngineInfo）
+      for (let i = 0; i < 24; i++) {
+        await new Promise((r) => setTimeout(r, 500));
+        const info = await this.getEngineInfo();
+        if (info && info.port > 0 && info.token) {
+          setApiBase(`http://127.0.0.1:${info.port}/api`);
+          setApiToken(info.token);
+          return info;
+        }
       }
+    } finally {
+      engineRestarting = false;
     }
     return null;
+  },
+
+  // [D81 热修] 我们自己的重启是否在进行中：engine-exit 处理器据此跳过
+  // 「意外退出才重启」逻辑，避免重启→exit→重启的无限循环。
+  isRestartingEngine(): boolean {
+    return engineRestarting;
   },
 
   // 停止本地引擎

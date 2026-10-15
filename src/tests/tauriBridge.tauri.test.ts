@@ -117,6 +117,24 @@ describe('tauriBridge 桌面分支（__TAURI_INTERNALS__）', () => {
 });
 
 describe('tauriBridge D81：引擎重启重连（restartEngineAndApply）', () => {
+  it('isRestartingEngine：重启窗口内为 true、结束后回落 false（无限重启循环的破除点）', async () => {
+    vi.useFakeTimers();
+    try {
+      h.invoke.mockImplementation((cmd: string) =>
+        cmd === 'start_engine' ? Promise.resolve('ok') : Promise.resolve({ port: 0, token: '' }));
+      const p = tauriBridge.restartEngineAndApply();
+      await vi.advanceTimersByTimeAsync(1_000);
+      // 重启进行中：engine-exit 处理器据此跳过「再重启一次」
+      expect(tauriBridge.isRestartingEngine()).toBe(true);
+      await vi.advanceTimersByTimeAsync(15_000);
+      await p;
+      expect(tauriBridge.isRestartingEngine()).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  }, 20_000);
+
+
   // ── D81：restartEngineAndApply（重启引擎 + 重取新实连信息）──────────────
   // 背景：start_engine 会 kill 旧 sidecar 再拉新的 ⇒ 端口与一次性 token 都变。
   // 只 invoke 不取新信息的旧链路，病征是「第一次扫描后每次开扫都 401/Network Error」。
