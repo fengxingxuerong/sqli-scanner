@@ -2,6 +2,67 @@
 
 本项目版本号遵循 [语义化版本 2.0.0](https://semver.org/lang/zh-CN/)。
 
+## [1.1.1] - 2026-10-16
+
+> **补丁版**：1.1.0 之后累积的 14 个批次（D72–D84）。主题三条：仓库/口径卫生、桌面壳链路
+> 真 bug 修复（含两个只在真机演示时才暴露的接缝缺陷）、UI 赛博化与扫描过程全可见。
+> 每个批次的完整动机/取证/测试见下方 `[Unreleased]` 中的对应条目。
+
+### 安全性（桌面壳授权边界修复）
+
+- **D81 + D81 热修**：修复「开扫即断 token」真 bug——旧链路开扫前重启 sidecar 会换掉
+  端口与一次性 token，前端不同步刷新则全部请求 401（病征：第一次扫描后每次开扫
+  Network Error）。新增 `tauriBridge.restartEngineAndApply()`（重启 + 有界轮询等新就绪
+  信息 + 落地 apiClient）与 `useEngineRecovery`（engine-exit 自动重连，两态横幅）。
+  热修打破「重启→exit→重启」无限循环（`engineRestarting` 标志）。
+- **D83**：引擎启动幂等化——`spawn_engine` 有在跑句柄直接返回，Terminated 时清空
+  EngineChild/EngineInfo（陈旧信息不再被当就绪）；前端两段式：已就绪零 invoke。
+  真机双扫验证引擎 PID 不变。
+- **D84**：桌面版渲染门禁——引擎实连信息异步取得期间不渲染路由，修冷启动深链
+  `/report/:id` 报「未找到报告」（前端抢跑打默认 base）。
+
+### 交付契约
+
+- **D82**：引擎原始 `report.json` 的漏洞条目补 CVSS v3.1 回填（`vulnEnrich` 复用
+  `cvssFor` 单一真源）——此前只有渲染格式（md/html）有 CVSS，机读消费方
+  （REST/CI/MCP）拿不到。新增 `server/tests/vulnEnrich.cvss.test.js` ×4。
+
+### 桌面壳构建与发布基建
+
+- **D75**：修本机 `tauri dev` 两起起不来（rustup 默认链损坏致 tauri-cli panic；
+  vite watcher 与 cargo 写 DLL 撞车 EBUSY ⇒ `watch.ignored` 排 `src-tauri/target`）。
+- **D76**：`sea-config.json` 同步构建工具实际输出（wasm 路径指向 dist-engine），
+  消掉每次 sidecar 构建写脏工作区。
+- **D77**：npm 端 `@tauri-apps/*` 四包收敛到 Rust crate 线（`~2.11.x`）——此前 npm
+  漂到 2.12 线而 Cargo.lock 锁 2.11，`tauri build` 在打包末尾才拦（CI 从不构建
+  Tauri 故从未暴露）。
+- **D78**：`release-check.mjs` 新增「Tauri npm↔crate 同线」判据，把上述不一致从
+  打包末尾拦截提前到发布入口。
+
+### 前端 UI
+
+- **D79**：对比度修复（默认浅色主题下 hero 硬编码色不达 WCAG AA）+ 密度提升
+  （扫描页双栏信息栏、历史页紧凑空态）；拆出 `HomeHero`/`ScanSidebar`/
+  `ScanConfirmDialogs`/`HistoryEmpty` 四个组件。
+- **D80**：赛博风格成本体——默认主题切暗色、点阵背景全局化、事件直播控制台
+  （全量事件 + 自动跟随 + 终端配色）、扫描过程三重可见（进度区自动滚入 + 全局
+  扫描线 + 顶栏呼吸灯）；拆出 `TopNav`/`ScanProgress`/`useScanActivity`。
+
+### 仓库卫生与口径治理
+
+- **D72**：本机构建产物清理（~39MB）、删除 git 坏 ref `origin/HEAD`、
+  `deliverables-demo` 加陈旧性生成声明。
+- **D73**：WAF 现行口径文档补立「真机口径现行版」（六轮结论链表 + 引用分级），
+  09-27 失效数字按推翻协议补标禁引。
+- **D74**：4 篇过期快照按归档规则移入 `docs/archive/`（根 docs 42→38 篇）。
+
+### 验证
+
+- vitest **574/574**；服务端 **3567 用例（3563 pass / 0 fail / 4 skip）**。
+- `gate:close --quick` 16/16、`cargo fmt --check` + `clippy -D warnings` 干净、
+  `artifact-drift` 三份基线零漂移、`npm audit --omit=dev` 0 漏洞。
+- 桌面端真机：双扫描引擎 PID 稳定、扫描结论与靶场地面真值一致（PoC 可重放）。
+
 ## [Unreleased]
 
 ### 2026-10-16 批次 D84 · 桌面版渲染门禁：引擎就绪前不渲染路由（修冷启动深链「未找到报告」）
