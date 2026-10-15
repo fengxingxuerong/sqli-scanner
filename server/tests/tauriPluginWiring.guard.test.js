@@ -238,10 +238,17 @@ function capabilityEntries() {
  * （fs.readFileSync / writeFileSync / rmSync…），不限定的话会把它们当成桌面调用，
  * 报出一堆"不在权限映射表里"的假缺陷（本条判据第一跑就是这样红的，实测）。
  */
+// [D82 判定收紧] 只认**真实 import**（import ... from / import(...)），不再用文本包含：
+// 实测误报 —— release-check.mjs 的 npm↔crate 配置表里写了字面量 '@tauri-apps/plugin-fs'
+// （描述用，非调用），文本包含口径把它当成插件消费者，进而把它自己读文件的
+// fs.existsSync/readFileSync 报成「桌面 fs 调用没授权」。精确匹配既消误报，
+// 又不放松判据（真消费者 tauriBridge.ts 仍照查）。
+const FS_IMPORT_RE = /(?:from\s*|import\s*\(?\s*)['"]@tauri-apps\/plugin-fs['"]/;
+
 function fsFunctionsUsedInSource() {
   const used = new Set();
   for (const { text } of sourceFiles()) {
-    if (!text.includes('@tauri-apps/plugin-fs')) continue;
+    if (!FS_IMPORT_RE.test(text)) continue;
     for (const m of text.matchAll(/\bfs\.([A-Za-z]+)\(/g)) used.add(m[1]);
   }
   return used;

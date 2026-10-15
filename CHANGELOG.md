@@ -4,6 +4,31 @@
 
 ## [Unreleased]
 
+### 2026-10-15 批次 D82 · 修交付契约缺口：引擎原始 report.json 补 CVSS 回填（核查真扫产物时实锤）
+
+**动机**：用户要求核查「扫描结论是否正确」。逐层验证结论无误（3 命中全部为真、PoC 可重放、
+定库正确、靶场死时如实报 unreachable），但**核查中发现一个契约缺口**：
+README 交付契约写「每条漏洞必含 风险等级 + CVSS v3.1，**全部格式**」，实测
+report.md / report.html 有（union 8.2 / boolean 7.5），**引擎台账的 report.json 三条
+vulns 全无 cvss 字段**——CVSS 只活在渲染链路（reportDelivery.buildDelivery），
+引擎回填链路（vulnEnrich）漏了。机读消费方（REST/CI/MCP）拿 JSON 的没有 CVSS。
+
+| 面 | 改动 |
+|---|---|
+| 修复 | `enrichVuln` 回填 affectedParam 的同一处补 `withCvss()`（复用 `cvssFor()` 单一真源）：条目无 cvss 则补、显式给定不覆盖（幂等）、不写回输入（poc.evidence 契约不破） |
+| 结构 | CVSS 回填报成 `withCvss` 辅助函数而非 inline：`enrichVuln` 有复杂度基线锁定（只许持平或变浅），inline 会顶穿（实测 inline 版直接触发 wiring 形态-7 红） |
+| 测试 | 新增 `server/tests/vulnEnrich.cvss.test.js` ×4：三件套齐全（union 8.2/High）/ 幂等不覆盖 + 未知技术保守默认 5.3 / 不写回输入 / attachVulnContext 整报告路径 |
+| 顺带修一个守卫误报 | `tauriPluginWiring.guard` ④ 的「文本包含 @tauri-apps/plugin-fs」口径把本仓 `release-check.mjs` 配置表里的**字面量**当成插件消费者，进而把它自己读文件的 `fs.existsSync/readFileSync` 报成「桌面 fs 没授权」⇒ 收紧为真实 import 匹配（`FS_IMPORT_RE`）。修判据而非绕过（本仓纪律） |
+
+**验证**：服务端 **3567 用例（3563 pass / 0 fail / 4 skip）**、artifact-drift 三份基线零漂移、
+gate:close 16/16、lint/tsc 全过。
+
+**留证**：这是本仓「单测全绿但产物违约」的又一实例——`cvssFor` 自己有测试、
+delivery 契约测试也绿（它只测渲染链路），缺口在**引擎原始报告**这条没人对过账的路径上。
+教训：交付契约的核对对象必须是**落盘产物**，不是渲染函数的入参。
+
+
+
 ### 2026-10-15 批次 D81 热修 · 打破引擎重启循环（D81 修完当天真机演示时暴露的附带缺陷）
 
 **症状**：D81 提交后重跑真机扫描演示，横幅从「已停止」变成永远停在**「引擎重启中，
