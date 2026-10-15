@@ -758,6 +758,7 @@
     "skipToContent": "Skip to main content",
     "engineRestart": "Restart Engine",
     "engineStopped": "Detection engine has stopped",
+    "engineReconnecting": "Engine restarting, reconnecting automatically…",
     "pageErrorTitle": "Page render error",
     "refreshPage": "Refresh Page",
     "scanRunning": "A scan is already running. Please stop it first.",

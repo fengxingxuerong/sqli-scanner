@@ -67,7 +67,9 @@ export default function ScanPage() {
   ) => {
     setStarting(true);
     try {
-      await tauriBridge.startEngine();
+      // [D81] 不能只 invoke start_engine：它会 kill 旧引擎再拉新的（端口/token 都变），
+      // 必须用重启后重取的实连信息，否则后续请求全带旧 token（401 → Network Error）。
+      await tauriBridge.restartEngineAndApply();
       await startScan({
         engine, url: url.trim(), method,
         bodyParams: bp, cookieParams: cp, headerParams: hp,

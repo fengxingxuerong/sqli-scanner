@@ -758,6 +758,7 @@
     "skipToContent": "跳到主内容",
     "engineRestart": "重启引擎",
     "engineStopped": "检测引擎已停止运行",
+    "engineReconnecting": "引擎重启中，正在自动重连…",
     "pageErrorTitle": "页面渲染异常",
     "refreshPage": "刷新页面",
     "scanRunning": "已有扫描正在运行，请先停止当前扫描",

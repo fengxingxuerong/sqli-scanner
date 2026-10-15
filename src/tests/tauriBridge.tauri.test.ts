@@ -15,6 +15,7 @@ vi.mock('@tauri-apps/api/event', () => ({ listen: h.listen }));
 vi.mock('@tauri-apps/api/core', () => ({ invoke: h.invoke }));
 
 import { tauriBridge } from '../shared/tauriBridge';
+import { getApiBase } from '../shared/apiClient';
 import { save as dialogSave, open as dialogOpen } from './stubs/tauriPluginDialog';
 import { writeTextFile, readTextFile } from './stubs/tauriPluginFs';
 
@@ -112,5 +113,46 @@ describe('tauriBridge 桌面分支（__TAURI_INTERNALS__）', () => {
     dialogOpen.mockResolvedValue(undefined);
     await expect(tauriBridge.openTextFile()).resolves.toBeNull();
   });
+
 });
 
+describe('tauriBridge D81：引擎重启重连（restartEngineAndApply）', () => {
+  // ── D81：restartEngineAndApply（重启引擎 + 重取新实连信息）──────────────
+  // 背景：start_engine 会 kill 旧 sidecar 再拉新的 ⇒ 端口与一次性 token 都变。
+  // 只 invoke 不取新信息的旧链路，病征是「第一次扫描后每次开扫都 401/Network Error」。
+  it('restartEngineAndApply：start_engine 后拿到新 port/token 就应用到 apiClient 并返回', async () => {
+    h.invoke.mockImplementation((cmd: string) =>
+      cmd === 'start_engine' ? Promise.resolve('ok') : Promise.resolve({ port: 4567, token: 'tok-new' }));
+    const info = await tauriBridge.restartEngineAndApply();
+    expect(info).toEqual({ port: 4567, token: 'tok-new' });
+    expect(h.invoke).toHaveBeenCalledWith('start_engine');
+    // 新地址/新 token 必须真的落到 apiClient——否则调用方仍然打旧端口
+    expect(getApiBase()).toBe('http://127.0.0.1:4567/api');
+  });
+
+  it('restartEngineAndApply：token 未就绪（port=0）时继续轮询，不采用半就绪状态', async () => {
+    let infoCalls = 0;
+    h.invoke.mockImplementation((cmd: string) => {
+      if (cmd === 'start_engine') return Promise.resolve('ok');
+      infoCalls += 1;
+      // 前两轮模拟「已拉起但 ENGINE_TOKEN 还没到」（Rust 侧 recv_timeout 5s）
+      return Promise.resolve(infoCalls < 3 ? { port: 0, token: '' } : { port: 5300, token: 't2' });
+    });
+    const info = await tauriBridge.restartEngineAndApply();
+    expect(info).toEqual({ port: 5300, token: 't2' });
+    expect(infoCalls).toBeGreaterThanOrEqual(3);
+  });
+
+  it('restartEngineAndApply：引擎始终不就绪 ⇒ 有界轮询后放弃返回 null（不无限等）', async () => {
+    vi.useFakeTimers();
+    try {
+      h.invoke.mockImplementation((cmd: string) =>
+        cmd === 'start_engine' ? Promise.resolve('ok') : Promise.resolve({ port: 0, token: '' }));
+      const p = tauriBridge.restartEngineAndApply();
+      await vi.advanceTimersByTimeAsync(15_000); // 24 轮 × 500ms = 12s 上界
+      await expect(p).resolves.toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  }, 20_000);
+});

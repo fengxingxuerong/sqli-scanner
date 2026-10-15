@@ -4,6 +4,39 @@
 
 ## [Unreleased]
 
+### 2026-10-15 批次 D81 · 桌面壳引擎重连修复：开扫即断 token 的真 bug（D80 演示时实网撞到）
+
+**动机**：D80 收尾时用 CDP 真跑一次扫描做演示，连续撞见「开扫后 Network Error +
+'检测引擎已停止运行'横幅不消」。逐层剥开是一条**真链路 bug**，非环境问题（sidecar 单独跑
+完全正常，368 行日志比对 + 直接打 52651 端口 health=200 证实引擎活着）。
+
+**根因链**（三层全断，任意一层都致命）：
+1. `ScanPage.doStart` 每次开扫先调 `startEngine()`，而 Rust `spawn_engine` **先 kill 旧
+   sidecar 再拉新的**（lib.rs:82-88）⇒ 端口与一次性 token 都变；
+2. 前端 `apiBase/token` 只在 App 挂载时取过一次（App.tsx 旧 useEffect，无重取路径）
+   ⇒ 之后的扫描请求全带**旧 token** → 401 → UI 报 Network Error；
+3. `engine-exit` 横幅只置位不清除（手动点「重启引擎」也不重取信息）⇒ 横幅常亮；
+   且这个横幅还是第 1 步的 startEngine 自己杀旧引擎触发的——**自残链**。
+
+**修法**（前端收口，Rust 未动）：
+
+| 面 | 改动 |
+|---|---|
+| 桥接 | `tauriBridge.restartEngineAndApply()`：`start_engine` → **有界轮询**（24×500ms）等新 `get_engine_info` 就绪（port>0 且 token 非空，Rust 收到 ENGINE_TOKEN 后才写 EngineInfo）→ `setApiBase/setApiToken` 落地 → 返回新信息 |
+| 扫描链路 | `ScanPage.doStart` 改调 `restartEngineAndApply()`（替代裸 `startEngine`）——重启后必须用新实连信息，否则等于白重启 |
+| 掉线恢复 | `useEngineRecovery` hook（D80 拆出的第四块）：engine-exit → 自动重连并落地新信息 → 成功即清横幅；**只有自动恢复失败才保留横幅 + 手动按钮**；横幅分「重连中(info)/已失败(error)」两态 |
+| 结构 | AppThemeProvider 体量/圈复杂度超基线（186/32）⇒ 引擎生命周期 UI 抽出为独立 hook（职责：与主题无关） |
+
+**测试**：`tauriBridge.tauri.test.ts` +3（D81 独立 describe）——新 token 落地 apiClient /
+半就绪状态(port=0)不采用继续轮询 / 始终不就绪有界放弃返回 null（fake timers 推进 15s）；
+scanPage 两组 mock 补 `restartEngineAndApply`。vitest **568**（565+3）全过，
+gate:close 16/16、tsc/lint/dup 全绿。
+
+**留证**：本批是「演示驱动测试」的又一实例——功能在单测里全绿，真跑一次才暴露
+接缝处的 token 生命周期问题（单测的 bridge mock 从不换 token）。已登记：D82 候选
+= 评估「开扫即重启引擎」是否必要（现状每扫必杀再生产引擎，既慢又无谓地换了 token）。
+
+
 ### 2026-10-14 批次 D80 · 赛博风格成本体（默认暗色 + 全局点阵）+ 扫描过程全可见（直播控制台）
 
 **动机**：实际渲染四个页面后确认：赛博资产（`.glass`/`.dot-grid`/`.neon-border`/

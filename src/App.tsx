@@ -11,6 +11,7 @@ import { useTranslation } from 'react-i18next';
 import router, { PageFallback } from './router';
 import DisclaimerDialog from './components/DisclaimerDialog';
 import { tauriBridge } from './shared/tauriBridge';
+import { useEngineRecovery } from './hooks/useEngineRecovery';
 import { setApiBase, setApiToken } from './shared/apiClient';
 import './i18n';
 
@@ -27,6 +28,7 @@ export { useThemeMode } from './shared/themeMode';
 // 顶层主题 Provider：动态 createTheme，主题模式持久化到 localStorage
 function AppThemeProvider({ children }: { children: ReactNode }) {
   const { t } = useTranslation();
+  const { engineDown, engineRecovering, restartEngine } = useEngineRecovery();
   const [mode, setModeState] = useState<ThemeMode>(() => {
     if (typeof window !== 'undefined') {
       const saved = window.localStorage.getItem(THEME_KEY);
@@ -69,21 +71,7 @@ function AppThemeProvider({ children }: { children: ReactNode }) {
     return () => { cancelled = true; };
   }, []);
 
-  // Tauri 桌面版：监听引擎崩溃/退出，Snackbar 提示用户可重启
-  const [engineDown, setEngineDown] = useState(false);
-  useEffect(() => {
-    if (!tauriBridge.isTauri) return;
-    const unlisten = tauriBridge.onEngineExit(() => {
-      setEngineDown(true);
-    });
-    return () => { if (unlisten) unlisten(); };
-  }, []);
-
-  const restartEngine = () => {
-    setEngineDown(false);
-    tauriBridge.startEngine().catch(() => undefined);
-  };
-
+  // [D81] 引擎生命周期 UI（自动重连 + 手动重启 + 横幅）抽至 useEngineRecovery
   const effectiveMode: 'light' | 'dark' =
     mode === 'system' ? (systemDark ? 'dark' : 'light') : mode;
 
@@ -198,13 +186,19 @@ function AppThemeProvider({ children }: { children: ReactNode }) {
   return (
     <ThemeModeContext.Provider value={{ mode, effectiveMode, setMode }}>
       <ThemeProvider theme={theme}>{children}</ThemeProvider>
-      {/* Tauri 桌面版：引擎退出提示 */}
+      {/* Tauri 桌面版：引擎退出提示（D81：重连中/已失败两态） */}
       {tauriBridge.isTauri && (
         <Snackbar open={engineDown} autoHideDuration={null} anchorOrigin={{ vertical: 'top', horizontal: 'center' }}>
-          <Alert severity="error" variant="filled" action={
-            <Button color="inherit" size="small" onClick={restartEngine}>{t('common.engineRestart')}</Button>
-          }>
-            {t('common.engineStopped')}
+          <Alert
+            severity={engineRecovering ? 'info' : 'error'}
+            variant="filled"
+            action={
+              engineRecovering ? undefined : (
+                <Button color="inherit" size="small" onClick={restartEngine}>{t('common.engineRestart')}</Button>
+              )
+            }
+          >
+            {engineRecovering ? t('common.engineReconnecting') : t('common.engineStopped')}
           </Alert>
         </Snackbar>
       )}
