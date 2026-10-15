@@ -4,6 +4,27 @@
 
 ## [Unreleased]
 
+### 2026-10-15 批次 D83 · 引擎启动幂等化：取消「开扫即重启引擎」（D81 两条 bug 的总源头）
+
+**动机**：D81/D81 热修都是在给「开扫即重启」打补丁——`ScanPage.doStart` 每次开扫先
+`startEngine()`，Rust `spawn_engine` 无条件 kill 旧 sidecar 再拉新的，端口与一次性
+token 都变，前端不同步刷新就 401（Network Error）；engine-exit 横幅还是这次自杀触发的。
+本批按 D81 留下的候选直接修总源头。
+
+**评估结论**：重启没有必要。引擎由壳在启动时拉起且设计上常驻；「每次开扫重启」既不
+提速也不保洁，只平白换 token、断 SSE、制造竞态。
+
+| 面 | 改动 |
+|---|---|
+| Rust（lib.rs） | spawn_engine **幂等**：EngineChild 有在跑句柄直接返回；Terminated 分支清空 EngineChild 句柄 + EngineInfo——进程真死后下次调用才能重拉，且 get_engine_info 不会把死引擎的陈旧信息当就绪返回（否则前端重连轮询会误判成功） |
+| 前端（tauriBridge） | restartEngineAndApply 改**两段式**：先探 get_engine_info，已就绪（port>0 且 token 非空，D83 起该状态只在引擎真在跑时成立）则**零 invoke 直接落地**；未就绪才 start_engine + 有界轮询。开扫路径从此不碰引擎 |
+| 测试 | tauriBridge 组重写为 5 例：在跑零 invoke / 未就绪才重启并落地 / 半就绪继续轮询 / 始终不就绪有界放弃 / 重启窗口标志；**顺带修测试基建**——D81 热修拆 describe 时丢了 beforeEach 的 spy 隔离，调用记录跨测试累积（病征：not.toHaveBeenCalledWith 被上一个 describe 的历史调用误触红） |
+
+**验证**：vitest **571** 全过、tsc/lint 0、cargo fmt --check + clippy -D warnings 干净、
+gate:close 16/16。Rust release 重编 + 真机双扫演示（引擎 PID 与 token 跨扫描稳定）见提交后验证。
+
+
+
 ### 2026-10-15 批次 D82 · 修交付契约缺口：引擎原始 report.json 补 CVSS 回填（核查真扫产物时实锤）
 
 **动机**：用户要求核查「扫描结论是否正确」。逐层验证结论无误（3 命中全部为真、PoC 可重放、

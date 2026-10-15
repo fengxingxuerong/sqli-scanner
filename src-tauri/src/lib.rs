@@ -41,7 +41,21 @@ fn pick_engine_port() -> u16 {
 // 启动/重启本地 Node 检测引擎（sidecar）
 // 可重入：重启时先 kill 残留旧进程，再写入新句柄（不二次 manage 覆盖丢句柄）
 // [A3] 全路径免 panic：构造/spawn 失败只广播 engine-exit，由前端提供重试入口。
+// [D83] **幂等**：已有在跑的 sidecar 时直接返回，不再 kill 旧的再拉新的。
+// 旧逻辑每次调用都重建引擎 ⇒ 端口与一次性 token 都变，前端不同步刷新就 401
+// （D81「开扫即断 token」及其热修「重启循环」两条 bug 的总源头，均为真机演示实锤）。
+// 判活依据 EngineChild 句柄存在性；进程真死时 Terminated 分支会清空句柄，
+// 之后的调用仍能正确重拉（见下方 Terminated 处理）。
 fn spawn_engine(app: &tauri::AppHandle) {
+    if let Some(state) = app.try_state::<EngineChild>() {
+        if let Ok(guard) = state.0.lock() {
+            if guard.is_some() {
+                println!("[引擎] sidecar 已在运行，跳过重复启动");
+                return;
+            }
+        }
+    }
+
     let port = pick_engine_port();
 
     let cmd = match app.shell().sidecar("sqli-engine") {
@@ -111,6 +125,19 @@ fn spawn_engine(app: &tauri::AppHandle) {
                 // 引擎进程退出：向前端广播（前端 Snackbar 提示 + 重启按钮）
                 CommandEvent::Terminated(payload) => {
                     println!("[引擎] 进程退出 code={:?}", payload.code);
+                    // [D83] 清空「在跑」判据的两份状态：句柄清掉后 spawn_engine 才能重拉；
+                    // EngineInfo 清掉后 get_engine_info 不会把已死引擎的旧端口/token 当就绪返回
+                    // （否则前端的重连轮询会立刻拿到陈旧信息、误判重连成功）。
+                    if let Some(state) = app_handle.try_state::<EngineChild>() {
+                        if let Ok(mut guard) = state.0.lock() {
+                            guard.take();
+                        }
+                    }
+                    if let Some(state) = app_handle.try_state::<EngineInfo>() {
+                        if let Ok(mut guard) = state.0.lock() {
+                            *guard = (0u16, String::new());
+                        }
+                    }
                     let _ = app_handle.emit(
                         "engine-exit",
                         serde_json::json!({

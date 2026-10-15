@@ -57,26 +57,35 @@ export const tauriBridge = {
     await invoke('start_engine').catch(() => undefined);
   },
 
-  // [D81 2026-10-15] 重启引擎并把**新的**实连信息应用到 apiClient。
-  // 为什么必须专用一个方法：Rust 侧 start_engine 会先 kill 旧 sidecar 再拉起新的，
-  // 端口与一次性 token 都会变（token 就绪最长 5s，见 lib.rs 的 recv_timeout）。
-  // 旧链路只 invoke 不取新信息 ⇒ 前端拿旧 token 打全部 API，病征是「第一次扫描之后
-  // 每次开扫都 Network Error / 401」+ engine-exit 横幅挂着不消（横幅是 startEngine
-  // 自己杀旧引擎触发的）。Web 版为 no-op（无 sidecar 概念）。
+  // [D81/D83] 确保引擎在线并把**当前**实连信息应用到 apiClient。
+  // D83 起语义分两档（Rust 侧 EngineInfo 在进程退出时即被清空，故「拿到有效
+  // port+token」即可判定引擎在跑）：
+  //   ① 现连信息已就绪 ⇒ **完全不 invoke**（旧实现每次开扫都重启引擎、换 token，
+  //      是 D81 两条 bug 的总源头）；② 未就绪 ⇒ start_engine 拉起 + 有界轮询等就绪。
+  // Web 版为 no-op（无 sidecar 概念）。
   async restartEngineAndApply(): Promise<{ port: number; token: string } | null> {
     if (!tauriAvailable) return null;
     const { invoke } = await import('@tauri-apps/api/core');
     const { setApiBase, setApiToken } = await import('./apiClient');
+    const apply = (info: { port: number; token: string }) => {
+      setApiBase(`http://127.0.0.1:${info.port}/api`);
+      setApiToken(info.token);
+    };
+    // ① 已在跑：直接落地返回，不碰引擎
+    const current = await this.getEngineInfo();
+    if (current && current.port > 0 && current.token) {
+      apply(current);
+      return current;
+    }
+    // ② 未就绪：拉起 + 有界轮询等新就绪信息
     engineRestarting = true;
     try {
       await invoke('start_engine').catch(() => undefined);
-      // 轮询等新引擎就绪：port>0 且 token 非空（Rust 在收到 ENGINE_TOKEN 后才写 EngineInfo）
       for (let i = 0; i < 24; i++) {
         await new Promise((r) => setTimeout(r, 500));
         const info = await this.getEngineInfo();
         if (info && info.port > 0 && info.token) {
-          setApiBase(`http://127.0.0.1:${info.port}/api`);
-          setApiToken(info.token);
+          apply(info);
           return info;
         }
       }
