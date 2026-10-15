@@ -1,4 +1,4 @@
-import { CssBaseline, ThemeProvider, createTheme, Snackbar, Alert, Button } from '@mui/material';
+import { CssBaseline, ThemeProvider, createTheme, Snackbar, Alert, Button, Box, CircularProgress } from '@mui/material';
 import {
   useState,
   useEffect,
@@ -12,7 +12,6 @@ import router, { PageFallback } from './router';
 import DisclaimerDialog from './components/DisclaimerDialog';
 import { tauriBridge } from './shared/tauriBridge';
 import { useEngineRecovery } from './hooks/useEngineRecovery';
-import { setApiBase, setApiToken } from './shared/apiClient';
 import './i18n';
 
 // 主题模式：浅色 / 跟随系统 / 暗色
@@ -24,6 +23,17 @@ import { THEME_KEY, ThemeModeContext } from './shared/themeMode';
 // 再导出：保持既有 import 路径不变（TopBar 等组件仍可从 App 取到主题类型/hook）
 export type { ThemeMode } from './shared/themeMode';
 export { useThemeMode } from './shared/themeMode';
+
+// [D84] 引擎就绪门禁的载入态单独成组件：这段 JSX 是一次性的容器 markup，挪出后可让
+// AppThemeProvider 变浅 —— 它本就在复杂度基线的豁免名单上，再长胖不合适（只许持平或变浅）。
+function EngineGate({ ready, children }: { ready: boolean; children: ReactNode }) {
+  if (ready) return <>{children}</>;
+  return (
+    <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
+      <CircularProgress size={28} />
+    </Box>
+  );
+}
 
 // 顶层主题 Provider：动态 createTheme，主题模式持久化到 localStorage
 function AppThemeProvider({ children }: { children: ReactNode }) {
@@ -59,15 +69,16 @@ function AppThemeProvider({ children }: { children: ReactNode }) {
 
   // [A3 2026-09-17] 桌面版：向 Rust 询问 sidecar 实际端口与一次性 token。
   // 引擎不再固定 4567（端口被占时随机），且带鉴权 token，前端必须按实况连接。
+  // [D84] 这里还加了**渲染门禁**：引擎实连信息是异步取得的，深链路由（冷启动直达 /report/:id）
+  // 在旧实现下页面比它先发请求 ⇒ 用默认 base 打 404 ⇒ 「未找到报告」（而报告其实好好的在）。
+  // 现在：等引擎就绪（有界等待）后再渲染路由，覆盖所有深链页；web/测试环境立即就绪（isTauri=false 不开门禁）。
+  const [engineReady, setEngineReady] = useState(!tauriBridge.isTauri);
   useEffect(() => {
     if (!tauriBridge.isTauri) return;
     let cancelled = false;
-    (async () => {
-      const info = await tauriBridge.getEngineInfo();
-      if (cancelled || !info) return;
-      setApiBase(`http://127.0.0.1:${info.port}/api`);
-      if (info.token) setApiToken(info.token);
-    })();
+    void tauriBridge.restartEngineAndApply().finally(() => {
+      if (!cancelled) setEngineReady(true); // 即使引擎最终没起来也渲染（默认 base 兜底给出可见反馈，好过停在白屏）
+    });
     return () => { cancelled = true; };
   }, []);
 
@@ -185,7 +196,11 @@ function AppThemeProvider({ children }: { children: ReactNode }) {
 
   return (
     <ThemeModeContext.Provider value={{ mode, effectiveMode, setMode }}>
-      <ThemeProvider theme={theme}>{children}</ThemeProvider>
+      <ThemeProvider theme={theme}>
+        {/* [D84] 引擎就绪前不渲染路由：否则深链页会提前发请求、打默认 base。
+            web/测试环境 engineReady 初值即 true，看不到这个加载态。 */}
+        <EngineGate ready={engineReady}>{children}</EngineGate>
+      </ThemeProvider>
       {/* Tauri 桌面版：引擎退出提示（D81：重连中/已失败两态） */}
       {tauriBridge.isTauri && (
         <Snackbar open={engineDown} autoHideDuration={null} anchorOrigin={{ vertical: 'top', horizontal: 'center' }}>

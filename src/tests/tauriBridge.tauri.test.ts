@@ -186,7 +186,8 @@ describe('tauriBridge D81：引擎重启重连（restartEngineAndApply）', () =
   it('D81：引擎始终不就绪 ⇒ 有界轮询后放弃返回 null（不无限等）', async () => {
     vi.useFakeTimers();
     try {
-      h.invoke.mockImplementation((cmd: string) => Promise.resolve({ port: 0, token: '' }));
+      // [D84 顺带修 HEAD 遗留] 形参 `cmd` 本例不分支用 ⇒ TS6133（`npm run typecheck:tests` 红）
+      h.invoke.mockImplementation(() => Promise.resolve({ port: 0, token: '' }));
       const p = tauriBridge.restartEngineAndApply();
       await vi.advanceTimersByTimeAsync(15_000); // 24 轮 × 500ms = 12s 上界
       await expect(p).resolves.toBeNull();

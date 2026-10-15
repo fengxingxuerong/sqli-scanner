@@ -4,6 +4,38 @@
 
 ## [Unreleased]
 
+### 2026-10-16 批次 D84 · 桌面版渲染门禁：引擎就绪前不渲染路由（修冷启动深链「未找到报告」）
+
+**动机**：报告页视觉核查时撞到——**冷启动直达深链** `/report/:id`（历史列表点开一条旧报告、
+或用上次会话的链接重进）时报「未找到报告」，而同 scanId 的 `/api/scan/:id/report` 直连返回
+200、`/api/scans` 也列得出来。不是后端丢了报告，是**前端抢跑**：引擎实连信息（随机端口 +
+一次性 token）是 App 挂载时异步向 Rust 问来的，旧实现里 `RouterProvider` 先渲染、
+ReportPage 的 fetch 比实连信息先发出 ⇒ 拿默认 base 打过去 ⇒ 404 ⇒ UI 报「未找到报告」。
+（D81 修的是 token 换掉之后还用旧 token 发请求，这批修的是**新信息还没到就先发请求**——同一接缝的另一半。）
+
+| 面 | 改动 |
+|---|---|
+| 渲染门禁 | `App.tsx`：`engineReady` state（初值 `!tauriBridge.isTauri`，web/测试环境天然放行），挂载后 `restartEngineAndApply()`（D83 的两段式，有界等待）落定实连信息才 `setEngineReady(true)` ⇒ 路由推迟到有正确 base 之后渲染，**覆盖所有深链页**而不是给每个页面各打一个补丁 |
+| 失败兜底 | 引擎最终没起来**也渲染**（`.finally` 无条件放行）——默认 base 兜底至少给出可见反馈，好过停在白屏 |
+| 结构 | 载入态 JSX 抽为 `EngineGate` 组件：`AppThemeProvider` 本就在复杂度基线豁免名单上，让它继续长胖不合适 ⇒ 函数体 **168→165 行**、圈复杂度 **28→26**（合规方向：持平或变浅，**没抬基线**） |
+| 测试 | `src/tests/appMount.engineGate.test.tsx`（新建 3 例）：未就绪期间路由不在（Gate 未开 ⇒ TopBar 不渲染）/ 已就绪快路径放行且不碰 `start_engine`（钉住 D83 幂等语义）/ web 初值契约（源码字面 `useState(!tauriBridge.isTauri)`）。判据选 TopBar 的语言切换按钮（`aria-label='Chinese'`）——TopBar 只经路由渲染，比匹配聚合文案稳 |
+
+**顺带压回去的两处技术债**（都是本批改动本身触发的基线红线，没走"抬基线"这条路）：
+
+- `castBudget` 守卫红（src/tests 92→93，新用例里两处 `(window as any)`）⇒ 改为给 `Window`
+  加**具名可选**类型槽（`declare global`），预算**保持 91 不增**。`as any` 会当场把
+  「这里到底是什么类型」整个关掉，而这次缺的只是一个类型声明。
+- `complexityGuard.wiring` 形态-7 红（`AppThemeProvider` 168→169）⇒ 抽组件降回 165，同上。
+
+**验证**（本批收口实测）：vitest **574/574**（覆盖率 94.83 / 85.01 / 84.33，阈值 88/77/67）·
+服务端 **3567 用例（3563 pass / 0 fail / 4 skip）** · `npm run typecheck` 三段全绿 ·
+`npm run lint` 0 error（2 条既有 warning 不在本批改动面）· wiring **230/230**（两条原本红的
+守卫由「红」转绿）· **`npm run gate:close` 18/18** · README 的事实数字由 `facts:refresh` →
+`facts:fix` 自动回写（571→574、覆盖率三项随之更新），未手改。
+
+> 📌 本批实测还推翻了 D83 自证的一句「tsc/lint 0」（见该条下的批注，旧数字保留）：
+> **D83 的提交上 `npm run typecheck` 直接 exit 2**。又一次证明 vitest 全绿不能替 typecheck 出席。
+
 ### 2026-10-15 批次 D83 · 引擎启动幂等化：取消「开扫即重启引擎」（D81 两条 bug 的总源头）
 
 **动机**：D81/D81 热修都是在给「开扫即重启」打补丁——`ScanPage.doStart` 每次开扫先
@@ -20,8 +52,14 @@ token 都变，前端不同步刷新就 401（Network Error）；engine-exit 横
 | 前端（tauriBridge） | restartEngineAndApply 改**两段式**：先探 get_engine_info，已就绪（port>0 且 token 非空，D83 起该状态只在引擎真在跑时成立）则**零 invoke 直接落地**；未就绪才 start_engine + 有界轮询。开扫路径从此不碰引擎 |
 | 测试 | tauriBridge 组重写为 5 例：在跑零 invoke / 未就绪才重启并落地 / 半就绪继续轮询 / 始终不就绪有界放弃 / 重启窗口标志；**顺带修测试基建**——D81 热修拆 describe 时丢了 beforeEach 的 spy 隔离，调用记录跨测试累积（病征：not.toHaveBeenCalledWith 被上一个 describe 的历史调用误触红） |
 
-**验证**：vitest **571** 全过、tsc/lint 0、cargo fmt --check + clippy -D warnings 干净、
+**验证**（原文保留）：vitest **571** 全过、tsc/lint 0、cargo fmt --check + clippy -D warnings 干净、
 gate:close 16/16。Rust release 重编 + 真机双扫演示（引擎 PID 与 token 跨扫描稳定）见提交后验证。
+> ⚠️ **2026-10-16 实测推翻（保留旧数字，别删）**：上行的「tsc/lint 0」不成立——
+> `npm run typecheck` 在 D83 的提交上就是**红的**（exit 2）：`src/tests/tauriBridge.tauri.test.ts:189`
+> 的 `mockImplementation((cmd: string) => …)` 形参未使用 ⇒ `TS6133`。可见本批**漏跑了 typecheck**
+> （D66 之后第二次栽在同一条上）。已由 D84 顺手修掉；教训写进批次收口清单：typecheck 不能被
+> 「只跑了 vitest 且全绿」替代，两者检查的对象根本不同（单测跑的是**转译后**的行为，
+> typecheck 查的是**类型**，`tsc -p tsconfig.tests.json` 是唯一能看见 src/tests 那双的眼睛）。
 
 
 
