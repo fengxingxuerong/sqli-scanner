@@ -28,7 +28,7 @@ export default function HomeHero() {
 
   return (
     <Box
-      className="glass"
+      className="glass hud-frame"
       sx={{
         borderRadius: 4,
         p: { xs: 4, md: 8 },
@@ -72,7 +72,12 @@ export default function HomeHero() {
         >
           {t('home.hero')}
         </Typography>
-        <Typography variant="body1" sx={{ color: dark ? 'rgba(148, 163, 184, 0.9)' : 'text.secondary', maxWidth: 560 }}>
+        {/* [D85] 终端风副标题：等宽字体 + 行首提示符 + 结尾闪烁光标 */}
+        <Typography
+          variant="body1"
+          className="mono caret-blink"
+          sx={{ color: dark ? 'rgba(148, 163, 184, 0.9)' : 'text.secondary', maxWidth: 560 }}
+        >
           {t('app.tagline')}
         </Typography>
         <Button
@@ -102,13 +107,23 @@ export default function HomeHero() {
         </Button>
       </Stack>
 
-      {/* 右下角装饰：盾牌光晕 */}
+      {/* [D85] 背景装饰拆为独立组件：Hero 主体保持在复杂度软上限内 */}
+      <HeroDecor />
+    </Box>
+  );
+}
+
+// Hero 背景装饰：右下角盾牌光晕 + 底部透视网格地面（纯展示，无交互）
+function HeroDecor() {
+  return (
+    <>
       <Box sx={{
         position: 'absolute', right: { xs: -40, md: 20 }, bottom: -20,
         opacity: 0.06, fontSize: { xs: 120, md: 200 }, pointerEvents: 'none',
       }}>
         <SecurityIcon sx={{ fontSize: 'inherit', color: '#00d4ff' }} />
       </Box>
-    </Box>
+      <div className="grid-floor" />
+    </>
   );
 }

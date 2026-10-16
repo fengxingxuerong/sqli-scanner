@@ -8,3 +8,6 @@ interface ImportMetaEnv {
 interface ImportMeta {
   readonly env: ImportMetaEnv;
 }
+
+// [D85] 版本号构建期常量（vite.config.ts define 注入，单一来源 package.json）
+declare const __APP_VERSION__: string;

@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Box, Typography, Switch, Alert, FormControlLabel } from '@mui/material';
 import { createScanConfigActions } from './scanConfigActions';
 import type { ScanConfigSectionProps } from './sectionProps';
+import SectionTitle from './SectionTitle';
 
 export default function SafetyGuardSection({ config, onChange }: ScanConfigSectionProps) {
   const { t } = useTranslation();
@@ -10,7 +11,7 @@ export default function SafetyGuardSection({ config, onChange }: ScanConfigSecti
 
   return (
     <Box>
-      <Typography variant="subtitle2" fontWeight={600} className="mb-3">{t('scanConfig.safetyGuardTitle')}</Typography>
+      <SectionTitle hintKey="safetyGuard">{t('scanConfig.safetyGuardTitle')}</SectionTitle>
       {/* ── 授权与安全护栏 [2026-09-23 UI-REACH] ─────────────────────────────
           引擎默认就把目标当生产系统（defaults.js: productionMode=true），高危池
           （写文件 / RCE / 永久改配置 / DoS）必须 confirmDestructive===true 才投放。

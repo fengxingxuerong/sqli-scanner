@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { Box, Typography, Switch, Stack, FormControlLabel } from '@mui/material';
 import { createScanConfigActions } from './scanConfigActions';
 import type { ScanConfigSectionProps } from './sectionProps';
+import SectionTitle from './SectionTitle';
 
 export default function SessionSection({ config, onChange }: ScanConfigSectionProps) {
   const { t } = useTranslation();
@@ -12,7 +13,7 @@ export default function SessionSection({ config, onChange }: ScanConfigSectionPr
 
   return (
     <Box>
-      <Typography variant="subtitle2" fontWeight={600} className="mb-3">{t('scanConfig.sessionPersistence')}</Typography>
+      <SectionTitle hintKey="session">{t('scanConfig.sessionPersistence')}</SectionTitle>
       <Stack spacing={2}>
         <FormControlLabel
           control={<Switch checked={config.sessionDefault ?? false} onChange={handleToggle('sessionDefault')} />}

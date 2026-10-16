@@ -10,7 +10,7 @@ import {
   Box, Container, Paper, Button, Stack, Typography, Chip,
   Alert, Card, CardContent, Divider, LinearProgress, Tab, Tabs
 } from '@mui/material';
-import { ArrowBack, Refresh, PlayArrow } from '@mui/icons-material';
+import { ArrowBack, Refresh } from '@mui/icons-material';
 import { useScan } from '../hooks/useScan';
 import { useScanStore } from '../store/scanStore';
 import i18n from '../i18n';
@@ -18,6 +18,8 @@ import ReportExport from '../components/ReportExport';
 import VulnDetail from '../components/VulnDetail';
 import DbTree, { extractedDbModel } from '../components/DbTree';
 import ReportSummarySection, { RISK_COLORS, TECHNIQUE_COLORS } from '../components/ReportSummarySection';
+import ReportResumeButton from '../components/ReportResumeButton';
+import ReportVerdictHint from '../components/ReportVerdictHint';
 import { resolveValidityMode } from '../components/ValidityBanner';
 import type { Vulnerability, SqlmapVulnEntry } from '../shared/types';
 
@@ -108,13 +110,12 @@ export default function ReportPage() {
   const { t } = useTranslation();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { getReport, startScan } = useScan();
+  const { getReport } = useScan();
   const report = useScanStore((s) => s.report);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [selectedVuln, setSelectedVuln] = useState<Vulnerability | null>(null);
   const [tab, setTab] = useState(0);
-  const [resumeError, setResumeError] = useState('');
   const [chartCollapsed, setChartCollapsed] = useState(false);
 
   useEffect(() => {
@@ -176,34 +177,8 @@ export default function ReportPage() {
     : sqlmapLogs;
   const effectiveVulnCount = isSqlmap ? sqlmapVulns.length : vulns.length;
 
-  // 续跑（P1-U5 补充）：复用 HistoryPage 判定——仅 builtin + 有会话配置时可续跑
-  const resumeCfg = report.target?.config;
-  const canResumeHere =
-    !isSqlmap && !!resumeCfg && !!(resumeCfg.sessionFile || resumeCfg.sessionDefault);
-  const handleResumeHere = async () => {
-    if (!report.target) return;
-    try {
-      await startScan({
-        engine: 'builtin',
-        url: report.target.baseUrl,
-        method: report.target.method,
-        bodyParams: report.target.bodyParams,
-        cookieParams: report.target.cookieParams,
-        headerParams: report.target.headerParams,
-        config: {
-          ...resumeCfg,
-          sessionFile:
-            resumeCfg.sessionFile || (resumeCfg.sessionDefault ? 'sqli-session-latest.json' : undefined),
-          sessionDefault: resumeCfg.sessionDefault,
-        },
-      });
-      navigate('/scan');
-    } catch (e: unknown) {
-      setResumeError(e instanceof Error ? e.message : t('history.resumeFailed'));
-    }
-  };
-
   // 可视化数据计算已下沉至 ReportSummarySection（单一事实源，本页仅透传折叠态）
+  // 续跑按钮拆至 ../ReportResumeButton（D85：自包含 state + handler， ReportPage 回归基线）
 
   return (
     <Container maxWidth="lg" className="py-6">
@@ -217,24 +192,15 @@ export default function ReportPage() {
         >
           {t('report.refresh')}
         </Button>
-        {canResumeHere && (
-          <Button
-            startIcon={<PlayArrow />}
-            onClick={handleResumeHere}
-            size="small"
-            color="primary"
-            variant="outlined"
-          >
-            {t('history.resume')}
-          </Button>
-        )}
-        {resumeError && (
-          <Typography variant="caption" color="error">{resumeError}</Typography>
-        )}
+        {/* [D85] 续跑按钮拆至 ../ReportResumeButton（自包含会话续跑逻辑） */}
+        <ReportResumeButton report={report} onStarted={() => navigate('/scan')} />
         <Box className="ml-auto">
           <ReportExport />
         </Box>
       </Stack>
+
+      {/* [D85] 小白引导：报告判读速览（未检出≠没洞），常驻摘要区上方 */}
+      <ReportVerdictHint />
 
       {/* 报告摘要区：风险卡片 + 统计卡片 + 可视化图表（独立组件，本页仅透传折叠态） */}
       <ReportSummarySection

@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Box, Typography, Switch, Stack, Alert, FormControlLabel } from '@mui/material';
 import { createScanConfigActions } from './scanConfigActions';
 import type { ScanConfigSectionProps } from './sectionProps';
+import SectionTitle from './SectionTitle';
 
 export default function OobSection({ config, onChange }: ScanConfigSectionProps) {
   const { t } = useTranslation();
@@ -10,7 +11,7 @@ export default function OobSection({ config, onChange }: ScanConfigSectionProps)
 
   return (
     <Box>
-      <Typography variant="subtitle2" fontWeight={600} className="mb-3">{t('scanConfig.oobTitle')}</Typography>
+      <SectionTitle hintKey="oob">{t('scanConfig.oobTitle')}</SectionTitle>
       {/* ── 带外通道（OOB）[2026-09-23 UI-REACH] ─────────────
           enabled 是**总开关**：techniques 里勾了 oob 还不够，接收端必须在此开启才会启动。
           这条通道在「无回显 + WAF 拦 sleep/报错/union」的场景里是唯一可达的一条

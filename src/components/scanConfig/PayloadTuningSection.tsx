@@ -7,6 +7,7 @@ import {
 import { BUILTIN_DBMS_OPTIONS } from '../../shared/constants';
 import { createScanConfigActions } from './scanConfigActions';
 import type { ScanConfigSectionProps } from './sectionProps';
+import SectionTitle from './SectionTitle';
 
 export default function PayloadTuningSection({ config, onChange }: ScanConfigSectionProps) {
   const { t } = useTranslation();
@@ -14,7 +15,7 @@ export default function PayloadTuningSection({ config, onChange }: ScanConfigSec
 
   return (
     <Box>
-      <Typography variant="subtitle2" fontWeight={600} className="mb-3">{t('scanConfig.payloadTuning')}</Typography>
+      <SectionTitle hintKey="payloadTuning">{t('scanConfig.payloadTuning')}</SectionTitle>
       {/* ── payload 与响应判定调优（[P0-FIX 2026-09-09] 后端已支持、UI 补接的开关）──
           这些键以前在面板上根本不存在（或只写 store 不进 startScan），后果分两种：
           · 预筛/静态跳过的预算控制勾不到 → 对大目标多发几倍无用请求；

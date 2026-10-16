@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Box, Typography, Stack } from '@mui/material';
 import type { ScanConfig, AuthConfig } from '../../shared/types';
 import type { ScanConfigSectionProps } from './sectionProps';
+import SectionTitle from './SectionTitle';
 
 type OnPatch = (patch: Partial<ScanConfig>) => void;
 
@@ -43,7 +44,7 @@ export default function NetworkAuthSection({ config, onChange }: ScanConfigSecti
 
   return (
     <Box>
-      <Typography variant="subtitle2" fontWeight={600} className="mb-3">{t('scanConfig.networkAuth')}</Typography>
+      <SectionTitle hintKey="networkAuth">{t('scanConfig.networkAuth')}</SectionTitle>
       <Stack spacing={2}>
         <Box>
           <Typography variant="caption" color="text.secondary">{t('scanConfig.proxyLabel')}</Typography>

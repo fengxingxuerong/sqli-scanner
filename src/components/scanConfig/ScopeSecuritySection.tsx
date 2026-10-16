@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { Box, Typography, Switch, Stack, Alert, FormControlLabel } from '@mui/material';
 import { createScanConfigActions } from './scanConfigActions';
 import type { ScanConfigSectionProps } from './sectionProps';
+import SectionTitle from './SectionTitle';
 
 export default function ScopeSecuritySection({ config, onChange }: ScanConfigSectionProps) {
   const { t } = useTranslation();
@@ -11,7 +12,7 @@ export default function ScopeSecuritySection({ config, onChange }: ScanConfigSec
 
   return (
     <Box>
-      <Typography variant="subtitle2" fontWeight={600} className="mb-3">{t('scanConfig.scopeSecurity')}</Typography>
+      <SectionTitle hintKey="scopeSecurity">{t('scanConfig.scopeSecurity')}</SectionTitle>
       {/* ── 授权范围与传输安全（[P0-SEC] scope 硬约束 + insecureTls；仅内置引擎透传）── */}
       <Stack spacing={2}>
         <Box>

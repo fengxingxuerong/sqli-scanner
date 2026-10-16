@@ -110,3 +110,59 @@ pre.payload, .mono, .terminal {
   border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover { background: rgba(0, 212, 255, 0.3); }
+
+/* ============================================================================
+ * D85 赛博视觉增强资产（2026-10-16）
+ * 全部按暗色语义设计——浅色模式不要挂这些类（对比度与辉光都会劣化）。
+ * ==========================================================================*/
+
+/* ── HUD 四角描边：容器四角露出 L 形亮线，终端 HUD 质感 ── */
+.hud-frame { position: relative; }
+.hud-frame::before,
+.hud-frame::after {
+  content: ''; position: absolute; width: 12px; height: 12px; pointer-events: none;
+  border-color: rgba(0, 212, 255, 0.55); border-style: solid; border-width: 0;
+}
+.hud-frame::before { top: -1px; left: -1px; border-top-width: 2px; border-left-width: 2px; }
+.hud-frame::after { bottom: -1px; right: -1px; border-bottom-width: 2px; border-right-width: 2px; }
+
+/* ── 切角面板：右上 / 左下斜切，赛博 HUD 常用形制 ── */
+.cyber-clip {
+  clip-path: polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 14px 100%, 0 calc(100% - 14px));
+}
+
+/* ── 霓虹辉光文字（标题 / 强调） ── */
+.neon-text { text-shadow: 0 0 6px rgba(0, 212, 255, 0.45), 0 0 18px rgba(0, 212, 255, 0.2); }
+
+/* ── 标题故障闪烁（低幅抖动，不动文字内容，不伤可读性） ── */
+@keyframes flicker {
+  0%, 92%, 94%, 97%, 100% { opacity: 1; }
+  93% { opacity: 0.55; }
+  96% { opacity: 0.75; }
+}
+.flicker { animation: flicker 4s linear infinite; }
+
+/* ── 终端光标闪烁（ Hero 副标题结尾的 ▌） ── */
+@keyframes caret-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+.caret-blink::after {
+  content: '▌'; margin-left: 2px; color: #00d4ff;
+  animation: caret-blink 1s step-end infinite;
+}
+
+/* ── 透视网格地面（Hero 底部装饰，向上淡出） ── */
+.grid-floor {
+  position: absolute; left: 0; right: 0; bottom: 0; height: 42%;
+  pointer-events: none; opacity: 0.4;
+  background-image:
+    linear-gradient(rgba(0, 212, 255, 0.12) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 212, 255, 0.12) 1px, transparent 1px);
+  background-size: 28px 28px;
+  -webkit-mask-image: linear-gradient(to top, rgba(0, 0, 0, 0.9), transparent);
+  mask-image: linear-gradient(to top, rgba(0, 0, 0, 0.9), transparent);
+}
+
+/* ── 状态点辉光（顶栏引擎在线指示） ── */
+.status-dot {
+  width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+  background: #22c55e; box-shadow: 0 0 8px rgba(34, 197, 94, 0.8);
+}

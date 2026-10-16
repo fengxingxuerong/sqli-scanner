@@ -1,17 +1,18 @@
 // ScanWizard —— 扫描向导：URL 输入 + 开始/停止按钮 + 高级设置 + WAF 建议
 
-import { memo, useState, useEffect } from 'react';
+import { memo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import {
   Box, Card, CardContent, Button, TextField, Stack, Typography, Alert,
-  Collapse, IconButton, Divider, Chip, InputAdornment,
+  Collapse, IconButton, Divider, InputAdornment,
 } from '@mui/material';
 import { ExpandMore, ExpandLess, PlayArrow, Stop, History, PauseCircleOutline, PlayCircleOutline } from '@mui/icons-material';
 import TargetForm from './TargetForm';
 import ScanConfigPanel from './ScanConfigPanel';
 import SqlmapOptions from './SqlmapOptions';
-import { sqlmapClient } from '../shared/apiClient';
+import EnginePicker from './EnginePicker';
+import InfoHint from './InfoHint';
 import { tryAutoDetect, looksLikeRawRequest } from '../shared/requestParser';
 import type { MethodType, ScanConfig, SqlmapConfig, WafDetectedPayload, EngineType } from '../shared/types';
 
@@ -60,17 +61,6 @@ function ScanWizardInner(props: ScanWizardProps) {
 
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [autoHint, setAutoHint] = useState('');
-  const [sqlmapStatus, setSqlmapStatus] = useState<{ available: boolean } | null>(null);
-
-  // sqlmap 预检
-  useEffect(() => {
-    if (engine !== 'sqlmap') { setSqlmapStatus(null); return; }
-    let cancelled = false;
-    sqlmapClient.status()
-      .then((s) => { if (!cancelled) setSqlmapStatus(s); })
-      .catch(() => { if (!cancelled) setSqlmapStatus({ available: false }); });
-    return () => { cancelled = true; };
-  }, [engine]);
 
   const handleUrlChange = (v: string) => {
     onUrlChange(v);
@@ -107,7 +97,11 @@ function ScanWizardInner(props: ScanWizardProps) {
       {/* 标题 */}
       <Stack direction="row" justifyContent="space-between" alignItems="center" className="mb-4">
         <Box>
-          <Typography variant="h5" fontWeight={700}>{t('scan.title')}</Typography>
+          <Box className="flex items-center">
+            <Typography variant="h5" fontWeight={700}>{t('scan.title')}</Typography>
+            {/* [D85] 小白引导：标题旁一句话说明整页用法 */}
+            <InfoHint text={t('configHints.wizard')} />
+          </Box>
           <Typography variant="body2" color="text.secondary">{t('scan.subtitle')}</Typography>
         </Box>
         <IconButton title={t('history.title')} aria-label={t('history.title')} onClick={() => navigate('/history')}>
@@ -199,23 +193,12 @@ function ScanWizardInner(props: ScanWizardProps) {
           <Collapse in={advancedOpen}>
             <Box className="pt-2 space-y-4">
               <Divider />
-              <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
-                <Typography variant="subtitle2" color="text.secondary">{t('scan.engine')}</Typography>
-                <Chip label={t('scan.engineBuiltin')} size="small"
-                  color={engine === 'builtin' ? 'primary' : 'default'}
-                  variant={engine === 'builtin' ? 'filled' : 'outlined'}
-                  onClick={() => !running && onEngineChange('builtin')} />
-                <Chip label={t('scan.engineSqlmap')} size="small"
-                  color={engine === 'sqlmap' ? 'secondary' : 'default'}
-                  variant={engine === 'sqlmap' ? 'filled' : 'outlined'}
-                  onClick={() => !running && onEngineChange('sqlmap')} />
-              </Stack>
-
-              {engine === 'sqlmap' && sqlmapStatus?.available === false && (
-                <Alert severity="warning" variant="outlined">
-                  {t('scan.sqlmapUnavailable')}
-                </Alert>
-              )}
+              {/* [D85] 引擎选择区拆至 ../EnginePicker（含 sqlmap 预检） */}
+              <EnginePicker
+                engine={engine}
+                running={running}
+                onEngineChange={onEngineChange}
+              />
 
               <TargetForm
                 url={url} method={method} bodyText={bodyText}

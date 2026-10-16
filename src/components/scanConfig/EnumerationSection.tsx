@@ -7,6 +7,7 @@ import type { ExtractScopeField } from '../../shared/constants';
 import { parseScopeList } from '../../shared/scanConfig';
 import { createScanConfigActions } from './scanConfigActions';
 import type { ScanConfigSectionProps } from './sectionProps';
+import SectionTitle from './SectionTitle';
 
 /** 枚举动作的输入项（顺序 = UI 展示顺序）。哪些项与当前动作相关由 EXTRACT_SCOPE_OPTIONS.needs 决定。 */
 const SCOPE_FIELDS: { key: ExtractScopeField; label: string }[] = [
@@ -27,7 +28,7 @@ export default function EnumerationSection({ config, onChange }: ScanConfigSecti
 
   return (
     <Box>
-      <Typography variant="subtitle2" fontWeight={600} className="mb-3">{t('scanConfig.enumeration')}</Typography>
+      <SectionTitle hintKey="enumeration">{t('scanConfig.enumeration')}</SectionTitle>
       {/* ── 枚举与拖库 [2026-09-23 E2] ──
           这条链此前断在两处：引擎能跑（engine/extractScope.js）、CLI 能用
           （bin/cli/config.js:314），但 REST 白名单没收该键（传了静默丢弃）、UI 无入口
