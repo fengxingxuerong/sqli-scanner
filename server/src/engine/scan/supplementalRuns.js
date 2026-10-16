@@ -6,7 +6,7 @@
 // =====================================================================
 import * as eventBus from '../../core/eventBus.js';
 import { logger } from '../../core/logger.js';
-import { oobReceiver } from '../../core/oobReceiver.js';
+import { oobTunnel } from '../../core/oobTunnel.js';
 import { createVulnerability } from '../models.js';
 
   // 二阶注入补充趟：在既有一阶聚合之后运行，对"每个存储点 × 每个触发页"调用独立 SecondOrderDetector。
@@ -36,9 +36,9 @@ export async function _runSecondOrder(scanId, target, points, dbms) {
     const oobCfg = (target.config && target.config.oob) || {};
     if (so.oobTrigger === true && oobCfg.enabled) {
       try {
-        await oobReceiver.start(oobCfg);
+        await oobTunnel.start(oobCfg);
       } catch (e) {
-        logger.warn(`二阶 OOB 接收端启动失败，OOB 触发判定将不可用：${e.message}`);
+        logger.warn(`二阶 OOB 隧道启动失败，OOB 触发判定将不可用：${e.message}`);
       }
     }
 

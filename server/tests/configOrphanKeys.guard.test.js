@@ -121,6 +121,17 @@ const EXEMPT = {
   // 不是顶层扫描 config —— config.oob.dnsPort / dnsDomain 的可达性由
   // configWhitelist.passthrough.test.js 的嵌套组守卫钉（那边的分母是 defaults.oob）。
   dnsPort: 'oobReceiver 自有 options（源自 config.oob 组，组内键由嵌套组守卫覆盖）',
+  // [D87] interactsh 外部隧道：同样是「组内键」形态 —— 它是 config.oob.interactsh 子组，
+  // 顶层 defaults 没有这个键名，故上面的 `k in defaults` 兜不住。
+  // 可达性由两处保证：① REST 白名单 guardOob 里的 guardInteractsh（净化后逐键落 config.oob.interactsh）；
+  // ② CLI --oob-interactsh 旗标（server/bin/cli/config.js 的 patchGroup）。
+  // 组内各子键的可达性由 configWhitelist.passthrough.test.js 的嵌套组守卫钉（分母 = defaults.oob.interactsh）。
+  interactsh: 'config.oob 子组（D87 外部 OOB 隧道）：入口 = REST guardInteractsh + CLI --oob-interactsh；组内键由嵌套组守卫覆盖',
+  server: 'config.oob.interactsh 组内键（协作端域名）；组内键由嵌套组守卫按 defaults.oob.interactsh 覆盖',
+  servers: 'config.oob.interactsh 组内键（候选协作端列表）；同上',
+  pollIntervalMs: 'config.oob.interactsh 组内键（轮询间隔）；同上',
+  receivedMax: 'config.oob.interactsh 组内键（回连记录上限）；同上',
+  httpPort: 'config.oob 组内键（OobTunnel 本地模式派生 callbackBase 时读取）；由嵌套组守卫覆盖',
   // sqlmap 互操作层的子配置组：外部执行文件的路径/参数**刻意不由网络调用方指定**
   // （走 env SQLMAP_PATH / SQLMAP_PYTHON / SQLMAP_ALLOW_EVAL，且 eval 默认关）。
   sqlmap: 'sqlmapBridge 自有子配置组；外部二进制参数刻意不经 REST（见 env SQLMAP_*）',

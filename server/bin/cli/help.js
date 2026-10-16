@@ -56,8 +56,14 @@ export const HELP_TEXT = `sqli-scanner CLI（对标 sqlmap 的 Node 引擎命令
                              {"noSql":{"enabled":true,"kinds":["nosql"]}}
   --oob                      [2026-10-12 §A2] 开启 OOB 带外通道接收端（默认关；即使 --technique 含 oob，
                              接收端不起也拿不到回调 —— defaults.js:292 明示）。子键走 --config 档案：
-                             {"oob":{"enabled":true,"callbackHost":"your.domain","dnsPort":53}}
-                             回连地址需公网可达（自建域或 interactsh 类协作端）
+                             {"oob":{"enabled":true,"callbackBase":"your.domain:8899","dnsOob":true,"dnsDomain":"your.domain"}}
+                             本地模式要求**目标能回连扫描器**（callbackBase 需目标可解析）
+  --oob-interactsh           [D87] 改用外部协作端隧道（interactsh 协议）：只要求**扫描器能出网**，
+                             不要求目标入站可达 —— 目标是云上/NAT 后/跨网段时的唯一可行形态。
+                             开时一并开启 oob 总开关。子键走 --config 档案：
+                             {"oob":{"enabled":true,"interactsh":{"enabled":true,"server":"oast.pro"}}}
+                             ⚠ 默认用公共协作端（回连记录交给其运营方，真实项目建议自建）；
+                             ⚠ 仅回带 token 不回带数据本身；仅在已授权范围内使用
   --level <1-5>              检测等级（1 默认，5 最深，对应注入点边界/子句变体）
   --risk <1-3>               风险等级（1 安全，2 标准，3 含 OR 变体）
   --test-filter <str>        仅运行 id 匹配的测试（逗号分隔子串，大小写不敏感，对标 sqlmap --test-filter）

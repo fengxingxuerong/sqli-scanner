@@ -18,6 +18,28 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 
+/**
+ * 通道总开关族（[D87 抽离]）：--no-sql / --oob / --oob-interactsh。
+ *
+ * 从 parseArgs 抽出的原因有两条，都不是为了好看：
+ *   ① parseArgs 已是 227 行 / 214 圈的存量巨兽，复杂度基线是**只许持平或变浅**的棘轮
+ *      —— 新增一个旗标不该靠抬基线过关（本仓明确禁止），该拆就拆；
+ *   ② 这三个旗标语义同族（都是「默认关的通道总开关」），抽成一处后
+ *      「谁知道 technique 与 enabled 正交」这件事只有一个落点，不再散在长链里。
+ *
+ * @param {string} a 当前 token
+ * @param {any} args 累积中的参数对象（命中即原地写入）
+ * @returns {boolean} 是否已被本族消费
+ */
+export function applyChannelFlag(a, args) {
+  if (a === '--no-sql') { args.noSql = true; return true; }
+  if (a === '--oob') { args.oob = true; return true; }
+  // [D87 2026-10-18] 外部协作端隧道（interactsh 协议）：开这条即同时开 oob 总开关
+  // ——隧道是 oob 的一种回连拓扑，总开关不开检测器根本不跑。只要求扫描器能出网。
+  if (a === '--oob-interactsh') { args.oob = true; args.oobInteractsh = true; return true; }
+  return false;
+}
+
 export function parseArgs(argv, preset) {
   /** @type {any} */
   const args = {
@@ -138,8 +160,7 @@ export function parseArgs(argv, preset) {
     // 与 --no-cast 同族命名（noSql → --no-sql）；oob 与 --technique oob 正交：
     // technique 只决定"测不测"，oob.enabled 决定"起不起接收端"（defaults.js:292-293 明写
     // 「即使 techniques 含 oob，也需此处开启接收端才启动」）——这正是此前 CLI 不可达的那半。
-    else if (a === '--no-sql') args.noSql = true;
-    else if (a === '--oob') args.oob = true;
+    else if (applyChannelFlag(a, args)) { /* --no-sql / --oob / --oob-interactsh（D87） */ }
     // [P0 2026-09-09 实战批次] 失效值替换 + 已知注入点直通（对标 sqlmap --invalid-*）
     else if (a === '--invalid-bignum') args.invalidBignum = true;
     else if (a === '--invalid-logical') args.invalidLogical = true;

@@ -5,6 +5,40 @@
 
 ---
 
+## 2026-10-18 批次 D87 · OOB 外部隧道（interactsh 协议）—— 补实战缺口 P1-3
+
+**动机**：TODO 2026-10-10 实战盘点的 P1-3。内置 `oobReceiver` 只监听本机，要求「目标能回连
+扫描器」；真实授权测试里目标多在云上/NAT 后/跨网段 ⇒ 这条回连路径通常不通 ⇒ **无回显盲注
+（OOB 是唯一可达通道）恒判「未检出」**，是与「这个站没注入」长得一样的静默假阴性。
+interactsh 模式改为「扫描器主动轮询协作端」，**只要求扫描器能出网**。
+
+| 面 | 落地 |
+|---|---|
+| 协议客户端 | `server/src/core/interactshClient.js`：**零依赖**手写（引擎不加运行时 npm 依赖）——注册（RSA-2048 SPKI PEM 明文 base64）/ 轮询 / AES-256-CTR（IV 前置）+ RSA-OAEP-SHA256 解 key / 注销 |
+| 拓扑抽象 | `server/src/core/oobTunnel.js`：`local` 与 `interactsh` 两拓扑统一为「要地址 + 等 token」一个接口 ⇒ **检测器零分支**；默认仍走本地（零行为漂移） |
+| 接线 | `OobDetector` / `scan/detect.js` / `scan/supplementalRuns.js` 改经 `oobTunnel`；`defaults.oob.interactsh` + REST `guardInteractsh`（主机名白名单，不放任意 URL）+ CLI `--oob-interactsh` + help |
+| 文档 | README 能力速查补旗标（readme:check 逼出来的）、help、`--config` 档案键登记 |
+
+**判据（离线 + 真机双层）**：
+- 离线 `server/tests/interactshClient.test.js` 9 例（mock 协作端，进 CI 常驻）：解密往返 / 域名长度阈值 / 大小写归因 / 外会话记录必须丢弃（防误报）/ 逐服务器回退 / 超时。
+- 真机 `e2e/oob-interactsh-lab/run.mjs`：自带**无回显**靶站（响应体无注入证据）→ 真实回连协作端 → 扫描器轮询取回 → **检出 1 条 OOB**、exit 0。已接入 `e2e/run-all.mjs` 与 `acceptance`（判据读文本，避开「退出码恒 0 = 永远绿」）。
+
+**实测踩到的两条协议硬约束**（都写进了源码注释与测试，别当推理）：
+1. **首标签长度 ≥ 33**（corrID 20 + nonce 13）：受控实验逐档递增，20/26/31/32 全失败、33/34/36 成功。
+   服务端 DNS 侧 `SlideWithLength(chunk, GetIdLength())` 在标签上滑窗找 corrID，长度不足窗口落不下。
+   ⚠️ **不过这道坎会表现为「偶发命中」**（本文件最初版本即如此），极易被误判成「公共服务器限流」。
+2. **DNS 标签大小写不敏感** ⇒ 服务端 `storeMatch` 存下来恒为小写，而引擎 token 是 nanoid（含大写）
+   ⇒ 不归一化则**隧道通了却恒不检出**（实测靶站回连 14 次、本地 received 恒 0）。两侧统一小写比较。
+
+**诚实边界**：① 默认关闭（开启即对外发带外请求）；② 公共协作端（`oast.*`）的回连记录交给其运营方，**真实项目建议自建**，且 OOB 只回带 token、不回带数据本身；③ UNC/SMB 向量的 445 握手仍不在覆盖内（走 DNS 通道归因）；④ 自建协作端的一键部署脚本未做。
+
+### 待推进
+
+- collaborator-everywhere 式普遍外带（TODO 理论清单第 10 条）依赖本条已就绪，可另行排期；
+- 自建协作端部署（docker-compose 一键）未做——公共端在生产环境不合适。
+
+---
+
 ## 2026-10-16 批次 D86 · 引导三件套收尾（已完成，待提交）
 
 用户对 D85 收尾时列的三个可选项回复「都要加上」，全部落地：
@@ -465,7 +499,7 @@ jSQL 多比特 ≈ 本仓 `blindBitwise` 位平面提取（8 位并行，MySQL/T
 
 **OOB 族（对应本表 2026-10-10 盘点的 P1-3）**
 
-9. **interactsh 公网协作端客户端**：零自建域名/服务器拿 OOB 回调（Node 内置 crypto RSA-OAEP + fetch 即可实现协议；注册→轮询→token 匹配进既有 `oobReceiver` 的 token 判定）。配置走 `config.oob.interactsh = { server? }`，与 `oob.dnsOob` 并列。**验证需公网/可通外网环境，本机离线只做协议 mock 单测，真机验证另起批次**。代价 M，价值 High。
+9. ~~**interactsh 公网协作端客户端**~~ —— ✅ **D87 已落地并真机验证**（本机公网可达，未留未验证账）：`server/src/core/interactshClient.js`（零依赖手写协议，Node 内置 crypto + fetch；注册→轮询→AES-256-CTR+RSA-OAEP 解密→token 归因）；配置走 `config.oob.interactsh`，与 `oob.dnsOob` 并列；CLI `--oob-interactsh`。**整链真机**：`e2e/oob-interactsh-lab`（自带无回显靶站 → 真回连协作端 → 扫描器轮询取回 → 检出 1 条 OOB）+ 已接入 acceptance/run-all 与接线门禁；离线单测 `server/tests/interactshClient.test.js` 9 例（进 CI 常驻）。⚠️ 本批实测踩到两条**协议硬约束**，已写进源码注释与测试：① 首标签 = corrID(20)+nonce 必须 ≥33 字符（否则服务端滑窗匹配不到，表现为「偶发命中」）；② DNS 大小写不敏感 ⇒ 服务端记录恒小写，token（nanoid 含大写）必须归一化比较（否则「隧道通了却检不出」）。代价 M，价值 High。
 10. **Collaborator-Everywhere 式普遍外带**：对所有未显式测的头/参数播撒 OOB 标记（非侵入），把 OOB 从 opt-in 通道变背景哨兵。依赖第 9 条先落地。代价 M，价值 Med。
 
 **SQL 面补齐族（sqlmap 派，全部已核对本仓 args.js 确认缺位）**
@@ -508,7 +542,7 @@ jSQL 多比特 ≈ 本仓 `blindBitwise` 位平面提取（8 位并行，MySQL/T
 |---|---|---|
 | P0-1 | 加密/签名参数接口无扩展点（`sign=`、整参加密、timestamp+nonce） | ✅ **D32 扩展点 + 判据**，✅ **D34 真机闭环**（`e2e/signed-api-lab` 五场景三轮一致）；⚠️ 只覆盖**签名**形态，整包 AES / 防重放没有靶点（见本节第 7 条） |
 | P0-2 | 认证只覆盖标准 HTML 表单登录（`loginFlow.js` 自承不做 OAuth/JWT 刷新/验证码/前端加密提交） | ✅ **D36 Bearer/Token 自动续期**（`bearerKeeper` + `--refresh-url` + 面板 + 真机 `e2e/bearer-lab` 六场景三轮一致）。仍不做：OAuth2 授权码流程 / SSO / 验证码 / 解析 JWT `exp` 做前瞻性续期（见下面 D36 节的账） |
-| P1-3 | OOB 通道在真实目标上拿不到（`oobReceiver` 默认绑 127.0.0.1、DNS 需自建域+占 53；无 interactsh/Collaborator 对接） | ⏳ 未做 |
+| P1-3 | OOB 通道在真实目标上拿不到（`oobReceiver` 默认绑 127.0.0.1、DNS 需自建域+占 53；无 interactsh/Collaborator 对接） | ✅ **D87 已做**：`server/src/core/interactshClient.js`（零依赖手写协议：注册/轮询/AES-256-CTR+RSA-OAEP 解密）+ `core/oobTunnel.js`（本地/外部两拓扑统一抽象，检测器零分支）+ CLI `--oob-interactsh` + REST 白名单；整链真机 `e2e/oob-interactsh-lab` 实测通过。⚠️ 仍不做：自建协作端一键部署脚本、SMB 通道归因（UNC 走 DNS 通道，非 445 监听） |
 | P1-4 | WAF 结论只有 CRS 一家（62 厂商指纹只做「识别」，推荐链无实测背书） | ⏳ 未做 |
 | P2-5 | 写副作用无自动清理/回滚（只有 `docs/pentest-handover/05` 的人工条款 R5/R6） | ⏳ 未做 |
 | P2-6 | 真实弱网下的召回衰减没有数（e2e 全跑本地回环） | ⏳ 未做 |

@@ -79,8 +79,8 @@
       "status": "unverified",
       "evidence": "11 用例覆盖五种目标形态（反射型命中 / 静态页零发现 / 全回显防噪 / 预算硬顶 / POST 载体）；引擎侧 TargetParser 6.6 步消费并打 mined 溯源标记",
       "refute_cmd": "node --test server/tests/paramMiner.test.js",
-      "recheck_batch": "待排期（需同题对照）",
-      "caveat": "★ D68 复核结论：**sqlmap 没有主动挖掘能力**（只收 -p/--param-del 等显式参数）⇒ 严格表述应是「提供 sqlmap 所没有的能力」，不是「更强」。本仓自身的召回率/误报率**无同题量化**。补证方案：对同一组目标分别跑本仓 paramMine 与 sqlmap -p 全量，比「发现的真实可注入参数数」。措辞修正前不得对外说「更强」。"
+      "recheck_batch": "D87（复跑自测通过；对标口径仍未建立，维持 unverified）",
+      "caveat": "★ D68 复核结论：**sqlmap 没有主动挖掘能力**（只收 -p/--param-del 等显式参数）⇒ 严格表述应是「提供 sqlmap 所没有的能力」，不是「更强」。本仓自身的召回率/误报率**无同题量化**。补证方案：对同一组目标分别跑本仓 paramMine 与 sqlmap -p 全量，比「发现的真实可注入参数数」。措辞修正前不得对外说「更强」。 ★ D87 复核（2026-10-18）：`node --test server/tests/paramMiner.test.js` 复跑 11/11 通过 —— 但该断言证明的是**自身功能可用**（反射命中/静态页零发现/预算硬顶等），**不构成「强于 sqlmap」的对照证据**（无同题双方实测、无 Arjun 基线）。维持 unverified：本条是**对标声明**，需要一个同题对照口径（参照 redteam-lab 的「双方各跑 3 次取多数决+中位」）才能转 verified，单测再多也不改变这一点。"
     }
   ]
 }

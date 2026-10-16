@@ -249,6 +249,11 @@ function applyChannelToggles(config, args) {
   else if (args.noSql && typeof args.noSql === 'object') patchGroup(config, 'noSql', args.noSql);
   if (args.oob === true) patchGroup(config, 'oob', { enabled: true });
   else if (args.oob && typeof args.oob === 'object') patchGroup(config, 'oob', args.oob);
+  // [D87] --oob-interactsh：外部协作端隧道。开总开关 + interactsh 子开关；
+  // 首个候选协作端数组/单服务器仍可由 --config 档案覆盖（patchGroup 带底合并，不整体赋值）。
+  if (args.oobInteractsh === true) {
+    patchGroup(config, 'oob', { enabled: true, interactsh: { enabled: true } });
+  }
 }
 
 /**

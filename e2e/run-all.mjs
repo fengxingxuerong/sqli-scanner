@@ -91,6 +91,10 @@ const LABS = [
   { name: 'pentest-lab', desc: '渗透视角刁钻场景实测', entry: 'e2e/pentest-lab/verify.mjs', deps: ['sandbox'] },
   { name: 'waf-real', desc: '真实 CRS v4.1.0 规则验证（纯内存规则引擎，无需 DB）', entry: 'e2e/waf-real/selftest.mjs', deps: [] },
   { name: 'oob-real-lab', desc: 'OOB 带外全链路（PG COPY TO PROGRAM / MySQL UNC）', entry: 'e2e/oob-real-lab/verify.mjs', deps: ['pg', 'sandbox'] },
+  // [D87] 外部协作端隧道（interactsh 协议）：与 oob-real-lab 的分工是**回连拓扑**不同 ——
+  // 上面那套验「目标能回连本机接收端」，本套验「只要求扫描器能出网」的形态。
+  // deps 为空：自带靶站、无需 DB/沙箱；但需联网访问协作端（无网时脚本自行 SKIP）。
+  { name: 'oob-interactsh-lab', desc: 'OOB 外部隧道整链（interactsh 协作端回连 → 扫描器轮询取回 → 检出）', entry: 'e2e/oob-interactsh-lab/run.mjs', deps: [] },
   { name: 'pg-osshell', desc: 'PG os-shell 真机闭环（COPY FROM PROGRAM 落表 → 回显）', entry: 'e2e/oob-real-lab/pg-osshell.e2e.mjs', deps: ['pg'] },
   { name: 'concurrent-isolation', desc: '并发多扫描隔离性（PG+MySQL 混扫不串扰）', entry: 'e2e/concurrent-isolation/e2e.mjs', deps: ['pg', 'sandbox'] },
   { name: 'csrf-lab', desc: 'CSRF 防护目标闭环（取页 token → 携带 → 检出）', entry: 'e2e/csrf-lab/e2e.mjs', deps: ['sandbox'] },

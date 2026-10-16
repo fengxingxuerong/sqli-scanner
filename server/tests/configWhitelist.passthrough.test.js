@@ -240,6 +240,14 @@ const EXPLICIT_ALT = {
   },
   'oob.callbackBase': 'oob.example.com:9100',
   'oob.dnsDomain': 'dns.example.com',
+  // [D87] interactsh 是「组内对象键」（与 wafEvasion.tamper 同形）：泛型 altFor 会给出
+  // {alt:true}，那对净化器是非法输入（非交互式子键）⇒ 必须给显式合法替代值。
+  'oob.interactsh': { enabled: true, server: 'oast.example.com', servers: ['oast.example.com'], pollIntervalMs: 3000, timeoutMs: 20000 },
+  'oob.interactsh.server': 'oast.example.com',
+  'oob.interactsh.servers': ['oast.example.com'],
+  'oob.interactsh.pollIntervalMs': 3000,
+  'oob.interactsh.timeoutMs': 20000,
+  'oob.interactsh.enabled': true,
   'wafEvasion.tamper': { enabled: true, plugins: ['spacev2'], intensity: 'high' },
 };
 
