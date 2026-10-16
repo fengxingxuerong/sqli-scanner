@@ -10,6 +10,7 @@ import { RouterProvider } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import router, { PageFallback } from './router';
 import DisclaimerDialog from './components/DisclaimerDialog';
+import OnboardingTour from './components/OnboardingTour';
 import { tauriBridge } from './shared/tauriBridge';
 import { useEngineRecovery } from './hooks/useEngineRecovery';
 import './i18n';
@@ -249,6 +250,8 @@ export default function App() {
           <RouterProvider router={router} />
         </Suspense>
       )}
+      {/* [D85] 首次启动欢迎引导：免责声明之后、路由之外挂载，冷启动直达任意路由都能看到 */}
+      {disclaimerAccepted && <OnboardingTour />}
     </AppThemeProvider>
   );
 }

@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Box, Typography, Switch, Alert, FormControlLabel, Divider } from '@mui/material';
 import { createScanConfigActions } from './scanConfigActions';
 import type { ScanConfigSectionProps } from './sectionProps';
+import SectionTitle from './SectionTitle';
 
 export default function DataExtractionSection({ config, onChange }: ScanConfigSectionProps) {
   const { t } = useTranslation();
@@ -10,7 +11,7 @@ export default function DataExtractionSection({ config, onChange }: ScanConfigSe
 
   return (
     <Box>
-      <Typography variant="subtitle2" fontWeight={600} className="mb-3">{t('scanConfig.dataExtraction')}</Typography>
+      <SectionTitle hintKey="dataExtraction">{t('scanConfig.dataExtraction')}</SectionTitle>
       <FormControlLabel
         control={<Switch checked={config.enableExtract} onChange={handleToggle('enableExtract')} />}
         label={t('scanConfig.enableExtract')}

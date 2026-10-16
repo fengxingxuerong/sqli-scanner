@@ -9,9 +9,6 @@
     "history": "History",
     "exploit": "Exploit"
   },
-  "topbar": {
-    "scanning": "SCANNING"
-  },
   "home": {
     "hero": "Start Your Security Audit",
     "startScan": "Start Scan",
@@ -782,5 +779,106 @@
     "high": "High",
     "medium": "Medium",
     "low": "Low"
+  },
+  "topbar": {
+    "scanning": "Scanning",
+    "help": "Help",
+    "helpTip": "Quick start / Glossary / Reading results",
+    "engineOnline": "Engine online",
+    "engineOffline": "Engine offline"
+  },
+  "help": {
+    "open": "Help",
+    "title": "Help Center",
+    "subtitle": "Quick start · Glossary · Reading results",
+    "tabGuide": "Quick Start",
+    "tabGlossary": "Glossary",
+    "tabVerdict": "Reading Results",
+    "close": "Close help",
+    "guideIntro": "Four steps to your first scan — defaults work out of the box:",
+    "guideAuth": "Legal prerequisite: only scan targets you have written authorization for. Unauthorized scanning may violate computer-misuse laws.",
+    "guideSteps": [
+      { "title": "1. Get authorization", "desc": "Make sure you have written authorization for the target (your own lab, an authorized engagement, or a CTF environment)." },
+      { "title": "2. Paste the target", "desc": "Enter a URL with parameters, or paste a raw HTTP request / curl command — method and cookies are auto-detected." },
+      { "title": "3. One-click scan", "desc": "Hit \"Start Scan\". Defaults are tuned; no advanced options needed. Live progress and event log included." },
+      { "title": "4. Read the report", "desc": "Check the verdict and risk level first, then evidence per finding. Export as JSON / HTML / Markdown / SARIF." }
+    ],
+    "glossaryIntro": "Every technical term in reports and config, in one line:",
+    "glossary": [
+      { "term": "SQL injection", "def": "Attacker-supplied SQL smuggled into an input parameter, making the database run commands it should never run (dump passwords, alter data, even take over the server)." },
+      { "term": "Injection point", "def": "The parameter whose value flows into a database query, e.g. the id in ?id=1. The tool enumerates all candidates automatically." },
+      { "term": "UNION-based injection", "def": "Attacker query results are merged into the normal page output, directly exposing sensitive data." },
+      { "term": "Error-based injection", "def": "Deliberately trigger database errors and read secrets out of the error message." },
+      { "term": "Blind · Boolean", "def": "No data is echoed, but true/false conditions render differently — data is guessed one bit at a time." },
+      { "term": "Blind · Time-based", "def": "The page looks identical either way; a deliberate 5-second sleep (or its absence) carries one bit. Slow but reliable." },
+      { "term": "OOB (out-of-band)", "def": "When the target neither echoes nor times, the database is induced to call the attacker's server (DNS / HTTP) and leak data out-of-band." },
+      { "term": "Second-order injection", "def": "Malicious SQL is stored first and only triggers when later concatenated into another query — it may not fire during the scan itself." },
+      { "term": "WAF (web firewall)", "def": "The \"security checkpoint\" in front of a site that identifies and blocks suspicious requests. The tool probes it with tamper transforms." },
+      { "term": "tamper plugins", "def": "\"Disguises\" for payloads: case swaps, comment injection, encoding tricks — invisible to the WAF, still valid SQL to the database." },
+      { "term": "Data extraction (dumping)", "def": "After confirmed injection, reading database / table / column names and rows. Destructive — requires confirmation, authorized targets only." },
+      { "term": "False positive / false negative", "def": "False positive = reported but not real; false negative = real but missed. Reports include an evidence chain — verify before finalizing." },
+      { "term": "verdict", "def": "no_vulnerability_detected = ran to completion with current config, no hits; inconclusive = session died / request rejected, NOT equivalent to \"no vulnerability\"." },
+      { "term": "CWE & CVSS", "def": "CWE is the weakness catalog ID (e.g. CWE-89 SQL injection); CVSS is the 0-10 severity score — higher is deadlier." },
+      { "term": "Built-in engine vs sqlmap", "def": "Built-in: zero dependencies, ideal for teaching / compliance. sqlmap: most complete, but needs Python and sqlmap installed locally." },
+      { "term": "Scope", "def": "By default only same-origin targets are hit, and every redirect hop is re-checked; private / loopback addresses are refused by default. That guardrail protects you — it is not a bug." }
+    ],
+    "verdictExitTitle": "Exit codes (CI gates)",
+    "verdictExit": [
+      { "code": "0", "desc": "No high-risk vulnerability found" },
+      { "code": "2", "desc": "Critical / High vulnerability found" },
+      { "code": "1", "desc": "Execution failed, or verdict untrustworthy (NOT \"no vulnerability\")" }
+    ],
+    "verdictStatusTitle": "How to read the verdict",
+    "verdictStatus": [
+      { "code": "no_vulnerability_detected", "desc": "Ran to completion with the current config and no hits. If the target needs login, configure auth first." },
+      { "code": "inconclusive", "desc": "Session expired mid-scan, requests rejected by signing / encryption, etc. — the scan did not finish; never report as \"no vulnerability\"." },
+      { "code": "session_expired", "desc": "Login state expired, invalidating the second half. Fix auth and rescan." }
+    ],
+    "verdictRiskTitle": "Risk levels",
+    "verdictRisk": [
+      { "code": "Critical", "desc": "Direct data dumping / privilege gain — fix immediately and escalate" },
+      { "code": "High", "desc": "Reliable sensitive-data read — fix ASAP" },
+      { "code": "Medium", "desc": "Conditionally exploitable — schedule a fix" },
+      { "code": "Low", "desc": "Limited impact — log and monitor" }
+    ],
+    "verdictCaveat": "\"No findings\" ≠ \"no vulnerabilities\": missing auth, encrypted responses, or a too-narrow scope all cause misses. When in doubt, run a deeper scan with authentication."
+  },
+  "onboarding": {
+    "welcomeTitle": "Welcome to the SQL Injection Scanner",
+    "welcomeDesc": "30 seconds to the core workflow — reopen anytime via the Help button top-right.",
+    "stepOf": "Step {{current}} / {{total}}",
+    "next": "Next",
+    "prev": "Back",
+    "start": "Get started",
+    "skip": "Skip",
+    "authTitle": "Authorized targets only",
+    "authDesc": "Before you begin: every target you scan must have written authorization. Unauthorized scanning may be illegal.",
+    "inputTitle": "Paste the target URL",
+    "inputDesc": "Parameterized URLs, raw HTTP requests, or curl commands all work — method and cookies are auto-detected.",
+    "scanTitle": "One-click scan",
+    "scanDesc": "Defaults are the recommended config. Watch live progress and events; pause or stop anytime.",
+    "reportTitle": "Read the report",
+    "reportDesc": "Verdict and risk level first, then evidence per finding. Multiple export formats at the top right.",
+    "done": "All set — start your first scan"
+  },
+  "configHints": {
+    "wizard": "Paste a target URL to start; defaults are already tuned — beginners can leave them untouched.",
+    "enginePick": "Built-in: zero dependencies, first choice for teaching / compliance. sqlmap: more complete, but requires local Python and sqlmap.",
+    "detectionIntensity": "Detection intensity: higher level tries more payloads — slower but broader. Default 3 balances speed and coverage; use the \"Quick Sweep\" preset when in a hurry.",
+    "safetyGuard": "Safety rails: rate limits, timeouts, retries — keeps you from knocking the target over; also gates destructive payloads.",
+    "injectionScope": "Injection scope: which parameter positions to test (query string / form / headers, etc.). All by default; exclude noisy params later.",
+    "advancedInjection": "Advanced techniques: stacked queries, second-order, UDF — lower hit rate but covers edge targets. Off by default.",
+    "requestControl": "Request control: timeout, retries, concurrency, rate limit. On flaky networks, raise timeouts and cut retries to reduce false verdicts.",
+    "dataExtraction": "Data extraction (dumping): after confirmed injection, read databases / tables / columns / rows. Destructive — needs confirmation, authorized targets only.",
+    "enumeration": "Enumeration: the \"roll call\" before dumping — databases, tables, columns first, then pick what to extract.",
+    "networkAuth": "Network & auth: proxy, login credentials, auth URL. Scanning logged-in pages requires configuring this first.",
+    "scopeSecurity": "Scope & security: same-origin only, private / loopback refused. Only relax for authorized internal targets.",
+    "payloadTuning": "Payload tuning: custom payload pools and filters for advanced users adapting to specific app fingerprints.",
+    "wafEvasion": "WAF evasion: pick tamper plugin combinations to probe the site's checkpoint. When a WAF is detected, a recommended combo is one click away.",
+    "crawler": "Crawler: auto-discovers links and forms to widen injection-point coverage. Same-origin only, depth adjustable.",
+    "session": "Session management: keeps login state alive, handles CSRF tokens and login refresh. Required for post-login pages.",
+    "nosql": "NoSQL injection: targets non-relational stores like MongoDB ($ne, $regex and friends).",
+    "oob": "Out-of-band (OOB): exfiltrate data via DNS / HTTP for targets that neither echo nor time. Requires a receiving server.",
+    "secondOrder": "Second-order injection: detects stored-then-triggered delayed injection; needs a second request that triggers the stored data."
   }
 }

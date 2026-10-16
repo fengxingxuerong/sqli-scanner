@@ -7,6 +7,7 @@ import { useTranslation } from 'react-i18next';
 import { Box, Typography, Switch, Stack, FormControlLabel, TextField } from '@mui/material';
 import { createScanConfigActions } from './scanConfigActions';
 import type { ScanConfigSectionProps } from './sectionProps';
+import SectionTitle from './SectionTitle';
 
 export default function AdvancedInjectionSection({ config, onChange }: ScanConfigSectionProps) {
   const { t } = useTranslation();
@@ -14,7 +15,7 @@ export default function AdvancedInjectionSection({ config, onChange }: ScanConfi
 
   return (
     <Box>
-      <Typography variant="subtitle2" fontWeight={600} className="mb-3">{t('scanConfig.advancedInjection')}</Typography>
+      <SectionTitle hintKey="advancedInjection">{t('scanConfig.advancedInjection')}</SectionTitle>
       <Stack spacing={2}>
         {/* ── 三个严格布尔位（引擎 `config.x === true` 判定，false 也如实发送）── */}
         <FormControlLabel

@@ -6,6 +6,7 @@ import {
 import { parseScopeList } from '../../shared/scanConfig';
 import { createScanConfigActions } from './scanConfigActions';
 import type { ScanConfigSectionProps } from './sectionProps';
+import SectionTitle from './SectionTitle';
 
 export default function SecondOrderSection({ config, onChange }: ScanConfigSectionProps) {
   const { t } = useTranslation();
@@ -13,7 +14,7 @@ export default function SecondOrderSection({ config, onChange }: ScanConfigSecti
 
   return (
     <Box>
-      <Typography variant="subtitle2" fontWeight={600} className="mb-3">{t('scanConfig.secondOrderTitle')}</Typography>
+      <SectionTitle hintKey="secondOrder">{t('scanConfig.secondOrderTitle')}</SectionTitle>
       {/* ── 二阶注入 [2026-09-23 UI-REACH] ─────────────
           开启即代表将对目标发起**真实写请求**，故警示与写确认位（allowWrites）
           都必须在界面上给出来：生产护栏（productionMode）一开，非幂等请求没有

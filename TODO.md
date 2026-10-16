@@ -5,6 +5,36 @@
 
 ---
 
+## 2026-10-16 批次 D85 · 桌面端赛博视觉增强 + 小白引导体系（已完成，待提交）
+
+**动机**：用户实测桌面端反馈——UI「太简陋」要赛博科技感；功能对小白不友好缺引导说明。
+D80 已有赛博基底，缺的是**可读性引导体系**与资产纵深覆盖。
+
+### 已落地
+
+| 面 | 内容 |
+|---|---|
+| 帮助中心 | `src/components/HelpCenter.tsx`：右侧抽屉 3 Tab（快速上手 / 术语表 16 条带过滤 / 结果判读三表）；TopBar「?」入口 |
+| 首启引导 | `src/components/OnboardingTour.tsx`：仅 Tauri + 首次启动，1.5s 延迟 4 步 Modal，`sqli_onboarded` 记忆 |
+| 配置引导 | `InfoHint.tsx`（Tooltip/Popover 两形态）+ `scanConfig/SectionTitle.tsx`；16 分区全接入；`configHints.*` 中英同步 |
+| 赛博资产 | `index.css` 7 项新资产（HUD 四角/切角/辉光/闪烁/光标/网格地面/状态点）；TopBar 版本角标 + HomeHero 终端风 + 首页三步卡霓虹化 + 报告判读速览 |
+| 保基线拆分 | `EnginePicker` / `ReportResumeButton` / `ReportVerdictHint` / `HeroDecor`；ReportPage 325→284 行、圈复杂度 69→58 |
+
+### 关键踩坑（代码注释 + CHANGELOG 均有记录）
+
+1. 前端 `import package.json` → TS2307（include 挡根目录）⇒ vite `define: __APP_VERSION__` 注入；
+2. vitest 不继承 define ⇒ `typeof` 守卫 + dev 兜底；
+3. InfoHint aria-label 全文 ⇒ 与测试 `getByLabelText` 多重匹配 ⇒ 文案避让（测试不可改，facts 指纹）；
+4. OnboardingTour Modal aria-hidden 挡桌面测试 ⇒ isTauri 门 + 1.5s 延迟。
+
+### 待推进
+
+- 桌面端真机视觉核查（打包后截图验收赛博资产在暗色下的实际表现）——需用户在本机跑 `npm run package:win` 后确认；
+- 术语表后续可扩：随新功能（如 D52 postprocess）补充条目；
+- 浅色模式未挂赛博资产类（按设计只服务暗色语义）——若用户要浅色赛博需另做对比度方案。
+
+---
+
 ## 2026-10-12 批次 D52 · 响应解密扩展点 --postprocess（与 --request-script 对偶）
 
 **动机**：`--request-script` 治「发不出合法请求」，D52 治对偶面「读不懂合法响应」——目标把响应体

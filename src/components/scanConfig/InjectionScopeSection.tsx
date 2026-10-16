@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Box, Typography, Switch, Stack, FormControlLabel } from '@mui/material';
 import { createScanConfigActions } from './scanConfigActions';
 import type { ScanConfigSectionProps } from './sectionProps';
+import SectionTitle from './SectionTitle';
 
 export default function InjectionScopeSection({ config, onChange }: ScanConfigSectionProps) {
   const { t } = useTranslation();
@@ -10,7 +11,7 @@ export default function InjectionScopeSection({ config, onChange }: ScanConfigSe
 
   return (
     <Box>
-      <Typography variant="subtitle2" fontWeight={600} className="mb-3">{t('scanConfig.injectionScope')}</Typography>
+      <SectionTitle hintKey="injectionScope">{t('scanConfig.injectionScope')}</SectionTitle>
       {/* [2026-09-23] 这两键此前「引擎已消费 / REST 白名单已收 / UI 无入口」：
           能力在，用户拿不到。默认关（与 TargetParser 默认一致）。 */}
       <Stack spacing={2}>

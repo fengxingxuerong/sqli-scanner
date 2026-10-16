@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { Box, Typography, Slider, Stack, FormControlLabel, Switch } from '@mui/material';
 import { createScanConfigActions } from './scanConfigActions';
 import type { ScanConfigSectionProps } from './sectionProps';
+import SectionTitle from './SectionTitle';
 
 export default function RequestControlSection({ config, onChange }: ScanConfigSectionProps) {
   const { t } = useTranslation();
@@ -11,7 +12,7 @@ export default function RequestControlSection({ config, onChange }: ScanConfigSe
 
   return (
     <Box>
-      <Typography variant="subtitle2" fontWeight={600} className="mb-3">{t('scanConfig.requestControl')}</Typography>
+      <SectionTitle hintKey="requestControl">{t('scanConfig.requestControl')}</SectionTitle>
       <Stack spacing={3}>
         <Box>
           <Typography variant="caption" color="text.secondary">{t('scanConfig.timeout')}: {config.timeoutMs}</Typography>

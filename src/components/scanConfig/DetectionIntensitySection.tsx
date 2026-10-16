@@ -5,6 +5,7 @@ import type { TechniqueType } from '../../shared/types';
 import { TECHNIQUES } from '../../shared/constants';
 import { createScanConfigActions } from './scanConfigActions';
 import type { ScanConfigSectionProps } from './sectionProps';
+import SectionTitle from './SectionTitle';
 
 export default function DetectionIntensitySection({ config, onChange }: ScanConfigSectionProps) {
   const { t } = useTranslation();
@@ -12,7 +13,7 @@ export default function DetectionIntensitySection({ config, onChange }: ScanConf
 
   return (
     <Box>
-      <Typography variant="subtitle2" fontWeight={600} className="mb-3">{t('scanConfig.detectionIntensity')}</Typography>
+      <SectionTitle hintKey="detectionIntensity">{t('scanConfig.detectionIntensity')}</SectionTitle>
       <Stack spacing={3}>
         <Box>
           <Typography variant="caption" color="text.secondary" gutterBottom>

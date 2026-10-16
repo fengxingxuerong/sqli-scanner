@@ -159,20 +159,22 @@ export default function HomePage() {
             <Typography color="text.secondary" gutterBottom>
               {t('home.empty')}
             </Typography>
-            {/* 三步引导卡片 */}
+            {/* 三步引导卡片（D85 赛博化：HUD 四角 + 编号霓虹徽章） */}
             <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} justifyContent="center" className="mt-4">
               {[
                 { step: '1', title: t('home.guide.step1'), desc: t('home.guide.step1Desc') },
                 { step: '2', title: t('home.guide.step2'), desc: t('home.guide.step2Desc') },
                 { step: '3', title: t('home.guide.step3'), desc: t('home.guide.step3Desc') },
               ].map((item) => (
-                <Card key={item.step} variant="outlined" sx={{ minWidth: 160, borderRadius: 2, flex: 1 }}>
+                <Card key={item.step} variant="outlined" className="hud-frame" sx={{ minWidth: 160, borderRadius: 2, flex: 1 }}>
                   <CardContent sx={{ textAlign: 'center', py: 2.5 }}>
                     <Box sx={{
                       width: 36, height: 36, borderRadius: '50%',
-                      bgcolor: 'primary.main', color: '#fff',
+                      background: 'linear-gradient(135deg, #00d4ff 0%, #8b5cf6 100%)',
+                      color: '#0a0e16',
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      fontWeight: 700, mx: 'auto', mb: 1.5, fontSize: '1rem',
+                      fontWeight: 800, mx: 'auto', mb: 1.5, fontSize: '1rem',
+                      boxShadow: '0 0 14px rgba(0, 212, 255, 0.35)',
                     }}>
                       {item.step}
                     </Box>

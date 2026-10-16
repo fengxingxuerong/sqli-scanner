@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Box, Typography, Switch, Stack, FormControlLabel } from '@mui/material';
 import { createScanConfigActions } from './scanConfigActions';
 import type { ScanConfigSectionProps } from './sectionProps';
+import SectionTitle from './SectionTitle';
 
 /** 非 SQL 注入的三类（与后端 ScanManager 的 kinds 白名单严格一致） */
 const NO_SQL_KINDS = ['nosql', 'graphql', 'ssti'] as const;
@@ -13,7 +14,7 @@ export default function NoSqlSection({ config, onChange }: ScanConfigSectionProp
 
   return (
     <Box>
-      <Typography variant="subtitle2" fontWeight={600} className="mb-3">{t('scanConfig.noSqlTitle')}</Typography>
+      <SectionTitle hintKey="nosql">{t('scanConfig.noSqlTitle')}</SectionTitle>
       {/* ── 非 SQL 注入（NoSQL / GraphQL / SSTI）[2026-09-23 UI-REACH] ─────────────
           这三类此前「引擎已实现（detectors/NoSqlInjectionDetector.js）、REST 白名单已收
           （scanRoutes.js:530）、类型与 SCAN_CONFIG_KEYS 都登记了」—— 唯独面板从未渲染过控件。

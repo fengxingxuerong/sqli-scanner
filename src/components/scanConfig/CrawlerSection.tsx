@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Box, Typography, Switch, Slider, FormControlLabel } from '@mui/material';
 import { createScanConfigActions } from './scanConfigActions';
 import type { ScanConfigSectionProps } from './sectionProps';
+import SectionTitle from './SectionTitle';
 
 export default function CrawlerSection({ config, onChange }: ScanConfigSectionProps) {
   const { t } = useTranslation();
@@ -10,7 +11,7 @@ export default function CrawlerSection({ config, onChange }: ScanConfigSectionPr
 
   return (
     <Box>
-      <Typography variant="subtitle2" fontWeight={600} className="mb-3">{t('scanConfig.crawler')}</Typography>
+      <SectionTitle hintKey="crawler">{t('scanConfig.crawler')}</SectionTitle>
       <FormControlLabel
         control={<Switch checked={(config.crawlDepth ?? 0) > 0} onChange={(e) => onChange({ crawlDepth: e.target.checked ? 2 : 0 })} />}
         label={t('scanConfig.enableCrawler')}
