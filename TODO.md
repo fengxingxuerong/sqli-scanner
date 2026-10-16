@@ -5,7 +5,29 @@
 
 ---
 
-## 2026-10-16 批次 D85 · 桌面端赛博视觉增强 + 小白引导体系（已完成，待提交）
+## 2026-10-16 批次 D86 · 引导三件套收尾（已完成，待提交）
+
+用户对 D85 收尾时列的三个可选项回复「都要加上」，全部落地：
+
+| 项 | 落地 |
+|---|---|
+| 术语表扩充 | `help.glossary` 16→24 条（sidecar/token、--request-script、--postprocess、扫描预设、断点续跑、WAF 指纹、SSE 事件直播）；中英同步 |
+| 浅色赛博 | `themeMode.tsx` `useThemeDataset` hook（`<html data-theme>` 同步）+ `index.css` 浅色变体（HUD 描边深青化、辉光/闪烁去除）；挂载点零 JSX 改动 |
+| 引导回看 | `onboardingReplay.ts`（CustomEvent 通道）+ HelpCenter「重新查看新手引导」按钮 + OnboardingTour 监听——修掉 D85「文案承诺回看却无入口」的真缺口 |
+
+- 引导延迟保持 1.5s（测试安全边际：engineGate waitFor 窗口 ~500ms，2 倍余量；不为看起来更快牺牲门禁）
+- 自查修掉：条件调用 useEffect（Rules of Hooks）→ effect 内判空；事件常量误导出 → 去 export（deadcode）
+- 验证：vitest 574/574 · typecheck 0 · lint 0 · 八守卫 + wiring 230 + readme/facts/refs/modules 全 0
+
+### 待推进
+
+- 桌面端真机安装验收（1.1.1 包仍是 D85 版；D86 改动需重新 `npm run package:win` 才进安装包——**当前包看不到回看按钮与浅色变体**）；
+- 浅色赛博只覆盖了 D85/D86 资产（hud-frame/grid-floor/neon-text/caret/flicker）；TopBar 顶栏恒深色不受影响；
+- 后续新功能落地时同步补术语表条目（防再次漂移）。
+
+---
+
+## 2026-10-16 批次 D85 · 桌面端赛博视觉增强 + 小白引导体系（已完成，已提交 71f6976+3bb5f3a，已推送）
 
 **动机**：用户实测桌面端反馈——UI「太简陋」要赛博科技感；功能对小白不友好缺引导说明。
 D80 已有赛博基底，缺的是**可读性引导体系**与资产纵深覆盖。

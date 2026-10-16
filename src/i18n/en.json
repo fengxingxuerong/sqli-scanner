@@ -795,6 +795,8 @@
     "tabGlossary": "Glossary",
     "tabVerdict": "Reading Results",
     "close": "Close help",
+    "replayTour": "Replay the beginner tour",
+    "replayTourHint": "The four-step walkthrough is always available",
     "guideIntro": "Four steps to your first scan — defaults work out of the box:",
     "guideAuth": "Legal prerequisite: only scan targets you have written authorization for. Unauthorized scanning may violate computer-misuse laws.",
     "guideSteps": [
@@ -820,7 +822,14 @@
       { "term": "verdict", "def": "no_vulnerability_detected = ran to completion with current config, no hits; inconclusive = session died / request rejected, NOT equivalent to \"no vulnerability\"." },
       { "term": "CWE & CVSS", "def": "CWE is the weakness catalog ID (e.g. CWE-89 SQL injection); CVSS is the 0-10 severity score — higher is deadlier." },
       { "term": "Built-in engine vs sqlmap", "def": "Built-in: zero dependencies, ideal for teaching / compliance. sqlmap: most complete, but needs Python and sqlmap installed locally." },
-      { "term": "Scope", "def": "By default only same-origin targets are hit, and every redirect hop is re-checked; private / loopback addresses are refused by default. That guardrail protects you — it is not a bug." }
+      { "term": "Scope", "def": "By default only same-origin targets are hit, and every redirect hop is re-checked; private / loopback addresses are refused by default. That guardrail protects you — it is not a bug." },
+      { "term": "Sidecar & one-time token", "def": "The desktop engine runs as a separate process: each start picks a random port and issues a one-time token, so no other local program can hijack your scan engine." },
+      { "term": "Request script (--request-script)", "def": "Rewrites requests before they go out (signing, encoding, passing challenges) so they look legitimate — fixes \"cannot send a valid request\"." },
+      { "term": "Response script (--postprocess)", "def": "Decrypts / decodes response bodies before detection — prevents ciphertext from flattening true/false differences into a silent \"scan never finished\" false negative." },
+      { "term": "Scan presets", "def": "One-click Quick Sweep / Standard / Deep Audit (ZAP Attack Strength style): beginners just pick a preset instead of tuning every control." },
+      { "term": "Resume from checkpoint", "def": "With a saved session, an interrupted scan resumes without re-testing parameters already done — fewer requests, less noise on the target." },
+      { "term": "WAF fingerprinting", "def": "Identifies the WAF vendor from response traits with zero extra requests, and offers a recommended tamper combo in one click." },
+      { "term": "Live events (SSE)", "def": "Scan progress and events stream in real time; the connection auto-reconnects, and full logs can be copied or downloaded anytime." }
     ],
     "verdictExitTitle": "Exit codes (CI gates)",
     "verdictExit": [
