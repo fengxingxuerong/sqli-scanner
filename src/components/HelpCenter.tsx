@@ -8,11 +8,13 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
-  Box, Drawer, IconButton, Tab, Tabs, Typography, Stack, Alert, TextField,
+  Box, Drawer, IconButton, Tab, Tabs, Typography, Stack, Alert, TextField, Button,
   InputAdornment, Paper,
 } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
 import SearchIcon from '@mui/icons-material/Search';
+import ReplayIcon from '@mui/icons-material/Replay';
+import { replayOnboarding } from './onboardingReplay';
 import ShieldIcon from '@mui/icons-material/Shield';
 
 interface HelpCenterProps {
@@ -47,6 +49,13 @@ function GuideTab() {
           </Typography>
         </Paper>
       ))}
+      {/* [D86] 回看入口：兑现欢迎文案「随时可回看」的承诺（D85 曾只有自动弹出） */}
+      <Button variant="outlined" startIcon={<ReplayIcon />} onClick={replayOnboarding}>
+        {t('help.replayTour')}
+      </Button>
+      <Typography variant="caption" color="text.secondary">
+        {t('help.replayTourHint')}
+      </Typography>
     </Stack>
   );
 }

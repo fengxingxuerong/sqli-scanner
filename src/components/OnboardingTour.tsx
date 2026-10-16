@@ -16,6 +16,7 @@ import LinkIcon from '@mui/icons-material/Link';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import ArticleIcon from '@mui/icons-material/Article';
 import { tauriBridge } from '../shared/tauriBridge';
+import { useOnboardingReplay } from './onboardingReplay';
 
 const STORAGE_KEY = 'sqli_onboarded';
 
@@ -36,6 +37,11 @@ export default function OnboardingTour() {
     return () => window.clearTimeout(timer);
   }, []);
   const [step, setStep] = useState(0);
+
+  // [D86] 帮助中心「重新查看新手引导」入口：回看时重置到第 0 步并强制打开
+  // （isTauri 门只挡自动弹出，不挡用户主动回看；web/开发环境同样可回看）。
+  const replay = useCallback(() => { setStep(0); setOpen(true); }, []);
+  useOnboardingReplay(replay);
 
   // 四步内容：title/desc 成对取自 i18n，避免在 JSX 里堆条件分支
   const steps = [

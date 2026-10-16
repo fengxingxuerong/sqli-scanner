@@ -65,6 +65,33 @@
 
 ## [Unreleased]
 
+### 2026-10-16 批次 D86 · 引导三件套收尾：术语表扩充 + 浅色赛博 + 引导回看入口（用户「都要加上」驱动）
+
+**动机**：D85 交付时列了三个可选增强（术语表补条目 / 浅色模式赛博资产 / 引导相关调优），
+用户回复「都要加上」。本批全部落地，并**修复一个 D85 留下的真缺口**：OnboardingTour 的
+欢迎文案写着「随时可点右上角帮助回看」，但 D85 只做了自动弹出、**没有回看入口**——
+文案承诺了功能不存在，正是本仓「文件存在 ≠ 能力存在」要防的形态。
+
+| 面 | 改动 |
+|---|---|
+| 术语表扩充 | `help.glossary` 16 → **24 条**：新增 sidecar 与一次性 token / 请求变换脚本（--request-script）/ 响应解密脚本（--postprocess）/ 扫描预设 / 断点续跑 / WAF 指纹识别 / 事件直播（SSE）——覆盖 D41–D52 各批次落地的小白黑话；中英同步 |
+| 浅色赛博 | `themeMode.tsx` 新增 `useThemeDataset` hook：生效模式同步到 `<html data-theme>`；`index.css` 浅色变体块（`[data-theme='light']`：HUD 描边换深青、网格线降透明度、辉光/闪烁去除——白底辉光会糊，深青描边保对比度）。HomeHero 等挂载点**零 JSX 改动**，CSS 层自动分流 |
+| 引导回看 | 新建 `onboardingReplay.ts`（CustomEvent 通道 + hook）；HelpCenter 快速上手 Tab 底部加「重新查看新手引导」按钮；OnboardingTour 监听事件重置到第 0 步并强制打开（isTauri 门只挡自动弹出，不挡主动回看） |
+| 引导时机 | 延迟保持 **1.5s 不变**（未顺手改短）：桌面「引擎就绪渲染门禁」测试的 waitFor 窗口约 500-550ms，1.5s 有 2 倍余量；改短有把既有测试打红的真风险——不为「看起来更快」牺牲门禁安全边际 |
+
+**两个当场自查修掉的问题**：
+
+1. 初版 hook 写成 `if (typeof window === 'undefined') return;` 前置条件调用 `useEffect`——
+   **违反 Rules of Hooks**（eslint react-hooks 会拦）。重写为 effect 无条件注册、window
+   判空移入 effect 内部。
+2. `ONBOARDING_REPLAY_EVENT` 初版导出 ⇒ deadcode 守卫抓「无跨文件引用的导出」
+   （dispatch/listen 都在同文件成对提供）。去掉 export，注释写明原因。
+
+**验证**（本批收口实测）：vitest **574/574** · `npm run typecheck` 0 error（中途抓出
+HelpCenter 缺 `Button` import，TS2304×2，已修）· `npm run lint` 0 error · 八道守卫全绿
+（deadcode 初版红→修）· wiring **230/230** · readme/facts/refs/modules 全 0。
+i18n parity 3/3（24 条术语 + 新键中英占位符一致）。
+
 ### 2026-10-16 批次 D85 · 桌面端赛博视觉增强 + 小白引导体系（用户反馈驱动）
 
 **动机**：用户实测桌面端反馈两条——① UI「太简陋」，要赛博科技感；② 功能对小白不友好，缺引导和说明。

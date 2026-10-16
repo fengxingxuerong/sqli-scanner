@@ -20,7 +20,7 @@ import './i18n';
 // 首启合规声明持久化 key（勾选「已知晓」后不再弹出，参考 THEME_KEY 模式）
 const DISCLAIMER_KEY = 'sqli_disclaimer';
 import type { ThemeMode } from './shared/themeMode';
-import { THEME_KEY, ThemeModeContext } from './shared/themeMode';
+import { THEME_KEY, ThemeModeContext, useThemeDataset } from './shared/themeMode';
 // 再导出：保持既有 import 路径不变（TopBar 等组件仍可从 App 取到主题类型/hook）
 export type { ThemeMode } from './shared/themeMode';
 export { useThemeMode } from './shared/themeMode';
@@ -86,6 +86,9 @@ function AppThemeProvider({ children }: { children: ReactNode }) {
   // [D81] 引擎生命周期 UI（自动重连 + 手动重启 + 横幅）抽至 useEngineRecovery
   const effectiveMode: 'light' | 'dark' =
     mode === 'system' ? (systemDark ? 'dark' : 'light') : mode;
+
+  // [D86] 生效模式同步到 <html data-theme>：浅色赛博资产经 CSS 变量切换（见 index.css）
+  useThemeDataset(effectiveMode);
 
   const setMode = useCallback((m: ThemeMode) => setModeState(m), []);
 
