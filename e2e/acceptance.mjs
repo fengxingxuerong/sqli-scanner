@@ -410,6 +410,33 @@ const SUITES = [
     },
   },
   {
+    // [D87] OOB 外部隧道（interactsh 协议）整链验收。与上面 oob-real 的分工是**回连拓扑**：
+    // 上面验「目标能回连本机接收端」，本套验「只要求扫描器能出网」（云上/NAT 后目标的唯一可行形态）。
+    // ⚠️ 判据读**文本**而非退出码：脚本在「无法访问协作端」时按设计 exit 0（SKIP），
+    //    拿退出码当判据会把「没测」认成「通过」——这正是本仓栽过的「永远绿」形状。
+    id: 'oob-interactsh',
+    title: 'OOB 外部隧道真机（interactsh 协作端回连 → 轮询取回 → 检出）',
+    needs: [],
+    optional: true, // 需出网；CI/内网环境无外网属常态 → SKIP 并写明原因，不判红也不算通过
+    run: () => run('node', ['e2e/oob-interactsh-lab/run.mjs']),
+    assert: (out) => {
+      if (/\[SKIP\] 无法访问协作端/.test(out)) {
+        // 用仓库既有的第三态 skipped（与 fileRead/fileWrite 同口径）：SKIP 不判红、也不计入 PASS
+        return { facts: { OOB外部隧道: '跳过（无外网）' }, pass: false, skipped: true, reason: '无法访问协作端（离线环境）' };
+      }
+      const hit = /OOB 外部隧道整链通过/.test(out);
+      const lab = /靶站收到请求 (\d+) 次（DNS 解析 (\d+) · HTTP 回连 (\d+)）/.exec(out);
+      return {
+        facts: {
+          OOB外部隧道: hit ? '✅ 检出' : '❌ 未检出',
+          靶站回连: lab ? `${lab[2]} DNS + ${lab[3]} HTTP` : '取不到',
+        },
+        pass: hit,
+        reason: hit ? null : '整链未检出（隧道链路或归因判据失效，现场见 stdout）',
+      };
+    },
+  },
+  {
     id: 'report-contract',
     title: '报告契约（自报字段必须与真实状态一致）',
     needs: ['mysql'],

@@ -2,7 +2,7 @@ import { nanoid } from 'nanoid';
 import { Detector } from '../Detector.js';
 import { createDetectionResult } from '../models.js';
 import { OOB_PAYLOADS, DNS_OOB_PAYLOADS, SUPPORTED, fillPayload, replaceAllLiteral } from '../payloads.js';
-import { oobReceiver } from '../../core/oobReceiver.js';
+import { oobTunnel } from '../../core/oobTunnel.js';
 import { ErrorCode, AppError } from '../../core/errors.js';
 import { logger } from '../../core/logger.js';
 
@@ -11,22 +11,17 @@ import { logger } from '../../core/logger.js';
  * Windows UNC 主机位不含 :port——`\\127.0.0.1:8899\x` 在真实目标上永远解析不了，
  * 所以 UNC 类向量必须用裸主机：剥 scheme、剥路径、剥端口，token 挪进 share 名
  * （外部 SMB 监听如 Responder 可从 share 名读出 token 完成确认）。
+ * [D87 2026-10-18] 实现迁至 core/oobTunnel.js（本地/外部两种拓扑共用同一派生逻辑），
+ * 此处保留同名再导出，避免既有调用方与测试断链。
  * @param {string} callbackBase 形如 'http://h:8899' / 'h:8899' / 'h' / 'h/prefix'
  * @param {string} token nanoid token
  * @returns {string} `<host>\oob\<token>`（不含前导 \\\\，模板层按需自带）
  */
-export function deriveUncPath(callbackBase, token) {
-  const bareHost = String(callbackBase || '')
-    .replace(/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//, '') // 剥 scheme
-    .split('/')[0] // 剥路径
-    .replace(/:\d+$/, '') // 剥端口
-    .trim();
-  return `${bareHost}\\oob\\${token}`;
-}
+export { deriveUncPath } from '../../core/oobTunnel.js';
 
 // OOB 带外检测器（无回显盲注兜底）
 // 策略模式与现有 Detector 子类一致：detect(ctx) 返回 DetectionResult。
-// 仅当 ScanManager 已按需启动 oobReceiver（oob 被选中且 enabled）时才可能命中；
+// 仅当 ScanManager 已按需启动 OOB 隧道（oob 被选中且 enabled）时才可能命中；
 // 命中即确认注入存在，但"只确认、不进拖库/二分提取"（扫描聚合阶段 oob 落空属预期）。
 export class OobDetector extends Detector {
   constructor() {
@@ -41,28 +36,23 @@ export class OobDetector extends Detector {
     const { httpClient, target, point, dbms, config } = ctx;
     const result = createDetectionResult(point.id, 'oob');
 
-    // 接收端未启动（oob 未正确启用）→ 抛 OOB_DISABLED，由调度层捕获并记录
-    if (!oobReceiver.isStarted()) {
+    // 隧道未启动（oob 未正确启用）→ 抛 OOB_DISABLED，由调度层捕获并记录
+    // [D87] 判据从 oobReceiver 改为 oobTunnel：两种回连拓扑（本地监听/外部协作端）都经
+    // 同一抽象，检测器无需知道背后是哪条；语义不变（未启用仍然拒绝，不静默放过）。
+    if (!oobTunnel.isStarted()) {
       throw new AppError(ErrorCode.OOB_DISABLED, 'oob 接收端未启动（需 oob 被选中且 enabled）');
     }
     const oobCfg = (config && config.oob) || {};
-    // P2-13: 未显式配置 callbackBase 时按接收端 httpPort 派生（127.0.0.1:<httpPort>），
-    // 避免用户只改 httpPort 不改 callbackBase 导致回连打到旧端口、OOB 静默失效。
-    const httpPort = Number(oobCfg.httpPort);
-    const callbackBase =
-      (typeof oobCfg.callbackBase === 'string' && oobCfg.callbackBase.trim() !== ''
-        ? oobCfg.callbackBase
-        : Number.isFinite(httpPort) && httpPort > 0
-          ? `127.0.0.1:${httpPort}`
-          : '127.0.0.1:8899');
     const timeoutMs = Number.isFinite(oobCfg.timeoutMs) ? oobCfg.timeoutMs : 5000;
 
-    // 生成带外 token，并与接收端地址拼成回调 URL（目标 DBMS 被触发后回连此地址）
+    // 生成带外 token，并由隧道解析出回连地址（本地模式: callbackBase 派生；
+    // interactsh 模式: 协作端域名，token 编进子域标签）。
     const token = nanoid(16);
-    const callback = `${callbackBase}/oob/${token}`;
+    const addr = oobTunnel.resolveAddresses(token, oobCfg);
+    const callback = addr.http;
     // [实战分析 P1 2026-10-02] UNC/SMB 类向量（MySQL/MariaDB/TiDB LOAD_FILE、MSSQL
     // xp_dirtree）用裸主机 + share 名形态：Windows UNC 主机位不含 :port。
-    const uncPath = deriveUncPath(callbackBase, token);
+    const uncPath = addr.unc;
 
     // 候选 DBMS：已知 dbms 且支持 OOB → 仅打该库；否则遍历所有支持库逐一尝试
     const supportedDbs = Object.keys(SUPPORTED).filter(
@@ -109,8 +99,8 @@ export class OobDetector extends Detector {
       }
     }
 
-    // 轮询等待目标回连（真实 DNS/SMB/HTTP 或测试直接调 oobReceiver.receive）
-    const hit = await oobReceiver.waitForToken(token, timeoutMs);
+    // 等待目标回连（本地监听命中 / interactsh 轮询取回；测试可直接调 oobTunnel.receive）
+    const hit = await oobTunnel.waitForToken(token, timeoutMs);
     if (hit) {
       result.vulnerable = true;
       result.dbms = dbms || null; // 已知库则标注；未知时仅确认注入存在
@@ -156,7 +146,7 @@ export class OobDetector extends Detector {
           }
         }
       }
-      const dnsHit = await oobReceiver.waitForToken(dnsToken, timeoutMs);
+      const dnsHit = await oobTunnel.waitForToken(dnsToken, timeoutMs);
       if (dnsHit) {
         result.vulnerable = true;
         result.dbms = dbms || null;

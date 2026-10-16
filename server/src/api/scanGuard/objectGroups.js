@@ -123,8 +123,35 @@ export function guardOob(config, cfg) {
       dnsOob: !!o.dnsOob,
       dnsDomain: typeof o.dnsDomain === 'string' ? o.dnsDomain.slice(0, 253) : defaults.oob.dnsDomain,
       dnsPort: clampInt(o.dnsPort, defaults.oob.dnsPort, 1, 65535),
+      // [D87 2026-10-18] 外部 OOB 隧道（interactsh 协议）。白名单必须放行，否则 REST/面板
+      // 传不进来——CLI 有旗标、面板无入口正是本仓反复吃过的「三端能力不对齐」形状。
+      // 安全口径：server 仅接受主机名（不含 scheme/路径，防被当跳板打任意 URL），
+      // servers 数组逐项同规则过滤；非法项丢弃并保留默认，不放宽成「任意字符串」。
+      interactsh: guardInteractsh(o.interactsh),
     };
   }
+}
+
+/** interactsh 配置净化（[D87]）：主机名白名单字符集 + 长度约束，非法项丢弃回退默认。 */
+function guardInteractsh(raw) {
+  const d = defaults.oob.interactsh;
+  const o = raw && typeof raw === 'object' ? raw : {};
+  const cleanHost = (v, fallback) => {
+    if (typeof v !== 'string') return fallback;
+    const s = v.trim().replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+    // 仅允许 DNS 主机名字符（不给任意 URL 留口子）；非法即回退默认
+    return /^[a-z0-9.-]{1,253}$/i.test(s) && s.includes('.') ? s : fallback;
+  };
+  const servers = Array.isArray(o.servers)
+    ? o.servers.map((s) => cleanHost(s, '')).filter((s) => s !== '').slice(0, 10)
+    : d.servers;
+  return {
+    enabled: !!o.enabled,
+    server: cleanHost(o.server, d.server),
+    servers: servers.length ? servers : d.servers,
+    pollIntervalMs: clampInt(o.pollIntervalMs, d.pollIntervalMs, 500, 60000),
+    timeoutMs: clampInt(o.timeoutMs, d.timeoutMs, 1000, 120000),
+  };
 }
 
 export function guardNoSql(config, cfg) {

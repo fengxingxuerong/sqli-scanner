@@ -65,6 +65,30 @@
 
 ## [Unreleased]
 
+### 2026-10-18 批次 D87 · OOB 外部隧道：interactsh 协议对接（补实战缺口 P1-3）
+
+**动机**：内置 OOB 接收端要求「目标能回连扫描器」，真实授权测试里目标多在云上/NAT 后/跨网段
+⇒ 回连路径不通 ⇒ 无回显盲注（OOB 是唯一可达通道）**恒判「未检出」**——与本仓反复治理的
+「静默假阴性」同形。本批改为「扫描器主动轮询外部协作端」，只要求扫描器能出网。
+
+| 面 | 改动 |
+|---|---|
+| 新增 `core/interactshClient.js` | 零依赖实现 interactsh 协议（引擎零运行时依赖的纪律）：注册 / 轮询 / AES-256-CTR（IV 前置）+ RSA-OAEP(SHA-256) 解 key / 注销 |
+| 新增 `core/oobTunnel.js` | 两拓扑（本地监听 / 外部协作端）统一抽象，检测器**零分支**；默认仍走本地 ⇒ 零行为漂移 |
+| 接线 | `OobDetector`、`scan/detect.js`、`scan/supplementalRuns.js` 经 `oobTunnel`；`defaults.oob.interactsh`；REST `guardInteractsh`（仅主机名字符集，不给任意 URL 留口）；CLI `--oob-interactsh` + help + README |
+| 测试 | 离线 `tests/interactshClient.test.js` 9 例（进 CI 常驻）；真机 `e2e/oob-interactsh-lab` 已接入 run-all/acceptance/接线门禁 |
+
+**实测推翻/踩坑（写成注释与判据，非推理）**：
+- 首标签必须 ≥33 字符（corrID 20 + nonce 13）：逐档受控实验 20/26/31/32 失败、33/34/36 成功；
+  服务端在标签上滑窗找 corrID，窗口落不下。**短域名会表现为「偶发命中」**，易被误读为服务器限流。
+- DNS 大小写不敏感：服务端存的回连记录恒小写，而 token 是 nanoid（含大写）⇒ 必须归一化比较，
+  否则「隧道通了却恒不检出」（实测靶站真回连 14 次、本地 received 恒 0）。
+
+**过程中修掉的自身缺陷**：新隧道与既有直连 `oobReceiver.start()` 用法形成「两入口各记各的状态」
+（检测器只认隧道 ⇒ 直连用例挂死，正是本仓最忌的形状）→ 隧道加委托回退，既有用法零回归。
+
+---
+
 ### 2026-10-16 批次 D86 · 引导三件套收尾：术语表扩充 + 浅色赛博 + 引导回看入口（用户「都要加上」驱动）
 
 **动机**：D85 交付时列了三个可选增强（术语表补条目 / 浅色模式赛博资产 / 引导相关调优），

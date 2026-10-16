@@ -11,7 +11,7 @@
 import { Scheduler } from '../../services/Scheduler.js';
 import * as eventBus from '../../core/eventBus.js';
 import { logger } from '../../core/logger.js';
-import { oobReceiver } from '../../core/oobReceiver.js';
+import { oobTunnel } from '../../core/oobTunnel.js';
 import { dialectToDbms } from '../DialectSqlBuilder.js';
 import { verifyTamperChains } from '../../core/waf/chainVerify.js';
 import { decideBlockPolicy, isUntrustedVendor } from '../../core/waf/blockPolicy.js';
@@ -69,10 +69,10 @@ export async function detectPhase(run) {
     let oobUnavailable = null;
     if (selectedTechs.includes('oob') && oobCfg && oobCfg.enabled) {
       try {
-        await oobReceiver.start(oobCfg);
+        await oobTunnel.start(oobCfg);
       } catch (e) {
         oobUnavailable = String(e?.message || e);
-        logger.warn(`OOB 接收端启动失败，oob 检测将不可用：${oobUnavailable}`);
+        logger.warn(`OOB 隧道启动失败，oob 检测将不可用：${oobUnavailable}`);
       }
     }
 
