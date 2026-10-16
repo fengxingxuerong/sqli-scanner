@@ -1,10 +1,16 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { fileURLToPath, URL } from 'node:url';
+import { version } from './package.json';
 
 // Vite 配置：开发期将 /api 代理到本地检测引擎（端口 4567）
 export default defineConfig({
   plugins: [react()],
+  // [D85] 版本号构建期注入：单一来源是 package.json（与 version:check 门禁同源），
+  // 前端 TopBar 版本角标消费 __APP_VERSION__（类型声明见 src/vite-env.d.ts）。
+  define: {
+    __APP_VERSION__: JSON.stringify(version),
+  },
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),
