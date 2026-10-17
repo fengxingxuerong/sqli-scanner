@@ -65,6 +65,27 @@
 
 ## [Unreleased]
 
+### 2026-10-17 批次 D95 · e2e 靶场接线实锤的两处烂账（判据假阳性 + 漏接线 + 收口清单 22 项）
+
+**动机（发现链）**：D94 修好 typecoverage 后，CI lint 首次越过第 17 步、多跑了 25 个从未
+在此内容上执行过的步骤，到第 43 步「e2e 靶场接线状态」当场红 —— 同一族缺陷的第二个实例：
+门禁在 ci-local/CI 里活着，但 **D93 建的 param-name-lab 有入口、从不执行**（其 run.mjs
+判据注释里甚至写着「acceptance 读文本判据」），而且该门禁**判据本身有假阳性**。
+
+| 面 | 改动 |
+|---|---|
+| 判据修复（假阳性） | `e2e-wiring-check.mjs` 原来用裸 `includes()` 在四份接线真源全文里找目录名 —— acceptance.mjs 一句**散文注释**提到 sqli-labs 被判「已接线」，与 reference-labs.json 的正确登记互撞报「白名单腐烂」，诱人删掉正确登记。新判据：读取时**字符串感知剥注释**（JS 行/块注释 + YAML 整行 `#`；URL 与字符串内容不受影响），并加 5 条 selftest 钉住（注释提及≠接线 / 剥注释过猛=假阴性 / 含 `//` 的 URL 免受伤害） |
+| 接线补齐（param-name-lab） | 三处：① `e2e/acceptance.mjs` 新增套件（needs mysql，读 `[PASS]`/`[SKIP]` 文本判据——D93 注释写明的归宿）；② `e2e/run-all.mjs` LABS 条目（deps `['mysql']`）；③ 靶场**自带幂等夹具**：D93 版复用 blackbox_lab.products，未跑过黑盒靶场的环境里整库不存在（CI acceptance 的 docker mysqld 就是）⇒ 永久 SKIP；现自建 `paramname_lab` + 种子（列结构同源），与 recall-lab「自带初始化」同惯例 |
+| 探针修复（假 FAIL） | run.mjs 原探针判「响应含 `sql=`」= MySQL 就绪，但**错误页也回显 `sql=`**（本机实测：MySQL 未起时把应 SKIP 的路径骗成三路扫描全 0 的假 `[FAIL]`）。改为「含 `sql=` **且**不含 `query failed`」 |
+| 收口清单 | `e2e:wiring` + `--selftest` 进 `gate:close`（**20→22 项**）与 `.husky/pre-commit`（纯静态、秒级，符合钩子准入标准）；preCommitGates wiring 测试把 e2e-wiring-check.mjs 钉进预期清单 |
+| 顺带（CI 稳定） | `extractor.timeDrift.test.js` 故障② 截止 90s→150s：run 260 macos 实测已发 269 请求仍顶爆（Σ(60+2i)≈89s + 真侧附加），按请求上限 ~350 ≈ 144s 的 1.05 倍重标；D64 起第二次墙钟重标，仍只动截止不动断言（失控判据在故障① 的 6s hangs） |
+| AGENTS.md | §3 收口清单 20→22 项；漏报史 4→5 次（D95 补 e2e:wiring） |
+
+**验证**：e2e:wiring 绿（34 靶场：28 已接线 · 6 参考登记 · 0 未处置）+ selftest 绿；
+沙箱真库全链路 `[param-name] vuln=1 paramNameHit=1 off=0 safe=0 → [PASS]`（D93 能力真值复现）；
+acceptance `--only=param-name-lab` 1 PASS / 0 FAIL；无库环境正确 `[SKIP]`（不再假 FAIL）；
+rust fmt/clippy 绿；timeDrift 11 例绿；stripComments 白盒 5 例绿；gate:close 22/22 绿。
+
 ### 2026-10-17 批次 D94 · JSDoc 类型覆盖回归回补（D87 引入；CI push 连红 8 次的唯一根因）
 
 **动机（发现链）**：发布收口时核查 CI 历史，发现 master 的 push 触发的 lint job 自

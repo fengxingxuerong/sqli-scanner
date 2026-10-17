@@ -51,6 +51,8 @@ function closeGateList({ quick = false } = {}) {
     { name: 'wiring', cmd: ['node', '--test', ...wiringTestFiles()] },
     { name: 'facts', cmd: ['npm', 'run', '--silent', 'facts:check'] },
     { name: 'refs', cmd: ['node', 'scripts/ref-integrity.mjs'] },
+    { name: 'e2e-wiring', cmd: ['node', 'scripts/e2e-wiring-check.mjs'] },
+    { name: 'e2e-wiring:selftest', cmd: ['node', 'scripts/e2e-wiring-check.mjs', '--selftest'] },
   ];
   if (quick) return list.filter((g) => !SLOW.has(g.name));
   return [...list, { name: 'typecheck', cmd: ['npm', 'run', '--silent', 'typecheck'] }, { name: 'lint', cmd: ['npm', 'run', '--silent', 'lint'] }];
@@ -61,7 +63,7 @@ function selftest() {
   const bad = [];
   const list = closeGateList();
   const names = list.map((g) => g.name);
-  const must = ['typecheck', 'lint', 'wiring', 'facts', 'refs', 'readme', 'complexity', 'nesting', 'duplication', 'deadcode', 'debt', 'typecoverage'];
+  const must = ['typecheck', 'lint', 'wiring', 'facts', 'refs', 'readme', 'complexity', 'nesting', 'duplication', 'deadcode', 'debt', 'typecoverage', 'e2e-wiring', 'e2e-wiring:selftest'];
   for (const m of must) if (!names.includes(m)) bad.push(`清单缺「${m}」（AGENTS.md §3 收口清单要求项）`);
   for (const g of ['complexity', 'nesting', 'duplication', 'deadcode', 'debt', 'typecoverage']) {
     if (!names.includes(`${g}:selftest`)) bad.push(`清单缺「${g}:selftest」（每道门禁都要自证）`);

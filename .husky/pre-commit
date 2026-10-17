@@ -109,4 +109,10 @@ run_gate "模块引用完整性（server/*.js 全量静态扫描）" node script
 #     与 2b 同族：同一事实多份副本。不同步时桌面安装包对外报的版本与 npm 包对不上。
 run_gate "版本号三处一致" node scripts/version-sync.mjs || exit 1
 
+# 2e. e2e 靶场接线状态：每个靶场要么出现在接线真源里、要么登记为参考靶场。
+#     纯静态（git ls-files + 读四份真源文本），符合本钩子"不执行被检代码"的准入。
+#     D93 建了 param-name-lab 却漏接线 —— 本钩子与收口清单当时都没有它，
+#     红灯一路躺到 CI 第 43 步才被 e2e:wiring 抓到（D95 补）。
+run_gate "e2e 靶场接线状态（已接线 ⇄ 已正名）" node scripts/e2e-wiring-check.mjs || exit 1
+
 echo "✅ pre-commit 门禁通过"

@@ -7,7 +7,7 @@
 // 值走参数化 ⇒ 值注入扫不到，只有改键名能打。缺这个靶点，D93 的能力就没有真值证据。
 //
 // 真值不依赖本文件自报（判据在 run.mjs：vuln 端点必须检出、safe 端点必须零检出）。
-// 依赖：MySQL（复用 blackbox_lab.products 表，只读；未就绪时 run.mjs 报 SKIP 不计过）。
+// 依赖：MySQL（自带幂等夹具：自建 paramname_lab.products + 种子；未就绪时 run.mjs 报 SKIP 不计过）。
 //
 // 用法：node e2e/param-name-lab/lab.mjs          # 监听 8123
 // ============================================================================
@@ -26,9 +26,32 @@ const DB = {
   user: process.env.MYSQL_USER || 'root',
   // 与 blackbox-lab 同默认（本机 mysqld 的 root 口令是 root；env.mjs 拉起的实例同此）
   password: process.env.MYSQL_PASSWORD ?? 'root',
-  database: 'blackbox_lab',
+  database: 'paramname_lab',
   charset: 'utf8mb4',
 };
+
+// [D95] 自带夹具（与 recall-lab 同惯例：只需要一个可连的 mysqld）——
+// D93 版复用 blackbox_lab.products，但没跑过 blackbox-lab 的环境里整库不存在
+// （CI acceptance 的 docker mysqld 就是这种环境）⇒ 探针失败 ⇒ 永久 SKIP、从不产生判据。
+// 现改为幂等自建 paramname_lab（列结构与 blackbox_lab.products 一致），不跨靶场耦合。
+const bootstrap = mysql.createPool({ host: DB.host, port: DB.port, user: DB.user, password: DB.password, connectionLimit: 1 });
+try {
+  await bootstrap.query('CREATE DATABASE IF NOT EXISTS paramname_lab CHARACTER SET utf8mb4');
+  await bootstrap.query(`CREATE TABLE IF NOT EXISTS paramname_lab.products (
+    id INT PRIMARY KEY AUTO_INCREMENT, name VARCHAR(96) NOT NULL, category VARCHAR(48),
+    price DECIMAL(10,2), stock INT DEFAULT 0) ENGINE=InnoDB`);
+  await bootstrap.query(`INSERT IGNORE INTO paramname_lab.products (id, name, category, price, stock) VALUES
+    (1,'Mechanical Keyboard','peripherals',499.00,12),
+    (2,'Noise Cancel Headphone','audio',1299.00,5),
+    (3,'USB-C Hub','peripherals',199.00,40),
+    (4,'27 inch Monitor','display',1899.00,3),
+    (5,'Webcam 1080p','video',289.00,18),
+    (6,'Laptop Stand','accessories',89.00,60)`);
+} catch (e) {
+  console.error('[param-name-lab] 夹具初始化失败（探针会 500 ⇒ run.mjs 报 SKIP）：', e && e.message);
+} finally {
+  await bootstrap.end().catch(() => {});
+}
 
 process.on('uncaughtException', (e) => console.error('[lab][uncaught]', e && e.message));
 process.on('unhandledRejection', (e) => console.error('[lab][unhandledRejection]', e && (e.message || e)));

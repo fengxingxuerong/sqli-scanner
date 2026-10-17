@@ -73,6 +73,50 @@ function readIfExists(rel) {
   return existsSync(p) ? readFileSync(p, 'utf8') : null;
 }
 
+/** 注释起始符 → 注释态（查表替掉 if 链，控圈复杂度）。 */
+const COMMENT_STATE = { '/': 'line', '*': 'block' };
+
+/** 剥行注释/块注释（字符串感知：`//` 只有在代码态才是注释起点，URL/字符串里的不受影响）。 */
+function stripJsComments(text) {
+  let out = '';
+  let state = 'code'; // code | line | block | str
+  let quote = '';
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    const d = text[i + 1];
+    if (state === 'code') {
+      if (c === '/' && COMMENT_STATE[d]) { state = COMMENT_STATE[d]; i++; continue; }
+      if ("'\"`".includes(c)) { state = 'str'; quote = c; }
+      out += c;
+    } else if (state === 'str') {
+      if (c === '\\') { out += c + (d ?? ''); i++; } else { out += c; if (c === quote) state = 'code'; }
+    } else if (state === 'line') {
+      if (c === '\n') { state = 'code'; out += c; }
+    } else if (c === '*' && d === '/') {
+      state = 'code'; i++; // block 结束
+    } else if (c === '\n') {
+      out += c; // block 内部换行保留（防相邻 token 拼接）
+    }
+  }
+  return out;
+}
+
+/** YAML：剥整行 `#` 注释（本项目三份真源里的提及都是整行注释；行尾注释保留原样）。 */
+function stripYamlLineComments(text) {
+  return text.split('\n').map((l) => (l.trimStart().startsWith('#') ? '' : l)).join('\n');
+}
+
+/**
+ * 读接线真源并剥注释：名字出现在**注释**里 ≠ 会被执行。
+ * [D95 实锤] acceptance.mjs 用一句散文注释提到 sqli-labs ⇒ 旧判据把它当「已接线」，
+ * 与 reference-labs.json 的登记互撞报「白名单腐烂」——假阳性逼人删正确登记。
+ */
+function readWiringSource(rel) {
+  const raw = readIfExists(rel);
+  if (raw === null) return null;
+  return rel.endsWith('.yml') ? stripYamlLineComments(raw) : stripJsComments(raw);
+}
+
 /** 目录名是否出现在接线真源里（整词匹配，避免 `labs` 命中 `sqli-labs` 的误判） */
 function isWiredIn(name, sources) {
   return Object.values(sources).some((text) => text !== null && text.includes(name));
@@ -114,7 +158,7 @@ const dirs = readdirSync(E2E, { withFileTypes: true })
   .sort();
 
 const sources = {};
-for (const rel of WIRING_SOURCES) sources[rel] = readIfExists(rel);
+for (const rel of WIRING_SOURCES) sources[rel] = readWiringSource(rel);
 
 /** 白名单：登记为「参考靶场、非门禁」的目录 */
 let whitelist = [];
@@ -238,6 +282,7 @@ function selftest() {
   }
   // 至少有一个靶场是「已接线」的（否则说明接线真源的路径全漂移了）
   if (wired === 0) failed.push('没有任何靶场被判为已接线 ⇒ 接线真源路径可能漂移（WIRING_SOURCES 需要同步）');
+  selftestStripping(failed);
   if (failed.length) {
     console.error(`\nFAIL：e2e-wiring-check selftest 有 ${failed.length} 项未通过`);
     for (const f of failed) console.error(`  · ${f}`);
@@ -245,4 +290,14 @@ function selftest() {
   }
   console.log(`✔ e2e-wiring-check selftest 通过（靶场 ${labs} 个、已接线 ${wired} 个、判据可返回 false）`);
   process.exit(0);
+}
+
+/** 注释剥离自证（D95：注释提及 ≠ 接线；过猛剥掉代码 = 假阴性也要防）。 */
+function selftestStripping(failed) {
+  const jsComment = stripJsComments("// fake-lab：注释提及\nconst entry = 'e2e/other-lab/run.mjs'; // fake-lab\n");
+  if (jsComment.includes('fake-lab')) failed.push('剥注释失败：注释里的名字幸存（假阳性会复发）');
+  if (!stripJsComments("const p = 'e2e/fake-lab/run.mjs';").includes('fake-lab')) failed.push('剥注释过猛：代码字符串里的名字被误剥（假阴性）');
+  if (!stripJsComments("const u = 'https://example.com/fake-lab';").includes('fake-lab')) failed.push('剥注释过猛：含 // 的 URL 字符串被误当注释');
+  if (stripYamlLineComments('# fake-lab\nkey: value\n').includes('fake-lab')) failed.push('YAML 整行注释里的名字幸存');
+  if (!stripYamlLineComments('run: node e2e/fake-lab/run.mjs\n').includes('fake-lab')) failed.push('YAML 代码行被误剥');
 }

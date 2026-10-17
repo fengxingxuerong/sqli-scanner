@@ -7,8 +7,8 @@
 //   ③ 关闭 testParamNames 时 /colfilter **不应检出**（证明能力的开关语义真实存在，
 //      而不是既有通道的漏光）
 //
-// 环境：需 MySQL（blackbox_lab.products 表）+ 靶场。未就绪输出 [SKIP] 并 exit 0
-// （acceptance 读文本判据，不看退出码）。
+// 环境：需 MySQL + 靶场（D95 起靶场自带幂等夹具：自建 paramname_lab + 种子，可连即可跑）。
+// 未就绪输出 [SKIP] 并 exit 0（acceptance 读文本判据，不看退出码）。
 //
 // 用法：node e2e/param-name-lab/run.mjs
 // ============================================================================
@@ -86,9 +86,11 @@ const timeout = (p) => Promise.race([p, new Promise((_, rej) => setTimeout(() =>
 const main = async () => {
   const skipOr = async (fn) => fn();
   const out = await skipOr(() => withLab(async () => {
-    // 先探测 MySQL 是否可用（靶场起了但库不在 ⇒ 所有请求 500 ⇒ 结论无意义）
+    // 先探测 MySQL 是否可用（靶场起了但库不在 ⇒ 所有请求 query failed ⇒ 结论无意义）。
+    // ⚠ 判据不能用「响应里有没有 sql=」——错误页也回显 sql=（D95 实测：MySQL 未起时
+    // 该判据把 [SKIP] 骗成「就绪」，三路扫描全 0 ⇒ 假 [FAIL]）。
     const probe = await fetch(`${BASE}/colfilter?name=Keyboard`).then((r) => r.text()).catch(() => '');
-    if (!/sql=/.test(probe)) return { skip: '靶场探针失败（MySQL 未就绪？）' };
+    if (!/sql=/.test(probe) || /query failed/.test(probe)) return { skip: '靶场探针失败（MySQL 未就绪？）' };
 
     const on = await timeout(scan('/colfilter?name=Keyboard', true));
     const off = await timeout(scan('/colfilter?name=Keyboard', false));
