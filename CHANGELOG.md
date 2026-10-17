@@ -95,6 +95,15 @@ HTTP 回连 14）` + 检出 OOB 漏洞 1 条 → `✅ OOB 外部隧道整链通�
 机制自证 9.7s 逼触 RUNAWAY 成功；故障③ 抽样化后本机第 1 抽即复现；
 待 CI 下一 run 复核（acceptance 的 oob 修复 + macos 的故障②/③）。
 
+**CI 收束（D96 补记，2026-10-17）**：run 263 复核 oob —— acceptance ✅（真链过，
+修复实锤 CI）；同 run macos 故障③ 单抽被冷启动停顿遮蔽（第二段修复的发现链）。
+run 264 因第二段改动测试源却未重采 facts，被**第 31 步口径守卫**当场红
+（守卫按设计在岗；重采指纹后修复）。**run 265（303aee4d）全绿收束**：13 job =
+11 ✅ + modsec/tamper 按 push 策略跳过；lint 58 步全过；macos 故障② 5.97s
+（完成态）/ 故障③ 首抽复现 / 机制自证 9.5s / 修复①③ 全过；acceptance 含
+oob 真链全过。台账补记：`waf-crs-pl1-bypass` 追加 modsec-live 常驻证据
+（口径不变、数字不变）；`tamper-versioned-parity` 复核无新增漂移（100/115）。
+
 ### 2026-10-17 批次 D95 · e2e 靶场接线实锤的两处烂账（判据假阳性 + 漏接线 + 收口清单 22 项）
 
 **动机（发现链）**：D94 修好 typecoverage 后，CI lint 首次越过第 17 步、多跑了 25 个从未

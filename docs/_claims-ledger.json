@@ -36,7 +36,7 @@
       "id": "waf-crs-pl1-bypass",
       "claim": "tamper 链对真 ModSecurity CRS 的绕过效果",
       "status": "verified",
-      "evidence": "docs/WAF-真机链对拍-2026-10-05.md（CRS 4.29/PARANOIA 1/阈值 5/真 MySQL，19 样本）；D14 补验 run 37632563420（CRS 4.30.0，同镜像 digest 对照，八件 tamper A/B：打穿格局零变化）",
+      "evidence": "docs/WAF-真机链对拍-2026-10-05.md（CRS 4.29/PARANOIA 1/阈值 5/真 MySQL，19 样本）；D14 补验 run 37632563420（CRS 4.30.0，同镜像 digest 对照，八件 tamper A/B：打穿格局零变化）；D96 补记：真机链已常驻 CI —— workflow_dispatch run 260（2026-10-17）modsec-live 成功（只证「真机链持续跑绿」，不新增绕过率证据，本条口径与数字不变）",
       "refute_cmd": "WAF_GATE_PL=1 npm run acceptance（waf-real/waf-auto 两套件）",
       "caveat": "★ 最好链 2/19、旧首选链 0/19；直连上界仅 10/19。禁止对外声明绕过率；逐轮口径链见 docs/waf-绕过能力实测口径.md「真机口径现行版」（2026-10-14 D73 补立）"
     },
@@ -54,7 +54,7 @@
       "status": "refuted",
       "evidence": "上游 doctest 字面比对：versionedkeywords 漏包 ALL、versionedmorekeywords 漏 CONCAT/CHAR/IFNULL/CAST/CURRENT_USER（同族内不自洽）——【T6 2026-10-14 已修 2 条真缺陷：补 ALL + 补函数名，关键字表收敛为单一真源 server/src/core/tamper/versionedKeywords.js】；【剩余 3 条形态差异未关闭：本仓 /*! X */ 含空格 vs 上游 /*!X*/，halfversioned 版本号 50540 vs 上游 0】",
       "refute_cmd": "node scripts/verify-tamper-upstream-examples.mjs（drift 字段；[T-6 已修]/[T-6 未动] 标记）",
-      "recheck_batch": "待真机 A/B（modsec-live job 加对照组）",
+      "recheck_batch": "待真机 A/B（modsec-live job 加对照组）；D96 复核（2026-10-17）：refute_cmd 复跑「无新增漂移」（字面一致数仍 100/115，3 条形态差异未动）",
       "caveat": "★ 真缺陷已修但**字面一致数仍是 100/115**——形态差异未消除。不得据此宣称该族与上游等价；形态取舍属行为变化，须真机证据（2026-10-05 真机对拍该族 0 打穿 ⇒ 现状本身也不构成绕过承诺）"
     },
     {
