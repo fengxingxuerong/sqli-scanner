@@ -3,11 +3,11 @@
   "_generatedBy": "node scripts/typecoverage-guard.mjs --fix-baseline",
   "batches": {
     "server/src/api": {
-      "coverage": 28.5,
-      "paramsTotal": 200,
-      "paramsTyped": 72,
-      "returnsTotal": 112,
-      "returnsTyped": 17,
+      "coverage": 29.6,
+      "paramsTotal": 209,
+      "paramsTyped": 77,
+      "returnsTotal": 119,
+      "returnsTyped": 20,
       "untypedHotspots": [
         "server/src/api/exploitRoutes.js:35 numOpt(@value)",
         "server/src/api/exploitRoutes.js:35 numOpt(@fallback)",
@@ -41,6 +41,14 @@
         "server/src/api/exploitRoutes.js:441 <arrow@441>()→?",
         "server/src/api/exploitRoutes.js:454 <arrow@454>(@req)",
         "server/src/api/exploitRoutes.js:454 <arrow@454>()→?",
+        "server/src/api/exploitRoutes.js:474 <arrow@474>(@req)",
+        "server/src/api/exploitRoutes.js:474 <arrow@474>()→?",
+        "server/src/api/exploitRoutes.js:491 <arrow@491>(@req)",
+        "server/src/api/exploitRoutes.js:491 <arrow@491>()→?",
+        "server/src/api/exploitRoutes.js:500 <arrow@500>(@ctx)",
+        "server/src/api/exploitRoutes.js:500 <arrow@500>()→?",
+        "server/src/api/exploitRoutes.js:501 <arrow@501>(@cmd)",
+        "server/src/api/exploitRoutes.js:501 <arrow@501>()→?",
         "server/src/api/healthRoutes.js:21 <arrow@21>(@req)",
         "server/src/api/healthRoutes.js:21 <arrow@21>(@res)",
         "server/src/api/healthRoutes.js:21 <arrow@21>()→?",
@@ -50,23 +58,15 @@
         "server/src/api/rateLimit.js:67 <arrow@67>(@now)",
         "server/src/api/rateLimit.js:67 <arrow@67>()→?",
         "server/src/api/rateLimit.js:72 <arrow@72>(@req)",
-        "server/src/api/rateLimit.js:72 <arrow@72>(@res)",
-        "server/src/api/rateLimit.js:72 <arrow@72>(@next)",
-        "server/src/api/rateLimit.js:72 <arrow@72>()→?",
-        "server/src/api/rateLimit.js:108 <arrow@108>(@v)",
-        "server/src/api/rateLimit.js:108 <arrow@108>(@dflt)",
-        "server/src/api/rateLimit.js:108 <arrow@108>()→?",
-        "server/src/api/reportAiRoutes.js:20 checkAiRate(@req)",
-        "server/src/api/reportAiRoutes.js:20 checkAiRate()→?",
-        "server/src/api/reportAiRoutes.js:41 <arrow@41>(@req)"
+        "server/src/api/rateLimit.js:72 <arrow@72>(@res)"
       ]
     },
     "server/src/core": {
-      "coverage": 48.9,
-      "paramsTotal": 1164,
-      "paramsTyped": 594,
-      "returnsTotal": 836,
-      "returnsTyped": 383,
+      "coverage": 50,
+      "paramsTotal": 1193,
+      "paramsTyped": 620,
+      "returnsTotal": 871,
+      "returnsTyped": 411,
       "untypedHotspots": [
         "server/src/core/apiAuthState.js:16 setAuthEnabled(@v)",
         "server/src/core/apiAuthState.js:16 setAuthEnabled()→?",
@@ -121,11 +121,11 @@
       ]
     },
     "server/src/engine": {
-      "coverage": 30.8,
-      "paramsTotal": 1183,
-      "paramsTyped": 380,
-      "returnsTotal": 600,
-      "returnsTyped": 170,
+      "coverage": 31.5,
+      "paramsTotal": 1199,
+      "paramsTyped": 395,
+      "returnsTotal": 605,
+      "returnsTyped": 174,
       "untypedHotspots": [
         "server/src/engine/binaryProbe.js:49 binaryProbe(@probe)",
         "server/src/engine/binaryProbe.js:49 binaryProbe()→?",
@@ -180,11 +180,11 @@
       ]
     },
     "server/src/services": {
-      "coverage": 23.4,
-      "paramsTotal": 179,
-      "paramsTyped": 41,
-      "returnsTotal": 150,
-      "returnsTyped": 36,
+      "coverage": 25.8,
+      "paramsTotal": 195,
+      "paramsTyped": 50,
+      "returnsTotal": 161,
+      "returnsTyped": 42,
       "untypedHotspots": [
         "server/src/services/authAudit.js:21 failMode()→?",
         "server/src/services/authAudit.js:63 readAuthEvents(@maxLines)",

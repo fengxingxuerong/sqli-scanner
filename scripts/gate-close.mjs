@@ -40,7 +40,7 @@ const SLOW = new Set(['lint', 'typecheck']);
  * @returns {Array<{name:string, cmd:string[]}>}
  */
 function closeGateList({ quick = false } = {}) {
-  const guards = ['complexity', 'nesting', 'duplication', 'deadcode', 'debt'];
+  const guards = ['complexity', 'nesting', 'duplication', 'deadcode', 'debt', 'typecoverage'];
   const list = [
     { name: 'complexity', cmd: ['node', 'scripts/complexity-guard.mjs'] },
     ...guards.filter((g) => g !== 'complexity').map((g) => ({ name: g, cmd: ['node', `scripts/${g}-guard.mjs`] })),
@@ -61,9 +61,9 @@ function selftest() {
   const bad = [];
   const list = closeGateList();
   const names = list.map((g) => g.name);
-  const must = ['typecheck', 'lint', 'wiring', 'facts', 'refs', 'readme', 'complexity', 'nesting', 'duplication', 'deadcode', 'debt'];
+  const must = ['typecheck', 'lint', 'wiring', 'facts', 'refs', 'readme', 'complexity', 'nesting', 'duplication', 'deadcode', 'debt', 'typecoverage'];
   for (const m of must) if (!names.includes(m)) bad.push(`清单缺「${m}」（AGENTS.md §3 收口清单要求项）`);
-  for (const g of ['complexity', 'nesting', 'duplication', 'deadcode', 'debt']) {
+  for (const g of ['complexity', 'nesting', 'duplication', 'deadcode', 'debt', 'typecoverage']) {
     if (!names.includes(`${g}:selftest`)) bad.push(`清单缺「${g}:selftest」（每道门禁都要自证）`);
   }
   const w = wiringTestFiles();

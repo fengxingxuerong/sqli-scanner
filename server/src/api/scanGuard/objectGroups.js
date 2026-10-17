@@ -108,6 +108,12 @@ export function guardWafEvasion(config, cfg) {
   }
 }
 
+/**
+ * oob 配置段白名单转发（含 D87 interactsh 子段）。
+ * @param {object} config 目标配置对象（原地修改）
+ * @param {object} cfg 用户传入的配置
+ * @returns {void}
+ */
 export function guardOob(config, cfg) {
   if (cfg.oob && typeof cfg.oob === 'object') {
     const o = cfg.oob;
@@ -132,7 +138,11 @@ export function guardOob(config, cfg) {
   }
 }
 
-/** interactsh 配置净化（[D87]）：主机名白名单字符集 + 长度约束，非法项丢弃回退默认。 */
+/**
+ * interactsh 配置净化（[D87]）：主机名白名单字符集 + 长度约束，非法项丢弃回退默认。
+ * @param {any} raw 用户传入的 interactsh 配置段（逐字段类型校验，非法即回退）
+ * @returns {{enabled:boolean, server:string, servers:string[], pollIntervalMs:number|undefined, timeoutMs:number|undefined}} 净化后的配置
+ */
 function guardInteractsh(raw) {
   const d = defaults.oob.interactsh;
   const o = raw && typeof raw === 'object' ? raw : {};

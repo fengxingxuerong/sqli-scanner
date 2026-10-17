@@ -65,6 +65,35 @@
 
 ## [Unreleased]
 
+### 2026-10-17 批次 D94 · JSDoc 类型覆盖回归回补（D87 引入；CI push 连红 8 次的唯一根因）
+
+**动机（发现链）**：发布收口时核查 CI 历史，发现 master 的 push 触发的 lint job 自
+run 255（2026-10-16 19:15Z）起连红 8 次（255-259），全部停在第 17 步「JSDoc 类型覆盖
+（基线只升不降）」——后续步骤全被 skip，红点从未被修。本地直接复现：
+`server/src/core` 48.7% < 基线 48.9%、`server/src/api` 28% < 基线 28.5%。
+
+**定位（worktree 逐提交测量，非推理）**：发布 commit `be62ac6` 与 D86 均为绿；
+**D87（OOB 外部隧道）起转红**，D88-D93 全数继承——8 次 CI 红、1 个批次的课。
+（第一次用 `git checkout <sha> -- server/` 测得的「发布内容也红」是**假阳性**：
+该命令不删除目标 commit 不存在的文件，D87+ 新文件残留继续被测量。改用
+`git worktree add` 干净检出后得到上述边界——测量方法本身踩坑，记录于此。）
+
+**为什么本地/收口没拦住**：守卫在三处都有接线（pre-commit 第 80 行 / `ci-local.mjs` /
+CI lint，且 D55 起的 wiring 测试钉着这三处）——但 **`gate:close` 收口清单里没有它**
+（D54-D61 六道门禁进了五道）。绕过 pre-commit 的提交（SKIP_PRECOMMIT / `--no-verify`
+的既定用法）之后，「提交前的最后一道自留地」收口清单对这次回归完全无感。
+
+| 面 | 改动 |
+|---|---|
+| 回补类型 | D87 新增文件逐函数补 JSDoc：`core/interactshClient.js` 9 个方法（+14 标注）、`core/oobTunnel.js` 8 个（+12）、`api/scanGuard/objectGroups.js` 的 `guardInteractsh`/`guardOob`（+5）——**修复方式是补标注，不是降基线/放宽判据** |
+| 结果 | core **48.7→50.0%**、api **28.0→29.6%**（engine 31.5 / services 25.8 本就高于基线）；`--fix-baseline` 把四批新值写入基线（棘轮收紧：core 50 / api 29.6 / engine 31.5 / services 25.8） |
+| 防复发 | `gate-close.mjs` 清单加入 `typecoverage`（+`--selftest`）：**18→20 项**，D71 自证同步加严（must 列表 + 各门禁 selftest 检查项）；AGENTS.md §3 更新为「六道门禁」，并补记第四次漏报（D94 补 typecoverage）与教训——**跳过 pre-commit 的批次，收口清单是最后一道自留地** |
+| 顺带 | `guardInteractsh` 标注时 checkJs 当场抓到两处不精确（`@param {unknown}` 收窄后属性访问全红、`clampInt` 实为 `number\|undefined`）——精确标注的价值即在此，两处均按真实语义修正后 typecheck 0 错 |
+
+**验证**：`typecoverage-guard` + `--selftest` 绿；`gate-close --selftest` 20 项绿；
+typecoverageGuard/preCommitGates/jsLexer wiring 27 例绿；oob/interactsh 相关 68 例绿；
+`npm run typecheck` 0 错；facts / readme 一致性绿。修复后推送由 CI run 验证（push 触发全量 lint）。
+
 ### 2026-10-17 批次 D93 · 参数名注入点（`--test-param-names`，吸收队列 #7）
 
 **缺口**：后端把 **query 键名**拼进 SQL，值走参数化或白名单——典型写法
