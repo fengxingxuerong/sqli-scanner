@@ -5,6 +5,63 @@
 
 ---
 
+## 2026-10-18 批次 D89 · WAF 指纹 × 第三方权威工具对拍（补台账 unverified 的外部证据）
+
+**动机**：台账 `waf-fingerprint-coverage`（「62 个 WAF 指纹识别」）长期 unverified ——
+真机只有 ModSecurity **1/62** 有样本，其余是「规则存在 + 判据单测」。本批补上**第三方权威对拍**。
+
+**外部裁判**：wafw00f（EnableSecurity，6.5k stars，173 厂商插件）的 `matchHeader`/`matchCookie`
+规则 = 各家**真实拦截页特征**，由第三方维护、非本项目编写。
+
+### 口径（首版错过一次，已纠正——记下来防复发）
+
+首版把 wafw00f 全 173 家都算进分母，得 25.8% —— **毫无意义**：未识别的大多数
+（Baffin Bay / Anubis / CacheFly / Envoy…）本就不在本仓 62 家清单内，不识别是**设计子集边界**。
+**口径错会把「范围小」误读成「能力差」**。纠正后只比「双方共有厂商」：18 家。
+
+### 结果（同一批样本，修复前后）
+
+| 时点 | 样本级 | 厂商级 |
+|---|---|---|
+| 修复前 | 45.7%（16/35） | 56%（10/18） |
+| **修复后** | **100%（36/36）** | **100%（18/18）** |
+
+### 修复内容（真缺口，非凑数）
+
+- **cookie 通道形态**：Cloudflare `__cfduid`、FortiWeb `FORTIWAFSID`、Imperva `incap_ses`/`visid_incap`、
+  Barracuda `BNI*`/`BN[IE]S_`、F5 BIG-IP APM 会话 cookie（`LastMRH_Session`/`MRHSession`/`F5_fullWT`/`F5_HT_shrinked`）、
+  F5 ASM `TS<hex>=`
+- **header 形态**：BinarySec `x-binarysec-*`、Bluedon `BDWAF`、Radware `x-sl-compstate`、
+  Wordfence `wfWAF` 变体、网宿 `Powered-By-ChinaCache`、百度云加速 server 本体、360 `panyun`、BlockDoS server
+
+### 判据固化
+
+`server/tests/wafExternalParity.guard.test.js`（4 例）：离线快照（36 样本入库，CI 零外网依赖）
++ 正向对拍 + 零误报反向 + 反例自证。**双向变异验证**：删 Cloudflare `__cfduid` → 红；
+删 Bluedon `BDWAF` → 红；还原即绿（逐字节一致）。
+
+### ★ 过程中修掉两个「我自己的 bug」（不改就会得出错误结论）
+
+1. **具体化器转义顺序错**：`\.`（字面点）在 `.`→`x`（通配点）替换**之后**才处理，
+   把 `blockdos\.net` 变成 `blockdosxnet` ⇒ 永不可能命中 ⇒ 对拍显示「未识别」。
+   实为**脚本 bug 被误读成产品缺陷**。
+2. **口径含不可测项**：`denyall.py` 只用 `matchStatus`+`matchReason` 判定（无 header/cookie），
+   本脚本不采集其样本却把它算进分母 ⇒ 低估命中率。已改为只统计「有 header/cookie 规则」的厂商。
+
+### 诚实边界（不得越界引用）
+
+- 「100%」只覆盖这 **18 家 × 36 样本**，**不是「62 家全能识别」**；
+- 样本由 wafw00f 正则具体化构造，证明「同一份厂商特征我们认得」，**不等于真机必然命中**；
+- 仍缺**商业云 WAF 真机样本** ⇒ 台账**据实维持 unverified**（内涵已从「只有规则+单测」
+  升级为「第三方权威对拍 18 家 100% + 有牙守卫」，缺口缩小到具体一项）。
+
+### 待推进
+
+- 商业云 WAF（阿里云/腾讯云/Cloudflare 等）真机样本采集 → 才能谈转 verified；
+- 62 家其余 44 家的外部对拍源（wafw00f 侧无对应插件）。
+
+---
+
 ## 2026-10-18 批次 D88 · 第三方真框架靶场（外部裁判）+ 修复其抓到的真漏检
 
 **动机**：本仓最硬的一类缺口——37 个 e2e 靶场除 `sqli-labs`（还是本项目自写的 Python 复刻，

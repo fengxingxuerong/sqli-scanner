@@ -8,6 +8,8 @@ export const WAF_RULES = {
     matchers: [
       { type: 'header', key: 'cf-ray' }, // 存在即特征
       { type: 'header', key: 'server', test: /cloudflare/i },
+      // [D89] cookie 形态（真值来源：wafw00f plugins/cloudflare.py matchCookie('__cfduid')）
+      { type: 'header', key: 'set-cookie', test: /__cfduid/i },
     ],
   },
   ModSecurity: {
@@ -35,7 +37,10 @@ export const WAF_RULES = {
   Baidu_Yunjiasu: {
     name: '百度云加速',
     matchers: [
-      { type: 'header', key: 'server', test: /bws|baidu/i },
+      // [D89] 补 yunjiasu 本体形态（真值来源：wafw00f plugins/baidu.py
+      // NAME='Yunjiasu (Baidu Cloud Computing)'，matchHeader(('Server', r'yunjiasu.*'))）。
+      // 此前只有 bws|baidu 与 via 形态 ⇒ Server: yunjiasu 这类响应漏识别。
+      { type: 'header', key: 'server', test: /yunjiasu|bws|baidu/i },
       { type: 'header', key: 'via', test: /yunjiasu|baidu/i },
     ],
   },
@@ -61,19 +66,35 @@ export const WAF_RULES = {
     name: 'Barracuda',
     matchers: [
       { type: 'header', key: 'server', test: /barracuda/i },
+      // [D89] cookie 形态（真值来源：wafw00f plugins/barracuda.py，三条 matchCookie）
+      { type: 'header', key: 'set-cookie', test: /^barra_counter_session=/i },
+      { type: 'header', key: 'set-cookie', test: /BNI__BARRACUDA_LB_COOKIE=/i },
+      { type: 'header', key: 'set-cookie', test: /BNI_persistence=/i },
+      // [D89] 增补形态（真值来源：wafw00f plugins/barracuda.py matchCookie(/^BN[IE]S_.*?=/)）
+      { type: 'header', key: 'set-cookie', test: /^BN[IE]S_.*?=/i },
     ],
   },
   F5_BIG_IP: {
     name: 'F5 BIG-IP',
     matchers: [
       { type: 'header', key: 'set-cookie', test: /bigipserver/i },
-      { type: 'header', key: 'server', test: /big[- ]?ip/i },
+      { type: 'header', key: 'server', test: /big([-_])?ip/i },
+      // [D89] BIG-IP APM 访问会话 cookie（真值来源：wafw00f plugins/f5bigipapm.py，
+      // matchCookie('^LastMRH_Session') / ('^MRHSession') / ('^F5_fullWT')）
+      { type: 'header', key: 'set-cookie', test: /^LastMRH_Session/i },
+      { type: 'header', key: 'set-cookie', test: /^MRHSession/i },
+      { type: 'header', key: 'set-cookie', test: /^F5_fullWT/i },
+      { type: 'header', key: 'set-cookie', test: /^F5_HT_shrinked/i }, // [D89] plugins/f5bigipapm.py
+      // [D89] BIG-IP ASM 事务 cookie（真值来源：plugins/f5bigipasm.py，TS<8 or 6 hex>=）
+      { type: 'header', key: 'set-cookie', test: /^TS[a-fA-F0-9]{6,8}=/ },
     ],
   },
   FortiWeb: {
     name: 'FortiWeb',
     matchers: [
       { type: 'header', key: 'server', test: /fortiweb/i },
+      // [D89] cookie 形态（真值来源：wafw00f plugins/fortiweb.py matchCookie(/^FORTIWAFSID=/)）
+      { type: 'header', key: 'set-cookie', test: /^FORTIWAFSID=/i },
     ],
   },
   Imperva_Incapsula: {
@@ -81,6 +102,9 @@ export const WAF_RULES = {
     matchers: [
       { type: 'header', key: 'x-iinfo' },
       { type: 'body', test: /incapsula/i },
+      // [D89] cookie 形态（真值来源：wafw00f plugins/incapsula.py 两条 matchCookie）
+      { type: 'header', key: 'set-cookie', test: /^incap_ses.*?=/i },
+      { type: 'header', key: 'set-cookie', test: /^visid_incap.*?=/i },
     ],
   },
   Akamai_Kona: {
@@ -100,7 +124,7 @@ export const WAF_RULES = {
     name: 'Wordfence',
     matchers: [
       { type: 'body', test: /wordfence/i },
-      { type: 'header', key: 'server', test: /wordfence/i },
+      { type: 'header', key: 'server', test: /wordfence|wf[_\-]?waf/i },
     ],
   },
   Sucuri: {
@@ -127,6 +151,8 @@ export const WAF_RULES = {
     name: 'Radware AppWall',
     matchers: [
       { type: 'header', key: 'server', test: /radware/i },
+      // [D89] 真值来源：wafw00f plugins/radware.py（X-SL-CompState）
+      { type: 'header', key: 'x-sl-compstate' },
     ],
   },
   Sophos_UTM: {
@@ -140,6 +166,11 @@ export const WAF_RULES = {
     name: 'Qihoo 360',
     matchers: [
       { type: 'body', test: /360webscan|qihoo/i },
+      // [D89] 补 360 网站卫士（盘云）header 形态（真值来源：wafw00f plugins/panyun360.py，
+      // matchHeader(('Server', r'panyun')) 与 X-Panyun-Request-ID 等三头）。
+      // 此前只有 body 形态 ⇒ 仅靠响应头即可识别的场景漏识别。
+      { type: 'header', key: 'server', test: /panyun/i },
+      { type: 'header', key: 'x-panyun-request-id' },
     ],
   },
   NAXSI: {
@@ -159,18 +190,24 @@ export const WAF_RULES = {
     name: 'BinarySec',
     matchers: [
       { type: 'header', key: 'server', test: /binarysec/i },
+      // [D89] 真值来源：wafw00f plugins/binarysec.py（x-binarysec-via / x-binarysec-nocache）
+      { type: 'header', key: 'x-binarysec-via' },
+      { type: 'header', key: 'x-binarysec-nocache' },
     ],
   },
   BlockDoS: {
     name: 'BlockDoS',
     matchers: [
       { type: 'body', test: /blockdos/i },
+      // [D89] 补 header 形态（真值来源：wafw00f plugins/blockdos.py
+      // matchHeader(('Server', r'blockdos\.net'))）。此前只有 body 形态 ⇒ 仅头部可识别时漏。
+      { type: 'header', key: 'server', test: /blockdos\.net/i },
     ],
   },
   Bluedon: {
     name: 'Bluedon',
     matchers: [
-      { type: 'header', key: 'server', test: /bluedon/i },
+      { type: 'header', key: 'server', test: /bluedon|BDWAF/i },
       { type: 'body', test: /bluedon/i },
     ],
   },
@@ -233,6 +270,8 @@ export const WAF_RULES = {
       { type: 'header', key: 'server', test: /wangsu|chinanetcenter/i },
       { type: 'header', key: 'via', test: /wangsu|chinanetcenter/i },
       { type: 'body', test: /网宿|chinanetcenter/i },
+      // [D89] 真值来源：wafw00f plugins/chinacache.py（Powered-By-ChinaCache）
+      { type: 'header', key: 'powered-by-chinacache' },
     ],
   },
   AWS_CloudFront: {

@@ -65,6 +65,32 @@
 
 ## [Unreleased]
 
+### 2026-10-18 批次 D89 · WAF 指纹 × 第三方权威工具对拍（补台账 unverified 的外部证据）
+
+**动机**：台账 `waf-fingerprint-coverage` 长期 unverified（真机仅 ModSecurity 1/62 有样本证据）。
+
+**外部裁判**：wafw00f（EnableSecurity，6.5k stars，173 插件）的 matchHeader/matchCookie 规则
+= 各家真实拦截页特征，第三方维护、非本项目编写。
+
+**口径纠正（首版错，已修）**：首版把 wafw00f 全 173 家算进分母得 25.8% —— 无意义，
+未识别者多不在本仓 62 家清单内（设计子集边界）。改为只比共有厂商（18 家）。
+
+**结果**：修复前 45.7% 样本 / 56% 厂商 → **修复后 100%（36/36）/ 100%（18/18）**。
+修复：补 cookie 通道形态（Cloudflare/FortiWeb/Imperva/Barracuda/F5 APM+ASM 会话 cookie）
+与 header 形态（BinarySec/Bluedon/Radware/Wordfence/网宿/百度云加速/360/BlockDoS）。
+
+**判据**：`server/tests/wafExternalParity.guard.test.js`（离线快照 + 正向对拍 + 零误报反向
++ 反例自证）；双向变异验证通过。
+
+**顺带修掉两个自身 bug**（不改会得出错误结论）：① 具体化器 `\.` 与 `.` 的替换顺序错，
+把 `blockdos\.net` 变 `blockdosxnet` ⇒ 假「未识别」；② 分母含「仅 status/reason 判定」的
+不可测厂商 ⇒ 低估命中率。
+
+**边界**：「100%」只覆盖 18 家 × 36 样本，非「62 家全能」；样本为构造值、非真机实录
+⇒ 台账据实维持 unverified，缺口缩小到「商业云 WAF 真机样本」。
+
+---
+
 ### 2026-10-18 批次 D88 · 第三方真框架靶场（外部裁判）+ 修复其抓到的真漏检
 
 **动机**：37 个 e2e 靶场除 `sqli-labs`（本项目自写复刻，真值自证）外全部自建 ⇒ 只有
