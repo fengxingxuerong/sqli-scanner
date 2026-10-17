@@ -100,6 +100,32 @@ function buildMultipartBody(fields, boundary) {
 // boundary 随机串（纯小写字母数字，避免特殊字符引发解析歧义）
 const nanoidLc = () => Math.random().toString(36).slice(2, 12);
 
+/**
+ * [D91 拆分] cookie 注入点的请求头写入（原为 buildInjectionRequest 内联分支，D91 加
+ * 「删大小写同名键」后超复杂度基线，按仓库纪律拆函数而非抬基线）。
+ *
+ * [D91 2026-10-17 真回归修复·A 处（构造层第一道防线）] 写入前先删 headers 中**所有大小写
+ * 同形的 Cookie 键**。背景：`--header "cookie: uid=1"` 会被 TargetParser 同时存进
+ * headerParams（小写键）与 config.auth.headers，若只 `req.headers['Cookie'] = 注入值`，
+ * 对象里就同时留着 `cookie=uid=1`（原值，小写）与 `Cookie=uid=<注入>`（大写）—— Node/axios
+ * 对大小写不敏感同名头的合并是「后写赢」（axios 1.20.0 AxiosHeaders.set：findKey 命中即
+ * 覆盖），键序上小写原值在后 ⇒ **服务端永远收到原值** ⇒ 该点所有探针都打在未注入的原值上
+ * ⇒ 门控真假响应恒等 ⇒ 判「不是注入」⇒ UNION/布尔通道从未启动 ⇒ 报告写「未检出」，
+ * 与「这个站没有注入」完全同形（红队 D11-cookie 实测：axios 1.18.1 时 19/19，5db14b8 升
+ * 1.20.0 后 18/19，三次历史运行全命中、复跑全漏）。
+ * 只删 Cookie 同名键，不动其他头；cookies 合并后的整串 Cookie 由本函数单键负责。
+ * @param {object} req 待写入的请求对象（就地修改 headers）
+ * @param {Record<string,string>} cookies 已把注入值写进 point.param 的 cookie 映射
+ */
+function applyCookieInjectionHeaders(req, cookies) {
+  for (const k of Object.keys(req.headers)) {
+    if (/^cookie$/i.test(k)) delete req.headers[k];
+  }
+  req.headers['Cookie'] = Object.entries(cookies)
+    .map(([k, v]) => `${k}=${v}`)
+    .join('; ');
+}
+
 export function buildInjectionRequest(target, point, value) {
   // 先包裹 prefix/suffix（对标 sqlmap --prefix/--suffix），再按注入点位置拼入请求
   const wrapped = applyPrefixSuffix(target, point, value);
@@ -317,9 +343,9 @@ export function buildInjectionRequest(target, point, value) {
     }
   } else if (point.location === 'cookie') {
     cookies[point.param] = injected;
-    req.headers['Cookie'] = Object.entries(cookies)
-      .map(([k, v]) => `${k}=${v}`)
-      .join('; ');
+    // [D91] 删键 + 单键写入（详见 applyCookieInjectionHeaders 的 JSDoc：大小写同名头
+    // 「后写赢」会把注入值顶掉，造成该点静默假阴性）
+    applyCookieInjectionHeaders(req, cookies);
   } else if (point.location === 'header') {
     req.headers[point.param] = injected;
   }

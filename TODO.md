@@ -5,6 +5,36 @@
 
 ---
 
+## 2026-10-17 批次 D91 · Cookie 注入点静默假阴性回归修复（推翻协议落地）
+
+**反证**：10-17 acceptance 红队 **18/19**（D11-cookie 漏），台账/README 却写 19/19
+（证据 10-05 三轮，D11 当时全命中）⇒ 真回归。
+
+**根因（抓包实证）**：`--header "cookie: uid=1"` 被存进 **headerParams + config.auth.headers 两处**；
+cookie 注入点构造后请求头同时含 `cookie=uid=1`（原值小写）与 `Cookie=uid=<注入>`（大写）。
+axios 1.20.0 的 `AxiosHeaders.set` 同名头**后写赢** ⇒ 原值在后 ⇒ 服务端永远收到原值 ⇒
+124 个探针全打在未注入值上 ⇒ 门控真假恒等 ⇒ 「未检出」（与「这个站没注入」同形）。
+引入点：`5db14b8` 升 axios 1.18.1→1.20.0；Node 22/24 与 D88 boundary 候选表均已对照排除。
+
+**修复**：A 构造层 `injection.js` cookie 分支删所有大小写同名键后单键写入；
+B 发送层 `requestContext.js` `mergeAuthHeaders` 的 auth.headers Cookie 同名且已有 Cookie 时跳过。
+判据 `server/tests/injection.cookieHeaderCollision.test.js` 6 例，双向变异验证（删 A/B 各 1 红，还原即绿）。
+
+**修复后实测**：D11 命中（union+error+boolean，61 请求）；红队 **19/19、0/7 误报**；
+F18 上次 acceptance 的引擎崩溃码（0xC0000409）**未复现**，留观不立结论。
+
+**台账**：`detect-benchmark-redteam-26` → **refuted**（旧 19/19 证据作废、数字保留）；
+新证据另立 `-d91` 条目；README 四处口径（R2 表/sqlmap 对照表/验收表/D6 注释）按推翻协议更新。
+
+### 待推进
+
+- 全量 acceptance 复跑（MySQL 常驻已起：10-17 17:22 的 env.mjs 残留实例，mysqld PID 23276 / lab PID 41852）——
+  D91 修复后应回到 16+ PASS，重点是 10-17 那 6 个 BLOCKED（3306/5432/secure_file_priv）；
+- D11 类问题的**通用化排查**：还有哪些注入点形态会被 auth.headers 副本夹击（当前只修了 Cookie 同名）；
+- 商业云 WAF 真机样本（D89 遗留）、62 家其余 44 家外部对拍源。
+
+---
+
 ## 2026-10-18 批次 D90 · 写副作用登记与自动清理（P2-5）
 
 **动机**：TODO 2026-10-10 盘点的 P2-5「写副作用无自动清理/回滚（只有

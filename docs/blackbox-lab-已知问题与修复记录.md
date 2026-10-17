@@ -150,6 +150,11 @@ TargetParser 的 level≥2 门控决定，与 sqlmap 同语义）；同时不再
 redteam-lab（真 MySQL）R1 **18/19**、R2 **19/19**、安全点误报 0/7（与既有记录一致，零回归）。
 新增纯 JS mock 回归钉 `server/tests/boundary.echoTarget.test.js`（不依赖真库即可复现回显污染两类缺陷）。
 
+> ⚠️ **2026-10-17 D91 沿革注**：上文 R2 19/19 为该批次当时结论。2026-10-17 全量 acceptance
+> 实测 **18/19**（D11-cookie 静默假阴性，根因 axios 1.20.0 同名大小写头合并 + `--header
+> "cookie:"` 双处存储夹击），D91 修复后复跑恢复 19/19。**现行口径以 D91 修复后复跑为准**
+> （CHANGELOG D91 / 台账 `detect-benchmark-redteam-26-d91`）；本行数字为该批次历史记录，保留作沿革。
+
 **同题对照（sqlmap 1.10.7，同一批靶点）**：
 
 | 工具 / 档位 | 漏洞检出 | 安全误报 |

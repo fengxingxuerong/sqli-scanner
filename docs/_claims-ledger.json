@@ -10,10 +10,19 @@
     {
       "id": "detect-benchmark-redteam-26",
       "claim": "红队靶场 26 靶点：检出 19/19、误报 0/7、命中中位 747ms（sqlmap 1.10.7 为 16/19、6/7、21.7s）",
+      "status": "refuted",
+      "refuted_by": "2026-10-17 全量 acceptance 实测 18/19（D11-cookie 静默假阴性：axios 1.20.0 同名大小写头后写赢 + --header cookie 双处存储夹击，服务端永远收到原值）；历史三轮 m1/m2/m3（axios 1.18.1）全命中 ⇒ 回归引入点为 5db14b8 升 axios 1.20.0",
+      "refute_cmd": "node e2e/redteam-lab/run-scan.mjs r2 D11-cookie（修复后应 HIT union+error+boolean）",
+      "evidence": "【已作废】docs/sqlmap-benchmark/redteam-strict-runs3.md（2026-10-05 三轮，彼时代码与依赖均不同，不代表现状）",
+      "caveat": "SQLite 靶场 + 浅档口径；不是互联网真实目标。修复后同口径恢复见 detect-benchmark-redteam-26-d91"
+    },
+    {
+      "id": "detect-benchmark-redteam-26-d91",
+      "claim": "红队靶场 26 靶点（D91 修复后同口径复跑）：检出 19/19、误报 0/7",
       "status": "verified",
-      "evidence": "docs/sqlmap-benchmark/redteam-strict-runs3.md（同题各 3 轮，检出多数决 + 耗时中位）",
-      "refute_cmd": "node e2e/redteam-lab/bench-compare.mjs（数字随靶场/引擎版本变，复跑即失效）",
-      "caveat": "SQLite 靶场 + 浅档口径；不是互联网真实目标"
+      "evidence": "e2e/redteam-lab/results-r2.json（2026-10-17，D91 修复后；D11-cookie HIT union+error+boolean 61 请求；F18-F24 exit 全 0）",
+      "refute_cmd": "node e2e/redteam-lab/run-scan.mjs r2（需 MySQL 3306 常驻：node e2e/redteam-lab/env.mjs）",
+      "caveat": "复跑即失效类数字；仅代表 D91 修复后的代码现状。耗时中位未随本轮重测（不引用旧 747ms）"
     },
     {
       "id": "detect-benchmark-sqli-labs-23",

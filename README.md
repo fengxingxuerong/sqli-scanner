@@ -1,6 +1,6 @@
 # sqli-scanner
 
-[![Tests](https://img.shields.io/badge/tests-4170%20passing-brightgreen)](#测试)[![CI](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml/badge.svg)](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml)
+[![Tests](https://img.shields.io/badge/tests-4178%20passing-brightgreen)](#测试)[![CI](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml/badge.svg)](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml)
 [![Dependencies](https://img.shields.io/badge/dependencies-0%20known%20vulns-brightgreen)](#环境变量)
 
 > CI 徽章为真实状态（仓库地址已定，run#90 起全绿）。发布判定仍以 `CHANGELOG.md`
@@ -391,7 +391,7 @@ backend/  ← Express + Node.js
 # 前端测试（574 个用例）
 npm test
 
-# 服务端测试（3600 个用例）
+# 服务端测试（3606 个用例）
 cd server && npm test
 
 # 全部测试
@@ -417,7 +417,7 @@ npm run artifact:drift   # 入库的 e2e 基线产物必须等于当前代码跑
 
 - TypeScript: 零错误
 - 前端测试: 574/574 通过（覆盖率门禁 stmts 93.03 / branch 84.88 / func 81.90，阈值 88/77/67）
-- 服务端测试: 3600 用例（3596 pass / 0 fail / 4 skip，并发口径 2026-10-17 复测；4 skip 为环境依赖显式跳过。覆盖率 lines 91.13 / branch 80.54 / func 84.28，阈值 85/74/77）
+- 服务端测试: 3606 用例（3604 pass / 0 fail / 2 skip，并发口径 2026-10-17 复测；2 skip 为环境依赖显式跳过。覆盖率 lines 91.13 / branch 80.54 / func 84.28，阈值 85/74/77）
 - 一键扫描: `npm run scan -- -u <url>`（CLI 一条命令产出 HTML/JSON/Markdown 全套报告 + manifest，退出码可直接进 CI 门禁）
 - Tamper 插件: 234 个（含批次 D3 新增 scalarselectinline；含 v24 增量 20 个，对齐 sqlmap 官方 tamper 全集，含官方 CRS/libinjection 实测组合 uniontable+odbcbrace；含批次 D13 新增 5 件上游形态变体 *nospace/*open/*block，真机 A/B 判决前不进默认链）
 - WAF 绕过能力: 200+ 插件链式组合，覆盖 62 个 WAF 厂商指纹识别 + 推荐
@@ -551,6 +551,13 @@ npm run redteam:report  # 汇总（含 sqlmap 同题对照）
 | R2 调参（level 3） | **19/19（100%）** | 全中 |
 | 安全对照（7 个安全点） | **误报 0** | 参数化/随机/500/403/重定向/静态资源 |
 
+> ⚠️ **口径沿革（2026-10-17 D91 推翻记录）**：上表 19/19 的原始证据为 2026-10-05 三轮复测
+> （axios 1.18.1）。2026-10-17 全量 acceptance 实测 **18/19** —— D11-cookie 因 axios 1.20.0
+> 同名大小写头合并行为变化出现**静默假阴性**（`--header "cookie:"` 双处存储被夹击，服务端
+> 永远收到原值）。D91 已修复并复跑恢复 19/19；**现行结论以修复后复跑为准**
+> （`e2e/redteam-lab/results-r2.json`，台账 `detect-benchmark-redteam-26-d91`），
+> 旧三轮证据已按 §3.5 标 refuted。复跑命令：`node e2e/redteam-lab/run-scan.mjs r2`。
+
 > docs/ 下文档的分组导航见 [docs/INDEX.md](docs/INDEX.md)（`npm run docs:index` 重新生成）。
 > **2026-10-13 起分两层**：`docs/` 根只放**现行**文档（42 篇：设计/PRD/实测口径/手册/门禁纪律），
 > 「某一天的评估、审计、批次战报」一律进 [docs/archive/](docs/archive/INDEX.md)（40 篇，含同系列
@@ -575,6 +582,10 @@ node e2e/redteam-lab/strict-compare.mjs --runs=3     # 合并出定版表
 - 双方各跑 3 轮，检出取多数决、耗时取中位；**两侧结果全部逐轮稳定（零抖动）**。
 - 引擎 19/19 为 2026-10-05 修复 cookie 点位生成门（testHeaders 显式开启时任档位生效）
   后的三轮复测；修复前 18/19（D11-cookie 与 sqlmap 同漏，见 CHANGELOG 批次 D6）。
+- **该表数字已于 2026-10-17 经 D91 推翻重做**：10-17 acceptance 实测 18/19（axios 1.20.0
+  同名大小写头合并致 D11-cookie 静默假阴性），D91 修复后复跑恢复 19/19。
+  **引用本表时以 D91 修复后复跑（`results-r2.json`）为准**；10-05 三轮证据台账标 refuted。
+  耗时中位 747ms/0.7s 未随 D91 重测，**不再对外引用**。
 - 引擎的差异化能力点：`E15-second-order`（二阶跨角色）引擎 3/3 检出、sqlmap 0/3。
 - 引擎的差异化能力点：`E15-second-order`（二阶跨角色）引擎 3/3 检出、sqlmap 0/3。
 - 完整逐靶点表与轮次明细：`docs/sqlmap-benchmark/redteam-strict-runs3.md`（由
@@ -652,7 +663,7 @@ npm run acceptance:sandbox          # 同全量，但套隔离 MySQL 沙箱（33
 | CRS 人工挂链 A/B（PL1） | off 8 / on 8，安全对照零误拦 |
 | CRS 自动选链（PL1） | 技术位 8，安全误报 0 |
 | CRS 执行器保真度（官方回归集｜族 942） | 保真度 **99.6%**，未点名分歧 **0**，已消失 0，误触 2 |
-| 红队实战评测（真值对照） | 19/19（100%），安全点 7，误报 0 |
+| 红队实战评测（真值对照） | 19/19（100%），安全点 7，误报 0（D91 修复后 10-17 复跑；期间曾因 axios 1.20 回归至 18/19，见 CHANGELOG D91） |
 | fileRead / fileWrite 真闭环 | PASS（文件落盘=true，隔离沙箱重试） |
 
 > ⚠️ **误报率的证据边界（2026-10-09 补，2026-10-13 更正）**：上表的「误报 0 / 19/19」全部产自**自建靶场**

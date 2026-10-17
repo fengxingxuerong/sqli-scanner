@@ -65,6 +65,56 @@
 
 ## [Unreleased]
 
+### 2026-10-17 批次 D91 · Cookie 注入点静默假阴性回归修复（推翻协议落地：台账 19/19 作废重做）
+
+**反证来源**：2026-10-17 全量 acceptance（`e2e/results/acceptance-report.md`）红队实战评测
+**18/19**——D11-cookie 漏检。而台账 `detect-benchmark-redteam-26` 与 README 均写
+**19/19（100%）**（证据为 2026-10-05 三轮 strict 复测）。历史三轮 `results-m1/m2/m3.json`
+D11 **全部命中**（union+error+boolean，59 请求）⇒ 判定为**真回归**，不是环境抖动。
+
+**根因（抓包实证，非推理）**：`--header "cookie: uid=1"` 被 TargetParser **同时**存进
+`target.headerParams.cookie`（构造层）与 `config.auth.headers.cookie`（发送层每请求重附）。
+cookie 注入点构造后请求头对象里同时存在两个大小写同名的键：
+
+    cookie = "uid=1"              ← 原值，小写（headerParams）
+    Cookie = "uid=1' OR '1'='1"   ← 注入值，大写（cookie 分支写入）
+
+axios 的 `AxiosHeaders.set` 对大小写不敏感同名头**后写赢**（`findKey` 命中即覆盖），
+键序上原值在后 ⇒ **服务端永远收到原值 uid=1**。于是该点 124 个探针全部打在未注入的原值上：
+门控真假响应恒等 ⇒ 判「不是注入」⇒ UNION/布尔通道从未启动 ⇒ 报告写「未检出」——
+与「这个站没有注入」完全同形（正是本仓反复治理的静默假阴性形状）。
+
+**回归引入点**：`5db14b8`（2026-10-09 批次收口）把 axios **1.18.1 → 1.20.0**，
+`AxiosHeaders` 同名头合并行为随之改变；10-05 三轮（1.18.1）19/19，之后 18/19。
+Node 22/24 对照复跑排除运行时因素；D88（boundary 候选表 13→15）对照复跑排除候选表因素。
+
+**修复（两层防线，各有判据）**：
+
+| 层 | 文件 | 修法 |
+|---|---|---|
+| A 构造层 | `server/src/engine/injection.js` | cookie 分支写入前**删所有大小写同形的 Cookie 键**，单键输出（cookies 整串由本分支负责） |
+| B 发送层 | `server/src/core/http/requestContext.js` | `mergeAuthHeaders` 的 `auth.headers` 分支：Cookie 同名（大小写不敏感）且请求头已有 Cookie 时**跳过**（显式构造/注入值优先于认证配置里的同名副本） |
+
+**判据**：`server/tests/injection.cookieHeaderCollision.test.js`（6 例：单键输出、无冲突仍附加、
+auth.cookie 路径语义不变、未修复形态自证）。**双向变异验证**：删 A → 1 红；删 B → 1 红；
+还原即绿（逐次验证）。
+
+**修复后实测（2026-10-17，同靶场同配置 r2）**：
+- D11-cookie：**命中**，union+error+boolean，MySQL 指纹，61 请求（修复前 0 检出 / 124 请求）
+- 红队全量：**19/19 漏洞检出、0/7 误报**（修复前 18/19）
+- CLI 退出码 2（发现高危）——修复前 exit=0
+
+**台账口径（§3.5 推翻链）**：
+- 旧结论「19/19、误报 0/7、中位 747ms」（证据 10-05 三轮）→ **refuted**（反证：10-17 实测 18/19，
+  根因 axios 1.20 同名头合并 + 双处存储夹击）；旧数字**保留**不删。
+- 新结论：D91 修复后同口径复跑恢复 19/19、0/7——但证据为**修复后**（10-17），
+  旧的三轮证据**不代表代码现状**，新条目另立（`detect-benchmark-redteam-26-d91`）。
+- 门禁已机器化：上述 6 例守卫测试进 CI 常驻 ⇒ 「能机器化的立即补」本条已完成。
+- F18-safe-item 曾在 10-17 acceptance 出现引擎进程 native 崩溃（exit=3221226505 / 0xC0000409），
+  D91 复跑**未复现**（7 个安全点 exit 全 0）⇒ 留观，不立结论。
+
+---
+
 ### 2026-10-16 批次 D86 · 白屏可诊断性收尾（桌面壳 FirstBlood 白屏现场）
 
 **动机**：D85 收尾时排查桌面 dev 白屏现场发现两个「白屏但无任何可见反馈」的缺口——
