@@ -1,0 +1,295 @@
+{
+  "_comment": "wafw00f（EnableSecurity，外部权威）规则样本快照。由 scripts 提取，非本项目编写厂商特征。",
+  "_source": "https://github.com/EnableSecurity/wafw00f (wafw00f/plugins/*.py matchHeader/matchCookie)",
+  "_generatedFrom": "wafw00f master",
+  "samples": [
+    {
+      "ours": "Airlock",
+      "kind": "cookie",
+      "key": "set-cookie",
+      "value": "al_sess=",
+      "sourceRule": "airlock: ^al[_-]?(sess|lb)=",
+      "wafw00fName": "Airlock (Phion/Ergon)"
+    },
+    {
+      "ours": "Anquanbao",
+      "kind": "header",
+      "key": "X-Powered-By-Anquanbao",
+      "value": "x",
+      "sourceRule": "anquanbao: .+?",
+      "wafw00fName": "Anquanbao (Anquanbao)"
+    },
+    {
+      "ours": "Baidu_Yunjiasu",
+      "kind": "header",
+      "key": "Server",
+      "value": "yunjiasux",
+      "sourceRule": "baidu: yunjiasu.*",
+      "wafw00fName": "Yunjiasu (Baidu Cloud Computing)"
+    },
+    {
+      "ours": "Barracuda",
+      "kind": "cookie",
+      "key": "set-cookie",
+      "value": "barra_counter_session=",
+      "sourceRule": "barracuda: ^barra_counter_session=",
+      "wafw00fName": "Barracuda (Barracuda Networks)"
+    },
+    {
+      "ours": "Barracuda",
+      "kind": "cookie",
+      "key": "set-cookie",
+      "value": "BNI__BARRACUDA_LB_COOKIE=",
+      "sourceRule": "barracuda: ^BNI__BARRACUDA_LB_COOKIE=",
+      "wafw00fName": "Barracuda (Barracuda Networks)"
+    },
+    {
+      "ours": "Barracuda",
+      "kind": "cookie",
+      "key": "set-cookie",
+      "value": "BNI_persistence=",
+      "sourceRule": "barracuda: ^BNI_persistence=",
+      "wafw00fName": "Barracuda (Barracuda Networks)"
+    },
+    {
+      "ours": "Barracuda",
+      "kind": "cookie",
+      "key": "set-cookie",
+      "value": "BNIS_x=",
+      "sourceRule": "barracuda: ^BN[IE]S_.*?=",
+      "wafw00fName": "Barracuda (Barracuda Networks)"
+    },
+    {
+      "ours": "BinarySec",
+      "kind": "header",
+      "key": "Server",
+      "value": "BinarySec",
+      "sourceRule": "binarysec: BinarySec",
+      "wafw00fName": "BinarySec (BinarySec)"
+    },
+    {
+      "ours": "BinarySec",
+      "kind": "header",
+      "key": "x-binarysec-via",
+      "value": "x",
+      "sourceRule": "binarysec: .+",
+      "wafw00fName": "BinarySec (BinarySec)"
+    },
+    {
+      "ours": "BinarySec",
+      "kind": "header",
+      "key": "x-binarysec-nocache",
+      "value": "x",
+      "sourceRule": "binarysec: .+",
+      "wafw00fName": "BinarySec (BinarySec)"
+    },
+    {
+      "ours": "BlockDoS",
+      "kind": "header",
+      "key": "Server",
+      "value": "blockdos.net",
+      "sourceRule": "blockdos: blockdos\\.net",
+      "wafw00fName": "BlockDoS (BlockDoS)"
+    },
+    {
+      "ours": "Bluedon",
+      "kind": "header",
+      "key": "Server",
+      "value": "BDWAF",
+      "sourceRule": "bluedon: BDWAF",
+      "wafw00fName": "Bluedon (Bluedon IST)"
+    },
+    {
+      "ours": "Wangsu_WAF",
+      "kind": "header",
+      "key": "Powered-By-ChinaCache",
+      "value": "x",
+      "sourceRule": "chinacache: .+",
+      "wafw00fName": "ChinaCache Load Balancer (ChinaCache)"
+    },
+    {
+      "ours": "Cloudflare",
+      "kind": "header",
+      "key": "server",
+      "value": "cloudflare",
+      "sourceRule": "cloudflare: cloudflare",
+      "wafw00fName": "Cloudflare (Cloudflare Inc.)"
+    },
+    {
+      "ours": "Cloudflare",
+      "kind": "header",
+      "key": "server",
+      "value": "cloudflare-nginx",
+      "sourceRule": "cloudflare: cloudflare[-_]nginx",
+      "wafw00fName": "Cloudflare (Cloudflare Inc.)"
+    },
+    {
+      "ours": "Cloudflare",
+      "kind": "header",
+      "key": "cf-ray",
+      "value": "x",
+      "sourceRule": "cloudflare: .+?",
+      "wafw00fName": "Cloudflare (Cloudflare Inc.)"
+    },
+    {
+      "ours": "Cloudflare",
+      "kind": "cookie",
+      "key": "set-cookie",
+      "value": "__cfduid",
+      "sourceRule": "cloudflare: __cfduid",
+      "wafw00fName": "Cloudflare (Cloudflare Inc.)"
+    },
+    {
+      "ours": "Edgecast",
+      "kind": "header",
+      "key": "Server",
+      "value": "ECDx",
+      "sourceRule": "edgecast: ^ECD(.+)?",
+      "wafw00fName": "Edgecast (Verizon Digital Media)"
+    },
+    {
+      "ours": "Edgecast",
+      "kind": "header",
+      "key": "Server",
+      "value": "ECSx",
+      "sourceRule": "edgecast: ^ECS(.*)?",
+      "wafw00fName": "Edgecast (Verizon Digital Media)"
+    },
+    {
+      "ours": "F5_BIG_IP",
+      "kind": "cookie",
+      "key": "set-cookie",
+      "value": "LastMRH_Session",
+      "sourceRule": "f5bigipapm: ^LastMRH_Session",
+      "wafw00fName": "BIG-IP AP Manager (F5 Networks)"
+    },
+    {
+      "ours": "F5_BIG_IP",
+      "kind": "cookie",
+      "key": "set-cookie",
+      "value": "MRHSession",
+      "sourceRule": "f5bigipapm: ^MRHSession",
+      "wafw00fName": "BIG-IP AP Manager (F5 Networks)"
+    },
+    {
+      "ours": "F5_BIG_IP",
+      "kind": "cookie",
+      "key": "set-cookie",
+      "value": "MRHSession",
+      "sourceRule": "f5bigipapm: ^MRHSession",
+      "wafw00fName": "BIG-IP AP Manager (F5 Networks)"
+    },
+    {
+      "ours": "F5_BIG_IP",
+      "kind": "cookie",
+      "key": "set-cookie",
+      "value": "F5_fullWT",
+      "sourceRule": "f5bigipapm: ^F5_fullWT",
+      "wafw00fName": "BIG-IP AP Manager (F5 Networks)"
+    },
+    {
+      "ours": "F5_BIG_IP",
+      "kind": "cookie",
+      "key": "set-cookie",
+      "value": "F5_fullWT",
+      "sourceRule": "f5bigipapm: ^F5_fullWT",
+      "wafw00fName": "BIG-IP AP Manager (F5 Networks)"
+    },
+    {
+      "ours": "F5_BIG_IP",
+      "kind": "cookie",
+      "key": "set-cookie",
+      "value": "F5_HT_shrinked",
+      "sourceRule": "f5bigipapm: ^F5_HT_shrinked",
+      "wafw00fName": "BIG-IP AP Manager (F5 Networks)"
+    },
+    {
+      "ours": "FortiWeb",
+      "kind": "cookie",
+      "key": "set-cookie",
+      "value": "FORTIWAFSID=",
+      "sourceRule": "fortiweb: ^FORTIWAFSID=",
+      "wafw00fName": "FortiWeb (Fortinet)"
+    },
+    {
+      "ours": "HuaweiCloud_WAF",
+      "kind": "header",
+      "key": "Server",
+      "value": "HuaweiCloudWAF",
+      "sourceRule": "huaweicloud: HuaweiCloudWAF",
+      "wafw00fName": "Huawei Cloud Firewall (Huawei)"
+    },
+    {
+      "ours": "HuaweiCloud_WAF",
+      "kind": "cookie",
+      "key": "set-cookie",
+      "value": "HWWAFSESID=",
+      "sourceRule": "huaweicloud: ^HWWAFSESID=",
+      "wafw00fName": "Huawei Cloud Firewall (Huawei)"
+    },
+    {
+      "ours": "Imperva_Incapsula",
+      "kind": "cookie",
+      "key": "set-cookie",
+      "value": "incap_sesx=",
+      "sourceRule": "incapsula: ^incap_ses.*?=",
+      "wafw00fName": "Incapsula (Imperva Inc.)"
+    },
+    {
+      "ours": "Imperva_Incapsula",
+      "kind": "cookie",
+      "key": "set-cookie",
+      "value": "visid_incapx=",
+      "sourceRule": "incapsula: ^visid_incap.*?=",
+      "wafw00fName": "Incapsula (Imperva Inc.)"
+    },
+    {
+      "ours": "Jiasule",
+      "kind": "header",
+      "key": "Server",
+      "value": "jiasule-waf",
+      "sourceRule": "jiasule: jiasule\\-waf",
+      "wafw00fName": "Jiasule (Jiasule)"
+    },
+    {
+      "ours": "Jiasule",
+      "kind": "cookie",
+      "key": "set-cookie",
+      "value": "jsl_trackingx=",
+      "sourceRule": "jiasule: ^jsl_tracking(.+)?=",
+      "wafw00fName": "Jiasule (Jiasule)"
+    },
+    {
+      "ours": "Jiasule",
+      "kind": "cookie",
+      "key": "set-cookie",
+      "value": "__jsluid=",
+      "sourceRule": "jiasule: __jsluid=",
+      "wafw00fName": "Jiasule (Jiasule)"
+    },
+    {
+      "ours": "SonicWall",
+      "kind": "header",
+      "key": "Server",
+      "value": "SonicWALL",
+      "sourceRule": "sonicwall: SonicWALL",
+      "wafw00fName": "SonicWall (Dell)"
+    },
+    {
+      "ours": "Wallarm",
+      "kind": "header",
+      "key": "Server",
+      "value": "nginx-wallarm",
+      "sourceRule": "wallarm: nginx[\\-_]wallarm",
+      "wafw00fName": "Wallarm (Wallarm Inc.)"
+    },
+    {
+      "ours": "Yunsuo",
+      "kind": "cookie",
+      "key": "set-cookie",
+      "value": "yunsuo_session=",
+      "sourceRule": "yunsuo: ^yunsuo_session=",
+      "wafw00fName": "Yunsuo (Yunsuo)"
+    }
+  ]
+}
