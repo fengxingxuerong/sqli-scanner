@@ -46,7 +46,9 @@
 //   （本机/ubuntu 47~54，windows 观测到 142+，合成最坏 212），截止必须按尾部定。
 // 修法（只重定截止时间；不碰断言、不碰标定、不碰 oracle 模型）：
 //  故障② 30s→90s（覆盖 ~300 请求 ≈ 85s，即观测尾部的 2 倍）；2026-10-17 D95 再于
-//   macos 实测（269 请求仍顶爆 90s）后重标 90s→150s —— 见该用例内注释；故障③ 20s→60s
+//   macos 实测（269 请求仍顶爆 90s）后重标 90s→150s；同日 D96 macos 二连实锤
+//   （356 请求仍在发）后，故障② 由墙钟截止**改为请求预算制**（见 extractWithBudget：
+//   墙钟 = Σ(60+2i) 随 N 二次增长，按墙钟定预算等于赌 runner 噪声尾部）；故障③ 20s→60s
 //   （REALISTIC 档单请求 ~1s，正常 17 请求就要 ~17s，原 20s 截止余量近零，
 //    本机 stall 模型实测一次停顿就双杀）；修复③ 20s→45s（同档预防）。
 //  修复① 保持 30s：跟踪开启后 CI 三平台实测 8.4~8.7s 零通胀，3.4 倍余量足够——
@@ -163,6 +165,45 @@ async function extractWithDeadline(ex, ctx, oracle, expr, deadlineMs = 30000) {
   }
 }
 
+/**
+ * 带**请求预算**的提取（[D96] 故障② 专用）：完成 → 返回提取值；请求数越过 cap
+ * 仍未完成 → 抛 `RUNAWAY`（失控，与故障① 同族）。另设挂死外闸（hangMs）：既没完成、
+ * 请求数也不增长 ⇒ 真挂死，判红。
+ *
+ * 为什么从墙钟截止改成请求预算：故障② 的失控形态在慢 runner 上是**重尾**的 ——
+ * linux 收敛只需 47~54 个请求；windows 观测 142+；macos 两次实测在 90s/150s 墙钟
+ * 截止下已发 269/356 个请求仍在发（D64 重标 → D95 再重标 → 同日被二连击穿）。
+ * 每请求延迟 = 60+2i(ms) 由 oracle 模型决定 ⇒ 墙钟 = Σover N 随 N 二次增长，
+ * 按墙钟定预算等于在赌 runner 的噪声尾部；请求数才是判定「有没有失控」的稳定量。
+ */
+async function extractWithBudget(ex, ctx, oracle, expr, { cap = 256, hangMs = 300000 } = {}) {
+  let hangTimer;
+  const poll = (async () => {
+    for (;;) {
+      if (oracle.stats.dead) return; // 提取已收尾
+      if (oracle.stats.total > cap) throw Object.assign(new Error('RUNAWAY'), { runaway: true });
+      await new Promise((r) => setTimeout(r, 50));
+    }
+  })();
+  const hang = new Promise((_, rej) => {
+    hangTimer = setTimeout(() => rej(Object.assign(new Error('HANG'), { hang: true })), hangMs);
+  });
+  try {
+    return await Promise.race([ex.extractTime(ctx, expr), poll, hang]);
+  } catch (e) {
+    if (e && e.hang) {
+      assert.fail(
+        `提取在 ${hangMs}ms 内既没完成、请求数也没越过预算 ${cap}（已发 ${oracle.stats.total} 个）` +
+          '—— 真挂死，不是重尾（这是防挂死外闸，不是失控判据）。'
+      );
+    }
+    throw e;
+  } finally {
+    clearTimeout(hangTimer);
+    oracle.stats.dead = true;
+  }
+}
+
 /** 跑一次并在 deadlineMs 内没完成时为 true（用于钉「关闭跟踪 ⇒ 失控」） */
 async function hangs(oracle, ctx, deadlineMs) {
   let timer;
@@ -196,17 +237,47 @@ test('★故障②★ 关闭跟踪、慢漂移 ⇒ 产出「看着像数据的�
   const secret = '5.7.40';
   const oracle = makeDriftOracle(secret, { driftMs: 2 });
   const ctx = buildCtx(oracle, 'drift-off-slow', { absMs: TIGHT.absMs, timeBaselineEvery: 0 });
-  // [D64] 截止 90s→150s（2026-10-17 D95，CI macos 实测后第二次重标）：run 260（v1.1.1）
-  // macos-latest 上本用例已发 269 个请求仍未跑完 —— Σ(60+2i)|_{i≤269} ≈ 89s 再加真侧附加
-  // 恰好顶爆 90s。距上限（L 封顶 ⇒ 约 350 请求 ≈ 144s）留 1.05 倍 ⇒ 150s。
-  // 失控形态由故障① 的 6s hangs 探测器负责，这里只是防挂死 suite，不是失控判据。
-  const out = await extractWithDeadline(new Extractor(), ctx, oracle, 'version()', 150000);
-  assert.notEqual(
-    out,
-    secret,
-    `关闭跟踪时应复现静默错值（实测形态 "5\\u0000::::"）：实际却提取正确 —— ` +
-      '说明本用例没打到故障（请调 driftMs，不要改断言）'
-  );
+  // [D64] 截止 30s→90s；[D95] 90s→150s（macos 269 请求顶爆）——同日 [D96] 150s 又被击穿
+  // （356 请求仍在发），至此两次墙钟重标都被 runner 噪声尾部反杀，改为**请求预算**：
+  //   判定 = 完成得错值（常规形态）OR 请求数越过预算（失控 = 故障复现，和故障① 同族 ——
+  //   慢 runner 上慢漂移故障的退化解）。预算 256 = D64 合成最坏 212 × 1.2；健康路径
+  //   （修复① 同组参数）只需 ~17 个请求，预算不会误触。断言内核不变：**不许提取正确**。
+  let out = null;
+  let runaway = false;
+  try {
+    out = await extractWithBudget(new Extractor(), ctx, oracle, 'version()');
+  } catch (e) {
+    if (e && e.runaway) runaway = true;
+    else throw e;
+  }
+  if (runaway) {
+    console.log(
+      `[故障②] 以失控形态复现：请求 ${oracle.stats.total} 个越过预算仍未收敛` +
+        '（慢 runner 上的退化解——故障确已打到，静默错值的"完成态"由快 runner 的 test-server 见证）'
+    );
+  } else {
+    assert.notEqual(
+      out,
+      secret,
+      `关闭跟踪时应复现静默错值（实测形态 "5\\u0000::::"）：实际却提取正确 —— ` +
+        '说明本用例没打到故障（请调 driftMs，不要改断言）'
+    );
+  }
+});
+
+test('★故障②机制自证★ 请求预算不是装饰：失控路径必须在越过预算时抛 RUNAWAY', async () => {
+  // 用故障① 的同组参数（快速漂移 ⇒ 必然失控）走预算路径、cap 压到 40：
+  // 短墙钟内必须以 RUNAWAY 收场。否则 cap 分支就是**永不触发的死代码**，
+  // 故障② 的「慢 runner 退化解」判定会静默失效（预算形同虚设）。
+  const oracle = makeDriftOracle('5.7.40', { driftMs: 8 });
+  const ctx = buildCtx(oracle, 'budget-probe', { absMs: TIGHT.absMs, timeBaselineEvery: 0 });
+  let runaway = false;
+  try {
+    await extractWithBudget(new Extractor(), ctx, oracle, 'version()', { cap: 40 });
+  } catch (e) {
+    runaway = !!(e && e.runaway);
+  }
+  assert.ok(runaway, `失控路径必须在请求数越过预算时抛 RUNAWAY（实际请求 ${oracle.stats.total} 个）`);
 });
 
 test('★故障③★ 真实余量档（300ms）下同样出错：不是只在极端小余量下才坏', async () => {
