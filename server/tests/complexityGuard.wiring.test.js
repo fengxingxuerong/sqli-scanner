@@ -101,9 +101,8 @@ test('形态-7) 基线里的每项都应被当前仓库"测到"（防基线虚�
   const { measureFunctions } = await import('../../scripts/complexity-guard.mjs');
   let checked = 0;
   for (const [key, d] of Object.entries(b.functions)) {
-    const sep = key.lastIndexOf('::');
+const sep = key.lastIndexOf('::');
     const file = key.slice(0, sep);
-    const fnName = key.slice(sep + 2);
     const measured = measureFunctions([file]);
     const m = measured[key];
     assert.ok(m, `${key}：基线里有但当前代码测不到 —— 函数可能已改名或删除（基线腐烂）`);

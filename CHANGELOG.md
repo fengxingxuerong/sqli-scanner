@@ -108,6 +108,17 @@ oob 真链全过。台账补记：`waf-crs-pl1-bypass` 追加 modsec-live 常驻
 （见上表）；本机实网复验时 token 恰含 `_`+`-` 双字符，14/14 全回连 ✅；
 run 267 复核。顺带：v1.1.1 GitHub Release 已建
 （https://github.com/fengxingxuerong/sqli-scanner/releases/tag/v1.1.1）。
+**第四段（run 268）**：macos 故障②/③ 全过 —— 预算制在 macos 兑现（257 请求
+82s 以失控形态收场，不再墙钟爆管）；但**修复①**单字节腐蚀（`5.7.40`→`5.7040`，
+同进程故障② 刚走失控路＝stall 退化模式）。新增 **stall 归因守卫**（提取窗口
+心跳 maxGap > 150ms ⇒ 污染抽重抽 ≤3；干净抽腐蚀 ⇒ 立即红——不蒙混真回归；
+全抽污染 ⇒ 显式红并注明「环境退化不可量测」）。run 269 复核。
++**第五段（run 269 提交）**：lint 死代码清零 —— `complexityGuard.wiring.test.js` 删
++`fnName` 死赋值、`wafExternalParity.guard.test.js` 移除未用 `readdirSync` import、
++`tamperKeywordCoverage.test.js` 的 `kwsOf` 有意保留并加禁告注释（防列表挪回函数内
++的哨兵）；facts 指纹重采回绿（4188 用例徽章），门禁 20/20。连同 run 268 后
++acceptance 全量重跑（19 PASS / 0 BLOCKED / 0 FAIL / 1 SKIP，真 MySQL/PG 闭环）
++一并提交，供 CI 复核 macOS 下 stall 守卫是否生效。
 
 ### 2026-10-17 批次 D95 · e2e 靶场接线实锤的两处烂账（判据假阳性 + 漏接线 + 收口清单 22 项）
 
