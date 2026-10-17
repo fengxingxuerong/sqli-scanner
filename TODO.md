@@ -5,6 +5,81 @@
 
 ---
 
+## 2026-10-17 批次 D93 · 参数名注入点（`--test-param-names`，吸收队列 #7）
+
+**缺口**：后端把 query **键名**拼进 SQL（`WHERE ${Object.keys(req.query)[0]} = ?`、键名当列名
+的 `ORDER BY`），值参数化 ⇒ 值注入扫不到。
+
+**三处接缝**：TargetParser 生成 paramName 点（`originalValue` = 键名本身）·
+injection.js 改键名保值（基线保持原键名）· boundary 跳过闭合探测 · prefilter 不剪枝。
+
+**实测（真 MySQL 靶场 `e2e/param-name-lab`）**：vuln=2（命中点全为 paramName）、
+开关关闭=0、安全白名单点=0。单测 4 例。
+
+### 待推进
+
+- JSON/XML **键名**注入面（本批只做 URL query 键名）；
+- paramName 点的 union 通道在「键名后还有固定后缀」的拼接形态下可能被截断（本批靶点
+  `WHERE ${k} = ?` 属可注释形态；`ORDER BY ${k} DESC` 这类尾部固定语法未覆盖，需另造靶点）；
+- e2e/param-name-lab 接入 acceptance/run-all（当前需手动跑，MySQL 缺失时 SKIP）。
+
+---
+
+## 2026-10-17 批次 D92 · D91 的两个遗留口子
+
+**① REST 入口 auth.headers 夹击面**：CLI 侧 `--test-headers` 的注入点头会从 `auth.headers`
+删除（251-261），REST（`sanitizeStart`）没有等价逻辑 ⇒ `auth.headers` 同名副本经
+`mergeAuthHeaders` 覆盖语义把注入值顶回原值 ⇒ header 类注入点静默假阴性。
+修复：`sanitizeStart` 补去重（非 cookie 头，大小写不敏感；cookie 不删，与 CLI 同口径）。
+判据 4 例 + 变异验证（路径不可达 ⇒ 2 红）。
+
+**② 红队判据 90%→100%**：18/19（95%）曾判 PASS，而那正是 D91 的真回归
+⇒ 阈值容错把「漏整类注入点」吞成通过。`gate-check.mjs` 与 acceptance assert 同步收紧为
+**全中 + 零误报**；注入 18/19 验证 ⇒ FAIL exit=1（旧判据 PASS）。
+
+### 待推进
+
+- Cookie 之外的**其他注入点形态**（url/body/header/二阶）与 auth 配置的交互是否还有同类
+  夹击（本轮已覆盖 header 的 REST 路径；CLI 与 REST 的去重口径应长期保持一致，可考虑抽共享函数）；
+- 商业云 WAF 真机样本（D89 遗留）、62 家其余 44 家外部对拍源；
+- versioned 注释形态（AGENTS.md §四，refuted 未关闭，待 tamper 批次）。
+
+---
+
+## 2026-10-17 批次 D91 · Cookie 注入点静默假阴性回归修复（推翻协议落地）
+
+**反证**：10-17 acceptance 红队 **18/19**（D11-cookie 漏），台账/README 却写 19/19
+（证据 10-05 三轮，D11 当时全命中）⇒ 真回归。
+
+**根因（抓包实证）**：`--header "cookie: uid=1"` 被存进 **headerParams + config.auth.headers 两处**；
+cookie 注入点构造后请求头同时含 `cookie=uid=1`（原值小写）与 `Cookie=uid=<注入>`（大写）。
+axios 1.20.0 的 `AxiosHeaders.set` 同名头**后写赢** ⇒ 原值在后 ⇒ 服务端永远收到原值 ⇒
+124 个探针全打在未注入值上 ⇒ 门控真假恒等 ⇒ 「未检出」（与「这个站没注入」同形）。
+引入点：`5db14b8` 升 axios 1.18.1→1.20.0；Node 22/24 与 D88 boundary 候选表均已对照排除。
+
+**修复**：A 构造层 `injection.js` cookie 分支删所有大小写同名键后单键写入；
+B 发送层 `requestContext.js` `mergeAuthHeaders` 的 auth.headers Cookie 同名且已有 Cookie 时跳过。
+判据 `server/tests/injection.cookieHeaderCollision.test.js` 6 例，双向变异验证（删 A/B 各 1 红，还原即绿）。
+
+**修复后实测**：D11 命中（union+error+boolean，61 请求）；红队 **19/19、0/7 误报**；
+F18 上次 acceptance 的引擎崩溃码（0xC0000409）**未复现**，留观不立结论。
+
+**台账**：`detect-benchmark-redteam-26` → **refuted**（旧 19/19 证据作废、数字保留）；
+新证据另立 `-d91` 条目；README 四处口径（R2 表/sqlmap 对照表/验收表/D6 注释）按推翻协议更新。
+
+### 待推进
+
+- ~~全量 acceptance 复跑~~ **已完成（10-17 晚，分三批 `--only` 跑，避开全量 20 分钟单测预算）**：
+  单测 PASS（3606 例 / 3604 pass / 0 fail / 2 skip）；MySQL 依赖 12 套件 **12/12 PASS**
+  （含上午 BLOCKED 的刁钻靶场 11/11、检测回归 19/19、真 MySQL 11/11、报告契约 8/8、
+  CRS 三件套、WAF A2/A3、批量隔离、登录编排）；红队 PASS（**19/19、0/7 误报**）。
+  仍 SKIP 的 5 个为环境缺失（PG 5432 未监听、secure_file_priv=NULL、Juice Shop /
+  interactsh 环境不满足）——**未覆盖即不计过，也不假装全量**。
+- D91 类问题的**通用化排查**：还有哪些注入点形态会被 auth.headers 副本夹击（当前只修了 Cookie 同名）；
+- 商业云 WAF 真机样本（D89 遗留）、62 家其余 44 家外部对拍源。
+
+---
+
 ## 2026-10-18 批次 D90 · 写副作用登记与自动清理（P2-5）
 
 **动机**：TODO 2026-10-10 盘点的 P2-5「写副作用无自动清理/回滚（只有
@@ -187,9 +262,9 @@ interactsh 模式改为「扫描器主动轮询协作端」，**只要求扫描�
 
 ---
 
-## 2026-10-16 批次 D86 · 引导三件套收尾（已完成，待提交）
+## 2026-10-16 批次 D86 · 引导三件套收尾 + 白屏可诊断性收尾（主体已提交 `5adac0c`；白屏修复部分见下）
 
-用户对 D85 收尾时列的三个可选项回复「都要加上」，全部落地：
+用户对 D85 收尾时列的三个可选项回复「都要加上」，全部落地（对应 CHANGELOG D86 条目）：
 
 | 项 | 落地 |
 |---|---|
@@ -200,6 +275,19 @@ interactsh 模式改为「扫描器主动轮询协作端」，**只要求扫描�
 - 引导延迟保持 1.5s（测试安全边际：engineGate waitFor 窗口 ~500ms，2 倍余量；不为看起来更快牺牲门禁）
 - 自查修掉：条件调用 useEffect（Rules of Hooks）→ effect 内判空；事件常量误导出 → 去 export（deadcode）
 - 验证：vitest 574/574 · typecheck 0 · lint 0 · 八守卫 + wiring 230 + readme/facts/refs/modules 全 0
+
+### 同批次第二部分 · 白屏可诊断性收尾（2026-10-16 晚，即本仓 D86 收尾现场）
+
+D85/D86 主体提交后，桌面 dev 白屏现场复盘发现**三个「白屏但无可见反馈」缺口**——本次修的是
+「可诊断性」，不是新功能：
+
+| 缺口 | 现象 | 修法 |
+|---|---|---|
+| vite dev 只听 `::1` | 本机 localhost 优先解析 IPv6，Tauri 桌面端 WebView2 按 IPv4 连 `localhost:5173` ⇒ 连不上，纯白板 | `vite.config.ts` 绑 `127.0.0.1` + `strictPort`；不开 0.0.0.0 |
+| ErrorBoundary 只包页面出口 | App/主题/DisclaimerDialog/OnboardingTour 抛错 ⇒ 整树卸载 ⇒ 白屏无反馈 | ErrorBoundary 上移到 App 根，错误至少渲染出文案 |
+| 引擎门禁只有转圈 | 引擎慢起与死掉同形 | 载入态补「正在连接检测引擎…」（`common.engineConnecting`，zh/en） |
+
+诚实边界：前端改动无自动化判据，白屏消失的验证依赖真机 `tauri dev`（D75 已修起不来根因）。
 
 ### 待推进
 

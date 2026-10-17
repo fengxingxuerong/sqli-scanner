@@ -365,6 +365,9 @@ export interface ScanConfig {
   // 使用者少测两类注入点，报告只会写「未检出」。
   testPath?: boolean;
   testHeaders?: boolean;
+  // [D93] 参数名本身作为注入点：后端把 query 键名当列名/排序名拼 SQL 时（`WHERE ${col} = ?`），
+  // 值被参数化 ⇒ 只有改键名能打。opt-in：每参数多一个点位（请求量约 +1 倍）。仅 URL query 键名。
+  testParamNames?: boolean;
   // ── [2026-10-01 UI-REACH §1.3] 高级注入面（对标 sqlmap --no-cast/--hex/--flush-session/
   // --union-from/--union-cols/--param-del/--where）──
   // CLI 能用、引擎真读、REST 白名单已收，此前内置引擎面板无入口（SqlmapOptions 的同名

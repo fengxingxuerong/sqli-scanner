@@ -193,7 +193,10 @@ export class InteractshClient {
     );
   }
 
-  /** 协作端域名前缀 = correlationId + nonce（长度已由构造保证 ≥33） */
+  /**
+   * 协作端域名前缀 = correlationId + nonce（长度已由构造保证 ≥33）。
+   * @returns {string} 前缀
+   */
   _domainPrefix() {
     return `${this._correlationId}${this._nonce}`;
   }
@@ -226,16 +229,29 @@ export class InteractshClient {
     return `${label}.${host}`;
   }
 
-  /** 拼出可供目标回连的 URL（http 形态）。 */
+  /**
+   * 拼出可供目标回连的 URL（http 形态）。
+   * @param {string} token 检测器 token
+   * @param {string} [scheme] URL scheme（默认 http）
+   * @returns {string} 回连 URL
+   */
   callbackUrlForToken(token, scheme = 'http') {
     return `${scheme}://${this.hostForToken(token)}/oob`;
   }
 
-  /** 协作端根域名（去掉前缀），供 UNC/裸主机类向量使用。 */
+  /**
+   * 协作端根域名（去掉前缀），供 UNC/裸主机类向量使用。
+   * @returns {string} 根域名
+   */
   bareHost() {
     return String(this._server || '').replace(/^https?:\/\//, '').replace(/\/.*$/, '');
   }
 
+  /**
+   * 向协作端注册会话（上游 /register 语义：明文 public-key + secret + corrID）。
+   * @param {string} base 协作端根 URL（https:// 形态）
+   * @returns {Promise<void>}
+   */
   async _register(base) {
     const body = JSON.stringify({
       'public-key': Buffer.from(this._publicKeyPem, 'utf8').toString('base64'),
@@ -254,6 +270,11 @@ export class InteractshClient {
     }
   }
 
+  /**
+   * 调度轮询循环（自递归 setTimeout；间隔下限 500ms）。
+   * @param {number} intervalMs 轮询间隔
+   * @returns {void}
+   */
   _schedulePoll(intervalMs) {
     const ms = Number.isFinite(intervalMs) && intervalMs >= 500 ? intervalMs : 2000;
     const tick = async () => {
@@ -268,6 +289,10 @@ export class InteractshClient {
     this._pollTimer = setTimeout(tick, ms);
   }
 
+  /**
+   * 单次轮询：取回连记录 → 解 aes_key → 逐条解密 → 归因入账。
+   * @returns {Promise<void>}
+   */
   async _pollOnce() {
     if (!this._server) return;
     const res = await fetch(
@@ -337,7 +362,11 @@ export class InteractshClient {
     return null;
   }
 
-  /** 记录 token 被回连（接口与 oobReceiver.receive 同形）。 */
+  /**
+   * 记录 token 被回连（接口与 oobReceiver.receive 同形）。
+   * @param {string} token 回连 token
+   * @returns {void}
+   */
   receive(token) {
     const key = normToken(token);
     if (!key) return;
@@ -386,10 +415,18 @@ export class InteractshClient {
     });
   }
 
+  /**
+   * 隧道是否已就绪（注册成功且在轮询）。
+   * @returns {boolean}
+   */
   isStarted() {
     return this._running && !!this._server;
   }
 
+  /**
+   * 停止轮询并向协作端注销（注销失败不影响本地状态）。
+   * @returns {Promise<void>}
+   */
   async stop() {
     this._running = false;
     if (this._pollTimer) {

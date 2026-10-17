@@ -66,6 +66,12 @@ export const defaults = {
   // 空串=不过滤（全部运行 / 不跳过）。
   testFilter: '',
   testSkip: '',
+  // [D93 2026-10-17] testParamNames：**参数名本身**也作为注入点（对标 SQLiDetector）。
+  // 场景：后端把 query 键名拼进 SQL（`SELECT ... WHERE ${key}=?` / `ORDER BY ${col}` 的
+  // 键名来自 `Object.keys(req.query)[0]`），值始终被参数化 ⇒ 值注入扫不到，只有改键名能打。
+  // 默认 false：开启后每个 query 参数多一个点位（请求量约 +1 倍），且大多数目标不存在该形态。
+  // 诚实边界：仅覆盖 URL query 键名；不含 JSON/XML 键名（结构复杂，键名注入面另论）。
+  testParamNames: false,
   // useRegistry（对标 sqlmap 声明式 payload 体系）：false=检测器直接用 payloads/*.js 扁平数组（默认，零回归）；
   // true=检测器改用 PAYLOAD_REGISTRY 声明式注册表 + selectPayloadsForCtx 筛选（受 level/risk/testFilter/testSkip 控制）。
   useRegistry: false,

@@ -56,7 +56,7 @@ node scripts/one-click-scan.mjs -u "http://target/page?id=1"   # 一条命令出
 
 - 每批改动走 **D 编号批次**（见 `TODO.md` 顶部），一次批次 = 代码 + 测试 + README/CHANGELOG 同步 + 门禁全绿。
 - `npm run readme:check`：README 与代码**双向核对**。数字类口径（方言分层 / tamper 数 / payload / 端点表）自 D53 起核对；**CLI 旗标类（D68 的 ⑯ / D69 的 ⑰）自 2026-10-14 起才真正双向**——此前门禁只核数字，「加了开关不写文档」一直没人守，实测 CLI 168 个旗标里 README 曾漏 73 个、user-guide 漏 123 个、**`--help` 自己漏 11 个**。判据实现在 `scripts/readme-consistency.mjs`（⑯⑰ 在 `scripts/readme-flag-coverage.mjs`）。
-- **收口清单已固化为一条命令：`npm run gate:close`（D71，18 项；`--quick` 跳最慢两项）。** 手写清单如下（漏一条都会被 CI 抓）：`npm run lint` + **`npm run typecheck`** + **五道门禁逐道跑**（`node scripts/{complexity,nesting,duplication,deadcode,debt}-guard.mjs`）+ **各门禁 `--selftest`** + **`node --test server/tests/*Guard*.test.js server/tests/*wiring*.test.js`（门禁 wiring，230 例）** + `npm run readme:check` + `npm run facts:check` + `node scripts/ref-integrity.mjs`。**已漏三次**：D66 漏 typecheck、D70 漏五道门禁、D70b 漏 wiring（基线改完必须跑 wiring —— 防虚高判据在测试里，不在门禁输出里）。
+- **收口清单已固化为一条命令：`npm run gate:close`（D71，20 项；`--quick` 跳最慢两项）。** 手写清单如下（漏一条都会被 CI 抓）：`npm run lint` + **`npm run typecheck`** + **六道门禁逐道跑**（`node scripts/{complexity,nesting,duplication,deadcode,debt,typecoverage}-guard.mjs`）+ **各门禁 `--selftest`** + **`node --test server/tests/*Guard*.test.js server/tests/*wiring*.test.js`（门禁 wiring）** + `npm run readme:check` + `npm run facts:check` + `node scripts/ref-integrity.mjs`。**已漏四次**：D66 漏 typecheck、D70 漏五道门禁、D70b 漏 wiring（基线改完必须跑 wiring —— 防虚高判据在测试里，不在门禁输出里）、D94 前补 typecoverage（D87 起 JSDoc 覆盖跌破基线，pre-commit 被 SKIP_PRECOMMIT 绕过后收口清单里没有它，红到 push 才现——**跳过 pre-commit 的批次，收口清单是最后一道自留地**）。
 - `npm run acceptance`：17 套件验收门禁，提级提交前必跑。
 - 引擎**有意零运行时 npm 依赖**（server 的 runtime deps 除外）；给引擎加能力请用 Node 内置能力。
 - 检测判据/定库签名的测试是校准过的——不要为了让测试变绿而放宽断言；行为变化必须有靶场证据。
@@ -71,7 +71,7 @@ node scripts/one-click-scan.mjs -u "http://target/page?id=1"   # 一条命令出
 
 | 类别 | 例 |
 |---|---|
-| 能力声明 | 「检出 19/19」「误报 0/7」「747ms」 |
+| 能力声明 | 「检出 19/19」「误报 0/7」「747ms」（注：19/19 正是被 D91 推翻过的实例——见 §三 表与台账 `detect-benchmark-redteam-26`，示例保留缘于此） |
 | 对标声明 | 「tamper 84/84」「字面一致 100/115」「6 种真引擎验证」 |
 | 效果声明 | 「WAF 绕过 N/N」「某链是首选链」 |
 | 安全声明 | 「0 误拦」「护栏不可绕过」 |
@@ -97,6 +97,7 @@ node scripts/one-click-scan.mjs -u "http://target/page?id=1"   # 一条命令出
 | 「dash2hash+hexliterals 是 WAF 首选链」 | 真 ModSecurity 容器实测 **0/19 打穿** | 仅 unionvaluesrow 系 2/19；首选链推荐被 artifact-drift 门禁当场打回 |
 | 「3 种数据库真实验证」 | 仓库里实际有 **7 种**引擎的真实验证记录 | 分层重列（真引擎/部分通道/模板适配），且等级写进每份报告的 `summary.dbmsEvidence` |
 | 「D57 迁移后测试全绿即等价」 | A/B 快照对比抓出**旧状态机不复位**的真 bug（多字面量场景漏处理） | 迁移即修复；门禁绿 ≠ 行为等价，必须 A/B |
+| 「红队检出 19/19、误报 0/7、中位 747ms」（10-05 三轮证据） | 10-17 全量 acceptance 实测 **18/19**：D11-cookie 静默假阴性——`--header "cookie:"` 双处存储 + axios 1.20.0 同名大小写头**后写赢**，服务端永远收到原值（124 探针全打在未注入值上，与「这个站没注入」同形） | D91 双层修复 + 6 例守卫（双向变异有牙）；复跑恢复 19/19。**旧证据 refuted、新证据另立**；`acceptance` 判据 ≥90% 曾把 18/19 判成 PASS ⇒ 判据阈值本身留观 |
 
 ### 四、常驻待复核队列（`docs/_claims-ledger.json`）
 
@@ -104,8 +105,8 @@ node scripts/one-click-scan.mjs -u "http://target/page?id=1"   # 一条命令出
 
 | 结论 | 状态 | 证据 | 待办 |
 |---|---|---|---|
-| versioned 关键字族「与上游等价」 | **refuted** | 上游 doctest 字面比对：本仓 `versionedkeywords` 输出漏包 `ALL`、`versionedmorekeywords` 漏 `CONCAT`（同族内不自洽） | 随 T-6 批次按上游形态重做 |
-| modsecurityversioned / modsecurityzeroversioned / halfversionedmorekeywords 版本注释形态 | **refuted** | 上游逐 token 重开注释并整段包裹，本仓只包关键字 | 同上 |
+| versioned 关键字族「与上游等价」 | **已修（T-6，2026-10-14）** | 上游 doctest 字面比对：本仓 `versionedkeywords` 输出漏包 `ALL`、`versionedmorekeywords` 漏 `CONCAT`（同族内不自洽） | T-6 已按上游形态重做（补 ALL + 22 个函数名，两件套收敛单一真源 `versionedKeywords.js`）；残留 3 条**形态差异**见下行 |
+| modsecurityversioned / modsecurityzeroversioned / halfversionedmorekeywords 版本注释形态 | **refuted（未关闭）** | 上游逐 token 重开注释并整段包裹，本仓只包关键字 | 形态差异，非功能缺陷；T-6 决定如实挂账不硬改，**待下批 tamper 批次连同复核** |
 
 > 复核命令：`node scripts/verify-tamper-upstream-examples.mjs`（读 `drift` / `excluded` 两字段，
 > `drift` 里 `[variant]` = 已对齐、`[queued]` = **已知未修的真缺陷**）。

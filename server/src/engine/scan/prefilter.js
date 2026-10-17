@@ -284,8 +284,10 @@ export async function prefilterPoints(deps, ctxBase, target, points) {
   // [P0 2026-09-09] knownPoint 直通点不参与预筛选（手工确认的可注入点不需要
   // 「有没有迹象」判定；探针反而可能因闭合形态未给全而误判无信号），
   // 但必须原样并入返回集（调用方以返回集作为「进入完整检测」的点集合）
-  const knownPoints = points.filter((p) => p.knownPoint);
-  points = points.filter((p) => !p.knownPoint);
+  // [D93] 分流：knownPoint 直通点与参数名点都不参与预筛选判定（探针改的是值，对键名点无信号是必然），
+  // 但必须原样并入返回集（调用方以返回集作为「进入完整检测」的点集合）。语义详见 splitPrefilterBypass。
+  const { bypass: knownPoints, candidates: rest } = splitPrefilterBypass(points);
+  points = rest;
   if (points.length === 0) return knownPoints;
   const skipIds = new Set();
   const prefilterCtx = { ...ctxBase, target };
@@ -512,4 +514,22 @@ export async function validationGuardedSkipPoints(deps, ctxBase, target, points)
 
   if (skip.size === 0) return { candidate: points, skipped: [] };
   return { candidate: points.filter((p) => !skip.has(p.id)), skipped: [...skip.values()] };
+}
+
+// ── [D93 2026-10-17] 预筛选分流：哪些点不参与「有无注入迹象」判定 ────────────────
+/**
+ * 把注入点分成「不参与预筛选（bypass）」与「候选（candidates）」两类。
+ *
+ * 两类 bypass（都必须原样并入返回集，否则等于把它们判成「静态点位」）：
+ *   · `knownPoint`（[P0 2026-09-09]）：用户手工确认的可注入点，不需要「有没有迹象」判定；
+ *     探针反而可能因闭合形态未给全而误判无信号。
+ *   · `paramName`（[D93]）：注入面在 **query 键名**，而预筛选探针改的是参数**值**——
+ *     无信号是必然的（不是「无迹象」）。实测用它剪枝会把这类点恒判静态，检出恒 0。
+ * @param {object[]} points 全部注入点
+ * @returns {{bypass: object[], candidates: object[]}}
+ */
+function splitPrefilterBypass(points) {
+  const bypass = points.filter((p) => p.knownPoint || p.location === 'paramName');
+  const bypassSet = new Set(bypass);
+  return { bypass, candidates: points.filter((p) => !bypassSet.has(p)) };
 }

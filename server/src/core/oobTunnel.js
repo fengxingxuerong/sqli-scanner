@@ -17,7 +17,12 @@
 import { oobReceiver } from './oobReceiver.js';
 import { interactshClient } from './interactshClient.js';
 
-/** 本地模式下从 callbackBase 派生 UNC 路径（原 OobDetector.deriveUncPath 语义，逐字保留） */
+/**
+ * 本地模式下从 callbackBase 派生 UNC 路径（原 OobDetector.deriveUncPath 语义，逐字保留）。
+ * @param {string} callbackBase 回连基址（可含 scheme/端口）
+ * @param {string} token 检测器 token
+ * @returns {string} UNC 路径
+ */
 export function deriveUncPath(callbackBase, token) {
   const bareHost = String(callbackBase || '')
     .replace(/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//, '') // 剥 scheme
@@ -35,7 +40,10 @@ class OobTunnel {
     this._mode = null;
   }
 
-  /** 当前模式（未启动为 null），供检测器/报告标注使用 */
+  /**
+   * 当前模式（未启动为 null），供检测器/报告标注使用。
+   * @returns {'local'|'interactsh'|null}
+   */
   get mode() {
     return this._mode;
   }
@@ -43,6 +51,7 @@ class OobTunnel {
   /**
    * 按配置启动隧道（幂等：同一模式重复 start 由底层客户端自行短路）。
    * @param {any} cfg oob 配置段
+   * @returns {Promise<void>}
    */
   async start(cfg) {
     const inter = cfg && cfg.interactsh;
@@ -76,20 +85,39 @@ class OobTunnel {
     return null;
   }
 
+  /**
+   * 隧道是否已就绪（活跃客户端存在）。
+   * @returns {boolean}
+   */
   isStarted() {
     return !!this._active();
   }
 
+  /**
+   * 转发回连记录到活跃客户端。
+   * @param {string} token 回连 token
+   * @returns {void}
+   */
   receive(token) {
     const c = this._active();
     if (c) c.receive(token);
   }
 
+  /**
+   * 等待某 token 被回连（转发到活跃客户端）。
+   * @param {string} token 检测器 token
+   * @param {number} timeoutMs 等待窗口
+   * @returns {Promise<boolean>} 是否在窗口内收到回连
+   */
   waitForToken(token, timeoutMs) {
     const c = this._active();
     return c ? c.waitForToken(token, timeoutMs) : Promise.resolve(false);
   }
 
+  /**
+   * 停止两条隧道（可能切换过模式），任一失败不影响另一条。
+   * @returns {Promise<void>}
+   */
   async stop() {
     // 两条通道都收（可能切换过模式），任一失败不影响另一条
     try { await interactshClient.stop(); } catch { /* ignore */ }

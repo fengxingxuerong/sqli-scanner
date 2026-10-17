@@ -65,6 +65,164 @@
 
 ## [Unreleased]
 
+### 2026-10-17 批次 D94 · JSDoc 类型覆盖回归回补（D87 引入；CI push 连红 8 次的唯一根因）
+
+**动机（发现链）**：发布收口时核查 CI 历史，发现 master 的 push 触发的 lint job 自
+run 255（2026-10-16 19:15Z）起连红 8 次（255-259），全部停在第 17 步「JSDoc 类型覆盖
+（基线只升不降）」——后续步骤全被 skip，红点从未被修。本地直接复现：
+`server/src/core` 48.7% < 基线 48.9%、`server/src/api` 28% < 基线 28.5%。
+
+**定位（worktree 逐提交测量，非推理）**：发布 commit `be62ac6` 与 D86 均为绿；
+**D87（OOB 外部隧道）起转红**，D88-D93 全数继承——8 次 CI 红、1 个批次的课。
+（第一次用 `git checkout <sha> -- server/` 测得的「发布内容也红」是**假阳性**：
+该命令不删除目标 commit 不存在的文件，D87+ 新文件残留继续被测量。改用
+`git worktree add` 干净检出后得到上述边界——测量方法本身踩坑，记录于此。）
+
+**为什么本地/收口没拦住**：守卫在三处都有接线（pre-commit 第 80 行 / `ci-local.mjs` /
+CI lint，且 D55 起的 wiring 测试钉着这三处）——但 **`gate:close` 收口清单里没有它**
+（D54-D61 六道门禁进了五道）。绕过 pre-commit 的提交（SKIP_PRECOMMIT / `--no-verify`
+的既定用法）之后，「提交前的最后一道自留地」收口清单对这次回归完全无感。
+
+| 面 | 改动 |
+|---|---|
+| 回补类型 | D87 新增文件逐函数补 JSDoc：`core/interactshClient.js` 9 个方法（+14 标注）、`core/oobTunnel.js` 8 个（+12）、`api/scanGuard/objectGroups.js` 的 `guardInteractsh`/`guardOob`（+5）——**修复方式是补标注，不是降基线/放宽判据** |
+| 结果 | core **48.7→50.0%**、api **28.0→29.6%**（engine 31.5 / services 25.8 本就高于基线）；`--fix-baseline` 把四批新值写入基线（棘轮收紧：core 50 / api 29.6 / engine 31.5 / services 25.8） |
+| 防复发 | `gate-close.mjs` 清单加入 `typecoverage`（+`--selftest`）：**18→20 项**，D71 自证同步加严（must 列表 + 各门禁 selftest 检查项）；AGENTS.md §3 更新为「六道门禁」，并补记第四次漏报（D94 补 typecoverage）与教训——**跳过 pre-commit 的批次，收口清单是最后一道自留地** |
+| 顺带 | `guardInteractsh` 标注时 checkJs 当场抓到两处不精确（`@param {unknown}` 收窄后属性访问全红、`clampInt` 实为 `number\|undefined`）——精确标注的价值即在此，两处均按真实语义修正后 typecheck 0 错 |
+
+**验证**：`typecoverage-guard` + `--selftest` 绿；`gate-close --selftest` 20 项绿；
+typecoverageGuard/preCommitGates/jsLexer wiring 27 例绿；oob/interactsh 相关 68 例绿；
+`npm run typecheck` 0 错；facts / readme 一致性绿。修复后推送由 CI run 验证（push 触发全量 lint）。
+
+### 2026-10-17 批次 D93 · 参数名注入点（`--test-param-names`，吸收队列 #7）
+
+**缺口**：后端把 **query 键名**拼进 SQL，值走参数化或白名单——典型写法
+`const col = Object.keys(req.query)[0]; SELECT ... WHERE ${col} = ?`、键名当列名的
+`ORDER BY ${col}`。此时值注入（location='url'）**扫不到**：值被参数化，改值无任何 SQL 语义
+变化。本仓此前没有这类注入点（SQLiDetector 同型能力缺位）。
+
+**实现（三处接缝，各一条判据）**：
+
+| 接缝 | 内容 |
+|---|---|
+| `TargetParser` | opt-in（`config.testParamNames === true`）为每个 query 参数**追加** paramName 点（不替换 url 点）。⚠ `originalValue` 必须是**键名本身**而非键的值——检测器以它为基准构造 `name AND 1=1-- -`；传值会让探针变成 `WHERE Keyboard AND 1=1-- - = ?`（列不存在 ⇒ 两侧同错 ⇒ 门控恒等 ⇒ 恒判非注入） |
+| `injection.js` | paramName 分支把注入值放到**键名**、值原样保留；`injected === originalValue` 时保持原键名（基线语义，否则预筛选/门控拿注入形态当真值基线） |
+| `boundary.js` | paramName 点**跳过闭合探测**：键名拼接无引号上下文，15 个候选前缀纯白烧请求且键名含空格会让目标 400 |
+| `prefilter.js` | paramName 点**不参与预筛选**：预筛选探针改的是值，对该点无信号是必然的（不是「无迹象」）——实测被剪枝后检出恒 0。与 `knownPoint` 同口径原样并入 |
+
+**配置/CLI 接线**：`defaults.testParamNames`（默认 false）、REST 白名单 + 标量透传、
+前端 `DEFAULT_CONFIG`/`SCAN_CONFIG_KEYS`/类型映射三处、CLI `--test-param-names` + help + README。
+
+**判据**：
+- `server/tests/paramName.injection.test.js`（4 例：生成/不生成、originalValue 语义、
+  基线保持原键名 + 注入改键名保值 + 伴随参数保留、闭合探测不发请求）
+- `e2e/param-name-lab/`（**真 MySQL** 靶场 + 判据）：`/colfilter` 键名拼 SQL（真值：
+  `?name=Keyboard` 1 行 → `?name OR 1=1-- -` 全表）、`/colfilter-safe` 同写法 + 白名单。
+  实测 **vuln=2（命中点全为 paramName）、开关关=0、安全点=0** —— 三个方向都成立
+
+**诚实边界**：仅 URL query 键名（JSON/XML 键名注入面另论）；paramName 点不做闭合探测，
+故「键名被引号包裹」的畸形写法不覆盖；`--test-param-names` 开启后每参数多一个点位
+（请求量约 +1 倍），默认关闭。
+
+---
+
+### 2026-10-17 批次 D92 · D91 的两个遗留口子（REST 夹击面 + 红队判据阈值）
+
+D91 修完 cookie 注入点回归后，按「发现一条假数据就列全影响面」继续排查同源问题，抓到两个：
+
+**① REST 入口的 auth.headers 夹击面（CLI 早有防护，REST 没有）**
+
+`--test-headers` 开的头成为注入点后，若 `auth.headers` 仍持同名副本，发送层
+`mergeAuthHeaders` 的 auth.headers 分支是**覆盖**语义 ⇒ 注入值被顶回原值 ⇒ 该点静默假阴性。
+CLI 侧（`server/bin/cli.js` 251-261）早有去重，REST 侧（`sanitizeStart` → `config.auth`
+由 `scalarsEgress` 直通）**完全没有** ⇒ 同一夹击面对 REST 的所有 header 注入点开放。
+
+修复：`sanitizeStart` 在返回前补等价去重——`testHeaders=true` 时把 `headerParams` 中的
+非 cookie 头（大小写不敏感匹配）从 `config.auth.headers` 删除，删空则移除该字段。
+Cookie 不删（与 CLI 同口径：会话语义走 `auth.cookie` 的追加语义；`auth.headers.cookie`
+的覆盖由 D91 B 处拦截）。
+判据：`server/tests/api.authHeadersInjectionPoint.test.js`（4 例：删除/大小写/ cookie 保留/
+未开 testHeaders 不动）。**变异验证**：让去重路径不可达 ⇒ 2 红；还原 ⇒ 4 绿。
+
+**② 红队判据 90% → 100%（阈值容错正是 D91 假绿的成因）**
+
+`gate-check.mjs` 与 acceptance 红队套件的判据原是「≥90% 且零误报」。D91 实证：**18/19（95%）
+被判 PASS**，而那是 cookie 注入点整类漏检的真回归——阈值把「漏掉一整类注入点」吞成通过。
+历史 m1/m2/m3 三轮 + D91 修复后复跑均 19/19 ⇒ 全中在稳定环境可达。
+
+收紧后：`hit === verifiedVulns.length && fp === 0`（gate-check）与
+`Number(hit) === Number(total) && fp === 0`（acceptance assert）。FAIL 文案带 `hit=N/M`。
+**验证**：注入「D11 hit=false」模拟修复前 ⇒ gate-check **FAIL exit=1**（旧判据 PASS）；
+还原 ⇒ PASS exit=0。抖动致假红时排查环境，不放宽判据（判据注释已写明）。
+
+---
+
+### 2026-10-17 批次 D91 · Cookie 注入点静默假阴性回归修复（推翻协议落地：台账 19/19 作废重做）
+
+**反证来源**：2026-10-17 全量 acceptance（`e2e/results/acceptance-report.md`）红队实战评测
+**18/19**——D11-cookie 漏检。而台账 `detect-benchmark-redteam-26` 与 README 均写
+**19/19（100%）**（证据为 2026-10-05 三轮 strict 复测）。历史三轮 `results-m1/m2/m3.json`
+D11 **全部命中**（union+error+boolean，59 请求）⇒ 判定为**真回归**，不是环境抖动。
+
+**根因（抓包实证，非推理）**：`--header "cookie: uid=1"` 被 TargetParser **同时**存进
+`target.headerParams.cookie`（构造层）与 `config.auth.headers.cookie`（发送层每请求重附）。
+cookie 注入点构造后请求头对象里同时存在两个大小写同名的键：
+
+    cookie = "uid=1"              ← 原值，小写（headerParams）
+    Cookie = "uid=1' OR '1'='1"   ← 注入值，大写（cookie 分支写入）
+
+axios 的 `AxiosHeaders.set` 对大小写不敏感同名头**后写赢**（`findKey` 命中即覆盖），
+键序上原值在后 ⇒ **服务端永远收到原值 uid=1**。于是该点 124 个探针全部打在未注入的原值上：
+门控真假响应恒等 ⇒ 判「不是注入」⇒ UNION/布尔通道从未启动 ⇒ 报告写「未检出」——
+与「这个站没有注入」完全同形（正是本仓反复治理的静默假阴性形状）。
+
+**回归引入点**：`5db14b8`（2026-10-09 批次收口）把 axios **1.18.1 → 1.20.0**，
+`AxiosHeaders` 同名头合并行为随之改变；10-05 三轮（1.18.1）19/19，之后 18/19。
+Node 22/24 对照复跑排除运行时因素；D88（boundary 候选表 13→15）对照复跑排除候选表因素。
+
+**修复（两层防线，各有判据）**：
+
+| 层 | 文件 | 修法 |
+|---|---|---|
+| A 构造层 | `server/src/engine/injection.js` | cookie 分支写入前**删所有大小写同形的 Cookie 键**，单键输出（cookies 整串由本分支负责） |
+| B 发送层 | `server/src/core/http/requestContext.js` | `mergeAuthHeaders` 的 `auth.headers` 分支：Cookie 同名（大小写不敏感）且请求头已有 Cookie 时**跳过**（显式构造/注入值优先于认证配置里的同名副本） |
+
+**判据**：`server/tests/injection.cookieHeaderCollision.test.js`（6 例：单键输出、无冲突仍附加、
+auth.cookie 路径语义不变、未修复形态自证）。**双向变异验证**：删 A → 1 红；删 B → 1 红；
+还原即绿（逐次验证）。
+
+**修复后实测（2026-10-17，同靶场同配置 r2）**：
+- D11-cookie：**命中**，union+error+boolean，MySQL 指纹，61 请求（修复前 0 检出 / 124 请求）
+- 红队全量：**19/19 漏洞检出、0/7 误报**（修复前 18/19）
+- CLI 退出码 2（发现高危）——修复前 exit=0
+
+**台账口径（§3.5 推翻链）**：
+- 旧结论「19/19、误报 0/7、中位 747ms」（证据 10-05 三轮）→ **refuted**（反证：10-17 实测 18/19，
+  根因 axios 1.20 同名头合并 + 双处存储夹击）；旧数字**保留**不删。
+- 新结论：D91 修复后同口径复跑恢复 19/19、0/7——但证据为**修复后**（10-17），
+  旧的三轮证据**不代表代码现状**，新条目另立（`detect-benchmark-redteam-26-d91`）。
+- 门禁已机器化：上述 6 例守卫测试进 CI 常驻 ⇒ 「能机器化的立即补」本条已完成。
+- F18-safe-item 曾在 10-17 acceptance 出现引擎进程 native 崩溃（exit=3221226505 / 0xC0000409），
+  D91 复跑**未复现**（7 个安全点 exit 全 0）⇒ 留观，不立结论。
+
+---
+
+### 2026-10-16 批次 D86 · 白屏可诊断性收尾（桌面壳 FirstBlood 白屏现场）
+
+**动机**：D85 收尾时排查桌面 dev 白屏现场发现两个「白屏但无任何可见反馈」的缺口——
+不是新功能，是把已有承诺（ErrorBoundary/引擎门禁）真正接通到 App 根：
+
+| 缺口 | 现象 | 修法 |
+|---|---|---|
+| vite dev 只听 `::1` | 本机 localhost 优先解析 IPv6，而 Tauri 桌面端 WebView2 按 IPv4 连 `http://localhost:5173` ⇒ **连不上，纯白板** | `vite.config.ts` 显式绑 `127.0.0.1`（IPv4/IPv6 回环客户端都能连）+ `strictPort` 防端口被占时静默漂移；不开 0.0.0.0 不暴露局域网 |
+| ErrorBoundary 只包页面出口 | App/主题/DisclaimerDialog/OnboardingTour 任一渲染抛错 ⇒ **整树卸载 ⇒ 白屏且无任何反馈** | ErrorBoundary 上移到 App 根，运行时错误至少渲染出错误文案（含 message），可诊断 |
+| 引擎门禁只有转圈 | 引擎慢起与引擎死掉在 UI 上同形，现场无法区分 | 载入态补文案「正在连接检测引擎…」（i18n `common.engineConnecting`，zh/en） |
+
+**诚实边界**：前端视觉改动无自动化判据（本次仅补齐文档与收口门禁）；
+「白屏消失」的验证依赖真机 `tauri dev`（D75 已修 rustup 链与 EBUSY 两条起不来根因）。
+
+---
+
 ### 2026-10-18 批次 D90 · 写副作用登记与自动清理（P2-5）
 
 **动机**：TODO P2-5「写副作用无自动清理/回滚」——人工条款 R5/R6 要求「记录全部副作用并清理」，

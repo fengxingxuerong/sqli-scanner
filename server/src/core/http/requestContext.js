@@ -38,6 +38,32 @@ export const FORBIDDEN_HEADERS = new Set([
 ]);
 
 /**
+ * [D91 拆分] 把 auth.headers 的逐键合并提为子函数（原为 mergeAuthHeaders 内联循环，
+ * D91 加 Cookie 同名跳过条件后函数体/圈复杂度双超基线，按仓库纪律拆函数而非抬基线）。
+ *
+ * 含 [D91 2026-10-17 真回归修复·第二道防线]：Cookie 同名（大小写不敏感）且请求头已有
+ * Cookie 时跳过。理由：`--header "cookie: X"` 会被 TargetParser 同时存进 headerParams
+ * （→ cookie 注入点的注入值）与 config.auth.headers（→ 本分支每请求重附原值）；若无条件
+ * 覆盖，注入值又被原值顶掉，与 A 处（injection.js）的构造层双键歧义叠加成「原值必胜」。
+ * 语义：显式构造的 Cookie（注入值/调用方指定）优先于认证配置里的同名副本。
+ * @param {Record<string,string>} h 已合并的基础头（就地修改）
+ * @param {object} authHeaders 认证配置里的自定义头
+ */
+function mergeAuthCustomHeaders(h, authHeaders) {
+  for (const [k, v] of Object.entries(authHeaders)) {
+    const lk = String(k).toLowerCase();
+    if (FORBIDDEN_HEADERS.has(lk)) {
+      logger.warn(`合并认证头时忽略禁止覆写的头：${k}`);
+      continue;
+    }
+    if (lk === 'cookie' && (h['Cookie'] || h['cookie'])) {
+      continue;
+    }
+    h[k] = v;
+  }
+}
+
+/**
  * 合并基础请求头与认证信息（Basic Auth / Cookie / 自定义头），
  * 对 FORBIDDEN_HEADERS 黑名单中的头名做拒绝覆写（防请求走私）。
  * @param {Record<string,string>} headers 基础请求头
@@ -74,13 +100,7 @@ export function mergeAuthHeaders(headers, auth) {
     h['Cookie'] = existing ? `${existing}; ${auth.cookie}` : auth.cookie;
   }
   if (auth.headers && typeof auth.headers === 'object') {
-    for (const [k, v] of Object.entries(auth.headers)) {
-      if (FORBIDDEN_HEADERS.has(String(k).toLowerCase())) {
-        logger.warn(`合并认证头时忽略禁止覆写的头：${k}`);
-        continue;
-      }
-      h[k] = v;
-    }
+    mergeAuthCustomHeaders(h, auth.headers);
   }
   return h;
 }

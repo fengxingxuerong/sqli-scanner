@@ -661,8 +661,14 @@ const SUITES = [
       const [, total, hit, pct, safeN, fp] = m;
       return {
         facts: { 检出: `${hit}/${total}`, 检出率: pct == null ? null : `${pct}%`, 安全点: safeN, 误报: fp },
-        pass: Number(total) > 0 && pct != null && Number(pct) >= 90 && Number(fp) === 0,
-        reason: fp && Number(fp) > 0 ? `安全点误报 ${fp} 个` : pct == null ? '未取到 gate-check 判据（输出格式变了？）' : Number(pct) < 90 ? `检出率仅 ${pct}%` : null,
+        // [D92 2026-10-17 收紧] 原判据 `pct >= 90` 会把 18/19（95%）判 PASS —— D91 实证
+        // 那正是 cookie 注入点静默假阴性的真回归，阈值容错把「漏整类注入点」吞成通过。
+        // 历史三轮 + 修复后复跑均 19/19 ⇒ 收紧为「必须全中」。抖动致假红时排查环境，不放宽判据。
+        pass: Number(total) > 0 && hit != null && Number(hit) === Number(total) && Number(fp) === 0,
+        reason: fp && Number(fp) > 0 ? `安全点误报 ${fp} 个`
+          : pct == null ? '未取到 gate-check 判据（输出格式变了？）'
+          : Number(hit) !== Number(total) ? `漏检 ${Number(total) - Number(hit)}/${total}（判据 D92：红队必须全中）`
+          : null,
       };
     },
   },
