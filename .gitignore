@@ -239,3 +239,9 @@ src/__coverage_calibrate__/
 # （缺陷类型：全绿却把被跟踪文件写脏）。证据/结论一律看 docs/sqlmap-benchmark/*.md 与
 # results-*.json，raw 目录只有本机调试价值，不该入库。
 docs/sqlmap-benchmark/sqlmap-raw/
+
+# 根目录调试残留（D96 两次教训：拉 CI 日志 / 临时 JSON 落盘后被 git add -A 吞入）
+/*.log
+/*.zip
+/*.tmp.json
+/*.txt
