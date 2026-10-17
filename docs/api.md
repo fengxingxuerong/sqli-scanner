@@ -584,7 +584,7 @@ curl "http://127.0.0.1:4567/api/sqlmap/sq2/diff?base=sq1"
 4. 独立限速桶（默认 5 req/s，`EXPLOIT_RATE_PER_SEC` 可调）→ 超限回 `code: 4290`；
 5. 目标过 SSRF；给了 `scope` 时按 `scope` 校验，给了 `scanId` 时沿用该次扫描登记的范围。
 
-**写类端点额外加严**（`/exploit/file-write`、`/exploit/os-shell`，会不可逆地修改目标状态）：
+**写类端点额外加严**（`/exploit/file-write`、`/exploit/os-shell`、`/exploit/side-effects/cleanup`，会不可逆地修改目标状态）：
 
 6. 必须提供**显式 `scope`** —— 不接受仅凭 `scanId` 间接推断范围（`scanId` 可能已回收、也可能指向另一台主机），否则 `1007`；
 7. 必须声明 `confirmDestructive: true`，否则 `6005`（与 `config.productionMode` / `confirmDestructive`、
@@ -592,6 +592,27 @@ curl "http://127.0.0.1:4567/api/sqlmap/sq2/diff?base=sq1"
 
 > 读类端点（`sql` / `file-read`）只需第 1–5 条；`confirmDestructive` 对它们无意义，
 > 传了也不会改变行为。`/exploit/capabilities` 是公开只读端点，不受上述门槛约束。
+
+#### 写副作用：查询与清理（[D90] 2026-10-18，补 P2-5）
+
+写类能力（file-write / os-shell / udf-install / stacked 写）会在目标上留下痕迹。此前只有
+`docs/pentest-handover/05` 的人工条款 R5/R6 要求「记录全部副作用并清理」，**代码里没有对应物**。
+
+| 端点 | 方法 | 门槛 | 语义 |
+|---|---|---|---|
+| `/exploit/side-effects` | GET | **只读，不需 EXPLOIT 门**（与 `ledger show` 同口径） | 返回该次扫描的副作用登记与清理计划；关掉利用能力后仍可查残留 |
+| `/exploit/side-effects/cleanup` | POST | **与写类端点同门控**（第 1–7 条全适用） | 执行自动清理；会对目标再发一次命令/写请求，故绝不绕门 |
+
+**为什么清理默认不自动执行**：扫描器「自作主张再动一次目标」比不清理更危险 ——
+故 `cleanup` 必须显式调用，且撤销动作走与利用同一套 HTTP 客户端与门控，
+不新开第二条写链路（避免「有门控的利用 + 无门控的清理」这种半开状态）。
+
+**可逆性分档**（登记时即标注，报告里可见）：`file_write` 可删；`udf_install` 可尝试卸载；
+`stacked_dml` 仅在给了反向语句时可逆；**`os_shell` 标 `irreversible`** ——
+命令执行起的进程/临时文件无法保证收回（同类工具一致），不假装能清。
+
+**登记是「写前」而非「写后」**：写入失败也留痕（`status: failed`）——
+「试过但没记」比「记了失败」危险得多。
 
 #### 形态 A：引用扫描结果（推荐）
 
@@ -660,6 +681,21 @@ SELECT 类走标量提取：`value` 就是取回的值；语句投递成功但�
 - `file-read`：额外字段 `path`。
 - `file-write`：额外字段 `content`、`remotePath`（≤1MB）。
 - `os-shell`：额外字段 `cmd`。
+
+#### `GET /exploit/side-effects`
+
+- 查询参数 `scanId`（必填）。返回该次扫描的写副作用登记、清理计划与汇总。
+- **只读端点，不需 EXPLOIT 门**（与 `ledger show` 同口径）：关掉利用能力后运维仍需
+  能查到「目标上留了什么」，否则痕迹不可见比不做清理更危险。
+- 响应字段：`effects[]`（每条含 `kind`/`target`/`status`/`reversible`/`cleanedAt`）、
+  `plan`（可清理项 + `irreversible[]` + summary）、`summary`（无副作用时为 `null`）。
+
+#### `POST /exploit/side-effects/cleanup`
+
+- 请求体额外字段 `scanId`（必填）。执行清理并逐条回报 `cleaned` / `failed` / `skipped` / `irreversible`。
+- **与写类端点同门控**（第 1–7 条全适用）：清理会对目标再发一次命令/写请求，属利用动作。
+- 撤销动作经与利用**同一个 HTTP 客户端与同一套门控**执行，不新开第二条写链路。
+- 失败不静默：任一撤销失败都会出现在 `results[]` 的 `failed` 项里（客户须知道哪个残留没清掉）。
 
 ---
 

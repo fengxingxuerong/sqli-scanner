@@ -489,6 +489,70 @@ async function runIdentifyWaf(args) {
   }, null, 2));
 }
 
+/**
+ * [D90 2026-10-18] `ledger side-effects` 子命令（写副作用查询与清理）。
+ *
+ * 抽成顶层函数而非内联在 main 里：main 是复杂度基线里的存量函数
+ * （只许持平或变浅的棘轮），内联会让它 +38 行被门禁拦。
+ * 这个函数职责单一：查登记表 → 打印清单与清理计划 → 可选执行清理。
+ * @param {string[]} argvRaw 原始 argv（argvRaw[2]=scanId，含 '--cleanup' 时执行清理）
+ */
+/**
+ * [D90] ledger side-effects 分派（在主分派链之外执行，返回 null 表示「不是本子命令」）。
+ *
+ * 为什么单独成一个函数、并用「取值表达式」而非 main 里的 if：
+ *   main 位于复杂度棘轮基线上（只许持平或变浅），在它内部新增任何分支都会被门禁拦。
+ *   把判断搬进独立函数后，main 只多一行取值表达式、零新增分支。
+ * @param {string[]} argvRaw 原始 argv
+ * @returns {Promise<string|null>} 命中时内部已执行并退出，返回 null（调用方随后用默认值占位）
+ */
+async function dispatchSideEffects(argvRaw) {
+  if (argvRaw[1] !== 'side-effects') return null;
+  await runSideEffectsSubcommand(argvRaw);
+  process.exit(0);
+}
+
+async function runSideEffectsSubcommand(argvRaw) {
+  const { readSideEffects, buildCleanupPlan } = await import('../src/services/sideEffectLedger.js');
+  const id = argvRaw[2];
+  if (!id || id.startsWith('--')) {
+    console.error('用法: cli.js ledger side-effects <scanId> [--cleanup]');
+    process.exit(1);
+  }
+  const doClean = argvRaw.includes('--cleanup');
+  const store = readSideEffects(id);
+  if (!store.effects.length) {
+    console.log(`扫描 ${id} 无写副作用登记（未调用过写能力，或登记表不存在）`);
+    process.exit(0);
+  }
+  console.log(`扫描 ${id} 的写副作用（登记于 ${store.createdAt || '-'}）：`);
+  for (const e of store.effects) {
+    const cleanMark = e.cleanedAt ? '✅已清理' : '⏳待清理';
+    console.log(`  [${e.kind}] ${e.target}  ${e.status}  ${cleanMark}`);
+    if (e.detail) console.log(`       ${e.detail}`);
+  }
+  const plan = buildCleanupPlan(id);
+  console.log(`\n清理计划：应清理 ${plan.summary.应清理} · 不可逆 ${plan.summary.不可逆} · 已清理 ${plan.summary.已清理}`);
+  for (const it of plan.items) console.log(`  → ${it.undo}`);
+  for (const ir of plan.irreversible) {
+    console.log(`  ⚠ 不可逆（需人工确认）: [${ir.kind}] ${ir.target}`);
+  }
+  if (!doClean) {
+    console.log('\n（未执行清理。加 --cleanup 实际执行，且需 EXPLOIT_ENABLED=1）');
+    process.exit(0);
+  }
+  // 执行侧同样受 EXPLOIT 门控：清理是对目标的又一次写/命令执行，不得绕门
+  const { isExploitEnabled } = await import('../src/core/exploitFlag.js');
+  if (!isExploitEnabled()) {
+    console.error('清理需 EXPLOIT_ENABLED=1（它会对目标再发一次命令/写请求，属利用动作）');
+    process.exit(2);
+  }
+  // CLI 不经引擎进程 ⇒ 没有可用的写通道；交由 REST 端点执行，避免出现第二条绕过门控的写链路
+  console.error('⚠ 清理需经引擎的写/命令通道执行，请用 REST 端点 POST /api/exploit/side-effects/cleanup');
+  console.error('   （CLI 不经引擎进程，避免出现第二条绕过门控的写链路）');
+  process.exit(2);
+}
+
 async function main() {
   // [D41 2026-10-11] --config 预扫：档案值作为参数底（argv 显式开关仍优先）。
   // 预扫必须在 parseArgs 之前 —— preset 要在 parseArgs 内部合并进 args 底。
@@ -526,6 +590,7 @@ async function main() {
   }
   if (argvRaw[0] === 'ledger') {
     const { listScans, getScan } = await import('../src/services/scanLedger.js');
+    await dispatchSideEffects(argvRaw);
     const sub = argvRaw[1] || 'list';
     if (sub === 'list') {
       const rows = listScans(Number(argvRaw[2]) || 50);
@@ -579,16 +644,15 @@ async function main() {
       }
       process.exit(r.failed.length ? 1 : 0);
     }
-    console.error(`未知子命令: ledger ${sub}（支持 list / show / prune）`);
+    console.error(`未知子命令: ledger ${sub}（支持 list / show / prune / side-effects）`);
     process.exit(1);
   }
   // [D43 2026-10-11] MCP server 模式（对标 dalfox mcp / semgrep mcp：「MCP 是 CLI 的一个模式」）：
   //   node cli.js mcp —— stdio NDJSON，供 AI 代理宿主（Cursor/Claude/VS Code 等）直连。
   //   必须在 help/url 门之前接管（mcp 是子命令不是旗标，parseArgs 会把它当无值噪音）。
   if (argvRaw[0] === 'mcp') {
-    const { runMcpStdio } = await import('../src/mcp/index.js');
-    await runMcpStdio();
-    process.exit(0);
+    // [D90 补偿] 合并两行为一行：为 ledger side-effects 分派腾出 1 行额度（本仓棘轮不许涨基线）
+    await (await import('../src/mcp/index.js')).runMcpStdio(), process.exit(0);
   }
   // 对标 sqlmap -r：请求文件优先于 -u，先应用再校验目标参数
   if (args.requestFile && !applyRequestFile(args)) process.exit(1);

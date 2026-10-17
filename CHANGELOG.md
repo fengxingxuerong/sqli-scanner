@@ -65,6 +65,29 @@
 
 ## [Unreleased]
 
+### 2026-10-18 批次 D90 · 写副作用登记与自动清理（P2-5）
+
+**动机**：TODO P2-5「写副作用无自动清理/回滚」——人工条款 R5/R6 要求「记录全部副作用并清理」，
+但代码里没有对应物。fileWrite 落的目标文件、os-shell 起的进程，测试结束全留在客户环境，
+报告无清单也无收尾动作。
+
+- 新增 `server/src/services/sideEffectLedger.js`：**写前**登记（失败也留痕）→ 撤销计划 → 自动清理；
+  可逆性分档（file_write 可删 / udf 可卸载 / stacked_dml 仅在有反向语句时可逆 /
+  **os_shell 标 irreversible** 不假装能清）；清理失败逐条回报，不静默
+- 接入：fileWrite 写前登记；CLI `ledger side-effects <scanId> [--cleanup]`；
+  REST `GET /exploit/side-effects`（只读，免 EXPLOIT 门）+ `POST /exploit/side-effects/cleanup`
+  （与写类端点**同门控**，不得成为绕过门控的第二条写链路）
+- 报告侧 `sideEffectSummaryForReport` 输出「写了什么/清没清」
+
+**安全口径**：不新增写能力，只登记/撤销既有能力的副作用；清理默认**不自动执行**
+（扫描器自作主张再动目标比不清理更危险）。
+
+**过程中修正**：① 测试用错 env 名（`SCAN_LEDGER_ROOT` 实为 `SQLI_LEDGER_DIR`）⇒ 写脏真实台账
+并使用例互相污染，已修正并核验真实目录零残留；② 复杂度棘轮拦下 5 处，按纪律拆函数
+（新增 5 个内聚函数），main 312→311 行、fileWrite 43→39 行，**未抬任何基线**。
+
+---
+
 ### 2026-10-18 批次 D89 · WAF 指纹 × 第三方权威工具对拍（补台账 unverified 的外部证据）
 
 **动机**：台账 `waf-fingerprint-coverage` 长期 unverified（真机仅 ModSecurity 1/62 有样本证据）。

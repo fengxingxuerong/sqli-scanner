@@ -1,6 +1,6 @@
 # sqli-scanner
 
-[![Tests](https://img.shields.io/badge/tests-4154%20passing-brightgreen)](#测试)[![CI](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml/badge.svg)](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml)
+[![Tests](https://img.shields.io/badge/tests-4170%20passing-brightgreen)](#测试)[![CI](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml/badge.svg)](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml)
 [![Dependencies](https://img.shields.io/badge/dependencies-0%20known%20vulns-brightgreen)](#环境变量)
 
 > CI 徽章为真实状态（仓库地址已定，run#90 起全绿）。发布判定仍以 `CHANGELOG.md`
@@ -299,6 +299,8 @@ npm run quality:all     # 【门禁】一键全量质量校验（测试/覆盖�
 | `/api/exploit/file-read` | POST | 目标文件读取（同上） |
 | `/api/exploit/file-write` | POST | 目标文件写入（同上） |
 | `/api/exploit/os-shell` | POST | OS 命令执行（同上；MySQL 需 sys_eval UDF，缺失时如实返回失败原因） |
+| `/api/exploit/side-effects` | GET | [D90] 查看某次扫描的**写副作用登记**与清理计划（`?scanId=`）。**只读、不需 EXPLOIT 门** —— 关掉利用能力后仍能查残留，否则运维看不见痕迹反而更危险 |
+| `/api/exploit/side-effects/cleanup` | POST | [D90] 执行写副作用清理（P2-5：把人工条款 R5/R6 变成代码能力）。**与写类端点同门控**（`EXPLOIT_ENABLED=1` + 授权声明 + scope 声明）——清理会对目标再发一次命令/写请求，绝不绕过门控；默认不自动执行（扫描器自作主张再动目标比不清理更危险） |
 
 > **授权声明**（`authDeclaration`）：利用操作在 `AUTH_DECLARATION_STRICT=strict`（默认）下需结构化授权声明 `{ operator, scope, timestamp, validWindowMs }`——`scope` 覆盖目标、`timestamp` 在有效窗内。`lenient` 模式兼容旧 `authorized: true` 布尔自证。配额超限返回 `QUOTA_TARGET_EXCEEDED` / `QUOTA_FANOUT_EXCEEDED`；声明问题返回 `AUTH_DECLARATION_MISSING` / `AUTH_DECLARATION_INVALID` / `AUTH_SCOPE_MISMATCH` / `AUTH_DECLARATION_EXPIRED`。审计落盘 `ledger/auth.jsonl`。
 | `/api/sqlmap/status` | GET | sqlmap 是否可用（不返回脚本路径） |
@@ -389,7 +391,7 @@ backend/  ← Express + Node.js
 # 前端测试（574 个用例）
 npm test
 
-# 服务端测试（3582 个用例）
+# 服务端测试（3600 个用例）
 cd server && npm test
 
 # 全部测试
@@ -415,7 +417,7 @@ npm run artifact:drift   # 入库的 e2e 基线产物必须等于当前代码跑
 
 - TypeScript: 零错误
 - 前端测试: 574/574 通过（覆盖率门禁 stmts 93.03 / branch 84.88 / func 81.90，阈值 88/77/67）
-- 服务端测试: 3582 用例（3580 pass / 0 fail / 2 skip，并发口径 2026-10-16 复测；2 skip 为环境依赖显式跳过。覆盖率 lines 91.13 / branch 80.54 / func 84.28，阈值 85/74/77）
+- 服务端测试: 3600 用例（3596 pass / 0 fail / 4 skip，并发口径 2026-10-17 复测；4 skip 为环境依赖显式跳过。覆盖率 lines 91.13 / branch 80.54 / func 84.28，阈值 85/74/77）
 - 一键扫描: `npm run scan -- -u <url>`（CLI 一条命令产出 HTML/JSON/Markdown 全套报告 + manifest，退出码可直接进 CI 门禁）
 - Tamper 插件: 234 个（含批次 D3 新增 scalarselectinline；含 v24 增量 20 个，对齐 sqlmap 官方 tamper 全集，含官方 CRS/libinjection 实测组合 uniontable+odbcbrace；含批次 D13 新增 5 件上游形态变体 *nospace/*open/*block，真机 A/B 判决前不进默认链）
 - WAF 绕过能力: 200+ 插件链式组合，覆盖 62 个 WAF 厂商指纹识别 + 推荐
