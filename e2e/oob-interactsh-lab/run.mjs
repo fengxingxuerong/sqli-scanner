@@ -47,14 +47,43 @@ const BASE_CONFIG = {
 /** 从载荷中提取协作端主机名（HTTP/URL 形态与 UNC 形态都要认） */
 function extractCallbackHost(text, server) {
   const s = String(text || '');
-  // [D96] 字符类必须含 `-`：CI 首跑实锤 UNC 向量载荷的回连域是
-  // `<注册前缀>s79cu7nof-qk5isw.oast.pro`（关联后缀带连字符），原 `[a-z0-9]{20,}`
-  // 在连字符处断开、剩余段不足 20 字符 ⇒ 14 个请求一个都没提取出主机 ⇒ 0 DNS + 0 HTTP
-  // ⇒ 假 FAIL。合法 DNS 标签本就含 `-`，提取正则不该比 DNS 更严。
-  const hostRe = new RegExp(`([a-z0-9-]{20,})\\.${server.replace(/\./g, '\\.')}`, 'i');
+  // [D96] 字符类必须覆盖引擎 nanoid token 的完整字母表（URL-safe：a-z0-9_-）。
+  // 两次 CI 逃逸实锤：
+  //  · run 262 acceptance：回连域含 `-`（`…s79cu7nof-qk5isw.oast.pro`）；
+  //  · run 266 e2e-self-contained：回连域含 `_`（`…pr7x_0xts-wq_gr4.oast.pro`，
+  //    nanoid 默认字母表 useandom-26T…_GQZ… 含下划线）。
+  // 原 `[a-z0-9]{20,}` 一遇这两个字符就断开 ⇒ 14 个请求 0 提取 ⇒ 假 FAIL。
+  // 提取正则必须与 token 生成端（interactshClient 的 normToken 输出）同字母表，
+  // 且 DNS 标签本来就允许 `-`（`_` 为宽松实践，服务端照收）。
+  const hostRe = new RegExp(`([\\w-]{20,})\\.${server.replace(/\./g, '\\.')}`, 'i');
   const m = s.match(hostRe);
   return m ? m[0] : null;
 }
+
+/**
+ * [D96] 判据自证：提取正则与 token 生成端的字母表必须同源可达 ——
+ * 空转的正则会让整条 OOB 链路在「收到请求但 0 回连」的形态上静默假红/假绿。
+ * 样本取自两次 CI 真实事故（连字符 / 下划线），加自定义 server 形态。
+ */
+function selftestExtract(server) {
+  const p = 'x'.repeat(34);
+  const cases = [
+    [`\\\\${p}s79cu7nof-qk5isw.${server}\\oob\\x`, true], // run 262 连字符事故样本
+    [`http://${p}pr7x_0xts-wq_gr4.${server}/oob`, true], // run 266 下划线事故样本
+    [`${p}PLAIN-TOKEN.${server}`, true], // 大写（DNS 大小写不敏感）
+    ['http://127.0.0.1/x?id=1', false], // 无回连域 ⇒ 不提取
+    [`short-${server}`, false], // 标签过短 ⇒ 不提取（防把根域本身当 token）
+  ];
+  for (const [text, want] of cases) {
+    const got = extractCallbackHost(text, server) !== null;
+    if (got !== want) {
+      throw new Error(`[selftest] extractCallbackHost 空转：${JSON.stringify(text)} 期望 ${want} 实际 ${got}`);
+    }
+  }
+}
+selftestExtract(SERVER);
+if (SERVER !== 'oast.pro') selftestExtract('oast.pro');
+
 
 function startLab() {
   const state = { hits: 0, dns: 0, http: 0 };
