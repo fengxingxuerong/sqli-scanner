@@ -1,4 +1,4 @@
-import { CssBaseline, ThemeProvider, createTheme, Snackbar, Alert, Button, Box, CircularProgress } from '@mui/material';
+import { CssBaseline, ThemeProvider, createTheme, Snackbar, Alert, Button, Box, CircularProgress, Typography } from '@mui/material';
 import {
   useState,
   useEffect,
@@ -11,6 +11,7 @@ import { useTranslation } from 'react-i18next';
 import router, { PageFallback } from './router';
 import DisclaimerDialog from './components/DisclaimerDialog';
 import OnboardingTour from './components/OnboardingTour';
+import ErrorBoundary from './components/ErrorBoundary';
 import { tauriBridge } from './shared/tauriBridge';
 import { useEngineRecovery } from './hooks/useEngineRecovery';
 import './i18n';
@@ -27,11 +28,17 @@ export { useThemeMode } from './shared/themeMode';
 
 // [D84] 引擎就绪门禁的载入态单独成组件：这段 JSX 是一次性的容器 markup，挪出后可让
 // AppThemeProvider 变浅 —— 它本就在复杂度基线的豁免名单上，再长胖不合适（只许持平或变浅）。
+// [D86 修白屏] 载入态补文案：原来只有一个转圈，桌面 dev 白屏时用户分不清「正在加载」
+// 还是「死了」——排查 FirstBlood 白屏现场时根本无法从 UI 区分这两种状态。
 function EngineGate({ ready, children }: { ready: boolean; children: ReactNode }) {
+  const { t } = useTranslation();
   if (ready) return <>{children}</>;
   return (
-    <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
+    <Box sx={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', height: '100vh', gap: 2 }}>
       <CircularProgress size={28} />
+      <Typography variant="body2" color="text.secondary">
+        {t('common.engineConnecting')}
+      </Typography>
     </Box>
   );
 }
@@ -244,17 +251,22 @@ export default function App() {
   return (
     <AppThemeProvider>
       <CssBaseline />
-      <DisclaimerDialog open={!disclaimerAccepted} onAccept={acceptDisclaimer} />
-      {disclaimerAccepted && (
-        // 外层兜底 Suspense：真实页面懒加载由 router.tsx 内层 Suspense（包裹 Outlet）
-        // 承接，顶栏不受影响；此处仅兜底「Layout 之上未来可能出现的挂起节点」，
-        // 正常路由切换时不会触发，不会造成整页闪白。
-        <Suspense fallback={<PageFallback />}>
-          <RouterProvider router={router} />
-        </Suspense>
-      )}
-      {/* [D85] 首次启动欢迎引导：免责声明之后、路由之外挂载，冷启动直达任意路由都能看到 */}
-      {disclaimerAccepted && <OnboardingTour />}
+      {/* [D86 修白屏] App 层 ErrorBoundary：原来的 ErrorBoundary 只包 router 内的页面出口，
+          App/主题/DisclaimerDialog/OnboardingTour 任一渲染抛错都是整树卸载 ⇒ 纯白屏且
+          无任何可见反馈。上移一层后运行时错误至少渲染出错误文案（含 message），可诊断。 */}
+      <ErrorBoundary>
+        <DisclaimerDialog open={!disclaimerAccepted} onAccept={acceptDisclaimer} />
+        {disclaimerAccepted && (
+          // 外层兜底 Suspense：真实页面懒加载由 router.tsx 内层 Suspense（包裹 Outlet）
+          // 承接，顶栏不受影响；此处仅兜底「Layout 之上未来可能出现的挂起节点」，
+          // 正常路由切换时不会触发，不会造成整页闪白。
+          <Suspense fallback={<PageFallback />}>
+            <RouterProvider router={router} />
+          </Suspense>
+        )}
+        {/* [D85] 首次启动欢迎引导：免责声明之后、路由之外挂载，冷启动直达任意路由都能看到 */}
+        {disclaimerAccepted && <OnboardingTour />}
+      </ErrorBoundary>
     </AppThemeProvider>
   );
 }

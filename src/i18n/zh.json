@@ -754,6 +754,7 @@
     "unknownError": "未知错误",
     "skipToContent": "跳到主内容",
     "engineRestart": "重启引擎",
+    "engineConnecting": "正在连接检测引擎…",
     "engineStopped": "检测引擎已停止运行",
     "engineReconnecting": "引擎重启中，正在自动重连…",
     "pageErrorTitle": "页面渲染异常",

@@ -65,6 +65,22 @@
 
 ## [Unreleased]
 
+### 2026-10-16 批次 D86 · 白屏可诊断性收尾（桌面壳 FirstBlood 白屏现场）
+
+**动机**：D85 收尾时排查桌面 dev 白屏现场发现两个「白屏但无任何可见反馈」的缺口——
+不是新功能，是把已有承诺（ErrorBoundary/引擎门禁）真正接通到 App 根：
+
+| 缺口 | 现象 | 修法 |
+|---|---|---|
+| vite dev 只听 `::1` | 本机 localhost 优先解析 IPv6，而 Tauri 桌面端 WebView2 按 IPv4 连 `http://localhost:5173` ⇒ **连不上，纯白板** | `vite.config.ts` 显式绑 `127.0.0.1`（IPv4/IPv6 回环客户端都能连）+ `strictPort` 防端口被占时静默漂移；不开 0.0.0.0 不暴露局域网 |
+| ErrorBoundary 只包页面出口 | App/主题/DisclaimerDialog/OnboardingTour 任一渲染抛错 ⇒ **整树卸载 ⇒ 白屏且无任何反馈** | ErrorBoundary 上移到 App 根，运行时错误至少渲染出错误文案（含 message），可诊断 |
+| 引擎门禁只有转圈 | 引擎慢起与引擎死掉在 UI 上同形，现场无法区分 | 载入态补文案「正在连接检测引擎…」（i18n `common.engineConnecting`，zh/en） |
+
+**诚实边界**：前端视觉改动无自动化判据（本次仅补齐文档与收口门禁）；
+「白屏消失」的验证依赖真机 `tauri dev`（D75 已修 rustup 链与 EBUSY 两条起不来根因）。
+
+---
+
 ### 2026-10-18 批次 D90 · 写副作用登记与自动清理（P2-5）
 
 **动机**：TODO P2-5「写副作用无自动清理/回滚」——人工条款 R5/R6 要求「记录全部副作用并清理」，

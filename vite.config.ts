@@ -18,6 +18,12 @@ export default defineConfig({
   },
   server: {
     port: 5173,
+    // [D86 修白屏] 本机 localhost 优先解析 IPv6（::1），vite 默认只听 ::1 ⇒ Tauri
+    // 桌面端 devUrl（http://localhost:5173）的 WebView2 走 IPv4 连不上 ⇒ 纯白板。
+    // 显式绑 127.0.0.1：IPv4/IPv6 回环客户端都能连（::1 客户端会 fallback 到 v4），
+    // 且不开 0.0.0.0（不暴露局域网）。strictPort 防端口被占时静默漂移。
+    host: '127.0.0.1',
+    strictPort: true,
     // Tauri 桌面开发（tauri dev）：cargo 会持续写 src-tauri/target/debug/deps/*.dll，
     // vite 的文件监视与它对撞 ⇒ Windows 上 EBUSY（-4082）直接崩掉 beforeDevCommand，
     // 表现为「tauri dev 起不来、\`The beforeDevCommand terminated with a non-zero status code\`」。

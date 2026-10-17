@@ -754,6 +754,7 @@
     "unknownError": "Unknown error",
     "skipToContent": "Skip to main content",
     "engineRestart": "Restart Engine",
+    "engineConnecting": "Connecting to the detection engine…",
     "engineStopped": "Detection engine has stopped",
     "engineReconnecting": "Engine restarting, reconnecting automatically…",
     "pageErrorTitle": "Page render error",

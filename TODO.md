@@ -187,9 +187,9 @@ interactsh 模式改为「扫描器主动轮询协作端」，**只要求扫描�
 
 ---
 
-## 2026-10-16 批次 D86 · 引导三件套收尾（已完成，待提交）
+## 2026-10-16 批次 D86 · 引导三件套收尾 + 白屏可诊断性收尾（主体已提交 `5adac0c`；白屏修复部分见下）
 
-用户对 D85 收尾时列的三个可选项回复「都要加上」，全部落地：
+用户对 D85 收尾时列的三个可选项回复「都要加上」，全部落地（对应 CHANGELOG D86 条目）：
 
 | 项 | 落地 |
 |---|---|
@@ -200,6 +200,19 @@ interactsh 模式改为「扫描器主动轮询协作端」，**只要求扫描�
 - 引导延迟保持 1.5s（测试安全边际：engineGate waitFor 窗口 ~500ms，2 倍余量；不为看起来更快牺牲门禁）
 - 自查修掉：条件调用 useEffect（Rules of Hooks）→ effect 内判空；事件常量误导出 → 去 export（deadcode）
 - 验证：vitest 574/574 · typecheck 0 · lint 0 · 八守卫 + wiring 230 + readme/facts/refs/modules 全 0
+
+### 同批次第二部分 · 白屏可诊断性收尾（2026-10-16 晚，即本仓 D86 收尾现场）
+
+D85/D86 主体提交后，桌面 dev 白屏现场复盘发现**三个「白屏但无可见反馈」缺口**——本次修的是
+「可诊断性」，不是新功能：
+
+| 缺口 | 现象 | 修法 |
+|---|---|---|
+| vite dev 只听 `::1` | 本机 localhost 优先解析 IPv6，Tauri 桌面端 WebView2 按 IPv4 连 `localhost:5173` ⇒ 连不上，纯白板 | `vite.config.ts` 绑 `127.0.0.1` + `strictPort`；不开 0.0.0.0 |
+| ErrorBoundary 只包页面出口 | App/主题/DisclaimerDialog/OnboardingTour 抛错 ⇒ 整树卸载 ⇒ 白屏无反馈 | ErrorBoundary 上移到 App 根，错误至少渲染出文案 |
+| 引擎门禁只有转圈 | 引擎慢起与死掉同形 | 载入态补「正在连接检测引擎…」（`common.engineConnecting`，zh/en） |
+
+诚实边界：前端改动无自动化判据，白屏消失的验证依赖真机 `tauri dev`（D75 已修起不来根因）。
 
 ### 待推进
 
