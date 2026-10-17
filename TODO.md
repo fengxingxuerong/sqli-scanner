@@ -5,6 +5,26 @@
 
 ---
 
+## 2026-10-17 批次 D93 · 参数名注入点（`--test-param-names`，吸收队列 #7）
+
+**缺口**：后端把 query **键名**拼进 SQL（`WHERE ${Object.keys(req.query)[0]} = ?`、键名当列名
+的 `ORDER BY`），值参数化 ⇒ 值注入扫不到。
+
+**三处接缝**：TargetParser 生成 paramName 点（`originalValue` = 键名本身）·
+injection.js 改键名保值（基线保持原键名）· boundary 跳过闭合探测 · prefilter 不剪枝。
+
+**实测（真 MySQL 靶场 `e2e/param-name-lab`）**：vuln=2（命中点全为 paramName）、
+开关关闭=0、安全白名单点=0。单测 4 例。
+
+### 待推进
+
+- JSON/XML **键名**注入面（本批只做 URL query 键名）；
+- paramName 点的 union 通道在「键名后还有固定后缀」的拼接形态下可能被截断（本批靶点
+  `WHERE ${k} = ?` 属可注释形态；`ORDER BY ${k} DESC` 这类尾部固定语法未覆盖，需另造靶点）；
+- e2e/param-name-lab 接入 acceptance/run-all（当前需手动跑，MySQL 缺失时 SKIP）。
+
+---
+
 ## 2026-10-17 批次 D92 · D91 的两个遗留口子
 
 **① REST 入口 auth.headers 夹击面**：CLI 侧 `--test-headers` 的注入点头会从 `auth.headers`

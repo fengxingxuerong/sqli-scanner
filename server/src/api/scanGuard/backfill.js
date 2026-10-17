@@ -59,6 +59,8 @@ export function applyBackfill(config, cfg) {
     //                    通用透传会放过 1/"true"，于是又变成「API 收了、引擎不生效」
     //   flushSession —— 与 hex 同口径收严格布尔，避免同一批键里两种真值语义并存
     'testPath', 'testHeaders', 'noCast', 'unionFrom',
+    // [D93] testParamNames：参数名注入点开关（严格布尔由引擎侧 `=== true` 判定，与 testPath 同族）
+    'testParamNames',
   ]);
   for (const k of BACKFILL_SCALAR_KEYS) {
     if (!(k in cfg) || k in config) continue;

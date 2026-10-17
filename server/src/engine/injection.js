@@ -621,3 +621,47 @@ export async function discoverEchoColumns(httpClient, ctx, columns) {
   const { cols } = await discoverEchoColumnsDetailed(httpClient, ctx, columns);
   return cols;
 }
+
+// ============================================================================
+// [D93 2026-10-17] 参数名注入点的请求构造（独立于 buildInjectionRequest）
+// ----------------------------------------------------------------------------
+// 为什么独立成函数而不是往 buildInjectionRequest 加 else-if 分支：
+// `buildInjectionRequest` 已在复杂度基线里（165 行 / 圈 91，"只许持平或变浅"），
+// 加一个分支即越线；而参数名注入的语义也确实不同——它改的是**键名**、值是原样保留的，
+// 与四种「值注入」位置（url/body/cookie/header）共用不了多少逻辑。独立构造函数让
+// 两条路径各自可读，代价只有 Detector.buildRequest 里一次分流。
+//
+// 场景：后端把 query 键名拼进 SQL（`const col = Object.keys(req.query)[0];
+// SELECT ... WHERE ${col} = ?`、键名当列名的 ORDER BY），值被参数化 ⇒ 值注入扫不到。
+//
+// ⚠ 基线语义：`value === point.originalValue` 时**必须保持原键名**（point.param），
+// 否则基线请求本身就成了改键名的注入形态（`?name=name`），预筛选/门控拿它当真值基线
+// ⇒ 真假对判据全歪（实测：prefilter 把该点判「无迹象」直接剪枝，检出恒 0）。
+// ⚠ 编码：键名含空格/引号必须 URL 编码（Express 会 decode 回原样）；payload 已是编码形态
+// （charencode 类 tamper）则不再二次编码，与 url 分支同口径。
+// 诚实边界：仅 URL query 键名；不含 JSON/XML 键名（结构面另论）。
+/**
+ * @param {object} target 目标（用 method / baseUrl / headerParams）
+ * @param {object} point 注入点（location='paramName'，originalValue 为键名本身）
+ * @param {string} value 注入值（检测器已拼好 payload）
+ * @returns {{method: string, url: string, params: object, data: object, headers: object}}
+ */
+export function buildParamNameRequest(target, point, value) {
+  const wrapped = applyPrefixSuffix(target, point, value);
+  const injected = encodeForPoint(wrapped, point && point.encoding);
+  const u = new URL(point.actionUrl || target.baseUrl);
+  const looksEncodedName = /%[0-9A-Fa-f]{2}/.test(injected);
+  const encoded = looksEncodedName ? injected : encodeURIComponent(injected);
+  const keyName = injected === point.originalValue ? point.param : encoded;
+  const pairs = [];
+  for (const [k, v] of u.searchParams.entries()) {
+    pairs.push(k === point.param ? `${keyName}=${encodeURIComponent(v)}` : `${encodeURIComponent(k)}=${encodeURIComponent(v)}`);
+  }
+  return {
+    method: point.formMethod || target.method || 'GET',
+    url: `${u.origin}${u.pathname}?${pairs.join('&')}`,
+    params: {},
+    data: {},
+    headers: { ...(target.headerParams || {}) },
+  };
+}

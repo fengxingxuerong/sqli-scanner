@@ -319,6 +319,8 @@
     "testPathHint": "Treat segments of /api/user/123 as injection points (REST route params often live there). Off = query & body only",
     "testHeadersLabel": "Also test request headers (--test-headers)",
     "testHeadersHint": "Treat values of Referer / X-Forwarded-For etc. as injection points (custom headers are often concatenated into SQL). Off = query & body only",
+    "testParamNamesLabel": "Also test parameter names (--test-param-names)",
+    "testParamNamesHint": "Treat URL parameter *names* as injection points: when the backend uses the key as a column/order-by name (e.g. WHERE ${col} = ?), values are parameterized so only renaming the key can inject. Adds one point per query parameter (~2x requests)",
     "advancedInjection": "Advanced Injection Surface",
     "noCastLabel": "Disable static-type CAST wrapping (--no-cast)",
     "noCastHint": "The engine wraps static values in CAST by default; disable when CAST-shaped requests trip the WAF",

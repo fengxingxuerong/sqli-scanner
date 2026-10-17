@@ -75,8 +75,9 @@ export function parseArgs(argv, preset) {
     //   （引擎 TargetParser 早已支持 header/cookie 注入点，此前 CLI 从未填充这些字段，
     //   导致 Cookie / X-Forwarded-For 等真实注入点被完全跳过）。
     // --test-path：把 URL path 末段作为注入点（path 型注入点）。
-    testHeaders: false,
-    testPath: false,
+    // [D93] testParamNames（--test-param-names）：把 query **键名**本身作为注入点（后端
+    // `WHERE ${key}=?` / 键名当列名的 ORDER BY 拼接）。默认关：每参数多一个点位（请求量约 +1 倍）。
+    testHeaders: false, testPath: false, testParamNames: false,
     // [D41 2026-10-11 对标 sqlmap -p/--param-exclude/--param-filter] 注入点筛选三件套
     testParam: null, paramExclude: null, paramFilter: null,
     // [2026-10-02 竞品吸收] --param-mine：参数挖掘总开关（默认关闭零回归）
@@ -171,8 +172,7 @@ export function parseArgs(argv, preset) {
     else if (a === '--test-filter') args.testFilter = next();
     else if (a === '--test-skip') args.testSkip = next();
     // —— 注入点扩展开关（本期新增，默认关闭，零回归）——
-    else if (a === '--test-headers') args.testHeaders = true;
-    else if (a === '--test-path') args.testPath = true;
+    else if (a === '--test-headers') args.testHeaders = true; else if (a === '--test-path') args.testPath = true; else if (a === '--test-param-names') args.testParamNames = true; // [D93] 三键同族，合一行保 parseArgs 基线（227 行只许持平）
     // [2026-10-02 竞品吸收] --param-mine：参数挖掘总开关（对标 Arjun 参数发现，默认关闭零回归）
     else if (a === '--param-mine') args.paramMine = true;
     // [2026-10-02 实战 P1-4] --crawl-browser：headless 浏览器爬取（SPA 目标 XHR 接口发现）

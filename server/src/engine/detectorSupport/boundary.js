@@ -54,6 +54,11 @@ export const BOUNDARY_CANDIDATES = [
 
 export async function probeBoundary(ctx) {
     const { point } = ctx;
+    // [D93 2026-10-17] 参数名注入点**不做闭合探测**：目标拼的是键名（列名/排序名），
+    // 不存在「值被引号包裹」的上下文 ⇒ 15 个候选前缀全部无意义，且键名里塞 `%'))`/空格
+    // 会让目标直接 400（Express 对畸形 query 的处理），白烧请求还可能污染门控判定。
+    // 语义上空前缀即正确：`ORDER BY <payload>` 直接拼在 SQL 里。
+    if (point.location === 'paramName') return '';
     const orig = point.originalValue || '1';
     // [P0 2026-09-09] knownPoint 直通：闭合形态已由使用者给定（point.boundary），
     // 跳过 13 候选并发探测（13 请求 → 1 基线请求）。基线仍发 1 次：

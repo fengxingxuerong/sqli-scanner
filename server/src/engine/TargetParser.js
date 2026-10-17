@@ -79,13 +79,10 @@ export class TargetParser {
       }
     }
 
-    // 2) URL 查询参数（level≥1，始终检查）
+    // 2) URL 查询参数（level≥1，始终检查）+ 2b) 参数名点（opt-in，详见 _appendQueryPoints）
     if (target.baseUrl) {
       try {
-        const u = new URL(target.baseUrl);
-        for (const [k, v] of this._queryEntries(u, config)) {
-          points.push(createInjectionPoint('url', k, v));
-        }
+        this._appendQueryPoints(points, new URL(target.baseUrl), config);
       } catch {
         // URL 解析失败则跳过
       }
@@ -510,6 +507,34 @@ export class TargetParser {
   }
 
   // 注入点去重 key（同 URL+参数不重复加）：
+  // ── [D93 2026-10-17] URL query 点（值注入）+ 参数名注入点（opt-in）──────────────
+  /**
+   * 生成 URL query 的两类注入点。
+   *
+   * 值注入点（location='url'）始终生成；参数名点（location='paramName'）仅在
+   * `config.testParamNames === true` 时**追加**（不替换，两类点并存）。
+   *
+   * 参数名点的场景（SQLiDetector 同型）：后端把 **query 键名**拼进 SQL，值始终参数化，如
+   * `const col = Object.keys(req.query)[0]; SELECT ... WHERE ${col} = ?`、键名当列名的
+   * `ORDER BY` ⇒ 值注入扫不到，只有改键名能打。
+   *
+   * ⚠ `originalValue` 必须传**键名本身**（不是键的值）：该点的注入面是键名，检测器以
+   * originalValue 为基准构造 `键名 AND 1=1-- -`。若传值（如 'Keyboard'），探针会变成
+   * `WHERE Keyboard AND 1=1-- - = ?`（列不存在 ⇒ 真假两侧同错 ⇒ 门控恒等 ⇒ 判非注入）。
+   * 值由 buildInjectionRequest 从原 URL 保留，不依赖该字段。
+   * 诚实边界：仅 URL query 键名（JSON/XML 键名注入面另论）。
+   * @param {object[]} points 注入点收集数组（就地追加）
+   * @param {URL} u 目标 URL
+   * @param {object} config 目标配置
+   * @returns {void}
+   */
+  _appendQueryPoints(points, u, config) {
+    const entries = this._queryEntries(u, config);
+    for (const [k, v] of entries) points.push(createInjectionPoint('url', k, v));
+    if (config.testParamNames !== true) return;
+    for (const [k, v] of entries) points.push(createInjectionPoint('paramName', k, k, { paramNameValue: v }));
+  }
+
   // url 点按「请求 URL（actionUrl 或目标 baseUrl）+ 参数名」去重；
   // 其它位置点按「位置 + 参数名 + actionUrl」去重（表单点多 action 视为独立点）。
   _pointKey(point, fallbackUrl) {

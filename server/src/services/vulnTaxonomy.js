@@ -26,6 +26,8 @@ export const LOCATION_TEXT = {
   cookie: 'Cookie 参数',
   header: 'HTTP 请求头',
   path: 'URL 路径段（path segment）',
+  // [D93] 参数名注入：后端把 query 键名当列名/排序名拼进 SQL（值被参数化）
+  paramName: '参数名（键名被拼进 SQL）',
   direct: '直连模式（SQL 模板，无 HTTP 请求）',
 };
 

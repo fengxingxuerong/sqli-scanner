@@ -65,6 +65,38 @@
 
 ## [Unreleased]
 
+### 2026-10-17 批次 D93 · 参数名注入点（`--test-param-names`，吸收队列 #7）
+
+**缺口**：后端把 **query 键名**拼进 SQL，值走参数化或白名单——典型写法
+`const col = Object.keys(req.query)[0]; SELECT ... WHERE ${col} = ?`、键名当列名的
+`ORDER BY ${col}`。此时值注入（location='url'）**扫不到**：值被参数化，改值无任何 SQL 语义
+变化。本仓此前没有这类注入点（SQLiDetector 同型能力缺位）。
+
+**实现（三处接缝，各一条判据）**：
+
+| 接缝 | 内容 |
+|---|---|
+| `TargetParser` | opt-in（`config.testParamNames === true`）为每个 query 参数**追加** paramName 点（不替换 url 点）。⚠ `originalValue` 必须是**键名本身**而非键的值——检测器以它为基准构造 `name AND 1=1-- -`；传值会让探针变成 `WHERE Keyboard AND 1=1-- - = ?`（列不存在 ⇒ 两侧同错 ⇒ 门控恒等 ⇒ 恒判非注入） |
+| `injection.js` | paramName 分支把注入值放到**键名**、值原样保留；`injected === originalValue` 时保持原键名（基线语义，否则预筛选/门控拿注入形态当真值基线） |
+| `boundary.js` | paramName 点**跳过闭合探测**：键名拼接无引号上下文，15 个候选前缀纯白烧请求且键名含空格会让目标 400 |
+| `prefilter.js` | paramName 点**不参与预筛选**：预筛选探针改的是值，对该点无信号是必然的（不是「无迹象」）——实测被剪枝后检出恒 0。与 `knownPoint` 同口径原样并入 |
+
+**配置/CLI 接线**：`defaults.testParamNames`（默认 false）、REST 白名单 + 标量透传、
+前端 `DEFAULT_CONFIG`/`SCAN_CONFIG_KEYS`/类型映射三处、CLI `--test-param-names` + help + README。
+
+**判据**：
+- `server/tests/paramName.injection.test.js`（4 例：生成/不生成、originalValue 语义、
+  基线保持原键名 + 注入改键名保值 + 伴随参数保留、闭合探测不发请求）
+- `e2e/param-name-lab/`（**真 MySQL** 靶场 + 判据）：`/colfilter` 键名拼 SQL（真值：
+  `?name=Keyboard` 1 行 → `?name OR 1=1-- -` 全表）、`/colfilter-safe` 同写法 + 白名单。
+  实测 **vuln=2（命中点全为 paramName）、开关关=0、安全点=0** —— 三个方向都成立
+
+**诚实边界**：仅 URL query 键名（JSON/XML 键名注入面另论）；paramName 点不做闭合探测，
+故「键名被引号包裹」的畸形写法不覆盖；`--test-param-names` 开启后每参数多一个点位
+（请求量约 +1 倍），默认关闭。
+
+---
+
 ### 2026-10-17 批次 D92 · D91 的两个遗留口子（REST 夹击面 + 红队判据阈值）
 
 D91 修完 cookie 注入点回归后，按「发现一条假数据就列全影响面」继续排查同源问题，抓到两个：

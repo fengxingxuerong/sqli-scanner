@@ -82,6 +82,8 @@ export const DEFAULT_CONFIG: ScanConfig = {
   // 因此这两个开关的语义是「在 level 门控之外**强制**追加」，不是「唯一入口」。
   testPath: false,
   testHeaders: false,
+  // [D93] 参数名本身作为注入点（opt-in）：开启后每个 query 参数多一个点位，仅覆盖 URL 键名
+  testParamNames: false,
   // [2026-10-02 竞品吸收] 参数挖掘（对标 Arjun）：默认关（opt-in，会向目标发额外探测请求）
   paramMine: false,
   // [2026-10-02 实战 P1-4] headless 浏览器爬取：默认关（opt-in，需 playwright + 系统浏览器）
@@ -111,6 +113,8 @@ export const SCAN_CONFIG_KEYS = [
   // 此前引擎已消费（TargetParser）、REST 白名单也已收（2026-09-20 CFG-REACH），
   // 唯独 UI 没有入口 → 使用者少测两类注入点，且报告只写「未检出」（能力缺失，不是便利开关）。
   'testPath', 'testHeaders',
+  // [D93] 参数名注入点（opt-in，默认关）：与 testPath/testHeaders 同族，由 TargetParser 消费
+  'testParamNames',
   // [2026-09-23 UI-REACH] 授权与安全护栏 + 请求节奏（四键此前无 UI 入口）
   'productionMode', 'confirmDestructive', 'delay', 'maxReq',
   // 盲注响应判定锚点（字符串，不是布尔）
@@ -242,6 +246,7 @@ export const SCAN_CONFIG_VALUE_TYPES: Record<ScanConfigKey, ScanConfigValueType>
   useRegistry: 'boolean',
   testPath: 'boolean',
   testHeaders: 'boolean',
+  testParamNames: 'boolean',
   // 生产护栏两键走严格布尔（defaults.js 默认 productionMode=true / confirmDestructive=false，
   // 面板必须能把「显式脱离护栏」与「确认投放高危池」这两个动作如实发出去）
   productionMode: 'boolean',

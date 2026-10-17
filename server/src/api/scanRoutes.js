@@ -176,6 +176,8 @@ const KNOWN_CFG_KEYS = new Set([
   // → Web / 桌面 / API 三端完全没有枚举与拖库能力（传了被当未知字段静默丢弃）。
   // 形状校验见下方 sanitizeExtractScope。
   'extractScope',
+  // [D93] --test-param-names：参数名本身作为注入点（TargetParser 消费）
+  'testParamNames',
 ]);
 
 

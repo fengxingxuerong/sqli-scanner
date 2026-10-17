@@ -91,12 +91,32 @@ function fnv1a(str) {
 const LITERAL_TABLE_PUNCT = new Set([',', '(', ')', '[', ']', '{', '}', ';', ':', '.']);
 
 /**
+ * [D93] 跳过 `new Set(` / `new Map(` / `new Set([` 形式的容器构造前缀。
+ * 抽成独立函数是为了让 isLiteralTableWindow 的圈复杂度留在软限内（原先内联 if 链 19 > 15）。
+ * @param {Array<{type:string,value:string}>} tokens 窗口 token
+ * @param {number} i 当前下标
+ * @returns {number} 跳过后的下标（不是该形态则原样返回）
+ */
+function skipContainerCtor(tokens, i) {
+  const isIdent = (t) => !!t && t.type === 'ident';
+  const isPunct = (t, v) => !!t && t.type === 'punct' && t.value === v;
+  if (!(isIdent(tokens[i]) && tokens[i].value === 'new')) return i;
+  if (!(isIdent(tokens[i + 1]) && /^(Set|Map)$/.test(tokens[i + 1].value))) return i;
+  let j = i + 2;
+  if (isPunct(tokens[j], '(')) j++;
+  if (isPunct(tokens[j], '[')) j++;
+  return j;
+}
+
+/**
  * 该克隆窗口是否「纯字面量数据表」（可豁免）。
  *
  * 允许**一个表头**（`const NAME = [` / `export const NAME = [` / `let` / `var`）——
  * 真实数据表都长这样，若把表头也算进窗口，任何表都豁免不了（selftest ④ 抓过这个）。
  * 表头之后必须**全是 str / num / 结构分隔符**；任何 ident / 运算符 / 调用即不豁免
  * ⇒ 只放过「纯字面量数据表」，绝不放过逻辑代码。
+ * [D93] 表头额外允许 `new Set([` / `new Map([` 容器构造包裹（见 skipContainerCtor 的注释：
+ * 往 KNOWN_CFG_KEYS 加一个键名就滑出 3 条假重复的真实成本）。
  * @param {Array<{type:string,value:string}>} tokens 窗口内的 token
  * @returns {boolean}
  */
@@ -109,7 +129,7 @@ function isLiteralTableWindow(tokens) {
     if (isIdent(tokens[i])) i++; // default / const / NAME
     if (isIdent(tokens[i])) i++; // const / NAME
     if (isPunct(tokens[i], '=')) i++;
-    if (isPunct(tokens[i], '[')) i++;
+    i = isPunct(tokens[i], '[') ? i + 1 : skipContainerCtor(tokens, i);
   }
   const rest = tokens.slice(i);
   if (!rest.length) return false;

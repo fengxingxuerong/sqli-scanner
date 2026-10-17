@@ -29,6 +29,14 @@ export default function InjectionScopeSection({ config, onChange }: ScanConfigSe
         <Typography variant="caption" color="text.disabled">
           {t('scanConfig.testHeadersHint')}
         </Typography>
+        {/* [D93] 参数名注入点：与上面两键同族（opt-in），后端键 testParamNames */}
+        <FormControlLabel
+          control={<Switch checked={config.testParamNames ?? false} onChange={handleToggle('testParamNames')} />}
+          label={t('scanConfig.testParamNamesLabel')}
+        />
+        <Typography variant="caption" color="text.disabled">
+          {t('scanConfig.testParamNamesHint')}
+        </Typography>
       </Stack>
     </Box>
   );
