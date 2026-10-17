@@ -51,6 +51,8 @@
 //   墙钟 = Σ(60+2i) 随 N 二次增长，按墙钟定预算等于赌 runner 噪声尾部）；故障③ 20s→60s
 //   （REALISTIC 档单请求 ~1s，正常 17 请求就要 ~17s，原 20s 截止余量近零，
 //    本机 stall 模型实测一次停顿就双杀）；修复③ 20s→45s（同档预防）。
+//  [D96 补] 故障③ 再加抽样化：macos #263 单抽未复现（原因见该用例内注释：首采样停顿
+//   抬高阈值 ⇒ 腐蚀点出搜索窗口）。∃抽样判定，4 抽上限；修复③ 保持单抽 ∀-正确。
 //  修复① 保持 30s：跟踪开启后 CI 三平台实测 8.4~8.7s 零通胀，3.4 倍余量足够——
 //  故意不放宽，跟踪器回归要能快速红。失控形态的快速探测由故障① 的 6s hangs
 //  负责，故障侧的 90s/60s 截止只是防挂死 suite，不是失控判据。
@@ -282,11 +284,29 @@ test('★故障②机制自证★ 请求预算不是装饰：失控路径必须�
 
 test('★故障③★ 真实余量档（300ms）下同样出错：不是只在极端小余量下才坏', async () => {
   const secret = '8';
-  const oracle = makeDriftOracle(secret, { driftMs: 30, trueExtraMs: REALISTIC.trueExtraMs });
-  const ctx = buildCtx(oracle, 'real-off', { absMs: REALISTIC.absMs, timeBaselineEvery: 0 });
-  // [D64] 截止 20s→60s：REALISTIC 档单请求 ~1s，正常 17 请求 ~17s，原截止余量近零
-  const out = await extractWithDeadline(new Extractor(), ctx, oracle, 'version()', 60000);
-  assert.notEqual(out, secret, `真实余量档关闭跟踪时应出错，实际却拿到 ${JSON.stringify(out)}`);
+  // [D64] 截止 20s→60s（REALISTIC 档单请求 ~1s，正常 17 请求 ~17s，原 20s 截止余量近零）。
+  // [D96 补] 抽样化：macos #263 单抽拿到正确值（#260 同参数同 runner 却复现）——机制是
+  //   **首个基线采样吃到大停顿**（冷启动/GC stall ⊇ 300ms+）⇒ 阈值被同步抬高
+  //   （threshold = tracker.ms + 300 ⇒ stall 直接抬高 onset）⇒ 腐蚀点（30ms×N ≥ stall+300）
+  //   推迟出搜索窗口（~18 请求）⇒ 这一抽看不到故障。故障是**配置级**断言：跟踪关闭
+  //   ⇒ 漂移最终必然腐蚀（不封顶增长是承重墙，见头部驳回方案①），但**何时**腐蚀受环境
+  //   停顿调制。抽样无状态（每抽新 oracle）：stall 只推迟复现、不取消复现。
+  //   判定 = ∃抽样出错（红 = 4 抽全对：该环境不可复现故障 ⇒ 修复断言前提失效，必须暴露）；
+  //   修复侧相反 —— 跟踪开启必须**零抽样**泄漏（见修复③ 单抽恒正确）。
+  const draws = 4;
+  for (let draw = 1; draw <= draws; draw++) {
+    const oracle = makeDriftOracle(secret, { driftMs: 30, trueExtraMs: REALISTIC.trueExtraMs });
+    const ctx = buildCtx(oracle, `real-off-${draw}`, { absMs: REALISTIC.absMs, timeBaselineEvery: 0 });
+    const out = await extractWithDeadline(new Extractor(), ctx, oracle, 'version()', 60000);
+    if (out !== secret) {
+      if (draw > 1) console.log(`[故障③] 第 ${draw} 抽样才复现错值（该抽请求 ${oracle.stats.total} 个；前 ${draw - 1} 抽被环境停顿遮蔽）`);
+      return;
+    }
+  }
+  assert.fail(
+    `真实余量档关闭跟踪时应出错：连续 ${draws} 抽都拿到正确值 ${JSON.stringify(secret)} —— ` +
+      '故障在该环境不可复现，后续修复断言失去前提（自证陷阱），不许静默放过。'
+  );
 });
 
 // ── 修复侧 ──────────────────────────────────────────────────────────────────
