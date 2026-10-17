@@ -95,6 +95,9 @@ const LABS = [
   // 上面那套验「目标能回连本机接收端」，本套验「只要求扫描器能出网」的形态。
   // deps 为空：自带靶站、无需 DB/沙箱；但需联网访问协作端（无网时脚本自行 SKIP）。
   { name: 'oob-interactsh-lab', desc: 'OOB 外部隧道整链（interactsh 协作端回连 → 扫描器轮询取回 → 检出）', entry: 'e2e/oob-interactsh-lab/run.mjs', deps: [] },
+  // [D88] 第三方真框架靶场（外部裁判）：真值不由本项目编写（OWASP Juice Shop 官方漏洞）。
+  // deps 为空：仅需目标在跑（JUICE_BASE），无 DB/沙箱依赖；未就绪时脚本自行 SKIP。
+  { name: 'juice-shop-lab', desc: '第三方真框架外部裁判（Juice Shop：真漏洞须检出 + 安全端点零误报）', entry: 'e2e/juice-shop-lab/run.mjs', deps: [] },
   { name: 'pg-osshell', desc: 'PG os-shell 真机闭环（COPY FROM PROGRAM 落表 → 回显）', entry: 'e2e/oob-real-lab/pg-osshell.e2e.mjs', deps: ['pg'] },
   { name: 'concurrent-isolation', desc: '并发多扫描隔离性（PG+MySQL 混扫不串扰）', entry: 'e2e/concurrent-isolation/e2e.mjs', deps: ['pg', 'sandbox'] },
   { name: 'csrf-lab', desc: 'CSRF 防护目标闭环（取页 token → 携带 → 检出）', entry: 'e2e/csrf-lab/e2e.mjs', deps: ['sandbox'] },

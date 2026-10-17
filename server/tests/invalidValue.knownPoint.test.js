@@ -1,9 +1,10 @@
 // [P0 2026-09-09 实战批次] 失效值替换（--invalid-*）+ 已知注入点直通（knownPoint）单测
 // 覆盖：① invalidize 三种模式语义；② applyInvalidValues/applyKnownPoints 点级改写；
-//      ③ probeBoundary knownPoint 短路（13 候选探测 → 1 基线请求）；
+//      ③ probeBoundary knownPoint 短路（候选探测 → 1 基线请求；候选数见 BOUNDARY_CANDIDATES）；
 //      ④ _prefilterPoints 直通点保守保留且并入返回集；⑤ _selectedTechs 技术位交集；
 //      ⑥ sanitizeStart REST 透传。
 import { test } from 'node:test';
+import { BOUNDARY_CANDIDATES } from '../src/engine/detectorSupport/boundary.js';
 import assert from 'node:assert/strict';
 import { invalidize, applyInvalidValues, isValidInvalidMode } from '../src/engine/invalidValue.js';
 import { applyKnownPoints, normalizeKnownPoint } from '../src/engine/knownPoint.js';
@@ -96,9 +97,15 @@ test('probeBoundary：普通点仍走候选探测（回归对照）', async () =
   };
   const point = { id: 'p1', param: 'id', location: 'url', originalValue: '1' };
   await d.probeBoundary({ httpClient, target: { method: 'GET', baseUrl: 'http://t/?id=1' }, point, config: {} });
-  // [2026-09-10] 本 mock 所有响应均为 'ok' → 13 个候选全部「相似于基线」→ 触发空基线 OR 复核
-  // （上限 4 个候选 × 2 探针 = 8 请求）。故请求数由固定 14 变为区间：14（无歧义）～22（最坏）。
-  assert.ok(reqCount >= 14 && reqCount <= 22, `普通点应为 1 基线 + 13 候选（+ 空基线 OR 复核 ≤8），实际 ${reqCount}`);
+  // [2026-09-10] 本 mock 所有响应均为 'ok' → 候选全部「相似于基线」→ 触发空基线 OR 复核
+  // （上限 4 个候选 × 2 探针 = 8 请求）。故请求数由固定值变为区间：1 基线 + 候选数（无歧义）～+8（最坏）。
+  // [D88 2026-10-18] 候选数 13 → 15（补 %')) 与 %") 两档，见 boundary.js 的 BOUNDARY_CANDIDATES）：
+  // 区间随之上移为 16～24。数字取自导出常量，避免下次改表时又漏同步。
+  const expectedProbes = BOUNDARY_CANDIDATES.length;
+  assert.ok(
+    reqCount >= 1 + expectedProbes && reqCount <= 1 + expectedProbes + 8,
+    `普通点应为 1 基线 + ${expectedProbes} 候选（+ 空基线 OR 复核 ≤8），实际 ${reqCount}`
+  );
 });
 
 test('_prefilterPoints：knownPoint 点跳过探针且并入返回集', async () => {

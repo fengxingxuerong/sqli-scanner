@@ -437,6 +437,37 @@ const SUITES = [
     },
   },
   {
+    // [D88 2026-10-18] 第三方真框架靶场（外部裁判）。补的是本仓最硬的一类缺口：
+    // 此前除 sqli-labs（本项目自写的 Python 复刻，真值自证）外，37 个靶场**全部自建**
+    // ⇒ 误报率/检出率只有「自己出题自己判卷」的证据。本套件用 OWASP Juice Shop
+    // （Angular + Sequelize ORM + SQLite，第三方活跃项目）当外部裁判，真值非本项目编写。
+    // 首跑即抓到一条真漏检（闭合候选缺 %')) 档 ⇒ 该点 UNION 通道从未启动），修复后转回归判据。
+    // ⚠️ 判据读**文本**而非退出码：未就绪时脚本按设计 exit 0（SKIP），
+    //    用退出码当判据会把「没测」认成「通过」——本仓栽过的「永远绿」形状。
+    id: 'juice-shop',
+    title: '第三方真框架外部裁判（Juice Shop：真漏洞须检出 + 安全端点零误报）',
+    needs: [],
+    optional: true, // 需目标在跑（外部项目，非本仓依赖）→ 未就绪 SKIP 并写明原因
+    run: () => run('node', ['e2e/juice-shop-lab/run.mjs']),
+    assert: (out) => {
+      if (/\[SKIP\] Juice Shop 靶场不可达/.test(out)) {
+        return { facts: { 外部裁判: '跳过（靶场未就绪）' }, pass: false, skipped: true, reason: 'Juice Shop 未构建/未启动' };
+      }
+      const m = /真值漏洞端点：检出 (\d+)\/(\d+)（漏检 (\d+)）/.exec(out);
+      const fp = /安全端点误报：(\d+)/.exec(out);
+      const pass = /外部裁判通过/.test(out);
+      return {
+        facts: {
+          外部裁判: pass ? '✅ 通过' : '❌ 未通过',
+          真漏洞检出: m ? `${m[1]}/${m[2]}（漏检 ${m[3]}）` : '取不到',
+          安全端点误报: fp ? fp[1] : '取不到',
+        },
+        pass,
+        reason: pass ? null : '外部裁判未通过（漏检或误报，见 stdout）',
+      };
+    },
+  },
+  {
     id: 'report-contract',
     title: '报告契约（自报字段必须与真实状态一致）',
     needs: ['mysql'],

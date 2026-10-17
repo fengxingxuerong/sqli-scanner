@@ -66,8 +66,9 @@ test('③b CI 只要求它确实 provisioning 过的套件（PG/红队是 contin
 //   D87 新增 oob-interactsh 套件时由 readme:check 与本地 wiring 双双抓出并对齐。
 // ⚠ 这个数字是「防空转」用的（解析不到 id 时上面的判据会拿空集合比 ⇒ 静默放行），
 //   所以加套件必须同步 +1，减套件必须同步 -1 —— 它不是装饰性计数。
-test('④ 不空转：SUITES 解析必须命中 18 个 id（否则上面几条可能在拿空集合比）', () => {
-  assert.equal(IDS.length, 18, `SUITES 解析到 ${IDS.length} 个 id：${IDS.join(', ')}`);
+// [D88 2026-10-18] 18 → 19：新增 juice-shop（第三方真框架外部裁判）。
+test('④ 不空转：SUITES 解析必须命中 19 个 id（否则上面几条可能在拿空集合比）', () => {
+  assert.equal(IDS.length, 19, `SUITES 解析到 ${IDS.length} 个 id：${IDS.join(', ')}`);
   assert.ok(IDS.includes('file-read') && IDS.includes('file-write'), '文件读写两个套件不在 SUITES 里 —— 取数口径变了');
 });
 
