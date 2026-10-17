@@ -45,7 +45,8 @@
 //   长度收敛虚高（L≈30）⇒ 位置数翻 5 倍 ⇒ 请求数 47 → 200+。请求数呈**重尾分布**
 //   （本机/ubuntu 47~54，windows 观测到 142+，合成最坏 212），截止必须按尾部定。
 // 修法（只重定截止时间；不碰断言、不碰标定、不碰 oracle 模型）：
-//  故障② 30s→90s（覆盖 ~300 请求 ≈ 85s，即观测尾部的 2 倍）；故障③ 20s→60s
+//  故障② 30s→90s（覆盖 ~300 请求 ≈ 85s，即观测尾部的 2 倍）；2026-10-17 D95 再于
+//   macos 实测（269 请求仍顶爆 90s）后重标 90s→150s —— 见该用例内注释；故障③ 20s→60s
 //   （REALISTIC 档单请求 ~1s，正常 17 请求就要 ~17s，原 20s 截止余量近零，
 //    本机 stall 模型实测一次停顿就双杀）；修复③ 20s→45s（同档预防）。
 //  修复① 保持 30s：跟踪开启后 CI 三平台实测 8.4~8.7s 零通胀，3.4 倍余量足够——
@@ -195,9 +196,11 @@ test('★故障②★ 关闭跟踪、慢漂移 ⇒ 产出「看着像数据的�
   const secret = '5.7.40';
   const oracle = makeDriftOracle(secret, { driftMs: 2 });
   const ctx = buildCtx(oracle, 'drift-off-slow', { absMs: TIGHT.absMs, timeBaselineEvery: 0 });
-  // [D64] 截止 90s：CI windows 实测请求数重尾（47~142+），按尾部而非中位数定；
-  // 失控形态由故障① 的 6s hangs 探测器负责，这里的截止只是防挂死 suite。
-  const out = await extractWithDeadline(new Extractor(), ctx, oracle, 'version()', 90000);
+  // [D64] 截止 90s→150s（2026-10-17 D95，CI macos 实测后第二次重标）：run 260（v1.1.1）
+  // macos-latest 上本用例已发 269 个请求仍未跑完 —— Σ(60+2i)|_{i≤269} ≈ 89s 再加真侧附加
+  // 恰好顶爆 90s。距上限（L 封顶 ⇒ 约 350 请求 ≈ 144s）留 1.05 倍 ⇒ 150s。
+  // 失控形态由故障① 的 6s hangs 探测器负责，这里只是防挂死 suite，不是失控判据。
+  const out = await extractWithDeadline(new Extractor(), ctx, oracle, 'version()', 150000);
   assert.notEqual(
     out,
     secret,

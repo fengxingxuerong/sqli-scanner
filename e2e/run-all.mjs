@@ -83,6 +83,9 @@ const LABS = [
   { name: 'tamper-matrix', desc: 'tamper × WAF 规则绕过矩阵', entry: 'e2e/tamper-matrix/tamper-test.mjs', deps: [] },
   { name: 'real-world-lab', desc: '拟真靶场（登录/搜索/上传，PGlite 内置）', entry: 'e2e/real-world-lab/verify.mjs', deps: [] },
   { name: 'real-mysql-lab', desc: '真实 MySQL 驱动靶场验证', entry: 'e2e/real-mysql-lab/verify.mjs', deps: ['sandbox'] },
+  // [D95] D93 的参数名注入真靶场：自带幂等夹具（自建 paramname_lab + 种子），
+  // 只要有可连的 mysqld 就能真跑（原先复用 blackbox_lab 表 ⇒ 未跑过黑盒靶场的环境永久 SKIP）。
+  { name: 'param-name-lab', desc: '参数名注入真靶场（键名拼 SQL 检出 + 白名单对照 + 开关语义）', entry: 'e2e/param-name-lab/run.mjs', deps: ['mysql'] },
   // [2026-09-28] 其余靶场验证的是**引擎**（多数直接 import ScanManager），这一套只走 HTTP：
   // 22 条对外端点 + 真 MySQL 靶站，逐条核"接口有没有把能力交付到用户手上"。
   // 它自带的靶站会记录每一个到达的请求（pause/resume、retest、凭据继承这类承诺

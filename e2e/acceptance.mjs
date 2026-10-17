@@ -330,6 +330,28 @@ const SUITES = [
     },
   },
   {
+    // [D95] D93 建了参数名注入真靶场（run.mjs 判据注释里自己写着「acceptance 读文本判据」），
+    // 却漏了这一行接线 —— CI lint 的 e2e:wiring 门禁在 D94 修复 typecoverage 后才第一次跑到
+    // 第 43 步，当场实锤「有入口、从不执行」（该门禁存在的意义正是堵这个形态）。
+    // 靶场自带幂等夹具（D95 起自建 paramname_lab，不再要求宿主预置 blackbox_lab），
+    // 与 recall-lab 同惯例：只需要一个可连的 mysqld 就能真跑。
+    id: 'param-name-lab',
+    title: '参数名注入真靶场（键名拼 SQL 检出 + 白名单对照零检出 + 开关语义）',
+    needs: ['mysql'],
+    run: () => run('node', ['e2e/param-name-lab/run.mjs'], envDb),
+    assert: (out) => {
+      const skip = /\[SKIP\]\s*(.+)/.exec(out);
+      if (skip) return { facts: { 跳过: 1 }, pass: false, skipped: true, skipReason: skip[1].trim() };
+      const pass = /\[PASS\] 参数名注入/.test(out);
+      const fail = /\[FAIL\]/.test(out);
+      return {
+        facts: { PASS: pass ? 1 : 0, FAIL: fail ? 1 : 0 },
+        pass: pass && !fail,
+        reason: fail ? '参数名注入断言未通过（详见 run.mjs 输出）' : pass ? null : '解析不到 [PASS] 行（套件没真跑）',
+      };
+    },
+  },
+  {
     id: 'real-world-lab',
     title: '真 PG 靶场（含二阶注入）',
     needs: [],

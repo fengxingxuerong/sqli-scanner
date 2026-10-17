@@ -12,7 +12,7 @@
 // 而现象要等到"某个只有本地才有的问题溜进提交"才显现。
 //
 // ── 本文件钉什么 ─────────────────────────────────────────────────────────────
-//   ① 四条静态门禁都在钩子里，且**没有被 || true / continue-on-error 吞掉**；
+//   ① 静态门禁都在钩子里，且**没有被 || true / continue-on-error 吞掉**；
 //   ② 钩子引用的每个脚本都真实存在（否则 sh 会静默跳过或报错，取决于位置）；
 //   ③ 逃生阀存在且仅检 SKIP_PRECOMMIT=1（不得变成"什么都能跳"）。
 //
@@ -42,12 +42,15 @@ function gateScripts() {
 
 const gates = gateScripts();
 
-test('接线-1) 钩子登记了预期的四条静态门禁（少一条即退化）', () => {
+test('接线-1) 钩子登记了预期的静态门禁（少一条即退化）', () => {
   const expected = [
     'scripts/arch-guard.mjs',
     'scripts/ref-integrity.mjs',
     'scripts/module-loadable.mjs',
     'scripts/version-sync.mjs',
+    // D93 漏接 param-name-lab 的教训：接线状态门禁也必须常驻钩子，
+    // 否则"新靶场有入口、从不执行"只能等 CI 第 43 步（D95 补）。
+    'scripts/e2e-wiring-check.mjs',
   ];
   for (const s of expected) {
     assert.ok(gates.includes(s),
