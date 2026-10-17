@@ -47,9 +47,13 @@ const BASE_CONFIG = {
 /** 从载荷中提取协作端主机名（HTTP/URL 形态与 UNC 形态都要认） */
 function extractCallbackHost(text, server) {
   const s = String(text || '');
-  const hostRe = new RegExp(`([a-z0-9]{20,}[a-z0-9]*)\\.${server.replace(/\./g, '\\.')}`, 'i');
+  // [D96] 字符类必须含 `-`：CI 首跑实锤 UNC 向量载荷的回连域是
+  // `<注册前缀>s79cu7nof-qk5isw.oast.pro`（关联后缀带连字符），原 `[a-z0-9]{20,}`
+  // 在连字符处断开、剩余段不足 20 字符 ⇒ 14 个请求一个都没提取出主机 ⇒ 0 DNS + 0 HTTP
+  // ⇒ 假 FAIL。合法 DNS 标签本就含 `-`，提取正则不该比 DNS 更严。
+  const hostRe = new RegExp(`([a-z0-9-]{20,})\\.${server.replace(/\./g, '\\.')}`, 'i');
   const m = s.match(hostRe);
-  return m ? m[1] + '.' + server : null;
+  return m ? m[0] : null;
 }
 
 function startLab() {
@@ -125,6 +129,9 @@ const oobHit = vulns.filter(
   (v) => String(v.technique || '') === 'oob' || /oob|带外|OOB/i.test(JSON.stringify(v))
 );
 console.log(`[scan] 靶站收到请求 ${lab.state.hits} 次（DNS 解析 ${lab.state.dns} · HTTP 回连 ${lab.state.http}）`);
+if (lab.state.hits > 0 && lab.state.dns === 0 && lab.state.http === 0) {
+  console.log('[scan] ⚠ 收到请求但没提取到任何协作端主机 —— 载荷形态与提取正则不匹配（检查 extractCallbackHost 与投放向量）');
+}
 console.log(`[scan] 检出漏洞 ${vulns.length} 条，其中 OOB 通道 ${oobHit.length} 条`);
 for (const v of vulns.slice(0, 3)) {
   console.log(`   · ${v.vulnType?.nameZh || v.type || v.technique} | ${v.riskLevel || '-'} | 参数=${v.param || v.affectedParam || v.affectedParam || '-'}`);
