@@ -295,7 +295,7 @@ export function sanitizeStart(body) {
   }
   warnDroppedConfigKeys(cfg, KNOWN_CFG_KEYS, config, DIRECT_ONLY_CFG_KEYS);
   // [D-REDACT 2026-10-12] redactPasswords 开关（spec 5.3.1 规则 1/2，默认 false 向后兼容）
-  const redactPasswords = b.redactPasswords === true || cfg.redactPasswords === true;
+  const redactPasswords = b.redactPasswords === true || cfg.redactPasswords === true; dropInjectedHeadersFromAuth(config, headerParams); // [D92] 注入点头去重——与上一句同行的原因：sanitizeStart 在复杂度基线里「只许持平」，单独成行会 +1 行越线；逻辑本体在文件末尾 dropInjectedHeadersFromAuth（有独立 JSDoc），此处只留调用
   return {
     url: u.toString(),
     method,
@@ -757,3 +757,38 @@ export const defaultScanManager = new ScanManager();
 
 // 默认单例路由
 export const scanRoutes = createRoutes({ scanManager: defaultScanManager });
+
+// ── [D92 2026-10-17 REST 对齐 CLI] 注入点头去重 ────────────────────────────────
+/**
+ * 被纳入注入点的请求头不再经 `auth.headers` 透传（REST 侧补 CLI 早已有的防线）。
+ *
+ * 背景：`--test-headers` 开的头成为注入点后，若 `config.auth.headers` 仍持同名副本，
+ * 发送层 `httpClient.mergeAuthHeaders` 的 auth.headers 分支是**覆盖**语义（h[k]=v），
+ * 会把注入值顶回原值 ⇒ 该点全部探针打在未注入值上 ⇒ 报告写「未检出」，与「这个站
+ * 没有注入」完全同形（D91 在 cookie 上实证；D92 把同一夹击面在 REST 入口封死）。
+ * CLI 侧见 `server/bin/cli.js` 251-261；此前 REST（`sanitizeStart` → `config.auth`
+ * 由 scalarsEgress 直通）没有等价逻辑。
+ *
+ * ⚠ 不得就地删 `config.auth.headers` —— 它与调用方 `cfg.auth` 是同一引用
+ * （buildGuardedConfig 只做键收敛，不深拷贝），就地 delete 会污染入参对象：
+ * 同一 body 复用第二次时 auth.headers 已被抹掉 ⇒「第一次扫对、第二次静默丢认证」。
+ * 故构造新对象再挂回 config。
+ *
+ * Cookie 不在此删（与 CLI 同口径）：会话语义由 `auth.cookie` 的追加语义承担；
+ * `auth.headers.cookie` 的覆盖由 D91 B 处（mergeAuthHeaders 的 Cookie 同名跳过）拦截。
+ * @param {object} config 已过守卫的配置（就地替换 auth 字段，不污染入参）
+ * @param {Record<string,string>} headerParams 注入点候选头
+ * @returns {void}
+ */
+function dropInjectedHeadersFromAuth(config, headerParams) {
+  const authHeaders = config.auth && config.auth.headers;
+  if (!authHeaders || typeof authHeaders !== 'object' || config.testHeaders !== true) return;
+  const kept = { ...authHeaders };
+  for (const k of Object.keys(headerParams)) {
+    if (String(k).toLowerCase() === 'cookie') continue;
+    const hit = Object.keys(kept).find((hk) => String(hk).toLowerCase() === String(k).toLowerCase());
+    if (hit) delete kept[hit];
+  }
+  config.auth = { ...config.auth, headers: kept };
+  if (Object.keys(kept).length === 0) delete config.auth.headers;
+}

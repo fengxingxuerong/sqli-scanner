@@ -37,7 +37,15 @@ console.log(
   `[redteam] round=${round} vuln=${verifiedVulns.length} hit=${hit} rate=${rate}% safe=${safes.length} fp=${fp}`
 );
 
-// 判据：调参口径 ≥90% 且零误报；安全点一个都不能被误报
-const pass = rate >= 90 && fp === 0 && verifiedVulns.length > 0;
-console.log(pass ? '[PASS] 红队实战评测' : `[FAIL] 红队实战评测（rate=${rate}% fp=${fp}）`);
+// 判据：[D92 2026-10-17 收紧] **必须全中**且零误报。原判据是 ≥90%——
+//   D91 实证 18/19（95%）曾判 PASS，而那正是 cookie 注入点静默假阴性的**真回归**：
+//   阈值容错把「漏掉一整类注入点」判成了通过（假绿比没门禁更糟）。
+//   历史 m1/m2/m3 三轮与 D91 修复后复跑均 19/19 ⇒ 全中在稳定环境可达；
+//   未来若抖动导致假红，先排查环境/靶场，**不要回头放宽判据**。
+const pass = verifiedVulns.length > 0 && hit === verifiedVulns.length && fp === 0;
+console.log(
+  pass
+    ? '[PASS] 红队实战评测'
+    : `[FAIL] 红队实战评测（hit=${hit}/${verifiedVulns.length} rate=${rate}% fp=${fp}）`
+);
 process.exit(pass ? 0 : 1);

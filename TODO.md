@@ -5,6 +5,27 @@
 
 ---
 
+## 2026-10-17 批次 D92 · D91 的两个遗留口子
+
+**① REST 入口 auth.headers 夹击面**：CLI 侧 `--test-headers` 的注入点头会从 `auth.headers`
+删除（251-261），REST（`sanitizeStart`）没有等价逻辑 ⇒ `auth.headers` 同名副本经
+`mergeAuthHeaders` 覆盖语义把注入值顶回原值 ⇒ header 类注入点静默假阴性。
+修复：`sanitizeStart` 补去重（非 cookie 头，大小写不敏感；cookie 不删，与 CLI 同口径）。
+判据 4 例 + 变异验证（路径不可达 ⇒ 2 红）。
+
+**② 红队判据 90%→100%**：18/19（95%）曾判 PASS，而那正是 D91 的真回归
+⇒ 阈值容错把「漏整类注入点」吞成通过。`gate-check.mjs` 与 acceptance assert 同步收紧为
+**全中 + 零误报**；注入 18/19 验证 ⇒ FAIL exit=1（旧判据 PASS）。
+
+### 待推进
+
+- Cookie 之外的**其他注入点形态**（url/body/header/二阶）与 auth 配置的交互是否还有同类
+  夹击（本轮已覆盖 header 的 REST 路径；CLI 与 REST 的去重口径应长期保持一致，可考虑抽共享函数）；
+- 商业云 WAF 真机样本（D89 遗留）、62 家其余 44 家外部对拍源；
+- versioned 注释形态（AGENTS.md §四，refuted 未关闭，待 tamper 批次）。
+
+---
+
 ## 2026-10-17 批次 D91 · Cookie 注入点静默假阴性回归修复（推翻协议落地）
 
 **反证**：10-17 acceptance 红队 **18/19**（D11-cookie 漏），台账/README 却写 19/19

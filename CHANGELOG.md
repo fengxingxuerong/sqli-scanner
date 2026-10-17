@@ -65,6 +65,37 @@
 
 ## [Unreleased]
 
+### 2026-10-17 批次 D92 · D91 的两个遗留口子（REST 夹击面 + 红队判据阈值）
+
+D91 修完 cookie 注入点回归后，按「发现一条假数据就列全影响面」继续排查同源问题，抓到两个：
+
+**① REST 入口的 auth.headers 夹击面（CLI 早有防护，REST 没有）**
+
+`--test-headers` 开的头成为注入点后，若 `auth.headers` 仍持同名副本，发送层
+`mergeAuthHeaders` 的 auth.headers 分支是**覆盖**语义 ⇒ 注入值被顶回原值 ⇒ 该点静默假阴性。
+CLI 侧（`server/bin/cli.js` 251-261）早有去重，REST 侧（`sanitizeStart` → `config.auth`
+由 `scalarsEgress` 直通）**完全没有** ⇒ 同一夹击面对 REST 的所有 header 注入点开放。
+
+修复：`sanitizeStart` 在返回前补等价去重——`testHeaders=true` 时把 `headerParams` 中的
+非 cookie 头（大小写不敏感匹配）从 `config.auth.headers` 删除，删空则移除该字段。
+Cookie 不删（与 CLI 同口径：会话语义走 `auth.cookie` 的追加语义；`auth.headers.cookie`
+的覆盖由 D91 B 处拦截）。
+判据：`server/tests/api.authHeadersInjectionPoint.test.js`（4 例：删除/大小写/ cookie 保留/
+未开 testHeaders 不动）。**变异验证**：让去重路径不可达 ⇒ 2 红；还原 ⇒ 4 绿。
+
+**② 红队判据 90% → 100%（阈值容错正是 D91 假绿的成因）**
+
+`gate-check.mjs` 与 acceptance 红队套件的判据原是「≥90% 且零误报」。D91 实证：**18/19（95%）
+被判 PASS**，而那是 cookie 注入点整类漏检的真回归——阈值把「漏掉一整类注入点」吞成通过。
+历史 m1/m2/m3 三轮 + D91 修复后复跑均 19/19 ⇒ 全中在稳定环境可达。
+
+收紧后：`hit === verifiedVulns.length && fp === 0`（gate-check）与
+`Number(hit) === Number(total) && fp === 0`（acceptance assert）。FAIL 文案带 `hit=N/M`。
+**验证**：注入「D11 hit=false」模拟修复前 ⇒ gate-check **FAIL exit=1**（旧判据 PASS）；
+还原 ⇒ PASS exit=0。抖动致假红时排查环境，不放宽判据（判据注释已写明）。
+
+---
+
 ### 2026-10-17 批次 D91 · Cookie 注入点静默假阴性回归修复（推翻协议落地：台账 19/19 作废重做）
 
 **反证来源**：2026-10-17 全量 acceptance（`e2e/results/acceptance-report.md`）红队实战评测

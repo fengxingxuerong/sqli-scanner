@@ -399,8 +399,8 @@
       "limitComplexity": 15
     },
     "server/src/core/http/requestContext.js::mergeAuthHeaders": {
-      "lines": 32,
-      "complexity": 18,
+      "lines": 26,
+      "complexity": 16,
       "limitLines": 100,
       "limitComplexity": 15
     },
@@ -957,7 +957,7 @@
       "limitComplexity": 15
     },
     "server/src/engine/injection.js::buildInjectionRequest": {
-      "lines": 167,
+      "lines": 165,
       "complexity": 91,
       "limitLines": 100,
       "limitComplexity": 15
