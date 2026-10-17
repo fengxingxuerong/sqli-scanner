@@ -28,9 +28,13 @@ F18 上次 acceptance 的引擎崩溃码（0xC0000409）**未复现**，留观�
 
 ### 待推进
 
-- 全量 acceptance 复跑（MySQL 常驻已起：10-17 17:22 的 env.mjs 残留实例，mysqld PID 23276 / lab PID 41852）——
-  D91 修复后应回到 16+ PASS，重点是 10-17 那 6 个 BLOCKED（3306/5432/secure_file_priv）；
-- D11 类问题的**通用化排查**：还有哪些注入点形态会被 auth.headers 副本夹击（当前只修了 Cookie 同名）；
+- ~~全量 acceptance 复跑~~ **已完成（10-17 晚，分三批 `--only` 跑，避开全量 20 分钟单测预算）**：
+  单测 PASS（3606 例 / 3604 pass / 0 fail / 2 skip）；MySQL 依赖 12 套件 **12/12 PASS**
+  （含上午 BLOCKED 的刁钻靶场 11/11、检测回归 19/19、真 MySQL 11/11、报告契约 8/8、
+  CRS 三件套、WAF A2/A3、批量隔离、登录编排）；红队 PASS（**19/19、0/7 误报**）。
+  仍 SKIP 的 5 个为环境缺失（PG 5432 未监听、secure_file_priv=NULL、Juice Shop /
+  interactsh 环境不满足）——**未覆盖即不计过，也不假装全量**。
+- D91 类问题的**通用化排查**：还有哪些注入点形态会被 auth.headers 副本夹击（当前只修了 Cookie 同名）；
 - 商业云 WAF 真机样本（D89 遗留）、62 家其余 44 家外部对拍源。
 
 ---
