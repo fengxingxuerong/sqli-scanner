@@ -5,6 +5,47 @@
 
 ---
 
+## 2026-10-18 批次 D90 · 写副作用登记与自动清理（P2-5）
+
+**动机**：TODO 2026-10-10 盘点的 P2-5「写副作用无自动清理/回滚（只有
+`docs/pentest-handover/05` 的人工条款 R5/R6）」。人工条款要求「记录全部副作用并清理」，
+但**代码里没有对应物** —— 正是本仓反复治理的形状：承诺写在文档里，实现里没有。
+
+真实后果：fileWrite 往客户服务器落的文件、os-shell 起的进程、udf 装的 DLL，
+测试结束全留在目标上，报告里只有正文描述、**没有可复核清单也没有收尾动作**。
+
+| 面 | 落地 |
+|---|---|
+| 登记 | `server/src/services/sideEffectLedger.js`：**写前**登记（写失败也留痕——「试过但没记」比「记了失败」危险），落 `ledger/<scanId>/side-effects.json` |
+| 可逆性分档 | `file_write` 可删／`udf_install` 可尝试卸载／`stacked_dml` 仅在给了反向语句时可逆／**`os_shell` 标 `irreversible`**（起的进程无法保证收回，如实标注不假装能清） |
+| 自动清理 | `buildCleanupPlan`（不执行）+ `cleanupSideEffects`（逐条回报 cleaned/failed/skipped/irreversible）。**失败不静默**，客户须知道哪个残留没清掉 |
+| 接入 | fileWrite 写前登记（`recordFileWriteEffect`）；CLI `ledger side-effects <scanId> [--cleanup]`；REST `GET /api/exploit/side-effects`（只读）+ `POST /api/exploit/side-effects/cleanup` |
+| 报告 | `sideEffectSummaryForReport`：让报告写出「写了什么/清没清」的可核对面 |
+
+### 安全口径（不得绕过）
+
+- 本模块**不新增任何写能力**，只登记与撤销既有能力已产生的副作用；
+- **GET 只读**不需 EXPLOIT 门（与 `ledger show` 同口径）—— 关掉利用能力后运维仍须能查残留；
+- **POST 清理与写类端点同门控**（EXPLOIT_ENABLED + 授权声明 + scope 声明）：
+  清理会对目标再发一次命令/写请求，**必须不是绕过门控的第二条写链路**（已断言钉住）；
+- **默认不自动执行清理**：扫描器「自作主张再动一次目标」比不清理更危险。
+
+### 诚实边界
+
+- 只登记**被显式调用**的写操作；不调用即无记录（不是全自动兜底）；
+- 不做「回滚整个业务事务」（需目标侧配合），只清理**本工具自己留下的痕迹**；
+- os-shell 类不可逆项在报告与 CLI 输出里显式列出，需人工确认。
+
+### 过程中修正
+
+- 测试首版用了错误的环境变量名（`SCAN_LEDGER_ROOT`，实为 `SQLI_LEDGER_DIR`）⇒ 登记表写进
+  真实 `data/ledger` 造成用例互相污染（实测「2 !== 1」）。命名为准后已核验真实目录零残留；
+- 复杂度棘轮拦下 5 处（我在存量函数里加逻辑）：按仓库纪律**拆函数**（抽出
+  `readBackAndVerify` / `runOneCleanup` / `irreversibleRows` / `summarizeResults` /
+  `runSideEffectsSubcommand`），最终 main 312→311 行、fileWrite 43→39 行，**未抬任何基线**。
+
+---
+
 ## 2026-10-18 批次 D89 · WAF 指纹 × 第三方权威工具对拍（补台账 unverified 的外部证据）
 
 **动机**：台账 `waf-fingerprint-coverage`（「62 个 WAF 指纹识别」）长期 unverified ——
@@ -651,7 +692,7 @@ jSQL 多比特 ≈ 本仓 `blindBitwise` 位平面提取（8 位并行，MySQL/T
 | P0-2 | 认证只覆盖标准 HTML 表单登录（`loginFlow.js` 自承不做 OAuth/JWT 刷新/验证码/前端加密提交） | ✅ **D36 Bearer/Token 自动续期**（`bearerKeeper` + `--refresh-url` + 面板 + 真机 `e2e/bearer-lab` 六场景三轮一致）。仍不做：OAuth2 授权码流程 / SSO / 验证码 / 解析 JWT `exp` 做前瞻性续期（见下面 D36 节的账） |
 | P1-3 | OOB 通道在真实目标上拿不到（`oobReceiver` 默认绑 127.0.0.1、DNS 需自建域+占 53；无 interactsh/Collaborator 对接） | ✅ **D87 已做**：`server/src/core/interactshClient.js`（零依赖手写协议：注册/轮询/AES-256-CTR+RSA-OAEP 解密）+ `core/oobTunnel.js`（本地/外部两拓扑统一抽象，检测器零分支）+ CLI `--oob-interactsh` + REST 白名单；整链真机 `e2e/oob-interactsh-lab` 实测通过。⚠️ 仍不做：自建协作端一键部署脚本、SMB 通道归因（UNC 走 DNS 通道，非 445 监听） |
 | P1-4 | WAF 结论只有 CRS 一家（62 厂商指纹只做「识别」，推荐链无实测背书） | ⏳ 未做 |
-| P2-5 | 写副作用无自动清理/回滚（只有 `docs/pentest-handover/05` 的人工条款 R5/R6） | ⏳ 未做 |
+| P2-5 | 写副作用无自动清理/回滚（只有 `docs/pentest-handover/05` 的人工条款 R5/R6） | ✅ **D90 已做**：`server/src/services/sideEffectLedger.js`（写前登记 + 撤销计划 + 自动清理）+ fileWrite 接入 + CLI `ledger side-effects` + REST `GET/POST /api/exploit/side-effects[/cleanup]`。⚠️ os-shell 类**不可逆**如实标注（不假装能清）；清理默认不自动执行 |
 | P2-6 | 真实弱网下的召回衰减没有数（e2e 全跑本地回环） | ⏳ 未做 |
 
 已在、**别再当待办推**的：批量 `-m`（含 Burp/HAR/Postman/OpenAPI 集合展开 + 共享限速桶）、HPP、
