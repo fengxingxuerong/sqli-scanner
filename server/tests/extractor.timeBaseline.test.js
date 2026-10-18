@@ -33,6 +33,12 @@ const TRUE_EXTRA_MS = 90;
 const ABS_THRESHOLD_MS = 25;
 // 修复后本文件的提取在 ~3s 内完成；未修复要跑数十分钟。取 15s 是两侧都远离的判定点。
 const DEADLINE_MS = 15000;
+// [D104 2026-10-18] 请求预算护栏（与墙钟双保险）：run 276 macos 实录——慢 runner 上
+// 定时器抖动把「零额外延迟」的探针读成恒真，失控态 15s 只跑到 239 个请求，墙钟红得
+// 不可解释（像 load 慢，实则判定链已失控）。请求计数是失控的直接证据且与 runner 快慢
+// 无关：修复后单表达式提取实测 ≤34 个（tb-ok 34 / tb-null 11），取 100 即 3 倍余量；
+// 失控态会数百上千。与 D96「故障②墙钟改请求预算」同一教训：不拿墙钟当唯一判据。
+const EXTRACT_REQUEST_BUDGET = 100;
 
 function extractQuery(opts) {
   if (typeof opts.url === 'string') {
@@ -97,13 +103,26 @@ function buildCtx(oracle, scanId) {
 
 /** 带截止时间的提取：超时即判红（未修复时的失控形态），并在收尾掐掉在途请求。 */
 async function extractWithDeadline(ex, ctx, oracle, expr) {
-  let timer;
+  let timer, budget;
   const kill = new Promise((_, rej) => {
     timer = setTimeout(() => rej(Object.assign(new Error('DEADLINE'), { deadline: true })), DEADLINE_MS);
+    // [D104] 请求预算轮询：一旦超过护栏立即判红（先于墙钟、与 runner 快慢无关）
+    budget = setInterval(() => {
+      if (oracle.stats.total > EXTRACT_REQUEST_BUDGET) {
+        rej(Object.assign(new Error('BUDGET'), { budget: true, total: oracle.stats.total }));
+      }
+    }, 200);
   });
   try {
     return await Promise.race([ex.extractTime(ctx, expr), kill]);
   } catch (e) {
+    if (e && e.budget) {
+      assert.fail(
+        `请求预算失控：已发 ${e.total} 个（护栏 ${EXTRACT_REQUEST_BUDGET}）——修复后单表达式提取实测 ≤34 个，` +
+          `失控态（阈值未含基线 ⇒ 恒判真）会数百上千。慢 runner 上墙钟方差大（run 276 macos 实录：` +
+          `失控态 15s 才跑 239 个，墙钟红得不可解释），请求计数才是失控的直接证据。`
+      );
+    }
     if (e && e.deadline) {
       assert.fail(
         `提取在 ${DEADLINE_MS}ms 内没跑完：阈值未含基线 ⇒ 长度二分恒判真顶到 65535 上界 ⇒ ` +
@@ -113,6 +132,7 @@ async function extractWithDeadline(ex, ctx, oracle, expr) {
     throw e;
   } finally {
     clearTimeout(timer);
+    clearInterval(budget);
     oracle.stats.dead = true;
   }
 }
