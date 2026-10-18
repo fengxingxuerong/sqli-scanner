@@ -179,4 +179,33 @@ app.post('/colfilter-xml-safe', async (req, res) => {
   }
 });
 
+// ── [D106] 固定后缀形态：键名后跟固定尾部语法（`ORDER BY ${key} DESC`）────────
+// 与 /colfilter 的差异：注入位之后还有「 DESC」这样的尾部语法。union 通道在 ORDER BY
+// 之后无法追加（SQL 语法里 ORDER BY 是 UNION 之后才允许的末段）⇒ 验证各通道真实行为。
+// 不回显 SQL：判据必须落在行集顺序/错误页差异上（回显会把载荷字符串差异当信号）。
+app.get('/colsort', async (req, res) => {
+  const key = Object.keys(req.query)[0] || 'price';
+  const sql = `SELECT id, name, price FROM products ORDER BY ${key} DESC`;
+  try {
+    const [rows] = await pool.query(sql);
+    res.send(page('colsort', rowsHtml(rows)));
+  } catch {
+    res.status(200).send(page('colsort', '<p class="err">query failed</p>'));
+  }
+});
+
+// 安全对照：列名白名单（同样的键名拼接写法，但先校验；error/union 探针连语法错误都进不去）
+app.get('/colsort-safe', async (req, res) => {
+  const raw = Object.keys(req.query)[0] || 'price';
+  const ALLOW = new Set(['id', 'name', 'price']);
+  const key = ALLOW.has(raw) ? raw : 'price';
+  const sql = `SELECT id, name, price FROM products ORDER BY ${key} DESC`;
+  try {
+    const [rows] = await pool.query(sql);
+    res.send(page('colsort-safe', rowsHtml(rows)));
+  } catch {
+    res.status(200).send(page('colsort-safe', '<p class="err">query failed</p>'));
+  }
+});
+
 app.listen(PORT, '127.0.0.1', () => console.log(`[param-name-lab] http://127.0.0.1:${PORT}`));

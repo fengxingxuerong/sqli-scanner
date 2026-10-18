@@ -1,6 +1,6 @@
 # sqli-scanner
 
-[![Tests](https://img.shields.io/badge/tests-4216%20passing-brightgreen)](#测试)[![CI](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml/badge.svg)](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml)
+[![Tests](https://img.shields.io/badge/tests-4219%20passing-brightgreen)](#测试)[![CI](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml/badge.svg)](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml)
 [![Dependencies](https://img.shields.io/badge/dependencies-0%20known%20vulns-brightgreen)](#环境变量)
 
 > CI 徽章为真实状态（仓库地址已定，run#90 起全绿）。发布判定仍以 `CHANGELOG.md`
@@ -91,7 +91,7 @@ $ echo $?   # 2（发现 High，CI 门禁生效）
 | **重定向** | 每一跳都重新校验授权范围，目标 302 到未授权主机时后续请求立即停止（防「统一登录/CDN 回源」逃逸） |
 | **SSRF 防护** | 内网/回环/链路本地/云元数据地址默认拒绝；授权内网目标需 `SSRF_ALLOW_PRIVATE=1` 或 `SSRF_ALLOW_CIDRS=<CIDR>` |
 | **二阶触发页** | 与主目标同受 scope 约束（存储点在圈内不代表回显页在圈内） |
-| **注入点范围** | 默认 query + body（含 JSON 嵌套）；`--test-headers` / `--test-path` 显式开启后追加请求头与 path 段；`--test-param-names` 追加「参数名本身」注入点（后端把键名/元素名当列名/排序名拼 SQL 时，值被参数化 ⇒ 只有改名能打；覆盖 query、[D103] JSON body 键名、[D105] XML body 元素名——XML 受 NameChar 约束走算术位移探针，仅数值语境列可判） |
+| **注入点范围** | 默认 query + body（含 JSON 嵌套）；`--test-headers` / `--test-path` 显式开启后追加请求头与 path 段；`--test-param-names` 追加「参数名本身」注入点（后端把键名/元素名当列名/排序名拼 SQL 时，值被参数化 ⇒ 只有改名能打；覆盖 query、[D103] JSON body 键名、[D105] XML body 元素名、[D106] ORDER BY 固定后缀位置——XML 受 NameChar 约束走算术位移探针（仅数值语境列可判），ORDER BY 位置走序数差分探针） |
 
 ### 支持的注入与漏洞类型
 
@@ -394,7 +394,7 @@ backend/  ← Express + Node.js
 # 前端测试（574 个用例）
 npm test
 
-# 服务端测试（3648 个用例）
+# 服务端测试（3651 个用例）
 cd server && npm test
 
 # 全部测试
@@ -420,7 +420,7 @@ npm run artifact:drift   # 入库的 e2e 基线产物必须等于当前代码跑
 
 - TypeScript: 零错误
 - 前端测试: 574/574 通过（覆盖率门禁 stmts 93.03 / branch 84.88 / func 81.90，阈值 88/77/67）
-- 服务端测试: 3648 用例（3642 pass / 0 fail / 6 skip，并发口径 2026-10-18 复测；6 skip 为环境依赖显式跳过。覆盖率 lines 91.13 / branch 80.54 / func 84.28，阈值 85/74/77）
+- 服务端测试: 3651 用例（3645 pass / 0 fail / 6 skip，并发口径 2026-10-18 复测；6 skip 为环境依赖显式跳过。覆盖率 lines 91.13 / branch 80.54 / func 84.28，阈值 85/74/77）
 - 一键扫描: `npm run scan -- -u <url>`（CLI 一条命令产出 HTML/JSON/Markdown 全套报告 + manifest，退出码可直接进 CI 门禁）
 - Tamper 插件: 234 个（含批次 D3 新增 scalarselectinline；含 v24 增量 20 个，对齐 sqlmap 官方 tamper 全集，含官方 CRS/libinjection 实测组合 uniontable+odbcbrace；含批次 D13 新增 5 件上游形态变体 *nospace/*open/*block，真机 A/B 判决前不进默认链）
 - WAF 绕过能力: 200+ 插件链式组合，覆盖 62 个 WAF 厂商指纹识别 + 推荐
@@ -626,7 +626,7 @@ node e2e/api-range-lab/run.mjs --list        # 列出全部用例
 ### 验收门禁（`npm run acceptance`）
 
 21 套件一次跑完（顺序即 `e2e/acceptance.mjs` 里 SUITES 的登记顺序）：服务端单测 → 独立刁钻靶场 →
-检测回归 → 真 MySQL → 参数名注入真靶场（query+JSON 键名+XML 元素名拼 SQL：检出 + 白名单对照 + 开关语义）→
+检测回归 → 真 MySQL → 参数名注入真靶场（query/JSON 键名+XML 元素名+ORDER BY 后缀位拼 SQL：检出 + 白名单对照 + 开关语义）→
 参数挖掘真靶场（隐藏参数只能字典挖掘：开挖掘 3/3 检出 + 关 0 + 安全点 0）→ 真 PG（含二阶）→ **批量编排故障隔离（`-m`，真 SQLite 靶站 + 死目标）** → OOB 带外通道真机 →
 OOB 外部隧道真机（interactsh 协作端，需出网，离线 SKIP） →
 **第三方真框架外部裁判（Juice Shop：真漏洞须检出 + 安全端点零误报，未就绪 SKIP）** →

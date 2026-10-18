@@ -65,6 +65,34 @@
 
 ## [Unreleased]
 
+### 2026-10-18 批次 D106 · paramName「ORDER BY 固定后缀」形态（P1-2 收口：序数差分探针）
+
+**背景**：P1-2 —— `WHERE ${k} = ?` 属可注释形态（D93 覆盖），但键名拼进 **ORDER BY 位置**
+且后跟固定尾部语法（`ORDER BY ${k} DESC`）时，既有通道全盲。真 MySQL 靶场实录（新增
+`/colsort` 端点）：布尔 + UNION + ERROR 三通道请求 64 个、**零检出**——布尔载荷 `{k} AND 1=1-- -`
+在 ORDER BY 里退化成 `ORDER BY price AND 1=1`（恒真=price）与 `ORDER BY price AND 1=2`
+（恒 0 常量），常量排序无可观察分化（与 TODO §M 同源老坑）；UNION 在该位置**语法不可表达**
+（ORDER BY 是 UNION 之后才允许的末段），扫不到也不能报。
+
+**能力（D106 判据）**：新增 `detectorSupport/orderByKey.js` 序数差分验证器（technique='boolean'，
+归类布尔差分族零新增类型）：
+
+- 探针 P1=`{k}, 1-- -`（裸整数 1 是合法 select 列表序号）vs P2=`{k}, 9999-- -`
+  （MySQL/MariaDB/TiDB 报 `Unknown column '9999' in 'order clause'`，PG 报 position 越界）；
+  分化 + 复核轮（两侧各自稳定且仍分化）才落槌，4 请求封顶、无分化 2 请求即止。
+- 反射页剥离回显载荷增量后再比较（`_stripReflected`）——反射端点零误报有单测钉住。
+- 只对标准赛道**零命中**的非 XML 参数名点补测（已命中的点不重复探测、不覆盖既有结论）；
+  XML 元素名点零请求（NameChar 不允许空格/逗号）；值点零请求。挂在 detectPhase 主循环后、
+  WAF tamper 重跑前（重跑合并逻辑可自然吸收补测命中）。
+
+**实测（真 MySQL 靶场，`e2e/param-name-lab` 扩 `/colsort` 三判据进 acceptance）**：
+`sortVuln=1 sortParamNameHit=1 sortOff=0 sortSafe=0`（修复前该端点零检出且 64 请求空转）；
+单测 21 例（+D106 三：命中/白名单+反射零误报/网络未决+前置边界零请求）。
+
+**诚实边界**：MSSQL/SQLite/Oracle 把裸整数当常量 ⇒ 两探针同序无分化（诚实假阴性）；
+目标把 SQL 错误吞成与正常页全同 ⇒ 假阴性；键名拼接处带括号/函数包裹 ⇒ 假阴性。
+XML 元素名在 ORDER BY 位置仍无判据（`{tag}, 9999` 非法 NameChar），留错误差分通道候选。
+
 ### 2026-10-18 批次 D105 · XML body 元素名注入面（P1-1 收口：NameChar 约束下的算术位移探针）
 
 **动机**：P1-1 余项——D93/D103 关闭了 query/JSON 键名面；XML 元素名同型（后端
@@ -95,6 +123,9 @@
 验证器真/安全/静态/网络不可用）。
 
 **收口**：底账 P1-1 → [x]（错误差分通道转 TODO 余项）。
+
+**CI 收束**：run 278 = `39139128689`（`560eb151`）attempt 1 全绿（11 ✅ + 2 skipped，
+23.4 min）；gate:close 22/22；facts 徽章 4216（+8 测试）。
 
 ### 2026-10-18 批次 D104 · CI macos 提取器判据抖动响应（墙钟 → 请求预算双护栏）
 
