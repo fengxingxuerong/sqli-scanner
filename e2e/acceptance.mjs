@@ -352,6 +352,24 @@ const SUITES = [
     },
   },
   {
+    id: 'param-mine-lab',
+    title: '参数挖掘真靶场（零告知发现隐藏参数检出 + 开关语义 + 安全点零检出）',
+    needs: ['mysql'],
+    run: () => run('node', ['e2e/param-mine-lab/run.mjs'], envDb),
+    assert: (out) => {
+      const skip = /\[SKIP\]\s*(.+)/.exec(out);
+      if (skip) return { facts: { 跳过: 1 }, pass: false, skipped: true, skipReason: skip[1].trim() };
+      const pass = /\[PASS\] 参数挖掘/.test(out);
+      const fail = /\[FAIL\]/.test(out);
+      const line = /\[param-mine\] on=(\d+\/\d+) off=(\d+) safe=(\d+)/.exec(out);
+      return {
+        facts: { 开挖掘检出轮次: line?.[1] || 'n/a', 关挖掘检出: line?.[2] || 'n/a', 安全点检出: line?.[3] || 'n/a' },
+        pass: pass && !fail,
+        reason: fail ? '参数挖掘断言未通过（详见 run.mjs 输出）' : pass ? null : '解析不到 [PASS] 行（套件没真跑）',
+      };
+    },
+  },
+  {
     id: 'real-world-lab',
     title: '真 PG 靶场（含二阶注入）',
     needs: [],

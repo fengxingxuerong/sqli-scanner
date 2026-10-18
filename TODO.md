@@ -5,6 +5,30 @@
 
 ---
 
+## 2026-10-18 批次 D102 · P0-5 台账收口（versioned 覆盖口径 + paramminer 同题对照）
+
+**A · tamper versioned 族（覆盖口径关闭）**：上游 5 个示例的**默认件**形态差异保留 drift 点名
+（默认链是否切换待真机 A/B）；上游形态由复刻件（*nospace / *open / *block）承载，对拍脚本 ALIAS
+段机械比对 **5/5**（复刻件缺失/漂移直接判红，无豁免位）。台账 `tamper-versioned-parity` 改写为
+覆盖口径 → verified；AGENTS.md §四行同步。
+
+**B · paramminer（改写措辞 + 实测量化）**：新真靶场 `e2e/param-mine-lab`（隐藏参数 kw 只在字典里，
+不在任何链接表单；开挖掘 3/3 检出、关挖掘 0、安全点 0，已接 acceptance 与 run-all）；同题对照
+（redteam 口径：同参 `--level 2 --dbms=mysql`、各 3 轮多数决）：我方零告知 3/3；sqlmap 零告知
+0/3、全告知 3/3 ⇒ 差异在**发现环节**。台账改写为「提供 sqlmap 所没有的主动发现能力」→ verified。
+
+**顺带实锤（判定脚本自伤）**：redteam `sqlmap-bench.mjs` 裸词正则 + neg-AND 两处自伤 ⇒ 旧
+`results-sqlmap-runs3.json` 的「sqlmap 16/19、6/7 误报」实际 **14/19、0/7**（重算文件
+`results-sqlmap-runs3.rescored.json`；旧文件与 archive 纪要留痕不重写；bench 正则已修正）。
+
+### 待推进
+
+- 重跑 redteam-lab sqlmap-bench（需 PG 常驻 + env.mjs）刷新修正后 runner 的新基线（当前用重算文件佐证）。
+- 同族审计：blackbox-lab `sqlmap-bench.mjs` 的「pos && !neg」在多参数混合日志上同样会反向误杀
+  （本批只修了 redteam 侧）；`sqlmap-benchmark/run.mjs` 的 `hit` 口径一并复核。
+
+---
+
 ## 2026-10-17 批次 D93 · 参数名注入点（`--test-param-names`，吸收队列 #7）
 
 **缺口**：后端把 query **键名**拼进 SQL（`WHERE ${Object.keys(req.query)[0]} = ?`、键名当列名
@@ -42,7 +66,7 @@ injection.js 改键名保值（基线保持原键名）· boundary 跳过闭合�
 - Cookie 之外的**其他注入点形态**（url/body/header/二阶）与 auth 配置的交互是否还有同类
   夹击（本轮已覆盖 header 的 REST 路径；CLI 与 REST 的去重口径应长期保持一致，可考虑抽共享函数）；
 - 商业云 WAF 真机样本（D89 遗留）、62 家其余 44 家外部对拍源；
-- versioned 注释形态（AGENTS.md §四，refuted 未关闭，待 tamper 批次）。
+- versioned 注释形态 —— **已关闭（D102 2026-10-18）**：上游形态由复刻件承载并纳入 ALIAS 比对 5/5，台账转 verified（覆盖口径）；默认链切换仍待真机 A/B。
 
 ---
 

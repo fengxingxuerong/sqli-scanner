@@ -1,0 +1,44 @@
+{
+  "summary": {
+    "at": "2026-10-18T11:13:59.486Z",
+    "runs": 3,
+    "ours": {
+      "mode": "--param-mine 零告知",
+      "hit": true,
+      "fromZero": "3/3"
+    },
+    "sqlmapZeroKnowledge": "0/3（预期 miss：未告知参数无法被发现）",
+    "sqlmapFullKnowledge": "3/3（预期 hit：阳性对照，参数已告知）",
+    "verdict": "差异在发现环节：我方零告知发现并检出；sqlmap 零告知 0 发现，全告知后可检出 ⇒ 主动挖掘是其没有的能力（不是「更强」的利用能力）"
+  },
+  "logs": {
+    "zeroKnowledge": [
+      {
+        "hit": false,
+        "note": ""
+      },
+      {
+        "hit": false,
+        "note": ""
+      },
+      {
+        "hit": false,
+        "note": ""
+      }
+    ],
+    "fullKnowledge": [
+      {
+        "hit": true,
+        "note": "parameter 'kw' is vulnerable. Do you want to keep testing the others (if any)? [y/N] N\r"
+      },
+      {
+        "hit": true,
+        "note": "parameter 'kw' is vulnerable. Do you want to keep testing the others (if any)? [y/N] N\r"
+      },
+      {
+        "hit": true,
+        "note": "parameter 'kw' is vulnerable. Do you want to keep testing the others (if any)? [y/N] N\r"
+      }
+    ]
+  }
+}

@@ -86,6 +86,9 @@ const LABS = [
   // [D95] D93 的参数名注入真靶场：自带幂等夹具（自建 paramname_lab + 种子），
   // 只要有可连的 mysqld 就能真跑（原先复用 blackbox_lab 表 ⇒ 未跑过黑盒靶场的环境永久 SKIP）。
   { name: 'param-name-lab', desc: '参数名注入真靶场（键名拼 SQL 检出 + 白名单对照 + 开关语义）', entry: 'e2e/param-name-lab/run.mjs', deps: ['mysql'] },
+  // [D102] 参数挖掘真靶场（隐藏参数 kw 只能靠字典猜出——不开挖整体漏检；与 sqlmap 的
+  // 同题对照证据器在同目录 sqlmap-contrast.mjs，需 sqlmap ⇒ 不进 CI，本地跑）
+  { name: 'param-mine-lab', desc: '参数挖掘真靶场（零告知发现隐藏参数检出 + 开关语义 + 安全点零检出）', entry: 'e2e/param-mine-lab/run.mjs', deps: ['mysql'] },
   // [2026-09-28] 其余靶场验证的是**引擎**（多数直接 import ScanManager），这一套只走 HTTP：
   // 22 条对外端点 + 真 MySQL 靶站，逐条核"接口有没有把能力交付到用户手上"。
   // 它自带的靶站会记录每一个到达的请求（pause/resume、retest、凭据继承这类承诺
