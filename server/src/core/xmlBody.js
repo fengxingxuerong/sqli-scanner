@@ -203,6 +203,35 @@ export function cloneXmlTree(tree) {
 }
 
 /**
+ * [D105 2026-10-18] 元素名合法性：与 parseXmlBody 的 tagRe 接受集保持一致
+ * （`[A-Za-z_][\w.:-]*`）。参数名注入要**改元素名**，这个名字会被原样拼进标签——
+ * 非法名（含空格/引号/括号，即一切 SQL 关键字载荷）一旦发出就是畸形报文。
+ * 本函数是「绝不发畸形 XML」边界的单点判定。
+ * @param {string} name
+ * @returns {boolean}
+ */
+export function isXmlName(name) {
+  return /^[A-Za-z_][\w.:-]*$/.test(String(name));
+}
+
+/**
+ * 把指定路径的元素**标签名**换掉（文本/属性/子节点原样保留）。
+ * 用于 XML body 元素名注入（后端把元素名当列名拼 SQL，D105）。非法新名直接拒绝
+ * （false），调用方回退原报文——与 setXmlLeaf 的「路径不存在返回 false」同口径。
+ * @param {XmlNode} tree 会被**就地修改**，调用方负责先克隆
+ * @param {string} path 点路径（与 getXmlLeaf/setXmlLeaf 同源）
+ * @param {string} newTag 新元素名
+ * @returns {boolean} 是否改名成功
+ */
+export function renameXmlTag(tree, path, newTag) {
+  if (!isXmlName(newTag)) return false;
+  const node = resolveNode(tree, String(path).split('.'));
+  if (!node) return false;
+  node.tag = String(newTag);
+  return true;
+}
+
+/**
  * 序列化回 XML 文本。
  * @param {XmlNode} tree
  * @returns {string}
@@ -232,4 +261,6 @@ export default {
   serializeXml,
   escapeXmlText,
   isXmlContentType,
+  isXmlName,
+  renameXmlTag,
 };

@@ -1010,13 +1010,13 @@
       "limitLines": 100,
       "limitComplexity": 15
     },
-    "server/src/engine/scan/detect.js::<arrow@546>": {
+    "server/src/engine/scan/detect.js::<arrow@636>": {
       "lines": 79,
       "complexity": 28,
       "limitLines": 100,
       "limitComplexity": 15
     },
-    "server/src/engine/scan/detect.js::<arrow@79>": {
+    "server/src/engine/scan/detect.js::<arrow@164>": {
       "lines": 162,
       "complexity": 80,
       "limitLines": 100,

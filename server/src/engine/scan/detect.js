@@ -13,6 +13,7 @@ import * as eventBus from '../../core/eventBus.js';
 import { logger } from '../../core/logger.js';
 import { oobTunnel } from '../../core/oobTunnel.js';
 import { dialectToDbms } from '../DialectSqlBuilder.js';
+import { xmlParamNameDetector } from '../detectorSupport/xmlParamName.js';
 import { verifyTamperChains } from '../../core/waf/chainVerify.js';
 import { decideBlockPolicy, isUntrustedVendor } from '../../core/waf/blockPolicy.js';
 // [A3-2026-09-25] 通道降级编排：把逐词拦截画像翻译成「哪些通道还值得跑」。
@@ -23,6 +24,95 @@ import { GENERIC_BLOCK_VENDOR } from '../../core/waf/blockSignatures.js';
 import { isNetworkFailureError } from '../../core/scanValidityGuard.js';
 import { emptyExtractedData } from '../models.js';
 import { PAUSE_POLL_MS } from './constants.js';
+
+/**
+ * [D105] XML body 元素名点的前置独立通道：专用算术位移验证器（NameChar 不承载通用载荷，
+ * 通用检测器/WAF tamper 对其无意义）。按同一 scheduler 并发/限速跑完后，返回**非 XML** 点
+ * 供标准赛道照旧处理——标准赛道的函数体/复杂度保持基线不变（本通道不污染热路径）。
+ * 统计口径与标准点一致：inconclusive 记未决（reliable=false），命中写 foundByPoint，
+ * 逐点落盘 session，完成后计入 fullyTestedPoints。
+ * @param {any[]} points
+ * @param {object} deps
+ * @returns {Promise<any[]>} 剩余（非 XML 元素名）点
+ */
+async function runXmlNamePrePass(points, deps) {
+  const isXmlName = (p) => p.location === 'paramName' && p.carrier === 'xml';
+  const xmlPoints = points.filter(isXmlName);
+  if (!xmlPoints.length) return points;
+  const rest = points.filter((p) => !isXmlName(p));
+  // 布尔差分族未被选中 ⇒ 该面不测（元素名拼接只有布尔差分通道能表达；union/error 无对应载荷族）
+  if (!deps.selectedTechs.includes('boolean')) return rest;
+  await deps.scheduler.run(xmlPoints, (point) => runOneXmlNamePoint(point, deps), 0);
+  return rest;
+}
+
+/**
+ * 单个 XML 元素名点的验证与记账（与标准点同口径：未决/命中/落盘/完成集）。
+ * @param {any} point
+ * @param {object} deps
+ */
+async function runOneXmlNamePoint(point, deps) {
+  const { ctxBase, target, s, guard, session, validity, validityEnabled, scanId } = deps;
+  if (s.cancelled || guard.shouldAbort) return;
+  if (session && session.perPoint[point.id] && session.perPoint[point.id].status === 'done') return;
+  eventBus.emit(scanId, 'point_testing', { pointId: point.id, technique: 'boolean' });
+  const ctx = { ...ctxBase, target, point, dbms: point.dbms || null };
+  const found = await detectXmlPoint(point, ctx, validity, validityEnabled);
+  await recordXmlPoint(point, ctx, found, deps);
+}
+
+/**
+ * XML 元素名点的验证（未决记账在调用侧；命中则返回单元素 found 数组）。
+ * @returns {Promise<Array<{technique:string,result:any}>>}
+ */
+async function detectXmlPoint(point, ctx, validity, validityEnabled) {
+  try {
+    const r = await xmlParamNameDetector.detect(ctx);
+    if (r && r.inconclusive) {
+      if (validityEnabled) validity.addNetworkErrorPoint(point.id);
+      point.netErr = true;
+      point.unverifiedReason = String(r.inconclusiveReason || '响应不可用');
+    }
+    if (r && r.vulnerable) return [{ technique: 'boolean', result: r }];
+  } catch (e) {
+    // 与检测器失败同口径：非网络异常按「该探针对本点不适用」处理（判负仍可接受）
+    logger.warn(`XML 元素名探针失败（按未命中处理）：${e.message}`);
+  }
+  return [];
+}
+
+/**
+ * XML 元素名点记账（与标准点同口径：foundByPoint / 逐点落盘 / fullyTestedPoints）。
+ */
+async function recordXmlPoint(point, ctx, found, deps) {
+  const { foundByPoint, fullyTestedPoints, session } = deps;
+  if (found.length) foundByPoint.set(point.id, { point, ctx, found });
+  if (session) {
+    await session
+      .savePointResult(point.id, { found: found.map((f) => ({ technique: f.technique, result: f.result })) })
+      .catch(() => null);
+  }
+  fullyTestedPoints.add(point.id);
+}
+
+/**
+ * [P1 2026-09-09] OOB 带外接收端启动（仅 oob 被选中且显式 enabled）。失败返回原因串
+ * （报告收尾写入 summary.oobUnavailable），成功/未启用返回 null。
+ * @param {string[]} selectedTechs
+ * @param {any} oobCfg
+ * @returns {Promise<string|null>}
+ */
+async function startOobIfNeeded(selectedTechs, oobCfg) {
+  if (!selectedTechs.includes('oob') || !oobCfg || !oobCfg.enabled) return null;
+  try {
+    await oobTunnel.start(oobCfg);
+    return null;
+  } catch (e) {
+    const msg = String(e?.message || e);
+    logger.warn(`OOB 隧道启动失败，oob 检测将不可用：${msg}`);
+    return msg;
+  }
+}
 
 /**
  * @param {object} run 扫描运行期上下文
@@ -66,17 +156,12 @@ export async function detectPhase(run) {
     const oobCfg = target.config.oob;
     // [P1 2026-09-09] OOB 启动失败 → 记录原因，报告收尾写入 summary.oobUnavailable
     // （此前只 warn，交付报告看不到「oob 没测成」，time/oob 场景会被误读成「无带外」）
-    let oobUnavailable = null;
-    if (selectedTechs.includes('oob') && oobCfg && oobCfg.enabled) {
-      try {
-        await oobTunnel.start(oobCfg);
-      } catch (e) {
-        oobUnavailable = String(e?.message || e);
-        logger.warn(`OOB 隧道启动失败，oob 检测将不可用：${oobUnavailable}`);
-      }
-    }
+    const oobUnavailable = await startOobIfNeeded(selectedTechs, oobCfg);
 
-    await scheduler.run(pointsToScan, async (point) => {
+    // [D105] XML body 元素名点：NameChar 不承载通用布尔/UNION 载荷 ⇒ 专用算术位移验证器在
+    // **标准赛道之前**独立跑（同一 scheduler 并发/限速），返回其余点照旧走通用流程。
+    const stdPoints = await runXmlNamePrePass(pointsToScan, { scheduler, ctxBase, target, selectedTechs, s, guard, session, validity, validityEnabled, foundByPoint, fullyTestedPoints, scanId });
+    await scheduler.run(stdPoints, async (point) => {
       if (s.cancelled) return;
       // [熔断] 目标库已进入不可恢复状态：剩余点直接跳过。
       // 库已损坏时基线被污染，继续测只会产出脏结果并持续伤害目标。
@@ -538,7 +623,12 @@ export async function detectPhase(run) {
           ).length;
         const retryPoints = filterAdaptive
           ? errorOnlyPoints.map((f) => f.point)
-          : pointsToScan.filter((p) => !foundByPoint.has(p.id) || fastBitCount(p.id) < 2);
+          // [D105] XML 元素名点不参与 tamper 重跑：tamper 载荷同样含空格/注释符，元素名承载不了，
+          // 重跑只会被合法性守卫回退成原报文白耗请求。
+          : pointsToScan.filter((p) =>
+              !(p.location === 'paramName' && p.carrier === 'xml')
+              && (!foundByPoint.has(p.id) || fastBitCount(p.id) < 2)
+            );
         if (retryPoints.length) {
           logger.info(
             `${highConfWaf ? `WAF 识别（${highConfWaf.vendor}）` : '拦截证据（未识别厂商）'}，自动套 tamper [${plugins.join(',')}] 重跑 ${retryPoints.length} 个未命中点（快速层）`

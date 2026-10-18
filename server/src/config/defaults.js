@@ -72,8 +72,9 @@ export const defaults = {
   // 默认 false：开启后每个 query 参数多一个点位（请求量约 +1 倍），且大多数目标不存在该形态。
   // [D103 2026-10-18] 覆盖范围扩到 **JSON body 键名**（`Object.keys(req.body)[0]` 同型；
   // jsonBody 传入时每个对象键多一个 carrier='json' 点位）。
-  // 诚实边界：XML 元素名不在覆盖内——载荷字符集受 XML NameChar 约束（布尔载荷含空格/引号
-  // ⇒ 发出即畸形报文），不以畸形报文换检出，待专门探针批。
+  // [D105 2026-10-18] 再扩到 **XML body 元素名**（carrier='xml'）：NameChar 不承载布尔载荷，
+  // 检测走专用算术位移探针（tag-0 恒等 / tag-1 位移；仅数值语境列可判，字符串列=诚实假阴性）。
+  // 边界：XML 元素名点不进通用检测器赛道与 WAF tamper 重跑（载荷族不可承载）。
   testParamNames: false,
   // useRegistry（对标 sqlmap 声明式 payload 体系）：false=检测器直接用 payloads/*.js 扁平数组（默认，零回归）；
   // true=检测器改用 PAYLOAD_REGISTRY 声明式注册表 + selectPayloadsForCtx 筛选（受 level/risk/testFilter/testSkip 控制）。
