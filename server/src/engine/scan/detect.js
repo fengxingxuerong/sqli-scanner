@@ -14,6 +14,7 @@ import { logger } from '../../core/logger.js';
 import { oobTunnel } from '../../core/oobTunnel.js';
 import { dialectToDbms } from '../DialectSqlBuilder.js';
 import { xmlParamNameDetector } from '../detectorSupport/xmlParamName.js';
+import { orderByKeyDetector } from '../detectorSupport/orderByKey.js';
 import { verifyTamperChains } from '../../core/waf/chainVerify.js';
 import { decideBlockPolicy, isUntrustedVendor } from '../../core/waf/blockPolicy.js';
 // [A3-2026-09-25] 通道降级编排：把逐词拦截画像翻译成「哪些通道还值得跑」。
@@ -112,6 +113,63 @@ async function startOobIfNeeded(selectedTechs, oobCfg) {
     logger.warn(`OOB 隧道启动失败，oob 检测将不可用：${msg}`);
     return msg;
   }
+}
+
+/**
+ * [D106] 参数名点 ORDER BY 固定后缀形态补测（P1-2）。只针对标准赛道**零命中**的非 XML
+ * 参数名点（已命中的点不重复探测、绝不覆盖既有结论）：布尔/UNION 在此形态全盲（常量排序
+ * 无真假分化 / UNION 语法不可表达），序数差分是唯一可观察通道。
+ * @param {any[]} points
+ * @param {object} deps
+ */
+async function runOrderByKeyPostPass(points, deps) {
+  if (!deps.selectedTechs.includes('boolean')) return; // 布尔差分族未选中 ⇒ 该面不测
+  const cands = points.filter(
+    (p) => p.location === 'paramName' && p.carrier !== 'xml' && !deps.foundByPoint.has(p.id)
+  );
+  if (!cands.length) return;
+  await deps.scheduler.run(cands, (point) => runOneOrderByKey(point, deps), 0);
+}
+
+/**
+ * 单个参数名点的 ORDER BY 序数探针与记账（只有零命中候选会走到这里，写入不覆盖既有条目）。
+ * @param {any} point
+ * @param {object} deps
+ */
+async function runOneOrderByKey(point, deps) {
+  const { ctxBase, target, s, guard, session, validity, validityEnabled, foundByPoint, scanId } = deps;
+  if (s.cancelled || guard.shouldAbort) return;
+  if (session && session.perPoint[point.id] && session.perPoint[point.id].status === 'done') return;
+  eventBus.emit(scanId, 'point_testing', { pointId: point.id, technique: 'boolean' });
+  const ctx = { ...ctxBase, target, point, dbms: point.dbms || null };
+  const found = await detectOrderByKeyPoint(point, ctx, validity, validityEnabled);
+  if (!found.length) return;
+  foundByPoint.set(point.id, { point, ctx, found });
+  if (session) {
+    await session
+      .savePointResult(point.id, { found: found.map((f) => ({ technique: f.technique, result: f.result })) })
+      .catch(() => null);
+  }
+}
+
+/**
+ * 参数名点 ORDER BY 序数探针的验证与未决记账。
+ * @returns {Promise<Array<{technique:string,result:any}>>}
+ */
+async function detectOrderByKeyPoint(point, ctx, validity, validityEnabled) {
+  try {
+    const r = await orderByKeyDetector.detect(ctx);
+    if (r && r.inconclusive) {
+      if (validityEnabled) validity.addNetworkErrorPoint(point.id);
+      point.netErr = true;
+      point.unverifiedReason = String(r.inconclusiveReason || '响应不可用');
+    }
+    if (r && r.vulnerable) return [{ technique: 'boolean', result: r }];
+  } catch (e) {
+    // 与检测器失败同口径：非网络异常按「该探针对本点不适用」处理（判负仍可接受）
+    logger.warn(`ORDER BY 键名探针失败（按未命中处理）：${e.message}`);
+  }
+  return [];
 }
 
 /**
@@ -392,6 +450,10 @@ export async function detectPhase(run) {
       if (session) await session.savePointResult(point.id, { found: found.map((f) => ({ technique: f.technique, result: f.result })) }).catch(() => null);
       fullyTestedPoints.add(point.id);
     }, 0); // [MERGED: perf] retry=0：单请求重试归 HttpClient 统一负责，避免双重放大为 (retry+1)² 次物理请求
+
+    // [D106] 参数名点 ORDER BY 固定后缀形态补测（P1-2）：标准赛道零命中的**非 XML** 参数名
+    // 点追加序数差分探针（`{k}, 1-- -` 有效 vs `{k}, 9999-- -` 序数越界）。
+    await runOrderByKeyPostPass(pointsToScan, { scheduler, ctxBase, target, selectedTechs, s, guard, session, validity, validityEnabled, foundByPoint, scanId });
 
     // 3.4) WAF 自动 tamper 重跑（P1-D5）：识别到高置信 WAF 且用户未显式配置 tamper 时，
     // 对「未命中点」套用 wafRecommend 推荐链重跑快速层（union/error/boolean），受节流控制。

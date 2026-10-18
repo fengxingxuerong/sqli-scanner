@@ -13,6 +13,8 @@
 // [D105 2026-10-18] XML body 元素名（carrier='xml'，P1-1 余项）——NameChar 不允许空格/引号
 // ⇒ 布尔载荷发出即畸形报文，载荷族改为算术位移（`tag-0` 恒等 / `tag-1` 位移），
 // 由专用验证器判定；判据 D105-*。
+// [D106 2026-10-18] ORDER BY 固定后缀形态（P1-2）——`ORDER BY ${k} DESC` 下布尔载荷退化为
+// 常量排序、UNION 语法不可表达 ⇒ 序数差分探针 `{k}, 1-- -` / `{k}, 9999-- -`；判据 D106-*。
 // ============================================================================
 
 import { test } from 'node:test';
@@ -21,6 +23,7 @@ import { TargetParser } from '../src/engine/TargetParser.js';
 import { buildParamNameRequest, buildJsonKeyRequest, buildXmlKeyRequest } from '../src/engine/injection.js';
 import { probeBoundary } from '../src/engine/detectorSupport/boundary.js';
 import { XmlParamNameDetector } from '../src/engine/detectorSupport/xmlParamName.js';
+import { OrderByKeyDetector } from '../src/engine/detectorSupport/orderByKey.js';
 import { parseXmlBody, cloneXmlTree, serializeXml, renameXmlTag, isXmlName } from '../src/core/xmlBody.js';
 
 const makeTarget = (cfg = {}) => ({
@@ -320,4 +323,83 @@ test('D105-③: 网络不可用 → inconclusive（记未决，不写阴性结�
   assert.equal(r.vulnerable, false);
   assert.equal(r.inconclusive, true);
   assert.match(String(r.inconclusiveReason), /不可用/);
+});
+
+// —— D106-① 序数差分验证器：模拟端点（真/安全/静态/反射/网络失败）——
+
+const sortPage = (rows) => `<html><body>${rows}</body></html>`;
+const ROWS_DESC = '<p>4 | 27 inch Monitor | 1899.00</p><p>2 | Noise Cancel Headphone | 1299.00</p>';
+const ROWS_ASC = '<p>6 | Laptop Stand | 89.00</p><p>3 | USB-C Hub | 199.00</p>';
+const SORT_ERR = '<p class="err">query failed</p>';
+
+function makeSortClient(kind) {
+  const reqs = [];
+  return {
+    reqs,
+    async request(opts) {
+      if (kind === 'netfail') return { status: 0, data: '', __netErr: { kind: 'timeout' } };
+      const url = String(opts.url || '');
+      reqs.push(url);
+      const m = /[?&]([^=]+)=/.exec(url);
+      const key = decodeURIComponent(m ? m[1] : '');
+      if (kind === 'vuln') {
+        if (key.includes('9999')) return { status: 200, data: sortPage(SORT_ERR) };
+        return { status: 200, data: sortPage(ROWS_ASC) };
+      }
+      if (kind === 'reflect') return { status: 200, data: sortPage(`<p>order: ${key}</p>${ROWS_DESC}`) };
+      return { status: 200, data: sortPage(ROWS_DESC) };
+    },
+  };
+}
+
+const sortCtx = (client) => ({
+  httpClient: client,
+  target: makeTarget(),
+  point: { id: 'q1', location: 'paramName', param: 'name', originalValue: 'name' },
+  dbms: 'MySQL',
+  config: { timeoutMs: 5000, retry: 0 },
+});
+
+test('D106-①: ORDER BY 尾部形态真端点命中（序数越界分化），4 请求含复核轮', async () => {
+  const client = makeSortClient('vuln');
+  const r = await new OrderByKeyDetector().detect(sortCtx(client));
+  assert.equal(r.vulnerable, true);
+  assert.equal(r.technique, 'boolean');
+  assert.deepEqual(r.payloads, ['name, 1-- -', 'name, 9999-- -']);
+  assert.equal(client.reqs.length, 4, 'P1/P2 + 复核 P1/P2');
+  assert.equal(r.trace.kind, 'paramname-ordery-diff');
+  assert.match(r.evidence, /ORDER BY/);
+});
+
+test('D106-①: 白名单端点零误报；反射端点零误报（剥离回显后两探针同形）', async () => {
+  const safeClient = makeSortClient('safe');
+  const rSafe = await new OrderByKeyDetector().detect(sortCtx(safeClient));
+  assert.equal(rSafe.vulnerable, false);
+  assert.equal(safeClient.reqs.length, 2, 'P1/P2 无分化即止（无需求复核轮）');
+
+  // 反射页：载荷明文回显但行集相同——若不做反射剥离会把「回显内容不同」当差分 ⇒ 误报
+  const reflectClient = makeSortClient('reflect');
+  const rReflect = await new OrderByKeyDetector().detect(sortCtx(reflectClient));
+  assert.equal(rReflect.vulnerable, false, '反射端点必须零误报');
+});
+
+test('D106-①: 网络不可用 → inconclusive；值点/XML 元素名点零请求（前置边界）', async () => {
+  const r = await new OrderByKeyDetector().detect(sortCtx(makeSortClient('netfail')));
+  assert.equal(r.vulnerable, false);
+  assert.equal(r.inconclusive, true);
+  assert.match(String(r.inconclusiveReason), /不可用/);
+
+  const valueClient = makeSortClient('vuln');
+  const valueCtx = sortCtx(valueClient);
+  valueCtx.point = { id: 'v1', location: 'url', param: 'name', originalValue: 'Keyboard' };
+  const rv = await new OrderByKeyDetector().detect(valueCtx);
+  assert.equal(rv.vulnerable, false);
+  assert.equal(valueClient.reqs.length, 0, '值点不应发任何请求（该面已由通用赛道覆盖）');
+
+  const xmlClient = makeSortClient('vuln');
+  const xmlCtx2 = sortCtx(xmlClient);
+  xmlCtx2.point = { id: 'x1', location: 'paramName', carrier: 'xml', param: 'filter.price', originalValue: 'price' };
+  const rx = await new OrderByKeyDetector().detect(xmlCtx2);
+  assert.equal(rx.vulnerable, false);
+  assert.equal(xmlClient.reqs.length, 0, 'XML 元素名点不应发序数探针（NameChar 不允许空格/逗号）');
 });

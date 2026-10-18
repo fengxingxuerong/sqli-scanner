@@ -20,9 +20,8 @@
 // ============================================================================
 import { Detector } from '../Detector.js';
 import { createDetectionResult } from '../models.js';
+import { applyProbeOutcome, probeOnce } from './probeOnce.js';
 import { isXmlName } from '../../core/xmlBody.js';
-
-const bodyOf = (res) => String(res && res.data != null ? res.data : '');
 
 export class XmlParamNameDetector extends Detector {
   constructor() {
@@ -40,35 +39,29 @@ export class XmlParamNameDetector extends Detector {
    * @returns {Promise<ShiftProbeOutcome>}
    */
   async _probeShift(send, tag) {
-    const rB = await send(tag);
-    const whyB = this.unusableOf(rB);
-    if (whyB) return { status: 'inconclusive', reason: `XML 元素名探针基线不可用：${whyB}` };
-    const bodyB = bodyOf(rB);
-    if (this._isWafBlockPage(rB)) return { status: 'none' }; // 基线即拦截页：参照不可信
+    const b = await probeOnce(this, send, tag, 'XML 元素名探针基线');
+    if (!b.ok) return { status: 'inconclusive', reason: b.why };
+    const bodyB = b.body;
+    if (this._isWafBlockPage(b.res)) return { status: 'none' }; // 基线即拦截页：参照不可信
 
-    const r0 = await send(`${tag}-0`);
-    const why0 = this.unusableOf(r0);
-    if (why0) return { status: 'inconclusive', reason: `恒等位移探针不可用：${why0}` };
-    if (bodyOf(r0) !== bodyB) return { status: 'none' }; // 恒等不成立 ⇒ 名字未进 SQL 表达式
+    const p0 = await probeOnce(this, send, `${tag}-0`, '恒等位移探针');
+    if (!p0.ok) return { status: 'inconclusive', reason: p0.why };
+    if (p0.body !== bodyB) return { status: 'none' }; // 恒等不成立 ⇒ 名字未进 SQL 表达式
 
-    const r1 = await send(`${tag}-1`);
-    const why1 = this.unusableOf(r1);
-    if (why1) return { status: 'inconclusive', reason: `单位位移探针不可用：${why1}` };
-    const body1 = bodyOf(r1);
-    if (body1 === bodyB) return { status: 'none' }; // 位移未改变真值 ⇒ 非注入
+    const p1 = await probeOnce(this, send, `${tag}-1`, '单位位移探针');
+    if (!p1.ok) return { status: 'inconclusive', reason: p1.why };
+    if (p1.body === bodyB) return { status: 'none' }; // 位移未改变真值 ⇒ 非注入
 
     // 复核轮：B 自稳 + P1 仍异（两组各自独立成立才落槌）
-    const rB2 = await send(tag);
-    const whyB2 = this.unusableOf(rB2);
-    if (whyB2) return { status: 'inconclusive', reason: `复核基线不可用：${whyB2}` };
-    if (bodyOf(rB2) !== bodyB) return { status: 'none' }; // 页面不可复现 ⇒ 差分不可信
-    const r1b = await send(`${tag}-1`);
-    const why1b = this.unusableOf(r1b);
-    if (why1b) return { status: 'inconclusive', reason: `复核位移探针不可用：${why1b}` };
-    if (bodyOf(r1b) === bodyB) return { status: 'none' };
+    const b2 = await probeOnce(this, send, tag, '复核基线');
+    if (!b2.ok) return { status: 'inconclusive', reason: b2.why };
+    if (b2.body !== bodyB) return { status: 'none' }; // 页面不可复现 ⇒ 差分不可信
+    const p1b = await probeOnce(this, send, `${tag}-1`, '复核位移探针');
+    if (!p1b.ok) return { status: 'inconclusive', reason: p1b.why };
+    if (p1b.body === bodyB) return { status: 'none' };
     return {
       status: 'vuln',
-      lengths: { baseline: bodyB.length, shift0: bodyOf(r0).length, shift1: body1.length },
+      lengths: { baseline: bodyB.length, shift0: p0.body.length, shift1: p1.body.length },
     };
   }
 
@@ -85,15 +78,9 @@ export class XmlParamNameDetector extends Detector {
 
     const send = (name) => this.send(ctx.httpClient, ctx, this.buildRequest(target, point, name));
     const out = await this._probeShift(send, tag);
-    if (out.status === 'inconclusive') {
-      result.inconclusive = true;
-      result.inconclusiveReason = out.reason;
-      return result;
-    }
-    if (out.status !== 'vuln') return result;
+    if (!applyProbeOutcome(result, out, dbms)) return result;
+    if (out.status !== 'vuln') return result; // 类型收窄（applyProbeOutcome 已保证）
 
-    result.vulnerable = true;
-    result.dbms = dbms || null;
     result.payloads = [`${tag}-0`, `${tag}-1`];
     result.evidence =
       `XML 元素名算术位移差分：${tag}-0 响应与基线一致（${out.lengths.baseline}B），` +

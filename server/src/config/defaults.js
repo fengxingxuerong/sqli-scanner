@@ -75,6 +75,9 @@ export const defaults = {
   // [D105 2026-10-18] 再扩到 **XML body 元素名**（carrier='xml'）：NameChar 不承载布尔载荷，
   // 检测走专用算术位移探针（tag-0 恒等 / tag-1 位移；仅数值语境列可判，字符串列=诚实假阴性）。
   // 边界：XML 元素名点不进通用检测器赛道与 WAF tamper 重跑（载荷族不可承载）。
+  // [D106 2026-10-18] 键名落在 **ORDER BY 固定后缀**位置（`ORDER BY ${k} DESC`）时三类通道
+  // 全盲（布尔退化常量排序/UNION 语法不可表达）⇒ 专用序数差分探针（`{k}, 1-- -` vs
+  // `{k}, 9999-- -`；只对标准赛道零命中的非 XML 参数名点补测）。
   testParamNames: false,
   // useRegistry（对标 sqlmap 声明式 payload 体系）：false=检测器直接用 payloads/*.js 扁平数组（默认，零回归）；
   // true=检测器改用 PAYLOAD_REGISTRY 声明式注册表 + selectPayloadsForCtx 筛选（受 level/risk/testFilter/testSkip 控制）。
