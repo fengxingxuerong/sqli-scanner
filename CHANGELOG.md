@@ -65,6 +65,41 @@
 
 ## [Unreleased]
 
+### 2026-10-18 批次 D107 · tamper 手写字面量扫描收口（P1-4：迁移 / 点名 / 守卫硬化）
+
+**背景**：P1-4 台账记「25 个复杂插件未迁移 walkLiterals」。本批逐文件重审（判据=是否手写
+引号状态机，不采信名单）：真手写扫描循环 **7 个**，其中 4 个原在守卫白名单、**3 个因变量名
+叫 `inQuote`/`inStr` 逃过守卫 grep**（plus2concat / plus2fnconcat / scalarselectinline）；
+名单点名的 randomcaseall / str2hex 早在 D57-II 已迁移 ⇒ 台账数字为 D57 时点快照，本批更正。
+
+**改动**
+
+- `literalWalk.js` 新增 `maskLiterals`：**长度保持打码**（字面量含引号逐字符替换为 ），
+  输出与输入等长、下标一一对应 —— 供「括号深度/参数切分定位」类插件在打码串上扫描、
+  回原串取切片（`IF(` 等针、逗号、括号、引号在字面量内天然不可见）。
+- `if2case` / `ifnull2casewhenisnull`：手写 inSingle/inDouble 状态机迁到 maskLiterals + 原
+  多遍算法（收敛语义不变）。**修正一类既有缺陷**：字面量内的 `IF(`/`IFNULL(` 曾被当真候选
+  （旧实现从字面量中段开扫，逗号/右括号在错误位置配对 ⇒ 改写字符串内容），现在不动。
+- `plus2concat` / `plus2fnconcat`：inQuote 迷你循环迁到 walkLiterals（onText 闭包持括号深度；
+  fn 版经哨兵分隔后嵌套组合，行注释段由组合器原样带回）。**修正三类既有缺陷**：
+  反斜杠转义引号翻错状态（`'it's'` 之后的顶层 + 漏换/误换）、双引号字面量内的 + 被误换、
+  行注释内的 + 被误切分。
+- 守卫硬化（`tamperLiteralWalk.guard.test.js`）：检测变量扩到 inSingle/inDouble/inQuote/inStr
+  全集、比对前剥离行注释（注释引用不再算回退）；白名单 4→3（space2comment / space2morehash /
+  scalarselectinline，逐条理由备注）；if2case / ifnull2casewhenisnull 移出白名单。
+
+**A/B 对拍留痕**（HEAD 旧实现 vs 新实现，确定性插件逐字节比较；语料=上游 doctest + 对抗样例）：
+4 插件共 42 例，差异 8 处 —— 全部为上述修正向（旧=错），其余逐字节一致；上游 doctest 7 例
+全过（照旧在官方卷面内）。
+
+**实测（tamper 专项目禁全绿）**：迁移相关 36 例 + tamper 全家 168 例全过；
+`tamper:parity` 缺失集合 0（与基线一致）；`tamper:examples` 无新增漂移；`tamper-matrix` exit 0。
+
+**诚实边界**：space2comment（反引号 + 块注释五态机）、space2morehash（两遍扫描，第一遍
+关键字聚合语义不同）、scalarselectinline（逃逸闭合符启发式 + 反斜杠跳过 + 8 轮收敛，原创非
+上游）三个维持定制扫描并在守卫白名单逐条点名；literalWalk 只识别 `'` 与 `"`，上述形态超出
+其语义，扩展属独立批次。
+
 ### 2026-10-18 批次 D106 · paramName「ORDER BY 固定后缀」形态（P1-2 收口：序数差分探针）
 
 **背景**：P1-2 —— `WHERE ${k} = ?` 属可注释形态（D93 覆盖），但键名拼进 **ORDER BY 位置**
@@ -92,6 +127,8 @@
 **诚实边界**：MSSQL/SQLite/Oracle 把裸整数当常量 ⇒ 两探针同序无分化（诚实假阴性）；
 目标把 SQL 错误吞成与正常页全同 ⇒ 假阴性；键名拼接处带括号/函数包裹 ⇒ 假阴性。
 XML 元素名在 ORDER BY 位置仍无判据（`{tag}, 9999` 非法 NameChar），留错误差分通道候选。
+
+**CI 收束**：run 279 = `39144745693`（`6a764556`）attempt 1 全绿（11 ✅ + 2 skipped，23.7 min）。
 
 ### 2026-10-18 批次 D105 · XML body 元素名注入面（P1-1 收口：NameChar 约束下的算术位移探针）
 
