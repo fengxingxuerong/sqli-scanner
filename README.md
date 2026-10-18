@@ -237,6 +237,7 @@ npm run waf-validate    # HTTP 实测验证 WAF 绕过
 npm run waf-e2e         # 运行 WAF e2e 对比测试
 npm run waf-real        # [对外口径] 真实 OWASP CRS v4.1.0 规则下 tamper 开/关 A/B
 npm run waf-auto        # CRS 下「引擎自动选链绕过」验收（不显式配 tamper）
+npm run waf-real:collect # [P0-1] 商业云 WAF 真机样本采集（仅授权目标；礼仪性 GET / --from-json）
 npm run acceptance      # 【门禁】全方位验收（20 套件，事实断言模式，可进 CI）
 npm run quality:all     # 【门禁】一键全量质量校验（测试/覆盖率/变异/验收/类型/架构/嵌套/引用/文档/版本，等价于 ci:local）
 ```
@@ -391,7 +392,7 @@ backend/  ← Express + Node.js
 # 前端测试（574 个用例）
 npm test
 
-# 服务端测试（3616 个用例）
+# 服务端测试（3620 个用例）
 cd server && npm test
 
 # 全部测试
@@ -417,7 +418,7 @@ npm run artifact:drift   # 入库的 e2e 基线产物必须等于当前代码跑
 
 - TypeScript: 零错误
 - 前端测试: 574/574 通过（覆盖率门禁 stmts 93.03 / branch 84.88 / func 81.90，阈值 88/77/67）
-- 服务端测试: 3616 用例（3614 pass / 0 fail / 2 skip，并发口径 2026-10-17 复测；2 skip 为环境依赖显式跳过。覆盖率 lines 91.13 / branch 80.54 / func 84.28，阈值 85/74/77）
+- 服务端测试: 3620 用例（3614 pass / 0 fail / 6 skip，并发口径 2026-10-17 复测；6 skip 为环境依赖显式跳过。覆盖率 lines 91.13 / branch 80.54 / func 84.28，阈值 85/74/77）
 - 一键扫描: `npm run scan -- -u <url>`（CLI 一条命令产出 HTML/JSON/Markdown 全套报告 + manifest，退出码可直接进 CI 门禁）
 - Tamper 插件: 234 个（含批次 D3 新增 scalarselectinline；含 v24 增量 20 个，对齐 sqlmap 官方 tamper 全集，含官方 CRS/libinjection 实测组合 uniontable+odbcbrace；含批次 D13 新增 5 件上游形态变体 *nospace/*open/*block，真机 A/B 判决前不进默认链）
 - WAF 绕过能力: 200+ 插件链式组合，覆盖 62 个 WAF 厂商指纹识别 + 推荐

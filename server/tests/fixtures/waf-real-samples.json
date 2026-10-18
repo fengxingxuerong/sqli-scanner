@@ -1,0 +1,5 @@
+{
+  "_comment": "商业云 WAF 真机样本快照（real capture，非构造）。由 e2e/waf-real/cloud-sample-collector.mjs 写入；守卫 server/tests/wafRealSamples.guard.test.js 消费。当前为空 = 尚未采集（台账 waf-fingerprint-coverage 维持 unverified，不允许静默转绿）。采集方式见 docs/WAF-真机样本采集-runbook.md。",
+  "_source": "对授权目标的真实响应抓包实录",
+  "samples": []
+}

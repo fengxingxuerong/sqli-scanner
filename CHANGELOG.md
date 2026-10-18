@@ -65,6 +65,46 @@
 
 ## [Unreleased]
 
+### 2026-10-18 批次 D98 · 商业云 WAF 真机样本采集框架（P0-1 落架）+ wiring 收集口径修复（D97 沿用）
+
+**动机**：台账 `waf-fingerprint-coverage`（`docs/_claims-ledger.json`）复核时仍为
+`unverified`——真机样本只有 ModSecurity 1/62，D89 的 18/18 是 wafw00f 规则**构造样本**，
+证明「同一份厂商特征我们认得」，不证明「真机必然命中」。缺口收敛为单一动作：补商业云
+WAF（Cloudflare / F5 / 阿里云 / 腾讯云 / AWS WAF 等）的**真实拦截/指纹响应样本**。
+
+**交付（让「拿到授权样本即可灌入转 verified」成为即插即用流程）**：
+
+1. `e2e/waf-real/cloud-sample-collector.mjs`——真机样本收集器：对**授权目标**发一次
+   良性 GET（零攻击载荷，与指纹阶段同行为），取响应喂 `WafIdentifier` 识别；命中即把
+   该厂商的命中特征（key/value）写入快照；`--from-json` 支持拦截页形态（用户在授权
+   目标上自行触发后导入，收集器不做攻击性探测）；`--expect <vendor>` 校验识别结果防
+   串台；dedup 防重复；dry-run 预览。红线遵守：无授权目标时不自动扫第三方（本仓纪律）。
+2. `server/tests/fixtures/waf-real-samples.json`——真机样本快照（初始为空 + schema
+   注释，`sourceRule: 'real-capture'` 与构造样本物理隔离）。
+3. `server/tests/wafRealSamples.guard.test.js`——**有牙守卫**：空快照 → 两个测试显式
+   SKIP（`# skipped` 可见，不是 PASS）并打印「待采集、台账维持 unverified」；
+   非空 → 逐条正检（构造响应必识别标称厂商）+ 零误报反向（去特征后不得识别）+ 变异
+   自证（删该厂商 rules 必红，防恒绿守卫）+ 数量护栏（≥3 家）+ 快照/收集器路径同源
+   文本判据（防写 A 读 B 假接线）。已实测：误塞构造样本和坏 value 时守卫能红。
+4. `docs/WAF-真机样本采集-runbook.md`——采集 runbook：合规红线、良性/拦截页两种采集
+   路径、8–10 家目标厂商清单、转 verified 验收门槛、失败排查表。
+
+**顺手修复（D97 定级）**：`scripts/gate-close.mjs` 的 `wiringTestFiles()` 用大小写敏感
+的 `includes('Guard')`，把 26 个 `*.guard.test.js`（含 D89 的 wafExternalParity.guard、
+wafSamples.guard 与新 wafRealSamples.guard）漏在收口清单之外——它们只在
+`cd server && npm test` 全量里被兜底跑，gate:close 看不见（「判据没看住它声称要管的
+东西」，D95/D97 同一形态第三次）。改为大小写不敏感匹配后 wiring 从 16 → 64 个测试
+文件，`npm run gate:close -- --quick` 与全量 22/22 双绿复验；AGENTS.md 手写清单同步修正。
+
+**同步**：README 脚本表补 `waf-real:collect`；`docs/_facts.json` 重采（服务端 3620 用例
+= 3614 pass / 6 skip，新增守卫 4 例计入；徽章 4188）；门禁全绿（gate:close 22/22。
+lint / typecheck / readme / facts / refs / e2e-wiring 全过）。
+
+**当前边界（不越界声明）**：快照仍为空——本批次只落「判据框架 + 流程」，不造样本；
+`waf-fingerprint-coverage` 维持 `unverified`（空快照守卫显式 SKIP，不会假绿）。
+转 verified 的钥匙是**用户提供授权目标**（自家站点或书面授权的 WAF 站点 URL /
+账号），拿到即可按 runbook 灌样本、守卫转实跑、台账更新。
+
 ### 2026-10-17 批次 D96 · CI run 262 两处红的根治（interactsh 提取正则吞连字符 + 故障②墙钟改请求预算）
 
 **动机（发现链）**：run 262（D95 推送）lint 首次全绿（第 43–52 步史上首次全部执行），
