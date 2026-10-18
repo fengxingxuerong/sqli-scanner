@@ -5,6 +5,25 @@
 
 ---
 
+## 2026-10-18 批次 D107 · tamper 手写字面量扫描收口（P1-4 收口）
+
+**背景**：台账「25 个复杂插件未迁 walkLiterals」系 D57 时点快照。逐文件重审实况：手写引号
+状态机共 7 个 —— 白名单 4 个 + 3 个因变量名（inQuote/inStr）逃过守卫 grep。
+
+**本批**：`literalWalk.js` 新增 `maskLiterals`（长度保持打码）；if2case / ifnull2casewhenisnull
+（字面量内 `IF(`/`IFNULL(` 不再被误改写）与 plus2concat / plus2fnconcat（转义引号、双引号、
+注释三类误改修正）共 4 个迁移；守卫扩到四变量全集 + 剥注释比对，白名单 4→3。
+A/B 42 例差 8 处（全为修正向）；上游 doctest 7/7；tamper 三门禁全绿。
+
+### 待推进（从 P1-4 拆出，均已白名单点名）
+
+- **literalWalk 反引号/块注释扩展**：space2comment 五态机（反引号 + `/* */`）与
+  space2morehash 两遍扫描要迁 walkLiterals 需先把抽象扩到反引号/块注释语义（独立批次）。
+- **scalarselectinline 逃逸启发式**：hasClosingQuote/isEscapeQuote 与 8 轮收敛是定制语义，
+  维持现状；若未来引号判据再出事，应以 quoteScan 扩展真源而非就地打补丁。
+
+---
+
 ## 2026-10-18 批次 D106 · paramName「ORDER BY 固定后缀」形态（P1-2 收口：序数差分探针）
 
 **背景**：P1-2 —— `WHERE ${k} = ?` 属可注释形态（D93 覆盖）；键名拼进 ORDER BY 位置且后跟

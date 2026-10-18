@@ -89,3 +89,23 @@ export function walkLiterals(src, handlers = {}) {
   flushText();
   return out;
 }
+
+/**
+ * [D107] 长度保持的**字面量打码**：把每个字面量（含引号本身）逐字符替换为 maskChar，
+ * 输出与输入**等长**且下标一一对应 —— 供「需要全局切片定位、又要屏蔽字面量内标点」
+ * 的插件使用（if2case / ifnull2casewhenisnull 的括号深度扫描）。
+ *
+ * 打码串仅保证：合法 SQL 文本中不会出现的 maskChar 不会伪造出 `IF(` 等针、逗号、
+ * 括号、引号；调用方仍应从**原串**用打码串的下标取切片（两串等长）。
+ * 未闭合字面量按契约整体打码（其后不存在代码层）。
+ *
+ * @param {string} src
+ * @param {string} [maskChar] 单字符，默认 \u0001（合法 SQL 文本不含）
+ * @returns {string}
+ */
+export function maskLiterals(src, maskChar = '\u0001') {
+  return walkLiterals(src, {
+    onLiteral: (body) => maskChar.repeat(body.length + 2), // 引号一并打码，保持等长
+    onAbort: (remaining) => maskChar.repeat(remaining.length),
+  });
+}

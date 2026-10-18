@@ -1,13 +1,15 @@
 // IF(A,B,C) → CASE WHEN (A) THEN (B) ELSE (C) END（对标 sqlmap if2case.py）
 // 深度感知括号与引号，正确处理嵌套调用与字符串字面量，绕过对 IF() 的弱过滤。
+//
+// [D107 2026-10-18] 手写 inSingle/inDouble 状态机迁移到 literalWalk 单一抽象：
+// 每轮先对全串做**长度保持打码**（maskLiterals：字面量含引号逐字符替换为 \u0001），
+// 在打码串上做括号/逗号定位，再回到原串取切片 —— 两串等长、下标一一对应。
+// 由此字面量内的 `IF(`、逗号、括号天然不可见（旧实现会把字面量里的 `IF(` 当候选，
+// 扫描起点落在字面量中段 ⇒ 可能产出畸形改写；本批修正，另有 A/B 留痕）。
+// 引号判据从逐字符 isQuoteEscaped 换为 readSqlLiteral（同一奇偶性契约的真源）。
 const EMPTY_PAREN_MARKER = '\u0000'; // NUL 不会出现在合法 SQL 串，用于暂存空括号
 
-// [2026-10-05] 引号判别改用 quoteScan 单一真源。
-// 原写法 `s[i-1] !== '\\'` 问的是"前一个字符是不是反斜杠"，而正确判据是
-// **连续反斜杠的奇偶性**：'a\' 的末位引号被转义（未闭合），'a\\' 的未转义（闭合）。
-// 影响：遇到 'a\\' 时引号状态永不复位 → 该 IF( 之后的括号配对全盘算错 →
-// 既漏掉本该转换的 IF()，也可能把 `)` 配到错误的位置。
-import { isQuoteEscaped } from '../quoteScan.js';
+import { maskLiterals } from '../literalWalk.js';
 
 export const if2case = {
   name: 'if2case',
@@ -21,18 +23,15 @@ export const if2case = {
     let s = String(payload ?? '');
     if (!s.includes('IF(')) return s;
     s = s.replaceAll('()', EMPTY_PAREN_MARKER);
-    while (s.includes('IF(')) {
-      const index = s.indexOf('IF(');
+    for (;;) {
+      const masked = maskLiterals(s);
+      const index = masked.indexOf('IF(');
+      if (index < 0) break;
       let depth = 1;
-      let inSingle = false;
-      let inDouble = false;
       const commas = [];
       let end = -1;
-      for (let i = index + 3; i < s.length; i++) {
-        const ch = s[i];
-        if (ch === "'" && !isQuoteEscaped(s, i)) inSingle = !inSingle;
-        else if (ch === '"' && !isQuoteEscaped(s, i)) inDouble = !inDouble;
-        if (inSingle || inDouble) continue;
+      for (let i = index + 3; i < masked.length; i++) {
+        const ch = masked[i];
         if (depth === 1 && ch === ',') commas.push(i);
         else if (depth === 1 && ch === ')') {
           end = i;

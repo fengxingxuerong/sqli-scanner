@@ -11,7 +11,12 @@
 //      字符是不是反斜杠"更严），上游三条示例不受影响。
 // ⚠️ 与上游一致：替换后若参数里还嵌着 IFNULL(，会继续被展开（上游 while 循环同理），
 //    ⇒ 嵌套形态会被**逐层展开**，这不是无限递归（嵌套深度单调下降）。
-import { isQuoteEscaped } from '../quoteScan.js';
+//
+// [D107 2026-10-18] 手写 inSingle/inDouble 状态机迁移到 literalWalk 单一抽象：
+// 每轮先做**长度保持打码**（maskLiterals），在打码串上定位 IFNULL( 与参数边界，
+// 回原串取切片 —— 字面量内的 IFNULL(（如 `'IFNULL(x,y)'`）不再被误当候选
+//（旧实现从字面量中段起扫，逗号/右括号会在错误位置配对），本批修正，另有 A/B 留痕。
+import { maskLiterals } from '../literalWalk.js';
 
 const NEEDLE_RE = /IFNULL\(/gi;
 
@@ -34,21 +39,17 @@ export const ifnull2casewhenisnull = {
   transform(payload) {
     let s = String(payload ?? '');
     for (;;) {
+      const masked = maskLiterals(s);
       NEEDLE_RE.lastIndex = 0;
-      const hit = NEEDLE_RE.exec(s);
+      const hit = NEEDLE_RE.exec(masked);
       if (!hit) break;
       const index = hit.index;
       const argStart = index + hit[0].length;
       let depth = 1;
       let comma = -1;
       let end = -1;
-      let inSingle = false;
-      let inDouble = false;
-      for (let i = argStart; i < s.length; i++) {
-        const c = s[i];
-        if (c === "'" && !isQuoteEscaped(s, i)) inSingle = !inSingle;
-        else if (c === '"' && !isQuoteEscaped(s, i)) inDouble = !inDouble;
-        if (inSingle || inDouble) continue;
+      for (let i = argStart; i < masked.length; i++) {
+        const c = masked[i];
         if (depth === 1 && c === ',') { comma = i; continue; }
         if (depth === 1 && c === ')') { end = i; break; }
         if (c === '(') depth++;
