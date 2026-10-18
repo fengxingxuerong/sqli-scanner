@@ -65,6 +65,57 @@
 
 ## [Unreleased]
 
+### 2026-10-18 批次 D99 + D100 · 44 家无 wafw00f 插件 WAF 的第二权威对拍源（P0-2 落架）
+
+**动机**：D89 引入 wafw00f 对拍后，62 家中仍有 44 家 wafw00f 侧无插件，`waf-fingerprint-
+coverage` 的证据链只有「规则 + 判据单测」（真机 1/62）。本批为这 44 家引入**第二独立
+权威源**：WhatWaf（Ekultek，2.9k stars，GPLv3，90 插件，与 wafw00f 各自独立开发）
++ nuclei-templates `waf-detect.yaml`（仅取 WhatWaf 未覆盖的 Safe3 一条——该模板
+reference 直指 WhatWaf、作者同为 WhatWaf 核心作者，不能整体当独立源）。
+
+**交付（净增量 27 家 WhatWaf + 1 家 Safe3/nuclei = 28 家外部背书）**：
+
+1. `scripts/extract-second-source-samples.mjs`（D99）——抽取脚本：内联 27 家 WhatWaf
+   字面样本映射 + nuclei Safe3 一条；每条样本带**源正则匹配自证**（防映射手滑，
+   `\A`→`^` 转写保 Python 语义；header 型以 `key + ' ' + value` 拼接匹配源正则，
+   兼容 `x-amz-cf-id` 这类头 **key** 特征）；`{,60}`→`{0,60}` 修正 JS 量词语法。
+2. `server/tests/fixtures/second-source-samples.json`——快照：30 条样本覆盖 28 家
+   （WhatWaf 29 + nuclei 1）、过宽登记 5 条、无第二源边界 16 家（如实登记，不夸大为
+   能力）。样本生成时逐条通过源正则自证。
+3. `wafRules.js`（D100）——13 处 matcher 缺口补全（带 `[D100]` 出处注释）：SafeDog
+   body 域名、Akamai_Kona `ak_bmsc=`、DenyAll 拦截页标题/cookie、Sucuri body、
+   Radware body、Qihoo_360 `360wzws|wzws.waf.cgi`、DotDefender body、StackPath 专属
+   文案、Teros `st8(id|wa|wf|_wat|_wlf)` 全变体、UrlScan 空格/下划线形态、WebKnight
+   server 头、Safe3 server 头（nuclei 唯一来源）。**修复 1 处真 bug**：ShadowDaemon
+   原 `\.forbidden` 转义过度（要求字面点号，真实拦截页是空格）→ 对照 WhatWaf 后
+   **直接删除该 matcher 而非补宽**——`<h\d>\d{3}.forbidden<.h\d>` 是任意 403 拦截页
+   通用形态（IIS/nginx/任何 WAF 都返回 "403 Forbidden"），补 `[\s.]` 会引入反向误报
+   （守卫实测抓到），按「过宽不采用」纪律只保留专属文案 "Request forbidden by
+   administrative rules"。
+4. `server/tests/wafSecondSourceParity.guard.test.js`（D99/D100）——常驻守卫：正检
+   30 条外部样本必须正确命名 + 零误报反向（干净/通用 403 响应不得命中任何厂商）+
+   反例自证（不存在特征不得命中 Cloudflare）+ 数量护栏。被 gate:close 的
+   wiringTestFiles() 大小写不敏感修复自动收口（64 个测试文件之一）。
+
+**对拍结果**：修复前 12/31 条外部样本未命中（body 形态 9 家 + cookie 2 家 + 空格
+1 家 + ShadowDaemon 转义 bug + Safe3 缺 server 头）→ 修复后 **30/30 正检全绿 + 反向
+零误报**。守卫 4/4（wafExternalParity / wafRealSamples / wafSecondSourceParity /
+wafSamples 全量无回归；全量 server 测试（cwd=server）**3624 例 = 3618 pass / 6 skip
+/ 0 fail**（2026-10-18 复核定稿；批次内早前一次记录为 3605 例 1 fail，复核不可复现
+——按可复现值入册，留痕不抹）。
+
+**台账**：`waf-fingerprint-coverage` 证据链升级——「wafw00f 18 家 × 36 样本 100% +
+WhatWaf 27 家 + nuclei 1 家（Safe3）100% + 真机 ModSecurity 1/62 + 无第二源边界 16 家
+登记」；**仍维持 unverified**（构造样本口径 ≠ 真机命中），缺口收窄为「商业云 WAF
+真机样本」唯一一项。
+
+**同步**：README 补第二对拍源说明与脚本行；`gate:close` 全量 22/22 验证。
+
+**当前边界（不越界声明）**：「100%」依旧是构造样本口径（外部权威正则具体化），不
+等于真实流量必然命中；16 家无第二源（Tencent_WAF/Citrix_NetScaler/Sophos_UTM/NAXSI/
+Eisoo/KnownSec_KSWAF/UPYUN_WAF/Azure_FrontDoor/GCP_CloudArmor/Fastly/SiteLock/
+Zenedge/F5_TrafficShield/SecureIIS/NSFOCUS/SafeLine）属**边界**而非能力缺口。
+
 ### 2026-10-18 批次 D98 · 商业云 WAF 真机样本采集框架（P0-1 落架）+ wiring 收集口径修复（D97 沿用）
 
 **动机**：台账 `waf-fingerprint-coverage`（`docs/_claims-ledger.json`）复核时仍为

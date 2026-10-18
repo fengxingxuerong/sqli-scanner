@@ -44,11 +44,13 @@ export const WAF_RULES = {
       { type: 'header', key: 'via', test: /yunjiasu|baidu/i },
     ],
   },
-  SafeDog: {
+SafeDog: {
     name: '安全狗',
     matchers: [
       { type: 'header', key: 'server', test: /safedog/i },
       { type: 'header', key: 'x-powered-by-safedog' },
+      // [D100] 第二源对拍（WhatWaf plugins/safedog.py 域名特征；拦截页/落地页引用官网域名形态）
+      { type: 'body', test: /safedog\.(net|com|cn)/i },
     ],
   },
   Tencent_WAF: {
@@ -107,10 +109,12 @@ export const WAF_RULES = {
       { type: 'header', key: 'set-cookie', test: /^visid_incap.*?=/i },
     ],
   },
-  Akamai_Kona: {
+Akamai_Kona: {
     name: 'Akamai Kona',
     matchers: [
       { type: 'header', key: 'server', test: /akamai/i },
+      // [D100] 第二源对拍（WhatWaf plugins/akamai.py cookie ak_bmsc；Bot Manager 会话令牌）
+      { type: 'header', key: 'set-cookie', test: /^ak_bmsc=/i },
     ],
   },
   DenyAll: {
@@ -118,6 +122,9 @@ export const WAF_RULES = {
     matchers: [
       { type: 'header', key: 'set-cookie', test: /denyall_/i },
       { type: 'body', test: /denyall/i },
+      // [D100] 第二源对拍（WhatWaf plugins/denyall.py：拦截页标题 Condition Intercepted + 会话 cookie）
+      { type: 'body', test: /condition intercepted/i },
+      { type: 'header', key: 'set-cookie', test: /^sessioncookie=/i },
     ],
   },
   Wordfence: {
@@ -127,11 +134,13 @@ export const WAF_RULES = {
       { type: 'header', key: 'server', test: /wordfence|wf[_\-]?waf/i },
     ],
   },
-  Sucuri: {
+Sucuri: {
     name: 'Sucuri',
     matchers: [
       { type: 'header', key: 'x-sucuri-id' },
       { type: 'header', key: 'server', test: /sucuri/i },
+      // [D100] 第二源对拍（WhatWaf plugins/sucuri.py：CloudProxy 拦截页标题形态）
+      { type: 'body', test: /sucuri website firewall/i },
     ],
   },
   Citrix_NetScaler: {
@@ -147,12 +156,14 @@ export const WAF_RULES = {
       { type: 'header', key: 'server', test: /\bace\b/i },
     ],
   },
-  Radware_AppWall: {
+Radware_AppWall: {
     name: 'Radware AppWall',
     matchers: [
       { type: 'header', key: 'server', test: /radware/i },
       // [D89] 真值来源：wafw00f plugins/radware.py（X-SL-CompState）
       { type: 'header', key: 'x-sl-compstate' },
+      // [D100] 第二源对拍（WhatWaf plugins/radware.py：拦截页标题形态）
+      { type: 'body', test: /unauthorized activity has been detected/i },
     ],
   },
   Sophos_UTM: {
@@ -166,11 +177,13 @@ export const WAF_RULES = {
     name: 'Qihoo 360',
     matchers: [
       { type: 'body', test: /360webscan|qihoo/i },
-      // [D89] 补 360 网站卫士（盘云）header 形态（真值来源：wafw00f plugins/panyun360.py，
+// [D89] 补 360 网站卫士（盘云）header 形态（真值来源：wafw00f plugins/panyun360.py，
       // matchHeader(('Server', r'panyun')) 与 X-Panyun-Request-ID 等三头）。
       // 此前只有 body 形态 ⇒ 仅靠响应头即可识别的场景漏识别。
       { type: 'header', key: 'server', test: /panyun/i },
       { type: 'header', key: 'x-panyun-request-id' },
+      // [D100] 第二源对拍（WhatWaf plugins/360.py：wzws.waf.cgi 与 360wzws 正文形态）
+      { type: 'body', test: /360wzws|wzws\.waf\.cgi/i },
     ],
   },
   NAXSI: {
@@ -179,11 +192,13 @@ export const WAF_RULES = {
       { type: 'body', test: /blocked by naxsi/i },
     ],
   },
-  DotDefender: {
+DotDefender: {
     name: 'DotDefender',
     matchers: [
       { type: 'header', key: 'x-dotdefender' },
       { type: 'header', key: 'server', test: /dotdefender/i },
+      // [D100] 第二源对拍（WhatWaf plugins/dotdefender.py：拦截页文案形态；X-dotDefender-denied 为 403 响应头）
+      { type: 'body', test: /dotdefender blocked your request/i },
     ],
   },
   BinarySec: {
@@ -238,10 +253,13 @@ export const WAF_RULES = {
       { type: 'body', test: /knownsec/i },
     ],
   },
-  Safe3: {
+Safe3: {
     name: 'Safe3 WAF',
     matchers: [
       { type: 'body', test: /safe3 web application firewall/i },
+      // [D100] 第二源对拍（nuclei-templates waf-detect.yaml safe3webfirewall 段：
+      // part: header, words: ["safe3 Web Firewall"] —— WhatWaf 无此特征，唯一外部背书）
+      { type: 'header', key: 'server', test: /safe3 web firewall/i },
     ],
   },
   // —— 以下 32 项为 WAF-v3 新增（保留既有 30 项不变，总 62 项，对标 sqlmap 130+ vendor 的子集）。
@@ -308,12 +326,15 @@ export const WAF_RULES = {
       { type: 'body', test: /server detected a syntax error in your request/i },
     ],
   },
-  StackPath: {
+StackPath: {
     name: 'StackPath',
     matchers: [
       { type: 'body', test: /<title>stackpath[^<]*<\/title>/i },
       { type: 'body', test: /protected by.*stackpath/i },
       { type: 'header', key: 'server', test: /stackpath/i },
+      // [D100] 第二源对拍（WhatWaf plugins/stackpath.py 取两条中的「action that triggered…」
+      // —— 另一条 "Sorry, you have been blocked!" 与 Cloudflare 撞文案过宽不采用）
+      { type: 'body', test: /action that triggered the service and blocked/i },
     ],
   },
   Edgecast: {
@@ -381,10 +402,11 @@ export const WAF_RULES = {
       { type: 'body', test: /\/__zenedge\//i },
     ],
   },
-  Teros: {
+Teros: {
     name: 'Teros',
     matchers: [
-      { type: 'header', key: 'set-cookie', test: /^st8(id|_wat|_wlf)/i },
+      // [D100] 第二源对拍（WhatWaf plugins/teros.py st8(id|.wa|.wf) 全变体 —— 本仓此前只收 id|_wat|_wlf）
+      { type: 'header', key: 'set-cookie', test: /^st8(id|wa|wf|_wat|_wlf)/i },
     ],
   },
   F5_TrafficShield: {
@@ -394,11 +416,13 @@ export const WAF_RULES = {
       { type: 'header', key: 'set-cookie', test: /^ASINFO=/i },
     ],
   },
-  WebKnight: {
+WebKnight: {
     name: 'WebKnight',
     matchers: [
       { type: 'status', test: /^999$/ }, // WebKnight 拦截返回 "999 No Hacking"
       { type: 'body', test: /webknight application firewall alert|aqtronix.{0,10}?webknight/i },
+      // [D100] 第二源对拍（WhatWaf plugins/webknight.py：Server 头形态 + 正文形态）
+      { type: 'header', key: 'server', test: /webknight/i },
     ],
   },
   SecureIIS: {
@@ -407,19 +431,25 @@ export const WAF_RULES = {
       { type: 'body', test: /secureiis is an internet security application/i },
     ],
   },
-  UrlScan: {
+UrlScan: {
     name: 'Microsoft UrlScan',
     matchers: [
-      { type: 'body', test: /rejected[-_]by[-_]urlscan/i },
+      // [D100] 第二源对拍（WhatWaf plugins/urlscan.py rejected.by.url.scan 通配 ——
+      // 真实拦截页是空格形态 "Rejected by URL Scan"，本仓此前 `rejected[-_]by...` 只收连字符/下划线）
+      { type: 'body', test: /rejected[\s_-]by[\s_-]?url\s?scan/i },
       { type: 'header', key: 'location', test: /rejected-by-urlscan/i },
     ],
   },
   // —— 开源 WAF ——
-  ShadowDaemon: {
+ShadowDaemon: {
     name: 'Shadow Daemon',
     matchers: [
       { type: 'body', test: /request forbidden by administrative rules/i },
-      { type: 'body', test: /<h\d{1}>\d{3}\.forbidden<\/h\d{1}>/i },
+      // [D100 修正] WhatWaf plugins/shadowd.py 规则一 `<h\d>\d{3}.forbidden<.h\d>`
+      // 实为任意 403 拦截页通用形态（IIS/nginx/任何 WAF 都返回 "403 Forbidden"），
+      // 过宽不采用（与 aws/akamai/stackpath 同纪律）。本仓原 `\.forbidden` 转义过度
+      // 从未命中 —— 实属侥幸，修复为 `[\s.]` 会引入误报 ⇒ 直接删除，仅保留专属文案
+      // "Request forbidden by administrative rules"。
     ],
   },
   ATS: {
