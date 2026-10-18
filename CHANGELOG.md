@@ -65,6 +65,53 @@
 
 ## [Unreleased]
 
+### 2026-10-18 批次 D101 · D91 类 auth 夹击通用化（P0-3 销账：全形态排查 + CLI/REST 单点去重）
+
+**动机**：D91 实修 cookie 注入点静默假阴性、D92 补掉 REST 入口的 auth.headers 夹击面后，
+底账 P0-3 挂着两笔：① url/body/header/二阶**全注入点形态 × auth 配置**的同类面未逐一排查；
+② CLI 侧去重（`server/bin/cli.js` 精确键名 `delete auth.headers[k]`）与 REST 侧
+（`dropInjectedHeadersFromAuth`，大小写不敏感 + 仅 testHeaders 触发）是**两份实现**，
+口径开始漂移（TODO.md:78「抽共享函数」）。
+
+**排查矩阵（逐一实证，全部走 构造层 → 去重 → 发送层合并 完整链）**：
+
+| 注入点形态 × auth 面 | 结论 |
+|---|---|
+| header 点 × auth.headers 同名（大小写变体） | CLI 精确键名 delete **漏删**（请求文件与 --header 混用产生大小写变体时静默顶回原值）⇒ 修 |
+| header 点 = authorization（REST 允许，CLI 的 buildInjectionTargets EXCLUDE 排除）× auth.basic | 发送层 `auth.basic` 无条件写 `Authorization` **顶回注入值** ⇒ 修（发送层跳过） |
+| cookie 点 × auth.headers.cookie | D91-B 已拦（发送层已有 Cookie 即跳过）✓ 补回归 |
+| cookie 点 × auth.cookie 追加 | CLI 有 leftover 去重；**REST 没有** ⇒ 修（共享实现覆盖）；另发现发送层只查大写 `h['Cookie']`，小写 `cookie` 键下追加**另起大写键**、axios 后写赢吞掉原串 ⇒ 修（归一为单键） |
+| url/body 点 × auth.* | 结构性无通道（mergeAuthHeaders 只碰 headers 域）✓ 补非干扰用例 |
+| 二阶（写/触发均走同一 client 同 config） | 入口去重对全部请求生效 ✓ 补连续两请求用例；bearerKeeper 续期路径自有摘键（D36）不在本批 |
+
+**修复（三层）**：
+1. 新模块 `server/src/core/authInjectionOverlap.js`——CLI 与 REST 的**单点实现**
+   （`dropInjectionOverlapFromAuth` 纯函数 + `applyDropInjectionOverlap` 就地入口）。
+   相比原实现两处收紧：去重门从「testHeaders === true」改为「headerParams 与 auth.headers
+   实际同名」（构造层对每个请求都写 `{...target.headerParams}`，level≥3 无 testHeaders 时
+   同名 auth 副本同样静默顶替显式值）；新增 auth.cookie 同名对去重（cookie 名大小写敏感）。
+2. `server/src/core/http/requestContext.js` 发送层：`shouldSkipBasicAuth`（请求头已带
+   Authorization ⇒ 不预置 Basic，「显式构造优先」与 D91-B 对齐）+ `appendAuthCookie`
+   （大小写不敏感归一单键，追加语义在任何形态下真实生效）。提取子函数而非抬复杂度基线。
+3. CLI `buildInjectionTargets` 产物与 REST `sanitizeStart` 均改调共享实现；REST 原
+   `dropInjectedHeadersFromAuth` 删除。
+
+**判据**：新增 `server/tests/authInjectionOverlap.test.js`（8 例：共享实现 ×3、完整链
+正向 ×3 含两处变异自证、跨通道/多请求 ×2）；`api.authHeadersInjectionPoint.test.js`
+5→7 例（D92-③ 按新口径翻转 + 补 cookie leftover ×2）。**全量 server：3634 例
+= 3628 pass / 6 skip / 0 fail**（另注：本批首轮全量中 `fetchUsing` 时间通道 between
+一例在负载下闪红，隔离两连跑 11/11 + 全量复跑全绿 ⇒ 负载时序抖动，按 D96 口径不放宽判据）。
+
+**顺带修复/迁移（守卫抓到）**：① entryParity「两入口逐键相等」抓到 REST 无条件
+`config.auth = undefined` 会凭空造出 `auth` 键 ⇒ 回写改为仅引用变化时执行（分支进 helper）；
+② 复杂度基线迁移：删函数致 scanRoutes 三个祖传匿名箭头行号位移（值不变，`--fix-baseline
+--force` 重键 383/522/709 → 385/524/711）；`mergeAuthHeaders` 经提取后**降到软限以下出基线**，
+另同步 14 处已自然变浅的下调。
+
+**边界（不越界声明）**：Digest/NTLM 的 Authorization 由各自握手层管理，不在本批语义内；
+CLI 侧 authorization 仍不作注入头（EXCLUDE 既有设计，REST 侧允许，夹击由发送层修复对齐）；
+本批全部为本地靶场/单测口径，无真机新证据。
+
 ### 2026-10-18 批次 D99 + D100 · 44 家无 wafw00f 插件 WAF 的第二权威对拍源（P0-2 落架）
 
 **动机**：D89 引入 wafw00f 对拍后，62 家中仍有 44 家 wafw00f 侧无插件，`waf-fingerprint-

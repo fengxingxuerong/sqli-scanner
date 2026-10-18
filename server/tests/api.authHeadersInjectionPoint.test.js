@@ -10,11 +10,15 @@
 //   逻辑 ⇒ 同一夹击面对 REST 的所有 header 注入点开放：auth.headers 的同名副本会经
 //   httpClient.mergeAuthHeaders 的**覆盖**语义把注入值顶回原值。
 //
-// 本文件钉住三件事：
-//   ① testHeaders 开时，headerParams 的非 cookie 头从 config.auth.headers 删除（大小写不敏感）；
+// 本文件钉住四件事：
+//   ① headerParams 与 auth.headers 实际同名即去重（大小写不敏感）——[D101] 去重门从
+//      「testHeaders === true」收紧为「实际同名」：构造层对每个请求都写
+//      `{...target.headerParams}`（injection.js:147），level≥3 无 testHeaders 时同名
+//      auth 副本同样静默顶替显式传入值；
 //   ② cookie 头**不删**（与 CLI 同口径：会话语义走 auth.cookie 追加；auth.headers.cookie
 //      的覆盖由 D91 B 处 mergeAuthHeaders 的 Cookie 同名跳过拦截）；
-//   ③ testHeaders 未开时不去重（那些头不是注入点，auth.headers 透传是既有特性）。
+//   ③ cookieParams 同名对从 auth.cookie 剔除（[D101] REST 补 CLI leftover 口径）；
+//   ④ 不污染调用方入参（同一 body 复用第二次仍能正确判定）。
 // ============================================================================
 
 import { test } from 'node:test';
@@ -23,7 +27,7 @@ import { sanitizeStart } from '../src/api/scanRoutes.js';
 
 const URL_BODY = { url: 'http://127.0.0.1:8080/item?id=1' };
 
-test('D92-①: testHeaders 开时，headerParams 的非 cookie 头从 auth.headers 删除', () => {
+test('D92-①: headerParams 的非 cookie 头与 auth.headers 同名时删除', () => {
   const t = sanitizeStart({
     ...URL_BODY,
     headerParams: { 'x-forwarded-for': '1' },
@@ -51,13 +55,33 @@ test('D92-②: cookie 头不删（会话语义走 auth.cookie，auth.headers.coo
   assert.equal(t.config.auth.headers.cookie, 'uid=1', 'cookie 必须保留——删除会改掉 CLI 同口径的会话语义');
 });
 
-test('D92-③: testHeaders 未开时不去重（那些头不是注入点）', () => {
+test('D101 收紧 D92-③: 同名去重不再依赖 testHeaders（构造层每请求都写 headerParams）', () => {
   const t = sanitizeStart({
     ...URL_BODY,
     headerParams: { 'x-forwarded-for': '1' },
     config: { auth: { headers: { 'x-forwarded-for': '1' } } },
   });
-  assert.equal(t.config.auth.headers['x-forwarded-for'], '1');
+  assert.equal(t.config.auth.headers, undefined, '同名副本必须删——即便 testHeaders 未开（level≥3/4 仍可能成点，且构造层每请求发送 headerParams，auth 副本会静默顶替显式值）');
+});
+
+test('D101: 无 headerParams 时 auth 原样保留（去掉同名才动，不做无差别清理）', () => {
+  const t = sanitizeStart({ ...URL_BODY, config: { auth: { headers: { 'x-api-key': 'k' } } } });
+  assert.equal(t.config.auth.headers['x-api-key'], 'k');
+});
+
+test('D101: cookieParams 同名对从 auth.cookie 剔除，残余会话键保留（REST 补 CLI leftover 口径）', () => {
+  const t = sanitizeStart({
+    ...URL_BODY,
+    cookieParams: { uid: '1' },
+    config: { auth: { cookie: 'uid=1; sid=abc' } },
+  });
+  assert.equal(t.config.auth.cookie, 'sid=abc', 'uid 已升为注入点 ⇒ 不得再经 auth.cookie 重复附加');
+  const t2 = sanitizeStart({
+    ...URL_BODY,
+    cookieParams: { uid: '1', sid: 'x' },
+    config: { auth: { cookie: 'uid=1; sid=x' } },
+  });
+  assert.equal(t2.config.auth.cookie, undefined, '全部同名 ⇒ cookie 字段整体移除');
 });
 
 test('D92-④: 不得污染调用方入参（同一 body 复用第二次仍能正确判定）', () => {

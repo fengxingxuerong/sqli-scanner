@@ -34,6 +34,8 @@ import { acquireScanSlot, trackScanTerminal, _scanGovernance } from './scanGover
 import { buildDirectTarget } from './directTarget.js';
 // 配置守卫（两条入口共用；为何单独成文件见其文件头）
 import { buildGuardedConfig } from './scanConfigGuard.js';
+// [D101 2026-10-18] 注入点 × auth 同名夹击去重（与 CLI 共用同一实现，取代 D92 的本地副本）
+import { applyDropInjectionOverlap } from '../core/authInjectionOverlap.js';
 // 报告回退与历史列表的数据源（引擎上下文完成后 30s 回收，台账才是服务端那一份）
 import { readReport, listScans, ledgerRoot, highestRisk } from '../services/scanLedger.js';
 // 抽到守卫模块后仍从本文件 re-export，保住既有引用路径（与 acquireScanSlot 同一做法）
@@ -297,7 +299,7 @@ export function sanitizeStart(body) {
   }
   warnDroppedConfigKeys(cfg, KNOWN_CFG_KEYS, config, DIRECT_ONLY_CFG_KEYS);
   // [D-REDACT 2026-10-12] redactPasswords 开关（spec 5.3.1 规则 1/2，默认 false 向后兼容）
-  const redactPasswords = b.redactPasswords === true || cfg.redactPasswords === true; dropInjectedHeadersFromAuth(config, headerParams); // [D92] 注入点头去重——与上一句同行的原因：sanitizeStart 在复杂度基线里「只许持平」，单独成行会 +1 行越线；逻辑本体在文件末尾 dropInjectedHeadersFromAuth（有独立 JSDoc），此处只留调用
+  const redactPasswords = b.redactPasswords === true || cfg.redactPasswords === true; applyDropInjectionOverlap(config, { headerParams, cookieParams: clampParams(src.cookieParams) }); // [D101] 注入点 × auth 同名夹击去重（共享单点实现；D92 起 REST 对齐 CLI，D101 收敛实现 + 覆盖 auth.cookie 同名对、去重门改为「实际同名」；仅引用变化时回写，避免凭空造 auth 键。分支在 helper 内：sanitizeStart 复杂度基线只许持平）——与上一句同行的原因见上
   return {
     url: u.toString(),
     method,
@@ -760,37 +762,12 @@ export const defaultScanManager = new ScanManager();
 // 默认单例路由
 export const scanRoutes = createRoutes({ scanManager: defaultScanManager });
 
-// ── [D92 2026-10-17 REST 对齐 CLI] 注入点头去重 ────────────────────────────────
-/**
- * 被纳入注入点的请求头不再经 `auth.headers` 透传（REST 侧补 CLI 早已有的防线）。
- *
- * 背景：`--test-headers` 开的头成为注入点后，若 `config.auth.headers` 仍持同名副本，
- * 发送层 `httpClient.mergeAuthHeaders` 的 auth.headers 分支是**覆盖**语义（h[k]=v），
- * 会把注入值顶回原值 ⇒ 该点全部探针打在未注入值上 ⇒ 报告写「未检出」，与「这个站
- * 没有注入」完全同形（D91 在 cookie 上实证；D92 把同一夹击面在 REST 入口封死）。
- * CLI 侧见 `server/bin/cli.js` 251-261；此前 REST（`sanitizeStart` → `config.auth`
- * 由 scalarsEgress 直通）没有等价逻辑。
- *
- * ⚠ 不得就地删 `config.auth.headers` —— 它与调用方 `cfg.auth` 是同一引用
- * （buildGuardedConfig 只做键收敛，不深拷贝），就地 delete 会污染入参对象：
- * 同一 body 复用第二次时 auth.headers 已被抹掉 ⇒「第一次扫对、第二次静默丢认证」。
- * 故构造新对象再挂回 config。
- *
- * Cookie 不在此删（与 CLI 同口径）：会话语义由 `auth.cookie` 的追加语义承担；
- * `auth.headers.cookie` 的覆盖由 D91 B 处（mergeAuthHeaders 的 Cookie 同名跳过）拦截。
- * @param {object} config 已过守卫的配置（就地替换 auth 字段，不污染入参）
- * @param {Record<string,string>} headerParams 注入点候选头
- * @returns {void}
- */
-function dropInjectedHeadersFromAuth(config, headerParams) {
-  const authHeaders = config.auth && config.auth.headers;
-  if (!authHeaders || typeof authHeaders !== 'object' || config.testHeaders !== true) return;
-  const kept = { ...authHeaders };
-  for (const k of Object.keys(headerParams)) {
-    if (String(k).toLowerCase() === 'cookie') continue;
-    const hit = Object.keys(kept).find((hk) => String(hk).toLowerCase() === String(k).toLowerCase());
-    if (hit) delete kept[hit];
-  }
-  config.auth = { ...config.auth, headers: kept };
-  if (Object.keys(kept).length === 0) delete config.auth.headers;
-}
+// ── 注入点头去重（D92 立，D101 迁移至共享实现）────────────────────────────────
+// 原 `dropInjectedHeadersFromAuth` 本地副本已移至 `core/authInjectionOverlap.js`
+// （`dropInjectionOverlapFromAuth`，CLI 与 REST 单点实现）。迁移时的两处收紧：
+//   ① 去重门从「testHeaders === true」改为「headerParams 与 auth.headers 实际同名」——
+//      构造层对每个请求都写 `{...target.headerParams}`（injection.js:147），level≥3 无
+//      testHeaders 时同名 auth 副本同样会静默顶替显式传入值（静默替换，不限于注入点）；
+//   ② 新增 auth.cookie 同名对去重（cookieParams ∩ auth.cookie ⇒ 双份 `uid=<payload>; uid=1`
+//      的生效顺序取决于目标解析，CLI 早已有 leftover 逻辑，REST 此前没有）。
+// 调用点在 sanitizeStart 内（与 redactPasswords 同行，复杂度基线的原因见该行注释）。

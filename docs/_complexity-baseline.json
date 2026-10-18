@@ -28,7 +28,9 @@
     },
     "scripts/duplication-guard.mjs::matchAcrossFiles": {
       "lines": 50,
-      "complexity": 17
+      "complexity": 17,
+      "limitLines": 100,
+      "limitComplexity": 15
     },
     "scripts/facts-sync.mjs::main": {
       "lines": 89,
@@ -133,7 +135,7 @@
       "limitComplexity": 15
     },
     "server/bin/cli.js::main": {
-      "lines": 312,
+      "lines": 311,
       "complexity": 123,
       "limitLines": 100,
       "limitComplexity": 15
@@ -157,8 +159,8 @@
       "limitComplexity": 15
     },
     "server/bin/cli.js::runSingleScanInner": {
-      "lines": 90,
-      "complexity": 48,
+      "lines": 81,
+      "complexity": 36,
       "limitLines": 100,
       "limitComplexity": 15
     },
@@ -175,7 +177,7 @@
       "limitComplexity": 15
     },
     "server/bin/cli/args.js::parseArgs": {
-      "lines": 227,
+      "lines": 224,
       "complexity": 214,
       "limitLines": 100,
       "limitComplexity": 15
@@ -276,19 +278,19 @@
       "limitLines": 100,
       "limitComplexity": 15
     },
-    "server/src/api/scanRoutes.js::<arrow@383>": {
+    "server/src/api/scanRoutes.js::<arrow@385>": {
       "lines": 68,
       "complexity": 34,
       "limitLines": 100,
       "limitComplexity": 15
     },
-    "server/src/api/scanRoutes.js::<arrow@522>": {
+    "server/src/api/scanRoutes.js::<arrow@524>": {
       "lines": 65,
       "complexity": 30,
       "limitLines": 100,
       "limitComplexity": 15
     },
-    "server/src/api/scanRoutes.js::<arrow@709>": {
+    "server/src/api/scanRoutes.js::<arrow@711>": {
       "lines": 27,
       "complexity": 26,
       "limitLines": 100,
@@ -399,12 +401,6 @@
     "server/src/core/http/proxy.js::resolveProxy": {
       "lines": 37,
       "complexity": 19,
-      "limitLines": 100,
-      "limitComplexity": 15
-    },
-    "server/src/core/http/requestContext.js::mergeAuthHeaders": {
-      "lines": 26,
-      "complexity": 16,
       "limitLines": 100,
       "limitComplexity": 15
     },
@@ -727,8 +723,8 @@
       "limitComplexity": 15
     },
     "server/src/engine/TargetParser.js::TargetParser.discover": {
-      "lines": 162,
-      "complexity": 90,
+      "lines": 159,
+      "complexity": 89,
       "limitLines": 100,
       "limitComplexity": 15
     },
@@ -829,8 +825,8 @@
       "limitComplexity": 15
     },
     "server/src/engine/detectors/OobDetector.js::OobDetector.detect": {
-      "lines": 104,
-      "complexity": 42,
+      "lines": 98,
+      "complexity": 38,
       "limitLines": 100,
       "limitComplexity": 15
     },
@@ -913,8 +909,8 @@
       "limitComplexity": 15
     },
     "server/src/engine/exploit/fileWrite.js::fileWrite": {
-      "lines": 43,
-      "complexity": 19,
+      "lines": 39,
+      "complexity": 17,
       "limitLines": 100,
       "limitComplexity": 15
     },
@@ -1261,8 +1257,8 @@
       "limitComplexity": 15
     },
     "src/App.tsx::AppThemeProvider": {
-      "lines": 168,
-      "complexity": 28,
+      "lines": 166,
+      "complexity": 26,
       "limitLines": 100,
       "limitComplexity": 15
     },
@@ -1285,7 +1281,7 @@
       "limitComplexity": 15
     },
     "src/components/ProgressView.tsx::ProgressView": {
-      "lines": 128,
+      "lines": 124,
       "complexity": 36,
       "limitLines": 100,
       "limitComplexity": 15
@@ -1309,8 +1305,8 @@
       "limitComplexity": 15
     },
     "src/components/ScanWizard.tsx::ScanWizardInner": {
-      "lines": 197,
-      "complexity": 50,
+      "lines": 182,
+      "complexity": 37,
       "limitLines": 100,
       "limitComplexity": 15
     },
@@ -1327,8 +1323,8 @@
       "limitComplexity": 15
     },
     "src/components/TopBar.tsx::TopBar": {
-      "lines": 131,
-      "complexity": 9,
+      "lines": 117,
+      "complexity": 4,
       "limitLines": 100,
       "limitComplexity": 15
     },
@@ -1447,26 +1443,26 @@
       "limitComplexity": 15
     },
     "src/pages/HistoryPage.tsx::HistoryPage": {
-      "lines": 169,
+      "lines": 161,
       "complexity": 28,
       "limitLines": 100,
       "limitComplexity": 15
     },
     "src/pages/HomePage.tsx::HomePage": {
-      "lines": 253,
+      "lines": 173,
       "complexity": 24,
       "limitLines": 100,
       "limitComplexity": 15
     },
     "src/pages/ReportPage.tsx::ReportPage": {
-      "lines": 320,
-      "complexity": 69,
+      "lines": 284,
+      "complexity": 58,
       "limitLines": 100,
       "limitComplexity": 15
     },
     "src/pages/ScanPage.tsx::ScanPage": {
-      "lines": 187,
-      "complexity": 32,
+      "lines": 158,
+      "complexity": 25,
       "limitLines": 100,
       "limitComplexity": 15
     },
@@ -1506,6 +1502,5 @@
       "limitLines": 100,
       "limitComplexity": 15
     }
-  },
-  "_note": "2026-10-14 D70：① printHelp / findClones 实测已低于软限（3 行 / 1 圈）⇒ 按「防虚高」判据**移出基线**（收进基线无意义，会被形态-6 判据判红 —— D67 的先例，我这次忘了）；② checkConsistency 176→177 行（⑯⑰ 判据已移入 readme-flag-coverage.mjs，此处只剩调用点，如实标注）；③ matchAcrossFiles（50 行/17 圈）登记为存量：**算法性复杂度**（两两文件 × 滑窗哈希 × delta 分组），已尝试拆分两次仅降 1 圈，拆不动就登记，不假装达标。"
+  }
 }
