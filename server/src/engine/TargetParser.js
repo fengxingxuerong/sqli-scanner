@@ -100,7 +100,7 @@ export class TargetParser {
     // 深度限制 6 / 每层节点上限 64 / 点数上限 50（防恶意深层嵌套 DoS）；
     // 非对象（null/数组标量等）安全跳过。
     if (target.jsonBody != null && typeof target.jsonBody === 'object') {
-      this._discoverJsonLeaves(target.jsonBody, [], points, 0);
+      this._discoverJsonLeaves(target.jsonBody, [], points, 0, config.testParamNames === true);
     }
 
     // 3.55) XML / SOAP body 叶子注入点（level≥1，xmlBody 传入时生效）
@@ -328,11 +328,40 @@ export class TargetParser {
     return filtered;
   }
 
+  // [D103] 对象键 → 点路径段（标识符/数字键直接用，其余含点号等特殊字符用 JSON.stringify
+  // 形式；数组下标不走本函数——调用侧直接用原始下标字符串）。
+  _jsonEntrySeg(key) {
+    return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(key) || /^\d+$/.test(key) ? key : JSON.stringify(key);
+  }
+
+  // [D103] 收集一个标量叶子的注入点：值点始终生成；键名点（opt-in）仅当父节点是**对象**
+  // 时追加（数组下标不是"名字"，无法改名——值点仍保留）。
+  _collectJsonLeaf(points, childPath, key, val, parentNode, wantParamNames) {
+    points.push(createInjectionPoint('body', childPath.join('.'), String(val)));
+    if (wantParamNames && !Array.isArray(parentNode)) {
+      points.push(
+        createInjectionPoint('paramName', childPath.join('.'), key, {
+          carrier: 'json',
+          paramNameValue: String(val),
+        })
+      );
+    }
+  }
+
   // [P1 批次 2026-09-08] JSON body 嵌套叶子注入点发现（discover 3.5 步的递归实现）。
   // 遍历 jsonBody 树收集字符串/数值叶子：param 用点路径（user.id / items.0.name，
   // 数组用数字下标），originalValue 取叶子原值字符串。防护边界（防恶意深层嵌套 DoS）：
   // 深度 ≤6、每层子节点 ≤64、总点数 ≤50，超限静默停止（保守：已发现的点照常返回）。
-  _discoverJsonLeaves(node, path, points, depth) {
+  //
+  // [D103 2026-10-18] wantParamNames（= config.testParamNames）为真时**追加** JSON 键名点
+  // （location='paramName'，carrier='json'）：注入面是**对象键名**本身，originalValue = 键名
+  // （真实键，非引号段形态），param = 点路径（构造侧 _splitJsonPath 互逆还原）。
+  // 与 query 键名同型（`Object.keys(req.body)[0]` 当列名拼 SQL），值参数化 ⇒ 值注入扫不到。
+  // 边界：数组下标不是"名字"（无法改名），不生成；键的**值**为对象/数组/bool/null 的不生成
+  // （与值点同口径只认 string/number 叶子）。
+  // @param {any} node @param {string[]} path @param {object[]} points @param {number} depth
+  // @param {boolean} wantParamNames
+  _discoverJsonLeaves(node, path, points, depth, wantParamNames) {
     if (depth > 6 || points.length >= 50) return;
     if (node == null || typeof node !== 'object') return; // 标量叶子由父层处理
     const entries = Array.isArray(node)
@@ -340,17 +369,13 @@ export class TargetParser {
       : Object.entries(node).slice(0, 64);
     for (const [key, val] of entries) {
       if (points.length >= 50) return;
-      // 数组下标保持裸数字（与 injection 侧 /^\d+$/ 数组匹配规则互逆）；
-      // 对象键仅标识符直接用，其余（含点号等特殊字符）用 JSON.stringify 形式。
-      const seg = Array.isArray(node)
-        ? key
-        : (/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(key) || /^\d+$/.test(key) ? key : JSON.stringify(key));
+      const seg = Array.isArray(node) ? key : this._jsonEntrySeg(key);
       const childPath = [...path, seg];
       if (val == null || typeof val === 'object') {
         // 嵌套对象/数组：递归（boolean 也递归跳过——bool 叶子注入语义无意义）
-        this._discoverJsonLeaves(val, childPath, points, depth + 1);
+        this._discoverJsonLeaves(val, childPath, points, depth + 1, wantParamNames);
       } else if (typeof val === 'string' || typeof val === 'number') {
-        points.push(createInjectionPoint('body', childPath.join('.'), String(val)));
+        this._collectJsonLeaf(points, childPath, key, val, node, wantParamNames);
       }
     }
   }
@@ -522,7 +547,10 @@ export class TargetParser {
    * originalValue 为基准构造 `键名 AND 1=1-- -`。若传值（如 'Keyboard'），探针会变成
    * `WHERE Keyboard AND 1=1-- - = ?`（列不存在 ⇒ 真假两侧同错 ⇒ 门控恒等 ⇒ 判非注入）。
    * 值由 buildInjectionRequest 从原 URL 保留，不依赖该字段。
-   * 诚实边界：仅 URL query 键名（JSON/XML 键名注入面另论）。
+   * [D103 2026-10-18] `carrier` 标记定位载体（query/json），构造侧据此分流：
+   * 本函数产 query；JSON body 键名点在 `_discoverJsonLeaves` 追加（carrier='json'）。
+   * 诚实边界：XML 元素名受 XML NameChar 约束（布尔载荷含空格/引号 ⇒ 发出即畸形报文），
+   * 不以畸形报文换检出，待专门探针批处理。
    * @param {object[]} points 注入点收集数组（就地追加）
    * @param {URL} u 目标 URL
    * @param {object} config 目标配置
@@ -532,14 +560,19 @@ export class TargetParser {
     const entries = this._queryEntries(u, config);
     for (const [k, v] of entries) points.push(createInjectionPoint('url', k, v));
     if (config.testParamNames !== true) return;
-    for (const [k, v] of entries) points.push(createInjectionPoint('paramName', k, k, { paramNameValue: v }));
+    for (const [k, v] of entries) points.push(createInjectionPoint('paramName', k, k, { carrier: 'query', paramNameValue: v }));
   }
 
   // url 点按「请求 URL（actionUrl 或目标 baseUrl）+ 参数名」去重；
   // 其它位置点按「位置 + 参数名 + actionUrl」去重（表单点多 action 视为独立点）。
+  // [D103] paramName 的 json 载体在去重键里带 carrier：query 键名与 JSON 键名可能同名
+  // （如都叫 name），共用 `${location}:${param}` 会让后落位的那个被静默去重掉。
   _pointKey(point, fallbackUrl) {
     if (point.location === 'url') {
       return `url:${point.actionUrl || fallbackUrl}:${point.param}`;
+    }
+    if (point.location === 'paramName' && point.carrier === 'json') {
+      return `paramName:json:${point.param}:${point.actionUrl || ''}`;
     }
     return `${point.location}:${point.param}:${point.actionUrl || ''}`;
   }

@@ -70,7 +70,10 @@ export const defaults = {
   // 场景：后端把 query 键名拼进 SQL（`SELECT ... WHERE ${key}=?` / `ORDER BY ${col}` 的
   // 键名来自 `Object.keys(req.query)[0]`），值始终被参数化 ⇒ 值注入扫不到，只有改键名能打。
   // 默认 false：开启后每个 query 参数多一个点位（请求量约 +1 倍），且大多数目标不存在该形态。
-  // 诚实边界：仅覆盖 URL query 键名；不含 JSON/XML 键名（结构复杂，键名注入面另论）。
+  // [D103 2026-10-18] 覆盖范围扩到 **JSON body 键名**（`Object.keys(req.body)[0]` 同型；
+  // jsonBody 传入时每个对象键多一个 carrier='json' 点位）。
+  // 诚实边界：XML 元素名不在覆盖内——载荷字符集受 XML NameChar 约束（布尔载荷含空格/引号
+  // ⇒ 发出即畸形报文），不以畸形报文换检出，待专门探针批。
   testParamNames: false,
   // useRegistry（对标 sqlmap 声明式 payload 体系）：false=检测器直接用 payloads/*.js 扁平数组（默认，零回归）；
   // true=检测器改用 PAYLOAD_REGISTRY 声明式注册表 + selectPayloadsForCtx 筛选（受 level/risk/testFilter/testSkip 控制）。

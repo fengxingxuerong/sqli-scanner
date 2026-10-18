@@ -43,9 +43,13 @@ injection.js 改键名保值（基线保持原键名）· boundary 跳过闭合�
 ### 待推进
 
 - JSON/XML **键名**注入面（本批只做 URL query 键名）；
+- [D103 2026-10-18] **JSON body 键名面已补**（`Object.keys(req.body)[0]` 当列名拼 SQL 同型；
+  carrier='json' 键名点 + 改键保值构造 + lab 新增 `/colfilter-json` 三判据实测全过）；
+  本项原「e2e/param-name-lab 接入 acceptance/run-all（当前需手动跑）」的描述自 D95 起已过时，随批更正。
+- 余 **XML 元素名**面（P1-1 剩项）：载荷字符集受 XML NameChar 约束（布尔载荷含空格/引号
+  ⇒ 发出即畸形报文）⇒ 需专门探针（算术位移/错误差分），另批。
 - paramName 点的 union 通道在「键名后还有固定后缀」的拼接形态下可能被截断（本批靶点
-  `WHERE ${k} = ?` 属可注释形态；`ORDER BY ${k} DESC` 这类尾部固定语法未覆盖，需另造靶点）；
-- e2e/param-name-lab 接入 acceptance/run-all（当前需手动跑，MySQL 缺失时 SKIP）。
+  `WHERE ${k} = ?` 属可注释形态；`ORDER BY ${k} DESC` 这类尾部固定语法未覆盖，需另造靶点）。
 
 ---
 

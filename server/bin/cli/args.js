@@ -77,6 +77,7 @@ export function parseArgs(argv, preset) {
     // --test-path：把 URL path 末段作为注入点（path 型注入点）。
     // [D93] testParamNames（--test-param-names）：把 query **键名**本身作为注入点（后端
     // `WHERE ${key}=?` / 键名当列名的 ORDER BY 拼接）。默认关：每参数多一个点位（请求量约 +1 倍）。
+    // [D103] 同开关覆盖 JSON body 键名（`Object.keys(req.body)[0]` 同型）。
     testHeaders: false, testPath: false, testParamNames: false,
     // [D41 2026-10-11 对标 sqlmap -p/--param-exclude/--param-filter] 注入点筛选三件套
     testParam: null, paramExclude: null, paramFilter: null,
