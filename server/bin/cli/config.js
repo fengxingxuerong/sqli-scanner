@@ -61,7 +61,15 @@ export function resolveBodyChannel(parsed) {
   return hasNested ? { bodyParams: {}, jsonBody: parsed } : { bodyParams: parsed ?? {}, jsonBody: null };
 }
 
+/**
+ * 由 CLI 参数解析「显式注入点目标」：--test-headers 时的请求头（除传输层/认证类）与 Cookie 键值。
+ * 产物被 target 构造层消费（headerParams/cookieParams 每请求携带），并被 D101 的
+ * auth 夹击去重（core/authInjectionOverlap.js）作为「显式键」输入。
+ * @param {any} args 解析后的 CLI 参数
+ * @returns {{cookieParams?: Record<string,string>, headerParams?: Record<string,string>}}
+ */
 export function buildInjectionTargets(args) {
+  /** @type {{cookieParams?: Record<string,string>, headerParams?: Record<string,string>}} */
   const result = {};
   // [P0-FIX 2026-09-18] `--cookie` 本身就是「这个 Cookie 是注入面」的显式表达，不再要求
   // 同时给 `--test-headers`。此前 cookieParams 只能从 `--header 'cookie: …'` 那条路填进来，
@@ -74,11 +82,13 @@ export function buildInjectionTargets(args) {
     if (Object.keys(cookieObj).length) result.cookieParams = cookieObj;
     return result;
   }
+  /** @type {Record<string,string>} */
   const hdrs = {};
   if (args.headerObj) Object.assign(hdrs, args.headerObj);
   const parsed = args.headers ? parseHeaders(args.headers) : undefined;
   if (parsed) Object.assign(hdrs, parsed);
   const EXCLUDE = new Set(['host', 'content-length', 'content-type', 'authorization']);
+  /** @type {Record<string,string>} */
   const headerParams = {};
   for (const [k, v] of Object.entries(hdrs)) {
     const lk = String(k).toLowerCase();

@@ -24,7 +24,11 @@ const targetStore = new Map();
 // credentialKey → active count
 const fanoutStore = new Map();
 
-/** 从凭据字符串生成摘要键（与 rateLimit.tokenKeyOf 同语义，但不依赖 req） */
+/**
+ * 从凭据字符串生成摘要键（与 rateLimit.tokenKeyOf 同语义，但不依赖 req）。
+ * @param {string|undefined} token 原始凭据（空/缺省 ⇒ 'anonymous'）
+ * @returns {string} `h:<sha256 前 16 位>` 摘要键
+ */
 export function credentialKeyOf(token) {
   const t = String(token || '').trim();
   if (!t) return 'anonymous';
@@ -65,7 +69,11 @@ export function checkQuota({ credentialKey, target, operation = 'scan' }) {
   return { allowed: true, remaining: { targets: TARGET_MAX - ts.targets.size, fanout: FANOUT_MAX - active - 1 } };
 }
 
-/** 释放扇出配额（扫描结束/停止时调用） */
+/**
+ * 释放扇出配额（扫描结束/停止时调用）。
+ * @param {{credentialKey?: string}} param 凭据键（缺省按 anonymous）
+ * @returns {void}
+ */
 export function release({ credentialKey }) {
   const key = credentialKey || 'anonymous';
   const active = fanoutStore.get(key) || 0;

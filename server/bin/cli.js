@@ -48,9 +48,10 @@ import {
   isEnumMode,
   buildExtractScope,
   validateEnumArgs,
-  parseCookiePairs,
   resolveBodyChannel,
 } from './cli/config.js';
+// [D101 2026-10-18] 注入点 × auth 同名夹击去重（与 REST sanitizeStart 共用同一实现）
+import { dropInjectionOverlapFromAuth } from '../src/core/authInjectionOverlap.js';
 // [D41 2026-10-11] 配置档案（对标 sqlmap -c/--save）：--config 预载 + --save-config 增量落盘
 import { presetFromArgv, saveConfigFile } from './cli/configFile.js';
 // 再导出：8 个测试文件从 ../bin/cli.js 导入这些符号，路径不能变
@@ -247,32 +248,20 @@ async function runSingleScanInner(sm, url, args) {
       assertInScope(String(url), scopeRules);
     }
   }
-  let auth = buildAuth(args);
-  // [本期新增] --test-headers：把显式请求头转为注入点字段。被纳入注入点的头不再经 auth 透传，
-  // 否则 httpClient.mergeAuthHeaders 会用原始值覆盖注入 payload（请求仍畸形/无注入）。
-  // 注入点的原始值由 buildInjectionRequest 始终从 target.headerParams/cookieParams 注入（含基线请求）。
+  /** @type {any} */ let auth = buildAuth(args);
+  // [D101 2026-10-18] 去重口径收敛为共享单点实现（core/authInjectionOverlap.js，与 REST
+  // sanitizeStart 同源）：① 非 cookie 注入点头从 auth.headers 删同名副本（**大小写不敏感**
+  // ——原实现在此精确键名 delete，请求文件与 --header 混用产生大小写变体时会漏删 ⇒
+  // mergeAuthHeaders 覆盖语义把注入值顶回原值）；② --cookie 已升为 cookie 注入点的键从
+  // auth.cookie 除去同名对，残余会话键重拼（原 leftover 逻辑等价迁移，P0-FIX 2026-09-18 语义
+  // 不变：同名双份 `uid=<payload>; uid=1` 的生效顺序取决于目标解析，必须避免）。
+  // 不删 auth.headers.cookie（会话语义）与 authorization（CLI 侧本就在 buildInjectionTargets
+  // 的 EXCLUDE 里，不作注入头）。
   const injTarget = buildInjectionTargets(args);
-  // 被纳入注入点的「请求头」不再经 auth 透传：mergeAuthHeaders 对普通头是**覆盖**语义，
-  // 否则会用原始值覆盖注入 payload（请求仍畸形/无注入）。Cookie 头不在此处删除 ——
-  // mergeAuthHeaders 对 cookie 是「追加」语义（existing + '; ' + auth.cookie），保留 auth.cookie
-  // 既能让注入点的 uid=<payload> 生效，又能带上独立传入的会话 Cookie（如 --cookie session=abc），避免掉会话。
-  if (injTarget.headerParams && auth && auth.headers) {
-    for (const k of Object.keys(injTarget.headerParams)) delete auth.headers[k];
-    if (auth.headers && Object.keys(auth.headers).length === 0) delete auth.headers;
-  }
-  // [P0-FIX 2026-09-18] --cookie 的每一对都已升为 cookieParams 注入点后，不再经 auth.cookie
-  // 重复附加：否则 Cookie 头出现同名两份（`uid=<payload>; uid=1`），哪份生效取决于目标的
-  // 解析顺序（多数取第一个、部分取最后一个）→ 同一目标重跑结论可能翻转。
-  // 只要还有「未被当作注入点」的键（如独立会话 cookie），auth.cookie 就原样保留。
-  if (injTarget.cookieParams && auth && auth.cookie && args.cookie) {
-    const asPoints = injTarget.cookieParams;
-    const fromFlag = parseCookiePairs(args.cookie, {});
-    const leftover = Object.keys(fromFlag).filter((k) => !(k in asPoints));
-    auth = leftover.length
-      ? { ...auth, cookie: leftover.map((k) => `${k}=${fromFlag[k]}`).join('; ') }
-      : { ...auth, cookie: undefined };
-    if (!auth.cookie) delete auth.cookie;
-  }
+  auth = dropInjectionOverlapFromAuth(auth, {
+    headerParams: injTarget.headerParams,
+    cookieParams: injTarget.cookieParams,
+  });
   // 枚举模式：把 CLI 参数解析为 extractScope 挂到 config（对标 sqlmap --dbs/--tables/...）
   const scope = buildExtractScope(args);
   if (scope) config.extractScope = scope;

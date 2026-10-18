@@ -64,6 +64,36 @@ function mergeAuthCustomHeaders(h, authHeaders) {
 }
 
 /**
+ * [D101 2026-10-18] 追加 auth.cookie 到请求头 Cookie —— 大小写不敏感找现有键并**归一为单键**。
+ * 此前只查大写 `h['Cookie']`：请求头里是小写 `cookie` 时判空 ⇒ auth.cookie 另起大写键 ⇒
+ * axios 归并同名头后写赢，吞掉原串（注入值/会话 cookie 双丢）。归一后追加语义在任何大小写
+ * 形态下都真实生效。抽为独立函数的原因：mergeAuthHeaders 有复杂度基线（只许持平）。
+ * @param {Record<string,string>} h 已合并的基础头（就地修改）
+ * @param {string} authCookie auth.cookie 串
+ */
+function appendAuthCookie(h, authCookie) {
+  const existingKeys = Object.keys(h).filter((k) => k.toLowerCase() === 'cookie');
+  const existing = existingKeys.length ? String(h[existingKeys[0]]).replace(/;?\s*$/, '') : '';
+  for (const k of existingKeys) delete h[k];
+  h['Cookie'] = existing ? `${existing}; ${authCookie}` : authCookie;
+}
+
+/**
+ * [D101 2026-10-18] Basic 预置跳过判定：NTLM 模式（[P1-2026-09-14] 既有语义：NTLM 走三步
+ * 握手，预置 Basic 会平白吃一次 401 且挡住 Type3 预附加 ⇒ 同主机后续请求重走握手），或请求头
+ * 已带 Authorization（REST headerParams 的 authorization 注入点/调用方显式自带）——
+ * mergeAuthHeaders 末尾写入会覆盖它，「显式构造优先于认证配置同名副本」与 D91-B 的 Cookie
+ * 语义对齐。抽为独立函数的原因同上（复杂度基线）。
+ * @param {object} auth 认证配置
+ * @param {Record<string,string>} h 已合并的基础头
+ * @returns {boolean}
+ */
+function shouldSkipBasicAuth(auth, h) {
+  if (auth.type && String(auth.type).toLowerCase() === 'ntlm') return true;
+  return Object.keys(h).some((k) => k.toLowerCase() === 'authorization');
+}
+
+/**
  * 合并基础请求头与认证信息（Basic Auth / Cookie / 自定义头），
  * 对 FORBIDDEN_HEADERS 黑名单中的头名做拒绝覆写（防请求走私）。
  * @param {Record<string,string>} headers 基础请求头
@@ -86,19 +116,12 @@ export function mergeAuthHeaders(headers, auth) {
     }
   }
   if (!auth) return h;
-  // [P1-2026-09-14] NTLM 模式不发 Basic 头：NTLM 走自己的三步握手（Type1→Type2→Type3），
-  // 预置 Basic 会 ① 让首请求平白吃一次 401 ② 挡住 Type3 的预附加（已有 Authorization 则不附加）
-  // → 同主机后续请求每次都重走握手（实测复用失效：第二次仍 3 次请求）。
-  const authIsNtlm = auth.type && String(auth.type).toLowerCase() === 'ntlm';
-  if (auth.basic && auth.basic.username != null && !authIsNtlm) {
+  if (auth.basic && auth.basic.username != null && !shouldSkipBasicAuth(auth, h)) {
     const user = auth.basic.username;
     const pass = auth.basic.password != null ? auth.basic.password : '';
     h['Authorization'] = 'Basic ' + Buffer.from(`${user}:${pass}`).toString('base64');
   }
-  if (auth.cookie) {
-    const existing = h['Cookie'] ? String(h['Cookie']).replace(/;?\s*$/, '') : '';
-    h['Cookie'] = existing ? `${existing}; ${auth.cookie}` : auth.cookie;
-  }
+  if (auth.cookie) appendAuthCookie(h, auth.cookie);
   if (auth.headers && typeof auth.headers === 'object') {
     mergeAuthCustomHeaders(h, auth.headers);
   }
