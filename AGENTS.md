@@ -106,7 +106,7 @@ node scripts/one-click-scan.mjs -u "http://target/page?id=1"   # 一条命令出
 | 结论 | 状态 | 证据 | 待办 |
 |---|---|---|---|
 | versioned 关键字族「与上游等价」 | **已修（T-6，2026-10-14）** | 上游 doctest 字面比对：本仓 `versionedkeywords` 输出漏包 `ALL`、`versionedmorekeywords` 漏 `CONCAT`（同族内不自洽） | T-6 已按上游形态重做（补 ALL + 22 个函数名，两件套收敛单一真源 `versionedKeywords.js`）；残留 3 条**形态差异**见下行 |
-| modsecurityversioned / modsecurityzeroversioned / halfversionedmorekeywords 版本注释形态 | **refuted（未关闭）** | 上游逐 token 重开注释并整段包裹，本仓只包关键字 | 形态差异，非功能缺陷；T-6 决定如实挂账不硬改，**待下批 tamper 批次连同复核** |
+| modsecurityversioned / modsecurityzeroversioned / halfversionedmorekeywords 版本注释形态 | **已关闭（D102，2026-10-18）** | 上游整段包裹 / 不闭合 /*!0 形态由复刻件（modsecurityversionedblock / modsecurityzeroversionedblock / halfversionedmorekeywordsopen）承载，纳入对拍脚本 ALIAS 段机械比对（5/5 一致）；默认件形态保留 | 默认链是否切换仍待真机 A/B（差异行在 drift 账逐条点名，不再阻塞台账条目） |
 
 > 复核命令：`node scripts/verify-tamper-upstream-examples.mjs`（读 `drift` / `excluded` 两字段，
 > `drift` 里 `[variant]` = 已对齐、`[queued]` = **已知未修的真缺陷**）。

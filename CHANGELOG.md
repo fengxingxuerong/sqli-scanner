@@ -65,6 +65,46 @@
 
 ## [Unreleased]
 
+### 2026-10-18 批次 D102 · P0-5 台账收口：versioned 族「覆盖口径」+ 参数挖掘同题对照
+
+**背景**：优化底账 P0-5 —— `docs/_claims-ledger.json` 两条 refuted/unverified 条目未关闭：
+`tamper-versioned-parity`（3 条形态差异）与 `paramminer-superiority`（「更强」无同题实测）。
+
+**A · tamper versioned 族（覆盖口径关闭）**
+
+- 事实底座：上游 5 个示例的**默认件**形态与本仓不同族（/*! X */ 空格形态 ×2、halfversioned
+  版本号 50540、modsecurity 两条整段块形态）——默认链是否切换仍待真机 A/B，drift 账保留点名；
+  但上游形态在本仓**由复刻件承载**（versionedkeywordsnospace / versionedmorekeywordsnospace /
+  halfversionedmorekeywordsopen / modsecurityversionedblock / modsecurityzeroversionedblock）。
+- 改动：对拍脚本新增 **ALIAS 段**（`scripts/verify-tamper-upstream-examples.mjs`）——把复刻件挂到
+  对应上游插件名下跑同一份字面比对，复刻件缺失/漂移**直接判红（无豁免位）**；随机件按上游
+  `random.seed(0)` 的单次采样口径做版本号归一（30+3 位随机，与上游 randomInt(3) 同构）。
+- 实测：复刻比对 **5/5 一致**（4 条逐字 + 1 条归一口径）；主比对维持 115 条/一致 100。
+  drift 账 5 行补记「覆盖口径关闭」（保留白历史）。
+- 台账：claim 改写为覆盖口径 → **verified**；AGENTS.md §四行、TODO.md 同项同步关闭。
+
+**B · paramminer 同题对照（改写措辞 + 真靶场）**
+
+- 新靶场 `e2e/param-mine-lab/`（lab.mjs + run.mjs）：隐藏参数 kw **不在任何链接/表单里**
+  （只能字典挖掘），进字符串拼接；安全对照 /api/safe 同款参数走占位符。判据三点：开挖掘
+  3/3 检出（多数决）、关挖掘 0、安全点 0。已接 acceptance（套件 `param-mine-lab`）与 run-all。
+- 同题对照 `sqlmap-contrast.mjs`（redteam 方法论：双方同参 `--level 2 --dbms=mysql`，各 3 轮
+  多数决）：我方零告知 **3/3**；sqlmap 零告知 **0/3**、全告知（kw 出现在请求里，等价 -p 全量）
+  **3/3**（`parameter 'kw' is vulnerable`）⇒ 差异在**发现环节**（sqlmap 无挖掘通道），不在利用
+  能力 ⇒ claim 改写为「提供 sqlmap 所没有的主动发现能力」→ **verified**。产物
+  `results-sqlmap-contrast.json` + sqlmap-out/*.log（sqlmap-out 已入 .gitignore）。
+- **顺带实锤（判定脚本自伤；留痕、不改旧文件）**：`e2e/redteam-lab/sqlmap-bench.mjs` 的命中
+  正则裸词 `/injectable/` 把未检出的 CRITICAL 句（"do not appear to be injectable"）判成命中，
+  且「pos && !neg」写法在多参数混合日志上会反向误杀 ⇒ 2026-10-04 版
+  `results-sqlmap-runs3.json` 记的「sqlmap 16/19 检出、6/7 误报」实际应为 **14/19、0/7**
+  （D14-base64 / D15-param-del 系 sqlmap 真漏，旧文件误记为命中；6 个 safe 点旧「误报」系自伤）。
+  修正：bench 正则定稿为只认肯定式专有短语；新增 `rescore-sqlmap-logs.mjs` 对既有日志**重算**
+  （不重跑，原日志即原始证据）→ `results-sqlmap-runs3.rescored.json`。8 点翻转逐个在案：
+  D14-base64 / D15-param-del（sqlmap 真漏，旧文件误记命中）+ F18/F19/F20/F21/F22/F24-safe-*
+  （6 个安全点，旧「误报」系自伤）。产物与旧文件同属 gitignore 的本机参考数字族（人工复跑口径）。
+  旧 json 与 archive 纪要数字不重写。同族历史参照：blackbox-lab runner 已栽过一次（F3）并修复。
+  重跑 redteam 靶场刷新基线（需 PG 常驻）挂待推进。
+
 ### 2026-10-18 批次 D101 · D91 类 auth 夹击通用化（P0-3 销账：全形态排查 + CLI/REST 单点去重）
 
 **动机**：D91 实修 cookie 注入点静默假阴性、D92 补掉 REST 入口的 auth.headers 夹击面后，

@@ -243,6 +243,52 @@ for (const [name, pairs] of Object.entries(snap.perPlugin)) {
   }
 }
 
+// ---------- 上游形态复刻件（ALIAS）----------
+// [D102 2026-10-18] 收口台账 tamper-versioned-parity「3 条形态差异未关闭」+ 两条 T-6 "未动"：
+// 这些上游示例的**默认件形态**与本仓不同族（差异仍在 drift 账里逐条点名，默认链是否切换
+// 待真机 A/B）——但上游形态在本仓**由专件复刻**（T-6/D13 批次入库的 *nospace/*open/*block）。
+// 本段把复刻件挂到对应上游插件名下跑**同一份字面比对**：复刻件与上游示例一致 ⇒ 「上游形态
+// 有对应实现且经外部卷子验证」从口头声明变成机械判据；复刻件漂移/缺失直接判红（无豁免位）。
+// 口径声明：比的是**形态复刻**（上游单条示例的字节形态），不等于「默认件=上游件」。
+const ALIAS = [
+  { from: 'versionedkeywordsnospace', to: 'versionedkeywords', note: '贴字无空格（上游基础版形态）' },
+  { from: 'versionedmorekeywordsnospace', to: 'versionedmorekeywords', note: '贴字无空格 + 函数名（上游更激进版形态）' },
+  { from: 'halfversionedmorekeywordsopen', to: 'halfversionedmorekeywords', note: '不闭合 /*!0（上游半版本化形态）' },
+  {
+    from: 'modsecurityversionedblock', to: 'modsecurityversioned', note: '整段随机版本块（版本号随上游同为 30+3位随机）',
+    // 上游 docstring 用 random.seed(0) 固定采样（30963 是**单次随机样本**，真值每跑随机）⇒
+    // 比对按「30+3 位数字」归一；本仓复刻件同样是 30+3 位随机 ⇒ 归一后必须稳定且一致。
+    normalize: (s) => String(s).replace(/\/\*!30\d{3}/g, '/*!30NNN'),
+  },
+  { from: 'modsecurityzeroversionedblock', to: 'modsecurityzeroversioned', note: '整段零版本块（上游形态）' },
+];
+
+let aliasChecked = 0, aliasOk = 0;
+const aliasMismatch = [];
+const aliasNoPlugin = [];
+for (const a of ALIAS) {
+  const pairs = snap.perPlugin[a.to];
+  const plugin = tamperRegistry.get(a.from);
+  if (!plugin) { aliasNoPlugin.push(`${a.from}（↔ 上游 ${a.to}）`); continue; }
+  if (!pairs?.length) { aliasNoPlugin.push(`上游快照缺 ${a.to} 示例（复刻件 ${a.from} 无从比对）`); continue; }
+  const norm = a.normalize || ((s) => String(s));
+  for (const [idx, { input, output }] of pairs.entries()) {
+    let got, got2;
+    try {
+      got = plugin.transform(input, {});
+      got2 = plugin.transform(input, {});
+    } catch (e) {
+      aliasChecked++;
+      aliasMismatch.push({ from: a.from, to: a.to, idx, input, want: norm(output), got: `[抛错] ${e.message}`, note: a.note });
+      continue;
+    }
+    aliasChecked++;
+    // 归一后双跑判异：随机面被归一后仍不稳定 ⇒ 复刻件含额外随机面，同样点名
+    if (norm(got) === norm(got2) && norm(got) === norm(output)) aliasOk++;
+    else aliasMismatch.push({ from: a.from, to: a.to, idx, input, want: norm(output), got: norm(got), secondRun: norm(got2), note: a.note });
+  }
+}
+
 const unexpected = mismatch.filter((m) => !m.known);
 // 豁免账必须会"过期"：某条本仓已改成与上游一致，却还留在账里 = 静默拿到一条无人复核的自由度。
 // 这里不判红（不阻塞），但逐条点名；--prune-baseline 直接把已失效的行删掉。
@@ -273,6 +319,7 @@ if (process.argv.includes('--prune-baseline')) {
 }
 console.log(`=== tamper 语义对齐上游官方示例（tag ${snap.tag}，快照 ${snap.at?.slice(0, 10)}）===`);
 console.log(`  上游示例覆盖插件 ${Object.keys(snap.perPlugin).length} 个｜字面比对 ${checked} 条，一致 ${ok} 条`);
+console.log(`  上游形态复刻件 ${ALIAS.length} 项｜比对 ${aliasChecked} 条，一致 ${aliasOk} 条${aliasOk < aliasChecked ? ' ⚠' : ''}`);
 if (skippedRandom.length) console.log(`  随机性跳过 ${skippedRandom.length} 条（逐条点名，不静默）`);
 // [2026-10-07] 双跑判异只是隐式兜底：两跑撞出同一形态（概率 Σp²）时会漏判成确定性插件并进入
 // 字面比对 ⇒ 必然翻红（实测 space2mysqlblank#0 触发过）。凡命中随机跳过却未登记 excluded 的，
@@ -287,8 +334,19 @@ for (const m of mismatch) {
   console.log(`      上游: ${JSON.stringify(m.want)}`);
   console.log(`      本仓: ${JSON.stringify(m.got)}`);
 }
-if (unexpected.length) {
-  console.error(`\n❌ ${unexpected.length} 条与上游官方示例不一致（且不在基线里）`);
+if (aliasNoPlugin.length) console.error(`  ❌ 复刻件缺失: ${aliasNoPlugin.join(' | ')}`);
+for (const m of aliasMismatch) {
+  console.error(`  ❌ [复刻漂移] ${m.from}（↔ 上游 ${m.to}#${m.idx}，${m.note}）`);
+  console.error(`      输入: ${JSON.stringify(m.input)}`);
+  console.error(`      上游: ${JSON.stringify(m.want)}`);
+  console.error(`      本仓: ${JSON.stringify(m.got)}${m.secondRun !== undefined ? `（二跑: ${JSON.stringify(m.secondRun)}）` : ''}`);
+}
+if (unexpected.length || aliasMismatch.length || aliasNoPlugin.length) {
+  const parts = [];
+  if (unexpected.length) parts.push(`${unexpected.length} 条与上游官方示例不一致（且不在基线里）`);
+  if (aliasMismatch.length) parts.push(`${aliasMismatch.length} 条复刻件漂移`);
+  if (aliasNoPlugin.length) parts.push(`${aliasNoPlugin.length} 项复刻件缺失`);
+  console.error(`\n❌ ${parts.join('；')}`);
   process.exit(1);
 }
-console.log('\n✅ 无新增漂移');
+console.log('\n✅ 无新增漂移（含复刻件比对）');

@@ -116,7 +116,16 @@ for (const c of selected) {
   for (let i = 0; i < RUNS; i++) {
     process.stdout.write(`[sqlmap] ${c.id} (${i + 1}/${RUNS}) ... `);
     const r = await run(c);
-    const inj = /is vulnerable|parameter '[^']*' is vulnerable|injectable/i.test(r.out);
+    // [D102 2026-10-18] 修正两类「判定脚本自伤」（同一处正则，blackbox-lab 已栽过一次、此处又栽）：
+    //   ① 裸词 /injectable/ 把未检出的 CRITICAL 句（"do not appear to be injectable"）判成命中
+    //      ⇒ 2026-10-04 版产出的 results-sqlmap-runs3.json 里 safe 侧 6/7「误报」是自伤，
+    //      且 vuln 侧 16/19 也虚高（D14/D15 混合日志被 ① 顺带判成命中）。
+    //   ② 「pos && !neg」在**多参数混合日志**上反向误杀（日志同时含 A is vulnerable 与
+    //      B does not seem to be injectable ⇒ 真命中被判 miss；rescore 首版实测 D14/D15 翻转错向）。
+    // 定稿：只认肯定式专有短语（否定句天然不含）。重算见 rescore-sqlmap-logs.mjs
+    // （14/19 检出、0/7 误报）；旧 results 文件不重写（留痕），重跑靶场刷新另挂待办。
+    const pos = /parameter '[^']+' is vulnerable|is '[^']+' injectable|identified the following injection point|resumed the following injection point/i;
+    const inj = pos.test(r.out);
     const fp = /false positive|unexploitable|looks like.*false/i.test(r.out);
     writeFileSync(`${OUTDIR}${c.id}.r${i + 1}.log`, r.out);
     runs.push({ hit: inj && !fp, ms: r.ms, note: r.note });

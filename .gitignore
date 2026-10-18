@@ -83,6 +83,7 @@ e2e/waf-lab/results/.git-broken-20260906/
 # 红队评测产物（本地生成，不入库）
 e2e/redteam-lab/out/
 e2e/redteam-lab/sqlmap-out/
+e2e/param-mine-lab/sqlmap-out/
 
 # e2e 临时诊断脚本与运行输出（本地 scratch，不纳入版本管理）
 e2e/diag/

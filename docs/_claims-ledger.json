@@ -50,12 +50,12 @@
     },
     {
       "id": "tamper-versioned-parity",
-      "claim": "versioned 关键字族与上游 sqlmap 等价",
-      "status": "refuted",
-      "evidence": "上游 doctest 字面比对：versionedkeywords 漏包 ALL、versionedmorekeywords 漏 CONCAT/CHAR/IFNULL/CAST/CURRENT_USER（同族内不自洽）——【T6 2026-10-14 已修 2 条真缺陷：补 ALL + 补函数名，关键字表收敛为单一真源 server/src/core/tamper/versionedKeywords.js】；【剩余 3 条形态差异未关闭：本仓 /*! X */ 含空格 vs 上游 /*!X*/，halfversioned 版本号 50540 vs 上游 0】",
-      "refute_cmd": "node scripts/verify-tamper-upstream-examples.mjs（drift 字段；[T-6 已修]/[T-6 未动] 标记）",
-      "recheck_batch": "待真机 A/B（modsec-live job 加对照组）；D96 复核（2026-10-17）：refute_cmd 复跑「无新增漂移」（字面一致数仍 100/115，3 条形态差异未动）",
-      "caveat": "★ 真缺陷已修但**字面一致数仍是 100/115**——形态差异未消除。不得据此宣称该族与上游等价；形态取舍属行为变化，须真机证据（2026-10-05 真机对拍该族 0 打穿 ⇒ 现状本身也不构成绕过承诺）"
+      "claim": "versioned 关键字族**覆盖**上游 sqlmap 官方示例形态：上游等价件（versionedkeywordsnospace / versionedmorekeywordsnospace / halfversionedmorekeywordsopen / modsecurityversionedblock / modsecurityzeroversionedblock 五个复刻件）与上游 doctest 字面对齐（脚本 ALIAS 段机械比对 5/5；modsecurityversioned 按上游 random.seed(0) 单次随机样本做版本号归一口径）。默认件为本仓强化形态，与上游差异逐条在 drift 账点名、不承诺与上游等价；默认链是否切换待真机 A/B",
+      "status": "verified",
+      "evidence": "上游 doctest 字面比对（115 条比对，一致 100）＋[D102 2026-10-18] 复刻件比对段（5 项比对，一致 5：4 条逐字 + modsecurityversioned 归一口径）；T-6（2026-10-14）已修 2 条真缺陷并收敛关键字表为单一真源 versionedKeywords.js；D102 把「上游形态有对应实现」从口头声明固化为 ALIAS 段机械判据（复刻件缺失/漂移直接判红，无豁免位），同时 5 条 drift 差异行逐一补记「覆盖口径关闭」（server/src/core/tamper/tamper-upstream-examples-baseline.json）",
+      "refute_cmd": "node scripts/verify-tamper-upstream-examples.mjs（drift 字段；末尾「上游形态复刻件」段为 D102 新增的复刻件比对）",
+      "recheck_batch": "待真机 A/B（modsec-live job 加对照组）；D96 复核（2026-10-17）：refute_cmd 复跑「无新增漂移」（字面一致数 100/115，3 条形态差异未动）；D102（2026-10-18）：新增 ALIAS 复刻件比对段 5/5 一致 ⇒ 按覆盖口径转 verified（改写见 claim），默认件差异维持 drift 点名",
+      "caveat": "★ 白历史：原表述「与上游 sqlmap 等价」对**默认件**成立性被推翻（3 条形态差异：/*! X */ 空格形态 ×2、halfversioned 版本号 50540 vs 0），D102 改写为覆盖口径并转 verified——覆盖的是「上游形态有对应实现且经比对」，不是「默认件=上游件」。形态取舍属行为变化，默认链切换仍须真机证据（2026-10-05 真机对拍该族 0 打穿 ⇒ 现状本身也不构成绕过承诺）。"
     },
     {
       "id": "tamper-parity-names",
@@ -84,12 +84,12 @@
     },
     {
       "id": "paramminer-superiority",
-      "claim": "参数挖掘（Arjun 式）强于 sqlmap",
-      "status": "unverified",
-      "evidence": "11 用例覆盖五种目标形态（反射型命中 / 静态页零发现 / 全回显防噪 / 预算硬顶 / POST 载体）；引擎侧 TargetParser 6.6 步消费并打 mined 溯源标记",
-      "refute_cmd": "node --test server/tests/paramMiner.test.js",
-      "recheck_batch": "D87（复跑自测通过；对标口径仍未建立，维持 unverified）",
-      "caveat": "★ D68 复核结论：**sqlmap 没有主动挖掘能力**（只收 -p/--param-del 等显式参数）⇒ 严格表述应是「提供 sqlmap 所没有的能力」，不是「更强」。本仓自身的召回率/误报率**无同题量化**。补证方案：对同一组目标分别跑本仓 paramMine 与 sqlmap -p 全量，比「发现的真实可注入参数数」。措辞修正前不得对外说「更强」。 ★ D87 复核（2026-10-18）：`node --test server/tests/paramMiner.test.js` 复跑 11/11 通过 —— 但该断言证明的是**自身功能可用**（反射命中/静态页零发现/预算硬顶等），**不构成「强于 sqlmap」的对照证据**（无同题双方实测、无 Arjun 基线）。维持 unverified：本条是**对标声明**，需要一个同题对照口径（参照 redteam-lab 的「双方各跑 3 次取多数决+中位」）才能转 verified，单测再多也不改变这一点。"
+      "claim": "参数挖掘（Arjun 式）**提供 sqlmap 所没有的主动发现能力**：在参数未出现在链接/表单的靶点上，从零发现隐藏参数并完成检出；sqlmap 无挖掘通道（-p/--param-del 只能收窄已知参数），须参数已出现在请求里才可能测到。（原表述「强于 sqlmap」已按 D68 复核改写——sqlmap 不做挖掘，「更强」无定义）",
+      "status": "verified",
+      "evidence": "① 单测 11 例（server/tests/paramMiner.test.js：五种目标形态/预算硬顶）；② [D102 2026-10-18] 真靶场 e2e/param-mine-lab（run.mjs 三判据：开挖掘 3/3 检出隐藏参数 kw / 关挖掘 0 / 安全点 0，已接 acceptance 常驻）：参数 kw 不在任何链接表单里，只能字典挖掘；③ 同题对照 sqlmap-contrast.mjs（redteam 口径：双方同参 --level 2 --dbms=mysql、各 3 轮多数决）：我方零告知 3/3 检出；sqlmap 零告知 0/3、全告知（kw 出现在请求里）3/3 命中 parameter 'kw' is vulnerable ⇒ 差异在**发现环节**、不在利用能力。产物：e2e/param-mine-lab/results-sqlmap-contrast.json + sqlmap-out/*.log",
+      "refute_cmd": "门禁判据：node e2e/param-mine-lab/run.mjs（已接 acceptance，套件 param-mine-lab）；同题对照：python e2e/run-with-sandbox.py e2e/param-mine-lab/sqlmap-contrast.mjs（需 sqlmap）",
+      "recheck_batch": "D87（复跑 11/11 通过，对标口径未建立，维持 unverified）；D102（2026-10-18）：建真靶场判据（接 acceptance）+ 同题对照证据器 ⇒ 按改写后的准确表述转 verified。同批顺带修正 redteam sqlmap-bench 判定正则两处自伤（见 CHANGELOG D102 与 rescore-sqlmap-logs.mjs）",
+      "caveat": "★ 白历史：原表述「参数挖掘（Arjun 式）强于 sqlmap」不成立（D68：sqlmap 无主动挖掘能力，「更强」无定义），D102 改写为「提供 sqlmap 所没有的主动发现能力」并经同题实测。边界：本条 verified 覆盖「从零发现能力存在且 sqlmap 无此通道」，**不覆盖字典召回率**（本仓字典 ~260 条 vs Arjun 2.6 万，无同题量化）；对照 --level=2 为双方同参（给利用侧公平阳性对照，默认单参数形态下 sqlmap 对被 LIKE 包裹+通用错误页的目标 level1 会漏）。"
     }
   ]
 }
