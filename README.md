@@ -1,6 +1,6 @@
 # sqli-scanner
 
-[![Tests](https://img.shields.io/badge/tests-4186%20passing-brightgreen)](#测试)[![CI](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml/badge.svg)](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml)
+[![Tests](https://img.shields.io/badge/tests-4192%20passing-brightgreen)](#测试)[![CI](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml/badge.svg)](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml)
 [![Dependencies](https://img.shields.io/badge/dependencies-0%20known%20vulns-brightgreen)](#环境变量)
 
 > CI 徽章为真实状态（仓库地址已定，run#90 起全绿）。发布判定仍以 `CHANGELOG.md`
@@ -194,7 +194,7 @@ admin-only 触发页 `/admin/panel`（users.admin 角色门禁 403）+ admin 会
 （SQL Server 与 Oracle 已于 2026-09-14/15 升级 verified，2026-09-22 补齐产物与版本凭证，**不在本段范围**。）
 | **1920 条 payload 模板** | 含注释/编码/子句/嵌套闭合变体：主库 1769 + 子句 137 + OOB 14（口径：各库×各技术下的模板条目数，**同一模板跨库/技术重复计入**）+ 686 条声明式注册表（`payloads/registry.json` 681 + `payloads/registry.versioned.json` 5 条版本门条目） |
 | **234 个 tamper 插件** | 覆盖 sqlmap 官方 tamper 全集（84/84，分母取自 tag 1.10.10 上游清单；`npm run tamper:parity` 核对名字、`npm run tamper:examples` 用**上游 docstring 里的官方示例**反测语义——同名不等于同行为，当前 100/115 条字面一致（另有 11 条因输出含随机性不适用字面比对、判据逐条点名跳过），其余 15 条**逐条定性**记于 `tamper-upstream-examples-baseline.json` 的 drift 字段——⚠️ 其中 T6 已修 2 条**真缺陷**（versionedkeywords 漏包 `ALL`、morekeywords 族漏包 CONCAT/CHAR/IFNULL/CAST/CURRENT_USER 等函数名，已收敛为单一真源 `versionedKeywords.js`），**另有 3 条形态差异仍未关闭**（本仓 `/*! X */` 含空格 vs 上游 `/*!X*/` 无空格；halfversioned 用版本号 50540 vs 上游 0）——形态取舍须真机 A/B 证据，本地口径不足以判，**不得据此宣称该族与上游等价**；含批次 D13 新增 5 件「上游形态变体」——真机 A/B 用，不动默认链）。⚠️ 绕过率口径见 [docs/waf-绕过能力实测口径.md](docs/waf-绕过能力实测口径.md) |
-| **62 WAF 指纹** | 自动识别 WAF 类型并推荐 tamper 组合。[D44] 指纹未命中时的**多向量主动探测**（wafw00f 式）：sqli-union/sqli-quote/xss/lfi 四向量差分 + Server 头漂移 + **连接级阻断识别**（断连型 WAF 此前被吞掉），「unknown 拦截器」也带可复核证据（哪些向量被拦/头怎么漂移）。入口：`--identify-waf`（只识别不扫描）或 `--active-waf-probe`（扫描期开启，默认关；REST 键 `activeWafProbe` 既有） |
+| **62 WAF 指纹** | 自动识别 WAF 类型并推荐 tamper 组合。[D44] 指纹未命中时的**多向量主动探测**（wafw00f 式）：sqli-union/sqli-quote/xss/lfi 四向量差分 + Server 头漂移 + **连接级阻断识别**（断连型 WAF 此前被吞掉），「unknown 拦截器」也带可复核证据（哪些向量被拦/头怎么漂移）。⚖️ **外部权威对拍**（口径见台账 `waf-fingerprint-coverage`，`docs/_claims-ledger.json`）：wafw00f 18 家 × 36 样本 100%（`wafExternalParity.guard`）+ WhatWaf 27 家 + nuclei(Safe3) 1 家 30 条样本 100%（`wafSecondSourceParity.guard`），16 家无第二源如实登记边界；⚠️ 构造样本口径 ≠ 真机命中，真实流量证据待商业云 WAF 授权样本（见 [docs/WAF-真机样本采集-runbook.md](docs/WAF-真机样本采集-runbook.md)）。入口：`--identify-waf`（只识别不扫描）或 `--active-waf-probe`（扫描期开启，默认关；REST 键 `activeWafProbe` 既有） |
 | **可视化报告** | 风险环形图 + 技术分布条形图 + 漏洞列表 + 数据提取树 + 检测摘要 |
 | **深度提取** | 分页聚合数据提取，绕过 UNION 限制 |
 | **全库拖库** | `--dump-all`：枚举所有库后逐库逐表拖（对标 sqlmap --dump-all） |
@@ -237,6 +237,9 @@ npm run waf-validate    # HTTP 实测验证 WAF 绕过
 npm run waf-e2e         # 运行 WAF e2e 对比测试
 npm run waf-real        # [对外口径] 真实 OWASP CRS v4.1.0 规则下 tamper 开/关 A/B
 npm run waf-auto        # CRS 下「引擎自动选链绕过」验收（不显式配 tamper）
+npm run waf-real:collect # [P0-1] 商业云 WAF 真机样本采集（仅授权目标；礼仪性 GET / --from-json）
+# [P0-2] 第二权威对拍源样本提取（WhatWaf 源码目录 → second-source-samples.json）
+node scripts/extract-second-source-samples.mjs --whatwaf <WhatWaf-src> [--out <json>]
 npm run acceptance      # 【门禁】全方位验收（20 套件，事实断言模式，可进 CI）
 npm run quality:all     # 【门禁】一键全量质量校验（测试/覆盖率/变异/验收/类型/架构/嵌套/引用/文档/版本，等价于 ci:local）
 ```
@@ -391,7 +394,7 @@ backend/  ← Express + Node.js
 # 前端测试（574 个用例）
 npm test
 
-# 服务端测试（3616 个用例）
+# 服务端测试（3624 个用例）
 cd server && npm test
 
 # 全部测试
@@ -417,7 +420,7 @@ npm run artifact:drift   # 入库的 e2e 基线产物必须等于当前代码跑
 
 - TypeScript: 零错误
 - 前端测试: 574/574 通过（覆盖率门禁 stmts 93.03 / branch 84.88 / func 81.90，阈值 88/77/67）
-- 服务端测试: 3616 用例（3612 pass / 0 fail / 4 skip，并发口径 2026-10-17 复测；4 skip 为环境依赖显式跳过。覆盖率 lines 91.13 / branch 80.54 / func 84.28，阈值 85/74/77）
+- 服务端测试: 3624 用例（3618 pass / 0 fail / 6 skip，并发口径 2026-10-18 复测；6 skip 为环境依赖显式跳过。覆盖率 lines 91.13 / branch 80.54 / func 84.28，阈值 85/74/77）
 - 一键扫描: `npm run scan -- -u <url>`（CLI 一条命令产出 HTML/JSON/Markdown 全套报告 + manifest，退出码可直接进 CI 门禁）
 - Tamper 插件: 234 个（含批次 D3 新增 scalarselectinline；含 v24 增量 20 个，对齐 sqlmap 官方 tamper 全集，含官方 CRS/libinjection 实测组合 uniontable+odbcbrace；含批次 D13 新增 5 件上游形态变体 *nospace/*open/*block，真机 A/B 判决前不进默认链）
 - WAF 绕过能力: 200+ 插件链式组合，覆盖 62 个 WAF 厂商指纹识别 + 推荐

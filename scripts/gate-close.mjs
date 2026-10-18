@@ -24,11 +24,20 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
-/** wiring 测试文件（门禁与接线测试；防虚高等判据只在测试里，不在门禁输出里） */
+/**
+ * wiring 测试文件（门禁与接线测试；防虚高等判据只在测试里，不在门禁输出里）。
+ * [2026-10-18 修正] 原匹配 `f.includes('Guard')` 大小写敏感，把 26 个 `*.guard.test.js`
+ * （含 D89 wafExternalParity.guard / wafSamples.guard 等）漏在收口清单之外——它们只在
+ * `cd server && npm test` 的全量里被兜底跑，gate:close 看不见。改成大小写不敏感，
+ * 使“守卫类测试”与“wiring 类测试”全部被收口。基线从 16 个扩容到 40+ 个。
+ */
 function wiringTestFiles() {
   const dir = join(ROOT, 'server', 'tests');
   return readdirSync(dir)
-    .filter((f) => f.endsWith('.test.js') && (f.includes('Guard') || f.includes('wiring')))
+    .filter((f) => {
+      const lower = f.toLowerCase();
+      return lower.endsWith('.test.js') && (lower.includes('guard') || lower.includes('wiring'));
+    })
     .sort()
     .map((f) => join('server', 'tests', f));
 }

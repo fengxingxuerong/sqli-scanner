@@ -65,6 +65,97 @@
 
 ## [Unreleased]
 
+### 2026-10-18 批次 D99 + D100 · 44 家无 wafw00f 插件 WAF 的第二权威对拍源（P0-2 落架）
+
+**动机**：D89 引入 wafw00f 对拍后，62 家中仍有 44 家 wafw00f 侧无插件，`waf-fingerprint-
+coverage` 的证据链只有「规则 + 判据单测」（真机 1/62）。本批为这 44 家引入**第二独立
+权威源**：WhatWaf（Ekultek，2.9k stars，GPLv3，90 插件，与 wafw00f 各自独立开发）
++ nuclei-templates `waf-detect.yaml`（仅取 WhatWaf 未覆盖的 Safe3 一条——该模板
+reference 直指 WhatWaf、作者同为 WhatWaf 核心作者，不能整体当独立源）。
+
+**交付（净增量 27 家 WhatWaf + 1 家 Safe3/nuclei = 28 家外部背书）**：
+
+1. `scripts/extract-second-source-samples.mjs`（D99）——抽取脚本：内联 27 家 WhatWaf
+   字面样本映射 + nuclei Safe3 一条；每条样本带**源正则匹配自证**（防映射手滑，
+   `\A`→`^` 转写保 Python 语义；header 型以 `key + ' ' + value` 拼接匹配源正则，
+   兼容 `x-amz-cf-id` 这类头 **key** 特征）；`{,60}`→`{0,60}` 修正 JS 量词语法。
+2. `server/tests/fixtures/second-source-samples.json`——快照：30 条样本覆盖 28 家
+   （WhatWaf 29 + nuclei 1）、过宽登记 5 条、无第二源边界 16 家（如实登记，不夸大为
+   能力）。样本生成时逐条通过源正则自证。
+3. `wafRules.js`（D100）——13 处 matcher 缺口补全（带 `[D100]` 出处注释）：SafeDog
+   body 域名、Akamai_Kona `ak_bmsc=`、DenyAll 拦截页标题/cookie、Sucuri body、
+   Radware body、Qihoo_360 `360wzws|wzws.waf.cgi`、DotDefender body、StackPath 专属
+   文案、Teros `st8(id|wa|wf|_wat|_wlf)` 全变体、UrlScan 空格/下划线形态、WebKnight
+   server 头、Safe3 server 头（nuclei 唯一来源）。**修复 1 处真 bug**：ShadowDaemon
+   原 `\.forbidden` 转义过度（要求字面点号，真实拦截页是空格）→ 对照 WhatWaf 后
+   **直接删除该 matcher 而非补宽**——`<h\d>\d{3}.forbidden<.h\d>` 是任意 403 拦截页
+   通用形态（IIS/nginx/任何 WAF 都返回 "403 Forbidden"），补 `[\s.]` 会引入反向误报
+   （守卫实测抓到），按「过宽不采用」纪律只保留专属文案 "Request forbidden by
+   administrative rules"。
+4. `server/tests/wafSecondSourceParity.guard.test.js`（D99/D100）——常驻守卫：正检
+   30 条外部样本必须正确命名 + 零误报反向（干净/通用 403 响应不得命中任何厂商）+
+   反例自证（不存在特征不得命中 Cloudflare）+ 数量护栏。被 gate:close 的
+   wiringTestFiles() 大小写不敏感修复自动收口（64 个测试文件之一）。
+
+**对拍结果**：修复前 12/31 条外部样本未命中（body 形态 9 家 + cookie 2 家 + 空格
+1 家 + ShadowDaemon 转义 bug + Safe3 缺 server 头）→ 修复后 **30/30 正检全绿 + 反向
+零误报**。守卫 4/4（wafExternalParity / wafRealSamples / wafSecondSourceParity /
+wafSamples 全量无回归；全量 server 测试（cwd=server）**3624 例 = 3618 pass / 6 skip
+/ 0 fail**（2026-10-18 复核定稿；批次内早前一次记录为 3605 例 1 fail，复核不可复现
+——按可复现值入册，留痕不抹）。
+
+**台账**：`waf-fingerprint-coverage` 证据链升级——「wafw00f 18 家 × 36 样本 100% +
+WhatWaf 27 家 + nuclei 1 家（Safe3）100% + 真机 ModSecurity 1/62 + 无第二源边界 16 家
+登记」；**仍维持 unverified**（构造样本口径 ≠ 真机命中），缺口收窄为「商业云 WAF
+真机样本」唯一一项。
+
+**同步**：README 补第二对拍源说明与脚本行；`gate:close` 全量 22/22 验证。
+
+**当前边界（不越界声明）**：「100%」依旧是构造样本口径（外部权威正则具体化），不
+等于真实流量必然命中；16 家无第二源（Tencent_WAF/Citrix_NetScaler/Sophos_UTM/NAXSI/
+Eisoo/KnownSec_KSWAF/UPYUN_WAF/Azure_FrontDoor/GCP_CloudArmor/Fastly/SiteLock/
+Zenedge/F5_TrafficShield/SecureIIS/NSFOCUS/SafeLine）属**边界**而非能力缺口。
+
+### 2026-10-18 批次 D98 · 商业云 WAF 真机样本采集框架（P0-1 落架）+ wiring 收集口径修复（D97 沿用）
+
+**动机**：台账 `waf-fingerprint-coverage`（`docs/_claims-ledger.json`）复核时仍为
+`unverified`——真机样本只有 ModSecurity 1/62，D89 的 18/18 是 wafw00f 规则**构造样本**，
+证明「同一份厂商特征我们认得」，不证明「真机必然命中」。缺口收敛为单一动作：补商业云
+WAF（Cloudflare / F5 / 阿里云 / 腾讯云 / AWS WAF 等）的**真实拦截/指纹响应样本**。
+
+**交付（让「拿到授权样本即可灌入转 verified」成为即插即用流程）**：
+
+1. `e2e/waf-real/cloud-sample-collector.mjs`——真机样本收集器：对**授权目标**发一次
+   良性 GET（零攻击载荷，与指纹阶段同行为），取响应喂 `WafIdentifier` 识别；命中即把
+   该厂商的命中特征（key/value）写入快照；`--from-json` 支持拦截页形态（用户在授权
+   目标上自行触发后导入，收集器不做攻击性探测）；`--expect <vendor>` 校验识别结果防
+   串台；dedup 防重复；dry-run 预览。红线遵守：无授权目标时不自动扫第三方（本仓纪律）。
+2. `server/tests/fixtures/waf-real-samples.json`——真机样本快照（初始为空 + schema
+   注释，`sourceRule: 'real-capture'` 与构造样本物理隔离）。
+3. `server/tests/wafRealSamples.guard.test.js`——**有牙守卫**：空快照 → 两个测试显式
+   SKIP（`# skipped` 可见，不是 PASS）并打印「待采集、台账维持 unverified」；
+   非空 → 逐条正检（构造响应必识别标称厂商）+ 零误报反向（去特征后不得识别）+ 变异
+   自证（删该厂商 rules 必红，防恒绿守卫）+ 数量护栏（≥3 家）+ 快照/收集器路径同源
+   文本判据（防写 A 读 B 假接线）。已实测：误塞构造样本和坏 value 时守卫能红。
+4. `docs/WAF-真机样本采集-runbook.md`——采集 runbook：合规红线、良性/拦截页两种采集
+   路径、8–10 家目标厂商清单、转 verified 验收门槛、失败排查表。
+
+**顺手修复（D97 定级）**：`scripts/gate-close.mjs` 的 `wiringTestFiles()` 用大小写敏感
+的 `includes('Guard')`，把 26 个 `*.guard.test.js`（含 D89 的 wafExternalParity.guard、
+wafSamples.guard 与新 wafRealSamples.guard）漏在收口清单之外——它们只在
+`cd server && npm test` 全量里被兜底跑，gate:close 看不见（「判据没看住它声称要管的
+东西」，D95/D97 同一形态第三次）。改为大小写不敏感匹配后 wiring 从 16 → 64 个测试
+文件，`npm run gate:close -- --quick` 与全量 22/22 双绿复验；AGENTS.md 手写清单同步修正。
+
+**同步**：README 脚本表补 `waf-real:collect`；`docs/_facts.json` 重采（服务端 3620 用例
+= 3614 pass / 6 skip，新增守卫 4 例计入；徽章 4188）；门禁全绿（gate:close 22/22。
+lint / typecheck / readme / facts / refs / e2e-wiring 全过）。
+
+**当前边界（不越界声明）**：快照仍为空——本批次只落「判据框架 + 流程」，不造样本；
+`waf-fingerprint-coverage` 维持 `unverified`（空快照守卫显式 SKIP，不会假绿）。
+转 verified 的钥匙是**用户提供授权目标**（自家站点或书面授权的 WAF 站点 URL /
+账号），拿到即可按 runbook 灌样本、守卫转实跑、台账更新。
+
 ### 2026-10-17 批次 D96 · CI run 262 两处红的根治（interactsh 提取正则吞连字符 + 故障②墙钟改请求预算）
 
 **动机（发现链）**：run 262（D95 推送）lint 首次全绿（第 43–52 步史上首次全部执行），
@@ -108,6 +199,17 @@ oob 真链全过。台账补记：`waf-crs-pl1-bypass` 追加 modsec-live 常驻
 （见上表）；本机实网复验时 token 恰含 `_`+`-` 双字符，14/14 全回连 ✅；
 run 267 复核。顺带：v1.1.1 GitHub Release 已建
 （https://github.com/fengxingxuerong/sqli-scanner/releases/tag/v1.1.1）。
+**第四段（run 268）**：macos 故障②/③ 全过 —— 预算制在 macos 兑现（257 请求
+82s 以失控形态收场，不再墙钟爆管）；但**修复①**单字节腐蚀（`5.7.40`→`5.7040`，
+同进程故障② 刚走失控路＝stall 退化模式）。新增 **stall 归因守卫**（提取窗口
+心跳 maxGap > 150ms ⇒ 污染抽重抽 ≤3；干净抽腐蚀 ⇒ 立即红——不蒙混真回归；
+全抽污染 ⇒ 显式红并注明「环境退化不可量测」）。run 269 复核。
++**第五段（run 269 提交）**：lint 死代码清零 —— `complexityGuard.wiring.test.js` 删
++`fnName` 死赋值、`wafExternalParity.guard.test.js` 移除未用 `readdirSync` import、
++`tamperKeywordCoverage.test.js` 的 `kwsOf` 有意保留并加禁告注释（防列表挪回函数内
++的哨兵）；facts 指纹重采回绿（4188 用例徽章），门禁 20/20。连同 run 268 后
++acceptance 全量重跑（19 PASS / 0 BLOCKED / 0 FAIL / 1 SKIP，真 MySQL/PG 闭环）
++一并提交，供 CI 复核 macOS 下 stall 守卫是否生效。
 
 ### 2026-10-17 批次 D95 · e2e 靶场接线实锤的两处烂账（判据假阳性 + 漏接线 + 收口清单 22 项）
 

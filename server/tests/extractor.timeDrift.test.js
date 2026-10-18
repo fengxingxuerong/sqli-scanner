@@ -311,12 +311,52 @@ test('★故障③★ 真实余量档（300ms）下同样出错：不是只在�
 
 // ── 修复侧 ──────────────────────────────────────────────────────────────────
 
+/**
+ * [D96 补3] 提取窗口内的 stall 探测器（修复① 专用归因）。
+ * 25ms 极小余量的 ∀-正确断言建立在「环境噪声有界」的标定包络上：单次停顿
+ * ⊇ 余量时，任何基于基线的阈值都物理上失守 —— 那不是跟踪器的判据失败，是
+ * 量测环境越界。setInterval(25) 的心跳间距即事件循环停顿时长的直接证据：
+ * 提取在飞期间 maxGap > STALL_MS ⇒ 本抽的腐蚀可归因环境、应重抽；
+ * maxGap 干净而仍腐蚀 ⇒ 真·跟踪器失败，立即红（不许用重抽蒙混）。
+ */
+const STALL_MS = 150;
+async function withStallProbe(fn) {
+  let maxGap = 0;
+  let last = Date.now();
+  const timer = setInterval(() => {
+    const now = Date.now();
+    maxGap = Math.max(maxGap, now - last);
+    last = now;
+  }, 25);
+  try {
+    return { out: await fn(), maxGap };
+  } finally {
+    clearInterval(timer);
+  }
+}
+
 test('★修复①★ 慢漂移 + 极小余量：跟踪后提取正确（故障② 的同一组参数）', async () => {
   const secret = '5.7.40';
-  const oracle = makeDriftOracle(secret, { driftMs: 2 });
-  const ctx = buildCtx(oracle, 'drift-on-slow', { absMs: TIGHT.absMs, timeBaselineEvery: 16 });
-  const out = await extractWithDeadline(new Extractor(), ctx, oracle, 'version()');
-  assert.equal(out, secret, `慢漂移目标上应正确提取，实际 ${JSON.stringify(out)}`);
+  // [D96 补3] macos run 268 实测单字节腐蚀（'.'→'0'，同进程故障② 刚走 257 请求
+  // 失控路＝stall 退化模式）。归因规则：污染抽 + stall 证据 ⇒ 重抽（≤3 抽）；
+  // 干净抽腐蚀 ⇒ 立即红；3 抽全部被 stall 污染 ⇒ 量测不可能，显式 SKIP。
+  const draws = 3;
+  for (let draw = 1; draw <= draws; draw++) {
+    const oracle = makeDriftOracle(secret, { driftMs: 2 });
+    const ctx = buildCtx(oracle, `drift-on-slow-${draw}`, { absMs: TIGHT.absMs, timeBaselineEvery: 16 });
+    const { out, maxGap } = await withStallProbe(() =>
+      extractWithDeadline(new Extractor(), ctx, oracle, 'version()')
+    );
+    if (out === secret) {
+      if (draw > 1) console.log(`[修复①] 第 ${draw} 抽通过（第 1 抽腐蚀被 stall ${maxGap}ms 归因重抽）`);
+      return;
+    }
+    if (maxGap <= STALL_MS) {
+      assert.equal(out, secret, `慢漂移目标上应正确提取（本抽无 stall 证据，maxGap=${maxGap}ms），实际 ${JSON.stringify(out)}`);
+    }
+    console.log(`[修复①] 第 ${draw} 抽腐蚀（${JSON.stringify(out)}）但存在 stall（maxGap=${maxGap}ms > ${STALL_MS}ms）⇒ 环境越界归因，重抽`);
+  }
+  assert.fail(`连续 ${draws} 抽全部被 stall 污染（各抽 maxGap 均 > ${STALL_MS}ms）——本 runner 退化到无法量测 25ms 余量档，不计为绿`);
 });
 
 test('★修复②★ 中等漂移 + 中等余量（4ms/探针 @ 60ms）：跟踪后提取正确', async () => {

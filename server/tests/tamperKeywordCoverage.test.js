@@ -35,6 +35,7 @@ import { keywordSplit } from '../src/core/tamper/plugins/keywordSplit.js';
  *      （keywordSplit.js:4），只扫 transform.toString() 会抽到 0 项 ⇒ 同样报假红。
  * 假红的危害是驱使后人去改本来正确的生产代码 —— 本仓已反复记录这类踩坑。
  */
+// eslint-disable-next-line no-unused-vars -- 有意保留（见上注释），防止将来有人把列表挪回函数内
 function kwsOf(plugin) {
   const src = plugin.transform.toString();
   const m = src.match(/\[([^\]]*'[A-Z][A-Z_]{1,}'[^\]]*)\]/);
