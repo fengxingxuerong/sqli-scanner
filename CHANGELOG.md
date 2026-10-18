@@ -65,6 +65,37 @@
 
 ## [Unreleased]
 
+### 2026-10-18 批次 D105 · XML body 元素名注入面（P1-1 收口：NameChar 约束下的算术位移探针）
+
+**动机**：P1-1 余项——D93/D103 关闭了 query/JSON 键名面；XML 元素名同型（后端
+`firstChild.nodeName` 当列名拼 SQL）但 **NameChar 不允许空格/引号/括号** ⇒ 布尔载荷
+`name AND 1=1-- -` 发出即畸形报文（目标解析失败，整轮判「不可注入」，比没发现更糟）。
+底账 P1-1 建议的算术位移方案本批落地。
+
+**能力**
+
+- TargetParser：`--test-param-names` 为每个 XML 叶子**追加** carrier='xml' 元素名点
+  （originalValue=元素名，param=叶子点路径；命名空间标签/同名兄弟下标路径正确提取标签）。
+- injection.js `buildXmlKeyRequest`：基线=调用方原报文**逐字**；注入=解析树克隆后**只换
+  元素名**（开闭标签同改，文本/属性/兄弟原样）。**合法名守卫单点**（isXmlName，与解析器
+  接受集 `[A-Za-z_][\w.:-]*` 同源）：非法名/路径失效一律回退原报文——「绝不发畸形 XML」。
+- detectorSupport/xmlParamName.js 专用验证器：B=`tag`、P0=`tag-0`（恒等）、P1=`tag-1`
+  （位移），判据 P0==B ∧ P1!=B，外加复核轮（B 自稳 + P1 仍异）；网络不可用记 inconclusive
+  （不写阴性）；归类布尔差分族（technique='boolean'），报告/风险/统计零新增类型。
+- scan/detect.js：XML 元素名点不走通用检测器赛道（指纹/层1层2全跳过——载荷族无法承载），
+  WAF tamper 重跑同样排除（tamper 载荷含空格/注释符，白耗请求）。
+- 诚实边界（进 help/README/证据）：仅**数值语境列**（`tag-0` 在字符串列上因隐式数值转换
+  恒等不成立 ⇒ 诚实假阴性）；仅 `WHERE ${tag} = ?` 形态；页面需可复现；错误差分通道未开（TODO 余项）。
+
+**实测（真 MySQL 靶场，`e2e/param-name-lab` 扩 XML 三判据进 acceptance）**：POST
+`/colfilter-xml`（元素名拼 SQL、值参数化；**不回显 SQL**——回显会让「-0 与基线一致」
+天然破裂，判据必须只落行集差异）开=检出（`xmlVuln=1 xmlParamNameHit=1`）；关=0；
+`/colfilter-xml-safe`（同写法+白名单）=0。单测 18 例（D93 三 + D103 七 + D105 八：
+生成/开关/命名空间与下标/基线逐字/改名保值/非法名回退/路径失效/renameXmlTag 单元/
+验证器真/安全/静态/网络不可用）。
+
+**收口**：底账 P1-1 → [x]（错误差分通道转 TODO 余项）。
+
 ### 2026-10-18 批次 D104 · CI macos 提取器判据抖动响应（墙钟 → 请求预算双护栏）
 
 **背景**：D103 推送（run 276 = `39130198438`，`13a9f873`）macos 腿红——

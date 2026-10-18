@@ -1,5 +1,5 @@
 import { obfuscateWithConfig } from '../core/tamper/applyTampers.js';
-import { buildInjectionRequest, buildParamNameRequest, buildJsonKeyRequest } from './injection.js';
+import { buildInjectionRequest, buildParamNameRequest, buildJsonKeyRequest, buildXmlKeyRequest } from './injection.js';
 
 // [拆分 2026-10-01] 类体只剩构造器与三个轻量方法；响应相似度/闭合探测/匹配指标/
 // 出口发送四大簇物理搬移到 ./detectorSupport/*（函数体逐行原样，由 Detector.prototype
@@ -51,9 +51,11 @@ export class Detector {
    */
   buildRequest(target, point, injectedValue) {
     // [D93] 参数名注入是独立形态（改键名、保值），走专用构造函数（理由见其 JSDoc）；
-    // [D103] carrier 分流：query 键名 vs JSON body 键名（同一 location 两种载体）。
+    // [D103] carrier 分流：query 键名 vs JSON body 键名（同一 location 两种载体）；
+    // [D105] XML 元素名载体（NameChar 合法名，专用算术位移验证器驱动）。
     if (point.location === 'paramName') {
       if (point.carrier === 'json') return buildJsonKeyRequest(target, point, injectedValue);
+      if (point.carrier === 'xml') return buildXmlKeyRequest(target, point, injectedValue);
       return buildParamNameRequest(target, point, injectedValue);
     }
     // P1-A3：请求构造三份复制收敛为单一 buildInjectionRequest（injection.js 已完整覆盖

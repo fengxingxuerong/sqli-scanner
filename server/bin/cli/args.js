@@ -78,6 +78,7 @@ export function parseArgs(argv, preset) {
     // [D93] testParamNames（--test-param-names）：把 query **键名**本身作为注入点（后端
     // `WHERE ${key}=?` / 键名当列名的 ORDER BY 拼接）。默认关：每参数多一个点位（请求量约 +1 倍）。
     // [D103] 同开关覆盖 JSON body 键名（`Object.keys(req.body)[0]` 同型）。
+    // [D105] 同开关覆盖 XML body 元素名（算术位移探针；NameChar 不承载布尔载荷）。
     testHeaders: false, testPath: false, testParamNames: false,
     // [D41 2026-10-11 对标 sqlmap -p/--param-exclude/--param-filter] 注入点筛选三件套
     testParam: null, paramExclude: null, paramFilter: null,

@@ -8,6 +8,9 @@
 //      而不是既有通道的漏光）
 //   [D103] ④-⑥ 同三条扩到 POST /colfilter-json（**JSON body 键名**载体：布尔载荷进键名，
 //      值参数化；安全白名单 /colfilter-json-safe 零检出 + 开关关闭对照）
+//   [D105] ⑦-⑨ 同三条再扩到 POST /colfilter-xml（**XML body 元素名**载体：NameChar 不允许
+//      空格/引号 ⇒ 布尔载荷承载不了，判据是算术位移探针 tag-0/tag-1；安全白名单
+//      /colfilter-xml-safe 零检出 + 开关关闭对照）
 //
 // 环境：需 MySQL + 靶场（D95 起靶场自带幂等夹具：自建 paramname_lab + 种子，可连即可跑）。
 // 未就绪输出 [SKIP] 并 exit 0（acceptance 读文本判据，不看退出码）。
@@ -50,6 +53,7 @@ async function scan(path, testParamNames, opts = {}) {
     config: cfg,
     ...(opts.method ? { method: opts.method } : {}),
     ...(opts.jsonBody ? { jsonBody: opts.jsonBody } : {}),
+    ...(opts.xmlBody ? { xmlBody: opts.xmlBody } : {}),
   });
   const t0 = Date.now();
   for (;;) {
@@ -107,9 +111,15 @@ const main = async () => {
     const jsonOn = await timeout(scan('/colfilter-json', true, { method: 'POST', jsonBody: jbody }));
     const jsonOff = await timeout(scan('/colfilter-json', false, { method: 'POST', jsonBody: jbody }));
     const jsonSafe = await timeout(scan('/colfilter-json-safe', true, { method: 'POST', jsonBody: jbody }));
+    // [D105] XML body 元素名载体三条（数值语境列 price —— 位移探针的适用形态）
+    const xbody = '<?xml version="1.0" encoding="UTF-8"?><filter><price>499</price></filter>';
+    const xmlOn = await timeout(scan('/colfilter-xml', true, { method: 'POST', xmlBody: xbody }));
+    const xmlOff = await timeout(scan('/colfilter-xml', false, { method: 'POST', xmlBody: xbody }));
+    const xmlSafe = await timeout(scan('/colfilter-xml-safe', true, { method: 'POST', xmlBody: xbody }));
 
     const paramHits = on.vulns.filter((v) => v.location === 'paramName').length;
     const jsonHits = jsonOn.vulns.filter((v) => v.location === 'paramName').length;
+    const xmlHits = xmlOn.vulns.filter((v) => v.location === 'paramName').length;
     const facts = {
       vuln检出: `${on.vulns.length}`,
       'vuln中paramName点': `${paramHits}`,
@@ -119,9 +129,14 @@ const main = async () => {
       'json中paramName点': `${jsonHits}`,
       json开关关闭: `${jsonOff.vulns.length}`,
       json安全点检出: `${jsonSafe.vulns.length}`,
+      xml检出: `${xmlOn.vulns.length}`,
+      'xml中paramName点': `${xmlHits}`,
+      xml开关关闭: `${xmlOff.vulns.length}`,
+      xml安全点检出: `${xmlSafe.vulns.length}`,
     };
     const pass = on.vulns.length > 0 && paramHits > 0 && off.vulns.length === 0 && safe.vulns.length === 0
-      && jsonHits > 0 && jsonOff.vulns.length === 0 && jsonSafe.vulns.length === 0;
+      && jsonHits > 0 && jsonOff.vulns.length === 0 && jsonSafe.vulns.length === 0
+      && xmlHits > 0 && xmlOff.vulns.length === 0 && xmlSafe.vulns.length === 0;
     return { facts, pass, verdict: on.verdict };
   }));
 
@@ -132,7 +147,8 @@ const main = async () => {
   const f = out.facts || {};
   console.log(`[param-name] vuln=${f.vuln检出} paramNameHit=${f['vuln中paramName点']} off=${f.开关关闭} safe=${f.安全点检出}`);
   console.log(`[param-name] jsonVuln=${f.json检出} jsonParamNameHit=${f['json中paramName点']} jsonOff=${f.json开关关闭} jsonSafe=${f.json安全点检出}`);
-  console.log(out.pass ? '[PASS] 参数名注入（D93+D103）' : '[FAIL] 参数名注入（D93+D103）');
+  console.log(`[param-name] xmlVuln=${f.xml检出} xmlParamNameHit=${f['xml中paramName点']} xmlOff=${f.xml开关关闭} xmlSafe=${f.xml安全点检出}`);
+  console.log(out.pass ? '[PASS] 参数名注入（D93+D103+D105）' : '[FAIL] 参数名注入（D93+D103+D105）');
   process.exit(out.pass ? 0 : 1);
 };
 

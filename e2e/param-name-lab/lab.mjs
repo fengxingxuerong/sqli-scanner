@@ -18,6 +18,10 @@ import { createRequire } from 'node:module';
 const require = createRequire(new URL('../../server/package.json', import.meta.url));
 const express = require('express');
 const mysql = require('mysql2/promise');
+// [D105] XML 元素名载体：复用引擎自己的极简解析器（靶场与解析口径同源，避免靶场自造
+// 「引擎认不出的 XML」或反之）；只取第一个叶子元素的标签名 + 文本，与 JSON 端点的
+// `Object.keys(body)[0]` 同型。
+const { parseXmlBody, xmlLeafPaths, getXmlLeaf } = await import('../../server/src/core/xmlBody.js');
 
 const PORT = Number(process.env.PARAMNAME_LAB_PORT || 8123);
 const DB = {
@@ -61,6 +65,8 @@ const app = express();
 // [D103] JSON body 键名载体：POST application/json 的请求体解析
 // （strict 默认只收对象/数组；16kb 上限对齐 scanRoutes 的 jsonBody 10KB + 余量）
 app.use(express.json({ limit: '16kb' }));
+// [D105] XML body 元素名载体：application/xml / text/xml 原文进 req.body（string）
+app.use(express.text({ type: ['application/xml', 'text/xml'], limit: '16kb' }));
 
 const page = (title, body) => `<!doctype html><html><head><meta charset="utf-8"><title>${title}</title></head><body>${body}</body></html>`;
 const rowsHtml = (rows) => rows.map((r) => `<p>${r.id} | ${r.name} | ${r.price}</p>`).join('') || '<p>NO_ROWS</p>';
@@ -128,6 +134,48 @@ app.post('/colfilter-json-safe', async (req, res) => {
     res.send(page('colfilter-json-safe', `<p>sql=${sql}</p>${rowsHtml(rows)}`));
   } catch {
     res.status(200).send(page('colfilter-json-safe', `<p>sql=${sql}</p><p class="err">query failed</p>`));
+  }
+});
+
+// ── [D105] XML body 元素名：元素名当列名（值参数化），与 /colfilter 同型换载体 ──
+// `const el = doc.firstElementChild; SELECT ... WHERE ${el.tagName} = ?`（文本走占位符）。
+// NameChar 不允许空格/引号 ⇒ 布尔载荷承载不了；判据是**算术位移**（price-0 恒等 / price-1 位移），
+// 探测请求本身是合法 XML（不以畸形报文换检出）。
+// 注意：本端点**不回显 SQL**（回显会让「-0 与基线一致」因为名字出现在页面上而天然破裂，
+// 判据必须只落在行集差异上——这也更接近真实系统）。
+const firstLeaf = (xmlText) => {
+  const parsed = parseXmlBody(xmlText);
+  if (!parsed.ok) return null;
+  const path = xmlLeafPaths(parsed.tree)[0];
+  if (!path) return null;
+  const segs = path.split('.').filter((s) => s && !/^\d+$/.test(s));
+  return { tag: segs[segs.length - 1] || '', val: getXmlLeaf(parsed.tree, path) ?? '' };
+};
+
+app.post('/colfilter-xml', async (req, res) => {
+  const leaf = firstLeaf(typeof req.body === 'string' ? req.body : '');
+  if (!leaf || !leaf.tag) return res.status(200).send(page('colfilter-xml', '<p class="err">parse failed</p>'));
+  const sql = `SELECT id, name, price FROM products WHERE ${leaf.tag} = ? LIMIT 3`;
+  try {
+    const [rows] = await pool.query(sql, [String(leaf.val)]);
+    res.send(page('colfilter-xml', rowsHtml(rows)));
+  } catch {
+    res.status(200).send(page('colfilter-xml', '<p class="err">query failed</p>'));
+  }
+});
+
+// XML 安全对照：元素名白名单（同样的拼接写法 + 先校验）
+app.post('/colfilter-xml-safe', async (req, res) => {
+  const leaf = firstLeaf(typeof req.body === 'string' ? req.body : '');
+  if (!leaf || !leaf.tag) return res.status(200).send(page('colfilter-xml-safe', '<p class="err">parse failed</p>'));
+  const ALLOW = new Set(['id', 'name', 'price']);
+  const key = ALLOW.has(leaf.tag) ? leaf.tag : 'id';
+  const sql = `SELECT id, name, price FROM products WHERE ${key} = ? LIMIT 3`;
+  try {
+    const [rows] = await pool.query(sql, [String(leaf.val)]);
+    res.send(page('colfilter-xml-safe', rowsHtml(rows)));
+  } catch {
+    res.status(200).send(page('colfilter-xml-safe', '<p class="err">query failed</p>'));
   }
 });
 

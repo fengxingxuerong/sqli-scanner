@@ -8,7 +8,7 @@ import { unionDebug } from './unionDebug.js';
 // [编码参数] payload 需按参数自身的传输编码（base64 / 0x-hex）编码后再发
 import { encodeForPoint } from './paramEncoding.js';
 // [2026-10-01] XML / SOAP body 通道（对标 ghauri 的 XML·SOAP 参数支持）
-import { cloneXmlTree, setXmlLeaf, serializeXml } from '../core/xmlBody.js';
+import { cloneXmlTree, setXmlLeaf, serializeXml, renameXmlTag } from '../core/xmlBody.js';
 
 // [P1 批次 2026-09-08] JSON 点路径段 → 真实键匹配（buildInjectionRequest JSON 分支用）。
 // 三向匹配（与 TargetParser._discoverJsonLeaves 的路径生成互逆）：
@@ -640,7 +640,7 @@ export async function discoverEchoColumns(httpClient, ctx, columns) {
 // ⚠ 编码：键名含空格/引号必须 URL 编码（Express 会 decode 回原样）；payload 已是编码形态
 // （charencode 类 tamper）则不再二次编码，与 url 分支同口径。
 // 诚实边界：仅 URL query 键名（carrier='query'）；JSON body 键名见 buildJsonKeyRequest
-// （[D103]）；XML 元素名待专门探针批（负载字符集受 XML NameChar 约束）。
+// （[D103]）；XML body 元素名见 buildXmlKeyRequest（[D105]，只承载 NameChar 合法名）。
 /**
  * @param {object} target 目标（用 method / baseUrl / headerParams）
  * @param {object} point 注入点（location='paramName'，originalValue 为键名本身）
@@ -743,4 +743,49 @@ export function buildJsonKeyRequest(target, point, value) {
     if (parent) _renameJsonLeafKey(parent, segs[segs.length - 1], wrapped);
   }
   return { method, url, params: {}, data: JSON.stringify(clone), headers };
+}
+
+// ============================================================================
+// [D105 2026-10-18] XML body **元素名**注入点的请求构造（carrier='xml'，P1-1 余项）
+// ----------------------------------------------------------------------------
+// 场景：后端把 XML 元素名当列名拼 SQL（`const tag = firstChild.nodeName;
+// SELECT ... WHERE ${tag} = ?`，XML-RPC / 内部网关的筛选式接口常见），值参数化 ⇒ 值注入扫不到。
+//
+// ⚠ 与 query/JSON 键名的本质差异：XML NameChar 不允许空格/引号/括号 ⇒ 通用布尔载荷
+// （`name AND 1=1-- -`）与 UNION 载荷（含空格）**无法承载**，强发即畸形报文
+// （目标解析失败后整轮判「不可注入」，比没发现更糟）。故：
+//   · 本函数只忠实执行「改元素名、文本原样」；**新名必须合法**（renameXmlTag 内部
+//     以 isXmlName 判定），非法名回退原报文 —— 「绝不发畸形 XML」的边界在此单点兑现。
+//   · 探针族是算术位移（`tag-0` 恒等 / `tag-1` 位移），由 detectorSupport/xmlParamName.js
+//     专用验证器驱动；**不套 applyPrefixSuffix/obfuscate**（闭合包裹与 tamper 都会破坏
+//     NameChar 合法性——这类载荷在 XML 元素名面本来就不存在）。
+//   · 基线保值：`value === point.originalValue` 时返回调用方原报文（xmlBody 原文），
+//     保证基线请求与普通爬取请求逐字节一致。
+/**
+ * @param {object} target 目标（用 method / baseUrl / headerParams / xmlBody / xmlTree）
+ * @param {object} point 注入点（location='paramName'、carrier='xml'，originalValue 为元素名）
+ * @param {string} value 新元素名（验证器给的 `tag-0` / `tag-1`）
+ * @returns {{method: string, url: string, params: object, data: string, headers: object}}
+ */
+export function buildXmlKeyRequest(target, point, value) {
+  const method = point.formMethod || target.method || 'POST';
+  const url = point.actionUrl || target.baseUrl;
+  const headers = { ...(target.headerParams || {}) };
+  const ctKey = Object.keys(headers).find((k) => /^content-type$/i.test(k));
+  if (!ctKey) headers['Content-Type'] = 'application/xml';
+  const rawBody = typeof target.xmlBody === 'string' ? target.xmlBody : '';
+  // 基线请求：原元素名、原报文
+  if (value === point.originalValue) {
+    return { method, url, params: {}, data: rawBody, headers };
+  }
+  // 末段下标段属同名兄弟的序号而非标签本身（getXmlLeaf 同一路径规则），
+  // 直接拿整条路径去改名即可——resolveNode 内部消费数字段。
+  const clone = target.xmlTree ? cloneXmlTree(target.xmlTree) : null;
+  let data = rawBody;
+  if (clone && renameXmlTag(clone, point.param, value)) {
+    data = serializeXml(clone);
+  }
+  // 路径失效/非法新名：原样报文 —— 至少不发坏报文（验证器会因「-0 与基线全等但 -1 也全等」
+  // 自然判非注入，不会产生误报；坏报文则可能污染目标侧状态）。
+  return { method, url, params: {}, data, headers };
 }

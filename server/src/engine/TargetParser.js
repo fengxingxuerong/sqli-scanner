@@ -111,15 +111,7 @@ export class TargetParser {
     // （宁可少发现，也不发畸形报文 —— 畸形会让目标解析失败，整轮判「不可注入」）。
     // 与 jsonBody 互斥优先 JSON：两者同时给属于调用方误用，JSON 语义更明确。
     if (typeof target.xmlBody === 'string' && target.xmlBody.trim() && target.jsonBody == null) {
-      if (!target.xmlTree) {
-        const parsed = parseXmlBody(target.xmlBody);
-        if (parsed.ok) target.xmlTree = parsed.tree; // 回写供 injection.js 复用（避免每请求重解析）
-      }
-      if (target.xmlTree) {
-        for (const path of xmlLeafPaths(target.xmlTree)) {
-          points.push(createInjectionPoint('body', path, getXmlLeaf(target.xmlTree, path) ?? '', { xmlPath: true }));
-        }
-      }
+      this._appendXmlPoints(target, points, config.testParamNames === true);
     }
 
     // 3.6) 二阶存储点标记（--second-order 显式开启时）
@@ -332,6 +324,38 @@ export class TargetParser {
   // 形式；数组下标不走本函数——调用侧直接用原始下标字符串）。
   _jsonEntrySeg(key) {
     return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(key) || /^\d+$/.test(key) ? key : JSON.stringify(key);
+  }
+
+  // [D105 2026-10-18] XML body 叶子值点 + （opt-in）元素名 paramName 点（discover 3.55 步的实现）。
+  // 元素名面：后端把**元素名**当列名拼 SQL（`WHERE ${tag} = ?`）时值被参数化 ⇒ 值注入扫不到。
+  // 与 query/JSON 键名同型，但载荷字符集受 XML NameChar 约束（布尔载荷含空格/引号 ⇒ 发出即
+  // 畸形报文）⇒ 检测走专用算术位移探针（detectorSupport/xmlParamName.js），不进通用载荷赛道。
+  // originalValue = 叶子元素名（验证器以 `tag-0`/`tag-1` 做恒等/位移差分）。
+  _appendXmlPoints(target, points, wantParamNames) {
+    if (!target.xmlTree) {
+      const parsed = parseXmlBody(target.xmlBody);
+      if (parsed.ok) target.xmlTree = parsed.tree; // 回写供 injection.js 复用（避免每请求重解析）
+    }
+    if (!target.xmlTree) return;
+    for (const path of xmlLeafPaths(target.xmlTree)) {
+      const leafVal = getXmlLeaf(target.xmlTree, path) ?? '';
+      points.push(createInjectionPoint('body', path, leafVal, { xmlPath: true }));
+      if (!wantParamNames) continue;
+      const tag = this._xmlLeafTag(path);
+      if (tag) {
+        points.push(
+          createInjectionPoint('paramName', path, tag, { carrier: 'xml', paramNameValue: leafVal })
+        );
+      }
+    }
+  }
+
+  // [D105] XML 叶子路径 → 叶子元素名（点路径最后一段的**标签段**）。
+  // 同名兄弟下标是纯数字段（xmlBody 生成规则），标签段永远非纯数字（tagRe 首字符限 [A-Za-z_]）⇒
+  // 跳过尾部数字段取到的就是元素名。路径异常返回 null（不生成点，安全跳过）。
+  _xmlLeafTag(path) {
+    const segs = String(path).split('.').filter((s) => s && !/^\d+$/.test(s));
+    return segs.length ? segs[segs.length - 1] : null;
   }
 
   // [D103] 收集一个标量叶子的注入点：值点始终生成；键名点（opt-in）仅当父节点是**对象**
@@ -567,12 +591,13 @@ export class TargetParser {
   // 其它位置点按「位置 + 参数名 + actionUrl」去重（表单点多 action 视为独立点）。
   // [D103] paramName 的 json 载体在去重键里带 carrier：query 键名与 JSON 键名可能同名
   // （如都叫 name），共用 `${location}:${param}` 会让后落位的那个被静默去重掉。
+  // [D105] xml 载体同理（同一 path 的值点与此处不同 location，不互斥）。
   _pointKey(point, fallbackUrl) {
     if (point.location === 'url') {
       return `url:${point.actionUrl || fallbackUrl}:${point.param}`;
     }
-    if (point.location === 'paramName' && point.carrier === 'json') {
-      return `paramName:json:${point.param}:${point.actionUrl || ''}`;
+    if (point.location === 'paramName' && (point.carrier === 'json' || point.carrier === 'xml')) {
+      return `paramName:${point.carrier}:${point.param}:${point.actionUrl || ''}`;
     }
     return `${point.location}:${point.param}:${point.actionUrl || ''}`;
   }
