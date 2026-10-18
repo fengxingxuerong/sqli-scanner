@@ -58,6 +58,9 @@ process.on('unhandledRejection', (e) => console.error('[lab][unhandledRejection]
 
 const pool = mysql.createPool({ ...DB, connectionLimit: 4, waitForConnections: true });
 const app = express();
+// [D103] JSON body 键名载体：POST application/json 的请求体解析
+// （strict 默认只收对象/数组；16kb 上限对齐 scanRoutes 的 jsonBody 10KB + 余量）
+app.use(express.json({ limit: '16kb' }));
 
 const page = (title, body) => `<!doctype html><html><head><meta charset="utf-8"><title>${title}</title></head><body>${body}</body></html>`;
 const rowsHtml = (rows) => rows.map((r) => `<p>${r.id} | ${r.name} | ${r.price}</p>`).join('') || '<p>NO_ROWS</p>';
@@ -92,6 +95,39 @@ app.get('/colfilter-safe', async (req, res) => {
     res.send(page('colfilter-safe', `<p>sql=${sql}</p>${rowsHtml(rows)}`));
   } catch {
     res.status(200).send(page('colfilter-safe', `<p>sql=${sql}</p><p class="err">query failed</p>`));
+  }
+});
+
+// ── [D103] JSON body 键名：键名当列名（值参数化），与 /colfilter 同型换载体 ──
+// `const col = Object.keys(req.body)[0]; SELECT ... WHERE ${col} = ?`
+// 键是合法 JSON 字符串（可含空格/引号）⇒ 布尔载荷 `name AND 1=1-- -` 可直接承载
+// （XML 元素名就承载不了 —— NameChar 不允许空格，所以才需要本靶场钉 JSON 面）。
+app.post('/colfilter-json', async (req, res) => {
+  const body = req.body && typeof req.body === 'object' ? req.body : {};
+  const key = Object.keys(body)[0] || 'id';
+  const val = body[key] ?? '1';
+  const sql = `SELECT id, name, price FROM products WHERE ${key} = ? LIMIT 3`;
+  try {
+    const [rows] = await pool.query(sql, [String(val)]);
+    res.send(page('colfilter-json', `<p>sql=${sql}</p>${rowsHtml(rows)}`));
+  } catch {
+    res.status(200).send(page('colfilter-json', `<p>sql=${sql}</p><p class="err">query failed</p>`));
+  }
+});
+
+// JSON 安全对照：列名白名单（同键名拼接写法 + 先校验）
+app.post('/colfilter-json-safe', async (req, res) => {
+  const body = req.body && typeof req.body === 'object' ? req.body : {};
+  const raw = Object.keys(body)[0] || 'id';
+  const ALLOW = new Set(['id', 'name', 'price']);
+  const key = ALLOW.has(raw) ? raw : 'id';
+  const val = body[raw] ?? '1';
+  const sql = `SELECT id, name, price FROM products WHERE ${key} = ? LIMIT 3`;
+  try {
+    const [rows] = await pool.query(sql, [String(val)]);
+    res.send(page('colfilter-json-safe', `<p>sql=${sql}</p>${rowsHtml(rows)}`));
+  } catch {
+    res.status(200).send(page('colfilter-json-safe', `<p>sql=${sql}</p><p class="err">query failed</p>`));
   }
 });
 

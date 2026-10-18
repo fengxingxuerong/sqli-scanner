@@ -1,11 +1,13 @@
 // ============================================================================
-// e2e/param-name-lab/run.mjs —— [D93] 参数名注入真靶场判据
+// e2e/param-name-lab/run.mjs —— [D93] 参数名注入真靶场判据（[D103] 扩 JSON body 键名）
 //
 // 判据（读引擎报告的事实字段，不看套件自报）：
-//   ① /colfilter（键名拼 SQL）开启 testParamNames 后**必须检出**，且命中点 location='paramName'
+//   ① /colfilter（query 键名拼 SQL）开启 testParamNames 后**必须检出**，且命中点 location='paramName'
 //   ② /colfilter-safe（同写法 + 白名单）**必须零检出**（证明不是「见 query 就报」）
 //   ③ 关闭 testParamNames 时 /colfilter **不应检出**（证明能力的开关语义真实存在，
 //      而不是既有通道的漏光）
+//   [D103] ④-⑥ 同三条扩到 POST /colfilter-json（**JSON body 键名**载体：布尔载荷进键名，
+//      值参数化；安全白名单 /colfilter-json-safe 零检出 + 开关关闭对照）
 //
 // 环境：需 MySQL + 靶场（D95 起靶场自带幂等夹具：自建 paramname_lab + 种子，可连即可跑）。
 // 未就绪输出 [SKIP] 并 exit 0（acceptance 读文本判据，不看退出码）。
@@ -29,7 +31,7 @@ const portOpen = (port) => new Promise((resolve) => {
 });
 
 /** 扫一个端点，返回 { verdict, vulns, reqs }（ScanManager.start + 轮询终态，与 juice-shop-lab 同范式） */
-async function scan(path, testParamNames) {
+async function scan(path, testParamNames, opts = {}) {
   const mgr = new ScanManager({});
   const cfg = {
     concurrency: 1,
@@ -43,7 +45,12 @@ async function scan(path, testParamNames) {
     productionMode: false,
     testParamNames,
   };
-  const id = await mgr.start({ url: `${BASE}${path}`, config: cfg });
+  const id = await mgr.start({
+    url: `${BASE}${path}`,
+    config: cfg,
+    ...(opts.method ? { method: opts.method } : {}),
+    ...(opts.jsonBody ? { jsonBody: opts.jsonBody } : {}),
+  });
   const t0 = Date.now();
   for (;;) {
     const st = mgr.scans.get(id);
@@ -95,15 +102,26 @@ const main = async () => {
     const on = await timeout(scan('/colfilter?name=Keyboard', true));
     const off = await timeout(scan('/colfilter?name=Keyboard', false));
     const safe = await timeout(scan('/colfilter-safe?name=Keyboard', true));
+    // [D103] JSON body 键名载体三条（与 query 三条同型）
+    const jbody = { name: 'Keyboard' };
+    const jsonOn = await timeout(scan('/colfilter-json', true, { method: 'POST', jsonBody: jbody }));
+    const jsonOff = await timeout(scan('/colfilter-json', false, { method: 'POST', jsonBody: jbody }));
+    const jsonSafe = await timeout(scan('/colfilter-json-safe', true, { method: 'POST', jsonBody: jbody }));
 
     const paramHits = on.vulns.filter((v) => v.location === 'paramName').length;
+    const jsonHits = jsonOn.vulns.filter((v) => v.location === 'paramName').length;
     const facts = {
       vuln检出: `${on.vulns.length}`,
       'vuln中paramName点': `${paramHits}`,
       开关关闭: `${off.vulns.length}`,
       安全点检出: `${safe.vulns.length}`,
+      json检出: `${jsonOn.vulns.length}`,
+      'json中paramName点': `${jsonHits}`,
+      json开关关闭: `${jsonOff.vulns.length}`,
+      json安全点检出: `${jsonSafe.vulns.length}`,
     };
-    const pass = on.vulns.length > 0 && paramHits > 0 && off.vulns.length === 0 && safe.vulns.length === 0;
+    const pass = on.vulns.length > 0 && paramHits > 0 && off.vulns.length === 0 && safe.vulns.length === 0
+      && jsonHits > 0 && jsonOff.vulns.length === 0 && jsonSafe.vulns.length === 0;
     return { facts, pass, verdict: on.verdict };
   }));
 
@@ -113,7 +131,8 @@ const main = async () => {
   }
   const f = out.facts || {};
   console.log(`[param-name] vuln=${f.vuln检出} paramNameHit=${f['vuln中paramName点']} off=${f.开关关闭} safe=${f.安全点检出}`);
-  console.log(out.pass ? '[PASS] 参数名注入（D93）' : '[FAIL] 参数名注入（D93）');
+  console.log(`[param-name] jsonVuln=${f.json检出} jsonParamNameHit=${f['json中paramName点']} jsonOff=${f.json开关关闭} jsonSafe=${f.json安全点检出}`);
+  console.log(out.pass ? '[PASS] 参数名注入（D93+D103）' : '[FAIL] 参数名注入（D93+D103）');
   process.exit(out.pass ? 0 : 1);
 };
 

@@ -639,7 +639,8 @@ export async function discoverEchoColumns(httpClient, ctx, columns) {
 // ⇒ 真假对判据全歪（实测：prefilter 把该点判「无迹象」直接剪枝，检出恒 0）。
 // ⚠ 编码：键名含空格/引号必须 URL 编码（Express 会 decode 回原样）；payload 已是编码形态
 // （charencode 类 tamper）则不再二次编码，与 url 分支同口径。
-// 诚实边界：仅 URL query 键名；不含 JSON/XML 键名（结构面另论）。
+// 诚实边界：仅 URL query 键名（carrier='query'）；JSON body 键名见 buildJsonKeyRequest
+// （[D103]）；XML 元素名待专门探针批（负载字符集受 XML NameChar 约束）。
 /**
  * @param {object} target 目标（用 method / baseUrl / headerParams）
  * @param {object} point 注入点（location='paramName'，originalValue 为键名本身）
@@ -664,4 +665,82 @@ export function buildParamNameRequest(target, point, value) {
     data: {},
     headers: { ...(target.headerParams || {}) },
   };
+}
+
+// ============================================================================
+// [D103 2026-10-18] JSON body **键名**注入点的请求构造（carrier='json'，P1-1 前半）
+// ----------------------------------------------------------------------------
+// 场景（D93 query 键名的结构面延伸）：后端把 JSON body 的**键名**当列名拼进 SQL
+// （`const col = Object.keys(req.body)[0]; SELECT ... WHERE ${col} = ?`），值参数化 ⇒
+// 值注入扫不到，只有改键名能打。JSON 键是合法字符串（可含空格/引号），布尔载荷
+// `name AND 1=1-- -` 形态可直接承载——与 query 键名同型，差异只在载体。
+//
+// 与 buildParamNameRequest 对齐的三条语义（D93 实测教训，缺一条即静默假阴性）：
+//   · 基线保值：`value === point.originalValue` 时必须保持原键名/原 body（否则基线请求
+//     自身就是注入形态，门控与预筛选全歪）；
+//   · 改键不改值：注入时仅替换键名，该键的**叶子值原样保留**（从 target.jsonBody 树读取）；
+//   · 路径解析与 JSON 值通道同源（_splitJsonPath / _matchJsonKey：键含点号的引号段互逆）。
+// 不做 URL 编码（JSON 序列化自行转义；charencode 类 tamper 对键名无意义）。
+// 诚实边界：仅 JSON 对象键（数组下标不是"名字"，TargetParser 侧不生成）；路径失效时
+// 原样 body（检测器自会判非注入，不抛错）。
+/**
+ * [D103] 沿点路径段导航到**叶子键的父对象**（路径除末段外全部走通才返回父对象，否则 null）。
+ * 段为纯数字走数组下标，否则 _matchJsonKey 三向匹配（与值通道同源规则）。
+ * @param {any} root 克隆体根 @param {string[]} segs _splitJsonPath 结果
+ * @returns {any} 父对象或 null
+ */
+function _navigateJsonParent(root, segs) {
+  let cur = root;
+  for (let i = 0; i < segs.length - 1; i++) {
+    const raw = segs[i];
+    const num = /^\d+$/.test(raw) ? Number(raw) : null;
+    const k = num !== null ? num : _matchJsonKey(cur, raw);
+    if (k === null || cur[k] == null || typeof cur[k] !== 'object') return null;
+    cur = cur[k];
+  }
+  return cur;
+}
+
+/**
+ * [D103] 在父对象上把叶子键改名（值原样搬移）：数组父对象不可改名（下标不是"名字"），
+ * 返回是否改名成功。
+ * @param {any} parent @param {string} leafSeg @param {string} newKey
+ * @returns {boolean}
+ */
+function _renameJsonLeafKey(parent, leafSeg, newKey) {
+  if (Array.isArray(parent)) return false;
+  const leafKey = /^\d+$/.test(leafSeg) ? null : _matchJsonKey(parent, leafSeg);
+  if (leafKey === null) return false;
+  const leafVal = parent[leafKey];
+  delete parent[leafKey];
+  parent[newKey] = leafVal;
+  return true;
+}
+
+/**
+ * @param {object} target 目标（用 method / baseUrl / headerParams / jsonBody）
+ * @param {object} point 注入点（location='paramName'、carrier='json'，originalValue 为键名本身）
+ * @param {string} value 注入值（检测器已拼好 payload）
+ * @returns {{method: string, url: string, params: object, data: object, headers: object}}
+ */
+export function buildJsonKeyRequest(target, point, value) {
+  const wrapped = applyPrefixSuffix(target, point, value);
+  const method = point.formMethod || target.method || 'POST';
+  const url = point.actionUrl || target.baseUrl;
+  const headers = { ...(target.headerParams || {}) };
+  const body = target.jsonBody != null && typeof target.jsonBody === 'object' ? target.jsonBody : {};
+  const ctKey = Object.keys(headers).find((k) => /^content-type$/i.test(k));
+  if (!ctKey) headers['Content-Type'] = 'application/json';
+  // 基线请求：原键名、原 body 原样
+  if (value === point.originalValue) {
+    return { method, url, params: {}, data: JSON.stringify(body), headers };
+  }
+  const clone = JSON.parse(JSON.stringify(body));
+  // 路径失效（非法路径/树被外部改动）：原样 body —— 至少不发坏报文
+  const segs = _splitJsonPath(point.param);
+  if (segs) {
+    const parent = _navigateJsonParent(clone, segs);
+    if (parent) _renameJsonLeafKey(parent, segs[segs.length - 1], wrapped);
+  }
+  return { method, url, params: {}, data: JSON.stringify(clone), headers };
 }

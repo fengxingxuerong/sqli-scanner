@@ -110,10 +110,11 @@ export const HELP_TEXT = `sqli-scanner CLI（对标 sqlmap 的 Node 引擎命令
                              匹配前先做 HTML 实体 + URL 解码归一化并剔除被回显的 payload。
                              验证：安全点误报 6/7 → 0/7，真阳性保持命中，同点连跑 5 次无偶发。
                              详见 README「已知问题与修复记录」与 e2e/blackbox-lab/
-  --test-param-names        把 **query 键名本身**作为注入点（D93）：服务端把键名当列名/排序名拼进 SQL
-                             （如 WHERE <键名> = ?、ORDER BY <键名> 的列名来自键名）时，值被参数化
-                             ⇒ 值注入扫不到，只有改键名能打。默认关闭：开启后每个 query 参数多一个
-                             点位（请求量约 +1 倍）。诚实边界：仅 URL query 键名，不含 JSON/XML 键名；
+  --test-param-names        把 **query 键名本身**作为注入点（D93；D103 起含 JSON body 键名）：服务端
+                             把键名当列名/排序名拼进 SQL（如 WHERE <键名> = ?、ORDER BY <键名> 的
+                             列名来自键名）时，值被参数化 ⇒ 值注入扫不到，只有改键名能打。默认关闭：
+                             开启后每个 query 参数多一个点位（请求量约 +1 倍）。诚实边界：XML 元素名
+                             不含（载荷字符集受 XML NameChar 约束，待专门探针批）；
                              参数名点不做闭合探测（键名拼接无引号上下文）
   --param-mine               参数挖掘（2026-10-02 竞品吸收，对标 Arjun 参数发现；默认关闭零回归）：
                              对目标 URL 主动探测字典参数（分组发送+反射定位+二分收敛，请求预算硬顶

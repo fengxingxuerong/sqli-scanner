@@ -209,7 +209,7 @@ function applyTestFilterSwitches(config, args) {
   // 注入点扩展开关（本期新增，默认关闭，零回归）：透传给 TargetParser 决定是否把请求头 / path 末段生成注入点
   if (args.testHeaders) config.testHeaders = true;
   if (args.testPath) config.testPath = true;
-  // [D93] --test-param-names：参数名本身作为注入点（仅 URL query 键名）
+  // [D93] --test-param-names：参数名本身作为注入点（URL query 键名 + [D103] JSON body 键名）
   if (args.testParamNames) config.testParamNames = true;
   // [2026-10-02 竞品吸收] --param-mine：参数挖掘总开关（TargetParser 6.6 步，Arjun 式发现隐藏参数）
   if (args.paramMine) config.paramMine = true;

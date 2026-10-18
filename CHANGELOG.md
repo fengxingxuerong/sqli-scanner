@@ -65,6 +65,35 @@
 
 ## [Unreleased]
 
+### 2026-10-18 批次 D103 · JSON body 键名注入面（P1-1 前半：D93 同型结构面延伸）
+
+**动机**：P1-1 —— D93 只做了 URL query 键名（`--test-param-names`），
+`Object.keys(req.body)[0]` 当列名拼 SQL（`WHERE ${key}=?`）的 JSON API 同形态漏洞扫不到。
+JSON 键是合法字符串（可含空格/引号），布尔载荷 `name AND 1=1-- -` 可直接承载——与 query
+键名同型，差异只在载体。
+
+**改动（与 D93 同构：三处接缝 + 一处分流）**
+
+- TargetParser：`_discoverJsonLeaves` 在 `testParamNames` 开启时**追加**键名点
+  （`location='paramName'`、`carrier='json'`、`originalValue`=真实键名、`param`=点路径）；
+  数组下标不是「名字」不生成；paramName 去重键带 carrier（query 与 JSON 同名键如 `name`
+  不再互相顶掉）。
+- injection.js：新增 `buildJsonKeyRequest`——基线保值（value===originalValue 时原键名原
+  body）+ 改键不改值（叶子值从 jsonBody 树读，原样保留）+ `_splitJsonPath/_matchJsonKey`
+  引号感知路径互逆（键含点号可改）；JSON 序列化自行转义，不做 URL 编码。
+- Detector.buildRequest 按 `carrier` 分流（query→`buildParamNameRequest`，json→新构造）；
+  boundary/prefilter 的 paramName 接缝本就按 location 判定，零改动复用（用例复证）。
+- CLI：`--test-param-names` help/注释同步覆盖范围（XML 元素名边界如实声明）。
+
+**实测（真 MySQL 靶场，`e2e/param-name-lab` 扩 JSON 三判据进 acceptance）**：POST
+`/colfilter-json`（键名拼 SQL、值参数化）开=检出（`jsonVuln=1 jsonParamNameHit=1`）；
+关=0；`/colfilter-json-safe`（同写法+列名白名单）=0。单测 10 例（D93 三例 + D103 七例：
+生成/去重互斥/基线/嵌套改键保值/含点号键/路径失效/闭合探测跳过）。
+
+**诚实边界**：XML 元素名不在本批——XML NameChar 不允许空格/引号 ⇒ 布尔载荷发出即畸形
+报文（与 XML 值通道「不以畸形报文换检出」同源边界），需专门探针（算术位移/错误差分），
+P1-1 余项挂另批。
+
 ### 2026-10-18 批次 D102 · P0-5 台账收口：versioned 族「覆盖口径」+ 参数挖掘同题对照
 
 **背景**：优化底账 P0-5 —— `docs/_claims-ledger.json` 两条 refuted/unverified 条目未关闭：
