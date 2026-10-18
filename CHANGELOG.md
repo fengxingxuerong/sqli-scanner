@@ -105,6 +105,9 @@
   旧 json 与 archive 纪要数字不重写。同族历史参照：blackbox-lab runner 已栽过一次（F3）并修复。
   重跑 redteam 靶场刷新基线（需 PG 常驻）挂待推进。
 
+**CI 收束（2026-10-18）**：run 274 = 39124194058（`027fe080`）= completed success
+（13 job = 11 ✅ + 2 跳过：tamper-waf-matrix / modsec-live，按 push 策略）——首次推送即全绿。
+
 ### 2026-10-18 批次 D101 · D91 类 auth 夹击通用化（P0-3 销账：全形态排查 + CLI/REST 单点去重）
 
 **动机**：D91 实修 cookie 注入点静默假阴性、D92 补掉 REST 入口的 auth.headers 夹击面后，
@@ -151,6 +154,9 @@
 **边界（不越界声明）**：Digest/NTLM 的 Authorization 由各自握手层管理，不在本批语义内；
 CLI 侧 authorization 仍不作注入头（EXCLUDE 既有设计，REST 侧允许，夹击由发送层修复对齐）；
 本批全部为本地靶场/单测口径，无真机新证据。
+
+**CI 收束（2026-10-18）**：run 273 = 39118294177（`d555642c`）= completed success
+（13 job = 11 ✅ + 2 跳过：tamper-waf-matrix / modsec-live，按 push 策略）——首次推送即全绿。
 
 ### 2026-10-18 批次 D99 + D100 · 44 家无 wafw00f 插件 WAF 的第二权威对拍源（P0-2 落架）
 
