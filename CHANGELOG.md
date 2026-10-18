@@ -116,6 +116,14 @@ WhatWaf 27 家 + nuclei 1 家（Safe3）100% + 真机 ModSecurity 1/62 + 无第�
 Eisoo/KnownSec_KSWAF/UPYUN_WAF/Azure_FrontDoor/GCP_CloudArmor/Fastly/SiteLock/
 Zenedge/F5_TrafficShield/SecureIIS/NSFOCUS/SafeLine）属**边界**而非能力缺口。
 
+**补记（2026-10-18 收官）**：本批推送后 run 269 步 31 红——**facts 重采后未重新
+`git add` 就提交**，提交进的是上一版指纹（481 文件版），工作树才是定稿（483 文件 /
+徽章 4192）；`e713dcd` 补齐入册后 **run 270 = completed success（13 job = 11 ✅ + 2
+按 push 策略跳过）**：macos matrix 全绿（stall 归因守卫 / 故障②请求预算 / 故障③
+抽样 / 修复① 全过）、acceptance 含 oob 真链全过、e2e-self-contained 全过——run 260
+以来全部红档清偿。教训并入 D96 补记同款纪律：★ **refresh/--fix 的产物必须在其
+「之后」再 `git add`**，否则 stage 里坐的是前一版指纹。
+
 ### 2026-10-18 批次 D98 · 商业云 WAF 真机样本采集框架（P0-1 落架）+ wiring 收集口径修复（D97 沿用）
 
 **动机**：台账 `waf-fingerprint-coverage`（`docs/_claims-ledger.json`）复核时仍为
