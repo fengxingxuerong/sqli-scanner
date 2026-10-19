@@ -2,18 +2,18 @@
 
 import { memo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useNavigate } from 'react-router-dom';
 import {
   Box, Card, CardContent, Button, TextField, Stack, Typography, Alert,
-  Collapse, IconButton, Divider, InputAdornment,
+  Collapse, Divider, InputAdornment,
 } from '@mui/material';
-import { ExpandMore, ExpandLess, PlayArrow, Stop, History, PauseCircleOutline, PlayCircleOutline } from '@mui/icons-material';
+import { ExpandMore, ExpandLess } from '@mui/icons-material';
 import TargetForm from './TargetForm';
 import ScanConfigPanel from './ScanConfigPanel';
 import SqlmapOptions from './SqlmapOptions';
 import EnginePicker from './EnginePicker';
-import InfoHint from './InfoHint';
+import { ScanWizardHeader, ScanIntensitySelector, ScanActionButtons } from './ScanWizardControls';
 import { tryAutoDetect, looksLikeRawRequest } from '../shared/requestParser';
+import type { ScanPresetId } from '../shared/scanPresets';
 import type { MethodType, ScanConfig, SqlmapConfig, WafDetectedPayload, EngineType } from '../shared/types';
 
 // ── Props ──
@@ -31,6 +31,8 @@ interface ScanWizardProps {
   error: string;
   wafSuggestion: WafDetectedPayload | null;
   status: string;
+  /** 当前生效的扫描预设档位（受控，null = 未选过任何预设） */
+  activePreset?: ScanPresetId | null;
   onUrlChange: (v: string) => void;
   onMethodChange: (m: MethodType) => void;
   onBodyTextChange: (v: string) => void;
@@ -44,19 +46,20 @@ interface ScanWizardProps {
   onStop: () => void;
   onPause: () => void;
   onResume: () => void;
+  /** 应用扫描预设档位（quick / standard / deep） */
+  onApplyPreset?: (id: ScanPresetId) => void;
 }
 
 // H3：memo 化 —— ScanPage 在扫描中因 status/report 等变化重渲染时，
 // 若表单 props 未变（回调已由父级 useCallback/setter 稳定化），跳过整棵向导子树的 diff。
 function ScanWizardInner(props: ScanWizardProps) {
   const { t } = useTranslation();
-  const navigate = useNavigate();
   const {
     url, method, bodyText, cookieText, headerText, config, sqlmapConfig,
-    engine, running, starting, error, wafSuggestion, status,
+    engine, running, starting, error, wafSuggestion, status, activePreset,
     onUrlChange, onMethodChange, onBodyTextChange, onCookieTextChange, onHeaderTextChange,
     onConfigChange, onSqlmapConfigChange, onEngineChange, onErrorClear,
-    onStart, onStop, onPause, onResume,
+    onStart, onStop, onPause, onResume, onApplyPreset,
   } = props;
 
   const [advancedOpen, setAdvancedOpen] = useState(false);
@@ -95,26 +98,14 @@ function ScanWizardInner(props: ScanWizardProps) {
   return (
     <>
       {/* 标题 */}
-      <Stack direction="row" justifyContent="space-between" alignItems="center" className="mb-4">
-        <Box>
-          <Box className="flex items-center">
-            <Typography variant="h5" fontWeight={700}>{t('scan.title')}</Typography>
-            {/* [D85] 小白引导：标题旁一句话说明整页用法 */}
-            <InfoHint text={t('configHints.wizard')} />
-          </Box>
-          <Typography variant="body2" color="text.secondary">{t('scan.subtitle')}</Typography>
-        </Box>
-        <IconButton title={t('history.title')} aria-label={t('history.title')} onClick={() => navigate('/history')}>
-          <History />
-        </IconButton>
-      </Stack>
+      <ScanWizardHeader />
 
       {error && (
         <Alert severity="error" className="mb-3" onClose={onErrorClear}>{error}</Alert>
       )}
 
       {/* 主卡片 */}
-      <Card variant="outlined" sx={{ borderRadius: 3 }}>
+      <Card variant="outlined" className="cyber-panel cyber-clip cyber-panel--scan" sx={{ borderRadius: 0 }}>
         <CardContent sx={{ p: { xs: 2.5, md: 4 } }}>
           <TextField
             fullWidth
@@ -133,54 +124,25 @@ function ScanWizardInner(props: ScanWizardProps) {
             </Alert>
           )}
 
-          {/* 大按钮 */}
-          <Button
-            fullWidth size="large" variant="contained"
-            disabled={starting && !running}
-            startIcon={running ? <Stop /> : <PlayArrow />}
-            onClick={running ? onStop : onStart}
-            sx={{
-              mt: 2.5, py: 1.8, borderRadius: 2.5, fontSize: '1.1rem', fontWeight: 700, letterSpacing: '0.02em',
-              color: '#fff',
-              background: running
-                ? 'linear-gradient(135deg, #dc2626 0%, #b91c1c 100%)'
-                : 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)',
-              boxShadow: running
-                ? '0 12px 28px -10px rgba(220, 38, 38, 0.55)'
-                : '0 12px 28px -10px rgba(124, 58, 237, 0.55)',
-              transition: 'transform 0.18s ease, box-shadow 0.18s ease',
-              '&:hover': {
-                transform: 'translateY(-2px)',
-                boxShadow: running
-                  ? '0 16px 32px -10px rgba(220, 38, 38, 0.65)'
-                  : '0 16px 32px -10px rgba(124, 58, 237, 0.7)',
-              },
-            }}
-          >
-            {running ? t('scan.stopBtn') : starting ? t('scan.starting') : t('scan.startBtn')}
-          </Button>
+          {/* [D107] 扫描强度三档：原本预设 chips 埋在「高级设置」折叠里，
+              新用户第一次打开只看到一个 URL 框，不知道该选多重。提到主区后，
+              「快 / 标准 / 深」一眼可选，选中档位即时显示它改了什么。 */}
+          <ScanIntensitySelector
+            activePreset={activePreset}
+            running={running}
+            onApplyPreset={onApplyPreset}
+          />
 
-          {/* [P0-FIX] 暂停/续跑：运行中显示「暂停」，暂停中显示「恢复」（对标 sqlmap Ctrl+C 暂停语义） */}
-          {running && onPause && (
-            <Button
-              fullWidth size="large" variant="outlined" color="warning"
-              startIcon={<PauseCircleOutline />}
-              onClick={onPause}
-              sx={{ mt: 1.2, py: 1.4, borderRadius: 2.5, fontSize: '1rem', fontWeight: 600 }}
-            >
-              {t('scan.pauseBtn')}
-            </Button>
-          )}
-          {status === 'paused' && onResume && (
-            <Button
-              fullWidth size="large" variant="outlined" color="success"
-              startIcon={<PlayCircleOutline />}
-              onClick={onResume}
-              sx={{ mt: 1.2, py: 1.4, borderRadius: 2.5, fontSize: '1rem', fontWeight: 600 }}
-            >
-              {t('scan.resumeBtn')}
-            </Button>
-          )}
+          {/* 大按钮 + 暂停/续跑 */}
+          <ScanActionButtons
+            running={running}
+            starting={starting}
+            status={status}
+            onStart={onStart}
+            onStop={onStop}
+            onPause={onPause}
+            onResume={onResume}
+          />
 
           <Stack direction="row" justifyContent="space-between" alignItems="center" className="mt-2">
             <Button size="small" onClick={() => setAdvancedOpen(!advancedOpen)}
@@ -224,6 +186,8 @@ function ScanWizardInner(props: ScanWizardProps) {
                 config={config} mode={engine}
                 onChange={(patch) => onConfigChange(patch)}
                 wafSuggestion={wafSuggestion?.suggestions}
+                activePreset={activePreset}
+                onApplyPreset={onApplyPreset}
               />
 
               {engine === 'sqlmap' && (

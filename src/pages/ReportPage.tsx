@@ -23,6 +23,9 @@ import ReportVerdictHint from '../components/ReportVerdictHint';
 import { resolveValidityMode } from '../components/ValidityBanner';
 import type { Vulnerability, SqlmapVulnEntry } from '../shared/types';
 
+// [P1-FIX] sqlmap 日志无界渲染：超大日志（数千行）全量挂 DOM 会冻结页面，仅渲染最近 500 行
+const VISIBLE_LOG_TAIL = 500;
+
 // sqlmap 日志级别 → 颜色（与 ProgressView 同源，避免重复定义漂移）
 const SQLMAP_LOG_COLOR: Record<string, string> = {
   error: '#d32f2f',
@@ -77,10 +80,11 @@ function SqlmapVulnCard({ v }: { v: SqlmapVulnEntry }) {
         {open && (
           <Box className="mt-3 pt-3 border-t border-gray-200">
             <Typography variant="caption" color="text.secondary">{t('report.sqlmapVuln.rawHitLine')}</Typography>
+            {/* [D107] 原为硬编码白底 #f5f5f5，暗色主题下是一大块刺眼白斑 */}
             <Box
               component="pre"
-              className="mt-1 p-2 rounded overflow-x-auto"
-              sx={{ backgroundColor: '#f5f5f5', fontSize: '0.75rem', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}
+              className="cyber-terminal mt-1 p-2"
+              sx={{ fontSize: '0.75rem', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}
             >
               {v.raw}
             </Box>
@@ -170,8 +174,6 @@ export default function ReportPage() {
   const isSqlmap = report.engine === 'sqlmap';
   const sqlmapVulns: SqlmapVulnEntry[] = (report.sqlmap?.vulns || []).filter((v) => !!v && !!v.raw);
   const sqlmapLogs = report.sqlmap?.logs || [];
-  // [P1-FIX] sqlmap 日志无界渲染：超大日志（数千行）全量挂 DOM 会冻结页面，仅渲染最近 500 行
-  const VISIBLE_LOG_TAIL = 500;
   const visibleSqlmapLogs = sqlmapLogs.length > VISIBLE_LOG_TAIL
     ? sqlmapLogs.slice(-VISIBLE_LOG_TAIL)
     : sqlmapLogs;
@@ -182,7 +184,7 @@ export default function ReportPage() {
 
   return (
     <Container maxWidth="lg" className="py-6">
-      {/* 鎿嶄綔鏍?*/}
+      {/* 操作栏：返回 / 刷新 / 续跑 / 导出（D107：统一按钮外形，带图标与文字） */}
       <Stack direction="row" spacing={2} className="mb-4" alignItems="center">
         <Button startIcon={<ArrowBack />} onClick={() => navigate('/')} size="small">{t('report.back')}</Button>
         <Button
@@ -394,10 +396,11 @@ export default function ReportPage() {
                     {t('report.logTruncated', { total: sqlmapLogs.length, shown: VISIBLE_LOG_TAIL })}
                   </Alert>
                 )}
+                {/* [D107] 原为硬编码黑底 #1e1e1e，浅色模式下是一大块黑砖 */}
                 <Box
                   component="pre"
-                  className="p-3 rounded overflow-x-auto"
-                  sx={{ backgroundColor: '#1e1e1e', color: '#e0e0e0', fontSize: '0.72rem', lineHeight: 1.5, maxHeight: 480, overflowY: 'auto' }}
+                  className="cyber-terminal cyber-terminal--chrome p-3"
+                  sx={{ color: 'var(--cy-text)', fontSize: '0.72rem', lineHeight: 1.5, maxHeight: 480 }}
                 >
                   {visibleSqlmapLogs.map((l, i) => (
                     <Box key={i} component="span" sx={{ display: 'block', color: SQLMAP_LOG_COLOR[l.level] || '#e0e0e0' }}>

@@ -14,9 +14,8 @@
     "server/src/engine/scan/detect.js": 9,
     "server/src/engine/scan/prefilter.js": 8,
     "src/components/DbTree.tsx": 8,
+    "src/components/home/HomeRecent.tsx": 7,
     "src/components/scanConfig/EnumerationSection.tsx": 7,
-    "src/hooks/useEvents.ts": 10,
-    "src/pages/HistoryPage.tsx": 7,
-    "src/pages/HomePage.tsx": 7
+    "src/hooks/useEvents.ts": 10
   }
 }

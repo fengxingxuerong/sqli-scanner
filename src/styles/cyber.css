@@ -1,0 +1,207 @@
+/* ============================================================================
+ * cyber.css —— 赛博科技风设计资产（D107 桌面端 UI 全面优化）
+ *
+ * 与 index.css 的分工：
+ *   index.css  = 基础层（字体 / 滚动条 / 早期赛博资产 .glass .dot-grid ...）
+ *   cyber.css  = 组件层（HUD 容器 / 数据卡 / 状态灯 / 终端 / 动效）
+ *
+ * 全部按暗底语义设计；浅色经 <html data-theme='light'> 切到同色相深变体
+ * （辉光类去掉 —— 白底上发光只会发糊）。选择器一律带 data-theme 前缀或
+ * 走 CSS 变量，不在本文件里写死跟主题无关的颜色。
+ * ==========================================================================*/
+
+:root {
+  /* 赛博色板（暗色语义） */
+  --cy-cyan: #00d4ff;
+  --cy-cyan-soft: rgba(0, 212, 255, 0.55);
+  --cy-cyan-faint: rgba(0, 212, 255, 0.12);
+  --cy-violet: #8b5cf6;
+  --cy-magenta: #ff2d6f;
+  --cy-lime: #22c55e;
+  --cy-amber: #fbbf24;
+
+  /* 表面层级 */
+  --cy-bg: #070b12;
+  --cy-surface: rgba(13, 20, 32, 0.72);
+  --cy-surface-solid: #0d1420;
+  --cy-surface-raised: rgba(20, 29, 45, 0.85);
+  --cy-line: rgba(0, 212, 255, 0.14);
+  --cy-line-strong: rgba(0, 212, 255, 0.32);
+
+  /* 文字 */
+  --cy-text: #e2e8f0;
+  --cy-text-dim: #94a3b8;
+  --cy-text-faint: #64748b;
+}
+
+[data-theme='light'] {
+  --cy-cyan: #0369a1;
+  --cy-cyan-soft: rgba(3, 105, 161, 0.6);
+  --cy-cyan-faint: rgba(3, 105, 161, 0.08);
+  --cy-violet: #6d28d9;
+  --cy-magenta: #be123c;
+  --cy-lime: #15803d;
+  --cy-amber: #b45309;
+
+  --cy-bg: #f2f5f9;
+  --cy-surface: rgba(255, 255, 255, 0.78);
+  --cy-surface-solid: #ffffff;
+  --cy-surface-raised: rgba(255, 255, 255, 0.95);
+  --cy-line: rgba(3, 105, 161, 0.16);
+  --cy-line-strong: rgba(3, 105, 161, 0.34);
+
+  --cy-text: #0f172a;
+  --cy-text-dim: #475569;
+  --cy-text-faint: #64748b;
+}
+
+/* ── HUD 面板：切角 + 玻璃 + 顶部霓虹扫描线 ───────────────────────────── */
+.cyber-panel {
+  position: relative;
+  background: var(--cy-surface);
+  border: 1px solid var(--cy-line);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+[data-theme='dark'] .cyber-panel {
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.03);
+}
+.cyber-panel:hover {
+  border-color: var(--cy-line-strong);
+}
+[data-theme='dark'] .cyber-panel:hover {
+  box-shadow: 0 4px 28px rgba(0, 0, 0, 0.5), 0 0 18px rgba(0, 212, 255, 0.06);
+}
+
+/* 顶部渐隐霓虹横线（HUD 通电感） */
+.cyber-panel--scan::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    var(--cy-cyan-soft) 25%,
+    var(--cy-violet) 75%,
+    transparent 100%
+  );
+  opacity: 0.75;
+  pointer-events: none;
+}
+
+/* ── 数据卡：左侧霓虹竖条（用于统计/结论类数字） ─────────────────────── */
+.cyber-stat {
+  position: relative;
+  overflow: hidden;
+}
+.cyber-stat__bar {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: linear-gradient(180deg, var(--cy-cyan) 0%, var(--cy-violet) 100%);
+}
+[data-theme='dark'] .cyber-stat__bar {
+  box-shadow: 0 0 12px rgba(0, 212, 255, 0.5);
+}
+
+/* ── 状态灯：在线(绿) / 运行(青呼吸) / 告警(琥珀) / 危险(红脉冲) ───────── */
+.cyber-led {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  display: inline-block;
+}
+.cyber-led--online { background: var(--cy-lime); }
+[data-theme='dark'] .cyber-led--online { box-shadow: 0 0 8px rgba(34, 197, 94, 0.85); }
+
+.cyber-led--busy { background: var(--cy-cyan); animation: cy-breath 1.4s ease-in-out infinite; }
+[data-theme='dark'] .cyber-led--busy { box-shadow: 0 0 8px rgba(0, 212, 255, 0.9); }
+
+.cyber-led--warn { background: var(--cy-amber); }
+[data-theme='dark'] .cyber-led--warn { box-shadow: 0 0 8px rgba(251, 191, 36, 0.8); }
+
+.cyber-led--danger { background: var(--cy-magenta); animation: cy-breath 1.4s ease-in-out infinite; }
+[data-theme='dark'] .cyber-led--danger { box-shadow: 0 0 8px rgba(255, 45, 111, 0.85); }
+
+@keyframes cy-breath {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+/* ── 终端输出块（日志 / payload / raw）───────────────────────────────── */
+.cyber-terminal {
+  background: var(--cy-surface-raised);
+  border: 1px solid var(--cy-line);
+  border-radius: 8px;
+  font-family: 'JetBrains Mono', 'Fira Code', Consolas, Menlo, monospace;
+  overflow: auto;
+}
+/* 终端左上「● ● ●」伪标题栏，纯装饰 */
+.cyber-terminal--chrome::before {
+  content: '';
+  display: block;
+  height: 22px;
+  border-bottom: 1px solid var(--cy-line);
+  background-image: radial-gradient(circle at 12px 11px, var(--cy-cyan-soft) 2px, transparent 3px),
+    radial-gradient(circle at 24px 11px, var(--cy-cyan-soft) 2px, transparent 3px),
+    radial-gradient(circle at 36px 11px, var(--cy-cyan-soft) 2px, transparent 3px);
+  opacity: 0.5;
+}
+
+/* ── 数据流背景（Hero / 空态底部装饰，横向流动）────────────────────── */
+.cyber-dataflow {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 1px;
+  pointer-events: none;
+  background: linear-gradient(90deg, transparent, var(--cy-cyan), transparent);
+  background-size: 40% 100%;
+  background-repeat: no-repeat;
+  animation: cy-flow 4.5s ease-in-out infinite;
+  opacity: 0.5;
+}
+@keyframes cy-flow {
+  0% { background-position: -40% 0; }
+  100% { background-position: 140% 0; }
+}
+
+/* ── 霓虹分隔线（区块之间，比 MUI Divider 更贴赛博语言）────────────── */
+.cyber-divider {
+  height: 1px;
+  border: 0;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    var(--cy-line-strong) 20%,
+    var(--cy-line) 50%,
+    transparent 100%
+  );
+}
+
+/* ── 角标文字（编号 / 状态，等宽 + 字距）────────────────────────────── */
+.cyber-tag {
+  font-family: 'JetBrains Mono', 'Fira Code', Consolas, Menlo, monospace;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+/* ── 无障碍：尊重系统「减少动效」偏好 ──────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  .cyber-led--busy,
+  .cyber-led--danger,
+  .cyber-dataflow,
+  .scanline-active::after,
+  .pulse-dot,
+  .flicker {
+    animation: none !important;
+  }
+}

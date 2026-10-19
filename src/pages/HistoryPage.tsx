@@ -7,46 +7,19 @@
 
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import {
-  Box, Container, Typography, Card, CardContent, Chip, Button,
-  IconButton, Alert, Stack, Grid
-} from '@mui/material';
-import DeleteIcon from '@mui/icons-material/Delete';
-import ReplayIcon from '@mui/icons-material/Replay';
-import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
+import { Container, Button, Alert, Stack } from '@mui/material';
+import HistoryIcon from '@mui/icons-material/History';
+import TravelExploreIcon from '@mui/icons-material/TravelExplore';
 import { useTranslation } from 'react-i18next';
 import { useScanStore } from '../store/scanStore';
 import { useScan } from '../hooks/useScan';
 import { useServerHistory } from '../hooks/useServerHistory';
 import { mergeHistory, type MergedHistoryRow } from '../shared/historyMerge';
 import HistoryEmpty from '../components/HistoryEmpty';
+import HistoryRowCard from '../components/HistoryRowCard';
+import PageHeader from '../components/cyber/PageHeader';
 import { buildResumeConfig } from '../shared/scanConfig';
-import i18n from '../i18n';
-import type { HistoryRecord, RiskLevel } from '../shared/types';
-
-const RISK_COLORS: Record<string, 'error' | 'warning' | 'info' | 'success'> = {
-  Critical: 'error',
-  High: 'warning',
-  Medium: 'info',
-  Low: 'success',
-};
-
-function formatTime(iso: string | null): string {
-  if (!iso) return '';
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return '';
-  const locale = i18n.language.startsWith('zh') ? 'zh-CN' : 'en-US';
-  return d.toLocaleString(locale, {
-    month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
-  });
-}
-
-/** 来源标记：让用户知道这条是「跨机器可见」还是「只在这台浏览器里」 */
-const SOURCE_LABEL: Record<MergedHistoryRow['source'], { key: string; color: 'info' | 'success' | 'default' }> = {
-  ledger: { key: 'history.sourceServer', color: 'info' },
-  live: { key: 'history.sourceLive', color: 'success' },
-  local: { key: 'history.sourceLocal', color: 'default' },
-};
+import type { HistoryRecord } from '../shared/types';
 
 export default function HistoryPage() {
   const { t } = useTranslation();
@@ -100,15 +73,22 @@ export default function HistoryPage() {
 
   return (
     <Container maxWidth="md" className="py-6">
-      {/* 页面标题 */}
-      <Box className="mb-6">
-        <Typography variant="h4" fontWeight={700} gutterBottom>
-          {t('history.title')}
-        </Typography>
-        <Typography variant="body2" color="text.secondary">
-          {t('history.subtitle', { count: rows.length })}
-        </Typography>
-      </Box>
+      {/* 页面标题 —— [D107] 统一 PageHeader：图标 + 标题 + 一句话用途 + 右侧 CTA */}
+      <PageHeader
+        icon={<HistoryIcon />}
+        title={t('history.title')}
+        desc={t('history.subtitle', { count: rows.length })}
+        actions={
+          <Button
+            size="small"
+            variant="contained"
+            startIcon={<TravelExploreIcon />}
+            onClick={() => navigate('/scan')}
+          >
+            {t('history.firstScan')}
+          </Button>
+        }
+      />
 
       {resumeError && (
         <Alert severity="error" className="mb-4" onClose={() => setResumeError('')}>
@@ -127,99 +107,16 @@ export default function HistoryPage() {
         <HistoryEmpty />
       ) : (
         <Stack spacing={2}>
-          {rows.map((row) => {
-            const risk: RiskLevel | null = row.riskLevel;
-            const targetUrl = row.target || t('history.unknownTarget');
-            const isSqlmap = row.local?.report?.engine === 'sqlmap';
-            const meta = SOURCE_LABEL[row.source];
-
-            return (
-              <Card
-                key={row.scanId}
-                variant="outlined"
-                className="cursor-pointer"
-                sx={{
-                  transition: 'box-shadow 0.2s ease, transform 0.15s ease',
-                  '&:hover': { boxShadow: 3, transform: 'translateY(-1px)' },
-                }}
-                onClick={() => goto(row.scanId)}
-                role="button"
-                tabIndex={0}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    goto(row.scanId);
-                  }
-                }}
-              >
-                <CardContent className="py-3">
-                  <Grid container alignItems="center" spacing={2}>
-                    <Grid item xs={12} sm={6}>
-                      <Typography variant="subtitle2" fontWeight={600} noWrap>
-                        {targetUrl}
-                      </Typography>
-                      <Typography variant="caption" color="text.secondary">
-                        {row.scanId.slice(0, 8)} · {formatTime(row.finishedAt)}
-                      </Typography>
-                    </Grid>
-                    <Grid item xs={6} sm={3}>
-                      <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-                        {risk ? (
-                          <Chip
-                            label={t('history.risk', { level: t(`risk.${risk.toLowerCase()}`) })}
-                            size="small"
-                            color={RISK_COLORS[risk]}
-                            variant="outlined"
-                          />
-                        ) : (
-                          // 老台账没有 highestRisk 字段 ⇒ 显示"未知"而不是猜一个出来
-                          <Chip label={t('history.riskUnknown')} size="small" variant="outlined" />
-                        )}
-                        <Chip label={t(meta.key)} size="small" color={meta.color} variant="outlined" />
-                        {isSqlmap && <Chip label="sqlmap" size="small" color="secondary" variant="outlined" />}
-                      </Stack>
-                      <Typography variant="caption" color="text.secondary" className="mt-1">
-                        {row.vulns > 0 ? t('history.vulns', { count: row.vulns }) : t('history.noVulns')}
-                      </Typography>
-                    </Grid>
-                    <Grid item xs={6} sm={3}>
-                      <Stack direction="row" spacing={1} justifyContent="flex-end">
-                        {canResume(row.local) && (
-                          <Button
-                            size="small"
-                            variant="outlined"
-                            startIcon={<ReplayIcon />}
-                            aria-label={t('history.resume')}
-                            onClick={(e) => { e.stopPropagation(); handleResume(row); }}
-                          >
-                            {t('history.resume')}
-                          </Button>
-                        )}
-                        <Button
-                          size="small"
-                          endIcon={<ArrowForwardIcon />}
-                          onClick={(e) => { e.stopPropagation(); goto(row.scanId); }}
-                        >
-                          {t('history.view')}
-                        </Button>
-                        {/* 只有本地条目删得掉：服务端没有 DELETE 端点，给按钮点了没反应等于骗人 */}
-                        {row.local && (
-                          <IconButton
-                            size="small"
-                            color="default"
-                            aria-label={t('history.delete')}
-                            onClick={(e) => handleDelete(e, row.scanId)}
-                          >
-                            <DeleteIcon fontSize="small" />
-                          </IconButton>
-                        )}
-                      </Stack>
-                    </Grid>
-                  </Grid>
-                </CardContent>
-              </Card>
-            );
-          })}
+          {rows.map((row) => (
+            <HistoryRowCard
+              key={row.scanId}
+              row={row}
+              canResume={canResume}
+              onResume={handleResume}
+              onDelete={handleDelete}
+              onGoto={goto}
+            />
+          ))}
         </Stack>
       )}
     </Container>

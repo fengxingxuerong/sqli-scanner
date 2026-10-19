@@ -90,6 +90,15 @@
       "refute_cmd": "门禁判据：node e2e/param-mine-lab/run.mjs（已接 acceptance，套件 param-mine-lab）；同题对照：python e2e/run-with-sandbox.py e2e/param-mine-lab/sqlmap-contrast.mjs（需 sqlmap）",
       "recheck_batch": "D87（复跑 11/11 通过，对标口径未建立，维持 unverified）；D102（2026-10-18）：建真靶场判据（接 acceptance）+ 同题对照证据器 ⇒ 按改写后的准确表述转 verified。同批顺带修正 redteam sqlmap-bench 判定正则两处自伤（见 CHANGELOG D102 与 rescore-sqlmap-logs.mjs）",
       "caveat": "★ 白历史：原表述「参数挖掘（Arjun 式）强于 sqlmap」不成立（D68：sqlmap 无主动挖掘能力，「更强」无定义），D102 改写为「提供 sqlmap 所没有的主动发现能力」并经同题实测。边界：本条 verified 覆盖「从零发现能力存在且 sqlmap 无此通道」，**不覆盖字典召回率**（本仓字典 ~260 条 vs Arjun 2.6 万，无同题量化）；对照 --level=2 为双方同参（给利用侧公平阳性对照，默认单参数形态下 sqlmap 对被 LIKE 包裹+通用错误页的目标 level1 会漏）。"
+    },
+    {
+      "id": "external-judge-juice-shop-d109",
+      "claim": "第三方外部裁判 OWASP Juice Shop 20.3.0（D109）：官方 SQLi 真值端点 2/2 检出（商品搜索 GET LIKE、登录 POST JSON），4 个带可测参数的安全端点误报 0；sqlmap 1.10.7 同题两处亦检出。",
+      "status": "verified",
+      "evidence": "e2e/juice-shop-lab/results/external-judge-2026-10-19.md（2026-10-19，Node v24.18.0；套件 2/2 检出 + 0/4 误报，acceptance --only=juice-shop 1 PASS/0 FAIL/0 SKIP）；真值来自官方 routes/search.ts:23 与 routes/login.ts:34；sqlmap 1.10.7 同题日志见该文件。",
+      "refute_cmd": "JUICE_BASE=http://127.0.0.1:3199 node e2e/acceptance.mjs --only=juice-shop",
+      "recheck_batch": "D109（2026-10-19）：新增登录 POST JSON 真值端点并实跑；此前 D88 只有搜索点 1 类。",
+      "caveat": "单轮；外部真值仅 2 个 SQLi 端点 + 4 个安全端点，不能外推为通用外部检出率；登录点报告的 expiredMidScan/401 认证挑战计数是登录语义噪声（finding 由 admin token vs 401 确认）；Juice Shop 为外部项目，未就绪时套件 SKIP，不计通过。"
     }
   ]
 }

@@ -4,15 +4,25 @@
     "tagline": "Enter your target URL and get injection points, database fingerprint, and a full report in minutes."
   },
   "nav": {
+    "homeDesc": "Statistics and recent scans",
+    "scanDesc": "Create a new scan task",
+    "historyDesc": "Scan ledger visible across machines",
+    "exploitDesc": "Run exploit actions on confirmed points",
     "home": "Home",
     "scan": "Scan",
     "history": "History",
     "exploit": "Exploit"
   },
   "home": {
+    "title": "Overview",
+    "desc": "Scan statistics, recent records and common entries",
     "hero": "Start Your Security Audit",
     "startScan": "Start Scan",
     "stats": {
+      "totalScansHint": "Total scan tasks saved on this machine",
+      "vulnsFoundHint": "Total confirmed injection points across reports",
+      "highRiskHint": "Scans rated Critical / High",
+      "targetsHint": "Unique sites after de-duplicating by target URL",
       "totalScans": "Total Scans",
       "vulnsFound": "Vulnerabilities",
       "highRisk": "High Risk",
@@ -24,6 +34,8 @@
     "firstScan": "Start Your First Scan",
     "unknownTarget": "(Unknown)",
     "guide": {
+      "title": "Get started in 3 steps",
+      "desc": "First time here? Follow these three steps to get a report",
       "step1": "Enter Target URL",
       "step1Desc": "Paste the website URL, supports HTTP request and curl command auto-detection",
       "step2": "One-Click Scan",
@@ -33,6 +45,8 @@
     }
   },
   "scan": {
+    "intensity": "Scan intensity",
+    "intensityHint": "When in doubt pick Standard — the defaults are already tuned",
     "title": "SQL Injection Scanner",
     "subtitle": "Paste the target URL and start scanning with one click",
     "urlLabel": "Target URL",
@@ -80,6 +94,8 @@
       "cancel": "Cancel"
     },
     "sidebar": {
+      "scopeDesc": "Read before scanning: what gets hit, what gets blocked",
+      "exitDesc": "For CI: the exit code decides whether the pipeline is blocked",
       "scopeTitle": "Authorization & Scan Boundary",
       "scopeSameOrigin": "Same-origin only by default (scheme + host + port): out-of-scope targets are rejected before the first request",
       "scopeRedirect": "Every redirect hop is re-validated: a 302 to an unauthorized host stops all following requests",
@@ -167,9 +183,16 @@
     "noSqlmapLogs": "No sqlmap output logs",
     "logTruncated": "Log is large; showing the latest {{shown}} lines ({{total}} total)",
     "stat": {
+      "hitHint": "Injection points confirmed by sqlmap",
+      "criticalHint": "Can dump data or write files — handle immediately",
+      "highHint": "Can read sensitive data — fix with priority",
+      "mediumHint": "Exploitation needs conditions — schedule a fix",
+      "lowHint": "Limited signal — needs manual confirmation",
       "hit": "Hits"
     },
     "charts": {
+      "title": "Distribution view",
+      "desc": "Break down findings by technique and risk level",
       "techniqueDistribution": "Technique Distribution",
       "riskDistribution": "Risk Distribution",
       "noData": "No vulnerability data to display charts",
@@ -217,6 +240,9 @@
     }
   },
   "exploit": {
+    "targetInfoDesc": "Two ways: give a scanId to reuse scan results and session, or fill URL + parameter manually",
+    "actionTitle": "Exploit actions",
+    "actionDesc": "SQL query / file read-write / OS command — confirm authorization before running",
     "title": "Exploit Tool",
     "subtitle": "After confirming an injection point, execute SQL Shell / File I/O / OS commands (authorized targets only)",
     "targetInfo": "Target Info",
@@ -874,6 +900,7 @@
     "done": "All set — start your first scan"
   },
   "configHints": {
+    "intensity": "Presets only touch detection-intensity keys (level / risk / techniques / crawler / prefilter). Your proxy, auth and scope settings are left untouched.",
     "wizard": "Paste a target URL to start; defaults are already tuned — beginners can leave them untouched.",
     "enginePick": "Built-in: zero dependencies, first choice for teaching / compliance. sqlmap: more complete, but requires local Python and sqlmap.",
     "detectionIntensity": "Detection intensity: higher level tries more payloads — slower but broader. Default 3 balances speed and coverage; use the \"Quick Sweep\" preset when in a hurry.",

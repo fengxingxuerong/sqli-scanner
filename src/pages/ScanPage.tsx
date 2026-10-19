@@ -16,6 +16,7 @@ import { useScan } from '../hooks/useScan';
 import { useEvents } from '../hooks/useEvents';
 import { useScanStore } from '../store/scanStore';
 import { DEFAULT_CONFIG, DEFAULT_SQLMAP_CONFIG } from '../shared/constants';
+import { SCAN_PRESETS, type ScanPresetId } from '../shared/scanPresets';
 import { tauriBridge } from '../shared/tauriBridge';
 import { ApiError } from '../shared/apiClient';
 import type { MethodType, ScanConfig, SqlmapConfig } from '../shared/types';
@@ -25,6 +26,17 @@ import { ErrorCode } from '../shared/types';
 function parseJson(text: string): Record<string, string> {
   if (!text.trim()) return {};
   return JSON.parse(text);
+}
+
+/** 启动失败归因：ENGINE_BUSY / RATE_LIMITED 给可操作提示，其余展示原始消息。 */
+function resolveStartError(e: unknown, t: (key: string) => string): string {
+  if (e instanceof ApiError) {
+    if (e.code === ErrorCode.ENGINE_BUSY) return t('scan.errors.engineBusy');
+    if (e.code === ErrorCode.RATE_LIMITED) return t('scan.errors.rateLimited');
+    return e.message || t('scan.errors.startFailed');
+  }
+  if (e instanceof Error) return e.message || t('scan.errors.startFailed');
+  return t('scan.errors.startFailed');
 }
 
 export default function ScanPage() {
@@ -56,6 +68,9 @@ export default function ScanPage() {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [sqlConfirmOpen, setSqlConfirmOpen] = useState(false);
   const [starting, setStarting] = useState(false);
+  // [D107] 扫描强度档位提升到页面级：向导主区的三档选择器与高级面板里的
+  // 预设 chips 共享同一状态，避免两处高亮互相打架。
+  const [activePreset, setActivePreset] = useState<ScanPresetId | null>(null);
 
   const running = status === 'running';
   // progressTotal/processedCount 由 ProgressView 自行订阅（H2 聚合值），此处不再中转
@@ -77,20 +92,7 @@ export default function ScanPage() {
         sqlmapConfig,
       });
     } catch (e: unknown) {
-      // 根据后端错误码区分行为：ENGINE_BUSY / RATE_LIMITED 提示重试，其余展示原始消息
-      let msg = t('scan.errors.startFailed');
-      if (e instanceof ApiError) {
-        if (e.code === ErrorCode.ENGINE_BUSY) {
-          msg = t('scan.errors.engineBusy');
-        } else if (e.code === ErrorCode.RATE_LIMITED) {
-          msg = t('scan.errors.rateLimited');
-        } else {
-          msg = e.message || t('scan.errors.startFailed');
-        }
-      } else if (e instanceof Error) {
-        msg = e.message || t('scan.errors.startFailed');
-      }
-      setError(msg);
+      setError(resolveStartError(e, t));
       setStatus('error');
     } finally {
       setStarting(false);
@@ -134,6 +136,13 @@ export default function ScanPage() {
     setConfig((c) => ({ ...c, ...patch })), []);
   const handleSqlmapConfigChange = useCallback((patch: Partial<SqlmapConfig>) =>
     setSqlmapConfig((c) => ({ ...c, ...patch })), []);
+  // 应用预设：patch 语义（只覆盖预设声明的键），同 SCAN_PRESETS 的契约
+  const handleApplyPreset = useCallback((id: ScanPresetId) => {
+    const preset = SCAN_PRESETS.find((p) => p.id === id);
+    if (!preset) return;
+    setConfig((c) => ({ ...c, ...preset.patch }));
+    setActivePreset(id);
+  }, []);
 
   return (
     <Container maxWidth="lg" className="py-6">
@@ -161,6 +170,7 @@ export default function ScanPage() {
             error={error}
             wafSuggestion={wafSuggestion}
             status={status}
+            activePreset={activePreset}
             onUrlChange={setUrl}
             onMethodChange={setMethod}
             onBodyTextChange={setBodyText}
@@ -174,6 +184,7 @@ export default function ScanPage() {
             onStop={handleStop}
             onPause={handlePause}
             onResume={handleResume}
+            onApplyPreset={handleApplyPreset}
           />
         </Box>
 

@@ -39,6 +39,17 @@ const ENDPOINTS = [
     // 亦把该端点列为 SQL 注入挑战目标。实机可打穿证明：
     //   q=apple')) UNION SELECT 1,2,...,10-- -   →  返回伪造行（列数=10）
   },
+  {
+    // [D109 2026-10-19] 官方登录 SQLi（loginAdminChallenge）：POST JSON body。
+    // 真值来源（外部、非本项目编写）：Juice Shop 官方 `routes/login.ts` 直接把
+    // req.body.email / req.body.password 插进 SELECT ... FROM Users WHERE 子句；
+    // 实机 `' OR 1=1--` 返回 admin token，`' OR 1=2--` 返回 401。
+    path: '/rest/user/login',
+    kind: 'vuln',
+    method: 'POST',
+    jsonBody: { email: 'x@y.z', password: 'x' },
+    desc: '登录（官方 routes/login.ts 直接拼接 email/password；JSON body）',
+  },
   // ⚠ 安全端点必须**带可测参数**：无参数的路径（如 /api/Products/1）不会产生任何请求，
   // 那种「0 检出」只是「没测过」，不构成零误报证据（本靶场首版即犯此错，已纠正）。
   // 下列端点均实测会产生数十至上百请求，零检出才有证明力。
@@ -74,9 +85,12 @@ async function reachable() {
 }
 
 /** 扫描单个端点，返回漏洞条数 */
-async function scanOne(url) {
+async function scanOne(ep) {
   const sm = new ScanManager({});
-  const id = await sm.start({ url, config: SCAN_CFG });
+  const target = { url: `${BASE}${ep.path}`, config: SCAN_CFG };
+  if (ep.method) target.method = ep.method;
+  if (ep.jsonBody) target.jsonBody = { ...ep.jsonBody };
+  const id = await sm.start(target);
   const t0 = Date.now();
   for (;;) {
     const st = sm.scans.get(id);
@@ -100,8 +114,8 @@ async function scanOne(url) {
 
 if (!(await reachable())) {
   console.log(`[SKIP] Juice Shop 靶场不可达（${BASE}）—— 需先构建并启动，跳过（不计通过亦不计失败）`);
-  console.log('       构建见本仓库 docs 或记忆：codeload tarball → npm install --omit=dev →');
-  console.log('       npm rebuild sqlite3 → frontend/ 单独 install + 关字体内联 → npm start');
+  console.log('       构建与启动见 e2e/juice-shop-lab/README.md（codeload tarball → npm install →');
+  console.log('       npm rebuild sqlite3 → frontend 构建 → PORT=3199 npm start）');
   process.exit(0);
 }
 
@@ -112,8 +126,7 @@ let truePositives = 0;
 let missed = 0;
 
 for (const ep of ENDPOINTS) {
-  const url = `${BASE}${ep.path}`;
-  const r = await scanOne(url);
+  const r = await scanOne(ep);
   const isVuln = ep.kind === 'vuln';
   if (isVuln) {
     if (r.vulns > 0) truePositives += 1;
@@ -124,7 +137,8 @@ for (const ep of ENDPOINTS) {
   rows.push({ ...ep, ...r });
   const mark = isVuln ? (r.vulns > 0 ? '✅' : '❌漏检') : r.vulns > 0 ? '❌误报' : '✅';
   console.log(
-    `${mark} [${isVuln ? '真值漏洞' : '安全端点'}] vulns=${r.vulns} 请求=${r.requests} ${ep.path}`
+    `${mark} [${isVuln ? '真值漏洞' : '安全端点'}] vulns=${r.vulns} 请求=${r.requests} ` +
+    `${ep.method || 'GET'} ${ep.path}`
   );
   if (r.techniques.length) console.log(`     命中技术：${r.techniques.join(', ')}`);
 }

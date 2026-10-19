@@ -9,6 +9,9 @@ import {
 } from '@mui/material';
 import type { ReportModel, SqlmapVulnEntry, Vulnerability } from '../shared/types';
 import ValidityBanner from './ValidityBanner';
+import CyberPanel from './cyber/CyberPanel';
+import CyberStat from './cyber/CyberStat';
+import RiskRing from './RiskRing';
 
 // 风险等级 → 颜色（与 ReportPage 原 RISK_COLORS 一致，导出供 ReportPage 复用防漂移）
 // 注：为保证漏洞列表卡片与摘要卡片的 WCAG 对比度一致，采用 ReportPage 原值（AA 达标）。
@@ -129,39 +132,40 @@ export default function ReportSummarySection({
         </CardContent>
       </Card>
 
-      {/* 统计卡片 */}
+      {/* 统计卡片 —— [D107] 换 CyberStat：数字等宽对齐，每级附一句话「意味着什么」，
+          避免只给个 Critical/High 让非安全岗的人看不懂严重性差别 */}
       <Grid container spacing={2} className="mb-4">
         <Grid item xs={6} md={3}>
-          <Card variant="outlined">
-            <CardContent className="text-center">
-              <Typography variant="h4" fontWeight={700} color="error">{isSqlmap ? sqlmapVulns.length : riskCounts.critical}</Typography>
-              <Typography variant="caption" color="text.secondary">{isSqlmap ? t('report.stat.hit') : t('risk.critical')}</Typography>
-            </CardContent>
-          </Card>
+          <CyberStat
+            value={isSqlmap ? sqlmapVulns.length : riskCounts.critical}
+            label={isSqlmap ? t('report.stat.hit') : t('risk.critical')}
+            hint={isSqlmap ? t('report.stat.hitHint') : t('report.stat.criticalHint')}
+            tone="danger"
+          />
         </Grid>
         <Grid item xs={6} md={3}>
-          <Card variant="outlined">
-            <CardContent className="text-center">
-              <Typography variant="h4" fontWeight={700} color="warning.main">{isSqlmap ? 0 : riskCounts.high}</Typography>
-              <Typography variant="caption" color="text.secondary">{t('risk.high')}</Typography>
-            </CardContent>
-          </Card>
+          <CyberStat
+            value={isSqlmap ? 0 : riskCounts.high}
+            label={t('risk.high')}
+            hint={t('report.stat.highHint')}
+            tone="warn"
+          />
         </Grid>
         <Grid item xs={6} md={3}>
-          <Card variant="outlined">
-            <CardContent className="text-center">
-              <Typography variant="h4" fontWeight={700} color="warning.light">{isSqlmap ? 0 : riskCounts.medium}</Typography>
-              <Typography variant="caption" color="text.secondary">{t('risk.medium')}</Typography>
-            </CardContent>
-          </Card>
+          <CyberStat
+            value={isSqlmap ? 0 : riskCounts.medium}
+            label={t('risk.medium')}
+            hint={t('report.stat.mediumHint')}
+            tone="cyan"
+          />
         </Grid>
         <Grid item xs={6} md={3}>
-          <Card variant="outlined">
-            <CardContent className="text-center">
-              <Typography variant="h4" fontWeight={700} color="success.main">{isSqlmap ? 0 : riskCounts.low}</Typography>
-              <Typography variant="caption" color="text.secondary">{t('risk.low')}</Typography>
-            </CardContent>
-          </Card>
+          <CyberStat
+            value={isSqlmap ? 0 : riskCounts.low}
+            label={t('risk.low')}
+            hint={t('report.stat.lowHint')}
+            tone="success"
+          />
         </Grid>
       </Grid>
 
@@ -171,17 +175,22 @@ export default function ReportSummarySection({
           {t('report.charts.noData')}
         </Alert>
       ) : (
-        <Card variant="outlined" className="mb-4">
-          <CardContent>
+        <CyberPanel
+          className="mb-4"
+          title={t('report.charts.title')}
+          desc={t('report.charts.desc')}
+          actions={
+            <Button size="small" onClick={onToggleCharts}>
+              {chartCollapsed ? t('report.charts.expand') : t('report.charts.collapse')}
+            </Button>
+          }
+        >
             <Grid container spacing={3}>
               {/* 漏洞技术分布条形图（可折叠） */}
               <Grid item xs={12} md={7}>
-                <Stack direction="row" justifyContent="space-between" alignItems="center" className="mb-2">
-                  <Typography variant="subtitle2" fontWeight={600}>{t('report.charts.techniqueDistribution')}</Typography>
-                  <Button size="small" onClick={onToggleCharts}>
-                    {chartCollapsed ? t('report.charts.expand') : t('report.charts.collapse')}
-                  </Button>
-                </Stack>
+                <Typography variant="subtitle2" fontWeight={600} className="mb-2">
+                  {t('report.charts.techniqueDistribution')}
+                </Typography>
                 {!chartCollapsed && (
                   <Stack spacing={1.5}>
                     {techniqueEntries.map(([tech, count]) => (
@@ -193,7 +202,13 @@ export default function ReportSummarySection({
                           {t(`technique.${tech}`, { defaultValue: tech })}
                         </Typography>
                         <Box
-                          sx={{ flex: 1, height: 18, borderRadius: 1, backgroundColor: '#f0f0f0', overflow: 'hidden' }}
+                          sx={{
+                            flex: 1,
+                            height: 18,
+                            borderRadius: 1,
+                            backgroundColor: 'var(--cy-line)',
+                            overflow: 'hidden',
+                          }}
                         >
                           <Box
                             sx={{
@@ -218,51 +233,16 @@ export default function ReportSummarySection({
                 <Typography variant="subtitle2" fontWeight={600} align="center" className="mb-1">
                   {t('report.charts.riskDistribution')}
                 </Typography>
-                <Box className="text-center">
-                  <svg width="150" height="150" viewBox="0 0 150 150" role="img" aria-label={t('report.charts.riskDistribution')}>
-                    {/* 背景环 */}
-                    <circle cx="75" cy="75" r={ringRadius} fill="none" stroke="#efefef" strokeWidth="16" />
-                    {/* 四段风险环 */}
-                    {ringSegments.map((seg) =>
-                      seg.count > 0 ? (
-                        <circle
-                          key={seg.key}
-                          cx="75"
-                          cy="75"
-                          r={ringRadius}
-                          fill="none"
-                          stroke={seg.color}
-                          strokeWidth="16"
-                          strokeDasharray={`${seg.len} ${ringCirc - seg.len}`}
-                          strokeDashoffset={-seg.offset}
-                          transform="rotate(-90 75 75)"
-                        />
-                      ) : null,
-                    )}
-                    {/* 中心：总漏洞数 */}
-                    <text x="75" y="72" textAnchor="middle" fontSize="26" fontWeight="700" fill="#212121">
-                      {totalVulns}
-                    </text>
-                    <text x="75" y="92" textAnchor="middle" fontSize="11" fill="#757575">
-                      {t('report.charts.total')}
-                    </text>
-                  </svg>
-                  {/* 图例 */}
-                  <Stack direction="row" spacing={1.5} justifyContent="center" className="mt-1" flexWrap="wrap">
-                    {riskRing.map((seg) => (
-                      <Box key={seg.key} className="flex items-center" sx={{ gap: 0.5 }}>
-                        <Box sx={{ width: 10, height: 10, borderRadius: '2px', backgroundColor: seg.color, flexShrink: 0 }} />
-                        <Typography variant="caption" color="text.secondary" sx={{ lineHeight: 1 }}>
-                          {t(`risk.${seg.key === 'Critical' ? 'critical' : seg.key === 'High' ? 'high' : seg.key === 'Medium' ? 'medium' : 'low'}`)} · {seg.count}
-                        </Typography>
-                      </Box>
-                    ))}
-                  </Stack>
-                </Box>
+                <RiskRing
+                  ringSegments={ringSegments}
+                  ringRadius={ringRadius}
+                  ringCirc={ringCirc}
+                  totalVulns={totalVulns}
+                  riskRing={riskRing}
+                />
               </Grid>
             </Grid>
-          </CardContent>
-        </Card>
+        </CyberPanel>
       )}
     </>
   );

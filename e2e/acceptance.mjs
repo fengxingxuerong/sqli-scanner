@@ -500,15 +500,23 @@ const SUITES = [
       }
       const m = /真值漏洞端点：检出 (\d+)\/(\d+)（漏检 (\d+)）/.exec(out);
       const fp = /安全端点误报：(\d+)/.exec(out);
-      const pass = /外部裁判通过/.test(out);
+      // 分母防缩水：套件自报「通过」还不够，搜索与登录两条真值端点都必须实际跑到。
+      // 否则删掉一条端点后分母从 2 变 1，1/1 仍会打印「外部裁判通过」。
+      const ranSearch = /GET \/rest\/products\/search\?q=apple/.test(out);
+      const ranLogin = /POST \/rest\/user\/login/.test(out);
+      const both = ranSearch && ranLogin;
+      const pass = /外部裁判通过/.test(out) && both;
       return {
         facts: {
           外部裁判: pass ? '✅ 通过' : '❌ 未通过',
+          真值端点: both ? '搜索+登录' : '缺失（端点清单被改？）',
           真漏洞检出: m ? `${m[1]}/${m[2]}（漏检 ${m[3]}）` : '取不到',
           安全端点误报: fp ? fp[1] : '取不到',
         },
         pass,
-        reason: pass ? null : '外部裁判未通过（漏检或误报，见 stdout）',
+        reason: pass ? null : both
+          ? '外部裁判未通过（漏检或误报，见 stdout）'
+          : '外部裁判端点未实际执行（搜索/登录真值端点缺失）',
       };
     },
   },
