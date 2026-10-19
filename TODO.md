@@ -201,8 +201,10 @@ F18 上次 acceptance 的引擎崩溃码（0xC0000409）**未复现**，留观�
   单测 PASS（3606 例 / 3604 pass / 0 fail / 2 skip）；MySQL 依赖 12 套件 **12/12 PASS**
   （含上午 BLOCKED 的刁钻靶场 11/11、检测回归 19/19、真 MySQL 11/11、报告契约 8/8、
   CRS 三件套、WAF A2/A3、批量隔离、登录编排）；红队 PASS（**19/19、0/7 误报**）。
-  仍 SKIP 的 5 个为环境缺失（PG 5432 未监听、secure_file_priv=NULL、Juice Shop /
-  interactsh 环境不满足）——**未覆盖即不计过，也不假装全量**。
+  当次仍 SKIP 的 5 个为环境缺失（PG 5432 未监听、secure_file_priv=NULL、Juice Shop /
+  interactsh 环境不满足）——**未覆盖即不计过，也不假装全量**。Juice Shop 已于
+  2026-10-19 D109 补跑通过（2/2 检出、0/4 误报，见
+  `e2e/juice-shop-lab/results/external-judge-2026-10-19.md`）。
 - D91 类问题的**通用化排查**：还有哪些注入点形态会被 auth.headers 副本夹击（当前只修了 Cookie 同名）；
 - 商业云 WAF 真机样本（D89 遗留）、62 家其余 44 家外部对拍源。
 
@@ -351,7 +353,8 @@ Juice Shop 本机跑通链：codeload tarball（npm 上 `juice-shop` 已弃用�
 
 ### 待推进
 
-- Juice Shop 其余 SQLi 挑战点（登录绕过 / 密码重置等）可逐步纳入真值清单；
+- ~~Juice Shop 登录绕过~~ **已完成（D109 2026-10-19：`POST /rest/user/login` 纳入真值清单，
+  套件 2/2 + 0/4）**；密码重置等其余 SQLi 挑战点仍待纳入；
 - 同族第三方靶场（DVWA / OWASP Benchmark）可后续补充，扩大外部裁判面。
 
 ---

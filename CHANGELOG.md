@@ -65,6 +65,42 @@
 
 ## [Unreleased]
 
+### 2026-10-19 批次 D109 · 外部裁判补登录 SQLi（Juice Shop 2/2 + 0/4）
+
+**动机**：D88 接入 Juice Shop 外部裁判时只覆盖搜索点；登录绕过是官方另一条独立 SQLi
+挑战（`routes/login.ts` 把 JSON body 的 email/password 直接拼进 `SELECT ... FROM Users`），
+此前未纳入真值清单。
+
+**改动**：
+- `e2e/juice-shop-lab/run.mjs`：端点描述支持 `method` / `jsonBody`，新增
+  `POST /rest/user/login` 真值点（官方 `loginAdminChallenge`）；4 个安全端点不变。
+- `e2e/acceptance.mjs`：juice-shop 断言新增「搜索 + 登录两条真值端点都必须实际跑到」的
+  文本判据，防止删点后分母缩水仍绿；facts 增加 `真值端点=搜索+登录`。
+- `e2e/juice-shop-lab/README.md`：补外部靶场构建/启动/复跑链，未就绪 SKIP 判据不变。
+- 证据：`e2e/juice-shop-lab/results/external-judge-2026-10-19.md`。
+- 台账：`docs/_claims-ledger.json` 新增 `external-judge-juice-shop-d109`（verified）。
+
+**实测**：套件 **2/2 检出、0/4 误报**；`acceptance --only=juice-shop`
+**1 PASS / 0 FAIL / 0 SKIP**；手工真值 `OR 1=1` → 200 admin token、`OR 1=2` → 401；
+sqlmap 1.10.7 同题两处均检出（登录 SQLite boolean 13 列，搜索 boolean+time）。
+
+**边界**：单轮；仅 2 个外部 SQLi 端点，不能外推为通用外部检出率；登录点
+`expiredMidScan`/401 计数为登录语义噪声；DVWA / OWASP Benchmark 未接入。
+
+**门禁收口（同批）**：前端 WIP 的复杂度/基线红清零（存量只减不增）：
+
+- `ScanWizardInner` 228 行/43 → 142/25（抽 `ScanWizardControls`：标题 + 强度档位 + 主操作按钮）
+- `ReportSummarySection` 226/32 → 191/31（抽 `RiskRing`：风险环 + 图例）
+- `HistoryPage` 170/29 → 87/18（抽 `HistoryRowCard`：单行卡片与来源/风险标记）
+- `ExploitPage` 200/49 → 189/38（抽 `buildExploitBase` / `dispatchExploit`；内联 arrow 18 → 7）
+- `ScanPage` 167/26 → 155/20（抽 `resolveStartError`）
+- `ReportPage` 285 → 284（`VISIBLE_LOG_TAIL` 提到模块级）
+- `ScanConfigPanel` 109/15 → 96/13（抽 `ScanPresetChips`；已不超软上限，移出基线）
+- `docs/_complexity-baseline.json` 250 → 245 项（0 抬高 / 5 移除 / 8 下调）；
+  `docs/_nesting-baseline.json` 16 → 15（移除 HistoryPage、HomePage；新增 HomeRecent）
+- 验证：`npm run gate:close` **22/22**；vitest **66 文件 / 574 用例全过**；
+  ESLint + 三套 typecheck 全绿。
+
 ### 2026-10-19 批次 D108 · Collaborator-Everywhere 式背景 OOB 哨兵（P1-5 收口）
 
 **背景**：P1-5 —— interactsh（D87）已就绪，但 OOB 仍是 opt-in 通道：只覆盖「显式选中的技术 ×

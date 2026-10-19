@@ -566,18 +566,6 @@
       "limitLines": 100,
       "limitComplexity": 15
     },
-    "server/src/core/tamper/plugins/if2case.js::transform": {
-      "lines": 35,
-      "complexity": 19,
-      "limitLines": 100,
-      "limitComplexity": 15
-    },
-    "server/src/core/tamper/plugins/ifnull2casewhenisnull.js::transform": {
-      "lines": 30,
-      "complexity": 19,
-      "limitLines": 100,
-      "limitComplexity": 15
-    },
     "server/src/core/tamper/plugins/scalarselectinline.js::transform": {
       "lines": 61,
       "complexity": 29,
@@ -723,8 +711,8 @@
       "limitComplexity": 15
     },
     "server/src/engine/TargetParser.js::TargetParser.discover": {
-      "lines": 159,
-      "complexity": 89,
+      "lines": 151,
+      "complexity": 84,
       "limitLines": 100,
       "limitComplexity": 15
     },
@@ -1010,27 +998,27 @@
       "limitLines": 100,
       "limitComplexity": 15
     },
-    "server/src/engine/scan/detect.js::<arrow@701>": {
-      "lines": 79,
-      "complexity": 28,
-      "limitLines": 100,
-      "limitComplexity": 15
-    },
     "server/src/engine/scan/detect.js::<arrow@225>": {
       "lines": 162,
       "complexity": 80,
       "limitLines": 100,
       "limitComplexity": 15
     },
+    "server/src/engine/scan/detect.js::<arrow@701>": {
+      "lines": 79,
+      "complexity": 28,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
     "server/src/engine/scan/detect.js::detectPhase": {
-      "lines": 449,
-      "complexity": 200,
+      "lines": 446,
+      "complexity": 196,
       "limitLines": 100,
       "limitComplexity": 15
     },
     "server/src/engine/scan/discover.js::discoverPoints": {
-      "lines": 130,
-      "complexity": 61,
+      "lines": 126,
+      "complexity": 59,
       "limitLines": 100,
       "limitComplexity": 15
     },
@@ -1293,20 +1281,14 @@
       "limitComplexity": 15
     },
     "src/components/ReportSummarySection.tsx::ReportSummarySection": {
-      "lines": 214,
+      "lines": 191,
       "complexity": 31,
       "limitLines": 100,
       "limitComplexity": 15
     },
-    "src/components/ScanConfigPanel.tsx::ScanConfigPanel": {
-      "lines": 107,
-      "complexity": 13,
-      "limitLines": 100,
-      "limitComplexity": 15
-    },
     "src/components/ScanWizard.tsx::ScanWizardInner": {
-      "lines": 182,
-      "complexity": 37,
+      "lines": 142,
+      "complexity": 25,
       "limitLines": 100,
       "limitComplexity": 15
     },
@@ -1430,27 +1412,15 @@
       "limitLines": 100,
       "limitComplexity": 15
     },
-    "src/pages/ExploitPage.tsx::<arrow@48>": {
-      "lines": 29,
-      "complexity": 18,
-      "limitLines": 100,
-      "limitComplexity": 15
-    },
     "src/pages/ExploitPage.tsx::ExploitPage": {
-      "lines": 195,
-      "complexity": 49,
+      "lines": 189,
+      "complexity": 38,
       "limitLines": 100,
       "limitComplexity": 15
     },
     "src/pages/HistoryPage.tsx::HistoryPage": {
-      "lines": 161,
-      "complexity": 28,
-      "limitLines": 100,
-      "limitComplexity": 15
-    },
-    "src/pages/HomePage.tsx::HomePage": {
-      "lines": 173,
-      "complexity": 24,
+      "lines": 87,
+      "complexity": 18,
       "limitLines": 100,
       "limitComplexity": 15
     },
@@ -1461,8 +1431,8 @@
       "limitComplexity": 15
     },
     "src/pages/ScanPage.tsx::ScanPage": {
-      "lines": 158,
-      "complexity": 25,
+      "lines": 155,
+      "complexity": 20,
       "limitLines": 100,
       "limitComplexity": 15
     },

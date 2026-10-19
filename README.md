@@ -670,14 +670,15 @@ npm run acceptance:sandbox          # 同全量，但套隔离 MySQL 沙箱（33
 | 红队实战评测（真值对照） | 19/19（100%），安全点 7，误报 0（D91 修复后 10-17 复跑；期间曾因 axios 1.20 回归至 18/19，见 CHANGELOG D91） |
 | fileRead / fileWrite 真闭环 | PASS（文件落盘=true，隔离沙箱重试） |
 
-> ⚠️ **误报率的证据边界（2026-10-09 补，2026-10-13 更正）**：上表的「误报 0 / 19/19」全部产自**自建靶场**
-> （`e2e/` 下 37 个靶场）。**第三方卷子 = 0**：本节此前写「唯一第三方卷子是 `sqli-labs`」，
-> 那次核对错了对象 —— `e2e/sqli-labs/` 里躺着的是本项目自己写的 223 行 Python 复刻
-> （`sqli-labs.py`，http.server + SQLite，runner 直接 spawn 它），不是上游那个 PHP+MySQL 仓库；
-> 同目录的 sqlmap 对照（`e2e/sqlmap-benchmark/run.mjs`）双方跑的就是这个复刻靶站，所以它是
-> **「同一自建靶场上的双方同题对照」，不是外部真值**。⇒ 该数字**不可外推为通用误报率**。
-> **未在任何第三方复杂应用上验证**（DVWA / Juice Shop / OWASP Benchmark 一类「真框架 +
-> 真 ORM + 复杂拼接」）。WAF 侧同理：只验了 ModSecurity+CRS 一家。
+> ⚠️ **误报率的证据边界（2026-10-09 补，2026-10-13 更正，2026-10-19 更新）**：上表的「误报 0 / 19/19」
+> 全部产自**自建靶场**（`e2e/` 下 37 个靶场）。`e2e/sqli-labs/` 不是上游那个 PHP+MySQL 仓库，
+> 而是本项目自己写的 223 行 Python 复刻（`sqli-labs.py`，http.server + SQLite，runner 直接
+> spawn 它）；同目录的 sqlmap 对照（`e2e/sqlmap-benchmark/run.mjs`）双方跑的就是这个复刻靶站，
+> 所以它是**「同一自建靶场上的双方同题对照」，不是外部真值**。
+> **第三方外部裁判目前只有 OWASP Juice Shop**（D88 接入、D109 补登录点）：2 个官方 SQLi 端点
+> （搜索 GET / 登录 POST JSON）均检出、4 个安全端点零误报（2026-10-19 实跑，证据见
+> `e2e/juice-shop-lab/results/external-judge-2026-10-19.md`）；DVWA / OWASP Benchmark 仍未接入。
+> ⇒ 上述数字**不可外推为通用误报率**。WAF 侧同理：只验了 ModSecurity+CRS 一家。
 
 **本轮 0 FAIL。** 此前两轮 FAIL 的定位与修复（CRS 执行器 `(?i:…)` 兼容性、`engine.e2e` 环境耦合假红）、
 「11 PASS / 0 SKIP 假绿」事故、门禁自身的两处缺陷修复与缺陷注入验证记录，已迁至

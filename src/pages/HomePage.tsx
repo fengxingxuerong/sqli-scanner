@@ -1,245 +1,48 @@
-// 首页：现代 SaaS 仪表盘风格的简洁仪表盘。
-// 设计要点：
-//  - 大而醒目的「开始扫描」CTA（渐变 Hero + 白色主按钮，导航到 /scan）
-//  - 快速统计（总扫描 / 发现漏洞 / 高危风险 / 已检测目标）
-//  - 最近 5 次扫描历史（点击回溯报告，跳转 /report/:scanId）
-//  - 轻量入场动画（fadeInUp，交错延迟），无复杂选项
+// 首页：总览仪表盘 —— 一眼看清「能做什么 / 做过什么 / 现在多危险」
+//
+// 版式（自上而下）：
+//   Hero     —— 一句话定位 + 主 CTA（开始扫描），赛博玻璃风（D79 拆至 ../components/HomeHero）
+//   Guide    —— 「三步上手」常驻引导：填 URL → 点扫描 → 看报告
+//   Stats    —— 四个数：扫过多少次 / 挖出多少洞 / 多少高危 / 覆盖多少目标
+//   Recent   —— 最近 5 次扫描，整行可点回溯报告
+//
+// [D107] 变更要点：
+//   · 三步引导由「仅空历史时显示」改为常驻 —— 有记录后新手就看不到用法，是引导失效；
+//   · 统计卡换 CyberStat（数字等宽 + 口径注解），外形与报告页统一；
+//   · 最近记录补「查看报告」按钮 —— 整行可点这件事不写出来没人知道；
+//   · 移除本页重复的 .dot-grid（Layout 已全局挂载，重复会叠两层点阵）。
+//
 // 说明：store 暴露的是 history 状态字段（useScanStore((s) => s.history)），
 //      与 HistoryPage 使用方式一致，返回 HistoryRecord[]。
 
-import { keyframes } from '@emotion/react';
-import { useNavigate } from 'react-router-dom';
-import {
-  Box,
-  Button,
-  Card,
-  CardContent,
-  Chip,
-  Container,
-  Divider,
-  Grid,
-  Paper,
-  Stack,
-  Typography,
-} from '@mui/material';
-import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
-import BugReportIcon from '@mui/icons-material/BugReport';
-import HistoryIcon from '@mui/icons-material/History';
-import TravelExploreIcon from '@mui/icons-material/TravelExplore';
-import WarningAmberIcon from '@mui/icons-material/WarningAmber';
-import { useTranslation } from 'react-i18next';
+import { Container, Stack } from '@mui/material';
 import { useScanStore } from '../store/scanStore';
 import HomeHero from '../components/HomeHero';
-import i18n from '../i18n';
-import type { RiskLevel } from '../shared/types';
-
-// 入场动画：自下而上淡入（避免生硬出现）
-const fadeInUp = keyframes`
-  from { opacity: 0; transform: translateY(18px); }
-  to   { opacity: 1; transform: translateY(0); }
-`;
-
-// 风险等级 → Chip 颜色映射
-const RISK_CHIP_COLOR: Record<RiskLevel, 'error' | 'warning' | 'info' | 'success'> = {
-  Critical: 'error',
-  High: 'warning',
-  Medium: 'info',
-  Low: 'success',
-};
-
-// 时间格式化（容错非法/空值）
-function formatTime(iso: string | null): string {
-  if (!iso) return '';
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return '';
-  const locale = i18n.language.startsWith('zh') ? 'zh-CN' : 'en-US';
-  return d.toLocaleString(locale, {
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-}
+import HomeGuide from '../components/home/HomeGuide';
+import HomeStats from '../components/home/HomeStats';
+import HomeRecent from '../components/home/HomeRecent';
 
 // 首页默认导出组件
 export default function HomePage() {
-  const { t } = useTranslation();
-  const navigate = useNavigate();
   const history = useScanStore((s) => s.history);
 
   const recent = history.slice(0, 5); // 最近 5 次
-  const totalScans = history.length;
-  const totalVulns = history.reduce((acc, h) => acc + (h.report?.vulns?.length ?? 0), 0);
-  const highRiskScans = history.filter((h) => {
-    const r = h.report?.riskLevel ?? h.riskLevel;
-    return r === 'Critical' || r === 'High';
-  }).length;
-  const targetCount = new Set(history.map((h) => h.report?.target?.baseUrl ?? h.target)).size;
-
-  const stats = [
-    { label: t('home.stats.totalScans'), value: totalScans, icon: <HistoryIcon />, color: '#6366f1' },
-    { label: t('home.stats.vulnsFound'), value: totalVulns, icon: <BugReportIcon />, color: '#ef4444' },
-    { label: t('home.stats.highRisk'), value: highRiskScans, icon: <WarningAmberIcon />, color: '#f59e0b' },
-    { label: t('home.stats.targets'), value: targetCount, icon: <TravelExploreIcon />, color: '#10b981' },
-  ];
-
-
 
   return (
     <Container maxWidth="lg" className="py-6">
-      {/* 点阵背景 */}
-      <div className="dot-grid" />
+      <Stack className="animate-in" spacing={0}>
+        {/* ── Hero：赛博玻璃风 ── */}
+        <HomeHero />
 
-      {/* ── Hero：赛博玻璃风（D79 拆至 ../components/HomeHero）── */}
-      <HomeHero />
+        {/* ── 三步上手（常驻）── */}
+        <HomeGuide />
 
-      {/* ── 快速统计 ── */}
-      <Grid container spacing={3} sx={{ mt: 1 }}>
-        {stats.map((s, i) => (
-          <Grid item xs={12} sm={6} md={3} key={s.label}>
-            <Card
-              sx={{
-                animation: `${fadeInUp} 0.5s ease-out both`,
-                animationDelay: `${0.08 * (i + 1)}s`,
-                p: 0,
-              }}
-            >
-              <CardContent>
-                <Stack direction="row" alignItems="center" spacing={1.5}>
-                  <Box
-                    sx={{
-                      width: 44, height: 44, borderRadius: 2,
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      color: '#0a0e16', flexShrink: 0,
-                      background: `linear-gradient(135deg, ${s.color}40 0%, ${s.color}80 100%)`,
-                      boxShadow: `0 0 12px ${s.color}40`,
-                    }}
-                  >
-                    {s.icon}
-                  </Box>
-                  <Box>
-                    <Typography variant="h4" fontWeight={800} lineHeight={1}>
-                      {s.value}
-                    </Typography>
-                    <Typography variant="body2" color="text.secondary">
-                      {s.label}
-                    </Typography>
-                  </Box>
-                </Stack>
-              </CardContent>
-            </Card>
-          </Grid>
-        ))}
-      </Grid>
+        {/* ── 快速统计 ── */}
+        <HomeStats history={history} />
 
-      {/* ── 最近扫描（5 条）── */}
-      <Paper
-        variant="outlined"
-        sx={{ mt: 4, borderRadius: 3, animation: `${fadeInUp} 0.55s ease-out 0.45s both` }}
-      >
-        <Stack
-          direction="row"
-          alignItems="center"
-          justifyContent="space-between"
-          sx={{ px: 3, py: 2 }}
-        >
-          <Typography variant="h6" fontWeight={700}>
-            {t('home.recentScans')}
-          </Typography>
-          {history.length > 0 && (
-            <Button size="small" endIcon={<ArrowForwardIcon />} onClick={() => navigate('/history')}>
-              {t('home.viewAll')}
-            </Button>
-          )}
-        </Stack>
-        <Divider />
-        {recent.length === 0 ? (
-          <Box sx={{ p: 5, textAlign: 'center' }}>
-            <HistoryIcon sx={{ fontSize: 44, color: 'text.disabled', mb: 1 }} />
-            <Typography color="text.secondary" gutterBottom>
-              {t('home.empty')}
-            </Typography>
-            {/* 三步引导卡片（D85 赛博化：HUD 四角 + 编号霓虹徽章） */}
-            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} justifyContent="center" className="mt-4">
-              {[
-                { step: '1', title: t('home.guide.step1'), desc: t('home.guide.step1Desc') },
-                { step: '2', title: t('home.guide.step2'), desc: t('home.guide.step2Desc') },
-                { step: '3', title: t('home.guide.step3'), desc: t('home.guide.step3Desc') },
-              ].map((item) => (
-                <Card key={item.step} variant="outlined" className="hud-frame" sx={{ minWidth: 160, borderRadius: 2, flex: 1 }}>
-                  <CardContent sx={{ textAlign: 'center', py: 2.5 }}>
-                    <Box sx={{
-                      width: 36, height: 36, borderRadius: '50%',
-                      background: 'linear-gradient(135deg, #00d4ff 0%, #8b5cf6 100%)',
-                      color: '#0a0e16',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      fontWeight: 800, mx: 'auto', mb: 1.5, fontSize: '1rem',
-                      boxShadow: '0 0 14px rgba(0, 212, 255, 0.35)',
-                    }}>
-                      {item.step}
-                    </Box>
-                    <Typography variant="subtitle2" fontWeight={600} gutterBottom>{item.title}</Typography>
-                    <Typography variant="caption" color="text.secondary">{item.desc}</Typography>
-                  </CardContent>
-                </Card>
-              ))}
-            </Stack>
-          </Box>
-        ) : (
-          <Box>
-            {recent.map((h, idx) => {
-              const risk: RiskLevel = h.report?.riskLevel ?? h.riskLevel ?? 'Low';
-              const targetUrl = h.report?.target?.baseUrl ?? h.target ?? t('home.unknownTarget');
-              return (
-                <Box key={h.scanId}>
-                  {idx > 0 && <Divider />}
-                  <Box
-                    onClick={() => navigate(`/report/${h.scanId}`)}
-                    role="button"
-                    tabIndex={0}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault();
-                        navigate(`/report/${h.scanId}`);
-                      }
-                    }}
-                    sx={{
-                      px: 3,
-                      py: 2,
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 2,
-                      transition: 'background-color 0.15s ease',
-                      '&:hover': { bgcolor: 'action.hover' },
-                    }}
-                  >
-                    <Box sx={{ minWidth: 0, flex: 1 }}>
-                      <Typography variant="body1" noWrap fontWeight={600}>
-                        {targetUrl}
-                      </Typography>
-                      <Typography variant="caption" color="text.secondary">
-                        {h.scanId} {formatTime(h.finishedAt)}
-                      </Typography>
-                    </Box>
-                    <Stack direction="row" spacing={1} alignItems="center" flexShrink={0}>
-                      {h.report?.engine === 'sqlmap' && (
-                        <Chip label="sqlmap" size="small" color="secondary" variant="outlined" />
-                      )}
-                      <Chip
-                        label={t('history.risk', { level: t(`risk.${risk.toLowerCase()}`) })}
-                        size="small"
-                        color={RISK_CHIP_COLOR[risk]}
-                        variant="outlined"
-                      />
-                    </Stack>
-                  </Box>
-                </Box>
-              );
-            })}
-          </Box>
-        )}
-      </Paper>
+        {/* ── 最近扫描（5 条）── */}
+        <HomeRecent rows={recent} hasHistory={history.length > 0} />
+      </Stack>
     </Container>
   );
 }

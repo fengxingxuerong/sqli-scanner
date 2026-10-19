@@ -30,17 +30,59 @@ import NoSqlSection from './scanConfig/NoSqlSection';
 import OobSection from './scanConfig/OobSection';
 import SecondOrderSection from './scanConfig/SecondOrderSection';
 
+function ScanPresetChips({
+  currentPreset,
+  onApply,
+}: {
+  currentPreset: ScanPresetId | null;
+  onApply: (id: ScanPresetId) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <Box className="flex items-center gap-1" sx={{ ml: 'auto' }} onClick={(e) => e.stopPropagation()}>
+      {SCAN_PRESETS.map((preset) => (
+        <Tooltip key={preset.id} title={t(preset.hintKey)} placement="top" arrow>
+          <Chip
+            label={t(preset.labelKey)}
+            size="small"
+            color={currentPreset === preset.id ? 'primary' : 'default'}
+            variant={currentPreset === preset.id ? 'filled' : 'outlined'}
+            onClick={() => onApply(preset.id)}
+            sx={{ userSelect: 'none' }}
+          />
+        </Tooltip>
+      ))}
+    </Box>
+  );
+}
+
 interface ScanConfigPanelProps {
   config: ScanConfig;
   mode: EngineType;
   onChange: (patch: Partial<ScanConfig>) => void;
   wafSuggestion?: WafSuggestion[];
+  /**
+   * 外部受控的当前预设档位（来自扫描向导的三档选择器）。
+   * 传入后本面板的高亮与其共享同一状态；不传则退回内部自治。
+   */
+  activePreset?: ScanPresetId | null;
+  /** 应用预设后的回执（供外部同步高亮） */
+  onApplyPreset?: (id: ScanPresetId) => void;
 }
 
-export default function ScanConfigPanel({ config, mode, onChange, wafSuggestion }: ScanConfigPanelProps) {
+export default function ScanConfigPanel({
+  config,
+  mode,
+  onChange,
+  wafSuggestion,
+  activePreset,
+  onApplyPreset,
+}: ScanConfigPanelProps) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
-  const [activePreset, setActivePreset] = useState<ScanPresetId | null>(null);
+  const [localPreset, setLocalPreset] = useState<ScanPresetId | null>(null);
+  // 受控优先：外部传入 activePreset 时以外部为准，否则用内部状态
+  const currentPreset = activePreset !== undefined ? activePreset : localPreset;
 
   // [2026-10-02 竞品吸收] 应用扫描预设：patch 语义（只覆盖预设声明的键，用户手填的
   // proxy/scope/extractScope 等原样保留）。点击不冒泡：预设 chips 在折叠头行上，
@@ -49,7 +91,8 @@ export default function ScanConfigPanel({ config, mode, onChange, wafSuggestion 
     const preset = SCAN_PRESETS.find((p) => p.id === id);
     if (!preset) return;
     onChange(preset.patch);
-    setActivePreset(id);
+    setLocalPreset(id);
+    if (onApplyPreset) onApplyPreset(id);
   };
 
   return (
@@ -72,20 +115,7 @@ export default function ScanConfigPanel({ config, mode, onChange, wafSuggestion 
         </Typography>
         {/* [2026-10-02 竞品吸收] 扫描预设（ZAP Attack Strength 思路）：常驻折叠头，
             一击切换「快速面检 / 标准扫描 / 深度审计」，不必展开逐项拨 5+ 个控件 */}
-        <Box className="flex items-center gap-1" sx={{ ml: 'auto' }} onClick={(e) => e.stopPropagation()}>
-          {SCAN_PRESETS.map((preset) => (
-            <Tooltip key={preset.id} title={t(preset.hintKey)} placement="top" arrow>
-              <Chip
-                label={t(preset.labelKey)}
-                size="small"
-                color={activePreset === preset.id ? 'primary' : 'default'}
-                variant={activePreset === preset.id ? 'filled' : 'outlined'}
-                onClick={() => applyPreset(preset.id)}
-                sx={{ userSelect: 'none' }}
-              />
-            </Tooltip>
-          ))}
-        </Box>
+        <ScanPresetChips currentPreset={currentPreset} onApply={applyPreset} />
         <IconButton size="small" aria-label={open ? t('common.collapse') : t('common.expand')}>
           {open ? <ExpandLess fontSize="small" /> : <ExpandMore fontSize="small" />}
         </IconButton>

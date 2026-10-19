@@ -4,15 +4,25 @@
     "tagline": "输入目标地址，几分钟内获得注入点、数据库指纹与完整检测报告。"
   },
   "nav": {
+    "homeDesc": "统计与最近扫描",
+    "scanDesc": "新建一次扫描任务",
+    "historyDesc": "跨机器可见的扫描台账",
+    "exploitDesc": "对已确认注入点执行利用操作",
     "home": "首页",
     "scan": "扫描",
     "history": "历史",
     "exploit": "利用工具"
   },
   "home": {
+    "title": "总览",
+    "desc": "扫描统计、最近记录与常用入口",
     "hero": "开始你的安全巡检",
     "startScan": "开始扫描",
     "stats": {
+      "totalScansHint": "本机保存的扫描任务总数",
+      "vulnsFoundHint": "各报告确认的注入点总数",
+      "highRiskHint": "风险为 Critical / High 的扫描次数",
+      "targetsHint": "按目标地址去重后的站点数",
       "totalScans": "总扫描次数",
       "vulnsFound": "发现漏洞",
       "highRisk": "高危风险",
@@ -24,6 +34,8 @@
     "firstScan": "开始第一次扫描",
     "unknownTarget": "(未知目标)",
     "guide": {
+      "title": "三步上手",
+      "desc": "第一次用？跟着这三步走完就能拿到报告",
       "step1": "输入目标 URL",
       "step1Desc": "粘贴网站地址，支持 HTTP 请求和 curl 命令自动识别",
       "step2": "一键开始检测",
@@ -33,6 +45,8 @@
     }
   },
   "scan": {
+    "intensity": "扫描强度",
+    "intensityHint": "拿不准就选「标准扫描」—— 默认配置已调优，可直接开始",
     "title": "SQL 注入检测",
     "subtitle": "粘贴目标地址，一键开始检测",
     "urlLabel": "目标 URL",
@@ -80,6 +94,8 @@
       "cancel": "取消"
     },
     "sidebar": {
+      "scopeDesc": "扫描前先看清楚：哪些地址会打、哪些会被拦",
+      "exitDesc": "接 CI 时用：按退出码判定本次扫描是否阻塞流水线",
       "scopeTitle": "授权与扫描边界",
       "scopeSameOrigin": "默认只打目标同源（scheme + host + port）：越界目标在发第一个请求前就会被拒",
       "scopeRedirect": "重定向每一跳都重新校验范围：302 到未授权主机，后续请求立即停",
@@ -167,9 +183,16 @@
     "noSqlmapLogs": "无 sqlmap 输出日志",
     "logTruncated": "日志较大，仅显示最近 {{shown}} 行（共 {{total}} 行）",
     "stat": {
+      "hitHint": "sqlmap 确认可用的注入点",
+      "criticalHint": "可进一步拖库 / 写文件，须立即处置",
+      "highHint": "可读取敏感数据，须优先修复",
+      "mediumHint": "利用需特定条件，建议排期修复",
+      "lowHint": "信息有限，需人工确认是否可利用",
       "hit": "命中"
     },
     "charts": {
+      "title": "分布视图",
+      "desc": "按检测技术与风险等级拆看这批漏洞",
       "techniqueDistribution": "技术分布",
       "riskDistribution": "风险分布",
       "noData": "无漏洞数据，无法展示图表",
@@ -217,6 +240,9 @@
     }
   },
   "exploit": {
+    "targetInfoDesc": "两种填法：填 scanId 直接沿用扫描结果与登录态，或手工填 URL + 参数",
+    "actionTitle": "利用操作",
+    "actionDesc": "SQL 查询 / 文件读写 / OS 命令，执行前必须勾选已获授权",
     "title": "利用工具",
     "subtitle": "已确认注入点后，可执行 SQL Shell / 文件读写 / OS 命令（需授权目标）",
     "targetInfo": "目标信息",
@@ -874,6 +900,7 @@
     "done": "引导完成，开始你的第一次检测吧"
   },
   "configHints": {
+    "intensity": "三档只覆盖检测强度相关配置（level / risk / 技术集 / 爬虫 / 预筛），你手填的代理、认证、范围等配置不会被重置。",
     "wizard": "粘贴目标地址即可开始；默认配置已调优，小白保持默认即可。",
     "enginePick": "自带引擎零依赖，教学 / 合规场景首选；sqlmap 功能更全，但需本机装有 Python 与 sqlmap。",
     "detectionIntensity": "检测强度：level 越高试的 payload 越多、越慢越全。默认 3 平衡速度与覆盖率，赶时间用预设「快速面检」。",
