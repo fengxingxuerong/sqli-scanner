@@ -21,6 +21,7 @@ node e2e/run-all.mjs --all                    # 强制全跑（缺依赖的会�
 | **MySQL 8 + PostgreSQL 16.2 + 红队靶场** | `node e2e/redteam-lab/env.mjs` | 常驻脚本（单进程拉起三者，进程活着服务就活着）。⚠️ 跨会话后进程会被回收，需重跑 |
 | **Java + 引擎 jar** | 本机 Temurin 21 + `D:\engines\jars\` | 多引擎靶场（H2/HSQLDB/Derby）用，无外部 DB 服务 |
 | **MariaDB** | 需自备并监听 `3308` | `mariadb-verify.mjs` 用；**当前环境未装**，该项无法复现（见 `docs/archive/dbms-验证复核-2026-09-12.md`） |
+| **VAmPI 双实例（外部裁判 2 号）** | 见 `e2e/vampi-lab/README.md` | Python 3.9 venv + `pip install --only-binary=:all:`（greenlet 在本机无 SDK 编译不了）；`vulnerable=1 @5000` 与 `vulnerable=0 @5001` |
 
 ## 靶场清单
 
@@ -44,6 +45,7 @@ node e2e/run-all.mjs --all                    # 强制全跑（缺依赖的会�
 | `detection-runner` | 数据驱动检测测试 | `run.js` | 无 |
 | `udf-lab` | UDF 接管真实验证（真 DLL） | `udf-takeover.e2e.mjs` | MySQL |
 | `waf-lab` | WAF 规则对比实验 | **门禁看 `compare-real.e2e.mjs`**（真 MySQL；本机经 `compare-real.run.py` 沙箱，CI 每次 push 直连 mysqld 跑）。⚠️ `compare.e2e.js` 是 2026-09-18 已废弃的空壳夹具（其 `/vuln` 端点不执行 SQL ⇒ 判据恒为 NO），只作历史保留、不作入口 | 无 |
+| `vampi-lab` | **外部裁判 2 号**：VAmPI（Flask + SQLAlchemy + SQLite）。补 Juice Shop 没有的**URL 路径段**注入形态；官方 `vulnerable` 开关起双实例（5000 拼接 / 5001 参数化）⇒ 零误报钉在**同路径同形态**上 | `run.mjs`（env：`VAMPI_VULN_BASE` / `VAMPI_SAFE_BASE`） | 需 VAmPI 双实例（见 `e2e/vampi-lab/README.md`） |
 | `sqli-labs` | sqli-labs 靶场适配 | `sqli-labs-runner.mjs`（75 关黄金标准 runner，靶场由 `sqli-labs.py` 起） | 需 sqli-labs 环境 |
 
 ## 常用工具

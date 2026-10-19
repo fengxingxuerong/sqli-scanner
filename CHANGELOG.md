@@ -65,6 +65,41 @@
 
 ## [Unreleased]
 
+### 2026-10-19 批次 D111 · 外部裁判 2 号：VAmPI（路径段注入 + 同形态 A/B 零误报）
+
+**动机**：D88/D109 之后外部裁判仍只有 **1 个项目、2 个真值端点** ⇒ 任何「外部检出率」
+类结论都只是单数据点。TODO 里点名的同族第三方靶场（DVWA / OWASP Benchmark）本机无
+PHP/MySQL/Docker 起不来，改选 **VAmPI**（`erev0s/VAmPI`，官方定位即「评估第三方工具
+对 API 的发现能力」）——它带来 Juice Shop 没有的注入点形态：**URL 路径段**。
+
+**新增**：
+- `e2e/vampi-lab/run.mjs`：真值 1（`/users/v1/{username}` 路径段）+ 安全对照 2（官方
+  `vulnerable=0` 参数化实例，同路径同形态）+ 同源复检 1（同点换良性值，单列统计）。
+- `e2e/vampi-lab/README.md`、`results/external-judge-2026-10-19-vampi.md`：构建/启动链
+  （Python 3.9 venv + `--only-binary=:all:`，greenlet 在本机无 SDK 编译不了）、真值表、
+  sqlmap 同题对照、边界。
+- `e2e/acceptance.mjs` 新增 `vampi` 套件（optional，未就绪 SKIP）；`e2e/run-all.mjs`
+  与 `e2e/README.md` 登记。
+- 台账：`docs/_claims-ledger.json` 新增 `external-judge-vampi-d111`。
+
+**实测**：真值 **1/1 检出**（95 请求，boolean+union+error 三通道，`dbms=SQLite`）；
+同源复检 1/1（75 请求）；安全端点 **0/2 误报**（123 / 144 请求，均打满）；
+证据不足 0；`acceptance --only=vampi` **1 PASS / 0 FAIL / 0 SKIP**。
+sqlmap 1.10.7 同题：URI `#1*` boolean + UNION 5 列 + SQLite（51 请求）——
+⚠ 基线必须用存在的用户（`zzz` 起手会被 `[CRITICAL] page not found (404)` 劝退，需
+`--ignore-code=404`）。
+
+**判据修正两处（真值归类错误，非代码 bug）**：
+1. **良性输入 ≠ 安全端点**：首版把漏洞实例的 `/users/v1/name1` 当安全对照 ⇒ 判为「误报」。
+   该点本就是官方拼接的注入点，输入良性不改变「点可注入」。改为同源复检，**不并入真值分母**。
+2. **5 请求的 0 检出不是零误报证据**：参数化实例的 `/users/v1/name1` 被「输入校验型可证
+   安全跳过」剪枝只发 5 请求（与 Juice Shop 首版「没测过 ≠ 通过」同形）。现对该点显式
+   `validationSkip:false`；套件新增 `安全端点证据不足（请求<30）` 计数并要求为 0。
+
+**边界**：外部真值仅 1 个端点（官方只有这一处字符串拼接）；两个外部裁判合计 3 个真值端点；
+路径段注入点**默认关闭**（`--test-path`），本套件显式开启，不代表默认配置覆盖率；
+3 条 finding 是同一注入点的三种技术命中，不是 3 个独立漏洞。
+
 ### 2026-10-19 批次 D110 · OOB 外部套件场景 B 丢回连重试（CI 抖动修复）
 
 **背景**：CI run `39273528126` 的 acceptance 中，`oob-interactsh` 场景 A（隧道）通过，

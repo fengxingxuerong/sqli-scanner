@@ -521,6 +521,44 @@ const SUITES = [
     },
   },
   {
+    // [D110 2026-10-19] 外部裁判 2 号：VAmPI（Flask + SQLAlchemy + SQLite）。
+    // 补的不是「再找一个靶场」，而是 Juice Shop 没有的注入点形态 —— URL 路径段
+    // （`/users/v1/{username}`）。最硬的一点：官方自带 vulnerable 开关 ⇒ 同路径起
+    // 两个实例（vuln=1 拼接 / vuln=0 参数化），零误报证据钉在**同一注入点形态**上。
+    // ⚠ 判据读**文本**（未就绪时脚本按设计 exit 0），且新增两条防自欺：
+    //   ① 安全端点必须真打满请求（<30 请求视为证据不足，不是通过）；
+    //   ② 同源复检单列，不并入真值分母（防把 1 个真值灌成 2 个）。
+    id: 'vampi',
+    title: '外部裁判 2 号（VAmPI：路径段注入须检出 + 同形态参数化实例零误报）',
+    needs: [],
+    optional: true, // 需两个外部实例在跑（非本仓依赖）→ 未就绪 SKIP 并写明原因
+    run: () => run('node', ['e2e/vampi-lab/run.mjs']),
+    assert: (out) => {
+      if (/\[SKIP\] VAmPI 靶场不可达/.test(out)) {
+        return { facts: { 外部裁判2: '跳过（靶场未就绪）' }, pass: false, skipped: true, reason: 'VAmPI 双实例未启动' };
+      }
+      const m = /真值漏洞端点：检出 (\d+)\/(\d+)（漏检 (\d+)）/.exec(out);
+      const fp = /安全端点误报：(\d+)/.exec(out);
+      const weak = /安全端点证据不足（请求<\d+）：(\d+)/.exec(out);
+      // 分母防缩水：真值端点必须实际跑到（删掉后 1/1 会变 0/0 而打印"通过"）
+      const ranTruth = /GET http:\/\/[^ ]*\/users\/v1\/zzz/.test(out);
+      const ranSafe = /vulnerable=0/.test(out);
+      const pass = /VAmPI 外部裁判通过/.test(out) && ranTruth && ranSafe;
+      return {
+        facts: {
+          外部裁判2: pass ? '✅ 通过' : '❌ 未通过',
+          真值漏洞: m ? `${m[1]}/${m[2]}（漏检 ${m[3]}）` : '取不到',
+          安全端点误报: fp ? fp[1] : '取不到',
+          证据不足: weak ? weak[1] : '取不到',
+        },
+        pass,
+        reason: pass ? null : !ranTruth || !ranSafe
+          ? '外部裁判端点未实际执行（真值/对照端点缺失）'
+          : '外部裁判未通过（漏检／误报／安全端点没真测，见 stdout）',
+      };
+    },
+  },
+  {
     id: 'report-contract',
     title: '报告契约（自报字段必须与真实状态一致）',
     needs: ['mysql'],

@@ -210,6 +210,37 @@ F18 上次 acceptance 的引擎崩溃码（0xC0000409）**未复现**，留观�
 
 ---
 
+## 2026-10-19 批次 D111 · 外部裁判 2 号：VAmPI（路径段注入 + 同形态 A/B 零误报）
+
+**背景**：D88/D109 之后外部裁判仍只有 **1 个项目、2 个真值端点** ⇒「外部检出率」类结论
+只是单数据点。TODO 点名的同族靶场（DVWA / OWASP Benchmark）本机无 PHP / MySQL / Docker，
+起不来；改选 **VAmPI**（`erev0s/VAmPI`，官方定位即「评估第三方工具对 API 的发现能力」），
+它补的是 Juice Shop 没有的注入点形态 —— **URL 路径段**。
+
+**本批**：新增 `e2e/vampi-lab/`（run.mjs + README + results 报告）；acceptance 增 `vampi`
+套件（optional，未就绪 SKIP）；run-all / e2e/README 登记；台账增 `external-judge-vampi-d111`。
+
+**实测**：真值 **1/1 检出**（95 请求，boolean+union+error，`dbms=SQLite`）；同源复检 1/1；
+安全端点 **0/2 误报**（123 / 144 请求，均打满）；证据不足 0；`acceptance --only=vampi`
+1 PASS / 0 FAIL / 0 SKIP。sqlmap 1.10.7 同题检出（boolean + UNION 5 列 + SQLite，51 请求）。
+
+**判据修正两处（真值归类错误，非代码 bug）**：
+1. 良性输入 ≠ 安全端点（漏洞实例上 `/users/v1/name1` 仍是注入点）⇒ 改为「同源复检」，
+   单列统计不并入真值分母；
+2. 参数化实例的该点被输入校验剪枝只发 5 请求 ⇒ 显式 `validationSkip:false`，并新增
+   「安全端点证据不足（请求<30）」计数要求为 0。
+
+### 待推进（外部裁判面继续扩）
+
+- **DVWA / OWASP Benchmark**：本机缺 PHP + MySQL（DVWA）与 JDK17 + Maven（Benchmark），
+  需自备运行时后才能接入；sqli-labs 目前仍是本仓自写 Python 复刻（真值自证）。
+- **VAmPI 其余面**：官方只此一处字符串拼接（`books`/`login` 走 ORM），扩不出更多 SQLi 真值；
+  若要扩「带认证头的安全端点」（`/books/v1/{title}` 需 Bearer），需先解决 runner 传静态头。
+- **同源复检的通用化**：当前只 VAmPI 有；Juice Shop 也可加（搜索点换良性词），
+  用来钉住「检出不依赖畸形输入」。
+
+---
+
 ## 2026-10-18 批次 D90 · 写副作用登记与自动清理（P2-5）
 
 **动机**：TODO 2026-10-10 盘点的 P2-5「写副作用无自动清理/回滚（只有
@@ -356,6 +387,8 @@ Juice Shop 本机跑通链：codeload tarball（npm 上 `juice-shop` 已弃用�
 - ~~Juice Shop 登录绕过~~ **已完成（D109 2026-10-19：`POST /rest/user/login` 纳入真值清单，
   套件 2/2 + 0/4）**；密码重置等其余 SQLi 挑战点仍待纳入；
 - 同族第三方靶场（DVWA / OWASP Benchmark）可后续补充，扩大外部裁判面。
+  → **D111（2026-10-19）已补 VAmPI**（外部裁判 2 号，路径段注入形态；DVWA/Benchmark 因本机
+  缺 PHP+MySQL / JDK17+Maven 仍未接入，见 D111 待推进）。
 
 ---
 

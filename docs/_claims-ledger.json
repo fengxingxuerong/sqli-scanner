@@ -99,6 +99,15 @@
       "refute_cmd": "JUICE_BASE=http://127.0.0.1:3199 node e2e/acceptance.mjs --only=juice-shop",
       "recheck_batch": "D109（2026-10-19）：新增登录 POST JSON 真值端点并实跑；此前 D88 只有搜索点 1 类。",
       "caveat": "单轮；外部真值仅 2 个 SQLi 端点 + 4 个安全端点，不能外推为通用外部检出率；登录点报告的 expiredMidScan/401 认证挑战计数是登录语义噪声（finding 由 admin token vs 401 确认）；Juice Shop 为外部项目，未就绪时套件 SKIP，不计通过。"
+    },
+    {
+      "id": "external-judge-vampi-d111",
+      "claim": "第三方外部裁判 2 号 VAmPI（D111）：官方 SQLi 真值端点（URL 路径段 /users/v1/{username}）1/1 检出，官方 vulnerable=0 参数化实例同路径误报 0；sqlmap 1.10.7 同题亦检出（boolean + UNION 5 列 + SQLite）。",
+      "status": "verified",
+      "evidence": "e2e/vampi-lab/results/external-judge-2026-10-19-vampi.md（2026-10-19；真值 95 请求命中 boolean+union+error，dbms=SQLite；安全端点 123/144 请求 0 误报；acceptance --only=vampi 1 PASS/0 FAIL/0 SKIP）；真值来自官方 models/user_model.py:72 的 f-string 拼接。",
+      "refute_cmd": "VAMPI_VULN_BASE=http://127.0.0.1:5000 VAMPI_SAFE_BASE=http://127.0.0.1:5001 node e2e/acceptance.mjs --only=vampi",
+      "recheck_batch": "D111（2026-10-19）：新增外部裁判 2 号并实跑；复核了 D109 的「外部裁判只有 1 个项目」这一口径缺口。",
+      "caveat": "单轮；外部真值仅 1 个 SQLi 端点（官方只有这一处拼接），两裁判合计 3 个真值端点，不能外推为通用外部检出率；路径段注入点默认关闭（--test-path），套件显式开启不代表默认配置覆盖率；3 条 finding 是同一注入点的三种技术命中而非 3 个独立漏洞；VAmPI 为外部项目，未就绪时套件 SKIP，不计通过。"
     }
   ]
 }

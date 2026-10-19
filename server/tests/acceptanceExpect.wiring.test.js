@@ -71,8 +71,9 @@ test('③b CI 只要求它确实 provisioning 过的套件（PG/红队是 contin
 //   却漏接线，D94 修好 typecoverage 后 CI 首次跑到 e2e:wiring 第 43 步当场实锤。
 // [D102 2026-10-18] 20 → 21：新增 param-mine-lab（参数挖掘真靶场，D102 建场时即接线：
 //   acceptance + run-all 双落位；本地全量测试当场抓出本计数未同步 ⇒ 这正是它防的空转）。
-test('④ 不空转：SUITES 解析必须命中 21 个 id（否则上面几条可能在拿空集合比）', () => {
-  assert.equal(IDS.length, 21, `SUITES 解析到 ${IDS.length} 个 id：${IDS.join(', ')}`);
+// [D111 2026-10-19] 21 → 22：新增 vampi（外部裁判 2 号，VAmPI 路径段注入 + 同形态 A/B）。
+test('④ 不空转：SUITES 解析必须命中 22 个 id（否则上面几条可能在拿空集合比）', () => {
+  assert.equal(IDS.length, 22, `SUITES 解析到 ${IDS.length} 个 id：${IDS.join(', ')}`);
   assert.ok(IDS.includes('file-read') && IDS.includes('file-write'), '文件读写两个套件不在 SUITES 里 —— 取数口径变了');
 });
 
