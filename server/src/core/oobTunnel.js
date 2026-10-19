@@ -115,6 +115,17 @@ class OobTunnel {
   }
 
   /**
+   * [D108] 等待一组 token 中任意一个回连（转发到活跃客户端；未启动返回 null）。
+   * @param {string[]} tokens 检测器 token 列表
+   * @param {number} timeoutMs 等待窗口
+   * @returns {Promise<string|null>} 首个命中的 token（原样大小写）或 null
+   */
+  waitForAnyToken(tokens, timeoutMs) {
+    const c = this._active();
+    return c ? c.waitForAnyToken(tokens, timeoutMs) : Promise.resolve(null);
+  }
+
+  /**
    * 停止两条隧道（可能切换过模式），任一失败不影响另一条。
    * @returns {Promise<void>}
    */

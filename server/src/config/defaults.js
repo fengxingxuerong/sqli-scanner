@@ -343,6 +343,20 @@ export const defaults = {
       pollIntervalMs: 2000, // 轮询间隔（回连取回延迟上限约等于该值）
       timeoutMs: 15000, // OOB 等待窗口（外部轮询需 ≥ pollIntervalMs*2 才有意义）
     },
+
+    // [D108 2026-10-19] 背景 OOB 哨兵（对标 Collaborator Everywhere）——补 P1-5：
+    // interactsh 已就绪（D87），但 OOB 仍 opt-in：只有 techniques 含 oob 且 risk≥2 时才逐点
+    // 投放带外载荷。risk=1 会把 oob 从技术集剔除（避免出站），而真实无回显盲注常正好藏在这类
+    // 「选定技术不覆盖」的面 ⇒ 漏检。开启后：收尾阶段向**没测过的面**（被跳过点、未生成的
+    // 请求头、配置的常见头）非侵入式播撒 OOB token，任一回连即确认无回显注入。
+    // ⚠ 默认关闭：开启即向目标额外发带外请求（授权范围内行为）；公共协作端能看到 token。
+    background: {
+      enabled: false, // 总开关（隐含 oob.enabled=true；显式开启覆盖 risk-1 技术门控）
+      maxRequests: 24, // 播撒请求预算上限（防把「补测」变成请求风暴）
+      timeoutMs: 10000, // 回连等待窗口（外部轮询需 ≥ pollIntervalMs*2）
+      // 额外播撒的常见请求头（覆盖 headerParams 未显式声明的面）；显式数组覆盖本默认
+      headers: ['User-Agent', 'Referer', 'X-Forwarded-For'],
+    },
   },
 
   // [2026-09-24] 补顶层默认位（引擎判据是 `!== false`，此前键不存在时行为等价于 true，

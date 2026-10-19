@@ -103,8 +103,11 @@ async function recordXmlPoint(point, ctx, found, deps) {
  * @param {any} oobCfg
  * @returns {Promise<string|null>}
  */
-async function startOobIfNeeded(selectedTechs, oobCfg) {
-  if (!selectedTechs.includes('oob') || !oobCfg || !oobCfg.enabled) return null;
+export async function startOobIfNeeded(selectedTechs, oobCfg) {
+  // [D108] 背景哨兵（oob.background.enabled）也要求隧道就绪：它是一条**独立的收尾投放面**，
+  // 不依赖 techniques 含 oob（risk=1 会剔除 oob —— 那正是哨兵要补的盲区）。
+  const bgOn = !!(oobCfg && oobCfg.background && oobCfg.background.enabled === true);
+  if (!bgOn && (!selectedTechs.includes('oob') || !oobCfg || !oobCfg.enabled)) return null;
   try {
     await oobTunnel.start(oobCfg);
     return null;

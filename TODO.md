@@ -5,6 +5,28 @@
 
 ---
 
+## 2026-10-19 批次 D108 · Collaborator-Everywhere 式背景 OOB 哨兵（P1-5 收口）
+
+**背景**：P1-5 —— interactsh（D87）已就绪，但 OOB 仍是 opt-in 通道：risk=1 技术门控剔除 OOB、
+被预筛选/静态判定跳过的点、以及根本没生成注入点的请求头，全程零 OOB 标记 ⇒ 无回显目标静默假阴性。
+
+**本批**：新增 `scan/oobSentinel.js` 背景哨兵——向「选定技术没覆盖的面」（跳过点 / `headerParams`
+未生成头点 / 配置常见头 / 未测完点）播撒 OOB token，任一回连即确认无回显注入；`oobWaiters.js`
+共享 `waitForAnyTokenIn`（三方同接口）；命中清掉 `noInjectionPoints` 误导标记；CLI `--oob-background`
++ REST `guardOobBackground` 净化；默认关（零行为变化）。
+
+**实测**：真 oast.pro 链 `e2e/oob-interactsh-lab` 场景 A+B 全过（场景 B：无 query + 头传参 +
+技术不含 oob → header 面回连检出 1 条）；单测 15 例；gate 全绿。
+
+### 待推进（从 P1-5 拆出）
+
+- **P1-6 自建协作端一键部署**：公共协作端回连记录归运营方；自建 docker-compose（公网域名 +
+  DNS 委派）仍待做（底账 P1-6 原文）。
+- **哨兵面穷尽化**：当前只保证「每个面一次机会」（预算封顶轮转），预算内未轮到即不播撒；
+  若未来要「穷尽每个面 × 每库」，需按请求预算调 `maxRequests`（上限 200）。
+
+---
+
 ## 2026-10-18 批次 D107 · tamper 手写字面量扫描收口（P1-4 收口）
 
 **背景**：台账「25 个复杂插件未迁 walkLiterals」系 D57 时点快照。逐文件重审实况：手写引号

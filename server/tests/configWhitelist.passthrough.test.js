@@ -248,6 +248,9 @@ const EXPLICIT_ALT = {
   'oob.interactsh.pollIntervalMs': 3000,
   'oob.interactsh.timeoutMs': 20000,
   'oob.interactsh.enabled': true,
+  // [D108] background 同为「组内对象键」：泛型 altFor 给 {alt:true} 会被净化器按非法输入
+  // 回退成 defaults（等于没测到「显式值不被带底吃掉」）。给显式合法且不同的值。
+  'oob.background': { enabled: true, maxRequests: 30, timeoutMs: 20000, headers: ['X-Test-Header'] },
   'wafEvasion.tamper': { enabled: true, plugins: ['spacev2'], intensity: 'high' },
 };
 

@@ -23,6 +23,21 @@ import { applyInvalidValues } from '../invalidValue.js';
 import { applyKnownPoints } from '../knownPoint.js';
 
 /**
+ * [D108] 标记被跳过的点并广播 point_skipped：skipReason 落在点上，报告才能解释
+ * 「为什么没测」；背景 OOB 哨兵也靠它区分「用户要求不动 / 静态」与「未测面」。
+ * @param {string} scanId
+ * @param {Array<object>} points
+ * @param {string} reason
+ * @returns {void}
+ */
+function tagSkippedPoints(scanId, points, reason) {
+  for (const p of points) {
+    p.skipReason = reason;
+    eventBus.emit(scanId, 'point_skipped', { pointId: p.id, reason });
+  }
+}
+
+/**
  * @param {object} run 扫描运行期上下文（需含 sm/scanId/target/cfg/ctxBase/rawClient/report）
  * @returns {Promise<{points: Array, pointsToScan: Array, session: object|null, restored: object|null}>}
  */
@@ -118,9 +133,9 @@ export async function discoverPoints(run) {
         const before = pointsToScan.length;
         const skipped = pointsToScan.filter((p) => skipSet.has(String(p.param || '').toLowerCase()));
         pointsToScan = pointsToScan.filter((p) => !skipSet.has(String(p.param || '').toLowerCase()));
-        for (const p of skipped) {
-          eventBus.emit(scanId, 'point_skipped', { pointId: p.id, reason: 'user-skip' });
-        }
+        // [D108] skipReason 必须落在点上：背景 OOB 哨兵靠它排除用户明确要求不动的参数
+        //（没有标记就会被当成「未测面」重新播撒，等于绕过用户的 --skip）。
+        tagSkippedPoints(scanId, skipped, 'user-skip');
         if (skipped.length) {
           logger.info(`--skip 排除 ${skipped.length}/${before} 个参数点（${[...skipSet].join(', ')}）`);
           if (session) {
@@ -143,9 +158,9 @@ export async function discoverPoints(run) {
     if (cfg.skipStatic === true && pointsToScan.length > 1) {
       const candidate = await sm._skipStaticPoints(ctxBase, target, pointsToScan);
       const skipped = pointsToScan.filter((p) => !candidate.includes(p));
-      for (const p of skipped) {
-        eventBus.emit(scanId, 'point_skipped', { pointId: p.id, reason: 'static' });
-      }
+      // [D108] 静态点同样留痕：交付报告的 skippedPoints 汇总此前只认得 prefilter/
+      // input_validation，static 一直缺这一笔（且背景哨兵要能识别这类「没测的面」）。
+      tagSkippedPoints(scanId, skipped, 'static');
       if (skipped.length) {
         logger.info(
           `skip-static 跳过 ${skipped.length}/${pointsToScan.length} 个静态参数点（同值去重 + 哨兵探测）`

@@ -282,7 +282,7 @@ export async function runScanLoop(sm, scanId) {
     }
 
     // 3.5) 二阶补充趟 + 3.6) 非 SQL 补充趟（已抽至 scan/supplemental.js，纯搬移）
-    await supplementalPasses({ sm, scanId, target, points, dbms, validity, finalVulns });
+    await supplementalPasses({ sm, scanId, target, points, dbms, validity, finalVulns, fullyTestedPoints, guard, report });
 
     // 4) 提取（已抽至 scan/extract.js，纯搬移）
     await extractPhase({ sm, scanId, s, target, foundByPoint, finalVulns, extracted, report });

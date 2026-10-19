@@ -58,6 +58,10 @@ export const HELP_TEXT = `sqli-scanner CLI（对标 sqlmap 的 Node 引擎命令
                              接收端不起也拿不到回调 —— defaults.js:292 明示）。子键走 --config 档案：
                              {"oob":{"enabled":true,"callbackBase":"your.domain:8899","dnsOob":true,"dnsDomain":"your.domain"}}
                              本地模式要求**目标能回连扫描器**（callbackBase 需目标可解析）
+  --oob-background           [D108] 背景 OOB 哨兵（对标 Collaborator Everywhere）：收尾阶段向
+                             「选定技术没覆盖的面」（被跳过点/未生成的请求头/配置的常见头）播撒
+                             OOB token，任一回连即确认无回显注入。隐含开启 oob；预算与等待窗口
+                             走 --config 档案 {"oob":{"background":{"maxRequests":24,"timeoutMs":10000}}}
   --oob-interactsh           [D87] 改用外部协作端隧道（interactsh 协议）：只要求**扫描器能出网**，
                              不要求目标入站可达 —— 目标是云上/NAT 后/跨网段时的唯一可行形态。
                              开时一并开启 oob 总开关。子键走 --config 档案：
