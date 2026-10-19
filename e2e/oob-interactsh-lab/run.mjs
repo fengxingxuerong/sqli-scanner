@@ -17,6 +17,11 @@
 //
 // 网络门控：无法访问协作端时**跳过并如实标注**（不计通过，也不计失败）。
 // 复跑：SSRF_ALLOW_PRIVATE=1 node e2e/oob-interactsh-lab/run.mjs
+//
+// [D110 2026-10-19] 外部协作端是 best-effort：场景 B 单次回连丢失不应直接判负。
+// 失败时换新 token 重试一次（5s 后），两次都 0 才判负；判据不变。
+// 反例自证：OOB_INT_DROP_BG_FIRST=1 + OOB_INT_BG_TIMEOUT_MS=10000 会丢弃首次场景 B
+// 的全部回连，必须由重试恢复 —— 用来证明重试分支不是空转。
 // ============================================================================
 
 import http from 'node:http';
@@ -86,7 +91,7 @@ if (SERVER !== 'oast.pro') selftestExtract('oast.pro');
 
 
 function startLab() {
-  const state = { hits: 0, dns: 0, http: 0 };
+  const state = { hits: 0, dns: 0, http: 0, dnsOk: 0, httpOk: 0, dropCallbacks: false };
   const server = http.createServer(async (req, res) => {
     state.hits += 1;
     const u = new URL(req.url, `http://127.0.0.1:${PORT}`);
@@ -94,13 +99,15 @@ function startLab() {
     // 播撒 token ⇒ 头值也必须参与提取，否则场景 B 恒「收到请求但 0 回连」。
     const raw = [...u.searchParams.values(), ...Object.values(req.headers)].join(' ');
     const host = extractCallbackHost(raw, SERVER);
-    if (host) {
+    if (host && !state.dropCallbacks) {
       // UNC 形态 → 真实 DNS 解析（interactsh 的 DNS 通道据此记录）
       state.dns += 1;
-      dns.lookup(host).catch(() => {});
+      dns.lookup(host).then(() => { state.dnsOk += 1; }).catch(() => {});
       // HTTP 形态 → 真实 HTTP 回连（interactsh 的 HTTP 通道据此记录）
       state.http += 1;
-      fetch(`http://${host}/oob`, { signal: AbortSignal.timeout(8000) }).catch(() => {});
+      fetch(`http://${host}/oob`, { signal: AbortSignal.timeout(8000) })
+        .then(() => { state.httpOk += 1; })
+        .catch(() => {});
     }
     // 永远返回同一个"正常"页面：无回显、无报错、无时间差——这正是 OOB 通道存在的意义
     res.statusCode = 200;
@@ -167,6 +174,7 @@ const A = await runScan(
   '[场景A]'
 );
 console.log(`[场景A] 靶站收到请求 ${lab.state.hits} 次（DNS 解析 ${lab.state.dns} · HTTP 回连 ${lab.state.http}）`);
+console.log(`[场景A] 协作端确认：DNS ${lab.state.dnsOk} · HTTP ${lab.state.httpOk}`);
 if (lab.state.hits > 0 && lab.state.dns === 0 && lab.state.http === 0) {
   console.log('[场景A] ⚠ 收到请求但没提取到任何协作端主机 —— 载荷形态与提取正则不匹配（检查 extractCallbackHost 与投放向量）');
 }
@@ -189,21 +197,55 @@ const BG_CONFIG = {
   oob: {
     enabled: true,
     timeoutMs: 30000,
-    background: { enabled: true, maxRequests: 8, timeoutMs: 30000, headers: ['User-Agent'] },
+    background: {
+      enabled: true,
+      maxRequests: 8,
+      timeoutMs: Number(process.env.OOB_INT_BG_TIMEOUT_MS) || 30000,
+      headers: ['User-Agent'],
+    },
     interactsh: { enabled: true, server: SERVER, pollIntervalMs: 1500 },
   },
 };
-const B = await runScan(
-  {
-    url: `http://127.0.0.1:${PORT}/item`,
-    config: BG_CONFIG,
-    headerParams: { 'X-Api-Key': 'demo-key' },
-  },
-  '[场景B]'
-);
-const bgHit = B.vulns.filter((v) => v.technique === 'oob' && v.oobBackground === true);
-const headerHit = bgHit.filter((v) => v.location === 'header' || String(v.param || '').toLowerCase().includes('user-agent') || String(v.param || '').toLowerCase() === 'x-api-key');
+async function runScenarioBOnce(label, dropCallbacks = false) {
+  lab.state.dropCallbacks = dropCallbacks;
+  try {
+    const B = await runScan(
+      {
+        url: `http://127.0.0.1:${PORT}/item`,
+        config: BG_CONFIG,
+        headerParams: { 'X-Api-Key': 'demo-key' },
+      },
+      label
+    );
+    const bgHit = B.vulns.filter((v) => v.technique === 'oob' && v.oobBackground === true);
+    const headerHit = bgHit.filter((v) => v.location === 'header' || String(v.param || '').toLowerCase().includes('user-agent') || String(v.param || '').toLowerCase() === 'x-api-key');
+    return { B, bgHit, headerHit };
+  } finally {
+    lab.state.dropCallbacks = false;
+  }
+}
+
+// 外部协作端是 best-effort 服务：单次回连丢失不应把「归因逻辑正确」判成「哨兵失效」。
+// 失败时重试一次（新 token/新扫描）；两次都 0 才判负，且每次尝试都留日志。
+// 反例自证：OOB_INT_DROP_BG_FIRST=1 + OOB_INT_BG_TIMEOUT_MS=2000 会让第一次尝试
+// 丢弃全部回连，必须由第二次尝试恢复，否则本套件本身没有牙。
+const MAX_BG_ATTEMPTS = 2;
+let bResult = null;
+for (let attempt = 1; attempt <= MAX_BG_ATTEMPTS; attempt += 1) {
+  console.log(`[场景B] 第 ${attempt}/${MAX_BG_ATTEMPTS} 次尝试（外部协作端回连偶发丢失时重试）`);
+  const dropCallbacks = process.env.OOB_INT_DROP_BG_FIRST === '1' && attempt === 1;
+  bResult = await runScenarioBOnce(`[场景B-${attempt}]`, dropCallbacks);
+  const bgOk = bResult.bgHit.length > 0 && bResult.headerHit.length > 0;
+  console.log(`[场景B] 第 ${attempt} 次尝试结果：background=${bResult.bgHit.length}，header=${bResult.headerHit.length}`);
+  if (bgOk) break;
+  if (attempt < MAX_BG_ATTEMPTS) {
+    console.log('[场景B] 未收到协作端确认，等待 5s 后重试（只对传输层丢回连重试，判据不放宽）');
+    await new Promise((r) => setTimeout(r, 5000));
+  }
+}
+const { B, bgHit, headerHit } = bResult;
 console.log(`[场景B] 靶站收到请求 ${lab.state.hits} 次（DNS 解析 ${lab.state.dns} · HTTP 回连 ${lab.state.http}）`);
+console.log(`[场景B] 协作端确认：DNS ${lab.state.dnsOk} · HTTP ${lab.state.httpOk}`);
 console.log(`[场景B] 检出漏洞 ${B.vulns.length} 条，其中背景哨兵 ${bgHit.length} 条（头面 ${headerHit.length} 条）`);
 for (const v of bgHit.slice(0, 3)) {
   console.log(`   · ${v.technique} | ${v.riskLevel || '-'} | 位置=${v.location || '-'} | 参数=${v.param || v.affectedParam || '-'}`);
