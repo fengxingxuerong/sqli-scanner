@@ -210,6 +210,39 @@ F18 上次 acceptance 的引擎崩溃码（0xC0000409）**未复现**，留观�
 
 ---
 
+## 2026-10-20 批次 D112 · 外部裁判 3 号：DVWA（PHP+MySQL 栈）＋ POST 伴随字段假阴性修复
+
+**背景**：前两个外部裁判都是 SQLite + 非 PHP 栈 ⇒ 「检出率」只证明「在 SQLite 上能打」。
+本机 2026-10-18 装好 PHP 8.3 + MariaDB 10.11 后 DVWA 首次可起（旧限制解除）。
+
+**本批**：新增 `e2e/dvwa-lab/`（run.mjs + README + results 报告）；acceptance 增 `dvwa` 套件
+（optional，未就绪 SKIP）；run-all / e2e/README 登记；README 套件数 22 → 23。
+
+**实测**：真值 **4/4 检出**（sqli low GET / blind low GET / **blind high cookie 注入点** /
+sqli medium POST 表单）；同源复检 1/1；安全端点 **0/2 误报**（官方 impossible 档，同路径 PDO
+参数化，均打满 150 请求）；证据不足 0。sqlmap 1.10.7 同题：medium POST 4 类全中（55 请求），
+cookie 注入亦检出。
+
+**修复（真 bug，外部靶场抓出）**：POST 表单伴随字段被丢弃 ⇒ 静默假阴性。
+`buildInjectionRequest` 用 `point.formValues` 重建 body，而它只有页面抓表单路径才赋值 ⇒
+`--body` 生成的点请求体只剩注入点自身 ⇒ DVWA medium（以 `isset($_POST['Submit'])` 为开关）
+124 条响应字节数全同 ⇒ 0 检出且不报错。修法：bodyParams 点自带完整表单快照
+（`TargetParser._appendBodyParamsPoints`），只覆盖单键；守卫
+`server/tests/bodyParamsCompanion.guard.test.js`（4 例含变异自证）。
+
+### 待推进（外部裁判面继续扩）
+
+- **OWASP Benchmark**：需 JDK17 + Maven，本机只有 TRAE 内置 JRE ⇒ 仍未接入。
+- **VAmPI 其余面**：官方只此一处字符串拼接（`books`/`login` 走 ORM），扩不出更多 SQLi 真值；
+  若要扩「带认证头的安全端点」（`/books/v1/{title}` 需 Bearer），需先解决 runner 传静态头。
+- **DVWA 其余面**：本轮只覆盖 sqli / sqli_blind 两模块；`--forms` 自动抓表单路径
+  （`crawl-lab` 已覆盖部分）尚未与 DVWA 交叉验证。
+- **同源复检的通用化**：VAmPI / Juice Shop / DVWA 各 1 条；可考虑抽成 runner 公共能力。
+- **外部裁判的「漏检即判红」口径**：三套件已统一（真值必须检出 + 安全端点打满 + 零误报），
+  但 acceptance 全量跑时它们都是 optional（未就绪 SKIP）——CI 上从未跑过，需确认 CI 环境能否起。
+
+---
+
 ## 2026-10-19 批次 D111 · 外部裁判 2 号：VAmPI（路径段注入 + 同形态 A/B 零误报）
 
 **背景**：D88/D109 之后外部裁判仍只有 **1 个项目、2 个真值端点** ⇒「外部检出率」类结论
@@ -230,10 +263,11 @@ F18 上次 acceptance 的引擎崩溃码（0xC0000409）**未复现**，留观�
 2. 参数化实例的该点被输入校验剪枝只发 5 请求 ⇒ 显式 `validationSkip:false`，并新增
    「安全端点证据不足（请求<30）」计数要求为 0。
 
-### 待推进（外部裁判面继续扩）
+### 待推进（D111 时代的旧清单，DVWA 一项已由 D112 完成；其余并入上方 D112 待推进）
 
-- **DVWA / OWASP Benchmark**：本机缺 PHP + MySQL（DVWA）与 JDK17 + Maven（Benchmark），
-  需自备运行时后才能接入；sqli-labs 目前仍是本仓自写 Python 复刻（真值自证）。
+- ~~**DVWA**~~ **已完成（D112 2026-10-20）**：本机 PHP 8.3 + MariaDB 10.11 就位后接入，
+  见 `e2e/dvwa-lab/`。剩余：**OWASP Benchmark** 需 JDK17 + Maven，本机只有 TRAE 内置 JRE；
+  sqli-labs 目前仍是本仓自写 Python 复刻（真值自证）。
 - **VAmPI 其余面**：官方只此一处字符串拼接（`books`/`login` 走 ORM），扩不出更多 SQLi 真值；
   若要扩「带认证头的安全端点」（`/books/v1/{title}` 需 Bearer），需先解决 runner 传静态头。
 - **同源复检的通用化**：当前只 VAmPI 有；Juice Shop 也可加（搜索点换良性词），
@@ -387,8 +421,10 @@ Juice Shop 本机跑通链：codeload tarball（npm 上 `juice-shop` 已弃用�
 - ~~Juice Shop 登录绕过~~ **已完成（D109 2026-10-19：`POST /rest/user/login` 纳入真值清单，
   套件 2/2 + 0/4）**；密码重置等其余 SQLi 挑战点仍待纳入；
 - 同族第三方靶场（DVWA / OWASP Benchmark）可后续补充，扩大外部裁判面。
-  → **D111（2026-10-19）已补 VAmPI**（外部裁判 2 号，路径段注入形态；DVWA/Benchmark 因本机
-  缺 PHP+MySQL / JDK17+Maven 仍未接入，见 D111 待推进）。
+  → **D111（2026-10-19）已补 VAmPI**（外部裁判 2 号，路径段注入形态）。
+  → **D112（2026-10-20）已补 DVWA**（外部裁判 3 号，PHP+MySQL 栈 / cookie 注入点 /
+    POST 表单；本机 PHP 8.3 + MariaDB 10.11 就位后接入）。外部裁判合计 **7 个真值端点**
+    （Juice Shop 2 + VAmPI 1 + DVWA 4）。剩余：**OWASP Benchmark** 需 JDK17 + Maven。
 
 ---
 

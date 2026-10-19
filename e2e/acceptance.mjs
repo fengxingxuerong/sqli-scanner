@@ -559,6 +559,51 @@ const SUITES = [
     },
   },
   {
+    // [D112 2026-10-20] 外部裁判 3 号：DVWA（PHP 8.3 + MariaDB + mysqli/PDO）。
+    // 前两个裁判都是 **SQLite** + 非 PHP 栈 ⇒ 「检出率」结论实际只证明「在 SQLite 上能打」。
+    // DVWA 补三件它们都没有的事：① MySQL/MariaDB 方言与 mysqli_error 回显形态；
+    // ② **cookie 位置注入点**（官方 high.php 把 $_COOKIE['id'] 直接拼进 WHERE）；
+    // ③ 官方四档难度开关 ⇒ impossible 档（PDO 参数化）是**同路径**的零误报对照。
+    // 首跑即抓到一条真漏检（POST 表单伴随字段 Submit 被丢弃 ⇒ 124 探针全打在未执行查询的
+    // 页面上 ⇒ 静默 0 检出），修复后转回归判据。
+    // ⚠ 判据读**文本**而非退出码：未就绪时脚本按设计 exit 0（SKIP）。
+    id: 'dvwa',
+    title: '外部裁判 3 号（DVWA：PHP+MySQL 栈真漏洞须检出 + 同路径 impossible 档零误报）',
+    needs: [],
+    optional: true, // 需外部靶场在跑（非本仓依赖）→ 未就绪 SKIP 并写明原因
+    run: () => run('node', ['e2e/dvwa-lab/run.mjs']),
+    assert: (out) => {
+      if (/\[SKIP\] DVWA 靶场不可达/.test(out)) {
+        return { facts: { 外部裁判3: '跳过（靶场未就绪）' }, pass: false, skipped: true, reason: 'DVWA 未启动（需 PHP + MySQL）' };
+      }
+      const m = /真值漏洞端点：检出 (\d+)\/(\d+)（漏检 (\d+)）/.exec(out);
+      const fp = /安全端点误报：(\d+)/.exec(out);
+      const weak = /安全端点证据不足（请求<\d+）：(\d+)/.exec(out);
+      // 分母防缩水：三种形态的端点必须都实际跑到——删掉任一种后 3/3 仍会打印「通过」。
+      //   · 真值漏洞 / cookie 注入点（本靶场独有的形态，本仓此前从未被外部证据覆盖）
+      //   · 真值漏洞 / medium（POST 表单 + 转义绕过；D112 抓到漏检的就是这一条）
+      //   · 安全端点 / impossible（同路径 A/B 对照，缺它则零误报无从谈起）
+      const ranCookie = /\[真值漏洞\/high\].*cookie/.test(out);
+      const ranMedium = /\[真值漏洞\/medium\]/.test(out);
+      const ranImpossible = /\[安全端点\/impossible\]/.test(out);
+      const both = ranCookie && ranMedium && ranImpossible;
+      const pass = /DVWA 外部裁判通过/.test(out) && both;
+      return {
+        facts: {
+          外部裁判3: pass ? '✅ 通过' : '❌ 未通过',
+          真值漏洞: m ? `${m[1]}/${m[2]}（漏检 ${m[3]}）` : '取不到',
+          安全端点误报: fp ? fp[1] : '取不到',
+          证据不足: weak ? weak[1] : '取不到',
+          形态覆盖: both ? 'cookie+POST+impossible' : `缺失（cookie=${ranCookie} medium=${ranMedium} impossible=${ranImpossible}）`,
+        },
+        pass,
+        reason: pass ? null : !both
+          ? '外部裁判端点未实际执行（cookie/POST/impossible 形态缺失）'
+          : '外部裁判未通过（漏检／误报／安全端点没真测，见 stdout）',
+      };
+    },
+  },
+  {
     id: 'report-contract',
     title: '报告契约（自报字段必须与真实状态一致）',
     needs: ['mysql'],

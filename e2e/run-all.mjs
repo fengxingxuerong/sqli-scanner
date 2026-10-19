@@ -108,6 +108,10 @@ const LABS = [
   // **URL 路径段**注入形态；官方 vulnerable 开关支撑「同路径 A/B」——vuln=1 拼接必须检出、
   // vuln=0 参数化必须零误报。env：VAMPI_VULN_BASE / VAMPI_SAFE_BASE（默认 5000/5001）。
   { name: 'vampi-lab', desc: '外部裁判 2 号（VAmPI：路径段注入须检出 + 同形态参数化实例零误报）', entry: 'e2e/vampi-lab/run.mjs', deps: [] },
+  // [D112] 外部裁判 3 号：DVWA（PHP 8.3 + MariaDB + mysqli/PDO）。前两个裁判都是 SQLite 栈，
+  // DVWA 补 **MySQL 方言 + cookie 注入点 + POST 表单伴随字段**，官方四档难度里的
+  // impossible（PDO 参数化）即同路径零误报对照。env：DVWA_BASE（默认 8099）。
+  { name: 'dvwa-lab', desc: '外部裁判 3 号（DVWA：cookie 注入 + POST 表单须检出 + 同路径 impossible 档零误报）', entry: 'e2e/dvwa-lab/run.mjs', deps: [] },
   { name: 'pg-osshell', desc: 'PG os-shell 真机闭环（COPY FROM PROGRAM 落表 → 回显）', entry: 'e2e/oob-real-lab/pg-osshell.e2e.mjs', deps: ['pg'] },
   { name: 'concurrent-isolation', desc: '并发多扫描隔离性（PG+MySQL 混扫不串扰）', entry: 'e2e/concurrent-isolation/e2e.mjs', deps: ['pg', 'sandbox'] },
   { name: 'csrf-lab', desc: 'CSRF 防护目标闭环（取页 token → 携带 → 检出）', entry: 'e2e/csrf-lab/e2e.mjs', deps: ['sandbox'] },

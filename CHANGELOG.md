@@ -65,6 +65,45 @@
 
 ## [Unreleased]
 
+### 2026-10-20 批次 D112 · 外部裁判 3 号：DVWA（PHP+MySQL 栈，cookie 注入 + POST 表单）＋ 一条静默假阴性修复
+
+**动机**：前两个外部裁判（Juice Shop / VAmPI）都是 **SQLite + 非 PHP 栈** ⇒ 任何「检出率」
+结论实际只证明「在 SQLite 上能打」。本机 2026-10-18 装好 PHP 8.3 + MariaDB 10.11 后
+DVWA 首次可起（`TODO.md` 里「本机缺 PHP+MySQL」的限制解除）。
+
+**新增**：
+- `e2e/dvwa-lab/run.mjs`：真值 4（`sqli` low GET / `sqli_blind` low GET / **`sqli_blind` high
+  cookie 注入点** / `sqli` medium POST 表单）+ 同源复检 1 + 安全对照 2（官方 `impossible` 档，
+  **同路径** PDO 参数化）。
+- `e2e/dvwa-lab/README.md`、`results/external-judge-2026-10-20-dvwa.md`：环境配方
+  （MariaDB 建库建号 → `config.inc.php` → `setup.php` 抠 `user_token`（属性是单引号）→ `php -S`）、
+  官方源码真值表、sqlmap 同题对照、边界。
+- `e2e/acceptance.mjs` 新增 `dvwa` 套件（optional，未就绪 SKIP）；`e2e/run-all.mjs`、
+  `e2e/README.md` 登记；README 套件数 22 → 23。
+
+**实测（修复后）**：真值 **4/4 检出（漏检 0）**；同源复检 1/1；安全端点 **0/2 误报**
+（均打满 150 请求）；证据不足 0。命中：`url·id·dbms=MariaDB`（union+error+boolean）、
+`cookie·id`（boolean）、`body·id`（union+error+boolean）。
+sqlmap 1.10.7 同题：medium POST 4 类全中（boolean/error/time/UNION 2 列，55 请求，
+`MySQL >= 5.1 (MariaDB fork)`）；cookie 注入也检出（RLIKE boolean-based blind，含自检误报）。
+
+**修复：POST 表单伴随字段被丢弃 ⇒ 静默假阴性**（首跑 `POST /vulnerabilities/sqli/` medium
+档 **0 检出 / 124 请求 / 不报错**）。
+- 根因：`buildInjectionRequest` 用 `req.data = { ...(point.formValues || {}) }` 重建报文，
+  而 `formValues` 只有**页面抓表单**路径才赋值 ⇒ `--body`/`bodyParams` 生成的点它是 `null`
+  ⇒ 请求体只剩 `id=<payload>`，`Submit` 被丢弃。DVWA medium 以 `isset($_POST['Submit'])`
+  为执行开关 ⇒ 124 条响应字节数**全部相同**（4620，记录代理全量落盘为证）⇒ 布尔恒等、
+  UNION 无回显 ⇒ 0 检出，与「这个站没有注入」同形（与 D91 cookie 假阴性同型）。
+- 修法：`TargetParser._appendBodyParamsPoints()` 让 bodyParams 生成的点自带完整表单快照
+  `{ formValues: { ...bodyAll } }`，注入只覆盖单键（sqlmap 同口径：保留原始 POST data 的非注入字段）。
+  `discover` 内改为单行调用 ⇒ **不上调** `docs/_complexity-baseline.json`（软上限不允许变长）。
+- 回归守卫：`server/tests/bodyParamsCompanion.guard.test.js`（4 例，含**变异自证**：去掉
+  `formValues` 后判据必须变红）。
+- 修复后同端点：3 条检出（union + error + boolean，89 请求）。
+
+**边界**：三个外部裁判合计 7 个真值端点，仍不足以支撑「全局检出率 N%」；命中条数是同一
+注入点的多技术命中而非多个漏洞；cookie 点需 `level>=2`（默认 1 不测 cookie），不代表默认配置覆盖率。
+
 ### 2026-10-19 批次 D111 · 外部裁判 2 号：VAmPI（路径段注入 + 同形态 A/B 零误报）
 
 **动机**：D88/D109 之后外部裁判仍只有 **1 个项目、2 个真值端点** ⇒ 任何「外部检出率」

@@ -72,8 +72,10 @@ test('③b CI 只要求它确实 provisioning 过的套件（PG/红队是 contin
 // [D102 2026-10-18] 20 → 21：新增 param-mine-lab（参数挖掘真靶场，D102 建场时即接线：
 //   acceptance + run-all 双落位；本地全量测试当场抓出本计数未同步 ⇒ 这正是它防的空转）。
 // [D111 2026-10-19] 21 → 22：新增 vampi（外部裁判 2 号，VAmPI 路径段注入 + 同形态 A/B）。
-test('④ 不空转：SUITES 解析必须命中 22 个 id（否则上面几条可能在拿空集合比）', () => {
-  assert.equal(IDS.length, 22, `SUITES 解析到 ${IDS.length} 个 id：${IDS.join(', ')}`);
+// [D112 2026-10-20] 22 → 23：新增 dvwa（外部裁判 3 号，PHP+MySQL 栈：cookie 注入点 +
+//   POST 表单伴随字段 + 官方 impossible 档同路径零误报）。
+test('④ 不空转：SUITES 解析必须命中 23 个 id（否则上面几条可能在拿空集合比）', () => {
+  assert.equal(IDS.length, 23, `SUITES 解析到 ${IDS.length} 个 id：${IDS.join(', ')}`);
   assert.ok(IDS.includes('file-read') && IDS.includes('file-write'), '文件读写两个套件不在 SUITES 里 —— 取数口径变了');
 });
 

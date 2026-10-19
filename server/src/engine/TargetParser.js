@@ -89,9 +89,8 @@ export class TargetParser {
     }
 
     // 3) Body 参数（level≥1，始终检查，与 sqlmap 默认行为一致）
-    for (const [k, v] of Object.entries(target.bodyParams || {})) {
-      points.push(createInjectionPoint('body', k, String(v)));
-    }
+    //    实现见 `_appendBodyParamsPoints`（D112：伴随字段快照，注释与根因在同处）。
+    this._appendBodyParamsPoints(points, target);
 
     // 3.5) JSON body 嵌套叶子注入点（level≥1，jsonBody 传入时生效）
     // [P1 批次 2026-09-08] 真实 API 场景（POST application/json）的注入点发现：
@@ -294,6 +293,33 @@ export class TargetParser {
     }
 
     return this._applyOnlyPoint(applyParamSelection(points, config), config);
+  }
+
+  /**
+   * [D112 2026-10-20] Body 参数注入点（--body / bodyParams）——**伴随字段必须随注入请求发出**。
+   *
+   * 根因与外部证据（第三方靶场 DVWA medium，`vulnerabilities/sqli/source/medium.php`）：
+   * 该页面以 `isset($_POST['Submit'])` 作为执行查询的开关。用户给
+   * `--body '{"id":"1","Submit":"Submit"}'` 后，本仓此前只把**注入点自身**写进请求体
+   * ——请求侧是 `req.data = { ...(point.formValues || {}) }`（injection.js），而
+   * `formValues` 只有**页面抓表单**那条路径才赋值 ⇒ bodyParams 路径生成的点它是 null
+   * ⇒ 请求体只剩 `id=<payload>`，`Submit` 被静默丢弃。
+   *
+   * 后果（e2e/dvwa-lab 首跑实测，124 条探针全记录）：服务端因缺 Submit 根本不执行查询，
+   * 124 条响应**字节数完全相同** ⇒ 布尔真假恒等、UNION 无回显、报错无信号 ⇒ **0 检出且不报错**，
+   * 与「这个站没有注入」完全同形（与 D91 的 cookie 假阴性同型）。
+   *
+   * 修法：每个 body 点自带完整表单快照 `{ formValues: { ...bodyAll } }`，注入时只覆盖单键、
+   * 其余字段原样保留（sqlmap 同口径：保留原始 POST data 的非注入字段）。
+   *
+   * @param {import('./models.js').InjectionPoint[]} points
+   * @param {import('./models.js').Target} target
+   */
+  _appendBodyParamsPoints(points, target) {
+    const bodyAll = target.bodyParams || {};
+    for (const [k, v] of Object.entries(bodyAll)) {
+      points.push(createInjectionPoint('body', k, String(v), { formValues: { ...bodyAll } }));
+    }
   }
 
   /**

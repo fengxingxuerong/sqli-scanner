@@ -108,6 +108,15 @@
       "refute_cmd": "VAMPI_VULN_BASE=http://127.0.0.1:5000 VAMPI_SAFE_BASE=http://127.0.0.1:5001 node e2e/acceptance.mjs --only=vampi",
       "recheck_batch": "D111（2026-10-19）：新增外部裁判 2 号并实跑；复核了 D109 的「外部裁判只有 1 个项目」这一口径缺口。",
       "caveat": "单轮；外部真值仅 1 个 SQLi 端点（官方只有这一处拼接），两裁判合计 3 个真值端点，不能外推为通用外部检出率；路径段注入点默认关闭（--test-path），套件显式开启不代表默认配置覆盖率；3 条 finding 是同一注入点的三种技术命中而非 3 个独立漏洞；VAmPI 为外部项目，未就绪时套件 SKIP，不计通过。"
+    },
+    {
+      "id": "external-judge-dvwa-d112",
+      "claim": "第三方外部裁判 3 号 DVWA（D112，PHP 8.3 + MariaDB + mysqli/PDO）：官方四档难度下的真值端点 4/4 检出（sqli low GET / sqli_blind low GET / sqli_blind high 的 cookie 注入点 $_COOKIE['id'] / sqli medium POST 表单），官方 impossible 档（PDO 参数化 + is_numeric）同路径误报 0；sqlmap 1.10.7 同题亦检出（medium POST 4 类全中，cookie 注入亦命中）。",
+      "status": "verified",
+      "evidence": "e2e/dvwa-lab/results/external-judge-2026-10-20-dvwa.md（2026-10-20；真值 57/67/70/89 请求命中，dbms=MariaDB；impossible 档 150/150 请求 0 误报；证据不足 0）；诊断产物 .box-agent-scratch/dvwa-medium-diag.json（首跑 124 条请求全记录，证明 POST 伴随字段 Submit 被丢弃导致响应字节数全同 ⇒ 静默 0 检出）；回归守卫 server/tests/bodyParamsCompanion.guard.test.js 4 例（含变异自证）。",
+      "refute_cmd": "node e2e/acceptance.mjs --only=dvwa（需 DVWA @8099 + MariaDB @3306 在跑）",
+      "recheck_batch": "D112（2026-10-20）：新增外部裁判 3 号并实跑；同时复核了「外部裁判只有 SQLite 栈」这一口径缺口（前两个裁判均为 SQLite + 非 PHP）。",
+      "caveat": "单轮；三个外部裁判合计 7 个真值端点，仍不足以支撑「全局检出率 N%」类结论；命中条数是同一注入点的多技术命中而非多个独立漏洞；cookie 注入点需 level>=2（默认 1 不测 cookie），套件显式 level=2 不代表默认配置覆盖率；medium 档可打穿是因为官方 SQL 为无引号数值型，不代表转义普遍可绕；DVWA 为外部项目，未就绪时套件 SKIP，不计通过。"
     }
   ]
 }
