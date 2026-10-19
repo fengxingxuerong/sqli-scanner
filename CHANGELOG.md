@@ -65,6 +65,49 @@
 
 ## [Unreleased]
 
+### 2026-10-19 批次 D108 · Collaborator-Everywhere 式背景 OOB 哨兵（P1-5 收口）
+
+**背景**：P1-5 —— interactsh（D87）已就绪，但 OOB 仍是 opt-in 通道：只覆盖「显式选中的技术 ×
+显式命中的面」；risk=1 技术门控剔除 OOB、被预筛选/静态判定跳过的点、以及根本没生成注入点的
+请求头，全程零 OOB 标记 ⇒ 真「无回显无报错」目标上的静默假阴性。本批把 OOB 从 opt-in 通道
+升级为背景哨兵。
+
+**能力（D108 判据）**：新增 `server/src/engine/scan/oobSentinel.js`——向「选定技术没覆盖的面」
+非侵入式播撒 OOB token（每面一个，预算封顶），任一回连即确认无回显注入：
+
+- 面收集：① `skipReason` ∈ {prefilter, static, input_validation} 的跳过点；② `target.headerParams`
+  中未生成注入点的头；③ 配置的常见头（默认 `['User-Agent','Referer','X-Forwarded-For']`，逐名
+  校验 `/^[A-Za-z0-9-]{1,64}$/`、上限 16 条）；④ 未测完的点（oob 已显式选中时排除完整跑过的点）。
+  显式排除 paramName / cookie / user-skip 点与 direct 模式。合成头点以 `createInjectionPoint`
+  推入 `report.points` 同引用数组（vulnEnrich 可解析）。
+- 面 × DBMS 轮转计划（面优先：预算受限时保证每个面至少投一次）；`pickTemplate` 优先 `{CALLBACK}`
+  模板，UNC 回退仅在 interactsh 模式（本地模式无 SMB 监听，不用必然无回连的载体）。
+- 等待语义：新 `core/oobWaiters.js` 共享 `waitForAnyTokenIn`（N token 首个回连即返回、命中/超时
+  全清理）——oobReceiver / interactshClient / oobTunnel 三方同接口（本地身份归一化、外部
+  normToken 小写、未启动返回 null）；首个命中后 500ms 短窗排空，一面一条 finding（去重）。
+- 命中并入 finalVulns（technique='oob'、riskOf→Medium、evidence 前缀「OOB 背景哨兵」），并清掉
+  `noInjectionPoints` 误导标记（「没测」不再伪装成「无洞」）；未命中时行为零变化。
+- 门控与 CLI：`oob.background.enabled` 默认关；enabled 隐含 `oob.enabled=true`（只开 background
+  却不起接收端属静默失效），`startOobIfNeeded` 同步放宽；`--oob-background`（旗标 + `--config`
+  深层合并子键，浅合并会把子键清掉）；`configFile` 动态键；REST `guardOobBackground` 净化
+  （maxRequests 1..200、timeoutMs 1000..120000、headers 白名单字符）。
+- 副产物：`--skip` / skip-static 的点补 `skipReason`（user-skip / static）——报告 `skippedPoints`
+  汇总补全；哨兵也据此识别「没测的面」，不把用户明确不动的参数当未测面重播（等于绕过 `--skip`）。
+
+**实测（真 oast.pro 外部链路，`e2e/oob-interactsh-lab` 场景 A+B）**：场景 A（既有 OOB 链路）
+保持；场景 B：URL 无 query、注入参数在请求头（`X-Api-Key`）、techniques=['union','error','boolean']
+（零 OOB 显式）、risk=1 —— 哨兵向 2 个未测面播撒 8 个 token（预算 8），靶站回连 22 次，
+检出 1 条（位置=header）；marker「✅ OOB 背景哨兵整链通过」；acceptance oob-interactsh 断言
+扩为 hitA && hitB。单测 `server/tests/oobBackground.test.js` 15 例（等待语义 / 门控 / 预算 /
+归因 / 无回连 / 面选择 / noInjectionPoints 清理 / startOobIfNeeded 门控 / 不挂原型）。
+
+**诚实边界**：哨兵只确认「该面存在带外回连」不回带数据（公共协作端限制，自建端同）；预算内
+面未轮到即不播撒（只保证每面一次机会，非穷尽）；UNC 载体依赖外部 SMB 监听（Responder/Inveigh）。
+包装层经 `_runOobBackground.call(sm, …)` 直接调用而非挂 `ScanManager.prototype`（挂载会拉长
+原型挂载尾部，与 httpClient/Detector/Exploiter 的挂载行产生 29 个新克隆窗口）。
+
+**收口**：底账 P1-5 → [x]。
+
 ### 2026-10-18 批次 D107 · tamper 手写字面量扫描收口（P1-4：迁移 / 点名 / 守卫硬化）
 
 **背景**：P1-4 台账记「25 个复杂插件未迁移 walkLiterals」。本批逐文件重审（判据=是否手写
@@ -99,6 +142,8 @@
 关键字聚合语义不同）、scalarselectinline（逃逸闭合符启发式 + 反斜杠跳过 + 8 轮收敛，原创非
 上游）三个维持定制扫描并在守卫白名单逐条点名；literalWalk 只识别 `'` 与 `"`，上述形态超出
 其语义，扩展属独立批次。
+
+**CI 收束**：run 280 = `39150282117`（`bc21c744`）attempt 1 全绿（11 ✅ + 2 skipped，22.9 min）。
 
 ### 2026-10-18 批次 D106 · paramName「ORDER BY 固定后缀」形态（P1-2 收口：序数差分探针）
 

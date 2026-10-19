@@ -63,6 +63,7 @@ function makeSm({ scanId, point, vulnerable, points }) {
     reportGen: { riskOf: (vulns) => (vulns.length ? 'High' : 'Info') },
     _runSecondOrder: async (..._a) => { secondOrderCalls.push(1); return []; },
     _runNoSql: async () => [],
+    _runOobBackground: async () => [],
     extractor: {},
     _hasData: () => false,
     wafRecommend: () => [],

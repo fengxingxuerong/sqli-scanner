@@ -90,8 +90,9 @@ function startLab() {
   const server = http.createServer(async (req, res) => {
     state.hits += 1;
     const u = new URL(req.url, `http://127.0.0.1:${PORT}`);
-    // 载荷可能出现在任意参数值里（引擎会按注入点位置投放）
-    const raw = [...u.searchParams.values()].join(' ');
+    // 载荷可能出现在任意参数值里（引擎会按注入点位置投放）；[D108] 背景哨兵向请求头
+    // 播撒 token ⇒ 头值也必须参与提取，否则场景 B 恒「收到请求但 0 回连」。
+    const raw = [...u.searchParams.values(), ...Object.values(req.headers)].join(' ');
     const host = extractCallbackHost(raw, SERVER);
     if (host) {
       // UNC 形态 → 真实 DNS 解析（interactsh 的 DNS 通道据此记录）
@@ -132,44 +133,90 @@ if (!(await networkOk())) {
   process.exit(0);
 }
 
-const sm = new ScanManager({});
-const scanId = await sm.start({ url: `http://127.0.0.1:${PORT}/item?id=1`, config: BASE_CONFIG });
-
-const t0 = Date.now();
-let report = null;
-for (;;) {
-  const s = sm.scans.get(scanId);
-  if (s && (s.status === 'completed' || s.status === 'error')) {
-    report = sm.getReport(scanId);
-    break;
+/**
+ * 跑一次完整扫描并等到终态；返回 { report, vulns, oobHit }。
+ * 超时/错误抛异常，由调用方统一收尾。
+ * @param {{url:string, config:object}} input
+ * @param {string} label 日志前缀
+ */
+async function runScan(input, label) {
+  const sm = new ScanManager({});
+  const scanId = await sm.start(input);
+  const t0 = Date.now();
+  for (;;) {
+    const s = sm.scans.get(scanId);
+    if (s && (s.status === 'completed' || s.status === 'error')) {
+      const report = sm.getReport(scanId);
+      const vulns = (report && report.vulns) || [];
+      const oobHit = vulns.filter(
+        (v) => String(v.technique || '') === 'oob' || /oob|带外|OOB/i.test(JSON.stringify(v))
+      );
+      return { report, vulns, oobHit };
+    }
+    if (Date.now() - t0 > 120000) {
+      sm.stop(scanId);
+      throw new Error(`${label} 扫描超时`);
+    }
+    await new Promise((r) => setTimeout(r, 100));
   }
-  if (Date.now() - t0 > 120000) {
-    sm.stop(scanId);
-    console.log('❌ 扫描超时');
-    await lab.close();
-    await oobTunnel.stop().catch(() => {});
-    process.exit(1);
-  }
-  await new Promise((r) => setTimeout(r, 100));
 }
 
-const vulns = (report && report.vulns) || [];
-const oobHit = vulns.filter(
-  (v) => String(v.technique || '') === 'oob' || /oob|带外|OOB/i.test(JSON.stringify(v))
+// ── 场景 A（D87 原判据）：显式 techniques=['oob'] + risk 2，参数面整链 ──────────
+const A = await runScan(
+  { url: `http://127.0.0.1:${PORT}/item?id=1`, config: BASE_CONFIG },
+  '[场景A]'
 );
-console.log(`[scan] 靶站收到请求 ${lab.state.hits} 次（DNS 解析 ${lab.state.dns} · HTTP 回连 ${lab.state.http}）`);
+console.log(`[场景A] 靶站收到请求 ${lab.state.hits} 次（DNS 解析 ${lab.state.dns} · HTTP 回连 ${lab.state.http}）`);
 if (lab.state.hits > 0 && lab.state.dns === 0 && lab.state.http === 0) {
-  console.log('[scan] ⚠ 收到请求但没提取到任何协作端主机 —— 载荷形态与提取正则不匹配（检查 extractCallbackHost 与投放向量）');
+  console.log('[场景A] ⚠ 收到请求但没提取到任何协作端主机 —— 载荷形态与提取正则不匹配（检查 extractCallbackHost 与投放向量）');
 }
-console.log(`[scan] 检出漏洞 ${vulns.length} 条，其中 OOB 通道 ${oobHit.length} 条`);
-for (const v of vulns.slice(0, 3)) {
-  console.log(`   · ${v.vulnType?.nameZh || v.type || v.technique} | ${v.riskLevel || '-'} | 参数=${v.param || v.affectedParam || v.affectedParam || '-'}`);
+console.log(`[场景A] 检出漏洞 ${A.vulns.length} 条，其中 OOB 通道 ${A.oobHit.length} 条`);
+for (const v of A.vulns.slice(0, 3)) {
+  console.log(`   · ${v.vulnType?.nameZh || v.type || v.technique} | ${v.riskLevel || '-'} | 参数=${v.param || v.affectedParam || '-'}`);
 }
-
-const ok = oobHit.length > 0;
-console.log(ok
+const hitA = A.oobHit.length > 0;
+console.log(hitA
   ? '✅ OOB 外部隧道整链通过：无回显目标经协作端回连被检出'
-  : '❌ 未检出 OOB —— 隧道链路或检测判据有问题');
+  : '❌ 场景A 未检出 OOB —— 隧道链路或检测判据有问题');
+
+// ── 场景 B（D108 背景哨兵）：无参数 URL + risk 1 + 技术集不含 oob ──────────────
+// 判据：**未显式配置注入点**（URL 无 query 参数、level 1 不生成头点）时，背景哨兵
+// 向 headerParams/常见头播撒 token，仍能经协作端回连检出 —— 这正是 P1-5 的验收口径。
+const BG_CONFIG = {
+  ...BASE_CONFIG,
+  techniques: ['union', 'error', 'boolean'], // 不含 oob：一阶不会做任何 OOB 投放
+  risk: 1, // 技术门控会把 oob 剔除；哨兵是唯一带外通道
+  oob: {
+    enabled: true,
+    timeoutMs: 30000,
+    background: { enabled: true, maxRequests: 8, timeoutMs: 30000, headers: ['User-Agent'] },
+    interactsh: { enabled: true, server: SERVER, pollIntervalMs: 1500 },
+  },
+};
+const B = await runScan(
+  {
+    url: `http://127.0.0.1:${PORT}/item`,
+    config: BG_CONFIG,
+    headerParams: { 'X-Api-Key': 'demo-key' },
+  },
+  '[场景B]'
+);
+const bgHit = B.vulns.filter((v) => v.technique === 'oob' && v.oobBackground === true);
+const headerHit = bgHit.filter((v) => v.location === 'header' || String(v.param || '').toLowerCase().includes('user-agent') || String(v.param || '').toLowerCase() === 'x-api-key');
+console.log(`[场景B] 靶站收到请求 ${lab.state.hits} 次（DNS 解析 ${lab.state.dns} · HTTP 回连 ${lab.state.http}）`);
+console.log(`[场景B] 检出漏洞 ${B.vulns.length} 条，其中背景哨兵 ${bgHit.length} 条（头面 ${headerHit.length} 条）`);
+for (const v of bgHit.slice(0, 3)) {
+  console.log(`   · ${v.technique} | ${v.riskLevel || '-'} | 位置=${v.location || '-'} | 参数=${v.param || v.affectedParam || '-'}`);
+}
+const hitB = bgHit.length > 0 && headerHit.length > 0;
+console.log(hitB
+  ? '✅ OOB 背景哨兵整链通过：未显式配置注入点仍经带外回连检出'
+  : '❌ 场景B 未检出背景哨兵 —— 面收集/播撒/归因链路有问题');
+
+const ok = hitA && hitB;
+console.log(ok
+  ? '✅ OOB 外部隧道整链通过（场景 A + B）'
+  : '❌ OOB 整链未通过（见上方场景结论）');
 
 await lab.close();
 await oobTunnel.stop().catch(() => {});

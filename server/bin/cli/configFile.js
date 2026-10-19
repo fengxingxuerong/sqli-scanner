@@ -68,6 +68,8 @@ export function buildKnownArgKeys(parseArgsFn) {
     // 漏登记的后果不是"少一个旗标"：--config 档案写 {"oob":{"enabled":true}} 会被
     // 未知键硬拒（policy：宁可拒绝启动也不静默忽略）⇒ CLI 用户对该通道零可达。
     'noSql', 'oob',
+    // —— [D108] 背景 OOB 哨兵开关（--oob-background；组内子键走 --config 档案的 oob.background）——
+    'oobBackground',
   ];
   const known = new Set(Object.keys(parseArgsFn([])));
   for (const k of dyn) known.add(k);

@@ -267,6 +267,16 @@ function applyChannelToggles(config, args) {
   if (args.oobInteractsh === true) {
     patchGroup(config, 'oob', { enabled: true, interactsh: { enabled: true } });
   }
+  // [D108] --oob-background：背景哨兵。background 是组内对象键，patchGroup 是浅合并 ——
+  // 直接传 { background: { enabled: true } } 会把默认的 maxRequests/timeoutMs/headers 抹掉
+  // （引擎侧读到 undefined）。必须带底合并：defaults.background ← 已有配置 ← 本次开关。
+  if (args.oobBackground === true) {
+    const cur = (config.oob && config.oob.background) || {};
+    patchGroup(config, 'oob', {
+      enabled: true,
+      background: { ...defaults.oob.background, ...cur, enabled: true },
+    });
+  }
 }
 
 /**

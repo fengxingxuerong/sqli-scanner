@@ -192,6 +192,7 @@ export function createDetectionResult(pointId, technique) {
 @property {any} trace
  * @property {any} [errorDetail] error 技术回填：结构化报错上下文
  * @property {string} [noSqlKind] NoSQL 技术回填：NoSQL 类型标记
+ * @property {boolean} [oobBackground] [D108] OOB 背景哨兵命中：非显式测试面回连
  */
 
 /**

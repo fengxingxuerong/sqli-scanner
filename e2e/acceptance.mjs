@@ -464,15 +464,20 @@ const SUITES = [
         // 用仓库既有的第三态 skipped（与 fileRead/fileWrite 同口径）：SKIP 不判红、也不计入 PASS
         return { facts: { OOB外部隧道: '跳过（无外网）' }, pass: false, skipped: true, reason: '无法访问协作端（离线环境）' };
       }
-      const hit = /OOB 外部隧道整链通过/.test(out);
+      const hit = /OOB 外部隧道整链通过（场景 A \+ B）/.test(out);
+      const hitA = /✅ OOB 外部隧道整链通过：无回显目标经协作端回连被检出/.test(out);
+      const hitB = /✅ OOB 背景哨兵整链通过/.test(out);
       const lab = /靶站收到请求 (\d+) 次（DNS 解析 (\d+) · HTTP 回连 (\d+)）/.exec(out);
+      const bg = /背景哨兵 (\d+) 条（头面 (\d+) 条）/.exec(out);
       return {
         facts: {
-          OOB外部隧道: hit ? '✅ 检出' : '❌ 未检出',
+          OOB外部隧道: hitA ? '✅ 检出' : '❌ 未检出',
+          OOB背景哨兵: hitB ? '✅ 检出' : '❌ 未检出',
           靶站回连: lab ? `${lab[2]} DNS + ${lab[3]} HTTP` : '取不到',
+          ...(bg ? { 背景哨兵: `${bg[1]} 条（头面 ${bg[2]}）` } : {}),
         },
-        pass: hit,
-        reason: hit ? null : '整链未检出（隧道链路或归因判据失效，现场见 stdout）',
+        pass: hit && hitA && hitB,
+        reason: hit && hitA && hitB ? null : '整链未检出（隧道链路/归因判据/哨兵面收集失效，现场见 stdout）',
       };
     },
   },

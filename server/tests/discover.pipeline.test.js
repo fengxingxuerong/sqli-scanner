@@ -186,6 +186,8 @@ test('⑤ --skip：大小写不敏感排除，跳过点发 user-skip 事件（�
     assert.equal(skipped.length, 1);
     assert.equal(skipped[0].payload.pointId, 'p1');
     assert.equal(out.points.length, 2, '排除只影响待扫集合，report.points 仍保留全量点');
+    // [D108] 点上也必须留痕：背景 OOB 哨兵据此排除用户明确要求不动的参数
+    assert.equal(out.points.find((p) => p.id === 'p1').skipReason, 'user-skip');
   } finally { h.done(); }
 });
 
@@ -207,6 +209,8 @@ test('⑥ skip-static：opt-in 开启时对多点生效，跳过点发 static �
     const st = h.byType('point_skipped').filter((e) => e.payload.reason === 'static');
     assert.equal(st.length, 1);
     assert.ok(h.calls.includes('skipStatic:2'));
+    // [D108] 静态跳过点留痕（skippedPoints 汇总 + 背景哨兵的面识别都依赖它）
+    assert.equal(out.points.find((p) => p.id === 'p1').skipReason, 'static');
   } finally { h.done(); }
 });
 

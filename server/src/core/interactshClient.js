@@ -44,6 +44,7 @@
 import crypto from 'node:crypto';
 import { ErrorCode, AppError } from './errors.js';
 import { logger } from './logger.js';
+import { waitForAnyTokenIn } from './oobWaiters.js';
 
 /** 上游默认值（settings.CorrelationIdLengthDefault / CorrelationIdNonceLengthDefault） */
 const CORR_ID_LENGTH = 20;
@@ -413,6 +414,17 @@ export class InteractshClient {
       this._waiters.set(key, set);
       set.add(entry);
     });
+  }
+
+  /**
+   * [D108] 等待一组 token 中任意一个回连（背景哨兵一次投放 N 个 token 时使用）。
+   * 归一化规则与 waitForToken 一致（小写索引），返回值是调用方传入的原样 token。
+   * @param {string[]} tokens
+   * @param {number} timeoutMs
+   * @returns {Promise<string|null>}
+   */
+  waitForAnyToken(tokens, timeoutMs) {
+    return waitForAnyTokenIn(this._received, this._waiters, tokens, timeoutMs, normToken);
   }
 
   /**

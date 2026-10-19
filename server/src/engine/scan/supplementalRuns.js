@@ -8,6 +8,7 @@ import * as eventBus from '../../core/eventBus.js';
 import { logger } from '../../core/logger.js';
 import { oobTunnel } from '../../core/oobTunnel.js';
 import { createVulnerability } from '../models.js';
+import { runOobSentinel } from './oobSentinel.js';
 
   // 二阶注入补充趟：在既有一阶聚合之后运行，对"每个存储点 × 每个触发页"调用独立 SecondOrderDetector。
   // 门控（唯一硬门）：secondOrder.enabled && triggerUrls 非空 && 存在 isStorePoint 点；
@@ -139,4 +140,27 @@ export async function _runNoSql(scanId, target, points, dbms) {
     );
     await this._maybeClose(ctxBase.httpClient);
     return collected;
+  }
+
+// 背景 OOB 哨兵补充趟（[D108]，对标 Collaborator Everywhere）：门控 oob.background.enabled，
+// 默认关闭。向「选定技术没覆盖的面」（被跳过点/未生成的请求头/未测完的点）非侵入式播撒
+// OOB token，任一回连即确认无回显注入。命中并入既有 finalVulns 通道（technique='oob'）。
+export async function _runOobBackground(scanId, target, points, dbms, fullyTestedPoints, guard, report) {
+    const oobCfg = (target.config && target.config.oob) || {};
+    const bg = oobCfg.background || {};
+    if (bg.enabled !== true) return []; // 未启用：零请求
+    const ctxBase = { httpClient: this._wrapWithSignal(scanId, this.getScanClient(scanId, target)), config: target.config, guard };
+    try {
+      return await runOobSentinel(
+        scanId, target, points, fullyTestedPoints, dbms, oobCfg,
+        this._selectedTechs(target.config),
+        { httpClient: ctxBase.httpClient, guard, report, scanId, eventBus, reportGen: this.reportGen }
+      );
+    } catch (e) {
+      // 哨兵是补测趟：失败只告警，绝不影响一阶结论
+      logger.warn(`OOB 背景哨兵失败（不影响主结论）：${e.message}`);
+      return [];
+    } finally {
+      await this._maybeClose(ctxBase.httpClient);
+    }
   }

@@ -134,8 +134,41 @@ export function guardOob(config, cfg) {
       // 安全口径：server 仅接受主机名（不含 scheme/路径，防被当跳板打任意 URL），
       // servers 数组逐项同规则过滤；非法项丢弃并保留默认，不放宽成「任意字符串」。
       interactsh: guardInteractsh(o.interactsh),
+      // [D108 2026-10-19] 背景 OOB 哨兵（P1-5）。与 interactsh 同形：组内对象键必须显式
+      // 转发，否则 REST/面板传了也被静默丢弃（引擎侧看到 defaults 的 background.enabled=false）。
+      background: guardOobBackground(o.background),
     };
+    // [D108] background 开启隐含总开关：哨兵是 oob 的一种投放形态，enabled=false 时
+    // 检测器根本拿不到隧道 ⇒ 只开 background 会变成「配了却永远不跑」的静默失效。
+    if (config.oob.background.enabled) config.oob.enabled = true;
   }
+}
+
+/** 背景哨兵默认播撒头（与 defaults.oob.background.headers 同源，改动只改一处） */
+const BG_HEADER_DEFAULTS = defaults.oob.background.headers;
+
+/**
+ * [D108] oob.background 子组净化：enabled/maxRequests/timeoutMs/headers 逐键校验。
+ * headers 只放行合法 HTTP 头名（`/^[A-Za-z0-9-]{1,64}$/`）：头名要原样写进请求行，
+ * 允许任意字符等于给「CRLF 注入/畸形报文」开一个入口；空数组视为未配置 → 回默认。
+ * @param {any} raw 用户传入的 background 配置段
+ * @returns {{enabled:boolean, maxRequests:number, timeoutMs:number, headers:string[]}} 净化后的配置
+ */
+function guardOobBackground(raw) {
+  const d = defaults.oob.background;
+  const o = raw && typeof raw === 'object' ? raw : {};
+  const headers = Array.isArray(o.headers)
+    ? o.headers
+        .filter((h) => typeof h === 'string' && /^[A-Za-z0-9-]{1,64}$/.test(h.trim()))
+        .map((h) => h.trim())
+        .slice(0, 16)
+    : BG_HEADER_DEFAULTS;
+  return {
+    enabled: !!o.enabled,
+    maxRequests: clampInt(o.maxRequests, d.maxRequests, 1, 200) ?? d.maxRequests,
+    timeoutMs: clampInt(o.timeoutMs, d.timeoutMs, 1000, 120000) ?? d.timeoutMs,
+    headers: headers.length ? headers : BG_HEADER_DEFAULTS,
+  };
 }
 
 /**

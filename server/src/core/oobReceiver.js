@@ -11,6 +11,7 @@ import http from 'node:http';
 import dgram from 'node:dgram';
 import { ErrorCode, AppError } from './errors.js';
 import { logger } from './logger.js';
+import { waitForAnyTokenIn } from './oobWaiters.js';
 
 // ── 加固配置 ────────────────────────────────────────────────────────────────
 const LISTEN_HOST = process.env.OOB_LISTEN_HOST || '127.0.0.1';
@@ -383,6 +384,17 @@ class OobReceiver {
       if (!this._waiters.has(token)) this._waiters.set(token, new Set());
       this._waiters.get(token).add(entry);
     });
+  }
+
+  /**
+   * [D108] 等待一组 token 中任意一个回连（背景哨兵一次投放 N 个 token 时使用）。
+   * 与 waitForToken 同一份 _received/_waiters 状态；首个命中即返回该 token（原样大小写）。
+   * @param {string[]} tokens
+   * @param {number} timeoutMs
+   * @returns {Promise<string|null>}
+   */
+  waitForAnyToken(tokens, timeoutMs) {
+    return waitForAnyTokenIn(this._received, this._waiters, tokens, timeoutMs, (t) => t);
   }
 
   isStarted() {

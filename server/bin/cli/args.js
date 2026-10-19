@@ -37,6 +37,9 @@ export function applyChannelFlag(a, args) {
   // [D87 2026-10-18] 外部协作端隧道（interactsh 协议）：开这条即同时开 oob 总开关
   // ——隧道是 oob 的一种回连拓扑，总开关不开检测器根本不跑。只要求扫描器能出网。
   if (a === '--oob-interactsh') { args.oob = true; args.oobInteractsh = true; return true; }
+  // [D108] 背景 OOB 哨兵（对标 Collaborator Everywhere）：开总开关 + background 子开关。
+  // 哨兵是 oob 的一种投放形态，总开关不开检测器拿不到隧道 ⇒ 一并打开。
+  if (a === '--oob-background') { args.oob = true; args.oobBackground = true; return true; }
   return false;
 }
 
