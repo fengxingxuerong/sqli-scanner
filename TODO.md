@@ -210,6 +210,27 @@ F18 上次 acceptance 的引擎崩溃码（0xC0000409）**未复现**，留观�
 
 ---
 
+## 2026-10-20 批次 D113 · 外部裁判认证场景扩面（VAmPI Bearer + DVWA 盲注 POST）
+
+**背景**：D112 之后外部裁判仍有缺口 —— ① 三个裁判全部匿名、无认证头，而 D91 的假阴性
+正是认证链路形状；② DVWA POST 真值都带错误回显，缺「仅布尔可分」的盲注形态。
+
+**本批**：
+- `e2e/vampi-lab/run.mjs` 加「自注册→登录拿 `auth_token`」链路 + 5 个端点
+  （官方 books `token_validator + filter_by` 带 Bearer 的安全端点 ×3；同一 Bearer 下
+  users 拼接真值 ×2）。判据加 `Bearer 认证端点：N 个（未测 M）`（未测≠零误报）。
+- `e2e/dvwa-lab/run.mjs` 加 `sqli_blind` medium 真值（盲注 POST），真值 4→5。
+- 两个 acceptance 定向均 1 PASS / 0 FAIL / 0 SKIP。
+
+**实测**：VAmPI 真值 2/2、同源 2/2、安全端点误报 0/5、Bearer 5 个全实跑；
+DVWA 真值 5/5、误报 0、证据不足 0。三裁判合计真值端点 **7 个**。
+
+**踩坑**：① VAmPI token 官方默认 60 秒过期（`tokentimetolive`）⇒ 扫描中途全 401 ⇒
+真假恒等（假零误报）⇒ 起靶场必须设 7200；② Bearer books 端点被输入校验剪枝只发
+5 请求（同款陷阱第三次）⇒ 显式 `validationSkip:false`。
+
+---
+
 ## 2026-10-20 批次 D112 · 外部裁判 3 号：DVWA（PHP+MySQL 栈）＋ POST 伴随字段假阴性修复
 
 **背景**：前两个外部裁判都是 SQLite + 非 PHP 栈 ⇒ 「检出率」只证明「在 SQLite 上能打」。

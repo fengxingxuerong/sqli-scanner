@@ -538,23 +538,33 @@ const SUITES = [
         return { facts: { 外部裁判2: '跳过（靶场未就绪）' }, pass: false, skipped: true, reason: 'VAmPI 双实例未启动' };
       }
       const m = /真值漏洞端点：检出 (\d+)\/(\d+)（漏检 (\d+)）/.exec(out);
-      const fp = /安全端点误报：(\d+)/.exec(out);
+      const fp = /安全端点误报：(\d+)\/(\d+)/.exec(out);
       const weak = /安全端点证据不足（请求<\d+）：(\d+)/.exec(out);
+      const untested = /Bearer 认证端点：(\d+) 个（未测 (\d+)/.exec(out);
       // 分母防缩水：真值端点必须实际跑到（删掉后 1/1 会变 0/0 而打印"通过"）
       const ranTruth = /GET http:\/\/[^ ]*\/users\/v1\/zzz/.test(out);
       const ranSafe = /vulnerable=0/.test(out);
-      const pass = /VAmPI 外部裁判通过/.test(out) && ranTruth && ranSafe;
+      // [D113] Bearer 形态必须实际跑到：认证链路不可用时该端点会被记为「未测」，
+      // 未测不等于零误报（「没测过」是本仓栽过三次的形状）。
+      const ranAuthTruth = /\[真值漏洞\+Bearer\]/.test(out);
+      const ranAuthSafe = /\[安全端点\+Bearer\]/.test(out);
+      const noUntested = untested ? untested[2] === '0' : false;
+      const pass =
+        /VAmPI 外部裁判通过/.test(out) && ranTruth && ranSafe && ranAuthTruth && ranAuthSafe && noUntested;
       return {
         facts: {
           外部裁判2: pass ? '✅ 通过' : '❌ 未通过',
           真值漏洞: m ? `${m[1]}/${m[2]}（漏检 ${m[3]}）` : '取不到',
-          安全端点误报: fp ? fp[1] : '取不到',
+          安全端点误报: fp ? `${fp[1]}/${fp[2]}` : '取不到',
           证据不足: weak ? weak[1] : '取不到',
+          Bearer端点: untested ? `${untested[1]} 个（未测 ${untested[2]}）` : '取不到',
         },
         pass,
         reason: pass ? null : !ranTruth || !ranSafe
           ? '外部裁判端点未实际执行（真值/对照端点缺失）'
-          : '外部裁判未通过（漏检／误报／安全端点没真测，见 stdout）',
+          : !ranAuthTruth || !ranAuthSafe || !noUntested
+            ? 'Bearer 认证端点未实际执行或认证链路不可用（未测 ≠ 零误报）'
+            : '外部裁判未通过（漏检／误报／安全端点没真测，见 stdout）',
       };
     },
   },
@@ -579,14 +589,16 @@ const SUITES = [
       const m = /真值漏洞端点：检出 (\d+)\/(\d+)（漏检 (\d+)）/.exec(out);
       const fp = /安全端点误报：(\d+)/.exec(out);
       const weak = /安全端点证据不足（请求<\d+）：(\d+)/.exec(out);
-      // 分母防缩水：三种形态的端点必须都实际跑到——删掉任一种后 3/3 仍会打印「通过」。
+      // 分母防缩水：四种形态的端点必须都实际跑到——删掉任一种后 5/5 仍会打印「通过」。
       //   · 真值漏洞 / cookie 注入点（本靶场独有的形态，本仓此前从未被外部证据覆盖）
       //   · 真值漏洞 / medium（POST 表单 + 转义绕过；D112 抓到漏检的就是这一条）
+      //   · 真值漏洞 / medium 盲注（POST 表单 + 无错误回显 ⇒ 仅布尔可分，D113 新增）
       //   · 安全端点 / impossible（同路径 A/B 对照，缺它则零误报无从谈起）
       const ranCookie = /\[真值漏洞\/high\].*cookie/.test(out);
-      const ranMedium = /\[真值漏洞\/medium\]/.test(out);
+      const ranMedium = /\[真值漏洞\/medium\].*POST/.test(out);
+      const ranBlindMedium = /POST \/vulnerabilities\/sqli_blind\//.test(out);
       const ranImpossible = /\[安全端点\/impossible\]/.test(out);
-      const both = ranCookie && ranMedium && ranImpossible;
+      const both = ranCookie && ranMedium && ranBlindMedium && ranImpossible;
       const pass = /DVWA 外部裁判通过/.test(out) && both;
       return {
         facts: {
@@ -594,11 +606,13 @@ const SUITES = [
           真值漏洞: m ? `${m[1]}/${m[2]}（漏检 ${m[3]}）` : '取不到',
           安全端点误报: fp ? fp[1] : '取不到',
           证据不足: weak ? weak[1] : '取不到',
-          形态覆盖: both ? 'cookie+POST+impossible' : `缺失（cookie=${ranCookie} medium=${ranMedium} impossible=${ranImpossible}）`,
+          形态覆盖: both
+            ? 'cookie+POST+盲注POST+impossible'
+            : `缺失（cookie=${ranCookie} medium=${ranMedium} blindMedium=${ranBlindMedium} impossible=${ranImpossible}）`,
         },
         pass,
         reason: pass ? null : !both
-          ? '外部裁判端点未实际执行（cookie/POST/impossible 形态缺失）'
+          ? '外部裁判端点未实际执行（cookie/POST/盲注POST/impossible 形态缺失）'
           : '外部裁判未通过（漏检／误报／安全端点没真测，见 stdout）',
       };
     },

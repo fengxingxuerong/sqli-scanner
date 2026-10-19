@@ -101,6 +101,18 @@ const ENDPOINTS = [
     desc: 'POST 表单 + 转义绕过（官方 medium.php：数值型无引号 ⇒ real_escape_string 拦不住）',
   },
   {
+    // [D113] 盲注 + POST 表单 + 转义绕过：官方 sqli_blind/medium.php 去掉 `or die`
+    // ⇒ 无错误回显，只剩 exists/MISSING 布尔（比 sqli/medium 更难一档：三通道只剩两通道）。
+    // 真值 curl 复核：id=1 AND 1=1# → exists；id=1 AND 1=2# → MISSING。
+    path: '/vulnerabilities/sqli_blind/',
+    level: 'medium',
+    kind: 'vuln',
+    method: 'POST',
+    body: { id: '1', Submit: 'Submit' },
+    test: ['id'],
+    desc: '盲注 + POST 表单（官方 medium.php：无 or die ⇒ 仅布尔可分）',
+  },
+  {
     path: '/vulnerabilities/sqli/?id=1&Submit=Submit',
     level: 'impossible',
     kind: 'safe',

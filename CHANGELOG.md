@@ -65,6 +65,35 @@
 
 ## [Unreleased]
 
+### 2026-10-20 批次 D113 · 外部裁判认证场景扩面（VAmPI Bearer + DVWA 盲注 POST）
+
+**动机**：D112 之后外部裁判的形态仍有缺口 —— ① 三个裁判**全部匿名、无认证头**，
+而本仓最贵的一类教训（D91 cookie 夹击假阴性）恰恰出在认证链路上；② DVWA 的 POST 表单
+真值都带错误回显，缺「仅布尔可分」的盲注形态。
+
+**VAmPI 扩面**（`e2e/vampi-lab/run.mjs`）：
+- 新增「自注册 → 登录拿 `auth_token`」链路（官方 `/users/v1/register` + `/login`，
+  响应字段是 `auth_token` 而非 `token`），**不依赖靶场种子用户**。
+- 新增 5 个端点：官方 `api_views/books.py:get_by_title`（`token_validator` 门禁 +
+  `filter_by` 参数化）带 Bearer ⇒ **认证 + 参数化 + 响应可分**的安全端点 3 个；
+  同一个 Bearer 头下的 `/users/v1/{username}` 拼接真值 2 个（D91 同型夹击的回归面）。
+- 判据新增：`安全端点误报：N/分母`、`Bearer 认证端点：N 个（未测 M）`，**未测不为 0 即红**
+  （认证链路不可用 ≠ 零误报）；acceptance 的 vampi 断言同步要求 Bearer 形态实际跑到。
+- ⚠ 靶场起法必须 `tokentimetolive=7200` —— 官方默认 60 秒，扫描中途全 401 ⇒ 真假恒等
+  （**假零误报**）；已写进 `e2e/vampi-lab/README.md`。
+
+**DVWA 扩面**（`e2e/dvwa-lab/run.mjs`）：新增 `sqli_blind` medium（POST 表单 +
+转义绕过 + **无错误回显，仅布尔可分**）真值端点，真值 4 → **5**。
+
+**实测**（两个定向门禁均 1 PASS / 0 FAIL / 0 SKIP）：
+- VAmPI：真值 **2/2**、同源复检 **2/2**、安全端点误报 **0/5**、证据不足 0、Bearer 5 个全实跑。
+- DVWA：真值 **5/5**、同源复检 1/1、误报 0、证据不足 0；新增盲注 POST 命中
+  `body·id·dbms=MySQL`（boolean，148 请求）。
+
+**首跑抓到一处判据缺口（同款陷阱第三次）**：VAmPI 5000 的 Bearer books 端点被
+「输入校验型可证安全跳过」剪枝只发 5 请求（D111/D112 已栽过两次的形状）⇒ 显式
+`validationSkip:false`，打满 144 请求后才计入零误报。三个外部裁判合计真值端点 **7 个**。
+
 ### 2026-10-20 批次 D112 · 外部裁判 3 号：DVWA（PHP+MySQL 栈，cookie 注入 + POST 表单）＋ 一条静默假阴性修复
 
 **动机**：前两个外部裁判（Juice Shop / VAmPI）都是 **SQLite + 非 PHP 栈** ⇒ 任何「检出率」

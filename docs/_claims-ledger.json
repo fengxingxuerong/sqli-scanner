@@ -117,6 +117,15 @@
       "refute_cmd": "node e2e/acceptance.mjs --only=dvwa（需 DVWA @8099 + MariaDB @3306 在跑）",
       "recheck_batch": "D112（2026-10-20）：新增外部裁判 3 号并实跑；同时复核了「外部裁判只有 SQLite 栈」这一口径缺口（前两个裁判均为 SQLite + 非 PHP）。",
       "caveat": "单轮；三个外部裁判合计 7 个真值端点，仍不足以支撑「全局检出率 N%」类结论；命中条数是同一注入点的多技术命中而非多个独立漏洞；cookie 注入点需 level>=2（默认 1 不测 cookie），套件显式 level=2 不代表默认配置覆盖率；medium 档可打穿是因为官方 SQL 为无引号数值型，不代表转义普遍可绕；DVWA 为外部项目，未就绪时套件 SKIP，不计通过。"
+    },
+    {
+      "id": "external-judge-vampi-bearer-d113",
+      "claim": "VAmPI 认证场景（D113）：带 Bearer JWT 的官方参数化端点 /books/v1/{title}（token_validator 门禁 + filter_by）零误报（3 个端点 0/3，均打满 122-144 请求）；同一 Bearer 头下 /users/v1/{username} 拼接真值仍 2/2 检出 ⇒ 认证头不破坏注入检出（D91 夹击假阴性的外部回归面）。",
+      "status": "verified",
+      "evidence": "e2e/vampi-lab/results/external-judge-2026-10-19-vampi.md 的 D113 追加段 + results/run-2026-10-20-d113.log（2026-10-20 01:41 复跑：真值 2/2、同源复检 2/2、安全端点误报 0/5、证据不足 0、Bearer 端点 5 个未测 0；acceptance --only=vampi 1 PASS/0 FAIL/0 SKIP）；靶场起法必须 tokentimetolive=7200（官方默认 60s 会让扫描中途全部 401 ⇒ 真假恒等）。",
+      "refute_cmd": "node e2e/acceptance.mjs --only=vampi（需 VAmPI 双实例 @5000/5001 在跑，且 tokentimetolive 已调大）",
+      "recheck_batch": "D113（2026-10-20）：外部裁判认证场景扩面；复核了「外部裁判全部匿名无认证头」这一口径缺口（D91 的假阴性正是认证链路形状，此前无外部证据）。",
+      "caveat": "单轮；Bearer 端点的注入点在路径段（book_title），Authorization 头本身不作为注入点（打了 token 会坏）⇒ 未覆盖「头注入」场景；登录链路用自注册随机账号，不依赖靶场种子数据；三个外部裁判合计 7 个真值端点，仍不能外推全局检出率。"
     }
   ]
 }

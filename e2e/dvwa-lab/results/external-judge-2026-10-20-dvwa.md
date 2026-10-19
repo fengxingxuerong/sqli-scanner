@@ -113,3 +113,33 @@ node e2e/dvwa-lab/run.mjs
 # 官方 acceptance 入口（定向；未就绪会如实 SKIP）
 node e2e/acceptance.mjs --only=dvwa
 ```
+
+---
+
+# [D113 2026-10-20] 扩面复跑：盲注 + POST 表单（追加）
+
+D112 的 4 个真值里有两条 POST 表单（sqli medium），但都带错误回显。真实场景里盲注
+（无回显、只靠布尔/时间）才是多数，于是补 **sqli_blind medium**：官方
+`vulnerabilities/sqli_blind/source/medium.php` 是 `$_POST['id']` + `real_escape_string`
++ 数值型无引号，且去掉 `or die` ⇒ **仅布尔可分**（三通道只剩两通道）。
+
+curl 复核：`id=1 AND 1=1#` → `User ID exists`；`id=1 AND 1=2#` → `MISSING`。
+
+## 复跑结果（2026-10-20 01:42，完整日志 `results/run-2026-10-20-d113.log`） —— 本地产物，`*.log` 按 `.gitignore` 不入库，关键数字已内联本表
+
+| 端点 | 档 | 类型 | 结果 | 命中技术 | 请求数 |
+|---|---|---|---|---|---|
+| `POST /vulnerabilities/sqli_blind/` | medium | 真值漏洞（盲注 POST） | ✅ 1 条 | boolean（`body·id·dbms=MySQL`） | 148 |
+| `POST /vulnerabilities/sqli/` | medium | 真值漏洞（错误回显 POST） | ✅ 3 条 | union, error, boolean | 89 |
+| `GET /vulnerabilities/sqli/?id=1` | low | 真值漏洞 | ✅ 3 条 | union, error, boolean | 57 |
+| `GET /vulnerabilities/sqli_blind/?id=1` | low | 真值漏洞 | ✅ 1 条 | boolean | 67 |
+| `GET /vulnerabilities/sqli_blind/` + cookie `id` | high | 真值漏洞（cookie 点） | ✅ 1 条 | boolean | 67 |
+| `GET /vulnerabilities/sqli/?id=1` | impossible | 安全对照 | ✅ 0 | - | 150 |
+| `GET /vulnerabilities/sqli_blind/?id=1` | impossible | 安全对照 | ✅ 0 | - | 150 |
+
+真值 **5/5（漏检 0）**；同源复检 1/1；误报 0；证据不足 0。
+`acceptance --only=dvwa`：**1 PASS / 0 FAIL / 0 SKIP**（形态覆盖 cookie+POST+盲注POST+impossible）。
+
+⚠ 观察项：本轮日志出现一次 `HTTP 超时（已达重试上限，放弃）`（sqli_blind low 的
+time 通道）—— 未影响判定（该点 boolean 已命中），但说明 high 档 cookie 端点的随机
+`sleep(2~4)` 噪声会偶发打穿 15s 超时；后续可考虑对该档放宽 timeoutMs 或记录为已知噪声。

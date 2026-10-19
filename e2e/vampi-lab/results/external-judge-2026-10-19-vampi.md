@@ -97,3 +97,52 @@ sqlmap -u "http://127.0.0.1:5000/users/v1/name1*" --batch --ignore-code=404 \
 - VAmPI 是外部项目，仓库不 vendor；未就绪时套件按设计 SKIP，不计通过。
 - 本报告对应提交前的工作区状态；运行产生的 `e2e/results/acceptance-report.partial.md`
   按 `.gitignore` 不入库，本文件保留关键事实与复跑命令。
+
+---
+
+# [D113 2026-10-20] 认证场景扩面：Bearer JWT + BOLA 端点（复跑追加）
+
+D110 只覆盖「匿名、无认证头」。真实渗透中扫描器几乎总是带着会话打的，而本仓最贵的
+一类教训恰恰出在认证链路上 —— **D91**：`--header "cookie:"` 双处存储 + axios 同名
+大小写头后写赢，124 个探针全打在未注入的值上，**静默假阴性**。本轮把 VAmPI 的认证面
+纳入外部裁判。
+
+## 靶场调整（必须）
+
+官方 token 默认 **60 秒**过期（`app.py: alive = getenv('tokentimetolive', 60)`）⇒
+一轮 100+ 请求的扫描会跨过期 ⇒ 中途全部 401 ⇒ 真假响应恒等（**假零误报 / 假漏检**）。
+起靶场时显式 `tokentimetolive=7200`（官方 env，README 已载）。
+
+## 端点与结果（2026-10-20 01:41 复跑，完整日志 `results/run-2026-10-20-d113.log`） —— 本地产物，`*.log` 按 `.gitignore` 不入库，关键数字已内联本表
+
+| 实例 | 端点 | 类型 | 结果 | 命中技术 | 请求数 |
+|---|---|---|---|---|---|
+| 5000 | `GET /users/v1/zzz` | 真值漏洞 | ✅ 3 条 | union, error, boolean（`path·zzz·dbms=SQLite`） | 95 |
+| 5000 + Bearer | `GET /users/v1/zzz` | 真值漏洞（认证场景） | ✅ 3 条 | union, error, boolean | 95 |
+| 5000 + Bearer | `GET /users/v1/name1` | 同源复检（认证场景） | ✅ 3 条 | union, error, boolean | 69 |
+| 5000 | `GET /users/v1/name1` | 同源复检 | ✅ 3 条 | union, error, boolean | 75 |
+| 5001 | `GET /users/v1/zzz` | 安全对照 | ✅ 0 | - | 123 |
+| 5001 | `GET /users/v1/name1` | 安全对照（良性输入） | ✅ 0 | - | 144 |
+| 5001 + Bearer | `GET /books/v1/{存在}` | 安全端点（认证 + 参数化） | ✅ 0 | - | 123 |
+| 5001 + Bearer | `GET /books/v1/{不存在}` | 安全端点（404 分支） | ✅ 0 | - | 122 |
+| 5000 + Bearer | `GET /books/v1/{存在}` | 安全端点（vuln 实例上仍参数化） | ✅ 0 | - | 144 |
+
+- 真值漏洞 **2/2（漏检 0）**；同源复检 **2/2**；安全端点误报 **0/5**；证据不足 **0**；
+  Bearer 端点 **5 个全部实跑（未测 0）**。
+- `acceptance --only=vampi`：**1 PASS / 0 FAIL / 0 SKIP**。
+
+## 首跑抓到的一处判据缺口（本轮同款陷阱第二次）
+
+5000 的 `/books/v1/{title}`（Bearer）首跑只发 **5 请求** —— 被「输入校验型可证安全
+跳过」剪枝（基线 200 → 单引号 404 ⇒ 判为白名单拦死）。这正是 D111 已栽过的形状
+（**5 请求的 0 检出不是零误报证据**）。处置：对该点显式 `validationSkip:false`，
+打满 144 请求后才计入零误报。同类端点（books 三条）现在全部强制打满。
+
+## 边界
+
+- Bearer 端点的注入点在**路径段**（book_title）；`Authorization` 头本身不作为注入点
+  （打了 token 会坏，测的就不是 SQLi）—— 用 `testParameter` 收敛。
+- 登录链路是「自注册 → 登录」，不依赖靶场种子用户（官方预置用户密码是 `pass1`，
+  但依赖种子数据会让靶场重建后判据失效）。
+- 三个外部裁判合计真值端点 7 个（Juice Shop 2 + VAmPI 1 + DVWA 4），仍不能外推
+  「全局检出率 N%」。
