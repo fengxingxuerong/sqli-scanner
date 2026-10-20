@@ -24,6 +24,12 @@ const REAL_ERRORS = [
   `SQLSTATE[42000]: Syntax error or access violation: 1064`, // PDO 形态
   `ORA-00933: SQL command not properly ended`, // Oracle
   `SQL0104N DB2 SQL Error`, // DB2
+  // [D118 2026-10-20] SQLite 强特征：收紧裸 `SQLite3` 后必须保持这些真报错形态命中
+  `no such table: users`, // SQLite 原生（此前**不在**通用 SIG，收紧后补入）
+  `no such column: foo`, // SQLite 原生
+  `SQL logic error near "x"`, // SQLite 原生
+  `SQLite3::SQLException: near "x": syntax error`, // SQLite C++ 驱动
+  `SQLite3 error: unable to open database file`, // SQLite 带错误词
 ];
 
 // 通用页面短语（非数据库报错）——必须不命中
@@ -33,6 +39,11 @@ const GENERIC_PAGES = [
   `See the SQLSTATE reference documentation for details`, // 文档页
   `SQLSTATE handling in PDO`, // 教程正文
   `This page explains common syntax error messages`, // 文档页
+  // [D118 2026-10-20] 裸 `SQLite3` 的真实误报源：DVWA/docs 默认页的一节标题。
+  // 爬虫扫全站（`--crawl`）时它把 instructions.php 的 doc 参数报成 3 条 High/CVSS 8.2
+  // 假漏洞 —— 收紧为「SQLite3 后须跟 `:` / `.` 或 error/exception」后必须不命中。
+  `<h2>SQLite3 SQL Injection</h2>`, // DVWA docs 页（误报源，逐字来自实测）
+  `<p>Support for SQLite3 is limited, before raising an issue</p>`,
 ];
 
 test('ERROR_SIG：真实库报错原文全部命中（收紧不得漏真）', () => {

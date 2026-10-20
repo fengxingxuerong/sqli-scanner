@@ -148,7 +148,9 @@ export function execMarkdown(d) {
   if (e.vulnCount) {
     const techs = e.techniques.join('/') || '-';
     out.push(`- 目标 ${d.meta.target} 共测试 ${e.pointCount} 个注入点，检出 **${e.vulnCount}** 条 SQL 注入漏洞（技术：${techs}），最高风险 **${e.riskLevel}**${e.dbms ? `，数据库 ${e.dbms}` : ''}。`);
-    if (e.impact) {
+    if (e.impact && e.impact.kind === 'databases') {
+      out.push(`- **影响实证**：本次已枚举数据库 **${e.impact.dbCount}** 个（样例：${e.impact.sampleDbs.join('、')}），**跨库可读性已被证实**；未继续拖表/行（受 extract 作用域约束）。`);
+    } else if (e.impact) {
       out.push(`- **影响实证**：本次已提取 ${e.impact.tableCount} 张表 / ${e.impact.rowCount} 行数据（样例：${e.impact.sampleTables.join('、')}），数据泄露风险已被验证成立。`);
     } else {
       out.push('- 影响实证：本次未开启拖库（enableExtract），影响面按检出通道定性推断（union/error 通道通常可达数据读出）。');
@@ -238,9 +240,11 @@ export function deliveryHtml(d, esc) {
     const techs = esc(e.techniques.join('/') || '-');
     execLines.push(`目标 ${esc(d.meta.target)} 共测试 ${e.pointCount} 个注入点，检出 <b>${e.vulnCount}</b> 条 SQL 注入漏洞（技术：${techs}），最高风险 <b>${esc(e.riskLevel)}</b>${e.dbms ? `，数据库 ${esc(e.dbms)}` : ''}。`);
     execLines.push(
-      e.impact
-        ? `影响实证：本次已提取 ${e.impact.tableCount} 张表 / ${e.impact.rowCount} 行数据（样例：${esc(e.impact.sampleTables.join('、'))}），数据泄露风险已被验证成立。`
-        : '影响实证：本次未开启拖库（enableExtract），影响面按检出通道定性推断。'
+      e.impact && e.impact.kind === 'databases'
+        ? `影响实证：本次已枚举数据库 <b>${e.impact.dbCount}</b> 个（样例：${esc(e.impact.sampleDbs.join('、'))}），<b>跨库可读性已被证实</b>；未继续拖表/行（受 extract 作用域约束）。`
+        : e.impact
+          ? `影响实证：本次已提取 ${e.impact.tableCount} 张表 / ${e.impact.rowCount} 行数据（样例：${esc(e.impact.sampleTables.join('、'))}），数据泄露风险已被验证成立。`
+          : '影响实证：本次未开启拖库（enableExtract），影响面按检出通道定性推断。'
     );
   } else {
     execLines.push(`目标 ${esc(d.meta.target)} 共测试 ${e.pointCount} 个注入点，<b>未检出漏洞</b>。`);

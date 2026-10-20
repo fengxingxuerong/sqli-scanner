@@ -117,16 +117,28 @@ const fmtDuration = (ms) => {
 /** 从 data 拖库树汇总影响面（表数/行数/样例表名） */
 export function dataImpactOf(data) {
   const rows = data && typeof data === 'object' ? data.rows : null;
-  if (!rows || typeof rows !== 'object') return null;
-  const tables = Object.entries(rows).filter(([, v]) => Array.isArray(v) && v.length);
-  if (!tables.length) return null;
-  let rowCount = 0;
-  for (const [, v] of tables) rowCount += v.length;
-  return {
-    tableCount: tables.length,
-    rowCount,
-    sampleTables: tables.slice(0, 3).map(([k]) => k),
-  };
+  const tables = rows && typeof rows === 'object'
+    ? Object.entries(rows).filter(([, v]) => Array.isArray(v) && v.length)
+    : [];
+  if (tables.length) {
+    let rowCount = 0;
+    for (const [, v] of tables) rowCount += v.length;
+    return {
+      kind: 'rows',
+      tableCount: tables.length,
+      rowCount,
+      sampleTables: tables.slice(0, 3).map(([k]) => k),
+    };
+  }
+  // [D118 2026-10-20] 第二档：**已枚举库名**但未拖表/行（`--dbs` / `--schemas`）。
+  // 反证：DVWA 上 `--dbs` 实测拿到 `["dvwa","test"]`，但这里原先只看 data.rows ⇒ 返回 null
+  // ⇒ 报告写「本次未开启拖库」，把「已证实可读数据库清单」降级成「什么都没做」——
+  // 交付物里最有说服力的那一档被丢掉了。
+  const dbs = Array.isArray(data?.databases) ? data.databases.filter((x) => typeof x === 'string' && x) : [];
+  if (dbs.length) {
+    return { kind: 'databases', dbCount: dbs.length, sampleDbs: dbs.slice(0, 5) };
+  }
+  return null;
 }
 
 /**

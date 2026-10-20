@@ -210,6 +210,27 @@ F18 上次 acceptance 的引擎崩溃码（0xC0000409）**未复现**，留观�
 
 ---
 
+## 2026-10-20 批次 D118 · 「可提交报告」核验：修数据实证 + SQLite3 误报
+
+**起因**：评估「一个目标 → 可提交报告」。真靶场跑一遍四件套后逐条打分，发现两个「做错了」：
+① `--dbs` 拿到 payload 残片（回显 payload 使标记自匹配）⇒ 修为提取前 stripEchoedPayload；
+② 静态文档页 `<h2>SQLite3 SQL Injection</h2>` 命中裸签名 ⇒ 报 3 条 High 假漏洞
+⇒ 收紧 SQLite3 签名 + 补 SQLite 强特征。
+
+**新增**：acceptance 第 25 套件 `extract-proof`（真库名，非残片）；errorSig 语料守卫。
+
+**当前结论**：单目标（URL + 参数 + 认证）已能一条命令出可提交报告。
+
+### 待推进（按优先级）
+
+1. **表单点被预筛选误杀**（接「给域名自动爬」的最后一公里）：
+   `node server/bin/cli.js -u "http://127.0.0.1:8099/vulnerabilities/sqli/" --forms --level 5
+   --cookie "security=low; PHPSESSID=x"` ⇒ 发现 3 点、预筛选跳过 3/3、0 检出；
+   同目标 `--method POST --body '{"id":"1","Submit":"Submit"}'` 检出 3 条。
+   ⇒ 查 prefilter 对 body/form 点的判据（怀疑伴随字段或 method 处理）。
+2. 表单 `method="GET"` 应生成 url 点而非 body 点（现按 body 发，靠 `$_REQUEST` 碰运气）。
+3. 报告补「修复后复扫验证」字段（工单闭环用）。
+
 ## 2026-10-20 批次 D117 · Benchmark 注入面全量（query 210 + header 67）
 
 **本批**：`cases-query.json`（210）+ `cases-header.json`（67）两套全量清单，独立于门禁基线

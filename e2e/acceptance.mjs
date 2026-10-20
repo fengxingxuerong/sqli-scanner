@@ -668,6 +668,38 @@ const SUITES = [
     },
   },
   {
+    // [D118 2026-10-20] 「数据泄露实证」验收：报告里最有说服力的一块，必须是真数据。
+    // 此前 DVWA low 上 `--dbs` 拿到的是 **payload 残片**（响应回显 payload ⇒ 标记匹配命中
+    // payload 自身），修复（提取前 stripEchoedPayload）后拿到真库名。本套件把这条钉在
+    // 真靶场上：真库名 ≥1、无 payload 残片、且必须真发过请求。
+    id: 'extract-proof',
+    title: '数据泄露实证（提取到的必须是真库名，不得是 payload 残片）',
+    needs: [],
+    optional: true,
+    run: () => run('node', ['e2e/extract-proof/run.mjs']),
+    assert: (out) => {
+      if (/\[SKIP\] DVWA 不可达/.test(out)) {
+        return { facts: { 数据实证: '跳过（DVWA 未就绪）' }, pass: false, skipped: true, reason: 'DVWA 未起（需 PHP 8.3 + MariaDB）' };
+      }
+      const dbs = /data\.databases = (\[[^\]]*\])/.exec(out);
+      const residue = /payload 残片：(\d+)/.exec(out);
+      const vulns = /检出漏洞：(\d+) 条/.exec(out);
+      const req = /请求 (\d+)/.exec(out);
+      const pass = /数据泄露实证成立/.test(out);
+      return {
+        facts: {
+          数据实证: pass ? '✅ 成立' : '❌ 不成立',
+          databases: dbs ? dbs[1] : '取不到',
+          残片: residue ? residue[1] : '取不到',
+          漏洞: vulns ? vulns[1] : '取不到',
+          请求: req ? req[1] : '取不到',
+        },
+        pass,
+        reason: pass ? null : '数据泄露实证不成立（未检出漏洞 / 未拿到真库名 / 拿到 payload 残片，见 stdout）',
+      };
+    },
+  },
+  {
     id: 'report-contract',
     title: '报告契约（自报字段必须与真实状态一致）',
     needs: ['mysql'],

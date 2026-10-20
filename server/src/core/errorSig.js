@@ -20,7 +20,12 @@
 //
 // 当前集合 = 历史两份的**并集**（逐项人工合并，大小写等价项已折叠：
 // `unclosed quotation`≡`Unclosed quotation`、`incorrect syntax near`≡`Incorrect syntax near`；
-// `sqlite3\.` 被裸 `SQLite3` 覆盖故弃）。收紧/新增形态时**只改这一处**。
+// `sqlite3\.` 曾被裸 `SQLite3` 覆盖故弃 —— [D118 2026-10-20] 裸名**已被真实误报打回**：
+//   DVWA `instructions.php?doc=PDF' AND extractvalue(...)` 的响应是 docs 默认页，页内
+//   `<h2>SQLite3 SQL Injection</h2>` 命中裸 `SQLite3` ⇒ 误报 High/CVSS 8.2（爬虫扫 35 个点时
+//   报出 3 条假漏洞）。现收紧为「SQLite3 后必须跟 `:` / `.` 或 error/exception」——
+//   真实报错形态（`SQLite3::SQLException` / `SQLite3.OperationalError` / `SQLite3 error`）全保留。
+// 收紧/新增形态时**只改这一处**。
 // ============================================================================
 
 /**
@@ -29,6 +34,6 @@
  * @type {RegExp}
  */
 export const SQL_ERROR_SIG =
-  /(SQL syntax|mysql_fetch|ORA-\d{5}|Microsoft SQL Server|PostgreSQL.*ERROR|SQLite3|syntax error at or near|XPATH syntax error|Incorrect syntax near|near\s+["'][^\n]{0,80}?["']\s*:\s*syntax error|unterminated quoted string|Unclosed quotation|extractvalue|updatexml|conversion failed|unknown column|Division by zero|SQL\d{4}[NRT]|DB2 SQL Error|SQLSTATE\s*\[|PG::|unrecognized token|Adaptive Server|Sybase\s*(?:error|message)|SQL error code|Firebird.*(?:error|exception)|isc_\d+|Informix\s+SQL|Informix.*(?:error|exception)|JdbcSQLException|org\.h2\.jdbc|org\.hsqldb|HSQLDB.*(?:error|exception)|org\.apache\.derby|Derby.*SQLException|Syntax error in SQL statement|Syntax error: Encountered|Cannot parse|Microsoft Access|ODBC|Jet.*Database|MonetDB.*(?:error|exception)|MonetDB\s+\d{5})/i;
+  /(SQL syntax|mysql_fetch|ORA-\d{5}|Microsoft SQL Server|PostgreSQL.*ERROR|SQLite3?(?:[:.]|[\s-]*(?:error|exception))|syntax error at or near|XPATH syntax error|Incorrect syntax near|near\s+["'][^\n]{0,80}?["']\s*:\s*syntax error|unterminated quoted string|Unclosed quotation|extractvalue|updatexml|conversion failed|unknown column|Division by zero|SQL\d{4}[NRT]|DB2 SQL Error|SQLSTATE\s*\[|PG::|unrecognized token|no such (?:table|column|function)|SQL logic error|Adaptive Server|Sybase\s*(?:error|message)|SQL error code|Firebird.*(?:error|exception)|isc_\d+|Informix\s+SQL|Informix.*(?:error|exception)|JdbcSQLException|org\.h2\.jdbc|org\.hsqldb|HSQLDB.*(?:error|exception)|org\.apache\.derby|Derby.*SQLException|Syntax error in SQL statement|Syntax error: Encountered|Cannot parse|Microsoft Access|ODBC|Jet.*Database|MonetDB.*(?:error|exception)|MonetDB\s+\d{5})/i;
 
 export default SQL_ERROR_SIG;

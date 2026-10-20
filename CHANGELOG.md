@@ -65,6 +65,44 @@
 
 ## [Unreleased]
 
+### 2026-10-20 批次 D118 · 「给目标出可提交报告」能力核验：修掉两个真缺陷
+
+**起因**：评估「一个目标 → 可直接提交的漏洞报告」这条链路是否成立。先跑一遍真靶场
+（DVWA low，外部裁判 3 号）交付四件套，再逐条对照客户交付标准打分，结果发现两个
+**不是「没做」而是「做错了」**的缺陷（都发生在报告最有说服力的一块）。
+
+**缺陷①：数据泄露实证是 payload 残片（比空更糟）**
+`--dbs` 实测拿到 `["'", "CAST((SELECT GROUP_CONCAT(schema_name SEPARATOR '", "') ..."]`。
+根因：DVWA low 的 `<pre>ID: {$id}` 把用户输入原样回显 ⇒ `body.match(/__S__(.*?)__E__/)`
+命中的第一处是 **payload 文本里的标记**，不是 SQL 结果。
+修：提取前先 `stripEchoedPayload(body, payload)` —— 该工具 ErrorDetector /
+DBFingerprinter / blindExtractor **早已在用**（含 SQL 转义与 JSON 转义变体），
+**唯独提取主路径没接**。修复后：`--dbs` → `["dvwa","test"]`；
+`--dump -D dvwa -T users` → 5 行真实数据（含密码 hash）。
+同步修：`dataImpactOf` 原先只看 `data.rows` ⇒ 枚举到库名却仍写「未开启拖库」；
+现分三档（rows / databases / 无）。
+
+**缺陷②：SQLite3 裸签名在静态文档页上误报**
+`--crawl 2 --forms` 扫 DVWA 全站（35 点）报出 3 条 High/CVSS 8.2 假漏洞，全在
+`instructions.php?doc=` 上 —— 该页有一节 `<h2>SQLite3 SQL Injection</h2>`，
+命中 ERROR_SIG 里的裸 `SQLite3`。基线对比救不了（注入后返回的是另一个页面）。
+修：`SQLite3` 收紧为须跟 `:` / `.` / error / exception（真实驱动形态
+`SQLite3::SQLException`、`SQLite3.OperationalError` 全保留）；
+同时补进通用 SIG 里此前缺失的 SQLite 强特征 `no such table/column/function`、
+`SQL logic error`（否则收紧后 SQLite 报错通道会掉）。修复后同一轮 35 点 0 检出。
+
+**新增守卫**：acceptance 第 25 个套件 `extract-proof`（真靶场：真库名 ≥1、无 payload
+残片、必须真发过请求）；`errorSig.specificity.test.js` 追加两组语料（SQLite 真报错必命中 /
+DVWA docs 误报源必不命中）。
+
+**当前结论**：**单目标（URL + 参数 + 认证）→ 一条命令出可提交报告**：四件套含
+元信息 / 执行摘要 / 攻击路径 / CWE·CVSS / 逐条 PoC（curl + 原始报文）/ 按技术通道的
+修复建议 / 影响实证 / 授权声明。仍**不成立**的是「给一个域名让它自己爬」——见下。
+
+**已知缺口（下一批）**：`--forms` / 爬虫抓到的表单点被**预筛选一并跳过**
+（DVWA low 的 GET 表单页：`--forms --level 5` 发现 3 点、预筛选跳过 3/3、0 检出，
+而同一目标显式 `--method POST --body` 能检出 3 条）。
+
 ### 2026-10-20 批次 D117 · Benchmark 注入面全量：query 210 + header 67
 
 **动机**：D116 只是「参数名形态全量」（74 条，其中 query 仅 7 条）。Benchmark 池子里

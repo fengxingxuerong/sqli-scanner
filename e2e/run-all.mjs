@@ -116,6 +116,8 @@ const LABS = [
   // 逐条标注真值；补前三个裁判都没有的 **HTTP header 注入面** 与参数名注入形态。
   // env：BENCHMARK_BASE（默认 https://127.0.0.1:8443/benchmark，deploy profile 是 https）。
   { name: 'benchmark-lab', desc: '外部裁判 4 号（OWASP Benchmark：官方标注真值须全检出 + header/参数名注入面）', entry: 'e2e/benchmark-lab/run.mjs', deps: [] },
+  // [D118] 数据泄露实证：提取到的必须是真库名，不得是 payload 残片（真靶场 DVWA low）。
+  { name: 'extract-proof', desc: '数据泄露实证（--dbs 必须拿到真库名而非 payload 残片）', entry: 'e2e/extract-proof/run.mjs', deps: [] },
   { name: 'pg-osshell', desc: 'PG os-shell 真机闭环（COPY FROM PROGRAM 落表 → 回显）', entry: 'e2e/oob-real-lab/pg-osshell.e2e.mjs', deps: ['pg'] },
   { name: 'concurrent-isolation', desc: '并发多扫描隔离性（PG+MySQL 混扫不串扰）', entry: 'e2e/concurrent-isolation/e2e.mjs', deps: ['pg', 'sandbox'] },
   { name: 'csrf-lab', desc: 'CSRF 防护目标闭环（取页 token → 携带 → 检出）', entry: 'e2e/csrf-lab/e2e.mjs', deps: ['sandbox'] },

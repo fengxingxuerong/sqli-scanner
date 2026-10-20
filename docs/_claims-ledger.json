@@ -164,6 +164,15 @@
       "refute_cmd": "node e2e/acceptance.mjs --only=benchmark（需 Benchmark @https://127.0.0.1:8443 + HSQLDB @9001 在跑）",
       "recheck_batch": "D115（2026-10-20）：推翻 D114 的 4/12；D116：扩到 74 条（参数名全量）；D117：query/header 两种形态全量（210 + 67），累计有效 327 条。",
       "caveat": "Benchmark 是合成靶场：178/178 不能外推真实系统检出率（WAF / 参数签名 / JSON·XML body 未覆盖）；finding 数是同一注入点的多技术命中而非独立漏洞数；参数名形态依赖 testParamNames、header 形态依赖 testHeaders（opt-in）；`{call <过程名>}` 4 条真值未检出是明确能力缺口（存储过程名注入），不计入分母但其安全侧 0/3 已计入判据；113 条 prepared/其它形态未纳入；Benchmark 未就绪时套件 SKIP 不计通过。"
+    },
+    {
+      "id": "deliverable-extract-proof-d118",
+      "claim": "「给一个目标出可提交漏洞报告」（D118）：单目标（URL + 参数 + 认证）一条 `one-click-scan` 产出四件套（html/md/json/manifest，含 CWE·CVSS / PoC curl / 按技术通道修复建议 / 影响实证 / 授权声明）；数据实证经真靶场验收 —— DVWA low 上 `--dbs` → [\"dvwa\",\"test\"]、`--dump -D dvwa -T users` → 5 行真数据。",
+      "status": "verified",
+      "evidence": "e2e/extract-proof/run.mjs（acceptance 第 25 套件，2026-10-20：真库名 dvwa/test、残片 0、漏洞 3、请求 71、PASS）；reports/127.0.0.1-2026-10-20T15-09-15/（--dump 报告写「已提取 1 张表 / 5 行数据」）；server/tests/errorSig.specificity.test.js 6 例全绿。",
+      "refute_cmd": "node e2e/acceptance.mjs --only=extract-proof（需 DVWA @8099 在跑）",
+      "recheck_batch": "D118（2026-10-20）：核验「可提交报告」能力；复核了「数据实证块」——此前产出的是 payload 残片（假证据）。",
+      "caveat": "**不成立的场景：给一个域名自动爬** —— `--forms`/爬虫抓到的表单点会被预筛选一并跳过（DVWA low 实测发现 3 点、跳过 3/3、0 检出，而显式 POST body 能检出 3 条），已登记下一批；PoC 复现与 CVSS 均为启发式（CVSS 明示「非逐条人工评定」）；WAF/签名/JSON·XML body 形态未覆盖。"
     }
   ]
 }
