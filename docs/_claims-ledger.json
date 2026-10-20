@@ -148,11 +148,22 @@
     {
       "id": "external-judge-benchmark-d114",
       "claim": "OWASP Benchmark 外部裁判 4 号（D114）：20/504 sqli 子集实跑（2026-10-20）真值 4/12（query 3/10、header 1/2）、安全对照 0/8、证据不足 0；已知漏检缺口，按 DVGA 同口径登记为参考靶场，不接门禁。",
-      "status": "verified",
+      "status": "refuted",
       "evidence": "e2e/benchmark-lab/results/benchmark-2026-10-20.md（JDK17 + Maven3.9 + BenchmarkJava 1.2 + HSQLDB 2.7.4，HTTPS 8443；query 真值 3/10、header 1/2、安全 0/8）；header 首跑 lab 因 level=2 未开 testHeaders ⇒ 0 请求，已修为显式 testHeaders；复跑命令与逐例漏检见该文件。",
       "refute_cmd": "BENCHMARK_BASE=https://127.0.0.1:8443/benchmark node e2e/benchmark-lab/run.mjs（需 Benchmark 已部署）",
       "recheck_batch": "D114（2026-10-20）：接线 + 实跑；已知 query 7 / header 1 漏检，未修，不得当作 Benchmark 检出率引用。",
-      "caveat": "子集 ≠ 全集（20/504）且单轮；4/12 只代表该子集/本次运行；参考靶场不接 acceptance/run-all，未就绪时 SKIP，不计通过。"
+      "caveat": "子集 ≠ 全集（20/504）且单轮；4/12 只代表该子集/本次运行；参考靶场不接 acceptance/run-all，未就绪时 SKIP，不计通过。",
+      "refuted_by": "external-judge-benchmark-d115",
+      "refuted_reason": "D115（2026-10-20）复跑推翻：D114 记的「query 3/10、header 1/2、已知漏检缺口」不是引擎缺陷。7 条 query 漏检里 3 条（BenchmarkTest00037/00038/00039）是官方「参数名注入」变体（`param = name`，服务端要求值===类名才取参数名）—— 按普通 query 参数发时 param 恒为空，注入根本没进查询（基线/真/假三种响应字节相同）；另 4 条是 level=2 下 error 通道命中但 union/boolean 未启动的正常情况。改用 testParamNames + `?<payload>=<类名>` 后 12/12 全检出（acceptance --only=benchmark 1 PASS）。按 §3.5 推翻协议保留旧数字，结论作废。"
+    },
+    {
+      "id": "external-judge-benchmark-d115",
+      "claim": "OWASP Benchmark 外部裁判（D115，Java + Spring + HSQLDB）：官方 expectedresults-1.2.csv 标注的子集（12 真值 + 8 安全对照，共 20/504 个 sqli 用例）上，真值 12/12 全部检出、官方标注安全用例 0/8 误报、证据不足 0；覆盖前三个外部裁判都没有的 HTTP header 注入面（2/2 检出）与参数名注入形态（3/3，需 testParamNames）。",
+      "status": "verified",
+      "evidence": "e2e/benchmark-lab/results/external-judge-2026-10-20-benchmark.md + results/run-2026-10-20.log（2026-10-20 21:16：12/12、0/8、命中 dbms=HSQLDB；acceptance --only=benchmark 1 PASS/0 FAIL/0 SKIP）；真值来自官方 CSV 与各用例 @WebServlet/value 源码，非本仓断言。",
+      "refute_cmd": "node e2e/acceptance.mjs --only=benchmark（需 Benchmark @https://127.0.0.1:8443 + HSQLDB @9001 在跑）",
+      "recheck_batch": "D115（2026-10-20）：推翻 D114 的 4/12 结论（runner 用法未对上「参数名注入」语义），复跑 12/12。",
+      "caveat": "子集 ≠ 全集：20/504，不能外推为「Benchmark 检出率 N%」，更不能与官方 scorecard 百分比相提并论；12 条 finding 是同一注入点的多技术命中而非 12 个独立漏洞；参数名形态依赖 testParamNames、header 形态依赖 testHeaders（均 opt-in，不代表默认配置覆盖率）；本子集不含 {call 存储过程用例；Benchmark 为外部项目，未就绪时套件 SKIP 不计通过。"
     }
   ]
 }

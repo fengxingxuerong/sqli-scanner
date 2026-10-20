@@ -210,6 +210,32 @@ F18 上次 acceptance 的引擎崩溃码（0xC0000409）**未复现**，留观�
 
 ---
 
+## 2026-10-20 批次 D115 · 外部裁判 4 号：OWASP Benchmark ＋ 推翻 D114 的 4/12 结论
+
+**背景**：前三号裁判都没有 **HTTP header 位置的注入点**。OWASP Benchmark（504 个 CWE-89
+用例，官方 CSV 逐条标注真值）补这块，并带来「同族 A/B」能力。
+
+**本批**：新增 `e2e/benchmark-lab/`（run.mjs + README + results 报告）；acceptance 增
+`benchmark` 套件（第 24 个）；run-all / e2e/README 登记；README 套件数 23→24。
+
+**环境打通**（全是坑）：JDK17（华为云）+ Maven 3.9（archive.apache.org）+ `-Dspotless.apply.skip=true`
++ **`-Pdeploy` 打包**（HSQLDB server / init 是 deploy profile 的 antrun execution；
+缺了 = `Connection refused` 或 `object not found: USERS`）+ cargo 到 **https/8443 自签**。
+
+**推翻链（D114 → D115）**：D114（并发会话）记「query 3/10、header 1/2，已知漏检缺口 ⇒
+仅作参考靶场、不接门禁」。本批复跑 9/12，逐条查官方源码后定位：00037/00038/00039 是
+**参数名注入**变体（`param = name`，要求值 === 类名）⇒ 按普通 query 参数发时 param 恒为空，
+注入没进查询（基线/真/假响应字节全同）。改用 `?<payload>=<类名>` + `testParamNames` 后
+**12/12 全检出**；台账 d114 置 refuted、新立 d115。
+
+**实测**：真值 12/12、安全对照 0/8 误报、证据不足 0、header 面 2/2、`acceptance
+--only=benchmark` 1 PASS / 0 FAIL / 0 SKIP。
+
+**待推进**：
+- 子集扩到全集（504 个 sqli）：每端点 60~150 请求，全跑约数小时；可分批（先 57 个参数名形态）。
+- `{call` 存储过程用例（57 个）未纳入子集：需先确认引擎对 HSQLDB CALL 的支持面。
+- Benchmark 的 XSS/命令注入等其它类别不在判据范围（本仓只测 SQLi）。
+
 ## 2026-10-20 批次 D113 · 外部裁判认证场景扩面（VAmPI Bearer + DVWA 盲注 POST）
 
 **背景**：D112 之后外部裁判仍有缺口 —— ① 三个裁判全部匿名、无认证头，而 D91 的假阴性

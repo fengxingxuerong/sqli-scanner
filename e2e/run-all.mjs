@@ -112,6 +112,10 @@ const LABS = [
   // DVWA 补 **MySQL 方言 + cookie 注入点 + POST 表单伴随字段**，官方四档难度里的
   // impossible（PDO 参数化）即同路径零误报对照。env：DVWA_BASE（默认 8099）。
   { name: 'dvwa-lab', desc: '外部裁判 3 号（DVWA：cookie 注入 + POST 表单须检出 + 同路径 impossible 档零误报）', entry: 'e2e/dvwa-lab/run.mjs', deps: [] },
+  // [D115] 外部裁判 4 号：OWASP Benchmark（Java + Spring + HSQLDB）。官方 expectedresults
+  // 逐条标注真值；补前三个裁判都没有的 **HTTP header 注入面** 与参数名注入形态。
+  // env：BENCHMARK_BASE（默认 https://127.0.0.1:8443/benchmark，deploy profile 是 https）。
+  { name: 'benchmark-lab', desc: '外部裁判 4 号（OWASP Benchmark：官方标注真值须全检出 + header/参数名注入面）', entry: 'e2e/benchmark-lab/run.mjs', deps: [] },
   { name: 'pg-osshell', desc: 'PG os-shell 真机闭环（COPY FROM PROGRAM 落表 → 回显）', entry: 'e2e/oob-real-lab/pg-osshell.e2e.mjs', deps: ['pg'] },
   { name: 'concurrent-isolation', desc: '并发多扫描隔离性（PG+MySQL 混扫不串扰）', entry: 'e2e/concurrent-isolation/e2e.mjs', deps: ['pg', 'sandbox'] },
   { name: 'csrf-lab', desc: 'CSRF 防护目标闭环（取页 token → 携带 → 检出）', entry: 'e2e/csrf-lab/e2e.mjs', deps: ['sandbox'] },

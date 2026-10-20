@@ -35,11 +35,6 @@
       "name": "dvga-lab",
       "since": "2026-10-20",
       "why": "外部裁判（GraphQL 面）的**能力缺口记录**，不是回归判据：DVGA 官方 views.py:320 的 pastes(filter) 是真 SQLi，但注入点在 POST body 的 GraphQL 查询串内部；引擎当前只做 JSON 叶子整串替换，生成的不是合法 GraphQL ⇒ 真值点如实 0/1。按设计保持红，**不接 acceptance/run-all**，也不为了让门禁绿而删端点或放宽判据。它另外抓到并已修复的 search(keyword) 误报（JSON 转义回显）由 server/tests/echoStrip.jsonEcho.test.js 守；跑法与证据见 e2e/dvga-lab/README.md，待 GraphQL 内嵌注入能力落地后再转门禁。"
-    },
-    {
-      "name": "benchmark-lab",
-      "since": "2026-10-20",
-      "why": "OWASP Benchmark 20/504 子集（query 真值 10 + query 安全 8 + header 真值 2）。官方 expectedresults-1.2.csv 逐条真值，但当前实跑是**已知漏检缺口**：真值 4/12（query 3/10、header 1/2）、安全对照 0/8。header 用例首跑因 lab 用了 level=2 且未开 testHeaders ⇒ 0 请求/无注入点，已修为显式 testHeaders；query 7 例真值仍漏检。按 DVGA 同口径登记为参考/缺口靶场，**不接 acceptance/run-all**，待缺口修复后再转门禁。证据/复跑见 e2e/benchmark-lab/README.md 与 results/。"
     }
   ]
 }

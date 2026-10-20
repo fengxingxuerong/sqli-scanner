@@ -65,6 +65,42 @@
 
 ## [Unreleased]
 
+### 2026-10-20 批次 D115 · 外部裁判 4 号：OWASP Benchmark 接入 ＋ 推翻 D114 的 4/12 结论
+
+**动机**：前三号外部裁判（Juice Shop / VAmPI / DVWA）技术栈各异，但**都没有 HTTP header
+位置的注入点**（D113 待推进点名过）。OWASP Benchmark 补这块，且带来前三号都没有的东西：
+官方 `expectedresults-1.2.csv` 逐条标注每个用例是否真有漏洞 ⇒ 可做「同族 A/B」。
+
+**新增**：`e2e/benchmark-lab/`（`run.mjs` + README + results 报告）；acceptance 增
+`benchmark` 套件（第 24 个，optional SKIP）；run-all / e2e/README 登记；README 套件数 23→24。
+
+**环境（本机从零打通，全是坑）**：JDK 17（华为云镜像，本机原先只有 TRAE 内置 JRE 无 javac）
++ Maven 3.9（archive.apache.org，其余镜像 404）+ `-Dspotless.apply.skip=true`（tarball 无
+`origin/master` ref）+ **`-Pdeploy` 打包**（HSQLDB server 与 init 是 deploy profile 里 antrun
+的两个 execution，缺了就是 `Connection refused` / `object not found: USERS`）+ cargo 部署到
+**https/8443 自签**（不是 8080，引擎需 `insecureTls`）。
+
+**首跑 9/12 → 复跑 12/12（推翻链）**：
+- **原结论（D114，并发会话提交 e5674a9）**：「20/504 子集，query 真值 3/10、header 1/2，
+  已知漏检缺口 ⇒ 按 DVGA 同口径登记为**参考靶场、不接门禁**」。
+- **反证（本批）**：三条漏检（BenchmarkTest00037/00038/00039）经查官方源码是**「参数名注入」
+  变体** —— `param = name`，且服务端要求**参数值 === 类名**才把参数名当 param。按普通 query
+  参数发 `?类名=baseline` 时 `value != 类名` ⇒ param 恒为 `""` ⇒ SQL 里 `PASSWORD=''`
+  ⇒ **注入根本没进查询**（实测基线/真/假三种响应字节完全相同）。改用
+  `?<payload>=<类名>` + 引擎 `testParamNames`（D93）后三条全部检出（`paramName·BenchmarkTest0003x`）。
+  该类用例在 504 个 sqli 里共 **57 个**。
+- **新结论**：真值 **12/12 全检出**、官方标注安全用例 **0/8 误报**、证据不足 0；
+  header 注入面 2/2 检出（`header·BenchmarkTest00018`，dbms=HSQLDB）。
+  `acceptance --only=benchmark` **1 PASS / 0 FAIL / 0 SKIP** ⇒ 具备接门禁的条件。
+- **台账**：`external-judge-benchmark-d114` 置 `refuted`（`refuted_by=d115`，旧数字保留），
+  新立 `external-judge-benchmark-d115`。
+
+**顺带保留**：D114 已修的 `testHeaders`（header 用例在 level=2 下必须显式开，否则 0 请求）。
+
+**边界**：子集 20/504，**不能外推为「Benchmark 检出率 N%」**，也不能与官方 scorecard 百分比
+相提并论；12 条 finding 是同一注入点的多技术命中；参数名/header 两种形态都依赖 opt-in 能力
+（`testParamNames` / `testHeaders`），不代表默认配置覆盖率。
+
 ### 2026-10-20 批次 D114 · 外部裁判扩面：DVGA GraphQL + OWASP Benchmark 4 号
 
 **动机**：D111–D113 已补 VAmPI/DVWA/认证，但 **GraphQL 查询串内部注入**与 **HTTP header

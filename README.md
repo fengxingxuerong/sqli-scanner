@@ -240,7 +240,7 @@ npm run waf-auto        # CRS 下「引擎自动选链绕过」验收（不显�
 npm run waf-real:collect # [P0-1] 商业云 WAF 真机样本采集（仅授权目标；礼仪性 GET / --from-json）
 # [P0-2] 第二权威对拍源样本提取（WhatWaf 源码目录 → second-source-samples.json）
 node scripts/extract-second-source-samples.mjs --whatwaf <WhatWaf-src> [--out <json>]
-npm run acceptance      # 【门禁】全方位验收（23 套件，事实断言模式，可进 CI）
+npm run acceptance      # 【门禁】全方位验收（24 套件，事实断言模式，可进 CI）
 npm run quality:all     # 【门禁】一键全量质量校验（测试/覆盖率/变异/验收/类型/架构/嵌套/引用/文档/版本，等价于 ci:local）
 ```
 
@@ -625,13 +625,14 @@ node e2e/api-range-lab/run.mjs --list        # 列出全部用例
 
 ### 验收门禁（`npm run acceptance`）
 
-23 套件一次跑完（顺序即 `e2e/acceptance.mjs` 里 SUITES 的登记顺序）：服务端单测 → 独立刁钻靶场 →
+24 套件一次跑完（顺序即 `e2e/acceptance.mjs` 里 SUITES 的登记顺序）：服务端单测 → 独立刁钻靶场 →
 检测回归 → 真 MySQL → 参数名注入真靶场（query/JSON 键名+XML 元素名+ORDER BY 后缀位拼 SQL：检出 + 白名单对照 + 开关语义）→
 参数挖掘真靶场（隐藏参数只能字典挖掘：开挖掘 3/3 检出 + 关 0 + 安全点 0）→ 真 PG（含二阶）→ **批量编排故障隔离（`-m`，真 SQLite 靶站 + 死目标）** → OOB 带外通道真机 →
 OOB 外部隧道真机（interactsh 协作端，需出网，离线 SKIP） →
 **第三方真框架外部裁判（Juice Shop：真漏洞须检出 + 安全端点零误报，未就绪 SKIP）** →
 **外部裁判 2 号（VAmPI：URL 路径段注入须检出 + 官方 vulnerable=0 同形态实例零误报，未就绪 SKIP）** →
 **外部裁判 3 号（DVWA：PHP+MySQL 栈，cookie 注入点 + POST 表单 + 官方 impossible 档同路径零误报，未就绪 SKIP）** →
+**外部裁判 4 号（OWASP Benchmark：官方逐条标注真值须全检出 + 同族安全用例零误报；含 header 注入面与参数名注入形态，未就绪 SKIP）** →
 **登录编排自动重登（真表单登录 + 会话反复过期，含对照组）** → 报告契约 → CRS 人工挂链 A/B →
 CRS 自动选链绕过 → CRS 执行器保真度（官方回归集）→ WAF 定向变异搜索（A2）端到端 →
 WAF 通道降级编排（A3）端到端 → 红队实战（真值对照 + sqlmap 同题）→ fileRead 真闭环 → fileWrite 真闭环。

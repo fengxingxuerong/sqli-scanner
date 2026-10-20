@@ -74,8 +74,10 @@ test('③b CI 只要求它确实 provisioning 过的套件（PG/红队是 contin
 // [D111 2026-10-19] 21 → 22：新增 vampi（外部裁判 2 号，VAmPI 路径段注入 + 同形态 A/B）。
 // [D112 2026-10-20] 22 → 23：新增 dvwa（外部裁判 3 号，PHP+MySQL 栈：cookie 注入点 +
 //   POST 表单伴随字段 + 官方 impossible 档同路径零误报）。
-test('④ 不空转：SUITES 解析必须命中 23 个 id（否则上面几条可能在拿空集合比）', () => {
-  assert.equal(IDS.length, 23, `SUITES 解析到 ${IDS.length} 个 id：${IDS.join(', ')}`);
+// [D115 2026-10-20] 23 → 24：新增 benchmark（外部裁判 4 号，OWASP Benchmark 子集：
+//   官方标注真值 + header 注入面 + 参数名注入形态）。
+test('④ 不空转：SUITES 解析必须命中 24 个 id（否则上面几条可能在拿空集合比）', () => {
+  assert.equal(IDS.length, 24, `SUITES 解析到 ${IDS.length} 个 id：${IDS.join(', ')}`);
   assert.ok(IDS.includes('file-read') && IDS.includes('file-write'), '文件读写两个套件不在 SUITES 里 —— 取数口径变了');
 });
 

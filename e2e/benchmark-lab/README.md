@@ -44,20 +44,52 @@ Invoke-WebRequest https://mirrors.huaweicloud.com/openjdk/17.0.2/openjdk-17.0.2_
 Invoke-WebRequest https://codeload.github.com/OWASP-Benchmark/BenchmarkJava/tar.gz/refs/heads/master -OutFile benchmark.tar.gz
 tar xzf benchmark.tar.gz    # → BenchmarkJava-master/
 
-# 4. 编译 + 部署（cargo 起 tomcat + 自动下 tomcat；HSQLDB 文件库自动建）
+# 4. 分三步起（本机实测配方；官方 runBenchmark.sh 是单条命令，但见下面第 3 条坑）
 cd BenchmarkJava-master
-JAVA_HOME='D:\tools\jdk\jdk-17.0.2' \
-  mvn initialize clean package cargo:run -Pdeploy \
+export JAVA_HOME='D:/tools/jdk/jdk-17.0.2'
+
+# 4a. 打包（-Pdeploy 才会跑 antrun 的 database-server / database-init）
+mvn initialize clean package -Pdeploy -DskipTests \
     -Dspotless.check.skip=true -Dspotless.apply.skip=true
-#    就绪后：https://127.0.0.1:8443/benchmark/sqli-00/BenchmarkTest00025（自签证书）
-#    ⚠ tarball 没有 origin/master，Spotless 的 apply 会直接失败；必须跳过（本机实测）。
+
+# 4b. 手动起 HSQLDB Server（端口 9001，库名 benchmarkDataBase）
+#     ⚠ 官方 antrun 用 <daemons> fork 起它，但 mvn 一退出子进程就被回收 ⇒ 本机必须手动起。
+mkdir -p target/db
+"$JAVA_HOME/bin/java" -cp ~/.m2/repository/org/hsqldb/hsqldb/2.7.4/hsqldb-2.7.4.jar \
+  org.hsqldb.Server --database.0 file:target/db/benchmark.db --dbname.0 benchmarkDataBase --port 9001 &
+
+# 4c. 起 tomcat（deploy profile ⇒ https/8443 + 自签证书）
+mvn cargo:run -Pdeploy -Dspotless.apply.skip=true
+#    就绪后：https://127.0.0.1:8443/benchmark/sqli-00/BenchmarkTest00025?BenchmarkTest00025=foo
 ```
 
-⚠ 坑：
-- `java.target=8` 但 **javac 必须来自真 JDK**；只有 JRE 时 maven-compiler-plugin 报
-  `Could not retrieve version from javac`（报错信息是中文乱码，容易看错方向）。
-- cargo 会自己下载 tomcat（走 maven 中央/aliyun 镜像），首次几分钟。
-- war 的 finalName 是 `benchmark` ⇒ URL 前缀 `/benchmark/`；端口 cargo 默认 8080。
+⚠ 坑（按踩到的顺序，全部本机实测）：
+- **javac 必须来自真 JDK**：只有 JRE 时 maven-compiler-plugin 报
+  `Could not retrieve version from javac`（报错中文乱码，容易看错方向）。
+- **`-Dspotless.apply.skip=true` 必须有**：spotless 配了 `ratchetFrom origin/master`，
+  tarball 没有 git ref ⇒ `No such reference 'origin/master'` 直接 fail。
+- **必须带 `-Pdeploy` 打包**：`database-server` / `database-init` 是 deploy profile 里
+  antrun 的两个 execution。不带 ⇒ HSQLDB 没起（`Connection refused`）或表不存在
+  （`SQLSyntaxErrorException: user lacks privilege or object not found: USERS`）。
+- **HSQLDB Server 要手动起**：ant 的 `<java fork="true">` 在 `mvn` 退出后进程被回收，
+  实测 9001 立刻消失 ⇒ 用上面 4b 的 java 命令常驻。
+- **`cargo:run` 别跟 `clean` 连跑**：库文件锁（`benchmark.db.lck` / `cargo.log`）会让
+  `clean` 失败。改代码后要先停 java 进程再 clean。
+- **端口是 8443 https（自签）不是 8080**：deploy profile 里 `cargo.servlet.port=8443` +
+  `cargo.protocol=https`；引擎侧要 `insecureTls: true`。
+- war 的 finalName 是 `benchmark` ⇒ URL 前缀 `/benchmark/`；参数名 = 用例类名（官方约定）。
+
+## 注入面三种形态（runner 必须区别对待）
+
+| 形态 | 判定（读官方源码） | runner 配置 |
+|---|---|---|
+| 普通 query | `request.getParameter(类名)` | `testParameter: [类名]`，URL `?类名=baseline` |
+| **参数名** | `param = name` 且要求 `value.equals(类名)` | `testParamNames: true`，URL `?<payload>=类名` |
+| **header** | `request.getHeader(类名)` | `headerParams: {类名: baseline}` + `testHeaders: true` |
+
+⚠ 第二种最容易踩：按普通 query 参数发时服务端 `param` 恒为空串（`PASSWORD=''`），
+注入根本没进查询，三种响应的**字节完全相同** ⇒ 会被误判成「引擎漏检」。
+504 个 sqli 用例里这类有 **57 个**（索引 `benchmark-sqli-index.json` 的 `paramName` 字段）。
 
 ## 真值来源（外部，非本仓编写）
 

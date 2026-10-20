@@ -1,5 +1,5 @@
 // ============================================================================
-// e2e/benchmark-lab/run.mjs —— [D114 2026-10-20] 外部裁判 4 号：OWASP Benchmark
+// e2e/benchmark-lab/run.mjs —— [D115 2026-10-20] 外部裁判 4 号：OWASP Benchmark
 //
 // ── 为什么需要第四个外部靶场 ────────────────────────────────────────────────
 // 前三个外部裁判各补一块，但都剩同一个缺口：**注入面太窄**。
@@ -72,9 +72,13 @@ const CASES = [
   { name: 'BenchmarkTest00032', path: '/sqli-00/BenchmarkTest00032', kind: 'query', vuln: true },
   { name: 'BenchmarkTest00033', path: '/sqli-00/BenchmarkTest00033', kind: 'query', vuln: true },
   { name: 'BenchmarkTest00034', path: '/sqli-00/BenchmarkTest00034', kind: 'query', vuln: true },
-  { name: 'BenchmarkTest00037', path: '/sqli-00/BenchmarkTest00037', kind: 'query', vuln: true },
-  { name: 'BenchmarkTest00038', path: '/sqli-00/BenchmarkTest00038', kind: 'query', vuln: true },
-  { name: 'BenchmarkTest00039', path: '/sqli-00/BenchmarkTest00039', kind: 'query', vuln: true },
+  // ── 参数名注入形态（官方 `param = name` 变体：注入点是**参数名**，值是标记串）──
+  // 首跑这三条全漏检 —— 不是引擎缺陷：按普通 query 参数发时，服务端要求
+  // `value === 类名` 才取 name 作 param，值给了 foo ⇒ param 恒为 ""（SQL 里 PASSWORD=''），
+  // 注入根本没进查询。正确用法是 `?<payload>=<类名>` + 引擎开 testParamNames（D93）。
+  { name: 'BenchmarkTest00037', path: '/sqli-00/BenchmarkTest00037', kind: 'query', vuln: true, paramName: true },
+  { name: 'BenchmarkTest00038', path: '/sqli-00/BenchmarkTest00038', kind: 'query', vuln: true, paramName: true },
+  { name: 'BenchmarkTest00039', path: '/sqli-00/BenchmarkTest00039', kind: 'query', vuln: true, paramName: true },
   // ── query 安全对照（官方标注 real=false，同族实现）──────────────────────
   { name: 'BenchmarkTest00430', path: '/sqli-00/BenchmarkTest00430', kind: 'query', vuln: false },
   { name: 'BenchmarkTest00432', path: '/sqli-00/BenchmarkTest00432', kind: 'query', vuln: false },
@@ -111,12 +115,20 @@ async function scanOne(c) {
   const sm = new ScanManager({});
   const target = {
     url: `${BASE}${c.path}`,
-    // [D114] header 用例必须显式 testHeaders：TargetParser 只在 level>=3 或 testHeaders
+    // [D114 由并发会话加入 / D115 保留] header 用例必须显式 testHeaders：TargetParser 只在 level>=3 或 testHeaders
     // 时把 headerParams 变成注入点；本 lab 全局 level=2（query 用例的默认档），漏了这一步
     // 会出现「header 用例 0 请求 + 没有匹配到任何注入点」的假漏检（首跑实测）。
-    config: { ...SCAN_CFG, testParameter: [c.name], ...(c.kind === 'header' ? { testHeaders: true } : {}) },
+    config: {
+      ...SCAN_CFG,
+      ...(c.paramName ? { testParamNames: true } : { testParameter: [c.name] }),
+      ...(c.kind === 'header' ? { testHeaders: true } : {}),
+    },
   };
-  if (c.kind === 'header') {
+  if (c.paramName) {
+    // 参数名注入形态（官方 `param = name` 变体）：`?<payload>=<类名>` —— 值是标记串，
+    // 服务端据此把**参数名**当 param；引擎开 testParamNames 后替换的正是参数名。
+    target.url = `${BASE}${c.path}?${c.name}=${c.name}`;
+  } else if (c.kind === 'header') {
     // 注入面在 HTTP 头（官方 getHeader(类名)）；显式 headerParams 传入基线值。
     target.headerParams = { [c.name]: 'baseline' };
   } else {

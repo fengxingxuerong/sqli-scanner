@@ -618,6 +618,48 @@ const SUITES = [
     },
   },
   {
+    // [D115 2026-10-20] 外部裁判 4 号：OWASP Benchmark（Java + Spring + HSQLDB）。
+    // 前三号裁判技术栈各异，但**都没有 HTTP header 位置的注入点**。Benchmark 补这块，
+    // 且带来前三号都没有的东西：官方 `expectedresults-1.2.csv` 逐条标注 real vulnerability。
+    // 首跑 9/12：三条漏检全因「参数名注入」变体（官方 `param = name`，值是标记串）——
+    // 按普通 query 参数发时服务端 param 恒为空，注入根本没进查询（基线/真/假响应全同）。
+    // 改用 testParamNames 后 12/12。
+    // ⚠ 判据读**文本**而非退出码：未就绪时脚本按设计 exit 0（SKIP）。
+    id: 'benchmark',
+    title: '外部裁判 4 号（OWASP Benchmark：官方标注真值须全检出 + 同族安全用例零误报）',
+    needs: [],
+    optional: true, // 需外部靶场在跑（非本仓依赖）→ 未就绪 SKIP 并写明原因
+    run: () => run('node', ['e2e/benchmark-lab/run.mjs']),
+    assert: (out) => {
+      if (/\[SKIP\] OWASP Benchmark 靶场不可达/.test(out)) {
+        return { facts: { 外部裁判4: '跳过（靶场未就绪）' }, pass: false, skipped: true, reason: 'Benchmark 未编译/未部署（需 JDK17 + Maven + HSQLDB）' };
+      }
+      const m = /真值漏洞用例：检出 (\d+)\/(\d+)（漏检 (\d+)/.exec(out);
+      const fp = /安全对照误报：(\d+)\/(\d+)/.exec(out);
+      const weak = /安全对照证据不足（请求<\d+）：(\d+)/.exec(out);
+      // 分母防缩水：两种非默认注入面必须实际跑到——删掉后 10/10 仍会打印「通过」
+      //   · header 形态（前三个外部裁判从未覆盖的注入面）
+      //   · 参数名形态（官方 `param = name` 变体，需 testParamNames）
+      const ranHeader = /\[真值漏洞\/header\]/.test(out);
+      const ranParamName = /\[真值漏洞\/query\].*BenchmarkTest0003[789]/.test(out);
+      const both = ranHeader && ranParamName;
+      const pass = /Benchmark 外部裁判通过/.test(out) && both;
+      return {
+        facts: {
+          外部裁判4: pass ? '✅ 通过' : '❌ 未通过',
+          真值漏洞: m ? `${m[1]}/${m[2]}（漏检 ${m[3]}）` : '取不到',
+          安全对照误报: fp ? `${fp[1]}/${fp[2]}` : '取不到',
+          证据不足: weak ? weak[1] : '取不到',
+          形态覆盖: both ? 'header+参数名' : `缺失（header=${ranHeader} paramName=${ranParamName}）`,
+        },
+        pass,
+        reason: pass ? null : !both
+          ? '外部裁判端点未实际执行（header/参数名形态缺失）'
+          : '外部裁判未通过（漏检／误报／安全端点没真测，见 stdout）',
+      };
+    },
+  },
+  {
     id: 'report-contract',
     title: '报告契约（自报字段必须与真实状态一致）',
     needs: ['mysql'],
