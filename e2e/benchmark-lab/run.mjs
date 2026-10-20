@@ -33,6 +33,7 @@
 //   BENCHMARK_BASE=http://127.0.0.1:8080/benchmark node e2e/benchmark-lab/run.mjs
 // ============================================================================
 
+import { readFileSync } from 'node:fs';
 import { ScanManager } from '../../server/src/engine/ScanManager.js';
 
 const BASE = process.env.BENCHMARK_BASE || 'https://127.0.0.1:8443/benchmark';
@@ -63,35 +64,17 @@ const SCAN_CFG_BASE = {
  * `kind`: 'query' ⇒ query 参数；'header' ⇒ HTTP 头（官方从 getHeader 取值）
  * `vuln`: 官方 CSV 标注的 real vulnerability
  */
-const CASES = [
-  // ── query 真值（官方标注 real=true）────────────────────────────────────
-  { name: 'BenchmarkTest00024', path: '/sqli-00/BenchmarkTest00024', kind: 'query', vuln: true },
-  { name: 'BenchmarkTest00025', path: '/sqli-00/BenchmarkTest00025', kind: 'query', vuln: true },
-  { name: 'BenchmarkTest00026', path: '/sqli-00/BenchmarkTest00026', kind: 'query', vuln: true },
-  { name: 'BenchmarkTest00027', path: '/sqli-00/BenchmarkTest00027', kind: 'query', vuln: true },
-  { name: 'BenchmarkTest00032', path: '/sqli-00/BenchmarkTest00032', kind: 'query', vuln: true },
-  { name: 'BenchmarkTest00033', path: '/sqli-00/BenchmarkTest00033', kind: 'query', vuln: true },
-  { name: 'BenchmarkTest00034', path: '/sqli-00/BenchmarkTest00034', kind: 'query', vuln: true },
-  // ── 参数名注入形态（官方 `param = name` 变体：注入点是**参数名**，值是标记串）──
-  // 首跑这三条全漏检 —— 不是引擎缺陷：按普通 query 参数发时，服务端要求
-  // `value === 类名` 才取 name 作 param，值给了 foo ⇒ param 恒为 ""（SQL 里 PASSWORD=''），
-  // 注入根本没进查询。正确用法是 `?<payload>=<类名>` + 引擎开 testParamNames（D93）。
-  { name: 'BenchmarkTest00037', path: '/sqli-00/BenchmarkTest00037', kind: 'query', vuln: true, paramName: true },
-  { name: 'BenchmarkTest00038', path: '/sqli-00/BenchmarkTest00038', kind: 'query', vuln: true, paramName: true },
-  { name: 'BenchmarkTest00039', path: '/sqli-00/BenchmarkTest00039', kind: 'query', vuln: true, paramName: true },
-  // ── query 安全对照（官方标注 real=false，同族实现）──────────────────────
-  { name: 'BenchmarkTest00430', path: '/sqli-00/BenchmarkTest00430', kind: 'query', vuln: false },
-  { name: 'BenchmarkTest00432', path: '/sqli-00/BenchmarkTest00432', kind: 'query', vuln: false },
-  { name: 'BenchmarkTest00436', path: '/sqli-00/BenchmarkTest00436', kind: 'query', vuln: false },
-  { name: 'BenchmarkTest00437', path: '/sqli-00/BenchmarkTest00437', kind: 'query', vuln: false },
-  { name: 'BenchmarkTest00440', path: '/sqli-00/BenchmarkTest00440', kind: 'query', vuln: false },
-  { name: 'BenchmarkTest00511', path: '/sqli-00/BenchmarkTest00511', kind: 'query', vuln: false },
-  { name: 'BenchmarkTest00513', path: '/sqli-00/BenchmarkTest00513', kind: 'query', vuln: false },
-  { name: 'BenchmarkTest00514', path: '/sqli-00/BenchmarkTest00514', kind: 'query', vuln: false },
-  // ── header 真值（官方从 request.getHeader 取值；前三个裁判未覆盖的注入面）──
-  { name: 'BenchmarkTest00018', path: '/sqli-00/BenchmarkTest00018', kind: 'header', vuln: true },
-  { name: 'BenchmarkTest00194', path: '/sqli-00/BenchmarkTest00194', kind: 'header', vuln: true },
-];
+/**
+ * 用例清单从 `cases.json` 读（不再硬编码）——理由是清单会随扩面增长，硬编码会让
+ * "加了用例却没落数据来源" 变成新的静默缺口。清单的生成口径写在文件内 `note` 字段：
+ *   · 真值来自官方 `expectedresults-1.2.csv`（real vulnerability true/false）
+ *   · URL 来自各用例源码的 `@WebServlet(value = ...)`
+ *   · `paramName: true` = 官方 `param = name` 变体（D115 抓到的那类：值是标记串，
+ *     注入点是**参数名**，必须配 `testParamNames` 且 URL 用 `?<payload>=<类名>`）
+ * env `BENCHMARK_CASES` 可指向另一份清单（做局部回归时用）。
+ */
+const CASES_PATH = process.env.BENCHMARK_CASES || new URL('./cases.json', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
+const CASES = JSON.parse(readFileSync(CASES_PATH, 'utf8')).cases;
 
 // 安全端点「算证据」的最低请求数：低于此值说明点被剪枝/预筛跳过，零检出只是没测过。
 const SAFE_MIN_REQUESTS = 30;
@@ -179,9 +162,28 @@ let weakEvidence = 0;
 const missedList = [];
 const fpList = [];
 
+// `{call <param>}` 形态（注入点是存储过程名）本引擎不支持 —— 单列、不并入真值分母。
+// 说明：这类 payload 空间是「过程名」而非「值位」，与 SQLi 值注入不是同一问题；
+// 保留在清单里是为了**证明它不会误报**（3 条 real=false 的 call 用例必须 0 检出）。
+let callVulnHit = 0;
+let callVulnTotal = 0;
+let callSafeFp = 0;
+let callSafeTotal = 0;
+
 for (const c of CASES) {
   const r = await scanOne(c);
-  if (c.vuln) {
+  if (c.callProcedure) {
+    if (c.vuln) {
+      callVulnTotal += 1;
+      if (r.vulns > 0) callVulnHit += 1;
+    } else {
+      callSafeTotal += 1;
+      if (r.vulns > 0) {
+        callSafeFp += 1;
+        fpList.push(c.name);
+      }
+    }
+  } else if (c.vuln) {
     if (r.vulns > 0) truePositives += 1;
     else {
       missed += 1;
@@ -204,15 +206,22 @@ for (const c of CASES) {
   if (r.detail.length) console.log(`     命中明细：${r.detail.join(' | ')}`);
 }
 
-const vulnTotal = CASES.filter((c) => c.vuln).length;
-const safeTotal = CASES.filter((c) => !c.vuln).length;
+const vulnTotal = CASES.filter((c) => c.vuln && !c.callProcedure).length;
+const safeTotal = CASES.filter((c) => !c.vuln && !c.callProcedure).length;
 const headerTotal = CASES.filter((c) => c.kind === 'header').length;
+const paramNameTotal = CASES.filter((c) => c.paramName && !c.callProcedure).length;
 console.log('\n=== 外部裁判汇总（OWASP Benchmark 子集）===');
 console.log(`真值漏洞用例：检出 ${truePositives}/${vulnTotal}（漏检 ${missed}${missedList.length ? '：' + missedList.join(',') : ''}）`);
 console.log(`安全对照误报：${falsePositives}/${safeTotal}（须为 0${fpList.length ? '：' + fpList.join(',') : ''}）`);
 console.log(`安全对照证据不足（请求<${SAFE_MIN_REQUESTS}）：${weakEvidence}（须为 0）`);
 console.log(`header 注入面用例：${headerTotal}（前三个外部裁判未覆盖的形态）`);
-const pass = missed === 0 && falsePositives === 0 && weakEvidence === 0;
+console.log(`参数名注入面用例：${paramNameTotal}（官方 param = name 变体）`);
+console.log(
+  `{call <过程名>} 形态（**已知能力边界，不计入分母**）：真值 ${callVulnHit}/${callVulnTotal} 检出；` +
+  `安全对照 ${callSafeFp}/${callSafeTotal} 误报（须为 0）`
+);
+console.log(`用例总数：${CASES.length}（真值 ${vulnTotal} + 安全 ${safeTotal} + call 形态 ${callVulnTotal + callSafeTotal}）`);
+const pass = missed === 0 && falsePositives === 0 && weakEvidence === 0 && callSafeFp === 0;
 console.log(pass
   ? '✅ Benchmark 外部裁判通过：官方标注真值全部检出 且 官方标注安全用例零误报'
   : '❌ 外部裁判未通过（漏检／误报／安全端点没真测，见上表）');

@@ -637,25 +637,33 @@ const SUITES = [
       const m = /真值漏洞用例：检出 (\d+)\/(\d+)（漏检 (\d+)/.exec(out);
       const fp = /安全对照误报：(\d+)\/(\d+)/.exec(out);
       const weak = /安全对照证据不足（请求<\d+）：(\d+)/.exec(out);
+      // [D116] `{call <过程名>}` 形态单列（已知能力边界）：真值不计入分母，
+      // 但其**安全侧误报必须为 0**（误报是真的缺陷，不是边界）。
+      const callLine = /\{call <过程名>\} 形态.*?安全对照 (\d+)\/(\d+) 误报/.exec(out);
+      const pn = /参数名注入面用例：(\d+)/.exec(out);
       // 分母防缩水：两种非默认注入面必须实际跑到——删掉后 10/10 仍会打印「通过」
       //   · header 形态（前三个外部裁判从未覆盖的注入面）
       //   · 参数名形态（官方 `param = name` 变体，需 testParamNames）
       const ranHeader = /\[真值漏洞\/header\]/.test(out);
       const ranParamName = /\[真值漏洞\/query\].*BenchmarkTest0003[789]/.test(out);
       const both = ranHeader && ranParamName;
-      const pass = /Benchmark 外部裁判通过/.test(out) && both;
+      const callSafeOk = callLine ? callLine[1] === '0' : false;
+      const pass = /Benchmark 外部裁判通过/.test(out) && both && callSafeOk;
       return {
         facts: {
           外部裁判4: pass ? '✅ 通过' : '❌ 未通过',
           真值漏洞: m ? `${m[1]}/${m[2]}（漏检 ${m[3]}）` : '取不到',
           安全对照误报: fp ? `${fp[1]}/${fp[2]}` : '取不到',
           证据不足: weak ? weak[1] : '取不到',
-          形态覆盖: both ? 'header+参数名' : `缺失（header=${ranHeader} paramName=${ranParamName}）`,
+          形态覆盖: both ? `header+参数名（${pn ? pn[1] : '?'} 条）` : `缺失（header=${ranHeader} paramName=${ranParamName}）`,
+          call形态: callLine ? `安全侧误报 ${callLine[1]}/${callLine[2]}` : '取不到',
         },
         pass,
         reason: pass ? null : !both
           ? '外部裁判端点未实际执行（header/参数名形态缺失）'
-          : '外部裁判未通过（漏检／误报／安全端点没真测，见 stdout）',
+          : !callSafeOk
+            ? `{call <过程名>} 形态出现安全侧误报（${callLine ? callLine[1] : '取不到'}）—— 边界不豁免误报`
+            : '外部裁判未通过（漏检／误报／安全端点没真测，见 stdout）',
       };
     },
   },

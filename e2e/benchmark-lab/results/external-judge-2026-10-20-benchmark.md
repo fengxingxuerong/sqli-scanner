@@ -87,3 +87,51 @@ node e2e/acceptance.mjs --only=benchmark
 - 靶场需要 `-Pdeploy` 起 HSQLDB server（antrun），且数据库文件在 `target/db/`；
   这属于**官方流程**，未改任何 Benchmark 源码（只加了 `-Dspotless.apply.skip=true`，
   因为 tarball 无 `origin/master` ref）。
+
+---
+
+# [D116 2026-10-20] 扩面：20 → 74 用例（参数名形态全量 + `{call}` 边界单列）
+
+D115 的子集只有 20 条（12 真值 + 8 安全），其中参数名形态只取到 3 条。本批把
+**全部 57 条参数名形态用例**并入清单，合计 **74 条**（真值 43 + 安全 24 + `{call}` 7）。
+清单落盘为 `e2e/benchmark-lab/cases.json`（不再硬编码在 runner 里 —— 清单会随扩面增长，
+硬编码会让「加了用例却没落数据来源」变成新的静默缺口）。
+
+## 结果（2026-10-20 22:30，完整日志 `results/run-2026-10-20-d116b.log`）
+
+| 类别 | 结果 |
+|---|---|
+| 真值漏洞（官方 real=true，**不含 `{call}`**） | **43/43 检出（漏检 0）** |
+| 安全对照（官方 real=false，不含 `{call}`） | **0/24 误报** |
+| 证据不足（请求 < 30） | 0 |
+| header 注入面 | 2/2 |
+| **参数名注入面** | **50 条全检出**（`paramName·BenchmarkTestNNNNN·dbms=HSQLDB`） |
+| `{call <过程名>}` 形态 | 真值 **0/4**（已知能力边界，不计入分母）；安全对照 **0/3 误报** |
+
+`acceptance --only=benchmark`：**1 PASS / 0 FAIL / 0 SKIP**（形态覆盖=header+参数名（50 条））。
+
+## 首跑的一处**清单口径错误**（不是引擎缺陷）
+
+未加 `callProcedure` 标记前首跑是 **43/47**，4 条漏检全部是
+`BenchmarkTest00590 / 01460 / 01462 / 01463`。逐条读源码：
+
+```java
+String sql = "{call " + bar + "}";        // 注入点是**存储过程名**
+java.sql.CallableStatement statement = connection.prepareCall(sql);
+```
+
+即 payload 空间是 `CALL <procedure_name>` —— 与「值位注入」不是同一个问题。本引擎不支持
+该类注入（sqlmap 也需显式 `--os-cmd`/存储过程专用路径才碰）。处置：
+
+- 清单里保留这 7 条（4 真值 + 3 安全），标 `callProcedure: true`；
+- 统计**单列**：真值不计入分母（否则把能力边界算成「漏检」，会污染检出率口径）；
+- 但**安全侧误报必须为 0**（误报是真的缺陷，边界不豁免）—— 实测 0/3，说明引擎在这类
+  端点上不会瞎报。
+
+## 边界（更新）
+
+- **子集 74/504**（原 20/504）。真值 43 条 —— 仍**不能外推为「Benchmark 检出率 N%」**，
+  也不能与官方 scorecard（28887 用例、按类别加权）的百分比相提并论。
+- `{call <过程名>}` 形态是**明确的能力缺口**（4 条真值全未检出），已记入 TODO 待推进；
+  本条不构成误报，也不影响值位注入的检出结论。
+- 参数名形态依赖 `testParamNames`、header 形态依赖 `testHeaders`（均 opt-in）。

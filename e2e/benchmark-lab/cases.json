@@ -1,0 +1,513 @@
+{
+ "note": "Benchmark sqli 用例清单（D116 扩面）。source: OWASP-Benchmark/BenchmarkJava master 的 expectedresults-1.2.csv（真值）+ 各用例 @WebServlet 注解（URL）+ 源码判定注入面。\n字段：paramName=true 表示官方 `param = name` 变体（需 testParamNames 且 URL 用 ?<payload>=<类名>）；callProcedure=true 表示 SQL 是 `{call <param>}` ⇒ 注入点是**存储过程名**，本引擎不支持该类注入（已知能力边界，统计时单列、不并入真值分母）。\n本清单 = D115 的 20 条回归基线 ∪ 全部 57 条参数名形态用例（其中 4 条同时是 callProcedure）。",
+ "cases": [
+  {
+   "name": "BenchmarkTest00018",
+   "path": "/sqli-00/BenchmarkTest00018",
+   "kind": "header",
+   "vuln": true
+  },
+  {
+   "name": "BenchmarkTest00024",
+   "path": "/sqli-00/BenchmarkTest00024",
+   "kind": "query",
+   "vuln": true
+  },
+  {
+   "name": "BenchmarkTest00025",
+   "path": "/sqli-00/BenchmarkTest00025",
+   "kind": "query",
+   "vuln": true
+  },
+  {
+   "name": "BenchmarkTest00026",
+   "path": "/sqli-00/BenchmarkTest00026",
+   "kind": "query",
+   "vuln": true
+  },
+  {
+   "name": "BenchmarkTest00027",
+   "path": "/sqli-00/BenchmarkTest00027",
+   "kind": "query",
+   "vuln": true
+  },
+  {
+   "name": "BenchmarkTest00032",
+   "path": "/sqli-00/BenchmarkTest00032",
+   "kind": "query",
+   "vuln": true
+  },
+  {
+   "name": "BenchmarkTest00033",
+   "path": "/sqli-00/BenchmarkTest00033",
+   "kind": "query",
+   "vuln": true
+  },
+  {
+   "name": "BenchmarkTest00034",
+   "path": "/sqli-00/BenchmarkTest00034",
+   "kind": "query",
+   "vuln": true
+  },
+  {
+   "name": "BenchmarkTest00037",
+   "path": "/sqli-00/BenchmarkTest00037",
+   "kind": "query",
+   "vuln": true,
+   "paramName": true
+  },
+  {
+   "name": "BenchmarkTest00038",
+   "path": "/sqli-00/BenchmarkTest00038",
+   "kind": "query",
+   "vuln": true,
+   "paramName": true
+  },
+  {
+   "name": "BenchmarkTest00039",
+   "path": "/sqli-00/BenchmarkTest00039",
+   "kind": "query",
+   "vuln": true,
+   "paramName": true
+  },
+  {
+   "name": "BenchmarkTest00194",
+   "path": "/sqli-00/BenchmarkTest00194",
+   "kind": "header",
+   "vuln": true
+  },
+  {
+   "name": "BenchmarkTest00430",
+   "path": "/sqli-00/BenchmarkTest00430",
+   "kind": "query",
+   "vuln": false
+  },
+  {
+   "name": "BenchmarkTest00432",
+   "path": "/sqli-00/BenchmarkTest00432",
+   "kind": "query",
+   "vuln": false
+  },
+  {
+   "name": "BenchmarkTest00436",
+   "path": "/sqli-00/BenchmarkTest00436",
+   "kind": "query",
+   "vuln": false
+  },
+  {
+   "name": "BenchmarkTest00437",
+   "path": "/sqli-00/BenchmarkTest00437",
+   "kind": "query",
+   "vuln": false
+  },
+  {
+   "name": "BenchmarkTest00440",
+   "path": "/sqli-00/BenchmarkTest00440",
+   "kind": "query",
+   "vuln": false
+  },
+  {
+   "name": "BenchmarkTest00511",
+   "path": "/sqli-01/BenchmarkTest00511",
+   "kind": "query",
+   "vuln": false
+  },
+  {
+   "name": "BenchmarkTest00513",
+   "path": "/sqli-01/BenchmarkTest00513",
+   "kind": "query",
+   "vuln": false
+  },
+  {
+   "name": "BenchmarkTest00514",
+   "path": "/sqli-01/BenchmarkTest00514",
+   "kind": "query",
+   "vuln": false
+  },
+  {
+   "name": "BenchmarkTest00589",
+   "path": "/sqli-01/BenchmarkTest00589",
+   "kind": "query",
+   "vuln": false,
+   "paramName": true,
+   "callProcedure": true
+  },
+  {
+   "name": "BenchmarkTest00590",
+   "path": "/sqli-01/BenchmarkTest00590",
+   "kind": "query",
+   "vuln": true,
+   "paramName": true,
+   "callProcedure": true
+  },
+  {
+   "name": "BenchmarkTest00591",
+   "path": "/sqli-01/BenchmarkTest00591",
+   "kind": "query",
+   "vuln": true,
+   "paramName": true
+  },
+  {
+   "name": "BenchmarkTest00592",
+   "path": "/sqli-01/BenchmarkTest00592",
+   "kind": "query",
+   "vuln": false,
+   "paramName": true
+  },
+  {
+   "name": "BenchmarkTest00593",
+   "path": "/sqli-01/BenchmarkTest00593",
+   "kind": "query",
+   "vuln": true,
+   "paramName": true
+  },
+  {
+   "name": "BenchmarkTest00594",
+   "path": "/sqli-01/BenchmarkTest00594",
+   "kind": "query",
+   "vuln": true,
+   "paramName": true
+  },
+  {
+   "name": "BenchmarkTest00595",
+   "path": "/sqli-01/BenchmarkTest00595",
+   "kind": "query",
+   "vuln": true,
+   "paramName": true
+  },
+  {
+   "name": "BenchmarkTest00596",
+   "path": "/sqli-01/BenchmarkTest00596",
+   "kind": "query",
+   "vuln": true,
+   "paramName": true
+  },
+  {
+   "name": "BenchmarkTest00597",
+   "path": "/sqli-01/BenchmarkTest00597",
+   "kind": "query",
+   "vuln": true,
+   "paramName": true
+  },
+  {
+   "name": "BenchmarkTest00598",
+   "path": "/sqli-01/BenchmarkTest00598",
+   "kind": "query",
+   "vuln": true,
+   "paramName": true
+  },
+  {
+   "name": "BenchmarkTest00599",
+   "path": "/sqli-01/BenchmarkTest00599",
+   "kind": "query",
+   "vuln": false,
+   "paramName": true
+  },
+  {
+   "name": "BenchmarkTest00600",
+   "path": "/sqli-01/BenchmarkTest00600",
+   "kind": "query",
+   "vuln": true,
+   "paramName": true
+  },
+  {
+   "name": "BenchmarkTest00601",
+   "path": "/sqli-01/BenchmarkTest00601",
+   "kind": "query",
+   "vuln": false,
+   "paramName": true
+  },
+  {
+   "name": "BenchmarkTest00602",
+   "path": "/sqli-01/BenchmarkTest00602",
+   "kind": "query",
+   "vuln": false,
+   "paramName": true
+  },
+  {
+   "name": "BenchmarkTest00603",
+   "path": "/sqli-01/BenchmarkTest00603",
+   "kind": "query",
+   "vuln": true,
+   "paramName": true
+  },
+  {
+   "name": "BenchmarkTest00604",
+   "path": "/sqli-01/BenchmarkTest00604",
+   "kind": "query",
+   "vuln": true,
+   "paramName": true
+  },
+  {
+   "name": "BenchmarkTest00605",
+   "path": "/sqli-01/BenchmarkTest00605",
+   "kind": "query",
+   "vuln": false,
+   "paramName": true
+  },
+  {
+   "name": "BenchmarkTest00606",
+   "path": "/sqli-01/BenchmarkTest00606",
+   "kind": "query",
+   "vuln": true,
+   "paramName": true
+  },
+  {
+   "name": "BenchmarkTest01459",
+   "path": "/sqli-03/BenchmarkTest01459",
+   "kind": "query",
+   "vuln": false,
+   "paramName": true,
+   "callProcedure": true
+  },
+  {
+   "name": "BenchmarkTest01460",
+   "path": "/sqli-03/BenchmarkTest01460",
+   "kind": "query",
+   "vuln": true,
+   "paramName": true,
+   "callProcedure": true
+  },
+  {
+   "name": "BenchmarkTest01461",
+   "path": "/sqli-03/BenchmarkTest01461",
+   "kind": "query",
+   "vuln": false,
+   "paramName": true,
+   "callProcedure": true
+  },
+  {
+   "name": "BenchmarkTest01462",
+   "path": "/sqli-03/BenchmarkTest01462",
+   "kind": "query",
+   "vuln": true,
+   "paramName": true,
+   "callProcedure": true
+  },
+  {
+   "name": "BenchmarkTest01463",
+   "path": "/sqli-03/BenchmarkTest01463",
+   "kind": "query",
+   "vuln": true,
+   "paramName": true,
+   "callProcedure": true
+  },
+  {
+   "name": "BenchmarkTest01464",
+   "path": "/sqli-03/BenchmarkTest01464",
+   "kind": "query",
+   "vuln": true,
+   "paramName": true
+  },
+  {
+   "name": "BenchmarkTest01465",
+   "path": "/sqli-03/BenchmarkTest01465",
+   "kind": "query",
+   "vuln": true,
+   "paramName": true
+  },
+  {
+   "name": "BenchmarkTest01466",
+   "path": "/sqli-03/BenchmarkTest01466",
+   "kind": "query",
+   "vuln": true,
+   "paramName": true
+  },
+  {
+   "name": "BenchmarkTest01467",
+   "path": "/sqli-03/BenchmarkTest01467",
+   "kind": "query",
+   "vuln": false,
+   "paramName": true
+  },
+  {
+   "name": "BenchmarkTest01468",
+   "path": "/sqli-03/BenchmarkTest01468",
+   "kind": "query",
+   "vuln": false,
+   "paramName": true
+  },
+  {
+   "name": "BenchmarkTest01469",
+   "path": "/sqli-03/BenchmarkTest01469",
+   "kind": "query",
+   "vuln": false,
+   "paramName": true
+  },
+  {
+   "name": "BenchmarkTest01470",
+   "path": "/sqli-03/BenchmarkTest01470",
+   "kind": "query",
+   "vuln": true,
+   "paramName": true
+  },
+  {
+   "name": "BenchmarkTest01471",
+   "path": "/sqli-03/BenchmarkTest01471",
+   "kind": "query",
+   "vuln": true,
+   "paramName": true
+  },
+  {
+   "name": "BenchmarkTest01472",
+   "path": "/sqli-03/BenchmarkTest01472",
+   "kind": "query",
+   "vuln": false,
+   "paramName": true
+  },
+  {
+   "name": "BenchmarkTest01473",
+   "path": "/sqli-03/BenchmarkTest01473",
+   "kind": "query",
+   "vuln": true,
+   "paramName": true
+  },
+  {
+   "name": "BenchmarkTest01474",
+   "path": "/sqli-03/BenchmarkTest01474",
+   "kind": "query",
+   "vuln": true,
+   "paramName": true
+  },
+  {
+   "name": "BenchmarkTest01475",
+   "path": "/sqli-03/BenchmarkTest01475",
+   "kind": "query",
+   "vuln": true,
+   "paramName": true
+  },
+  {
+   "name": "BenchmarkTest01476",
+   "path": "/sqli-03/BenchmarkTest01476",
+   "kind": "query",
+   "vuln": true,
+   "paramName": true
+  },
+  {
+   "name": "BenchmarkTest01477",
+   "path": "/sqli-03/BenchmarkTest01477",
+   "kind": "query",
+   "vuln": true,
+   "paramName": true
+  },
+  {
+   "name": "BenchmarkTest02353",
+   "path": "/sqli-05/BenchmarkTest02353",
+   "kind": "query",
+   "vuln": false,
+   "paramName": true
+  },
+  {
+   "name": "BenchmarkTest02354",
+   "path": "/sqli-05/BenchmarkTest02354",
+   "kind": "query",
+   "vuln": true,
+   "paramName": true
+  },
+  {
+   "name": "BenchmarkTest02355",
+   "path": "/sqli-05/BenchmarkTest02355",
+   "kind": "query",
+   "vuln": true,
+   "paramName": true
+  },
+  {
+   "name": "BenchmarkTest02356",
+   "path": "/sqli-05/BenchmarkTest02356",
+   "kind": "query",
+   "vuln": true,
+   "paramName": true
+  },
+  {
+   "name": "BenchmarkTest02357",
+   "path": "/sqli-05/BenchmarkTest02357",
+   "kind": "query",
+   "vuln": true,
+   "paramName": true
+  },
+  {
+   "name": "BenchmarkTest02358",
+   "path": "/sqli-05/BenchmarkTest02358",
+   "kind": "query",
+   "vuln": true,
+   "paramName": true
+  },
+  {
+   "name": "BenchmarkTest02359",
+   "path": "/sqli-05/BenchmarkTest02359",
+   "kind": "query",
+   "vuln": true,
+   "paramName": true
+  },
+  {
+   "name": "BenchmarkTest02360",
+   "path": "/sqli-05/BenchmarkTest02360",
+   "kind": "query",
+   "vuln": true,
+   "paramName": true
+  },
+  {
+   "name": "BenchmarkTest02361",
+   "path": "/sqli-05/BenchmarkTest02361",
+   "kind": "query",
+   "vuln": false,
+   "paramName": true
+  },
+  {
+   "name": "BenchmarkTest02362",
+   "path": "/sqli-05/BenchmarkTest02362",
+   "kind": "query",
+   "vuln": true,
+   "paramName": true
+  },
+  {
+   "name": "BenchmarkTest02363",
+   "path": "/sqli-05/BenchmarkTest02363",
+   "kind": "query",
+   "vuln": false,
+   "paramName": true
+  },
+  {
+   "name": "BenchmarkTest02364",
+   "path": "/sqli-05/BenchmarkTest02364",
+   "kind": "query",
+   "vuln": true,
+   "paramName": true
+  },
+  {
+   "name": "BenchmarkTest02365",
+   "path": "/sqli-05/BenchmarkTest02365",
+   "kind": "query",
+   "vuln": false,
+   "paramName": true
+  },
+  {
+   "name": "BenchmarkTest02366",
+   "path": "/sqli-05/BenchmarkTest02366",
+   "kind": "query",
+   "vuln": false,
+   "paramName": true
+  },
+  {
+   "name": "BenchmarkTest02367",
+   "path": "/sqli-05/BenchmarkTest02367",
+   "kind": "query",
+   "vuln": false,
+   "paramName": true
+  },
+  {
+   "name": "BenchmarkTest02368",
+   "path": "/sqli-05/BenchmarkTest02368",
+   "kind": "query",
+   "vuln": false,
+   "paramName": true
+  },
+  {
+   "name": "BenchmarkTest02369",
+   "path": "/sqli-05/BenchmarkTest02369",
+   "kind": "query",
+   "vuln": true,
+   "paramName": true
+  }
+ ]
+}
