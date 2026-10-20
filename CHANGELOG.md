@@ -65,7 +65,50 @@
 
 ## [Unreleased]
 
-### 2026-10-21 批次 D119 · 回显剔除从「抓一个补一个」改为变体矩阵（P0 ②）
+### 2026-10-21 批次 D120 · 表单伴随字段 + GET 表单 url 点（接手并发会话未提交工作 + 语法救援）
+
+**背景**：外部靶场自测（DVWA low `/vulnerabilities/sqli/`）暴露同一类缺陷的**第二条路径** ——
+D112 修的是 `--body` 生成点丢伴随字段；这次是**表单爬取路径**：
+① 按钮/提交控件（`<input type="submit" name="Submit">`）没被采集 ⇒ DVWA 的
+`if (isset($_REQUEST['Submit']))` 不成立 ⇒ **查询根本不执行** ⇒ 注入 payload 不进 SQL；
+② GET 表单被无条件生成 **body** 点 ⇒ 请求 method=GET 而注入值写在 data 里 ⇒ axios 发
+GET 不带 body ⇒ **参数根本没发出去**。两者都表现为「响应恒等于基线」的静默 0 检出。
+
+**本批（含对并发会话的救援）**：
+- 接手并发会话工作区里**未提交且语法不合法**的 `TargetParser.js`（`_parseForms` 里多一个
+  `}` 把 textarea 采集踢出循环、`return forms;` 掉到类层级 ⇒ 全仓 lint/测试/wiring 红 40+
+  分钟）。只做**最小语法修复**（删那个 `}`），不改它的设计意图；其内容与备份见提交说明。
+- `_parseForms` 拆出 `_collectInputs` / `_collectTextareas`（44→23 行，圈复杂度 24→9）；
+  两处「表单→注入点」重复逻辑收敛为 `_pushFormPoints`（`_crawlForms` 与
+  `_mergeCrawlFindings` 共用，`_mergeCrawlFindings` 56→38 行、复杂度 18→13）。
+- `docs/_complexity-baseline.json` 同步下调上述三条（**下调不是放宽红线**，是记录变准）。
+- 测试：`targetParser.crawl.test.js` 更新 GET 表单断言并新增「按钮进 formValues 但不生成
+  注入点」用例；`targetParser.forms.test.js` 同步 formValues（含 submit）与 actionUrl。
+
+**真机 A/B（DVWA low，PHP 8.3 + MariaDB 10.11，`security=low`，本机复现）**：
+
+| | 修复前（HEAD） | 修复后（D120） |
+|---|---|---|
+| 注入点 actionUrl | `…/vulnerabilities/sqli/#`（无 Submit、无 query） | `…/vulnerabilities/sqli/?id=&Submit=Submit#` |
+| formValues | 仅 `id` | `{ Submit: "Submit" }` |
+| verdict | `no_vulnerability_detected`（0 条） | **`vulnerability_detected`，3 条** |
+| CLI 退出码 | 0 | 2 |
+
+复跑命令：
+```bash
+node server/bin/cli.js -u "http://127.0.0.1:8099/vulnerabilities/sqli/" --forms \
+  --header "Cookie: security=low" --level 2 --risk 2 --technique BEUST --test-param id --smart
+```
+（靶场起法见 `e2e/dvwa-lab/README.md`：PHP 8.3 `D:\tools\php83` + MariaDB 10.11
+`D:\tools\mariadb` + `setup.php` 抠 `user_token` POST `create_db` + `security.php` POST low。）
+
+**验证**：服务端全量 **3691 例 0 fail**；表单/爬取相关 46/46；复杂度守卫通过（三条基线
+同步下调）；三个外部裁判复跑零回归（Juice 2/2+0/4、VAmPI 2/2+0/5+Bearer、DVGA 0/1 按设计红）。
+
+**边界**：`--test-param id` 定向单参数；`Submit` 这类按钮仍**不生成注入点**（服务端校验值，
+当注入点只会产生噪声），只是随请求发出；`<select>` 仍未采集（取值需解析 selected option）。
+
+### 2026-10-21 批次 D119 · 回显剔除变体矩阵化（P0 ②）
 
 **动机**：外部靶场自测里 DVGA 抓到的那条假阳性（JSON 转义回显未被剔除 → payload 自带
 `extractvalue` 命中 ERROR_SIG → 手工证实不可注入的点上报 High/CVSS 8.2）是**同一族问题的

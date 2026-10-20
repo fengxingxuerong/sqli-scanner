@@ -698,21 +698,9 @@
       "limitLines": 100,
       "limitComplexity": 15
     },
-    "server/src/engine/TargetParser.js::TargetParser._mergeCrawlFindings": {
-      "lines": 56,
-      "complexity": 18,
-      "limitLines": 100,
-      "limitComplexity": 15
-    },
-    "server/src/engine/TargetParser.js::TargetParser._parseForms": {
-      "lines": 41,
-      "complexity": 24,
-      "limitLines": 100,
-      "limitComplexity": 15
-    },
     "server/src/engine/TargetParser.js::TargetParser.discover": {
       "lines": 151,
-      "complexity": 84,
+      "complexity": 82,
       "limitLines": 100,
       "limitComplexity": 15
     },

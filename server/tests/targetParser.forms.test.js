@@ -57,7 +57,10 @@ test('crawlForms 开启：解析表单生成 body 点并捕获 CSRF', async () =
   assert.equal(user.actionUrl, 'http://x.com/login'); // 相对 action 解析为绝对地址
   assert.equal(user.originalValue, 'admin');
   // 全部字段（含 CSRF token）随表单点携带
-  assert.deepEqual(user.formValues, { username: 'admin', password: '', _token: 'csrf123' });
+  // [D120 2026-10-21] 伴随字段（submit 按钮）也必须随请求发出 —— 否则 DVWA 这类
+  // `if (isset($_REQUEST['Submit']))` 的目标查询根本不执行，注入 payload 不进 SQL
+  // （与 D112「POST body 的伴随字段必须随注入请求发出」同类，这次补表单爬取路径）
+  assert.deepEqual(user.formValues, { username: 'admin', password: '', _token: 'csrf123', submit: 'Go' });
   assert.equal(user.csrfTokenName, '_token');
 
   const pass = formPoints.find((p) => p.param === 'password');
@@ -71,7 +74,9 @@ test('crawlForms 开启：解析表单生成 body 点并捕获 CSRF', async () =
   // GET 表单
   const q = formPoints.find((p) => p.param === 'q');
   assert.equal(q.formMethod, 'GET');
-  assert.equal(q.actionUrl, 'http://x.com/search');
+  // [D120] GET 表单生成 url 点，字段预置进 query（注入时只替换目标参数）
+  assert.equal(q.location, 'url');
+  assert.equal(q.actionUrl, 'http://x.com/search?q=');
 
   // submit 类控件不应成为注入点
   assert.ok(!formPoints.some((p) => p.param === 'submit'));
@@ -193,7 +198,8 @@ test('二阶标记不破坏原有发现（crawlForms 关闭仍无表单点，开
   // 既有断言仍成立：字段数量、CSRF 捕获、action 解析
   assert.equal(formPoints.length, 4);
   const user = formPoints.find((p) => p.param === 'username');
-  assert.deepEqual(user.formValues, { username: 'admin', password: '', _token: 'csrf123' });
+  // [D120] 含伴随字段 submit（理由同上：不进 SQL 的目标会因缺 Submit 而 0 检出）
+  assert.deepEqual(user.formValues, { username: 'admin', password: '', _token: 'csrf123', submit: 'Go' });
   assert.equal(user.csrfTokenName, '_token');
   assert.equal(user.actionUrl, 'http://x.com/login');
   // 且新增字段存在且有默认语义

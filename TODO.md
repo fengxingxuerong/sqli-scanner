@@ -5,6 +5,37 @@
 
 ---
 
+## 2026-10-21 批次 D120 · 表单伴随字段 + GET 表单 url 点（接手并发会话未提交工作）
+
+**背景**：DVWA low `/vulnerabilities/sqli/` 真机自测暴露 D112 的**第二条路径**（那次修
+`--body` 生成点，这次是表单爬取）：① 按钮/提交控件没采集 ⇒ `isset($_REQUEST['Submit'])`
+不成立 ⇒ 查询不执行；② GET 表单生成 body 点 ⇒ axios 发 GET 不带 body ⇒ 参数没发出去。
+两者都表现为「响应恒等于基线」的静默 0 检出。
+
+**本批**：接手并发会话工作区里未提交且语法不合法的 `TargetParser.js`（最小语法救援：
+`_parseForms` 多一个 `}`，把 textarea 采集踢出循环、`return forms;` 掉到类层级），
+不改其设计意图；`_parseForms` 拆 `_collectInputs`/`_collectTextareas`（44→23 行），
+两处「表单→注入点」收敛为 `_pushFormPoints`；复杂度基线三条同步下调；
+crawl/forms 测试同步新语义并新增「按钮进 formValues 但不生成注入点」用例。
+
+**真机 A/B（DVWA low，本机复现）**：修复前 `actionUrl=…/sqli/#`（无 Submit、无 query）、
+verdict `no_vulnerability_detected`（0 条，退出码 0）；修复后
+`actionUrl=…/sqli/?id=&Submit=Submit#` + `formValues={Submit:"Submit"}`、verdict
+`vulnerability_detected`（**3 条**，退出码 2）。
+
+**验证**：服务端全量 3691 例 0 fail；表单/爬取 46/46；复杂度守卫通过；三个外部裁判
+复跑零回归（Juice 2/2+0/4、VAmPI 2/2+0/5+Bearer、DVGA 0/1 按设计红）。
+
+### 待推进
+
+- **P0 ① GraphQL 内嵌注入点**（`graphql-inline-injection-gap`）：仍 0/1。要在 JSON 叶子
+  （GraphQL 查询串）内部定位值位并保持骨架注入，与 D120 的「GET 表单进 query」是同一类
+  思路（保骨架、只换值），可复用其设计。
+- **`<select>` 采集**：取值需解析 selected option，场景较少，按需补。
+- DVWA 靶场起法已固化在 `e2e/dvwa-lab/README.md`；本机资产 `/d/tools/{php83,mariadb,jdk,maven}`。
+
+---
+
 ## 2026-10-21 批次 D119 · 回显剔除变体矩阵化（P0 ②）
 
 **背景**：外部靶场自测中 DVGA 抓到的假阳性（JSON 转义回显未被剔除）是回显剔除这条线的

@@ -182,6 +182,15 @@
       "refute_cmd": "node --test server/tests/echoStrip.variantsMatrix.test.js",
       "recheck_batch": "D119（2026-10-21）：DVGA JSON 转义假阳性（D114 已修）后，把「抓一个补一个」改为形态矩阵；复核了 DVGA 那条修法是否只修了一个点。",
       "caveat": "矩阵只覆盖「payload 本身在响应里的形态」；不覆盖 XML 属性回显 / 十六进制转义 / 部分语言特有转义（未实测到，不写进矩阵）；截断前缀阈值 16 是防误删折中，不是理论最优。"
+    },
+    {
+      "id": "form-companion-fields-and-get-url-points-d120",
+      "claim": "表单爬取路径：① 按钮/提交控件作为伴随字段随请求发出（不生成注入点）；② GET 表单生成 url 点（字段预置 query）而非 body 点。",
+      "status": "verified",
+      "evidence": "真机 A/B（DVWA low，security=low，--forms --test-param id --smart）：修复前 actionUrl=…/sqli/#（无 Submit/无 query）verdict=no_vulnerability_detected 0 条退出码 0；修复后 actionUrl=…/sqli/?id=&Submit=Submit# + formValues={Submit:Submit} verdict=vulnerability_detected 3 条退出码 2。单测 server/tests/targetParser.{crawl,forms}.test.js；服务端全量 3691 例 0 fail。",
+      "refute_cmd": "node server/bin/cli.js -u \"http://127.0.0.1:8099/vulnerabilities/sqli/\" --forms --header \"Cookie: security=low\" --level 2 --risk 2 --technique BEUST --test-param id --smart（需 DVWA @8099 在跑）",
+      "recheck_batch": "D120（2026-10-21）：外部靶场自测抓出 D112 同型缺陷的第二条路径；接手并发会话未提交工作并做最小语法救援。",
+      "caveat": "仅验证 GET 表单与 Submit 伴随字段这一形态；<select> 仍未采集；按钮类字段不生成注入点（服务端校验值，当点只产噪声）；真机 A/B 为单轮、单目标、单参数（id）。"
     }
   ]
 }

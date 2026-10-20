@@ -112,7 +112,7 @@ test('爬取失败不阻断：目标页取不到也正常返回既有发现', as
   assert.ok(points.some((p) => p.param === 'a' && p.location === 'body'));
 });
 
-test('crawlDepth + crawlForms 同时开启：爬取页表单也被解析为 body 点', async () => {
+test('crawlDepth + crawlForms 同时开启：爬取页表单生成点（GET 表单 → url 点）', async () => {
   const http = mockHttp({
     'https://x.com/page': '<a href="/search">搜</a>',
     'https://x.com/search': '<form method="GET" action="/do-search"><input name="q" value=""></form>',
@@ -124,9 +124,43 @@ test('crawlDepth + crawlForms 同时开启：爬取页表单也被解析为 body
   const points = await parser.discover(target);
   const q = points.find((p) => p.param === 'q');
   assert.ok(q);
-  assert.equal(q.location, 'body');
+  // [D120 2026-10-21] GET 表单必须生成 **url** 点，不能生成 body 点：请求 method=GET 而
+  // 注入值写在 data 里 ⇒ axios 发 GET 不带 body ⇒ 参数根本没发出去，响应恒等于基线
+  // ⇒ 静默 0 检出。实测出处：DVWA low `<form action="#" method="GET">`，修复前
+  // formValues 已补齐 Submit 仍 0 检出，改 url 点后同一目标检出 3 条。
+  assert.equal(q.location, 'url');
   assert.equal(q.formMethod, 'GET');
-  assert.equal(q.actionUrl, 'https://x.com/do-search');
+  // GET 表单：全部字段（含按钮伴随字段）预置进 query，注入时只替换目标参数
+  assert.equal(q.actionUrl, 'https://x.com/do-search?q=');
+});
+
+// [D120 2026-10-21] 伴随字段：提交按钮必须采集进 formValues（否则服务端 `isset($_POST['Submit'])`
+// 不成立 ⇒ 查询不执行 ⇒ 注入 payload 不进 SQL），但**不生成注入点**（按钮值由服务端校验）。
+test('表单伴随字段：按钮进 formValues 但不生成注入点；POST 表单仍是 body 点', async () => {
+  const http = mockHttp({
+    'https://x.com/login':
+      '<form method="POST" action="/do-login">' +
+      '<input type="text" name="username" value="admin">' +
+      '<input type="password" name="password" value="">' +
+      '<input type="hidden" name="user_token" value="abc">' +
+      '<input type="submit" name="Submit" value="Submit">' +
+      '</form>',
+  });
+  const parser = new TargetParser(http);
+  const target = createTarget({ url: 'https://x.com/login', method: 'POST', config: { level: 1 } });
+  target.config.crawlForms = true;
+  const points = await parser.discover(target);
+  // 三个可注入字段生成 body 点
+  for (const n of ['username', 'password', 'user_token']) {
+    const p = points.find((x) => x.param === n);
+    assert.ok(p, `${n} 应生成注入点`);
+    assert.equal(p.location, 'body');
+  }
+  // 按钮不生成注入点，但在 formValues 里随请求发出
+  assert.ok(!points.some((p) => p.param === 'Submit'), 'Submit 不应作为注入点');
+  const user = points.find((p) => p.param === 'username');
+  assert.equal(user.formValues.Submit, 'Submit');
+  assert.equal(user.formValues.user_token, 'abc');
 });
 
 test('构造签名兼容：crawler 缺省自动创建（不抛）', () => {

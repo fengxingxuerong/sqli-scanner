@@ -490,39 +490,88 @@ export class TargetParser {
         action = baseUrl;
       }
 
-      const values = {};
-      let csrfTokenName = null;
-      const inputRe = /<input\b([^>]*)\/?>/gi;
-      let im;
-      while ((im = inputRe.exec(inner))) {
-        const tag = im[1] || '';
-        const type = (this._attr(tag, 'type') || 'text').toLowerCase();
-        // 跳过提交/按钮类控件（无注入语义）；hidden 仍需采集（含 CSRF token）
-        if (['submit', 'button', 'image', 'reset'].includes(type)) continue;
-        const name = this._attr(tag, 'name');
-        if (!name) continue; // 无 name 的 input 不可作为注入点
-        const value = this._attr(tag, 'value') || '';
-        values[name] = value;
-        if (!csrfTokenName && CSRF_RE.test(name)) csrfTokenName = name;
-      }
-
-      // [P1-FIX 2026-09-07] 补 <textarea> 采集：多行文本（评论正文/简介/资料）是二阶注入
-      // 最典型的存储字段——此前只解析 <input>，textarea 字段整体缺失 → 二阶存储探针存错
-      // 参数（存进 item_id 而非正文 body）→ 存储值根本进不了被拼接的 SQL → 二阶必漏
-      // （real-world-lab 实测）。取值语义：标签间文本即默认值；同名时 input 优先（不覆盖）。
-      // <select> 未采集（取值需解析 selected option，场景较少，后续按需补）。
-      const taRe = /<textarea\b([^>]*)>([\s\S]*?)<\/textarea>/gi;
-      let tm;
-      while ((tm = taRe.exec(inner))) {
-        const name = this._attr(tm[1] || '', 'name');
-        if (!name) continue; // 无 name 的 textarea 不可作为注入点
-        if (values[name] == null) values[name] = (tm[2] || '').trim();
-        if (!csrfTokenName && CSRF_RE.test(name)) csrfTokenName = name;
-      }
-
-      forms.push({ method, action, values, csrfTokenName });
+      const collected = this._collectInputs(inner);
+      const values = collected.values;
+      this._collectTextareas(inner, values, collected);
+      // injectableNames：要生成**注入点**的字段（排除按钮 —— 按钮值由服务端校验，
+      // 拿它当注入点只会产生噪声；但它仍在 values 里随请求发出，见 _collectInputs 注释）。
+      const injectableNames = Object.keys(values).filter((n) => !collected.buttonNames.has(n));
+      forms.push({ method, action, values, injectableNames, csrfTokenName: collected.csrfTokenName });
     }
     return forms;
+  }
+
+  /**
+   * 采集表单内 `<input>`：返回 { values, buttonNames, csrfTokenName }。
+   *
+   * [D120 2026-10-21] 提交/按钮类控件**必须采集进 values**，只是不作为注入点。
+   * 反证（外部裁判 DVWA low，`vulnerabilities/sqli/source/low.php`）：
+   *   `if (isset($_REQUEST['Submit'])) { $id = $_REQUEST['id']; ... }`
+   *   ⇒ 缺 Submit 时查询**根本不执行**，注入 payload 不进 SQL，响应与基线完全一致
+   *   ⇒ 扫描器静默 0 检出（实测：`--forms` 发现 body:id 点、formValues 只有 {"id":""}、
+   *      367 请求 0 漏洞；补齐 Submit 后同一目标检出 3 条）。
+   * 这与 D112 是同一类缺陷（「POST body 的伴随字段必须随注入请求发出」）——
+   * 那次修的是 --body 生成点，这次补上表单爬取路径。
+   * hidden 仍需采集（含 CSRF token），与按钮一并随请求发出。
+   * @param {string} inner 表单内 HTML
+   * @returns {{ values: Record<string, string>, buttonNames: Set<string>, csrfTokenName: string | null }}
+   */
+  _collectInputs(inner) {
+    /** @type {Record<string, string>} */
+    const values = {};
+    const buttonNames = new Set();
+    let csrfTokenName = null;
+    const inputRe = /<input\b([^>]*)\/?>/gi;
+    let im;
+    while ((im = inputRe.exec(inner))) {
+      const tag = im[1] || '';
+      const type = (this._attr(tag, 'type') || 'text').toLowerCase();
+      const name = this._attr(tag, 'name');
+      if (!name) continue; // 无 name 的 input 既不是参数也不是触发条件
+      const value = this._attr(tag, 'value') || '';
+      const isButton = ['submit', 'button', 'image', 'reset'].includes(type);
+      if (isButton) buttonNames.add(name);
+      values[name] = value;
+      if (!csrfTokenName && CSRF_RE.test(name)) csrfTokenName = name;
+    }
+    return { values, buttonNames, csrfTokenName };
+  }
+
+  /**
+   * [P1-FIX 2026-09-07] 补 `<textarea>` 采集：多行文本（评论正文/简介/资料）是二阶注入
+   * 最典型的存储字段——此前只解析 `<input>`，textarea 字段整体缺失 → 二阶存储探针存错
+   * 参数（存进 item_id 而非正文 body）→ 存储值根本进不了被拼接的 SQL → 二阶必漏
+   * （real-world-lab 实测）。取值语义：标签间文本即默认值；同名时 input 优先（不覆盖）。
+   * `<select>` 未采集（取值需解析 selected option，场景较少，后续按需补）。
+   * @param {string} inner 表单内 HTML
+   * @param {Record<string,string>} values 就地写入（不改已有的 input 同名值）
+   * @param {{csrfTokenName: string|null}} collected 就地回填 CSRF 名
+   */
+  _collectTextareas(inner, values, collected) {
+    const taRe = /<textarea\b([^>]*)>([\s\S]*?)<\/textarea>/gi;
+    let tm;
+    while ((tm = taRe.exec(inner))) {
+      const name = this._attr(tm[1] || '', 'name');
+      if (!name) continue; // 无 name 的 textarea 不可作为注入点
+      if (values[name] == null) values[name] = (tm[2] || '').trim();
+      if (!collected.csrfTokenName && CSRF_RE.test(name)) collected.csrfTokenName = name;
+    }
+  }
+
+      /**
+   * 把表单字段全部写进 URL 的 query（GET 表单用；同名参数覆盖）。
+   * @param {string} action 表单 action（绝对地址）
+   * @param {Record<string,string>} values 表单字段
+   * @returns {string} 带完整 query 的 URL（解析失败原样返回）
+   */
+  _urlWithValues(action, values) {
+    try {
+      const u = new URL(action);
+      for (const [k, v] of Object.entries(values || {})) u.searchParams.set(k, v ?? '');
+      return u.toString();
+    } catch {
+      return action;
+    }
   }
 
   // 从标签字符串中取某属性值（兼容双引号/单引号/无引号）
@@ -532,30 +581,58 @@ export class TargetParser {
     return attrValue(tag, name);
   }
 
-  // 表单爬取：解析页面表单，为每个 named input 生成 body 位置注入点。
+  // 表单爬取：解析页面表单，为每个 named input 生成注入点。
   // 同一页面多 action 记为独立点；CSRF token 随 formValues 一并带上。
+  // [D120] 生成逻辑抽到 _pushFormPoints（与 _mergeCrawlFindings 共用单一事实源）。
   async _crawlForms(target, points) {
     const config = target.config || {};
     const html = await this._fetchHtml(target.baseUrl, config);
     if (!html) return;
     const forms = this._parseForms(html, target.baseUrl);
+    const seen = new Set(points.map((p) => this._pointKey(p, target.baseUrl)));
     for (const form of forms) {
-      const csrf = form.csrfTokenName || null;
-      // 仅 POST 表单点标记为潜在存储点（GET/非表单点保持 false/null，向后兼容一阶）
-      const isStore = form.method === 'POST';
-      const storeKind = isStore ? this._inferStoreKind(form.values) : null;
-      for (const fieldName of Object.keys(form.values)) {
-        points.push(
-          createInjectionPoint('body', fieldName, form.values[fieldName] || '', {
-            formMethod: form.method,
-            actionUrl: form.action,
-            formValues: form.values,
-            csrfTokenName: csrf,
-            isStorePoint: isStore,
-            storeKind,
-          })
-        );
-      }
+      this._pushFormPoints(form, null, points, seen);
+    }
+  }
+
+  /**
+   * 把一个表单的字段生成为注入点（`_crawlForms` 与 `_mergeCrawlFindings` 共用）。
+   *
+   * [D120 2026-10-21] 位置选择：**GET 表单 → url 点，POST 表单 → body 点**。
+   * GET 表单若生成 body 点，请求 method=GET 而注入值写在 data 里 ⇒ axios 发 GET 不带
+   * body ⇒ 参数根本没发出去，响应恒等于基线 ⇒ 静默 0 检出（DVWA low 实测：
+   * 修复前 367 请求 0 漏洞，改 url 点后同一目标检出 3 条）。
+   * GET 表单的全部字段（含按钮伴随字段）预置进 query，注入时只替换目标参数。
+   *
+   * 注入点只从**非按钮字段**生成（按钮值由服务端校验，拿它当注入点只会产生噪声），
+   * 但按钮仍在 formValues 里随请求发出（见 `_parseForms` 注释）。
+   *
+   * @param {object} form _parseForms 的产物
+   * @param {string|null} crawledUrl 该表单所在的已抓取页（无则 null）
+   * @param {object[]} points 注入点数组（就地追加）
+   * @param {Set<string>} seen 去重键集合（就地更新）
+   */
+  _pushFormPoints(form, crawledUrl, points, seen) {
+    const loc = form.method === 'POST' ? 'body' : 'url';
+    const actionUrl = loc === 'url' ? this._urlWithValues(form.action, form.values) : form.action;
+    const csrf = form.csrfTokenName || null;
+    const isStore = form.method === 'POST';
+    const storeKind = isStore ? this._inferStoreKind(form.values) : null;
+    for (const fieldName of form.injectableNames || Object.keys(form.values)) {
+      const key = `${loc}:${fieldName}:${actionUrl}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      points.push(
+        createInjectionPoint(loc, fieldName, form.values[fieldName] || '', {
+          formMethod: form.method,
+          actionUrl,
+          formValues: form.values,
+          csrfTokenName: csrf,
+          isStorePoint: isStore,
+          storeKind,
+          crawledUrl,
+        })
+      );
     }
   }
 
@@ -702,30 +779,13 @@ export class TargetParser {
         // URL 解析失败则跳过该链接
       }
     }
-    // 2) 已抓取页表单（仅 crawlForms 开启时解析，语义与 _crawlForms 一致）
+    // 2) 已抓取页表单（仅 crawlForms 开启时解析，语义与 _crawlForms 一致，共用 _pushFormPoints）
     if (config.crawlForms) {
       for (const page of pages) {
         const forms = this._parseForms(page.html, page.url);
         for (const form of forms) {
-          const csrf = form.csrfTokenName || null;
-          const isStore = form.method === 'POST';
-          const storeKind = isStore ? this._inferStoreKind(form.values) : null;
-          for (const fieldName of Object.keys(form.values)) {
-            const key = `body:${fieldName}:${form.action}`;
-            if (seen.has(key)) continue;
-            seen.add(key);
-            points.push(
-              createInjectionPoint('body', fieldName, form.values[fieldName] || '', {
-                formMethod: form.method,
-                actionUrl: form.action,
-                formValues: form.values,
-                csrfTokenName: csrf,
-                isStorePoint: isStore,
-                storeKind,
-                crawledUrl: page.url,
-              })
-            );
-          }
+          // [D120] GET 表单 → url 点、POST → body 点；按钮进 formValues 但不成点
+          this._pushFormPoints(form, page.url, points, seen);
         }
       }
     }
