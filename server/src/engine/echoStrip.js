@@ -74,6 +74,21 @@ export function stripEchoedPayload(body, payload) {
   try {
     variants.add(encodeURIComponent(payload));
   } catch { /* 非法字符忽略 */ }
+  // [D112 2026-10-20 外溢自 DVGA 外部裁判] **JSON 字符串转义型回显**：
+  // JSON API（GraphQL / REST）报错时把用户输入整段塞进 `{"errors":[{"message":"…"}]}`，
+  // 其中的 payload 是 **JSON 转义形态**（`"` → `\"`、换行 → `\n`）——只按原文剔，剔不干净。
+  // 实测出处：DVGA `/graphql` 注入后响应
+  //   {"errors":[{"message":"Syntax Error … \n1: { search(keyword: \"x\") … }' AND extractvalue(…)…"}]}
+  // payload 里的 `extractvalue` 因此逃过剔除，被 ERROR_SIG（含 payload 自身关键字）命中
+  // ⇒ 在**手工证实不可注入**（ORM like 参数化）的 search(keyword) 点上误报 High/CVSS 8.2。
+  // `JSON.stringify(s).slice(1,-1)` 即「该串出现在 JSON 字符串里时的样子」，与服务端
+  // 序列化规则同源，比手写 replace 覆盖更全（控制字符 \u0000 等一并覆盖）。
+  try {
+    const jsonEsc = JSON.stringify(String(payload)).slice(1, -1);
+    variants.add(jsonEsc);
+    // 双层：JSON 里再嵌一层 JSON（错误消息套娃 / 日志二次序列化）
+    variants.add(JSON.stringify(jsonEsc).slice(1, -1));
+  } catch { /* 非法字符忽略 */ }
   for (const v of variants) {
     if (v && v.length > 3) t = t.split(v).join('');
   }

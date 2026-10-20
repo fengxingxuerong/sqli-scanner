@@ -93,11 +93,11 @@
     },
     {
       "id": "external-judge-juice-shop-d109",
-      "claim": "第三方外部裁判 OWASP Juice Shop 20.3.0（D109）：官方 SQLi 真值端点 2/2 检出（商品搜索 GET LIKE、登录 POST JSON），4 个带可测参数的安全端点误报 0；sqlmap 1.10.7 同题两处亦检出。",
+      "claim": "第三方外部裁判 OWASP Juice Shop 20.3.0（D109）：官方 SQLi 真值端点 2/2 检出（商品搜索 GET LIKE、登录 POST JSON），4 个带可测参数的安全端点误报 0；同注入点换良性值 banana 的同源复检 1/1（D114）；sqlmap 1.10.7 同题两处亦检出。",
       "status": "verified",
-      "evidence": "e2e/juice-shop-lab/results/external-judge-2026-10-19.md（2026-10-19，Node v24.18.0；套件 2/2 检出 + 0/4 误报，acceptance --only=juice-shop 1 PASS/0 FAIL/0 SKIP）；真值来自官方 routes/search.ts:23 与 routes/login.ts:34；sqlmap 1.10.7 同题日志见该文件。",
+      "evidence": "e2e/juice-shop-lab/results/external-judge-2026-10-19.md（2026-10-19，Node v24.18.0；套件 2/2 检出 + 0/4 误报，acceptance --only=juice-shop 1 PASS/0 FAIL/0 SKIP）；D114 同源复检 1/1（2026-10-20 复跑，请求 98）；真值来自官方 routes/search.ts:23 与 routes/login.ts:34；sqlmap 1.10.7 同题日志见该文件。",
       "refute_cmd": "JUICE_BASE=http://127.0.0.1:3199 node e2e/acceptance.mjs --only=juice-shop",
-      "recheck_batch": "D109（2026-10-19）：新增登录 POST JSON 真值端点并实跑；此前 D88 只有搜索点 1 类。",
+      "recheck_batch": "D109（2026-10-19）：新增登录 POST JSON 真值端点并实跑；D114（2026-10-20）：补同源复检（同注入点换 banana）。",
       "caveat": "单轮；外部真值仅 2 个 SQLi 端点 + 4 个安全端点，不能外推为通用外部检出率；登录点报告的 expiredMidScan/401 认证挑战计数是登录语义噪声（finding 由 admin token vs 401 确认）；Juice Shop 为外部项目，未就绪时套件 SKIP，不计通过。"
     },
     {
@@ -126,6 +126,33 @@
       "refute_cmd": "node e2e/acceptance.mjs --only=vampi（需 VAmPI 双实例 @5000/5001 在跑，且 tokentimetolive 已调大）",
       "recheck_batch": "D113（2026-10-20）：外部裁判认证场景扩面；复核了「外部裁判全部匿名无认证头」这一口径缺口（D91 的假阴性正是认证链路形状，此前无外部证据）。",
       "caveat": "单轮；Bearer 端点的注入点在路径段（book_title），Authorization 头本身不作为注入点（打了 token 会坏）⇒ 未覆盖「头注入」场景；登录链路用自注册随机账号，不依赖靶场种子数据；三个外部裁判合计 7 个真值端点，仍不能外推全局检出率。"
+    },
+    {
+      "id": "external-judge-dvga-d114",
+      "claim": "GraphQL 面外部裁判 DVGA（D114）：官方 pastes(filter) 真值点 0/1（已知 GraphQL 查询串内部注入能力缺口）；官方 search(keyword) ORM 参数化点修复 JSON 转义回显后 0 误报；同 resolver 无 filter 0 误报。",
+      "status": "verified",
+      "evidence": "e2e/dvga-lab/results/external-judge-2026-10-20-dvga.md（2026-10-20；真值 0/1，149 请求；安全 0/3；JSON 回显修复契约 server/tests/echoStrip.jsonEcho.test.js 4 例）；官方真值 core/views.py:320。",
+      "refute_cmd": "DVGA_BASE=http://127.0.0.1:5013 node e2e/dvga-lab/run.mjs",
+      "recheck_batch": "D114（2026-10-20）：GraphQL 面外部裁判入库；JSON 回显误报修复。",
+      "caveat": "单轮；靶场当前未常驻，复跑需按 README 起 DVGA；本套件按设计红（0/1），不接 acceptance/run-all；不能外推 GraphQL 覆盖率。"
+    },
+    {
+      "id": "graphql-inline-injection-gap",
+      "claim": "能力缺口：引擎当前不支持 GraphQL 查询串内部值位注入；现有 JSON 叶子整串替换会生成非法 GraphQL，DVGA 真值点 pastes(filter) 0/1。",
+      "status": "verified",
+      "evidence": "e2e/dvga-lab/results/external-judge-2026-10-20-dvga.md（真值点 0/1；payload 为整串替换后语法错误，服务端只回显语法错）；e2e/dvga-lab/README.md 起靶场/复跑链。",
+      "refute_cmd": "DVGA_BASE=http://127.0.0.1:5013 node e2e/dvga-lab/run.mjs（期望当前仍 0/1；能力落地后应转绿并改写本条）",
+      "recheck_batch": "D114（2026-10-20）：记入能力缺口；未修，禁止对外声称 GraphQL 注入覆盖。",
+      "caveat": "这是能力边界，不是安全结论；GraphQL 面目前只有 DVGA 一个端点样本。"
+    },
+    {
+      "id": "external-judge-benchmark-d114",
+      "claim": "OWASP Benchmark 外部裁判 4 号（D114）：20/504 sqli 子集实跑（2026-10-20）真值 4/12（query 3/10、header 1/2）、安全对照 0/8、证据不足 0；已知漏检缺口，按 DVGA 同口径登记为参考靶场，不接门禁。",
+      "status": "verified",
+      "evidence": "e2e/benchmark-lab/results/benchmark-2026-10-20.md（JDK17 + Maven3.9 + BenchmarkJava 1.2 + HSQLDB 2.7.4，HTTPS 8443；query 真值 3/10、header 1/2、安全 0/8）；header 首跑 lab 因 level=2 未开 testHeaders ⇒ 0 请求，已修为显式 testHeaders；复跑命令与逐例漏检见该文件。",
+      "refute_cmd": "BENCHMARK_BASE=https://127.0.0.1:8443/benchmark node e2e/benchmark-lab/run.mjs（需 Benchmark 已部署）",
+      "recheck_batch": "D114（2026-10-20）：接线 + 实跑；已知 query 7 / header 1 漏检，未修，不得当作 Benchmark 检出率引用。",
+      "caveat": "子集 ≠ 全集（20/504）且单轮；4/12 只代表该子集/本次运行；参考靶场不接 acceptance/run-all，未就绪时 SKIP，不计通过。"
     }
   ]
 }

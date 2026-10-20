@@ -50,6 +50,15 @@ const ENDPOINTS = [
     jsonBody: { email: 'x@y.z', password: 'x' },
     desc: '登录（官方 routes/login.ts 直接拼接 email/password；JSON body）',
   },
+  {
+    // [D114 2026-10-20] 同源复检（与搜索点**同一个注入点**，只把取值 apple 换成 banana）。
+    // 作用同 VAmPI 那条：钉住「检出不是靠输入里自带引号/畸形形态」——换良性值仍须检出。
+    // 统计时单列，不并入真值分母（并入即把 2 个真值灌成 3 个）。
+    path: '/rest/products/search?q=banana',
+    kind: 'vuln',
+    homologous: true,
+    desc: '搜索点同源复检（同注入点换良性取值 banana）',
+  },
   // ⚠ 安全端点必须**带可测参数**：无参数的路径（如 /api/Products/1）不会产生任何请求，
   // 那种「0 检出」只是「没测过」，不构成零误报证据（本靶场首版即犯此错，已纠正）。
   // 下列端点均实测会产生数十至上百请求，零检出才有证明力。
@@ -124,27 +133,38 @@ const rows = [];
 let falsePositives = 0;
 let truePositives = 0;
 let missed = 0;
+let homoHit = 0;
+let homoTotal = 0;
 
 for (const ep of ENDPOINTS) {
   const r = await scanOne(ep);
   const isVuln = ep.kind === 'vuln';
   if (isVuln) {
-    if (r.vulns > 0) truePositives += 1;
-    else missed += 1;
+    if (ep.homologous) {
+      homoTotal += 1;
+      if (r.vulns > 0) homoHit += 1;
+    } else if (r.vulns > 0) {
+      truePositives += 1;
+    } else {
+      missed += 1;
+    }
   } else if (r.vulns > 0) {
     falsePositives += 1;
   }
   rows.push({ ...ep, ...r });
   const mark = isVuln ? (r.vulns > 0 ? '✅' : '❌漏检') : r.vulns > 0 ? '❌误报' : '✅';
+  const tag = isVuln ? (ep.homologous ? '同源复检' : '真值漏洞') : '安全端点';
   console.log(
-    `${mark} [${isVuln ? '真值漏洞' : '安全端点'}] vulns=${r.vulns} 请求=${r.requests} ` +
+    `${mark} [${tag}] vulns=${r.vulns} 请求=${r.requests} ` +
     `${ep.method || 'GET'} ${ep.path}`
   );
   if (r.techniques.length) console.log(`     命中技术：${r.techniques.join(', ')}`);
 }
 
+const vulnTotal = ENDPOINTS.filter((e) => e.kind === 'vuln' && !e.homologous).length;
 console.log('\n=== 外部裁判汇总 ===');
-console.log(`真值漏洞端点：检出 ${truePositives}/${ENDPOINTS.filter((e) => e.kind === 'vuln').length}（漏检 ${missed}）`);
+console.log(`真值漏洞端点：检出 ${truePositives}/${vulnTotal}（漏检 ${missed}）`);
+console.log(`同源复检（同点换良性值）：检出 ${homoHit}/${homoTotal}`);
 console.log(`安全端点误报：${falsePositives}（须为 0）`);
 const pass = missed === 0 && falsePositives === 0;
 console.log(pass

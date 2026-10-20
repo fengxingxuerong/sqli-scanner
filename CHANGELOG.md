@@ -65,6 +65,34 @@
 
 ## [Unreleased]
 
+### 2026-10-20 批次 D114 · 外部裁判扩面：DVGA GraphQL + OWASP Benchmark 4 号
+
+**动机**：D111–D113 已补 VAmPI/DVWA/认证，但 **GraphQL 查询串内部注入**与 **HTTP header
+注入面**仍未覆盖。DVGA 首跑抓到一条真实误报；OWASP Benchmark 的官方逐条真值补上
+header 形态与同族 A/B。
+
+**改动**：
+- `server/src/engine/echoStrip.js`：补 **JSON 字符串转义型回显**（含双层）剔除；来源是
+  DVGA `search(keyword)`（官方 ORM `like` 参数化、手工证实不可注入）上的 High/CVSS 8.2
+  误报。契约 `server/tests/echoStrip.jsonEcho.test.js` 4 例（§A/§A2 正检、§B 弱版敏感性、
+  §C 真报错不得误删）。
+- `e2e/dvga-lab/`：GraphQL 面外部裁判（DVGA）；真值 `pastes(filter)` **0/1** = 已知能力缺口
+  （GraphQL 查询串内部注入未实现），按设计红，登记为 `reference-labs.json`，不接
+  acceptance/run-all；安全点 `search(keyword)` 修复后 0 误报。跑法/证据见同目录 README。
+- `e2e/benchmark-lab/`：外部裁判 4 号 OWASP Benchmark，**20/504 子集**（query 真值 10 +
+  query 安全 8 + header 真值 2）。实跑 **真值 4/12（query 3/10、header 1/2）、安全 0/8**；
+  header 首跑的 0/2 是 lab 接线问题（全局 level=2 未开 `testHeaders` ⇒ 无注入点），已修为
+  显式 `testHeaders`。query 7 + header 1 仍漏检 ⇒ 按 DVGA 同口径登记为参考/缺口靶场，
+  **不接 acceptance/run-all**；证据 `e2e/benchmark-lab/results/benchmark-2026-10-20.md`。
+- `e2e/juice-shop-lab/`：补同源复检（同搜索注入点换良性 banana），2026-10-20 复跑 1/1。
+- 文档/台账：README 外部裁判边界更新（验收仍 23 套件，benchmark 是参考非门禁）；
+  `e2e/README.md` 索引；`docs/_claims-ledger.json` 新增 `external-judge-dvga-d114`、
+  `graphql-inline-injection-gap`、`external-judge-benchmark-d114`（实测缺口）。
+
+**验证**：`server/tests/echoStrip.jsonEcho.test.js` **4/4**；Juice Shop 同源复检 **1/1**
+（真值 2/2、安全 0/4）；`acceptance --only=juice-shop` PASS；Benchmark 实跑 4/12 + 0/8
+（已知缺口，参考靶场）；本地收口门禁见提交记录。
+
 ### 2026-10-20 批次 D113 · 外部裁判认证场景扩面（VAmPI Bearer + DVWA 盲注 POST）
 
 **动机**：D112 之后外部裁判的形态仍有缺口 —— ① 三个裁判**全部匿名、无认证头**，

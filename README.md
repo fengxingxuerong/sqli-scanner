@@ -420,7 +420,7 @@ npm run artifact:drift   # 入库的 e2e 基线产物必须等于当前代码跑
 
 - TypeScript: 零错误
 - 前端测试: 574/574 通过（覆盖率门禁 stmts 93.31 / branch 84.84 / func 81.81，阈值 88/77/67）
-- 服务端测试: 3674 用例（3668 pass / 0 fail / 6 skip，并发口径 2026-10-19 复测；6 skip 为环境依赖显式跳过。覆盖率 lines 91.39 / branch 80.65 / func 84.54，阈值 85/74/77）
+- 服务端测试: 3674 用例（3668 pass / 0 fail / 6 skip，并发口径 2026-10-20 复测；6 skip 为环境依赖显式跳过。覆盖率 lines 91.39 / branch 80.65 / func 84.54，阈值 85/74/77）
 - 一键扫描: `npm run scan -- -u <url>`（CLI 一条命令产出 HTML/JSON/Markdown 全套报告 + manifest，退出码可直接进 CI 门禁）
 - Tamper 插件: 234 个（含批次 D3 新增 scalarselectinline；含 v24 增量 20 个，对齐 sqlmap 官方 tamper 全集，含官方 CRS/libinjection 实测组合 uniontable+odbcbrace；含批次 D13 新增 5 件上游形态变体 *nospace/*open/*block，真机 A/B 判决前不进默认链）
 - WAF 绕过能力: 200+ 插件链式组合，覆盖 62 个 WAF 厂商指纹识别 + 推荐
@@ -677,10 +677,12 @@ npm run acceptance:sandbox          # 同全量，但套隔离 MySQL 沙箱（33
 > 而是本项目自己写的 223 行 Python 复刻（`sqli-labs.py`，http.server + SQLite，runner 直接
 > spawn 它）；同目录的 sqlmap 对照（`e2e/sqlmap-benchmark/run.mjs`）双方跑的就是这个复刻靶站，
 > 所以它是**「同一自建靶场上的双方同题对照」，不是外部真值**。
-> **第三方外部裁判目前只有 OWASP Juice Shop**（D88 接入、D109 补登录点）：2 个官方 SQLi 端点
-> （搜索 GET / 登录 POST JSON）均检出、4 个安全端点零误报（2026-10-19 实跑，证据见
-> `e2e/juice-shop-lab/results/external-judge-2026-10-19.md`）；DVWA / OWASP Benchmark 仍未接入。
-> ⇒ 上述数字**不可外推为通用误报率**。WAF 侧同理：只验了 ModSecurity+CRS 一家。
+> **第三方外部裁判现在是 4 号 + 1 个 GraphQL 缺口参考**（D88/D109/D111/D112/D114）：
+> Juice Shop（2 个官方 SQLi + 4 安全端点 + 同源复检）、VAmPI（路径段注入 + 双实例 A/B）、
+> DVWA（PHP+MySQL + cookie/POST + impossible A/B）；OWASP Benchmark 与 DVGA 作为
+> **参考/能力缺口**（Benchmark 20/504 子集当前真值 4/12、安全 0/8；DVGA GraphQL 真值
+> 0/1；均不接门禁）。以上都是**小样本/子集**，不能外推为通用检出率或误报率；
+> WAF 侧仍只验 ModSecurity+CRS 一家。
 
 **本轮 0 FAIL。** 此前两轮 FAIL 的定位与修复（CRS 执行器 `(?i:…)` 兼容性、`engine.e2e` 环境耦合假红）、
 「11 PASS / 0 SKIP 假绿」事故、门禁自身的两处缺陷修复与缺陷注入验证记录，已迁至
