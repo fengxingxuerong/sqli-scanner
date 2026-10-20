@@ -158,12 +158,12 @@
     },
     {
       "id": "external-judge-benchmark-d115",
-      "claim": "OWASP Benchmark 外部裁判（D115/D116，Java + Spring + HSQLDB）：官方 expectedresults-1.2.csv 标注的 74 条 sqli 用例（真值 43 + 安全对照 24 + `{call}` 形态 7）上，真值 43/43 全部检出、安全对照 0/24 误报、证据不足 0；覆盖前三个外部裁判都没有的 HTTP header 注入面（2/2）与参数名注入形态（50 条全检出，需 testParamNames）。",
+      "claim": "OWASP Benchmark 外部裁判（D115→D117，Java + Spring + HSQLDB）：官方 expectedresults-1.2.csv 的 sqli 用例，按注入面全量实跑 —— query 210（111 真值 + 99 安全）、header 67（33 + 34）、参数名形态 50 有效（34 + 16），合计有效 327 条：真值 178/178 全部检出、安全 0/149 误报、证据不足 0；另有 `{call <过程名>}` 7 条单列（4 真值未检出 = 已知边界，3 安全 0 误报）。",
       "status": "verified",
-      "evidence": "e2e/benchmark-lab/results/external-judge-2026-10-20-benchmark.md（D115 段 20 用例 + D116 段 74 用例）+ results/run-2026-10-20-d116b.log（2026-10-20 22:30：43/43、0/24、paramName 50 条、dbms=HSQLDB；acceptance --only=benchmark 1 PASS/0 FAIL/0 SKIP）；清单口径落盘 e2e/benchmark-lab/cases.json。",
+      "evidence": "e2e/benchmark-lab/results/external-judge-2026-10-20-benchmark.md（D115 20 条 / D116 74 条 / D117 query 210 + header 67）+ results/run-2026-10-20-d117-query.log、-d117-header.log、-d116b.log；清单 cases.json / cases-query.json / cases-header.json；acceptance --only=benchmark（74 条基线）1 PASS/0 FAIL/0 SKIP。",
       "refute_cmd": "node e2e/acceptance.mjs --only=benchmark（需 Benchmark @https://127.0.0.1:8443 + HSQLDB @9001 在跑）",
-      "recheck_batch": "D115（2026-10-20）：推翻 D114 的 4/12 结论（runner 用法未对上「参数名注入」语义）；D116（2026-10-20）：扩面 20 → 74 用例（参数名形态全量），`{call}` 形态单列。",
-      "caveat": "子集 74/504，不能外推为「Benchmark 检出率 N%」，也不能与官方 scorecard（28887 用例按类别加权）相提并论；43 条 finding 是同一注入点的多技术命中而非 43 个独立漏洞；参数名形态依赖 testParamNames、header 形态依赖 testHeaders（均 opt-in，不代表默认配置覆盖率）；`{call <过程名>}` 形态 4 条真值全未检出 = 明确能力缺口（注入点是存储过程名，非值位），单列不计入分母，但其安全侧误报 0/3 已计入判据；Benchmark 为外部项目，未就绪时套件 SKIP 不计通过。"
+      "recheck_batch": "D115（2026-10-20）：推翻 D114 的 4/12；D116：扩到 74 条（参数名全量）；D117：query/header 两种形态全量（210 + 67），累计有效 327 条。",
+      "caveat": "Benchmark 是合成靶场：178/178 不能外推真实系统检出率（WAF / 参数签名 / JSON·XML body 未覆盖）；finding 数是同一注入点的多技术命中而非独立漏洞数；参数名形态依赖 testParamNames、header 形态依赖 testHeaders（opt-in）；`{call <过程名>}` 4 条真值未检出是明确能力缺口（存储过程名注入），不计入分母但其安全侧 0/3 已计入判据；113 条 prepared/其它形态未纳入；Benchmark 未就绪时套件 SKIP 不计通过。"
     }
   ]
 }

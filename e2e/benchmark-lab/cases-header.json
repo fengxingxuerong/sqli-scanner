@@ -1,0 +1,407 @@
+{
+ "note": "Benchmark **header 注入面全量清单**（D117）。source: expectedresults-1.2.csv + 各用例 `request.getHeader(类名)` 源码判定；均为值位注入（头名固定=类名）。\n用途：把 header 形态从 2 条扩到全量 67 条（33 真值 + 34 安全），验证 D115 首次覆盖的头位置注入在更大样本上的表现。跑法：BENCHMARK_CASES=e2e/benchmark-lab/cases-header.json node e2e/benchmark-lab/run.mjs",
+ "cases": [
+  {
+   "name": "BenchmarkTest00018",
+   "path": "/sqli-00/BenchmarkTest00018",
+   "kind": "header",
+   "vuln": true
+  },
+  {
+   "name": "BenchmarkTest00194",
+   "path": "/sqli-00/BenchmarkTest00194",
+   "kind": "header",
+   "vuln": true
+  },
+  {
+   "name": "BenchmarkTest00195",
+   "path": "/sqli-00/BenchmarkTest00195",
+   "kind": "header",
+   "vuln": true
+  },
+  {
+   "name": "BenchmarkTest00196",
+   "path": "/sqli-00/BenchmarkTest00196",
+   "kind": "header",
+   "vuln": true
+  },
+  {
+   "name": "BenchmarkTest00197",
+   "path": "/sqli-00/BenchmarkTest00197",
+   "kind": "header",
+   "vuln": false
+  },
+  {
+   "name": "BenchmarkTest00198",
+   "path": "/sqli-00/BenchmarkTest00198",
+   "kind": "header",
+   "vuln": true
+  },
+  {
+   "name": "BenchmarkTest00199",
+   "path": "/sqli-00/BenchmarkTest00199",
+   "kind": "header",
+   "vuln": true
+  },
+  {
+   "name": "BenchmarkTest00200",
+   "path": "/sqli-00/BenchmarkTest00200",
+   "kind": "header",
+   "vuln": false
+  },
+  {
+   "name": "BenchmarkTest00201",
+   "path": "/sqli-00/BenchmarkTest00201",
+   "kind": "header",
+   "vuln": false
+  },
+  {
+   "name": "BenchmarkTest00202",
+   "path": "/sqli-00/BenchmarkTest00202",
+   "kind": "header",
+   "vuln": false
+  },
+  {
+   "name": "BenchmarkTest00203",
+   "path": "/sqli-00/BenchmarkTest00203",
+   "kind": "header",
+   "vuln": true
+  },
+  {
+   "name": "BenchmarkTest00204",
+   "path": "/sqli-00/BenchmarkTest00204",
+   "kind": "header",
+   "vuln": true
+  },
+  {
+   "name": "BenchmarkTest00205",
+   "path": "/sqli-00/BenchmarkTest00205",
+   "kind": "header",
+   "vuln": false
+  },
+  {
+   "name": "BenchmarkTest00206",
+   "path": "/sqli-00/BenchmarkTest00206",
+   "kind": "header",
+   "vuln": false
+  },
+  {
+   "name": "BenchmarkTest00336",
+   "path": "/sqli-00/BenchmarkTest00336",
+   "kind": "header",
+   "vuln": false
+  },
+  {
+   "name": "BenchmarkTest00337",
+   "path": "/sqli-00/BenchmarkTest00337",
+   "kind": "header",
+   "vuln": true
+  },
+  {
+   "name": "BenchmarkTest00338",
+   "path": "/sqli-00/BenchmarkTest00338",
+   "kind": "header",
+   "vuln": false
+  },
+  {
+   "name": "BenchmarkTest00339",
+   "path": "/sqli-00/BenchmarkTest00339",
+   "kind": "header",
+   "vuln": true
+  },
+  {
+   "name": "BenchmarkTest00340",
+   "path": "/sqli-00/BenchmarkTest00340",
+   "kind": "header",
+   "vuln": false
+  },
+  {
+   "name": "BenchmarkTest00341",
+   "path": "/sqli-00/BenchmarkTest00341",
+   "kind": "header",
+   "vuln": true
+  },
+  {
+   "name": "BenchmarkTest00342",
+   "path": "/sqli-00/BenchmarkTest00342",
+   "kind": "header",
+   "vuln": true
+  },
+  {
+   "name": "BenchmarkTest00343",
+   "path": "/sqli-00/BenchmarkTest00343",
+   "kind": "header",
+   "vuln": false
+  },
+  {
+   "name": "BenchmarkTest00344",
+   "path": "/sqli-00/BenchmarkTest00344",
+   "kind": "header",
+   "vuln": false
+  },
+  {
+   "name": "BenchmarkTest01085",
+   "path": "/sqli-02/BenchmarkTest01085",
+   "kind": "header",
+   "vuln": false
+  },
+  {
+   "name": "BenchmarkTest01086",
+   "path": "/sqli-02/BenchmarkTest01086",
+   "kind": "header",
+   "vuln": false
+  },
+  {
+   "name": "BenchmarkTest01087",
+   "path": "/sqli-02/BenchmarkTest01087",
+   "kind": "header",
+   "vuln": true
+  },
+  {
+   "name": "BenchmarkTest01088",
+   "path": "/sqli-02/BenchmarkTest01088",
+   "kind": "header",
+   "vuln": true
+  },
+  {
+   "name": "BenchmarkTest01089",
+   "path": "/sqli-02/BenchmarkTest01089",
+   "kind": "header",
+   "vuln": false
+  },
+  {
+   "name": "BenchmarkTest01090",
+   "path": "/sqli-02/BenchmarkTest01090",
+   "kind": "header",
+   "vuln": true
+  },
+  {
+   "name": "BenchmarkTest01091",
+   "path": "/sqli-02/BenchmarkTest01091",
+   "kind": "header",
+   "vuln": true
+  },
+  {
+   "name": "BenchmarkTest01092",
+   "path": "/sqli-02/BenchmarkTest01092",
+   "kind": "header",
+   "vuln": false
+  },
+  {
+   "name": "BenchmarkTest01093",
+   "path": "/sqli-02/BenchmarkTest01093",
+   "kind": "header",
+   "vuln": true
+  },
+  {
+   "name": "BenchmarkTest01094",
+   "path": "/sqli-02/BenchmarkTest01094",
+   "kind": "header",
+   "vuln": true
+  },
+  {
+   "name": "BenchmarkTest01095",
+   "path": "/sqli-02/BenchmarkTest01095",
+   "kind": "header",
+   "vuln": false
+  },
+  {
+   "name": "BenchmarkTest01096",
+   "path": "/sqli-02/BenchmarkTest01096",
+   "kind": "header",
+   "vuln": false
+  },
+  {
+   "name": "BenchmarkTest01097",
+   "path": "/sqli-02/BenchmarkTest01097",
+   "kind": "header",
+   "vuln": true
+  },
+  {
+   "name": "BenchmarkTest01098",
+   "path": "/sqli-02/BenchmarkTest01098",
+   "kind": "header",
+   "vuln": false
+  },
+  {
+   "name": "BenchmarkTest01214",
+   "path": "/sqli-02/BenchmarkTest01214",
+   "kind": "header",
+   "vuln": true
+  },
+  {
+   "name": "BenchmarkTest01215",
+   "path": "/sqli-02/BenchmarkTest01215",
+   "kind": "header",
+   "vuln": false
+  },
+  {
+   "name": "BenchmarkTest01216",
+   "path": "/sqli-02/BenchmarkTest01216",
+   "kind": "header",
+   "vuln": false
+  },
+  {
+   "name": "BenchmarkTest01217",
+   "path": "/sqli-02/BenchmarkTest01217",
+   "kind": "header",
+   "vuln": false
+  },
+  {
+   "name": "BenchmarkTest01218",
+   "path": "/sqli-02/BenchmarkTest01218",
+   "kind": "header",
+   "vuln": false
+  },
+  {
+   "name": "BenchmarkTest01219",
+   "path": "/sqli-02/BenchmarkTest01219",
+   "kind": "header",
+   "vuln": false
+  },
+  {
+   "name": "BenchmarkTest01220",
+   "path": "/sqli-02/BenchmarkTest01220",
+   "kind": "header",
+   "vuln": false
+  },
+  {
+   "name": "BenchmarkTest01221",
+   "path": "/sqli-02/BenchmarkTest01221",
+   "kind": "header",
+   "vuln": true
+  },
+  {
+   "name": "BenchmarkTest01222",
+   "path": "/sqli-02/BenchmarkTest01222",
+   "kind": "header",
+   "vuln": true
+  },
+  {
+   "name": "BenchmarkTest01963",
+   "path": "/sqli-04/BenchmarkTest01963",
+   "kind": "header",
+   "vuln": true
+  },
+  {
+   "name": "BenchmarkTest01964",
+   "path": "/sqli-04/BenchmarkTest01964",
+   "kind": "header",
+   "vuln": true
+  },
+  {
+   "name": "BenchmarkTest01965",
+   "path": "/sqli-04/BenchmarkTest01965",
+   "kind": "header",
+   "vuln": false
+  },
+  {
+   "name": "BenchmarkTest01966",
+   "path": "/sqli-04/BenchmarkTest01966",
+   "kind": "header",
+   "vuln": false
+  },
+  {
+   "name": "BenchmarkTest01967",
+   "path": "/sqli-04/BenchmarkTest01967",
+   "kind": "header",
+   "vuln": false
+  },
+  {
+   "name": "BenchmarkTest01968",
+   "path": "/sqli-04/BenchmarkTest01968",
+   "kind": "header",
+   "vuln": false
+  },
+  {
+   "name": "BenchmarkTest01969",
+   "path": "/sqli-04/BenchmarkTest01969",
+   "kind": "header",
+   "vuln": false
+  },
+  {
+   "name": "BenchmarkTest01970",
+   "path": "/sqli-04/BenchmarkTest01970",
+   "kind": "header",
+   "vuln": true
+  },
+  {
+   "name": "BenchmarkTest01971",
+   "path": "/sqli-04/BenchmarkTest01971",
+   "kind": "header",
+   "vuln": true
+  },
+  {
+   "name": "BenchmarkTest01972",
+   "path": "/sqli-04/BenchmarkTest01972",
+   "kind": "header",
+   "vuln": true
+  },
+  {
+   "name": "BenchmarkTest01973",
+   "path": "/sqli-04/BenchmarkTest01973",
+   "kind": "header",
+   "vuln": false
+  },
+  {
+   "name": "BenchmarkTest02090",
+   "path": "/sqli-04/BenchmarkTest02090",
+   "kind": "header",
+   "vuln": true
+  },
+  {
+   "name": "BenchmarkTest02091",
+   "path": "/sqli-04/BenchmarkTest02091",
+   "kind": "header",
+   "vuln": true
+  },
+  {
+   "name": "BenchmarkTest02092",
+   "path": "/sqli-04/BenchmarkTest02092",
+   "kind": "header",
+   "vuln": true
+  },
+  {
+   "name": "BenchmarkTest02093",
+   "path": "/sqli-04/BenchmarkTest02093",
+   "kind": "header",
+   "vuln": false
+  },
+  {
+   "name": "BenchmarkTest02094",
+   "path": "/sqli-04/BenchmarkTest02094",
+   "kind": "header",
+   "vuln": true
+  },
+  {
+   "name": "BenchmarkTest02095",
+   "path": "/sqli-04/BenchmarkTest02095",
+   "kind": "header",
+   "vuln": false
+  },
+  {
+   "name": "BenchmarkTest02096",
+   "path": "/sqli-04/BenchmarkTest02096",
+   "kind": "header",
+   "vuln": true
+  },
+  {
+   "name": "BenchmarkTest02097",
+   "path": "/sqli-04/BenchmarkTest02097",
+   "kind": "header",
+   "vuln": false
+  },
+  {
+   "name": "BenchmarkTest02098",
+   "path": "/sqli-04/BenchmarkTest02098",
+   "kind": "header",
+   "vuln": false
+  },
+  {
+   "name": "BenchmarkTest02099",
+   "path": "/sqli-04/BenchmarkTest02099",
+   "kind": "header",
+   "vuln": true
+  }
+ ]
+}

@@ -104,12 +104,27 @@ URL 从各用例源码 `@WebServlet(value = "/sqli-XX/BenchmarkTestNNNNN")` 提�
 - 本轮实跑 **20 个**（query 真值 10 + query 安全 8 + header 真值 2；结果见上方「当前状态」）。
 全集 504 个留待后续批次（每端点 60~150 请求，全跑一遍约需数小时）。
 
-## 复跑
+## 三套用例清单（按跑批时长分开）
+
+| 清单 | 条数 | 内容 | 用时 | 用途 |
+|---|---|---|---|---|
+| `cases.json` | 74 | 20 条回归基线 ∪ 全部 57 条参数名形态 | ~25 min | **门禁基线**（`acceptance --only=benchmark`） |
+| `cases-query.json` | 210 | query 形态全量（111 真值 + 99 安全） | ~1 min | 深度验证（最常见注入面） |
+| `cases-header.json` | 67 | header 形态全量（33 + 34） | ~20 s | 深度验证（头位置注入） |
 
 ```bash
-BENCHMARK_BASE=https://127.0.0.1:8443/benchmark node e2e/benchmark-lab/run.mjs
-# 当前是参考/缺口靶场，不接 acceptance；实跑证据在 results/benchmark-2026-10-20.md。
+# 门禁基线（已接 acceptance 第 24 套件，D115 起；不再是「参考靶场」）
+node e2e/benchmark-lab/run.mjs
+node e2e/acceptance.mjs --only=benchmark          # 未就绪 SKIP
+
+# 深度验证（指定清单）
+BENCHMARK_CASES=e2e/benchmark-lab/cases-query.json node e2e/benchmark-lab/run.mjs
+BENCHMARK_CASES=e2e/benchmark-lab/cases-header.json node e2e/benchmark-lab/run.mjs
 ```
+
+当前累计（D117）：**有效 327 条 —— 真值 178/178 检出、安全 0/149 误报**；
+`{call <过程名>}` 7 条单列（4 真值未检出 = 已知边界，3 安全 0 误报）。
+
 
 ## 边界（不得越界引用）
 
