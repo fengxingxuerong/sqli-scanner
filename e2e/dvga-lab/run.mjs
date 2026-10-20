@@ -125,7 +125,7 @@ if (!(await reachable())) {
   process.exit(0);
 }
 
-console.log(`[lab] DVGA 就绪：${BASE}（第三方 GraphQL 靶场 = 外部裁判 3 号；真值来自官方源码）`);
+console.log(`[lab] DVGA 就绪：${BASE}（第三方 GraphQL 靶场 = GraphQL 面外部裁判；真值来自官方源码）`);
 
 const rows = [];
 let truePositives = 0;
