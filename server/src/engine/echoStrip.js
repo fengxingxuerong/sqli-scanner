@@ -55,44 +55,87 @@ export function stripEchoedPayload(body, payload) {
   if (!body) return '';
   let t = normalizeEcho(body);
   if (!payload) return t;
-  // [P0-FIX 2026-09-17 外溢 2026-09-23] 变体集合必须覆盖**转义型回显**：
-  // 目标若先把用户输入做 SQL 转义再回显，响应里的 payload 是它的转义形态
-  // （recall-lab `/escape` 实测回显 `alice'' AND extractvalue(...)`，
-  //  而原文是 `alice' AND extractvalue(...)`）——只按原文剔，剔不干净，
-  // 于是 payload 自带的关键词继续命中判据信号 → 安全点误报。
-  // 常见转义只有两种：单引号翻倍（SQL 标准）与反斜杠转义（MySQL/PHP addslashes 系）。
-  //
-  // 这段修复原先只写在 ErrorDetector 的私有副本里（故只有报错通道受益），
-  // 而共享版一直是弱版本 —— 本文件的另外三个调用方（边界探测 / 布尔比对 / 定库）
-  // 面对的是同一种污染，却没拿到同一个修复。
-  const variants = new Set([String(payload), normalizeEcho(payload)]);
+  for (const v of echoVariants(payload)) {
+    if (v && v.length > 3) t = t.split(v).join('');
+  }
+  // 截断型回显：目标常把用户输入截到固定长度再回显（日志/错误消息/前端省略），
+  // 整串与所有变体都剔不掉，但**最长前缀**仍在 —— 逐长度递减找首个命中的前缀。
+  // ⚠ 阈值 ECHO_TRUNC_MIN=16 是防误伤：低于该长度的前缀可能与真实报错文案重合，
+  //    而 16 字符以上的注入值前缀只可能是回显（真报错不会恰好以注入值开头）。
+  t = stripLongestPrefix(t, payload, ECHO_TRUNC_MIN);
+  return t;
+}
+
+/** 截断回显的最短前缀长度（低于此不剔，防误删真实报错文本） */
+export const ECHO_TRUNC_MIN = 16;
+
+/**
+ * 剔除 `t` 中出现的 `payload` 最长前缀（长度 ≥ minLen）。
+ * 只剔**一次**最长的那个：更短的前缀一定包含在它里面，无需重复。
+ * @param {string} t 已归一化并剔过完整变体的响应
+ * @param {string} payload
+ * @param {number} minLen
+ * @returns {string}
+ */
+export function stripLongestPrefix(t, payload, minLen = ECHO_TRUNC_MIN) {
+  const p = String(payload || '');
+  if (p.length < minLen) return t;
+  for (let n = p.length; n >= minLen; n--) {
+    const pre = p.slice(0, n);
+    if (t.includes(pre)) return t.split(pre).join('');
+  }
+  return t;
+}
+
+/**
+ * payload 在响应里可能出现的**全部形态**（回显变体全集）。
+ *
+ * 为什么抽成独立函数（[D112 2026-10-20] 之前的形态是内联在 stripEchoedPayload 里）：
+ * 本文件已经因为「抓到一个补一个」补了四轮（SQL 转义 → 反斜杠 → URL 编码 → JSON 转义），
+ * 每轮都只有**当时那一种**形态被测到，其余形态仍在漏。抽出来后单测可以**逐变体矩阵**
+ * 遍历（新增形态必须补进矩阵，否则矩阵会红），把「补一个漏一片」变成「补一个锁一片」。
+ *
+ * 每条形变的实测出处（没有出处的形态不写进来 —— 那是想象，不是证据）：
+ *  · 原文 / normalizeEcho：文件路径回显（Express 404，2026-09-16 P0）
+ *  · SQL 转义 `''` 与反斜杠 `\'`：recall-lab `/escape` 靶点（2026-09-17）
+ *  · URL 编码：Express 404 页 `%20`/`&#39;` 混合（2026-09-16）
+ *  · JSON 转义（含双层）：DVGA `/graphql` 的 errors.message（2026-10-20，D112）
+ *  · Unicode `\uXXXX`：JSON 序列化器把引号写成 \u0027/\u0022（与 JSON 转义同源的另一档实现）
+ *  · 双重 URL 编码：WAF/网关二次解码后再回显（与 normalizeEcho 的两轮解码对应）
+ *  · base64：把用户输入编码后回显的日志/调试面
+ * @param {string} payload
+ * @returns {string[]} 去重后的变体（含原文）
+ */
+export function echoVariants(payload) {
+  const p = String(payload ?? '');
+  if (!p) return [];
+  const variants = new Set([p, normalizeEcho(p)]);
   for (const v of [...variants]) {
     if (!v) continue;
     variants.add(v.replace(/'/g, "''")); // SQL 转义：' → ''
     variants.add(v.replace(/'/g, "\\'")); // 反斜杠转义：' → \'
   }
   try {
-    variants.add(encodeURIComponent(payload));
+    variants.add(encodeURIComponent(p));
+    // 双重 URL 编码（网关二次解码后回显；与 normalizeEcho 的两轮解码对应）
+    variants.add(encodeURIComponent(encodeURIComponent(p)));
   } catch { /* 非法字符忽略 */ }
-  // [D112 2026-10-20 外溢自 DVGA 外部裁判] **JSON 字符串转义型回显**：
-  // JSON API（GraphQL / REST）报错时把用户输入整段塞进 `{"errors":[{"message":"…"}]}`，
-  // 其中的 payload 是 **JSON 转义形态**（`"` → `\"`、换行 → `\n`）——只按原文剔，剔不干净。
-  // 实测出处：DVGA `/graphql` 注入后响应
-  //   {"errors":[{"message":"Syntax Error … \n1: { search(keyword: \"x\") … }' AND extractvalue(…)…"}]}
-  // payload 里的 `extractvalue` 因此逃过剔除，被 ERROR_SIG（含 payload 自身关键字）命中
-  // ⇒ 在**手工证实不可注入**（ORM like 参数化）的 search(keyword) 点上误报 High/CVSS 8.2。
-  // `JSON.stringify(s).slice(1,-1)` 即「该串出现在 JSON 字符串里时的样子」，与服务端
-  // 序列化规则同源，比手写 replace 覆盖更全（控制字符 \u0000 等一并覆盖）。
   try {
-    const jsonEsc = JSON.stringify(String(payload)).slice(1, -1);
+    const jsonEsc = JSON.stringify(p).slice(1, -1);
     variants.add(jsonEsc);
     // 双层：JSON 里再嵌一层 JSON（错误消息套娃 / 日志二次序列化）
     variants.add(JSON.stringify(jsonEsc).slice(1, -1));
   } catch { /* 非法字符忽略 */ }
-  for (const v of variants) {
-    if (v && v.length > 3) t = t.split(v).join('');
-  }
-  return t;
+  // Unicode 转义：`'` → `\u0027`、`"` → `\u0022`、`\` → `\u005c`
+  // （JSON.stringify 只保证合法转义，部分序列化器把 ASCII 引号也输出成 \u 形式）
+  try {
+    variants.add(p.replace(/['"\\]/g, (c) => '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0')));
+  } catch { /* 非法字符忽略 */ }
+  // base64（调试面把用户输入编码后回显）
+  try {
+    if (typeof Buffer !== 'undefined') variants.add(Buffer.from(p, 'utf8').toString('base64'));
+  } catch { /* 非法字符忽略 */ }
+  return [...variants].filter(Boolean);
 }
 
 /**
@@ -111,4 +154,4 @@ export function responseSkeleton(s) {
     .trim();
 }
 
-export default { normalizeEcho, stripEchoedPayload, responseSkeleton };
+export default { normalizeEcho, stripEchoedPayload, responseSkeleton, echoVariants, stripLongestPrefix };

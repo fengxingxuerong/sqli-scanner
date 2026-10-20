@@ -173,6 +173,15 @@
       "refute_cmd": "node e2e/acceptance.mjs --only=extract-proof（需 DVWA @8099 在跑）",
       "recheck_batch": "D118（2026-10-20）：核验「可提交报告」能力；复核了「数据实证块」——此前产出的是 payload 残片（假证据）。",
       "caveat": "**不成立的场景：给一个域名自动爬** —— `--forms`/爬虫抓到的表单点会被预筛选一并跳过（DVWA low 实测发现 3 点、跳过 3/3、0 检出，而显式 POST body 能检出 3 条），已登记下一批；PoC 复现与 CVSS 均为启发式（CVSS 明示「非逐条人工评定」）；WAF/签名/JSON·XML body 形态未覆盖。"
+    },
+    {
+      "id": "echo-strip-variants-coverage-d119",
+      "claim": "回显剔除（echoStrip）覆盖 9 类回显形态：原文 / SQL 转义 / 反斜杠 / URL 编码 / 双重 URL / JSON 转义 / JSON 双层 / Unicode \\uXXXX / base64，外加截断型回显的最长前缀剔除。",
+      "status": "verified",
+      "evidence": "server/tests/echoStrip.variantsMatrix.test.js 16 例（§A 逐形态剔除 + §A2 变体生成器覆盖全部形态 + §B/§B2 弱版敏感性 + §C 截断 + §D 真报错不误删 + §E 边界）；缺陷注入复验：摘掉 4 个新形态 → 4 条红、还原 → 16/16。",
+      "refute_cmd": "node --test server/tests/echoStrip.variantsMatrix.test.js",
+      "recheck_batch": "D119（2026-10-21）：DVGA JSON 转义假阳性（D114 已修）后，把「抓一个补一个」改为形态矩阵；复核了 DVGA 那条修法是否只修了一个点。",
+      "caveat": "矩阵只覆盖「payload 本身在响应里的形态」；不覆盖 XML 属性回显 / 十六进制转义 / 部分语言特有转义（未实测到，不写进矩阵）；截断前缀阈值 16 是防误删折中，不是理论最优。"
     }
   ]
 }

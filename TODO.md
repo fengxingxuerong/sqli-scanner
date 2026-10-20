@@ -5,6 +5,32 @@
 
 ---
 
+## 2026-10-21 批次 D119 · 回显剔除变体矩阵化（P0 ②）
+
+**背景**：外部靶场自测中 DVGA 抓到的假阳性（JSON 转义回显未被剔除）是回显剔除这条线的
+**第 5 次同族复发**（09-16 URL/HTML 实体 → 09-17 SQL/反斜杠 → 10-20 JSON 转义）。
+每次都是「抓一个补一个、只测那一个」，其余形态继续漏。
+
+**本批**：`echoStrip.js` 抽出 `echoVariants()`（变体清单 + 逐形态实测出处写进 JSDoc），
+补 Unicode `\uXXXX` / 双重 URL / base64 / 截断型回显最长前缀剔除（阈值 16）；
+新增 `server/tests/echoStrip.variantsMatrix.test.js` 16 例矩阵契约，
+§A2 钉住「变体生成器必须覆盖矩阵全部形态」。
+修了首版两条假绿用例（base64 probe 用编码串、截断长度覆盖关键字全字）。
+
+**实测**：矩阵 16/16；缺陷注入（摘 4 个新形态）→ 4 条红、还原 → 16/16；
+回显/报错通道相关测试 59/59 绿（`errorParse` 因并发会话半写 TargetParser 而红，非本批）。
+
+**台账**：`echo-strip-variants-coverage-d119`（verified）。
+
+### 待推进（P0 ① 未动）
+
+- **结构化文本内嵌注入点**（GraphQL / batch / 嵌套 JSON）：DVGA 真值点 0/1 的根因。
+  并发会话正在改 `TargetParser.js`（位置正是注入点发现），**先查 `git log -5` 再决定接手**，
+  别再撞车（本轮已与 D114 撞过一次）。
+- 矩阵后续形态候选（未实测到，不进矩阵）：XML 属性回显、十六进制转义、各语言特有转义。
+
+---
+
 ## 2026-10-19 批次 D108 · Collaborator-Everywhere 式背景 OOB 哨兵（P1-5 收口）
 
 **背景**：P1-5 —— interactsh（D87）已就绪，但 OOB 仍是 opt-in 通道：risk=1 技术门控剔除 OOB、
