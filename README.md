@@ -678,12 +678,12 @@ npm run acceptance:sandbox          # 同全量，但套隔离 MySQL 沙箱（33
 > 而是本项目自己写的 223 行 Python 复刻（`sqli-labs.py`，http.server + SQLite，runner 直接
 > spawn 它）；同目录的 sqlmap 对照（`e2e/sqlmap-benchmark/run.mjs`）双方跑的就是这个复刻靶站，
 > 所以它是**「同一自建靶场上的双方同题对照」，不是外部真值**。
-> **第三方外部裁判现在是 4 号 + 1 个 GraphQL 缺口参考**（D88/D109/D111/D112/D114）：
+> **第三方外部裁判现在是 4 号 + 1 个 GraphQL 面裁判**（D88/D109/D111/D112/D114/D121）：
 > Juice Shop（2 个官方 SQLi + 4 安全端点 + 同源复检）、VAmPI（路径段注入 + 双实例 A/B）、
 > DVWA（PHP+MySQL + cookie/POST + impossible A/B）；OWASP Benchmark 与 DVGA 作为
-> **参考/能力缺口**（Benchmark 20/504 子集当前真值 4/12、安全 0/8；DVGA GraphQL 真值
-> 0/1；均不接门禁）。以上都是**小样本/子集**，不能外推为通用检出率或误报率；
-> WAF 侧仍只验 ModSecurity+CRS 一家。
+> **参考/单端点证据**（Benchmark 20/504 子集当时真值 4/12、安全 0/8；DVGA GraphQL 真值
+> **1/1、安全 0 误报**，D121 连续 3 轮；均不接门禁）。以上都是**小样本/子集**，不能外推
+> 为通用检出率或误报率；WAF 侧仍只验 ModSecurity+CRS 一家。
 
 **本轮 0 FAIL。** 此前两轮 FAIL 的定位与修复（CRS 执行器 `(?i:…)` 兼容性、`engine.e2e` 环境耦合假红）、
 「11 PASS / 0 SKIP 假绿」事故、门禁自身的两处缺陷修复与缺陷注入验证记录，已迁至

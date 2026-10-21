@@ -1,5 +1,5 @@
 // ============================================================================
-// e2e/dvga-lab/run.mjs —— [D114 2026-10-20] GraphQL 面外部裁判：DVGA（Flask + SQLite）
+// e2e/dvga-lab/run.mjs —— [D114 2026-10-20 → D121 2026-10-21] GraphQL 面外部裁判：DVGA（Flask + SQLite）
 //
 // ── 为什么还要第三个外部靶场 ───────────────────────────────────────────────
 // 外部裁判此前只有 Juice Shop（query + JSON 字段）与 VAmPI（URL 路径段）。
@@ -17,6 +17,11 @@
 //   filter "x"                → {"data":{"pastes":[]}}
 //   filter "x' OR 1=1-- -"    → 返回全部 pastes（布尔真）
 //   filter "x' OR 1=2-- -"    → []                      ⇒ 布尔可分
+//
+// ── D121 结论（2026-10-21）──────────────────────────────────────────────────
+// 新增 GraphQL 查询串内联字面量点后，真值点 `pastes(filter)` **1/1**（union/error/
+// boolean 三通道命中）；安全点 `search(keyword)` 0 误报（124 请求）；无 filter 的
+// resolver 因没有字符串字面量而**0 点/0 请求**（结构对照，不计检出证据）。
 //
 // ── 依赖与门控（按需 SKIP，不伪装通过）──────────────────────────────────────
 // 需要 DVGA 已构建并运行（见同目录 README.md）。未就绪时输出 `[SKIP]` 并以 **exit 0**
@@ -45,7 +50,8 @@ const ENDPOINTS = [
     method: 'POST',
     jsonBody: { query: '{ pastes(public: true) { id title } }' },
     kind: 'safe',
-    desc: '同 resolver 不带 filter（ORM，无拼接）',
+    minRequests: 0,
+    desc: '同 resolver 不带 filter（无字符串字面量 ⇒ 预期 0 点/0 请求，结构对照不计证据）',
   },
   {
     // 安全对照 2：官方 resolve_search 用 `like(search)` 参数化（`%{}%`.format，值走绑定参数）
@@ -137,20 +143,21 @@ let weakEvidence = 0;
 for (const ep of ENDPOINTS) {
   const r = await scanOne(ep);
   const isVuln = ep.kind === 'vuln';
+  const minReq = ep.minRequests ?? SAFE_MIN_REQUESTS;
   if (isVuln) {
     if (r.vulns > 0) truePositives += 1;
     else missed += 1;
   } else if (r.vulns > 0) {
     falsePositives += 1;
-  } else if (r.requests < SAFE_MIN_REQUESTS) {
+  } else if (r.requests < minReq) {
     weakEvidence += 1;
   }
   rows.push({ ...ep, ...r });
   let mark;
   if (isVuln) mark = r.vulns > 0 ? '✅' : '❌漏检';
   else if (r.vulns > 0) mark = '❌误报';
-  else if (r.requests < SAFE_MIN_REQUESTS) mark = '⚠️证据不足';
-  else mark = '✅';
+  else if (r.requests < minReq) mark = '⚠️证据不足';
+  else mark = minReq === 0 ? '✅结构对照' : '✅';
   console.log(
     `${mark} [${isVuln ? '真值漏洞' : '安全端点'}] vulns=${r.vulns} 请求=${r.requests} ` +
     `${ep.method || 'GET'} ${ep.path} :: ${ep.desc}`
@@ -163,7 +170,7 @@ const vulnTotal = ENDPOINTS.filter((e) => e.kind === 'vuln').length;
 console.log('\n=== 外部裁判汇总（DVGA / GraphQL）===');
 console.log(`真值漏洞端点：检出 ${truePositives}/${vulnTotal}（漏检 ${missed}）`);
 console.log(`安全端点误报：${falsePositives}（须为 0）`);
-console.log(`安全端点证据不足（请求<${SAFE_MIN_REQUESTS}）：${weakEvidence}（须为 0）`);
+console.log(`安全端点证据不足（请求<各自下限；常规 ${SAFE_MIN_REQUESTS}）：${weakEvidence}（须为 0）`);
 const pass = missed === 0 && falsePositives === 0 && weakEvidence === 0;
 console.log(pass
   ? '✅ DVGA 外部裁判通过：GraphQL 注入可检出 且 安全端点零误报'

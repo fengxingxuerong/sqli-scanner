@@ -37,6 +37,11 @@ function tagSkippedPoints(scanId, points, reason) {
   }
 }
 
+/** 0 注入点时的指路文案（抽到模块级，给 discoverPoints 腾出 D124 调用所需行数）。 */
+const NO_INJECTION_POINTS_HINT =
+  '未发现任何可测参数：目标 URL 无 query 参数，且未启用请求头/ path 段注入点。' +
+  '如需测试请求头注入请加 --test-headers，测试 URL path 末段注入请加 --test-path。';
+
 /**
  * @param {object} run 扫描运行期上下文（需含 sm/scanId/target/cfg/ctxBase/rawClient/report）
  * @returns {Promise<{points: Array, pointsToScan: Array, session: object|null, restored: object|null}>}
@@ -58,10 +63,10 @@ export async function discoverPoints(run) {
     if (!points.length) {
       report.summary = report.summary || {};
       report.summary.noInjectionPoints = true;
-      report.summary.noInjectionPointsHint =
-        '未发现任何可测参数：目标 URL 无 query 参数，且未启用请求头/ path 段注入点。' +
-        '如需测试请求头注入请加 --test-headers，测试 URL path 末段注入请加 --test-path。';
+      report.summary.noInjectionPointsHint = NO_INJECTION_POINTS_HINT;
     }
+
+    annotateSurfaceCoverage(report, target); // [D124] 未覆盖面 + 浏览器爬取降级留痕
 
     // 会话持久化（对标 sqlmap --session/--resume）：
     // 若配置给出 sessionFile 且文件存在 → 恢复历史（resume 模式，跳过已完成点）；否则新建会话。
@@ -238,4 +243,67 @@ export async function discoverPoints(run) {
     }
 
   return { points, pointsToScan, session, restored };
+}
+
+/**
+ * [D124 2026-10-21] 把「覆盖范围」的两处事实写进报告摘要（抽成独立函数守复杂度基线）。
+ *
+ * 两件事都是同一个病根：**「你以为测了，其实没测」**。
+ *   ① uncoveredSurfaces：默认 level=1 只覆盖 URL query + POST body，cookie/header/path/表单
+ *      四类面压根没进检测 —— 报告却只写「未检出」；
+ *   ② crawlBrowserFallback：`--crawl-browser` 在 playwright/浏览器不可用时静默降级为
+ *      HTTP 爬虫（SPA 的 XHR 接口面整体丢失），原来只刷一条日志。
+ *
+ * @param {object} report 报告对象（原地写 summary）
+ * @param {object} target 目标（读 config 与 crawlBrowserFallback）
+ * @returns {void}
+ */
+function annotateSurfaceCoverage(report, target) {
+  const cfg = (target && target.config) || {};
+  const uncovered = uncoveredSurfaces(cfg);
+  if (uncovered.length) {
+    report.summary = report.summary || {};
+    report.summary.uncoveredSurfaces = uncovered;
+    report.summary.uncoveredSurfacesHint =
+      `本次未覆盖 ${uncovered.length} 类注入面（${uncovered.map((u) => u.label).join('、')}）——` +
+      '这些面「未检出」是因为**根本没测**，不是测过判安全。需要时按提示提高覆盖后复扫。';
+  }
+  const fb = target && target.crawlBrowserFallback;
+  if (fb) {
+    report.summary = report.summary || {};
+    report.summary.crawlBrowserFallback = { ...fb };
+    report.summary.crawlBrowserHint =
+      '已请求浏览器渲染爬取（--crawl-browser），但本轮**降级为 HTTP 爬虫**' +
+      `（原因：${fb.reason}）。` +
+      'SPA 目标的 XHR/fetch 接口面可能整体未被发现 —— 别把本次「未检出」读成「这些接口没有注入」。' +
+      '生产部署请把 playwright 从 devDependencies 移到 dependencies，或显式安装浏览器后再复扫。';
+  }
+}
+
+/**
+ * [D124 2026-10-21] 列出「按当前配置压根不会测」的注入面（纯函数，便于单测与复用）。
+ *
+ * 为什么需要：`level` 默认 1 只覆盖 URL query + POST body。真实项目里 90% 的人用默认档
+ * 扫完就写报告，而 cookie / header / path 三类面从未进入检测 —— 报告却只写「未检出」。
+ * 这不是检出率问题，是**覆盖范围没披露**。
+ *
+ * @param {object} config 生效配置（读 level / testHeaders / testPath / crawlForms / crawlBrowser）
+ * @returns {Array<{surface: string, label: string, hint: string}>} 未覆盖的注入面（已覆盖则为空数组）
+ */
+export function uncoveredSurfaces(config = {}) {
+  const level = Number(config.level) || 1;
+  const out = [];
+  if (level < 2 && config.testHeaders !== true) {
+    out.push({ surface: 'cookie', label: 'Cookie 注入面', hint: '提高 --level 到 2，或显式 --test-headers' });
+  }
+  if (level < 3 && config.testHeaders !== true) {
+    out.push({ surface: 'header', label: 'HTTP 请求头注入面', hint: '提高 --level 到 3，或显式 --test-headers' });
+  }
+  if (config.testPath !== true) {
+    out.push({ surface: 'path', label: 'URL 路径段注入面', hint: '显式 --test-path（并用 * 标记路径注入位）' });
+  }
+  if (level < 5 && config.crawlForms !== true) {
+    out.push({ surface: 'forms', label: '页面表单爬取注入面', hint: '提高 --level 到 5（或 --forms）后复扫' });
+  }
+  return out;
 }

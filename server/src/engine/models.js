@@ -46,6 +46,12 @@ import { defaults } from '../config/defaults.js';
  * @property {string} [decodedValue] 运行期补充：解码后的值
  * @property {boolean} [precisionMarked] 运行期补充：精确标记点（跳静态探测）
  * @property {string} [_baselineTitle] 运行期补充：基线页 <title>
+ * @property {'json'|'xml'|'graphql'} [carrier] 载体（paramName 键名 / GraphQL 内联值位）
+ * @property {string} [graphqlPath] GraphQL 查询串在 jsonBody 内的点路径（如 query / 0.query）
+ * @property {number} [graphqlLiteralStart] 内联字面量在查询串内的起始下标（含引号）
+ * @property {number} [graphqlLiteralEnd] 内联字面量结束下标（开区间，不含引号后一位）
+ * @property {string} [graphqlLiteralRaw] 原始字面量（含引号，用于基线逐字保持）
+ * @property {string|null} [graphqlArgName] GraphQL 参数名（如 filter），无名时为 null
  */
 
 /**

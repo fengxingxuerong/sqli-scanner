@@ -9,6 +9,8 @@ import { unionDebug } from './unionDebug.js';
 import { encodeForPoint } from './paramEncoding.js';
 // [2026-10-01] XML / SOAP body 通道（对标 ghauri 的 XML·SOAP 参数支持）
 import { cloneXmlTree, setXmlLeaf, serializeXml, renameXmlTag } from '../core/xmlBody.js';
+// [D121 2026-10-21] GraphQL 内联字面量替换：保持查询骨架，只换值位（DVGA 0/1 的修法）
+import { replaceGraphQLStringLiteral } from './graphqlInline.js';
 
 // [P1 批次 2026-09-08] JSON 点路径段 → 真实键匹配（buildInjectionRequest JSON 分支用）。
 // 三向匹配（与 TargetParser._discoverJsonLeaves 的路径生成互逆）：
@@ -69,6 +71,59 @@ function _splitJsonPath(path) {
   return segs.length ? segs : null;
 }
 
+// [D121] JSON 点路径 → 父容器与最后一段真实键。与 _matchJsonKey 同源规则：
+// 数组下标（'0'）与对象键都走 hasOwnProperty 命中；键含点号时由 "a.b" 引号段还原。
+// 返回 null = 路径失效（调用方保守降级，不发畸形请求）。
+function _resolveJsonParent(root, segs) {
+  if (root == null || typeof root !== 'object' || !Array.isArray(segs) || segs.length === 0) {
+    return null;
+  }
+  let cur = root;
+  for (let i = 0; i < segs.length - 1; i += 1) {
+    const key = _matchJsonKey(cur, segs[i]);
+    if (key === null || cur[key] == null || typeof cur[key] !== 'object') return null;
+    cur = cur[key];
+  }
+  const last = _matchJsonKey(cur, segs[segs.length - 1]);
+  return last === null ? null : { parent: cur, key: last };
+}
+
+/**
+ * [D121 2026-10-21] GraphQL 内联字面量点的请求构造。
+ *
+ * 与普通 JSON 叶子点的区别：不替换整个 `query` 字符串，而是只替换 `graphqlInline`
+ * 扫描出的那个双引号字面量；其余查询骨架、variables、operationName 逐字保留。
+ * 失败（路径/区间不匹配）返回 false，调用方走保守分支，绝不退化成整串替换。
+ * @param {object} req 已带 method/url/headers 的请求对象（就地写 data）
+ * @param {object} target 扫描目标（用 jsonBody）
+ * @param {object} point 注入点（carrier='graphql'）
+ * @param {string} injected 已编码/包裹后的注入值
+ * @returns {boolean} 是否成功构造
+ */
+function buildGraphQLBodyRequest(req, target, point, injected) {
+  const body = target && target.jsonBody;
+  if (body == null || typeof body !== 'object') return false;
+  if (typeof point.graphqlPath !== 'string') return false;
+  const segs = _splitJsonPath(point.graphqlPath);
+  if (!segs) return false;
+  const clone = JSON.parse(JSON.stringify(body));
+  const slot = _resolveJsonParent(clone, segs);
+  if (!slot || typeof slot.parent[slot.key] !== 'string') return false;
+  const next = replaceGraphQLStringLiteral(
+    slot.parent[slot.key],
+    Number(point.graphqlLiteralStart),
+    Number(point.graphqlLiteralEnd),
+    injected,
+    point.originalValue,
+    point.graphqlLiteralRaw
+  );
+  if (next == null) return false;
+  slot.parent[slot.key] = next;
+  req.data = JSON.stringify(clone);
+  req.headers['Content-Type'] = 'application/json';
+  return true;
+}
+
 // 读取 target.config 的 prefix/suffix（对标 sqlmap --prefix / --suffix），
 // 包裹「被注入的参数值」：最终注入值 = prefix + 原值 + payload + suffix。
 // 仅影响注入请求——value 恰为原始值（基线请求）或直连模式时原样返回，不污染基线请求。
@@ -124,6 +179,24 @@ function applyCookieInjectionHeaders(req, cookies) {
   req.headers['Cookie'] = Object.entries(cookies)
     .map(([k, v]) => `${k}=${v}`)
     .join('; ');
+}
+
+// [D121] JSON body 嵌套叶子点（param 为点路径如 user.id）：按路径替换叶子值后整体
+// 重序列化为 JSON 字符串。与 TargetParser._discoverJsonLeaves 的路径生成规则互逆。
+// 从 buildInjectionRequest 抽出（D121 加 GraphQL 分支后触碰复杂度基线，按纪律拆函数）；
+// 行为逐行保留：路径非法/失效时不改 req.data，交给后续既有语义。
+function applyJsonBodyInjection(req, target, point, injected) {
+  if (target.jsonBody == null || typeof target.jsonBody !== 'object' || !point.param.includes('.')) return;
+  // 引号感知路径解析：键含点号时 TargetParser 生成 "a.b" 形式段，
+  // 暴力 split('.') 会切碎——_splitJsonPath 把带引号段作为整体解析（互逆规则）。
+  const segs = _splitJsonPath(point.param);
+  if (!segs) return; // 非法路径（引号未闭合/空段）：JSON 注入失效，保持表单语义
+  const clone = JSON.parse(JSON.stringify(target.jsonBody));
+  const slot = _resolveJsonParent(clone, segs);
+  if (!slot) return;
+  slot.parent[slot.key] = injected;
+  req.data = JSON.stringify(clone);
+  req.headers['Content-Type'] = 'application/json';
 }
 
 export function buildInjectionRequest(target, point, value) {
@@ -256,6 +329,12 @@ export function buildInjectionRequest(target, point, value) {
     }
     req.url = u.toString();
   } else if (point.location === 'body') {
+    // [D121 2026-10-21] GraphQL 内联字面量点：先于普通 JSON 叶子/表单分支处理。
+    // 构造成功即返回；失败则继续走既有分支（不会把整个 query 串当值替换 —— 那会
+    // 生成非法 GraphQL，D114 已实测其后果）。
+    if (point.carrier === 'graphql' && buildGraphQLBodyRequest(req, target, point, injected)) {
+      return req;
+    }
     // [2026-10-01] XML / SOAP 叶子点（对标 ghauri XML·SOAP）：必须**先于**下面表单 /
     // urlencoded 分支处理 —— 否则 req.data 会被摊成 `路径=值` 的 urlencoded 对象，
     // 只吃 XML 的目标一个字段都解析不到 ⇒ 注入值从未进 SQL ⇒ 静默 0 检出
@@ -305,42 +384,9 @@ export function buildInjectionRequest(target, point, value) {
       req.data = new URLSearchParams(req.data).toString();
       req.headers['Content-Type'] = 'application/x-www-form-urlencoded';
     }
-    // [P1 批次 2026-09-08] JSON body 嵌套注入点（param 为点路径如 user.id）：
-    // target.jsonBody 存在时按路径替换叶子值为注入值后整体重序列化为 JSON 字符串
-    // （Content-Type 设 application/json——HttpClient 对字符串 data 直发不覆盖）。
-    // 点路径按段替换：段为纯数字走数组下标，否则走对象键（键含点号时用 JSON.stringify
-    // 形式匹配，与 TargetParser._discoverJsonLeaves 的路径生成规则互逆）。
-    if (target.jsonBody != null && typeof target.jsonBody === 'object' && point.param.includes('.')) {
-      const clone = JSON.parse(JSON.stringify(target.jsonBody));
-      // [P1 批次 2026-09-08] 引号感知路径解析：键含点号时 TargetParser 生成 "a.b" 形式段，
-      // 暴力 split('.') 会切碎——_splitJsonPath 把带引号段作为整体解析（互逆规则）。
-      const segs = _splitJsonPath(point.param);
-      let cur = clone;
-      let ok = true;
-      // 显式取出非空局部量：下面的循环/尾部取值都依赖它非 null，
-      // 仅靠 if (!segs) 赋值 ok 无法让 TS 在循环体内完成窄化。
-      const segsArr = /** @type {string[]} */ (segs);
-      if (!segs) {
-        ok = false; // 非法路径（引号未闭合/空段）：JSON 注入失效，保持表单语义
-      }
-      for (let i = 0; ok && i < segsArr.length - 1; i++) {
-        const raw = segsArr[i];
-        const num = /^\d+$/.test(raw) ? Number(raw) : null;
-        const key = num !== null ? num : _matchJsonKey(cur, raw);
-        if (key === null || cur[key] == null || typeof cur[key] !== 'object') { ok = false; break; }
-        cur = cur[key];
-      }
-      if (ok) {
-        const leaf = segsArr[segsArr.length - 1];
-        const leafNum = /^\d+$/.test(leaf) ? Number(leaf) : null;
-        const leafKey = leafNum !== null ? leafNum : _matchJsonKey(cur, leaf);
-        if (leafKey !== null) {
-          cur[leafKey] = injected;
-          req.data = JSON.stringify(clone);
-          req.headers['Content-Type'] = 'application/json';
-        }
-      }
-    }
+    // [P1 批次 2026-09-08 / D121 抽出] JSON body 嵌套注入点：
+    // 按点路径替换叶子值后整体重序列化（见 applyJsonBodyInjection）。
+    applyJsonBodyInjection(req, target, point, injected);
   } else if (point.location === 'cookie') {
     cookies[point.param] = injected;
     // [D91] 删键 + 单键写入（详见 applyCookieInjectionHeaders 的 JSDoc：大小写同名头

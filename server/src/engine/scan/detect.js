@@ -179,6 +179,46 @@ async function detectOrderByKeyPoint(point, ctx, validity, validityEnabled) {
  * @param {object} run 扫描运行期上下文
  * @returns {Promise<object>} 检测产物（挂回 run 供下游阶段消费）
  */
+
+/**
+ * [D123 2026-10-21] 点级拦截归因：把「本点发请求期间出现过拦截」写在注入点上。
+ *
+ * 为什么需要独立函数：主调度回调（`<arrow@225>`）已有 80 的圈复杂度基线且只许持平/下降，
+ * 把这段判断内联进去会立刻抬高基线、被 complexityGuard.wiring 打红。抽出来既守基线，
+ * 也让判据可被单测直接钉住（`unverifiedSurfaces.test.js` 的判据 A 依赖该字段）。
+ *
+ * 语义：`blockHitsBefore` 是本点开测前的全局累计拦截数，收尾取差值 ⇒ 仅本点归因。
+ * 只记事实，是否算「未验证」由 `unverifiedSurfaces.js` 决定（两处判据不混）。
+ *
+ * @param {object} point 注入点（原地写入 blockedRequests / unverifiedReason）
+ * @param {number} blockHitsBefore 开测前快照
+ * @param {object|null} validity 可信度守卫
+ * @param {boolean} validityEnabled 守卫是否启用
+ * @returns {number} 本点被拦的请求数（0 表示没观察到拦截）
+ */
+function attributePointBlocks(point, blockHitsBefore, validity, validityEnabled) {
+  if (!point) return 0;
+  const now = validityEnabled && validity ? Number(validity.blockHits || 0) : 0;
+  const delta = now - Number(blockHitsBefore || 0);
+  if (delta > 0) {
+    point.blockedRequests = delta;
+    if (!point.unverifiedReason) point.unverifiedReason = 'WAF/守卫拦截（请求被拦，注入值可能从未送达）';
+  }
+  return delta > 0 ? delta : 0;
+}
+
+/**
+ * [D123] 本点开测前的拦截计数快照（与 attributePointBlocks 配对）。
+ * 单独成函数的原因：`<arrow@…>` 调度回调的圈复杂基线只许持平/下降，
+ * 内联 `validityEnabled && validity ? … : 0` 一次加 3 个分支点。
+ * @param {object|null} validity 可信度守卫
+ * @param {boolean} validityEnabled 守卫是否启用
+ * @returns {number}
+ */
+function blockHitsSnapshot(validity, validityEnabled) {
+  return validityEnabled && validity ? Number(validity.blockHits || 0) : 0;
+}
+
 export async function detectPhase(run) {
   const { cfg, ctxBase, guard, pointsToScan, rawClient, s, scanId, session, sm, target, validity, validityEnabled } = run;
 
@@ -434,7 +474,7 @@ export async function detectPhase(run) {
         return results.filter((r) => r.vulnerable);
       };
 
-      const found = [];
+      const found = [], blockHitsBefore = blockHitsSnapshot(validity, validityEnabled); // [D123] 本点拦截快照
       // 层1：快速层并行
       const fastHits = await runLayer(FAST);
       found.push(...fastHits);
@@ -451,7 +491,7 @@ export async function detectPhase(run) {
       // 写盘可能仍在进行——测试/调用方在扫描结束后清理会话文件会被迟到的写盘重新创建
       // （曾导致 phase3.sessionDefault 测试偶发竞态失败）。
       if (session) await session.savePointResult(point.id, { found: found.map((f) => ({ technique: f.technique, result: f.result })) }).catch(() => null);
-      fullyTestedPoints.add(point.id);
+      attributePointBlocks(point, blockHitsBefore, validity, validityEnabled); fullyTestedPoints.add(point.id);
     }, 0); // [MERGED: perf] retry=0：单请求重试归 HttpClient 统一负责，避免双重放大为 (retry+1)² 次物理请求
 
     // [D106] 参数名点 ORDER BY 固定后缀形态补测（P1-2）：标准赛道零命中的**非 XML** 参数名

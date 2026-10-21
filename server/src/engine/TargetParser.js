@@ -13,6 +13,9 @@ import { logger } from '../core/logger.js';
 import { collectRendered, BrowserUnavailable, isStaticEndpoint } from './discovery/browserCrawler.js';
 // [2026-10-01] XML / SOAP body 叶子发现（对标 ghauri XML·SOAP）
 import { parseXmlBody, xmlLeafPaths, getXmlLeaf } from '../core/xmlBody.js';
+// [D121 2026-10-21] GraphQL 查询串内联值位：JSON 叶子整串替换会生成非法 GraphQL，
+// 需要保持骨架、只换字符串字面量（DVGA 外部裁判 0/1 的根因）。
+import { looksLikeGraphQLQuery, findGraphQLInlineLiterals } from './graphqlInline.js';
 // [D41 2026-10-11 对标 sqlmap -p/--param-exclude/--param-filter] 注入点筛选三件套
 import { applyParamSelection } from './paramSelection.js';
 
@@ -384,6 +387,43 @@ export class TargetParser {
     return segs.length ? segs[segs.length - 1] : null;
   }
 
+  // [D121 2026-10-21] GraphQL 查询串的内联值位点。
+  //
+  // 背景：DVGA 外部裁判真值点是 `{ pastes(filter: "x") { … } }`，SQL 拼接发生在
+  // GraphQL resolver 内部的 filter 值上。既有 JSON 叶子通道把 **整个 query 字符串**
+  // 当参数替换成 payload ⇒ 服务端在 GraphQL 解析层就 400（D114 实测），注入值从未
+  // 进入 SQL。修法：在这里定位每个双引号字符串字面量，生成独立点，构造侧只替换该
+  // 字面量（graphqlInline.replaceGraphQLStringLiteral），查询骨架保持不变。
+  //
+  // 返回 true 表示「这是 GraphQL 查询串」——调用方不要再为它生成整串值点：整串替换
+  // 必然生成非法 GraphQL，属于已知的静默假阴性形态。没有内联字面量时（例如全部值
+  // 都走 variables，或 resolver 不接收字符串参数）不生成点，但也不回退整串点。
+  _collectGraphqlQueryLeaf(points, childPath, key, query) {
+    if (key !== 'query' || typeof query !== 'string' || !looksLikeGraphQLQuery(query)) return false;
+    const literals = findGraphQLInlineLiterals(query);
+    const prefix = childPath.join('.');
+    const used = new Set(points.map((p) => p.param));
+    let unnamed = 0;
+    for (const lit of literals) {
+      if (points.length >= 50) break;
+      const base = lit.argName ? `${prefix}.${lit.argName}` : `${prefix}.literal${++unnamed}`;
+      let param = base;
+      for (let n = 2; used.has(param); n += 1) param = `${base}[${n}]`;
+      used.add(param);
+      points.push(
+        createInjectionPoint('body', param, lit.value, {
+          carrier: 'graphql',
+          graphqlPath: prefix,
+          graphqlLiteralStart: lit.start,
+          graphqlLiteralEnd: lit.end,
+          graphqlLiteralRaw: lit.raw,
+          graphqlArgName: lit.argName,
+        })
+      );
+    }
+    return true;
+  }
+
   // [D103] 收集一个标量叶子的注入点：值点始终生成；键名点（opt-in）仅当父节点是**对象**
   // 时追加（数组下标不是"名字"，无法改名——值点仍保留）。
   _collectJsonLeaf(points, childPath, key, val, parentNode, wantParamNames) {
@@ -425,6 +465,7 @@ export class TargetParser {
         // 嵌套对象/数组：递归（boolean 也递归跳过——bool 叶子注入语义无意义）
         this._discoverJsonLeaves(val, childPath, points, depth + 1, wantParamNames);
       } else if (typeof val === 'string' || typeof val === 'number') {
+        if (this._collectGraphqlQueryLeaf(points, childPath, key, val)) continue; // GraphQL：勿回退整串点
         this._collectJsonLeaf(points, childPath, key, val, node, wantParamNames);
       }
     }
@@ -743,6 +784,13 @@ export class TargetParser {
     } catch (e) {
       const reason = e instanceof BrowserUnavailable ? e.message : `${e?.message || e}`;
       logger.warn(`[crawlBrowser] 不可用，降级为 HTTP 爬虫：${reason}`);
+      // [D124 2026-10-21] 降级事实必须进报告，不能只活在日志里。
+      // 背景：playwright 配在**根 package.json 的 devDependencies** ⇒ 生产部署
+      // （`npm install --omit=dev`）里根本没有它，`--crawl-browser` 会对 SPA 目标
+      // 静默退化成 HTTP 爬虫（只见空壳 HTML，XHR 接口面全丢）——日志刷一条 warn 就没了，
+      // 使用者以为「已开启浏览器爬取」，拿到的是 HTTP 爬虫的结论。
+      // 与 `summary.noInjectionPoints` 同形态：把「你以为开了、其实没开」写进报告摘要。
+      target.crawlBrowserFallback = { requested: true, degradedTo: 'http-crawler', reason };
       return this._crawlLinks(target, points, depth);
     }
     this._mergeCrawlFindings(target, points, result || {}, config);

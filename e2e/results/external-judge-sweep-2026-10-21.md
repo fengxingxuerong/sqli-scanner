@@ -2,9 +2,14 @@
 
 > 一页看清「外部裁判有哪些、各自真值多少、当前红绿、怎么复跑」。
 > ⚠ 本文件是**汇总**，不是新证据：每个数字都标注来源文件与实测日期；引用以各自
-> `results/` 原始报告为准。本轮（10-21）**未产生新的实测数字** —— 三个我可控的靶场
-> 已重启（VAmPI 5000/5001、DVGA 5013），但引擎侧 `TargetParser.js` 正处于并发会话的
-> 编辑中（半写状态、语法不合法），跑不了任何依赖引擎的 e2e，故未复跑。
+> `results/` 原始报告为准。
+>
+> **2026-10-21 二次修订**：当日 D121 之后又做了**一轮 5 裁判全量复跑**（五个靶场全部
+> 重搭、重跑），原始日志在 `external-sweep-2026-10-21-*.log`、报告在
+> [`external-sweep-2026-10-21-full.md`](external-sweep-2026-10-21-full.md)。
+> 该轮回溯发现本表两处**口径过期**（不是新 bug，是汇总没跟上 D113 的扩容）：
+> DVWA 真值由 4 → **5**、VAmPI 安全分母由 2 → **5**，合计由 185 → **187**。
+> 旧数字保留在下方「修订记录」，不删历史。
 
 ## 一、外部裁判清单（真值均来自第三方源码，非本仓断言）
 
@@ -12,24 +17,34 @@
 |---|---|---|---|---|---|---|
 | 1 | **OWASP Juice Shop** 20.3.0 | Node + Sequelize + SQLite | query + POST JSON body | 2（搜索 LIKE、登录绕过） | ✅ 2/2 检出、0/4 误报 | acceptance `juice-shop` |
 | 2 | **VAmPI** | Python + Flask + SQLAlchemy + SQLite | **URL 路径段** `/users/v1/{u}` | 1（+ 同源复检） | ✅ 1/1、0/2 误报（A/B 同形态参数化实例） | acceptance `vampi` |
-| 3 | **DVWA** | PHP 8.3 + MariaDB | cookie 注入点 + POST 表单 | 4（四档官方难度） | ✅ 4/4 | 见 `e2e/dvwa-lab/` |
-| 4 | **VAmPI Bearer** | 同上 + JWT | 带认证头的参数化端点 | 安全对照 | ✅ 0 误报 | 见 `e2e/vampi-lab/` |
-| 5 | **DVGA** | Python + Flask + Graphene + SQLite | **GraphQL 查询串内部** | 1（`pastes(filter)`） | ❌ **0/1 已知缺口**（且此前「1/1」系假阳性，已作废） | 参考靶场，不接门禁 |
-| 6 | **OWASP Benchmark** | Java 17 + Spring + HSQLDB | query + **HTTP header** + 参数名 | 178（D115→D117 全量） | 真值 178/178、安全 0/149（D117 口径） | 参考 → 见 benchmark-lab |
+| 3 | **DVWA** | PHP 8.3 + MariaDB | cookie 注入点 + POST 表单 | **5**（四档难度，含 medium 盲注 POST） | ✅ **5/5**（D113 起；本轮复跑 5/5）、impossible 0/2 误报 | acceptance `dvwa` |
+| 4 | **VAmPI Bearer** | 同上 + JWT | 带认证头的参数化端点 | 安全对照 | ✅ **0/5** 误报（3 个 Bearer 安全端点 + 2 个同形态参数化） | acceptance `vampi` |
+| 5 | **DVGA** | Python + Flask + Graphene + SQLite | **GraphQL 查询串内部** | 1（`pastes(filter)`） | ✅ **1/1**（D121，本轮复跑 1/1）；安全 `search(keyword)` 0 误报；此前「1/1」假阳性已作废 | 参考靶场，不接门禁 |
+| 6 | **OWASP Benchmark** | Java 17 + Spring + HSQLDB | query + **HTTP header** + 参数名 | 178（D115→D117 全量） | ✅ 真值 **178/178**、安全 **0/149**（本轮按三份清单全量复跑，逐条吻合 D117 口径） | acceptance `benchmark`（74 条基线） |
 
-合计外部真值端点：**185 个**（Juice 2 + VAmPI 1 + DVWA 4 + DVGA 1 + Benchmark 178），
-其中 **1 个（DVGA GraphQL）打不穿**。
+合计外部真值端点：**187 个**（Juice 2 + VAmPI 1 + DVWA 5 + DVGA 1 + Benchmark 178）；
+D121 后 **187/187 可打穿**，安全端点误报 0（分母 4 + 5 + 2 + 1 + 149）。
+
+> 修订记录（§3.5「保留旧数字并标注作废」）：首版汇总写「DVWA 4 / VAmPI 安全 0/2 /
+> 合计 185」，沿用的是 D112 与 D111 的口径。实际 D113 已给 DVWA 加第 5 个真值点
+> （`POST /vulnerabilities/sqli_blind/`，medium 无错误回显只余布尔），并给 VAmPI 加了
+> 3 个 Bearer 安全端点——当日 d113 运行实测就是 5/5（数字内联在
+> `e2e/dvwa-lab/results/external-judge-2026-10-20-dvwa.md`）。**旧数字 4/185 作废**，
+> 新口径 5/187 以本轮复跑日志为准。
 
 ## 二、本次自测重启的靶场
 
+> 2026-10-21 二次复跑时**五个靶场全部重新搭起**（含此前「未起」的 DVWA 与 Benchmark），
+> 下表「状态」列已按该轮更新；各靶场的从零起法见 `external-sweep-2026-10-21-full.md`。
+
 | 靶场 | 地址 | 状态 | 复跑命令 |
 |---|---|---|---|
-| Juice Shop | `http://127.0.0.1:3199` | 常驻未回收 | `JUICE_BASE=http://127.0.0.1:3199 node e2e/juice-shop-lab/run.mjs` |
-| VAmPI 漏洞实例 | `http://127.0.0.1:5000` | 本轮重启（`vulnerable=1`） | `node e2e/vampi-lab/run.mjs` |
-| VAmPI 对照实例 | `http://127.0.0.1:5001` | 本轮重启（`vulnerable=0`，参数化） | 同上（套件同时打两个实例） |
-| DVGA | `http://127.0.0.1:5013` | 本轮重启 | `DVGA_BASE=http://127.0.0.1:5013 node e2e/dvga-lab/run.mjs` |
-| DVWA | `http://127.0.0.1:8099` | **未起**（并发会话建，进程已回收） | 见 `e2e/dvwa-lab/README.md` |
-| Benchmark | `https://127.0.0.1:8443` | **未起**（需 JDK17 + Maven 打包） | 见 `e2e/benchmark-lab/README.md` |
+| Juice Shop | `http://127.0.0.1:3199` | 本轮重起（v20.3.0，前端已构建） | `JUICE_BASE=http://127.0.0.1:3199 node e2e/juice-shop-lab/run.mjs` |
+| VAmPI 漏洞实例 | `http://127.0.0.1:5000` | 本轮重起（`vulnerable=1`，`tokentimetolive=7200`） | `node e2e/vampi-lab/run.mjs` |
+| VAmPI 对照实例 | `http://127.0.0.1:5001` | 本轮重起（`vulnerable=0`，参数化） | 同上（套件同时打两个实例） |
+| DVGA | `http://127.0.0.1:5013` | 本轮重起 | `DVGA_BASE=http://127.0.0.1:5013 node e2e/dvga-lab/run.mjs` |
+| DVWA | `http://127.0.0.1:8099` | **本轮已起**（PHP 8.3 + MariaDB 10.11） | `DVWA_BASE=http://127.0.0.1:8099 node e2e/dvwa-lab/run.mjs` |
+| Benchmark | `https://127.0.0.1:8443` | **本轮已起**（JDK17 + Maven 打包 + HSQLDB 9001 + cargo Tomcat） | `node e2e/benchmark-lab/run.mjs` |
 
 ## 三、DVGA 这条线的完整推翻链（本仓 §3.5 协议实例）
 
@@ -42,9 +57,12 @@
 4. **修复**：`echoStrip.js` 变体集合补 `JSON.stringify(payload).slice(1,-1)` 及双层形态；
    契约 `server/tests/echoStrip.jsonEcho.test.js` 4 例（含 §B 弱版敏感性、§C 真报错不误删），
    缺陷注入复验：摘掉修复 → §A/§A2 红，备份还原 → 4/4 绿。
-5. **新结论**：真值点**如实变成 0/1** —— 引擎从未真正打穿过它；缺口登记为
-   `graphql-inline-injection-gap`（需「字符串内嵌注入」能力：保持
-   `{ pastes(public: true, filter: "<PAYLOAD>") { id } }` 骨架，只替换值位）。
+5. **中间结论（已作废）**：D114 后真值点如实变成 0/1，登记为
+   `graphql-inline-injection-gap`。
+6. **D121 修复**：新增 GraphQL 查询串内联字面量点（`carrier='graphql'`），保持
+   `{ pastes(public: true, filter: "<PAYLOAD>") { id title } }` 骨架、只替换值位；
+   真值点 **1/1**（union/error/boolean），安全点 0 误报，连续 3 轮一致。
+   证据：`e2e/dvga-lab/results/external-judge-2026-10-21-d121.md`；旧 0/1 记录保留作历史。
 
 ## 四、VAmPI 这条线（本轮 D111 建立）
 
@@ -57,10 +75,13 @@
 
 ## 五、边界（不得越界引用）
 
-- 185 个真值端点分布在 5 个项目上，**仍不能外推为「通用外部检出率」** —— 每个项目的
-  注入形态、DBMS、框架都不同，样本不独立同分布。
-- `pastes(filter)` 那 1 个缺口会让「GraphQL 面」整体结论为**未覆盖**，不要在任何对外口径里
-  把 GraphQL 计入已验证能力。
+- 187 个真值端点分布在 5 个项目上，**仍不能外推为「通用外部检出率」** —— 每个项目的
+  注入形态、DBMS、框架都不同，样本不独立同分布；且 Benchmark 一个项目就占 178/187。
+- GraphQL 面目前只有 DVGA `pastes(filter)` **一个**真值端点（D121 已 1/1），不能外推为
+  「GraphQL 通用覆盖」；block string / 裸 `application/graphql` 仍不在该通道内。
 - 路径段注入点（`--test-path`）默认关闭；header 注入点（Benchmark header 形态）在 level=2
   下也不生成 ⇒ 套件显式开启的档位不代表默认配置覆盖率。
-- 本轮未复跑（原因见文件头），表中数字的最后实测日期见各自 `results/` 报告。
+- `{call <过程名>}` 4 条真值仍未检出（Benchmark 的 7 条 call 形态里），是**已知能力边界**，
+  单列不计入 178。
+- 2026-10-21 二次复跑是 5 裁判**同一轮**全量重跑（各自日志见 `external-sweep-2026-10-21-*.log`）；
+  但 `e2e/run-all.mjs` 全量套件未跑，DVGA 仍不接 acceptance。

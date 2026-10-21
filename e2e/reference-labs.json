@@ -34,7 +34,7 @@
     {
       "name": "dvga-lab",
       "since": "2026-10-20",
-      "why": "外部裁判（GraphQL 面）的**能力缺口记录**，不是回归判据：DVGA 官方 views.py:320 的 pastes(filter) 是真 SQLi，但注入点在 POST body 的 GraphQL 查询串内部；引擎当前只做 JSON 叶子整串替换，生成的不是合法 GraphQL ⇒ 真值点如实 0/1。按设计保持红，**不接 acceptance/run-all**，也不为了让门禁绿而删端点或放宽判据。它另外抓到并已修复的 search(keyword) 误报（JSON 转义回显）由 server/tests/echoStrip.jsonEcho.test.js 守；跑法与证据见 e2e/dvga-lab/README.md，待 GraphQL 内嵌注入能力落地后再转门禁。"
+      "why": "外部裁判（GraphQL 面）：DVGA 官方 views.py:320 的 pastes(filter) 是真 SQLi，注入点在 POST body 的 GraphQL 查询串内部。D121（2026-10-21）新增 GraphQL 内联字面量点后真值点 **1/1**（union/error/boolean），安全点 search(keyword) 0 误报；连续 3 轮一致，证据见 e2e/dvga-lab/results/external-judge-2026-10-21-d121.md。仍**不接 acceptance/run-all**：只有单一 GraphQL 端点样本且需手动起靶场，属参考证据而非稳定门禁；跑法见 e2e/dvga-lab/README.md。"
     }
   ]
 }

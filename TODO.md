@@ -5,6 +5,141 @@
 
 ---
 
+## 2026-10-21 批次 D124 · 覆盖范围披露（未覆盖面 + 浏览器降级进报告）
+
+**背景**：报告写 `no_vulnerability_detected` 时，用户分不清「测了没洞」与「压根没测」。
+两处事实只活在日志/配置里：① 默认 `level=1` 只测 URL query + POST body
+（cookie/header/path/表单四类面从未进入检测）；② `--crawl-browser` 在 playwright/浏览器
+不可用时静默降级为 HTTP 爬虫，SPA 的 XHR 接口面整体丢失——而 playwright 在
+`devDependencies`，生产 `--omit=dev` 必然触发。
+
+**本批**：
+- `scan/discover.js`：`uncoveredSurfaces(config)` + `annotateSurfaceCoverage` ⇒
+  `summary.uncoveredSurfaces` / `uncoveredSurfacesHint`（带开启方式，随开关收缩）。
+- `TargetParser.js`：降级时记录 `target.crawlBrowserFallback` ⇒
+  `summary.crawlBrowserFallback` / `crawlBrowserHint`（点明 SPA 接口面可能未发现）。
+- 两字段都只在事实成立时出现；未开启/浏览器可用时不写，避免假警示。
+- 测试 7/7（降级替身 2 + 未覆盖面 5，含真实 `ScanManager` 端到端）。
+
+**外部核验**（2026-10-22）：5 裁判 187/187 无回归，新字段 8/8 场景无假阳性
+（Juice/VAmPI/DVWA/DVGA + Benchmark header），acceptance 4 PASS。证据
+`e2e/results/external-sweep-2026-10-22-post-d124.md`。
+
+### 待推进
+
+- **playwright 依赖位置**：本批只做披露；生产部署 `--omit=dev` 仍会降级。候选：
+  移到 `dependencies`/`optionalDependencies`，或在启动横幅显式告警（两者可并存）。
+- **真实 SPA 复现**：降级阳性路径目前由本地替身制造，未在真实 SPA 目标上复现。
+- 未覆盖面清单目前是配置级静态判定；`--crawl-browser` 实际发现到的接口面未参与
+  「覆盖/未覆盖」的动态核算（若后续要精确到「本次发现了多少面、测了多少面」需另立批次）。
+
+---
+
+## 2026-10-21 批次 D123 · 「未验证注入面」显形（P0 第一件事：WAF 场景给正式结论）
+
+**背景（用户视角的缺口）**：问「能当真实渗透工具用吗」时，最该补的不是检出率，而是
+**目标挂了 WAF 时能不能给严肃结论**。现状是：整体健康、局部注入面被吃掉 ⇒ 报告写
+`no_vulnerability_detected`，不说「有 N 个面根本没送达 payload」。
+
+**根因（实测）**：`detect.js` 的 `fullyTestedPoints.add(point.id)` **无条件执行**——403 拦截
+不抛错 ⇒ 被拦的点也算「跑完」。`validity` 是整轮级、`verdict` 只在整轮不可信时翻转，
+看不见中间态。
+
+**本批**：
+- 新增 `scan/unverifiedSurfaces.js`：按注入面摊开 + 生成结论句。
+- `detect.js`：`blockHitsSnapshot` / `attributePointBlocks` ⇒ `point.blockedRequests`（点级归因）。
+- `scanRunner.js`：`annotateUnverifiedSurfaces` / `buildVerdictNote` ⇒ 未验证面**进 verdictNote**。
+- `AGENTS.md` §2 判读表补一行（代理最容易读错的第四件事）。
+
+### 待推进（本批之后，按原顺序）
+
+- **P0 剩余**：真实云 WAF 授权样本采集（`docs/WAF-真机样本采集-runbook.md` 已就绪，缺真实流量）。
+  没有它，WAF 侧仍只能给「可解释结论」，给不出绕过率。
+- **P1**：真实形态样本（SPA / 签名接口 / 网关重写 / GraphQL variables）替换 Benchmark 权重。
+- **P2**：18 库分层里 DM8 / TiDB 提到真引擎验证。
+- ~~**顺带**：`playwright` 在 `devDependencies`，生产部署（`--omit=dev`）时 `--crawl-browser`
+  静默回落 HTTP 爬虫 —— 应在启动横幅显式告警。~~ **D124 已把降级事实写进报告**
+  （`summary.crawlBrowserFallback`）；依赖位置仍未改，生产部署仍会降级 → 见 D124 待推进。
+- **环境债（D123 发现）**：Node v24.18.0 / Windows 下含 HTTP 服务端的测试文件在**进程退出**
+  触发 libuv 断言（`win/async.c:94`），整个文件被判 fail 而用例全过；`git archive HEAD` 隔离
+  复跑同样崩溃 ⇒ 运行时缺陷，待评估 Node 版本或改用 `--test-isolation` 规避。
+
+---
+
+## 2026-10-21 批次 D122 · 外部靶场全量复跑（5 裁判同轮）
+
+**背景**：D121 之后五个外部靶场的结论分散在各自旧报告里，且汇总口径**已过期**：
+`external-judge-sweep-2026-10-21.md` 写「DVWA 4/4、VAmPI 安全 0/2、合计 185」，而
+D113 当天给 DVWA 加了第 5 个真值点（medium 盲注 POST）、给 VAmPI 加了 3 个 Bearer
+安全端点 —— 当日 d113 运行的实测结果就是 5/5（该 `.log` 按 `.gitignore` 不入库；
+数字内联在 `e2e/dvwa-lab/results/external-judge-2026-10-20-dvwa.md`）。汇总没跟上，属**口径腐烂**。
+
+**本批**（不改引擎代码，只重搭靶场 + 复跑 + 修口径）：
+- 五个靶场全部在本机**从零重搭**：Juice Shop v20.3.0（含前端构建）、VAmPI 双实例、
+  DVGA、DVWA（PHP 8.3 + MariaDB 10.11）、OWASP Benchmark（JDK17 + Maven + HSQLDB + cargo）。
+  补齐 `e2e/vampi-lab/run_port.py`（README 引用但目录内缺文件）。
+- 同轮全量复跑：**真值 187/187 可打穿、安全端点误报 0、证据不足 0**。
+  其中 Benchmark 按三份清单全量跑（query 210 → 111/111 + 0/99；header 67 → 33/33 + 0/34；
+  基线 74 → 43/43 + 0/24），与 D117 的 178/149 逐条吻合。
+- `acceptance --only=juice-shop,vampi,dvwa,benchmark` → **4 PASS / 0 FAIL / 0 SKIP**。
+- 口径修正（§3.5：保留旧数字并标注作废）：DVWA 真值 4→5、VAmPI 安全分母 2→5、
+  合计真值端点 185→**187**；D121 前「只补跑 DVGA、其余沿用旧证据」的说明作废。
+- 证据：`e2e/results/external-sweep-2026-10-21-full.md`（数字内联，不依赖日志）、
+  `e2e/dvwa-lab/results/external-judge-2026-10-21-dvwa-rerun.md`；台账新增
+  `external-judge-sweep-2026-10-21-5judges`（verified），并给 `external-judge-dvwa-d112`
+  补 5/5 与复跑证据。
+
+### 待推进
+
+- `{call <过程名>}` 4 条真值仍未检出（已知边界，单列不计入 178）——P0 ② 仍在。
+- Benchmark 仍占 187 里的 178：外部样本**严重不均衡**，别拿 187/187 说「通用检出率」。
+- DVGA 要转稳定门禁，前置仍是「靶场需手动起 + 只有 1 个 GraphQL 真值端点」。
+
+---
+
+
+## 2026-10-21 批次 D121 · GraphQL 查询串内联值位注入（P0 ① 收口）
+
+**背景**：D114 外部裁判 DVGA 真值点 `pastes(filter)` 0/1 —— 旧 JSON 叶子通道把**整个
+`query` 字符串**替换成 payload，GraphQL 解析层直接 400，注入值从未进 SQL；D120 修完
+表单路径后，它仍是唯一未打穿的外部真值点。
+
+**本批**：
+- 新增 `server/src/engine/graphqlInline.js`：GraphQL 查询串词法扫描（双引号字面量/
+  转义/注释；block string 跳过）+ 编码与按区间替换。边界：只处理内联字面量，
+  variables 走既有 JSON 叶子通道，裸 `application/graphql` 不支持。
+- `TargetParser._collectGraphqlQueryLeaf`：`query` 字段像 GraphQL 时只生成
+  `carrier='graphql'` 的内联字面量点（如 `query.filter`），不再回退整串点；同名字面量
+  以 `param[2]` 区分；数组路径 `0.query.filter` 可用。
+- `injection.buildGraphQLBodyRequest`：clone `jsonBody`，只替换目标字面量，保留查询
+  骨架/其他字段；基线逐字不变。`_resolveJsonParent` 复用于 JSON 叶子路径（抽出
+  `applyJsonBodyInjection`，`buildInjectionRequest` 圈复杂度 91→78）。
+- `prefilter.skipStaticPoints`：GraphQL 点不参与同值去重（`field(a:"x", b:"x")` 只测
+  一个会静默漏另一个），仍参与静态哨兵。
+- 回归：`server/tests/graphqlInline.injection.test.js` 12 例（发现/构造/转义/多字面量/
+  batch/variables/非 GraphQL `query` 零回归/区间失效）+ `graphqlInline.scan.test.js`
+  2 例（本地同构靶场 + 真 `ScanManager`：检出且安全点零误报）。
+
+**外部实测**：`DVGA_BASE=http://127.0.0.1:5013 node e2e/dvga-lab/run.mjs` 连续 3 轮：
+真值 **1/1**（union/error/boolean，98 请求）、安全 `search(keyword)` **0 误报**
+（124 请求）、无 filter resolver 0 点/0 请求结构对照、证据不足 0；证据
+`e2e/dvga-lab/results/external-judge-2026-10-21-d121.md`。台账：
+`external-judge-dvga-d121` verified；`graphql-inline-injection-gap` /
+`external-judge-dvga-d114` refuted（旧 0/1 保留作历史）。
+
+**边界**：单端点样本，不外推 GraphQL 通用覆盖率；block string / 裸
+`application/graphql` 未覆盖；DVGA 仍为参考靶场，不接 acceptance/run-all。
+
+### 待推进
+
+- **DVGA 转稳定门禁的前置**：靶场需手动起（Python 依赖）+ 只有 1 个真值端点；
+  要接 CI 需容器化或补多端点样本，否则只是「参考证据」。
+- **P0 ② `{call <过程名>}`**：Benchmark 4 条真值未检出（327 条有效覆盖之外单列）。
+- **P0 ③ 发现阶段签名爬虫 + 外部裁判进 CI**：`--request-script` 尚未用于 crawler；
+  外部裁判多数 optional，CI 不稳定。
+
+---
+
 ## 2026-10-21 批次 D120 · 表单伴随字段 + GET 表单 url 点（接手并发会话未提交工作）
 
 **背景**：DVWA low `/vulnerabilities/sqli/` 真机自测暴露 D112 的**第二条路径**（那次修
@@ -28,9 +163,8 @@ verdict `no_vulnerability_detected`（0 条，退出码 0）；修复后
 
 ### 待推进
 
-- **P0 ① GraphQL 内嵌注入点**（`graphql-inline-injection-gap`）：仍 0/1。要在 JSON 叶子
-  （GraphQL 查询串）内部定位值位并保持骨架注入，与 D120 的「GET 表单进 query」是同一类
-  思路（保骨架、只换值），可复用其设计。
+- ~~**P0 ① GraphQL 内嵌注入点**（`graphql-inline-injection-gap`）~~：**D121 已完成**
+  （DVGA 1/1，连续 3 轮；`carrier='graphql'` 内联字面量点）。
 - **`<select>` 采集**：取值需解析 selected option，场景较少，按需补。
 - DVWA 靶场起法已固化在 `e2e/dvwa-lab/README.md`；本机资产 `/d/tools/{php83,mariadb,jdk,maven}`。
 
@@ -55,9 +189,9 @@ verdict `no_vulnerability_detected`（0 条，退出码 0）；修复后
 
 ### 待推进（P0 ① 未动）
 
-- **结构化文本内嵌注入点**（GraphQL / batch / 嵌套 JSON）：DVGA 真值点 0/1 的根因。
-  并发会话正在改 `TargetParser.js`（位置正是注入点发现），**先查 `git log -5` 再决定接手**，
-  别再撞车（本轮已与 D114 撞过一次）。
+- ~~**结构化文本内嵌注入点**（GraphQL / batch / 嵌套 JSON）~~：D121 已完成 GraphQL
+  查询串内联字面量（DVGA 1/1）；batch 数组路径与 variables 通道有测试，但其他结构化文本
+  （如 GraphQL block string）仍未覆盖。
 - 矩阵后续形态候选（未实测到，不进矩阵）：XML 属性回显、十六进制转义、各语言特有转义。
 
 ---

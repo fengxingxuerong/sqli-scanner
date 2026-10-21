@@ -19,6 +19,8 @@ import { HTTP_LOG_THROTTLE_MS } from './scan/constants.js';
 // 到 scan/detect.js 等子模块消费，此处删除不影响任何行为。
 import { supplementalPasses } from './scan/supplemental.js';
 import { finalizeReport } from './scan/finalize.js';
+// [D123 2026-10-21] 未验证注入面（按注入面摊开，进 verdictNote）
+import { summarizeUnverifiedSurfaces, unverifiedSentence } from './scan/unverifiedSurfaces.js';
 import { aggregateVulns } from './scan/aggregate.js';
 import { extractPhase } from './scan/extract.js';
 import { detectPhase } from './scan/detect.js';
@@ -31,6 +33,72 @@ import { discoverPoints } from './scan/discover.js';
  * @param {string} scanId 扫描 ID
  * @returns {Promise<void>}
  */
+/**
+ * [D123 2026-10-21] 把「未验证注入面」摊开并写进报告，返回可直接拼进 verdictNote 的一句文案。
+ *
+ * 为什么单独成函数：`runScanLoop` 的复杂度基线只许持平/下降（存量 188 行 / 69 圈复杂），
+ * 内联这 15 行会立刻把基线顶上去。抽出来的同时把「算字段」与「进文案」绑在一起 ——
+ * 该仓最贵的一类教训就是字段算出来了但没人读（byRisk 恒 null、推荐链只走 SSE 不落盘）。
+ *
+ * @param {object} rep 报告对象（原地写 summary.unverifiedSurfaces / unverifiedSentence）
+ * @param {object} p
+ * @param {Array<object>} p.points 本轮计划检测的点
+ * @param {Set<string>} p.done 引擎认为跑完的点
+ * @param {object} p.validity 可信度守卫实例
+ * @returns {string|null} 拼进 verdictNote 的句子（无未验证面时 null）
+ */
+function annotateUnverifiedSurfaces(rep, { points, done, validity }) {
+  const v = validity && typeof validity.summary === 'function' ? validity.summary() : null;
+  const unv = summarizeUnverifiedSurfaces({
+    points: points || [],
+    fullyTested: done || [],
+    vulns: rep.vulns,
+    inconclusivePoints: (v && v.inconclusivePoints) || [],
+    netErrPoints: Array.isArray(validity && validity.netErrPoints) ? validity.netErrPoints : [],
+  });
+  const sentence = unverifiedSentence(unv);
+  if (!sentence) return null;
+  rep.summary = rep.summary || {};
+  rep.summary.unverifiedSurfaces = unv.surfaces;
+  rep.summary.unverifiedSentence = sentence;
+  return sentence;
+}
+
+/**
+ * [D123 2026-10-21] verdictNote 文案（抽成纯函数：`applyValidity` 是既有高复杂度闭包，
+ * 基线只许持平/下降，内联拼接会直接顶上去）。
+ * @param {object} p
+ * @param {boolean} p.inconclusive 阴性结论是否不成立
+ * @param {boolean} p.nothingTested 是否一个可测点都没有
+ * @param {boolean} p.negative 是否 0 命中
+ * @param {object} p.v 守卫摘要
+ * @param {object} p.rep 报告（读 noInjectionPointsHint / vulns）
+ * @param {string|null} p.unvSentence 未验证面结论（无则 null）
+ * @returns {string}
+ */
+function buildVerdictNote({ inconclusive, nothingTested, negative, v, rep, unvSentence }) {
+  if (inconclusive) {
+    if (nothingTested) {
+      return (
+        `本次扫描未发现任何可测注入点（${rep.summary.noInjectionPointsHint || '目标 URL 无参数且未启用请求头/path 段'}）——` +
+        '一次检测都没跑，「未检出」不构成任何结论。若目标是可达的 API，请确认 URL 带 query 参数或改用 --body / jsonBody / xmlBody 指定注入面'
+      );
+    }
+    return `未检出漏洞 ≠ 无漏洞：本次扫描 ${v.reason}；${v.inconclusivePoints.length} 个注入点未完成有效检测，阴性结论不成立，需按建议处置后复扫（${v.advice}）`;
+  }
+  if (!negative) {
+    return (
+      `本次扫描检出 ${(rep.vulns || []).length} 条漏洞，命中详情见 vulns` +
+      (unvSentence ? `。⚠️ 另有未完成检测的注入面（可能藏有未发现的问题）：${unvSentence}` : '')
+    );
+  }
+  // 整体健康 ≠ 每个面都测了：有未验证面时必须追加，否则「可信度正常」会把「部分面根本没测」一起背书掉
+  return (
+    '目标在本次扫描窗口内可达、未被拦且会话有效，「未检出漏洞」的阴性结论可信度正常（仍建议对高风险参数人工复核）' +
+    (unvSentence ? `。⚠️ 但需注意：${unvSentence}` : '')
+  );
+}
+
 export async function runScanLoop(sm, scanId) {
     const s = sm.scans.get(scanId);
     if (!s) return;
@@ -149,16 +217,13 @@ export async function runScanLoop(sm, scanId) {
         : negative
           ? 'no_vulnerability_detected'
           : 'vulnerability_detected';
-      rep.summary.verdictNote = inconclusive
-        ? (nothingTested
-          // 「0 注入点」与「测了但网络/会话不可靠」是两种不同处置，文案必须分开：
-          // 前者要人去确认目标可达性与 URL 是否带参数，后者要人去重扫未决点。
-          ? `本次扫描未发现任何可测注入点（${rep.summary.noInjectionPointsHint || '目标 URL 无参数且未启用请求头/path 段'}）——` +
-            '一次检测都没跑，「未检出」不构成任何结论。若目标是可达的 API，请确认 URL 带 query 参数或改用 --body / jsonBody / xmlBody 指定注入面'
-          : `未检出漏洞 ≠ 无漏洞：本次扫描 ${v.reason}；${v.inconclusivePoints.length} 个注入点未完成有效检测，阴性结论不成立，需按建议处置后复扫（${v.advice}）`)
-        : negative
-          ? '目标在本次扫描窗口内可达、未被拦且会话有效，「未检出漏洞」的阴性结论可信度正常（仍建议对高风险参数人工复核）'
-          : `本次扫描检出 ${(rep.vulns || []).length} 条漏洞，命中详情见 vulns`;
+      // [D123] 未验证注入面：摊开 + 进结论文案（实现见 annotateUnverifiedSurfaces 的 JSDoc）
+      const unvSentence = annotateUnverifiedSurfaces(rep, {
+        points: sweep && sweep.points,
+        done: sweep && sweep.done,
+        validity,
+      });
+      rep.summary.verdictNote = buildVerdictNote({ inconclusive, nothingTested, negative, v, rep, unvSentence });
       if (!v.reliable) eventBus.emit(scanId, 'scan_validity', v);
       // 单注入点扫描可能根本不会再进入调度循环，abort 事件在收尾处补发（与 db-guard 同构），
       // 保证调用方一定能收到中止通知

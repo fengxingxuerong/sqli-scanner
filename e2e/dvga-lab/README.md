@@ -1,21 +1,27 @@
-# DVGA 外部裁判靶场（GraphQL 面 · 能力缺口记录）
+# DVGA 外部裁判靶场（GraphQL 面 · D121 起 1/1）
 
 第三方外部裁判：**DVGA**（`dolevf/Damn-Vulnerable-GraphQL-Application`，故意脆弱
 GraphQL 应用）。技术栈：Python + Flask + Graphene + SQLAlchemy + SQLite。
 它不与 VAmPI/DVWA 共用「外部裁判 N 号」编号（那两项已占 2/3 号），按注入面称为
-**GraphQL 面外部裁判**；当前是**能力缺口参考靶场**，不接门禁。
+**GraphQL 面外部裁判**；D121 起真值点已打穿，仍按**单端点参考靶场**处理，不接门禁。
 
 它补的是 1/2 号裁判都没有的注入面：**注入点位于 POST body 里那段 GraphQL 查询字符串的
 内部**（`{ pastes(public: true, filter: "…") { … } }`）—— 值替换必须同时保持 GraphQL 语法合法。
 
 真值来自官方 `core/views.py:resolve_pastes` 的字符串拼接，**不是本项目编写的断言**。
 
-## ⚠️ 当前状态：能力缺口记录，不是回归判据
+## ✅ 当前状态：D121 已打穿（2026-10-21）
 
-本套件**当前是红的，且应当保持红**（`真值漏洞端点：检出 0/1`）。原因不是靶场没起对，
-而是引擎尚不支持「GraphQL 查询串内部注入」这类形态（见下方「它抓到了什么」）。
-因此它**不接入** `e2e/acceptance.mjs` 与 `e2e/run-all.mjs`，登记在
-`e2e/reference-labs.json` 与 `e2e/README.md` 的靶场清单 —— 等内嵌注入能力落地后再转为门禁判据。
+真值点 `pastes(filter)` **1/1**（union / error / boolean 三通道命中），安全点
+`search(keyword)` **0 误报**（124 请求），无 filter 的 resolver 作为「无字符串字面量 ⇒
+0 点/0 请求」的结构对照。连续 3 轮一致，证据见
+[`results/external-judge-2026-10-21-d121.md`](results/external-judge-2026-10-21-d121.md)。
+
+它**仍不接入** `e2e/acceptance.mjs` 与 `e2e/run-all.mjs`（单一 GraphQL 端点样本 + 需手动
+起靶场），登记在 `e2e/reference-labs.json` 与 `e2e/README.md` 的靶场清单；复跑命令见下。
+
+历史：D114 首次接入时真值点 0/1，登记为 `graphql-inline-injection-gap`；D121 新增
+GraphQL 查询串内联字面量点后转绿，旧结论作废（见台账）。
 
 ## 它抓到了什么（本靶场的实证价值）
 
@@ -26,10 +32,11 @@ GraphQL 应用）。技术栈：Python + Flask + Graphene + SQLAlchemy + SQLite�
    **JSON 转义形态**（`"` → `\"`），旧 `stripEchoedPayload` 剔不掉 ⇒ payload 自带的
    `extractvalue` 命中 `ERROR_SIG`。修复：变体集合补 JSON 转义（含双层），
    契约见 `server/tests/echoStrip.jsonEcho.test.js`（含缺陷注入复验）。
-2. **一条真漏检（未修，能力缺口）**：真值点 `pastes(filter)` 此前「检出」用的**就是上面那条
+2. **一条真漏检（D121 已修）**：真值点 `pastes(filter)` 此前「检出」用的**就是上面那条
    无效 payload** —— 修复假阳性后，它如实变成 0 检出。也就是说：**之前的「检出」是假阳性，
-   真值点其实一直没打穿**。现有注入点形态（query / path / JSON 叶子整串替换）无法在
-   GraphQL 语法内部定位到 `filter` 的值位。
+   真值点其实一直没打穿**。旧注入点形态（query / path / JSON 叶子整串替换）无法在
+   GraphQL 语法内部定位到 `filter` 的值位；D121 新增 `carrier='graphql'` 内联字面量点，
+   只替换值位、保留查询骨架，真值点恢复 1/1。
 
 ## 起靶场（本机已验证链，D112）
 

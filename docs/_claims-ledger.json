@@ -111,12 +111,12 @@
     },
     {
       "id": "external-judge-dvwa-d112",
-      "claim": "第三方外部裁判 3 号 DVWA（D112，PHP 8.3 + MariaDB + mysqli/PDO）：官方四档难度下的真值端点 4/4 检出（sqli low GET / sqli_blind low GET / sqli_blind high 的 cookie 注入点 $_COOKIE['id'] / sqli medium POST 表单），官方 impossible 档（PDO 参数化 + is_numeric）同路径误报 0；sqlmap 1.10.7 同题亦检出（medium POST 4 类全中，cookie 注入亦命中）。",
+      "claim": "第三方外部裁判 3 号 DVWA（D112，PHP 8.3 + MariaDB + mysqli/PDO）：官方四档难度下的真值端点 5/5 检出（2026-10-21 修订：原文误记 4/4，实际 D113 已加第 5 点 medium 盲注 POST；当日 d113 日志即 5/5）（sqli low GET / sqli_blind low GET / sqli_blind high 的 cookie 注入点 $_COOKIE['id'] / sqli medium POST 表单），官方 impossible 档（PDO 参数化 + is_numeric）同路径误报 0；sqlmap 1.10.7 同题亦检出（medium POST 4 类全中，cookie 注入亦命中）。",
       "status": "verified",
-      "evidence": "e2e/dvwa-lab/results/external-judge-2026-10-20-dvwa.md（2026-10-20；真值 57/67/70/89 请求命中，dbms=MariaDB；impossible 档 150/150 请求 0 误报；证据不足 0）；诊断产物 .box-agent-scratch/dvwa-medium-diag.json（首跑 124 条请求全记录，证明 POST 伴随字段 Submit 被丢弃导致响应字节数全同 ⇒ 静默 0 检出）；回归守卫 server/tests/bodyParamsCompanion.guard.test.js 4 例（含变异自证）。",
+      "evidence": "e2e/dvwa-lab/results/external-judge-2026-10-20-dvwa.md（2026-10-20；真值 57/67/70/89 请求命中，dbms=MariaDB；impossible 档 150/150 请求 0 误报；证据不足 0）；诊断产物 .box-agent-scratch/dvwa-medium-diag.json（首跑 124 条请求全记录，证明 POST 伴随字段 Submit 被丢弃导致响应字节数全同 ⇒ 静默 0 检出）；回归守卫 server/tests/bodyParamsCompanion.guard.test.js 4 例（含变异自证）。 2026-10-21 全量复跑：e2e/dvwa-lab/results/external-judge-2026-10-21-dvwa-rerun.md（真值 5/5、同源复检 1/1、impossible 0/2 误报、证据不足 0）。",
       "refute_cmd": "node e2e/acceptance.mjs --only=dvwa（需 DVWA @8099 + MariaDB @3306 在跑）",
-      "recheck_batch": "D112（2026-10-20）：新增外部裁判 3 号并实跑；同时复核了「外部裁判只有 SQLite 栈」这一口径缺口（前两个裁判均为 SQLite + 非 PHP）。",
-      "caveat": "单轮；三个外部裁判合计 7 个真值端点，仍不足以支撑「全局检出率 N%」类结论；命中条数是同一注入点的多技术命中而非多个独立漏洞；cookie 注入点需 level>=2（默认 1 不测 cookie），套件显式 level=2 不代表默认配置覆盖率；medium 档可打穿是因为官方 SQL 为无引号数值型，不代表转义普遍可绕；DVWA 为外部项目，未就绪时套件 SKIP，不计通过。"
+      "recheck_batch": "D112（2026-10-20）：新增外部裁判 3 号并实跑；同时复核了「外部裁判只有 SQLite 栈」这一口径缺口（前两个裁判均为 SQLite + 非 PHP）。 D121 后（2026-10-21）：5 裁判同轮全量复跑，DVWA 5/5 复现；同时修正「合计真值端点 185→187」的口径（DVWA 4→5、VAmPI 安全分母 2→5）。",
+      "caveat": "单轮；三个外部裁判合计 8 个真值端点（Juice 2 + VAmPI 1 + DVWA 5），仍不足以支撑「全局检出率 N%」类结论；命中条数是同一注入点的多技术命中而非多个独立漏洞；cookie 注入点需 level>=2（默认 1 不测 cookie），套件显式 level=2 不代表默认配置覆盖率；medium 档可打穿是因为官方 SQL 为无引号数值型，不代表转义普遍可绕；DVWA 为外部项目，未就绪时套件 SKIP，不计通过。"
     },
     {
       "id": "external-judge-vampi-bearer-d113",
@@ -130,7 +130,9 @@
     {
       "id": "external-judge-dvga-d114",
       "claim": "GraphQL 面外部裁判 DVGA（D114）：官方 pastes(filter) 真值点 0/1（已知 GraphQL 查询串内部注入能力缺口）；官方 search(keyword) ORM 参数化点修复 JSON 转义回显后 0 误报；同 resolver 无 filter 0 误报。",
-      "status": "verified",
+      "status": "refuted",
+      "refuted_by": "external-judge-dvga-d121",
+      "refuted_reason": "D121（2026-10-21）新增 GraphQL 查询串内联字面量点后，同一 DVGA 靶场连续 3 轮真值 1/1（union/error/boolean）、安全 0 误报；D114 的 0/1 是旧引擎能力边界，不再是现状。旧数字保留作历史。",
       "evidence": "e2e/dvga-lab/results/external-judge-2026-10-20-dvga.md（2026-10-20；真值 0/1，149 请求；安全 0/3；JSON 回显修复契约 server/tests/echoStrip.jsonEcho.test.js 4 例）；官方真值 core/views.py:320。",
       "refute_cmd": "DVGA_BASE=http://127.0.0.1:5013 node e2e/dvga-lab/run.mjs",
       "recheck_batch": "D114（2026-10-20）：GraphQL 面外部裁判入库；JSON 回显误报修复。",
@@ -139,11 +141,22 @@
     {
       "id": "graphql-inline-injection-gap",
       "claim": "能力缺口：引擎当前不支持 GraphQL 查询串内部值位注入；现有 JSON 叶子整串替换会生成非法 GraphQL，DVGA 真值点 pastes(filter) 0/1。",
-      "status": "verified",
+      "status": "refuted",
+      "refuted_by": "external-judge-dvga-d121",
+      "refuted_reason": "D121（2026-10-21）已实现 carrier='graphql' 内联字面量点：TargetParser 只生成查询串内部值位点，injection 保持骨架替换；DVGA 真值点连续 3 轮 1/1。旧 0/1 保留作历史，不再作为当前能力边界。",
       "evidence": "e2e/dvga-lab/results/external-judge-2026-10-20-dvga.md（真值点 0/1；payload 为整串替换后语法错误，服务端只回显语法错）；e2e/dvga-lab/README.md 起靶场/复跑链。",
       "refute_cmd": "DVGA_BASE=http://127.0.0.1:5013 node e2e/dvga-lab/run.mjs（期望当前仍 0/1；能力落地后应转绿并改写本条）",
       "recheck_batch": "D114（2026-10-20）：记入能力缺口；未修，禁止对外声称 GraphQL 注入覆盖。",
       "caveat": "这是能力边界，不是安全结论；GraphQL 面目前只有 DVGA 一个端点样本。"
+    },
+    {
+      "id": "external-judge-dvga-d121",
+      "claim": "GraphQL 面外部裁判 DVGA（D121）：官方 pastes(filter) 真值点 1/1（union/error/boolean 三通道，98 请求）；官方 search(keyword) ORM 参数化点 0 误报（124 请求）；同 resolver 无 filter 作为 0 点/0 请求结构对照；连续 3 轮一致。",
+      "status": "verified",
+      "evidence": "e2e/dvga-lab/results/external-judge-2026-10-21-d121.md（2026-10-21 连续 3 轮：真值 1/1 + 安全 0 误报 + 证据不足 0）；实现于 TargetParser._collectGraphqlQueryLeaf + injection.buildGraphQLBodyRequest；回归 server/tests/graphqlInline.injection.test.js 12 例 + graphqlInline.scan.test.js 2 例（同构靶场 + 真 ScanManager）。",
+      "refute_cmd": "DVGA_BASE=http://127.0.0.1:5013 node e2e/dvga-lab/run.mjs",
+      "recheck_batch": "D121（2026-10-21）：GraphQL 查询串内联字面量点；DVGA 外部裁判复跑转绿。",
+      "caveat": "单一 GraphQL 端点样本；block string / 裸 application/graphql 不在该通道内；仍不接 acceptance/run-all，不能外推 GraphQL 通用覆盖率。"
     },
     {
       "id": "external-judge-benchmark-d114",
@@ -191,6 +204,24 @@
       "refute_cmd": "node server/bin/cli.js -u \"http://127.0.0.1:8099/vulnerabilities/sqli/\" --forms --header \"Cookie: security=low\" --level 2 --risk 2 --technique BEUST --test-param id --smart（需 DVWA @8099 在跑）",
       "recheck_batch": "D120（2026-10-21）：外部靶场自测抓出 D112 同型缺陷的第二条路径；接手并发会话未提交工作并做最小语法救援。",
       "caveat": "仅验证 GET 表单与 Submit 伴随字段这一形态；<select> 仍未采集；按钮类字段不生成注入点（服务端校验值，当点只产噪声）；真机 A/B 为单轮、单目标、单参数（id）。"
+    },
+    {
+      "id": "external-judge-sweep-2026-10-21-5judges",
+      "claim": "5 个外部裁判同轮全量复跑（2026-10-21，D121 之后）：Juice Shop 真值 2/2 + 安全 0/4；VAmPI 真值 2/2（同一注入点匿名+Bearer）+ 安全 0/5 + Bearer 端点 5 个未测 0；DVGA 真值 1/1 + 安全 0 误报；DVWA 真值 5/5 + 安全 0/2；OWASP Benchmark 按三份清单全量实跑（query 210 → 111/111 + 0/99；header 67 → 33/33 + 0/34；基线 74 → 43/43 + 0/24，{call} 4 真值单列未检出）。合计外部真值 187/187 可打穿、安全端点误报 0、证据不足 0。",
+      "status": "verified",
+      "evidence": "e2e/results/external-sweep-2026-10-21-full.md（本轮报告，数字已内联在表格里）；（仓库 .gitignore 排除 *.log，原始日志仅本地留档，不列为可复核证据）；acceptance --only=juice-shop,vampi,dvwa,benchmark → 4 PASS / 0 FAIL / 0 SKIP（定向跑写 e2e/results/acceptance-report.partial.md，该文件按设计 .gitignore 不入库，故以本报告表格为可复核依据）。",
+      "refute_cmd": "node e2e/acceptance.mjs --only=juice-shop,vampi,dvwa,benchmark（需 5 个靶场全起：Juice@3199 / VAmPI@5000,5001 / DVGA@5013 / DVWA@8099 / Benchmark@https://127.0.0.1:8443 + HSQLDB@9001）",
+      "recheck_batch": "2026-10-21（D121 之后）：五个靶场全部在本机重搭并同轮复跑；顺带纠正汇总口径 —— DVWA 真值 4→5、VAmPI 安全分母 2→5、合计真值端点 185→187。",
+      "caveat": "187 个真值点分布 5 个项目但严重不均衡（Benchmark 占 178/187），不能外推「通用外部检出率」；GraphQL 面仍只有 1 个真值端点；{call <过程名>} 4 条真值未检出为已知边界，不计入 178；e2e/run-all.mjs 全量套件本轮未跑；DVGA 仍不接 acceptance。"
+    },
+    {
+      "id": "unverified-surfaces-d123",
+      "claim": "「未验证注入面」显形（D123）：扫描报告对**部分注入面被 WAF/守卫吞掉**的情形给出正式结论 —— 产出 summary.unverifiedSurfaces（按 url/body/header/cookie/path/xml 摊开 计划/测完/跳过/未验证）与 summary.unverifiedSentence，并把该结论拼进 summary.verdictNote（阳性与阴性两条路径都拼）。判据三条独立来源：点级 blockedRequests>0 / point.netErr / 守卫中止的 inconclusivePoints；命中点与有意跳过（skipReason）点不计入。",
+      "status": "verified",
+      "evidence": "单测 server/tests/unverifiedSurfaces.test.js 7/7；端到端 server/tests/unverifiedSurfaces.scan.test.js 2/2（真 ScanManager + 本地靶场：cookie 面被拦 36 次、url 面正常检出 ⇒ 报告同时给出「检出 1 条」与「Cookie 面 1/1 未验证」）；缺陷注入复验三连（摘 skipReason 守卫→②红、摘已命中排除→③红、摘 blockedRequests 归因→⑧红，还原后全绿）；回归 detect.orchestration 17/17、graphqlInline 14/14、complexityGuard.wiring 7/7。",
+      "refute_cmd": "cd server && node --test --test-force-exit \"tests/unverifiedSurfaces*.test.js\"",
+      "recheck_batch": "D123（2026-10-21）：回答「能否作为真实渗透工具」时识别出的第一优先级缺口——WAF 场景的结论质量，而非检出率数字。",
+      "caveat": "只覆盖本引擎**自己发包**碰到的拦截；目标对整类请求直接断连、或 WAF 返回与业务页无法区分的假响应时，blockedRequests 记不到（仍会落进 netErr/未命中）。真实云 WAF 授权样本仍未采集，本批给的是「可解释结论」，不是绕过率。skipReason 之外的其他「引擎有意不测」来源若未来新增，需同步登记到判据里，否则会变成假未验证面。"
     }
   ]
 }

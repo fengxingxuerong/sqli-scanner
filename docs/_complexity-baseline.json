@@ -986,18 +986,6 @@
       "limitLines": 100,
       "limitComplexity": 15
     },
-    "server/src/engine/scan/detect.js::<arrow@225>": {
-      "lines": 162,
-      "complexity": 80,
-      "limitLines": 100,
-      "limitComplexity": 15
-    },
-    "server/src/engine/scan/detect.js::<arrow@701>": {
-      "lines": 79,
-      "complexity": 28,
-      "limitLines": 100,
-      "limitComplexity": 15
-    },
     "server/src/engine/scan/detect.js::detectPhase": {
       "lines": 446,
       "complexity": 196,
@@ -1005,7 +993,7 @@
       "limitComplexity": 15
     },
     "server/src/engine/scan/discover.js::discoverPoints": {
-      "lines": 126,
+      "lines": 125,
       "complexity": 59,
       "limitLines": 100,
       "limitComplexity": 15
@@ -1088,15 +1076,9 @@
       "limitLines": 100,
       "limitComplexity": 15
     },
-    "server/src/engine/scanRunner.js::<arrow@122>": {
-      "lines": 34,
-      "complexity": 21,
-      "limitLines": 100,
-      "limitComplexity": 15
-    },
     "server/src/engine/scanRunner.js::runScanLoop": {
-      "lines": 188,
-      "complexity": 69,
+      "lines": 186,
+      "complexity": 68,
       "limitLines": 100,
       "limitComplexity": 15
     },
@@ -1457,6 +1439,24 @@
     "src/tests/sqlmapOptions.test.tsx::<arrow@182>": {
       "lines": 102,
       "complexity": 3,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/engine/scan/detect.js::<arrow@265>": {
+      "lines": 162,
+      "complexity": 80,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/engine/scan/detect.js::<arrow@741>": {
+      "lines": 79,
+      "complexity": 28,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/engine/scanRunner.js::<arrow@190>": {
+      "lines": 34,
+      "complexity": 21,
       "limitLines": 100,
       "limitComplexity": 15
     }

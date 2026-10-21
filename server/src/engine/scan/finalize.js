@@ -155,6 +155,9 @@ export async function finalizeReport(run) {
     tamperHint: Array.isArray(blockPolicy?.tamperHint) ? [...blockPolicy.tamperHint] : [],
     backoffMs: blockPolicy?.backoffMs ?? null,
   };
+  // [D123] 「未验证注入面」的逐面摊开在 applyValidity 内计算（scanRunner.js）——
+  // 必须在裁定 verdict 的同一处算，否则字段算出来了 verdictNote 仍不引用它，
+  // 又会变成「有字段没人读」的老形态。
   // [P0-FIX 2026-09-12] 报告一致性：blockPolicy 由 decideBlockPolicy 依「厂商识别 + wafEvasion 配置」
   // 生成，不看本次实际发生的拦截与自适应重跑，于是会出现自相矛盾的交付物——实测 waf 场景报告里
   // blockPolicy.action='none'（理由「无拦截证据」），而 summary.wafAdaptive.triggered=true、

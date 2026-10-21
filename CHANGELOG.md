@@ -65,6 +65,157 @@
 
 ## [Unreleased]
 
+### 2026-10-21 批次 D124 · 覆盖范围披露（未覆盖面 + 浏览器降级进报告）
+
+**动机（同一个病根的两面）**：报告只写「未检出」，但用户无法区分「测了没洞」与
+「压根没测」。① `level` 默认 1 只覆盖 URL query + POST body，cookie/header/path/表单
+四类面从未进入检测；② `--crawl-browser` 在 playwright/浏览器不可用时**静默降级**为 HTTP
+爬虫（SPA 的 XHR/fetch 接口面整体丢失），而 playwright 在根 `package.json` 的
+`devDependencies` ⇒ 生产 `npm install --omit=dev` 必然触发。两者都只活在日志里。
+
+**改动**：
+- `scan/discover.js`：新增 `uncoveredSurfaces(config)` 纯函数与 `annotateSurfaceCoverage`，
+  把「按当前配置压根不会测」的面写进 `summary.uncoveredSurfaces` + 指路文案
+  （`testHeaders` / `testPath` / 提高 level），随 `testHeaders` / `testPath` 正确收缩。
+- `TargetParser.js`：浏览器爬取抛 `BrowserUnavailable` 时记录
+  `target.crawlBrowserFallback = { requested, degradedTo: 'http-crawler', reason }`；
+  `annotateSurfaceCoverage` 落成 `summary.crawlBrowserFallback` + 提示
+  「SPA 接口面可能整体未被发现，别把未检出读成没有注入」。
+- 两个字段都只在事实成立时出现（未开启/浏览器可用时不写），避免「狼来了」式假警示。
+
+**验证**：
+- `crawlBrowserFallback.test.js` **2/2**（用实例注入的必然失败替身制造降级；另测未开启时
+  不得出现字段）+ `uncoveredSurfaces.test.js` **5/5**（默认档四类、全覆盖零项、
+  `testHeaders` 视为覆盖 cookie+header、level=2 边界、真实 `ScanManager` 报告落盘）⇒ **7/7**。
+- 外部回归（2026-10-22，当前工作树）：5 裁判 **187/187** 真值、安全误报 0；新字段在
+  Juice/VAmPI/DVWA/DVGA/Benchmark header **8/8** 场景无假「未验证面/降级」，未覆盖清单
+  随开关正确收缩；`acceptance --only=...` **4 PASS / 0 FAIL / 0 SKIP**。证据：
+  `e2e/results/external-sweep-2026-10-22-post-d124.md`。
+
+**边界**：本批只做**披露**，不改变实际覆盖范围；`playwright` 的依赖位置仍是缺口
+（生产部署仍会降级，见 TODO D124 待推进）。浏览器降级的阳性路径由本地替身覆盖，
+未在真实 SPA 目标上复现。
+
+### 2026-10-21 批次 D123 · 「未验证注入面」显形（WAF 场景的正式结论）
+
+**动机（一句话）**：目标整体健康、但**部分注入面被 WAF 吃掉**时，旧报告仍写
+`verdict=no_vulnerability_detected`，且只字不提「有 2 个 header 面一条 payload 都没送达」——
+客户会读成「这些面都测过了、都没问题」。这与本仓反复治理的**静默假阴性**同形。
+
+**根因（实测，不是推测）**：`detect.js` 里 `fullyTestedPoints.add(point.id)` 是**无条件**执行的
+——检测器被拦成 403 时不抛错，于是该点照常进「跑完」集合。**「跑完」与「测成」在校验层完全同形**，
+而既有的 `validity` 是整轮级健康度、`verdict` 只在整轮不可信时才转 `inconclusive`，
+两者都看不见「整体还行、局部没测」这个中间态。
+
+**改动**：
+- 新增 `server/src/engine/scan/unverifiedSurfaces.js`：按注入面（url/body/header/cookie/path/xml）
+  摊开「计划测 / 测完 / 有意跳过 / 未验证」，产出 `summary.unverifiedSurfaces` 与
+  `summary.unverifiedSentence`；结论文案刻意区分「没测成」与「测了没洞」。
+- `detect.js`：新增 `blockHitsSnapshot` + `attributePointBlocks`，在**每个注入点**开测前取
+  拦截计数快照、收尾取差值 ⇒ 落成 `point.blockedRequests`（点级拦截归因，与既有
+  `point.netErr` / `point.unverifiedReason` 同形态）。这是唯一能区分「跑完」与「测成」的证据来源。
+- `scanRunner.js`：新增 `annotateUnverifiedSurfaces` + `buildVerdictNote`，把未验证面
+  **拼进 `verdictNote`**（阳性/阴性两条路径都拼）——避免重演「字段算出来了但没人读」
+  （`summary.byRisk` 曾恒为 null、推荐链曾只走 SSE 不落盘）。
+
+**判据（三条独立来源，保守）**：① 本点 `blockedRequests > 0`；② `point.netErr`/网络层失败；
+③ 守卫中止导致的 `inconclusivePoints`。且必须**不命中**、**不是有意跳过**
+（`skipReason` 权威标记——否则开 `--smart` 会刷一屏假「未验证面」）。
+
+**验证**：
+- 单测 `unverifiedSurfaces.test.js` **7/7**；端到端 `unverifiedSurfaces.scan.test.js` **2/2**
+  （真 `ScanManager` + 本地靶场：cookie 面被拦 36 次、url 面正常检出 ⇒ 报告必须同时给出
+  「检出 1 条」与「Cookie 面 1/1 未验证」）。
+- **缺陷注入复验（有牙）**：摘掉 `skipReason` 守卫 → ② 变红；摘掉「已命中不计入」→ ③ 变红；
+  摘掉 `point.blockedRequests` 归因 → ⑧ 变红。三次还原后全绿。
+- 回归：`detect.orchestration` 17/17、`graphqlInline` 14/14、`complexityGuard.wiring` 7/7；
+- 复杂度门禁：新增两个 helper 后 `detectPhase` 仍为 **446/196**（与基线持平，靠抽出
+  `blockHitsSnapshot`/`attributePointBlocks` 吸收），`runScanLoop` **降至 186/68**（基线同步下调）。
+
+**过程中的一次自身失误（如实留痕）**：抽取函数时把定义名写成 `blockHitsSnapshot`、调用写成
+`snapshotBlocks`，该异常被外层 `catch` 静默吞掉，表现为「检测器 0 次调用」而非报错——
+正是本仓反复出现的「静默失败」形态。由 `detect.orchestration` 的 7/8/9 三条用例当场抓出。
+
+**环境侧既有问题（非本批引入）**：Node v24.18.0 / Windows 下，若干**含 HTTP 服务端**的测试文件
+在**进程退出阶段**触发 libuv 原生断言 `Assertion failed: !(handle->flags & UV_HANDLE_CLOSING),
+file src\win\async.c, line 94`，导致整个文件被判 fail，而其中每条用例实际全过。
+已用 `git archive HEAD` 导出**未修改版本**在隔离副本复跑 `report.viewSanitize`，**同样崩溃** ⇒
+与 D123 无关，属运行时缺陷，另行登记。
+
+### 2026-10-21 批次 D122 · 外部靶场全量复跑（5 裁判同轮）＋ 口径纠正
+
+**动机**：D121 之后五个外部靶场的结论分散在各自旧报告，汇总 `e2e/results/external-judge-sweep-2026-10-21.md`
+写的口径**已过期**——「DVWA 4/4、VAmPI 安全 0/2、合计 185」。实际 D113 当天就给 DVWA 加了
+第 5 个真值点（medium 盲注 POST，无错误回显只余布尔）、给 VAmPI 加了 3 个 Bearer 安全端点，
+当日 d113 运行的实测结果已是 **5/5**（`.log` 按 `.gitignore` 不入库；数字内联在
+`e2e/dvwa-lab/results/external-judge-2026-10-20-dvwa.md`）。汇总沿用了 D112/D111 的旧数，
+属**口径腐烂**而非代码回归。
+
+**改动**（只动靶场搭建与文档/台账，**不改引擎代码**）：
+- 补齐 `e2e/vampi-lab/run_port.py`（README 引用但目录内缺文件：官方 `app.py` 硬编码 5000，
+  对照实例需要可配端口）。
+- 五个靶场在本机**从零重搭**并同轮复跑：Juice Shop v20.3.0（`npm install --omit=dev` +
+  `npm rebuild sqlite3` + 前端构建 + `tsc`）、VAmPI 双实例（3.9 venv，`tokentimetolive=7200`）、
+  DVGA（`promise==2.3`/`graphql-core==2.3.2` 无 wheel，需 `--no-binary=:all: --no-build-isolation`
+  且 setuptools<70）、DVWA（PHP 8.3 + MariaDB 10.11，`setup.php` 单引号 `user_token`）、
+  OWASP Benchmark（JDK17 + Maven；**HSQLDB 必须手动起**，ant `<daemons>` fork 的进程随 mvn 退出被回收）。
+- 口径修正（AGENTS.md §3.5「保留旧数字并标注作废」）：DVWA 真值 4 → **5**、VAmPI 安全分母
+  2 → **5**、合计外部真值端点 185 → **187**；并作废「只有 DVGA 补跑、其余沿用旧证据」的说明。
+
+**验证**（同轮，本地日志因 `.gitignore` 排除 `*.log` 仅本地留档；数字已内联进报告表格）：
+- Juice Shop：真值 **2/2**、同源复检 1/1、安全 **0/4**。
+- VAmPI：真值 **2/2**（同一注入点匿名 + Bearer）、同源复检 2/2、安全 **0/5**、Bearer 端点
+  5 个未测 0。
+- DVGA：真值 **1/1**（`body·query.filter`，union/error/boolean）、安全 **0 误报**、结构对照 0 点/0 请求。
+- DVWA：真值 **5/5**（low GET / low blind / high cookie / medium POST / medium blind POST）、
+  impossible **0/2** 误报、证据不足 0。
+- Benchmark 三份清单全量：query 210 → **111/111 检出 + 0/99 误报**；header 67 → **33/33 + 0/34**；
+  基线 74 → **43/43 + 0/24**；`{call}` 4 条真值仍漏（已知边界，单列不计分母）。逐条吻合 D117 的 178/149。
+- 门禁：`node e2e/acceptance.mjs --only=juice-shop,vampi,dvwa,benchmark` → **4 PASS / 0 FAIL / 0 SKIP**。
+- 文档门禁复核：`npm run facts:check`、`npm run readme:check`、`node scripts/ref-integrity.mjs`、
+  `node scripts/e2e-wiring-check.mjs` 全绿（249 处引用在库、40 靶场 33 接线 + 7 已登记）。
+
+**证据**：`e2e/results/external-sweep-2026-10-21-full.md`（本轮原始报告）、
+`e2e/dvwa-lab/results/external-judge-2026-10-21-dvwa-rerun.md`；台账新增
+`external-judge-sweep-2026-10-21-5judges`（verified），`external-judge-dvwa-d112` 补 5/5 与复跑证据。
+
+**边界**：187 个真值点里 Benchmark 占 178，样本严重不均衡，不得外推「通用外部检出率」；
+GraphQL 面仍只有 1 个真值端点；`{call <过程名>}` 4 条真值未检出；`e2e/run-all.mjs` 全量套件本轮未跑。
+
+### 2026-10-21 批次 D121 · GraphQL 查询串内联值位注入（P0 ① 收口）
+
+**动机**：D114 外部裁判 DVGA 真值点 `pastes(filter)` 0/1。旧 JSON 叶子通道把整个
+`query` 字符串当参数替换成 payload，服务端在 GraphQL 解析层直接 400 ⇒ 注入值从未进入
+SQL。这是「保骨架、只换值」类缺陷在结构化文本上的最后一处 P0。
+
+**改动**：
+- 新增 `server/src/engine/graphqlInline.js`：词法扫描查询串内双引号字面量（处理转义、
+  跳过注释/block string），提供 `encodeGraphQLString` 与 `replaceGraphQLStringLiteral`
+  （按区间替换，校验边界与原始 raw；失效返回 null）。
+- `TargetParser._collectGraphqlQueryLeaf`：`query` 字段像 GraphQL 时生成
+  `carrier='graphql'` 的内联点（`query.filter`），**不再**为整串生成点；同名字面量以
+  `[2]` 区分，数组路径 `0.query.filter` 可用；variables 继续走既有 JSON 叶子通道。
+- `injection.buildGraphQLBodyRequest`：clone `jsonBody`，只替换目标字面量，保留查询
+  骨架/variables/operationName；基线请求逐字不变。抽出 `applyJsonBodyInjection` 并复用
+  `_resolveJsonParent`，`buildInjectionRequest` 圈复杂度 91→78、函数体 165→142 行
+  （不抬基线）。
+- `prefilter.skipStaticPoints`：GraphQL 点不参与同值去重（同值可能对应不同 resolver
+  位置），仍参与静态哨兵。
+
+**验证**：
+- `server/tests/graphqlInline.injection.test.js` **12/12**（发现/构造/转义/多字面量/
+  batch/variables/非 GraphQL `query` 零回归/区间失效）+ `graphqlInline.scan.test.js`
+  **2/2**（本地同构靶场 + 真 `ScanManager`：检出且安全点零误报）。
+- DVGA 外部裁判连续 **3 轮**：真值 `pastes(filter)` **1/1**（union/error/boolean，
+  98 请求）、安全 `search(keyword)` **0 误报**（124 请求）、无 filter resolver 0 点/
+  0 请求结构对照、证据不足 0。证据：
+  `e2e/dvga-lab/results/external-judge-2026-10-21-d121.md`。
+- 台账：新增 `external-judge-dvga-d121`（verified）；`graphql-inline-injection-gap`、
+  `external-judge-dvga-d114`（refuted，旧 0/1 保留作历史）。
+
+**边界**：单一 GraphQL 端点样本，不外推通用覆盖率；block string / 裸
+`application/graphql` 未覆盖；DVGA 仍不接 acceptance/run-all。
+
 ### 2026-10-21 批次 D120 · 表单伴随字段 + GET 表单 url 点（接手并发会话未提交工作 + 语法救援）
 
 **背景**：外部靶场自测（DVWA low `/vulnerabilities/sqli/`）暴露同一类缺陷的**第二条路径** ——
@@ -103,7 +254,8 @@ node server/bin/cli.js -u "http://127.0.0.1:8099/vulnerabilities/sqli/" --forms 
 `D:\tools\mariadb` + `setup.php` 抠 `user_token` POST `create_db` + `security.php` POST low。）
 
 **验证**：服务端全量 **3691 例 0 fail**；表单/爬取相关 46/46；复杂度守卫通过（三条基线
-同步下调）；三个外部裁判复跑零回归（Juice 2/2+0/4、VAmPI 2/2+0/5+Bearer、DVGA 0/1 按设计红）。
+同步下调）；三个外部裁判复跑零回归（Juice 2/2+0/4、VAmPI 2/2+0/5+Bearer、DVGA 0/1
+当时为已知缺口 —— D121 后已转 1/1）。
 
 **边界**：`--test-param id` 定向单参数；`Submit` 这类按钮仍**不生成注入点**（服务端校验值，
 当注入点只会产生噪声），只是随请求发出；`<select>` 仍未采集（取值需解析 selected option）。

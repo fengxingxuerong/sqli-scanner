@@ -31,8 +31,13 @@ python -m venv <venv-dir>
 #    一轮扫描（100+ 请求）会跨过期 ⇒ 中途全部 401 ⇒ 真假响应恒等（假零误报/假漏检）。
 tokentimetolive=7200 <venv>/Scripts/python app.py                              # 5000（vuln=1）
 curl -s "http://127.0.0.1:5000/createdb"                                        # 建库 + 灌入 name1/name2
-PORT=5001 vulnerable=0 tokentimetolive=7200 <venv>/Scripts/python run_port.py   # 5001（vuln=0）
+PORT=5001 vulnerable=0 tokentimetolive=7200 <venv>/Scripts/python <repo>/e2e/vampi-lab/run_port.py   # 5001（vuln=0）
 ```
+
+⚠ `run_port.py` 是**本仓**提供的启动器（`e2e/vampi-lab/run_port.py`，D122 入库）：
+上游 `app.py` 把端口硬编码 5000，A/B 对照必须在 5001 再起一个，所以只把 `PORT`
+开放出来；`vulnerable` 仍由官方 `config.py` 读 env，未改任何业务逻辑。
+在 VAmPI 源码目录内执行即可（脚本 import 的是同目录的 `config.py`）。
 
 ⚠ 本机环境纪实：Python 3.9 + `--only-binary=:all:` 是必需的 —— 直接装会去编译
 greenlet，本机 MSVC BuildTools 缺 Windows SDK 头文件（`math.h` 找不到）必然失败。

@@ -188,7 +188,7 @@ export async function probeBaselineRttMs(httpClient, prefilterCtx, target, sampl
  * @returns {Promise<object[]>} 保留的点
  */
 export async function skipStaticPoints(deps, ctxBase, target, points) {
-  if (target.mode === 'direct' || !points || points.length === 0) return points || [];
+  if (target.mode === 'direct' || !points?.length) return points || [];
   const httpClient = ctxBase.httpClient;
   const ctx = { ...ctxBase, target };
   const skip = [];
@@ -200,13 +200,13 @@ export async function skipStaticPoints(deps, ctxBase, target, points) {
       toProbe.push(p); // 用户显式指定的点：不做同值去重，也不做哨兵跳过
       continue;
     }
-    const val = p.originalValue == null ? '' : String(p.originalValue);
-    if (seenValues.has(val)) {
-      skip.push(p);
+    const val = p.originalValue == null ? '' : String(p.originalValue); // [D121] GraphQL 内联点按 param 区分
+    if (p.carrier === 'graphql' || !seenValues.has(val)) {
+      seenValues.add(val);
+      toProbe.push(p);
       continue;
     }
-    seenValues.add(val);
-    toProbe.push(p);
+    skip.push(p);
   }
   if (toProbe.length <= 1) return points.filter((p) => !skip.includes(p));
   // b) 哨兵探测：每点 1 请求（基线跨点共享）；点级并发限 4，与预筛选对齐
@@ -233,7 +233,7 @@ export async function skipStaticPoints(deps, ctxBase, target, points) {
           getBaseline(point),
           sendInjection(httpClient, ctx, sentReq, { retry: 0 }),
         ]);
-        if (!baseRes || !sentRes || isUnusableResponse(baseRes) || isUnusableResponse(sentRes)) return; // 基线/哨兵任一失败 → 无法判定 → 保守保留
+        if (!baseRes || !sentRes || [baseRes, sentRes].some(isUnusableResponse)) return; // 基线/哨兵任一失败 → 无法判定 → 保守保留
         // ① 状态码必须一致
         if ((baseRes.status ?? null) !== (sentRes.status ?? null)) return;
         const baseBody = String(baseRes.data ?? '');
