@@ -803,6 +803,21 @@
     "stopped": "Stopped",
     "error": "Error"
   },
+  "triage": {
+    "title": "Manual Triage",
+    "status": {
+      "open": "Open",
+      "confirmed": "Confirmed",
+      "false_positive": "False positive",
+      "accepted_risk": "Accepted risk"
+    },
+    "notePlaceholder": "Note (optional, included in exported reports)",
+    "save": "Save triage",
+    "saving": "Saving…",
+    "saved": "Triage saved",
+    "error": "Failed to save triage",
+    "hint": "Human annotation only; it does not change the scan verdict, risk level, or exit code. It persists across rescans by stable fingerprint."
+  },
   "risk": {
     "critical": "Critical",
     "high": "High",

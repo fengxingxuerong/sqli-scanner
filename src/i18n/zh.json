@@ -803,6 +803,21 @@
     "stopped": "已停止",
     "error": "出错"
   },
+  "triage": {
+    "title": "人工裁决",
+    "status": {
+      "open": "待确认",
+      "confirmed": "已确认",
+      "false_positive": "误报",
+      "accepted_risk": "接受风险"
+    },
+    "notePlaceholder": "备注（可选，写入导出报告）",
+    "save": "保存裁决",
+    "saving": "保存中…",
+    "saved": "裁决已保存",
+    "error": "裁决保存失败",
+    "hint": "人工标注，不改变扫描结论、风险等级或退出码；复扫后按稳定指纹继续生效。"
+  },
   "risk": {
     "critical": "严重",
     "high": "高危",

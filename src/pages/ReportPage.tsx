@@ -15,13 +15,13 @@ import { useScan } from '../hooks/useScan';
 import { useScanStore } from '../store/scanStore';
 import i18n from '../i18n';
 import ReportExport from '../components/ReportExport';
-import VulnDetail from '../components/VulnDetail';
+import VulnCard from '../components/VulnCard';
 import DbTree, { extractedDbModel } from '../components/DbTree';
-import ReportSummarySection, { RISK_COLORS, TECHNIQUE_COLORS } from '../components/ReportSummarySection';
+import ReportSummarySection from '../components/ReportSummarySection';
 import ReportResumeButton from '../components/ReportResumeButton';
 import ReportVerdictHint from '../components/ReportVerdictHint';
 import { resolveValidityMode } from '../components/ValidityBanner';
-import type { Vulnerability, SqlmapVulnEntry } from '../shared/types';
+import type { SqlmapVulnEntry } from '../shared/types';
 
 // [P1-FIX] sqlmap 日志无界渲染：超大日志（数千行）全量挂 DOM 会冻结页面，仅渲染最近 500 行
 const VISIBLE_LOG_TAIL = 500;
@@ -118,7 +118,8 @@ export default function ReportPage() {
   const report = useScanStore((s) => s.report);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [selectedVuln, setSelectedVuln] = useState<Vulnerability | null>(null);
+  // [D125] 选中态只存 id：裁决保存后刷新报告，详情必须跟着最新 vuln 对象走（不能拿旧快照）
+  const [selectedVulnId, setSelectedVulnId] = useState<string | null>(null);
   const [tab, setTab] = useState(0);
   const [chartCollapsed, setChartCollapsed] = useState(false);
 
@@ -246,53 +247,14 @@ export default function ReportPage() {
           ) : (
             <Stack spacing={2}>
               {vulns.map((vuln) => (
-                <Card
+                <VulnCard
                   key={vuln.id}
-                  variant="outlined"
-                  className="cursor-pointer"
-                  sx={{ borderLeft: `4px solid ${RISK_COLORS[vuln.riskLevel] || '#888'}` }}
-                  onClick={() => setSelectedVuln(selectedVuln?.id === vuln.id ? null : vuln)}
-                  aria-expanded={selectedVuln?.id === vuln.id}
-                  role="button"
-                  tabIndex={0}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault();
-                      setSelectedVuln(selectedVuln?.id === vuln.id ? null : vuln);
-                    }
-                  }}
-                >
-                  <CardContent className="py-3">
-                    <Stack direction="row" justifyContent="space-between" alignItems="center">
-                      <Box>
-                        <Typography variant="subtitle2" fontWeight={600}>
-                          {vuln.pointId}
-                        </Typography>
-                        <Typography variant="caption" color="text.secondary">
-                          {vuln.description || t('report.techniqueInjection', { technique: vuln.technique })}
-                        </Typography>
-                      </Box>
-                      <Stack direction="row" spacing={1} alignItems="center">
-                        <Chip
-                          label={vuln.technique}
-                          size="small"
-                          sx={{ backgroundColor: TECHNIQUE_COLORS[vuln.technique] || '#888', color: '#fff' }}
-                        />
-                        <Chip
-                          label={vuln.riskLevel}
-                          size="small"
-                          sx={{ backgroundColor: RISK_COLORS[vuln.riskLevel] || '#888', color: '#fff' }}
-                        />
-                        {vuln.dbms && <Chip label={vuln.dbms} size="small" variant="outlined" />}
-                      </Stack>
-                    </Stack>
-                    {selectedVuln?.id === vuln.id && (
-                      <Box className="mt-3 pt-3 border-t border-gray-200">
-                        <VulnDetail vuln={vuln} />
-                      </Box>
-                    )}
-                  </CardContent>
-                </Card>
+                  vuln={vuln}
+                  expanded={selectedVulnId === vuln.id}
+                  onToggle={() => setSelectedVulnId(selectedVulnId === vuln.id ? null : vuln.id)}
+                  scanId={report.scanId}
+                  onTriageChanged={() => { if (id) getReport(id, { force: true }); }}
+                />
               ))}
             </Stack>
           )}

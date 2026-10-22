@@ -38,6 +38,8 @@ import { buildGuardedConfig } from './scanConfigGuard.js';
 import { applyDropInjectionOverlap } from '../core/authInjectionOverlap.js';
 // 报告回退与历史列表的数据源（引擎上下文完成后 30s 回收，台账才是服务端那一份）
 import { readReport, listScans, ledgerRoot, highestRisk } from '../services/scanLedger.js';
+// [D125] 人工裁决：报告读取时合并，PATCH 写入；REST/MCP/导出共用同一份合并逻辑
+import { attachTriage, setFindingTriage } from '../services/findingTriage.js';
 // 抽到守卫模块后仍从本文件 re-export，保住既有引用路径（与 acquireScanSlot 同一做法）
 export { sanitizeExtractScope } from './scanConfigGuard.js';
 
@@ -344,6 +346,87 @@ function createReportGuard(tokenOverride) {
 }
 
 /**
+ * [D125] 校验人工裁决请求：findingId 形状 + body 只允许 status/note。
+ * @param {object} req
+ * @returns {{findingId: string, body: object, error?: undefined} | {findingId?: undefined, body?: undefined, error: {status: number, code: number, message: string}}}
+ */
+function validateTriageRequest(req) {
+  const findingId = String(req.params.findingId || '');
+  if (!findingId || findingId.length > 500) {
+    return { error: { status: 400, code: ErrorCode.INVALID_PARAM, message: 'findingId 非法' } };
+  }
+  const body = req.body && typeof req.body === 'object' ? req.body : {};
+  const unknown = Object.keys(body).filter((k) => k !== 'status' && k !== 'note');
+  if (unknown.length) {
+    return { error: { status: 400, code: ErrorCode.INVALID_PARAM, message: `未知字段：${unknown.join(',')}` } };
+  }
+  return { findingId, body };
+}
+
+/**
+ * [D125] 把 AppError 映射为 HTTP 响应形态。
+ * @param {unknown} e
+ * @returns {{status: number, code: number, message: string}}
+ */
+function triageErrorOf(e) {
+  const code = e instanceof AppError ? e.code : ErrorCode.INVALID_PARAM;
+  return {
+    status: code === ErrorCode.SCAN_NOT_FOUND ? 404 : 400,
+    code,
+    message: e instanceof Error ? e.message : '裁决保存失败',
+  };
+}
+
+/**
+ * [D125] 注册人工裁决路由（从 createRoutes 抽出，避免门面函数体继续膨胀）。
+ * @param {object} router Express Router
+ * @param {Function} requireReport 报告鉴权守卫
+ * @param {Function} reportWithFallback 报告读取（内存→台账）
+ * @returns {void}
+ */
+function registerFindingTriageRoute(router, requireReport, reportWithFallback) {
+  router.patch('/scan/:id/findings/:findingId/triage', requireReport, (req, res) => {
+    const parsed = validateTriageRequest(req);
+    if (parsed.error) {
+      return res.status(parsed.error.status).json({ code: parsed.error.code, data: null, message: parsed.error.message });
+    }
+    const found = reportWithFallback(req.params.id);
+    if (!found) {
+      return res.status(404).json({ code: ErrorCode.SCAN_NOT_FOUND, data: null, message: '扫描不存在或已结束' });
+    }
+    try {
+      const out = setFindingTriage({
+        report: found.report,
+        scanId: req.params.id,
+        findingId: parsed.findingId,
+        status: parsed.body.status,
+        note: parsed.body.note,
+      });
+      return res.json({ code: 0, data: out, message: 'ok' });
+    } catch (e) {
+      const err = triageErrorOf(e);
+      return res.status(err.status).json({ code: err.code, data: null, message: err.message });
+    }
+  });
+}
+
+/**
+ * [D125] 报告读取（内存优先，台账兜底；两者都合并人工裁决）。
+ * 为什么必须有台账这一路：ScanManager 完成后 30s 回收上下文，而台账才是服务端留存的那一份。
+ * @param {object} sm ScanManager
+ * @returns {(scanId: string) => ({report: object, source: 'live'|'ledger'}|null)}
+ */
+function makeReportWithFallback(sm) {
+  return (scanId) => {
+    const live = sm.getReport(scanId);
+    if (live) return { report: attachTriage(live), source: 'live' };
+    const persisted = readReport(scanId);
+    if (persisted) return { report: attachTriage(persisted), source: 'ledger' };
+    return null;
+  };
+}
+
+/**
  * 创建扫描相关路由。
  * @param {object} [opts]
  * @param {import('../engine/ScanManager.js').ScanManager} [opts.scanManager] 不传则内部自建
@@ -355,21 +438,8 @@ export function createRoutes({ scanManager, eventBus: bus = eventBus, reportToke
   const router = Router();
   const requireReport = createReportGuard(reportToken);
 
-  /**
-   * 报告读取（内存优先，台账兜底）。
-   * 为什么必须有台账这一路：ScanManager 完成后 30s 回收上下文，而台账才是服务端留存的
-   * 那一份。没有这条回退时，"扫完隔一会儿再打开报告"必然得到 扫描不存在或已结束，
-   * 交付场景（复审、出报告、换人接手）全都落在回收窗口之外。
-   * @param {string} scanId
-   * @returns {{report: object, source: 'live'|'ledger'}|null}
-   */
-  function reportWithFallback(scanId) {
-    const live = sm.getReport(scanId);
-    if (live) return { report: live, source: 'live' };
-    const persisted = readReport(scanId);
-    if (persisted) return { report: persisted, source: 'ledger' };
-    return null;
-  }
+  // [D125] 报告读取（内存优先、台账兜底 + 统一合并裁决）抽到模块级，守 createRoutes 门面基线。
+  const reportWithFallback = makeReportWithFallback(sm);
 
   // [P0-SEC 2026-09-08] scanId 形状校验：scanId 会被拼进导出响应的 Content-Disposition 文件名，
   // 且出现在日志里。引擎自身用 nanoid(10) 生成，但路由不得假定调用方传得对：
@@ -611,6 +681,10 @@ export function createRoutes({ scanManager, eventBus: bus = eventBus, reportToke
     res.json({ code: ok ? 0 : ErrorCode.SCAN_NOT_FOUND, data: { resumed: ok }, message: ok ? 'ok' : '扫描未处于暂停状态' });
   });
 
+  // [D125 2026-10-22] 人工裁决（confirmed / false_positive / accepted_risk / open）
+  // 裁决是交付层标注：不改 verdict、exit code、风险等级或漏洞条数；复扫后按稳定指纹继续生效。
+  registerFindingTriageRoute(router, requireReport, reportWithFallback);
+
   router.get('/scan/:id/report', requireReport, (req, res) => {
     const found = reportWithFallback(req.params.id);
     if (!found) {
@@ -657,22 +731,21 @@ export function createRoutes({ scanManager, eventBus: bus = eventBus, reportToke
       return res.status(400).json({ code: ErrorCode.INVALID_PARAM, data: null, message: 'format 非法，仅支持 json/html/csv/markdown/md/db-json/sarif' });
     }
     const format = rawFormat;
-    // 渲染顺序 = 数据来源顺序：先内存（扫描还在上下文里），拿不到再回退台账（历史扫描也要能
-    // 重新导出一份交付文档）。不在前置就要求 getReport 命中：exportReport 自己知道怎么取报告，
-    // 这里再读一次等于把"报告从哪来"复制成两份真相（本仓反复出现过的那族缺陷）。
+    // [D125] 导出与查看/差异走同一个 reportWithFallback：内存优先、台账兜底，并统一合并
+    // 人工裁决。此前导出自己再读一次台账，等于把「报告从哪来」复制成两份真相。
     // [D-REDACT 2026-10-12] ?redactPasswords=1 运行时覆盖（spec 5.3.1 规则 2）
     const redactOverride = String(req.query.redactPasswords || '') === '1' ? { redactPasswords: true } : {};
-    let out = sm.exportReport(req.params.id, format, undefined, redactOverride);
-    if (out == null) {
-      const persisted = readReport(req.params.id);
-      if (persisted) out = sm.exportReport(req.params.id, format, persisted, redactOverride);
-    }
-    if (out == null) {
+    const found = reportWithFallback(req.params.id);
+    if (!found) {
       // 必须是 4xx：这是一条**文件下载**端点。历史上它返回 200 + `application/json` 且不带
       // Content-Disposition，而前端只判 `res.ok` 就把响应体另存盘 ⇒ 用户拿到一个装着
       // {"code":2001,"message":"扫描不存在或已结束"} 的 "report_xxx.csv"，看起来像报告坏了，
       // 实际是扫描早已被回收。实测复现过（2026-09-25）。
       // 只改这一条端点的状态码：`/scan/:id/diff` 那类 JSON 接口按 200+code 契约被前端正常解包。
+      return res.status(404).json({ code: ErrorCode.SCAN_NOT_FOUND, data: null, message: '扫描不存在或已结束' });
+    }
+    const out = sm.exportReport(req.params.id, format, found.report, redactOverride);
+    if (out == null) {
       return res.status(404).json({ code: ErrorCode.SCAN_NOT_FOUND, data: null, message: '扫描不存在或已结束' });
     }
     // [P0-FIX 2026-09-28 接口靶场] db-json 无数据时必须明确拒绝，而不是发一个 4 字节的

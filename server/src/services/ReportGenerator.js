@@ -36,6 +36,8 @@ import { attachVulnContext } from '../engine/vulnEnrich.js';
 // 风险/技术分布的计数口径（与 finalize 写 summary.byRisk/byTechnique 同一实现）
 import { countBy } from '../engine/models.js';
 import { vulnTypeOf } from './vulnTaxonomy.js';
+// [D125] 人工裁决展示（状态中文名/备注）；渲染层只读，不写存储。
+import { triageStatusText, triageNoteText } from './findingTriage.js';
 // [2026-09-13] 交付层：元信息/执行摘要/WAF 交战/修复建议+CVSS（markdown/html/csv 共用单一取数源）
 import { buildDelivery } from './reportDelivery.js';
 // [E3 2026-09-22] 攻击路径叙事：从入口 → 注入点 → 可用通道 → 数据获取 → 影响定性的链路。
@@ -44,6 +46,123 @@ import { attackPathHtml, attackPathMarkdown } from './reportAttackPath.js';
 
 // 导出时单条证据/说明的最大长度（原逻辑不变）
 const EVIDENCE_MAX = 4000;
+
+/**
+ * [D125] 人工裁决的汇总句（Markdown/HTML 共用，避免两种格式各写一套文案）。
+ * @param {object|null|undefined} summary
+ * @returns {string} 无裁决数据时返回空串
+ */
+function triageSummaryText(summary) {
+  const t = summary && summary.triage;
+  if (!t || !t.total) return '';
+  return `人工裁决：已确认 ${t.confirmed} / 误报 ${t.falsePositive} / 接受风险 ${t.acceptedRisk} / 待确认 ${t.open}`;
+}
+
+/**
+ * [D125] SARIF 侧的人工裁决映射：误报作为 external suppression，其余保留为 properties。
+ * @param {object} v
+ * @returns {{suppressions: Array<object>|undefined, triage: {status:string, note:string}}}
+ */
+function triageSarif(v) {
+  const status = (v && v.triage && v.triage.status) || 'open';
+  const note = triageNoteText(v);
+  return {
+    suppressions: status === 'false_positive'
+      ? [{ kind: 'external', justification: note || '人工标记为误报' }]
+      : undefined,
+    triage: { status, note },
+  };
+}
+
+/**
+ * [D125] CSV 单条漏洞行（抽离以守 toCSV 的行数/复杂度基线）。
+ * @param {object} v 漏洞
+ * @param {Map<string, object>} cvssOf pointId|technique → CVSS
+ * @param {Map<string, string[]>} remOf pointId|technique → 修复动作
+ * @returns {string} 已转义并用逗号拼接的一行
+ */
+function csvVulnRow(v, cvssOf, remOf) {
+  const key = `${v.pointId}|${v.technique}`;
+  const cvss = cvssOf.get(key);
+  const rem = (remOf.get(key) || []).join(' / ');
+  const t = (v && v.vulnType) || vulnTypeOf(v && v.technique);
+  const req = v.url ? `${v.method || 'GET'} ${v.url}` : '';
+  return [
+    v.id,
+    v.pointId,
+    affectedParamText(v),
+    t.nameZh,
+    t.cwe,
+    t.owasp,
+    v.technique,
+    v.dbms || '',
+    v.riskLevel,
+    cvss ? `${cvss.score} ${cvss.vector}` : '',
+    req,
+    rem.replace(/[\r\n,]/g, ' '),
+    triageStatusText(v.triage && v.triage.status),
+    triageNoteText(v).replace(/[\r\n,]/g, ' '),
+    (v.description || '').replace(/[\r\n,]/g, ' '),
+  ]
+    .map((c) => csvSafeCell(c))
+    .join(',');
+}
+
+/**
+ * [D125] SARIF result 的 properties（抽离以守 toSARIF 的行数/复杂度基线）。
+ * @param {object} v 漏洞
+ * @param {object} point 注入点
+ * @param {object} vt 漏洞类型
+ * @param {object} r 报告
+ * @param {{status:string, note:string}} triage 裁决视图
+ * @returns {object}
+ */
+function sarifPropertiesOf(v, point, vt, r, triage) {
+  return {
+    dbms: v.dbms || null,
+    affectedParam: (v && v.param) || point.param || null,
+    location: (v && v.location) || point.location || null,
+    vulnType: vt.nameEn,
+    payloads: (v.payloads || []).slice(0, 5),
+    method: r.target?.method || 'GET',
+    triage,
+  };
+}
+
+/**
+ * [D125] HTML 单条漏洞行（抽离以守 toHTML 的行数基线）。
+ * @param {object} v 漏洞
+ * @param {object} d buildDelivery 产物
+ * @param {(s: unknown) => string} escape HTML 转义函数
+ * @returns {string}
+ */
+function htmlVulnRow(v, d, escape) {
+  const it = d.remediation.perVuln.find((x) => x.pointId === v.pointId && x.technique === v.technique);
+  const cvss = it ? `${it.cvss.score} ${it.cvss.severity}` : '-';
+  return `<tr>
+        <td>${escape(v.pointId)}</td>
+        <td>${escape(affectedParamText(v))}</td>
+        <td>${escape(vulnTypeText(v))}</td>
+        <td>${escape(v.technique)}</td>
+        <td>${escape(v.dbms || '-')}</td>
+        <td class="${escape(String(v.riskLevel || 'low').toLowerCase())}">${escape(v.riskLevel)}</td>
+        <td>${escape(cvss)}</td>
+        <td>${escape(triageStatusText(v.triage && v.triage.status))}</td>
+        <td>${escape(triageNoteText(v))}</td>
+        <td>${escape(v.description || '')}</td>
+      </tr>`;
+}
+
+/**
+ * [D125] HTML 人工裁决汇总句（无裁决数据时返回空串）。
+ * @param {object|null|undefined} summary
+ * @param {(s: unknown) => string} escape HTML 转义函数
+ * @returns {string}
+ */
+function triageSummaryHtml(summary, escape) {
+  const text = triageSummaryText(summary);
+  return text ? `<p class="meta">${escape(text)}</p>` : '';
+}
 
 // ============================================================================
 // [P0-FIX 2026-09-08] 报告侧安全渲染原语（PoC 要塞进 <pre> 与属性位，故单独成组）
@@ -324,33 +443,8 @@ export class ReportGenerator {
     const lines = [];
     // [2026-09-17] 交付缺口修复：新增受影响参数/漏洞类型/CWE/OWASP/受影响请求五列，
     // 原列（漏洞ID/注入点/技术/数据库/风险/CVSS/修复建议/说明）全部保留且相对顺序不变。
-    lines.push('漏洞ID,注入点,受影响参数,漏洞类型,CWE,OWASP,技术,数据库,风险,CVSS,受影响请求,修复建议,说明');
-    for (const v of r.vulns || []) {
-      const key = `${v.pointId}|${v.technique}`;
-      const cvss = cvssOf.get(key);
-      const rem = (remOf.get(key) || []).join(' / ');
-      const t = (v && v.vulnType) || vulnTypeOf(v && v.technique);
-      const req = v.url ? `${v.method || 'GET'} ${v.url}` : '';
-      lines.push(
-        [
-          v.id,
-          v.pointId,
-          affectedParamText(v),
-          t.nameZh,
-          t.cwe,
-          t.owasp,
-          v.technique,
-          v.dbms || '',
-          v.riskLevel,
-          cvss ? `${cvss.score} ${cvss.vector}` : '',
-          req,
-          rem.replace(/[\r\n,]/g, ' '),
-          (v.description || '').replace(/[\r\n,]/g, ' '),
-        ]
-          .map((c) => csvSafeCell(c))
-          .join(',')
-      );
-    }
+    lines.push('漏洞ID,注入点,受影响参数,漏洞类型,CWE,OWASP,技术,数据库,风险,CVSS,受影响请求,修复建议,裁决,裁决备注,说明');
+    for (const v of r.vulns || []) lines.push(csvVulnRow(v, cvssOf, remOf));
     const rows = r.data?.rows || {};
     if (Object.keys(rows).length) {
       lines.push('');
@@ -429,6 +523,7 @@ export class ReportGenerator {
       // 两个都不存在 ⇒ 同一份真实产物里 uri 全成 "/"，SARIF 消费方拿不到受影响地址。
       const url = v.url || point.actionUrl || r.target?.baseUrl || '';
       const uri = (() => { try { return new URL(url).pathname + (new URL(url).search || ''); } catch { return url; } })();
+      const tr = triageSarif(v);
       results.push({
         ruleId,
         ruleIndex: rules.findIndex((x) => x.id === ruleId),
@@ -442,16 +537,12 @@ export class ReportGenerator {
           // [2026-09-17] 优先取漏洞条目回填的 param（自包含），退化为从 points 现查。
           logicalLocations: [{ name: (v && v.param) || point.param || 'unknown', kind: 'resource' }],
         }],
-        partialFingerprints: { scanPointId: v.pointId || '' },
-        properties: {
-          dbms: v.dbms || null,
-          // [2026-09-17] 交付字段：受影响参数/位置/漏洞类型（平台侧无需回查原始报告即可分派）
-          affectedParam: (v && v.param) || point.param || null,
-          location: (v && v.location) || point.location || null,
-          vulnType: vt.nameEn,
-          payloads: (v.payloads || []).slice(0, 5),
-          method: r.target?.method || 'GET',
-        },
+        // [D125] findingKey 跨扫描稳定（scanPointId 每次重生成，只能定位本次扫描）
+        partialFingerprints: { scanPointId: v.pointId || '', findingKey: v.findingKey || '' },
+        // [D125] 人工标记误报 ⇒ SARIF external suppression；裁决本身进 properties 供平台读取
+        suppressions: tr.suppressions,
+        // [2026-09-17] 交付字段：受影响参数/位置/漏洞类型（平台侧无需回查原始报告即可分派）
+        properties: sarifPropertiesOf(v, point, vt, r, tr.triage),
       });
     }
     return JSON.stringify({
@@ -500,16 +591,18 @@ export class ReportGenerator {
     md.push('');
     // [2026-09-17] 交付缺口修复：新增「受影响参数」「漏洞类型」两列（其余列原样保留，不做信息削减）。
     // 此前只有内部 pointId hash 与 technique，收报告的人无法自解「哪个参数中招、这是什么漏洞」。
-    md.push('| 注入点 | 受影响参数 | 漏洞类型 | 技术 | 数据库 | 风险 | CVSS | 说明 |');
-    md.push('|---|---|---|---|---|---|---|---|');
+    md.push('| 注入点 | 受影响参数 | 漏洞类型 | 技术 | 数据库 | 风险 | CVSS | 裁决 | 裁决备注 | 说明 |');
+    md.push('|---|---|---|---|---|---|---|---|---|---|');
     for (const v of r.vulns || []) {
       const cvss = cvssOfVuln(v, d);
       md.push(
-        `| ${mdCell(v.pointId)} | ${mdCell(affectedParamText(v))} | ${mdCell(vulnTypeText(v))} | ${mdCell(v.technique)} | ${mdCell(v.dbms || '-')} | ${mdCell(v.riskLevel)} | ${mdCell(cvss)} | ${mdCell(v.description)} |`
+        `| ${mdCell(v.pointId)} | ${mdCell(affectedParamText(v))} | ${mdCell(vulnTypeText(v))} | ${mdCell(v.technique)} | ${mdCell(v.dbms || '-')} | ${mdCell(v.riskLevel)} | ${mdCell(cvss)} | ${mdCell(triageStatusText(v.triage && v.triage.status))} | ${mdCell(triageNoteText(v))} | ${mdCell(v.description)} |`
       );
     }
-    if (!(r.vulns || []).length) md.push('| - | - | - | - | - | - | - | 未发现漏洞 |');
+    if (!(r.vulns || []).length) md.push('| - | - | - | - | - | - | - | - | - | 未发现漏洞 |');
     md.push('');
+    const triageLine = triageSummaryText(r.summary);
+    if (triageLine) md.push(`> ${triageLine}`, '');
     // [--passwords 升级] 凭据风险与漏洞清单同属「发现」，排在修复建议之前（md/html 严格同序）。
     // 取 `r.data`（_forExport 的产物，data 字段原样保留）；无 --passwords 结果时该函数返回 []。
     md.push(...credentialRiskMarkdown(r.data?.passwordAnalysis));
@@ -569,25 +662,7 @@ export class ReportGenerator {
   toHTML(report) {
     const r = this._forExport(report);
     const d = buildDelivery(this._enrich(report));
-    const rows = (r.vulns || [])
-      .map(
-        (v) => {
-          const it = d.remediation.perVuln.find((x) => x.pointId === v.pointId && x.technique === v.technique);
-          const cvss = it ? `${it.cvss.score} ${it.cvss.severity}` : '-';
-          // [2026-09-17] 新增「受影响参数」「漏洞类型」两列（列顺序与 markdown/csv 对齐）
-          return `<tr>
-        <td>${this._escape(v.pointId)}</td>
-        <td>${this._escape(affectedParamText(v))}</td>
-        <td>${this._escape(vulnTypeText(v))}</td>
-        <td>${this._escape(v.technique)}</td>
-        <td>${this._escape(v.dbms || '-')}</td>
-        <td class="${this._escape(String(v.riskLevel || 'low').toLowerCase())}">${this._escape(v.riskLevel)}</td>
-        <td>${this._escape(cvss)}</td>
-        <td>${this._escape(v.description || '')}</td>
-      </tr>`;
-        }
-      )
-      .join('');
+    const rows = (r.vulns || []).map((v) => htmlVulnRow(v, d, (s) => this._escape(s))).join('');
     const payloads = (r.vulns || [])
       .flatMap((v) => v.payloads || [])
       .map((p) => '• ' + this._escape(p))
@@ -680,8 +755,9 @@ export class ReportGenerator {
       ${conclusionSection}
       ${attackPathSection}
       <h2>漏洞清单</h2>
-      <table><thead><tr><th>注入点</th><th>受影响参数</th><th>漏洞类型</th><th>技术</th><th>数据库</th><th>风险</th><th>CVSS</th><th>说明</th></tr></thead>
-      <tbody>${rows || '<tr><td colspan="8">未发现漏洞</td></tr>'}</tbody></table>
+      <table><thead><tr><th>注入点</th><th>受影响参数</th><th>漏洞类型</th><th>技术</th><th>数据库</th><th>风险</th><th>CVSS</th><th>裁决</th><th>裁决备注</th><th>说明</th></tr></thead>
+      <tbody>${rows || '<tr><td colspan="10">未发现漏洞</td></tr>'}</tbody></table>
+      ${triageSummaryHtml(report.summary, (s) => this._escape(s))}
       ${credentialSection}
       ${remediationSection}
       <h2>Payload 示例</h2>

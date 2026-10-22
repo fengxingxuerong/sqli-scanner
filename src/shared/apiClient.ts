@@ -153,6 +153,10 @@ export const apiClient = {
     const res = await http.post<ApiResponse<T>>(url, data, config);
     return res.data.data as T;
   },
+  async patch<T>(url: string, data?: object, config?: object): Promise<T> {
+    const res = await http.patch<ApiResponse<T>>(url, data, config);
+    return res.data.data as T;
+  },
   // tamper 清单（GET /api/tampers，单一事实源，与 TamperRegistry.list() 一致）
   tampers: () => apiClient.get<TamperInfo[]>('/tampers'),
   // AI 报告生成

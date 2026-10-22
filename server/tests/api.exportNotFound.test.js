@@ -17,16 +17,32 @@
 //   ③ 设了 reportToken 时未带 token 必须 401 —— 下载路径是 src/ 里唯一绕开
 //      apiClient 的 fetch，鉴权头历史上根本没发出去（实测裸 fetch 401 / 带 header 200）。
 // ============================================================================
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import express from 'express';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { createRoutes } from '../src/api/scanRoutes.js';
+
+// [D125] 导出改走 reportWithFallback（内存→台账 + triage 合并）；隔离数据源，
+// 避免测试读到本机真实台账/裁决。
+const TMP = mkdtempSync(join(tmpdir(), 'sqli-export-test-'));
+process.env.SQLI_LEDGER_DIR = join(TMP, 'ledger');
+process.env.SQLI_TRIAGE_FILE = join(TMP, 'triage.json');
+after(() => rmSync(TMP, { recursive: true, force: true }));
 
 const CSV_BODY = 'url,param,technique\nhttp://x?id=1,id,union\n';
 
 /** 只实现本测试用到的方法的桩管理器（不依赖 ScanManager 真跑扫描/DB） */
 const stubManager = {
-  exportReport: (id, format) => (id === 'good' ? (format === 'csv' ? CSV_BODY : JSON.stringify({ scanId: id })) : null),
+  // [D125] 导出与查看同源：路由先经 getReport 取报告（真实 ScanManager 同契约）
+  getReport: (id) => (id === 'good' ? { scanId: 'good', points: [], vulns: [] } : null),
+  exportReport: (id, format, reportArg) => {
+    if (id !== 'good') return null;
+    if (format === 'csv') return CSV_BODY;
+    return JSON.stringify(reportArg || { scanId: id });
+  },
 };
 
 async function withApp(opts, fn) {

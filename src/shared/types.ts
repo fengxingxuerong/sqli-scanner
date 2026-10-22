@@ -547,6 +547,14 @@ export interface DetectionResult {
 }
 
 /** 漏洞 */
+export type TriageStatus = 'open' | 'confirmed' | 'false_positive' | 'accepted_risk';
+
+export interface FindingTriage {
+  status: TriageStatus;
+  note: string;
+  updatedAt: string | null;
+}
+
 export interface Vulnerability {
   id: string;
   pointId: string;
@@ -557,6 +565,9 @@ export interface Vulnerability {
   description: string;
   evidence?: string; // 检测器原始证据（P1-U2 新增，供详情页单独展示）
   trace?: BlindTrace | null;
+  // [D125] 人工裁决：findingKey 跨扫描稳定；triage 缺省视为 open（老报告无此字段）
+  findingKey?: string;
+  triage?: FindingTriage;
   // 可复现 PoC（仅导出路径由 ReportGenerator 惰性挂载；UI 侧报告可能缺失，缺失时不渲染复现区）
   poc?: VulnPoc;
 }
@@ -587,6 +598,8 @@ export interface ReportSummary {
   verdict?: 'no_vulnerability_detected' | 'inconclusive';
   verdictNote?: string;
   validity?: ScanValidity;
+  // [D125] 人工裁决计数（不改变 verdict/风险/条数）
+  triage?: { total: number; open: number; confirmed: number; falsePositive: number; acceptedRisk: number };
 }
 
 export interface ReportModel {

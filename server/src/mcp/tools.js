@@ -19,6 +19,7 @@ import { createTarget } from '../engine/models.js';
 import { TargetParser } from '../engine/TargetParser.js';
 import { httpClient } from '../core/httpClient.js';
 import { listScans, readReport } from '../services/scanLedger.js';
+import { attachTriage } from '../services/findingTriage.js';
 import { parseHeaders } from '../../bin/cli/args.js';
 import { parseCookiePairs, resolveBodyChannel } from '../../bin/cli/config.js';
 
@@ -38,7 +39,17 @@ export function createToolContext(deps = {}) {
 function loadReport(ctx, scanId) {
   let report = ctx.scanManager ? ctx.scanManager.getReport(scanId) : null;
   if (!report) report = readReport(scanId);
-  return report || null;
+  // [D125] 与 REST/导出同一份人工裁决合并逻辑（MCP 不是取数旁路）
+  return report ? attachTriage(report) : null;
+}
+
+/**
+ * [D125] 裁决字段的紧凑形态（抽离以守 compactVuln 复杂度基线）。
+ * @param {object} v
+ * @returns {{findingKey: string|null, triage: object|null}}
+ */
+function compactTriage(v) {
+  return { findingKey: v.findingKey || null, triage: v.triage || null };
 }
 
 /** 漏洞条目 → 代理可读的紧凑形态（与 manifest 的 findings 四要素同源口径） */
@@ -57,6 +68,7 @@ function compactVuln(v) {
     payloads: v.payloads || [],
     poc: v.poc ? { method: v.poc.method, url: v.poc.url, payload: v.poc.payload, curl: v.poc.curl } : null,
     remediation: v.remediation || null,
+    ...compactTriage(v),
   };
 }
 

@@ -97,7 +97,7 @@ test('toMarkdown: 四要素章节齐全（元信息/执行摘要/修复建议/WA
   assert.match(md, /请求总数：95/);
   // 既有行保持：漏洞表加 CVSS 列但原列仍在
   // [2026-09-17] 新增「受影响参数」「漏洞类型」两列（交付缺口：此前只有内部 pointId hash）
-  assert.match(md, /\| 注入点 \| 受影响参数 \| 漏洞类型 \| 技术 \| 数据库 \| 风险 \| CVSS \| 说明 \|/);
+  assert.match(md, /\| 注入点 \| 受影响参数 \| 漏洞类型 \| 技术 \| 数据库 \| 风险 \| CVSS \| 裁决 \| 裁决备注 \| 说明 \|/);
   assert.match(md, /CVSS 8\.2 High.*AV:N\/AC:L\/PR:N\/UI:N\/S:U\/C:H\/I:L\/A:N/s);
   // 通用基线含参数化与最小权限（整改可执行性）
   assert.ok(GENERAL_REMEDIATION.some((a) => a.includes('参数化')));
@@ -143,7 +143,7 @@ test('toCSV: CVSS 与修复建议列落位（三侧同源）', () => {
   // CSV 以 BOM 开头（Excel 中文兼容），断言前剥掉
   const csv = rg.toCSV(mkReport()).replace(/^\uFEFF/, '');
   // [2026-09-17] 新增受影响参数/漏洞类型/CWE/OWASP/受影响请求列（原列相对顺序不变）
-  assert.match(csv, /^漏洞ID,注入点,受影响参数,漏洞类型,CWE,OWASP,技术,数据库,风险,CVSS,受影响请求,修复建议,说明/);
+  assert.match(csv, /^漏洞ID,注入点,受影响参数,漏洞类型,CWE,OWASP,技术,数据库,风险,CVSS,受影响请求,修复建议,裁决,裁决备注,说明/);
   assert.match(csv, /8\.2/);
   assert.match(csv, /参数化/);
 });

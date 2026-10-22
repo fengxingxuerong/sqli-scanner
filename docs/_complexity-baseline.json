@@ -278,19 +278,19 @@
       "limitLines": 100,
       "limitComplexity": 15
     },
-    "server/src/api/scanRoutes.js::<arrow@385>": {
+    "server/src/api/scanRoutes.js::<arrow@455>": {
       "lines": 68,
       "complexity": 34,
       "limitLines": 100,
       "limitComplexity": 15
     },
-    "server/src/api/scanRoutes.js::<arrow@524>": {
+    "server/src/api/scanRoutes.js::<arrow@594>": {
       "lines": 65,
       "complexity": 30,
       "limitLines": 100,
       "limitComplexity": 15
     },
-    "server/src/api/scanRoutes.js::<arrow@711>": {
+    "server/src/api/scanRoutes.js::<arrow@784>": {
       "lines": 27,
       "complexity": 26,
       "limitLines": 100,
@@ -303,8 +303,8 @@
       "limitComplexity": 15
     },
     "server/src/api/scanRoutes.js::createRoutes": {
-      "lines": 300,
-      "complexity": 138,
+      "lines": 295,
+      "complexity": 135,
       "limitLines": 100,
       "limitComplexity": 15
     },
@@ -1112,13 +1112,13 @@
       "limitLines": 100,
       "limitComplexity": 15
     },
-    "server/src/mcp/tools.js::<arrow@102>": {
+    "server/src/mcp/tools.js::<arrow@114>": {
       "lines": 50,
       "complexity": 30,
       "limitLines": 100,
       "limitComplexity": 15
     },
-    "server/src/mcp/tools.js::<arrow@283>": {
+    "server/src/mcp/tools.js::<arrow@295>": {
       "lines": 51,
       "complexity": 25,
       "limitLines": 100,
@@ -1130,21 +1130,15 @@
       "limitLines": 100,
       "limitComplexity": 15
     },
-    "server/src/services/ReportGenerator.js::ReportGenerator.toCSV": {
-      "lines": 50,
-      "complexity": 19,
-      "limitLines": 100,
-      "limitComplexity": 15
-    },
     "server/src/services/ReportGenerator.js::ReportGenerator.toHTML": {
-      "lines": 118,
-      "complexity": 7,
+      "lines": 102,
+      "complexity": 5,
       "limitLines": 100,
       "limitComplexity": 15
     },
     "server/src/services/ReportGenerator.js::ReportGenerator.toSARIF": {
-      "lines": 68,
-      "complexity": 40,
+      "lines": 63,
+      "complexity": 31,
       "limitLines": 100,
       "limitComplexity": 15
     },
@@ -1395,8 +1389,8 @@
       "limitComplexity": 15
     },
     "src/pages/ReportPage.tsx::ReportPage": {
-      "lines": 284,
-      "complexity": 58,
+      "lines": 245,
+      "complexity": 47,
       "limitLines": 100,
       "limitComplexity": 15
     },

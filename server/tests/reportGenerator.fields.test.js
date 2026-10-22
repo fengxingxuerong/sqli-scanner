@@ -43,15 +43,15 @@ const rowOf = (md) => md.split('\n').find((l) => l.startsWith('| p1 ')) || '';
 // ① 不可信参数名：三侧都不破坏结构
 // ---------------------------------------------------------------------------
 
-test('参数名含竖线：Markdown 表格不被切列（分隔符计数仍为 8 列）', () => {
+test('参数名含竖线：Markdown 表格不被切列（分隔符计数仍为 10 列）', () => {
   const md = rg.toMarkdown(mkReport([VULN()], [{ id: 'p1', location: 'url', param: 'a|b' }]));
   const row = rowOf(md);
   assert.ok(row, '应渲染出 p1 行');
   assert.ok(row.includes('a\\|b'), '竖线必须转义，否则整张表被切列');
-  // 8 列需要 9 个分隔符；被转义的 \| 是数据不是分隔符，需扣除
+  // 10 列需要 11 个分隔符；被转义的 \| 是数据不是分隔符，需扣除
   const pipes = (row.match(/\|/g) || []).length;
   const escaped = (row.match(/\\\|/g) || []).length;
-  assert.equal(pipes - escaped, 9, `表格应为 8 列（实得 ${pipes - escaped - 1} 列）：${row.slice(0, 120)}`);
+  assert.equal(pipes - escaped, 11, `表格应为 10 列（实得 ${pipes - escaped - 1} 列）：${row.slice(0, 120)}`);
 });
 
 test('参数名含 HTML：HTML 报告必须转义，不得出现可执行标签', () => {
@@ -83,7 +83,7 @@ test('参数名含反引号：不提前闭合 Markdown 行内代码', () => {
   const row = rowOf(md);
   assert.ok(row.includes('a`b`'), '表格单元格是纯文本不受反引号影响');
   // 表格不应被反引号破坏：仍能在同一行找到该参数
-  assert.equal((row.match(/\|/g) || []).length - (row.match(/\\\|/g) || []).length, 9);
+  assert.equal((row.match(/\|/g) || []).length - (row.match(/\\\|/g) || []).length, 11);
 });
 
 // ---------------------------------------------------------------------------

@@ -40,6 +40,7 @@
 一旦设置了 `SCAN_API_TOKEN`，以下端点**必须携带 token**，否则返回 `401`：
 
 - `GET /scan/:id/report`、`GET /scan/:id/report/export`
+- `PATCH /scan/:id/findings/:findingId/triage`
 - `GET /sqlmap/:id/report`
 - `GET /scan/:id/events`、`GET /sqlmap/:id/events`（SSE）
 - 所有 `POST` 端点（start / stop / exploit/*）
@@ -404,6 +405,27 @@ SSE 实时进度流，事件结构 `{ type, scanId, ts, payload, seq }`（帧内
 ```
 
 错误码：`1002` 基线扫描不存在 / `1002` 注入点不存在（pointId 需来自同一报告）/ `1002` 基线缺目标信息；重测自动剥离子项 `extractScope`（避免重复枚举与误触发写入），scope 与 SSRF 校验与全扫一致。
+
+#### `PATCH /scan/:id/findings/:findingId/triage`
+
+人工裁决（交付层标注：**不改变** verdict、风险等级、漏洞条数或退出码）。`findingId` 可传
+报告里的 `vuln.id`，也可传稳定 `findingKey`（跨复扫不变；报告中每条 vuln 都带该字段）。
+
+请求体（只允许这两个字段，未知字段 → `1003`）：
+
+| 字段 | 必填 | 说明 |
+|---|---|---|
+| `status` | 是 | `open` / `confirmed` / `false_positive` / `accepted_risk` |
+| `note` | 否 | 备注，trim 后 ≤ 2000 字符 |
+
+```json
+{ "code": 0, "data": { "findingKey": "GET http://host/item|url|id|boolean",
+  "triage": { "status": "false_positive", "note": "人工复现为页面差异", "updatedAt": "2026-10-22T00:53:28.273Z" } }, "message": "ok" }
+```
+
+读取报告、导出（JSON/HTML/Markdown/CSV/SARIF）与 MCP `get_findings`/`get_report` 会合并
+`vuln.triage` 与 `summary.triage`（SARIF 误报映射为 external suppression）。错误：
+`1003` 非法状态/字段/备注过长；`2001` 扫描或 finding 不存在。
 
 #### `GET /scan/:id/report`
 
