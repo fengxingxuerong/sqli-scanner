@@ -26,6 +26,7 @@ import { fileURLToPath } from 'node:url';
 import net from 'node:net';
 // [DECISION-2026-09-22] 套件状态判定（含「沙箱起不来」三形态识别）抽成可单测模块
 import { classifySuite, evaluateExpect } from './lib/suiteVerdict.mjs';
+import { ensureSqliSchema } from './lib/sqliSchema.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, '..');
@@ -150,6 +151,7 @@ const git = await gitStamp();
 
 const pre = {
   mysql: false, mysqlReason: '', secureFilePriv: null, secure_file_priv: false, mysqlVersion: null,
+  mysqlSchemaNote: '',
   redteamLab: false,
   // [OOB 套件 2026-09-23] OOB 必须真 PG（`COPY TO PROGRAM` 只有真服务端才会执行系统命令回连），
   // 不能退回嵌入式引擎。缺 PG 时该套件走 optional SKIP 并写明原因 —— 与 redteam 同一口径。
@@ -167,6 +169,21 @@ const pre = {
       // 后两者都算「已放行」，故判据是「非 null/undefined」而不是「非空字符串」——
       // 用真值语义会把 ''（完全放行）误判成未放行，正好和实际能力相反。
       pre.secure_file_priv = r[0].s !== null && r[0].s !== undefined;
+      // [D126 2026-10-22] 表与种子数据同样属于前置：只连得上库、没有 users/products 表时，
+      // 靶站每条查询都 SQL 报错 ⇒ 真/假响应同形（都是错误页）⇒ boolean/time 全 miss，
+      // 依赖数据的套件会把「环境缺失」报成「真值漏检」（实测空库 1/11、有表 11/11）。
+      // 这里开跑前幂等补齐（缺库建库/缺表建表/空表灌种子，既有数据不覆盖），并在报告前置行留痕。
+      try {
+        const schema = await ensureSqliSchema(c, { database: MYSQL.database, quiet: true });
+        if (schema.created.length || schema.seeded.length) {
+          pre.mysqlSchemaNote =
+            `schema 自愈：新建表[${schema.created.join('、') || '无'}] ` +
+            `灌种子[${schema.seeded.join('、') || '无'}]`;
+        }
+      } catch (e) {
+        // 自愈失败不阻断（只读账号等）——但要留痕，别让后续套件的「漏检」看起来像引擎问题
+        pre.mysqlSchemaNote = `schema 自愈失败（${e.code || e.message}）：依赖表数据的套件结论不可信`;
+      }
       await c.end();
     } catch (e) {
       pre.mysqlReason = `端口开放但连接失败（${e.code || e.message}）——检查 MYSQL_USER/MYSQL_PASSWORD`;
@@ -977,7 +994,9 @@ const results = [];
 console.log('═══ 全方位验收门禁（事实断言模式：不采信套件自报 PASS）═══\n');
 console.log(
   `前置：MySQL ${pre.mysql ? `✅ ${pre.mysqlVersion} @${MYSQL.host}:${MYSQL.port}` : `❌ ${pre.mysqlReason}`}` +
-    `　secure_file_priv=${JSON.stringify(pre.secureFilePriv)}\n`
+    `　secure_file_priv=${JSON.stringify(pre.secureFilePriv)}` +
+    (pre.mysqlSchemaNote ? `　${pre.mysqlSchemaNote}` : '') +
+    '\n'
 );
 
 const selected = ONLY ? SUITES.filter((s) => ONLY.has(s.id)) : SUITES;
@@ -1137,7 +1156,7 @@ const md = [
   `> 生成：${new Date().toISOString()}　｜　执行器：\`node e2e/acceptance.mjs\`　｜　Node ${process.version}`,
   versionLine,
   scopeLine,
-  `> 前置：MySQL ${pre.mysql ? `${pre.mysqlVersion} @${MYSQL.host}:${MYSQL.port}` : `不可用（${pre.mysqlReason}）`}；secure_file_priv=${JSON.stringify(pre.secureFilePriv)}`,
+  `> 前置：MySQL ${pre.mysql ? `${pre.mysqlVersion} @${MYSQL.host}:${MYSQL.port}` : `不可用（${pre.mysqlReason}）`}；secure_file_priv=${JSON.stringify(pre.secureFilePriv)}${pre.mysqlSchemaNote ? `；${pre.mysqlSchemaNote}` : ''}`,
   '',
   '> **判定纪律**：不采信各套件自报的 PASS 字样，只解析可独立核对的事实数字并据此断言。',
   '',

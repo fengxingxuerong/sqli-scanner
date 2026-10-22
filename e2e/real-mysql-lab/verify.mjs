@@ -10,6 +10,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { createMysqlLabApp } from './lab-app.js';
+import { ensureSqliSchema } from '../lib/sqliSchema.mjs';
 
 const require = createRequire(new URL('../../server/package.json', import.meta.url));
 const mysql = require('mysql2/promise');
@@ -103,6 +104,15 @@ function runSqlmap(url) {
   const c = await mysql.createConnection(MYSQL_CONF);
   const [v] = await c.query('SELECT VERSION() v');
   console.log(`[verify] MySQL ${v[0].v} @ ${MYSQL_CONF.host}:${MYSQL_CONF.port}/${MYSQL_CONF.database}`);
+  // [D126 2026-10-22] schema 自愈：缺表/空表时靶站每条查询都 SQL 报错，真/假响应同形
+  // （都是错误页）⇒ boolean/time 全 miss，本套件会把「环境缺失」报成「真值漏检」。
+  // 实测对照：空库 3/11、有表 11/11。这里开跑前幂等补齐，已有数据不覆盖。
+  const schema = await ensureSqliSchema(c, { database: MYSQL_CONF.database });
+  if (schema.created.length || schema.seeded.length) {
+    console.log(
+      `[verify] schema 自愈：新建表[${schema.created.join('、') || '无'}] 灌种子[${schema.seeded.join('、') || '无'}]`
+    );
+  }
   await c.end();
 }
 
