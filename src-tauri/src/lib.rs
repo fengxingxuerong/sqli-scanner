@@ -70,11 +70,15 @@ fn spawn_engine(app: &tauri::AppHandle) {
         }
     };
 
-    // 注入引擎配置：端口 / 回环监听 / 一次性 token / 允许 Tauri WebView 的 origin
+    // 注入引擎配置：端口 / 回环监听 / 一次性 token / 允许 Tauri WebView 的 origin / 版本
+    // [D128] ENGINE_VERSION 取壳自己的 crate 版本（= tauri.conf.json = package.json，由
+    // version:check 三处互校）：sidecar 即便不带 SEA 版本 asset 也不会谎报，
+    // 是「内嵌版本」之外的第二道保险。
     let cmd = cmd
         .env("HOST", "127.0.0.1")
         .env("PORT", port.to_string())
         .env("SCAN_API_TOKEN_EMIT", "1")
+        .env("ENGINE_VERSION", env!("CARGO_PKG_VERSION"))
         .env(
             "ALLOWED_ORIGINS",
             "http://tauri.localhost,tauri://localhost",

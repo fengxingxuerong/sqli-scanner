@@ -361,10 +361,32 @@ test('★修复①★ 慢漂移 + 极小余量：跟踪后提取正确（故障�
 
 test('★修复②★ 中等漂移 + 中等余量（4ms/探针 @ 60ms）：跟踪后提取正确', async () => {
   const secret = '5.7.40';
-  const oracle = makeDriftOracle(secret, { driftMs: 4 });
-  const ctx = buildCtx(oracle, 'drift-on-mid', { absMs: 60, timeBaselineEvery: 16 });
-  const out = await extractWithDeadline(new Extractor(), ctx, oracle, 'version()');
-  assert.equal(out, secret, `中等漂移目标上应正确提取，实际 ${JSON.stringify(out)}`);
+  // [D132 2026-10-23] 与上面的「修复①」同一套 stall 归因规则：本条此前**没有**归因/重抽，
+  // 因此在覆盖率采集（进程被 instrument，墙钟被拉长）或与其它套件并发时会出现
+  // 单字节腐蚀 `"5.7  \u0000"` —— 那是 runner 卡顿淹没 60ms 余量，不是提取逻辑错。
+  // 归因规则（沿用 D96 补3）：有 stall 证据（maxGap > STALL_MS）⇒ 重抽（≤3）；
+  // 无 stall 证据而腐蚀 ⇒ 立即红；3 抽全被污染 ⇒ assert.fail（显式失败，不静默放过）。
+  const draws = 3;
+  for (let draw = 1; draw <= draws; draw++) {
+    const oracle = makeDriftOracle(secret, { driftMs: 4 });
+    const ctx = buildCtx(oracle, `drift-on-mid-${draw}`, { absMs: 60, timeBaselineEvery: 16 });
+    const { out, maxGap } = await withStallProbe(() =>
+      extractWithDeadline(new Extractor(), ctx, oracle, 'version()')
+    );
+    if (out === secret) {
+      if (draw > 1) console.log(`[修复②] 第 ${draw} 抽通过（前 ${draw - 1} 抽腐蚀被 stall 归因重抽）`);
+      return;
+    }
+    if (maxGap <= STALL_MS) {
+      assert.equal(
+        out,
+        secret,
+        `中等漂移目标上应正确提取（本抽无 stall 证据，maxGap=${maxGap}ms），实际 ${JSON.stringify(out)}`
+      );
+    }
+    console.log(`[修复②] 第 ${draw} 抽腐蚀（${JSON.stringify(out)}）但存在 stall（maxGap=${maxGap}ms > ${STALL_MS}ms）⇒ 环境越界归因，重抽`);
+  }
+  assert.fail(`连续 ${draws} 抽全部被 stall 污染（各抽 maxGap 均 > ${STALL_MS}ms）——本 runner 退化到无法量测 60ms 余量档，不计为绿`);
 });
 
 test('★修复③★ 真实余量档（300ms @ 30ms/探针）：跟踪后提取正确（故障③ 同参数）', async () => {

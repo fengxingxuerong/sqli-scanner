@@ -3,12 +3,19 @@
 // version-sync.mjs —— 版本号一致性门禁
 //
 // ── 要防的是什么 ─────────────────────────────────────────────────────────────
-// 本项目的版本号手工维护在**三个文件**里：
-//   · package.json            （npm / GitHub Action / 文档）
-//   · src-tauri/tauri.conf.json（Tauri 壳 + 安装包元数据）
-//   · src-tauri/Cargo.toml    （Rust crate）
+// 本项目的版本号手工维护在**六个位置**里：
+//   · package.json                        （npm / GitHub Action / 文档）
+//   · src-tauri/tauri.conf.json           （Tauri 壳 + 安装包元数据）
+//   · src-tauri/Cargo.toml                （Rust crate）
+//   · server/package.json                 （引擎子包；D127 起纳入，此前长期停在 1.1.0）
+//   · package-lock.json                   （根锁文件顶层 version）
+//   · server/package-lock.json            （引擎锁文件顶层 version）
+//   每个 lock 文件还有第二份副本 `packages[""].version`，一并纳入（同一事实两份副本
+//   是本仓反复栽的形态：README 测试数、e2e 基线、版本号都是同一类）。
 //
 // 实测（2026-10-05）：前两者是 1.1.0，**Cargo.toml 孤悬 1.0.0**。
+// 实测（2026-10-23，D127 补）：server/package.json 与两个 lock 文件仍停在 1.1.0，
+// 而根 package.json 已是 1.1.1 —— 旧判据只看三处，看不见这三份副本。
 // 后果不是"不好看"，而是**桌面安装包对外报的版本与 npm 包不一致**——
 // 用户装到的壳比 Web 前端旧一个小版本，而没有任何地方提示。
 //
@@ -57,6 +64,55 @@ const TARGETS = [
       return m ? m[1] : null;
     },
     replace: (text, v) => text.replace(/^version\s*=\s*"[^"]+"/m, `version = "${v}"`),
+  },
+  {
+    // 引擎子包：`npm run server` / Dockerfile 里的 `npm --prefix server ci` 都读它，
+    // 与根包长期不同步（D127 实测 1.1.0 vs 1.1.1）——旧判据看不见。
+    file: path.join('server', 'package.json'),
+    label: 'server/package.json',
+    pick: (text) => {
+      const m = text.match(/^\s{2}"version"\s*:\s*"([^"]+)"/m);
+      return m ? m[1] : null;
+    },
+    replace: (text, v) => text.replace(/^(\s{2}"version"\s*:\s*)"[^"]+"/m, `$1"${v}"`),
+  },
+  {
+    // 锁文件顶层 version：`npm ci` 用它，也是 `npm ls` 报版本的来源之一。
+    file: 'package-lock.json',
+    label: 'package-lock.json',
+    pick: (text) => {
+      const m = text.match(/^\s{2}"version"\s*:\s*"([^"]+)"/m);
+      return m ? m[1] : null;
+    },
+    replace: (text, v) => text.replace(/^(\s{2}"version"\s*:\s*)"[^"]+"/m, `$1"${v}"`),
+  },
+  {
+    // 同一个 lock 里的第二份副本：packages[""].version（6 空格缩进，其余嵌套版本都在 10+ 空格）。
+    file: 'package-lock.json',
+    label: 'package-lock.json#packages[""]',
+    pick: (text) => {
+      const m = text.match(/^\s{6}"version"\s*:\s*"([^"]+)"/m);
+      return m ? m[1] : null;
+    },
+    replace: (text, v) => text.replace(/^(\s{6}"version"\s*:\s*)"[^"]+"/m, `$1"${v}"`),
+  },
+  {
+    file: path.join('server', 'package-lock.json'),
+    label: 'server/package-lock.json',
+    pick: (text) => {
+      const m = text.match(/^\s{2}"version"\s*:\s*"([^"]+)"/m);
+      return m ? m[1] : null;
+    },
+    replace: (text, v) => text.replace(/^(\s{2}"version"\s*:\s*)"[^"]+"/m, `$1"${v}"`),
+  },
+  {
+    file: path.join('server', 'package-lock.json'),
+    label: 'server/package-lock.json#packages[""]',
+    pick: (text) => {
+      const m = text.match(/^\s{6}"version"\s*:\s*"([^"]+)"/m);
+      return m ? m[1] : null;
+    },
+    replace: (text, v) => text.replace(/^(\s{6}"version"\s*:\s*)"[^"]+"/m, `$1"${v}"`),
   },
 ];
 
@@ -113,6 +169,16 @@ function main() {
         { label: 'src-tauri/tauri.conf.json', version: null, error: '未找到版本号字段' },
         { label: 'src-tauri/Cargo.toml', version: null, error: '未找到版本号字段' },
       ], expect: 2 },
+      // D127 新增判据必须自证：子包与锁文件的三份副本落后时也得红，
+      // 否则「扩了覆盖面」只是嘴上说说（旧判据正是漏了这三处）。
+      { name: 'D127 子包 + 两个 lock 副本落后 ⇒ 必须报出 3 条', entries: [
+        { label: 'package.json', version: '1.2.0' },
+        { label: 'src-tauri/tauri.conf.json', version: '1.2.0' },
+        { label: 'src-tauri/Cargo.toml', version: '1.2.0' },
+        { label: 'server/package.json', version: '1.1.0' },
+        { label: 'package-lock.json', version: '1.1.0' },
+        { label: 'package-lock.json#packages[""]', version: '1.1.0' },
+      ], expect: 3 },
     ];
     let failed = 0;
     for (const c of cases) {
@@ -160,12 +226,12 @@ function main() {
   if (mismatches.length) {
     console.error(`\n✖ 版本号不一致（${mismatches.length} 处）：`);
     for (const m of mismatches) console.error(`  · ${m.label}: ${m.detail}`);
-    console.error('\n修法：改齐三处，或执行 `npm run version:fix` 以 package.json 为基准同步。');
-    console.error('（桌面安装包版本来自 tauri.conf.json / Cargo.toml，不一致会让交付给客户的壳对不上版本号。）');
+    console.error('\n修法：改齐全部位置，或执行 `npm run version:fix` 以 package.json 为基准同步。');
+    console.error('（桌面安装包版本来自 tauri.conf.json / Cargo.toml；Docker/子包安装读 server/package.json；`npm ci` 读两个 lock —— 任一处不一致都会让交付物对不上版本号。）');
     process.exit(1);
   }
 
-  console.log('\n✔ 版本号三处一致');
+  console.log(`\n✔ 版本号全部一致（${entries.length} 处）`);
 }
 
 if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith('version-sync.mjs')) {

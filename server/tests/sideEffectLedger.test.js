@@ -163,6 +163,32 @@ test('登记表损坏：返回空壳 + corrupt 标记，不抛（且不静默）
   assert.equal(store.corrupt, true, '损坏必须显式标记，便于人工核查');
 });
 
+// ── [D132 2026-10-23] 路径穿越：scanId 只许作单层目录名 ──────────────────────
+// 背景：旧实现 `join(ledgerRoot(), String(scanId), 'side-effects.json')` 未校验，而 scanId
+// 来自 REST 查询串/请求体 ⇒ `../../x` 可越界读写任意位置名为 side-effects.json 的文件，
+// 且清理路径会在该位置递归建目录。scanLedger 早有 safeScanId，这里漏了同一道判据。
+test('路径穿越：readSideEffects 对 ../ 越界 scanId 必须拒绝（不得读到根外文件）', () => {
+  const evil = '../' + 'escape-probe';
+  assert.throws(
+    () => readSideEffects(evil),
+    (e) => e && e.code === 1005,
+    '含 ../ 的 scanId 必须抛 SCAN_ID_INVALID，而不是拼进路径'
+  );
+  // 变体逐条钉死：Windows/POSIX 分隔符、绝对路径、NUL、当前/父目录
+  for (const bad of ['..', '.', 'a/b', 'a\\b', '/etc', 'C:\\temp', 'x\0y', '']) {
+    assert.throws(() => readSideEffects(bad), (e) => e && e.code === 1005, `scanId=${JSON.stringify(bad)} 必须拒绝`);
+  }
+});
+
+test('路径穿越：recordSideEffect / buildCleanupPlan 同口径拒绝（写与清理都不得越界）', () => {
+  assert.throws(
+    () => recordSideEffect('../../pwn', { kind: SIDE_EFFECT_KINDS.FILE_WRITE, target: '/tmp/x' }),
+    (e) => e && e.code === 1005
+  );
+  assert.throws(() => buildCleanupPlan('../..'), (e) => e && e.code === 1005);
+  assert.throws(() => sideEffectSummaryForReport('a/b'), (e) => e && e.code === 1005);
+});
+
 // 收尾：清测试用临时台账目录（仅本测试自己创建的）
 process.on('exit', () => {
   try { rmSync(TMP, { recursive: true, force: true }); } catch { /* ignore */ }

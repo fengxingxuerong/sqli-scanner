@@ -344,6 +344,7 @@ export const HELP_TEXT = `sqli-scanner CLI（对标 sqlmap 的 Node 引擎命令
   （--no-escape / --union-char 未实现，已从帮助移除；传入会被忽略并打印提示）
 
   -h, --help                 显示帮助
+  -V, --version              只打印版本号（与 package.json / 桌面壳同一事实源）并退出
 
 直连模式（对标 sqlmap -d）:
   -d, --direct <connStr>     数据库连接串（如 mysql://user:pass@host/db、sqlite://path.db）
@@ -363,4 +364,19 @@ export const HELP_TEXT = `sqli-scanner CLI（对标 sqlmap 的 Node 引擎命令
 
 export function printHelp() {
   console.log(HELP_TEXT);
+}
+
+/**
+ * 打印版本号并退出（`-V` / `--version`）。
+ *
+ * 为什么自成一个函数而不是在入口内联：`main()` 是复杂度基线里的存量函数（只许持平），
+ * 内联 5 行会把它顶破基线；而「版本查询」与「帮助」本就是同类职责（入口元信息查询），
+ * 放在本模块与 printHelp 并列最自然。版本号取 `core/version.js` 的四级解析结果，
+ * 与 `/api/health` 和桌面壳同源——不在这里另抄一份字面量。
+ * @returns {Promise<never>} 打印后直接 `process.exit(0)`（永不 resolve）
+ */
+export async function printVersion() {
+  const { ENGINE_VERSION } = await import('../../src/core/version.js');
+  console.log(ENGINE_VERSION);
+  process.exit(0);
 }

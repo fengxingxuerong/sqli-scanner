@@ -17,6 +17,8 @@
 // 资源安全：总页数预算 maxPages（默认 10）、每页导航超时 pageTimeoutMs（默认 15s）、
 // 只入队同域链接、browser 在 finally 中关闭。所有 URL 处理都是纯函数（pickEndpoints）
 // 可独立测试；收集器本身通过依赖注入可被测试替身替换。
+// [D132] 渲染进程的**子资源请求**（img/script/fetch）也不过 httpClient，因此接线时给
+// context 装 route 拦截，逐条过 SSRF 判据（见 makeBrowserEgressGuard）。
 // ============================================================================
 import { URL } from 'url';
 
@@ -25,6 +27,48 @@ export class BrowserUnavailable extends Error {
     super(message);
     this.name = 'BrowserUnavailable';
   }
+}
+
+/**
+ * [D132 2026-10-23] 浏览器请求的 SSRF 闸门（渲染进程会自己发子资源请求，绕开 httpClient）。
+ *
+ * 背景：`SECURITY.md` 曾写「所有出站请求都过 core/httpClient.js 的 SSRF/scope 校验」，
+ * 而 `page.goto()` 之后浏览器会自行请求页面里的**任意**子资源（img/script/fetch）——
+ * 这些请求既不过 httpClient，也不经过任何 egress 判据。若目标页面（或目标上被注入的
+ * 内容）引用 `http://169.254.169.254/...`，扫描器所在的机器就会替攻击者发出该请求。
+ *
+ * 口径（有意不收窄到 scope）：
+ *   · **SSRF 判据照旧**（内网/回环/链路本地/云元数据一律拦），这是安全红线；
+ *   · **不按 scan scope 拦第三方 CDN**：拦掉会改变渲染结果（CSS/JS 缺失 → SPA 抓不到
+ *     接口），而 scope 的语义是「注入目标范围」，不是「页面允许加载哪些静态资源」。
+ *   · 非 http(s)（data:/blob:/about:）不发起网络请求，直接放行。
+ *   · 按 host 缓存判定结果（同一 host 只解析一次，避免每个子请求都做一次 DNS）。
+ *
+ * @param {(url: string) => Promise<unknown>} assertSafe 出站校验（默认 assertSafeHttpTarget）
+ * @returns {(url: string) => Promise<boolean>} 判定函数（true = 放行）
+ */
+export function makeBrowserEgressGuard(assertSafe) {
+  /** @type {Map<string, Promise<boolean>>} */
+  const cache = new Map();
+  return async (url) => {
+    if (!/^https?:\/\//i.test(String(url))) return true; // 非网络协议：浏览器不会出站
+    let host;
+    try {
+      host = new URL(String(url)).host;
+    } catch {
+      return false; // 解析不出 host 的 URL 一律不放行（fail-closed）
+    }
+    let pending = cache.get(host);
+    if (!pending) {
+      // 存 Promise 而不是结果：并发子请求共享同一次解析
+      pending = Promise.resolve()
+        .then(() => assertSafe(url))
+        .then(() => true)
+        .catch(() => false);
+      cache.set(host, pending);
+    }
+    return pending;
+  };
 }
 
 /** 静态资源扩展名（接口 URL 过滤：XHR 拉的 js/css/图片不是注入面） */
@@ -131,6 +175,58 @@ export async function launchBrowser({ headless = true } = {}) {
 }
 
 /**
+ * 给浏览器 context 装上出站闸门（判定逻辑见 makeBrowserEgressGuard）。
+ * 拆成独立函数而非内联进 collectRendered：闸门装配有 4 个易错分支
+ * （route 是否可用 / 校验抛错 / abort 抛错 / 请求已取消），内联会把收集器的
+ * 圈复杂度顶破软上限（门禁判据：新代码请拆分，不许写进基线放宽）。
+ * @param {any} context Playwright BrowserContext
+ * @param {{ egress?: (url: string) => Promise<unknown>, log?: (msg: string) => void }} [opts] 注入项（测试用）
+ * @returns {Promise<boolean>} 是否成功装配（false = 该 context 不支持 route 拦截）
+ */
+async function installBrowserEgressGuard(context, opts = {}) {
+  if (!context || typeof context.route !== 'function') return false;
+  const log = opts.log || (() => {});
+  const assertSafe = opts.egress || (await import('../../core/http/egressGuard.js')).assertSafeHttpTarget;
+  const guard = makeBrowserEgressGuard(assertSafe);
+  await context.route('**/*', async (route) => {
+    let ok = false;
+    try {
+      ok = await guard(route.request().url());
+    } catch {
+      ok = false;
+    }
+    try {
+      if (ok) await route.continue();
+      else await route.abort('blockedbyclient');
+    } catch {
+      /* 请求可能已被页面取消：无需处理 */
+    }
+  });
+  log('浏览器出站闸门已启用：子请求逐条过 SSRF 判据（host 级缓存）');
+  return true;
+}
+
+/**
+ * 渲染后把同域链接入队（深度预算 + 去重 + 总页数上限都在这里判）。
+ * 抽成独立函数是为了让 collectRendered 的圈复杂度留在软上限内——
+ * 这三个判据嵌在 BFS 循环里会与导航重试分支叠在一起，超上限后只能靠放宽基线绕过。
+ * @param {any} page Playwright Page
+ * @param {string} url 当前页 URL（同源判定的基准）
+ * @param {{ depth: number, maxPages: number, pages: any[], queue: string[], enqueued: Set<string> }} st 遍历状态
+ * @returns {Promise<void>}
+ */
+async function enqueueRenderedLinks(page, url, st) {
+  if (!(st.pages.length <= st.depth * st.maxPages + 1 || st.depth > 0)) return;
+  const hrefs = await page.$$eval('a[href]', (as) => as.map((a) => a.getAttribute('href') || ''));
+  for (const link of pickSameOriginLinks(hrefs, url)) {
+    if (!st.enqueued.has(link) && st.pages.length + st.queue.length < st.maxPages) {
+      st.enqueued.add(link);
+      st.queue.push(link);
+    }
+  }
+}
+
+/**
  * 渲染收集主入口：从 baseUrl 出发 BFS 渲染（深度 depth），收集渲染后链接、
  * XHR/fetch 端点与页面 HTML。
  * @param {object} opts
@@ -139,6 +235,7 @@ export async function launchBrowser({ headless = true } = {}) {
  * @param {number} [opts.maxPages] 总页数预算（含入口页）
  * @param {number} [opts.pageTimeoutMs] 每页导航超时
  * @param {object} [opts.launch] 测试注入：{ browser, name }（跳过真实启动）
+ * @param {(url: string) => Promise<unknown>} [opts.egress] 测试注入：出站校验（默认 assertSafeHttpTarget）
  * @param {(msg: string) => void} [opts.log]
  * @returns {Promise<{pages: {url: string, html: string}[], links: string[], endpoints: string[], browser: string}>}
  */
@@ -154,6 +251,12 @@ export async function collectRendered(opts) {
   const launched = launch ? launch : await launchBrowser({});
   const { browser, name } = launched;
   const context = await browser.newContext({ ignoreHTTPSErrors: true });
+  // [D132] 渲染进程出站闸门：子资源请求不过 httpClient，必须逐条过 SSRF 判据。
+  // 装配细节在 installBrowserEgressGuard（内联会把 collectRendered 顶破复杂度基线）。
+  if (!launch) {
+    const installed = await installBrowserEgressGuard(context, { egress: opts.egress, log });
+    if (!installed) log('⚠ 该浏览器 context 不支持 route 拦截：子资源未经 SSRF 校验（请升级 playwright）');
+  }
   const page = await context.newPage();
 
   const pages = [];
@@ -177,16 +280,8 @@ export async function collectRendered(opts) {
         await page.waitForLoadState('networkidle', { timeout: Math.min(3000, pageTimeoutMs) }).catch(() => {});
         const html = await page.content();
         pages.push({ url, html });
-        // 渲染后链接入队（深度预算：pages.length 达 maxPages 自然截断；depth 控制入队层数）
-        if (pages.length <= depth * maxPages + 1 || depth > 0) {
-          const hrefs = await page.$$eval('a[href]', (as) => as.map((a) => a.getAttribute('href') || ''));
-          for (const link of pickSameOriginLinks(hrefs, url)) {
-            if (!enqueued.has(link) && pages.length + queue.length < maxPages) {
-              enqueued.add(link);
-              queue.push(link);
-            }
-          }
-        }
+        // 渲染后链接入队（深度/去重/页数预算的判据在 enqueueRenderedLinks 里）
+        await enqueueRenderedLinks(page, url, { depth, maxPages, pages, queue, enqueued });
       } catch {
         /* 单页导航失败跳过（超时/网络错误），继续下一页 */
       }

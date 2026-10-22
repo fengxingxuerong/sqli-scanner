@@ -5,6 +5,7 @@
   "useSnapshot": false,
   "useCodeCache": false,
   "assets": {
-    "sql-wasm.wasm": "server/dist-engine/sql-wasm.wasm"
+    "sql-wasm.wasm": "server/dist-engine/sql-wasm.wasm",
+    "package.json": "package.json"
   }
 }

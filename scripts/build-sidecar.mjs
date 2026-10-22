@@ -167,13 +167,25 @@ fs.mkdirSync(BINARIES_DIR, { recursive: true });
 
 // ── 1) 确保 CJS bundle 存在且新鲜 ─────────────────────────────────────────────
 const cjsEntry = path.join(DIST_DIR, 'engine.cjs');
+// [D128 缺陷修复] 旧判据只看 `server/src` **目录**的 mtime —— 改一个已有文件不会更新
+//   目录 mtime，于是改完 core/version.js 仍会「复用已有 CJS bundle」，把**旧代码**打进
+//   sidecar（本轮实测：修完版本解析后冒烟仍报旧来源，因为 bundle 没重建）。
+//   现在递归取 server/src 下所有文件与 server/index.js 的最大 mtime。
+const newestEngineSource = () => {
+  let max = fs.statSync(path.join(ROOT, 'server', 'index.js')).mtimeMs;
+  const walk = (dir) => {
+    for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
+      const p = path.join(dir, ent.name);
+      if (ent.isDirectory()) walk(p);
+      else max = Math.max(max, fs.statSync(p).mtimeMs);
+    }
+  };
+  walk(path.join(ROOT, 'server', 'src'));
+  return max;
+};
 const needBuild = (() => {
   if (!fs.existsSync(cjsEntry)) return true;
-  const srcMtime = Math.max(
-    fs.statSync(path.join(ROOT, 'server', 'index.js')).mtimeMs,
-    fs.statSync(path.join(ROOT, 'server', 'src')).mtimeMs
-  );
-  return fs.statSync(cjsEntry).mtimeMs < srcMtime;
+  return fs.statSync(cjsEntry).mtimeMs < newestEngineSource();
 })();
 
 if (needBuild) {
@@ -211,8 +223,12 @@ fs.writeFileSync(
       // [B1] 把 wasm 作为 SEA asset 内嵌：运行时 core/sqlJsLoader.js 用
       // require('node:sea').getAsset('sql-wasm.wasm') 取出后喂给 initSqlJs({ wasmBinary })。
       // 键名必须与 sqlJsLoader.js 的 SQL_WASM_ASSET 一致（现已加断言校验）。
+      // [D128] 同时内嵌根 package.json：sidecar 装在用户机器上时旁边没有仓库，
+      // 靠文件系统找版本会得到 0.0.0+unknown（旧实现就是这样谎报的）。
+      // 版本随包带走，运行时 core/version.js 用 getAsset('package.json') 读取。
       assets: {
         'sql-wasm.wasm': path.relative(ROOT, wasmForAsset).replace(/\\/g, '/'),
+        'package.json': 'package.json',
       },
     },
     null,
@@ -326,6 +342,39 @@ if (!tokenMatch) {
 }
 const token = tokenMatch[1];
 diag('✓ 引擎启动、health=200、一次性 token 已回传');
+
+// ── [D128] 版本自报核对：exe 必须报出 package.json 的版本 ────────────────────
+// 旧实现从文件系统向上找 package.json：开发树上跑得到 1.1.1，装到用户机器
+// （exe 旁边没有仓库）得到 `0.0.0+unknown` —— 开发环境永远复现不出来的谎报。
+// 现在版本作为 SEA asset 内嵌，这里断言「随包版本 == 打包时版本」，并把
+// 空目录 cwd 一起验掉（exe 自报版本不得依赖磁盘上的任何仓库文件）。
+{
+  const pkgVersion = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version;
+  const health = await new Promise((resolve) => {
+    const q = http.get({ host: '127.0.0.1', port: PORT, path: '/api/health' }, (res) => {
+      let body = '';
+      res.setEncoding('utf8');
+      res.on('data', (d) => { body += d; });
+      res.on('end', () => {
+        try { resolve(JSON.parse(body)?.data ?? null); } catch { resolve(null); }
+      });
+    });
+    q.on('error', () => resolve(null));
+    q.setTimeout(3000, () => q.destroy());
+  });
+  const got = health?.version;
+  const src = health?.versionSource;
+  if (got !== pkgVersion) {
+    try { child.kill(); } catch { /* noop */ }
+    fail(
+      `sidecar 版本自报不一致：期望 ${pkgVersion}（package.json），实际 ${got ?? '(health 读不到)'}（来源 ${src ?? '?'}）。\n` +
+        `  装到用户机器上会报错误版本；检查 sea-config.json 的 assets 是否含 "package.json"，` +
+        `以及 core/version.js 的 SEA 分支。`
+    );
+  }
+  diag(`✓ 版本自报一致：${got}（来源 ${src}；cwd 为空目录，不依赖仓库文件）`);
+}
+
 
 // ── 5b) 直连 SQLite 真扫（B1 的核心验收）────────────────────────────────────
 // 起真实 sqlite 库（driverType=sqljs + initSql 建表），跑一次直连扫描。

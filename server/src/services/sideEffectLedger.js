@@ -32,8 +32,9 @@
 // ============================================================================
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, isAbsolute, join } from 'node:path';
 import { logger } from '../core/logger.js';
+import { AppError, ErrorCode } from '../core/errors.js';
 import { ledgerRoot } from './scanLedger.js';
 
 /** 副作用类型（决定撤销语义） */
@@ -46,11 +47,37 @@ export const SIDE_EFFECT_KINDS = Object.freeze({
 });
 
 /**
+ * [D132 2026-10-23] 校验 scanId 只作**单层目录名**——`join(ledgerRoot(), scanId, ...)` 之前
+ * 完全没校验，而 scanId 来自 REST 查询串/请求体（`/api/exploit/side-effects?scanId=...`
+ * 与 cleanup 的 body），攻击者（或本机任意进程，回环无鉴权时）可用 `../../x` 越界读写
+ * `side-effects.json` 并在任意可写位置递归建目录。
+ *
+ * 与 `scanLedger.js` 的 safeScanId 同一口径（同一类缺陷，两处各写一份是它复发的根源，
+ * 因此判据保持逐字对齐；之所以不抽公共函数：两个模块的目录语义独立演进，
+ * 抽出来反而要把「ledger 根相同」这个巧合固化）。
+ * @param {unknown} scanId 调用方给的扫描 id
+ * @returns {string} 安全的单层目录名
+ * @throws {AppError} scanId 含路径分隔符 / `..` / 绝对路径 / NUL 时
+ */
+function safeScanId(scanId) {
+  const s = String(scanId ?? '');
+  if (!s || s === '.' || s === '..' || /[\\/]/.test(s) || isAbsolute(s) || s.includes('\0')) {
+    throw new AppError(
+      ErrorCode.SCAN_ID_INVALID,
+      `sideEffectLedger: 非法 scanId（不得包含路径分隔符或 ..）：${s.slice(0, 80)}`
+    );
+  }
+  return s;
+}
+
+/**
  * 副作用登记表（按 scanId 分文件）。
  * 结构：{ scanId, createdAt, effects: [ {id, kind, target, detail, reversible, undo, recordedAt, cleanedAt, cleanResult} ] }
+ * @param {unknown} scanId 扫描 id（经 safeScanId 校验）
+ * @returns {string} 登记表绝对路径
  */
 function sideEffectsPath(scanId) {
-  return join(ledgerRoot(), String(scanId), 'side-effects.json');
+  return join(ledgerRoot(), safeScanId(scanId), 'side-effects.json');
 }
 
 /**

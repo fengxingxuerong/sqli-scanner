@@ -25,7 +25,7 @@ import { isExploitEnabled } from '../src/core/exploitFlag.js';
 // [P0-SEC 2026-09-09] --scope 接线：CLI 直走 ScanManager 不经 scanRoutes，需在本层完成
 // 「目标先校验 + 按 scanId 登记」，否则 --scope 是静默 no-op（httpClient 逐跳取用登记项）。
 import { parseScope, assertInScope, assertDirectDbInScope, registerScanScope, releaseScanScope } from '../src/core/scopeGuard.js';
-import { printHelp } from './cli/help.js';
+import { printHelp, printVersion } from './cli/help.js';
 import { readFileSync } from 'node:fs';
 import { parseXmlBody, xmlLeafPaths } from '../src/core/xmlBody.js';
 // [D24 2026-10-09 扩展生态] 自定义检测条目：validate（纯校验）+ merge（冲突拒绝）+ ALS 注入
@@ -966,6 +966,11 @@ const invokedDirectly = (() => {
 })();
 
 if (invokedDirectly) {
+  // [D132] -V/--version：入口元信息查询，在 parseArgs 之前接管。旧行为是
+  // `--version` 被判成「无法识别的参数」直接 exit 2（发包/排障第一步就问版本）。
+  // 放在 main() 之外有两个理由：① 版本查询不该要求 -u；② main() 是复杂度基线里的
+  // 存量函数（只许持平），多一个分支就会顶破基线。
+  if (process.argv.includes('--version') || process.argv.includes('-V')) await printVersion();
   main().catch((e) => {
     logger.error(`CLI 执行失败：${e.message}`);
     console.error(e.message);

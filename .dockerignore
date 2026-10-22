@@ -18,3 +18,13 @@ tests/
 docker-compose*.yml
 .DS_Store
 coverage/
+# [D132] 桌面壳与 e2e 靶场不参与镜像构建，却会把上下文撑到 GB 级
+#（本机实测：src-tauri/target 1.1 GB + e2e 210 MB + .box-agent-scratch 2 GB）
+src-tauri/
+e2e/
+logs/
+reports/
+deliverables-demo/
+.box-agent*/
+.workbuddy/
+*.artifact.json

@@ -9,7 +9,6 @@
     "server/src/engine/Extractor.js": 7,
     "server/src/engine/blindExtractor.js": 7,
     "server/src/engine/detectors/BooleanBlindDetector.js": 7,
-    "server/src/engine/discovery/browserCrawler.js": 7,
     "server/src/engine/extractScope.js": 9,
     "server/src/engine/scan/detect.js": 9,
     "server/src/engine/scan/prefilter.js": 8,
