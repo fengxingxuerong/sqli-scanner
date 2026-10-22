@@ -196,6 +196,12 @@ jobs:
       #   `app.listen(PORT, HOST)` ⇒ 容器内只绑回环，端口映射的流量到不了该 socket；
       #   而 healthcheck 打的是容器内 127.0.0.1（照常通过）⇒ compose 报 healthy 但外部不可达。
       #   该判据静态核对配置文本，无需 docker（放在 lint job，与 ci-local 的 docker 排除无关）。
+      # [D129 2026-10-23] 这一行原来只跑 `--selftest`，而 selftest 一进函数就 return
+      #   ⇒ **CI 从不检查脏工作区 / tag↔版本 / Tauri npm↔crate 同线**，D77 那类漂移
+      #   能一路绿到打包末尾。CI checkout 必为干净树（脏工作区在开发者机器上才出现），
+      #   故真跑在 CI 里是安全的；tag 推送时这一关顺带把「tag 与 package.json 不一致」拦住。
+      - run: node scripts/release-check.mjs
+        name: 发布前一致性（干净工作区 / tag↔版本 / Tauri 版本线）
       - run: node scripts/release-check.mjs --selftest
         name: 发布门禁判据自证（对合成分支必须有反应）
       # [P1-ADD 2026-09-19] CRS 执行器保真度门禁。本仓所有 WAF 绕过数字都出自**自实现的
@@ -243,7 +249,20 @@ jobs:
         name: e2e 靶场接线状态（已接线 ⇄ 已正名）
       - run: npm run e2e:wiring:selftest
         name: e2e 接线判据自证（不恒真）
-      - run: npx eslint .
+      # [D129 2026-10-23] 三道「只在本机 ci-local 里跑、CI 一步都没跑」的门禁接线。
+      #   本仓自己的验证报告（docs/verification-2026-10-22-full-sweep.md）已把它们
+      #   记成「CI 与本机门禁漂移」：本机能绿、CI 看不见，等于对合并/发布没有约束力。
+      - run: node scripts/greenguard-check.mjs
+        name: 恒绿嫌疑检查（门禁脚本不得"无论如何都 exit 0"）
+      - run: node scripts/greenguard-check.mjs --selftest
+        name: 恒绿嫌疑判据自证
+      - run: node scripts/gate-recorder.mjs --selftest
+        name: 门禁运行记录器判据自证（三态可区分）
+      - run: node scripts/coverage-calibration.mjs
+        name: 覆盖率阈值校准（配置合理 + 门禁确实会拦）
+      - run: node scripts/readme-flag-coverage.mjs --selftest
+        name: CLI 旗标覆盖判据自证（README/help 双向核对）
+      - run: npm run lint
         name: ESLint
       # [DECISION-2026-09-22] e2e 辅助模块的单测（纯 Node，无 MySQL 依赖）。
       # 为什么需要这一步：`e2e/lib/suiteVerdict.mjs` 决定验收套件的「红」被记到环境头上
