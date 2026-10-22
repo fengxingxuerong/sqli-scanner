@@ -66,7 +66,7 @@ sqli-scanner 是**攻击性安全工具**，自身也是攻击面的一部分。
 |---|---|---|
 | 服务端（`server/`，生产依赖 223 个） | **0 vulnerabilities** | D132 升级 `follow-redirects` 1.16.0 → 1.16.1 后清零（原 1 high，经 axios 传递） |
 | 根包运行期依赖（React/MUI/axios 等） | **0 vulnerabilities** | 同上 |
-| 根包 devDependencies | **2 critical + 2 moderate**（`vitest` / `tinypool` / `@vitest/mocker`） | 只影响**本机跑测试**：利用需要执行不受信任的测试代码/worker 选项；生产安装 `--omit=dev` 不含它们。修复需 vitest 3→5 大版本升级，已排期；在此之前**不要把未知来源的测试文件加进仓库再跑** |
+| 根包 devDependencies | **2 critical + 2 moderate**（`vitest` / `tinypool` / `@vitest/mocker`） | 只影响**本机跑测试**：利用需要执行不受信任的测试代码/worker 选项；生产安装 `--omit=dev` 不含它们。**已实测升级到 vitest 5**：依赖可解、574/574 全过、根包 audit 归零，但 v5 的覆盖率口径整体下移约 8pt（低于既有阈值）且本地耗时 90s→242s，按「不为变绿放宽校准阈值」的纪律**回退**，列为独立批次（重测 + 同批重定阈值，见 TODO）。在此之前**不要把未知来源的测试文件加进仓库再跑** |
 
 > 复现：`npm audit`（根，含 dev）与 `cd server && npm audit`（生产）。
 > Docker 镜像用 `npm ci --omit=dev`，因此不携带 devDependency 告警面。

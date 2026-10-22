@@ -33,8 +33,20 @@
 - **显式 UNION 注入点的 union 通道漏报**（report-contract 套件）：同上，需 MySQL 复现。
 - **fileWrite 真闭环**：自报语义已修（D131），但环境侧还要 `secure_priv` 与写路径对齐，
   需带 MySQL 的机器复跑 `node e2e/acceptance.mjs --only=file-write`。
-- **vitest 3 → 5 升级**：清掉 devDependencies 的 2 critical（tinypool/RCE gadget）。
-- **Docker 构建上下文约 3.3 GB**：`.dockerignore` 未排除 `src-tauri/`、`e2e/`、`logs/`。
+- **vitest 3 → 5 升级**：已实测尝试并**回退**（2026-10-23，证据见下），不是"没时间做"。
+  - 依赖可解：`vitest@5.0.5 + @vitest/coverage-v8@5.0.5 + @types/node@^24` 安装成功，
+    功能面 **574/574 全过**、根包 `npm audit` → **0 vulnerabilities**（清掉 2 critical + 2 moderate）。
+  - 两个卡点：① **覆盖率口径整体下移约 8pt**（statements 93.16 → 84.73、lines 91.5 → 87.3，
+    低于既有的 88/88 阈值）——这是 v5 覆盖率语义变化，不是代码退化；按本仓纪律
+    「不为变绿放宽校准阈值」，需要先按新口径重测再一次性重定基线（属独立批次）。
+    ② 本地单跑耗时 90s → **242s**（v5 的模块隔离/导入统计变化；CI 并行档未测）。
+  - 复现：`npm i -D vitest@5.0.5 @vitest/coverage-v8@5.0.5 "@types/node@^24"` →
+    `npx vitest run`（过）→ `npx vitest run --coverage`（阈值红）。
+  - 下次做这件事的顺序：先升 v5 → 用新口径重测覆盖率 → **同一批**重定 `vitest.config.ts`
+    阈值与 `docs/_facts.json` → 再评估 CI 耗时；不要只改阈值。
+- **Docker 镜像未实测**：`.dockerignore` 已排掉 `src-tauri/`、`e2e/`、`logs/`、`reports/`
+  等 GB 级目录（D132），但本机无 Docker ⇒ 镜像构建与容器内冒烟仍未跑过；CI 的 `docker`
+  job 会兜这一层，首次推送后看它。
 - **远端历史**：本地比 origin/master 多 50+ 提交且 `origin/master` 在本地已 gone；
   推送前需确认 force-push 策略与 tag 归属（v1.2.0 只在本地打过）。
 
