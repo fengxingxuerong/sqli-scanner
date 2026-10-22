@@ -1,6 +1,6 @@
 # sqli-scanner
 
-[![Tests](https://img.shields.io/badge/tests-4259%20passing-brightgreen)](#测试)[![CI](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml/badge.svg)](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml)
+[![Tests](https://img.shields.io/badge/tests-4298%20passing-brightgreen)](#测试)[![CI](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml/badge.svg)](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml)
 [![Dependencies](https://img.shields.io/badge/dependencies-0%20known%20vulns-brightgreen)](#环境变量)
 
 > CI 徽章为真实状态（仓库地址已定，run#90 起全绿）。发布判定仍以 `CHANGELOG.md`
@@ -134,6 +134,7 @@ OWASP 分类统一为 `A03:2021-Injection`。**未收录的通道不会被静默
 |------|------|
 | **一键扫描** | 三种形态：Web UI（输入 URL → 点击开始 → 查看报告）/ **CLI 一条命令出全套报告**（`npm run scan -- -u <url>`）/ REST API。CLI 形态见「一键扫描」小节 |
 | **结构化漏洞报告** | HTML / JSON / Markdown / SARIF / CSV / manifest，每条漏洞含**漏洞类型(CWE·OWASP) / 风险等级(CVSS) / 受影响参数 / 利用证明(curl·原始报文) / 修复建议**，且明确标注扫描范围与结论可信度 |
+| **人工裁决（triage）** | 交付前给每条 finding 标注 `open / confirmed / false_positive / accepted_risk` + 备注；按「方法+目标+位置+参数+技术」稳定指纹**跨复扫生效**，全部导出格式透传（SARIF 误报映射为 external suppression）。裁决**不改变** verdict、风险等级、漏洞条数或退出码 |
 | **凭据风险标注** | `--passwords` 取回的账号哈希按**格式**识别算法（MySQL native / caching_sha2、PostgreSQL md5 / SCRAM-SHA-256、SQL Server 0x0100 / 0x0200、bcrypt / argon2 等）并标注强度与风险，报告新增「凭据风险」一节。判定**完全离线、不做爆破**，且报告**不回显原始哈希** |
 | **官方 GitHub Action** | 仓库根 `action.yml`（composite）：一条 `uses:` 跑完扫描 → 产出报告套件 → 上传 code scanning → 按退出码判红。引用方式与所需权限见 [docs/CI-集成.md](docs/CI-集成.md) |
 | **9 种检测技术** | union / error / boolean / time / stacked / oob / second_order / inline / nosql |
@@ -289,7 +290,8 @@ npm run quality:all     # 【门禁】一键全量质量校验（测试/覆盖�
 | `/api/scan/:id/stop` | POST | 停止扫描（未知 id → SCAN_NOT_FOUND；已终态不改写状态） |
 | `/api/scan/:id/pause` | POST | 暂停扫描（暂停在**请求边界**生效：期间不再向目标发包） |
 | `/api/scan/:id/resume` | POST | 恢复扫描 |
-| `/api/scan/:id/report` | GET | 获取报告（与导出同源，含可复制的 PoC；内存回收后读台账） |
+| `/api/scan/:id/report` | GET | 获取报告（与导出同源，含可复制的 PoC 与人工裁决；内存回收后读台账） |
+| `/api/scan/:id/findings/:findingId/triage` | PATCH | 人工裁决（body：`status=open/confirmed/false_positive/accepted_risk` + `note`；findingId 可用 vuln.id 或稳定 findingKey；不改变 verdict/退出码） |
 | `/api/scan/:id/report/export` | GET | 导出报告（json / html / csv / markdown / md / db-json / sarif；无拖库数据的 db-json → 400；`?redactPasswords=1` 运行时覆盖脱敏） |
 | `/api/scan/:id/report/ai` | POST | AI 报告生成（数据外发为 opt-in，未设端点即拒绝） |
 | `/api/scan/:id/report/ai/configs` | GET | AI 可用配置清单（不回显 Key） |
@@ -394,7 +396,7 @@ backend/  ← Express + Node.js
 # 前端测试（574 个用例）
 npm test
 
-# 服务端测试（3691 个用例）
+# 服务端测试（3730 个用例）
 cd server && npm test
 
 # 全部测试
@@ -419,8 +421,8 @@ npm run artifact:drift   # 入库的 e2e 基线产物必须等于当前代码跑
 ## 项目状态
 
 - TypeScript: 零错误
-- 前端测试: 574/574 通过（覆盖率门禁 stmts 93.31 / branch 84.84 / func 81.81，阈值 88/77/67）
-- 服务端测试: 3691 用例（3685 pass / 0 fail / 6 skip，并发口径 2026-10-20 复测；6 skip 为环境依赖显式跳过。覆盖率 lines 91.39 / branch 80.65 / func 84.54，阈值 85/74/77）
+- 前端测试: 574/574 通过（覆盖率门禁 stmts 93.16 / branch 84.47 / func 80.63，阈值 88/77/67）
+- 服务端测试: 3730 用例（3724 pass / 0 fail / 6 skip，并发口径 2026-10-21 复测；6 skip 为环境依赖显式跳过。覆盖率 lines 91.52 / branch 80.43 / func 84.83，阈值 85/74/77）
 - 一键扫描: `npm run scan -- -u <url>`（CLI 一条命令产出 HTML/JSON/Markdown 全套报告 + manifest，退出码可直接进 CI 门禁）
 - Tamper 插件: 234 个（含批次 D3 新增 scalarselectinline；含 v24 增量 20 个，对齐 sqlmap 官方 tamper 全集，含官方 CRS/libinjection 实测组合 uniontable+odbcbrace；含批次 D13 新增 5 件上游形态变体 *nospace/*open/*block，真机 A/B 判决前不进默认链）
 - WAF 绕过能力: 200+ 插件链式组合，覆盖 62 个 WAF 厂商指纹识别 + 推荐

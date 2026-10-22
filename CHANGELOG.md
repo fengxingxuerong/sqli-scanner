@@ -65,6 +65,68 @@
 
 ## [Unreleased]
 
+### 2026-10-22 批次 D126 · 验收前置 schema 自愈（把「环境缺失」从「真值漏检」里摘出来）
+
+**动机**：全方面验证（`docs/verification-2026-10-22-full-sweep.md`）里两个 MySQL 套件
+红成 8/11 与 3/11，报告写「真值漏检」，第一轮归因指向「boolean 通道在低信噪比场景退化」。
+D126 用同代码同机器做 A/B：**空库（只有 `CREATE DATABASE`）1/11 与 3/11，跑过 schema
+初始化后 11/11 与 11/11** —— 靶站 `SELECT ... FROM users/products` 缺表即 SQL 报错，
+真/假条件响应同形（都落到错误页）⇒ boolean / time 拿不到信号。
+**环境缺失被伪装成了能力退化**，这是门禁最容易骗人的一种红。
+
+**改动**：
+
+- 新增 `e2e/lib/sqliSchema.mjs`：`probeSqliSchema`（只读探测，区分「库不可用」与
+  「库在但缺表/空表」，两个 `ok` 字段分开）/ `ensureSqliSchema`（缺库建库、缺表建表、
+  空表灌种子，**既有数据不覆盖**）/ `schemaVerdict`（纯函数判定）/ `assertSafeDbName`
+  （库名白名单，挡住 `USE` 拼接）。
+- 四处共用同一份实现：`e2e/real-mysql-lab/init-db.mjs`、`e2e/pentest-lab/verify.mjs`、
+  `e2e/real-mysql-lab/verify.mjs`、`e2e/acceptance.mjs` 的 MySQL 前置（自愈成功写进
+  报告前置行；失败也留痕，避免后续「漏检」被误读成引擎问题）。
+- 单测 `e2e/lib/sqliSchema.test.mjs` 11 例（含缺表/空表/幂等/库名注入），
+  并做**缺陷注入复验**（把 missing 判定改坏 → 3 例转红，还原后 11/11）。
+
+**推翻记录**（§3.5 协议）：原结论「boolean 通道在低信噪比场景大面积失效」→ 反证
+（空库/有表 A/B）→ 新结论「引擎通道正常，缺陷在 e2e 前置不校验 schema」。
+台账条目 `boolean-channel-false-alarm-d126`（status=refuted）。
+
+**复验**：空库 `node e2e/acceptance.mjs --only=pentest-lab,real-mysql-lab` →
+前置打印 `schema 自愈：新建表[users、products] 灌种子[users、products]`，**2 PASS / exit 0**；
+`node --test "e2e/lib/*.test.mjs"` → 34/34。
+
+### 2026-10-22 批次 D125 · 人工裁决（finding triage）：交付前把「引擎认为」变成「人确认」
+
+**动机**：扫描器只能回答「引擎认为有没有」；真实渗透交付还要回答「人是否认可」。
+此前报告里没有地方记录「这条已人工复现」「这条是误报」「客户接受风险」——顾问只能在外部的
+表格里另记一份，复扫后两份记录必然漂移。本批把裁决做成报告的一等字段。
+
+**改动**：
+- 新增 `services/findingTriage.js`：稳定指纹（方法 + 目标 origin+path + 位置 + 参数 + 技术）+
+  `<ledger>/triage.json` 原子持久化 + `attachTriage` 只读合并（不改内存报告）。
+- `api/scanRoutes.js`：`PATCH /api/scan/:id/findings/:findingId/triage`；`reportWithFallback`
+  统一合并裁决；**导出改为与查看/差异同源**（此前导出自己再读一次台账，会绕过 triage）。
+- `ReportGenerator`：CSV/Markdown/HTML 增「裁决/裁决备注」列与汇总句；SARIF 每条 result 带
+  `properties.triage`，误报映射为 `external` suppression + `partialFingerprints.findingKey`。
+- MCP `get_findings`/`get_report` 读取时同样合并（MCP 不是取数旁路）。
+- Web UI：漏洞卡片显示裁决芯片，详情内提供状态下拉 + 备注 + 保存（`TriageControls`）；
+  选中态改为按 id 派生，保存后刷新报告仍看到最新对象。
+- 类型/i18n：`Vulnerability.triage`、`ReportSummary.triage`、`FindingTriage`；zh/en 双语文案。
+
+**验证**：
+- `server/tests/findingTriage.test.js` **6/6**（默认 open/跨复扫指纹/不同参数不串味/清除/
+  非法输入/四种导出+SARIFF suppression）。
+- `server/tests/api.findingTriage.test.js` **3/3**（真 express + createRoutes：PATCH→GET→导出；
+  按 findingKey 更新；非法状态/未知 finding/未知字段/不存在扫描均 4xx）。
+- 浏览器实操（browser-use + 真 `node server/index.js` + 合成台账报告）：展开漏洞 → 选择
+  已确认 → 填备注 → 保存；卡片芯片、下拉值、`summary.triage`、`triage.json` 与四种导出
+  全部一致；再切「误报」复验。
+- `npx tsc --noEmit`、`npm run build`、i18n parity **3/3** 通过；`gate:close` **22/22**。
+
+**边界**：
+- 裁决是人工标注：**不改变** verdict、风险等级、漏洞条数、退出码；误报仍保留在 `vulns` 中。
+- 指纹基于方法+目标 origin/path+位置+参数+技术；目标迁移/路径改变后需重新裁决（不会误套旧结论）。
+- 存储为单进程原子写文件；多实例共享部署需要外部存储/锁（当前部署模型是单服务进程）。
+
 ### 2026-10-21 批次 D124 · 覆盖范围披露（未覆盖面 + 浏览器降级进报告）
 
 **动机（同一个病根的两面）**：报告只写「未检出」，但用户无法区分「测了没洞」与

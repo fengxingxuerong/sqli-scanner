@@ -51,6 +51,7 @@ node scripts/one-click-scan.mjs -u "http://target/page?id=1"   # 一条命令出
 | `vulns: []` 且 verdict=`no_vulnerability_detected` | 引擎按配置跑完且无命中。若你没配认证（`--auth`/`--cookie`/`--refresh-url`），先补认证再下结论。**⚠ 还要看 `summary.unverifiedSurfaces`**：目标整体健康 ≠ 每个注入面都测过（见下行） |
 | 报告存在 `summary.unverifiedSurfaces` / `summary.unverifiedSentence` | **[D123]** 有注入点**没能完成有效检测**（被 WAF/守卫拦、或网络层失败），且已按注入面摊开（如「HTTP 请求头 2/2」）。这些点的「未检出」是**没测成**，不是「测了没洞」——引用阴性结论时必须同时声明它们是未验证面，且 `verdictNote` 已带有该提示 |
 | 报告存在 `summary.uncoveredSurfaces` / `summary.crawlBrowserFallback` | **[D124]** `uncoveredSurfaces` = 这些注入面**按当前配置压根没测**（如默认 level=1 的 cookie/header/path/表单）；`crawlBrowserFallback` = 请求了 `--crawl-browser` 但降级成 HTTP 爬虫（SPA 的 XHR 面可能整体未发现）。两者都不影响已测面的结论，但引用「未检出」时必须同时声明覆盖缺口 |
+| 报告 `vuln.triage` / `summary.triage` 存在 | **[D125]** 这是**人工交付标注**（open/confirmed/false_positive/accepted_risk），不是引擎检测结论；误报仍保留在 `vulns` 中，且**不改变** verdict、风险等级或退出码。对外汇报按裁决口径引用，不要把它当成重新扫描的结果 |
 | verdict=`session_expired` / `inconclusive` | 会话半途失效或签名/加密把请求拒了。修认证或配 `--request-script` 后重扫 |
 | 报告 `summary.dbmsEvidence.caveat` 存在 | 命中的 DBMS 只有模板适配、未经真引擎验证——对外引用时必须带上该告警 |
 

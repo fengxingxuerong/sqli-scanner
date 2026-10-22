@@ -5,6 +5,51 @@
 
 ---
 
+## 2026-10-22 批次 D126 · 验收前置 schema 自愈
+
+**背景**：全方面验证里 `pentest-lab` 8/11、`real-mysql-lab` 3/11，报告写成「真值漏检」。
+同代码同机器 A/B 证明是**测试库缺表**（空库 1/11 与 3/11；有表 11/11 与 11/11）——
+环境缺失被伪装成引擎退化，门禁红得指错方向。
+
+**本批**：
+- `e2e/lib/sqliSchema.mjs`：`probeSqliSchema` / `ensureSqliSchema` / `schemaVerdict` /
+  `assertSafeDbName`（库名白名单）。
+- 四处共用：`init-db.mjs`、`pentest-lab/verify.mjs`、`real-mysql-lab/verify.mjs`、
+  `acceptance.mjs` MySQL 前置（自愈/失败都写进报告前置行）。
+- 单测 11 例 + 缺陷注入复验；空库跑两套件 → 2 PASS / exit 0。
+
+### 待推进
+
+- **MySQL 8.x 方言复验**：本轮只在 MariaDB 10.11 跑通 11/11；CI 的 MySQL 8.x 未同口径复跑。
+- **其他套件的隐性数据依赖**：`blackbox-lab` / `fullchain-lab` 等同样假设库里有表，
+  是否要一并接 `ensureSqliSchema` 需逐个确认（它们登记为参考靶场，暂不动）。
+- **fileWrite 的 `wrote` 置位条件**：本轮未改（环境侧是 `secure_file_priv` 目录不匹配；
+  但「未验证落盘却置 wrote」仍应单独修，见验证报告 P0-4）。
+
+---
+
+## 2026-10-22 批次 D125 · 人工裁决（finding triage）
+
+**背景**：真实渗透交付需要「人确认/误报/接受风险」的标注，而报告只有引擎命中；
+顾问在外表另记一份，复扫后必然漂移。
+
+**本批**：
+- `services/findingTriage.js`：稳定指纹 + `<ledger>/triage.json` 原子存储 + `attachTriage`。
+- `PATCH /api/scan/:id/findings/:findingId/triage`；报告查看/导出/MCP 统一合并。
+- CSV/MD/HTML 增裁决列与汇总；SARIF `properties.triage` + 误报 external suppression。
+- Web UI 裁决控件（状态下拉 + 备注 + 保存）与卡片芯片；zh/en 文案。
+- 测试 6 + 3；浏览器实操确认/误报两态；typecheck/build/i18n/gate 全绿。
+
+### 待推进
+
+- **批量裁决**：按技术/风险/参数批量设置（当前逐条）。
+- **裁决审计**：记录操作者与变更历史（当前只存最后状态 + updatedAt；多用户部署前必须补）。
+- **MCP 写入**：MCP 目前只读裁决（`get_findings` 透传）；是否暴露 `set_finding_triage`
+  需先定授权边界（代理不应替人做交付结论）。
+- **跨实例存储**：当前单进程原子写；多副本部署需外部 KV/DB + 并发控制。
+
+---
+
 ## 2026-10-21 批次 D124 · 覆盖范围披露（未覆盖面 + 浏览器降级进报告）
 
 **背景**：报告写 `no_vulnerability_detected` 时，用户分不清「测了没洞」与「压根没测」。

@@ -222,6 +222,15 @@
       "refute_cmd": "cd server && node --test --test-force-exit \"tests/unverifiedSurfaces*.test.js\"",
       "recheck_batch": "D123（2026-10-21）：回答「能否作为真实渗透工具」时识别出的第一优先级缺口——WAF 场景的结论质量，而非检出率数字。",
       "caveat": "只覆盖本引擎**自己发包**碰到的拦截；目标对整类请求直接断连、或 WAF 返回与业务页无法区分的假响应时，blockedRequests 记不到（仍会落进 netErr/未命中）。真实云 WAF 授权样本仍未采集，本批给的是「可解释结论」，不是绕过率。skipReason 之外的其他「引擎有意不测」来源若未来新增，需同步登记到判据里，否则会变成假未验证面。"
+    },
+    {
+      "id": "boolean-channel-false-alarm-d126",
+      "claim": "全方面验证报告（2026-10-22）把「刁钻靶场 8/11、真 MySQL 3/11」判为 boolean 通道在低信噪比场景退化",
+      "status": "refuted",
+      "refuted_by": "2026-10-22 D126 同代码同机器对照：测试库只有 CREATE DATABASE、无 users/products 表时 1/11 与 3/11（逐条复现 acceptance 的 10 个失败）；跑过 schema 初始化（users 6 行 / products 4 行）后两套件均 11/11（含 noisy/rdr/waf403/empty/blind/b64url/time/mp/json_deep/enc/bl）。根因：靶站查询缺表即 SQL 报错 ⇒ 真/假响应同形 ⇒ boolean/time 无信号；环境缺失被伪装成引擎退化",
+      "refute_cmd": "DROP DATABASE sqli_lab; CREATE DATABASE sqli_lab; node e2e/acceptance.mjs --only=pentest-lab,real-mysql-lab   # 期望：前置自带 schema 自愈 → 2 PASS / exit 0",
+      "evidence": "docs/verification-2026-10-22-full-sweep.md（推翻记录一节）；e2e/lib/sqliSchema.mjs + sqliSchema.test.mjs（11 例，含缺陷注入复验）",
+      "caveat": "新结论仅覆盖 MariaDB 10.11 本机；MySQL 8.x 方言差异未复验，但与本条推翻无关（缺表在任何方言下都无信号）"
     }
   ]
 }
