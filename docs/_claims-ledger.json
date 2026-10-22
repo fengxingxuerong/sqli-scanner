@@ -29,7 +29,7 @@
       "claim": "sqli-labs 23 关：23/23 vs sqlmap 14/23",
       "status": "verified",
       "evidence": "docs/sqlmap-benchmark/sqlmap-benchmark-2026-10-13-level1-runs3.md",
-      "refute_cmd": "npm run bench -- --suite sqli-labs",
+      "refute_cmd": "node e2e/sqlmap-benchmark/run.mjs（需本机 sqlmap + 自建复刻靶站；npm run sqlmap-benchmark 同义）",
       "caveat": "2026-10-13 口径；引擎此后经 D54-D67 多批改动，数字需复跑才可再引"
     },
     {
@@ -45,7 +45,7 @@
       "claim": "（已作废）tamper 挂链可有效绕过 CRS：PL2 8→9",
       "status": "refuted",
       "evidence": "执行器保真度实测仅 60.7%（`(?i)` 内联标记被吃、TX/MATCHED_VARS 未实现）⇒ 修复后保真度 99.3%，同一批探针结论全变（PL1 无增益 / PL3/PL4 全零）",
-      "refute_cmd": "node e2e/waf-real/crs-fidelity.mjs（保真度门禁）",
+      "refute_cmd": "npm run waf-fidelity（= node e2e/waf-real/crs-equivalence.mjs，保真度门禁；族 930 用 npm run waf-fidelity:930）",
       "history": "原口径出自 docs/waf-绕过能力实测口径.md，2026-09-19 整体推翻；旧数字保留作历史，禁止引用"
     },
     {

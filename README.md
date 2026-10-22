@@ -1,7 +1,7 @@
 # sqli-scanner
 
-[![Tests](https://img.shields.io/badge/tests-4298%20passing-brightgreen)](#测试)[![CI](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml/badge.svg)](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml)
-[![Dependencies](https://img.shields.io/badge/dependencies-0%20known%20vulns-brightgreen)](#环境变量)
+[![Tests](https://img.shields.io/badge/tests-4312%20passing-brightgreen)](#测试)[![CI](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml/badge.svg)](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml)
+[![Dependencies](https://img.shields.io/badge/prod%20deps-0%20known%20vulns-brightgreen)](SECURITY.md)
 
 > CI 徽章为真实状态（仓库地址已定，run#90 起全绿）。发布判定仍以 `CHANGELOG.md`
 > 与本地/远端门禁结果为准。
@@ -254,6 +254,7 @@ npm run quality:all     # 【门禁】一键全量质量校验（测试/覆盖�
 | 用途 | 旗标 |
 |---|---|
 | 目标输入 | `--url` `--request-file` `--batch` `--direct` `--headers` `--header` `--log-file` |
+| 运行与元信息 | `--version`（只打印版本号并退出，与 package.json / 桌面壳同一事实源） |
 | 注入请求构造 | `--method` `--body` `--cookie` `--header` `--session-file` `--known-point` |
 | 认证与会话 | `--auth` `--auth-type` `--login-url` `--login-user-field` `--login-pass-field` `--refresh-token` `--refresh-field` `--csrf-method` `--csrf-refresh` |
 | 检测控制 | `--test-filter` `--test-skip` `--no-verify` `--use-registry` `--smart` `--time-baseline-every` `--param-mine` `--crawl-browser` `--forms` `--crawl` |
@@ -396,7 +397,7 @@ backend/  ← Express + Node.js
 # 前端测试（574 个用例）
 npm test
 
-# 服务端测试（3730 个用例）
+# 服务端测试（3744 个用例）
 cd server && npm test
 
 # 全部测试
@@ -422,7 +423,7 @@ npm run artifact:drift   # 入库的 e2e 基线产物必须等于当前代码跑
 
 - TypeScript: 零错误
 - 前端测试: 574/574 通过（覆盖率门禁 stmts 93.16 / branch 84.47 / func 80.63，阈值 88/77/67）
-- 服务端测试: 3730 用例（3724 pass / 0 fail / 6 skip，并发口径 2026-10-21 复测；6 skip 为环境依赖显式跳过。覆盖率 lines 91.52 / branch 80.43 / func 84.83，阈值 85/74/77）
+- 服务端测试: 3744 用例（3738 pass / 0 fail / 6 skip，并发口径 2026-10-22 复测；6 skip 为环境依赖显式跳过。覆盖率 lines 91.52 / branch 80.43 / func 84.83，阈值 85/74/77）
 - 一键扫描: `npm run scan -- -u <url>`（CLI 一条命令产出 HTML/JSON/Markdown 全套报告 + manifest，退出码可直接进 CI 门禁）
 - Tamper 插件: 234 个（含批次 D3 新增 scalarselectinline；含 v24 增量 20 个，对齐 sqlmap 官方 tamper 全集，含官方 CRS/libinjection 实测组合 uniontable+odbcbrace；含批次 D13 新增 5 件上游形态变体 *nospace/*open/*block，真机 A/B 判决前不进默认链）
 - WAF 绕过能力: 200+ 插件链式组合，覆盖 62 个 WAF 厂商指纹识别 + 推荐
@@ -580,8 +581,8 @@ node e2e/redteam-lab/strict-compare.mjs --runs=3     # 合并出定版表
 
 | 指标（同分母：19 漏洞点 + 7 安全点） | sqli-scanner（默认档） | sqlmap 1.10.7（--level 1 --risk 1） |
 |---|---|---|
-| 漏洞检出 | **19/19** | 16/19 |
-| 安全点误报 | **0/7** | **6/7**（F18-F22、F24 全部 3/3 轮稳定误报） |
+| 漏洞检出 | **19/19** | 14/19（D102 重判；原表 16/19 已作废） |
+| 安全点误报 | **0/7** | **0/7**（D102 重判；原表 6/7 系判定脚本自伤，已作废） |
 | 命中场景中位耗时 | **0.7s** | 21.7s |
 
 - 双方各跑 3 轮，检出取多数决、耗时取中位；**两侧结果全部逐轮稳定（零抖动）**。
@@ -591,7 +592,11 @@ node e2e/redteam-lab/strict-compare.mjs --runs=3     # 合并出定版表
   同名大小写头合并致 D11-cookie 静默假阴性），D91 修复后复跑恢复 19/19。
   **引用本表时以 D91 修复后复跑（`results-r2.json`）为准**；10-05 三轮证据台账标 refuted。
   耗时中位 747ms/0.7s 未随 D91 重测，**不再对外引用**。
-- 引擎的差异化能力点：`E15-second-order`（二阶跨角色）引擎 3/3 检出、sqlmap 0/3。
+- **sqlmap 侧数字已于 2026-10-18 经 D102 重判**：`sqlmap-bench.mjs` 的命中正则裸词 `/injectable/`
+  把「do not appear to be injectable」判成命中、且 `pos && !neg` 会反向误杀 ⇒ 原记的
+  16/19、6/7 实际为 **14/19、0/7**（D14-base64 / D15-param-del 是 sqlmap 真漏；
+  6 个安全点旧「误报」全为脚本自伤）。重判不重跑：`rescore-sqlmap-logs.mjs` 对原日志重算
+  → `results-sqlmap-runs3.rescored.json`。**旧数字保留于 CHANGELOG D102 作废留痕，不得再引用。**
 - 引擎的差异化能力点：`E15-second-order`（二阶跨角色）引擎 3/3 检出、sqlmap 0/3。
 - 完整逐靶点表与轮次明细：`docs/sqlmap-benchmark/redteam-strict-runs3.md`（由
   `strict-compare.mjs` 从双侧多轮原始结果合成，可复现）。
@@ -659,21 +664,24 @@ npm run acceptance:sandbox          # 同全量，但套隔离 MySQL 沙箱（33
   经 `run-with-sandbox.py` 注入沙箱连接信息后 16/16 全绿（含 fileRead/fileWrite 真闭环，
   secure_file_priv 由沙箱放行）；直连宿主的旧口径在 3306 无 MySQL 时会把 6 个套件 BLOCKED。
 
-**最近一次全量结果（2026-09-20 01:00，本机：MySQL 8.0.28 @3306 + 红队靶场 @8231 均在线）**：
-**12 PASS / 0 BLOCKED / 0 FAIL / 0 SKIP**（12 套件全绿；改到盲注提取链路后复跑仍全绿）
+**最近一次全量结果（2026-10-22，逐条证据见 [docs/verification-2026-10-22-full-sweep.md](docs/verification-2026-10-22-full-sweep.md)）**：
+**16 PASS / 6 FAIL / 3 SKIP，exit=1**（25 套件；3 SKIP 为环境不满足：OOB 真机缺 PG、
+interactsh 隧道、Juice Shop 未就绪——SKIP 不计通过）。
 
-| 套件 | 事实 |
-|---|---|
-| 服务端单测 | 1896 tests / 1895 pass / 0 fail / 1 skip（skip 为环境依赖显式跳过） |
-| 独立刁钻靶场 | 10/10 检出，安全误报 0 |
-| 检测回归 | 19 PASS / 0 FAIL |
-| 真 MySQL / 真 PG（含二阶） | 10 PASS / 全部通过（PGlite） |
-| 报告契约 | 8 项一致 / 0 不一致 |
-| CRS 人工挂链 A/B（PL1） | off 8 / on 8，安全对照零误拦 |
-| CRS 自动选链（PL1） | 技术位 8，安全误报 0 |
-| CRS 执行器保真度（官方回归集｜族 942） | 保真度 **99.6%**，未点名分歧 **0**，已消失 0，误触 2 |
-| 红队实战评测（真值对照） | 19/19（100%），安全点 7，误报 0（D91 修复后 10-17 复跑；期间曾因 axios 1.20 回归至 18/19，见 CHANGELOG D91） |
-| fileRead / fileWrite 真闭环 | PASS（文件落盘=true，隔离沙箱重试） |
+| 套件 | 本轮事实 | 状态 |
+|---|---|---|
+| 服务端单测 / 前端单测 | 3730 用例 3724 pass / 0 fail / 6 skip；vitest 66 文件 574 用例 | PASS |
+| 独立刁钻靶场（11 场景） | 8/11 → **11/11**（D126 修 schema 自愈后复跑） | PASS（原红已推翻） |
+| 真 MySQL 靶场 | 3/11 → **11/11**（同上） | PASS（原红已推翻） |
+| 报告契约 | 显式 UNION 注入点只检出 `["error"]`，union 通道漏报 | **FAIL（未决）** |
+| CRS 人工挂链 A/B（PL1） | 该轮记录 off=4 / on=4（基线 8/8） | **未决**：同一天 15:20 的 `e2e/waf-real/results/waf-real-report.md` 记录的却是 8 个技术位、安全对照零误拦（与基线持平）。两份产物互相矛盾 ⇒ 需要一次可复现的 MySQL 8 + CRS 复跑才能定性，**在此之前不得引用任一数字** |
+| CRS 自动选链（PL1） | 该轮记录技术位 4 < 基线 8 | **未决**：同上，与同日 `waf-auto` 产物口径待对齐 |
+| fileWrite 真闭环 | 自报 `{wrote:true, verified:false}` 且文件不存在 | **FAIL（自报语义已修 D131；环境侧仍待 `secure_file_priv` 对齐）** |
+| 其余 15 套件（PG / OOB / 外部裁判 / 登录编排 / 保真度 / 红队 / fileRead …） | 见各套件产物 | PASS |
+
+> 4 项未决已登记为**能力声明级**问题：对外引用检出率或 WAF 结论时必须同时声明这四点，
+> 不得用「验收通过」概括。上一版 README 此处写「2026-09-20 12 PASS / 12 套件全绿」，
+> 那是 12 套件时代的历史快照，与当前 25 套件门禁不同分母，**已删除，避免误引**。
 
 > ⚠️ **误报率的证据边界（2026-10-09 补，2026-10-13 更正，2026-10-19 更新）**：上表的「误报 0 / 19/19」
 > 全部产自**自建靶场**（`e2e/` 下 37 个靶场）。`e2e/sqli-labs/` 不是上游那个 PHP+MySQL 仓库，
@@ -682,10 +690,11 @@ npm run acceptance:sandbox          # 同全量，但套隔离 MySQL 沙箱（33
 > 所以它是**「同一自建靶场上的双方同题对照」，不是外部真值**。
 > **第三方外部裁判现在是 4 号 + 1 个 GraphQL 面裁判**（D88/D109/D111/D112/D114/D121）：
 > Juice Shop（2 个官方 SQLi + 4 安全端点 + 同源复检）、VAmPI（路径段注入 + 双实例 A/B）、
-> DVWA（PHP+MySQL + cookie/POST + impossible A/B）；OWASP Benchmark 与 DVGA 作为
-> **参考/单端点证据**（Benchmark 20/504 子集当时真值 4/12、安全 0/8；DVGA GraphQL 真值
-> **1/1、安全 0 误报**，D121 连续 3 轮；均不接门禁）。以上都是**小样本/子集**，不能外推
-> 为通用检出率或误报率；WAF 侧仍只验 ModSecurity+CRS 一家。
+> DVWA（PHP+MySQL + cookie/POST + impossible A/B）；OWASP Benchmark 按 **D115/D117 全量口径**
+> 计（query 210 + header 67 + 参数名形态 50，有效 327：真值 **178/178**、安全 **0/149**；
+> 原「20/504 子集 4/12」被 D115 推翻，**旧数字作废**），Benchmark 已是 acceptance 套件之一；
+> DVGA 为**单端点参考证据**（GraphQL 真值 1/1、安全 0 误报，D121 连续 3 轮，不接门禁）。
+> 以上仍是**子集/小样本**，不能外推为通用检出率或误报率；WAF 侧仍只验 ModSecurity+CRS 一家。
 
 **本轮 0 FAIL。** 此前两轮 FAIL 的定位与修复（CRS 执行器 `(?i:…)` 兼容性、`engine.e2e` 环境耦合假红）、
 「11 PASS / 0 SKIP 假绿」事故、门禁自身的两处缺陷修复与缺陷注入验证记录，已迁至
@@ -715,7 +724,11 @@ npm run acceptance:sandbox          # 同全量，但套隔离 MySQL 沙箱（33
 
 > 旧实现只走堆叠通道：在仅 UNION 的目标上第二条语句不会执行，但 HTTP 响应仍为 200 →
 > 旧实现据此返回 `{wrote:true, verified:false}`，**文件从未落盘**（实测文件系统确认不存在）。
-> 现增加 UNION 回落 + `via` 标注，并在未落地时返回 `ok:false`（`wrote` 仅表示请求已发出）。
+> 现增加 UNION 回落 + `via` 标注。**[D131 2026-10-23] 字段语义收紧**：`wrote` 只由
+> **外部事实**（回读内容含写入标记）置位，不再用「有没有 HTTP 响应」冒充写入成功——
+> 请求发出去但没验证落地时返回 `{ok:false, wrote:false, attempted:true, unverified:true}`，
+> 调用方仍能区分「没发」「发了没成」「真写进去了」。这就是本仓反复治理的缺陷形态
+> 「中间层自报成功、无人校验外部事实」，此处按同一判据修正。
 
 **硬前提（必须如实告知客户）**：MySQL 的 `fileRead` 同时需要
 ① 账号具备 `FILE` 权限；② **`secure_file_priv` 放行**。

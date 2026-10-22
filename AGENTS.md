@@ -44,7 +44,7 @@ node scripts/one-click-scan.mjs -u "http://target/page?id=1"   # 一条命令出
 3. `GET /api/scan/:id/report` / `GET /api/scan/:id/report/export?format=json|html|markdown|sarif|csv`
 4. 异常路径：`POST /api/scan/:id/stop | pause | resume`；单点复测 `POST /api/scan/:id/point/:pointId/retest`
 
-## 2. 结果判读（代理最容易读错的三件事）
+## 2. 结果判读（代理最容易读错的五件事）
 
 | 现象 | 正确判读 |
 |---|---|
@@ -60,7 +60,7 @@ node scripts/one-click-scan.mjs -u "http://target/page?id=1"   # 一条命令出
 - 每批改动走 **D 编号批次**（见 `TODO.md` 顶部），一次批次 = 代码 + 测试 + README/CHANGELOG 同步 + 门禁全绿。
 - `npm run readme:check`：README 与代码**双向核对**。数字类口径（方言分层 / tamper 数 / payload / 端点表）自 D53 起核对；**CLI 旗标类（D68 的 ⑯ / D69 的 ⑰）自 2026-10-14 起才真正双向**——此前门禁只核数字，「加了开关不写文档」一直没人守，实测 CLI 168 个旗标里 README 曾漏 73 个、user-guide 漏 123 个、**`--help` 自己漏 11 个**。判据实现在 `scripts/readme-consistency.mjs`（⑯⑰ 在 `scripts/readme-flag-coverage.mjs`）。
 - **收口清单已固化为一条命令：`npm run gate:close`（D71，22 项；`--quick` 跳最慢两项）。** 手写清单如下（漏一条都会被 CI 抓）：`npm run lint` + **`npm run typecheck`** + **六道门禁逐道跑**（`node scripts/{complexity,nesting,duplication,deadcode,debt,typecoverage}-guard.mjs`）+ **各门禁 `--selftest`** + **`node --test server/tests/（guard 与 wiring 类测试全量，判据见 scripts/gate-close.mjs 的 wiringTestFiles()，大小写不敏感）`** + `npm run readme:check` + `npm run facts:check` + `node scripts/ref-integrity.mjs` + `node scripts/e2e-wiring-check.mjs`（+`--selftest`）。**已漏六次**：D66 漏 typecheck、D70 漏五道门禁、D70b 漏 wiring（基线改完必须跑 wiring —— 防虚高判据在测试里，不在门禁输出里）、D94 前补 typecoverage（D87 起 JSDoc 覆盖跌破基线，pre-commit 被 SKIP_PRECOMMIT 绕过后收口清单里没有它，红到 push 才现——**跳过 pre-commit 的批次，收口清单是最后一道自留地**）、D95 补 e2e:wiring（D93 建的 param-name-lab 有入口从不执行，且该门禁只在 ci-local/CI、收口清单没有它——同一形态第二次重演；判据把注释当接线导致假阳性，一并修+自证）、**D97 修 wiring 收集（2026-10-18：wiringTestFiles() 用大小写敏感的 `includes('Guard')`，把 26 个 `*.guard.test.js`（含 D89 wafExternalParity.guard、wafSamples.guard 与新增 wafRealSamples.guard）漏在收口之外——它们只在 `cd server && npm test` 全量里被兜底跑，gate:close 看不见**）。
-- `npm run acceptance`：17 套件验收门禁，提级提交前必跑。
+- `npm run acceptance`：25 套件验收门禁，提级提交前必跑（缺 MySQL/Docker 时套件如实 BLOCKED/SKIP，不计通过）。
 - 引擎**有意零运行时 npm 依赖**（server 的 runtime deps 除外）；给引擎加能力请用 Node 内置能力。
 - 检测判据/定库签名的测试是校准过的——不要为了让测试变绿而放宽断言；行为变化必须有靶场证据。
 
@@ -104,15 +104,22 @@ node scripts/one-click-scan.mjs -u "http://target/page?id=1"   # 一条命令出
 
 ### 四、常驻待复核队列（`docs/_claims-ledger.json`）
 
-当前**已知为假、待推翻重做**的条目（发现即按二节协议处理，不得静默保留）：
+**以台账为唯一真源**（`status` 字段）：当前 24 条 = 18 verified / 5 refuted / 1 unverified。
+`refuted` 必须保留旧数字、标注作废、指向新证据，并在 CHANGELOG 留推翻链——本仓已执行的
+5 条：`detect-benchmark-redteam-26`（D91）、`waf-bypass-legacy-claim`（09-19 重写 + D73）、
+`external-judge-dvga-d114` / `graphql-inline-injection-gap`（D121）、`external-judge-benchmark-d114`（D115）、
+`boolean-channel-false-alarm-d126`（D126：缺表被误判成能力退化）。
 
-| 结论 | 状态 | 证据 | 待办 |
+剩余**未验证**条目（禁止对外当结论引用）：
+
+| 结论 | 状态 | 已有的证据 | 待办 |
 |---|---|---|---|
-| versioned 关键字族「与上游等价」 | **已修（T-6，2026-10-14）** | 上游 doctest 字面比对：本仓 `versionedkeywords` 输出漏包 `ALL`、`versionedmorekeywords` 漏 `CONCAT`（同族内不自洽） | T-6 已按上游形态重做（补 ALL + 22 个函数名，两件套收敛单一真源 `versionedKeywords.js`）；残留 3 条**形态差异**见下行 |
-| modsecurityversioned / modsecurityzeroversioned / halfversionedmorekeywords 版本注释形态 | **已关闭（D102，2026-10-18）** | 上游整段包裹 / 不闭合 /*!0 形态由复刻件（modsecurityversionedblock / modsecurityzeroversionedblock / halfversionedmorekeywordsopen）承载，纳入对拍脚本 ALIAS 段机械比对（5/5 一致）；默认件形态保留 | 默认链是否切换仍待真机 A/B（差异行在 drift 账逐条点名，不再阻塞台账条目） |
+| 62 个 WAF 指纹的**真机命中率** | **unverified** | 62 条 matcher + 判据单测；外部双源对拍（wafw00f 18 家 × 36 样本 100%、WhatWaf 27 家 + nuclei Safe3）；真机样本仅 ModSecurity 1/62 | 采集商业云 WAF 授权样本（`docs/WAF-真机样本采集-runbook.md`），补命中率之前只能说「62 条规则 + 构造样本对拍」 |
 
 > 复核命令：`node scripts/verify-tamper-upstream-examples.mjs`（读 `drift` / `excluded` 两字段，
 > `drift` 里 `[variant]` = 已对齐、`[queued]` = **已知未修的真缺陷**）。
+> 台账里每条都要有**可跑通**的 `refute_cmd`——D127 曾实测出两条指向不存在命令/文件
+> （`npm run bench`、`crs-fidelity.mjs`），已修；新增条目时请先跑一遍再写。
 
 ## 4. MCP（已落地，D43）
 

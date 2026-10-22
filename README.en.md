@@ -183,7 +183,7 @@ a command.
 ```bash
 npm test                                   # frontend suite
 cd server && npm test                      # backend suite
-npm run acceptance                         # 17-suite end-to-end gate
+npm run acceptance                         # 25-suite end-to-end gate
 npm run mutation                           # mutation gate: does a broken mutant make a test fail?
 npm run perf:budget                        # request-cost measurement, no network needed
 npm run facts:check                        # README figures vs. freshly collected facts

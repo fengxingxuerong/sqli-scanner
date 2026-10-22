@@ -178,3 +178,27 @@
 - **诚实边界写进产品**：`summary.dbmsEvidence.caveat`、`unverifiedSurfaces`、`uncoveredSurfaces`、`crawlBrowserFallback` 把「没测成」与「测了没洞」分开——这正是多数扫描器最容易撒谎的地方。
 
 **总评**：这是一个「工程完成度远高于发布完成度」的项目。能力已经够用，缺的是发版那套枯燥动作。
+
+---
+
+## 10. 销账记录（2026-10-23，批次 D127–D132）
+
+本报告写完后立刻按清单执行了一轮修复，逐项对应 §3/§4：
+
+| 原条目 | 处置 | 判据 / 证据 |
+|---|---|---|
+| P0-1 发布标识不可复现 | **已修（D127）**：D125/D126 全部提交；version-sync 判据 3 处 → 8 处（新增 server/package.json 与两个 lock 的两份副本）；1.1.1 → 1.2.0 | `node scripts/version-sync.mjs` 8/8 一致；`node scripts/release-check.mjs` 在干净树 + tag 上 exit 0 |
+| P0-2 sidecar 版本 0.0.0+unknown | **已修（D128）**：版本作为 SEA asset 内嵌 + 纯解析器 + 构建冒烟断言 + Rust 侧 ENGINE_VERSION | 出仓探针 `/api/health` → `1.2.0（来源 sea:package.json）`；`version.resolve.test.js` 7/7 |
+| P0-3 发布门禁 CI 不真跑 | **已修（D129）**：`release-check` 真跑 + selftest 两步；greenguard / gate-recorder / coverage-calibration / flag-coverage 接线；npx eslint → npm run lint | `.github/workflows/ci.yml` 新增步骤；`npm run gate:close` 22/22 |
+| P0-4 D125 半提交 | **已修（D127）**：实现文件入库、测试与实现同批 | `git status` 干净；`cd server && npm test` 全绿 |
+| P0-5 三项验收未决 | **部分修（D131）**：fileWrite `wrote` 改由回读验证置位（attempted/unverified 补位）；CRS PL1 与 union 漏报**仍需真 MySQL + CRS 环境**，已写入 README「未决 FAIL」与 TODO 待推进 | `exploiter.fileWriteUnion.test.js` / `exploiter.test.js` 语义断言；README 验收表逐项标注 |
+| P0-6 对外口径含被推翻数字 | **已修（D130）**：sqlmap 16/19、6/7 → 14/19、0/7（保留旧数字作废）；Benchmark 4/12 → 178/178、0/149 并纠正「不接门禁」；删除 09-20 历史快照；en README 17→25；AGENTS 三处口径 | `npm run readme:check` / `facts:check` 绿 + 人工复核 |
+| P1-1 依赖告警 | **已修（D132）**：两棵树 `npm audit fix`；server **0 vulnerabilities**；根包剩 devDependencies 4 条（vitest/tinypool 需大版本升级），SECURITY.md 如实登记、徽章改 prod 口径 | `npm audit`（server）0；`npm audit`（根）2 critical+2 moderate 全 dev |
+| P1-2 scanId 路径穿越 | **已修（D132）**：sideEffectLedger 补 safeScanId（与 scanLedger 同口径），读写/清理三处入口共判 | `sideEffectLedger.test.js` 新增 2 例（`../`、绝对路径、NUL、空串全拒） |
+| P1-3 浏览器绕过 SSRF | **已修（D132）**：`context.route` 逐条过 `assertSafeHttpTarget`（host 级缓存、fail-closed）；SECURITY.md 写明「只拦 SSRF、不按 scope 拦 CDN」的有意边界 | `browserEgressGuard.test.js` 5/5 |
+| P1-4 版本号漂移 | **已修（D127）**：见 P0-1（8 处互校） | 同上 |
+| P1-5 en README 分叉 | **已修（D130）**：17 → 25 套件；另注明中文 README 为权威版本 | 人工复核 |
+| P2 CLI 无 --version | **已修（D132）**：`-V/--version` 早退打印版本（README/help 同步，flag 覆盖门禁覆盖） | `node server/bin/cli.js --version` → `1.2.0`，exit 0 |
+
+**仍未关闭**（环境依赖，不假装修好）：CRS PL1 4/8 与自动选链 4<8、显式 UNION 点 union 漏报、
+fileWrite 环境侧闭环、vitest 大版本升级、Docker 上下文体积、远端 50+ 提交未推送。

@@ -5,6 +5,41 @@
 
 ---
 
+## 2026-10-23 批次 D127–D132 · 发布收尾
+
+**背景**：`docs/release-readiness-2026-10-23.md` 逐项实测出 6 项 P0 + 5 项 P1；
+本批把能从代码侧修的全部修掉，剩下的（依赖外部 MySQL/CRS 环境的）如实留在下面「待推进」。
+
+**本批**：
+- D127 提交 D125/D126 未提交工作（含未跟踪实现）→ version-sync 判据 3 处 → **8 处**
+  （server/package.json + 两个 lock 的顶层与 `packages[""]`）→ 1.1.1 → **1.2.0**；
+  台账两条失效 `refute_cmd` 修正。
+- D128 sidecar 版本戳（SEA asset 内嵌 package.json + 解耦解析器 + 冒烟断言；
+  Rust 侧 `ENGINE_VERSION` 第二道保险）；顺带修 build-sidecar 的 CJS bundle 新鲜度判据
+  （只看目录 mtime ⇒ 会复用旧 bundle）。
+- D129 `release-check` 在 CI 真跑（原来只跑 selftest）；greenguard / gate-recorder /
+  coverage-calibration / readme-flag-coverage selftest 接线进 CI；`npx eslint` → `npm run lint`。
+- D130 README 竞品表按 D102 重判（14/19、0/7）、Benchmark 按 D115/D117（178/178、0/149）、
+  删 09-20 历史快照改 25 套件实测表、en README 17→25、AGENTS 口径同步。
+- D131 fileWrite `wrote` 只由回读验证置位（新增 attempted/unverified）。
+- D132 `sideEffectLedger` scanId 校验 + 浏览器出站闸门 + `npm audit fix`（server 0 漏洞）
+  + CLI `-V/--version` + SECURITY.md 依赖状态与浏览器例外如实登记。
+
+### 待推进
+
+- **CRS PL1 4/8 vs 基线 8/8**：需要真 MySQL 8 + CRS 执行器环境才能 bisect（本机无 MySQL）。
+  注意两份产物互相矛盾：acceptance 记录 4/4，同一天 15:20 的 `e2e/waf-real/results/waf-real-report.md`
+  记录 8 个技术位且安全对照零误拦（= 基线水平）。先复跑一次定性，再按 §3.5 决定是修引擎还是收基线。
+- **显式 UNION 注入点的 union 通道漏报**（report-contract 套件）：同上，需 MySQL 复现。
+- **fileWrite 真闭环**：自报语义已修（D131），但环境侧还要 `secure_priv` 与写路径对齐，
+  需带 MySQL 的机器复跑 `node e2e/acceptance.mjs --only=file-write`。
+- **vitest 3 → 5 升级**：清掉 devDependencies 的 2 critical（tinypool/RCE gadget）。
+- **Docker 构建上下文约 3.3 GB**：`.dockerignore` 未排除 `src-tauri/`、`e2e/`、`logs/`。
+- **远端历史**：本地比 origin/master 多 50+ 提交且 `origin/master` 在本地已 gone；
+  推送前需确认 force-push 策略与 tag 归属（v1.2.0 只在本地打过）。
+
+---
+
 ## 2026-10-22 批次 D126 · 验收前置 schema 自愈
 
 **背景**：全方面验证里 `pentest-lab` 8/11、`real-mysql-lab` 3/11，报告写成「真值漏检」。

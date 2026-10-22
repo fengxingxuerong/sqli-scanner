@@ -65,6 +65,73 @@
 
 ## [Unreleased]
 
+> 下一批次起的条目写在这里。发版时把本节整体升为 `## [x.y.z] - YYYY-MM-DD` 并补汇总段。
+
+## [1.2.0] - 2026-10-23
+
+> **次版本**：1.1.1 之后累积 **42 个批次（D85–D126）**。五条主题：
+> ① **外部裁判真值扩面**——Juice Shop / VAmPI / DVWA / OWASP Benchmark / DVGA 五个第三方靶场
+> 同轮复跑，187 个外部真值端点全检出、安全端点 0 误报（D109–D122，口径与边界见台账）；
+> ② **「没测成」与「测了没洞」显形**——`unverifiedSurfaces` / `uncoveredSurfaces` /
+> `crawlBrowserFallback` 进报告与 `verdictNote`（D123/D124），这是本版对交付可信度影响最大的一项；
+> ③ **人工裁决（triage）**——`open/confirmed/false_positive/accepted_risk` 跨复扫生效、
+> 全格式透传、SARIF 误报映射 external suppression（D125）；
+> ④ **注入面继续扩**——JSON body 键名（D103）、XML 元素名（D105）、ORDER BY 固定后缀（D106）、
+> GraphQL 查询串内联值位（D121）、表单伴随字段与 GET 表单 url 点（D120）、
+> 背景 OOB 哨兵（D108）、OOB interactsh 隧道（D87）；
+> ⑤ **发布基建与口径治理**——版本号 8 处互校（D127 起）、sidecar 版本戳（D128）、
+> 验收前置 schema 自愈（D126）、回显剔除矩阵化（D119）、WAF 指纹双源对拍（D89/D99/D100）。
+>
+> **升级注意**：报告新增 `summary.unverifiedSurfaces` / `uncoveredSurfaces` 与 `vuln.triage`；
+> 机读消费方若按字段白名单解析，需要放行这些新键；`triage` 不改变 verdict 与退出码。
+
+### 2026-10-23 批次 D127–D132 · 发布收尾（身份归位 / 版本戳 / 门禁进 CI / 口径统一 / 未决销账 / P1 安全）
+
+**动机**：`docs/release-readiness-2026-10-23.md` 的发布就绪度评估把 6 项 P0 与 5 项 P1
+逐条实测出来。本批不是加功能，是**把「能发布」这件事补齐**，逐条对应评估里的阻断项。
+
+- **D127 发布身份归位**：先把 D125/D126 的未提交工作按批次提交（此前实现文件未跟踪、
+  测试已 staged ⇒ 直接 commit 会红 CI）；`version-sync` 判据从 **3 处扩到 8 处**
+  （新增 `server/package.json` 与两个 lock 文件的顶层 + `packages[""]` 副本，旧判据看不见
+  这三份副本，实测它们停在 1.1.0）；version 1.1.1 → **1.2.0**（42 个批次 D85–D126 的累积）；
+  台账两条指向不存在命令/文件的 `refute_cmd`（`npm run bench`、`crs-fidelity.mjs`）修正。
+  判据：`version:check` 8/8 一致、`release-check` 在干净树上 exit 0。
+- **D128 sidecar 版本戳**：SEA 产物把根 `package.json` 作为 **asset 内嵌**，运行时
+  `version.js` 走 `sea:package.json` 分支（新增 `resolveVersion` 纯解析器 + 7 例单测）；
+  Rust 壳再注入 `ENGINE_VERSION=env!("CARGO_PKG_VERSION")` 作第二道保险；构建冒烟**新增
+  版本断言**（exe 自报版本必须等于打包版本）。实测：旧产物复制到仓外 `/api/health` 报
+  `0.0.0+unknown`，修复后报 `1.2.0（来源 sea:package.json）`。
+  附带修掉构建脚本一个真缺陷：CJS bundle 新鲜度只看 `server/src` **目录** mtime，
+  改已有文件不更新目录 mtime ⇒ 会复用旧 bundle（本轮实测差点把旧 version.js 打进包）。
+- **D129 发布门禁进 CI**：`ci.yml` 原来只跑 `release-check --selftest`（一进函数就 return），
+  从不检查脏树/tag↔版本/Tauri 版本线；改为**真跑 + 自证两步**。同时把只存在于
+  `scripts/ci-local.mjs` 的三道门禁接线进 CI：greenguard(+selftest)、gate-recorder selftest、
+  coverage-calibration、readme-flag-coverage selftest；`npx eslint .` 改回 `npm run lint`
+  （ci.yml 自己注释里禁止过的 npx 形态）。
+- **D130 口径统一（推倒重写，不是改小数字）**：README 竞品表按 D102 重判改为 sqlmap
+  **14/19、0/7**（原 16/19、6/7 系判定脚本自伤，旧数字保留于本文件 D102 并标作废）；
+  Benchmark 改为 D115/D117 口径（有效 327 / 真值 178/178 / 安全 0/149，原「20/504 子集 4/12」
+  作废），并纠正「Benchmark 不接门禁」的错述（它是验收套件 #4）；删除 09-20 的「12 套件全绿」
+  历史快照，换成本轮 25 套件实测表（16 PASS / 6 FAIL / 3 SKIP，逐项标注哪 2 项已被 D126 推翻、
+  哪 4 项仍未决）；README.en.md 的 17 套件改 25；AGENTS §2/§3/§3.5 的「三件事/17 套件/
+  队列 2 行」同步为实际值。
+- **D131 未决项之二：fileWrite 自报语义**：`wrote` 从「拿到 HTTP 响应」改为**只由回读验证
+  置位**（`wrote===verified`），新增 `attempted` / `unverified` 两个字段保留「发过但没落地」
+  的信息。单测改为断言 `wrote:false / attempted:true / unverified:true`（旧断言正是把
+  「请求已发出」当成功的那条）。
+- **D132 P1 安全清账**：① `sideEffectLedger` 的 `scanId` 补齐与 `scanLedger` 同口径的
+  `safeScanId`（此前 `join(ledgerRoot(), scanId, ...)` 未校验 ⇒ 认证后可 `../../` 越界读写）；
+  ② 浏览器爬虫新增出站闸门 `makeBrowserEgressGuard`（`context.route` 逐条过
+  `assertSafeHttpTarget`，host 级缓存，fail-closed）+ 5 例单测，并在 `SECURITY.md` 写明
+  「只拦 SSRF、不按 scope 拦 CDN」的有意边界；③ 两个依赖树 `npm audit fix`：server
+  **0 vulnerabilities**（follow-redirects 1.16.0→1.16.1），根包剩 2 critical + 2 moderate
+  全在 devDependencies（vitest/tinypool，修复需大版本升级，已写入 SECURITY.md 并在 README
+  徽章改成 `prod deps` 口径，不再宣称「0 known vulns」）；④ CLI 补 `-V/--version`
+  （此前 `--version` 被当成无法识别的参数 exit 2）。
+- **验证**：`gate:close` 22/22；`version:check` 8/8；`release-check` exit 0；新增/改动的
+  单测（version.resolve 7、browserEgressGuard 5、sideEffectLedger 穿越 2、fileWrite 语义 2）
+  全过；`npm run build`、`cargo fmt/check`、sidecar 冒烟（含版本断言）全过。
+
 ### 2026-10-22 批次 D126 · 验收前置 schema 自愈（把「环境缺失」从「真值漏检」里摘出来）
 
 **动机**：全方面验证（`docs/verification-2026-10-22-full-sweep.md`）里两个 MySQL 套件
