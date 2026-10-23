@@ -249,6 +249,15 @@
       "refute_cmd": "cd %TEMP%\\verify-labs && tar -xzf juice.tar.gz && cd juice-shop-20.3.0 && npx ../../... ; 复现三步：① tar -xzf juice.tar.gz（恢复 data/）；② cd frontend && npx pnpm@9 install --shamefully-hoist && npx ng build --configuration production；③ 根目录 node_modules\\.bin\\tsc.cmd --ignoreDeprecations 6.0；④ <node22>/node.exe build/app（PORT=3199）；⑤ JUICE_BASE=http://127.0.0.1:3199 node e2e/acceptance.mjs --only=juice-shop",
       "recheck_batch": "D137（2026-10-23）：Juice Shop 裁判本机转 PASS；README 的「不可复现」段与 TODO 相关条目同步改写。",
       "caveat": "本轮只验「搜索 + 登录」两个官方 SQLi 真值端点与 4 个安全端点；Juice Shop 其余注入面未测。Node 24 崩溃是 Juice Shop 侧 libuv/fs 事件路径与 Windows+Node24 的交互，**不是本引擎缺陷**（同轮 validity-guard 表现正确）。"
+    },
+    {
+      "id": "benchmark-local-full-run-d138",
+      "claim": "OWASP Benchmark 在本机可运行并能跑完三份清单（此前被记为「需从 github.com 拉源码 + JDK+Maven+cargo，本机不可用」）：基线 74 → 43/43 真值 + 0/24 安全；query 210 → 111/111 + 0/99；header 67 → 33/33 + 0/34；合计 187/187 真值、0/157 安全误报、证据不足 0。",
+      "status": "verified",
+      "evidence": "e2e/results/acceptance-report.md（全量 25/25 含 benchmark 套件）；CHANGELOG D138；TODO D138 复现配方",
+      "refute_cmd": "$java -cp ~/.m2/.../hsqldb-2.7.4.jar org.hsqldb.Server --database.0 file:<scratch>/BenchmarkJava-master/target/db/benchmark.db --dbname.0 benchmarkDataBase --port 9001；JAVA_HOME=<jdk17> mvn cargo:run -Pdeploy -Dspotless.apply.skip=true；BENCHMARK_BASE=https://127.0.0.1:8443/benchmark BENCHMARK_CASES=e2e/benchmark-lab/cases-query.json node e2e/benchmark-lab/run.mjs（header 同法）",
+      "recheck_batch": "D138（2026-10-23）：最后一个 SKIP 关闭；全量 acceptance 25 PASS / 0 BLOCKED / 0 FAIL / 0 SKIP。",
+      "caveat": "源码与构建产物来自本机 scratch 缓存（`.box-agent-scratch/BenchmarkJava-master`，gitignore 不入库）；换机器需按 TODO 配方重编（`mvn initialize clean package -Pdeploy -DskipTests`）。Benchmark 是合成靶场，187/187 不能外推为通用检出率。"
     }
   ]
 }

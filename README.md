@@ -666,8 +666,8 @@ npm run acceptance:sandbox          # 同全量，但套隔离 MySQL 沙箱（33
 
 **最近一次全量结果（2026-10-23，v1.2.0；原始报告 [e2e/results/acceptance-report.md](e2e/results/acceptance-report.md)；
 四项旧未决与外部裁判的复验见 [e2e/results/external-sweep-2026-10-23-v1.2.0.md](e2e/results/external-sweep-2026-10-23-v1.2.0.md)）**：
-**24 PASS / 0 BLOCKED / 0 FAIL / 1 SKIP（25 套件；唯一 SKIP 是 OWASP Benchmark
-未在本机起靶场，SKIP 不计通过）**。
+**25 PASS / 0 BLOCKED / 0 FAIL / 0 SKIP（25 套件全绿；五个外部裁判全部在本机起真靶场，
+无 SKIP、无 BLOCKED）**。
 
 | 套件 | 本轮事实 | 状态 |
 |---|---|---|
@@ -680,15 +680,17 @@ npm run acceptance:sandbox          # 同全量，但套隔离 MySQL 沙箱（33
 | 外部裁判 3 号（DVWA） | **5/5 真值、安全端点 0 误报、证据不足 0**（cookie / POST / 盲注 POST / impossible 四形态） | PASS（本机起真靶场） |
 | 数据泄露实证 | **成立**：`--dbs` 取回真库名（9 个）而非 payload 残片；139 请求、3 条漏洞 | PASS（本机起真靶场） |
 | 外部裁判 1 号（Juice Shop） | **2/2 真值（搜索 LIKE 双层括号 + 官方登录 JSON body）、安全端点 0/4 误报**；**[D137]** 此前记「本机不可复现」——三个真实根因已定位（源码树缺 `data/`、前端依赖需 `--shamefully-hoist`、必须跑 Node 22 而非 24），见台账 `juice-shop-runnable-local-d137` | PASS（本机起真靶场） |
-| 外部裁判 4 号（OWASP Benchmark） | 本机未起靶场（需 JDK+Maven+cargo，且源码需从 GitHub 拉取——本机到 github.com 不通）；同轮**单独复跑 178/178、0/149**（三清单 344 有效） | SKIP（另有单独复跑证据，未验证，不计通过） |
+| 外部裁判 4 号（OWASP Benchmark） | **三清单本机全跑**：基线 74 → **43/43 + 0/24**；query 210 → **111/111 + 0/99**；header 67 → **33/33 + 0/34**；合计 **187/187 真值、0/157 安全零误报**；含 header 与参数名形态 50 条、`{call}` 安全侧 0/3。**[D138]** 本机已可运行（HSQLDB 9001 手动常驻 + `mvn cargo:run -Pdeploy`，JDK17/Maven 本机已有），此前记「需 GitHub 拉源码故不可用」——源码与构建产物在本机 scratch 缓存中 | PASS（本机起真靶场，三清单全跑） |
 | 红队实战 | 19/19、安全点 7、误报 0 | PASS |
 | OOB 带外真机 / 外部隧道 | 真 PG `COPY TO PROGRAM` 真实回连 ✅；interactsh 回连 14 DNS + 14 HTTP | PASS |
 | 其余套件（PG / 登录编排 / 保真度 / 变异搜索 / 降级编排 / 参数名 / 参数挖掘 / 批量编排 …） | 见验收报告 | PASS |
 
 > 上一版（2026-10-22）的 16 PASS / 6 FAIL / 3 SKIP 快照已被取代；其中「报告契约 / CRS 手工 /
 > CRS 自动 / fileWrite」四项旧未决已在真 MySQL 8.0.28/10.11 上复跑转绿，旧数字保留在
-> CHANGELOG 1.2.0 的「D133–D137」段并标注作废。**不得把本表读成「25 套全部通过」**：
-> 仍剩 1 个 SKIP（OWASP Benchmark 未在本机起靶场，其单独复跑证据见外部裁判文档）。
+> CHANGELOG 1.2.0 的「D133–D138」段并标注作废。**本表 25/25 全绿，无 SKIP、无 BLOCKED**：
+> 五个外部裁判（Juice Shop / VAmPI / DVWA / Benchmark / DVGA 另计）都在本机起了真靶场，
+> 其中 Benchmark 三清单全跑（187/187）；仍未验证的三件事在**仓库外**：真实商业云 WAF 样本、
+> Docker 镜像与桌面打包、远端推送。
 > 上一版 README 此处写「2026-09-20 12 PASS / 12 套件全绿」，那是 12 套件时代的历史快照，
 > 与当前 25 套件门禁不同分母，**已删除，避免误引**。
 

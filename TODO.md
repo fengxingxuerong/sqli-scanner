@@ -5,6 +5,38 @@
 
 ---
 
+## 2026-10-23 批次 D138 · 本机起 OWASP Benchmark → 全量验收 25/25 全绿（0 FAIL / 0 SKIP）
+
+**背景**：D137 后只剩 Benchmark 一个 SKIP。本轮发现本机已有它的源码与构建产物
+（`.box-agent-scratch/BenchmarkJava-master`、`benchmark-db`；JDK17 在 `D:\tools\jdk`，
+Maven 3.9.11 在 `D:\tools\maven`，`~/.m2` 里 hsqldb 2.7.4 与 cargo 的 Tomcat 都已缓存），
+**不需要连 GitHub**。
+
+**复现（照抄）**：
+```powershell
+$java='D:\tools\jdk\jdk-17.0.2\bin\java.exe'
+$hsql="$env:USERPROFILE\.m2\repository\org\hsqldb\hsqldb\2.7.4\hsqldb-2.7.4.jar"
+$bj='<repo>\.box-agent-scratch\BenchmarkJava-master'
+& $java -cp $hsql org.hsqldb.Server --database.0 "file:$bj/target/db/benchmark.db" `
+  --dbname.0 benchmarkDataBase --port 9001            # 必须常驻（antrun 的 fork 会被回收）
+$env:JAVA_HOME='D:\tools\jdk\jdk-17.0.2'
+cd $bj; mvn cargo:run -Pdeploy -Dspotless.apply.skip=true      # https/8443 自签
+$env:BENCHMARK_BASE='https://127.0.0.1:8443/benchmark'
+node e2e/acceptance.mjs --only=benchmark              # 或三清单全跑：BENCHMARK_CASES=.../cases-query.json
+```
+
+**结果**：基线 43/43 + 0/24、query 111/111 + 0/99、header 33/33 + 0/34 ⇒ **187/187、0/157**；
+全量 acceptance **25 PASS / 0 BLOCKED / 0 FAIL / 0 SKIP（exit 0）**。
+
+### 待推进（仍未关闭）
+
+- **仓库外才能验的三件事**：真实商业云 WAF 授权样本、Docker 镜像与桌面打包、`v1.2.0` 推送
+  （本机到 github.com:443 不通）。
+- 本机依赖一旦重启需重新起靶场：MariaDB 3306、DVWA 8099、VAmPI 5000/5001、
+  Juice Shop 3199（**Node 22**）、Benchmark 9001 + 8443；3308 有一份遗留沙箱 mysqld 待清。
+
+---
+
 ## 2026-10-23 批次 D137 · 推翻「Juice Shop 本机不可复现」（24 PASS / 0 FAIL / 1 SKIP）
 
 **背景**：README/TODO/`docs/verification-2026-10-22-full-sweep.md` 都写着 Juice Shop

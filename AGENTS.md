@@ -104,7 +104,7 @@ node scripts/one-click-scan.mjs -u "http://target/page?id=1"   # 一条命令出
 
 ### 四、常驻待复核队列（`docs/_claims-ledger.json`）
 
-**以台账为唯一真源**（`status` 字段）：当前 27 条 = 19 verified / 7 refuted / 1 unverified。
+**以台账为唯一真源**（`status` 字段）：当前 28 条 = 20 verified / 7 refuted / 1 unverified。
 `refuted` 必须保留旧数字、标注作废、指向新证据，并在 CHANGELOG 留推翻链——本仓已执行的
 7 条：`detect-benchmark-redteam-26`（D91）、`waf-bypass-legacy-claim`（09-19 重写 + D73）、
 `external-judge-dvga-d114` / `graphql-inline-injection-gap`（D121）、`external-judge-benchmark-d114`（D115）、

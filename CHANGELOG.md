@@ -85,6 +85,36 @@
 > **升级注意**：报告新增 `summary.unverifiedSurfaces` / `uncoveredSurfaces` 与 `vuln.triage`；
 > 机读消费方若按字段白名单解析，需要放行这些新键；`triage` 不改变 verdict 与退出码。
 
+### 2026-10-23 批次 D138 · 本机起 OWASP Benchmark → 全量验收 25/25 全绿（0 FAIL / 0 SKIP）
+
+**动机**：D137 之后唯一 SKIP 是 OWASP Benchmark。本轮发现本机**已有**它的源码与构建产物
+（`.box-agent-scratch/BenchmarkJava-master` + `benchmark-db`，上一会话留下），JDK17 与 Maven
+本机也有，于是直接起靶场。
+
+**起法（照抄；两处必须注意）**：
+```powershell
+$java = 'D:\tools\jdk\jdk-17.0.2\bin\java.exe'
+$hsql = "$env:USERPROFILE\.m2\repository\org\hsqldb\hsqldb\2.7.4\hsqldb-2.7.4.jar"
+$bj   = '<repo>\.box-agent-scratch\BenchmarkJava-master'
+# 1) HSQLDB **必须手动常驻**（官方 antrun 的 fork 子进程随 mvn 退出被回收）
+& $java -cp $hsql org.hsqldb.Server --database.0 "file:$bj/target/db/benchmark.db" `
+        --dbname.0 benchmarkDataBase --port 9001
+# 2) Tomcat（deploy profile ⇒ https/8443 + 自签证书；target/cargo 已缓存的 Tomcat 直接复用）
+$env:JAVA_HOME='D:\tools\jdk\jdk-17.0.2'
+mvn cargo:run -Pdeploy -Dspotless.apply.skip=true
+# 3) 验收（引擎侧 insecureTls 由靶场 runner 自处理）
+$env:BENCHMARK_BASE='https://127.0.0.1:8443/benchmark'
+node e2e/acceptance.mjs --only=benchmark
+```
+（重编：`mvn initialize clean package -Pdeploy -DskipTests`；`cargo:run` 不要跟 `clean` 连跑，会撞库文件锁。）
+
+**结果**：
+- 基线清单 74 → **43/43 真值、0/24 安全**（header + 参数名形态 50 条，`{call}` 安全侧 0/3）；
+- query 210 → **111/111、0/99**；header 67 → **33/33、0/34**；
+  合计 **187/187 真值、0/157 安全零误报、证据不足 0** —— 与 D133 的单独复跑逐项一致。
+- **全量 acceptance：25 PASS / 0 BLOCKED / 0 FAIL / 0 SKIP（25/25 跑出断言，exit 0）**
+  —— D137 是 24 PASS/1 SKIP，**本机所有依赖已 provisioning 完毕**。
+
 ### 2026-10-23 批次 D137 · 推翻「Juice Shop 本机不可复现」并让它真跑（24 PASS / 0 FAIL / 1 SKIP）
 
 **动机**：README/TODO/验证报告长期把 Juice Shop 裁判记成「本机不可复现（需完整 Angular 构建、

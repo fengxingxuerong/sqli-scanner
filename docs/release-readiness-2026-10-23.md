@@ -315,3 +315,29 @@ Docker/桌面打包 + 远端推送」四类。
 **全量 acceptance：24 PASS / 0 BLOCKED / 0 FAIL / 1 SKIP（exit 0）**。
 唯一 SKIP = OWASP Benchmark（需 JDK+Maven+cargo，且源码要从 github.com 拉——本机 443 不通）。
 台账新增 `juice-shop-runnable-local-d137`（refuted + 复现命令）。
+
+---
+
+## 16. 2026-10-23 D138 起 OWASP Benchmark → **25/25 全绿**
+
+最后一个 SKIP 也起起来了：本机其实**已有** Benchmark 的源码与构建产物
+（`.box-agent-scratch/BenchmarkJava-master`、`benchmark-db`），JDK17 + Maven 3.9.11 本机也有，
+`~/.m2` 里 hsqldb 2.7.4 与 cargo 的 Tomcat 均已缓存 ⇒ **不需要连 GitHub**。
+
+| 项 | 结果 |
+|---|---|
+| 基线清单 74 | **43/43 真值、0/24 安全**（header + 参数名形态 50 条；`{call}` 安全侧 0/3） |
+| query 210 | **111/111、0/99** |
+| header 67 | **33/33、0/34** |
+| 合计 | **187/187 真值、0/157 安全零误报、证据不足 0**（与 D133 的单独复跑逐项一致） |
+| **全量 acceptance** | **25 PASS / 0 BLOCKED / 0 FAIL / 0 SKIP（25/25 跑出断言，exit 0）** |
+
+两处起法要点（写进 TODO 复现配方）：HSQLDB 必须**手动常驻**（官方 antrun 的 fork 子进程随
+`mvn` 退出被回收）；`cargo:run -Pdeploy` 不要跟 `clean` 连跑（库文件锁）。
+
+**发布判断（更新）**：
+- **本地 v1.2.0：本机全量验收 25/25 全绿、0 FAIL、0 BLOCKED、0 SKIP**，`release-check` exit 0、
+  tag 在 HEAD、工作树干净 ⇒ 本机可交付状态已达成。
+- **线上发布：仍差**推送 master + tag（本机 443 不通，需能出网的环境或代理）。
+- **商业口径：仍不建议**——真实商业云 WAF 样本、Docker 镜像与桌面打包未验证；
+  这三个不在本机可复现范围内，已如实登记在 TODO 与台账 caveat。
