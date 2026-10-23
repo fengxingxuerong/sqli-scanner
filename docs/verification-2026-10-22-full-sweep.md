@@ -36,6 +36,18 @@
 | DVGA 5013 | Python+Flask+Graphene | GraphQL 查询串内联注入 **1/1**（union/error/boolean）、安全点 search(keyword) **0 误报**、无 filter 结构对照 0 请求 ✅ |
 | Juice Shop 3199 | Node+SQLite | **未跑通（4 轮尝试）**：① npm 10 装依赖崩 `edgesOut`；② npm 9 同崩；③ pnpm 装成功但 Angular 构建要求 node ≥22.22.3（换 node 24 后 `@codemirror/state` 解析失败）；④ 按 `lib/startup/validatePreconditions` 期望路径补占位静态资源，仍被 `customizeEasterEgg`/`customizeApplication` 接连索要 `JuicyBot.png`/`JuicyChatBot.png`/`threejs-demo.html` 等 UI 资产。⇒ 该靶场依赖**完整 Angular 构建**，无法只部署 API 层 |
 
+> ⚠️ **后续更正（D137，2026-10-23）**：上格「未跑通 / 无法只部署 API 层」的结论**已被推翻**。
+> 真因三条，全部可复现：① 源码树**缺整个 `data/` 目录**（partial 解压）——`JuicyBot.png` /
+> `threejs-demo.html` 等资产本就在 `data/` 里，「接连索要资产」是缺目录的症状；`tar -xzf juice.tar.gz`
+> 重解压即恢复。② 前端依赖必须**扁平**安装：`npm install` 在该 lockfile 上崩
+> `Cannot read properties of null (reading 'matches')`；默认 strict 布局的 `pnpm install` 缺
+> `@codemirror/state`（上游未声明、靠 npm 提升才可见）；`npx pnpm@9 install --shamefully-hoist`
+> + `npx ng build --configuration production`（42s）即产出 validatePreconditions 需要的四个文件名。
+> ③ 必须用 **Node 22**：Node 24 在 Windows 下扫该靶场搜索路由会触发 libuv
+> `fs-event.c:72` 断言**当场崩进程**，裁判侧只见 ECONNREFUSED（引擎 validity-guard 正确判为不可信）。
+> 结论：`--only=juice-shop` → **2/2 真值、0/4 误报**，该裁判不再是环境缺口。
+> 台账条目：`juice-shop-runnable-local-d137`（status=refuted，附可复现命令）。
+
 Benchmark 三套明细（本轮）：
 `cases.json` 74（43 真值 + 24 安全 + 7 call）→ 43/43、0/24；
 `cases-query.json` 210（111 + 99）→ 111/111、0/99；

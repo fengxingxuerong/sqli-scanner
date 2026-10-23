@@ -85,6 +85,31 @@
 > **升级注意**：报告新增 `summary.unverifiedSurfaces` / `uncoveredSurfaces` 与 `vuln.triage`；
 > 机读消费方若按字段白名单解析，需要放行这些新键；`triage` 不改变 verdict 与退出码。
 
+### 2026-10-23 批次 D137 · 推翻「Juice Shop 本机不可复现」并让它真跑（24 PASS / 0 FAIL / 1 SKIP）
+
+**动机**：README/TODO/验证报告长期把 Juice Shop 裁判记成「本机不可复现（需完整 Angular 构建、
+无法只部署 API 层），4 轮尝试失败」。本轮把它跑起来了——按 §3.5 记推翻链，**旧结论作废**。
+
+**三个真实根因（都不是「无法只部署 API 层」）**：
+1. **源码树缺整个 `data/` 目录**（上次解压是 partial 的）⇒ `Cannot find module '../data/datacache'`
+   + 缺 easter-egg 资产（`JuicyBot.png`/`threejs-demo.html` 等正是上一轮抱怨「接连索要」的那些）。
+   `tar -xzf juice.tar.gz` 重解压即恢复（228 条 data/ 条目）。
+2. **前端依赖必须扁平安装**：`npm install` 在该 lockfile 上崩 `Cannot read properties of null
+   (reading 'matches')`；`pnpm install`（默认 strict 布局）则 `Cannot find module '@codemirror/state'`
+   （上游未声明该传递依赖，靠 npm 的扁平提升才可见）。`npx pnpm@9 install --shamefully-hoist`
+   + `npx ng build --configuration production`（42s）产出 `index.html/main.js/polyfills.js/styles.css`
+   —— 正好满足 `validatePreconditions` 的四个精确文件名。
+3. **必须用 Node 22**（本机 22.22.2）：Node 24 在 Windows 下扫到搜索路由会触发 libuv
+   `Assertion failed: !_wcsnicmp(filename, dir, dirlen), file src\win\fs-event.c, line 72`
+   **当场崩进程** ⇒ 裁判侧只见 ECONNREFUSED。**不是本引擎缺陷**：同轮 `validity-guard` 正确把
+   68 次无效响应判成「结论不可信」而不是「未检出」。
+
+**结果**：`JUICE_BASE=http://127.0.0.1:3199 node e2e/acceptance.mjs --only=juice-shop`
+→ **2/2 真值检出（搜索 LIKE 双层括号 + 官方登录 JSON body）、安全端点 0/4 误报**；
+**全量 acceptance：24 PASS / 0 BLOCKED / 0 FAIL / 1 SKIP（exit 0）**（D136 为 23/2）。
+剩唯一 SKIP = OWASP Benchmark（需 JDK+Maven+cargo，且源码要从 github.com 拉，本机不通）。
+台账新增 `juice-shop-runnable-local-d137`（refuted → 新结论 + 可复现命令）。
+
 ### 2026-10-23 批次 D136 · 本机再补 VAmPI 裁判（23 PASS / 0 FAIL / 2 SKIP）
 
 **本批**：把外部裁判 2 号（VAmPI）在本机起真靶场——上游 `VAmPI-master` + 现成 venv，

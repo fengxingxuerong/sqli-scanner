@@ -240,6 +240,15 @@
       "refute_cmd": "python e2e/run-with-sandbox.py e2e/contract/report-contract.e2e.mjs --drop-dir；MYSQL_HOST=127.0.0.1 MYSQL_PORT=3306 MYSQL_USER=root MYSQL_PASSWORD=root MYSQL_DATABASE=sqli_lab WAF_GATE_PL=1 node e2e/acceptance.mjs --only=waf-real,waf-auto；MYSQL_PORT=3308（MySQL 8 沙箱）node e2e/fileops/exploit-file-write.e2e.mjs + exploit-file-read.e2e.mjs；五个外部 run.mjs",
       "recheck_batch": "D133（2026-10-23）：旧 CRS 4/8、UNION FAIL、fileWrite 环境闭环作废；v1.2.0 外部与全量验收补证。",
       "caveat": "OOB 真机（缺 PG）与数据泄露实证仍 SKIP（未验证）；无真实商业云 WAF 样本；Benchmark 占 178/187；{call} 4 条未检出；Docker/桌面打包未验证；远端未推送。"
+    },
+    {
+      "id": "juice-shop-runnable-local-d137",
+      "claim": "（已被 D137 推翻）「Juice Shop 20.3.0 在本机不可复现：该靶场依赖完整 Angular 构建，无法只部署 API 层」——上一轮全量验证（2026-10-22）与 README「Juice Shop 起法在本机不可复现（4 轮尝试）」都据此把该裁判长期记 SKIP。",
+      "status": "refuted",
+      "refuted_by": "2026-10-23 D137 本机实跑：Juice Shop 20.3.0 在 3199 上跑起来，`JUICE_BASE=http://127.0.0.1:3199 node e2e/acceptance.mjs --only=juice-shop` → **2/2 真值检出、安全端点 0/4 误报**（搜索 `/rest/products/search?q=` + 官方登录 `/rest/user/login`）。三个真实根因（都不是「需要 API-only 部署」）：① 解压出的源码树**缺整个 `data/` 目录**（partial 解压）⇒ `Cannot find module '../data/datacache'` + 缺 easter-egg 资产；重解压 juice.tar.gz 即恢复；② 前端依赖必须**扁平（hoisted）**安装：`npm install` 在该 lockfile 上崩 `Cannot read properties of null (reading 'matches')`，`pnpm install`（默认 strict）则 `Cannot find module '@codemirror/state'`，`npx pnpm@9 install --shamefully-hoist` 后 `ng build` 42s 成功（产出 index.html/main.js/polyfills.js/styles.css，正好满足 validatePreconditions）；③ 必须用 **Node 22**（本机 22.22.2）：Node 24 在 Windows 下跑搜索路由会触发 libuv `Assertion failed: !_wcsnicmp(filename, dir, dirlen), file src\\win\\fs-event.c, line 72` 当场崩进程 ⇒ 裁判侧只见 ECONNREFUSED（引擎的 validity-guard 正确判为「不可信」而不是「未检出」）。",
+      "refute_cmd": "cd %TEMP%\\verify-labs && tar -xzf juice.tar.gz && cd juice-shop-20.3.0 && npx ../../... ; 复现三步：① tar -xzf juice.tar.gz（恢复 data/）；② cd frontend && npx pnpm@9 install --shamefully-hoist && npx ng build --configuration production；③ 根目录 node_modules\\.bin\\tsc.cmd --ignoreDeprecations 6.0；④ <node22>/node.exe build/app（PORT=3199）；⑤ JUICE_BASE=http://127.0.0.1:3199 node e2e/acceptance.mjs --only=juice-shop",
+      "recheck_batch": "D137（2026-10-23）：Juice Shop 裁判本机转 PASS；README 的「不可复现」段与 TODO 相关条目同步改写。",
+      "caveat": "本轮只验「搜索 + 登录」两个官方 SQLi 真值端点与 4 个安全端点；Juice Shop 其余注入面未测。Node 24 崩溃是 Juice Shop 侧 libuv/fs 事件路径与 Windows+Node24 的交互，**不是本引擎缺陷**（同轮 validity-guard 表现正确）。"
     }
   ]
 }

@@ -104,11 +104,13 @@ node scripts/one-click-scan.mjs -u "http://target/page?id=1"   # 一条命令出
 
 ### 四、常驻待复核队列（`docs/_claims-ledger.json`）
 
-**以台账为唯一真源**（`status` 字段）：当前 26 条 = 19 verified / 6 refuted / 1 unverified。
+**以台账为唯一真源**（`status` 字段）：当前 27 条 = 19 verified / 7 refuted / 1 unverified。
 `refuted` 必须保留旧数字、标注作废、指向新证据，并在 CHANGELOG 留推翻链——本仓已执行的
-6 条：`detect-benchmark-redteam-26`（D91）、`waf-bypass-legacy-claim`（09-19 重写 + D73）、
+7 条：`detect-benchmark-redteam-26`（D91）、`waf-bypass-legacy-claim`（09-19 重写 + D73）、
 `external-judge-dvga-d114` / `graphql-inline-injection-gap`（D121）、`external-judge-benchmark-d114`（D115）、
-`boolean-channel-false-alarm-d126`（D126：缺表被误判成能力退化）。
+`boolean-channel-false-alarm-d126`（D126：缺表被误判成能力退化）、
+`juice-shop-runnable-local-d137`（D137：把「Juice Shop 本机不可复现」推翻——真因是源码树缺 `data/`、
+前端依赖需扁平安装、必须跑 Node 22 而非 24）。
 
 剩余**未验证**条目（禁止对外当结论引用）：
 

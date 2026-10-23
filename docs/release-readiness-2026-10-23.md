@@ -297,3 +297,21 @@ D134 之后剩下的 SKIP 都在「靶场没起」这一类。本轮把本机**�
 综合三轮（D134→D135→D136）：本机 acceptance 由 20 PASS/5 SKIP → 22/3 → **23/2**，
 且 **FAIL 与 BLOCKED 全程为 0**；未验证面收敛到「Juice/ Benchmark 未起靶场 + 真实云 WAF 样本 +
 Docker/桌面打包 + 远端推送」四类。
+
+---
+
+## 15. 2026-10-23 D137 推翻「Juice Shop 本机不可复现」（24 PASS / 0 FAIL / 1 SKIP）
+
+仓库长期把 Juice Shop 裁判记为「本机不可复现（需完整 Angular 构建、无法只部署 API 层，4 轮尝试失败）」。
+本轮把它跑起来，**该结论按 §3.5 作废**，真因三条（都可复现）：
+
+| 症状（旧记录） | 真因 | 处置 |
+|---|---|---|
+| `Cannot find module '../data/datacache'`、接连索要 `JuicyBot.png`/`threejs-demo.html` | 解压出的源码树**缺整个 `data/` 目录**（partial 解压）；那些资产本就在 `data/` 里 | `tar -xzf juice.tar.gz` 重解压（恢复 228 条 `data/` 条目） |
+| `npm 10/9 装依赖崩 edgesOut` / `@codemirror/state` 解析失败 | 前端依赖必须**扁平（hoisted）**：npm 在该 lockfile 上崩 `Cannot read properties of null (reading 'matches')`；strict 布局的 pnpm 缺上游未声明的 `@codemirror/state` | `npx pnpm@9 install --shamefully-hoist` + `npx ng build --configuration production`（42s，产出 `index.html/main.js/polyfills.js/styles.css` = validatePreconditions 的四个名字） |
+| （新发现）裁判侧全线 ECONNREFUSED、0/2 检出 | Node 24 在 Windows 下扫搜索路由触发 libuv `Assertion failed: !_wcsnicmp(filename, dir, dirlen), file src\win\fs-event.c, line 72` → **进程当场崩**（非引擎缺陷；同轮 validity-guard 正确判「结论不可信」而非「未检出」） | 用 **Node 22**（本机 22.22.2）跑靶场 |
+
+**结果**：`--only=juice-shop` → **2/2 真值（搜索 LIKE 双层括号 + 官方登录 JSON body）、安全端点 0/4 误报**；
+**全量 acceptance：24 PASS / 0 BLOCKED / 0 FAIL / 1 SKIP（exit 0）**。
+唯一 SKIP = OWASP Benchmark（需 JDK+Maven+cargo，且源码要从 github.com 拉——本机 443 不通）。
+台账新增 `juice-shop-runnable-local-d137`（refuted + 复现命令）。

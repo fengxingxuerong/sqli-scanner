@@ -5,6 +5,40 @@
 
 ---
 
+## 2026-10-23 批次 D137 · 推翻「Juice Shop 本机不可复现」（24 PASS / 0 FAIL / 1 SKIP）
+
+**背景**：README/TODO/`docs/verification-2026-10-22-full-sweep.md` 都写着 Juice Shop
+「本机不可复现（需完整 Angular 构建，无法只部署 API 层），4 轮尝试失败」。本轮把它跑起来了，
+**旧结论按 §3.5 作废**（台账 `juice-shop-runnable-local-d137`）。
+
+**三个真实根因**：
+1. 解压出的源码树**缺整个 `data/`**（partial 解压）——重解压 `juice.tar.gz` 恢复 228 条；
+2. 前端依赖必须**扁平**装：`npm install` 崩 `null.matches`；`pnpm`（strict）报
+   `Cannot find module '@codemirror/state'`；`npx pnpm@9 install --shamefully-hoist` + `ng build` 通过；
+3. 必须跑 **Node 22**：Node 24 在 Windows 下扫搜索路由触发 libuv `fs-event.c:72` 断言，
+   **进程当场崩**（裁判侧只见 ECONNREFUSED）；引擎的 validity-guard 正确判为「结论不可信」。
+
+**复现（照抄）**：
+```powershell
+cd $env:TEMP\verify-labs; tar -xzf juice.tar.gz              # 恢复 data/
+cd juice-shop-20.3.0\frontend
+npx --yes pnpm@9 install --shamefully-hoist --no-frozen-lockfile
+npx ng build --configuration production                     # 约 42s
+cd ..; node_modules\.bin\tsc.cmd --ignoreDeprecations 6.0    # 根目录编译 build/
+$env:PORT='3199'; <node22>\node.exe build/app                # Node 22，不要用 24
+JUICE_BASE=http://127.0.0.1:3199 node e2e/acceptance.mjs --only=juice-shop
+```
+
+**结果**：Juice **2/2 真值、0/4 误报**；全量 **24 PASS / 0 BLOCKED / 0 FAIL / 1 SKIP（exit 0）**。
+
+### 待推进（仍未关闭）
+
+- 唯一 SKIP：**OWASP Benchmark** 未在本机起靶场（需 JDK+Maven+cargo，且源码要从 github.com 拉，
+  本机到 github.com:443 不通）；单独复跑证据仍是 178/178、0/149。
+- 真实商业云 WAF 样本；Docker 镜像与桌面打包；`v1.2.0` 推送。
+
+---
+
 ## 2026-10-23 批次 D136 · 本机再补 VAmPI 裁判（23 PASS / 0 FAIL / 2 SKIP）
 
 **本批**：外部裁判 2 号 VAmPI 在本机起真靶场（上游源码 + 现成 venv）。
@@ -25,8 +59,10 @@ Start-Process $venv -ArgumentList 'D:\projects\sqli-scanner\e2e\vampi-lab\run_po
 
 ### 待推进（仍未关闭）
 
-- 2 个 SKIP：**Juice Shop**（需完整 Angular 构建产物，本机 4 轮未起）、
-  **OWASP Benchmark**（需 JDK17 + Maven + cargo + HSQLDB）；两者单独复跑证据已有（187/187）。
+- ~~2 个 SKIP：**Juice Shop**（需完整 Angular 构建产物，本机 4 轮未起）、
+  **OWASP Benchmark**（需 JDK17 + Maven + cargo + HSQLDB）~~：**D137 已推翻 Juice Shop 那条**
+  （本机真跑通、2/2 检出，真因是源码树缺 `data/` + 前端依赖需扁平装 + 必须跑 Node 22）；
+  仍剩 Benchmark 一个 SKIP（其单独复跑证据已有 178/178、0/149）。
 - 真实商业云 WAF 样本；Docker 镜像与桌面打包；`v1.2.0` 推送（需能出网的环境）。
 
 ---
