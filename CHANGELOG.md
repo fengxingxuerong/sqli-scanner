@@ -85,6 +85,33 @@
 > **升级注意**：报告新增 `summary.unverifiedSurfaces` / `uncoveredSurfaces` 与 `vuln.triage`；
 > 机读消费方若按字段白名单解析，需要放行这些新键；`triage` 不改变 verdict 与退出码。
 
+### 2026-10-23 批次 D143 · 交付件判据收敛到单源 + 自证进收口清单（22 → 24 项）
+
+**怎么触发的（不是计划，是门禁抓的）**：D142 加完两个便携包脚本后，`duplication` 门禁当场
+由 3272 涨到 **3274**（超出只减不增的基线），`deadcode` 随后又抓到一个新导出无人引用。
+两个红都是真问题，不是噪声：
+
+- **判据两份实现**：`build-portable` 与 `portable-smoke` 各自写了一份「Tauri 命名约定」
+  （sidecar 必须叫 `sqli-engine[.exe]`）、一份 `/api/health` 探活（后者还与 `build-sidecar`
+  的探活重复 97 tokens）。同一约定两份实现正是本仓反复治理的形态（README 测试数、e2e 基线、
+  版本号都是同一类）⇒ 收敛到 **`scripts/lib/portable.mjs` 单一来源**：
+  `targetTriple` / `portableLayout` / `buildManifest` / `readOpt` / `failWith` / `skipWith` /
+  `fetchHealthData` / `isDirectRun` / `judgeHealth` / `runSelftest` + 两组自证用例。
+  `build-sidecar` 的 D128 版本冒烟也改用同一个 `fetchHealthData`（探活实现不再有三份）。
+- **判据自证**：两个脚本补 `--selftest`（`build-portable` 11 条：命名约定 / 三元组 /
+  manifest sha256 用已知内容核对；`portable-smoke` 7 条：版本、`authEnabled`（含
+  `'true'` 字符串不算过的那条反向护栏）、`status`、取不到响应）。
+  并按仓库纪律**把两项接进收口清单**（`gate:close` 22 → **24 项**，`must` 名单同步，
+  AGENTS §3 手写清单同步）——否则又是「新门禁只在某处能跑、收口看不见」。
+- **死代码**：新导出 `targetTriple` 只有本模块内部用 ⇒ 去掉 export（跨模块不可见即不该导出），
+  `deadcode` 回到基线 166/166。
+
+判据（全部本轮实测）：`duplication` 3272 = 基线；`deadcode` 166 = 基线；
+`node scripts/build-portable.mjs --selftest` 11/11、`node scripts/portable-smoke.mjs --selftest` 7/7；
+端到端便携包（组装 38.7 MB zip + 干净解压冒烟）仍通过；`node scripts/build-sidecar.mjs`
+（含 D128 版本断言）冒烟通过（`1.2.0` / `sea:package.json`）；
+**`npm run gate:close` 24/24**。
+
 ### 2026-10-23 批次 D142 · 便携包组装/冒烟固化为脚本 + CI 桌面交付件 job
 
 **动机**：D141 的便携包是**手工复制**出来的（还得记得把 sidecar 改名、记得带 LICENSE）——

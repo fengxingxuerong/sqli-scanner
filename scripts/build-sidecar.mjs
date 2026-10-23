@@ -34,6 +34,7 @@ import os from 'node:os';
 import http from 'node:http';
 import net from 'node:net';
 import { fileURLToPath } from 'node:url';
+import { fetchHealthData } from './lib/portable.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DIST_DIR = path.join(ROOT, 'server', 'dist-engine');
@@ -350,18 +351,9 @@ diag('✓ 引擎启动、health=200、一次性 token 已回传');
 // 空目录 cwd 一起验掉（exe 自报版本不得依赖磁盘上的任何仓库文件）。
 {
   const pkgVersion = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version;
-  const health = await new Promise((resolve) => {
-    const q = http.get({ host: '127.0.0.1', port: PORT, path: '/api/health' }, (res) => {
-      let body = '';
-      res.setEncoding('utf8');
-      res.on('data', (d) => { body += d; });
-      res.on('end', () => {
-        try { resolve(JSON.parse(body)?.data ?? null); } catch { resolve(null); }
-      });
-    });
-    q.on('error', () => resolve(null));
-    q.setTimeout(3000, () => q.destroy());
-  });
+  // [D143] 探健康端点的实现收敛到 scripts/lib/portable.mjs（便携包冒烟用同一份）：
+  // 两处各写一遍会让判据漂移（duplication 门禁当场点名了这对重复块）。
+  const health = await fetchHealthData(PORT);
   const got = health?.version;
   const src = health?.versionSource;
   if (got !== pkgVersion) {

@@ -5,6 +5,28 @@
 
 ---
 
+## 2026-10-23 批次 D143 · 交付件判据收敛到单源 + 自证进收口清单（22 → 24 项）
+
+**触发**：D142 之后 `duplication` 由 3272 涨到 3274（超基线）、`deadcode` 抓到 1 个新导出 —— 两个红都是真问题，
+不是噪声（判据两份实现、跨模块不可见的导出）。
+
+**本批**：
+- 新增 `scripts/lib/portable.mjs`：Tauri 命名约定 / manifest / 探活 / 选项解析 / 失败与跳过 /
+  自证 harness + 两组自证用例，**收敛为单一来源**；`build-sidecar` 的 D128 版本冒烟改用同一个探活
+  （此前探活有三份实现）。
+- 两个便携包脚本补 `--selftest`（11 + 7 条判据），并接进 `gate:close`（22 → **24 项**）、
+  `must` 名单与 AGENTS §3 手写清单。
+- `targetTriple` 去掉 export（只有本模块用）；`deadcode` 回到基线 166/166。
+
+### 待推进（仍未关闭）
+
+- `desktop-package` CI job 首跑仍需一次 tag/手动 dispatch（有网环境）。
+- 便携包链路在收口清单里只跑 **selftest**；真冒烟（要壳 + sidecar 产物）由 `package:portable`
+  与 CI job 承担 —— 若将来想让本机清单也覆盖真冒烟，需要把「壳 release 构建 2m15s」的耗时纳入权衡。
+- 其余照旧：Docker 镜像、云 WAF 样本、远端推送。
+
+---
+
 ## 2026-10-23 批次 D142 · 便携包组装/冒烟固化为脚本 + CI 桌面交付件 job
 
 **本批**：

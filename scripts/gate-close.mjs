@@ -62,6 +62,13 @@ function closeGateList({ quick = false } = {}) {
     { name: 'refs', cmd: ['node', 'scripts/ref-integrity.mjs'] },
     { name: 'e2e-wiring', cmd: ['node', 'scripts/e2e-wiring-check.mjs'] },
     { name: 'e2e-wiring:selftest', cmd: ['node', 'scripts/e2e-wiring-check.mjs', '--selftest'] },
+    // [D143 2026-10-23] 便携包两个脚本的自证。为什么必须进收口清单：它们是 D142 新增的交付
+    // 链路判据（Tauri 命名约定 / manifest sha256 / 健康断言），而收口纪律是「新增门禁必须
+    // 同时加到这里」——否则又会变成「只在某处能跑、收口看不见」。这里只跑 --selftest（不碰产物）：
+    // 真冒烟需要壳与 sidecar 产物，属交付件链路，由 CI 的 desktop-package job 负责；
+    // 本项保证**判据本身没空转**。
+    { name: 'portable-build:selftest', cmd: ['node', 'scripts/build-portable.mjs', '--selftest'] },
+    { name: 'portable-smoke:selftest', cmd: ['node', 'scripts/portable-smoke.mjs', '--selftest'] },
   ];
   if (quick) return list.filter((g) => !SLOW.has(g.name));
   return [...list, { name: 'typecheck', cmd: ['npm', 'run', '--silent', 'typecheck'] }, { name: 'lint', cmd: ['npm', 'run', '--silent', 'lint'] }];
@@ -72,7 +79,7 @@ function selftest() {
   const bad = [];
   const list = closeGateList();
   const names = list.map((g) => g.name);
-  const must = ['typecheck', 'lint', 'wiring', 'facts', 'refs', 'readme', 'complexity', 'nesting', 'duplication', 'deadcode', 'debt', 'typecoverage', 'e2e-wiring', 'e2e-wiring:selftest'];
+  const must = ['typecheck', 'lint', 'wiring', 'facts', 'refs', 'readme', 'complexity', 'nesting', 'duplication', 'deadcode', 'debt', 'typecoverage', 'e2e-wiring', 'e2e-wiring:selftest', 'portable-build:selftest', 'portable-smoke:selftest'];
   for (const m of must) if (!names.includes(m)) bad.push(`清单缺「${m}」（AGENTS.md §3 收口清单要求项）`);
   for (const g of ['complexity', 'nesting', 'duplication', 'deadcode', 'debt', 'typecoverage']) {
     if (!names.includes(`${g}:selftest`)) bad.push(`清单缺「${g}:selftest」（每道门禁都要自证）`);
