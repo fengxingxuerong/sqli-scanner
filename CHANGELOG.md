@@ -85,6 +85,22 @@
 > **升级注意**：报告新增 `summary.unverifiedSurfaces` / `uncoveredSurfaces` 与 `vuln.triage`；
 > 机读消费方若按字段白名单解析，需要放行这些新键；`triage` 不改变 verdict 与退出码。
 
+### 2026-10-23 批次 D141 · 免安装便携包（portable zip）+ 干净解压冒烟
+
+**动机**：官方安装包（NSIS）需联网下载工具链而本机不通，于是产一个**离线可交付**的便携包，
+并**在干净解压目录里冒烟**（不是就地跑）——这一格此前完全没有产物。
+
+- 组装：`sqli-scanner.exe`（12.9 MB，D139 的 release 产物）+ `sqli-engine.exe`
+  （sidecar 由 `sqli-engine-x86_64-pc-windows-msvc.exe` 改名而来——Tauri 打包时正是这么改名，
+  壳按 `sidecar("sqli-engine")` 找它）+ `README.md` + `LICENSE`。
+- 产物：`sqli-v1.2.0-portable-win-x64\`（105.7 MB 解压后）与
+  `sqli-v1.2.0-portable-win-x64.zip`（**38.7 MB**；放在仓库之外，不入库）。
+- **冒烟（干净解压）**：解压到临时目录 → 启动 `sqli-scanner.exe` → 壳自动拉起 `sqli-engine`
+  子进程 → `GET /api/health` 返回 `version=1.2.0`、`versionSource=env:ENGINE_VERSION`、
+  `authEnabled=true`；退出后无残留进程。
+- 边界：这不是官方安装包（无开始菜单/卸载项），是**免安装绿色包**；NSIS/WiX 安装包仍需能联网
+  的环境跑 `npm run package:win`。
+
 ### 2026-10-23 批次 D140 · Cargo.lock 纳入版本互校（8 处 → 9 处）
 
 **怎么发现的**：D139 跑 `tauri build --no-bundle` 之后 `git status` 多出一处改动 ——

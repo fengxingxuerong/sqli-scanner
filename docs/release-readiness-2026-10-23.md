@@ -358,3 +358,22 @@ Docker/桌面打包 + 远端推送」四类。
 
 **仍未关**：NSIS 安装包（本机无 tauri 打包缓存、NSIS 工具链需联网下载而 github 不可达 ⇒ 只到 exe）、
 Docker 镜像（本机无 Docker）、真实商业云 WAF 授权样本、远端推送。
+
+---
+
+## 18. 2026-10-23 D140–D141 版本互校补一处 + 免安装便携包
+
+- **D140**：D139 跑 `tauri build` 后 `Cargo.lock` 里本仓包版本被 cargo 从 `1.1.1` 改成 `1.2.0`
+  —— 说明 D127 的「8 处互校」漏了这份副本（不真跑 cargo 就永远不红）。
+  `version-sync` 增加该判据（只认 `name = "sqli-scanner"`，不碰依赖条目），目标数 8 → **9**，
+  并补一例 selftest。判据：`version:check` 9/9 一致。
+- **D141**：产**免安装便携包**并在**干净解压目录**冒烟：
+  `sqli-scanner.exe`（12.9 MB）+ `sqli-engine.exe`（sidecar 改名，Tauri 打包时同款命名）
+  + README + LICENSE → `sqli-v1.2.0-portable-win-x64.zip`（38.7 MB，仓库外）。
+  干净解压后启动：壳拉起 sidecar、`/api/health` = `1.2.0`（`versionSource=env:ENGINE_VERSION`、
+  `authEnabled=true`），退出无残留。
+  边界：这是绿色包，**不是**官方安装包（无开始菜单/卸载项）。
+
+**发布判断（最终）**：本机可复现范围内**全部转绿**（验收 25/25、桌面壳 release 构建 + 真机冒烟、
+MCP 9 工具、版本 9 处互校、便携包干净冒烟）。仍未验证的四件事都需要**本机之外的资源**：
+官方安装包（联网）、Docker 镜像（无 docker）、真实商业云 WAF 授权样本、远端推送。

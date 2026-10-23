@@ -5,6 +5,30 @@
 
 ---
 
+## 2026-10-23 批次 D141 · 免安装便携包（portable zip）+ 干净解压冒烟
+
+**背景**：官方安装包需联网下载 NSIS，本机不通 ⇒ 产一个**离线可交付**的绿色包，且**干净解压后冒烟**。
+
+**做法与产物**（仓库外，不入库）：
+```powershell
+$dst='D:\projects\sqli-v1.2.0-portable-win-x64'
+Copy-Item <repo>\src-tauri\target\release\sqli-scanner.exe            "$dst\sqli-scanner.exe"
+Copy-Item <repo>\src-tauri\binaries\sqli-engine-<triple>.exe          "$dst\sqli-engine.exe"   # 改名，壳按此名找
+Compress-Archive "$dst\*" "$dst.zip"        # 38.7 MB（解压后 105.7 MB）
+```
+**冒烟**：解压到临时目录 → 启动 → 壳拉起 sidecar → `/api/health` = `1.2.0`
+（`versionSource=env:ENGINE_VERSION`、`authEnabled=true`）→ 退出无残留。
+
+### 待推进（仍未关闭）
+
+- **NSIS/WiX 官方安装包**：需能联网的环境跑 `npm run package:win`（本机 `%LOCALAPPDATA%\tauri`
+  为空、github.com 不可达）。
+- Docker 镜像（本机无 docker/podman）、真实商业云 WAF 授权样本、`v1.2.0` 推送。
+- 便携包目前是「手工组装」；若要进 CI，需把组装与干净解压冒烟固化成脚本 + job
+  （本批因产物放仓库外、且无安装包链路，先手工留证）。
+
+---
+
 ## 2026-10-23 批次 D140 · Cargo.lock 纳入版本互校（8 处 → 9 处）
 
 **背景**：D139 跑完 `tauri build` 后 `Cargo.lock` 冒出一处改动——本仓包版本从 `1.1.1` 被
