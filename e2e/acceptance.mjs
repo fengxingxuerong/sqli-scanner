@@ -27,6 +27,9 @@ import net from 'node:net';
 // [DECISION-2026-09-22] 套件状态判定（含「沙箱起不来」三形态识别）抽成可单测模块
 import { classifySuite, evaluateExpect } from './lib/suiteVerdict.mjs';
 import { ensureSqliSchema } from './lib/sqliSchema.mjs';
+// [D134 2026-10-23] 红队输出四形态判定（pass / fail / skip / blocked）抽成可单测模块：
+// 实测过一次「靶场库不可用 → 19 个真值点全漏 → 记成 0% 检出率 FAIL」，环境缺失被伪装成能力退化。
+import { classifyRedteamOutput } from './lib/redteamVerdict.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, '..');
@@ -249,14 +252,29 @@ try {
 async function withRedteamLab(body) {
   if (pre.redteamLab) return body();
   console.log('    （红队靶场未常驻：自己拉起 env.mjs，跑完会收掉）');
-  const proc = spawn('node', ['e2e/redteam-lab/env.mjs'], { cwd: ROOT, stdio: 'ignore', shell: process.platform === 'win32' });
+  // [D134] 捕获 env.mjs 的输出（原来 stdio: 'ignore' 把它的诊断全丢了）：
+  // env.mjs 现在会在「靶场库不可用」时打 [BLOCKED] 并退出，这个标记必须传得上来，
+  // 否则套件只能看到一个"跑完了但 0 检出"的靶场，把缺依赖记成检出率退化。
+  const proc = spawn('node', ['e2e/redteam-lab/env.mjs'], {
+    cwd: ROOT,
+    stdio: ['ignore', 'pipe', 'pipe'],
+    shell: process.platform === 'win32',
+  });
+  let envOut = '';
+  proc.stdout?.on('data', (d) => { envOut += d.toString(); });
+  proc.stderr?.on('data', (d) => { envOut += d.toString(); });
   let up = false;
   for (let i = 0; i < 60; i++) {
     if (await portOpen(REDTEAM_PORT, '127.0.0.1', 1000)) { up = true; break; }
     await new Promise((r) => setTimeout(r, 1000));
   }
   try {
-    return up ? await body() : { code: 0, out: '[SKIP] 自起红队靶场失败（120s 内 8231 未就绪，多半是缺 PostgreSQL）' };
+    if (!up) {
+      const marker = /\[BLOCKED\]/.test(envOut) ? '[BLOCKED]' : '[SKIP]';
+      return { code: 0, out: `${envOut}\n${marker} 自起红队靶场失败（120s 内 ${REDTEAM_PORT} 未就绪）` };
+    }
+    const r = await body();
+    return { ...r, out: `${envOut}\n${r.out}` };
   } finally {
     try { proc.kill(); } catch { /* 已退出 */ }
   }
@@ -901,23 +919,20 @@ const SUITES = [
       return run('node', ['e2e/redteam-lab/gate-check.mjs', 'r2']);
     }),
     assert: (out) => {
-      // 自起失败（典型：本机没 PG）→ 报 SKIP 而不是 FAIL：没测过不该判红，但也不能算通过
-      if (/\[SKIP\]/.test(out) && !/\[redteam\] round=r2/.test(out)) {
-        return { pass: false, skipped: true, skipReason: (/\[SKIP\] (.+)/.exec(out)?.[1] ?? '红队靶场未就绪').trim() };
-      }
-      // 只吃事实数字：gate-check 算好的真值（分母只含已确认 vuln，误报只数 safe 点）
-      const m = /\[redteam\] round=r2 vuln=(\d+) hit=(\d+) rate=(\d+)% safe=(\d+) fp=(\d+)/.exec(out) || [];
-      const [, total, hit, pct, safeN, fp] = m;
+      // [D134] 判定收敛到可单测的 classifyRedteamOutput（四种形态）：
+      //   · pass —— 全中且零误报（D92 判据：必须全中，阈值容错会吞掉整类注入点的静默假阴性）
+      //   · fail —— 漏检 / 误报 / 取不到事实数字（判据失效也要红，不许静默通过）
+      //   · skip —— 自起失败且无 round 行（典型：本机没 PG；没测过不该判红，但也不能算通过）
+      //   · blocked —— 靶场**起来了但库不可用**（D134 实测形态：root 口令未知 ⇒ 19 点全漏，
+      //      若按 fail 记账就是把「环境缺失」写成「检出率 0%」的能力退化）
+      const v = classifyRedteamOutput(out);
+      if (v.status === 'pass') return { pass: true, facts: v.facts, reason: null };
+      if (v.status === 'fail') return { pass: false, facts: v.facts, reason: v.reason };
       return {
-        facts: { 检出: `${hit}/${total}`, 检出率: pct == null ? null : `${pct}%`, 安全点: safeN, 误报: fp },
-        // [D92 2026-10-17 收紧] 原判据 `pct >= 90` 会把 18/19（95%）判 PASS —— D91 实证
-        // 那正是 cookie 注入点静默假阴性的真回归，阈值容错把「漏整类注入点」吞成通过。
-        // 历史三轮 + 修复后复跑均 19/19 ⇒ 收紧为「必须全中」。抖动致假红时排查环境，不放宽判据。
-        pass: Number(total) > 0 && hit != null && Number(hit) === Number(total) && Number(fp) === 0,
-        reason: fp && Number(fp) > 0 ? `安全点误报 ${fp} 个`
-          : pct == null ? '未取到 gate-check 判据（输出格式变了？）'
-          : Number(hit) !== Number(total) ? `漏检 ${Number(total) - Number(hit)}/${total}（判据 D92：红队必须全中）`
-          : null,
+        pass: false,
+        skipped: true,
+        facts: v.facts,
+        skipReason: v.reason ?? (v.status === 'blocked' ? '红队靶场库不可用' : '红队靶场未就绪'),
       };
     },
   },

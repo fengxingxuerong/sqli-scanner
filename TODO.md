@@ -5,6 +5,33 @@
 
 ---
 
+## 2026-10-23 批次 D134 · 环境路径/依赖不再伪装成能力退化（fileops 目录判定 + 红队 BLOCKED）
+
+**背景**：本轮把全量 acceptance 在本机真跑起来（宿主 MariaDB 10.11 + 真 MySQL 8.0.28 沙箱），
+最好结果 **20 PASS / 0 BLOCKED / 0 FAIL / 5 SKIP**。过程中抓到两个把环境记成能力的真缺陷——
+与 D126「缺表被写成漏检」同形，按同一纪律修。
+
+**本批**：
+- `e2e/lib/fileopsPaths.mjs`（+5 例自证）：按 MySQL 语义解析可用目录（NULL 禁用 / '' 不限制 /
+  '/dir/' 限定必须用它），优先级 显式 env > 实例自报 `@@secure_file_priv` > tmpdir 兜底。
+- `e2e/fileops/exploit-{file-read,file-write}.e2e.mjs`：接入上述判定并**把目标路径打在 pre 行**。
+  实测宿主限定目录下：fileWrite `{wrote:true,verified:true,via:"union"}`、fileRead 回读一致，
+  `方式=宿主实例`（不再依赖沙箱重试）。
+- `e2e/udf-lab/mysql_sandbox.py`：stdout/stderr 切 UTF-8 + replace，修掉 GBK 控制台下 `⚠`
+  触发的 UnicodeEncodeError（它会把「沙箱重试」整条自愈链路崩成 BLOCKED）。
+- `e2e/lib/redteamVerdict.mjs`（+8 例自证）+ `e2e/redteam-lab/env.mjs` + `acceptance.withRedteamLab`：
+  靶场库不可用 ⇒ `[BLOCKED]` 显形（不再记成 0/19 检出率 0%）；env 输出改为捕获（原 `stdio:'ignore'`）。
+
+### 待推进（仍未关闭）
+
+- 数据泄露实证（extract-proof）仍需 DVWA @8099 起靶场；本轮未跑。
+- 真实商业云 WAF 样本、OOB 真机（缺 PG）、Docker 镜像与桌面打包：同上。
+- 沙箱实例 3308 有一份**上一会话遗留的 mysqld**（身份探测不认，`--start` 会拒绝复用并提示
+  `--stop/--destroy`）；换机器或复跑沙箱套件前先清掉。
+- `v1.2.0` 仍只在本机；推送需能出网的环境。
+
+---
+
 ## 2026-10-23 批次 D133 · v1.2.0 发布复验（四项旧未决销账 + 全量验收 + 外部裁判）
 
 **背景**：v1.2.0 tag 已在本地，但发布证据还停在 1.1.x/D121–D124；README 的

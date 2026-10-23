@@ -96,6 +96,7 @@ try {
 
 // 1.5) 探测 root 口令（本机实例未必是空口令；其它 e2e 靶场用的是 root/root）
 process.env.LAB_DB_PASSWORD = process.env.LAB_DB_PASSWORD || '';
+let dbReady = false;
 try {
   // mysql2 装在 server/node_modules：用 createRequire 按 server 包解析（与 lab-app.mjs 同源）
   const req = createRequire(new URL('../../server/package.json', import.meta.url));
@@ -107,12 +108,24 @@ try {
       await c.query('SELECT 1');
       await c.end();
       process.env.LAB_DB_PASSWORD = pw;
+      dbReady = true;
       console.log(`[env] MySQL 口令探测成功（${pw === '' ? '空口令' : 'root'}）`);
       break;
     } catch { /* 换下一个候选 */ }
   }
 } catch (e) {
   console.warn(`[env] 口令探测跳过：${e.message}`);
+}
+
+// [D134 2026-10-23] 库不可用必须**显形**，不能带着一个查不了库的靶场往下跑：
+// 靶场 19 个端点会全部返回错误页 ⇒ 门禁看到 `vuln=19 hit=0 rate=0%` ⇒
+// 把「环境缺失」记成「检出率 0%（=能力退化）」。实测形态：3306 没起时本文件自己
+// 拉起一个口令未知的 mysqld，三个候选口令全失败，然后靶场照常"跑完"。
+// 判定口径与 D126 一致：环境缺失要么 BLOCKED 要么 SKIP，绝不冒充能力结论。
+if (!dbReady) {
+  console.log('[BLOCKED] 靶场库不可用：root 口令探测全部失败（候选：LAB_DB_PASSWORD / root / 空口令）');
+  console.log('[BLOCKED] 处置：让 3306 常驻一个可连实例并设 LAB_DB_PASSWORD（+ MYSQLD_PATH），或先起库再跑');
+  process.exit(3);
 }
 
 // 2) 靶场：内联启动（与 mysqld 同进程生命周期）

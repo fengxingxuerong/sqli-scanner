@@ -234,3 +234,24 @@ CRS PL1 4/8、显式 UNION 漏报、fileWrite 环境闭环三项已在 D133 复�
 - **商业产品口径：仍不建议**（无真实云 WAF 样本、OOB/数据泄露未验证、Docker/桌面未打包验证）。
 
 证据：`e2e/results/acceptance-report.md`、`e2e/results/external-sweep-2026-10-23-v1.2.0.md`。
+
+---
+
+## 12. 2026-10-23 D134 独立复跑（宿主 MariaDB，20 PASS / 0 FAIL）
+
+D133 的结论由另一会话产出，故本轮**在同机上独立重跑**了一遍全量验收（宿主 MariaDB 10.11.19
+@3306，`root/root`，`secure_file_priv=D:\tools\mariadb\files\`；另有一个真 MySQL 8.0.28
+沙箱在 3308 常驻）。结论与 D133 一致，并借这次复跑抓到两个把**环境**记成**能力**的真缺陷：
+
+| 观察 | 真实性质 | 处置（D134） |
+|---|---|---|
+| fileWrite `文件落盘=false` / fileRead BLOCKED（方式=隔离沙箱重试） | 套件把目标目录写成 `tmpdir`/`D:/tmp`，与实例的 `secure_file_priv` 限定目录不符 ⇒ MySQL 拒绝 | 新增 `e2e/lib/fileopsPaths.mjs`（NULL 禁用 / `''` 不限制 / `'/dir/'` 必须用它）+ 5 例自证；两个套件改读 `@@secure_file_priv`。修后宿主实例真跑 PASS（`via=union`、文件系统侧含标记；fileRead 回读一致） |
+| 红队 `0/19 检出率 0% FAIL` | 宿主 3306 没起时 `env.mjs` 自己拉起口令未知的 mysqld ⇒ 19 个真值点全部查库失败（**靶场库不可用**） | `env.mjs` 口令三候选全败时打 `[BLOCKED]` 并退出；`withRedteamLab` 捕获其输出（原 `stdio:'ignore'` 把诊断全丢）；判定收敛到 `e2e/lib/redteamVerdict.mjs`（+8 例自证） |
+| 沙箱自愈重试整条链路抛 `UnicodeEncodeError` | Windows GBK 控制台打印 `⚠` 即崩，套件既没 PASS 也没 SKIP → BLOCKED | `e2e/udf-lab/mysql_sandbox.py` stdout/stderr 切 UTF-8 + replace |
+
+**D134 后本机全量结果：20 PASS / 0 BLOCKED / 0 FAIL / 5 SKIP（exit 0）**
+——比 D133 的 17 PASS/8 SKIP 多 3 项（fileRead/fileWrite 由「沙箱/跳过」变为**宿主实例真跑**）。
+5 个 SKIP 全部是「四个外部裁判未起 + 数据泄露实证环境不满足」，与 D133 同一口径。
+
+**发布判断不变**：本地 v1.2.0 可发布；线上发布差推送与 tag（需网络与授权）；
+商业口径仍不建议（无真实云 WAF 样本、OOB/数据泄露未验证、Docker 与桌面打包未验证）。

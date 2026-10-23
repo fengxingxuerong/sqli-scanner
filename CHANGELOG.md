@@ -85,6 +85,32 @@
 > **升级注意**：报告新增 `summary.unverifiedSurfaces` / `uncoveredSurfaces` 与 `vuln.triage`；
 > 机读消费方若按字段白名单解析，需要放行这些新键；`triage` 不改变 verdict 与退出码。
 
+### 2026-10-23 批次 D134 · 环境路径/依赖不再伪装成能力退化（fileops 目录判定 + 红队 BLOCKED）
+
+**动机**：本轮在本机把全量 acceptance 真跑起来（宿主 MariaDB 10.11 + 真 MySQL 8.0.28 沙箱），
+拿到的最好结果是 **20 PASS / 0 BLOCKED / 0 FAIL / 5 SKIP**；过程中暴露两个**把环境问题记成能力问题**的
+真缺陷——与 D126「缺表被写成漏检」同一形态，故按同一纪律修掉。
+
+- **fileRead / fileWrite 的目录判定**（新 `e2e/lib/fileopsPaths.mjs` + 8 例单测）：
+  两个套件此前只认沙箱注入的 `MYSQL_SECURE_FILE_DIR`，宿主实例把 `secure_file_priv` 指到某个
+  目录（**合法且常见**，本就是现实中唯一会被批准的配置）时，套件仍往 `tmpdir`/`D:/tmp` 写 ⇒
+  MySQL 拒绝 ⇒ 验收报 `fileWrite FAIL`（文件落盘=false）/`fileRead BLOCKED`。现改为按 MySQL 语义读
+  `@@secure_file_priv`：`NULL`=禁用（SKIP）、`''`=不限制（用兜底目录）、`'/dir/'`=**限定必须用它**。
+  实测（宿主 `secure_file_priv=D:\tools\mariadb\files\`）：fileWrite `{ok:true,wrote:true,verified:true,via:"union"}`
+  且文件系统侧含标记、`方式=宿主实例`；fileRead `LOAD_FILE` 回读一致。**不再需要沙箱重试**。
+- **沙箱自愈链路的崩溃**（`e2e/udf-lab/mysql_sandbox.py`）：Windows 控制台默认 GBK，打印 `⚠` 抛
+  `UnicodeEncodeError` ⇒ acceptance 的「宿主未放行 → 隔离沙箱重试」整条链路崩在 print 上，
+  套件既没 PASS 也没 SKIP，被记成 BLOCKED。现统一把 stdout/stderr 切到 UTF-8 + 替换不可编码字符，
+  诊断一定打得出来（实测端口被占用时打出完整处置提示并 exit 3）。
+- **红队套件的依赖判定**（新 `e2e/lib/redteamVerdict.mjs` + 8 例单测）：
+  ① `env.mjs` 三个候选口令全失败时**显形**打 `[BLOCKED]` 并退出，不再带着一个查不了库的靶场往下跑；
+  ② `acceptance.withRedteamLab` 由 `stdio:'ignore'`（把 env.mjs 的诊断全丢掉）改为捕获输出；
+  ③ 套件判定收敛到 `classifyRedteamOutput`（pass / fail / skip / blocked 四形态，含「旁支 BLOCKED
+  不得借跳过逃逸」「取不到事实数字必须红」两条反例）。
+  实测形态：宿主 3306 没起时 env.mjs 自己拉起口令未知的 mysqld ⇒ 19 个真值点全部查库失败 ⇒
+  此前记为 **0/19 检出率 0% FAIL**（能力退化），真实性质是**靶场库不可用**。
+- **判据自证**：`node --test "e2e/lib/*.test.mjs"` 47/47（新增 fileopsPaths 5 + redteamVerdict 8）。
+
 ### 2026-10-23 批次 D127–D132 · 发布收尾（身份归位 / 版本戳 / 门禁进 CI / 口径统一 / 未决销账 / P1 安全）
 
 **动机**：`docs/release-readiness-2026-10-23.md` 的发布就绪度评估把 6 项 P0 与 5 项 P1

@@ -43,6 +43,17 @@ import sys
 import time
 from pathlib import Path
 
+# [D134 2026-10-23] Windows 控制台默认 GBK(cp936)：打印 `⚠` 这类字符会抛
+# UnicodeEncodeError，把「沙箱启动失败」的真实原因换成一段 Python traceback
+# （实测：宿主 3308 被占用时，acceptance 的「宿主未放行 → 隔离沙箱重试」整条自愈链路
+#  就崩在 print 上，套件既没 PASS 也没 SKIP，被记成 BLOCKED）。
+# 统一把 stdout/stderr 切到 UTF-8 + 不可编码字符替换，保证诊断信息一定打得出来。
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        pass
+
 HERE = Path(__file__).resolve().parent
 SB = HERE / ".mysql-sandbox"
 INI = SB / "my-sandbox.ini"

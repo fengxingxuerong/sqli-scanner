@@ -666,24 +666,25 @@ npm run acceptance:sandbox          # 同全量，但套隔离 MySQL 沙箱（33
 
 **最近一次全量结果（2026-10-23，v1.2.0；原始报告 [e2e/results/acceptance-report.md](e2e/results/acceptance-report.md)；
 四项旧未决与外部裁判的复验见 [e2e/results/external-sweep-2026-10-23-v1.2.0.md](e2e/results/external-sweep-2026-10-23-v1.2.0.md)）**：
-**17 PASS / 0 FAIL / 8 SKIP（25 套件；SKIP 为环境不满足：四个外部裁判未起、fileRead/fileWrite
-宿主 `secure_file_priv=NULL`、OOB 真机缺 PG、数据泄露实证环境不满足；SKIP 不计通过）**。
+**20 PASS / 0 BLOCKED / 0 FAIL / 5 SKIP（25 套件；5 SKIP 全部是「四个外部裁判未起 + 数据泄露实证环境不满足」，
+SKIP 不计通过）**。
 
 | 套件 | 本轮事实 | 状态 |
 |---|---|---|
-| 服务端单测 | 3744 用例 3738 pass / 0 fail / 6 skip | PASS |
+| 服务端单测 | 3744 用例 3740 pass / 0 fail / 4 skip（本次环境含真 MySQL；无 MySQL 时 6 skip，见「项目状态」的采集口径） | PASS |
 | 独立刁钻 / 检测回归 / 真 MySQL | 11/11、19/19、11/11 | PASS |
 | 报告契约 | 8/8；`union 技术应被检出` 通过（显式 UNION 点不再只出 error） | PASS（2026-10-22 旧 FAIL 已被本轮复跑推翻） |
 | CRS 人工挂链 / 自动选链（PL1） | off=8 / on=8；自动技术位=8；安全误拦/误报=0 | PASS（旧 4/8 结论作废） |
-| fileRead / fileWrite | acceptance 因宿主 `secure_file_priv=NULL` SKIP；MySQL 8.0.28 沙箱复跑均 PASS（fileWrite via=union、文件系统侧含标记；fileRead LOAD_FILE 回读一致） | PASS（沙箱） |
+| fileRead / fileWrite | **宿主实例（`secure_file_priv=D:\tools\mariadb\files\` 限定目录）真跑 PASS**：fileWrite `via=union`、`{wrote:true,verified:true}`、文件系统侧含标记；fileRead LOAD_FILE 回读一致。**[D134]** 此前 FAIL/BLOCKED 是套件把目标目录写成 tmpdir（与实例限定目录不符）——环境路径不匹配被记成能力退化，已改为读 `@@secure_file_priv` | PASS（宿主） |
 | 外部裁判 4 个 | acceptance 因靶场未起 SKIP；同轮单独复跑 **187/187、0 误报** | PASS（单独复跑） |
-| 其余套件（PG / OOB 隧道 / 登录编排 / 保真度 / 红队 / 参数名 / 参数挖掘 / 批量编排 …） | 见验收报告 | PASS |
-| OOB 带外真机 / 数据泄露实证 | 缺 PG / 环境不满足 | SKIP（未验证，不计通过） |
+| 红队实战 | 19/19、安全点 7、误报 0 | PASS |
+| 其余套件（PG / OOB 隧道 / 登录编排 / 保真度 / 变异搜索 / 降级编排 / 参数名 / 参数挖掘 / 批量编排 …） | 见验收报告 | PASS |
+| 外部裁判 4 个 + 数据泄露实证 | 靶场未起 / 环境不满足 | SKIP（未验证，不计通过；外部裁判已单独复跑，数据泄露实证仍未验证） |
 
-> 上一版（2026-10-22）的 16 PASS / 6 FAIL / 3 SKIP 快照已被本轮取代；其中「报告契约 /
-> CRS 手工 / CRS 自动 / fileWrite」四项旧未决已在真 MySQL 8.0.28/10.11 上复跑转绿，
-> 旧数字保留在 CHANGELOG 1.2.0 的「发布复验（D133）」段并标注作废。**不得把本表读成
-> 「25 套全部通过」**：8 个 SKIP 中 6 个已单独补跑，OOB 真机与数据泄露实证仍未验证。
+> 上一版（2026-10-22）的 16 PASS / 6 FAIL / 3 SKIP 快照已被取代；其中「报告契约 / CRS 手工 /
+> CRS 自动 / fileWrite」四项旧未决已在真 MySQL 8.0.28/10.11 上复跑转绿，旧数字保留在
+> CHANGELOG 1.2.0 的「发布复验（D133）」与「D134」段并标注作废。**不得把本表读成
+> 「25 套全部通过」**：仍剩 5 个 SKIP，其中数据泄露实证、OOB 真机（缺 PG）未验证。
 > 上一版 README 此处写「2026-09-20 12 PASS / 12 套件全绿」，那是 12 套件时代的历史快照，
 > 与当前 25 套件门禁不同分母，**已删除，避免误引**。
 
