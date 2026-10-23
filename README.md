@@ -664,24 +664,28 @@ npm run acceptance:sandbox          # 同全量，但套隔离 MySQL 沙箱（33
   经 `run-with-sandbox.py` 注入沙箱连接信息后 16/16 全绿（含 fileRead/fileWrite 真闭环，
   secure_file_priv 由沙箱放行）；直连宿主的旧口径在 3306 无 MySQL 时会把 6 个套件 BLOCKED。
 
-**最近一次全量结果（2026-10-22，逐条证据见 [docs/verification-2026-10-22-full-sweep.md](docs/verification-2026-10-22-full-sweep.md)）**：
-**16 PASS / 6 FAIL / 3 SKIP，exit=1**（25 套件；3 SKIP 为环境不满足：OOB 真机缺 PG、
-interactsh 隧道、Juice Shop 未就绪——SKIP 不计通过）。
+**最近一次全量结果（2026-10-23，v1.2.0；原始报告 [e2e/results/acceptance-report.md](e2e/results/acceptance-report.md)；
+四项旧未决与外部裁判的复验见 [e2e/results/external-sweep-2026-10-23-v1.2.0.md](e2e/results/external-sweep-2026-10-23-v1.2.0.md)）**：
+**17 PASS / 0 FAIL / 8 SKIP（25 套件；SKIP 为环境不满足：四个外部裁判未起、fileRead/fileWrite
+宿主 `secure_file_priv=NULL`、OOB 真机缺 PG、数据泄露实证环境不满足；SKIP 不计通过）**。
 
 | 套件 | 本轮事实 | 状态 |
 |---|---|---|
-| 服务端单测 / 前端单测 | 3730 用例 3724 pass / 0 fail / 6 skip；vitest 66 文件 574 用例 | PASS |
-| 独立刁钻靶场（11 场景） | 8/11 → **11/11**（D126 修 schema 自愈后复跑） | PASS（原红已推翻） |
-| 真 MySQL 靶场 | 3/11 → **11/11**（同上） | PASS（原红已推翻） |
-| 报告契约 | 显式 UNION 注入点只检出 `["error"]`，union 通道漏报 | **FAIL（未决）** |
-| CRS 人工挂链 A/B（PL1） | 该轮记录 off=4 / on=4（基线 8/8） | **未决**：同一天 15:20 的 `e2e/waf-real/results/waf-real-report.md` 记录的却是 8 个技术位、安全对照零误拦（与基线持平）。两份产物互相矛盾 ⇒ 需要一次可复现的 MySQL 8 + CRS 复跑才能定性，**在此之前不得引用任一数字** |
-| CRS 自动选链（PL1） | 该轮记录技术位 4 < 基线 8 | **未决**：同上，与同日 `waf-auto` 产物口径待对齐 |
-| fileWrite 真闭环 | 自报 `{wrote:true, verified:false}` 且文件不存在 | **FAIL（自报语义已修 D131；环境侧仍待 `secure_file_priv` 对齐）** |
-| 其余 15 套件（PG / OOB / 外部裁判 / 登录编排 / 保真度 / 红队 / fileRead …） | 见各套件产物 | PASS |
+| 服务端单测 | 3744 用例 3738 pass / 0 fail / 6 skip | PASS |
+| 独立刁钻 / 检测回归 / 真 MySQL | 11/11、19/19、11/11 | PASS |
+| 报告契约 | 8/8；`union 技术应被检出` 通过（显式 UNION 点不再只出 error） | PASS（2026-10-22 旧 FAIL 已被本轮复跑推翻） |
+| CRS 人工挂链 / 自动选链（PL1） | off=8 / on=8；自动技术位=8；安全误拦/误报=0 | PASS（旧 4/8 结论作废） |
+| fileRead / fileWrite | acceptance 因宿主 `secure_file_priv=NULL` SKIP；MySQL 8.0.28 沙箱复跑均 PASS（fileWrite via=union、文件系统侧含标记；fileRead LOAD_FILE 回读一致） | PASS（沙箱） |
+| 外部裁判 4 个 | acceptance 因靶场未起 SKIP；同轮单独复跑 **187/187、0 误报** | PASS（单独复跑） |
+| 其余套件（PG / OOB 隧道 / 登录编排 / 保真度 / 红队 / 参数名 / 参数挖掘 / 批量编排 …） | 见验收报告 | PASS |
+| OOB 带外真机 / 数据泄露实证 | 缺 PG / 环境不满足 | SKIP（未验证，不计通过） |
 
-> 4 项未决已登记为**能力声明级**问题：对外引用检出率或 WAF 结论时必须同时声明这四点，
-> 不得用「验收通过」概括。上一版 README 此处写「2026-09-20 12 PASS / 12 套件全绿」，
-> 那是 12 套件时代的历史快照，与当前 25 套件门禁不同分母，**已删除，避免误引**。
+> 上一版（2026-10-22）的 16 PASS / 6 FAIL / 3 SKIP 快照已被本轮取代；其中「报告契约 /
+> CRS 手工 / CRS 自动 / fileWrite」四项旧未决已在真 MySQL 8.0.28/10.11 上复跑转绿，
+> 旧数字保留在 CHANGELOG 1.2.0 的「发布复验（D133）」段并标注作废。**不得把本表读成
+> 「25 套全部通过」**：8 个 SKIP 中 6 个已单独补跑，OOB 真机与数据泄露实证仍未验证。
+> 上一版 README 此处写「2026-09-20 12 PASS / 12 套件全绿」，那是 12 套件时代的历史快照，
+> 与当前 25 套件门禁不同分母，**已删除，避免误引**。
 
 > ⚠️ **误报率的证据边界（2026-10-09 补，2026-10-13 更正，2026-10-19 更新）**：上表的「误报 0 / 19/19」
 > 全部产自**自建靶场**（`e2e/` 下 37 个靶场）。`e2e/sqli-labs/` 不是上游那个 PHP+MySQL 仓库，
@@ -694,7 +698,8 @@ interactsh 隧道、Juice Shop 未就绪——SKIP 不计通过）。
 > 计（query 210 + header 67 + 参数名形态 50，有效 327：真值 **178/178**、安全 **0/149**；
 > 原「20/504 子集 4/12」被 D115 推翻，**旧数字作废**），Benchmark 已是 acceptance 套件之一；
 > DVGA 为**单端点参考证据**（GraphQL 真值 1/1、安全 0 误报，D121 连续 3 轮，不接门禁）。
-> 以上仍是**子集/小样本**，不能外推为通用检出率或误报率；WAF 侧仍只验 ModSecurity+CRS 一家。
+> 以上仍是**子集/小样本**，不能外推为通用检出率或误报率；WAF 侧仍只有 ModSecurity+CRS 的
+> 有限样本（CRS 门禁是仓库内执行器；真实商业云 WAF 样本仍缺）。
 
 **本轮 0 FAIL。** 此前两轮 FAIL 的定位与修复（CRS 执行器 `(?i:…)` 兼容性、`engine.e2e` 环境耦合假红）、
 「11 PASS / 0 SKIP 假绿」事故、门禁自身的两处缺陷修复与缺陷注入验证记录，已迁至

@@ -231,6 +231,15 @@
       "refute_cmd": "DROP DATABASE sqli_lab; CREATE DATABASE sqli_lab; node e2e/acceptance.mjs --only=pentest-lab,real-mysql-lab   # 期望：前置自带 schema 自愈 → 2 PASS / exit 0",
       "evidence": "docs/verification-2026-10-22-full-sweep.md（推翻记录一节）；e2e/lib/sqliSchema.mjs + sqliSchema.test.mjs（11 例，含缺陷注入复验）",
       "caveat": "新结论仅覆盖 MariaDB 10.11 本机；MySQL 8.x 方言差异未复验，但与本条推翻无关（缺表在任何方言下都无信号）"
+    },
+    {
+      "id": "release-revalidation-2026-10-23-d133",
+      "claim": "v1.2.0 发布复验（2026-10-23）：四项旧未决在真 MySQL 8.0.28/10.11 上复跑转绿——报告契约 8/8（显式 UNION 点 union 通道检出）、CRS PL1 手工 off=8/on=8、自动技术位 8（安全误报 0）、fileWrite {ok:true,wrote:true,verified:true,via:'union'} 且文件系统侧含标记、fileRead LOAD_FILE 回读一致；全量 acceptance 17 PASS/0 FAIL/8 SKIP；外部裁判 5 个同轮复跑 187/187、安全 0 误报。",
+      "status": "verified",
+      "evidence": "e2e/results/external-sweep-2026-10-23-v1.2.0.md；e2e/results/acceptance-report.md；e2e/waf-real/results/waf-real-report.md；e2e/detection-runner/results/detection-report.md",
+      "refute_cmd": "python e2e/run-with-sandbox.py e2e/contract/report-contract.e2e.mjs --drop-dir；MYSQL_HOST=127.0.0.1 MYSQL_PORT=3306 MYSQL_USER=root MYSQL_PASSWORD=root MYSQL_DATABASE=sqli_lab WAF_GATE_PL=1 node e2e/acceptance.mjs --only=waf-real,waf-auto；MYSQL_PORT=3308（MySQL 8 沙箱）node e2e/fileops/exploit-file-write.e2e.mjs + exploit-file-read.e2e.mjs；五个外部 run.mjs",
+      "recheck_batch": "D133（2026-10-23）：旧 CRS 4/8、UNION FAIL、fileWrite 环境闭环作废；v1.2.0 外部与全量验收补证。",
+      "caveat": "OOB 真机（缺 PG）与数据泄露实证仍 SKIP（未验证）；无真实商业云 WAF 样本；Benchmark 占 178/187；{call} 4 条未检出；Docker/桌面打包未验证；远端未推送。"
     }
   ]
 }

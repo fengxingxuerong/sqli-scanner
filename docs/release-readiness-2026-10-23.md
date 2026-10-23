@@ -5,6 +5,12 @@
 >
 > **环境**：Windows；node v24.18.0（已构建 sidecar 内为 22.22.2）；npm 11.16.0；cargo 1.98.0。
 > **本机无 MySQL、无 Docker、无 PHP** ⇒ 25 套验收中 23 套本轮无法复跑。
+>
+> **2026-10-23 D133 复验更新**：本文 §0–§9 是 v1.1.1 工作区的历史评估。D127–D132 + D133
+> 已把 6 项 P0 与 5 项 P1 的代码侧销账；四项能力未决已在真 MySQL 8.0.28/10.11 上复跑转绿；
+> v1.2.0 外部裁判 187/187；全量 acceptance 17 PASS / 0 FAIL / 8 SKIP。当前结论：
+> **本地 v1.2.0 具备对外技术发布条件；线上发布仍差推送/远端 tag/CI，以及 OOB 真机、
+> 数据泄露实证、Docker/桌面打包等未验证项**。见 §11。
 
 ---
 
@@ -200,5 +206,31 @@
 | P1-5 en README 分叉 | **已修（D130）**：17 → 25 套件；另注明中文 README 为权威版本 | 人工复核 |
 | P2 CLI 无 --version | **已修（D132）**：`-V/--version` 早退打印版本（README/help 同步，flag 覆盖门禁覆盖） | `node server/bin/cli.js --version` → `1.2.0`，exit 0 |
 
-**仍未关闭**（环境依赖，不假装修好）：CRS PL1 4/8 与自动选链 4<8、显式 UNION 点 union 漏报、
-fileWrite 环境侧闭环、vitest 大版本升级、Docker 上下文体积、远端 50+ 提交未推送。
+**仍未关闭（2026-10-23 D133 更新）**：OOB 真机 / 数据泄露实证环境不满足、无真实商业云 WAF
+样本、Docker 镜像与桌面打包未验证、vitest 大版本升级、远端 50+ 提交未推送。
+CRS PL1 4/8、显式 UNION 漏报、fileWrite 环境闭环三项已在 D133 复跑转绿，见 §11。
+
+---
+
+## 11. 2026-10-23 D133 发布复验（旧未决销账 + v1.2.0 外部裁判）
+
+| 项 | 命令 | 结果 |
+|---|---|---|
+| 报告契约（显式 UNION） | `python e2e/run-with-sandbox.py e2e/contract/report-contract.e2e.mjs --drop-dir` | **8/8**；union 通道检出 |
+| CRS 人工挂链 PL1 | `MYSQL_* node e2e/acceptance.mjs --only=waf-real,waf-auto` | **off=8 / on=8**；安全误拦 false |
+| CRS 自动选链 PL1 | 同上 | **技术位=8**；安全误报 0 |
+| fileWrite / fileRead | MySQL 8.0.28 沙箱（`secure_file_priv` 限定目录） | **均 PASS**；fileWrite `via=union`、文件系统侧含标记 |
+| 全量 acceptance | `MYSQL_* WAF_GATE_PL=1 node e2e/acceptance.mjs` | **17 PASS / 0 FAIL / 8 SKIP** |
+| 外部裁判 v1.2.0 | 5 个靶场同轮复跑 + Benchmark 三清单 | **187/187、0 误报** |
+
+8 SKIP 中：四个外部裁判已单独复跑（187/187）；fileRead/fileWrite 已用沙箱复跑（PASS）；
+仅 **OOB 真机（缺 PG）与数据泄露实证（环境不满足）仍未验证**。
+
+**当前发布判断**：
+- **本地 v1.2.0 技术版：可以发布**（`release-check` exit 0、`gate:close` 22/22、tag 在 HEAD、
+  工作树干净、外部 187/187、全量验收 0 FAIL）。
+- **线上 GitHub Release：还差** 推送 `master` + tag（需明确授权，且需网络可达）、远端 CI 在
+  tag 上真跑、release notes 引用 CHANGELOG 1.2.0 的「已知问题与未验证面」。
+- **商业产品口径：仍不建议**（无真实云 WAF 样本、OOB/数据泄露未验证、Docker/桌面未打包验证）。
+
+证据：`e2e/results/acceptance-report.md`、`e2e/results/external-sweep-2026-10-23-v1.2.0.md`。

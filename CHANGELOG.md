@@ -132,6 +132,39 @@
   单测（version.resolve 7、browserEgressGuard 5、sideEffectLedger 穿越 2、fileWrite 语义 2）
   全过；`npm run build`、`cargo fmt/check`、sidecar 冒烟（含版本断言）全过。
 
+### 2026-10-23 批次 D133 · v1.2.0 发布复验（四项旧未决销账 + 全量验收 + 外部裁判）
+
+**动机**：v1.2.0 tag 已在本机，但外部证据仍停在 1.1.x/D121–D124，README 的
+16 PASS / 6 FAIL / 3 SKIP 快照里还有 4 项能力级未决。本批在真 MySQL 8.0.28/10.11 上复跑，
+把「未验证」从发布阻断降为「已补证 / 仍属环境边界」。
+
+**复跑（旧结论按 §3.5 作废，保留旧数字于本节上下文）**：
+- 报告契约：`python e2e/run-with-sandbox.py e2e/contract/report-contract.e2e.mjs --drop-dir`
+  → **8/8**，显式 UNION 点 union 通道检出。旧「只出 error / union 漏报」作废。
+- CRS PL1：`acceptance --only=waf-real,waf-auto` → **off=8 / on=8、auto=8、误报 0**。
+  旧「手工 4/8、自动 4」作废。
+- fileWrite：MySQL 8.0.28 沙箱（`secure_file_priv` 限定目录）→
+  **`{ok:true,wrote:true,verified:true,via:"union"}`**，文件系统侧确认文件存在且含标记；
+  fileRead 同环境 **PASS**（LOAD_FILE 回读一致）。旧 `{wrote:true,verified:false}` 作废。
+- 全量 acceptance（宿主 MariaDB 10.11）：**17 PASS / 0 FAIL / 8 SKIP**（25 套件）。
+  8 SKIP = 四个外部裁判未起（已同轮单独复跑）+ fileRead/fileWrite 宿主 `secure_file_priv=NULL`
+  （已用 MySQL 8 沙箱复跑）+ OOB 真机缺 PG + 数据泄露实证环境不满足。
+- 外部裁判 **v1.2.0** 复跑：Juice 2/2、VAmPI 2/2 + 0/5、DVGA 1/1、DVWA 5/5、
+  Benchmark 178/178 + 0/149 ⇒ **187/187 真值、0 误报**。证据：
+  `e2e/results/external-sweep-2026-10-23-v1.2.0.md`；全量验收报告：
+  `e2e/results/acceptance-report.md`。
+
+**已知问题与未验证面（v1.2.0 对外发布口径，必须随 release notes 引用）**：
+- 外部 187/187 是小样本且严重不均衡（Benchmark 占 178/187），**不能外推通用检出率**；
+  GraphQL 面只有 DVGA 一个真值端点；`{call <过程名>}` 4 条真值未检出（已知边界）。
+- **没有真实商业云 WAF 样本**；CRS PL1 8/8 是仓库内执行器 + 真 MySQL 靶站口径，
+  不是云 WAF 绕过率。真机 ModSecurity 样本仍只有 1/62 WAF 指纹。
+- OOB 带外真机（PG COPY TO PROGRAM）与数据泄露实证本轮仍 SKIP（环境不满足），
+  **未验证不等于不存在**。
+- Docker 镜像未构建/冒烟（本机无 Docker）；桌面 `tauri build` 未在本轮打包验证。
+- `v1.2.0` 目前只在本机 tag，远端未推送；发布前必须对齐 origin 并在 tag 上跑 CI。
+- vitest 3→5 升级仍按独立批次处理（覆盖率口径需重定，不混进本发布批）。
+
 ### 2026-10-22 批次 D126 · 验收前置 schema 自愈（把「环境缺失」从「真值漏检」里摘出来）
 
 **动机**：全方面验证（`docs/verification-2026-10-22-full-sweep.md`）里两个 MySQL 套件

@@ -5,6 +5,34 @@
 
 ---
 
+## 2026-10-23 批次 D133 · v1.2.0 发布复验（四项旧未决销账 + 全量验收 + 外部裁判）
+
+**背景**：v1.2.0 tag 已在本地，但发布证据还停在 1.1.x/D121–D124；README 的
+16 PASS / 6 FAIL / 3 SKIP 快照里还有 4 项能力级未决。本批在真 MySQL 8.0.28/10.11 上复跑，
+把「未验证」从「发布阻断」降为「已补证/仍属环境边界」。
+
+**本批实测**：
+- 报告契约：`python e2e/run-with-sandbox.py e2e/contract/report-contract.e2e.mjs --drop-dir`
+  → **8/8**，显式 UNION 点 union 通道检出（旧 FAIL 作废）。
+- CRS PL1：`acceptance --only=waf-real,waf-auto` → **off=8/on=8、auto=8、误报 0**（旧 4/8 作废）。
+- fileRead/fileWrite：MySQL 8.0.28 沙箱（`secure_file_priv` 限定目录）→ **均 PASS**；
+  fileWrite `{wrote:true,verified:true,via:"union"}`，文件系统侧含标记。
+- 全量 acceptance：**17 PASS / 0 FAIL / 8 SKIP**（8 SKIP 中外部 4 + fileRead/fileWrite 已单独补跑；
+  OOB 真机缺 PG、数据泄露实证环境不满足仍未验证）。
+- 外部裁判 v1.2.0：Juice 2/2、VAmPI 2/2+0/5、DVGA 1/1、DVWA 5/5、Benchmark 178/178+0/149
+  ⇒ **187/187、0 误报**；证据 `e2e/results/external-sweep-2026-10-23-v1.2.0.md`。
+
+### 待推进（仍未关闭）
+
+- OOB 真机（PG COPY TO PROGRAM）与数据泄露实证：环境不满足，未验证。
+- 真实商业云 WAF 样本仍缺；CRS 8/8 是仓库内执行器口径，不是云 WAF 绕过率。
+- Benchmark 占 187 里的 178；`{call <过程名>}` 4 条真值未检出（已知边界）。
+- Docker 镜像未构建/冒烟（本机无 Docker）；桌面打包未在本轮验证。
+- `v1.2.0` 目前只在本机；推送/远端 tag 需单独授权（GitHub 443 曾不可达）。
+- vitest 3→5 升级仍按独立批次处理（覆盖率口径需重定，不混进发布批）。
+
+---
+
 ## 2026-10-23 批次 D127–D132 · 发布收尾
 
 **背景**：`docs/release-readiness-2026-10-23.md` 逐项实测出 6 项 P0 + 5 项 P1；
@@ -27,12 +55,13 @@
 
 ### 待推进
 
-- **CRS PL1 4/8 vs 基线 8/8**：需要真 MySQL 8 + CRS 执行器环境才能 bisect（本机无 MySQL）。
-  注意两份产物互相矛盾：acceptance 记录 4/4，同一天 15:20 的 `e2e/waf-real/results/waf-real-report.md`
-  记录 8 个技术位且安全对照零误拦（= 基线水平）。先复跑一次定性，再按 §3.5 决定是修引擎还是收基线。
-- **显式 UNION 注入点的 union 通道漏报**（report-contract 套件）：同上，需 MySQL 复现。
-- **fileWrite 真闭环**：自报语义已修（D131），但环境侧还要 `secure_priv` 与写路径对齐，
-  需带 MySQL 的机器复跑 `node e2e/acceptance.mjs --only=file-write`。
+- ~~**CRS PL1 4/8 vs 基线 8/8**~~：2026-10-23 复跑 **off=8/on=8、auto=8、误报 0**
+  （`acceptance --only=waf-real,waf-auto`，真 MySQL 10.11）。旧 4/8 数字作废。
+- ~~**显式 UNION 注入点的 union 通道漏报**~~：2026-10-23 report-contract **8/8**，
+  `union 技术应被检出` 通过（沙箱 MySQL 8.0.28 + schema 自愈）。旧 FAIL 作废。
+- ~~**fileWrite 真闭环**~~：2026-10-23 MySQL 8.0.28 沙箱复跑 PASS
+  （`{wrote:true,verified:true,via:"union"}`，文件系统侧含标记）；fileRead 同步 PASS。
+  宿主 `secure_file_priv=NULL` 时验收仍 SKIP，属环境边界而非能力缺口。
 - **vitest 3 → 5 升级**：已实测尝试并**回退**（2026-10-23，证据见下），不是"没时间做"。
   - 依赖可解：`vitest@5.0.5 + @vitest/coverage-v8@5.0.5 + @types/node@^24` 安装成功，
     功能面 **574/574 全过**、根包 `npm audit` → **0 vulnerabilities**（清掉 2 critical + 2 moderate）。
