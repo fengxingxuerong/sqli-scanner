@@ -5,6 +5,37 @@
 
 ---
 
+## 2026-10-23 批次 D135 · 本机补齐 DVWA 裁判与数据泄露实证（22 PASS / 0 FAIL / 3 SKIP）
+
+**背景**：D134 后只剩「外部裁判未起 + 数据泄露实证环境不满足」这类 SKIP。本批把本机**能起的起起来**：
+真 DVWA（PHP 8.3 + 宿主 MariaDB 10.11）→ 外部裁判 3 号 + 数据泄露实证两条同时转绿。
+
+**本机复现配方（下次直接照抄）**：
+```powershell
+# 1) 宿主 MariaDB（该 datadir 里已有 dvwa / sqli_lab / redteam_lab / param*-lab 等靶场库）
+D:\tools\mariadb\mariadb-10.11.19-winx64\bin\mariadbd.exe --defaults-file=D:\tools\mariadb\data\my.ini `
+  --port=3306 --secure-file-priv=D:/tools/mariadb/files --console
+# 2) DVWA（config.inc.php 从 .dist 拷贝；env 驱动，关鉴权、默认 low）
+$env:DISABLE_AUTHENTICATION='true'; $env:DEFAULT_SECURITY_LEVEL='low'
+$env:DB_SERVER='127.0.0.1'; $env:DB_PORT='3306'; $env:DB_DATABASE='dvwa'; $env:DB_USER='root'; $env:DB_PASSWORD='root'
+D:\tools\php83\php.exe -S 127.0.0.1:8099 -t <DVWA-master>
+# 3) 验收
+$env:MYSQL_HOST='127.0.0.1'; $env:MYSQL_PORT='3306'; $env:MYSQL_USER='root'; $env:MYSQL_PASSWORD='root'
+$env:MYSQL_DATABASE='sqli_lab'; $env:WAF_GATE_PL='1'; $env:DVWA_BASE='http://127.0.0.1:8099'
+node e2e/acceptance.mjs
+```
+
+**结果**：外部裁判 3 号 DVWA **5/5、0 误报、0 证据不足**（四形态）；数据泄露实证**成立**
+（真库名 9 个、139 请求、3 条漏洞）；全量 **22 PASS / 0 BLOCKED / 0 FAIL / 3 SKIP（exit 0）**。
+
+### 待推进（仍未关闭）
+
+- 3 个 SKIP：Juice Shop / VAmPI / OWASP Benchmark 未在本机起靶场（VAmPI 有现成 venv 与源码，
+  Juice 有已构建产物，Benchmark 需 JDK+Maven+cargo —— 属「起靶场」工作量，非能力缺口）。
+- 真实商业云 WAF 样本；Docker 镜像与桌面打包；`v1.2.0` 推送（需能出网的环境）。
+
+---
+
 ## 2026-10-23 批次 D134 · 环境路径/依赖不再伪装成能力退化（fileops 目录判定 + 红队 BLOCKED）
 
 **背景**：本轮把全量 acceptance 在本机真跑起来（宿主 MariaDB 10.11 + 真 MySQL 8.0.28 沙箱），

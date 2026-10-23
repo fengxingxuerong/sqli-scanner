@@ -254,4 +254,25 @@ D133 的结论由另一会话产出，故本轮**在同机上独立重跑**了�
 5 个 SKIP 全部是「四个外部裁判未起 + 数据泄露实证环境不满足」，与 D133 同一口径。
 
 **发布判断不变**：本地 v1.2.0 可发布；线上发布差推送与 tag（需网络与授权）；
-商业口径仍不建议（无真实云 WAF 样本、OOB/数据泄露未验证、Docker 与桌面打包未验证）。
+商业口径仍不建议（无真实云 WAF 样本、Docker 与桌面打包未验证）。
+
+---
+
+## 13. 2026-10-23 D135 本机补齐 DVWA 裁判与数据泄露实证（22 PASS / 0 FAIL / 3 SKIP）
+
+D134 之后剩下的 SKIP 都在「靶场没起」这一类。本轮把本机**能起的**起起来——宿主 MariaDB 10.11
+的 datadir 里本就有 `dvwa` 库，`dvwa.tar.gz` 也在，于是补上真 DVWA（PHP 8.3 built-in server，
+`DISABLE_AUTHENTICATION=true` + `DEFAULT_SECURITY_LEVEL=low`）：
+
+| 套件 | 结果 |
+|---|---|
+| 外部裁判 3 号（DVWA） | **5/5 真值、安全端点 0 误报、证据不足 0**（low GET / low 盲注 / high cookie / medium POST + impossible 对照） |
+| 数据泄露实证 | **成立**：`--dbs` 取回**真库名 9 个**（`dvwa`/`sqli_lab`/`redteam_lab`/`campus_library`/… ）而非 payload 残片；139 请求、3 条漏洞 |
+| 全量 acceptance | **22 PASS / 0 BLOCKED / 0 FAIL / 3 SKIP（exit 0）** |
+
+**仍未验证（3 SKIP）**：Juice Shop、VAmPI、OWASP Benchmark 未在本机起靶场
+（其单独复跑证据仍是 D133 的 187/187、0 误报，含 Benchmark 三清单）。
+**OOB 真机本轮为 PASS**（真 PG `COPY TO PROGRAM` 真实回连），此前「缺 PG」的记录已被本机环境推翻。
+
+结论：**本机可复现范围内，验收已无 FAIL、无 BLOCKED**；剩下的都是「没起靶场」，
+以及仓库外才能验证的三件事（真实云 WAF 样本、Docker/桌面打包、远端推送）。

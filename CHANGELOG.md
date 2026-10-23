@@ -85,6 +85,30 @@
 > **升级注意**：报告新增 `summary.unverifiedSurfaces` / `uncoveredSurfaces` 与 `vuln.triage`；
 > 机读消费方若按字段白名单解析，需要放行这些新键；`triage` 不改变 verdict 与退出码。
 
+### 2026-10-23 批次 D135 · 本机补齐 DVWA 裁判与数据泄露实证（22 PASS / 0 FAIL / 3 SKIP）
+
+**动机**：D134 之后本机只差「外部裁判未起 + 数据泄露实证环境不满足」这一类 SKIP。
+本批把**能在本机起的两件**起起来：真 DVWA（PHP 8.3 + MariaDB 10.11）跑外部裁判 3 号与数据泄露实证。
+
+**环境（可复现）**：
+- 宿主 MariaDB 10.11.19：`mariadbd --defaults-file=D:\tools\mariadb\data\my.ini --port=3306
+  --secure-file-priv=D:/tools/mariadb/files --console`（该实例已有 `dvwa` / `sqli_lab` /
+  `redteam_lab` / `param*-lab` 等靶场库）。
+- DVWA：`tar -xzf dvwa.tar.gz` 后 `config.inc.php` 拷贝自 `.dist`（env 驱动），以
+  `DISABLE_AUTHENTICATION=true DEFAULT_SECURITY_LEVEL=low DB_*=root/root php -S 127.0.0.1:8099 -t <DVWA>`
+  起真靶场。实测 `/vulnerabilities/sqli/?id=1&Submit=Submit`（cookie `security=low`）返回
+  `First name: admin`。
+- 验收：`MYSQL_* DVWA_BASE=http://127.0.0.1:8099 WAF_GATE_PL=1 node e2e/acceptance.mjs`。
+
+**结果**：
+- 外部裁判 3 号（DVWA）：**5/5 真值、安全端点 0 误报、证据不足 0**，四形态覆盖
+  （low GET / low 盲注 / high cookie / medium POST + impossible 档对照）。
+- 数据泄露实证：**成立**——`--dbs` 取回真库名（9 个，含 `dvwa`/`sqli_lab`/`redteam_lab` …）
+  而非 payload 残片；139 请求、3 条漏洞。
+- **全量 acceptance：22 PASS / 0 BLOCKED / 0 FAIL / 3 SKIP（exit 0）**，比 D134 的 20/5 再收 2 项。
+- 剩 3 个 SKIP：Juice Shop / VAmPI / OWASP Benchmark **未在本机起靶场**（其单独复跑证据见
+  `e2e/results/external-sweep-2026-10-23-v1.2.0.md`：187/187、0 误报，含 Benchmark 三清单）。
+
 ### 2026-10-23 批次 D134 · 环境路径/依赖不再伪装成能力退化（fileops 目录判定 + 红队 BLOCKED）
 
 **动机**：本轮在本机把全量 acceptance 真跑起来（宿主 MariaDB 10.11 + 真 MySQL 8.0.28 沙箱），
