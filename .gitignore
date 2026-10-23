@@ -3,6 +3,9 @@ node_modules
 ._*
 .tmp-*
 dist
+# [D142] 免安装便携包的组装产物（scripts/build-portable.mjs 生成）；交付件由 CI 作为
+# artifact 上传或放仓库外，不入库（内含 92 MB sidecar）。
+dist-portable
 server/node_modules
 src-tauri/target
 src-tauri/binaries

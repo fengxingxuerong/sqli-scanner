@@ -233,6 +233,8 @@ npm run dev          # 启动前端开发服务器
 npm run server       # 启动后端服务器
 npm run build        # 构建前端
 npm test             # 运行前端测试
+npm run package:portable  # 桌面：壳 release 构建 → 组装免安装便携包 → 干净解压冒烟（离线可跑）
+npm run package:win       # 桌面：官方 NSIS 安装包（需联网下载 NSIS 工具链）
 npm run tamper-matrix   # 生成 tamper 绕过矩阵
 npm run waf-validate    # HTTP 实测验证 WAF 绕过
 npm run waf-e2e         # 运行 WAF e2e 对比测试

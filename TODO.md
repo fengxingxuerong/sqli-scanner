@@ -5,6 +5,28 @@
 
 ---
 
+## 2026-10-23 批次 D142 · 便携包组装/冒烟固化为脚本 + CI 桌面交付件 job
+
+**本批**：
+- `scripts/build-portable.mjs`（离线）：校验壳/sidecar 产物 → 按 Tauri 约定落成 `sqli-engine[.exe]`
+  → 带 README/LICENSE + `manifest.json`（逐文件 sha256）→ 打 zip；任一步失败**非零退出**。
+- `scripts/portable-smoke.mjs`：**干净解压**后启动，断言壳拉起 sidecar + 版本一致 +
+  `authEnabled=true`，再清理进程与临时目录；非 Windows 输出 `[SKIP]`（不计通过）。
+- npm scripts：`dist:portable` / `dist:portable:smoke` / `package:portable`。
+- CI 新 job **`desktop-package`**（windows-latest，**仅 tag/手动**）：构建前端 + sidecar →
+  `npx tauri build --bundles nsis`（有网 ⇒ 产出官方安装包）→ 组装便携包 → 冒烟 → 上传产物。
+- 判据有牙（本地实测）：sidecar 故意不改名 → 冒烟 exit 1 且报出命名约定；正常包 → exit 0、0 残留。
+
+### 待推进（仍未关闭）
+
+- **CI 的 `desktop-package` job 尚未真跑过**（首次会在下一次打 tag 或手动 dispatch 时验证；
+  本地无网跑不了 NSIS）。若它红了，先看两处：`build:sidecar` 在 windows runner 上的 SEA 冒烟、
+  以及 `tauri build` 的 NSIS 工具链下载。
+- `dist-portable/` 已进 .gitignore（内含 92 MB sidecar）；交付件由 CI artifact 或仓库外目录承载。
+- Docker 镜像（本机无 docker；CI 的 docker job 覆盖）、真实商业云 WAF 授权样本、远端推送。
+
+---
+
 ## 2026-10-23 批次 D141 · 免安装便携包（portable zip）+ 干净解压冒烟
 
 **背景**：官方安装包需联网下载 NSIS，本机不通 ⇒ 产一个**离线可交付**的绿色包，且**干净解压后冒烟**。

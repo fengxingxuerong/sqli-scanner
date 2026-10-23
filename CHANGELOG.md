@@ -85,6 +85,30 @@
 > **升级注意**：报告新增 `summary.unverifiedSurfaces` / `uncoveredSurfaces` 与 `vuln.triage`；
 > 机读消费方若按字段白名单解析，需要放行这些新键；`triage` 不改变 verdict 与退出码。
 
+### 2026-10-23 批次 D142 · 便携包组装/冒烟固化为脚本 + CI 桌面交付件 job
+
+**动机**：D141 的便携包是**手工复制**出来的（还得记得把 sidecar 改名、记得带 LICENSE）——
+手工步骤就是本仓反复治理的「文件存在 ≠ 能力存在」形态；而官方安装包在无网环境永远产不出。
+本批把这条链路变成可复现命令，并交给**有网的 CI runner** 产出真正的安装包。
+
+- **`scripts/build-portable.mjs`**（离线可跑）：① 校验壳（`tauri build` 产物）与 sidecar（SEA）
+  都存在，缺失时给出**要跑哪条命令**；② 按 Tauri 命名约定把 sidecar 落成 `sqli-engine[.exe]`
+  （壳用 `shell().sidecar("sqli-engine")` 找它，不改名就跑不起来）；③ 带 README/LICENSE，
+  写 `manifest.json`（逐文件 sha256，交付可核对）；④ 打 zip —— 打不出来就**非零退出**，不产半成品。
+- **`scripts/portable-smoke.mjs`**：**干净解压**后启动，断言「壳自己拉起 sidecar」+
+  「`/api/health` 版本 === package.json 版本」+「`authEnabled === true`」，然后清理进程与临时目录。
+  在仓库里跑 exe 会向上找到 package.json 而谎报版本（D128/D139 两次实测）⇒ 断言必须在干净目录做。
+  非 Windows 平台输出 `[SKIP]` 并 exit 0（不计通过）。
+- **判据有牙（实测）**：故意把 sidecar 留成 `sqli-engine-x86_64-pc-windows-msvc.exe` 不改名 →
+  冒烟 **exit 1** 并指出命名约定；改动后正常包 → exit 0、0 残留进程。
+- **npm scripts**：`dist:portable` / `dist:portable:smoke` / `package:portable`
+  （release:check → build → build:sidecar → `tauri build --no-bundle` → 组装 → 冒烟）。
+- **CI 新 job `desktop-package`**（`windows-latest`，**仅 tag 推送或 workflow_dispatch**）：
+  前端构建 → sidecar → `npx tauri build --bundles nsis`（runner 有网，NSIS 可下载 ⇒ 补上
+  「官方安装包未产出」这一格）→ 组装便携包 → 干净解压冒烟 → 上传
+  `nsis/*.exe` + `dist-portable/*.zip` + `manifest.json`（`if-no-files-found: error`）。
+  之所以只在 tag/dispatch 跑：完整 Tauri 构建是分钟级重活，不该压在每次 push 上。
+
 ### 2026-10-23 批次 D141 · 免安装便携包（portable zip）+ 干净解压冒烟
 
 **动机**：官方安装包（NSIS）需联网下载工具链而本机不通，于是产一个**离线可交付**的便携包，
