@@ -85,6 +85,20 @@
 > **升级注意**：报告新增 `summary.unverifiedSurfaces` / `uncoveredSurfaces` 与 `vuln.triage`；
 > 机读消费方若按字段白名单解析，需要放行这些新键；`triage` 不改变 verdict 与退出码。
 
+### 2026-10-23 批次 D136 · 本机再补 VAmPI 裁判（23 PASS / 0 FAIL / 2 SKIP）
+
+**本批**：把外部裁判 2 号（VAmPI）在本机起真靶场——上游 `VAmPI-master` + 现成 venv，
+漏洞实例 5000（`tokentimetolive=7200`，默认 60 秒会让整轮扫描中途全 401 ⇒ 真假恒等）、
+对照实例 5001（`vulnerable=0`，经 `e2e/vampi-lab/run_port.py`，需把 VAmPI 源码目录同时作为
+cwd 与 `PYTHONPATH`，否则 `from config import vuln_app` 直接 ImportError）。
+
+**结果**：
+- 外部裁判 2 号（VAmPI）：**2/2 真值、安全端点 0/5 误报、证据不足 0**，Bearer 端点 5 个（未测 0），
+  同端点参数化实例 A/B 零误报。
+- **全量 acceptance：23 PASS / 0 BLOCKED / 0 FAIL / 2 SKIP（exit 0）**（D135 是 22/3）。
+- 剩 2 个 SKIP：Juice Shop（需完整 Angular 构建，本机 4 轮未起）、OWASP Benchmark
+  （需 JDK17 + Maven + cargo）；其单独复跑证据仍见 `e2e/results/external-sweep-2026-10-23-v1.2.0.md`。
+
 ### 2026-10-23 批次 D135 · 本机补齐 DVWA 裁判与数据泄露实证（22 PASS / 0 FAIL / 3 SKIP）
 
 **动机**：D134 之后本机只差「外部裁判未起 + 数据泄露实证环境不满足」这一类 SKIP。

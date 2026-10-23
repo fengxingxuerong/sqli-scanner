@@ -276,3 +276,24 @@ D134 之后剩下的 SKIP 都在「靶场没起」这一类。本轮把本机**�
 
 结论：**本机可复现范围内，验收已无 FAIL、无 BLOCKED**；剩下的都是「没起靶场」，
 以及仓库外才能验证的三件事（真实云 WAF 样本、Docker/桌面打包、远端推送）。
+
+---
+
+## 14. 2026-10-23 D136 再补 VAmPI（23 PASS / 0 FAIL / 2 SKIP）
+
+把外部裁判 2 号 VAmPI 也起起来（上游 `VAmPI-master` + 现成 venv；漏洞实例 5000 +
+参数化对照 5001，`tokentimetolive=7200`）。踩到并记录的两处：`run_port.py` 需要把源码目录
+同时作为 cwd 与 `PYTHONPATH`（否则 `from config import vuln_app` ImportError）；
+官方默认 `tokentimetolive=60s` 会让整轮扫描中途全 401（真假恒等 ⇒ 假阴性），必须显式设大。
+
+| 套件 | 结果 |
+|---|---|
+| 外部裁判 2 号（VAmPI） | **2/2 真值、安全端点 0/5 误报、证据不足 0、Bearer 5 端点未测 0** |
+| 全量 acceptance | **23 PASS / 0 BLOCKED / 0 FAIL / 2 SKIP（exit 0）** |
+
+**仍剩 2 个 SKIP**：Juice Shop（需完整 Angular 构建，本机 4 轮未起）、OWASP Benchmark
+（需 JDK17 + Maven + cargo）。两者的单独复跑证据仍为 D133 的 187/187、0 误报（含 Benchmark 三清单）。
+
+综合三轮（D134→D135→D136）：本机 acceptance 由 20 PASS/5 SKIP → 22/3 → **23/2**，
+且 **FAIL 与 BLOCKED 全程为 0**；未验证面收敛到「Juice/ Benchmark 未起靶场 + 真实云 WAF 样本 +
+Docker/桌面打包 + 远端推送」四类。

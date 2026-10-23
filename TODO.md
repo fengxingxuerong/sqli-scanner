@@ -5,6 +5,32 @@
 
 ---
 
+## 2026-10-23 批次 D136 · 本机再补 VAmPI 裁判（23 PASS / 0 FAIL / 2 SKIP）
+
+**本批**：外部裁判 2 号 VAmPI 在本机起真靶场（上游源码 + 现成 venv）。
+两处踩坑写进配方，避免下次重复：
+
+```powershell
+$venv = "$env:TEMP\verify-labs\vampi-venv\Scripts\python.exe"; $src = "$env:TEMP\verify-labs\VAmPI-master"
+$env:tokentimetolive='7200'      # 官方默认 60s ⇒ 整轮扫描中途全 401 ⇒ 真假恒等（假阴性）
+Start-Process $venv -ArgumentList 'app.py' -WorkingDirectory $src -PassThru -NoNewWindow   # 5000 漏洞实例
+Invoke-WebRequest 'http://127.0.0.1:5000/createdb'                                          # 建库灌种子
+$env:PYTHONPATH=$src; $env:PORT='5001'; $env:vulnerable='0'
+Start-Process $venv -ArgumentList 'D:\projects\sqli-scanner\e2e\vampi-lab\run_port.py' `
+  -WorkingDirectory $src -PassThru -NoNewWindow   # 5001 参数化对照（cwd 与 PYTHONPATH 都要给源码目录）
+```
+
+**结果**：VAmPI **2/2 真值、0/5 误报、证据不足 0、Bearer 5 端点未测 0**；
+全量 **23 PASS / 0 BLOCKED / 0 FAIL / 2 SKIP（exit 0）**。
+
+### 待推进（仍未关闭）
+
+- 2 个 SKIP：**Juice Shop**（需完整 Angular 构建产物，本机 4 轮未起）、
+  **OWASP Benchmark**（需 JDK17 + Maven + cargo + HSQLDB）；两者单独复跑证据已有（187/187）。
+- 真实商业云 WAF 样本；Docker 镜像与桌面打包；`v1.2.0` 推送（需能出网的环境）。
+
+---
+
 ## 2026-10-23 批次 D135 · 本机补齐 DVWA 裁判与数据泄露实证（22 PASS / 0 FAIL / 3 SKIP）
 
 **背景**：D134 后只剩「外部裁判未起 + 数据泄露实证环境不满足」这类 SKIP。本批把本机**能起的起起来**：
