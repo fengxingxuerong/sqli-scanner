@@ -85,6 +85,19 @@
 > **升级注意**：报告新增 `summary.unverifiedSurfaces` / `uncoveredSurfaces` 与 `vuln.triage`；
 > 机读消费方若按字段白名单解析，需要放行这些新键；`triage` 不改变 verdict 与退出码。
 
+### 2026-10-23 批次 D140 · Cargo.lock 纳入版本互校（8 处 → 9 处）
+
+**怎么发现的**：D139 跑 `tauri build --no-bundle` 之后 `git status` 多出一处改动 ——
+`src-tauri/Cargo.lock` 里本仓包的版本条目被 cargo 从 `1.1.1` 改写成 `1.2.0`。
+也就是说 **D127 的「8 处互校」漏了它**：不真跑一次 cargo，这一处会一直停在旧版本号，
+而任何门禁都不会红。**与 D127 那次是同一形状的第三次复现**（同一事实多份副本 + 缺一道互校）。
+
+- `scripts/version-sync.mjs`：新增判据 `src-tauri/Cargo.lock（本仓包）`
+  （匹配 `name = "sqli-scanner"` 之后的 `version`，只认本仓包、不碰依赖条目），
+  目标数 8 → **9**；新增一例 selftest（「Cargo.lock 本仓包条目落后 ⇒ 必须报出 1 条」）证明判据有牙。
+- 判据：`node scripts/version-sync.mjs` → **9 处一致（1.2.0）**；
+  `lib/version-sync.mjs --selftest` 6 例全过；`npm run gate:close` 22/22。
+
 ### 2026-10-23 批次 D139 · 桌面壳 release 构建 + 真机冒烟 + MCP 手测（原先「桌面端零验证」关闭）
 
 **动机**：发布就绪度评估里「桌面端零验证」与「MCP/REST 真机未验」一直挂着。本批把这两块补上，

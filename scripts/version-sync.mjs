@@ -3,19 +3,22 @@
 // version-sync.mjs —— 版本号一致性门禁
 //
 // ── 要防的是什么 ─────────────────────────────────────────────────────────────
-// 本项目的版本号手工维护在**六个位置**里：
+// 本项目的版本号手工维护在**七个文件、九处**里（D140 起）：
 //   · package.json                        （npm / GitHub Action / 文档）
 //   · src-tauri/tauri.conf.json           （Tauri 壳 + 安装包元数据）
 //   · src-tauri/Cargo.toml                （Rust crate）
+//   · src-tauri/Cargo.lock                （Rust 锁文件里**本仓包自己**的条目；D140 起纳入）
 //   · server/package.json                 （引擎子包；D127 起纳入，此前长期停在 1.1.0）
 //   · package-lock.json                   （根锁文件顶层 version）
 //   · server/package-lock.json            （引擎锁文件顶层 version）
-//   每个 lock 文件还有第二份副本 `packages[""].version`，一并纳入（同一事实两份副本
-//   是本仓反复栽的形态：README 测试数、e2e 基线、版本号都是同一类）。
+//   两个 npm lock 文件各还有第二份副本 `packages[""].version`，一并纳入。
+//   形状完全一致的三次教训：README 测试数、e2e 基线、版本号——同一个事实多份副本，缺一道互校。
 //
 // 实测（2026-10-05）：前两者是 1.1.0，**Cargo.toml 孤悬 1.0.0**。
 // 实测（2026-10-23，D127 补）：server/package.json 与两个 lock 文件仍停在 1.1.0，
 // 而根 package.json 已是 1.1.1 —— 旧判据只看三处，看不见这三份副本。
+// 实测（2026-10-23，D140 补）：`tauri build` 才把 Cargo.lock 里本仓包条目从 1.1.1 改成 1.2.0
+// —— 亦即 D127 的 8 处互校仍漏了它，不真跑 cargo 就永远发现不了。
 // 后果不是"不好看"，而是**桌面安装包对外报的版本与 npm 包不一致**——
 // 用户装到的壳比 Web 前端旧一个小版本，而没有任何地方提示。
 //
@@ -114,6 +117,20 @@ const TARGETS = [
     },
     replace: (text, v) => text.replace(/^(\s{6}"version"\s*:\s*)"[^"]+"/m, `$1"${v}"`),
   },
+  {
+    // [D140 2026-10-23] Rust 锁文件里**本仓包自己**的版本条目。
+    // 由来：D139 跑 `tauri build --no-bundle` 时 cargo 把这里从 1.1.1 改写成 1.2.0 ——
+    // 也就是说 D127 的 8 处互校漏了它，**版本号在这一处一直是旧的**，只有真跑 cargo 才暴露。
+    // 形状与 D127 那次完全一致：同一个事实又多一份副本，缺一道互校。
+    file: path.join('src-tauri', 'Cargo.lock'),
+    label: 'src-tauri/Cargo.lock（本仓包）',
+    pick: (text) => {
+      const m = text.match(/\nname = "sqli-scanner"\r?\nversion = "([^"]+)"/);
+      return m ? m[1] : null;
+    },
+    replace: (text, v) =>
+      text.replace(/(\nname = "sqli-scanner"\r?\nversion = )"[^"]+"/, `$1"${v}"`),
+  },
 ];
 
 /** 读取全部目标文件的版本。缺失文件 / 缺失键都算失败，不静默跳过。 */
@@ -179,6 +196,14 @@ function main() {
         { label: 'package-lock.json', version: '1.1.0' },
         { label: 'package-lock.json#packages[""]', version: '1.1.0' },
       ], expect: 3 },
+      // D140 新增判据必须自证：Rust 锁文件里本仓包的版本条目落后时也得红
+      //（D139 实测：`tauri build` 才把它从 1.1.1 改成 1.2.0，说明此前 8 处互校漏了它）。
+      { name: 'D140 Cargo.lock 本仓包条目落后 ⇒ 必须报出 1 条', entries: [
+        { label: 'package.json', version: '1.2.0' },
+        { label: 'src-tauri/tauri.conf.json', version: '1.2.0' },
+        { label: 'src-tauri/Cargo.toml', version: '1.2.0' },
+        { label: 'src-tauri/Cargo.lock（本仓包）', version: '1.1.1' },
+      ], expect: 1 },
     ];
     let failed = 0;
     for (const c of cases) {
