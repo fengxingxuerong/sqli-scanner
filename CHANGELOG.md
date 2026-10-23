@@ -85,6 +85,27 @@
 > **升级注意**：报告新增 `summary.unverifiedSurfaces` / `uncoveredSurfaces` 与 `vuln.triage`；
 > 机读消费方若按字段白名单解析，需要放行这些新键；`triage` 不改变 verdict 与退出码。
 
+### 2026-10-23 批次 D139 · 桌面壳 release 构建 + 真机冒烟 + MCP 手测（原先「桌面端零验证」关闭）
+
+**动机**：发布就绪度评估里「桌面端零验证」与「MCP/REST 真机未验」一直挂着。本批把这两块补上，
+**代码未改动**（只记录实测）。
+
+- **桌面壳 release 构建**：`npx tauri build --no-bundle` → `Finished release profile in 2m15s`，
+  产出 `src-tauri/target/release/sqli-scanner.exe`（**12.9 MB**）。之所以带 `--no-bundle`：
+  本机没有 tauri 打包缓存（`%LOCALAPPDATA%\tauri` 不存在），NSIS 需要联网下载工具链而
+  github.com 在本机不可达 ⇒ **安装包（installer）仍未产出**，这是本批唯一没关掉的那一格。
+- **真机冒烟（壳 ↔ sidecar ↔ 引擎）**：启动 exe → 壳自动拉起 `sqli-engine` 子进程 →
+  引擎监听 `127.0.0.1:4567` → `GET /api/health` 返回
+  `{"version":"1.2.0","versionSource":"env:ENGINE_VERSION","authEnabled":true,"exploitEnabled":false}`。
+  三点同时被真机验证：① 壳能拉起并管理 sidecar；② **D128 的第二道保险（Rust 侧注入
+  `ENGINE_VERSION=env!("CARGO_PKG_VERSION")`）在真实链路上生效**（versionSource 正是 env 分支，
+  且版本与 package.json 一致）；③ 壳注入的一次性 token 生效（`authEnabled:true`，
+  而 `/api/health` 作为公开端点仍可读）。冒烟后两个进程均已清理。
+- **MCP（stdio）手测**：向 `node server/bin/cli.js mcp` 管道送入 `initialize` +
+  `notifications/initialized` + `tools/list` → 返回 `protocolVersion 2024-11-05`、
+  `serverInfo {name: sqli-scanner, version: 1.2.0}`、**9 个工具**（run_scan / get_scan_status /
+  get_findings / get_report / list_scans / stop|pause|resume_scan / preflight），与 README 表一致。
+
 ### 2026-10-23 批次 D138 · 本机起 OWASP Benchmark → 全量验收 25/25 全绿（0 FAIL / 0 SKIP）
 
 **动机**：D137 之后唯一 SKIP 是 OWASP Benchmark。本轮发现本机**已有**它的源码与构建产物

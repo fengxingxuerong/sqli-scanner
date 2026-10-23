@@ -341,3 +341,20 @@ Docker/桌面打包 + 远端推送」四类。
 - **线上发布：仍差**推送 master + tag（本机 443 不通，需能出网的环境或代理）。
 - **商业口径：仍不建议**——真实商业云 WAF 样本、Docker 镜像与桌面打包未验证；
   这三个不在本机可复现范围内，已如实登记在 TODO 与台账 caveat。
+
+---
+
+## 17. 2026-10-23 D139 桌面壳 release 构建 + 真机冒烟 + MCP 手测
+
+评估里「桌面端零验证」与「MCP/REST 未验」两块本批补上（代码未改动，只记录实测）：
+
+| 项 | 命令 | 结果 |
+|---|---|---|
+| 壳 release 构建 | `npx tauri build --no-bundle` | `Finished release profile in 2m15s` → `src-tauri/target/release/sqli-scanner.exe`（**12.9 MB**） |
+| 壳 ↔ sidecar 真机 | 启动该 exe | 壳自动拉起 `sqli-engine` 子进程，引擎监听 `127.0.0.1:4567` |
+| 版本上报（D128 第二道保险） | `GET /api/health` | `version=1.2.0`、**`versionSource=env:ENGINE_VERSION`** ⇒ Rust 侧 `env!("CARGO_PKG_VERSION")` 注入在真实链路上生效 |
+| 一次性 token | 同上 | `authEnabled=true`（壳注入 token），public 的 health 仍可读 |
+| MCP stdio | `printf initialize/tools\\/list \| node server/bin/cli.js mcp` | `protocolVersion 2024-11-05`、`serverInfo.version 1.2.0`、**9 个工具**（与 README 表一致） |
+
+**仍未关**：NSIS 安装包（本机无 tauri 打包缓存、NSIS 工具链需联网下载而 github 不可达 ⇒ 只到 exe）、
+Docker 镜像（本机无 Docker）、真实商业云 WAF 授权样本、远端推送。

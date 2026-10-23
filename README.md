@@ -687,10 +687,11 @@ npm run acceptance:sandbox          # 同全量，但套隔离 MySQL 沙箱（33
 
 > 上一版（2026-10-22）的 16 PASS / 6 FAIL / 3 SKIP 快照已被取代；其中「报告契约 / CRS 手工 /
 > CRS 自动 / fileWrite」四项旧未决已在真 MySQL 8.0.28/10.11 上复跑转绿，旧数字保留在
-> CHANGELOG 1.2.0 的「D133–D138」段并标注作废。**本表 25/25 全绿，无 SKIP、无 BLOCKED**：
+> CHANGELOG 1.2.0 的「D133–D139」段并标注作废。**本表 25/25 全绿，无 SKIP、无 BLOCKED**：
 > 五个外部裁判（Juice Shop / VAmPI / DVWA / Benchmark / DVGA 另计）都在本机起了真靶场，
-> 其中 Benchmark 三清单全跑（187/187）；仍未验证的三件事在**仓库外**：真实商业云 WAF 样本、
-> Docker 镜像与桌面打包、远端推送。
+> 其中 Benchmark 三清单全跑（187/187）；桌面壳也已做 release 构建 + 真机冒烟（壳拉起 sidecar、
+> 版本与鉴权注入均实测）。仍未验证的是**本机之外**的几件事：真实商业云 WAF 样本、Docker 镜像、
+> NSIS 安装包（需联网下载工具链）、远端推送。
 > 上一版 README 此处写「2026-09-20 12 PASS / 12 套件全绿」，那是 12 套件时代的历史快照，
 > 与当前 25 套件门禁不同分母，**已删除，避免误引**。
 

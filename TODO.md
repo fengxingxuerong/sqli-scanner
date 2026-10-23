@@ -5,6 +5,41 @@
 
 ---
 
+## 2026-10-23 批次 D139 · 桌面壳 release 构建 + 真机冒烟 + MCP 手测
+
+**背景**：评估里「桌面端零验证」「MCP 真机未验」两块一直挂着。本批补上（**代码未改动**）。
+
+**本批实测**：
+```powershell
+# 壳 release 构建（不打包 installer）
+npx tauri build --no-bundle        # Finished release profile in 2m15s → src-tauri\target\release\sqli-scanner.exe（12.9 MB）
+# 真机冒烟：壳 → sidecar → 引擎
+Start-Process src-tauri\target\release\sqli-scanner.exe
+#   壳自动拉起 sqli-engine 子进程，引擎监听 127.0.0.1:4567
+curl http://127.0.0.1:4567/api/health
+#   → {"version":"1.2.0","versionSource":"env:ENGINE_VERSION","authEnabled":true,"exploitEnabled":false,...}
+# MCP stdio 手测
+'{"jsonrpc":"2.0","id":1,"method":"initialize",...}' | node server/bin/cli.js mcp
+#   → protocolVersion 2024-11-05 · serverInfo.version 1.2.0 · 9 个工具
+```
+
+**真机确认的三件事**：① 壳能拉起/管理 sidecar；② D128 的第二道保险（Rust 注入
+`ENGINE_VERSION`）在真实链路上生效（`versionSource=env:ENGINE_VERSION`）；③ 壳注入的一次性
+token 生效（`authEnabled:true`，public 的 `/api/health` 仍可读）。冒烟后进程已清理。
+
+### 待推进（仍未关闭）
+
+- **NSIS 安装包未产出**：本机无 tauri 打包缓存（`%LOCALAPPDATA%\tauri` 不存在），NSIS 工具链要联网
+  下载而 github.com 不可达 ⇒ 只到 `sqli-scanner.exe`（12.9 MB）。有网环境跑
+  `npm run package:win` 即可产出安装包。
+- **Docker 镜像**未构建（本机无 Docker）。
+- **真实商业云 WAF 授权样本**（台账唯一 unverified 条目）。
+- **`v1.2.0` 推送**（本机到 github.com:443 不通；bundle 已备）。
+- 本机靶场是临时进程，重启后需按 D134–D138 的配方重新拉起（MariaDB 3306、DVWA 8099、
+  VAmPI 5000/5001、Juice 3199 用 Node 22、Benchmark 9001+8443；3308 遗留沙箱 mysqld 待清）。
+
+---
+
 ## 2026-10-23 批次 D138 · 本机起 OWASP Benchmark → 全量验收 25/25 全绿（0 FAIL / 0 SKIP）
 
 **背景**：D137 后只剩 Benchmark 一个 SKIP。本轮发现本机已有它的源码与构建产物
