@@ -35,5 +35,8 @@
     "sql.js": "^1.14.1",
     "undici": "^7.29.0",
     "winston": "^3.13.0"
+  },
+  "overrides": {
+    "@azure/msal-node": "^7.1.1"
   }
 }

@@ -69,8 +69,12 @@ function scanFile(filePath) {
   // throw / process.exitCode = 非0 也算失败退出路径（不算恒绿）
   const hasThrow = /\bthrow\b/.test(src);
   const hasExitCodeNon0 = /process\.exitCode\s*=\s*[^0]/.test(src);
-  if (allExits.length > 0 && exit0Count > 0 && exitNon0Count === 0 && !hasThrow && !hasExitCodeNon0) {
-    suspects.push({ line: 0, pattern: 'only-exit-0', desc: `仅有 process.exit(0)（${exit0Count} 处），无 exit(1/2)/throw/exitCode —— 无论结果如何都成功退出` });
+  // [2026-10-24] 失败退出可以委托给共享 helper（scripts/lib/portable.mjs 的 failWith -> exit(1)）。
+  // 只看本文件的 exit 调用会把这种脚本误报成恒绿（D143 的 build-portable 就栽在这里）。
+  // 要求本文件**真的调用了** helper；只 import 不算。
+  const hasFailHelper = /\bfailWith\s*\(/.test(src);
+  if (allExits.length > 0 && exit0Count > 0 && exitNon0Count === 0 && !hasThrow && !hasExitCodeNon0 && !hasFailHelper) {
+    suspects.push({ line: 0, pattern: 'only-exit-0', desc: `仅有 process.exit(0)（${exit0Count} 处），无 exit(1/2)/throw/exitCode/failWith —— 无论结果如何都成功退出` });
   }
 
   return suspects;
@@ -123,10 +127,19 @@ function selftest() {
   //   两条都要修：写在 tmpdir（漏清也伤不到门禁），退出用 exitCode（让 finally 真跑）。
   const fake = path.join(os.tmpdir(), `greenguard-selftest-fake-${process.pid}.mjs`);
   const normalFake = path.join(os.tmpdir(), `greenguard-selftest-normal-${process.pid}.mjs`);
+  const onlyExitFake = path.join(os.tmpdir(), `greenguard-selftest-only-exit-${process.pid}.mjs`);
+  const delegatedFake = path.join(os.tmpdir(), `greenguard-selftest-delegated-${process.pid}.mjs`);
   const fakeSrc = `import fs from 'node:fs';\ntry { fs.readFileSync('nonexistent'); } catch { process.exit(0); }\n`;
   const normalSrc = `import fs from 'node:fs';\nif (!fs.existsSync('x')) process.exit(1);\nprocess.exit(0);\n`;
+  // 最纯粹的恒绿：无条件 exit 0，必须是判据 ③ 的活体样本
+  const onlyExitSrc = `process.exit(0);\n`;
+  // 失败退出委托给共享 helper：只 import 定义在别处的 failWith，本文件只有 exit(0)；
+  // 它**不是**恒绿，判据不得误报（D143 build-portable 的真实形态）。
+  const delegatedSrc = `import { failWith } from './lib/portable.mjs';\nif (!process.env.OK) failWith('[x]', 'failed');\nprocess.exit(0);\n`;
   fs.writeFileSync(fake, fakeSrc, 'utf8');
   fs.writeFileSync(normalFake, normalSrc, 'utf8');
+  fs.writeFileSync(onlyExitFake, onlyExitSrc, 'utf8');
+  fs.writeFileSync(delegatedFake, delegatedSrc, 'utf8');
   try {
     const suspects = scanFile(fake);
     if (suspects.length === 0) {
@@ -143,10 +156,21 @@ function selftest() {
       process.exitCode = 1;
       return;
     }
-    console.log('✔ greenguard-check selftest 通过（恒绿可检出，正常脚本不误报 only-exit-0）');
+    // only-exit-0 必须仍能检出纯恒绿；委托 failWith 的脚本不得被 only-exit-0 误报
+    if (!scanFile(onlyExitFake).some((s) => s.pattern === 'only-exit-0')) {
+      console.error('✗ selftest 失败：纯 exit(0) 脚本未被 only-exit-0 检出');
+      process.exitCode = 1;
+      return;
+    }
+    if (scanFile(delegatedFake).some((s) => s.pattern === 'only-exit-0')) {
+      console.error('✗ selftest 失败：委托 failWith 的脚本被误报为 only-exit-0');
+      process.exitCode = 1;
+      return;
+    }
+    console.log('✔ greenguard-check selftest 通过（恒绿可检出；正常/委托退出不误报）');
     process.exitCode = 0;
   } finally {
-    for (const p of [fake, normalFake]) {
+    for (const p of [fake, normalFake, onlyExitFake, delegatedFake]) {
       try {
         fs.unlinkSync(p);
       } catch {

@@ -57,6 +57,12 @@ function closeGateList({ quick = false } = {}) {
     { name: 'readme', cmd: ['node', 'scripts/readme-consistency.mjs'] },
     { name: 'readme:selftest', cmd: ['node', 'scripts/readme-consistency.mjs', '--selftest'] },
     { name: 'flag:selftest', cmd: ['node', 'scripts/readme-flag-coverage.mjs', '--selftest'] },
+    // [D145 2026-10-24] greenguard 此前只在 CI lint 跑、收口清单没有它：D143 的
+    // scripts/build-portable.mjs（失败退出委托给 failWith）被判 only-exit-0 恒绿，
+    // 本地 gate:close 全绿、CI lint 红。判据本身已修（识别委托 helper）+ 自证，
+    // 这里把两道都接进收口，避免同一形态第三次重演。
+    { name: 'greenguard', cmd: ['node', 'scripts/greenguard-check.mjs'] },
+    { name: 'greenguard:selftest', cmd: ['node', 'scripts/greenguard-check.mjs', '--selftest'] },
     { name: 'wiring', cmd: ['node', '--test', ...wiringTestFiles()] },
     { name: 'facts', cmd: ['npm', 'run', '--silent', 'facts:check'] },
     { name: 'refs', cmd: ['node', 'scripts/ref-integrity.mjs'] },
@@ -69,6 +75,10 @@ function closeGateList({ quick = false } = {}) {
     // 本项保证**判据本身没空转**。
     { name: 'portable-build:selftest', cmd: ['node', 'scripts/build-portable.mjs', '--selftest'] },
     { name: 'portable-smoke:selftest', cmd: ['node', 'scripts/portable-smoke.mjs', '--selftest'] },
+    // [D144 2026-10-23] 本机靶场体检判据的自证。验收 25/25 依赖 6 个外部服务，而「没起的靶场」
+    // 在验收里只表现为 SKIP/BLOCKED（假绿温床）⇒ scripts/labs.mjs 把「哪些没起、为什么、
+    // 要设哪个环境变量」变成一条命令。这里只跑 --selftest（纯函数，不探测也不起进程）。
+    { name: 'labs:selftest', cmd: ['node', 'scripts/labs.mjs', '--selftest'] },
   ];
   if (quick) return list.filter((g) => !SLOW.has(g.name));
   return [...list, { name: 'typecheck', cmd: ['npm', 'run', '--silent', 'typecheck'] }, { name: 'lint', cmd: ['npm', 'run', '--silent', 'lint'] }];
@@ -79,7 +89,7 @@ function selftest() {
   const bad = [];
   const list = closeGateList();
   const names = list.map((g) => g.name);
-  const must = ['typecheck', 'lint', 'wiring', 'facts', 'refs', 'readme', 'complexity', 'nesting', 'duplication', 'deadcode', 'debt', 'typecoverage', 'e2e-wiring', 'e2e-wiring:selftest', 'portable-build:selftest', 'portable-smoke:selftest'];
+  const must = ['typecheck', 'lint', 'wiring', 'facts', 'refs', 'readme', 'complexity', 'nesting', 'duplication', 'deadcode', 'debt', 'typecoverage', 'e2e-wiring', 'e2e-wiring:selftest', 'portable-build:selftest', 'portable-smoke:selftest', 'labs:selftest', 'greenguard', 'greenguard:selftest'];
   for (const m of must) if (!names.includes(m)) bad.push(`清单缺「${m}」（AGENTS.md §3 收口清单要求项）`);
   for (const g of ['complexity', 'nesting', 'duplication', 'deadcode', 'debt', 'typecoverage']) {
     if (!names.includes(`${g}:selftest`)) bad.push(`清单缺「${g}:selftest」（每道门禁都要自证）`);

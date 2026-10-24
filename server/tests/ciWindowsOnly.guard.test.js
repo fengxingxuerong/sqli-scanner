@@ -88,6 +88,19 @@ const KNOWN_SAFE = new Map([
     '该 `taskkill` 在 `if (process.platform === "win32" && p.pid)` 之内（**上一行**）—— 平台守卫是跨行的，行级判据看不到，故此处显式登记；else 分支走 `p.kill("SIGKILL")`'],
   ['e2e/waf-lab/compare-real.e2e.mjs:wincmd:` Windows: netstat -ano | findstr :${LAB_PORT} 然后 taskkill /',
     '该行是**错误提示文案**（端口被占时的排查建议），不参与执行；同段紧邻的下一行已给出 POSIX 方案 `lsof -ti :PORT | xargs kill -9`'],
+  // [D145 2026-10-24] build-sidecar.mjs（CI 的 ubuntu job）为了复用探活实现，import 了
+  // scripts/lib/portable.mjs。后者是纯函数/自证清单，.exe 只是**字符串比较与命名约定**，
+  // 不参与跨平台执行；ubuntu 上 portableLayout('linux') 走 ext='' 分支。
+  ["scripts/lib/portable.mjs:exe:const ext = platform === 'win32' ? '.exe' : '';",
+    '平台分支本身：`platform === "win32" ? ".exe" : ""` —— ubuntu 上取空串，不产生 .exe 路径；build-sidecar 只 import `fetchHealthData`'],
+  ["scripts/lib/portable.mjs:exe:['Windows 壳名应为 sqli-scanner.exe', win.shell === 'sqli-scanne",
+    '`buildChecks()` 的自证断言（字符串比较），只在 `--selftest` 执行；build-sidecar 不调用它'],
+  ["scripts/lib/portable.mjs:exe:['Windows sidecar 产物名带三元组', win.sidecar === 'sqli-engine-x86",
+    '同上：buildChecks 的命名约定断言，纯字符串比较，不在 ubuntu 执行路径上'],
+  ["scripts/lib/portable.mjs:exe:['Windows sidecar 交付名必须是 sqli-engine.exe（Tauri 命名约定）', win.s",
+    '同上：buildChecks 的命名约定断言（Tauri 约定），不在 ubuntu 执行路径上'],
+  ["scripts/lib/portable.mjs:exe:['便携包按 sqli-engine.exe 找 sidecar（Tauri 命名约定）', portableLayou",
+    '`smokeChecks()` 的自证断言；Windows 冒烟或 --selftest 才调用，ubuntu 上不会执行'],
 ]);
 
 /**

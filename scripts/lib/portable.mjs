@@ -75,14 +75,28 @@ export function buildManifest(dir, meta) {
 }
 
 /**
- * 读 `--flag value` 形式的选项（两个脚本共用；避免各写一份解析）。
+ * 读选项值，**两种写法都认**：`--flag value` 与 `--flag=value`。
+ * （D144 实测教训：只认前者时，`--require=nope` 被当成不存在的标志 ⇒ 校验被静默跳过、
+ *  脚本照常 exit 0 —— 判据形同虚设。这类「传了没生效」的红线在本仓有专名。）
  * @param {string[]} argv 参数数组
  * @param {string} name 选项名（如 `--zip`）
  * @returns {string|null} 值；缺省为 null
  */
 export function readOpt(argv, name) {
+  const eq = argv.find((a) => a.startsWith(`${name}=`));
+  if (eq) return eq.slice(name.length + 1) || null;
   const i = argv.indexOf(name);
   return i >= 0 && argv[i + 1] ? argv[i + 1] : null;
+}
+
+/**
+ * 选项是否出现（同样认 `--flag` 与 `--flag=value` 两种写法）。
+ * @param {string[]} argv 参数数组
+ * @param {string} name 选项名
+ * @returns {boolean} 是否出现
+ */
+export function hasFlag(argv, name) {
+  return argv.includes(name) || argv.some((a) => a.startsWith(`${name}=`));
 }
 
 /**
@@ -204,7 +218,10 @@ export function buildChecks() {
     ['不支持的平台必须报 ok=false（不能编三元组）', portableLayout('sunos', 'x64').ok === false],
     ['darwin/arm64 三元组正确', targetTriple('darwin', 'arm64') === 'aarch64-apple-darwin'],
     ['readOpt 能取值', readOpt(['--zip', 'x.zip'], '--zip') === 'x.zip'],
+    ['readOpt 认 --flag=value 写法（D144 教训：只认空格写法会静默跳过校验）', readOpt(['--zip=y.zip'], '--zip') === 'y.zip'],
     ['readOpt 缺值返回 null', readOpt(['--zip'], '--zip') === null],
+    ['hasFlag 认两种写法', hasFlag(['--up=dvwa'], '--up') === true && hasFlag(['--up', 'dvwa'], '--up') === true],
+    ['hasFlag 不误判前缀（--u 不等于 --up）', hasFlag(['--u'], '--up') === false],
     ['manifest 只登记一个文件', m.files.length === 1],
     ['manifest 的 sha256 与内容一致（判据有牙）', m.files[0]?.sha256 === expect],
     ['manifest 元信息字段正确', m.version === '1.2.3' && m.kind === 'portable'],

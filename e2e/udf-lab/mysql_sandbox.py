@@ -368,10 +368,34 @@ def _sandbox_alive() -> tuple[bool, str]:
         return False, f"探针失败 rc={rc}：{text[:120]}"
     if ".mysql-sandbox" not in text.lower():
         return False, f"连到的实例不是本沙箱（@@datadir={text[:120]}）"
-    return True, text.splitlines()[-1][:120]
+    line = next((ln for ln in text.splitlines() if ".mysql-sandbox" in ln.lower()), text.splitlines()[-1])
+    return True, line[:120]
 
 
-def do_start(wait_sec: int = 45) -> int:
+def _initial_root_alive() -> tuple[bool, str]:
+    """判断实例是不是**刚 --initialize-insecure、尚未 provision** 的本沙箱。
+
+    [2026-10-24 真 bug] 原判据只认 sandbox 账号，而该账号是**启动成功之后**由
+    `_provision()` 建的 —— 新初始化的 datadir 上 root 无密码、sandbox 不存在，
+    于是 do_start 永远等不到「就绪」，`--init` 在它自己的 `do_start(wait_sec=40)`
+    处必然失败，还会留下一个占着 3308 的实例（run-all 的 12/12 级联失败就是这么来的）。
+    这里单独放行「root 无密码 + datadir 是本沙箱」的初始态；provision 随后在同一生命周期内完成。
+    """
+    rc, out = _mysql_exec("SELECT @@datadir;", user="root", password=None)
+    text = (out or "").strip()
+    if rc != 0:
+        return False, f"初始实例探针失败 rc={rc}：{text[:120]}"
+    if ".mysql-sandbox" not in text.lower():
+        return False, f"连到的实例不是本沙箱（@@datadir={text[:120]}）"
+    line = next((ln for ln in text.splitlines() if ".mysql-sandbox" in ln.lower()), text.splitlines()[-1])
+    return True, line[:120]
+
+
+def do_start(wait_sec: int | None = None) -> int:
+    if wait_sec is None:
+        # 45s 在本机不够：冷启动实测 ~46-50s，超时后启动器放弃、mysqld 继续占着 3308，
+        # 后续每个沙箱套件都「拒绝复用」级联失败（2026-10-24 run-all 12/12 复现）。
+        wait_sec = int(os.environ.get("SANDBOX_START_TIMEOUT", "120"))
     if _port_open(SANDBOX_PORT):
         # [T 2026-10-12] 端口在监听 **不等于** 本沙箱在跑 —— 必须验明正身再用。
         # 只判 `_port_open` 时，端口被任何进程占用（上一套件残留的、正在关闭中的、
@@ -381,6 +405,10 @@ def do_start(wait_sec: int = 45) -> int:
         ok, detail = _sandbox_alive()
         if ok:
             print(f"[mysql-sandbox] 已在运行且身份正确（{detail}）")
+            return 0
+        fresh, fdetail = _initial_root_alive()
+        if fresh:
+            print(f"[mysql-sandbox] 已在运行（初始 datadir，root 无密码，待 provision）：{fdetail}")
             return 0
         print(f"[mysql-sandbox] ⚠ 端口 {SANDBOX_PORT} 已被占用，但其上的实例不是本沙箱：{detail}")
         print("[mysql-sandbox] 拒绝复用 —— 拿身份不明的实例跑完再报错，比一开始就失败难查得多。")
@@ -411,11 +439,19 @@ def do_start(wait_sec: int = 45) -> int:
             if ok:
                 print(f"[mysql-sandbox] 已就绪（{round(time.time()-t0,1)}s）")
                 return 0
+            fresh, fdetail = _initial_root_alive()
+            if fresh:
+                print(f"[mysql-sandbox] 已就绪（初始 datadir，待 provision；{round(time.time()-t0,1)}s）")
+                return 0
         time.sleep(0.5)
 
     print(f"[mysql-sandbox] 启动超时（{wait_sec}s）。错误日志尾部：")
     if ERRORLOG.exists():
         print(ERRORLOG.read_text(encoding="utf-8", errors="replace")[-1500:])
+    # 超时必须收尸：否则刚起来的 mysqld 会占住 3308，下一个套件只会看到「身份不明」
+    killed = _kill_by_datadir()
+    if killed:
+        print(f"[mysql-sandbox] 已清理本沙箱的 {killed} 个 mysqld（避免端口残留级联失败）")
     return 1
 
 
@@ -446,25 +482,29 @@ def do_stop() -> int:
 def _kill_by_datadir() -> int:
     """只杀 datadir 指向本沙箱的 mysqld，绝不误杀主实例。
 
-    注意：本机 `wmic` 不可用（Win10 新版已移除，实测 WinError 2），
-    故改用 `tasklist /v` 拿命令行 + PID。
+    注意：`tasklist /V` 输出**不含命令行**（只有窗口标题），拿它匹配 datadir 永远 0 命中
+    —— 这是 2026-10-24 实测 `--stop` 报「端口仍被占用」却杀不掉的真因。
+    改用 PowerShell 的 Win32_Process.CommandLine（本机 wmic 已移除）。
     """
+    if os.name != "nt":
+        return 0
+    script = (
+        "Get-CimInstance Win32_Process -Filter \"Name='mysqld.exe'\" | "
+        "Where-Object { $_.CommandLine -like '*.mysql-sandbox*' } | "
+        "ForEach-Object { $_.ProcessId }"
+    )
     try:
-        r = _run(["tasklist", "/FI", "IMAGENAME eq mysqld.exe", "/V", "/FO", "CSV"])
+        r = _run(["powershell", "-NoProfile", "-NonInteractive", "-Command", script])
     except FileNotFoundError:
         return 0
 
     n = 0
     for line in (r.stdout or "").splitlines():
-        if "mysqld" not in line.lower() or ".mysql-sandbox" not in line:
+        pid = line.strip()
+        if not pid.isdigit():
             continue
-        # CSV: "映像名称","PID","会话名","会话#","内存使用","状态","用户名","CPU时间","窗口标题"
-        fields = [f.strip('"') for f in line.split('","')]
-        for f in fields:
-            if f.isdigit() and f != "0":
-                _run(["taskkill", "/F", "/PID", f])
-                n += 1
-                break
+        _run(["taskkill", "/F", "/T", "/PID", pid])
+        n += 1
     return n
 
 
@@ -676,25 +716,29 @@ def do_selftest() -> int:
       B 端口被占，探针答"我是主库"（D:\\mysql\\data）⇒ 3（拒绝复用，不得拿主库跑）
       C 端口被占，探针答不上来（半死实例）        ⇒ 3（拒绝复用）
       D 反向钉子：端口被占，探针确认是本沙箱      ⇒ 0（正常复用，别把功能也关掉）
+      E 初始 datadir：sandbox 账号不存在、root 无密码且 datadir 是本沙箱
+                                                ⇒ 0（待 provision；2026-10-24 的 --init 自锁 bug）
+      F 端口被占且是同一初始实例                  ⇒ 0（可复用，随后由 launch() provision）
+      G 启动超时                                  ⇒ 1 且必须调用收尸（不许把 3308 留给下一个套件）
 
     @returns 0 = 全部通过；1 = 有场景不符
     """
     global _port_open, _mysql_exec, is_initialized
 
-    saved = (_port_open, _mysql_exec, is_initialized, subprocess.Popen, write_ini)
+    saved = (_port_open, _mysql_exec, is_initialized, subprocess.Popen, write_ini, _kill_by_datadir)
     fails: list[str] = []
     SANDBOX_DATADIR = str(DATADIR).lower()
     HOST_DATADIR_TXT = r"D:\mysql\data"
 
     def start_call(port_open_seq, exec_result):
-        """跑一次 do_start，返回 rc。"""
+        """跑一次 do_start，返回 rc。exec_result 可为固定 (rc,out) 或 (sql,user,password)->(rc,out)。"""
         seq = list(port_open_seq)
 
         def fake_port_open(port=3308, host="127.0.0.1", timeout=1.0):
             return seq.pop(0) if len(seq) > 1 else seq[0]
 
         globals()["_port_open"] = fake_port_open
-        globals()["_mysql_exec"] = lambda *a, **k: exec_result
+        globals()["_mysql_exec"] = exec_result if callable(exec_result) else (lambda *a, **k: exec_result)
         globals()["is_initialized"] = lambda: True
         globals()["write_ini"] = lambda **k: 0
         subprocess.Popen = lambda *a, **k: None  # 真启动被桩掉：本自测不起任何进程
@@ -705,6 +749,12 @@ def do_selftest() -> int:
             globals()["is_initialized"] = saved[2]
             subprocess.Popen = saved[3]
             globals()["write_ini"] = saved[4]
+
+    def fresh_exec(*a, **k):
+        """初始 datadir：sandbox 账号登录失败，root 无密码可登录且 datadir 属于本沙箱。"""
+        if k.get("user") == "root" and k.get("password") is None:
+            return (0, SANDBOX_DATADIR)
+        return (1, "ERROR 1045 (28000): Access denied for user 'root'@'localhost'")
 
     try:
         # A：端口空闲 → 起来后探针认出本沙箱（第一次 False 走启动分支，其后 True 表示已监听）
@@ -726,17 +776,34 @@ def do_selftest() -> int:
         rc = start_call([True], (0, SANDBOX_DATADIR))
         if rc != 0:
             fails.append(f"D 反向钉子（本沙箱应可复用）：期望 0，实得 {rc}")
+
+        # E/F：初始 datadir（已 --initialize-insecure、尚未 provision）必须被认出来，
+        # 否则 do_init 在自己的 do_start 处永远超时（2026-10-24 实测）。
+        rc = start_call([False, True], fresh_exec)
+        if rc != 0:
+            fails.append(f"E 初始 datadir 启动：期望 0（待 provision），实得 {rc}")
+        rc = start_call([True], fresh_exec)
+        if rc != 0:
+            fails.append(f"F 复用初始 datadir：期望 0，实得 {rc}")
+
+        # G：启动超时必须收尸，否则占着 3308 让后续套件全部「身份不明」。
+        cleaned: list[int] = []
+        globals()["_kill_by_datadir"] = lambda: (cleaned.append(1) or 1)
+        rc = start_call([False], (0, SANDBOX_DATADIR))
+        if rc != 1 or len(cleaned) != 1:
+            fails.append(f"G 超时收尸：期望 rc=1 且清理 1 次，实得 rc={rc} 清理={len(cleaned)} 次")
     finally:
         globals()["_port_open"], globals()["_mysql_exec"], globals()["is_initialized"] = saved[0], saved[1], saved[2]
         subprocess.Popen = saved[3]
         globals()["write_ini"] = saved[4]
+        globals()["_kill_by_datadir"] = saved[5]
 
     if fails:
         print("[mysql-sandbox] --selftest ❌ 失败：")
         for f in fails:
             print(f"  · {f}")
         return 1
-    print("[mysql-sandbox] --selftest ✅ 4/4 通过（A 就绪 / B 主库拒绝 / C 半死拒绝 / D 本沙箱可复用）")
+    print("[mysql-sandbox] --selftest ✅ 7/7 通过（A 就绪 / B 主库拒绝 / C 半死拒绝 / D 本沙箱可复用 / E 初始 datadir / F 复用初始 / G 超时收尸）")
     return 0
 
 

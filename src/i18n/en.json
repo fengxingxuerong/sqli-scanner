@@ -29,6 +29,7 @@
       "targets": "Targets Scanned"
     },
     "recentScans": "Recent Scans",
+  "recentScansDesc": "Recent scans and their risk verdicts on this machine",
     "viewAll": "View All",
     "empty": "No scan records yet. Click \"Start Scan\" above to begin your first scan!",
     "firstScan": "Start Your First Scan",

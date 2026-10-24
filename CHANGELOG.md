@@ -67,6 +67,28 @@
 
 > 下一批次起的条目写在这里。发版时把本节整体升为 `## [x.y.z] - YYYY-MM-DD` 并补汇总段。
 
+### 2026-10-24 批次 D145 · 交付阻断修复（门禁对称 / 沙箱 / i18n / 依赖审计）
+
+- **gate:close 与 CI 对齐**：`scripts/build-portable.mjs` 的失败退出委托给 `failWith()`，
+  greenguard 的恒绿判据看不见委托路径，把 HEAD 判成 `only-exit-0`（本地收口绿、CI lint 红）。
+  判据改为识别 `failWith()` 调用，并补 2 条自证（纯 `exit(0)` 仍检出、正常/委托不误报）；
+  `greenguard` + `--selftest` 接进 `gate:close`（**25 → 27 项**）与 AGENTS §3。
+- **D144 收口**：移除 `scripts/labs.mjs` 未使用导入、`planLab` 收为模块内函数；
+  Windows `.cmd` 经 shell 启动（Node 24 EINVAL）；benchmark-app 启动等待 180s。
+- **MySQL 沙箱（真 bug）**：`do_start` 只认启动后才 provision 的 sandbox 账号，新初始化 datadir
+  永远等不到就绪 ⇒ `--init` 自锁；实测 run-all 12/12 沙箱套件因 45s 超时泄漏 3308 级联失败。
+  新增「初始 datadir（root 无密码 + 本沙箱 datadir）」判据、等待 45s → 120s、超时收尸、
+  `--stop` 改用 PowerShell 命令行定位（`tasklist /V` 不含命令行）。自证 4 → 7 条。
+- **i18n**：补 `home.recentScansDesc`（首页曾直接显示原始键名）；新增 `src/tests/i18n.keys.test.ts`
+  守卫全量 `t()` 键（575 前端用例）。
+- **依赖审计**：`npm audit fix` 修掉 body-parser / undici / ip-address；
+  `@azure/msal-node` 经 `overrides` 升 7.1.1（上游 identity 4.14 仍锁 ^6，无兼容修复）。
+  `npm audit --audit-level=high` = 0；mssql 可加载、全量服务端测试通过。
+  **边界**：AAD 交互式授权无 Azure 环境可测；mssql 服务端凭据流不受该公告影响。
+- **验证**：`gate:close` 27/27；server 3744（3740 pass / 0 fail / 4 skip）；frontend 575/575；
+  徽章 4315；沙箱 `real-mysql-lab` 11/11（3.7s 启动、退出后 3308 释放）；
+  `labs --up=benchmark-app`+`benchmark-db` → 8443 = 200。
+
 ## [1.2.0] - 2026-10-23
 
 > **次版本**：1.1.1 之后累积 **42 个批次（D85–D126）**。五条主题：
@@ -84,6 +106,30 @@
 >
 > **升级注意**：报告新增 `summary.unverifiedSurfaces` / `uncoveredSurfaces` 与 `vuln.triage`；
 > 机读消费方若按字段白名单解析，需要放行这些新键；`triage` 不改变 verdict 与退出码。
+
+### 2026-10-23 批次 D144 · 靶场体检/拉起脚本化（`labs.mjs`）+ 判据进收口清单（24 → 25 项）
+
+**动机**：25/25 全绿依赖 6 个外部服务（MariaDB / DVWA / VAmPI×2 / Juice / Benchmark×2，外加只探测的 PG），
+而起法此前只活在 TODO 的散文配方里、路径是本机硬编码。**真正的危险不是麻烦**：没起来的靶场在验收里
+只表现为 **SKIP/BLOCKED**，很容易被读成「没问题」（假绿温床）。
+
+- **`scripts/labs.mjs`**（CLI）+ **`scripts/lib/labs.mjs`**（纯判据）：
+  - `--check`（默认）：只探测端口，按 ✅up / ⬜可拉起 / ⛔缺前置 渲染，**缺前置时点名要设哪个环境变量**；
+    `--require=dvwa,juice` 把指定靶场变硬要求（没起即 exit 1，并给出 `--up=` 处置命令）。
+  - `--up[=ids]`：把「前置齐备且端口没起」的拉起来（detached + 日志落 `.box-agent-scratch/labs-logs/`），
+    pid 记进 `.box-agent-scratch/labs-pids.json`；45s 未就绪即 exit 1 并指向日志。
+  - `--stop`：**只杀本脚本自己起过的 pid**（不碰别人的进程）。
+  - `--list`：打印每个靶场的 cmd/args/cwd/env/前置与可覆盖的环境变量
+    （`MARIADB_HOME`/`PHP_EXE`/`DVWA_DIR`/`VAMPI_VENV`/`VAMPI_SRC`/`NODE22_EXE`/`JUICE_DIR`/
+    `JAVA_EXE`/`MAVEN_CMD`/`HSQL_JAR`/`BENCHMARK_DIR`）。
+- **顺手修掉一个「传了没生效」**：`readOpt` 原来只认 `--flag value`，于是 `--require=nope` 被当成不存在的
+  标志 ⇒ 校验被**静默跳过**、脚本照常 exit 0（就是实测反例暴露的）。现在两种写法都认，并补
+  `hasFlag`（含「`--u` 不得被当成 `--up`」的前缀护栏），自证补 3 条。
+- **进收口清单**：`labs:selftest` 接入 `gate:close`（24 → **25 项**）、`must` 名单与 AGENTS §3。
+
+判据（本轮实测）：`node scripts/labs.mjs` 体检 8 项全 ✅（含 probe-only 的 PG）；
+`--require=nope` **exit 1** 且给出处置；`--up=mariadb`（已在跑）不重复拉起；`--list` 打印全部配方；
+`labs --selftest` 8/8、`build-portable --selftest` 14/14；**`npm run gate:close` 25/25**。
 
 ### 2026-10-23 批次 D143 · 交付件判据收敛到单源 + 自证进收口清单（22 → 24 项）
 

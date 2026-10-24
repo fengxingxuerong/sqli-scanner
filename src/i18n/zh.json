@@ -29,6 +29,7 @@
       "targets": "已检测目标"
     },
     "recentScans": "最近扫描",
+  "recentScansDesc": "本机最近的扫描任务与风险结论",
     "viewAll": "查看全部",
     "empty": "还没有扫描记录，点击上方「开始扫描」发起第一次检测吧",
     "firstScan": "开始第一次扫描",

@@ -1,6 +1,6 @@
 # sqli-scanner
 
-[![Tests](https://img.shields.io/badge/tests-4312%20passing-brightgreen)](#测试)[![CI](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml/badge.svg)](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml)
+[![Tests](https://img.shields.io/badge/tests-4315%20passing-brightgreen)](#测试)[![CI](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml/badge.svg)](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml)
 [![Dependencies](https://img.shields.io/badge/prod%20deps-0%20known%20vulns-brightgreen)](SECURITY.md)
 
 > CI 徽章为真实状态（仓库地址已定，run#90 起全绿）。发布判定仍以 `CHANGELOG.md`
@@ -396,7 +396,7 @@ backend/  ← Express + Node.js
 ## 测试
 
 ```bash
-# 前端测试（574 个用例）
+# 前端测试（575 个用例）
 npm test
 
 # 服务端测试（3744 个用例）
@@ -424,8 +424,8 @@ npm run artifact:drift   # 入库的 e2e 基线产物必须等于当前代码跑
 ## 项目状态
 
 - TypeScript: 零错误
-- 前端测试: 574/574 通过（覆盖率门禁 stmts 93.16 / branch 84.47 / func 80.63，阈值 88/77/67）
-- 服务端测试: 3744 用例（3738 pass / 0 fail / 6 skip，并发口径 2026-10-22 复测；6 skip 为环境依赖显式跳过。覆盖率 lines 91.52 / branch 80.43 / func 84.83，阈值 85/74/77）
+- 前端测试: 575/575 通过（覆盖率门禁 stmts 93.16 / branch 84.47 / func 80.63，阈值 88/77/67）
+- 服务端测试: 3744 用例（3740 pass / 0 fail / 4 skip，并发口径 2026-10-24 复测；4 skip 为环境依赖显式跳过。覆盖率 lines 91.52 / branch 80.43 / func 84.83，阈值 85/74/77）
 - 一键扫描: `npm run scan -- -u <url>`（CLI 一条命令产出 HTML/JSON/Markdown 全套报告 + manifest，退出码可直接进 CI 门禁）
 - Tamper 插件: 234 个（含批次 D3 新增 scalarselectinline；含 v24 增量 20 个，对齐 sqlmap 官方 tamper 全集，含官方 CRS/libinjection 实测组合 uniontable+odbcbrace；含批次 D13 新增 5 件上游形态变体 *nospace/*open/*block，真机 A/B 判决前不进默认链）
 - WAF 绕过能力: 200+ 插件链式组合，覆盖 62 个 WAF 厂商指纹识别 + 推荐
@@ -658,6 +658,12 @@ npm run acceptance                  # 全量（约 8 分钟）
 npm run acceptance -- --skip-heavy  # 跳过最慢的 CRS 组
 npm run acceptance -- --only=waf-auto,waf-real   # 改完某模块做定向门禁
 npm run acceptance:sandbox          # 同全量，但套隔离 MySQL 沙箱（3308）——宿主无 3306 MySQL 时的推荐跑法
+
+# 靶场体检 / 拉起（25 套件里的外部裁判与库；"没起的靶场"在验收里只表现为 SKIP/BLOCKED）
+npm run labs:check                  # 只探测：哪些起了、哪些没起、缺什么（--require=dvwa,juice 可把指定项变硬要求）
+npm run labs:list                   # 打印每个靶场的命令/前置/可覆盖的环境变量
+npm run labs:up                     # 把前置齐备且没起的拉起来（pid 记在 .box-agent-scratch/labs-pids.json）
+npm run labs:stop                   # 只停本脚本起过的进程
 ```
 
 - 依赖缺失时输出 **SKIP + 原因**（不静默跳过、不假装通过）；任一必需套件失败 → 非零退出码。

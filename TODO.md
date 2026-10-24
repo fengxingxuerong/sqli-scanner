@@ -5,6 +5,60 @@
 
 ---
 
+## 2026-10-24 批次 D145 · 交付阻断修复（D144 收口 + 门禁/沙箱/i18n/审计）
+
+**动机**：2026-10-24 全方面交付评估实测出的红项（不是新增能力）：D144 工作树 lint/deadcode 红；
+已提交的 HEAD 被 CI lint 的 greenguard 判红而 `gate:close` 看不见；MySQL 沙箱在「已初始化未 provision」
+的 datadir 上必然超时并泄漏 3308（run-all 12/12 级联失败）；首页缺 `home.recentScansDesc`；
+server 运行时依赖 4 high / 1 moderate（README 的 0 漏洞徽章已失真）。
+
+**本批**：
+- **D144 收口**：移除 `scripts/labs.mjs` 未使用导入；`planLab` 收为模块内函数；Windows 下 `.cmd`
+  经 shell 启动（Node 24 直接 spawn 会 EINVAL）；benchmark-app 启动等待 45s → 180s（实测 ~80s）。
+- **greenguard**：识别委托给 `failWith()` 的非零退出路径（D143 的 build-portable 因此被误判 only-exit-0）；
+  自证从 1 条扩到 3 条（纯 exit(0) 仍检出 / 正常与委托不误报）；接入 `gate:close`（25 → **27 项**）
+  与 AGENTS §3（并记为「已漏七次」的第七次）。
+- **MySQL 沙箱**：新增「初始 datadir（root 无密码 + datadir 属本沙箱）」身份判据 —— 原判据只认
+  sandbox 账号，而账号在启动成功后才 provision，导致 `--init` 在自己的 `do_start` 处必然超时；
+  启动等待 45s → 120s（`SANDBOX_START_TIMEOUT` 可覆盖）；超时必收尸；
+  `--stop` 改用 PowerShell 命令行定位（`tasklist /V` 不含命令行，原来永远 0 命中）。
+  自证 4 → 7 条（新增 E 初始 datadir / F 复用初始 / G 超时收尸）。
+- **UI**：补 `home.recentScansDesc`（zh/en）+ `src/tests/i18n.keys.test.ts` 守卫（全量 638 个 `t()` 键）。
+- **依赖**：`npm audit fix` + `overrides: @azure/msal-node@^7.1.1`。上游 `@azure/identity@4.14.0`
+  仍锁 `msal ^6` 且无兼容修复版；override 后 server audit 0，`require('mssql')` 正常。
+  **边界**：mssql 的 AAD 交互式授权路径无 Azure 环境可测（服务端凭据流不受该公告影响）。
+
+**验证**：`gate:close` 27/27；server 3744（3740 pass / 0 fail / 4 skip）；frontend 575/575；
+`npm audit --audit-level=high` = 0；sandbox `real-mysql-lab` 11/11（启动 3.7s，退出后 3308 释放）；
+`labs --up=benchmark-app` + `benchmark-db` → `https://127.0.0.1:8443/benchmark/` = 200。
+
+**未做**：远端推送（本轮只做本地提交；origin 与本地历史分叉，推送需单独确认）。
+
+---
+
+## 2026-10-23 批次 D144 · 靶场体检/拉起脚本化（`labs.mjs`）+ 判据进收口清单（24 → 25 项）
+
+**动机**：25/25 依赖 6 个外部服务，起法此前只在 TODO 散文里、路径本机硬编码；而没起的靶场在验收里
+**只表现为 SKIP/BLOCKED**（假绿温床）。
+
+**本批**：
+- `scripts/labs.mjs` + `scripts/lib/labs.mjs`：`--check`（体检，`--require=ids` 变硬要求）、
+  `--up[=ids]`（拉起，pid 记 `.box-agent-scratch/labs-pids.json`）、`--stop`（只停自己起的）、
+  `--list`（配方 + 可覆盖的环境变量）、`--selftest`（纯判据 8 条）。
+- npm scripts：`labs:check` / `labs:up` / `labs:stop` / `labs:list`；README 验收段补用法。
+- 修 `readOpt` 只认 `--flag value` 导致 `--require=nope` 被**静默跳过**的问题（实测反例暴露）；
+  补 `hasFlag`（含「`--u` 不等于 `--up`」前缀护栏），自证 +3 条。
+- `labs:selftest` 接入 `gate:close`（24 → 25 项）、`must` 名单与 AGENTS §3。
+
+### 待推进（仍未关闭）
+
+- `--up` 只实测过「已在跑 ⇒ 不重复拉起」这条路径；**从零拉起整链**（尤其 Benchmark 的
+  `cargo:run` 与 MariaDB 首次启动）本轮未在空机上验证 —— 换机器时按 `--list` 配方核对。
+- 靶场是长驻手工态（本机当前 8 项全 ✅）；CI 跑不到这些外部靶场，靠 acceptance 的 SKIP 如实披露。
+- 其余照旧：`desktop-package` job 首跑、Docker 镜像、云 WAF 样本、远端推送。
+
+---
+
 ## 2026-10-23 批次 D143 · 交付件判据收敛到单源 + 自证进收口清单（22 → 24 项）
 
 **触发**：D142 之后 `duplication` 由 3272 涨到 3274（超基线）、`deadcode` 抓到 1 个新导出 —— 两个红都是真问题，
