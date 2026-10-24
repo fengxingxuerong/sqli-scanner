@@ -5,6 +5,27 @@
 
 ---
 
+## 2026-10-24 批次 D150 · workflow 门禁补两条（timeout 必填 / 硬编码凭据）
+
+**动机**：D149 立了 workflow 结构判据；本批补「成本」与「凭据」两类同样只能出事后才知道的判据。
+
+**本批**：
+- `timeout-minutes` 必填：不写默认上限 **360 分钟**。判据上线**当场抓到 9 个 job 缺超时**
+  （lint / test-frontend / test-server / test-matrix / tamper-waf-matrix / docker /
+  docker-publish / release / audit）⇒ 已补齐 45/25/30/45/20/20/20/20/15（2–3× 余量，不卡紧）。
+  另判非法值（0 / >360）。
+- 硬编码凭据扫描（ghp_ / github_pat_ / AKIA / sk- / 私钥块），`${{ secrets.X }}` 表达式不算（反向护栏）。
+- 测试 4 → 5 条；facts 重采（前端 575/67、服务端 3749、徽章 4320）。
+
+### 待推进（仍未关闭）
+
+- timeout 取值是**估算**（参照既有 job 的超时与实测运行时），不是从 CI 历史分布算出来的；
+  首次 push 后可按真实耗时收紧（判据本身会守「必须写」这条）。
+- 仍只判结构：job 的业务语义（该跑什么、跑多久算合格）由各自门禁守；CI 的**运行**结果
+  仍需一次 push/tag 才能验证（`desktop-package` / `docker-publish` / `codeql` 无首跑记录）。
+
+---
+
 ## 2026-10-24 批次 D149 · workflow 结构门禁（新增守卫 + 条件性版本豁免）
 
 **动机**：4 个 workflow 的结构错误只有 GitHub 才知道（push 才红，本地无从验证）；结构却是静态可判的。

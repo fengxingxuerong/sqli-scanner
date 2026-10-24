@@ -39,28 +39,38 @@ const FILES = listWorkflows();
 /** 解析 + 结构体检；YAML 解析失败也算问题（返回原因，不让它静默通过） */
 function lintFile(full) {
   const rel = path.relative(REPO, full).split(path.sep).join('/');
+  const text = readFileSync(full, 'utf8');
   let doc;
   try {
-    doc = YAML.parse(readFileSync(full, 'utf8'), { uniqueKeys: true });
+    doc = YAML.parse(text, { uniqueKeys: true });
   } catch (e) {
     return [`${rel} —— YAML 解析失败：${e.message}`];
   }
-  return lintWorkflowDoc({ doc, file: rel });
+  return lintWorkflowDoc({ doc, file: rel, text });
 }
 
 // ── ① 判据有牙：每条规则都要对合成样本有反应 ─────────────────────────────────
 test('自证：缺 runs-on / needs 断链 / 空步骤 / uses+run / 未钉版本 都必须被点名', () => {
   const base = (jobs) => ({ doc: { jobs }, file: 'synthetic.yml' });
+  // 合规 job 的公共前缀：带上 timeout-minutes（D150 起必填），让下面的反例只暴露它要测的那条
+  const okJob = (extra = {}) => ({ 'runs-on': 'ubuntu-latest', 'timeout-minutes': 10, ...extra });
   const cases = [
-    ['缺 runs-on', base({ a: { steps: [{ uses: 'actions/checkout@v4' }] } }), /缺 runs-on/],
-    ['needs 指向不存在的 job', base({ a: { 'runs-on': 'ubuntu-latest', needs: ['ghost'], steps: [{ run: 'true' }] } }), /依赖的 job「ghost」不存在/],
-    ['steps 为空', base({ a: { 'runs-on': 'ubuntu-latest', steps: [] } }), /steps 为空/],
-    ['空步骤（既无 uses 也无 run）', base({ a: { 'runs-on': 'ubuntu-latest', steps: [{ name: 'x' }] } }), /既无 uses 也无 run/],
-    ['uses 与 run 同写', base({ a: { 'runs-on': 'ubuntu-latest', steps: [{ uses: 'actions/checkout@v4', run: 'true' }] } }), /uses 与 run 同时存在/],
-    ['未钉版本的 action', base({ a: { 'runs-on': 'ubuntu-latest', steps: [{ uses: 'actions/checkout' }] } }), /未钉版本/],
+    ['缺 runs-on', base({ a: { 'timeout-minutes': 10, steps: [{ uses: 'actions/checkout@v4' }] } }), /缺 runs-on/],
+    [
+      '缺 timeout-minutes（默认上限 360 分钟，挂住会烧满配额）',
+      base({ a: { 'runs-on': 'ubuntu-latest', steps: [{ run: 'true' }] } }),
+      /缺 timeout-minutes/,
+    ],
+    ['timeout-minutes 为 0（非法）', base({ a: okJob({ 'timeout-minutes': 0, steps: [{ run: 'true' }] }) }), /非法值/],
+    ['timeout-minutes 超过 360（非法）', base({ a: okJob({ 'timeout-minutes': 400, steps: [{ run: 'true' }] }) }), /非法值/],
+    ['needs 指向不存在的 job', base({ a: okJob({ needs: ['ghost'], steps: [{ run: 'true' }] }) }), /依赖的 job「ghost」不存在/],
+    ['steps 为空', base({ a: okJob({ steps: [] }) }), /steps 为空/],
+    ['空步骤（既无 uses 也无 run）', base({ a: okJob({ steps: [{ name: 'x' }] }) }), /既无 uses 也无 run/],
+    ['uses 与 run 同写', base({ a: okJob({ steps: [{ uses: 'actions/checkout@v4', run: 'true' }] }) }), /uses 与 run 同时存在/],
+    ['未钉版本的 action', base({ a: okJob({ steps: [{ uses: 'actions/checkout' }] }) }), /未钉版本/],
     [
       '条件性豁免缺 with.toolchain ⇒ 必须报（豁免不许退化成「随便不钉」）',
-      base({ a: { 'runs-on': 'ubuntu-latest', steps: [{ uses: 'dtolnay/rust-toolchain@master' }] } }),
+      base({ a: okJob({ steps: [{ uses: 'dtolnay/rust-toolchain@master' }] }) }),
       /缺 with\.toolchain/,
     ],
     ['可复用工作流 job 不该写 runs-on', base({ a: { uses: 'o/r/.github/workflows/x.yml@v1', 'runs-on': 'ubuntu-latest' } }), /不该写 runs-on/],
@@ -71,15 +81,30 @@ test('自证：缺 runs-on / needs 断链 / 空步骤 / uses+run / 未钉版本 
     assert.ok(problems.some((p) => re.test(p)), `${label}：判据没反应（拿到 ${JSON.stringify(problems)}）`);
   }
   // 合规样本必须 0 问题（否则判据过严，会逼人放宽）
-  const ok = lintWorkflowDoc(base({ a: { 'runs-on': 'ubuntu-latest', steps: [{ uses: 'actions/checkout@v4' }, { run: 'echo hi' }] } }));
+  const ok = lintWorkflowDoc(base({ a: okJob({ steps: [{ uses: 'actions/checkout@v4' }, { run: 'echo hi' }] }) }));
   assert.deepEqual(ok, [], `合规样本不该报问题：${JSON.stringify(ok)}`);
   // 本地 action / docker:// 不算未钉版本；条件性豁免在**带 with.toolchain** 时放行
-  const local = lintWorkflowDoc(base({ a: { 'runs-on': 'ubuntu-latest', steps: [{ uses: './' }, { uses: 'docker://alpine:3' }] } }));
+  const local = lintWorkflowDoc(base({ a: okJob({ steps: [{ uses: './' }, { uses: 'docker://alpine:3' }] }) }));
   assert.deepEqual(local, [], `本地/容器 action 不该报未钉版本：${JSON.stringify(local)}`);
   const waived = lintWorkflowDoc(
-    base({ a: { 'runs-on': 'ubuntu-latest', steps: [{ uses: 'dtolnay/rust-toolchain@master', with: { toolchain: '1.98.0' } }] } })
+    base({ a: okJob({ steps: [{ uses: 'dtolnay/rust-toolchain@master', with: { toolchain: '1.98.0' } }] }) })
   );
   assert.deepEqual(waived, [], `带 with.toolchain 的条件性豁免应放行：${JSON.stringify(waived)}`);
+});
+
+test('自证：硬编码凭据必须被点名，且 secrets 表达式本身不算凭据', () => {
+  const bad = lintWorkflowDoc({
+    doc: { jobs: { a: { 'runs-on': 'ubuntu-latest', 'timeout-minutes': 5, steps: [{ run: 'echo ghp_abcdefghijklmnopqrstuvwx' }] } } },
+    file: 'synthetic.yml',
+    text: 'jobs:\n  a:\n    env:\n      TOKEN: ghp_abcdefghijklmnopqrstuvwx\n',
+  });
+  assert.ok(bad.some((p) => /疑似硬编码GitHub PAT/.test(p)), `硬编码 PAT 必须报出：${JSON.stringify(bad)}`);
+  const good = lintWorkflowDoc({
+    doc: { jobs: { a: { 'runs-on': 'ubuntu-latest', 'timeout-minutes': 5, steps: [{ run: 'echo ${{ secrets.X }}' }] } } },
+    file: 'synthetic.yml',
+    text: 'jobs:\n  a:\n    env:\n      TOKEN: ${{ secrets.SCAN_API_TOKEN }}\n',
+  });
+  assert.deepEqual(good, [], `secrets 表达式不该被当成硬编码凭据：${JSON.stringify(good)}`);
 });
 
 test('自证：YAML 重复 job 名必须解析失败（重名 job 会被静默覆盖）', () => {

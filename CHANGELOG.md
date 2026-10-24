@@ -83,6 +83,28 @@
 - **开源门面**：`CODE_OF_CONDUCT.md`、`CONTRIBUTING`/PR 模板、Issue 模板三份、`dependabot.yml`、
   `codeql.yml`（GitHub 代码扫描）；`docs/INDEX.md` 与 TODO 同步。
 
+### 2026-10-24 批次 D150 · workflow 门禁补两条（timeout 必填 / 硬编码凭据）——当场抓到 9 个 job 缺超时
+
+**动机**：D149 把 workflow 结构判据立起来，本批补上两条**成本与凭据**类的判据 ——
+它们同样是「本地全绿、出事才知道」的形态。
+
+- **`timeout-minutes` 必填**：不写时 GitHub 的默认上限是 **360 分钟**，挂住的 job 会烧满
+  runner 配额；而本仓挂住的常见原因恰恰是「等服务端口 / 等回连 / 死锁」。
+  判据一上线就**抓到 9 个 job 没有超时**：`lint` / `test-frontend` / `test-server` /
+  `test-matrix` / `tamper-waf-matrix` / `docker` / `docker-publish` / `release` / `audit`
+  ⇒ 已按任务重量补齐（45/25/30/45/20/20/20/20/15；取值口径写进补丁注释：
+  以既有选择为参照 —— acceptance 25、sidecar-build 12、modsec-live 45 —— 取 2–3× 余量，不卡紧）。
+  另判非法值（0 / 负 / >360）。
+- **硬编码凭据**：workflow 是明文入库的，任何 token 写进去等于公开。判据扫
+  `ghp_…` / `github_pat_…` / `AKIA…` / `sk-…` / 私钥块；**`${{ secrets.X }}` 表达式不算凭据**
+  （先把表达式占位再扫，避免把正确写法误判 —— 这条反向护栏在测试里）。
+- 测试 4 → **5** 条（新增 timeout 缺失/非法 3 例、凭据正反 2 例）。
+
+**顺带**：`facts` 重采（新增测试文件改变了采集指纹）——前端 **575** 用例 / 67 文件、
+服务端 **3749** 用例（3745 pass / 0 fail / 4 skip）、徽章 **4320**。
+
+判据：`node --test tests/ciWorkflows.guard.test.js` **5/5**；`npm run gate:close` **27/27**。
+
 ### 2026-10-24 批次 D149 · workflow 结构门禁（新增守卫 + 条件性版本豁免）
 
 **动机**：仓库现在有 4 个 workflow（`ci.yml` / `codeql.yml` / …），而它们的**结构错误**只有 GitHub

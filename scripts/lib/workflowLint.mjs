@@ -49,6 +49,31 @@ function lintJobShape(doc, file, problems) {
   }
 }
 
+/**
+ * 每个 job 必须显式写 `timeout-minutes`（D150）。
+ * 为什么：不写时 GitHub 的默认上限是 **360 分钟**——挂住的 job 会烧满 6 小时 runner 配额，
+ * 而挂住最常见的原因恰恰是本仓已有过的形态（等服务端口、等回连、死锁）。
+ * 显式值既是成本闸，也是「这个 job 正常多久」的口径声明。
+ * @param {any} doc 已解析的 workflow
+ * @param {string} file 文件名
+ * @param {string[]} problems 累积问题
+ * @returns {void}
+ */
+function lintTimeouts(doc, file, problems) {
+  for (const [name, job] of Object.entries(doc.jobs ?? {})) {
+    if (typeof job?.uses === 'string') continue; // 可复用工作流的超时由被调用方声明
+    const raw = job?.['timeout-minutes'];
+    if (raw == null) {
+      problems.push(`${file}: jobs.${name} —— 缺 timeout-minutes（不写则默认上限 360 分钟，挂住的 job 会烧满配额）`);
+      continue;
+    }
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n <= 0 || n > 360) {
+      problems.push(`${file}: jobs.${name}.timeout-minutes —— 非法值：${String(raw)}（应为 1..360 的分钟数）`);
+    }
+  }
+}
+
 /** `needs:` 指向的 job 必须存在（依赖图断掉时 GitHub 报的是整份 workflow 无效） */
 function lintNeeds(doc, file, problems) {
   const names = new Set(Object.keys(doc.jobs ?? {}));
@@ -77,6 +102,36 @@ function lintSteps(doc, file, problems) {
       if (hasRun && !step.run.trim()) problems.push(`${where} —— run 为空字符串`);
     }
   }
+}
+
+/** 硬编码凭据形态（workflow 是明文入库的，任何 token 写进去等于公开） */
+const SECRET_PATTERNS = [
+  [/ghp_[A-Za-z0-9]{20,}/, 'GitHub PAT（ghp_…）'],
+  [/github_pat_[A-Za-z0-9_]{20,}/, 'GitHub fine-grained PAT（github_pat_…）'],
+  [/AKIA[0-9A-Z]{16}/, 'AWS Access Key ID（AKIA…）'],
+  [/sk-[A-Za-z0-9]{20,}/, 'OpenAI 风格密钥（sk-…）'],
+  [/-----BEGIN [A-Z ]*PRIVATE KEY-----/, '私钥块'],
+];
+
+/**
+ * workflow 里不得出现硬编码凭据（D150）：`${{ secrets.X }}` 才是唯一正确写法。
+ * 只扫明文，`${{ secrets.… }}` 与 `${{ github.token }}` 表达式不算。
+ * 不导出：只有 lintWorkflowDoc 用它（deadcode 门禁把「无人 import 的导出」算死代码）；
+ * 测试通过带 `text` 的 lintWorkflowDoc 覆盖它。
+ * @param {string} text workflow 原文
+ * @param {string} file 文件名
+ * @returns {string[]} 问题列表
+ */
+function lintNoHardcodedSecrets(text, file) {
+  const problems = [];
+  const lines = String(text ?? '').split(/\r?\n/);
+  for (const [i, line] of lines.entries()) {
+    const code = line.replace(/\$\{\{[^}]*\}\}/g, ' EXPR '); // 表达式占位，避免把 secrets 引用本身当凭据
+    for (const [re, label] of SECRET_PATTERNS) {
+      if (re.test(code)) problems.push(`${file}:${i + 1} —— 疑似硬编码${label}（应改用 \${{ secrets.X }}）`);
+    }
+  }
+  return problems;
 }
 
 /**
@@ -115,14 +170,16 @@ function lintUsesPinned(doc, file, problems) {
  * @param {{ doc: any, file: string, emptyOk?: boolean }} input 已解析的 workflow 与其文件名
  * @returns {string[]} 问题列表（空数组 = 通过）
  */
-export function lintWorkflowDoc({ doc, file, emptyOk = false }) {
+export function lintWorkflowDoc({ doc, file, emptyOk = false, text = null }) {
   const problems = [];
+  if (text != null) problems.push(...lintNoHardcodedSecrets(text, file));
   if (!doc || typeof doc !== 'object') return [`${file} —— 顶层不是对象（YAML 解析失败或内容为空）`];
   if (!doc.jobs || typeof doc.jobs !== 'object' || Object.keys(doc.jobs).length === 0) {
     // 只有显式声明「允许没有 job」时才算过（例如占位文件）；默认视为错误，避免空 workflow 静默通过
-    return emptyOk ? [] : [`${file} —— 没有 jobs（workflow 什么也不做）`];
+    return problems.concat(emptyOk ? [] : [`${file} —— 没有 jobs（workflow 什么也不做）`]);
   }
   lintJobShape(doc, file, problems);
+  lintTimeouts(doc, file, problems);
   lintNeeds(doc, file, problems);
   lintSteps(doc, file, problems);
   lintUsesPinned(doc, file, problems);

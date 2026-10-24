@@ -19,6 +19,7 @@ on:
 jobs:
   lint:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     if: github.event_name != 'schedule'
     steps:
       - uses: actions/checkout@v4
@@ -313,6 +314,7 @@ jobs:
 
   test-frontend:
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     if: github.event_name != 'schedule'
     steps:
       - uses: actions/checkout@v4
@@ -341,6 +343,7 @@ jobs:
 
   test-server:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     if: github.event_name != 'schedule'
     steps:
       - uses: actions/checkout@v4
@@ -380,6 +383,7 @@ jobs:
         # [P1-5] ubuntu 已由 lint/test-frontend/test-server 覆盖，矩阵仅跑跨平台增量（windows/macos）
         os: [windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
     needs: [lint, test-frontend, test-server]
     if: always() && github.event_name != 'schedule'
     steps:
@@ -854,6 +858,7 @@ jobs:
           docker rm -f mysql-waf 2>/dev/null || true
   tamper-waf-matrix:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     # [修复] 原 job 级 schedule:/workflow_dispatch: 为非法键（只能放顶层 on:），已移至顶层。
     # 注意不能用 needs:[test-server]：schedule 触发时 test-server 被 if 跳过会连带跳过本 job，
     # 周度矩阵永远不跑。改为仅由 schedule / 手动 dispatch 触发（与原 schedule-only 语义一致）。
@@ -1144,6 +1149,7 @@ jobs:
 
   docker:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     needs: [test-frontend, test-server]
     if: always() && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master') && github.event_name != 'schedule'
     steps:
@@ -1193,6 +1199,7 @@ jobs:
   # 不做「看起来多架构、实际没验证」的声明。验证后再加 platforms。
   docker-publish:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     needs: [test-frontend, test-server]
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
@@ -1230,6 +1237,7 @@ jobs:
   # 一起挂到 GitHub Release。构建复用 desktop-package（不重复跑一遍 Tauri）。
   release:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     needs: [desktop-package]
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
@@ -1278,6 +1286,7 @@ jobs:
   # [P0-FIX] 依赖安全扫描：CI 中缺少 npm audit 步骤，无法拦截传递依赖中的已知漏洞
   audit:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     if: github.event_name != 'schedule'
     steps:
       - uses: actions/checkout@v4
