@@ -28,7 +28,7 @@
     "express": "^4.19.2",
     "mssql": "^12.7.2",
     "mysql2": "^3.23.3",
-    "nanoid": "^5.0.7",
+    "nanoid": "^6.0.2",
     "oracledb": "^7.0.1",
     "pg": "^8.23.0",
     "socks-proxy-agent": "^8.0.2",
