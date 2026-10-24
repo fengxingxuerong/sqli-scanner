@@ -1,0 +1,62 @@
+name: Bug report
+description: 报告可复现的缺陷（请先确认目标是你有权测试的环境）
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈。提交前请先确认：**不要在 issue 中粘贴真实凭证、客户数据或未授权的目标地址**。
+        安全漏洞请走 SECURITY.md 的私下渠道。
+  - type: textarea
+    id: summary
+    attributes:
+      label: 现象
+      description: 实际发生了什么？期望是什么？
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: 最小复现
+      description: 命令、目标形态（可脱敏）、报告/manifest 片段（去掉凭证）
+      placeholder: |
+        node server/bin/cli.js -u "http://127.0.0.1:PORT/page?id=1" --level 2
+        预期：...
+        实际：...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: 版本
+      description: 输出 `node server/bin/cli.js --version`；桌面版请注明壳与 sidecar 版本
+    validations:
+      required: true
+  - type: dropdown
+    id: surface
+    attributes:
+      label: 入口
+      options:
+        - CLI
+        - REST API
+        - MCP
+        - Web panel
+        - Desktop (Tauri)
+        - Build / packaging / CI
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: 环境
+      description: OS / Node 版本 / 数据库靶场 / 是否设置 SCAN_API_TOKEN、EXPLOIT_ENABLED 等
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: 确认
+      options:
+        - label: 目标是我有权测试的环境，或问题与本机靶场/单元测试有关
+          required: true
+        - label: 已移除凭证、Cookie、客户数据
+          required: true

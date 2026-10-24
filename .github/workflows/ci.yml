@@ -1188,6 +1188,93 @@ jobs:
           docker stop sqli-test
           docker rm sqli-test
 
+  # [D146 2026-10-24] tag 发布：把镜像推到 ghcr.io。
+  # 只发 linux/amd64：arm64 尚未在本仓验证（oracledb 等原生依赖在 QEMU 下未跑过），
+  # 不做「看起来多架构、实际没验证」的声明。验证后再加 platforms。
+  docker-publish:
+    runs-on: ubuntu-latest
+    needs: [test-frontend, test-server]
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=ref,event=tag
+            type=semver,pattern={{version}}
+            type=raw,value=latest
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          provenance: true
+          sbom: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # [D146 2026-10-24] 发布链：tag 推送后把已构建的桌面产物 + SBOM + 校验和
+  # 一起挂到 GitHub Release。构建复用 desktop-package（不重复跑一遍 Tauri）。
+  release:
+    runs-on: ubuntu-latest
+    needs: [desktop-package]
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: 下载桌面交付件
+        uses: actions/download-artifact@v4
+        with:
+          name: desktop-package
+          path: release-assets
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: 生成 SBOM（CycloneDX：前端 + 引擎运行时依赖）
+        run: |
+          npm ci --ignore-scripts
+          npm sbom --sbom-format=cyclonedx > release-assets/sbom-frontend.cdx.json
+          cd server
+          npm ci --ignore-scripts
+          npm sbom --sbom-format=cyclonedx --omit=dev > ../release-assets/sbom-engine.cdx.json
+      - name: 生成 SHA256 校验和（按 Release 资产名扁平化，供下载后直接 -c）
+        run: |
+          python3 - <<'PY'
+          import hashlib
+          from pathlib import Path
+
+          root = Path('release-assets')
+          lines = []
+          for p in sorted(root.rglob('*')):
+              if p.is_file() and p.name != 'SHA256SUMS.txt':
+                  digest = hashlib.sha256(p.read_bytes()).hexdigest()
+                  lines.append(f'{digest}  {p.name}')
+          (root / 'SHA256SUMS.txt').write_text('\n'.join(lines) + '\n', encoding='utf-8')
+          print('\n'.join(lines))
+          PY
+      - name: 创建 Release 并上传资产
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          gh release view "$tag" >/dev/null 2>&1 || gh release create "$tag" --title "$tag" --generate-notes
+          find release-assets -type f -print0 | sort -z | xargs -0 gh release upload "$tag" --clobber
+
   # [P0-FIX] 依赖安全扫描：CI 中缺少 npm audit 步骤，无法拦截传递依赖中的已知漏洞
   audit:
     runs-on: ubuntu-latest

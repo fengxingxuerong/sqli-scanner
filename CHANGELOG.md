@@ -67,6 +67,40 @@
 
 > 下一批次起的条目写在这里。发版时把本节整体升为 `## [x.y.z] - YYYY-MM-DD` 并补汇总段。
 
+### 2026-10-24 批次 D146 · 开源门面 + ghcr 镜像发布 + sqlmap 对照 bench
+
+（本条目由并发会话进行中批次的落盘内容整理而成；该批次工作区未提交时 `refs` 门禁点名
+「package.json 引用的 bench/run.mjs 未入库」，故与 D147 一并入库。）
+
+- **ghcr 镜像发布**（`ci.yml` 新增 `docker-publish` job）：仅在 tag 推送时跑，把镜像推到
+  `ghcr.io/<repo>`（`GITHUB_TOKEN` + `packages: write`，tag/semver/latest 三档）。
+  只发 **linux/amd64**：arm64 尚未在本仓验证（oracledb 等原生依赖没在 QEMU 下跑过），
+  **不做「看起来多架构、实际没验证」的声明**。
+- **sqlmap 对照 bench**（`bench/run.mjs` + `bench/README.md`，`npm run bench:sqlmap` /
+  `bench:selftest`）：对 DVWA 等真靶场逐场景记录双方结果，产物落 `bench/results/<ISO>/`
+  （含每轮 raw 输出；`bench/results/` 已进 .gitignore，只留脚本与说明入库）。
+- **英文文档与发布流程**：`docs/en/quickstart.md`、`docs/release-process.md`、`README.en.md` 同步。
+- **开源门面**：`CODE_OF_CONDUCT.md`、`CONTRIBUTING`/PR 模板、Issue 模板三份、`dependabot.yml`、
+  `codeql.yml`（GitHub 代码扫描）；`docs/INDEX.md` 与 TODO 同步。
+
+### 2026-10-24 批次 D147 · 靶场脚本化拉起验证（`labs --up` 全链 → 全量验收 25/25）
+
+**背景**：D144 的 `labs.mjs` 当时只实测过「已在跑 ⇒ 不重复拉起」那条路径，从零拉起整链是未验证面
+（写进了 D144 待推进）；D145 又修了 `mvn.cmd` 在 Node 下 `spawn EINVAL` 的问题。本批把整链真跑一遍。
+
+- 把本机 5 个外部服务从「已停」状态交给脚本拉起：
+  `node scripts/labs.mjs --up` → `vampi-safe / juice / benchmark-db / benchmark-app` 全部就绪
+  （含 `mvn cargo:run` 起 Tomcat；pid 记入 `.box-agent-scratch/labs-pids.json`，日志在 `labs-logs/`）。
+- 复检：`node scripts/labs.mjs` → **8 项全 ✅**（6 个可拉起 + probe-only 的 PostgreSQL）。
+- 随后跑**全量验收**（靶场全部由脚本拉起而非手工常驻）：
+  **25 PASS / 0 BLOCKED / 0 FAIL / 0 SKIP（25/25 跑出断言，exit 0）**。
+- 收口：`npm run gate:close` **27/27**（含 D145 新接入的 greenguard 两项目）。
+
+**顺带发现并处理的仓库不一致**：工作区里另一并发批次的 `package.json` 新增了
+`bench:sqlmap` / `bench:selftest` 指向 `bench/run.mjs`，但该文件**未 git add** ⇒ `refs` 门禁
+当场点名「本机有、库里没有」（CI 会 `Cannot find module`）。已把该批次的新文件补进索引
+（未提交其内容，提交仍归该批次），复跑 `refs` 绿。
+
 ### 2026-10-24 批次 D145 · 交付阻断修复（门禁对称 / 沙箱 / i18n / 依赖审计）
 
 - **gate:close 与 CI 对齐**：`scripts/build-portable.mjs` 的失败退出委托给 `failWith()`，

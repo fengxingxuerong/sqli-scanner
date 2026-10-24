@@ -28,6 +28,8 @@ and no stable exit-code contract.
 
 ## Quick start
 
+> Full English guide: [docs/en/quickstart.md](docs/en/quickstart.md).
+
 ### Web UI
 
 ```bash

@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 安全漏洞（私下报告）
+    url: https://github.com/fengxingxuerong/sqli-scanner/security/policy
+    about: 请勿在公开 issue 中披露可利用细节、凭证或客户数据
+  - name: 使用文档
+    url: https://github.com/fengxingxuerong/sqli-scanner#readme
+    about: 安装、CLI / API / MCP 用法与能力边界

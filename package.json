@@ -133,7 +133,9 @@
     "waf-validate": "node e2e/waf-lab/validate-tamper.mjs",
     "waf:audit": "node scripts/waf-ammunition-audit.mjs",
     "waf:screen": "node scripts/waf-semantic-screen.mjs",
-    "waf-real:collect": "node e2e/waf-real/cloud-sample-collector.mjs"
+    "waf-real:collect": "node e2e/waf-real/cloud-sample-collector.mjs",
+    "bench:sqlmap": "node bench/run.mjs",
+    "bench:selftest": "node bench/run.mjs --selftest"
   },
   "lint-staged": {
     "*.{js,mjs,cjs,ts,tsx}": [

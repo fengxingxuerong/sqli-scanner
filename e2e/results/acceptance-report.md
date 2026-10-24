@@ -1,7 +1,7 @@
 # 全方位验收门禁报告
 
-> 生成：2026-10-23T14:04:04.418Z　｜　执行器：`node e2e/acceptance.mjs`　｜　Node v24.18.0
-> 代码版本：`bd92bbe`（工作区 clean）
+> 生成：2026-10-24T13:19:01.016Z　｜　执行器：`node e2e/acceptance.mjs`　｜　Node v24.18.0
+> 代码版本：`382548c`　⚠️ **工作区 dirty**（跑验收前有 14 个未提交改动：.github/workflows/ci.yml、.gitignore、README.en.md 等）—— **本报告不对应任何提交**
 > 套件范围：**25/25 跑出断言**　｜　判定：**全量**
 > 前置：MySQL 10.11.19-MariaDB @127.0.0.1:3306；secure_file_priv="D:\\tools\\mariadb\\files\\"
 

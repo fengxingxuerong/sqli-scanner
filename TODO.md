@@ -5,6 +5,32 @@
 
 ---
 
+## 2026-10-24 批次 D146 · 发布链与社区工程（tag → Release / ghcr / SBOM / 自动化）
+
+**动机**：D145 之后代码可交付，但“外部能不能拿到”仍是最大缺口：远端 release 零资产、
+Docker 只构建不推送、无依赖机器人/CodeQL、无 issue/PR 模板、英文资料只有摘要。
+
+**本批**：
+- `ci.yml` 新增三个 tag 触发 job：
+  - `docker-publish`：推 `ghcr.io/<repo>:vX.Y.Z` / `X.Y.Z` / `latest`，带 provenance + SBOM
+    （**仅 linux/amd64**：arm64 未验证，不做多架构假声明）。
+  - `release`：下载 `desktop-package` 产物，生成 CycloneDX SBOM（前端/引擎）与
+    `SHA256SUMS.txt`，创建/更新 GitHub Release 并上传全部资产。
+  - 复用既有 `desktop-package` 构建，不重复跑 Tauri。
+- `.github/dependabot.yml`：npm（根 + server）、cargo、github-actions 每周。
+- `.github/workflows/codeql.yml`：JS/TS 静态分析（push / PR / 每周）。
+- 社区模板：issue（bug/feature）、PR 模板、`CODE_OF_CONDUCT.md`。
+- 文档：`docs/en/quickstart.md`（英文安装 / CLI / CI / REST / MCP / Docker / 边界）、
+  `docs/release-process.md`（升版本、验收、tag、CI 产物、回滚）。
+
+**验证**：工作流 YAML 可解析；`ref-integrity` 全绿（新增引用均指向已入库路径）；
+`gate:close` 27/27。
+
+**未做**：实际打 tag / 推送 / 创建 Release（需显式授权）；Docker arm64；Windows 代码签名 /
+macOS notarization；Action Marketplace 上架。
+
+---
+
 ## 2026-10-24 批次 D145 · 交付阻断修复（D144 收口 + 门禁/沙箱/i18n/审计）
 
 **动机**：2026-10-24 全方面交付评估实测出的红项（不是新增能力）：D144 工作树 lint/deadcode 红；

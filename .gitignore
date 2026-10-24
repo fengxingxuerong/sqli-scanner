@@ -249,3 +249,6 @@ docs/sqlmap-benchmark/sqlmap-raw/
 /*.zip
 /*.tmp.json
 /*.txt
+
+# D147 public benchmark raw outputs (machine-specific)
+bench/results/
