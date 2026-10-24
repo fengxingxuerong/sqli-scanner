@@ -1,5 +1,5 @@
 {
-  "at": "2026-10-24T17:45:53.647Z",
+  "at": "2026-10-24T19:36:59.463Z",
   "rows": [
     {
       "id": "multi-seg",
@@ -9,7 +9,7 @@
       "hit": true,
       "vulns": 3,
       "verdict": "vulnerability_detected",
-      "ms": 1132,
+      "ms": 1252,
       "exit": 2,
       "tail": "[检测] 86d7dabd · union\n[检测] 86d7dabd · error\n[检测] 86d7dabd · boolean\n[命中] union @ 86d7dabd\n[命中] error @ 86d7dabd\n[命中] boolean @ 86d7dabd\n[完成] 风险等级 High\n",
       "ok": true
@@ -22,7 +22,7 @@
       "hit": false,
       "vulns": 0,
       "verdict": "no_vulnerability_detected",
-      "ms": 733,
+      "ms": 1037,
       "exit": 0,
       "tail": "[完成] 风险等级 Low\n",
       "ok": true
@@ -35,7 +35,7 @@
       "hit": true,
       "vulns": 3,
       "verdict": "vulnerability_detected",
-      "ms": 948,
+      "ms": 1122,
       "exit": 2,
       "tail": "[检测] 86d7dabd · union\n[检测] 86d7dabd · error\n[检测] 86d7dabd · boolean\n[命中] union @ 86d7dabd\n[命中] error @ 86d7dabd\n[命中] boolean @ 86d7dabd\n[完成] 风险等级 High\n",
       "ok": true
@@ -48,7 +48,7 @@
       "hit": false,
       "vulns": 0,
       "verdict": "no_vulnerability_detected",
-      "ms": 1779,
+      "ms": 1902,
       "exit": 0,
       "tail": "[检测] 86d7dabd · union\n[检测] 86d7dabd · error\n[检测] 86d7dabd · boolean\n[完成] 风险等级 Low\n",
       "ok": true
@@ -61,7 +61,7 @@
       "hit": true,
       "vulns": 3,
       "verdict": "vulnerability_detected",
-      "ms": 936,
+      "ms": 1040,
       "exit": 2,
       "tail": "[检测] 57d63830 · union\n[检测] 57d63830 · error\n[检测] 57d63830 · boolean\n[命中] union @ 57d63830\n[命中] error @ 57d63830\n[命中] boolean @ 57d63830\n[完成] 风险等级 High\n",
       "ok": true
@@ -74,7 +74,7 @@
       "hit": false,
       "vulns": 0,
       "verdict": "no_vulnerability_detected",
-      "ms": 1762,
+      "ms": 2612,
       "exit": 0,
       "tail": "[检测] 57d63830 · union\n[检测] 57d63830 · error\n[检测] 57d63830 · boolean\n[完成] 风险等级 Low\n",
       "ok": true
@@ -87,7 +87,7 @@
       "hit": true,
       "vulns": 3,
       "verdict": "vulnerability_detected",
-      "ms": 2012,
+      "ms": 3118,
       "exit": 2,
       "tail": "[检测] eb8511f8 · union\n[检测] eb8511f8 · error\n[检测] eb8511f8 · boolean\n[检测] eb8511f8 · union\n[检测] eb8511f8 · error\n[检测] eb8511f8 · boolean\n[命中] union @ eb8511f8\n[命中] error @ eb8511f8\n[命中] boolean @ eb8511f8\n[完成] 风险等级 High\n",
       "ok": true
@@ -100,7 +100,7 @@
       "hit": false,
       "vulns": 0,
       "verdict": "no_vulnerability_detected",
-      "ms": 734,
+      "ms": 1682,
       "exit": 0,
       "tail": "[完成] 风险等级 Low\n",
       "ok": true
@@ -113,7 +113,7 @@
       "hit": true,
       "vulns": 3,
       "verdict": "vulnerability_detected",
-      "ms": 1148,
+      "ms": 1936,
       "exit": 2,
       "tail": "[检测] eb8511f8 · union\n[检测] eb8511f8 · error\n[检测] eb8511f8 · boolean\n[命中] union @ eb8511f8\n[命中] error @ eb8511f8\n[命中] boolean @ eb8511f8\n[完成] 风险等级 High\n",
       "ok": true
@@ -126,7 +126,43 @@
       "hit": false,
       "vulns": 0,
       "verdict": "no_vulnerability_detected",
-      "ms": 738,
+      "ms": 1749,
+      "exit": 0,
+      "tail": "[完成] 风险等级 Low\n",
+      "ok": true
+    },
+    {
+      "id": "json-body",
+      "path": "/api/json",
+      "vuln": true,
+      "carrier": "扁平 JSON body（声明 CT=json）",
+      "method": "POST",
+      "body": "{\"id\":1}",
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "hit": true,
+      "vulns": 3,
+      "verdict": "vulnerability_detected",
+      "ms": 1922,
+      "exit": 2,
+      "tail": "[检测] c50935c3 · union\n[检测] c50935c3 · error\n[检测] c50935c3 · boolean\n[命中] union @ c50935c3\n[命中] error @ c50935c3\n[命中] boolean @ c50935c3\n[完成] 风险等级 High\n",
+      "ok": true
+    },
+    {
+      "id": "json-body-safe",
+      "path": "/safe/json",
+      "vuln": false,
+      "carrier": "JSON body（安全对照）",
+      "method": "POST",
+      "body": "{\"id\":1}",
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "hit": false,
+      "vulns": 0,
+      "verdict": "no_vulnerability_detected",
+      "ms": 1553,
       "exit": 0,
       "tail": "[完成] 风险等级 Low\n",
       "ok": true

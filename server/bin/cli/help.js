@@ -43,7 +43,10 @@ export const HELP_TEXT = `sqli-scanner CLI（对标 sqlmap 的 Node 引擎命令
                              ⚠ OpenAPI 是**接口定义**不是抓包：参数值取自 example/default，
                                缺失处是占位 '1'，扫之前请自行核对
   --method <GET|POST|...>    请求方法（默认 GET；支持 PUT/PATCH/DELETE）
-  --body <json>              POST body（JSON 对象字符串）
+  --body <json>              POST body（JSON 对象字符串）。通道判定：嵌套对象 → 按 JSON 扫描；
+                             扁平对象默认按 urlencoded（保持表单目标的行为），但**声明了
+                             Content-Type: application/json 时按 JSON 扫描**（[D155]：只吃
+                             JSON 的目标收到 urlencoded 会 415/400 ⇒ 静默 0 检出）
   --xml-body <xml>           XML / SOAP body 原文（注入点取叶子路径，如 soap:Envelope.soap:Body.GetUser.id）
   --xml-body-file <path>     同上，从文件读（多行 SOAP 信封用这个）
   --cookie <str>             认证 Cookie 串（透传 config.auth.cookie，非注入点）

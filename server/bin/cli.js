@@ -49,6 +49,7 @@ import {
   buildExtractScope,
   validateEnumArgs,
   resolveBodyChannel,
+  declaredContentType,
 } from './cli/config.js';
 // [D101 2026-10-18] 注入点 × auth 同名夹击去重（与 REST sanitizeStart 共用同一实现）
 import { dropInjectionOverlapFromAuth } from '../src/core/authInjectionOverlap.js';
@@ -197,15 +198,26 @@ async function runSingleScan(sm, url, args) {
   return runSingleScanInner(sm, url, args);
 }
 
+/** [D155] body 走 JSON 语义的播报理由：声明 CT 优先（json 字样），其次嵌套检测。纯函数。 */
+function jsonChannelWhy(declaredCt) {
+  return /json/i.test(declaredCt)
+    ? `声明的 Content-Type 是 ${declaredCt.split(';')[0]}`
+    : '检测到嵌套 JSON';
+}
+
 async function runSingleScanInner(sm, url, args) {
   const parsedBody = args.body ? JSON.parse(args.body) : {};
   // [JSON-BODY-FIX 2026-09-20] 判定本体在 cli/config.js 的 resolveBodyChannel（带完整理由注释）：
   // 含嵌套的 --body 走 jsonBody（引擎 _discoverJsonLeaves 取叶子路径），扁平 body 继续
   // bodyParams（urlencoded），既有行为不变。这里只负责接线与播报。
-  const { bodyParams, jsonBody } = resolveBodyChannel(parsedBody);
+  // [D155] 第二个入参 = 调用方**声明**的 Content-Type：声明了 application/json 时，扁平
+  // JSON 也走 jsonBody —— 否则只吃 JSON 的目标收到 urlencoded（415/400），注入值从未进业务逻辑。
+  // （[跨会话类型补丁 2026-10-25] why 构造抽到 jsonChannelWhy —— runSingleScanInner 复杂度/行数
+  //   只许持平变浅；行为零变化，由 cli.jsonBody.test.js 9 例背书。）
+  const declaredCt = declaredContentType(args);
+  const { bodyParams, jsonBody } = resolveBodyChannel(parsedBody, declaredCt);
   if (jsonBody) {
-    console.log('  [body] 检测到嵌套 JSON → 按 application/json 语义扫描，'
-      + '注入点取自叶子路径（如 user.id / tags.0）；扁平 body 仍走 urlencoded。');
+    console.log(`  [body] ${jsonChannelWhy(declaredCt)} → 按 application/json 语义扫描，注入点取自叶子路径（如 user.id / tags.0）；未声明 JSON 的扁平 body 仍走 urlencoded。`);
   }
   // [2026-10-01] XML / SOAP body 通道（对标 ghauri XML·SOAP）：--xml-body 直接给原文，
   // --xml-body-file 读文件（多行 SOAP 信封）。解析失败的原文**照样往下传** —— 由引擎按

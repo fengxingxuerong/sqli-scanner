@@ -9,7 +9,7 @@
 // ============================================================================
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { ERROR_SIG, dbmsFromError } from '../src/engine/payloads.js';
+import { ERROR_SIG, dbmsFromError, FINGERPRINT } from '../src/engine/payloads.js';
 import { SQL_ERROR_SIG } from '../src/core/scanValidityGuard.js';
 
 // 真实报错原文（各库高频形态）——必须命中
@@ -114,4 +114,37 @@ test('单源并集锚点：历史分叉形态两侧均命中（PG:: / unrecogniz
 
 test('dbmsFromError：PDO SQLSTATE 形态仍能定库', () => {
   assert.equal(dbmsFromError('SQLSTATE[42000]: [Microsoft][ODBC] SQL Server'), 'SQL Server');
+});
+
+// ===== [D157 2026-10-25] 三 Java 引擎的「报错定库」：原文里没有库名 =====
+// 缺陷实测（e2e/multi-engine-lab 真 JDBC 内存库，NO_WAF=1）：Derby 三个场景检出正常、
+// 但 `定库=null（未识别）` —— 报错原文 `Syntax error: Encountered "\'" at line 1, column 31.`
+// 里没有 "Derby"，原签名只认品牌词/驱动类名 ⇒ 定库 null ⇒ 注释符与提取语句按默认选。
+// H2 / HSQLDB 同样形态（它们只是靠 UNION 版本回显才定出来的，盲注档也为 null）。
+const REAL_DERBY_ERR = `Syntax error: Encountered "\\'" at line 1, column 31.`;
+const REAL_HSQLDB_ERR = `unexpected token: ' in statement [SELECT * FROM USERS WHERE NAME=alice']`;
+const REAL_H2_ERR = `Syntax error in SQL statement "SELECT * FROM USERS WHERE ID=1'"; expected "identifier"`;
+
+test('[D157] 三引擎真实报错原文都能定库（不靠品牌词）', () => {
+  assert.equal(dbmsFromError(REAL_DERBY_ERR), 'Derby', 'Derby 的 Encountered/at line N, column M 句式');
+  assert.equal(dbmsFromError('ERROR 42X01: Syntax error: Encountered "AND" at line 1, column 20.'), 'Derby',
+    'Derby SQLState 42Xxx 前缀');
+  assert.equal(dbmsFromError(REAL_HSQLDB_ERR), 'HSQLDB', 'HSQLDB 的 unexpected token ... in statement [ 句式');
+  assert.equal(dbmsFromError(REAL_H2_ERR), 'H2', 'H2 的 Syntax error in SQL statement 句式');
+});
+
+test('[D157] 反向：JS 报错页不得被认成 HSQLDB（裸 unexpected token 是陷阱）', () => {
+  for (const s of [
+    `Uncaught SyntaxError: Unexpected token '<'`,
+    `Uncaught SyntaxError: Unexpected token '<' (at app.js:1:1)`,
+  ]) {
+    assert.notEqual(dbmsFromError(s), 'HSQLDB', `JS 报错不得定库 HSQLDB：${s}`);
+  }
+});
+
+test('[D157] Derby 响应头签名不再认裸 java（Server: Java/1.x 是误报源）', () => {
+  const sigs = FINGERPRINT.Derby || [];
+  const matches = (s) => sigs.some((sig) => sig.match.test(s));
+  assert.ok(matches('Apache Derby Network Server - 10.16.1.1'), 'Derby 品牌词仍应命中');
+  assert.ok(!matches('Java/1.8.0_301'), '裸 Java 服务不得判成 Derby（会按错方言投 payload）');
 });

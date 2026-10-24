@@ -51,14 +51,48 @@ export function parseCookiePairs(raw, into) {
  * 判定刻意保持保守：**只有真含嵌套才切通道**。扁平 body 继续 bodyParams（urlencoded），
  * 既有行为一字不变 —— 否则会把"目标是表单接口、但顺手用了 JSON 语法写扁平 body"的
  * 既有扫描全改成 application/json，那是回归不是修复。
+ *
+ * [D155 2026-10-25] 上面那条保守规则只对「没声明 Content-Type」的情况成立。声明了
+ * `application/json`（`--header` 或 `-r` 抓包带来的）却仍按 urlencoded 发，是另一件事：
+ * 目标多半只吃 JSON、CT 不对直接 415/400 ⇒ 注入值从未进业务逻辑 ⇒ **静默 0 检出**。
+ * 实测（`e2e/detect-surface-lab` 的 `/api/json`，只认 application/json）：
+ *   `--method POST --body '{"id":1}' --header 'Content-Type: application/json'` → 0 检出。
+ * 所以第二个参数只做**窄修复**：声明了 JSON 且 body 是对象/数组 ⇒ 走 jsonBody；
+ * 没声明 CT 的调用方（含所有既有测试）行为逐位不变。
  * @param {unknown} parsed JSON.parse(args.body) 的结果
+ * @param {string} [declaredContentType] 请求头里声明的 Content-Type（可带 charset 参数）
  * @returns {{ bodyParams: Record<string, any>, jsonBody: object|null }}
  */
-export function resolveBodyChannel(parsed) {
-  const isPlainObject = !!parsed && typeof parsed === 'object' && !Array.isArray(parsed);
+export function resolveBodyChannel(parsed, declaredContentType) {
+  const isObj = !!parsed && typeof parsed === 'object';
+  const ct = String(declaredContentType || '').toLowerCase().split(';')[0].trim();
+  const jsonish = ct === 'application/json' || ct === 'text/json' || /\+json$/.test(ct);
+  // [D155] 显式声明 JSON：对象/数组一律走 jsonBody（扁平 JSON API 的常态）
+  if (jsonish && isObj) return { bodyParams: {}, jsonBody: parsed };
+  const isPlainObject = isObj && !Array.isArray(parsed);
   const hasNested = isPlainObject
     && Object.values(parsed).some((v) => v !== null && typeof v === 'object');
   return hasNested ? { bodyParams: {}, jsonBody: parsed } : { bodyParams: parsed ?? {}, jsonBody: null };
+}
+
+/**
+ * [D155] 取本次调用**声明**的 Content-Type。
+ *
+ * 取值优先级**刻意与 buildAuth 一致**（args.headerObj 优先，否则才解析 --header）：
+ * 本函数是用来判断「实际会发出去的报文声明了什么」，若它读到的是 --header 而 buildAuth
+ * 用的是 -r 的 headerObj，就会出现「按 JSON 发 body、却声明 form」的自相矛盾报文 ——
+ * 那种报文目标必然解析失败，比不修还糟。
+ * 只读，不参与注入点筛选（Content-Type 在 buildInjectionTargets 里是排除项）。
+ * @param {any} args 解析后的 CLI 参数
+ * @returns {string} 未声明时返回空串
+ */
+export function declaredContentType(args) {
+  /** @type {Record<string, any>} */
+  let hdrs = {};
+  if (args.headerObj) hdrs = { ...args.headerObj };
+  else if (args.headers) hdrs = parseHeaders(String(args.headers)) || {};
+  const k = Object.keys(hdrs).find((x) => /^content-type$/i.test(String(x)));
+  return k ? String(hdrs[k]) : '';
 }
 
 /**

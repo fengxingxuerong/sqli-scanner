@@ -1,4 +1,4 @@
-// 检测面探针靶场（D154）
+// 检测面探针靶场（D154/D155）
 //
 // 目的：现有靶场把「数值/字符串/LIKE/ORDER BY/POST/JSON/Cookie/Header/Path/二阶/堆叠」
 // 都覆盖了，但**注入点所在的载体形态**还有几类没人用真库验过。本靶场只做一件事：
@@ -148,6 +148,43 @@ function route(u, res) {
   return false;
 }
 
+/**
+ * [D155] JSON API 端点：**只**接受 `Content-Type: application/json` 的 body。
+ *
+ * 真实现代 API 就是这样：CT 不对直接 400/415，body 根本不进业务逻辑。
+ * 用途：验证「CLI 拿到扁平 JSON body + 显式 JSON CT 时，到底按 JSON 发还是按
+ * urlencoded 发」——按 urlencoded 发就是静默 0 检出（与「这个站没洞」同形）。
+ * @param {import('node:http').IncomingMessage} req
+ * @param {http.ServerResponse} res
+ * @param {boolean} safe 是否参数化（安全对照）
+ */
+function handleJson(req, res, safe) {
+  const ct = String(req.headers['content-type'] || '');
+  if (!/^application\/json/i.test(ct)) {
+    res.writeHead(415, { 'Content-Type': 'text/plain' });
+    res.end('unsupported media type: expected application/json');
+    return;
+  }
+  let raw = '';
+  req.on('data', (c) => {
+    raw += c;
+    if (raw.length > 64 * 1024) req.destroy();
+  });
+  req.on('end', () => {
+    let id;
+    try {
+      const body = JSON.parse(raw || '{}');
+      id = body && body.id != null ? String(body.id) : '1';
+    } catch {
+      res.writeHead(400, { 'Content-Type': 'text/plain' });
+      res.end('invalid json');
+      return;
+    }
+    if (safe) void respond(res, () => runSql('SELECT id,name FROM users WHERE id = ?', [id]));
+    else void respond(res, () => runSql(`SELECT id,name FROM users WHERE id = ${id}`));
+  });
+}
+
 await setupDb();
 const server = http.createServer((req, res) => {
   let u;
@@ -161,6 +198,11 @@ const server = http.createServer((req, res) => {
   if (u.pathname === '/healthz') {
     res.writeHead(200, { 'Content-Type': 'text/plain' });
     res.end('ok');
+    return;
+  }
+  // [D155] JSON body 载体：与上面 4 类不同，它的判据是「发送侧形态」而不是「取值位置」
+  if (u.pathname === '/api/json' || u.pathname === '/safe/json') {
+    handleJson(req, res, u.pathname === '/safe/json');
     return;
   }
   try {

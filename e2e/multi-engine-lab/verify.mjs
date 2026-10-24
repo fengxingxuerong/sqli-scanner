@@ -46,10 +46,14 @@ const NO_WAF = process.env.NO_WAF === '1' || process.env.NO_WAF === 'true';
 //   H2 / HSQLDB 在 num、str 两场景经回显定出库；Derby 三个场景 `dbms` 全 null —— 定不出来。
 //   写 null 不是"跳过"，是钉住"当前定不出"：哪天探针改好了真报出 Derby，这条断言会红，
 //   提示把基线和 README 的覆盖面一起改掉。正向漂移和负向漂移都必须出声。
+//   [D157 2026-10-25] 这条断言**按设计红了**：Derby 报错签名补上后，num/str 场景实测
+//   定库=Derby（此前三场景全 null）。按上面那句"提示"把基线改成 Derby，同时改 README
+//   的覆盖面一栏。blind 场景仍可能 null（无回显、无报错可判），所以这里断言的是
+//   「至少有一个场景定得出」，不是「三场景全中」。
 const ENGINES = [
   { name: 'h2', engine: 'h2', label: 'H2 2.2.224 (MODE=MySQL)', expect: 'H2', expectDbms: 'H2' },
   { name: 'hsqldb', engine: 'hsqldb', label: 'HSQLDB 2.7.3', expect: 'HSQLDB', expectDbms: 'HSQLDB' },
-  { name: 'derby', engine: 'derby', label: 'Derby 10.16.1.1', expect: 'Derby', expectDbms: null },
+  { name: 'derby', engine: 'derby', label: 'Derby 10.16.1.1', expect: 'Derby', expectDbms: 'Derby' },
 ];
 
 const baseConfig = { concurrency: 4, ratePerSec: 0, retry: 0, timeoutMs: 15000, enableExtract: false };

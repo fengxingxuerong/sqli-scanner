@@ -34,6 +34,15 @@ const CASES = [
   // 基准对照：普通单值 query（应稳定检出，用来证明靶场/链路本身没问题）
   { id: 'plain-query', path: '/dup?a=1', vuln: true, carrier: '普通 query（基准）' },
   { id: 'plain-query-safe', path: '/safe/dup?a=1', vuln: false, carrier: '普通 query（安全对照）' },
+  // [D155] 扁平 JSON body + 显式 application/json：目标只吃 JSON，CT 不对直接 415
+  {
+    id: 'json-body', path: '/api/json', vuln: true, carrier: '扁平 JSON body（声明 CT=json）',
+    method: 'POST', body: '{"id":1}', headers: { 'Content-Type': 'application/json' },
+  },
+  {
+    id: 'json-body-safe', path: '/safe/json', vuln: false, carrier: 'JSON body（安全对照）',
+    method: 'POST', body: '{"id":1}', headers: { 'Content-Type': 'application/json' },
+  },
 ];
 
 /**
@@ -64,12 +73,16 @@ async function waitReady() {
 
 /**
  * 跑一条用例，返回 {hit, vulnCount, verdict, ms}
- * @param {{id:string,path:string,vuln:boolean}} c
- * @returns {{hit:boolean, vulns:number, verdict:string, ms:number}}
+ * @param {{id:string,path:string,vuln:boolean,method?:string,body?:string,headers?:Record<string,string>}} c
+ * @returns {{hit:boolean, vulns:number, verdict:string, ms:number, exit:number, tail:string}}
  */
 function scanCase(c) {
   const outDir = path.join(RESULTS, c.id);
   fs.rmSync(outDir, { recursive: true, force: true });
+  const extra = [];
+  if (c.method) extra.push('--method', c.method);
+  if (c.body) extra.push('--body', c.body);
+  for (const [k, v] of Object.entries(c.headers || {})) extra.push('--header', `${k}: ${v}`);
   const t0 = Date.now();
   const r = spawnSync(process.execPath, [
     path.join(ROOT, 'scripts/one-click-scan.mjs'),
@@ -80,6 +93,7 @@ function scanCase(c) {
     '-o', outDir,
     '--no-ledger', '--quiet',
     '--retries', '1', '--http-timeout', '8000', '--timeout', '120000',
+    ...extra,
   ], {
     cwd: ROOT,
     encoding: 'utf8',
@@ -131,7 +145,7 @@ child.stderr.on('data', (d) => { serverLog += d.toString(); });
 let exitCode = 0;
 try {
   await waitReady();
-  console.log('═══ 检测面探针（D154）═══');
+  console.log('═══ 检测面探针（D154/D155）═══');
   const rows = [];
   for (const c of cases) {
     // 每条用例前先探活：靶场挂掉必须 BLOCKED，不能把「靶场没了」记成「引擎漏检」

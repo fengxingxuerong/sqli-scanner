@@ -195,7 +195,11 @@ export const FINGERPRINT = {
   // —— D 方向新增（最小适配，响应头特征，待真实环境验证）——
   Access: [{ header: 'X-Powered-By', match: /\basp\b/i }],
   HSQLDB: [{ header: 'Server', match: /\bhsqldb\b/i }],
-  Derby: [{ header: 'Server', match: /(\bderby\b|\bjava\b)/i }],
+  // [D157] 原签名是 `(\bderby\b|\bjava\b)` —— `java` 那半条是误报源：任何 `Server: Java/1.x`
+  // 的 JDK 内置 HTTP 服务都会把库判成 Derby ⇒ 注释符/提取语句按 Derby 选 ⇒ 静默漏检
+  // （与 2026-09-11「BaseHTTP 含 ase → 误定库 Sybase → 0 检出」同一族）。Derby 自己的
+  // 网络服务会带品牌词，只认品牌词即可。
+  Derby: [{ header: 'Server', match: /(\bderby\b|Apache Derby)/i }],
   MonetDB: [{ header: 'Server', match: /monetdb/i }],
 };
 
@@ -367,11 +371,24 @@ export const ERROR_SIG_BY_DBMS = [
   { dbms: 'Sybase', sig: /(Adaptive Server|Sybase|SQL error code)/i },
   { dbms: 'Firebird', sig: /(Firebird|isc_|Dynamic SQL Error)/i },
   { dbms: 'Informix', sig: /(Informix)/i },
-  { dbms: 'H2', sig: /(org\.h2|H2)/i },
+  // [D157 2026-10-25] H2 / HSQLDB / Derby 的报错**原文里根本没有库名**，原签名只认
+  // `org.h2` / `HSQLDB` / `Derby` 这些「驱动类名或品牌词」，于是真机靶场
+  // （e2e/multi-engine-lab，真 JDBC 内存库）里这三个库的报错定库全 null：
+  //   · Derby：`Syntax error: Encountered "\'" at line 1, column 31.`
+  //   · HSQLDB：`unexpected token: ' in statement [SELECT * FROM USERS WHERE NAME=alice']`
+  //   · H2：`Syntax error in SQL statement "SELECT * ..."; expected "identifier"`
+  // 后果不是「报告里少个词」：dbms=null ⇒ 注释符/提取语句/payload 族按默认选 ⇒ 通道退化。
+  // 现补三库各自的**解析器报错句式**（均为该库独有的措辞，不是裸词）：
+  //   · Derby 的 `Encountered ... at line N, column M` 与 SQLState 42Xxx 前缀；
+  //   · HSQLDB 的 `unexpected token: ... in statement [...]`（「裸 unexpected token」
+  //     不收 —— 那是 JS 的 `Uncaught SyntaxError: Unexpected token '<'`，收进来会把
+  //     JS 报错页判成 HSQLDB）；
+  //   · H2 的 `Syntax error in SQL statement`。
+  { dbms: 'H2', sig: /(org\.h2|Syntax error in SQL statement|H2)/i },
   { dbms: 'ClickHouse', sig: /(DB::Exception|ClickHouse)/i },
   { dbms: 'Access', sig: /(Microsoft Access|ODBC|Jet.*Database|Could not find file)/i },
-  { dbms: 'HSQLDB', sig: /(HSQLDB|org\.hsqldb)/i },
-  { dbms: 'Derby', sig: /(Derby|org\.apache\.derby)/i },
+  { dbms: 'HSQLDB', sig: /(HSQLDB|org\.hsqldb|unexpected token:[^\n]{0,200}in statement \[)/i },
+  { dbms: 'Derby', sig: /(Derby|org\.apache\.derby|Syntax error: Encountered[^\n]{0,200}at line \d+, column \d+|ERROR 42X\d\d)/i },
   { dbms: 'MonetDB', sig: /(MonetDB|monetdb|mclient)/i },
 ];
 

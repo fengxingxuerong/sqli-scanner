@@ -92,6 +92,43 @@ test('resolveBodyChannel 的边界：null / 数组 / 嵌套里的 null 都不该
   );
 });
 
+// ===== [D155] 声明的 Content-Type 决定 body 通道 =====
+// 缺陷（2026-10-25 实测）：`--method POST --body '{"id":1}' --header 'Content-Type: application/json'`
+// 对只吃 JSON 的目标（CT 不对直接 415）是**静默 0 检出** —— 引擎按 urlencoded 发，
+// 注入值从未进业务逻辑。e2e/detect-surface-lab 的 /api/json 把这条钉成可复现事实。
+// 分批反证：**没声明 CT 的扁平 body 行为必须逐位不变**（既有 4 条用例继续守着）。
+
+test('[D155] 声明 application/json：扁平 body 也走 jsonBody（只吃 JSON 的目标才有救）', async () => {
+  const input = await inputFromArgv([
+    'node', 'cli', '-u', URL, '--method', 'POST',
+    '--body', '{"id":1}', '--header', 'Content-Type: application/json',
+  ]);
+  assert.deepEqual(input.jsonBody, { id: 1 }, '声明了 JSON ⇒ 扁平 body 也必须是 jsonBody');
+  assert.deepEqual(input.bodyParams, {}, '走 jsonBody 时 bodyParams 必须置空，否则同名点重复投放');
+  assert.deepEqual(await pointsOf({ ...input, config: { level: 1 } }), ['id']);
+});
+
+test('[D155] application/*+json（如 vnd.api+json）与带 charset 的声明同样生效', () => {
+  assert.deepEqual(
+    resolveBodyChannel({ id: 1 }, 'application/vnd.api+json'),
+    { bodyParams: {}, jsonBody: { id: 1 } }
+  );
+  assert.deepEqual(
+    resolveBodyChannel({ id: 1 }, 'Application/JSON; charset=utf-8'),
+    { bodyParams: {}, jsonBody: { id: 1 } }
+  );
+});
+
+test('[D155] 未声明 CT / 非 JSON 声明：扁平 body 行为逐位不变（零回归）', () => {
+  assert.deepEqual(resolveBodyChannel({ id: 1 }), { bodyParams: { id: 1 }, jsonBody: null });
+  assert.deepEqual(
+    resolveBodyChannel({ id: 1 }, 'application/x-www-form-urlencoded'),
+    { bodyParams: { id: 1 }, jsonBody: null }
+  );
+  // 声明 JSON 但 body 不是对象（如纯标量字符串）→ 不强行改通道
+  assert.deepEqual(resolveBodyChannel('x', 'application/json'), { bodyParams: 'x', jsonBody: null });
+});
+
 test('直连模式不受影响（-d 分支不构造 body 通道）', async () => {
   const input = await inputFromArgv([
     'node', 'cli', '-d', 'memory://x', '--sql-template', 'SELECT * FROM t WHERE id={INJECT}',
