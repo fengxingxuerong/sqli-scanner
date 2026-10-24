@@ -10,6 +10,7 @@ import {
   findBaselineScanId,
   resolveBaselineReport,
   decideDiffExit,
+  parseFailSeverities,
 } from '../src/services/diffGate.js';
 
 // ===== normalizeTarget =====
@@ -83,6 +84,82 @@ test('decideDiffExit：本次结论不可信 → exit 1（不判红也不假绿�
 test('decideDiffExit：diff 缺形（无 new 数组）→ 保守 exit 0 但不含新增声明', () => {
   const d = decideDiffExit({ diff: { new: null, remaining: [], base: { vulnCount: 0 } }, newReport: mkReport() });
   assert.equal(d.code, 0);
+});
+
+// ===== [D152] --fail-severities 判红口径（对标 nuclei -severity 的分级门禁）=====
+test('parseFailSeverities：合法值去重 + 按严重度降序；大小写不敏感', () => {
+  assert.deepEqual(parseFailSeverities('high,critical,high').severities, ['critical', 'high']);
+  assert.deepEqual(parseFailSeverities('Medium').severities, ['medium']);
+  assert.deepEqual(parseFailSeverities('low,medium,high,critical').severities, ['critical', 'high', 'medium', 'low']);
+});
+
+test('parseFailSeverities：未知等级 / 空值 → ok=false 且错误信息含合法集', () => {
+  assert.equal(parseFailSeverities('critical,urgent').ok, false);
+  assert.ok(parseFailSeverities('critical,urgent').error.includes('urgent'));
+  assert.ok(parseFailSeverities('critical,urgent').error.includes('critical/high/medium/low'));
+  assert.equal(parseFailSeverities('').ok, false);
+  assert.equal(parseFailSeverities(undefined).ok, false);
+});
+
+test('[D152] 口径给出：新增 Medium 不在 critical,high 口径 → exit 0 且如实披露低于口径', () => {
+  const d = decideDiffExit({
+    diff: mkDiff([{ location: 'url', param: 'q', technique: 'error', riskLevel: 'Medium' }], [], 0),
+    newReport: mkReport(),
+    failSeverities: ['critical', 'high'],
+  });
+  assert.equal(d.code, 0);
+  assert.ok(d.reason.includes('1 条低于口径'), `reason 应披露低于口径的新增：${d.reason}`);
+});
+
+test('[D152] 口径给出：新增 Medium 在 medium 口径内 → exit 2（显式收紧）', () => {
+  const d = decideDiffExit({
+    diff: mkDiff([{ location: 'url', param: 'q', technique: 'error', riskLevel: 'Medium' }], [], 0),
+    newReport: mkReport(),
+    failSeverities: ['medium'],
+  });
+  assert.equal(d.code, 2);
+  assert.ok(d.reason.includes('判红口径 medium'));
+  assert.ok(d.reason.includes('url:q:error'));
+});
+
+test('[D152] 口径给出：混合新增只对达口径者判红，低口径者在 reason 披露不吞', () => {
+  const d = decideDiffExit({
+    diff: mkDiff([
+      { location: 'url', param: 'a', technique: 'union', riskLevel: 'Critical' },
+      { location: 'url', param: 'b', technique: 'error', riskLevel: 'Low' },
+    ], [], 0),
+    newReport: mkReport(),
+    failSeverities: ['critical', 'high'],
+  });
+  assert.equal(d.code, 2);
+  assert.ok(d.reason.includes('url:a:union'));
+  assert.ok(!d.reason.includes('url:b:error'), '低于口径的新增不进判红清单');
+  assert.ok(d.reason.includes('1 条低于口径'), `reason 应披露低于口径计数：${d.reason}`);
+});
+
+test('[D152] 口径不传 = [D45] 原语义不变：任何新增（含 Medium/Low）都判红', () => {
+  const d = decideDiffExit({
+    diff: mkDiff([{ location: 'url', param: 'q', technique: 'error', riskLevel: 'Low' }], [], 0),
+    newReport: mkReport(),
+  });
+  assert.equal(d.code, 2);
+  // 空数组同样视为未给口径（防 CLI 层把空串解析成空数组后悄悄改语义）
+  const d2 = decideDiffExit({
+    diff: mkDiff([{ location: 'url', param: 'q', technique: 'error', riskLevel: 'Low' }], [], 0),
+    newReport: mkReport(),
+    failSeverities: [],
+  });
+  assert.equal(d2.code, 2);
+});
+
+test('[D152] 口径不影响可信度出口：结论不可信仍 exit 1（不判红也不假绿）', () => {
+  const d = decideDiffExit({
+    diff: mkDiff([{ location: 'url', param: 'q', technique: 'error', riskLevel: 'Critical' }], [], 0),
+    newReport: mkReport(false),
+    failSeverities: ['critical'],
+  });
+  assert.equal(d.code, 1);
+  assert.equal(d.gateable, false);
 });
 
 // ===== 台账集成（临时目录隔离：SQLI_LEDGER_DIR 每次 test 内设置）=====

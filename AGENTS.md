@@ -31,6 +31,10 @@ node scripts/one-click-scan.mjs -u "http://target/page?id=1"   # 一条命令出
 - **定向复测**：`-p <param>` 只测指定参数、`--param-filter body` 只测某位置、
   `--param-exclude <regex>` 排除噪声参数（[D41] 对标 sqlmap）。筛选把点位删光时报错退出——
   这说明参数写错了，不是目标没洞。
+- **CI 判红口径**（一键扫描）：`--fail-severities <critical|high|medium|low 子集>` 显式
+  覆盖退出码判红等级（[D152] 对标 nuclei `-severity`）；不传 = 默认（普通模式 Critical/High、
+  diff 模式新增即红）。低于口径的新增会披露不判红——引用「未判红」结论时先看
+  `manifest.gate.failSeverities` 确认口径。
 - 代理超时预算紧张时：`--retries 1 --http-timeout 5000 --timeout <整场上限毫秒>` 收敛等待；
   `--skip-static` 与 `--smart` 可显著省请求（语义见 help）。
 

@@ -67,6 +67,32 @@
 
 > 下一批次起的条目写在这里。发版时把本节整体升为 `## [x.y.z] - YYYY-MM-DD` 并补汇总段。
 
+### 2026-10-25 批次 D152 · 竞品对标落盘 + 判红口径可配（`--fail-severities`）
+
+**动机**：全量对标 2026-W43 GitHub 同类热点（nuclei / dast-orchestra / Vigolium / Quill /
+Sentinel/Pulse / PingWAF / DorkEye 等，见 `docs/竞品对标-2026W43.md`）。逐项核实后确认
+本仓已覆盖其中绝大多数头牌能力（报告 diff / OpenAPI 导入 / AI 复核与修复 / CI 门禁 /
+语义检测）；**唯一小而真实的缺口是分级判红口径**——nuclei `-severity` / semgrep 分级门禁
+语义里「按严重度等级决定门禁红不红」在本仓是写死的（普通模式 Critical/High、diff 模式
+新增即红），团队想收紧到 Medium 也进不了主干时表达不出来。
+
+- **`--fail-severities <critical|high|medium|low 子集>`**（`scripts/one-click-scan.mjs`，
+  一键扫描专属旗标）：显式给出的判红口径，普通模式与 diff 模式统一按口径判红。
+  **不传 = 既有语义原样**（有意保守：口径是策略选择不是引擎事实，默认悄悄改口径等于
+  换了一批人在不知情下变了门禁含义）。
+- 单一真源：合法等级集与 CSV 解析在 `services/diffGate.js`（`FAIL_SEVERITY_LEVELS` /
+  `parseFailSeverities`），CLI 校验复用；`decideDiffExit({ failSeverities })` 纯函数扩展，
+  低于口径的新增在裁决 reason 计数披露（**不判红 ≠ 不存在**），口径记入
+  `manifest.gate.failSeverities` 供机器消费；`validity.reliable=false` 仍 exit 1
+  （口径不影响可信度出口）。
+- 测试：`server/tests/diffGate.test.js` 9 → 16（口径裁决 6 例：收紧判红 / 放宽不判红且
+  披露 / 混合新增分桶 / 不传与空数组=原语义 / 可信度出口不受口径影响；解析 3 例：归一、
+  未知等级拒绝、空值拒绝）。
+- 文档：README diff 门禁行、docs/CI-集成.md 第五节新增「判红口径」小节、AGENTS §1.1
+  CI 判红口径条目、help 文本。
+- 对标排队项（不在本批）：nuclei 式模板化规则生态、Vigolium 式 agentic 编排、第三方
+  评测基准靶场做外部裁判 5 号——见 `docs/竞品对标-2026W43.md` 吸收矩阵与 TODO。
+
 ### 2026-10-24 批次 D146 · 开源门面 + ghcr 镜像发布 + sqlmap 对照 bench
 
 （本条目由并发会话进行中批次的落盘内容整理而成；该批次工作区未提交时 `refs` 门禁点名

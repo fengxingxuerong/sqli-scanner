@@ -126,6 +126,29 @@ node scripts/one-click-scan.mjs -u "http://target/page?id=1" --diff-base auto
 **同一模块**（`engine/scanDiff.js`，比对键 `location:param:technique`——pointId 每次扫描
 重新生成，不能做键）。
 
+### 判红口径：`--fail-severities`（[D152]，对标 nuclei `-severity`）
+
+默认口径是**策略而非引擎事实**，所以显式给出才生效、不传不动既有语义：
+
+| 模式 | 不传（默认） | 传 `--fail-severities` |
+|---|---|---|
+| 普通模式（无 `--diff-base`） | 聚合风险 Critical/High → exit 2 | 聚合等级**或任一漏洞**命中口径 → exit 2 |
+| diff 模式（`--diff-base`） | 新增即红（不分级，[D45] 原语义） | 新增**且达口径**才红；低于口径的新增不判红但必须披露 |
+
+```bash
+# 例：团队安全基线要求连 Medium 都不许进主干
+node scripts/one-click-scan.mjs -u "http://target/page?id=1" \
+  --diff-base auto --fail-severities critical,high,medium
+```
+
+裁决纪律（`services/diffGate.js` 纯函数钉死，单测覆盖）：
+
+- **不判红 ≠ 不存在**：低于口径的新增在裁决 reason 里计数披露（「另有 N 条低于口径的新增
+  未判红，明细见 diff.json」），manifest 的 `gate.failSeverities` 记录本次口径——机器消费方
+  永远知道这次门禁是按什么口径放的行。
+- **口径不影响可信度出口**：`validity.reliable=false` 依旧 exit 1（不判红也不假绿）。
+- 取值非法（未知等级/空值）拒绝启动；合法值大小写不敏感、去重、按严重度降序归一。
+
 ## 六、可信度边界（诚实标注，勿外推）
 
 | 断言 | 状态 |

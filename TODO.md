@@ -5,6 +5,29 @@
 
 ---
 
+## 2026-10-25 批次 D152 · 竞品对标落盘 + 判红口径可配（`--fail-severities`）
+
+**动机**：对标 2026-W43 GitHub 同类热点后，本仓已覆盖绝大多数头牌能力（逐项核实见
+`docs/竞品对标-2026W43.md`）；唯一小而真实的缺口 = nuclei `-severity` 式**分级判红口径**
+（退出码判红等级此前写死）。
+
+**本批**：
+- `--fail-severities <子集>`（一键扫描）：显式判红口径，普通/diff 两模式统一生效；
+  不传 = 既有语义原样。单一真源 `services/diffGate.js`（`parseFailSeverities` +
+  `decideDiffExit` 扩展），低于口径的新增披露不判红，`manifest.gate.failSeverities` 落盘。
+- 测试 `diffGate.test.js` 9 → 16；README / CI-集成.md 第五节 / AGENTS §1.1 / help 同步。
+
+### 待推进（对标排队项，见吸收矩阵）
+
+- **nuclei 式模板化检测规则生态**（YAML DSL + 社区规则订阅）：大工程；先做「payload 池
+  外置化」可行性调研，再谈 DSL。吸收价值高但需独立批次立项。
+- **Vigolium 式 agentic 编排**（自主侦察→决策→复测循环）：MCP 9 工具已是代理可驱动的
+  形态，自主循环属宿主侧策略；可先在 MCP 加「建议下一步」提示字段试水。
+- **第三方评测基准靶场做外部裁判 5 号**（[评测基准仓库](https://github.com/Cryshana/Micro-Bench-for-Web-Vulnerability-Scanners)
+  ，机读 PoC + 修复对照）：需拉起评估 PHP 靶场内容与真值映射，独立批次。
+
+---
+
 ## 2026-10-24 批次 D151 · workflow 门禁再补一条：顶层 permissions 必填（最小权限进代码）
 
 **本批**：

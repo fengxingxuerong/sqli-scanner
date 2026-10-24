@@ -1,6 +1,6 @@
 # sqli-scanner
 
-[![Tests](https://img.shields.io/badge/tests-4320%20passing-brightgreen)](#测试)[![CI](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml/badge.svg)](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml)
+[![Tests](https://img.shields.io/badge/tests-4327%20passing-brightgreen)](#测试)[![CI](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml/badge.svg)](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml)
 [![Dependencies](https://img.shields.io/badge/prod%20deps-0%20known%20vulns-brightgreen)](SECURITY.md)
 
 > CI 徽章为真实状态（仓库地址已定，run#90 起全绿）。发布判定仍以 `CHANGELOG.md`
@@ -204,7 +204,7 @@ admin-only 触发页 `/admin/panel`（users.admin 角色门禁 403）+ admin 会
 | **AI 漏洞报告** | 3 角色流水线（分析师→撰写→审阅），支持多 key 容灾，自动生成专业中文安全分析报告 |
 | **利用工具** | SQL Shell / 文件读写 / OS 命令执行（需授权）。⚠️ 验证状态见下文「利用能力实测口径」与 [docs/udf-沙箱验证环境与边界.md](docs/udf-沙箱验证环境与边界.md)：**fileRead / fileWrite / UDF-os-shell 均已跑通真实闭环**（后者在隔离沙箱内），仅注册表仍为 mock 单测 |
 | **CLI 100+ 参数（原生引擎）** | 对标 sqlmap：--dbs/--tables/--dump/**--dump-all**/**--common-tables**/**--common-columns**/-D/-T/-C/--search/--users/--passwords/--prefix/--suffix/--time-sec/-r/--mobile/--parse-errors/--safe-url/--safe-freq/--delay/--current-user/--current-db/--hostname/--is-dba/**--identify-waf**/--skip-static/--predict-output/--test-headers/--test-path/**--test-param-names**/**--hex**/--where/--param-del/**--advise**（扫描前风险评估）/**--confirm-extreme**（极高危第二道确认）/**-b --banner**/**--statements**/**--procs**/**-U**（用户过滤）/**--exclude**（库排除）等（`node server/bin/cli.js --help` 为准，从仓库根直接跑；`--dbs` 等参数说明在该 help 里） |
-| **diff-aware CI 门禁** | `node scripts/one-click-scan.mjs -u <url> --diff-base auto`（[D45] semgrep 语义：**只对新增发现判红**）。与台账中最近一次同目标扫描自动比对（或显式 `--diff-base <scanId>`；diff 计算与 REST `/api/scan/:id/diff` 同一模块）：新增发现 → exit 2；存量仍在 → exit 0（不阻塞无关 PR——安全 CI 被弃用的第一原因就是存量噪声）；本次结论不可信（validity）或无基线可认 → exit 1（不判红也不假绿）。产出 `diff.json`（fixed/new/remaining 明细）+ `manifest.diff`（机器消费）。接法与语义细则见 [docs/CI-集成.md](docs/CI-集成.md) 第五节 |
+| **diff-aware CI 门禁** | `node scripts/one-click-scan.mjs -u <url> --diff-base auto`（[D45] semgrep 语义：**只对新增发现判红**）。与台账中最近一次同目标扫描自动比对（或显式 `--diff-base <scanId>`；diff 计算与 REST `/api/scan/:id/diff` 同一模块）：新增发现 → exit 2；存量仍在 → exit 0（不阻塞无关 PR——安全 CI 被弃用的第一原因就是存量噪声）；本次结论不可信（validity）或无基线可认 → exit 1（不判红也不假绿）。产出 `diff.json`（fixed/new/remaining 明细）+ `manifest.diff`（机器消费）。**`--fail-severities <子集>`**（[D152] 对标 nuclei `-severity` 分级门禁）：显式给出的判红口径（critical/high/medium/low 逗号分隔），普通模式与 diff 模式统一按口径判红——不传则维持各模式默认（普通模式 Critical/High 才 exit 2；diff 模式新增即红）；低于口径的新增在裁决 reason 与 manifest 如实披露（不判红 ≠ 不存在），`manifest.gate.failSeverities` 供机器消费。接法与语义细则见 [docs/CI-集成.md](docs/CI-集成.md) 第五节 |
 | **原生 MCP server** | `node server/bin/cli.js mcp`（stdio NDJSON，零依赖，[D43] 对标 dalfox `mcp` / semgrep `mcp` 的「MCP 是 CLI 的一个模式」形态）：AI 代理宿主（Cursor / Claude Code / VS Code 等）直连驱动扫描。9 个工具：`run_scan`（异步返回 scanId）/ `get_scan_status` / `get_findings`（CWE·CVSS·受影响参数·PoC curl）/ `get_report`（json/md/html/csv/sarif/db-json）/ `list_scans` / `stop`·`pause`·`resume_scan` / **`preflight`**（零 payload 侦察：可达性 + 注入点发现）。走与 REST 同一条 sanitizeStart 配置白名单 + SSRF/scope 护栏——MCP 不是旁路；`confirmDestructive` 必须显式传（代理不得代答）。宿主配置：`{"command":"node","args":["<repo>/server/bin/cli.js","mcp"]}` |
 | **NoSQL / OOB 通道开关（CLI）** | `--no-sql`（NoSQL / GraphQL / SSTI 补充趟）、`--oob`（带外接收端）与 `--oob-interactsh`（[D87] 外部协作端隧道）。[2026-10-12] 这两个通道**默认关**，引擎与 UI/REST 早可达，**唯独 CLI 没有入口**（连 `--config` 档案都被未知键硬拒）⇒ CLI/脚本用户此前完全开不了：旗标只开总开关，子键走 `--config`（如 `{"oob":{"enabled":true,"callbackBase":"cb.example:8899"}}`，整组带底合并，未写子键回落默认）。⚠️ 与 `--technique` 正交：technique 决定「测不测」，`oob.enabled` 决定「接收端起不起」——只写 `--technique oob` 拿不到回调 | `--oob-interactsh` 解决**回连拓扑**：内置接收端要求「目标能回连扫描器」，目标是云上/NAT 后/跨网段时通常不通 ⇒ 无回显盲注恒判「未检出」（与「这个站没注入」同形的静默假阴性）；该旗标改用 interactsh 协议的外部协作端，**只要求扫描器能出网**（引擎零依赖手写协议：注册/轮询/AES-256-CTR+RSA-OAEP 解密）。默认用公共协作端（`oast.pro` 等，回连记录交给其运营方，**真实项目建议自建**）；⚠️ 公共协作端下 OOB 只回带 token、不回带数据本身；仅在已授权范围内使用 | [D108] 背景 OOB 哨兵：`--oob-background` 把 OOB token 播撒到「选定技术没覆盖的面」（被预筛选/静态判定跳过的点、未生成注入点的请求头），任一回连即确认无回显注入；`enabled` 隐含启动接收端，子键（`maxRequests`/`timeoutMs`/`headers`）走 `--config` 的 `oob.background`。默认关 |
 | **CLI 报告格式补齐 db-json** | `-f/--format` 现支持 `json|csv|markdown|md|html|sarif|**db-json**`（db-json = 仅拖库数据，扩展名 `db.json`，与 REST `/report/export` 同源；此前 REST/UI 有、CLI 与 MCP 枚举缺）。**未知格式改为拒绝启动**（旧行为静默回退 JSON ⇒「以为导了 db-json 实际是普通 JSON」） |
@@ -399,7 +399,7 @@ backend/  ← Express + Node.js
 # 前端测试（575 个用例）
 npm test
 
-# 服务端测试（3749 个用例）
+# 服务端测试（3756 个用例）
 cd server && npm test
 
 # 全部测试
@@ -425,7 +425,7 @@ npm run artifact:drift   # 入库的 e2e 基线产物必须等于当前代码跑
 
 - TypeScript: 零错误
 - 前端测试: 575/575 通过（覆盖率门禁 stmts 93.16 / branch 84.47 / func 80.63，阈值 88/77/67）
-- 服务端测试: 3749 用例（3745 pass / 0 fail / 4 skip，并发口径 2026-10-24 复测；4 skip 为环境依赖显式跳过。覆盖率 lines 91.52 / branch 80.43 / func 84.83，阈值 85/74/77）
+- 服务端测试: 3756 用例（3752 pass / 0 fail / 4 skip，并发口径 2026-10-24 复测；4 skip 为环境依赖显式跳过。覆盖率 lines 91.52 / branch 80.43 / func 84.83，阈值 85/74/77）
 - 一键扫描: `npm run scan -- -u <url>`（CLI 一条命令产出 HTML/JSON/Markdown 全套报告 + manifest，退出码可直接进 CI 门禁）
 - Tamper 插件: 234 个（含批次 D3 新增 scalarselectinline；含 v24 增量 20 个，对齐 sqlmap 官方 tamper 全集，含官方 CRS/libinjection 实测组合 uniontable+odbcbrace；含批次 D13 新增 5 件上游形态变体 *nospace/*open/*block，真机 A/B 判决前不进默认链）
 - WAF 绕过能力: 200+ 插件链式组合，覆盖 62 个 WAF 厂商指纹识别 + 推荐

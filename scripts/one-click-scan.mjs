@@ -36,7 +36,7 @@ import { formatDumpData } from '../server/src/engine/dumpFormat.js';
 // [D45 2026-10-11] diff-aware CI 门禁：diff 计算与 REST /api/scan/:id/diff 同源（scanDiff），
 // 基线解析与退出码裁决在 diffGate（纯函数，单测钉死三种出口）
 import { diffReports } from '../server/src/engine/scanDiff.js';
-import { findBaselineScanId, resolveBaselineReport, decideDiffExit } from '../server/src/services/diffGate.js';
+import { findBaselineScanId, resolveBaselineReport, decideDiffExit, parseFailSeverities } from '../server/src/services/diffGate.js';
 import { cvssFor } from '../server/src/services/reportDelivery.js';
 import { VULN_TAXONOMY } from '../server/src/services/vulnTaxonomy.js';
 import { parseScope } from '../server/src/core/scopeGuard.js';
@@ -64,31 +64,57 @@ const AUTHORIZATION_NOTE =
 
 // ---------------------------------------------------------------------------
 // 自定义参数（不污染 parseArgs 的既有键表：先摘出来，其余原样交给 CLI 解析器）
+// 每个值型旗标一个校验器（规则彼此解耦）；表驱动分派，新增旗标 = 加一行注册。
 // ---------------------------------------------------------------------------
+function parseFormatsArg(v) {
+  const list = String(v || '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
+  const bad = list.filter((f) => !FORMATS.includes(f));
+  if (bad.length) return { error: `--formats 含不支持的格式：${bad.join(', ')}（支持 ${FORMATS.join('/')}）` };
+  return { formats: list.length ? list : null };
+}
+
+// [D45 2026-10-11] diff-aware CI 门禁（semgrep 语义）：--diff-base <scanId|auto>，
+// 只对新增发现判红（exit 2），存量发现不阻塞（exit 0），结论不可信 → exit 1。
+function parseDiffBaseArg(v) {
+  const s = String(v || '').trim();
+  if (!s) return { error: '--diff-base 需要值：<baselineScanId> 或 auto（按目标自动找台账里最近一次同目标扫描）' };
+  if (s !== 'auto' && !/^[A-Za-z0-9_-]{1,64}$/.test(s)) {
+    return { error: `--diff-base 形态非法：${s}（scanId 只认 [A-Za-z0-9_-]{1,64}，或 auto）` };
+  }
+  return { diffBase: s };
+}
+
+// [D152 2026-10-25] 判红口径可配（对标 nuclei -severity / semgrep --error 的分级门禁）：
+// 显式给出才生效，不传 = 既有语义原样（diff 模式新增即红；普通模式 Critical/High 才红）。
+function parseFailSeveritiesArg(v) {
+  const parsed = parseFailSeverities(String(v || ''));
+  if (!parsed.ok) return { error: parsed.error };
+  return { failSeverities: parsed.severities };
+}
+
+const OWN_VALUE_FLAGS = new Map([
+  ['--formats', parseFormatsArg],
+  ['-F', parseFormatsArg],
+  ['--fail-severities', parseFailSeveritiesArg],
+  ['--diff-base', parseDiffBaseArg],
+]);
+const OWN_BOOL_FLAGS = new Map([
+  ['--no-ledger', (o) => { o.ledger = false; }],
+  ['--quiet', (o) => { o.quiet = true; }],
+]);
+
 function splitOwnArgs(argv) {
   const opts = { formats: [...DEFAULTS_FORMATS], ledger: true, quiet: false, open: false };
   const rest = [];
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
-    if (a === '--formats' || a === '-F') {
-      const v = String(argv[++i] || '');
-      const list = v.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
-      const bad = list.filter((f) => !FORMATS.includes(f));
-      if (bad.length) return { opts, rest, error: `--formats 含不支持的格式：${bad.join(', ')}（支持 ${FORMATS.join('/')}）` };
-      if (list.length) opts.formats = list;
-      continue;
-    }
-    if (a === '--no-ledger') { opts.ledger = false; continue; }
-    if (a === '--quiet') { opts.quiet = true; continue; }
-    // [D45 2026-10-11] diff-aware CI 门禁（semgrep 语义）：--diff-base <scanId|auto>，
-    // 只对新增发现判红（exit 2），存量发现不阻塞（exit 0），结论不可信 → exit 1。
-    if (a === '--diff-base') {
-      const v = String(argv[++i] || '').trim();
-      if (!v) return { opts, rest, error: '--diff-base 需要值：<baselineScanId> 或 auto（按目标自动找台账里最近一次同目标扫描）' };
-      if (v !== 'auto' && !/^[A-Za-z0-9_-]{1,64}$/.test(v)) {
-        return { opts, rest, error: `--diff-base 形态非法：${v}（scanId 只认 [A-Za-z0-9_-]{1,64}，或 auto）` };
-      }
-      opts.diffBase = v;
+    const boolApply = OWN_BOOL_FLAGS.get(a);
+    if (boolApply) { boolApply(opts); continue; }
+    const valueParse = OWN_VALUE_FLAGS.get(a);
+    if (valueParse) {
+      const r = valueParse(argv[++i]);
+      if (r.error) return { opts, rest, error: r.error };
+      for (const [k, val] of Object.entries(r)) if (k !== 'error' && val != null) opts[k] = val;
       continue;
     }
     rest.push(a);
@@ -111,6 +137,10 @@ function printHelp() {
                              比对（auto=台账中最近一次同目标扫描），新增发现 → exit 2；
                              存量仍在 → exit 0（不阻塞无关 PR）；本次结论不可信或无基线可认
                              → exit 1（拒绝认证，不假绿）。产出 diff.json + manifest.diff
+      --fail-severities <list>  判红口径（[D152] 对标 nuclei -severity）：逗号分隔
+                             critical/high/medium/low 子集。显式给出才生效——普通模式
+                             默认 Critical/High 才 exit 2，diff 模式默认新增即红；
+                             给出后两个模式都按此口径判红（低于口径的新增如实披露不判红）
   -o, --out <dir>        输出目录（默认 reports/<主机名>-<时间戳>/）
       --no-ledger        不写扫描台账快照
       --quiet            精简输出（只打最终摘要）
@@ -146,7 +176,8 @@ function printHelp() {
 支持的注入类型（引擎内置技术通道）:
 ${techniques}
 
-退出码: 0=未发现高危 / 2=发现 Critical 或 High / 1=执行失败（可直接用于 CI 门禁）`);
+退出码: 0=未发现高危 / 2=发现 Critical 或 High / 1=执行失败（可直接用于 CI 门禁）
+       显式 --fail-severities 时按该口径判红（[D152]，详见 docs/CI-集成.md 第五节）`);
 }
 
 // ---------------------------------------------------------------------------
@@ -203,6 +234,54 @@ function printReportBrief(report, files, outDir) {
 // ---------------------------------------------------------------------------
 // 主流程
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// diff 门禁执行（[D45] 建线/比对 + [D152] 口径透传）：找基线 → 读基线 → diff → 裁决 → 落盘。
+// 失败路径直接 exit 1（拒绝认证，不假绿）；成功返回 diffInfo 供 manifest 与退出码消费。
+// ---------------------------------------------------------------------------
+function runDiffGate({ opts, report, target, outDir, files }) {
+  const rows = scanLedger.listScans(500);
+  const curTarget = report.target?.url || report.target?.baseUrl || target;
+  const baseScanId = findBaselineScanId({
+    diffBase: opts.diffBase,
+    currentScanId: report.scanId,
+    currentTarget: curTarget,
+    rows,
+  });
+  if (!baseScanId) {
+    console.error(
+      `[diff-gate] 找不到基线扫描（--diff-base ${opts.diffBase}` +
+      `${opts.diffBase === 'auto' ? '：台账中无同目标历史扫描' : ''}）。` +
+      '\n  门禁拒绝在无基线时认证「无新增」——先跑一次建立基线（同一目标 URL），或显式给出基线 scanId。'
+    );
+    process.exit(1);
+  }
+  const baseReport = resolveBaselineReport({ baseScanId, scanManager: null });
+  if (!baseReport) {
+    console.error(`[diff-gate] 基线扫描 ${baseScanId} 的报告不可读（台账缺失/损坏）——门禁拒绝认证`);
+    process.exit(1);
+  }
+  const diff = diffReports(baseReport, report);
+  // [D152] 显式判红口径透传：不传时 decideDiffExit 维持 [D45] 原语义（新增即红）
+  const decision = decideDiffExit({ diff, newReport: report, failSeverities: opts.failSeverities });
+  const diffInfo = { baseScanId, diff, decision };
+  writeFileSync(join(outDir, 'diff.json'), JSON.stringify(diff, null, 2), 'utf-8');
+  files.push('diff.json');
+  return diffInfo;
+}
+
+// [D152] 普通模式退出码：显式口径 → 聚合等级**或任一漏洞**命中即红（Medium-only 的发现集
+// 也能被显式口径抓住）；不传 → 维持原语义（聚合风险 Critical/High 才红）。
+function exitBySeverityGate({ report, failSeverities }) {
+  if (failSeverities) {
+    const gauge = new Set(failSeverities);
+    const risky =
+      gauge.has(String(report.riskLevel || '').toLowerCase()) ||
+      (report.vulns || []).some((v) => gauge.has(String(v.riskLevel || '').toLowerCase()));
+    process.exit(risky ? 2 : 0);
+  }
+  process.exit(report.riskLevel === 'Critical' || report.riskLevel === 'High' ? 2 : 0);
+}
+
 async function main() {
   const argv = process.argv.slice(2);
   const { opts, rest, error } = splitOwnArgs(argv);
@@ -319,35 +398,7 @@ async function main() {
   // 比 diff（与 REST /api/scan/:id/diff 同源 scanDiff 模块），**只对新增发现判红**——
   // 存量发现已暴露在基线里，不该阻塞无关 PR。结论不可信（validity.reliable=false）→ exit 1
   //（不判红也不假绿：verdict=inconclusive ≠ 未检出）。无基线可认 → exit 1（拒绝认证）。
-  let diffInfo = null;
-  if (opts.diffBase) {
-    const rows = scanLedger.listScans(500);
-    const curTarget = report.target?.url || report.target?.baseUrl || target;
-    const baseScanId = findBaselineScanId({
-      diffBase: opts.diffBase,
-      currentScanId: report.scanId,
-      currentTarget: curTarget,
-      rows,
-    });
-    if (!baseScanId) {
-      console.error(
-        `[diff-gate] 找不到基线扫描（--diff-base ${opts.diffBase}` +
-        `${opts.diffBase === 'auto' ? '：台账中无同目标历史扫描' : ''}）。` +
-        '\n  门禁拒绝在无基线时认证「无新增」——先跑一次建立基线（同一目标 URL），或显式给出基线 scanId。'
-      );
-      process.exit(1);
-    }
-    const baseReport = resolveBaselineReport({ baseScanId, scanManager: null });
-    if (!baseReport) {
-      console.error(`[diff-gate] 基线扫描 ${baseScanId} 的报告不可读（台账缺失/损坏）——门禁拒绝认证`);
-      process.exit(1);
-    }
-    const diff = diffReports(baseReport, report);
-    const decision = decideDiffExit({ diff, newReport: report });
-    diffInfo = { baseScanId, diff, decision };
-    writeFileSync(join(outDir, 'diff.json'), JSON.stringify(diff, null, 2), 'utf-8');
-    files.push('diff.json');
-  }
+  const diffInfo = opts.diffBase ? runDiffGate({ opts, report, target, outDir, files }) : null;
 
   // ---- 结构化清单（机器消费入口：CI / 工单系统 / 汇总看板）----
   const pocReport = (() => { try { return rg.attachPoc(report); } catch { return report; } })();
@@ -401,6 +452,9 @@ async function main() {
           decision: { code: diffInfo.decision.code, reason: diffInfo.decision.reason },
         }
       : null,
+    // [D152] 本次门禁的判红口径（机器消费）：null = 各模式默认（普通模式 Critical/High；
+    // diff 模式新增即红）；数组 = --fail-severities 显式口径
+    gate: { failSeverities: opts.failSeverities || null },
     authorization: AUTHORIZATION_NOTE,
   };
   writeFileSync(join(outDir, 'manifest.json'), JSON.stringify(manifest, null, 2), 'utf-8');
@@ -426,8 +480,7 @@ async function main() {
     console.log(`  裁决     : exit ${diffInfo.decision.code} —— ${diffInfo.decision.reason}`);
     process.exit(diffInfo.decision.code);
   }
-  const risky = report.riskLevel === 'Critical' || report.riskLevel === 'High';
-  process.exit(risky ? 2 : 0);
+  exitBySeverityGate({ report, failSeverities: opts.failSeverities });
 }
 
 main().catch((e) => {
