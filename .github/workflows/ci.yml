@@ -28,7 +28,7 @@ jobs:
     timeout-minutes: 45
     if: github.event_name != 'schedule'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           node-version: 24
@@ -323,7 +323,7 @@ jobs:
     timeout-minutes: 25
     if: github.event_name != 'schedule'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           node-version: 24
@@ -352,7 +352,7 @@ jobs:
     timeout-minutes: 30
     if: github.event_name != 'schedule'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           node-version: 24
@@ -411,7 +411,7 @@ jobs:
             fi
           done
           echo "前置门禁全部通过"
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # [CI-FIX 2026-09-20] macOS 默认只配了 127.0.0.1，而 Linux 是整个 127.0.0.0/8 可用。
       # server/tests/httpClient.egressHardening.test.js 需要绑定 **127.0.0.2**
       # （验证出站守卫对"非 .1 回环地址"的处理），首跑 macOS 腿直接 EADDRNOTAVAIL。
@@ -467,7 +467,7 @@ jobs:
             exit 1
           fi
           echo "前置门禁全部通过"
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           node-version: 24
@@ -757,7 +757,7 @@ jobs:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           node-version: 24
@@ -890,7 +890,7 @@ jobs:
     #      现改为与 acceptance 同款的 docker MySQL。
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           node-version: 24
@@ -1030,7 +1030,7 @@ jobs:
             exit 1
           fi
           echo "前置门禁全部通过"
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           node-version: 24
@@ -1068,7 +1068,7 @@ jobs:
             exit 1
           fi
           echo "前置门禁全部通过"
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           node-version: 24
@@ -1119,7 +1119,7 @@ jobs:
             fi
           done
           echo "前置门禁全部通过"
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           node-version: 24
@@ -1171,7 +1171,7 @@ jobs:
             fi
           done
           echo "前置门禁全部通过"
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Build Docker image
         run: docker build -t sqli-scanner .
       - name: Smoke test
@@ -1212,7 +1212,7 @@ jobs:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
         with:
@@ -1250,7 +1250,7 @@ jobs:
       contents: write
       actions: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: 下载桌面交付件
         uses: actions/download-artifact@v4
         with:
@@ -1295,7 +1295,7 @@ jobs:
     timeout-minutes: 15
     if: github.event_name != 'schedule'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           node-version: 24
@@ -1333,7 +1333,7 @@ jobs:
             exit 1
           fi
           echo "前置门禁全部通过"
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           node-version: 24
