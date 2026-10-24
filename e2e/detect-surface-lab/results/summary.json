@@ -1,15 +1,16 @@
 {
-  "at": "2026-10-24T19:36:59.463Z",
+  "at": "2026-10-24T20:58:32.464Z",
   "rows": [
     {
       "id": "multi-seg",
       "path": "/api/users/1/orders",
       "vuln": true,
       "carrier": "多段路径中间段",
+      "testPath": true,
       "hit": true,
       "vulns": 3,
       "verdict": "vulnerability_detected",
-      "ms": 1252,
+      "ms": 1220,
       "exit": 2,
       "tail": "[检测] 86d7dabd · union\n[检测] 86d7dabd · error\n[检测] 86d7dabd · boolean\n[命中] union @ 86d7dabd\n[命中] error @ 86d7dabd\n[命中] boolean @ 86d7dabd\n[完成] 风险等级 High\n",
       "ok": true
@@ -19,10 +20,11 @@
       "path": "/safe/users/1/orders",
       "vuln": false,
       "carrier": "多段路径（安全对照）",
+      "testPath": true,
       "hit": false,
       "vulns": 0,
       "verdict": "no_vulnerability_detected",
-      "ms": 1037,
+      "ms": 778,
       "exit": 0,
       "tail": "[完成] 风险等级 Low\n",
       "ok": true
@@ -32,10 +34,11 @@
       "path": "/api/item/1.json",
       "vuln": true,
       "carrier": ".json 后缀段",
+      "testPath": true,
       "hit": true,
       "vulns": 3,
       "verdict": "vulnerability_detected",
-      "ms": 1122,
+      "ms": 993,
       "exit": 2,
       "tail": "[检测] 86d7dabd · union\n[检测] 86d7dabd · error\n[检测] 86d7dabd · boolean\n[命中] union @ 86d7dabd\n[命中] error @ 86d7dabd\n[命中] boolean @ 86d7dabd\n[完成] 风险等级 High\n",
       "ok": true
@@ -45,10 +48,11 @@
       "path": "/safe/item/1.json",
       "vuln": false,
       "carrier": ".json 后缀（安全对照）",
+      "testPath": true,
       "hit": false,
       "vulns": 0,
       "verdict": "no_vulnerability_detected",
-      "ms": 1902,
+      "ms": 1833,
       "exit": 0,
       "tail": "[检测] 86d7dabd · union\n[检测] 86d7dabd · error\n[检测] 86d7dabd · boolean\n[完成] 风险等级 Low\n",
       "ok": true
@@ -58,10 +62,11 @@
       "path": "/api/matrix;cat=1",
       "vuln": true,
       "carrier": "矩阵参数 ;cat=",
+      "testPath": true,
       "hit": true,
       "vulns": 3,
       "verdict": "vulnerability_detected",
-      "ms": 1040,
+      "ms": 1014,
       "exit": 2,
       "tail": "[检测] 57d63830 · union\n[检测] 57d63830 · error\n[检测] 57d63830 · boolean\n[命中] union @ 57d63830\n[命中] error @ 57d63830\n[命中] boolean @ 57d63830\n[完成] 风险等级 High\n",
       "ok": true
@@ -71,10 +76,11 @@
       "path": "/safe/matrix;cat=1",
       "vuln": false,
       "carrier": "矩阵参数（安全对照）",
+      "testPath": true,
       "hit": false,
       "vulns": 0,
       "verdict": "no_vulnerability_detected",
-      "ms": 2612,
+      "ms": 1836,
       "exit": 0,
       "tail": "[检测] 57d63830 · union\n[检测] 57d63830 · error\n[检测] 57d63830 · boolean\n[完成] 风险等级 Low\n",
       "ok": true
@@ -87,7 +93,7 @@
       "hit": true,
       "vulns": 3,
       "verdict": "vulnerability_detected",
-      "ms": 3118,
+      "ms": 2030,
       "exit": 2,
       "tail": "[检测] eb8511f8 · union\n[检测] eb8511f8 · error\n[检测] eb8511f8 · boolean\n[检测] eb8511f8 · union\n[检测] eb8511f8 · error\n[检测] eb8511f8 · boolean\n[命中] union @ eb8511f8\n[命中] error @ eb8511f8\n[命中] boolean @ eb8511f8\n[完成] 风险等级 High\n",
       "ok": true
@@ -100,7 +106,7 @@
       "hit": false,
       "vulns": 0,
       "verdict": "no_vulnerability_detected",
-      "ms": 1682,
+      "ms": 831,
       "exit": 0,
       "tail": "[完成] 风险等级 Low\n",
       "ok": true
@@ -113,7 +119,7 @@
       "hit": true,
       "vulns": 3,
       "verdict": "vulnerability_detected",
-      "ms": 1936,
+      "ms": 1018,
       "exit": 2,
       "tail": "[检测] eb8511f8 · union\n[检测] eb8511f8 · error\n[检测] eb8511f8 · boolean\n[命中] union @ eb8511f8\n[命中] error @ eb8511f8\n[命中] boolean @ eb8511f8\n[完成] 风险等级 High\n",
       "ok": true
@@ -126,9 +132,9 @@
       "hit": false,
       "vulns": 0,
       "verdict": "no_vulnerability_detected",
-      "ms": 1749,
+      "ms": 1827,
       "exit": 0,
-      "tail": "[完成] 风险等级 Low\n",
+      "tail": "[检测] eb8511f8 · union\n[检测] eb8511f8 · error\n[检测] eb8511f8 · boolean\n[完成] 风险等级 Low\n",
       "ok": true
     },
     {
@@ -144,7 +150,7 @@
       "hit": true,
       "vulns": 3,
       "verdict": "vulnerability_detected",
-      "ms": 1922,
+      "ms": 990,
       "exit": 2,
       "tail": "[检测] c50935c3 · union\n[检测] c50935c3 · error\n[检测] c50935c3 · boolean\n[命中] union @ c50935c3\n[命中] error @ c50935c3\n[命中] boolean @ c50935c3\n[完成] 风险等级 High\n",
       "ok": true
@@ -162,9 +168,43 @@
       "hit": false,
       "vulns": 0,
       "verdict": "no_vulnerability_detected",
-      "ms": 1553,
+      "ms": 1830,
       "exit": 0,
-      "tail": "[完成] 风险等级 Low\n",
+      "tail": "[检测] c50935c3 · union\n[检测] c50935c3 · error\n[检测] c50935c3 · boolean\n[完成] 风险等级 Low\n",
+      "ok": true
+    },
+    {
+      "id": "multipart-file",
+      "vuln": true,
+      "carrier": "multipart 文件字段 filename",
+      "multipart": {
+        "path": "/api/upload",
+        "filename": "alice",
+        "title": "report"
+      },
+      "hit": true,
+      "vulns": 3,
+      "verdict": "vulnerability_detected",
+      "ms": 1207,
+      "exit": 2,
+      "tail": "  [i] -r multipart：文本字段 title；文件字段 avatar（按 multipart 重建，文件字段注入 filename）。\n[检测] 5d7a8707 · union\n[检测] 5d7a8707 · error\n[检测] 5d7a8707 · boolean\n[命中] union @ 5d7a8707\n[命中] error @ 5d7a8707\n[命中] boolean @ 5d7a8707\n[完成] 风险等级 High\n",
+      "ok": true
+    },
+    {
+      "id": "multipart-file-safe",
+      "vuln": false,
+      "carrier": "multipart 文件字段（安全对照）",
+      "multipart": {
+        "path": "/safe/upload",
+        "filename": "alice",
+        "title": "report"
+      },
+      "hit": false,
+      "vulns": 0,
+      "verdict": "no_vulnerability_detected",
+      "ms": 3055,
+      "exit": 0,
+      "tail": "  [i] -r multipart：文本字段 title；文件字段 avatar（按 multipart 重建，文件字段注入 filename）。\n[检测] 5d7a8707 · union\n[检测] 5d7a8707 · error\n[检测] 5d7a8707 · boolean\n[完成] 风险等级 Low\n",
       "ok": true
     }
   ]

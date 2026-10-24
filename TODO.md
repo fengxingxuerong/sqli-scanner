@@ -5,6 +5,40 @@
 
 ---
 
+## 2026-10-25 批次 D159 · `-r` multipart 保真 + 文件字段 filename 注入面
+
+**动机**：`-r` 是实战最常用的入口（Burp 抓到什么测什么）。这条路上有两层静默失效：
+① `applyRequestFile` 把 multipart 目标降级成 urlencoded（理由写的是「引擎不支持发
+multipart」，但 2026-09-22 起 `buildMultipartBody` 已能发）⇒ 只认 multipart 的上传接口
+415/400 ⇒ 注入值从未进业务逻辑；② 文件字段的 filename 被当文本字段内容发，`filename=`
+属性消失 ⇒ 「上传接口把文件名落库后再拼 SQL」这个形态从未被注入过。
+
+**本批**：
+- 解析器：文件字段单列 `fileParts`（name/filename/contentType），不混进 bodyFields。
+- `-r` 接线：保留 multipart CT 与 fileParts；文本字段仍走 bodyParams。
+- 发现：每个 filePart 建一个 `fileField` 注入点（注入 filename）。
+- 发送：`declaredHeaderValue` 同时看 headerParams 与 auth.headers（否则 `-r` 的 CT 找不到，
+  报文会变成「urlencoded 实体 + multipart 声明」）；multipart 按真实结构重建，filename
+  内的 `"` 转义。
+- 靶场：`e2e/detect-surface-lab` 新增 `/api/upload`（只认 multipart、filename 拼 SQL）+
+  `/safe/upload`；`-r` 真值 0/1 → 1/1、安全对照 0 误报；14 用例全绿。
+- 推翻链：`requestFile.importWiring.test.js` 两条旧断言（三字段全进 body / 必须丢 CT）
+  按新事实改写，旧结论与原理由保留在测试注释里。
+
+### 待推进（仍未关闭）
+
+- **文件二进制内容不重放**：重建时报文里文件部分为空（filename 保留）。若某目标把
+  「文件内容」也拼进 SQL（极罕见），本批不覆盖——真要覆盖得先定「用哪个内容注入」，
+  属产品决策。
+- **多文件字段 + 字段顺序**：重建顺序是「文本字段在前、文件字段在后」，与原始抓包顺序
+  可能不同。FastAPI/Express 一类按名字取值的目标无影响，**按下标取值**的目标会错位——
+  需要抓包保留原始 part 顺序才能修，单独一批。
+- `paramMine` 仍跳过 multipart 载体（help 已注明），本批没有改它。
+- REST 入口（`POST /api/scan/start`）没有 fileParts 字段：面板用户不能上传抓包文件，
+  与 CLI 能力仍不对称（评估是否值得开口）。
+
+---
+
 ## 2026-10-25 批次 D157 · 报错定库补三 Java 引擎（Derby 从「定不出」到 `定库=Derby`）
 
 **动机**：`docs/优化底账-2026-10-18.md` P1-13（HSQLDB/Derby 定库通道失效）。真机靶场

@@ -185,6 +185,53 @@ function handleJson(req, res, safe) {
   });
 }
 
+/**
+ * [D159] multipart 上传端点：**只**接受 multipart/form-data，且把文件字段的 **filename**
+ * 拼进 SQL（`SELECT ... WHERE name = '<filename>'`）—— 真实上传接口就是把文件名落库的那种。
+ *
+ * 用途：验证两件事一起修好没有：
+ *   ① `-r` 抓到的 multipart 不再被降级成 urlencoded（那样目标 415，注入值从未进业务逻辑）；
+ *   ② 文件字段按 `name="x"; filename="…"` 重建，注入值写进 filename 而不是文本字段内容。
+ * 安全对照走 `?` 参数化（注入值永远不进 SQL 语法）。
+ * @param {import('node:http').IncomingMessage} req
+ * @param {http.ServerResponse} res
+ * @param {boolean} safe 是否参数化
+ */
+function handleUpload(req, res, safe) {
+  const ct = String(req.headers['content-type'] || '');
+  if (!/^multipart\/form-data/i.test(ct)) {
+    res.writeHead(415, { 'Content-Type': 'text/plain' });
+    res.end('unsupported media type: expected multipart/form-data');
+    return;
+  }
+  const bm = /boundary=(?:"([^"]+)"|([^;\s]+))/i.exec(ct);
+  if (!bm) {
+    res.writeHead(400, { 'Content-Type': 'text/plain' });
+    res.end('missing boundary');
+    return;
+  }
+  const boundary = bm[1] || bm[2];
+  let raw = '';
+  req.on('data', (c) => {
+    raw += c;
+    if (raw.length > 256 * 1024) req.destroy();
+  });
+  req.on('end', () => {
+    let filename = '';
+    for (const part of raw.split(`--${boundary}`)) {
+      const m = /filename="([^"]*)"/i.exec(part);
+      if (m) { filename = m[1]; break; }
+    }
+    if (!filename) {
+      res.writeHead(400, { 'Content-Type': 'text/plain' });
+      res.end('no file field');
+      return;
+    }
+    if (safe) void respond(res, () => runSql('SELECT id,name FROM users WHERE name = ?', [filename]));
+    else void respond(res, () => runSql(`SELECT id,name FROM users WHERE name = '${filename}'`));
+  });
+}
+
 await setupDb();
 const server = http.createServer((req, res) => {
   let u;
@@ -203,6 +250,11 @@ const server = http.createServer((req, res) => {
   // [D155] JSON body 载体：与上面 4 类不同，它的判据是「发送侧形态」而不是「取值位置」
   if (u.pathname === '/api/json' || u.pathname === '/safe/json') {
     handleJson(req, res, u.pathname === '/safe/json');
+    return;
+  }
+  // [D159] multipart 上传：注入面在文件字段的 filename 上
+  if (u.pathname === '/api/upload' || u.pathname === '/safe/upload') {
+    handleUpload(req, res, u.pathname === '/safe/upload');
     return;
   }
   try {

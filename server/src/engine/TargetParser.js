@@ -106,6 +106,9 @@ export class TargetParser {
     //    实现见 `_appendBodyParamsPoints`（D112：伴随字段快照，注释与根因在同处）。
     this._appendBodyParamsPoints(points, target);
 
+    // 3.1) multipart **文件字段**（filename）注入点（实现与根因见 _appendFilePartsPoints）
+    this._appendFilePartsPoints(points, target);
+
     // 3.5) JSON body 嵌套叶子注入点（level≥1，jsonBody 传入时生效）
     // [P1 批次 2026-09-08] 真实 API 场景（POST application/json）的注入点发现：
     // 递归遍历 jsonBody 树，字符串/数值叶子 → 注入点（param 用点路径如 user.id、
@@ -327,6 +330,29 @@ export class TargetParser {
     const bodyAll = target.bodyParams || {};
     for (const [k, v] of Object.entries(bodyAll)) {
       points.push(createInjectionPoint('body', k, String(v), { formValues: { ...bodyAll } }));
+    }
+  }
+
+  /**
+   * [D159 2026-10-25] multipart **文件字段**（filename）注入点。
+   *
+   * 背景：`-r` 抓到的上传表单里，`Content-Disposition: form-data; name="avatar";
+   * filename="cat.png"` 这一段的「值」是 filename，目标常把它落库/落日志后再拼 SQL。
+   * 旧实现：解析器把 filename 塞进 bodyFields ⇒ 发送侧当**文本字段内容**发，
+   * filename 属性整个消失 ⇒ 目标读到空文件名 ⇒ 注入值从未进业务逻辑（静默假阴性）。
+   * 现在文件字段单独走 target.fileParts，这里为每个字段名建一个点（注入 filename），
+   * formValues 带上文本字段，发送侧重整份 multipart 时一并重建。
+   * @param {import('./models.js').InjectionPoint[]} points
+   * @param {import('./models.js').Target} target
+   */
+  _appendFilePartsPoints(points, target) {
+    const files = Array.isArray(target.fileParts) ? target.fileParts : [];
+    for (const fp of files) {
+      if (!fp || !fp.name) continue;
+      points.push(createInjectionPoint('body', fp.name, fp.filename || '', {
+        fileField: true,
+        formValues: { ...(target.bodyParams || {}) },
+      }));
     }
   }
 

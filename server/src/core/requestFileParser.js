@@ -12,6 +12,72 @@
 //
 // 返回 { method, url, headers, body, params } 或 null（非法格式）。
 
+/**
+ * [D159 拆分] 单个 multipart part 的解析（文本字段 vs 文件字段）。
+ * @param {string} part 原始片段
+ * @param {Record<string,string>} params 输出：字段名 → 值
+ * @param {(k: string, v: string) => void} addBody 输出：bodyFields 写入器
+ * @param {Array<{name: string, filename: string, contentType: string}>} fileParts 输出：文件字段
+ */
+function parseMultipartPart(part, params, addBody, fileParts) {
+  if (!part || part.trim() === '--' || part.trim() === '') return;
+  const ci = part.indexOf('\n\n');
+  const head = ci >= 0 ? part.slice(0, ci) : part;
+  let val = ci >= 0 ? part.slice(ci + 2) : '';
+  val = val.replace(/\r?\n$/, '').replace(/^\r?\n/, '').replace(/\n+$/, '');
+  const nm = /name="([^"]+)"/i.exec(head);
+  if (!nm) return;
+  const fn = /filename="([^"]*)"/i.exec(head);
+  if (fn) {
+    addMultipartFilePart(nm[1], fn[1], head, params, addBody, fileParts);
+    return;
+  }
+  if (val && !(nm[1] in params)) params[nm[1]] = val;
+  if (val) addBody(nm[1], val);
+}
+
+/**
+ * [D159] 文件字段落两处：params/bodyFields（集合契约）与 fileParts（发送侧重建用）。
+ * @param {string} name 字段名
+ * @param {string} filename 文件名（可能为空串 —— 浏览器「未选文件」时就是这样）
+ * @param {string} head part 头
+ * @param {Record<string,string>} params
+ * @param {(k: string, v: string) => void} addBody
+ * @param {Array<{name: string, filename: string, contentType: string}>} fileParts
+ */
+function addMultipartFilePart(name, filename, head, params, addBody, fileParts) {
+  // 文件字段：值取 filename（二进制内容无注入语义，文件名常进 SQL/日志）
+  if (filename && !(name in params)) params[name] = filename;
+  if (filename) addBody(name, filename);
+  const ctm = /content-type:\s*([^\r\n]+)/i.exec(head);
+  fileParts.push({ name, filename: filename || '', contentType: ctm ? ctm[1].trim() : '' });
+}
+
+/**
+ * [D159 拆分] multipart body 字段提取（原内联在 parseRequestFile，加 fileParts 后超复杂度基线）。
+ *
+ * 输出两路：
+ *   · 文本字段 → params（候选列表）与 bodyFields（经 addBody 回写）
+ *   · 文件字段 → 返回的 fileParts（name / filename / contentType）
+ * bodyFields 的契约是「body 里有哪些字段」，文件字段照收；从 bodyParams 剔除文件字段的
+ * 动作在 CLI 的 applyRequestFile 里（发送侧需要按 fileParts 重建 multipart）。
+ * @param {string} body 原始 body
+ * @param {string} ctVal Content-Type（含 boundary）
+ * @param {Record<string,string>} params 输出：字段名 → 值（就地把文本字段写入）
+ * @param {(k: string, v: string) => void} addBody 输出：bodyFields 写入器
+ * @returns {Array<{name: string, filename: string, contentType: string}>} 文件字段
+ */
+function parseMultipartFields(body, ctVal, params, addBody) {
+  const fileParts = [];
+  const bm = /boundary=(?:"([^"]+)"|([^;\s]+))/i.exec(ctVal);
+  const boundary = bm ? (bm[1] || bm[2]) : null;
+  if (!boundary) return fileParts;
+  for (const part of body.split('--' + boundary)) {
+    parseMultipartPart(part, params, addBody, fileParts);
+  }
+  return fileParts;
+}
+
 export function parseRequestFile(text) {
   if (!text || typeof text !== 'string') return null;
   // 去除 BOM 与首尾空白
@@ -64,6 +130,7 @@ export function parseRequestFile(text) {
   }
 
   // 提取 query params（注入参数候选）
+  /** @type {Record<string,string>} */
   const params = {};
   // [MULTIPART-R-FIX 2026-09-20] bodyFields 与 params 同步收集，但**只装来自 body 的字段**。
   // 为什么不能只给 params：它把 query、urlencoded body、multipart、JSON 四个来源混在同一个
@@ -115,31 +182,11 @@ export function parseRequestFile(text) {
 
   // [批次 10 2026-09-15] multipart/form-data：提取 text 字段名→值作为注入参数候选
   //（Burp 抓包上传表单常态；文件字段值取 filename 不取二进制）。只读提取，body 原样保留。
-  if (body && ctVal && /multipart\/form-data/i.test(ctVal)) {
-    const bm = /boundary=(?:"([^"]+)"|([^;\s]+))/i.exec(ctVal);
-    const boundary = bm ? (bm[1] || bm[2]) : null;
-    if (boundary) {
-      const parts = body.split('--' + boundary);
-      for (const part of parts) {
-        if (!part || part.trim() === '--' || part.trim() === '') continue;
-        const ci = part.indexOf('\n\n');
-        const head = ci >= 0 ? part.slice(0, ci) : part;
-        let val = ci >= 0 ? part.slice(ci + 2) : '';
-        val = val.replace(/\r?\n$/, '').replace(/^\r?\n/, '').replace(/\n+$/, '');
-        const nm = /name="([^"]+)"/i.exec(head);
-        if (!nm) continue;
-        const fn = /filename="([^"]*)"/i.exec(head);
-        if (fn) {
-          // 文件字段：值取 filename（二进制内容无注入语义，文件名常进 SQL/日志）
-          if (fn[1] && !(nm[1] in params)) params[nm[1]] = fn[1];
-          if (fn[1]) addBody(nm[1], fn[1]);
-          continue;
-        }
-        if (val && !(nm[1] in params)) params[nm[1]] = val;
-        if (val) addBody(nm[1], val);
-      }
-    }
-  }
+  // [D159 2026-10-25] 文件字段另收进 fileParts（实现见 parseMultipartFields）：
+  // 发送侧要按 `filename=` 属性重建，不能当文本字段内容发 —— 否则目标读到的文件名恒空。
+  const fileParts = body && ctVal && /multipart\/form-data/i.test(ctVal)
+    ? parseMultipartFields(body, ctVal, params, addBody)
+    : [];
   // [批次 10 2026-09-15] JSON body：顶层叶子值并入 params（嵌套叶子走点路径标记为候选）
   if (body && ctVal && /application\/json/i.test(ctVal)) {
     try {
@@ -162,5 +209,6 @@ export function parseRequestFile(text) {
     } catch { /* 非 JSON body 原样保留 */ }
   }
 
-  return { method, url, headers, body, params, bodyFields };
+  // [D159] fileParts 供发送侧按真实 multipart 形态重建（filename / contentType 原样保留）
+  return { method, url, headers, body, params, bodyFields, fileParts };
 }

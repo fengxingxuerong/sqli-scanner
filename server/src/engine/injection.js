@@ -140,13 +140,34 @@ export function applyPrefixSuffix(target, point, value) {
 
 // 统一的注入请求构造（url/body/cookie/header 四种注入点）
 // 与 Detector.buildRequest / Extractor._build / DBFingerprinter._build 行为一致，集中维护避免三处漂移。
-// multipart 报文构造（发送侧）：按 RFC 7578 拼文本字段，末段为闭合 boundary。
-// 已知限制：只重建**文本字段**；原请求里的 file 类型字段会以空值占位（字段名仍在），
-// 文件内容不回传 —— 对 SQL 注入检测无影响（注入面在字段名/文本值上）。
-function buildMultipartBody(fields, boundary) {
+// multipart 报文构造（发送侧）：按 RFC 7578 拼文本字段 + 文件字段，末段为闭合 boundary。
+//
+// [D159 2026-10-25] 文件字段从「静默丢弃 / 当文本发」改成**按真实结构重建**：
+//   `Content-Disposition: form-data; name="avatar"; filename="<值>"`
+//   目标是「只认 multipart 的上传接口」时，它读的是 `filename`（落库/落日志），
+//   旧实现把文件名当文本字段内容发 ⇒ 那个位置永远没有被注入过（静默假阴性）。
+// 注入字符串可能含 `"`（H2/部分方言的 payload 用双引号闭合），filename 在引号内
+// 必须转义，否则整段报文被目标解析失败 —— 转义后服务端解出来仍是原值。
+// @param {Record<string, any>} fields 文本字段
+// @param {string} boundary
+// @param {Array<{name:string,filename:string,contentType?:string}>} [fileParts] 文件字段
+// @param {{name:string,value:string}|null} [injectedFile] 本次要注入的文件字段
+// @returns {string} multipart 报文
+function buildMultipartBody(fields, boundary, fileParts, injectedFile) {
   const chunks = [];
+  const esc = (s) => String(s ?? '').replace(/"/g, '\\"').replace(/[\r\n]/g, '');
   for (const [k, v] of Object.entries(fields || {})) {
+    if (injectedFile && k === injectedFile.name) continue; // 文件字段不重复发文本段
     chunks.push(`--${boundary}\r\nContent-Disposition: form-data; name="${k}"\r\n\r\n${v ?? ''}\r\n`);
+  }
+  for (const fp of Array.isArray(fileParts) ? fileParts : []) {
+    if (!fp || !fp.name) continue;
+    const fname = injectedFile && injectedFile.name === fp.name ? injectedFile.value : fp.filename;
+    const ctype = fp.contentType || 'application/octet-stream';
+    chunks.push(
+      `--${boundary}\r\nContent-Disposition: form-data; name="${esc(fp.name)}"; filename="${esc(fname)}"\r\n`
+      + `Content-Type: ${esc(ctype)}\r\n\r\n\r\n`
+    );
   }
   chunks.push(`--${boundary}--\r\n`);
   return chunks.join('');
@@ -154,6 +175,30 @@ function buildMultipartBody(fields, boundary) {
 
 // boundary 随机串（纯小写字母数字，避免特殊字符引发解析歧义）
 const nanoidLc = () => Math.random().toString(36).slice(2, 12);
+
+/**
+ * [D159] 读「本次请求实际上会发出去的」某个请求头的声明值。
+ *
+ * 必须看**两处**：`--header` / `--test-headers` 的注入头走 `target.headerParams`；
+ * `-r` 抓包导入的请求头走 `config.auth.headers`（httpClient 发送时合并）。
+ * 只看 headerParams 会把 `-r` 的 multipart 目标误判成非 multipart ⇒ body 按 urlencoded 发、
+ * 头却仍是 multipart（目标 415/400）⇒ 每个点都被预筛剪掉（实测 11 请求、0 命中断言）。
+ * @param {any} target
+ * @param {string} name 头名（大小写不敏感）
+ * @returns {string} 未声明时返回空串
+ */
+function declaredHeaderValue(target, name) {
+  const lc = String(name).toLowerCase();
+  /** @param {any} obj */
+  const pick = (obj) => {
+    if (!obj || typeof obj !== 'object') return '';
+    const k = Object.keys(obj).find((x) => String(x).toLowerCase() === lc);
+    return k ? String(obj[k]) : '';
+  };
+  const fromParams = pick(target && target.headerParams);
+  if (fromParams) return fromParams;
+  return pick(target && target.config && target.config.auth && target.config.auth.headers);
+}
 
 /**
  * [D91 拆分] cookie 注入点的请求头写入（原为 buildInjectionRequest 内联分支，D91 加
@@ -365,18 +410,28 @@ export function buildInjectionRequest(target, point, value) {
         if (rndHit(k)) req.data[k] = rndVal();
       }
     }
-    req.data[point.param] = injected;
+    // [D159] 文件字段点不写文本字段（注入值进 filename，见下方 multipart 分支）
+    if (!point.fileField) req.data[point.param] = injected;
     // [P1 2026-09-22] multipart 目标：目标请求头声明了 multipart/form-data 时，
     // 必须以 multipart 形态重建报文 —— 否则发成 urlencoded / JSON，只吃 multipart 的目标
     // 解析不到字段 → **注入值从未进 SQL → 静默 0 检出**。
     // （`-r` 导入侧早就能认出 multipart 的字段名，缺的一直是发送侧；靶场 e2e/pentest-lab
     //  的 `/mp` 把这个缺口钉成了可复现事实。）
-    // 已知限制：只重建**文本字段**；原请求里的 file 类型字段会以空值占位（文件名仍在）。
-    const declaredCt = Object.keys(req.headers).find((k) => /^content-type$/i.test(k));
-    if (declaredCt && /^multipart\/form-data/i.test(req.headers[declaredCt])) {
-      const existing = /boundary=(?:"([^"]+)"|([^;\s]+))/i.exec(req.headers[declaredCt]);
+    // [D159 2026-10-25] 文件字段（fileParts）现在按真实结构重建：`name="x"; filename="…"` +
+    // 空内容，不再当成文本字段发。此前 `-r` 的 multipart 还会被降级成 urlencoded（见
+    // bin/cli/args.js 的 D159 注释），两层修复合起来才让「上传表单的 filename 注入」可达。
+    //
+    // [D159] 声明头必须**两处都看**：`--header` 走 target.headerParams，而 `-r` 抓包的
+    // 请求头走 config.auth.headers（headerObj）。只看前者时，-r 的 multipart 目标被判成
+    // 非 multipart → 按 urlencoded 发、却带着 auth 那边的 multipart Content-Type
+    // （实测：报文 `title=report` + `Content-Type: multipart/...`，目标 415，全点被剪）。
+    const declaredCt = declaredHeaderValue(target, 'content-type');
+    if (/^multipart\/form-data/i.test(declaredCt)) {
+      const existing = /boundary=(?:"([^"]+)"|([^;\s]+))/i.exec(declaredCt);
       const boundary = (existing?.[1] || existing?.[2] || `----SqlScanBoundary${nanoidLc()}`).trim();
-      req.data = buildMultipartBody(req.data, boundary);
+      // 文件字段点：注入值写进 filename 而不是文本字段内容
+      const injectedFile = point.fileField ? { name: point.param, value: injected } : null;
+      req.data = buildMultipartBody(req.data, boundary, target && target.fileParts, injectedFile);
       req.headers['Content-Type'] = `multipart/form-data; boundary=${boundary}`;
     } else if (target.jsonBody == null) {
       // [P0-FIX 2026-09-15] 表单点 Content-Type 修正：axios 对对象 data 默认 JSON 序列化，

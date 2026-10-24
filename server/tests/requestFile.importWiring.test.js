@@ -64,34 +64,53 @@ async function withTmp() {
 async function bodyPoints(args) {
   const { bodyParams, jsonBody } = resolveBodyChannel(args.body ? JSON.parse(args.body) : {});
   const t = createTarget({
-    url: args.url, method: args.method, bodyParams, jsonBody, config: { level: 1 },
+    url: args.url,
+    method: args.method,
+    bodyParams,
+    jsonBody,
+    fileParts: args.fileParts || [], // [D159] 文件字段单独成点
+    config: { level: 1 },
   });
   const pts = await new TargetParser().discover(t);
   return pts.filter((p) => p.location === 'body').map((p) => p.param);
 }
 
-test('multipart -r：三个真实字段进引擎，绝不出现以 boundary 命名的垃圾键', async () => {
+test('multipart -r：真实字段进引擎，绝不出现以 boundary 命名的垃圾键', async () => {
   const t = await withTmp();
   try {
     const args = await viaDashR(multipartReq, (n, c) => t.write(n, c));
     const parsed = JSON.parse(args.body);
-    assert.deepEqual(Object.keys(parsed).sort(), ['avatar', 'caption', 'username'],
-      `-r 之后 body 应只剩解析器抽出的真实字段，实际：${JSON.stringify(parsed)}`);
-    assert.equal(parsed.avatar, 'cat.png', '文件字段应取 filename');
+    // [D159 2026-10-25 推翻记录] 本断言原为 ['avatar','caption','username']（文件字段混进
+    // bodyFields）。文件字段的 filename 不是「可按 urlencoded 重发的值」——混进去会让发送侧
+    // 把它当文本字段发、`filename` 属性消失，目标读到的文件名永远是空 ⇒ 注入值不进 SQL。
+    // 现在文本字段进 bodyParams，文件字段单独走 args.fileParts。旧断言的那半句
+    //「文件字段应取 filename」保留在新断言里（值没丢，只是换了通道）。
+    assert.deepEqual(Object.keys(parsed).sort(), ['caption', 'username'],
+      `-r 之后 body 只应剩文本字段，实际：${JSON.stringify(parsed)}`);
+    assert.deepEqual(args.fileParts, [{ name: 'avatar', filename: 'cat.png', contentType: 'image/png' }],
+      '文件字段必须按 name/filename/contentType 单独带走（发送侧据此重建 multipart）');
     const params = await bodyPoints(args);
-    assert.deepEqual(params.sort(), ['avatar', 'caption', 'username']);
+    assert.deepEqual(params.sort(), ['avatar', 'caption', 'username'],
+      '三个字段都必须成为注入点：文本字段走 bodyParams，文件字段走 fileParts');
     for (const p of params) {
       assert.ok(!/Content-Disposition|boundary/i.test(p), `注入点键名不该带 multipart 原文，实际：${p}`);
     }
   } finally { await t.done(); }
 });
 
-test('multipart -r：必须丢掉已对不上的 multipart Content-Type（否则声明与实体不符）', async () => {
+// [D159 2026-10-25 推翻记录] 原断言：「必须丢掉已对不上的 multipart Content-Type」。
+// 那条成立于「引擎只能发 urlencoded」的时代——声明与实际不符确实更糟。但现在引擎会
+// 按 boundary 重建 multipart（injection.js buildMultipartBody，e2e/pentest-lab /mp 与
+// 本轮新增的 e2e/detect-surface-lab /api/upload 都是端到端证据），保留 Content-Type
+// 才是「声明与实体一致」；丢掉它反而是把 multipart-only 目标推回 415。
+test('multipart -r：保留 multipart Content-Type（发送侧按 boundary 重建报文）', async () => {
   const t = await withTmp();
   try {
     const args = await viaDashR(multipartReq, (n, c) => t.write(n, c));
-    const ct = Object.keys(args.headerObj || {}).filter((k) => /^content-type$/i.test(k));
-    assert.deepEqual(ct, [], `headerObj 里不该留 Content-Type，实际：${JSON.stringify(args.headerObj)}`);
+    const ctKeys = Object.keys(args.headerObj || {}).filter((k) => /^content-type$/i.test(k));
+    assert.deepEqual(ctKeys, ['Content-Type'], `headerObj 应保留 Content-Type，实际：${JSON.stringify(args.headerObj)}`);
+    assert.match(String(args.headerObj['Content-Type']), /^multipart\/form-data;\s*boundary=/i,
+      '声明的 Content-Type 必须仍是 multipart 且带 boundary');
   } finally { await t.done(); }
 });
 

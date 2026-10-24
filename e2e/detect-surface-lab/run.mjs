@@ -19,15 +19,15 @@ const BASE = `http://127.0.0.1:${PORT}`;
 const RESULTS = path.join(HERE, 'results');
 
 const CASES = [
-  // 多段路径：id 在中间段
-  { id: 'multi-seg', path: '/api/users/1/orders', vuln: true, carrier: '多段路径中间段' },
-  { id: 'multi-seg-safe', path: '/safe/users/1/orders', vuln: false, carrier: '多段路径（安全对照）' },
+  // 多段路径：id 在中间段（需要 --test-path 才会生成路径点）
+  { id: 'multi-seg', path: '/api/users/1/orders', vuln: true, carrier: '多段路径中间段', testPath: true },
+  { id: 'multi-seg-safe', path: '/safe/users/1/orders', vuln: false, carrier: '多段路径（安全对照）', testPath: true },
   // .json 后缀段
-  { id: 'json-suffix', path: '/api/item/1.json', vuln: true, carrier: '.json 后缀段' },
-  { id: 'json-suffix-safe', path: '/safe/item/1.json', vuln: false, carrier: '.json 后缀（安全对照）' },
-  // 矩阵参数
-  { id: 'matrix', path: '/api/matrix;cat=1', vuln: true, carrier: '矩阵参数 ;cat=' },
-  { id: 'matrix-safe', path: '/safe/matrix;cat=1', vuln: false, carrier: '矩阵参数（安全对照）' },
+  { id: 'json-suffix', path: '/api/item/1.json', vuln: true, carrier: '.json 后缀段', testPath: true },
+  { id: 'json-suffix-safe', path: '/safe/item/1.json', vuln: false, carrier: '.json 后缀（安全对照）', testPath: true },
+  // 矩阵参数（注入点在 path 段内，同样需要 --test-path）
+  { id: 'matrix', path: '/api/matrix;cat=1', vuln: true, carrier: '矩阵参数 ;cat=', testPath: true },
+  { id: 'matrix-safe', path: '/safe/matrix;cat=1', vuln: false, carrier: '矩阵参数（安全对照）', testPath: true },
   // 重复 query 键
   { id: 'dup-key', path: '/dup?a=1&a=2', vuln: true, carrier: '重复 query 键' },
   { id: 'dup-key-safe', path: '/safe/dup?a=1&a=2', vuln: false, carrier: '重复键（安全对照）' },
@@ -43,7 +43,44 @@ const CASES = [
     id: 'json-body-safe', path: '/safe/json', vuln: false, carrier: 'JSON body（安全对照）',
     method: 'POST', body: '{"id":1}', headers: { 'Content-Type': 'application/json' },
   },
+  // [D159] `-r` 抓包导入的 multipart 上传表单：注入面在文件字段的 filename 上。
+  // 旧实现：-r 把 multipart 降级成 urlencoded（目标 415）+ 文件字段当文本发（filename 丢失）
+  // ⇒ 0 检出。现在保留 multipart 并按 filename 注入。
+  {
+    id: 'multipart-file', vuln: true, carrier: 'multipart 文件字段 filename',
+    multipart: { path: '/api/upload', filename: 'alice', title: 'report' },
+  },
+  {
+    id: 'multipart-file-safe', vuln: false, carrier: 'multipart 文件字段（安全对照）',
+    multipart: { path: '/safe/upload', filename: 'alice', title: 'report' },
+  },
 ];
+
+/**
+ * 造一份 Burp 形态的 multipart 抓包（`-r` 的输入）。
+ * @param {{path:string, filename:string, title:string}} spec
+ * @returns {string} 请求原文
+ */
+function buildMultipartRequest(spec) {
+  const B = '----DSLabFormBoundary7MA4';
+  return [
+    `POST ${spec.path} HTTP/1.1`,
+    `Host: 127.0.0.1:${PORT}`,
+    `Content-Type: multipart/form-data; boundary=${B}`,
+    '',
+    `--${B}`,
+    'Content-Disposition: form-data; name="title"',
+    '',
+    spec.title,
+    `--${B}`,
+    `Content-Disposition: form-data; name="avatar"; filename="${spec.filename}"`,
+    'Content-Type: image/png',
+    '',
+    'PNGDATA',
+    `--${B}--`,
+    '',
+  ].join('\r\n');
+}
 
 /**
  * 解析 --only=a,b
@@ -73,21 +110,33 @@ async function waitReady() {
 
 /**
  * 跑一条用例，返回 {hit, vulnCount, verdict, ms}
- * @param {{id:string,path:string,vuln:boolean,method?:string,body?:string,headers?:Record<string,string>}} c
+ * @param {{id:string,path?:string,vuln:boolean,method?:string,body?:string,headers?:Record<string,string>,multipart?:{path:string,filename:string,title:string}}} c
  * @returns {{hit:boolean, vulns:number, verdict:string, ms:number, exit:number, tail:string}}
  */
 function scanCase(c) {
   const outDir = path.join(RESULTS, c.id);
   fs.rmSync(outDir, { recursive: true, force: true });
   const extra = [];
+  let targetArgs;
+  if (c.multipart) {
+    // [D159] 走真实入口 -r：multipart 的字段/文件结构只有抓包导入这条路上有
+    const reqPath = path.join(RESULTS, `${c.id}.req.txt`);
+    fs.writeFileSync(reqPath, buildMultipartRequest(c.multipart));
+    targetArgs = ['-r', reqPath];
+  } else {
+    targetArgs = ['-u', BASE + c.path];
+  }
   if (c.method) extra.push('--method', c.method);
   if (c.body) extra.push('--body', c.body);
+  // [D159] --test-path 按用例开启：路径点对 multipart 目标没有意义，
+  //   而且会给只认 /api/upload 的靶场塞一条 404 请求（实测把整场拖到 --timeout）
+  if (c.testPath) extra.push('--test-path');
   for (const [k, v] of Object.entries(c.headers || {})) extra.push('--header', `${k}: ${v}`);
   const t0 = Date.now();
   const r = spawnSync(process.execPath, [
     path.join(ROOT, 'scripts/one-click-scan.mjs'),
-    '-u', BASE + c.path,
-    '--level', '3', '--test-path',
+    ...targetArgs,
+    '--level', '3',
     '--technique', 'union,error,boolean',
     '--formats', 'json',
     '-o', outDir,

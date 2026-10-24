@@ -57,6 +57,62 @@ test('回归：普通表单点仍是 urlencoded（不得被 multipart 分支误�
   assert.ok(!String(req.data).includes('Content-Disposition'), '不应出现 multipart 片段');
 });
 
+// ===== [D159 2026-10-25] 文件字段（filename）注入面 =====
+// 缺陷：file 字段被当文本字段发（`name="avatar"` + 内容=文件名），`filename=` 属性整个
+// 消失 ⇒ 目标读到的文件名永远是空 ⇒ 注入值从未进 SQL。靶场 /api/upload 实测 0 检出。
+const MP_B = '----Boundary1';
+const mpTarget = (extra = {}) => ({
+  method: 'POST',
+  baseUrl: 'http://127.0.0.1:8250/api/upload',
+  headerParams: { 'Content-Type': `multipart/form-data; boundary=${MP_B}` },
+  bodyParams: { title: 'report' },
+  fileParts: [{ name: 'avatar', filename: 'alice', contentType: 'image/png' }],
+  ...extra,
+});
+
+test('[D159] 文件字段点：注入值写进 filename，文件结构保留', () => {
+  const point = {
+    location: 'body',
+    param: 'avatar',
+    originalValue: 'alice',
+    fileField: true,
+    formValues: { title: 'report' },
+  };
+  const req = buildInjectionRequest(mpTarget(), point, "alice' AND 1=1-- -");
+  const body = String(req.data);
+  assert.match(body, /name="avatar"; filename="alice' AND 1=1-- -"/, '注入值必须出现在 filename 里');
+  assert.ok(!/name="avatar"\r\n/.test(body), '不得再出现「文件字段被当文本字段」的旧形态');
+  assert.ok(body.includes('name="title"'), '同一表单的文本字段必须保留');
+  assert.match(req.headers['Content-Type'], /^multipart\/form-data; boundary=----Boundary1$/);
+});
+
+test('[D159] 文本字段点：文件字段按原 filename 一起重建（不再被丢弃）', () => {
+  const point = { location: 'body', param: 'title', originalValue: 'report', formValues: { title: 'report' } };
+  const req = buildInjectionRequest(mpTarget(), point, "report' AND 1=1-- -");
+  const body = String(req.data);
+  assert.ok(body.includes('name="title"'), '文本字段应被注入');
+  assert.match(body, /name="avatar"; filename="alice"/, '文件字段必须原样保留（此前会被整段丢弃）');
+});
+
+test('[D159] filename 里的双引号必须转义（否则整段 multipart 被目标解析失败）', () => {
+  const payload = 'x" AND "1"="2';
+  const point = {
+    location: 'body',
+    param: 'avatar',
+    originalValue: 'alice',
+    fileField: true,
+    formValues: { title: 'report' },
+  };
+  const req = buildInjectionRequest(mpTarget(), point, payload);
+  const body = String(req.data);
+  const line = body.split('\r\n').find((l) => l.includes('filename='));
+  assert.ok(line.includes('\\"'), `filename 里的引号必须转义，实际：${line}`);
+  // 结构判据：按 quoted-string 规则解回来必须等于原 payload（服务端看到的是同一个值）
+  const m = /filename="((?:[^"\\]|\\.)*)"/.exec(line);
+  assert.ok(m, `filename 应是合法的 quoted-string，实际：${line}`);
+  assert.equal(m[1].replace(/\\(.)/g, '$1'), payload, '转义后服务端解出的值必须与原 payload 一致');
+});
+
 test('回归：JSON body 目标仍走 JSON 分支', () => {
   const target = {
     method: 'POST',

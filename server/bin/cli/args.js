@@ -609,6 +609,52 @@ export function bodyToJsonString(body) {
   return null;
 }
 
+// [D159 2026-10-25] multipart 抓包 → args.body（文本字段）+ args.fileParts（文件字段）。
+//
+// 历史：原实现把整个 multipart 目标**降级**成 urlencoded，理由是「引擎不支持发送 multipart」。
+// 该理由 2026-09-22 起已不成立（injection.js 的 buildMultipartBody 会按 boundary 重建报文，
+// e2e/pentest-lab 的 `/mp` 是端到端证据）。降级的实际后果是：只认 multipart 的上传表单
+// 收到 urlencoded ⇒ 415/400 ⇒ 注入值从未进业务逻辑 ⇒ **静默 0 检出**，而 Burp 抓到的上传
+// 接口恰好是最常见的一类 multipart 目标。
+// 现在：Content-Type 原样保留；文本字段进 bodyParams；文件字段进 fileParts（发送侧按
+// `name="x"; filename="…"` 重建，注入值写进 filename）。文件字段**不**进 bodyParams ——
+// filename 是文件字段的属性，不是文本字段的内容。
+/**
+ * @param {any} args
+ * @param {any} parsed parseRequestFile / parseRequestCollection 的单条结果
+ */
+function applyMultipartBody(args, parsed) {
+  const allFields = parsed.bodyFields || {};
+  const fileNames = new Set((parsed.fileParts || []).map((f) => f.name).filter(Boolean));
+  const fields = {};
+  for (const [k, v] of Object.entries(allFields)) {
+    if (!fileNames.has(k)) fields[k] = v;
+  }
+  if (Object.keys(fields).length) args.body = JSON.stringify(fields);
+  args.fileParts = Array.isArray(parsed.fileParts) ? parsed.fileParts : [];
+  const names = args.fileParts.map((f) => f.name).filter(Boolean);
+  console.warn(
+    `  [i] -r multipart：文本字段 ${Object.keys(fields).join(', ') || '(无)'}`
+    + `；文件字段 ${names.join(', ') || '(无)'}（按 multipart 重建，文件字段注入 filename）。`
+    + (names.length ? '' : '\n      若本次抓包本就只有文件字段，注入面来自 filename。')
+  );
+}
+
+// [D159 拆分] body 通道路由：multipart 走真实重建，其余沿用原有的 JSON/urlencoded 启发式。
+/**
+ * @param {any} args
+ * @param {any} parsed
+ * @param {string} ctForBody 抓包里声明的 Content-Type
+ */
+function applyBodyToArgs(args, parsed, ctForBody) {
+  if (/multipart\/form-data/i.test(ctForBody)) {
+    applyMultipartBody(args, parsed);
+    return;
+  }
+  const bodyJson = bodyToJsonString(parsed.body);
+  if (bodyJson) args.body = bodyJson;
+}
+
 // 对标 sqlmap -r：读取请求文件 → 解析 → 覆盖 args 的 url/method/body/headers/cookie
 // 返回 null 表示文件读取或解析失败（调用方应退出并报错）
 export function applyRequestFile(args) {
@@ -646,30 +692,7 @@ export function applyRequestFile(args) {
   }
   const ctKeyForBody = Object.keys(parsed.headers || {}).find((k) => /^content-type$/i.test(k));
   const ctForBody = ctKeyForBody ? String(parsed.headers[ctKeyForBody]) : '';
-  const isMultipart = /multipart\/form-data/i.test(ctForBody);
-  if (isMultipart) {
-    // [MULTIPART-R-FIX 2026-09-20] 抓包是 multipart 时，绝不能走下面的 urlencoded 启发式。
-    // 实测那条路会把整份 body 塌成**一个**键，键名是 `--<boundary>\r\nContent-Disposition:
-    // form-data; name`、值是余下全部内容（因为 multipart 里没有 '&'，只有'name="' 里的 '='）。
-    // 于是 `parsed.params` 里明明解析对了 3 个字段（username/caption/avatar），递进引擎的
-    // 却是 1 个垃圾点：扫描正常跑完、0 检出、一句"未检出"——静默假阴性。
-    // 引擎目前**不支持发送 multipart**（injection.js / httpClient 里 0 处 FormData/boundary），
-    // 所以这里做的是"降级但要说实话"：改用解析器抽出的真实字段，并**丢掉那个已经对不上的
-    // multipart Content-Type**（留着它 = 声明 multipart 却发 urlencoded，目标必然解析失败），
-    // 让 HttpClient 按 urlencoded 发。字段名与值都是对的，很多框架两种编码都吃；
-    // 不吃的那些，下面的 warn 会明确告诉你为什么没测到，而不是让你以为没有洞。
-    const fields = parsed.bodyFields || {};
-    if (Object.keys(fields).length) args.body = JSON.stringify(fields);
-    if (ctKeyForBody) delete parsed.headers[ctKeyForBody];
-    console.warn(
-      `  [!] -r 抓到的是 multipart/form-data 目标（字段：${Object.keys(fields).slice(0, 6).join(', ') || '(未解析出)'}）。`
-      + '\n      引擎当前不支持发送 multipart，本次已降级为 application/x-www-form-urlencoded 重发同一批字段。'
-      + '\n      只认 multipart 的目标会收不到参数 → "未检出"不代表没有注入。需要真 multipart 请见 TODO。'
-    );
-  } else {
-    const bodyJson = bodyToJsonString(parsed.body);
-    if (bodyJson) args.body = bodyJson;
-  }
+  applyBodyToArgs(args, parsed, ctForBody);
   // Cookie 头 → args.cookie；其余请求头 → args.headerObj
   const cookieKey = Object.keys(parsed.headers).find(k => k.toLowerCase() === 'cookie');
   if (cookieKey) args.cookie = parsed.headers[cookieKey];

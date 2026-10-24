@@ -67,6 +67,39 @@
 
 > 下一批次起的条目写在这里。发版时把本节整体升为 `## [x.y.z] - YYYY-MM-DD` 并补汇总段。
 
+### 2026-10-25 批次 D159 · `-r` multipart 保真 + 文件字段 filename 注入面
+
+**缺陷（两层，都在 `-r` 抓包这条最常用的实战入口上）**：
+1. **降级**：`applyRequestFile` 把 multipart 目标改写成 urlencoded（注释理由是「引擎不支持
+   发送 multipart」，而该理由自 2026-09-22 `buildMultipartBody` 落地起已不成立）。
+   后果：只认 multipart 的上传接口 415/400 ⇒ 注入值从未进业务逻辑 ⇒ **静默 0 检出**。
+2. **文件字段形态**：解析器早把 filename 塞进 bodyFields，发送侧当文本字段发
+   （`name="avatar"` + 内容=文件名），`filename=` 属性整个消失 ⇒ 目标读到的文件名恒空。
+   上传接口「把文件名落库后再拼 SQL」这个高频形态，此前**从未被注入过**。
+3. 顺带修一处判定源：`buildInjectionRequest` 只看 `target.headerParams` 找 Content-Type，
+   而 `-r` 的请求头在 `config.auth.headers` ⇒ 即便保留 multipart 声明也会被判成非
+   multipart（实测报文 `title=report` + `Content-Type: multipart/...`，目标 415，全点被
+   预筛剪掉，整场 11 请求 0 命中）。
+
+**修复**：
+- `requestFileParser`：文件字段单独产出 `fileParts: [{name, filename, contentType}]`，
+  不再混进 `bodyFields`（`params` 保留 filename 候选语义不变）。
+- `applyRequestFile`：保留 multipart Content-Type 与 `fileParts`，只把**文本字段**交给
+  bodyParams；提示语改成逐字段列出（文本/文件分开）。
+- `TargetParser`：每个 filePart 建一个 `body` 注入点（`fileField: true`，注入 filename）。
+- `injection.js`：`declaredHeaderValue()` 两处都看（headerParams + auth.headers）；
+  `buildMultipartBody(fields, boundary, fileParts, injectedFile)` 按真实结构重建文件字段，
+  filename 内的 `"` 转义（服务端解出的值不变）。
+- 行为变化的推翻链：`requestFile.importWiring.test.js` 原断「三个字段全进 body」与
+  「必须丢掉 multipart Content-Type」——两条均按新事实改写，旧结论与理由留在测试注释里。
+
+**证据**：
+- 靶场 `e2e/detect-surface-lab` 新增 `/api/upload`（只认 multipart、把 filename 拼进 SQL）
+  与 `/safe/upload`（`?` 参数化）：`-r` 真值 **0/1 → 1/1**（3 条：union/error/boolean），
+  安全对照 0 误报；14 用例全绿（真值 7/7、误报 0）。
+- 单测 +6：文件字段进 fileParts 且不入 bodyFields / filename 注入保留结构 / 文本点保留
+  文件字段 / 引号转义往返一致 / `-r` 保留 multipart 声明 / 三字段都是注入点。
+
 ### 2026-10-25 批次 D158 · nuclei 模板生态调研收口 + 26 套件全绿基线刷新（docs 批）
 
 **两件事，都不改代码**：

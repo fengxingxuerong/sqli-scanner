@@ -17,6 +17,7 @@ import { defaults } from '../config/defaults.js';
  * @property {object|null} [jsonBody]
  * @property {string|null} [xmlBody] XML / SOAP body 原文（2026-10-01）
  * @property {object|null} [xmlTree] xmlBody 解析后的树（TargetParser 惰性填充，供 injection 复用）
+ * @property {Array<{name:string, filename:string, contentType?:string}>} [fileParts] multipart 文件字段（D159，来自 -r 抓包）
  * @property {Record<string, any>} [cookieParams]
  * @property {Record<string, any>} [headerParams]
  * @property {Record<string, any>} config
@@ -114,6 +115,19 @@ export function createTarget(input) {
   // 优先级：显式写在 config 里的赢（REST 侧 sanitizeStart 就是这么给的），顶层作兜底。
   const cfgIn = input.config || {};
   const authIn = cfgIn.auth ?? (input.auth && typeof input.auth === 'object' ? input.auth : null);
+  return buildHttpTarget(input, method, cfgIn, authIn);
+}
+
+/**
+ * [D159 拆分] HTTP 目标的字段落盘（原内联在 createTarget；加 fileParts 后超复杂度/行数基线）。
+ * 逐字段注释随字段迁到这里，语义零变化。
+ * @param {any} input
+ * @param {string} method
+ * @param {any} cfgIn
+ * @param {any} authIn
+ * @returns {import('./models.js').Target}
+ */
+function buildHttpTarget(input, method, cfgIn, authIn) {
   return {
     id: nanoid(10),
     mode: 'http',
@@ -129,6 +143,10 @@ export function createTarget(input) {
     // 替换叶子文本后重序列化发送。xmlTree 为解析后的树（首次发现时惰性填充，避免重复解析）。
     xmlBody: typeof input.xmlBody === 'string' ? input.xmlBody : null,
     xmlTree: null,
+    // [D159 2026-10-25] multipart 的文件字段（来自 `-r` 抓包）：[{ name, filename, contentType }]。
+    // TargetParser 把每个 name 变成注入点（注入 filename），injection.js 重建报文时保留
+    // 文件字段结构 —— 否则目标读的是 filename，而我们把注入值写进了「文本字段内容」。
+    fileParts: Array.isArray(input.fileParts) ? input.fileParts : [],
     cookieParams: input.cookieParams || {},
     headerParams: input.headerParams || {},
     config: { ...defaults, ...cfgIn, auth: authIn },

@@ -205,6 +205,30 @@ function jsonChannelWhy(declaredCt) {
     : '检测到嵌套 JSON';
 }
 
+/**
+ * [D159 拆分] HTTP 目标 input 组装（原内联在 runSingleScanInner；加 fileParts 后超复杂度基线）。
+ * @param {string} url
+ * @param {any} args
+ * @param {{bodyParams:any, jsonBody:any, xmlBody:any, config:any, auth:any, injTarget:any}} parts
+ * @returns {any}
+ */
+function buildHttpScanInput(url, args, parts) {
+  const { bodyParams, jsonBody, xmlBody, config, auth, injTarget } = parts;
+  return {
+    url,
+    method: args.method,
+    bodyParams,
+    jsonBody,
+    xmlBody,
+    // [D159] multipart 文件字段（-r 抓包）：TargetParser 建 filename 注入点，
+    // injection.js 重建报文时保留文件字段结构
+    fileParts: Array.isArray(args.fileParts) ? args.fileParts : [],
+    config,
+    auth,
+    ...injTarget,
+  };
+}
+
 async function runSingleScanInner(sm, url, args) {
   const parsedBody = args.body ? JSON.parse(args.body) : {};
   // [JSON-BODY-FIX 2026-09-20] 判定本体在 cli/config.js 的 resolveBodyChannel（带完整理由注释）：
@@ -286,7 +310,7 @@ async function runSingleScanInner(sm, url, args) {
         sqlTemplate: args.sqlTemplate || 'SELECT * FROM users WHERE id={INJECT}',
         config,
       }
-    : { url, method: args.method, bodyParams, jsonBody, xmlBody, config, auth, ...injTarget };
+    : buildHttpScanInput(url, args, { bodyParams, jsonBody, xmlBody, config, auth, injTarget });
   const scanId = await sm.start(input);
   // [P0-SEC] scope 按 scanId 登记：httpClient 在每一跳（含重定向）前取用，防 302 出圈
   // 只给 HTTP 扫描登记：直连不发 HTTP 请求，逐跳校验没有对象可校（入口已按 DB 主机校过）
