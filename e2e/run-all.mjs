@@ -60,6 +60,11 @@ function multiEngineJarEnv() {
 
 const LABS = [
   { name: 'redteam-lab', desc: '红队评测：24 靶点（17 注入 + 7 安全对照，自起环境）', entry: 'e2e/redteam-lab/run-with-env.mjs', args: ['r2'], deps: [] },
+  // [D154 2026-10-25] 检测面探针：多段路径中间段 / `.json` 数据后缀段 / 矩阵参数 / 重复 query 键，
+  //   每条载体配一个真参数化的同形态安全对照。真 MariaDB（凭据同其它靶场：root/root 或 LAB_DB_PASSWORD）。
+  //   接线理由：旧口径「只测末段 + 含点即静态」在这里实测 2/2 漏检（修复后 10/10），
+  //   不进门禁的话下次同型回归没人看得见。
+  { name: 'detect-surface-lab', desc: '检测面探针：路径多段/数据后缀/矩阵/重复键（真 MariaDB，10 用例）', entry: 'e2e/detect-surface-lab/run.mjs', deps: ['mysql'] },
   { name: 'retest-lab', desc: '单点重测接口端到端（自起靶场）', entry: 'e2e/retest-lab/verify.mjs', deps: [] },
   { name: 'multi-engine-lab', desc: '多引擎 tamper A/B（真 JDBC：H2/HSQLDB/Derby，挂 CRS）', entry: 'e2e/multi-engine-lab/verify.mjs', deps: ['java'], env: multiEngineJarEnv },
   // [CI-FIX 2026-09-25] 同一份 verify 的 NO_WAF 档必须也注册。为什么两条不能合成一条：

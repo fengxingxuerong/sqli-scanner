@@ -107,7 +107,12 @@ export const HELP_TEXT = `sqli-scanner CLI（对标 sqlmap 的 Node 引擎命令
   --test-headers             把显式传入的请求头（--header 或 -r 请求文件中的头，如 Cookie / X-Forwarded-For）
                              作为注入点测试（默认关闭：保持现有行为，头仅作会话透传）。授权的渗透测试中，
                              服务端按请求头取值拼 SQL 的场景（如 SELECT ... WHERE id=\${x_forwarded_for}）必须开启才能检出
-  --test-path               把 URL path 末段（非空且非静态资源 .html/.js/.css/.png 等）作为注入点测试
+  --test-path               把 URL path 中的「数据段」作为注入点测试（[D154] 口径）：
+                             ① 末段必测（无论是否含数字）；② 中间段只测含数字的数据段
+                             （纯路由段 api/v1/users 不烧请求预算；要精确指定就测某段请用既有
+                             的 URL 段尾 * 标记）；③ .json/.xml/.do/.action/.csv/.yaml/.yml
+                             后缀段只换前缀、后缀保留（/api/item/5.json）；④ 静态资源
+                             （.js/.css/.png…）与未知后缀跳过。每目标最多 6 个路径点。
                              （默认关闭：保持现有行为。服务端按 path 段取值拼 SQL 的场景必须开启才能检出）
                              [P0-FIX 2026-09-16] 曾因「404 页回显 URL → payload 自带关键词被误读为
                              数据库报错」导致非 200 端点误报（7 个安全点中 6 个），已修复：

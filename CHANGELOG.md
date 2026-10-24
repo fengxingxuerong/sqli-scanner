@@ -67,6 +67,52 @@
 
 > 下一批次起的条目写在这里。发版时把本节整体升为 `## [x.y.z] - YYYY-MM-DD` 并补汇总段。
 
+### 2026-10-25 批次 D154 · 路径注入面扩展（多段路径中间段 + 数据后缀段）
+
+**动机**：`--test-path` 只取「最后一个非空段，且含点即静态」。真 MariaDB 建的检测面探针
+靶场 `e2e/detect-surface-lab/` 实测两类真实载体 **0 检出且不报错**：
+`/api/users/5/orders`（中间 id 从不是点位）、`/api/item/5.json`（整段被当静态跳过 ⇒ 0 点）。
+同形态安全对照（真参数化）0 误报 ⇒ 判定为漏检而非「测不到」。
+
+**修复**：
+- `TargetParser#_discoverPathPoints` + 纯函数 `classifyPathSegment`：末段必测（逐位零回归）；
+  中间段只测含数字的数据段（纯路由段 api/v1/users 不烧预算；要精确指定注入段仍用既有
+  URL 段尾 `*` 标记，P3 短路优先、不重复出点）；`v\d+` 版本前缀排除；数据后缀
+  `.json/.xml/.do/.action/.csv/.yaml/.yml` 只换前缀、后缀保留；静态资源与未知后缀跳过；
+  每目标上限 6 个路径点（每点约 100-300 请求，opt-in 也不能无界放大）。
+- `injection.js` 路径分支按 `pathSuffix` 保留后缀 —— 去掉后缀即 404，注入值不会进业务逻辑。
+
+**证据**：
+- `server/tests/headerPathPoints.test.js` +7 例（多段中间段 / 纯路由段跳过 / `.json` 后缀保留 /
+  静态与未知后缀 / `*` 标记 / 上限 / 下标），原有路径用例逐条保持。
+- `e2e/detect-surface-lab/`（真 MariaDB，10 用例）：修复前 `multi-seg` 与 `json-suffix`
+  真值 0 检出（2/2 漏），修复后 **10/10 通过、0 误报**；`results/summary.json` 落盘。
+  靶场同轮钉住两项既有能力：矩阵参数 `;cat=`、重复 query 键（后端取末值）**当前已可检出**，
+  不是缺口（防以后回归无人发现）。
+- 接进 `e2e/run-all.mjs`（e2e wiring 门禁要求新靶场二选一：接线或正名）+
+  `npm run lab:surface`。
+
+### 2026-10-25 批次 D153 · MCP get_findings 附 nextSteps 代理建议（agentic 方向试水）
+
+**动机**：竞品对标（`docs/竞品对标-2026W43.md`）排队项「Vigolium 式 agentic 化」的第一步。
+MCP 的调用方是 AI 代理，代理最容易犯的错不是不会调工具，而是**把报告读扁**：inconclusive
+当「没洞」、未验证面当「测了没洞」、误报未裁决就外报。把 AGENTS §2「代理最容易读错的
+五件事」翻成机器可消费的建议字段，代理不需要熟读文档也能走对下一步。
+
+- 新增 `services/nextStepHints.js`（纯函数）：从既有披露（validity/verdict/
+  unverifiedSurfaces/uncoveredSurfaces/crawlBrowserFallback/triage/dbmsEvidence）推导
+  7 类建议（fix-session / retest-unverified / raise-coverage / crawl-fallback / triage /
+  dbms-caveat / export·baseline 收尾）。**边界：只引用既有披露，不产生新检测结论**；
+  baseline 建议要求显式 `verdict=no_vulnerability_detected`（空报告不许被建议建基线）。
+- MCP `get_findings` 响应附 `nextSteps` 数组（kind/text/via，via 指向具体工具/旗标/端点）。
+- 测试：`nextStepHints.test.js` 新增 8 例（缺形防御/各类建议/未裁决含缺形 triage/
+  baseline 前提收紧）；`mcp.server.test.js` get_findings 断言扩展。
+- 门禁驱动重构：nextStepHints 按建议类别一函数拆分（复杂度 24→主函数 ~3）；
+  tools.js 抽出 `findingsPayload`（buildTools 265→249 行，低于基线 263）。
+- 基线重锚说明：complexity 基线对匿名箭头按**行号**锚定，顶部新增 import 使
+  run_scan/preflight 两个**未改动**的箭头（30/50、25/51）行号漂移；仅重锚两键、值原样
+  （diff 两行可审）。`--fix-baseline --force` 会顺带收录全仓 106 个超硬限函数——已弃用。
+
 ### 2026-10-25 批次 D152 · 竞品对标落盘 + 判红口径可配（`--fail-severities`）
 
 **动机**：全量对标 2026-W43 GitHub 同类热点（nuclei / dast-orchestra / Vigolium / Quill /

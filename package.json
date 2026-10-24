@@ -66,6 +66,7 @@
     "fmt:rust": "cd src-tauri && cargo fmt",
     "lab:battery": "node e2e/random-lab/battery.mjs",
     "lab:redteam": "node e2e/redteam-lab/env.mjs",
+    "lab:surface": "node e2e/detect-surface-lab/run.mjs",
     "labs:check": "node scripts/labs.mjs",
     "labs:list": "node scripts/labs.mjs --list",
     "labs:stop": "node scripts/labs.mjs --stop",

@@ -324,7 +324,9 @@ export function buildInjectionRequest(target, point, value) {
         ? point.pathSegment
         : segments.findIndex((s) => s.replace(/\*+$/g, '') === point.param);
     if (idx >= 0 && idx < segments.length) {
-      segments[idx] = injected;
+      // [D154] `.json` 等数据后缀段：后缀是路由的一部分（去掉即 404），只替换前缀
+      const suffix = typeof point.pathSuffix === 'string' ? point.pathSuffix : '';
+      segments[idx] = suffix ? `${injected}${suffix}` : injected;
       u.pathname = segments.join('/');
     }
     req.url = u.toString();

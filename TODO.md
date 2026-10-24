@@ -5,6 +5,61 @@
 
 ---
 
+## 2026-10-25 批次 D154 · 路径注入面扩展（多段路径中间段 + 数据后缀段）
+
+**动机**：`--test-path` 自 2026-09-16 起只取「最后一个非空段，且含点即判静态资源」。
+用真 MariaDB 建的检测面探针靶场 `e2e/detect-surface-lab/` 实测，该口径对两类真实载体
+**0 检出且不报错**（与「这个站没洞」同形）：
+- `/api/users/5/orders` —— REST 最常见的形态，中间的 id 永远不是点位（只测末段 `orders`）；
+- `/api/item/5.json` —— `\.[a-z]+$` 把整段当静态文件跳过 ⇒ 0 个注入点。
+同形态安全对照（真参数化 `?`）0 误报 ⇒ 这是漏检，不是「本来就测不到」。
+
+**本批**：
+- `TargetParser._discoverPathPoints()` + 纯函数 `classifyPathSegment()`（新口径：
+  末段必测零回归 / 中间段只测含数字的数据段（精确指定仍用既有 URL `*` 标记，P3 短路优先）/
+  `v\d+` 版本前缀排除 / `.json/.xml/.do/.action/.csv/.yaml/.yml` 只换前缀保留后缀 /
+  静态资源与未知后缀跳过 / 每目标上限 6 点）。
+- `injection.js` 路径分支按 `pathSuffix` 保留后缀（去掉后缀即 404，注入值不会进业务逻辑）。
+- 测试：`headerPathPoints.test.js` 新增 7 例（多段中间段 / 纯路由段跳过 / `.json` 后缀保留 /
+  静态与未知后缀 / `*` 标记 / 上限 / pathSegment 下标）。原 4 条路径用例逐条保持通过。
+- 靶场：`e2e/detect-surface-lab/`（真 MariaDB，10 条用例 = 4 类载体 × 真值/安全对照 + 2 条基准），
+  实测 **修复前 5/5 漏检 → 修复后 10/10 通过、0 误报**；接进 `e2e/run-all.mjs` 与
+  `npm run lab:surface`。
+- 钉住的既有能力（本批实测，不改代码）：矩阵参数 `;cat=` 与重复 query 键（后端取末值）
+  当前**已能检出**，不是缺口 —— 一并写进靶场，防止以后回归时无人发现。
+
+### 待推进（仍未关闭）
+
+- 中间段的「非数字 slug」（`/product/widgets-xyz/orders`）仍不测：纯启发式会把
+  `/api/v1/users` 这类路由段一起烧掉（每点约 100-300 请求）。要覆盖得先有「路由 vs 数据」
+  的更强判据（如按同名段在多个 URL 里是否恒定）—— 单独一批，别混进来。
+- `--crawl`/`--crawl-browser` 发现的 URL 目前只进 query/body 面，不自动扩 path 面
+  （`testPath` 是全局开关，爬到的 URL 会跟着测，但没做按 URL 的预算分配）。
+- 路径点的请求量随段数线性增长（最多 6 倍），`--test-path` 大扫描时建议配
+  `--smart`/`--skip-static` 收敛；是否要在 `--advise` 里给出提示待评估。
+
+---
+
+## 2026-10-25 批次 D153 · MCP get_findings 附 nextSteps 代理建议（agentic 方向试水）
+
+**动机**：D152 对标排队项「agentic 化」的第一步——代理最常见的错是**把报告读扁**
+（inconclusive 当没洞/未验证面当测了没洞/误报未裁决就外报），把 AGENTS §2 的读错模式
+翻成 `get_findings` 的机器可消费建议字段。
+
+**本批**：
+- `services/nextStepHints.js` 纯函数（7 类建议，只引用既有披露不造新结论）；MCP
+  `get_findings` 附 `nextSteps`；单测 8 例 + MCP 测试扩展；README/AGENTS 同步。
+- 门禁驱动重构：nextStepHints 一类一函数；tools.js 抽 `findingsPayload`
+  （buildTools 265→249）；complexity 基线**重锚**两箭头键（行号漂移，值原样，diff 可审）。
+
+### 待推进
+
+- agentic 深水区（自主侦察→决策→复测循环）仍不做：属宿主侧策略，本仓先保持「建议字段」
+  形态积累代理调用数据，等真实用法反馈再决定要不要内置循环。
+- 其余照旧：nuclei 模板生态调研、外部裁判 5 号（见 D152 待推进）。
+
+---
+
 ## 2026-10-25 批次 D152 · 竞品对标落盘 + 判红口径可配（`--fail-severities`）
 
 **动机**：对标 2026-W43 GitHub 同类热点后，本仓已覆盖绝大多数头牌能力（逐项核实见

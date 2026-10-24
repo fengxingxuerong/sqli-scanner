@@ -20,6 +20,7 @@ import { TargetParser } from '../engine/TargetParser.js';
 import { httpClient } from '../core/httpClient.js';
 import { listScans, readReport } from '../services/scanLedger.js';
 import { attachTriage } from '../services/findingTriage.js';
+import { nextStepHints } from '../services/nextStepHints.js';
 import { parseHeaders } from '../../bin/cli/args.js';
 import { parseCookiePairs, resolveBodyChannel } from '../../bin/cli/config.js';
 
@@ -69,6 +70,25 @@ function compactVuln(v) {
     poc: v.poc ? { method: v.poc.method, url: v.poc.url, payload: v.poc.payload, curl: v.poc.curl } : null,
     remediation: v.remediation || null,
     ...compactTriage(v),
+  };
+}
+
+/** [D153] get_findings 响应装配：紧凑发现清单 + verdictNote + nextSteps 代理建议。 */
+function findingsPayload(report) {
+  const validity = report.summary?.validity || null;
+  return {
+    scanId: report.scanId,
+    verdict: report.summary?.verdict || null,
+    verdictNote:
+      validity && validity.reliable === false
+        ? `结论可信度=${validity.status}（不可信，见 get_report 的「结论可信度」节）`
+        : null,
+    dbms: report.dbms || null,
+    totalVulns: (report.vulns || []).length,
+    findings: (report.vulns || []).map(compactVuln),
+    // [D153 2026-10-25] 代理下一步建议（纯函数，见 services/nextStepHints.js）：只引用既有
+    // 披露不造新结论，把 AGENTS §2「代理最容易读错的五件事」翻成机器可消费字段。
+    nextSteps: nextStepHints(report),
   };
 }
 
@@ -181,23 +201,13 @@ export function buildTools(ctx) {
     {
       name: 'get_findings',
       description:
-        '取扫描的结构化漏洞清单（CWE/CVSS/受影响参数/PoC curl）。注意：verdict=inconclusive 不等于「未检出」。',
+        '取扫描的结构化漏洞清单（CWE/CVSS/受影响参数/PoC curl）+ nextSteps 下一步建议（[D153] 依据报告既有披露：' +
+        '结论可信度/未验证面/未覆盖面/人工裁决，inconclusive 不等于「未检出」）。',
       inputSchema: { type: 'object', required: ['scanId'], properties: { scanId: { type: 'string' } } },
       run: async ({ scanId }) => {
         const report = loadReport(ctx, String(scanId));
         if (!report) return text({ error: `找不到扫描 ${scanId}（内存与台账均无）` }, { isError: true });
-        const validity = report.summary?.validity || null;
-        return text({
-          scanId: report.scanId,
-          verdict: report.summary?.verdict || null,
-          verdictNote:
-            validity && validity.reliable === false
-              ? `结论可信度=${validity.status}（不可信，见 get_report 的「结论可信度」节）`
-              : null,
-          dbms: report.dbms || null,
-          totalVulns: (report.vulns || []).length,
-          findings: (report.vulns || []).map(compactVuln),
-        });
+        return text(findingsPayload(report));
       },
     },
     {

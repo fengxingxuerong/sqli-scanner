@@ -137,9 +137,11 @@ AI 代理宿主（Cursor / Claude Code / VS Code 等）可经 **MCP stdio** 直�
 ```
 
 工具集（9 个）：`run_scan`（异步启动，返回 scanId；走与 REST 同一条 sanitizeStart 白名单 +
-SSRF/scope 护栏）/ `get_scan_status` / `get_findings`（CWE·CVSS·受影响参数·PoC curl）/
-`get_report`（json|markdown|html|csv|sarif）/ `list_scans` / `stop_scan` / `pause_scan` /
-`resume_scan` / **`preflight`**（零 payload 侦察：可达性 + 注入点发现——**开打前先跑这个**）。
+SSRF/scope 护栏）/ `get_scan_status` / `get_findings`（CWE·CVSS·受影响参数·PoC curl；
+[D153] 附 `nextSteps` 下一步建议——按结论可信度/未验证面/未裁决态给出可执行动作，
+**建议是对既有披露的引用，不是新检测结论**）/ `get_report`（json|markdown|html|csv|sarif）/
+`list_scans` / `stop_scan` / `pause_scan` / `resume_scan` / **`preflight`**
+（零 payload 侦察：可达性 + 注入点发现——**开打前先跑这个**）。
 
 红线不变：`risk=3` 需显式 `confirmDestructive=true`（用户同意后才设）；`verdict=inconclusive`
 不等于「未检出」（get_findings 的 verdictNote 会提示）。落地前请用 1.1/1.2 的两种方式驱动。

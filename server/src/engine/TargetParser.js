@@ -22,6 +22,17 @@ import { applyParamSelection } from './paramSelection.js';
 // 反 CSRF 字段名正则（命中即记为 csrfTokenName）
 const CSRF_RE = /^(csrf|_token|__RequestVerificationToken|authenticity_token)$/i;
 
+// [D154] --test-path 的段分类表（详见 _discoverPathPoints 的 JSDoc）
+// 静态资源后缀：命中即整体跳过（注入它们既无意义，又会让 SPA 的 /a/app.js 之类误报 500）
+const PATH_STATIC_EXT = new Set([
+  'js', 'mjs', 'css', 'map', 'png', 'jpg', 'jpeg', 'gif', 'svg', 'ico', 'webp', 'avif', 'bmp',
+  'woff', 'woff2', 'ttf', 'eot', 'otf', 'mp4', 'webm', 'mp3', 'wav', 'ogg', 'wasm', 'pdf', 'zip', 'gz',
+]);
+// 数据后缀：Rails/Spring 常见的 `/users/5.json`。后缀必须保留（去掉就路由不到了），只替换前缀。
+const PATH_DATA_EXT = new Set(['json', 'xml', 'do', 'action', 'csv', 'yaml', 'yml']);
+// 路径点上限：每个点约 100-300 请求，--test-path 是显式 opt-in 也不能无界放大请求量
+const PATH_POINT_MAX = 6;
+
 // 目标解析器：从 Target 的 URL/Body/Cookie/Header 中发现注入点，
 // 并可选地爬取 HTML 表单（复杂表单 / 反 CSRF 自动处理）与站内链接（对标 sqlmap --crawl）。
 export class TargetParser {
@@ -162,28 +173,14 @@ export class TargetParser {
       }
     }
 
-    // 5.5) URL path 末段注入点（--test-path 显式开启，默认关闭零回归）：
-    //   取 pathname 最后一段（非空），若不含 . 后缀（非 .html/.js/.css/.png 等静态资源），
-    //   作为一个 path 注入点（kind 'path'），注入时仅替换该段、保留其余 path 与 query。
-    //   pathSegment 记录段下标（0-based，含前导空段），供 buildInjectionRequest 精确定位替换。
+    // 5.5) URL path 注入点（--test-path 显式开启，默认关闭零回归）：
+    //   [D154 2026-10-25] 原实现只取「最后一个非静态段」，两种情况必然漏检且不报错：
+    //     ① `/api/users/5/orders` —— REST 最常见的形态，中间的数字 id 从来不是点位；
+    //     ② `/api/item/5.json`  —— `\.[a-z]+$` 把整段当静态资源跳过，一个点都不生成。
+    //   实测见 e2e/detect-surface-lab（真 MariaDB，两条真值 0 检出、同形态安全对照 0 误报）。
+    //   新口径仍只在 --test-path 下生效，分类规则在 _discoverPathPoints 里逐条写明。
     if (config.testPath && target.baseUrl) {
-      try {
-        const u = new URL(target.baseUrl);
-        const segs = u.pathname.split('/');
-        let idx = -1;
-        for (let i = segs.length - 1; i >= 0; i--) {
-          if (segs[i] !== '') { idx = i; break; }
-        }
-        if (idx >= 0) {
-          const seg = segs[idx];
-          const isStatic = /\.[a-zA-Z0-9]+$/.test(seg); // 含 . 后缀视为静态资源，跳过
-          if (!isStatic) {
-            points.push(createInjectionPoint('path', seg, seg, { pathSegment: idx }));
-          }
-        }
-      } catch {
-        // URL 解析失败则跳过 path 点
-      }
+      points.push(...this._discoverPathPoints(target.baseUrl));
     }
 
     // 6) 表单爬取（opt-in crawlForms 开启即生效，与 level 解耦——对齐 sqlmap --forms 独立开关）
@@ -292,10 +289,18 @@ export class TargetParser {
         p.originalValue = p.originalValue.slice(0, -1); // 剥离尾部 *
         p.precisionMarked = true;
       }
-      return this._applyOnlyPoint(applyParamSelection(marked, config), config);
+      // [类型补丁 2026-10-25] points 空数组字面量演化出联合元素类型；断言到 applyParamSelection
+      // 的入参形态（纯类型层，行为零变化——由 headerPathPoints.test.js 17 例绿背书）
+      return this._applyOnlyPoint(
+        applyParamSelection(/** @type {{location: string, param: string}[]} */ (marked), config),
+        config
+      );
     }
 
-    return this._applyOnlyPoint(applyParamSelection(points, config), config);
+    return this._applyOnlyPoint(
+      applyParamSelection(/** @type {{location: string, param: string}[]} */ (points), config),
+      config
+    );
   }
 
   /**
@@ -323,6 +328,49 @@ export class TargetParser {
     for (const [k, v] of Object.entries(bodyAll)) {
       points.push(createInjectionPoint('body', k, String(v), { formValues: { ...bodyAll } }));
     }
+  }
+
+  /**
+   * [D154] --test-path 的路径段注入点发现。
+   *
+   * 旧口径只取最后一个非空段且「含点即静态」，因此两类真实形态必然静默漏检
+   * （e2e/detect-surface-lab 真 MariaDB 实测）：
+   *   · `/api/users/5/orders` —— 中间段 `5` 从不是点位（末段 `orders` 才是）；
+   *   · `/api/item/5.json`   —— 整段被当静态资源跳过，0 个点位。
+   *
+   * 新口径（仍只对显式 `--test-path` 生效）：
+   *   ① 末段：无论有没有数字都测 —— 与旧行为逐位一致（零回归）；
+   *   ② 中间段：只有「数据样式」才测（含数字）——纯路由段（api / v1 / users / product）
+   *      不测，因为每个路径点约 100-300 请求，`--test-path` 也不该把预算烧在注定 404 的段上；
+   *      要精确指定「就测这一段」，用既有的 URL 段尾 `*` 标记（P3，discover 里短路优先）；
+   *   ③ 数据后缀段（`.json/.xml/.do/.action/.csv/.yaml/.yml`）：只替换后缀前缀，
+   *      后缀原样保留（去掉后缀路由直接 404，注入值根本没进业务逻辑）；
+   *   ④ 静态资源后缀（`.js/.css/.png/...`）与未知后缀：整体跳过。
+   *
+   * @param {string} baseUrl 目标 URL
+   * @returns {Array<Record<string, any>>} 注入点列表（最多 PATH_POINT_MAX 个）
+   */
+  _discoverPathPoints(baseUrl) {
+    let segs;
+    try {
+      segs = new URL(baseUrl).pathname.split('/');
+    } catch {
+      return [];
+    }
+    const nonEmpty = [];
+    for (let i = 0; i < segs.length; i += 1) if (segs[i] !== '') nonEmpty.push(i);
+    const lastIdx = nonEmpty.length ? nonEmpty[nonEmpty.length - 1] : -1;
+    const out = [];
+    for (let i = 0; i < segs.length && out.length < PATH_POINT_MAX; i += 1) {
+      if (segs[i] === '') continue;
+      const cls = classifyPathSegment(segs[i], i === lastIdx);
+      if (!cls) continue;
+      out.push(createInjectionPoint('path', cls.param, cls.param, {
+        pathSegment: i,
+        pathSuffix: cls.suffix,
+      }));
+    }
+    return out;
   }
 
   /**
@@ -867,6 +915,41 @@ export class TargetParser {
     if (has('displayname', 'bio', 'avatar', 'nickname', 'profile', 'firstname', 'lastname')) return 'profile';
     return 'unknown';
   }
+}
+
+/**
+ * [D154] 单个 path 段 → 是否值得作为注入点。
+ *
+ * 规则与理由见 `TargetParser#_discoverPathPoints` 的 JSDoc；本函数是纯函数，
+ * 单独拆出来是为了让「末段必测 / 中间段只测数据样式 / 数据后缀保留」三条判据
+ * 能被单测逐条钉住（行为变化必须有靶场证据，见 AGENTS §3）。
+ * @param {string} seg 路径段原文（已解码前的形态）
+ * @param {boolean} isLast 是否为最后一个非空段
+ * @returns {{param: string, suffix: string}|null} 命中返回 param/suffix，不测则 null
+ */
+function classifyPathSegment(seg, isLast) {
+  const value = seg;
+  if (!value) return null;
+
+  const dot = value.lastIndexOf('.');
+  if (dot > 0) {
+    const ext = value.slice(dot + 1).toLowerCase();
+    if (PATH_STATIC_EXT.has(ext)) return null; // 静态资源：不测
+    if (PATH_DATA_EXT.has(ext)) {
+      // 数据后缀：只换前缀，后缀保留（`/api/item/5.json` 去掉后缀即 404）
+      return { param: value.slice(0, dot), suffix: value.slice(dot) };
+    }
+    return null; // 未知后缀：保守跳过（与旧口径一致）
+  }
+
+  // 无后缀段：末段必测（零回归）；中间段只测含数字的数据段。
+  // 要精确指定「就测这一段」请用既有的 URL 段尾 `*` 标记（P3，discover 里短路优先于本函数）。
+  if (isLast) return { param: value, suffix: '' };
+  // 版本前缀（v1 / v2）也含数字，但它是路由而不是数据 —— 单独排除，
+  // 否则 `/api/v1/users/5/orders` 会白测一个必然 404 的 `v1`
+  if (/^v\d+$/i.test(value)) return null;
+  if (/\d/.test(value)) return { param: value, suffix: '' };
+  return null;
 }
 
 export default TargetParser;

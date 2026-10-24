@@ -125,6 +125,71 @@ test('path 注入构造：只替换目标段，保留其余路径段与 query', 
   assert.equal(u.searchParams.get('trace'), '1', 'query 应保留');
 });
 
+// ===== [D154] 路径注入面扩展（多段 / 数据后缀） =====
+// 背景：e2e/detect-surface-lab（真 MariaDB）实测，旧口径对以下两类载体 0 检出：
+//   · /api/users/5/orders —— 只测末段，中间的数字 id 从来不是点位
+//   · /api/item/5.json   —— 含点即判静态，整段跳过，一个点都不生成
+// 同形态安全对照（真参数化）0 误报，所以这是漏检而不是「本来就测不到」。
+
+test('[D154] 多段路径：中间的数字段也生成注入点（REST 最常见的 id 位置）', async () => {
+  const target = createTarget({ url: 'http://example.com/api/users/5/orders', config: { testPath: true } });
+  const points = await parser.discover(target);
+  const ids = points.filter((p) => p.location === 'path').map((p) => p.param);
+  assert.ok(ids.includes('5'), `中间段 5 应作为注入点，实际：${ids.join(',')}`);
+  assert.ok(ids.includes('orders'), '末段仍应测（零回归）');
+  const p5 = points.find((x) => x.location === 'path' && x.param === '5');
+  assert.equal(p5.pathSegment, 3, 'pathSegment 应指向真实下标，注入才不会打错段');
+});
+
+test('[D154] 多段路径：纯路由段（api/v1/users）不生成点位（请求预算不烧在必然 404 的段上）', async () => {
+  const target = createTarget({ url: 'http://example.com/api/v1/users/5/orders', config: { testPath: true } });
+  const points = await parser.discover(target);
+  const ids = points.filter((p) => p.location === 'path').map((p) => p.param);
+  assert.deepEqual(ids.sort(), ['5', 'orders'].sort(), `实际：${ids.join(',')}`);
+});
+
+test('[D154] 数据后缀段：.json 生成点位且保留后缀，只替换前缀', async () => {
+  const base = 'http://example.com/api/item/5.json';
+  const target = createTarget({ url: base, config: { testPath: true } });
+  const points = await parser.discover(target);
+  const p = points.find((x) => x.location === 'path');
+  assert.ok(p, '.json 后缀段应生成注入点（旧口径被当静态资源整段跳过）');
+  assert.equal(p.param, '5', 'param 应是后缀前缀，不是整段');
+  assert.equal(p.pathSuffix, '.json', '后缀必须记录，注入时原样保留');
+  const req = buildInjectionRequest(target, p, "1' AND 1=1-- -");
+  const u = new URL(req.url);
+  assert.ok(
+    u.pathname.endsWith(".json"),
+    `注入段必须保留 .json 后缀（去掉即 404，注入值不会进业务逻辑），实际：${u.pathname}`
+  );
+  assert.ok(u.pathname.includes("1'"), '前缀应被替换为注入值');
+});
+
+test('[D154] 数据后缀安全对照：静态资源与未知后缀仍然跳过（不制造噪声点位）', async () => {
+  for (const u of ['http://example.com/a/app.js', 'http://example.com/index.html', 'http://example.com/v1.2']) {
+    const points = await parser.discover(createTarget({ url: u, config: { testPath: true } }));
+    assert.equal(points.filter((p) => p.location === 'path').length, 0, `${u} 不应生成 path 注入点`);
+  }
+});
+
+test('[D154] 精确指定注入段仍走既有 `*` 标记（P3 短路优先，不与新口径重复出点）', async () => {
+  const target = createTarget({ url: 'http://example.com/api/user/alice*/orders', config: { testPath: true } });
+  const points = await parser.discover(target);
+  const paths = points.filter((p) => p.location === 'path');
+  assert.equal(paths.length, 1, '`*` 标记只出 1 个点（整段精确指定）');
+  assert.equal(paths[0].param, 'alice');
+  assert.equal(paths[0].precisionMarked, true);
+});
+
+test('[D154] 路径点上限：最多 6 个（--test-path 是 opt-in 也不能无界放大请求量）', async () => {
+  const target = createTarget({
+    url: 'http://example.com/a1/b2/c3/d4/e5/f6/g7/h8/orders',
+    config: { testPath: true },
+  });
+  const points = await parser.discover(target);
+  assert.ok(points.filter((p) => p.location === 'path').length <= 6, '路径点数应受上限约束');
+});
+
 // ===== 空注入点告警（防静默假阴性） =====
 
 test('无 query / 无 header / 未开 testPath：解析出 0 个注入点', async () => {

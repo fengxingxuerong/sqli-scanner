@@ -161,7 +161,7 @@ function printHelp() {
       --proxy <url>            代理（如 http://127.0.0.1:7890）
       --timeout <ms>           扫描超时（默认 0 = 不限）
       --test-headers           把请求头作为注入点测试
-      --test-path              把 URL path 末段作为注入点测试
+      --test-path              把 URL path 数据段作为注入点（[D154] 末段必测 + 含数字中间段 + .json 后缀段）
   -p, --test-param <p1,p2>     只测指定参数（对标 sqlmap -p；复测/CI 定向回归）
       --param-exclude <regex>  按正则排除参数（对标 sqlmap --param-exclude）
       --param-filter <places>  按位置筛选（url/body/header/cookie/path，对标 sqlmap --param-filter）

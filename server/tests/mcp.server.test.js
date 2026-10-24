@@ -119,6 +119,12 @@ test('工具：get_findings 出四要素紧凑形态；get_scan_status 回落台
   assert.equal(f.totalVulns, 1);
   assert.equal(f.findings[0].vulnType.cwe, 'CWE-89');
   assert.equal(f.findings[0].poc.curl, "curl 'http://t/?id=1'");
+  // [D153] nextSteps：假报告 1 条未裁决发现 → 至少 triage + export 两条建议
+  assert.ok(Array.isArray(f.nextSteps));
+  const kinds = f.nextSteps.map((h) => h.kind);
+  assert.ok(kinds.includes('triage'));
+  assert.ok(kinds.includes('export'));
+  assert.ok(f.nextSteps.every((h) => typeof h.text === 'string' && typeof h.via === 'string'));
   const st = parse(await call('get_scan_status', { scanId: 'scan123' }));
   assert.equal(st.status, 'running');
   const st2 = parse(await call('get_scan_status', { scanId: 'nope' }));
