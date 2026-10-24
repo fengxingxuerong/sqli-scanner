@@ -1,7 +1,7 @@
 # docs 导航索引
 
 > 由 `node scripts/gen-docs-index.mjs` 生成（2026-10-24），
-> 覆盖 docs/ 下 44 篇 md。文档增删后重跑即可；标题取各文件的一级标题。
+> 覆盖 docs/ 下 45 篇 md。文档增删后重跑即可；标题取各文件的一级标题。
 
 ## 其它（专题笔记与过程记录）（7）
 
@@ -49,17 +49,18 @@
 - [release-process.md](./release-process.md) — 发布流程（Release process）
 - [user-guide.md](./user-guide.md) — sqli-scanner 用户手册
 
+## 对标与竞品分析（sqlmap / Arjun / ZAP）（4）
+
+- [nuclei模板生态可行性调研-2026-10-25.md](./nuclei%E6%A8%A1%E6%9D%BF%E7%94%9F%E6%80%81%E5%8F%AF%E8%A1%8C%E6%80%A7%E8%B0%83%E7%A0%94-2026-10-25.md) — nuclei 式模板生态 · 可行性调研（2026-10-25，W43 对标排队项收口）
+- [technique_inline_oob_tradeoff.md](./technique_inline_oob_tradeoff.md) — 检测技术取舍说明：Inline Queries（sqlmap `Q`）与 OOB 替代决策
+- [竞品对标-2026W43.md](./%E7%AB%9E%E5%93%81%E5%AF%B9%E6%A0%87-2026W43.md) — 竞品对标 · 2026-W43（10-19 ~ 10-25）
+- [竞品对标分析-2026-10-03.md](./%E7%AB%9E%E5%93%81%E5%AF%B9%E6%A0%87%E5%88%86%E6%9E%90-2026-10-03.md) — 竞品对标分析：sqli-scanner vs GitHub 同类精品（2026-10-03）
+
 ## 体检与评价（项目当前水准的定期体检）（3）
 
 - [release-readiness-2026-10-23.md](./release-readiness-2026-10-23.md) — 发布就绪度评估 · sqli-scanner（2026-10-23，v1.1.1 工作区）
 - [项目评价-2026-10-03-v2.md](./%E9%A1%B9%E7%9B%AE%E8%AF%84%E4%BB%B7-2026-10-03-v2.md) — sqli-scanner 项目评价 v2（2026-10-03 · 晚间复评）
 - [验收门禁-判定纪律与事故记录.md](./%E9%AA%8C%E6%94%B6%E9%97%A8%E7%A6%81-%E5%88%A4%E5%AE%9A%E7%BA%AA%E5%BE%8B%E4%B8%8E%E4%BA%8B%E6%95%85%E8%AE%B0%E5%BD%95.md) — 验收门禁：事故记录与历史口径
-
-## 对标与竞品分析（sqlmap / Arjun / ZAP）（3）
-
-- [technique_inline_oob_tradeoff.md](./technique_inline_oob_tradeoff.md) — 检测技术取舍说明：Inline Queries（sqlmap `Q`）与 OOB 替代决策
-- [竞品对标-2026W43.md](./%E7%AB%9E%E5%93%81%E5%AF%B9%E6%A0%87-2026W43.md) — 竞品对标 · 2026-W43（10-19 ~ 10-25）
-- [竞品对标分析-2026-10-03.md](./%E7%AB%9E%E5%93%81%E5%AF%B9%E6%A0%87%E5%88%86%E6%9E%90-2026-10-03.md) — 竞品对标分析：sqli-scanner vs GitHub 同类精品（2026-10-03）
 
 ## 实测口径与验证记录（数字怎么来的）（3）
 

@@ -67,6 +67,54 @@
 
 > 下一批次起的条目写在这里。发版时把本节整体升为 `## [x.y.z] - YYYY-MM-DD` 并补汇总段。
 
+### 2026-10-25 批次 D158 · nuclei 模板生态调研收口 + 26 套件全绿基线刷新（docs 批）
+
+**两件事，都不改代码**：
+
+- **调研收口**（`docs/nuclei模板生态可行性调研-2026-10-25.md`）：W43 对标最后一个排队项。
+  核心发现——「payload 池外置化」的最小形态**已存在**（`--payload-file`：追加式、同
+  registry schema、id 冲突即拒、高危池硬门同样管辖、校验失败硬失败，README 与专文均已
+  文档化），排队项按事实关闭。真正的差距不在格式而在**检测模型**：nuclei 模板自带
+  matcher（响应模式匹配），本仓模板只带注入构造、判据在校准过的差分通道引擎里——
+  对 SQLi 后者误报可控性更强（nuclei 的 SQLi 模板少且社区质量参差正因如此）。
+  **结论**：不做格式兼容与开放订阅（matcher 旁路会稀释差分判定的误报证据链，与本仓
+  claims 纪律冲突）；分发诉求以「受控配方包」形态留档（同 schema JSON + 每条附可复现
+  靶场证据），出现真实用户诉求再立项。对标矩阵与 TODO 同步收口。
+- **26 套件全绿基线**：D156 接入当日首轮全量复跑的 4 个环境性红/跳（PG/Juice 短暂下线、
+  `PORT_BASE=8200+pid%200` 与本机他应用在 8326 的约 1/200 巧合碰撞——非硬编码缺陷、
+  并发会话撞验收 2 例隔离复跑绿）在同日环境恢复后消除：复跑 **26 PASS / 0 FAIL /
+  0 SKIP**（服务端 3773 用例 0 挂、六个外部裁判全起真靶场）。README 快照刷新为现行
+  基线，首轮干扰以勘误注记保留（不删历史）。
+
+### 2026-10-25 批次 D157 · 报错定库补三 Java 引擎（Derby 从「定不出」到 `定库=Derby`）
+
+**缺陷**：`ERROR_SIG_BY_DBMS` 里 H2/HSQLDB/Derby 的签名只认**品牌词或驱动类名**
+（`org.h2` / `HSQLDB` / `Derby`），而这三种库的报错**原文里根本没有库名**：
+- Derby：`Syntax error: Encountered "\'" at line 1, column 31.`（真 JDBC 靶场实测原文）
+- HSQLDB：`unexpected token: ' in statement [SELECT * FROM USERS WHERE NAME=alice']`
+- H2：`Syntax error in SQL statement "SELECT * ..."; expected "identifier"`
+
+后果不是「报告少一个词」：`dbms=null` ⇒ 注释符 / 提取语句 / payload 族按默认选 ⇒ 通道退化。
+真机证据（`e2e/multi-engine-lab`，`NO_WAF=1`，真 JDBC 内存库）：修复前 Derby 三场景
+`定库=null（未识别）`；H2/HSQLDB 仅靠 UNION 版本回显定出，盲注档同样 null。
+
+**修复**：
+- 补三库各自的**解析器报错句式**（均为该库独有措辞，不收裸词）：
+  Derby `Syntax error: Encountered … at line N, column M` + SQLState `42Xxx`；
+  HSQLDB `unexpected token: … in statement [...]`（**裸 unexpected token 不收** ——
+  那是 JS 的 `Uncaught SyntaxError: Unexpected token '<'`，收进来会把 JS 报错页判成 HSQLDB）；
+  H2 `Syntax error in SQL statement`。
+- 顺带修一处误报源：`FINGERPRINT.Derby` 原为 `(\bderby\b|\bjava\b)`，`Server: Java/1.x`
+  的 JDK 内置服务会被判成 Derby ⇒ 按错方言投 payload（与 2026-09-11「BaseHTTP 含 ase →
+  误定库 Sybase → 0 检出」同一族）。现只认品牌词。
+
+**证据**：
+- `errorSig.specificity.test.js` +3 例：三库真实报错原文都能定库；JS 报错页不得判成 HSQLDB；
+  `Server: Java/1.8` 不得判成 Derby。
+- `NO_WAF=1 node e2e/multi-engine-lab/verify.mjs`：**汇总 `derby 定库=Derby`**（此前 null），
+  断言行 `定库基线=✅`；`verify.mjs` 的 `expectDbms` 与 README 覆盖面一栏同步改正向漂移。
+- `docs/优化底账-2026-10-18.md` P1-13 关闭（走「报错兜底」而非修 WRAP，理由与盲注档边界写在该条目）。
+
 ### 2026-10-25 批次 D156 · 外部裁判 5 号：VulnLab（同一应用三档真值 + 修复档零误报）
 
 **动机**：W43 竞品对标（`docs/竞品对标-2026W43.md`）排队项落地。VulnLab

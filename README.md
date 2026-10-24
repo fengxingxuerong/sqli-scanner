@@ -150,7 +150,7 @@ OWASP 分类统一为 `A03:2021-Injection`。**未收录的通道不会被静默
 | 等级 | 方言 | 证据 |
 |---|---|---|
 | ✅ **真实引擎验证**（检测/绕过主链路跑通） | MySQL、MariaDB、PostgreSQL、SQLite、Oracle（2026-09-15，e2e/oracle-lab）、SQL Server（2026-09-14，e2e/mssql-lab） | 真 MySQL 8.0.x（`e2e/real-mysql-lab` + `e2e/waf-real`）、真 MariaDB 11.4.13（`e2e/multi-engine-lab/mariadb-verify.mjs`；⚠️ 其产物测于 09-09，CRS 执行器 09-19 修准之后**未复跑**，能引什么/不能引什么写在 `results/mariadb-report.md` 顶部）、PGlite 18.3、sql.js WASM、真 PostgreSQL 16.2（`e2e/oob-real-lab` OOB 带外全链路）、**真 SQL Server 2022 Express 16.0.1000.6**（`e2e/mssql-lab`：双上下文三通道 + 拖库 5/5 + os-shell，2026-09-22 补证，见 `e2e/mssql-lab/results/VERIFICATION-2026-09-22.md`）、**真 Oracle AI Database 26ai Free 23.26.3.0.0**（`e2e/oracle-lab`：双上下文三通道 + 拖库 5/5） |
-| ⚠️ **部分通道验证** | H2、HSQLDB、Derby | `e2e/multi-engine-lab`（真实 JDBC 内存库）。**三档分开引，别混**：① 无 WAF 档 = 三引擎布尔通道 9/9，回显定库 H2/HSQLDB 成功、**Derby 定不出**；② CRS **PL1（官方默认部署档）** = 布尔 9/9（`results/multi-engine-report.pl1.md`）⇒ "这三库在默认部署的 CRS 下可被检出"成立，但**定库不达**（UNION 哨兵被吃）；③ CRS **PL2/PL3/PL4** = 0/9，PL1→PL2 之间是断崖 ⇒ 不能拿②说"过任何 WAF"，也不能拿③说"过不了 WAF"。旧 P3 报告（09-09）"tamper 打穿 CRS 后 H2/Derby error 通道检出"今已不可复现，见该文件顶部的失效声明 |
+| ⚠️ **部分通道验证** | H2、HSQLDB、Derby | `e2e/multi-engine-lab`（真实 JDBC 内存库）。**三档分开引，别混**：① 无 WAF 档 = 三引擎布尔通道 9/9，回显定库 H2/HSQLDB 成功；**Derby 自 [D157] 起也能定出**（补的是报错句式签名 `Syntax error: Encountered ... at line N, column M` / SQLState `42Xxx` —— 此前 Derby 报错原文里没有库名，三场景 `dbms` 全 null；注意盲注档仍可能 null，那档没有回显也没有报错可判）；② CRS **PL1（官方默认部署档）** = 布尔 9/9（`results/multi-engine-report.pl1.md`）⇒ "这三库在默认部署的 CRS 下可被检出"成立，但**定库不达**（UNION 哨兵被吃）；③ CRS **PL2/PL3/PL4** = 0/9，PL1→PL2 之间是断崖 ⇒ 不能拿②说"过任何 WAF"，也不能拿③说"过不了 WAF"。旧 P3 报告（09-09）"tamper 打穿 CRS 后 H2/Derby error 通道检出"今已不可复现，见该文件顶部的失效声明 |
 | ⛔ **模板适配（未在真实 DBMS 验证）** | TiDB、DM8、ClickHouse、DB2、Sybase、Firebird、Informix、Access、MonetDB | 仅有检测/提取模板；方言语法、列类型、报错文本均可能有偏差 |
 
 **OOB / 强动态页 / 定库加固 / 二阶跨角色的实测记录**（真机靶场，含修复过程与验证数据）已迁至
@@ -677,20 +677,18 @@ node e2e/acceptance.mjs --require-labs=dvwa,juice   # 指定靶场变硬要求�
   经 `run-with-sandbox.py` 注入沙箱连接信息后 16/16 全绿（含 fileRead/fileWrite 真闭环，
   secure_file_priv 由沙箱放行）；直连宿主的旧口径在 3306 无 MySQL 时会把 6 个套件 BLOCKED。
 
-**最近一次全量结果（2026-10-23，v1.2.0，25 套件时代；原始报告 [e2e/results/acceptance-report.md](e2e/results/acceptance-report.md)；
-四项旧未决与外部裁判的复验见 [e2e/results/external-sweep-2026-10-23-v1.2.0.md](e2e/results/external-sweep-2026-10-23-v1.2.0.md)）**：
-**25 PASS / 0 BLOCKED / 0 FAIL / 0 SKIP（当轮 25 套件全绿；五个外部裁判全部在本机起真靶场，
-无 SKIP、无 BLOCKED）**。
-**[D156 2026-10-25] 起 25 → 26 套件**（新增外部裁判 5 号 VulnLab，下表末行）。26 套件的全绿
-基线尚未凑齐：当轮全量复跑时外部 PG 短暂下线（OOB 真机 SKIP）、Juice Shop 短暂下线（SKIP）、
-fileRead 的靶场端口 8326 被本机另一应用（DeepSeek Harness）占用（EADDRINUSE FAIL）、另有
-2 个单测在并发会话同时跑验收时相互干扰（隔离复跑 9/9 绿）——四个红/跳全为环境性，
-裁判 5 号本身 **PASS（真值档 2/2 漏检 0、修复档 0/1 误报、三档真跑 92–127 请求/档）**。
-待端口与靶场环境恢复后复跑刷新本快照。
+**最近一次全量结果（2026-10-25，[D156] 起 26 套件；原始报告 [e2e/results/acceptance-report.md](e2e/results/acceptance-report.md)；
+10-23 的 25 套件时代全绿与四项旧未决复验见 [e2e/results/external-sweep-2026-10-23-v1.2.0.md](e2e/results/external-sweep-2026-10-23-v1.2.0.md)）**：
+**26 PASS / 0 BLOCKED / 0 FAIL / 0 SKIP（26 套件全绿；六个外部裁判全部在本机起真靶场，
+无 SKIP、无 BLOCKED；服务端单测 3773 用例 0 挂）**。
+（D156 接入当日的第一次全量复跑曾因环境性干扰出现 4 红/跳——外部 PG 与 Juice Shop 短暂
+下线、验收器随机端口基址与本机另一应用在 8326 巧合碰撞（`PORT_BASE=8200+pid%200`，约
+1/200 概率、非硬编码缺陷）、并发会话同时跑验收致 2 例单测相互干扰（隔离复跑绿）；同日
+环境恢复后复跑即 26/26 全绿，上句为现行基线。）
 
 | 套件 | 本轮事实 | 状态 |
 |---|---|---|
-| 服务端单测 | 3744 用例 3740 pass / 0 fail / 4 skip（本次环境含真 MySQL；无 MySQL 时 6 skip，见「项目状态」的采集口径） | PASS |
+| 服务端单测 | 3773 用例 3769 pass / 0 fail / 4 skip（2026-10-25 复测；本次环境含真 MySQL；无 MySQL 时 6 skip，见「项目状态」的采集口径） | PASS |
 | 独立刁钻 / 检测回归 / 真 MySQL | 11/11、19/19、11/11 | PASS |
 | 报告契约 | 8/8；`union 技术应被检出` 通过（显式 UNION 点不再只出 error） | PASS（2026-10-22 旧 FAIL 已被复跑推翻） |
 | CRS 人工挂链 / 自动选链（PL1） | off=8 / on=8；自动技术位=8；安全误拦/误报=0 | PASS（旧 4/8 结论作废） |

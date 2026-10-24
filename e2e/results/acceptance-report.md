@@ -1,15 +1,15 @@
 # 全方位验收门禁报告
 
-> 生成：2026-10-24T13:19:01.016Z　｜　执行器：`node e2e/acceptance.mjs`　｜　Node v24.18.0
-> 代码版本：`382548c`　⚠️ **工作区 dirty**（跑验收前有 14 个未提交改动：.github/workflows/ci.yml、.gitignore、README.en.md 等）—— **本报告不对应任何提交**
-> 套件范围：**25/25 跑出断言**　｜　判定：**全量**
+> 生成：2026-10-24T19:51:30.944Z　｜　执行器：`node e2e/acceptance.mjs`　｜　Node v24.18.0
+> 代码版本：`7dbf4be`　⚠️ **工作区 dirty**（跑验收前有 11 个未提交改动：e2e/detect-surface-lab/results/summary.json、e2e/detect-surface-lab/run.mjs、e2e/detect-surface-lab/server.mjs 等）—— **本报告不对应任何提交**
+> 套件范围：**26/26 跑出断言**　｜　判定：**全量**
 > 前置：MySQL 10.11.19-MariaDB @127.0.0.1:3306；secure_file_priv="D:\\tools\\mariadb\\files\\"
 
 > **判定纪律**：不采信各套件自报的 PASS 字样，只解析可独立核对的事实数字并据此断言。
 
 | 结果 | 套件 | 事实 |
 |---|---|---|
-| ✅ PASS | 服务端单测 | tests=3744　pass=3740　fail=0　skipped=4 |
+| ✅ PASS | 服务端单测 | tests=3773　pass=3769　fail=0　skipped=4 |
 | ✅ PASS | 独立刁钻靶场（11 场景） | 漏洞场景=11/11　安全误报=0 |
 | ✅ PASS | 检测回归（19 场景） | PASS=19　FAIL=0 |
 | ✅ PASS | 真 MySQL 靶场 | PASS=11　FAIL=0 |
@@ -24,7 +24,8 @@
 | ✅ PASS | 外部裁判 2 号（VAmPI：路径段注入须检出 + 同形态参数化实例零误报） | 外部裁判2=✅ 通过　真值漏洞=2/2（漏检 0）　安全端点误报=0/5　证据不足=0　Bearer端点=5 个（未测 0） |
 | ✅ PASS | 外部裁判 3 号（DVWA：PHP+MySQL 栈真漏洞须检出 + 同路径 impossible 档零误报） | 外部裁判3=✅ 通过　真值漏洞=5/5（漏检 0）　安全端点误报=0　证据不足=0　形态覆盖=cookie+POST+盲注POST+impossible |
 | ✅ PASS | 外部裁判 4 号（OWASP Benchmark：官方标注真值须全检出 + 同族安全用例零误报） | 外部裁判4=✅ 通过　真值漏洞=43/43（漏检 0）　安全对照误报=0/24　证据不足=0　形态覆盖=header+参数名（50 条）　call形态=安全侧误报 0/3 |
-| ✅ PASS | 数据泄露实证（提取到的必须是真库名，不得是 payload 残片） | 数据实证=✅ 成立　databases=["campus_library","dvwa","parammine_lab","paramname_lab","redteam_lab","sqli_lab","sqli_lab_bare","sqli_lab_bare2","test"]　残片=取不到　漏洞=3　请求=139 |
+| ✅ PASS | 外部裁判 5 号（VulnLab：三档真值 low/medium 须检出 + high 参数化修复档零误报） | 外部裁判5=✅ 通过　真值档位=2/2（漏检 0）　修复档误报=0/1　证据不足=0　档位覆盖=low+medium+high（三档真跑） |
+| ✅ PASS | 数据泄露实证（提取到的必须是真库名，不得是 payload 残片） | 数据实证=✅ 成立　databases=["campus_library","ds_lab","dvwa","parammine_lab","paramname_lab","redteam_lab","sqli_lab","sqli_lab_bare","sqli_lab_bare2","test"]　残片=取不到　漏洞=3　请求=142 |
 | ✅ PASS | 报告契约（自报字段必须与真实状态一致） | 通过=8　不一致=0 |
 | ✅ PASS | CRS 人工挂链 A/B（PL1 档基线） | off=8　on=8　基线=off≥8 on≥8　安全对照误拦=false |
 | ✅ PASS | CRS 自动选链绕过（PL1 档基线） | 技术位=8　基线=≥8　安全误报=0 |
@@ -35,6 +36,6 @@
 | ✅ PASS | fileRead 真闭环 | PASS=true　SKIP=false　方式=宿主实例 |
 | ✅ PASS | fileWrite 真闭环（文件系统侧断言） | PASS=true　SKIP=false　文件落盘=true　方式=宿主实例 |
 
-**汇总：25 PASS / 0 FAIL(含 BLOCKED) / 0 SKIP**
+**汇总：26 PASS / 0 FAIL(含 BLOCKED) / 0 SKIP**
 
 

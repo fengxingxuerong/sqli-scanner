@@ -5,6 +5,35 @@
 
 ---
 
+## 2026-10-25 批次 D157 · 报错定库补三 Java 引擎（Derby 从「定不出」到 `定库=Derby`）
+
+**动机**：`docs/优化底账-2026-10-18.md` P1-13（HSQLDB/Derby 定库通道失效）。真机靶场
+`e2e/multi-engine-lab`（真 JDBC 内存库，NO_WAF=1）实测：Derby 三场景检出正常但
+`定库=null（未识别）`——报错原文 `Syntax error: Encountered "\'" at line 1, column 31.`
+里没有 "Derby"，而 `ERROR_SIG_BY_DBMS` 只认品牌词/驱动类名。H2/HSQLDB 同形态，只是靠
+UNION 版本回显才定出来（盲注档同样 null）。
+
+**本批**：
+- 补三库解析器句式签名：Derby `Encountered … at line N, column M` + `ERROR 42Xxx`；
+  HSQLDB `unexpected token: … in statement [...]`；H2 `Syntax error in SQL statement`。
+  **裸 `unexpected token` 刻意不收**（JS `Uncaught SyntaxError: Unexpected token '<'` 会误判 HSQLDB）。
+- 修 `FINGERPRINT.Derby` 误报源：去掉 `\bjava\b`（`Server: Java/1.x` 会被判成 Derby ⇒ 错方言 payload）。
+- 测试 +3（三库真报错定库 / JS 报错不判 HSQLDB / 裸 Java 不判 Derby）。
+- `e2e/multi-engine-lab/verify.mjs` `expectDbms`：Derby `null → 'Derby'`（正向漂移按该文件
+  注释要求的流程改，README 覆盖面一栏同步）。
+- 实测：`NO_WAF=1 node e2e/multi-engine-lab/verify.mjs` → `derby … 定库=Derby`、断言行全绿。
+
+### 待推进（仍未关闭）
+
+- 盲注档（无回显、无报错）三库仍 `定库=null` —— 报错签名救不了没有报错的场景，要另做
+  时间向量/函数存在性探针（Derby 无原生 sleep，需 LIKE 重运算类方案，成本高，单独评估）。
+- 同批发现的 `FINGERPRINT.H2` 裸 `H2`（`/(org\.h2|Syntax error in SQL statement|H2)/i`）
+  仍靠 ±160 字符报错上下文兜底，是否收紧到句式级需一次误报语料回归（DVWA docs 页那种 `<h2>` 已剥标签，但纯文本 "H2" 仍可能命中）。
+- CRS PL1 档定库仍不达（UNION 哨兵被吞，与本次无关）；把「回显被打掉时报错签名能否兜底」做成
+  modsec-live 的一个新断言，可验证 WAF 下这条新通道是否还有效。
+
+---
+
 ## 2026-10-25 批次 D156 · 外部裁判 5 号：VulnLab（W43 对标排队项落地）
 
 **动机**：D152 对标矩阵排队项。VulnLab（[hediwen831-star/vulnlab](https://github.com/hediwen831-star/vulnlab)，
@@ -126,8 +155,11 @@ urlencoded 发，是另一件事：只吃 JSON 的目标直接 415/400，注入�
 
 ### 待推进（对标排队项，见吸收矩阵）
 
-- **nuclei 式模板化检测规则生态**（YAML DSL + 社区规则订阅）：大工程；先做「payload 池
-  外置化」可行性调研，再谈 DSL。吸收价值高但需独立批次立项。
+- **nuclei 式模板化检测规则生态**（YAML DSL + 社区规则订阅）：✅ 调研收口（2026-10-25，
+  `docs/nuclei模板生态可行性调研-2026-10-25.md`）——「payload 池外置化」最小形态已存在
+  （`--payload-file`，追加式+高危门管辖+硬校验）；格式兼容与开放订阅**不做**
+  （matcher 旁路会稀释差分判定的误报证据链）；分发生态以「受控配方包」形态留档，
+  出现真实用户诉求再立项。
 - **Vigolium 式 agentic 编排**（自主侦察→决策→复测循环）：MCP 9 工具已是代理可驱动的
   形态，自主循环属宿主侧策略；可先在 MCP 加「建议下一步」提示字段试水。
 - **第三方评测基准靶场做外部裁判 5 号**（[评测基准仓库](https://github.com/hediwen831-star/vulnlab)
