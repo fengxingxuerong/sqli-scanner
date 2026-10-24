@@ -239,3 +239,24 @@ export function selectToStart(labs, rows, only) {
   const todo = labs.filter((l, i) => (wanted ? wanted.has(l.id) : true) && rows[i].status === 'start');
   return { todo, unknown };
 }
+
+/**
+ * [D148] 把「指定靶场是否在线」判成硬要求（供 acceptance 的 `--require-labs` 用）。
+ * 为什么需要：没起的靶场在验收里只表现为 SKIP/BLOCKED，很容易被读成「没问题」；
+ * 想让一轮验收真正覆盖外部裁判时，就得先声明「这些必须在」。口径与 `--require=` 一致：
+ * 只认事实（端口），不认识/没起的 id 逐条点名，并给出 `--up` 处置命令。
+ * @param {Array<any>} rows planAll 的结果
+ * @param {string[]} required 必须在线（或至少可拉起）的靶场 id
+ * @returns {{ ok: boolean, missing: string[], unknown: string[] }} 判定与逐条点名
+ */
+export function judgeLabs(rows, required) {
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  const unknown = required.filter((id) => !byId.has(id));
+  // 只认「正在监听」：`start`（前置齐备但没起）也算没达标 —— 调用方要的是「这轮真的能测」，
+  // 不是「理论上能拉起」。处置命令由调用方打印（`--up=<ids>`）。
+  const missing = required.filter((id) => {
+    const row = byId.get(id);
+    return row ? row.status !== 'up' : false;
+  });
+  return { ok: unknown.length === 0 && missing.length === 0, missing, unknown };
+}

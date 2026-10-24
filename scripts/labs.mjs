@@ -23,7 +23,7 @@ import net from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { hasFlag, isDirectRun, readOpt, runSelftest } from './lib/portable.mjs';
-import { labSpecs, planAll, renderRows, selectToStart } from './lib/labs.mjs';
+import { labSpecs, planAll, renderRows, judgeLabs, selectToStart } from './lib/labs.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const TAG = '[labs]';
@@ -159,7 +159,11 @@ function selftest(labs) {
     ['渲染结果含每个 id（漏一行就等于看不见）', labs.every((l) => render.includes(l.id))],
     ['--up 的 id 白名单能筛出待拉起项', selectToStart(labs, rowsReady, 'dvwa').todo.map((l) => l.id).join(',') === 'dvwa'],
     ['不认识的 id 必须被点名', selectToStart(labs, rowsReady, 'nope').unknown.join(',') === 'nope'],
-  ], '体检 / 筛选 / 渲染三类判据');
+    // [D148] `--require` 的判据（与 acceptance 的 `--require-labs` 共用同一份）
+    ['require：全部在线 ⇒ ok', judgeLabs(rowsUp, ['dvwa', 'juice']).ok === true],
+    ['require：没起的（含「可拉起但没起」）必须点名', judgeLabs(rowsReady, ['dvwa']).missing.join(',') === 'dvwa'],
+    ['require：不认识的 id 与没起的分开报', judgeLabs(rowsUp, ['nope']).unknown.join(',') === 'nope'],
+  ], '体检 / 筛选 / 渲染 / 硬要求 四类判据');
 }
 
 // ── 主流程 ───────────────────────────────────────────────────────────────────
@@ -181,14 +185,15 @@ async function main() {
     console.log(renderRows(rows));
     const require = readOpt(argv, '--require');
     if (require) {
-      const down = require
-        .split(',')
-        .map((s) => s.trim())
-        .filter(Boolean)
-        .filter((id) => rows.find((r) => r.id === id)?.status !== 'up');
-      if (down.length) {
-        console.error(`\n${TAG} ✗ --require 指定的靶场没起：${down.join(', ')}`);
-        console.error(`${TAG}   处置：node scripts/labs.mjs --up=${down.join(',')}（或按 --list 里的配方手工起）`);
+      const ids = require.split(',').map((s) => s.trim()).filter(Boolean);
+      const verdict = judgeLabs(rows, ids);
+      if (verdict.unknown.length) {
+        console.error(`\n${TAG} ✗ 不认识的靶场 id：${verdict.unknown.join(', ')}（用 --list 看可用 id）`);
+        process.exit(1);
+      }
+      if (!verdict.ok) {
+        console.error(`\n${TAG} ✗ --require 指定的靶场没起：${verdict.missing.join(', ')}`);
+        console.error(`${TAG}   处置：node scripts/labs.mjs --up=${verdict.missing.join(',')}（或按 --list 里的配方手工起）`);
         process.exit(1);
       }
       console.log(`\n${TAG} ✓ --require 指定的靶场均在监听`);

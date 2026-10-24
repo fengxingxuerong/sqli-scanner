@@ -83,6 +83,24 @@
 - **开源门面**：`CODE_OF_CONDUCT.md`、`CONTRIBUTING`/PR 模板、Issue 模板三份、`dependabot.yml`、
   `codeql.yml`（GitHub 代码扫描）；`docs/INDEX.md` 与 TODO 同步。
 
+### 2026-10-24 批次 D148 · 验收前置靶场体检（`--labs-only` / `--require-labs=`，判据与 labs.mjs 同源）
+
+**动机**：D144 的 `labs.mjs` 解决了「靶场没起没人告诉你」，但**验收自己**仍然只会在跑完后
+把没起的靶场摊成 SKIP/BLOCKED —— 想真正覆盖外部裁判的人得自己记得先体检。本批把这条前置接进验收。
+
+- `scripts/lib/labs.mjs` 新增纯函数 **`judgeLabs(rows, required)`**（只认「正在监听」；
+  「可拉起但没起」也算没达标），`labs.mjs --require=` 改为复用它 —— **同一判断只有一份实现**
+  （此前 `labs.mjs` 里内联过一版口径相同的过滤，正是本仓反复治理的形态）。自证 8 → **11 条**。
+- `e2e/acceptance.mjs` 新增两个入口（判据 import 自 `scripts/lib/labs.mjs`，不另写）：
+  - `--labs-only`：只做靶场体检并退出（不起进程）；
+  - `--require-labs=dvwa,juice`：把指定靶场变硬要求，**开跑前**不满足即 exit 2 并给出
+    `node scripts/labs.mjs --up=<ids>` 处置命令；不认识的 id 单独点名（不与「没起」混报）。
+  默认（两个都没给）保持原行为，只在有靶场没起时多打一行提示。
+
+判据（本轮实测）：`labs --selftest` **11/11**；`acceptance --labs-only` → 8 项全 ✅、exit 0；
+`acceptance --require-labs=nope --labs-only` → **exit 2** 且点名不认识的 id；
+`--require-labs` 在靶场全在线时打印 ✅；`gate:close` 27/27。
+
 ### 2026-10-24 批次 D147 · 靶场脚本化拉起验证（`labs --up` 全链 → 全量验收 25/25）
 
 **背景**：D144 的 `labs.mjs` 当时只实测过「已在跑 ⇒ 不重复拉起」那条路径，从零拉起整链是未验证面

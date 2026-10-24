@@ -5,6 +5,27 @@
 
 ---
 
+## 2026-10-24 批次 D148 · 验收前置靶场体检（`--labs-only` / `--require-labs=`，判据与 labs.mjs 同源）
+
+**动机**：`labs.mjs` 解决了「靶场没起没人告诉你」，但**验收自己**仍只会把没起的靶场摊成 SKIP/BLOCKED。
+
+**本批**：
+- `scripts/lib/labs.mjs` 新增 `judgeLabs(rows, required)` 纯函数（只认「正在监听」，
+  「可拉起但没起」也算没达标）；`labs.mjs --require=` 改为复用同一份判据（删掉内联的同口径过滤）；
+  `labs --selftest` 8 → **11 条**。
+- `e2e/acceptance.mjs`：`--labs-only`（只体检后退出）、`--require-labs=ids`（硬要求，开跑前 exit 2
+  并给出 `--up` 处置）、默认只在有靶场没起时多打一行提示。
+- README 验收段补两个入口的用法。
+
+### 待推进（仍未关闭）
+
+- CI 侧仍跑不到这些外部靶场（无 MySQL/PHP/Java 靶场 provision），因此 `--require-labs` 目前只在
+  本机/自建 CI 有意义；若要进 GitHub Actions，需要先给 job 起靶场（或把外部裁判整套跑在容器里）。
+- `--up` 的从零拉起已在 D147 实测（4 个靶场）；MariaDB 首次冷启路径仍未在空机验证。
+- 其余照旧：`desktop-package` / `docker-publish` job 首跑、云 WAF 样本、远端推送。
+
+---
+
 ## 2026-10-24 批次 D146 · 发布链与社区工程（tag → Release / ghcr / SBOM / 自动化）
 
 **动机**：D145 之后代码可交付，但“外部能不能拿到”仍是最大缺口：远端 release 零资产、

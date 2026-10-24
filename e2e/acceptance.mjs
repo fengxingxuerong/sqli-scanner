@@ -30,6 +30,8 @@ import { ensureSqliSchema } from './lib/sqliSchema.mjs';
 // [D134 2026-10-23] 红队输出四形态判定（pass / fail / skip / blocked）抽成可单测模块：
 // 实测过一次「靶场库不可用 → 19 个真值点全漏 → 记成 0% 检出率 FAIL」，环境缺失被伪装成能力退化。
 import { classifyRedteamOutput } from './lib/redteamVerdict.mjs';
+// [D148] 靶场体检判据与 scripts/labs.mjs 共用同一份（不在这里另写一套）
+import { judgeLabs, labSpecs, planAll, renderRows } from '../scripts/lib/labs.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, '..');
@@ -56,6 +58,18 @@ const EXPECT = (() => {
   const a = process.argv.find((x) => x.startsWith('--expect='));
   return a ? a.slice('--expect='.length).split(',').map((s) => s.trim()).filter(Boolean) : [];
 })();
+// [D148] --require-labs=dvwa,juice —— 「这些外部靶场必须在线」。
+// 为什么需要：没起的靶场在验收里只表现为 SKIP/BLOCKED（SKIP 不计通过，但很容易被读成
+// 「没问题」）。想真正覆盖外部裁判时，先用这个把「必须在」声明出来；判据与
+// `node scripts/labs.mjs --require=` 共用同一份（scripts/lib/labs.mjs:judgeLabs），
+// 不在这里另写一套。
+//   --labs-only            只做靶场体检并退出（不起进程；用于跑验收前的前置确认）
+//   --require-labs=<ids>   体检 + 把指定靶场变硬要求（没起 → exit 1，并给出 --up 处置命令）
+const REQUIRE_LABS = (() => {
+  const a = process.argv.find((x) => x.startsWith('--require-labs='));
+  return a ? a.slice('--require-labs='.length).split(',').map((s) => s.trim()).filter(Boolean) : [];
+})();
+const LABS_ONLY = process.argv.includes('--labs-only');
 const PORT_BASE = 8200 + (process.pid % 200); // 避开常驻端口，支持并行跑
 
 // ── 工具 ────────────────────────────────────────────────────────────────────
@@ -227,6 +241,43 @@ const pre = {
 // 红队评测靶场（ground-truth 真值对照 + sqlmap 同题对比）：独立进程常驻，需预先拉起
 const REDTEAM_PORT = Number(process.env.REDTEAM_LAB_PORT) || 8231;
 pre.redteamLab = await portOpen(REDTEAM_PORT, '127.0.0.1', 1500);
+
+// ── [D148] 外部靶场体检（判据与 node scripts/labs.mjs 同源）───────────────────
+// 三档用法：默认只在有靶场没起时打一行提示；`--labs-only` 只体检并退出；
+// `--require-labs=ids` 把指定靶场变硬要求（没起则**开跑前**失败，而不是等一堆 SKIP 出来才看）。
+{
+  const labs = labSpecs({ env: process.env, repoRoot: ROOT });
+  const openPorts = new Map(
+    await Promise.all(labs.map(async (l) => [l.port, await portOpen(l.port, '127.0.0.1', 900)]))
+  );
+  const rows = planAll(labs, { portOpen: (p) => Boolean(openPorts.get(p)), pathExists: (p) => existsSync(p) });
+  const shown = LABS_ONLY || REQUIRE_LABS.length > 0;
+  if (shown) {
+    console.log('\n靶场体检（与 scripts/labs.mjs 同源判据）：');
+    console.log(renderRows(rows));
+  }
+  if (REQUIRE_LABS.length) {
+    const v = judgeLabs(rows, REQUIRE_LABS);
+    if (v.unknown.length) {
+      console.error(`❌ --require-labs 里有不认识的靶场 id：${v.unknown.join(', ')}（node scripts/labs.mjs --list 看可用 id）`);
+      process.exit(2);
+    }
+    if (!v.ok) {
+      console.error(`❌ --require-labs 指定的靶场没起：${v.missing.join(', ')}`);
+      console.error(`   处置：node scripts/labs.mjs --up=${v.missing.join(',')}`);
+      process.exit(2);
+    }
+    console.log('✅ --require-labs 指定的靶场均在监听');
+  }
+  if (LABS_ONLY) {
+    console.log('\n（--labs-only：只做体检，未跑套件）');
+    process.exit(0);
+  }
+  const down = rows.filter((r) => r.status !== 'up').map((r) => r.id);
+  if (!REQUIRE_LABS.length && down.length) {
+    console.log(`\n提示：${down.length} 个靶场未在线（${down.join(', ')}）⇒ 对应套件会 SKIP/BLOCKED；拉起：node scripts/labs.mjs --up\n`);
+  }
+}
 
 const envDb = {
   MYSQL_HOST: MYSQL.host,

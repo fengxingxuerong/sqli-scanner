@@ -664,6 +664,10 @@ npm run labs:check                  # 只探测：哪些起了、哪些没起、
 npm run labs:list                   # 打印每个靶场的命令/前置/可覆盖的环境变量
 npm run labs:up                     # 把前置齐备且没起的拉起来（pid 记在 .box-agent-scratch/labs-pids.json）
 npm run labs:stop                   # 只停本脚本起过的进程
+
+# 验收自带同一份靶场判据的入口（与 labs.mjs 同源，不另写一套）
+node e2e/acceptance.mjs --labs-only                 # 只做靶场体检并退出（跑全量前先确认）
+node e2e/acceptance.mjs --require-labs=dvwa,juice   # 指定靶场变硬要求：没起则**开跑前** exit 2
 ```
 
 - 依赖缺失时输出 **SKIP + 原因**（不静默跳过、不假装通过）；任一必需套件失败 → 非零退出码。
