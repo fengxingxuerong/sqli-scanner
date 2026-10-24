@@ -1,6 +1,6 @@
 # sqli-scanner
 
-[![Tests](https://img.shields.io/badge/tests-4341%20passing-brightgreen)](#测试)[![CI](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml/badge.svg)](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml)
+[![Tests](https://img.shields.io/badge/tests-4344%20passing-brightgreen)](#测试)[![CI](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml/badge.svg)](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml)
 [![Dependencies](https://img.shields.io/badge/prod%20deps-0%20known%20vulns-brightgreen)](SECURITY.md)
 
 > CI 徽章为真实状态（仓库地址已定，run#90 起全绿）。发布判定仍以 `CHANGELOG.md`
@@ -217,7 +217,7 @@ admin-only 触发页 `/admin/panel`（users.admin 角色门禁 403）+ admin 会
 | **配置档案** | `--config <file.json>` 预载参数（argv > 档案 > 内置默认；键=长参数名，如 `{"level":5,"tamper":"space2comment"}`；含未知键拒绝启动）+ `--save-config <file.json>` 把本次非默认参数增量落盘复扫（对标 sqlmap -c/--save + ffuf -config）。[D41] 配合上面的筛选三件套可把「复测配方」入库进 CI |
 | **sqlmap 桥接参数（非原生）** | `--csrf-url` / `--csrf-token` / `--eval` / `--skip-urlencode` / `--keep-alive` / `--null-connection`：**仅当转交外部 sqlmap 进程（sqlmapBridge）时才会被传递**，本项目自有引擎不消费这些键。请勿把上表与本节混用 |
 | **-r 请求文件** | 从 Burp/curl 请求文本导入 URL/method/headers/body |
-| **结构化 body 通道（JSON 嵌套 / XML·SOAP）** | 两类现代 API body 都按**叶子路径**发现注入点，而不是把整份 body 当成一个参数：`jsonBody`（对象，如 `user.id` / `tags.0`）与 `xmlBody`（XML 字符串，如 `soap:Envelope.soap:Body.GetUser.id`；对标 ghauri 的 XML·SOAP 支持）。入口：REST `xmlBody` 字段、CLI `--xml-body` / `--xml-body-file`。⚠️ XML 通道只认「元素 + 文本」形态：注释 / CDATA / DOCTYPE / 正文处理指令一律**整体放弃**（宁可不发现，也不发畸形报文） |
+| **结构化 body 通道（JSON 嵌套 / XML·SOAP）** | 两类现代 API body 都按**叶子路径**发现注入点，而不是把整份 body 当成一个参数：`jsonBody`（对象，如 `user.id` / `tags.0`）与 `xmlBody`（XML 字符串，如 `soap:Envelope.soap:Body.GetUser.id`；对标 ghauri 的 XML·SOAP 支持）。入口：REST `xmlBody` 字段、CLI `--xml-body` / `--xml-body-file`。**[D155] body 通道按声明的 `Content-Type` 判定**：`--body '{"id":1}' --header 'Content-Type: application/json'` 这类扁平 JSON API 也走 JSON 语义（此前按 urlencoded 发 ⇒ 只吃 JSON 的目标 415/400 ⇒ 静默 0 检出，`e2e/detect-surface-lab` 的 `/api/json` 实测 0/1 → 修复后 1/1）；未声明 CT 的扁平 body 行为不变。⚠️ XML 通道只认「元素 + 文本」形态：注释 / CDATA / DOCTYPE / 正文处理指令一律**整体放弃**（宁可不发现，也不发畸形报文） |
 | **mTLS 客户端证书** | `clientCert`（PEM 路径，证书+私钥同文件，对标 sqlmap `--cert`）：目标要求 TLS 双向认证时没有证书连第一跳都被拒。与 `insecureTls` 正交（一个管「我信不信目标」，一个管「目标信不信我」） |
 | **Bearer/Token 自动续期** | `--refresh-url`（`config.bearerRefresh`，面板「网络与认证」同址）：API 的 access token 通常 15 分钟～1 小时过期，而一次扫描动辄几千条请求几十分钟 —— 后半程全 401 时检测层看到的是"响应没有差异"，报告写「未检出」，**而那半程一个注入都没进业务逻辑**。配上它：请求吃 401/403 ⇒ POST 刷新端点换新令牌 ⇒ 重试原请求一次。四条口径：① 拿到新 token 之前**不动**你从抓包带来的 `Authorization`；② 一次挑战只续一次（不循环打客户认证服务）；③ 并发去重（几十条同时 401 只发一次续期）；④ 续期失败必须显形 —— 结论降级为 **inconclusive**，reason 里给出「尝试 N 次失败 M 次 + 最后一次原因」（取不到 token 时会写明试过哪些字段、响应顶层有哪些键）。同批补了 `session_expired` 的两种此前无人接手的形态：**整轮零业务响应**（从来没进去过）与**进去过之后连续出不去**（中途失效）—— 既有判据要求"基线请求不 401"，而令牌过期时基线同样吃 401，那条判据在这类目标上永不可达。不实现 OAuth2 授权码 / SSO / 验证码。见 [docs/Bearer令牌续期.md](docs/Bearer%E4%BB%A4%E7%89%8C%E7%BB%AD%E6%9C%9F.md) |
 | **自定义请求变换（扩展点）** | `--request-script <file.js>`（`config.requestScript`）：目标接口带 `sign=` 签名、整参加密或 timestamp+nonce 防重放时，注入值会破坏签名 ⇒ 目标恒回 400 ⇒ 报告写「未检出」，**而那不等于没有洞**。脚本在**扫描/检测阶段**每条出站请求的最后一环重算签名/重新加密（含保活页、CSRF 取页、登录提交这些非注入请求；⚠️ 注入点发现阶段的爬虫请求不经此层，见文档 §7）。四条硬约束：① 变换在 SSRF/scope 校验之前完成（校验作用于变换后的 URL）；② 脚本失败即**不发**该请求（绝不退化成"发没签名的原始请求"）；③ 只能改 `url/method/headers/data/params`，`signal/scanId/限速` 等引擎控制权不可被脚本摘掉；④ 脚本必须位于环境变量 `REQUEST_SCRIPT_DIR` 内（出口层的代码注入面）。配套判据 `transform_rejected`：连基线请求都被拒 ⇒ 判「脚本配错」并中止；基线正常而注入全被拒 ⇒ 判「签名没覆盖该参数」，两种都强制把结论降级为 **inconclusive**。用法见 [docs/请求变换脚本.md](docs/请求变换脚本.md) |
@@ -243,7 +243,7 @@ npm run waf-auto        # CRS 下「引擎自动选链绕过」验收（不显�
 npm run waf-real:collect # [P0-1] 商业云 WAF 真机样本采集（仅授权目标；礼仪性 GET / --from-json）
 # [P0-2] 第二权威对拍源样本提取（WhatWaf 源码目录 → second-source-samples.json）
 node scripts/extract-second-source-samples.mjs --whatwaf <WhatWaf-src> [--out <json>]
-npm run acceptance      # 【门禁】全方位验收（25 套件，事实断言模式，可进 CI）
+npm run acceptance      # 【门禁】全方位验收（26 套件，事实断言模式，可进 CI）
 npm run quality:all     # 【门禁】一键全量质量校验（测试/覆盖率/变异/验收/类型/架构/嵌套/引用/文档/版本，等价于 ci:local）
 ```
 
@@ -399,7 +399,7 @@ backend/  ← Express + Node.js
 # 前端测试（575 个用例）
 npm test
 
-# 服务端测试（3770 个用例）
+# 服务端测试（3773 个用例）
 cd server && npm test
 
 # 全部测试
@@ -425,7 +425,7 @@ npm run artifact:drift   # 入库的 e2e 基线产物必须等于当前代码跑
 
 - TypeScript: 零错误
 - 前端测试: 575/575 通过（覆盖率门禁 stmts 93.16 / branch 84.47 / func 80.63，阈值 88/77/67）
-- 服务端测试: 3770 用例（3766 pass / 0 fail / 4 skip，并发口径 2026-10-24 复测；4 skip 为环境依赖显式跳过。覆盖率 lines 91.52 / branch 80.43 / func 84.83，阈值 85/74/77）
+- 服务端测试: 3773 用例（3769 pass / 0 fail / 4 skip，并发口径 2026-10-24 复测；4 skip 为环境依赖显式跳过。覆盖率 lines 91.56 / branch 80.55 / func 84.98，阈值 85/74/77）
 - 一键扫描: `npm run scan -- -u <url>`（CLI 一条命令产出 HTML/JSON/Markdown 全套报告 + manifest，退出码可直接进 CI 门禁）
 - Tamper 插件: 234 个（含批次 D3 新增 scalarselectinline；含 v24 增量 20 个，对齐 sqlmap 官方 tamper 全集，含官方 CRS/libinjection 实测组合 uniontable+odbcbrace；含批次 D13 新增 5 件上游形态变体 *nospace/*open/*block，真机 A/B 判决前不进默认链）
 - WAF 绕过能力: 200+ 插件链式组合，覆盖 62 个 WAF 厂商指纹识别 + 推荐
@@ -634,7 +634,7 @@ node e2e/api-range-lab/run.mjs --list        # 列出全部用例
 
 ### 验收门禁（`npm run acceptance`）
 
-25 套件一次跑完（顺序即 `e2e/acceptance.mjs` 里 SUITES 的登记顺序）：服务端单测 → 独立刁钻靶场 →
+26 套件一次跑完（顺序即 `e2e/acceptance.mjs` 里 SUITES 的登记顺序）：服务端单测 → 独立刁钻靶场 →
 检测回归 → 真 MySQL → 参数名注入真靶场（query/JSON 键名+XML 元素名+ORDER BY 后缀位拼 SQL：检出 + 白名单对照 + 开关语义）→
 参数挖掘真靶场（隐藏参数只能字典挖掘：开挖掘 3/3 检出 + 关 0 + 安全点 0）→ 真 PG（含二阶）→ **批量编排故障隔离（`-m`，真 SQLite 靶站 + 死目标）** → OOB 带外通道真机 →
 OOB 外部隧道真机（interactsh 协作端，需出网，离线 SKIP） →
@@ -642,6 +642,7 @@ OOB 外部隧道真机（interactsh 协作端，需出网，离线 SKIP） →
 **外部裁判 2 号（VAmPI：URL 路径段注入须检出 + 官方 vulnerable=0 同形态实例零误报，未就绪 SKIP）** →
 **外部裁判 3 号（DVWA：PHP+MySQL 栈，cookie 注入点 + POST 表单 + 官方 impossible 档同路径零误报，未就绪 SKIP）** →
 **外部裁判 4 号（OWASP Benchmark：官方逐条标注真值须全检出 + 同族安全用例零误报；含 header 注入面与参数名注入形态，未就绪 SKIP）** →
+**外部裁判 5 号（VulnLab：同一应用三档真值——low 直拼/medium 可绕黑名单须检出 + high 参数化修复档零误报；自拉自收，[D156]）** →
 **登录编排自动重登（真表单登录 + 会话反复过期，含对照组）** → 报告契约 → CRS 人工挂链 A/B →
 CRS 自动选链绕过 → CRS 执行器保真度（官方回归集）→ WAF 定向变异搜索（A2）端到端 →
 WAF 通道降级编排（A3）端到端 → 红队实战（真值对照 + sqlmap 同题）→ fileRead 真闭环 → fileWrite 真闭环。
@@ -659,7 +660,7 @@ npm run acceptance -- --skip-heavy  # 跳过最慢的 CRS 组
 npm run acceptance -- --only=waf-auto,waf-real   # 改完某模块做定向门禁
 npm run acceptance:sandbox          # 同全量，但套隔离 MySQL 沙箱（3308）——宿主无 3306 MySQL 时的推荐跑法
 
-# 靶场体检 / 拉起（25 套件里的外部裁判与库；"没起的靶场"在验收里只表现为 SKIP/BLOCKED）
+# 靶场体检 / 拉起（26 套件里的外部裁判与库；"没起的靶场"在验收里只表现为 SKIP/BLOCKED）
 npm run labs:check                  # 只探测：哪些起了、哪些没起、缺什么（--require=dvwa,juice 可把指定项变硬要求）
 npm run labs:list                   # 打印每个靶场的命令/前置/可覆盖的环境变量
 npm run labs:up                     # 把前置齐备且没起的拉起来（pid 记在 .box-agent-scratch/labs-pids.json）
@@ -676,10 +677,16 @@ node e2e/acceptance.mjs --require-labs=dvwa,juice   # 指定靶场变硬要求�
   经 `run-with-sandbox.py` 注入沙箱连接信息后 16/16 全绿（含 fileRead/fileWrite 真闭环，
   secure_file_priv 由沙箱放行）；直连宿主的旧口径在 3306 无 MySQL 时会把 6 个套件 BLOCKED。
 
-**最近一次全量结果（2026-10-23，v1.2.0；原始报告 [e2e/results/acceptance-report.md](e2e/results/acceptance-report.md)；
+**最近一次全量结果（2026-10-23，v1.2.0，25 套件时代；原始报告 [e2e/results/acceptance-report.md](e2e/results/acceptance-report.md)；
 四项旧未决与外部裁判的复验见 [e2e/results/external-sweep-2026-10-23-v1.2.0.md](e2e/results/external-sweep-2026-10-23-v1.2.0.md)）**：
-**25 PASS / 0 BLOCKED / 0 FAIL / 0 SKIP（25 套件全绿；五个外部裁判全部在本机起真靶场，
+**25 PASS / 0 BLOCKED / 0 FAIL / 0 SKIP（当轮 25 套件全绿；五个外部裁判全部在本机起真靶场，
 无 SKIP、无 BLOCKED）**。
+**[D156 2026-10-25] 起 25 → 26 套件**（新增外部裁判 5 号 VulnLab，下表末行）。26 套件的全绿
+基线尚未凑齐：当轮全量复跑时外部 PG 短暂下线（OOB 真机 SKIP）、Juice Shop 短暂下线（SKIP）、
+fileRead 的靶场端口 8326 被本机另一应用（DeepSeek Harness）占用（EADDRINUSE FAIL）、另有
+2 个单测在并发会话同时跑验收时相互干扰（隔离复跑 9/9 绿）——四个红/跳全为环境性，
+裁判 5 号本身 **PASS（真值档 2/2 漏检 0、修复档 0/1 误报、三档真跑 92–127 请求/档）**。
+待端口与靶场环境恢复后复跑刷新本快照。
 
 | 套件 | 本轮事实 | 状态 |
 |---|---|---|
@@ -693,6 +700,7 @@ node e2e/acceptance.mjs --require-labs=dvwa,juice   # 指定靶场变硬要求�
 | 数据泄露实证 | **成立**：`--dbs` 取回真库名（9 个）而非 payload 残片；139 请求、3 条漏洞 | PASS（本机起真靶场） |
 | 外部裁判 1 号（Juice Shop） | **2/2 真值（搜索 LIKE 双层括号 + 官方登录 JSON body）、安全端点 0/4 误报**；**[D137]** 此前记「本机不可复现」——三个真实根因已定位（源码树缺 `data/`、前端依赖需 `--shamefully-hoist`、必须跑 Node 22 而非 24），见台账 `juice-shop-runnable-local-d137` | PASS（本机起真靶场） |
 | 外部裁判 4 号（OWASP Benchmark） | **三清单本机全跑**：基线 74 → **43/43 + 0/24**；query 210 → **111/111 + 0/99**；header 67 → **33/33 + 0/34**；合计 **187/187 真值、0/157 安全零误报**；含 header 与参数名形态 50 条、`{call}` 安全侧 0/3。**[D138]** 本机已可运行（HSQLDB 9001 手动常驻 + `mvn cargo:run -Pdeploy`，JDK17/Maven 本机已有），此前记「需 GitHub 拉源码故不可用」——源码与构建产物在本机 scratch 缓存中 | PASS（本机起真靶场，三清单全跑） |
+| 外部裁判 5 号（VulnLab，[D156] 新增） | **三档真值**：low 直拼检出 3 条（union/error/boolean）· medium 可绕黑名单检出 1 条（error 通道）· **high 参数化修复档零误报**（127 请求，verdict=no_vulnerability_detected）；真值档 2/2 漏检 0、证据充分（92–127 请求/档）。真值来自对方 benchmark/manifest.yaml；自拉自收（自动 clone + php -S，CI 可真实执行） | PASS（2026-10-25 首测） |
 | 红队实战 | 19/19、安全点 7、误报 0 | PASS |
 | OOB 带外真机 / 外部隧道 | 真 PG `COPY TO PROGRAM` 真实回连 ✅；interactsh 回连 14 DNS + 14 HTTP | PASS |
 | 其余套件（PG / 登录编排 / 保真度 / 变异搜索 / 降级编排 / 参数名 / 参数挖掘 / 批量编排 …） | 见验收报告 | PASS |

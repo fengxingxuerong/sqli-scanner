@@ -5,6 +5,58 @@
 
 ---
 
+## 2026-10-25 批次 D156 · 外部裁判 5 号：VulnLab（W43 对标排队项落地）
+
+**动机**：D152 对标矩阵排队项。VulnLab（[hediwen831-star/vulnlab](https://github.com/hediwen831-star/vulnlab)，
+更正：初版对标文档误记仓库名 Cryshana/Micro-Bench，clone 404 实证后修正）带来前四位裁判
+都没有的形态：**同一应用里的三档实现**（low 直拼 / medium 可绕黑名单 / high 参数化修复），
+修复档即误报诱饵，真值来自对方 benchmark/manifest.yaml（非本仓断言，对方 CI 52 条绕过
+断言守护）。
+
+**本批**：
+- `e2e/vulnlab-lab/`：runner 自拉自收（未 clone 自动 `git clone --depth 1`；Windows 共享
+  php.ini 被 DVWA 锁 MySQL 形态 ⇒ `php -n -d extension=pdo_sqlite` 独立加载不改共享 ini；
+  已在跑则复用）⇒ **CI ubuntu 自带 php 即可真实执行**，非环境性 SKIP。
+- 验收 25 → **26 套件**（acceptance + run-all + README/AGENTS 口径同步）；防缩水判据：
+  三档必须各自真跑并打印请求计数，请求 <25 或结论不可信 = 证据不足不通过。
+- 实测（2026-10-25 本机）：low 3 条（union/error/boolean）· medium 1 条（error 打穿黑名单）
+  · high 修复档零误报（127 请求，verdict=no_vulnerability_detected）—— 真值档 2/2 漏检 0。
+
+### 待推进
+
+- VulnLab 其余 12 个场景（XSS/LFI/SSRF/反序列化等）超出本仓 SQLi 定位，不做；
+  若做 NoSQL/SSTI 补充趟的对照可另评估 ssti/unserialize 场景（排队，低优先）。
+
+---
+
+## 2026-10-25 批次 D155 · body 通道按声明的 Content-Type 判定（扁平 JSON API 不再静默 0 检出）
+
+**动机**：`--body` 的通道判定（D… [JSON-BODY-FIX 2026-09-20]）刻意「只有真含嵌套才走
+`jsonBody`，扁平一律 bodyParams(urlencoded)」—— 那条保守规则是对的（表单目标不能被
+顺手改语义），但它只对「**没声明** Content-Type」成立。声明了 `application/json` 却仍按
+urlencoded 发，是另一件事：只吃 JSON 的目标直接 415/400，注入值从未进业务逻辑 ⇒
+扫描正常跑完、报告写「未检出」。`e2e/detect-surface-lab` 的 `/api/json`（只认 JSON）实测：
+`--method POST --body '{"id":1}' --header 'Content-Type: application/json'` → **0 检出**。
+
+**本批**：
+- `resolveBodyChannel(parsed, declaredContentType?)`：声明 JSON（`application/json` /
+  `text/json` / `*+json`，大小写与 charset 不敏感）且 body 是对象/数组 ⇒ 走 `jsonBody`。
+- 新增 `declaredContentType(args)`：`--header` 与 `-r` 抓包 headerObj 合流读 CT，只读不改筛选。
+- CLI 播报改成分因（「声明的 Content-Type 是 application/json」/「检测到嵌套 JSON」）。
+- 测试 +3（声明 JSON 扁平 → jsonBody 且叶子点=id / `+json` 与 charset 变体 / 未声明与
+  非 JSON 声明逐位零回归）。**既有 4 条扁平 body 用例继续守着「没声明就按 urlencoded」**。
+- 靶场扩到 12 用例（新增 `json-body` 真值 + `json-body-safe` 参数化对照）。
+
+### 待推进（仍未关闭）
+
+- REST 入口（`POST /api/scan/start`）没有这层判定：调用方传 `bodyParams` 时仍按 urlencoded 发。
+  是否要加 `contentType` 字段属于接口面变更，单独评估（REST 用户本来可以直接传 `jsonBody`）。
+- `-r` 抓包里 CT 为 `application/json` 但 body 是**非法 JSON** 的场景：目前 `bodyToJsonString`
+  返回 null（不回填 body），扫描会跑「无 body 点」—— 应该显式告警而不是静默，下一批处理。
+- multipart 里的 file 字段（filename 注入）仍只按空值占位，未作为注入面。
+
+---
+
 ## 2026-10-25 批次 D154 · 路径注入面扩展（多段路径中间段 + 数据后缀段）
 
 **动机**：`--test-path` 自 2026-09-16 起只取「最后一个非空段，且含点即判静态资源」。
@@ -78,8 +130,8 @@
   外置化」可行性调研，再谈 DSL。吸收价值高但需独立批次立项。
 - **Vigolium 式 agentic 编排**（自主侦察→决策→复测循环）：MCP 9 工具已是代理可驱动的
   形态，自主循环属宿主侧策略；可先在 MCP 加「建议下一步」提示字段试水。
-- **第三方评测基准靶场做外部裁判 5 号**（[评测基准仓库](https://github.com/Cryshana/Micro-Bench-for-Web-Vulnerability-Scanners)
-  ，机读 PoC + 修复对照）：需拉起评估 PHP 靶场内容与真值映射，独立批次。
+- **第三方评测基准靶场做外部裁判 5 号**（[评测基准仓库](https://github.com/hediwen831-star/vulnlab)
+  ，机读 PoC + 修复对照）：✅ 已落地（D156，见顶部批次条目）。
 
 ---
 

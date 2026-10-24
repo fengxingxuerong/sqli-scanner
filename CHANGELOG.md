@@ -67,6 +67,47 @@
 
 > 下一批次起的条目写在这里。发版时把本节整体升为 `## [x.y.z] - YYYY-MM-DD` 并补汇总段。
 
+### 2026-10-25 批次 D156 · 外部裁判 5 号：VulnLab（同一应用三档真值 + 修复档零误报）
+
+**动机**：W43 竞品对标（`docs/竞品对标-2026W43.md`）排队项落地。VulnLab
+（hediwen831-star/vulnlab —— 更正：初版对标文档误记仓库名 Cryshana/Micro-Bench，
+clone 404 实证后修正）带来前四位裁判（Juice Shop/VAmPI/DVWA/Benchmark）都没有的形态：
+**同一应用里的三档实现**——`sqli/low.php` 数字型直拼、`sqli/medium.php` 黑名单
+（非递归替换，官方标注双写可绕）、`sqli/high.php` `:id` 参数化修复档。修复档即天然
+误报诱饵：对方 `benchmark/manifest.yaml` 明示「high 档上的任何一条报告都是误报，
+无需人工复核」，且对方 CI 用 52 条绕过断言守护修复档——真值非本仓断言。
+
+- `e2e/vulnlab-lab/`：runner **自拉自收**——未 clone 自动 `git clone --depth 1`；
+  Windows 共享 php.ini 被 DVWA 场景锁为 MySQL 形态（未启 pdo_sqlite）⇒
+  `php -n -d extension_dir=… -d extension=pdo_sqlite` 独立加载**不改共享 ini**；
+  已在跑（同端口同应用）则复用。⇒ CI ubuntu 自带 php 即可真实执行（VAmPI 裁判
+  在 CI 是环境性 SKIP，本裁判不是）。
+- 验收 25 → **26 套件**（`acceptance.mjs` SUITES + `run-all.mjs` 接线 + README/AGENTS
+  口径同步）。防缩水判据：三档必须各自真跑并打印请求计数；请求 <25 或结论不可信
+  ⇒「证据不足」不通过（[D113]「没测过≠零误报」教训的口径）。
+- 实测（2026-10-25 本机）：low 检出 3 条（union/error/boolean）· medium 检出 1 条
+  （error 通道打穿黑名单）· high 修复档零误报（127 请求，verdict=no_vulnerability_detected）
+  —— 真值档 2/2 漏检 0，证据全部充分（92–127 请求/档）。
+
+### 2026-10-25 批次 D155 · body 通道按声明的 Content-Type 判定（扁平 JSON API 不再静默 0 检出）
+
+**缺陷**：`--body` 的通道判定只按「是否含嵌套」切 `jsonBody`，扁平一律 urlencoded。
+该保守规则对**未声明** Content-Type 的调用方是对的，但声明了 `application/json` 时
+仍按 urlencoded 发 —— 只吃 JSON 的目标 415/400，注入值从未进业务逻辑，报告写「未检出」。
+`e2e/detect-surface-lab` 的 `/api/json` 实测：`--method POST --body '{"id":1}'
+--header 'Content-Type: application/json'` → **0 检出**（修复前）。
+
+**修复**：`resolveBodyChannel(parsed, declaredContentType?)` 增加第二入参——声明 JSON
+（`application/json` / `text/json` / `*+json`，大小写与 charset 不敏感）且 body 是
+对象/数组时走 `jsonBody`；新增 `declaredContentType(args)` 从 `--header` 与 `-r` 的
+headerObj 合流读取。未声明 CT 的扁平 body 行为逐位不变（既有 4 条用例继续守着）。
+
+**证据**：
+- `cli.jsonBody.test.js` +3 例（声明 JSON 扁平 → jsonBody 且叶子点 `id` / `+json` 与
+  charset 变体 / 未声明与非 JSON 声明零回归）。
+- 靶场 12 用例：`json-body` 真值 0/1 → **1/1**（3 条漏洞），`json-body-safe` 参数化对照 0 误报；
+  同轮其余 10 条（路径多段/`.json` 后缀/矩阵/重复键/基准）保持通过。
+
 ### 2026-10-25 批次 D154 · 路径注入面扩展（多段路径中间段 + 数据后缀段）
 
 **动机**：`--test-path` 只取「最后一个非空段，且含点即静态」。真 MariaDB 建的检测面探针

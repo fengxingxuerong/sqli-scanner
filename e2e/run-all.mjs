@@ -121,6 +121,10 @@ const LABS = [
   // 逐条标注真值；补前三个裁判都没有的 **HTTP header 注入面** 与参数名注入形态。
   // env：BENCHMARK_BASE（默认 https://127.0.0.1:8443/benchmark，deploy profile 是 https）。
   { name: 'benchmark-lab', desc: '外部裁判 4 号（OWASP Benchmark：官方标注真值须全检出 + header/参数名注入面）', entry: 'e2e/benchmark-lab/run.mjs', deps: [] },
+  // [D156] 外部裁判 5 号：VulnLab（PHP + pdo_sqlite，自拉自收）。同一应用三档实现
+  //（low 直拼 / medium 可绕黑名单 / high 参数化修复），修复档即误报诱饵；真值来自对方
+  // benchmark/manifest.yaml。env：VULNLAB_PORT / VULNLAB_DIR / PHP_EXE（默认 8135）。
+  { name: 'vulnlab-lab', desc: '外部裁判 5 号（VulnLab：三档真值 low/medium 须检出 + high 修复档零误报）', entry: 'e2e/vulnlab-lab/run.mjs', deps: [] },
   // [D118] 数据泄露实证：提取到的必须是真库名，不得是 payload 残片（真靶场 DVWA low）。
   { name: 'extract-proof', desc: '数据泄露实证（--dbs 必须拿到真库名而非 payload 残片）', entry: 'e2e/extract-proof/run.mjs', deps: [] },
   { name: 'pg-osshell', desc: 'PG os-shell 真机闭环（COPY FROM PROGRAM 落表 → 回显）', entry: 'e2e/oob-real-lab/pg-osshell.e2e.mjs', deps: ['pg'] },

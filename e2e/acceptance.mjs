@@ -754,6 +754,45 @@ const SUITES = [
     },
   },
   {
+    // [D156 2026-10-25] 外部裁判 5 号：VulnLab（PHP + pdo_sqlite，W43 对标排队项落地）。
+    // 补的形态：**同一应用里的三档实现**（low 直拼 / medium 可绕黑名单 / high 参数化修复），
+    // 修复档即误报诱饵——真值来自对方 benchmark/manifest.yaml（非本仓断言），且对方 CI
+    // 用 52 条绕过断言守护修复档。与前四位最大的差别：**自拉自收**（自动 clone + php -S
+    // 独立 ini 加载 pdo_sqlite）⇒ CI ubuntu 自带 php 即可真实执行，不是环境性 SKIP。
+    id: 'vulnlab',
+    title: '外部裁判 5 号（VulnLab：三档真值 low/medium 须检出 + high 参数化修复档零误报）',
+    needs: [],
+    optional: true, // php 缺失时 SKIP（自拉自收，正常环境应可执行）
+    run: () => run('node', ['e2e/vulnlab-lab/run.mjs']),
+    assert: (out) => {
+      if (/\[SKIP\] VulnLab 靶场不可/.test(out)) {
+        return { facts: { 外部裁判5: '跳过（php 未就绪）' }, pass: false, skipped: true, reason: 'VulnLab 需要 php -S + pdo_sqlite（PHP_EXE 可指定路径）' };
+      }
+      const m = /真值漏洞档位：检出 (\d+)\/(\d+)（漏检 (\d+)）/.exec(out);
+      const fp = /修复档误报：(\d+)\/1/.exec(out);
+      const weak = /证据不足（请求<\d+ 或结论不可信）：(\d+)/.exec(out);
+      // 分母防缩水：三档必须各自真跑（请求计数随行打印）——删档后 1/1 也能打印「通过」
+      const ranLow = /\[真值档\] low\.php.*请求 \d+/.test(out);
+      const ranMedium = /\[真值档\] medium\.php.*请求 \d+/.test(out);
+      const ranHigh = /\[修复档\] high\.php.*请求 \d+/.test(out);
+      const allTiers = ranLow && ranMedium && ranHigh;
+      const pass = /VulnLab 外部裁判通过/.test(out) && allTiers;
+      return {
+        facts: {
+          外部裁判5: pass ? '✅ 通过' : '❌ 未通过',
+          真值档位: m ? `${m[1]}/${m[2]}（漏检 ${m[3]}）` : '取不到',
+          修复档误报: fp ? `${fp[1]}/1` : '取不到',
+          证据不足: weak ? weak[1] : '0',
+          档位覆盖: allTiers ? 'low+medium+high（三档真跑）' : '缺失',
+        },
+        pass,
+        reason: pass ? null : !allTiers
+          ? '三档未全部实际执行（low/medium/high 必须各自真跑并打印请求计数）'
+          : '外部裁判未通过（漏检/修复档误报/证据不足，见 stdout）',
+      };
+    },
+  },
+  {
     // [D118 2026-10-20] 「数据泄露实证」验收：报告里最有说服力的一块，必须是真数据。
     // 此前 DVWA low 上 `--dbs` 拿到的是 **payload 残片**（响应回显 payload ⇒ 标记匹配命中
     // payload 自身），修复（提取前 stripEchoedPayload）后拿到真库名。本套件把这条钉在
