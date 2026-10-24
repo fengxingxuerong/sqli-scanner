@@ -5,6 +5,24 @@
 
 ---
 
+## 2026-10-24 批次 D151 · workflow 门禁再补一条：顶层 permissions 必填（最小权限进代码）
+
+**本批**：
+- 判据：每个 workflow 必须显式写顶层 `permissions:`（对象 / `read-all` / `write-all`），形态非法也报。
+  理由：不声明时 token 权限取决于仓库设置 ⇒ 权限不由代码决定、无法评审。
+- **当场抓到**：`ci.yml` 15 个 job 都没有顶层 permissions ⇒ 补 `permissions: contents: read`
+  （checkout / upload-artifact / audit 够用；`docker-publish`(packages: write) 与
+  `release`(contents: write) 的 job 级声明保持不变）。`codeql.yml` 本就声明了。
+- 测试 5 条（新增缺 permissions / 形态非法 2 例）；facts 因测试文件内容变化重采（数字不变）。
+
+### 待推进（仍未关闭）
+
+- permissions 只判「有声明 + 形态合法」，**不判最小化程度**（哪个 job 其实不需要那项权限）——
+  真要判需要按 job 逐个核对用到的 API，属人工评审范畴；目前的护栏是「默认最小 + 提权必须写在 job 上」。
+- 三个新 job（`desktop-package` / `docker-publish` / `codeql`）仍无首跑记录；结构已静态守住。
+
+---
+
 ## 2026-10-24 批次 D150 · workflow 门禁补两条（timeout 必填 / 硬编码凭据）
 
 **动机**：D149 立了 workflow 结构判据；本批补「成本」与「凭据」两类同样只能出事后才知道的判据。

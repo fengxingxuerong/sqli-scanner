@@ -83,6 +83,23 @@
 - **开源门面**：`CODE_OF_CONDUCT.md`、`CONTRIBUTING`/PR 模板、Issue 模板三份、`dependabot.yml`、
   `codeql.yml`（GitHub 代码扫描）；`docs/INDEX.md` 与 TODO 同步。
 
+### 2026-10-24 批次 D151 · workflow 门禁再补一条：顶层 permissions 必填（最小权限进代码）
+
+**动机**：D150 补了 timeout 与凭据，本批补「权限」——同一类「出事才知道」的形态。
+
+- **判据**：每个 workflow 必须显式声明顶层 `permissions:`（对象，或 `read-all`/`write-all`），
+  形态非法也报。理由：**不声明时 GITHUB_TOKEN 的权限取决于仓库/组织设置**（新建仓库默认只读，
+  老仓库可能是 read-write）——权限不由代码决定，就无法在评审里看见；需要更多权限的 job
+  自行覆盖（本仓已有两处：`docker-publish` → `packages: write`、`release` → `contents: write`）。
+- **判据当场抓到真事**：`ci.yml` 的 15 个 job **都没有顶层 permissions**（只有那两个 job 各自声明）
+  ⇒ 已在文件顶部补 `permissions: contents: read`（checkout / upload-artifact / npm audit 都够用；
+  两个提权 job 的 job 级声明保持不变）。`codeql.yml` 本来就声明了（`security-events: write` 等）。
+- 测试 5 条不变（新增 2 例：缺顶层 permissions、形态非法；synthetic 样本统一带上合规 permissions）。
+
+**顺带**：facts 重采（测试文件内容变更触发指纹变化）—— 前端 575 / 服务端 3749 / 徽章 4320 不变。
+
+判据：`node --test tests/ciWorkflows.guard.test.js` **5/5**；`npm run gate:close` **27/27**。
+
 ### 2026-10-24 批次 D150 · workflow 门禁补两条（timeout 必填 / 硬编码凭据）——当场抓到 9 个 job 缺超时
 
 **动机**：D149 把 workflow 结构判据立起来，本批补上两条**成本与凭据**类的判据 ——

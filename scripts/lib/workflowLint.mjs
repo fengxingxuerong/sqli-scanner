@@ -74,6 +74,27 @@ function lintTimeouts(doc, file, problems) {
   }
 }
 
+/**
+ * 顶层 `permissions:` 必须显式声明（D151）。
+ * 为什么：不声明时 GITHUB_TOKEN 的权限取决于**仓库/组织设置**（新建仓库默认只读，老仓库可能是
+ * read-write）——也就是「权限不由代码决定，无法评审」。本仓口径：最小权限写在文件里，
+ * 需要更多权限的 job 自己 `permissions:` 覆盖（例如 release 的 contents: write、
+ * docker-publish 的 packages: write）。
+ * @param {any} doc 已解析的 workflow
+ * @param {string} file 文件名
+ * @param {string[]} problems 累积问题
+ * @returns {void}
+ */
+function lintPermissions(doc, file, problems) {
+  const perms = doc.permissions;
+  if (perms === undefined) {
+    problems.push(`${file} —— 缺顶层 permissions（不声明则权限取决于仓库设置，无法评审；应写 contents: read 并按 job 提权）`);
+    return;
+  }
+  const okShape = typeof perms === 'string' ? /^(read-all|write-all)$/.test(perms) : perms !== null && typeof perms === 'object';
+  if (!okShape) problems.push(`${file}.permissions —— 形态非法：${JSON.stringify(perms)}（应为 read-all/write-all 或权限对象）`);
+}
+
 /** `needs:` 指向的 job 必须存在（依赖图断掉时 GitHub 报的是整份 workflow 无效） */
 function lintNeeds(doc, file, problems) {
   const names = new Set(Object.keys(doc.jobs ?? {}));
@@ -174,6 +195,7 @@ export function lintWorkflowDoc({ doc, file, emptyOk = false, text = null }) {
   const problems = [];
   if (text != null) problems.push(...lintNoHardcodedSecrets(text, file));
   if (!doc || typeof doc !== 'object') return [`${file} —— 顶层不是对象（YAML 解析失败或内容为空）`];
+  lintPermissions(doc, file, problems);
   if (!doc.jobs || typeof doc.jobs !== 'object' || Object.keys(doc.jobs).length === 0) {
     // 只有显式声明「允许没有 job」时才算过（例如占位文件）；默认视为错误，避免空 workflow 静默通过
     return problems.concat(emptyOk ? [] : [`${file} —— 没有 jobs（workflow 什么也不做）`]);

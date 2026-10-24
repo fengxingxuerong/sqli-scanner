@@ -51,7 +51,7 @@ function lintFile(full) {
 
 // ── ① 判据有牙：每条规则都要对合成样本有反应 ─────────────────────────────────
 test('自证：缺 runs-on / needs 断链 / 空步骤 / uses+run / 未钉版本 都必须被点名', () => {
-  const base = (jobs) => ({ doc: { jobs }, file: 'synthetic.yml' });
+  const base = (jobs) => ({ doc: { permissions: { contents: 'read' }, jobs }, file: 'synthetic.yml' });
   // 合规 job 的公共前缀：带上 timeout-minutes（D150 起必填），让下面的反例只暴露它要测的那条
   const okJob = (extra = {}) => ({ 'runs-on': 'ubuntu-latest', 'timeout-minutes': 10, ...extra });
   const cases = [
@@ -74,7 +74,17 @@ test('自证：缺 runs-on / needs 断链 / 空步骤 / uses+run / 未钉版本 
       /缺 with\.toolchain/,
     ],
     ['可复用工作流 job 不该写 runs-on', base({ a: { uses: 'o/r/.github/workflows/x.yml@v1', 'runs-on': 'ubuntu-latest' } }), /不该写 runs-on/],
-    ['没有 jobs', { doc: { on: 'push' }, file: 'synthetic.yml' }, /没有 jobs/],
+    ['没有 jobs', { doc: { permissions: { contents: 'read' }, on: 'push' }, file: 'synthetic.yml' }, /没有 jobs/],
+    [
+      '缺顶层 permissions ⇒ 必须报（权限不由代码决定就无法评审）',
+      { doc: { jobs: { a: okJob({ steps: [{ run: 'true' }] }) } }, file: 'synthetic.yml' },
+      /缺顶层 permissions/,
+    ],
+    [
+      'permissions 形态非法 ⇒ 必须报',
+      { doc: { permissions: 42, jobs: { a: okJob({ steps: [{ run: 'true' }] }) } }, file: 'synthetic.yml' },
+      /形态非法/,
+    ],
   ];
   for (const [label, input, re] of cases) {
     const problems = lintWorkflowDoc(input);
@@ -94,13 +104,13 @@ test('自证：缺 runs-on / needs 断链 / 空步骤 / uses+run / 未钉版本 
 
 test('自证：硬编码凭据必须被点名，且 secrets 表达式本身不算凭据', () => {
   const bad = lintWorkflowDoc({
-    doc: { jobs: { a: { 'runs-on': 'ubuntu-latest', 'timeout-minutes': 5, steps: [{ run: 'echo ghp_abcdefghijklmnopqrstuvwx' }] } } },
+    doc: { permissions: { contents: 'read' }, jobs: { a: { 'runs-on': 'ubuntu-latest', 'timeout-minutes': 5, steps: [{ run: 'echo ghp_abcdefghijklmnopqrstuvwx' }] } } },
     file: 'synthetic.yml',
     text: 'jobs:\n  a:\n    env:\n      TOKEN: ghp_abcdefghijklmnopqrstuvwx\n',
   });
   assert.ok(bad.some((p) => /疑似硬编码GitHub PAT/.test(p)), `硬编码 PAT 必须报出：${JSON.stringify(bad)}`);
   const good = lintWorkflowDoc({
-    doc: { jobs: { a: { 'runs-on': 'ubuntu-latest', 'timeout-minutes': 5, steps: [{ run: 'echo ${{ secrets.X }}' }] } } },
+    doc: { permissions: { contents: 'read' }, jobs: { a: { 'runs-on': 'ubuntu-latest', 'timeout-minutes': 5, steps: [{ run: 'echo ${{ secrets.X }}' }] } } },
     file: 'synthetic.yml',
     text: 'jobs:\n  a:\n    env:\n      TOKEN: ${{ secrets.SCAN_API_TOKEN }}\n',
   });

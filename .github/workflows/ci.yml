@@ -16,6 +16,12 @@ on:
     - cron: '0 3 * * *'
   workflow_dispatch:
 
+# [D151] 最小权限显式声明：不写时 GITHUB_TOKEN 的权限取决于仓库/组织设置（老仓库可能是
+# read-write），即「权限不由代码决定、无法评审」。这里给最小集合 contents: read；
+# 需要更多权限的 job 自行覆盖（docker-publish → packages: write；release → contents: write）。
+permissions:
+  contents: read
+
 jobs:
   lint:
     runs-on: ubuntu-latest
