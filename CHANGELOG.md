@@ -83,6 +83,29 @@
 - **开源门面**：`CODE_OF_CONDUCT.md`、`CONTRIBUTING`/PR 模板、Issue 模板三份、`dependabot.yml`、
   `codeql.yml`（GitHub 代码扫描）；`docs/INDEX.md` 与 TODO 同步。
 
+### 2026-10-24 批次 D149 · workflow 结构门禁（新增守卫 + 条件性版本豁免）
+
+**动机**：仓库现在有 4 个 workflow（`ci.yml` / `codeql.yml` / …），而它们的**结构错误**只有 GitHub
+才知道（push 上去才红，本地无从验证）。本机跑不了 Actions，但结构是纯静态可判的，而这类
+「本地全绿、CI 红」正是本仓反复治理的形态。
+
+- **`scripts/lib/workflowLint.mjs`**（纯函数，吃已解析对象）：判 `runs-on` 缺失 /
+  `needs:` 断链 / `steps` 为空 / 空步骤（既无 `uses` 也无 `run`）/ `uses`+`run` 同写 /
+  第三方 action **未钉版本** / 可复用工作流 job 误写 `runs-on` / 没有 `jobs`。
+- **`server/tests/ciWorkflows.guard.test.js`**（守卫类，自动进 wiring 收集）：
+  ① 对**合成的不合规样本**逐条自证「有牙」（8 条规则各一反例 + 合规样本 0 问题）；
+  ② 对仓库每个 workflow 跑一遍，要求 0 问题；③ 收集非空（防空转）。
+  另加「YAML 重复 job 名必须解析失败」一条（重名 job 会被静默覆盖）。
+- **判据当场抓到真事**：`dtolnay/rust-toolchain@master` 不钉版本号 —— 这是本仓 CI 注释里
+  论证过的**有意**选择（`@stable` 会每次拉最新 stable；版本由 `with.toolchain` +
+  `src-tauri/rust-toolchain.toml` 钉死）。于是把它做成**条件性豁免**：允许不钉，但
+  **必须在场 `with.toolchain`**，缺了就报「版本实际没被钉住」——
+  豁免不许退化成「随便不钉」（这是本仓「孤儿配置键逐个实名豁免」的同款纪律）。
+- 收口：新守卫被 `gate-close` 的 wiring 收集自动纳入（67 → **68** 个测试文件）。
+
+判据（本轮实测）：`node --test tests/ciWorkflows.guard.test.js` **4/4**；
+`gate-close --selftest` = 27 项 / wiring **68**；`npm run gate:close` **27/27**。
+
 ### 2026-10-24 批次 D148 · 验收前置靶场体检（`--labs-only` / `--require-labs=`，判据与 labs.mjs 同源）
 
 **动机**：D144 的 `labs.mjs` 解决了「靶场没起没人告诉你」，但**验收自己**仍然只会在跑完后

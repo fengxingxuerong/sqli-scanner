@@ -5,6 +5,26 @@
 
 ---
 
+## 2026-10-24 批次 D149 · workflow 结构门禁（新增守卫 + 条件性版本豁免）
+
+**动机**：4 个 workflow 的结构错误只有 GitHub 才知道（push 才红，本地无从验证）；结构却是静态可判的。
+
+**本批**：
+- `scripts/lib/workflowLint.mjs`：`runs-on` 缺失 / `needs` 断链 / 空 `steps` / 空步骤 /
+  `uses`+`run` 同写 / 未钉版本 action / 可复用 job 误写 `runs-on` / 没有 `jobs`。
+- `server/tests/ciWorkflows.guard.test.js`：8 条规则各有反例自证 + 仓库全部 workflow 0 问题 +
+  收集非空 + 「YAML 重复 job 名必须解析失败」。守卫自动进 wiring 收集（67 → **68**）。
+- **判据抓到真事**：`dtolnay/rust-toolchain@master` 未钉版本（CI 注释里论证过的有意选择）
+  ⇒ 做成**条件性豁免**：允许不钉，但必须同时给 `with.toolchain`，缺了就报。
+
+### 待推进（仍未关闭）
+
+- 只判**结构**，不判业务语义（哪个 job 该跑什么由各自门禁守）；workflow 的**运行**仍只能在
+  push/tag 后由 GitHub 验证（`desktop-package` / `docker-publish` / codeql 三个 job 尚无首跑记录）。
+- 若将来加多文件 workflow，`workflowLint` 的规则可直接复用（已按「吃已解析对象」设计，可合成样本单测）。
+
+---
+
 ## 2026-10-24 批次 D148 · 验收前置靶场体检（`--labs-only` / `--require-labs=`，判据与 labs.mjs 同源）
 
 **动机**：`labs.mjs` 解决了「靶场没起没人告诉你」，但**验收自己**仍只会把没起的靶场摊成 SKIP/BLOCKED。
