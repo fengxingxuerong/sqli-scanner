@@ -652,7 +652,18 @@ function applyBodyToArgs(args, parsed, ctForBody) {
     return;
   }
   const bodyJson = bodyToJsonString(parsed.body);
-  if (bodyJson) args.body = bodyJson;
+  if (bodyJson) { args.body = bodyJson; return; }
+  // [D160 2026-10-25] 声明了 JSON 却解析不出来：必须出声。
+  // 旧行为是静默丢弃 body ⇒ 引擎收到 0 个 body 注入点、扫描照常跑完、报告写「未检出」，
+  // 与「这个站没洞」完全同形。真实场景：抓包被截断（Burp 只存了 header）、body 是
+  // jsonp/前后空格/多段拼接、或 CT 写的是 json 但实际是自定义序列化。
+  if (/json/i.test(ctForBody)) {
+    const preview = String(parsed.body || '').slice(0, 60).replace(/\s+/g, ' ');
+    console.warn(
+      `  [!] -r 抓到 Content-Type: ${ctForBody.split(';')[0]}，但 body 不是合法 JSON（前 60 字：${preview || '(空)'}）。`
+      + '\n      本次不会生成任何 body 注入点 —— 「未检出」不代表没有注入，请核对抓包 body 是否完整。'
+    );
+  }
 }
 
 // 对标 sqlmap -r：读取请求文件 → 解析 → 覆盖 args 的 url/method/body/headers/cookie

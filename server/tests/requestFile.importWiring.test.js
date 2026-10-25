@@ -151,3 +151,27 @@ test('JSON -r：原样交给 jsonBody 通道，不经 urlencoded 启发式', asy
     assert.deepEqual((await bodyPoints(args)).sort(), ['note', 'user.id']);
   } finally { await t.done(); }
 });
+
+// [D160 2026-10-25] 声明 JSON 但 body 非法：必须出声。
+// 旧行为静默丢 body ⇒ 0 个 body 点、扫描照常跑完、报告写「未检出」——与「没洞」同形。
+test('[D160] JSON -r：CT=json 但 body 非法时显式告警（不静默丢 body）', async () => {
+  const t = await withTmp();
+  const warns = [];
+  const origWarn = console.warn;
+  console.warn = (...a) => { warns.push(a.join(' ')); };
+  try {
+    const req = [
+      'POST /api/order HTTP/1.1', 'Host: shop.example.com',
+      'Content-Type: application/json', '',
+      '{"user":{"id":1},  <-- 被截断', '',
+    ].join('\r\n');
+    const args = await viaDashR(req, (n, c) => t.write(n, c));
+    assert.ok(!args.body, `非法 JSON 不该被塞进 body（否则引擎会再崩一次），实际：${JSON.stringify(args.body)}`);
+    const hit = warns.find((w) => /body 不是合法 JSON/.test(w));
+    assert.ok(hit, `必须显式告警，实际 warn：${JSON.stringify(warns)}`);
+    assert.match(hit, /未检出.*不代表没有注入/, '告警必须点明「未检出」不可当作阴性结论');
+  } finally {
+    console.warn = origWarn;
+    await t.done();
+  }
+});

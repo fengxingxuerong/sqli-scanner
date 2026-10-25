@@ -1,7 +1,7 @@
 # 全方位验收门禁报告
 
-> 生成：2026-10-24T19:51:30.944Z　｜　执行器：`node e2e/acceptance.mjs`　｜　Node v24.18.0
-> 代码版本：`7dbf4be`　⚠️ **工作区 dirty**（跑验收前有 11 个未提交改动：e2e/detect-surface-lab/results/summary.json、e2e/detect-surface-lab/run.mjs、e2e/detect-surface-lab/server.mjs 等）—— **本报告不对应任何提交**
+> 生成：2026-10-24T21:25:17.946Z　｜　执行器：`node e2e/acceptance.mjs`　｜　Node v24.18.0
+> 代码版本：`f3a0e19`　⚠️ **工作区 dirty**（跑验收前有 3 个未提交改动：e2e/vulnlab-lab/results/external-judge-2026-10-24-d156.md、server/bin/cli/args.js、server/tests/requestFile.importWiring.test.js）—— **本报告不对应任何提交**
 > 套件范围：**26/26 跑出断言**　｜　判定：**全量**
 > 前置：MySQL 10.11.19-MariaDB @127.0.0.1:3306；secure_file_priv="D:\\tools\\mariadb\\files\\"
 
@@ -9,7 +9,7 @@
 
 | 结果 | 套件 | 事实 |
 |---|---|---|
-| ✅ PASS | 服务端单测 | tests=3773　pass=3769　fail=0　skipped=4 |
+| ✅ PASS | 服务端单测 | tests=3781　pass=3777　fail=0　skipped=4 |
 | ✅ PASS | 独立刁钻靶场（11 场景） | 漏洞场景=11/11　安全误报=0 |
 | ✅ PASS | 检测回归（19 场景） | PASS=19　FAIL=0 |
 | ✅ PASS | 真 MySQL 靶场 | PASS=11　FAIL=0 |
