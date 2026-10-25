@@ -67,6 +67,37 @@
 
 > 下一批次起的条目写在这里。发版时把本节整体升为 `## [x.y.z] - YYYY-MM-DD` 并补汇总段。
 
+### 2026-10-25 批次 D161 · CI 首曝修复：server 侧补 `yaml` devDependency（test-server 红 → 绿）
+
+**背景**：D152–D159 首次推送远端（f3a0e19）后 CI 首轮 `test-server` 红：
+`ciWorkflows.guard.test.js`（D149 的 workflow 结构守卫）`ERR_MODULE_NOT_FOUND: yaml`。
+根因是**环境差异首曝**：`yaml` 只在**根** package.json 的 devDependencies（本地跑测试经
+目录上溯能解析），CI 的 test-server 在 `server/` 用自己的清单 `npm ci`——server 的
+devDependencies 此前为空 ⇒ 装不到。守卫本身没问题，本地 gate:close 也看不见这类缺口
+（本地恰好有根 node_modules 兜底）。
+
+- 修复：server/package.json 补 `devDependencies.yaml@^2.9.1`（与根同版本线）+ lock 更新。
+- 已扫描 server/{src,tests,bin} 全部裸包导入对 server 清单的缺口：**仅 yaml 一处**
+  （其余均为相对导入的扫描误报）—— 不会出现下一个「首曝即红」的同类缺口。
+- 下游影响：acceptance / e2e-self-contained / desktop-package / docker / test-matrix
+  等上一轮全部挂在「前置门禁检查」快败（依赖 test-server 的设计行为），test-server
+  转绿后随本次推送自动复跑。
+
+### 2026-10-25 批次 D160 · `-r` 声明 JSON 但 body 非法时显式告警（不再静默丢 body）
+
+**缺陷**：`applyBodyToArgs` 对「CT=application/json 且 body 解析失败」静默返回 ——
+`args.body` 保持空，引擎收到 **0 个 body 注入点**，扫描照常跑完、报告写「未检出」。
+这与「这个站没有注入」完全同形，属于本仓反复治理的「静默假阴性」族。
+真实触发场景：抓包被截断（Burp 只存 header）、body 是 jsonp / 多段拼接、CT 写 json
+但实际是自定义序列化。
+
+**修复**：解析失败且 CT 含 json 时打一条显式告警（含前 60 字预览），并点明
+「本次不会生成任何 body 注入点 —— 『未检出』不代表没有注入，请核对抓包 body 是否完整」。
+非 JSON 的 CT（urlencoded 等）行为不变（它们本来就靠 urlencoded 启发式兜底）。
+
+**证据**：`requestFile.importWiring.test.js` +1 例（CT=json + 截断 body：`args.body` 必须
+为空、必须出现告警、告警必须点明阴性结论不成立）。
+
 ### 2026-10-25 批次 D159 · `-r` multipart 保真 + 文件字段 filename 注入面
 
 **缺陷（两层，都在 `-r` 抓包这条最常用的实战入口上）**：
