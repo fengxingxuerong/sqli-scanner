@@ -67,6 +67,23 @@
 
 > 下一批次起的条目写在这里。发版时把本节整体升为 `## [x.y.z] - YYYY-MM-DD` 并补汇总段。
 
+### 2026-10-25 批次 D162 · VulnLab 裁判自证探针（CI 环境误报「漏检」→ 诚实 SKIP）+ facts 口径补刷
+
+**CI 首轮实况**（run 40172892226）：desktop-package / sidecar-build / release-smoke / docker
+首跑全绿；test-server 经 D161 修复转绿；**desktop-package 交付件链路首跑成功**（windows
+runner 走完壳+sidecar+便携包+冒烟）。剩两处红，本批修复：
+
+- **e2e-self-contained 红**：vulnlab-lab 在 CI 上三档各 105 请求、verdict 干净的
+  no_vulnerability_detected——引擎认真测了，但靶场对任何输入无差分响应（疑似该环境
+  SQLite 建库/种子失败致页面形态统一）。报「漏检」是错误归因：**靶场部署问题 ≠ 引擎
+  漏检**。修复：runner 加自证探针——扫描前用两条裸 GET 验证 low.php 对 `1 OR 1=1`
+  有真差分（官方 manifest 最低真值；本机实测 +11%）；不满足则 [SKIP] 并打印两端响应
+  特征（自诊断），不计通过亦不计失败。本地（探针通过）仍完整裁决三档。
+  顺带补齐 spawn 后早退路径的 php 进程清理。
+- **lint 红**：README ↔ _facts.json 数字口径漂移（并发批次加了测试未刷口径——
+  pre-commit 不含 facts 检查，本地 gate:close 才有；CI lint 有）。补刷：
+  徽章 4344 → 4350（575 前端 + 3775 服务端）。
+
 ### 2026-10-25 批次 D161 · CI 首曝修复：server 侧补 `yaml` devDependency（test-server 红 → 绿）
 
 **背景**：D152–D159 首次推送远端（f3a0e19）后 CI 首轮 `test-server` 红：

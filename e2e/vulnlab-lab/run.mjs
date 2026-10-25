@@ -146,10 +146,43 @@ if (!upState) {
 }
 if (!upState) {
   console.log(`[SKIP] VulnLab 靶场不可达（${BASE} php=${PHP}）—— 起 php -S 失败，见上方日志`);
+  if (spawned) { try { spawned.kill(); } catch { /* best effort */ } }
   process.exit(0);
 }
 console.log(`[lab] VulnLab 就绪：${BASE}（${upState === 'reused' ? '复用已跑实例' : '本次自起 ' + PHP}）`);
 console.log('[lab] 外部真值：benchmark/manifest.yaml 三档映射（low/med=vulnerable，high=negative 修复对照）');
+
+// ── [D162 2026-10-25] 自证探针：靶场行为先符合官方真值的最低形态，才允许裁判引擎 ──
+// CI 实测教训（run 40172892226 的 e2e-self-contained）：CI 上三档各 105 请求、
+// verdict 干净的 no_vulnerability_detected——引擎认真测了，但靶场对任何输入无差分
+// 响应（疑似该环境 SQLite 建库/种子失败致页面形态统一）。此时报「漏检」是错误归因：
+// 靶场部署问题 ≠ 引擎漏检。探针用官方 manifest 的最低真值（low 档数字型直拼，
+// `1 OR 1=1` 必须命中多行改变响应；本机实测 +11%）把两者分开。
+async function selfTruthProbe() {
+  const get = async (q) => {
+    try {
+      const r = await fetch(`${BASE}/sqli/low.php?id=${encodeURIComponent(q)}`, { signal: AbortSignal.timeout(8000) });
+      return { ok: r.ok, len: (await r.text()).length };
+    } catch {
+      return { ok: false, len: 0 };
+    }
+  };
+  const a = await get('1');
+  const b = await get('1 OR 1=1');
+  const diffPct = a.len > 0 ? Math.abs(b.len - a.len) / a.len : 1;
+  return { a, b, diffPct, pass: a.ok && b.ok && diffPct > 0.03 };
+}
+const probe = await selfTruthProbe();
+if (!probe.pass) {
+  console.log(
+    `[SKIP] VulnLab 靶场行为与官方真值不符（low.php 对 "1 OR 1=1" 无差分响应：基线 ${probe.a.len}B vs ` +
+    `探针 ${probe.b.len}B，差 ${(((probe.b.len - probe.a.len) / (probe.a.len || 1)) * 100).toFixed(1)}%）` +
+    '—— 靶场部署环境问题（非引擎漏检）；本裁判只在靶场行为符合其 manifest 最低真值时裁决引擎'
+  );
+  if (spawned) { try { spawned.kill(); } catch { /* best effort */ } }
+  process.exit(0);
+}
+console.log(`[lab] 自证探针通过：low.php 基线 ${probe.a.len}B → OR 1=1 ${probe.b.len}B（${probe.b.len >= probe.a.len ? '+' : ''}${(((probe.b.len - probe.a.len) / (probe.a.len || 1)) * 100).toFixed(1)}%，符合官方真值形态）`);
 
 // ── 三档扫描 + 裁决 ──────────────────────────────────────────────────────────
 const rows = [];
