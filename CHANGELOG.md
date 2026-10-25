@@ -67,6 +67,19 @@
 
 > 下一批次起的条目写在这里。发版时把本节整体升为 `## [x.y.z] - YYYY-MM-DD` 并补汇总段。
 
+### 2026-10-25 批次 D163 · CI 第二轮两红收口：pl1 定库基线重生成（D157 修复实证）+ facts 覆盖率微调
+
+**CI 第二轮实况**（run 40174802954，@10a279b）：test-server/lint 之外全绿，
+desktop-package 因前置 cancelled 未跑（下一轮自动补）；剩两红均为**基线漂移**而非代码问题：
+
+- **artifact-drift 红**：`multi-engine-report.pl1.md` 与 CI 现跑差 4 行——但差异内容正是
+  D157「Derby/H2 定库修复」的**生效证据**（定库列 `-/-` → `H2/H2`、`-/Derby`、`Derby/-`）：
+  并发批次改了行为、入库基线没重生成。本批带 ENGINE_JARS 本地重跑 `CRS_PL=1 verify.mjs`
+  （全部断言通过、safe 零误报）重生成基线，5 行更新与 CI 现跑一致。
+- **facts 红**：D160 并发批次新增测试使服务端覆盖率微调（branches 84.48→84.46、
+  lines 91.58→91.45、functions 84.99→84.88），刷新采集（徽章仍 4350 = 575 + 3775）。
+  此前一轮的「修改(1) requestFile.importWiring.test.js」随 a8e03fa 入库后指纹自洽。
+
 ### 2026-10-25 批次 D162 · VulnLab 裁判自证探针（CI 环境误报「漏检」→ 诚实 SKIP）+ facts 口径补刷
 
 **CI 首轮实况**（run 40172892226）：desktop-package / sidecar-build / release-smoke / docker
