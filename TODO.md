@@ -5,6 +5,32 @@
 
 ---
 
+## 2026-10-25 批次 D166 · multipart 字段名注入面 + 一条跨载体挂死修复
+
+**动机**：`--test-param-names` 的宿主已有 query（D93）/ JSON 键（D103）/ XML 元素名（D105）/
+ORDER BY 固定后缀（D106），唯独 multipart 表单没有 —— 而「上传+排序+筛选」的表单页是
+multipart 最常见形态，后端把字段**名**当列名拼 SQL 时值注入扫不到。
+
+**本批**：
+- 发现：`testParamNames` + multipart 目标 ⇒ 每个文本字段建 `carrier='form'` 的 paramName 点
+  （`isMultipartTarget` 两处查 CT：`--header` 与 `-r` 的 auth.headers）。
+- 构造：`buildFormNameRequest` 改名不改值、boundary 取自声明头、name 引号转义。
+- 判定：复用 orderByKey 序数差分（`{名}, 1-- -` vs `{名}, 9999-- -`）。
+- **同时修的真 bug**：`buildInjectionRequest` 只在 Detector 层分流 paramName，指纹/边界
+  直接调它 ⇒ `data:{}` + multipart CT ⇒ axios 自造另一个 boundary ⇒ 目标等数据到超时。
+  现在入口按 carrier 分流（这条对所有 paramName 载体生效，不止 form）。
+- 靶场：`/api/form-sort` + `/safe/form-sort`；真值 0/1 → 1/1、0 误报；全套 16 用例全绿。
+
+### 待推进（仍未关闭）
+
+- 文件字段**名**暂不建点（改名后目标多半直接丢弃该 part，改了等于没测）。
+- 判定仍依赖「序数越界是错误」的方言语义：MSSQL/SQLite/Oracle 把裸整数当常量 ⇒ 诚实假阴性
+  （与 D106 同一刀口，未变）。
+- 若后端把**整个字段集合的键**拼进 SQL（如 `WHERE ${keys.join(' AND ')}`），单字段改名的
+  探针语义会变（多一个键而不是改一个键）——当前不覆盖，需要一个「增键」变体，单独评估。
+
+---
+
 ## 2026-10-25 批次 D160 · `-r` 声明 JSON 但 body 非法时显式告警
 
 **动机**：D159 修完 multipart 后顺手查了同一条入口的另外两路。JSON 这一路是：抓包声明

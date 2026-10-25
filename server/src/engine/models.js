@@ -47,7 +47,8 @@ import { defaults } from '../config/defaults.js';
  * @property {string} [decodedValue] 运行期补充：解码后的值
  * @property {boolean} [precisionMarked] 运行期补充：精确标记点（跳静态探测）
  * @property {string} [_baselineTitle] 运行期补充：基线页 <title>
- * @property {'json'|'xml'|'graphql'} [carrier] 载体（paramName 键名 / GraphQL 内联值位）
+ * @property {'json'|'xml'|'graphql'|'form'} [carrier] 载体（paramName 键名 / GraphQL 内联值位 / D166 multipart 字段名）
+ * @property {boolean} [fileField] D159：multipart 文件字段点（注入值写进 filename，不写文本内容）
  * @property {string} [graphqlPath] GraphQL 查询串在 jsonBody 内的点路径（如 query / 0.query）
  * @property {number} [graphqlLiteralStart] 内联字面量在查询串内的起始下标（含引号）
  * @property {number} [graphqlLiteralEnd] 内联字面量结束下标（开区间，不含引号后一位）

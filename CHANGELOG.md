@@ -67,6 +67,49 @@
 
 > 下一批次起的条目写在这里。发版时把本节整体升为 `## [x.y.z] - YYYY-MM-DD` 并补汇总段。
 
+### 2026-10-25 批次 D166 · multipart 字段名注入面（`--test-param-names` 补第五个宿主）+ 一条跨载体挂死修复
+
+**功能**：`--test-param-names` 的同族宿主此前是 query 键名（D93）、JSON 键名（D103）、
+XML 元素名（D105）、ORDER BY 固定后缀（D106），**multipart 表单没有**。而「上传 + 排序 +
+筛选」的表单页恰恰是 multipart 最常见的形态，后端把字段名当列名拼 SQL
+（`SELECT ... ORDER BY ${sort}`）时，字段值被参数化 ⇒ 值注入扫不到。本批补上：
+`TargetParser` 在 `testParamNames` + multipart 目标时为每个**文本字段**建
+`location='paramName'`、`carrier='form'` 的点（originalValue=字段名本身，文件字段名
+不建点——改名后目标多半直接丢弃该 part）；`buildFormNameRequest` 负责把字段
+`name="…"` 改成注入值而**内容原样保留**（boundary 取声明头、名内引号转义、键序保持）。
+
+**判定走的两条路（实测分工，别只记一条）**：标准赛道直接可判——error 通道
+`id' AND extractvalue(…)-- -` 拼进 ORDER BY 触发 MariaDB 语法错回显、boolean 通道
+`id,(SELECT 1)-- -` vs `id,(SELECT 1 UNION SELECT 2)-- -` 序数真假分化；orderByKey
+的序数差分（`{名}, 1-- -` 合法 vs `{名}, 9999-- -` 越界）经 `sortApplicable`
+（carrier≠xml）**自动覆盖 form 载体**，是标准赛道零命中时的兜底通道（本靶场上
+标准赛道已命中，兜底未触发——机制在，本批不夸大它的功劳）。
+
+**顺带修一条跨载体真 bug（不是本功能引入的）**：`buildInjectionRequest` 只在
+`Detector.buildRequest` 里按 carrier 分流 paramName 点，而**指纹/边界等路径直接调它** ⇒
+paramName 点落到「值注入」尾部，产出 `data:{}` + 继承来的 multipart Content-Type。
+axios 见到对象 data + multipart 会自己生成**另一个 boundary** 的 FormData，头又被覆盖成
+抓包里的 boundary ⇒ 目标找不到分隔符、一直等数据 ⇒ **请求挂到超时**（form 字段名点
+整轮指纹 8 次全超时，扫描卡死 60s、报告无结论）。修法：在 `buildInjectionRequest` 入口按
+carrier 分流（query/JSON/XML/form 各走专用构造器，对四种载体全生效）。
+
+**证据**：
+- 靶场 `e2e/detect-surface-lab` 新增 `/api/form-sort`（第一个文本字段的名当 ORDER BY
+  列名）+ `/safe/form-sort`（列名白名单 id/name，改名无效回落固定列）：真值
+  **0/1 → 1/1**（2 条命中：error + boolean，clause=orderby），安全对照 0 误报；
+  全套 **16 用例全绿**（真值 8/8、误报 0）。
+- **A/B 实证**（git worktree 切 HEAD 7b9d969 + 同一靶场）：HEAD 真值 **0 检出**
+  （日志自证只建了值/文件字段点、无字段名点）⇒ 检出能力确由本批引入，非靶场偶合。
+- `paramName.multipart.test.js` +9 例（发现/默认关闭/非 multipart 不建点 / auth.headers
+  单边声明也认 / 基线保值 / 改名不改值 / 名内引号转义 / **入口分流不得产出 data:{}** /
+  query 载体不被 form 分支抢走 / JSON 载体归位回归）。
+
+**顺带修跑批器一个误报 BLOCKED（`run.mjs` 的 alive 探活）**：本机密集跑批下，
+`fetch(healthz)` 首包偶发 **ECONNRESET**（undici 池化连接被靶场 5s keep-alive
+空闲超时关闭后复用；靶场进程实证存活——任务管理的靶场在 BLOCKED 时仍在服务），
+单次失败即判「靶场没了」⇒ 整场 BLOCKED、真值/误报数字全作废。修法：探活带两次
+重试 + 首错打码留证。真死的靶场三次全败，BLOCKED 语义不变。
+
 ### 2026-10-25 批次 D165 · 时间通道测试的平台时钟预算（mac 矩阵红收口，等比缩放非放宽）
 
 **CI 连续两轮 mac 红的同一根因**（run 40177681970 与 40180540456 交替呈现两种病征）：

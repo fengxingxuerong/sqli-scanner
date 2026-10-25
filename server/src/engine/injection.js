@@ -158,7 +158,10 @@ function buildMultipartBody(fields, boundary, fileParts, injectedFile) {
   const esc = (s) => String(s ?? '').replace(/"/g, '\\"').replace(/[\r\n]/g, '');
   for (const [k, v] of Object.entries(fields || {})) {
     if (injectedFile && k === injectedFile.name) continue; // 文件字段不重复发文本段
-    chunks.push(`--${boundary}\r\nContent-Disposition: form-data; name="${k}"\r\n\r\n${v ?? ''}\r\n`);
+    // [D166] 字段名同样过 esc：paramName 点（carrier='form'）注入时名就是载荷，
+    // 名内含引号不转义会提前闭合 Content-Disposition ⇒ 畸形报文（文件字段名早已
+    // 如此，文本字段名此前不注入所以没暴露——同一处防护，两类字段对齐）。
+    chunks.push(`--${boundary}\r\nContent-Disposition: form-data; name="${esc(k)}"\r\n\r\n${v ?? ''}\r\n`);
   }
   for (const fp of Array.isArray(fileParts) ? fileParts : []) {
     if (!fp || !fp.name) continue;
@@ -244,7 +247,31 @@ function applyJsonBodyInjection(req, target, point, injected) {
   req.headers['Content-Type'] = 'application/json';
 }
 
+// @returns 显式声明的原因：TS 对返回联合做子型归约（UnionReduction.Subtype），本函数
+// 各分支形状异构且多处含 any 字段，直连分支的 `{...,sql}` 形状会被宽形状结构性吸收 ⇒
+// 推断类型丢失 `sql`，Extractor/pocBuilder 的 `req.sql` 报 TS2339（D166 实测）。
+/**
+ * @param {object} target 扫描目标（mode='direct' 时走 SQL 模板直连分支）
+ * @param {object} point 注入点（location='paramName' 的点在入口按 carrier 分流）
+ * @param {string} value 注入值（检测器已拼好的 payload；基线请求传 point.originalValue）
+ * @returns {{method: any, url: any, params: any, data: any, headers: any, sql?: string}} 请求对象。
+ *   query/body/header/cookie/表单/JSON/XML/form 各分支返回形状异构，字段故放宽为 any；
+ *   直连模式额外带 `sql`（由 DirectConnector 执行），HTTP 模式下 HttpClient 忽略该字段。
+ */
 export function buildInjectionRequest(target, point, value) {
+  // [D166 2026-10-25] 参数名点（location='paramName'）必须在**本函数入口**就分流到各载体的
+  // 专用构造器。原先只在 Detector.buildRequest 里分流，而指纹/边界/预筛选等路径是直接调
+  // 本函数的 —— 于是 paramName 点在这里落到「值注入」的尾部，产出 `data:{}` + 继承来的
+  // `Content-Type: multipart/form-data`。axios 见到对象 data + multipart 会自己生成一份
+  // **另一个 boundary** 的 FormData，而我们又把头覆盖成抓包里的 boundary ⇒ 目标找不到分隔符，
+  // 一直等更多数据 ⇒ 请求挂到超时（实测：form 字段名点整轮指纹 8 次全超时，扫描卡死 60s）。
+  // 各 builder 都很轻（纯字符串拼装），在上游分流没有额外成本。
+  if (point && point.location === 'paramName') {
+    if (point.carrier === 'json') return buildJsonKeyRequest(target, point, value);
+    if (point.carrier === 'xml') return buildXmlKeyRequest(target, point, value);
+    if (point.carrier === 'form') return buildFormNameRequest(target, point, value);
+    return buildParamNameRequest(target, point, value);
+  }
   // 先包裹 prefix/suffix（对标 sqlmap --prefix/--suffix），再按注入点位置拼入请求
   const wrapped = applyPrefixSuffix(target, point, value);
   // [编码参数] 参数值本身是 base64 / 0x-hex 传输时，payload 必须先编码成同样形态再发：
@@ -890,5 +917,57 @@ export function buildXmlKeyRequest(target, point, value) {
   }
   // 路径失效/非法新名：原样报文 —— 至少不发坏报文（验证器会因「-0 与基线全等但 -1 也全等」
   // 自然判非注入，不会产生误报；坏报文则可能污染目标侧状态）。
+  return { method, url, params: {}, data, headers };
+}
+
+// ============================================================================
+// [D166 2026-10-25] multipart **字段名**注入点的请求构造（carrier='form'）
+// ----------------------------------------------------------------------------
+// 场景（D93 query 键名的第五个宿主）：上传+排序+筛选类表单页，后端把表单字段**名**
+// 当列名拼进 SQL（`SELECT ... ORDER BY ${sort}`，值被参数化或干脆忽略）⇒ 值注入
+// 扫不到，只有改字段名能打。
+//
+// 与 buildJsonKeyRequest 对齐的三条语义（D93 实测教训，缺一条即静默假阴性）：
+//   · 基线保值：`value === point.originalValue` 时字段名/值/文件段全部原样
+//     （否则基线请求自身就是注入形态，门控与预筛选全歪）；
+//   · 改键不改值：注入时仅把目标字段的 name="…" 换成载荷，**该字段的值原样保留**，
+//     其余文本字段与文件段（filename/contentType）原样保留；
+//   · boundary 取自目标声明的 Content-Type（抓包里的 boundary 目标侧认得），
+//     没声明才生成新的；CT 头随体重写为声明的 boundary（与 D159 同口径）。
+//
+// 载荷不套 applyPrefixSuffix 之外的任何编码：名是 Content-Disposition 属性值，
+// buildMultipartBody 内部对引号/CRLF 做转义（防提前闭合属性）；charencode 类
+// tamper 对属性名无意义（编码形态的名称目标侧原样读入，不会先解码）。
+// 诚实边界：仅 multipart 文本字段（TargetParser._appendFormNamePoints 只建文本
+// 字段点；文件字段名改名后目标多半丢弃该 part，D166 不建点）。
+/**
+ * @param {object} target 目标（用 method / baseUrl / headerParams / bodyParams / fileParts）
+ * @param {object} point 注入点（location='paramName'、carrier='form'，originalValue 为字段名本身）
+ * @param {string} value 注入值（检测器已拼好 payload）
+ * @returns {{method: string, url: string, params: object, data: string, headers: object}}
+ */
+export function buildFormNameRequest(target, point, value) {
+  const wrapped = applyPrefixSuffix(target, point, value);
+  const method = point.formMethod || target.method || 'POST';
+  const url = point.actionUrl || target.baseUrl;
+  const headers = { ...(target.headerParams || {}) };
+  const declaredCt = declaredHeaderValue(target, 'content-type');
+  const existing = /boundary=(?:"([^"]+)"|([^;\s]+))/i.exec(declaredCt);
+  const boundary = (existing?.[1] || existing?.[2] || `----SqlScanBoundary${nanoidLc()}`).trim();
+  const fields = { ...(target.bodyParams || {}) };
+  // 基线请求：原字段名、原值（与普通抓包重放语义一致）
+  if (value !== point.originalValue) {
+    // 改名不改值：目标字段名换成载荷，值原样；其余字段原样。
+    // 按原序重建（delete+重插会把字段挪到末尾——「取第一个字段名当列名」的
+    // 后端会因此读错字段，多字段表单下这是静默改变攻击面）。
+    const renamed = {};
+    for (const [k, v] of Object.entries(fields)) {
+      renamed[k === point.param ? wrapped : k] = v;
+    }
+    for (const k of Object.keys(fields)) delete fields[k];
+    Object.assign(fields, renamed);
+  }
+  const data = buildMultipartBody(fields, boundary, target && target.fileParts, null);
+  headers['Content-Type'] = `multipart/form-data; boundary=${boundary}`;
   return { method, url, params: {}, data, headers };
 }

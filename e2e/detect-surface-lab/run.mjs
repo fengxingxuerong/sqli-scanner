@@ -54,6 +54,18 @@ const CASES = [
     id: 'multipart-file-safe', vuln: false, carrier: 'multipart 文件字段（安全对照）',
     multipart: { path: '/safe/upload', filename: 'alice', title: 'report' },
   },
+  // [D166] `-r` 抓包导入的 multipart 排序表单：注入面在文本字段的**名**上
+  // （后端把字段名当 ORDER BY 列名，值被忽略）——`--test-param-names` 的第五个宿主。
+  // 旧实现：form carrier 点落到 body 分支产出 data:{} + 继承 multipart CT ⇒ axios
+  // 自造另一个 boundary ⇒ 目标等数据到超时（整轮指纹挂死，报告无结论）。
+  {
+    id: 'multipart-form-name', vuln: true, carrier: 'multipart 字段名（序数差分）',
+    formSort: { path: '/api/form-sort' }, paramNames: true,
+  },
+  {
+    id: 'multipart-form-name-safe', vuln: false, carrier: 'multipart 字段名（安全对照）',
+    formSort: { path: '/safe/form-sort' }, paramNames: true,
+  },
 ];
 
 /**
@@ -74,6 +86,34 @@ function buildMultipartRequest(spec) {
     spec.title,
     `--${B}`,
     `Content-Disposition: form-data; name="avatar"; filename="${spec.filename}"`,
+    'Content-Type: image/png',
+    '',
+    'PNGDATA',
+    `--${B}--`,
+    '',
+  ].join('\r\n');
+}
+
+/**
+ * [D166] 造一份 Burp 形态的 multipart 排序表单抓包：一个文本字段 `id`（值 1）
+ * + 一个文件字段 `avatar`。靶场把第一个**文本字段的名**当 ORDER BY 列名 ——
+ * 注入面在 name 上，值被忽略（这正是只有改名能打的形态）。
+ * @param {{path:string}} spec
+ * @returns {string} 请求原文
+ */
+function buildFormSortRequest(spec) {
+  const B = '----DSLabFormBoundary7MA4';
+  return [
+    `POST ${spec.path} HTTP/1.1`,
+    `Host: 127.0.0.1:${PORT}`,
+    `Content-Type: multipart/form-data; boundary=${B}`,
+    '',
+    `--${B}`,
+    'Content-Disposition: form-data; name="id"',
+    '',
+    '1',
+    `--${B}`,
+    'Content-Disposition: form-data; name="avatar"; filename="cat.png"',
     'Content-Type: image/png',
     '',
     'PNGDATA',
@@ -123,11 +163,18 @@ function scanCase(c) {
     const reqPath = path.join(RESULTS, `${c.id}.req.txt`);
     fs.writeFileSync(reqPath, buildMultipartRequest(c.multipart));
     targetArgs = ['-r', reqPath];
+  } else if (c.formSort) {
+    // [D166] 同上：字段名注入点只有 -r 导入的 multipart 目标上才建
+    const reqPath = path.join(RESULTS, `${c.id}.req.txt`);
+    fs.writeFileSync(reqPath, buildFormSortRequest(c.formSort));
+    targetArgs = ['-r', reqPath];
   } else {
     targetArgs = ['-u', BASE + c.path];
   }
   if (c.method) extra.push('--method', c.method);
   if (c.body) extra.push('--body', c.body);
+  // [D166] --test-param-names 按用例开启（默认关闭，零回归）
+  if (c.paramNames) extra.push('--test-param-names');
   // [D159] --test-path 按用例开启：路径点对 multipart 目标没有意义，
   //   而且会给只认 /api/upload 的靶场塞一条 404 请求（实测把整场拖到 --timeout）
   if (c.testPath) extra.push('--test-path');
@@ -162,16 +209,25 @@ function scanCase(c) {
 }
 
 /**
- * 靶场是否还活着
+ * 靶场是否还活着。
+ *
+ * [D166] 带两次重试 + 首错落日志：本机密集跑批下 fetch 会偶发**瞬断**（靶场进程
+ * 实证存活——任务管理的靶场在 BLOCKED 时仍在服务 curl 正常），单次失败即判
+ * 「靶场没了」会把「一次瞬断」误报成整场 BLOCKED（真漏检/误报数字全作废）。
+ * 真死的靶场三次全败，BLOCKED 语义不变；首错打码是为留证据（哪个瞬断成因）。
  * @returns {Promise<boolean>}
  */
 async function alive() {
-  try {
-    const r = await fetch(`${BASE}/healthz`);
-    return r.ok;
-  } catch {
-    return false;
+  for (let i = 0; i < 3; i += 1) {
+    try {
+      const r = await fetch(`${BASE}/healthz`);
+      if (r.ok) return true;
+    } catch (e) {
+      if (i === 0) console.error(`[alive] 探活瞬断（重试中）：${e.cause ? e.cause.code || e.cause.message : e.message}`);
+    }
+    await new Promise((r) => setTimeout(r, 1000));
   }
+  return false;
 }
 
 const only = parseOnly(process.argv.slice(2));
@@ -194,7 +250,7 @@ child.stderr.on('data', (d) => { serverLog += d.toString(); });
 let exitCode = 0;
 try {
   await waitReady();
-  console.log('═══ 检测面探针（D154/D155）═══');
+  console.log('═══ 检测面探针（D154/D155/D159/D166）═══');
   const rows = [];
   for (const c of cases) {
     // 每条用例前先探活：靶场挂掉必须 BLOCKED，不能把「靶场没了」记成「引擎漏检」

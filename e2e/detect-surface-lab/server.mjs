@@ -1,8 +1,8 @@
-// 检测面探针靶场（D154/D155）
+// 检测面探针靶场（D154/D155/D159/D166）
 //
 // 目的：现有靶场把「数值/字符串/LIKE/ORDER BY/POST/JSON/Cookie/Header/Path/二阶/堆叠」
 // 都覆盖了，但**注入点所在的载体形态**还有几类没人用真库验过。本靶场只做一件事：
-// 把每类载体单独做成一个真实可注入的端点 + 一个同形态的安全对照（参数化），
+// 把每类载体单独做成一个真实可注入的端点 + 一个同形态的安全对照（参数化/白名单），
 // 让 `run.mjs` 逐条实测「引擎到底测没测到这个位置」。
 //
 // 载体清单（全部真 MariaDB，SQL 拼接方式写死为最原始的字符串拼接）：
@@ -13,6 +13,9 @@
 //   3. 矩阵参数         GET /api/matrix;cat=1       —— JAX-RS/Spring 的 `;name=value`，
 //      现有实现把整段当一个值替换，`;` 前的名字与 `=` 后的值一起被破坏。
 //   4. 重复 query 键    GET /dup?a=1&a=2            —— 后端取末值时，引擎替换首值等于没注入。
+//   5. [D155] JSON body 载体（只吃 application/json，CT 不对 415）。
+//   6. [D159] multipart 文件字段 filename（上传接口把文件名落库再拼 SQL）。
+//   7. [D166] multipart 文本字段**名**（`--test-param-names`：后端把字段名当排序列）。
 //
 // 安全对照（同名形态、参数化）：/safe/... 四个端点，要求 0 误报。
 //
@@ -232,6 +235,60 @@ function handleUpload(req, res, safe) {
   });
 }
 
+/**
+ * [D166] multipart **字段名**当排序列的端点：**只**接受 multipart/form-data，且把
+ * 第一个**文本字段的名**（不是值）拼进 ORDER BY —— 「上传+排序+筛选」表单页的常见
+ * 形态：字段值被参数化/忽略，列名却来自字段名（框架把 field name 当排序列的那种）。
+ *
+ * 用途：验证 `--test-param-names` 的第五个宿主（form carrier）——把字段 name="…"
+ * 改成序数探针（`id, 1-- -` 合法 vs `id, 9999-- -` 越界）时到底检不检出。
+ * 安全对照：列名白名单（id/name），改名不在白名单 ⇒ 回落固定列，两探针同页 ⇒ 0 误报。
+ * @param {import('node:http').IncomingMessage} req
+ * @param {http.ServerResponse} res
+ * @param {boolean} safe 是否走白名单（安全对照）
+ */
+function handleFormSort(req, res, safe) {
+  const ct = String(req.headers['content-type'] || '');
+  if (!/^multipart\/form-data/i.test(ct)) {
+    res.writeHead(415, { 'Content-Type': 'text/plain' });
+    res.end('unsupported media type: expected multipart/form-data');
+    return;
+  }
+  const bm = /boundary=(?:"([^"]+)"|([^;\s]+))/i.exec(ct);
+  if (!bm) {
+    res.writeHead(400, { 'Content-Type': 'text/plain' });
+    res.end('missing boundary');
+    return;
+  }
+  const boundary = bm[1] || bm[2];
+  let raw = '';
+  req.on('data', (c) => {
+    raw += c;
+    if (raw.length > 256 * 1024) req.destroy();
+  });
+  req.on('end', () => {
+    // 按报文顺序收集**文本字段名**（文件段跳过——它的名不是排序列）；
+    // quoted-pair 反转义（`name="id\""` 的名是 `id"`，RFC 2045 口径，与真实框架一致）
+    const names = [];
+    for (const part of raw.split(`--${boundary}`)) {
+      if (/filename="/i.test(part)) continue;
+      const m = /name="([^"]*)"/i.exec(part);
+      if (m) names.push(m[1].replace(/\\"/g, '"'));
+    }
+    const firstName = names[0];
+    if (!firstName) {
+      res.writeHead(400, { 'Content-Type': 'text/plain' });
+      res.end('no text field');
+      return;
+    }
+    let col = firstName;
+    if (safe && !['id', 'name'].includes(col)) col = 'id'; // 列名白名单：改名无效
+    // 安全对照的 col 已被白名单收敛为字面量 id/name（不是用户输入），可直接拼接；
+    //  vulnerable 侧就是缺陷本体：字段名原样进 ORDER BY。
+    void respond(res, () => runSql(`SELECT id,name FROM users ORDER BY ${col}`));
+  });
+}
+
 await setupDb();
 const server = http.createServer((req, res) => {
   let u;
@@ -255,6 +312,11 @@ const server = http.createServer((req, res) => {
   // [D159] multipart 上传：注入面在文件字段的 filename 上
   if (u.pathname === '/api/upload' || u.pathname === '/safe/upload') {
     handleUpload(req, res, u.pathname === '/safe/upload');
+    return;
+  }
+  // [D166] multipart 字段名：注入面在文本字段的 name 上（--test-param-names）
+  if (u.pathname === '/api/form-sort' || u.pathname === '/safe/form-sort') {
+    handleFormSort(req, res, u.pathname === '/safe/form-sort');
     return;
   }
   try {

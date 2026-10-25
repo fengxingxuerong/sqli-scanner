@@ -22,6 +22,30 @@ import { applyParamSelection } from './paramSelection.js';
 // 反 CSRF 字段名正则（命中即记为 csrfTokenName）
 const CSRF_RE = /^(csrf|_token|__RequestVerificationToken|authenticity_token)$/i;
 
+// [D166 2026-10-25] 目标是否 multipart 表单（声明 Content-Type 判定）。
+// 声明头**两处都看**：`--header` 走 target.headerParams，`-r` 抓包的请求头走
+// config.auth.headers —— D159 的教训：只看前者时，`-r` 的 multipart 目标会被判成
+// 非 multipart ⇒ 按 urlencoded 发、却带着 auth 那边的 multipart Content-Type
+// （报文与声明错配，只认 multipart 的目标 415，全点被剪）。
+// 与 injection.js 的 declaredHeaderValue 同口径（不跨模块 import：TargetParser
+// 不该依赖发送侧私有函数，两边各自守自己的断言）。
+/**
+ * @param {import('./models.js').Target} target
+ * @returns {boolean}
+ */
+function isMultipartTarget(target) {
+  /** @param {any} obj */
+  const pick = (obj) => {
+    if (!obj || typeof obj !== 'object') return '';
+    const k = Object.keys(obj).find((x) => /^content-type$/i.test(x));
+    return k ? String(obj[k]) : '';
+  };
+  const ct =
+    pick(target && target.headerParams) ||
+    pick(target && target.config && target.config.auth && target.config.auth.headers);
+  return /^multipart\/form-data/i.test(ct);
+}
+
 // [D154] --test-path 的段分类表（详见 _discoverPathPoints 的 JSDoc）
 // 静态资源后缀：命中即整体跳过（注入它们既无意义，又会让 SPA 的 /a/app.js 之类误报 500）
 const PATH_STATIC_EXT = new Set([
@@ -108,6 +132,14 @@ export class TargetParser {
 
     // 3.1) multipart **文件字段**（filename）注入点（实现与根因见 _appendFilePartsPoints）
     this._appendFilePartsPoints(points, target);
+
+    // 3.2) [D166 2026-10-25] multipart **字段名**（键名）注入点（opt-in --test-param-names）。
+    //      与 D93/D103/D105/D106 同一族：后端把表单字段名当列名拼 SQL（`ORDER BY ${sort}`），
+    //      值被参数化 ⇒ 只有改名能打。此前这一族的宿主只有 query / JSON 键 / XML 元素名，
+    //      multipart 表单（上传+排序+筛选那类页面最常见的形态）完全没接。
+    if (config.testParamNames === true && isMultipartTarget(target)) {
+      this._appendFormNamePoints(points, target);
+    }
 
     // 3.5) JSON body 嵌套叶子注入点（level≥1，jsonBody 传入时生效）
     // [P1 批次 2026-09-08] 真实 API 场景（POST application/json）的注入点发现：
@@ -352,6 +384,38 @@ export class TargetParser {
       points.push(createInjectionPoint('body', fp.name, fp.filename || '', {
         fileField: true,
         formValues: { ...(target.bodyParams || {}) },
+      }));
+    }
+  }
+
+  /**
+   * [D166 2026-10-25] multipart **字段名**（键名）注入点（opt-in --test-param-names）。
+   *
+   * 背景：`--test-param-names` 的同族宿主此前是 query 键名（D93）、JSON 键名（D103）、
+   * XML 元素名（D105）、ORDER BY 固定后缀（D106），multipart 表单没有——而「上传 +
+   * 排序 + 筛选」的表单页恰恰是 multipart 最常见的形态：后端把表单字段**名**当列名
+   * 拼 SQL（`SELECT ... ORDER BY ${sort}`，字段值被参数化/忽略）⇒ 值注入扫不到，
+   * 只有改名能打。本函数补上这个宿主。
+   *
+   * 点形态与 query 键名同构（D93）：location='paramName'、carrier='form'、
+   * originalValue = 字段名本身（真实名，非引号段形态）、paramNameValue = 字段原值
+   * （构造侧改名时值原样保留）。只覆盖**文本字段**（target.bodyParams）——文件字段名
+   * 改名后目标多半直接丢弃该 part（改了等于没测），D166 批次明确不建点（见 TODO.md）。
+   * 去重键带 carrier（_dedupePoints）：query 键名与表单字段名可能同名，不互相去重。
+   *
+   * 判定由 `detectorSupport/orderByKey.js` 的序数差分驱动（`{k}, 1-- -` vs `{k}, 9999-- -`
+   * 页面是否分化），本函数只负责把「字段名」变成点位。
+   *
+   * @param {import('./models.js').InjectionPoint[]} points
+   * @param {import('./models.js').Target} target
+   */
+  _appendFormNamePoints(points, target) {
+    const fields = target.bodyParams || {};
+    for (const [k, v] of Object.entries(fields)) {
+      points.push(createInjectionPoint('paramName', k, k, {
+        carrier: 'form',
+        paramNameValue: String(v),
+        formValues: { ...fields },
       }));
     }
   }
