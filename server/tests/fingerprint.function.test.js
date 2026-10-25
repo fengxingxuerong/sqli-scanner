@@ -66,3 +66,26 @@ test('[D167] 负向对照自证失败（报错页≈真基线页）⇒ 不信探
   });
   assert.equal(dbms, null);
 });
+
+// ----------------------------------------------------------------------------
+// [D167 接线] `_fingerprintByFallbacks` 的调用序（fingerprint() 第 5.5/6 步的入口）：
+// 函数存在性探针是纯布尔请求（无 sleep），时间向量要 2s×N 串行等待 —— 顺序错会白付
+// 等待成本，短路错会在函数通道已定库后再发延时探针。e2e 盲注场景走到该入口，但
+// 「先函数后时间、命中即停」的顺序本身只在单元层钉得住。
+// ----------------------------------------------------------------------------
+test('[D167] 接线：函数通道命中 ⇒ 即停（时间向量不发起）；未命中 ⇒ 回落时间向量', async () => {
+  const fp = new DBFingerprinter();
+  /** @type {string[]} */
+  const calls = [];
+  const args = [{}, {}, {}, {}, (s) => s, {}, 0];
+  fp._fingerprintByFunction = async () => { calls.push('fn'); return 'HSQLDB'; };
+  fp._fingerprintByTime = async () => { calls.push('time'); return 'MySQL'; };
+  assert.equal(await fp._fingerprintByFallbacks(...args), 'HSQLDB');
+  assert.deepEqual(calls, ['fn'], '函数通道命中后不得再发时间向量探针');
+
+  calls.length = 0;
+  fp._fingerprintByFunction = async () => { calls.push('fn'); return null; };
+  fp._fingerprintByTime = async (...a) => { calls.push('time'); return `MySQL#${a[6]}`; };
+  assert.equal(await fp._fingerprintByFallbacks(...args), 'MySQL#0', '未命中须回落时间向量且透传 baselineRtt');
+  assert.deepEqual(calls, ['fn', 'time']);
+});
