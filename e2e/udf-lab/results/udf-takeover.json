@@ -1,10 +1,10 @@
 {
-  "generatedAt": "2026-09-20T12:37:11.263Z",
+  "generatedAt": "2026-10-25T16:18:45.153Z",
   "mysqlVersion": "8.0.28",
   "pluginDir": "D:/projects/sqli-scanner/e2e/udf-lab/.mysql-sandbox/plugin/",
   "secureFilePriv": "D:\\projects\\sqli-scanner\\e2e\\udf-lab\\.mysql-sandbox\\plugin\\",
   "registered": 1,
-  "commandOutput": "udf_lab_31095",
+  "commandOutput": "udf_lab_25001",
   "whoami": "Admin（无密码）",
   "osShell": {
     "ok": true,

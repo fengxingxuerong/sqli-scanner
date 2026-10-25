@@ -1,4 +1,4 @@
-# 外部裁判 5 号 · VulnLab（2026-10-25T13:15:32.737Z）
+# 外部裁判 5 号 · VulnLab（2026-10-25T16:16:54.832Z）
 
 - 靶场：https://github.com/hediwen831-star/vulnlab（C:\Users\Admin（无密码）\AppData\Local\Temp\verify-labs\vulnlab，php=D:/tools/php83/php.exe，http://127.0.0.1:8135）
 - 真值来源：对方 benchmark/manifest.yaml（三档映射 + high 档 52 条绕过断言守护）
