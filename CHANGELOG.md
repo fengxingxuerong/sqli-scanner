@@ -67,6 +67,34 @@
 
 > 下一批次起的条目写在这里。发版时把本节整体升为 `## [x.y.z] - YYYY-MM-DD` 并补汇总段。
 
+### 2026-10-25 批次 D167 · 函数存在性定库（blind 档：无回显、无报错也能定库）
+
+**缺口**：H2/HSQLDB/Derby 的 `blind` 场景（目标吞掉报错、页面只有「查到/没查到」两态）
+此前 `定库=null` —— 报错签名没有材料、时间向量对这三家又不可用（H2 的 SLEEP 是毫秒且
+故意不进盲探，Derby/HSQLDB 无延时原语）。定不出库 ⇒ 注释符/提取语句/payload 族按默认选。
+
+**修复**：新增第三条通道「函数存在性」——把各库**独占函数**放进恒真条件，用布尔差分判它
+是否真的存在：
+- 真基线 `AND 1=1` / 假基线 `AND 1=2` 必须可区分（否则该点没有布尔差分，通道不适用）；
+- 负向对照 `AND <不存在的函数>() IS NOT NULL`：对照页若≈真基线页 ⇒ 目标把"函数不存在"
+  渲染成正常页，探针页不能当证据 ⇒ 放弃；
+- 探针 `AND <独占函数> IS NOT NULL/IS NULL`：必须≈真基线且≠假基线才定库。
+- 三条表达式都在真引擎验过（本库为真、他两库报错）：H2 `H2VERSION()`、HSQLDB
+  `DATABASE_VERSION()`（**不用** `DATABASE()`——H2 也支持，无区分度）、Derby
+  `SYSCS_UTIL.SYSCS_GET_DATABASE_PROPERTY('derby.serviceProtocol') IS NULL`。
+- 两处工程细节（都是实测踩出来的）：① 回显目标必须先用 `stripEchoedPayload` 把 payload
+  从响应里剔掉，否则每条探针正文都因回显而不同，「≈真基线」永不成立；② **注释符按库选**
+  —— Derby 的 lexer 不接受 `-- -`（`Lexical error ... Encountered: <EOF>`），裸 `--` 可以；
+  MySQL 则必须 `-- `。基线/对照按注释符分组缓存，同组只付一次成本。
+
+**证据**：
+- `NO_WAF=1 node e2e/multi-engine-lab/verify.mjs`：三引擎 **blind 场景全部定库**
+  （此前全 null）——`blind 检出=[union,boolean] 定库=H2` / `定库=HSQLDB` / `定库=Derby`，
+  断言行 `定库基线=✅`。
+- `fingerprint.function.test.js` +4 例：命中 / 探针=假基线不定库 / 无布尔差分不定库 /
+  负向对照失败不定库。
+- 成本：2 基线 + 1 对照 + ≤3 探针（命中即停），并在时间向量**之前**跑（省 2s×N 串行等待）。
+
 ### 2026-10-25 批次 D166 · multipart 字段名注入面（`--test-param-names` 补第五个宿主）+ 一条跨载体挂死修复
 
 **功能**：`--test-param-names` 的同族宿主此前是 query 键名（D93）、JSON 键名（D103）、

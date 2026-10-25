@@ -1,6 +1,6 @@
 # sqli-scanner
 
-[![Tests](https://img.shields.io/badge/tests-4359%20passing-brightgreen)](#测试)[![CI](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml/badge.svg)](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml)
+[![Tests](https://img.shields.io/badge/tests-4365%20passing-brightgreen)](#测试)[![CI](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml/badge.svg)](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml)
 [![Dependencies](https://img.shields.io/badge/prod%20deps-0%20known%20vulns-brightgreen)](SECURITY.md)
 
 > CI 徽章为真实状态（仓库地址已定，run#90 起全绿）。发布判定仍以 `CHANGELOG.md`
@@ -150,7 +150,7 @@ OWASP 分类统一为 `A03:2021-Injection`。**未收录的通道不会被静默
 | 等级 | 方言 | 证据 |
 |---|---|---|
 | ✅ **真实引擎验证**（检测/绕过主链路跑通） | MySQL、MariaDB、PostgreSQL、SQLite、Oracle（2026-09-15，e2e/oracle-lab）、SQL Server（2026-09-14，e2e/mssql-lab） | 真 MySQL 8.0.x（`e2e/real-mysql-lab` + `e2e/waf-real`）、真 MariaDB 11.4.13（`e2e/multi-engine-lab/mariadb-verify.mjs`；⚠️ 其产物测于 09-09，CRS 执行器 09-19 修准之后**未复跑**，能引什么/不能引什么写在 `results/mariadb-report.md` 顶部）、PGlite 18.3、sql.js WASM、真 PostgreSQL 16.2（`e2e/oob-real-lab` OOB 带外全链路）、**真 SQL Server 2022 Express 16.0.1000.6**（`e2e/mssql-lab`：双上下文三通道 + 拖库 5/5 + os-shell，2026-09-22 补证，见 `e2e/mssql-lab/results/VERIFICATION-2026-09-22.md`）、**真 Oracle AI Database 26ai Free 23.26.3.0.0**（`e2e/oracle-lab`：双上下文三通道 + 拖库 5/5） |
-| ⚠️ **部分通道验证** | H2、HSQLDB、Derby | `e2e/multi-engine-lab`（真实 JDBC 内存库）。**三档分开引，别混**：① 无 WAF 档 = 三引擎布尔通道 9/9，回显定库 H2/HSQLDB 成功；**Derby 自 [D157] 起也能定出**（补的是报错句式签名 `Syntax error: Encountered ... at line N, column M` / SQLState `42Xxx` —— 此前 Derby 报错原文里没有库名，三场景 `dbms` 全 null；注意盲注档仍可能 null，那档没有回显也没有报错可判）；② CRS **PL1（官方默认部署档）** = 布尔 9/9（`results/multi-engine-report.pl1.md`）⇒ "这三库在默认部署的 CRS 下可被检出"成立，但**定库不达**（UNION 哨兵被吃）；③ CRS **PL2/PL3/PL4** = 0/9，PL1→PL2 之间是断崖 ⇒ 不能拿②说"过任何 WAF"，也不能拿③说"过不了 WAF"。旧 P3 报告（09-09）"tamper 打穿 CRS 后 H2/Derby error 通道检出"今已不可复现，见该文件顶部的失效声明 |
+| ⚠️ **部分通道验证** | H2、HSQLDB、Derby | `e2e/multi-engine-lab`（真实 JDBC 内存库）。**三档分开引，别混**：① 无 WAF 档 = 三引擎布尔通道 9/9，回显定库 H2/HSQLDB 成功；**Derby 自 [D157] 起也能定出**（报错句式签名 `Syntax error: Encountered ... at line N, column M` / SQLState `42Xxx`）；**[D167] 起 blind 档（无回显、无报错可判）也能定库**——新增「函数存在性」通道：把各库独占函数（H2 `H2VERSION()` / HSQLDB `DATABASE_VERSION()` / Derby `SYSCS_UTIL.SYSCS_GET_DATABASE_PROPERTY(...) IS NULL`）放进恒真条件，用布尔差分 + 负向对照判断它是否真的存在，实测三引擎 blind 场景 `定库=H2/HSQLDB/Derby`；② CRS **PL1（官方默认部署档）** = 布尔 9/9（`results/multi-engine-report.pl1.md`）⇒ "这三库在默认部署的 CRS 下可被检出"成立，但**定库不达**（UNION 哨兵被吃）；③ CRS **PL2/PL3/PL4** = 0/9，PL1→PL2 之间是断崖 ⇒ 不能拿②说"过任何 WAF"，也不能拿③说"过不了 WAF"。旧 P3 报告（09-09）"tamper 打穿 CRS 后 H2/Derby error 通道检出"今已不可复现，见该文件顶部的失效声明 |
 | ⛔ **模板适配（未在真实 DBMS 验证）** | TiDB、DM8、ClickHouse、DB2、Sybase、Firebird、Informix、Access、MonetDB | 仅有检测/提取模板；方言语法、列类型、报错文本均可能有偏差 |
 
 **OOB / 强动态页 / 定库加固 / 二阶跨角色的实测记录**（真机靶场，含修复过程与验证数据）已迁至
@@ -399,7 +399,7 @@ backend/  ← Express + Node.js
 # 前端测试（575 个用例）
 npm test
 
-# 服务端测试（3790 个用例）
+# 服务端测试（3794 个用例）
 cd server && npm test
 
 # 全部测试
@@ -425,7 +425,7 @@ npm run artifact:drift   # 入库的 e2e 基线产物必须等于当前代码跑
 
 - TypeScript: 零错误
 - 前端测试: 575/575 通过（覆盖率门禁 stmts 93.16 / branch 84.47 / func 80.63，阈值 88/77/67）
-- 服务端测试: 3790 用例（3784 pass / 0 fail / 6 skip，并发口径 2026-10-25 复测；6 skip 为环境依赖显式跳过。覆盖率 lines 91.56 / branch 80.55 / func 84.98，阈值 85/74/77）
+- 服务端测试: 3794 用例（3790 pass / 0 fail / 4 skip，并发口径 2026-10-25 复测；4 skip 为环境依赖显式跳过。覆盖率 lines 91.56 / branch 80.55 / func 84.98，阈值 85/74/77）
 - 一键扫描: `npm run scan -- -u <url>`（CLI 一条命令产出 HTML/JSON/Markdown 全套报告 + manifest，退出码可直接进 CI 门禁）
 - Tamper 插件: 234 个（含批次 D3 新增 scalarselectinline；含 v24 增量 20 个，对齐 sqlmap 官方 tamper 全集，含官方 CRS/libinjection 实测组合 uniontable+odbcbrace；含批次 D13 新增 5 件上游形态变体 *nospace/*open/*block，真机 A/B 判决前不进默认链）
 - WAF 绕过能力: 200+ 插件链式组合，覆盖 62 个 WAF 厂商指纹识别 + 推荐

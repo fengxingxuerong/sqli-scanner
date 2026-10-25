@@ -1,6 +1,6 @@
 # 多引擎 tamper A/B（H2 / HSQLDB / Derby）　—　WAF：off（NO_WAF=1）
 
-> 生成：2026-10-24T20:02:53.774Z　｜　引擎：真实 JDBC 引擎（内存库）　｜　本档 WAF：off（NO_WAF=1）
+> 生成：2026-10-25T14:46:31.335Z　｜　引擎：真实 JDBC 引擎（内存库）　｜　本档 WAF：off（NO_WAF=1）
 >
 > **口径必须先看这行**：WAF=on 时 CRS 会把 UNION 哨兵探针整条 403 掉，**版本回显定库通道
 > 根本不会被执行**，所以那一档里的 `dbms=null` 只说明"没定出库"，不能读成"探针在该库上跑不动"。
@@ -10,13 +10,13 @@
 |---|---|---|---|---|---|
 | h2 | num | union,error,boolean | union,error,boolean | H2/H2 | 技术位与 tamper 前一致 |
 | h2 | str | union,error,boolean | union,error,boolean | H2/H2 | 技术位与 tamper 前一致 |
-| h2 | blind | union,boolean | union,boolean | -/- | 技术位与 tamper 前一致 |
+| h2 | blind | union,boolean | union,boolean | H2/H2 | 技术位与 tamper 前一致 |
 | hsqldb | num | union,boolean | union,boolean | HSQLDB/HSQLDB | 技术位与 tamper 前一致 |
 | hsqldb | str | union,boolean | union,boolean | HSQLDB/HSQLDB | 技术位与 tamper 前一致 |
-| hsqldb | blind | union,boolean | union,boolean | -/- | 技术位与 tamper 前一致 |
+| hsqldb | blind | union,boolean | union,boolean | HSQLDB/HSQLDB | 技术位与 tamper 前一致 |
 | derby | num | error,boolean | union,error,boolean | -/Derby | tamper 新增 union |
 | derby | str | union,error,boolean | error,boolean | Derby/- | tamper 丢失 union |
-| derby | blind | boolean | union,boolean | -/- | tamper 新增 union |
+| derby | blind | boolean | union,boolean | Derby/Derby | tamper 新增 union |
 
 > **本档有效性**：off 检出合计 9、on 检出合计 9 ⇒ 覆盖面类断言成立。但本档**没有 WAF**，所以两侧差值不是绕过收益，只是 tamper 改写 payload 的副作用（见说明列）。
 

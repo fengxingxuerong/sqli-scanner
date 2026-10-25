@@ -5,6 +5,34 @@
 
 ---
 
+## 2026-10-25 批次 D167 · 函数存在性定库（blind 档补第三条通道）
+
+**动机**：D157 让 Derby 在「有报错」时能定库，但 `blind` 场景（目标吞报错、只有两态页面）
+三引擎仍 `定库=null`：报错签名没材料、时间向量对 H2/HSQLDB/Derby 都不可用（H2 的 SLEEP 是
+毫秒且按纪律不进盲探，另两家无延时原语）。定不出库 ⇒ 注释符/提取/payload 族全按默认选。
+
+**本批**：新增「函数存在性」通道（`DBFingerprinter._fingerprintByFunction`）：
+- 独占函数放进恒真条件 → 布尔差分（真/假基线可区分才适用）；
+- 负向对照自证（不存在的函数不得≈真基线，防"报错页被渲染成正常页"）；
+- 探针必须≈真基线且≠假基线；
+- 三条表达式真引擎验过：H2 `H2VERSION()`、HSQLDB `DATABASE_VERSION()`、Derby
+  `SYSCS_UTIL.SYSCS_GET_DATABASE_PROPERTY(...) IS NULL`；
+- 回显必须 strip（否则每条探针正文不同）；**注释符按库选**（Derby 不收 `-- -`，裸 `--` 可以）。
+
+**实测**：`NO_WAF=1 node e2e/multi-engine-lab/verify.mjs` → 三引擎 blind 场景全部定库
+（此前全 null）；断言行全绿。测试 +4。
+
+### 待推进（仍未关闭）
+
+- 只覆盖 H2/HSQLDB/Derby 三家（有「独占且恒真」函数的库）。MySQL/PG/MSSQL/Oracle 走
+  回显/报错已经够，不需要；剩下的模板库（DB2/ClickHouse/…）没有真引擎可验，不硬加。
+- 表达式全部写死在 `FUNCTION_FINGERPRINTS`：新增库要同时给出**他库会报错**的证据，
+  否则这条通道会变成误定库源（本批用真引擎交叉验证了三条）。
+- `{BD}` 闭合前缀若为空（数值语境）没问题；字符串语境下 `'` 闭合 + `AND` 也验过。
+  但 **ORDER BY / LIMIT 等非值位置**不适用（那里没有布尔真值语境），属结构性边界。
+
+---
+
 ## 2026-10-25 批次 D166 · multipart 字段名注入面 + 一条跨载体挂死修复
 
 **动机**：`--test-param-names` 的宿主已有 query（D93）/ JSON 键（D103）/ XML 元素名（D105）/
