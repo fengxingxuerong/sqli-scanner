@@ -289,6 +289,72 @@ function handleFormSort(req, res, safe) {
   });
 }
 
+/**
+ * [D168] 页面表单（enctype=multipart/form-data）：爬取/`--forms` 路径发现的**上传表单**。
+ *
+ * 真实形态：上传页里除了文件字段还有可写的文本字段（caption / title / author），
+ * 后端把它们拼进 SQL。这类表单没有对应的请求头 —— 编码类型只写在 `<form enctype>` 上，
+ * 按 urlencoded 提交会被 415/400 挡掉，字段从未进业务逻辑（与 D159 的 -r 场景同型）。
+ * @param {http.ServerResponse} res
+ * @param {string} [action] 表单提交地址（安全对照走 /safe/form-upload）
+ */
+function handleFormPage(res, action = '/api/form-upload') {
+  res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+  res.end(
+    '<!DOCTYPE html><html><body>'
+    + '<h1>upload</h1>'
+    + `<form action="${action}" method="post" enctype="multipart/form-data">`
+    + '<input type="text" name="caption" value="alice">'
+    + '<input type="file" name="file">'
+    + '<input type="submit" name="go" value="upload">'
+    + '</form></body></html>'
+  );
+}
+
+/**
+ * [D168] 该表单的提交端点：只认 multipart，把 caption 拼进 SQL（`name = '<caption>'`）。
+ * @param {import('node:http').IncomingMessage} req
+ * @param {http.ServerResponse} res
+ * @param {boolean} safe 参数化对照
+ */
+function handleFormUpload(req, res, safe) {
+  const ct = String(req.headers['content-type'] || '');
+  if (!/^multipart\/form-data/i.test(ct)) {
+    res.writeHead(415, { 'Content-Type': 'text/plain' });
+    res.end('unsupported media type: expected multipart/form-data');
+    return;
+  }
+  const bm = /boundary=(?:"([^"]+)"|([^;\s]+))/i.exec(ct);
+  if (!bm) {
+    res.writeHead(400, { 'Content-Type': 'text/plain' });
+    res.end('missing boundary');
+    return;
+  }
+  const boundary = bm[1] || bm[2];
+  let raw = '';
+  req.on('data', (c) => {
+    raw += c;
+    if (raw.length > 256 * 1024) req.destroy();
+  });
+  req.on('end', () => {
+    let caption = '';
+    for (const part of raw.split(`--${boundary}`)) {
+      const nm = /name="([^"]*)"/i.exec(part);
+      if (!nm || nm[1] !== 'caption') continue;
+      const ci = part.indexOf('\r\n\r\n');
+      caption = (ci >= 0 ? part.slice(ci + 4) : '').replace(/\r\n$/, '');
+      break;
+    }
+    if (!caption) {
+      res.writeHead(400, { 'Content-Type': 'text/plain' });
+      res.end('no caption');
+      return;
+    }
+    if (safe) void respond(res, () => runSql('SELECT id,name FROM users WHERE name = ?', [caption]));
+    else void respond(res, () => runSql(`SELECT id,name FROM users WHERE name = '${caption}'`));
+  });
+}
+
 await setupDb();
 const server = http.createServer((req, res) => {
   let u;
@@ -317,6 +383,19 @@ const server = http.createServer((req, res) => {
   // [D166] multipart 字段名：注入面在文本字段的 name 上（--test-param-names）
   if (u.pathname === '/api/form-sort' || u.pathname === '/safe/form-sort') {
     handleFormSort(req, res, u.pathname === '/safe/form-sort');
+    return;
+  }
+  // [D168] 页面表单（enctype=multipart）：--forms / 爬取路径发现后必须按 multipart 提交
+  if (u.pathname === '/form-upload') {
+    handleFormPage(res);
+    return;
+  }
+  if (u.pathname === '/safe-form-upload') {
+    handleFormPage(res, '/safe/form-upload');
+    return;
+  }
+  if (u.pathname === '/api/form-upload' || u.pathname === '/safe/form-upload') {
+    handleFormUpload(req, res, u.pathname === '/safe/form-upload');
     return;
   }
   try {

@@ -67,6 +67,25 @@
 
 > 下一批次起的条目写在这里。发版时把本节整体升为 `## [x.y.z] - YYYY-MM-DD` 并补汇总段。
 
+### 2026-10-26 批次 D168 · 页面表单 enctype=multipart 的发送形态（`--forms`/爬取路径）
+
+**缺陷**：`<form enctype="multipart/form-data">` 的上传表单只有**标记**里写着编码类型，
+没有任何请求头可读 ⇒ `--forms` / 爬取路径发现的注入点一律按 urlencoded 发 ⇒ 只认 multipart
+的端点 415/400 ⇒ 字段从未进业务逻辑、报告写「未检出」。与 D159（`-r` 抓包）是同一族的
+第三处入口：抓包、字段名、页面表单，三处此前只有抓包那处能识别 multipart。
+
+**修复**：`_parseForms` 记录 `enctype` → `_pushFormPoints` 带进点的 `formEnctype` →
+`buildInjectionRequest` 在没有声明头时用它决定是否按 multipart 重建（报文构造复用
+`buildMultipartBody`，文本字段与按钮伴随字段一并保留）。
+
+**证据**：
+- 靶场 `e2e/detect-surface-lab` 新增 `/form-upload`（enctype=multipart 的 HTML 表单）+
+  `/api/form-upload`（只认 multipart，caption 拼 SQL）+ `/safe-form-upload`（参数化）。
+  **A/B 实测**：把发送侧那一行改回「只看声明头」→ `form-enctype` 真值 0 检出；
+  恢复后 **3 条命中**、安全对照 0 误报；全套 **18 用例全绿**（真值 9/9、误报 0）。
+- `formEnctype.multipart.test.js` +4 例（enctype 记录 / 无 enctype 为空 / multipart 报文
+  含字段与按钮且不退化成 urlencoded / 无 enctype 时仍 urlencoded）。
+
 ### 2026-10-25 批次 D167 · 函数存在性定库（blind 档：无回显、无报错也能定库）
 
 **缺口**：H2/HSQLDB/Derby 的 `blind` 场景（目标吞掉报错、页面只有「查到/没查到」两态）

@@ -37,6 +37,7 @@ import { defaults } from '../config/defaults.js';
  * @property {string|null} technique
  * @property {string|null} dbms
  * @property {string|null} [formMethod]
+ * @property {string} [formEnctype] D168：表单声明的 enctype（multipart 表单必须按 multipart 发）
  * @property {string|null} [actionUrl]
  * @property {Record<string, any>|null} [formValues]
  * @property {string|null} [csrfTokenName]

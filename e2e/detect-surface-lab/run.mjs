@@ -66,6 +66,16 @@ const CASES = [
     id: 'multipart-form-name-safe', vuln: false, carrier: 'multipart 字段名（安全对照）',
     formSort: { path: '/safe/form-sort' }, paramNames: true,
   },
+  // [D168] 页面表单 enctype=multipart：`--forms` 路径发现的表单必须按 multipart 提交。
+  // 旧实现：-r/表单路径都没有请求头可读 ⇒ 一律 urlencoded ⇒ 只认 multipart 的上传端点 415。
+  {
+    id: 'form-enctype', vuln: true, carrier: '页面表单 enctype=multipart',
+    path: '/form-upload', forms: true,
+  },
+  {
+    id: 'form-enctype-safe', vuln: false, carrier: '页面表单 enctype（安全对照）',
+    path: '/safe-form-upload', forms: true,
+  },
 ];
 
 /**
@@ -175,6 +185,8 @@ function scanCase(c) {
   if (c.body) extra.push('--body', c.body);
   // [D166] --test-param-names 按用例开启（默认关闭，零回归）
   if (c.paramNames) extra.push('--test-param-names');
+  // [D168] --forms：页面表单发现（需配 level 5；本靶场用例显式开启）
+  if (c.forms) extra.push('--forms', '--level', '5');
   // [D159] --test-path 按用例开启：路径点对 multipart 目标没有意义，
   //   而且会给只认 /api/upload 的靶场塞一条 404 请求（实测把整场拖到 --timeout）
   if (c.testPath) extra.push('--test-path');

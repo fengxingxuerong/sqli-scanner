@@ -5,6 +5,28 @@
 
 ---
 
+## 2026-10-26 批次 D168 · 页面表单 enctype=multipart 的发送形态
+
+**动机**：multipart 的第三处入口。D159 修了 `-r` 抓包，D166 修了字段名，剩下的
+`--forms` / 爬取路径发现的 `<form enctype="multipart/form-data">` 仍按 urlencoded 提交 ⇒
+只认 multipart 的上传端点 415 ⇒ 字段从未进业务逻辑（静默假阴性）。编码类型只写在标记里，
+没有请求头可读，所以一直没人接。
+
+**本批**：`_parseForms` 记 enctype → 点带 `formEnctype` → 发送侧无声明头时据此按 multipart
+重建（复用 buildMultipartBody，文本字段与按钮伴随字段保留）。A/B 实测：改回旧行为 0 检出，
+恢复后 3 条命中；靶场新增 `/form-upload` + `/api/form-upload` + `/safe/form-upload`，18 用例全绿。
+测试 +4。
+
+### 待推进（仍未关闭）
+
+- 表单里 `<input type="file">` 的 **filename** 注入面在爬取路径上仍未建点（D159 只覆盖
+  `-r` 抓包带来的 fileParts）。要补需要从 HTML 表单推断文件名占位，语义上不如抓包可靠。
+- `<select>` 字段仍不采集（D112 注释里注明，取值需解析 selected option）。
+- 表单 enctype 只认 `multipart/form-data`；`text/plain` 表单（`enctype="text/plain"` 是浏览器
+  的一种合法但罕见的提交格式）目前按 urlencoded 发 —— 真实站点极少，先不接。
+
+---
+
 ## 2026-10-25 批次 D167 · 函数存在性定库（blind 档补第三条通道）
 
 **动机**：D157 让 Derby 在「有报错」时能定库，但 `blind` 场景（目标吞报错、只有两态页面）

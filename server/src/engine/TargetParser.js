@@ -675,7 +675,10 @@ export class TargetParser {
       // injectableNames：要生成**注入点**的字段（排除按钮 —— 按钮值由服务端校验，
       // 拿它当注入点只会产生噪声；但它仍在 values 里随请求发出，见 _collectInputs 注释）。
       const injectableNames = Object.keys(values).filter((n) => !collected.buttonNames.has(n));
-      forms.push({ method, action, values, injectableNames, csrfTokenName: collected.csrfTokenName });
+      // [D168 2026-10-26] 表单编码类型：`enctype="multipart/form-data"` 的上传表单若按
+      // urlencoded 提交，目标直接 415/400 ⇒ 字段从未进业务逻辑（与 D159 同一类静默假阴性）。
+      const enctype = (this._attr(formTag, 'enctype') || '').toLowerCase();
+      forms.push({ method, action, values, injectableNames, csrfTokenName: collected.csrfTokenName, enctype });
     }
     return forms;
   }
@@ -810,6 +813,8 @@ export class TargetParser {
           isStorePoint: isStore,
           storeKind,
           crawledUrl,
+          // [D168] 表单声明的 enctype：multipart 上传表单必须按 multipart 发（见 injection）
+          formEnctype: form.enctype || '',
         })
       );
     }

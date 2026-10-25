@@ -452,7 +452,10 @@ export function buildInjectionRequest(target, point, value) {
     // 请求头走 config.auth.headers（headerObj）。只看前者时，-r 的 multipart 目标被判成
     // 非 multipart → 按 urlencoded 发、却带着 auth 那边的 multipart Content-Type
     // （实测：报文 `title=report` + `Content-Type: multipart/...`，目标 415，全点被剪）。
-    const declaredCt = declaredHeaderValue(target, 'content-type');
+    // [D168 2026-10-26] 表单**自身声明的** enctype 也要认：`<form enctype="multipart/form-data">`
+    // 的上传表单（爬取/`--forms` 路径发现）没有对应的请求头，此前按 urlencoded 发 ⇒
+    // 只认 multipart 的目标 415/400 ⇒ 字段从未进业务逻辑（与 D159 的 -r 场景同型）。
+    const declaredCt = declaredHeaderValue(target, 'content-type') || String(point.formEnctype || '');
     if (/^multipart\/form-data/i.test(declaredCt)) {
       const existing = /boundary=(?:"([^"]+)"|([^;\s]+))/i.exec(declaredCt);
       const boundary = (existing?.[1] || existing?.[2] || `----SqlScanBoundary${nanoidLc()}`).trim();
