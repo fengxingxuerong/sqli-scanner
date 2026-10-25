@@ -67,6 +67,23 @@
 
 > 下一批次起的条目写在这里。发版时把本节整体升为 `## [x.y.z] - YYYY-MM-DD` 并补汇总段。
 
+### 2026-10-25 批次 D164 · CI 第三轮收口：acceptance 失败现场进日志 + VulnLab 探针 SKIP 判据补配
+
+**CI 第三轮实况**（run 40177681970，@7b57ebd）：**9 绿 / 2 红**——上轮的 lint、
+e2e-self-contained、test-matrix(windows) 全部转绿（D162/D163 修复生效）；剩：
+
+- **acceptance 红**：两个套件。①外部裁判 5 号 = **我的 assert 漏配**：D162 给 runner 加的
+  「靶场行为与官方真值不符 → [SKIP]」新出口，验收断言只认「靶场不可」前缀，探针 SKIP
+  掉进了三档判据误判 FAIL。补配 SKIP 分支（skipped=true 不计通过亦不计失败，理由注明
+  「部署环境问题 ≠ 引擎漏检」）。②报告契约 = CI 专有失败且**现场文件不回显**
+  （acceptance 只落 last-failure-*.log，本地用编辑器看，CI 上就丢了）——给 ci.yml
+  acceptance job 加 `if: failure()` 步骤把现场 tail 进日志，省一轮"重跑加调试"往返；
+  本地复跑 8/8 全过，根因等下一轮 CI 现场输出后归因。
+- **test-matrix(macos) 红**：时间通道回归钉（gt 默认档）在共享 macOS runner 上超阈
+  —— ubuntu/windows 均绿，属计时抖动暴露的**平台敏感**而非回归（本地隔离复跑 5/5 绿、
+  本机全量 26/26 该套件绿）。按「不为变绿放宽校准断言」纪律不动判据，留平台容忍度
+  议题给时间通道归属批次（与 runner 质量相关，非代码缺陷）。
+
 ### 2026-10-25 批次 D163 · CI 第二轮两红收口：pl1 定库基线重生成（D157 修复实证）+ facts 覆盖率微调
 
 **CI 第二轮实况**（run 40174802954，@10a279b）：test-server/lint 之外全绿，

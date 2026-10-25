@@ -765,8 +765,13 @@ const SUITES = [
     optional: true, // php 缺失时 SKIP（自拉自收，正常环境应可执行）
     run: () => run('node', ['e2e/vulnlab-lab/run.mjs']),
     assert: (out) => {
+      // 两类合法 SKIP：php 未就绪 / [D162] 靶场行为与官方真值不符（部署环境问题 ≠ 引擎漏检，
+      // 见 vulnlab-lab 自证探针——CI 上 SQLite 种子失败曾被误归因为漏检，本分支防重演）
       if (/\[SKIP\] VulnLab 靶场不可/.test(out)) {
         return { facts: { 外部裁判5: '跳过（php 未就绪）' }, pass: false, skipped: true, reason: 'VulnLab 需要 php -S + pdo_sqlite（PHP_EXE 可指定路径）' };
+      }
+      if (/\[SKIP\] VulnLab 靶场行为与官方真值不符/.test(out)) {
+        return { facts: { 外部裁判5: '跳过（靶场自证探针未过：部署环境问题）' }, pass: false, skipped: true, reason: 'VulnLab 靶场行为不符合其 manifest 最低真值（见 runner 的自诊断输出）——不计通过亦不计失败' };
       }
       const m = /真值漏洞档位：检出 (\d+)\/(\d+)（漏检 (\d+)）/.exec(out);
       const fp = /修复档误报：(\d+)\/1/.exec(out);
