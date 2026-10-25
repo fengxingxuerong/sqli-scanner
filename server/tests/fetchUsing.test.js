@@ -174,9 +174,18 @@ test('长值延伸：between 模式在 [256,blindMaxLen] 续段提取与 gt 一�
 
 // ── ⑥ 时间通道三连 ────────────────────────────────────────────────────
 
-const BASE_MS = 40;
-const TRUE_EXTRA_MS = 80;
-const ABS_THRESHOLD_MS = 20;
+// [D165 2026-10-25] 平台时钟预算：共享 CI runner（实测 macOS）的 setTimeout 抖动可达
+// ±100ms，吃掉固定余量 ⇒ 两种病征交替出现：判别余量（FALSE≈BASE vs 阈值 BASE+20，仅
+// 20ms）被吃 → 错提取；累计时长（between 上百探针）被推过 30s 死循环检测线。三档常数
+// **等比**放大 = 时钟变慢、判别比例 40:80:20 不变 ⇒ 引擎判定语义零变化（不是放宽校准，
+// 是把「时钟预算」随平台显式化）；30s 截止是死循环探测器，同倍放大。本地默认 1x。
+const SCALE = process.env.TIME_TEST_SCALE
+  ? Number(process.env.TIME_TEST_SCALE)
+  : process.env.CI && process.platform === 'darwin' ? 3 : 1;
+const BASE_MS = 40 * SCALE;
+const TRUE_EXTRA_MS = 80 * SCALE;
+const ABS_THRESHOLD_MS = 20 * SCALE;
+const DEADLINE_MS = 30000 * SCALE;
 
 // 时间预言机：从 payload 解出条件（gt/between/= 全形态）判定真假；
 // blockGt=true 模拟「`>` 被 WAF 过滤」——含 `>` 的 payload 不执行、不延迟。
@@ -230,11 +239,11 @@ test('时间通道 gt（默认）：慢目标上正确提取（回归钉）', as
 test('时间通道 between：同一 secret 提取结果与 gt 一致', async () => {
   const secret = '5.7.40';
   const ctx = buildTimeCtx(makeTimeOracle(secret), { fetchUsing: 'between' });
-  assert.equal(await extractWithDeadline(() => ex.extractTime(ctx, 'version()'), 30000), secret);
+  assert.equal(await extractWithDeadline(() => ex.extractTime(ctx, 'version()'), DEADLINE_MS), secret);
 });
 
 test('时间通道 WAF 过滤 `>`：between 模式仍可提取（gt 恒假失败）', async () => {
   const secret = '5.7.40';
   const btCtx = buildTimeCtx(makeTimeOracle(secret, { blockGt: true }), { fetchUsing: 'between' });
-  assert.equal(await extractWithDeadline(() => ex.extractTime(btCtx, 'version()'), 30000), secret);
+  assert.equal(await extractWithDeadline(() => ex.extractTime(btCtx, 'version()'), DEADLINE_MS), secret);
 });
