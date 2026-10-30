@@ -177,4 +177,23 @@ describe('作用域 —— 只在本次扫描可见，默认路径逐位零变�
       assert.deepEqual(inside.map((p) => p.id), baseline.map((p) => p.id));
     });
   });
+
+  // [D179 2026-10-26] 这条钉的是一个**真实缺口**：原判定只认「id 带 -dest-」或「模板与内置池同串」，
+  // 于是自定义条目写 `'; DROP TABLE t-- -` 会完全绕过高危池硬门（D24 文档声称「同样受管」，实测不成立）。
+  // 现在：自定义条目（_custom 标记）按**语句**判据兜底；内置条目判定不变（不误伤既有检出）。
+  test('⑰ 自定义条目的破坏性语句同样受高危池硬门管辖（D24 文档口径至此成立）', () => {
+    const { entries } = validateCustomEntries([
+      okEntry({ id: 'custom-drop-1', dbms: ['MySQL'], technique: 'boolean', template: "{ORIG}'; DROP TABLE t-- -", level: 1, risk: 1 }),
+      okEntry({ id: 'custom-benign-1', dbms: ['MySQL'], technique: 'boolean', level: 1, risk: 1 }),
+    ]);
+    runWithCustomPayloads(entries, () => {
+      const gated = selectPayloads({ dbms: 'MySQL', technique: 'boolean', level: 1, risk: 1, productionMode: true });
+      assert.equal(gated.some((p) => p.id === 'custom-drop-1'), false, '未确认高危 ⇒ 破坏性自定义条目不得投放');
+      assert.equal(gated.some((p) => p.id === 'custom-benign-1'), true, '非破坏性自定义条目不受影响');
+      const allowed = selectPayloads({
+        dbms: 'MySQL', technique: 'boolean', level: 1, risk: 1, productionMode: true, confirmDestructive: true,
+      });
+      assert.equal(allowed.some((p) => p.id === 'custom-drop-1'), true, '已确认 ⇒ 才投放');
+    });
+  });
 });

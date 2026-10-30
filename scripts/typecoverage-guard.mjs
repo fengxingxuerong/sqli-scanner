@@ -60,8 +60,14 @@ function extractJsdocBlocks(src) {
     const trimmed = lines[i].trimStart();
     if (trimmed.startsWith('/**')) {
       let end = i;
-      for (let j = i + 1; j < lines.length; j++) {
-        if (lines[j].includes('*/')) { end = j; break; }
+      // [D215 2026-10-31] 单行 `/** ... */` 的结束符就在**本行**。原实现无条件从 i+1 开始找
+      // `*/`，于是单行块会一路吞到下一个多行 JSDoc 的结尾 —— 块内所有函数都关联不到注释，
+      // 而 i=end 又把中间代码整段跳过。实测：scanRoutes / sqlmapRoutes 里按项目既有风格
+      // （blindExtractor.js 同款）写的单行 JSDoc **一条都没被计入**。自证已补 ④。
+      if (!trimmed.includes('*/')) {
+        for (let j = i + 1; j < lines.length; j++) {
+          if (lines[j].includes('*/')) { end = j; break; }
+        }
       }
       blocks.push({ startLine: i + 1, endLine: end + 1, text: lines.slice(i, end + 1).join('\n') });
       i = end;
@@ -303,6 +309,23 @@ function selftestMain() {
         { batches: { 'x': { coverage: 50, untypedHotspots: [] }, 'y': { coverage: 50, untypedHotspots: [] } } },
       );
       ok(r.errors.some((e) => e.includes('y') && e.includes('缩小')), `批次 y 缺失应报错，实际：${r.errors.join('|')}`);
+    });
+
+    // ⑥ 单行 JSDoc 必须被识别（D215 修复：原实现从 i+1 找 `*/`，会把后续代码整段吞进本块）
+    t('⑥ 单行 JSDoc 被正确关联（不吞后续代码）', () => {
+      const inlineSrc = '/** @param {string} a @param {number} b @returns {boolean} */\n'
+        + 'function inline(a, b) { return a.length > b; }\n'
+        + 'function after(x) { return x; }\n';
+      const p = write('inline.js', inlineSrc);
+      const batch = measureCoverage([dir])[dir];
+      ok(batch.paramsTyped >= 2, `单行 JSDoc 的参数应被计入，实际 ${batch.paramsTyped}`);
+      ok(batch.returnsTyped >= 1, `单行 JSDoc 的 @returns 应被计入，实际 ${batch.returnsTyped}`);
+      // 关键反向：after 不能被 inline 的注释「顺带覆盖」
+      ok(
+        batch.untypedHotspots.some((h) => h.includes('after')),
+        `后续函数应仍列为未标注热点，实际：${batch.untypedHotspots.join('|')}`
+      );
+      fs.rmSync(p, { force: true });
     });
 
     console.log(failed ? `\n❌ selftest ${failed} 条失败` : '\n✅ selftest 全绿');

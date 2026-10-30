@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "sqli-scanner": {
+      "command": "node",
+      "args": ["server/bin/cli.js", "mcp"],
+      "env": {}
+    }
+  }
+}

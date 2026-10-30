@@ -30,7 +30,8 @@ const constants = read('src/shared/constants.ts');
 
 test('① 生产调用点：getScanClient 真的挂了 withLoginFlow', () => {
   assert.match(scanClient, /core\/loginFlow\.js/, 'scanClient 没有 import loginFlow');
-  assert.match(scanClient, /withLoginFlow\(view, cfg\.login\)/, 'withLoginFlow 没包在 per-scan 视图上');
+  // [D205] 装配链抽到 wrapSessionLayers 后变量名不再是 view：只钉调用存在，不钉局部变量名
+  assert.match(scanClient, /withLoginFlow\(/, 'withLoginFlow 没包在 per-scan 视图上');
   // 门必须带 username：无凭据的登录编排没有意义（与 guardLogin 的收紧口径一致）
   assert.match(scanClient, /cfg\.login\.username/, '登录包装的开启条件缺 username 判定');
 });

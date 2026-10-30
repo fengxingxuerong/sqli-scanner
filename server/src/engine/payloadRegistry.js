@@ -67,7 +67,26 @@ const DESTRUCTIVE_TEMPLATES = new Set(
 );
 const DESTRUCTIVE_ID_RE = /(?:^|-)dest-/;
 
-// 判定一条注册表条目是否属于高危池（id 带 -dest- 或模板与 destructive 池同串）。
+// [D179 2026-10-26] 破坏性**语句**判据（只对自定义条目生效，见 isDestructivePayload）。
+// 为什么补这一条：原来的判定只认「id 带 -dest-」或「模板与内置 destructive 池同串」——
+// 自定义条目里写 `'; DROP TABLE t-- -` 会**完全绕过**高危池硬门（D24 文档声称「同样受管」，
+// 实测不成立）。内置条目不受影响（它们本来就与池同串），避免误伤既有检出。
+const DESTRUCTIVE_SQL_RE = /(?:^|[\s'"(;])(?:drop\s+table|truncate\s+table|delete\s+from|insert\s+into|update\s+[\w.]+\s+set|alter\s+table|create\s+(?:table|user|role)|grant\s+\w+|revoke\s+\w+|into\s+(?:out|dump)file|load_file\s*\(|xp_cmdshell|pg_(?:read|write)_file|copy\s+[\w"'.]+\s+to\s+program)/i;
+
+/**
+ * 模板里是否含破坏性语句（写库/删表/文件/命令执行原语）。
+ * 与 `isDestructivePayload` 分开：内置条目的判定沿用「同串比对」，本函数用于自定义条目与
+ * 配方包校验（它们没有「与池同串」可言，只能看语句本身）。
+ * @param {{template?: string, falseTemplate?: string}} entry 注册表条目
+ * @returns {boolean} 命中破坏性语句原语
+ */
+export function hasDestructiveSql(entry) {
+  if (!entry || typeof entry !== 'object') return false;
+  return [entry.template, entry.falseTemplate].some((t) => typeof t === 'string' && DESTRUCTIVE_SQL_RE.test(t));
+}
+
+// 判定一条注册表条目是否属于高危池（id 带 -dest-、模板与 destructive 池同串、
+// 或**自定义条目**的模板含破坏性语句原语）。
 // falseTemplate 一并查：高危池目前无假对，但防后续补条目时绕过判定。
 export function isDestructivePayload(entry) {
   if (!entry || typeof entry !== 'object') return false;
@@ -75,6 +94,8 @@ export function isDestructivePayload(entry) {
   for (const tpl of [entry.template, entry.falseTemplate]) {
     if (typeof tpl === 'string' && DESTRUCTIVE_TEMPLATES.has(tpl)) return true;
   }
+  // [D179] 自定义条目没有「与池同串」可言 ⇒ 按语句判据兜底（否则 `; DROP TABLE` 直接绕过硬门）
+  if (entry._custom === true && hasDestructiveSql(entry)) return true;
   return false;
 }
 
@@ -163,43 +184,61 @@ export function runWithCustomPayloads(entries, fn) {
  *          productionMode?: boolean, confirmDestructive?: boolean}} opts
  * @returns {typeof PAYLOAD_REGISTRY} 筛选后的条目（原对象引用，不拷贝）
  */
-export function selectPayloads({ dbms, technique, level, risk, clause, boundary, testFilter, testSkip, dbmsVersion, productionMode, confirmDestructive } = {}) {
-  // [P0-FIX 2026-09-09] 高危池硬门（显式参数 > 扫描上下文策略 > 不施加）
-  const gate = resolveDestructiveGate({ productionMode, confirmDestructive });
-  // 解析 testFilter：逗号分隔 → 小写子串数组（空值过滤）
-  const filterIds = testFilter
-    ? String(testFilter).split(',').map((s) => s.trim().toLowerCase()).filter(Boolean)
-    : [];
-  // 解析 testSkip：逗号分隔 → 小写子串数组（空值过滤）
-  const skipIds = testSkip
-    ? String(testSkip).split(',').map((s) => s.trim().toLowerCase()).filter(Boolean)
-    : [];
+/** 解析逗号分隔的 id 子串列表（小写、去空） */
+function parseIdList(s) {
+  return s ? String(s).split(',').map((x) => x.trim().toLowerCase()).filter(Boolean) : [];
+}
 
-  return activeRegistry().filter((p) => {
-    if (dbms && !p.dbms.includes(dbms)) return false;
-    if (technique && p.technique !== technique) return false;
-    if (level && p.level > level) return false;
-    if (risk && p.risk > risk) return false;
-    if (clause && clause.length && !p.clause.some((c) => clause.includes(c))) return false;
-    if (boundary && !p.boundary.includes(boundary)) return false;
-    // [P1-FIX 2026-09-05] 版本分支：条目可用 minVersion / maxVersion 声明适用区间
-    //   · minVersion：目标版本 >= 该值才投放（如 MSSQL STRING_AGG 需 2017+）
-    //   · maxVersion：目标版本 < 该值才投放（如 MySQL<5.7 的 password 列）
-    //   版本未知（dbmsVersion 为 null 或 major 为 null）→ 不过滤（保守：不因未知砍 payload）
-    if (dbmsVersion && dbmsVersion.major != null) {
-      if (p.minVersion != null && !versionAtLeast(dbmsVersion, p.minVersion)) return false;
-      if (p.maxVersion != null && !versionBelow(dbmsVersion, p.maxVersion)) return false;
-    }
-    // testFilter：白名单 — id 须包含任一 filter 子串（filterIds 为空时跳过此检查）
-    if (filterIds.length > 0 && !filterIds.some((f) => p.id.toLowerCase().includes(f))) return false;
-    // testSkip：黑名单 — id 包含任一 skip 子串则排除
-    if (skipIds.some((s) => p.id.toLowerCase().includes(s))) return false;
-    // [P0-FIX 2026-09-09] productionMode 硬门：未确认则高危池模板不投放（不抛错、不中断扫描）。
-    // 实战后果：一次误配置就把 RCE/写文件 payload 送进生产库，或反过来让使用者以为 risk 生效了
-    // 而实际没测——两种都是事故。抑制本身必须进报告，见 ScanManager._noteConstraint。
-    if (gate && !gate.allowed && isDestructivePayload(p)) return false;
-    return true;
-  });
+/** 维度过滤：dbms / technique / level / risk / clause / boundary */
+function matchesAxis(p, sel) {
+  if (sel.dbms && !p.dbms.includes(sel.dbms)) return false;
+  if (sel.technique && p.technique !== sel.technique) return false;
+  if (sel.level && p.level > sel.level) return false;
+  if (sel.risk && p.risk > sel.risk) return false;
+  if (sel.clause && sel.clause.length && !p.clause.some((c) => sel.clause.includes(c))) return false;
+  if (sel.boundary && !p.boundary.includes(sel.boundary)) return false;
+  return true;
+}
+
+/** 版本区间：minVersion / maxVersion；版本未知时不过滤（保守：不因未知砍 payload） */
+function matchesVersion(p, v) {
+  if (!v || v.major == null) return true;
+  if (p.minVersion != null && !versionAtLeast(v, p.minVersion)) return false;
+  if (p.maxVersion != null && !versionBelow(v, p.maxVersion)) return false;
+  return true;
+}
+
+/** testFilter 白名单 / testSkip 黑名单（按 id 子串，大小写不敏感） */
+function matchesIdFilters(p, sel) {
+  const id = p.id.toLowerCase();
+  if (sel.filterIds.length > 0 && !sel.filterIds.some((f) => id.includes(f))) return false;
+  if (sel.skipIds.some((s) => id.includes(s))) return false;
+  return true;
+}
+
+/**
+ * 单条是否入选（含高危池硬门）。拆成函数是为了守住函数级复杂度硬上限——
+ * 原内联 filter 回调随着判据增长越线（26 > 25），且箭头函数按行号命名，一挪动就丢基线。
+ * @param {object} p 注册表条目
+ * @param {object} sel 已解析的筛选上下文
+ * @returns {boolean} 是否保留
+ */
+function keepPayload(p, sel) {
+  if (!matchesAxis(p, sel) || !matchesVersion(p, sel.dbmsVersion) || !matchesIdFilters(p, sel)) return false;
+  // [P0-FIX 2026-09-09] productionMode 硬门：未确认则高危池模板不投放（不抛错、不中断扫描）。
+  // 实战后果：一次误配置就把 RCE/写文件 payload 送进生产库，或反过来让使用者以为 risk 生效了
+  // 而实际没测——两种都是事故。抑制本身必须进报告，见 ScanManager._noteConstraint。
+  return !(sel.gate && !sel.gate.allowed && isDestructivePayload(p));
+}
+
+export function selectPayloads(opts = {}) {
+  const sel = {
+    ...opts,
+    gate: resolveDestructiveGate(opts),
+    filterIds: parseIdList(opts.testFilter),
+    skipIds: parseIdList(opts.testSkip),
+  };
+  return activeRegistry().filter((p) => keepPayload(p, sel));
 }
 
 /**

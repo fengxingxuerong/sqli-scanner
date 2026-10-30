@@ -18,6 +18,9 @@ import { applyScanTransform, notifyTransformOutcome, transformActiveForScan } fr
 import { applyResponseTransform, responseTransformActiveForScan } from '../../core/responseTransform.js';
 // [D36 实战 P0-2] Bearer/Token 自动续期
 import { refreshActiveForScan, withBearerRefresh } from '../../core/bearerKeeper.js';
+// [D198 对标 sqlmap --live-cookies] 每请求重读的 cookie 文件（会话入口面，挂在最内层：
+// 保活取页/CSRF 取页/登录提交这些**内层自发请求**也要带上最新会话 cookie）
+import { withLiveCookies } from '../../core/liveCookies.js';
 import { DirectConnector } from '../../core/directConnector.js';
 
   // 连接器选择：direct 目标用 DirectConnector 直连数据库，其余用统一 HttpClient 单例。
@@ -267,6 +270,61 @@ function wrapPauseGate(view, scanId, waitWhilePaused) {
   // [D67] 装配链的**次序即契约**：变换/解密在最内层（每个加工方先写完、脚本最后签），
   //   safeUrl → csrf → login → bearer 四层会话准备依次向外，协议/出口层与暂停闸
   //   在最外层（全部消费方统一生效）。改次序前先读各 helper 的「为什么」注释。
+/**
+ * [D205] 会话层装配：live-cookies → safeUrl → csrf → login → bearer。
+ * 从 `getScanClient` 抽出（D198 接 `--live-cookies` 后它涨到 42 行/22 圈，超了存量基线 36/18）。
+ * **次序即契约**，改序前先读每一层的「为什么」：
+ *   · live-cookies 必须**最内层**（变换层之后、safeUrl 之前）—— 保活/取页/CSRF/登录这些
+ *     **内层自发请求也要带上最新会话 cookie**；
+ *   · safeUrl 的保活/取页请求要吃到 live 层的最新 cookie；
+ *   · csrf 取页要吃保活/协议策略；
+ *   · login 的表单 hidden csrf 字段由 loginFlow 自行探测（故在 csrf 之后）；
+ *   · bearer 续期请求要吃到 csrf/登录两层的会话准备（故在最外层会话位）。
+ * @param {any} view 当前客户端视图（变换/解密层已包好）
+ * @param {string} scanId 扫描 id
+ * @param {Record<string, any>} cfg 目标配置（`target.config`）
+ * @param {Record<string, any>|null|undefined} target 目标；**`cookieParams` 在 target 上，不在 config**
+ * @returns {any} 装配好的视图
+ */
+function wrapSessionLayers(view, scanId, cfg, target) {
+  let v = view;
+  // [D198 对标 sqlmap --live-cookies] 每请求用文件里的最新值覆盖同名会话 cookie。
+  // 被当作注入点的 cookie 键由 cookieParams 排除，否则 payload 会被文件里的原值顶回去。
+  // [D205 代 D198 收口] excludeNames 原写 `cfg.cookieParams` —— cfg 是 `target.config`，
+  // 而 cookieParams 在 **target 上**，旧写法恒为空数组 ⇒ 排除清单永不生效（该防的场景正是注入点本身）。
+  if (typeof cfg.liveCookiesFile === 'string' && cfg.liveCookiesFile.trim()) {
+    v = /** @type {any} */ (withLiveCookies(v, scanId, {
+      file: cfg.liveCookiesFile,
+      excludeNames: Object.keys((target && target.cookieParams) || {}),
+    }));
+  }
+  // --safe-url/--safe-freq 保活（SSRF 校验在 client.request 内逐请求执行；失败静默不影响扫描）
+  if (typeof cfg.safeUrl === 'string' && /^https?:\/\//i.test(cfg.safeUrl)) {
+    v = /** @type {any} */ (withSafeUrl(v, { safeUrl: cfg.safeUrl, safeFreq: cfg.safeFreq }));
+  }
+  // --csrf-url/--csrf-token 会话层（取页提取 token，每请求携带 + 定期刷新）
+  if (typeof cfg.csrfUrl === 'string' && /^https?:\/\//i.test(cfg.csrfUrl)) {
+    v = /** @type {any} */ (withCsrf(v, {
+      csrfUrl: cfg.csrfUrl,
+      csrfTokenName: cfg.csrfTokenName,
+      csrfMethod: cfg.csrfMethod,
+      refreshFreq: cfg.csrfRefreshFreq,
+    }));
+  }
+  // 登录编排：会话过期自动重登一次并重试原请求；SSRF/scope/限速逐请求照常生效
+  if (
+    cfg.login && typeof cfg.login.url === 'string' &&
+    /^https?:\/\//i.test(cfg.login.url) && cfg.login.username
+  ) {
+    v = /** @type {any} */ (withLoginFlow(v, cfg.login));
+  }
+  // Bearer/Token 自动续期：与表单登录可共存（cookie 会话 + API bearer）
+  if (cfg.bearerRefresh && refreshActiveForScan(scanId)) {
+    v = /** @type {any} */ (withBearerRefresh(v, scanId));
+  }
+  return v;
+}
+
 export function getScanClient(scanId, target) {
     const connector = this.getConnector(target);
     if (connector !== this.httpClient || typeof connector.forScan !== 'function') return connector;
@@ -278,41 +336,8 @@ export function getScanClient(scanId, target) {
       if (transformActiveForScan(scanId)) view = wrapRequestTransformLayer(view, scanId);
       if (responseTransformActiveForScan(scanId)) view = wrapResponseTransformLayer(view, scanId);
 
-      // [sqlmap 对标] --safe-url/--safe-freq：配置了保活 URL 时包装客户端
-      // （SSRF 校验在 client.request 内逐请求执行；失败静默不影响扫描）
-      // ⚠ 必须包 `view` 而不是 `sc`：D32 的请求变换层可能已经挂在 sc 上，
-      //   直取 sc 会让保活/取页/csrf/登录这几层的请求全部绕过签名（变换层被跳过）。
-      if (typeof cfg.safeUrl === 'string' && /^https?:\/\//i.test(cfg.safeUrl)) {
-        view = /** @type {any} */ (withSafeUrl(view, { safeUrl: cfg.safeUrl, safeFreq: cfg.safeFreq }));
-      }
-      // [sqlmap 对标 2026-09-14] --csrf-url/--csrf-token：CSRF 会话层（取页提取 token，
-      // 每请求自动携带 + 定期刷新）。挂在 safeUrl 之后：token 取页吃到保活/协议策略。
-      if (typeof cfg.csrfUrl === 'string' && /^https?:\/\//i.test(cfg.csrfUrl)) {
-        view = /** @type {any} */ (withCsrf(view, {
-          csrfUrl: cfg.csrfUrl,
-          csrfTokenName: cfg.csrfTokenName,
-          csrfMethod: cfg.csrfMethod,
-          refreshFreq: cfg.csrfRefreshFreq,
-        }));
-      }
-      // [批次14 实战 P1-6] 登录编排（cfg.login.url 显式开启）：标准表单登录自动提交 +
-      // 会话过期（401/403/登录跳转）自动重登一次并重试原请求。挂在 csrf 之后：登录
-      // 表单本身的 hidden csrf 字段由 loginFlow 自行探测透传。登录请求走同一 per-scan
-      // client —— SSRF/scope/限速逐请求照常生效。凭据错误时重登失败即放行原响应
-      // （authLost 统计按既有口径收尾），不会死循环。
-      if (
-        cfg.login && typeof cfg.login.url === 'string' &&
-        /^https?:\/\//i.test(cfg.login.url) && cfg.login.username
-      ) {
-        view = /** @type {any} */ (withLoginFlow(view, cfg.login));
-      }
-      // [D36 实战 P0-2] Bearer/Token 自动续期（cfg.bearerRefresh.url 显式开启）。
-      // 挂在 loginFlow 之后：表单登录换的是会话 Cookie，Bearer 换的是 access token，
-      // 两者可以共存（目标同时用 cookie 会话 + API bearer），且续期请求要吃到
-      // csrf/登录这两层的会话准备。与 loginFlow 同一纪律：一次挑战只重试一次、并发去重。
-      if (cfg.bearerRefresh && refreshActiveForScan(scanId)) {
-        view = /** @type {any} */ (withBearerRefresh(view, scanId));
-      }
+      // 会话层装配（live-cookies → safeUrl → csrf → login → bearer）：次序即契约，见 wrapSessionLayers
+      view = wrapSessionLayers(view, scanId, cfg, target);
       // [P2-5] 协议/出口层（最外层的非闸包装）+ [F1] 暂停闸（视图自身，request/headRequest 都过闸）
       view = wrapEgressLayer(view, cfg);
       view = wrapPauseGate(view, scanId, this._waitWhilePaused.bind(this));

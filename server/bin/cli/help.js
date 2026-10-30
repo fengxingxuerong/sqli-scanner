@@ -50,6 +50,18 @@ export const HELP_TEXT = `sqli-scanner CLI（对标 sqlmap 的 Node 引擎命令
   --xml-body <xml>           XML / SOAP body 原文（注入点取叶子路径，如 soap:Envelope.soap:Body.GetUser.id）
   --xml-body-file <path>     同上，从文件读（多行 SOAP 信封用这个）
   --cookie <str>             认证 Cookie 串（透传 config.auth.cookie，非注入点）
+  --load-cookies <file>      [D198] 从 cookie 文件载入会话（对标 sqlmap --load-cookies）：
+                             支持 Netscape/wget cookies.txt、浏览器扩展导出的 JSON 数组
+                             （也接受 {"cookies":[…]} 包装）、或一段 Cookie: 头文本；
+                             只发送 domain 匹配目标主机的条目（secure 条目不发给 http、
+                             过期条目不发）。与 --cookie 同名时**显式 --cookie 优先**（会提示）；
+                             一条都没匹配会如实告警（不静默裸跑）。格式识别不了直接拒绝启动
+  --live-cookies <file>      [D198] 每请求前重读该 cookie 文件、用最新值覆盖同名会话 cookie
+                             （对标 sqlmap --live-cookies）：短时效 token（前端每次刷新都换）
+                             的目标不给它 = 后半程全 401，而那些 401 在报告里长得像「没洞」。
+                             按 mtime+size 缓存，不是每请求打一次盘；被当作注入点的 cookie 键
+                             自动排除（不会把 payload 顶回原值）。读不到文件时如实告警并沿用
+                             原值（目标侧照样 401 ⇒ 结论是不确定，不是「未检出」）
   --header <k:v,k:v>          额外请求头（冒号分隔，逗号分隔多组）
   --technique <BEUSTQ>       检测技术子集（union/error/boolean/time/stacked/oob/inline/second_order，逗号分隔；缺省=默认 4 类）
   --no-sql                   [2026-10-12 §A2] 开启 NoSQL 注入通道（nosql/graphql/ssti 三类，默认关）。
@@ -177,6 +189,11 @@ export const HELP_TEXT = `sqli-scanner CLI（对标 sqlmap 的 Node 引擎命令
                             PG 用 -m 12（sqlmap 同样不内置破解）
   --hostname                枚举数据库主机名/地址（对标 sqlmap --hostname）
   --is-dba                  判断当前用户是否为 DBA（对标 sqlmap --is-dba，返回 1/0）
+  --audit                   只读安全配置审计（[D181] 对标 sqlmap --audit）：连上库后额外查
+                            版本/连接身份/超管/建角色/口令加密/public 可写/文件读权限等，
+                            结果进报告 audit 段与 summary.audit。**仅直连模式（-d）有效**；
+                            全程只读（只发 SELECT/SHOW/PRAGMA），查不到的项标 unknown 并说明原因
+                            （不等于通过）。HTTP 目标给本开关会如实写「需要直连」而不是静默跳过
   --schema -D <db> -T <t>   枚举表结构/列定义（对标 sqlmap --schema）
   --privileges              枚举当前用户权限（对标 sqlmap --privileges；失败返回 null）
   --roles                   枚举当前用户角色（对标 sqlmap --roles；失败返回 null）
@@ -280,6 +297,23 @@ export const HELP_TEXT = `sqli-scanner CLI（对标 sqlmap 的 Node 引擎命令
                              db-json = 仅拖库数据（库/表/列/行，扩展名 db.json，与 REST 导出同源）。
                              未知格式**拒绝启动**（旧行为静默回退 JSON 已修，"传了没生效"红线）
   -o, --out <path>           报告输出文件（批量模式输出到目录）
+  --fix-prompt [dir]         扫描后生成「给编码代理的修复提示词」：每条命中一份 Markdown，
+                             内含为什么能注入 / 该怎么改 / 改完怎么验（复测命令 + 期望 0 命中）。
+                             不带值 ⇒ 写 <--out 目录或当前目录>/fix-prompts/；带值 ⇒ 直接写该目录。
+                             只生成指令，**不自动改代码**（[D176]；结论不可信时会先声明口径）
+  --repro-check [dir]        复现检查：把每条命中的 PoC 请求重放 2 次，判别
+                             「已复现（两次响应一致）/ 单次命中（不一致）/ 不可重放」，
+                             判定写进 report.json 的 vuln.repro 与 summary.repro；同时生成
+                             repro-*.sh + repro-*.expect.json（一致才 exit 0）。
+                             不带值 ⇒ <--out 目录或当前目录>/repro/；带值 ⇒ 直接写该目录。
+                             注意：一致 ≠ 漏洞仍存在，只说明这条证据稳定（[D177]）
+  --ai-report [dir]          扫描后用 LLM 生成自然语言报告（analyst→writer→reviewer 三角色流水线）。
+                             需先配 AI_REPORT_API_BASE（完整 chat/completions 端点）+ AI_REPORT_KEY_1；
+                             自建/本机网关常强制 provider/model 全名，另需 AI_REPORT_MODEL_1/2/3。
+                             不带值 ⇒ 写 <--out 目录或当前目录>/ai-report/；带值 ⇒ 直接写该目录。
+                             落盘 ai-report.md + ai-report.json（模型链/耗时/审阅状态）。
+                             报告里的响应判据取自引擎实测布尔 trace（真/假响应长度差、差异片段），
+                             不是模型编的；AI_REPORT_MASK=0 让 host/路径原样输出（PoC 可直接复现）[D205]
   -c, --concurrency <n>     批量并发扫描数（默认 1）
   --timeout <ms>             单次扫描等待上限（默认 0 = 无限制）
   --retries <n>              单请求连接失败重试次数（[D41] 对标 sqlmap --retries，0-5，默认 3；
@@ -342,6 +376,15 @@ export const HELP_TEXT = `sqli-scanner CLI（对标 sqlmap 的 Node 引擎命令
   --force-ssl              目标 http:// 强制升级 https（对标 sqlmap --force-ssl）
   --ignore-redirects        不跟随 3xx 跳转，直接返回跳转响应（对标 sqlmap --ignore-redirects）
   --hpp                     注入参数双份提交（query+body 同名，WAF 绕过，对标 sqlmap --hpp）
+  --no-keep-alive           [D197] 每次请求新建连接、不复用长连接（对标 sqlmap --no-keep-alive）：
+                            连接级 WAF 状态/限速计数不再跨请求累积；代价是每请求一次 TCP+TLS 握手。
+                            经受治出口清单（egressOpts）生效：检测/指纹/提取/二阶同一形态
+  --drop-set-cookie         [D197] 忽略响应里的 Set-Cookie，不回发（对标 sqlmap --drop-set-cookie）：
+                            目标每次响应都换会话 cookie 时（负载均衡/风控），自动吸收反而会把请求
+                            打成「多个会话」；需要固定初始会话的场景加这个
+  --list-tampers            [D197] 只列出当前可用的 tamper 插件（名字/说明/dbms 限定/terminal/幂等）
+                            并退出，不发起任何请求（对标 sqlmap --list-tampers）。总数是运行时真值，
+                            文档里的数字会漂 —— 挑链前以本输出为准
   --parse-errors            解析错误响应中的数据库报错原文与 SQL 上下文，留存证据链（对标 sqlmap --parse-errors）
   --union-cols <n>          UNION 探测指定列数（跳过 ORDER BY 二分猜测，对标 sqlmap --union-cols）
   --union-from <from>       UNION 探测强制伪表 FROM 子句（如 dual，覆盖方言自动判定，对标 sqlmap --union-from）
@@ -356,9 +399,10 @@ export const HELP_TEXT = `sqli-scanner CLI（对标 sqlmap 的 Node 引擎命令
   -V, --version              只打印版本号（与 package.json / 桌面壳同一事实源）并退出
 
 直连模式（对标 sqlmap -d）:
-  -d, --direct <connStr>     数据库连接串（如 mysql://user:pass@host/db、sqlite://path.db）
+  -d, --direct <connStr>     数据库连接串（如 mysql://user:pass@host/db、oracle://user:pass@host:1521/svc?privilege=SYSDBA、db2://user:pass@host:50000/db、sqlite://path.db）
   --sql-template <sql>       SQL 模板（含 {INJECT} 标记；默认 SELECT * FROM users WHERE id={INJECT}）
-  --driver <type>            驱动类型 memory|sqljs|sqlite（默认 memory；真实驱动需 npm install 接入，见 core/dbDrivers.js）
+  --driver <type>            驱动类型 memory|sqljs|sqlite|mysql|pglite|mssql|oracle|db2
+                             （缺省按 -d 连接串的 scheme 推断；memory 是**自检桩**，不是真库）
 
 退出码：
   0 = 扫描完成、无高危命中

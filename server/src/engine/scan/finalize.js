@@ -13,8 +13,34 @@ import { createVulnerability, countBy } from '../models.js';
 import { summarizeSkipped } from '../scanHelpers.js';
 import { dbmsEvidenceOf } from '../dbmsEvidence.js';
 import { publicReport } from '../scanHelpers.js';
+// [D181] 只读安全配置审计（对标 sqlmap --audit）
+import { auditPhase } from './auditPhase.js';
 // [2026-09-17] 漏洞条目上下文回填（受影响参数 / 规范化漏洞类型）
 import { attachVulnContext } from '../vulnEnrich.js';
+
+/**
+ * [D181] 报告收尾的可选附加阶段（审计 / 会话落盘 / 事件 / 回收）：
+ * 从 `finalizeReport` 抽出，理由同本文件头——那是个卡在行数硬上限上的存量函数，
+ * 每加一个「顺手也要做」的步骤就得抬基线，而基线只许持平或变浅。
+ * @param {object} run 扫描运行期上下文
+ * @returns {Promise<void>}
+ */
+async function finalizeSideEffects(run) {
+  const { sm, scanId, s, target, report, session, ctxBase } = run;
+  // [D181] 只读安全配置审计（opt-in，仅直连）：赶在会话落盘之前，
+  // 这样 report.json / manifest / 会话快照拿到的是同一份事实。
+  // 直连模式下 ctxBase.httpClient 就是 DirectConnector，故统一从这里取。
+  await auditPhase({ rawClient: ctxBase && ctxBase.httpClient, target, report });
+  // 会话落盘收尾（resume 模式可用同一 sessionFile 续跑/复核）：必须先 finalize 落盘完成，再置 completed，
+  // 避免 resume 端在 status=completed 后、落盘前抢读到一个 vulns 为空的半成品会话。
+  if (session) await session.finalize(report).catch(() => {});
+  s.status = 'completed';
+  // [MERGED: security] scan_completed 事件脱敏：SSE 不再携带 target 凭据
+  eventBus.emit(scanId, 'scan_completed', publicReport(report));
+  await sm._maybeClose(ctxBase.httpClient);
+  // completed 路径回收扫描上下文（TTL 到期清 scans + eventBus + 限速桶）
+  sm._retire(scanId);
+}
 
 /**
  * @param {object} run 扫描运行期上下文（见 scanRunner.js）
@@ -22,9 +48,9 @@ import { attachVulnContext } from '../vulnEnrich.js';
  */
 export async function finalizeReport(run) {
   const {
-    sm, scanId, s, target, report, finalVulns, extracted, restored, session,
+    sm, scanId, target, report, finalVulns, extracted, restored, session,
     points, pointsToScan, fullyTestedPoints, stackedSelected, corroborations,
-    oobUnavailable, dbms, guard, wafAgg, blockPolicy, blockAdaptiveInfo, validity, ctxBase,
+    oobUnavailable, dbms, guard, wafAgg, blockPolicy, blockAdaptiveInfo, validity,
   } = run;
 
   report.vulns = finalVulns;
@@ -196,13 +222,6 @@ export async function finalizeReport(run) {
   // 计数放在报告本体而不是清单里现算：报告 JSON、REST /report、前端与 manifest 才共用同一份事实。
   report.summary.byRisk = countBy(report.vulns, 'riskLevel');
   report.summary.byTechnique = countBy(report.vulns, 'technique');
-  // 会话落盘收尾（resume 模式可用同一 sessionFile 续跑/复核）：必须先 finalize 落盘完成，再置 completed，
-  // 避免 resume 端在 status=completed 后、落盘前抢读到一个 vulns 为空的半成品会话。
-  if (session) await session.finalize(report).catch(() => {});
-  s.status = 'completed';
-  // [MERGED: security] scan_completed 事件脱敏：SSE 不再携带 target 凭据
-  eventBus.emit(scanId, 'scan_completed', publicReport(report));
-  await sm._maybeClose(ctxBase.httpClient);
-  // completed 路径回收扫描上下文（TTL 到期清 scans + eventBus + 限速桶）
-  sm._retire(scanId);
+  // 收尾副作用（审计 / 会话落盘 / 事件 / 回收）见 finalizeSideEffects
+  await finalizeSideEffects(run);
 }

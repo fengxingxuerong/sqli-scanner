@@ -25,8 +25,9 @@ npm run version:check
 ```bash
 node scripts/labs.mjs --check          # 先确认靶场；缺项会表现为 SKIP
 node scripts/labs.mjs --up             # 拉起（Windows 上 benchmark-app 需要 ~80s）
-npm run gate:close                     # 27 项收口
+npm run gate:close                     # 35 项收口
 npm run acceptance                     # 25 套件；SKIP 不算通过
+node scripts/pack-install-check.mjs    # 发版包「registry 式安装」端到端（干净目录真装真跑；需网络）
 npm run package:portable               # 壳构建 → 便携包 → 干净解压冒烟
 npm run release:check                  # 干净工作区 / tag↔版本 / Tauri 线
 ```

@@ -125,6 +125,18 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 const RESULTS_DIR = resolve(dirname(fileURLToPath(import.meta.url)), 'results');
 mkdirSync(RESULTS_DIR, { recursive: true });
 const genAt = new Date().toISOString();
+// [D185 2026-10-27] 引擎标签改为实测值：报告头硬编码的「真实 MySQL 8.0.28」曾在 MariaDB 实例上
+// 再生成（MYSQL_PORT 默认 3306，本机那是 MariaDB 10.11）——引擎声明与实连引擎不一致，违反 §3.5 证据纪律。
+// 现改为每次跑完查 SELECT version() 写进产物，连接串与版本同源，谁连的就是谁。
+const dbVersionConn = await mysql.createConnection(MYSQL_CONF).catch(() => null);
+let dbVersion = '';
+if (dbVersionConn) {
+  try {
+    const [verRows] = await dbVersionConn.query('select version() as v');
+    dbVersion = String(verRows[0]?.v ?? '');
+  } catch { /* 版本拿不到就写「version 未知」，不让它把整份报告写坏 */ }
+  await dbVersionConn.end().catch(() => {});
+}
 const summaryRows = SCENARIOS.filter((s) => !s.expectSafe).map((s) => ({
   name: s.name,
   tamperOff: matrix.off[s.name].found,
@@ -132,7 +144,7 @@ const summaryRows = SCENARIOS.filter((s) => !s.expectSafe).map((s) => ({
   must: s.must,
 }));
 // 口径必须随数字一起存档：不带 PL 的"绕过率 N/N"没有可比性（CRS 官方默认部署是 PL1）。
-const report = { generatedAt: genAt, crs: `OWASP CRS v4.1.0 (自实现 SecRule 执行器, ${PL_LABEL})`, paranoiaLevel: EFFECTIVE_PL, db: `MySQL ${MYSQL_CONF.host}:${MYSQL_CONF.port}/${MYSQL_CONF.database}`, matrix, summaryRows, safeControlFalsePositive: !safeOk };
+const report = { generatedAt: genAt, crs: `OWASP CRS v4.1.0 (自实现 SecRule 执行器, ${PL_LABEL})`, paranoiaLevel: EFFECTIVE_PL, db: `${dbVersion || 'version 未知'} @ ${MYSQL_CONF.host}:${MYSQL_CONF.port}/${MYSQL_CONF.database}`, matrix, summaryRows, safeControlFalsePositive: !safeOk };
 // 改档跑出来的产物**不能覆盖默认那份**（同一个坑今天在 multi-engine-lab 上刚踩过：
 // 抬头印的是当时档位，文件名却只有一个，于是 `CRS_PL=3` 的一次探索把对外口径的 PL1 基线
 // 换成了 0/0 那份，README 引用的数字悄悄变了口径而没有任何东西报出来）。
@@ -142,7 +154,7 @@ writeFileSync(resolve(RESULTS_DIR, `waf-real-report${SUFFIX}.json`), JSON.string
 const md = [
   '# 真实 CRS v4.1.0 下 tamper 开/关 A/B（对外唯一口径）',
   '',
-  `> 生成：${genAt}　｜　靶场：真实 MySQL 8.0.28（e2e/real-mysql-lab/lab-app）　｜　CRS：官方规则原文 + 自实现执行器，档位 **${PL_LABEL}**（` +
+  `> 生成：${genAt}　｜　靶场（MySQL 协议引擎，实连实测）：${dbVersion || 'version 查询失败'} @ ${MYSQL_CONF.host}:${MYSQL_CONF.port}/${MYSQL_CONF.database}（e2e/real-mysql-lab/lab-app）　｜　CRS：官方规则原文 + 自实现执行器，档位 **${PL_LABEL}**（` +
     `${SUFFIX ? `本档为 PL${EFFECTIVE_PL}（非默认口径），产物是独立文件、不是对外那份` : '本文件是**默认口径 PL1** 那份'}；` +
     '改档 `CRS_PL=1..4 npm run waf-real` 各写各的文件，互不覆盖；CRS 官方默认部署为 PL1）',
   '',

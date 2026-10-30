@@ -34,6 +34,9 @@ curl -s "http://127.0.0.1:5000/createdb"                                        
 PORT=5001 vulnerable=0 tokentimetolive=7200 <venv>/Scripts/python <repo>/e2e/vampi-lab/run_port.py   # 5001（vuln=0）
 ```
 
+> [D188] `npm run labs:up` 起 VAmPI 时**会自动调用 `/createdb`**（`labs.mjs` 的 `seedPath` 钩子）——
+> 手工按上面步骤起时仍需自己 curl 一次；不播种则 `/users/v1/name1` 恒 500，外部裁判会因此 FAIL/SKIP。
+
 ⚠ `run_port.py` 是**本仓**提供的启动器（`e2e/vampi-lab/run_port.py`，D122 入库）：
 上游 `app.py` 把端口硬编码 5000，A/B 对照必须在 5001 再起一个，所以只把 `PORT`
 开放出来；`vulnerable` 仍由官方 `config.py` 读 env，未改任何业务逻辑。

@@ -1,5 +1,6 @@
 import { URL } from 'url';
 import { fillPayload, replaceAllLiteral } from './payloads.js';
+import { SQL_ERROR_SIG } from '../core/errorSig.js';
 import { obfuscateWithConfig } from '../core/tamper/applyTampers.js';
 import { resolveDbms, resolveFromClause, commentSuffix } from './DialectSqlBuilder.js';
 // [P0-FIX 2026-09-09] 出口选项同源 + 失败响应结构（见 egressOpts.js 顶部三起事故）
@@ -583,14 +584,23 @@ function _numMarkers(base, columns) {
 async function _probeBody(httpClient, ctx, probe) {
   const res = await sendInjection(httpClient, ctx, probe.req);
   const status = res?.status ?? null;
+  const body = String(res?.data ?? '');
+  // [P0-FIX 2026-09-07] 标记命中必须发生在非错误响应上：PG 严格类型下 UNION 类型错配的
+  // 500 错误页会把「转换失败的输入值」原样回显（invalid input syntax for type integer:
+  // "SQLISCANNER0"）——按纯文本匹配会把报错回显误判为可回显列（实测 echoCols 被污染成
+  // int 列 [0] → 拖库把文本表达式放 int 列 → 提取全线 500）。
+  // [D207] 但**状态码拦不住渲染成 200 的错误页**：Derby/H2/部分 JSP 站把 SQL 报错做成
+  // 普通页面（200 + `Syntax error: Encountered ")"`）并回显 SQL 片段。实测
+  // `demo.testfire.net` 的 doLogin：`point.boundary` 推断为空 ⇒ union payload 无引号
+  // ⇒ `WHERE uid=testuser UNION SELECT …` 语法错误 ⇒ 200 错误页里出现 `'SQLISCANNER40'`
+  // ⇒ 假命中「UNION 注入成功，回显列 40（列数 41）」。故补内容级甄别，
+  // 签名复用 `core/errorSig.js` 的唯一真源（不在这里另开一份清单）。
+  const errorPage = SQL_ERROR_SIG.test(body);
   return {
-    body: String(res?.data ?? ''),
+    body,
     status,
-    // [P0-FIX 2026-09-07] 标记命中必须发生在非错误响应上：PG 严格类型下 UNION 类型错配的
-    // 500 错误页会把「转换失败的输入值」原样回显（invalid input syntax for type integer:
-    // "SQLISCANNER0"）——按纯文本匹配会把报错回显误判为可回显列（实测 echoCols 被污染成
-    // int 列 [0] → 拖库把文本表达式放 int 列 → 提取全线 500）。
-    echoed: status != null && status >= 200 && status < 400,
+    errorPage,
+    echoed: status != null && status >= 200 && status < 400 && !errorPage,
   };
 }
 

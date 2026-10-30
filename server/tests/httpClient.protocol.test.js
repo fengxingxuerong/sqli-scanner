@@ -2,9 +2,22 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { HttpClient } from '../src/core/httpClient.js';
 
+/**
+ * [D188] 本文件只测 URL 改写与重定向策略，不测 egress/DNS。
+ * 不 stub 会走真实 SSRF 校验：`example.com` 离线或 DNS 抖动时直接抛
+ * `目标主机 example.com DNS 解析失败`，让「URL 改写对不对」的判据恒红
+ * （2026-10-28 实测：同一条 acceptance 两次跑出 0 fail / 8 fail，唯一变量是 DNS）。
+ * @returns {HttpClient} 跳过 egress 校验的客户端（instance/_rawUndici 仍由各用例注入）
+ */
+function makeProtocolClient() {
+  const c = new HttpClient();
+  c._assertEgressAllowed = async () => {};
+  return c;
+}
+
 // ===== [P2-5] --force-ssl =====
 test('forceSsl: http:// 目标改写为 https:// 后再发请求', async () => {
-  const client = new HttpClient();
+  const client = makeProtocolClient();
   let capturedUrl = null;
   let capturedCfg = null;
   client.instance.request = async (cfg) => {
@@ -24,7 +37,7 @@ test('forceSsl: http:// 目标改写为 https:// 后再发请求', async () => {
 });
 
 test('forceSsl: 已是 https 的目标不被改写', async () => {
-  const client = new HttpClient();
+  const client = makeProtocolClient();
   let capturedUrl = null;
   client.instance.request = async (cfg) => {
     capturedUrl = cfg.url;
@@ -35,7 +48,7 @@ test('forceSsl: 已是 https 的目标不被改写', async () => {
 });
 
 test('forceSsl: 未开启时不改写（回归护栏）', async () => {
-  const client = new HttpClient();
+  const client = makeProtocolClient();
   let capturedUrl = null;
   client.instance.request = async (cfg) => {
     capturedUrl = cfg.url;
@@ -46,7 +59,7 @@ test('forceSsl: 未开启时不改写（回归护栏）', async () => {
 });
 
 test('forceSsl: 带端口/查询串的 URL 改写后保留端口与查询', async () => {
-  const client = new HttpClient();
+  const client = makeProtocolClient();
   let capturedUrl = null;
   client.instance.request = async (cfg) => {
     capturedUrl = cfg.url;
@@ -63,7 +76,7 @@ test('forceSsl: 带端口/查询串的 URL 改写后保留端口与查询', asyn
 
 // ===== [P2-5] --ignore-redirects =====
 test('ignoreRedirects: 3xx 响应直接返回不跟随（首跳即 302）', async () => {
-  const client = new HttpClient();
+  const client = makeProtocolClient();
   let rawCalls = 0;
   client.instance.request = async () => {
     rawCalls++;
@@ -80,7 +93,7 @@ test('ignoreRedirects: 3xx 响应直接返回不跟随（首跳即 302）', asyn
 });
 
 test('ignoreRedirects: 未开启时仍跟随跳转（回归护栏：最多 5 跳）', async () => {
-  const client = new HttpClient();
+  const client = makeProtocolClient();
   let rawCalls = 0;
   client.instance.request = async () => {
     rawCalls++;
@@ -91,7 +104,7 @@ test('ignoreRedirects: 未开启时仍跟随跳转（回归护栏：最多 5 跳
 });
 
 test('ignoreRedirects: http2 路径同样忽略 3xx', async () => {
-  const client = new HttpClient();
+  const client = makeProtocolClient();
   client._rawUndici = async () => {
     return { status: 301, headers: { location: 'http://example.com/next' }, data: '' };
   };
@@ -106,7 +119,7 @@ test('ignoreRedirects: http2 路径同样忽略 3xx', async () => {
 });
 
 test('ignoreRedirects: 200 正常响应不受影响', async () => {
-  const client = new HttpClient();
+  const client = makeProtocolClient();
   let rawCalls = 0;
   client.instance.request = async () => {
     rawCalls++;

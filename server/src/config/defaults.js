@@ -34,6 +34,14 @@ export const defaults = {
   // 默认 false 保持现状（显式传 sessionFile 才落盘），避免静默副作用。
   sessionDefault: false,
 
+  // [D198 2026-10-30 对标 sqlmap --live-cookies] 每请求重读的 cookie 文件路径。
+  // null = 关闭。开启后 core/liveCookies.js 在每次请求前重读该文件（mtime+size 缓存，
+  // 不是每请求打一次盘），用其中的**最新值覆盖同名会话 cookie** —— 短时效 token
+  // （前端每次刷新都换）的目标不给它 = 后半程全 401，而那些 401 在报告里长得像
+  // 「这个参数没洞」。被当作注入点的 cookie 键（cookieParams）自动排除，
+  // 不会把 payload 顶回原值（与 D101 的 auth/注入点去重同一纪律）。
+  liveCookiesFile: null,
+
   // 检测
   // level/risk 分级（对标 sqlmap --level / --risk）：
   //   level 1-5：payload 复杂度 / 边界探测强度（1 默认，5 最深）
@@ -216,6 +224,11 @@ export const defaults = {
 
   // 提取
   enableExtract: true, // 拖库开关（默认开，前端二次确认）
+  // [D181] 只读安全配置审计（--audit，对标 sqlmap 同名）刻意**不在此处**给默认值：
+  // 它只在 CLI 直连模式（-d）下有意义，而 defaults 顶层键必须进 REST 白名单
+  // （configWhitelist.guard 会红）；把它塞进白名单又会让前端契约测试要求「面板有入口」，
+  // 而 Web UI 是单目标 HTTP 面板、根本没有连接串输入。缺省 undefined 即「关」，
+  // auditPhase 用 `if (!cfg.audit) return` 判定，语义不变。
   excludeSysdbs: true, // 系统库过滤（对标 sqlmap --exclude-sysdbs；false 时拖库含系统库）
   dumpRowLimit: 100, // 单次拖库单表行数上限
   // [sqlmap 对标] 行范围导出（--start/--stop）：dumpStart=起始行偏移（0 起），dumpStop=结束行（绝对行号，0=不限）

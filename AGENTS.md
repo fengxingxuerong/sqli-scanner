@@ -31,6 +31,13 @@ node scripts/one-click-scan.mjs -u "http://target/page?id=1"   # 一条命令出
 - **定向复测**：`-p <param>` 只测指定参数、`--param-filter body` 只测某位置、
   `--param-exclude <regex>` 排除噪声参数（[D41] 对标 sqlmap）。筛选把点位删光时报错退出——
   这说明参数写错了，不是目标没洞。
+- **修复回路**：`--fix-prompt [dir]`（[D176]）把命中项渲染成「为什么能注入 / 该怎么改 /
+  改完怎么验（复测命令 + 期望 0 命中）」的 Markdown，落在 `<--out>/fix-prompts/` 或指定目录。
+  它**不自动改代码**，也不替 agent 判断业务语义；`verdict=inconclusive` 时会先声明口径。
+- **复现判定**：`--repro-check [dir]`（[D177]）把每条命中的 PoC 重放 2 次，判定
+  `reproduced`（两次一致）/ `single_hit`（不一致，证据不稳）/ `unreplayable`（无 PoC 或发不出去，
+  带 `reason`），写进 `vuln.repro` 与 `summary.repro`，并产出 `repro-*.sh` + `.expect.json`。
+  **一致 ≠ 漏洞仍存在**；比对前剔除 10 位以上数字与 ISO 时间戳（易变标记），不做相似度。
 - **CI 判红口径**（一键扫描）：`--fail-severities <critical|high|medium|low 子集>` 显式
   覆盖退出码判红等级（[D152] 对标 nuclei `-severity`）；不传 = 默认（普通模式 Critical/High、
   diff 模式新增即红）。低于口径的新增会披露不判红——引用「未判红」结论时先看
@@ -63,7 +70,7 @@ node scripts/one-click-scan.mjs -u "http://target/page?id=1"   # 一条命令出
 
 - 每批改动走 **D 编号批次**（见 `TODO.md` 顶部），一次批次 = 代码 + 测试 + README/CHANGELOG 同步 + 门禁全绿。
 - `npm run readme:check`：README 与代码**双向核对**。数字类口径（方言分层 / tamper 数 / payload / 端点表）自 D53 起核对；**CLI 旗标类（D68 的 ⑯ / D69 的 ⑰）自 2026-10-14 起才真正双向**——此前门禁只核数字，「加了开关不写文档」一直没人守，实测 CLI 168 个旗标里 README 曾漏 73 个、user-guide 漏 123 个、**`--help` 自己漏 11 个**。判据实现在 `scripts/readme-consistency.mjs`（⑯⑰ 在 `scripts/readme-flag-coverage.mjs`）。
-- **收口清单已固化为一条命令：`npm run gate:close`（D71 立；**D143 起 24 项、D144 起 25 项、D145 起 27 项**；`--quick` 跳最慢两项）。** 手写清单如下（漏一条都会被 CI 抓）：`npm run lint` + **`npm run typecheck`** + **六道门禁逐道跑**（`node scripts/{complexity,nesting,duplication,deadcode,debt,typecoverage}-guard.mjs`）+ **各门禁 `--selftest`** + **`node --test server/tests/（guard 与 wiring 类测试全量，判据见 scripts/gate-close.mjs 的 wiringTestFiles()，大小写不敏感）`** + `npm run readme:check` + `npm run facts:check` + `node scripts/ref-integrity.mjs` + `node scripts/e2e-wiring-check.mjs`（+`--selftest`）+ **`node scripts/build-portable.mjs --selftest`** + **`node scripts/portable-smoke.mjs --selftest`**（D143 补：交付件链路的两道判据也要自证）+ **`node scripts/labs.mjs --selftest`**（D144 补：本机靶场体检判据的自证）+ **`node scripts/greenguard-check.mjs`（+`--selftest`）**（D145 补：它只跑在 CI lint，收口清单没有它 ⇒ D143 的 build-portable 被误判恒绿，本地全绿而 CI 红）。**已漏七次**：D66 漏 typecheck、D70 漏五道门禁、D70b 漏 wiring（基线改完必须跑 wiring —— 防虚高判据在测试里，不在门禁输出里）、D94 前补 typecoverage（D87 起 JSDoc 覆盖跌破基线，pre-commit 被 SKIP_PRECOMMIT 绕过后收口清单里没有它，红到 push 才现——**跳过 pre-commit 的批次，收口清单是最后一道自留地**）、D95 补 e2e:wiring（D93 建的 param-name-lab 有入口从不执行，且该门禁只在 ci-local/CI、收口清单没有它——同一形态第二次重演；判据把注释当接线导致假阳性，一并修+自证）、**D97 修 wiring 收集（2026-10-18：wiringTestFiles() 用大小写敏感的 `includes('Guard')`，把 26 个 `*.guard.test.js`（含 D89 wafExternalParity.guard、wafSamples.guard 与新增 wafRealSamples.guard）漏在收口之外——它们只在 `cd server && npm test` 全量里被兜底跑，gate:close 看不见**）、**D145 补 greenguard（2026-10-24：greenguard 只跑 CI lint，收口清单没有它；D143 把便携包的失败退出收敛到 `failWith()` 后，恒绿判据看不见委托路径，把 build-portable 判成 only-exit-0 —— 本地 gate:close 绿、CI lint 红。判据已识别 failWith + 补自证，并接进收口）**。
+- **收口清单已固化为一条命令：`npm run gate:close`（D71 立；**D143 起 24 项、D144 起 25 项、D145 起 27 项、D175 起 29 项、D178 起 31 项、D179 起 33 项、D182 起 35 项、**D218 起 37 项**（补 `changelog-index` 的 check 与 selftest 两项）**；`--quick` 跳最慢两项）。** 手写清单如下（漏一条都会被 CI 抓）：`npm run lint` + **`npm run typecheck`** + **六道门禁逐道跑**（`node scripts/{complexity,nesting,duplication,deadcode,debt,typecoverage}-guard.mjs`）+ **各门禁 `--selftest`** + **`node --test server/tests/（guard 与 wiring 类测试全量，判据见 scripts/gate-close.mjs 的 wiringTestFiles()，大小写不敏感）`** + `npm run readme:check` + `npm run facts:check` + `node scripts/ref-integrity.mjs` + `node scripts/e2e-wiring-check.mjs`（+`--selftest`）+ **`node scripts/build-portable.mjs --selftest`** + **`node scripts/portable-smoke.mjs --selftest`**（D143 补：交付件链路的两道判据也要自证）+ **`node scripts/labs.mjs --selftest`**（D144 补：本机靶场体检判据的自证）+ **`node scripts/greenguard-check.mjs`（+`--selftest`）**（D145 补：它只跑在 CI lint，收口清单没有它 ⇒ D143 的 build-portable 被误判恒绿，本地全绿而 CI 红）。**已漏七次**：D66 漏 typecheck、D70 漏五道门禁、D70b 漏 wiring（基线改完必须跑 wiring —— 防虚高判据在测试里，不在门禁输出里）、D94 前补 typecoverage（D87 起 JSDoc 覆盖跌破基线，pre-commit 被 SKIP_PRECOMMIT 绕过后收口清单里没有它，红到 push 才现——**跳过 pre-commit 的批次，收口清单是最后一道自留地**）、D95 补 e2e:wiring（D93 建的 param-name-lab 有入口从不执行，且该门禁只在 ci-local/CI、收口清单没有它——同一形态第二次重演；判据把注释当接线导致假阳性，一并修+自证）、**D97 修 wiring 收集（2026-10-18：wiringTestFiles() 用大小写敏感的 `includes('Guard')`，把 26 个 `*.guard.test.js`（含 D89 wafExternalParity.guard、wafSamples.guard 与新增 wafRealSamples.guard）漏在收口之外——它们只在 `cd server && npm test` 全量里被兜底跑，gate:close 看不见**）、**D145 补 greenguard（2026-10-24：greenguard 只跑 CI lint，收口清单没有它；D143 把便携包的失败退出收敛到 `failWith()` 后，恒绿判据看不见委托路径，把 build-portable 判成 only-exit-0 —— 本地 gate:close 绿、CI lint 红。判据已识别 failWith + 补自证，并接进收口）**。
 - `npm run acceptance`：26 套件验收门禁，提级提交前必跑（缺 MySQL/Docker 时套件如实 BLOCKED/SKIP，不计通过）。
 - 引擎**有意零运行时 npm 依赖**（server 的 runtime deps 除外）；给引擎加能力请用 Node 内置能力。
 - 检测判据/定库签名的测试是校准过的——不要为了让测试变绿而放宽断言；行为变化必须有靶场证据。
@@ -73,6 +80,10 @@ node scripts/one-click-scan.mjs -u "http://target/page?id=1"   # 一条命令出
 > **前提**：本仓所有对外结论（检出率 / 覆盖率 / 对标 sqlmap / WAF 绕过 / 数据库支持等级）
 > 一律视为**未经证实的断言**，直到有**可复现命令 + 落盘产物**支撑。README 的门面数字不是证据，
 > 门禁的绿灯也不是——门禁只保证「这条判据此刻没退化」，不保证「判据本身是对的」。
+>
+> **对外可信度页**：[docs/质量台账.md](docs/质量台账.md)（[D178]）——门禁项数 / 用例 / 覆盖率 vs 阈值 /
+> 结论台账状态分布全部由 `node scripts/quality-ledger.mjs` 从真源生成，手改即红（`--check` 已在收口清单）。
+> 它**只汇总既有判据的产出，不做能力声明**；要引用检出率之类结论，仍须回到台账里那条 claim 的 `refute_cmd`。
 
 ### 一、什么算「关键结论」
 
@@ -145,3 +156,17 @@ SSRF/scope 护栏）/ `get_scan_status` / `get_findings`（CWE·CVSS·受影响�
 
 红线不变：`risk=3` 需显式 `confirmDestructive=true`（用户同意后才设）；`verdict=inconclusive`
 不等于「未检出」（get_findings 的 verdictNote 会提示）。落地前请用 1.1/1.2 的两种方式驱动。
+
+### 4.1 装载面（D175：能力有 ≠ 装得上）
+
+宿主侧的三个清单已入库，装法与宿主差异见 [docs/agent-装载.md](docs/agent-装载.md)：
+
+| 文件 | 作用 |
+|---|---|
+| `.mcp.json` | 项目级 MCP 配置（`mcpServers.sqli-scanner` → `node server/bin/cli.js mcp`） |
+| `.claude-plugin/plugin.json` | 插件清单（字段与 `server/package.json` 版本号**同一真源**） |
+| `skills/sqli-scan/SKILL.md` | 技能说明：必带三条硬口径（`inconclusive` / `unverifiedSurfaces` / `confirmDestructive`）与红线，且必须提到全部 9 个工具名 |
+
+`npm run agent:check`（含 `--selftest`，已进收口清单与 pre-commit）把三者钉住：版本漂移、
+工具改名后技能还在教旧名字、技能里出现越界话术（目标发现 / dork / 自主渗透）都会红。
+改 MCP 工具名或加工具时，**同一个批次里同步 SKILL.md**，否则门禁红。

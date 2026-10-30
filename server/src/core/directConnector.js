@@ -57,6 +57,18 @@ export class DirectConnector {
     return this.driver?.dialect || null;
   }
 
+  // [D181] 只读安全配置审计需要直接拿驱动跑 SELECT/SHOW/PRAGMA。
+  // 刻意不暴露 `driver` 字段本身：审计方只能通过这里拿到已连接的驱动，无法替换/关闭它
+  // （连接生命周期仍归本类，close() 由扫描收尾统一调用）。
+  /**
+   * 取已连接的驱动（供只读审计使用）。
+   * @returns {Promise<object>} 驱动实例（含 dialect 与 query(sql)）
+   */
+  async getDriverForAudit() {
+    await this._ensure();
+    return this.driver;
+  }
+
   // 契约同 HttpClient.request(req) -> { status, headers, data }
   async request(req) {
     await this._ensure();

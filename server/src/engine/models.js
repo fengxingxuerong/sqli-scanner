@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { nanoid } from 'nanoid'; // 仅 scanId / targetId 用（随机，不需稳定）
 import { AppError, ErrorCode } from '../core/errors.js';
+import { driverTypeFromConnectionString } from '../core/dbDrivers.js';
 import { defaults } from '../config/defaults.js';
 
 // 工厂与校验函数：构造 Target / InjectionPoint / DetectionResult /
@@ -79,6 +80,24 @@ import { defaults } from '../config/defaults.js';
 
 // 构造扫描目标（校验 URL 与方法）
 /**
+ * [D187] 直连 db 归一化：未显式声明 `driverType` 时按 DSN scheme 推断。
+ *
+ * 为什么必须有这一层：CLI 曾写 `driverType: args.driverType || 'memory'`，于是
+ * `-d mysql://root@host/db` **不带** `--driver` 会被当成内存自检驱动——报告照常出
+ * High 命中，打的却是一个模拟库（2026-10-28 实测：`dbmsVersion=5.7.25-sqlite-sim`、
+ * audit dialect=sqlite）。这是本仓最反对的「中间层自报成功、无人校验外部事实」。
+ * 推断规则与 getDriver 同源（driverTypeFromConnectionString），显式声明永远优先。
+ * @param {any} input 直连入参（含 db 或 connectionString，可带顶层 driverType）
+ * @returns {Record<string, any>} 归一化后的 db（不修改入参）
+ */
+function normalizeDirectDb(input) {
+  const db = input.db ? { ...input.db } : { connectionString: input.connectionString };
+  const connStr = String(db.connectionString || input.connectionString || '');
+  db.driverType = String(db.driverType || input.driverType || driverTypeFromConnectionString(connStr));
+  return db;
+}
+
+/**
  * @param {any} input
  * @returns {Target}
  */
@@ -95,7 +114,7 @@ export function createTarget(input) {
     return {
       id: nanoid(10),
       mode: 'direct',
-      db: input.db || { connectionString: input.connectionString, driverType: input.driverType || 'memory' },
+      db: normalizeDirectDb(input),
       sqlTemplate: input.sqlTemplate,
       originalValue: input.originalValue != null ? String(input.originalValue) : '1',
       config: { ...defaults, ...(input.config || {}) },

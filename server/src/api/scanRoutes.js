@@ -121,6 +121,10 @@ const KNOWN_CFG_KEYS = new Set([
   'timeBlindSleepSec', 'timeProbeSleepSec', 'timeExtractSleepSec',
   // [P1-FIX 2026-09-05] Cookie Jar（自动会话保持）+ --drop-set-cookie 对标
   'cookieJar', 'dropSetCookie',
+  // [D198 2026-10-30 对标 sqlmap --live-cookies] 每请求重读的 cookie 文件：
+  // 调用方给的路径按 sessionFile 同一套白名单收窄（scanGuard/bespokeKeys.js），
+  // 因为它的内容会被当作 cookie 原样发给目标（放开绝对路径＝任意文件读取原语）。
+  'liveCookiesFile',
   // [G4 对标 sqlmap --parse-errors] 错误响应原文/上下文进证据链（opt-in boolean）
   'parseErrors',
   // [P1-FIX 2026-09-09] freshQueries：面板（SqlmapOptions）有开关、scanRunner 也读 cfg.freshQueries，
@@ -201,6 +205,12 @@ const DIRECT_ONLY_CFG_KEYS = new Set(['db', 'connectionString', 'sqlTemplate', '
 // 兼容两种入参形态（原逻辑），新增：headerParams 头名过滤。
 // 注意：保持同步函数（测试契约同步调用）；SSRF 校验在路由处理器 async 层执行
 // （见 /scan/start handler 中的 assertSafeHttpTarget 调用）。
+/**
+ * 校验并收敛 /scan/start 入参（HTTP 与直连两条入口共用同一套守卫）。
+ * 纯同步：SSRF 需要 DNS 解析，放在路由处理器里 await。
+ * @param {object} body 请求体
+ * @returns {object} 规范化后的目标与 config（含 bodyParams / jsonBody / xmlBody / scope 等）
+ */
 export function sanitizeStart(body) {
   const b = body || {};
   const cfg = b.config || {};
@@ -322,14 +332,21 @@ export function sanitizeStart(body) {
 // 故测试读写的仍是 scanGovernance.js 里那份 activeScanCount 状态 —— 语义不变。
 
 // ── 报告访问护栏（P2-1：恒时比较）───────────────────────────────────────────
+/**
+ * 构造报告访问护栏：配置了 token 时恒时比较 x-scan-token / x-api-token / Bearer / ?token。
+ * @param {string} [tokenOverride] 测试用 token 覆盖（undefined 时读 SCAN_API_TOKEN）
+ * @returns {(req: import('express').Request, res: import('express').Response, next: import('express').NextFunction) => void}
+ */
 function createReportGuard(tokenOverride) {
   const resolveToken = () =>
     tokenOverride !== undefined ? tokenOverride : process.env.SCAN_API_TOKEN || '';
+  /** @param {any} a @param {any} b @returns {boolean} 恒时比较（先 SHA-256 归一长度） */
   const safeEqual = (a, b) => {
     const ha = crypto.createHash('sha256').update(String(a ?? '')).digest();
     const hb = crypto.createHash('sha256').update(String(b ?? '')).digest();
     return crypto.timingSafeEqual(ha, hb);
   };
+  /** @param {import('express').Request} req @param {import('express').Response} res @param {import('express').NextFunction} next @returns {void} */
   return (req, res, next) => {
     const token = resolveToken();
     if (!token) return next();
@@ -385,6 +402,7 @@ function triageErrorOf(e) {
  * @returns {void}
  */
 function registerFindingTriageRoute(router, requireReport, reportWithFallback) {
+  /** PATCH /scan/:id/findings/:findingId/triage —— 人工裁决写入（open/confirmed/false_positive/accepted_risk）。@param {import('express').Request} req @param {import('express').Response} res @returns {void} */
   router.patch('/scan/:id/findings/:findingId/triage', requireReport, (req, res) => {
     const parsed = validateTriageRequest(req);
     if (parsed.error) {
@@ -417,6 +435,7 @@ function registerFindingTriageRoute(router, requireReport, reportWithFallback) {
  * @returns {(scanId: string) => ({report: object, source: 'live'|'ledger'}|null)}
  */
 function makeReportWithFallback(sm) {
+  /** @param {string} scanId 扫描 id @returns {{report: object, source: 'live'|'ledger'}|null} */
   return (scanId) => {
     const live = sm.getReport(scanId);
     if (live) return { report: attachTriage(live), source: 'live' };
@@ -432,6 +451,7 @@ function makeReportWithFallback(sm) {
  * @param {import('../engine/ScanManager.js').ScanManager} [opts.scanManager] 不传则内部自建
  * @param {any} [opts.eventBus] 事件总线（默认取模块级 eventBus 单例）
  * @param {string} [opts.reportToken] 报告导出接口的访问令牌
+ * @returns {import('express').Router}
  */
 export function createRoutes({ scanManager, eventBus: bus = eventBus, reportToken } = {}) {
   const sm = scanManager || new ScanManager();
@@ -445,6 +465,7 @@ export function createRoutes({ scanManager, eventBus: bus = eventBus, reportToke
   // 且出现在日志里。引擎自身用 nanoid(10) 生成，但路由不得假定调用方传得对：
   // 带 CR/LF 的 id 可试响应头注入，带 ../ 的 id 会被任何后续“落盘/拉取”型逻辑当路径用。
   // 统一用 router.param 拦住所有 :id 端点（比逐路由判更不容易漏）。
+  /** router.param 守卫：所有 :id 端点共用 scanId 形状校验。@param {import('express').Request} req @param {import('express').Response} res @param {import('express').NextFunction} next @param {string} id 扫描 id @returns {void} */
   router.param('id', (req, res, next, id) => {
     if (typeof id !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(id)) {
       return res.status(400).json({ code: ErrorCode.SCAN_ID_INVALID, data: null, message: 'scanId 格式非法' });
@@ -452,6 +473,7 @@ export function createRoutes({ scanManager, eventBus: bus = eventBus, reportToke
     next();
   });
 
+  /** POST /scan/start —— 启动扫描（限速 + 并发槽 + SSRF/scope 校验）。@param {import('express').Request} req @param {import('express').Response} res @returns {Promise<void>} */
   router.post('/scan/start', scanStartLimiter, async (req, res) => {
     const release = acquireScanSlot();
     if (!release) {
@@ -542,6 +564,7 @@ export function createRoutes({ scanManager, eventBus: bus = eventBus, reportToke
   });
 
   // [P2-11] 实时报告快照同样挂报告守卫（token 未设置时为 no-op，行为不变）
+  /** GET /scan/:id —— 扫描状态与进度。@param {import('express').Request} req @param {import('express').Response} res @returns {void} */
   router.get('/scan/:id', requireReport, (req, res) => {
     const found = reportWithFallback(req.params.id);
     if (!found) {
@@ -559,10 +582,12 @@ export function createRoutes({ scanManager, eventBus: bus = eventBus, reportToke
   });
 
   // [P2-11] SSE 进度流挂报告守卫（事件内容含扫描目标与完整报告，见 ScanManager 脱敏 patch）
+  /** GET /scan/:id/events —— SSE 实时事件流（EventSource 不能带头，token 走 query）。@param {import('express').Request} req @param {import('express').Response} res @returns {void} */
   router.get('/scan/:id/events', requireReport, (req, res) => {
     bus.toSSE(req.params.id, req, res);
   });
 
+  /** POST /scan/:id/stop —— 停止扫描（未知 id 不回 code:0）。@param {import('express').Request} req @param {import('express').Response} res @returns {void} */
   router.post('/scan/:id/stop', requireReport, (req, res) => {
     // 三种情形必须可区分（接口靶场实测：旧实现对不存在的 scanId 也返回 code:0 +
     // {stopped:false}，调用方据此以为"已经停了"；而终态扫描被改写成 'stopped'，
@@ -591,6 +616,7 @@ export function createRoutes({ scanManager, eventBus: bus = eventBus, reportToke
   // 旧实现只能整站重扫——调参验证一次要等几分钟。这里复用原扫描的 target + 新 config，
   // 通过 config.onlyPoint 把注入点收敛到目标点，请求量从数百降到几十，且对检测主流程零侵入。
   // 返回新的 scanId（与 /scan/start 一致，异步扫描，用 /scan/:id/report 取结果）。
+  /** POST /scan/:id/point/:pointId/retest —— 单点复测（复用原扫描的 target/config）。@param {import('express').Request} req @param {import('express').Response} res @returns {Promise<void>} */
   router.post('/scan/:id/point/:pointId/retest', requireReport, async (req, res) => {
     const release = acquireScanSlot();
     if (!release) {
@@ -671,11 +697,13 @@ export function createRoutes({ scanManager, eventBus: bus = eventBus, reportToke
   });
 
   // [P0-FIX] 暂停/续跑扫描（对标 sqlmap Ctrl+C 暂停语义；仅 running 可暂停、paused 可恢复）
+  /** POST /scan/:id/pause —— 暂停扫描。@param {import('express').Request} req @param {import('express').Response} res @returns {void} */
   router.post('/scan/:id/pause', requireReport, (req, res) => {
     const ok = sm.pause(req.params.id);
     res.json({ code: ok ? 0 : ErrorCode.SCAN_NOT_FOUND, data: { paused: ok }, message: ok ? 'ok' : '扫描不在运行中，无法暂停' });
   });
 
+  /** POST /scan/:id/resume —— 继续已暂停的扫描。@param {import('express').Request} req @param {import('express').Response} res @returns {void} */
   router.post('/scan/:id/resume', requireReport, (req, res) => {
     const ok = sm.resume(req.params.id);
     res.json({ code: ok ? 0 : ErrorCode.SCAN_NOT_FOUND, data: { resumed: ok }, message: ok ? 'ok' : '扫描未处于暂停状态' });
@@ -685,6 +713,7 @@ export function createRoutes({ scanManager, eventBus: bus = eventBus, reportToke
   // 裁决是交付层标注：不改 verdict、exit code、风险等级或漏洞条数；复扫后按稳定指纹继续生效。
   registerFindingTriageRoute(router, requireReport, reportWithFallback);
 
+  /** GET /scan/:id/report —— 完整报告（内存优先，台账兜底）。@param {import('express').Request} req @param {import('express').Response} res @returns {void} */
   router.get('/scan/:id/report', requireReport, (req, res) => {
     const found = reportWithFallback(req.params.id);
     if (!found) {
@@ -709,6 +738,7 @@ export function createRoutes({ scanManager, eventBus: bus = eventBus, reportToke
   //   比对键 = location:param:technique（不用 pointId——每次扫描的 pointId 都是新生成的，
   //   用它比对会把「同一个注入点」算成新增+已修复各一条，结果毫无意义）。
   //   输出三组：fixed（基线有、本次无）/ new（本次有、基线无）/ remaining（两次都有）。
+  /** GET /scan/:id/diff?base= —— 与基线扫描对比（新增/修复/未变）。@param {import('express').Request} req @param {import('express').Response} res @returns {void} */
   router.get('/scan/:id/diff', requireReport, (req, res) => {
     const baseId = String(req.query.base || '').trim();
     if (!baseId) {
@@ -722,6 +752,7 @@ export function createRoutes({ scanManager, eventBus: bus = eventBus, reportToke
     res.json({ code: 0, data: diffReports(base.report, cur.report), message: 'ok' });
   });
 
+  /** GET /scan/:id/report/export?format=json|html|markdown|sarif|csv —— 报告导出（attachment）。@param {import('express').Request} req @param {import('express').Response} res @returns {void} */
   router.get('/scan/:id/report/export', requireReport, (req, res) => {
     const rawFormat = (req.query.format || 'json').toString().toLowerCase();
     // [P0-SEC 2026-09-08] format 白名单：它既进 Content-Type 又拼进 Content-Disposition 文件名，
@@ -781,6 +812,7 @@ export function createRoutes({ scanManager, eventBus: bus = eventBus, reportToke
   // 报告就取不到，History 页显示的是浏览器 localStorage（换机器/清缓存/服务重启即丢）。
   // 台账（CLI 早就在写）第一次被接口暴露出来。注意它不在 PUBLIC_READONLY 里：
   // 清单含目标 URL 与结论，属扫描数据，必须带 token。
+  /** GET /scans —— 历史扫描列表。@param {import('express').Request} req @param {import('express').Response} res @returns {void} */
   router.get('/scans', requireReport, (req, res) => {
     const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), 500);
     const byId = new Map();
@@ -812,6 +844,7 @@ export function createRoutes({ scanManager, eventBus: bus = eventBus, reportToke
   });
 
   // GET /api/payloads?dbms=&technique= —— 只读查看 Payload 模板
+  /** GET /payloads —— 当前生效的 payload 目录（只读元信息）。@param {import('express').Request} req @param {import('express').Response} res @returns {void} */
   router.get('/payloads', (req, res) => {
     const dbms = req.query.dbms?.toString();
     const technique = req.query.technique?.toString();

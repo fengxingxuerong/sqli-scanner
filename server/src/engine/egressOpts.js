@@ -58,6 +58,12 @@ export const EGRESS_KEYS = Object.freeze([
   'maxReq',
   'cookieJar',
   'dropSetCookie',
+  // [D197 2026-10-30 对标 sqlmap --no-keep-alive] **必须收在这里才真的生效**：
+  // HttpClient.request 读的是 `opts.disableKeepAlive`（httpClient.js 的 disableKA 判定），
+  // 而 `config.disableKeepAlive` 只被 HttpClient **构造参数**读 —— 走 config 的调用点
+  // （REST / CLI / --config 档案）到不了构造处，等于「传了没生效」。
+  // 漏收的后果与前三次事故同形（见本文件顶部）：使用者以为换了出口形态，实际只有构造时那一个客户端变了。
+  'disableKeepAlive',
   'forceSsl',
   'ignoreRedirects',
 ]);
@@ -71,6 +77,7 @@ export const EGRESS_KEYS = Object.freeze([
  *     `opts.proxyBypassLocal ?? defaults.proxyBypassLocal !== false`——在此处替它补默认值会让
  *     defaults.proxyBypassLocal=false 的逃生口失效。
  *   - `cookieJar: !== false`（默认开）/ `dropSetCookie: === true`（默认关，对标 --drop-set-cookie）。
+ *   - `disableKeepAlive: === true`（默认关，对标 --no-keep-alive）：每请求新建连接，不复用长连接。
  *   - `forceSsl` / `ignoreRedirects`：严格 `=== true`（未配置即 false）。
  * @param {object} [config] 扫描配置（target.config / ctx.config）
  * @param {object} [overrides] 调用点专有键（per-request 覆盖、networkTiming、headers 等）
@@ -93,6 +100,8 @@ export function buildEgressOpts(config, overrides = {}) {
     // [P1-FIX 2026-09-05] Cookie Jar 会话保持 / --drop-set-cookie
     cookieJar: cfg.cookieJar !== false,
     dropSetCookie: cfg.dropSetCookie === true,
+    // [D197] --no-keep-alive：每请求新建连接（消费点 httpClient 的 disableKA 判定）
+    disableKeepAlive: cfg.disableKeepAlive === true,
     // [sqlmap 对标] --force-ssl / --ignore-redirects
     forceSsl: cfg.forceSsl === true,
     ignoreRedirects: cfg.ignoreRedirects === true,

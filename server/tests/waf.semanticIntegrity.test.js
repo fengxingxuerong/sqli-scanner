@@ -85,13 +85,51 @@ test('★ 真机复核钉子（D16）：12 件名单逐件成立，含被怀疑�
   const names = [
     'keywordSplit', 'misunion', 'sap', 'lad', 'dhs', 'accessfilter', 'aspjetty',
     'nullencode', 'squiggle',
-    'randomboundary', 'halfversionedmysql', 'halfversionedmorekeywordsopen',
+    'halfversionedmysql', 'halfversionedmorekeywordsopen',
   ];
-  assert.equal(names.length, 12, '名单规模变了 ⇒ 必须重新做一轮真机复核再改这里');
+  assert.equal(names.length, 11, '名单规模变了 ⇒ 必须重新做一轮真机复核再改这里');
   const unsafe = semanticUnsafeRegistry();
   for (const n of names) {
     assert.ok(unsafe.has(n), `${n} 应被判语义不可用（真机已复核该判定成立）`);
   }
+});
+
+test('randomboundary：随机型插件按样本级最坏情况判危（[D190] 判定可复现，不随 Math.random 抖动）', () => {
+  // [D188 2026-10-28 发现问题] 它从 6 种边界里随机取（plugins/randomboundary.js），
+  // 只有抽到单独一个 `/*` 时才产生未闭合注释 —— 单次抽样当判据在两次 acceptance 里
+  // 给出相反结论（0 fail / 1 fail，无代码差异）。
+  // [D190 2026-10-29 兑现] auditPlugin 改样本级：两种子探测识别随机型 ⇒ 固定种子补满
+  // 样本（8 个）⇒ 任一样本命中不变量即计破坏。同种子必得同序列 ⇒ 判定可复现；
+  // randomboundary 的 8 样本窗口必然抽到 `/*` ⇒ 稳定进语义不可用名单（真机 0/19 的
+  // 噪声件从此被结构性排除，而不是看单次抽样运气）。
+  const unsafe = semanticUnsafeRegistry();
+  assert.ok(unsafe.has('randomboundary'), '随机型插件按样本级最坏情况应判语义不可用（8 样本窗口必抽到 /*）');
+  assert.ok(
+    unsafe.get('randomboundary').some((v) => v.id === 'unclosed-comment'),
+    'randomboundary 应带 unclosed-comment 违规'
+  );
+  // 判据本身对已知坏/好样本的反应（不变量单测，不经过注册表）
+  for (const out of ['SELECT/* 1 UNION SELECT 1', 'SELECT 1 /*', '1 UNION/* SELECT 1']) {
+    assert.ok(findUnclosedComment(out).length > 0, `未闭合注释必须被抓到：${out}`);
+  }
+  assert.deepEqual(findUnclosedComment('SELECT/**/1 UNION/**/SELECT 1'), [], '闭合注释不得误报');
+});
+
+test('[D190] 语义审计确定性：两次全量审计（234 插件 × 语料 × 采样）结论逐字节一致', () => {
+  // 这是 D188 抖动问题的直接反证：修前同一提交两次跑注册表判定可不同；
+  // 修后随机插件走固定种子采样，全审计输出必须可复现。
+  const a = auditAll({ force: true });
+  const b = auditAll({ force: true });
+  const key = (m) => JSON.stringify([...m.values()].map((x) => [x.name, x.violations ?? []]).sort());
+  assert.equal(key(a), key(b), '两次全量审计必须得出完全一致的违规结论');
+});
+
+test('[D190] 确定型插件零行为变化：单样本路径不被采样放大（charencode 的派生结论不变）', () => {
+  // 随机型探测对确定型插件（两种子输出一致）必须只留 1 个样本 —— 233 件存量插件的
+  // 派生结论（eliminates/introduces/eliminatesAll）不允许因采样改造而漂移。
+  const r = auditPlugin('charencode');
+  assert.equal(r.eliminatesAll, true, 'charencode 的整串消除结论必须保持');
+  assert.ok(r.violations.length === 0, 'charencode 不应被误判违规');
 });
 
 test('命中：块注释未闭合必须被抓到（整段留在注释里，MySQL 解析不到）', () => {

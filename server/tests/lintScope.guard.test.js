@@ -218,6 +218,8 @@ test('③ 本机排障现场必须继续被排除（lint 的红绿不许取决�
     '.acl-recovery/**',
     'e2e/diag/**',
     '.tmp-*',
+    // [D187] 靶场检出目录（第三方源码 + venv，不入库）：不排除会让 lint 依赖本机拉起了哪些靶场
+    '.verify-labs/**',
   ];
   const missing = mustIgnore.filter((p) => !ignores.includes(p));
   assert.deepEqual(

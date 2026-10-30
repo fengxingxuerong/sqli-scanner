@@ -15,6 +15,7 @@ import { oobTunnel } from '../../core/oobTunnel.js';
 import { dialectToDbms } from '../DialectSqlBuilder.js';
 import { xmlParamNameDetector } from '../detectorSupport/xmlParamName.js';
 import { orderByKeyDetector } from '../detectorSupport/orderByKey.js';
+import { keyBoolDetector } from '../detectorSupport/keyBool.js';
 import { verifyTamperChains } from '../../core/waf/chainVerify.js';
 import { decideBlockPolicy, isUntrustedVendor } from '../../core/waf/blockPolicy.js';
 // [A3-2026-09-25] 通道降级编排：把逐词拦截画像翻译成「哪些通道还值得跑」。
@@ -56,7 +57,7 @@ async function runOneXmlNamePoint(point, deps) {
   const { ctxBase, target, s, guard, session, validity, validityEnabled, scanId } = deps;
   if (s.cancelled || guard.shouldAbort) return;
   if (session && session.perPoint[point.id] && session.perPoint[point.id].status === 'done') return;
-  eventBus.emit(scanId, 'point_testing', { pointId: point.id, technique: 'boolean' });
+  eventBus.emit(scanId, 'point_testing', { pointId: point.id, technique: 'boolean', param: point.param, location: point.location });
   const ctx = { ...ctxBase, target, point, dbms: point.dbms || null };
   const found = await detectXmlPoint(point, ctx, validity, validityEnabled);
   await recordXmlPoint(point, ctx, found, deps);
@@ -143,9 +144,14 @@ async function runOneOrderByKey(point, deps) {
   const { ctxBase, target, s, guard, session, validity, validityEnabled, foundByPoint, scanId } = deps;
   if (s.cancelled || guard.shouldAbort) return;
   if (session && session.perPoint[point.id] && session.perPoint[point.id].status === 'done') return;
-  eventBus.emit(scanId, 'point_testing', { pointId: point.id, technique: 'boolean' });
+  eventBus.emit(scanId, 'point_testing', { pointId: point.id, technique: 'boolean', param: point.param, location: point.location });
   const ctx = { ...ctxBase, target, point, dbms: point.dbms || null };
   const found = await detectOrderByKeyPoint(point, ctx, validity, validityEnabled);
+  // [D169/D173/D174] ORDER BY 位置无命中时，键名载体（form 字段名 / query 参数名 /
+  // JSON body 键名）再试一次「多键拼接」形态（键名进 WHERE 布尔位置）
+  if (!found.length && (point.carrier === 'form' || point.carrier === 'query' || point.carrier === 'json')) {
+    found.push(...(await detectKeyBoolPoint(point, ctx, validity, validityEnabled)));
+  }
   if (!found.length) return;
   foundByPoint.set(point.id, { point, ctx, found });
   if (session) {
@@ -171,6 +177,34 @@ async function detectOrderByKeyPoint(point, ctx, validity, validityEnabled) {
   } catch (e) {
     // 与检测器失败同口径：非网络异常按「该探针对本点不适用」处理（判负仍可接受）
     logger.warn(`ORDER BY 键名探针失败（按未命中处理）：${e.message}`);
+  }
+  return [];
+}
+
+/**
+ * [D169 2026-10-26 立，D173 扩到 query 载体] 多键拼接形态（键名进 WHERE 布尔位置）的验证与记账。
+ *
+ * 与 orderByKey 互补：后者打 ORDER BY 位置（`{k}, 1-- -` 序数差分），这里打
+ * `WHERE {k} = ? AND ...` 这种把**键名**（表单字段名 / URL 参数名）拼进布尔表达式的构造。
+ * 实测在盲档（错误被吞成 0 行）上，通用布尔通道的 `{k} AND 1=1-- -` 因 varchar 列名被当 0
+ * 而恒无分化——必须换成自洽布尔式 + 行注释才有信号（详见 detectorSupport/keyBool.js）。
+ * @param {any} point
+ * @param {object} ctx
+ * @param {object} validity
+ * @param {boolean} validityEnabled
+ * @returns {Promise<Array<{technique:string,result:any}>>}
+ */
+async function detectKeyBoolPoint(point, ctx, validity, validityEnabled) {
+  try {
+    const r = await keyBoolDetector.detect(ctx);
+    if (r && r.inconclusive) {
+      if (validityEnabled) validity.addNetworkErrorPoint(point.id);
+      point.netErr = true;
+      point.unverifiedReason = String(r.inconclusiveReason || '响应不可用');
+    }
+    if (r && r.vulnerable) return [{ technique: 'boolean', result: r }];
+  } catch (e) {
+    logger.warn(`多键拼接键名探针失败（按未命中处理）：${e.message}`);
   }
   return [];
 }
@@ -441,7 +475,7 @@ export async function detectPhase(run) {
         const inLayer = active.filter((d) => techniques.includes(d.technique));
         const results = await Promise.all(
           inLayer.map(async (detector) => {
-            eventBus.emit(scanId, 'point_testing', { pointId: point.id, technique: detector.technique });
+            eventBus.emit(scanId, 'point_testing', { pointId: point.id, technique: detector.technique, param: point.param, location: point.location });
             try {
               const result = await detector.detect(ctx);
               // [P0-FIX 2026-09-09] 检测器自报「本点未得出有效结论」（对照对全部不可用）时，
@@ -816,7 +850,7 @@ export async function detectPhase(run) {
             }
             const results = await Promise.all(
               fast.map(async (detector) => {
-                eventBus.emit(scanId, 'point_testing', { pointId: point.id, technique: detector.technique, tamperRetry: true });
+                eventBus.emit(scanId, 'point_testing', { pointId: point.id, technique: detector.technique, tamperRetry: true, param: point.param, location: point.location });
                 try {
                   const result = await detector.detect(rctx);
                   return { technique: detector.technique, result, vulnerable: !!result?.vulnerable };

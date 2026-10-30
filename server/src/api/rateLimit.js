@@ -54,21 +54,25 @@ export function tokenKeyOf(req) {
  * @param {number} opts.max 窗口内允许的最大请求数；<=0 时返回直通中间件（限流关闭）
  * @param {string} opts.name 限流档名（日志与错误文案用，如 'scan-start'）
  * @param {(req: import('express').Request) => string} [opts.keyOf] 计额键（默认 tokenKeyOf）
+ * @returns {(req: import('express').Request, res: import('express').Response, next: import('express').NextFunction) => void} Express 中间件（带 `enabled` 标记）
  */
 export function createRateLimiter({ windowMs, max, name, keyOf = tokenKeyOf }) {
   // 关闭档（max<=0）：直通。测试/本地压测可用环境变量显式关掉。
   if (!Number.isFinite(max) || max <= 0) {
+    /** @param {any} _req @param {any} _res @param {Function} next @returns {void} */
     const passthrough = (_req, _res, next) => next();
     passthrough.enabled = false;
     return passthrough;
   }
   /** @type {Map<string, {count:number, windowStart:number}>} */
   const hits = new Map();
+  /** @param {number} now 当前时间戳（ms） @returns {void} */
   const sweep = (now) => {
     for (const [k, v] of hits) {
       if (v.windowStart + windowMs <= now) hits.delete(k);
     }
   };
+  /** @param {import('express').Request} req @param {import('express').Response} res @param {import('express').NextFunction} next @returns {void} */
   const middleware = (req, res, next) => {
     // CORS 预检不计额（它不代表业务动作）
     if (req.method === 'OPTIONS') return next();
@@ -105,6 +109,7 @@ export function createRateLimiter({ windowMs, max, name, keyOf = tokenKeyOf }) {
   return middleware;
 }
 
+/** @param {string} v 环境变量名 @param {number} dflt 缺省值 @returns {number} 解析后的数值（非法回落缺省） */
 const envMax = (v, dflt) => {
   const n = Number(process.env[v]);
   return Number.isFinite(n) ? n : dflt;

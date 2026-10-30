@@ -190,6 +190,8 @@ import {
   wafHtml,
   credentialRiskMarkdown,
   credentialRiskHtml,
+  auditMarkdown,
+  auditHtml,
 } from './reportSections.js';
 
 // [2026-09-13] 顶层小助手：漏洞表行里的 CVSS 单元格文本（score + vector，同源 reportDelivery）
@@ -606,6 +608,8 @@ export class ReportGenerator {
     // [--passwords 升级] 凭据风险与漏洞清单同属「发现」，排在修复建议之前（md/html 严格同序）。
     // 取 `r.data`（_forExport 的产物，data 字段原样保留）；无 --passwords 结果时该函数返回 []。
     md.push(...credentialRiskMarkdown(r.data?.passwordAnalysis));
+    // [D181] 只读安全配置审计（未开启 --audit 时整段不渲染；开了但没跑成只写一行原因）
+    md.push(...auditMarkdown(r.audit));
     md.push(...remediationMarkdown(d));
     md.push('## Payload 示例');
     md.push('');
@@ -673,8 +677,9 @@ export class ReportGenerator {
     const escHtml = (s) => this._escape(String(s));
     const conclusionSection = conclusionHtml(report, escHtml);
     const deliverySection = deliveryHtml(d, escHtml);
-    // [--passwords 升级] 与 markdown 侧严格同序：漏洞清单之后、修复建议之前
-    const credentialSection = credentialRiskHtml(r.data?.passwordAnalysis, escHtml);
+    // [D181] 附带发现两卡（凭据风险 + 只读安全配置审计）合成一行：toHTML 已卡在行数硬上限，
+    // 基线只许持平或变浅，故不再各占一行。语义与顺序不变（漏洞清单之后、修复建议之前）。
+    const extraFindings = `${credentialRiskHtml(r.data?.passwordAnalysis, escHtml)}${auditHtml(r.audit, escHtml)}`;
     const remediationSection = remediationHtml(d, escHtml);
     const wafSection = wafHtml(d, escHtml);
     // [E3 2026-09-22] 攻击路径段：插在执行摘要之后、漏洞清单之前 —— 读者先拿到全局链路，
@@ -758,7 +763,7 @@ export class ReportGenerator {
       <table><thead><tr><th>注入点</th><th>受影响参数</th><th>漏洞类型</th><th>技术</th><th>数据库</th><th>风险</th><th>CVSS</th><th>裁决</th><th>裁决备注</th><th>说明</th></tr></thead>
       <tbody>${rows || '<tr><td colspan="10">未发现漏洞</td></tr>'}</tbody></table>
       ${triageSummaryHtml(report.summary, (s) => this._escape(s))}
-      ${credentialSection}
+      ${extraFindings}
       ${remediationSection}
       <h2>Payload 示例</h2>
       <pre>${payloads || '无'}</pre>

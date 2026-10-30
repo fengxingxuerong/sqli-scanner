@@ -57,8 +57,11 @@ describe('接线：源码里的六个位点', () => {
   test('scanClient 把 withBearerRefresh 挂在 loginFlow 之后（包装链最外）', () => {
     const src = read('server/src/engine/scan/scanClient.js');
     assert.match(src, /core\/bearerKeeper\.js/);
-    const iLogin = src.indexOf('withLoginFlow(view, cfg.login)');
-    const iRefresh = src.indexOf('withBearerRefresh(view, scanId)');
+    // [D205] 会话装配链抽到 wrapSessionLayers 后局部变量从 view 改名为 v：这里只钉
+    //「两层调用都在 + 先后次序」，不钉局部变量名 —— 钉变量名会让纯移动的重构假红，
+    // 而真正要守的契约是**次序**（续期层必须在登录层之外）。
+    const iLogin = src.indexOf('withLoginFlow(');
+    const iRefresh = src.indexOf('withBearerRefresh(');
     assert.ok(iLogin > 0 && iRefresh > 0, '两处包装至少要都在');
     assert.ok(iRefresh > iLogin, '续期层必须在登录层之外：401 先要经过它，否则永远不触发');
     assert.match(src, /refreshActiveForScan\(scanId\)/, '门必须查登记表（未登记时零行为变化）');

@@ -193,6 +193,79 @@ node server/bin/cli.js -u "http://target/login" --method POST \
 
 历史记录存 localStorage（最多 100 条），认证 / 代理凭据已脱敏。
 
+### 修复提示词（`--fix-prompt`，[D176]）
+
+报告是给人读的交付物；如果下一步要**交给编码代理去改代码**，加 `--fix-prompt`：
+
+```bash
+node server/bin/cli.js -u "https://target/items?cat=1" -o out/ --fix-prompt
+# 产出 out/fix-prompts/{README.md, fix-01-cat.md, …}
+# 带值则直接写进指定目录：--fix-prompt ./fixes
+```
+
+每条命中一份 Markdown，固定四段：**为什么能注入**（按检测通道）/ **该怎么改**（参数化查询、
+标识符白名单、账号降权等）/ **改完怎么验**（可直接复制的复测命令 + 期望 `0 条 finding`）/
+**结论口径**（`verdict=inconclusive` 或存在未验证面时先声明——那是"没测成"，不是"没修好"）。
+
+它**不自动修改代码**，也不猜业务语义；`vulns: []` 时只产出一份说明本次无命中的索引。
+
+### AI 自然语言报告（`--ai-report`，[D205]）
+
+JSON / HTML 报告是给机器和评审看的；要一份**能直接贴进 SRC 工单**的自然语言报告，加 `--ai-report`。
+此前只有 REST 面板（`POST /api/scan/:id/report/ai`）能生成，CLI 扫完只有 JSON —— [D205] 补上入口：
+
+```bash
+export AI_REPORT_API_BASE=http://127.0.0.1:8326/v1/chat/completions   # 完整 chat 端点（不是 base）
+export AI_REPORT_KEY_1=<你的 key>
+export AI_REPORT_MODEL_1=deepseek-auto/deepseek-v4-flash              # 自建/本机网关要求 provider/model 全名
+export AI_REPORT_MODEL_2=deepseek-auto/glm-5.2
+export AI_REPORT_MODEL_3=raccoon/sn-sensenova-6-8-flash-lite
+
+node server/bin/cli.js -u "https://target/login" --method POST --body '{"uid":"a","passw":"b"}' \
+  -o out/ --ai-report
+# 产出 out/ai-report/{ai-report.md, ai-report.json}
+# 带值则直接写进指定目录：--ai-report ./ai
+```
+
+流水线固定三角色：**analyst**（漏洞分析/风险）→ **writer**（报告撰写/PoC）→ **reviewer**（审计/修复/合规）。
+`ai-report.json` 记录用了哪条模型链、耗时、审阅状态、源扫描的 verdict，便于复核口径。
+
+**两个必须知道的取舍**：
+
+| 项 | 默认 | 说明 |
+|---|---|---|
+| 数据脱敏（`AI_REPORT_MASK`） | 开启 | host 写成 `<目标Host>`、路径写成 `/***`，**PoC 天然不可复现**（这是防外发的默认值）。指向本机/自建网关时设 `AI_REPORT_MASK=0`，host 与路径原样进 prompt，PoC 可直接复制执行 |
+| 响应判据来源 | 引擎 trace | 报告里的「真条件 8356B / 假条件 8459B / 长度差 -103B / 首个差异偏移 5130」直接取自扫描器实测的布尔 trace，**不是模型编的**；没有 trace 时 prompt 明确要求写「判据需人工确认」 |
+
+**失败语义**：`--ai-report` 的 env 没配齐 → **开扫前**就报错退出（不会白扫三分钟）；
+生成阶段失败 → `exitCode=1`（执行失败），**不改**扫描结论与风险等级——AI 不可用既不等于有洞，也不等于没洞。
+`reviewer` 返回空内容时不再标「✅ 已审阅」，而是回退到撰写稿并标注未审阅（[D205] 修的假绿缺陷）。
+
+> 边界：`scripts/one-click-scan.mjs` **不支持** `--ai-report`（它有自己的参数表，不复用 CLI 解析器）。
+
+### 复现检查与可复现件（`--repro-check`，[D177]）
+「报告里有一条 High」和「这条 High 能稳定复现」是两件事。加 `--repro-check` 让扫描器自己判：
+
+```bash
+node server/bin/cli.js -u "https://target/items?cat=1" -o out/ --repro-check
+# 报告里每条 finding 多一个 vuln.repro：{ status, consistent, repeats, samples[], reason? }
+# summary.repro：{ checked, reproduced, singleHit, unreplayable }
+# 产物：out/repro/repro-01-cat.sh + repro-01-cat.expect.json + README.md
+```
+
+三种判定：`reproduced`（两次重放状态码与响应体一致）/ `single_hit`（不一致 → 证据不稳，
+先查会话失效、被 WAF 拦、目标抖动）/ `unreplayable`（没有 PoC 或请求发不出去，`reason` 说明原因）。
+
+两个必须知道的口径：
+
+1. **一致 ≠ 漏洞仍存在**，只说明这条证据稳定；判定不替代人工复核。
+2. 比对前会剔除**明显的易变标记**（10 位以上数字串、ISO 时间戳），否则带
+   `<!-- generated at 1699999999 -->` 的页面会在跨秒重放时被误判成 `single_hit`；
+   剔除清单刻意极小，剥完仍是严格字节比较（不做相似度匹配）。
+
+`repro-*.sh` 是给第三方/离线的可移植件（bash + curl + sha256sum，同样剔除易变标记后比对，
+一致 exit 0）；Windows 上需 WSL / Git Bash 才能跑。
+
 ---
 
 ## 八、安全与合规边界

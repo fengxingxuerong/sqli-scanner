@@ -35,6 +35,14 @@ const genKeyNoBase = await import('../src/services/ReportAI.js?keynobase');
 // 实例 B：2 个 key + 显式 AI_REPORT_API_BASE（外发 opt-in 已启用；主实例）
 process.env.AI_REPORT_API_BASE = 'http://127.0.0.1:9/v1/chat/completions';
 const gen = await import('../src/services/ReportAI.js?k2');
+// 实例 D：AI_REPORT_MODEL_1..3 覆盖角色模型（[D192] 本地网关 provider/model 全名场景）
+process.env.AI_REPORT_MODEL_1 = 'deepseek-auto/deepseek-v4-flash';
+process.env.AI_REPORT_MODEL_2 = 'deepseek-auto/glm-5.2';
+process.env.AI_REPORT_MODEL_3 = 'raccoon/sn-sensenova-6-8-flash-lite';
+const genEnvModels = await import('../src/services/ReportAI.js?envmodels');
+delete process.env.AI_REPORT_MODEL_1;
+delete process.env.AI_REPORT_MODEL_2;
+delete process.env.AI_REPORT_MODEL_3;
 
 test('listAiConfigs：返回 3 个角色且字段齐全', () => {
   const cfgs = gen.listAiConfigs();
@@ -43,6 +51,30 @@ test('listAiConfigs：返回 3 个角色且字段齐全', () => {
   for (const c of cfgs) {
     assert.ok(c.model && c.desc && c.label);
   }
+});
+
+test('[D192] AI_REPORT_MODEL_1..3 覆盖角色模型：默认名不变，覆盖后请求体带全名', async () => {
+  // 不设 env 的主实例仍是默认裸名
+  assert.deepEqual(
+    gen.listAiConfigs().map((c) => c.model),
+    ['deepseek-v4-flash', 'glm-5.2', 'sensenova-6.8-flash-lite'],
+  );
+  // 覆盖实例：configs 回显覆盖值
+  assert.deepEqual(
+    genEnvModels.listAiConfigs().map((c) => c.model),
+    ['deepseek-auto/deepseek-v4-flash', 'deepseek-auto/glm-5.2', 'raccoon/sn-sensenova-6-8-flash-lite'],
+  );
+  // 覆盖实例真实发出的请求体带覆盖后的模型名
+  const fh = installFetch(async () => ({
+    ok: true, status: 200,
+    json: async () => ({ choices: [{ message: { content: 'OUT' } }] }),
+  }));
+  try {
+    const r = await genEnvModels.generateAiReport(baseReport('envm-1'));
+    assert.equal(r.success, true);
+    assert.equal(JSON.parse(fh.calls[0].opts.body).model, 'deepseek-auto/deepseek-v4-flash');
+    assert.equal(r.model, 'deepseek-auto/deepseek-v4-flash→deepseek-auto/glm-5.2→raccoon/sn-sensenova-6-8-flash-lite');
+  } finally { fh.restore(); }
 });
 
 test('未配置任何 key：generateAiReport 明确报错不崩溃', async () => {
@@ -123,5 +155,37 @@ test('缓存容量上限 100：最旧条目被淘汰后重新生成', async () =
     const before = fh.calls.length;
     await g.generateAiReport(baseReport('bulk-0')); // 最旧的 bulk-0 应已被挤出 → 需重新调 LLM
     assert.ok(fh.calls.length > before);
+  } finally { fh.restore(); }
+});
+
+// ── [D205] 空响应不算成功（10-30 实测缺陷：reviewer 返回空 content 仍标「✅ 已审阅」，正文 0B）──
+test('[D205] reviewer 返回空内容 ≠ 审阅通过：正文回退到撰写稿并如实标注', async () => {
+  const g = await import('../src/services/ReportAI.js?emptyreview'); // 独立实例（独立 keyHealth/cache）
+  const fh = installFetch(async (i) => ({
+    ok: true,
+    status: 200,
+    json: async () => ({
+      choices: [{ message: { content: i === 3 ? '' : `BODY-${i}` }, finish_reason: i === 3 ? 'length' : 'stop' }],
+    }),
+  }));
+  try {
+    const r = await g.generateAiReport(baseReport('empty-review'));
+    assert.equal(r.success, true);
+    assert.ok(!r.reviewNote.includes('已经过安全审阅'), '空返回不能被标成已审阅');
+    assert.equal(r.content, 'BODY-2', '正文应回退到 writer 的产出，而不是空串');
+  } finally { fh.restore(); }
+});
+
+test('[D205] 三角色全返回空 → 报错，不产出空报告', async () => {
+  const g = await import('../src/services/ReportAI.js?allempty');
+  const fh = installFetch(async () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({ choices: [{ message: { content: '' }, finish_reason: 'length' }] }),
+  }));
+  try {
+    // 三次空响应会把三个 key 依次标冷却，最终可能是「空内容」或「无可用 key」——
+    // 两种都必须 reject（关键判据是**不产出空报告**，不是报哪句话）
+    await assert.rejects(() => g.generateAiReport(baseReport('all-empty')), /空内容|AI 报告为空|无可用 key/);
   } finally { fh.restore(); }
 });

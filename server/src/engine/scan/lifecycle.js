@@ -9,6 +9,8 @@ import { releaseScanTransform } from '../../core/requestTransform.js';
 // [D52] 响应解密登记回收（--postprocess）
 import { releaseResponseTransform } from '../../core/responseTransform.js';
 import { releaseScanRefresh } from '../../core/bearerKeeper.js';
+// [D198] live cookie 登记回收（与 scope/变换/续期同一回收面）
+import { releaseLiveCookies } from '../../core/liveCookies.js';
 
 // 暂停轮询间隔：与 scan/detect.js 的点边界等待同量级，忙等与迟钝之间取个折中
 const PAUSE_POLL_MS = 100;
@@ -71,6 +73,8 @@ export function _disposeScan(scanId) {
     // [D36] 续期状态（拿到的 token、in-flight 去重 promise）同样随扫描回收，
     // 否则长驻服务里每轮扫描留一个持有 token 的条目 —— 那是要被清掉的凭据，不是缓存。
     releaseScanRefresh(scanId);
+    // [D198] live cookie 文件登记随扫描回收（与上面同一理由：能并到已有回收面就不另开一条路径）
+    releaseLiveCookies(scanId);
     const rec = this.scans.get(scanId);
     this.scans.delete(scanId);
     eventBus.dispose(scanId);

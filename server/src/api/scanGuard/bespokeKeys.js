@@ -16,17 +16,36 @@ import { sanitizeExtractScope, EXTRACT_SCOPE_MODES } from './extractScope.js';
 // 操作者自己打的，REST 的输入来自网络调用方。（取窄集合的完整口径见原注释。）
 const PARAM_DEL_ALLOWED = /^[;,|^~]$/;
 
-export function guardBespokeKeys(config, cfg) {
-  // sessionFile 白名单（原逻辑不变）
-  if (cfg.sessionFile !== undefined && cfg.sessionFile !== null && cfg.sessionFile !== '') {
-    if (!isSafeSessionPath(cfg.sessionFile)) {
+/**
+ * [D205 收口 D198] 会话文件路径白名单：`sessionFile` 与 `liveCookiesFile` 的安全判据完全相同
+ * （唯一真源 `isSafeSessionPath`），故合并成一处 —— 顺便把 `guardBespokeKeys` 压回存量基线内
+ *（D198 接 `--live-cookies` 后它涨到 84 行/46 圈，超了 75/42 的存量基线）。
+ *
+ * 为什么 REST 侧必须收窄：`liveCookiesFile` 让服务端按**调用方给的路径**读文件、并把内容当作
+ * cookie 发给目标 —— 放开绝对路径等于给远程调用方一个「任意文件读取 + 带外外发」的原语
+ *（cookie 值会被原样写进请求头）。CLI 侧不受此限（操作者本机自己的文件）。
+ * @param {Record<string, any>} config 目标配置（原地写）
+ * @param {Record<string, any>} cfg 调用方配置
+ * @returns {void}
+ * @throws {AppError} 路径不在白名单内（绝对路径 / `..` 逃逸 / 非字符串）
+ */
+function guardSessionPathKeys(config, cfg) {
+  for (const key of ['sessionFile', 'liveCookiesFile']) {
+    const v = cfg[key];
+    if (v === undefined || v === null || v === '') continue;
+    if (!isSafeSessionPath(v)) {
       throw new AppError(
         ErrorCode.INVALID_PARAM,
-        'sessionFile 非法：仅允许工作目录下的文件名或系统临时目录内路径，拒绝绝对路径/..逃逸'
+        `${key} 非法：仅允许工作目录下的文件名或系统临时目录内路径，拒绝绝对路径/..逃逸`,
       );
     }
-    config.sessionFile = cfg.sessionFile;
+    config[key] = v;
   }
+}
+
+export function guardBespokeKeys(config, cfg) {
+  // 会话文件路径白名单（sessionFile / liveCookiesFile 同一真源，见 guardSessionPathKeys）
+  guardSessionPathKeys(config, cfg);
   const sessionDefault = pickBool(cfg, 'sessionDefault');
   if (sessionDefault !== undefined) config.sessionDefault = sessionDefault;
   // [对标 sqlmap --dbms] 强制指定 DBMS：白名单校验 + 透传（scanRunner 消费跳过指纹）

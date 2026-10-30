@@ -51,11 +51,19 @@ test('extractSqlFragment: MySQL near 提取片段；无片段 → null', () => {
 
 // —— ErrorDetector 集成 ——
 function makeErrorOracle() {
-  // 基线无报错；注入含 SQL syntax 报错 → 返回报错体（含 PG 风格 LINE 片段）
+  // [D211 口径修正] 原 mock 是「只要请求含引号就返回报错页」—— 那正是**引号过敏页**，
+  // 与新判据要否掉的形态同构，于是这条用例成了旧假绿口径的守护者。
+  //
+  // 真实的报错注入目标：报错必须由 **payload 特异的 SQL 语义**引起。让 SQL 语法出错
+  // 只需一个未闭合引号，与「注入是否成立」无关。故此处按「请求里是否含 payload 函数」
+  // 分流：含 ⟹ 数据库执行该函数并报错回显；不含 ⟹ 正常页。
+  const PAYLOAD_FN = /(?:extractvalue|updatexml|badfunc_sqli_probe|ctxsys|cast|convert)/i;
   return {
     async request(opts) {
-      const u = typeof opts.url === 'string' ? opts.url : '';
-      if (u.includes('1=2') || !u.includes('%27') && !u.includes('%22')) {
+      const raw = typeof opts.url === 'string' ? opts.url : '';
+      let u = raw;
+      try { u = decodeURIComponent(raw); } catch { /* 形如孤立 % 的畸形串保持原样 */ }
+      if (u.includes('1=2') || !PAYLOAD_FN.test(u)) {
         return { data: '<p>正常页面</p>', status: 200 };
       }
       return {

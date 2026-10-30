@@ -123,3 +123,34 @@ test('未知 DBMS：FROM dual 兜底轮仍生效（Oracle 式必须有 FROM）',
   assert.ok(usedDual);
   assert.deepEqual(r.cols, [0, 1]);
 });
+
+// [D207] Derby / JSP 式：SQL 报错被渲染成 **HTTP 200 的普通页面**，并把出错语句原样回显。
+// 修复前：`_probeBody.echoed` 只看状态码（200-399）⇒ 错误页里的 'SQLISCANNER0..N' 全被当回显列。
+// 实测证据（demo.testfire.net POST /doLogin）：boundary 推断为空 ⇒ union payload 无引号
+// ⇒ `WHERE uid=testuser UNION SELECT …` 语法错误 ⇒ 200 错误页里出现 'SQLISCANNER40'
+// ⇒ 假命中「UNION 注入成功，回显列 40（列数 41）」。
+test('[D207] 200 的错误页回显标记不算回显列（Derby/JSP 形态）', async () => {
+  const derbyErrorPage = (injected) => ({
+    status: 200,
+    data: '<html><body><div style="font-weight:bold;">'
+      + 'Syntax error: Encountered ")" at line 1, column 105.'
+      + `</div><pre>${injected}</pre></body></html>`,
+  });
+  const { ctx } = makeCtx(derbyErrorPage, 'Derby');
+  const r = await discoverEchoColumnsDetailed(ctx.httpClient, ctx, 3, "'");
+  assert.deepEqual(r.cols, [], 'Error 页里的标记不是回显列');
+  assert.equal(r.numericCols.length, 0);
+  assert.equal(r.style, 'none');
+});
+
+// 反向对照：同样的 200 页面，但不含 DB 报错文案时仍按正常回显处理（防「一律不认」的过度收紧）
+test('[D207] 反向对照：200 正常页里的标记仍算回显列', async () => {
+  const normalPage = (injected) => {
+    const m = injected.match(/UNION SELECT (.+?)(?:--\s*-)?$/);
+    const exprs = m ? m[1].split(',').map((s) => s.trim()) : [];
+    return { status: 200, data: `<html>row ${exprs.filter((t) => /^'[^']*'$/.test(t)).map((t) => t.replaceAll("'", '')).join('|')}</html>` };
+  };
+  const { ctx } = makeCtx(normalPage, 'MySQL');
+  const r = await discoverEchoColumnsDetailed(ctx.httpClient, ctx, 2, "'");
+  assert.deepEqual(r.cols, [0, 1]);
+});

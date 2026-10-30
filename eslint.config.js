@@ -46,6 +46,10 @@ export default [
       '.acl-recovery/**',
       'kanban-check-*/**',
       '.tmp-chk/**',
+      // [D187 2026-10-28] 靶场检出目录（DVWA / VAmPI / Juice Shop 等第三方源码 + Python venv，
+      // 不入库、随本机拉起的靶场变化）。实测未排除时 `npm run lint` 一次吃进 907 条
+      // `document is not defined` 类噪音 —— 门禁红绿又变成「取决于本机磁盘上躺着什么」。
+      '.verify-labs/**',
       // [LINT-FIX 2026-09-19] 原先这里另有 9 条目录/文件级 ignore（multi-engine-lab / ntlm-lab /
       // oob-real-lab / redteam-lab / retest-lab / waf-real / acceptance.mjs / l46-fp-stage /
       // verify-tamper-breakage），理由是「子代理引入的 unused import 不阻塞主 CI」。

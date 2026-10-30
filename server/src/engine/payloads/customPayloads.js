@@ -111,5 +111,7 @@ export function mergeCustomEntries(base, custom) {
       `[customPayloads] 自定义条目 id 与内置注册表冲突（不允许覆盖内置）：${conflicts.join(', ')}`
     );
   }
-  return [...base, ...custom];
+  // [D179] 打标记：自定义条目没有「与内置 destructive 池同串」可言，高危池硬门要靠
+  // isDestructivePayload 里的语句判据兜底 —— 而那条判据只对 _custom 生效（不误伤内置条目）。
+  return [...base, ...custom.map((c) => ({ ...c, _custom: true }))];
 }

@@ -142,6 +142,12 @@ function printHelp() {
                              默认 Critical/High 才 exit 2，diff 模式默认新增即红；
                              给出后两个模式都按此口径判红（低于口径的新增如实披露不判红）
   -o, --out <dir>        输出目录（默认 reports/<主机名>-<时间戳>/）
+      --fix-prompt [dir] 生成「给编码代理的修复提示词」（[D176]）：每条命中一份 Markdown，
+                         含为什么能注入/该怎么改/改完怎么验（复测命令 + 期望 0 命中）。
+                         不带值 ⇒ <输出目录>/fix-prompts/；带值 ⇒ 直接写该目录。不自动改代码
+      --repro-check [dir] 复现检查（[D177]）：把每条命中的 PoC 重放 2 次判「已复现/单次命中/
+                         不可重放」，写进 report.json 的 vuln.repro 与 summary.repro；同时产出
+                         repro-*.sh + repro-*.expect.json（一致才 exit 0）。一致 ≠ 漏洞仍存在
       --no-ledger        不写扫描台账快照
       --quiet            精简输出（只打最终摘要）
   -h, --help             显示本帮助

@@ -182,10 +182,45 @@ export class ErrorDetector extends Detector {
       // 再次命中 ERROR_SIG → 「二次确认」形同虚设。recall-lab /escape 实测（转义型
       // 安全靶点）即因此误报：回显为转义变体 `alice'' AND extractvalue(...)`。
       if (!stripEchoedPayload(body2, payload).match(ERROR_SIG)) continue;
+      // [D211] 引号归因对照：报错必须是 **payload 特异引起** 的，
+      // 而不是「我塞了一个引号把语法搞坏」引起的（后者与可注入性无关）。
+      // 不通过时 continue 试下一个模板 —— 于是无引号模板（真正触发
+      // extractvalue/updatexml 回显的那一类）仍会命中，判据更准而非更松。
+      if (!(await this._quoteAttributed(ctx, filled, match[0]))) continue;
       // [G4] body 随命中返回，供 --parse-errors 原文留存（opt-in 消费）
       return { payload, match: match[0], body };
     }
     return null;
+  }
+
+  /**
+   * [D211/D212] 归因对照：补发 payload 的「无害对照串」（原值 + 结构前缀 + 注释后缀，
+   * 去掉注入载荷），只在它**不引发同一条**报错签名时才认可命中。
+   *
+   * 语义：对照串落在与原 payload **相同的 SQL 语法位置**，只是没有注入载荷。
+   *   · payload 报 A 错、对照不报或报别的错 ⇒ 报错由 payload 引起 ⇒ 命中；
+   *   · 两者报同一条 A 错 ⇒ 报错由结构破坏（引号/逗号/括号）引起 ⇒ 不算命中。
+   *
+   * D212 补正：初版只认引号，导致无引号的 INSERT VALUES 形态（`{ORIG},(…)`）整族
+   * 绕过对照；现按「原值之后的连续结构字符」取前缀，覆盖引号族与元组族。
+   *
+   * 只在**已命中**后调用 ⇒ 不命中的点（真实扫描里的绝大多数请求）零额外开销。
+   *
+   * @param {object} ctx { httpClient, target, point }
+   * @param {string} filled 已填充的注入串（未混淆）
+   * @param {string} hitMatch 原 payload 命中的报错签名文本
+   * @returns {Promise<boolean>} true = 归因成立（认可命中）
+   */
+  async _quoteAttributed(ctx, filled, hitMatch) {
+    const { httpClient, target, point } = ctx;
+    const harmless = buildHarmlessQuoteVariant(filled, point.originalValue || '1');
+    // 构造不出「更短且不同」的对照 ⇒ 无从归因 ⇒ 维持原判定（不引入新的假阴）
+    if (!harmless) return true;
+    const probe = this.obfuscateValue(ctx, harmless);
+    const res = await this.send(httpClient, ctx, this.buildRequest(target, point, probe), ctx);
+    const body = String(res?.data ?? '');
+    const m = stripEchoedPayload(body, probe).match(ERROR_SIG);
+    return !(m && m[0] === hitMatch);
   }
 }
 
@@ -310,6 +345,53 @@ export function pickErrorTemplates(dbms, opts = {}) {
   // 兜底：若高频表未覆盖（理论不发生），回退 MySQL 模板防止空跑
   if (!out.length && PAYLOADS.MySQL && PAYLOADS.MySQL.error.length) out.push(PAYLOADS.MySQL.error[0]);
   return out;
+}
+
+// [D211] 无害引号变体：把 payload 的「注入载荷」整段去掉，只保留 **引号前缀 + 注释后缀**。
+//
+// 为什么需要它：原判据只要求「响应含 SQL 错误签名 + 与基线不同 + 二次确认」，
+// 而**让 SQL 语法出错只需要一个未闭合的引号** —— 这与「注入是否成立」毫无关系。
+// 真实站点（老 Java/PHP 常见）往往对「含特殊字符的输入」统一返回带 SQL 片段或驱动
+// 报错文案的错误页（且像 Derby/JSP 那样是 HTTP 200，见 D207）⇒ 任何带引号的 payload
+// 都假阳。实测 demo.testfire.net 的 btnSubmit 即被这样误判。
+//
+// 于是把 payload 与它的「无害引号变体」**成对发送**：
+//   payload  : Login' AND extractvalue(1,concat(0x7e,(SELECT version())))-- -
+//   无害变体 : Login'-- -      ← 同样含引号、同样带注释后缀，只是没有注入载荷
+// 若两者引发**同一条**报错签名 ⇒ 报错可归因于「引号」而非 payload ⇒ 不算命中。
+//
+// 单/双引号都算闭合字符：只认单引号会让 `{ORIG}" AND updatexml(...)` 这类双引号
+// 闭合模板绕过对照，在「引号敏感」目标上继续假阳。
+// 边界：仍不处理「不含引号」的模板（数字型 / INSERT VALUES `,(` 形态）—— 那类 payload
+// 本来就不存在「引号引起报错」这一竞争解释，无需对照（也不该凭对照把它否掉）。
+// 闭合/结构前缀 = payload 中「原值之后」开头的连续**纯结构字符**：
+// 引号（单/双/反）、括号、逗号（INSERT VALUES 元组分隔）、%、反斜杠、空白。
+// 之所以不只看引号：INSERT VALUES 形态（`,(...`）不含任何引号，仅看引号会让它整族
+// 绕过对照 —— 实测 demo.testfire.net 的 btnSubmit 正是被 `{ORIG},(SELECT CAST(…) AS int))-- -`
+// 这类无引号 payload 误判成报错注入。
+const CLOSURE_PREFIX_RE = /^[\s'"`)%,]*/;
+const COMMENT_SUFFIX_RE = /(?:--[^\n]*|#[\s\S]*|\/\*[\s\S]*?\*\/)\s*$/;
+
+/**
+ * 构造 error payload 的「无害对照串」：**原值 + 结构前缀 + 注释后缀**，去掉注入载荷。
+ *
+ * 语义：对照串与原 payload 落在**同一个 SQL 语法位置**，只是没有注入载荷。
+ * 于是「payload 报 A 错、对照也报同一个 A 错」⇒ 报错来自结构破坏（引号/逗号），
+ * 与 payload 无关 ⇒ 不算报错注入。
+ *
+ * @param {string} payload 已填充（fillPayload 之后）的注入串
+ * @param {string} [orig] 参数原值（用于定位「原值之后」；缺省按 payload 开头计算）
+ * @returns {string|null} 无害对照串；无法构造出**更短且不同**的对照时返回 null
+ */
+export function buildHarmlessQuoteVariant(payload, orig = '') {
+  if (typeof payload !== 'string' || !payload) return null;
+  const head = orig && payload.startsWith(orig) ? orig : '';
+  const closure = (payload.slice(head.length).match(CLOSURE_PREFIX_RE) || [''])[0];
+  const suffix = payload.match(COMMENT_SUFFIX_RE);
+  const probe = head + closure.replace(/\s+/g, '') + (suffix ? suffix[0] : '');
+  // 对照必须显著更短且不等于原 payload —— 否则等于没发对照（也避免把「纯原值」误当攻击）
+  if (!probe || probe === payload) return null;
+  return probe;
 }
 
 // [UNIFY 2026-09-23] 本文件原先在这里自留了 normalizeEcho / stripEchoedPayload 两份私有实现，

@@ -355,6 +355,249 @@ function handleFormUpload(req, res, safe) {
   });
 }
 
+/**
+ * [D174] JSON 多键筛选：把 **JSON body 的键名**拼成 WHERE 条件
+ * （`{"name":"alice","go":"1"}` → `WHERE name = 'alice' AND go = '1'`），值做转义。
+ * 与 D169（form）、D173（query）是同一判据的第三个载体：键名进布尔位置，值不是注入面。
+ * @param {import('node:http').IncomingMessage} req
+ * @param {http.ServerResponse} res
+ * @param {{safe?: boolean, blind?: boolean}} [opts]
+ */
+function handleJsonFilter(req, res, opts = {}) {
+  const { safe = false, blind = false } = opts;
+  let raw = '';
+  req.on('data', (c) => {
+    raw += c;
+    if (raw.length > 64 * 1024) req.destroy();
+  });
+  req.on('end', () => {
+    let body;
+    try {
+      body = JSON.parse(raw || '{}');
+    } catch {
+      res.writeHead(400, { 'Content-Type': 'text/plain' });
+      res.end('invalid json');
+      return;
+    }
+    if (!/^application\/json/i.test(String(req.headers['content-type'] || ''))) {
+      res.writeHead(415, { 'Content-Type': 'text/plain' });
+      res.end('expected application/json');
+      return;
+    }
+    const keys = Object.keys(body || {}).filter((k) => k !== 'go');
+    if (!keys.length) {
+      res.writeHead(400, { 'Content-Type': 'text/plain' });
+      res.end('no field');
+      return;
+    }
+    const where = keys
+      .map((k) => {
+        const col = safe && k !== 'name' && k !== 'id' ? 'name' : k;
+        return `${col} = '${String(body[k]).replace(/'/g, "''")}'`;
+      })
+      .join(' AND ');
+    const sql = `SELECT id,name FROM users WHERE ${where}`;
+    if (!blind) {
+      void respond(res, () => runSql(sql));
+      return;
+    }
+    runSql(sql)
+      .then((rows) => {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ rows }));
+      })
+      .catch(() => {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ rows: [] }));
+      });
+  });
+}
+
+/**
+ * [D173] query 多键筛选：把**URL 参数名**拼成 WHERE 条件（`?name=alice&go=1` →
+ * `WHERE name = 'alice' AND go = '1'`），值做转义。query 键名进布尔位置的形态。
+ * @param {import('node:http').IncomingMessage} req
+ * @param {http.ServerResponse} res
+ * @param {{safe?: boolean, blind?: boolean}} [opts]
+ */
+function handleQueryFilter(req, res, opts = {}) {
+  const { safe = false, blind = false } = opts;
+  const u = new URL(req.url || '/', 'http://127.0.0.1');
+  const pairs = [...u.searchParams.entries()].filter(([k]) => k !== 'go');
+  if (!pairs.length) {
+    res.writeHead(400, { 'Content-Type': 'text/plain' });
+    res.end('no field');
+    return;
+  }
+  const where = pairs
+    .map(([k, v]) => {
+      const col = safe && k !== 'name' && k !== 'id' ? 'name' : k;
+      return `${col} = '${String(v).replace(/'/g, "''")}'`;
+    })
+    .join(' AND ');
+  const sql = `SELECT id,name FROM users WHERE ${where}`;
+  if (!blind) {
+    void respond(res, () => runSql(sql));
+    return;
+  }
+  runSql(sql)
+    .then((rows) => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ rows }));
+    })
+    .catch(() => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ rows: [] }));
+    });
+}
+
+/**
+ * [D172] SPA 入口页：静态 HTML 只有空壳，数据靠 JS fetch 打 REST 接口
+ * （`/api/users/5/orders`，**没有 query 参数**）—— 浏览器爬取的主发现面。
+ * @param {http.ServerResponse} res
+ * @param {string} [href] 要 fetch 的接口（安全对照指向 /safe/users/5/orders）
+ */
+function handleSpa(res, href = '/api/users/5/orders') {
+  res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+  res.end(
+    '<!DOCTYPE html><html><body><h1>spa</h1><div id="out"></div>'
+    + '<script>fetch(' + JSON.stringify(href) + ').then(function(r){return r.text();})'
+    + '.then(function(t){document.getElementById("out").textContent=t;});</script>'
+    + '</body></html>'
+  );
+}
+
+/**
+ * [D171] 下拉筛选表单：注入面在 `<select>` 的选项值上（`sort`/`status`/`id` 这类）。
+ * 表单解析此前只认 `<input>`/`<textarea>` ⇒ 这类表单只剩按钮字段 ⇒ 0 个注入点。
+ * @param {http.ServerResponse} res
+ * @param {string} [action] 提交地址（安全对照指向 /safe/select-filter）
+ */
+function handleSelectPage(res, action = '/api/select-filter') {
+  res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+  res.end(
+    '<!DOCTYPE html><html><body><h1>filter</h1>'
+    + `<form action="${action}" method="post">`
+    + '<select name="id"><option value="1" selected>one</option><option value="2">two</option></select>'
+    + '<input type="submit" name="go" value="filter">'
+    + '</form></body></html>'
+  );
+}
+
+/**
+ * [D171] 下拉筛选的提交端点：把 `id` 字段值拼进 SQL（`WHERE id = <id>`）。
+ * @param {import('node:http').IncomingMessage} req
+ * @param {http.ServerResponse} res
+ * @param {boolean} safe 参数化对照
+ */
+function handleSelectFilter(req, res, safe) {
+  let raw = '';
+  req.on('data', (c) => {
+    raw += c;
+    if (raw.length > 64 * 1024) req.destroy();
+  });
+  req.on('end', () => {
+    const q = new URLSearchParams(raw);
+    const id = q.get('id') || '';
+    if (!id) {
+      res.writeHead(400, { 'Content-Type': 'text/plain' });
+      res.end('no id');
+      return;
+    }
+    if (safe) void respond(res, () => runSql('SELECT id,name FROM users WHERE id = ?', [id]));
+    else void respond(res, () => runSql(`SELECT id,name FROM users WHERE id = ${id}`));
+  });
+}
+
+/**
+ * [D170] 站内链接页：REST 形态的链接（没有 query 参数，注入面在路径段）。
+ * 爬取只抽 query 键时这类链接产出 0 个注入点 ⇒ 路径面在爬取路径上整体缺失。
+ * @param {http.ServerResponse} res
+ * @param {string} href 链接目标（安全对照指向 /safe/users/5/orders）
+ */
+function handlePathLinks(res, href = '/api/users/5/orders') {
+  res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+  res.end(
+    '<!DOCTYPE html><html><body><h1>links</h1>'
+    + `<a href="${href}">order detail</a>`
+    + '</body></html>'
+  );
+}
+
+/**
+ * [D169] 多键拼接端点：把**全部字段名**拼成 WHERE 条件（`WHERE k1 = 'v1' AND k2 = 'v2'`），
+ * 值做过简单转义（不是注入面），列名直接来自字段名。
+ *
+ * 真实形态：动态筛选/多条件查询构造器把 `Object.keys(body)` 拼进 SQL。字段名在
+ * **布尔表达式位置**（不是 ORDER BY），所以 orderByKey 的序数差分（`{k}, 1-- -`）
+ * 在这里只会语法错误；要用「把键名换成恒真/恒假布尔式」的探针才能打出来。
+ * 安全对照走列名白名单（不在名单里回退 name）。
+ * @param {import('node:http').IncomingMessage} req
+ * @param {http.ServerResponse} res
+ * @param {boolean} safe 是否走列名白名单
+ */
+function handleFormFilter(req, res, opts = {}) {
+  const { safe = false, blind = false } = opts;
+  const ct = String(req.headers['content-type'] || '');
+  if (!/^multipart\/form-data/i.test(ct)) {
+    res.writeHead(415, { 'Content-Type': 'text/plain' });
+    res.end('unsupported media type: expected multipart/form-data');
+    return;
+  }
+  const bm = /boundary=(?:"([^"]+)"|([^;\s]+))/i.exec(ct);
+  if (!bm) {
+    res.writeHead(400, { 'Content-Type': 'text/plain' });
+    res.end('missing boundary');
+    return;
+  }
+  const boundary = bm[1] || bm[2];
+  let raw = '';
+  req.on('data', (c) => {
+    raw += c;
+    if (raw.length > 256 * 1024) req.destroy();
+  });
+  req.on('end', () => {
+    /** @type {Array<{name: string, value: string}>} */
+    const fields = [];
+    for (const part of raw.split(`--${boundary}`)) {
+      const nm = /name="([^"]*)"/i.exec(part);
+      if (!nm) continue;
+      if (/filename="/i.test(part)) continue; // 文件字段不参与 WHERE 构造
+      const ci = part.indexOf('\r\n\r\n');
+      const value = (ci >= 0 ? part.slice(ci + 4) : '').replace(/\r\n$/, '');
+      fields.push({ name: nm[1], value });
+    }
+    const usable = fields.filter((f) => f.name !== 'go');
+    if (!usable.length) {
+      res.writeHead(400, { 'Content-Type': 'text/plain' });
+      res.end('no field');
+      return;
+    }
+    const where = usable
+      .map((f) => {
+        const col = safe && f.name !== 'name' && f.name !== 'id' ? 'name' : f.name;
+        const val = String(f.value).replace(/'/g, "''");
+        return `${col} = '${val}'`;
+      })
+      .join(' AND ');
+    const sql = `SELECT id,name FROM users WHERE ${where}`;
+    if (!blind) {
+      void respond(res, () => runSql(sql));
+      return;
+    }
+    // 盲档：把 SQL 错误吞成「没查到」，唯一信号只剩响应差异（布尔通道）
+    runSql(sql)
+      .then((rows) => {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ rows }));
+      })
+      .catch(() => {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ rows: [] }));
+      });
+  });
+}
+
 await setupDb();
 const server = http.createServer((req, res) => {
   let u;
@@ -392,6 +635,63 @@ const server = http.createServer((req, res) => {
   }
   if (u.pathname === '/safe-form-upload') {
     handleFormPage(res, '/safe/form-upload');
+    return;
+  }
+  // [D169] 多键拼接：字段名进 WHERE（布尔位置），值已转义
+  if (u.pathname === '/api/form-filter' || u.pathname === '/safe/form-filter'
+    || u.pathname === '/api/form-filter-blind' || u.pathname === '/safe/form-filter-blind') {
+    const safe = u.pathname.includes('/safe/');
+    const blind = u.pathname.endsWith('-blind');
+    handleFormFilter(req, res, { safe, blind });
+    return;
+  }
+  // [D170] 站内链接页：链接本身是 REST 路径（无 query 参数）
+  if (u.pathname === '/path-links') {
+    handlePathLinks(res);
+    return;
+  }
+  if (u.pathname === '/safe-path-links') {
+    handlePathLinks(res, '/safe/users/5/orders');
+    return;
+  }
+  // [D171] 下拉筛选表单：注入面在 <select> 的选项值上
+  if (u.pathname === '/select-filter-page') {
+    handleSelectPage(res);
+    return;
+  }
+  if (u.pathname === '/safe-select-filter-page') {
+    handleSelectPage(res, '/safe/select-filter');
+    return;
+  }
+  if (u.pathname === '/api/select-filter' || u.pathname === '/safe/select-filter') {
+    handleSelectFilter(req, res, u.pathname === '/safe/select-filter');
+    return;
+  }
+  // [D172] SPA：接口靠 JS fetch，端点无 query 参数
+  if (u.pathname === '/spa') {
+    handleSpa(res);
+    return;
+  }
+  if (u.pathname === '/safe-spa') {
+    handleSpa(res, '/safe/users/5/orders');
+    return;
+  }
+  // [D173] query 多键筛选：参数名进 WHERE（布尔位置）
+  if (u.pathname === '/api/query-filter' || u.pathname === '/safe/query-filter'
+    || u.pathname === '/api/query-filter-blind' || u.pathname === '/safe/query-filter-blind') {
+    handleQueryFilter(req, res, {
+      safe: u.pathname.includes('/safe/'),
+      blind: u.pathname.endsWith('-blind'),
+    });
+    return;
+  }
+  // [D174] JSON 多键筛选：body 键名进 WHERE（布尔位置）
+  if (u.pathname === '/api/json-filter' || u.pathname === '/safe/json-filter'
+    || u.pathname === '/api/json-filter-blind' || u.pathname === '/safe/json-filter-blind') {
+    handleJsonFilter(req, res, {
+      safe: u.pathname.includes('/safe/'),
+      blind: u.pathname.endsWith('-blind'),
+    });
     return;
   }
   if (u.pathname === '/api/form-upload' || u.pathname === '/safe/form-upload') {

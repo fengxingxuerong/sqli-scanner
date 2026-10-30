@@ -1,0 +1,19 @@
+{
+  "name": "sqli-scanner",
+  "version": "1.3.0",
+  "description": "授权范围内的 SQL 注入检测：9 工具 MCP + 交付型报告（SARIF/HTML/JSON/Markdown），结论带口径（verdict / unverifiedSurfaces），扫完即出可进 CI 的退出码与清单。只扫用户明确给出的目标。",
+  "author": {
+    "name": "fengxingxuerong"
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/fengxingxuerong/sqli-scanner",
+  "repository": "https://github.com/fengxingxuerong/sqli-scanner",
+  "keywords": [
+    "security",
+    "sql-injection",
+    "dast",
+    "pentest",
+    "mcp",
+    "sarif"
+  ]
+}

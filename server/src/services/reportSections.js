@@ -331,6 +331,86 @@ const CRED_CAVEAT =
   '「未设口令/非口令插件」二者在 SQL 层不可区分（如 MySQL auth_socket 同样表现为空）。' +
   '「弱」指该 KDF 离线爆破成本低，**不代表口令已被还原**。';
 
+// ============================================================================
+// [D181] 只读安全配置审计小节（对标 sqlmap --audit）
+//
+// 与「凭据风险」同样是**附加发现**，但口径有三处不同，渲染时必须一并说清：
+//   · 未执行（没开 --audit / 非直连）⇒ 只写一行原因，不渲染空表（空表看起来像「查过且没问题」）；
+//   · unknown 项**不是通过**：单独计数并列出来，否则读者会把「没查成」读成「配得好」；
+//   · 全程只读：把这句话放在小节尾部，避免被当成「审计改过配置」。
+// ============================================================================
+const AUDIT_CAVEAT =
+  '判定口径：**只读**（仅 SELECT/SHOW/PRAGMA），不改配置、不写库、不调过程。' +
+  '`未查成(unknown)` 表示权限不足/方言不支持/查询失败——**不等于通过**。';
+
+/** 审计结论一句话（与 engine/audit.js 的 auditSentence 同义，但这里只依赖报告字段） */
+function auditSummaryLine(audit) {
+  const s = audit && audit.summary;
+  if (!s || !s.total) return '未执行安全配置审计。';
+  const parts = [`${s.total} 项检查：通过 ${s.pass}、存在风险 ${s.fail}`];
+  if (s.unknown) parts.push(`未查成 ${s.unknown}（不等于通过）`);
+  return `${parts.join('，')}。`;
+}
+
+/** 审计项的状态文案 */
+function auditStatusText(status) {
+  return status === 'pass' ? '通过' : status === 'fail' ? '风险' : '未查成';
+}
+
+/**
+ * markdown：只读安全配置审计小节（未开启 --audit 时整段不渲染）
+ * @param {any} audit report.audit
+ * @returns {string[]}
+ */
+export function auditMarkdown(audit) {
+  if (!audit) return [];
+  if (audit.ran === false) {
+    // 明确「没做」比留白安全：留白会被读成「做了没问题」
+    return ['', '## 安全配置审计（--audit）', '', `- 未执行：${audit.reason || '未开启 --audit'}`, ''];
+  }
+  const findings = Array.isArray(audit.findings) ? audit.findings : [];
+  if (!findings.length) return [];
+  const out = ['', '## 安全配置审计（--audit，只读）', ''];
+  out.push(`- 方言：${audit.dialect || '-'}；${auditSummaryLine(audit)}`);
+  out.push('', '| 检查项 | 状态 | 说明 |', '|---|---|---|');
+  for (const f of findings) {
+    const detail = f.status === 'unknown' && f.reason ? `${f.detail}（${f.reason}）` : f.detail;
+    out.push(`| ${mdCell(f.title)} | ${mdCell(auditStatusText(f.status))} | ${mdCell(detail)} |`);
+  }
+  out.push('', `> ${AUDIT_CAVEAT}`, '');
+  return out;
+}
+
+/**
+ * HTML：只读安全配置审计卡（未开启 --audit 返回空串）
+ * @param {any} audit report.audit
+ * @param {(s: unknown) => string} esc HTML 转义原语
+ * @returns {string}
+ */
+export function auditHtml(audit, esc) {
+  if (!audit) return '';
+  if (audit.ran === false) {
+    return `<div class="verdict"><h2>安全配置审计（--audit）</h2>
+      <p class="meta">未执行：${esc(audit.reason || '未开启 --audit')}</p>
+    </div>`;
+  }
+  const findings = Array.isArray(audit.findings) ? audit.findings : [];
+  if (!findings.length) return '';
+  const rows = findings
+    .map((f) => {
+      const cls = f.status === 'fail' ? 'high' : f.status === 'unknown' ? 'medium' : '';
+      const detail = f.status === 'unknown' && f.reason ? `${f.detail}（${f.reason}）` : f.detail;
+      return `<tr><td>${esc(f.title)}</td><td class="${cls}">${esc(auditStatusText(f.status))}</td><td>${esc(detail)}</td></tr>`;
+    })
+    .join('');
+  return `<div class="verdict${(audit.summary && audit.summary.fail) ? ' bad' : ''}">
+      <h2>安全配置审计（--audit，只读）</h2>
+      <p class="meta">方言：${esc(audit.dialect || '-')}；${esc(auditSummaryLine(audit))}</p>
+      <table><thead><tr><th>检查项</th><th>状态</th><th>说明</th></tr></thead><tbody>${rows}</tbody></table>
+      <p class="meta">${esc(AUDIT_CAVEAT)}</p>
+    </div>`;
+}
+
 /**
  * markdown：凭据风险小节（无分析结果返回 []，整段不渲染）
  * @param {any} analysis report.data.passwordAnalysis

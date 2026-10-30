@@ -81,8 +81,13 @@ test('固定索引对 [0,2]/[1,3]/[4,5]/[6,7] 未被扩容破坏（5 库）', ()
     assert.equal(b[3], '{ORIG}" AND "1"="2', `${dbms} [3]`);
     assert.equal(b[4], '{ORIG} AND 1=1', `${dbms} [4]`);
     assert.equal(b[5], '{ORIG} AND 1=2', `${dbms} [5]`);
-    assert.equal(b[6], "{ORIG}' OR '1'='1", `${dbms} [6]`);
-    assert.equal(b[7], "{ORIG}' OR '1'='2", `${dbms} [7]`);
+    // [D209] MySQL / [D214] PostgreSQL、SQLite 补了 `-- -` 注释后缀（裸 OR 被后续 `AND …`
+    // 续接后恒假）；其余库未改（各自 SQL 上下文不同，须逐个靶场验证）—— 这里按库区分期望值。
+    const OR_COMMENTED = ['MySQL', 'PostgreSQL', 'SQLite'];
+    const orTrue = OR_COMMENTED.includes(dbms) ? "{ORIG}' OR '1'='1'-- -" : "{ORIG}' OR '1'='1";
+    const orFalse = OR_COMMENTED.includes(dbms) ? "{ORIG}' OR '1'='2'-- -" : "{ORIG}' OR '1'='2";
+    assert.equal(b[6], orTrue, `${dbms} [6]`);
+    assert.equal(b[7], orFalse, `${dbms} [7]`);
     assert.equal(b.slice(0, 8).length, 8, `${dbms} 前 8 项数量不变`);
   }
 });

@@ -76,6 +76,72 @@ const CASES = [
     id: 'form-enctype-safe', vuln: false, carrier: '页面表单 enctype（安全对照）',
     path: '/safe-form-upload', forms: true,
   },
+  // [D169] 多键拼接：字段名进 WHERE 的布尔位置（值已转义）。序数差分在这里只会语法错误，
+  // 需要「把键名换成恒真/恒假布尔式」的探针。
+  {
+    id: 'form-key-bool', vuln: true, carrier: '多键拼接（字段名进 WHERE）',
+    formFilter: { path: '/api/form-filter' }, paramNames: true,
+  },
+  {
+    id: 'form-key-bool-safe', vuln: false, carrier: '多键拼接（安全对照）',
+    formFilter: { path: '/safe/form-filter' }, paramNames: true,
+  },
+  // 盲档：SQL 错误被吞成「没查到」⇒ 通用布尔通道的 `{k} AND 1=1-- -` 因 varchar 列名
+  // 被当 0 而恒无分化；只有「自洽布尔式 + 行注释」的探针才有信号（D169 实测）
+  {
+    id: 'form-key-bool-blind', vuln: true, carrier: '多键拼接·盲档（错误被吞）',
+    formFilter: { path: '/api/form-filter-blind' }, paramNames: true,
+  },
+  {
+    id: 'form-key-bool-blind-safe', vuln: false, carrier: '多键拼接·盲档（安全对照）',
+    formFilter: { path: '/safe/form-filter-blind' }, paramNames: true,
+  },
+  // [D174] JSON 键名进 WHERE 的布尔位置（盲档：错误被吞成 0 行）
+  {
+    id: 'json-key-bool-blind', vuln: true, carrier: 'JSON 键名（多键·盲档）',
+    jsonFilter: { path: '/api/json-filter-blind' }, paramNames: true,
+  },
+  {
+    id: 'json-key-bool-blind-safe', vuln: false, carrier: 'JSON 键名（多键·安全对照）',
+    jsonFilter: { path: '/safe/json-filter-blind' }, paramNames: true,
+  },
+  // [D170] 爬取到的 REST 链接（无 query 参数）也要按 --test-path 建路径点。
+  // 旧行为：爬取只从链接抽 query 键 ⇒ 这类链接 0 个注入点 ⇒ 路径面在爬取路径上缺失。
+  {
+    id: 'crawl-path', vuln: true, carrier: '爬取链接的路径段',
+    path: '/path-links', crawl: 1, testPath: true,
+  },
+  {
+    id: 'crawl-path-safe', vuln: false, carrier: '爬取链接的路径段（安全对照）',
+    path: '/safe-path-links', crawl: 1, testPath: true,
+  },
+  // [D171] 下拉筛选表单的选项值（`<select>` 此前整体不采集 ⇒ 表单只剩按钮字段 ⇒ 0 点）
+  {
+    id: 'form-select', vuln: true, carrier: '表单 <select> 选项值',
+    path: '/select-filter-page', forms: true,
+  },
+  {
+    id: 'form-select-safe', vuln: false, carrier: '表单 <select>（安全对照）',
+    path: '/safe-select-filter-page', forms: true,
+  },
+  // [D172] SPA 的 XHR 端点（REST 形态、无 query）：浏览器爬取发现后按 --test-path 建路径点
+  {
+    id: 'spa-endpoint-path', vuln: true, carrier: 'SPA XHR 端点的路径段',
+    path: '/spa', crawlBrowser: true, testPath: true,
+  },
+  {
+    id: 'spa-endpoint-path-safe', vuln: false, carrier: 'SPA XHR 端点（安全对照）',
+    path: '/safe-spa', crawlBrowser: true, testPath: true,
+  },
+  // [D173] query 参数名进 WHERE 的布尔位置（盲档：错误被吞成 0 行）
+  {
+    id: 'query-key-bool-blind', vuln: true, carrier: 'query 参数名（多键·盲档）',
+    path: '/api/query-filter-blind?name=alice&go=1', paramNames: true,
+  },
+  {
+    id: 'query-key-bool-blind-safe', vuln: false, carrier: 'query 参数名（多键·安全对照）',
+    path: '/safe/query-filter-blind?name=alice&go=1', paramNames: true,
+  },
 ];
 
 /**
@@ -133,6 +199,49 @@ function buildFormSortRequest(spec) {
 }
 
 /**
+ * [D169] 造一份「多键筛选」表单的抓包：字段 `name=alice` + 按钮 `go=1`。
+ * 后端把**字段名**拼成 WHERE 条件（值已转义），所以注入面是字段名。
+ * @param {{path:string}} spec
+ * @returns {string} 请求原文
+ */
+function buildFormFilterRequest(spec) {
+  const B = '----DSLabFormBoundary7MA4';
+  return [
+    `POST ${spec.path} HTTP/1.1`,
+    `Host: 127.0.0.1:${PORT}`,
+    `Content-Type: multipart/form-data; boundary=${B}`,
+    '',
+    `--${B}`,
+    'Content-Disposition: form-data; name="name"',
+    '',
+    'alice',
+    `--${B}`,
+    'Content-Disposition: form-data; name="go"',
+    '',
+    '1',
+    `--${B}--`,
+    '',
+  ].join('\r\n');
+}
+
+/**
+ * [D174] 造一份「JSON 多键筛选」的抓包：`{"name":"alice","go":"1"}` + `Content-Type: application/json`。
+ * 后端把 **JSON 键名**拼进 WHERE（值转义），注入面是键名。
+ * @param {{path:string}} spec
+ * @returns {string} 请求原文
+ */
+function buildJsonFilterRequest(spec) {
+  return [
+    `POST ${spec.path} HTTP/1.1`,
+    `Host: 127.0.0.1:${PORT}`,
+    'Content-Type: application/json',
+    '',
+    '{"name":"alice","go":"1"}',
+    '',
+  ].join('\r\n');
+}
+
+/**
  * 解析 --only=a,b
  * @param {string[]} argv
  * @returns {Set<string>|null}
@@ -178,6 +287,16 @@ function scanCase(c) {
     const reqPath = path.join(RESULTS, `${c.id}.req.txt`);
     fs.writeFileSync(reqPath, buildFormSortRequest(c.formSort));
     targetArgs = ['-r', reqPath];
+  } else if (c.formFilter) {
+    // [D169] 多键拼接：字段名进 WHERE（布尔位置）
+    const reqPath = path.join(RESULTS, `${c.id}.req.txt`);
+    fs.writeFileSync(reqPath, buildFormFilterRequest(c.formFilter));
+    targetArgs = ['-r', reqPath];
+  } else if (c.jsonFilter) {
+    // [D174] 多键拼接：JSON body 键名进 WHERE（布尔位置）
+    const reqPath = path.join(RESULTS, `${c.id}.req.txt`);
+    fs.writeFileSync(reqPath, buildJsonFilterRequest(c.jsonFilter));
+    targetArgs = ['-r', reqPath];
   } else {
     targetArgs = ['-u', BASE + c.path];
   }
@@ -187,6 +306,10 @@ function scanCase(c) {
   if (c.paramNames) extra.push('--test-param-names');
   // [D168] --forms：页面表单发现（需配 level 5；本靶场用例显式开启）
   if (c.forms) extra.push('--forms', '--level', '5');
+  // [D170] --crawl：站内链接爬取（爬到的 REST 链接按 --test-path 建路径点）
+  if (c.crawl) extra.push('--crawl', String(c.crawl));
+  // [D172] --crawl-browser：headless 渲染 + 捕获 XHR/fetch 端点（端点路径段按 --test-path 建点）
+  if (c.crawlBrowser) extra.push('--crawl-browser');
   // [D159] --test-path 按用例开启：路径点对 multipart 目标没有意义，
   //   而且会给只认 /api/upload 的靶场塞一条 404 请求（实测把整场拖到 --timeout）
   if (c.testPath) extra.push('--test-path');

@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import { sanitizeStart } from '../src/api/scanRoutes.js';
 import { ErrorCode } from '../src/core/errors.js';
 
-test('direct: 提供 connectionString + sqlTemplate 时放行', () => {
+test('direct: 提供 connectionString + sqlTemplate 时放行，driverType 按 scheme 推断', () => {
   const out = sanitizeStart({
     mode: 'direct',
     connectionString: 'sqlite://:memory:',
@@ -17,9 +17,25 @@ test('direct: 提供 connectionString + sqlTemplate 时放行', () => {
   });
   assert.equal(out.mode, 'direct');
   assert.equal(out.db.connectionString, 'sqlite://:memory:');
-  assert.equal(out.db.driverType, 'memory');
+  // [D187] 此前写死 'memory'（假库自检桩）；sqlite:// 应推断为真实 sql.js 驱动
+  assert.equal(out.db.driverType, 'sqlite');
   assert.equal(out.sqlTemplate, 'SELECT * FROM users WHERE id={INJECT}');
   assert.equal(out.config.level, 2);
+});
+
+test('direct: 远端 DSN 未带 driverType 时按 scheme 推断（防静默落到 memory 自检桩）', () => {
+  const out = sanitizeStart({
+    mode: 'direct',
+    connectionString: 'mysql://u:p@db.internal.test:3306/app',
+    sqlTemplate: 'SELECT * FROM users WHERE id={INJECT}',
+  });
+  assert.equal(out.db.driverType, 'mysql');
+  const ora = sanitizeStart({
+    mode: 'direct',
+    connectionString: 'oracle://SYS:p@127.0.0.1:1521/FREEPDB1?privilege=SYSDBA',
+    sqlTemplate: 'SELECT * FROM users WHERE id={INJECT}',
+  });
+  assert.equal(ora.db.driverType, 'oracle');
 });
 
 test('direct: 提供 db 对象（含 driverType）时优先透传', () => {

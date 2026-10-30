@@ -69,6 +69,18 @@ const TARGETS = [
     replace: (text, v) => text.replace(/^version\s*=\s*"[^"]+"/m, `version = "${v}"`),
   },
   {
+    // agent 装载面：`.claude-plugin/plugin.json` 是插件市场的版本来源。
+    // [D219] 实测：发 1.3.0 时它还停在 1.2.0，由 agent-manifest 门禁抓出 ——
+    // 这是「同一事实多份副本」的**第十处**，version-sync 此前只覆盖九处。
+    file: path.join('.claude-plugin', 'plugin.json'),
+    label: '.claude-plugin/plugin.json',
+    pick: (text) => {
+      const m = text.match(/^\s{2}"version"\s*:\s*"([^"]+)"/m);
+      return m ? m[1] : null;
+    },
+    replace: (text, v) => text.replace(/^(\s{2}"version"\s*:\s*)"[^"]+"/m, `$1"${v}"`),
+  },
+  {
     // 引擎子包：`npm run server` / Dockerfile 里的 `npm --prefix server ci` 都读它，
     // 与根包长期不同步（D127 实测 1.1.0 vs 1.1.1）——旧判据看不见。
     file: path.join('server', 'package.json'),

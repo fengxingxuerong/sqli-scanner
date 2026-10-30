@@ -102,8 +102,11 @@ test('MySQL boolean [0,2]/[1,3]/[4,5]/[6,7] 真假对未被破坏', () => {
   assert.equal(MYSQL_BOOLEAN[3], '{ORIG}" AND "1"="2', '[3] 双引号假条件');
   assert.equal(MYSQL_BOOLEAN[4], '{ORIG} AND 1=1', '[4] 数字真条件');
   assert.equal(MYSQL_BOOLEAN[5], '{ORIG} AND 1=2', '[5] 数字假条件');
-  assert.equal(MYSQL_BOOLEAN[6], "{ORIG}' OR '1'='1", '[6] OR 真条件');
-  assert.equal(MYSQL_BOOLEAN[7], "{ORIG}' OR '1'='2", '[7] OR 假条件');
+  // [D209] [6]/[7] 补了 `-- -` 注释后缀：裸 OR 在 `WHERE a='…' AND b='…'` 里因 AND 优先于 OR
+  // 而恒假，空基线兜底对（ti:7/fi:6）因此静默失效（真机证据见 CHANGELOG D209）。
+  // 索引位置不变，只有内容变 —— 这是有意变更，断言同步更新而不是放宽。
+  assert.equal(MYSQL_BOOLEAN[6], "{ORIG}' OR '1'='1'-- -", '[6] OR 真条件（带注释）');
+  assert.equal(MYSQL_BOOLEAN[7], "{ORIG}' OR '1'='2'-- -", '[7] OR 假条件（带注释）');
   assert.equal(MYSQL_BOOLEAN.slice(0, 8).length, 8, '前 8 项数量不变（扩容仅 append）');
 });
 
@@ -114,8 +117,11 @@ test('PostgreSQL boolean [0,2]/[1,3]/[4,5]/[6,7] 真假对未被破坏', () => {
   assert.equal(PG_BOOLEAN[3], '{ORIG}" AND "1"="2', '[3] 双引号假条件');
   assert.equal(PG_BOOLEAN[4], '{ORIG} AND 1=1', '[4] 数字真条件');
   assert.equal(PG_BOOLEAN[5], '{ORIG} AND 1=2', '[5] 数字假条件');
-  assert.equal(PG_BOOLEAN[6], "{ORIG}' OR '1'='1", '[6] OR 真条件');
-  assert.equal(PG_BOOLEAN[7], "{ORIG}' OR '1'='2", '[7] OR 假条件');
+  // [D214] 与 MySQL 的 D209 同源：裸 OR 在 `WHERE a='…' AND b='…'` 里被后续 AND 续接后恒假，
+  // 真/假两侧落同一张错页 ⇒ 布尔判据静默失效（真 PG/SQLite 靶场实测，见 CHANGELOG D214）。
+  // 索引位置不变，只有内容变 —— 有意变更，断言同步更新而不是放宽。
+  assert.equal(PG_BOOLEAN[6], "{ORIG}' OR '1'='1'-- -", '[6] OR 真条件（带注释）');
+  assert.equal(PG_BOOLEAN[7], "{ORIG}' OR '1'='2'-- -", '[7] OR 假条件（带注释）');
   assert.equal(PG_BOOLEAN.slice(0, 8).length, 8, '前 8 项数量不变（扩容仅 append）');
 });
 

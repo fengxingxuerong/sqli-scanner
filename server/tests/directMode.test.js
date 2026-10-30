@@ -142,11 +142,29 @@ test('D: 真实 SQLite 端到端 UnionDetector 直连命中（SqlJsDriver）', a
   await c.close();
 });
 
-// 注：引号型布尔 payload（1' AND '1'='1）在真实 SQLite 属语法错误，两侧同报错无法形成差异，
-// 故真实 SQLite 端到端以「报错注入」证明直连通道对真实引擎可用，布尔通道已由 MemoryRecordDriver 端到端覆盖。
-test('D: 真实 SQLite 端到端 ErrorDetector 直连命中（SqlJsDriver）', async () => {
+// [D211 口径修正] 本条原先以「注入带引号 ⇒ SQLite 报 unrecognized token」判定报错注入命中。
+// 取证：在真实 SQLite 上，payload 与它的无害引号变体（`1'-- -`）**报的是同一条签名**
+// （unrecognized token）—— 即报错来自「引号破坏了语法」，而 extractvalue 等 payload 函数
+// **从未被执行**（SQLite 没有这些函数）。按 D211 新判据，这不该算报错注入：
+// 报成 error 会暗示「可从报错中取数」，而事实不能。
+// 数值上下文的点由 boolean/union 通道接住（见 directMode 的 boolean 直连用）。
+const STR_TPL = "SELECT id,name FROM users WHERE name='{INJECT}'";
+
+test('D: 真实 SQLite 直连 —— 引号语法错误不再判为报错注入（D211 归因）', async () => {
   const target = directTarget({ db: { driverType: 'sqljs', initSql: INIT_SQL } });
   const point = directPoint();
+  const c = new DirectConnector(target);
+  const res = await new ErrorDetector().detect(directCtx(target, point, c));
+  assert.equal(res.vulnerable, false, '仅有引号引起的语法错误不得判为报错注入');
+  await c.close();
+});
+
+test('D: 真实 SQLite 端到端 ErrorDetector 直连命中 —— 字符串上下文（SqlJsDriver）', async () => {
+  // 与上一条的差别只在**上下文**：这里是字符串包裹（WHERE name='...'），
+  // payload 的引号能闭合 ⇒ SQL 合法 ⇒ payload 函数真的被执行并报错回显
+  // （SQLite 报 no such function）。这才是报错注入应有的证据形态。
+  const target = directTarget({ db: { driverType: 'sqljs', initSql: INIT_SQL }, sqlTemplate: STR_TPL });
+  const point = directPoint(STR_TPL);
   const c = new DirectConnector(target);
   const res = await new ErrorDetector().detect(directCtx(target, point, c));
   assert.equal(res.vulnerable, true);

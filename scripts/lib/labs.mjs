@@ -48,6 +48,10 @@ function dvwaSpec(p, verifyLabs) {
     requires: [
       need('file', p('PHP_EXE', 'D:/tools/php83/php.exe'), 'PHP_EXE'),
       need('file', path.join(dir, 'config', 'config.inc.php'), 'DVWA_DIR'),
+      // [D188] 可服务性标记：根 index.php/login.php 缺失 = 供应物被清（TEMP 清理/AV），
+      // 服务器起得来也只会全 404 —— labs 体检必须当场红，不能等到套件 SKIP
+      need('file', path.join(dir, 'index.php'), 'DVWA_DIR(index.php)'),
+      need('file', path.join(dir, 'login.php'), 'DVWA_DIR(login.php)'),
     ],
     cmd: p('PHP_EXE', 'D:/tools/php83/php.exe'),
     args: ['-S', '127.0.0.1:8099', '-t', dir],
@@ -79,6 +83,10 @@ function vampiSpec(p, verifyLabs, repoRoot, mode) {
     cmd: `${venv}/Scripts/python.exe`,
     args: [entry],
     cwd: src,
+    // [D188] 官方 `app.py` 只建空 SQLite，不调 /createdb 就没有 users 表 ——
+    // 外部裁判 2 号会在「靶场不可达」与「500 空表」之间表现成 FAIL/静默 SKIP（2026-10-28 实测）。
+    // seedPath 由 labs.mjs 在端口就绪后调用；两个实例共用同一份 DB，重复调用是幂等的。
+    seedPath: '/createdb',
     // tokentimetolive 必须显式设大：官方默认 60s 会让一轮扫描中途全 401 ⇒ 真假恒等（假阴性）
     // 对照实例另需 PYTHONPATH=源码目录（否则 run_port.py 里 `from config import vuln_app` ImportError）
     env: vuln
@@ -162,7 +170,10 @@ function postgresSpec() {
 export function labSpecs({ env = {}, repoRoot }) {
   const p = (name, dflt) => env[name] ?? dflt;
   const home = env.USERPROFILE ?? env.HOME ?? '';
-  const verifyLabs = path.join(env.TEMP ?? env.TMP ?? '', 'verify-labs');
+  // [D188] 靶场供应物默认落仓内 .verify-labs（耐久）：原默认 %TEMP%\verify-labs 会被
+  // 临时目录清理/AV 清掉——2026-10-27 实测 DVWA 根 PHP 被选择性清空、套件静默 SKIP。
+  // 已供应在旧位置的实例：迁移过去，或用 VERIFY_LABS 环境变量指回旧路径。
+  const verifyLabs = p('VERIFY_LABS', path.join(repoRoot, '.verify-labs'));
   return [
     mariadbSpec(p, repoRoot),
     dvwaSpec(p, verifyLabs),

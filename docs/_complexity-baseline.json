@@ -8,12 +8,6 @@
       "limitLines": 100,
       "limitComplexity": 15
     },
-    "scripts/complexity-guard.mjs::fixBaseline": {
-      "lines": 33,
-      "complexity": 27,
-      "limitLines": 100,
-      "limitComplexity": 15
-    },
     "scripts/complexity-guard.mjs::judge": {
       "lines": 33,
       "complexity": 19,
@@ -81,8 +75,8 @@
       "limitComplexity": 15
     },
     "scripts/one-click-scan.mjs::main": {
-      "lines": 195,
-      "complexity": 70,
+      "lines": 167,
+      "complexity": 63,
       "limitLines": 100,
       "limitComplexity": 15
     },
@@ -135,8 +129,8 @@
       "limitComplexity": 15
     },
     "server/bin/cli.js::main": {
-      "lines": 311,
-      "complexity": 123,
+      "lines": 285,
+      "complexity": 113,
       "limitLines": 100,
       "limitComplexity": 15
     },
@@ -171,14 +165,14 @@
       "limitComplexity": 15
     },
     "server/bin/cli/args.js::applyRequestFile": {
-      "lines": 53,
-      "complexity": 24,
+      "lines": 40,
+      "complexity": 19,
       "limitLines": 100,
       "limitComplexity": 15
     },
     "server/bin/cli/args.js::parseArgs": {
       "lines": 224,
-      "complexity": 214,
+      "complexity": 212,
       "limitLines": 100,
       "limitComplexity": 15
     },
@@ -275,24 +269,6 @@
     "server/src/api/scanGuard/scalarsEgress.js::guardScalarsEgress": {
       "lines": 74,
       "complexity": 41,
-      "limitLines": 100,
-      "limitComplexity": 15
-    },
-    "server/src/api/scanRoutes.js::<arrow@455>": {
-      "lines": 68,
-      "complexity": 34,
-      "limitLines": 100,
-      "limitComplexity": 15
-    },
-    "server/src/api/scanRoutes.js::<arrow@594>": {
-      "lines": 65,
-      "complexity": 30,
-      "limitLines": 100,
-      "limitComplexity": 15
-    },
-    "server/src/api/scanRoutes.js::<arrow@784>": {
-      "lines": 27,
-      "complexity": 26,
       "limitLines": 100,
       "limitComplexity": 15
     },
@@ -507,8 +483,8 @@
       "limitComplexity": 15
     },
     "server/src/core/requestFileParser.js::parseRequestFile": {
-      "lines": 124,
-      "complexity": 66,
+      "lines": 103,
+      "complexity": 49,
       "limitLines": 100,
       "limitComplexity": 15
     },
@@ -687,8 +663,8 @@
       "limitComplexity": 15
     },
     "server/src/engine/Extractor.js::Extractor.extractScalar": {
-      "lines": 22,
-      "complexity": 20,
+      "lines": 19,
+      "complexity": 17,
       "limitLines": 100,
       "limitComplexity": 15
     },
@@ -699,8 +675,8 @@
       "limitComplexity": 15
     },
     "server/src/engine/TargetParser.js::TargetParser.discover": {
-      "lines": 151,
-      "complexity": 82,
+      "lines": 144,
+      "complexity": 79,
       "limitLines": 100,
       "limitComplexity": 15
     },
@@ -884,12 +860,6 @@
       "limitLines": 100,
       "limitComplexity": 15
     },
-    "server/src/engine/exploit/fileWrite.js::fileWrite": {
-      "lines": 39,
-      "complexity": 17,
-      "limitLines": 100,
-      "limitComplexity": 15
-    },
     "server/src/engine/exploit/stacked.js::buildStackPageSql": {
       "lines": 47,
       "complexity": 21,
@@ -933,32 +903,20 @@
       "limitComplexity": 15
     },
     "server/src/engine/injection.js::buildInjectionRequest": {
-      "lines": 165,
-      "complexity": 91,
+      "lines": 150,
+      "complexity": 89,
       "limitLines": 100,
       "limitComplexity": 15
     },
     "server/src/engine/models.js::createTarget": {
-      "lines": 41,
-      "complexity": 25,
+      "lines": 29,
+      "complexity": 20,
       "limitLines": 100,
       "limitComplexity": 15
     },
     "server/src/engine/paramEncoding.js::detectParamEncoding": {
       "lines": 21,
       "complexity": 16,
-      "limitLines": 100,
-      "limitComplexity": 15
-    },
-    "server/src/engine/payloadRegistry.js::<arrow@178>": {
-      "lines": 16,
-      "complexity": 26,
-      "limitLines": 100,
-      "limitComplexity": 15
-    },
-    "server/src/engine/payloadRegistry.js::selectPayloads": {
-      "lines": 25,
-      "complexity": 28,
       "limitLines": 100,
       "limitComplexity": 15
     },
@@ -982,6 +940,18 @@
     },
     "server/src/engine/scan/capabilityConstraints.js::collectCapabilityConstraints": {
       "lines": 65,
+      "complexity": 28,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/engine/scan/detect.js::<arrow@299>": {
+      "lines": 162,
+      "complexity": 80,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
+    "server/src/engine/scan/detect.js::<arrow@775>": {
+      "lines": 79,
       "complexity": 28,
       "limitLines": 100,
       "limitComplexity": 15
@@ -1011,14 +981,8 @@
       "limitComplexity": 15
     },
     "server/src/engine/scan/finalize.js::finalizeReport": {
-      "lines": 134,
-      "complexity": 69,
-      "limitLines": 100,
-      "limitComplexity": 15
-    },
-    "server/src/engine/scan/prefilter.js::<arrow@225>": {
-      "lines": 22,
-      "complexity": 16,
+      "lines": 130,
+      "complexity": 67,
       "limitLines": 100,
       "limitComplexity": 15
     },
@@ -1076,6 +1040,12 @@
       "limitLines": 100,
       "limitComplexity": 15
     },
+    "server/src/engine/scanRunner.js::<arrow@190>": {
+      "lines": 32,
+      "complexity": 20,
+      "limitLines": 100,
+      "limitComplexity": 15
+    },
     "server/src/engine/scanRunner.js::runScanLoop": {
       "lines": 186,
       "complexity": 68,
@@ -1125,14 +1095,14 @@
       "limitComplexity": 15
     },
     "server/src/mcp/tools.js::buildTools": {
-      "lines": 263,
-      "complexity": 81,
+      "lines": 253,
+      "complexity": 72,
       "limitLines": 100,
       "limitComplexity": 15
     },
     "server/src/services/ReportGenerator.js::ReportGenerator.toHTML": {
       "lines": 102,
-      "complexity": 5,
+      "complexity": 4,
       "limitLines": 100,
       "limitComplexity": 15
     },
@@ -1436,21 +1406,21 @@
       "limitLines": 100,
       "limitComplexity": 15
     },
-    "server/src/engine/scan/detect.js::<arrow@265>": {
-      "lines": 162,
-      "complexity": 80,
+    "server/src/api/scanRoutes.js::<arrow@477>": {
+      "lines": 68,
+      "complexity": 34,
       "limitLines": 100,
       "limitComplexity": 15
     },
-    "server/src/engine/scan/detect.js::<arrow@741>": {
-      "lines": 79,
-      "complexity": 28,
+    "server/src/api/scanRoutes.js::<arrow@620>": {
+      "lines": 65,
+      "complexity": 30,
       "limitLines": 100,
       "limitComplexity": 15
     },
-    "server/src/engine/scanRunner.js::<arrow@190>": {
-      "lines": 34,
-      "complexity": 21,
+    "server/src/api/scanRoutes.js::<arrow@816>": {
+      "lines": 27,
+      "complexity": 26,
       "limitLines": 100,
       "limitComplexity": 15
     }

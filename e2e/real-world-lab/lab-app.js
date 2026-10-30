@@ -261,11 +261,48 @@ export async function createRealLabApp(opts = {}) {
     res.send(html('点评面板', tableHtml(rows) + `<p>点评摘要：${body}</p>`));
   });
 
-  // ============ 安全对照：参数化查询（引擎应当 0 检出） ============
+  // ============ 安全对照 ①：参数化查询（引擎应当 0 检出） ============
   app.get('/blog', wrap(async (req, res) => {
     const id = Number(req.query.id ?? '1');
     const r = await db.query('SELECT * FROM items WHERE id = $1', [Number.isFinite(id) ? id : 1]);
     res.send(html('博文', tableHtml(r.rows)));
+  }));
+
+  // ============ 安全对照 ②：引号敏感错误页（D211 的合成裁判） ============
+  // 真实形态（老 Java/PHP 站点常见，demo.testfire.net 的 btnSubmit 疑似同类）：
+  //   业务查询**已参数化**（注入不成立），但遗留的输入校验分支一看到**引号**就吐出
+  //   带 SQL 报错文案的错误页 —— 而且常常是 **HTTP 200**（Derby/JSP 即如此，见 D207）。
+  // 后果：让 SQL 语法出错**只需要一个未闭合的引号**，与「能否注入」无关 ⇒
+  //   原判据（响应含错误签名 + 异于基线 + 二次确认）会把这类点全部误判成报错注入。
+  // 这里的敏感集**故意只含引号**（不含 -- / ( / ;），精确对应「引号敏感」这一类，
+  // 于是修复前后构成干净 A/B：修复前 error 假阳，修复后 0 命中。
+  app.get('/profile', wrap(async (req, res) => {
+    const name = String(req.query.name ?? '');
+    // 安全：参数化查询（注入不成立）
+    const r = await db.query('SELECT id, username, email FROM users WHERE username = $1', [name]);
+    // 遗留校验分支：只在输入含引号时返回带 SQL 报错签名的页面（HTTP 200）
+    if (/['"]/.test(name)) {
+      return res
+        .status(200)
+        .send(html('资料查询', '<pre>Syntax error: Encountered "\'" at line 1, column 42.</pre>'));
+    }
+    res.send(html('资料查询', tableHtml(r.rows)));
+  }));
+
+  // ============ 安全对照 ③：响应漂移点（D213 的合成裁判） ============
+  // 真实形态：有状态 / 被限流的目标在扫描压力下会**交替返回不同页面**
+  // （登录成功页 / 失败页 / 报错页 / 限流页），且状态切换的持续时间往往长于一次采样窗口。
+  // 此时「真/假条件的差异」可能只是采样恰好跨了两个状态，并非 SQL 语义差异 ⇒ 布尔通道假阳。
+  // 这里用**逐请求轮换**的两种页面长度来模拟该漂移（确定性可复现，不是随机噪声）。
+  let driftTick = 0;
+  app.get('/drift', wrap(async (req, res) => {
+    const id = req.query.id ?? '1';
+    // 安全：参数化查询（注入不成立）
+    const r = await db.query('SELECT * FROM items WHERE id = $1', [Number(id) || 1]);
+    driftTick += 1;
+    // 偶数次请求额外追加一段固定长度文本 ⇒ 页面变长（模拟「状态切换到另一张页」）
+    const extra = driftTick % 2 === 0 ? `<p>${'X'.repeat(103)}</p>` : '';
+    res.send(html('漂移页', tableHtml(r.rows) + extra));
   }));
 
   // 统一错误处理：SQL 抛错 → 500 + 报错文本（真实应用行为；报错文本供检测器识别）

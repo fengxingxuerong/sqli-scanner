@@ -115,4 +115,9 @@ run_gate "版本号三处一致" node scripts/version-sync.mjs || exit 1
 #     红灯一路躺到 CI 第 43 步才被 e2e:wiring 抓到（D95 补）。
 run_gate "e2e 靶场接线状态（已接线 ⇄ 已正名）" node scripts/e2e-wiring-check.mjs || exit 1
 
+# 2f. agent 装载面（D175）：插件清单 / 技能说明 / .mcp.json 三者与代码真源一致。
+#     纯静态（读四份文件 + 比对工具名），秒级。挡的是「MCP 能力有、宿主里装不上」——
+#     版本号抄错、工具改名后技能教旧名字、技能写越界话术，此前都不会有任何报错。
+run_gate "agent 装载面（清单/技能/MCP 入口一致）" node scripts/agent-manifest-check.mjs || exit 1
+
 echo "✅ pre-commit 门禁通过"

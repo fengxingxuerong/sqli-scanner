@@ -1,0 +1,1977 @@
+{
+  "_comment": "sqlmap 对标底账（由 node scripts/sqlmap-parity.mjs --write 生成，手改即被 smapParity.guard 判红）",
+  "_generatedBy": "node scripts/sqlmap-parity.mjs --write",
+  "sqlmapVersion": "1.10.7",
+  "stats": {
+    "total": 222,
+    "ok": 98,
+    "alias": 30,
+    "part": 10,
+    "auto": 3,
+    "gap": 52,
+    "out": 29,
+    "gapP1": 1,
+    "gapP2": 19,
+    "gapP3": 32
+  },
+  "groups": [
+    {
+      "group": "Target（目标输入）",
+      "options": [
+        {
+          "opt": "--url",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        }
+      ]
+    },
+    {
+      "group": "Request（请求构造）",
+      "options": [
+        {
+          "opt": "--user-agent",
+          "kind": "alias",
+          "ours": "--header",
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--header",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--method",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--data",
+          "kind": "alias",
+          "ours": "--body",
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--param-del",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--cookie",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--cookie-del",
+          "kind": "part",
+          "ours": "--cookie",
+          "priority": null,
+          "reason": null,
+          "note": "解析固定按 `;` 分隔；自定义 cookie 分隔符未暴露（低价值长尾）"
+        },
+        {
+          "opt": "--live-cookies",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--load-cookies",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--drop-set-cookie",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--http1",
+          "kind": "gap",
+          "ours": null,
+          "priority": "P3",
+          "reason": null,
+          "note": "强制 HTTP/1.1；引擎只有 http2 开关，h2 优先失败时无法回退到 1.1"
+        },
+        {
+          "opt": "--http2",
+          "kind": "gap",
+          "ours": null,
+          "priority": "P2",
+          "reason": null,
+          "note": "**只做了一半**：config.http2 只被 crawler / TargetParser 消费（取页/爬虫面），注入请求走 opts.http2 而无人传该键 ⇒ 接线必须同时改检测链路的出口选项，属独立批次；D197 复核后**刻意没接**（接了就是「收参数不生效」）"
+        },
+        {
+          "opt": "--mobile",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--random-agent",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--host",
+          "kind": "alias",
+          "ours": "--header",
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--referer",
+          "kind": "alias",
+          "ours": "--header",
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--headers",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--auth-type",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--auth-cred",
+          "kind": "alias",
+          "ours": "--auth",
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--auth-file",
+          "kind": "alias",
+          "ours": "--cert",
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--abort-code",
+          "kind": "gap",
+          "ours": null,
+          "priority": "P3",
+          "reason": null,
+          "note": "命中指定状态码即中止整场（风控/封禁早停）；当前只有 --ignore-code 的反向语义"
+        },
+        {
+          "opt": "--ignore-code",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--ignore-proxy",
+          "kind": "part",
+          "ours": "--proxy-bypass-local",
+          "priority": null,
+          "reason": null,
+          "note": "本仓用「本地/私网豁免环境变量代理」表达，缺「对所有目标都不走代理」的全局口"
+        },
+        {
+          "opt": "--ignore-redirects",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--ignore-timeouts",
+          "kind": "gap",
+          "ours": null,
+          "priority": "P3",
+          "reason": null,
+          "note": "超时不计入可信度判定；当前超时会被记为未验证面（更诚实，但缺用户显式覆盖口）"
+        },
+        {
+          "opt": "--proxy",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--proxy-cred",
+          "kind": "alias",
+          "ours": "--proxy",
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--proxy-file",
+          "kind": "gap",
+          "ours": null,
+          "priority": "P3",
+          "reason": null,
+          "note": "代理池轮换（每请求换出口）未实现；--proxy 只有单出口"
+        },
+        {
+          "opt": "--proxy-freq",
+          "kind": "gap",
+          "ours": null,
+          "priority": "P3",
+          "reason": null,
+          "note": "配合代理池的换出口频率未实现（与 --proxy-file 同批）"
+        },
+        {
+          "opt": "--tor",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--tor-port",
+          "kind": "part",
+          "ours": "--tor",
+          "priority": null,
+          "reason": null,
+          "note": "Tor 端口固定 9050，无旗标覆盖（wafEvasion 可配但无 CLI 面）"
+        },
+        {
+          "opt": "--tor-type",
+          "kind": "gap",
+          "ours": null,
+          "priority": "P3",
+          "reason": null,
+          "note": "仅 socks5；socks4/http 代理类型未暴露为独立开关"
+        },
+        {
+          "opt": "--check-tor",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--delay",
+          "kind": "alias",
+          "ours": "--delay-sec",
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--timeout",
+          "kind": "alias",
+          "ours": "--http-timeout",
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--retries",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--retry-on",
+          "kind": "gap",
+          "ours": null,
+          "priority": "P2",
+          "reason": null,
+          "note": "按状态码/响应特征重试（弱网 + 风控抖动目标的关键）；当前仅对连接失败重试"
+        },
+        {
+          "opt": "--randomize",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--safe-url",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--safe-post",
+          "kind": "gap",
+          "ours": null,
+          "priority": "P3",
+          "reason": null,
+          "note": "保活请求只支持 GET；会改状态的会话用 POST 保活时无表达方式"
+        },
+        {
+          "opt": "--safe-req",
+          "kind": "gap",
+          "ours": null,
+          "priority": "P3",
+          "reason": null,
+          "note": "保活请求无法整请求导入（带认证头的保活页）"
+        },
+        {
+          "opt": "--safe-freq",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--skip-urlencode",
+          "kind": "gap",
+          "ours": null,
+          "priority": "P2",
+          "reason": null,
+          "note": "注入值恒做 URL 编码；目标只在未编码形态下才透传到 SQL 时无法表达"
+        },
+        {
+          "opt": "--skip-xmlencode",
+          "kind": "gap",
+          "ours": null,
+          "priority": "P3",
+          "reason": null,
+          "note": "XML/SOAP 注入值恒做实体编码；同上"
+        },
+        {
+          "opt": "--csrf-token",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--csrf-url",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--csrf-method",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--csrf-data",
+          "kind": "gap",
+          "ours": null,
+          "priority": "P3",
+          "reason": null,
+          "note": "取 CSRF token 时的附加表单字段未暴露（多步令牌页）"
+        },
+        {
+          "opt": "--csrf-retries",
+          "kind": "gap",
+          "ours": null,
+          "priority": "P3",
+          "reason": null,
+          "note": "取 token 失败的重试次数未暴露"
+        },
+        {
+          "opt": "--force-ssl",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--chunked",
+          "kind": "gap",
+          "ours": null,
+          "priority": "P2",
+          "reason": null,
+          "note": "Transfer-Encoding: chunked 分块发送（绕 IDS/WAF 的常见形态）；httpClient 无分块发送路径"
+        },
+        {
+          "opt": "--hpp",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--eval",
+          "kind": "alias",
+          "ours": "--request-script",
+          "priority": null,
+          "reason": null,
+          "note": null
+        }
+      ]
+    },
+    {
+      "group": "Optimization（性能）",
+      "options": [
+        {
+          "opt": "--predict-output",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--no-keep-alive",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--null-connection",
+          "kind": "gap",
+          "ours": null,
+          "priority": "P2",
+          "reason": null,
+          "note": "**引擎写完了但没接线**：sendHead / matchNullConnection 挂在 Detector 原型上而**零调用点**（死代码），httpClient.headRequest 也只有包装没有消费者 ⇒ 真做要接进布尔/时间检测器并复核判据（HEAD 无 body，真假只能靠状态码 + Content-Length），不是纯接线"
+        },
+        {
+          "opt": "--threads",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        }
+      ]
+    },
+    {
+      "group": "Injection（注入构造）",
+      "options": [
+        {
+          "opt": "--skip",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--skip-static",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--param-exclude",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--param-filter",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--dbms",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--dbms-cred",
+          "kind": "gap",
+          "ours": null,
+          "priority": "P3",
+          "reason": null,
+          "note": "DBMS 侧凭据（UDF/注册表操作的 EXECUTE AS 等）无入口"
+        },
+        {
+          "opt": "--os",
+          "kind": "gap",
+          "ours": null,
+          "priority": "P2",
+          "reason": null,
+          "note": "强制目标 OS（影响文件路径与命令通道形态）；当前按 DBMS 推断，无显式覆盖"
+        },
+        {
+          "opt": "--invalid-bignum",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--invalid-logical",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--invalid-string",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--no-cast",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--no-escape",
+          "kind": "out",
+          "ours": null,
+          "priority": null,
+          "reason": "原「保留接口」已按「收参数不生效＝红线」移除；实现需改转义实现（与引擎不同源，语义无法对齐）",
+          "note": null
+        },
+        {
+          "opt": "--prefix",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--suffix",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--tamper",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--proof",
+          "kind": "auto",
+          "ours": null,
+          "priority": null,
+          "reason": "证据链默认就带 payload 与命中位置（vuln.poc.curl/raw + hit.match + --fix-prompt），无需开关",
+          "note": null
+        }
+      ]
+    },
+    {
+      "group": "Detection（判定口径）",
+      "options": [
+        {
+          "opt": "--level",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--risk",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--string",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--not-string",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--regexp",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--code",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--smart",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--text-only",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--titles",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        }
+      ]
+    },
+    {
+      "group": "Techniques（技术面）",
+      "options": [
+        {
+          "opt": "--technique",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--time-sec",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--disable-stats",
+          "kind": "out",
+          "ours": null,
+          "priority": null,
+          "reason": "本仓无「统计面板」概念（进度行 + 报告即输出面），无开关可关",
+          "note": null
+        },
+        {
+          "opt": "--union-cols",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--union-char",
+          "kind": "out",
+          "ours": null,
+          "priority": null,
+          "reason": "同上（占位已移除）；实现需改 marker.js 的 MARKER_RE 与 tamper 保护链（高危区），评估结论为风险 > 收益",
+          "note": null
+        },
+        {
+          "opt": "--union-from",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--union-values",
+          "kind": "gap",
+          "ours": null,
+          "priority": "P3",
+          "reason": null,
+          "note": "UNION 判真的自定义测试值未暴露（非常规字符集目标）"
+        },
+        {
+          "opt": "--dns-domain",
+          "kind": "part",
+          "ours": "--oob",
+          "priority": null,
+          "reason": null,
+          "note": "带外 DNS 外带走 --oob + config.oob.dnsDomain / --oob-interactsh，无同名旗标"
+        },
+        {
+          "opt": "--second-url",
+          "kind": "alias",
+          "ours": "--second-order",
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--second-req",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        }
+      ]
+    },
+    {
+      "group": "Fingerprint（指纹）",
+      "options": [
+        {
+          "opt": "--fingerprint",
+          "kind": "part",
+          "ours": "--banner",
+          "priority": null,
+          "reason": null,
+          "note": "本仓产 DBMS 版本 + summary.dbmsEvidence 分级；OS / Web 服务器指纹未成体系"
+        }
+      ]
+    },
+    {
+      "group": "Enumeration（枚举与拖库）",
+      "options": [
+        {
+          "opt": "--all",
+          "kind": "part",
+          "ours": "--dump-all",
+          "priority": null,
+          "reason": null,
+          "note": "--dump-all 覆盖全库拖库；sqlmap -a 还含 users/passwords/privileges 一次拉全"
+        },
+        {
+          "opt": "--banner",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--current-user",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--current-db",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--hostname",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--is-dba",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--users",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--passwords",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--privileges",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--roles",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--dbs",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--tables",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--columns",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--schema",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--count",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--dump",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--dump-all",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--search",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--comments",
+          "kind": "gap",
+          "ours": null,
+          "priority": "P3",
+          "reason": null,
+          "note": "表/列注释枚举（MSSQL/MySQL 的 pg_description 类面）未实现"
+        },
+        {
+          "opt": "--statements",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--procs",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--exclude-sysdbs",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--pivot-column",
+          "kind": "gap",
+          "ours": null,
+          "priority": "P3",
+          "reason": null,
+          "note": "关联表拖库时的主键列指定未实现"
+        },
+        {
+          "opt": "--where",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--start",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--stop",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--first",
+          "kind": "alias",
+          "ours": "--start",
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--last",
+          "kind": "alias",
+          "ours": "--stop",
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--sql-query",
+          "kind": "alias",
+          "ours": "--sql-shell",
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--sql-shell",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--sql-file",
+          "kind": "gap",
+          "ours": null,
+          "priority": "P3",
+          "reason": null,
+          "note": "从文件读 SQL 再执行（长脚本/多语句）；当前只能内联 --sql-shell 串"
+        }
+      ]
+    },
+    {
+      "group": "Brute force（字典爆破）",
+      "options": [
+        {
+          "opt": "--common-tables",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--common-columns",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--common-files",
+          "kind": "gap",
+          "ours": null,
+          "priority": "P3",
+          "reason": null,
+          "note": "常见文件名字典爆破（LOAD_FILE 路径面）未实现"
+        }
+      ]
+    },
+    {
+      "group": "UDF（用户自定义函数）",
+      "options": [
+        {
+          "opt": "--udf-inject",
+          "kind": "part",
+          "ours": "--udf-install",
+          "priority": null,
+          "reason": null,
+          "note": "本仓要求自带 UDF 十六进制（--udf-hex）；不内置编译产物（GPLv2 与供应链边界）"
+        },
+        {
+          "opt": "--shared-lib",
+          "kind": "out",
+          "ours": null,
+          "priority": null,
+          "reason": "不内置编译产物（GPLv2 与供应链边界）；用户自带 UDF 十六进制走 --udf-hex",
+          "note": null
+        }
+      ]
+    },
+    {
+      "group": "File system（文件读写）",
+      "options": [
+        {
+          "opt": "--file-read",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--file-write",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--file-dest",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        }
+      ]
+    },
+    {
+      "group": "OS access（系统层）",
+      "options": [
+        {
+          "opt": "--os-cmd",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--os-shell",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--os-pwn",
+          "kind": "out",
+          "ours": null,
+          "priority": null,
+          "reason": "武器化通道（MSF 反弹/内存马）超出「授权 SQLi 扫描 + 可核对证据」定位",
+          "note": null
+        },
+        {
+          "opt": "--os-smbrelay",
+          "kind": "out",
+          "ours": null,
+          "priority": null,
+          "reason": "SMB 中继依赖外部工具链，属武器化，同上不做",
+          "note": null
+        },
+        {
+          "opt": "--os-bof",
+          "kind": "out",
+          "ours": null,
+          "priority": null,
+          "reason": "缓冲区溢出模块属武器化，同上不做",
+          "note": null
+        },
+        {
+          "opt": "--priv-esc",
+          "kind": "out",
+          "ours": null,
+          "priority": null,
+          "reason": "提权动作不可逆且越出只读取证边界；本仓只做显式授权的文件/命令通道",
+          "note": null
+        },
+        {
+          "opt": "--msf-path",
+          "kind": "out",
+          "ours": null,
+          "priority": null,
+          "reason": "无 Metasploit 集成（不做外部框架编排）",
+          "note": null
+        },
+        {
+          "opt": "--tmp-path",
+          "kind": "out",
+          "ours": null,
+          "priority": null,
+          "reason": "本仓文件写为单次直写，不引入本地暂存目录概念",
+          "note": null
+        }
+      ]
+    },
+    {
+      "group": "Windows registry（注册表）",
+      "options": [
+        {
+          "opt": "--reg-read",
+          "kind": "gap",
+          "ours": null,
+          "priority": "P2",
+          "reason": null,
+          "note": "**引擎已实现** registryRead（server/src/engine/exploit/registry.js，MSSQL xp_regread 通道），CLI 与 REST 均无入口 ⇒ 接线即可，不用重写"
+        },
+        {
+          "opt": "--reg-add",
+          "kind": "gap",
+          "ours": null,
+          "priority": "P2",
+          "reason": null,
+          "note": "**引擎已实现** registryWrite（写入类，需 EXPLOIT_ENABLED + --authorized 双闸）⇒ 接线即可"
+        },
+        {
+          "opt": "--reg-del",
+          "kind": "gap",
+          "ours": null,
+          "priority": "P2",
+          "reason": null,
+          "note": "**引擎已实现** registryWrite 的删除形态 ⇒ 接线即可"
+        },
+        {
+          "opt": "--reg-key",
+          "kind": "gap",
+          "ours": null,
+          "priority": "P2",
+          "reason": null,
+          "note": "注册表路径参数面（配合 reg-read/add/del，同批接线）"
+        },
+        {
+          "opt": "--reg-value",
+          "kind": "gap",
+          "ours": null,
+          "priority": "P2",
+          "reason": null,
+          "note": "注册表值名参数面（同上）"
+        },
+        {
+          "opt": "--reg-data",
+          "kind": "gap",
+          "ours": null,
+          "priority": "P2",
+          "reason": null,
+          "note": "写入数据参数面（同上）"
+        },
+        {
+          "opt": "--reg-type",
+          "kind": "gap",
+          "ours": null,
+          "priority": "P2",
+          "reason": null,
+          "note": "写入类型参数面（REG_SZ/DWORD 等，同上）"
+        }
+      ]
+    },
+    {
+      "group": "General（通用）",
+      "options": [
+        {
+          "opt": "--abort-on-empty",
+          "kind": "gap",
+          "ours": null,
+          "priority": "P3",
+          "reason": null,
+          "note": "连续空结果即停（防无意义拖库）；当前只能靠 --max-requests 兜"
+        },
+        {
+          "opt": "--answers",
+          "kind": "out",
+          "ours": null,
+          "priority": null,
+          "reason": "本仓 CLI 刻意无交互提问（非交互优先），等价面是 --config/--save-config 与显式旗标",
+          "note": null
+        },
+        {
+          "opt": "--base64",
+          "kind": "alias",
+          "ours": "--tamper",
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--base64-safe",
+          "kind": "alias",
+          "ours": "--tamper",
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--batch",
+          "kind": "auto",
+          "ours": null,
+          "priority": null,
+          "reason": "CLI 无交互提问（非交互优先），「不提问」这件事天然成立；⚠ 本仓 --batch 是「批量目标文件」不是 sqlmap 的这个开关",
+          "note": null
+        },
+        {
+          "opt": "--binary-fields",
+          "kind": "gap",
+          "ours": null,
+          "priority": "P3",
+          "reason": null,
+          "note": "二进制列（图片/哈希）十六进制化导出未实现"
+        },
+        {
+          "opt": "--check-internet",
+          "kind": "gap",
+          "ours": null,
+          "priority": "P3",
+          "reason": null,
+          "note": "开扫前连通性自检（区分「本机断网」与「目标不可达」）未实现"
+        },
+        {
+          "opt": "--cleanup",
+          "kind": "gap",
+          "ours": null,
+          "priority": "P1",
+          "reason": null,
+          "note": "利用后清理（UDF/xp_cmdshell 复位/临时表/落盘文件）**完全缺失**：授权测试的 OPSEC 刚需，不做等于在客户环境留残留"
+        },
+        {
+          "opt": "--crawl",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--crawl-exclude",
+          "kind": "gap",
+          "ours": null,
+          "priority": "P2",
+          "reason": null,
+          "note": "爬虫排除正则未暴露（登出链接/危险动作页必须能排掉）"
+        },
+        {
+          "opt": "--csv-del",
+          "kind": "gap",
+          "ours": null,
+          "priority": "P3",
+          "reason": null,
+          "note": "CSV 导出分隔符不可配（Excel 本地化场景）"
+        },
+        {
+          "opt": "--charset",
+          "kind": "gap",
+          "ours": null,
+          "priority": "P3",
+          "reason": null,
+          "note": "注入值字符集约束（非 ASCII 目标）未暴露"
+        },
+        {
+          "opt": "--dump-file",
+          "kind": "gap",
+          "ours": null,
+          "priority": "P3",
+          "reason": null,
+          "note": "拖库数据落盘路径不可单独指定（当前固定 dump.<ext>）"
+        },
+        {
+          "opt": "--dump-format",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--encoding",
+          "kind": "gap",
+          "ours": null,
+          "priority": "P2",
+          "reason": null,
+          "note": "页面编码显式声明（GBK/Shift-JIS 目标）未暴露；比对与提取当前按 UTF-8/自动"
+        },
+        {
+          "opt": "--eta",
+          "kind": "out",
+          "ours": null,
+          "priority": null,
+          "reason": "进度行已给目标/点位/耗时；独立 ETA 显示无新信息",
+          "note": null
+        },
+        {
+          "opt": "--flush-session",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--forms",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--fresh-queries",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--gpage",
+          "kind": "out",
+          "ours": null,
+          "priority": null,
+          "reason": "Google dork 属目标发现，AGENTS §0 红线（只扫用户明确给出的目标）",
+          "note": null
+        },
+        {
+          "opt": "--har",
+          "kind": "auto",
+          "ours": null,
+          "priority": null,
+          "reason": "-r/-m 按内容自动识别 HAR（Burp XML / HAR / Postman / OpenAPI 同一入口），无同名旗标",
+          "note": null
+        },
+        {
+          "opt": "--hex",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--output-dir",
+          "kind": "alias",
+          "ours": "--out",
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--parse-errors",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--preprocess",
+          "kind": "alias",
+          "ours": "--request-script",
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--postprocess",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--repair",
+          "kind": "out",
+          "ours": null,
+          "priority": null,
+          "reason": "REPAIR TABLE 改写目标库，与「授权只读扫描」定位冲突",
+          "note": null
+        },
+        {
+          "opt": "--report-json",
+          "kind": "alias",
+          "ours": "--format",
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--save",
+          "kind": "alias",
+          "ours": "--save-config",
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--scope",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--skip-heuristics",
+          "kind": "part",
+          "ours": "--smart",
+          "priority": null,
+          "reason": null,
+          "note": "本仓启发式（prefilter）默认关、--smart 才开；sqlmap 默认开、本项关 —— 同一开关的另一默认值"
+        },
+        {
+          "opt": "--skip-waf",
+          "kind": "gap",
+          "ours": null,
+          "priority": "P3",
+          "reason": null,
+          "note": "跳过 WAF 识别阶段未暴露（已知有 WAF 且只想省请求时）"
+        },
+        {
+          "opt": "--table-prefix",
+          "kind": "gap",
+          "ours": null,
+          "priority": "P3",
+          "reason": null,
+          "note": "Oracle/DB2 表前缀枚举参数未暴露"
+        },
+        {
+          "opt": "--test-filter",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--test-skip",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--time-limit",
+          "kind": "alias",
+          "ours": "--timeout",
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--unsafe-naming",
+          "kind": "gap",
+          "ours": null,
+          "priority": "P3",
+          "reason": null,
+          "note": "拖库产物命名安全化开关未暴露（长尾）"
+        },
+        {
+          "opt": "--web-root",
+          "kind": "gap",
+          "ours": null,
+          "priority": "P3",
+          "reason": null,
+          "note": "文件写用的 Web 根路径（写 webshell 落点）未暴露；当前要求绝对路径 --file-dest"
+        }
+      ]
+    },
+    {
+      "group": "Non-SQL（非 SQL 注入通道）",
+      "options": [
+        {
+          "opt": "--graphql",
+          "kind": "alias",
+          "ours": "--no-sql",
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--ldap",
+          "kind": "gap",
+          "ours": null,
+          "priority": "P2",
+          "reason": null,
+          "note": "LDAP 注入通道未实现（检测器 + payload 面；sqlmap 1.10 新增）"
+        },
+        {
+          "opt": "--nosql",
+          "kind": "alias",
+          "ours": "--no-sql",
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--xpath",
+          "kind": "gap",
+          "ours": null,
+          "priority": "P2",
+          "reason": null,
+          "note": "XPath 注入通道未实现（同上）"
+        },
+        {
+          "opt": "--ssti",
+          "kind": "alias",
+          "ours": "--no-sql",
+          "priority": null,
+          "reason": null,
+          "note": null
+        }
+      ]
+    },
+    {
+      "group": "Miscellaneous（杂项）",
+      "options": [
+        {
+          "opt": "--alert",
+          "kind": "gap",
+          "ours": null,
+          "priority": "P2",
+          "reason": null,
+          "note": "命中即执行宿主命令（自动化联动/Slack 钩子）；需显式授权与命令白名单，不能静默执行"
+        },
+        {
+          "opt": "--beep",
+          "kind": "out",
+          "ours": null,
+          "priority": null,
+          "reason": "无人值守/CI 场景下无意义（agent 驱动是主用法）",
+          "note": null
+        },
+        {
+          "opt": "--dependencies",
+          "kind": "out",
+          "ours": null,
+          "priority": null,
+          "reason": "引擎有意零运行时依赖，无「缺依赖」这一类故障",
+          "note": null
+        },
+        {
+          "opt": "--disable-coloring",
+          "kind": "out",
+          "ours": null,
+          "priority": null,
+          "reason": "本仓 CLI 输出无 ANSI 着色，无开关可关",
+          "note": null
+        },
+        {
+          "opt": "--disable-hashing",
+          "kind": "out",
+          "ours": null,
+          "priority": null,
+          "reason": "本仓不做口令哈希破解（报告如实指向离线 hashcat）",
+          "note": null
+        },
+        {
+          "opt": "--gui",
+          "kind": "out",
+          "ours": null,
+          "priority": null,
+          "reason": "交互形态不同：本仓为 Web GUI / 桌面壳 / MCP，不做 sqlmap 式 TUI",
+          "note": null
+        },
+        {
+          "opt": "--list-tampers",
+          "kind": "ok",
+          "ours": null,
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "--no-logging",
+          "kind": "gap",
+          "ours": null,
+          "priority": "P3",
+          "reason": null,
+          "note": "关闭日志落盘开关未暴露（当前恒写 ledger）"
+        },
+        {
+          "opt": "--no-truncate",
+          "kind": "gap",
+          "ours": null,
+          "priority": "P3",
+          "reason": null,
+          "note": "报告长字段不截断开关未暴露（长 payload/长响应取证用）"
+        },
+        {
+          "opt": "--offline",
+          "kind": "out",
+          "ours": null,
+          "priority": null,
+          "reason": "本仓会话是断点续跑缓存，不是「零请求离线数据源」，无对应语义",
+          "note": null
+        },
+        {
+          "opt": "--purge",
+          "kind": "gap",
+          "ours": null,
+          "priority": "P3",
+          "reason": null,
+          "note": "本地产物/会话清理（与 --cleanup 相邻：这项针对本地侧）未实现"
+        },
+        {
+          "opt": "--results-file",
+          "kind": "out",
+          "ours": null,
+          "priority": null,
+          "reason": "sqlmap REST 内部形态；本仓以 scanId + 报告文件表达同一需求",
+          "note": null
+        },
+        {
+          "opt": "--shell",
+          "kind": "out",
+          "ours": null,
+          "priority": null,
+          "reason": "交互式 SQL 执行已由 --sql-shell 覆盖，不做 REPL 形态",
+          "note": null
+        },
+        {
+          "opt": "--tmp-dir",
+          "kind": "out",
+          "ours": null,
+          "priority": null,
+          "reason": "无本地临时目录概念（与 --tmp-path 同因）",
+          "note": null
+        },
+        {
+          "opt": "--tui",
+          "kind": "out",
+          "ours": null,
+          "priority": null,
+          "reason": "不做 TUI（Web/桌面壳/MCP 已覆盖交互面）",
+          "note": null
+        },
+        {
+          "opt": "--unstable",
+          "kind": "gap",
+          "ours": null,
+          "priority": "P3",
+          "reason": null,
+          "note": "不稳定连接模式（弱网重试策略）未实现"
+        },
+        {
+          "opt": "--update",
+          "kind": "out",
+          "ours": null,
+          "priority": null,
+          "reason": "经 npm/git 分发并受版本一致性门禁约束，不做自更新（供应链完整性）",
+          "note": null
+        },
+        {
+          "opt": "--wizard",
+          "kind": "out",
+          "ours": null,
+          "priority": null,
+          "reason": "向导是交互式引导；agent/CI 用法需要的是显式旗标与 --advise 预检",
+          "note": null
+        }
+      ]
+    },
+    {
+      "group": "短名专用（help 里无长名，仍是独立能力面）",
+      "options": [
+        {
+          "opt": "-d",
+          "kind": "alias",
+          "ours": "--direct",
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "-l",
+          "kind": "alias",
+          "ours": "--log-file",
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "-m",
+          "kind": "alias",
+          "ours": "--batch",
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "-r",
+          "kind": "alias",
+          "ours": "--request-file",
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "-g",
+          "kind": "out",
+          "ours": null,
+          "priority": null,
+          "reason": "Google dork 属目标发现，AGENTS §0 红线",
+          "note": null
+        },
+        {
+          "opt": "-c",
+          "kind": "part",
+          "ours": "--config",
+          "priority": null,
+          "reason": null,
+          "note": "档案格式为 JSON（键=长旗标名）；不支持 sqlmap 的 INI(`sqlmap.conf`) 语法"
+        },
+        {
+          "opt": "-o",
+          "kind": "alias",
+          "ours": "--predict-output",
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "-p",
+          "kind": "alias",
+          "ours": "--test-param",
+          "priority": null,
+          "reason": null,
+          "note": null
+        },
+        {
+          "opt": "-s",
+          "kind": "part",
+          "ours": "--session-file",
+          "priority": null,
+          "reason": null,
+          "note": "会话是 JSON 台账（断点续跑语义一致），不读写 sqlmap 的 SQLite 会话文件"
+        },
+        {
+          "opt": "-t",
+          "kind": "gap",
+          "ours": null,
+          "priority": "P2",
+          "reason": null,
+          "note": "原始 HTTP 流量全量落盘（复现与审计）未实现：当前只有结构化 ledger + 报告，无法回放原始报文"
+        },
+        {
+          "opt": "-v",
+          "kind": "gap",
+          "ours": null,
+          "priority": "P3",
+          "reason": null,
+          "note": "日志详细度无 CLI 开关（级别走环境变量/配置），与 sqlmap -v 0-6 的逐级详细度不对位"
+        },
+        {
+          "opt": "-z",
+          "kind": "out",
+          "ours": null,
+          "priority": null,
+          "reason": "sqlmap 助记符缩写语法；本仓要求显式长旗标（可读与可审计优先）",
+          "note": null
+        },
+        {
+          "opt": "-hh",
+          "kind": "out",
+          "ours": null,
+          "priority": null,
+          "reason": "本仓 --help 即全量清单，不分基础/高级两段",
+          "note": null
+        }
+      ]
+    }
+  ],
+  "plan": [
+    {
+      "batch": "D198",
+      "title": "会话与 OPSEC（剩余 P1/P3 缺口：出口留残留、清理面为空）",
+      "items": [
+        "--cleanup",
+        "--purge"
+      ]
+    },
+    {
+      "batch": "D199",
+      "title": "协议形态与宿主钩子（WAF/IDS 绕过的收发形态 + 自动化入口）",
+      "items": [
+        "--chunked",
+        "--skip-urlencode",
+        "--skip-xmlencode",
+        "--retry-on",
+        "--crawl-exclude",
+        "--skip-waf",
+        "--alert"
+      ]
+    },
+    {
+      "batch": "D200",
+      "title": "Windows 注册表面（引擎已实现、只差接线：读/写/删 + 四个参数面）",
+      "items": [
+        "--reg-read",
+        "--reg-add",
+        "--reg-del",
+        "--reg-key",
+        "--reg-value",
+        "--reg-data",
+        "--reg-type",
+        "--dbms-cred"
+      ]
+    },
+    {
+      "batch": "D201",
+      "title": "传输形态收口（把「只做了一半」的三项做完：检测链路 h2 / HTTP1 回退 / HEAD 快速判定）",
+      "items": [
+        "--http2",
+        "--http1",
+        "--null-connection",
+        "--unstable"
+      ]
+    },
+    {
+      "batch": "D202",
+      "title": "强制面与编码（把「推断错了就没救」的几项变成可显式指定）",
+      "items": [
+        "--os",
+        "--encoding",
+        "--charset",
+        "--fingerprint"
+      ]
+    },
+    {
+      "batch": "D203",
+      "title": "非 SQL 通道补齐（LDAP / XPath 注入检测器）",
+      "items": [
+        "--ldap",
+        "--xpath"
+      ]
+    },
+    {
+      "batch": "D204",
+      "title": "长尾 P3（按需；不与上面抢优先级，但都在底账里点名，不许「关起门来」）",
+      "items": [
+        "--abort-code",
+        "--ignore-timeouts",
+        "--safe-post",
+        "--safe-req",
+        "--csrf-data",
+        "--csrf-retries",
+        "--union-values",
+        "--abort-on-empty",
+        "--check-internet",
+        "--csv-del",
+        "--dump-file",
+        "--table-prefix",
+        "--unsafe-naming",
+        "--web-root",
+        "--no-logging",
+        "--no-truncate",
+        "--comments",
+        "--pivot-column",
+        "--sql-file",
+        "--common-files",
+        "--binary-fields",
+        "--proxy-file",
+        "--proxy-freq",
+        "--tor-type",
+        "-t",
+        "-v"
+      ]
+    }
+  ]
+}

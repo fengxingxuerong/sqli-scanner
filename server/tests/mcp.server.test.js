@@ -5,6 +5,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
+import { DatabaseSync } from 'node:sqlite';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createMcpServer, LATEST_PROTOCOL_VERSION } from '../src/mcp/protocol.js';
@@ -12,6 +13,9 @@ import { createToolContext, buildToolDispatch } from '../src/mcp/tools.js';
 import { ScanManager } from '../src/engine/ScanManager.js';
 
 const SERVER_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+
+// 端到端靶点用的**真实 SQLite** 业务数据（不走 mock，交给 node:sqlite 真执行）
+const INIT_SQL = "CREATE TABLE items(id INT, name TEXT); INSERT INTO items VALUES(1,'widget'),(2,'gadget');";
 
 // ===== 协议层 =====
 const SERVER_INFO = { name: 'sqli-scanner', version: '1.1.0' };
@@ -137,19 +141,29 @@ test('工具：get_findings 出四要素紧凑形态；get_scan_status 回落台
 
 // ===== 真靶场端到端：in-process ScanManager + 本地易受攻击 HTTP 服务 =====
 test('端到端：本地靶点 run_scan → 轮询 → get_findings 检出 error 注入', { timeout: 120000 }, async () => {
-  // sqli-labs 形态：200 页内回显**真实 SQLite 报错文本**（sqlite3.OperationalError: unrecognized token）。
-  // 注意两件事：① 必须 200 页内回显——500+JSON 会被 prefilter 判成输入校验（TODO D34 笔记）；
-  // ② 报错文本必须命中通用 ERROR_SIG（含 "SQLite3"/"SQL syntax" 等真实形态）——裸
-  //    "unrecognized token" 是 2026-10-01 收紧后的**指纹表专属**签名，通用判定不收（防前端 5xx 误报），
-  //    故靶点用 Python sqlite3 驱动的真实报错前缀，而不是自造文案。
+  // sqli-labs 形态：200 页内回显**真实 SQLite 报错文本**（sqlite3.OperationalError: ...）。
+  // [D211 口径修正] 原靶点是「只要含引号就吐报错文案」= **引号过敏页**，其"命中"证据
+  // 只是引号破坏了语法，payload 函数从未执行 ⟹ 属于新判据要否掉的形态。
+  // 现改为**真的把输入拼进 SQL 交给 SQLite 执行**，且用**字符串上下文**
+  // （WHERE name='...'）：payload 的引号能闭合 ⇒ SQL 合法 ⇒ 函数真的被执行并报错回显。
+  // 注意两件事：① 必须 200 页内回显——500+JSON 会被 prefilter 判成输入校验
+  // （TODO D34 笔记）；② 报错文案必须命中通用 ERROR_SIG（含 "SQLite3"/"SQL syntax" 等真实形态）。
+  const db = new DatabaseSync(':memory:');
+  db.exec(INIT_SQL);
   const server = createServer((rq, rs) => {
     const u = new URL(rq.url, 'http://x');
     const id = u.searchParams.get('id') || '';
     rs.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-    if (/'/.test(id)) {
-      rs.end(`<html><body>Warning: sqlite3.OperationalError: unrecognized token: &quot;${id}&quot; in query SELECT * FROM items WHERE id=${id}</body></html>`);
-    } else {
-      rs.end(`<html><body><h1>Item ${id}</h1><p>static footer ${Math.random() > 2}</p></body></html>`);
+    try {
+      const rows = db.prepare(`SELECT id,name FROM items WHERE name='${id}'`).all();
+      rs.end(
+        `<html><body><h1>Item ${id}</h1><pre>${rows.map((r) => `${r.id}\t${r.name}`).join('\n')}</pre></body></html>`
+      );
+    } catch (e) {
+      // 数据库真实报错直出（sqli-labs 形态）：含驱动前缀，命中通用 ERROR_SIG
+      rs.end(
+        `<html><body>Warning: sqlite3.OperationalError: ${String(e?.message ?? e)} in query SELECT * FROM items WHERE name='${id}'</body></html>`
+      );
     }
   });
   await new Promise((r) => server.listen(0, '127.0.0.1', r));

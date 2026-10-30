@@ -106,8 +106,10 @@ test('PG boolean [4,5] 数字型真假对未被破坏', () => {
 
 test('PG boolean [6,7] OR-based 布尔对未被破坏', () => {
   const b = PAYLOADS.PostgreSQL.boolean;
-  assert.equal(b[6], "{ORIG}' OR '1'='1", 'PG boolean[6] 应为 OR 真条件');
-  assert.equal(b[7], "{ORIG}' OR '1'='2", 'PG boolean[7] 应为 OR 假条件');
+  // [D214] 与 D209（MySQL）同源：裸 OR 被后续 `AND …` 续接后恒假 ⇒ 真/假落同一张错页。
+  // 索引位置不变，只有内容变 —— 有意变更，断言同步更新而不是放宽。
+  assert.equal(b[6], "{ORIG}' OR '1'='1'-- -", 'PG boolean[6] 应为 OR 真条件（带注释）');
+  assert.equal(b[7], "{ORIG}' OR '1'='2'-- -", 'PG boolean[7] 应为 OR 假条件（带注释）');
 });
 
 // ───────────────────────── SQL Server 深度覆盖断言 ─────────────────────────

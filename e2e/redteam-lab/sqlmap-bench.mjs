@@ -22,6 +22,12 @@ const LAB = `http://127.0.0.1:${LAB_PORT}`;
 const OUTDIR = new URL('./sqlmap-out/', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
 
 const RUNS = Math.max(1, Number((process.argv.find((a) => a.startsWith('--runs=')) || '').split('=')[1]) || 3);
+// [D194] --profile=hard：sqlmap 强档（--level=3 --risk=2），与引擎侧 run-scan.mjs 的 r2 档
+// 对等（老师傅调参口径）。默认档维持 --level 1（sqlmap 自身默认），两个档案的结果文件分开：
+// 默认档 results-sqlmap-<TAG>.json（历史消费方不变），强档 results-sqlmap-hard.json。
+const PROFILE = (process.argv.find((a) => a.startsWith('--profile=')) || '--profile=default').split('=')[1] || 'default';
+const IS_HARD = PROFILE === 'hard';
+const SQLMAP_PROFILE_ARGS = IS_HARD ? ['--level=3', '--risk=2'] : [];
 const TAG = RUNS > 1 ? `runs${RUNS}` : 'single';
 const winPath = (url) => url.pathname.replace(/^\/([A-Za-z]:)/, '$1');
 
@@ -88,6 +94,7 @@ const run = (c) => new Promise((resolve) => {
     ...(typeof c.argsFn === 'function' ? c.argsFn() : c.args),
     '--batch', '--flush-session', '-v', '0', '--ignore-proxy',
     '--output-dir', OUTDIR, '--answers=follow=Y',
+    ...SQLMAP_PROFILE_ARGS,
   ];
   const t0 = Date.now();
   // 清除环境代理：sqlmap 会读 *_PROXY；--ignore-proxy 再兜一层（二者叠加是刻意冗余）
@@ -149,15 +156,16 @@ const safe = results.filter((r) => r.kind === 'safe');
 const vulnHit = vuln.filter((r) => r.hit).length;
 const falsePos = safe.filter((r) => r.hit).length;
 const summary = {
-  runs: RUNS, generatedAt: new Date().toISOString(),
+  runs: RUNS, profile: PROFILE, generatedAt: new Date().toISOString(),
   total: results.length, vulnCount: vuln.length, safeCount: safe.length,
   vulnHitRate: `${vulnHit}/${vuln.length}`,
   falsePositives: `${falsePos}/${safe.length}`,
 };
 const outPath = (name) => new URL(name, import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
-writeFileSync(outPath(`./results-sqlmap-${TAG}.json`), JSON.stringify({ summary, results }, null, 2), 'utf8');
-// 单轮模式继续维护旧文件名（报告层/历史对照的既有消费方不受影响）
-if (RUNS === 1) {
+// [D194] 强档落独立文件（不覆盖默认档的历史结果）；默认档维持 results-sqlmap-<TAG>.json
+writeFileSync(outPath(IS_HARD ? './results-sqlmap-hard.json' : `./results-sqlmap-${TAG}.json`), JSON.stringify({ summary, results }, null, 2), 'utf8');
+// 单轮模式继续维护旧文件名（报告层/历史对照的既有消费方不受影响）——仅默认档
+if (RUNS === 1 && !IS_HARD) {
   writeFileSync(outPath('./results-sqlmap.json'),
     JSON.stringify(results.map(({ id, hit, ms, note }) => ({ id, hit, ms, note })), null, 2), 'utf8');
 }

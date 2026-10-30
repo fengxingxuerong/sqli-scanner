@@ -14,6 +14,8 @@ import { parseRequestFile } from '../../src/core/requestFileParser.js';
 import { parseRequestCollection } from '../../src/core/requestCollectionParser.js';
 import { logger } from '../../src/core/logger.js';
 import { tamperRegistry } from '../../src/core/tamper/TamperRegistry.js';
+// [D198 对标 sqlmap --load-cookies] cookie 文件的解析/主机过滤/合并（与 --live-cookies 同一真源）
+import { parseCookieFile, selectCookies, mergeCookieStrings, parseCookieHeader, hostOf } from '../../src/core/cookieFile.js';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -40,14 +42,51 @@ export function applyChannelFlag(a, args) {
   // [D108] 背景 OOB 哨兵（对标 Collaborator Everywhere）：开总开关 + background 子开关。
   // 哨兵是 oob 的一种投放形态，总开关不开检测器拿不到隧道 ⇒ 一并打开。
   if (a === '--oob-background') { args.oob = true; args.oobBackground = true; return true; }
+  // [D181] 只读安全配置审计（对标 sqlmap --audit）：纯布尔开关，归到「默认关的附加摸底」族。
+  // 放在这里而不是主 if 链：parseArgs 已卡在行数硬上限，加一行就得抬基线（纪律禁止）。
+  if (a === '--audit') { args.audit = true; return true; }
+  // [D197 2026-10-30 对标 sqlmap] 出口形态两项：**引擎早已实现、此前 CLI 无入口**
+  //   --no-keep-alive   → httpClient.request(opts.disableKeepAlive)（每次新建连接）
+  //   --drop-set-cookie → sessionState / cookieJar（不把响应 Set-Cookie 回发）
+  // 两项都在 REST 白名单里、都是「能力有 ≠ 装得上」的那一格。
+  // ⚠ 同批刻意**没有**收 --null-connection 与 --http2：复核后确认它们只做了一半 ——
+  //   · sendHead/matchNullConnection 挂在 Detector 原型上但**零调用点**（死代码），
+  //     收了就是「收参数不生效」，本仓的红线；
+  //   · config.http2 只被 crawler / TargetParser 消费，注入请求走 opts.http2（无人传），
+  //     接了只能覆盖取页/爬虫面 —— 要接就得动检测链路，属独立批次（见 docs/sqlmap-对标底账.md）。
+  if (a === '--no-keep-alive') { args.disableKeepAlive = true; return true; }
+  if (a === '--drop-set-cookie') { args.dropSetCookie = true; return true; }
   return false;
 }
+
+/** 可选值旗标：带值 = 取该值；不带值 = `true`（布尔/交互语义）。共用一张表，避免 if 链继续膨胀。 */
+const OPTIONAL_VALUE_FLAGS = new Map([
+  ['--sql-shell', 'sqlShell'],
+  ['--os-shell', 'osShell'],
+  // [D176] --fix-prompt[=dir]：扫描后生成「给编码代理的修复提示词」（改哪 / 怎么改 / 改完怎么验）。
+  // 不带值 = 落在 --out 目录（或当前目录）的 fix-prompts/；带值 = 直接写进该目录。
+  // 刻意不自动改代码：提示词只给可执行指令与复测命令，改完由人/代理自己验证。
+  ['--fix-prompt', 'fixPrompt'],
+  // [D177] --repro-check[=dir]：重放每条 finding 的 PoC 两次判定稳定性（一致才标「已复现」），
+  // 并把 repro.sh + expect.json 落盘。不带值 = <--out 目录或当前目录>/repro/。
+  ['--repro-check', 'reproCheck'],
+  // [D205] --ai-report[=dir]：扫描后用 LLM 生成自然语言报告（analyst→writer→reviewer）。
+  // 不带值 = <--out 目录或当前目录>/ai-report/。env 未配齐由 buildConfig 硬拒（开扫前就报，
+  // 不让用户白等三分钟）——REST 侧 /report/ai 早就有，CLI 侧此前完全没入口。
+  ['--ai-report', 'aiReport'],
+  // [D198 2026-10-30 对标 sqlmap --load-cookies/--live-cookies] 会话文件两件套：
+  //   静态（开扫读一次，并进 auth.cookie）与动态（每请求重读，覆盖同名会话 cookie）。
+  // 走本表而不是主 if 链的原因与上面同：parseArgs 已卡在行数硬上限（加一行就顶破基线）。
+  // 不带值时落 `true` —— 由 buildConfig 硬拒（「收参数不生效」是红线，宁可拒绝启动）。
+  ['--load-cookies', 'loadCookies'],
+  ['--live-cookies', 'liveCookies'],
+]);
 
 export function parseArgs(argv, preset) {
   /** @type {any} */
   const args = {
     url: null, batch: null, method: 'GET', body: null, cookie: null, headers: null,
-    format: 'json', out: null, timeoutMs: 0, concurrency: 1, help: false,
+    format: 'json', out: null, fixPrompt: null, reproCheck: null, aiReport: null, timeoutMs: 0, concurrency: 1, help: false,
     technique: null, level: null, risk: null, dump: false, tamper: null, proxy: null, auth: null,
     // —— 授权范围 / 传输安全 / 输入校验跳过（[P0-SEC 2026-09-09] 对应引擎新增三能力）——
     scope: null, insecureTls: false, noValidationSkip: false,
@@ -110,7 +149,9 @@ export function parseArgs(argv, preset) {
     // configFile 登记表 ⇒ --config 档案也会被未知键硬拒 ⇒ CLI/脚本用户**完全开不了**。
     // 布尔 = 只开总开关；子键（oob.callbackHost/dnsPort、noSql.kinds/concurrency）
     // 走 --config 档案整组透传（见 buildConfig 的 patchGroup 分支）。
-    noSql: false, oob: false,
+    // [D197 2026-10-30 对标 sqlmap] HTTP 出口形态（引擎已实现，见 applyChannelFlag 注释）：
+    // --no-keep-alive / --drop-set-cookie —— 并入上一行以保住 parseArgs 的行数基线
+    noSql: false, oob: false, disableKeepAlive: false, dropSetCookie: false,
     // 内部：从请求文件解析出的 header 对象（buildAuth 直接使用）
     headerObj: null,
     // 无法识别的开关收集在此（不再静默忽略）：告警见循环末尾，硬拒见 unknownFlagError()
@@ -132,10 +173,11 @@ export function parseArgs(argv, preset) {
     else if (a === '-l' || a === '--log-file') args.logFile = next();
     else if (a === '--check-tor') args.checkTor = true;
     // —— 攻击操作（对标 sqlmap --os-cmd/--sql-shell/--file-read/--file-write）——
-    // --sql-shell / --os-shell：带值=单次执行；不带值（或值以 -- 开头）= 交互式 REPL（对标 sqlmap 同名参数）
+    // --sql-shell / --os-shell / --fix-prompt：带值=单次执行；不带值=交互式 REPL / 布尔语义
+    //（对标 sqlmap 同名参数）。三者共用一张表，避免给 if 链再添分支（复杂度门禁盯 parseArgs）。
+    const optionalKey = OPTIONAL_VALUE_FLAGS.get(a);
+    if (optionalKey) args[optionalKey] = peekValue() ?? true;
     else if (a === '--os-cmd') args.osCmd = next();
-    else if (a === '--sql-shell') args.sqlShell = peekValue() ?? true;
-    else if (a === '--os-shell') args.osShell = peekValue() ?? true;
     else if (a === '--file-read') args.fileRead = next();
     else if (a === '--file-write') args.fileWrite = next();
     else if (a === '--file-dest') args.fileDest = next();
@@ -718,9 +760,51 @@ export function applyRequestFile(args) {
 }
 
 // 合并 --cookie / --header / --auth / --proxy → auth 对象
+/**
+ * [D198 对标 sqlmap --load-cookies] cookie 文件（Netscape/wget · JSON · Cookie 头文本）
+ * → 会话 cookie 串，与显式 `--cookie` 合并。
+ *
+ * 优先级：**显式 --cookie 优先，文件补齐其余**。理由是与本仓既有纪律一致（cookie jar 的
+ * `mergeInto`、D101 的对外披露都是「用户显式优先」）；同名冲突时打一行提示，
+ * 而不是静默丢弃文件里的新值（静默正是这类会话类旗标最容易骗人的地方）。
+ *
+ * 只匹配目标主机（domain 为空则视为通用）：cookie 是凭据，不发给不该给的主机。
+ * 没有任何条目匹配时**如实告警**——否则使用者会以为文件加载成功，实际整场在裸跑。
+ * @param {any} args CLI 参数
+ * @param {string|undefined} explicit 显式 --cookie
+ * @returns {string|undefined} 合并后的 Cookie 串
+ */
+export function applyLoadCookies(args, explicit) {
+  if (args.loadCookies == null) return explicit;
+  if (args.loadCookies === true) throw new Error('--load-cookies 需要一个 cookie 文件路径（支持 Netscape/wget cookies.txt、JSON 数组、或一段 Cookie 头文本）');
+  const file = String(args.loadCookies);
+  let parsed;
+  try {
+    parsed = parseCookieFile(readFileSync(file, 'utf8'));
+  } catch (e) {
+    // [D205 代 D198 收口] preserve-caught-error：原始异常要挂 cause，否则只剩一句拼好的文案
+    throw new Error(`--load-cookies 读取失败（${file}）：${e.message}`, { cause: e });
+  }
+  const sel = selectCookies(parsed.entries, args.url);
+  if (sel.skippedHost > 0 || sel.matched.length === 0) {
+    logger.warn(`--load-cookies：${file}（${parsed.format}）共 ${sel.total} 条，匹配目标主机 ${hostOf(args.url) || '(未知)'} ${sel.matched.length} 条（域名不符 ${sel.skippedHost} · 过期 ${sel.skippedExpired} · secure 不适用 ${sel.skippedSecure}）`);
+  }
+  const fromFile = sel.header;
+  if (!fromFile) return explicit;
+  const explicitPairs = parseCookieHeader(explicit || '').map((p) => p.name);
+  const clash = parseCookieHeader(fromFile).filter((p) => explicitPairs.includes(p.name)).map((p) => p.name);
+  if (clash.length) logger.warn(`--load-cookies：${clash.join('、')} 同时来自 --cookie 与文件，按「显式优先」取 --cookie 的值`);
+  // [D205 代 D198 收口] explicit 可能为 undefined（没传 --cookie 只给了文件）：
+  // mergeCookieStrings 的 primary 类型是 string，运行时也靠 parseCookieHeader 兜底 —— 这里显式给空串
+  return mergeCookieStrings(explicit || '', fromFile);
+}
+
 export function buildAuth(args) {
   /** @type {any} */ let auth = undefined;
   if (args.cookie) auth = { ...auth, cookie: args.cookie };
+  // [D198] --load-cookies：文件条目并入（显式 --cookie 同名优先，见 applyLoadCookies）
+  const withFile = applyLoadCookies(args, auth?.cookie);
+  if (withFile) auth = { ...auth, cookie: withFile };
   // 请求文件解析出的 header 对象优先（值可能含逗号，避免被 parseHeaders 截断）
   if (args.headerObj) auth = { ...auth, headers: { ...(auth?.headers || {}), ...args.headerObj } };
   else if (args.headers) auth = { ...auth, headers: parseHeaders(args.headers) };

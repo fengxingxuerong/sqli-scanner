@@ -13,8 +13,10 @@
 //
 // 真实生产驱动（mysql2 / pg / mssql / oracledb 等）需用户自备并 `npm install`，再按 target.db.driverType 注册接入。
 
+import { promisify } from 'node:util';
 import { logger } from './logger.js';
 import { loadSqlJs } from './sqlJsLoader.js';
+import { AppError, ErrorCode } from './errors.js';
 
 const TABLE = { columns: ['id', 'name'], rows: [[1, 'alice'], [2, 'bob']] };
 
@@ -138,7 +140,7 @@ export class MysqlDriver {
     // 跑通过——mysql2 不可用时静默跳过，可用后立即暴露 Access denied（root 无密码连 root/root 实例）。
     // 选项优先，MYSQL_PASSWORD 环境变量兜底；undefined 保持旧「无密码」行为（零回归）。
     const password = this._opts.password ?? process.env.MYSQL_PASSWORD ?? undefined;
-    this._conn = await mysql.createConnection({ host, port, user, password, charset: 'utf8mb4' });
+    this._conn = await mysql.createConnection({ host, port, user, password, database: this._opts.database || undefined, charset: 'utf8mb4' });
     if (this._opts.initSql) {
       for (const sql of this._opts.initSql.split(';').map((s) => s.trim()).filter(Boolean)) {
         await this._conn.query(sql);
@@ -162,6 +164,203 @@ export class MysqlDriver {
   async close() {
     if (this._conn) {
       try { await this._conn.end(); } catch { /* ignore */ }
+      this._conn = null;
+    }
+  }
+}
+
+// 真实 SQL Server 驱动（mssql 包，server 依赖已内置）
+// 连接本机/远程 sqlservr（含 LocalDB：host 传 '(localdb)\\实例名'，免凭据走 Windows 集成认证）
+// 不加 export：仅在 builtinDriver 内部分派（死代码门禁口径——新代码不添未使用导出）
+class MssqlDriver {
+  constructor(opts = {}) {
+    this.name = 'mssql';
+    this.dialect = 'mssql';
+    this._opts = opts;
+    this._pool = null;
+  }
+  async connect() {
+    let mod;
+    try {
+      mod = await import('mssql');
+    } catch {
+      throw new AppError(ErrorCode.DIRECT_DRIVER_UNAVAILABLE, '[direct] mssql 未安装。请在 server 目录执行 npm install mssql');
+    }
+    // mssql 包是 CJS：动态 import 下命名构造器挂在 default 上（node:24 实测）
+    const mssql = mod.default ?? mod;
+    // 连接参数命名为 connCfg（不用 cfg）：configOrphanKeys 守卫监听 cfg.X 形态的
+    // 扫描配置读取点，这里的 user/database 是直连凭据（源自 DSN/env），不是用户旋钮
+    const connCfg = {
+      server: this._opts.host || '127.0.0.1',
+      port: this._opts.port || 1433,
+      database: this._opts.database || undefined,
+      // 本仓靶场均为本机实例：关 TLS 校验（信任自签证书），局域网部署需自行加密
+      options: { trustServerCertificate: true, encrypt: false },
+      connectionTimeout: 15000,
+      requestTimeout: 30000,
+    };
+    if (this._opts.user) {
+      connCfg.user = this._opts.user;
+      // [D184 同款口径] 选项优先，MSSQL_PASSWORD 环境变量兑底；均缺省时走 Windows 集成认证（LocalDB 常态）
+      connCfg.password = this._opts.password ?? process.env.MSSQL_PASSWORD ?? undefined;
+    }
+    this._pool = await new mssql.ConnectionPool(connCfg).connect();
+  }
+  async query(sql) {
+    if (!this._pool) throw new AppError(ErrorCode.DIRECT_DRIVER_UNAVAILABLE, '[direct] SQL Server 连接未建立');
+    const res = await this._pool.request().query(String(sql));
+    const recordset = res.recordset || [];
+    // mssql 的列序取 recordset.columns（空结果集也有），归一化对齐 PgDriver/MysqlDriver 契约
+    const columns = res.recordset?.columns ? Object.keys(res.recordset.columns) : (recordset.length ? Object.keys(recordset[0]) : []);
+    const rows = recordset.map((r) => columns.map((c) => (r[c] == null ? '' : String(r[c]))).join('\t'));
+    return { rows, columns };
+  }
+  async close() {
+    if (this._pool) {
+      try { await this._pool.close(); } catch { /* ignore */ }
+      this._pool = null;
+    }
+  }
+}
+
+// 真实 Oracle 驱动（oracledb thin 模式，server 依赖已内置）
+// 连接串形态：oracle://user:pass@host:1521/service?privilege=SYSDBA（对标 sqlmap -d）
+// thin 模式为纯 JS，不需要 Instant Client；SYS 必须以 SYSDBA/SYSOPER 身份连接（普通身份连不上）。
+class OracleDriver {
+  /**
+   * @param {object} [opts] 连接参数（DSN 解析结果或显式 db 配置）
+   * @param {string} [opts.host] 主机（缺省 127.0.0.1）
+   * @param {number} [opts.port] 端口（缺省 1521）
+   * @param {string} [opts.database] service name（Easy Connect 的 `/service` 段）
+   * @param {string} [opts.user] 用户名（SYS 需配合 privilege）
+   * @param {string} [opts.password] 口令（缺省读 ORACLE_PASSWORD）
+   * @param {string} [opts.connectString] 完整 Easy Connect 串（优先于 host/port/database）
+   * @param {string} [opts.privilege] 特权身份（SYSDBA/SYSOPER/...，缺省读 ORACLE_PRIVILEGE）
+   */
+  constructor(opts = {}) {
+    this.name = 'oracle';
+    this.dialect = 'oracle';
+    this._opts = opts;
+    this._conn = null;
+    this._mod = null;
+  }
+  /** @returns {Promise<void>} 连接建立（失败抛 AppError/驱动原始错误） */
+  async connect() {
+    let mod;
+    try {
+      mod = await import('oracledb');
+    } catch {
+      throw new AppError(ErrorCode.DIRECT_DRIVER_UNAVAILABLE, '[direct] oracledb 未安装。请在 server 目录执行 npm install oracledb');
+    }
+    // oracledb 是 CJS：动态 import 下常量（SYSDBA/OUT_FORMAT_ARRAY）挂在 default 上
+    const oracledb = mod.default ?? mod;
+    this._mod = oracledb;
+    const host = this._opts.host || '127.0.0.1';
+    const port = this._opts.port || 1521;
+    const service = this._opts.database ? `/${this._opts.database}` : '';
+    const connCfg = {
+      connectString: this._opts.connectString || `${host}:${port}${service}`,
+      user: this._opts.user,
+      // [D184 同款口径] 选项优先，ORACLE_PASSWORD 环境变量兑底
+      password: this._opts.password ?? process.env.ORACLE_PASSWORD ?? undefined,
+    };
+    const privilege = String(this._opts.privilege || process.env.ORACLE_PRIVILEGE || '').toUpperCase();
+    if (privilege) {
+      // 只认 oracledb 导出的特权常量（SYSDBA/SYSOPER/SYSASM/SYSBACKUP/SYSDG/SYSKM/SYSRAC）
+      if (!(privilege in oracledb)) {
+        throw new AppError(ErrorCode.DIRECT_DRIVER_UNAVAILABLE, `[direct] 不支持的 Oracle 连接身份：${privilege}`);
+      }
+      connCfg.privilege = oracledb[privilege];
+    }
+    this._conn = await oracledb.getConnection(connCfg);
+  }
+  /**
+   * @param {string} sql 只读/注入 SQL
+   * @returns {Promise<{rows: string[], columns: string[]}>} 行按列序 tab-join
+   */
+  async query(sql) {
+    if (!this._conn) throw new AppError(ErrorCode.DIRECT_DRIVER_UNAVAILABLE, '[direct] Oracle 连接未建立');
+    // OUT_FORMAT_ARRAY：行按列序返回数组，列名取 metaData，归一化对齐 PgDriver/MysqlDriver 契约
+    const res = await this._conn.execute(String(sql), [], { outFormat: this._mod?.OUT_FORMAT_ARRAY });
+    const columns = (res.metaData || []).map((m) => String(m.name));
+    const rows = (res.rows || []).map((r) => (Array.isArray(r) ? r : columns.map((c) => r[c]))
+      .map((v) => (v == null ? '' : String(v))).join('\t'));
+    return { rows, columns };
+  }
+  /** @returns {Promise<void>} 关闭连接（幂等） */
+  async close() {
+    if (this._conn) {
+      try { await this._conn.close(); } catch { /* ignore */ }
+      this._conn = null;
+    }
+  }
+}
+
+// 真实 IBM Db2 驱动（ibm_db 包，用户自备：npm install ibm_db —— 内置 IBM clidriver，体积数百 MB，不进 server 依赖）
+// 连接串形态：db2://user:pass@host:50000/dbname（对标 sqlmap -d）
+// 不加 export：仅在 builtinDriver 内部分派（死代码门禁口径——新代码不添未使用导出）
+class Db2Driver {
+  /**
+   * @param {object} [opts] 连接参数（DSN 解析结果或显式 db 配置）
+   * @param {string} [opts.host] 主机（缺省 127.0.0.1）
+   * @param {number} [opts.port] 端口（缺省 50000）
+   * @param {string} [opts.database] 数据库名（testdb 等）
+   * @param {string} [opts.user] 用户名（db2inst1 等，OS 认证）
+   * @param {string} [opts.password] 口令（缺省读 DB2_PASSWORD）
+   */
+  constructor(opts = {}) {
+    this.name = 'db2';
+    this.dialect = 'db2';
+    this._opts = opts;
+    this._conn = null;
+  }
+  /** @returns {Promise<void>} 连接建立（失败抛 AppError/驱动原始错误） */
+  async connect() {
+    let mod;
+    try {
+      mod = await import('ibm_db');
+    } catch {
+      throw new AppError(ErrorCode.DIRECT_DRIVER_UNAVAILABLE, '[direct] ibm_db 未安装。请在 server 目录执行 npm install ibm_db（内置 IBM clidriver，体积数百 MB，按需安装）');
+    }
+    const ibm_db = mod.default ?? mod;
+    const host = this._opts.host || '127.0.0.1';
+    const port = this._opts.port || 50000;
+    // [D184 同款口径] 选项优先，DB2_PASSWORD 环境变量兜底
+    const password = this._opts.password ?? process.env.DB2_PASSWORD ?? undefined;
+    const dsn =
+      `DATABASE=${this._opts.database || ''};HOSTNAME=${host};PORT=${port};` +
+      `PROTOCOL=TCPIP;UID=${this._opts.user || ''};PWD=${password ?? ''};`;
+    /** @type {{ query: (q: string, cb: (e: Error | null, r?: Record<string, unknown>[]) => void) => void, close: (cb: (e: Error | null) => void) => void } | null} */
+    this._conn = null;
+    // ibm_db 全 API 回调式：promisify 后 await（避免为回调箭头引入未标注参数/返回）
+    const openDsn = /** @type {(dsn: string) => Promise<NonNullable<typeof this._conn>>} */ (
+      promisify(/** @type {(dsn: string, cb: (e: Error | null, conn?: NonNullable<typeof this._conn>) => void) => void} */ (ibm_db.open)).bind(ibm_db)
+    );
+    this._conn = await openDsn(dsn);
+  }
+  /**
+   * @param {string} sql 只读/注入 SQL
+   * @returns {Promise<{rows: string[], columns: string[]}>} 行按列序 tab-join
+   */
+  async query(sql) {
+    if (!this._conn) throw new AppError(ErrorCode.DIRECT_DRIVER_UNAVAILABLE, '[direct] Db2 连接未建立');
+    const runSql = /** @type {(q: string) => Promise<Record<string, unknown>[]>} */ (
+      promisify(this._conn.query.bind(this._conn))
+    );
+    const result = await runSql(String(sql));
+    // ibm_db 结果为对象数组 [{col: val}]；归一化对齐既有驱动契约
+    const rows = Array.isArray(result) ? result : [];
+    const columns = rows.length ? Object.keys(rows[0]) : [];
+    const out = rows.map((r) => columns.map((c) => (r[c] == null ? '' : String(r[c]))).join('\t'));
+    return { rows: out, columns };
+  }
+  /** @returns {Promise<void>} 关闭连接（幂等） */
+  async close() {
+    if (this._conn) {
+      const end = /** @type {() => Promise<void>} */ (
+        promisify(this._conn.close.bind(this._conn))
+      );
+      try { await end(); } catch { /* ignore */ }
       this._conn = null;
     }
   }
@@ -228,9 +427,48 @@ export function driverTypeFromConnectionString(connStr) {
     case 'mssql':
     case 'sqlserver': return 'mssql';
     case 'oracle': return 'oracle';
+    case 'db2': return 'db2';
+    case 'pglite': return 'pglite';
     case 'sqlite': return 'sqlite';
     default: return 'memory';
   }
+}
+
+// 真实生产驱动注册表：driverType → 工厂函数（用户自备驱动包并 npm install 后注册）。
+
+/**
+ * 把直连 DSN（sqlmap -d 同形：`scheme://user:pass@host:port/db`）解析成结构化字段。
+ * [D184] 此前 userinfo 被静默丢弃：MysqlDriver 只会拿到默认 root + 空密码去握手，
+ * 在有口令策略的库上实测报 `Server requests authentication using unknown plugin auth_gssapi_client`
+ * （MariaDB 10.11 真机），而同机用 MYSQL_PASSWORD 环境变量就能连上——纯凭据丢失，不是库的问题。
+ * 规则：
+ *   - 只取「字段存在」的项（无 userinfo 不产生 user/password 键，保持旧行为零回归）；
+ *   - 合并优先级：显式 db 字段 > DSN 解析 > 驱动内置默认（MYSQL_PASSWORD 环境变量在驱动内兑底，
+ *     故 DSN 凭据 > 环境变量）；
+ *   - 解析失败（非标准 URL，如裸路径 sqlite 文件）返回空对象，行为与旧版一致。
+ * 特殊字符凭据需 percent-encode（与 URL 语义一致，sqlmap 同要求）。
+ * @param {string} connStr
+ * @returns {{user?:string, password?:string, host?:string, port?:number, database?:string}}
+ */
+export function dsnFields(connStr) {
+  if (typeof connStr !== 'string' || !connStr) return {};
+  let u;
+  try {
+    u = new URL(connStr);
+  } catch {
+    return {};
+  }
+  const out = {};
+  if (u.username) out.user = decodeURIComponent(u.username);
+  if (u.password) out.password = decodeURIComponent(u.password);
+  if (u.hostname) out.host = decodeURIComponent(u.hostname);
+  if (u.port) out.port = Number(u.port);
+  if (u.pathname && u.pathname.length > 1) out.database = decodeURIComponent(u.pathname.slice(1));
+  // [D187] Oracle 的 SYS 连接需要显式特权身份（SYSDBA 等），DSN 用 ?privilege=SYSDBA 表达；
+  // 其它库忽略该键（驱动不读就不会生效）。
+  const privilege = u.searchParams.get('privilege');
+  if (privilege) out.privilege = privilege.toUpperCase();
+  return out;
 }
 
 // 真实生产驱动注册表：driverType → 工厂函数（用户自备驱动包并 npm install 后注册）。
@@ -255,12 +493,29 @@ export function registeredDrivers() {
 // - driverType 在注册表 → 调工厂加载（真实驱动，调用方注入依赖）；
 // - driverType 未注册且非内置 → 抛清晰错误（不再静默回退 memory）；
 // - driverType 缺省 → 从 connectionString scheme 推断；推断不出回退 memory 自检。
-export async function getDriver(target) {
-  const db = (target && target.db) || {};
-  const connStr = typeof db.connectionString === 'string' ? db.connectionString : '';
-  let type = String(db.driverType || '').toLowerCase();
-  if (!type && connStr) type = driverTypeFromConnectionString(connStr);
+/**
+ * [D184] DSN 结构化字段并入 db 副本（不改入参）：显式字段 > DSN 解析 > 驱动内置默认（只填缺失键）。
+ * 抽成 helper 的原因：getDriver 在复杂度基线里，存量函数只许变瘦（形态-7 防基线虚高）。
+ * @param {object} dbRaw
+ * @returns {object} 合并后的 db 副本
+ */
+function mergeDsnFields(dbRaw) {
+  const db = { ...dbRaw };
+  const connStr = typeof dbRaw.connectionString === 'string' ? dbRaw.connectionString : '';
+  for (const [k, v] of Object.entries(dsnFields(connStr))) {
+    if (db[k] === undefined) db[k] = v;
+  }
+  return db;
+}
 
+/**
+ * [D186] 内置驱动分派（抽出原因同 mergeDsnFields：getDriver 在复杂度基线内，存量只许变瘦）。
+ * 返回已连接的驱动；null = 无内置分支（交给注册表/报错路径）。
+ * @param {string} type
+ * @param {object} db
+ * @returns {Promise<object|null>}
+ */
+async function builtinDriver(type, db) {
   // 内置驱动
   if (type === 'sqljs' || type === 'sqlite') {
     try {
@@ -286,6 +541,35 @@ export async function getDriver(target) {
     await d.connect();
     return d;
   }
+  // SQL Server：真实 MSSQL 驱动（mssql 包），LocalDB 实例名可作 host（免凭据集成认证）
+  if (type === 'mssql') {
+    const d = new MssqlDriver(db);
+    await d.connect();
+    return d;
+  }
+  // Oracle：真实 oracledb thin 驱动（SYS 需 DSN 带 ?privilege=SYSDBA）
+  if (type === 'oracle') {
+    const d = new OracleDriver(db);
+    await d.connect();
+    return d;
+  }
+  // IBM Db2：ibm_db 直连（用户自备驱动包；未安装时抛 DIRECT_DRIVER_UNAVAILABLE，不静默回退）
+  if (type === 'db2') {
+    const d = new Db2Driver(db);
+    await d.connect();
+    return d;
+  }
+  return null;
+}
+
+export async function getDriver(target) {
+  const db = mergeDsnFields((target && target.db) || {});
+  const connStr = typeof db.connectionString === 'string' ? db.connectionString : '';
+  let type = String(db.driverType || '').toLowerCase();
+  if (!type && connStr) type = driverTypeFromConnectionString(connStr);
+
+  const builtin = await builtinDriver(type, db);
+  if (builtin) return builtin;
   // 真实驱动注册表
   if (type && DRIVER_REGISTRY.has(type)) {
     const factory = DRIVER_REGISTRY.get(type);

@@ -29,7 +29,7 @@ const MYSQL_CONF = { host: process.env.MYSQL_HOST ?? '127.0.0.1', port: Number(p
     const [rows] = await probe.query('SELECT COUNT(*) c FROM users');
     console.log(`[预检] MySQL ${MYSQL_CONF.host}:${MYSQL_CONF.port} 可用，users=${rows[0].c} 行`);
   } catch (e) {
-    console.error(`[预检失败] MySQL 不可用：${e.message}\n请先启动：/d/mysql/bin/mysqld --datadir=D:/mysql/data --port=3307`);
+    console.error(`[预检失败] MySQL 不可用：${e.message}\n请先启动：/d/mysql/bin/mysqld --datadir=D:/mysql/data --port=${MYSQL_CONF.port}（或用 MYSQL_PORT 指向已在监听的实例；默认 3306 本机是 MariaDB 靶场）`);
     process.exit(2);
   } finally {
     await probe.end().catch(() => {});

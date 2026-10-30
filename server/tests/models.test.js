@@ -28,6 +28,26 @@ test('createTarget direct 模式：校验 db/connectionString 和 sqlTemplate �
   assert.throws(() => createTarget({ mode: 'direct', sqlTemplate: 'SELECT * FROM t WHERE id = {INJECT}' }), { code: ErrorCode.INVALID_TARGET });
 });
 
+test('[D187] createTarget direct：未声明 driverType 时按 DSN scheme 推断（不得静默回退 memory）', () => {
+  const mk = (connectionString) => createTarget({
+    mode: 'direct', connectionString, sqlTemplate: 'SELECT * FROM t WHERE id = {INJECT}',
+  });
+  // 此前 CLI/REST 都把缺省值写死 'memory'：-d mysql://... 会打到内存自检桩并伪造命中
+  assert.equal(mk('mysql://u:p@h/db').db.driverType, 'mysql');
+  assert.equal(mk('postgres://u:p@h/db').db.driverType, 'postgres');
+  assert.equal(mk('mssql://u:p@h/db').db.driverType, 'mssql');
+  assert.equal(mk('oracle://u:p@h:1521/svc?privilege=SYSDBA').db.driverType, 'oracle');
+  assert.equal(mk('pglite://memory').db.driverType, 'pglite');
+  assert.equal(mk('sqlite://:memory:').db.driverType, 'sqlite');
+  assert.equal(mk('memory').db.driverType, 'memory', '只有明确的 memory 才走自检桩');
+  // 显式声明永远优先（顶层 driverType 与 db.driverType 都认）
+  const explicit = createTarget({
+    mode: 'direct', connectionString: 'mysql://u:p@h/db', driverType: 'memory',
+    sqlTemplate: 'SELECT * FROM t WHERE id = {INJECT}',
+  });
+  assert.equal(explicit.db.driverType, 'memory');
+});
+
 test('createTarget 非法 URL 抛 INVALID_TARGET', () => {
   assert.throws(() => createTarget({}), { code: ErrorCode.INVALID_TARGET });
   assert.throws(() => createTarget({ url: '' }), { code: ErrorCode.INVALID_TARGET });

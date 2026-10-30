@@ -1,6 +1,6 @@
 # sqli-scanner
 
-[![Tests](https://img.shields.io/badge/tests-4370%20passing-brightgreen)](#测试)[![CI](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml/badge.svg)](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml)
+[![Tests](https://img.shields.io/badge/tests-4523%20passing-brightgreen)](#测试)[![CI](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml/badge.svg)](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml)
 [![Dependencies](https://img.shields.io/badge/prod%20deps-0%20known%20vulns-brightgreen)](SECURITY.md)
 
 > CI 徽章为真实状态（仓库地址已定，run#90 起全绿）。发布判定仍以 `CHANGELOG.md`
@@ -60,6 +60,8 @@ node scripts/one-click-scan.mjs -u "http://target/page?id=1"
 ```bash
 -F, --formats html,json,markdown,sarif,csv   # 输出格式（默认 html,json,markdown）
 -o, --out <dir>                              # 输出目录
+    --fix-prompt [dir]                       # 生成「给编码代理的修复提示词」（改哪/怎么改/改完怎么验；不自动改代码）
+    --repro-check [dir]                      # 复现检查：PoC 重放 2 次判「已复现/单次命中」，产出 repro-*.sh + expect.json
     --scope <域名/CIDR,...>                  # 授权范围（缺省按目标同源执行）
     --level 1-5 --risk 1-3 --technique union,error,... --tamper <链>
     --timeout <ms> --quiet --no-ledger
@@ -193,7 +195,7 @@ admin-only 触发页 `/admin/panel`（users.admin 角色门禁 403）+ admin 会
 **给客户的话**：上表 ⛔ 等级（TiDB / DM8 / ClickHouse / DB2 / Sybase / Firebird / Informix / Access / MonetDB 共 9 种）仅有模板适配，
 请把结论视为**待复核线索**而非可用证据——报告会在 `summary.dbmsEvidence.caveat` 中自动声明这一点。
 （SQL Server 与 Oracle 已于 2026-09-14/15 升级 verified，2026-09-22 补齐产物与版本凭证，**不在本段范围**。）
-| **1920 条 payload 模板** | 含注释/编码/子句/嵌套闭合变体：主库 1769 + 子句 137 + OOB 14（口径：各库×各技术下的模板条目数，**同一模板跨库/技术重复计入**）+ 686 条声明式注册表（`payloads/registry.json` 681 + `payloads/registry.versioned.json` 5 条版本门条目） |
+| **1912 条 payload 模板** | 含注释/编码/子句/嵌套闭合变体：主库 1761 + 子句 137 + OOB 14（口径：各库×各技术下的模板条目数，**同一模板跨库/技术重复计入**）+ 686 条声明式注册表（`payloads/registry.json` 681 + `payloads/registry.versioned.json` 5 条版本门条目） |
 | **234 个 tamper 插件** | 覆盖 sqlmap 官方 tamper 全集（84/84，分母取自 tag 1.10.10 上游清单；`npm run tamper:parity` 核对名字、`npm run tamper:examples` 用**上游 docstring 里的官方示例**反测语义——同名不等于同行为，当前 100/115 条字面一致（另有 11 条因输出含随机性不适用字面比对、判据逐条点名跳过），其余 15 条**逐条定性**记于 `tamper-upstream-examples-baseline.json` 的 drift 字段——⚠️ 其中 T6 已修 2 条**真缺陷**（versionedkeywords 漏包 `ALL`、morekeywords 族漏包 CONCAT/CHAR/IFNULL/CAST/CURRENT_USER 等函数名，已收敛为单一真源 `versionedKeywords.js`），**另有 3 条形态差异仍未关闭**（本仓 `/*! X */` 含空格 vs 上游 `/*!X*/` 无空格；halfversioned 用版本号 50540 vs 上游 0）——形态取舍须真机 A/B 证据，本地口径不足以判，**不得据此宣称该族与上游等价**；含批次 D13 新增 5 件「上游形态变体」——真机 A/B 用，不动默认链）。⚠️ 绕过率口径见 [docs/waf-绕过能力实测口径.md](docs/waf-绕过能力实测口径.md) |
 | **62 WAF 指纹** | 自动识别 WAF 类型并推荐 tamper 组合。[D44] 指纹未命中时的**多向量主动探测**（wafw00f 式）：sqli-union/sqli-quote/xss/lfi 四向量差分 + Server 头漂移 + **连接级阻断识别**（断连型 WAF 此前被吞掉），「unknown 拦截器」也带可复核证据（哪些向量被拦/头怎么漂移）。⚖️ **外部权威对拍**（口径见台账 `waf-fingerprint-coverage`，`docs/_claims-ledger.json`）：wafw00f 18 家 × 36 样本 100%（`wafExternalParity.guard`）+ WhatWaf 27 家 + nuclei(Safe3) 1 家 30 条样本 100%（`wafSecondSourceParity.guard`），16 家无第二源如实登记边界；⚠️ 构造样本口径 ≠ 真机命中，真实流量证据待商业云 WAF 授权样本（见 [docs/WAF-真机样本采集-runbook.md](docs/WAF-真机样本采集-runbook.md)）。入口：`--identify-waf`（只识别不扫描）或 `--active-waf-probe`（扫描期开启，默认关；REST 键 `activeWafProbe` 既有） |
 | **可视化报告** | 风险环形图 + 技术分布条形图 + 漏洞列表 + 数据提取树 + 检测摘要 |
@@ -203,9 +205,9 @@ admin-only 触发页 `/admin/panel`（users.admin 角色门禁 403）+ admin 会
 | **WAF 识别接口** | `--identify-waf`：仅识别 WAF 厂商并输出推荐 tamper 链，不发起注入检测（对标 sqlmap --identify-waf） |
 | **AI 漏洞报告** | 3 角色流水线（分析师→撰写→审阅），支持多 key 容灾，自动生成专业中文安全分析报告 |
 | **利用工具** | SQL Shell / 文件读写 / OS 命令执行（需授权）。⚠️ 验证状态见下文「利用能力实测口径」与 [docs/udf-沙箱验证环境与边界.md](docs/udf-沙箱验证环境与边界.md)：**fileRead / fileWrite / UDF-os-shell 均已跑通真实闭环**（后者在隔离沙箱内），仅注册表仍为 mock 单测 |
-| **CLI 100+ 参数（原生引擎）** | 对标 sqlmap：--dbs/--tables/--dump/**--dump-all**/**--common-tables**/**--common-columns**/-D/-T/-C/--search/--users/--passwords/--prefix/--suffix/--time-sec/-r/--mobile/--parse-errors/--safe-url/--safe-freq/--delay/--current-user/--current-db/--hostname/--is-dba/**--identify-waf**/--skip-static/--predict-output/--test-headers/--test-path/**--test-param-names**/**--hex**/--where/--param-del/**--advise**（扫描前风险评估）/**--confirm-extreme**（极高危第二道确认）/**-b --banner**/**--statements**/**--procs**/**-U**（用户过滤）/**--exclude**（库排除）等（`node server/bin/cli.js --help` 为准，从仓库根直接跑；`--dbs` 等参数说明在该 help 里） |
+| **CLI 100+ 参数（原生引擎）** | 对标 sqlmap：--dbs/--tables/--dump/**--dump-all**/**--common-tables**/**--common-columns**/-D/-T/-C/--search/--users/--passwords/--prefix/--suffix/--time-sec/-r/--mobile/--parse-errors/--safe-url/--safe-freq/--delay/--current-user/--current-db/--hostname/--is-dba/**--identify-waf**/--skip-static/--predict-output/--test-headers/--test-path/**--test-param-names**/**--hex**/--where/--param-del/**--advise**（扫描前风险评估）/**--confirm-extreme**（极高危第二道确认）/**-b --banner**/**--statements**/**--procs**/**-U**（用户过滤）/**--exclude**（库排除）/**--audit**（[D181] 只读安全配置审计：直连模式下查版本/超管/建角色/口令加密/public 可写/文件读权限，覆盖 PG / SQLite / MySQL·MariaDB / SQL Server / **Oracle（D187）** / **DB2（D189，ibm_db 用户自备）**，结果进 `report.audit` 与 `summary.audit`；只发 SELECT/SHOW/PRAGMA，查不到的项标 `unknown` 并写原因——**不等于通过**）等（`node server/bin/cli.js --help` 为准，从仓库根直接跑；`--dbs` 等参数说明在该 help 里） |
 | **diff-aware CI 门禁** | `node scripts/one-click-scan.mjs -u <url> --diff-base auto`（[D45] semgrep 语义：**只对新增发现判红**）。与台账中最近一次同目标扫描自动比对（或显式 `--diff-base <scanId>`；diff 计算与 REST `/api/scan/:id/diff` 同一模块）：新增发现 → exit 2；存量仍在 → exit 0（不阻塞无关 PR——安全 CI 被弃用的第一原因就是存量噪声）；本次结论不可信（validity）或无基线可认 → exit 1（不判红也不假绿）。产出 `diff.json`（fixed/new/remaining 明细）+ `manifest.diff`（机器消费）。**`--fail-severities <子集>`**（[D152] 对标 nuclei `-severity` 分级门禁）：显式给出的判红口径（critical/high/medium/low 逗号分隔），普通模式与 diff 模式统一按口径判红——不传则维持各模式默认（普通模式 Critical/High 才 exit 2；diff 模式新增即红）；低于口径的新增在裁决 reason 与 manifest 如实披露（不判红 ≠ 不存在），`manifest.gate.failSeverities` 供机器消费。接法与语义细则见 [docs/CI-集成.md](docs/CI-集成.md) 第五节 |
-| **原生 MCP server** | `node server/bin/cli.js mcp`（stdio NDJSON，零依赖，[D43] 对标 dalfox `mcp` / semgrep `mcp` 的「MCP 是 CLI 的一个模式」形态）：AI 代理宿主（Cursor / Claude Code / VS Code 等）直连驱动扫描。9 个工具：`run_scan`（异步返回 scanId）/ `get_scan_status` / `get_findings`（CWE·CVSS·受影响参数·PoC curl；**[D153] 附 `nextSteps` 代理下一步建议**——按结论可信度/未验证面/未覆盖面/未裁决态/DBMS 告警给出可执行动作与入口，只引用既有披露不造新结论）/ `get_report`（json/md/html/csv/sarif/db-json）/ `list_scans` / `stop`·`pause`·`resume_scan` / **`preflight`**（零 payload 侦察：可达性 + 注入点发现）。走与 REST 同一条 sanitizeStart 配置白名单 + SSRF/scope 护栏——MCP 不是旁路；`confirmDestructive` 必须显式传（代理不得代答）。宿主配置：`{"command":"node","args":["<repo>/server/bin/cli.js","mcp"]}` |
+| **原生 MCP server** | `node server/bin/cli.js mcp`（stdio NDJSON，零依赖，[D43] 对标 dalfox `mcp` / semgrep `mcp` 的「MCP 是 CLI 的一个模式」形态）：AI 代理宿主（Cursor / Claude Code / VS Code 等）直连驱动扫描。9 个工具：`run_scan`（异步返回 scanId）/ `get_scan_status` / `get_findings`（CWE·CVSS·受影响参数·PoC curl；**[D153] 附 `nextSteps` 代理下一步建议**——按结论可信度/未验证面/未覆盖面/未裁决态/DBMS 告警给出可执行动作与入口，只引用既有披露不造新结论）/ `get_report`（json/md/html/csv/sarif/db-json）/ `list_scans` / `stop`·`pause`·`resume_scan` / **`preflight`**（零 payload 侦察：可达性 + 注入点发现）。走与 REST 同一条 sanitizeStart 配置白名单 + SSRF/scope 护栏——MCP 不是旁路；`confirmDestructive` 必须显式传（代理不得代答）。宿主配置：`{"command":"node","args":["<repo>/server/bin/cli.js","mcp"]}`。**[D175] 装载面已入库**：项目级 `.mcp.json` + `.claude-plugin/plugin.json` + `skills/sqli-scan/SKILL.md`（技能里带「`inconclusive` ≠ 未检出」「必须声明 `unverifiedSurfaces`」「不得代开 `risk: 3`」三条硬口径与红线），一致性由 `npm run agent:check` 守着；宿主侧装法与已知缺口见 [docs/agent-装载.md](docs/agent-装载.md) |
 | **NoSQL / OOB 通道开关（CLI）** | `--no-sql`（NoSQL / GraphQL / SSTI 补充趟）、`--oob`（带外接收端）与 `--oob-interactsh`（[D87] 外部协作端隧道）。[2026-10-12] 这两个通道**默认关**，引擎与 UI/REST 早可达，**唯独 CLI 没有入口**（连 `--config` 档案都被未知键硬拒）⇒ CLI/脚本用户此前完全开不了：旗标只开总开关，子键走 `--config`（如 `{"oob":{"enabled":true,"callbackBase":"cb.example:8899"}}`，整组带底合并，未写子键回落默认）。⚠️ 与 `--technique` 正交：technique 决定「测不测」，`oob.enabled` 决定「接收端起不起」——只写 `--technique oob` 拿不到回调 | `--oob-interactsh` 解决**回连拓扑**：内置接收端要求「目标能回连扫描器」，目标是云上/NAT 后/跨网段时通常不通 ⇒ 无回显盲注恒判「未检出」（与「这个站没注入」同形的静默假阴性）；该旗标改用 interactsh 协议的外部协作端，**只要求扫描器能出网**（引擎零依赖手写协议：注册/轮询/AES-256-CTR+RSA-OAEP 解密）。默认用公共协作端（`oast.pro` 等，回连记录交给其运营方，**真实项目建议自建**）；⚠️ 公共协作端下 OOB 只回带 token、不回带数据本身；仅在已授权范围内使用 | [D108] 背景 OOB 哨兵：`--oob-background` 把 OOB token 播撒到「选定技术没覆盖的面」（被预筛选/静态判定跳过的点、未生成注入点的请求头），任一回连即确认无回显注入；`enabled` 隐含启动接收端，子键（`maxRequests`/`timeoutMs`/`headers`）走 `--config` 的 `oob.background`。默认关 |
 | **CLI 报告格式补齐 db-json** | `-f/--format` 现支持 `json|csv|markdown|md|html|sarif|**db-json**`（db-json = 仅拖库数据，扩展名 `db.json`，与 REST `/report/export` 同源；此前 REST/UI 有、CLI 与 MCP 枚举缺）。**未知格式改为拒绝启动**（旧行为静默回退 JSON ⇒「以为导了 db-json 实际是普通 JSON」） |
 | **注入点筛选三件套** | `-p/--test-param <p1,p2>`（只测指定参数）/ `--param-exclude <regex>`（正则排除噪声参数）/ `--param-filter <place,...>`（按位置筛选：url/get/query、body/post/form、header、cookie、path；对标 sqlmap 同名三参）。[D41] 复测与 CI 定向回归用：大 body 只测可疑参数不再全量投 payload。**筛光点位即报错退出并列出可用点位**——0 点扫描=「没测」，绝不伪装成「未检出」 |
@@ -221,7 +223,7 @@ admin-only 触发页 `/admin/panel`（users.admin 角色门禁 403）+ admin 会
 | **mTLS 客户端证书** | `clientCert`（PEM 路径，证书+私钥同文件，对标 sqlmap `--cert`）：目标要求 TLS 双向认证时没有证书连第一跳都被拒。与 `insecureTls` 正交（一个管「我信不信目标」，一个管「目标信不信我」） |
 | **Bearer/Token 自动续期** | `--refresh-url`（`config.bearerRefresh`，面板「网络与认证」同址）：API 的 access token 通常 15 分钟～1 小时过期，而一次扫描动辄几千条请求几十分钟 —— 后半程全 401 时检测层看到的是"响应没有差异"，报告写「未检出」，**而那半程一个注入都没进业务逻辑**。配上它：请求吃 401/403 ⇒ POST 刷新端点换新令牌 ⇒ 重试原请求一次。四条口径：① 拿到新 token 之前**不动**你从抓包带来的 `Authorization`；② 一次挑战只续一次（不循环打客户认证服务）；③ 并发去重（几十条同时 401 只发一次续期）；④ 续期失败必须显形 —— 结论降级为 **inconclusive**，reason 里给出「尝试 N 次失败 M 次 + 最后一次原因」（取不到 token 时会写明试过哪些字段、响应顶层有哪些键）。同批补了 `session_expired` 的两种此前无人接手的形态：**整轮零业务响应**（从来没进去过）与**进去过之后连续出不去**（中途失效）—— 既有判据要求"基线请求不 401"，而令牌过期时基线同样吃 401，那条判据在这类目标上永不可达。不实现 OAuth2 授权码 / SSO / 验证码。见 [docs/Bearer令牌续期.md](docs/Bearer%E4%BB%A4%E7%89%8C%E7%BB%AD%E6%9C%9F.md) |
 | **自定义请求变换（扩展点）** | `--request-script <file.js>`（`config.requestScript`）：目标接口带 `sign=` 签名、整参加密或 timestamp+nonce 防重放时，注入值会破坏签名 ⇒ 目标恒回 400 ⇒ 报告写「未检出」，**而那不等于没有洞**。脚本在**扫描/检测阶段**每条出站请求的最后一环重算签名/重新加密（含保活页、CSRF 取页、登录提交这些非注入请求；⚠️ 注入点发现阶段的爬虫请求不经此层，见文档 §7）。四条硬约束：① 变换在 SSRF/scope 校验之前完成（校验作用于变换后的 URL）；② 脚本失败即**不发**该请求（绝不退化成"发没签名的原始请求"）；③ 只能改 `url/method/headers/data/params`，`signal/scanId/限速` 等引擎控制权不可被脚本摘掉；④ 脚本必须位于环境变量 `REQUEST_SCRIPT_DIR` 内（出口层的代码注入面）。配套判据 `transform_rejected`：连基线请求都被拒 ⇒ 判「脚本配错」并中止；基线正常而注入全被拒 ⇒ 判「签名没覆盖该参数」，两种都强制把结论降级为 **inconclusive**。用法见 [docs/请求变换脚本.md](docs/请求变换脚本.md) |
-| **自定义检测条目（扩展点）** | `--payload-file <file.json>`：追加用户自己的 payload 条目（与 `registry.json` 同 schema），**只追加、不允许覆盖内置**，且同样受高危池硬门管辖；不传即与内置基线逐位一致。见 [docs/自定义检测条目.md](docs/自定义检测条目.md) |
+| **自定义检测条目（扩展点）** | `--payload-file <file.json>`：追加用户自己的 payload 条目（与 `registry.json` 同 schema），**只追加、不允许覆盖内置**，且同样受高危池硬门管辖（[D179] 起对**自定义**条目按语句判据兜底：`'; DROP TABLE` 这类模板不再能绕过 `--confirm-destructive`）；不传即与内置基线逐位一致。见 [docs/自定义检测条目.md](docs/自定义检测条目.md)。**[D179] 配方包**：把「条目 + 目标特征 + A/B 口径 + 修复建议」打成目录（`recipes/`），`node scripts/recipe-pack.mjs --check` 校验、`--export` 导出成 `--payload-file`；`demo` 与 `cve` 互斥（没真机验证不许写 CVE 号），破坏性条目必须自行声明 `risk: 3` —— 规范见 [docs/配方包规范.md](docs/配方包规范.md) |
 | **中英双语** | 全界面 i18n 支持中英切换 |
 | **历史记录** | 扫描历史卡片式展示，支持续跑/删除 |
 | **真实 DBMS 验证** | **6 种真实引擎全链路验证**（MySQL / MariaDB / PostgreSQL / SQLite / Oracle / SQL Server）+ 3 种部分通道验证 + 9 种模板适配；分层与逐条证据见上文「数据库支持验证等级」表（[2026-10-12 修正] 本行原写「SQLite + PostgreSQL + MySQL 三库」，与「18 种数据库」行自相矛盾且已落后于现状） |
@@ -256,9 +258,9 @@ npm run quality:all     # 【门禁】一键全量质量校验（测试/覆盖�
 | 用途 | 旗标 |
 |---|---|
 | 目标输入 | `--url` `--request-file` `--batch` `--direct` `--headers` `--header` `--log-file` |
-| 运行与元信息 | `--version`（只打印版本号并退出，与 package.json / 桌面壳同一事实源） |
+| 运行与元信息 | `--version`（只打印版本号并退出，与 package.json / 桌面壳同一事实源） `--list-tampers`（只列当前可用 tamper 插件并退出，不发包；[D197] 对标 sqlmap --list-tampers） |
 | 注入请求构造 | `--method` `--body` `--cookie` `--header` `--session-file` `--known-point` |
-| 认证与会话 | `--auth` `--auth-type` `--login-url` `--login-user-field` `--login-pass-field` `--refresh-token` `--refresh-field` `--csrf-method` `--csrf-refresh` |
+| 认证与会话 | `--auth` `--auth-type` `--login-url` `--login-user-field` `--login-pass-field` `--refresh-token` `--refresh-field` `--csrf-method` `--csrf-refresh` `--load-cookies`（cookie 文件载入会话：Netscape/JSON/Cookie 头文本） `--live-cookies`（每请求重读该文件，覆盖同名会话 cookie） |
 | 检测控制 | `--test-filter` `--test-skip` `--no-verify` `--use-registry` `--smart` `--time-baseline-every` `--param-mine` `--crawl-browser` `--forms` `--crawl` |
 | 并发与调度 | `--concurrency` `--concurrency-det` |
 | sqlmap 兼容长名（短名的长形式，脚本可移植用） | `--user` `--db` `--table` `--skip` `--headers` `--concurrency-det` |
@@ -266,7 +268,7 @@ npm run quality:all     # 【门禁】一键全量质量校验（测试/覆盖�
 | 提取与重放 | `--verify` `--flush-session` `--fresh-queries` `--days` |
 | 响应匹配（高级检测） | `--string` `--not-string` `--code` `--text-only` `--titles` `--regexp` `--invalid-bignum` `--invalid-logical` `--invalid-string` |
 | 利用通道（**需 `--authorized` + `EXPLOIT_ENABLED=1`**） | `--os-cmd` `--os-shell` `--sql-shell` `--udf-hex` `--udf-install` `--file-read` `--file-write` `--file-dest` `--driver` |
-| 网络与协议 | `--proxy` `--proxy-bypass-local` `--no-proxy-bypass-local` `--insecure` `--rate` `--threads` `--retries` `--http-timeout` `--delay-sec` `--req-rate` `--max-requests` `--tor` `--check-tor` `--random-agent` `--force-ssl` `--ignore-redirects` `--hpp` |
+| 网络与协议 | `--proxy` `--proxy-bypass-local` `--no-proxy-bypass-local` `--insecure` `--rate` `--threads` `--retries` `--http-timeout` `--delay-sec` `--req-rate` `--max-requests` `--tor` `--check-tor` `--random-agent` `--force-ssl` `--ignore-redirects` `--hpp` `--no-keep-alive` `--drop-set-cookie` |
 | 安全护栏与授权 | `--authorized` `--confirm-destructive` `--no-production-mode` `--no-xp-auto-enable` `--no-validation-skip` `--yes` |
 | 已移除的占位参数（**收参数但不生效**，仅为兼容旧命令行） | `--no-escape` `--union-char` `--max` `--days` |
 > ⚠️ 上表 `--max` / `--days` 指**扫描侧**的占位（收下即丢弃，无效果）。`node server/bin/cli.js ledger prune --max=N` 是 **ledger 子命令自己的参数**，仍然有效，两者同名不同义。
@@ -385,12 +387,13 @@ NTLMv1 三步握手 + 自实现 DES（`core/desEcb.js`，不需要 `--openssl-le
 ## 架构
 
 ```
-frontend/ ← React + TypeScript + MUI + Vite
+src/          ← React + TypeScript + MUI + Vite（前端，`src/App.tsx` 入口）
     ↓ REST API
-backend/  ← Express + Node.js
-    ├── engine/     # 检测引擎（9 种检测器 + Extractor + Exploiter）
-    ├── core/       # 核心模块（tamper / WAF / DB 驱动 / OOB 接收）
-    └── api/        # API 路由（scan / exploit / tamper / health）
+server/       ← Express + Node.js（后端，`server/index.js` 入口）
+    └── src/
+        ├── engine/   # 检测引擎（9 种检测器 + Extractor + Exploiter）
+        ├── core/     # 核心模块（tamper / WAF / DB 驱动 / OOB 接收）
+        └── api/      # API 路由（scan / exploit / tamper / health）
 ```
 
 ## 测试
@@ -399,7 +402,7 @@ backend/  ← Express + Node.js
 # 前端测试（575 个用例）
 npm test
 
-# 服务端测试（3799 个用例）
+# 服务端测试（3954 个用例）
 cd server && npm test
 
 # 全部测试
@@ -425,7 +428,7 @@ npm run artifact:drift   # 入库的 e2e 基线产物必须等于当前代码跑
 
 - TypeScript: 零错误
 - 前端测试: 575/575 通过（覆盖率门禁 stmts 93.16 / branch 84.47 / func 80.63，阈值 88/77/67）
-- 服务端测试: 3799 用例（3795 pass / 0 fail / 4 skip，并发口径 2026-10-25 复测；4 skip 为环境依赖显式跳过。覆盖率 lines 91.56 / branch 80.55 / func 84.98，阈值 85/74/77）
+- 服务端测试: 3954 用例（3948 pass / 0 fail / 6 skip，并发口径 2026-10-30 复测；6 skip 为环境依赖显式跳过。覆盖率 lines 90.78 / branch 79.27 / func 83.96，阈值 85/74/77）
 - 一键扫描: `npm run scan -- -u <url>`（CLI 一条命令产出 HTML/JSON/Markdown 全套报告 + manifest，退出码可直接进 CI 门禁）
 - Tamper 插件: 234 个（含批次 D3 新增 scalarselectinline；含 v24 增量 20 个，对齐 sqlmap 官方 tamper 全集，含官方 CRS/libinjection 实测组合 uniontable+odbcbrace；含批次 D13 新增 5 件上游形态变体 *nospace/*open/*block，真机 A/B 判决前不进默认链）
 - WAF 绕过能力: 200+ 插件链式组合，覆盖 62 个 WAF 厂商指纹识别 + 推荐
@@ -567,18 +570,34 @@ npm run redteam:report  # 汇总（含 sqlmap 同题对照）
 > 旧三轮证据已按 §3.5 标 refuted。复跑命令：`node e2e/redteam-lab/run-scan.mjs r2`。
 
 > docs/ 下文档的分组导航见 [docs/INDEX.md](docs/INDEX.md)（`npm run docs:index` 重新生成）。
+> **对外可信度一页看 [docs/质量台账.md](docs/质量台账.md)**（[D178] 自动生成：门禁项数 / 用例 /
+> 覆盖率 vs 阈值 / 结论台账状态分布；手改即红 `node scripts/quality-ledger.mjs --check`）。
 > **2026-10-13 起分两层**：`docs/` 根只放**现行**文档（42 篇：设计/PRD/实测口径/手册/门禁纪律），
 > 「某一天的评估、审计、批次战报」一律进 [docs/archive/](docs/archive/INDEX.md)（40 篇，含同系列
 > 更晚一份的取代指向）。归档规则与"为什么不删"见该索引页首——归档 ≠ 删除，被证伪的旧结论原样留着。
 
 ### sqlmap 同题对照（定版：26 靶点 × 3 轮，2026-10-04）
 
+> **能力面对标另有底账**：[docs/sqlmap-对标底账.md](docs/sqlmap-对标底账.md)（[D197] 自动生成）。
+> 它回答的是「sqlmap 1.10.7 的 **222** 个能力面**逐项**在本仓处于哪一态」（同名同义 / 等价异构 /
+> 默认即覆盖 / 部分覆盖 / 缺口 / 明确不做），与下面的**检出效果**对照是两件事：
+> 底账里写「等价异构」只表示有落点，够不够用必须回到本节的同题复跑与真机靶场。
+> 复验：`npm run sqlmap:parity`（校验）/ `--write`（重生成）/ `--selftest`（判据自证）/
+> `--refresh`（重跑本机 sqlmap 报上游选项面漂移）。
+> ⚠ 引用覆盖率时不得只报一个百分数：`明确不做`（武器化、目标发现、自更新等 29 项）
+> 既不该算进「未覆盖」，也不能从分母里踢掉 —— 整张分布一起引用。
+
 ```bash
 # 先起靶场环境（常驻），再跑两侧多轮对照
 node e2e/redteam-lab/env.mjs &
-node e2e/redteam-lab/sqlmap-bench.mjs --runs=3      # sqlmap 侧
+node e2e/redteam-lab/sqlmap-bench.mjs --runs=3      # sqlmap 侧（默认档 level1/risk1）
 node e2e/redteam-lab/run-scan.mjs m1                 # 引擎侧默认档 × 3 轮（m2/m3 同）
 node e2e/redteam-lab/strict-compare.mjs --runs=3     # 合并出定版表
+
+# 强档对照（[D194] 双方同升 level3/risk2，检验默认档领先是否只在浅档成立）
+node e2e/redteam-lab/sqlmap-bench.mjs --profile=hard --runs=1   # sqlmap 强档 → results-sqlmap-hard.json
+node e2e/redteam-lab/run-scan.mjs r2-1                           # 引擎强档（r2-2/r2-3 多轮同）
+node e2e/redteam-lab/strict-compare.mjs --hard                   # 合并出强档表 → redteam-strict-hard.md
 ```
 
 | 指标（同分母：19 漏洞点 + 7 安全点） | sqli-scanner（默认档） | sqlmap 1.10.7（--level 1 --risk 1） |
@@ -604,8 +623,10 @@ node e2e/redteam-lab/strict-compare.mjs --runs=3     # 合并出定版表
   `strict-compare.mjs` 从双侧多轮原始结果合成，可复现）。
 
 口径边界：SQLite 靶场 + 浅档对照（引擎侧刻意不用 R2 高档结果参与对比，档位须与
-sqlmap --level 1 对等）。已作为 `redteam` 套件纳入 `npm run acceptance`（需先起靶场；
-CI 里起不来则按 SKIP 处理，不假绿）。
+sqlmap --level 1 对等）。**强档对等对照自 [D194] 起可用**（`--profile=hard` /
+`strict-compare.mjs --hard`，双方同升 level3/risk2，结果见
+`docs/sqlmap-benchmark/redteam-strict-hard.md`）。已作为 `redteam` 套件纳入 `npm run acceptance`
+（需先起靶场；CI 里起不来则按 SKIP 处理，不假绿）。
 
 ### 接口靶场（`npm run e2e:api-range`）
 
@@ -775,7 +796,9 @@ D14 轮起 4.30.0）；跨轮数字比较前先确认同镜像 digest。**未实
 本节自实现执行器口径的数字不能外推到它们。
 复现：`MYSQL_PORT=3306 node e2e/waf-real/waf-verify.mjs`（人工挂链 A/B）与
 `node e2e/waf-real/waf-auto-check.mjs`（自动路径验收）。
-- 直连模式（对标 sqlmap -d）：支持 SQLite 直连（sql.js）+ 真实驱动注册接口（mysql2/pg/mssql/oracle 等需用户自备）
+- 直连模式（对标 sqlmap -d）：内置 **sql.js（SQLite）/ PGlite（PostgreSQL WASM）/ mysql2 / mssql / oracledb(thin)** 驱动，
+  `-d <dsn>` 未传 `--driver` 时按连接串 scheme 推断（[D187]：此前静默回退 `memory` 自检桩会伪造命中）；
+  Oracle 的 SYS 连接用 `?privilege=SYSDBA` 表达；其余驱动（如原生 pg）仍可经 `registerDriver` 接入
 
 ## 贡献
 

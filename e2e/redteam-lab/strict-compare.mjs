@@ -11,15 +11,21 @@
 import { writeFileSync, readFileSync, existsSync } from 'node:fs';
 
 const RUNS = Number((process.argv.find((a) => a.startsWith('--runs=')) || '--runs=3').split('=')[1]) || 3;
+// [D194] --hard：强档对照（sqlmap --level=3 --risk=2 的 results-sqlmap-hard.json ×
+// 引擎 r2-N 轮 results-r2-N.json）。与默认档（level1 vs level1）分开成表，档位对等才可直比。
+const HARD = process.argv.includes('--hard');
 const read = (f) => JSON.parse(readFileSync(new URL(f, import.meta.url), 'utf8'));
 
-const smapPath = `./results-sqlmap-runs${RUNS}.json`;
+const smapPath = HARD ? './results-sqlmap-hard.json' : `./results-sqlmap-runs${RUNS}.json`;
 if (!existsSync(new URL(smapPath, import.meta.url))) {
-  console.error(`缺 ${smapPath} —— 先跑 node e2e/redteam-lab/sqlmap-bench.mjs --runs=${RUNS}`);
+  console.error(`缺 ${smapPath} —— 先跑 node e2e/redteam-lab/sqlmap-bench.mjs${HARD ? ' --profile=hard --runs=1' : ` --runs=${RUNS}`}`);
   process.exit(1);
 }
 const smap = read(smapPath);
-const engineRounds = ['m1', 'm2', 'm3'].map((r) => {
+const engineRounds = (HARD
+  ? ['r2-1', 'r2-2', 'r2-3'].filter((r) => existsSync(new URL(`./results-${r}.json`, import.meta.url)))
+  : ['m1', 'm2', 'm3']
+).map((r) => {
   const f = `./results-${r}.json`;
   if (!existsSync(new URL(f, import.meta.url))) {
     console.error(`缺 ${f} —— 先跑 node e2e/redteam-lab/run-scan.mjs ${r}`);
@@ -27,6 +33,10 @@ const engineRounds = ['m1', 'm2', 'm3'].map((r) => {
   }
   return read(f);
 });
+if (HARD && engineRounds.length === 0) {
+  console.error('缺 results-r2-N.json —— 先跑 node e2e/redteam-lab/run-scan.mjs r2-1（强档引擎侧）');
+  process.exit(1);
+}
 
 const gt = read('./ground-truth.json');
 
@@ -63,14 +73,19 @@ const eAgg = agg('engine');
 const sAgg = agg('sqlmap');
 
 const fmtMs = (ms) => (ms == null ? '-' : ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms`);
+const smapRuns = smap.summary?.runs || RUNS;
+const eDenom = engineRounds.length;
 const rows = perTarget.map((t) =>
-  `| ${t.id} | ${t.kind} | ${t.engine.hit ? '✅' : '❌'}(${t.engine.hitCount}/3) | ${fmtMs(t.engine.ms)} | ${t.sqlmap.hit ? '✅' : '❌'}(${t.sqlmap.hitCount}/${RUNS}) | ${fmtMs(t.sqlmap.ms)} |`);
+  `| ${t.id} | ${t.kind} | ${t.engine.hit ? '✅' : '❌'}(${t.engine.hitCount}/${eDenom}) | ${fmtMs(t.engine.ms)} | ${t.sqlmap.hit ? '✅' : '❌'}(${t.sqlmap.hitCount}/${smapRuns}) | ${fmtMs(t.sqlmap.ms)} |`);
 
+const profileLine = HARD
+  ? '- 引擎档位：**强档**（r2：level 3 / risk 2 / 全技术集）｜sqlmap 档位：**强档**（`--level=3 --risk=2`，D194 起对等升档）'
+  : '- 引擎档位：默认档（与 sqlmap `--level=1 --risk=1` 同为浅档；引擎侧刻意不用 r2 的高档结果）';
 const md = [
-  '# 红队靶场严格同题对照（26 靶点 × 多轮，定版口径）',
+  `# 红队靶场严格同题对照（26 靶点 × ${HARD ? '强档' : '默认档'}，定版口径）`,
   '',
-  `- 日期：${new Date().toISOString().slice(0, 10)}｜方法论：同靶点双方各跑 ${RUNS} 轮，检出多数决、耗时中位`,
-  '- 引擎档位：默认档（与 sqlmap `--level=1 --risk=1` 同为浅档；引擎侧刻意不用 r2 的高档结果）',
+  `- 日期：${new Date().toISOString().slice(0, 10)}｜方法论：同靶点双方各跑多轮，检出多数决、耗时中位（引擎 ${eDenom} 轮 / sqlmap ${smapRuns} 轮）`,
+  profileLine,
   '- 分母：vuln 19 + safe 7 = **26**，两侧完全一致（同题守卫在 bench 启动时钉死）',
   '',
   '| 靶点 | 类型 | 引擎检出(轮) | 引擎中位 | sqlmap 检出(轮) | sqlmap 中位 |',
@@ -85,15 +100,17 @@ const md = [
   `| 安全点误报（7 安全点） | **${eAgg.falsePos}** | ${sAgg.falsePos} |`,
   `| 命中场景中位耗时 | **${fmtMs(eAgg.medianMs)}** | ${fmtMs(sAgg.medianMs)} |`,
   '',
-  '> 口径边界：SQLite 靶场 + 浅档对照；本表取代旧「18/14 分母不同」的单轮对照，',
-  '> 旧结论中「比率不可直接类比」的保留意见自本表起作废。',
+  HARD
+    ? '> 强档口径（D194）：双方同升 level3/risk2，检验默认档领先是否只在浅档成立；单轮快照，稳定性结论仍以默认档多轮为准。'
+    : '> 口径边界：SQLite 靶场 + 浅档对照；本表取代旧「18/14 分母不同」的单轮对照，',
+  ...(HARD ? [] : ['> 旧结论中「比率不可直接类比」的保留意见自本表起作废。']),
   '',
 ].join('\r\n');
 
-const tag = `runs${RUNS}`;
+const tag = HARD ? 'hard' : `runs${RUNS}`;
 writeFileSync(new URL(`../../docs/sqlmap-benchmark/redteam-strict-${tag}.md`, import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1'), md, 'utf8');
 writeFileSync(new URL(`./results-strict-${tag}.json`, import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1'),
-  JSON.stringify({ runs: RUNS, summary: { engine: eAgg, sqlmap: sAgg }, perTarget }, null, 2), 'utf8');
+  JSON.stringify({ runs: RUNS, profile: HARD ? 'hard' : 'default', summary: { engine: eAgg, sqlmap: sAgg }, perTarget }, null, 2), 'utf8');
 console.log(`引擎: 检出 ${eAgg.vulnHit} 误报 ${eAgg.falsePos} 中位 ${fmtMs(eAgg.medianMs)}`);
 console.log(`sqlmap: 检出 ${sAgg.vulnHit} 误报 ${sAgg.falsePos} 中位 ${fmtMs(sAgg.medianMs)}`);
 console.log('定版报告已写入 docs/sqlmap-benchmark/');

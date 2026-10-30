@@ -34,8 +34,15 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.VULNLAB_PORT || 8135);
 const BASE = `http://127.0.0.1:${PORT}`;
 const REPO = 'https://github.com/hediwen831-star/vulnlab';
-const LAB_DIR = process.env.VULNLAB_DIR
-  || join(process.env.LOCALAPPDATA || join(process.env.USERPROFILE || '', 'AppData', 'Local'), 'Temp', 'verify-labs', 'vulnlab');
+// [D188] LAB_DIR 解析：env > 仓内 .verify-labs（耐久，labs.mjs 同款默认）> TEMP（旧默认，兜底）。
+// 原 LAB_DIR 无条件落 %TEMP% —— 供应物被临时清理/AV 清空时套件静默 SKIP（2026-10-27 实测三裁判同日中招）。
+// 候选按「html/sqli/low.php 存在」挑选：起得来的供应物才算数，避免坏供应物蒙混。
+const LAB_DIR_CANDIDATES = [
+  process.env.VULNLAB_DIR,
+  join(HERE, '..', '..', '.verify-labs', 'vulnlab'),
+  join(process.env.LOCALAPPDATA || join(process.env.USERPROFILE || '', 'AppData', 'Local'), 'Temp', 'verify-labs', 'vulnlab'),
+].filter(Boolean);
+const LAB_DIR = LAB_DIR_CANDIDATES.find((d) => existsSync(join(d, 'html', 'sqli', 'low.php'))) || LAB_DIR_CANDIDATES[0];
 const RESULTS_DIR = join(HERE, 'results');
 
 // 三档真值端点（external manifest：low/med=vulnerable，high=negative）

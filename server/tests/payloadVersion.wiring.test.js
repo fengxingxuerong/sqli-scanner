@@ -35,6 +35,10 @@ function extractCallArgs(code, callee = 'selectPayloads') {
   const re = new RegExp(`${callee}\\(\\s*\\{`, 'g');
   let m;
   while ((m = re.exec(code))) {
+    // [D179] 排除**函数定义**：`function selectPayloads({ dbms, ... })` 长得和调用一模一样，
+    // 原判据把它也数成「调用点」⇒ 用定义凑够数量，真正该钉的转发反而可能缺席。
+    // 定义不是调用点，这里必须跳过（自证见 ③ 的 negative 用例）。
+    if (/function\s+$/.test(code.slice(Math.max(0, m.index - 20), m.index))) continue;
     const start = code.indexOf('{', m.index);
     let depth = 0;
     for (let i = start; i < code.length; i++) {
@@ -81,9 +85,12 @@ test('② 反向对照：本判据对"缺键"确实敏感（防恒真判据）',
 test('③ ctx 版选择器也必须转发 dbmsVersion（入口有两种写法时不能只钉一种）', async () => {
   const code = readFileSync(join(SRC, 'engine/payloadRegistry.js'), 'utf8');
   const args = extractCallArgs(code, 'selectPayloads');
-  assert.ok(args.length >= 2, `payloadRegistry 内应有 ≥2 处 selectPayloads 调用（含 selectPayloadsForCtx 的转发），实得 ${args.length}`);
+  assert.ok(args.length >= 1, `payloadRegistry 内应有 selectPayloads 调用（含 selectPayloadsForCtx 的转发），实得 ${args.length}`);
   const forwarding = args.find((a) => /dbmsVersion\s*:\s*(extra\.dbmsVersion\s*\?\?\s*)?ctx\.dbmsVersion/.test(a));
   assert.ok(forwarding, 'selectPayloadsForCtx 必须把 ctx.dbmsVersion 转发给 selectPayloads');
+  // [D179] negative：函数定义不得被当成调用点（否则「转发缺席」也能靠定义凑数）
+  const defOnly = `export function selectPayloads({ dbms, technique, dbmsVersion } = {}) { return []; }`;
+  assert.equal(extractCallArgs(defOnly).length, 0, '函数定义被误算成调用点 —— 判据会被定义骗过去');
 });
 
 test('④ 端到端：真把版本喂进去时，minVersion 条目按版本投放/退场（不是只测被调函数）', async () => {

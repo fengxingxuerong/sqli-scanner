@@ -14,6 +14,9 @@
 //   这里只补 scope，SSRF 那半保留原判：直连是操作者明示意图，不构成服务端被诱导的内网访问。
 // ============================================================================
 import { AppError, ErrorCode } from '../core/errors.js';
+// [D187] 未显式声明 driverType 时按 DSN scheme 推断。此前默认 'memory'：REST 传
+// `connectionString: 'mysql://...'` 不带 driverType，会落到内存自检驱动并伪造命中。
+import { driverTypeFromConnectionString } from '../core/dbDrivers.js';
 // assertDirectDbInScope 的本体在 core/scopeGuard.js：REST 的 mode:direct 与 CLI 的 -d 共用一份判据
 import { parseScope, assertDirectDbInScope } from '../core/scopeGuard.js';
 // 与 HTTP 分支共用同一个配置守卫（clamp / 形状校验 / 白名单键落地）。
@@ -36,10 +39,12 @@ export function buildDirectTarget(b, cfg) {
   if (!b.sqlTemplate || !String(b.sqlTemplate).includes('{INJECT}')) {
     throw new AppError(ErrorCode.INVALID_TARGET, '直连模式需要提供含 {INJECT} 注入标记的 sqlTemplate');
   }
-  const db = b.db || {
-    connectionString: String(b.connectionString),
-    driverType: String(b.driverType || 'memory'),
-  };
+  const db = b.db
+    ? { ...b.db }
+    : { connectionString: String(b.connectionString) };
+  if (!db.driverType) {
+    db.driverType = String(b.driverType || driverTypeFromConnectionString(String(db.connectionString || '')));
+  }
   const scopeRules = parseScope(cfg.scope);
   // 判据本体在 core/scopeGuard.js（REST 的 mode:direct 与 CLI 的 -d 共用一份），此处只接线
   assertDirectDbInScope({ db, connectionString: b.connectionString }, scopeRules);

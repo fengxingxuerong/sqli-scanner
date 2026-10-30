@@ -1,17 +1,20 @@
 # docs 导航索引
 
-> 由 `node scripts/gen-docs-index.mjs` 生成（2026-10-24），
-> 覆盖 docs/ 下 45 篇 md。文档增删后重跑即可；标题取各文件的一级标题。
+> 由 `node scripts/gen-docs-index.mjs` 生成（2026-10-26），
+> 覆盖 docs/ 下 50 篇 md。文档增删后重跑即可；标题取各文件的一级标题。
 
-## 其它（专题笔记与过程记录）（7）
+## 其它（专题笔记与过程记录）（10）
 
 - [Bearer令牌续期.md](./Bearer%E4%BB%A4%E7%89%8C%E7%BB%AD%E6%9C%9F.md) — Bearer/Token 自动续期（长扫描的会话维持）
 - [CI-集成.md](./CI-%E9%9B%86%E6%88%90.md) — 在 CI 里用 sqli-scanner 当 SQLi 门禁
+- [agent-装载.md](./agent-%E8%A3%85%E8%BD%BD.md) — 在 AI 代理宿主里装载 sqli-scanner（D175）
 - [blackbox-lab-已知问题与修复记录.md](./blackbox-lab-%E5%B7%B2%E7%9F%A5%E9%97%AE%E9%A2%98%E4%B8%8E%E4%BF%AE%E5%A4%8D%E8%AE%B0%E5%BD%95.md) — 黑盒评测：已知问题与修复记录
 - [优化底账-2026-10-18.md](./%E4%BC%98%E5%8C%96%E5%BA%95%E8%B4%A6-2026-10-18.md) — 优化底账 · sqli-scanner（2026-10-18 建账）
 - [服务端类型化.md](./%E6%9C%8D%E5%8A%A1%E7%AB%AF%E7%B1%BB%E5%9E%8B%E5%8C%96.md) — 服务端类型化档案（checkJs → strictNullChecks）
 - [自定义检测条目.md](./%E8%87%AA%E5%AE%9A%E4%B9%89%E6%A3%80%E6%B5%8B%E6%9D%A1%E7%9B%AE.md) — 自定义检测条目（`--payload-file`）
 - [请求变换脚本.md](./%E8%AF%B7%E6%B1%82%E5%8F%98%E6%8D%A2%E8%84%9A%E6%9C%AC.md) — 自定义请求变换脚本（签名 / 加密参数接口）
+- [质量台账.md](./%E8%B4%A8%E9%87%8F%E5%8F%B0%E8%B4%A6.md) — 质量台账（自动生成）
+- [配方包规范.md](./%E9%85%8D%E6%96%B9%E5%8C%85%E8%A7%84%E8%8C%83.md) — 配方包规范（CVE 定向检测）
 
 ## 设计文档与 PRD（为什么这么设计）（11）
 
@@ -49,11 +52,12 @@
 - [release-process.md](./release-process.md) — 发布流程（Release process）
 - [user-guide.md](./user-guide.md) — sqli-scanner 用户手册
 
-## 对标与竞品分析（sqlmap / Arjun / ZAP）（4）
+## 对标与竞品分析（sqlmap / Arjun / ZAP）（5）
 
 - [nuclei模板生态可行性调研-2026-10-25.md](./nuclei%E6%A8%A1%E6%9D%BF%E7%94%9F%E6%80%81%E5%8F%AF%E8%A1%8C%E6%80%A7%E8%B0%83%E7%A0%94-2026-10-25.md) — nuclei 式模板生态 · 可行性调研（2026-10-25，W43 对标排队项收口）
 - [technique_inline_oob_tradeoff.md](./technique_inline_oob_tradeoff.md) — 检测技术取舍说明：Inline Queries（sqlmap `Q`）与 OOB 替代决策
 - [竞品对标-2026W43.md](./%E7%AB%9E%E5%93%81%E5%AF%B9%E6%A0%87-2026W43.md) — 竞品对标 · 2026-W43（10-19 ~ 10-25）
+- [竞品对标-2026W44.md](./%E7%AB%9E%E5%93%81%E5%AF%B9%E6%A0%87-2026W44.md) — 竞品对标 · 2026-10-26（滚动窗口 10-19 ~ 10-26，补 W43 未评的一层：agent 分发…
 - [竞品对标分析-2026-10-03.md](./%E7%AB%9E%E5%93%81%E5%AF%B9%E6%A0%87%E5%88%86%E6%9E%90-2026-10-03.md) — 竞品对标分析：sqli-scanner vs GitHub 同类精品（2026-10-03）
 
 ## 体检与评价（项目当前水准的定期体检）（3）
@@ -62,10 +66,11 @@
 - [项目评价-2026-10-03-v2.md](./%E9%A1%B9%E7%9B%AE%E8%AF%84%E4%BB%B7-2026-10-03-v2.md) — sqli-scanner 项目评价 v2（2026-10-03 · 晚间复评）
 - [验收门禁-判定纪律与事故记录.md](./%E9%AA%8C%E6%94%B6%E9%97%A8%E7%A6%81-%E5%88%A4%E5%AE%9A%E7%BA%AA%E5%BE%8B%E4%B8%8E%E4%BA%8B%E6%95%85%E8%AE%B0%E5%BD%95.md) — 验收门禁：事故记录与历史口径
 
-## 实测口径与验证记录（数字怎么来的）（3）
+## 实测口径与验证记录（数字怎么来的）（4）
 
 - [udf-沙箱验证环境与边界.md](./udf-%E6%B2%99%E7%AE%B1%E9%AA%8C%E8%AF%81%E7%8E%AF%E5%A2%83%E4%B8%8E%E8%BE%B9%E7%95%8C.md) — UDF 接管：验证环境与边界（2026-09-18 起，如实说明，勿夸大）
 - [verification-2026-10-22-full-sweep.md](./verification-2026-10-22-full-sweep.md) — 全方面验证报告 · 2026-10-22（从头实跑，不引用历史结论）
+- [审计口径.md](./%E5%AE%A1%E8%AE%A1%E5%8F%A3%E5%BE%84.md) — 安全配置审计口径（`--audit`，D181）
 - [检测与定库-实测口径.md](./%E6%A3%80%E6%B5%8B%E4%B8%8E%E5%AE%9A%E5%BA%93-%E5%AE%9E%E6%B5%8B%E5%8F%A3%E5%BE%84.md) — 检测与定库：实测口径（真机靶场记录）
 
 ## 批次纪要与推进记录（按时间序的战报）（1）

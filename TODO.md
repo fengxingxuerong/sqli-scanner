@@ -5,6 +5,668 @@
 
 ---
 
+## 2026-10-31 批次 D211 · error 判据区分「谁引起的报错」（已完成，见 CHANGELOG）
+
+已交付：`buildHarmlessQuoteVariant()` + `ErrorDetector._quoteAttributed()`
+——命中后补发「无害引号变体」（引号前缀 + 注释后缀、去掉注入载荷），两者引发**同一条**签名才拒绝。
+约束：只在**已命中**后补发 ⇒ 未命中点零开销；单/双引号都覆盖（只认单引号会让双引号闭合模板绕过）。
+
+验证（真 PG 靶场，非 mock）：新裁判点 `/profile?name=1` 三连 A/B ——
+修复前 `error@de9d0cb9`×3（假阳）→ 修复后 `-`×3（0 命中）；3 个真漏洞点全命中、2 个安全点全 0。
+单测 10 例；缺陷注入复验通过（禁用对照 ⇒ ① 转红，②③ 仍绿）。
+
+**遗留（按优先级）**：
+
+| 项 | 说明 | 建议批次 |
+|---|---|---|
+| **其它 DBMS 的裸 OR 模板** | 12 个库的 `boolean[6]/[7]` 仍是裸 OR（MSSQL/Oracle/DM8/ClickHouse/DB2/Sybase/Firebird/Informix/H2/Access/HSQLDB/MonetDB）；已带注释后缀的是 MySQL/MariaDB/TiDB/Derby 与 **[D214] PostgreSQL/SQLite**（真 PG/SQLite 靶场复现后同源修复，PG 另删掉扩容区两条逐字节重复）。理论缺陷同 MySQL（多条件目标上裸 OR 恒假），但**无目标证据** ⟹ 不改。所需证据见 CHANGELOG D213 ③ | 拿到目标证据时 |
+| **error 判据升级到 sqlmap 口径** | 现判据仍是「响应里有没有 SQL 错误签名」；sqlmap 的 error-based 要求**报错中回显取数结果**（payload 内 `<result>` 占位符匹配）。**尚未做**，属较大改动，需先有「不升级就误报」的目标证据 | 有证据时 |
+| 外部真站 btnSubmit 漂移 | testfire 三连仍有 1/3 偶发 boolean 命中；手工 curl 证明该参数三种 payload 响应恒为 8360 字节、完全无差异 ⇒ 归因于外部网络/目标侧（平均延迟 64–110 秒、大量超时重试），**非判据缺陷** | 网络恢复后专项 |
+
+**已证伪 / 已兑现（本批关闭，勿再重复投入）**：
+
+| 项 | 结论 |
+|---|---|
+| boundary 候选丢弃逻辑 | **前提不成立**。hook `probeBoundary` 实测：`/s?q=1`（LIKE）⇒ `"'"`、数值点 ⇒ `""`，均正确。原 TODO 描述的现象源于目标侧无差异 |
+| error 通道跨轮复核 | **已由 D211/D212 覆盖**。归因对照即其复核；D212 后 testfire 三连 error 命中归零 |
+| SecondOrder / InlineQuery 同源风险 | **已有等效判据**。`SecondOrderDetector` 路径 B 用「报错指纹变化 + 阴性对照恢复基线」，与 D211 归因同源，无需推广 |
+
+---
+
+## 2026-10-30 批次 D210 · 闭合前缀探测诊断（已完成，含一处回滚，见 CHANGELOG）
+
+已交付：`_boundaryPairDiff` 的 OR 兜底（AND 优先/命中即早退，空基线目标才多一组请求）+
+`boundary.orPairDiff.test.js` 3 例（含一条**缺陷钉**：AND 能区分的目标当前仍回退空串）。
+回滚：offBaseline 候选差分（能探出 `'` 但把 error 假阳放大到 4/4/2）。
+
+**遗留（按优先级）**：
+
+| 项 | 说明 | 建议批次 |
+|---|---|---|
+| **error 判据不区分「谁引起的错误」** | 只要响应含 SQL 错误签名就判命中 ⇒「参数本身带引号就报错」的目标被判成注入。实测 `btnSubmit=Login' AND extractvalue(…)-- -` 返回 8360 正常页、零语法错误，扫描器却报 `error`。修法：同参数的无害引号变体（`'`、`'-- -`）与 payload 变体成对发，只有 **payload 特异引起**错误才算命中 | **D211（优先）** |
+| boundary 候选丢弃逻辑 | `_boundaryCandidateProbes` 只收「相似于基线」的候选，真正闭合的 `'` 因 `AND 1=1` 改变页面被丢弃 ⇒ 修复方案（offBaseline 差分）已验证可行，等 D211 完成后再启用 | D211 之后 |
+| 目标抖动仍在 | 回滚后真机 1/2/2（run1 漏 uid/passw）。D206 的跨轮复核只覆盖 boolean，error 没有复核，error 假阳会挤占时间片 | 与 D211 同批评估 |
+
+---
+
+## 2026-10-30 批次 D209 · OR 布尔模板补注释后缀（已完成，见 CHANGELOG）
+
+`uid` 漏报已闭合：真机三连从 1/1/1 → **2/2/2**（`uid` + `passw` 都稳定）。
+根因是 MySQL（dbms 未识别时的回退模板集）与 Derby 的 boolean `[6]/[7]` 是**裸 OR**
+（`{ORIG}' OR '1'='1`），被后续 `AND passw=…` 续接后因 AND 优先级恒假 ⇒ 空基线兜底对静默失效。
+已补 `-- -`，并删掉 MySQL 数组末尾两条从未被投放的重复副本（主库 1769 → 1763）。
+
+**遗留**：
+
+| 项 | 说明 |
+|---|---|
+| 其余库的裸 OR 模板 | PG / Oracle / MSSQL / SQLite / H2 / Access 等的 `[6]/[7]` 同样缺注释后缀，但各自 SQL 上下文不同（是否允许 `-- -`、查询里是否本来就没有后续 AND），**须逐个靶场验证后再改**，不盲改 |
+| `_boundaryPairs` 的 OR 对未被真机验证过 | 该函数只在 `point.boundary` 非空时生效；testfire 的 boundary 是空串，所以这条路径**至今没有真机证据**，只有单测覆盖。下次在「闭合前缀可探测」的靶场（如 DVWA）上补一次 |
+| `point.boundary` 为空的上游原因 | testfire 上闭合探测全落空（`'`/`")` 等候选都没命中），但手工 `testuser'` 明显改变 SQL 行为——疑似闭合探测的判据过严。未查，记待办 |
+
+---
+
+## 2026-10-30 批次 D207 · UNION 错误页甄别（已完成，见 CHANGELOG）
+
+已交付：`_probeBody` 增加内容级甄别（响应体命中 `SQL_ERROR_SIG` ⇒ `echoed=false`），
+修掉「Derby/JSP 把 SQL 报错渲染成 200 普通页 → 错误页里的 `SQLISCANNER40` 被当成回显列」的假 union。
+`injection.echoCols.test.js` 8/8（含反向对照防过度收紧），缺陷注入复验 1 红。真机三连 union 假命中消失。
+
+---
+
+## 2026-10-30 批次 D206 · 布尔命中跨轮复核（已完成，见 CHANGELOG）
+
+已交付：`_recheckPair`（命中后跨轮一致性）+ `_pairHasMeaningfulDiff`（主轮/复核轮同口径）
++ `booleanBlind.recheck.test.js` 5/5（缺陷注入复验 3 红）。
+**效果**：同一目标连跑三次 5/2/1 条 → **2/2/2**（`passw` 3/3 稳定）。
+**推翻**：D205 说「`btnSubmit` 疑误报」作废 —— 它以 `error` 技术命中、payload 单个引号就能
+打断 SQL，说明该参数真被拼进 SQL；boolean 不稳是会话漂移，不是不存在注入。
+
+**遗留（按优先级）**：
+
+| 项 | 说明 | 建议批次 |
+|---|---|---|
+| **union / error 无复核** | 仍是抖动源：`uid` 的 union 三次只出现一次；run1「回显列 40（列数 41）」有**反射嫌疑**（payload 里的 `SQLISCANNER40` 可能只是被页面原样回显，不是 UNION 执行结果）。需查 union 的反射甄别并按同一模式加复核 | D207 |
+| **有状态接口的会话漂移** | `testuser/testpass` 是可登录凭据，扫描期登录成功会改变后续所有响应。本轮只做到「不稳就不报」，根治要扫描期会话隔离（每轮重建/清 cookie） | D208（需设计） |
+| 报告缺完整可执行请求 | writer 未按模板输出 `Host/Content-Type/body`，只有 payload + 路径 + 判据。属 prompt 工程 | D207 |
+| **Derby 报错型不稳** | `testuser'` 直接回显 `Syntax error: Encountered ")"`，但三次只有一次判成 `error`（另两次靠 boolean 捞回）。签名模板 `payloads/index.js:391` 已有 Derby 模式 → 属命中不稳，与 union 同批处理 | D207 |
+| `one-click-scan.mjs` 未接 `--ai-report` | 它有自己的参数表，不复用 `parseArgs`；已在 user-guide 标注边界，是否接需决定 | 待定 |
+
+---
+
+## 2026-10-30 批次 D205 · AI 报告 CLI 入口 + 判据透传（已完成，见 CHANGELOG）
+
+已交付：`--ai-report [dir]`、开扫前预检、`summarizeTrace` 判据透传、`AI_REPORT_MASK`、
+空响应守卫（含 `max_tokens: 4096` 在 reasoning 模型上必爆的修复）。
+遗留项已并入上面的 D206/D207，本段仅留档。
+
+---
+
+## 2026-10-30 批次 D197 · sqlmap 对标底账 + 首批 CLI 面接线（全方面补齐的「刻度尺」）
+
+**动机**：任务要求「对比 sqlmap 全方面补齐」。已有五轮对标全是散文（无分母、无逐项状态、
+不防过期），两个方向的失真都实测到了：已闭环仍列（`--parse-errors`/`--hpp`/Digest·NTLM）与
+「引擎已实现、CLI 无入口」被漏判成「未实现」（`--no-keep-alive`/`--drop-set-cookie`/
+`--null-connection`/`--http2`）。先立机器可核对的底账，再按它接线。
+
+**本批**：`scripts/sqlmap-parity.mjs`（生成 `docs/_sqlmap-parity.json` + `docs/sqlmap-对标底账.md`；
+分母＝sqlmap 1.10.7 `-hh` 实测 222 项；六态分类；三条防过期判据；`--refresh` 报上游漂移）+
+接线三项（`--no-keep-alive` / `--drop-set-cookie` / `--list-tampers`）+
+`disableKeepAlive` 纳入受治出口清单（修「config 里有、opts 里没有」这类真缺陷）+
+`server/tests/sqlmapParity.guard.test.js` 9/9。
+
+**优先队列（**计划**，批次号落地时按本地 git log 顺延；缺口共 52：P1 1 / P2 19 / P3 32 —— D198 已落地 `--load-cookies`/`--live-cookies` 两项，[D205] 已把底账改回事实）**：
+
+| 建议批次 | 主题 | 缺口项 |
+|---|---|---|
+| D198 | 会话与 OPSEC（入口靠人手抄、出口留残留） | `--load-cookies`(P1) `--cleanup`(P1) `--live-cookies`(P2) `--purge`(P3) |
+| D199 | 协议形态与宿主钩子 | `--chunked`(P2) `--skip-urlencode`(P2) `--retry-on`(P2) `--crawl-exclude`(P2) `--alert`(P2) `--skip-xmlencode` `--skip-waf`(P3) |
+| D200 | Windows 注册表面（引擎已实现 registryRead/Write，只差接线；REST 亦无入口） | `--reg-*` ×7(P2) `--dbms-cred`(P3) |
+| D201 | 传输形态收口（把「只做了一半」的三项做完：检测链路 h2 / HTTP1 回退 / HEAD 快速判定） | `--http2`(P2) `--null-connection`(P2) `--http1` `--unstable`(P3) |
+| D202 | 强制面与编码（推断错了就没救的几项） | `--os`(P2) `--encoding`(P2) `--charset` `--fingerprint`（OS/Web 面） |
+| D203 | 非 SQL 通道补齐 | `--ldap`(P2) `--xpath`(P2) |
+| D204 | 长尾 P3（26 项，见底账 §二 D204） | `--proxy-file`/`--proxy-freq`/`--tor-type`/`-t`(P2)/`-v`/`--comments`/`--sql-file`/… |
+
+**待推进（仍未关闭）**：
+- 上游选项面会动：`--refresh` 每次跑都会报新增/删除；本批已见 sqlmap 1.10 新增的
+  `--graphql`/`--ldap`/`--nosql`/`--xpath`/`--ssti`/`--live-cookies`/`--base64`/`--abort-on-empty`/
+  `--union-values`/`--retry-on`/`--results-file`/`--repair`/`--skip-heuristics`/`--disable-hashing` 等 ——
+  **底账的分母必须随之更新**（改 INVENTORY_TEXT 后跑 `--write`）。
+- 底账不覆盖「同一旗标的语义深浅」：例如 `--technique` 我们支持 `BEUSTQ` 字母语法而 sqlmap 的
+  偏门写法（`A`＝all）未对齐；这类差异要么补实现、要么写进对应 NOTES，不能默认「同名即同义」。
+- 短名专用面只收了 13 个（`-d/-l/-m/-r/-g/-c/-o/-p/-s/-t/-v/-z/-hh`）；`-U/-D/-T/-C/-X/-A/-H/-f/-a/-b/-s` 等
+  带值的短名靠长名归属（本仓均有长名），未单独计分母 —— 若要对齐 sqlmap 的**短名脚本可移植性**，
+  需要另立一项：把本仓缺的短名别名逐一对齐（当前 `-f` 本仓是 `--format`，与 sqlmap `-f`＝fingerprint 冲突）。
+
+---
+
+## 2026-10-29 批次 D189 · DB2 直连驱动 + 审计方言（IBM Db2 v11.5.8.0 容器真机端到端）
+
+**动机**：D187 后审计方言只剩 DB2 没有驱动句柄。检测侧 `DialectSqlBuilder` 早有 DB2 方言，
+直连审计面补齐后两侧对齐。ibm_db 内置 IBM clidriver 数百 MB，**不进 server 依赖**
+（防回退 D182 包体瘦身），按用户自备模式：未安装抛 `DIRECT_DRIVER_UNAVAILABLE`（6011），不静默回退。
+
+**本批**：`Db2Driver`（`db2://user:pass@host:50000/db`，`DB2_PASSWORD` 兜底，回调式 API 归一化）+
+`db2://` scheme 推断 + `DB2_CHECKS` 四项（version / current-user /
+**instance-authority（high，SYSPROC 表函数）** / dbadm-holders（medium））+ `--help`/README/审计口径同步。
+
+**证据（2026-10-29，容器 ibmcom/db2:latest = DB2 v11.5.8.0 @ VMware Ubuntu 24.04 VM）**：
+- 属主 db2inst1：`summary={"total":4,"pass":3,"fail":1,"unknown":0}`，instance-authority 如实
+  **fail(high)**（SYSADM 经组授予：`d_user='*'`、`d_group='Y'`）；
+- 低权 db2fenc1：`{"total":4,"pass":4,"fail":0,"unknown":0}`，四项查询 PUBLIC 可读、无假 unknown；
+- 实测校准两处「不猜」：实例级权限不在 `syscat.dbauth`（SQL0206N 现场实证），走
+  `SYSPROC.AUTH_LIST_AUTHORITIES_FOR_AUTHID`；`d_user='*'` 不算持有；
+- CLI 端到端真机证据：`-d "db2://..." --audit` ⇒ exit=2、`audit.ran=true dialect=db2`、
+  `vulns=[error]`（error 通道真机命中，直连真库走完整检测链）；
+- 单测 `auditChecks.db2.test.js` 6/6（真机输出作夹具）；关联套件 25/25 零回归。
+
+### 待推进（仍未关闭）
+
+- `auditChecks.db2.test.js` 最后一条「未装不静默回退」负例：装了 ibm_db 的本机会走真连接
+  （clidriver 默认 ~30s 超时）才报错——判据本身两种环境都过，但耗时差异大；可改为
+  stub `import('ibm_db')` 收敛耗时（需模块注入点，暂不为此扩面）。
+- VM/docker 底座是本机手工搭的（VMware Ubuntu 24.04 + docker-ce + DaoCloud 加速）：
+  CI 无 DB2/VMware，沿用 D186/D187 的「真机输出作夹具 + 本机真机证据」口径；
+  若 CI 有实例可补 skip 型真机用例。
+
+---
+
+## 2026-10-28 批次 D188 · 验收可复现性（靶场供应物耐久 + VAmPI 自播种 + 离线判据）
+
+**动机**：D187 提交后按要求补跑 `npm run acceptance`，连中三处与产品代码无关、但会让门禁
+「红绿取决于本机环境」的缺陷：① VAmPI 进程在监听但 DB 空表（官方 app.py 只建空库，须调
+`/createdb`）⇒ 外部裁判 2 号 FAIL，Node 24 undici 解析 500 断连还直接崩进程；②
+`httpClient.protocol.test.js` 的 8 条 URL 改写/重定向判据走真实 SSRF 校验，离线 DNS 失败即 8 fail
+（同一条 acceptance 两次 0 fail / 8 fail）；③ 靶场供应物默认在 `%TEMP%\verify-labs`，被清理/AV
+清空时三裁判静默 SKIP（工作树里上一批未提交的迁移即为此）。
+
+**本批**：
+- 供应物迁移：`scripts/lib/labs.mjs` 默认 `repoRoot/.verify-labs`（`VERIFY_LABS` 覆盖）；DVWA 增加
+  `index.php`/`login.php` 服务性前置；VAmPI 增加 `seedPath: '/createdb'`；
+- `scripts/labs.mjs`：启动后自动播种（node:http，20s），失败判未就绪——「端口在听」≠「靶场可用」；
+- `e2e/vulnlab-lab/run.mjs`：LAB_DIR 三候选解析（env > 仓内 > TEMP），按低档 PHP 存在挑选；
+- `server/tests/httpClient.protocol.test.js`：stub egress 校验，判据不依赖公网 DNS；
+- `server/tests/waf.semanticIntegrity.test.js`：`randomboundary` 退出 12 件稳定名单（随机边界的
+  未闭合注释只在抽到 `/*` 时出现，两次 acceptance 分别 0/1 fail），改为固定坏/好样本验判据；
+- **编号撞车说明**：工作树里未提交的 `[D187]` 标记改为 `D188`——D187 已由 Oracle 批次提交占用。
+
+**证据**：
+- 离线：protocol 测试 8/8（修复前 8 fail）；`waf.semanticIntegrity` 5 连跑 15/15；
+  服务端全量 **3871 用例 3867 pass / 0 fail / 4 skip**；
+- `labs.mjs --up=vampi-vuln` → `已播种 /createdb`；`/users/v1/name1` 由 500 转 200；
+- `gate:close` **35/35**；`npm run acceptance` **25 PASS / 0 FAIL / 1 SKIP**
+  （唯一 SKIP = Juice Shop 构建缺失；VAmPI 转 PASS、Benchmark 43/43、红队 19/19）。
+
+### 待推进（仍未关闭）
+
+- ~~随机型 tamper（`randomboundary` 等）的语义判据应按**样本级**判~~ **[D190 已关]**：
+  `auditPlugin` 改两种子探测 + 固定种子 8 样本最坏情况判危，randomboundary 稳定进名单、
+  全审计可复现；其余 Math.random 插件自动走多样本路径（接入 `ctx.rng` 可得确定性，暂无必要）。
+- `%TEMP%\verify-labs` 旧供应物仍在的部分机器上会被继续使用（`VERIFY_LABS` 可指回）；迁移脚本未做。
+- 外部裁判 1 号 Juice Shop 仍缺 `build/app` 供应物（本批未重建）。
+
+---
+
+## 2026-10-28 批次 D187 · Oracle 审计方言 + `-d` 驱动推断（关闭三处待推进；顺带修「打假库出真结论」）
+
+**动机**：D184/D185/D186 的「待推进」都留着同一条——`--audit` 未覆盖 Oracle（检测侧 `e2e/oracle-lab`
+早有真机 26ai Free）。开工前按 §3.5 先复核用法，当场抓到一个更严重的问题：`-d "mysql://..."` **不传**
+`--driver` 时，CLI / REST / 模型层三处都把 driverType 写死 `memory` —— 实际打的是内存自检桩，
+报告照常出 High（`dbmsVersion=5.7.25-sqlite-sim`、`audit.dialect=sqlite`）。
+「打假库出真结论」正是本仓最反对的「中间层自报成功、无人校验外部事实」，本批一并修。
+
+**本批**：
+- `OracleDriver`（oracledb thin，server 依赖已内置）：DSN
+  `oracle://user:pass@host:1521/service?privilege=SYSDBA`，`ORACLE_PASSWORD` / `ORACLE_PRIVILEGE`
+  兜底；`OUT_FORMAT_ARRAY` 归一化对齐既有驱动契约；`getDriver` 内置 oracle 分派；
+- `dsnFields` 解析 `?privilege=`（其它方言忽略；无参数零回归）；
+- `ORACLE_CHECKS` 六项 + `CHECKS_BY_DIALECT` 注册（⑤ 只读判据自动覆盖）：version / current_user /
+  **oracle-sysdba（high，ISDBA）** / oracle-dba-role（medium）/ 默认 profile 口令校验（medium）/
+  **oracle-directory-priv（high，CREATE ANY DIRECTORY → UTL_FILE 文件读写）**；
+- **[缺陷修复]** `createTarget` 新增 `normalizeDirectDb()`：未显式声明 driverType 时按 DSN scheme 推断；
+  CLI（`args.driverType || 'memory'`）与 REST（`String(b.driverType || 'memory')`）去掉写死默认；
+  `--help` 的 `--driver` 列表同步为 memory|sqljs|sqlite|mysql|pglite|mssql|oracle；
+- **[门禁卫生]** `eslint.config.js` 补 `.verify-labs/**`：本机靶场第三方源码/venv 被 `npm run lint`
+  吃进 907 条噪音（`document is not defined` 等），让门禁红绿依赖本机磁盘；`lintScope.guard` ③ 钉住。
+
+**证据（2026-10-28，本机 Oracle AI Database 26ai Free 23.26.3.0.0 / FREEPDB1）**：
+- SYS SYSDBA 端到端（**未传 `--driver`**）：
+  `audit.ran=true dialect=oracle summary={"total":6,"pass":2,"fail":4,"unknown":0}` ——
+  version=`Oracle AI Database 26ai Free Release 23.26.3.0.0`、current_user=SYS、
+  sysdba/dba-role/password-verify/directory-priv 四项如实 fail；同轮直连扫描 `union`+`error`
+  双命中（`vulns=2`，exit=2）；
+- 低权账号（仅 `CREATE SESSION`）：`{"total":6,"pass":5,"fail":0,"unknown":1}` ——
+  `dba_profiles` 不可见（`ORA-00942`）如实标 unknown 并带 reason，**不计入 pass**；
+- A/B 复核「静默回退 memory」修复：同一条 `-d "mysql://root:root@127.0.0.1:3306/sqli_lab"`，
+  修复前 `driverType=memory` / `5.7.25-sqlite-sim` / `audit.dialect=sqlite`；
+  修复后 `driverType=mysql` / `10.11.19-MariaDB` / `audit.dialect=mysql`（3 项审计真跑）；
+- 单测：新增 `auditChecks.oracle.test.js`（8 条 judges/DSN 判据）；关联套件 12 文件 **85/85** 绿。
+
+### 待推进（仍未关闭）
+
+- ~~`--audit` 仍缺 DB2~~ **[D189 已关]**：DB2 审计方言落地（ibm_db 用户自备 + 容器真机双形态验证），
+  六方言至此齐（PG/SQLite/MySQL·MariaDB/MSSQL/Oracle/DB2）。
+- 低权账号看不见 `DBA_PROFILES` 是真实权限边界（该条必 unknown）；要覆盖需用 DBA 账号连接，
+  报告口径已写明「unknown ≠ 通过」，不另造降级。
+- Oracle 真机未进服务端测试套件（CI 无 Oracle 实例），沿用 D186 的「真机输出作夹具 + CLI 真机证据」
+  口径；若后续 CI 有实例，可补一条 skip 型真机用例。
+
+---
+
+## 2026-10-27 批次 D183 · 棘轮重锚（把已兑现的改善锁进门禁基线）
+
+**动机**：六道守卫是「存量只许持平或下降」的棘轮，但基线不重锚，已兑现的改善就锁不住——
+每次跑门禁都在提示「可下调基线」（complexity 30+ 条）/「可上调基线」（typecoverage 4 个目录）/
+「已消失，可从基线中移除」（deadcode 2 条），提示本身不生效。
+
+**本批**：三道基线重锚，全部走 `--fix-baseline`（complexity 按 D180 设计需显式 `--force` 收录存量硬超限）：
+- complexity：240 → **237** 条（`fileWrite` / `fixBaseline` / `prefilter::<arrow@225>` 已重构达标、退出豁免），
+  13 条下调（`parseRequestFile` 函数体 124→103 行、`buildTools` 圈复杂度 81→72 等）；
+  103 个存量硬超限按 min(旧,当前) 原样保留——先拆分再重锚的纪律不变；
+- deadcode：清掉 2 条失配条目（`dbDrivers` 的 PgDriver / SqlJsDriver 已不存在），164 条与实测对齐；
+- typecoverage：core 50→50.9 / engine 31.5→36.5 / api 29.6→31.5 / services 25.8→40.7（%）。
+
+**证据**：三道门禁 + selftest 全绿；`gate:close` **35/35**（2026-10-27）；途中顺带复验了 D180 拒绝路径
+（不带 `--force` 时 over-hard 拒绝且零副作用，理由与 selftest ⑥⑦⑧ 断言一致）。
+
+### 待推进（仍未关闭）
+
+- 103 个存量硬超限函数（scanRoutes/sanitizeStart、exploitRoutes 等）仍是基线内技术债；拆分属重构批次。
+- duplication 3272 块顶在基线（最大头是词表类数据表互相重复，已有数据表豁免口径）；要收这块需先立豁免判据。
+
+---
+
+## 2026-10-27 批次 D186 · MSSQL 直连驱动 + 审计方言（SQL Server 2022 真机端到端）
+
+**动机**：审计方言表只有 PG/SQLite/MySQL/MariaDB；SQL Server 的检测侧早已 verified
+（e2e/mssql-lab 三通道）但直连面连驱动都没有（getDriver 对 mssql 只会报「未注册」）
+——审计对 SQL Server 无从谈起。
+
+**本批**：
+- `MssqlDriver`（mssql 包已在 server 依赖里）：TCP 直连 + 无凭据时 Windows 集成认证，
+  query 归一化对齐 PgDriver/MysqlDriver 契约（recordset.columns 取列序）；getDriver 内置 mssql 分支；
+- `MSSQL_CHECKS` 三条（version / current_user / **sysadmin 判定**——MSSQL 语境下比 FILE 权限
+  更致命的高危形态）；CHECKS_BY_DIALECT 注册（⑤ 只读判据自动覆盖新方言）；
+- dsnFields 顺手修一个真缺陷：hostname 此前不做 percent-decode
+  （LocalDB 形态 `(localdb)%5C实例` 原样返回）——现在统一解码；
+- 真机：本机 SQLI 服务停着且非管理员无法启动，改用 **LocalDB（同源 SQL Server 2022 引擎）**：
+  .NET SqlClient 建库表 + 開 TCP 口受阻后，用本地 TDS 桥（TCP⇄命名管道，临时取证工具
+  不入仓）完成端到端 CLI `--audit` 直连真实引擎出全量报告。
+
+**证据**：
+- 端到端：`audit.ran=true dialect=mssql {total:3,pass:2,fail:1,unknown:0}`——version=2022 RTM
+  16.0.1000.6、current_user=audit_probe、**mssql-sysadmin fail**（真实高危形态：注入即全实例接管）；
+  同轮直连扫描出 union+error 双命中（exit=2）；
+- 检查项 SQL 先经 .NET SqlClient 在同引擎逐条实跑核实（version/identity/sysadmin=yes）；
+- 单测 6 条（judges 用真机输出作夹具 + dsnFields LocalDB 形态 + 空结果不静默通过），
+  连同 audit/dbDrivers 全量 **35/35** 绿。
+
+### 待推进（仍未关闭）
+
+- audit 未覆盖 Oracle / DB2（无驱动句柄；Oracle 检测侧已有真机靶场 e2e/oracle-lab，审计通道待接）。
+- 本机 SQLI 命名实例服务停止中，恢复需管理员一次（net start MSSQL$SQLI），恢复后可用 65039 端口
+  做 DSN 直连复核（runbook 见 e2e/mssql-lab/results/README.md）。
+- LocalDB 实例 sqli-audit 与 TDS 桥脚本留在 .box-agent-scratch（取证可复现，不入仓）。
+
+---
+
+## 2026-10-27 批次 D185 · WAF 真机报告引擎标签实测化 + 纯 MySQL 8.0.28 审计真机验证
+
+**动机（现场抓到）**：waf-real 报告头**硬编码**「真实 MySQL 8.0.28」，而 MYSQL_PORT 默认 3306 上本机
+站着的是 MariaDB 10.11 靶场——今天 acceptance 再生成的报告继续印 8.0.28，实连引擎却是 MariaDB：
+引擎声明与实连引擎脱钩，违反 §3.5「对外结论与事实同源」。另：tamper-live 预检失败提示写死
+`--port=3307`，与配置默认 3306 矛盾。
+
+**本批**：waf-verify.mjs 落盘前实连查询 `SELECT version()`，JSON `db` 字段与 md 头改印实测版本
+（措辞「靶场（MySQL 协议引擎，实连实测）」，连接失败降级「version 未知」不把报告写坏）；
+tamper-live 提示改为随 MYSQL_CONF.port 同源；顺带把 D:/mysql 便携真 MySQL 8.0.28 拉到 :3307
+跑通纯 MySQL 审计真机（关闭 D181/D184 遗留「纯 MySQL 无单独真机」）。
+
+**证据**：
+- 纯 MySQL 8.0.28：audit.ran=true，3 项全执行（version=8.0.28 / root@localhost / FILE fail）；
+- 标签修复：PL1 重跑 off=8/on=8 与基线零漂移，报告头改印实测
+  `10.11.19-MariaDB @ 127.0.0.1:3306/sqli_lab`；pl3 重跑数字同前（全拦 0 命中，与 §三
+  「PL3/PL4 全零」一致），两份 diff 均仅头部行；
+- 审计口径.md「MySQL / MariaDB」段升为双真机已验证（含两轮实测块）。
+
+### 待推进（仍未关闭）
+
+- audit 未覆盖 Oracle / DB2（无驱动句柄；Oracle 检测侧已有真机靶场，审计通道待接；SQL Server
+  已由 D186 补齐）。
+- waf-real 历史存档（本批之前的报告）印的 8.0.28 无法追溯当时实连引擎；本批起口径永真。
+
+---
+
+## 2026-10-27 批次 D184 · 直连 DSN 凭据修复 + MySQL 系审计真机验证 + registry 式安装判据
+
+**动机**：对真机 MariaDB 跑 `--audit` 当场暴露：DSN userinfo（`mysql://root:***@host/db`）被静默丢弃，
+驱动拿默认 root + 空密码握手报 `auth_gssapi_client`；sqlmap `-d` 语义就是 userinfo 内嵌凭据。
+顺带收编两条遗留：D181「MySQL 三检查项无真机验证」、D182「registry 式安装端到端需用新包重跑」。
+
+**本批**：`dbDrivers.dsnFields()`（DSN → 结构化字段；显式 > DSN > 驱动默认，无 userinfo 零回归）
++ `MysqlDriver` database 透传 + `scripts/pack-install-check.mjs`（干净目录真装真跑，selftest 5 夹具；
+需网络故不进 gate:close，定位发版前体检，写进 release-process §2）+ 审计口径/release-process 同步。
+途中被自家门禁抓两次（见 CHANGELOG）：复杂度棘轮抓 getDriver 变胖 → 抽 mergeDsnFields；
+重复代码门禁抓 run()/selftest 照抄 → 抽 `scripts/lib/packCheckCommon.mjs` 公共件。
+
+**证据**：单测 14/14（新增 dbDrivers.dsn.test.js 9 条）；真机 MariaDB 10.11.19 审计 3 项全执行
+（version / current_user / **FILE 判 fail**）；pack-install 实跑 1.14 MB → 真装 53.4s（185 依赖）
+→ 树干净 → exit=2 命中 3 条。途中被自家门禁抓一次：初版把合并循环写进 getDriver，
+形态-7（防基线虚高）当场红（39→43 行）——按棘轮纪律抽成 mergeDsnFields() helper 后复绿。
+
+### 待推进（仍未关闭）
+
+- 纯 MySQL（非 MariaDB）仍无单独真机；audit 未覆盖 Oracle / SQL Server / DB2。
+- pack-install-check 依赖网络，只在发版前手工跑（release-process §2 已写入口径）。
+
+---
+
+## 2026-10-26 批次 D182 · npm 包体瘦身 + 解包后可跑性判据
+
+**动机**：无 `files` 白名单 ⇒ `npm pack` 27.1 MB（含 `tests/` 与运行期 `ledger/`）；且「发出去的包能不能跑」
+从来没有判据，而本仓反复栽在「本机好好的，拿出去少个文件」。
+
+**本批**：`server/package.json` 加 `files: ["bin/","src/","index.js"]` + `scripts/pack-check.mjs`
+（体积上限 / 必备资产 / 禁止条目 / 解包真跑 + 6 夹具 selftest）+ 进 `gate:close`（33→**35 项**）。
+
+**证据**：27.1 MB → **1.14 MB**；pack-check 实跑「解包后 --help 正常、直连扫描 exit=2、命中 3 条」；
+selftest 6/6；gate:close 35/35 全绿。
+
+### 待推进（仍未关闭）
+
+- **仍未发布 npm**：`private: true` 属发版决策；技术侧（体积 / 内容 / 可跑性）已就绪。
+- ~~`npx` 走 registry 装依赖的端到端~~ **D184 已关闭**：`scripts/pack-install-check.mjs` 真装真跑全绿
+  （1.14 MB 包 → 干净目录安装 → exit=2 命中 3 条），写进 release-process §2 发版前体检。
+- 无公共镜像（GHCR 未推）。
+
+---
+
+## 2026-10-26 批次 D181 · `--audit` 跨 DBMS 只读安全配置审计
+
+**动机**：扫描答「能不能注入」，交付还要答「库本身有多松」。sqlmap 2026-10-19 收编 `--audit`；
+本仓只有「凭据风险标注」，缺配置面。
+
+**本批**：`engine/auditChecks.js`（PG 7 / SQLite 3 / MySQL 3，数据驱动）+ `engine/audit.js`
+（执行器，unknown 单列计数）+ `scan/auditPhase.js`（接线，finalize 前）+ `DirectConnector.getDriverForAudit()`
++ 报告 `audit` 段与 Markdown/HTML 小节 + CLI `--audit` + docs/审计口径.md。
+
+**证据**：单测 6 例；**真机 3 例**（PGlite 真 PG 18：7 项全执行、超管 fail、审计前后数据与 schema 不变；
+sql.js 真 SQLite：外键默认关判 fail、开 pragma 后转 pass）；CLI 端到端 total=7/pass=3/fail=4/unknown=0；
+反向：不带开关无 audit 字段、HTTP 目标写「需要直连」。
+
+### 待推进（仍未关闭）
+
+- **MySQL 三条检查项无真机验证**：本机无 MySQL，状态只能 unknown；补验证要一台真 MySQL。
+- 未覆盖 Oracle / SQL Server / DB2（无驱动句柄）；未产出修复脚本（只陈述事实）。
+- 未接 REST/MCP（与 `--payload-file` 一致，仅 CLI + 直连）。
+
+---
+
+## 2026-10-26 批次 D180 · `--fix-baseline` 写盘安全化
+
+**动机（现场踩到）**：超硬上限存在时，`--fix-baseline` 先写盘再 exit 2 ⇒ 拒绝执行却把基线
+从 242 条/657 行写成个位数。已从 git 恢复并手工删两条失效键。
+
+**本批**：`planBaseline()` 纯函数化（判定先于写盘）+ 两条拒绝规则（over-hard / 基线腰斩）
++ 原子写（temp + rename）+ 拒绝时零副作用；自证 5 → **8 条**（⑥⑦⑧）。
+
+**证据**：`--selftest` 8/8、guard 绿（688 文件 / 240 条基线）、`gate:close` 33 项全绿。
+
+### 待推进（仍未关闭）
+
+- **D181 `--audit`（跨 DBMS 只读配置审计）**：顺延。设计要点已定：复用直连驱动，
+  **PGlite（真 PG 18，WASM）与 sql.js（SQLite）可做真机验证**；MySQL/MSSQL/Oracle 无真机则只能
+  标「模板适配」并写进 `summary.dbmsEvidence` 的同类 caveat。检查项（只读）：版本、超管账户、
+  口令加密方式、public schema 写权限 / 文件权限模型、危险函数可执行性。
+  验收：PGlite + sql.js 两引擎各一轮真值断言；无驱动时明确「不可用」而非静默跳过。
+- `--fix-baseline` 拒绝路径尚无端到端夹具（现在靠纯函数自证 + 代码时序保证）；要真跑需可注入
+  的基线路径（`--baseline <path>`），属工具改造，非本批范围。
+
+---
+
+## 2026-10-26 批次 D179 · 配方包 + 自定义条目高危池缺口修复
+
+**动机**：单 CVE 快响是流量入口；payload 散用会「不知道对应哪个洞 / 验证口径只存在作者脑子里 /
+顺手写 DROP 当证据」。把配方做成目录即单元 + 字段即契约 + 校验器即闸门。
+
+**本批**：`recipes/`（规范 docs/配方包规范.md + demo 配方）+ `scripts/recipe-pack.mjs`
+（check/export/selftest 11 夹具）+ 进 `gate:close`（31→**33 项**）+ 台账/INDEX/文档同步。
+**并修掉一个真缺口**：自定义条目的 `'; DROP TABLE` 此前能绕过高危池硬门（`isDestructivePayload`
+只认同串/id）；现在合并时打 `_custom` + 语句判据 `hasDestructiveSql()`，内置判定不变；
+单测 ⑰ 钉住，文档口径同步更正。
+
+**证据**：recipe check/selftest 绿（11/11）；export 2 条；靶场 A/B 基线 exit 2 / 带配方 exit 2（集合一致）/
+安全对照 exit 0；customPayloads 17 例全过。
+
+### 待推进（仍未关闭）
+
+- **没有真实 CVE 配方**：闸门就位（demo 禁止带 cve），等真机验证证据再收录。
+- 配方未接 UI/REST；未做外部订阅（拉清单≈目标发现，红线）。
+
+---
+
+## 2026-10-26 批次 D178 · 质量台账（对外可核查的一页）
+
+**动机**：31 项门禁 + 28 条 claim 台账 + 26 套验收只存在于内部输出，外部看不见；竞品都在喊
+evidence-bound 但没有可核查台账（`docs/竞品对标-2026W44.md` §二）。
+
+**本批**：`scripts/lib/gate-list.mjs`（清单单一真源，gate-close 改为 import + 重名自证）+
+`scripts/quality-ledger.mjs`（真源 → `docs/质量台账.md`；`--check` 手改即红；`--selftest` 6 条判据）+
+接进 `gate:close`（29→**31 项**）；AGENTS §3/§3.5、release-process、en-quickstart、docs INDEX 同步。
+
+**证据**：台账 2150 字符、`--check` 绿（31 项）；手改「575→999」→ `--check` exit **1**，还原 → 0；
+`gate-close --selftest` 31 项 / wiring 68；台账数字与真源一致（验收 26 套件、靶场 42、覆盖率
+91.71/80.38/85.17 vs 阈值 85/74/77、claims 28=20+7+1）。途中修掉「只数出 12/26 套件」的漏算。
+
+### 待推进（仍未关闭）
+
+- **未发布成网站**：只以仓库内 Markdown 存在；要对外挂 Pages 需先定发布链路（避免再开未验证面）。
+- 台账未含「外部裁判」逐套件结果（现在只有套件总数）；要按裁判列明细得先有机器可读汇总。
+- 台账未含 `acceptance` 最近一次实跑时间（facts 只采测试与覆盖率）。
+
+---
+
+## 2026-10-26 批次 D177 · 可复现件 `--repro-check`
+
+**动机**：「报告里有 High」≠「这条 High 能稳定复现」；poc.curl 只是一条能跑的请求，
+会话失效/WAF/抖动会让它第二次就变样。缺的是「两次重放是否一致」的判据。
+
+**本批**：`services/reproPack.js`（归一化 + repro.sh + expect.json + 文件名安全化）+
+`services/reproCheck.js`（replayVuln → annotateRepro → writeReproPack）+ CLI `--repro-check [dir]`
+（出报告前重放；走 httpClient 护栏；三重判定 reproduced/single_hit/unreplayable，带 reason）；
+help/one-click/README/user-guide/AGENTS 同步。
+
+**证据**：靶场 A/B `/items?cat=1` → 3/3 reproduced（len 504/253/437）、`/blog?id=1` → 0 命中 0 脚本；
+**跨秒重放（间隔 1.2s）仍 3/3**（易变时间戳剔除生效）；单测 8 例。
+途中修掉两个假绿：① PoC 惰性挂载未先 attach ⇒ 全 unreplayable；② 响应体字段是 `data` 不是 `body`
+⇒ 哈希恒为空、判据退化成只看状态码。
+
+### 待推进（仍未关闭）
+
+- `repro-*.sh` 本机未实跑（这台 Windows 无 bash；生成器/转义有单测覆盖，需 WSL/Git Bash 或 Linux CI 实跑一次）。
+- 「单次命中」缺真机样本（只有单测 + 假通道）；找含随机内容的靶场补一条。
+- 未接 REST/MCP（MCP 侧最自然的位置同样并入 `get_report`）。
+
+---
+
+## 2026-10-26 批次 D176 · 修复回路 `--fix-prompt`
+
+**动机**：报告给人读，但扫描后的下一步常是「交给编码代理去改」——缺「改哪/怎么改/改完怎么验」。
+
+**本批**：`services/fixPrompt.js`（9 通道 why+改法+复测命令，未知通道兜底；inconclusive 先声明口径）
++ CLI `--fix-prompt [dir]`（索引 + 逐条 md，不自动改代码）+ `--help`/one-click/README/user-guide/AGENTS 同步。
+
+**证据**：单测 7 例（含 safeName 真缺陷：`..` 留在文件名里 → 已修）；靶场 A/B
+`/items?cat=1` exit 2 / 3 条 / 3 份提示词，`/blog?id=1` exit 0 / 0 条 / 仅索引。
+
+### 待推进（仍未关闭）
+
+- 批量模式（`-m`）不逐目标生成；REST/MCP 未暴露该产物（MCP 侧下一步并入 `get_report` format 枚举）。
+- 提示词只覆盖「通道级标准改法」，不含框架特化（如 MyBatis `${}`、Django `.raw()`）——需真实诉求再补。
+
+---
+
+## 2026-10-26 批次 D175 · agent 装载面（能力有 ≠ 装得上）
+
+**动机**：MCP 9 工具（D43）齐全，但宿主里装不上——没有插件清单/技能说明/`.mcp.json`，
+只有 AGENTS.md 里一段要手抄的 JSON；三者漂移（版本、工具名、越界话术）无任何判据。
+外部信号：`topic:claude-skills` 近 25 天新建 2,728 仓（`docs/竞品对标-2026W44.md` §二）。
+
+**本批**：`.mcp.json` + `.claude-plugin/plugin.json`（版本与 `server/package.json` 同源）+
+`skills/sqli-scan/SKILL.md`（9 工具名 + 三条硬口径 + 红线）+ `scripts/agent-manifest-check.mjs`
+（11 类反向夹具自证）。接线：`agent:check` 进 `gate:close`（27→**29 项**）与 pre-commit 2f；
+AGENTS §3/§4.1、README MCP 行、release-process/quickstart 项数同步；新增 `docs/agent-装载.md`。
+
+**证据**：`agent:check` 绿（9 工具）；`--selftest` 11/11；真仓双向变异（技能漏工具名 / 版本漂移
+→ exit 1，还原 → 0）；MCP `tools/list` = 1 行 9 工具；`npm pack` 27,237 KB +
+`npx --package <tgz> sqli-scan --version` → `1.2.0` exit 0。
+
+### 待推进（仍未关闭）
+
+- **未发布 npm**（两个 `package.json` 仍 `private: true`）：发布前必须先做 `files` 白名单——
+  当前 tarball 27 MB（含测试与产物），发出去等于每次 `npx` 都拉全量。
+- **宿主矩阵未实测**：只验了 `.mcp.json` 形态；Claude Code 插件装载与 Cursor 未跑真机，
+  版本差异需记进 `docs/agent-装载.md` §五。
+- **无公共镜像**：`Dockerfile` 只在本地，未推 GHCR。
+
+---
+
+## 2026-10-26 批次 D174 · 多键拼接判据扩到 JSON 键名
+
+**动机**：D169（form）/ D173（query）之后，同判据的第三个载体还差 JSON body 键名
+（`Object.keys(req.body)` 拼进 WHERE）。盲档实测 0 检出。
+
+**本批**：`KEY_CARRIERS` 加 `json`；post-pass fallback 补 json；证据文案按载体区分。
+靶场新增 `/api/json-filter`（含 `/safe/` 与 `-blind` 变体）。A/B：不含 json → 0 检出；
+补上 → 1 条命中、对照 0 误报。测试 +2（并把「不接」的边界从 JSON 改到 XML）。
+
+### 待推进（仍未关闭）
+
+- XML 元素名（carrier='xml'）**结构性不接**本判据：NameChar 不允许空格/逗号，本判据的载荷
+  形态（`{k} = 'x' OR 1=1-- `）在元素名位置上不合法 —— 由 D105 的算术位移探针单独覆盖。
+- `buildJsonKeyRequest` 改名后**键序会变**（删旧键、新键追加到末尾）。对「只看第一个键」
+  的后端，注入键可能不是被拼进 SQL 的那个 —— 本次靶场按「全部键拼接」实现，属常见形态；
+  只取首键/尾键的后端未验（已登记）。
+- 三个载体（form/query/json）共用同一 `-- ` 注释假设：后端若用 `?` 占位符参数化**值**而
+  键名后无固定后缀（`WHERE ${keys.join(' AND ')}`），本判据仍需单独验证。
+
+---
+
+## 2026-10-26 批次 D173 · 多键拼接判据扩到 query 参数名
+
+**动机**：D169 的判断只接了 `carrier='form'`；同一形态在 URL query 上也存在
+（`?name=alice&go=1` → `WHERE name = 'alice' AND go = '1'`），而 query 载体此前只有
+orderByKey 序数差分（WHERE 位置只会语法错误）⇒ 盲档 0 检出。
+
+**本批**：`formKeyBool.js` 泛化为 `keyBool.js` / `KeyBoolDetector`，`KEY_CARRIERS = {form, query}`；
+判据本身不变；构造沿用 `buildParamNameRequest`（只改已有键）。post-pass fallback 放宽到
+`form || query`。A/B：收回 `{form}` → 0 检出；恢复 → 1 条命中、对照 0 误报。测试 +2。
+
+### 待推进（仍未关闭）
+
+- **JSON 键名（carrier='json'）刻意未接**：改 JSON 键会改变序列化引号/转义语义，
+  与「改 URL/表单键名」不同，需要单独验证（当前在单测里钉成「零请求跳过」）。
+- 该判据要求「键名后面跟着固定后缀」（` = '值'`）。若后端把键名单独拼成
+  `WHERE ${keys.join(' AND ')}`（无固定后缀），`-- ` 之后无可吞内容，仍需单独验（D169 已登记）。
+- query 键名的多键形态依赖目标 URL 里**已有**该参数（`buildParamNameRequest` 不新增键）；
+  `--param-mine` 挖出的隐藏参数会进值通道，是否会生成键名点未验。
+
+---
+
+## 2026-10-26 批次 D172 · SPA 的 XHR 端点路径段注入
+
+**动机**：D170 修了站内链接的路径面；浏览器捕获的 **XHR/fetch 端点**是另一半，而且
+SPA 上它是主发现面——接口端点常是 REST 形态（`/api/orders/5`，无 query），原实现只抽
+query 键 ⇒ 0 个注入点。
+
+**本批**：端点合并抽成 `_mergeEndpointTarget`（静态资源过滤在合并层再做一遍 + `viaBrowser`
+标记），与爬取链接共用整场 path 预算（8）。真 Chromium 端到端验证：靶场新增 `/spa`
+（空壳 + `fetch('/api/users/5/orders')`），A/B 实测关闭端点路径点 → 0 检出；恢复 →
+2 条命中（union@5 / error@5，报告里 actionUrl 指向端点、viaBrowser 可见）。
+测试 +4；全套探针 28 用例全绿。
+
+### 待推进（仍未关闭）
+
+- 预算 8 是拍的值：SPA 端点数量通常远多于链接，真实站点上可能需要按端点数量自适应
+  （例如 ceil(端点数/10)），当前是硬顶。
+- 浏览器爬取的 endpoints 里含**带 hash 的 URL**（`#/route`），`_discoverPathPoints` 只看
+  pathname，hash 路由的段不会被测——SPA 的 hash 路由形态（Vue Router hash 模式）未覆盖。
+- 端点的 path 点同样只在 `--test-path` 显式开启时生成（与主目标同语义），未做"SPA 自动开"。
+
+---
+
+## 2026-10-26 批次 D171 · 表单 `<select>` 字段采集
+
+**动机**：`--forms` 的表单解析只认 `<input>`/`<textarea>`；筛选/排序表单的注入面经常就在
+下拉值上（`sort`/`status`/`id`），缺它时这类表单只剩按钮字段 ⇒ **0 个注入点** ⇒ 报告写
+「未检出」。实测日志 `[发现] 0 个注入点`。
+
+**本批**：`_collectSelects` 按浏览器语义取值（优先 selected，否则第一个带 value 的选项），
+input 同名优先，无 value 的 option 跳过。A/B 实测：去掉采集 → 0 检出；恢复 → 3 条命中、
+安全对照 0 误报。靶场新增 `/select-filter-page` + `/api/select-filter` + 安全对照；
+全套探针 26 用例全绿；测试 +5。
+
+### 待推进（仍未关闭）
+
+- `multiple` 多选 `<select>` 只取第一个值（浏览器会提交多个同名键），未验证。
+- 无 `value` 属性的 option（浏览器提交文本）刻意跳过：要覆盖需先确认文本里的空格/中文
+  怎么编码，否则注入点会发畸形报文。
+- `<select>` 出现在**爬取页**（非入口页）时，依赖 crawlForms 开启才解析——行为与 input 一致，
+  未单独测。
+
+---
+
+## 2026-10-26 批次 D170 · 爬取链接的路径段注入（--test-path 覆盖面）
+
+**动机**：D154 的 `--test-path` 只作用于主目标 URL；爬取产出的站内链接只抽 query 键，
+REST 形态的链接（`/api/users/5/orders`，无 query）于是产出 0 个注入点 ⇒ 路径面在爬取
+路径上整体缺失。
+
+**本批**：每条爬取链接额外走 `_discoverPathPoints`（与主目标同一套段分类），点带 actionUrl；
+整场最多 8 个爬取路径点（预算）。`_mergeCrawlFindings` 复杂度一度 18（>15），按纪律把单链接
+合并抽成 `_mergeLinkTarget`。A/B 实测：上限改 0（旧行为）→ 0 检出；恢复 → 2 条命中。
+靶场新增 `/path-links` + `/safe-path-links`，24 用例全绿；测试 +4。
+
+### 待推进（仍未关闭）
+
+- 预算 8 是拍的值，不是从真实站点链接分布算出来的；要调需要先有「爬取链接数分布」样本。
+- `--crawl-browser` 的 endpoints（XHR）同样只抽 query —— 无 query 的 XHR 端点（如
+  `/api/orders/5`）仍不会被建路径点。同一族的另一半，下一批可收（注意 SPA 端点数量大，
+  预算要更严）。
+- 爬取路径点不参与 `--param-filter path` 之外的筛选语义验证（与主目标同源逻辑，未单独测）。
+
+---
+
+## 2026-10-26 批次 D169 · 多键拼接形态的字段名注入（盲档补判据）
+
+**动机**：D166 覆盖了字段名进 **ORDER BY** 的形态；同一族的另一半是「全部字段名拼进
+WHERE」（动态筛选构造器，值转义/参数化、列名来自字段名）。
+
+**先排除、再补**：
+- 错误可见的目标上这条形态**已被既有通道命中**（error@name / error@go）——首版假设
+  「需要新增键探针」被实测推翻，靶场用例保留作回归。
+- 盲档（错误被吞成「没查到」）才是真缺口：通用布尔载荷 `{k} AND 1=1-- -` 里 varchar
+  列名被当 0 ⇒ 恒真恒假都是 0 行；orderByKey 的序数差分在 WHERE 位置只会语法错误。
+
+**本批**：新增 `detectorSupport/formKeyBool.js`（仅 carrier='form'）：`{k} = 'x' OR 1=1-- `
+vs `OR 1=2-- `，未知列对照不自证即放弃，复核轮稳定才落槌；接在 orderByKey 之后跑。
+**行注释必须是 `-- `（带尾空格）**：`/* */` 吞不掉固定后缀（实测两页反转），`-- -` 在
+Derby 上 Lexical error。实测盲档 0/1 → 1/1；靶场 22 用例全绿；测试 +4；
+复杂度基线只重锚两个匿名箭头（值原样）。
+
+### 待推进（仍未关闭）
+
+- 该判据假设「字段名后面跟着固定后缀」（如 ` = '值'`）。若后端把键名单独拼成
+  `WHERE ${keys.join(' AND ')}`（键名本身就是完整表达式，后面没有固定后缀），
+  `-- ` 之后无可吞内容 —— 语法仍成立（注释在末尾），但 `{k} = 'x'` 这一半会改变语义，
+  需要单独验证；当前靶场没有这种形态。
+- 只覆盖 multipart（carrier='form'）；query 键名的多键拼接形态未验（query 键改名等价于
+  改参数名，语义不同，单独评估）。
+- 盲档判定依赖「两页可区分」；目标若把「有结果/无结果」渲染成同一页（前端渲染型），
+  仍会漏 —— 与所有布尔通道共面的边界。
+
+---
+
 ## 2026-10-26 批次 D168 · 页面表单 enctype=multipart 的发送形态
 
 **动机**：multipart 的第三处入口。D159 修了 `-r` 抓包，D166 修了字段名，剩下的

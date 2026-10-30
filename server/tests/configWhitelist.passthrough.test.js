@@ -103,6 +103,10 @@ const PROBE = {
   // 它是枚举/拖库动作族的配置对象，mode 必须在 18 个白名单值内（引擎 switch 的判据），
   // 形状校验见 scanRoutes 的 sanitizeExtractScope。这里给最小合法值，测「透传在不在」。
   extractScope: { mode: 'dbs' },
+  // [D205 代 D198 收口] liveCookiesFile 的探针值：该键**只收**工作目录文件名/临时目录内路径
+  //（scanGuard/bespokeKeys 用 isSafeSessionPath 拦绝对路径与 .. 逃逸，因为内容会被当 cookie 发给目标）。
+  // 默认探针 `1` 会命中「非法」分支被误判成「无透传」——这里给最小合法值，测的仍是透传在不在。
+  liveCookiesFile: 'probe-cookies.txt',
   db: null,
   connectionString: null,
   sqlTemplate: null,

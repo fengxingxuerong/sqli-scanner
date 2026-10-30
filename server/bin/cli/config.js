@@ -14,7 +14,9 @@
 // 已由段 3 落值），改序前先读对应 helper 的注释。
 // ============================================================================
 import { parseHeaders, parseAuth } from './args.js';
-import { readFileSync } from 'node:fs';
+// [D205] --ai-report 的开扫前预检（env 不全直接拒绝，不让用户扫完三分钟才发现没配上）
+import { assertAiReportUsable } from '../../src/services/aiReportCli.js';
+import { readFileSync, existsSync } from 'node:fs';
 import { logger } from '../../src/core/logger.js';
 import { defaults } from '../../src/config/defaults.js';
 import { PAYLOADS, enableDestructivePayloads } from '../../src/engine/payloads.js';
@@ -661,15 +663,50 @@ function applyProtocolAndMisc(config, args) {
   if (args.hex) config.hex = true;
   if (args.unionCols) config.unionCols = String(args.unionCols).slice(0, 16);
   if (args.unionFrom) config.unionFrom = String(args.unionFrom).slice(0, 100);
+  // [D197 2026-10-30 对标 sqlmap] 出口形态两项 —— 引擎消费点早已存在，缺的只是 CLI→config 这一跳：
+  //   config.disableKeepAlive → 出口选项（egressOpts 已把本键纳入受治清单 → 检测/提取/指纹同一形态）
+  //   config.dropSetCookie    → buildEgressOpts → cookieJar（不回发响应 Set-Cookie）
+  // 同批没接的 --null-connection / --http2 只做了一半（死调用点/仅取页面），见 args.js 的说明。
+  if (args.disableKeepAlive) config.disableKeepAlive = true;
+  if (args.dropSetCookie) config.dropSetCookie = true;
+  // [D198 对标 sqlmap --live-cookies] 每请求重读的 cookie 文件（见 applyLiveCookies）
+  applyLiveCookies(config, args);
+}
+
+/**
+ * [D205 代 D198 收口] `--live-cookies` 接线，从 `applyProtocolAndMisc` 抽出
+ *（那里每加一个 if 都算圈复杂度，抽前已到 16 > 软上限 15）。
+ * 不带值 = 收参数不生效，故**拒绝启动**（本仓红线）；启动前自检可读性 ——
+ * 让「路径写错」在开扫那一刻报出来，而不是扫完半小时才发现整场在用过期会话（那种报告长得像「未检出」）。
+ * @param {Record<string, any>} config 目标配置（原地写）
+ * @param {Record<string, any>} args CLI 参数
+ * @returns {void}
+ * @throws {Error} 不带值（true）或文件不存在
+ */
+function applyLiveCookies(config, args) {
+  if (args.liveCookies == null) return;
+  if (args.liveCookies === true) throw new Error('--live-cookies 需要一个 cookie 文件路径（支持 Netscape/wget cookies.txt、JSON 数组、或一段 Cookie 头文本）');
+  const file = String(args.liveCookies);
+  if (!existsSync(file)) throw new Error(`--live-cookies 文件不存在：${file}`);
+  config.liveCookiesFile = file;
 }
 
 // 构建 config：透传 level/risk/technique/dump/tamper/proxy/rate/threads
 export function buildConfig(args) {
+  // [D205] AI 报告预检：`--ai-report` 已给但 AI_REPORT_API_BASE/KEY 未配齐 → 这里就抛，
+  // 不等到扫描跑完三分钟才在落盘阶段失败（收参数不生效是本仓红线）。
+  assertAiReportUsable(args);
   const enumActive = isEnumMode(args);
+  // 显式标注为开放对象：下面各 apply* helper 会往里加键（提取/导出族、通道开关等），
+  // 若让 TS 按字面量推断成封闭类型，任何新增键都会报 TS2339（D181 加 audit 时踩到）。
+  /** @type {Record<string, any>} */
   const config = {
     concurrency: args.concurrencyDet,
     ratePerSec: args.ratePerSec,
     enableExtract: args.dump || enumActive,
+    // [D181] 只读安全配置审计（对标 sqlmap --audit）：仅在 -d 直连下有意义，
+    // 但此处不硬拦——非直连时 auditPhase 会写一条「需要直连」的 unknown 说明（不静默跳过）。
+    ...(args.audit ? { audit: true } : {}),
   };
   // [D67] 调用顺序 = 原语句顺序（逐段搬移的守恒约束；跨段依赖见各 helper 注释）
   applyScanLevelAndRisk(config, args);

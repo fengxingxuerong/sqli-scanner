@@ -10,15 +10,18 @@ export const randomboundary = {
   name: 'randomboundary',
   description: '在关键字之间插入随机边界符，绕过 WAF 关键字检测',
   /**
+   * [D190] 随机源可注入：`ctx.rng` 存在时用它（语义审计的固定种子采样 ⇒ 判定可复现），
+   * 缺省仍用 Math.random（运行期行为零变化）。
    * @param {string} payload
-   * @param {object} ctx
+   * @param {{rng?: () => number}} [ctx]
    * @returns {string}
    */
   transform(payload, ctx) {
+    const rand = ctx && typeof ctx.rng === 'function' ? ctx.rng : Math.random;
     let s = String(payload ?? '');
     for (const re of RES) {
       s = s.replace(re, (match) => {
-        const boundary = BOUNDARIES[Math.floor(Math.random() * BOUNDARIES.length)];
+        const boundary = BOUNDARIES[Math.floor(rand() * BOUNDARIES.length)];
         return `${match}${boundary}`;
       });
     }

@@ -172,8 +172,120 @@ export const INVARIANTS = [
   { id: 'unclosed-comment', title: '块注释未闭合（整段留在注释里）', detect: (out) => findUnclosedComment(out) },
 ];
 
+/** 审计采样数：随机型插件的「最坏情况」判定窗口（固定种子 ⇒ 判定可复现，不随 Math.random 抖动） */
+const AUDIT_SAMPLES = 8;
+
 /**
- * 单插件审计：实测派生 + 不变量检查。
+ * FNV-1a 字符串哈希（审计采样种子派生用，非加密用途）。
+ * @param {string} s 输入串
+ * @returns {number} 32 位无符号整数
+ */
+function hashString(s) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return h >>> 0;
+}
+
+/**
+ * mulberry32 确定性 PRNG（审计采样专用；同种子必得同序列 ⇒ 全审计可复现）。
+ * @param {number} seed 32 位种子
+ * @returns {() => number} 返回 [0,1) 浮点的函数
+ */
+function mulberry32(seed) {
+  let a = seed >>> 0;
+  return function next() {
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/**
+ * [D190 样本级判危] 对一条语料产出审计样本：
+ * 先用两种子各跑一次，输出一致 ⇒ 确定型插件，单样本即可（存量行为零变化）；
+ * 不一致 ⇒ 随机型，补满样本数并对**全部样本**取最坏（任一样本命中不变量即计破坏）。
+ *
+ * 为什么必须这么做：randomboundary 从 6 种边界随机取，只有抽到单独 `/*` 时才产生
+ * 未闭合注释——单次抽样当判据会在两次 acceptance 里给出相反结论（D188 实测 0/1 fail
+ * 无代码差异）。样本级 + 固定种子的组合把「一次抽样走运/倒霉」变成「可复现的最坏情况」。
+ *
+ * 未接入 `ctx.rng` 的随机插件（忽略注入、直接用 Math.random）也会走多样本路径
+ * （两种子输出大概率不同），判定质量同样提升，只是不可复现——接入 `ctx.rng` 即得确定性。
+ * @param {{name: string, transform: (s: string, ctx?: object) => string}} p 插件
+ * @param {string} input 语料原文
+ * @returns {string[]} 变换后的样本集合（全部与输入相同 ⇒ 空数组）
+ */
+function transformSamples(p, input) {
+  const rngA = mulberry32(hashString(`${p.name}:a:${input}`));
+  const outA = String(p.transform(input, { rng: rngA }));
+  if (outA !== input) {
+    const rngB = mulberry32(hashString(`${p.name}:b:${input}`));
+    const outB = String(p.transform(input, { rng: rngB }));
+    if (outB === outA) return [outA];
+    const outs = new Set([outA, outB]);
+    for (let i = 0; outs.size < AUDIT_SAMPLES && i < AUDIT_SAMPLES * 4; i++) {
+      const rng = mulberry32(hashString(`${p.name}:s${i}:${input}`));
+      outs.add(String(p.transform(input, { rng })));
+    }
+    return [...outs];
+  }
+  return [outA];
+}
+
+/**
+ * 对单条语料的全部样本做派生与不变量检查（[D190] 从 auditPlugin 抽出：样本级循环，
+ * 拆分原因=复杂度棘轮，auditPlugin 存量基线只许持平或变浅）。
+ * @param {{name: string, transform: (s: string, ctx?: object) => string}} p 插件
+ * @param {string} input 语料原文
+ * @param {string[]} samples 变换样本（transformSamples 产物）
+ * @param {{eliminated: Set<string>, introduced: Set<string>, violations: Array<{id: string, evidence: string[], onCorpus: number}>}} acc 跨语料累计器
+ * @returns {{allGone: boolean, broken: boolean, hitInv: Set<string>}} 本语料判定：
+ *   allGone=任一样本「输入关键词全消」；broken=任一样本命中任一不变量；
+ *   hitInv=本语料命中的不变量 id 并集（onCorpus 每语料只计一次，语义与单样本时代一致）
+ */
+function evaluateSamples(p, input, samples, acc) {
+  let broken = false;
+  let allGone = false;
+  const hitInv = new Set();
+  for (const out of samples) {
+    // 字面是否还在 → 看**解码后**的形态（见 normalizeForToken 的踩坑说明）
+    const seen = normalizeForToken(out);
+    const presentIn = DERIVE_KEYWORDS.filter((k) => wordRe(k).test(input));
+    let gone = 0;
+    for (const k of DERIVE_KEYWORDS) {
+      const hasIn = wordRe(k).test(input);
+      const hasOut = wordRe(k).test(seen);
+      if (hasIn && !hasOut) { acc.eliminated.add(k); gone += 1; }
+      if (!hasIn && hasOut) acc.introduced.add(k);
+    }
+    // 整串消除：输入里出现的关键词**全没了**（编码族的特征），且确实有词可消
+    if (presentIn.length > 0 && gone === presentIn.length) allGone = true;
+    for (const inv of INVARIANTS) {
+      const ev = inv.detect(out, input);
+      // ⚠️ 这里的 else 必须加大括号：`if (cur) for (...) if (x) A; else B;` 的 else
+      //    会被解析进**内层** if（dangling else）⇒ 首次命中（cur 为 undefined）永不入账，
+      //    表现为"检测函数明明命中、violations 却是空的"。2026-10-08 实测踩到。
+      if (ev.length) {
+        broken = true;
+        hitInv.add(inv.id);
+        const cur = acc.violations.find((v) => v.id === inv.id);
+        if (cur) {
+          for (const e of ev) if (!cur.evidence.includes(e)) cur.evidence.push(e);
+        } else {
+          acc.violations.push({ id: inv.id, evidence: [...ev], onCorpus: 0 });
+        }
+      }
+    }
+  }
+  return { allGone, broken, hitInv };
+}
+
+/**
+ * 单插件审计：实测派生 + 不变量检查（[D190] 随机型插件按样本级最坏情况判）。
  * @param {string} name 插件名
  * @returns {{name:string, exists:boolean, changed:number, brokenOn:number, eliminates:string[], introduces:string[], eliminatesAll:boolean, violations:Array<{id:string, evidence:string[], onCorpus:number}>, error?:string}}
  */
@@ -207,46 +319,31 @@ export function auditPlugin(name) {
   let allGoneOn = 0;
 
   for (const input of PROBE_CORPUS) {
-    let out;
+    /** @type {string[]} */
+    let samples;
     try {
-      out = p.transform(String(input), {});
+      // [D190] 样本级判危：确定型插件 1 个样本（行为零变化），随机型插件取多样本
+      samples = transformSamples(p, String(input));
     } catch (e) {
       error = String(e && e.message ? e.message : e).slice(0, 120);
       continue;
     }
-    out = String(out);
-    if (out === input) continue; // 该语料上没作用，不参与派生（形态不匹配，不是没本事）
+    if (!samples.length) continue; // 该语料上没作用，不参与派生（形态不匹配，不是没本事）
+    // [D193] 回归修复：transformSamples 对「变换后原样返回」的语料也返回 1 个样本，
+    // 而旧口径（D190 前）是 `out === input ⇒ skip`。不补这条 skip 的话，no-op 语料
+    // 全部计入 changed 却不可能 allGone，`eliminatesAll: allGoneOn === changed` 恒假
+    // ⇒ 编码兜底族（atbash/caesar/rot13…）被误判成定向消除者（covers=2）挤占候选头排，
+    // 策展定向插件（scalarselectinline）被 maxChains 截掉——waf.bypassSearcher
+    // 「探针相关性」用例在 D190 提交上确定性红（D189 17/17 → D190 16/17，本机实证）。
+    if (samples.every((o) => o === String(input))) continue; // 全样本原样 ⇒ 该语料没作用
     changed += 1;
-    let brokenHere = false; // 本语料是否被任一不变量判为破坏
-    // 字面是否还在 → 看**解码后**的形态（见 normalizeForToken 的踩坑说明）
-    const seen = normalizeForToken(out);
-    const presentIn = DERIVE_KEYWORDS.filter((k) => wordRe(k).test(input));
-    let gone = 0;
-    for (const k of DERIVE_KEYWORDS) {
-      const hasIn = wordRe(k).test(input);
-      const hasOut = wordRe(k).test(seen);
-      if (hasIn && !hasOut) { eliminated.add(k); gone += 1; }
-      if (!hasIn && hasOut) introduced.add(k);
+    const { allGone, broken, hitInv } = evaluateSamples(p, String(input), samples, { eliminated, introduced, violations });
+    if (broken) brokenOn += 1;
+    if (allGone) allGoneOn += 1;
+    for (const id of hitInv) {
+      const v = violations.find((x) => x.id === id);
+      if (v) v.onCorpus += 1;
     }
-    // 整串消除：输入里出现的关键词**全没了**（编码族的特征），且确实有词可消
-    if (presentIn.length > 0 && gone === presentIn.length) allGoneOn += 1;
-    for (const inv of INVARIANTS) {
-      const ev = inv.detect(out, input);
-      // ⚠️ 这里的 else 必须加大括号：`if (cur) for (...) if (x) A; else B;` 的 else
-      //    会被解析进**内层** if（dangling else）⇒ 首次命中（cur 为 undefined）永不入账，
-      //    表现为"检测函数明明命中、violations 却是空的"。2026-10-08 实测踩到。
-      if (ev.length) {
-        brokenHere = true;
-        const cur = violations.find((v) => v.id === inv.id);
-        if (cur) {
-          cur.onCorpus += 1;
-          for (const e of ev) if (!cur.evidence.includes(e)) cur.evidence.push(e);
-        } else {
-          violations.push({ id: inv.id, evidence: [...ev], onCorpus: 1 });
-        }
-      }
-    }
-    if (brokenHere) brokenOn += 1;
   }
   return {
     name,

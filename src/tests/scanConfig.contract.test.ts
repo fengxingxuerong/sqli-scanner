@@ -227,7 +227,7 @@ describe('配置契约：面板 → 请求体 → 后端白名单', () => {
 // 已全部接进面板（SessionSection / RequestControlSection / PayloadTuningSection）并按判据 ⑤
 // 移出登记表 —— 能力类**当前为空**是「债还清」的正常形态，不是登记表失效。
 // 新键再落入能力类时：在此登记 + 更新 ⑧ 的基线 + 在登记处写明「默认关 ⇒ 假阴性」的引擎机制。
-const CAPABILITY_GAP_KEYS: string[] = [];
+const CAPABILITY_GAP_KEYS: string[] = ['liveCookiesFile']; // [D205 代 D198] 会话续期能力，面板无入口（接 ScanConfigPanel 后移出）
 
 const TUNING_NO_UI_KEYS = [
   // [2026-10-03 UI-REACH] 提取/拖库治理 8 键（extractConcurrency/dumpConcurrency/
@@ -374,7 +374,7 @@ const KNOWN_MISSING_UI_KEYS = new Set([...CAPABILITY_GAP_KEYS, ...TUNING_NO_UI_K
   it('⑧ 能力缺失类只减不增（新增能力型缺口必须显式论证，不许静默登记）', () => {
     const CAPABILITY_BASELINE = new Set([
       'csrfUrl', 'csrfTokenName', 'csrfMethod', 'csrfRefreshFreq',
-      'safeUrl', 'safeFreq', 'hpp', 'matchText',
+      'safeUrl', 'safeFreq', 'hpp', 'matchText', 'liveCookiesFile', // [D205 代 D198] 默认 null ⇒ 短效 token 目标后半程假阴性（同 sessionFile 机制）
     ]);
     const unargued = CAPABILITY_GAP_KEYS.filter((k) => !CAPABILITY_BASELINE.has(k));
     expect(

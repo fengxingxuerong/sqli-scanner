@@ -56,6 +56,9 @@ const PATH_STATIC_EXT = new Set([
 const PATH_DATA_EXT = new Set(['json', 'xml', 'do', 'action', 'csv', 'yaml', 'yml']);
 // 路径点上限：每个点约 100-300 请求，--test-path 是显式 opt-in 也不能无界放大请求量
 const PATH_POINT_MAX = 6;
+// [D170] 爬取链接的路径点总上限：链接多的站（导航/列表页）可能几十条 REST URL，
+// 每条再乘 6 个路径点会把请求量放大到不可控；按整场 8 点封顶。
+const CRAWLED_PATH_POINT_MAX = 8;
 
 // 目标解析器：从 Target 的 URL/Body/Cookie/Header 中发现注入点，
 // 并可选地爬取 HTML 表单（复杂表单 / 反 CSRF 自动处理）与站内链接（对标 sqlmap --crawl）。
@@ -672,6 +675,9 @@ export class TargetParser {
       const collected = this._collectInputs(inner);
       const values = collected.values;
       this._collectTextareas(inner, values, collected);
+      // [D171 2026-10-26] `<select>` 字段：筛选/排序表单最常见控件，此前整体不采集
+      // （D112 注释里登记为「后续按需补」）。缺它时这类表单只剩按钮字段 ⇒ 0 个注入点。
+      this._collectSelects(inner, values, collected);
       // injectableNames：要生成**注入点**的字段（排除按钮 —— 按钮值由服务端校验，
       // 拿它当注入点只会产生噪声；但它仍在 values 里随请求发出，见 _collectInputs 注释）。
       const injectableNames = Object.keys(values).filter((n) => !collected.buttonNames.has(n));
@@ -740,7 +746,33 @@ export class TargetParser {
     }
   }
 
-      /**
+  /**
+   * [D171 2026-10-26] 采集表单内 `<select>`：取 selected option 的 value，没有 selected
+   * 就取第一个有 value 的 option（浏览器默认行为）。
+   *
+   * 为什么重要：筛选/排序表单的注入面经常就在下拉值上（`sort=name`、`status=1`），
+   * 而此前只解析 `<input>` / `<textarea>` ⇒ 这类表单只剩按钮字段 ⇒ **0 个注入点**，
+   * 报告写「未检出」。同名时 input 优先（与 textarea 同口径）。
+   * 边界：只认有 `value` 属性的 option（无 value 的 option 浏览器会用文本，文本里可能含
+   * 空格/中文，当注入点会发畸形报文）；`multiple` 多选只取第一个（未验证）。
+   * @param {string} inner 表单内 HTML
+   * @param {Record<string,string>} values 就地写入（不改已有的 input/textarea 同名值）
+   * @param {{csrfTokenName: string|null}} collected 就地回填 CSRF 名
+   */
+  _collectSelects(inner, values, collected) {
+    const selRe = /<select\b([^>]*)>([\s\S]*?)<\/select>/gi;
+    let sm;
+    while ((sm = selRe.exec(inner))) {
+      const name = this._attr(sm[1] || '', 'name');
+      if (!name || values[name] != null) continue;
+      const picked = pickSelectValue(sm[2] || '');
+      if (picked == null) continue;
+      values[name] = picked;
+      if (!collected.csrfTokenName && CSRF_RE.test(name)) collected.csrfTokenName = name;
+    }
+  }
+
+  /**
    * 把表单字段全部写进 URL 的 query（GET 表单用；同名参数覆盖）。
    * @param {string} action 表单 action（绝对地址）
    * @param {Record<string,string>} values 表单字段
@@ -956,16 +988,13 @@ export class TargetParser {
   _mergeCrawlFindings(target, points, { pages = [], links = [], endpoints = [] } = {}, config) {
     // 既有点的 key 集合，用于合并去重
     const seen = new Set(points.map((p) => this._pointKey(p, target.baseUrl)));
-    // 1) 所有发现的同域 URL（含未抓取链接页）的 query 参数 → url 注入点
+    // 1) 所有发现的同域 URL（含未抓取链接页）的 query 参数 + （--test-path）路径段 → 注入点
+    //    实现见 _mergeLinkTarget（D170：路径点让 REST 形态的站内链接也能被测到）
+    /** @type {{count: number}} 路径点预算（就地累加，整场封顶） */
+    const budget = { count: 0 };
     for (const rawUrl of links) {
       try {
-        const u = new URL(rawUrl);
-        for (const [k, v] of u.searchParams.entries()) {
-          const key = `url:${rawUrl}:${k}`;
-          if (seen.has(key)) continue;
-          seen.add(key);
-          points.push(createInjectionPoint('url', k, v, { actionUrl: rawUrl, crawledUrl: rawUrl }));
-        }
+        this._mergeLinkTarget(rawUrl, points, seen, config, budget);
       } catch {
         // URL 解析失败则跳过该链接
       }
@@ -981,22 +1010,90 @@ export class TargetParser {
       }
     }
     // 3) [实战分析 P1-4] XHR/fetch 接口端点 → url 注入点（SPA 主发现面）
+    //    [D172 2026-10-26] 同一批端点的**路径段**也按 --test-path 建点：SPA 的接口端点常是
+    //    REST 形态（`/api/orders/5`，无 query）⇒ 此前端点产出 0 个注入点。
+    //    与爬取链接共用同一个 path 预算（整场封顶，端点数量通常比链接更多）。
     for (const rawUrl of endpoints) {
       try {
-        const u = new URL(rawUrl);
-        // 静态资源过滤在合并层再来一遍：不信任上游收集器（注入式替身可能不过滤）
-        if (isStaticEndpoint(u)) continue;
-        for (const [k, v] of u.searchParams.entries()) {
-          const key = `url:${rawUrl}:${k}`;
-          if (seen.has(key)) continue;
-          seen.add(key);
-          points.push(
-            createInjectionPoint('url', k, v, { actionUrl: rawUrl, crawledUrl: rawUrl, viaBrowser: true })
-          );
-        }
+        this._mergeEndpointTarget(rawUrl, points, seen, config, budget);
       } catch {
         // 端点 URL 解析失败则跳过
       }
+    }
+  }
+
+  /**
+   * [D172 2026-10-26] 单条浏览器捕获的 XHR/fetch 端点 → query 注入点 +（`--test-path` 时）
+   * 路径注入点。
+   *
+   * 为什么需要：SPA 的接口端点常是 REST 形态（`/api/orders/5`，**没有 query**）。原实现只从
+   * 端点 URL 抽 query 键 ⇒ 这类端点产出 0 个注入点，与 D170 修掉的「爬取链接」是同一族缺口，
+   * 只是发现来源不同（浏览器捕获 vs 站内链接）。
+   * 安全边界：静态资源过滤在合并层**再做一遍**（不信任上游收集器，注入式替身可能不过滤）；
+   * 预算与爬取链接共用（整场最多 CRAWLED_PATH_POINT_MAX 个爬取路径点）。
+   * @param {string} rawUrl 端点 URL（不可解析由调用方 catch 跳过）
+   * @param {object[]} points 注入点数组（就地追加）
+   * @param {Set<string>} seen 去重键集合（就地更新）
+   * @param {object} config 扫描配置（读 testPath）
+   * @param {{count: number}} budget 路径点预算（就地累加）
+   */
+  _mergeEndpointTarget(rawUrl, points, seen, config, budget) {
+    const u = new URL(rawUrl);
+    // 静态资源过滤在合并层再来一遍：不信任上游收集器（注入式替身可能不过滤）
+    if (isStaticEndpoint(u)) return;
+    for (const [k, v] of u.searchParams.entries()) {
+      const key = `url:${rawUrl}:${k}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      points.push(
+        createInjectionPoint('url', k, v, { actionUrl: rawUrl, crawledUrl: rawUrl, viaBrowser: true })
+      );
+    }
+    if (config.testPath !== true || budget.count >= CRAWLED_PATH_POINT_MAX) return;
+    for (const pp of this._discoverPathPoints(rawUrl)) {
+      if (budget.count >= CRAWLED_PATH_POINT_MAX) break;
+      const key = `path:${pp.param}:${rawUrl}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      pp.actionUrl = rawUrl;
+      pp.crawledUrl = rawUrl;
+      pp.viaBrowser = true;
+      points.push(pp);
+      budget.count += 1;
+    }
+  }
+
+  /**
+   * [D170 2026-10-26] 单条爬取链接 → query 注入点 +（`--test-path` 时）路径注入点。
+   *
+   * 为什么需要：REST 形态的站内链接（`/api/users/5/orders`）没有 query 参数，而爬取原先
+   * 只从链接里抽 query 键 ⇒ 这类链接产出 **0 个注入点**，路径注入面在爬取路径上整体缺失
+   * （D154 的 `--test-path` 只作用于主目标 URL）。
+   * 预算：整场最多 `CRAWLED_PATH_POINT_MAX` 个爬取路径点（每点约 100-300 请求）。
+   * @param {string} rawUrl 链接 URL（不可解析/非合法 URL 由调用方 catch 跳过）
+   * @param {object[]} points 注入点数组（就地追加）
+   * @param {Set<string>} seen 去重键集合（就地更新）
+   * @param {object} config 扫描配置（读 testPath）
+   * @param {{count: number}} budget 路径点预算（就地累加）
+   */
+  _mergeLinkTarget(rawUrl, points, seen, config, budget) {
+    const u = new URL(rawUrl);
+    for (const [k, v] of u.searchParams.entries()) {
+      const key = `url:${rawUrl}:${k}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      points.push(createInjectionPoint('url', k, v, { actionUrl: rawUrl, crawledUrl: rawUrl }));
+    }
+    if (config.testPath !== true || budget.count >= CRAWLED_PATH_POINT_MAX) return;
+    for (const pp of this._discoverPathPoints(rawUrl)) {
+      if (budget.count >= CRAWLED_PATH_POINT_MAX) break;
+      const key = `path:${pp.param}:${rawUrl}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      pp.actionUrl = rawUrl;
+      pp.crawledUrl = rawUrl;
+      points.push(pp);
+      budget.count += 1;
     }
   }
 
@@ -1045,6 +1142,29 @@ function classifyPathSegment(seg, isLast) {
   if (/^v\d+$/i.test(value)) return null;
   if (/\d/.test(value)) return { param: value, suffix: '' };
   return null;
+}
+
+/**
+ * [D171] 从一个 `<select>` 的内部 HTML 里取要提交的 option value。
+ *
+ * 浏览器语义：有 `selected` 就取它；否则取第一个选项。只认带 `value` 属性的 option ——
+ * 无 value 的 option 浏览器会提交其**文本**（可能含空格/中文），当注入点会发畸形报文。
+ * @param {string} inner `<select>` 与 `</select>` 之间的 HTML
+ * @returns {string|null} 取不到返回 null
+ */
+function pickSelectValue(inner) {
+  const optRe = /<option\b([^>]*)>/gi;
+  let first = null;
+  let om;
+  while ((om = optRe.exec(inner))) {
+    const tag = om[1] || '';
+    const vm = /value\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i.exec(tag);
+    if (!vm) continue;
+    const value = vm[1] ?? vm[2] ?? vm[3] ?? '';
+    if (first == null) first = value;
+    if (/\bselected\b/i.test(tag)) return value;
+  }
+  return first;
 }
 
 export default TargetParser;

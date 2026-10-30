@@ -95,7 +95,7 @@ const list = only ? TARGETS.filter(t => only.includes(t.id)) : TARGETS;
 const results = [];
 for (const t of list) {
   const extra = [...t.extra];
-  if (round === 'r2') extra.push('--level', '3', '--risk', '2', '--technique', BASE_TECH);
+  if (round.startsWith('r2')) extra.push('--level', '3', '--risk', '2', '--technique', BASE_TECH);
   process.stdout.write(`[${round}] ${t.id} ... `);
   const r = await runOnce(t.id, t.url, extra, round);
   const b = brief(r);

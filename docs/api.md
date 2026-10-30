@@ -507,6 +507,17 @@ curl -X POST http://127.0.0.1:4567/api/scan/abc123/report/ai
 兼容 endpoint，数据外发 opt-in——未设置时返回 409，不会静默外发）+ `AI_REPORT_KEY_1..3`
 （至少 1 个即启用，失败/429 自动同角色降级再跨角色降级）。角色流水线固定为
 analyst→writer→reviewer；超时由路由硬编码 120s（`reportAiRoutes.js`）。
+`AI_REPORT_MODEL_1/2/3`（[D192]）可分别覆盖三个角色的模型名（不设即默认裸名）——自建/本地
+网关常强制 `provider/model` 全名（如本机 dsh 网关对裸名一律 400），覆盖后同款模型仍可用。
+`AI_REPORT_API_BASE` 须是**完整的 chat/completions URL**（服务端原样 POST，不拼路径）。
+
+`AI_REPORT_MASK`（[D205]）：默认 `1`/未设 = 脱敏（prompt 里 host 写成 `<目标Host>`、路径写成 `/***`，
+**PoC 因此不可直接复现**）；设 `0` 时 host 与路径原样进 prompt，适用于**本机/自建**网关。
+注意报告正文里同时会带引擎实测判据（真/假响应长度、长度差、差异偏移与差异片段，取自 `vuln.trace`），
+这不是模型编的——脱敏只影响 URL，不影响判据。
+
+> CLI 侧同一能力用 `--ai-report [dir]`（[D205]，落 `ai-report.md` + `ai-report.json`），
+> 与 REST 共用同一 `ReportAI.js`；CLI 侧超时放宽到 600s（三模型串行，实测 90~180s）。
 
 ```json
 { "code": 0, "data": { "success": true, "model": "deepseek-v4-flash→glm-5.2→sensenova-6.8-flash-lite", "content": "…", "reviewNote": "✅ 已经过安全审阅角色校验", "pipeline": "analyst→writer→reviewer", "usage": null }, "message": "ok" }

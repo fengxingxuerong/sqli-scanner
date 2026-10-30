@@ -142,7 +142,7 @@ macOS/Linux desktop builds are not part of the current release gate.
 ## Verifying a checkout
 
 ```bash
-npm run gate:close        # 27-item local closure gate
+npm run gate:close        # 35-item local closure gate
 npm run acceptance        # 25 suites; needs lab services (see scripts/labs.mjs)
 npm run release:check     # version/tag/Tauri consistency
 ```
