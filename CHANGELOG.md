@@ -7,17 +7,46 @@
 > 下一批次起的条目写在这里。发版时把本节整体升为 `## [x.y.z] - YYYY-MM-DD` 并补汇总段。
 
 <!-- changelog-index:start -->
-**本段覆盖 3 个批次（D219–D221，2026-10-31 → 2026-10-31）**。正文按时间倒序排列；
+**本段覆盖 4 个批次（D219–D222，2026-10-31 → 2026-10-31）**。正文按时间倒序排列；
 下表是同一批次的索引，便于按编号或关键词定位。**索引只是导航，正文未做任何删改**
 （被推翻的旧结论原样保留，这是本仓的既定口径）。新增批次后跑
 `node scripts/changelog-index.mjs --write` 重生成，`--check` 校验是否过期。
 
 | 批次 | 日期 | 主题 |
 |---|---|---|
+| D222 | 10-31 | v1.3.0 tag run 尾巴收口：Windows CRLF / 发版链自动化 / scope 归因竞态 / waf-real 基线重校准 |
 | D221 | 10-31 | waf-lab configA 取证定案：门禁前置在结构假阳上标定，重校准 + union 门控三态化 |
 | D220 | 10-31 | 发布链路收口：CI 干净环境 typecheck + D211 归因探针的三处连带靶场修复 |
 | D219 | 10-31 | 发版 1.3.0（66 批归并）+ 索引脚本支持空段 |
 <!-- changelog-index:end -->
+
+### 2026-10-31 批次 D222 · v1.3.0 tag run 尾巴收口：Windows CRLF / 发版链自动化 / scope 归因竞态 / waf-real 基线重校准
+
+**动机**：v1.3.0 tag run（#41198644003）16 job 里 14 绿，两红 + 发版链暗知识 + 一处测试归因竞态，
+逐项取证收口：
+
+- **CI Windows 腿 artifactDrift（CRLF 类）**：GitHub Windows runner 镜像默认
+  `core.autocrlf=true` ⇒ checkout 物化 CRLF ⇒ 字节级产物比对必炸（「产物即判据」单测挂，
+  ubuntu/macos 腿全绿）——与本机 D220 同源。修法：test-matrix 的 Windows 腿 checkout 后
+  关 autocrlf 并按 LF 重写已物化的树。
+- **发版链自动化**：v1.1.x 起 tag 推送从不触发 CI（`on.push` 只有 branches），发版靠
+  「手动 workflow_dispatch + 选 tag」的暗知识（v1.3.0 实测踩中：打完 tag 无任何 run）。
+  补 `tags: ['v*']`，打 tag 即自动走 完整门禁 → desktop-package → release。
+- **api-range scope 归因竞态**：scope 用例断言 total=0 实得 1（/wafnum，随机复现）。
+  取证：被拒的越界扫描在**入口**就拦住、不可能发 /wafnum；泄漏请求只能来自**上一条
+  in-scope 扫描** stop 返回后的爬虫/发现队列排水（abort 掐不死队列下一拍）——
+  **不是 scope 破防**（scopeGuard 本体无恙），是测试归因竞态。修法：reset 前等靶场
+  静默（连续两次采样一致，上限 3s），两轮 api-range 复验 PASS 49/49。
+- **waf-real PL1 基线重校准 8→5**（无需 Docker：套件用进程内 crs-engine.js + 沙箱 MySQL，
+  本地完美复现 CI 的 5/5）。bisect 思路 + D210 物证：丢失的 3 个 error 档全是引号结构
+  假阳（`1' AND GTID_SUBTRACT(...)` / `alice' AND JSON_KEYS(...)`——引号即刻语法错，
+  **函数从未执行**，evidence 全是泛化 "SQL syntax"，对照串同签名被 D211/D212 正确拒绝）
+  ——与 compare-real/configA/battery paren 同源的**第四实例**。诚实 5 档 = num/str/like/
+  blind 的 boolean + orderby 的 error（过归因对照）。`waf-bits-baseline.json` 按实测
+  收紧并附物证说明。
+
+**验证**：ciWorkflows/ciWiring/ciWindowsOnly 三守卫 20/20；api-range 两轮 49/49；
+waf-verify PL1 本地 EXIT=0（5/5 = 新基线）；D210 对照跑 8/8（物证抓取自该轮 dump）。
 
 ### 2026-10-31 批次 D221 · waf-lab configA 取证定案：门禁前置在结构假阳上标定，重校准 + union 门控三态化
 
