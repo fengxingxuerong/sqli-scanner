@@ -5,6 +5,59 @@
 
 ---
 
+## 2026-11-01 批次 D225 · 交付前全量验收抓出「假通过阴影」漏检回归 + CRS auto 档方言分档
+
+**动机**：交付前带靶场全量验收（8 靶场在线）实测 **2 FAIL**：Juice Shop 外部裁判真值
+2/2 → 1/2（search 漏检），CRS auto PL1 技术位 7 < 基线 8。10-25 本机同验收全绿
+（7f5df26 物证）⇒ 中间必有回归。CI 自 D223 起四连红全是台账/数字口径过期
+（lint 前置把 test-matrix 拦下，套件从未在 CI 执行）⇒ 本机是唯一能跑这两个套件的环境，
+回归无人守门——「跳过的套件不守门」再次应验。
+
+**Juice 漏检：boundary pairDiff 的 OR 兜底「假通过」阴影（已修，c745c48）**
+
+- 二分（7f5df26 绿 → HEAD 红，23 提交）钉在归并提交 3ade12e（66 批 squash，无法再细分）
+  ⇒ 转逐请求取证：手动探针证明漏洞活着（`OR 1=1` 全表 / UNION 错配 SQLITE_ERROR 页），
+  引擎 171 探针 0 命中 ⇒ 引擎侧。
+- 机制两段：① 单探针阶段全落空——[PAIR-FIX] 同源，基线剥 `orig`、候选剥完整 payload，
+  注入值兼作 legit 内容时（`apple_juice.jpg`）削量不对称（同一份 1617B 响应基线侧削 75B、
+  候选侧 0B）⇒ 完美复现基线的 `%'))` 判「不相似」；② 兜底 pairDiff 里 D210 的 OR 兜底 +
+  早退让低保真前缀 `'))` 假通过（OR 1=1 全表 34245B vs OR 1=2 空集 30B），
+  正确前缀所在第二波没跑 ⇒ boundary=`'))` ⇒ 全通道静默。
+- 修法：`_boundaryPairDiff` 差分命中后加**基线锚定分级**（真/假侧以 orig 口径剥离后
+  ≈ 基线者立即胜出，仅差分者记兜底）。D210 ghost-user 场景锚定即中零额外请求；
+  PAIR-FIX 回显场景走兜底与修复前一致。内层抽 `_boundaryPairProbe` 过复杂度门禁。
+- 验证：boundary/boolean 7 文件 65/65（新增 2 用例钉死阴影与兜底语义）；
+  Juice Shop 真机外部裁判恢复 **2/2**（复检 1/1、安全端点 0 误报）。
+
+**CRS auto 7-vs-8：不是代码回归，是基线漏重校准 + 方言差（已按推翻协议处置）**
+
+- 锚点在同一 MariaDB 上复跑 = 8 ⇒ squash 窗口内有变化；再取证：锚点的 num error 位
+  命中 payload 是 **`1' AND GTID_SUBTRACT(...)`** —— 恰是 D211 定义的引号结构假阳
+  （引号即刻语法错，函数从未执行）。D211 归因对照在 HEAD 上**正确拒绝**它（errdbg 物证：
+  同款 payload attributed=false）⇒ HEAD 的 7 是**去假阳后的诚实数字**。
+- MySQL 8 上 `GTID_SUBTRACT((SELECT version()),1)` 产生真实报错 ⇒ CI（mysql:8.0）
+  post-D211 仍 ≥8（D222 实测）⇒ CI 权威数字不变。MariaDB 无 GTID_SUBTRACT
+  （`FUNCTION does not exist` 不匹配 ERROR_SIG）、可检出的 extractvalue XPATH 错误
+  被 CRS 拦在库外 ⇒ MariaDB 诚实 7 档（num/str/like/blind 的 boolean +
+  str/like/orderby 的 error）。
+- D222a 重校准只动了人工档（8→5），auto 档漏了——**auto=8（2026-09-19）是假阳膨胀数字**，
+  本次推翻并按方言分档：`bits["1"].auto=8`（MySQL 8，CI 权威）+ `bits["1"].autoMariaDB=7`
+  （物证入基线 JSON）；acceptance 断言按 waf-auto-check 打印的「数据库方言=」行选档，
+  方言行/基线键缺失按更严的 auto 判（缺基线不当通过）。
+- 验证：`acceptance --only=waf-auto` PASS（技术位=7 基线=≥7（mariadb） 安全误报=0）。
+
+**交付链连带（本批次一并收口）**
+
+- D223 起的四次 CI 红（lint：台账过期 / 数字口径）根因 = facts 重采后未重新生成
+  台账与 README 对齐数字——本批次已修（bc660e4），并把「验收产物随手提交」纳入纪律。
+- 本机无 Rust 工具链 ⇒ 桌面壳/便携包无法本地产出；发版链已由 D222 闭合
+  （tag 推送 → CI desktop-package → release），本机不再需要 Rust。
+
+**遗留**：本机 MariaDB 与 CI MySQL 8 的方言差今后会持续出现在「真库类」套件上，
+凡新增此类套件，基线必须带方言标注（本批 waf-auto 是第一个）。
+
+---
+
 ## 2026-10-31 批次 D224 · 测试基建的两类偶发红（D223 收口时的 `bad port` 追根）
 
 **动机**：D223 收口跑 `wiring` 时红过一次：`[cause]: Error: bad port`

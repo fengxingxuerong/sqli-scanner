@@ -281,7 +281,13 @@ export async function _boundaryPairDiff(ctx, orig, candidates, similar, PROBE_OP
       const pairHits = await Promise.allSettled(
         wave.map((prefix) => this._boundaryPairProbe(ctx, orig, prefix, similar, PROBE_OPTS))
       );
-      const hits = /** @type {any[]} */ (pairHits.filter((r) => r.status === 'fulfilled' && r.value.ok).map((r) => r.value));
+      // 显式循环而非 filter+map：`PromiseSettledResult` 的收窄传不进 map 回调，
+      // 原写法靠 `/** @type {any[]} */` 断言压过去，typecheck 仍报 TS2339（D225 收口实测）。
+      /** @type {any[]} */
+      const hits = [];
+      for (const r of pairHits) {
+        if (r.status === 'fulfilled' && r.value && r.value.ok) hits.push(r.value);
+      }
       const anchored = hits.find((h) => h.anchored);
       if (anchored) return anchored.prefix;
       if (!unanchored && hits.length > 0) unanchored = { prefix: hits[0].prefix };

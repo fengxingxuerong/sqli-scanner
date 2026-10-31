@@ -7,13 +7,14 @@
 > 下一批次起的条目写在这里。发版时把本节整体升为 `## [x.y.z] - YYYY-MM-DD` 并补汇总段。
 
 <!-- changelog-index:start -->
-**本段覆盖 6 个批次（D219–D224，2026-10-31 → 2026-10-31）**。正文按时间倒序排列；
+**本段覆盖 7 个批次（D219–D225，2026-10-31 → 2026-11-01）**。正文按时间倒序排列；
 下表是同一批次的索引，便于按编号或关键词定位。**索引只是导航，正文未做任何删改**
 （被推翻的旧结论原样保留，这是本仓的既定口径）。新增批次后跑
 `node scripts/changelog-index.mjs --write` 重生成，`--check` 校验是否过期。
 
 | 批次 | 日期 | 主题 |
 |---|---|---|
+| D225 | 11-01 | 交付前全量验收抓出「假通过阴影」漏检回归 + CRS auto 档方言分档 |
 | D224 | 10-31 | 测试基建的两类偶发红：undici blocked-port（Windows-only）+ auth.jsonl 认领竞态 |
 | D223 | 10-31 | 收口清单 ↔ CI 接线：8 个门禁「有入口、从不执行」+ 质量台账收口 |
 | D222 | 10-31 | v1.3.0 tag run 尾巴收口：Windows CRLF / 发版链自动化 / scope 归因竞态 / waf-real 基线重校准 |
@@ -21,6 +22,48 @@
 | D220 | 10-31 | 发布链路收口：CI 干净环境 typecheck + D211 归因探针的三处连带靶场修复 |
 | D219 | 10-31 | 发版 1.3.0（66 批归并）+ 索引脚本支持空段 |
 <!-- changelog-index:end -->
+
+### 2026-11-01 批次 D225 · 交付前全量验收抓出「假通过阴影」漏检回归 + CRS auto 档方言分档
+
+**动机**：交付前带靶场全量验收（8 靶场在线）实测 2 FAIL：Juice Shop 外部裁判真值
+2/2 → 1/2（search 漏检 171 探针 0 命中）、CRS auto PL1 技术位 7 < 基线 8。
+10-25 同机同配置全绿（7f5df26）⇒ 中间必有回归；而 CI 自 D223 起四连红全是
+台账/数字口径过期，lint 前置把 test-matrix 拦下 ⇒ 这两个套件在 CI 从未执行，
+本机成了唯一守门环境——「跳过的套件不守门」再次应验。
+
+**Juice 漏检 = boundary pairDiff 的 OR 兜底「假通过」阴影（已修，c745c48）**
+
+- 二分（7f5df26 绿 → HEAD 红）钉在归并提交 3ade12e（66 批 squash，无法再细分），
+  转逐请求取证：手动探针证明漏洞活着（`OR 1=1` 全表、UNION 错配 SQLITE_ERROR 页）
+  ⇒ 引擎侧。机制两段：① 单探针阶段全落空——基线剥 `orig`、候选剥完整 payload，
+  注入值兼作 legit 内容时削量不对称（同一份 1617B 响应基线侧削 75B、候选侧 0B），
+  完美复现基线的 `%'))` 被判「不相似」（[PAIR-FIX] 同源）；② 兜底 pairDiff 里
+  D210 的 OR 兜底 + 早退让低保真前缀 `'))` 假通过（OR 1=1 全表 34245B vs OR 1=2
+  空集 30B），正确前缀所在第二波没跑 ⇒ boundary=`'))` ⇒ 全通道静默。
+- 修法：`_boundaryPairDiff` 差分命中后加**基线锚定分级**（真/假侧以 orig 口径剥离后
+  ≈ 基线者立即胜出；仅差分者记兜底，全部候选扫完仍无锚定才沿用旧行为）。
+  D210 ghost-user 场景锚定即中、零额外请求；PAIR-FIX 回显场景走兜底与修复前一致；
+  请求量仅在存在假通过候选时增加（Juice 实测 +20）。内层抽 `_boundaryPairProbe`
+  过复杂度门禁。
+- 验证：boundary/boolean 7 文件 65/65；新增 2 用例（假通过阴影 + 兜底非硬门槛）；
+  Juice Shop 真机外部裁判恢复 **2/2**（复检 1/1、安全端点 0 误报）。
+
+**CRS auto 7-vs-8 = 基线漏重校准 + 方言差，非代码回归（按推翻协议处置）**
+
+- 原结论「CRS auto PL1=8」**作废**（保留数字）：取证证明锚点的 num error 位命中
+  payload 是 `1' AND GTID_SUBTRACT(...)` —— D211 定义的引号结构假阳（引号即刻语法错，
+  函数从未执行）；D211 归因对照在 HEAD 上正确拒绝它（errdbg 物证 attributed=false），
+  HEAD 的 7 是去假阳后的诚实数字。auto=8 录于 2026-09-19（D211 之前），假阳膨胀；
+  D222a 重校准只动了人工档，auto 档漏了。
+- 新结论按方言分档：MySQL 8 有真 GTID_SUBTRACT 报错 ⇒ `auto=8` 不变（CI mysql:8.0
+  于 D222 实测 ≥8，权威）；MariaDB 无 GTID_SUBTRACT、可检出的 extractvalue XPATH
+  错误被 CRS 拦在库外 ⇒ `autoMariaDB=7`（诚实档，物证入 `waf-bits-baseline.json`）。
+  acceptance 断言按 waf-auto-check 打印的「数据库方言=」行选档；缺失按更严的 auto 判。
+- 验证：`acceptance --only=waf-auto` PASS（技术位=7 基线=≥7（mariadb） 安全误报=0）。
+
+**交付链连带**：D223 起四次 CI 红的根因（facts 重采后台账/README 未同步）已修
+（bc660e4）；本机无 Rust ⇒ 桌面壳/便携包改由 CI tag 触发（D222 已闭合发版链）。
+**遗留**：真库类套件的基线今后必须带方言标注（waf-auto 是第一个）。
 
 ### 2026-10-31 批次 D224 · 测试基建的两类偶发红：undici blocked-port（Windows-only）+ auth.jsonl 认领竞态
 

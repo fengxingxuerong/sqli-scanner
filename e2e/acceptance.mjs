@@ -877,15 +877,23 @@ const SUITES = [
       //   于是"缺基线"被当成"下限为零 ⇒ 一定通过"。这正是本文件在 waf-real 那条上明确拒绝的
       //   形状（`基线缺该档` 直接 FAIL），两条判据对同一件事不该一个严一个松。
       //   现在要求逐档逐字段齐全；新增一档没量过就是红，逼着要么补测要么别挂。
-      const rawAuto = WAF_BASELINE.bits?.[String(WAF_GATE_PL)]?.auto;
+      // [D225] 方言分档：waf-auto-check 打印「数据库方言=」行。MySQL 8 有真 GTID_SUBTRACT
+      //   报错（auto floor=8）；MariaDB 没有（诚实 7 档，物证见基线 autoMariaDB说明）。
+      //   方言行缺失（旧版套件输出）时按 auto（更严）判——缺判据不当通过。
+      const b = WAF_BASELINE.bits?.[String(WAF_GATE_PL)];
+      if (!b) {
+        return { facts: { 错误: '基线缺该档' }, pass: false, reason: `waf-bits-baseline.json 里没有 PL${WAF_GATE_PL} 的条目` };
+      }
+      const dialect = (out.match(/数据库方言=(mariadb|mysql)/) || [])[1] || null;
+      const rawAuto = dialect === 'mariadb' ? (b.autoMariaDB ?? null) : (b.auto ?? null);
       if (rawAuto == null) {
-        return { facts: { 错误: '基线缺该档 auto' }, pass: false, reason: `waf-bits-baseline.json 的 PL${WAF_GATE_PL} 条目没有 auto 值 —— 缺基线不当通过，请先补测` };
+        return { facts: { 错误: '基线缺该档 auto', 方言: dialect ?? '未知' }, pass: false, reason: `waf-bits-baseline.json 的 PL${WAF_GATE_PL} 条目没有${dialect === 'mariadb' ? ' autoMariaDB' : ' auto'} 值 —— 缺基线不当通过，请先补测` };
       }
       const floor = rawAuto;
       return {
-        facts: { 技术位: bits, 基线: `≥${floor}`, 安全误报: fp },
+        facts: { 技术位: bits, 基线: `≥${floor}${dialect ? `（${dialect}）` : ''}`, 安全误报: fp },
         pass: bits != null && bits >= floor && fp === 0,
-        reason: fp ? `安全误报 ${fp}` : bits < floor ? `技术位 ${bits} < PL${WAF_GATE_PL} 基线 ${floor}` : null,
+        reason: fp ? `安全误报 ${fp}` : bits < floor ? `技术位 ${bits} < PL${WAF_GATE_PL} 基线 ${floor}${dialect ? `（${dialect}）` : ''}` : null,
       };
     },
   },

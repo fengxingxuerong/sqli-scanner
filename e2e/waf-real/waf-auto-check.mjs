@@ -31,6 +31,12 @@ const MYSQL_CONF = {
 
 let WAF_HITS = 0;
 const pool = mysql.createPool({ ...MYSQL_CONF, connectionLimit: 8, multipleStatements: true });
+// [D225] 方言探测：auto 档基线按引擎分档。MySQL 8 有真 GTID_SUBTRACT 报错（error 位可检出），
+// MariaDB 没有（`FUNCTION does not exist` 不匹配 ERROR_SIG）⇒ 同一套诚实判据下两引擎的
+// 合理 floor 不同（MySQL 8 = 8 / MariaDB = 7，物证见 waf-bits-baseline.json bits["1"].autoMariaDB）。
+const _dialectRows = await pool.query('SELECT VERSION() AS v');
+const DB_VERSION = String(_dialectRows[0][0]?.v ?? '');
+const DB_DIALECT = /mariadb/i.test(DB_VERSION) ? 'mariadb' : 'mysql';
 const crsMiddleware = (req, res, next) => {
   const verdict = evaluate(fromExpress(req));
   if (verdict.blocked) {
@@ -124,6 +130,7 @@ try {
     manualBaseline = `PL${wantPl} 档 off=${sum('tamperOff')} on=${sum('tamperOn')}（${rep.generatedAt || '时间未知'}）`;
   }
 } catch { /* 报告缺失即视为未采集 */ }
+console.log(`[auto] 数据库方言=${DB_DIALECT}（${DB_VERSION}）—— auto 基线按方言分档，见 waf-bits-baseline.json`);
 console.log(`\n[auto] 自动绕过技术位合计 ${bits}（人工挂链基线：${manualBaseline}）｜WAF 拦截 ${WAF_HITS} 次｜安全误报 ${falsePositive}`);
 console.log('[auto] 结论：' + (bits >= 5 ? '自动路径生效 ✅' : '自动路径未生效 ❌'));
 process.exit(0);

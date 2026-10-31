@@ -158,7 +158,19 @@ function collectServer({ coverage }) {
   if (pick('fail') > 0) {
     const first = pick('fail');
     console.warn(`[facts] ⚠ 服务端测试首次出现 ${first} fail —— 已重跑一次（flaky 不计入口径；连续失败才是真失败）`);
+    // [D225] 失败取证：把 TAP 的 not ok 行打出来（D225 实测：连续两轮采集 fail=1 却拿不到
+    // 用例名，日志里只有汇总数字，复现与定因全靠盲跑）。不改变任何判定，只补可见性。
+    const notOk = out.match(/^\s*not ok .*$/gm) || [];
+    if (notOk.length) {
+      console.warn(`[facts]   首轮失败用例（前 10 条）：`);
+      for (const line of notOk.slice(0, 10)) console.warn(`[facts]   ${line.trim().slice(0, 160)}`);
+    }
     out = runOnce();
+    const notOk2 = out.match(/^\s*not ok .*$/gm) || [];
+    if (pick('fail') > 0 && notOk2.length) {
+      console.warn(`[facts]   复跑仍失败，用例（前 10 条）：`);
+      for (const line of notOk2.slice(0, 10)) console.warn(`[facts]   ${line.trim().slice(0, 160)}`);
+    }
   }
   const res = {
     tests: pick('tests'), pass: pick('pass'), fail: pick('fail'), skip: pick('skipped'),

@@ -9,9 +9,11 @@
       "realOff": 5,
       "realOn": 5,
       "auto": 8,
+      "autoMariaDB": 7,
       "测于": "2026-09-19T09:26Z",
       "说明": "**[D222a 重校准 8→5]** 旧值 8 标定在引号结构假阳上：D210 物证（.tmp 留档已入 CHANGELOG）抓到 3 个 error 档全是泛化 \"SQL syntax\"（引号即刻语法错，GTID_SUBTRACT/JSON_KEYS 从未执行），对照串同签名 ⇒ D211/D212 归因对照正确拒绝。诚实 5 档 = num/str/like/blind 的 boolean + orderby 的 error（过归因对照）。union 在 PL1 一直被 942100 拦（从未在基线里）。",
-      "复测": "2026-10-31 D222a：CRS_PL=1 node e2e/run-with-sandbox.py e2e/waf-real/waf-verify.mjs（沙箱 MySQL，bisect+D210 物证后重校准）"
+      "复测": "2026-10-31 D222a：CRS_PL=1 node e2e/run-with-sandbox.py e2e/waf-real/waf-verify.mjs（沙箱 MySQL，bisect+D210 物证后重校准）",
+      "autoMariaDB说明": "**[D225 2026-11-01] auto 档按方言分档**：auto=8 录于 2026-09-19（D211 之前），其中 num 的 error 位实为引号结构假阳（`1' AND GTID_SUBTRACT(...)` 命中泛化 \"SQL syntax\"，引号所致、函数从未执行）——D211 归因对照上线后该位被**正确拒绝**（物证：交付前全量验收取证，errhit 日志命中同款 payload、HEAD 上 attributed=false）。MySQL 8 有真 GTID_SUBTRACT 报错 ⇒ floor 保持 8（CI mysql:8.0 于 D222 实测 ≥8）；MariaDB 无 GTID_SUBTRACT（`FUNCTION does not exist` 不匹配 ERROR_SIG），可检出的 extractvalue XPATH 错误探针被 CRS 拦在库外 ⇒ 诚实 7 档 = num/str/like/blind 的 boolean + str/like/orderby 的 error（本机 MariaDB 10.11.19 实测）。acceptance 断言按 waf-auto-check 打印的「数据库方言=」行选档；方言行缺失或基线缺 autoMariaDB 时按 auto（更严）判——缺基线不当通过。"
     },
     "2": {
       "realOff": 0,
