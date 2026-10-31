@@ -7,13 +7,14 @@
 > 下一批次起的条目写在这里。发版时把本节整体升为 `## [x.y.z] - YYYY-MM-DD` 并补汇总段。
 
 <!-- changelog-index:start -->
-**本段覆盖 7 个批次（D219–D225，2026-10-31 → 2026-11-01）**。正文按时间倒序排列；
+**本段覆盖 8 个批次（D219–D226，2026-10-31 → 2026-11-01）**。正文按时间倒序排列；
 下表是同一批次的索引，便于按编号或关键词定位。**索引只是导航，正文未做任何删改**
 （被推翻的旧结论原样保留，这是本仓的既定口径）。新增批次后跑
 `node scripts/changelog-index.mjs --write` 重生成，`--check` 校验是否过期。
 
 | 批次 | 日期 | 主题 |
 |---|---|---|
+| D226 | 11-01 | CI 不再被文档口径整条拦死 + facts 刷新三步一体 |
 | D225 | 11-01 | 交付前全量验收抓出「假通过阴影」漏检回归 + CRS auto 档方言分档 |
 | D224 | 10-31 | 测试基建的两类偶发红：undici blocked-port（Windows-only）+ auth.jsonl 认领竞态 |
 | D223 | 10-31 | 收口清单 ↔ CI 接线：8 个门禁「有入口、从不执行」+ 质量台账收口 |
@@ -22,6 +23,34 @@
 | D220 | 10-31 | 发布链路收口：CI 干净环境 typecheck + D211 归因探针的三处连带靶场修复 |
 | D219 | 10-31 | 发版 1.3.0（66 批归并）+ 索引脚本支持空段 |
 <!-- changelog-index:end -->
+
+### 2026-11-01 批次 D226 · CI 不再被文档口径整条拦死 + facts 刷新三步一体
+
+**动机**：D223 起 CI 四连红，根因都是台账/数字口径过期（**文档**问题）。但 `test-matrix`
+的前置检查把 lint 与两个测试 job 一视同仁 ⇒ lint 一红，windows/macos 两条腿一步没跑就
+exit 1。文档口径过期与「代码能不能在 Windows 上跑」是两件事，前者不该替后者下结论。
+
+**交付**：
+
+- `ci.yml` 的 `test-matrix` 前置检查：测试类（test-frontend / test-server）失败仍即停；
+  lint 失败降级为 `::warning::`，不阻断跨平台测试。取舍写进注释：lint 红时多花一轮跨平台
+  机时，换「测试一定有信号」—— 跳过的套件不守门。
+- `npm run facts:refresh` 改为三步一体：重采集 → 回写 README → **重生成质量台账**。
+  D223 四连红的直接成因是重采后漏了最后一步（README 对齐了、台账仍指着旧 `_facts.json`），
+  而旧提示只写到 `--fix` 为止，等于把人往坑里引。
+- 新增 `facts:refresh:fast`（不带 `--coverage`）：本机跑 `--coverage` 会被 safe-delete
+  护栏拦在 vitest 清理 `coverage/` 那一步（186 个文件 > 阈值 50），fast 版给本机用。
+- `facts-sync` 两处「修法」提示改指向 `npm run facts:refresh`。
+
+**验证**：`ciWorkflows` / `ciWiring` / `ciNightlyEngine` / `ciWindowsOnly` 四个守卫 **26/26**；
+YAML 解析通过（15 个 job）；`facts:check` 绿；`gate:close` 37/37。
+
+**边界**：**未改任何 job 的依赖图**（`needs` 仍是 `[lint, test-frontend, test-server]`），
+只改前置检查的裁决口径；lint 红时 CI 整体仍红、PR 仍不能合并。
+
+**未解决（真因）**：Juice Shop 在 CI **恒 SKIP** —— `acceptance` 里没有「拉起 Juice Shop」
+的步骤，而套件判据是「靶场不可达 ⇒ `skipped: true`」。它与 lint 阻断是**两件独立的事**，
+本批只修了后者。要让外部裁判真正守门，得在 `acceptance` 里加拉起步骤（或把该 SKIP 改成 FAIL）。
 
 ### 2026-11-01 批次 D225 · 交付前全量验收抓出「假通过阴影」漏检回归 + CRS auto 档方言分档
 

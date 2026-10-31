@@ -488,7 +488,7 @@ function reportStale(s, doFix) {
   if (s.reason === 'missing') {
     console.error(`[facts] 缺少 ${SOURCES_PATH}：无法确认 _facts.json 是当前测试代码采出来的。`);
     console.error('[facts] 这不是「没问题」，是「没有依据」—— 本判据不静默通过。');
-    console.error('[facts] 修法：node scripts/facts-sync.mjs --refresh --coverage');
+    console.error('[facts] 修法：npm run facts:refresh（重采集 → 回写 README → 重生成质量台账）');
     return;
   }
   console.error('[facts] ⚠ 采集源已改动 —— _facts.json 可能过期（README 与它「一致」不代表数字是新的）');
@@ -499,7 +499,9 @@ function reportStale(s, doFix) {
   if (doFix) {
     console.error('[facts] 已**拒绝**本次 --fix：基准（_facts.json）自己过期时，按它改 README 等于把旧数字再抄一遍。');
   }
-  console.error('[facts] 修法：node scripts/facts-sync.mjs --refresh --coverage && node scripts/facts-sync.mjs --fix');
+  // [D226 2026-11-01] 提示改为一条命令：D223 起 CI 四连红的根因是「重采后忘了重生成台账」，
+  // 而旧提示只到 `--fix` 为止（README 对齐了、quality-ledger 仍指着旧 _facts.json ⇒ CI 红）。
+  console.error('[facts] 修法：npm run facts:refresh（重采集 → 回写 README → 重生成质量台账，三步一体）');
 }
 
 // ── 主流程 ──────────────────────────────────────────────────────────────────

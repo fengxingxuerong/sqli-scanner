@@ -435,7 +435,7 @@ jobs:
     needs: [lint, test-frontend, test-server]
     if: always() && github.event_name != 'schedule'
     steps:
-      - name: 前置门禁检查（前置失败时显式标注而非静默跳过）
+      - name: 前置门禁检查（测试类前置失败即停；lint 失败只警告）
         env:
           LINT_RESULT: ${{ needs.lint.result }}
           TF_RESULT: ${{ needs.test-frontend.result }}
@@ -446,13 +446,22 @@ jobs:
         # （同 job 里「Recreate server/.env.test」那步早就带了 shell: bash，本步漏了。）
         shell: bash
         run: |
-          for r in "$LINT_RESULT" "$TF_RESULT" "$TS_RESULT"; do
+          for r in "$TF_RESULT" "$TS_RESULT"; do
             if [ "$r" = "failure" ] || [ "$r" = "cancelled" ]; then
-              echo "::error::前置门禁未通过（lint=$LINT_RESULT, test-frontend=$TF_RESULT, test-server=$TS_RESULT）"
+              echo "::error::测试类前置未通过（test-frontend=$TF_RESULT, test-server=$TS_RESULT）"
               exit 1
             fi
           done
-          echo "前置门禁全部通过"
+          # [D226 2026-11-01] lint 失败不再阻断跨平台测试。
+          # 原实现把 lint 与两个测试 job 一视同仁：lint 一红（D223 起四连红全是台账/数字
+          # 口径过期这类**文档**问题），test-matrix 一步没跑就 exit 1 ⇒ windows/macos 两条腿
+          # 的 typecheck + 单测从未拿到信号。文档口径过期与「代码能不能在 Windows 上跑」
+          # 是两件事，前者不该替后者下结论。
+          # 取舍：lint 红时多花一轮跨平台机时，换「测试一定有信号」——跳过的套件不守门。
+          if [ "$LINT_RESULT" = "failure" ] || [ "$LINT_RESULT" = "cancelled" ]; then
+            echo "::warning::lint 未通过（$LINT_RESULT）—— 不阻断跨平台测试，但合并前必须修"
+          fi
+          echo "前置门禁通过（测试类）"
       - uses: actions/checkout@v7
       # [D222] Windows runner 镜像默认 core.autocrlf=true ⇒ checkout 物化 CRLF ⇒
       # artifactDrift 等「字节级比对」门禁必炸（实测 v1.3.0 tag run：windows 腿挂
