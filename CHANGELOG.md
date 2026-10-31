@@ -7,16 +7,48 @@
 > 下一批次起的条目写在这里。发版时把本节整体升为 `## [x.y.z] - YYYY-MM-DD` 并补汇总段。
 
 <!-- changelog-index:start -->
-**本段覆盖 2 个批次（D219–D220，2026-10-31 → 2026-10-31）**。正文按时间倒序排列；
+**本段覆盖 3 个批次（D219–D221，2026-10-31 → 2026-10-31）**。正文按时间倒序排列；
 下表是同一批次的索引，便于按编号或关键词定位。**索引只是导航，正文未做任何删改**
 （被推翻的旧结论原样保留，这是本仓的既定口径）。新增批次后跑
 `node scripts/changelog-index.mjs --write` 重生成，`--check` 校验是否过期。
 
 | 批次 | 日期 | 主题 |
 |---|---|---|
+| D221 | 10-31 | waf-lab configA 取证定案：门禁前置在结构假阳上标定，重校准 + union 门控三态化 |
 | D220 | 10-31 | 发布链路收口：CI 干净环境 typecheck + D211 归因探针的三处连带靶场修复 |
 | D219 | 10-31 | 发版 1.3.0（66 批归并）+ 索引脚本支持空段 |
 <!-- changelog-index:end -->
+
+### 2026-10-31 批次 D221 · waf-lab configA 取证定案：门禁前置在结构假阳上标定，重校准 + union 门控三态化
+
+**动机**：D220 遗留的 waf-lab configA 零检出是发版最后一道阻断。沙箱 bisect（b14a793 绿 →
+48 批 tip 红，7 步）钉在 **3fa68e37/D212**；在 D207（最后一个绿锚点）抓到 configA 当时的
+检出原文：`1' AND GTID_SUBSET(CONCAT((SELECT version())),1)-- -` 打在 `/num` **数值上下文**
+——引号即刻语法错，**GTID_SUBSET 从未执行**，evidence 是泛化 "SQL syntax"；对照串 `1'-- -`
+同签名 ⇒ D211/D212 归因拒绝**完全正确**。
+
+**真因链**（三层叠加，物证齐全）：
+1. modsecurity_crs 档（waf-profiles.js）拦 union select（942100）/ 同义式（942120/130）/
+   extractvalue 族（942141/142）/ information_schema（942180）⇒ 裸探针**无诚实通道可达**；
+2. 实验有效性前置「两侧都必须有检出」是 2026-09-25 在上述结构假阳上标定的 ⇒ D211/D212
+   杀掉假阳后**永远不可能诚实满足**——门禁此前一直靠假阳维持绿；
+3. UnionDetector 门控的 AND/OR 探针（`AND 1=1`/`OR 1=1`）也被同义式规则拦成同态 403 ⇒
+   union 判「不可注入」提前放弃（`[CRS-FIX 2026-09-09]` 同族问题的残留形态）。
+
+**交付**：
+- `metrics.js evaluateAbExperiment`：有效性前置重校准为 **tamper 侧（configB）≥1**——
+  tamper 正是被测能力，「A=0 且 B≥1」是硬 WAF 档下实验成立的理想形态；A3 通道降级的
+  回归守护由其专项 e2e（waf 通道降级编排 A3，决策表精确断言）承担，残留风险在此声明；
+- `UnionDetector._gateInjection` 三态化：`true`（有差分）/ `false`（双 200 同态=反射，
+  保守拒绝，**不变**）/ `'inconclusive'`（真假探针同态**非 200**=疑似 WAF 收缩，无判据
+  ⇒ 放行）——放行安全：列发现的 ORDER BY 差分是固有 SQL 上下文判据，反射点不收敛、
+  union 自止，假阳防线不降级；`waf.abCriteria.test.js` 按 D221 口径重写（9/9）；
+- `compare-real` 扫描配置 `maxColumnsGuess 3→8`（靶场 `/num` = `SELECT * FROM users`
+  5 列；注：本档位 union 仍被 942100 拦，此修复对不拦 union 的档位才有意义）。
+
+**验证**：`waf.abCriteria.test.js` 9/9；`unionGateUnusableResponse` 6/6；`detectors` 18/18；
+compare-real 实跑 **EXIT=0**——前置 B=1/1 ✓、拦截率 67.6%→39.6% ✓、高危规则 58→1 ✓、
+**结论「tamper 确已绕过 WAF ✅」**——这条实验首次测到真实差异。
 
 ### 2026-10-31 批次 D220 · 发布链路收口：CI 干净环境 typecheck + D211 归因探针的三处连带靶场修复
 

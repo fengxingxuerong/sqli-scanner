@@ -7,8 +7,13 @@
 //   「tamper 确已绕过 WAF ✅」—— 一条"扫描器完全不干活也算通过"的门禁。
 //
 // 三条主线：
-//   ① 纯函数判据：**零检出 ⇒ 实验不成立**，即使两条 WAF 指标都成立也必须红；
+//   ① 纯函数判据：**tamper 侧零检出 ⇒ 实验不成立**，即使两条 WAF 指标都成立也必须红；
 //      反向也要成立：检出正常但 WAF 指标不动时，前置不能把它放行。
+//      [D221 重校准] 旧前置的「A≥1」在引号结构假阳上标定（2026-09-25）：当时 configA 的
+//      1/1 = `1' AND GTID_SUBSET(...)` 打在数值上下文（D207 物证，GTID_SUBSET 从未执行）；
+//      modsecurity_crs 档把 union/同义式/extractvalue 族/information_schema 全拦 ⇒
+//      A=0 是硬 CRS 档下的诚实结果，tamper 侧（B≥1）才是被测能力 ⇒ 「A=0 且 B≥1」
+//      是实验成立的理想形态。A3 通道降级的回归守护由其专项 e2e（决策表精确断言）承担。
 //   ② 接线存在：compare-real.e2e.mjs 必须真的调 evaluateAbExperiment，
 //      且退出码取自它的 passed（防"helper 写得很全、门禁零调用"）。
 //   ③ 前置真的进了 pass 表达式：`passed: valid && …`，摘掉就红。
@@ -44,19 +49,29 @@ test('健康态：前置通过 + 两条 WAF 判据成立 → passed', () => {
   assert.equal(v.passed, true);
 });
 
-test('A3 初版现场复现：configA 零检出时，WAF 指标再漂亮也不得通过', () => {
-  // 其余数字与健康态一致（拦截率 79.4%→45.7%、高危 30→0 均在"下降"）
+test('[D221 重校准] 硬 CRS 档理想形态：A=0 且 B≥1（tamper 新增检出）→ 前置通过、实验成立', () => {
+  // 旧口径把这条判死（「A3 初版现场复现」）——取证推翻：A=0 在硬 CRS 档是诚实结果。
+  // modsecurity_crs 档拦 union select（942100）/ 同义式（942120/130）/ extractvalue 族
+  // （942141/142）/ information_schema（942180）⇒ 裸探针无诚实通道可达；
+  // configA 旧时的 1/1 是引号结构假阳（`1' AND GTID_SUBSET(...)`，GTID_SUBSET 从未执行，
+  // 对照串 `1'-- -` 同签名 ⇒ D211/D212 归因对照正确拒绝）。tamper 侧 B=1 才是被测能力。
   const v = evaluateAbExperiment({ ...HEALTHY, detectedA: 0 });
-  assert.equal(v.valid, false, '零检出必须被前拦截');
-  assert.equal(v.blockRateDrop, true, 'WAF 侧指标确实仍成立 —— 正是旧版漏判的原因');
+  assert.equal(v.valid, true, 'A=0 且 B≥1 时前置必须放行（tamper 新增检出 = 实验目的本身）');
+  assert.equal(v.blockRateDrop, true);
   assert.equal(v.highRiskDrop, true);
-  assert.equal(v.passed, false, '旧版此处为 true，门禁绿着放过了一次扫描器完全不干活');
-  assert.match(v.validityReasons.join('\n'), /configA/);
+  assert.equal(v.passed, true);
 });
 
-test('configB 零检出同样不成立（tamper 把 payload 打成不可执行 ≠ 绕过成功）', () => {
+test('tamper 侧零检出仍不成立（tamper 把 payload 打成不可执行 ≠ 绕过成功）', () => {
   const v = evaluateAbExperiment({ ...HEALTHY, detectedB: 0 });
+  assert.equal(v.valid, false, 'B=0 ⇒ 无从比较，实验不成立（D221 前置核心）');
   assert.equal(v.passed, false);
+  assert.match(v.validityReasons.join('\n'), /configB/);
+});
+
+test('B=0 且 A=0：双侧全零同样不成立（无任何检出 ⇒ 无从比较）', () => {
+  const v = evaluateAbExperiment({ ...HEALTHY, detectedA: 0, detectedB: 0 });
+  assert.equal(v.valid, false);
   assert.match(v.validityReasons.join('\n'), /configB/);
 });
 

@@ -56,8 +56,23 @@ export function evaluateAbExperiment({
   if (!(totalPoints >= 1)) {
     reasons.push(`靶场未识别到任何注入点（totalPoints=${totalPoints}）—— 扫描未跑完或靶子坏了`);
   }
-  if (!(detectedA >= 1)) reasons.push(`configA（tamper 关）零检出（${detectedA}/${totalPoints}）`);
-  if (!(detectedB >= 1)) reasons.push(`configB（tamper 开）零检出（${detectedB}/${totalPoints}）`);
+  // [D221 有效性前置重校准] 旧前置 = detectedA≥1 且 detectedB≥1，其中「A≥1」是
+  // 2026-09-25 在**引号结构假阳**上标定的：当时 configA 的 1/1 = `1' AND
+  // GTID_SUBSET(...)` 打在数值上下文（D207 物证：evidence 为泛化 "SQL syntax"，
+  // GTID_SUBSET 从未执行；对照串 `1'-- -` 同签名 ⇒ D211/D212 归因对照正确拒绝）。
+  // modsecurity_crs 档把 union select（942100）/ 同义式（942120/130）/
+  // extractvalue 族（942141/142）/ information_schema（942180）全拦 ⇒ 该前置在
+  // 硬 CRS 档下**永远不可能诚实满足**——门禁此前靠假阳维持绿。
+  // 新前置 = **detectedB ≥ 1（tamper 侧）**：tamper 正是本实验的被测能力，
+  // 「A=0 且 B≥1」是硬 WAF 档下实验成立的理想形态（tamper 新增检出）。
+  // A3 通道降级的回归守护由其专项 e2e（waf 通道降级编排 A3，决策表精确断言）承担，
+  // 不再由本前置代理——残留风险已在 CHANGELOG D221 声明。
+  if (!(detectedB >= 1)) {
+    reasons.push(
+      `configB（tamper 开）零检出（${detectedB}/${totalPoints}）—— tamper 侧无检出则 A/B 无从比较（D221 前置重校准）`,
+    );
+  }
+  // configA 侧仅作披露、不再判死：A=0 且 B≥1 = tamper 在 WAF 下新增检出的强信号。
   const valid = reasons.length === 0;
 
   const blockRateDrop = blockRateB < blockRateA;

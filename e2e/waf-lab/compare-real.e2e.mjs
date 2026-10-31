@@ -55,7 +55,11 @@ function buildConfig(tamperOn) {
     techniques: ['union', 'error', 'boolean'],
     dbms: 'MySQL',
     enableExtract: false,
-    maxColumnsGuess: 3,
+    // [D221] 3 → 8。靶场注入点 `/num` = `SELECT * FROM users`（5 列，e2e/lib/sqliSchema.mjs），
+    // union 猜列上限 3 意味着 union 通道在**非拦截档位**也结构性打不进（列数永远对不上），
+    // 对齐靶场真实形态。注：modsecurity_crs 档另有 crs_942100（/union\s+select/i）把
+    // union 整族拦死——本档位下 union 仍不可达，此修复对「不拦 union 的档位」才有意义。
+    maxColumnsGuess: 8,
     ratePerSec: 20,
     concurrency: 4,
     timeoutMs: 8000,
@@ -213,6 +217,13 @@ async function main() {
   Object.assign(waf.stats, { total: 0, blocked: 0, passed: 0, byRule: {} });
   const reportA = await waitForScan(sm, await sm.start({ url: TARGET, config: buildConfig(false) }));
   const A = summarize(reportA, waf.stats.blocked, waf.stats.total, { ...waf.stats.byRule });
+  // [D221-临时取证] 抓 configA 的 vuln 原文（payload/evidence），定案后移除。
+  try {
+    (await import('node:fs')).writeFileSync(
+      '.tmp-configA-vulns.json',
+      JSON.stringify((reportA?.vulns || []).map((v) => ({ technique: v.technique, payloads: v.payloads, evidence: v.evidence, param: v.param, url: v.url })), null, 1),
+    );
+  } catch { /* 取证 dump 失败不影响主流程 */ }
 
   // —— configB：tamper 开 ——
   Object.assign(waf.stats, { total: 0, blocked: 0, passed: 0, byRule: {} });
@@ -322,7 +333,7 @@ async function main() {
     `| tamper 关 (configA) | ${A.totalReq} | ${A.blockedReq} | ${metrics.blockRateA}% | ${highRiskA} |`,
     `| tamper 开 (configB) | ${B.totalReq} | ${B.blockedReq} | ${metrics.blockRateB}% | ${highRiskB} |`,
     '',
-    `**前置 两侧都必须有检出（A=${A.detectedPoints}/${totalPoints}　B=${B.detectedPoints}/${totalPoints}）? ${valid ? 'YES ✅' : `NO ❌ 实验不成立：${validityReasons.join('；')}`}**`,
+    `**前置 tamper 侧必须有检出（B=${B.detectedPoints}/${totalPoints}，D221 重校准）? ${valid ? 'YES ✅' : `NO ❌ 实验不成立：${validityReasons.join('；')}`}**`,
     '',
     `**判据① 拦截率下降（${metrics.blockRateA}% → ${metrics.blockRateB}%）? ${criterion1 ? 'YES ✅' : 'NO ❌'}**`,
     `**判据② 高危规则命中下降（${highRiskA} → ${highRiskB}，规则 ${HIGH_RISK_RULES.join('/')}）? ${criterion2 ? 'YES ✅' : 'NO ❌'}**`,

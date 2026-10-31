@@ -44,7 +44,10 @@ export class UnionDetector extends Detector {
    *   无信号：真假都返回基线相同内容 → 相似 → 拒绝
    *
    * 用与 BooleanBlindDetector._similar 同套容差（LCP 85% + 分块兜底）。
-   * @returns {Promise<boolean>} true=存在注入现象（通过门控）
+   * @returns {Promise<boolean|'inconclusive'>} true=存在注入现象（通过门控）；
+   *   false=失败样本（重发仍不可用）或双 200 同态（反射/非 SQL，保守拒绝）；
+   *   'inconclusive'=真假探针同态非 200（[D221] 疑似 WAF 收缩，无判据——调用方应继续，
+   *   由 ORDER BY 差分自行判决）
    */
   async _gateInjection(ctx, httpClient, target, point, boundary) {
     const orig = point.originalValue || '1';
@@ -59,75 +62,133 @@ export class UnionDetector extends Detector {
     const commentSuffix = commentSuffixFor(ctx.dbms, {
       tamperEnabled: !!ctx.config?.wafEvasion?.tamper?.enabled,
     });
-    // [P0-FIX 2026-10-05] 失败样本护栏：发送后先判可用性，不可用的重发一次。
-    //
-    // 缺陷：原实现直接 `String((await this.send(...))?.data ?? '')`，把**网络失败**
-    // 折成空串参与真假比对。空串 vs 正常页面必然"不相似" ⇒ 门控放行 ⇒
-    // 网络抖动被当成 SQL 真假分化，门控本该防的参数反射误报从这里漏出去。
-    // 实测：真探针超时 + 假探针正常 ⇒ pass=true（假阳性来源）。
-    //
-    // 同族检测器早有这道闸（口径统一在 egressOpts.isUnusableResponse）：
-    //   BooleanBlindDetector:266/333/431  this.unusableOf(rTrue) || this.unusableOf(rFalse)
-    //   TimeBlindDetector:171             this.unusableOf(baseRes) || this.unusableOf(injectRes)
-    //   StackedDetector:75/148            !r.__error && r.resp != null
-    //   prefilter.js:24 甚至写了纪律「本模块统一用 isUnusableResponse(res)，
-    //                                **不要**改回 res == null」——Union 是唯一漏掉的。
-    //
-    // 为什么是"重发"而不是"直接拒绝"：直接拒绝会把假阳性修成假阴性，
-    // 违反「不得降低检出能力」。重发命中失败样本同样无效的场合才拒绝，
-    // 与同族检测器同口径。代价：仅在失败时多 1 个请求，正常场景零开销。
-    const sendUsable = async (payload) => {
-      const req = this.buildRequest(target, point, this.obfuscateValue(ctx, payload));
-      let res = await this.send(httpClient, ctx, req, ctx);
-      if (!this.unusableOf(res)) return { res, body: String(res?.data ?? '') };
-      unionDebug(`gate 探针失败(${this.unusableOf(res)})，重发一次 payload=${JSON.stringify(payload)}`);
-      res = await this.send(httpClient, ctx, req, ctx);
-      if (!this.unusableOf(res)) return { res, body: String(res?.data ?? '') };
-      return { res, body: null };   // 重发仍失败：交由调用方保守处理
-    };
-    // 真探针：AND 1=1（SQL 上下文中恒真）
-    const t = await sendUsable(`${orig}${boundary} AND 1=1${commentSuffix}`);
-    // 假探针：AND 1=2（SQL 上下文中恒假，应改变响应）
-    const f = await sendUsable(`${orig}${boundary} AND 1=2${commentSuffix}`);
-    // 失败样本不参与判定：宁可不启用 UNION，也不能拿网络抖动当注入信号。
-    // （此前两侧都失败会因都是 '' 而"恰好"判相似 → 保守拒绝，属巧合正确；
-    //   换成单边失败就崩。现改为显式按失败标志判定，不依赖巧合。）
-    if (t.body === null || f.body === null) {
-      unionDebug(`gate 探针不可用（true=${t.body === null} false=${f.body === null}）→ 保守拒绝`);
-      return false;
-    }
-    const trueBody = t.body;
-    const falseBody = f.body;
-    // 真假互相不相似 = 注入信号（SQL 真假分化改变了响应）
-    // 真假互相相似 = 反射（输入只是文本回显，结构相同）或无注入
-    // [P0-DIAG 2026-09-10] 门控是 union 唯一静默失败点，输出实际探针与响应长度便于排障
-    const andSimilar = this._similar(trueBody, falseBody);
-    unionDebug(
-      `gate point=${point.id} boundary=${JSON.stringify(boundary)} suffix=${JSON.stringify(commentSuffix)} ` +
-        `tamper=${!!ctx.config?.wafEvasion?.tamper?.enabled} truePayload=${JSON.stringify(`${orig}${boundary} AND 1=1${commentSuffix}`)} ` +
-        `trueLen=${trueBody.length} falseLen=${falseBody.length} similar=${andSimilar}`
+    const dbg =
+      `point=${point.id} boundary=${JSON.stringify(boundary)} suffix=${JSON.stringify(commentSuffix)} ` +
+      `tamper=${!!ctx.config?.wafEvasion?.tamper?.enabled}`;
+    // AND 型门控（真=恒真 / 假=恒假）
+    const and = await this._gateStage(
+      ctx,
+      httpClient,
+      target,
+      point,
+      `${orig}${boundary} AND 1=1${commentSuffix}`,
+      `${orig}${boundary} AND 1=2${commentSuffix}`,
+      dbg,
     );
-    if (!andSimilar) return true;
-
+    if (and === 'pass') return true;
+    if (and === 'unusable') return false; // 失败样本：宁可不启用 UNION，也不拿网络抖动当注入信号
+    if (and === 'reflection') {
     // [P1-FIX 2026-09-10] 空基线降级复判（OR 型）：
     // 参数**原值查不到行**时（失效 id / 已删除记录 / 需鉴权不可见——实测 UA 头注入点
     // `WHERE username='Mozilla'` 恒 0 行），`AND 1=1` 与 `AND 1=2` 双双落在同一个空结果集，
     // 响应完全相同 → 门控误判「参数不在 SQL 上下文」→ UNION 恒不启用（实测 ua 场景只出 error/boolean）。
     // OR 型不受此影响：`OR 1=1` 命中全表（有数据）、`OR 1=2` 回到原空集 → 真假必然分化。
     // 成本：仅在 AND 型判「相似」后才追加 2 个请求（正常场景零额外开销）。
-    const orProbe = (n) => `${orig}${boundary} OR 1=${n}${commentSuffix}`;
-    const ot = await sendUsable(orProbe(1));
-    const of = await sendUsable(orProbe(2));
-    // 同上：OR 复判的失败样本同样不得参与判定
-    if (ot.body === null || of.body === null) {
-      unionDebug(`gate OR 复判探针不可用 → 保守拒绝`);
-      return false;
+      const or = await this._gateStage(
+        ctx,
+        httpClient,
+        target,
+        point,
+        `${orig}${boundary} OR 1=1${commentSuffix}`,
+        `${orig}${boundary} OR 1=2${commentSuffix}`,
+        dbg,
+      );
+      if (or === 'pass') return true;
+      return false; // 'unusable'（失败样本）/ 'reflection'（OR 也同态）/ 'blocked' → 保守拒绝
     }
-    const orSimilar = this._similar(ot.body, of.body);
+    // and === 'blocked'：[D221] AND/OR 同族形状（同义式）都会被拦，OR 复判无判据 → 放行。
+    // 安全性：列发现阶段的 ORDER BY 差分是固有 SQL 上下文判据——反射点在 ORDER BY 上
+    // 同样无差分、列发现不收敛、union 自动中止 ⇒ 假阳防线不因放行而降级。
+    // （实证：waf-lab CRS 档 boolean 全拦 + 旧对照判据下 union 恒死，bisect 钉在 D211/D212
+    //   归因对照上线后暴露——此前 union 通道靠结构假阳的 error 通道顶替；
+    //   [CRS-FIX 2026-09-09] 已修过同族问题之一（tamper `/*` 后缀双 500），
+    //   「探针本身被 WAF 收缩」是残留形态。证据链见 CHANGELOG D221。）
+    return 'inconclusive';
+  }
+
+  /**
+   * [D221] 失败样本护栏（自 _gateInjection 提取）：发送后先判可用性，不可用的重发一次。
+   *
+   * 缺陷：原实现直接 `String((await this.send(...))?.data ?? '')`，把**网络失败**
+   * 折成空串参与真假比对。空串 vs 正常页面必然"不相似" ⇒ 门控放行 ⇒
+   * 网络抖动被当成 SQL 真假分化，门控本该防的参数反射误报从这里漏出去。
+   * 实测：真探针超时 + 假探针正常 ⇒ pass=true（假阳性来源）。
+   *
+   * 同族检测器早有这道闸（口径统一在 egressOpts.isUnusableResponse）：
+   *   BooleanBlindDetector:266/333/431  this.unusableOf(rTrue) || this.unusableOf(rFalse)
+   *   TimeBlindDetector:171             this.unusableOf(baseRes) || this.unusableOf(injectRes)
+   *   StackedDetector:75/148            !r.__error && r.resp != null
+   *   prefilter.js:24 甚至写了纪律「本模块统一用 isUnusableResponse(res)，
+   *                                **不要**改回 res == null」——Union 是唯一漏掉的。
+   *
+   * 为什么是"重发"而不是"直接拒绝"：直接拒绝会把假阳性修成假阴性，
+   * 违反「不得降低检出能力」。重发命中失败样本同样无效的场合才拒绝，
+   * 与同族检测器同口径。代价：仅在失败时多 1 个请求，正常场景零开销。
+   * @param {object} ctx { httpClient, target, point, config, dbms }
+   * @param {object} httpClient 引擎共享 HTTP 客户端（走 egress/scope 护栏）
+   * @param {object} target 扫描目标（含 url/params/mode）
+   * @param {object} point 注入点（含 id/originalValue）
+   * @param {string} payload 待发送的探针串（未混淆）
+   * @returns {Promise<{res: object, body: string|null}>} body=null = 重发仍不可用，交由调用方保守处理
+   */
+  async _sendUsable(ctx, httpClient, target, point, payload) {
+    const req = this.buildRequest(target, point, this.obfuscateValue(ctx, payload));
+    let res = await this.send(httpClient, ctx, req, ctx);
+    if (!this.unusableOf(res)) return { res, body: String(res?.data ?? '') };
+    unionDebug(`gate 探针失败(${this.unusableOf(res)})，重发一次 payload=${JSON.stringify(payload)}`);
+    res = await this.send(httpClient, ctx, req, ctx);
+    if (!this.unusableOf(res)) return { res, body: String(res?.data ?? '') };
+    return { res, body: null }; // 重发仍失败：交由调用方保守处理
+  }
+
+  /**
+   * [D221] 单阶段真假判（AND 门控与 OR 复判共用，自 _gateInjection 提取）。
+   *
+   * 核心区分（真假探针互相比较，而非各自比基线）：
+   *   反射目标：`Results for: ... AND 1=1` vs `... AND 1=2` → 结构高度相似（仅末尾 1 字符不同）
+   *   真实注入：`HAS_RESULTS` vs `NO_RESULTS` → 互相不相似（SQL 真假分化改变响应）
+   *   无信号：真假都返回基线相同内容 → 相似
+   * 用与 BooleanBlindDetector._similar 同套容差（LCP 85% + 分块兜底）。
+   *
+   * @param {object} ctx { httpClient, target, point, config, dbms }
+   * @param {object} httpClient 引擎共享 HTTP 客户端（走 egress/scope 护栏）
+   * @param {object} target 扫描目标（含 url/params/mode）
+   * @param {object} point 注入点（含 id/originalValue）
+   * @param {string} truePayload 真探针（恒真形态）
+   * @param {string} falsePayload 假探针（恒假形态）
+   * @param {string} dbg 门控诊断前缀（point/boundary/suffix/tamper）
+   * @returns {Promise<'pass'|'unusable'|'reflection'|'blocked'>}
+   *   'pass' = 真假不相似（SQL 真假分化改变了响应，存在注入现象）；
+   *   'unusable' = 失败样本（重发仍不可用）——保守拒绝，不得拿网络抖动当注入信号；
+   *   'reflection' = 双 200 同态（参数反射 / 非 SQL 上下文；AND 阶段转入 OR 复判）；
+   *   'blocked' = 真假相似且**同态非 200**（[D221] 疑似 WAF 收缩：响应无 SQL 真假
+   *     信息，既非「反射」也非「有注入」——AND 阶段直接放行，由 ORDER BY 差分
+   *     自行判决）。
+   */
+  async _gateStage(ctx, httpClient, target, point, truePayload, falsePayload, dbg) {
+    // 失败样本不参与判定：宁可不启用 UNION，也不能拿网络抖动当注入信号。
+    // （此前两侧都失败会因都是 '' 而"恰好"判相似 → 保守拒绝，属巧合正确；
+    //   换成单边失败就崩。现改为显式按失败标志判定，不依赖巧合。）
+    const t = await this._sendUsable(ctx, httpClient, target, point, truePayload);
+    const f = await this._sendUsable(ctx, httpClient, target, point, falsePayload);
+    if (t.body === null || f.body === null) {
+      unionDebug(`gate ${dbg} 探针不可用（true=${t.body === null} false=${f.body === null}）→ 保守拒绝`);
+      return 'unusable';
+    }
+    // [P0-DIAG 2026-09-10] 门控是 union 唯一静默失败点，输出实际探针与响应长度便于排障
+    const similar = this._similar(t.body, f.body);
     unionDebug(
-      `gate point=${point.id} OR 复判 payload=${JSON.stringify(orProbe(1))} orTrueLen=${ot.body.length} orFalseLen=${of.body.length} similar=${orSimilar}`
+      `gate ${dbg} truePayload=${JSON.stringify(truePayload)} trueLen=${t.body.length} falseLen=${f.body.length} similar=${similar}`
     );
-    return !orSimilar;
+    if (!similar) return 'pass';
+    // [D221] 被拦形态判定：真假探针**同态非 200**——典型如 CRS 同义式规则（942130 类）
+    // 把 `AND 1=1`/`AND 1=2` 双双 403 成同一个拦截页。此时响应里不含任何 SQL 真假信息：
+    // 既不能判「有注入」，也不能判「反射」，属**无判据**而非「不可注入」。
+    if (t.res?.status != null && t.res.status === f.res.status && t.res.status !== 200) {
+      unionDebug(`gate ${dbg} 真假探针同态 status=${t.res.status}（疑似 WAF 拦截页）→ 无判据`);
+      return 'blocked';
+    }
+    return 'reflection';
   }
 
   /**
@@ -154,11 +215,14 @@ export class UnionDetector extends Detector {
     const isDirect = target?.mode === 'direct';
     const gateEnabled = !isDirect && ctx.config?.unionSkipGate !== true;
     if (gateEnabled) {
-      const pass = await this._gateInjection(ctx, httpClient, target, point, boundary);
-      unionDebug(`gate pass=${pass} point=${point.id}`);
-      if (!pass) {
-        return result; // vulnerable=false，不误报
+      const gate = await this._gateInjection(ctx, httpClient, target, point, boundary);
+      unionDebug(`gate verdict=${gate} point=${point.id}`);
+      if (gate === false) {
+        return result; // 200 同态（反射 / 非 SQL 上下文）⇒ union 不启用（假阳防线，D221 保持不变）
       }
+      // true=真假有差分；'inconclusive'=真假探针同态非 200（疑似 WAF 收缩，无判据）
+      // ⇒ 都继续：列发现的 ORDER BY 差分是固有 SQL 上下文判据，反射点在此不收敛、
+      // union 自止，故放行不引入新的假阳面（D221）。
     }
 
     // 1) 猜列数（ORDER BY 二分，请求数 ~log2(maxCols)，取代线性扫描）
