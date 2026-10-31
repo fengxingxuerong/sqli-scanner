@@ -318,7 +318,11 @@ class Db2Driver {
   async connect() {
     let mod;
     try {
-      mod = await import('ibm_db');
+      // [D220] ibm_db 是可选驱动（D189：用户自备、不进依赖）。用变量间接 import，
+      // 避免未安装环境（CI 干净 checkout）下 checkJs 静态解析报 TS2307——
+      // 作者本机装过 ibm_db 才一直绿；CI 才是大多数人的环境。运行期缺失仍由 catch 兜底。
+      const ibmDbSpecifier = 'ibm_db';
+      mod = await import(ibmDbSpecifier);
     } catch {
       throw new AppError(ErrorCode.DIRECT_DRIVER_UNAVAILABLE, '[direct] ibm_db 未安装。请在 server 目录执行 npm install ibm_db（内置 IBM clidriver，体积数百 MB，按需安装）');
     }
