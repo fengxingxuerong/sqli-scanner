@@ -35,7 +35,7 @@ jobs:
     if: github.event_name != 'schedule'
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
       - name: Cache frontend node_modules
@@ -330,7 +330,7 @@ jobs:
     if: github.event_name != 'schedule'
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
       - name: Cache frontend node_modules
@@ -359,7 +359,7 @@ jobs:
     if: github.event_name != 'schedule'
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
       - name: Cache server node_modules
@@ -436,7 +436,7 @@ jobs:
       - name: Add loopback alias 127.0.0.2 (macOS only)
         if: matrix.os == 'macos-latest'
         run: sudo ifconfig lo0 alias 127.0.0.2 up
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
       - run: npm ci
@@ -485,7 +485,7 @@ jobs:
           fi
           echo "前置门禁全部通过"
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
       - name: Cache server node_modules
@@ -785,7 +785,7 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
       - run: cd server && npm ci
@@ -918,7 +918,7 @@ jobs:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
       - run: cd server && npm ci
@@ -1058,7 +1058,7 @@ jobs:
           fi
           echo "前置门禁全部通过"
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
       - run: npm ci
@@ -1096,7 +1096,7 @@ jobs:
           fi
           echo "前置门禁全部通过"
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
       - run: npm ci
@@ -1147,7 +1147,7 @@ jobs:
           done
           echo "前置门禁全部通过"
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
       - run: npm ci
@@ -1283,7 +1283,7 @@ jobs:
         with:
           name: desktop-package
           path: release-assets
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
       - name: 生成 SBOM（CycloneDX：前端 + 引擎运行时依赖）
@@ -1323,7 +1323,7 @@ jobs:
     if: github.event_name != 'schedule'
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
       - run: npm audit --omit=dev --audit-level=high
@@ -1361,7 +1361,7 @@ jobs:
           fi
           echo "前置门禁全部通过"
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
       - name: Cache server node_modules
