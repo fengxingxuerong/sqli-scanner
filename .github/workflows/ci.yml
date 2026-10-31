@@ -34,8 +34,8 @@ jobs:
     timeout-minutes: 45
     if: github.event_name != 'schedule'
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
       - name: Cache frontend node_modules
@@ -365,8 +365,8 @@ jobs:
     timeout-minutes: 25
     if: github.event_name != 'schedule'
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
       - name: Cache frontend node_modules
@@ -394,8 +394,8 @@ jobs:
     timeout-minutes: 30
     if: github.event_name != 'schedule'
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
       - name: Cache server node_modules
@@ -453,7 +453,7 @@ jobs:
             fi
           done
           echo "前置门禁全部通过"
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # [D222] Windows runner 镜像默认 core.autocrlf=true ⇒ checkout 物化 CRLF ⇒
       # artifactDrift 等「字节级比对」门禁必炸（实测 v1.3.0 tag run：windows 腿挂
       # 「产物即判据」，ubuntu/macos 腿全绿）。仓库规范是 LF，关掉 autocrlf 后把
@@ -472,7 +472,7 @@ jobs:
       - name: Add loopback alias 127.0.0.2 (macOS only)
         if: matrix.os == 'macos-latest'
         run: sudo ifconfig lo0 alias 127.0.0.2 up
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
       - run: npm ci
@@ -520,8 +520,8 @@ jobs:
             exit 1
           fi
           echo "前置门禁全部通过"
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
       - name: Cache server node_modules
@@ -820,8 +820,8 @@ jobs:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
       - run: cd server && npm ci
@@ -953,8 +953,8 @@ jobs:
     #      现改为与 acceptance 同款的 docker MySQL。
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
       - run: cd server && npm ci
@@ -1093,8 +1093,8 @@ jobs:
             exit 1
           fi
           echo "前置门禁全部通过"
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
       - run: npm ci
@@ -1131,8 +1131,8 @@ jobs:
             exit 1
           fi
           echo "前置门禁全部通过"
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
       - run: npm ci
@@ -1182,8 +1182,8 @@ jobs:
             fi
           done
           echo "前置门禁全部通过"
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
       - run: npm ci
@@ -1234,7 +1234,7 @@ jobs:
             fi
           done
           echo "前置门禁全部通过"
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Build Docker image
         run: docker build -t sqli-scanner .
       - name: Smoke test
@@ -1275,7 +1275,7 @@ jobs:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
         with:
@@ -1283,14 +1283,14 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ghcr.io/${{ github.repository }}
           tags: |
             type=ref,event=tag
             type=semver,pattern={{version}}
             type=raw,value=latest
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@v7
         with:
           context: .
           platforms: linux/amd64
@@ -1313,13 +1313,13 @@ jobs:
       contents: write
       actions: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: 下载桌面交付件
         uses: actions/download-artifact@v4
         with:
           name: desktop-package
           path: release-assets
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
       - name: 生成 SBOM（CycloneDX：前端 + 引擎运行时依赖）
@@ -1358,8 +1358,8 @@ jobs:
     timeout-minutes: 15
     if: github.event_name != 'schedule'
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
       - run: npm audit --omit=dev --audit-level=high
@@ -1396,8 +1396,8 @@ jobs:
             exit 1
           fi
           echo "前置门禁全部通过"
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
       - name: Cache server node_modules
