@@ -187,7 +187,14 @@ function startTarget() {
         return reply(res, 400, { code: 4003, msg: 'decrypt failed' });
       }
       markReached(plain !== '1');
-      return html(res, page(runRaw(`SELECT id,name,price FROM items WHERE id = ${plain}`)));
+      // [D220] 数值上下文 → 字符串上下文。D211 的引号归因对照上线后，数值位上的
+      // 引号 payload 与其无害变体报**同一条** unrecognized token（payload 函数从未
+      // 执行——SQLite 根本没有 extractvalue），旧「检出」正是 D211 定义的引号假绿，
+      // 被正确拒绝 ⇒ A2 静默归零（bisect 钉在 357f367，A2 报告留档 .tmp-a2-*.json）。
+      // 字符串上下文下 payload 会真正执行到 extractvalue ⇒ "no such function"
+      // （payload 特异）；无害变体 `x'-- -` 合法不报错 ⇒ 归因放行。D35 意图
+      // （加密接口配正确脚本必须可检出）保持不变，且与 D211「升级靶点形态」先例一致。
+      return html(res, page(runRaw(`SELECT id,name,price FROM items WHERE name = '${plain}'`)));
     });
   };
 

@@ -74,7 +74,30 @@ function tableHtml(rows) {
 /** 创建靶场应用（工厂函数，供 e2e 同进程复用） */
 export async function createRealLabApp(opts = {}) {
   const { PGlite } = await import(pathToFileURL(_require.resolve('@electric-sql/pglite')).href);
-  const db = new PGlite();
+  let pg = new PGlite();
+  // [D220] PGlite 的 stack_depth 是**粘性**的：某条语句触发后，实例对后续任何查询
+  // （包括无害参数化 INSERT）都持续报错，且此前没有任何深层查询经 db.query 抛过错
+  // （D220 探针实测：第一条失败的就是 `INSERT ... VALUES ($1,$2,$3)` 普通写入）。
+  // 真实 PostgreSQL 是**按语句恢复**的，不会永久 brick ⇒ 这里按真实语义复位实例并
+  // 重试一次，让靶场在引擎的归因探针（D211）高频写入二阶存储点时保持可用。
+  // 逃逸路径已另行收口：/panel、/admin/panel 的参数化读 await 收进 try/catch，坏库降级 500。
+  const resetPg = async () => {
+    try { await pg.close(); } catch { /* 实例已不可用，忽略 */ }
+    pg = new PGlite();
+    await pg.exec(INIT_SQL);
+  };
+  const db = {
+    exec: (sql) => pg.exec(sql),
+    query: async (sql, params) => {
+      try {
+        return await pg.query(sql, params);
+      } catch (e) {
+        if (!/stack depth/i.test(String(e.message))) throw e;
+        await resetPg();
+        return pg.query(sql, params);
+      }
+    },
+  };
   await db.exec(INIT_SQL);
 
   const app = express();
@@ -236,10 +259,16 @@ export async function createRealLabApp(opts = {}) {
   // 高权读出的存储型注入只能被「跨角色配置」（storeCookies+triggerCookies）检出。
   app.get('/admin/panel', requireAdmin, async (req, res) => {
     const id = req.query.id ?? '1';
-    const latest = await db.query('SELECT body FROM reviews WHERE item_id = $1 ORDER BY id DESC LIMIT 1', [Number(id)]);
-    const body = latest.rows[0]?.body ?? '';
+    let body = '';
     let rows;
     try {
+      // [D220] 「读最新评论」这条参数化查询原先裸奔：目标库被深层 payload 打进 stack
+      // 深度上限后，PGlite 实例会**持续**对任何查询（包括这条无害参数化查询）报
+      // stack_depth——reject 逃逸成 unhandledRejection 直接杀掉靶场进程（run-all
+      // 现场崩溃于 Ie.parse，查询 `SELECT body FROM reviews ...`，D220 批次留档）。
+      // 收进同一个 catch：库坏 ⇒ 500 错误页（真实应用的降级行为），靶场继续活。
+      const latest = await db.query('SELECT body FROM reviews WHERE item_id = $1 ORDER BY id DESC LIMIT 1', [Number(id)]);
+      body = latest.rows[0]?.body ?? '';
       rows = (await db.query(`SELECT * FROM items WHERE id = ${id} AND title != '${body}'`)).rows;
     } catch (e) {
       return res.status(500).send(html('管理面板错误', `<pre>${e.message}</pre>`));
@@ -250,10 +279,13 @@ export async function createRealLabApp(opts = {}) {
   app.get('/panel', requireAuth, async (req, res) => {
     const id = req.query.id ?? '1';
     // SECURITY-REVIEW: 触发页把「最新一条评论正文」拼进 SQL —— 真正二阶注入点
-    const latest = await db.query('SELECT body FROM reviews WHERE item_id = $1 ORDER BY id DESC LIMIT 1', [Number(id)]);
-    const body = latest.rows[0]?.body ?? '';
+    let body = '';
     let rows;
     try {
+      // [D220] 同 /admin/panel：参数化读查询与二阶执行查询共用一个 catch，
+      // 目标库 stack_depth 后降级 500，不再让 unhandledRejection 杀进程。
+      const latest = await db.query('SELECT body FROM reviews WHERE item_id = $1 ORDER BY id DESC LIMIT 1', [Number(id)]);
+      body = latest.rows[0]?.body ?? '';
       rows = (await db.query(`SELECT * FROM items WHERE id = ${id} AND title != '${body}'`)).rows;
     } catch (e) {
       return res.status(500).send(html('点评面板错误', `<pre>${e.message}</pre>`));
