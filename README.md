@@ -3,12 +3,52 @@
 [![Tests](https://img.shields.io/badge/tests-4523%20passing-brightgreen)](#测试)[![CI](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml/badge.svg)](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml)
 [![Dependencies](https://img.shields.io/badge/prod%20deps-0%20known%20vulns-brightgreen)](SECURITY.md)
 
-> CI 徽章为真实状态（仓库地址已定，run#90 起全绿）。发布判定仍以 `CHANGELOG.md`
+> CI 徽章为真实状态（红绿以 GitHub Actions 实跑为准）。发布判定仍以 `CHANGELOG.md`
 > 与本地/远端门禁结果为准。
 
 **简体中文** | [English](README.en.md)
 
 一键式 SQL 注入检测工具 —— Web 面板 / 桌面壳 / CLI 三端，**扫完即出可进 CI 的全套交付件**（SARIF 2.1.0 + CVSS/CWE + 授权声明清单 + 退出码 `0/1/2`）。无需记忆命令行参数，打开浏览器即可使用。
+
+## 下载即用
+
+| 形态 | 获取 | 说明 |
+|---|---|---|
+| **Windows 安装包** | [Releases](https://github.com/fengxingxuerong/sqli-scanner/releases/latest) → `*_x64-setup.exe` | NSIS 安装，内置检测引擎，双击即用，无需 Node / Docker |
+| **Windows 免安装** | [Releases](https://github.com/fengxingxuerong/sqli-scanner/releases/latest) → `sqli-v*-portable-win32-x64.zip` | 解压即跑；附 `manifest.json`（逐文件 sha256） |
+| **Docker** | `docker compose up -d` → <http://localhost:4567> | 前后端同端口，适合服务器 / 内网 |
+| **CLI（源码）** | `npm install && npm run scan -- -u <url>` | 见下方「快速开始」 |
+
+> 每个 Release 同时挂 `SHA256SUMS.txt` 与 CycloneDX SBOM（前端 / 引擎各一份），下载后可 `sha256sum -c` 核对。
+> 桌面版当前只提供 Windows 构建；macOS / Linux 请用 Docker 或源码方式。
+
+## 界面预览
+
+<p>
+  <img src="docs/images/home.png" width="800" alt="首页：三步上手与风险概览"><br>
+  <em>首页 —— 三步上手引导与总扫描 / 漏洞 / 高危 / 目标四项概览</em>
+</p>
+<p>
+  <img src="docs/images/scan.png" width="800" alt="扫描页：目标输入、授权边界与 CI 退出码口径"><br>
+  <em>扫描页 —— 目标 URL 与三档强度；右侧固定展示授权边界（同源限定 / 重定向逐跳校验 / 内网默认拒绝）与 CI 退出码口径</em>
+</p>
+<p>
+  <img src="docs/images/scan-progress.png" width="800" alt="扫描进行中：实时进度与阶段耗时"><br>
+  <em>扫描进行中 —— 实时进度、阶段耗时与事件流，可随时暂停 / 停止</em>
+</p>
+<details>
+<summary>更多截图</summary>
+
+<p>
+  <img src="docs/images/history.png" width="800" alt="扫描历史：每次扫描的风险结论与漏洞数"><br>
+  <em>扫描历史 —— 每次扫描的风险结论与漏洞数，点击进入报告详情</em>
+</p>
+<p>
+  <img src="docs/images/consent.png" width="560" alt="首次使用的授权确认弹窗"><br>
+  <em>首次使用 —— 授权确认：仅限已授权环境使用，勾选确认后才能进入</em>
+</p>
+
+</details>
 
 ## 快速开始
 
