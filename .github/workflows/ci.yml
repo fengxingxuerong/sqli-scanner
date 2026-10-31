@@ -3,6 +3,12 @@ name: CI
 on:
   push:
     branches: [main, master]
+    # [D222] tag 触发：v1.1.x 时代发版链一直靠「手动 workflow_dispatch + 选 tag ref」
+    # 的暗知识驱动（v1.1.1 的 run event 即 dispatch），tag 推送本身从不触发 CI——
+    # v1.3.0 实测：打完 tag 无任何 run，必须手动补发。补上 tags 过滤后，打 tag 即
+    # 自动走 完整门禁 → desktop-package → release 挂资产，发版链闭合。
+    tags:
+      - 'v*'
   pull_request:
     branches: [main, master]
   # [修复] schedule/workflow_dispatch 是 workflow 级触发器，只能放在顶层 on: 下，
@@ -412,6 +418,17 @@ jobs:
           done
           echo "前置门禁全部通过"
       - uses: actions/checkout@v4
+      # [D222] Windows runner 镜像默认 core.autocrlf=true ⇒ checkout 物化 CRLF ⇒
+      # artifactDrift 等「字节级比对」门禁必炸（实测 v1.3.0 tag run：windows 腿挂
+      # 「产物即判据」，ubuntu/macos 腿全绿）。仓库规范是 LF，关掉 autocrlf 后把
+      # 已物化的树按 LF 重写（与 D220 本机同款处置）。
+      - name: Normalize line endings to LF (Windows runner default autocrlf=true breaks byte-exact artifact gates)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          git config core.autocrlf false
+          git rm -q --cached -r .
+          git reset -q --hard
       # [CI-FIX 2026-09-20] macOS 默认只配了 127.0.0.1，而 Linux 是整个 127.0.0.0/8 可用。
       # server/tests/httpClient.egressHardening.test.js 需要绑定 **127.0.0.2**
       # （验证出站守卫对"非 .1 回环地址"的处理），首跑 macOS 腿直接 EADDRNOTAVAIL。
