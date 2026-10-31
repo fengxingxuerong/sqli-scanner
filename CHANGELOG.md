@@ -7,15 +7,46 @@
 > 下一批次起的条目写在这里。发版时把本节整体升为 `## [x.y.z] - YYYY-MM-DD` 并补汇总段。
 
 <!-- changelog-index:start -->
-**本段覆盖 1 个批次（D219–D219，2026-10-31 → 2026-10-31）**。正文按时间倒序排列；
+**本段覆盖 2 个批次（D219–D220，2026-10-31 → 2026-10-31）**。正文按时间倒序排列；
 下表是同一批次的索引，便于按编号或关键词定位。**索引只是导航，正文未做任何删改**
 （被推翻的旧结论原样保留，这是本仓的既定口径）。新增批次后跑
 `node scripts/changelog-index.mjs --write` 重生成，`--check` 校验是否过期。
 
 | 批次 | 日期 | 主题 |
 |---|---|---|
+| D220 | 10-31 | 发布链路收口：CI 干净环境 typecheck + D211 归因探针的三处连带靶场修复 |
 | D219 | 10-31 | 发版 1.3.0（66 批归并）+ 索引脚本支持空段 |
 <!-- changelog-index:end -->
+
+### 2026-10-31 批次 D220 · 发布链路收口：CI 干净环境 typecheck + D211 归因探针的三处连带靶场修复
+
+**动机**：CI 自 D169 起全红（run #323–332），`desktop-package`/`release` 连锁 skip——
+这就是 v1.1.0/v1.1.1 两个 Release「0 资产」的机制；1.3.0 是在红门禁下归并的。
+逐 job 取证（CI 日志经 API 拉取 + 本地 bisect + 靶场 A/B）：
+
+- **lint（CI-only）**：`server/src/core/dbDrivers.js` 静态 `await import('ibm_db')` 在干净
+  checkout 上 TS2307——作者本机装过 ibm_db（D189 实测遗留）才一直绿。改为变量间接
+  import，运行期 `catch` 兜底语义不变（directMode 13/13 通过）。
+- **signed-api-lab A2**（bisect 钉在 357f367/D211）：丢的那条「检出」是引号 payload 打在
+  **数值上下文**上的 `unrecognized token`——`extractvalue` 在 SQLite 根本不存在，payload
+  函数从未执行，正是 D211 定义的引号假绿，归因拒绝**是对的**；但 endpoint 本身可注入，
+  加密通道让引擎看不到明文上下文 ⇒ 数值模板发不进去 ⇒ 静默假阴。沿用 D211
+  「升级靶点形态」先例：`/api/enc` 改字符串上下文，payload 真正执行到 `extractvalue` ⇒
+  `no such function`（payload 特异），无害变体合法不报错 ⇒ 归因放行。A2 恢复检出
+  3 条（三族 12 场景 PASS）。
+- **real-world-lab**（同钉 D211，A/B：D211^ 全绿 / D211 崩溃）：两处叠加缺陷——
+  ① `/panel`、`/admin/panel` 的参数化读 await 裸奔，目标库报 stack_depth 后 reject 逃逸成
+  unhandledRejection 杀进程；② PGlite 的 stack_depth 是**粘性**的（探针实测：第一条失败的
+  就是无害参数化 INSERT，且此前无任何深查询经 db.query 报错；归因探针开 ⇒ wedge、
+  关 ⇒ 全绿，三次复现），真实 PG 按语句恢复不会 brick。修法：裸 await 收进 try/catch
+  （坏库降级 500）+ db 门面在 stack_depth 时复位实例重试一次（模拟真实 PG 语义）。
+  归因探针开启下 12 场景全 PASS。
+- **README**：补「下载即用」与 5 张界面截图（首次有图）；删除过期话术「run#90 起全绿」。
+- **卫生**：根目录 31 个临时日志、`.git.broken-20261005`、`scripts/.probe-scan.png` 清理。
+
+**遗留**（立案见 TODO D220 段，待专项取证不盲改）：api-range scope 竞态漏请求
+（授权边界类）、battery paren 形态漏报、waf-lab configA 零检出（CRS 全拦，疑 A3
+通道降级层同形回归）、加密通道上下文盲区。
 
 ### 2026-10-31 批次 D219 · 发版 1.3.0（66 批归并）+ 索引脚本支持空段
 

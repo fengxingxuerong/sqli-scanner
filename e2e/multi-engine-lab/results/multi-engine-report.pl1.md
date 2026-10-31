@@ -1,6 +1,6 @@
 # 多引擎 tamper A/B（H2 / HSQLDB / Derby）　—　WAF：on（CRS v4.1.0 ≈PL1）
 
-> 生成：2026-10-29T03:20:54.995Z　｜　引擎：真实 JDBC 引擎（内存库）　｜　本档 WAF：on（CRS v4.1.0 ≈PL1）
+> 生成：2026-10-31T10:00:01.403Z　｜　引擎：真实 JDBC 引擎（内存库）　｜　本档 WAF：on（CRS v4.1.0 ≈PL1）
 >
 > **口径必须先看这行**：WAF=on 时 CRS 会把 UNION 哨兵探针整条 403 掉，**版本回显定库通道
 > 根本不会被执行**，所以那一档里的 `dbms=null` 只说明"没定出库"，不能读成"探针在该库上跑不动"。
@@ -8,13 +8,13 @@
 
 | 引擎 | 场景 | tamper off | tamper on | 定库 off/on | 说明 |
 |---|---|---|---|---|---|
-| h2 | num | error,boolean | error,boolean | H2/H2 | 技术位与 tamper 前一致 |
+| h2 | num | boolean | boolean | H2/H2 | 技术位与 tamper 前一致 |
 | h2 | str | error,boolean | error,boolean | H2/H2 | 技术位与 tamper 前一致 |
 | h2 | blind | boolean | boolean | H2/H2 | 技术位与 tamper 前一致 |
 | hsqldb | num | boolean | boolean | HSQLDB/HSQLDB | 技术位与 tamper 前一致 |
 | hsqldb | str | boolean | boolean | HSQLDB/HSQLDB | 技术位与 tamper 前一致 |
 | hsqldb | blind | boolean | boolean | HSQLDB/HSQLDB | 技术位与 tamper 前一致 |
-| derby | num | error,boolean | error,boolean | -/Derby | 技术位与 tamper 前一致 |
+| derby | num | error,boolean | boolean | -/Derby | tamper 丢失 error |
 | derby | str | error,boolean | error,boolean | Derby/- | 技术位与 tamper 前一致 |
 | derby | blind | boolean | boolean | Derby/Derby | 技术位与 tamper 前一致 |
 

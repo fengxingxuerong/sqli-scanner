@@ -5,6 +5,42 @@
 
 ---
 
+## 2026-10-31 批次 D220 · 发布链路收口：CI 干净环境 typecheck + D211 归因探针的三处连带（已完成，见 CHANGELOG）
+
+CI 自 D169 起全红（run #323–332），`desktop-package`/`release` 连锁 skip——这就是
+v1.1.0/v1.1.1 两个 Release「0 资产」的机制。本批逐 job 取证（lint/acceptance/e2e 的
+CI 日志经 API 拉取 + 本地 bisect）：
+
+1. **lint（CI-only）**：`dbDrivers.js` 静态 `await import('ibm_db')` 在干净 checkout 上
+   TS2307——作者本机装过 ibm_db（D189 实测遗留）才一直绿。改变量间接 import，
+   运行期 catch 兜底不变（directMode 13/13）。
+2. **signed-api-lab A2**（bisect 钉在 357f367/D211）：丢的「检出」是引号 payload 打在
+   **数值上下文**上的 `unrecognized token`——extractvalue 在 SQLite 不存在、payload 函数
+   从未执行，正是 D211 定义的引号假绿，归因拒绝**是对的**；但 endpoint 本身可注入，
+   加密通道让引擎看不到明文上下文 ⇒ 数值模板发不进去 ⇒ 静默假阴。沿用 D211
+   「升级靶点形态」先例：`/api/enc` 改字符串上下文，payload 真正执行到 extractvalue ⇒
+   `no such function`（payload 特异），无害变体合法不报错 ⇒ 归因放行。A2 恢复检出 3 条。
+3. **real-world-lab**（同钉 D211，A/B：D211^ 全绿 / D211 崩溃）：两处叠加缺陷——
+   ① `/panel`、`/admin/panel` 的参数化读 await 裸奔，目标库报 stack_depth 后 reject
+   逃逸成 unhandledRejection 杀进程；② PGlite 的 stack_depth 是**粘性**的（探针实测：
+   第一条失败的就是无害参数化 INSERT，且此前无任何深查询经 db.query 报错；归因探针
+   开 ⇒ wedge、关 ⇒ 全绿，三次复现），真实 PG 按语句恢复不会 brick。修法：裸 await
+   收进 try/catch（坏库降级 500）+ db 门面在 stack_depth 时复位实例重试（模拟真实 PG
+   语义，提高靶场保真度）。归因探针开启下 12 场景全 PASS。
+
+**遗留（均已立案，待专项取证，不盲改）**：
+
+| 项 | 现有证据 | 下一步 |
+|---|---|---|
+| **api-range scope 竞态漏请求** | 全量 run-all 第二轮：`越界扫描不得向靶站发出任何请求，实得 1 个 {"/wafnum":1}`（首轮 49/49 全过，随机复现）。**这是授权边界类** | 复跑抓现场 → 查扫描级 scope 登记/回收与首个请求的时序窗（scopeGuard D91 体系），独立批次修 |
+| **battery paren 形态漏报** | 两轮 missByShape 全落 paren（11/12 → 10/12，随机种子 441065871 等）；疑似 D211 归因对 `)` 闭合族的误杀（D212 说覆盖元组族，需对 paren 逐例验证） | 固定种子复现 → 抓 paren 命中 payload 与变体的响应对 → 判「归因误杀」还是「用例真值不可观测」 |
+| **waf-lab configA 零检出** | compare-real.md：单注入点被 CRS 全拦（942120×65 / 942130×99 / 942141×36…）；2026-09-25 A3 通道降级初版出过**同形事故**（1/1→0/1）后修复——疑为通道降级/CRS 画像层回归，与 A2 归因不同族 | 按 A3 当年的取证路径复现：CRS PL1 画像下各通道的可达性矩阵 → 定位哪个通道被判死 |
+| redteam-lab 本机启动失败 | env.mjs 起 D:/mysql 于 3306 等待超时（与 run-all 沙箱争用嫌疑）；CI 侧该靶场不跑 | 本机环境问题，CI 无影响；需要时把 env.mjs 端口可配 |
+| 加密通道上下文盲区 | 密文叶子只能按密文形态选模板（A2 在字符串化之前无法布尔检出） | 能力项：request-script 解密钩子回传明文基线供上下文探测，另立批次 |
+| PGlite 粘性 wedge 的 wasm 机理 | 复位包装已吸收后果；内部机理（疑似 longjmp 后栈基线漂移）未证 | 有 PGlite 内部证据时再挖，不阻塞 |
+
+---
+
 ## 2026-10-31 批次 D211 · error 判据区分「谁引起的报错」（已完成，见 CHANGELOG）
 
 已交付：`buildHarmlessQuoteVariant()` + `ErrorDetector._quoteAttributed()`

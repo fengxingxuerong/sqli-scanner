@@ -20,3 +20,4 @@
 {"at":"2026-09-24T17:05:24.172Z","seed":269518205,"requested":24,"observableVuln":12,"unobservable":0,"recallHit":12,"benign":12,"fp":0,"ci95Lower":75.75}
 {"at":"2026-09-24T17:16:44.330Z","seed":20260919,"requested":40,"observableVuln":20,"unobservable":0,"recallHit":20,"benign":20,"fp":0,"ci95Lower":83.89}
 {"at":"2026-10-29T03:26:15.524Z","seed":244372162,"requested":24,"observableVuln":12,"unobservable":0,"recallHit":12,"benign":12,"fp":0,"ci95Lower":75.75}
+{"at":"2026-10-31T10:04:30.719Z","seed":441065871,"requested":24,"observableVuln":12,"unobservable":0,"recallHit":10,"benign":12,"fp":0,"ci95Lower":55.2}
