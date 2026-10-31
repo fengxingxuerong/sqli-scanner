@@ -567,6 +567,18 @@ test('scan', 'config 白名单：未收录键不得静默进引擎（传了要�
 });
 
 test('scan', '授权范围（scope）：越界目标必须在入口被拒', async (ctx) => {
+  // [D222] 上一条用例刚 POST /stop——扫描的发现/爬虫队列在 stop 返回后仍有一拍排水
+  // （abort 只能掐灭「已挂 signal 的在途请求」，队列里的下一拍不受控）。实测泄漏路径
+  // /wafnum 只可能是上一条 in-scope 扫描的合法流量（被拒的越界扫描目标是 /num?id=1，
+  // 入口拒绝的扫描不可能发 /wafnum）——不是 scope 破防，是归因竞态。故 reset 前先等
+  // 靶场静默（计数连续两次采样一致，上限 3s），确保只统计本用例的流量。
+  let prev = (await rangeStats(ctx)).total;
+  for (let i = 0; i < 20; i++) {
+    await new Promise((r) => setTimeout(r, 150));
+    const now = (await rangeStats(ctx)).total;
+    if (now === prev) break;
+    prev = now;
+  }
   await ctx.rangePost('/__range/reset', {});
   const r = await ctx.post('/api/scan/start', {
     url: `${ctx.LAB}/num?id=1`,
