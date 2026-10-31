@@ -166,6 +166,34 @@ const GATES = [
   // e2e/ 下的 *.test.mjs 不在 server/tests / src/tests 的发现范围里 —— 不接线就等于没写。
   // 必须用 glob：Node 的 `--test <目录>/` 会把目录当模块 require（实测 1 fail），不是扫描目录。
   { id: 'lint', name: 'e2e 辅助模块单测（状态判定等）', cmd: 'node --test "e2e/lib/*.test.mjs"' },
+  // ── [D223 2026-10-31] 收口清单里 8 个「有入口、从不执行」的门禁接线 ────────────
+  // 与 ci.yml 的同名步骤一一对应（判据 server/tests/gateListWiring.guard.test.js
+  // 三向核对「gate-list ⊆ ci.yml ∩ ci-local」）。此前它们只在 `npm run gate:close` 里跑，
+  // 而 gate:close 是**手工**动作 —— 没人跑它时这些判据等于不存在。代价已发生过一次：
+  // quality-ledger 在 HEAD 上红了整天才被人工发现（台账快照停在 10-30，facts 已到 10-31）。
+  //
+  // 表驱动而不是 15 条同构对象字面量：逐条展开会让 duplication 门禁从 3271 涨到 3286
+  // （窗格 ≥80 tokens 的 `{ id: 'lint', name: ..., cmd: ... }` 相互匹配），而本仓的
+  // 重复代码基线是「只减不增」—— 为接线而抬高基线是把可维护性换成记账，不值。
+  // 每条仍是 [名称, 命令行]，语义与逐条写完全一致，顺序也保持不变。
+  ...[
+    ['agent 装载面一致性（.mcp.json / 插件清单 / 技能说明）', 'node scripts/agent-manifest-check.mjs'],
+    ['agent 装载面判据自证', 'node scripts/agent-manifest-check.mjs --selftest'],
+    ['质量台账与数据源逐字一致（手改或过期即红）', 'node scripts/quality-ledger.mjs --check'],
+    ['质量台账判据自证', 'node scripts/quality-ledger.mjs --selftest'],
+    ['配方包（无真机验证不许写 CVE 号 / 破坏性条目须 risk 3）', 'node scripts/recipe-pack.mjs --check'],
+    ['配方包判据自证', 'node scripts/recipe-pack.mjs --selftest'],
+    ['CHANGELOG 顶部索引等于正文批次', 'node scripts/changelog-index.mjs --check'],
+    ['CHANGELOG 索引判据自证', 'node scripts/changelog-index.mjs --selftest'],
+    ['npm 包体（体积/必备资产/不含 tests·ledger/解包后真能跑）', 'node scripts/pack-check.mjs'],
+    ['包体判据自证', 'node scripts/pack-check.mjs --selftest'],
+    ['便携包构建判据自证（交付件链路）', 'node scripts/build-portable.mjs --selftest'],
+    ['便携包冒烟判据自证', 'node scripts/portable-smoke.mjs --selftest'],
+    ['本机靶场体检判据自证（纯函数，不探测不起进程）', 'node scripts/labs.mjs --selftest'],
+    // readme:selftest 此前只在 CI 有、ci-local 缺 —— 同族缺口，一并补齐（D223 顺手）。
+    ['CLI 旗标覆盖判据自证（README/help 双向核对）', 'node scripts/readme-flag-coverage.mjs --selftest'],
+    ['README 口径判据自证（方言分层三处）', 'node scripts/readme-consistency.mjs --selftest'],
+  ].map(([name, cmd]) => ({ id: 'lint', name, cmd })),
   { id: 'lint', name: 'cargo fmt --check', cmd: 'cd src-tauri && cargo fmt --check' },
   { id: 'lint', name: 'cargo clippy -D warnings', cmd: 'cd src-tauri && cargo clippy -- -D warnings' },
   { id: 'test-frontend', name: '前端测试 + 覆盖率门禁', cmd: 'npx vitest run --coverage --reporter=dot', slow: true },

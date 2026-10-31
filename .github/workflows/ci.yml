@@ -275,6 +275,42 @@ jobs:
         name: 覆盖率阈值校准（配置合理 + 门禁确实会拦）
       - run: node scripts/readme-flag-coverage.mjs --selftest
         name: CLI 旗标覆盖判据自证（README/help 双向核对）
+      # ── [D223 2026-10-31] 收口清单 ↔ CI 接线补齐 ───────────────────────────────
+      # 动机：`scripts/lib/gate-list.mjs` 是收口清单的单一真源（37 项），但**没有任何判据**
+      # 要求清单里的每一项在 CI / ci-local 里被执行过。实测（2026-10-31）：其中 8 个
+      # 门禁脚本 **CI 与 ci-local 两侧都没有** —— 于是 `quality-ledger --check` 在 HEAD 上
+      # 红了整整一天（docs/质量台账.md 快照停在 10-30，_facts.json 已重采到 10-31）却没人
+      # 发现：本地不跑 gate:close 的人看不到，CI 又从不知道有这个门禁。
+      # 「有入口、从不执行」是本仓登记过多轮的同一形态（e2e 靶场 D2 / greenguard D145 /
+      # 变异门禁 D94），这次的代价是**对外质量台账静默过期**。判据见
+      # server/tests/gateListWiring.guard.test.js（三向：覆盖 / 不空转 / 自证）。
+      - run: node scripts/agent-manifest-check.mjs
+        name: agent 装载面一致性（.mcp.json / 插件清单 / 技能说明）
+      - run: node scripts/agent-manifest-check.mjs --selftest
+        name: agent 装载面判据自证（版本漂移/改名必红）
+      - run: node scripts/quality-ledger.mjs --check
+        name: 质量台账与数据源逐字一致（手改或过期即红）
+      - run: node scripts/quality-ledger.mjs --selftest
+        name: 质量台账判据自证（计数/明细/标红/确定性）
+      - run: node scripts/recipe-pack.mjs --check
+        name: 配方包（无真机验证不许写 CVE 号 / 破坏性条目须 risk 3）
+      - run: node scripts/recipe-pack.mjs --selftest
+        name: 配方包判据自证
+      - run: node scripts/changelog-index.mjs --check
+        name: CHANGELOG 顶部索引等于正文批次（漏更新即红）
+      - run: node scripts/changelog-index.mjs --selftest
+        name: CHANGELOG 索引判据自证
+      # pack-check 是唯一有实际耗时的一项（本机 ~4s：npm pack 解包后真跑一次），仍属 lint 档。
+      - run: node scripts/pack-check.mjs
+        name: npm 包体（体积上限 / 必备资产 / 不含 tests·ledger / 解包后真能跑）
+      - run: node scripts/pack-check.mjs --selftest
+        name: 包体判据自证
+      - run: node scripts/build-portable.mjs --selftest
+        name: 便携包构建判据自证（交付件链路）
+      - run: node scripts/portable-smoke.mjs --selftest
+        name: 便携包冒烟判据自证
+      - run: node scripts/labs.mjs --selftest
+        name: 本机靶场体检判据自证（纯函数，不探测不起进程）
       - run: npm run lint
         name: ESLint
       # [DECISION-2026-09-22] e2e 辅助模块的单测（纯 Node，无 MySQL 依赖）。

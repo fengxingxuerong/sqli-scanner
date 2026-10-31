@@ -7,18 +7,113 @@
 > 下一批次起的条目写在这里。发版时把本节整体升为 `## [x.y.z] - YYYY-MM-DD` 并补汇总段。
 
 <!-- changelog-index:start -->
-**本段覆盖 4 个批次（D219–D222，2026-10-31 → 2026-10-31）**。正文按时间倒序排列；
+**本段覆盖 5 个批次（D219–D223，2026-10-31 → 2026-10-31）**。正文按时间倒序排列；
 下表是同一批次的索引，便于按编号或关键词定位。**索引只是导航，正文未做任何删改**
 （被推翻的旧结论原样保留，这是本仓的既定口径）。新增批次后跑
 `node scripts/changelog-index.mjs --write` 重生成，`--check` 校验是否过期。
 
 | 批次 | 日期 | 主题 |
 |---|---|---|
+| D223 | 10-31 | 收口清单 ↔ CI 接线：8 个门禁「有入口、从不执行」+ 质量台账收口 |
 | D222 | 10-31 | v1.3.0 tag run 尾巴收口：Windows CRLF / 发版链自动化 / scope 归因竞态 / waf-real 基线重校准 |
 | D221 | 10-31 | waf-lab configA 取证定案：门禁前置在结构假阳上标定，重校准 + union 门控三态化 |
 | D220 | 10-31 | 发布链路收口：CI 干净环境 typecheck + D211 归因探针的三处连带靶场修复 |
 | D219 | 10-31 | 发版 1.3.0（66 批归并）+ 索引脚本支持空段 |
 <!-- changelog-index:end -->
+
+### 2026-10-31 批次 D224 · 测试基建的两类偶发红：undici blocked-port（Windows-only）+ auth.jsonl 认领竞态
+
+**动机**：D223 收口时 `wiring` 门禁红过一次，报 `[cause]: Error: bad port`
+（`exploitRoutes.guards.test.js:67` 的 fetch）。重跑即绿 —— 典型的偶发红。
+本仓口径是「门禁绿 ≠ 判据对」，若再加上「绿了也可能是运气」，纪律就废了，故立案查根因。
+
+**缺陷一：undici blocked-port（Windows-only）**
+- 机制：测试普遍用 `listen(0)` 让内核挑端口，而 Node 内置 fetch（undici）**拒绝连接**
+  一批「不安全端口」（SSRF 防护）。内核挑到哪个端口不受测试控制。
+- **平台相关性**（决定了为什么 CI 从没红）：blocked-port 全部 ≤ 10080；而临时端口区间
+  Linux 32768–60999 / macOS 49152–65535 ⇒ 永远不可能命中；**Windows 从 1024 起** ⇒ 可能命中。
+  本机 `netsh int ipv4 show dynamicport tcp` 实测确为 1024 起。于是形态是
+  「CI 永不红、本机偶发红、重跑又绿」—— 最难诊断的那一类。
+- 量化：随机绑定 2 万次，命中 5 次（2049/3659/4045/5060/5061）⇒ **约 0.025%/次 bind**。
+  wiring 一次跑 70+ 文件、每文件 1–3 个端口，叠加多轮 matrix 就是偶发红。
+- 交付 `server/tests/support/listenSafe.js`：`listenSafe()` / `listenAppSafe(app)` /
+  `bindServerSafe(server)`（后者利用「Node 允许同一 Server `close()` 后再 `listen()`」，
+  handler 无需重建 ⇒ 20 个文件的 diff 都只有 1–2 行，`server.address().port` /
+  `server.close()` 全部照旧）。清单由**本机逐端口行为实测**得出（78 项），不抄文档。
+- **迁移面**：20 个「既 `listen(0)` 又 `fetch()`」的文件全部迁移（18 个 `listenAppSafe`
+  + 3 处 mock target `bindServerSafe` + edge/sqlmap 的同步形态）。
+  顺带修掉一处自造反模式：`new Promise(async (resolve) => …)`（async executor 会让外层
+  在 settle 前返回，且 unhandled rejection 会逃逸）。
+- **判据** `server/tests/support/listenSafe.test.js`（4 条）：① 清单真实性（对清单里的端口，
+  fetch **必须**以 `bad port` 拒绝 —— 行为验证）；② 分配器有效性（12 次采样端口必不在清单
+  且必可 fetch 通）；③ 自证（裸端口必须失败、清单外必须成功）。
+  ⚠ 特意**不**断言「12 次端口两两不同」：close 后内核会回收端口，采样到重复是合法的，
+  写死那条等于自己造一个新的随机红（本批刚修完同类 flake）—— 实测确实重复，判据已松动为
+  「多样性 ≥3」。
+
+**缺陷二：`auth.jsonl` 认领竞态（既有，非本批引入）**
+- 现象：`exploitRoutes.authDeclaration.test.js` 的「审计：授权拒绝事件写入 auth.jsonl」
+  断言 `last.result === 'denied'`，实得 `'allowed'`。
+- 根因：`auth.jsonl` 是**全进程共享的单一文件**（不按 scanId 分），而 `node --test` 多文件
+  并发；断言写成「读文件最后一行 == 我刚写的」在并发下不成立 —— 别的文件刚追加了 allowed。
+- **已在 HEAD 上复现证明是既有缺陷**：相同 21 文件组合跑 10 轮，HEAD 失败 1 轮，
+  与本批改动无关（它是被 D224 改动的时序「暴露」出来的）。
+- 交付：`recordAuthEvent` 返回值补 `eventId`（向后兼容，`ok`/`error` 语义不变）；
+  新增 `findAuthEvents({eventId,…})` 做**并发安全的按条件取回**
+  （保留 `readAuthEvents` 的「看最近审计流」语义，但注释明确写「测试不得用最后一行」）；
+  两个断言点（`exploitRoutes.authDeclaration` / `authQuota`）改为按 eventId 精确取回。
+- 判据 `server/tests/authAudit.concurrent.test.js`（4 条）：① 必须回传 eventId；
+  ② 并发交错写 12 条后每条都能按 id 精确取回且互不混淆；③ **自证**：构造「插队事件」
+  证明旧写法（读最后一行）确实会取错 —— 这正是本判据要防的形态；④ 空文件/坏行容错。
+
+**验证**：压力复跑 23 文件 × 12 轮 **0 失败**（修复前同组合 10 轮错 1–2 轮）；
+`listenSafe.test` 4/4、`authAudit.concurrent.test` 4/4；两个新文件均已确认被
+`node --test` 的默认发现收录（TAP 报告可见，防「写了从没跑过」）。
+
+### 2026-10-31 批次 D223 · 收口清单 ↔ CI 接线：8 个门禁「有入口、从不执行」+ 质量台账收口
+
+**动机**：`npm run gate:close` 在 HEAD 上红着，卡在 `quality-ledger` —— `docs/质量台账.md`
+的数据快照停在 `2026-10-30T20:55`，而 `docs/_facts.json` 已被 D221 重采到 `10-31T11:45`
+（服务端用例 3954→3955、覆盖率 90.8/79.26/83.98 → 90.83/79.25/84.01 三处全变）。
+台账是本仓对外宣称「可核查」的那一页，**它静默过期 = 门面数字与真源不一致**。
+
+修之前先把根因查清。按 `scripts/lib/gate-list.mjs` 的 37 项逐条核对 ci.yml 与
+`scripts/ci-local.mjs`（`npm run <alias>` 按 package.json 展开），实测 **8 个门禁脚本
+在 CI 与 ci-local 两侧都没有执行**：agent-manifest / **quality-ledger** / recipes /
+changelog-index / pack-check / build-portable / portable-smoke / labs（各含 `:selftest`）。
+它们只活在 `npm run gate:close` 里，而那是**手工**动作 —— 没人跑它时这些判据等于不存在。
+这正是本仓反复治理的「有入口、从不执行」（e2e 靶场 D2 / greenguard D145 / 变异门禁 D94），
+本次代价是**对外质量台账静默过期一整天**。
+
+**交付**：
+- **接线**：13 条步骤进 ci.yml 的 lint job、15 条进 ci-local 的 GATES。ci-local 侧用
+  表驱动（`[...[名称, 命令]].map(...)`）而不是 15 条同构对象字面量 —— 逐条展开会让
+  duplication 门禁从 3271 涨到 **3286**（≥80 tokens 的 `{ id, name, cmd }` 相互匹配），
+  而重复代码基线是「只减不增」：为接线去抬基线，是拿可维护性换记账。表驱动后反而降到 **3268**。
+- **顺手补齐**：ci-local 缺的 `readme:selftest`（此前只在 CI 有，同族缺口）。
+- **新判据** `server/tests/gateListWiring.guard.test.js`（三向）：
+  ① 覆盖 —— 清单每项脚本必须在 ci.yml **与** ci-local 各被执行（**注释里的脚本名不算**
+  「本仓有过 jobBody 注释假绿的先例」、`npm run` 别名必须展开）；
+  ② 不空转 —— 两处引用到的 `scripts/*.mjs` 必须真实存在（防「引用一个不存在的门禁」）；
+  ③ 自证 —— 判据必须能红：删掉一行接线要被抓出、注释不得被当成接线、别名必须被展开。
+  **变异实测**：删掉 ci.yml 里 quality-ledger 两行 ⇒ 守卫红 2 项并精确点名
+  （`quality-ledger（quality-ledger.mjs）: ci.yml ✗`）。
+- `docs/质量台账.md` 重新生成（wiring 文件数 70→71、服务端用例 3955）。
+
+**连带缺陷（守卫发现的是真问题，不是误报）**：把 pack-check / build-portable /
+portable-smoke / labs 接进 ci.yml 后，`ciWindowsOnly.guard.test.js` 立刻红 —— 这四个脚本
+**此前从不在 CI 执行**，所以从未进入「ci.yml 会跑的本仓脚本」这个扫描面。23 处
+`C:\Windows` / `D:/tools/...` / `.exe` 字面量被点名。
+处置不是照单登记：逐条核过平台路径，并用**把 `process.platform` 打成 `'linux'`** 的包装脚本
+实跑三个 selftest（labs 11+4 条 / build-portable 14 条 / portable-smoke 7 条，**全部 exit 0**）
+—— 证实这些字面量只是「环境变量优先、否则本机默认值」的默认值或自证用字符串，ubuntu 执行
+路径上不落地（`labs` 缺前置 ⇒ 如实 SKIP；`winTar()` 非 win32 直接返回 `'tar'`；
+`portable-smoke` 非 win32 整段 skip）。随后按其规定姿势用 `regKey()` 生成内容锚点（**不手抄**
+—— 手抄错一位就静默失效，本批第一次手抄确实漏了 3 条，被「自证③ 登记表不得虚胖」当场抓住）
+登记进 KNOWN_SAFE 并逐条写清理由。
+
+**验证**：`gate:close --quick` 由 **19/35** 推进到 **34/35**（`duplication` 3268 < 基线 3272）；
+`wiring` 435 用例全绿；`gateListWiring.guard` 4/4；`ciWindowsOnly.guard` 7/7；变异双向。
 
 ### 2026-10-31 批次 D222 · v1.3.0 tag run 尾巴收口：Windows CRLF / 发版链自动化 / scope 归因竞态 / waf-real 基线重校准
 
