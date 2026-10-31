@@ -17,6 +17,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { ErrorCode } from '../src/core/errors.js';
+import { listenAppSafe } from './support/listenSafe.js';
 
 let importSeq = 0;
 
@@ -31,9 +32,7 @@ async function loadApp(exploitEnabled) {
 async function withApp(exploitEnabled, fn) {
   const createApp = await loadApp(exploitEnabled);
   const app = createApp();
-  const server = await new Promise((resolve) => {
-    const s = app.listen(0, '127.0.0.1', () => resolve(s));
-  });
+  const server = await listenAppSafe(app);
   try {
     await fn(`http://127.0.0.1:${server.address().port}`);
   } finally {

@@ -16,6 +16,7 @@ import express from 'express';
 import { createRoutes } from '../src/api/scanRoutes.js';
 import { createInjectionPoint, createVulnerability } from '../src/engine/models.js';
 import { attachVulnContext } from '../src/engine/vulnEnrich.js';
+import { listenAppSafe } from './support/listenSafe.js';
 
 const DIR = mkdtempSync(join(tmpdir(), 'sqli-triage-api-'));
 process.env.SQLI_TRIAGE_FILE = join(DIR, 'triage.json');
@@ -53,9 +54,7 @@ async function withApp(fn) {
   const app = express();
   app.use(express.json());
   app.use('/api', createRoutes({ scanManager: stubManager }));
-  const server = await new Promise((resolve) => {
-    const s = app.listen(0, '127.0.0.1', () => resolve(s));
-  });
+  const server = await listenAppSafe(app);
   const base = `http://127.0.0.1:${server.address().port}`;
   try {
     await fn(base);

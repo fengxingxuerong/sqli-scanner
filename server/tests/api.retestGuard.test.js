@@ -17,6 +17,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import express from 'express';
 import { createRoutes } from '../src/api/scanRoutes.js';
+import { listenAppSafe } from './support/listenSafe.js';
 
 const BASE_URL = 'http://127.0.0.1:9999/x?id=1';
 
@@ -60,9 +61,7 @@ async function withApp(stub, fn) {
   const app = express();
   app.use(express.json());
   app.use('/api', createRoutes({ scanManager: stub.sm, eventBus: stub.bus }));
-  const server = await new Promise((resolve) => {
-    const s = app.listen(0, '127.0.0.1', () => resolve(s));
-  });
+  const server = await listenAppSafe(app);
   try {
     await fn(`http://127.0.0.1:${server.address().port}`);
   } finally {

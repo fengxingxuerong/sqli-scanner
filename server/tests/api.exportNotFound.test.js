@@ -24,6 +24,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createRoutes } from '../src/api/scanRoutes.js';
+import { listenAppSafe } from './support/listenSafe.js';
 
 // [D125] 导出改走 reportWithFallback（内存→台账 + triage 合并）；隔离数据源，
 // 避免测试读到本机真实台账/裁决。
@@ -48,9 +49,7 @@ const stubManager = {
 async function withApp(opts, fn) {
   const app = express();
   app.use('/api', createRoutes({ scanManager: stubManager, ...opts }));
-  const server = await new Promise((resolve) => {
-    const s = app.listen(0, '127.0.0.1', () => resolve(s));
-  });
+  const server = await listenAppSafe(app);
   const base = `http://127.0.0.1:${server.address().port}`;
   try {
     await fn(base);

@@ -15,6 +15,7 @@ import http from 'node:http';
 import { pickEndpoints, pickSameOriginLinks, collectRendered, BrowserUnavailable } from '../src/engine/discovery/browserCrawler.js';
 import { TargetParser } from '../src/engine/TargetParser.js';
 import { LinkCrawler } from '../src/engine/crawler.js';
+import { bindServerSafe } from './support/listenSafe.js';
 
 // ─── ① 纯函数 ───
 describe('[browserCrawler] pickEndpoints 纯函数', () => {
@@ -193,7 +194,7 @@ describe('[browserCrawler] 真浏览器 smoke', () => {
       res.writeHead(200, { 'Content-Type': 'text/html' });
       res.end('<html><body>list page</body></html>');
     });
-    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    await bindServerSafe(server);
     baseUrl = `http://127.0.0.1:${server.address().port}/app`;
   });
 

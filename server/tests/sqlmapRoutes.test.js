@@ -12,7 +12,7 @@ function buildApp() {
 }
 
 async function req(app, method, path, body) {
-  const server = app.listen(0);
+  const server = await listenAppSafe(app);
   const { port } = server.address();
   try {
     const res = await fetch(`http://127.0.0.1:${port}${path}`, {
@@ -59,6 +59,7 @@ test('POST /sqlmap/:id/stop 不存在时返回 SCAN_NOT_FOUND（不得报成功�
 // ── [F2 2026-10-03] /sqlmap/:id/diff 与 /sqlmap/:id/report/export ──
 import { bridge } from '../src/api/sqlmapRoutes.js';
 import { diffSqlmapVulns, renderSqlmapMarkdown } from '../src/engine/sqlmapBridge.js';
+import { listenAppSafe } from './support/listenSafe.js';
 
 const seed = (id, vulns) => {
   bridge.scans.set(id, { logs: [], vulns, state: 'completed', startedAt: Date.now() });
@@ -135,7 +136,7 @@ test('★export markdown：真实报告渲染（attachment 头 + 发现计数 + 
     { param: 'a|b', technique: 'union', raw: 'y' },
   ]);
   try {
-    const server2 = buildApp().listen(0);
+    const server2 = await listenAppSafe(buildApp());
     const { port } = server2.address();
     try {
       const res = await fetch(`http://127.0.0.1:${port}/sqlmap/f2-md/report/export?format=md`);

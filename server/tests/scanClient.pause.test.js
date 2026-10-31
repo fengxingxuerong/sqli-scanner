@@ -17,6 +17,7 @@ import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import { getConnector, getScanClient } from '../src/engine/scan/scanClient.js';
+import { bindServerSafe } from './support/listenSafe.js';
 
 let server;
 let baseUrl;
@@ -29,7 +30,7 @@ beforeEach(async () => {
     hits += 1;
     res.writeHead(200, { 'content-type': 'text/plain' }).end('ok');
   });
-  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  await bindServerSafe(server);
   baseUrl = `http://127.0.0.1:${server.address().port}`;
 });
 

@@ -16,6 +16,7 @@ import assert from 'node:assert/strict';
 import express from 'express';
 import { ReportGenerator } from '../src/services/ReportGenerator.js';
 import { createRoutes } from '../src/api/scanRoutes.js';
+import { listenAppSafe } from './support/listenSafe.js';
 
 const SECRET_REPORT = {
   scanId: 's1',
@@ -67,9 +68,7 @@ const stubManager = {
 async function withApp(fn) {
   const app = express();
   app.use('/api', createRoutes({ scanManager: stubManager }));
-  const server = await new Promise((resolve) => {
-    const s = app.listen(0, '127.0.0.1', () => resolve(s));
-  });
+  const server = await listenAppSafe(app);
   const base = `http://127.0.0.1:${server.address().port}`;
   try {
     await fn(base);

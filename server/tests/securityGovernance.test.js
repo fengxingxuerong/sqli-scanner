@@ -15,6 +15,7 @@ import { ErrorCode, AppError } from '../src/core/errors.js';
 import { isSafeSessionPath } from '../src/core/sessionStore.js';
 import { logger } from '../src/core/logger.js';
 import { TokenBucket } from '../src/core/http/tokenBucket.js';
+import { listenAppSafe } from './support/listenSafe.js';
 
 // 构造合法目标入参（config 可覆盖）
 function start(cfg) {
@@ -102,8 +103,7 @@ test('POST /scan/start 超限并发返回 ENGINE_BUSY(2002)', async () => {
   const app = express();
   app.use(express.json());
   app.use('/api', scanRoutes);
-  const server = app.listen(0, '127.0.0.1');
-  await new Promise((r) => server.once('listening', r));
+  const server = await listenAppSafe(app);
   const port = server.address().port;
   try {
     const resp = await fetch(`http://127.0.0.1:${port}/api/scan/start`, {

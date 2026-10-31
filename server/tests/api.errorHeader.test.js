@@ -5,12 +5,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createApp } from '../index.js';
+import { listenAppSafe } from './support/listenSafe.js';
 
 async function withApp(fn) {
   const app = createApp();
-  const server = await new Promise((resolve) => {
-    const s = app.listen(0, '127.0.0.1', () => resolve(s));
-  });
+  const server = await listenAppSafe(app);
   const port = server.address().port;
   try {
     await fn(`http://127.0.0.1:${port}`);

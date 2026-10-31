@@ -12,6 +12,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createApp } from '../index.js';
+import { listenAppSafe } from './support/listenSafe.js';
 
 // 靶场（e2e/redteam-lab）需先启动：node e2e/redteam-lab/server.mjs
 const LAB = 'http://127.0.0.1:8231';
@@ -29,9 +30,7 @@ async function labReachable() {
 
 async function withApp(fn) {
   const app = createApp();
-  const server = await new Promise((resolve) => {
-    const s = app.listen(0, '127.0.0.1', () => resolve(s));
-  });
+  const server = await listenAppSafe(app);
   const base = `http://127.0.0.1:${server.address().port}`;
   try {
     await fn(base);

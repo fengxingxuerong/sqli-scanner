@@ -101,6 +101,62 @@ const KNOWN_SAFE = new Map([
     '同上：buildChecks 的命名约定断言（Tauri 约定），不在 ubuntu 执行路径上'],
   ["scripts/lib/portable.mjs:exe:['便携包按 sqli-engine.exe 找 sidecar（Tauri 命名约定）', portableLayou",
     '`smokeChecks()` 的自证断言；Windows 冒烟或 --selftest 才调用，ubuntu 上不会执行'],
+  // ── [D223 2026-10-31] 接线后新进入扫描面的三个脚本 ─────────────────────────────
+  // 触发条件正是本守卫存在的意义：把 pack-check / build-portable / portable-smoke / labs
+  // 的 `--selftest` 接进 ci.yml（此前它们只在手工 gate:close 里跑）⇒ pin-check 让它们
+  // 首次进入「ci.yml 会执行的本仓脚本」集合 ⇒ 立刻暴露这批 Windows-only 字面量。
+  //
+  // **不是照单登记了事**：逐条核过平台路径，并用「把 process.platform 打成 'linux'」的
+  // 包装脚本实跑过三个 selftest（本机能改 platform），全部 exit 0：
+  //   labs ✓ 11+4 条判据 / build-portable ✓ 14 条 / portable-smoke ✓ 7 条。
+  // 即这些 `.exe`、`D:/...` 都只是**默认值或自证用的字符串**，ubuntu 执行路径上不落地。
+  // 登记理由按脚本分组写在同一锚点旁，避免"一张牌盖多行"。
+  ['scripts/pack-check.mjs:exe:const sysTar = path.join(process.env.SystemRoot || \'C:\\\\Wind',
+    '`winTar()` 的第一行就是 `if (process.platform !== "win32") return "tar"` —— ubuntu 上直接返回 POSIX tar，本行不可达；System32\\tar.exe 是 Windows 专用回退'],
+  ['scripts/pack-check.mjs:drive:const sysTar = path.join(process.env.SystemRoot || \'C:\\\\Wind',
+    '同上（同一行的 C:\\Windows 默认值，仅 win32 分支使用）'],
+  ['scripts/pack-check.mjs:drive:// [D189] tar 不许依赖 PATH 解析：Git Bash 环境下 GNU tar 会把 `C:\\...` ',
+    '该行是**注释**（记录 D189 的 Git-Bash rmt 误判），不参与执行'],
+  ['scripts/portable-smoke.mjs:exe:if (!enginePid) enginePid = newestPidOf(path.basename(layout',
+    '`newestPidOf(...)` 在 `if (process.platform !== "win32") skip(...)` 之后（该文件 136 行守卫），ubuntu 上整段被判 skip 后退出；`.exe` 只是 portableLayout 的产物名比较'],
+  ['scripts/lib/labs.mjs:drive:const home = p(\'MARIADB_HOME\', \'D:/tools/mariadb/mariadb-10.',
+    '`p()` 是「环境变量优先、否则用本机默认值」的读取器；这些默认值是**作者机器上的靶场路径**，缺失时 labs 走 `need()` 的 skip 分支（判据③自证：前置缺失一律 skip + 点名环境变量）。`--selftest` 全程注入 pathExists，不碰真实路径'],
+  ['scripts/lib/labs.mjs:drive:const data = p(\'MARIADB_DATADIR\', \'D:/tools/mariadb/data\');',
+    '同上（MARIADB_HOME 的配套默认值）'],
+  ['scripts/lib/labs.mjs:exe:requires: [need(\'file\', `${home}/bin/mariadbd.exe`, \'MARIADB',
+    '同上：`need()` 在文件缺失时产出 skip 行，不抛错；ubuntu 上 mariadbd.exe 不存在 ⇒ 该靶场如实 SKIP'],
+  ['scripts/lib/labs.mjs:exe:cmd: `${home}/bin/mariadbd.exe`,',
+    '同上：cmd 只在 status=start 时才被 spawn，而 start 的前置是 need() 全绿'],
+  ['scripts/lib/labs.mjs:drive:`--secure-file-priv=${p(\'MARIADB_SECURE_DIR\', \'D:/tools/mari',
+    '同上：MariaDB 启动参数里的本机默认目录，随 cmd 一同不可达'],
+  ["scripts/lib/labs.mjs:exe:need('file', p('PHP_EXE', 'D:/tools/php83/php.exe'), 'PHP_EX",
+    '同上：PHP_EXE 可经环境变量覆盖；缺失 ⇒ skip'],
+  ["scripts/lib/labs.mjs:drive:need('file', p('PHP_EXE', 'D:/tools/php83/php.exe'), 'PHP_EX",
+    '同上（同一行的 D: 默认值）'],
+  ["scripts/lib/labs.mjs:exe:cmd: p('PHP_EXE', 'D:/tools/php83/php.exe'),",
+    '同上：只在 need() 通过后 spawn'],
+  ["scripts/lib/labs.mjs:drive:cmd: p('PHP_EXE', 'D:/tools/php83/php.exe'),",
+    '同上（同一行）'],
+  ['scripts/lib/labs.mjs:exe:requires: [need(\'file\', `${venv}/Scripts/python.exe`, \'VAMPI',
+    '同上：VAmPI 的 venv 里 Scripts/python.exe 是 Windows venv 布局；VAMPI_VENV 可覆盖，缺失 ⇒ skip'],
+  ['scripts/lib/labs.mjs:exe:cmd: `${venv}/Scripts/python.exe`,',
+    '同上：仅 need() 全绿后 spawn'],
+  ["scripts/lib/labs.mjs:exe:const node22 = p('NODE22_EXE', path.join(home, '.workbuddy',",
+    '同上：NODE22_EXE 默认指向作者机器上的 node 22 二进制；缺失 ⇒ 用 its skip 分支（Juice Shop 需要 node22）'],
+  ["scripts/lib/labs.mjs:exe:need('file', p('JAVA_EXE', 'D:/tools/jdk/jdk-17.0.2/bin/java",
+    '同上：JAVA_EXE 可覆盖，缺失 ⇒ skip（Benchmark 靶场）'],
+  ["scripts/lib/labs.mjs:drive:need('file', p('JAVA_EXE', 'D:/tools/jdk/jdk-17.0.2/bin/java",
+    '同上（同一行）'],
+  ["scripts/lib/labs.mjs:exe:cmd: p('JAVA_EXE', 'D:/tools/jdk/jdk-17.0.2/bin/java.exe'),",
+    '同上：仅 need() 全绿后 spawn'],
+  ["scripts/lib/labs.mjs:drive:cmd: p('JAVA_EXE', 'D:/tools/jdk/jdk-17.0.2/bin/java.exe'),",
+    '同上（同一行）'],
+  ["scripts/lib/labs.mjs:drive:need('file', p('MAVEN_CMD', 'D:/tools/maven/apache-maven-3.9",
+    '同上：MAVEN_CMD 可覆盖，缺失 ⇒ skip（Benchmark 的 mvn cargo:run）'],
+  ["scripts/lib/labs.mjs:drive:cmd: p('MAVEN_CMD', 'D:/tools/maven/apache-maven-3.9.11/bin/",
+    '同上：仅 need() 全绿后 spawn'],
+  ["scripts/lib/labs.mjs:drive:env: { JAVA_HOME: p('JAVA_HOME', 'D:/tools/jdk/jdk-17.0.2') ",
+    '同上：启动 env 里的 JAVA_HOME 默认值，随 cmd 不可达'],
 ]);
 
 /**

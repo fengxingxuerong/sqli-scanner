@@ -1,0 +1,53 @@
+name: 扫描结果与实际不符（误报 / 漏报 / 结论不可信）
+description: 引擎判定与目标真实情况不一致——这是我们最想要的反馈
+labels: ['scan-feedback']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈。**误报率比检出率更能帮到这个项目**——每一条可复现的误报/漏报都会
+        进入判据取证流程（参见 AGENTS.md §3.5 的推翻协议）。
+        ⚠️ 请只提交你**已获授权**测试的目标信息，脱敏后再贴。
+  - type: dropdown
+    id: kind
+    attributes:
+      label: 结果类型
+      options:
+        - 误报（报了漏洞，实际没有）
+        - 漏报（实际有注入，没报）
+        - verdict=inconclusive（会话失效/签名被拒等，结论不可信）
+        - unverifiedSurfaces 过大（大量注入面没测成）
+        - 其他
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: 复现命令与输出（脱敏）
+      description: |
+        CLI 请附完整命令与 `reports/<host>-<时间戳>/manifest.json` 里的 verdict / vuln.triage；
+        面板/REST 请附导出的 JSON。**引用结论前先看 verdict：inconclusive ≠ 未检出。**
+      placeholder: |
+        node server/bin/cli.js -u "http://target/page?id=1" --level 3
+        （verdict / 命中条目 / unverifiedSurfaces）
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: 目标的实际情况与依据
+      description: 手工验证怎么做的、为什么认为判定不对（参数真实上下文 / 数据库类型 / 是否有 WAF）
+    validations:
+      required: true
+  - type: input
+    id: dbms_waf
+    attributes:
+      label: 目标数据库类型 / WAF（如已知）
+      placeholder: 例：MySQL 8.0 + 云 WAF；未知可留空
+  - type: checkboxes
+    id: auth
+    attributes:
+      label: 授权声明
+      options:
+        - label: 我确认对上述目标拥有合法测试授权，且已对敏感信息脱敏
+          required: true

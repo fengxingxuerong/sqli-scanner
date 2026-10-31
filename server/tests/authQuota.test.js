@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { validateDeclaration, extractDeclaration } from '../src/core/authDeclaration.js';
 import { checkQuota, release, getQuotaState, credentialKeyOf, _resetForTest } from '../src/api/quotaMiddleware.js';
-import { recordAuthEvent, readAuthEvents, _clearForTest } from '../src/services/authAudit.js';
+import { recordAuthEvent, findAuthEvents, _clearForTest } from '../src/services/authAudit.js';
 import { tokenKeyOf } from '../src/api/rateLimit.js';
 
 // ── authDeclaration ──────────────────────────────────────────────────────
@@ -154,9 +154,11 @@ test('authAudit：记录并读取审计事件（spec 5.2.1 规则 2）', () => {
     result: 'allowed',
   });
   assert.equal(r.ok, true);
-  const events = readAuthEvents();
-  assert.ok(events.length >= 1, '至少 1 条记录');
-  const last = events[events.length - 1];
+  // [D224] 按 eventId 精确取回：auth.jsonl 全进程共享，并发时「最后一行」不是自己写的
+  assert.ok(r.eventId, 'recordAuthEvent 必须回传 eventId（否则调用方无法在并发下认领自己的事件）');
+  const mine = findAuthEvents({ eventId: r.eventId });
+  assert.equal(mine.length, 1, '按 eventId 应恰好取回 1 条');
+  const last = mine[0];
   assert.equal(last.operator, 'pentester');
   assert.equal(last.operation, 'exploit:sql');
   assert.equal(last.result, 'allowed');
@@ -166,14 +168,16 @@ test('authAudit：记录并读取审计事件（spec 5.2.1 规则 2）', () => {
 
 test('authAudit：拒绝事件也记录', () => {
   _clearForTest();
-  recordAuthEvent({
+  const rec = recordAuthEvent({
     operation: 'exploit:os-shell',
     target: 'http://target.com/',
     result: 'denied',
     reason: 'AUTH_DECLARATION_MISSING',
   });
-  const events = readAuthEvents();
-  const last = events[events.length - 1];
+  // [D224] 同上：按 eventId 定位，不依赖文件时序
+  const mine = findAuthEvents({ eventId: rec.eventId });
+  assert.equal(mine.length, 1, '按 eventId 应恰好取回 1 条');
+  const last = mine[0];
   assert.equal(last.result, 'denied');
   assert.equal(last.reason, 'AUTH_DECLARATION_MISSING');
 });
