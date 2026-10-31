@@ -116,7 +116,7 @@ export async function probeBoundary(ctx) {
       const similarHits = await this._boundaryCandidateProbes(ctx, orig, candidates, similar, PROBE_OPTS);
       // 降级链与原实现同序：基线比对全落空 → 真假对差分；多候选同时相似 → OR 型复核；否则取首个命中
       if (similarHits.length === 0) {
-        const pairPrefix = await this._boundaryPairDiff(ctx, orig, candidates, PROBE_OPTS);
+        const pairPrefix = await this._boundaryPairDiff(ctx, orig, candidates, similar, PROBE_OPTS);
         if (pairPrefix !== null) return pairPrefix;
       }
       if (similarHits.length > 1) {
@@ -247,45 +247,81 @@ export async function _boundaryCandidateProbes(ctx, orig, candidates, similar, P
    * （e2e/fixtures/recall/10-search-like.json：41 → 65，撞破它自己的请求数上限），
    * 而且在 WAF 目标上这 26 条全是硬拦截特征 —— 多花的是封 IP 的风险。
    * 先投前 6 个（12 请求），拿不到差分再投剩余（LIKE 的 `%'` 在第 9 位，仍会覆盖到）。
+   *
+   * [D225 2026-11-01] 差分命中后追加「基线锚定」分级：真侧或假侧以 **orig 口径剥离**后 ≈ 基线
+   * 的候选**立即胜出**；只有差分、两侧都偏离基线的候选只记兜底——全部候选扫完仍无锚定者才用。
+   * 为什么必须有这一级（真机回归证据：Juice Shop 20.3.0 `/rest/products/search?q=`，SQLite）：
+   *   · 候选表里 `'))` 排在 `%'))` 之前。错误层级的 `'))` 在 OR 对上差分巨大
+   *     （`apple')) OR 1=1-- -` → 全表 34245 字节 vs `OR 1=2` → 空集 30 字节）⇒ D210 的
+   *     OR 兜底让它**提前返回**，正确前缀 `%'))`（AND 对：apple 行 ≈ 基线）所在的第二波根本没跑。
+   *   · boundary 错成 `'))` 后布尔真侧偏离基线被拒、error 被归因对照拒、union 列数全错
+   *     ⇒ 该点全通道静默漏检（外部裁判 2/2 → 1/2）。
+   * 为什么锚定剥离用 orig 而不是实发 payload：注入值恰好也是 legit 内容时（Juice 的
+   * `apple_juice.jpg`），`stripEchoedPayload(基线, orig)` 与 `stripEchoedPayload(候选, 完整payload)`
+   * 削的量不对称（实测同一份 1617 字节响应，基线侧被削 75 字节、候选侧一字未削），
+   * `_boundarySimilar` 因此把完美复现基线的候选判成「不相似」——这正是本函数存在的
+   * [PAIR-FIX] 缺陷形态。以 orig 统一口径剥离两侧，完美复现者自然锚定成功；
+   * 回显型目标（payload 文本被原样打回）剥不干净 ⇒ 锚定不上 ⇒ 走兜底，行为与修复前一致。
+   * 成本：锚定命中即早退（testfire 场景 AND/OR 第一对就锚定，请求量不变）；只有存在
+   * 「假通过」候选时才多扫完本波与后续波（Juice 实测 boundary 探测约 +20 请求）。
    * @param {object} ctx 检测上下文
    * @param {string} orig 参数原值
    * @param {string[]} candidates 闭合候选（按出现频率排序）
+   * @param {(body: string, status: any, payload: string) => boolean} similar 基线相似判定
+   *        （剥回显 → 状态码 → 分块比对；锚定复核以 **orig** 为剥离口径）
    * @param {object} PROBE_OPTS 探针请求选项（retry: 0）
    * @returns {Promise<string|null>} 命中的闭合前缀；无命中返回 null
    */
-export async function _boundaryPairDiff(ctx, orig, candidates, PROBE_OPTS) {
-    const { httpClient, target, point } = ctx;
+export async function _boundaryPairDiff(ctx, orig, candidates, similar, PROBE_OPTS) {
     const WAVES = [candidates.slice(0, 6), candidates.slice(6)];
+    /** @type {{prefix: string}|null} 仅有差分、未锚定基线的兜底候选 */
+    let unanchored = null;
     for (const wave of WAVES) {
       if (!wave.length) continue;
       const pairHits = await Promise.allSettled(
-        wave.map(async (prefix) => {
-          // [D210] AND 优先、OR 兜底。原因同 D209：参数**原值查不到行**时 AND 恒假
-          //（`WHERE uid='ghost' AND 1=1` 仍是空集），真/假两侧都落同一页 ⇒ 差分无信号 ⇒
-          // 闭前缀探测失败 ⇒ `point.boundary=''` ⇒ union/提取全部拿不到闭合。
-          // 真机证据（demo.testfire.net POST /doLogin，testuser 不是有效用户）：
-          //   testuser' AND 1=1-- -  → login.jsp   |  testuser' AND 1=2-- -  → login.jsp（无差异）
-          //   testuser' OR  1=1-- -  → bank/main.jsp |  testuser' OR  1=2-- -  → login.jsp（有差异）
-          // AND 命中即早退，正常目标零额外开销；只有空基线目标才多花一组请求。
-          for (const op of ['AND', 'OR']) {
-            const tp = this.obfuscateValue(ctx, `${orig}${prefix} ${op} 1=1-- -`);
-            const fp = this.obfuscateValue(ctx, `${orig}${prefix} ${op} 1=2-- -`);
-            const [t, f] = await Promise.all([
-              this.send(httpClient, ctx, this.buildRequest(target, point, tp), PROBE_OPTS),
-              this.send(httpClient, ctx, this.buildRequest(target, point, fp), PROBE_OPTS),
-            ]);
-            const tc = stripEchoedPayload(String(t?.data ?? ''), tp);
-            const fc = stripEchoedPayload(String(f?.data ?? ''), fp);
-            // 两侧都空（如全程 404）不构成信号
-            if (tc.length > 0 && !this.chunkedSimilar(tc, fc)) return { prefix, ok: true };
-          }
-          return { prefix, ok: false };
-        })
+        wave.map((prefix) => this._boundaryPairProbe(ctx, orig, prefix, similar, PROBE_OPTS))
       );
-      const bestPair = /** @type {any} */ (pairHits.find((r) => r.status === 'fulfilled' && r.value.ok));
-      if (bestPair) return bestPair.value.prefix;
+      const hits = /** @type {any[]} */ (pairHits.filter((r) => r.status === 'fulfilled' && r.value.ok).map((r) => r.value));
+      const anchored = hits.find((h) => h.anchored);
+      if (anchored) return anchored.prefix;
+      if (!unanchored && hits.length > 0) unanchored = { prefix: hits[0].prefix };
     }
+    // [D225] 兜底：没有任何锚定候选时，维持修复前行为（取首个差分命中，PAIR-FIX 回显场景依赖此路径）
+    if (unanchored) return unanchored.prefix;
     return null;
+  }
+
+  /**
+   * [D225] 单个闭合候选的真假对探测（_boundaryPairDiff 的内层，独立成函数过复杂度门禁）。
+   * AND 优先、OR 兜底（[D210]，理由见 _boundaryPairDiff 函数头与 D209 空基线分析）；
+   * 差分命中后做基线锚定分级（[D225]）：真/假任一侧以 orig 口径剥离后 ≈ 基线 ⇒ anchored。
+   * @param {object} ctx 检测上下文
+   * @param {string} orig 参数原值
+   * @param {string} prefix 闭合候选前缀
+   * @param {(body: string, status: any, payload: string) => boolean} similar 基线相似判定
+   * @param {object} PROBE_OPTS 探针请求选项（retry: 0）
+   * @returns {Promise<{prefix: string, ok: boolean, anchored: boolean}>}
+   */
+export async function _boundaryPairProbe(ctx, orig, prefix, similar, PROBE_OPTS) {
+    const { httpClient, target, point } = ctx;
+    for (const op of ['AND', 'OR']) {
+      const tp = this.obfuscateValue(ctx, `${orig}${prefix} ${op} 1=1-- -`);
+      const fp = this.obfuscateValue(ctx, `${orig}${prefix} ${op} 1=2-- -`);
+      const [t, f] = await Promise.all([
+        this.send(httpClient, ctx, this.buildRequest(target, point, tp), PROBE_OPTS),
+        this.send(httpClient, ctx, this.buildRequest(target, point, fp), PROBE_OPTS),
+      ]);
+      const tData = String(t?.data ?? '');
+      const fData = String(f?.data ?? '');
+      const tc = stripEchoedPayload(tData, tp);
+      const fc = stripEchoedPayload(fData, fp);
+      // 两侧都空（如全程 404）不构成信号
+      if (!(tc.length > 0 && !this.chunkedSimilar(tc, fc))) continue;
+      // [D225] 基线锚定（orig 口径剥离，见 _boundaryPairDiff 函数头）：sound oracle 至少一侧 ≈ 诚实基线
+      const anchored = similar(tData, t?.status, orig) || similar(fData, f?.status, orig);
+      return { prefix, ok: true, anchored };
+    }
+    return { prefix, ok: false, anchored: false };
   }
 
   /**

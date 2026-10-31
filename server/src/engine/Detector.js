@@ -11,7 +11,7 @@ export { buildDynamicSimilarFn, buildDynamicSimilarGated } from './detectorSuppo
 import { chunkedSimilar, buildDynamicSimilar } from './detectorSupport/similarity.js';
 import {
   probeBoundary, _knownPointBoundary, _boundaryBaseline, _boundaryCandidateProbes,
-  _boundaryPairDiff, _boundaryOrRecheck, _boundarySimilar,
+  _boundaryPairDiff, _boundaryPairProbe, _boundaryOrRecheck, _boundarySimilar,
 } from './detectorSupport/boundary.js';
 import {
   matchAnchors, _textOnly, matchText, _matchByCode, _toRegExp, _matchByRegexp,
@@ -85,6 +85,7 @@ Detector.prototype._knownPointBoundary = _knownPointBoundary;
 Detector.prototype._boundaryBaseline = _boundaryBaseline;
 Detector.prototype._boundaryCandidateProbes = _boundaryCandidateProbes;
 Detector.prototype._boundaryPairDiff = _boundaryPairDiff;
+Detector.prototype._boundaryPairProbe = _boundaryPairProbe;
 Detector.prototype._boundaryOrRecheck = _boundaryOrRecheck;
 Detector.prototype._boundarySimilar = _boundarySimilar;
 Detector.prototype.matchAnchors = matchAnchors;
