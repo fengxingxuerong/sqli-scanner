@@ -89,10 +89,15 @@ function spliceBlock(lines, block) {
  * @returns {{next:string, count:number}} 新全文与批次条数
  */
 function buildIndex(text) {
-  const lines = text.split('\n');
+  // [D220] CRLF 容忍：core.autocrlf=true 的 checkout 每次 `git touch` 都会把
+  // CHANGELOG.md 变回 CRLF，按 `'\n'` 切行后标记行带着 `\r`，indexOf 永远失配
+  // （实测：commit 后 working tree 必 CRLF ⇒ gate 的 --check 必红）。切行改按
+  // /\r?\n/，写回时按原文件的换行风格 join，正文一个字节不动。
+  const eol = text.includes('\r\n') ? '\r\n' : '\n';
+  const lines = text.split(/\r?\n/);
   const entries = parseEntries(lines);
   const block = renderBlock(entries);
-  return { next: spliceBlock(lines, block).join('\n'), count: entries.length };
+  return { next: spliceBlock(lines, block).join(eol), count: entries.length };
 }
 
 /**
