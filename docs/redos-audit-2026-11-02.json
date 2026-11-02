@@ -1,0 +1,178 @@
+{
+  "generatedAt": "2026-11-01T17:04:25.588Z",
+  "filesScanned": 446,
+  "regexes": 1047,
+  "probed": 12,
+  "danger": [],
+  "candidates": [
+    {
+      "file": "server\\src\\core\\tamper\\plugins\\if2case.js",
+      "line": 43,
+      "pattern": "^\\(+|\\)+$",
+      "flags": "g",
+      "score": 5,
+      "reasons": [
+        "组内量词 + 组外量词",
+        "交替 + 组外量词"
+      ],
+      "probe": {
+        "ms": 0.0548,
+        "timedOut": false
+      }
+    },
+    {
+      "file": "server\\src\\core\\tamper\\plugins\\binary.js",
+      "line": 45,
+      "pattern": "(\\s+binary)+",
+      "flags": "g",
+      "score": 3,
+      "reasons": [
+        "组内量词 + 组外量词"
+      ],
+      "probe": {
+        "ms": 0.0558,
+        "timedOut": false
+      }
+    },
+    {
+      "file": "server\\src\\engine\\parseErrors.js",
+      "line": 20,
+      "pattern": "(?:near|at)\\s+[\"']((?:[^\"']|['\"]){1,80})",
+      "flags": "i",
+      "score": 2,
+      "reasons": [
+        "交替 + 组外量词"
+      ],
+      "probe": {
+        "ms": 0.0531,
+        "timedOut": false
+      }
+    },
+    {
+      "file": "server\\src\\engine\\parseErrors.js",
+      "line": 22,
+      "pattern": "Incorrect\\s+syntax\\s+(?:near\\s+)?[\"']?((?:[^\"']|['\"]){1,80})",
+      "flags": "i",
+      "score": 2,
+      "reasons": [
+        "交替 + 组外量词"
+      ],
+      "probe": {
+        "ms": 0.0886,
+        "timedOut": false
+      }
+    },
+    {
+      "file": "server\\src\\engine\\payloadRegistry.js",
+      "line": 74,
+      "pattern": "(?:^|[\\s'\"(;])(?:drop\\s+table|truncate\\s+table|delete\\s+from|insert\\s+into|update\\s+[\\w.]+\\s+set|alter\\s+table|create\\s+(?:table|user|role)|grant\\s+\\w+|revoke\\s+\\w+|into\\s+(?:out|dump)file|load_file\\s*\\(|xp_cmdshell|pg_(?:read|write)_file|copy\\s+[\\w\"'.]+\\s+to\\s+program)",
+      "flags": "i",
+      "score": 2,
+      "reasons": [
+        "相邻重叠量词"
+      ],
+      "probe": {
+        "ms": 0.4416,
+        "timedOut": false
+      }
+    },
+    {
+      "file": "server\\src\\engine\\payloads\\index.js",
+      "line": 230,
+      "pattern": "PostgreSQL\\s+\\d+",
+      "flags": "i",
+      "score": 2,
+      "reasons": [
+        "相邻重叠量词"
+      ],
+      "probe": {
+        "ms": 0.0586,
+        "timedOut": false
+      }
+    },
+    {
+      "file": "server\\src\\engine\\payloads\\index.js",
+      "line": 233,
+      "pattern": "(Oracle|Release\\s+\\d+\\.\\d+)",
+      "flags": "i",
+      "score": 2,
+      "reasons": [
+        "相邻重叠量词"
+      ],
+      "probe": {
+        "ms": 0.0856,
+        "timedOut": false
+      }
+    },
+    {
+      "file": "server\\src\\core\\dbDrivers.js",
+      "line": 396,
+      "pattern": "\\s+ORDER\\s+BY\\s+\\d+.*$",
+      "flags": "is",
+      "score": 2,
+      "reasons": [
+        "相邻重叠量词"
+      ],
+      "probe": {
+        "ms": 0.1132,
+        "timedOut": false
+      }
+    },
+    {
+      "file": "server\\src\\core\\digestAuth.js",
+      "line": 37,
+      "pattern": "([a-zA-Z][a-zA-Z0-9_-]*)\\s*=\\s*(?:\"((?:[^\"\\\\]|\\\\.)*)\"|([^\\s,]+))",
+      "flags": "g",
+      "score": 2,
+      "reasons": [
+        "交替 + 组外量词"
+      ],
+      "probe": {
+        "ms": 0.0599,
+        "timedOut": false
+      }
+    },
+    {
+      "file": "server\\src\\core\\tamper\\plugins\\scalarselectinline.js",
+      "line": 40,
+      "pattern": "'(?:[^'\\\\]|\\\\.)*'|\"(?:[^\"\\\\]|\\\\.)*\"|`(?:[^`\\\\]|\\\\.)*`",
+      "flags": "g",
+      "score": 2,
+      "reasons": [
+        "交替 + 组外量词"
+      ],
+      "probe": {
+        "ms": 0.0617,
+        "timedOut": false
+      }
+    },
+    {
+      "file": "server\\src\\engine\\payloads\\index.js",
+      "line": 229,
+      "pattern": "^\\d+\\.\\d+\\.\\d+(?!(?:.*MariaDB|.*TiDB))(?:-\\S.*)?\\s*$",
+      "flags": "i",
+      "score": 1,
+      "reasons": [
+        "双 .*"
+      ],
+      "probe": {
+        "ms": 0.0662,
+        "timedOut": false
+      }
+    },
+    {
+      "file": "server\\src\\core\\errorSig.js",
+      "line": 37,
+      "pattern": "(SQL syntax|mysql_fetch|ORA-\\d{5}|Microsoft SQL Server|PostgreSQL.*ERROR|SQLite3?(?:[:.]|[\\s-]*(?:error|exception))|syntax error at or near|XPATH syntax error|Incorrect syntax near|near\\s+[\"'][^\\n]{0,80}?[\"']\\s*:\\s*syntax error|unterminated quoted string|Unclosed quotation|extractvalue|updatexml|conversion failed|unknown column|Division by zero|SQL\\d{4}[NRT]|DB2 SQL Error|SQLSTATE\\s*\\[|PG::|unrecognized token|no such (?:table|column|function)|SQL logic error|Adaptive Server|Sybase\\s*(?:error|message)|SQL error code|Firebird.*(?:error|exception)|isc_\\d+|Informix\\s+SQL|Informix.*(?:error|exception)|JdbcSQLException|org\\.h2\\.jdbc|org\\.hsqldb|HSQLDB.*(?:error|exception)|org\\.apache\\.derby|Derby.*SQLException|Syntax error in SQL statement|Syntax error: Encountered|Cannot parse|Microsoft Access|ODBC|Jet.*Database|MonetDB.*(?:error|exception)|MonetDB\\s+\\d{5})",
+      "flags": "i",
+      "score": 1,
+      "reasons": [
+        "双 .*"
+      ],
+      "probe": {
+        "ms": 0.591,
+        "timedOut": false
+      }
+    }
+  ]
+}

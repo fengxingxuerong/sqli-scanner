@@ -49,6 +49,14 @@ import { AppError, ErrorCode } from './errors.js';
 import { logger } from './logger.js';
 import { looksLikeInjection } from './scanValidityGuard.js';
 
+/**
+ * 变换脚本体积上限（1MB）。脚本不会这么大 —— 超过基本是误绑了数据文件。
+ * 为什么要这道闸：`createHash('sha256').update(readFileSync(f))` 是**同步**的，
+ * 10MB 实测数十 ms 事件循环阻塞，而它跑在每次扫描的启动路径上。
+ * @type {number}
+ */
+export const MAX_SCRIPT_BYTES = 1024 * 1024;
+
 /** 允许的脚本后缀（与 --tamper 的用户插件同一约定） */
 const SCRIPT_EXT_RE = /\.(?:m|c)?js$/i;
 
@@ -142,7 +150,7 @@ export function assertScriptPath(rawPath, {
  * 失败一律抛 AppError(REQUEST_SCRIPT_INVALID) —— 不降级为「忽略脚本继续扫」：
  * 静默继续会让使用者以为自定义签名生效了，比报错危险得多（同 customPayloads 的硬失败口径）。
  * @param {string} rawPath
- * @param {{allowedDir?: string}} [opts]
+ * @param {{allowedDir?: string, maxBytes?: number}} [opts] maxBytes 覆盖体积上限（单测传小值）
  * @returns {Promise<{fn: Function, source: string, sha256: string}>}
  */
 export async function loadRequestScript(rawPath, opts = {}) {
@@ -162,6 +170,15 @@ export async function loadRequestScript(rawPath, opts = {}) {
     throw new AppError(
       ErrorCode.REQUEST_SCRIPT_INVALID,
       `请求变换脚本必须导出 transform 函数（export function transform(req){...} 或 export default fn）：${resolved}`,
+    );
+  }
+  // [D239] 哈希前先挡体积：同步 sha256 无上限 = 误绑大文件即数十 ms 阻塞（见 MAX_SCRIPT_BYTES）
+  const maxBytes = opts.maxBytes ?? MAX_SCRIPT_BYTES;
+  const st = statSync(resolved);
+  if (st.size > maxBytes) {
+    throw new AppError(
+      ErrorCode.REQUEST_SCRIPT_INVALID,
+      `请求变换脚本过大（${st.size} 字节 > ${maxBytes}）：请确认绑定的是脚本而不是数据文件`,
     );
   }
   const sha256 = createHash('sha256').update(readFileSync(resolved)).digest('hex');

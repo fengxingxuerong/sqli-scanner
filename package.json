@@ -147,7 +147,8 @@
     "waf:screen": "node scripts/waf-semantic-screen.mjs",
     "waf-real:collect": "node e2e/waf-real/cloud-sample-collector.mjs",
     "bench:sqlmap": "node bench/run.mjs",
-    "bench:selftest": "node bench/run.mjs --selftest"
+    "bench:selftest": "node bench/run.mjs --selftest",
+    "perf:echostrip": "node e2e/perf/echoStrip-shortcircuit.probe.mjs"
   },
   "lint-staged": {
     "*.{js,mjs,cjs,ts,tsx}": [

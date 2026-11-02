@@ -1105,6 +1105,47 @@ const SUITES = [
       return v;
     },
   },
+  {
+    // [D228 2026-11-01] AI 报告网关端到端（opt-in）：ReportAI 三角色流水线此前只有 stub 单测，
+    // 「本地网关 × 真报告」全链路无验收。本套件用真实 HTTP 网关跑完
+    // 探活 → 三角色调用 → 脱敏 → 审阅标记 → 落盘，并核对 ai-report.md 元数据头。
+    // 网关/模型未就绪 → [SKIP] + exit 0（未就绪不是失败，但必须写明原因，不得冒充通过）。
+    // 断言的是链路事实（实调回声/脱敏/审阅/元数据/落盘），不判报告文风质量。
+    id: 'ai-gateway',
+    title: 'AI 报告网关端到端（opt-in：本地网关 × 真报告 → 元数据头+脱敏+审阅+落盘全链路）',
+    needs: [],
+    optional: true, // 需本地 LLM 网关 + 对话模型（非本仓依赖）→ 未就绪 SKIP 并写明原因
+    run: () => run('node', ['e2e/ai-gateway-lab/run.mjs']),
+    assert: (out) => {
+      if (/\[SKIP\] AI 网关不可用/.test(out)) {
+        return { facts: { AI网关: '跳过（网关/模型未就绪）' }, pass: false, skipped: true, reason: '本地 LLM 网关或对话模型未就绪（AI_GATEWAY_URL/AI_GATEWAY_MODEL 可注入）' };
+      }
+      const reviewed = /审阅角色校验：✅/.test(out);
+      const meta = /元数据头：(\d)\/4/.exec(out);
+      const mask = /数据脱敏：on/.test(out);
+      const disk = /落盘：true \((\d+) bytes/.exec(out);
+      const real = /网关实调：true \(([^)]+)\)/.exec(out);
+      const ranPipeline = /网关：http/.test(out); // 实际发起过网关探活（防 stub 假通过）
+      const pass = ranPipeline && reviewed && !!meta && meta[1] === '4' && mask && !!disk && !!real;
+      return {
+        facts: {
+          AI网关: pass ? '✅ 通过' : '❌ 未通过',
+          网关实调: real ? real[1] : '取不到',
+          元数据头: meta ? `${meta[1]}/4` : '取不到',
+          数据脱敏: mask ? 'on' : '取不到',
+          落盘: disk ? `${disk[1]} bytes` : '取不到',
+        },
+        pass,
+        reason: pass ? null : !ranPipeline
+          ? '网关探活从未执行（runner 未输出网关行）'
+          : !reviewed ? '审阅角色未通过（reviewer 未返回 ✅）'
+          : !meta || meta[1] !== '4' ? 'ai-report.md 元数据头不完整'
+          : !mask ? '数据脱敏标记缺失（默认必须 on）'
+          : !real ? '网关实调回声缺失（model 链不匹配，可能被 stub）'
+          : 'AI 网关链路断言失败（见 stdout）',
+      };
+    },
+  },
 ];
 
 // ── 执行 ────────────────────────────────────────────────────────────────────

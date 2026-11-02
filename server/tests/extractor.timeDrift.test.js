@@ -320,43 +320,143 @@ test('★故障③★ 真实余量档（300ms）下同样出错：不是只在�
  * maxGap 干净而仍腐蚀 ⇒ 真·跟踪器失败，立即红（不许用重抽蒙混）。
  */
 const STALL_MS = 150;
+/**
+ * [D240] 整抽墙钟预算：超过它且**请求数正常** ⇒ 归因环境（CPU 被抢占 / 并发挤压）。
+ *
+ * 为什么需要第二条证据：`maxGap` 只看事件循环**被堵**的时长。机器上还有别的
+ * 负载时更常见的形态是「心跳照常、每次 await 的调度延迟被拉长」——maxGap 干净，
+ * 而 25ms/60ms 的那点余量已被整体拖慢吃掉。实测（2026-11-02 全量并发跑 +
+ * 外部负载）：maxGap=52ms < STALL_MS，但提取产出 `5/7.40`（正常 `5.7.40`）⇒
+ * 按旧判据当场红，属于把「机器慢」记成「跟踪器坏」。
+ *
+ * 为什么必须配请求数上界：跟踪器真失效时请求数会发散（D64 实测 47 → 142+，
+ * Σ(60+2i) 二次增长 ⇒ 墙钟必然暴涨）。只看墙钟会把真 bug 归因成环境。
+ * 实测正常请求数：TIGHT 档 47~54，修复② 档同量级 ⇒ 取 100 作上界（约 2×）。
+ */
+const SLOW_WALL_MS = 20000;
+const NORMAL_REQ_CEIL = 100;
+/**
+ * [D242] 「deadline 超时但请求数极少」判据的请求数上界。
+ *
+ * macos-latest runner（CI #379）实测：本文件的失败探针用例只发出 **4 个**请求就吃满
+ * 30s deadline（正常路径要 ~50 个、每个 60~90ms）——平均 7.5s/请求，慢了 100 倍，
+ * 那是**进程被冻结**（同 runner 上并发的其它测试文件把它挤停），不是提取失控。
+ *
+ * 真·失控的形态是请求数**暴涨**（恒判真 ⇒ 长度顶到上界 ⇒ 逐位置循环；D64 实测 47 → 142+），
+ * 与「4 个」差一个数量级 —— 用请求数上界就能把「环境冻结」与「循环失控」分开。
+ */
+const FROZEN_REQ_CEIL = 20;
+
 async function withStallProbe(fn) {
   let maxGap = 0;
   let last = Date.now();
+  const t0 = Date.now();
   const timer = setInterval(() => {
     const now = Date.now();
     maxGap = Math.max(maxGap, now - last);
     last = now;
   }, 25);
   try {
-    return { out: await fn(), maxGap };
+    const out = await fn();
+    return { out, maxGap, elapsed: Date.now() - t0 };
   } finally {
     clearInterval(timer);
   }
 }
+
+/**
+ * [D240] 归因判定（纯函数，真值表在下方 §归因判据 逐条钉死）。
+ *
+ * @param {{out:string, secret:string, maxGap:number, elapsed:number, reqs:number}} d
+ * @returns {'pass'|'env'|'bug'} pass=拿到正解；env=有环境越界证据、应重抽；bug=无证据仍腐蚀
+ */
+function classifyDraw({ out, secret, maxGap, elapsed, reqs }) {
+  if (out === secret) return 'pass';
+  const stalled = maxGap > STALL_MS;
+  // 慢且请求数正常 ⇒ 机器被抢占；请求数发散（真失效）不许走这条
+  const slowButHealthy = elapsed > SLOW_WALL_MS && reqs <= NORMAL_REQ_CEIL;
+  return stalled || slowButHealthy ? 'env' : 'bug';
+}
+
+/**
+ * [D240] 把「一抽腐蚀」归类为三种之一，供修复①② 共用（原先是两段逐字重复的循环）。
+ *
+ *   pass —— 拿到正解，结束
+ *   env  —— 有环境越界证据（stall 或 慢且请求数正常），重抽
+ *   bug  —— 两条证据都没有却仍腐蚀 ⇒ 真·跟踪器失败，立即红（不许用重抽蒙混）
+ *
+ * @param {{secret:string, label:string, draws:number,
+ *          makeOracle:(draw:number)=>object,
+ *          makeCtx:(draw:number, oracle:object)=>object}} spec
+ * @returns {Promise<void>}
+ */
+async function expectExtractionSurvivesDrift(spec) {
+  const { secret, label, draws, makeOracle, makeCtx } = spec;
+  for (let draw = 1; draw <= draws; draw++) {
+    const oracle = makeOracle(draw);
+    const ctx = makeCtx(draw, oracle);
+    const { out, maxGap, elapsed } = await withStallProbe(() =>
+      extractWithDeadline(new Extractor(), ctx, oracle, 'version()')
+    );
+    const reqs = Number(oracle?.stats?.total ?? NaN);
+    const verdict = classifyDraw({ out, secret, maxGap, elapsed, reqs });
+    if (verdict === 'pass') {
+      if (draw > 1) console.log(`[${label}] 第 ${draw} 抽通过（前 ${draw - 1} 抽腐蚀被环境归因重抽）`);
+      return;
+    }
+    if (verdict === 'bug') {
+      assert.equal(
+        out,
+        secret,
+        `${label}：目标上应正确提取（本抽无环境越界证据：maxGap=${maxGap}ms ≤ ${STALL_MS}ms、` +
+          `elapsed=${elapsed}ms ≤ ${SLOW_WALL_MS}ms 或请求数 ${reqs} > ${NORMAL_REQ_CEIL}），` +
+          `实际 ${JSON.stringify(out)}`
+      );
+    }
+    console.log(
+      `[${label}] 第 ${draw} 抽腐蚀（${JSON.stringify(out)}）但环境越界` +
+        `（maxGap=${maxGap}ms、elapsed=${elapsed}ms、请求 ${reqs}）⇒ 重抽`
+    );
+  }
+  assert.fail(`连续 ${draws} 抽全部被环境越界污染 —— 本 runner 退化到无法量测该余量档，不计为绿`);
+}
+
+test('§归因判据：环境越界才重抽，真·失效必须立即红（真值表）', () => {
+  // 腐蚀样本（实测形态：`.` 被写成 `/`）
+  const base = { out: '5/7.40', secret: '5.7.40', maxGap: 10, elapsed: 8000, reqs: 50 };
+  // ① 拿到正解 ⇒ pass，与环境多差无关
+  assert.equal(
+    classifyDraw({ ...base, out: '5.7.40', maxGap: STALL_MS + 500, elapsed: SLOW_WALL_MS * 5, reqs: 500 }),
+    'pass'
+  );
+  // ② 事件循环停顿 ⇒ env（原判据，保持）
+  assert.equal(classifyDraw({ ...base, maxGap: STALL_MS + 1 }), 'env');
+  // ③ 边界：恰好等于 STALL_MS 不算停顿（判据是严格大于）
+  assert.equal(classifyDraw({ ...base, maxGap: STALL_MS }), 'bug');
+  // ④ 整体慢 + 请求数正常 ⇒ env（D240 新增：CPU 被抢占不产生事件循环停顿）
+  assert.equal(classifyDraw({ ...base, elapsed: SLOW_WALL_MS + 1, reqs: NORMAL_REQ_CEIL }), 'env');
+  // ⑤ ★ 整体慢但请求数发散 ⇒ 真·失效，必须 bug（防「放宽归因把真 bug 吞掉」）
+  //    依据 D64 实测：跟踪器失效时请求数 47 → 142+，Σ(60+2i) 二次增长 ⇒ 墙钟必然暴涨
+  assert.equal(classifyDraw({ ...base, elapsed: 60000, reqs: NORMAL_REQ_CEIL + 1 }), 'bug');
+  assert.equal(classifyDraw({ ...base, elapsed: 60000, reqs: 142 }), 'bug');
+  // ⑥ 快且请求数正常 ⇒ bug（最常见的真失效形态）
+  assert.equal(classifyDraw({ ...base, elapsed: 8000, reqs: 47 }), 'bug');
+  // ⑦ 边界：恰好等于墙钟预算不算慢
+  assert.equal(classifyDraw({ ...base, elapsed: SLOW_WALL_MS, reqs: 50 }), 'bug');
+});
 
 test('★修复①★ 慢漂移 + 极小余量：跟踪后提取正确（故障② 的同一组参数）', async () => {
   const secret = '5.7.40';
   // [D96 补3] macos run 268 实测单字节腐蚀（'.'→'0'，同进程故障② 刚走 257 请求
   // 失控路＝stall 退化模式）。归因规则：污染抽 + stall 证据 ⇒ 重抽（≤3 抽）；
   // 干净抽腐蚀 ⇒ 立即红；3 抽全部被 stall 污染 ⇒ 量测不可能，显式 SKIP。
-  const draws = 3;
-  for (let draw = 1; draw <= draws; draw++) {
-    const oracle = makeDriftOracle(secret, { driftMs: 2 });
-    const ctx = buildCtx(oracle, `drift-on-slow-${draw}`, { absMs: TIGHT.absMs, timeBaselineEvery: 16 });
-    const { out, maxGap } = await withStallProbe(() =>
-      extractWithDeadline(new Extractor(), ctx, oracle, 'version()')
-    );
-    if (out === secret) {
-      if (draw > 1) console.log(`[修复①] 第 ${draw} 抽通过（第 1 抽腐蚀被 stall ${maxGap}ms 归因重抽）`);
-      return;
-    }
-    if (maxGap <= STALL_MS) {
-      assert.equal(out, secret, `慢漂移目标上应正确提取（本抽无 stall 证据，maxGap=${maxGap}ms），实际 ${JSON.stringify(out)}`);
-    }
-    console.log(`[修复①] 第 ${draw} 抽腐蚀（${JSON.stringify(out)}）但存在 stall（maxGap=${maxGap}ms > ${STALL_MS}ms）⇒ 环境越界归因，重抽`);
-  }
-  assert.fail(`连续 ${draws} 抽全部被 stall 污染（各抽 maxGap 均 > ${STALL_MS}ms）——本 runner 退化到无法量测 25ms 余量档，不计为绿`);
+  await expectExtractionSurvivesDrift({
+    secret,
+    label: '修复①',
+    draws: 3,
+    makeOracle: () => makeDriftOracle(secret, { driftMs: 2 }),
+    makeCtx: (draw, oracle) => buildCtx(oracle, `drift-on-slow-${draw}`, { absMs: TIGHT.absMs, timeBaselineEvery: 16 }),
+  });
 });
 
 test('★修复②★ 中等漂移 + 中等余量（4ms/探针 @ 60ms）：跟踪后提取正确', async () => {
@@ -366,27 +466,13 @@ test('★修复②★ 中等漂移 + 中等余量（4ms/探针 @ 60ms）：跟�
   // 单字节腐蚀 `"5.7  \u0000"` —— 那是 runner 卡顿淹没 60ms 余量，不是提取逻辑错。
   // 归因规则（沿用 D96 补3）：有 stall 证据（maxGap > STALL_MS）⇒ 重抽（≤3）；
   // 无 stall 证据而腐蚀 ⇒ 立即红；3 抽全被污染 ⇒ assert.fail（显式失败，不静默放过）。
-  const draws = 3;
-  for (let draw = 1; draw <= draws; draw++) {
-    const oracle = makeDriftOracle(secret, { driftMs: 4 });
-    const ctx = buildCtx(oracle, `drift-on-mid-${draw}`, { absMs: 60, timeBaselineEvery: 16 });
-    const { out, maxGap } = await withStallProbe(() =>
-      extractWithDeadline(new Extractor(), ctx, oracle, 'version()')
-    );
-    if (out === secret) {
-      if (draw > 1) console.log(`[修复②] 第 ${draw} 抽通过（前 ${draw - 1} 抽腐蚀被 stall 归因重抽）`);
-      return;
-    }
-    if (maxGap <= STALL_MS) {
-      assert.equal(
-        out,
-        secret,
-        `中等漂移目标上应正确提取（本抽无 stall 证据，maxGap=${maxGap}ms），实际 ${JSON.stringify(out)}`
-      );
-    }
-    console.log(`[修复②] 第 ${draw} 抽腐蚀（${JSON.stringify(out)}）但存在 stall（maxGap=${maxGap}ms > ${STALL_MS}ms）⇒ 环境越界归因，重抽`);
-  }
-  assert.fail(`连续 ${draws} 抽全部被 stall 污染（各抽 maxGap 均 > ${STALL_MS}ms）——本 runner 退化到无法量测 60ms 余量档，不计为绿`);
+  await expectExtractionSurvivesDrift({
+    secret,
+    label: '修复②',
+    draws: 3,
+    makeOracle: () => makeDriftOracle(secret, { driftMs: 4 }),
+    makeCtx: (draw, oracle) => buildCtx(oracle, `drift-on-mid-${draw}`, { absMs: 60, timeBaselineEvery: 16 }),
+  });
 });
 
 test('★修复③★ 真实余量档（300ms @ 30ms/探针）：跟踪后提取正确（故障③ 同参数）', async () => {
@@ -449,20 +535,43 @@ test('请求失败的探针既不得入样、也不得参与判定（首次超�
   //   摘掉 `t0 = Date.now()` 那行本用例即红（A/B 验过：对照 11/11 绿、变异 10/11 红）。
   //   同一处还须「失败绝不入样」：两个方向都会坏，缺一半都留红。
   const secret = '8036';
-  let n = 0;
-  const oracle = makeDriftOracle(secret, {
-    driftMs: 0,
-    failAfterMs: 1200, // 明显大于「真侧延迟 90ms + 余量 25ms」
-    throwWhen: (q) => {
-      if (!/SLEEP\(/.test(q)) return false;
-      n += 1;
-      return n === 5;
-    },
-  });
-  const ctx = buildCtx(oracle, 'fail-probe', { absMs: TIGHT.absMs, timeBaselineEvery: 16 });
-  const out = await extractWithDeadline(new Extractor(), ctx, oracle, 'version()');
-  assert.equal(out, secret, `失败探针污染判定/基线时会提取出错值，实际 ${JSON.stringify(out)}`);
-  assert.ok(oracle.stats.thrown >= 1, '模拟失败未命中，本用例等于空断言');
+  // [D242] 三抽 + 环境冻结归因：macos runner 实测只发 4 个请求就吃满 30s deadline
+  //（正常 ~50 个请求 / 每个 60~90ms）⇒ 进程被冻结，不是提取失控。失控时请求数会暴涨
+  //（D64 实测 47 → 142+），与 4 个差一个数量级，用 FROZEN_REQ_CEIL 区分。
+  // 三抽全冻结则显式 fail（不计为绿）。
+  const draws = 3;
+  for (let draw = 1; draw <= draws; draw++) {
+    let n = 0;
+    const oracle = makeDriftOracle(secret, {
+      driftMs: 0,
+      failAfterMs: 1200, // 明显大于「真侧延迟 90ms + 余量 25ms」
+      throwWhen: (q) => {
+        if (!/SLEEP\(/.test(q)) return false;
+        n += 1;
+        return n === 5;
+      },
+    });
+    const ctx = buildCtx(oracle, `fail-probe-${draw}`, { absMs: TIGHT.absMs, timeBaselineEvery: 16 });
+    let out;
+    try {
+      out = await extractWithDeadline(new Extractor(), ctx, oracle, 'version()');
+    } catch (e) {
+      const reqs = oracle.stats.total;
+      if (reqs > FROZEN_REQ_CEIL) throw e; // 请求数已发散 ⇒ 真·失控，原样上抛
+      console.log(
+        `[失败探针] 第 ${draw} 抽 deadline 超时（${e.message}）但仅发 ${reqs} 个请求` +
+          `（≤ ${FROZEN_REQ_CEIL}）⇒ 环境冻结归因，重抽`
+      );
+      continue;
+    }
+    assert.equal(out, secret, `失败探针污染判定/基线时会提取出错值，实际 ${JSON.stringify(out)}`);
+    assert.ok(oracle.stats.thrown >= 1, '模拟失败未命中，本用例等于空断言');
+    return;
+  }
+  assert.fail(
+    `连续 ${draws} 抽都在 deadline 内没跑完且请求数 ≤ ${FROZEN_REQ_CEIL} —— ` +
+      '本 runner 冻结到无法量测该用例，不计为绿'
+  );
 });
 
 test('resolveTimeBaselineEvery：非法值硬拒，不静默回落（「传了没生效」红线）', () => {

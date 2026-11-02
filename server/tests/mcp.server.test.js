@@ -78,7 +78,9 @@ function fakeManager() {
         vulns: [{ id: 'v1', technique: 'error', vulnType: { nameZh: '报错注入', cwe: 'CWE-89', owasp: 'A03:2021-Injection' }, riskLevel: 'High', param: 'id', location: 'url', url: 'http://t/?id=1', method: 'GET', payloads: ['x'], poc: { curl: "curl 'http://t/?id=1'", payload: "x'" }, cvss: { score: 8.6, severity: 'High', vector: 'AV:N/AC:L' }, remediation: '参数化' }],
       };
     },
-    exportReport(id, fmt, reportArg) { return fmt === 'markdown' ? '# r' : JSON.stringify(reportArg); },
+    // [D235] json 路径模拟真实 ReportGenerator.toJSON 的 pretty 形态（此前假成 minify，
+    // 掩盖了「MCP 层要自己对 pretty 串 minify」这条真实链路）
+    exportReport(id, fmt, reportArg) { return fmt === 'markdown' ? '# r' : JSON.stringify(reportArg, null, 2); },
     stop() { return true; },
     pause() { return true; },
     resume() { return true; },
@@ -137,6 +139,28 @@ test('工具：get_findings 出四要素紧凑形态；get_scan_status 回落台
   assert.equal(sp.stopped, true);
   const rep = await call('get_report', { scanId: 'scan123', format: 'markdown' });
   assert.equal(rep.content[0].text, '# r');
+});
+
+// [D235] MCP 消费方是 AI 代理：工具输出统一 minify（token 按字符计费，缩进换行是纯开销）。
+// minify JSON 不含任何裸换行（字符串内换行被转义为 \n 两字符）——这是与 pretty 的可判差异。
+test('D235：工具输出统一 minify —— text() 单行；get_report(json) 对 pretty 串 minify 且语义不变', async () => {
+  const f = await call('get_findings', { scanId: 'scan123' });
+  assert.ok(!f.content[0].text.includes('\n'), 'get_findings 应为 minify 单行 JSON');
+  // JSON 语义不变：minify 只动空白，parse 后仍是有效 findings 结构
+  assert.equal(JSON.parse(f.content[0].text).totalVulns, 1);
+  const rep = await call('get_report', { scanId: 'scan123' }); // 默认 json；假 exportReport 给的是 pretty
+  assert.ok(!rep.content[0].text.includes('\n'), 'get_report(json) 应对 pretty 串 minify 成单行');
+  // minify 不丢数据：parse 后关键字段仍在（报告对象会带 triage 富化，不做整体 deepEqual）
+  const parsedRep = JSON.parse(rep.content[0].text);
+  assert.equal(parsedRep.vulns[0].id, 'v1');
+  assert.equal(parsedRep.summary.verdict, 'vulnerability_found');
+  // 人类可读 format 不受影响
+  const repMd = await call('get_report', { scanId: 'scan123', format: 'markdown' });
+  assert.equal(repMd.content[0].text, '# r');
+  // 业务错误路径同样 minify（协议 NDJSON 分帧不依赖内容层格式）
+  const badFmt = await call('get_report', { scanId: 'scan123', format: 'yaml' });
+  assert.equal(badFmt.isError, true);
+  assert.ok(!badFmt.content[0].text.includes('\n'));
 });
 
 // ===== 真靶场端到端：in-process ScanManager + 本地易受攻击 HTTP 服务 =====

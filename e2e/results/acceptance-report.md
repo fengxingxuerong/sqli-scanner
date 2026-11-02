@@ -1,15 +1,15 @@
 # 全方位验收门禁报告
 
-> 生成：2026-10-31T20:50:03.907Z　｜　执行器：`node e2e/acceptance.mjs`　｜　Node v24.22.1
-> 代码版本：`3acf12c`　⚠️ **工作区 dirty**（跑验收前有 1 个未提交改动：.github/workflows/ci.yml）—— **本报告不对应任何提交**
-> 套件范围：**26/26 跑出断言**　｜　判定：**全量**
+> 生成：2026-11-01T14:26:08.436Z　｜　执行器：`node e2e/acceptance.mjs`　｜　Node v24.20.0
+> 代码版本：`bcf158a`　⚠️ **工作区 dirty**（跑验收前有 24 个未提交改动：.github/workflows/ci.yml、.gitignore、AGENTS.md 等）—— **本报告不对应任何提交**
+> 套件范围：**27/27 跑出断言**　｜　判定：**全量**
 > 前置：MySQL 10.11.19-MariaDB @127.0.0.1:3306；secure_file_priv="D:\\tools\\mariadb\\files\\"
 
 > **判定纪律**：不采信各套件自报的 PASS 字样，只解析可独立核对的事实数字并据此断言。
 
 | 结果 | 套件 | 事实 |
 |---|---|---|
-| ✅ PASS | 服务端单测 | tests=3969　pass=3965　fail=0　skipped=4 |
+| ✅ PASS | 服务端单测 | tests=3970　pass=3966　fail=0　skipped=4 |
 | ✅ PASS | 独立刁钻靶场（11 场景） | 漏洞场景=11/11　安全误报=0 |
 | ✅ PASS | 检测回归（19 场景） | PASS=19　FAIL=0 |
 | ✅ PASS | 真 MySQL 靶场 | PASS=11　FAIL=0 |
@@ -35,7 +35,8 @@
 | ✅ PASS | 红队实战评测（ground-truth 真值对照 + sqlmap 同题） | 检出=19/19　检出率=100%　安全点=7　误报=0 |
 | ✅ PASS | fileRead 真闭环 | PASS=true　SKIP=false　方式=宿主实例 |
 | ✅ PASS | fileWrite 真闭环（文件系统侧断言） | PASS=true　SKIP=false　文件落盘=true　方式=宿主实例 |
+| ✅ PASS | AI 报告网关端到端（opt-in：本地网关 × 真报告 → 元数据头+脱敏+审阅+落盘全链路） | AI网关=✅ 通过　网关实调=qwen2.5:0.5b→qwen2.5:0.5b→qwen2.5:0.5b　元数据头=4/4　数据脱敏=on　落盘=712 bytes |
 
-**汇总：26 PASS / 0 FAIL(含 BLOCKED) / 0 SKIP**
+**汇总：27 PASS / 0 FAIL(含 BLOCKED) / 0 SKIP**
 
 

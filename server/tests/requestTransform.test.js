@@ -266,3 +266,24 @@ describe('登记回收与观察者', () => {
     assert.equal(setTransformObserver('s-ghost', () => {}), false);
   });
 });
+
+// [D239] 体积闸：`createHash(...).update(readFileSync(f))` 是同步的，误绑大文件 =
+// 每次扫描启动阻塞数十 ms（10MB 实测）。闸必须在哈希之前，且不能误伤正常脚本。
+describe('脚本体积上限', () => {
+  test('超过 maxBytes ⇒ 拒绝，错误码与文案可判', async () => {
+    const big = path.join(DIR, 'big-script.mjs');
+    writeFileSync(big, 'export function transform(r){return r;}\n' + '// pad\n'.repeat(40));
+    await assert.rejects(
+      () => loadRequestScript(big, { maxBytes: 64 }),
+      (e) => e.code === ErrorCode.REQUEST_SCRIPT_INVALID && /过大/.test(e.message)
+    );
+  });
+
+  test('上限之内仍可加载（闸不能误伤正常脚本）', async () => {
+    const ok = path.join(DIR, 'ok-script.mjs');
+    writeFileSync(ok, 'export function transform(r){return r;}\n');
+    const loaded = await loadRequestScript(ok);
+    assert.equal(typeof loaded.fn, 'function');
+    assert.equal(loaded.sha256.length, 64);
+  });
+});

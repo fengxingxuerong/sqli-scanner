@@ -28,9 +28,9 @@
         "server/src/api/exploitRoutes.js:554 <arrow@554>()→?",
         "server/src/api/exploitRoutes.js:555 <arrow@555>(@cmd)",
         "server/src/api/exploitRoutes.js:555 <arrow@555>()→?",
-        "server/src/api/healthRoutes.js:21 <arrow@21>(@req)",
-        "server/src/api/healthRoutes.js:21 <arrow@21>(@res)",
-        "server/src/api/healthRoutes.js:21 <arrow@21>()→?",
+        "server/src/api/healthRoutes.js:22 <arrow@22>(@req)",
+        "server/src/api/healthRoutes.js:22 <arrow@22>(@res)",
+        "server/src/api/healthRoutes.js:22 <arrow@22>()→?",
         "server/src/api/reportAiRoutes.js:20 checkAiRate(@req)",
         "server/src/api/reportAiRoutes.js:20 checkAiRate()→?",
         "server/src/api/reportAiRoutes.js:41 <arrow@41>(@req)",
@@ -62,11 +62,11 @@
       ]
     },
     "server/src/core": {
-      "coverage": 51.5,
-      "paramsTotal": 1290,
-      "paramsTyped": 694,
-      "returnsTotal": 935,
-      "returnsTyped": 451,
+      "coverage": 51.6,
+      "paramsTotal": 1298,
+      "paramsTyped": 699,
+      "returnsTotal": 942,
+      "returnsTyped": 457,
       "untypedHotspots": [
         "server/src/core/apiAuthState.js:26 _resetAuthStateForTest()→?",
         "server/src/core/bearerKeeper.js:85 buildRefreshRequest(@spec)",
@@ -121,11 +121,11 @@
       ]
     },
     "server/src/engine": {
-      "coverage": 39.9,
-      "paramsTotal": 1504,
-      "paramsTyped": 643,
-      "returnsTotal": 749,
-      "returnsTyped": 255,
+      "coverage": 40.6,
+      "paramsTotal": 1522,
+      "paramsTyped": 663,
+      "returnsTotal": 752,
+      "returnsTyped": 260,
       "untypedHotspots": [
         "server/src/engine/audit.js:34 <arrow@34>(@line)",
         "server/src/engine/audit.js:34 <arrow@34>()→?",
@@ -180,13 +180,15 @@
       ]
     },
     "server/src/services": {
-      "coverage": 44.5,
-      "paramsTotal": 293,
-      "paramsTyped": 127,
-      "returnsTotal": 228,
-      "returnsTyped": 105,
+      "coverage": 45.8,
+      "paramsTotal": 302,
+      "paramsTyped": 135,
+      "returnsTotal": 233,
+      "returnsTyped": 110,
       "untypedHotspots": [
         "server/src/services/authAudit.js:21 failMode()→?",
+        "server/src/services/authAudit.js:89 <arrow@89>(@l)",
+        "server/src/services/authAudit.js:89 <arrow@89>()→?",
         "server/src/services/findingTriage.js:171 <arrow@171>(@v)",
         "server/src/services/findingTriage.js:171 <arrow@171>()→?",
         "server/src/services/ReportAI.js:39 getKeyHealth(@idx)",
@@ -233,9 +235,7 @@
         "server/src/services/reportAttackPath.js:215 <arrow@215>()→?",
         "server/src/services/reportAttackPath.js:260 <arrow@260>(@row)",
         "server/src/services/reportAttackPath.js:260 <arrow@260>(@i)",
-        "server/src/services/reportAttackPath.js:260 <arrow@260>()→?",
-        "server/src/services/reportAttackPath.js:290 <arrow@290>(@it)",
-        "server/src/services/reportAttackPath.js:290 <arrow@290>(@j)"
+        "server/src/services/reportAttackPath.js:260 <arrow@260>()→?"
       ]
     }
   }

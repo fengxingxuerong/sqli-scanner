@@ -79,6 +79,16 @@ export function closeGateList({ root, quick = false }) {
     { name: 'portable-smoke:selftest', cmd: ['node', 'scripts/portable-smoke.mjs', '--selftest'] },
     // [D144 2026-10-23] 本机靶场体检判据的自证（纯函数，不探测也不起进程）。
     { name: 'labs:selftest', cmd: ['node', 'scripts/labs.mjs', '--selftest'] },
+    // [D232 2026-11-02] 检测器正则的 ReDoS 审计：正则跑在**目标可控**的响应体上，
+    // 一条灾难性回溯就是被目标拖死的 DoS 面。静态打分排序 + worker 限时动态探测，
+    // 只对候选跑（12 条，1.4s）；异常退出码 2 = 确认有危险正则。
+    { name: 'redos', cmd: ['node', 'scripts/redos-audit.mjs'] },
+    { name: 'redos:selftest', cmd: ['node', 'scripts/redos-audit.mjs', '--selftest'] },
+    // [D234 2026-11-02] 已作废口径不得复述回当前文档：D130 只修了主 README，e2e 下两份
+    // README 把「Benchmark 4/12、参考靶场不接门禁」写了 13 天；2026-10-22 的会话记录
+    // 甚至已经记下这个矛盾却没落地 —— 光靠"记得改"不行，钉成判据。
+    { name: 'stale-claims', cmd: ['node', 'scripts/stale-claim-check.mjs'] },
+    { name: 'stale-claims:selftest', cmd: ['node', 'scripts/stale-claim-check.mjs', '--selftest'] },
   ];
   if (quick) return list.filter((g) => !SLOW.has(g.name));
   return [...list, { name: 'typecheck', cmd: ['npm', 'run', '--silent', 'typecheck'] }, { name: 'lint', cmd: ['npm', 'run', '--silent', 'lint'] }];

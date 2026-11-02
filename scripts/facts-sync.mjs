@@ -24,6 +24,8 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync } from 
 import { createHash } from 'node:crypto';
 import { dirname, resolve, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
+// [D243] 失败取证：从 TAP 里取「用例名 + 断言消息」（not ok 行只有用例名，看不到判据输入量）
+import { extractFailureDetails } from './lib/failureDetail.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, '..');
@@ -160,17 +162,20 @@ function collectServer({ coverage }) {
     console.warn(`[facts] ⚠ 服务端测试首次出现 ${first} fail —— 已重跑一次（flaky 不计入口径；连续失败才是真失败）`);
     // [D225] 失败取证：把 TAP 的 not ok 行打出来（D225 实测：连续两轮采集 fail=1 却拿不到
     // 用例名，日志里只有汇总数字，复现与定因全靠盲跑）。不改变任何判定，只补可见性。
-    const notOk = out.match(/^\s*not ok .*$/gm) || [];
-    if (notOk.length) {
-      console.warn(`[facts]   首轮失败用例（前 10 条）：`);
-      for (const line of notOk.slice(0, 10)) console.warn(`[facts]   ${line.trim().slice(0, 160)}`);
-    }
+    // [D243] 追加断言消息：not ok 行**只有用例名**，看不到判据输入量（D242 实测：修 flaky
+    // 需要 maxGap / elapsed / reqs 三个数，缺了就只能盲调阈值）。
+    const printFailures = (tag, tapOut) => {
+      const details = extractFailureDetails(tapOut);
+      if (!details.length) return;
+      console.warn(`[facts]   ${tag}（前 ${details.length} 条）：`);
+      for (const d of details) {
+        console.warn(`[facts]   ${d.title}`);
+        if (d.detail) console.warn(`[facts]     ↳ ${d.detail}`);
+      }
+    };
+    printFailures('首轮失败用例', out);
     out = runOnce();
-    const notOk2 = out.match(/^\s*not ok .*$/gm) || [];
-    if (pick('fail') > 0 && notOk2.length) {
-      console.warn(`[facts]   复跑仍失败，用例（前 10 条）：`);
-      for (const line of notOk2.slice(0, 10)) console.warn(`[facts]   ${line.trim().slice(0, 160)}`);
-    }
+    if (pick('fail') > 0) printFailures('复跑仍失败，用例', out);
   }
   const res = {
     tests: pick('tests'), pass: pick('pass'), fail: pick('fail'), skip: pick('skipped'),

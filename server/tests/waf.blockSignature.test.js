@@ -404,3 +404,30 @@ test('decideBlockPolicy：输出契约固定四字段（调用方可无条件消
     assert.ok(p.backoffMs === null || (typeof p.backoffMs === 'number' && p.backoffMs >= 0 && p.backoffMs <= MAX_BACKOFF_MS));
   }
 });
+
+// ── 6) [D229] haystack 先截后拼（P0-3 卡顿修复）：截断口径与命中行为逐项钉死 ──
+// 旧实现 head+body 全量拼接后再截 HAYSTACK_CAP —— 每对布尔探针 ×2 次多 MB 临时串，
+// 是长扫描 GC 抖动源（10MB body 实测 157.8ms/40 次 vs 先截后拼 6.6ms，降 95.8%）。
+// 新实现逐码元等价（slice 前缀语义，五档 body + head≥CAP 边界基准已比对）；
+// 本组断言从公共函数可观测面钉死行为不变：窗口内命中、窗口外不命中（旧口径同样匹配不到）。
+test('haystack 先截后拼：窗口内拦截页仍命中，窗口外签名口径不变（大 body 不误报不漏变）', () => {
+  const blockPage = '<html><body>您的请求被 WAF 拦截：web application firewall blocked</body></html>';
+  // ① 窗口内（签名在 200KB 窗口头部）：命中且 vendor 不变
+  const inWindow = { status: 403, headers: { server: 'nginx' }, body: blockPage + '<padding>'.repeat(20000) };
+  const hit = detectGenericBlock(inWindow);
+  assert.ok(hit, '窗口内拦截页必须命中');
+  assert.equal(hit.vendor, GENERIC_BLOCK_VENDOR);
+  assert.ok(hit.matchedIds.length >= 1, '至少命中一条签名');
+  // ② 窗口外（签名在 250KB 处，超出 HAYSTACK_CAP=200KB）：新实现 = 旧实现 = 不命中
+  const beyond = 'A'.repeat(250_000) + blockPage;
+  assert.equal(detectGenericBlock({ status: 403, headers: {}, body: beyond }), null,
+    '窗口外签名不应命中 —— 若命中说明截断口径变了（旧口径同样匹配不到，行为必须一致）');
+  // ③ 大体积正常页（≈5MB，无任何签名）：不命中且不误报
+  const normal = ('<tr><td>normal row padded bytes</td></tr>\n').repeat(120000);
+  assert.ok(normal.length > 4 * 1024 * 1024, '前提：body 超过 4MB（走到截断分支）');
+  assert.equal(detectGenericBlock({ status: 200, headers: { server: 'nginx' }, body: normal }), null,
+    '大正常页不得误报');
+  // ④ 头部白名单特征仍参与匹配（head 部分不受 body 截断影响）
+  const viaHeader = detectGenericBlock({ status: 403, headers: { 'x-waf-message': 'blocked by waf' }, body: '<html>ok</html>' });
+  assert.ok(viaHeader, '白名单头特征必须仍参与匹配（先截 body 不影响 head）');
+});

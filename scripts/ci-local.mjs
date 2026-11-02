@@ -190,6 +190,12 @@ const GATES = [
     ['便携包构建判据自证（交付件链路）', 'node scripts/build-portable.mjs --selftest'],
     ['便携包冒烟判据自证', 'node scripts/portable-smoke.mjs --selftest'],
     ['本机靶场体检判据自证（纯函数，不探测不起进程）', 'node scripts/labs.mjs --selftest'],
+    // [D232 2026-11-02] 正则 ReDoS 面：检测器正则跑在目标可控的响应体上
+    ['ReDoS 审计判据自证（危险样本必须判出/安全样本不得误报）', 'node scripts/redos-audit.mjs --selftest'],
+    ['ReDoS 审计（静态候选 + worker 限时动态探测）', 'node scripts/redos-audit.mjs'],
+    // [D234 2026-11-02] 已作废口径不得复述回当前文档（D130 漏扫 e2e/ 的历史教训）
+    ['作废口径复述检测自证（构造样本必须红）', 'node scripts/stale-claim-check.mjs --selftest'],
+    ['作废口径复述检测（README 类当前文档）', 'node scripts/stale-claim-check.mjs'],
     // readme:selftest 此前只在 CI 有、ci-local 缺 —— 同族缺口，一并补齐（D223 顺手）。
     ['CLI 旗标覆盖判据自证（README/help 双向核对）', 'node scripts/readme-flag-coverage.mjs --selftest'],
     ['README 口径判据自证（方言分层三处）', 'node scripts/readme-consistency.mjs --selftest'],

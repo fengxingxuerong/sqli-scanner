@@ -25,6 +25,7 @@ import { sqlmapRoutes } from './src/api/sqlmapRoutes.js';
 import { exploitRoutes } from './src/api/exploitRoutes.js';
 import { reportAiRoutes } from './src/api/reportAiRoutes.js';
 import { logger } from './src/core/logger.js';
+import { startEventLoopWatch, stopEventLoopWatch } from './src/core/eventLoopWatch.js';
 import { setAuthEnabled } from './src/core/apiAuthState.js';
 import { oobReceiver } from './src/core/oobReceiver.js';
 import { httpClient } from './src/core/httpClient.js';
@@ -361,6 +362,9 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 export function start() {
   const app = createApp();
   const PORT = process.env.PORT ? Number(process.env.PORT) : defaults.port;
+  // [D236] 事件循环滞后观测：卡死矩阵的「暗区」收口——大 body 同步长条拖慢 REST/SSE 时
+  // 有日志（>阈值节流告警）也有指标（/api/health 的 eventLoop 字段）。CLI 一次性进程不接。
+  startEventLoopWatch();
   // [A3] 桌面 sidecar：把一次性 token 以固定格式打到 stdout，供 Tauri 壳捕获后交给前端。
   // 仅 SCAN_API_TOKEN_EMIT=1（壳显式要求）时输出，普通 CLI/服务端启动不打印任何额外内容。
   if (TOKEN_SOURCE === 'generated' && API_TOKEN) {
@@ -384,6 +388,7 @@ export function start() {
     await Promise.race([drainRunningScans(5000), sleep(5000)]);
     await oobReceiver.stop();
     httpClient.close();
+    stopEventLoopWatch();
     clearTimeout(killTimer);
     logger.info('引擎已关闭');
     process.exit(0);

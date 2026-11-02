@@ -311,6 +311,16 @@ jobs:
         name: 便携包冒烟判据自证
       - run: node scripts/labs.mjs --selftest
         name: 本机靶场体检判据自证（纯函数，不探测不起进程）
+      # [D232 2026-11-02] 正则 ReDoS 面：检测器正则跑在目标可控的响应体上
+      - run: node scripts/redos-audit.mjs --selftest
+        name: ReDoS 审计判据自证（危险样本必须判出/安全样本不得误报）
+      - run: node scripts/redos-audit.mjs
+        name: ReDoS 审计（静态候选 + worker 限时动态探测）
+      # [D234 2026-11-02] 已作废口径不得复述回当前文档（D130 漏扫 e2e/ 的历史教训）
+      - run: node scripts/stale-claim-check.mjs --selftest
+        name: 作废口径复述检测自证（构造样本必须红）
+      - run: node scripts/stale-claim-check.mjs
+        name: 作废口径复述检测（README 类当前文档）
       - run: npm run lint
         name: ESLint
       # [DECISION-2026-09-22] e2e 辅助模块的单测（纯 Node，无 MySQL 依赖）。
@@ -705,6 +715,46 @@ jobs:
           done
           echo "红队靶场未就绪（CI 可能缺 PG），门禁将跳过该套件（SKIP）"
           tail -20 redteam-env.log || true
+      # [D227 2026-11-01] 外部裁判 1 号（Juice Shop）此前在 CI **恒 SKIP**：
+      # acceptance 里从来没有拉起它的步骤，而套件判据是「靶场不可达 ⇒ skipped:true」——
+      # 于是「真漏洞必须检出 + 安全端点零误报」这条唯一的**第三方真值**判据从未在 CI 执行
+      # （D225 那次 Juice 2/2 → 1/2 的漏检回归，本机验收才发现，正是这么漏过去的）。
+      # 用官方镜像而非本机构建路径：labs 里的 juiceSpec 依赖 NODE22_EXE + 本地 tarball 构建
+      # （见 e2e/juice-shop-lab/README.md），CI 不适用；而 planLab 的判据是「端口在监听即 up」，
+      # 与 requires 文件无关 ⇒ 容器映射到 3199 即可让 --require-labs=juice 生效。
+      - name: 启动 Juice Shop（外部裁判 1 号：第三方真值）
+        run: |
+          docker run -d --name juice-shop -p 3199:3000 bkimminich/juice-shop:v20.3.0
+          for i in $(seq 1 90); do
+            if curl -sf -o /dev/null "http://127.0.0.1:3199/rest/products/search?q=apple"; then
+              echo "Juice Shop ready（第 $i 次探测，约 $((i * 2))s）"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::Juice Shop 180s 内未就绪"
+          docker logs --tail 50 juice-shop || true
+          exit 1
+      # [D228 2026-11-01] 外部裁判 2 号（VAmPI）硬起：A/B 双实例（vuln 5000 / safe 5001）。
+      # 镜像 erev0s/vampi（上游 README 官方镜像），vulnerable 环境变量切档；
+      # 种子走 /createdb（与 labs.mjs seedPath 同源）。⚠️ CI 段无法本地实证，首跑盯红：
+      # 镜像 tag / 种子路径 / 端口冲突任一不对都会在此步显式红，不会静默 SKIP。
+      # dvwa / benchmark 的 CI 化遗留：镜像内含 MySQL 启动链 / Java 构建链未验证，不盲猜。
+      - name: 启动 VAmPI 双实例（外部裁判 2 号：A/B 对照）
+        run: |
+          docker run -d --name vampi-vuln -p 5000:5000 -e vulnerable=1 erev0s/vampi:latest
+          docker run -d --name vampi-safe -p 5001:5000 -e vulnerable=0 erev0s/vampi:latest
+          for i in $(seq 1 60); do
+            if curl -sf -o /dev/null "http://127.0.0.1:5000/createdb" && curl -sf -o /dev/null "http://127.0.0.1:5001/createdb"; then
+              echo "VAmPI ready（第 $i 次探测，约 $((i * 2))s）"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::VAmPI 120s 内未就绪"
+          docker logs --tail 50 vampi-vuln || true
+          docker logs --tail 50 vampi-safe || true
+          exit 1
       # [2026-09-25] recall-lab 从独立 job 搬进这里 —— 只有本 job 有 mysqld，
       #   两条真实 MySQL 场景（real_mysql_numeric / real_mysql_str）自 09-10 写下起
       #   从未在任何自动门禁里执行过（独立 job 只能跑到 16/18，另 2 条恒 SKIP）。
@@ -731,7 +781,11 @@ jobs:
         # 原因、退出码仍 0 —— 头条能力整轮不测而门禁仍绿（2026-09-27 审计实证）。
         # oob-real / redteam 刻意不列入：它们的 PG 与靶场是 continue-on-error 拉的，
         # 起不来属已知可能，纳入会把环境抖动变成长期红。
-        run: npm run acceptance -- --expect=file-read,file-write
+        # [D227] juice 反过来——它由上面「启动 Juice Shop」**硬起**（起不来该步就红），
+        # 所以这里用 --require-labs 把「靶场不可达 ⇒ SKIP」改成开跑前失败：
+        # 要么真跑，要么明确红，不再有第三条「静默跳过」的路。
+        # [D228] vampi-vuln/vampi-safe 同法纳入硬要求（上面双实例硬起；多值判据 D148 已有）。
+        run: npm run acceptance -- --expect=file-read,file-write --require-labs=juice,vampi-vuln,vampi-safe
         env:
           MYSQL_PORT: 3306
           MYSQL_USER: root

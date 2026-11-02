@@ -33,12 +33,12 @@
 //     原地改写会让第二次拿到的是「解密后的密文」。
 // ============================================================================
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { readFileSync, statSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 
 import { AppError, ErrorCode } from './errors.js';
 import { logger } from './logger.js';
-import { assertScriptPath } from './requestTransform.js';
+import { assertScriptPath, MAX_SCRIPT_BYTES } from './requestTransform.js';
 
 /** 脚本可替换的字段白名单（见文件头约束 3）：只有响应体文本 */
 export const RESPONSE_TRANSFORMABLE_KEYS = Object.freeze(['data']);
@@ -78,7 +78,7 @@ export function assertResponseScriptPath(rawPath, { allowedDir } = {}) {
  * 失败一律抛 AppError(REQUEST_SCRIPT_INVALID) —— 与 requestScript 同口径：
  * 静默忽略脚本会让使用者以为解密生效了，比报错危险得多。
  * @param {string} rawPath
- * @param {{allowedDir?: string}} [opts]
+ * @param {{allowedDir?: string, maxBytes?: number}} [opts] maxBytes 覆盖体积上限（单测传小值）
  * @returns {Promise<{fn: Function, source: string, sha256: string}>}
  */
 export async function loadResponseScript(rawPath, opts = {}) {
@@ -98,6 +98,15 @@ export async function loadResponseScript(rawPath, opts = {}) {
     throw new AppError(
       ErrorCode.RESPONSE_SCRIPT_INVALID,
       `响应解密脚本必须导出 transform 函数（export function transform(res){...} 或 export default fn）：${resolved}`,
+    );
+  }
+  // [D239] 同 requestTransform：同步 sha256 前先挡体积（上限单点定义在 MAX_SCRIPT_BYTES）
+  const maxBytes = opts.maxBytes ?? MAX_SCRIPT_BYTES;
+  const st = statSync(resolved);
+  if (st.size > maxBytes) {
+    throw new AppError(
+      ErrorCode.RESPONSE_SCRIPT_INVALID,
+      `响应解密脚本过大（${st.size} 字节 > ${maxBytes}）：请确认绑定的是脚本而不是数据文件`,
     );
   }
   const sha256 = createHash('sha256').update(readFileSync(resolved)).digest('hex');

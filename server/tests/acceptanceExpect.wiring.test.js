@@ -78,8 +78,10 @@ test('③b CI 只要求它确实 provisioning 过的套件（PG/红队是 contin
 //   官方标注真值 + header 注入面 + 参数名注入形态）。
 // [D156 2026-10-25] 25 → 26：新增 vulnlab（外部裁判 5 号，VulnLab：同一应用三档真值
 //   low/medium 须检出 + high 参数化修复档零误报；自拉自收）。
-test('④ 不空转：SUITES 解析必须命中 26 个 id（否则上面几条可能在拿空集合比）', () => {
-  assert.equal(IDS.length, 26, `SUITES 解析到 ${IDS.length} 个 id：${IDS.join(', ')}`);
+// [D228 2026-11-01] 26 → 27：新增 ai-gateway（AI 报告网关端到端，opt-in：真实本地网关 ×
+//   真报告 → 元数据头/脱敏/审阅/落盘全链路；网关未就绪 [SKIP] exit 0 不假绿）。
+test('④ 不空转：SUITES 解析必须命中 27 个 id（否则上面几条可能在拿空集合比）', () => {
+  assert.equal(IDS.length, 27, `SUITES 解析到 ${IDS.length} 个 id：${IDS.join(', ')}`);
   assert.ok(IDS.includes('file-read') && IDS.includes('file-write'), '文件读写两个套件不在 SUITES 里 —— 取数口径变了');
 });
 

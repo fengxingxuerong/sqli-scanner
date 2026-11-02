@@ -14,8 +14,13 @@
 // 口径（重要，别误读）：
 //   · 目标设为**安全点**（所有探测都不命中）—— 这是真实扫描里绝大多数点的形态，
 //     也是请求浪费最容易被看见的场景。
-//   · 测的是**检测阶段**，不含提取(extract)阶段与 WAF 重跑路径（后者需真靶场）。
-//   · time/stacked/oob 三个慢通道**未采样**（time 会真 sleep，数分钟级）。
+//   · 测的是**检测阶段** + **提取阶段直连 HTTP 的四个代表路径**（[D237] 收 P2-3 盲区）：
+//     guessColumns / extractProof(boolean) / extractInlineProof / enumerateDatabases，
+//     全部经 Extractor._send 收敛到 ctx.httpClient（与检测同款 stub）。
+//     响应恒为安全页 = 「目标无任何回显」的最坏提取场景（二分/布尔通道全走满）。
+//   · 仍**未采样**：time/stacked/oob 慢通道（time 会真 sleep）、完整拖库路径
+//     extractScope.extractAll（需伪造 ScanManager，保真度存疑不硬凑）、WAF 自适应重跑（需真靶场）。
+//   · [D237] 每个阶段附带 CPU 时间（process.cpuUsage 差值，用户+系统 ms）。
 //
 // 跑法：node e2e/perf/request-budget.probe.mjs
 // ============================================================================
@@ -25,6 +30,7 @@ import { ErrorDetector } from '../../server/src/engine/detectors/ErrorDetector.j
 import { BooleanBlindDetector } from '../../server/src/engine/detectors/BooleanBlindDetector.js';
 import { InlineQueryDetector } from '../../server/src/engine/detectors/InlineQueryDetector.js';
 import { NoSqlInjectionDetector } from '../../server/src/engine/detectors/NoSqlInjectionDetector.js';
+import { Extractor } from '../../server/src/engine/Extractor.js';
 
 // ── 记录型 httpClient ──────────────────────────────────────────────────────
 // 安全点响应：始终返回同一份正常页面 → 所有通道都判「未命中」→ 走完整探测流程。
@@ -139,12 +145,14 @@ for (const [name, Ctor] of DETECTORS) {
   const client = createProbeClient();
   const det = new Ctor();
   const t0 = Date.now();
+  const cpu0 = process.cpuUsage();
   let err = null;
   try {
     await det.detect(buildCtx(client));
   } catch (e) {
     err = e.message;
   }
+  const cpu = process.cpuUsage(cpu0);
   const ms = Date.now() - t0;
 
   const localCounts = new Map();
@@ -165,6 +173,7 @@ for (const [name, Ctor] of DETECTORS) {
     unique: localCounts.size,
     dupWithin,
     ms,
+    cpuMs: Math.round((cpu.user + cpu.system) / 1000 * 10) / 10,
     err,
     kindCounts,
   });
@@ -175,17 +184,78 @@ const pad = (s, n) => String(s).padEnd(n);
 const num = (s, n) => String(s).padStart(n);
 
 console.log('=== 单点检测请求预算（安全点 / 最小配置 / 不含 time·stacked·oob）===');
-console.log(`${pad('检测器', 10)}${num('请求数', 8)}${num('唯一', 7)}${num('自身重复', 10)}${num('耗时ms', 9)}  备注`);
-console.log('-'.repeat(64));
+console.log(`${pad('检测器', 10)}${num('请求数', 8)}${num('唯一', 7)}${num('自身重复', 10)}${num('耗时ms', 9)}${num('CPU ms', 9)}  备注`);
+console.log('-'.repeat(72));
 for (const r of rows) {
   console.log(
-    `${pad(r.name, 10)}${num(r.total, 8)}${num(r.unique, 7)}${num(r.dupWithin, 10)}${num(r.ms, 9)}  ${r.err ? 'ERR: ' + r.err : ''}`
+    `${pad(r.name, 10)}${num(r.total, 8)}${num(r.unique, 7)}${num(r.dupWithin, 10)}${num(r.ms, 9)}${num(r.cpuMs, 9)}  ${r.err ? 'ERR: ' + r.err : ''}`
   );
 }
 const totalReq = rows.reduce((s, r) => s + r.total, 0);
 const totalDup = rows.reduce((s, r) => s + r.dupWithin, 0);
 console.log('-'.repeat(64));
 console.log(`${pad('合计', 10)}${num(totalReq, 8)}${num('', 7)}${num(totalDup, 10)}`);
+
+// ── 提取阶段直连路径计数（[D237] 收 P2-3 盲区之一）────────────────────────
+// Extractor 的一切 HTTP 都收敛到 ctx.httpClient.request（与检测阶段同一收敛点），
+// 同款 stub 即可离线计数。响应恒为安全页 ⇒ 「无任何回显」的最坏提取场景。
+// 请求上界：blindMaxLen 压到 16（默认 4096，安全页下二分会走满）防长循环。
+const EXTRACT_PATHS = [
+  ['guessColumns', (ex, ctx) => ex.guessColumns(ctx)],
+  ['extractProof', (ex, ctx) => ex.extractProof(ctx)],
+  ['extractInline', (ex, ctx) => ex.extractInlineProof(ctx)],
+  ['enumDatabases', (ex, ctx) => ex.enumerateDatabases(ctx)],
+];
+
+const exRows = [];
+for (const [name, fn] of EXTRACT_PATHS) {
+  const client = createProbeClient();
+  const ex = new Extractor();
+  const ctx = buildCtx(client, {
+    config: {
+      timeoutMs: 5000,
+      timeThresholdMs: 800,
+      level: 1,
+      risk: 1,
+      blindMaxLen: 16,
+      prefilter: false,
+      unionSkipGate: true,
+      // 提取请求也吃 delay/reqRate/maxReq（P0-FIX 出口同源）；stub 不 sleep，无需设 delay
+    },
+  });
+  const cpu0 = process.cpuUsage();
+  let err = null;
+  try {
+    await fn(ex, ctx);
+  } catch (e) {
+    err = e.message;
+  }
+  const cpu = process.cpuUsage(cpu0);
+  const localCounts = new Map();
+  for (const c of client.calls) localCounts.set(c.fp, (localCounts.get(c.fp) || 0) + 1);
+  const dupWithin = [...localCounts.values()].filter((n) => n > 1).reduce((s, n) => s + (n - 1), 0);
+  exRows.push({
+    name,
+    total: client.calls.length,
+    unique: localCounts.size,
+    dupWithin,
+    cpuMs: Math.round((cpu.user + cpu.system) / 1000 * 10) / 10,
+    err,
+  });
+}
+
+console.log('');
+console.log('=== 提取阶段直连路径请求预算（安全页 = 无回显最坏场景；blindMaxLen=16）===');
+console.log(`${pad('路径', 14)}${num('请求数', 8)}${num('唯一', 7)}${num('自身重复', 10)}${num('CPU ms', 9)}  备注`);
+console.log('-'.repeat(72));
+for (const r of exRows) {
+  console.log(
+    `${pad(r.name, 14)}${num(r.total, 8)}${num(r.unique, 7)}${num(r.dupWithin, 10)}${num(r.cpuMs, 9)}  ${r.err ? 'ERR: ' + r.err : ''}`
+  );
+}
+const exTotal = exRows.reduce((s, r) => s + r.total, 0);
+console.log('-'.repeat(72));
+console.log(`${pad('合计', 14)}${num(exTotal, 8)}`);
 
 // ── payload 形态归因 ───────────────────────────────────────────────────────
 console.log('');
@@ -231,6 +301,6 @@ if (crossDup.length) {
 console.log('');
 console.log('=== 未采样通道（本探针不覆盖，别当成「无浪费」）===');
 console.log('  · time / stacked / oob —— 会真 sleep 或需真靶场');
-console.log('  · 提取(extract)阶段 —— 需真实 DB 回显（§C2 回显列定位重复的战场）');
+console.log('  · 完整拖库路径 extractScope.extractAll（union/error 的 extractAll 全链）—— 需伪造 ScanManager，保真度存疑不硬凑（[D237] 明示不采样）');
 console.log('  · WAF 自适应重跑路径 —— 需真被拦截（§C1 提到的 +40~60 请求/点）');
 console.log('  · 请求数会随 config.level/risk 与目标响应形态变化；本表是「最小配置 + 安全点」下的下界');

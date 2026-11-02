@@ -5,6 +5,257 @@
 
 ---
 
+## 2026-11-02 批次 D244 · 基线收紧（修好「重建基线」这条路本身）（已完成，见 CHANGELOG）
+
+**动机**：门禁长期挂着「可下调基线 20 条 / 可上调基线 3 处」告警无人执行。按纪律先问为什么
+没人做 —— 结论是 `--fix-baseline` 根本跑不通，不是人懒。
+
+**真缺陷**：`buildNextEntries` 的超硬上限判据不看 `old[key]`，把**已登记的历史债**当成
+「新函数超硬上限」⇒ 只要仓库存在一条历史债，基线永久不可重建（实测误拒 103 条）。
+第二处：重建路径漏了 `remapArrowKeys`，匿名函数行号漂移被记成「新增/删除」。
+
+**交付**：判据改 `isOverHard(m) && prev === undefined`；查旧值走 remap；`removed` 扣掉被
+remap 接管的旧键；自证 ⑫⑬（存量可写回且只减不增 / 漂移不计增删）。注入复验：
+回退判据 → ⑫ 红（`REAL_EXIT=1`），还原后 13/13。
+
+**结果**：`_complexity-baseline.json` 237 → 233（删 4 / 降 7），告警 20 → 0；
+`_typecoverage-baseline.json` 三处上调，告警 3 → 0。
+
+**未做（诚实边界）**：死代码 164 条**未分类**。`kind` 只能分「再导出 18 / 函数 94 / 常量 50」，
+「死代码 or 脚本入口」必须逐条读语义 ⇒ 自动分组清单是假治理，移交独立批次。
+
+---
+
+## 2026-11-02 批次 D238 · cli.js 贴线抽取（结构减债）（已完成，见 CHANGELOG）
+
+**动机**：cli.js 1175 行距 1200 上限仅 25 行（无容差）；循 scanRoutes 先例主动抽取。
+
+**交付**：报告输出/落盘函数族（8 函数，~260 行）逐字搬移到 `cli/reportOutput.js`；
+cli.js **1174 → 915**（余量 284）；三个测试导入符号按 args re-export 先例保持路径不变；
+基线锚点随迁。受影响 15 套件 154/154 + 全量 0 fail。
+
+---
+
+## 2026-11-02 批次 D237 · request-budget 探针扩盲区（P2-3）（已完成，见 CHANGELOG）
+
+**动机**：探针自认盲区——提取阶段与 CPU 消耗没有数字，盲区里的优化直觉无法立项。
+
+**交付**：提取直连四路径（guessColumns/extractProof/extractInline/enumDatabases）
+同款 stub 离线计数（安全页 = 无回显最坏场景，blindMaxLen=16 防长循环）+ 每阶段 CPU 计时；
+明示仍不采样：extractAll 全链（需伪造 sm 不硬凑）、time/stacked/oob、WAF 重跑。
+首跑：提取直连合计 35 请求，检测段 96 不变。
+
+---
+
+## 2026-11-02 批次 D235 · MCP 输出序列化瘦身（P2-1）（已完成，见 CHANGELOG）
+
+**动机**：《卡死风险报告》P2-1 —— MCP 9 工具输出与 get_report(json) 全部 pretty，
+消费方是 AI 代理，token 按字符计费。协议分帧不依赖内容格式（已核实），测试全 JSON.parse 零阻力。
+
+**交付**：`text()` 与 get_report(json) 在 MCP 层统一 minify（REST 下载面与**全部落盘** pretty
+保持 human-readable 语义）；AGENTS.md §4 枚举补齐 md/db-json；新增 minify 测试钉。
+量化：30 份真实台账报告 **351,695 B → 238,025 B（省 32%）**。
+
+**验证**：mcp.server.test.js 9/9；gate:close 41/41。
+
+---
+
+## 2026-11-02 批次 D236 · 事件循环滞后观测（暗区收口）（已完成，见 CHANGELOG）
+
+**动机**：《卡死风险报告》§四.3——全仓零 perf_hooks，大 body 同步长条拖慢 REST/SSE 时
+无日志无指标。本批补观测点：`core/eventLoopWatch.js` + `/api/health` 的 `eventLoop` 字段。
+
+**交付**：monitorEventLoopDelay 周期采样 + 超阈值节流告警（首次超阈值立即告警——
+真值表抓出首版会吞掉启动后 30s 内的首次卡顿）+ 优雅关闭接线。
+真值表 / 受控滞后诱导（确定性驱动）/ 启停幂等 7/7；实跑冒烟测到启动期 32ms 滞后。
+
+---
+
+## 2026-11-02 批次 D243 · 失败取证补齐断言消息（已完成，见 CHANGELOG）
+
+**动机**：D242 收口时 facts 首轮红、复跑绿，但 D225 取证只打 `not ok` 行（只有用例名）⇒
+拿不到 `maxGap`/`elapsed`/`reqs` 就无法定因，只能盲调阈值。
+
+**交付**：`scripts/lib/failureDetail.mjs`（`extractFailureDetails`：把 not ok 行与随后的
+`error:` 行配对取出）+ facts-sync 接入（`↳` 前缀）+ 守卫 `failureDetail.guard.test.js`
+（6 用例，命名带 guard ⇒ 进 wiring 段）。
+
+**边界**：只取证不改判定；取不到就返回空串。守卫钉「error 离 not ok 超 20 行窗口 ⇒ 不串取」。
+
+**验证**：6/6；注入窗口 20→30 → §D 红。
+
+**CI #380 复验**：macos ✅、windows ✅（上轮被 fail-fast 连带 cancelled）、test-server ✅、
+lint/audit/frontend/docker/release-smoke/sidecar-build/e2e-self-contained ✅。
+
+---
+
+## 2026-11-02 批次 D242 · CI 首跑红的修复（已完成，见 CHANGELOG）
+
+**背景**：D241 推送后 CI #379 —— 14 个 job 里 12 绿，红的是 `test-matrix (macos-latest)`
+的 Server tests；windows 因 fail-fast cancelled。这是 D230–D241 十二个批次**第一次走 CI**。
+
+**证据**：`extractor.timeDrift.test.js:513` 失败，报「30000ms 内没跑完（已发请求 **4 个**）」。
+正常要 ~50 个请求、每个 60~90ms ⇒ 7.5s/请求 = 慢了 100 倍 ⇒ **进程被冻结**，不是提取失控
+（失控时请求数会暴涨，D64 实测 47→142+）。
+
+**修法**：该用例原先无归因，改为 3 抽 + `reqs ≤ 20 ⇒ 环境冻结重抽`、`reqs > 20 ⇒ 原样上抛`、
+3 抽全冻结 ⇒ `assert.fail`（不假绿）。
+
+**验证**：本地注入 `failAfterMs: 100000` 制造确定性冻结 → 3 次「环境冻结归因，重抽」+
+`assert.fail`；还原后 13/13。
+
+---
+
+## 2026-11-02 批次 D241 · 服务端测试并发标定 + `test:fast`（已完成，见 CHANGELOG）
+
+**动机**：4005 用例在 20 逻辑核机器上只跑并发 3，欠并行。
+
+**标定**（同条件四轮，均 4005/3998/0 fail/7 skip）：c3 **222.0s** → c6 136.1s → **c8 115.7s** →
+c10 108.0s。取 8 落地（c8→c10 只差 7s，边际递减）。
+
+**交付**：`server/package.json` 加 `test:fast`（并发 8）+ CONTRIBUTING 写明边界。
+**不改默认 `npm test`**：CI 是 2 vCPU（并发 8 超配），且 D215 有 57 文件并发 `cancelled` 前科；
+收口结论仍以并发 3 为准。
+
+**⚠️ 边界**：稳定性只验证单轮。快档若遇 `cancelled`/端口冲突按「降一档」处理，不上调重试。
+
+---
+
+## 2026-11-02 批次 D240 · 测试 flaky 归因判据 + 真值表（已完成，见 CHANGELOG）
+
+**动机**：同一份代码 TAP 轮 0 fail / junit 轮 1 fail —— `extractor.timeDrift.test.js`「修复①」
+产出 `5/7.40`，而该抽 `maxGap=52ms` 低于 `STALL_MS=150` ⇒ 被误判成跟踪器失效。
+
+**根因**：`maxGap` 只测事件循环**被堵**；CPU 被抢占时心跳照常、await 调度延迟被拉长，
+余量照样被吃掉 —— 判据有盲区。
+
+**修法**：判据抽成纯函数 `classifyDraw()`，加第二条证据 `elapsed > 20s 且 reqs ≤ 100`；
+请求数上界保证「真失效（请求发散 47→142+）」不会走归因。两处重复归因循环合并为 helper。
+
+**验证**：真值表 7 断言点（含「慢+请求数发散必须 bug」）+ 缺陷注入 2 处各红 + 该文件 13/13。
+
+**⚠️ 诚实边界**：flaky 未复现（4/5 核负载各跑全量均绿、归因 0 次触发），
+本批是「根因推断 + 真值表 + 注入」三重验证，不是「复现后修复」。
+
+**同批测量**：全量 237s，其中 timeDrift 单文件 74.5s（31%，真实延迟模拟不可压）；
+本机 20 核但并发 3（提高有端口竞争前科，留待独立标定）。
+
+---
+
+## 2026-11-02 批次 D234 · 「已作废口径」复述检测 + 收口 39→41（已完成，见 CHANGELOG）
+
+**动机**：原计划做 CI 靶场化，先修 Docker —— `com.docker.service` Stopped 且无管理员权限、
+`wsl.exe` 被沙箱黑名单拦截、日志显示 Linux VM 7h44m 未启动 ⇒ **Docker 本会话不可修**，
+转为文档口径对账。
+
+**查出腐烂 13 天**：`e2e/benchmark-lab/README.md` 仍写「参考靶场、不接门禁、真值 4/12」，
+`e2e/README.md` 有两处重复过期行；实际 `acceptance.mjs:714` 早接了 benchmark（43/43 + 0/24），
+`referenceOnly` 名单里从未有它。D115 已推翻、D130 只修主 README、10-22 的会话记录**记了没修**。
+
+**交付**：两份 README + 台账 `claim`/`caveat` 修正（保留 4/12 作废快照）；
+新增门禁 `scripts/stale-claim-check.mjs`（带 scope，避免误伤 dvga 的正确答案），
+收口 **39 → 41 项**。自证抓出两个真问题：`main()` 忘传 filePath 导致**恒绿**、scope 过宽误伤 dvga。
+
+**验证**：`--selftest` 漏报 5/5 抓、误报 7/7 放过；注入过期行精确报 1 处、还原即绿；`gate:close` 41/41。
+
+**待用户**：安全中心移除 `wsl.exe` 黑名单 + 管理员启动 Docker Desktop，CI 靶场化才能继续。
+
+---
+
+## 2026-11-02 批次 D233 · 待复核 claim 对账 + P2-2 核查（已完成，见 CHANGELOG）
+
+**动机**：§3.5 第 5 条「每批至少复核 1 条」—— D230–D232 三批都在做优化，一条没复核。
+
+**复核**：`waf-fingerprint-coverage`（唯一 unverified）。**抓出口径错误**：evidence 写
+「62 条 matcher」，实测是 **62 家厂商 / 156 条 matcher**（旧表述把厂商数当 matcher 数）。
+对拍判据 20/20 绿；真机样本仍仅 ModSecurity 1 例，本机 Docker 返回 500 无法新增 ⇒ 维持 unverified。
+
+**P2-2 核查结论：不做**。三处有风险的入口（`useServerHistory` / `loadReport` / `reconcile`）
+**正确性问题都已防住**（`alive` 守卫 / `latestReportRequestId` / `reconciling` 闸 + scanId 二次校验），
+剩下只是请求不取消的带宽浪费；统一注入 `AbortSignal` 要动 41 个调用点，收益不抵改动面。
+
+---
+
+## 2026-11-02 批次 D232 · ReDoS 审计 + 收口 37→39 项（已完成，见 CHANGELOG）
+
+**动机**：P2-4。检测器正则跑在**目标可控**的响应体上，灾难性回溯 = 扫描器被目标拖死的 DoS 面。
+
+**交付**：`scripts/redos-audit.mjs`（espree 静态打分排序 + worker 限时动态探测 + `--selftest`），
+接入 `gate:close` 37→39 项、ci.yml/ci-local 三向接线、`docs/ReDoS-审计-2026-11-02.md`。
+
+**结果**：446 文件 / **1047 条正则** / 静态候选 12 条 / 动态全部 **<1ms** / 0 条灾难性回溯。
+
+**诚实边界**：动态只覆盖 3 种通用病态串，不等于「任意输入安全」；需特定前缀的靠人工复核；
+`--param-exclude` 用户正则不在此列（作用于参数名非响应体）。
+
+**同批结项 P1**：P1-2（`statSync` 6.7µs/次）、P1-5（24MB join 43ms 一次性）、
+P1-1 剩余（无真实数据）—— 全部判为理论风险，不做。**P1 至此清零**。
+
+---
+
+## 2026-11-02 批次 D231 · 台账列表尾部块读（已完成，见 CHANGELOG）
+
+**动机**：P1-1 治理路径同步全量 IO。实测真实台账索引 5.8MB / 15605 行，`GET /api/scans`
+每次都全量 `readFileSync` + 15605 次 `JSON.parse` 才 `slice(-limit)` ⇒ 同步阻塞 30~40ms。
+
+**交付**：`scanLedger.listScans` 尾部块读（1MB 起、4× 扩容、最坏退化全量），
+UTF-8 截断首行丢弃，`limit<=0` 旧语义原样保留。实测 30~40ms → **1.7ms**。
+
+**顺带降级**：P1-3（报告深拷贝）/ P1-4（终态 SSE 全量报告）经真实体量核对
+（P50=9KB / P99=32KB / 最大 82KB）判为理论风险，本批不做 —— 改 SSE 协议要动前端与断线对账。
+
+**验证**：守卫 14 用例（oracle 等价，含扩容/UTF-8 边界/limit=0）；缺陷注入 4 处，
+其中 `TAIL_GROW=1` 抓出**初版扩容无终止条件会死循环**，已补退化分支并留为回归证据。
+
+---
+
+## 2026-11-02 批次 D230 · P0-1 攻坚：三条候选修法实测淘汰两条，落等价短路（已完成，见 CHANGELOG）
+
+**动机**：P0-1（检测签名无长度闸）是交付后唯一留存 P0。报告建议「截断 512KB + 边界回读」，
+本批先量再改，把该建议与另两条候选一起实测淘汰 —— 截断改判定语义（D225 静默假阴性同形）、
+分块早停无收益（命中末尾反慢 1.31×）、字面量预筛负收益（142ms vs 35ms）。
+
+**交付**：`engine/echoStrip.js` 两处逐码元等价短路 —— `stripLongestPrefix` 最短前缀早退
+（10MB 20.5→0.5ms）、`normalizeEcho` 的 `&` / `%XX`+`+` 判据短路（29.0→3.9ms）；
+整链 `stripEchoedPayload` 在 JSON 响应上 38.0→5.5ms（6.9×）。变体 indexOf 预判因实测无收益已回退。
+
+**验证**：新守卫 `echoStrip.shortCircuit.guard.test.js`（oracle 等价 8322 组 0 差异 +
+判据真值表 + 截断回显逐档）；缺陷注入 2 处各红 5/10、7/10；echoStrip 45/45；全量单测 0 fail。
+
+**遗留**：`ERROR_SIG` 全量 match 的 35ms/10MB 判定为「不漏检的必要代价」，P0-1 据此降级关闭。
+
+---
+
+## 2026-11-01 批次 D229 · 交付闸收口：P0-3 卡顿修复 + ai-gateway 断言去模型依赖（已完成，见 CHANGELOG）
+
+**动机**：交付前全量验收首轮 2 FAIL（fetchUsing 时序 flake 有案单跑复绿；ai-gateway 脱敏断言
+查了模型非确定回显）；《卡死风险报告》P0-3 应修、P0-2 需降级修正。
+
+**交付**：P0-3 落地（buildHaystack 先截后拼，逐码元等价，10MB 实测 7.7×，新增 4 项行为钉）；
+ai-gateway 断言改为头部策略行（确定性）+ 超时余量；P0-2 降级修正（加载时一次性，非请求路径）。
+
+**验证**：waf.blockSignature 23/23；ai-gateway 单跑通过；干净档全量验收 27/27 PASS；gate:close 37/37。
+
+---
+
+## 2026-11-01 批次 D228 · AI 报告网关端到端验收 + 本地网关 runbook + CI 靶场硬要求扩展（已完成，见 CHANGELOG）
+
+**动机**：同日测试审计列出四缺口：① CI 靶场硬要求只覆盖 juice；② AI_REPORT 流水线只有
+stub 单测，「本地网关 × 真报告」全链路无验收；③ 本地网关运维手册缺失；④ `--ai-report`
+默认落点未进 .gitignore。
+
+**交付**：① ci.yml VAmPI 双实例 docker 硬起 + `--require-labs=juice,vampi-vuln,vampi-safe`
+（多值判据 D148 已有；CI 段首跑盯红；dvwa/benchmark 的 CI 化遗留，镜像/构建链不盲猜）；
+② 新验收套件 `ai-gateway`（26→27）：真实 HTTP 网关跑完 ReportAI 全流水线，断言链路事实
+（实调回声/元数据头 4/4/脱敏/落盘/审阅 ✅），未就绪 `[SKIP]` exit 0 不假绿，不判文风质量；
+③ docs/AI-网关-runbook.md（Ollama/自建两形态、模型分档、运维坑）；④ .gitignore 加 `ai-report/`，
+README/AGENTS 套件数同步。
+
+**验证**：`acceptance --only=ai-gateway` 本机 PASS（实调 qwen2.5:0.5b×3 链回声、元数据 4/4、
+落盘 6883B）；SKIP 路径（死端口）exit 0；`--require-labs` 多值与未知 id 拒绝路径本地实跑验证。
+
+---
+
 ## 2026-11-01 批次 D225 · 交付前全量验收抓出「假通过阴影」漏检回归 + CRS auto 档方言分档
 
 **动机**：交付前带靶场全量验收（8 靶场在线）实测 **2 FAIL**：Juice Shop 外部裁判真值

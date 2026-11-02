@@ -226,23 +226,33 @@ function baselineEntry(o, m) {
 
 /**
  * 产出新的基线条目集合（不碰磁盘）。
+ *
+ * [D244] 两处修正（2026-11-02 实测：`--fix-baseline` 被 103 条「超硬上限未入基线」误拒，
+ * 导致基线自 D180 之后**根本无法重建**，20 条「可下调基线」告警长期无人能收）：
+ *   1. over-hard 拒绝只针对**不在基线里的新函数**。历史债（旧基线本就收录的超硬函数，
+ *      如 `cli.js::main` 复杂度 113）必须允许写回 —— 旧判据不看 old，只要存在一条历史债
+ *      就永久拒绝，与「基线记录存量、硬上限约束新代码」的设计自相矛盾。
+ *   2. 查旧条目要先走 remapArrowKeys：匿名函数键含行号，行号一漂就查不到 old，
+ *      存量会被当成新的超硬函数（D217 在 judge 侧已修，这条路径漏了）。
  * @param {Record<string,{lines:number,complexity:number}>} measured 当前度量
  * @param {Record<string,{lines:number,complexity:number}>} old 旧基线
  * @param {boolean} force 是否收录超硬上限函数
+ * @param {Record<string,string>} [remap] 实测键 → 基线键（匿名函数行号漂移对齐）
  * @returns {{next: object, added: string[], lowered: string[], overHard: string[]}}
  */
-function buildNextEntries(measured, old, force) {
+function buildNextEntries(measured, old, force, remap = {}) {
   const next = {};
   const added = [], lowered = [], overHard = [];
   for (const [key, m] of Object.entries(measured)) {
     if (!isOverSoft(m)) continue;
-    if (isOverHard(m)) {
+    const prev = old[key] ?? old[remap[key]];
+    if (isOverHard(m) && prev === undefined) {
       overHard.push(key);
-      if (!force) continue; // 超硬上限者不得进基线（须先拆分）
+      if (!force) continue; // 新代码超硬上限不得进基线（须先拆分）
     }
-    if (!old[key]) added.push(key);
-    if (isLowered(old[key], m)) lowered.push(key);
-    next[key] = baselineEntry(old[key], m);
+    if (prev === undefined) added.push(key);
+    if (isLowered(prev, m)) lowered.push(key);
+    next[key] = baselineEntry(prev, m);
   }
   return { next, added, lowered, overHard };
 }
@@ -274,8 +284,12 @@ function decideRefusal({ old, next, overHard, force }) {
  */
 function planBaseline(measured, old, opts = {}) {
   const force = opts.force === true;
-  const { next, added, lowered, overHard } = buildNextEntries(measured, old, force);
-  const removed = Object.keys(old).filter((k) => !next[k]);
+  // [D244] 匿名函数键含行号：重建基线前先对齐，否则行号漂移会把存量当成新增/删除
+  const remap = remapArrowKeys(measured, old);
+  const { next, added, lowered, overHard } = buildNextEntries(measured, old, force, remap);
+  const mappedOld = new Set(Object.values(remap));
+  // 已被 remap 接管的旧键不算「被删除」——它只是换了个行号
+  const removed = Object.keys(old).filter((k) => !next[k] && !mappedOld.has(k));
   const refuse = decideRefusal({ old, next, overHard, force });
   return { next, added, removed, lowered, overHard, refuse };
 }
@@ -375,6 +389,36 @@ function selftestArrowRemap(t, ok) {
     const r = judge(measured, { functions: base });
     ok(r.errors.length > 0, '变差后必须报错（不能因「同一个箭头」而放行）');
     ok(/硬上限/.test(r.errors[0]), `应按新函数超硬上限报出，实际：${r.errors[0]}`);
+  });
+}
+
+/**
+ * [D244] `--fix-baseline` 重建语义的自证。
+ *
+ * 存在意义：D180 之后本仓基线**再也重建不了**（103 条「超硬上限未入基线」误拒），
+ * 而口子恰恰是「存量超硬函数被当成新函数」。这两条判据钉住修复：
+ * 历史债可写回（只减不增）、新超硬函数仍拒绝。
+ * @param {(name:string,fn:Function)=>void} t 用例注册器
+ * @param {(cond:boolean,msg:string)=>void} ok 断言器
+ */
+function selftestBaselineRebuild(t, ok) {
+  t('⑫ [D244] 存量超硬上限函数允许重建基线（不拒绝，且只减不增）', () => {
+    const old = { 'cli.js::main': { lines: 285, complexity: 113 } };
+    const measured = { 'cli.js::main': { lines: 273, complexity: 107 } };
+    const plan = planBaseline(measured, old, {});
+    ok(plan.refuse === null, `存量超硬不应拒绝，实际 ${JSON.stringify(plan.refuse)}`);
+    ok(plan.next['cli.js::main'].lines === 273, `应下调到 273，实际 ${plan.next['cli.js::main'].lines}`);
+    ok(plan.next['cli.js::main'].complexity === 107, `复杂度应下调到 107，实际 ${plan.next['cli.js::main'].complexity}`);
+    ok(plan.overHard.length === 0, `不应点名历史债，实际 ${plan.overHard.join(',')}`);
+  });
+  t('⑬ [D244] 匿名函数行号漂移时重建基线：不计新增、不计删除', () => {
+    const old = { 'x.js::<arrow@10>': { lines: 120, complexity: 18 } };
+    const measured = { 'x.js::<arrow@20>': { lines: 120, complexity: 18 } };
+    const plan = planBaseline(measured, old, {});
+    ok(plan.refuse === null, `漂移不应拒绝，实际 ${JSON.stringify(plan.refuse)}`);
+    ok(plan.added.length === 0, `不应计为新增，实际 ${plan.added.join(',')}`);
+    ok(plan.removed.length === 0, `不应计为删除，实际 ${plan.removed.join(',')}`);
+    ok(plan.next['x.js::<arrow@20>'].lines === 120, '应把旧值搬到新键上');
   });
 }
 
@@ -486,6 +530,7 @@ function selftestMain() {
 
     // ⑨⑩ [D217] 匿名函数行号漂移判据（拆到独立函数，守住 selftestMain 的 100 行软上限）
     selftestArrowRemap(t, ok);
+    selftestBaselineRebuild(t, ok);
 
     console.log(failed ? `\n❌ selftest ${failed} 条失败` : '\n✅ selftest 全绿');
     process.exitCode = failed ? 1 : 0;

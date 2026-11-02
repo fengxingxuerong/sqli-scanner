@@ -259,3 +259,7 @@ bench/results/
 #   路 .verify-labs/          —— 本机靶场检出目录（DVWA / VAmPI / Juice Shop 等第三方源码 + venv），
 #                                由 scripts/labs.mjs 按需拉起；不入库，也不参与 lint（见 eslint.config.js）
 .verify-labs/
+
+# [D228] --ai-report 默认落点（扫描产物的 AI 报告目录，不入库）
+ai-report/
+.zcode/

@@ -29,7 +29,7 @@
 
 | 路径（GET） | 说明 |
 |------|------|
-| `/health`、`/api/health` | 健康检查 |
+| `/health`、`/api/health` | 健康检查。[D236] `data.eventLoop` = 事件循环滞后观测（`{p99Ms, maxMs, samples}`，最近采样窗口，毫秒；CLI/MCP 未启动时全零）——`maxMs` 持续超 100ms 说明有同步长条任务在拖慢 REST/SSE，服务端同时有节流 warn 日志（阈值可用 `EVENT_LOOP_LAG_WARN_MS` 覆盖） |
 | `/payloads`、`/api/payloads` | 只读 Payload 模板 |
 | `/tampers`、`/api/tampers` | tamper 插件清单 |
 | `/exploit/capabilities`、`/api/exploit/capabilities` | 利用能力清单 |

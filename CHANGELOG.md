@@ -7,8 +7,633 @@
 > 下一批次起的条目写在这里。发版时把本节整体升为 `## [x.y.z] - YYYY-MM-DD` 并补汇总段。
 
 <!-- changelog-index:start -->
-当前没有未发布批次（最近一次发版见下方版本段落）。
+**本段覆盖 17 个批次（D228–D244，2026-11-01 → 2026-11-02）**。正文按时间倒序排列；
+下表是同一批次的索引，便于按编号或关键词定位。**索引只是导航，正文未做任何删改**
+（被推翻的旧结论原样保留，这是本仓的既定口径）。新增批次后跑
+`node scripts/changelog-index.mjs --write` 重生成，`--check` 校验是否过期。
+
+| 批次 | 日期 | 主题 |
+|---|---|---|
+| D244 | 11-02 | 基线收紧（发现门禁从 D180 起就无法重建） |
+| D243 | 11-02 | 失败取证补齐断言消息（让 flaky 可定因，不再盲调阈值） |
+| D242 | 11-02 | CI 首跑红的修复：macos 冻结下的 deadline 归因 |
+| D241 | 11-02 | 服务端测试并发标定（222s → 116s）+ `test:fast` |
+| D240 | 11-02 | 测试 flaky 归因判据（maxGap 盲区）+ 真值表钉死 |
+| D239 | 11-02 | 变换脚本体积闸 + 《卡死风险报告》估算的实测校正 |
+| D234 | 11-02 | 「已作废口径」复述检测（D130 漏改残留，腐烂 13 天）+ 收口 39→41 项 |
+| D235 | 11-02 | MCP 输出序列化瘦身（P2-1）：工具输出统一 minify |
+| D236 | 11-02 | 事件循环滞后观测（卡死矩阵「暗区」收口）：eventLoopWatch + /api/health 暴露 |
+| D238 | 11-02 | cli.js 贴线抽取：报告输出/落盘函数族纯搬移至 cli/reportOutput.js |
+| D237 | 11-02 | request-budget 探针扩盲区（P2-3）：提取直连路径计数 + CPU 计时 |
+| D233 | 11-02 | 待复核 claim 对账（§3.5 每批 1 条）：WAF 指纹口径修正 |
+| D232 | 11-02 | ReDoS 审计（1047 条正则 / 0 条灾难性回溯）+ 收口 37→39 项 |
+| D231 | 11-02 | 台账列表尾部块读（5.8MB 索引 30~40ms → 1.7ms）+ 死循环防御 |
+| D230 | 11-02 | P0-1 攻坚：三条候选修法实测淘汰两条，落等价短路（回显归一化 6.9×） |
+| D229 | 11-01 | 交付闸收口：P0-3 卡顿修复（haystack 先截后拼）+ ai-gateway 断言去模型依赖 |
+| D228 | 11-01 | AI 报告网关端到端验收（ai-gateway 套件）+ 本地网关 runbook + CI 靶场硬要求扩展 |
 <!-- changelog-index:end -->
+
+### 2026-11-02 批次 D244 · 基线收紧（发现门禁从 D180 起就无法重建）
+
+**动机**：门禁自己一直在告警「可下调基线 20 条 / 可上调基线 3 处」，但没人执行。按纪律
+先问「为什么没人做」，再动手 —— 结果不是人懒，是 **`--fix-baseline` 根本执行不了**。
+
+#### 真缺陷：存量历史债被当成「新函数超硬上限」
+
+`node scripts/complexity-guard.mjs --fix-baseline` 实测拒绝：
+
+```
+✗ 拒绝写入基线：103 个函数超硬上限未入基线
+  （本次未改动任何文件：拒绝 = 零副作用）
+```
+
+但基线里本来就有 20 个超硬条目（`cli.js::main` 复杂度 113、`cli/args.js::parseArgs` 212
+—— 这些是 2026-09 就登记的历史债）。根因在 `buildNextEntries`：
+
+```js
+if (isOverHard(m)) {
+  overHard.push(key);
+  if (!force) continue;   // ← 不看 old[key] 是否已存在
+}
+```
+
+D180 的判据意图是「**新**代码不得从超硬上限起步」，实现却对**所有**超硬函数一票否决。
+后果：仓库里只要存在**一条**历史债，基线就永久不可重建 —— 与「基线记录存量、硬上限约束
+新代码」的设计自相矛盾。这不是「没人维护基线」，是**工具把维护的路堵死了**。
+
+#### 第二处：重建路径漏了 remap
+
+`judge()` 走 `lookupBaseline()`（含 `remapArrowKeys`，D217 修的行号漂移对齐），
+`buildNextEntries()` 却直连 `old[key]` —— 匿名函数键 `<arrow@行号>` 一漂就查不到旧值，
+存量被记成"新增"、旧键被记成"删除"。同一份键映射逻辑，判定路径修了、重建路径漏了。
+
+#### 修复
+
+- over-hard 拒绝改为 `isOverHard(m) && prev === undefined`（只拦新函数）
+- 重建前先 `remapArrowKeys(measured, old)`，查旧值走 `old[key] ?? old[remap[key]]`
+- `removed` 扣掉被 remap 接管的旧键（否则漂移会让"删除数"虚高）
+- 新增自证 ⑫⑬：存量超硬可写回且只减不增 / 行号漂移不计新增不计删除
+
+**注入复验**：把判据改回 `isOverHard(m)` → selftest ⑫ 红（`REAL_EXIT=1`）；备份还原后 13/13 全绿。
+
+#### 收紧结果
+
+| 基线 | 变更 | 复核 |
+|---|---|---|
+| `docs/_complexity-baseline.json` | 237 → **233** 条（删 4 条已降到软上限下、下调 7 条） | 「可下调」告警 **20 → 0** |
+| `docs/_typecoverage-baseline.json` | core 51.5→51.6、engine 39.9→40.6、services 44.5→45.8 | 「可上调」告警 **3 → 0** |
+
+#### 同批 claim 对账（§3.5 每批至少复核 1 条）
+
+`waf-fingerprint-coverage` 的 `recheck_batch` 里，D233 把「本机 Docker 返回 500」写成了缺口阻碍。
+本批纠正这条**归因**：Docker 里跑的是 ModSecurity（开源 WAF，已计入那 1 例），起得来也只是
+「开源真机 2 例」；而缺口定义是「**商业云** WAF 真机样本」。真实阻碍是**没有合法授权的商业云
+目标**，与 Docker 无关。工具链已自检：采集器对 Cloudflare 形态样本识别正确（dry-run 未落盘）、
+`wafRealSamples.guard` 空快照下 2 pass / 2 skip（显式 SKIP，不假绿）。状态仍 `unverified`，
+但缺口口径已改 —— 免得下一轮又去折腾 Docker。
+
+#### 诚实边界
+
+- **死代码 164 条未分类**。原计划同批做，实测后放弃：`kind` 只能分出「兼容再导出 18 /
+  函数 94 / 常量 50」，而「这是死代码还是脚本入口」必须逐条读语义（e2e/scripts 的导出
+  消费方是 CLI 或人工，不是 import 关系）。产出自动分组清单只会让人以为已治理，
+  移交独立批次（需逐条判定 + 删码风险控制）。
+- 复杂度基线仍含 20 个超硬上限存量条目 —— 本轮只是**允许**它们被写回，没有拆分它们。
+  这些是真实技术债，不是已解决项。
+
+### 2026-11-02 批次 D243 · 失败取证补齐断言消息（让 flaky 可定因，不再盲调阈值）
+
+**动机**：D242 收口时 `facts:refresh` 首轮红了一个用例、复跑绿。但 facts-sync 的 D225 取证
+**只打 `not ok` 行**——那一行只有用例名。而修那条 flaky 需要判据的输入量
+（`maxGap` / `elapsed` / `reqs`，它们决定「环境慢」还是「逻辑失控」），
+**拿不到数就只能盲调阈值**，那不是修复，是赌。
+
+**交付**：
+
+- `scripts/lib/failureDetail.mjs`：`extractFailureDetails(tapOutput)` —— 从 TAP 输出里把
+  「not ok 行」与紧随其后的 `error:` 行**配对**取出（node:test 的 tap reporter 把断言消息
+  放在 YAML 块的 `error:` 行里）。
+- `scripts/facts-sync.mjs` 接入：首轮与复跑的失败取证都带断言消息（`↳` 前缀）。
+- 新守卫 `server/tests/failureDetail.guard.test.js`（6 用例，命名带 `guard` ⇒ 进收口清单的
+  wiring 段）：成对取出 / 全绿不产噪音 / `error` 缺席时 detail 为空串（**不抛错、不猜**） /
+  **error 行离 not ok 超过 20 行窗口时不得串取后一个用例的 error** / 多条按序 + limit 生效 /
+  消息里含冒号引号等号时不被截断。
+
+**⚠️ 边界**：只做**取证**，不改变任何判定（取不到就返回空串，调用方按原样处理）。
+守卫钉的「20 行窗口」是**有意的保守**：宁可 detail 取不到，也不误取相邻用例的断言。
+
+**验证**：守卫 6/6；缺陷注入把窗口 20 → 30 → §D 红（证明窗口这条判据有牙）。
+
+### 2026-11-02 批次 D242 · CI 首跑红的修复：macos 冻结下的 deadline 归因
+
+**背景**：D241 推送后 CI #379 首跑（a0fef40）—— 14 个 job 里 **12 个绿**，红的是
+`test-matrix (macos-latest)` 的 `Server tests`；`windows-latest` 因 fail-fast 被 cancelled。
+这是本仓 **D230–D241 共 12 个批次第一次走 CI**，本地 20 核跑了十几轮全量都没暴露。
+
+**失败证据**（CI 日志 `tests/extractor.timeDrift.test.js:513`）：
+
+```
+AssertionError: 提取在 30000ms 内没跑完：…（已发请求 4 个）。
+✖ 请求失败的探针既不得入样… (50953ms)
+```
+
+**判读**：**只发 4 个请求就吃满 30s deadline** —— 平均 7.5s/请求，而正常路径是
+~50 个请求、每个 60~90ms。**慢了 100 倍 ⇒ 进程被冻结**（同 runner 上并发的其它测试
+文件把它挤停），不是提取失控。真·失控的形态是请求数**暴涨**（恒判真 ⇒ 长度顶到上界 ⇒
+逐位置循环；D64 实测 47 → 142+），与「4 个」差一个数量级。
+
+**修法**（沿用 D240 的归因思路，但换判据）：该用例此前**没有**任何归因/重试，超时即红。
+改为 3 抽 +
+- `reqs > FROZEN_REQ_CEIL(20)` ⇒ 请求数已发散，原样上抛（真·失控仍红）
+- `reqs <= 20` ⇒ 环境冻结，重抽（日志留证）
+- 3 抽全冻结 ⇒ `assert.fail`（**显式失败，不静默放过**）
+
+**验证**：本地注入 `failAfterMs: 1200 → 100000` 制造确定性冻结 → 日志出现 3 次
+「环境冻结归因，重抽」，最后 `assert.fail('连续 3 抽都在 deadline 内没跑完且请求数 ≤ 20')`
+—— 归因分支可达，且**不会把全冻结伪装成绿**。还原后该用例 1/1 通过。
+
+**⚠️ 与 D240 的关系**：两者是同一台机器上的两类环境噪声 ——
+D240 修的是「跑完了但值被污染」（maxGap 盲区），本批修的是「压根没跑完」（deadline 超时）。
+共同点：判据都必须用**请求数**把「环境慢」与「逻辑失控」分开，因为后者的唯一稳定特征是
+请求数发散，而不是耗时。
+
+**同批观察（未修，留证据）**：本批收口跑 `facts:refresh` 时，首轮又红了一次 **D240 改的
+`修复①`**，facts-sync 的 D93 重试机制复跑后绿（0 fail）。即 D240 的归因**没有完全消除**
+该用例的环境敏感性。但首轮日志只留了用例名（D225 的取证只打 `not ok` 行），**拿不到
+maxGap / elapsed / reqs 三个数就无法定因** —— 是「3 抽全腐蚀 ⇒ assert.fail」还是
+「单抽被判 bug」，两种修法完全不同。故本批**不动判据**（不靠猜阈值调参），
+下一步先把这三个数打进失败消息，再谈阈值。→ **D243 已把断言消息打进取证输出**。
+
+**CI 复验（#380，a5bc65e）**：**整轮 success**（16 个 job 全绿，含 `acceptance` 27 套件
+全量验收、`test-matrix (macos-latest)`、`test-matrix (windows-latest)` —— 上一轮后者
+是被 fail-fast 连带 cancelled，本轮自己跑过去了）。这是 D230 以来**第一次 CI 全绿**。
+
+### 2026-11-02 批次 D241 · 服务端测试并发标定（222s → 116s）+ `test:fast`
+
+**动机**：全量 4005 用例在 **20 逻辑核**的机器上只跑 `--test-concurrency=3` —— 明显欠并行。
+
+**标定**（同条件四轮：4005 tests / 3998 pass / 0 fail / 7 skip，MySQL 未起、同一时段连续跑）：
+
+| 并发 | 耗时 | 相对 |
+|---|---|---|
+| 3 | **222.0s** | 1.00× |
+| 6 | 136.1s | 1.63× |
+| 8 | 115.7s | 1.92× |
+| 10 | 108.0s | 2.06× |
+
+c8 → c10 边际递减（只差 7s），取 **8** 落地。
+
+**交付**：`server/package.json` 新增 `test:fast`（并发 8）；CONTRIBUTING 写明适用边界。
+
+**为什么不改默认 `npm test`**：
+
+- CI runner 是 **2 vCPU**，并发 8 是超配会更慢，且 D215 有「57 文件并发导致 `cancelled`」的前科。
+- 收口/提交前的结论必须以 `npm test`（并发 3）为准 —— 快档只缩短本地「改-验」循环。
+- 一个并发数同时服务 20 核本机与 2 核 CI 是伪需求，环境差异应当显式表达，而不是写进默认值。
+
+**⚠️ 诚实边界**：稳定性只验证了**单轮**（每档各跑一次 0 fail / 0 cancelled）。D215 的端口竞争
+前科说明高并发风险真实存在，所以落地取 8 而非更快的 10，且**不进 CI**。若后续在快档遇到
+`cancelled` 或端口冲突，按「降一档」处理，不要靠上调重试次数掩盖。
+
+### 2026-11-02 批次 D240 · 测试 flaky 归因判据（maxGap 盲区）+ 真值表钉死
+
+**动机（一次真实 flaky，不是设想）**：为拿文件级耗时改用 junit reporter 跑全量，
+**同一份代码** TAP 轮 **0 fail**、junit 轮 **1 fail**：
+`extractor.timeDrift.test.js` 的「修复①」产出 `5/7.40`（正确值 `5.7.40`），
+而该抽 `maxGap=52ms` ≤ `STALL_MS=150ms` ⇒ 旧判据判成「真·跟踪器失败」，当场红。
+
+**根因**：`maxGap`（25ms 心跳间距）只测量**事件循环被堵**的时长。机器上还有别的负载时，
+更常见的形态是「心跳照常、每次 await 的调度延迟被拉长」—— 事件循环没停，但 25ms / 60ms
+那点余量已被整体拖慢吃掉。旧判据在这个形态上是盲的。
+
+**修法**（`tests/extractor.timeDrift.test.js`）：
+
+- 归因判据抽成纯函数 `classifyDraw()`，两条证据：① `maxGap > STALL_MS`（原）；
+  ② `elapsed > SLOW_WALL_MS(20s)` **且** `reqs <= NORMAL_REQ_CEIL(100)`（新）。
+- **为什么不是放宽断言**：跟踪器真失效时请求数会发散（D64 实测 47 → 142+，
+  `Σ(60+2i)` 二次增长 ⇒ 墙钟必然暴涨）。请求数上界把这种形态挡在归因之外 ⇒ 真 bug 仍立即红。
+- 两个用例（修复①/②）原先是逐字重复的同一段归因循环，一并抽成
+  `expectExtractionSurvivesDrift()`（顺带消掉重复）。
+
+**验证**：
+
+- 新增 `§归因判据` 真值表（7 个断言点）：正解恒 pass、停顿归因、边界（`==` 不算停顿）、
+  慢 + 请求数正常归因、**慢 + 请求数发散必须 bug**、快 + 正常必须 bug、墙钟边界。
+- 缺陷注入 2 处各红：去掉请求数上界 → 真值表红；`>` 改 `>=` → 边界用例红。
+- 该文件 **13/13** 通过（72.9s，与改前 74.5s 同量级，无回归）。
+
+**⚠️ 诚实边界**：这个 flaky **没能稳定复现** —— 4 核 / 5 核 CPU 忙循环负载下各跑一轮全量
+（后者 310s）均 **0 fail**、归因分支 **0 次触发**。所以本批**不是「复现后修复」**，而是
+「根因推断 + 判据真值表 + 缺陷注入」三重验证；它是否真消除了那次 flaky，只有下次在真实
+负载下再红才能确认。判据本身的可证伪性由真值表保证，不依赖复现。
+
+**同批测量（只记录，不改）**：
+
+- 全量 4004 用例 / 237s；其中 `extractor.timeDrift.test.js` 单文件 **74.5s（31%）**
+  —— 来自真实延迟模拟（每探针 `setTimeout` 60~90ms），除非改标定否则压不下去。
+- 本机 **20 逻辑核**，测试并发只有 3。提高并发理论上能显著缩短，但 D215 有端口竞争的
+  前科（57 文件同时跑会 `cancelled`），本批不动，留作后续独立标定。
+
+### 2026-11-02 批次 D239 · 变换脚本体积闸 + 《卡死风险报告》估算的实测校正
+
+**动机**：按「先量再改」逐条复算《卡死风险报告-2026-11-01》，发现 P0/P1 里**三条估算与
+代码事实不符** —— 直接按报告给的优先级投入会做无用功。本批先校正口径，再做其中唯一
+零风险且收益确定的一项。
+
+**实测校正（推翻的是估算，不是结论本身）**：
+
+| 报告条目 | 报告估算 | 实测 / 代码事实 | 处置 |
+|---|---|---|---|
+| P1-3 报告深拷贝 | 「几十 ms」 | 2MB 报告 `structuredClone` **9.3ms**；1.5MB **5.8ms** | 量级下调。「缓存+深冻结」实测 7.07ms（首次更贵、后续 0）⇒ **只在取阅 ≥2 次时才赚**，收益不明确，不做 |
+| P1-2 liveCookies | 「每请求 2 次 syscall」 | `entriesOf` **已有 mtime+size 缓存**（liveCookies.js:78），命中时只 1 次 statSync | 不成立，不改 |
+| P1-1 authAudit | 「全量读 + 全量重写」 | 写路径是 `appendFileSync`（:53）；全量读只在 `readAuthAudit`（低频） | 不成立，不改 |
+
+**交付（P0-2）**：
+
+- `requestTransform.js` / `responseTransform.js`：同步 `sha256(readFileSync)` 前加体积闸
+  （`MAX_SCRIPT_BYTES = 1MB`，单点定义、response 侧复用）。误绑数据文件不再变成每次扫描
+  启动时数十 ms 的事件循环阻塞，而是**明确报错**（`REQUEST_SCRIPT_INVALID` /
+  `RESPONSE_SCRIPT_INVALID` +「请确认绑定的是脚本而不是数据文件」）。
+- `maxBytes` 可注入：单测传 64 字节即可，不必造 1MB 夹具。
+- 新增 2 用例：超限必拒（错误码 + 文案可判）/ 上限内仍可加载（闸不误伤正常脚本）。
+
+**验证**：`requestTransform` **21/21**；`requestTransform.wiring` + `validity.transformReject`
+**23/23**；tsc 零错误；`gate:close` 41/41。
+
+**边界**：只挡**同步哈希**这一处；未改任何扫描行为，也未动 `ERROR_SIG` 匹配路径
+（D230 已证明截断会致静默假阴性，那条路本批不碰）。
+
+### 2026-11-02 批次 D234 · 「已作废口径」复述检测（D130 漏改残留，腐烂 13 天）+ 收口 39→41 项
+
+**动机（从一次失败的尝试开始，如实记录）**：原计划做 dvwa/benchmark 的 CI 靶场化，先修 Docker：
+
+- `com.docker.service` = **Stopped**，`Start-Service` 报「无法打开计算机上的服务」→ 当前会话**非管理员**；
+- Docker 日志给出根因：`cannot toggle VM OTel collector, backend is not running`，已等待 **7h44m**
+  —— Linux VM 从未启动；
+- 直接原因：`wsl.exe` 被**沙箱安全策略列入程序黑名单**（系统提示明确「不可审批、不可绕过、
+  不要通过其他 shell 或脚本重试」）。
+- 结论：**Docker 在本会话不可修复**，CI 靶场化阻塞（benchmark 另有定位问题，见下）。
+  需要用户动作：① 安全中心 → 命令安全 → 程序黑名单移除 `wsl.exe`；② 以管理员启动 Docker Desktop。
+
+**转做的实际收获：查出一处腐烂 13 天的文档矛盾**：
+
+- `e2e/benchmark-lab/README.md` 开篇写「⚠️ 已知漏检缺口（参考靶场，不接门禁）」、
+  「20/504 子集真值 **4/12**」、「按 DVGA 同口径登记为 reference-labs，**不接 acceptance/run-all**」；
+- `e2e/README.md` 有**两处重复行**（同一靶场出现两次，一条正常、一条写「参考/已知缺口」）；
+- `docs/_claims-ledger.json` 的 `external-judge-benchmark-d114` 与生成的 `docs/质量台账.md` 同口径。
+- **实际状态**：`e2e/acceptance.mjs:714` 早就把 benchmark 接成门禁套件，最近一轮
+  27/27 全 PASS（`cases.json` 74 条 → 真值 **43/43**、安全 **0/24**）；D117 全量 **178/178**；
+  `reference-labs.json` 的 referenceOnly 名单里**从未有它**。
+- **时序**：D115（10-20）已推翻 4/12；D130（10-23）只改了主 `README.md`；
+  2026-10-22 的会话记录里甚至写着「Benchmark README 三处口径互不相等」**但没落地**。
+  ⇒ 同一处腐烂被记录两次、修过一次，仍在 `e2e/` 下存活 —— 「记得改」不是机制。
+
+**交付**：
+
+- 改写 `e2e/benchmark-lab/README.md` 状态段：当前状态（43/43 + 0/24、178/178、已接 acceptance）
+  + **保留 4/12 作废快照**并写清「4/12 是『没测成』不是『检不出』」（与 DVGA 的 GraphQL 缺口是两类问题）。
+- 删 `e2e/README.md` 两处重复过期行，正常那行补「已接 acceptance + 43/43」。
+- 台账 `external-judge-benchmark-d114` 的 `claim` 加「（已作废）」前缀、`caveat` 说明
+  「不止数字错，『参考靶场不接门禁』的定性也不成立」+ 残留腐烂位置。
+- **新门禁 `scripts/stale-claim-check.mjs`**：扫 README 类当前文档，命中「已作废口径」的复述即红。
+  规则带 `scope`（benchmark 自己的 README 宽判；e2e 总览要求同行出现 benchmark 主语，
+  否则会误伤 dvga 的**正确**表述「参考证据不接门禁」）。
+  接入 `gate:close` **39 → 41 项** + ci.yml/ci-local 各两行（三向接线 4/4 绿）。
+
+**★ 自证抓到的两个真问题（否则这条门禁本身就是假绿）**：
+
+1. 首版 `main()` 调 `scanText(text)` **忘了传文件路径** ⇒ 带 scope 的规则全被过滤 ⇒
+   **恒绿**。注入过期行验证时「✔ 未检出」才暴露 —— 已修并写进代码注释。
+2. 首版 scope 用 `/benchmark|e2e[\\/]README\.md$/`，把 `e2e/README.md` 里的 dvga 行判成错
+   （dvga 的确仍是参考靶场）—— 拆成两条规则按文档类型区分，误报从 4 条降到 0。
+
+**验证**：`--selftest` 漏报 5 例全抓 / 误报 7 例全放过（含 dvga 反向样本）；
+注入过期行 → 精确报 1 处、还原 → 绿；`gate:close` **41/41**。
+
+> **更正（2026-11-02，D235 批次前置复跑发现）**：上文「`gate:close` 41/41」是上一会话的
+> 自报口径，与实际不符 —— 全量复跑时 deadcode 门禁红：本批新脚本 `RULES` / `scanText`
+> 两处 `export` 无人引用（不在基线，且基线政策明文「新增未使用导出不得进入基线」）。
+> 已去掉 `export`（自证与判码不受影响）后复跑 **41/41 通过**。教训与本仓 §3.5 同源：
+> **不采信自报 PASS，收口结论以复跑退出码为准。**
+
+### 2026-11-02 批次 D235 · MCP 输出序列化瘦身（P2-1）：工具输出统一 minify
+
+**动机**：《卡死风险报告》P2-1 —— `mcp/tools.js` 的 `text()`（8/9 工具唯一出口）与
+`get_report` 的 format=json 路径全部 pretty 序列化。MCP 的消费方是 **AI 代理**
+（JSON.parse 后按语义读取），token 按字符计费，缩进与换行是纯开销。协议层已核实安全：
+NDJSON 分帧只依赖信封层转义（`protocol.js json()`），内容层格式无关；全部现有测试
+均为 JSON.parse 断言，minify 零阻力。
+
+**交付**：
+
+- `tools.js text()` 改 minify；`get_report` format=json 在 **MCP 层**对 `exportReport`
+  返回的 pretty 串 minify（`ReportGenerator.toJSON` 与 REST 下载面的 human-readable
+  语义不动；minify 先于 20 万字符截断执行，同一窗口装更多有效内容）。
+- **落盘 pretty 全部保持不动**（report.json / meta.json / triage.json / side-effects.json /
+  sqlmap 导出）——取证交付的人类可读语义，写频低（D231/D232 已判理论风险）。
+- AGENTS.md §4 `get_report` 枚举补齐 `md`/`db-json`（此前与代码不一致）；README MCP 行同步口径。
+- 测试钉：mcp.server.test.js 新增 D235 用例（`text()` 单行无裸换行 / `get_report(json)`
+  对 pretty 串 minify 且数据不丢 / markdown 与 isError 路径不受影响）；
+  假 `exportReport` 的 json 路径改为 pretty（此前假成 minify，掩盖了「MCP 层要自己
+  minify」这条真实链路）。
+- 门禁联动两笔：① 内联 minify 首版让 `buildTools` +2 行/+2 圈触发复杂度门禁 →
+  按门禁建议抽成模块级纯函数 `slimReportText()`（minify + 截断帽单点收口）；
+  ② get_report 净减 4 行使复杂度基线锚点 `tools.js::<arrow@305>` 失配（wiring 形态-7
+  抓「基线腐烂」）→ 精确改锚 `arrow@301`（preflight run 箭头，指标 51 行/圈 25 未变，
+  未动其它基线条目）。
+
+**量化**（30 份真实台账 report.json，可复现：`node -e` 读 `server/data/ledger/*/report.json`
+比对 `JSON.stringify(o, null, 2)` 与 `JSON.stringify(o)`）：
+pretty **351,695 B** → minify **238,025 B**，**省 32%**；最大单份省 9.8KB。
+
+**验证**：mcp.server.test.js **9/9**（含新钉与端到端）；`gate:close` **41/41**。
+
+### 2026-11-02 批次 D236 · 事件循环滞后观测（卡死矩阵「暗区」收口）：eventLoopWatch + /api/health 暴露
+
+**动机**：《卡死风险报告》§四.3 —— 死锁型挂死防线已成套，残余的是「性能退化型卡顿」：
+大 body 同步长条把事件循环切块时 REST/SSE 全部卡顿，但全仓**零 perf_hooks**，
+出事既无日志也无指标，只能人肉感知。本批补上观测点（建议原文「引擎诊断加慢日志」）。
+
+**交付**：
+
+- 新模块 `server/src/core/eventLoopWatch.js`：`monitorEventLoopDelay`（resolution 20ms）+
+  周期采样（默认 1s，窗口读后 reset）；单窗口 max 超阈值（默认 100ms，env
+  `EVENT_LOOP_LAG_WARN_MS` 可覆盖）发**节流告警**（冷却 30s；`lastAt=0` 语义 =
+  **首次超阈值立即告警**——真值表抓出首版会把进程启动后 30s 内的首次卡顿吞掉，已修）。
+  采样抽成可导出的 `sampleWindow()`（本仓「可测内部导出」惯例，守卫形态-5 同款）。
+- 接线：`server/index.js start()` 启动、优雅关闭路径停止；`/api/health` `data.eventLoop` =
+  `{p99Ms, maxMs, samples}`（只放计数，符合该端点字段口径；CLI/MCP 未启动时全零，形状恒定）。
+- 错误形态：两处「调用方 bug」抛错用 `AppError(ErrorCode.INVALID_PARAM)`（core 层既有惯例，
+  egressGuard 同款）——首版裸 `throw new Error` 被错误形态门禁抓（非受限目录 39→41 只减不增），已改。
+- **已知语义（诚实边界）**：monitorEventLoopDelay 只测「本轮同步任务让后续回调等了多久」
+  （非 CPU 占用率）；同步长条结束后内部观察回调与外部采样存在同相位竞态，该长条可能
+  **延迟一个采样窗口可见**——不影响告警本质，注释与测试均已声明。
+
+**测试（零墙钟等式断言，遵守「拿墙钟当活性上限=测机器负载」教训）**：
+纯决策真值表（纳秒折算 / 阈值严格大于 / 冷却期 / 首次告警）+ 受控滞后诱导
+（同步阻塞 120ms → 内部观察落账 → 手动采样必测到，确定性驱动绕开竞态）+
+启停幂等/复位 + `/api/health` 形态。**实跑冒烟**：本机起服务 4s，
+`/api/health` 实况返回 `eventLoop: {p99Ms:32.1, maxMs:32.1, samples:3}`——启动本身
+就被测到一次 32ms 滞后，正是这个观测点的价值。eventLoopWatch.test.js **7/7**；
+`gate:close` **41/41**。
+
+### 2026-11-02 批次 D238 · cli.js 贴线抽取：报告输出/落盘函数族纯搬移至 cli/reportOutput.js
+
+**动机**：架构评估「贴线大文件」短板 —— cli.js 门禁计数 1175，距 1200 上限仅 25 行
+（行数维基线为空 ⇒ 非基线文件超限**无容差**）。09-25 scanRoutes 批沉淀原则：
+「行数上限是软线，接近时应当主动抽取而不是继续往里加」。
+
+**搬移前核查（循 scanRoutes 批「先核块内依赖」纪律）**：
+
+- 搬移族 = cli.js 内聚度最高的报告输出/落盘块：`formatReport` / `applyReproCheck` /
+  `writeSingleReportFiles` / `writeOptInArtifacts` / `emitSingleScanOutput` /
+  `fixPromptBaseDir` / `writeFixPromptsForReport` / `printExtractView`（逐字搬移，零行为变化）；
+  `makeScanProgressLogger`（进度事件，非报告输出）**留守**，手术脚本内建「夹带校验」。
+- 测试导入面：`formatReport` / `printExtractView` / `writeFixPromptsForReport` 被
+  cli.format / terminalSafe / fixPrompt 三套件从 `../bin/cli.js` 导入 →
+  按 args re-export 同款先例在 cli.js 顶部保留 `export … from './cli/reportOutput.js'`；
+  文件底部既有的 `printExtractView` 导出列表同步移除（重复导出会让整个 CLI 无法加载）。
+- 随搬移失效的 10 个 import 由 eslint no-unused-vars 精确指认后清除
+  （`readFileSync` 仍被留守代码使用，保留——eslint no-undef 抓的）。
+
+**交付**：新文件 `server/bin/cli/reportOutput.js`（277 行）；cli.js **1174 → 915 行**
+（余量 25 → 284）；基线锚点随迁 `cli.js::printExtractView` →
+`cli/reportOutput.js::printExtractView`（63 行/圈 64 未变，wiring 形态-7 防虚高判据覆盖）。
+`fixPromptBaseDir` 等三个族内私有函数**不导出**（deadcode 门禁：同文件使用不算引用，
+导出即红——D234 教训的直接应用）。
+
+**验证**：eslint 双文件 0 错；受影响 cli 系 15 套件 **154/154**；全量 `npm test` 0 fail；
+complexity / arch / deadcode 门禁全绿；`gate:close` **41/41**。
+
+### 2026-11-02 批次 D237 · request-budget 探针扩盲区（P2-3）：提取直连路径计数 + CPU 计时
+
+**动机**：《卡死风险报告》P2-3 / 探针头注释自认盲区 —— 探针只覆盖检测阶段，
+提取（extract）阶段与各阶段 CPU 消耗没有数字。本仓纪律「先量再改」：盲区里的
+优化直觉（如「提取阶段回显列定位重复」）无法立项也无法证伪。
+
+**交付**（`e2e/perf/request-budget.probe.mjs`，探针保持手动、不进门禁三向接线）：
+
+- 新增**提取阶段直连路径**段：`guessColumns` / `extractProof(boolean)` /
+  `extractInlineProof` / `enumerateDatabases` 四条代表路径——全部经 `Extractor._send`
+  收敛到 `ctx.httpClient`（与检测阶段同一收敛点），同款 stub 离线计数。
+  响应恒为安全页 = 「目标无任何回显」的**最坏提取场景**；`blindMaxLen` 压到 16
+  （默认 4096）防安全页下二分走满长循环。
+- 每检测器 / 每提取路径附带 **CPU 时间**（`process.cpuUsage` 差值，用户+系统 ms）。
+- 头注释与「未采样通道」清单同步：**明示**仍不采样的三样——time/stacked/oob 慢通道、
+  完整拖库链 `extractScope.extractAll`（需伪造 ScanManager，保真度存疑不硬凑）、
+  WAF 自适应重跑（需真靶场）。README 性能节同步。
+
+**首跑数字**（最小配置 + 安全点）：提取直连四路径合计 **35 请求**
+（guessColumns 9 / extractProof 16 / extractInline 1 / enumDatabases 9），
+无失控循环、无错误；检测段合计 96 请求不变（D237 未动检测路径）。CPU 维度在
+level 1 + 小 body 下基本 <1ms（boolean 15ms 为最高）——相对比较需更大 level 才有意义。
+
+**验证**：`npm run perf:budget` 实跑两轮数字一致；`gate:close` **41/41**。
+
+### 2026-11-02 批次 D233 · 待复核 claim 对账（§3.5 每批 1 条）：WAF 指纹口径修正
+
+**动机**：AGENTS.md §3.5 第 5 条要求「不可机器化的进待复核队列，**每批 D 批次至少复核 1 条**」。
+D230–D232 三批都在做优化，一条没复核 —— 本批补上。台账里当前唯一的非终态条目是
+`waf-fingerprint-coverage`（`unverified`，「62 个 WAF 指纹识别」）。
+
+**复核发现（口径错误，不是能力错误）**：
+
+- evidence 原文写「**62 条 matcher** 在 core/waf/wafRules.js」，运行期实测是
+  **62 家厂商 / 156 条 matcher**（`Object.keys(WAF_RULES).length === 62`，matchers 合计 156）。
+  旧表述把**厂商数**当成了 **matcher 数** —— 对外引用时会把「62 家」说成「62 条规则」，量级差 2.5 倍。
+  「62 个指纹」这个 headline 本身**准确**（指纹 = 厂商家数），错的只是 evidence 里的单位。
+- 对拍判据复跑：`wafExternalParity.guard` + `wafSecondSourceParity.guard` + `waf_rules_v2/v3`
+  **20/20 绿**（wafw00f 18 家 × 36 样本 100%、WhatWaf 27 + nuclei 1 对拍 100% 仍成立）。
+- 真机样本仍只有 ModSecurity **1 例**（`e2e/waf-real/modsec-live.mjs` 需容器）；
+  本机 Docker 引擎当前返回 500（`docker ps` 失败），**无法新增真机样本** ⇒ 维持 `unverified`。
+
+**交付**：`docs/_claims-ledger.json` 修正 evidence 单位 + `recheck_batch` 追加 D233 复核记录
+（含「Docker 不可用导致补证受阻」这个环境事实，避免下一轮误以为没人试过）。
+质量台账无变化（status 分布仍 20 verified / 7 refuted / 1 unverified）。
+
+**同批核查 P2-2（前端请求取消）：不做，关键路径已有防护**
+
+报告说「普通 HTTP 请求路由切换后悬挂堆积」。逐个查了三个有真实风险的入口：
+
+| 位置 | 现有防护 | 缺口 |
+|---|---|---|
+| `useServerHistory`（历史列表） | `alive` 守卫，卸载后不 setState（含 StrictMode 双跑） | 请求本身不取消（单次几十 KB GET） |
+| `useScan.loadReport` | `latestReportRequestId !== scanId` 丢弃过期响应 | 同上 |
+| `useEvents.reconcile`（断线对账） | `reconciling` 并发闸 + `cur.scanId !== scanId` 二次校验 | 同上 |
+
+**正确性问题（旧响应覆盖新数据）三处都已防住**，剩下的是「请求不取消」这一纯带宽浪费；
+统一注入 `AbortSignal` 要动 41 个调用点，收益不抵改动面 —— 不做。
+
+### 2026-11-02 批次 D232 · ReDoS 审计（1047 条正则 / 0 条灾难性回溯）+ 收口 37→39 项
+
+**动机**：《卡死风险报告》P2-4 —— 检测器正则**跑在目标可控的响应体上**（上限 10MB）。
+一条 `(a+)+` 形态就能让扫描器被目标拖死：攻击者不用打穿任何东西，只要让它别动。
+这不是性能问题，是 DoS 面，且这项审计一直挂着没做。
+
+**交付**：
+
+- **`scripts/redos-audit.mjs`**（两段判据，缺一不可）：
+  ① **静态**：用 espree 解析 AST 精确取正则（不靠文本匹配源码，避开注释与除法误抓），
+  按「组内量词+组外量词 / 交替+量词 / 相邻重叠量词 / 双 `.*`」打分，只做**排序**；
+  ② **动态**：对候选喂病态串（`a`×N+破坏后缀 / `1`×N+`x` / 空格×N+`#`，N∈{24,26,32}），
+  在 **worker 线程**里跑、250ms 未返回即 `terminate` 判危险 —— 真挂住时审计自身不陪葬。
+  `--selftest` 用 `(a+)+$` 与 `^[a-z]+$` 验证判据有区分度（危险必判出、安全不得误报）。
+- **接入收口**：`gate:close` **37 → 39 项**（redos + redos:selftest），ci.yml 与 ci-local.mjs
+  各补两行（三向接线判据 `gateListWiring.guard.test.js` 4/4 绿），AGENTS.md 项数表述同步。
+  默认不落盘（门禁每次收口都跑，写文件会让工作区无故变脏），存档要显式 `--out=`。
+
+**结果**：扫描 **446 文件 / 1047 条正则**，静态候选 12 条，动态探测**全部 <1ms**，
+未发现可利用的灾难性回溯。12 条逐条判定见 `docs/ReDoS-审计-2026-11-02.md`：
+4 条启发式误判（字面括号被当成组、固定词交替）、3 条有 `{1,80}` 上界、3 条互斥分支的
+quoted-string 形态、1 条有 `^$` 锚点、1 条线性大交替。
+
+**诚实边界**（报告里单列一节）：动态只覆盖 3 种通用病态串，**不能**证明「任意输入安全」；
+需要特定前缀才进入回溯区的正则靠人工复核（有限上界）而非动态结论；
+`--param-exclude` 的用户正则未纳入（作用于参数名而非响应体）。
+
+**同批核对 P1 剩余项（结论：均为理论风险，不做）**：
+
+| 项 | 实测 | 判定 |
+|---|---|---|
+| P1-2 liveCookies 每请求 `statSync` | **6.7µs/次**（1000 请求累计 7ms，分散在多次请求间） | 可忽略 |
+| P1-5 导出全内存拼接 | 24MB 拖库表 `join` **43ms**（一次性、用户主动触发） | 可接受 |
+| P1-1 剩余（authAudit / findingTriage / sideEffectLedger） | 本机 `auth.jsonl` 不存在；后两者按 scanId 分文件、KB 级 | 无真实数据支撑，不做 |
+
+### 2026-11-02 批次 D231 · 台账列表尾部块读（5.8MB 索引 30~40ms → 1.7ms）+ 死循环防御
+
+**动机**：《卡死风险报告》P1-1 指出治理/审计路径同步全量 IO。先量再改：本机真实台账
+`server/data/ledger/index.jsonl` **5.8MB / 15605 行**，`GET /api/scans` 每次请求都走
+`listScans(limit)`，旧实现把整个索引 `readFileSync` → `split` → 逐行 `JSON.parse` 之后
+才 `slice(-limit)` —— 实测**同步阻塞 30~40ms**，而调用方只要最后几十~几百条。
+
+**先量再改的副产品（推翻报告的量级估算）**：同批核了 P1-3（`getReport` 深拷贝）与
+P1-4（终态 SSE 携带全量报告）—— 报告称「报告大（几千命中）时几十 ms」，但真实台账
+15605 份报告的体量是 **P50=9KB / P90=22KB / P99=32KB / 最大 82KB**，深拷贝与序列化都是
+微秒级。**这两项据此降级为理论风险，不做改动**（改 SSE 协议要动前端与断线对账，收益不抵风险）。
+
+**交付**（`services/scanLedger.js`）：
+
+- **尾部块读**：从文件末尾按 1MB 块 `readSync`，反向逐行解析，凑够 `limit` 条即停；
+  块不够按 4× 扩容，最坏退化为全量读。本机实测 `listScans(50)` **30~40ms → 1.7ms**、
+  `listScans(500)` → 2.3ms。
+- **UTF-8 截断处理**：块边界可能切断多字节字符，截断片段的**首行一律丢弃**并标记 `atHead`，
+  避免半边汉字被 `toString` 成替换字符后误当登记。
+- **旧语义原样保留**：`limit <= 0` 走原实现（`slice(-0) === slice(0)` ⇒ 全量、负数 ⇒ 从第
+  `|limit|` 条起），不做"顺手修正"——那是调用方可见的行为变更。
+
+**验证**：新守卫 `tests/scanLedger.listTail.guard.test.js`（14 用例）——以 D231 前的实现为
+oracle，覆盖空行/坏 JSON/`null`/`0`/`false`/CRLF/末尾无换行/`limit=0`/负 limit/
+15605 行规模化/2MB 长行扩容/中文跨块边界，逐条 `deepEqual`。
+缺陷注入 4 处：丢弃 falsy 行改错红 2/14、边界多取一条红 6/14、遇空行提前终止红 9/14、
+`TAIL_GROW` 配成 1 时 14/14 绿且**不卡死**（防御生效）。
+
+**★ 注入抓到的真缺陷（本批第二收获）**：初版扩容循环是 `chunk *= TAIL_GROW;` 裸自增 ——
+把倍率改成 1 时**原地空转死循环**，测试进程被 SIGTERM 杀掉才暴露。已补
+`if (!(next > chunk)) return fullScanRows(...)` 退化分支：块不再增长时退化为全量读，
+绝不在原地打转。这类"配置错一个数就卡死"的形态正是本仓最忌讳的卡死类缺陷，
+保留注入 5 作为该防御的回归证据。
+
+### 2026-11-02 批次 D230 · P0-1 攻坚：三条候选修法实测淘汰两条，落等价短路（回显归一化 6.9×）
+
+**动机**：《卡死风险报告》P0-1 是交付后唯一留存 P0 —— 检测热路径无长度闸，
+`ERROR_SIG` 直接 match 10MB 响应体；报告给的修法是「截断 ~512KB + 边界扩展回读」。
+本批先量再改，**实测把报告的建议连同我自己的方案一起否掉了**（推翻链见下）。
+
+**实测淘汰（数字均为本机 10MB×N 次均值，可复跑：`npm run perf:echostrip`）**：
+
+| 候选修法 | 实测 | 判定 |
+|---|---|---|
+| 全量 `match(ERROR_SIG)` @10MB | 35.1ms/次（基线） | — |
+| 截断 512KB 窗口 | 1.86ms（**18.9×**） | **否决**：漏掉落在尾段的报错 = 静默假阴性，正是 D225 刚抓过的形态 |
+| 分块扫描 + 命中即停（我提的） | 多次采样无一致收益，命中末尾档 **1.31×（更慢）** | **否决**：V8 正则本就线性扫全文，切片只增加分配 |
+| 39 条字面量预筛（`toLowerCase`+`includes`） | **142ms（负收益 0.2×）** | 否决：多趟 10MB 扫描比单次大正则更贵 |
+| 单条粗筛正则 → 命中才全量 | 无命中 27.2ms（**2.1×**）、命中@5MB 42.1ms（0.7×） | 否决理由是**正确性**不是性能：粗筛必须覆盖 `ERROR_SIG` 全部 45 个分支的必要子串（示例清单已漏 `isc_`），漏一个即静默假阴性；且真实 HTML 的 `error`/`table`/`Access` 命中率高，会退化成两遍扫描 |
+
+**交付（两处逐码元等价短路，`engine/echoStrip.js`）**：
+
+- **`stripLongestPrefix` 早退**：最短前缀（16 字）都不在 ⇒ 任何更长前缀（都以它开头）
+  必然不在，无需逐长度连扫 ~20 遍全文。无回显是真实扫描的绝大多数请求。
+  10MB 实测 **20.5ms → 0.5ms（38.7×）**。
+- **`normalizeEcho` 两段判据短路**：无 `&` ⇒ 7 次实体 replace 全恒等；无 `%XX` 且无 `+`
+  ⇒ `decodeURIComponent` 恒等返回且不抛错。单函数 10MB 实测 29.0ms → 3.9ms（7.5×）。
+  ⚠️ `+` **不能提前替换**：`decodeURIComponent` 遇非法序列抛错时会保留含 `+` 的原串，
+  提前替换会改掉异常路径（`a+b%E4` 实测）—— 判据取「两者都恒等」的安全区。
+- 整链 `stripEchoedPayload` @10MB：JSON 响应（无实体/无编码）**38.0 → 5.5ms（6.9×）**、
+  单行 JSON 32.0 → 4.7ms（6.9×）；含 `&amp;` 的 HTML 页 112.2 → 104.3ms（1.1×，
+  实体替换本身是实功，不该省——**收益取决于响应形态，不是普适加速**）。
+- **回退一条**：变体循环的 `t.includes(v)` 预判实测 3.09 → 2.79ms（噪声级，split/join 在
+  无命中时已被 V8 快路径吃掉），不为玩具数字加复杂度，已还原。
+
+**验证**：新增 `tests/echoStrip.shortCircuit.guard.test.js`（10 用例）——以 D230 **之前**的
+实现为 oracle，边界语料 30 条 ×8 payload + 400 组确定性随机语料 + 截断回显逐档 + 1MB body，
+共 **8322 组逐码元比对 0 差异**；判据真值表钉死 `%` 非转义（`50%`）/非法序列（`%E4`）/
+`%%20` 等边界。缺陷注入复验：`needsUrlDecode→false` 红 7/10、`needsHtmlEntityDecode→false`
+红 5/10（`REAL_EXIT=1`）。echoStrip 全套 45/45；服务端全量单测 0 fail；gate:close 全绿。
+
+**推翻链（按 §3.5 记录，旧结论保留）**：
+
+- 原结论：「P0-1 应做 512KB 截断 + 边界回读」（《卡死风险报告-2026-11-01》P0-1 建议）
+  → 反证：截断会漏尾段报错，与 D225「静默假阴性」同形；分块早停实测无收益甚至更慢
+  → 新结论：**匹配本身不可省（保语义），可省的只有「恒等变换」**——真正热点是
+  `stripEchoedPayload` 里的空转扫描，不是 ERROR_SIG 本身。P0-1 的「长度闸」需求
+  据此**降级**：剩余成本（35ms/10MB）是「不漏检」的必要代价，不再作为待修项。
+
+### 2026-11-01 批次 D229 · 交付闸收口：P0-3 卡顿修复（haystack 先截后拼）+ ai-gateway 断言去模型依赖
+
+**动机**：交付前全量验收首轮（27 套件全断言）实测 2 FAIL：① `fetchUsing` 时间通道 ——
+并发满载时序扰动（CHANGELOG:1112 同类案底，单跑 11/11 复绿）；② `ai-gateway` 套件 ——
+脱敏断言查的是正文是否回显 `<目标Host>//***` 占位符，而 0.5B 模型输出非确定（首轮回显、
+本轮未回显）⇒ 断言口径错在套件侧，不在链路。另：《卡死风险报告》P0 三条中的 P0-3
+（haystack 先拼后截）应修，P0-2 需降级修正。
+
+**交付**：
+
+- **P0-3 落地**：`blockSignatures.js` buildHaystack 先截后拼 —— 等价变换（slice 前缀语义，
+  五档 body + head≥CAP 边界逐码元基准比对 OK）；10MB body 实测 **145.9ms/40 → 19.0ms/40（7.7×）**，
+  布尔判据热路径（matchMetrics:233 每对 ×2）不再物化多 MB 临时串，长扫描 GC 抖动源消除。
+  新增 4 项行为钉（窗口内命中 / 窗口外口径不变 / 大页不误报 / 白名单头仍匹配）。
+- **ai-gateway 断言修正**：脱敏证据从「正文回显占位符」（模型非确定）改为「头部策略行」
+  （meta.masked，确定性）；默认超时 300s→420s（全量负载下 0.5B CPU 推理余量）。
+- **P0-2 降级修正**：requestTransform/responseTransform 的同步 sha256 发生在脚本**加载时**
+  （每扫描一次，非每请求）——《卡死风险报告》的「请求路径」表述系调查子代理误标，
+  降级为非问题；真实性能遗留仅 P0-1（匹配长度闸，需靶场回归证据，留 D230 专项）。
+
+**验证**：bench 等价五档+边界 OK；`waf.blockSignature` 23/23；`ai-gateway` 单跑判据通过（11.5s）；
+干净档全量验收 **27 PASS / 0 FAIL / 0 SKIP（27/27 全断言）**（见 e2e/results/acceptance-report.md）；
+gate:close 37/37。
+
+### 2026-11-01 批次 D228 · AI 报告网关端到端验收（ai-gateway 套件）+ 本地网关 runbook + CI 靶场硬要求扩展
+
+**动机**：同日测试审计（《测试审计与外部靶场能力-2026-11-01.md》）列出四个缺口：
+① CI 靶场保障弱于本机（D227 只硬起了 juice）；② AI_REPORT 三角色流水线只有 stub 单测，
+「本地网关 × 真报告」全链路无验收；③ 本地网关运维手册缺失；④ `--ai-report` 默认落点
+`ai-report/` 未进 .gitignore。本批全部收口。
+
+**交付**：
+
+- **新验收套件 `ai-gateway`（26 → 27）**：`e2e/ai-gateway-lab/run.mjs` 用**真实 HTTP 网关**
+  跑完 ReportAI 全流水线（探活 → analyst→writer→reviewer → 脱敏 → 审阅标记 → 落盘），
+  断言链路事实：网关实调回声（model 链）/ 元数据头 4/4 / 数据脱敏 on / 落盘字节 >0 / 审阅 ✅。
+  网关/模型未就绪 → `[SKIP]` + exit 0（未就绪不是失败，写明原因，不得冒充通过）；
+  断言**不判报告文风质量**（0.5B 级链路验证模型输出极短是模型上限，不是链路故障）。
+  注入面：`AI_GATEWAY_URL/KEY/MODEL`（默认 Ollama 11434 + qwen2.5:0.5b）。
+- **CI 硬要求扩展（D227 续）**：`ci.yml` 新增 VAmPI 双实例 docker 硬起
+  （erev0s/vampi，vuln 5000 / safe 5001，`/createdb` 种子探测 120s），acceptance 消费
+  `--require-labs=juice,vampi-vuln,vampi-safe`（多值判据 D148 已有）。⚠️ CI 段无法本地实证，
+  首跑盯红；dvwa（镜像内含 MySQL 启动链）/ benchmark（Java 构建链）的 CI 化遗留——
+  不盲猜镜像与构建链，留待专项批次。
+- **docs/AI-网关-runbook.md**：两种本地网关形态（Ollama / dsh 型自建代理）、env 矩阵
+  （含 MODEL_1/2/3 覆盖与 AI_REPORT_MASK=0 的本机语义）、模型分档（链路验证 0.5B vs
+  生产 ≥7B）、`--ai-report` 用法与产物解读、验收套件用法、运维坑（ollama sha256 校验挂死
+  → 杀客户端重试；结果缓存指纹对链路测试的影响）。
+- **卫生**：`.gitignore` 加 `ai-report/`；README/AGENTS 验收套件数 26 → 27；
+  README 接口靶场节挂 runbook 链接。
+
+**验证**：`acceptance --only=ai-gateway` 本机实跑 **PASS**（网关实调 qwen2.5:0.5b×3 链回声、
+元数据 4/4、脱敏 on、落盘 6883B）；SKIP 路径（AI_GATEWAY_URL=死端口）→ `[SKIP]` exit 0；
+`--require-labs=juice,vampi-vuln,vampi-safe` 多值判据本地实跑通过（八靶场在线体检 ✅）、
+未知 id 拒绝路径验证；门禁全绿记录见收口清单实跑（readme:check / facts:check / refs:check /
+changelog:index / lint / gate:close 37 项）。
 
 ## [1.3.1] - 2026-11-01
 

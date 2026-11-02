@@ -5,15 +5,28 @@
 （`expectedresults-1.2.csv`），因此可以做「同族 A/B」——同一种写法、同一个注入面，
 官方说可注入的必须检出，官方说安全的必须零误报。
 
-## ⚠️ 当前状态：已知漏检缺口（参考靶场，不接门禁）
+## ✅ 当前状态：已接验收门禁（D114 的漏检缺口已由 D115–D117 修复）
 
-2026-10-20 实跑本机 20/504 子集：**真值 4/12（query 3/10、header 1/2）、安全对照 0/8、
-证据不足 0**。header 首跑曾因 lab 全局 `level=2` 且未开 `testHeaders`，`headerParams`
-没有生成注入点（0 请求，报「没有匹配到任何注入点」）——已在 `run.mjs` 显式补
-`testHeaders: true`，重跑 header 1/2。query 仍有 7 例真值漏检，待逐例归因。
+**最近一轮门禁证据**（`e2e/results/acceptance-report.md`，2026-11-01 全量验收 27/27 全 PASS）：
 
-按 DVGA 同口径登记为 `e2e/reference-labs.json` 的参考/缺口靶场，**不接
-acceptance/run-all**；缺口修复后再转门禁。证据见 `results/benchmark-2026-10-20.md`。
+| 口径 | 结果 |
+|---|---|
+| `cases.json` 74 条基线（20 条回归基线 ∪ 全部 57 条参数名形态） | **真值 43/43 检出（漏检 0）、安全对照 0/24 误报**、证据不足 0、形态覆盖 header + 参数名（50 条）、`{call}` 安全侧 0/3 |
+| 全量三份清单 178 条（D115→D117） | **178/178 真值、0/149 安全**（见 `e2e/results/external-judge-sweep-2026-10-21.md`） |
+
+入口：`npm run acceptance -- --only=benchmark`（`e2e/acceptance.mjs` 的 `benchmark` 套件）。
+**不在 `e2e/reference-labs.json` 的 referenceOnly 名单里**，即它是门禁靶场，不是参考靶场。
+
+> ⚠️ **历史快照（已作废，勿引用）**：2026-10-20 实跑 20/504 子集时真值只有 **4/12**
+> （query 3/10、header 1/2）、安全 0/8。那是 D114 立案时的状态：
+> header 侧根因是 lab 全局 `level=2` 且未开 `testHeaders`（`headerParams` 未生成注入点，
+> 0 请求），query 侧 7 例里 **3 条是官方「参数名注入」变体**（`param = name`，
+> 服务端要求值 === 类名才取参数名）——按普通 query 参数发时 param 恒为空，注入根本没进查询。
+> D115 改用 `testParamNames` + `?<payload>=<类名>` 后 12/12 全检出，D117 扩到 178 条全量亦全绿。
+>
+> **本文档原先据此把本靶场写成「参考靶场、不接门禁」，与实际相反**（`acceptance.mjs`
+> 早就接了它、`referenceOnly` 名单里也从未有它）。D234（2026-11-02）核对纠正：
+> 一句话——**4/12 是「没测成」不是「检不出」**，与 DVGA 的 GraphQL 缺口是两类问题。
 
 ## 为什么需要第四号
 

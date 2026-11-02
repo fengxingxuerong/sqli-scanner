@@ -231,11 +231,7 @@ export function buildTools(ctx) {
         if (!report) return text({ error: `找不到扫描 ${scanId}` }, { isError: true });
         let out = ctx.scanManager.exportReport(String(scanId), fmt, report);
         if (out == null) out = JSON.stringify(report);
-        out = String(out);
-        if (out.length > 200000) {
-          out = out.slice(0, 200000) + `\n…[截断，完整内容共 ${out.length} 字符，请用更小的 format 或分节读取]`;
-        }
-        return { content: [{ type: 'text', text: out }] };
+        return { content: [{ type: 'text', text: slimReportText(out, fmt) }] };
       },
     },
     {
@@ -360,14 +356,37 @@ export function buildTools(ctx) {
 }
 
 /**
+ * [D235] get_report 的文本出口：format=json 时在 MCP 层 minify —— exportReport 的 json 路径
+ * （ReportGenerator.toJSON）是 pretty，那是 REST 下载面的人工可读语义；MCP 消费方是代理，
+ * token 按字符计费。minify 先于截断执行，同一 20 万字符窗口装更多有效内容。
+ * 非 JSON 串（自定义 exportReport 兜底等）保持原样，不做二次解释。
+ * @param {unknown} out exportReport 返回的字符串（或 null 兜底后的 JSON 串）
+ * @param {string} fmt get_report 的 format 参数
+ * @returns {string} 可直接放进 text content 的文本（json=minify 单行；其余原样 + 截断帽）
+ */
+function slimReportText(out, fmt) {
+  let s = String(out);
+  if (fmt === 'json') {
+    try { s = JSON.stringify(JSON.parse(s)); } catch { /* 非 JSON 串保持原样 */ }
+  }
+  if (s.length > 200000) {
+    s = s.slice(0, 200000) + `\n…[截断，完整内容共 ${s.length} 字符，请用更小的 format 或分节读取]`;
+  }
+  return s;
+}
+
+/**
  * 工具结果包装：JSON 序列化为唯一 text content（isError 语义见 protocol.js 注释）。
+ * [D235] 用 minify 而非 pretty：MCP 的消费方是 AI 代理（JSON.parse 后按语义读取），
+ * token 按字符计费 —— 缩进与换行是纯开销。NDJSON 分帧只依赖信封层转义（protocol.js json()），
+ * 内容层格式无关；需要人类可读输出的场合走 get_report 的 markdown/html format。
  * @param {unknown} obj
  * @param {{isError?: boolean}} [opts]
  * @returns {{content: Array<{type: string, text: string}>, isError?: boolean}}
  */
 function text(obj, { isError } = {}) {
   /** @type {{content: Array<{type: string, text: string}>, isError?: boolean}} */
-  const result = { content: [{ type: 'text', text: JSON.stringify(obj, null, 2) }] };
+  const result = { content: [{ type: 'text', text: JSON.stringify(obj) }] };
   if (isError) result.isError = true;
   return result;
 }

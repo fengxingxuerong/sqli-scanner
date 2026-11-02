@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { ENGINE_VERSION, VERSION_SOURCE } from '../core/version.js';
 import { isAuthEnabled } from '../core/apiAuthState.js';
+import { getEventLoopStats } from '../core/eventLoopWatch.js';
 import { defaults } from '../config/defaults.js';
 // [P1-1 收口 2026-09-29] 利用能力开关的判据必须**唯一**：本文件曾自己写
 // `process.env.EXPLOIT_ENABLED === '1' || === 'true'`，而 `bin/cli.js` 写 `!== '1'`
@@ -34,6 +35,10 @@ healthRoutes.get('/health', (req, res) => {
       // 出站策略态：strict=基础层+严格层全开；relaxed=SSRF_ALLOW_PRIVATE 或 allowCidrs 非空。
       // cloudMetadataBlocked 恒 true（云元数据属基础层，不可被任何配置豁免）。
       egressPolicy: getEgressPolicy(),
+      // [D236] 事件循环滞后观测（最近一个采样窗口的 p99/max/采样数，毫秒）：超阈值时
+      // 服务端已有节流 warn 日志，这里是同源指标——运维不用翻日志就能看到卡顿水位。
+      // CLI/MCP 未启动观测时全零（形状恒定）。仍属「布尔/计数」字段口径。
+      eventLoop: getEventLoopStats(),
     },
     message: 'ok',
   });

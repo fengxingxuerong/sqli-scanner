@@ -10,7 +10,11 @@
 // 追加写 meta.jsonl（全局索引行），供 `ledger list` / `ledger show <id>` 检索。
 // 目录默认 <repo>/data/ledger，可用 env SQLI_LEDGER_DIR 覆盖。
 // ============================================================================
-import { mkdirSync, writeFileSync, appendFileSync, existsSync, readFileSync, readdirSync, rmSync, renameSync } from 'node:fs';
+import {
+  mkdirSync, writeFileSync, appendFileSync, existsSync, readFileSync, readdirSync, rmSync, renameSync,
+  // [D231] 尾部块读：只取索引末尾几 KB~MB，不必把整个索引读进内存
+  openSync, fstatSync, readSync, closeSync,
+} from 'node:fs';
 import { join, dirname, resolve as pathResolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { AppError, ErrorCode } from '../core/errors.js';
@@ -115,16 +119,99 @@ export function recordScan(report, docs = {}, opts = {}) {
   return { dir, scanId, files, pruned };
 }
 
-/** 台账检索：列出全部登记（取最新的 limit 条，新→旧） */
-export function listScans(limit = 50) {
-  const idx = join(ledgerDir(), 'index.jsonl');
-  if (!existsSync(idx)) return [];
+/** [D231] 尾部块读的初始字节数（约 2700 行台账；不够时按 TAIL_GROW 倍扩） */
+const TAIL_CHUNK_BYTES = 1024 * 1024;
+/** [D231] 尾块不够 limit 条时的扩容倍率 */
+const TAIL_GROW = 4;
+
+/**
+ * [D231] 读文件末尾至多 maxBytes 字节。
+ * `atHead` 为真表示已读到文件头（首行完整）；否则首行被字节边界截断，调用方必须丢弃它
+ * （UTF-8 多字节被切断时 `toString('utf8')` 会得到替换字符）。
+ * @param {string} file
+ * @param {number} maxBytes
+ * @returns {{text: string, atHead: boolean}}
+ */
+function readTailChunk(file, maxBytes) {
+  const fd = openSync(file, 'r');
+  try {
+    const size = fstatSync(fd).size;
+    const start = Math.max(0, size - maxBytes);
+    const len = size - start;
+    const buf = Buffer.allocUnsafe(len);
+    if (len > 0) readSync(fd, buf, 0, len, start);
+    return { text: buf.toString('utf8'), atHead: start === 0 };
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/**
+ * [D231] 从一段（可能被截头的）索引文本里反向取至多 limit 条有效登记。
+ * 与旧实现 `split('\n').filter(Boolean).map(parse).filter(Boolean).slice(-limit).reverse()`
+ * 同义：空行跳过、坏行跳过、falsy 行丢弃，结果按新→旧。
+ * @param {string} text
+ * @param {boolean} atHead 片段是否覆盖文件头
+ * @param {number} limit
+ * @returns {object[]}
+ */
+function parseTailRows(text, atHead, limit) {
+  const out = [];
+  let end = text.length;
+  while (end > 0 && out.length < limit) {
+    const nl = text.lastIndexOf('\n', end - 1);
+    const start = nl === -1 ? 0 : nl + 1;
+    const line = text.slice(start, end);
+    const isHeadLine = start === 0;
+    end = isHeadLine ? 0 : start - 1;
+    // 截断片段的首行可能缺前半截，不可信 ⇒ 丢弃并结束（不是"解析失败"，无法从本片段补）
+    if (isHeadLine && !atHead) break;
+    if (!line) continue;
+    try {
+      const row = JSON.parse(line);
+      if (row) out.push(row);
+    } catch { /* 坏行跳过，同旧实现的 catch → null → filter(Boolean) */ }
+  }
+  return out;
+}
+
+/**
+ * [D231] 全量解析路径：与 D231 之前的实现逐字等价（含 `slice(-limit)` 的反直觉语义）。
+ * 两个调用点：limit 非正（语义特殊）、尾块扩容异常（防御退化）。
+ * @param {string} idx 索引文件路径
+ * @param {number} limit
+ * @returns {object[]}
+ */
+function fullScanRows(idx, limit) {
   const rows = readFileSync(idx, 'utf-8')
     .split('\n')
     .filter(Boolean)
     .map((l) => { try { return JSON.parse(l); } catch { return null; } })
     .filter(Boolean);
   return rows.slice(-limit).reverse();
+}
+
+/** 台账检索：列出全部登记（取最新的 limit 条，新→旧） */
+export function listScans(limit = 50) {
+  const idx = join(ledgerDir(), 'index.jsonl');
+  if (!existsSync(idx)) return [];
+  // limit 非正时保持**旧路径**：`rows.slice(-limit)` 对 0/负数的语义反直觉
+  // （`slice(-0)` === `slice(0)` ⇒ 全量；`limit=-5` ⇒ 从第 5 条起），
+  // 这里不动它，避免悄悄改变调用方看到的结果。
+  if (!(Number(limit) > 0)) return fullScanRows(idx, limit);
+  // [D231] 只读尾部字节块：旧实现把整个索引（本机实测 5.8MB / 15605 行）读进来
+  // 再 split + 逐行 JSON.parse，每次历史列表 API 同步阻塞 30~40ms，且随台账线性恶化。
+  // 现按块从尾部读，凑够 limit 条即停；块不够就按 TAIL_GROW 扩容，最坏退化为全量读。
+  let chunk = TAIL_CHUNK_BYTES;
+  for (;;) {
+    const { text, atHead } = readTailChunk(idx, chunk);
+    const rows = parseTailRows(text, atHead, limit);
+    if (rows.length >= limit || atHead) return rows;
+    const next = chunk * TAIL_GROW;
+    // 防御：块不再增长（倍率配错 / 数值溢出）时退化全量读 —— 绝不在原地空转
+    if (!(next > chunk)) return fullScanRows(idx, limit);
+    chunk = next;
+  }
 }
 
 /**

@@ -23,8 +23,7 @@ node e2e/run-all.mjs --all                    # 强制全跑（缺依赖的会�
 | **MariaDB** | 需自备并监听 `3308` | `mariadb-verify.mjs` 用；**当前环境未装**，该项无法复现（见 `docs/archive/dbms-验证复核-2026-09-12.md`） |
 | **VAmPI 双实例（外部裁判 2 号）** | 见 `e2e/vampi-lab/README.md` | Python 3.9 venv + `pip install --only-binary=:all:`（greenlet 在本机无 SDK 编译不了）；`vulnerable=1 @5000` 与 `vulnerable=0 @5001` |
 | **DVWA（外部裁判 3 号）** | 见 `e2e/dvwa-lab/README.md` | PHP 8.3（`D:\tools\php83`，需 `mysqli`/`pdo_mysql`）+ MariaDB 10.11 @3306 + DVWA 源码；`php -S 127.0.0.1:8099`，四档难度靠 `security` cookie 切换 |
-| **OWASP Benchmark（外部裁判 4 号）** | 见 `e2e/benchmark-lab/README.md` | JDK 17（`D://tools//jdk//jdk-17.0.2`，需 javac）+ Maven 3.9；`mvn package -Pdeploy`（起 HSQLDB server + init db）→ `mvn cargo:run -Pdeploy`（**https/8443** 自签）；必须 `-Dspotless.apply.skip=true` |
-| **OWASP Benchmark（外部裁判 4 号 · 参考/已知缺口）** | 见 `e2e/benchmark-lab/README.md` | JDK 17 + Maven 3.9 + `BenchmarkJava`（cargo Tomcat，deploy profile 默认 HTTPS 8443 自签证书）；20/504 sqli 子集；当前真值 4/12、安全 0/8，修缺口前不接门禁 |
+| **OWASP Benchmark（外部裁判 4 号）** | 见 `e2e/benchmark-lab/README.md` | JDK 17（`D://tools//jdk//jdk-17.0.2`，需 javac）+ Maven 3.9；`mvn package -Pdeploy`（起 HSQLDB server + init db）→ `mvn cargo:run -Pdeploy`（**https/8443** 自签）；必须 `-Dspotless.apply.skip=true`。**已接 `acceptance --only=benchmark`**：74 条基线 43/43 + 0/24（D234 核对；D114 的 4/12 是「没测成」不是「检不出」） |
 | **DVGA（GraphQL 面参考靶场）** | 见 `e2e/dvga-lab/README.md` | Python 3.9/3.10 + DVGA（Flask/Graphene/SQLAlchemy）；D121 起真值点 `pastes(filter)` **1/1**、安全点 0 误报；仍为单端点参考证据，不接门禁 |
 
 ## 靶场清单
@@ -52,7 +51,6 @@ node e2e/run-all.mjs --all                    # 强制全跑（缺依赖的会�
 | `dvwa-lab` | **外部裁判 3 号**：DVWA（PHP + mysqli/PDO + MySQL/MariaDB）。补前两个裁判都没有的 **MySQL 方言**、**cookie 位置注入点**（官方 `$_COOKIE['id']`）与 **POST 表单伴随字段**；官方四档难度里的 `impossible`（PDO 参数化）即同路径 A/B 零误报对照 | `run.mjs`（env：`DVWA_BASE`，默认 8099） | 需 PHP + MariaDB + DVWA（见 `e2e/dvwa-lab/README.md`） |
 | `benchmark-lab` | **外部裁判 4 号**：OWASP Benchmark（Java + Spring + HSQLDB）。官方 `expectedresults-1.2.csv` 逐条标注真值；补前三个裁判都没有的 **HTTP header 注入面** 与**参数名注入**形态（504 个 sqli 用例取 20 个） | `run.mjs`（env：`BENCHMARK_BASE`，默认 `https://127.0.0.1:8443/benchmark`） | 需 JDK17 + Maven + Tomcat(cargo) + HSQLDB（见 `e2e/benchmark-lab/README.md`） |
 | `vampi-lab` | **外部裁判 2 号**：VAmPI（Flask + SQLAlchemy + SQLite）。补 Juice Shop 没有的**URL 路径段**注入形态；官方 `vulnerable` 开关起双实例（5000 拼接 / 5001 参数化）⇒ 零误报钉在**同路径同形态**上 | `run.mjs`（env：`VAMPI_VULN_BASE` / `VAMPI_SAFE_BASE`） | 需 VAmPI 双实例（见 `e2e/vampi-lab/README.md`） |
-| `benchmark-lab` | **外部裁判 4 号（参考/已知缺口）**：OWASP Benchmark（Java + HSQLDB）。官方 `expectedresults-1.2.csv` 逐条真值；子集 query 真值 10 + query 安全 8 + header 真值 2。**当前实跑真值 4/12、安全 0/8**（query 3/10、header 1/2）⇒ 按 DVGA 同口径登记为参考靶场，修缺口前不接门禁 | `run.mjs`（env：`BENCHMARK_BASE`，默认 HTTPS 8443） | JDK 17 + Maven 3.9 + BenchmarkJava（见 `e2e/benchmark-lab/README.md`） |
 | `dvga-lab` | **GraphQL 面外部裁判**：D121 起官方 `pastes(filter)` 真值点 **1/1**（union/error/boolean），`search(keyword)` 参数化点 0 误报；无 filter 的 resolver 作为 0 点结构对照。`search(keyword)` 的 JSON 回显误报已在 D114 修复 | `run.mjs`（env：`DVGA_BASE`，默认 5013） | Python 3.9/3.10 + DVGA（见 `e2e/dvga-lab/README.md`）；3 轮一致，仍为参考证据、不接门禁 |
 | `sqli-labs` | sqli-labs 靶场适配 | `sqli-labs-runner.mjs`（75 关黄金标准 runner，靶场由 `sqli-labs.py` 起） | 需 sqli-labs 环境 |
 

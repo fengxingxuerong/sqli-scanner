@@ -18,14 +18,8 @@ import { httpClient } from '../src/core/httpClient.js';
 // [P1-FIX 2026-09-05] --format 出口：原为死参数（解析后从未消费，-o 恒写 JSON）。
 // ReportGenerator 的 toCSV/toMarkdown/toHTML 与 REST /report/export 同源，直接复用。
 import { ReportGenerator } from '../src/services/ReportGenerator.js';
-// [D176] 修复提示词：把命中项渲染成「改哪 / 怎么改 / 改完怎么验」的指令（不自动改代码）
-import { renderFixPrompts } from '../src/services/fixPrompt.js';
-// [D205] AI 报告（--ai-report）：此前只有 REST /api/scan/:id/report/ai 有入口，
-// CLI 扫完只能拿 JSON，AI 报告得靠外部脚本喂 generateAiReport。
-import { writeAiReport } from '../src/services/aiReportCli.js';
 import { renderScanSummaryPanel, batchHitLines, batchNextLine, batchWriteHint, printBatchHitsAndNext, printBatchSummary, urlOfLogRequest } from './cli/summaryPanel.js';
-// [D177] 可复现件：重放 PoC 判定稳定性 + 生成 repro.sh/expect.json（一致 ≠ 漏洞仍存在）
-import { annotateRepro, writeReproPack } from '../src/services/reproCheck.js';
+import { readFileSync } from 'node:fs';
 import * as scanLedger from '../src/services/scanLedger.js';
 // [P1-1 收口 2026-09-29] 利用能力开关的**唯一判据**（与 REST 的 /exploit/*、
 // /exploit/capabilities、sqlmap 桥的 --os-shell 门控同源）。
@@ -36,8 +30,6 @@ import { parseScope, assertInScope, assertDirectDbInScope, registerScanScope, re
 import { printHelp, printVersion } from './cli/help.js';
 // [D197] --list-tampers 的渲染层（对标 sqlmap --list-tampers）：入口元信息查询，与 --version 同形态
 import { printTamperCatalog } from './cli/tamperCatalog.js';
-import { readFileSync, mkdirSync, writeFileSync, statSync } from 'node:fs';
-import { join, dirname, resolve as resolvePath } from 'node:path';
 import { parseXmlBody, xmlLeafPaths } from '../src/core/xmlBody.js';
 // [D24 2026-10-09 扩展生态] 自定义检测条目：validate（纯校验）+ merge（冲突拒绝）+ ALS 注入
 import { validateCustomEntries, mergeCustomEntries } from '../src/engine/payloads/customPayloads.js';
@@ -53,6 +45,8 @@ import {
   checkTor,
   unknownFlagError,
 } from './cli/args.js';
+// [D238] 报告输出函数族：测试从 bin/cli.js 导入的三个符号按 args re-export 同款先例保持路径不变
+export { formatReport, printExtractView, writeFixPromptsForReport } from './cli/reportOutput.js';
 import {
   buildInjectionTargets,
   buildConfig,
@@ -62,6 +56,8 @@ import {
   resolveBodyChannel,
   declaredContentType,
 } from './cli/config.js';
+// [D238] 报告输出/落盘函数族已抽至 cli/reportOutput.js（纯搬移，函数体逐字未动）
+import { formatReport, applyReproCheck, emitSingleScanOutput } from './cli/reportOutput.js';
 // [D101 2026-10-18] 注入点 × auth 同名夹击去重（与 REST sanitizeStart 共用同一实现）
 import { dropInjectionOverlapFromAuth } from '../src/core/authInjectionOverlap.js';
 // [D41 2026-10-11] 配置档案（对标 sqlmap -c/--save）：--config 预载 + --save-config 增量落盘
@@ -82,69 +78,6 @@ export {
 } from './cli/args.js';
 
 // --format 分发（json|csv|markdown|md|html|sarif|db-json）：单目标 -o 与批量目录导出共用。
-// [2026-10-12 优化空间勘查 §A3] 两处修：
-//   ① 补 db-json（仅拖库数据）——该格式 REST/UI 早有，CLI 与 MCP 的枚举却没有；
-//   ② **未知格式从"静默回退 JSON"改为抛错**。旧行为下 `--format db-json` 会写出一个
-//      名为 report.db-json 的普通 JSON —— "传了没生效"正是本仓红线（宁可拒绝启动，
-//      也不让"以为设了"变成实际没设；与 --config 未知键硬拒同一条政策）。
-//   格式集与 REST FORMAT_EXT / MCP get_report enum 同源对齐（parity 有守卫）。
-export function formatReport(report, fmt = 'json') {
-  const f = String(fmt || 'json').toLowerCase();
-  if (f === 'csv' || f === 'markdown' || f === 'md' || f === 'html') {
-    const rg = new ReportGenerator();
-    return f === 'csv' ? rg.toCSV(report)
-      : f === 'html' ? rg.toHTML(report)
-      : rg.toMarkdown(report);
-  }
-  if (f === 'sarif') {
-    // [批次 9 2026-09-15] SARIF 2.1.0：GitHub Security / DefectDojo 对接
-    return new ReportGenerator().toSARIF(report);
-  }
-  if (f === 'db-json') {
-    // 仅拖库数据（库/表/列/行）；单源在 ReportGenerator.toDBJSON（ScanManager 共用）
-    return new ReportGenerator().toDBJSON(report);
-  }
-  if (f === 'json') return JSON.stringify(report, null, 2);
-  throw new Error(
-    `--format 未知格式：${fmt}（仅支持 json|csv|markdown|md|html|sarif|db-json）\n` +
-    '  旧行为是静默回退 JSON —— 那会让"以为设了 db-json"实际拿到普通 JSON，故改为拒绝。'
-  );
-}
-
-// 极简参数解析（避免引入 commander 依赖）
-
-/**
- * [D177] 复现检查：重放每条 finding 的 PoC 两次 → 判「已复现 / 单次命中 / 不可重放」，
- * 写进 `vuln.repro` 与 `summary.repro`，并把 repro.sh + expect.json 落盘。
- * 重放走 httpClient（SSRF/scope 护栏照旧生效），失败只影响判定，不中断扫描。
- * @param {object} report 引擎报告（原地挂判定）
- * @param {object} args CLI 参数
- * @returns {Promise<void>}
- */
-async function applyReproCheck(report, args) {
-  const repeats = 2;
-  // PoC 是**渲染期惰性挂载**的（ReportGenerator.attachPoc 返回新对象）：不先挂上，
-  // 每条 finding 都会因为没有 poc.url 被判成 unreplayable（D177 首跑就是这样 0/3 的）。
-  const withPoc = new ReportGenerator().attachPoc(report);
-  const summary = await annotateRepro(withPoc, {
-    request: (o) => httpClient.request({ ...o, proxy: args.proxy || undefined, insecureTls: Boolean(args.insecureTls) }),
-    repeats,
-    timeoutMs: args.httpTimeoutMs || undefined,
-  });
-  // 判定写回原报告（attachPoc 是纯函数，不回写入参）
-  report.vulns = report.vulns || [];
-  report.vulns.forEach((v, i) => { if (withPoc.vulns?.[i]?.repro) v.repro = withPoc.vulns[i].repro; });
-  report.summary = report.summary || {};
-  report.summary.repro = summary;
-  const explicit = typeof args.reproCheck === 'string' && args.reproCheck.trim() ? args.reproCheck : null;
-  const dir = explicit ? resolvePath(explicit) : join(fixPromptBaseDir(args), 'repro');
-  const { count } = writeReproPack(withPoc, dir, { repeats, target: report?.target?.url });
-  console.error(
-    `复现检查：已复现 ${summary.reproduced}/${summary.checked}（单次命中 ${summary.singleHit}、不可重放 ${summary.unreplayable}）；` +
-      `脚本已写入 ${dir}（${count} 份；一致 ≠ 漏洞仍存在）`
-  );
-}
-
 /**
  * [D195] 扫描进度事件 → 控制台行。独立成函数：runSingleScanInner 圈复杂度基线内。
  * point_discovered 事件自带完整点位（param/location），存索引供 [检测]/[命中] 行渲染
@@ -175,131 +108,6 @@ function makeScanProgressLogger() {
 // [D195] 人读结果面板拆至 cli/summaryPanel.js（pre-commit 体积门禁）；re-export 供测试
 export { renderScanSummaryPanel, batchHitLines, batchNextLine, batchWriteHint, printBatchHitsAndNext };
 
-/**
- * [D176] 单目标报告落盘（`--out`）：目录语义 / 单文件语义 / 台账快照。
- * 与 `emitSingleScanOutput` 拆开是为了守住函数级复杂度软上限（18 > 15 的教训）。
- * @param {object} report 引擎报告
- * @param {object} args CLI 参数
- * @returns {string} 实际使用的格式
- */
-function writeSingleReportFiles(report, args) {
-  // [P1-FIX 2026-09-05] 按 --format 分发导出（json|csv|markdown|html），与 REST /report/export 同源
-  const fmt = String(args.format || 'json').toLowerCase();
-  // [goal 批次 A-3] -o 目录语义：路径是已存在目录或以分隔符结尾 → 写 report.<ext> 组
-  //（sqlmap 风格），否则保持单文件兼容。交付默认 --format html 时同时落 md 便于交接。
-  const outIsDir = (() => { try { return statSync(args.out).isDirectory(); } catch { return /[\\/]$/.test(args.out); } })();
-  if (outIsDir) {
-    mkdirSync(args.out, { recursive: true });
-    const ext = fmt === 'markdown' || fmt === 'md' ? 'md' : fmt === 'db-json' ? 'db.json' : fmt;
-    writeFileSync(join(args.out, `report.${ext}`), formatReport(report, fmt), 'utf-8');
-    if (fmt === 'html') writeFileSync(join(args.out, 'report.md'), formatReport(report, 'markdown'), 'utf-8');
-    if (fmt === 'markdown' || fmt === 'md') writeFileSync(join(args.out, 'report.html'), formatReport(report, 'html'), 'utf-8');
-  } else {
-    writeFileSync(args.out, formatReport(report, fmt), 'utf-8');
-  }
-  // [goal 批次 A-2] 扫描台账：单 URL 模式自动登记可追溯快照（meta/report/poc）
-  // [FIX 2026-09-18] 同批量模式：必须传 attachPoc 的导出形态，否则 poc/ 恒为空
-  // （_attachPoc 不可变返回新对象，原始 report 上永远没有 v.poc）。
-  try {
-    const rgLedger = new ReportGenerator();
-    scanLedger.recordScan(rgLedger.attachPoc(report), {
-      html: rgLedger.toHTML(report),
-      markdown: rgLedger.toMarkdown(report),
-    });
-  } catch (e) { console.error(`台账登记失败: ${e.message}`); }
-  return fmt;
-}
-
-/**
- * [D205] 两个 opt-in 产物出口（`--fix-prompt` / `--ai-report`）。
- * 从 `emitSingleScanOutput` 抽出：那里每多一个 if 都算进函数级复杂度门禁，而这两个出口
- * 都是「扫描完成后才跑、失败不影响扫描结论」的同构逻辑，放在一起更清楚。
- * @param {object} report 引擎报告
- * @param {object} args CLI 参数
- * @returns {Promise<void>} 两个出口都跑完（或按未启用跳过）后 resolve
- */
-async function writeOptInArtifacts(report, args) {
-  // [D176] 修复提示词：命中项 → 改哪/怎么改/改完怎么验。刻意不自动改代码。
-  if (args.fixPrompt) {
-    const { dir, count } = writeFixPromptsForReport(report, args);
-    console.error(`修复提示词已写入 ${dir}（${count} 条；改完按其中命令复测，期望 0 命中）`);
-  }
-  // [D205] AI 报告：LLM 三模型流水线。失败只判「执行失败」（exitCode=1），
-  // **不改**扫描结论与风险等级——AI 不可用不等于没洞，也不等于有洞。
-  if (args.aiReport) {
-    process.stderr.write('AI 报告：调用网关三模型流水线（analyst→writer→reviewer），通常需 1-3 分钟…\n');
-    const r = await writeAiReport(report, args);
-    if (r.ok) {
-      process.stderr.write(`AI 报告已写入 ${r.file}（${r.model}，${Math.round((r.elapsedMs || 0) / 1000)}s，${r.bytes}B）\n`);
-    } else {
-      process.stderr.write(`AI 报告失败：${r.error}\n`);
-      process.exitCode = 1;
-    }
-  }
-}
-
-/**
- * [D176] 单目标模式的产物落地：报告（`--out` / 枚举视图 / stdout JSON）+ opt-in 产物。
- * 从 `main` 抽出（函数级复杂度门禁盯 main：每加一个出口分支都算增长）。
- * [D205] 改为 async：`--ai-report` 要等 LLM 流水线返回；main 里只多一个 `await ` 前缀，不新增行。
- * @param {object} report 引擎报告
- * @param {object} args CLI 参数
- * @param {{enumActive?: boolean, exploitMode?: boolean}} flags 编排层状态
- * @returns {Promise<void>} 产物写完后 resolve
- */
-async function emitSingleScanOutput(report, args, flags) {
-  // [D195] 人读结果面板：枚举/拖库/利用模式有自己的产物形态，不叠面板
-  if (!flags?.enumActive && !args.dump && !flags?.exploitMode) {
-    process.stderr.write(renderScanSummaryPanel(report) + '\n');
-  }
-  if (args.out) {
-    const fmt = writeSingleReportFiles(report, args);
-    // [D195] 默认 json-only 时提示人读格式的获取方式（零行为变更，纯指引）
-    const fmtHint = fmt === 'json' ? '；人读格式加 --format markdown' : '';
-    console.error(`报告已写入 ${args.out}（格式 ${fmt}${fmtHint}）`);
-  } else if (flags?.enumActive || args.dump) {
-    // 枚举/拖库模式：默认打印 report.data 精简视图（文本，对标 sqlmap 终端输出）
-    printExtractView(report);
-  } else if (!flags?.exploitMode) {
-    console.log(JSON.stringify(report, null, 2));
-  }
-  await writeOptInArtifacts(report, args);
-}
-
-/**
- * [D176] 修复提示词的默认落点：`--out` 是目录（或不存在但以分隔符结尾）就用它，
- * 是文件就用它所在目录；没给 `--out` 用当前目录。都不套 `fix-prompts/`。
- * @param {object} args CLI 参数
- * @returns {string} 绝对目录
- */
-function fixPromptBaseDir(args) {
-  const out = typeof args?.out === 'string' && args.out.trim() ? args.out : process.cwd();
-  try {
-    if (statSync(out).isDirectory()) return resolvePath(out);
-  } catch {
-    if (/[\\/]$/.test(out)) return resolvePath(out);
-  }
-  return resolvePath(dirname(out));
-}
-
-/**
- * [D176] 把报告里的命中项渲染成修复提示词并落盘（索引 + 每条一份）。
- * 目录语义：`--fix-prompt <dir>` 直接写该目录；`--fix-prompt`（不带值）写
- * `<--out 目录或当前目录>/fix-prompts/`。**不自动改代码**。
- * @param {object} report 引擎报告
- * @param {object} args CLI 参数（仅用 `fixPrompt` 与 `out`）
- * @returns {{dir: string, count: number}} 落盘目录与提示词条数
- */
-export function writeFixPromptsForReport(report, args) {
-  const explicit = typeof args?.fixPrompt === 'string' && args.fixPrompt.trim() ? args.fixPrompt : null;
-  const dir = explicit ? resolvePath(explicit) : join(fixPromptBaseDir(args), 'fix-prompts');
-  const { index, items } = renderFixPrompts(report, { url: report?.target?.url || report?.url });
-  mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, 'README.md'), index, 'utf-8');
-  for (const it of items) writeFileSync(join(dir, it.file), it.content, 'utf-8');
-  return { dir, count: items.length };
-}
-
 // 对标 sqlmap --test-headers / --test-path（本期新增，默认关闭，零回归）：
 // 把用户显式传入的请求头 / URL path 末段转为注入点。引擎 TargetParser 早已支持
 // header/cookie/path 注入点（遍历 target.cookieParams / target.headerParams / path 段），
@@ -310,81 +118,6 @@ export function writeFixPromptsForReport(report, args) {
 //   Cookie 头特殊解析为 k=v 填入 target.cookieParams；host / content-length / content-type /
 //   authorization 排除（传输层/认证类头，避免破坏请求或会话）。
 // 返回 { headerParams?, cookieParams? }，供 runSingleScan 注入 target；无内容时返回 {}。
-
-// 枚举模式精简文本输出（report.data 视图）
-function printExtractView(report) {
-  // 本视图打印的每一段都是**目标可控**数据（库名/表名/列名/单元格值/凭据），故在出口处统一消毒控制序列：
-  // OSC 0 能改写操作员终端标题、OSC 8 能造出"显示文字与真实目标完全不同"的可点击超链接、
-  // CR/CSI 能覆盖刚打印的那一行、裸换行能伪造一条时间戳齐全的假日志行。
-  // 消毒定义在函数入口、视图内 24 个打印点一律走 out()：这类出口的常态失效方式是"漏一处"，
-  // 要求每个调用点都记得套一层等于没设防。
-  const out = (...args) => console.log(...args.map((a) => (typeof a === 'string' ? sanitizeForTerminal(a) : a)));
-  const data = report.data;
-  if (!data) { out('（无提取数据，注入点未确认或提取失败）'); return; }
-  if (data.currentDb !== undefined && data.currentDb !== null) out(`current database: ${data.currentDb}`);
-  if (data.currentUser !== undefined && data.currentUser !== null) out(`current user: ${data.currentUser}`);
-  if (data.users !== undefined && data.users !== null) out(`users: ${data.users}`);
-  if (data.passwords !== undefined && data.passwords !== null) out(`passwords: ${data.passwords}`);
-  if (data.hostname !== undefined && data.hostname !== null) out(`hostname: ${data.hostname}`);
-  if (data.isDba !== undefined && data.isDba !== null) out(`is DBA: ${data.isDba}`);
-  if (data.userPrivs !== undefined && data.userPrivs !== null) out(`privileges: ${data.userPrivs}`);
-  if (data.roles !== undefined && data.roles !== null) out(`roles: ${data.roles}`);
-  const hasTables = data.tables && Object.keys(data.tables).length;
-  const hasCols = data.columns && Object.keys(data.columns).length;
-  const hasRows = data.rows && Object.values(data.rows).some(v => Array.isArray(v) && v.length);
-  const hasModeField = data.currentDb || data.currentUser || data.users || data.passwords || data.hostname || data.isDba || data.userPrivs || data.roles || (data.counts && Object.keys(data.counts).length);
-  // --dbs：仅库名列表（其它模式不进入此分支）
-  if (!hasTables && !hasCols && !hasRows && !hasModeField) {
-    for (const db of (data.databases || [])) out(db);
-    if (!data.databases || !data.databases.length) out('（未枚举到数据库）');
-  }
-  // --tables / --columns / --dump
-  for (const [db, tabs] of Object.entries(data.tables || {})) {
-    for (const t of tabs) {
-      const key = `${db}.${t}`;
-      const cols = data.columns ? data.columns[key] : null;
-      const rows = data.rows ? data.rows[key] : null;
-      if (Array.isArray(rows) && rows.length) {
-        const showCols = cols || Object.keys(rows[0]);
-        out(`[${key}]  共 ${rows.length} 行`);
-        out('  ' + showCols.join(' | '));
-        for (const row of rows.slice(0, 50)) {
-          out('  ' + showCols.map(c => row[c] == null ? '' : row[c]).join(' | '));
-        }
-        if (rows.length > 50) out(`  …（仅显示前 50 行，共 ${rows.length} 行）`);
-      } else if (cols && cols.length) {
-        out(`${key}: ${cols.join(', ')}`);
-      } else {
-        out(key);
-      }
-    }
-  }
-  // --count
-  if (data.counts) {
-    for (const [k, v] of Object.entries(data.counts)) out(`${k}: ${v == null ? 'N/A' : v} 行`);
-  }
-  // --search：输出匹配的表名和列名汇总
-  if (data.search) {
-    out(`search keyword: ${data.search.keyword}`);
-    if (data.search.matchedTables && data.search.matchedTables.length) {
-      out(`matched tables: ${data.search.matchedTables.join(', ')}`);
-    } else {
-      out('matched tables: (none)');
-    }
-    if (data.search.matchedColumns && data.search.matchedColumns.length) {
-      for (const m of data.search.matchedColumns) {
-        out(`  ${m.table}: ${m.columns.join(', ')}`);
-      }
-    }
-  }
-  // --schema：输出表结构定义
-  if (data.schemas && Object.keys(data.schemas).length) {
-    out('schemas:');
-    for (const [k, v] of Object.entries(data.schemas)) {
-      out(`  ${k}: ${v == null ? '(null)' : v}`);
-    }
-  }
-}
 
 // [D24 2026-10-09] 外层只负责把自定义条目挂进本次扫描的异步上下文；不传 --payload-file 时
 // 直接走 Inner，与旧调用路径逐位相同（无 ALS 开销、无行为差异）。
@@ -1169,6 +902,6 @@ if (invokedDirectly) {
 }
 
 // 导出供单测使用（仍在 cli.js 定义的符号；args 族的再导出见文件顶部）
-export { buildConfig, isEnumMode, buildExtractScope, validateEnumArgs, printExtractView, runSingleScan, buildInjectionTargets, resolveBodyChannel };
+export { buildConfig, isEnumMode, buildExtractScope, validateEnumArgs, runSingleScan, buildInjectionTargets, resolveBodyChannel };
 // 注：runExploit 已在定义处 `export async function` 导出，**不可**在此再列一次
 // （重复导出会被 module-loadable 门禁拦下：它会让整个 CLI 无法加载）。

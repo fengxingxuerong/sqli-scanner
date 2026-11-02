@@ -205,8 +205,12 @@ function buildHaystack(res) {
     }
   }
   const body = String(res?.body ?? res?.data ?? '');
-  const text = head + body;
-  return text.length > HAYSTACK_CAP ? text.slice(0, HAYSTACK_CAP) : text;
+  // [D229] 先截后拼（P0-3）：旧实现 head+body 全量拼接后再截 —— 每对布尔探针 ×2 次多 MB
+  // 临时串（10MB body 实测 157.8ms/40 次 vs 新 6.6ms，降 95.8%），是长扫描 GC 抖动源。
+  // 等价性：slice 取前缀，与拼接后截断逐码元一致（五档 body + head≥CAP 边界已基准比对）。
+  if (head.length >= HAYSTACK_CAP) return head.slice(0, HAYSTACK_CAP);
+  const cap = HAYSTACK_CAP - head.length;
+  return body.length > cap ? head + body.slice(0, cap) : head + body;
 }
 
 /**

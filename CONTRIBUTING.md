@@ -25,6 +25,11 @@ docs/                设计文档与对标分析
 3. **测试**：
    - 前端：`npm test`（vitest，用例数以 `docs/_facts.json` 为准）
    - 服务端：`cd server && npm test`（node:test，用例数以 `docs/_facts.json` 为准）
+   - 服务端**本地快档**：`cd server && npm run test:fast`（并发 8）。
+     同条件实测耗时（本机 20 逻辑核）：并发 3 ≈ 222s、6 ≈ 136s、**8 ≈ 116s**、10 ≈ 108s；
+     用例数以 `docs/_facts.json` 为准。
+     **只在本地用**：CI runner 是 2 vCPU，并发 8 是超配；收口/提交前仍以 `npm test`（并发 3）的
+     结果为准 —— 快档只是缩短「改-验」循环，不是替代收口。
    - 召回靶场：`npm run recall-e2e` ⇒ **16 条 + 2 条 SKIP**（真实 MySQL 组）。要跑满 18 条走隔离沙箱：
      `python e2e/run-with-sandbox.py e2e/recall-lab/recall.e2e.js`（实测 18/18 通过；驱动端点由
      `MYSQL_HOST/PORT/USER/PASSWORD` 注入，SKIP 时会打印究竟是哪一类原因）。

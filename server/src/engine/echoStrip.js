@@ -12,6 +12,33 @@
 // 现收敛到这里；**新增任何基于响应内容的判定，都应先过一遍本模块**。
 // ============================================================================
 
+/** 任意 `%XX` 转义序列（URL 编码的**形状**判据，不校验 UTF-8 合法性） */
+const PCT_ESC_RE = /%[0-9A-Fa-f]{2}/;
+
+/**
+ * [D230] HTML 实体还原是否可能改变文本：无 `&` 时 7 次 replace 全是恒等。
+ * 抽成独立判据供守卫测试钉真值表——删掉短路会让它变成死代码（deadcode 门禁当场红）。
+ * @param {string} t
+ * @returns {boolean}
+ */
+export function needsHtmlEntityDecode(t) {
+  return typeof t === 'string' && t.includes('&');
+}
+
+/**
+ * [D230] URL 解码是否可能改变文本。
+ *
+ * 判据是「存在 `%XX` **或** 存在 `+`」：两者都没有时 `decodeURIComponent(t.replace(/\+/g,' '))`
+ * 必定恒等返回且不抛错，两轮循环纯属白扫（10MB 实测 23ms）。
+ * **不能把 `+` 提前替换掉再判**：`decodeURIComponent` 遇非法序列会抛错并保留**原 t**
+ * （含 `+`），提前替换会改变异常路径的结果（`a+b%E4` 实测）。含 `+` 时一律走原路径。
+ * @param {string} t
+ * @returns {boolean}
+ */
+export function needsUrlDecode(t) {
+  return typeof t === 'string' && (PCT_ESC_RE.test(t) || t.includes('+'));
+}
+
 /**
  * 把响应文本归一化为「纯文本」：HTML 实体 → 字符 → URL 解码（两轮，防双重编码）。
  * 回显常见混合形态，例如 Express 404 页把 `'` 转成 `&#39;`、空格转成 `%20`，
@@ -21,20 +48,30 @@
  */
 export function normalizeEcho(s) {
   let t = String(s || '');
-  t = t
-    .replace(/&#(\d+);/g, (_, d) => String.fromCharCode(Number(d) || 0))
-    .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => String.fromCharCode(parseInt(h, 16) || 0))
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, String.fromCharCode(34))
-    .replace(/&apos;/g, String.fromCharCode(39))
-    .replace(/&amp;/g, '&');
-  for (let i = 0; i < 2; i++) {
-    try {
-      const d = decodeURIComponent(t.replace(/\+/g, ' '));
-      if (d !== t) t = d; else break;
-    } catch {
-      break;
+  // [D230] 两处**逐码元等价**的短路（10MB body 实测）：
+  //  ① 无 `&` ⇒ 7 次实体 replace 每条都要扫全文却都是恒等，直接跳过；
+  //  ② 无 `%XX` 且无 `+` ⇒ decodeURIComponent 恒等返回、不抛错，两轮循环白扫。
+  // 单函数实测：无实体/无编码的响应（JSON API 常态）29.0ms → 3.9ms（7.5×）；
+  // 含 `&amp;` 的 HTML 页 68.0ms → 66.2ms（≈1×）—— 实体替换是实功，不该省。
+  // 判据实现见 needsHtmlEntityDecode / needsUrlDecode（守卫测试逐条钉真值表）。
+  if (needsHtmlEntityDecode(t)) {
+    t = t
+      .replace(/&#(\d+);/g, (_, d) => String.fromCharCode(Number(d) || 0))
+      .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => String.fromCharCode(parseInt(h, 16) || 0))
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, String.fromCharCode(34))
+      .replace(/&apos;/g, String.fromCharCode(39))
+      .replace(/&amp;/g, '&');
+  }
+  if (needsUrlDecode(t)) {
+    for (let i = 0; i < 2; i++) {
+      try {
+        const d = decodeURIComponent(t.replace(/\+/g, ' '));
+        if (d !== t) t = d; else break;
+      } catch {
+        break;
+      }
     }
   }
   return t;
@@ -80,6 +117,10 @@ export const ECHO_TRUNC_MIN = 16;
 export function stripLongestPrefix(t, payload, minLen = ECHO_TRUNC_MIN) {
   const p = String(payload || '');
   if (p.length < minLen) return t;
+  // [D230] 最短前缀都不在 ⇒ 任何更长前缀（都以它开头）也不在，无需逐个试。
+  // 无回显是真实扫描的绝大多数请求；旧实现为此连扫 ~20 遍全文，
+  // 10MB body 实测 20.5ms → 0.5ms（38.7×）。
+  if (!t.includes(p.slice(0, minLen))) return t;
   for (let n = p.length; n >= minLen; n--) {
     const pre = p.slice(0, n);
     if (t.includes(pre)) return t.split(pre).join('');
