@@ -8,6 +8,7 @@
 // 现实对应物：从测试环境拷了签名密钥上线到生产目标、或者密钥轮换后忘了同步 SDK。
 import { buildSign, paramsOf } from '../sign-scheme.mjs';
 
+// @dynamic —— 由引擎按 --request-script 加载调用（不是 import 消费）
 export function transform(req) {
   const url = String(req.url || '');
   if (!url.includes('/api/')) return req;

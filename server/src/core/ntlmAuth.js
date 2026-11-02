@@ -26,7 +26,7 @@ import { md4Utf16le } from './ntlmMd4.js';
 import { desEcbEncrypt } from './desEcb.js';
 
 // ── NTLMSSP flags（MS-NLMP §2.2.2.5 常用子集） ─────────────────────────────
-export const NTLM_FLAGS = {
+const NTLM_FLAGS = {
   NEGOTIATE_UNICODE: 0x00000002,
   REQUEST_TARGET: 0x00000004,
   NEGOTIATE_NTLM: 0x00000200,

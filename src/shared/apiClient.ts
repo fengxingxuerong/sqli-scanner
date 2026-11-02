@@ -22,7 +22,7 @@ export class ApiError extends Error {
 //   不要 import 这个常量：A3 那次就是只搬了 axios 拦截器，SSE 与报告导出还在拼它，
 //   于是随机端口下「扫描能起、进度永远不动、导出永远 404」。判据见
 //   src/tests/desktopRuntimeBase.test.tsx（该用例刻意不 mock 本模块）。
-export const API_BASE: string =
+const API_BASE: string =
   (import.meta.env.VITE_API_BASE as string | undefined) ?? '/api';
 let runtimeBase: string | null = null;
 export function setApiBase(base: string): void {

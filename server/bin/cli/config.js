@@ -201,6 +201,10 @@ function applyScanLevelAndRisk(config, args) {
   // 逃生口：--no-production-mode（靶场/自建演练环境）等价于已确认。
   config.productionMode = !args.noProductionMode;
   config.confirmDestructive = args.confirmDestructive === true;
+  // [P0-SEC 2026-11-02] 报告 PoC 凭据默认脱敏（引擎默认同值，这里显式落键便于 --save-config 复现）。
+  config.pocRedactAuth = args.pocRedactAuth !== false;
+  // [P1-SAFE 2026-11-02] 自动发现的表单 POST 默认不投放；显式 --confirm-form-writes 才放行。
+  config.confirmFormWrites = args.confirmFormWrites === true;
   // [2026-09-24] 不可逆动作拒绝位：MSSQL 的 os shell 通路在 xp_cmdshell 未启用时会自动发
   // `sp_configure 'xp_cmdshell',1; RECONFIGURE`（Exploiter.js:450，判据 `!== false`）。
   // 那是**实例级永久配置变更**，与「只读复核」不是同一件事；引擎侧一直支持拒绝，

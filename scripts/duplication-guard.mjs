@@ -138,7 +138,7 @@ function isLiteralTableWindow(tokens) {
   );
 }
 
-export function findClones(files, opts = {}) {
+function findClones(files, opts = {}) {
   return findClonesWithStats(files, opts).clones;
 }
 
@@ -300,7 +300,7 @@ function loadBaseline() {
  * @param {{clones?:number,waivers?:string[]}} baseline
  * @returns {{errors:string[],notes:string[]}}
  */
-export function judge(clones, baseline) {
+function judge(clones, baseline) {
   const errors = [];
   const notes = [];
   const baseCount = baseline.clones ?? 0;

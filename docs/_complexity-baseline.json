@@ -14,12 +14,6 @@
       "limitLines": 100,
       "limitComplexity": 15
     },
-    "scripts/deadcode-guard.mjs::findUnusedExports": {
-      "lines": 44,
-      "complexity": 17,
-      "limitLines": 100,
-      "limitComplexity": 15
-    },
     "scripts/duplication-guard.mjs::matchAcrossFiles": {
       "lines": 50,
       "complexity": 17,

@@ -1,6 +1,8 @@
 import { URL } from 'url';
 import { fillPayload, replaceAllLiteral } from './payloads.js';
 import { SQL_ERROR_SIG } from '../core/errorSig.js';
+// [P1-PERF 2026-11-02] 错误页甄别走有界匹配
+import { hasBoundedMatch } from '../core/boundedMatch.js';
 import { obfuscateWithConfig } from '../core/tamper/applyTampers.js';
 import { resolveDbms, resolveFromClause, commentSuffix } from './DialectSqlBuilder.js';
 // [P0-FIX 2026-09-09] 出口选项同源 + 失败响应结构（见 egressOpts.js 顶部三起事故）
@@ -595,7 +597,7 @@ async function _probeBody(httpClient, ctx, probe) {
   // ⇒ `WHERE uid=testuser UNION SELECT …` 语法错误 ⇒ 200 错误页里出现 `'SQLISCANNER40'`
   // ⇒ 假命中「UNION 注入成功，回显列 40（列数 41）」。故补内容级甄别，
   // 签名复用 `core/errorSig.js` 的唯一真源（不在这里另开一份清单）。
-  const errorPage = SQL_ERROR_SIG.test(body);
+  const errorPage = hasBoundedMatch(body, SQL_ERROR_SIG);
   return {
     body,
     status,

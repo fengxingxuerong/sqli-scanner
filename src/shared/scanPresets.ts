@@ -49,12 +49,14 @@ export const SCAN_PRESETS: readonly ScanPreset[] = [
     id: 'standard',
     labelKey: 'scanConfig.presetStandard',
     hintKey: 'scanConfig.presetStandardHint',
-    // 标准扫描 = DEFAULT_CONFIG 的检测强度面（level/risk 与后端 defaults 对齐）
+    // 标准扫描 = DEFAULT_CONFIG 的检测强度面（level/risk/crawlDepth 与后端 defaults 对齐）。
+    // [P1-CFG] crawlDepth 0 = 引擎安全基线（不开爬虫）；要爬虫升级走 deep，不在此偏移默认面
+    // —— scanPresets 契约测试「防两处漂移」钉住本身份。
     patch: {
       level: 1,
       risk: 1,
       techniques: STANDARD_TECHNIQUES,
-      crawlDepth: 1,
+      crawlDepth: 0,
       prefilter: true,
       skipStatic: false,
     },

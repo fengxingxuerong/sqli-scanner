@@ -95,6 +95,8 @@ export const INJECTION_SIGS = [
 // 均为它的 re-export（同一正则对象）。教训：两份实现"互相看齐"一次不等于永远同集，
 // 能单源就必须单源。历史取证见 docs/archive/优化空间勘查-2026-10-12.md §A1。
 import { SQL_ERROR_SIG } from './errorSig.js';
+// [P1-PERF 2026-11-02] 5xx 响应体可能很大，报错签名匹配改走有界窗口
+import { hasBoundedMatch } from './boundedMatch.js';
 // 保持既有导出面：本模块的 import 方（scanValidityGuard 自身 + 测试）继续从这里取。
 export { SQL_ERROR_SIG };
 
@@ -407,7 +409,7 @@ export class ScanValidityGuard {
     const injection = looksLikeInjection(req);
     // 自己触发的 SQL 报错（error 技术的正常产物）不计入「目标处于错误状态」
     const selfInflicted =
-      serverErr && injection === true && SQL_ERROR_SIG.test(String(res?.data ?? ''));
+      serverErr && injection === true && hasBoundedMatch(String(res?.data ?? ''), SQL_ERROR_SIG);
     // 只统计「被我们排除掉的那部分」：与 serverErr 互斥，不重复计数（两者相加 = 全部 5xx）
     this.injection5xx += selfInflicted ? 1 : 0;
 

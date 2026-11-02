@@ -388,6 +388,12 @@ export interface ScanConfig {
   // 也无法「显式声明这是靶场」，而报告只会写「未检出」—— 能力被默认值锁死（与 OOB 同一形态）。
   productionMode?: boolean;
   confirmDestructive?: boolean;
+  // [P0-SEC 2026-11-02] 报告 PoC 凭据脱敏：默认 true（Cookie/Authorization 在 curl/raw 中打码）。
+  // 关闭前应确认报告不外发；CLI 对应 --no-poc-redact-auth。
+  pocRedactAuth?: boolean;
+  // [P1-SAFE 2026-11-02] 自动发现的表单 POST 写请求确认位：默认 false 时跳过非幂等表单 action；
+  // 开启会向目标发送真实 POST（可能创建/修改数据），并登记 side-effect 台账。
+  confirmFormWrites?: boolean;
   // ── [2026-09-23 UI-REACH] 请求节奏（对标 sqlmap --delay / --max-requests）──
   // delay：每次请求间的**固定**延时（秒；引擎侧 httpClient 夹到上限 60），用于规避 WAF 频率限制。
   // 与 ratePerSec 的令牌桶是两套机制（固定间隔 vs 平均速率），不是重复项。

@@ -24,6 +24,8 @@ import { oobReceiver } from '../../core/oobReceiver.js';
 import { ErrorCode, AppError } from '../../core/errors.js';
 // P1-11 收敛：表单/标签属性解析与 TargetParser/crawler 共用单一事实源（含正则缓存）
 import { attrValue } from '../crawler.js';
+// [P1-PERF 2026-11-02] 大响应有界匹配
+import { matchBounded } from '../../core/boundedMatch.js';
 
 // 二阶注入检测器（Second-order / Stored SQLi）
 // 策略模式与现有 Detector 子类一致：detect(ctx) 返回 createDetectionResult 形状。
@@ -70,7 +72,7 @@ export class SecondOrderDetector extends Detector {
     //    记录报错指纹（命中的具体文本）而非仅布尔：触发页可能自带固有报错
     //    （如空参数语法错误），此时需对比「报错内容是否因存储探针而变化」。
     const baselineBody = await this._trigger(httpClient, ctx, triggerUrl);
-    const baseMatch = baselineBody.match(ERROR_SIG);
+    const baseMatch = matchBounded(baselineBody, ERROR_SIG);
     const baselineErr = !!baseMatch;
 
     // 2) 存储阶段（真实写）：构造报错探针 → 可选刷新 CSRF → POST 表单点
@@ -82,7 +84,7 @@ export class SecondOrderDetector extends Detector {
 
     // 3) 触发阶段：读触发页，看是否回显报错
     const expBody = await this._trigger(httpClient, ctx, triggerUrl);
-    const expMatch = expBody.match(ERROR_SIG);
+    const expMatch = matchBounded(expBody, ERROR_SIG);
     const expErr = !!expMatch;
 
     // 4) 阴性对照（可选）：存良性值 → 读触发页应无报错（提高判定置信）
@@ -92,7 +94,7 @@ export class SecondOrderDetector extends Detector {
       const benign = point.originalValue && String(point.originalValue).trim() ? point.originalValue : 'benign';
       await this._store(httpClient, ctx, benign);
       const negBody = await this._trigger(httpClient, ctx, triggerUrl);
-      negMatch = negBody.match(ERROR_SIG);
+      negMatch = matchBounded(negBody, ERROR_SIG);
       negErr = !!negMatch;
     }
 

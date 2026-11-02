@@ -97,4 +97,3 @@ export function _resetForTest() {
   fanoutStore.clear();
 }
 
-export { TARGET_MAX, FANOUT_MAX, WINDOW_MS };

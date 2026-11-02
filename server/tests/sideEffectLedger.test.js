@@ -29,11 +29,28 @@ process.env.SQLI_LEDGER_DIR = TMP;
 const {
   SIDE_EFFECT_KINDS,
   recordSideEffect,
+  recordFormWriteEffects,
   readSideEffects,
   buildCleanupPlan,
   cleanupSideEffects,
   sideEffectSummaryForReport,
 } = await import('../src/services/sideEffectLedger.js');
+
+test('[P1-SAFE] recordFormWriteEffects：同一 action 只记一次，GET 点不记，且标记不可逆', () => {
+  const scanId = 'se-form-write';
+  const points = [
+    { actionUrl: 'https://t.example/comment', formMethod: 'POST', param: 'body' },
+    { actionUrl: 'https://t.example/comment', formMethod: 'POST', param: 'author' },
+    { actionUrl: 'https://t.example/search', formMethod: 'GET', param: 'q' },
+  ];
+  assert.equal(recordFormWriteEffects(scanId, points), 1);
+  const store = readSideEffects(scanId);
+  assert.equal(store.effects.length, 1);
+  assert.equal(store.effects[0].kind, SIDE_EFFECT_KINDS.FORM_WRITE);
+  assert.equal(store.effects[0].reversible, false, '表单写无通用撤销配方，必须标不可逆');
+  const plan = buildCleanupPlan(scanId);
+  assert.equal(plan.irreversible.length, 1);
+});
 
 test('登记：写前记录并落盘，含可逆性与撤销配方', () => {
   const scanId = 'se-1';

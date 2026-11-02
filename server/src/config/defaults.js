@@ -1,4 +1,8 @@
 // 引擎默认参数（集中维护，前后端/双形态需同步修改）
+// [P1-CFG 2026-11-02] 跨端共享的默认值收敛到 sharedDefaults.js（单源）；
+// 本文件只保留引擎内部调优项。UI 侧由 scripts/sync-scan-defaults.mjs 生成 JSON。
+import { SHARED_SCAN_DEFAULTS } from './sharedDefaults.js';
+
 export const defaults = {
   // 网络
   port: 4567, // 引擎监听端口
@@ -7,8 +11,8 @@ export const defaults = {
   // 判定窗口被压缩产生误判。对齐 sqlmap 默认（30s / 3 retries）作为保守基线；
   // 追求速度的场景由前端/CLI 显式调低（ratePerSec/concurrency 保持现值不变，
   // 它们经 per-scan 限速桶约束，安全性与并发解耦）。
-  timeoutMs: 30000, // 单请求超时（sqlmap 默认 30）
-  retry: 3, // 失败重试次数（sqlmap 默认 3）
+  timeoutMs: SHARED_SCAN_DEFAULTS.timeoutMs, // 单请求超时（sqlmap 默认 30）
+  retry: SHARED_SCAN_DEFAULTS.retry, // 失败重试次数（sqlmap 默认 3）
   // 显式 HTTP keep-alive Agent 开关（false=默认启用长连接复用；true=回退 Node 默认 agent 行为）。
   // 对标 sqlmap --keep-alive 的反向开关：默认开，禁用后不再挂自定义 keep-alive Agent。
   // [P0-FIX 2026-09-09] 本键与 http2 此前只存在于 defaults，未进 scanRoutes 的 KNOWN_CFG_KEYS →
@@ -25,10 +29,10 @@ export const defaults = {
   // 10 req/s 保住 4 并发的基本吞吐（本地靶场全量 e2e 时间预算不变），同时把「开箱即打挂目标」
   // 的风险压到可接受水位。追求速度的场景仍由前端/CLI 显式调高（前端限速设置经 ScanManager
   // 按 scanId 注入 HttpClient 独立桶，真正生效）。
-  ratePerSec: 10,
+  ratePerSec: SHARED_SCAN_DEFAULTS.ratePerSec,
 
   // 调度
-  concurrency: 4, // 并发检测线程数
+  concurrency: SHARED_SCAN_DEFAULTS.concurrency, // 并发检测线程数
   // 会话默认落盘（P2-P4）：true 时扫描自动用固定文件名 sqli-session-latest.json 落盘，
   // 下次对同一目标 URL 扫描自动 resume（跳过已完成点，复扫近乎 0 请求）。
   // 默认 false 保持现状（显式传 sessionFile 才落盘），避免静默副作用。
@@ -69,6 +73,8 @@ export const defaults = {
   // 高危（destructive）payload 池投放确认位：默认 false = 不投放。true 表示操作者已确认获得书面授权、
   // 且目标可承受写文件/命令执行/资源耗尽类探测。对应 CLI `--confirm-destructive`、REST config 同名键。
   confirmDestructive: false,
+  // [P1-SAFE 2026-11-02] 自动发现的表单 POST：默认不投放写请求；需显式确认。
+  confirmFormWrites: SHARED_SCAN_DEFAULTS.confirmFormWrites,
   // testFilter / testSkip（对标 sqlmap --test-filter / --test-skip）：逗号分隔的 id 子串列表，
   // 大小写不敏感。testFilter=白名单（仅保留 id 含任一子串的条目），testSkip=黑名单（排除 id 含任一子串的条目）。
   // 空串=不过滤（全部运行 / 不跳过）。
@@ -105,7 +111,7 @@ export const defaults = {
   // 组间稳定差异采样次数（真/假各 N 个）：N=2~3 足矣（组内一致性 2 即可证伪随机 nonce；
   // 3 更稳）。legacy 路径（blindRobust 关闭）会补足到该样本数（额外 ~2 请求/对），robust 路径复用已采样数组零额外请求。
   boolStableDiffSamples: 3,
-  timeThresholdMs: 1500, // 时间盲注判定阈值（ms）
+  timeThresholdMs: SHARED_SCAN_DEFAULTS.timeThresholdMs, // 时间盲注判定阈值（ms）
   timeBlindSamples: 5, // 时间盲注判定所需稳定采样次数（3→5：提升抖动目标下的判定稳健性；请求量小幅上升）
   timeBlindSleepSec: 2, // 时间盲注 sleep 时长（秒）：「探测/提取分离」前的共用基准（P2-P5）。
   // 默认 2 与历史行为一致；显式配置 timeProbeSleepSec / timeExtractSleepSec 可分别压低探测墙钟 /
@@ -205,7 +211,10 @@ export const defaults = {
   // [P0-SEC 2026-09-08] 交付型报告的 PoC 凭据脱敏：默认 false（PoC 要能复制即跑）。
   // 报告文件会随邮件/IM 流通：若担心测试者会话凭据随报告外流，置 true 后
   // Cookie/Authorization/X-Api-Token 等头在 curl/raw/headers 三处统一打码。
-  pocRedactAuth: false,
+  // [P0-SEC 2026-11-02] 默认改为 true：报告/台账会随邮件、IM、工单流转，
+  // PoC 里的 Cookie/Authorization 默认不外泄；确需「复制即跑」时 CLI `--no-poc-redact-auth`
+  // / REST config.pocRedactAuth=false / UI 开关显式关闭。
+  pocRedactAuth: SHARED_SCAN_DEFAULTS.pocRedactAuth,
   // [P0-SEC 2026-09-08] 授权范围（渗透作战第一红线）：空数组=不启用；非空时条目形如
   // 'example.com'（含子域）/ '=example.com'（仅裸域）/ '10.0.0.0/8' / 'https://a.example.com/portal'。
   // 启用后：目标 URL、safeUrl、二阶触发页、以及每一跳重定向目标均逐次校验，越界直接拒发。
@@ -223,7 +232,8 @@ export const defaults = {
   knownPoint: null,
 
   // 提取
-  enableExtract: true, // 拖库开关（默认开，前端二次确认）
+  // [P1-CFG 2026-11-02] 默认关闭：提取是侵入性动作（枚举+读数据），与 `--dump`/枚举/UI 显式开启对齐。
+  enableExtract: SHARED_SCAN_DEFAULTS.enableExtract,
   // [D181] 只读安全配置审计（--audit，对标 sqlmap 同名）刻意**不在此处**给默认值：
   // 它只在 CLI 直连模式（-d）下有意义，而 defaults 顶层键必须进 REST 白名单
   // （configWhitelist.guard 会红）；把它塞进白名单又会让前端契约测试要求「面板有入口」，
@@ -393,11 +403,11 @@ export const defaults = {
   techniques: ['union', 'error', 'boolean', 'time'],
 
   // 表单爬取（复杂表单 / 反 CSRF 自动处理）。默认关闭，避免误触发提交副作用。
-  crawlForms: false,
+  crawlForms: SHARED_SCAN_DEFAULTS.crawlForms,
   // 站内链接爬取深度（对标 sqlmap --crawl=<depth>）：0=关闭，1-3=爬取深度。
   // 爬虫从目标页递归发现同域链接，将各页 query 参数并入注入点集合。
   // 默认关闭，避免扩大攻击面造成非预期请求；仅对已授权目标显式开启。
-  crawlDepth: 0,
+  crawlDepth: SHARED_SCAN_DEFAULTS.crawlDepth,
 
   // 代理 / 认证：httpClient 已完整实现（buildProxyAgent 支持 http/https/socks5/socks5h/socks4/socks4a；
   // mergeAuthHeaders 支持 basic/cookie/自定义头）。

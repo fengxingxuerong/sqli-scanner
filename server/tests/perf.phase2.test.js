@@ -216,7 +216,9 @@ test('T3 提取阶段点间并行：多 union 点并发拖库', async () => {
 
   const id = await sm.start({
     url: 'http://x/?a=1&b=2',
-    config: { concurrency: 2, ratePerSec: 100, techniques: ['union'], prefilter: false, extractConcurrency: 2 },
+    // [P1-CFG 2026-11-02] enableExtract 默认改为 false；本用例测的是提取并发，
+    // 显式打开提取，避免把「默认值变化」误判成并发回归。
+    config: { concurrency: 2, ratePerSec: 100, techniques: ['union'], prefilter: false, extractConcurrency: 2, enableExtract: true },
   });
   await waitScanDone(sm, id);
   assert.equal(peak, 2, '两个注入点的提取应并发执行（点间并行）');

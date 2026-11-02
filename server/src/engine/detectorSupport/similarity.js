@@ -45,7 +45,7 @@ export function normBody(v) {
  *
  * @returns {boolean} 长度差在容差内
  */
-export function lenTolerable(la, lb) {
+function lenTolerable(la, lb) {
   if (la === lb) return true;
   return Math.abs(la - lb) <= Math.max(24, Math.max(la, lb) * 0.12);
 }

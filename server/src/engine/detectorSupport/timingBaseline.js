@@ -110,4 +110,4 @@ export function _resetForTest() {
   store.clear();
 }
 
-export { MIN_SAMPLES, MAX_HOSTS, ALPHA, TTL_MS };
+export { MIN_SAMPLES };

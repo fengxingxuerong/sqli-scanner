@@ -122,10 +122,32 @@ describe('ScanPage · 组装与进度', () => {
 });
 
 describe('ScanPage · 拖库二次确认（builtin）', () => {
-  it('默认开启拖库：点开始 → ConfirmExtract；取消不发起，确认后带 enableExtract 发起', async () => {
+  // [P1-CFG] enableExtract 默认已翻转为 false（安全基线：不显式开启就不拖库）。
+  // 两个用例随新默认重写场景，护栏双向都钉住：关 = 无框直发；开 = 必过确认框。
+  it('默认关闭拖库：点开始直接发起，无二次确认对话框', async () => {
     startScanMock.mockResolvedValueOnce('s1');
     renderPage();
-    // 填 URL（无需展开高级设置，enableExtract 默认 true）
+    // 填 URL（无需展开高级设置，enableExtract 默认 false）
+    fireEvent.change(screen.getAllByPlaceholderText('http://example.com/item.php?id=1')[0], {
+      target: { value: 'http://t/item.php?id=1' },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: '开始扫描' }));
+    await waitFor(() => expect(startScanMock).toHaveBeenCalledTimes(1));
+    expect(screen.queryByText('确认执行数据提取（拖库）？')).toBeNull();
+    const args = startScanMock.mock.calls[0][0];
+    expect(args.url).toBe('http://t/item.php?id=1');
+    expect(args.engine).toBe('builtin');
+    expect(args.config.enableExtract).toBe(false);
+  });
+
+  it('显式开启拖库：点开始 → ConfirmExtract；取消不发起，确认后带 enableExtract 发起', async () => {
+    startScanMock.mockResolvedValueOnce('s1');
+    renderPage();
+    // 展开两层高级设置并切换 enableExtract(true)（默认 false）
+    fireEvent.click(screen.getAllByText('高级设置')[0]);
+    fireEvent.click(screen.getAllByText('高级设置')[1]);
+    fireEvent.click(screen.getByLabelText('启用数据提取（拖库）'));
     fireEvent.change(screen.getAllByPlaceholderText('http://example.com/item.php?id=1')[0], {
       target: { value: 'http://t/item.php?id=1' },
     });
@@ -148,23 +170,6 @@ describe('ScanPage · 拖库二次确认（builtin）', () => {
     expect(args.url).toBe('http://t/item.php?id=1');
     expect(args.engine).toBe('builtin');
     expect(args.config.enableExtract).toBe(true);
-  });
-
-  it('显式关闭 enableExtract：直接发起，无二次确认对话框', async () => {
-    startScanMock.mockResolvedValueOnce('s1');
-    renderPage();
-    // 展开两层高级设置并切换 enableExtract(false)
-    fireEvent.click(screen.getAllByText('高级设置')[0]);
-    fireEvent.click(screen.getAllByText('高级设置')[1]);
-    fireEvent.click(screen.getByLabelText('启用数据提取（拖库）'));
-    fireEvent.change(screen.getAllByPlaceholderText('http://example.com/item.php?id=1')[0], {
-      target: { value: 'http://t/item.php?id=1' },
-    });
-
-    fireEvent.click(screen.getByRole('button', { name: '开始扫描' }));
-    await waitFor(() => expect(startScanMock).toHaveBeenCalledTimes(1));
-    expect(screen.queryByText('确认执行数据提取（拖库）？')).toBeNull();
-    expect(startScanMock.mock.calls[0][0].config.enableExtract).toBe(false);
   });
 });
 

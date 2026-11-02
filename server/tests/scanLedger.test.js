@@ -82,8 +82,8 @@ test('recordScan: 落盘 meta/report 并追加全局索引', () => {
     assert.ok(existsSync(join(rec.dir, 'report.json')));
     assert.ok(existsSync(join(rec.dir, 'report.html')));
     assert.ok(existsSync(join(rec.dir, 'report.md')));
-    // docs.json 优先于自动序列化
-    assert.equal(readFileSync(join(rec.dir, 'report.json'), 'utf8'), '{"k":1}');
+    // docs.json 优先于自动序列化，但仍必须过落盘脱敏管道（格式统一为 pretty JSON）
+    assert.deepEqual(JSON.parse(readFileSync(join(rec.dir, 'report.json'), 'utf8')), { k: 1 });
     // 全局索引一行
     const idx = readFileSync(join(dir, 'index.jsonl'), 'utf8').split('\n').filter(Boolean);
     assert.equal(idx.length, 1);

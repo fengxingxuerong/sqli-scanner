@@ -57,7 +57,7 @@ function dirtyPaths() {
  *          isRepo: boolean, allowDirty: boolean}} s
  * @returns {{level:'error'|'warn', msg:string}[]}
  */
-export function judge(s) {
+function judge(s) {
   const problems = [];
 
   // ① 版本号三处一致（判据来自 version-sync.mjs，不复制一份）
@@ -109,7 +109,7 @@ export function judge(s) {
  * 隐蔽处：容器内 healthcheck 走 127.0.0.1 照常通过 ⇒ compose healthy 但外部访问不到。
  * 对外暴露面由 `ports` 的宿主绑定 + SCAN_API_TOKEN 控制，与 HOST 无关。
  */
-export function checkComposeHost(text) {
+function checkComposeHost(text) {
   // 只认 environment 段里的 HOST=，避免命中注释里出现的 "HOST=127.0.0.1" 说明文字
   const m = text.match(/^\s*-\s*HOST=(\S+)\s*$/m);
   if (!m) return { level: 'warn', msg: 'docker-compose.yml 未显式设置 HOST（将回落到镜像默认 0.0.0.0）' };

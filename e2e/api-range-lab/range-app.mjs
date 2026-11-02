@@ -24,9 +24,9 @@ const _require = createRequire(new URL('../../server/package.json', import.meta.
 const express = _require('express');
 const mysql = _require('mysql2/promise');
 
-// 会话/凭据常量：靶站侧硬编码，测试侧引用同一份导出（避免两边各写一份漂移）
-export const LAB_SESSION_COOKIE = 'sid=lab-sess-2026';
-export const LAB_AUTH_HEADER = 'lab-secret-2026';
+// 会话/凭据常量：靶站侧唯一来源（下面的 /account 判据直接引用，避免两处各写一份漂移）
+const LAB_SESSION_COOKIE = 'sid=lab-sess-2026';
+const LAB_AUTH_HEADER = 'lab-secret-2026';
 
 const PORT = Number(process.env.API_RANGE_LAB_PORT) || 8260;
 
@@ -187,7 +187,7 @@ export function createRangeApp(pool, opts = {}) {
   // ── Cookie：需要会话 Cookie 才可达（验「会话是否被接口继承」） ──
   app.get('/account', wrap(async (req, res) => {
     const cookies = String(req.headers.cookie || '');
-    if (!cookies.includes('sid=lab-sess-2026')) {
+    if (!cookies.includes(LAB_SESSION_COOKIE)) {
       noteAuth('/account', false, req);
       return res.status(401).send(html('Login required', '<p>missing session cookie</p>'));
     }

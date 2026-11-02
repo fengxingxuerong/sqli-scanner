@@ -11,7 +11,7 @@
 //   node scripts/coverage-calibration.mjs          # 校验阈值配置
 //   node scripts/coverage-calibration.mjs --selftest  # 自证门禁会拦（跑 vitest，约 10s）
 // ============================================================================
-import { readFileSync, existsSync, writeFileSync, unlinkSync, mkdirSync } from 'node:fs';
+import { readFileSync, existsSync, writeFileSync, unlinkSync, mkdirSync, rmSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { dirname, resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -116,14 +116,17 @@ const tmpDir = join(ROOT, 'src', '__coverage_calibrate__');
 const tmpSrc = join(tmpDir, 'calibrate.ts');
 const tmpTest = join(tmpDir, 'calibrate.test.ts');
 
+let exitCode = 0;
 try {
   mkdirSync(tmpDir, { recursive: true });
   // 写一个有 4 个函数的源文件，但测试只覆盖 1 个 → 覆盖率 25% < 阈值 67%
+  // [D245] 未覆盖的三个函数**不加 export**：测试只需要 import covered，而 `export function`
+  // 写法会被 deadcode-guard 的正则当成真实导出（模板字符串里的假符号进了未使用清单）。
   writeFileSync(tmpSrc, `
 export function covered() { return 1; }
-export function uncovered1() { return 2; }
-export function uncovered2() { return 3; }
-export function uncovered3() { return 4; }
+function uncovered1() { return 2; }
+function uncovered2() { return 3; }
+function uncovered3() { return 4; }
 `);
   writeFileSync(tmpTest, `
 import { test, expect } from 'vitest';
@@ -142,16 +145,22 @@ test('calibrate', () => { expect(covered()).toBe(1); });
   const code = r.status ?? -1;
 
   // vitest 覆盖率门禁失败时 exit code 非 0
+  // [D245] 这里**不能直接 process.exit()**：它会立即终止进程，外层 finally 的夹具清理
+  // 永远不执行（本仓 src/__coverage_calibrate__ 里躺了 2026-10-13 的残留，就是这么来的）。
+  // 改为记录结果，等 finally 清完再退出。
   if (code !== 0) {
     console.log(`✅ selftest 通过：极低覆盖率场景被门禁拦截（exit=${code}）`);
-    process.exit(0);
+    exitCode = 0;
   } else {
-    console.error(`❌ selftest 失败：极低覆盖率场景未被拦截（exit=0），门禁可能失效`);
+    console.error('❌ selftest 失败：极低覆盖率场景未被拦截（exit=0），门禁可能失效');
     console.error('   vitest 输出尾部：', out.split('\n').slice(-10).join('\n'));
-    process.exit(1);
+    exitCode = 1;
   }
 } finally {
   try { unlinkSync(tmpSrc); } catch { /* noop */ }
   try { unlinkSync(tmpTest); } catch { /* noop */ }
-  try { require('node:fs').rmdirSync(tmpDir); } catch { /* noop */ }
+  // [D245] 旧写法 `require('node:fs').rmdirSync(...)` 在 ESM 里没有 require ⇒ 抛错被 catch 吞掉，
+  // 夹具目录从来没被删过。改用已导入的 rmSync。
+  try { rmSync(tmpDir, { recursive: true, force: true }); } catch { /* noop */ }
 }
+process.exit(exitCode);

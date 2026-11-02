@@ -4,7 +4,7 @@ import { logger } from '../logger.js';
 // tamper 插件注册表（策略模式容器）
 // 对标 sqlmap --tamper：把"单一内联混淆"升级为"链式可插拔"体系。
 // 内置插件在 applyTampers.js 导入时注册；用户插件可按名注册后由 config.wafEvasion.tamper.plugins 引用。
-export class TamperRegistry {
+class TamperRegistry {
   constructor() {
     // name -> 插件对象 { name, description, transform(payload, ctx) }
     this._plugins = new Map();

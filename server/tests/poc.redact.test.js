@@ -1,9 +1,10 @@
 // ============================================================================
 // tests/poc.redact.test.js —— PoC 凭据脱敏开关回归 [P0-SEC 2026-09-08]
 //
-// 为什么单独成测：PoC 的默认语义是「复制即跑」，因此 Cookie/Authorization 必须原样带出；
-// 但报告文件会随邮件/IM 流通，测试者的会话凭据写进去就是自我泄露。两条诉求冲突，
-// 用 config.pocRedactAuth 把选择权交给部署方——本测试锁住「默认不脱敏、开启后三处一致脱敏」。
+// 为什么单独成测：PoC 要能「复制即跑」，但报告文件会随邮件/IM 流通，测试者的会话凭据
+// 写进去就是自我泄露。2026-11-02 起引擎/REST/CLI/UI 的 config.pocRedactAuth 默认 true；
+// buildPocEvidence 本身仍接受显式 opts（低层默认不脱敏，便于单测/内部复用）。
+// 本测试锁住「开启后三处一致脱敏」与「显式关闭时保持可复现语义」。
 // ============================================================================
 
 import { test } from 'node:test';
@@ -57,6 +58,6 @@ test('报告侧接线：report.target.config.pocRedactAuth=true 时导出内容�
   assert.ok(!md.includes('SECRETSID123'), '导出报告不得残留会话凭据');
   assert.ok(/curl /.test(md), 'PoC 区块仍应存在');
 
-  const plain = rg.toMarkdown(rg.attachPoc({ ...report, target: { ...report.target, config: {} } }));
-  assert.ok(plain.includes('session=SECRETSID123'), '未开启时保持可复现语义（默认不变）');
+  const plain = rg.toMarkdown(rg.attachPoc({ ...report, target: { ...report.target, config: { pocRedactAuth: false } } }));
+  assert.ok(plain.includes('session=SECRETSID123'), '显式关闭时保持可复现语义');
 });

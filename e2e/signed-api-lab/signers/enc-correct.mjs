@@ -7,6 +7,7 @@
 // 它对非目标接口必须是无副作用的（否则会破坏保活页/取页这些不该被改写的请求）。
 import { encryptString, decryptString } from '../enc-scheme.mjs';
 
+// @dynamic —— 由引擎按 --request-script 加载调用（不是 import 消费）
 export function transform(req) {
   const url = String(req.url || '');
   if (!url.includes('/api/enc')) return req;

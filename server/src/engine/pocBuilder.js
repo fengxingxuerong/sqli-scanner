@@ -58,7 +58,7 @@ function hostOf(u) {
 //   - 含 CR/LF 的值 → $'...\r\n...'（ANSI-C 引用：既保持单行命令，又不让换行截断命令；
 //     $'' 内部 $ 与反引号同样不参与展开，只有 \ 与 ' 需转义）
 // 绝不使用双引号包裹——双引号内 $()、反引号会真实执行。
-export function shellQuote(value) {
+function shellQuote(value) {
   const s = String(value ?? '');
   if (s === '') return "''";
   if (/[\r\n]/.test(s)) {
@@ -250,7 +250,7 @@ const SENSITIVE_POC_HEADERS = new Set([
   'x-scan-token',
   'x-api-key',
 ]);
-export function maskSensitiveHeaders(headers) {
+function maskSensitiveHeaders(headers) {
   const out = {};
   for (const [k, v] of Object.entries(headers || {})) {
     out[k] = SENSITIVE_POC_HEADERS.has(String(k).toLowerCase())

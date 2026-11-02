@@ -121,6 +121,7 @@ test('crawlDepth + crawlForms 同时开启：爬取页表单生成点（GET 表�
   const target = createTarget({ url: 'https://x.com/page', method: 'GET', config: { level: 1 } }); // [FIX 2026-09-13] 开启即生效、与 level 解耦（原锁 level=5）
   target.config.crawlDepth = 2;
   target.config.crawlForms = true;
+  target.config.confirmFormWrites = true;
   const points = await parser.discover(target);
   const q = points.find((p) => p.param === 'q');
   assert.ok(q);
@@ -149,6 +150,7 @@ test('表单伴随字段：按钮进 formValues 但不生成注入点；POST 表
   const parser = new TargetParser(http);
   const target = createTarget({ url: 'https://x.com/login', method: 'POST', config: { level: 1 } });
   target.config.crawlForms = true;
+  target.config.confirmFormWrites = true;
   const points = await parser.discover(target);
   // 三个可注入字段生成 body 点
   for (const n of ['username', 'password', 'user_token']) {

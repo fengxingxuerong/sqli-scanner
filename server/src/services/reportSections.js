@@ -28,7 +28,7 @@ import { STRENGTH_LABEL } from '../engine/extraction/hashAnalysis.js';
  * @param {any} report
  * @returns {{verdict:string, note:string, constraints:string[], skipped:{total:number,byReason:Record<string,number>}|null}|null}
  */
-export function conclusion(report) {
+function conclusion(report) {
   const s = (report && report.summary) || {};
   const verdict = String(s.verdict || '');
   const note = String(s.verdictNote || '');
@@ -55,7 +55,7 @@ export function conclusion(report) {
  * @param {{total:number,byReason:Record<string,number>}|null} skipped
  * @returns {string|null}
  */
-export function skippedText(skipped) {
+function skippedText(skipped) {
   if (!skipped) return null;
   const LABEL = {
     prefilter: '预筛选（探针无信号）',

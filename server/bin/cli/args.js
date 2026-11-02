@@ -13,6 +13,8 @@ import { parseRequestFile } from '../../src/core/requestFileParser.js';
 // 归一化统一走 requestFileParser，故 params/bodyFields/multipart 的既有修复自动继承。
 import { parseRequestCollection } from '../../src/core/requestCollectionParser.js';
 import { logger } from '../../src/core/logger.js';
+// [P1-CFG 2026-11-02] CLI 默认值与引擎/REST/UI 同一真源
+import { SHARED_SCAN_DEFAULTS } from '../../src/config/sharedDefaults.js';
 import { tamperRegistry } from '../../src/core/tamper/TamperRegistry.js';
 // [D198 对标 sqlmap --load-cookies] cookie 文件的解析/主机过滤/合并（与 --live-cookies 同一真源）
 import { parseCookieFile, selectCookies, mergeCookieStrings, parseCookieHeader, hostOf } from '../../src/core/cookieFile.js';
@@ -56,6 +58,11 @@ export function applyChannelFlag(a, args) {
   //     接了只能覆盖取页/爬虫面 —— 要接就得动检测链路，属独立批次（见 docs/sqlmap-对标底账.md）。
   if (a === '--no-keep-alive') { args.disableKeepAlive = true; return true; }
   if (a === '--drop-set-cookie') { args.dropSetCookie = true; return true; }
+  // [P0-SEC/P1-SAFE 2026-11-02] 报告 PoC 脱敏（默认开）/ 自动表单写请求（默认关）：
+  // 走本函数而不是主 if 链 —— parseArgs 的复杂度基线不可再涨。
+  if (a === '--poc-redact-auth') { args.pocRedactAuth = true; return true; }
+  if (a === '--no-poc-redact-auth') { args.pocRedactAuth = false; return true; }
+  if (a === '--confirm-form-writes') { args.confirmFormWrites = true; return true; }
   return false;
 }
 
@@ -86,7 +93,7 @@ export function parseArgs(argv, preset) {
   /** @type {any} */
   const args = {
     url: null, batch: null, method: 'GET', body: null, cookie: null, headers: null,
-    format: 'json', out: null, fixPrompt: null, reproCheck: null, aiReport: null, timeoutMs: 0, concurrency: 1, help: false,
+    format: 'json', out: null, fixPrompt: null, reproCheck: null, aiReport: null, timeoutMs: 0, concurrency: 1, help: false, pocRedactAuth: true, confirmFormWrites: false,
     technique: null, level: null, risk: null, dump: false, tamper: null, proxy: null, auth: null,
     // —— 授权范围 / 传输安全 / 输入校验跳过（[P0-SEC 2026-09-09] 对应引擎新增三能力）——
     scope: null, insecureTls: false, noValidationSkip: false,
@@ -96,7 +103,7 @@ export function parseArgs(argv, preset) {
     noXpAutoEnable: false,
     // —— HTTP 协议层（对标 sqlmap --force-ssl / --ignore-redirects / --hpp）——
     forceSsl: false, ignoreRedirects: false, hpp: false,
-    ratePerSec: 50, concurrencyDet: 4,
+    ratePerSec: SHARED_SCAN_DEFAULTS.ratePerSec, concurrencyDet: SHARED_SCAN_DEFAULTS.concurrency,
     direct: null, sqlTemplate: null, driverType: null,
     // —— 枚举模式（对标 sqlmap）——
     dbs: false, tables: false, columns: false,
@@ -280,8 +287,8 @@ export function parseArgs(argv, preset) {
     else if (a === '--no-xp-auto-enable') args.noXpAutoEnable = true;
     else if (a === '--auth') args.auth = next();
     else if (a === '--auth-type') args.authType = next();
-    else if (a === '--rate' || a === '--ratePerSec') args.ratePerSec = Number(next()) || 50;
-    else if (a === '--threads' || a === '--concurrency-det') args.concurrencyDet = Number(next()) || 4;
+    else if (a === '--rate' || a === '--ratePerSec') args.ratePerSec = Number(next()) || SHARED_SCAN_DEFAULTS.ratePerSec;
+    else if (a === '--threads' || a === '--concurrency-det') args.concurrencyDet = Number(next()) || SHARED_SCAN_DEFAULTS.concurrency;
     else if (a === '--format' || a === '-f') args.format = next();
     else if (a === '--out' || a === '-o') args.out = next();
     else if (a === '--timeout') args.timeoutMs = Number(next()) || 0;

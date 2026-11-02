@@ -24,7 +24,7 @@ import { resolveProxy } from './proxy.js';
 
 // ── ① 认证头合并（P2-8：头名黑名单）────────────────────────────────────────────
 // 禁止调用者通过 auth.headers / headerParams 覆写以下头，防止请求走私/虚拟主机绕过
-export const FORBIDDEN_HEADERS = new Set([
+const FORBIDDEN_HEADERS = new Set([
   'host',
   'content-length',
   'transfer-encoding',

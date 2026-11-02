@@ -68,7 +68,7 @@ const TIER_KEYS = [
  * @param {string} helpText
  * @returns {string[]}
  */
-export function countTemplates(v) {
+function countTemplates(v) {
   let n = 0;
   const walk = (x) => {
     if (Array.isArray(x)) {
@@ -290,7 +290,7 @@ function parseApiTable(lines) {
  * 注册端点是 `GET /api/health` ⇒ 解析时统一补前缀，否则两边永远对不上（假红）。
  * 查询串（`?limit=50` / `?format=...`）一律剥掉 —— 它不是路径的一部分。
  */
-export function parseApiDocEndpoints(lines) {
+function parseApiDocEndpoints(lines) {
   const rows = [];
   lines.forEach((l, i) => {
     if (!/^#{3,4}\s/.test(l)) return;
@@ -324,9 +324,41 @@ function parseNodePathClaims(lines) {
   return out;
 }
 
+/**
+ * [P1-DOC 2026-11-02] 快速启动命令可执行性：README 教的两条「最短路径」必须自带前置条件。
+ *   · Docker：`docker compose up -d` 前必须出现 SCAN_API_TOKEN（compose 用 ${VAR:?} 强制）；
+ *   · CLI：`npm run scan` 前必须出现 `cd server && npm install`（引擎依赖在独立 package）。
+ * @param {string[]} lines README 行
+ * @returns {string[]} 失败说明
+ */
+function checkQuickstartCommands(lines) {
+  const fails = [];
+  const idx = lines.findIndex((l) => /docker\s+compose\s+up\s+-d/.test(l));
+  if (idx >= 0) {
+    const context = lines.slice(Math.max(0, idx - 3), idx + 1).join('\n');
+    if (!/SCAN_API_TOKEN/.test(context)) {
+      fails.push(
+        `⑯ README:${idx + 1} 教了 docker compose up -d，但前 3 行没有 SCAN_API_TOKEN —— ` +
+        'compose 的 ${SCAN_API_TOKEN:?} 会直接拒绝启动，照抄的人第一步就失败'
+      );
+    }
+  }
+  const cliIdx = lines.findIndex((l) => /npm\s+run\s+scan\s+--\s+-u/.test(l) && /npm\s+install/.test(l));
+  if (cliIdx >= 0) {
+    const context = lines.slice(Math.max(0, cliIdx - 2), cliIdx + 1).join('\n');
+    if (!/cd\s+server\s*&&\s*npm\s+install/.test(context)) {
+      fails.push(
+        `⑯ README:${cliIdx + 1} 教了 npm install && npm run scan，但没写 cd server && npm install —— ` +
+        '引擎依赖在独立 server 包里，干净检出会在 import 阶段 MODULE_NOT_FOUND'
+      );
+    }
+  }
+  return fails;
+}
+
 // ── 判据（纯函数，便于自证） ──────────────────────────────────────────────────
 /** @param code 代码侧取数源 */
-export function checkConsistency(input) {
+function checkConsistency(input) {
   const { overview, tiers, customer, tech, tamperCounts, payload, suiteClaims, tamperUniverse, code } = input;
   const fails = [];
   const tierCounts = TIER_KEYS.map((k) => tiers[k.id].names.length);
@@ -563,8 +595,23 @@ const SAMPLE = () => ({
   },
 });
 
+/**
+ * ⑯ 快速启动命令的自证：正例不得误报、反例必须被点名。
+ * @param {string[]} bad 失败收集数组
+ */
+function selftestQuickstart(bad) {
+  const dockerBad = checkQuickstartCommands(['', '```bash', 'docker compose up -d', '```']);
+  if (dockerBad.length !== 1 || !/⑯/.test(dockerBad[0])) bad.push('样本「Docker 缺 token」未被 ⑯ 点名');
+  const dockerOk = checkQuickstartCommands(['export SCAN_API_TOKEN=xxx', 'docker compose up -d']);
+  if (dockerOk.length) bad.push(`样本「Docker 有 token」本应全绿，却报：${dockerOk[0]}`);
+  const cliBad = checkQuickstartCommands(['npm install && npm run scan -- -u http://x']);
+  if (cliBad.length !== 1 || !/⑯/.test(cliBad[0])) bad.push('样本「CLI 缺 server install」未被 ⑯ 点名');
+  const cliOk = checkQuickstartCommands(['npm install', 'cd server && npm install', 'npm run scan -- -u http://x']);
+  if (cliOk.length) bad.push(`样本「CLI 两次安装」本应全绿，却报：${cliOk[0]}`);
+}
+
 function selftest() {
-  const bad = [];
+  const bad = []; selftestQuickstart(bad);
   const expectOk = (name, mut) => {
     const s = SAMPLE();
     mut(s);
@@ -685,7 +732,7 @@ function selftest() {
     for (const b of bad) console.error('    · ' + b);
     return 1;
   }
-  console.log('[readme] ✓ 自证通过：26 类漂移样本全部被点名，5 类正确样本无误报（判据不空转）');
+  console.log('[readme] ✓ 自证通过：28 类漂移样本全部被点名，7 类正确样本无误报（判据不空转）');
   return 0;
 }
 
@@ -745,6 +792,7 @@ function main() {
     overview, tiers, customer, tech, tamperCounts, payload, suiteClaims, tamperUniverse, docs, apiTable, apiDoc, nodePaths, code,
     cliFlags, missingCliFlags, missingHelpFlags,
   });
+  fails.push(...checkQuickstartCommands(lines));
   if (fails.length) {
     console.error(`[readme] ✗ README 声称与事实不符（${fails.length} 处）：`);
     for (const f of fails) console.error('    · ' + f);

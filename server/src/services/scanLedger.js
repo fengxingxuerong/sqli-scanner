@@ -18,6 +18,9 @@ import {
 import { join, dirname, resolve as pathResolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { AppError, ErrorCode } from '../core/errors.js';
+// [P0-SEC 2026-11-02] 台账落盘统一脱敏：报告/文档/PoC 三处必须同源，
+// 否则「导出已打码、台账仍明文」会变成第二条凭据泄露路径。
+import { redactPersistedReport, redactPocText } from './reportRedaction.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_DIR = pathResolve(HERE, '../../data/ledger');
@@ -26,6 +29,30 @@ function ledgerDir() {
   const d = process.env.SQLI_LEDGER_DIR || DEFAULT_DIR;
   mkdirSync(d, { recursive: true });
   return d;
+}
+
+/** 落盘 HTML/Markdown 前统一过文本脱敏（调用方预渲染的文档也不豁免）。 */
+function writeDocs(write, docs) {
+  if (docs.html) write('report.html', redactPocText(docs.html));
+  if (docs.markdown) write('report.md', redactPocText(docs.markdown));
+}
+
+/**
+ * [P0-SEC 2026-11-02] report.json 内容统一来源：优先调用方预渲染 JSON，但**必须重新解析并脱敏**；
+ * 解析失败/缺省则回退到已脱敏的报告对象。
+ * @param {unknown} docsJson
+ * @param {object} safeReport
+ * @returns {string}
+ */
+function buildReportJson(docsJson, safeReport) {
+  if (typeof docsJson === 'string' && docsJson) {
+    try {
+      return JSON.stringify(redactPersistedReport(JSON.parse(docsJson)), null, 2);
+    } catch {
+      /* 预渲染 JSON 损坏 ⇒ 回退安全报告 */
+    }
+  }
+  return JSON.stringify(safeReport, null, 2);
 }
 
 /**
@@ -40,9 +67,12 @@ function ledgerDir() {
 export function recordScan(report, docs = {}, opts = {}) {
   void opts; // 预留参数：脱敏在 ReportGenerator 完成，此处不参与，显式声明以免误读
   if (!report || typeof report !== 'object') throw new AppError(ErrorCode.INVALID_PARAM, 'recordScan: report required');
+  // [P0-SEC 2026-11-02] 台账是**长期留存**的第二份报告：内存里/导出时脱敏过，不代表落盘这份也脱敏。
+  // 统一在入口强制走 redactPersistedReport（auth/proxy/cookies/Authorization/token + PoC 凭据头）。
+  const safeReport = redactPersistedReport(report);
   // [FIX 2026-09-18] scanId 会拼进落盘路径，必须收敛为单层目录名（原先 `../x` 可在
   // ledger 根目录之外创建目录，实测复现）。scanId 缺省时的自动生成值不受影响。
-  const scanId = safeScanId(report.scanId || report.id || `scan-${Date.now()}`);
+  const scanId = safeScanId(safeReport.scanId || safeReport.id || `scan-${Date.now()}`);
   const dir = join(ledgerDir(), scanId);
   const pocDir = join(dir, 'poc');
   mkdirSync(pocDir, { recursive: true });
@@ -54,13 +84,12 @@ export function recordScan(report, docs = {}, opts = {}) {
     writeFileSync(p, content, 'utf-8');
     files.push(name);
   };
-  if (docs.html) write('report.html', docs.html);
-  if (docs.markdown) write('report.md', docs.markdown);
-  write('report.json', docs.json || JSON.stringify(report, null, 2));
+  writeDocs(write, docs);
+  write('report.json', buildReportJson(docs.json, safeReport));
 
   // PoC 逐条落盘（与 ReportGenerator._pocEntries 同编号规则：poc-N-M-point.txt）
   let n = 0;
-  for (const v of report.vulns || []) {
+  for (const v of safeReport.vulns || []) {
     if (!v || !v.poc) continue;
     n += 1;
     const point = String(v.pointId ?? '-');
@@ -73,32 +102,32 @@ export function recordScan(report, docs = {}, opts = {}) {
       seen.add(p);
       m += 1;
       const file = join(pocDir, `poc-${n}-${m}-${point}.txt`);
-      writeFileSync(file, String(v.poc.raw || v.poc.curl || ''), 'utf-8');
+      writeFileSync(file, redactPocText(String(v.poc.raw || v.poc.curl || '')), 'utf-8');
       files.push(`poc/poc-${n}-${m}-${point}.txt`);
     }
   }
 
-  const startedAt = report.startedAt || report.meta?.startedAt || null;
-  const finishedAt = report.finishedAt || new Date().toISOString();
+  const startedAt = safeReport.startedAt || safeReport.meta?.startedAt || null;
+  const finishedAt = safeReport.finishedAt || new Date().toISOString();
   const meta = {
     scanId,
-    target: report.target?.url || report.target?.baseUrl || '-',
-    method: report.target?.method || 'GET',
+    target: safeReport.target?.url || safeReport.target?.baseUrl || '-',
+    method: safeReport.target?.method || 'GET',
     startedAt,
     finishedAt,
-    points: (report.points || []).length,
-    vulns: (report.vulns || []).length,
-    payloadHits: (report.vulns || []).reduce((acc, v) => acc + (Array.isArray(v.payloads) ? v.payloads.length : 0), 0),
+    points: (safeReport.points || []).length,
+    vulns: (safeReport.vulns || []).length,
+    payloadHits: (safeReport.vulns || []).reduce((acc, v) => acc + (Array.isArray(v.payloads) ? v.payloads.length : 0), 0),
     // [goal-FIX 2026-09-16] verdict 口径修正：vulns>0 时 summary.verdict 仍是阴性口径
     // （scanRunner 仅在无命中时区分 inconclusive/no_vulnerability_detected），台账若原样透传
     // 会出现「vulns=3 verdict=no_vulnerability_detected」的交付级自相矛盾。
-    verdict: (report.vulns || []).length > 0 ? 'vulnerability_detected' : (report.summary?.verdict || 'no_vulnerability_detected'),
-    dbms: report.dbms || null,
+    verdict: (safeReport.vulns || []).length > 0 ? 'vulnerability_detected' : (safeReport.summary?.verdict || 'no_vulnerability_detected'),
+    dbms: safeReport.dbms || null,
     // [2026-09-29] History 页改由服务端 `GET /api/scans` 供数，UI 要显示风险等级色标；
     // 而台账 meta 此前只存 vulns 条数 ⇒ 前端只能显示"—"，等于接了服务端反而丢了信息。
     // 这里一次性把「最高风险」固化进 meta。**老台账读出来是 undefined ⇒ UI 显示"—"**，
     // 不回填、不猜 —— 没有就是没有。
-    highestRisk: highestRisk(report.vulns || []),
+    highestRisk: highestRisk(safeReport.vulns || []),
     files,
     recordedAt: new Date().toISOString(),
   };

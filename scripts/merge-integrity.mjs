@@ -119,7 +119,7 @@ function lines(text) {
 }
 
 // ── 自动探测 merge 三方 ──────────────────────────────────────────────────────
-export function detectMergeContext() {
+function detectMergeContext() {
   const parents = git(['rev-list', '--parents', '-n', '1', 'HEAD'], { allowFail: true });
   if (!parents) return null;
   const parts = parents.split(/\s+/);
@@ -139,7 +139,7 @@ export function detectMergeContext() {
  * merge-base 取不到的条目（浅克隆）跳过，不阻断。
  * @param {string} range 形如 `A..B`
  */
-export function detectMergeContextsInRange(range) {
+function detectMergeContextsInRange(range) {
   const merges = (git(['rev-list', '--merges', range], { allowFail: true }) || '')
     .split('\n')
     .map((s) => s.trim())
@@ -165,7 +165,7 @@ function changedFilesInMerge({ ours, theirs, merge }) {
 
 // ── 判据 ① b：symbol 级"新增导出是否被吃掉" ──────────────────────────────────
 /** 从源码里抽导出符号名（只看 Program 顶层，ESM 语义） */
-export function exportedSymbols(src) {
+function exportedSymbols(src) {
   if (!src) return new Set();
   let ast;
   try {
@@ -206,7 +206,7 @@ function collectIds(node, out) {
  * 对单个文件跑 symbol 判据 + 行级判据。
  * @returns {Array<object>} findings
  */
-export function checkFileAcrossMerge(file, ctx) {
+function checkFileAcrossMerge(file, ctx) {
   const findings = [];
   const baseSrc = show(ctx.base, file);
   const oursSrc = show(ctx.ours, file);
@@ -321,7 +321,7 @@ export function checkFileAcrossMerge(file, ctx) {
 // 这是本门禁最有价值的一条验证：把 base/ours/theirs 指向真实的那三个 commit，
 // 判据必须自己喊出"theirs 侧新增的导出 highestRisk 在 merge 结果里没了"。
 // 伪造样本容易写成"顺着判据写"，真历史不会。
-export function selfTest() {
+function selfTest() {
   const SCENARIO = {
     name: '真实事故复现：684e4a3 把 d44ff82 的 scanLedger 实现吃掉',
     base: '00ce269',   // 远端 squash 态（旧版 scanLedger）

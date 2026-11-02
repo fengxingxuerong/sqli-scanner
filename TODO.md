@@ -5,6 +5,76 @@
 
 ---
 
+## 2026-11-03 批次 D247 · 前端 P1-CFG 遗留收口：3 红清零 + 批次补登记（已完成，见 CHANGELOG）
+
+**动机**：D246 跑收口清单在 facts 项暴露——工作区有一批**未登记**的 P1-CFG 前端接入
+（UI 默认值接生成物真源 + 两护栏键 + 2 个新测试 + 2 个未跟踪脚本），带 3 个红测试、无批次记录。
+《交付状态报告-2026-11-01》的 `git add -A && git commit` 若照做会把红测试一起提交。
+
+**定性**：3 红全是**测试写死旧默认值**（enableExtract 翻转为 false / crawlDepth 收到 0 后场景没跟），
+组件逻辑健全；standard 预设的身份声明「= DEFAULT_CONFIG 检测强度面」自证镜像该跟。
+
+**交付**：scanPage ×2 场景重写（护栏双向保留：关=无框直发 / 开=必过确认框，零断言放宽）；
+scanPresets standard crawlDepth 1→0 + 注释写明 [P1-CFG] 语义；i18n 双语 presetStandardHint 同步；
+2 个脚本 git add 入库（ref-integrity 抓的就是 CI 断链）。**连带**：首次提交被 pre-commit arch:guard
+拦截——TargetParser.js 1241 行超 1200（同源遗留的服务端半批 +85 行），按 D238 先例把 formWriteGate
+函数族逐字迁出（1241→1170，27/27 + arch 绿）；**暴露门禁盲区：arch:guard 不在 gate:close 41 项里**
+（gate:close 全绿 ≠ arch 绿），留观察。
+
+**结果**：前端 579/579；facts:refresh 三步一体（README 6 处、服务端 4034=4027 pass/0 fail/7 skip）；
+**gate:close 41/41** + arch:guard 绿。诚实边界：原始改动出自此前未署名的工作，本批只做收口并补登记。
+
+---
+
+## 2026-11-03 批次 D246 · 交接包收口：self-check 判据去过期化（228 冻结数 + 旧真源路径）（已完成，见 CHANGELOG）
+
+**动机**：交付文档审查。实跑 `docs/pentest-handover/scripts/self-check.mjs` 实测 **8/10**
+（README 与 PH-07 V2 均宣称 10/10）——交接包 v1.0-rc1（09-16 打包）已落后仓库 6.5 周。
+
+**两处判据失守**：C4 冻结「tamper 注册数 = 228」（打包时点快照，实测 234，真漂移）；
+C6 在 defaults.js 里 grep `ratePerSec: 10`（[P1-CFG] 起单一真源迁至 sharedDefaults.js，
+defaults.js 仅转引，假阳性）——共性是判据钉在会漂移的载体上。
+
+**交付**：C4 改钉结构不变量「plugins/ 文件数 = applyTampers.js 导入数 = 运行时注册数」
+（234/234/234；正好覆盖 applyTampers.js 头注自曝的 registerMany 列表跳环先例），数量口径交回
+README（readme:check 守卫）；C6 改读运行时真源 + 新增「defaults.js 不得写死 ratePerSec
+字面量」漂移守卫；顺带修掉 C4 异步塞同步 helper、靠 run() 复制逻辑重执行兜底、228 字面量
+两处维护的结构 wart。
+
+**牙齿验证**：注入孤儿插件文件 → C4 精准红；真源改 11 → C6 精准红；还原后 10/10，exit=0。
+
+**台账对齐**：达标验证报告「最终结论」checkbox 达成后长期未勾——已勾；`handover-v1.0` tag
+按 VERSION.md 修订约定追补于 R3 达标 commit 3d63b7e（annotated，注明追补缘由）；白皮书
+§3.5 / 能力矩阵 B3 散文的「228」改为指向 self-check C4 实测；review-engineerB.md 追加 E 节
+（历史行不改）。VERSION 递增 v1.0-rc2；包文档内容基线仍是 09-16 审计，未重演全量能力审计
+（诚实边界）。
+
+---
+
+## 2026-11-02 批次 D245 · 死代码 164 条清零（先把门禁的假阳性修掉）（已完成，见 CHANGELOG）
+
+**动机**：D244 把「164 条未分类」挂出来时说「必须逐条读语义」。真去做才发现：**没有一条是真死代码**，
+全是门禁的三类假阳性。
+
+**三类假阳性**：① 动态 `await import(pathToFileURL(resolve(...)))`（57 条，e2e 主力形态，
+静态正则完全看不见；按旧判据删 export 会让 25 个活符号断链）；② 再导出 `export { X } from './y.js'`
+（10 条，删了源头 export 会 `does not provide an export named`，实测 298 个测试文件同时红）；
+③ 模板字符串里的 `export function`（3 条，覆盖率校准夹具）。
+
+**顺带修真 bug**：`coverage-calibration.mjs` 的夹具从 2026-10-13 起就没清过 ——
+`finally` 里用了 ESM 不存在的 `require`，且 `process.exit()` 在 try 内直接终止进程跳过 finally。
+
+**交付**：`collectDynamicImportFiles` + `toProjectRelative`；`export {...} from` 计入引用；
+`export * from` 目标整份豁免；`server/bin` 纳入扫描面；自证 ⑥⑦⑧。
+
+**结果**：基线 **164 → 0**；71 个多余导出降为模块私有（代码保留）、4 个 `@public`、7 个 `@dynamic`、
+4 个重复导出/常量改内部引用；另 78 条属门禁假阳性（修判据后不再检出）。
+
+**第二个扫描面缺口**：`server/index.js`（服务入口）不在 SCAN_DIRS 里，它 `import { reportAiRoutes }`
+的引用看不见 —— 删掉具名导出后服务起不来。已把扫描面扩到整个 `server`（递归，跳过 node_modules）。
+
+---
+
 ## 2026-11-02 批次 D244 · 基线收紧（修好「重建基线」这条路本身）（已完成，见 CHANGELOG）
 
 **动机**：门禁长期挂着「可下调基线 20 条 / 可上调基线 3 处」告警无人执行。按纪律先问为什么

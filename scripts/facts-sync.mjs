@@ -562,7 +562,7 @@ function buildFacts() {
  * @param {{files?: Record<string,string>}} before
  * @param {{files?: Record<string,string>}} after
  */
-export function diffDigests(before, after) {
+function diffDigests(before, after) {
   const b = before?.files || {};
   const a = after?.files || {};
   const changed = [];

@@ -73,7 +73,7 @@ export function getResponseHeader(headers, name) {
  * @param {*} data 响应体
  * @returns {Buffer|null} 非二进制输入返回 null
  */
-export function toBuffer(data) {
+function toBuffer(data) {
   if (Buffer.isBuffer(data)) return data;
   if (data instanceof ArrayBuffer) return Buffer.from(data);
   if (ArrayBuffer.isView(data)) return Buffer.from(data.buffer, data.byteOffset, data.byteLength);

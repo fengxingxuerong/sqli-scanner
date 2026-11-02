@@ -65,7 +65,7 @@ function collectFiles(rel, out) {
  * @param {string[]} scanDirs - 扫描目录
  * @returns {{markers:Array<{type,file,line,date?,batch?,summary?,unified:boolean}>}}
  */
-export function scanDebtMarkers(scanDirs) {
+function scanDebtMarkers(scanDirs) {
   const markers = [];
   for (const d of scanDirs) {
     const files = collectFiles(d, []);
@@ -113,7 +113,7 @@ function loadBaseline() {
  * @param {{markers?:object}} baseline
  * @returns {{errors:string[],notes:string[]}}
  */
-export function judge(found, baseline) {
+function judge(found, baseline) {
   const errors = [];
   const notes = [];
   const baseMarkers = baseline.markers || {};

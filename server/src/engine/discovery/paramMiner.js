@@ -27,7 +27,7 @@
 import { URL } from 'url';
 import { PARAM_WORDLIST, MINE_CANARY } from './paramWordlist.js';
 
-export const MINE_DEFAULTS = Object.freeze({
+const MINE_DEFAULTS = Object.freeze({
   chunkSize: 30, // 每次请求携带的候选参数数（Arjun 用 ~500；本仓保守取 30，压低单请求体积与误报面）
   maxRequests: 150, // 请求预算硬顶（含 baseline/canary/分组/二分/复核全部请求）
   lenDiffThreshold: 24, // 无反射时判定「响应有行为变化」的最小长度差

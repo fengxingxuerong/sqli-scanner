@@ -78,7 +78,9 @@ test('形态-6) 基线文件存在且结构合法（门禁不得因基线缺失�
   assert.ok(b && typeof b === 'object', '基线应为对象');
   assert.ok(b.symbols && typeof b.symbols === 'object', '基线应含 symbols 对象字段');
   const keys = Object.keys(b.symbols);
-  assert.ok(keys.length > 0, '基线不应为空（存量确有未使用导出）');
+  // [D245] 基线**可以为空**：2026-11-02 把 164 条逐条处置完（三类假阳性修复 + 多余导出降为
+  // 模块私有），真实存量就是 0。旧断言「必须有条目」会把「清干净」判成失败 ——
+  // 门禁有没有牙由 --selftest ① 证明（导出无人引用必须报出），不靠基线非空假装在工作。
   for (const k of keys) {
     const v = b.symbols[k];
     assert.ok(v.reason, `基线条目 ${k} 必须有 reason`);

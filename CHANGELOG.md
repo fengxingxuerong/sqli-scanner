@@ -7,13 +7,16 @@
 > 下一批次起的条目写在这里。发版时把本节整体升为 `## [x.y.z] - YYYY-MM-DD` 并补汇总段。
 
 <!-- changelog-index:start -->
-**本段覆盖 17 个批次（D228–D244，2026-11-01 → 2026-11-02）**。正文按时间倒序排列；
+**本段覆盖 20 个批次（D228–D247，2026-11-01 → 2026-11-03）**。正文按时间倒序排列；
 下表是同一批次的索引，便于按编号或关键词定位。**索引只是导航，正文未做任何删改**
 （被推翻的旧结论原样保留，这是本仓的既定口径）。新增批次后跑
 `node scripts/changelog-index.mjs --write` 重生成，`--check` 校验是否过期。
 
 | 批次 | 日期 | 主题 |
 |---|---|---|
+| D247 | 11-03 | 前端 P1-CFG 遗留收口：3 红清零 + 批次补登记（gate:close 41/41） |
+| D246 | 11-03 | 交接包收口：self-check 判据去过期化 + 台账首尾对齐 |
+| D245 | 11-02 | 死代码 164 条清零（三个假阳性来源 + 一个吞异常的清理） |
 | D244 | 11-02 | 基线收紧（发现门禁从 D180 起就无法重建） |
 | D243 | 11-02 | 失败取证补齐断言消息（让 flaky 可定因，不再盲调阈值） |
 | D242 | 11-02 | CI 首跑红的修复：macos 冻结下的 deadline 归因 |
@@ -33,7 +36,162 @@
 | D228 | 11-01 | AI 报告网关端到端验收（ai-gateway 套件）+ 本地网关 runbook + CI 靶场硬要求扩展 |
 <!-- changelog-index:end -->
 
+### 2026-11-03 批次 D247 · 前端 P1-CFG 遗留收口：3 红清零 + 批次补登记（gate:close 41/41）
+
+**发现**（D246 跑收口清单在 facts 项暴露）：工作区躺着一批**未登记**的前端改动——
+[P1-CFG] UI 默认值接进单一真源生成物（`constants.ts`：concurrency/timeout/retry/ratePerSec/timeThreshold/
+enableExtract/crawlDepth/pocRedactAuth/confirmFormWrites 全部改读 `scanDefaults.generated.json`）、
+`SafetyGuardSection` 接进表单写/PoC 脱敏两护栏键、新增 `scanDefaults.test.ts` 与
+`scanConfig.formWrites.test.tsx`、两个未跟踪脚本（`sync-scan-defaults.mjs` / `migrate-ledger-redact.mjs`）。
+带 **3 个红测试**，TODO/CHANGELOG 无任何批次记录。
+
+**3 红定性**（全是**测试写死旧默认值**，组件逻辑健全、一行未动）：
+
+- `scanPage.test.tsx` ×2：按旧默认（enableExtract=true）写的场景——「默认开启拖库」点开始等确认框
+  （新默认直接发起，`getByText` 抛错）；「显式关闭」点开关（新默认下点开关变**开启**，waitFor 超时）。
+- `scanPresets.test.ts`：standard 预设 `crawlDepth=1` vs 新默认 0。预设注释自证身份
+  「标准扫描 = DEFAULT_CONFIG 的检测强度面」——默认面动了，镜像没跟。
+
+**修法**（护栏双向保持钉住，不放宽断言）：
+
+- scanPage ×2 重写场景：默认关 → 无框直发（`enableExtract=false` 断言保留）；显式开 →
+  ConfirmExtract 门（取消不发 / 确认带 true 发起，原断言全保留）。
+- scanPresets standard `crawlDepth: 1→0`（镜像身份兑现；要爬虫升级走 deep），注释写明 [P1-CFG] 语义。
+- i18n 双语 `presetStandardHint` 同步（「爬虫深度 1」→「不开爬虫」，与镜像值一致）。
+- 两个脚本 `git add` 入库——ref-integrity 口径就是 git 跟踪集合，「本机有、库里没有」正是它要抓的
+  CI 断链（`Cannot find module`）。
+
+#### 连带发现：pre-commit 架构门禁拦下 TargetParser 超限（同源遗留的服务端半批）
+
+首次提交被 pre-commit 的 arch:guard 拦截：`TargetParser.js` **1241 行**（HEAD 1170），超 1200 上限且不在
+基线 = 新债。涨出来的 +85 行正是同一批未登记工作的服务端半批（[P1-SAFE] 表单写入门控，配套
+`targetParser.formWriteGate.test.js`）。**暴露一个门禁盲区**：arch:guard 只在 pre-commit 与 check:all，
+不在 gate:close 的 41 项里——gate:close 全绿 ≠ arch 绿，本批实测撞上。
+
+修法按 D238「贴线抽取」先例：门控函数族（2 常量 + 4 函数，对 TargetParser **零内部依赖**，parser 由
+调用方传参）逐字迁出到 [formWriteGate.js](../server/src/engine/formWriteGate.js)，TargetParser 留一行
+import；**1241 → 1170**（正好回到 HEAD 行数，纯搬移零行为变化）。判据：formWriteGate/crawl/forms
+三套 27/27 + arch:guard 绿 + 全量 gate:close 复跑绿。
+
+**验证**：前端 579/579（3 红清零，零断言放宽）；`npm run facts:refresh` 三步一体（README 6 处回写、
+服务端 4034 = 4027 pass / 0 fail / 7 skip、质量台账重生成）；**gate:close 41/41**；arch:guard 绿。
+
+**诚实边界**：本批只做收口——`constants.ts` / `SafetyGuardSection` / `apiClient` / i18n 结构与两护栏键、
+TargetParser 门控逻辑的**原始改动出自此前未署名的工作**，随本次提交一并入库并由本条目补登记；
+D247 新增 = 测试场景重写、预设镜像值、双语文案、脚本登记、formWriteGate 贴线抽取。
+
+### 2026-11-03 批次 D246 · 交接包收口：self-check 判据去过期化 + 台账首尾对齐
+
+**动机**：交付文档审查。交接包 v1.0-rc1（2026-09-16 打包，对应 master @ daa7182）的
+机器自检实测 **8/10**（README 与 PH-07 V2 均宣称 10/10，exit=0）——判据钉在会漂移的
+载体上，6.5 周后双失守。
+
+#### 失守点 ①：C4 冻结数（真漂移）
+
+`tamper 注册数 = 228` 是打包时点快照，实测 234（批次新增 6 个 tamper）。快照数进判据 =
+把「当时的事实」当成「永远的事实」。改钉**结构不变量**：`plugins/` 文件数 =
+`applyTampers.js` 对 `./plugins/` 的 import 语句数 = 运行时注册数（234/234/234）——
+这正好覆盖 `applyTampers.js` 头注自曝过的真实缺陷形态（registerMany 列表 76→90 跳环）；
+数量本身交回 README（`readme:check` 双向核对守卫），自检不再冻结数字。
+同形态的散文冻结数一并清掉：白皮书 §3.5、能力矩阵 B3 的「228 个插件」改为指向 C4 实测。
+
+#### 失守点 ②：C6 旧真源路径（假阳性）
+
+C6 在 `defaults.js` 里 grep `ratePerSec: 10`，但 [P1-CFG] 起单一真源迁至
+`sharedDefaults.js`，defaults.js 仅转引——值没漂，判据瞎了。改读运行时真源
+（import `SHARED_SCAN_DEFAULTS` 断言 ===10），并新增反向守卫：defaults.js 再出现
+`ratePerSec: <数字>` 字面量即红（防绕过单一真源写死）。
+
+顺带修结构 wart：原 C4 判据函数是 async 塞进同步 helper（返回 Promise 恒真），
+靠 `run()` 里复制一份逻辑重执行兜底、228 字面量两处维护——改为顶部预载一次，
+判据全同步、单点维护。
+
+#### 牙齿验证（判据必须能红）
+
+- 注入孤儿插件文件 `__orphan_tooth_test__.js` → C4 精准红（文件 235/导入 234/注册 234）；删除后复绿。
+- sharedDefaults.js ratePerSec 10→11 → C6 精准红（单一真源实测 = 11）；还原后复绿。
+- 终态 10/10 PASS，exit=0。
+
+#### 台账首尾对齐（只追加，不改历史）
+
+- 达标验证报告「最终结论」：R3 达成（9.1）但 checkbox 一直未勾——补勾，并注明 tag 补打缘由。
+- `handover-v1.0` tag：原「达标后打 tag」承诺未执行——追补 annotated tag 于 R3 ALL PASS
+  commit `3d63b7e`（已验证为 master 祖先）。
+- review-engineerB.md 追加 E 节记录 A1/A2 判据修订（09-16 历史行保留不改）。
+- VERSION 递增 v1.0-rc2；**诚实边界**：包文档内容基线仍是 09-16 审计，rc2 未重演全量能力审计。
+
+### 2026-11-02 批次 D245 · 死代码 164 条清零（三个假阳性来源 + 一个吞异常的清理）
+
+**动机**：D244 把「死代码 164 条未分类」挂了出来，理由是「必须逐条读语义」。本批真去做了，
+结论是**先修门禁，再谈分类** —— 164 条里没有一条是真正的「死代码」，全是三类假阳性。
+
+#### 假阳性 ①：动态 import（57 条）
+
+本仓 e2e 大量写：
+
+```js
+const { createOobLabApp } = await import(pathToFileURL(resolve(ROOT, 'e2e/x/lab-app.mjs')).href)
+```
+
+`extractReferences` 只认 `import ... from '...'`，运行时拼装路径的动态导入**完全看不见**。
+于是一整批活代码被判死。**实测代价**：先按旧判据动手删 export，`e2e` 立刻断链
+（`createSecondOrderLab` / `createRecallLab` / `buildPgTarget` 等 25 个符号）。
+
+修法：新增 `collectDynamicImportFiles`，从 `import(` 起 400 字符窗口里取第一个 `.js/.mjs/.ts`
+字面量，归一到项目相对路径后**整份豁免**该文件的导出（解构了谁静态不可知）。
+取向写明是「宁少报不误伤」：提取不出就按未使用报出，属已知漏报。
+
+#### 假阳性 ②：再导出 `export { X } from './y.js'`（10 条）
+
+`httpClient.js` 把 `responseCodec.js` 的 5 个函数转发出去保持旧导入路径。旧判据不认这种形态，
+于是 `responseCodec.js` 里的实现被判死；一旦删掉它的 `export`，转发处立即
+`does not provide an export named 'detectResponseCharset'` —— **298 个服务端测试文件同时红**
+（本批中途真实发生，已回退）。
+
+修法：`export { ... } from` 计入 refs；`export * from` 目标整份豁免。
+顺带把扫描面从 `server/src|tests|bin` 扩到整个 `server`（递归，已跳过 node_modules）——
+`server/index.js` 这个**服务入口**不在扫描面里，它 `import { reportAiRoutes }` 的引用看不见，
+于是删掉具名导出后服务起不来（`does not provide an export named`，实测同一轮红的还有它）。
+`cli.js` 里 `(await import('../src/mcp/index.js')).runMcpStdio()` 也是同类漏扫。
+
+#### 假阳性 ③：模板字符串里的 `export function`（3 条）
+
+`scripts/coverage-calibration.mjs` 用 `writeFileSync` 生成校准夹具，夹具源码写在模板字符串里。
+正则派门禁把它当成真实导出。修法：夹具里三个未覆盖函数不再 `export`（测试只 import `covered`，
+覆盖率统计按函数算，不依赖导出），既消除假阳性又不削弱校准。
+
+#### 顺带修真 bug：校准夹具从来没有被清理
+
+`src/__coverage_calibrate__/` 里躺着 **2026-10-13** 的残留（也正是它贡献了上面 3 条假阳性）。
+根因两层：
+
+1. `finally` 里写的是 `require('node:fs').rmdirSync(...)` —— ESM 没有 `require`，抛错被
+   `catch { /* noop */ }` 吞掉；
+2. 更关键：`process.exit(0)` 在 `try` 块内调用，**立即终止进程，finally 根本不执行**。
+
+改为记录 `exitCode`，`finally` 清完再 `process.exit`。复验：`--selftest` 通过且目录已删净。
+
+#### 处置结果
+
+| 处置 | 数量 | 说明 |
+|---|---|---|
+| 去 `export`（模块私有） | 71 | 代码保留、行为不变；仅「导出了但只有本文件用」 |
+| `@public` 标注 | 4 | `eventBus` 的 `emit/toSSE/dispose/_peekReplayBuffer`（测试以 `import * as` 消费） |
+| `@dynamic` 标注 | 7 | `signers/*.mjs` 的 `transform`（引擎按 `--request-script` 加载） |
+| 重复导出 / 常量改内部引用 | 4 | `reportAiRoutes` 具名导出、`LAB_SESSION_COOKIE`、前端 `API_BASE`/`EVENT_STYLE`/`LOG_COLOR` 中的常量侧 |
+| **删除真死代码** | **2** | `tamper/marker.js` 的 `isStashChar` / `stash` —— 注释写着「供插件引用」，实际 `stashAll` 早已内联实现，全仓零引用（164 条里唯一的真死代码） |
+| 门禁假阳性（不再检出） | 78 | 动态 import 57 + 再导出 10 + `server/index.js` 扫描面 + 常量折叠 + 模板串 3 |
+| **基线** | **164 → 0** | `docs/_deadcode-baseline.json` 已无条目 |
+
+#### 验证
+
+- `deadcode-guard --selftest` **8/8**（新增 ⑥⑦ 动态 import、⑧ 再导出）
+- 缺陷注入：注释掉动态豁免 → ⑥⑦ 红（`REAL_EXIT=1`）；还原后全绿
+- 中途误删事件的反证：修复前 298 文件红 → 修复后同批 30/30 绿 → 全量回归见收口
+- `coverage-calibration --selftest` 通过且夹具清理干净
+
 ### 2026-11-02 批次 D244 · 基线收紧（发现门禁从 D180 起就无法重建）
+
 
 **动机**：门禁自己一直在告警「可下调基线 20 条 / 可上调基线 3 处」，但没人执行。按纪律
 先问「为什么没人做」，再动手 —— 结果不是人懒，是 **`--fix-baseline` 根本执行不了**。

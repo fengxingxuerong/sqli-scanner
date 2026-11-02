@@ -21,7 +21,7 @@ import { AppError, ErrorCode } from '../core/errors.js';
  * 与 ReportGenerator.csvSafeCell、src/shared/dumpExport.ts 逐字一致，
  * 三处同源由 src/tests/csvFormulaParity.test.ts 钉住（改动任一侧即红）。
  */
-export const FORMULA_PREFIX_RE = /^[=+\-@\t\r]/;
+const FORMULA_PREFIX_RE = /^[=+\-@\t\r]/;
 
 /**
  * CSV 单元格转义：公式前缀防护 + 含逗号/引号/换行/首尾空格的字段用双引号包裹，内部引号双写。

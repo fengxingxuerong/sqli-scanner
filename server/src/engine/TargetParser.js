@@ -18,6 +18,8 @@ import { parseXmlBody, xmlLeafPaths, getXmlLeaf } from '../core/xmlBody.js';
 import { looksLikeGraphQLQuery, findGraphQLInlineLiterals } from './graphqlInline.js';
 // [D41 2026-10-11 对标 sqlmap -p/--param-exclude/--param-filter] 注入点筛选三件套
 import { applyParamSelection } from './paramSelection.js';
+// [P1-SAFE 2026-11-02] 自动发现表单的写入门控 —— 函数族见 ./formWriteGate.js（D247 贴线抽取，逐字迁出）
+import { buildFormPointMeta } from './formWriteGate.js';
 
 // 反 CSRF 字段名正则（命中即记为 csrfTokenName）
 const CSRF_RE = /^(csrf|_token|__RequestVerificationToken|authenticity_token)$/i;
@@ -805,7 +807,7 @@ export class TargetParser {
     const forms = this._parseForms(html, target.baseUrl);
     const seen = new Set(points.map((p) => this._pointKey(p, target.baseUrl)));
     for (const form of forms) {
-      this._pushFormPoints(form, null, points, seen);
+      this._pushFormPoints(form, null, points, seen, target);
     }
   }
 
@@ -825,25 +827,23 @@ export class TargetParser {
    * @param {string|null} crawledUrl 该表单所在的已抓取页（无则 null）
    * @param {object[]} points 注入点数组（就地追加）
    * @param {Set<string>} seen 去重键集合（就地更新）
+   * @param {object} target 扫描目标（读 config.confirmFormWrites，并登记跳过原因）
    */
-  _pushFormPoints(form, crawledUrl, points, seen) {
-    const loc = form.method === 'POST' ? 'body' : 'url';
-    const actionUrl = loc === 'url' ? this._urlWithValues(form.action, form.values) : form.action;
-    const csrf = form.csrfTokenName || null;
-    const isStore = form.method === 'POST';
-    const storeKind = isStore ? this._inferStoreKind(form.values) : null;
+  _pushFormPoints(form, crawledUrl, points, seen, target) {
+    const meta = buildFormPointMeta(this, form, target);
+    if (!meta) return;
     for (const fieldName of form.injectableNames || Object.keys(form.values)) {
-      const key = `${loc}:${fieldName}:${actionUrl}`;
+      const key = `${meta.loc}:${fieldName}:${meta.actionUrl}`;
       if (seen.has(key)) continue;
       seen.add(key);
       points.push(
-        createInjectionPoint(loc, fieldName, form.values[fieldName] || '', {
+        createInjectionPoint(meta.loc, fieldName, form.values[fieldName] || '', {
           formMethod: form.method,
-          actionUrl,
+          actionUrl: meta.actionUrl,
           formValues: form.values,
-          csrfTokenName: csrf,
-          isStorePoint: isStore,
-          storeKind,
+          csrfTokenName: meta.csrf,
+          isStorePoint: meta.isStore,
+          storeKind: meta.storeKind,
           crawledUrl,
           // [D168] 表单声明的 enctype：multipart 上传表单必须按 multipart 发（见 injection）
           formEnctype: form.enctype || '',
@@ -1005,7 +1005,7 @@ export class TargetParser {
         const forms = this._parseForms(page.html, page.url);
         for (const form of forms) {
           // [D120] GET 表单 → url 点、POST → body 点；按钮进 formValues 但不成点
-          this._pushFormPoints(form, page.url, points, seen);
+          this._pushFormPoints(form, page.url, points, seen, target);
         }
       }
     }

@@ -380,7 +380,7 @@ function selfTest() {
 // （判据单一来源，不手抄第二份 —— 本仓反复吃过"同一判据多份实现"的亏）。
 const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 
-export { walkJs, analyzeSource, checkModule, runCheck, analyzeAll, resolveImport, selfTest };
+export { analyzeSource, checkModule };
 
 if (!isMain) {
   // 被 import（merge-integrity.mjs 复用判据）时到此为止：不执行检查、不 exit

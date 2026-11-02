@@ -37,6 +37,7 @@ test('level=1（前端默认档）时 crawlForms 开启依然产出表单点（�
   const parser = makeParser(HTML);
   const target = createTarget({ url: 'http://x.com/page', method: 'GET', config: { level: 1 } });
   target.config.crawlForms = true;
+  target.config.confirmFormWrites = true;
   const points = await parser.discover(target);
   const formPoints = points.filter((p) => p.formMethod !== null);
   assert.equal(formPoints.length, 4, 'level=1 时表单爬取应生效并产出全部表单字段点');
@@ -46,6 +47,7 @@ test('crawlForms 开启：解析表单生成 body 点并捕获 CSRF', async () =
   const parser = makeParser(HTML);
   const target = createTarget({ url: 'http://x.com/page', method: 'GET', config: { level: 1 } }); // [FIX 2026-09-13] 开启即生效、与 level 解耦（原锁 level=5）
   target.config.crawlForms = true;
+  target.config.confirmFormWrites = true;
   const points = await parser.discover(target);
   const formPoints = points.filter((p) => p.formMethod !== null);
   // form1: username/password/_token（3，submit 跳过）；form2: q（1）→ 共 4 个表单点
@@ -90,6 +92,7 @@ test('多 action 记为独立点（不同 action 独立）', async () => {
   const parser = makeParser(html);
   const target = createTarget({ url: 'http://x.com/p', method: 'GET', config: { level: 1 } }); // [FIX 2026-09-13] 开启即生效、与 level 解耦（原锁 level=5）
   target.config.crawlForms = true;
+  target.config.confirmFormWrites = true;
   const points = await parser.discover(target);
   const xs = points.filter((p) => p.param === 'x');
   assert.equal(xs.length, 2);
@@ -102,6 +105,7 @@ test('取页失败（HttpClient 抛错）不中断发现，仅无表单点', asy
   const parser = new TargetParser(httpClient);
   const target = createTarget({ url: 'http://x.com/page', method: 'GET', bodyParams: { a: '1' }, config: { level: 1 } }); // [FIX 2026-09-13] 开启即生效、与 level 解耦（原锁 level=5）
   target.config.crawlForms = true;
+  target.config.confirmFormWrites = true;
   const points = await parser.discover(target);
   // 原 body 参数仍被发现；表单点因取页失败而不产生
   assert.ok(points.some((p) => p.param === 'a' && p.location === 'body'));
@@ -118,6 +122,7 @@ test('POST 表单点被标记 isStorePoint=true，GET 表单点保持 false', as
   const parser = makeParser(HTML);
   const target = createTarget({ url: 'http://x.com/page', method: 'GET', config: { level: 1 } }); // [FIX 2026-09-13] 开启即生效、与 level 解耦（原锁 level=5）
   target.config.crawlForms = true;
+  target.config.confirmFormWrites = true;
   const points = await parser.discover(target);
   const formPoints = points.filter((p) => p.formMethod !== null);
   // 表单1 为 POST → 三个字段均 isStorePoint=true
@@ -139,6 +144,7 @@ test('storeKind 启发式：注册类 POST 表单识别为 registration', async 
   const parser = makeParser(html);
   const target = createTarget({ url: 'http://x.com/r', method: 'GET', config: { level: 1 } }); // [FIX 2026-09-13] 开启即生效、与 level 解耦（原锁 level=5）
   target.config.crawlForms = true;
+  target.config.confirmFormWrites = true;
   const points = await parser.discover(target);
   const user = points.find((p) => p.param === 'username');
   assert.equal(user.isStorePoint, true);
@@ -154,6 +160,7 @@ test('storeKind 启发式：评论类 POST 表单识别为 comment', async () =>
   const parser = makeParser(html);
   const target = createTarget({ url: 'http://x.com/c', method: 'GET', config: { level: 1 } }); // [FIX 2026-09-13] 开启即生效、与 level 解耦（原锁 level=5）
   target.config.crawlForms = true;
+  target.config.confirmFormWrites = true;
   const points = await parser.discover(target);
   const c = points.find((p) => p.param === 'comment');
   assert.equal(c.isStorePoint, true);
@@ -169,6 +176,7 @@ test('storeKind 启发式：资料类 POST 表单识别为 profile', async () =>
   const parser = makeParser(html);
   const target = createTarget({ url: 'http://x.com/p', method: 'GET', config: { level: 1 } }); // [FIX 2026-09-13] 开启即生效、与 level 解耦（原锁 level=5）
   target.config.crawlForms = true;
+  target.config.confirmFormWrites = true;
   const points = await parser.discover(target);
   const d = points.find((p) => p.param === 'displayName');
   assert.equal(d.isStorePoint, true);
@@ -183,6 +191,7 @@ test('storeKind 启发式：其它 POST 表单识别为 unknown', async () => {
   const parser = makeParser(html);
   const target = createTarget({ url: 'http://x.com/s', method: 'GET', config: { level: 1 } }); // [FIX 2026-09-13] 开启即生效、与 level 解耦（原锁 level=5）
   target.config.crawlForms = true;
+  target.config.confirmFormWrites = true;
   const points = await parser.discover(target);
   const q = points.find((p) => p.param === 'query');
   assert.equal(q.isStorePoint, true);
@@ -193,6 +202,7 @@ test('二阶标记不破坏原有发现（crawlForms 关闭仍无表单点，开
   const parser = makeParser(HTML);
   const target = createTarget({ url: 'http://x.com/page', method: 'GET', config: { level: 1 } }); // [FIX 2026-09-13] 开启即生效、与 level 解耦（原锁 level=5）
   target.config.crawlForms = true;
+  target.config.confirmFormWrites = true;
   const points = await parser.discover(target);
   const formPoints = points.filter((p) => p.formMethod !== null);
   // 既有断言仍成立：字段数量、CSRF 捕获、action 解析

@@ -27,7 +27,10 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const BASELINE_FILE = path.join(ROOT, 'docs', '_deadcode-baseline.json');
 
 const EXPORT_DIRS = ['server/src', 'src', 'scripts', 'e2e'];
-const SCAN_DIRS = ['server/src', 'server/tests', 'src', 'scripts', 'e2e'];
+// [D245] 引用收集面必须含 `server`（递归），否则 server/index.js 这类根入口的 import 看不见。
+// 实测：`server/index.js` 里 `import { reportAiRoutes }` 漏扫 ⇒ 判成死代码 ⇒ 删 export 后
+// 服务起不来（`does not provide an export named`）。collect 已跳过 node_modules 等目录。
+const SCAN_DIRS = ['server', 'src', 'scripts', 'e2e'];
 const EXT = ['.js', '.ts', '.tsx', '.mjs'];
 const USAGE_MARKERS = ['@public', '@used-by', '@test-only', '@dynamic'];
 
@@ -91,6 +94,81 @@ function extractExports(filePath, src) {
   return exports;
 }
 
+// ── 动态 import 目标收集（[D245] 静态分析的最大盲区）────────────────────────
+//
+// 为什么必须做：本仓 e2e 大量用
+//   `const { createOobLabApp } = await import(pathToFileURL(resolve(ROOT, 'e2e/x/lab-app.mjs')).href)`
+// 这类**运行时拼装路径**的动态导入。静态正则只认 `import ... from '...'`，于是这些符号
+// 全被判成「未使用导出」，164 条基线里混着 25 个这样的**活代码**（2026-11-02 实测：
+// 按旧判据删 export 会直接打断 e2e 运行）。
+//
+// 判据取向：**宁少报不误伤**。路径片段能提取出来 ⇒ 该文件整份豁免（无法知道解构了谁）；
+// 提取不出 ⇒ 不豁免（会以「未使用」报出，属已知漏报，不在本门禁兜底）。
+//
+// @param {string} callerFile 调用点所在文件（项目相对路径）
+// @param {string} src 文件源码
+// @returns {Set<string>} 被动态 import 的目标文件（项目相对路径）
+/**
+ * 把 import/export 说明符归一化为项目相对路径（posix 分隔）。
+ * @param {string} callerFile 调用点文件（项目相对路径）
+ * @param {string} spec 说明符（'./x.js' / '../a/b.js' / 'pkg/sub/x.js' / 绝对路径）
+ * @returns {string|null} 项目内相对路径；解析不到或越出项目根则 null
+ */
+function toProjectRelative(callerFile, spec) {
+  if (!/\.(mjs|js|ts|tsx)$/.test(spec)) return null;
+  let abs;
+  if (spec.startsWith('./') || spec.startsWith('../')) {
+    abs = path.resolve(path.dirname(path.join(ROOT, callerFile)), spec);
+  } else if (path.isAbsolute(spec)) {
+    abs = spec;
+  } else {
+    abs = path.join(ROOT, spec);
+  }
+  const rel = path.relative(ROOT, abs).split(path.sep).join('/');
+  return rel.startsWith('..') ? null : rel;
+}
+
+/**
+ * 收集文件内的字符串常量（用于折叠动态 import 里的 `${VAR}`）。
+ *
+ * 为什么需要：本仓有
+ *   `const VERDICT_REL = 'e2e/waf-real/pwnVerdict.mjs'; ... await import(new URL(`../../${VERDICT_REL}`, import.meta.url))`
+ * 这种「模板串 + 同文件常量」的形态。不做折叠就提取不到路径，被导入的文件不豁免 ⇒
+ * `EXFIL_MARK` 之类被属性访问的符号被判死（2026-11-02 实测：modsecLive.wiring ⑮ 报
+ * `Cannot read properties of undefined`）。
+ * @param {string} src 文件源码
+ * @returns {Map<string,string>} 常量名 → 值
+ */
+function localStringConstants(src) {
+  const out = new Map();
+  for (const m of src.matchAll(/(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*['"`]([^'"`\n]+)['"`]/g)) {
+    out.set(m[1], m[2]);
+  }
+  return out;
+}
+
+/**
+ * 收集动态 import 的目标文件。
+ * @param {string} callerFile 调用点文件（项目相对路径）
+ * @param {string} src 文件源码
+ * @returns {Set<string>} 目标文件（项目相对路径）
+ */
+function collectDynamicImportFiles(callerFile, src) {
+  const out = new Set();
+  const consts = localStringConstants(src);
+  // 不匹配闭合括号：参数里常有 `resolve(ROOT, 'x.js')` 嵌套括号
+  for (const m of src.matchAll(/\bimport\s*\(/g)) {
+    const window = src
+      .slice(m.index + m[0].length, m.index + m[0].length + 400)
+      .replace(/\$\{([A-Za-z_$][\w$]*)\}/g, (whole, name) => consts.get(name) ?? whole);
+    const lit = window.match(/['"`]([^'"`]*?\.(?:mjs|js|ts|tsx))['"`]/);
+    if (!lit) continue;
+    const rel = toProjectRelative(callerFile, lit[1]);
+    if (rel) out.add(rel);
+  }
+  return out;
+}
+
 // ── 引用收集：提取文件中的所有导入引用 ──────────────────────────────────────
 function extractReferences(filePath, src) {
   const refs = new Set();
@@ -126,8 +204,24 @@ function extractReferences(filePath, src) {
       refs.add(names[0].trim());
     }
   }
+  // [D245] 再导出 `export { A, B } from './x.js'` 同样是「消费」。
+  // 旧判据只认 import，于是 bar 文件把 foo 的符号转发出去时，foo 里的实现被判成死代码；
+  // 一旦按误判删掉 foo 的 export，转发处立即 `does not provide an export named` 断链
+  // （2026-11-02 实测：298 个服务端测试文件同时红）。
+  for (const m of src.matchAll(/export\s*\{([^}]+)\}\s*from\s*['"`]([^'"`]+)['"`]/g)) {
+    for (const part of m[1].split(',')) {
+      const n = part.trim().split(/\s+as\s+/)[0].trim();
+      if (n) refs.add(n);
+    }
+  }
+  // `export * from './x.js'`：转发的是谁静态不可知 ⇒ 目标文件整份豁免
+  const dynamicFiles = collectDynamicImportFiles(filePath, src);
+  for (const m of src.matchAll(/export\s*\*\s*from\s*['"`]([^'"`]+)['"`]/g)) {
+    const rel = toProjectRelative(filePath, m[1]);
+    if (rel) dynamicFiles.add(rel);
+  }
   // Same-file usage: function/const used but not exported (covers re-exports)
-  return { refs, nsImports };
+  return { refs, nsImports, dynFiles: dynamicFiles };
 }
 
 // ── 用途标记检测：检查导出符号上方是否有 @public 等标记 ──────────────────────
@@ -142,45 +236,66 @@ function hasUsageMarker(src, lineNum) {
 }
 
 /**
+ * 收集所有导出声明。
+ * @param {string[]} exportDirs 导出符号收集目录
+ * @returns {Array<{file:string,name:string,kind:string,line:number}>}
+ */
+function collectAllExports(exportDirs) {
+  const resolve = (f) => (path.isAbsolute(f) ? f : path.join(ROOT, f));
+  const all = [];
+  for (const d of exportDirs) {
+    for (const f of collect(d, EXT, [])) {
+      let src;
+      try { src = fs.readFileSync(resolve(f), 'utf8'); } catch { continue; }
+      all.push(...extractExports(f, src));
+    }
+  }
+  return all;
+}
+
+/**
+ * 收集所有引用（具名 / 命名空间 / 动态 import 目标）。
+ *
+ * [D245] `dynTargets` 是被动态 `import()` 的文件集合：那些文件的导出整份豁免。
+ * 抽成独立函数的另一个原因：加完这层逻辑后 findUnusedExports 超出复杂度基线，
+ * 按本仓纪律「优先抽方法，不上调基线」。
+ * @param {string[]} scanDirs 引用收集目录
+ * @returns {{allRefs:Set<string>,nsModules:Set<string>,dynTargets:Set<string>}}
+ */
+function collectAllReferences(scanDirs) {
+  const resolve = (f) => (path.isAbsolute(f) ? f : path.join(ROOT, f));
+  const allRefs = new Set();
+  const nsModules = new Set();
+  const dynTargets = new Set();
+  for (const d of scanDirs) {
+    for (const f of collect(d, EXT, [])) {
+      let src;
+      try { src = fs.readFileSync(resolve(f), 'utf8'); } catch { continue; }
+      const { refs, nsImports, dynFiles } = extractReferences(f, src);
+      for (const r of refs) allRefs.add(r);
+      for (const ns of nsImports) nsModules.add(ns);
+      for (const t of dynFiles) dynTargets.add(t);
+    }
+  }
+  return { allRefs, nsModules, dynTargets };
+}
+
+/**
  * 查找未使用的导出符号。
  * @param {string[]} exportDirs - 导出符号收集目录
  * @param {string[]} scanDirs - 引用收集目录
  * @returns {Array<{file:string,name:string,kind:string,line:number,reason?:string}>}
  */
-export function findUnusedExports(exportDirs, scanDirs) {
-  const allExports = [];
-  const allRefs = new Set();
-  const nsModules = new Set();
-
-  const resolve = (f) => path.isAbsolute(f) ? f : path.join(ROOT, f);
-
-  // Collect exports
-  for (const d of exportDirs) {
-    const files = collect(d, EXT, []);
-    for (const f of files) {
-      let src;
-      try { src = fs.readFileSync(resolve(f), 'utf8'); } catch { continue; }
-      allExports.push(...extractExports(f, src));
-    }
-  }
-
-  // Collect references
-  for (const d of scanDirs) {
-    const files = collect(d, EXT, []);
-    for (const f of files) {
-      let src;
-      try { src = fs.readFileSync(resolve(f), 'utf8'); } catch { continue; }
-      const { refs, nsImports } = extractReferences(f, src);
-      for (const r of refs) allRefs.add(r);
-      for (const ns of nsImports) nsModules.add(ns);
-    }
-  }
-
+function findUnusedExports(exportDirs, scanDirs) {
+  const allExports = collectAllExports(exportDirs);
+  const { allRefs, nsModules, dynTargets } = collectAllReferences(scanDirs);
   // Judge: export not in refs → suspected dead code
   const unused = [];
   for (const exp of allExports) {
     if (exp.name === 'default') continue; // default exports hard to track statically
     if (allRefs.has(exp.name)) continue;
+    // [D245] 动态 import 的目标文件无法静态知道解构了谁 ⇒ 整份豁免（宁少报不误伤）
+    if (dynTargets.has(exp.file)) continue;
 
     // Check usage marker
     const abs = path.isAbsolute(exp.file) ? exp.file : path.join(ROOT, exp.file);
@@ -218,7 +333,7 @@ function loadBaseline() {
  * @param {{symbols?:object}} baseline
  * @returns {{errors:string[],notes:string[],exempted:string[]}}
  */
-export function judge(unused, baseline) {
+function judge(unused, baseline) {
   const errors = [];
   const notes = [];
   const exempted = [];
@@ -363,6 +478,36 @@ function selftestMain() {
       );
       ok(r.errors.length === 0, '基线内应豁免');
       ok(r.exempted.length === 1, '应记录 1 个豁免');
+    });
+
+    // ⑥⑦ [D245] 动态 import 目标整份豁免（旧判据把它当死代码，实测会打断 e2e）
+    write('dynTarget.mjs', 'export function dynFn() { return 1; }\n');
+    write('dynCaller.mjs', 'const { dynFn } = await import("./dynTarget.mjs");\nvoid dynFn;\n');
+    write('dynTarget2.mjs', 'export function dynFn2() { return 1; }\n');
+    write('dynCaller2.mjs', 'const m2 = await import(new URL("./dynTarget2.mjs", import.meta.url).href);\nvoid m2;\n');
+    t('⑥ 相对路径动态 import 的目标不误报', () => {
+      const names = findUnusedExports([dir], [dir]).map((u) => u.name);
+      ok(!names.includes('dynFn'), `dynFn 被 await import 消费，不应报出；实际 ${JSON.stringify(names)}`);
+    });
+    t('⑦ new URL(...) 拼装的动态 import 目标不误报', () => {
+      const names = findUnusedExports([dir], [dir]).map((u) => u.name);
+      ok(!names.includes('dynFn2'), `dynFn2 被动态 import 消费，不应报出；实际 ${JSON.stringify(names)}`);
+    });
+
+    // ⑧ [D245] 再导出 `export { X } from './mod.js'` 视为消费（否则删 X 的 export 即断链）
+    write('reSrc.js', 'export function reExportedFn() { return 1; }\n');
+    write('reBar.js', 'export { reExportedFn } from "./reSrc.js";\n');
+    t('⑧ 再导出视为消费，不断链', () => {
+      const names = findUnusedExports([dir], [dir]).map((u) => u.name);
+      ok(!names.includes('reExportedFn'), `被再导出的符号不应报死代码；实际 ${JSON.stringify(names)}`);
+    });
+
+    // ⑨ [D245] 模板串 + 同文件常量的动态 import（`new URL(`./${REL}`, ...)`）
+    write('dynRel.mjs', 'export const DYN_KEY = 1;\n');
+    write('dynCaller3.mjs', 'const REL = "dynRel.mjs";\nconst m3 = await import(new URL(`./${REL}`, import.meta.url));\nvoid m3;\n');
+    t('⑨ 模板串 + 同文件常量的动态 import 目标不误报', () => {
+      const names = findUnusedExports([dir], [dir]).map((u) => u.name);
+      ok(!names.includes('DYN_KEY'), `DYN_KEY 被动态 import 消费，不应报出；实际 ${JSON.stringify(names)}`);
     });
 
     console.log(failed ? `\n❌ selftest ${failed} 条失败` : '\n✅ selftest 全绿');

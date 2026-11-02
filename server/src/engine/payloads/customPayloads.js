@@ -27,7 +27,7 @@ import { TECHNIQUE_TYPES } from './index.js';
 export const CUSTOM_REQUIRED_FIELDS = ['id', 'dbms', 'technique', 'template'];
 
 /** 合法注入位置（见 payloadRegistry.js 分级约定） */
-export const CUSTOM_WHERE_VALUES = ['value', 'position'];
+const CUSTOM_WHERE_VALUES = ['value', 'position'];
 
 /**
  * 校验并规范化用户自定义条目。

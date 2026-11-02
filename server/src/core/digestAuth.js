@@ -178,7 +178,7 @@ export function extractDigestChallenge(resHeaders) {
  * @param {string} value WWW-Authenticate 完整值（多段逗号分隔）
  * @returns {string[]} 每项形如 `Digest realm="r", nonce="n"`
  */
-export function splitChallenges(value) {
+function splitChallenges(value) {
   const s = String(value ?? '');
   const out = [];
   // scheme 起点：字符串开头，或逗号之后的第一个 token

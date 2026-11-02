@@ -33,8 +33,8 @@ export const WHERE_VALUES = ['value', 'position'];
 export const CLAUSE_VALUES = ['where', 'orderby', 'groupby', 'having', 'limit', 'update'];
 
 /** level / risk 取值区间（对标 sqlmap） */
-export const LEVEL_RANGE = { min: 1, max: 5 };
-export const RISK_RANGE = { min: 1, max: 3 };
+const LEVEL_RANGE = { min: 1, max: 5 };
+const RISK_RANGE = { min: 1, max: 3 };
 
 /** 属于「位置注入」的子句（where:'position' 的条目应挂这些） */
 export const POSITION_CLAUSES = ['orderby', 'limit', 'update'];
@@ -54,7 +54,7 @@ export const KNOWN_FIELDS = [
 ];
 
 /** 高危池标记（id 含此串，见 payloadRegistry 的 destructive 策略） */
-export const DESTRUCTIVE_ID_MARK = '-dest-';
+const DESTRUCTIVE_ID_MARK = '-dest-';
 
 /**
  * 纯对象判定 —— 写成**类型谓词**（`@returns {v is ...}`），让 checkJs 能在后续分支里收窄类型。

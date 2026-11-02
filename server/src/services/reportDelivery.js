@@ -12,7 +12,7 @@
 // ============================================================================
 
 /** 技术通道 → 修复建议（针对性措施；通用基线另行追加） */
-export const REMEDIATION_BY_TECHNIQUE = {
+const REMEDIATION_BY_TECHNIQUE = {
   union: [
     '改用参数化查询/预编译语句，禁止用字符串拼接把用户输入并入 SQL 文本',
     '应用数据库账号最小权限：禁用 FILE 权限与跨库访问，限制 information_schema 可见范围',

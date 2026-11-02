@@ -13,7 +13,7 @@
 // ============================================================================
 import crypto from 'node:crypto';
 
-export const JWT_SECRET = 'lab-bearer-secret';
+const JWT_SECRET = 'lab-bearer-secret';
 export const REFRESH_SECRET = 'lab-refresh-token-0123456789';
 /** 令牌名义有效期（毫秒）—— 签发时写进 exp，是否"过期"由靶站的虚拟时钟拨动决定 */
 export const TOKEN_TTL_MS = 60_000;

@@ -24,7 +24,7 @@ export const SECOND_ORDER_ALLOWED_METHODS = Object.freeze([
   'DELETE',
 ]);
 /** 幂等方法：不会改变目标状态，生产环境下无需额外确认 */
-export const SECOND_ORDER_IDEMPOTENT_METHODS = Object.freeze(['GET', 'HEAD']);
+const SECOND_ORDER_IDEMPOTENT_METHODS = Object.freeze(['GET', 'HEAD']);
 
 /**
  * 归一并裁决本次二阶请求应使用的方法。

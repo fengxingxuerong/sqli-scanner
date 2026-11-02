@@ -108,7 +108,7 @@ const KNOWN_CFG_KEYS = new Set([
   'validationSkip', 'pocRedactAuth',
   // [P0-FIX 2026-09-09] 生产护栏：高危池（RCE/写文件/DoS 类）投放必须显式确认。
   // 这两个键必须可达 REST：否则「引擎实现了、API 收不到」会重演——使用者以为 risk=3 就真能控住风险。
-  'productionMode', 'confirmDestructive',
+  'productionMode', 'confirmDestructive', 'confirmFormWrites', // 后两者=高危池确认 / 自动表单写确认
   'delay', 'reqRate', 'maxReq', // --delay/--reqrate/--max-requests 限速治理
   'forceSsl', 'ignoreRedirects', // HTTPS 强制 / 重定向跟随开关
   'hpp', 'activeWafProbe', // HTTP 参数污染 / WAF 主动探测（opt-in）

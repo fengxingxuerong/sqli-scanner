@@ -1,6 +1,6 @@
 # sqli-scanner
 
-[![Tests](https://img.shields.io/badge/tests-4579%20passing-brightgreen)](#测试)[![CI](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml/badge.svg)](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml)
+[![Tests](https://img.shields.io/badge/tests-4606%20passing-brightgreen)](#测试)[![CI](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml/badge.svg)](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml)
 [![Dependencies](https://img.shields.io/badge/prod%20deps-0%20known%20vulns-brightgreen)](SECURITY.md)
 
 > CI 徽章为真实状态（红绿以 GitHub Actions 实跑为准）。发布判定仍以 `CHANGELOG.md`
@@ -16,8 +16,8 @@
 |---|---|---|
 | **Windows 安装包** | [Releases](https://github.com/fengxingxuerong/sqli-scanner/releases/latest) → `*_x64-setup.exe` | NSIS 安装，内置检测引擎，双击即用，无需 Node / Docker |
 | **Windows 免安装** | [Releases](https://github.com/fengxingxuerong/sqli-scanner/releases/latest) → `sqli-v*-portable-win32-x64.zip` | 解压即跑；附 `manifest.json`（逐文件 sha256） |
-| **Docker** | `docker compose up -d` → <http://localhost:4567> | 前后端同端口，适合服务器 / 内网 |
-| **CLI（源码）** | `npm install && npm run scan -- -u <url>` | 见下方「快速开始」 |
+| **Docker** | `SCAN_API_TOKEN=$(openssl rand -hex 32) docker compose up -d` → <http://localhost:4567> | 前后端同端口；必须提供 API Token（compose 用 `${SCAN_API_TOKEN:?...}` 强制） |
+| **CLI（源码）** | `npm install && (cd server && npm install) && npm run scan -- -u <url>` | 引擎依赖在独立 `server` 包中，两次安装缺一不可；见下方「快速开始」 |
 
 > 每个 Release 同时挂 `SHA256SUMS.txt` 与 CycloneDX SBOM（前端 / 引擎各一份），下载后可 `sha256sum -c` 核对。
 > 桌面版当前只提供 Windows 构建；macOS / Linux 请用 Docker 或源码方式。
@@ -70,6 +70,8 @@ http://localhost:5173
 ### Docker 一键部署
 
 ```bash
+# 先生成并导出 API Token（未设置时 compose 会直接拒绝启动，避免无鉴权扫描代理）
+export SCAN_API_TOKEN="$(openssl rand -hex 32)"   # PowerShell: $env:SCAN_API_TOKEN = (openssl rand -hex 32)
 docker compose up -d
 # 浏览器打开 http://localhost:4567（前后端同端口，Express 直接托管前端静态文件）
 # 后端 API http://localhost:4567
@@ -309,7 +311,7 @@ npm run quality:all     # 【门禁】一键全量质量校验（测试/覆盖�
 | 响应匹配（高级检测） | `--string` `--not-string` `--code` `--text-only` `--titles` `--regexp` `--invalid-bignum` `--invalid-logical` `--invalid-string` |
 | 利用通道（**需 `--authorized` + `EXPLOIT_ENABLED=1`**） | `--os-cmd` `--os-shell` `--sql-shell` `--udf-hex` `--udf-install` `--file-read` `--file-write` `--file-dest` `--driver` |
 | 网络与协议 | `--proxy` `--proxy-bypass-local` `--no-proxy-bypass-local` `--insecure` `--rate` `--threads` `--retries` `--http-timeout` `--delay-sec` `--req-rate` `--max-requests` `--tor` `--check-tor` `--random-agent` `--force-ssl` `--ignore-redirects` `--hpp` `--no-keep-alive` `--drop-set-cookie` |
-| 安全护栏与授权 | `--authorized` `--confirm-destructive` `--no-production-mode` `--no-xp-auto-enable` `--no-validation-skip` `--yes` |
+| 安全护栏与授权 | `--authorized` `--confirm-destructive` `--confirm-form-writes` `--poc-redact-auth` `--no-poc-redact-auth` `--no-production-mode` `--no-xp-auto-enable` `--no-validation-skip` `--yes` |
 | 已移除的占位参数（**收参数但不生效**，仅为兼容旧命令行） | `--no-escape` `--union-char` `--max` `--days` |
 > ⚠️ 上表 `--max` / `--days` 指**扫描侧**的占位（收下即丢弃，无效果）。`node server/bin/cli.js ledger prune --max=N` 是 **ledger 子命令自己的参数**，仍然有效，两者同名不同义。
 
@@ -318,6 +320,8 @@ npm run quality:all     # 【门禁】一键全量质量校验（测试/覆盖�
 - **`--authorized` 是红线**：`--os-cmd` / `--sql-shell` / `--file-read` / `--file-write` 四个利用通道**双闸门**——必须显式声明已获授权，且进程环境设 `EXPLOIT_ENABLED=1`；缺一即拒启动。
 - **`--risk 3` 默认不放高危 payload**：`--confirm-destructive` 是显式放行口；靶场/自建演练用 `--no-production-mode` 等价声明。
 - **`--insecure` 会关闭 TLS 校验**（失去中间人防护），报告与会话会告警。
+- **PoC 凭据默认脱敏**：Cookie/Authorization 在报告 curl/raw 中打码；确需复制即跑时用 `--no-poc-redact-auth` 显式关闭（关闭后报告与台账会明文保存会话凭据）。
+- **自动发现的表单 POST 默认不投放**：需 `--confirm-form-writes`（或 UI 同名开关）显式确认；logout/delete/remove/update 等高风险 action 即使确认也会跳过并在报告 `summary.constraints` 中说明。
 
 ## 后端 API
 
@@ -439,10 +443,10 @@ server/       ← Express + Node.js（后端，`server/index.js` 入口）
 ## 测试
 
 ```bash
-# 前端测试（575 个用例）
+# 前端测试（579 个用例）
 npm test
 
-# 服务端测试（4011 个用例）
+# 服务端测试（4034 个用例）
 cd server && npm test
 
 # 全部测试
@@ -467,8 +471,8 @@ npm run artifact:drift   # 入库的 e2e 基线产物必须等于当前代码跑
 ## 项目状态
 
 - TypeScript: 零错误
-- 前端测试: 575/575 通过（覆盖率门禁 stmts 93.16 / branch 84.47 / func 80.63，阈值 88/77/67）
-- 服务端测试: 4011 用例（4004 pass / 0 fail / 7 skip，并发口径 2026-11-02 复测；7 skip 为环境依赖显式跳过。覆盖率 lines 90.78 / branch 79.27 / func 83.96，阈值 85/74/77）
+- 前端测试: 579/579 通过（覆盖率门禁 stmts 93.16 / branch 84.47 / func 80.63，阈值 88/77/67）
+- 服务端测试: 4034 用例（4027 pass / 0 fail / 7 skip，并发口径 2026-11-02 复测；7 skip 为环境依赖显式跳过。覆盖率 lines 90.89 / branch 79.29 / func 84.22，阈值 85/74/77）
 - 一键扫描: `npm run scan -- -u <url>`（CLI 一条命令产出 HTML/JSON/Markdown 全套报告 + manifest，退出码可直接进 CI 门禁）
 - Tamper 插件: 234 个（含批次 D3 新增 scalarselectinline；含 v24 增量 20 个，对齐 sqlmap 官方 tamper 全集，含官方 CRS/libinjection 实测组合 uniontable+odbcbrace；含批次 D13 新增 5 件上游形态变体 *nospace/*open/*block，真机 A/B 判决前不进默认链）
 - WAF 绕过能力: 200+ 插件链式组合，覆盖 62 个 WAF 厂商指纹识别 + 推荐

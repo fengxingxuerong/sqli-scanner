@@ -17,10 +17,10 @@
 // ============================================================================
 
 /** 统一的 OWASP Top 10 分类（本项目命中的注入类漏洞全部落在此类） */
-export const OWASP_INJECTION = 'A03:2021-Injection';
+const OWASP_INJECTION = 'A03:2021-Injection';
 
 /** 注入位置 → 中文名（报告「受影响参数」列的位置说明） */
-export const LOCATION_TEXT = {
+const LOCATION_TEXT = {
   url: 'URL 查询参数（GET query）',
   body: '请求体参数（POST body / 表单 / JSON）',
   cookie: 'Cookie 参数',

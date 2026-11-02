@@ -14,6 +14,7 @@ import { buildSign } from '../sign-scheme.mjs';
 /** 抓包那一刻的参数副本（漏了「注入会改哪个字段」这件事） */
 const CAPTURED = [['id', '1'], ['t', '1']];
 
+// @dynamic —— 由引擎按 --request-script 加载调用（不是 import 消费）
 export function transform(req) {
   const url = String(req.url || '');
   if (!url.includes('/api/')) return req;

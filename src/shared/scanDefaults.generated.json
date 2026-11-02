@@ -1,0 +1,12 @@
+{
+  "timeoutMs": 30000,
+  "retry": 3,
+  "ratePerSec": 10,
+  "concurrency": 4,
+  "timeThresholdMs": 1500,
+  "crawlDepth": 0,
+  "crawlForms": false,
+  "enableExtract": false,
+  "pocRedactAuth": true,
+  "confirmFormWrites": false
+}

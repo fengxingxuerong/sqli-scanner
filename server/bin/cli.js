@@ -264,7 +264,8 @@ async function runSingleScanInner(sm, url, args) {
     await new Promise((r) => setTimeout(r, 200));
   }
 
-  const report = sm.getReport(scanId);
+  // [P1-PERF 2026-11-02] 终态报告默认是冻结快照；CLI 后续要写 repro/输出，显式取可写克隆。
+  const report = sm.getReport(scanId, { mutable: true });
   if (scopeRules?.enabled) { try { releaseScanScope(scanId); } catch { /* ignore */ } }
   eventBus.dispose(scanId);
   return report;

@@ -21,6 +21,8 @@ import { _colGuessCache } from '../Extractor.js';
 import { dnsCache } from '../../core/httpClient.js';
 import { applyInvalidValues } from '../invalidValue.js';
 import { applyKnownPoints } from '../knownPoint.js';
+// [P1-SAFE 2026-11-02] 表单写请求登记（与 exploit 的写副作用台账同源）
+import { recordFormWriteEffects } from '../../services/sideEffectLedger.js';
 
 /**
  * [D108] 标记被跳过的点并广播 point_skipped：skipReason 落在点上，报告才能解释
@@ -34,6 +36,22 @@ function tagSkippedPoints(scanId, points, reason) {
   for (const p of points) {
     p.skipReason = reason;
     eventBus.emit(scanId, 'point_skipped', { pointId: p.id, reason });
+  }
+}
+
+/**
+ * [P1-SAFE 2026-11-02] 只有显式确认表单写请求后才登记（未确认时 TargetParser 不建点，
+ * 这里也不会出现 form_write 记录）。每个 action 只登记一次，写前留痕。
+ * @param {string} scanId
+ * @param {Array<object>} points
+ * @param {object} cfg
+ */
+function recordConfirmedFormWrites(scanId, points, cfg) {
+  if (cfg.confirmFormWrites !== true) return;
+  try {
+    recordFormWriteEffects(scanId, points);
+  } catch {
+    /* 登记失败不影响扫描（sideEffectLedger 内部已 warn） */
   }
 }
 
@@ -54,7 +72,7 @@ export async function discoverPoints(run) {
     // [P0-FIX] 传入 per-scan httpClient（rawClient），使爬取/表单探测也走 per-scan 限速桶
     eventBus.emit(scanId, 'scan_phase', { phase: 'discovering', message: '正在发现注入点…' });
     const points = await sm.parser.discover(target, rawClient);
-    report.points = points;
+    report.points = points; recordConfirmedFormWrites(scanId, points, cfg);
     eventBus.emit(scanId, 'point_discovered', { points });
 
     // [本期新增] 空注入点显式告警（防静默假阴性）：解析出 0 个注入点时不再静默输出 Low 风险，

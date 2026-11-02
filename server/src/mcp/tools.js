@@ -96,7 +96,7 @@ function findingsPayload(report) {
  * @param {object} ctx createToolContext 产物
  * @returns {Array<{name,description,inputSchema,run}>}
  */
-export function buildTools(ctx) {
+function buildTools(ctx) {
   return [
     {
       name: 'run_scan',

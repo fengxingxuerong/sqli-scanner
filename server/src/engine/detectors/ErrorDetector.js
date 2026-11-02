@@ -7,6 +7,8 @@ import { extractErrorContext, extractSqlFragment } from '../parseErrors.js';
 // 与 echoStrip.js 是同一设施的两个版本且不等价（副本多 SQL 转义变体），
 // 造成「同一个 P0 只修了报错通道」。详见 ../echoStrip.js 文件头。
 import { stripEchoedPayload } from '../echoStrip.js';
+// [P1-PERF 2026-11-02] 大响应有界匹配：10MB 正文不再每次全文跑 ERROR_SIG
+import { matchBounded } from '../../core/boundedMatch.js';
 
 // 报错注入检测器
 // 思路：注入会触发数据库报错的 Payload，检测响应中是否出现数据库报错特征
@@ -170,7 +172,7 @@ export class ErrorDetector extends Detector {
       //   Cannot GET /api/safe/error&#39;%20AND%20extractvalue(1,concat...
       // 单引号被 Express 404 页转成 **HTML 实体 &#39;**（不是 %27），空格是 %20 —— 只做
       // decodeURIComponent 无法还原，这正是前两次修复失败的原因。
-      const match = stripEchoedPayload(body, payload).match(ERROR_SIG);
+      const match = matchBounded(stripEchoedPayload(body, payload), ERROR_SIG);
       if (!match) continue;
       // 基线已存在同样的报错信息 → 视为页面固有，不计入注入
       if (baseMatch && match[0] === baseMatch[0]) continue;
@@ -181,7 +183,7 @@ export class ErrorDetector extends Detector {
       // 首次判定（上方）已剔除，但这里用原始 body2，只要 payload 被页面回显就必然
       // 再次命中 ERROR_SIG → 「二次确认」形同虚设。recall-lab /escape 实测（转义型
       // 安全靶点）即因此误报：回显为转义变体 `alice'' AND extractvalue(...)`。
-      if (!stripEchoedPayload(body2, payload).match(ERROR_SIG)) continue;
+      if (!matchBounded(stripEchoedPayload(body2, payload), ERROR_SIG)) continue;
       // [D211] 引号归因对照：报错必须是 **payload 特异引起** 的，
       // 而不是「我塞了一个引号把语法搞坏」引起的（后者与可注入性无关）。
       // 不通过时 continue 试下一个模板 —— 于是无引号模板（真正触发
@@ -219,7 +221,7 @@ export class ErrorDetector extends Detector {
     const probe = this.obfuscateValue(ctx, harmless);
     const res = await this.send(httpClient, ctx, this.buildRequest(target, point, probe), ctx);
     const body = String(res?.data ?? '');
-    const m = stripEchoedPayload(body, probe).match(ERROR_SIG);
+    const m = matchBounded(stripEchoedPayload(body, probe), ERROR_SIG);
     return !(m && m[0] === hitMatch);
   }
 }

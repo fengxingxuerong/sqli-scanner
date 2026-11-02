@@ -9,6 +9,7 @@
 import { buildSign, TICK_KEY } from '../sign-scheme.mjs';
 import crypto from 'node:crypto';
 
+// @dynamic —— 由引擎按 --request-script 加载调用（不是 import 消费）
 export function transform(req) {
   const url = String(req.url || '');
   if (!url.includes('/api/tick')) return req;

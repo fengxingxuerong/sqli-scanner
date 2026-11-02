@@ -322,7 +322,8 @@ const TUNING_NO_UI_KEYS = [
   // 「不暴露」不损失任何判定能力 ⇒ 留在调优类。
   'predictOutput',
   // 动态块 / 错误原文留存
-  'autoDynamicBlock', 'parseErrors', 'pocRedactAuth',
+  'autoDynamicBlock', 'parseErrors',
+  // pocRedactAuth / confirmFormWrites 已于 2026-11-02 接进「授权与安全护栏」分组 → 移出本表
   // 生产护栏（高危池确认位）：productionMode / confirmDestructive 已于 2026-09-23
   // 接进「授权与安全护栏」分组 → 移出本表
   // 高级姿势（--second-order / --oob 已于 2026-09-23 接进 ScanConfigPanel 的

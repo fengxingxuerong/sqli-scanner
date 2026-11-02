@@ -1,4 +1,5 @@
 import type { RiskLevel, TechniqueType, ScanConfig, SqlmapConfig, ExtractScopeMode } from './types';
+import SHARED_SCAN_DEFAULTS from './scanDefaults.generated.json'; // [P1-CFG] 生成物，勿手改
 
 /**
  * [2026-09-23 E2] 枚举 / 拖库动作表（对标 sqlmap 的枚举开关）。
@@ -57,12 +58,12 @@ export const TECHNIQUE_LABEL: Record<TechniqueType, string> = {
 
 /** 默认扫描配置（用于 UI 初始值与展示） */
 export const DEFAULT_CONFIG: ScanConfig = {
-  concurrency: 6,          // 并发数（默认 6，兼顾速度与稳定性）
-  timeoutMs: 10000,        // 请求超时（毫秒）
-  retry: 2,                // 失败重试次数
-  timeThresholdMs: 3000,   // 时间盲注延迟阈值（毫秒，默认 3s，避免误报）
-  ratePerSec: 5,           // 每秒请求速率限制
-  enableExtract: true,     // 默认开启数据提取（拖库）
+  concurrency: SHARED_SCAN_DEFAULTS.concurrency,
+  timeoutMs: SHARED_SCAN_DEFAULTS.timeoutMs,
+  retry: SHARED_SCAN_DEFAULTS.retry,
+  timeThresholdMs: SHARED_SCAN_DEFAULTS.timeThresholdMs,
+  ratePerSec: SHARED_SCAN_DEFAULTS.ratePerSec,
+  enableExtract: SHARED_SCAN_DEFAULTS.enableExtract,
   proxy: null,
   auth: null,
   wafEvasion: {
@@ -73,7 +74,7 @@ export const DEFAULT_CONFIG: ScanConfig = {
     tamper: { enabled: false, plugins: [], intensity: 'medium' },
   },
   techniques: ['union', 'error', 'boolean', 'time', 'stacked'], // 默认启用 5 种主要技术
-  crawlDepth: 1, // 默认开启爬虫深度 1（自动发现同目录下的参数入口）
+  crawlDepth: SHARED_SCAN_DEFAULTS.crawlDepth, pocRedactAuth: SHARED_SCAN_DEFAULTS.pocRedactAuth, confirmFormWrites: SHARED_SCAN_DEFAULTS.confirmFormWrites,
   // 输入校验跳过（后端 defaults.validationSkip 同为 true）：参数被白名单拦死时短路跳过，
   // UI 开关默认勾选；关闭后对被拦死的点也照跑完整检测（审计场景）。
   validationSkip: true,
@@ -103,7 +104,7 @@ export const DEFAULT_CONFIG: ScanConfig = {
  *   ③ 每个键的值类型必须与后端解析口径一致（见下方 SCAN_CONFIG_VALUE_TYPES）。
  * 新增开关的次序：先在这里登记键名 + 类型 → 再写 UI → CI 会替你记住接没接上。
  */
-export const SCAN_CONFIG_KEYS = [
+const BASE_SCAN_CONFIG_KEYS = [
   // 网络 / 调度
   'concurrency', 'timeoutMs', 'retry', 'ratePerSec', 'timeThresholdMs',
   // 检测强度与 payload
@@ -184,6 +185,10 @@ export const SCAN_CONFIG_KEYS = [
   'timeBlindSleepSec', 'timeProbeSleepSec', 'timeExtractSleepSec',
 ] as const;
 
+// [P1-SAFE/P0-SEC 2026-11-02] 新增的护栏两键单独成表再拼接：避免在 80+ 项字面量数组中间插入 token，
+// 触发重复代码门禁的窗口错位（见 docs/_dup-baseline.json 的 D93 注释）。
+export const SCAN_CONFIG_KEYS = [...BASE_SCAN_CONFIG_KEYS, 'pocRedactAuth', 'confirmFormWrites'] as const;
+
 /** 前端可控的扫描配置键名（由 SCAN_CONFIG_KEYS 推导，无手写重复） */
 export type ScanConfigKey = (typeof SCAN_CONFIG_KEYS)[number];
 
@@ -249,8 +254,7 @@ export const SCAN_CONFIG_VALUE_TYPES: Record<ScanConfigKey, ScanConfigValueType>
   testParamNames: 'boolean',
   // 生产护栏两键走严格布尔（defaults.js 默认 productionMode=true / confirmDestructive=false，
   // 面板必须能把「显式脱离护栏」与「确认投放高危池」这两个动作如实发出去）
-  productionMode: 'boolean',
-  confirmDestructive: 'boolean',
+  productionMode: 'boolean', confirmDestructive: 'boolean', pocRedactAuth: 'boolean', confirmFormWrites: 'boolean',
   // 0 是合法值（delay=0 不延时 / maxReq=0 不限量），不能被当成「未配置」丢掉
   delay: 'number',
   maxReq: 'number',

@@ -16,11 +16,11 @@
 // ============================================================================
 
 /** 本服务支持的 MCP protocolVersion（新版本加入数组头部；客户端版本不在内时回落最新） */
-export const SUPPORTED_PROTOCOL_VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'];
+const SUPPORTED_PROTOCOL_VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'];
 export const LATEST_PROTOCOL_VERSION = SUPPORTED_PROTOCOL_VERSIONS[0];
 
 // JSON-RPC 2.0 标准错误码
-export const RPC_ERRORS = {
+const RPC_ERRORS = {
   PARSE_ERROR: -32700,
   INVALID_REQUEST: -32600,
   METHOD_NOT_FOUND: -32601,

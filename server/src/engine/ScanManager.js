@@ -79,6 +79,20 @@ function _envRetireTtl() {
   return Number.isFinite(n) && n >= 1000 ? Math.round(n) : 30000;
 }
 
+/**
+ * [P1-PERF 2026-11-02] 深冻结终态报告快照：缓存对象是**共享只读视图**，
+ * 任何原地写入都应在调用方先 clone（getReport 的 mutable 选项）。
+ * @param {any} node
+ * @returns {any}
+ */
+function deepFreeze(node) {
+  if (node == null || typeof node !== 'object') return node;
+  if (Object.isFrozen(node)) return node;
+  Object.freeze(node);
+  for (const v of Object.values(node)) deepFreeze(v);
+  return node;
+}
+
 // 扫描管理器（门面模式）：对外暴露 start/stop/getReport/exportReport，
 // 内部串起「发现→指纹→四检测器→提取→构造报告」，全程经 EventBus 推送进度。
 export class ScanManager {
@@ -306,15 +320,43 @@ export class ScanManager {
     };
   }
 
-  getReport(scanId) {
+  /**
+   * 取报告快照。
+   *
+   * [P1-PERF 2026-11-02] 终态报告已不可变：首次读取时结构化克隆一次并**深冻结**缓存，
+   * 后续调用直接复用（版本=status+finishedAt；终态不会再变）。避免每次 API/SSE 读取
+   * 都对几 MB 报告做 structuredClone。
+   *
+   * 运行中仍每次克隆（报告还在增长，缓存会给出过期视图）；`mutable:true` 强制克隆，
+   * 给需要回写的调用方（CLI 的 --repro-check）用，避免冻结对象被原地修改。
+   * @param {string} scanId
+   * @param {{mutable?:boolean}} [opts]
+   * @returns {object|null}
+   */
+  getReport(scanId, opts = {}) {
     const s = this.scans.get(scanId);
     if (!s || !s.report) return null;
-    try {
-      return structuredClone(s.report);
-    } catch {
-      // structuredClone 不可用时回退 JSON 序列化
-      return JSON.parse(JSON.stringify(s.report));
+    const terminal = TERMINAL_STATUSES.includes(s.status);
+    const version = `${s.status}|${s.report.finishedAt || ''}`;
+    if (terminal && !opts.mutable && s._reportSnapshot && s._reportSnapshotVersion === version) {
+      return s._reportSnapshot;
     }
+    const clone = () => {
+      try {
+        return structuredClone(s.report);
+      } catch {
+        // structuredClone 不可用时回退 JSON 序列化
+        return JSON.parse(JSON.stringify(s.report));
+      }
+    };
+    const snap = clone();
+    if (terminal && !opts.mutable) {
+      deepFreeze(snap);
+      s._reportSnapshot = snap;
+      s._reportSnapshotVersion = version;
+      return snap;
+    }
+    return snap;
   }
 
   // 导出报告（json / html / csv / markdown / db-json / sarif）
@@ -326,15 +368,18 @@ export class ScanManager {
     const report = reportArg !== undefined ? reportArg : s && s.report;
     if (!report) return null;
     // [D-REDACT 2026-10-12] 注入脱敏 opts：扫描启动时 redactPasswords 或导出时 opts.redactPasswords
-    if (((s && s.redactPasswords) || opts.redactPasswords) && !report._redactOpts) {
-      report._redactOpts = { redactPasswords: true, redactAuth: true, redactTarget: true };
-    }
-    if (format === 'html') return this.reportGen.toHTML(report);
-    if (format === 'csv') return this.reportGen.toCSV(report);
-    if (format === 'markdown' || format === 'md') return this.reportGen.toMarkdown(report);
-    if (format === 'sarif') return this.reportGen.toSARIF(report); // [批次 9 2026-09-15] SARIF 2.1.0
-    if (format === 'db-json') return this.reportGen.toDBJSON(report); // 仅拖库数据（库/表/列/行；[2026-10-12] 单源化到 ReportGenerator.toDBJSON）
-    return this.reportGen.toJSON(report);
+    // [P1-PERF 2026-11-02] 不再往 report 上原地写 `_redactOpts`：终态快照是共享只读视图，
+    // 原地写会让下一次读取拿到带导出痕迹的报告；改为生成带 opts 的浅拷贝再交给渲染器。
+    const exportReport =
+      ((s && s.redactPasswords) || opts.redactPasswords) && !report._redactOpts
+        ? { ...report, _redactOpts: { redactPasswords: true, redactAuth: true, redactTarget: true } }
+        : report;
+    if (format === 'html') return this.reportGen.toHTML(exportReport);
+    if (format === 'csv') return this.reportGen.toCSV(exportReport);
+    if (format === 'markdown' || format === 'md') return this.reportGen.toMarkdown(exportReport);
+    if (format === 'sarif') return this.reportGen.toSARIF(exportReport); // [批次 9 2026-09-15] SARIF 2.1.0
+    if (format === 'db-json') return this.reportGen.toDBJSON(exportReport); // 仅拖库数据（库/表/列/行；[2026-10-12] 单源化到 ReportGenerator.toDBJSON）
+    return this.reportGen.toJSON(exportReport);
   }
 
   // 扫描流水线

@@ -246,6 +246,8 @@ function applyConcurrencyAndMine(config, cfg) {
   if (validationSkip !== undefined) config.validationSkip = validationSkip;
   const pocRedactAuth = pickBool(cfg, 'pocRedactAuth');
   if (pocRedactAuth !== undefined) config.pocRedactAuth = pocRedactAuth;
+  const confirmFormWrites = pickBool(cfg, 'confirmFormWrites');
+  if (confirmFormWrites !== undefined) config.confirmFormWrites = confirmFormWrites;
   const prefilterSinglePoint = pickBool(cfg, 'prefilterSinglePoint');
   if (prefilterSinglePoint !== undefined) config.prefilterSinglePoint = prefilterSinglePoint;
 }

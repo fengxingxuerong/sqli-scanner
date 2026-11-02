@@ -44,6 +44,9 @@ export const SIDE_EFFECT_KINDS = Object.freeze({
   STACKED_DML: 'stacked_dml', // 数据被改（INSERT/UPDATE/DELETE）→ 可反向（若记了原值）
   OS_SHELL: 'os_shell', // 命令执行（可能有进程/临时文件）→ 不可保证收回
   REG_WRITE: 'reg_write', // 注册表写入 → 可尝试删键
+  // [P1-SAFE 2026-11-02] 自动发现表单的写请求：非幂等 action 可能创建/修改/删除业务数据。
+  // 这类写由 confirmFormWrites 显式放行，且无法通用撤销（只能人工核对），故登记为不可逆。
+  FORM_WRITE: 'form_write',
 });
 
 /**
@@ -144,6 +147,41 @@ export function recordSideEffect(scanId, effect, error = '') {
   }
   logger.info(`[side-effects] 已登记 ${kind} → ${entry.target}（可逆=${reversible}${error ? '，失败' : ''}）`);
   return { id, path: p, recorded: true };
+}
+
+/**
+ * [P1-SAFE 2026-11-02] 扫描发现表单写点后批量登记副作用（每个 action 只记一次）。
+ *
+ * 调用时机：confirmFormWrites=true 且 TargetParser 已建出非幂等表单点之后。
+ * 未确认时 TargetParser 根本不建点，因此这里不会登记「没发生的写」。
+ *
+ * @param {string} scanId
+ * @param {Array<{actionUrl?:string, formMethod?:string, method?:string, param?:string}>} points
+ * @returns {number} 新登记条数
+ */
+export function recordFormWriteEffects(scanId, points = []) {
+  const nonIdempotent = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+  const seen = new Set();
+  let recorded = 0;
+  for (const p of points) {
+    const method = String(p && (p.formMethod || p.method) || '').toUpperCase();
+    const url = String(p && p.actionUrl || '');
+    if (!url || !nonIdempotent.has(method)) continue;
+    const key = `${method} ${url}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    try {
+      recordSideEffect(scanId, {
+        kind: SIDE_EFFECT_KINDS.FORM_WRITE,
+        target: url,
+        detail: `表单 ${method} 注入检测：会向该 action 发送真实请求（字段 ${String(p.param || '-')}）`,
+      });
+      recorded += 1;
+    } catch (e) {
+      logger.warn(`[side-effects] 表单写登记失败（${key}）：${e.message}`);
+    }
+  }
+  return recorded;
 }
 
 /**
@@ -328,6 +366,7 @@ export function sideEffectSummaryForReport(scanId) {
 export default {
   SIDE_EFFECT_KINDS,
   recordSideEffect,
+  recordFormWriteEffects,
   readSideEffects,
   buildCleanupPlan,
   cleanupSideEffects,

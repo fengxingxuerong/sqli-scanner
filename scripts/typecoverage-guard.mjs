@@ -94,7 +94,7 @@ function parseJsdocTypes(jsdocText) {
  * @param {string[]} batches 相对仓库根的目录路径
  * @returns {Record<string, {paramsTotal:number, paramsTyped:number, returnsTotal:number, returnsTyped:number, coverage:number, untypedHotspots:string[]}>}
  */
-export function measureCoverage(batches) {
+function measureCoverage(batches) {
   const out = {};
   for (const batch of batches) {
     const files = collect(batch, EXT, []);
@@ -150,7 +150,7 @@ function loadBaseline() {
  * @param {{batches?:Record<string,object>}} baseline
  * @returns {{errors:string[], notes:string[]}}
  */
-export function judge(measured, baseline) {
+function judge(measured, baseline) {
   const errors = [];
   const notes = [];
   const base = baseline.batches || {};

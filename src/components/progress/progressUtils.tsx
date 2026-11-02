@@ -20,7 +20,7 @@ export const STATUS_COLOR: Record<ScanStatus, 'default' | 'info' | 'success' | '
 // [P1-FIX] 修正事件样式表：删除不存在于 EventType 的幽灵 key（detection_not_found），
 // 补齐 extraction_progress / scan_stopped / scan_paused / scan_resumed（此前静默走灰色默认，
 // 暂停/停止在时间线上无视觉区分）。
-export const EVENT_STYLE: Record<string, { icon: ReactNode; color: string }> = {
+const EVENT_STYLE: Record<string, { icon: ReactNode; color: string }> = {
   scan_started: { icon: <InfoIcon fontSize="small" />, color: '#1565c0' },
   scan_phase: { icon: <InfoIcon fontSize="small" />, color: '#1565c0' },
   http_request: { icon: <InfoIcon fontSize="small" />, color: '#475569' },
@@ -48,7 +48,7 @@ export function getEventStyle(type: string) {
 }
 
 // sqlmap 日志颜色
-export const LOG_COLOR: Record<string, string> = {
+const LOG_COLOR: Record<string, string> = {
   success: '#2e7d32', error: '#d32f2f', info: '#1565c0',
   warn: '#ed6c02', debug: '#9e9e9e', output: '#374151',
 };

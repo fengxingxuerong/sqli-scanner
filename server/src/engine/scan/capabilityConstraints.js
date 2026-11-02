@@ -8,6 +8,23 @@ import { defaults } from '../../config/defaults.js';
 import { countDestructiveCandidates, registryMode } from '../payloadRegistry.js';
 
 /**
+ * [P1-SAFE 2026-11-02] 自动发现表单的写请求被抑制时必须在报告里可见：
+ * 否则「表单一个都没测」会被读成「表单没有注入」。
+ * @param {object} target
+ * @returns {string[]} 0 或 1 条说明
+ */
+function formGateConstraints(target) {
+  const gate = target && target.formDiscoveryGate;
+  if (!gate || !(gate.skipped > 0)) return [];
+  const reasons = new Set((gate.items || []).map((i) => i.reason).filter(Boolean));
+  return [
+    `已跳过 ${gate.skipped} 个自动发现表单（${[...reasons].join(' / ') || '写请求门控'}）：` +
+      '非幂等表单 POST 需 confirmFormWrites=true 才投放；logout/delete/remove/update 等高风险 action 始终跳过。' +
+      '这些表单面本次未检测，报告不据此给出「无注入」结论',
+  ];
+}
+
+/**
  * [P0-FIX 2026-09-09] 汇总「本次扫描被抑住了什么能力」，写进 report.summary.constraints。
  *
  * 为什么需要：本项目反复出现同一类缺陷——开关存在、引擎支持、中间断链，而用户以为生效了。
@@ -20,7 +37,7 @@ import { countDestructiveCandidates, registryMode } from '../payloadRegistry.js'
  * @returns {string[]} 可读说明（空数组 = 本次无任何能力被抑制）
  */
 export function collectCapabilityConstraints(config = {}, target = {}) {
-  const out = [];
+  const out = [...formGateConstraints(target)];
   const productionMode = config.productionMode !== false;
   const confirmDestructive = config.confirmDestructive === true;
   const risk = Number(config.risk) || Number(defaults.risk) || 2;

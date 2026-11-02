@@ -59,7 +59,7 @@ function isRestricted(file, restrictedDirs) {
  * @param {string[]} restrictedDirs - 受限目录列表（裸 Error 必须为 0）
  * @returns {{restricted:Array,nonRestrictedByFile:Record<string,number>}}
  */
-export function findInconsistentThrows(scanDir, restrictedDirs) {
+function findInconsistentThrows(scanDir, restrictedDirs) {
   const files = collectFiles(scanDir, []);
   const restricted = [];
   const nonRestrictedByFile = {};
@@ -101,7 +101,7 @@ function loadBaseline() {
  * @param {{bareErrorByFile?:Record<string,number>}} baseline
  * @returns {{errors:string[],notes:string[]}}
  */
-export function judge(found, baseline) {
+function judge(found, baseline) {
   const errors = [];
   const notes = [];
   const baseByFile = baseline.bareErrorByFile || {};

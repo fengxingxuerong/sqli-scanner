@@ -25,7 +25,7 @@
 // =====================================================================
 import { buildInjectionRequest, sendInjection, applyPrefixSuffix } from '../injection.js';
 import { isUnusableResponse } from '../egressOpts.js';
-import { ERROR_SIG } from '../payloads.js';
+import { ERROR_SIG } from '../payloads.js'; import { hasBoundedMatch } from '../../core/boundedMatch.js'; // [P1-PERF] 有界匹配
 import { defaults } from '../../config/defaults.js';
 import { logger } from '../../core/logger.js';
 
@@ -492,8 +492,8 @@ export async function validationGuardedSkipPoints(deps, ctxBase, target, points)
       // 任一探测失败（网络错误/超时/返回空）→ 无法判定 → 保守保留
       if (rest.some((r) => !r || r.res == null || isUnusableResponse(r.res))) return;
       // ④ 任一回包含 SQL 报错签名 → 明确保留（error 技术有活可干）
-      if (ERROR_SIG.test(rawBody(quote))) return;
-      for (const r of rest) if (ERROR_SIG.test(rawBody(r))) return;
+      if (hasBoundedMatch(rawBody(quote), ERROR_SIG)) return;
+      for (const r of rest) if (hasBoundedMatch(rawBody(r), ERROR_SIG)) return;
       // ②+③ 良性非法值与两个恒真串探针必须与单引号响应同构且均为 >=400：
       // SQL 真被执行时恒真条件会返回正常页，任一路差异 → 不跳过（防「异常被吞」型漏检）。
       for (const r of rest) {

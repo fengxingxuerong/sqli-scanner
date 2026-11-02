@@ -313,7 +313,7 @@ const EMBEDDED_DB_DRIVERS = /^(sqljs|sqlite|sqlite3|memory|pglite)$/i;
  * 从 db 配置 / connectionString 里取数据库主机。
  * 返回 '' 表示拿不到（内嵌驱动或连接串里没有主机名）。
  */
-export function directDbHost(db = {}, connectionString = '') {
+function directDbHost(db = {}, connectionString = '') {
   if (db.host) return String(db.host);
   const conn = String(db.connectionString || connectionString || '');
   return (conn.match(/^[a-z0-9+.-]+:\/\/(?:[^/?#@]*@)?([^/?#:]+)/i) || [])[1] || '';

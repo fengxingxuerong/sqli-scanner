@@ -281,6 +281,11 @@ export const HELP_TEXT = `sqli-scanner CLI（对标 sqlmap 的 Node 引擎命令
                              把两个动作分开，避免一次回车扫平生产库。
   --no-production-mode       声明本次不是生产环境（靶场/自建演练）：关掉生产护栏，高危池与二阶写请求不再被预置抑制
   --allow-second-order-writes 允许二阶使用非幂等方法（POST/PUT/PATCH/DELETE）：二阶本质是写操作，默认仅 GET/HEAD
+  --confirm-form-writes      确认自动发现的表单 POST 可以投放注入请求（默认跳过非幂等表单 action；
+                             开启后会向目标发送真实 POST，可能创建/修改数据，并登记 side-effect 台账）
+  --poc-redact-auth          显式开启报告 PoC 凭据脱敏（默认值，仅用于覆盖 --config 里关闭态）
+  --no-poc-redact-auth       关闭报告 PoC 的凭据脱敏（默认开启：Cookie/Authorization 在 curl/raw 中打码；
+                             仅在报告不外发且需要复制即跑时使用）
   --no-xp-auto-enable        拒绝自动开启 xp_cmdshell：MSSQL 的 os shell 通路在未启用时会发
                              sp_configure 'xp_cmdshell',1 + RECONFIGURE（实例级永久配置变更）。
                              默认仍自动开启（与历史行为一致）；要把扫描严格停在只读边界内就加本开关。
@@ -290,7 +295,7 @@ export const HELP_TEXT = `sqli-scanner CLI（对标 sqlmap 的 Node 引擎命令
   --auth-type <Basic|Digest|NTLM>  认证类型（默认 Basic；Digest 走 RFC 7616 挑战-响应；
                              NTLM 走 Type1-3 握手（引擎完整实现），凭据用 DOMAIN\\user:pass
                              形态对齐 sqlmap --auth-cred，domain 可省略）
-  --rate <n>                 限速 req/s（默认 50）
+  --rate <n>                 限速 req/s（默认 10，与引擎/REST/UI 同一默认值）
   --threads <n>              检测并发数（默认 4）；别名 --concurrency-det（同义）
   -f, --format <fmt>         报告格式 json|csv|markdown|md|html|sarif|db-json（默认 json）。
                              md = markdown 别名；sarif = SARIF 2.1.0（GitHub Security/DefectDojo）；

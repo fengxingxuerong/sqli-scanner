@@ -170,4 +170,4 @@ export function resolveProxy(configuredProxy, { targetUrl = '', trustProxyEnv, p
 
 // 注：assertProxyUsable / isLocalOrPrivateHost / isNoProxyHost / resolveProxy 在搬移体内已是
 // `export function`，此处只补导出内部使用的 parseProxyUrl。
-export { parseProxyUrl, SOCKS_PROXY_SCHEMES, PROXY_SCHEMES };
+export { parseProxyUrl, SOCKS_PROXY_SCHEMES };

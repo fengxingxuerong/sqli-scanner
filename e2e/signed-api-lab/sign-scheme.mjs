@@ -29,7 +29,7 @@ export const TICK_WINDOW_MS = 60000;
  * @param {Iterable<[string, string]>} entries 参数对（含重复名时按出现顺序保留）
  * @param {string} key 密钥
  */
-export function canonical(entries, key = KEY) {
+function canonical(entries, key = KEY) {
   const pairs = [...entries]
     .filter(([k]) => k !== 'sign')
     .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));

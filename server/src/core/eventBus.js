@@ -65,6 +65,7 @@ export function create(scanId) {
   return emitters.get(scanId);
 }
 
+// @public —— eventBus 公共 API：测试以 `import * as eventBus` 消费，静态无法判定
 export function emit(scanId, type, payload) {
   const em = emitters.get(scanId);
   if (!em) return;
@@ -92,6 +93,7 @@ function _lastSeqOf(req) {
 }
 
 // 将某次扫描的事件转为 SSE 流推送给前端
+// @public —— eventBus 公共 API：测试以 `import * as eventBus` 消费，静态无法判定
 export function toSSE(scanId, req, res) {
   const em = emitters.get(scanId);
 
@@ -224,6 +226,7 @@ function _dec(scanId) {
 }
 
 // 清理某次扫描的命名空间
+// @public —— eventBus 公共 API：测试以 `import * as eventBus` 消费，静态无法判定
 export function dispose(scanId) {
   const em = emitters.get(scanId);
   if (em) {
@@ -240,6 +243,7 @@ export function dispose(scanId) {
  * 提供这个访问器后，测试断言的是「回放内容」这个契约，而不是「缓冲挂在哪」。
  * @param {string} scanId
  * @returns {Array<{seq:number,type:string}>|undefined}
+ * @public —— 测试以 `import * as eventBus` 取用，静态无法判定
  */
 export function _peekReplayBuffer(scanId) {
   const em = emitters.get(scanId);

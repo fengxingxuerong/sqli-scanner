@@ -85,6 +85,30 @@ test('① 发现 0 个注入点 → summary 明确告警并给出开启更多注
   } finally { h.done(); }
 });
 
+test('[P1-SAFE] confirmFormWrites=true：发现的表单 POST 点在检测前登记 side-effect', async () => {
+  const ledger = mkdtempSync(path.join(tmpdir(), 'discover-form-write-'));
+  const prev = process.env.SQLI_LEDGER_DIR;
+  process.env.SQLI_LEDGER_DIR = ledger;
+  const point = {
+    id: 'fp1', param: 'comment', location: 'body',
+    formMethod: 'POST', actionUrl: 'http://target.example/comment', isStorePoint: true,
+  };
+  const h = build({ points: [point], cfg: { confirmFormWrites: true } });
+  try {
+    await discoverPoints(h.run);
+    const { readSideEffects } = await import('../src/services/sideEffectLedger.js');
+    const store = readSideEffects(h.scanId);
+    assert.equal(store.effects.length, 1);
+    assert.equal(store.effects[0].kind, 'form_write');
+    assert.equal(store.effects[0].target, 'http://target.example/comment');
+  } finally {
+    h.done();
+    if (prev === undefined) delete process.env.SQLI_LEDGER_DIR;
+    else process.env.SQLI_LEDGER_DIR = prev;
+    rmSync(ledger, { recursive: true, force: true });
+  }
+});
+
 test('① 反向：有点位时不得打上「无注入点」标记（否则报告自相矛盾）', async () => {
   const h = build();
   try {

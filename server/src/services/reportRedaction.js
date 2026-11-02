@@ -8,11 +8,17 @@
 // 三层脱敏（按 opts 分层，缺省全 false ⇒ 零行为变化，向后兼容）：
 //   · redactPasswords → data.passwords 中哈希原文打码（保留 identity，打码 hash）
 //   · redactAuth      → PoC 凭据头（Authorization/Cookie/x-api-token）打码
-//   · redactTarget    → target.config.auth/proxy 置 null
+//   · redactTarget    → target.config.auth/proxy/login/clientCert 置 null，
+//                       cookieParams/headerParams 删除，URL 内嵌凭据打码
 //
 // 约束（spec 5.3.1 规则 4）：脱敏后风险标注（passwordAnalysis）仍可读且不可反推原文。
 // ============================================================================
 const REDACTED = '[REDACTED]';
+
+// 落盘/持久化专用：这些键的值一律打码（键名保留，便于报告读者知道「曾配置过」）。
+// 只作用于 target 与 PoC headers，不递归改写漏洞证据正文。
+const SENSITIVE_KEY_RE =
+  /^(password|passwd|pwd|secret|token|authorization|proxy-authorization|cookie|set-cookie|x-api-key|x-api-token|x-scan-token|clientcert|privatekey|private_key|access_key|secret_key)$/i;
 
 /** 打码单个 password 条目：保留 identity（最后一个 `:` 前），打码 hash */
 function redactPasswordEntry(entry) {
@@ -22,16 +28,28 @@ function redactPasswordEntry(entry) {
   return entry.slice(0, colon) + ':' + REDACTED;
 }
 
-/** 打码 PoC 字符串中的凭据头 */
-function redactPocString(s) {
+/** 打码 PoC/文本中的凭据 */
+export function redactPocText(s) {
   if (typeof s !== 'string') return s;
   return s
     // -H "Authorization: ..." / -H "Cookie: ..." / -H "x-api-token: ..."
     .replace(/(-H\s+['"])(?:Authorization|Proxy-Authorization|Cookie|x-api-token|x-scan-token)(:\s*[^'"]*)(['"])/gi, `$1${REDACTED}$3`)
     // 内联 Authorization: Bearer/Basic <token>
     .replace(/(Authorization:\s*)(?:Bearer|Basic)\s+[^\s,;'"&]+/gi, `$1${REDACTED}`)
+    // 裸 Cookie/Set-Cookie 头行（HTML/Markdown 报告里的原始报文片段）
+    .replace(/((?:set-)?cookie\s*:\s*)[^\r\n<]+/gi, `$1${REDACTED}`)
     // URL 内嵌凭据 user:pass@host
     .replace(/:\/\/([^:/@\s]+):([^/@\s]+)@/, `://$1:'${REDACTED}'@`);
+}
+
+/** 打码 PoC headers 对象中的凭据头（保留头名，值替换） */
+function redactPocHeaders(headers) {
+  if (!headers || typeof headers !== 'object' || Array.isArray(headers)) return headers;
+  const out = {};
+  for (const [k, v] of Object.entries(headers)) {
+    out[k] = SENSITIVE_KEY_RE.test(String(k)) ? REDACTED : v;
+  }
+  return out;
 }
 
 /** 打码 vuln 的 PoC 凭据 */
@@ -40,14 +58,70 @@ function redactVulnAuth(vuln) {
   const out = { ...vuln };
   if (out.poc && typeof out.poc === 'object' && !Array.isArray(out.poc)) {
     out.poc = { ...out.poc };
-    for (const key of ['curl', 'command', 'request', 'raw']) {
-      if (typeof out.poc[key] === 'string') out.poc[key] = redactPocString(out.poc[key]);
+    for (const key of ['curl', 'command', 'request', 'raw', 'body']) {
+      if (typeof out.poc[key] === 'string') out.poc[key] = redactPocText(out.poc[key]);
     }
+    if (out.poc.headers) out.poc.headers = redactPocHeaders(out.poc.headers);
   } else if (typeof out.poc === 'string') {
-    out.poc = redactPocString(out.poc);
+    out.poc = redactPocText(out.poc);
   } else if (Array.isArray(out.poc)) {
-    out.poc = out.poc.map((p) => (typeof p === 'string' ? redactPocString(p) : p));
+    out.poc = out.poc.map((p) => (typeof p === 'string' ? redactPocText(p) : p));
   }
+  return out;
+}
+
+/**
+ * 递归打码 target 内的敏感键值（只改值，保留键名）。
+ * 只用于落盘/持久化：报告正文里的漏洞证据与参数名不动。
+ * @param {any} node
+ * @param {number} [depth]
+ * @returns {any}
+ */
+function redactSensitiveValues(node, depth = 0) {
+  if (node == null || depth > 8) return node;
+  if (Array.isArray(node)) return node.map((v) => redactSensitiveValues(v, depth + 1));
+  if (typeof node !== 'object') return node;
+  const out = {};
+  for (const [k, v] of Object.entries(node)) {
+    out[k] = SENSITIVE_KEY_RE.test(k) && v != null ? REDACTED : redactSensitiveValues(v, depth + 1);
+  }
+  return out;
+}
+
+/** 落盘 target 脱敏：auth/proxy/login/clientCert 置 null，cookie/header 参数删除，URL 内嵌凭据打码 */
+function redactTargetForDisk(target) {
+  if (!target || typeof target !== 'object') return target;
+  const out = { ...target };
+  for (const key of ['baseUrl', 'url']) {
+    if (typeof out[key] === 'string') out[key] = redactPocText(out[key]);
+  }
+  if (out.config && typeof out.config === 'object') {
+    const cfg = { ...out.config };
+    for (const key of ['auth', 'proxy', 'login', 'clientCert', 'bearerRefresh']) {
+      if (key in cfg) cfg[key] = null;
+    }
+    out.config = redactSensitiveValues(cfg);
+  }
+  if ('cookieParams' in out) delete out.cookieParams;
+  if ('headerParams' in out) delete out.headerParams;
+  if (out.db && typeof out.db === 'object') {
+    out.db = { ...out.db };
+    if (out.db.connectionString) out.db.connectionString = '***';
+    if (out.db.password) out.db.password = '***';
+  }
+  return redactSensitiveValues(out);
+}
+
+/**
+ * 落盘/持久化专用脱敏：强制打开三层，且额外清掉 target 的会话凭据。
+ * 不修改入参（深拷贝）。
+ * @param {object} report
+ * @returns {object}
+ */
+export function redactPersistedReport(report) {
+  if (!report || typeof report !== 'object') return report;
+  const out = redactReport(report, { redactPasswords: true, redactAuth: true, redactTarget: true });
+  out.target = redactTargetForDisk(out.target);
   return out;
 }
 
@@ -74,9 +148,9 @@ export function redactReport(report, opts = {}) {
     out.vulns = out.vulns.map(redactVulnAuth);
   }
 
-  // ③ target.auth/proxy 置 null
-  if (redactTarget && out.target && out.target.config && typeof out.target.config === 'object') {
-    out.target.config = { ...out.target.config, auth: null, proxy: null };
+  // ③ target 凭据置 null / 删除（导出与落盘共用；导出路径随后还会过 sanitizeTargetForExport）
+  if (redactTarget && out.target && typeof out.target === 'object') {
+    out.target = redactTargetForDisk(out.target);
   }
 
   return out;

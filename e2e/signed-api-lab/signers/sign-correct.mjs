@@ -3,6 +3,7 @@
 // 于是注入请求在目标眼里与浏览器发出的等价 ⇒ 注入真的抵达 SQL。
 import { buildSign, paramsOf } from '../sign-scheme.mjs';
 
+// @dynamic —— 由引擎按 --request-script 加载调用（不是 import 消费）
 export function transform(req) {
   const url = String(req.url || '');
   // 只给业务接口签名；其它路径（保活页/取页）原样放行，省得把靶站计数搅浑
