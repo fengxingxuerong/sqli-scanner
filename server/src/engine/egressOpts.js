@@ -66,6 +66,10 @@ export const EGRESS_KEYS = Object.freeze([
   'disableKeepAlive',
   'forceSsl',
   'ignoreRedirects',
+  // [D201 2026-11-04 对标 sqlmap --http2] 请求级 h2 形态：per-scan 客户端构造期已备好
+  // undici agent（config.http2），但注入链路的 opts.http2 此前无人传 ⇒ h2 只覆盖取页/爬虫面。
+  // 收进受治清单后，检测/提取/指纹三条通路同源生效（_sendFollowRedirects 判 opts.http2）。
+  'http2',
 ]);
 
 /**
@@ -105,6 +109,8 @@ export function buildEgressOpts(config, overrides = {}) {
     // [sqlmap 对标] --force-ssl / --ignore-redirects
     forceSsl: cfg.forceSsl === true,
     ignoreRedirects: cfg.ignoreRedirects === true,
+    // [D201] --http2：请求级 h2 形态（客户端构造期 agent + 此处的 opts 判据，两头同源于 config）
+    http2: cfg.http2 === true,
   };
   if (overrides && typeof overrides === 'object') Object.assign(o, overrides);
   return o;

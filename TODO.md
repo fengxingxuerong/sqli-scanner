@@ -5,6 +5,41 @@
 
 ---
 
+## 2026-11-04 批次 D201 · 传输形态收口：`--http2` 检测链路接通 + `--http1` 互斥 + `--null-connection` 快判相位（缺口 43→40）（已完成，见 CHANGELOG）
+
+**动机**：底账 D201 组的三件半成品——`--null-connection`（sendHead/matchNullConnection 挂在
+Detector 原型上**零调用点**的死代码）、`--http2`（config 只被 crawler/TargetParser 消费，
+注入请求走 opts.http2 而无人传）、`--http1`（引擎只有 http2 开关）。底账原文就写着
+「真做要接进检测器并复核判据，不是纯接线」。
+
+**交付**：
+
+1. **`--http2` 检测链路接通**：`http2` 进 egressOpts 受治清单（EGRESS_KEYS + buildEgressOpts
+   一行）——治理测试钉「三通路同源」，检测/提取/指纹/爬虫同一协议形态；CLI 参数 +
+   REST 白名单（REST 侧 http2 早已透传）。undici agent 本就在 per-scan 客户端构造期就绪，
+   缺的只是请求级 opts 判据。
+2. **`--http1`**：显式压回 HTTP/1.1（可覆盖 `--config` 档案里的 http2:true，argv > 档案
+   既有优先级）；与 `--http2` **互斥硬拒**（双给启动即报错——收参数不生效是红线）。
+3. **`--null-connection` 快判相位**：新 `_nullConnDetect`（detect() 不在复杂度基线，可干净
+   接入；GRACE=0 的存量相位一行未动）。判据按底账要求复核：基线 2 次 HEAD **自身一致**
+   才可信（动态页元数据在抖 → 立即弃用元数据模式）；真假对用 `matchNullConnection`
+   （状态码/Content-Length 与基线可区分）；真偏离 + 假不偏离 → 命中；假也偏离的对弃用；
+   **元数据不可决 → 自动落回 body 相位**——「不可决 ≠ 不可注入」，绝不为提速牺牲检出
+   （body 级防线：稳定差异/反射甄别/WAF 拦截页比对在 HEAD 模式不适用，方法头注释写明）。
+   sendHead/matchNullConnection 两条死代码由此转正。
+4. **测试**：新 booleanNullConn.test.js 6 条（HEAD-only 出结论且零 GET / 全一致落回 body /
+   基线抖动弃用 / 三旗标进 config + 互斥 / egress 透传 / 解析不误收）+
+   治理/白名单/注册表回归 26 条全绿。
+5. **文档与底账**：help 网络段 +3 行、README 网络行 + 传输形态专行；parity 3 条 gap→ok、
+   NOTES 清 3 条、PLAN 的 D201 组撤编（`--unstable` P3 并入 D204 长尾）——**缺口 43→40，
+   同名同义 110（50%）**。
+
+**结果**：受影响 5 套件 32/32；底账重生成（分母 222 不变）。
+诚实边界：`--null-connection` 的元数据判定无真机 A/B（单元级语义已钉；真机提速幅度
+取决于目标动态噪声，留待有授权目标时实测）；`--unstable`（弱网重试策略）留守 D204 长尾。
+
+---
+
 ## 2026-11-04 批次 D250 · D198 收尾：利用后清理 `--cleanup` + 本地痕迹 `--purge`（缺口 45→43）（已完成，见 CHANGELOG）
 
 **动机**：D198 剩下的 P1/P3 两项——`--cleanup`（授权测试的 OPSEC 刚需：清掉 UDF /

@@ -4,15 +4,15 @@
   "sqlmapVersion": "1.10.7",
   "stats": {
     "total": 222,
-    "ok": 107,
+    "ok": 110,
     "alias": 30,
     "part": 10,
     "auto": 3,
-    "gap": 43,
+    "gap": 40,
     "out": 29,
     "gapP1": 0,
-    "gapP2": 12,
-    "gapP3": 31
+    "gapP2": 10,
+    "gapP3": 30
   },
   "groups": [
     {
@@ -113,19 +113,19 @@
         },
         {
           "opt": "--http1",
-          "kind": "gap",
+          "kind": "ok",
           "ours": null,
-          "priority": "P3",
+          "priority": null,
           "reason": null,
-          "note": "强制 HTTP/1.1；引擎只有 http2 开关，h2 优先失败时无法回退到 1.1"
+          "note": null
         },
         {
           "opt": "--http2",
-          "kind": "gap",
+          "kind": "ok",
           "ours": null,
-          "priority": "P2",
+          "priority": null,
           "reason": null,
-          "note": "**只做了一半**：config.http2 只被 crawler / TargetParser 消费（取页/爬虫面），注入请求走 opts.http2 而无人传该键 ⇒ 接线必须同时改检测链路的出口选项，属独立批次；D197 复核后**刻意没接**（接了就是「收参数不生效」）"
+          "note": null
         },
         {
           "opt": "--mobile",
@@ -478,11 +478,11 @@
         },
         {
           "opt": "--null-connection",
-          "kind": "gap",
+          "kind": "ok",
           "ours": null,
-          "priority": "P2",
+          "priority": null,
           "reason": null,
-          "note": "**引擎写完了但没接线**：sendHead / matchNullConnection 挂在 Detector 原型上而**零调用点**（死代码），httpClient.headRequest 也只有包装没有消费者 ⇒ 真做要接进布尔/时间检测器并复核判据（HEAD 无 body，真假只能靠状态码 + Content-Length），不是纯接线"
+          "note": null
         },
         {
           "opt": "--threads",
@@ -1892,34 +1892,6 @@
       ]
     },
     {
-      "batch": "D201",
-      "title": "传输形态收口（把「只做了一半」的三项做完：检测链路 h2 / HTTP1 回退 / HEAD 快速判定）",
-      "items": [
-        "--http2",
-        "--http1",
-        "--null-connection",
-        "--unstable"
-      ]
-    },
-    {
-      "batch": "D202",
-      "title": "强制面与编码（把「推断错了就没救」的几项变成可显式指定）",
-      "items": [
-        "--os",
-        "--encoding",
-        "--charset",
-        "--fingerprint"
-      ]
-    },
-    {
-      "batch": "D203",
-      "title": "非 SQL 通道补齐（LDAP / XPath 注入检测器）",
-      "items": [
-        "--ldap",
-        "--xpath"
-      ]
-    },
-    {
       "batch": "D204",
       "title": "长尾 P3（按需；不与上面抢优先级，但都在底账里点名，不许「关起门来」）",
       "items": [
@@ -1949,7 +1921,26 @@
         "--tor-type",
         "-t",
         "-v",
-        "--dbms-cred"
+        "--dbms-cred",
+        "--unstable"
+      ]
+    },
+    {
+      "batch": "D202",
+      "title": "强制面与编码（把「推断错了就没救」的几项变成可显式指定）",
+      "items": [
+        "--os",
+        "--encoding",
+        "--charset",
+        "--fingerprint"
+      ]
+    },
+    {
+      "batch": "D203",
+      "title": "非 SQL 通道补齐（LDAP / XPath 注入检测器）",
+      "items": [
+        "--ldap",
+        "--xpath"
       ]
     }
   ]

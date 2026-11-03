@@ -46,6 +46,13 @@ export class BooleanBlindDetector extends Detector {
     const result = createDetectionResult(point.id, 'boolean');
     const templates = (PAYLOADS[dbms] && PAYLOADS[dbms].boolean) || PAYLOADS.MySQL.boolean;
 
+    // [D201] --null-connection 快判相位（sqlmap 语义：HEAD 无 body，真假只看状态码/Content-Length）：
+    // 元数据可决 → 直接出结论（省全正文传输）；不可决 → 照常落入下方 body 相位。
+    // 「元数据不可决 ≠ 不可注入」——绝不为提速牺牲检出（判据见 _nullConnDetect 头注释）。
+    if (ctx.config?.nullConnection === true && (await this._nullConnDetect(ctx, result, templates))) {
+      return result;
+    }
+
     let primary;
     // T1 响应匹配多指标（--string/--not-string/--text-only/--code/--regexp/--titles）：
     // 用户显式配置时优先用其判定真/假；未配置回退 blindRobust 统计 + 分块比对（默认路径不变）。
@@ -66,6 +73,54 @@ export class BooleanBlindDetector extends Detector {
       return this._clauseRound(ctx, primary);
     }
     return primary;
+  }
+
+  // —— [D201] --null-connection 快判相位（对标 sqlmap 同名）——
+  // sendHead/matchNullConnection（egress.js）自引擎拆分起就挂在 Detector 原型上但**零调用点**
+  // ——底账记「死代码、接线要复核判据」的就是这里。本相位把两者接进布尔通道：
+  //   · 传输：全部走 HEAD（sendHead，复用 request() 的 SSRF/限速/会话全套安全机制）；
+  //   · 判定：matchNullConnection——状态码不同或 Content-Length 不同 = 与基线可区分；
+  //   · 门槛：基线 2 次 HEAD 自身必须一致（动态页的元数据本身在抖 → 元数据判据不可信），
+  //     假条件改变元数据的对直接弃用；真条件偏离基线 且 假条件不偏离 → 命中。
+  // 元数据不可决时返回 false，detect() 照常落入 body 相位——HEAD 模式看不到 body 级信号
+  // （稳定差异/反射甄别/WAF 拦截页比对都不适用），**绝不为提速把「元数据无差异」读成「无注入」**。
+  /**
+   * @param {object} ctx { httpClient, target, point, dbms, config }
+   * @param {object} result 检测结果（命中时原地写）
+   * @param {Array<object>} templates 布尔模板（detect() 已按 dbms 选好）
+   * @returns {Promise<boolean>} true = 元数据已出结论（result 已写入），false = 落回 body 相位
+   */
+  async _nullConnDetect(ctx, result, templates) {
+    const { httpClient, target, point } = ctx;
+    const orig = point.originalValue || '1';
+    // 基线 2 次 HEAD：状态码 + Content-Length 必须自身一致，否则元数据判据不可信
+    const base = await this.sendHead(httpClient, ctx, this.buildRequest(target, point, orig));
+    const base2 = await this.sendHead(httpClient, ctx, this.buildRequest(target, point, orig));
+    if (this.matchNullConnection(base2, base)) return false;
+
+    const pairs = this._getBooleanPairs(ctx, templates);
+    for (const p of pairs) {
+      if (p.ti >= 0 && (!templates[p.ti] || !templates[p.fi])) continue;
+      const truePayload = p.truePayload ?? this.obfuscateValue(ctx, fillPayload(templates[p.ti], { orig }));
+      const falsePayload = p.falsePayload ?? this.obfuscateValue(ctx, fillPayload(templates[p.fi], { orig }));
+      const rTrue = await this.sendHead(httpClient, ctx, this.buildRequest(target, point, truePayload));
+      const rFalse = await this.sendHead(httpClient, ctx, this.buildRequest(target, point, falsePayload));
+      // 假条件也改变元数据 ⇒ 该对在元数据维度不可判（页面噪声/目标语义），跳过本对
+      if (this.matchNullConnection(rFalse, base)) continue;
+      if (this.matchNullConnection(rTrue, base)) {
+        result.vulnerable = true;
+        result.dbms = ctx.dbms;
+        result.evidence =
+          `布尔注入确认(null-connection 元数据判定): HEAD 状态码/Content-Length 与基线可区分` +
+          `（真条件 ${rTrue.status}/${this._contentLengthOf(rTrue) ?? '-'} vs 基线 ${base.status}/${this._contentLengthOf(base) ?? '-'}；假条件与基线一致）`;
+        result.payloads = [truePayload, falsePayload];
+        point.confirmed = true;
+        point.technique = 'boolean';
+        point.dbms = ctx.dbms;
+        return true;
+      }
+    }
+    return false;
   }
 
   // level>=2 才消费子句位置变体（对标 sqlmap --level；level=1/undefined 请求数与行为零变化）。

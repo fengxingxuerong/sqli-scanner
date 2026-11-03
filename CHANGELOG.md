@@ -7,13 +7,14 @@
 > 下一批次起的条目写在这里。发版时把本节整体升为 `## [x.y.z] - YYYY-MM-DD` 并补汇总段。
 
 <!-- changelog-index:start -->
-**本段覆盖 24 个批次（D228–D250，2026-11-01 → 2026-11-04）**。正文按时间倒序排列；
+**本段覆盖 25 个批次（D228–D201，2026-11-01 → 2026-11-04）**。正文按时间倒序排列；
 下表是同一批次的索引，便于按编号或关键词定位。**索引只是导航，正文未做任何删改**
 （被推翻的旧结论原样保留，这是本仓的既定口径）。新增批次后跑
 `node scripts/changelog-index.mjs --write` 重生成，`--check` 校验是否过期。
 
 | 批次 | 日期 | 主题 |
 |---|---|---|
+| D201 | 11-04 | 传输形态收口：`--http2` 检测链路接通 + `--http1` 互斥 + `--null-connection` 快判相位（缺口 43→40） |
 | D250 | 11-04 | D198 收尾：利用后清理 `--cleanup` + 本地痕迹 `--purge`（缺口 45→43） |
 | D200 | 11-04 | Windows 注册表面接线：CLI 7 旗标 + REST 3 端点 + 引擎 registryDelete（缺口 52→45） |
 | D249 | 11-04 | arch:guard 接进收口清单 + 判据自证（D247 留观盲区收口，gate:close 43/43） |
@@ -39,6 +40,33 @@
 | D229 | 11-01 | 交付闸收口：P0-3 卡顿修复（haystack 先截后拼）+ ai-gateway 断言去模型依赖 |
 | D228 | 11-01 | AI 报告网关端到端验收（ai-gateway 套件）+ 本地网关 runbook + CI 靶场硬要求扩展 |
 <!-- changelog-index:end -->
+
+### 2026-11-04 批次 D201 · 传输形态收口：`--http2` 检测链路接通 + `--http1` 互斥 + `--null-connection` 快判相位（缺口 43→40）
+
+**动机**：底账 D201 组三件半成品——`--null-connection`（egress 的 sendHead/matchNullConnection
+挂在 Detector 原型上**零调用点**）、`--http2`（config 只被 crawler/TargetParser 消费，注入
+请求走 opts.http2 无人传）、`--http1`（只有 http2 开关）。底账原文：「真做要接进检测器并
+复核判据，不是纯接线」。
+
+**交付**：
+
+- **`--http2` 接通**：`http2` 进 egressOpts 受治清单（EGRESS_KEYS + buildEgressOpts 一行，
+  治理测试钉三通路同源）——检测/提取/指纹/爬虫同一协议形态；CLI 参数 + REST 白名单
+  （undici agent 构造期本就就绪，缺的只是请求级 opts 判据）。
+- **`--http1`**：显式压回 HTTP/1.1（可覆盖 `--config` 档案的 http2:true）；与 `--http2`
+  **互斥硬拒**（双给启动即报错）。
+- **`--null-connection` 快判相位**：新 `_nullConnDetect`（detect() 不在复杂度基线，存量相位
+  一行未动）。判据复核：基线 2 次 HEAD 自身一致才可信；真条件偏离基线 + 假条件不偏离 →
+  命中；**元数据不可决自动落回 body 相位**——「不可决 ≠ 不可注入」，不为提速牺牲检出
+  （body 级防线在 HEAD 模式不适用，方法头注释写明）。两条死代码转正。
+- **测试**：booleanNullConn.test.js 6 条（HEAD-only 出结论且零 GET / 全一致落回 / 基线抖动
+  弃用 / config 映射+互斥 / egress 透传 / 解析不误收）+ 治理/白名单/注册表回归 26 条。
+- **文档与底账**：help +3 行、README 网络行 + 传输形态专行；parity 3 条 gap→ok、PLAN 的
+  D201 组撤编（`--unstable` 并入 D204）——**缺口 43→40，同名同义 110（50%）**。
+
+**结果**：受影响 5 套件 32/32；底账重生成（分母 222 不变）。
+诚实边界：元数据判定无真机 A/B（单元级语义已钉；提速幅度取决于目标动态噪声）；
+`--unstable`（弱网重试策略）留守 D204 长尾。
 
 ### 2026-11-04 批次 D250 · D198 收尾：利用后清理 `--cleanup` + 本地痕迹 `--purge`（缺口 45→43）
 

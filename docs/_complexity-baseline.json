@@ -255,8 +255,8 @@
       "limitComplexity": 15
     },
     "server/src/api/scanGuard/scalarsEgress.js::guardScalarsEgress": {
-      "lines": 74,
-      "complexity": 41,
+      "lines": 71,
+      "complexity": 39,
       "limitLines": 100,
       "limitComplexity": 15
     },

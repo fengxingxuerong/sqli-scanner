@@ -51,13 +51,17 @@ export function applyChannelFlag(a, args) {
   //   --no-keep-alive   → httpClient.request(opts.disableKeepAlive)（每次新建连接）
   //   --drop-set-cookie → sessionState / cookieJar（不把响应 Set-Cookie 回发）
   // 两项都在 REST 白名单里、都是「能力有 ≠ 装得上」的那一格。
-  // ⚠ 同批刻意**没有**收 --null-connection 与 --http2：复核后确认它们只做了一半 ——
-  //   · sendHead/matchNullConnection 挂在 Detector 原型上但**零调用点**（死代码），
-  //     收了就是「收参数不生效」，本仓的红线；
-  //   · config.http2 只被 crawler / TargetParser 消费，注入请求走 opts.http2（无人传），
-  //     接了只能覆盖取页/爬虫面 —— 要接就得动检测链路，属独立批次（见 docs/sqlmap-对标底账.md）。
   if (a === '--no-keep-alive') { args.disableKeepAlive = true; return true; }
   if (a === '--drop-set-cookie') { args.dropSetCookie = true; return true; }
+  // [D201 2026-11-04 对标 sqlmap --http2/--http1/--null-connection] 传输形态收口（此前
+  // args.js 头注释「刻意没收」的三项，本批把半成品做完后正式收参）：
+  //   · --http2 → config.http2（undici ALPN h2 优先；egress 出口 opts 同源透传，注入链路生效）
+  //   · --http1 → 显式压回 HTTP/1.1（与 --http2 互斥，buildConfig 硬拒双给）
+  //   · --null-connection → config.nullConnection（布尔通道 HEAD 元数据快判相位，见
+  //     BooleanBlindDetector._nullConnDetect；元数据不可决时照常落回 body 相位，不牺牲判据）
+  if (a === '--http2') { args.http2 = true; return true; }
+  if (a === '--http1') { args.http1 = true; return true; }
+  if (a === '--null-connection') { args.nullConnection = true; return true; }
   // [P0-SEC/P1-SAFE 2026-11-02] 报告 PoC 脱敏（默认开）/ 自动表单写请求（默认关）：
   // 走本函数而不是主 if 链 —— parseArgs 的复杂度基线不可再涨。
   if (a === '--poc-redact-auth') { args.pocRedactAuth = true; return true; }

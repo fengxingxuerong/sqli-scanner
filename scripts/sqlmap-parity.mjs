@@ -110,8 +110,10 @@ export const STATUS = {
   '--live-cookies': 'ok',
   '--load-cookies': 'ok',
   '--drop-set-cookie': 'ok',
-  '--http1': 'gap:P3',
-  '--http2': 'gap:P2',
+  // [D201 2026-11-04 已落地] --http2：egress 受治键一行（注入链路 opts.http2 同源）+ CLI 参数；
+  // --http1：显式压回 1.1（与 --http2 互斥硬拒）——半成品收口完成。
+  '--http1': 'ok',
+  '--http2': 'ok',
   '--mobile': 'ok',
   '--random-agent': 'ok',
   '--host': 'ok:--header',
@@ -157,7 +159,9 @@ export const STATUS = {
   // ── Optimization ───────────────────────────────────────────────────────────
   '--predict-output': 'ok',
   '--no-keep-alive': 'ok',
-  '--null-connection': 'gap:P2',
+  // [D201 2026-11-04 已接线] 快判相位：基线 2 次 HEAD 自洽门槛 + matchNullConnection 元数据
+  // 判定（BooleanBlindDetector._nullConnDetect）；不可决自动落回 body 相位，不牺牲检出。
+  '--null-connection': 'ok',
   '--threads': 'ok',
 
   // ── Injection ──────────────────────────────────────────────────────────────
@@ -365,12 +369,11 @@ export const STATUS = {
 export const NOTES = {
   '--cookie-del': '解析固定按 `;` 分隔；自定义 cookie 分隔符未暴露（低价值长尾）',
   // [D205 收口 D198] --live-cookies / --load-cookies 已落地，gap 理由不再成立（已移出本表）
-  '--http1': '强制 HTTP/1.1；引擎只有 http2 开关，h2 优先失败时无法回退到 1.1',
-  '--http2': '**只做了一半**：config.http2 只被 crawler / TargetParser 消费（取页/爬虫面），注入请求走 opts.http2 而无人传该键 ⇒ 接线必须同时改检测链路的出口选项，属独立批次；D197 复核后**刻意没接**（接了就是「收参数不生效」）',
+  // [D201 收口 2026-11-04] --http1/--http2/--null-connection 已落地，gap 理由不再成立（已移出本表）
   '--abort-code': '命中指定状态码即中止整场（风控/封禁早停）；当前只有 --ignore-code 的反向语义',
   '--ignore-proxy': '本仓用「本地/私网豁免环境变量代理」表达，缺「对所有目标都不走代理」的全局口',
   '--ignore-timeouts': '超时不计入可信度判定；当前超时会被记为未验证面（更诚实，但缺用户显式覆盖口）',
-  '--null-connection': '**引擎写完了但没接线**：sendHead / matchNullConnection 挂在 Detector 原型上而**零调用点**（死代码），httpClient.headRequest 也只有包装没有消费者 ⇒ 真做要接进布尔/时间检测器并复核判据（HEAD 无 body，真假只能靠状态码 + Content-Length），不是纯接线',  '--proxy-file': '代理池轮换（每请求换出口）未实现；--proxy 只有单出口',
+  '--proxy-file': '代理池轮换（每请求换出口）未实现；--proxy 只有单出口',
   '--proxy-freq': '配合代理池的换出口频率未实现（与 --proxy-file 同批）',
   '--tor-port': 'Tor 端口固定 9050，无旗标覆盖（wafEvasion 可配但无 CLI 面）',
   '--tor-type': '仅 socks5；socks4/http 代理类型未暴露为独立开关',
@@ -433,10 +436,19 @@ export const PLAN = [
   },
   // [D200 2026-11-04 已落地] 注册表面 7 项已接线（STATUS 改 ok），组内只剩 --dbms-cred（P3）
   // —— 并入 D204 长尾，不再单列批次。
+  // [D201 2026-11-04 已落地] --http2/--http1/--null-connection 三项收口（STATUS 改 ok）；
+  // 组内只剩 --unstable（P3，弱网重试策略未实现）——并入 D204 长尾。
   {
-    batch: 'D201',
-    title: '传输形态收口（把「只做了一半」的三项做完：检测链路 h2 / HTTP1 回退 / HEAD 快速判定）',
-    items: ['--http2', '--http1', '--null-connection', '--unstable'],
+    batch: 'D204',
+    title: '长尾 P3（按需；不与上面抢优先级，但都在底账里点名，不许「关起门来」）',
+    items: [
+      '--abort-code', '--ignore-timeouts', '--safe-post', '--safe-req', '--csrf-data', '--csrf-retries',
+      '--union-values', '--abort-on-empty', '--check-internet', '--csv-del', '--dump-file', '--table-prefix',
+      '--unsafe-naming', '--web-root', '--no-logging', '--no-truncate', '--comments', '--pivot-column',
+      '--sql-file', '--common-files', '--binary-fields', '--proxy-file', '--proxy-freq', '--tor-type', '-t', '-v',
+      '--dbms-cred',
+      '--unstable',
+    ],
   },
   {
     batch: 'D202',
@@ -447,17 +459,6 @@ export const PLAN = [
     batch: 'D203',
     title: '非 SQL 通道补齐（LDAP / XPath 注入检测器）',
     items: ['--ldap', '--xpath'],
-  },
-  {
-    batch: 'D204',
-    title: '长尾 P3（按需；不与上面抢优先级，但都在底账里点名，不许「关起门来」）',
-    items: [
-      '--abort-code', '--ignore-timeouts', '--safe-post', '--safe-req', '--csrf-data', '--csrf-retries',
-      '--union-values', '--abort-on-empty', '--check-internet', '--csv-del', '--dump-file', '--table-prefix',
-      '--unsafe-naming', '--web-root', '--no-logging', '--no-truncate', '--comments', '--pivot-column',
-      '--sql-file', '--common-files', '--binary-fields', '--proxy-file', '--proxy-freq', '--tor-type', '-t', '-v',
-      '--dbms-cred',
-    ],
   },
 ];
 

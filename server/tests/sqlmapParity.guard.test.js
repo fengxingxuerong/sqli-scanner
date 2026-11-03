@@ -132,15 +132,24 @@ test('⑥ D197 接线真的通到 config 与**出口选项**（不是只改了�
   }
 });
 
-test('⑥b 同批刻意没接的两项必须仍是缺口（防「只做了一半就宣称支持」）', () => {
-  // --null-connection / --http2 复核结论：引擎侧只做了一半（前者零调用点、后者仅取页面），
-  // 收成 CLI 旗标就是「收参数不生效」。本测试把「不许悄悄接上」写成判据：
-  // 一旦谁把它们接完（含检测链路），下面这条会红，逼着他把底账状态一并改对。
+test('⑥b 传输形态三项已接线：旗标→config→egress 通到头，底账状态必须同批改对（[D201] 反转 D197 哨兵）', () => {
+  // D197 曾把「不许悄悄接上」钉成判据（当时 --null-connection 零调用点、--http2 仅取页面，
+  // 收成旗标就是「收参数不生效」）。[D201] 把三件半成品做完：--http2 进 egress 受治清单
+  //（注入链路生效）、--null-connection 快判相位接进布尔通道（sendHead/matchNullConnection
+  // 转正）、--http1 显式压回。本判据**反转哨兵方向**：接线必须通到头 + 底账必须同批 ok——
+  // 谁回退了接线而不把底账改回 gap，这里同样会红（哨兵语义不灭，只换方向）。
   const flags = sourceFlags();
-  for (const f of ['--null-connection', '--http2']) {
-    assert.equal(flags.has(f), false, `${f} 已被接上：请同时把 docs/_sqlmap-parity.json 的状态改成 ok/part 并说明覆盖范围`);
-    assert.equal(parseCode(STATUS[f]).kind, 'gap', `${f} 在底账里必须是 gap（当前 ${STATUS[f]}）`);
+  for (const f of ['--null-connection', '--http2', '--http1']) {
+    assert.equal(flags.has(f), true, `${f} 应已接进 CLI（D201）；若回退接线，必须同步把底账改回 gap 并在本判据写明`);
+    assert.equal(parseCode(STATUS[f]).kind, 'ok', `${f} 在底账里必须是 ok（当前 ${STATUS[f]}）——接线与底账必须同批改`);
   }
+  // 端到端：--http2 落 config 且进 egress opts（检测链路真的看得到）；--null-connection 落 config
+  const c = buildConfig(parseArgs(['-u', 'http://t.test/?id=1', '--http2', '--null-connection']));
+  assert.equal(c.http2, true, '--http2 没落到 config（引擎拿不到）');
+  assert.equal(c.nullConnection, true, '--null-connection 没落到 config（快判相位拿不到）');
+  assert.equal(buildEgressOpts(c).http2, true, 'config.http2 必须进 egress opts（收参数不生效红线）');
+  // 互斥哨兵：--http1 与 --http2 双给必须拒启
+  assert.throws(() => buildConfig(parseArgs(['-u', 'http://t.test/?id=1', '--http1', '--http2'])), /互斥/);
 });
 
 test('⑧ 底账的元数据不许自相矛盾：版本、状态译名、计划覆盖、说明表', () => {

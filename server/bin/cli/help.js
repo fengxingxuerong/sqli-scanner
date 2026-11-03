@@ -404,6 +404,12 @@ export const HELP_TEXT = `sqli-scanner CLI（对标 sqlmap 的 Node 引擎命令
   --drop-set-cookie         [D197] 忽略响应里的 Set-Cookie，不回发（对标 sqlmap --drop-set-cookie）：
                             目标每次响应都换会话 cookie 时（负载均衡/风控），自动吸收反而会把请求
                             打成「多个会话」；需要固定初始会话的场景加这个
+  --http2                   [D201] 首选 HTTP/2（undici ALPN 协商，目标不支持自动降级 1.1）：
+                            经受治出口清单生效——检测/提取/指纹/爬虫同一协议形态（对标 --http2）
+  --http1                   [D201] 显式只用 HTTP/1.1（与 --http2 互斥，同时给直接拒启）
+  --null-connection         [D201] 布尔通道 HEAD 元数据快判（对标 sqlmap --null-connection）：
+                            只看状态码/Content-Length 与基线的差异，可决即出结论、省全正文传输；
+                            不可决（动态页/基线抖动）自动落回 body 判定——不为提速牺牲检出
   --list-tampers            [D197] 只列出当前可用的 tamper 插件（名字/说明/dbms 限定/terminal/幂等）
                             并退出，不发起任何请求（对标 sqlmap --list-tampers）。总数是运行时真值，
                             文档里的数字会漂 —— 挑链前以本输出为准

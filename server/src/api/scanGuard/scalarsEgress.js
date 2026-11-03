@@ -9,6 +9,23 @@ import { TECHNIQUE_TYPES } from '../../engine/payloads.js';
 import { pickBool } from '../scanConfigUtils.js';
 import { applyTuningKnobs } from '../scanConfigTuning.js';
 
+/**
+ * [D201 2026-11-04] HTTP 传输形态三键（http2 / nullConnection / disableKeepAlive）：
+ * 严格布尔提取——缺省不落地（引擎按 undefined 走默认路径）；非布尔值入口拒掉，
+ * 不留「REST 收下却不生效」的暗坑（同 compactErrorTemplates 口径）。
+ * 独立成函数的原因：guardScalarsEgress 是复杂度基线存量函数（只许持平），
+ * nullConnection 第三键进来后按守卫建议按职责拆出。
+ * @param {object} config 落地目标（buildGuardedConfig 的 config）
+ * @param {object} cfg 原始入参
+ * @returns {void}
+ */
+function applyTransportBooleans(config, cfg) {
+  for (const key of ['http2', 'nullConnection', 'disableKeepAlive']) {
+    const v = pickBool(cfg, key);
+    if (v !== undefined) config[key] = v;
+  }
+}
+
 export function guardScalarsEgress(config, cfg) {
   // 认证配置透传（httpClient.mergeAuthHeaders 消费：basic/cookie/自定义头）
   // 注：凭据仅在引擎内存/报告/会话中使用，服务端导出侧已脱敏（见 ReportGenerator/ScanManager patch）。
@@ -121,7 +138,7 @@ export function guardScalarsEgress(config, cfg) {
   if (proxyBypassLocal !== undefined) config.proxyBypassLocal = proxyBypassLocal;
   // [2026-09-24] HTTP 传输形态两键：defaults.js 的注释早在 2026-09-09 就写着
   // 「本键与 http2 此前只存在于 defaults，未进 KNOWN_CFG_KEYS → 已补白名单+透传」，
-  // 但白名单里**从来没有它们**（本轮实测：sanitizeStart 对 config.http2 / 
+  // 但白名单里**从来没有它们**（本轮实测：sanitizeStart 对 config.http2 /
   // config.disableKeepAlive 都不落地，还会回一条「未知字段」warn）。后果不是"不好看"：
   //   · http2 —— crawler.js:169 / TargetParser.js:288 的判据是 `config?.http2 === true`，
   //     收不到就永远走 axios HTTP/1.1，而调用方以为换了协议形态（WAF 侧指纹也不同）；
@@ -129,10 +146,9 @@ export function guardScalarsEgress(config, cfg) {
   // CLI 侧这两个键连旋钮都没有 ⇒ 此前没有任何入口能让引擎读到非默认值。
   // 走严格布尔（同 compactErrorTemplates）：`1`/`"true"` 在 REST 收下却不被引擎生效，
   // 是一种更难的查法，不如在入口就拒掉。
-  const http2 = pickBool(cfg, 'http2');
-  if (http2 !== undefined) config.http2 = http2;
-  const disableKeepAlive = pickBool(cfg, 'disableKeepAlive');
-  if (disableKeepAlive !== undefined) config.disableKeepAlive = disableKeepAlive;
+  // [D201 2026-11-04] 三键收进 applyTransportBooleans（本函数复杂度基线只许持平，
+  // nullConnection 第三键进来后按守卫建议拆出）。
+  applyTransportBooleans(config, cfg);
   // [2026-09-24] xpAutoEnable：**不可逆动作的拒绝位**。Exploiter.js:450 的判据是
   // `ctx.config?.xpAutoEnable !== false`，命中就发
   // `EXEC sp_configure 'xp_cmdshell',1; RECONFIGURE`（实例级永久配置变更，MSSQL 侧

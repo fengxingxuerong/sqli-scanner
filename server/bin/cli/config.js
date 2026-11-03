@@ -633,6 +633,26 @@ function applyTorUaAndDumpOpts(config, args) {
 }
 
 /**
+ * [D201 2026-11-04 对标 sqlmap --http2/--http1/--null-connection] 传输形态三键：
+ *   http2 → per-scan 客户端 undici agent（构造期）+ egress 出口 opts（请求期，本批接通）；
+ *   http1 → 显式压回 HTTP/1.1（undici ALPN 本会自动降级，本键表达「明确不用 h2」，可覆盖
+ *           --config 档案里的 http2:true —— argv > 档案的既定优先级）；
+ *   nullConnection → 布尔通道 HEAD 元数据快判（BooleanBlindDetector._nullConnDetect）。
+ * 独立成函数：applyProtocolAndMisc 复杂度本已贴线，三键进来按守卫建议按职责拆出。
+ * @param {object} config 目标 config（原地写）
+ * @param {object} args CLI 参数
+ * @returns {void}
+ */
+function applyTransportForm(config, args) {
+  if (args.http1 && args.http2) {
+    throw new Error('--http1 与 --http2 互斥：一个只要 HTTP/1.1，一个首选 HTTP/2（undici 会自动降级），不能同时给');
+  }
+  if (args.http2) config.http2 = true;
+  if (args.http1) config.http2 = false;
+  if (args.nullConnection) config.nullConnection = true;
+}
+
+/**
  * —— HTTP 协议层（对标 sqlmap --force-ssl / --ignore-redirects / --hpp）——
  * + 对标 sqlmap 增强参数透传（引擎消费同名字段）。
  * [D21 2026-10-09] 此处原有 `if (args.randomUA) config.randomUA = true;` —— **死代码**：
@@ -670,9 +690,11 @@ function applyProtocolAndMisc(config, args) {
   // [D197 2026-10-30 对标 sqlmap] 出口形态两项 —— 引擎消费点早已存在，缺的只是 CLI→config 这一跳：
   //   config.disableKeepAlive → 出口选项（egressOpts 已把本键纳入受治清单 → 检测/提取/指纹同一形态）
   //   config.dropSetCookie    → buildEgressOpts → cookieJar（不回发响应 Set-Cookie）
-  // 同批没接的 --null-connection / --http2 只做了一半（死调用点/仅取页面），见 args.js 的说明。
   if (args.disableKeepAlive) config.disableKeepAlive = true;
   if (args.dropSetCookie) config.dropSetCookie = true;
+  // [D201 2026-11-04 对标 sqlmap --http2/--http1/--null-connection] 传输形态三项收口
+  //（互斥校验 + config 落地，见 applyTransportForm；本函数复杂度按守卫建议保持拆分）
+  applyTransportForm(config, args);
   // [D198 对标 sqlmap --live-cookies] 每请求重读的 cookie 文件（见 applyLiveCookies）
   applyLiveCookies(config, args);
 }
