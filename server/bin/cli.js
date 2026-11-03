@@ -21,6 +21,8 @@ import { ReportGenerator } from '../src/services/ReportGenerator.js';
 import { renderScanSummaryPanel, batchHitLines, batchNextLine, batchWriteHint, printBatchHitsAndNext, printBatchSummary, urlOfLogRequest } from './cli/summaryPanel.js';
 import { readFileSync } from 'node:fs';
 import * as scanLedger from '../src/services/scanLedger.js';
+// [D198] --cleanup：撤销配方读自写副作用台账，执行走 exploit 同门同上下文
+import { cleanupChannel, cleanupSideEffects, readSideEffects } from '../src/services/sideEffectLedger.js';
 // [P1-1 收口 2026-09-29] 利用能力开关的**唯一判据**（与 REST 的 /exploit/*、
 // /exploit/capabilities、sqlmap 桥的 --os-shell 门控同源）。
 import { isExploitEnabled } from '../src/core/exploitFlag.js';
@@ -307,6 +309,11 @@ const EXPLOIT_OP_KEYS = ['osCmd', 'sqlShell', 'fileRead', 'fileWrite', 'regRead'
 function isExploitMode(args) {
   return EXPLOIT_OP_KEYS.some((k) => !!args[k]);
 }
+// [D198] 扫描后动作面 = 利用动作 + --cleanup（清理是对目标的又一次写/命令执行，同门）
+/** @param {any} args @returns {boolean} */
+function isPostScanMode(args) {
+  return isExploitMode(args) || !!args.cleanup;
+}
 /** @param {any} args @returns {boolean} 是否请求了注册表操作（走 runExploitRegistry 分支） */
 function isRegistryOp(args) {
   return !!(args.regRead || args.regAdd || args.regDel);
@@ -340,6 +347,9 @@ async function runExploitCore(report, args, dispatch) {
     target,
     point,
     dbms: report.dbms || vuln.dbms || null,
+    // [D198] scanId 透传：file-write / udf / reg-write 的写前登记（sideEffectLedger）依赖它
+    // （缺省为 undefined，登记侧按 falsy 跳过 —— 不在这里加 `|| null`，会多一个分支）
+    scanId: report.scanId,
   };
   const result = await dispatch(exploiter, ctx, args);
   if (result === REPL_HANDLED) return null;
@@ -429,6 +439,109 @@ async function dispatchRegistryAction(exploiter, ctx, args) {
   if (p.op === 'add') return exploiter.registryWrite(ctx, { key: p.key, value: p.value, data: p.data, type: p.type });
   return exploiter.registryDelete(ctx, { key: p.key, value: p.value });
 }
+
+// —— [D198] 扫描后动作与利用后清理（对标 sqlmap --cleanup）——
+// 撤销配方来自写副作用台账（file_write / udf_install / reg_write 均已写前登记），
+// 按 kind 路由通道：SQL 类（DROP FUNCTION / 反向 DML）走 sql-shell，文件/注册表走 os-shell。
+// 门与上下文复用 runExploitCore（EXPLOIT_ENABLED + --authorized + 注入点）——清理是对目标的
+// 又一次写/命令执行，与 REST /api/exploit/side-effects/cleanup 同门，绝不绕过。
+/**
+ * @param {any} exploiter @param {object} ctx
+ * @returns {(cmd: string, item: object) => Promise<{ok: boolean, output: string, error: string}>}
+ */
+function makeCleanupExecutor(exploiter, ctx) {
+  return async (cmd, item) => {
+    const r = cleanupChannel(item && item.kind) === 'sql'
+      ? await exploiter.sqlShell(ctx, cmd)
+      : await exploiter.osShell(ctx, cmd);
+    return {
+      ok: !!(r && r.ok),
+      output: r && r.value != null ? String(r.value) : (r && r.raw != null ? String(r.raw) : ''),
+      error: r && r.error ? String(r.error) : '',
+    };
+  };
+}
+
+/** @param {any} exploiter @param {object} ctx */
+async function dispatchCleanup(exploiter, ctx) {
+  const scanId = ctx.scanId;
+  if (!scanId) return { ok: false, error: '报告缺少 scanId，无法定位写副作用台账' };
+  const store = readSideEffects(scanId);
+  if (!store.effects.length) {
+    return { ok: true, scanId, note: '无已登记的写副作用，无需清理（os-shell/sql-shell 交互不产生可自动撤销的登记项）' };
+  }
+  const r = await cleanupSideEffects(scanId, makeCleanupExecutor(exploiter, ctx));
+  return { ok: r.summary.失败 === 0, scanId, summary: r.summary, results: r.results };
+}
+
+/** @param {any} report @param {any} args @returns {Promise<any>} 最后一个动作的结果（利用结果或清理结果） */
+async function runPostScanActions(report, args) {
+  let out;
+  if (isExploitMode(args)) {
+    out = await (isRegistryOp(args) ? runExploitRegistry(report, args) : runExploit(report, args));
+  }
+  if (args.cleanup) out = await runExploitCore(report, args, dispatchCleanup);
+  return out;
+}
+// 导出供测试（cli.cleanup.test.js 验证登记/路由/门，零网络）
+export { runPostScanActions };
+
+// —— [D198 对标 sqlmap --purge] 本地痕迹清理（P3，无需 -u / 不发包）——
+// 范围＝扫描器**自己的状态**：本地台账根目录（扫描快照 report.json/html/md + poc/、
+// 写副作用 side-effects.json、auth.jsonl 审计）与引擎日志。
+// **导出目录 reports/ 与用户指定的 --session-file 不碰**（前者是交付物，后者是用户路径）。
+// 需显式确认：交互 TTY 走确认提示；非交互必须 --yes（不可静默删审计与快照）。
+// @param {string[]} argv
+// @param {{targets?: Array<{label: string, path: string, dir?: boolean}>}} [inject]
+//        targets 注入缝：测试传自己的临时目录，避免测试删掉真实引擎日志（Windows 上文件被
+//        占用时 rmSync 会 EPERM，真实运行时日志目标按 best-effort 处理不阻断）。
+// @returns {Promise<number>} 进程退出码
+async function runPurge(argv, inject = {}) {
+  const fs = await import('node:fs');
+  const path = await import('node:path');
+  const os = await import('node:os');
+  const targets = inject.targets || [
+    { label: '本地台账根目录（扫描快照 / 写副作用 / auth 审计）', path: scanLedger.ledgerRoot(), dir: true },
+    { label: '引擎日志（本机 logs/）', path: path.join(process.cwd(), 'logs', 'engine.log'), bestEffort: true },
+    { label: '引擎日志（临时目录）', path: path.join(os.tmpdir(), 'sqli-scanner', 'engine.log'), bestEffort: true },
+  ];
+  if (!argv.includes('--yes')) {
+    if (!process.stdin.isTTY) {
+      console.error('[purge] 非交互环境需显式 --yes 确认（将删除本地台账快照/审计与引擎日志；reports/ 与 --session-file 不受影响）');
+      return 2;
+    }
+    const readline = await import('node:readline/promises');
+    const rl = readline.createInterface({ input: process.stdin, output: process.stderr });
+    const ans = (await rl.question('[purge] 将删除扫描器本地痕迹（台账快照/审计/引擎日志；reports/ 保留）。输入 yes 确认：')).trim();
+    rl.close();
+    if (ans !== 'yes') {
+      console.error('[purge] 已取消');
+      return 1;
+    }
+  }
+  let removed = 0;
+  for (const t of targets) {
+    try {
+      if (!fs.existsSync(t.path)) {
+        console.log(`  - ${t.label}：不存在（跳过）`);
+        continue;
+      }
+      fs.rmSync(t.path, { recursive: !!t.dir, force: true });
+      removed++;
+      console.log(`  ✔ ${t.label}：已删除 ${t.path}`);
+    } catch (e) {
+      if (t.bestEffort) {
+        console.error(`  ⚠ ${t.label}：跳过（${e.message}）`);
+        continue;
+      }
+      console.error(`  ✖ ${t.label}：删除失败 ${e.message}`);
+      return 1;
+    }
+  }
+  console.log(`[purge] 完成：删除 ${removed}/${targets.length} 项（reports/ 与 --session-file 未动）`);
+  return 0;
+}
+export { runPurge };
 
 // 交互式 shell REPL（对标 sqlmap --sql-shell / --os-shell）：
 // readline 循环，逐条执行并打印结果，exit/quit 退出。输出走 stderr 提示、stdout 结果。
@@ -940,15 +1053,15 @@ async function main() {
     process.exit(1);
   }
 
-  const exploitMode = isExploitMode(args);
+  const exploitMode = isPostScanMode(args);
   // [D177] 复现检查必须在出报告之前：判定要进 report.json / manifest，不能事后补
   if (args.reproCheck) await applyReproCheck(report, args);
   await emitSingleScanOutput(report, args, { enumActive, exploitMode });
 
-  // 攻击操作（对标 sqlmap --os-cmd/--sql-shell/--file-read/--file-write/--reg-*）：
+  // 攻击操作与清理（对标 sqlmap --os-cmd/--sql-shell/--file-read/--file-write/--reg-*/--cleanup）：
   // 需 EXPLOIT_ENABLED=1 + --authorized；对首个命中注入点执行并打印结果
   if (exploitMode) {
-    await (isRegistryOp(args) ? runExploitRegistry(report, args) : runExploit(report, args));
+    await runPostScanActions(report, args);
     const risk = report.riskLevel;
     process.exit(risk === 'Critical' || risk === 'High' ? 2 : 0);
   }
@@ -979,6 +1092,11 @@ if (invokedDirectly) {
   // 覆盖它的门禁是 scripts/sqlmap-parity.mjs（把本行的字面量算作「本方旗标真源」之一）；
   // ⑯/⑰ 旗标门禁只认 args.js 的解析分支，故 README/help 的收录由本轮手动保证。
   if (process.argv.includes('--list-tampers')) await printTamperCatalog();
+  // [D198 对标 sqlmap --purge] 本地痕迹清理：与 --version 同形态的入口元信息动作，
+  // 不要求 -u、不进扫描流程、不发包；放 main() 之外同因（main 是存量复杂度基线）。
+  if (process.argv.includes('--purge')) {
+    process.exit(await runPurge(process.argv));
+  }
   main().catch((e) => {
     logger.error(`CLI 执行失败：${e.message}`);
     console.error(e.message);

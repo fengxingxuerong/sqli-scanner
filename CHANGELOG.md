@@ -7,13 +7,14 @@
 > 下一批次起的条目写在这里。发版时把本节整体升为 `## [x.y.z] - YYYY-MM-DD` 并补汇总段。
 
 <!-- changelog-index:start -->
-**本段覆盖 23 个批次（D228–D200，2026-11-01 → 2026-11-04）**。正文按时间倒序排列；
+**本段覆盖 24 个批次（D228–D250，2026-11-01 → 2026-11-04）**。正文按时间倒序排列；
 下表是同一批次的索引，便于按编号或关键词定位。**索引只是导航，正文未做任何删改**
 （被推翻的旧结论原样保留，这是本仓的既定口径）。新增批次后跑
 `node scripts/changelog-index.mjs --write` 重生成，`--check` 校验是否过期。
 
 | 批次 | 日期 | 主题 |
 |---|---|---|
+| D250 | 11-04 | D198 收尾：利用后清理 `--cleanup` + 本地痕迹 `--purge`（缺口 45→43） |
 | D200 | 11-04 | Windows 注册表面接线：CLI 7 旗标 + REST 3 端点 + 引擎 registryDelete（缺口 52→45） |
 | D249 | 11-04 | arch:guard 接进收口清单 + 判据自证（D247 留观盲区收口，gate:close 43/43） |
 | D248 | 11-04 | 工作区遗留补登记：4 真 bug + P1 尾批收口（gate:close 41/41） |
@@ -38,6 +39,58 @@
 | D229 | 11-01 | 交付闸收口：P0-3 卡顿修复（haystack 先截后拼）+ ai-gateway 断言去模型依赖 |
 | D228 | 11-01 | AI 报告网关端到端验收（ai-gateway 套件）+ 本地网关 runbook + CI 靶场硬要求扩展 |
 <!-- changelog-index:end -->
+
+### 2026-11-04 批次 D250 · D198 收尾：利用后清理 `--cleanup` + 本地痕迹 `--purge`（缺口 45→43）
+
+**动机**：D198 剩下的 P1/P3——`--cleanup`（授权测试的 OPSEC 刚需）与 `--purge`（本机台账/
+审计/日志）。写副作用台账（D90）已有登记与 REST 清理，但 CLI 没有入口；更关键的是 REST
+清理把**全部**撤销都发给 os-shell，`DROP FUNCTION` 被当系统命令执行必然失败——失败不静默
+（进 `failed[]`），但清理从未成功过。
+
+**交付**：
+
+- **CLI `--cleanup`（P1）**：读本次扫描的写副作用台账，与利用**同门同上下文**
+  （`EXPLOIT_ENABLED=1` + `--authorized` + 注入点）；无登记项时如实说明，不假装清了什么。
+- **CLI `--purge`（P3）**：不要求 `-u`、不发包，入口拦截（与 `--version` / `--list-tampers`
+  同形态，不占 `main()` 复杂度基线）。删本地台账根目录（扫描快照 report.json/html/md +
+  poc/、写副作用、auth.jsonl 审计）与引擎日志；`reports/` 导出目录与 `--session-file` 不动。
+  非交互必须显式 `--yes`；交互 TTY 走 `yes` 确认。
+- **写前登记补全**：`registryWrite` 记 `reg_write`，`udfInstall` 记共享库 `file_write` +
+  每个函数 `udf_install`（撤销 = 幂等 `DROP FUNCTION IF EXISTS`）。`ctx.scanId` 在 CLI 与
+  REST 两条上下文里都透传——此前 REST 手工入参带 `scanId` 也不登记（写了没账）。
+  注册表撤销必须给显式配方 `reg delete "<键>" /v "<值>" /f`：`target` 记的是
+  `hive\key\value`，默认推导会把整串当键路径（删不掉却可能被当成已清）——无配方时
+  如实进 `irreversible` 交人工核对，不猜。
+- **REST 清理路由修复**：新增 `cleanupChannel(kind)` 单点判定（SQL 类
+  `udf_install`/`stacked_dml` 走 sql-shell，文件/注册表走 os-shell），CLI 与 REST 共用；
+  删除两处各写一份的判断。未知类型一律走 os-shell（不让任意字符串进 SQL 通道）。
+- **测试 13 条**：新增 `server/tests/cli.cleanup.test.js` 11 条（args 消费与带值拒绝 /
+  三种写前登记（含注册表撤销 `/v` + `/f` 语法）/ 通道路由 / 双闸拒绝 / 空台账如实说明 /
+  purge 的 `--yes` 与 best-effort）；`sideEffectLedger.test.js` 补 2 条
+  （`cleanupChannel` 路由 + `reg_write` 无配方不猜默认键路径）。
+  实跑 11/11、25/25 绿。
+- **底账与文档**：`sqlmap-parity` 的 `--cleanup` / `--purge` gap→ok、D198 计划组撤编；
+  缺口 **45 → 43**（P1 **1 → 0** / P2 12 / P3 **32 → 31**），同名同义 **105 → 107**，
+  `docs/_sqlmap-parity.json` + `docs/sqlmap-对标底账.md` 已重生成；help / README /
+  `docs/api.md`（通道路由 + `scanId` 透传）/ user-guide 旗标数同批同步。
+- **顺带收账**：`udfInstall` 抽出 `loadUdfHex` + 两个写前登记函数，复杂度基线
+  82 行/36 圈 → 75/32；`main` 105 → 104（exploit 分支收进 `runPostScanActions`）。
+
+**结果**：受影响 2 个测试文件 25/25 绿；gate:close 43/43。
+
+**诚实边界**：
+
+1. `--cleanup` 只清**已登记**的写副作用；os-shell 起的进程与 form_write 标 `irreversible`，
+   不假装能清。本批只有单元级验证，**没有真机 MySQL/MSSQL 跑通 UDF 安装→DROP 的完整回路**。
+2. `--purge` 按设计删除本地台账**快照**（含 report.json/html/md）与 auth 审计；执行前确认
+   `SQLI_LEDGER_DIR` 指向的目录。`reports/` 导出目录与用户指定会话文件不受影响。
+3. `--cleanup` 与 `--purge` 都需显式触发：清理不是扫描的默认收尾动作（自作主张再动目标比
+   不清理更危险），purge 也不是安装/升级时的自动动作。
+
+**claim 复核 ×1**（§3.5）：`unverified-surfaces-d123` 按 `refute_cmd` 实跑
+（`cd server && node --test --test-force-exit "tests/unverifiedSurfaces*.test.js"`）9/9 通过。
+
+---
 
 ### 2026-11-04 批次 D200 · Windows 注册表面接线：CLI 7 旗标 + REST 3 端点 + 引擎 registryDelete（缺口 52→45）
 

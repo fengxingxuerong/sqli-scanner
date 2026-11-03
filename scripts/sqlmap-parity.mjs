@@ -279,7 +279,9 @@ export const STATUS = {
   '--batch': 'auto:CLI 无交互提问（非交互优先），「不提问」这件事天然成立；⚠ 本仓 --batch 是「批量目标文件」不是 sqlmap 的这个开关',
   '--binary-fields': 'gap:P3',
   '--check-internet': 'gap:P3',
-  '--cleanup': 'gap:P1',
+  // [D250 2026-11-04 收口 D198] --cleanup / --purge 已落地（args.js 表驱动分支 +
+  // cli.js 入口拦截），底账必须朝事实方向改：gap → ok。
+  '--cleanup': 'ok',
   '--crawl': 'ok',
   '--crawl-exclude': 'gap:P2',
   '--csv-del': 'gap:P3',
@@ -329,7 +331,8 @@ export const STATUS = {
   '--no-logging': 'gap:P3',
   '--no-truncate': 'gap:P3',
   '--offline': 'out:本仓会话是断点续跑缓存，不是「零请求离线数据源」，无对应语义',
-  '--purge': 'gap:P3',
+  // [D250] --purge 已落地（cli.js 入口拦截；本地台账/日志清理），不再记缺口。
+  '--purge': 'ok',
   '--results-file': 'out:sqlmap REST 内部形态；本仓以 scanId + 报告文件表达同一需求',
   '--shell': 'out:交互式 SQL 执行已由 --sql-shell 覆盖，不做 REPL 形态',
   '--tmp-dir': 'out:无本地临时目录概念（与 --tmp-path 同因）',
@@ -393,7 +396,6 @@ export const NOTES = {
   '--abort-on-empty': '连续空结果即停（防无意义拖库）；当前只能靠 --max-requests 兜',
   '--binary-fields': '二进制列（图片/哈希）十六进制化导出未实现',
   '--check-internet': '开扫前连通性自检（区分「本机断网」与「目标不可达」）未实现',
-  '--cleanup': '利用后清理（UDF/xp_cmdshell 复位/临时表/落盘文件）**完全缺失**：授权测试的 OPSEC 刚需，不做等于在客户环境留残留',
   '--crawl-exclude': '爬虫排除正则未暴露（登出链接/危险动作页必须能排掉）',
   '--csv-del': 'CSV 导出分隔符不可配（Excel 本地化场景）',
   '--charset': '注入值字符集约束（非 ASCII 目标）未暴露',
@@ -409,7 +411,6 @@ export const NOTES = {
   '--alert': '命中即执行宿主命令（自动化联动/Slack 钩子）；需显式授权与命令白名单，不能静默执行',
   '--no-logging': '关闭日志落盘开关未暴露（当前恒写 ledger）',
   '--no-truncate': '报告长字段不截断开关未暴露（长 payload/长响应取证用）',
-  '--purge': '本地产物/会话清理（与 --cleanup 相邻：这项针对本地侧）未实现',
   '--unstable': '不稳定连接模式（弱网重试策略）未实现',
   '-c': '档案格式为 JSON（键=长旗标名）；不支持 sqlmap 的 INI(`sqlmap.conf`) 语法',
   '-s': '会话是 JSON 台账（断点续跑语义一致），不读写 sqlmap 的 SQLite 会话文件',
@@ -423,13 +424,8 @@ export const NOTES = {
  * @type {Array<{batch:string, title:string, items:string[]}>}
  */
 export const PLAN = [
-  {
-    batch: 'D198',
-    // [D205 收口] --load-cookies / --live-cookies 已由 D198 落地（见 STATUS 的 ok），
-    // 从建议清单里移出，只留真正还没做的两项（否则产物里会出现「建议批次」里躺着已完成项）。
-    title: '会话与 OPSEC（剩余 P1/P3 缺口：出口留残留、清理面为空）',
-    items: ['--cleanup', '--purge'],
-  },
+  // [D250 2026-11-04 已落地] D198 组全部收口：--load-cookies/--live-cookies（D198）+
+  // --cleanup/--purge（D250）。不再保留空组，否则产物里会出现「建议批次」躺在已完成项上。
   {
     batch: 'D199',
     title: '协议形态与宿主钩子（WAF/IDS 绕过的收发形态 + 自动化入口）',

@@ -5,6 +5,51 @@
 
 ---
 
+## 2026-11-04 批次 D250 · D198 收尾：利用后清理 `--cleanup` + 本地痕迹 `--purge`（缺口 45→43）（已完成，见 CHANGELOG）
+
+**动机**：D198 剩下的 P1/P3 两项——`--cleanup`（授权测试的 OPSEC 刚需：清掉 UDF /
+注册表写 / 落盘文件）与 `--purge`（本机台账、审计与日志）——此前只有写副作用台账的
+登记层与 REST 清理端点，CLI 完全无入口；而 REST 清理把**全部**撤销都发给 os-shell，
+`DROP FUNCTION` 被当系统命令执行必然失败（失败不静默，但清理从未成功过）。
+
+**交付**：
+
+1. **CLI `--cleanup`（P1）**：撤销配方读自写副作用台账（`file_write` / `udf_install` /
+   `reg_write`），与利用**同门同上下文**（`EXPLOIT_ENABLED=1` + `--authorized` + 注入点）；
+   无登记项时如实说明（不假装清了什么）。`stacked_dml` 的反向语句同样可清。
+2. **CLI `--purge`（P3）**：不要求 `-u`、不发包，入口拦截（与 `--version` / `--list-tampers`
+   同形态，不占 `main()` 复杂度基线）。范围＝本地台账根目录（扫描快照 report.json/html/md +
+   poc/、写副作用、auth.jsonl 审计）与引擎日志；`reports/` 导出目录与 `--session-file` 不碰。
+   非交互必须显式 `--yes`（不可静默删审计与快照）。
+3. **写前登记补全**：`registryWrite` 记 `reg_write`、`udfInstall` 记共享库 `file_write`
+   + 每个函数 `udf_install`（撤销 = 幂等 `DROP FUNCTION IF EXISTS`）；`ctx.scanId` 在 CLI
+   与 REST 两条上下文里都透传（此前 REST 手工入参即使带 `scanId` 也不登记 = 写了没账）。
+   注册表撤销给显式配方 `reg delete "<键>" /v "<值>" /f`——`target` 是 `hive\key\value`，
+   默认推导会把整串当键路径；无配方时如实进 `irreversible`，不猜。
+4. **REST 清理通道路由修复**：抽出 `cleanupChannel(kind)` 单点判定——SQL 类
+   （`udf_install` / `stacked_dml`）走 sql-shell，文件/注册表走 os-shell；CLI 与 REST 共用，
+   不再两处各写一份判断（旧实现全走 os-shell，DROP FUNCTION 必失败）。
+5. **测试 13 条**：新增 `cli.cleanup.test.js` 11 条（args 消费与带值拒绝 / 三种写前登记
+   （含注册表撤销 `/v` + `/f` 语法）/ 通道路由 / 双闸拒绝 / 空台账如实说明 / purge 的
+   `--yes` 与 best-effort），`sideEffectLedger.test.js` 补 2 条（`cleanupChannel` 路由 +
+   `reg_write` 无配方不猜默认键路径）。实跑 11/11、25/25 绿。
+6. **底账与文档**：`sqlmap-parity` 两项 gap→ok、D198 计划组撤编；缺口 **45 → 43**
+   （P1 **1 → 0** / P2 12 / P3 **32 → 31**），同名同义 105 → 107，产物已重生成；
+   help / README / `docs/api.md`（通道路由 + `scanId` 透传）/ user-guide 旗标数同批同步。
+7. **顺带收账**：`udfInstall` 抽出 `loadUdfHex` + 两个写前登记函数，复杂度基线
+   82 行/36 圈 → 75/32；`main` 105 → 104（exploit 分支收进 `runPostScanActions`），
+   `complexity:baseline` 已下调（只减不增）。
+
+**结果**：受影响 2 个测试文件 25/25 绿；gate:close 43/43（详见 CHANGELOG）。
+
+**诚实边界**：
+- `--cleanup` 只清**已登记**的写副作用；os-shell / form_write 标不可逆（不假装能清），
+  且本批只有单元级验证——**没有真机 MySQL/MSSQL 跑通一次 UDF 安装→DROP 的完整回路**。
+- `--purge` 按设计删除本地台账**快照**（含 report.json/html/md）与 auth 审计；`reports/`
+  导出目录与用户指定会话文件不动。执行前务必确认 `SQLI_LEDGER_DIR` 指向的目录。
+
+---
+
 ## 2026-11-04 批次 D200 · Windows 注册表面接线：CLI 7 旗标 + REST 3 端点 + 引擎 registryDelete（对标 sqlmap --reg-*）（已完成，见 CHANGELOG）
 
 **动机**：sqlmap 对标底账（D197）缺口 52 项里性价比最高的一组——7 条 P2（`--reg-read/add/del`
@@ -746,13 +791,13 @@ CI 日志经 API 拉取 + 本地 bisect）：
 `disableKeepAlive` 纳入受治出口清单（修「config 里有、opts 里没有」这类真缺陷）+
 `server/tests/sqlmapParity.guard.test.js` 9/9。
 
-**优先队列（**计划**，批次号落地时按本地 git log 顺延；缺口共 52：P1 1 / P2 19 / P3 32 —— D198 已落地 `--load-cookies`/`--live-cookies` 两项，[D205] 已把底账改回事实）**：
+**优先队列（**计划**，批次号落地时按本地 git log 顺延；缺口沿革：D197 立账 52 → D200 后 45 → D250 后 **43**（P1 **0** / P2 12 / P3 31），同名同义 107）**：
 
 | 建议批次 | 主题 | 缺口项 |
 |---|---|---|
-| D198 | 会话与 OPSEC（入口靠人手抄、出口留残留） | `--load-cookies`(P1) `--cleanup`(P1) `--live-cookies`(P2) `--purge`(P3) |
+| D198 | ✅ 已完成（D198 两项 + D250 收尾） | `--load-cookies`(P1) `--live-cookies`(P2) `--cleanup`(P1) `--purge`(P3) 均已落地 |
 | D199 | 协议形态与宿主钩子 | `--chunked`(P2) `--skip-urlencode`(P2) `--retry-on`(P2) `--crawl-exclude`(P2) `--alert`(P2) `--skip-xmlencode` `--skip-waf`(P3) |
-| D200 | Windows 注册表面（引擎已实现 registryRead/Write，只差接线；REST 亦无入口） | `--reg-*` ×7(P2) `--dbms-cred`(P3) |
+| D200 | ✅ 已完成（7 项 `--reg-*` 已接线，长尾只剩 `--dbms-cred` 并入 D204） | `--reg-*` ×7(P2) `--dbms-cred`(P3) |
 | D201 | 传输形态收口（把「只做了一半」的三项做完：检测链路 h2 / HTTP1 回退 / HEAD 快速判定） | `--http2`(P2) `--null-connection`(P2) `--http1` `--unstable`(P3) |
 | D202 | 强制面与编码（推断错了就没救的几项） | `--os`(P2) `--encoding`(P2) `--charset` `--fingerprint`（OS/Web 面） |
 | D203 | 非 SQL 通道补齐 | `--ldap`(P2) `--xpath`(P2) |

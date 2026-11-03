@@ -21,7 +21,7 @@
 // 本模块**不新增任何写能力**，只登记与撤销既有能力已产生的副作用：
 //   · 写操作本身仍受 productionMode / EXPLOIT_ENABLED / allowWrites / confirmDestructive 门控
 //   · cleanup 是**对目标发起的额外请求**，因此同样需要 EXPLOIT_ENABLED 门（见 route 侧调用）
-//   · 默认**不自动执行**清理：cleanup 需显式调用（CLI `--cleanup-side-effects <scanId>` /
+//   · 默认**不自动执行**清理：cleanup 需显式调用（CLI `--cleanup`（读本次扫描台账）/
 //     REST 端点），避免「扫描器自作主张再动一次目标」——那是比不清理更糟的行为。
 //
 // ── 诚实边界 ────────────────────────────────────────────────────────────────
@@ -48,6 +48,24 @@ export const SIDE_EFFECT_KINDS = Object.freeze({
   // 这类写由 confirmFormWrites 显式放行，且无法通用撤销（只能人工核对），故登记为不可逆。
   FORM_WRITE: 'form_write',
 });
+
+/**
+ * [D250] 撤销配方该走哪条执行通道：`sql` = sql-shell，`os` = os-shell。
+ *
+ * 为什么必须单独成一个判据：撤销配方是**语句形态**，不是「一条命令」——
+ *   · `udf_install` 的撤销是 `DROP FUNCTION …`、`stacked_dml` 的撤销是反向 DML ⇒ 必须走 SQL 通道
+ *   · `file_write` 是 `rm`/`del`、`reg_write` 是 `reg delete …` ⇒ 必须走系统命令通道
+ * 旧实现把全部撤销都丢给 os-shell ⇒ DROP FUNCTION 被当系统命令执行必然失败，
+ * 而失败会如实记进 `failed[]`（不会静默），但清理实际上从未成功过（D250 修）。
+ * CLI 与 REST 共用本函数：两处各写一份判断就会再次分叉（本仓反复治理的形状）。
+ *
+ * 未知/缺省类型一律走 `os`：宁可执行失败并留痕，也不把任意字符串送进 SQL 通道。
+ * @param {unknown} kind SIDE_EFFECT_KINDS 之一
+ * @returns {'sql'|'os'} 执行通道
+ */
+export function cleanupChannel(kind) {
+  return kind === SIDE_EFFECT_KINDS.UDF_INSTALL || kind === SIDE_EFFECT_KINDS.STACKED_DML ? 'sql' : 'os';
+}
 
 /**
  * [D132 2026-10-23] 校验 scanId 只作**单层目录名**——`join(ledgerRoot(), scanId, ...)` 之前
@@ -193,7 +211,10 @@ export function recordFormWriteEffects(scanId, points = []) {
 function inferReversible(kind) {
   if (kind === SIDE_EFFECT_KINDS.FILE_WRITE) return true; // 删文件即可
   if (kind === SIDE_EFFECT_KINDS.UDF_INSTALL) return true; // 可尝试 DROP FUNCTION
-  if (kind === SIDE_EFFECT_KINDS.REG_WRITE) return true; // 可尝试删键
+  // [D250] 注册表写**必须**带显式配方：target 记的是 hive\key\value，默认配方无法安全拆出
+  // 「键」与「/v 值名」——`reg delete "hive\key\value" /f` 删的是不存在的键（删不掉，但可能
+  // 被当成已清）。无配方时按不可逆处理，交由人工核对，不给出看起来像撤销的猜测。
+  if (kind === SIDE_EFFECT_KINDS.REG_WRITE) return 'undo-only';
   if (kind === SIDE_EFFECT_KINDS.STACKED_DML) return 'undo-only'; // 仅有反向语句时可逆
   // os_shell：起的进程/创建的临时文件无法保证收回 —— 如实标不可逆
   return false;
@@ -237,11 +258,12 @@ export function buildCleanupPlan(scanId) {
   };
 }
 
-/** 无显式配方时的默认撤销语句（按类型给最保守形态） */
+/** 无显式配方时的默认撤销语句（按类型给最保守形态；无法安全推导的返回 null） */
 function defaultUndo(e) {
   if (e.kind === SIDE_EFFECT_KINDS.FILE_WRITE) return `rm -f -- ${e.target}`;
   if (e.kind === SIDE_EFFECT_KINDS.UDF_INSTALL) return `DROP FUNCTION ${e.target}`;
-  if (e.kind === SIDE_EFFECT_KINDS.REG_WRITE) return `reg delete "${e.target}" /f`;
+  // reg_write 不在此列：target 是 hive\key\value，必须由登记方给「键 + /v 值名」的显式配方，
+  // 默认推导必然猜错（见 inferReversible 的同条注释）。
   return null;
 }
 
@@ -249,10 +271,10 @@ function defaultUndo(e) {
  * 执行清理计划。**调用方负责先过 EXPLOIT_ENABLED 门**（本函数只做登记与调度）。
  *
  * @param {string} scanId
- * @param {(cmd:string) => Promise<{ok:boolean, output?:string, error?:string}>} executor
- *        实际执行器（由调用方注入：CLI 走 os-shell 通道、REST 走 exploit 通道）。
+ * @param {(cmd:string, item:object) => Promise<{ok:boolean, output?:string, error?:string}>} executor
+ *        实际执行器（由调用方注入：CLI/REST 都走 exploit 同一套门控与 HTTP 客户端）。
  *        注入而非内置，是为了让「清理」与「利用」共用同一套门控与 HTTP 客户端，
- *        避免出现「绕过门控的第二条写链路」。
+ *        避免出现「绕过门控的第二条写链路」。第二参 item = 计划项（按 kind 路由通道用）。
  * @returns {Promise<{scanId, results:Array, summary:object}>}
  */
 /**
@@ -260,7 +282,8 @@ function defaultUndo(e) {
  * 职责单一 —— 把「执行一条撤销、把结果正负两面都记下来」收在一处。
  * @param {object} item 计划项
  * @param {object|undefined} rec 对应的登记记录（用于回写清理状态）
- * @param {(cmd:string) => Promise<{ok:boolean,output?:string,error?:string}>} executor
+ * @param {(cmd:string, item:object) => Promise<{ok:boolean,output?:string,error?:string}>} executor
+ *        第二参 item 供调用方按 kind 路由通道（[D198] SQL 类撤销走 sql-shell，文件/注册表走 os-shell）
  * @returns {Promise<object>} result 行
  */
 async function runOneCleanup(item, rec, executor) {
@@ -268,7 +291,7 @@ async function runOneCleanup(item, rec, executor) {
     return { id: item.id, kind: item.kind, target: item.target, status: 'skipped', reason: '无可用的撤销配方' };
   }
   try {
-    const r = await executor(item.undo);
+    const r = await executor(item.undo, item);
     const ok = !!(r && r.ok);
     if (rec) {
       rec.cleanedAt = ok ? new Date().toISOString() : null;
@@ -310,10 +333,10 @@ function summarizeResults(results) {
  * 执行清理计划。**调用方负责先过 EXPLOIT_ENABLED 门**（本函数只做登记与调度）。
  *
  * @param {string} scanId
- * @param {(cmd:string) => Promise<{ok:boolean, output?:string, error?:string}>} executor
- *        实际执行器（由调用方注入：CLI 走 os-shell 通道、REST 走 exploit 通道）。
+ * @param {(cmd:string, item:object) => Promise<{ok:boolean, output?:string, error?:string}>} executor
+ *        实际执行器（由调用方注入：CLI/REST 都走 exploit 同一套门控与 HTTP 客户端）。
  *        注入而非内置，是为了让「清理」与「利用」共用同一套门控与 HTTP 客户端，
- *        避免出现「绕过门控的第二条写链路」。
+ *        避免出现「绕过门控的第二条写链路」。第二参 item = 计划项（按 kind 路由通道用）。
  * @dynamic REST 路由经动态 import 调用（走与利用同一套门控），静态扫描不可见
  * @returns {Promise<{scanId, results:Array, summary:object}>}
  */

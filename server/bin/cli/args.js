@@ -98,6 +98,9 @@ const OPTIONAL_VALUE_FLAGS = new Map([
   ['--reg-value', 'regValue'],
   ['--reg-data', 'regData'],
   ['--reg-type', 'regType'],
+  // [D198 对标 sqlmap --cleanup] 利用后清理（UDF DROP / reg delete / 删落盘文件）：
+  // 撤销配方来自写副作用台账，执行走 exploit 同一套双闸（EXPLOIT_ENABLED + --authorized）。
+  ['--cleanup', 'cleanup'],
 ]);
 
 export function parseArgs(argv, preset) {

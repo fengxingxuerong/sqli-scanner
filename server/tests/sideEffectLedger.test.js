@@ -33,8 +33,26 @@ const {
   readSideEffects,
   buildCleanupPlan,
   cleanupSideEffects,
+  cleanupChannel,
   sideEffectSummaryForReport,
 } = await import('../src/services/sideEffectLedger.js');
+
+test('[D250] cleanupChannel：SQL 类撤销走 sql-shell，文件/注册表走 os-shell（单一真源）', () => {
+  // 撤销配方是语句形态而不是「一条命令」：DROP FUNCTION / 反向 DML 只能走 SQL 通道。
+  // 旧实现把全部撤销丢给 os-shell ⇒ DROP FUNCTION 被当系统命令执行，清理从未成功过。
+  assert.equal(cleanupChannel(SIDE_EFFECT_KINDS.UDF_INSTALL), 'sql');
+  assert.equal(cleanupChannel(SIDE_EFFECT_KINDS.STACKED_DML), 'sql');
+  for (const kind of [
+    SIDE_EFFECT_KINDS.FILE_WRITE,
+    SIDE_EFFECT_KINDS.REG_WRITE,
+    SIDE_EFFECT_KINDS.OS_SHELL,
+    SIDE_EFFECT_KINDS.FORM_WRITE,
+    'unknown-kind',
+    undefined,
+  ]) {
+    assert.equal(cleanupChannel(kind), 'os', `kind=${String(kind)} 应走 os-shell（未知类型不得进 SQL 通道）`);
+  }
+});
 
 test('[P1-SAFE] recordFormWriteEffects：同一 action 只记一次，GET 点不记，且标记不可逆', () => {
   const scanId = 'se-form-write';
@@ -112,6 +130,19 @@ test('默认撤销配方：无显式 undo 时按类型给出保守形态', () =>
   const plan = buildCleanupPlan(scanId);
   assert.equal(plan.items.length, 1);
   assert.match(plan.items[0].undo, /^rm -f -- \/tmp\/b$/);
+});
+
+test('[D250] reg_write 无显式配方：不得猜默认键路径（target 是 hive\\key\\value）', () => {
+  const scanId = 'se-reg-default';
+  recordSideEffect(scanId, {
+    kind: SIDE_EFFECT_KINDS.REG_WRITE,
+    target: 'HKEY_LOCAL_MACHINE\\SOFTWARE\\x\\v',
+  });
+  const plan = buildCleanupPlan(scanId);
+  assert.equal(plan.items.length, 0, '不得生成 reg delete "hive\\key\\value" /f（删的是不存在的键）');
+  assert.equal(plan.irreversible.length, 1, '无配方时如实进不可逆清单，交人工核对');
+  const e = readSideEffects(scanId).effects[0];
+  assert.equal(e.reversible, 'undo-only');
 });
 
 test('执行清理：成功项标记 cleaned 并回写；幂等——再跑计划为空', async () => {

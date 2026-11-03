@@ -360,6 +360,16 @@ export const HELP_TEXT = `sqli-scanner CLI（对标 sqlmap 的 Node 引擎命令
   --reg-value <name>        注册表值名
   --reg-data <data>         写入数据（--reg-add 用）
   --reg-type <type>         值类型（--reg-add 用，默认 REG_SZ）
+  --cleanup                 利用后按写副作用台账执行撤销并退出（对标 sqlmap --cleanup）：
+                            撤销配方来自 file-write / udf-install / reg-* 的写前登记；
+                            SQL 类（DROP FUNCTION / 反向 DML）走 sql-shell，文件/注册表走 os-shell。
+                            与利用同门（EXPLOIT_ENABLED=1 + --authorized）；无登记项时如实说明
+
+本地状态清理（**不要求 -u、不发包**）:
+  --purge                   只清理**本机**痕迹并退出（对标 sqlmap --purge）：
+                            删除本地台账根目录（扫描快照 report.json/html/md + poc/、写副作用
+                            side-effects.json、auth.jsonl 审计）与引擎日志（被占用时跳过不阻断）；
+                            reports/ 导出目录与用户指定的 --session-file 不碰。非交互环境必须显式 --yes
 
 爬虫与会话（对标 sqlmap）:
   --forms                  收集页面表单注入点（需配 --level 5 才生效）

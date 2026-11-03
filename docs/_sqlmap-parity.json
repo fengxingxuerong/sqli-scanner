@@ -4,15 +4,15 @@
   "sqlmapVersion": "1.10.7",
   "stats": {
     "total": 222,
-    "ok": 105,
+    "ok": 107,
     "alias": 30,
     "part": 10,
     "auto": 3,
-    "gap": 45,
+    "gap": 43,
     "out": 29,
-    "gapP1": 1,
+    "gapP1": 0,
     "gapP2": 12,
-    "gapP3": 32
+    "gapP3": 31
   },
   "groups": [
     {
@@ -1325,11 +1325,11 @@
         },
         {
           "opt": "--cleanup",
-          "kind": "gap",
+          "kind": "ok",
           "ours": null,
-          "priority": "P1",
+          "priority": null,
           "reason": null,
-          "note": "利用后清理（UDF/xp_cmdshell 复位/临时表/落盘文件）**完全缺失**：授权测试的 OPSEC 刚需，不做等于在客户环境留残留"
+          "note": null
         },
         {
           "opt": "--crawl",
@@ -1703,11 +1703,11 @@
         },
         {
           "opt": "--purge",
-          "kind": "gap",
+          "kind": "ok",
           "ours": null,
-          "priority": "P3",
+          "priority": null,
           "reason": null,
-          "note": "本地产物/会话清理（与 --cleanup 相邻：这项针对本地侧）未实现"
+          "note": null
         },
         {
           "opt": "--results-file",
@@ -1878,14 +1878,6 @@
     }
   ],
   "plan": [
-    {
-      "batch": "D198",
-      "title": "会话与 OPSEC（剩余 P1/P3 缺口：出口留残留、清理面为空）",
-      "items": [
-        "--cleanup",
-        "--purge"
-      ]
-    },
     {
       "batch": "D199",
       "title": "协议形态与宿主钩子（WAF/IDS 绕过的收发形态 + 自动化入口）",

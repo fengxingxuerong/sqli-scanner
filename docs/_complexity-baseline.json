@@ -124,7 +124,7 @@
     },
     "server/bin/cli.js::main": {
       "lines": 273,
-      "complexity": 105,
+      "complexity": 104,
       "limitLines": 100,
       "limitComplexity": 15
     },
@@ -861,8 +861,8 @@
       "limitComplexity": 15
     },
     "server/src/engine/exploit/udf.js::udfInstall": {
-      "lines": 82,
-      "complexity": 36,
+      "lines": 75,
+      "complexity": 32,
       "limitLines": 100,
       "limitComplexity": 15
     },

@@ -1,6 +1,6 @@
 # sqli-scanner
 
-[![Tests](https://img.shields.io/badge/tests-4637%20passing-brightgreen)](#测试)[![CI](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml/badge.svg)](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml)
+[![Tests](https://img.shields.io/badge/tests-4649%20passing-brightgreen)](#测试)[![CI](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml/badge.svg)](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml)
 [![Dependencies](https://img.shields.io/badge/prod%20deps-0%20known%20vulns-brightgreen)](SECURITY.md)
 
 > CI 徽章为真实状态（红绿以 GitHub Actions 实跑为准）。发布判定仍以 `CHANGELOG.md`
@@ -309,7 +309,8 @@ npm run quality:all     # 【门禁】一键全量质量校验（测试/覆盖�
 | 枚举与拖库 | `--columns` `--columns-list` `--schema` `--privileges` `--roles` `--count` `--exclude-sysdbs` `--no-exclude-sysdbs` `--start` `--stop` `--dbms` `--union-cols` `--union-from` `--no-cast` `--sql-template` |
 | 提取与重放 | `--verify` `--flush-session` `--fresh-queries` `--days` |
 | 响应匹配（高级检测） | `--string` `--not-string` `--code` `--text-only` `--titles` `--regexp` `--invalid-bignum` `--invalid-logical` `--invalid-string` |
-| 利用通道（**需 `--authorized` + `EXPLOIT_ENABLED=1`**） | `--os-cmd` `--os-shell` `--sql-shell` `--udf-hex` `--udf-install` `--file-read` `--file-write` `--file-dest` `--driver` `--reg-read` `--reg-add` `--reg-del` `--reg-key` `--reg-value` `--reg-data` `--reg-type` |
+| 利用通道（**需 `--authorized` + `EXPLOIT_ENABLED=1`**） | `--os-cmd` `--os-shell` `--sql-shell` `--udf-hex` `--udf-install` `--file-read` `--file-write` `--file-dest` `--driver` `--reg-read` `--reg-add` `--reg-del` `--reg-key` `--reg-value` `--reg-data` `--reg-type` `--cleanup`（按写副作用台账撤销本次利用的残留；SQL 类走 sql-shell、文件/注册表走 os-shell） |
+| 本地状态清理（**不要求 `-u`、不发包**） | `--purge`（删除本地台账根目录：扫描快照 + 写副作用 + `auth.jsonl` 审计，以及引擎日志；`reports/` 导出目录与 `--session-file` 不动。非交互必须 `--yes`） |
 | Windows 注册表面（[D200] 对标 sqlmap `--reg-*`，仅 MSSQL `xp_reg*`） | `--reg-read [key]`（读值，`xp_regread`）/ `--reg-add`（写值，需 `--reg-key`/`--reg-value`/`--reg-data`，`--reg-type` 默认 REG_SZ）/ `--reg-del`（删值，`xp_regdelete` 按值名、不可逆）。三操作旗标带值 = 键路径速记；REST 同名端点 `/api/exploit/reg-read|reg-add|reg-del`，写删与 os-shell 同档 destructive（显式 scope + `confirmDestructive:true`） |
 | 网络与协议 | `--proxy` `--proxy-bypass-local` `--no-proxy-bypass-local` `--insecure` `--rate` `--threads` `--retries` `--http-timeout` `--delay-sec` `--req-rate` `--max-requests` `--tor` `--check-tor` `--random-agent` `--force-ssl` `--ignore-redirects` `--hpp` `--no-keep-alive` `--drop-set-cookie` |
 | 安全护栏与授权 | `--authorized` `--confirm-destructive` `--confirm-form-writes` `--poc-redact-auth` `--no-poc-redact-auth` `--no-production-mode` `--no-xp-auto-enable` `--no-validation-skip` `--yes` |
@@ -358,7 +359,7 @@ npm run quality:all     # 【门禁】一键全量质量校验（测试/覆盖�
 | `/api/exploit/reg-add` | POST | [D200] Windows 注册表写（对标 sqlmap `--reg-add`；仅 MSSQL `xp_regwrite`。写类：显式 scope + `confirmDestructive:true`；`key/value/data` 必填，`type` 默认 REG_SZ） |
 | `/api/exploit/reg-del` | POST | [D200] Windows 注册表删值（对标 sqlmap `--reg-del`；仅 MSSQL `xp_regdelete` 按值名删除、不可逆。写类双闸同上；`key/value` 必填） |
 | `/api/exploit/side-effects` | GET | [D90] 查看某次扫描的**写副作用登记**与清理计划（`?scanId=`）。**只读、不需 EXPLOIT 门** —— 关掉利用能力后仍能查残留，否则运维看不见痕迹反而更危险 |
-| `/api/exploit/side-effects/cleanup` | POST | [D90] 执行写副作用清理（P2-5：把人工条款 R5/R6 变成代码能力）。**与写类端点同门控**（`EXPLOIT_ENABLED=1` + 授权声明 + scope 声明）——清理会对目标再发一次命令/写请求，绝不绕过门控；默认不自动执行（扫描器自作主张再动目标比不清理更危险） |
+| `/api/exploit/side-effects/cleanup` | POST | [D90/D250] 执行写副作用清理（P2-5：把人工条款 R5/R6 变成代码能力）。**与写类端点同门控**（`EXPLOIT_ENABLED=1` + 授权声明 + scope 声明）——清理会对目标再发一次命令/写请求，绝不绕过门控；按登记类型路由：SQL 类撤销（`DROP FUNCTION` / 反向 DML）走 sql-shell，文件/注册表走 os-shell；默认不自动执行（扫描器自作主张再动目标比不清理更危险） |
 
 > **授权声明**（`authDeclaration`）：利用操作在 `AUTH_DECLARATION_STRICT=strict`（默认）下需结构化授权声明 `{ operator, scope, timestamp, validWindowMs }`——`scope` 覆盖目标、`timestamp` 在有效窗内。`lenient` 模式兼容旧 `authorized: true` 布尔自证。配额超限返回 `QUOTA_TARGET_EXCEEDED` / `QUOTA_FANOUT_EXCEEDED`；声明问题返回 `AUTH_DECLARATION_MISSING` / `AUTH_DECLARATION_INVALID` / `AUTH_SCOPE_MISMATCH` / `AUTH_DECLARATION_EXPIRED`。审计落盘 `ledger/auth.jsonl`。
 | `/api/sqlmap/status` | GET | sqlmap 是否可用（不返回脚本路径） |
@@ -450,7 +451,7 @@ server/       ← Express + Node.js（后端，`server/index.js` 入口）
 # 前端测试（579 个用例）
 npm test
 
-# 服务端测试（4064 个用例）
+# 服务端测试（4076 个用例）
 cd server && npm test
 
 # 全部测试
@@ -476,7 +477,7 @@ npm run artifact:drift   # 入库的 e2e 基线产物必须等于当前代码跑
 
 - TypeScript: 零错误
 - 前端测试: 579/579 通过（覆盖率门禁 stmts 93.16 / branch 84.47 / func 80.63，阈值 88/77/67）
-- 服务端测试: 4064 用例（4058 pass / 0 fail / 6 skip，并发口径 2026-11-03 复测；6 skip 为环境依赖显式跳过。覆盖率 lines 90.89 / branch 79.29 / func 84.22，阈值 85/74/77）
+- 服务端测试: 4076 用例（4070 pass / 0 fail / 6 skip，并发口径 2026-11-03 复测；6 skip 为环境依赖显式跳过。覆盖率 lines 90.89 / branch 79.29 / func 84.22，阈值 85/74/77）
 - 一键扫描: `npm run scan -- -u <url>`（CLI 一条命令产出 HTML/JSON/Markdown 全套报告 + manifest，退出码可直接进 CI 门禁）
 - Tamper 插件: 234 个（含批次 D3 新增 scalarselectinline；含 v24 增量 20 个，对齐 sqlmap 官方 tamper 全集，含官方 CRS/libinjection 实测组合 uniontable+odbcbrace；含批次 D13 新增 5 件上游形态变体 *nospace/*open/*block，真机 A/B 判决前不进默认链）
 - WAF 绕过能力: 200+ 插件链式组合，覆盖 62 个 WAF 厂商指纹识别 + 推荐

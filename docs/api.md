@@ -636,7 +636,7 @@ curl "http://127.0.0.1:4567/api/sqlmap/sq2/diff?base=sq1"
 | 端点 | 方法 | 门槛 | 语义 |
 |---|---|---|---|
 | `/exploit/side-effects` | GET | **只读，不需 EXPLOIT 门**（与 `ledger show` 同口径） | 返回该次扫描的副作用登记与清理计划；关掉利用能力后仍可查残留 |
-| `/exploit/side-effects/cleanup` | POST | **与写类端点同门控**（第 1–7 条全适用） | 执行自动清理；会对目标再发一次命令/写请求，故绝不绕门 |
+| `/exploit/side-effects/cleanup` | POST | **与写类端点同门控**（第 1–7 条全适用） | 执行自动清理；会对目标再发一次命令/写请求，故绝不绕门。按登记类型路由：SQL 类（`DROP FUNCTION` / 反向 DML）走 sql-shell，文件/注册表走 os-shell（[D250] 单一判据 `cleanupChannel`） |
 
 **为什么清理默认不自动执行**：扫描器「自作主张再动一次目标」比不清理更危险 ——
 故 `cleanup` 必须显式调用，且撤销动作走与利用同一套 HTTP 客户端与门控，
@@ -741,6 +741,12 @@ Windows 注册表面（对标 sqlmap `--reg-*`；仅 MSSQL `xp_reg*`，非 MSSQL
 - 请求体额外字段 `scanId`（必填）。执行清理并逐条回报 `cleaned` / `failed` / `skipped` / `irreversible`。
 - **与写类端点同门控**（第 1–7 条全适用）：清理会对目标再发一次命令/写请求，属利用动作。
 - 撤销动作经与利用**同一个 HTTP 客户端与同一套门控**执行，不新开第二条写链路。
+- **通道路由**（[D250]）：`udf_install` 的 `DROP FUNCTION` 与 `stacked_dml` 的反向语句走
+  `sql-shell`；`file_write`（rm/del）与 `reg_write`（reg delete）走 `os-shell`。
+  旧实现全部走 os-shell，DROP FUNCTION 会被当系统命令执行 —— 失败不静默，但清理从未成功。
+- **写前登记随上下文透传**：手工入参（`target`+`point`+`dbms`）同时带 `scanId` 时，
+  `file-write` / `udf-install` / `reg-add` 的写操作会登记到该扫描台账；不带 `scanId`
+  则只执行不登记（无账可清，响应里不会假装有）。
 - 失败不静默：任一撤销失败都会出现在 `results[]` 的 `failed` 项里（客户须知道哪个残留没清掉）。
 
 ---

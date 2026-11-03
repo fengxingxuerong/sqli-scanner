@@ -697,6 +697,11 @@ function applyLiveCookies(config, args) {
 
 // 构建 config：透传 level/risk/technique/dump/tamper/proxy/rate/threads
 export function buildConfig(args) {
+  // [D250] --cleanup 是布尔开关（对标 sqlmap --cleanup）：清理的是**本次扫描**的写副作用台账。
+  // 带值（看起来像扫描 id/路径）不会生效 ⇒ 明确拒绝，避免「收参数不生效」。
+  if (typeof args.cleanup === 'string') {
+    throw new Error(`--cleanup 不接受值（收到 ${args.cleanup}）：它清理本次扫描的写副作用台账`);
+  }
   // [D205] AI 报告预检：`--ai-report` 已给但 AI_REPORT_API_BASE/KEY 未配齐 → 这里就抛，
   // 不等到扫描跑完三分钟才在落盘阶段失败（收参数不生效是本仓红线）。
   assertAiReportUsable(args);
