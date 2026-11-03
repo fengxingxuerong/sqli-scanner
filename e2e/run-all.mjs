@@ -218,7 +218,7 @@ const probePort = (port, timeout = 800) =>
 
 const hasJava = () =>
   new Promise((resolve) => {
-    const p = spawn('java', ['-version'], { stdio: 'ignore' });
+    const p = spawn('java', ['-version'], { stdio: 'ignore', windowsHide: true });
     p.on('error', () => resolve(false));
     p.on('exit', (c) => resolve(c === 0));
     setTimeout(() => { try { p.kill(); } catch { /* noop */ } resolve(false); }, 3000);
@@ -290,7 +290,7 @@ function pythonWorks(cmd) {
     const finish = (v) => { if (!done) { done = true; resolve(v); } };
     let p;
     try {
-      p = spawn(cmd, ['-c', 'print(1)'], { stdio: ['ignore', 'pipe', 'pipe'] });
+      p = spawn(cmd, ['-c', 'print(1)'], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
     } catch {
       return finish(false);
     }
@@ -341,6 +341,8 @@ const runOne = async (lab, useSandbox = false, useLocalPg = false) => {
         ...(typeof lab.env === 'function' ? lab.env() : lab.env || {}),
       },
       stdio: ['ignore', 'pipe', 'pipe'],
+      // [P0-FIX 2026-11-03] 每个靶场一个子进程：不隐藏时无控制台宿主会逐靶场弹 cmd 窗口
+      windowsHide: true,
     });
     let out = '';
     let timeoutNote = '';
@@ -367,7 +369,7 @@ const runOne = async (lab, useSandbox = false, useLocalPg = false) => {
         // win32 上 spawn 走 shell 时 kill 只打死外壳、孙进程仍持有管道；这里 stdio 是 pipe 且
         // 不用 shell，但 python 包装层会再起 mysqld/node —— 连树杀才真能放掉端口。
         if (process.platform === 'win32' && p.pid) {
-          spawn('taskkill', ['/pid', String(p.pid), '/T', '/F'], { stdio: 'ignore' });
+          spawn('taskkill', ['/pid', String(p.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true });
         } else {
           p.kill('SIGKILL');
         }

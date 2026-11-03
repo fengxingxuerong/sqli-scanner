@@ -1,5 +1,5 @@
 {
-  "at": "2026-10-29T03:47:47.619Z",
+  "at": "2026-11-03T14:25:43.250Z",
   "rows": [
     {
       "id": "multi-seg",
@@ -10,9 +10,9 @@
       "hit": true,
       "vulns": 3,
       "verdict": "vulnerability_detected",
-      "ms": 1300,
+      "ms": 8454,
       "exit": 2,
-      "tail": "[检测] 86d7dabd · union\n[检测] 86d7dabd · error\n[检测] 86d7dabd · boolean\n[命中] union @ 86d7dabd\n[命中] error @ 86d7dabd\n[命中] boolean @ 86d7dabd\n[完成] 风险等级 High\n",
+      "tail": "[检测] 1@path · union\n[检测] 1@path · error\n[检测] 1@path · boolean\n[命中] union @ 1@path\n[命中] error @ 1@path\n[命中] boolean @ 1@path\n[完成] 风险等级 High\n",
       "ok": true
     },
     {
@@ -24,7 +24,7 @@
       "hit": false,
       "vulns": 0,
       "verdict": "no_vulnerability_detected",
-      "ms": 879,
+      "ms": 1056,
       "exit": 0,
       "tail": "[完成] 风险等级 Low\n",
       "ok": true
@@ -38,9 +38,9 @@
       "hit": true,
       "vulns": 3,
       "verdict": "vulnerability_detected",
-      "ms": 1094,
+      "ms": 7650,
       "exit": 2,
-      "tail": "[检测] 86d7dabd · union\n[检测] 86d7dabd · error\n[检测] 86d7dabd · boolean\n[命中] union @ 86d7dabd\n[命中] error @ 86d7dabd\n[命中] boolean @ 86d7dabd\n[完成] 风险等级 High\n",
+      "tail": "[检测] 1@path · union\n[检测] 1@path · error\n[检测] 1@path · boolean\n[命中] union @ 1@path\n[命中] error @ 1@path\n[命中] boolean @ 1@path\n[完成] 风险等级 High\n",
       "ok": true
     },
     {
@@ -52,9 +52,9 @@
       "hit": false,
       "vulns": 0,
       "verdict": "no_vulnerability_detected",
-      "ms": 1933,
+      "ms": 10327,
       "exit": 0,
-      "tail": "[检测] 86d7dabd · union\n[检测] 86d7dabd · error\n[检测] 86d7dabd · boolean\n[完成] 风险等级 Low\n",
+      "tail": "[检测] 1@path · union\n[检测] 1@path · error\n[检测] 1@path · boolean\n[完成] 风险等级 Low\n",
       "ok": true
     },
     {
@@ -66,9 +66,9 @@
       "hit": true,
       "vulns": 3,
       "verdict": "vulnerability_detected",
-      "ms": 1074,
+      "ms": 7673,
       "exit": 2,
-      "tail": "[检测] 57d63830 · union\n[检测] 57d63830 · error\n[检测] 57d63830 · boolean\n[命中] union @ 57d63830\n[命中] error @ 57d63830\n[命中] boolean @ 57d63830\n[完成] 风险等级 High\n",
+      "tail": "[检测] matrix;cat=1@path · union\n[检测] matrix;cat=1@path · error\n[检测] matrix;cat=1@path · boolean\n[命中] union @ matrix;cat=1@path\n[命中] error @ matrix;cat=1@path\n[命中] boolean @ matrix;cat=1@path\n[完成] 风险等级 High\n",
       "ok": true
     },
     {
@@ -80,9 +80,9 @@
       "hit": false,
       "vulns": 0,
       "verdict": "no_vulnerability_detected",
-      "ms": 1898,
+      "ms": 10325,
       "exit": 0,
-      "tail": "[检测] 57d63830 · union\n[检测] 57d63830 · error\n[检测] 57d63830 · boolean\n[完成] 风险等级 Low\n",
+      "tail": "[检测] matrix;cat=1@path · union\n[检测] matrix;cat=1@path · error\n[检测] matrix;cat=1@path · boolean\n[完成] 风险等级 Low\n",
       "ok": true
     },
     {
@@ -93,9 +93,9 @@
       "hit": true,
       "vulns": 3,
       "verdict": "vulnerability_detected",
-      "ms": 2093,
+      "ms": 14432,
       "exit": 2,
-      "tail": "[检测] eb8511f8 · union\n[检测] eb8511f8 · error\n[检测] eb8511f8 · boolean\n[检测] eb8511f8 · union\n[检测] eb8511f8 · error\n[检测] eb8511f8 · boolean\n[命中] union @ eb8511f8\n[命中] error @ eb8511f8\n[命中] boolean @ eb8511f8\n[完成] 风险等级 High\n",
+      "tail": "[检测] a@url · union\n[检测] a@url · error\n[检测] a@url · boolean\n[检测] a@url · union\n[检测] a@url · error\n[检测] a@url · boolean\n[命中] union @ a@url\n[命中] error @ a@url\n[命中] boolean @ a@url\n[完成] 风险等级 High\n",
       "ok": true
     },
     {
@@ -106,7 +106,7 @@
       "hit": false,
       "vulns": 0,
       "verdict": "no_vulnerability_detected",
-      "ms": 867,
+      "ms": 859,
       "exit": 0,
       "tail": "[完成] 风险等级 Low\n",
       "ok": true
@@ -119,9 +119,9 @@
       "hit": true,
       "vulns": 3,
       "verdict": "vulnerability_detected",
-      "ms": 1088,
+      "ms": 7613,
       "exit": 2,
-      "tail": "[检测] eb8511f8 · union\n[检测] eb8511f8 · error\n[检测] eb8511f8 · boolean\n[命中] union @ eb8511f8\n[命中] error @ eb8511f8\n[命中] boolean @ eb8511f8\n[完成] 风险等级 High\n",
+      "tail": "[检测] a@url · union\n[检测] a@url · error\n[检测] a@url · boolean\n[命中] union @ a@url\n[命中] error @ a@url\n[命中] boolean @ a@url\n[完成] 风险等级 High\n",
       "ok": true
     },
     {
@@ -132,9 +132,9 @@
       "hit": false,
       "vulns": 0,
       "verdict": "no_vulnerability_detected",
-      "ms": 1893,
+      "ms": 10296,
       "exit": 0,
-      "tail": "[检测] eb8511f8 · union\n[检测] eb8511f8 · error\n[检测] eb8511f8 · boolean\n[完成] 风险等级 Low\n",
+      "tail": "[检测] a@url · union\n[检测] a@url · error\n[检测] a@url · boolean\n[完成] 风险等级 Low\n",
       "ok": true
     },
     {
@@ -150,9 +150,9 @@
       "hit": true,
       "vulns": 3,
       "verdict": "vulnerability_detected",
-      "ms": 1062,
+      "ms": 7617,
       "exit": 2,
-      "tail": "[检测] c50935c3 · union\n[检测] c50935c3 · error\n[检测] c50935c3 · boolean\n[命中] union @ c50935c3\n[命中] error @ c50935c3\n[命中] boolean @ c50935c3\n[完成] 风险等级 High\n",
+      "tail": "[检测] id@body · union\n[检测] id@body · error\n[检测] id@body · boolean\n[命中] union @ id@body\n[命中] error @ id@body\n[命中] boolean @ id@body\n[完成] 风险等级 High\n",
       "ok": true
     },
     {
@@ -168,9 +168,9 @@
       "hit": false,
       "vulns": 0,
       "verdict": "no_vulnerability_detected",
-      "ms": 1905,
+      "ms": 10305,
       "exit": 0,
-      "tail": "[检测] c50935c3 · union\n[检测] c50935c3 · error\n[检测] c50935c3 · boolean\n[完成] 风险等级 Low\n",
+      "tail": "[检测] id@body · union\n[检测] id@body · error\n[检测] id@body · boolean\n[完成] 风险等级 Low\n",
       "ok": true
     },
     {
@@ -183,11 +183,11 @@
         "title": "report"
       },
       "hit": true,
-      "vulns": 0,
-      "verdict": "no-report",
-      "ms": 655,
+      "vulns": 3,
+      "verdict": "vulnerability_detected",
+      "ms": 6367,
       "exit": 2,
-      "tail": "[cli] 无法识别的参数（不会生效）：-r\n无法识别的参数：-r\n  这些开关不会生效，本次启动已拒绝 —— 宁可少跑一次，也不让「以为设了」变成实际没设。\n  用 --help 核对开关名（例如 --driver 而不是 --driver-type；--scope 而不是 --scopes）。\n",
+      "tail": "  [i] -r multipart：文本字段 title；文件字段 avatar（按 multipart 重建，文件字段注入 filename）。\n[检测] avatar@body · union\n[检测] avatar@body · error\n[检测] avatar@body · boolean\n[命中] union @ avatar@body\n[命中] error @ avatar@body\n[命中] boolean @ avatar@body\n[完成] 风险等级 High\n",
       "ok": true
     },
     {
@@ -199,13 +199,13 @@
         "filename": "alice",
         "title": "report"
       },
-      "hit": true,
+      "hit": false,
       "vulns": 0,
-      "verdict": "no-report",
-      "ms": 662,
-      "exit": 2,
-      "tail": "[cli] 无法识别的参数（不会生效）：-r\n无法识别的参数：-r\n  这些开关不会生效，本次启动已拒绝 —— 宁可少跑一次，也不让「以为设了」变成实际没设。\n  用 --help 核对开关名（例如 --driver 而不是 --driver-type；--scope 而不是 --scopes）。\n",
-      "ok": false
+      "verdict": "no_vulnerability_detected",
+      "ms": 22928,
+      "exit": 0,
+      "tail": "  [i] -r multipart：文本字段 title；文件字段 avatar（按 multipart 重建，文件字段注入 filename）。\n[检测] avatar@body · union\n[检测] avatar@body · error\n[检测] avatar@body · boolean\n[完成] 风险等级 Low\n",
+      "ok": true
     },
     {
       "id": "multipart-form-name",
@@ -216,11 +216,11 @@
       },
       "paramNames": true,
       "hit": true,
-      "vulns": 0,
-      "verdict": "no-report",
-      "ms": 665,
+      "vulns": 2,
+      "verdict": "vulnerability_detected",
+      "ms": 11083,
       "exit": 2,
-      "tail": "[cli] 无法识别的参数（不会生效）：-r\n无法识别的参数：-r\n  这些开关不会生效，本次启动已拒绝 —— 宁可少跑一次，也不让「以为设了」变成实际没设。\n  用 --help 核对开关名（例如 --driver 而不是 --driver-type；--scope 而不是 --scopes）。\n",
+      "tail": "  [i] -r multipart：文本字段 id；文件字段 avatar（按 multipart 重建，文件字段注入 filename）。\n[检测] id@paramName · union\n[检测] id@paramName · error\n[检测] id@paramName · boolean\n[命中] error @ id@paramName\n[命中] boolean @ id@paramName\n[完成] 风险等级 High\n",
       "ok": true
     },
     {
@@ -231,13 +231,13 @@
         "path": "/safe/form-sort"
       },
       "paramNames": true,
-      "hit": true,
+      "hit": false,
       "vulns": 0,
-      "verdict": "no-report",
-      "ms": 660,
-      "exit": 2,
-      "tail": "[cli] 无法识别的参数（不会生效）：-r\n无法识别的参数：-r\n  这些开关不会生效，本次启动已拒绝 —— 宁可少跑一次，也不让「以为设了」变成实际没设。\n  用 --help 核对开关名（例如 --driver 而不是 --driver-type；--scope 而不是 --scopes）。\n",
-      "ok": false
+      "verdict": "no_vulnerability_detected",
+      "ms": 11427,
+      "exit": 0,
+      "tail": "  [i] -r multipart：文本字段 id；文件字段 avatar（按 multipart 重建，文件字段注入 filename）。\n[检测] id@paramName · union\n[检测] id@paramName · error\n[检测] id@paramName · boolean\n[检测] id@paramName · boolean\n[完成] 风险等级 Low\n",
+      "ok": true
     },
     {
       "id": "form-enctype",
@@ -248,9 +248,9 @@
       "hit": true,
       "vulns": 3,
       "verdict": "vulnerability_detected",
-      "ms": 1110,
+      "ms": 6176,
       "exit": 2,
-      "tail": "[发现] 2 个注入点\n[检测] 6198bc94 · union\n[检测] 6198bc94 · error\n[检测] 6198bc94 · boolean\n[命中] union @ 6198bc94\n[命中] error @ 6198bc94\n[命中] boolean @ 6198bc94\n[完成] 风险等级 High\n",
+      "tail": "[发现] 2 个注入点\n[检测] caption@body · union\n[检测] caption@body · error\n[检测] caption@body · boolean\n[命中] union @ caption@body\n[命中] error @ caption@body\n[命中] boolean @ caption@body\n[完成] 风险等级 High\n",
       "ok": true
     },
     {
@@ -262,9 +262,9 @@
       "hit": false,
       "vulns": 0,
       "verdict": "no_vulnerability_detected",
-      "ms": 3153,
+      "ms": 19652,
       "exit": 0,
-      "tail": "[发现] 2 个注入点\n[检测] c1a41ea8 · union\n[检测] c1a41ea8 · error\n[检测] c1a41ea8 · boolean\n[完成] 风险等级 Low\n",
+      "tail": "[发现] 2 个注入点\n[检测] caption@body · union\n[检测] caption@body · error\n[检测] caption@body · boolean\n[完成] 风险等级 Low\n",
       "ok": true
     },
     {
@@ -276,11 +276,11 @@
       },
       "paramNames": true,
       "hit": true,
-      "vulns": 0,
-      "verdict": "no-report",
-      "ms": 667,
+      "vulns": 2,
+      "verdict": "vulnerability_detected",
+      "ms": 57820,
       "exit": 2,
-      "tail": "[cli] 无法识别的参数（不会生效）：-r\n无法识别的参数：-r\n  这些开关不会生效，本次启动已拒绝 —— 宁可少跑一次，也不让「以为设了」变成实际没设。\n  用 --help 核对开关名（例如 --driver 而不是 --driver-type；--scope 而不是 --scopes）。\n",
+      "tail": "ame · boolean\n[检测] go@paramName · union\n[检测] go@paramName · error\n[检测] go@paramName · boolean\n[检测] name@body · union\n[检测] name@body · error\n[检测] name@body · boolean\n[检测] name@paramName · union\n[检测] name@paramName · error\n[检测] name@paramName · boolean\n[检测] go@paramName · union\n[检测] go@paramName · error\n[检测] go@paramName · boolean\n[命中] error @ name@paramName\n[命中] error @ go@paramName\n[完成] 风险等级 High\n",
       "ok": true
     },
     {
@@ -291,13 +291,13 @@
         "path": "/safe/form-filter"
       },
       "paramNames": true,
-      "hit": true,
+      "hit": false,
       "vulns": 0,
-      "verdict": "no-report",
-      "ms": 652,
-      "exit": 2,
-      "tail": "[cli] 无法识别的参数（不会生效）：-r\n无法识别的参数：-r\n  这些开关不会生效，本次启动已拒绝 —— 宁可少跑一次，也不让「以为设了」变成实际没设。\n  用 --help 核对开关名（例如 --driver 而不是 --driver-type；--scope 而不是 --scopes）。\n",
-      "ok": false
+      "verdict": "no_vulnerability_detected",
+      "ms": 31172,
+      "exit": 0,
+      "tail": "本字段 name, go；文件字段 (无)（按 multipart 重建，文件字段注入 filename）。\n      若本次抓包本就只有文件字段，注入面来自 filename。\n[检测] name@paramName · union\n[检测] name@paramName · error\n[检测] name@paramName · boolean\n[检测] go@paramName · union\n[检测] go@paramName · error\n[检测] go@paramName · boolean\n[检测] name@body · union\n[检测] name@body · error\n[检测] name@body · boolean\n[检测] name@paramName · boolean\n[检测] go@paramName · boolean\n[完成] 风险等级 Low\n",
+      "ok": true
     },
     {
       "id": "form-key-bool-blind",
@@ -308,11 +308,11 @@
       },
       "paramNames": true,
       "hit": true,
-      "vulns": 0,
-      "verdict": "no-report",
-      "ms": 674,
-      "exit": 2,
-      "tail": "[cli] 无法识别的参数（不会生效）：-r\n无法识别的参数：-r\n  这些开关不会生效，本次启动已拒绝 —— 宁可少跑一次，也不让「以为设了」变成实际没设。\n  用 --help 核对开关名（例如 --driver 而不是 --driver-type；--scope 而不是 --scopes）。\n",
+      "vulns": 1,
+      "verdict": "vulnerability_detected",
+      "ms": 35348,
+      "exit": 0,
+      "tail": " 重建，文件字段注入 filename）。\n      若本次抓包本就只有文件字段，注入面来自 filename。\n[检测] name@paramName · union\n[检测] name@paramName · error\n[检测] name@paramName · boolean\n[检测] go@paramName · union\n[检测] go@paramName · error\n[检测] go@paramName · boolean\n[检测] name@body · union\n[检测] name@body · error\n[检测] name@body · boolean\n[检测] name@paramName · boolean\n[检测] go@paramName · boolean\n[命中] boolean @ name@paramName\n[完成] 风险等级 Medium\n",
       "ok": true
     },
     {
@@ -323,13 +323,13 @@
         "path": "/safe/form-filter-blind"
       },
       "paramNames": true,
-      "hit": true,
+      "hit": false,
       "vulns": 0,
-      "verdict": "no-report",
-      "ms": 663,
-      "exit": 2,
-      "tail": "[cli] 无法识别的参数（不会生效）：-r\n无法识别的参数：-r\n  这些开关不会生效，本次启动已拒绝 —— 宁可少跑一次，也不让「以为设了」变成实际没设。\n  用 --help 核对开关名（例如 --driver 而不是 --driver-type；--scope 而不是 --scopes）。\n",
-      "ok": false
+      "verdict": "no_vulnerability_detected",
+      "ms": 31161,
+      "exit": 0,
+      "tail": "本字段 name, go；文件字段 (无)（按 multipart 重建，文件字段注入 filename）。\n      若本次抓包本就只有文件字段，注入面来自 filename。\n[检测] name@paramName · union\n[检测] name@paramName · error\n[检测] name@paramName · boolean\n[检测] go@paramName · union\n[检测] go@paramName · error\n[检测] go@paramName · boolean\n[检测] name@body · union\n[检测] name@body · error\n[检测] name@body · boolean\n[检测] name@paramName · boolean\n[检测] go@paramName · boolean\n[完成] 风险等级 Low\n",
+      "ok": true
     },
     {
       "id": "json-key-bool-blind",
@@ -340,11 +340,11 @@
       },
       "paramNames": true,
       "hit": true,
-      "vulns": 0,
-      "verdict": "no-report",
-      "ms": 662,
-      "exit": 2,
-      "tail": "[cli] 无法识别的参数（不会生效）：-r\n无法识别的参数：-r\n  这些开关不会生效，本次启动已拒绝 —— 宁可少跑一次，也不让「以为设了」变成实际没设。\n  用 --help 核对开关名（例如 --driver 而不是 --driver-type；--scope 而不是 --scopes）。\n",
+      "vulns": 1,
+      "verdict": "vulnerability_detected",
+      "ms": 35288,
+      "exit": 0,
+      "tail": "[检测] name@paramName · union\n[检测] name@paramName · error\n[检测] name@paramName · boolean\n[检测] go@paramName · union\n[检测] go@paramName · error\n[检测] go@paramName · boolean\n[检测] name@body · union\n[检测] name@body · error\n[检测] name@body · boolean\n[检测] name@paramName · boolean\n[检测] go@paramName · boolean\n[命中] boolean @ name@paramName\n[完成] 风险等级 Medium\n",
       "ok": true
     },
     {
@@ -355,13 +355,13 @@
         "path": "/safe/json-filter-blind"
       },
       "paramNames": true,
-      "hit": true,
+      "hit": false,
       "vulns": 0,
-      "verdict": "no-report",
-      "ms": 664,
-      "exit": 2,
-      "tail": "[cli] 无法识别的参数（不会生效）：-r\n无法识别的参数：-r\n  这些开关不会生效，本次启动已拒绝 —— 宁可少跑一次，也不让「以为设了」变成实际没设。\n  用 --help 核对开关名（例如 --driver 而不是 --driver-type；--scope 而不是 --scopes）。\n",
-      "ok": false
+      "verdict": "no_vulnerability_detected",
+      "ms": 31132,
+      "exit": 0,
+      "tail": "[检测] name@paramName · union\n[检测] name@paramName · error\n[检测] name@paramName · boolean\n[检测] go@paramName · union\n[检测] go@paramName · error\n[检测] go@paramName · boolean\n[检测] name@body · union\n[检测] name@body · error\n[检测] name@body · boolean\n[检测] name@paramName · boolean\n[检测] go@paramName · boolean\n[完成] 风险等级 Low\n",
+      "ok": true
     },
     {
       "id": "crawl-path",
@@ -373,9 +373,9 @@
       "hit": true,
       "vulns": 2,
       "verdict": "vulnerability_detected",
-      "ms": 1910,
+      "ms": 69790,
       "exit": 2,
-      "tail": "[发现] 4 个注入点\n[检测] bdf9adf1 · union\n[检测] bdf9adf1 · error\n[检测] bdf9adf1 · boolean\n[命中] union @ bdf9adf1\n[命中] error @ bdf9adf1\n[完成] 风险等级 High\n",
+      "tail": "[发现] 4 个注入点\n[检测] 5@path · union\n[检测] 5@path · error\n[检测] 5@path · boolean\n[检测] path-links@path · union\n[检测] path-links@path · error\n[检测] path-links@path · boolean\n[检测] path-links@path · union\n[检测] path-links@path · error\n[检测] path-links@path · boolean\n[检测] orders@path · union\n[检测] orders@path · error\n[检测] orders@path · boolean\n[命中] union @ 5@path\n[命中] error @ 5@path\n[完成] 风险等级 High\n",
       "ok": true
     },
     {
@@ -388,9 +388,9 @@
       "hit": false,
       "vulns": 0,
       "verdict": "no_vulnerability_detected",
-      "ms": 888,
+      "ms": 56007,
       "exit": 0,
-      "tail": "[发现] 4 个注入点\n[完成] 风险等级 Low\n",
+      "tail": "[发现] 4 个注入点\n[检测] 5@path · union\n[检测] 5@path · error\n[检测] 5@path · boolean\n[检测] safe-path-links@path · union\n[检测] safe-path-links@path · error\n[检测] safe-path-links@path · boolean\n[检测] safe-path-links@path · union\n[检测] safe-path-links@path · error\n[检测] safe-path-links@path · boolean\n[检测] orders@path · union\n[检测] orders@path · error\n[检测] orders@path · boolean\n[完成] 风险等级 Low\n",
       "ok": true
     },
     {
@@ -402,9 +402,9 @@
       "hit": true,
       "vulns": 3,
       "verdict": "vulnerability_detected",
-      "ms": 1106,
+      "ms": 8847,
       "exit": 2,
-      "tail": "[发现] 1 个注入点\n[检测] e285ed42 · union\n[检测] e285ed42 · error\n[检测] e285ed42 · boolean\n[命中] union @ e285ed42\n[命中] error @ e285ed42\n[命中] boolean @ e285ed42\n[完成] 风险等级 High\n",
+      "tail": "[发现] 1 个注入点\n[检测] id@body · union\n[检测] id@body · error\n[检测] id@body · boolean\n[命中] union @ id@body\n[命中] error @ id@body\n[命中] boolean @ id@body\n[完成] 风险等级 High\n",
       "ok": true
     },
     {
@@ -416,9 +416,9 @@
       "hit": false,
       "vulns": 0,
       "verdict": "no_vulnerability_detected",
-      "ms": 1911,
+      "ms": 10288,
       "exit": 0,
-      "tail": "[发现] 1 个注入点\n[检测] fa3370e5 · union\n[检测] fa3370e5 · error\n[检测] fa3370e5 · boolean\n[完成] 风险等级 Low\n",
+      "tail": "[发现] 1 个注入点\n[检测] id@body · union\n[检测] id@body · error\n[检测] id@body · boolean\n[完成] 风险等级 Low\n",
       "ok": true
     },
     {
@@ -431,9 +431,9 @@
       "hit": true,
       "vulns": 2,
       "verdict": "vulnerability_detected",
-      "ms": 3345,
+      "ms": 71474,
       "exit": 2,
-      "tail": "[发现] 4 个注入点\n[检测] bdf9adf1 · union\n[检测] bdf9adf1 · error\n[检测] bdf9adf1 · boolean\n[命中] union @ bdf9adf1\n[命中] error @ bdf9adf1\n[完成] 风险等级 High\n",
+      "tail": "[发现] 4 个注入点\n[检测] 5@path · union\n[检测] 5@path · error\n[检测] 5@path · boolean\n[检测] spa@path · union\n[检测] spa@path · error\n[检测] spa@path · boolean\n[检测] spa@path · union\n[检测] spa@path · error\n[检测] spa@path · boolean\n[检测] orders@path · union\n[检测] orders@path · error\n[检测] orders@path · boolean\n[命中] union @ 5@path\n[命中] error @ 5@path\n[完成] 风险等级 High\n",
       "ok": true
     },
     {
@@ -446,9 +446,9 @@
       "hit": false,
       "vulns": 0,
       "verdict": "no_vulnerability_detected",
-      "ms": 2356,
+      "ms": 57320,
       "exit": 0,
-      "tail": "[发现] 4 个注入点\n[完成] 风险等级 Low\n",
+      "tail": "[发现] 4 个注入点\n[检测] 5@path · union\n[检测] 5@path · error\n[检测] 5@path · boolean\n[检测] safe-spa@path · union\n[检测] safe-spa@path · error\n[检测] safe-spa@path · boolean\n[检测] safe-spa@path · union\n[检测] safe-spa@path · error\n[检测] safe-spa@path · boolean\n[检测] orders@path · union\n[检测] orders@path · error\n[检测] orders@path · boolean\n[完成] 风险等级 Low\n",
       "ok": true
     },
     {
@@ -460,9 +460,9 @@
       "hit": true,
       "vulns": 1,
       "verdict": "vulnerability_detected",
-      "ms": 6217,
+      "ms": 35279,
       "exit": 0,
-      "tail": "[检测] 22b341c2 · union\n[检测] 22b341c2 · error\n[检测] 22b341c2 · boolean\n[检测] a7c29b0b · union\n[检测] a7c29b0b · error\n[检测] a7c29b0b · boolean\n[检测] de9d0cb9 · union\n[检测] de9d0cb9 · error\n[检测] de9d0cb9 · boolean\n[检测] 22b341c2 · boolean\n[检测] a7c29b0b · boolean\n[命中] boolean @ 22b341c2\n[完成] 风险等级 Medium\n",
+      "tail": "[检测] name@paramName · union\n[检测] name@paramName · error\n[检测] name@paramName · boolean\n[检测] go@paramName · union\n[检测] go@paramName · error\n[检测] go@paramName · boolean\n[检测] name@url · union\n[检测] name@url · error\n[检测] name@url · boolean\n[检测] name@paramName · boolean\n[检测] go@paramName · boolean\n[命中] boolean @ name@paramName\n[完成] 风险等级 Medium\n",
       "ok": true
     },
     {
@@ -474,9 +474,9 @@
       "hit": false,
       "vulns": 0,
       "verdict": "no_vulnerability_detected",
-      "ms": 5398,
+      "ms": 31270,
       "exit": 0,
-      "tail": "[检测] 22b341c2 · union\n[检测] 22b341c2 · error\n[检测] 22b341c2 · boolean\n[检测] a7c29b0b · union\n[检测] a7c29b0b · error\n[检测] a7c29b0b · boolean\n[检测] de9d0cb9 · union\n[检测] de9d0cb9 · error\n[检测] de9d0cb9 · boolean\n[检测] 22b341c2 · boolean\n[检测] a7c29b0b · boolean\n[完成] 风险等级 Low\n",
+      "tail": "[检测] name@paramName · union\n[检测] name@paramName · error\n[检测] name@paramName · boolean\n[检测] go@paramName · union\n[检测] go@paramName · error\n[检测] go@paramName · boolean\n[检测] name@url · union\n[检测] name@url · error\n[检测] name@url · boolean\n[检测] name@paramName · boolean\n[检测] go@paramName · boolean\n[完成] 风险等级 Low\n",
       "ok": true
     }
   ]

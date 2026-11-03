@@ -75,7 +75,15 @@ function entriesOf(entry) {
     }
     return null;
   }
-  if (entry.cache && entry.cache.mtimeMs === st.mtimeMs && entry.cache.size === st.size) return entry.cache.entries;
+  // [FIX 2026-11-03] mtime+size 不足以识别「同 tick 同尺寸改写」：Windows 的 mtimeMs
+  // 精度受系统时钟粒度限制（默认约 15.6ms），外部进程在同一 tick 内把 sid=V1 换成等长
+  // 的 sid=V2 时两者完全相同 ⇒ 缓存命中，把旧会话发给目标（并发 full-suite 实测
+  // freshness 拿到 sid=V1）。对「刚写入的文件」直接绕缓存，代价只在变更后的极短窗口
+  // 内多一次 readFileSync，常态（文件未变）仍走缓存。
+  const recentlyWritten = Date.now() - st.mtimeMs <= 50;
+  if (!recentlyWritten && entry.cache && entry.cache.mtimeMs === st.mtimeMs && entry.cache.size === st.size) {
+    return entry.cache.entries;
+  }
   try {
     const { entries } = parseCookieFile(readFileSync(entry.file, 'utf8'));
     entry.cache = { mtimeMs: st.mtimeMs, size: st.size, entries };

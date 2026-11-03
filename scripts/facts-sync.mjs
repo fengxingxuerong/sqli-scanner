@@ -84,7 +84,7 @@ const stripAnsi = (s) => String(s).replace(ANSI_RE, '');
 // spawnSync 无论退出码如何都同时给出 stdout + stderr，两个流合并后再解析才稳。
 function run(cmd, cwd) {
   const r = spawnSync(cmd, {
-    cwd, shell: true, encoding: 'utf8',
+    cwd, shell: true, encoding: 'utf8', windowsHide: true,
     maxBuffer: 64 * 1024 * 1024,
   });
   if (r.error) throw r.error;

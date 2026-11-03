@@ -114,4 +114,3 @@ export function findAuthEvents(where = {}) {
 export function _clearForTest() {
   try { fs.writeFileSync(AUTH_AUDIT_PATH, '', 'utf8'); } catch { /* noop */ }
 }
-

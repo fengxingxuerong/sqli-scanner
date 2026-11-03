@@ -1162,7 +1162,7 @@
     },
     "server/src/services/scanLedger.js::recordScan": {
       "lines": 62,
-      "complexity": 42,
+      "complexity": 39,
       "limitLines": 100,
       "limitComplexity": 15
     },

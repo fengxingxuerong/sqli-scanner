@@ -5,6 +5,59 @@
 
 ---
 
+## 2026-11-04 批次 D248 · 工作区遗留补登记：4 真 bug + P1 尾批（有界匹配/落盘脱敏/REST 缺省/表单门控/windowsHide）（已完成，见 CHANGELOG）
+
+**动机**：与 D247 同形态——工作区躺着 2026-11-02~11-03 两天的**未登记**改动
+（49 文件 +519/−261），无批次号、无 CHANGELOG。先逐文件通读 diff 定性，确认含
+**4 处真 bug 修复**后补登记并收口。
+
+**交付**（按主题）：
+
+1. **真 bug ×4**：
+   - CLI `-r/--request-file`、`-l/--log-file`、`--check-tor` 三条 if 与后续 else-if 链被
+     `optionalKey` 断开，已消费的 token 被二次判读落进 unknownFlags ⇒ `-r` 恒被硬拒
+     （detect-surface-lab 8 个抓包导入用例全部 exit 2）。补 `continue` + cli.unknownFlags 测试。
+   - boundary 候选缺「无引号 + 裸 `)`」档 ⇒ `WHERE id=({v})` 数值括号包裹点 boundary 全落空、
+     门控探针 `2 AND 1=1-- -` 括号未闭合语法错、真假响应恒等 ⇒ 整点静默漏报（与「无注入」同形；
+     random-battery seed=708844500 c02-paren 实测）。补候选 + 不变量⑦ guard 测试；
+     battery 复跑 12/12（missByShape 清空）。
+   - liveCookies 的 mtime+size 缓存被「同 tick 同尺寸改写」击穿（Windows 时钟粒度 ~15.6ms，
+     外部进程同 tick 换等长 sid ⇒ 旧会话发给目标，并发 full-suite 实测 freshness 拿到 sid=V1）。
+     改为「刚写入 50ms 内绕缓存」，常态仍走缓存；测试用 `utimesSync` 钉死 mtime 确定性复现
+     （不靠 sleep/竞态）。
+   - oobReceiver 测试写死 19001-19006 端口被宿主占用（WorkBuddy 沙箱自身监听 19004 ⇒
+     EADDRINUSE 让整条服务端套件红）。改 `freePort()` 每次向系统申请。
+2. **[P1-PERF] 大响应有界匹配扩面**：scanValidityGuard / WafIdentifier / blockProfile /
+   ErrorDetector / NoSqlInjectionDetector 五处热路径改 `hasBoundedMatch`（4xx 拦截页、指纹响应、
+   基线正文、SSTI/GraphQL 回显判定，正文可达 10MB）；新增 largeBodyBounded.test.js——
+   每例构造 2MB 正文、签名放窗口外末尾，钉住「窗口轮转没有把全正文扫描退化成只看前 512KB」且不误报。
+3. **落盘/导出凭据脱敏补口**：`redactPointsForDisk`——cookie/header 注入点的 originalValue
+   本身就是会话凭据（此前只删 target.cookieParams，点位数组仍把原文写进 report.json，
+   真实 blackbox-lab 扫描复现）；ReportGenerator 导出管道与 CLI `--format json`（旧实现裸
+   `JSON.stringify` 绕过脱敏管道）同口径打码，点位 id/location/param 保留（仍能说明「测过这个点」）。
+4. **[P1-CFG] REST 入口 enableExtract 缺省接单源**：`!!cfg.enableExtract` 硬编码 ⇒
+   sharedDefaults 改默认时 REST 入口不跟着变；改 pickBool + defaults 兜底，guard 测试临时改
+   单源断言 REST 缺省跟随（显式 true/false 均保留）。
+5. **[P1-SAFE] 表单写门控约束进报告**：ScanManager.start 算 constraints 早于爬表单 ⇒ 报告首屏
+   看不到「表单未测」；discover 收尾补写 `formGateConstraints` 进 `summary.constraints`
+   （discover.pipeline 测试钉住），标注失败不影响扫描。
+6. **windowsHide 弹窗修复**（用户三次反馈）：acceptance / run-all / ci-local / facts-sync 全部
+   spawn 点补 `windowsHide:true`——win32 + shell:true 在无控制台宿主下逐门禁/逐靶场弹 cmd 窗口
+   （40+ 条门禁 = 40+ 次弹窗）；只改进程创建标志不改命令语义。ci-local 顺带登记 ci.yml 新增的
+   3 个 tag/dispatch 触发发布链 job（desktop-package/docker-publish/release：本机无 Rust/Docker/
+   Release 权限，替代不了）。
+7. **e2e 靶场与新安全默认对齐**：crawl-lab / detect-surface-lab / real-world-lab /
+   second-order fixture 显式 `confirmFormWrites:true`（判据不变，只放行被测动作——不确认时
+   formWriteGate 默认跳过非幂等表单，POST 表单用例 0 注入点、verdict=inconclusive）。
+8. **产物与文档同步**：facts 三步一体（服务端 4034→4048 用例、badge 4606→4621、覆盖率微涨；全量套件 0 fail）、
+   质量台账重生成、random-battery / detect-surface / acceptance 产物刷新；VulnLab 外部裁判 5 号
+   （11-03）入库：low/medium 档全检出（union/error·High）、high 档（:id 参数化修复对照）零误报。
+
+**结果**：受影响 9 个测试文件 75/75 绿；gate:close 41/41。
+诚实边界：原始改动出自此前未署名的工作（同 D247 形态），本批做定性、补登记与收口。
+
+---
+
 ## 2026-11-03 批次 D247 · 前端 P1-CFG 遗留收口：3 红清零 + 批次补登记（已完成，见 CHANGELOG）
 
 **动机**：D246 跑收口清单在 facts 项暴露——工作区有一批**未登记**的 P1-CFG 前端接入

@@ -1,5 +1,7 @@
 import { WAF_RULES } from './wafRules.js';
 import { detectGenericBlock } from './blockSignatures.js';
+// [P1-PERF 2026-11-02] 指纹阶段的响应体最大 10MB，body matcher 改走有界窗口
+import { hasBoundedMatch } from '../boundedMatch.js';
 // [2026-09-29 收敛] 响应头读取口径全仓唯一：core/getHeader.js。本文件原私有版最弱
 // （无 .get 方法支持、数组值原样透出），同一响应可能与 scanValidityGuard 结论不一致。
 import { getHeader } from '../getHeader.js';
@@ -16,7 +18,7 @@ function matchOne(matcher, response) {
     return matcher.test ? matcher.test.test(String(v)) : true; // 无 test 仅要求该头存在
   }
   if (matcher.type === 'body') {
-    return !!matcher.test && matcher.test.test(String(response.body ?? ''));
+    return !!matcher.test && hasBoundedMatch(String(response.body ?? ''), matcher.test);
   }
   if (matcher.type === 'status') {
     return !!matcher.test && matcher.test.test(String(response.status ?? ''));

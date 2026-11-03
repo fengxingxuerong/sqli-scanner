@@ -85,6 +85,26 @@ test('① 发现 0 个注入点 → summary 明确告警并给出开启更多注
   } finally { h.done(); }
 });
 
+test('[P1-SAFE] 表单写门控跳过记录进入 report.summary.constraints', async () => {
+  // 回归真实链路缺口：ScanManager.start 时算 constraints 早于爬表单，发现后必须补写，
+  // 否则 formDiscoveryGate 有记录、报告首屏却仍看不到「表单未测」。
+  const target = {
+    mode: 'http', url: 'http://target.example/form', config: { confirmFormWrites: false },
+    formDiscoveryGate: {
+      skipped: 2,
+      items: [{ reason: 'form-writes-unconfirmed' }, { reason: 'high-risk-action' }],
+    },
+  };
+  const h = build({ target, cfg: { confirmFormWrites: false } });
+  try {
+    await discoverPoints(h.run);
+    const text = (h.report.summary.constraints || []).join('\n');
+    assert.match(text, /已跳过 2 个自动发现表单/);
+    assert.match(text, /form-writes-unconfirmed/);
+    assert.match(text, /high-risk-action/);
+  } finally { h.done(); }
+});
+
 test('[P1-SAFE] confirmFormWrites=true：发现的表单 POST 点在检测前登记 side-effect', async () => {
   const ledger = mkdtempSync(path.join(tmpdir(), 'discover-form-write-'));
   const prev = process.env.SQLI_LEDGER_DIR;

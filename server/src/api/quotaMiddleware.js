@@ -96,4 +96,3 @@ export function _resetForTest() {
   targetStore.clear();
   fanoutStore.clear();
 }
-

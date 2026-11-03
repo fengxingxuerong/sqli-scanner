@@ -176,9 +176,12 @@ export function parseArgs(argv, preset) {
       const v = argv[i + 1];
       return v != null && !v.startsWith('--') ? argv[++i] : null;
     };
-    if (a === '-r' || a === '--request-file') args.requestFile = next();
-    else if (a === '-l' || a === '--log-file') args.logFile = next();
-    else if (a === '--check-tor') args.checkTor = true;
+    // [FIX 2026-11-03] 这三条与下面的 else-if 链被 const optionalKey 断开：值虽已被消费，
+    // 同一个 token 仍会再落进下面那条链的尾部被记成 unknownFlags ⇒ `-r` 恒被硬拒
+    // （e2e/detect-surface-lab 的 8 个 -r 用例全部 exit 2 实测证实）。补 continue 即止。
+    if (a === '-r' || a === '--request-file') { args.requestFile = next(); continue; }
+    else if (a === '-l' || a === '--log-file') { args.logFile = next(); continue; }
+    else if (a === '--check-tor') { args.checkTor = true; continue; }
     // —— 攻击操作（对标 sqlmap --os-cmd/--sql-shell/--file-read/--file-write）——
     // --sql-shell / --os-shell / --fix-prompt：带值=单次执行；不带值=交互式 REPL / 布尔语义
     //（对标 sqlmap 同名参数）。三者共用一张表，避免给 if 链再添分支（复杂度门禁盯 parseArgs）。

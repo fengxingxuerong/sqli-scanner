@@ -70,7 +70,10 @@ function applySchedulingScalars(config, cfg) {
   if (prefix !== undefined) config.prefix = prefix;
   const suffix = clampStr(cfg.suffix, '', 200);
   if (suffix !== undefined) config.suffix = suffix;
-  config.enableExtract = !!cfg.enableExtract;
+  // [P1-CFG 2026-11-02] 缺省值取 defaults（= sharedDefaults 单源），不再硬编码 false：
+  // 否则 sharedDefaults 改默认时 REST 入口不会跟着变，四个入口再次漂移。
+  const enableExtract = pickBool(cfg, 'enableExtract');
+  config.enableExtract = enableExtract !== undefined ? enableExtract : defaults.enableExtract;
 }
 
 /**

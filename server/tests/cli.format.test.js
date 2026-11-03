@@ -21,6 +21,24 @@ test('formatReport: json 默认输出', () => {
   assert.equal(formatReport(report, 'json'), out);
 });
 
+test('formatReport: json 导出脱敏 target.cookieParams 与 Cookie 点位原文', () => {
+  const dirty = {
+    ...report,
+    target: {
+      url: 'http://t/?id=1',
+      cookieParams: { token: 'tok-secret' },
+      config: { auth: { basic: { username: 'u', password: 'p' } }, pocRedactAuth: true },
+    },
+    points: [{ id: 'p1', location: 'cookie', param: 'token', originalValue: 'tok-secret' }],
+  };
+  const out = formatReport(dirty, 'json');
+  assert.equal(out.includes('tok-secret'), false, 'JSON 导出仍含 Cookie 原文');
+  const parsed = JSON.parse(out);
+  assert.equal('cookieParams' in parsed.target, false, 'target.cookieParams 不应落盘');
+  assert.equal(parsed.points[0].originalValue, '[REDACTED]', 'Cookie 点位原文应打码');
+  assert.equal(parsed.target.config.auth, null, 'auth 凭据不应落盘');
+});
+
 test('formatReport: csv 输出含表头与数据行', () => {
   const out = formatReport(report, 'csv');
   assert.ok(typeof out === 'string' && out.includes(','), `csv 应为字符串: ${out}`);

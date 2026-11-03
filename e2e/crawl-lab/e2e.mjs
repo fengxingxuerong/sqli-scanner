@@ -88,7 +88,9 @@ console.log(`[① crawl1] points=${JSON.stringify(params)} itemFound=${itemFound
 console.log(`[③ scope] external.example.com 被请求: ${externalHit ? '是(FAIL)' : '否(PASS)'}`);
 
 // ---- 断言 ②：--forms（POST 表单注入点）----
-const s2 = await sm.start({ url: `${BASE}/search?pre=1`, config: { concurrency: 2, ratePerSec: 0, retry: 0, timeoutMs: 15000, techniques: ['union', 'error', 'boolean'], crawlForms: true, level: 3 } });
+// [FIX 2026-11-03] 该断言就是要测 POST 写表单的发现与检出，必须显式确认写请求；
+// 否则 formWriteGate 默认跳过非幂等表单（实测表单点缺失 → 本靶场红）。
+const s2 = await sm.start({ url: `${BASE}/search?pre=1`, config: { concurrency: 2, ratePerSec: 0, retry: 0, timeoutMs: 15000, techniques: ['union', 'error', 'boolean'], crawlForms: true, confirmFormWrites: true, level: 3 } });
 const t1 = Date.now();
 for (;;) { const s = sm.scans.get(s2); if (s && (s.status === 'completed' || s.status === 'error')) break; if (Date.now() - t1 > 120000) break; await new Promise((r) => setTimeout(r, 40)); }
 const r2 = sm.getReport(s2) || {};

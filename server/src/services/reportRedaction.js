@@ -88,6 +88,32 @@ function redactSensitiveValues(node, depth = 0) {
   return out;
 }
 
+/**
+ * 落盘点位脱敏：cookie/header 注入点的 originalValue 本身就是会话凭据；
+ * 参数名命中敏感词（token/password/authorization…）时同样打码。
+ * 点位本身（id/location/param）保留，报告仍能说明「测过这个点」。
+ * @param {Array<object>} points
+ * @returns {Array<object>}
+ */
+export function redactPointsForDisk(points) {
+  if (!Array.isArray(points)) return points;
+  return points.map((p) => {
+    if (!p || typeof p !== 'object') return p;
+    const out = { ...p };
+    const loc = String(out.location || out.in || '').toLowerCase();
+    if (
+      loc === 'cookie' || loc === 'header' || loc === 'headers'
+      || SENSITIVE_KEY_RE.test(String(out.param || ''))
+    ) {
+      if (out.originalValue != null) out.originalValue = REDACTED;
+    }
+    if (out.formValues && typeof out.formValues === 'object') {
+      out.formValues = redactSensitiveValues(out.formValues);
+    }
+    return out;
+  });
+}
+
 /** 落盘 target 脱敏：auth/proxy/login/clientCert 置 null，cookie/header 参数删除，URL 内嵌凭据打码 */
 function redactTargetForDisk(target) {
   if (!target || typeof target !== 'object') return target;
@@ -113,6 +139,15 @@ function redactTargetForDisk(target) {
 }
 
 /**
+ * target 与点位凭据同属落盘面：抽成一处，避免 redactReport 的分支继续增长。
+ * @param {object} out 已克隆的报告
+ */
+function redactTargetAndPointsForDisk(out) {
+  if (out.target && typeof out.target === 'object') out.target = redactTargetForDisk(out.target);
+  if (Array.isArray(out.points)) out.points = redactPointsForDisk(out.points);
+}
+
+/**
  * 落盘/持久化专用脱敏：强制打开三层，且额外清掉 target 的会话凭据。
  * 不修改入参（深拷贝）。
  * @param {object} report
@@ -120,9 +155,7 @@ function redactTargetForDisk(target) {
  */
 export function redactPersistedReport(report) {
   if (!report || typeof report !== 'object') return report;
-  const out = redactReport(report, { redactPasswords: true, redactAuth: true, redactTarget: true });
-  out.target = redactTargetForDisk(out.target);
-  return out;
+  return redactReport(report, { redactPasswords: true, redactAuth: true, redactTarget: true });
 }
 
 /**
@@ -148,10 +181,8 @@ export function redactReport(report, opts = {}) {
     out.vulns = out.vulns.map(redactVulnAuth);
   }
 
-  // ③ target 凭据置 null / 删除（导出与落盘共用；导出路径随后还会过 sanitizeTargetForExport）
-  if (redactTarget && out.target && typeof out.target === 'object') {
-    out.target = redactTargetForDisk(out.target);
-  }
+  // ③ target 与点位凭据置 null / 删除（导出与落盘共用；导出路径随后还会过 sanitizeTargetForExport）
+  if (redactTarget) redactTargetAndPointsForDisk(out);
 
   return out;
 }

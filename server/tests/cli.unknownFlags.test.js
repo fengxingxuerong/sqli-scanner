@@ -44,6 +44,18 @@ test('正常开关不误伤（含直连四件套）', () => {
   assert.equal(a.scope, '10.20.0.0/16');
 });
 
+test('抓包导入三件套 -r/-l/--check-tor 已被消费，不得再被记成未识别', () => {
+  // [FIX 2026-11-03] 实测缺陷：这三条在 parseArgs 里自成一条 if 链，与后续 else-if 链
+  // 断开 ⇒ 同一个 token 被二次判读并落到 unknownFlags，one-click 入口直接 exit 2。
+  // 后果不止是文案：-r 的 8 个真靶场用例（multipart / 字段名注入）全部跑不起来。
+  const a = parseArgs(['-r', '/tmp/x.req', '-l', '/tmp/x.log', '--check-tor', '-u', 'http://127.0.0.1:9/x']);
+  assert.deepEqual(a.unknownFlags, [], `不该把已消费的开关记成未识别：${a.unknownFlags.join(',')}`);
+  assert.equal(unknownFlagError(a), null);
+  assert.equal(a.requestFile, '/tmp/x.req', '前提自检：值必须真的被消费');
+  assert.equal(a.logFile, '/tmp/x.log');
+  assert.equal(a.checkTor, true);
+});
+
 test('已知但"未实现"的开关仍按原政策：告警但不计入硬拒', () => {
   const a = parseArgs(['-u', 'http://127.0.0.1:9/x', '--no-escape']);
   assert.deepEqual(a.unknownFlags, [], '--no-escape 已被显式识别（政策=告警后继续），不得当拼错');

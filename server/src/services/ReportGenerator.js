@@ -27,7 +27,7 @@ import {
   pocRedactedForExport,
 } from './reportPoC.js';
 // [D-REDACT 2026-10-12] 统一脱敏管道（spec 5.3.1）：全格式导出前必经 redactReport。
-import { redactReport } from './reportRedaction.js';
+import { redactReport, redactPointsForDisk } from './reportRedaction.js';
 // [2026-09-17] 交付缺口修复：vuln 只有内部 pointId hash，报告读者无法自解「哪个参数中招」。
 // attachVulnContext 兜底给漏洞条目补 param/location/url/method/vulnType（幂等浅拷贝），
 // 使「受影响参数」与「漏洞类型(CWE/OWASP)」成为报告的自包含字段——
@@ -427,7 +427,10 @@ export class ReportGenerator {
       delete r._redactOpts;
     }
     if (!r.target) return r;
-    return { ...r, target: sanitizeTargetForExport(r.target) };
+    const out = { ...r, target: sanitizeTargetForExport(r.target) };
+    // Cookie/Header 注入点的 originalValue 是凭据，导出报告与台账同口径打码。
+    if (Array.isArray(out.points)) out.points = redactPointsForDisk(out.points);
+    return out;
   }
 
   // 导出 JSON（P1-1：target 已脱敏）

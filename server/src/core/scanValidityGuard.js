@@ -143,7 +143,8 @@ export function isBlockedResponse(res) {
   if (status < 400) return false;
   const text = String(res.data ?? res.body ?? '');
   if (!text) return false;
-  return GENERIC_BLOCK_SIG.test(text);
+  // [P1-PERF 2026-11-02] 4xx/5xx 拦截页同样可能很大：窗口匹配保留全正文语义
+  return hasBoundedMatch(text, GENERIC_BLOCK_SIG);
 }
 
 /**

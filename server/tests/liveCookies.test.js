@@ -10,7 +10,7 @@
 // ============================================================================
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, rmSync, chmodSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, rmSync, chmodSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -58,6 +58,25 @@ test('freshness：文件改了，下一个请求必须带新值（含 headReques
   assert.ok(seen[2].head === true, 'headRequest 也必须走 live 层（否则 --null-connection 型盲注不带会话）');
   assert.match(seen[2].headers.Cookie, /sid=V2/);
   releaseLiveCookies('lc-fresh');
+});
+
+test('同 tick 同尺寸改写：mtime+size 相同也必须重读（Windows 时钟粒度实证）', async () => {
+  // [FIX 2026-11-03] 复现实测缺陷：并发 full-suite 下 freshness 拿到 sid=V1。
+  // 手法：把 mtime 钉到同一个未来时刻，两次写入同长度内容 ⇒ mtime+size 完全相同，
+  // 旧实现在这里必被缓存吃掉（确定性复现，不靠 sleep/竞态）。
+  resetLiveCookies();
+  const file = writeCookies('example.com\tTRUE\t/\tFALSE\t0\tsid\tV1');
+  const pinned = new Date(Date.now() + 5000);
+  utimesSync(file, pinned, pinned);
+  const seen = [];
+  const client = withLiveCookies(fakeClient(seen), 'lc-same-tick', { file });
+  await client.request({ url: 'http://example.com/a', headers: {} });
+  assert.match(seen[0].headers.Cookie, /sid=V1/);
+  writeFileSync(file, 'example.com\tTRUE\t/\tFALSE\t0\tsid\tV2', 'utf8');
+  utimesSync(file, pinned, pinned);
+  await client.request({ url: 'http://example.com/b', headers: {} });
+  assert.match(seen[1].headers.Cookie, /sid=V2/, '同 mtime 同尺寸的改写被缓存吃掉 ⇒ 目标侧 401');
+  releaseLiveCookies('lc-same-tick');
 });
 
 test('优先级：live 文件覆盖同名静态 cookie、补齐其余、不动其它头', async () => {

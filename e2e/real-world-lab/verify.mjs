@@ -178,6 +178,9 @@ async function main() {
         ...baseConfig,
         level: 5,
         crawlForms: true,
+        // [FIX 2026-11-03] 本场景即「评论 POST 存储 → /panel 回读」；不确认写请求时
+        // formWriteGate 会跳过评论表单，二阶链路根本没有存储动作（实测 miss）。
+        confirmFormWrites: true,
         techniques: ['error', 'boolean'],
         // [P1-FIX 2026-09-07] triggerUrl 必须是完整可用 URL（/panel?id=1）：空 id（/panel?id=）
         // 在靶场产生与存储值无关的恒定语法错误（WHERE id =  AND），任何判定路径都会被堵死。
@@ -228,6 +231,9 @@ async function main() {
           ...baseConfig,
           level: 5,
           crawlForms: true,
+          // [FIX 2026-11-03] 跨角色二阶链路必须写入（alice POST 存储 → admin 面板触发）；
+          // 不显式确认时 formWriteGate 默认跳过非幂等表单，detect 只剩 2 请求、必 miss。
+          confirmFormWrites: true,
           techniques: ['error', 'boolean'],
           secondOrder: {
             enabled: true,

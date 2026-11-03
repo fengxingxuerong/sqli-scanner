@@ -431,4 +431,3 @@ app.listen(PORT, '127.0.0.1', () => {
   console.log(`[blackbox-lab] listening on http://127.0.0.1:${PORT}  WAF=${WAF_ON ? 'ON' : 'OFF'}`);
   console.log(`[blackbox-lab] db=blackbox_lab @ ${DB.host}:${DB.port}`);
 });
-

@@ -13,7 +13,7 @@ import { countDestructiveCandidates, registryMode } from '../payloadRegistry.js'
  * @param {object} target
  * @returns {string[]} 0 或 1 条说明
  */
-function formGateConstraints(target) {
+export function formGateConstraints(target) {
   const gate = target && target.formDiscoveryGate;
   if (!gate || !(gate.skipped > 0)) return [];
   const reasons = new Set((gate.items || []).map((i) => i.reason).filter(Boolean));

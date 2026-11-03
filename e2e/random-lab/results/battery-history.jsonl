@@ -21,3 +21,14 @@
 {"at":"2026-09-24T17:16:44.330Z","seed":20260919,"requested":40,"observableVuln":20,"unobservable":0,"recallHit":20,"benign":20,"fp":0,"ci95Lower":83.89}
 {"at":"2026-10-29T03:26:15.524Z","seed":244372162,"requested":24,"observableVuln":12,"unobservable":0,"recallHit":12,"benign":12,"fp":0,"ci95Lower":75.75}
 {"at":"2026-10-31T10:04:30.719Z","seed":441065871,"requested":24,"observableVuln":12,"unobservable":0,"recallHit":10,"benign":12,"fp":0,"ci95Lower":55.2}
+{"at":"2026-11-03T11:29:51.264Z","seed":705386586,"requested":24,"observableVuln":12,"unobservable":0,"recallHit":11,"benign":12,"fp":0,"ci95Lower":64.61}
+{"at":"2026-11-03T11:53:49.775Z","seed":706825445,"requested":24,"observableVuln":12,"unobservable":0,"recallHit":12,"benign":12,"fp":0,"ci95Lower":75.75}
+{"at":"2026-11-03T12:17:51.148Z","seed":708266909,"requested":24,"observableVuln":12,"unobservable":0,"recallHit":12,"benign":12,"fp":0,"ci95Lower":75.75}
+{"at":"2026-11-03T12:27:28.364Z","seed":708844500,"requested":24,"observableVuln":12,"unobservable":0,"recallHit":11,"benign":12,"fp":0,"ci95Lower":64.61}
+{"at":"2026-11-03T14:52:58.576Z","seed":717574400,"requested":24,"observableVuln":12,"unobservable":0,"recallHit":10,"benign":12,"fp":0,"ci95Lower":55.2}
+{"at":"2026-11-03T15:21:42.307Z","seed":708844500,"requested":24,"observableVuln":12,"unobservable":0,"recallHit":11,"benign":12,"fp":0,"ci95Lower":64.61}
+{"at":"2026-11-03T15:25:02.663Z","seed":708844500,"requested":24,"observableVuln":12,"unobservable":0,"recallHit":11,"benign":12,"fp":0,"ci95Lower":64.61}
+{"at":"2026-11-03T15:26:45.113Z","seed":708844500,"requested":24,"observableVuln":12,"unobservable":0,"recallHit":12,"benign":12,"fp":0,"ci95Lower":75.75}
+{"at":"2026-11-03T15:26:55.490Z","seed":708844501,"requested":24,"observableVuln":12,"unobservable":0,"recallHit":12,"benign":12,"fp":0,"ci95Lower":75.75}
+{"at":"2026-11-03T15:26:59.038Z","seed":20261103,"requested":24,"observableVuln":12,"unobservable":0,"recallHit":12,"benign":12,"fp":0,"ci95Lower":75.75}
+{"at":"2026-11-03T15:27:02.315Z","seed":123456789,"requested":24,"observableVuln":12,"unobservable":0,"recallHit":12,"benign":12,"fp":0,"ci95Lower":75.75}

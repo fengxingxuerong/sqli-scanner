@@ -305,7 +305,10 @@ function scanCase(c) {
   // [D166] --test-param-names 按用例开启（默认关闭，零回归）
   if (c.paramNames) extra.push('--test-param-names');
   // [D168] --forms：页面表单发现（需配 level 5；本靶场用例显式开启）
-  if (c.forms) extra.push('--forms', '--level', '5');
+  // [FIX 2026-11-03] 本 lab 的 form-enctype / form-select 两例**就是** POST 表单的提交面；
+  // formWriteGate 默认跳过非幂等表单（安全默认，零改动），故此处按用例显式确认写请求，
+  // 否则 0 注入点（实测 891ms 结束、verdict=inconclusive）。判据不变，只放行被测动作。
+  if (c.forms) extra.push('--forms', '--level', '5', '--confirm-form-writes');
   // [D170] --crawl：站内链接爬取（爬到的 REST 链接按 --test-path 建路径点）
   if (c.crawl) extra.push('--crawl', String(c.crawl));
   // [D172] --crawl-browser：headless 渲染 + 捕获 XHR/fetch 端点（端点路径段按 --test-path 建点）

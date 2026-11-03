@@ -54,7 +54,12 @@ function dirtyReport() {
         raw: 'GET /items?id=1 HTTP/1.1\r\nCookie: sid=cookie-secret\r\nAuthorization: Bearer poc-secret\r\n\r\n',
       },
     }],
-    points: [{ id: 'p1' }],
+    points: [
+      { id: 'p1' },
+      // [E2E 2026-11-03] cookie 注入点的 originalValue 就是会话 token；此前只删 target.cookieParams，
+      // 点位数组仍把原文写进 report.json（真实 blackbox-lab 扫描复现）。
+      { id: 'p2', location: 'cookie', param: 'token', originalValue: 'cookie-secret' },
+    ],
     summary: { verdict: 'vulnerability_detected' },
   };
 }

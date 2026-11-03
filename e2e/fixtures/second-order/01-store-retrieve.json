@@ -9,6 +9,7 @@
     "techniques": ["second_order"],
     "level": 5,
     "crawlForms": true,
+    "confirmFormWrites": true,
     "secondOrder": {
       "enabled": true,
       "triggerUrls": ["http://127.0.0.1:8125/profile"]

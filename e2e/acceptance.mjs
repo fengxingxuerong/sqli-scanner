@@ -89,6 +89,9 @@ function run(cmd, args, env = {}, timeoutMs = 900000, cwd = ROOT) {
       cwd,
       env: { ...process.env, ...env },
       shell: process.platform === 'win32',
+      // [FIX 2026-11-03] shell:true 在 win32 会拉起 cmd.exe；不声明 windowsHide 时
+      // 在无控制台的调用方下会**弹出可见控制台窗口**（用户已三次反馈）。只改执行方式。
+      windowsHide: true,
     });
     let out = '';
     let settled = false;
@@ -104,7 +107,7 @@ function run(cmd, args, env = {}, timeoutMs = 900000, cwd = ROOT) {
       // 门禁仍在 200s 外原地等）。故：win32 用 taskkill /T 连树杀，外加 5s 兜底结算。
       try {
         if (process.platform === 'win32' && child.pid) {
-          spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
+          spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true });
         } else {
           child.kill('SIGKILL');
         }
@@ -310,6 +313,8 @@ async function withRedteamLab(body) {
     cwd: ROOT,
     stdio: ['ignore', 'pipe', 'pipe'],
     shell: process.platform === 'win32',
+    // [FIX 2026-11-03] 同上：win32 + shell 会拉起 cmd 控制台，必须隐藏。
+    windowsHide: true,
   });
   let envOut = '';
   proc.stdout?.on('data', (d) => { envOut += d.toString(); });

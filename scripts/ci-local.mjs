@@ -257,6 +257,20 @@ const EXCLUDED_JOBS = {
     '本机可跑的只有**静态**那一半（`node e2e/waf-real/tamper-sweep.mjs`，走自实现 crs-engine），' +
     '而本 job 的存在意义正是拿真引擎去对照静态口径 —— 没有容器就没有对照对象。' +
     '想看结果：GitHub 上手动 dispatch 一次，报告以 artifact 形式下载。',
+  // [D-GATE 2026-11-03] 以下 3 个 job 由 ci.yml 新增，此前未登记 ⇒ ci-local 首步覆盖自检直接红。
+  // 它们全部是 **tag / workflow_dispatch 才触发**的发布链，不是每次提交都要跑的门禁：
+  // 本机/预提交阶段没有 tag，也没有 GitHub Release 权限与产物上传面，替代不了。
+  'desktop-package':
+    'tag 推送或手动 dispatch 才触发（ci.yml `if` 条件），在 windows-latest 上装 Rust/Tauri 工具链' +
+    '（dtolnay/rust-toolchain + nsis）构建桌面安装包。本机无 Rust/cargo（`cargo` 不在 PATH），' +
+    '且这不是提交门禁而是发布产物构建 —— 本机替代不了；发布前由 package:win / package:mac 触发。',
+  'docker-publish':
+    '仅 tag 推送触发，需要 docker buildx 推送 `ghcr.io`（packages: write + GITHUB_TOKEN）。' +
+    '本机无 docker（与 docker job 同因，exit 127），也没有 ghcr 写权限 ⇒ 替代不了。',
+  release:
+    '仅 tag 推送触发，下载 desktop-package 产物并创建 GitHub Release（contents: write）。' +
+    '本机没有 tag 上下文、没有 Release 写权限，也没有上游构建产物可下载 ⇒ 替代不了；' +
+    '本地发布前用 release:check（判据自证）与 package:win / package:mac 校验，真发布交 CI。',
 };
 
 // GATES 覆盖到的 job 名（`typecheck` 不是 ci.yml 的 job 而是 lint job 内的步骤，一并计入无害）
@@ -331,7 +345,9 @@ for (const g of GATES) {
   const t0 = Date.now();
   process.stdout.write(`▶ ${g.name} ... `);
   // shell 执行单串命令（见 GATES 上方注释），输出落文件以免刷屏，失败时再回贴尾部
-  const r = spawnSync(g.cmd, { cwd: ROOT, shell: true, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+  // [P0-FIX 2026-11-03] windowsHide:true：无控制台的宿主里 shell:true 会给每个门禁新建 cmd 控制台窗口
+  // （实测 40+ 条门禁 = 40+ 次弹窗）。该选项只改进程创建标志，不改命令语义与结果。
+  const r = spawnSync(g.cmd, { cwd: ROOT, shell: true, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, windowsHide: true });
   const code = r.status === null ? -1 : r.status;
   const out = `${r.stdout || ''}${r.stderr || ''}`;
   const secs = ((Date.now() - t0) / 1000).toFixed(1);

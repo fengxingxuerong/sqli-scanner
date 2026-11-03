@@ -37,7 +37,9 @@ export function formatReport(report, fmt = 'json') {
     // 仅拖库数据（库/表/列/行）；单源在 ReportGenerator.toDBJSON（ScanManager 共用）
     return new ReportGenerator().toDBJSON(report);
   }
-  if (f === 'json') return JSON.stringify(report, null, 2);
+  // JSON 走 ReportGenerator.toJSON：与其它导出格式共用「挂 PoC → target 脱敏 → 点位脱敏」管道，
+  // 避免 -o 落盘报告把 target.cookieParams / Cookie 注入点原文写进磁盘。
+  if (f === 'json') return new ReportGenerator().toJSON(report);
   throw new Error(
     `--format 未知格式：${fmt}（仅支持 json|csv|markdown|md|html|sarif|db-json）\n` +
     '  旧行为是静默回退 JSON —— 那会让"以为设了 db-json"实际拿到普通 JSON，故改为拒绝。'

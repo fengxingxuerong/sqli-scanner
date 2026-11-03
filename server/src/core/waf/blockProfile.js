@@ -21,6 +21,8 @@
 // ============================================================================
 import { buildInjectionRequest } from '../../engine/injection.js';
 import { logger } from '../logger.js';
+// [P1-PERF 2026-11-02] 拦截页文案匹配有界：响应体可达 10MB
+import { hasBoundedMatch } from '../boundedMatch.js';
 // [D38] 语义索引（手工精标 + 机械校验）：对症模式的 applicablePattern，不按插件名猜
 import { CORE_SEMANTICS } from './bypass/semantics.js';
 
@@ -38,7 +40,7 @@ const BLOCKED_STATUSES = new Set([403, 406, 429, 501, 503]);
 export function looksBlocked(res, baseLen, { strict = false } = {}) {
   if (!res) return true;
   if (BLOCKED_STATUSES.has(res.status)) return true;
-  if (strict) return /blocked by|request blocked|access denied|安全狗|拦截/i.test(String(res.data ?? ''));
+  if (strict) return hasBoundedMatch(String(res.data ?? ''), /blocked by|request blocked|access denied|安全狗|拦截/i);
   const len = String(res.data ?? '').length;
   if (baseLen > 0 && len < baseLen * 0.5) return true;
   return false;

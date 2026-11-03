@@ -33,7 +33,8 @@ export class ErrorDetector extends Detector {
       ctx
     );
     const baseBody = String(baseRes?.data ?? '');
-    const baseMatch = baseBody.match(ERROR_SIG);
+    // [P1-PERF 2026-11-02] 基线正文同样可能达 10MB：有界匹配避免整页跨窗口扫描
+    const baseMatch = matchBounded(baseBody, ERROR_SIG);
 
     // 优先使用命中库专属报错 Payload，否则遍历全部库的报错 Payload
     // 差距 3（P0）：dbms 未知时原实现 Object.values(PAYLOADS).flatMap 全库 = 14+库×N 模板连发。

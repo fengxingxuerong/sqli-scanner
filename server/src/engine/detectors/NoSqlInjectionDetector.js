@@ -2,6 +2,8 @@ import { Detector } from '../Detector.js';
 import { createDetectionResult } from '../models.js';
 import { NOSQL_OPERATOR_PROBES, SSTI_PROBES, GRAPHQL_PROBES } from '../payloads.js';
 import { chunkSimilarity } from '../../core/statsHelper.js';
+// [P1-PERF 2026-11-02] SSTI/GraphQL 回显签名在 10MB 正文里同样按窗口匹配
+import { hasBoundedMatch } from '../../core/boundedMatch.js';
 
 // 非 SQL 注入检测器（NoSQL / GraphQL / SSTI）
 // 与经典 SQLi 检测器（union/error/boolean/time）正交：目标后端不是关系型 SQL 引擎，
@@ -142,7 +144,7 @@ export class NoSqlInjectionDetector extends Detector {
       if (r === null) continue;
       const body = r.body;
       // 求值判定：响应含 sig（49/config/<class> 等），且基线不含该特征（排除原样回显未求值）
-      if (probe.sig.test(body) && !probe.sig.test(baseBody)) {
+      if (hasBoundedMatch(body, probe.sig) && !hasBoundedMatch(baseBody, probe.sig)) {
         return this._hit(result, point, 'ssti', `SSTI（${probe.engine}）：${probe.expr} 表达式被求值回显`, [payload]);
       }
     }
@@ -158,7 +160,7 @@ export class NoSqlInjectionDetector extends Detector {
       // 同上：失败样本不参与判定
       const r = await this._sendBody(httpClient, ctx, target, point, probe.query);
       if (r === null) continue;
-      if (probe.sig.test(r.body) && !probe.sig.test(baseBody)) {
+      if (hasBoundedMatch(r.body, probe.sig) && !hasBoundedMatch(baseBody, probe.sig)) {
         return this._hit(result, point, 'graphql', `GraphQL 注入（${probe.name}）：${probe.query} → 回显确认`, [probe.query]);
       }
     }

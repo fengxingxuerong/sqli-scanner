@@ -7,13 +7,14 @@
 > 下一批次起的条目写在这里。发版时把本节整体升为 `## [x.y.z] - YYYY-MM-DD` 并补汇总段。
 
 <!-- changelog-index:start -->
-**本段覆盖 20 个批次（D228–D247，2026-11-01 → 2026-11-03）**。正文按时间倒序排列；
+**本段覆盖 21 个批次（D228–D248，2026-11-01 → 2026-11-04）**。正文按时间倒序排列；
 下表是同一批次的索引，便于按编号或关键词定位。**索引只是导航，正文未做任何删改**
 （被推翻的旧结论原样保留，这是本仓的既定口径）。新增批次后跑
 `node scripts/changelog-index.mjs --write` 重生成，`--check` 校验是否过期。
 
 | 批次 | 日期 | 主题 |
 |---|---|---|
+| D248 | 11-04 | 工作区遗留补登记：4 真 bug + P1 尾批收口（gate:close 41/41） |
 | D247 | 11-03 | 前端 P1-CFG 遗留收口：3 红清零 + 批次补登记（gate:close 41/41） |
 | D246 | 11-03 | 交接包收口：self-check 判据去过期化 + 台账首尾对齐 |
 | D245 | 11-02 | 死代码 164 条清零（三个假阳性来源 + 一个吞异常的清理） |
@@ -35,6 +36,57 @@
 | D229 | 11-01 | 交付闸收口：P0-3 卡顿修复（haystack 先截后拼）+ ai-gateway 断言去模型依赖 |
 | D228 | 11-01 | AI 报告网关端到端验收（ai-gateway 套件）+ 本地网关 runbook + CI 靶场硬要求扩展 |
 <!-- changelog-index:end -->
+
+### 2026-11-04 批次 D248 · 工作区遗留补登记：4 真 bug + P1 尾批收口（gate:close 41/41）
+
+**发现**（与 D247 同形态）：工作区躺着 2026-11-02~11-03 两天的**未登记**改动
+（49 文件 +519/−261，无批次号、无 CHANGELOG），其中含 **4 处真 bug**。逐文件通读 diff 定性后
+补登记并收口；诚实边界：原始改动出自此前未署名的工作，本批做定性、补登记与收口。
+
+**真 bug ×4**（每处都带复现证据与回归测试）：
+
+- **CLI `-r` 恒被硬拒**：`-r/--request-file`、`-l/--log-file`、`--check-tor` 三条 if 与后续
+  else-if 链被断开，已消费的 token 被二次判读记进 unknownFlags ⇒ one-click 入口直接 exit 2
+  （detect-surface-lab 8 个抓包导入用例——multipart / 字段名注入——全部跑不起来）。补 `continue`。
+- **boundary 缺「无引号 + 裸 `)`」档**：目标 `WHERE id=({v})` 的正确闭合前缀是裸 `)`，表里只有
+  带引号的括号变体 ⇒ boundary 全落空 ⇒ 门控探针括号未闭合语法错 ⇒ 真假响应恒等 ⇒ 整点静默漏报
+  （与「无注入」同形；random-battery seed=708844500 c02-paren 实测）。补候选 + 不变量⑦ guard；
+  battery 复跑 12/12、missByShape 清空。
+- **liveCookies 缓存被「同 tick 同尺寸改写」击穿**：Windows mtimeMs 精度 ~15.6ms，外部进程同 tick
+  把 sid=V1 换成等长 sid=V2 ⇒ mtime+size 完全相同 ⇒ 缓存命中把旧会话发给目标（并发 full-suite
+  实测 freshness 拿到 V1）。改「刚写入 50ms 内绕缓存，常态仍走缓存」；测试用 `utimesSync` 钉死
+  mtime 确定性复现，不靠 sleep/竞态。
+- **OOB 测试端口写死被宿主占用**：19001-19006 中 19004 与 WorkBuddy 沙箱监听冲突 ⇒ EADDRINUSE
+  让整条服务端套件红。改 `freePort()` 每次向系统申请。
+
+**P1 尾批（原始标注 [P1-PERF]/[P1-CFG]/[P1-SAFE]/[D-REDACT]）**：
+
+- **大响应有界匹配扩面**：scanValidityGuard / WafIdentifier / blockProfile / ErrorDetector /
+  NoSqlInjectionDetector 五处热路径改 `hasBoundedMatch`（4xx 拦截页、指纹响应、基线正文、
+  SSTI/GraphQL 回显判定，正文可达 10MB）；新增 largeBodyBounded.test.js——每例 2MB 正文、
+  签名放窗口外末尾，钉住「窗口轮转没有把全正文扫描退化成只看前 512KB」且不误报。
+- **落盘/导出凭据脱敏补口**：`redactPointsForDisk`——cookie/header 点位 originalValue 本身是
+  会话凭据（此前只删 target.cookieParams，点位数组仍把原文写进 report.json，真实 blackbox-lab
+  扫描复现）；ReportGenerator 导出与 CLI `--format json`（旧实现裸 `JSON.stringify` 绕过脱敏
+  管道）同口径打码；点位 id/location/param 保留，报告仍能说明「测过这个点」。
+- **REST 入口 enableExtract 缺省接单源**：`!!cfg.enableExtract` 硬编码 false ⇒ sharedDefaults
+  改默认时 REST 四入口漂移；改 pickBool + defaults 兜底，guard 测试临时改单源断言跟随。
+- **表单写门控约束进报告**：ScanManager.start 算 constraints 早于爬表单 ⇒ 报告首屏看不到
+  「表单未测」；discover 收尾补写 `formGateConstraints` 进 `summary.constraints`（测试钉住）。
+- **windowsHide 弹窗修复**（用户三次反馈）：acceptance / run-all / ci-local / facts-sync 全部
+  spawn 点补 `windowsHide:true`（win32 + shell:true 在无控制台宿主下逐门禁/逐靶场弹 cmd 窗口，
+  40+ 条 = 40+ 次；只改进程创建标志不改命令语义）；ci-local 顺带登记 ci.yml 新增的 3 个
+  tag/dispatch 触发发布链 job（desktop-package/docker-publish/release，本机无 Rust/Docker/
+  Release 权限，替代不了）。
+- **e2e 靶场与新安全默认对齐**：crawl-lab / detect-surface-lab / real-world-lab / second-order
+  fixture 显式 `confirmFormWrites:true`——判据不变，只放行被测动作（不确认时 formWriteGate
+  默认跳过非幂等表单，POST 表单用例 0 注入点、verdict=inconclusive）。
+- **产物与文档同步**：facts 三步一体（服务端 4034→4048 用例、badge 4606→4621、覆盖率微涨；全量套件 0 fail）、
+  质量台账重生成、random-battery / detect-surface / acceptance 产物刷新；VulnLab 外部裁判 5 号
+  （11-03）入库：low/medium 档全检出（union·id·High / error·id·High）、high 档（:id 参数化
+  修复对照）零误报，判「通过」。
+
+**结果**：受影响 9 个测试文件 75/75 绿；gate:close 41/41。
 
 ### 2026-11-03 批次 D247 · 前端 P1-CFG 遗留收口：3 红清零 + 批次补登记（gate:close 41/41）
 
