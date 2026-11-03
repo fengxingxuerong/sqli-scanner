@@ -87,6 +87,17 @@ const OPTIONAL_VALUE_FLAGS = new Map([
   // 不带值时落 `true` —— 由 buildConfig 硬拒（「收参数不生效」是红线，宁可拒绝启动）。
   ['--load-cookies', 'loadCookies'],
   ['--live-cookies', 'liveCookies'],
+  // [D200 2026-11-04 对标 sqlmap --reg-*] Windows 注册表面（仅 MSSQL xp_reg*；EXPLOIT 双闸）：
+  //   三操作旗标带值 = 键路径速记（等价 --reg-key），不带值 = 布尔；键/值/数据/类型走四个参数面。
+  //   引擎 registryRead/registryWrite/registryDelete 早已就位，本表只补 CLI 参数面 ——
+  //   走表而非主 if 链的原因同上：parseArgs 复杂度基线（224 行存量债）只许持平。
+  ['--reg-read', 'regRead'],
+  ['--reg-add', 'regAdd'],
+  ['--reg-del', 'regDel'],
+  ['--reg-key', 'regKey'],
+  ['--reg-value', 'regValue'],
+  ['--reg-data', 'regData'],
+  ['--reg-type', 'regType'],
 ]);
 
 export function parseArgs(argv, preset) {

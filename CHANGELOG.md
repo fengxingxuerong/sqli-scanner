@@ -7,13 +7,14 @@
 > 下一批次起的条目写在这里。发版时把本节整体升为 `## [x.y.z] - YYYY-MM-DD` 并补汇总段。
 
 <!-- changelog-index:start -->
-**本段覆盖 22 个批次（D228–D249，2026-11-01 → 2026-11-04）**。正文按时间倒序排列；
+**本段覆盖 23 个批次（D228–D200，2026-11-01 → 2026-11-04）**。正文按时间倒序排列；
 下表是同一批次的索引，便于按编号或关键词定位。**索引只是导航，正文未做任何删改**
 （被推翻的旧结论原样保留，这是本仓的既定口径）。新增批次后跑
 `node scripts/changelog-index.mjs --write` 重生成，`--check` 校验是否过期。
 
 | 批次 | 日期 | 主题 |
 |---|---|---|
+| D200 | 11-04 | Windows 注册表面接线：CLI 7 旗标 + REST 3 端点 + 引擎 registryDelete（缺口 52→45） |
 | D249 | 11-04 | arch:guard 接进收口清单 + 判据自证（D247 留观盲区收口，gate:close 43/43） |
 | D248 | 11-04 | 工作区遗留补登记：4 真 bug + P1 尾批收口（gate:close 41/41） |
 | D247 | 11-03 | 前端 P1-CFG 遗留收口：3 红清零 + 批次补登记（gate:close 41/41） |
@@ -37,6 +38,45 @@
 | D229 | 11-01 | 交付闸收口：P0-3 卡顿修复（haystack 先截后拼）+ ai-gateway 断言去模型依赖 |
 | D228 | 11-01 | AI 报告网关端到端验收（ai-gateway 套件）+ 本地网关 runbook + CI 靶场硬要求扩展 |
 <!-- changelog-index:end -->
+
+### 2026-11-04 批次 D200 · Windows 注册表面接线：CLI 7 旗标 + REST 3 端点 + 引擎 registryDelete（缺口 52→45）
+
+**动机**：sqlmap 对标底账（D197）里性价比最高的缺口组——7 条 P2（`--reg-read/add/del` +
+`--reg-key/value/data/type`），引擎 `registryRead`/`registryWrite` 早已实现只差入口。
+
+**交付**：
+
+- **引擎补真缺口**：`registryDelete`（`master..xp_regdelete`，按值名删除，仅 MSSQL）。
+  **纠正一处底账误记**：NOTES 曾写「registryWrite 的删除形态已实现」，实测 registry.js
+  此前只有 read/write——删除通道是本批新补（NOTES 已删、底账已重生成）。
+- **CLI 7 旗标**：全部走 `OPTIONAL_VALUE_FLAGS` 表——parseArgs 复杂度基线（224 行存量债）
+  只许持平，主 if 链**零增长**；三操作旗标带值 = 键路径速记（对标 sqlmap `--reg-read [key]`）。
+- **runExploit 瘦身重构**（GRACE=0 的合规解法）：「门 + 上下文」留 `runExploitCore`，旧动作链
+  逐字搬进 `dispatchExploitAction`，注册表分发独立成 `dispatchRegistryAction` +
+  `normalizeRegistryArgs`；main() 的 exploitMode 判定收进 `isExploitMode`/`isRegistryOp`
+  （行数不变、复杂度净降）。基线 min 收账：runExploit 移出存量债、main 107→105。
+- **REST 3 端点**：`/api/exploit/reg-read`（读类：scope 声明即可）、`reg-add`/`reg-del`
+  （写类：显式 scope + `confirmDestructive:true`，删除不可逆与 os-shell 同档）；
+  引擎侧再拒非 MSSQL。双闸不变：`EXPLOIT_ENABLED=1` + 授权声明。路径**字面量**直写 +
+  `regRouteHandler(spec)` 共用骨架（readme:check ⑭ 以代码注册路径为真源核对 README
+  API 表，工厂收路径参数会让文档被误判 404——本批实测被抓后改形）；`docs/api.md`
+  同步 3 端点 + 「四条→七条动作端点」「写类加严清单」两处口径（⑭b）。
+- **测试 11 套件 87/87**：引擎 xp_regdelete 语句断言、CLI 门/分发/参数面 9 条、REST
+  6005/1007/INVALID_PARAM 判码 4 条、args 解析不误收 1 条；三入口一致性 / capabilities /
+  udf / oracle / fileWrite / dbmsExtend6 回归无破损。
+- **文档与底账**：help +7 行、README 利用通道行 + 专行 + 端点表 3 行；parity 7 条 gap→ok、
+  PLAN 的 D200 组撤编（`--dbms-cred` 并入 D204）——**缺口 52 → 45，同名同义 98 → 105**。
+- **收口三门的真实经过**（各有牙齿）：① duplication +3 真凶是 Exploiter.js 的
+  `prototype.X = X` 机械挂载链（与 httpClient/Detector/ScanManager 同形滑窗，加一行 = 3 对），
+  改 **Object.assign 表驱动**清掉 47 对历史债（3272→3225 已收账；循环写法还会让 checkJs
+  跨文件丢原型成员，Object.assign 两头都解）；registry.js 顺手抽 `sendXp` 共用骨架；
+  ② typecoverage：无标注 lambda 把 api 拉到 67.1% < 基线——args 参数面提为带 JSDoc 具名
+  函数（67.4%），瞬态 67.5% 不收账、基线还原；③ typecheck：JSDoc 联合类型需
+  `error !== null` 单元判别才收窄（真值判断不行——`error: string` 含空串）。
+
+**结果**：受影响 11 套件 87/87 绿；复杂度基线 min 收账（runExploit 移出存量债、main
+107→105）；duplication 基线 3272→3225；gate:close 43/43。
+诚实边界：注册表操作无真机 MSSQL 验证（单元级语句断言已钉；真机需 xp_reg* 启用的授权目标）。
 
 ### 2026-11-04 批次 D249 · arch:guard 接进收口清单 + 判据自证（D247 留观盲区收口，gate:close 43/43）
 

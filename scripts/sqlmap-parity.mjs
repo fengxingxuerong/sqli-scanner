@@ -260,13 +260,16 @@ export const STATUS = {
   '--tmp-path': 'out:本仓文件写为单次直写，不引入本地暂存目录概念',
 
   // ── Windows registry ───────────────────────────────────────────────────────
-  '--reg-read': 'gap:P2',
-  '--reg-add': 'gap:P2',
-  '--reg-del': 'gap:P2',
-  '--reg-key': 'gap:P2',
-  '--reg-value': 'gap:P2',
-  '--reg-data': 'gap:P2',
-  '--reg-type': 'gap:P2',
+  // [D200 2026-11-04 已接线] CLI 7 旗标（OPTIONAL_VALUE_FLAGS 表）+ REST
+  // /api/exploit/reg-read|reg-add|reg-del（读类 / 写类 destructive 双档）+ 引擎
+  // registryDelete（xp_regdelete；底账曾误记「写入的删除形态已实现」，实为本批补齐）。
+  '--reg-read': 'ok',
+  '--reg-add': 'ok',
+  '--reg-del': 'ok',
+  '--reg-key': 'ok',
+  '--reg-value': 'ok',
+  '--reg-data': 'ok',
+  '--reg-type': 'ok',
 
   // ── General ────────────────────────────────────────────────────────────────
   '--abort-on-empty': 'gap:P3',
@@ -387,13 +390,6 @@ export const NOTES = {
   '--sql-file': '从文件读 SQL 再执行（长脚本/多语句）；当前只能内联 --sql-shell 串',
   '--common-files': '常见文件名字典爆破（LOAD_FILE 路径面）未实现',
   '--udf-inject': '本仓要求自带 UDF 十六进制（--udf-hex）；不内置编译产物（GPLv2 与供应链边界）',
-  '--reg-read': '**引擎已实现** registryRead（server/src/engine/exploit/registry.js，MSSQL xp_regread 通道），CLI 与 REST 均无入口 ⇒ 接线即可，不用重写',
-  '--reg-add': '**引擎已实现** registryWrite（写入类，需 EXPLOIT_ENABLED + --authorized 双闸）⇒ 接线即可',
-  '--reg-del': '**引擎已实现** registryWrite 的删除形态 ⇒ 接线即可',
-  '--reg-key': '注册表路径参数面（配合 reg-read/add/del，同批接线）',
-  '--reg-value': '注册表值名参数面（同上）',
-  '--reg-data': '写入数据参数面（同上）',
-  '--reg-type': '写入类型参数面（REG_SZ/DWORD 等，同上）',
   '--abort-on-empty': '连续空结果即停（防无意义拖库）；当前只能靠 --max-requests 兜',
   '--binary-fields': '二进制列（图片/哈希）十六进制化导出未实现',
   '--check-internet': '开扫前连通性自检（区分「本机断网」与「目标不可达」）未实现',
@@ -439,11 +435,8 @@ export const PLAN = [
     title: '协议形态与宿主钩子（WAF/IDS 绕过的收发形态 + 自动化入口）',
     items: ['--chunked', '--skip-urlencode', '--skip-xmlencode', '--retry-on', '--crawl-exclude', '--skip-waf', '--alert'],
   },
-  {
-    batch: 'D200',
-    title: 'Windows 注册表面（引擎已实现、只差接线：读/写/删 + 四个参数面）',
-    items: ['--reg-read', '--reg-add', '--reg-del', '--reg-key', '--reg-value', '--reg-data', '--reg-type', '--dbms-cred'],
-  },
+  // [D200 2026-11-04 已落地] 注册表面 7 项已接线（STATUS 改 ok），组内只剩 --dbms-cred（P3）
+  // —— 并入 D204 长尾，不再单列批次。
   {
     batch: 'D201',
     title: '传输形态收口（把「只做了一半」的三项做完：检测链路 h2 / HTTP1 回退 / HEAD 快速判定）',
@@ -467,6 +460,7 @@ export const PLAN = [
       '--union-values', '--abort-on-empty', '--check-internet', '--csv-del', '--dump-file', '--table-prefix',
       '--unsafe-naming', '--web-root', '--no-logging', '--no-truncate', '--comments', '--pivot-column',
       '--sql-file', '--common-files', '--binary-fields', '--proxy-file', '--proxy-freq', '--tor-type', '-t', '-v',
+      '--dbms-cred',
     ],
   },
 ];

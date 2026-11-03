@@ -5,6 +5,59 @@
 
 ---
 
+## 2026-11-04 批次 D200 · Windows 注册表面接线：CLI 7 旗标 + REST 3 端点 + 引擎 registryDelete（对标 sqlmap --reg-*）（已完成，见 CHANGELOG）
+
+**动机**：sqlmap 对标底账（D197）缺口 52 项里性价比最高的一组——7 条 P2（`--reg-read/add/del`
++ `--reg-key/value/data/type`），引擎 `registryRead`/`registryWrite` 早已实现只差入口。
+按既定顺序（底账 D200 组）开工。
+
+**交付**：
+
+1. **引擎补真缺口**：`registryDelete`（`master..xp_regdelete`，按值名删除，仅 MSSQL）——
+   底账 NOTES 曾记「registryWrite 的删除形态已实现」，**实测 registry.js 只有 read/write**，
+   删除通道是本批新补（已在底账 NOTES/批次记录中纠正该误记）。
+2. **CLI 7 旗标**：全部走 `OPTIONAL_VALUE_FLAGS` 表（parseArgs 复杂度基线 224 行存量债只许
+   持平，主 if 链零增长）；三操作旗标带值 = 键路径速记（对标 sqlmap `--reg-read [key]`）；
+   走 `runExploitRegistry` 入口，与 `runExploit` **同门同上下文**（EXPLOIT_ENABLED 双闸 +
+   authorized）。
+3. **runExploit 瘦身重构**（complexity-guard GRACE=0 的合规解法）：「门 + 上下文」留
+   `runExploitCore`，旧动作链逐字搬进 `dispatchExploitAction`（REPL 分支返回哨兵），
+   注册表分发独立 `dispatchRegistryAction` + `normalizeRegistryArgs`；main() 的
+   exploitMode 判定收进模块级 `isExploitMode`/`isRegistryOp`（行数不变、复杂度净降）。
+   复杂度基线 min 更新：runExploit 移出存量债、main 107→105。
+4. **REST 3 端点**：`/api/exploit/reg-read`（读类，scope 声明即可）、`/api/exploit/reg-add`
+   与 `/api/exploit/reg-del`（写类：显式 scope + `confirmDestructive:true`，删除不可逆与
+   os-shell 同档）；引擎侧再拒非 MSSQL。路径用**字面量**直写 + `regRouteHandler(spec)`
+   共用骨架——readme:check ⑭ 以「代码注册路径」为真源核对 README API 表，工厂收参数
+   会让路径对核对器不可见（本批实测被抓后改形）。`docs/api.md` 同步 3 端点 +
+   「四条动作端点→七条」「写类加严清单」两处口径（⑭b）。
+5. **测试 11 套件 87/87 绿**：引擎 `xp_regdelete` 语句与不可逆标注（takeover 补 2 条）、
+   CLI 门/分发/参数面 9 条（新 `cli.registryOp.test.js`，prototype patch 零网络）、
+   REST 门/参数面 4 条（新 `exploitRoutes.registry.test.js`，含 6005/1007/INVALID_PARAM
+   判码）、args 解析 1 条（unknownFlags 不误收）；三入口一致性、capabilities、udf/oracle/
+   fileWrite/dbmsExtend6 全量回归无破损。
+6. **文档与底账**：help 利用操作段 +7 行、README 利用通道行 + 注册表专行 + 端点表 3 行、
+   api.md 三端点节；`sqlmap-parity.mjs` 7 条 gap→ok、NOTES 清 7 条、PLAN 的 D200 组撤编
+   （`--dbms-cred` 并入 D204 长尾）——**缺口 52 → 45**，同名同义 98 → 105。
+7. **收口三门的真实经过**（都有牙齿）：
+   - **duplication +3**：真凶不是注册表函数——是 Exploiter.js 的 `prototype.X = X` 机械
+     挂载链（与 httpClient/Detector/ScanManager 同形，加一行 = 3 对新滑窗）。registry.js
+     顺手抽了 `sendXp` 共用骨架；挂载链改 **Object.assign 表驱动**后清掉 47 对历史债
+     （3272→3225，基线已收账）。循环写法还会让 checkJs 跨文件丢原型成员（typecheck
+     TS2339 ×5），Object.assign 恰好两头都解。
+   - **typecoverage**：api 覆盖率曾因无标注 lambda 掉到 67.1% < 基线 67.3%——args 参数面
+     提为带 JSDoc 的具名函数（67.4%）；中途瞬态 67.5% 收进基线后又回落，按「不收瞬态」
+     还原基线，不虚增。
+   - **typecheck**：normalizeRegistryArgs 的 JSDoc 联合类型需 `error !== null` 单元判别
+     才收窄（真值判断不行——`error: string` 含空串）。
+
+**结果**：受影响 11 套件 87/87；复杂度基线 min 收账（runExploit 移出存量债、main 107→105）；
+duplication 基线 3272→3225；底账重生成（分母 222 不变）；gate:close 43/43。
+诚实边界：CLI/REST 的注册表操作**没有真机 MSSQL 验证**（引擎 xp_reg* 通道有单元级
+语句断言；真机验证需 xp_reg* 已启用的授权 MSSQL 目标，与利用面其它通道同口径）。
+
+---
+
 ## 2026-11-04 批次 D249 · arch:guard 接进收口清单 + 判据自证（D247 留观盲区收口）（已完成，见 CHANGELOG）
 
 **动机**：D247 留观项——arch:guard 只跑 pre-commit 与 check:all，不在 gate:close 里 ⇒

@@ -124,13 +124,7 @@
     },
     "server/bin/cli.js::main": {
       "lines": 273,
-      "complexity": 107,
-      "limitLines": 100,
-      "limitComplexity": 15
-    },
-    "server/bin/cli.js::runExploit": {
-      "lines": 61,
-      "complexity": 23,
+      "complexity": 105,
       "limitLines": 100,
       "limitComplexity": 15
     },

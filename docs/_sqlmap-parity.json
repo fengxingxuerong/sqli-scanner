@@ -4,14 +4,14 @@
   "sqlmapVersion": "1.10.7",
   "stats": {
     "total": 222,
-    "ok": 98,
+    "ok": 105,
     "alias": 30,
     "part": 10,
     "auto": 3,
-    "gap": 52,
+    "gap": 45,
     "out": 29,
     "gapP1": 1,
-    "gapP2": 19,
+    "gapP2": 12,
     "gapP3": 32
   },
   "groups": [
@@ -1208,59 +1208,59 @@
       "options": [
         {
           "opt": "--reg-read",
-          "kind": "gap",
+          "kind": "ok",
           "ours": null,
-          "priority": "P2",
+          "priority": null,
           "reason": null,
-          "note": "**引擎已实现** registryRead（server/src/engine/exploit/registry.js，MSSQL xp_regread 通道），CLI 与 REST 均无入口 ⇒ 接线即可，不用重写"
+          "note": null
         },
         {
           "opt": "--reg-add",
-          "kind": "gap",
+          "kind": "ok",
           "ours": null,
-          "priority": "P2",
+          "priority": null,
           "reason": null,
-          "note": "**引擎已实现** registryWrite（写入类，需 EXPLOIT_ENABLED + --authorized 双闸）⇒ 接线即可"
+          "note": null
         },
         {
           "opt": "--reg-del",
-          "kind": "gap",
+          "kind": "ok",
           "ours": null,
-          "priority": "P2",
+          "priority": null,
           "reason": null,
-          "note": "**引擎已实现** registryWrite 的删除形态 ⇒ 接线即可"
+          "note": null
         },
         {
           "opt": "--reg-key",
-          "kind": "gap",
+          "kind": "ok",
           "ours": null,
-          "priority": "P2",
+          "priority": null,
           "reason": null,
-          "note": "注册表路径参数面（配合 reg-read/add/del，同批接线）"
+          "note": null
         },
         {
           "opt": "--reg-value",
-          "kind": "gap",
+          "kind": "ok",
           "ours": null,
-          "priority": "P2",
+          "priority": null,
           "reason": null,
-          "note": "注册表值名参数面（同上）"
+          "note": null
         },
         {
           "opt": "--reg-data",
-          "kind": "gap",
+          "kind": "ok",
           "ours": null,
-          "priority": "P2",
+          "priority": null,
           "reason": null,
-          "note": "写入数据参数面（同上）"
+          "note": null
         },
         {
           "opt": "--reg-type",
-          "kind": "gap",
+          "kind": "ok",
           "ours": null,
-          "priority": "P2",
+          "priority": null,
           "reason": null,
-          "note": "写入类型参数面（REG_SZ/DWORD 等，同上）"
+          "note": null
         }
       ]
     },
@@ -1900,20 +1900,6 @@
       ]
     },
     {
-      "batch": "D200",
-      "title": "Windows 注册表面（引擎已实现、只差接线：读/写/删 + 四个参数面）",
-      "items": [
-        "--reg-read",
-        "--reg-add",
-        "--reg-del",
-        "--reg-key",
-        "--reg-value",
-        "--reg-data",
-        "--reg-type",
-        "--dbms-cred"
-      ]
-    },
-    {
       "batch": "D201",
       "title": "传输形态收口（把「只做了一半」的三项做完：检测链路 h2 / HTTP1 回退 / HEAD 快速判定）",
       "items": [
@@ -1970,7 +1956,8 @@
         "--proxy-freq",
         "--tor-type",
         "-t",
-        "-v"
+        "-v",
+        "--dbms-cred"
       ]
     }
   ]

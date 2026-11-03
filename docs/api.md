@@ -608,7 +608,8 @@ curl "http://127.0.0.1:4567/api/sqlmap/sq2/diff?base=sq1"
 
 ### 4.4 利用模块（破坏性，需 `EXPLOIT_ENABLED=1` + `authorized: true` + 声明授权范围）
 
-四条动作端点（`/exploit/sql`、`/exploit/file-read`、`/exploit/file-write`、`/exploit/os-shell`）共用一套门槛：
+七条动作端点（`/exploit/sql`、`/exploit/file-read`、`/exploit/file-write`、`/exploit/os-shell`、
+`/exploit/reg-read`、`/exploit/reg-add`、`/exploit/reg-del`）共用一套门槛：
 
 1. 服务端 `EXPLOIT_ENABLED=1`（默认关闭；**每次请求现读**，改 `.env` 后无需猜是否生效）；
 2. 请求体 `authorized: true`（前端勾选语义，仅作审计，安全边界是 ①+ token）；
@@ -617,7 +618,8 @@ curl "http://127.0.0.1:4567/api/sqlmap/sq2/diff?base=sq1"
 4. 独立限速桶（默认 5 req/s，`EXPLOIT_RATE_PER_SEC` 可调）→ 超限回 `code: 4290`；
 5. 目标过 SSRF；给了 `scope` 时按 `scope` 校验，给了 `scanId` 时沿用该次扫描登记的范围。
 
-**写类端点额外加严**（`/exploit/file-write`、`/exploit/os-shell`、`/exploit/side-effects/cleanup`，会不可逆地修改目标状态）：
+**写类端点额外加严**（`/exploit/file-write`、`/exploit/os-shell`、`/exploit/reg-add`、
+`/exploit/reg-del`、`/exploit/side-effects/cleanup`，会不可逆地修改目标状态）：
 
 6. 必须提供**显式 `scope`** —— 不接受仅凭 `scanId` 间接推断范围（`scanId` 可能已回收、也可能指向另一台主机），否则 `1007`；
 7. 必须声明 `confirmDestructive: true`，否则 `6005`（与 `config.productionMode` / `confirmDestructive`、
@@ -714,6 +716,17 @@ SELECT 类走标量提取：`value` 就是取回的值；语句投递成功但�
 - `file-read`：额外字段 `path`。
 - `file-write`：额外字段 `content`、`remotePath`（≤1MB）。
 - `os-shell`：额外字段 `cmd`。
+
+#### `POST /exploit/reg-read` / `POST /exploit/reg-add` / `POST /exploit/reg-del`（[D200]）
+
+Windows 注册表面（对标 sqlmap `--reg-*`；仅 MSSQL `xp_reg*`，非 MSSQL 引擎侧返回
+`ok:false` + 原因）。门档：`reg-read` 读类（scope 声明即可）；`reg-add` / `reg-del`
+写类（显式 scope + `confirmDestructive:true`——`reg-del` 走 `xp_regdelete` 按值名删除、
+不可逆，与 os-shell 同档）。
+
+- `reg-read`：额外字段 `key`（必填）、`value`（可选，缺省读键默认值）。
+- `reg-add`：额外字段 `key`、`value`、`data`（必填），`type`（可选，默认 `REG_SZ`）。
+- `reg-del`：额外字段 `key`、`value`（必填）。
 
 #### `GET /exploit/side-effects`
 

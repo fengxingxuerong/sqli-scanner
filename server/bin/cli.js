@@ -284,7 +284,36 @@ async function runSingleScanInner(sm, url, args) {
 // 认 1 与 true）只有一处定义，见 core/exploitFlag.js 的头注释。
 // 导出供测试直接验证三入口一致性（本函数原为模块私有，测试只能用"读源码正则"这种
 // 弱判据；导出后可以直接调它，判据从"文本像不像"升级为"行为对不对"）。
+//
+// [D200 2026-11-04 拆分] 复杂度基线 GRACE=0，runExploit（61 行存量债）一行不能长；
+// 注册表面（--reg-*）接线按「门/上下文」与「动作链」拆开：门与上下文留在
+// runExploitCore（旧 runExploit 逐字搬移，只减不增合法瘦身），两条动作链各自成函数 ——
+// 旧链在 dispatchExploitAction 一字未改，注册表面在 dispatchRegistryAction（新建）。
+const REPL_HANDLED = Symbol('exploit-repl'); // 交互 REPL 已自行输出，runExploitCore 不再打印结果 JSON
+
 export async function runExploit(report, args) {
+  return runExploitCore(report, args, dispatchExploitAction);
+}
+
+// [D200] 注册表面入口（对标 sqlmap --reg-read/--reg-add/--reg-del）：与 runExploit 同门同上下文。
+export async function runExploitRegistry(report, args) {
+  return runExploitCore(report, args, dispatchRegistryAction);
+}
+
+// main() 是复杂度基线存量函数（273 行），行数与复杂度都不许涨 —— 利用面判定收进模块级助手，
+// main 里只留一行调用（替换原 || 链，复杂度净下降）。
+const EXPLOIT_OP_KEYS = ['osCmd', 'sqlShell', 'fileRead', 'fileWrite', 'regRead', 'regAdd', 'regDel'];
+/** @param {any} args @returns {boolean} 是否请求了任一利用动作 */
+function isExploitMode(args) {
+  return EXPLOIT_OP_KEYS.some((k) => !!args[k]);
+}
+/** @param {any} args @returns {boolean} 是否请求了注册表操作（走 runExploitRegistry 分支） */
+function isRegistryOp(args) {
+  return !!(args.regRead || args.regAdd || args.regDel);
+}
+
+/** @param {any} report @param {any} args @param {(exploiter:any, ctx:object, args:any)=>Promise<any>} dispatch */
+async function runExploitCore(report, args, dispatch) {
   if (!report || !report.vulns || !report.vulns.length) {
     console.error('[exploit] 未发现注入点，无法执行利用操作');
     return null;
@@ -312,6 +341,14 @@ export async function runExploit(report, args) {
     point,
     dbms: report.dbms || vuln.dbms || null,
   };
+  const result = await dispatch(exploiter, ctx, args);
+  if (result === REPL_HANDLED) return null;
+  console.log(JSON.stringify(result, null, 2));
+  return result;
+}
+
+/** @param {any} exploiter @param {object} ctx @param {any} args */
+async function dispatchExploitAction(exploiter, ctx, args) {
   let result;
   if (args.udfInstall) {
     console.error(`[exploit] UDF 全链投递（hex=${args.udfHex || '未指定'}）`);
@@ -321,13 +358,13 @@ export async function runExploit(report, args) {
     result = await exploiter.osShell(ctx, args.osCmd);
   } else if (args.osShell === true) {
     await runShellRepl('os', ctx, exploiter);
-    return null;
+    return REPL_HANDLED;
   } else if (typeof args.osShell === 'string') {
     console.error(`[exploit] 执行系统命令: ${args.osShell}`);
     result = await exploiter.osShell(ctx, args.osShell);
   } else if (args.sqlShell === true) {
     await runShellRepl('sql', ctx, exploiter);
-    return null;
+    return REPL_HANDLED;
   } else if (typeof args.sqlShell === 'string') {
     console.error(`[exploit] 执行 SQL: ${args.sqlShell}`);
     result = await exploiter.sqlShell(ctx, args.sqlShell);
@@ -342,8 +379,55 @@ export async function runExploit(report, args) {
     console.error(`[exploit] 写入目标文件: ${args.fileDest}`);
     result = await exploiter.fileWrite(ctx, args.fileWrite, args.fileDest);
   }
-  console.log(JSON.stringify(result, null, 2));
   return result;
+}
+
+// —— [D200] 注册表参数面归一化（对标 sqlmap --reg-*）——
+// 值型旗标（--reg-key/--reg-value/--reg-data/--reg-type）走 OPTIONAL_VALUE_FLAGS 表：
+// 带值=字符串；忘给值会落成 true（布尔），这里统一按「非字符串 = 没给」处理并明确报错。
+/** @param {string|null} v @returns {string|null} */
+function strArg(v) {
+  return typeof v === 'string' && v ? v : null;
+}
+
+/**
+ * @param {any} args
+ * @returns {{ error: string, op: null } | { error: null, op: string, key: string, value: string | null, data: string | null, type: string, label: string }}
+ */
+function normalizeRegistryArgs(args) {
+  const on = [args.regRead, args.regAdd, args.regDel].filter(Boolean);
+  if (on.length !== 1) {
+    return {
+      error: on.length === 0
+        ? '未指定注册表操作：--reg-read / --reg-add / --reg-del 三选一'
+        : '注册表操作一次只执行一种（--reg-read / --reg-add / --reg-del）',
+      op: null,
+    };
+  }
+  const op = args.regRead ? 'read' : args.regAdd ? 'add' : 'del';
+  const shorthand = strArg(on[0]); // 操作旗标带值 = 键路径速记（对标 sqlmap --reg-read [key]）
+  const key = strArg(args.regKey) || shorthand;
+  const value = strArg(args.regValue);
+  const data = strArg(args.regData);
+  const type = strArg(args.regType) || 'REG_SZ';
+  if (!key) return { error: '缺少注册表键路径：用 --reg-key <路径>，或操作旗标带值速记（如 --reg-read <路径>）', op: null };
+  if (op === 'add' && (!value || !data)) return { error: '--reg-add 需 --reg-value <值名> 与 --reg-data <数据>', op: null };
+  if (op === 'del' && !value) return { error: '--reg-del 需 --reg-value <值名>（xp_regdelete 按值名删除）', op: null };
+  const label = { read: '读取注册表', add: '写入注册表', del: '删除注册表值' }[op];
+  return { error: null, op, key, value, data, type, label };
+}
+
+/** @param {any} exploiter @param {object} ctx @param {any} args */
+async function dispatchRegistryAction(exploiter, ctx, args) {
+  const p = normalizeRegistryArgs(args);
+  if (p.error !== null) {
+    console.error(`[exploit] ${p.error}`);
+    return null;
+  }
+  console.error(`[exploit] ${p.label}: ${p.key}${p.value ? ` \\ ${p.value}` : ''}`);
+  if (p.op === 'read') return exploiter.registryRead(ctx, { key: p.key, value: p.value });
+  if (p.op === 'add') return exploiter.registryWrite(ctx, { key: p.key, value: p.value, data: p.data, type: p.type });
+  return exploiter.registryDelete(ctx, { key: p.key, value: p.value });
 }
 
 // 交互式 shell REPL（对标 sqlmap --sql-shell / --os-shell）：
@@ -856,15 +940,15 @@ async function main() {
     process.exit(1);
   }
 
-  const exploitMode = !!(args.osCmd || args.sqlShell || args.fileRead || args.fileWrite);
+  const exploitMode = isExploitMode(args);
   // [D177] 复现检查必须在出报告之前：判定要进 report.json / manifest，不能事后补
   if (args.reproCheck) await applyReproCheck(report, args);
   await emitSingleScanOutput(report, args, { enumActive, exploitMode });
 
-  // 攻击操作（对标 sqlmap --os-cmd/--sql-shell/--file-read/--file-write）：
+  // 攻击操作（对标 sqlmap --os-cmd/--sql-shell/--file-read/--file-write/--reg-*）：
   // 需 EXPLOIT_ENABLED=1 + --authorized；对首个命中注入点执行并打印结果
   if (exploitMode) {
-    await runExploit(report, args);
+    await (isRegistryOp(args) ? runExploitRegistry(report, args) : runExploit(report, args));
     const risk = report.riskLevel;
     process.exit(risk === 'Critical' || risk === 'High' ? 2 : 0);
   }

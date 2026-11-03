@@ -56,6 +56,28 @@ test('抓包导入三件套 -r/-l/--check-tor 已被消费，不得再被记成�
   assert.equal(a.checkTor, true);
 });
 
+test('[D200] 注册表面 7 旗标全部被消费（--reg-* 三操作 + 四参数面）', () => {
+  // 对标 sqlmap --reg-read/--reg-add/--reg-del/--reg-key/--reg-value/--reg-data/--reg-type：
+  // 走 OPTIONAL_VALUE_FLAGS 表（parseArgs 主链零增长）；三操作不带值 = 布尔、带值 = 键路径速记。
+  const a = parseArgs([
+    '-u', 'http://127.0.0.1:9/x', '--reg-read', '--reg-key', 'SOFTWARE\\x', '--reg-value', 'v',
+  ]);
+  assert.deepEqual(a.unknownFlags, [], `不该有未识别开关：${a.unknownFlags.join(',')}`);
+  assert.equal(unknownFlagError(a), null);
+  assert.equal(a.regRead, true);
+  assert.equal(a.regKey, 'SOFTWARE\\x');
+  assert.equal(a.regValue, 'v');
+  const b = parseArgs(['-u', 'http://127.0.0.1:9/x', '--reg-add', '--reg-del', '--reg-data', 'd', '--reg-type', 'REG_DWORD']);
+  assert.deepEqual(b.unknownFlags, []);
+  assert.equal(b.regAdd, true);
+  assert.equal(b.regDel, true);
+  assert.equal(b.regData, 'd');
+  assert.equal(b.regType, 'REG_DWORD');
+  const c = parseArgs(['-u', 'http://127.0.0.1:9/x', '--reg-read', 'SOFTWARE\\short']);
+  assert.deepEqual(c.unknownFlags, []);
+  assert.equal(c.regRead, 'SOFTWARE\\short', '操作旗标带值 = 键路径速记（对标 sqlmap --reg-read [key]）');
+});
+
 test('已知但"未实现"的开关仍按原政策：告警但不计入硬拒', () => {
   const a = parseArgs(['-u', 'http://127.0.0.1:9/x', '--no-escape']);
   assert.deepEqual(a.unknownFlags, [], '--no-escape 已被显式识别（政策=告警后继续），不得当拼错');

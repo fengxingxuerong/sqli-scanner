@@ -343,7 +343,7 @@ export const HELP_TEXT = `sqli-scanner CLI（对标 sqlmap 的 Node 引擎命令
   --known-point <spec>      已知注入点直通（跳过预筛选/闭合探测，键值对用 ; 分隔）：
                             "param=id;quote=';paren=);techniques=union,error"
 
-利用操作（对标 sqlmap --os-cmd/--sql-shell/--file-read/--file-write；需环境变量 EXPLOIT_ENABLED=1 且显式 --authorized）:
+利用操作（对标 sqlmap --os-cmd/--sql-shell/--file-read/--file-write/--reg-*；需环境变量 EXPLOIT_ENABLED=1 且显式 --authorized）:
   --authorized              声明已获授权（安全红线，仅限授权渗透场景）
   --os-cmd <cmd>            执行系统命令（os-shell 通道，入口形态）
   --os-shell [cmd]          同 --os-cmd：不带值则走交互式 os-shell（等价 --os-shell=true）
@@ -353,6 +353,13 @@ export const HELP_TEXT = `sqli-scanner CLI（对标 sqlmap 的 Node 引擎命令
   --file-read <path>        读取目标文件
   --file-write <content>    写入目标文件（需配合 --file-dest <远程路径>）
   --file-dest <path>        --file-write 的远程目标路径
+  --reg-read [key]          读取 Windows 注册表值（仅 MSSQL xp_regread；键路径可用 --reg-key）
+  --reg-add [key]           写注册表值（需 --reg-key/--reg-value/--reg-data，类型默认 REG_SZ）
+  --reg-del [key]           删除注册表值（需 --reg-key/--reg-value；xp_regdelete，不可逆）
+  --reg-key <path>          注册表键路径（配合上面三个操作；三操作旗标带值可作速记）
+  --reg-value <name>        注册表值名
+  --reg-data <data>         写入数据（--reg-add 用）
+  --reg-type <type>         值类型（--reg-add 用，默认 REG_SZ）
 
 爬虫与会话（对标 sqlmap）:
   --forms                  收集页面表单注入点（需配 --level 5 才生效）
