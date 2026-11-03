@@ -5,6 +5,39 @@
 
 ---
 
+## 2026-11-04 批次 D249 · arch:guard 接进收口清单 + 判据自证（D247 留观盲区收口）（已完成，见 CHANGELOG）
+
+**动机**：D247 留观项——arch:guard 只跑 pre-commit 与 check:all，不在 gate:close 里 ⇒
+「gate:close 41/41 全绿 ≠ arch 绿」当日就实测过（TargetParser 1241 行超 1200，被 pre-commit
+拦下）。D145 greenguard「门禁只活在别处，收口看不见」同一形态第三次重演，按纪律钉死。
+
+**交付**：
+
+1. arch-guard.mjs 补 `--selftest`（12 条判据：注入一次性 fixture 直接调内部函数，finally 整目录
+   清除并自证无残留——若被中断残留，下一次真跑 arch:guard 会红，可见方向的安全失败）：
+   行数维度 6 条（软上限 / 硬上限不认基线 / 基线内膨胀 / 容差内入台账 / 已瘦身 / 字节维度独立
+   生效——payloadRegistry「983 行 167KB」教训）+ 循环依赖 2 条（A⇄B 互导检出、cycleKey
+   规范化契约与方向无关）+ console 3 条（log 命中定位、error=错误上报合法、行注释剔除；
+   非生产目录不命中）+ 清理自证 1 条。
+2. **已知盲区显式钉住而非顺手改规则**：写 selftest 时 fixture 实测暴露「单行块注释
+   `/* console.log */` 仍被命中」（现行规则只剔除行注释 `!startsWith("//")`）。按「不为绿而
+   改判定语义」纪律，把现行契约钉进自证——未来若修规则，此处会红提醒同步；块注释内被注释掉
+   的调试代码靠基线吸收。
+3. gate-list.mjs 接进 `arch` + `arch:selftest`（41→43，快门禁区）；gate-close.mjs 自证 must
+   清单同步；质量台账重生成（项数 43）。
+4. **AGENTS.md 三处同步**：项数沿革（D249 起 43 项）、手写清单「六道→七道门禁」（brace 组加
+   arch）、「已漏七次」→「已漏八次」并补 D249 条目（含 D145 greenguard 同形态第三次重演的
+   归因）。
+
+**结果**：selftest 12/12 绿；gate:close 43/43（含新 arch 两项）。
+**claim 复核 ×2**（§3.5 每批至少 1 条；D248 属补登记批未做，本批一并补）：
+`tamper-parity-names`（`npm run tamper:parity`：官方 84/84、缺失 0，exit=0）与
+`echo-strip-variants-coverage-d119`（16/16 pass）两条 verified claim 的 `refute_cmd` 实跑复核通过。
+**遗留不变**：62 条 WAF 指纹真机命中率仍 unverified——需商业云 WAF 授权样本（外部采集，
+见 docs/WAF-真机样本采集-runbook.md），非本机批次可收。
+
+---
+
 ## 2026-11-04 批次 D248 · 工作区遗留补登记：4 真 bug + P1 尾批（有界匹配/落盘脱敏/REST 缺省/表单门控/windowsHide）（已完成，见 CHANGELOG）
 
 **动机**：与 D247 同形态——工作区躺着 2026-11-02~11-03 两天的**未登记**改动

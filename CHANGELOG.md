@@ -7,13 +7,14 @@
 > 下一批次起的条目写在这里。发版时把本节整体升为 `## [x.y.z] - YYYY-MM-DD` 并补汇总段。
 
 <!-- changelog-index:start -->
-**本段覆盖 21 个批次（D228–D248，2026-11-01 → 2026-11-04）**。正文按时间倒序排列；
+**本段覆盖 22 个批次（D228–D249，2026-11-01 → 2026-11-04）**。正文按时间倒序排列；
 下表是同一批次的索引，便于按编号或关键词定位。**索引只是导航，正文未做任何删改**
 （被推翻的旧结论原样保留，这是本仓的既定口径）。新增批次后跑
 `node scripts/changelog-index.mjs --write` 重生成，`--check` 校验是否过期。
 
 | 批次 | 日期 | 主题 |
 |---|---|---|
+| D249 | 11-04 | arch:guard 接进收口清单 + 判据自证（D247 留观盲区收口，gate:close 43/43） |
 | D248 | 11-04 | 工作区遗留补登记：4 真 bug + P1 尾批收口（gate:close 41/41） |
 | D247 | 11-03 | 前端 P1-CFG 遗留收口：3 红清零 + 批次补登记（gate:close 41/41） |
 | D246 | 11-03 | 交接包收口：self-check 判据去过期化 + 台账首尾对齐 |
@@ -36,6 +37,35 @@
 | D229 | 11-01 | 交付闸收口：P0-3 卡顿修复（haystack 先截后拼）+ ai-gateway 断言去模型依赖 |
 | D228 | 11-01 | AI 报告网关端到端验收（ai-gateway 套件）+ 本地网关 runbook + CI 靶场硬要求扩展 |
 <!-- changelog-index:end -->
+
+### 2026-11-04 批次 D249 · arch:guard 接进收口清单 + 判据自证（D247 留观盲区收口，gate:close 43/43）
+
+**动机**：D247 留观项——arch:guard 只跑 pre-commit 与 check:all，不在 gate:close 里 ⇒
+「gate:close 全绿 ≠ arch 绿」当日就实测过（TargetParser 1241 行，被 pre-commit 拦下）。
+D145 greenguard「门禁只活在别处，收口看不见」同一形态第三次重演，按纪律钉死。
+
+**交付**：
+
+- **arch-guard.mjs 补 `--selftest`（12 条判据）**：注入一次性 fixture（`server/src/__arch_selftest__/`，
+  console 规则只对生产目录生效所以必须落在扫描前缀下）直接调内部函数，finally 整目录清除并
+  自证无残留——若被中断残留，下一次真跑 arch:guard 会红（可见方向的安全失败）。覆盖：
+  行数维度 6 条（软上限 / **硬上限不认基线** / 基线内膨胀 / 容差内入台账 / 已瘦身 / 字节维度
+  独立生效——payloadRegistry「983 行 167KB」教训）+ 循环依赖 2 条（A⇄B 互导检出、cycleKey
+  规范化契约与方向无关）+ console 3 条（log 命中定位、error=错误上报合法、行注释剔除、
+  非生产目录不命中）+ 清理自证 1 条。
+- **已知盲区显式钉住而非顺手改规则**：selftest 实测暴露「单行块注释 `/* console.log */` 仍被
+  命中」（现行规则只剔除行注释 `!startsWith("//")`）。按「不为绿而改判定语义」纪律，把现行
+  契约钉进自证——未来修规则时此处会红提醒同步；块注释内被注释掉的调试代码靠基线吸收。
+- **接进收口清单**：gate-list.mjs 增 `arch` + `arch:selftest`（41→43，快门禁区）；gate-close.mjs
+  自证 must 清单同步；质量台账重生成（项数 43）；AGENTS.md 三处同步（项数沿革 D249 起 43 项、
+  手写清单六道→七道门禁、「已漏七次」→「已漏八次」补 D249 条目）。
+
+**结果**：selftest 12/12 绿；gate:close 43/43。
+**claim 复核 ×2**（§3.5 每批至少 1 条；D248 属补登记批未做，本批一并补）：
+`tamper-parity-names`（官方 84/84、缺失 0，exit=0）与 `echo-strip-variants-coverage-d119`
+（16/16 pass），两条 verified claim 的 `refute_cmd` 实跑复核通过。
+**遗留不变**：62 条 WAF 指纹真机命中率仍 unverified（需商业云 WAF 授权样本，外部采集，
+见 docs/WAF-真机样本采集-runbook.md）。
 
 ### 2026-11-04 批次 D248 · 工作区遗留补登记：4 真 bug + P1 尾批收口（gate:close 41/41）
 

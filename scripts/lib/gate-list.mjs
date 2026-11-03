@@ -41,6 +41,11 @@ export function closeGateList({ root, quick = false }) {
     { name: 'complexity', cmd: ['node', 'scripts/complexity-guard.mjs'] },
     ...guards.filter((g) => g !== 'complexity').map((g) => ({ name: g, cmd: ['node', `scripts/${g}-guard.mjs`] })),
     ...guards.map((g) => ({ name: `${g}:selftest`, cmd: ['node', `scripts/${g}-guard.mjs`, '--selftest'] })),
+    // [D249 2026-11-04] arch:guard 此前只跑 pre-commit 与 check:all，收口清单没有它 ——
+    // D247 实测 gate:close 41/41 全绿而 arch:guard 红（TargetParser 1241 行超 1200）。
+    // 与 D145 的 greenguard 同一形态：门禁只活在别处 ⇒ 收口看不见。接进收口 + 判据自证。
+    { name: 'arch', cmd: ['node', 'scripts/arch-guard.mjs'] },
+    { name: 'arch:selftest', cmd: ['node', 'scripts/arch-guard.mjs', '--selftest'] },
     { name: 'readme', cmd: ['node', 'scripts/readme-consistency.mjs'] },
     { name: 'readme:selftest', cmd: ['node', 'scripts/readme-consistency.mjs', '--selftest'] },
     { name: 'flag:selftest', cmd: ['node', 'scripts/readme-flag-coverage.mjs', '--selftest'] },

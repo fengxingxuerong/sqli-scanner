@@ -14,6 +14,7 @@
 // 用法：
 //   node scripts/arch-guard.mjs            # 检查（违规则退出码 1）
 //   node scripts/arch-guard.mjs --update   # 重新生成基线（仅在瘦身后使用）
+//   node scripts/arch-guard.mjs --selftest # 自证判据不空转（D249）
 // ============================================================================
 import fs from 'node:fs';
 import path from 'node:path';
@@ -195,6 +196,83 @@ function checkConsole(files) {
     });
   }
   return hits;
+}
+
+// ---------- selftest ----------
+// [D249 2026-11-04] 判据自证：注入一次性 fixture 直接调用内部函数，断言「该红的红、
+// 该绿的绿」。fixture 写进 server/src 是因为 console 规则只对生产目录（server/src /
+// src 前缀）生效；finally 里整目录清除并自证无残留 —— 若被中断残留，下一次真跑
+// arch:guard 会红（可见方向的安全失败）。依赖 cwd = 仓库根（ROOT = process.cwd()）。
+function selftestMain() {
+  const dir = path.join(ROOT, 'server', 'src', '__arch_selftest__');
+  const rel = (f) => `server/src/__arch_selftest__/${f}`;
+  const results = [];
+  const ok = (cond, name) => results.push([!!cond, name]);
+
+  const writeFixture = (name, content) => {
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, name), content, 'utf8');
+  };
+
+  try {
+    // 体积 fixture：行数维度（软上限 / 硬上限）+ 字节维度（数据密集型，行数会漏）
+    writeFixture('lines_1201.js', '// pad\n'.repeat(1201));
+    writeFixture('lines_2001.js', '// pad\n'.repeat(2001));
+    writeFixture('bytes_101k.js', 'x'.repeat(101 * 1024));
+    // 循环依赖 fixture：两文件互导
+    writeFixture('cycA.js', "import { b } from './cycB.js';\nexport const a = 1;\n");
+    writeFixture('cycB.js', "import { a } from './cycA.js';\nexport const b = 2;\n");
+    // console fixture：log（禁）/ error（错误上报，合法）/ 行注释 / 块注释
+    writeFixture('consoleFix.js', [
+      'const t = 1;',
+      'console.log(t);',
+      'console.error(t);',
+      '// console.log(inLineComment);',
+      '/* console.log(inBlockComment); */',
+    ].join('\n'));
+
+    const l1201 = rel('lines_1201.js');
+    const l2001 = rel('lines_2001.js');
+    const b101k = rel('bytes_101k.js');
+
+    // —— 体积：行数维度 ——
+    ok(checkSize([l1201], {}).violations.length === 1, '① 1201 行、基线外 → 违规');
+    ok(checkSize([l2001], { [l2001]: 2001 }).violations.length === 1, '② 2001 行越硬上限：基线登记也 → 违规（硬上限不认基线）');
+    ok(checkSize([l1201], { [l1201]: 1100 }).violations.length === 1, '③ 基线 1100 → 1201（+101 > 容差 30）→ 违规（膨胀）');
+    const within = checkSize([l1201], { [l1201]: 1190 });
+    ok(within.violations.length === 0 && within.oversize.has(l1201), '④ 基线 1190（+11 ≤ 容差）→ 不违规且入台账');
+    ok(checkSize([l1201], { [l1201]: 1300 }).violations.length === 0, '⑤ 已瘦身（1201 < 基线 1300）→ 不违规');
+    // —— 体积：字节维度独立生效（payloadRegistry 教训：983 行 / 167KB 纯行数永远绿灯）——
+    ok(checkSize([b101k], {}).violations.length === 1, '⑥ 1 行 101KB → 字节维度违规');
+
+    // —— 循环依赖：检出 + cycleKey 规范化契约（与方向/重复无关，基线才可比）——
+    const cyc = findCycles(buildGraph([rel('cycA.js'), rel('cycB.js')]));
+    ok(cyc.length === 1, '⑦ A⇄B 互导 → 恰检出 1 条环');
+    ok(cycleKey(cyc[0]) === [rel('cycA.js'), rel('cycB.js')].sort().join('|'), '⑧ cycleKey = 排序去重文件集（基线可比）');
+
+    // —— console：钉住现行规则的真实语义（不为绿而改判定）——
+    const hits = checkConsole([rel('consoleFix.js')]);
+    ok(JSON.stringify(hits) === JSON.stringify([`${rel('consoleFix.js')}:2`, `${rel('consoleFix.js')}:5`]),
+      '⑨ console 判定：log 命中第 2 行；console.error（错误上报）/行注释不命中');
+    ok(hits.some((h) => h.endsWith(':5')), '⑩ 已知盲区（显式钉住）：单行块注释 /* console.log */ 仍命中 —— 现行规则只剔除行注释（!startsWith("//")），块注释内被注释掉的调试代码靠基线吸收；未来若修此规则，此处会红提醒同步契约');
+    ok(checkConsole(['scripts/arch-guard.mjs']).length === 0, '⑪ 非生产目录（scripts/）不命中');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+  ok(!fs.existsSync(dir), '⑫ fixture 已清除，无残留');
+
+  const failed = results.filter(([p]) => !p);
+  for (const [p, name] of results) console.log(`  ${p ? '✅' : '❌'} ${name}`);
+  if (failed.length) {
+    console.error(`[arch-guard] ✗ selftest ${failed.length}/${results.length} 条失败`);
+    process.exit(1);
+  }
+  console.log(`[arch-guard] ✓ selftest 全绿（${results.length} 条判据）`);
+}
+
+if (process.argv.includes('--selftest')) {
+  selftestMain();
+  process.exit(0);
 }
 
 // ---------- main ----------
