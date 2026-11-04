@@ -250,6 +250,47 @@ function applyJsonBodyInjection(req, target, point, injected) {
   req.headers['Content-Type'] = 'application/json';
 }
 
+/**
+ * URL query 注入值的落地形态（抽自 buildInjectionRequest：该函数贴复杂度基线，
+ * [D199] 新增 skip-urlencode 总开关后必须把等量分支移出，而不是抬基线放行）。
+ * 四条互斥路径，优先级即 sqlmap 口径：
+ *   ① skip-urlencode：值不做任何百分号编码（参数名仍编码，URL 结构完整性）；
+ *   ② param-del：按自定义分隔符手工重建 query（searchParams 只认 '&'）；
+ *   ③ preEncoded：payload 本身已是编码形态，避免 %→%25 二次编码；
+ *   ④ 默认：searchParams.set（URL 构造器负责编码）。
+ * @returns {string} 新的请求 URL
+ */
+function applyUrlQueryInjection(u, target, point, injected, preEncoded) {
+  const cfg = target.config || {};
+  const paramDel = cfg.paramDel || null;
+  const rawUrl = (val) => {
+    u.searchParams.delete(point.param);
+    const rest = u.searchParams.toString();
+    return `${u.origin}${u.pathname}?${rest ? rest + '&' : ''}${encodeURIComponent(point.param)}=${val}`;
+  };
+  // 值里的 &/# 会改变 query 结构，是 --skip-urlencode 的固有语义（sqlmap 同），调用方自担。
+  if (cfg.skipUrlencode === true) return rawUrl(injected);
+  if (paramDel) {
+    const rawQ = u.search.startsWith('?') ? u.search.slice(1) : u.search;
+    const val = preEncoded ? injected : encodeURIComponent(injected);
+    let hit = false;
+    const parts = rawQ.split(paramDel).filter(Boolean).map((pair) => {
+      const i = pair.indexOf('=');
+      const k = i < 0 ? pair : pair.slice(0, i);
+      if (k === point.param) {
+        hit = true;
+        return `${k}=${val}`;
+      }
+      return pair;
+    });
+    if (!hit) parts.push(`${encodeURIComponent(point.param)}=${val}`);
+    return `${u.origin}${u.pathname}?${parts.join(paramDel)}`;
+  }
+  if (preEncoded) return rawUrl(injected);
+  u.searchParams.set(point.param, injected);
+  return u.toString();
+}
+
 // @returns 显式声明的原因：TS 对返回联合做子型归约（UnionReduction.Subtype），本函数
 // 各分支形状异构且多处含 any 字段，直连分支的 `{...,sql}` 形状会被宽形状结构性吸收 ⇒
 // 推断类型丢失 `sql`，Extractor/pocBuilder 的 `req.sql` 报 TS2339（D166 实测）。
@@ -362,33 +403,9 @@ export function buildInjectionRequest(target, point, value) {
         preEncoded = false; // 非法序列（如 '%a%'）→ 未编码
       }
     }
-    // [对标 sqlmap --param-del] 自定义分隔符：searchParams 只认 '&'，用它重建会把
-    // `a=1;b=2` 整体写成一个参数值 → 注入请求畸形。此处按用户分隔符手工重建 query。
-    const paramDel = (target.config && target.config.paramDel) || null;
-    if (paramDel) {
-      const rawQ = u.search.startsWith('?') ? u.search.slice(1) : u.search;
-      const val = preEncoded ? injected : encodeURIComponent(injected);
-      let hit = false;
-      const parts = rawQ.split(paramDel).filter(Boolean).map((pair) => {
-        const i = pair.indexOf('=');
-        const k = i < 0 ? pair : pair.slice(0, i);
-        if (k === point.param) {
-          hit = true;
-          return `${k}=${val}`;
-        }
-        return pair;
-      });
-      if (!hit) parts.push(`${encodeURIComponent(point.param)}=${val}`);
-      req.url = `${u.origin}${u.pathname}?${parts.join(paramDel)}`;
-    } else if (preEncoded) {
-      // 手工拼 query：先移除同名旧参数，injected 已是编码形态仅编码参数名
-      u.searchParams.delete(point.param);
-      const rest = u.searchParams.toString();
-      req.url = `${u.origin}${u.pathname}?${rest ? rest + '&' : ''}${encodeURIComponent(point.param)}=${injected}`;
-    } else {
-      u.searchParams.set(point.param, injected);
-      req.url = u.toString();
-    }
+    // 四条 query 重建路径（skip-urlencode / param-del / preEncoded / 默认）见
+    // applyUrlQueryInjection 的方法头；此处只消费返回值，主函数复杂度不因新开关上涨。
+    req.url = applyUrlQueryInjection(u, target, point, injected, preEncoded);
   } else if (point.location === 'path') {
     // P3 路径注入点：按 pathSegment 下标替换 URL 路径中的标记段（URL 构造器自动做路径编码）
     const u = new URL(req.url);
@@ -421,7 +438,9 @@ export function buildInjectionRequest(target, point, value) {
     if (_xmlTree && point.xmlPath === true && String(point.param).includes('.')) {
       const clone = cloneXmlTree(_xmlTree);
       if (setXmlLeaf(clone, point.param, injected)) {
-        req.data = serializeXml(clone);
+        // [D199 对标 sqlmap --skip-xmlencode] 注入值不做 XML 实体转义：目标只在原始
+        // 字节形态下才把值透传到 SQL（自带反转义网关）。默认仍转义（XML 结构完整性）。
+        req.data = serializeXml(clone, { skipEncode: target.config?.skipXmlencode === true });
         // Content-Type：SOAP 1.1 要 text/xml、1.2 要 application/soap+xml，
         // 原样保留调用方声明（改声明比不声明更危险），没声明才兜 application/xml。
         const _ctKey = Object.keys(req.headers).find((k) => /^content-type$/i.test(k));
@@ -797,7 +816,9 @@ export function buildParamNameRequest(target, point, value) {
   const injected = encodeForPoint(wrapped, point && point.encoding);
   const u = new URL(point.actionUrl || target.baseUrl);
   const looksEncodedName = /%[0-9A-Fa-f]{2}/.test(injected);
-  const encoded = looksEncodedName ? injected : encodeURIComponent(injected);
+  // [D199] skip-urlencode：键名同样不做百分号编码（与 url 值分支同口径；键名仍受
+  // 「value===originalValue 时保持原键名」的基线语义约束）
+  const encoded = looksEncodedName || target.config?.skipUrlencode === true ? injected : encodeURIComponent(injected);
   const keyName = injected === point.originalValue ? point.param : encoded;
   const pairs = [];
   for (const [k, v] of u.searchParams.entries()) {

@@ -4,15 +4,15 @@
   "sqlmapVersion": "1.10.7",
   "stats": {
     "total": 222,
-    "ok": 110,
+    "ok": 117,
     "alias": 30,
     "part": 10,
     "auto": 3,
-    "gap": 40,
+    "gap": 33,
     "out": 29,
     "gapP1": 0,
-    "gapP2": 10,
-    "gapP3": 30
+    "gapP2": 5,
+    "gapP3": 28
   },
   "groups": [
     {
@@ -321,11 +321,11 @@
         },
         {
           "opt": "--retry-on",
-          "kind": "gap",
+          "kind": "ok",
           "ours": null,
-          "priority": "P2",
+          "priority": null,
           "reason": null,
-          "note": "按状态码/响应特征重试（弱网 + 风控抖动目标的关键）；当前仅对连接失败重试"
+          "note": null
         },
         {
           "opt": "--randomize",
@@ -369,19 +369,19 @@
         },
         {
           "opt": "--skip-urlencode",
-          "kind": "gap",
+          "kind": "ok",
           "ours": null,
-          "priority": "P2",
+          "priority": null,
           "reason": null,
-          "note": "注入值恒做 URL 编码；目标只在未编码形态下才透传到 SQL 时无法表达"
+          "note": null
         },
         {
           "opt": "--skip-xmlencode",
-          "kind": "gap",
+          "kind": "ok",
           "ours": null,
-          "priority": "P3",
+          "priority": null,
           "reason": null,
-          "note": "XML/SOAP 注入值恒做实体编码；同上"
+          "note": null
         },
         {
           "opt": "--csrf-token",
@@ -433,11 +433,11 @@
         },
         {
           "opt": "--chunked",
-          "kind": "gap",
+          "kind": "ok",
           "ours": null,
-          "priority": "P2",
+          "priority": null,
           "reason": null,
-          "note": "Transfer-Encoding: chunked 分块发送（绕 IDS/WAF 的常见形态）；httpClient 无分块发送路径"
+          "note": null
         },
         {
           "opt": "--hpp",
@@ -1341,11 +1341,11 @@
         },
         {
           "opt": "--crawl-exclude",
-          "kind": "gap",
+          "kind": "ok",
           "ours": null,
-          "priority": "P2",
+          "priority": null,
           "reason": null,
-          "note": "爬虫排除正则未暴露（登出链接/危险动作页必须能排掉）"
+          "note": null
         },
         {
           "opt": "--csv-del",
@@ -1517,11 +1517,11 @@
         },
         {
           "opt": "--skip-waf",
-          "kind": "gap",
+          "kind": "ok",
           "ours": null,
-          "priority": "P3",
+          "priority": null,
           "reason": null,
-          "note": "跳过 WAF 识别阶段未暴露（已知有 WAF 且只想省请求时）"
+          "note": null
         },
         {
           "opt": "--table-prefix",
@@ -1623,11 +1623,11 @@
       "options": [
         {
           "opt": "--alert",
-          "kind": "gap",
+          "kind": "ok",
           "ours": null,
-          "priority": "P2",
+          "priority": null,
           "reason": null,
-          "note": "命中即执行宿主命令（自动化联动/Slack 钩子）；需显式授权与命令白名单，不能静默执行"
+          "note": null
         },
         {
           "opt": "--beep",
@@ -1878,19 +1878,6 @@
     }
   ],
   "plan": [
-    {
-      "batch": "D199",
-      "title": "协议形态与宿主钩子（WAF/IDS 绕过的收发形态 + 自动化入口）",
-      "items": [
-        "--chunked",
-        "--skip-urlencode",
-        "--skip-xmlencode",
-        "--retry-on",
-        "--crawl-exclude",
-        "--skip-waf",
-        "--alert"
-      ]
-    },
     {
       "batch": "D204",
       "title": "长尾 P3（按需；不与上面抢优先级，但都在底账里点名，不许「关起门来」）",

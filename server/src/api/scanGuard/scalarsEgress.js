@@ -24,6 +24,42 @@ function applyTransportBooleans(config, cfg) {
     const v = pickBool(cfg, key);
     if (v !== undefined) config[key] = v;
   }
+  // [D199] 同属「出口标量」职责，合并到本 helper 内调用：guardScalarsEgress 的函数体
+  // 已贴复杂度基线（只许持平或变浅），再挂一行调用就会顶破。
+  applyWireTogglesGuarded(config, cfg);
+}
+
+/**
+ * [D199 2026-11-04 对标 sqlmap] 协议形态六键的 REST 入口严格校验。
+ * 为什么不用 pickBool：boolOf 是 truthy 语义，1 / "true" 会被收下并转成 true，
+ * 但引擎侧判据是 `=== true`（egressOpts / injection / detect）⇒「REST 收了却不生效」。
+ * 这类静默假阴性是本仓反复栽过的形态，故入口只认真布尔；两个正则串启动即预编译。
+ * @param {object} config 落地目标
+ * @param {object} cfg 原始入参
+ * @returns {void}
+ */
+function applyWireTogglesGuarded(config, cfg) {
+  for (const key of ['chunked', 'skipUrlencode', 'skipXmlencode', 'skipWaf']) {
+    const v = cfg[key];
+    if (v === undefined || v === null) continue;
+    if (typeof v !== 'boolean') {
+      throw new AppError(ErrorCode.INVALID_PARAM, `${key} 仅支持布尔值（引擎按 === true 判定）`);
+    }
+    config[key] = v;
+  }
+  for (const { key, maxLen } of [{ key: 'retryOn', maxLen: 200 }, { key: 'crawlExclude', maxLen: 500 }]) {
+    const v = cfg[key];
+    if (v === undefined || v === null || v === '') continue;
+    if (typeof v !== 'string' || v.length > maxLen) {
+      throw new AppError(ErrorCode.INVALID_PARAM, `${key} 仅支持 ≤${maxLen} 字符的正则串`);
+    }
+    try {
+      new RegExp(v);
+    } catch (e) {
+      throw new AppError(ErrorCode.INVALID_PARAM, `${key} 正则无效：${e.message}`);
+    }
+    config[key] = v;
+  }
 }
 
 export function guardScalarsEgress(config, cfg) {
@@ -148,6 +184,7 @@ export function guardScalarsEgress(config, cfg) {
   // 是一种更难的查法，不如在入口就拒掉。
   // [D201 2026-11-04] 三键收进 applyTransportBooleans（本函数复杂度基线只许持平，
   // nullConnection 第三键进来后按守卫建议拆出）。
+  // [D199] 协议形态六键在 applyTransportBooleans 内同批落地（与 CLI 的 buildConfig 同口径）
   applyTransportBooleans(config, cfg);
   // [2026-09-24] xpAutoEnable：**不可逆动作的拒绝位**。Exploiter.js:450 的判据是
   // `ctx.config?.xpAutoEnable !== false`，命中就发

@@ -70,6 +70,12 @@ export const EGRESS_KEYS = Object.freeze([
   // undici agent（config.http2），但注入链路的 opts.http2 此前无人传 ⇒ h2 只覆盖取页/爬虫面。
   // 收进受治清单后，检测/提取/指纹三条通路同源生效（_sendFollowRedirects 判 opts.http2）。
   'http2',
+  // [D199 2026-11-04 对标 sqlmap --retry-on] 状态码命中即重试（弱网/风控抖动目标）：
+  // 值 = 状态码正则（buildConfig 启动即预编译校验），httpClient 重试循环消费。
+  'retryOn',
+  // [D199 2026-11-04 对标 sqlmap --chunked] Transfer-Encoding: chunked 发送请求体
+  //（绕 IDS/WAF 的收发形态；仅 HTTP/1.1 axios 通道，带请求体的方法生效）。
+  'chunked',
 ]);
 
 /**
@@ -111,6 +117,10 @@ export function buildEgressOpts(config, overrides = {}) {
     ignoreRedirects: cfg.ignoreRedirects === true,
     // [D201] --http2：请求级 h2 形态（客户端构造期 agent + 此处的 opts 判据，两头同源于 config）
     http2: cfg.http2 === true,
+    // [D199] --retry-on：状态码正则字符串（预编译在 httpClient 侧做一次，循环外）
+    retryOn: cfg.retryOn ?? null,
+    // [D199] --chunked：请求体分块发送（_rawRequest 消费；GET/无体方法无效果）
+    chunked: cfg.chunked === true,
   };
   if (overrides && typeof overrides === 'object') Object.assign(o, overrides);
   return o;

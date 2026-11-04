@@ -80,6 +80,47 @@ export function extractLinks(html, baseUrl, opts = {}) {
  * 链接爬虫：BFS 深度爬取，同域限制 + 全局去重 + 每深度/总量上限。
  * 单页取页失败（网络/超时/4xx）跳过不阻断整体爬取。
  */
+/**
+ * [D199 对标 sqlmap --crawl-exclude] 编译爬虫排除正则 → 判定函数。
+ * 抽到模块级的原因：LinkCrawler.crawl 的函数体/圈复杂度贴着「只许持平或变浅」的基线，
+ * 把编译与容错写在热路径里会顶破 6 圈。buildConfig 已预编译校验过，此处构造失败按
+ * 「无排除」降级（爬虫不该因一个坏表达式整体停摆，且正常到不了这里）。
+ * @param {object} config 扫描配置
+ * @returns {(u: string | null) => boolean} 归一化失败（null）一律视为不命中
+ */
+function buildCrawlExclude(config) {
+  const raw = config && config.crawlExclude;
+  if (!raw) return () => false;
+  try {
+    const re = new RegExp(String(raw));
+    return (u) => re.test(String(u));
+  } catch {
+    return () => false;
+  }
+}
+
+/** 规范化失败 / 已访问 / 排除正则命中 ⇒ 跳过本次取页。 */
+function shouldSkipCrawlUrl(url, visited, excluded) {
+  return !url || visited.has(url) || excluded(url);
+}
+
+/** 收集同域、未访问、未被排除的下层链接（同域解析的容错也在这里，不占主循环复杂度）。 */
+function collectNextLinks(links, normalize, host, visited, excluded) {
+  const out = [];
+  for (const link of links) {
+    const lu = normalize(link.url);
+    if (!lu || visited.has(lu)) continue;
+    try {
+      if (new URL(lu).host !== host) continue;
+    } catch {
+      continue;
+    }
+    if (excluded(lu)) continue;
+    out.push(lu);
+  }
+  return out;
+}
+
 export class LinkCrawler {
   /**
    * @param {object} [options]
@@ -115,10 +156,13 @@ export class LinkCrawler {
       return { pages: [], links: [] };
     }
     const host = base.host;
+    // [D199 对标 sqlmap --crawl-exclude] 登出链接 / 危险动作页必须排掉（爬进去就是真实副作用）。
+    // 编译与容错在模块级 buildCrawlExclude，主循环只消费判定函数。
+    const excluded = buildCrawlExclude(config);
     const visited = new Set(); // 已取页（或已入队）的规范化 URL
     const allLinks = new Set(); // 全部发现的同域去重链接（含已抓取页本身）
     const pages = [];
-    let frontier = [this._normalize(baseUrl)];
+    let frontier = [this._normalize(baseUrl)].filter((u) => !excluded(u));
     // 深度语义对标 sqlmap --crawl=<depth>：depth=1 仅目标页，depth=2 目标页+一级链接页，
     // depth=3 再加二级。d 从 0 计，循环 <maxDepth 次 = 恰好抓 maxDepth 层页面。
     for (let d = 0; d < maxDepth && frontier.length > 0 && pages.length < this.maxTotalPages; d++) {
@@ -127,21 +171,19 @@ export class LinkCrawler {
       for (const rawUrl of frontier) {
         if (perDepth >= this.maxPagesPerDepth || pages.length >= this.maxTotalPages) break;
         const url = this._normalize(rawUrl);
-        if (!url || visited.has(url)) continue;
+        if (url === null || shouldSkipCrawlUrl(url, visited, excluded)) continue;
         visited.add(url);
         perDepth++;
         allLinks.add(url); // 抓取页本身也是注入面（含 query）
         const html = await this._fetch(url, config);
         if (html == null) continue; // 单页失败跳过，不阻断
         pages.push({ url, html });
-        for (const link of extractLinks(html, url, { includeImages: this.includeImages })) {
-          const lu = this._normalize(link.url);
-          if (!lu || visited.has(lu)) continue;
-          try {
-            if (new URL(lu).host !== host) continue; // 同域限制：仅爬与目标同 host 的链接
-          } catch {
-            continue;
-          }
+        // 同域限制 + [D199] 排除正则（命中不入队、不取页）都在 collectNextLinks 内判定
+        const links = collectNextLinks(
+          extractLinks(html, url, { includeImages: this.includeImages }),
+          (x) => this._normalize(x), host, visited, excluded,
+        );
+        for (const lu of links) {
           allLinks.add(lu);
           next.push(lu);
         }

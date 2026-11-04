@@ -5,6 +5,54 @@
 
 ---
 
+## 2026-11-04 批次 D199 · 协议形态与宿主钩子七件（缺口 40→33）（已完成，见 CHANGELOG）
+
+**起点不是空白**：工作区留着并发会话的 8 个未提交文件（07:14–07:18 半写），
+`server/src/engine/injection.js` 把 `} else if (paramDel) {` 插在 `const paramDel` 声明之前
+⇒ 重复声明 + 块结构错乱，`node --check` 报 517 行 `Unexpected token 'export'`，
+引擎整条不可跑；`--skip-waf` / `--alert` 只有参数面、零消费点；文档/测试/底账全未同步。
+
+**交付**：
+
+1. **修半写**：`paramDel` 声明上移、内层 `if` 去掉，恢复单链 if/else 结构；HEAD 版同文件
+   `node --check` 通过、修复后通过，错误确由未提交改动引入（未回滚、未代并发会话提交）。
+2. **`--skip-waf`**：`scan/detect.js` 跳过 WAF 指纹识别与主动探测阶段（`cfg.skipWaf === true`），
+   只跳识别、不跳检测中的拦截判定与自适应重跑（wafAgg 为空 = 没识别出厂商的默认行为）。
+3. **`--alert`**：新 `bin/cli/alert.js`。命中才触发；命令只认 argv 字面量，
+   **不进 `--config` 档案 / REST 白名单、不插值任何目标数据**（命中条数与风险走两个环境变量）；
+   512 长度上限 + 禁换行；fire-and-forget，失败只告警不改退出码。挂在
+   `emitSingleScanOutput` 末尾 ⇒ **仅单目标模式**（批量 results 摘要形态未接，边界写进 help/README）。
+4. **REST 双入口**：`KNOWN_CFG_KEYS` 6 键 + `BACKFILL_SCALAR_KEYS` 兜底 +
+   `scalarsEgress.applyWireTogglesGuarded` 严格校验（布尔只认真布尔，否则 `1` 被收下却
+   在引擎 `=== true` 处失效 = 静默假阴性；两个正则串启动期预编译）。`alert` 刻意不在 REST 面。
+5. **可测性抽取**：`http/retryOn.js`（compileRetryOn / shouldRetryOnStatus）、
+   `http/transport.js` 的 `applyChunkedBody` 两个纯函数 + 剔注释的源码接线守卫，
+   避免用全链路 mock 自证「重试了几次」。
+6. **测试** `server/tests/d199WireToggles.test.js` 17 条：参数面 / 值型缺值硬拒 /
+   非法正则 / config 档案边界 / REST 透传与严格类型 / egress 同源 / skip-urlencode 不编码 +
+   **param-del 旧分支回归** / XML 不转义 / 爬虫排除 / 重试判据 / 分块流 / --alert 安全边界。
+7. **文档与底账**：help +11 行、README 参数表 + 协议形态行、user-guide 边界与旗标数 175→178、
+   `docs/api.md` +3 行；parity 7 条 gap→ok、NOTES 清 7 条、PLAN 的 D199 组撤编
+   ⇒ **缺口 40→33，同名同义 117（53%）**，产物已重生成。
+
+**推翻链（本批两条旧口径作废）**：
+① README「sqlmap 桥接参数（非原生）」把 `--skip-urlencode` / `--null-connection` 写成
+「自有引擎不消费」——D201 起前者已错、D199 起后者也错，已改并在原行标注作废日期；
+② `sqlmap-parity --selftest` 写死 `gapP1 >= 1`（隐含「永远至少有一个 P1 缺口」），
+D250 把 P1 清零后本批实测假红（P1=0/P2=5），改成结构不变量 `gap>0 && P1+P2+P3==gap`
+（分类被清空/漏记仍会红）。
+
+**结果**：新增测试 18/18；`npm run gate:close` **43/43**；facts 终值服务端 4100 用例
+（4094 pass / 0 fail / 6 skip）、徽章 4671。facts 重采 3 次（DNS 抖动 / BACKFILL 真冲突 /
+死代码去 export），逐次原因见 CHANGELOG。
+
+**诚实边界**：`--retry-on` / `--chunked` / `--skip-waf` 无真机弱网·IDS·WAF A/B（单元级语义已钉）；
+`--chunked` 仅 HTTP/1.1 字符串体，h2 通道原生分帧无此开关语义；
+`--skip-urlencode` / `--skip-xmlencode` 会破坏 query/XML 结构完整性，风险由调用方自担；
+`--alert` 仅单目标模式、命令由用户显式给出且不经任何目标数据插值。
+
+---
+
 ## 2026-11-04 批次 D201 · 传输形态收口：`--http2` 检测链路接通 + `--http1` 互斥 + `--null-connection` 快判相位（缺口 43→40）（已完成，见 CHANGELOG）
 
 **动机**：底账 D201 组的三件半成品——`--null-connection`（sendHead/matchNullConnection 挂在

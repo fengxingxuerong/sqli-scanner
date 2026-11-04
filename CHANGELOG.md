@@ -7,13 +7,14 @@
 > 下一批次起的条目写在这里。发版时把本节整体升为 `## [x.y.z] - YYYY-MM-DD` 并补汇总段。
 
 <!-- changelog-index:start -->
-**本段覆盖 25 个批次（D228–D201，2026-11-01 → 2026-11-04）**。正文按时间倒序排列；
+**本段覆盖 26 个批次（D228–D199，2026-11-01 → 2026-11-04）**。正文按时间倒序排列；
 下表是同一批次的索引，便于按编号或关键词定位。**索引只是导航，正文未做任何删改**
 （被推翻的旧结论原样保留，这是本仓的既定口径）。新增批次后跑
 `node scripts/changelog-index.mjs --write` 重生成，`--check` 校验是否过期。
 
 | 批次 | 日期 | 主题 |
 |---|---|---|
+| D199 | 11-04 | 协议形态与宿主钩子七件（缺口 40→33） |
 | D201 | 11-04 | 传输形态收口：`--http2` 检测链路接通 + `--http1` 互斥 + `--null-connection` 快判相位（缺口 43→40） |
 | D250 | 11-04 | D198 收尾：利用后清理 `--cleanup` + 本地痕迹 `--purge`（缺口 45→43） |
 | D200 | 11-04 | Windows 注册表面接线：CLI 7 旗标 + REST 3 端点 + 引擎 registryDelete（缺口 52→45） |
@@ -40,6 +41,70 @@
 | D229 | 11-01 | 交付闸收口：P0-3 卡顿修复（haystack 先截后拼）+ ai-gateway 断言去模型依赖 |
 | D228 | 11-01 | AI 报告网关端到端验收（ai-gateway 套件）+ 本地网关 runbook + CI 靶场硬要求扩展 |
 <!-- changelog-index:end -->
+
+### 2026-11-04 批次 D199 · 协议形态与宿主钩子七件（缺口 40→33）
+
+**动机**：底账 PLAN 的 D199 组七项。工作区留着并发会话 07:14–07:18 的 8 个半写文件：
+`server/src/engine/injection.js` 把 `} else if (paramDel) {` 插在 `const paramDel` 声明之前，
+造成重复声明 + 块结构错乱（`node --check` 报 517 行 `Unexpected token 'export'`，
+`git show HEAD:` 同文件语法通过 ⇒ 错误确由未提交改动引入）；`--skip-waf` / `--alert`
+只有参数面、零消费点；help/README/测试/底账全未同步。按并发纪律不动他人文件，
+接手收口而非回滚。
+
+**交付**：
+
+- **修半写**：`paramDel` 声明上移、去掉多余内层 `if`，恢复单链 if/else；新测试专门钉
+  `--param-del` 旧分支回归（防「语法修好了但语义悄悄坏」）。
+- **`--skip-waf`**：`scan/detect.js` 在 WAF 指纹识别与主动探测两处判 `cfg.skipWaf === true`。
+  **只跳识别阶段**，不跳检测中的拦截判定/自适应重跑：`wafAgg` 为空与「识别没命中」同语义。
+- **`--alert`**：新 `bin/cli/alert.js`。命中才执行；命令只认 **argv 字面量**，
+  **不进 `--config` 档案、不进 REST 白名单、不插值任何目标可控数据**（只经
+  `SQLI_ALERT_FINDINGS` / `SQLI_ALERT_RISK` 两个内部枚举环境变量传值）；512 长度上限、
+  禁换行/NUL；fire-and-forget + `unref()`，失败只告警、不改退出码。挂在
+  `emitSingleScanOutput` 末尾 ⇒ **仅单目标模式**（批量 results 摘要形态未接，已写进 help/README）。
+- **REST 双入口**：`KNOWN_CFG_KEYS` 六键 + `BACKFILL_SCALAR_KEYS` 兜底 +
+  `scalarsEgress.applyWireTogglesGuarded` 严格类型（布尔只认真布尔 —— `1` 被收下而引擎按
+  `=== true` 判定就是「REST 收了却不生效」的静默假阴性；两个正则串启动期预编译）。
+  `alert` 刻意不在 REST 面；`configFile` 的 `KNOWN_ARG_KEYS` 收六键、排除 `alert`。
+- **可测性抽取**：`http/retryOn.js`（`compileRetryOn` / `shouldRetryOnStatus`）与
+  `http/transport.js` 的 `applyChunkedBody` 两个纯函数，配**剔注释**源码接线守卫；
+  不用全链路 mock 自证「重试了几次」。
+- **测试** `server/tests/d199WireToggles.test.js` 17 条：参数面 / 三值型缺值硬拒 /
+  非法正则启动期硬拒 / config 档案边界 / REST 透传与严格类型负例 / egress 同源 /
+  skip-urlencode 不编码 + param-del 回归 / XML 不转义 / 爬虫排除 / 重试判据（余量用尽交回
+  最后响应）/ 分块 Readable 流 / `--alert` 安全边界（无命中不触发、命令无目标数据、spawn 失败）。
+- **文档与底账**：help +11 行、README 参数表协议形态行、user-guide 边界说明与旗标数
+  175→178（实测 `cliFlags` 178）、`docs/api.md` 三行；parity 7 条 gap→ok、NOTES 清 7 条、
+  PLAN 的 D199 组撤编 ⇒ **缺口 40→33，同名同义 117（53%）**，产物重生成（分母 222 不变）。
+
+**推翻链（两条旧口径作废，保留原句与作废日期）**：
+
+1. README「sqlmap 桥接参数（非原生）」原写 `--skip-urlencode` / `--null-connection`
+   「**本项目自有引擎不消费**」。D201 让 `--null-connection` 原生化、D199 让
+   `--skip-urlencode` 原生化后该句已腐烂 3 天 ⇒ 从列表移除两项、原行标注作废原因
+   （不是把数字改小，是推翻「仅桥接」这个定性）。
+2. `sqlmap-parity --selftest` 原写死 `gapP1 >= 1 && gapP2 >= 3`，隐含「永远至少有一个 P1
+   缺口」——D250 把 P1 清零后本批实测**假红**（P1=0 / P2=5）。判据本身错了：收敛缺口
+   是目标，不是异常。改为结构不变量 `gap > 0 && P1+P2+P3 === gap`（分类被清空/漏记仍红），
+   4 个反例自证照旧。
+
+**结果**：新增测试 18/18（`server/tests/d199WireToggles.test.js`）；底账 `--check` /
+`--selftest` / `--write` 全绿；`npm run gate:close` **43/43**；typecheck / lint / 七道门禁及
+各自证全绿；facts 重采后服务端 4100 用例（4094 pass / 0 fail / 6 skip）、徽章 4671。
+
+⚠️ **本批 facts 重采 3 次（非常态，逐次留痕，均因修真问题而非放宽判据）**：
+① 首采遇瞬时 DNS 抖动（`assertSafeHttpTarget` 合法公网 URL 用例，单跑 4/4 绿），同时抓出
+真冲突「D199 六键误进 `BACKFILL_SCALAR_KEYS`」⇒ 严格布尔校验打破了
+`configDroppedKeys.warn` 的「兜底键带数字 1 全部落地」不变式；
+② 从兜底名单移除六键（bespoke 严格校验本就不该混进宽松透传）后重采；
+③ 死代码门禁抓出 `buildCrawlExclude` 导出无人用 ⇒ 去掉 export + 补非法正则降级测试，
+改测试文件触发内容指纹变更 ⇒ 再采。
+
+**诚实边界**：`--retry-on` / `--chunked` / `--skip-waf` 无真机弱网·IDS·WAF A/B（单元级语义
+已钉，效果幅度不得外推）；`--chunked` 仅 HTTP/1.1 非空字符串体，h2 通道原生分帧无此开关
+语义；`--skip-urlencode` / `--skip-xmlencode` 会让值里的 `&`/`#`/`<` 改变 query/XML 结构，
+属开关固有语义、风险由调用方自担；`--alert` 仅单目标模式，命令由用户显式给出且不经
+目标数据插值；批量模式不触发（如后续要接，须另开批次补 results 汇总形态的判据）。
 
 ### 2026-11-04 批次 D201 · 传输形态收口：`--http2` 检测链路接通 + `--http1` 互斥 + `--null-connection` 快判相位（缺口 43→40）
 

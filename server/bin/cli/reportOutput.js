@@ -14,6 +14,7 @@ import * as scanLedger from '../../src/services/scanLedger.js';
 import { httpClient } from '../../src/core/httpClient.js';
 import { sanitizeForTerminal } from '../../src/core/terminalSafe.js';
 import { renderScanSummaryPanel } from './summaryPanel.js';
+import { runAlert } from './alert.js';
 
 // [2026-10-12 优化空间勘查 §A3] 两处修：
 //   ① 补 db-json（仅拖库数据）——该格式 REST/UI 早有，CLI 与 MCP 的枚举却没有；
@@ -168,6 +169,9 @@ export async function emitSingleScanOutput(report, args, flags) {
     console.log(JSON.stringify(report, null, 2));
   }
   await writeOptInArtifacts(report, args);
+  // [D199 对标 sqlmap --alert] 命中联动宿主命令：报告已成形、产物已落盘后才触发，
+  // 失败不影响退出码。批量模式（results 摘要形态）不走本函数，边界见 help/README。
+  runAlert(report, args);
 }
 
 /**

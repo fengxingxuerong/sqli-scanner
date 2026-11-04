@@ -104,6 +104,12 @@ const KNOWN_CFG_KEYS = new Set([
   // [2026-09-24] 引擎真读、此前**任何入口都设不了**的三键（见 sanitizeStart 内注释）：
   // http2 / disableKeepAlive（传输形态）+ xpAutoEnable（不可逆动作的拒绝位）
   'http2', 'disableKeepAlive', 'xpAutoEnable',
+  // [D199 2026-11-04 对标 sqlmap] 协议形态与宿主钩子六键（CLI 旗标同源）：
+  // 四布尔（chunked / skip-*）+ 两正则串（retryOn / crawlExclude）。
+  // ⚠️ alert 刻意不在此表 —— 它是本机宿主动作，只认 CLI 命令行字面量。
+  // 透传与严格类型校验在 scanGuard/scalarsEgress.js（applyWireTogglesGuarded），
+  // 仅登记白名单而不透传会重演「REST 收了、引擎收不到」的静默假阴性。
+  'chunked', 'skipUrlencode', 'skipXmlencode', 'skipWaf', 'retryOn', 'crawlExclude',
   // [P1-PERF 2026-09-08] 输入校验型目标的可证安全跳过开关 + PoC 凭据脱敏开关
   'validationSkip', 'pocRedactAuth',
   // [P0-FIX 2026-09-09] 生产护栏：高危池（RCE/写文件/DoS 类）投放必须显式确认。

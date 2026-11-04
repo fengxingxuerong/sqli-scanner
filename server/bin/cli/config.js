@@ -14,6 +14,8 @@
 // 已由段 3 落值），改序前先读对应 helper 的注释。
 // ============================================================================
 import { parseHeaders, parseAuth } from './args.js';
+// [D199] --alert 启动期校验：命令只认 argv 字面量，不落 config（见 cli/alert.js 的安全边界）
+import { validateAlertCommand } from './alert.js';
 // [D205] --ai-report 的开扫前预检（env 不全直接拒绝，不让用户扫完三分钟才发现没配上）
 import { assertAiReportUsable } from '../../src/services/aiReportCli.js';
 import { readFileSync, existsSync } from 'node:fs';
@@ -695,8 +697,52 @@ function applyProtocolAndMisc(config, args) {
   // [D201 2026-11-04 对标 sqlmap --http2/--http1/--null-connection] 传输形态三项收口
   //（互斥校验 + config 落地，见 applyTransportForm；本函数复杂度按守卫建议保持拆分）
   applyTransportForm(config, args);
+  // [D199 2026-11-04 对标 sqlmap --chunked/--skip-*-encode/--skip-waf/--retry-on/
+  // --crawl-exclude/--alert] 协议形态与宿主钩子七件（见 applyWireToggles）
+  applyWireToggles(config, args);
   // [D198 对标 sqlmap --live-cookies] 每请求重读的 cookie 文件（见 applyLiveCookies）
   applyLiveCookies(config, args);
+}
+
+/**
+ * [D199 2026-11-04 对标 sqlmap] 协议形态与宿主钩子七件（底账 D199 组）：
+ *   chunked / skip-urlencode / skip-xmlencode / skip-waf：四布尔（默认关，默认路径零变化）；
+ *   retry-on / crawl-exclude：值型正则——**启动即预编译**（非法正则拒绝启动，不在
+ *   扫描中途炸）；retry-on 经受治出口清单进 httpClient（egressOpts），crawl-exclude
+ *   在 crawler 链接收录处消费；
+ *   alert：**不落 config** ——它是本机宿主动作（命中联动命令），只能由命令行字面量给出，
+ *   不能被 --config 档案（KNOWN_ARG_KEYS 不收录）或 REST 触发；缺值硬拒。
+ * 独立成函数：applyProtocolAndMisc 复杂度贴线（D201 已拆过一次），七件再进来必超软上限。
+ * @param {object} config 目标 config（原地写）
+ * @param {object} args CLI 参数
+ * @returns {void}
+ */
+function applyWireToggles(config, args) {
+  if (args.retryOn === true) throw new Error('--retry-on 需要值：命中即重试的状态码正则（如 "408|429|50[23]"）');
+  if (args.crawlExclude === true) throw new Error('--crawl-exclude 需要值：爬虫 URL 排除正则（如 "logout|admin"）');
+  validateAlertCommand(args.alert); // [D199] 缺值/过长/换行硬拒；命令本身不落 config（宿主动作只认 argv 字面量）
+  if (args.retryOn) {
+    const re = String(args.retryOn).slice(0, 200);
+    try {
+      new RegExp(re);
+    } catch (e) {
+      throw new Error(`--retry-on 正则无效：${e.message}`, { cause: e });
+    }
+    config.retryOn = re;
+  }
+  if (args.crawlExclude) {
+    const re = String(args.crawlExclude).slice(0, 500);
+    try {
+      new RegExp(re);
+    } catch (e) {
+      throw new Error(`--crawl-exclude 正则无效：${e.message}`, { cause: e });
+    }
+    config.crawlExclude = re;
+  }
+  if (args.skipUrlencode) config.skipUrlencode = true;
+  if (args.skipXmlencode) config.skipXmlencode = true;
+  if (args.skipWaf) config.skipWaf = true;
+  if (args.chunked) config.chunked = true;
 }
 
 /**

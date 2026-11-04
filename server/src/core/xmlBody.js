@@ -234,11 +234,15 @@ export function renameXmlTag(tree, path, newTag) {
 /**
  * 序列化回 XML 文本。
  * @param {XmlNode} tree
+ * @param {{skipEncode?: boolean}} [opts] skipEncode=true 时不做实体转义
+ *   （[D199] 对标 sqlmap --skip-xmlencode：目标只在原始字节形态下透传到 SQL 时用；
+ *   默认转义保证 XML 结构完整性——值里含 < & 等字符时结构风险由调用方自担）
  * @returns {string}
  */
-export function serializeXml(tree) {
+export function serializeXml(tree, opts = {}) {
+  const skip = opts?.skipEncode === true;
   const render = (node) => {
-    if (typeof node === 'string') return escapeXmlText(node);
+    if (typeof node === 'string') return skip ? node : escapeXmlText(node);
     const open = `<${node.tag}${node.attrs}${node.selfClosing ? '/' : ''}>`;
     if (node.selfClosing) return open;
     const inner = node.children.map(render).join('');

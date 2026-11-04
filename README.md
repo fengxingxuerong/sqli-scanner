@@ -1,6 +1,6 @@
 # sqli-scanner
 
-[![Tests](https://img.shields.io/badge/tests-4655%20passing-brightgreen)](#测试)[![CI](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml/badge.svg)](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml)
+[![Tests](https://img.shields.io/badge/tests-4671%20passing-brightgreen)](#测试)[![CI](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml/badge.svg)](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml)
 [![Dependencies](https://img.shields.io/badge/prod%20deps-0%20known%20vulns-brightgreen)](SECURITY.md)
 
 > CI 徽章为真实状态（红绿以 GitHub Actions 实跑为准）。发布判定仍以 `CHANGELOG.md`
@@ -259,7 +259,7 @@ admin-only 触发页 `/admin/panel`（users.admin 角色门禁 403）+ admin 会
 | **提取比较算子** | `--fetch-using <gt\|between>`（[D50]，默认 gt=历史行为零回归）：`>`/`<` 被 WAF 过滤而 BETWEEN 仍放行的目标上，between 把长度/字节二分换成 `x BETWEEN lo AND mid` 窄化（cls 字符类探测本就只用 BETWEEN，该通道此前的静默失准正是本开关要堵的洞）。布尔与时间双通道同构；探测次数与 gt 同阶，提取值经等值复验。`in` 不支持（IN 为假时无法定位区间，TODO 留证）；非法值拒绝启动。⚠️ 上游归属更正：原登记为"对标 ghauri --fetch-using"，对 ghauri v1.0.5/dev 整包取证 0 命中——按技术本身价值落地 |
 | **响应解密脚本** | `--postprocess <file.js>`（[D52]，与 `--request-script` 对偶）：目标把响应体加密/编码后返回时（AES 信封、自定义 Base64 变体、自研 RPC 序列化），检测层拿到的全是密文 ⇒ 真/假条件的差异被加密抹平 ⇒ 报告写「未检出」——**而那不等于没有洞**。脚本导出 `transform(res)->res`，在 per-scan 客户端视图最内层对每条响应体解密/解码（含保活/CSRF 取页/登录；爬虫请求不经此层），只允许替换 `data`（status/headers 是可信度判账的输入，不可改）。硬约束与 request-script 对偶：脚本须位于 `RESPONSE_SCRIPT_DIR` 白名单目录内；加载失败**扫描不启动**；执行失败时该响应按失败处理（fail-closed，宁漏不误，绝不用密文继续比对） |
 | **配置档案** | `--config <file.json>` 预载参数（argv > 档案 > 内置默认；键=长参数名，如 `{"level":5,"tamper":"space2comment"}`；含未知键拒绝启动）+ `--save-config <file.json>` 把本次非默认参数增量落盘复扫（对标 sqlmap -c/--save + ffuf -config）。[D41] 配合上面的筛选三件套可把「复测配方」入库进 CI |
-| **sqlmap 桥接参数（非原生）** | `--csrf-url` / `--csrf-token` / `--eval` / `--skip-urlencode` / `--keep-alive` / `--null-connection`：**仅当转交外部 sqlmap 进程（sqlmapBridge）时才会被传递**，本项目自有引擎不消费这些键。请勿把上表与本节混用 |
+| **sqlmap 桥接参数（非原生）** | `--csrf-url` / `--csrf-token` / `--eval` / `--keep-alive`：**仅当转交外部 sqlmap 进程（sqlmapBridge）时才会被传递**，本项目自有引擎不消费这些键。⚠️ 本节旧口径曾把 `--skip-urlencode` / `--null-connection` 也列为「仅桥接」（**2026-11-04 作废**）：两者自 D201 / D199 起已由自有引擎原生消费，见下方参数表。请勿把上表与本节混用 |
 | **-r 请求文件** | 从 Burp/curl 请求文本导入 URL/method/headers/body（也认 Burp XML / HAR / Postman / OpenAPI 集合）。**[D159] multipart 上传表单保真**：此前 `-r` 会把 multipart 降级成 urlencoded（目标 415 ⇒ 静默 0 检出），且文件字段被当文本字段发（`filename` 属性丢失）。现在按 boundary 重建 multipart，**文件字段的 `filename` 本身成为注入面**（上传接口把文件名落库后再拼 SQL 的形态），文本字段照常；证据：`e2e/detect-surface-lab` 的 `/api/upload` 真值 0/1 → 修复后 1/1、参数化对照 0 误报。⚠️ 仍只支持**单个文件字段/整份表单重建**，不重放文件二进制内容（文件内容对 SQL 注入无意义） |
 | **结构化 body 通道（JSON 嵌套 / XML·SOAP）** | 两类现代 API body 都按**叶子路径**发现注入点，而不是把整份 body 当成一个参数：`jsonBody`（对象，如 `user.id` / `tags.0`）与 `xmlBody`（XML 字符串，如 `soap:Envelope.soap:Body.GetUser.id`；对标 ghauri 的 XML·SOAP 支持）。入口：REST `xmlBody` 字段、CLI `--xml-body` / `--xml-body-file`。**[D155] body 通道按声明的 `Content-Type` 判定**：`--body '{"id":1}' --header 'Content-Type: application/json'` 这类扁平 JSON API 也走 JSON 语义（此前按 urlencoded 发 ⇒ 只吃 JSON 的目标 415/400 ⇒ 静默 0 检出，`e2e/detect-surface-lab` 的 `/api/json` 实测 0/1 → 修复后 1/1）；未声明 CT 的扁平 body 行为不变。⚠️ XML 通道只认「元素 + 文本」形态：注释 / CDATA / DOCTYPE / 正文处理指令一律**整体放弃**（宁可不发现，也不发畸形报文） |
 | **mTLS 客户端证书** | `clientCert`（PEM 路径，证书+私钥同文件，对标 sqlmap `--cert`）：目标要求 TLS 双向认证时没有证书连第一跳都被拒。与 `insecureTls` 正交（一个管「我信不信目标」，一个管「目标信不信我」） |
@@ -314,6 +314,7 @@ npm run quality:all     # 【门禁】一键全量质量校验（测试/覆盖�
 | Windows 注册表面（[D200] 对标 sqlmap `--reg-*`，仅 MSSQL `xp_reg*`） | `--reg-read [key]`（读值，`xp_regread`）/ `--reg-add`（写值，需 `--reg-key`/`--reg-value`/`--reg-data`，`--reg-type` 默认 REG_SZ）/ `--reg-del`（删值，`xp_regdelete` 按值名、不可逆）。三操作旗标带值 = 键路径速记；REST 同名端点 `/api/exploit/reg-read|reg-add|reg-del`，写删与 os-shell 同档 destructive（显式 scope + `confirmDestructive:true`） |
 | 网络与协议 | `--proxy` `--proxy-bypass-local` `--no-proxy-bypass-local` `--insecure` `--rate` `--threads` `--retries` `--http-timeout` `--delay-sec` `--req-rate` `--max-requests` `--tor` `--check-tor` `--random-agent` `--force-ssl` `--ignore-redirects` `--hpp` `--no-keep-alive` `--drop-set-cookie` `--http2` `--http1` `--null-connection` |
 | 传输形态（[D201] 对标 sqlmap `--http2`/`--http1`/`--null-connection`） | `--http2`：首选 HTTP/2（undici ALPN，目标不支持自动降级 1.1），经受治出口清单生效——检测/提取/指纹/爬虫同一协议形态；`--http1`：显式只用 1.1（与 `--http2` 互斥，双给拒启）；`--null-connection`：布尔通道 HEAD 元数据快判（状态码/Content-Length 与基线可区分即出结论、省全正文传输；不可决自动落回 body 判定，不为提速牺牲检出） |
+| 协议形态与宿主钩子（[D199] 对标 sqlmap） | `--chunked`：请求体 `Transfer-Encoding: chunked` 分块发送（仅 HTTP/1.1 带体请求，h2 原生分帧无此语义）；`--skip-urlencode`：注入值不做百分号编码（自解码/二次解码网关；值里的 `&`/`#` 会改 query 结构，调用方自担）；`--skip-xmlencode`：XML/SOAP 注入值不做实体转义（默认转义保证 XML 结构完整）；`--skip-waf`：跳过 WAF 指纹识别/主动探测阶段（只省请求，检测中拦截判定与自适应重跑不变）；`--retry-on <正则>`：状态码命中即重试，复用 `--retries` 余量；`--crawl-exclude <正则>`：爬虫排除 URL（登出/危险动作页不入队不取页）；`--alert <命令>`：命中时执行宿主命令（**仅单目标模式**），只认命令行字面量，不进 `--config`/REST、不插值目标数据，命中条数与风险等级走 `SQLI_ALERT_FINDINGS` / `SQLI_ALERT_RISK` 环境变量 |
 | 安全护栏与授权 | `--authorized` `--confirm-destructive` `--confirm-form-writes` `--poc-redact-auth` `--no-poc-redact-auth` `--no-production-mode` `--no-xp-auto-enable` `--no-validation-skip` `--yes` |
 | 已移除的占位参数（**收参数但不生效**，仅为兼容旧命令行） | `--no-escape` `--union-char` `--max` `--days` |
 > ⚠️ 上表 `--max` / `--days` 指**扫描侧**的占位（收下即丢弃，无效果）。`node server/bin/cli.js ledger prune --max=N` 是 **ledger 子命令自己的参数**，仍然有效，两者同名不同义。
@@ -452,7 +453,7 @@ server/       ← Express + Node.js（后端，`server/index.js` 入口）
 # 前端测试（579 个用例）
 npm test
 
-# 服务端测试（4082 个用例）
+# 服务端测试（4100 个用例）
 cd server && npm test
 
 # 全部测试
@@ -477,8 +478,8 @@ npm run artifact:drift   # 入库的 e2e 基线产物必须等于当前代码跑
 ## 项目状态
 
 - TypeScript: 零错误
-- 前端测试: 579/579 通过（覆盖率门禁 stmts 93.16 / branch 84.47 / func 80.63，阈值 88/77/67）
-- 服务端测试: 4082 用例（4076 pass / 0 fail / 6 skip，并发口径 2026-11-03 复测；6 skip 为环境依赖显式跳过。覆盖率 lines 90.89 / branch 79.29 / func 84.22，阈值 85/74/77）
+- 前端测试: 577/579 通过（覆盖率门禁 stmts 93.16 / branch 84.47 / func 80.63，阈值 88/77/67）
+- 服务端测试: 4100 用例（4094 pass / 0 fail / 6 skip，并发口径 2026-11-04 复测；6 skip 为环境依赖显式跳过。覆盖率 lines 90.89 / branch 79.29 / func 84.22，阈值 85/74/77）
 - 一键扫描: `npm run scan -- -u <url>`（CLI 一条命令产出 HTML/JSON/Markdown 全套报告 + manifest，退出码可直接进 CI 门禁）
 - Tamper 插件: 234 个（含批次 D3 新增 scalarselectinline；含 v24 增量 20 个，对齐 sqlmap 官方 tamper 全集，含官方 CRS/libinjection 实测组合 uniontable+odbcbrace；含批次 D13 新增 5 件上游形态变体 *nospace/*open/*block，真机 A/B 判决前不进默认链）
 - WAF 绕过能力: 200+ 插件链式组合，覆盖 62 个 WAF 厂商指纹识别 + 推荐

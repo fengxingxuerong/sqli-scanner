@@ -417,15 +417,18 @@ export async function detectPhase(run) {
         point.dbmsVersion = fpResult.version;
         dbmsVersion = fpResult.version;
       }
-      // WAF 指纹识别：复用指纹阶段已抓取的基线响应（status/headers/body），零额外发包
-      const wafCands = sm.wafIdentifier.identify((fpResult && fpResult.baseline) || {});
+      // WAF 指纹识别：复用指纹阶段已抓取的基线响应（status/headers/body），零额外发包。
+      // [D199 对标 sqlmap --skip-waf] 显式跳过**识别阶段**（已知目标挂 WAF、或只想省掉
+      // 主动探测请求时）。只跳过识别，不跳过检测中的拦截判定与自适应重跑：wafAgg 为空
+      // 与「识别没命中」同语义，走无画像默认行为，不降低检出能力（对标底账 40 项之一）。
+      const wafCands = wafCandidates(sm, cfg, fpResult);
       for (const c of wafCands) {
         const prev = wafAgg.get(c.vendor);
         if (!prev || c.confidence > prev.confidence) wafAgg.set(c.vendor, c);
       }
       // [sqlmap 对标] 主动 WAF 探测：被动识别无果且 config.activeWafProbe 开启时，
       // 主动发送多向量探测请求观察拦截行为以识别厂商。仅 direct 模式外触发。
-      if (wafCands.length === 0 && cfg.activeWafProbe === true && target.mode !== 'direct') {
+      if (shouldActiveWafProbe(cfg, wafCands, target)) {
         try {
           const probeResult = await sm.wafIdentifier.activeProbe(target, ctxBase.httpClient);
           if (probeResult.detected) {
@@ -893,4 +896,28 @@ export async function detectPhase(run) {
     oobUnavailable,
     wafAgg,
   };
+}
+
+/**
+ * [D199 对标 sqlmap --skip-waf] WAF 识别阶段（被动指纹 / 主动探测）的总闸。
+ * 抽成模块级纯判据的原因：detectPhase 与内部 scheduler 回调的圈复杂度都贴着
+ * 「只许持平或变浅」的基线，把两个 skipWaf 条件直接写进热路径会各顶破 2 圈。
+ * 语义边界：只跳过识别，不跳过检测中的拦截判定与自适应重跑。
+ * @param {object} sm ScanManager（wafIdentifier 可注入）
+ * @param {object} cfg 扫描配置
+ * @param {object|null} fpResult 指纹阶段结果（复用其 baseline，零额外发包）
+ * @returns {Array<object>} WAF 候选
+ */
+function wafCandidates(sm, cfg, fpResult) {
+  if (cfg.skipWaf === true) return [];
+  return sm.wafIdentifier.identify((fpResult && fpResult.baseline) || {});
+}
+
+/**
+ * 是否需要主动 WAF 探测：被动识别无果 + 未显式跳过识别 + 开关打开 + 非直连模式。
+ * @returns {boolean}
+ */
+function shouldActiveWafProbe(cfg, wafCands, target) {
+  return wafCands.length === 0 && cfg.skipWaf !== true
+    && cfg.activeWafProbe === true && target.mode !== 'direct';
 }

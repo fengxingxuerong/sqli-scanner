@@ -410,6 +410,19 @@ export const HELP_TEXT = `sqli-scanner CLI（对标 sqlmap 的 Node 引擎命令
   --null-connection         [D201] 布尔通道 HEAD 元数据快判（对标 sqlmap --null-connection）：
                             只看状态码/Content-Length 与基线的差异，可决即出结论、省全正文传输；
                             不可决（动态页/基线抖动）自动落回 body 判定——不为提速牺牲检出
+  --chunked                 [D199] 请求体分块发送（Transfer-Encoding: chunked；仅 HTTP/1.1 带体请求）：
+                            绕 IDS/WAF 对总长可预读的收发形态；h2 通道原生分帧，此开关无效果
+  --skip-urlencode          [D199] 注入值不做百分号编码（目标自解码/二次解码网关时才用）：
+                            值里的 &/# 会改变 query 结构，属本开关固有语义，调用方自担
+  --skip-xmlencode          [D199] XML/SOAP 注入值不做实体转义（默认转义保证 XML 结构完整性）
+  --skip-waf                [D199] 跳过 WAF 指纹识别与主动探测阶段（已知有 WAF、只想省请求）；
+                            检测中的拦截判定与自适应重跑不变，不降低检出
+  --retry-on <regex>        [D199] 状态码命中正则即重试（如 "408|429|50[23]"），复用 --retries 余量；
+                            余量用尽时把最后一次响应原样交回判定
+  --crawl-exclude <regex>   [D199] 爬虫 URL 排除正则（如 "logout|admin"）：命中的链接不入队、不取页
+  --alert <cmd>             [D199] 命中时执行宿主命令（仅单目标模式）。只认命令行字面量：
+                            不进 --config/REST、不插值任何目标数据；命中条数/风险走
+                            SQLI_ALERT_FINDINGS / SQLI_ALERT_RISK 环境变量；执行失败不改退出码
   --list-tampers            [D197] 只列出当前可用的 tamper 插件（名字/说明/dbms 限定/terminal/幂等）
                             并退出，不发起任何请求（对标 sqlmap --list-tampers）。总数是运行时真值，
                             文档里的数字会漂 —— 挑链前以本输出为准

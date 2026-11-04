@@ -118,6 +118,9 @@ import { undiciAgentInsecure, _rawRequest, _finishResponse, _rawUndici } from '.
 import { _followRedirects, _followRedirectsH2 } from './http/redirects.js';
 import { _digestAuthHeader, _digestReplay, _setDigestChallenge, _after401 } from './http/auth.js';
 import { _beforeAttempt, _onRequestError, _sleep } from './http/retry.js';
+// [D199] --retry-on 状态码重试判据（纯函数，见 core/http/retryOn.js）
+import { compileRetryOn, shouldRetryOnStatus } from './http/retryOn.js';
+import { attachNetworkTiming } from './http/responseTiming.js';
 export { dnsCache, EXTRACT_MAX_BODY_BYTES, MAX_BODY_BYTES };
 
 export class HttpClient {
@@ -249,6 +252,11 @@ export class HttpClient {
     // 重试必然又打同一个死 IP）——取 IP 的时机与原实现逐点一致。
     const send = () =>
       this._sendFollowRedirects(opts, headers, proxyConf, timeoutMs, disableKA, redirectsLeft, egress);
+    // [D199 对标 sqlmap --retry-on] 状态码命中即重试（弱网/风控抖动目标的关键——
+    // 默认仅对连接失败重试，目标回 503/429 时会被当成「响应」直接交给检测判定，
+    // 把「风控抖动」读成「注入差异」或「无差异」都有可能）。正则由 buildConfig
+    // 启动时预编译校验过；此处构造失败按「无 retry-on」降级（防御性，正常到不了）。
+    const retryOnRe = compileRetryOn(opts.retryOn);
     let lastErr;
     for (let attempt = 0; attempt <= retry; attempt++) {
       // 每次尝试前的闸门：abort 检查 / --max-requests 计数 / --delay 延时（见 _beforeAttempt）
@@ -262,18 +270,15 @@ export class HttpClient {
         let res = await send();
         // 401 → Digest 挑战-重放 / NTLM 三步握手（可能内部经 send() 重发并返回最终响应）
         res = await this._after401(res, opts, headers, send, digestPreAttached);
-        if (t0Net !== null && res && typeof res === 'object') {
-          // 非枚举属性：不污染任何 JSON 序列化/请求头透传路径
-          // [P1-FIX ②] 计时点覆盖整条传输（含代理往返）：走 Burp/socks 时 __networkMs =
-          // 「本地↔代理目标」全往返，故 jitterMs 与时间盲注阈值不得按本地 RTT 标定；
-          // 此处只加 __meta.viaProxy 标注（不改判定公式，避免回归）。
-          Object.defineProperty(res, '__networkMs', {
-            value: performance.now() - t0Net,
-            enumerable: false,
-            configurable: true,
-            writable: true,
-          });
+        // [D199] --retry-on：状态码命中且还有重试余量 → 退避后进下一轮 attempt
+        //（不 return：与连接失败重试同语义，余量用尽时把最后一次响应原样交回）
+        if (shouldRetryOnStatus(retryOnRe, res, attempt, retry)) {
+          await this._sleep(400 * (attempt + 1));
+          continue;
         }
+        // [D199] 计时元数据抽到 core/http/responseTiming.js（原块语义逐字不变）：
+        // [P1-FIX ②] 计时点覆盖整条传输（含代理往返），jitterMs/时间盲注阈值不得按本地 RTT 标定。
+        attachNetworkTiming(res, t0Net);
         // [P1-FIX ④] 出口语义写进响应元数据（与 __networkMs 同样非枚举）：
         // 上层/报告据此标注「本次扫描未校验证书」「响应被截断」「流量经代理」，检测判定不变。
         if (res && typeof res === 'object') {

@@ -85,9 +85,11 @@ node server/bin/cli.js -u "http://target/login" --method POST \
 
 ## 四、关键配置项
 
-> **本节只讲最常用的配置**；**CLI 的全部 175 个开关**见 README 的「CLI 能力速查（按用途分组）」
+> **本节只讲最常用的配置**；**CLI 的全部 178 个开关**见 README 的「CLI 能力速查（按用途分组）」
 > 或直接 `node server/bin/cli.js --help`（两者由 `npm run readme:check` 的 ⑯/⑰ 判据钉死一致）。
 > ⚠️ 本文件是**上手指南**，不承担参数全表的职责——全表在 README，这里不重复（避免两处漂移）。
+>
+> [D199] 协议形态类开关（`--chunked` / `--skip-urlencode` / `--skip-xmlencode` / `--skip-waf` / `--retry-on` / `--crawl-exclude` / `--alert`）会改变**发包形态或宿主动作**，不属于「调大调小」类参数：默认全关，只在明确知道目标需要时才开。其中 `--alert` 会执行本机命令，只认命令行字面量，不能写进 `--config` 档案或经 REST 触发，且仅单目标模式生效；边界详见 README 与 `--help`。
 
 | 配置 | 默认 | 说明 |
 |------|------|------|

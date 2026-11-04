@@ -105,6 +105,20 @@ const OPTIONAL_VALUE_FLAGS = new Map([
   // [D198 对标 sqlmap --cleanup] 利用后清理（UDF DROP / reg delete / 删落盘文件）：
   // 撤销配方来自写副作用台账，执行走 exploit 同一套双闸（EXPLOIT_ENABLED + --authorized）。
   ['--cleanup', 'cleanup'],
+  // [D199 2026-11-04 对标 sqlmap --chunked/--skip-urlencode/--skip-xmlencode/--skip-waf/
+  // --retry-on/--crawl-exclude/--alert] 协议形态与宿主钩子七件（组 = 底账 D199）：
+  //   四布尔（chunked / skip-urlencode / skip-xmlencode / skip-waf）+ 三值型
+  //   （retry-on=状态码正则 / crawl-exclude=URL 排除正则 / alert=命中联动宿主命令）。
+  //   值型不带值落 true ⇒ buildConfig 硬拒（同 --load-cookies「收参数不生效」口径）。
+  //   alert 只认命令行字面量：不进 --config 档案（KNOWN_ARG_KEYS 不收录）、REST 不可达
+  //   ——本机宿主动作不能由一份外来配置文件触发。
+  ['--chunked', 'chunked'],
+  ['--skip-urlencode', 'skipUrlencode'],
+  ['--skip-xmlencode', 'skipXmlencode'],
+  ['--skip-waf', 'skipWaf'],
+  ['--retry-on', 'retryOn'],
+  ['--crawl-exclude', 'crawlExclude'],
+  ['--alert', 'alert'],
 ]);
 
 export function parseArgs(argv, preset) {

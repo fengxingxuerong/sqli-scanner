@@ -138,21 +138,23 @@ export const STATUS = {
   '--delay': 'ok:--delay-sec',
   '--timeout': 'ok:--http-timeout',
   '--retries': 'ok',
-  '--retry-on': 'gap:P2',
+  // [D199 2026-11-04 已接线] 协议形态四件：状态码重试 / 注入值不编码 / XML 不转义 / 分块发送。
+  // CLI 旗标 + config + REST 白名单同源；测试见 server/tests/d199WireToggles.test.js。
+  '--retry-on': 'ok',
   '--randomize': 'ok',
   '--safe-url': 'ok',
   '--safe-post': 'gap:P3',
   '--safe-req': 'gap:P3',
   '--safe-freq': 'ok',
-  '--skip-urlencode': 'gap:P2',
-  '--skip-xmlencode': 'gap:P3',
+  '--skip-urlencode': 'ok',
+  '--skip-xmlencode': 'ok',
   '--csrf-token': 'ok',
   '--csrf-url': 'ok',
   '--csrf-method': 'ok',
   '--csrf-data': 'gap:P3',
   '--csrf-retries': 'gap:P3',
   '--force-ssl': 'ok',
-  '--chunked': 'gap:P2',
+  '--chunked': 'ok',
   '--hpp': 'ok',
   '--eval': 'ok:--request-script',
 
@@ -287,7 +289,10 @@ export const STATUS = {
   // cli.js 入口拦截），底账必须朝事实方向改：gap → ok。
   '--cleanup': 'ok',
   '--crawl': 'ok',
-  '--crawl-exclude': 'gap:P2',
+  // [D199] 排除正则 + 跳过 WAF 识别阶段：均在 CLI/REST 双入口生效（--skip-waf 只跳识别阶段，
+  // 不跳检测中的拦截判定；--alert 见下方 Miscellaneous 的边界说明）。
+  '--crawl-exclude': 'ok',
+  '--skip-waf': 'ok',
   '--csv-del': 'gap:P3',
   '--charset': 'gap:P3',
   '--dump-file': 'gap:P3',
@@ -309,7 +314,6 @@ export const STATUS = {
   '--save': 'ok:--save-config',
   '--scope': 'ok',
   '--skip-heuristics': 'part:--smart',
-  '--skip-waf': 'gap:P3',
   '--table-prefix': 'gap:P3',
   '--test-filter': 'ok',
   '--test-skip': 'ok',
@@ -325,7 +329,9 @@ export const STATUS = {
   '--xpath': 'gap:P2',
 
   // ── Miscellaneous ──────────────────────────────────────────────────────────
-  '--alert': 'gap:P2',
+  // [D199] 边界：仅单目标模式触发（批量 results 摘要形态未接）；命令只认 argv 字面量，
+  // 不进 --config/REST、不插值目标数据（见 cli/alert.js 安全边界与 help/README）。
+  '--alert': 'ok',
   '--beep': 'out:无人值守/CI 场景下无意义（agent 驱动是主用法）',
   '--dependencies': 'out:引擎有意零运行时依赖，无「缺依赖」这一类故障',
   '--disable-coloring': 'out:本仓 CLI 输出无 ANSI 着色，无开关可关',
@@ -377,14 +383,12 @@ export const NOTES = {
   '--proxy-freq': '配合代理池的换出口频率未实现（与 --proxy-file 同批）',
   '--tor-port': 'Tor 端口固定 9050，无旗标覆盖（wafEvasion 可配但无 CLI 面）',
   '--tor-type': '仅 socks5；socks4/http 代理类型未暴露为独立开关',
-  '--retry-on': '按状态码/响应特征重试（弱网 + 风控抖动目标的关键）；当前仅对连接失败重试',
   '--safe-post': '保活请求只支持 GET；会改状态的会话用 POST 保活时无表达方式',
   '--safe-req': '保活请求无法整请求导入（带认证头的保活页）',
-  '--skip-urlencode': '注入值恒做 URL 编码；目标只在未编码形态下才透传到 SQL 时无法表达',
-  '--skip-xmlencode': 'XML/SOAP 注入值恒做实体编码；同上',
   '--csrf-data': '取 CSRF token 时的附加表单字段未暴露（多步令牌页）',
   '--csrf-retries': '取 token 失败的重试次数未暴露',
-  '--chunked': 'Transfer-Encoding: chunked 分块发送（绕 IDS/WAF 的常见形态）；httpClient 无分块发送路径',
+  // [D199 2026-11-04] 上四条缺口说明随实现落地作废（retry-on / skip-urlencode /
+  // skip-xmlencode / chunked）；保留空缺而不是留着「当前无」的过期描述。
   '--dbms-cred': 'DBMS 侧凭据（UDF/注册表操作的 EXECUTE AS 等）无入口',
   '--os': '强制目标 OS（影响文件路径与命令通道形态）；当前按 DBMS 推断，无显式覆盖',
   '--union-values': 'UNION 判真的自定义测试值未暴露（非常规字符集目标）',
@@ -399,19 +403,16 @@ export const NOTES = {
   '--abort-on-empty': '连续空结果即停（防无意义拖库）；当前只能靠 --max-requests 兜',
   '--binary-fields': '二进制列（图片/哈希）十六进制化导出未实现',
   '--check-internet': '开扫前连通性自检（区分「本机断网」与「目标不可达」）未实现',
-  '--crawl-exclude': '爬虫排除正则未暴露（登出链接/危险动作页必须能排掉）',
   '--csv-del': 'CSV 导出分隔符不可配（Excel 本地化场景）',
   '--charset': '注入值字符集约束（非 ASCII 目标）未暴露',
   '--dump-file': '拖库数据落盘路径不可单独指定（当前固定 dump.<ext>）',
   '--encoding': '页面编码显式声明（GBK/Shift-JIS 目标）未暴露；比对与提取当前按 UTF-8/自动',
   '--skip-heuristics': '本仓启发式（prefilter）默认关、--smart 才开；sqlmap 默认开、本项关 —— 同一开关的另一默认值',
-  '--skip-waf': '跳过 WAF 识别阶段未暴露（已知有 WAF 且只想省请求时）',
   '--table-prefix': 'Oracle/DB2 表前缀枚举参数未暴露',
   '--unsafe-naming': '拖库产物命名安全化开关未暴露（长尾）',
   '--web-root': '文件写用的 Web 根路径（写 webshell 落点）未暴露；当前要求绝对路径 --file-dest',
   '--ldap': 'LDAP 注入通道未实现（检测器 + payload 面；sqlmap 1.10 新增）',
   '--xpath': 'XPath 注入通道未实现（同上）',
-  '--alert': '命中即执行宿主命令（自动化联动/Slack 钩子）；需显式授权与命令白名单，不能静默执行',
   '--no-logging': '关闭日志落盘开关未暴露（当前恒写 ledger）',
   '--no-truncate': '报告长字段不截断开关未暴露（长 payload/长响应取证用）',
   '--unstable': '不稳定连接模式（弱网重试策略）未实现',
@@ -429,11 +430,8 @@ export const NOTES = {
 export const PLAN = [
   // [D250 2026-11-04 已落地] D198 组全部收口：--load-cookies/--live-cookies（D198）+
   // --cleanup/--purge（D250）。不再保留空组，否则产物里会出现「建议批次」躺在已完成项上。
-  {
-    batch: 'D199',
-    title: '协议形态与宿主钩子（WAF/IDS 绕过的收发形态 + 自动化入口）',
-    items: ['--chunked', '--skip-urlencode', '--skip-xmlencode', '--retry-on', '--crawl-exclude', '--skip-waf', '--alert'],
-  },
+  // [D199 2026-11-04 已落地] 协议形态与宿主钩子七件全部接线（STATUS 改 ok）；
+  // 不留空组，否则产物里会出现「建议批次」躺在已完成项上。
   // [D200 2026-11-04 已落地] 注册表面 7 项已接线（STATUS 改 ok），组内只剩 --dbms-cred（P3）
   // —— 并入 D204 长尾，不再单列批次。
   // [D201 2026-11-04 已落地] --http2/--http1/--null-connection 三项收口（STATUS 改 ok）；
@@ -777,7 +775,14 @@ function selftest() {
   const real = judgeParity();
   if (real.fails.length) bad.push(`真实底账自身不干净：${real.fails.slice(0, 5).join(' / ')}`);
   if (real.stats.total < 200) bad.push(`分母只剩 ${real.stats.total} 项 —— INVENTORY 可能被删空（sqlmap 1.10.7 实测 222）`);
-  if (real.stats.gapP1 < 1 || real.stats.gapP2 < 3) bad.push(`P1/P2 缺口计数异常（P1=${real.stats.gapP1} P2=${real.stats.gapP2}）—— 分类可能被清空`);
+  // [D199 2026-11-04 口径作废] 旧判据写死 `gapP1 >= 1 && gapP2 >= 3`，隐含假设
+  // 「永远至少有一个 P1 缺口」——但 D250 已把 P1 清零，收敛本身就是目标；该假设在
+  // 缺口真的收敛时会把自证判红（2026-11-04 实测：P1=0 P2=5 假红）。
+  // 换成结构性不变量：还有缺口、且三档之和必须等于缺口总数（分类被清空/漏记即红）。
+  const sumP = real.stats.gapP1 + real.stats.gapP2 + real.stats.gapP3;
+  if (real.stats.gap < 1 || sumP !== real.stats.gap) {
+    bad.push(`缺口分类计数异常（gap=${real.stats.gap}，P1+P2+P3=${sumP}）—— 分类可能被清空或漏记`);
+  }
   if (bad.length) {
     console.error('[sqlmap-parity] ✗ 自证失败：');
     for (const b of bad) console.error('    · ' + b);

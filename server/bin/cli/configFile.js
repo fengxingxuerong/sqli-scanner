@@ -62,6 +62,11 @@ export function buildKnownArgKeys(parseArgsFn) {
     'fetchUsing',
     // —— [D44] 主动 WAF 探测 ——
     'activeWafProbe',
+    // —— [D199 2026-11-04] 协议形态与宿主钩子六键 ——
+    // 四布尔 + 两正则串；均经受治出口/引擎消费，档案可预载。
+    // ⚠️ `alert` 刻意**不在此表**：宿主动作只认命令行字面量，一份外来 JSON 不能
+    // 触发本机命令（安全边界，见 cli/alert.js）。写进档案会被未知键硬拒。
+    'chunked', 'skipUrlencode', 'skipXmlencode', 'skipWaf', 'retryOn', 'crawlExclude',
     // —— [D46] 运维侦察枚举（-b/--statements/--procs）+ -U/--exclude 过滤 ——
     'banner', 'statements', 'procs', 'user', 'exclude',
     // —— [2026-10-12 §A2] 默认关通道组：旗标只开总开关，整组子键经档案透传 ——

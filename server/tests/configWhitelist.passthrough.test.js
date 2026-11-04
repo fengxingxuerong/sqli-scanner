@@ -71,6 +71,14 @@ const PROBE = {
   // [D50 2026-10-12] --fetch-using 探针值：枚举 gt|between，默认探针 1 过不了校验是
   // **正确行为**（非法值不静默回落 gt）。这里给合法值只测「透传在不在」。
   fetchUsing: 'between',
+  // [D199] 协议形态六键：布尔严格（1/"true" 会被入口拒绝，属正确行为）、
+  // 正则串给可编译的最小合法值，测的是「透传在不在」而非校验宽容度。
+  chunked: true,
+  skipUrlencode: true,
+  skipXmlencode: true,
+  skipWaf: true,
+  retryOn: '408|429',
+  crawlExclude: 'logout',
   // [P0 2026-09-09 实战批次] 新键探针值（默认探针 1 过不了键自身校验）
   invalidValue: 'bignum',
   knownPoint: { param: 'id' },

@@ -276,6 +276,9 @@ curl -X POST http://127.0.0.1:4567/api/scan/start \
 | `crawlForms` | bool（默认 false） | 解析页面表单生成 body 注入点 |
 | `wafEvasion` | object | `{ randomUA, obfuscate, jitterMs(0-5000), tamper: { enabled, plugins[], intensity: low/medium/high } }`；tamper 链按数组顺序应用 |
 | `skipStatic` | bool（默认 false） | 对标 sqlmap `--skip-static`：静态参数预筛选（同值去重 + 哨兵探测） |
+| `chunked` / `skipUrlencode` / `skipXmlencode` / `skipWaf` | bool（默认 false） | [D199] 协议形态四开关：分块发送 / 注入值不编码 / XML 值不转义 / 跳过 WAF 识别阶段。**只认真布尔**，`1`/`"true"` 会被入口拒绝（引擎按 `=== true` 判定，收下非布尔会造成「REST 收了却不生效」） |
+| `retryOn` | string，≤200，合法正则 | [D199] 状态码命中即重试（如 `"408\|429\|50[23]"`），复用 `retry` 余量；入口预编译，非法表达式拒绝启动 |
+| `crawlExclude` | string，≤500，合法正则 | [D199] 爬虫 URL 排除正则（如 `"logout\|admin"`）：命中的链接不入队、不取页 |
 | `prefilter` | bool（默认 true） | 参数预筛选（1-2 个廉价探测排除明显无注入点参数，省 50-75% 请求） |
 | `autoDynamicBlock` | bool（默认 true） | 对标 sqlmap 动态内容感知：基线两两分块比对标记高频差异块为动态块，后续相似度比对自动排除 |
 | `predictOutput` | bool（默认 true） | 对标 sqlmap `--predict-output`：同目标跨点复用常见值二分提取结果 |

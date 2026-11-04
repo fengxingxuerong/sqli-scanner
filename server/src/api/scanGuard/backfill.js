@@ -61,6 +61,12 @@ export function applyBackfill(config, cfg) {
     'testPath', 'testHeaders', 'noCast', 'unionFrom',
     // [D93] testParamNames：参数名注入点开关（严格布尔由引擎侧 `=== true` 判定，与 testPath 同族）
     'testParamNames',
+    // ⚠️ [D199 2026-11-04] 协议形态六键（chunked / skipUrlencode / skipXmlencode /
+    // skipWaf / retryOn / crawlExclude）**刻意不进此表**：它们在
+    // scalarsEgress.applyWireTogglesGuarded 有 bespoke 严格校验（布尔只认真布尔、
+    // 正则启动期预编译），与「任意标量宽松兜底」语义冲突 —— 实测把它们塞进来后，
+    // configDroppedKeys.warn.test.js 的「兜底键带数字 1 全部落地」不变式立刻被
+    // 严格校验的拒绝告警打破。白名单 + bespoke 透传已足够，无需第二份宽松路径。
   ]);
   for (const k of BACKFILL_SCALAR_KEYS) {
     if (!(k in cfg) || k in config) continue;

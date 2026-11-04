@@ -4,9 +4,27 @@
 // 自 httpClient.js 拆出（纯搬移）：由 HttpClient.prototype 挂载（this 语义不变）。
 // =====================================================================
 import { Agent as UndiciAgent, request as undiciRequest } from 'undici';
+import { Readable } from 'node:stream';
 import { defaults } from '../../config/defaults.js';
 import { logger } from '../logger.js';
 import { effectiveInsecureTls, effectiveClientCert, logSafeUrl } from './requestContext.js';
+
+/**
+ * [D199 对标 sqlmap --chunked] 请求体分块形态（抽成纯函数，零网络可验）：
+ * 仅「显式开关 + 非空字符串体」时把 body 换成 Readable 流并声明 Transfer-Encoding。
+ * 对象体由调用方序列化，不在此改道；GET/无体方法无效果；undici(h2) 通道原生分帧，
+ * 无此开关语义（边界见 --chunked 文档）。默认路径返回的仍是原对象引用，零行为变化。
+ * @param {object} opts 请求选项
+ * @param {unknown} data 请求体
+ * @param {object} headers 请求头
+ * @returns {{data: unknown, headers: object}}
+ */
+export function applyChunkedBody(opts, data, headers) {
+  const on = opts && opts.chunked === true && typeof data === 'string' && data.length > 0;
+  return on
+    ? { data: Readable.from(data), headers: { ...headers, 'Transfer-Encoding': 'chunked' } }
+    : { data, headers };
+}
 import { agentsForTls } from './agentFactory.js';
 import { loadClientCert } from './clientCert.js';
 import {
@@ -52,12 +70,17 @@ export async function _rawRequest(cfg, opts, headers, proxyConf, timeoutMs, disa
         : disableKA
           ? { httpAgent: false, httpsAgent: false }
           : {};
+    // [D199 对标 sqlmap --chunked] 请求体改流式 + 头部声明 chunked ⇒ node http 通道
+    // 以 Transfer-Encoding: chunked 发送（IDS/WAF 无法预读总长的收发形态）。
+    // 仅对字符串体生效（GET/无体方法无效果）；对象体先由调用方序列化，不在此改道。
+    // undici（h2）通道分帧原生流式，无此开关语义（边界见 --chunked 文档）。
+    const chunked = applyChunkedBody(opts, opts.data, headers);
     const res = await this.instance.request({
       method: opts.method || 'GET',
       url: opts.url,
       params: opts.params,
-      data: opts.data,
-      headers,
+      data: chunked.data,
+      headers: chunked.headers,
       timeout: timeoutMs,
       maxContentLength: maxBody,
       maxBodyLength: maxBody,

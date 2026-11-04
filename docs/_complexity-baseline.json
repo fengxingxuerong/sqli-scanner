@@ -260,19 +260,19 @@
       "limitLines": 100,
       "limitComplexity": 15
     },
-    "server/src/api/scanRoutes.js::<arrow@477>": {
+    "server/src/api/scanRoutes.js::<arrow@483>": {
       "lines": 68,
       "complexity": 34,
       "limitLines": 100,
       "limitComplexity": 15
     },
-    "server/src/api/scanRoutes.js::<arrow@620>": {
+    "server/src/api/scanRoutes.js::<arrow@626>": {
       "lines": 65,
       "complexity": 30,
       "limitLines": 100,
       "limitComplexity": 15
     },
-    "server/src/api/scanRoutes.js::<arrow@816>": {
+    "server/src/api/scanRoutes.js::<arrow@822>": {
       "lines": 27,
       "complexity": 26,
       "limitLines": 100,
@@ -405,8 +405,8 @@
       "limitComplexity": 15
     },
     "server/src/core/httpClient.js::HttpClient.request": {
-      "lines": 49,
-      "complexity": 23,
+      "lines": 47,
+      "complexity": 21,
       "limitLines": 100,
       "limitComplexity": 15
     },
@@ -716,12 +716,6 @@
       "limitLines": 100,
       "limitComplexity": 15
     },
-    "server/src/engine/crawler.js::LinkCrawler.crawl": {
-      "lines": 43,
-      "complexity": 19,
-      "limitLines": 100,
-      "limitComplexity": 15
-    },
     "server/src/engine/dbmsVersion.js::parseDbmsVersion": {
       "lines": 30,
       "complexity": 16,
@@ -891,8 +885,8 @@
       "limitComplexity": 15
     },
     "server/src/engine/injection.js::buildInjectionRequest": {
-      "lines": 150,
-      "complexity": 89,
+      "lines": 127,
+      "complexity": 81,
       "limitLines": 100,
       "limitComplexity": 15
     },
@@ -934,11 +928,11 @@
     },
     "server/src/engine/scan/detect.js::<arrow@299>": {
       "lines": 162,
-      "complexity": 80,
+      "complexity": 76,
       "limitLines": 100,
       "limitComplexity": 15
     },
-    "server/src/engine/scan/detect.js::<arrow@775>": {
+    "server/src/engine/scan/detect.js::<arrow@778>": {
       "lines": 79,
       "complexity": 28,
       "limitLines": 100,
@@ -946,7 +940,7 @@
     },
     "server/src/engine/scan/detect.js::detectPhase": {
       "lines": 446,
-      "complexity": 196,
+      "complexity": 192,
       "limitLines": 100,
       "limitComplexity": 15
     },
