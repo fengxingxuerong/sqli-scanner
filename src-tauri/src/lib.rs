@@ -15,6 +15,65 @@ use tauri_plugin_shell::ShellExt;
 // 子进程句柄（用于停止 sidecar）
 struct EngineChild(std::sync::Mutex<Option<CommandChild>>);
 
+/// [DATADIR-SHELL 2026-11-05] 计算 sidecar 的台账目录（纯函数，便于 `#[cfg(test)]` 断言）。
+///
+/// 分工：引擎侧已有 `--data-dir > SQLI_LEDGER_DIR > 形态默认` 的完整优先级链，壳**只负责
+/// 把变量递下去**，不重复实现判定。桌面形态下引擎的 exe 位于安装目录（Program Files 等
+/// 不可写位置），形态默认值会写失败，故壳显式给出可写位置。
+///
+/// 优先级：
+///   ① `user_set`（父进程已有 `SQLI_LEDGER_DIR`）—— 用户显式设置优先沿用，绝不覆盖；
+///   ② `%LOCALAPPDATA%\sqli-scanner`；
+///   ③ `<exe 目录>\data`（兜底：LOCALAPPDATA 取不到时）。
+fn ledger_dir_from(
+    user_set: Option<String>,
+    local_appdata: Option<String>,
+    exe_dir: Option<String>,
+) -> Option<String> {
+    if let Some(v) = user_set {
+        if !v.trim().is_empty() {
+            return Some(v);
+        }
+    }
+    if let Some(base) = local_appdata {
+        if !base.trim().is_empty() {
+            return Some(
+                std::path::Path::new(&base)
+                    .join("sqli-scanner")
+                    .to_string_lossy()
+                    .into_owned(),
+            );
+        }
+    }
+    exe_dir.map(|d| {
+        std::path::Path::new(&d)
+            .join("data")
+            .to_string_lossy()
+            .into_owned()
+    })
+}
+
+/// 读取本机环境并落日志（真正的 `env()` 调用在同名决策之后由 spawn_engine 完成）。
+fn ledger_dir_for_sidecar() -> Option<String> {
+    let user = std::env::var("SQLI_LEDGER_DIR")
+        .ok()
+        .filter(|s| !s.trim().is_empty());
+    let local_appdata = std::env::var("LOCALAPPDATA").ok();
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.to_string_lossy().into_owned()));
+    let value = ledger_dir_from(user.clone(), local_appdata.clone(), exe_dir);
+    match (&user, &local_appdata) {
+        (Some(_), _) => println!("[引擎] 沿用父进程已设置的 SQLI_LEDGER_DIR（不覆盖）"),
+        (None, Some(_)) => println!("[引擎] 台账目录：{:?}", value),
+        (None, None) => eprintln!(
+            "[引擎] 未取到 LOCALAPPDATA，台账目录退到 exe 同目录 data：{:?}",
+            value
+        ),
+    }
+    value
+}
+
 // [A3 2026-09-17] 引擎实连信息：(监听端口, 一次性 token)
 // 旧实现把端口写死 4567 且无鉴权：本机任何进程都能连上这个「能扫能拖库」的引擎，
 // 甚至可以先占 4567 冒充引擎（WebView 的 CSP 允许该 origin）截获目标 Cookie 与拖库结果。
@@ -83,6 +142,14 @@ fn spawn_engine(app: &tauri::AppHandle) {
             "ALLOWED_ORIGINS",
             "http://tauri.localhost,tauri://localhost",
         );
+
+    // [DATADIR-SHELL 2026-11-05] 台账目录：桌面壳的 exe 装在 Program Files 等只读位置，
+    // 引擎按形态默认会尝试写 `<exe 目录>/data/ledger` 而失败。这里显式递下 SQLI_LEDGER_DIR，
+    // 优先级与日志在 ledger_dir_for_sidecar 内（用户已设置则原样沿用）。
+    let cmd = match ledger_dir_for_sidecar() {
+        Some(dir) => cmd.env("SQLI_LEDGER_DIR", dir),
+        None => cmd,
+    };
 
     let (mut rx, child) = match cmd.spawn() {
         Ok(v) => v,
@@ -238,4 +305,67 @@ pub fn run() {
             }
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ledger_dir_from;
+    use std::path::Path;
+
+    // [DATADIR-SHELL 2026-11-05] 不启 GUI 的运行时验证：直接断言壳要递下去的取值。
+    // 覆盖优先级链的三档 + 空白值当未设置 + 全不可得时不注入。
+
+    #[test]
+    fn user_set_wins_and_is_not_overridden() {
+        let got = ledger_dir_from(
+            Some(r"D:\mine\ledger".to_string()),
+            Some(r"C:\Users\u\AppData\Local".to_string()),
+            Some(r"C:\Program Files\sqli".to_string()),
+        );
+        assert_eq!(got.as_deref(), Some(r"D:\mine\ledger"));
+    }
+
+    #[test]
+    fn falls_to_local_appdata_sqli_scanner() {
+        let got = ledger_dir_from(
+            None,
+            Some(r"C:\Users\u\AppData\Local".to_string()),
+            Some(r"C:\Program Files\sqli".to_string()),
+        );
+        let want = Path::new(r"C:\Users\u\AppData\Local")
+            .join("sqli-scanner")
+            .to_string_lossy()
+            .into_owned();
+        assert_eq!(got.as_deref(), Some(want.as_str()));
+    }
+
+    #[test]
+    fn falls_back_to_exe_dir_data_without_local_appdata() {
+        let got = ledger_dir_from(None, None, Some(r"C:\Program Files\sqli".to_string()));
+        let want = Path::new(r"C:\Program Files\sqli")
+            .join("data")
+            .to_string_lossy()
+            .into_owned();
+        assert_eq!(got.as_deref(), Some(want.as_str()));
+    }
+
+    #[test]
+    fn blank_values_are_treated_as_unset() {
+        let got = ledger_dir_from(
+            Some("   ".to_string()),
+            Some(String::new()),
+            Some(r"C:\opt\sqli".to_string()),
+        );
+        let want = Path::new(r"C:\opt\sqli")
+            .join("data")
+            .to_string_lossy()
+            .into_owned();
+        assert_eq!(got.as_deref(), Some(want.as_str()));
+    }
+
+    #[test]
+    fn nothing_available_means_no_injection() {
+        // 完全不注入时由引擎按形态默认值处理，壳不猜路径
+        assert_eq!(ledger_dir_from(None, None, None), None);
+    }
 }
