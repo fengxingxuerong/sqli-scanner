@@ -28,3 +28,15 @@ deliverables-demo/
 .box-agent*/
 .workbuddy/
 *.artifact.json
+# [ACCEPT 2026-11-05] 实测构建上下文 1.55GB，远程 daemon 在 COPY . . 卡死 >40min。
+# 以下均为运行产物/实验工装/备份，镜像构建不需要：
+.verify-labs/
+dist-portable/
+data/
+server/data/
+server/logs/
+server/dist-engine/
+**/*.log
+**/*.bak-*
+**/*.bak
+**/.git/
