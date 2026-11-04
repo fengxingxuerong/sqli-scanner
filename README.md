@@ -1,6 +1,6 @@
 # sqli-scanner
 
-[![Tests](https://img.shields.io/badge/tests-4711%20passing-brightgreen)](#测试)[![CI](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml/badge.svg)](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml)
+[![Tests](https://img.shields.io/badge/tests-4715%20passing-brightgreen)](#测试)[![CI](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml/badge.svg)](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml)
 [![Dependencies](https://img.shields.io/badge/prod%20deps-0%20known%20vulns-brightgreen)](SECURITY.md)
 
 > CI 徽章为真实状态（红绿以 GitHub Actions 实跑为准）。发布判定仍以 `CHANGELOG.md`
@@ -314,7 +314,7 @@ npm run quality:all     # 【门禁】一键全量质量校验（测试/覆盖�
 | 利用通道（**需 `--authorized` + `EXPLOIT_ENABLED=1`**） | `--os-cmd` `--os-shell` `--sql-shell` `--sql-file`（[D241] 从文件读 SQL，长脚本不必挤命令行；执行路径与 `--sql-shell` 完全一致，读失败即退出不降级为空串） `--udf-hex` `--udf-install` `--file-read` `--file-write` `--file-dest` `--driver` `--reg-read` `--reg-add` `--reg-del` `--reg-key` `--reg-value` `--reg-data` `--reg-type` `--cleanup`（按写副作用台账撤销本次利用的残留；SQL 类走 sql-shell、文件/注册表走 os-shell） |
 | 本地状态清理（**不要求 `-u`、不发包**） | `--purge`（删除本地台账根目录：扫描快照 + 写副作用 + `auth.jsonl` 审计，以及引擎日志；`reports/` 导出目录与 `--session-file` 不动。非交互必须 `--yes`） |
 | Windows 注册表面（[D200] 对标 sqlmap `--reg-*`，仅 MSSQL `xp_reg*`） | `--reg-read [key]`（读值，`xp_regread`）/ `--reg-add`（写值，需 `--reg-key`/`--reg-value`/`--reg-data`，`--reg-type` 默认 REG_SZ）/ `--reg-del`（删值，`xp_regdelete` 按值名、不可逆）。三操作旗标带值 = 键路径速记；REST 同名端点 `/api/exploit/reg-read|reg-add|reg-del`，写删与 os-shell 同档 destructive（显式 scope + `confirmDestructive:true`） |
-| 网络与协议 | `--proxy` `--proxy-bypass-local` `--no-proxy-bypass-local` `--insecure` `--rate` `--threads` `--retries` `--http-timeout` `--delay-sec` `--req-rate` `--max-requests` `--tor` `--check-tor` `--random-agent` `--force-ssl` `--ignore-redirects` `--hpp` `--no-keep-alive` `--drop-set-cookie` `--http2` `--http1` `--null-connection` |
+| 网络与协议 | `--proxy` `--proxy-bypass-local` `--no-proxy-bypass-local` `--insecure` `--rate` `--threads` `--retries` `--http-timeout` `--delay-sec` `--req-rate` `--max-requests` `--tor` `--check-tor` `--check-internet`（[D242] 开扫前 TCP 探 1.1.1.1:53 / 223.5.5.5:53，把「本机断网」与「目标不可达」分开；只警告不阻断） `--random-agent` `--force-ssl` `--ignore-redirects` `--hpp` `--no-keep-alive` `--drop-set-cookie` `--http2` `--http1` `--null-connection` |
 | 传输形态（[D201] 对标 sqlmap `--http2`/`--http1`/`--null-connection`） | `--http2`：首选 HTTP/2（undici ALPN，目标不支持自动降级 1.1），经受治出口清单生效——检测/提取/指纹/爬虫同一协议形态；`--http1`：显式只用 1.1（与 `--http2` 互斥，双给拒启）；`--null-connection`：布尔通道 HEAD 元数据快判（状态码/Content-Length 与基线可区分即出结论、省全正文传输；不可决自动落回 body 判定，不为提速牺牲检出） |
 | 强制面与编码（[D202] 对标 sqlmap） | `--os <windows\|linux>`：覆盖 UDF 平台与报告指纹标注；命令模板仍按 DBMS 推断（未做跨平台切换）。`--encoding <字符集>`：显式页面编码，覆盖 Content-Type/HTML meta 自动探测，经 egress 出口同源生效。`--charset <字符集>`：盲注字节提取的候选字符类区间，未命中回退全区间二分（默认行为不变）。`--fingerprint`：把已采集信号汇总成 `summary.fingerprint`，**不主动探测、未显式指定时不猜 OS**。REST 侧同名四键（`os`/`encoding`/`charset`/`fingerprint`）均严格校验 |
 | 协议形态与宿主钩子（[D199] 对标 sqlmap） | `--chunked`：请求体 `Transfer-Encoding: chunked` 分块发送（仅 HTTP/1.1 带体请求，h2 原生分帧无此语义）；`--skip-urlencode`：注入值不做百分号编码（自解码/二次解码网关；值里的 `&`/`#` 会改 query 结构，调用方自担）；`--skip-xmlencode`：XML/SOAP 注入值不做实体转义（默认转义保证 XML 结构完整）；`--skip-waf`：跳过 WAF 指纹识别/主动探测阶段（只省请求，检测中拦截判定与自适应重跑不变）；`--retry-on <正则>`：状态码命中即重试，复用 `--retries` 余量；`--crawl-exclude <正则>`：爬虫排除 URL（登出/危险动作页不入队不取页）；`--alert <命令>`：命中时执行宿主命令（**仅单目标模式**），只认命令行字面量，不进 `--config`/REST、不插值目标数据，命中条数与风险等级走 `SQLI_ALERT_FINDINGS` / `SQLI_ALERT_RISK` 环境变量 |
@@ -456,7 +456,7 @@ server/       ← Express + Node.js（后端，`server/index.js` 入口）
 # 前端测试（579 个用例）
 npm test
 
-# 服务端测试（4138 个用例）
+# 服务端测试（4142 个用例）
 cd server && npm test
 
 # 全部测试
@@ -482,7 +482,7 @@ npm run artifact:drift   # 入库的 e2e 基线产物必须等于当前代码跑
 
 - TypeScript: 零错误
 - 前端测试: 579/579 通过（覆盖率门禁 stmts 93.16 / branch 84.47 / func 80.63，阈值 88/77/67）
-- 服务端测试: 4138 用例（4132 pass / 0 fail / 6 skip，并发口径 2026-11-04 复测；6 skip 为环境依赖显式跳过。覆盖率 lines 90.89 / branch 79.29 / func 84.22，阈值 85/74/77）
+- 服务端测试: 4142 用例（4136 pass / 0 fail / 6 skip，并发口径 2026-11-04 复测；6 skip 为环境依赖显式跳过。覆盖率 lines 90.89 / branch 79.29 / func 84.22，阈值 85/74/77）
 - 一键扫描: `npm run scan -- -u <url>`（CLI 一条命令产出 HTML/JSON/Markdown 全套报告 + manifest，退出码可直接进 CI 门禁）
 - Tamper 插件: 234 个（含批次 D3 新增 scalarselectinline；含 v24 增量 20 个，对齐 sqlmap 官方 tamper 全集，含官方 CRS/libinjection 实测组合 uniontable+odbcbrace；含批次 D13 新增 5 件上游形态变体 *nospace/*open/*block，真机 A/B 判决前不进默认链）
 - WAF 绕过能力: 200+ 插件链式组合，覆盖 62 个 WAF 厂商指纹识别 + 推荐

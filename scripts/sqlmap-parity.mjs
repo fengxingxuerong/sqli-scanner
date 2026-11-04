@@ -286,7 +286,7 @@ export const STATUS = {
   '--base64-safe': 'ok:--tamper',
   '--batch': 'auto:CLI 无交互提问（非交互优先），「不提问」这件事天然成立；⚠ 本仓 --batch 是「批量目标文件」不是 sqlmap 的这个开关',
   '--binary-fields': 'gap:P3',
-  '--check-internet': 'gap:P3',
+  '--check-internet': 'ok',
   // [D250 2026-11-04 收口 D198] --cleanup / --purge 已落地（args.js 表驱动分支 +
   // cli.js 入口拦截），底账必须朝事实方向改：gap → ok。
   '--cleanup': 'ok',
@@ -406,7 +406,6 @@ export const NOTES = {
   '--udf-inject': '本仓要求自带 UDF 十六进制（--udf-hex）；不内置编译产物（GPLv2 与供应链边界）',
   '--abort-on-empty': '连续空结果即停（防无意义拖库）；当前只能靠 --max-requests 兜',
   '--binary-fields': '二进制列（图片/哈希）十六进制化导出未实现',
-  '--check-internet': '开扫前连通性自检（区分「本机断网」与「目标不可达」）未实现',
   '--csv-del': 'CSV 导出分隔符不可配（Excel 本地化场景）',
   '--dump-file': '拖库数据落盘路径不可单独指定（当前固定 dump.<ext>）',
   '--skip-heuristics': '本仓启发式（prefilter）默认关、--smart 才开；sqlmap 默认开、本项关 —— 同一开关的另一默认值',
@@ -440,7 +439,7 @@ export const PLAN = [
     title: '长尾 P3（按需；不与上面抢优先级，但都在底账里点名，不许「关起门来」）',
     items: [
       '--abort-code', '--ignore-timeouts', '--safe-post', '--safe-req', '--csrf-data', '--csrf-retries',
-      '--union-values', '--abort-on-empty', '--check-internet', '--csv-del', '--dump-file', '--table-prefix',
+      '--union-values', '--abort-on-empty', '--csv-del', '--dump-file', '--table-prefix',
       '--unsafe-naming', '--web-root', '--no-logging', '--no-truncate', '--comments', '--pivot-column',
       '--common-files', '--binary-fields', '--proxy-file', '--proxy-freq', '--tor-type', '-v',
       '--dbms-cred',

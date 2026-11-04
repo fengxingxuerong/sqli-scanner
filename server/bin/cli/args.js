@@ -173,6 +173,8 @@ function applyFlagFamily(a, args, next) {
  */
 function parseMiscArg(a, args, next) {
   if (a === '--sql-file') { args.sqlFile = next(); return true; }
+  // [D242 对标 sqlmap --check-internet] 开扫前本机联网自检（区分「本机断网」与「目标不可达」）
+  if (a === '--check-internet') { args.checkInternet = true; return true; }
   return false;
 }
 
@@ -239,7 +241,7 @@ export function parseArgs(argv, preset) {
     crawlBrowser: false,
     // [批次14 实战 P1-6] 登录编排：登录页 URL（默认 null 关闭；凭据复用 --auth）
     loginUrl: null, loginUserField: null, loginPassField: null,
-    checkTor: false,   // 对标 sqlmap --check-tor：校验 Tor 出口后继续
+    checkTor: false, checkInternet: false,   // 对标 sqlmap --check-tor / --check-internet
     // —— 攻击操作（对标 sqlmap --os-cmd/--sql-shell/--file-read/--file-write；需 EXPLOIT_ENABLED=1）——
     osCmd: null, sqlShell: null, sqlFile: null, fileRead: null, fileWrite: null, fileDest: null,
     // —— 强制 DBMS / 二阶触发页 / 授权声明 ——

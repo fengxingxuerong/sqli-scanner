@@ -4,15 +4,15 @@
   "sqlmapVersion": "1.10.7",
   "stats": {
     "total": 222,
-    "ok": 124,
+    "ok": 125,
     "alias": 31,
     "part": 9,
     "auto": 3,
-    "gap": 26,
+    "gap": 25,
     "out": 29,
     "gapP1": 0,
     "gapP2": 0,
-    "gapP3": 26
+    "gapP3": 25
   },
   "groups": [
     {
@@ -1317,11 +1317,11 @@
         },
         {
           "opt": "--check-internet",
-          "kind": "gap",
+          "kind": "ok",
           "ours": null,
-          "priority": "P3",
+          "priority": null,
           "reason": null,
-          "note": "开扫前连通性自检（区分「本机断网」与「目标不可达」）未实现"
+          "note": null
         },
         {
           "opt": "--cleanup",
@@ -1890,7 +1890,6 @@
         "--csrf-retries",
         "--union-values",
         "--abort-on-empty",
-        "--check-internet",
         "--csv-del",
         "--dump-file",
         "--table-prefix",

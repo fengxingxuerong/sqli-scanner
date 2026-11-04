@@ -17,6 +17,8 @@ import { Exploiter } from '../src/engine/Exploiter.js';
 import { httpClient } from '../src/core/httpClient.js';
 // [D240 对标 sqlmap -t] 原始流量落盘（旁路；扫描主流程可选启用）
 import { enableTrafficLog } from '../src/core/http/trafficLog.js';
+// [D242 对标 sqlmap --check-internet] 本机联网自检（只警告不阻断）
+import { probeInternet } from '../src/core/netProbe.js';
 // [P1-FIX 2026-09-05] --format 出口：原为死参数（解析后从未消费，-o 恒写 JSON）。
 // ReportGenerator 的 toCSV/toMarkdown/toHTML 与 REST /report/export 同源，直接复用。
 import { ReportGenerator } from '../src/services/ReportGenerator.js';
@@ -742,14 +744,27 @@ function applySqlFile(args) {
 }
 
 /**
- * 扫描前准备（[D240]/[D241]）：把「一次性的开关生效」都收在这里，
+ * [D242 对标 sqlmap --check-internet] 本机联网自检。
+ * 只警告不阻断：内网/离线靶场本来就访问不了公网，阻断会把正常场景判死。
+ * @returns {Promise<void>}
+ */
+async function checkInternet() {
+  const r = await probeInternet();
+  if (r.ok) return;
+  console.error(`  [preflight] ⚠ 本机疑似断网（${r.tried.join(' / ')} 均不可达）——`
+    + '目标若报不可达，先排除本机网络，别当成「目标没洞」或「目标已下线」');
+}
+
+/**
+ * 扫描前准备（[D240]/[D241]/[D242]）：把「一次性的开关生效」都收在这里，
  * 避免 main 继续增长（它的行数与圈复杂度都贴基线）。
  * @param {any} args CLI 参数
- * @returns {void}
+ * @returns {Promise<void>}
  */
-function prepareScan(args) {
+async function prepareScan(args) {
   setupTrafficLog(args);
   applySqlFile(args);
+  if (args.checkInternet) await checkInternet();
 }
 
 async function main() {
@@ -764,8 +779,8 @@ async function main() {
     console.error(`[cli] ${e?.message || e}`);
     process.exit(2);
   }
-  // [D240/D241] 扫描前准备（流量落盘 / --sql-file 读文件）：判断都在函数内，不给 main 加分支
-  const args = parseArgs(argvAll, preset); prepareScan(args);
+  // [D240-D242] 扫描前准备（流量落盘 / --sql-file / 联网自检）：判断都在函数内，不给 main 加分支
+  const args = parseArgs(argvAll, preset); await prepareScan(args);
   // [D41] --save-config：把本次实际生效的参数增量（相对内置默认）落盘，然后照常继续扫描。
   if (args.saveConfigFile) {
     try {

@@ -407,6 +407,10 @@ export const HELP_TEXT = `sqli-scanner CLI（对标 sqlmap 的 Node 引擎命令
   --skip-static             跳过静态参数预筛
   --tor                     走 Tor（默认 socks5://127.0.0.1:9050）
   --check-tor               先校验 Tor 出口（请求 check.torproject.org 确认匿名化生效）再扫描
+  --check-internet          开扫前做本机联网自检（[D242] 对标 sqlmap --check-internet）：TCP 探
+                            1.1.1.1:53 / 223.5.5.5:53，任一通即有网。**只警告不阻断**（内网/离线
+                            靶场本来就出不去）。用途：把「本机断网」与「目标不可达」分开——
+                            否则两者在日志里都是同一个 ECONNREFUSED
   --mobile                  随机移动端 UA 池（对标 sqlmap --mobile）
   --random-agent            每次请求随机 UA（桌面 + 移动全池，对标 sqlmap --random-agent）
   --param-del <c>           自定义参数分隔符（对标 sqlmap --param-del）：默认 &，用于 a=1;b=2 这类站点
