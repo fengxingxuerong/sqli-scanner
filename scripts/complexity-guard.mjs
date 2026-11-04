@@ -114,7 +114,7 @@ function loadBaseline() {
  * @param {Record<string,object>} base 基线条目
  * @returns {Record<string,string>} 实测键 → 基线键 的映射（仅匿名函数、仅唯一特征匹配）
  */
-function remapArrowKeys(measured, base) {
+export function remapArrowKeys(measured, base) {
   const ARROW = /^(.*)::<arrow@\d+>$/;
   const byFile = new Map();
   for (const [key, m] of Object.entries(measured)) {

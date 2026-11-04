@@ -98,14 +98,23 @@ test('形态-6) 基线文件存在且结构合法（门禁不得因基线缺失�
 
 test('形态-7) 基线里的每项都应被当前仓库"测到"（防基线虚高）', async () => {
   const b = JSON.parse(repo('docs/_complexity-baseline.json'));
-  const { measureFunctions } = await import('../../scripts/complexity-guard.mjs');
+  const { measureFunctions, remapArrowKeys } = await import('../../scripts/complexity-guard.mjs');
+  // [D244] 匿名函数的键带行号（`<arrow@N>`），**在其前面插入任何注释/空行都会漂移**。
+  // guard 内部用 remapArrowKeys 处理这件事（D217），但本测试此前直接按基线键精确匹配
+  // ⇒ guard 绿、测试红，把「行号漂移」误报成「基线腐烂」（D243 实测：插 17 行触发 3 个键）。
+  // 现在测试与 guard 同口径：先全量度量，再用同一份重映射把基线键解析到当前实测键。
+  const files = [...new Set(Object.keys(b.functions).map((k) => k.slice(0, k.lastIndexOf('::'))))];
+  const measuredAll = measureFunctions(files);
+  const remap = remapArrowKeys(measuredAll, b.functions);
+  // remap 的方向是「实测键 → 基线键」，这里反过来查
+  const actualKeyOf = new Map(Object.entries(remap).map(([m, bk]) => [bk, m]));
   let checked = 0;
+  let remapped = 0;
   for (const [key, d] of Object.entries(b.functions)) {
-const sep = key.lastIndexOf('::');
-    const file = key.slice(0, sep);
-    const measured = measureFunctions([file]);
-    const m = measured[key];
+    const actualKey = actualKeyOf.get(key) || key;
+    const m = measuredAll[actualKey];
     assert.ok(m, `${key}：基线里有但当前代码测不到 —— 函数可能已改名或删除（基线腐烂）`);
+    if (actualKey !== key) remapped++;
     assert.ok(m.lines <= d.lines,
       `${key}：基线记 ${d.lines} 行，实际 ${m.lines} 行 —— 基线虚高（可下调）`);
     assert.ok(m.complexity <= d.complexity,
@@ -113,4 +122,31 @@ const sep = key.lastIndexOf('::');
     checked++;
   }
   assert.ok(checked > 0, '应至少校验一项');
+  // 重映射是「按 (行数, 圈复杂度) 唯一匹配」，正常仓库里应当能解析掉那些漂移的匿名键。
+  // 不断言 remapped > 0（某次重构后行号可能恰好没漂），只在它非零时留痕便于排查。
+  if (remapped > 0) console.log(`[形态-7] 匿名函数键重映射 ${remapped} 个（行号漂移免疫）`);
+});
+// [D244] 形态-7 依赖 remapArrowKeys 才能免疫行号漂移。这里独立钉住它的三条边界，
+// 防止 guard 侧把它改坏（比如放宽成「按序号对齐」）而测试跟着错。
+test('形态-7b) remapArrowKeys：唯一特征匹配才映射，歧义/变差都不映射', async () => {
+  const { remapArrowKeys } = await import('../../scripts/complexity-guard.mjs');
+  const base = { 'a.js::<arrow@10>': { lines: 120, complexity: 18 } };
+  // 特征一致 ⇒ 映射（行号漂移可解析）
+  assert.deepEqual(
+    remapArrowKeys({ 'a.js::<arrow@20>': { lines: 120, complexity: 18 } }, base),
+    { 'a.js::<arrow@20>': 'a.js::<arrow@10>' }
+  );
+  // 特征变了（变差）⇒ 不映射：不能因为「都是同一个箭头」就放行
+  assert.deepEqual(
+    remapArrowKeys({ 'a.js::<arrow@20>': { lines: 121, complexity: 18 } }, base),
+    {}
+  );
+  // 歧义（同文件两个同特征匿名函数）⇒ 不映射：宁可误报，不静默错配
+  assert.deepEqual(
+    remapArrowKeys({
+      'a.js::<arrow@20>': { lines: 120, complexity: 18 },
+      'a.js::<arrow@30>': { lines: 120, complexity: 18 },
+    }, base),
+    {}
+  );
 });
