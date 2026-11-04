@@ -362,6 +362,9 @@ export const HELP_TEXT = `sqli-scanner CLI（对标 sqlmap 的 Node 引擎命令
   --udf-hex <src>           UDF 十六进制投放（MSSQL 用；写入目标文件后 CREATE FUNCTION）
   --udf-install             UDF 一键安装（写入 + 建函数 + 调用，需 --udf-hex）
   --sql-shell <sql>         执行任意 SQL
+  --sql-file <file>         从文件读 SQL 再执行（[D241] 对标 sqlmap --sql-file）：长脚本/多语句
+                            不必挤在一行命令行里；读出的内容走与 --sql-shell 完全相同的执行路径
+                            （同样需 --authorized + EXPLOIT_ENABLED=1）。读失败直接退出，不降级为空串
   --file-read <path>        读取目标文件
   --file-write <content>    写入目标文件（需配合 --file-dest <远程路径>）
   --file-dest <path>        --file-write 的远程目标路径

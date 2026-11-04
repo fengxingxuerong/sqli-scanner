@@ -159,7 +159,21 @@ const OPTIONAL_VALUE_FLAGS = new Map([
  */
 function applyFlagFamily(a, args, next) {
   if (applyChannelFlag(a, args)) return true;
-  return parseTrafficArg(a, args, next);
+  if (parseTrafficArg(a, args, next)) return true;
+  return parseMiscArg(a, args, next);
+}
+
+/**
+ * [D241 对标 sqlmap --sql-file] 长尾小旗标族：从文件读 SQL 再执行。
+ * 与 `--sql-shell` 的差别只在来源（文件 vs 命令行串），执行路径完全复用。
+ * @param {string} a 当前参数
+ * @param {any} args 累积结果
+ * @param {() => string} next 取下一个参数
+ * @returns {boolean} 是否已消费该参数
+ */
+function parseMiscArg(a, args, next) {
+  if (a === '--sql-file') { args.sqlFile = next(); return true; }
+  return false;
 }
 
 /**
@@ -227,7 +241,7 @@ export function parseArgs(argv, preset) {
     loginUrl: null, loginUserField: null, loginPassField: null,
     checkTor: false,   // 对标 sqlmap --check-tor：校验 Tor 出口后继续
     // —— 攻击操作（对标 sqlmap --os-cmd/--sql-shell/--file-read/--file-write；需 EXPLOIT_ENABLED=1）——
-    osCmd: null, sqlShell: null, fileRead: null, fileWrite: null, fileDest: null,
+    osCmd: null, sqlShell: null, sqlFile: null, fileRead: null, fileWrite: null, fileDest: null,
     // —— 强制 DBMS / 二阶触发页 / 授权声明 ——
     dbms: null, secondOrderUrl: null, authorized: false,
     // [D42 2026-10-11 对标 sqlmap] --second-req：二阶触发页从抓包请求文件导入（整请求形态）

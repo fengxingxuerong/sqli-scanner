@@ -243,7 +243,7 @@ export const STATUS = {
   '--last': 'ok:--stop',
   '--sql-query': 'ok:--sql-shell',
   '--sql-shell': 'ok',
-  '--sql-file': 'gap:P3',
+  '--sql-file': 'ok',
 
   // ── Brute force ────────────────────────────────────────────────────────────
   '--common-tables': 'ok',
@@ -402,7 +402,6 @@ export const NOTES = {
   '--all': '--dump-all 覆盖全库拖库；sqlmap -a 还含 users/passwords/privileges 一次拉全',
   '--comments': '表/列注释枚举（MSSQL/MySQL 的 pg_description 类面）未实现',
   '--pivot-column': '关联表拖库时的主键列指定未实现',
-  '--sql-file': '从文件读 SQL 再执行（长脚本/多语句）；当前只能内联 --sql-shell 串',
   '--common-files': '常见文件名字典爆破（LOAD_FILE 路径面）未实现',
   '--udf-inject': '本仓要求自带 UDF 十六进制（--udf-hex）；不内置编译产物（GPLv2 与供应链边界）',
   '--abort-on-empty': '连续空结果即停（防无意义拖库）；当前只能靠 --max-requests 兜',
@@ -443,7 +442,7 @@ export const PLAN = [
       '--abort-code', '--ignore-timeouts', '--safe-post', '--safe-req', '--csrf-data', '--csrf-retries',
       '--union-values', '--abort-on-empty', '--check-internet', '--csv-del', '--dump-file', '--table-prefix',
       '--unsafe-naming', '--web-root', '--no-logging', '--no-truncate', '--comments', '--pivot-column',
-      '--sql-file', '--common-files', '--binary-fields', '--proxy-file', '--proxy-freq', '--tor-type', '-v',
+      '--common-files', '--binary-fields', '--proxy-file', '--proxy-freq', '--tor-type', '-v',
       '--dbms-cred',
       '--unstable',
     ],

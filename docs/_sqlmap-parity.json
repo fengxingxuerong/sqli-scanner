@@ -4,15 +4,15 @@
   "sqlmapVersion": "1.10.7",
   "stats": {
     "total": 222,
-    "ok": 123,
+    "ok": 124,
     "alias": 31,
     "part": 9,
     "auto": 3,
-    "gap": 27,
+    "gap": 26,
     "out": 29,
     "gapP1": 0,
     "gapP2": 0,
-    "gapP3": 27
+    "gapP3": 26
   },
   "groups": [
     {
@@ -1047,11 +1047,11 @@
         },
         {
           "opt": "--sql-file",
-          "kind": "gap",
+          "kind": "ok",
           "ours": null,
-          "priority": "P3",
+          "priority": null,
           "reason": null,
-          "note": "从文件读 SQL 再执行（长脚本/多语句）；当前只能内联 --sql-shell 串"
+          "note": null
         }
       ]
     },
@@ -1900,7 +1900,6 @@
         "--no-truncate",
         "--comments",
         "--pivot-column",
-        "--sql-file",
         "--common-files",
         "--binary-fields",
         "--proxy-file",

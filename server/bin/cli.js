@@ -724,6 +724,34 @@ function setupTrafficLog(args) {
   }
 }
 
+/**
+ * [D241 对标 sqlmap --sql-file] 从文件读 SQL 再执行：读出的内容直接落成 `args.sqlShell`
+ * 字符串，复用既有 exploit 分支（`typeof sqlShell === 'string'`），不新增执行路径。
+ * 读失败**直接退出**而不是降级成空串 —— 空 SQL 打到目标上等于「什么都没做却报成功」。
+ * @param {any} args CLI 参数（读 sqlFile，写 sqlShell）
+ * @returns {void}
+ */
+function applySqlFile(args) {
+  if (!args.sqlFile) return;
+  try {
+    args.sqlShell = readFileSync(args.sqlFile, 'utf8');
+  } catch (e) {
+    console.error(`  [exploit] 读取 SQL 文件失败：${args.sqlFile}（${e?.message || e}）`);
+    process.exit(2);
+  }
+}
+
+/**
+ * 扫描前准备（[D240]/[D241]）：把「一次性的开关生效」都收在这里，
+ * 避免 main 继续增长（它的行数与圈复杂度都贴基线）。
+ * @param {any} args CLI 参数
+ * @returns {void}
+ */
+function prepareScan(args) {
+  setupTrafficLog(args);
+  applySqlFile(args);
+}
+
 async function main() {
   // [D41 2026-10-11] --config 预扫：档案值作为参数底（argv 显式开关仍优先）。
   // 预扫必须在 parseArgs 之前 —— preset 要在 parseArgs 内部合并进 args 底。
@@ -736,8 +764,8 @@ async function main() {
     console.error(`[cli] ${e?.message || e}`);
     process.exit(2);
   }
-  // [D240] 原始流量落盘：判断放在 setupTrafficLog 内（不给 main 加分支），调用与上一句同行
-  const args = parseArgs(argvAll, preset); setupTrafficLog(args);
+  // [D240/D241] 扫描前准备（流量落盘 / --sql-file 读文件）：判断都在函数内，不给 main 加分支
+  const args = parseArgs(argvAll, preset); prepareScan(args);
   // [D41] --save-config：把本次实际生效的参数增量（相对内置默认）落盘，然后照常继续扫描。
   if (args.saveConfigFile) {
     try {
