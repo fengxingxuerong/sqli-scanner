@@ -78,7 +78,7 @@
 - `e2e/detect-surface-lab` 32 条用例里 **10 条**走真 `-r` 入口，全部 `verdict=no-report`；
   其中 5 条安全对照因「0 检出」被记成 **安全误报 5** ⇒ 该靶场判红（`exit 1`）。
   真正原因是入口坏了，报告写的却是「引擎误报」。
-- 提交版 `e2e/detect-surface-lab/results/summary.json`（2026-10-25）里这 10 条是 `ok=true` ——
+- `e2e/detect-surface-lab/results/summary.json`（2026-10-25 那次运行的落盘记录；运行时产物不入库，见 `results/.gitignore`）里这 10 条是 `ok=true` ——
   **10-25 之前 `-r` 是好的**，回归确实发生在 D176（10-26）之后。
 - 文档宣传口径「对标 sqlmap -r 导入抓包」当前**不可用**。
 
