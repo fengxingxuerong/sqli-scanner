@@ -5,6 +5,25 @@
 
 ---
 
+## 2026-11-04 批次 D251 · pre-commit 三道门禁接进收口（43→49 项）（已完成，见 CHANGELOG）
+
+**起点**：D202 提交时 `gate:close` 43/43 全绿、pre-commit 却因 `error-contract-guard`
+抓出 5 处裸 Error 而红。逐项对账 `.husky/pre-commit` 的 13 道门禁后发现缺口不止一道：
+`error-contract` / `module-loadable` / `version-sync` 三道都只在钩子与 CI 跑；
+`version-sync` 连 `ci-local.mjs` 也缺。这是「门禁只活在别处」的第 4 次重演。
+
+**交付**：
+1. `gate-list.mjs` 表驱动接进三道 + 各自证（6 项，43→49），避免同构字面量推高
+   duplication 基线；`gate-close.mjs` 自证 must 名单同步（删任一项即红）。
+2. `ci-local.mjs` 补 `version-sync` 两条，`gateListWiring.guard.test.js` 三向核对成立。
+3. AGENTS.md 沿革/手写清单/漏项次数、ci.yml 注释、质量台账（49 项）、CHANGELOG 同步。
+
+**验证**：gate:close --selftest 通过（49 项）、三向核对 4/4、`npm run gate:close` 49/49。
+
+**边界**：不改判据阈值、不抬基线；CI 的 cargo / coverage / 靶场重活不进收口清单属有意分工。
+
+---
+
 ## 2026-11-04 批次 D202 · 强制面与编码四项（缺口 33→30）（已完成，见 CHANGELOG）
 
 **起点**：底账 D202 组——`--os`(P2) / `--encoding`(P2) / `--charset`(P3) 零入口，

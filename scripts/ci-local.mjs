@@ -199,6 +199,10 @@ const GATES = [
     // readme:selftest 此前只在 CI 有、ci-local 缺 —— 同族缺口，一并补齐（D223 顺手）。
     ['CLI 旗标覆盖判据自证（README/help 双向核对）', 'node scripts/readme-flag-coverage.mjs --selftest'],
     ['README 口径判据自证（方言分层三处）', 'node scripts/readme-consistency.mjs --selftest'],
+    // [D251 2026-11-04] version-sync 此前只在 ci.yml 与 pre-commit 跑，ci-local 缺：
+    // 接进收口清单后会被 gateListWiring 的三向核对判红，补成两侧对称。
+    ['版本号三处一致自证（构造样本必须反应）', 'node scripts/version-sync.mjs --selftest'],
+    ['版本号三处一致', 'node scripts/version-sync.mjs'],
   ].map(([name, cmd]) => ({ id: 'lint', name, cmd })),
   { id: 'lint', name: 'cargo fmt --check', cmd: 'cd src-tauri && cargo fmt --check' },
   { id: 'lint', name: 'cargo clippy -D warnings', cmd: 'cd src-tauri && cargo clippy -- -D warnings' },

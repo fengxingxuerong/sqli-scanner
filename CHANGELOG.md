@@ -7,13 +7,14 @@
 > 下一批次起的条目写在这里。发版时把本节整体升为 `## [x.y.z] - YYYY-MM-DD` 并补汇总段。
 
 <!-- changelog-index:start -->
-**本段覆盖 27 个批次（D228–D202，2026-11-01 → 2026-11-04）**。正文按时间倒序排列；
+**本段覆盖 28 个批次（D228–D251，2026-11-01 → 2026-11-04）**。正文按时间倒序排列；
 下表是同一批次的索引，便于按编号或关键词定位。**索引只是导航，正文未做任何删改**
 （被推翻的旧结论原样保留，这是本仓的既定口径）。新增批次后跑
 `node scripts/changelog-index.mjs --write` 重生成，`--check` 校验是否过期。
 
 | 批次 | 日期 | 主题 |
 |---|---|---|
+| D251 | 11-04 | pre-commit 三道门禁接进收口（43→49 项） |
 | D202 | 11-04 | 强制面与编码四项（缺口 33→30） |
 | D199 | 11-04 | 协议形态与宿主钩子七件（缺口 40→33） |
 | D201 | 11-04 | 传输形态收口：`--http2` 检测链路接通 + `--http1` 互斥 + `--null-connection` 快判相位（缺口 43→40） |
@@ -42,6 +43,33 @@
 | D229 | 11-01 | 交付闸收口：P0-3 卡顿修复（haystack 先截后拼）+ ai-gateway 断言去模型依赖 |
 | D228 | 11-01 | AI 报告网关端到端验收（ai-gateway 套件）+ 本地网关 runbook + CI 靶场硬要求扩展 |
 <!-- changelog-index:end -->
+
+### 2026-11-04 批次 D251 · pre-commit 三道门禁接进收口（43→49 项）
+
+**动机**：D202 提交时 `gate:close` 43/43 全绿，却在 pre-commit 被 `error-contract-guard`
+拦下（新文件 `forcedSurfaces.js` 5 处裸 Error）。这是「门禁只活在别处」的第 4 次重演
+（前有 D95 e2e:wiring、D145 greenguard、D249 arch:guard）。顺着这条线把
+`.husky/pre-commit` 的 13 道门禁与 `gate-list.mjs` 逐项对账，发现**不止一道**：
+`error-contract` / `module-loadable` / `version-sync` 三道都只在钩子与 CI 跑，
+收口清单里没有；其中 `version-sync` 连 `ci-local.mjs` 都缺，与 ci.yml 不对称。
+
+**交付**：
+
+1. `scripts/lib/gate-list.mjs` 用表驱动一次接进三道 + 各自 `--selftest`（6 项，43→49）；
+   不写 6 条同构对象字面量，避免 duplication 基线上涨（D223 实测过的形态）。
+2. `scripts/gate-close.mjs` 的 selftest `must` 名单与「每道门禁都要自证」循环同步，
+   任一被删即红；`scripts/ci-local.mjs` 补 `version-sync` 的 check + selftest，
+   使 `gateListWiring.guard.test.js` 的三向核对（gate-list ⊆ ci.yml ∩ ci-local）成立。
+3. 文档同步：AGENTS.md 项数沿革 43→49、手写清单补预提交三道、「已漏八次」→九次；
+   `ci.yml` 注释里的「37 项」标为 D223 当时口径；`docs/质量台账.md` 由脚本重生成（49 项）。
+
+**结果**：`node scripts/gate-close.mjs --selftest` 通过（清单 49 项、wiring 75 文件、
+关键项齐全）；三向核对单测 `gateListWiring.guard.test.js` 4/4；`npm run gate:close`
+**49/49**（2026-11-04 18:57 本机实测，含新增 6 项；表驱动接线未推高 duplication 基线）。
+补记结果段后复跑同为 49/49。
+
+**诚实边界**：本批只解决「本地收口看不见这些门禁」，**不改任何判据阈值、不抬基线**；
+CI 里的 cargo / coverage / 靶场验收等重活仍不在收口清单，那是有意分工而非缺口。
 
 ### 2026-11-04 批次 D202 · 强制面与编码四项（缺口 33→30）
 

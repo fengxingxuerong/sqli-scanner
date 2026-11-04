@@ -30,6 +30,16 @@ export function wiringTestFiles(root) {
 
 const SLOW = new Set(['lint', 'typecheck']);
 
+// [D251 2026-11-04] pre-commit 里三道「只活在别处」的门禁：此前只在
+// `.husky/pre-commit` 与 CI 跑，收口清单里没有。D202 提交时 error-contract 抓出
+// 5 处裸 Error，而 gate:close 43/43 全绿 —— 与 D95/D145/D249 同一形态的第 4 次重演。
+// 一次补齐三道 + 各自证，别等下一位接手者逐个踩。脚本名不统一，用映射表而非拼串。
+const PRECOMMIT_ONLY = [
+  ['error-contract', 'scripts/error-contract-guard.mjs'],
+  ['module-loadable', 'scripts/module-loadable.mjs'],
+  ['version-sync', 'scripts/version-sync.mjs'],
+];
+
 /**
  * 收口清单。顺序按「快 → 慢」，失败即停（与 CI 的 bash -e 语义一致）。
  * @param {{root: string, quick?: boolean}} opts 仓库根与 quick 开关
@@ -46,6 +56,12 @@ export function closeGateList({ root, quick = false }) {
     // 与 D145 的 greenguard 同一形态：门禁只活在别处 ⇒ 收口看不见。接进收口 + 判据自证。
     { name: 'arch', cmd: ['node', 'scripts/arch-guard.mjs'] },
     { name: 'arch:selftest', cmd: ['node', 'scripts/arch-guard.mjs', '--selftest'] },
+    // [D251] 表驱动而非 6 条同构对象字面量：逐条展开会让 duplication-guard 的
+    // 令牌窗口重复计数上涨（D223 已实测过同一形态），本仓基线是「只减不增」。
+    ...PRECOMMIT_ONLY.flatMap(([name, script]) => [
+      { name, cmd: ['node', script] },
+      { name: `${name}:selftest`, cmd: ['node', script, '--selftest'] },
+    ]),
     { name: 'readme', cmd: ['node', 'scripts/readme-consistency.mjs'] },
     { name: 'readme:selftest', cmd: ['node', 'scripts/readme-consistency.mjs', '--selftest'] },
     { name: 'flag:selftest', cmd: ['node', 'scripts/readme-flag-coverage.mjs', '--selftest'] },

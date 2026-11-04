@@ -276,7 +276,7 @@ jobs:
       - run: node scripts/readme-flag-coverage.mjs --selftest
         name: CLI 旗标覆盖判据自证（README/help 双向核对）
       # ── [D223 2026-10-31] 收口清单 ↔ CI 接线补齐 ───────────────────────────────
-      # 动机：`scripts/lib/gate-list.mjs` 是收口清单的单一真源（37 项），但**没有任何判据**
+      # 动机：`scripts/lib/gate-list.mjs` 是收口清单的单一真源（D223 当时 37 项，D251 起 49 项），但**没有任何判据**
       # 要求清单里的每一项在 CI / ci-local 里被执行过。实测（2026-10-31）：其中 8 个
       # 门禁脚本 **CI 与 ci-local 两侧都没有** —— 于是 `quality-ledger --check` 在 HEAD 上
       # 红了整整一天（docs/质量台账.md 快照停在 10-30，_facts.json 已重采到 10-31）却没人
