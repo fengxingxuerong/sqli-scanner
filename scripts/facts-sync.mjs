@@ -94,7 +94,12 @@ function run(cmd, cwd) {
 }
 
 function collectFrontend({ coverage }) {
-  const out = run(`npx vitest run${coverage ? ' --coverage' : ''}`, ROOT);
+  // [FIX 2026-11-04] 不走 npx：Windows 上 npx 经 cmd shim 派生，实测本机导致 esbuild 服务被中断
+  //（"The service is no longer running" / vitest worker "Zone Allocation failed"）——同一套测试
+  // 用 node 直跑本地 bin 则 69 files / 579 tests 稳定通过。采集语义不变，只是不再经过 shim。
+  // --no-file-parallelism 同步显式传入：覆盖率 + 文件并行在本机会让单 worker 内存爆掉。
+  const vitestBin = resolve(ROOT, 'node_modules/vitest/vitest.mjs');
+  const out = run(`node "${vitestBin}" run${coverage ? ' --coverage' : ''} --no-file-parallelism`, ROOT);
   const files = out.match(/Test Files\s+(\d+)\s+passed/);
   // vitest 的汇总行有两种词序，且**失败数排在前面**：
   //   全绿：  Tests  452 passed (452)
@@ -146,7 +151,12 @@ function collectServer({ coverage }) {
   // 走管道时输出的是 spec 格式（`ℹ tests 1885`）→ 本地跑 --refresh 必失败（数字采集器在自己
   // 机器上取不到数，等于没有）。同一台机器上「上一次能解析、下一次不能」的不确定性也一并消除。
   const script = coverage ? 'test:coverage:report' : 'test';
-  const runOnce = () => run(`npm run ${script} -- --test-reporter=tap`, resolve(ROOT, 'server'));
+  // [FIX 2026-11-04] 不走 npm run（同样经 cmd shim 派生；本机实测 npx/npm 派生的子进程会被中断）。
+  // 直接取 package.json 里的真实命令（`node --env-file… --test …`）执行，判定与阈值来源不变。
+  const serverPkg = JSON.parse(readFileSync(resolve(ROOT, 'server/package.json'), 'utf8'));
+  const baseCmd = serverPkg.scripts[script];
+  if (!baseCmd) throw new Error(`server/package.json 缺 ${script}`);
+  const runOnce = () => run(`${baseCmd} --test-reporter=tap`, resolve(ROOT, 'server'));
   let out = runOnce();
   const pick = (key) => {
     const m = out.match(new RegExp(`^# ${key} (\\d+)$`, 'm'));
