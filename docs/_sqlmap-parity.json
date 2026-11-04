@@ -4,14 +4,14 @@
   "sqlmapVersion": "1.10.7",
   "stats": {
     "total": 222,
-    "ok": 121,
+    "ok": 123,
     "alias": 30,
     "part": 9,
     "auto": 3,
-    "gap": 30,
+    "gap": 28,
     "out": 29,
     "gapP1": 0,
-    "gapP2": 3,
+    "gapP2": 1,
     "gapP3": 27
   },
   "groups": [
@@ -1586,11 +1586,11 @@
         },
         {
           "opt": "--ldap",
-          "kind": "gap",
+          "kind": "ok",
           "ours": null,
-          "priority": "P2",
+          "priority": null,
           "reason": null,
-          "note": "LDAP 注入通道未实现（检测器 + payload 面；sqlmap 1.10 新增）"
+          "note": null
         },
         {
           "opt": "--nosql",
@@ -1602,11 +1602,11 @@
         },
         {
           "opt": "--xpath",
-          "kind": "gap",
+          "kind": "ok",
           "ours": null,
-          "priority": "P2",
+          "priority": null,
           "reason": null,
-          "note": "XPath 注入通道未实现（同上）"
+          "note": null
         },
         {
           "opt": "--ssti",
@@ -1910,14 +1910,6 @@
         "-v",
         "--dbms-cred",
         "--unstable"
-      ]
-    },
-    {
-      "batch": "D203",
-      "title": "非 SQL 通道补齐（LDAP / XPath 注入检测器）",
-      "items": [
-        "--ldap",
-        "--xpath"
       ]
     }
   ]

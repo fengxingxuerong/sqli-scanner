@@ -69,6 +69,12 @@ export const HELP_TEXT = `sqli-scanner CLI（对标 sqlmap 的 Node 引擎命令
                              此前 UI/REST 可达而 CLI 完全无入口（连 --config 档案都被未知键硬拒）。
                              子键（noSql.kinds / noSql.concurrency）走 --config 档案：
                              {"noSql":{"enabled":true,"kinds":["nosql"]}}
+  --ldap                     [D203] 开启 LDAP 注入检测（非 SQL 补充趟，收窄 noSql.kinds=['ldap']，默认关）。
+                             过滤器真/假条件对 + 二次确认；不做「解析报错即漏洞」的弱判据。
+                             与 --no-sql 同给时以显式选中的类别为准；档案可写 {"noSql":{"enabled":true,"kinds":["ldap"]}}
+  --xpath                    [D203] 开启 XPath 注入检测（同上，收窄 noSql.kinds=['xpath']，默认关）。
+                             字符串闭合 / 节点轴 union 两类真/假探针，复用 NoSQL 通道的误报防线。
+                             两个旗标同给则两类都跑；对外结论须带「无真靶场 A/B」边界
   --oob                      [2026-10-12 §A2] 开启 OOB 带外通道接收端（默认关；即使 --technique 含 oob，
                              接收端不起也拿不到回调 —— defaults.js:292 明示）。子键走 --config 档案：
                              {"oob":{"enabled":true,"callbackBase":"your.domain:8899","dnsOob":true,"dnsDomain":"your.domain"}}

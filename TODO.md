@@ -5,6 +5,27 @@
 
 ---
 
+## 2026-11-04 批次 D203 · 非 SQL 通道补齐（LDAP / XPath）（缺口 30→28）（已完成，见 CHANGELOG）
+
+**起点**：底账 D203 组两项 P2 gap（检测器 + payload 面零实现）；原有非 SQL 补充趟只有
+nosql / graphql / ssti 三类。
+
+**交付**：
+1. `LDAP_FILTER_PROBES` / `XPATH_PROBES` 两表（primary + confirm 真/假对）；
+   `_detectBooleanProbes` 从 NoSQL 抽出成单源，新 `LdapXpathInjectionDetector` 继承复用，
+   `supplementalRuns._runNoSql` 按 kind 分派 —— 默认 kinds 不变，默认行为零变化。
+2. `--ldap` / `--xpath` 三入口（CLI / `--config` / REST `noSql.kinds` 白名单），
+   旗标语义为收窄 kinds，不新增顶层配置组。
+3. 15 条守卫测试；help / README / api.md / user-guide（旗标数 179→181）/ 底账同步。
+
+**验证**：新增 15/15、NoSQL 与配置回归 70/70；底账 `--check`/`--selftest`/`--write` 绿，
+缺口 30→28（P2 3→1）；`npm run gate:close` 49/49。
+
+**诚实边界**：仅单元级桩靶场，无 LDAP 目录服务 / XPath 真机 A/B；底账记 `ok` 只指
+入口与检测器已存在，不得外推检出率或「与 sqlmap 语义等价」。
+
+---
+
 ## 2026-11-04 批次 D251 · pre-commit 三道门禁接进收口（43→49 项）（已完成，见 CHANGELOG）
 
 **起点**：D202 提交时 `gate:close` 43/43 全绿、pre-commit 却因 `error-contract-guard`

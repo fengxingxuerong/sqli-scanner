@@ -203,7 +203,8 @@ export function guardNoSql(config, cfg) {
     config.noSql = {
       enabled: !!ns.enabled,
       kinds: Array.isArray(ns.kinds)
-        ? ns.kinds.filter((k) => typeof k === 'string' && ['nosql', 'graphql', 'ssti'].includes(k))
+        // [D203] ldap / xpath 复用同一补充趟编排，只是探测表不同（见 LdapXpathInjectionDetector）。
+        ? ns.kinds.filter((k) => typeof k === 'string' && ['nosql', 'graphql', 'ssti', 'ldap', 'xpath'].includes(k))
         : defaults.noSql.kinds,
       // [2026-09-24] 本组此前整键漏转发 concurrency：ScanManager.js:633 读
       // `Number(noSql.concurrency) || 2`，而 sanitizeStart 只重建 {enabled, kinds} ⇒

@@ -14,6 +14,8 @@ import { hasBoundedMatch } from '../../core/boundedMatch.js';
 //   - nosql：MongoDB 运算符注入（$gt/$ne/$where/$regex/$in/$nin/$exists/$type），布尔差异判定
 //   - graphql：内省/字段别名/批处理/循环查询探测（__schema/__typename 回显）
 //   - ssti：多模板引擎注入（Jinja2/FreeMarker/Velocity/ERB/Thymeleaf/通用），表达式求值回显
+// [D203] ldap / xpath 两类由子类 LdapXpathInjectionDetector 复用本类的
+// `_detectBooleanProbes` 骨架（同一套误报防线），不另写一份判定。
 //
 // 判定升级（对标经典布尔盲注统计思路，保持轻量）：
 //   - 内容差异判定（真/假响应有实质内容差异，且与基线可区分），剔除纯长度噪声
@@ -93,15 +95,18 @@ export class NoSqlInjectionDetector extends Detector {
   }
 
   /**
-   * MongoDB 运算符注入：按成本升序遍历操作符矩阵（$gt/$ne 优先，命中即停），
-   * 每组先发 primary 真/假，内容差异命中后再发 confirm 等价真/假做二次确认。
+   * [D203] 布尔差异判定骨架：NoSQL / LDAP / XPath 三类共用。
+   * probes 每条含 primary/confirm 的 true|false；build 把「原值 + 条件片段」拼成
+   * 完整 payload；label 进 evidence，kind 进 result.noSqlKind。抽成单源是为了让新通道
+   * 不必复制这段 30 行判定（duplication 基线只减不增），也避免两套判据悄悄分叉。
+   * 与抽离前的 _detectNosql 逐值等价：同样的失败重试、内容差异、基线区分、二次确认。
    */
-  async _detectNosql(ctx, point, baseBody, result) {
+  async _detectBooleanProbes(ctx, point, baseBody, result, probes, build, label, kind) {
     const { httpClient, target } = ctx;
     const orig = point.originalValue || '1';
-    for (const probe of NOSQL_OPERATOR_PROBES) {
-      const pTrue = this._nosqlPayload(orig, probe.primary.true);
-      const pFalse = this._nosqlPayload(orig, probe.primary.false);
+    for (const probe of probes) {
+      const pTrue = build(orig, probe.primary.true);
+      const pFalse = build(orig, probe.primary.false);
       // 失败样本不参与判定：单边失败会把「超时」误读成「真条件返回空」⇒ 直接误报。
       const t = await this._sendBody(httpClient, ctx, target, point, pTrue);
       if (t === null) continue;                       // 重发仍失败 → 跳过本探针
@@ -112,8 +117,8 @@ export class NoSqlInjectionDetector extends Detector {
       if (!this._contentDiff(tBody, fBody)) continue;
       if (!this._distinctFromBase(tBody, fBody, baseBody)) continue;
       // 二次确认：换一组等价 payload（同操作符、不同取值），两次一致才报
-      const cTrue = this._nosqlPayload(orig, probe.confirm.true);
-      const cFalse = this._nosqlPayload(orig, probe.confirm.false);
+      const cTrue = build(orig, probe.confirm.true);
+      const cFalse = build(orig, probe.confirm.false);
       const ct = await this._sendBody(httpClient, ctx, target, point, cTrue);
       if (ct === null) continue;
       const cf = await this._sendBody(httpClient, ctx, target, point, cFalse);
@@ -122,12 +127,21 @@ export class NoSqlInjectionDetector extends Detector {
       return this._hit(
         result,
         point,
-        'nosql',
-        `NoSQL 运算符注入（${probe.name}）：真/假响应内容差异，二次确认一致（真长 ${tBody.length} ≠ 假长 ${fBody.length}，基线 ${baseBody.length}）`,
+        kind,
+        `${label}（${probe.name}）：真/假响应内容差异，二次确认一致（真长 ${tBody.length} ≠ 假长 ${fBody.length}，基线 ${baseBody.length}）`,
         [pTrue, pFalse, cTrue, cFalse]
       );
     }
     return result;
+  }
+
+  /** MongoDB 运算符注入：按成本升序遍历操作符矩阵（$gt/$ne 优先，命中即停）。 */
+  async _detectNosql(ctx, point, baseBody, result) {
+    return this._detectBooleanProbes(
+      ctx, point, baseBody, result,
+      NOSQL_OPERATOR_PROBES, (orig, op) => this._nosqlPayload(orig, op),
+      'NoSQL 运算符注入', 'nosql'
+    );
   }
 
   /**

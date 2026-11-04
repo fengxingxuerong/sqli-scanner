@@ -69,6 +69,25 @@ export function applyChannelFlag(a, args) {
   if (a === '--confirm-form-writes') { args.confirmFormWrites = true; return true; }
   // [D202 对标 sqlmap --fingerprint] 报告级指纹汇总（只汇总已采集信号，不做主动探测）
   if (a === '--fingerprint') { args.fingerprint = true; return true; }
+  // [D203] 新旗标走独立子函数：本函数圈复杂度已到新代码软上限 15，
+  // 再加两个 if 会顶破（complexity-guard 实测 17）。委托而非新增分支，
+  // 既不抬基线也不改 parseArgs 的主链。
+  return applyNonSqlKindFlag(a, args);
+}
+
+/**
+ * [D203 2026-11-04] 非 SQL 通道的 LDAP / XPath 两类（对标 sqlmap --ldap / --xpath）。
+ * 与 --no-sql 同族，作用是**收窄** noSql.kinds 到所选类别，不是新增顶层配置组。
+ * 旗标用「token 与旗标字符串做字面量比较」的形态，cliFlags()/readme-flag-coverage
+ * 才能扫到（⑰ 双向核对）。⚠ 别在注释里写这种比较的示例：扫描器按源码文本取旗标，
+ * 注释里的示例串会被当成真旗标（D95 记过同一形态的假阳性，本批实测又撞上一次）。
+ * @param {string} a 当前 token
+ * @param {any} args 累积中的参数对象
+ * @returns {boolean} 是否已被本族消费
+ */
+function applyNonSqlKindFlag(a, args) {
+  if (a === '--ldap') { args.ldap = true; return true; }
+  if (a === '--xpath') { args.xpath = true; return true; }
   return false;
 }
 
@@ -198,7 +217,7 @@ export function parseArgs(argv, preset) {
     // 走 --config 档案整组透传（见 buildConfig 的 patchGroup 分支）。
     // [D197 2026-10-30 对标 sqlmap] HTTP 出口形态（引擎已实现，见 applyChannelFlag 注释）：
     // --no-keep-alive / --drop-set-cookie —— 并入上一行以保住 parseArgs 的行数基线
-    noSql: false, oob: false, disableKeepAlive: false, dropSetCookie: false,
+    noSql: false, ldap: false, xpath: false, oob: false, disableKeepAlive: false, dropSetCookie: false,
     // 内部：从请求文件解析出的 header 对象（buildAuth 直接使用）
     headerObj: null,
     // 无法识别的开关收集在此（不再静默忽略）：告警见循环末尾，硬拒见 unknownFlagError()

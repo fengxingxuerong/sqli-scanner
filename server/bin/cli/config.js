@@ -304,6 +304,13 @@ function applyLoginAndTechnique(config, args) {
 function applyChannelToggles(config, args) {
   if (args.noSql === true) patchGroup(config, 'noSql', { enabled: true });
   else if (args.noSql && typeof args.noSql === 'object') patchGroup(config, 'noSql', args.noSql);
+  // [D203] --ldap / --xpath 把非 SQL 通道收窄到显式选中的类别（argv > 档案 > 默认）：
+  // 两个同给则两类都跑；与 --no-sql 同给时以本次选中的类别为准（flags 后写覆盖 kinds）。
+  // 只开总开关会连同默认的 nosql/graphql/ssti 一起跑，对 LDAP/XPath 目标是纯噪声请求。
+  const channelKinds = [];
+  if (args.ldap === true) channelKinds.push('ldap');
+  if (args.xpath === true) channelKinds.push('xpath');
+  if (channelKinds.length) patchGroup(config, 'noSql', { enabled: true, kinds: channelKinds });
   if (args.oob === true) patchGroup(config, 'oob', { enabled: true });
   else if (args.oob && typeof args.oob === 'object') patchGroup(config, 'oob', args.oob);
   // [D87] --oob-interactsh：外部协作端隧道。开总开关 + interactsh 子开关；

@@ -85,7 +85,7 @@ node server/bin/cli.js -u "http://target/login" --method POST \
 
 ## 四、关键配置项
 
-> **本节只讲最常用的配置**；**CLI 的全部 179 个解析分支开关**（另有表驱动旗标）见 README 的「CLI 能力速查（按用途分组）」
+> **本节只讲最常用的配置**；**CLI 的全部 181 个解析分支开关**（另有表驱动旗标；[D203] 新增 `--ldap` / `--xpath` 两项，开启 LDAP / XPath 注入检测通道，默认关，语义见 README「LDAP / XPath 注入通道」行）见 README 的「CLI 能力速查（按用途分组）」
 > 或直接 `node server/bin/cli.js --help`（两者由 `npm run readme:check` 的 ⑯/⑰ 判据钉死一致）。
 > ⚠️ 本文件是**上手指南**，不承担参数全表的职责——全表在 README，这里不重复（避免两处漂移）。
 >

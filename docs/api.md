@@ -295,7 +295,7 @@ curl -X POST http://127.0.0.1:4567/api/scan/start \
 | `matchTitle` | bool | 对标 sqlmap `--titles`：真假 `<title>` 不同即信号 |
 | `blindRobust` | object | 统计判定分支参数：`{enabled, booleanSamples(1-10), baselineSamples(1-20), timeConfidenceZ(0-5), minStableRatio(0-1), adaptive, concurrency(1-16)}`；详见 `defaults.js` |
 | `secondOrder` | object | 二阶注入参数：`{enabled, triggerUrls[], cookieParams}` |
-| `noSql` | object | 非 SQL 注入（NoSQL/GraphQL/SSTI）：`{enabled, kinds['nosql','graphql','ssti']}` |
+| `noSql` | object | 非 SQL 注入补充趟：`{enabled, kinds, concurrency}`；[D203] `kinds` 白名单扩为 `['nosql','graphql','ssti','ldap','xpath']`，`ldap`/`xpath` 走独立探测器但复用同一布尔差异判定与结果聚合 |
 | `extractConcurrency` | 1-16（默认 4） | 盲注二分提取并发度 |
 | `dumpMaxRows` | 1-50000（默认 50000） | 全量拖库行数上限 |
 | `dumpRowLimit` | 1-1000（默认 100） | 单次拖库行数（分页续拉） |

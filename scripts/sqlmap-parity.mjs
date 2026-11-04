@@ -329,8 +329,11 @@ export const STATUS = {
   '--graphql': 'ok:--no-sql',
   '--nosql': 'ok:--no-sql',
   '--ssti': 'ok:--no-sql',
-  '--ldap': 'gap:P2',
-  '--xpath': 'gap:P2',
+  // [D203 2026-11-04] 两项已落地：同名旗标 + 独立探测器（复用非 SQL 补充趟的
+  // 布尔差异判定骨架）+ payload 面。边界见 README「LDAP / XPath 注入通道」行：
+  // 仅单元级模拟靶场验证，无 LDAP 目录服务 / XPath 真机 A/B，不得外推检出率。
+  '--ldap': 'ok',
+  '--xpath': 'ok',
 
   // ── Miscellaneous ──────────────────────────────────────────────────────────
   // [D199] 边界：仅单目标模式触发（批量 results 摘要形态未接）；命令只认 argv 字面量，
@@ -411,8 +414,6 @@ export const NOTES = {
   '--table-prefix': 'Oracle/DB2 表前缀枚举参数未暴露',
   '--unsafe-naming': '拖库产物命名安全化开关未暴露（长尾）',
   '--web-root': '文件写用的 Web 根路径（写 webshell 落点）未暴露；当前要求绝对路径 --file-dest',
-  '--ldap': 'LDAP 注入通道未实现（检测器 + payload 面；sqlmap 1.10 新增）',
-  '--xpath': 'XPath 注入通道未实现（同上）',
   '--no-logging': '关闭日志落盘开关未暴露（当前恒写 ledger）',
   '--no-truncate': '报告长字段不截断开关未暴露（长 payload/长响应取证用）',
   '--unstable': '不稳定连接模式（弱网重试策略）未实现',
@@ -448,12 +449,8 @@ export const PLAN = [
       '--unstable',
     ],
   },
-  // [D202 2026-11-04 已落地] 强制面四项全部接线（STATUS 改 ok）；不留空组。
-  {
-    batch: 'D203',
-    title: '非 SQL 通道补齐（LDAP / XPath 注入检测器）',
-    items: ['--ldap', '--xpath'],
-  },
+  // [D202/D203 2026-11-04 已落地] 强制面四项、非 SQL 的 LDAP/XPath 两项
+  // 全部接线（STATUS 改 ok）；已完成的组撤编，不留空组。
 ];
 
 /** 状态码 → 中文标签（报告与 JSON 共用，避免两处各译一遍）。 */
