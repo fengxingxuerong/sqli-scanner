@@ -15,6 +15,8 @@ import { sanitizeForTerminal } from '../src/core/terminalSafe.js';
 // 攻击操作（对标 sqlmap --os-cmd/--sql-shell/--file-read/--file-write）：复用引擎 Exploiter
 import { Exploiter } from '../src/engine/Exploiter.js';
 import { httpClient } from '../src/core/httpClient.js';
+// [D240 对标 sqlmap -t] 原始流量落盘（旁路；扫描主流程可选启用）
+import { enableTrafficLog } from '../src/core/http/trafficLog.js';
 // [P1-FIX 2026-09-05] --format 出口：原为死参数（解析后从未消费，-o 恒写 JSON）。
 // ReportGenerator 的 toCSV/toMarkdown/toHTML 与 REST /report/export 同源，直接复用。
 import { ReportGenerator } from '../src/services/ReportGenerator.js';
@@ -703,6 +705,25 @@ async function runSideEffectsSubcommand(argvRaw) {
   process.exit(2);
 }
 
+/**
+ * [D240 对标 sqlmap -t/--traffic-file] 开启原始流量落盘。
+ * 启用失败**不阻断扫描**：流量文件是旁路审计能力，扫描结果比审计文件重要；
+ * 但失败要在 stderr 可见（否则用户以为开了、其实一条没记）。
+ * @param {any} args CLI 参数（读 trafficFile / trafficMaxBody）
+ * @returns {void}
+ */
+function setupTrafficLog(args) {
+  if (!args.trafficFile) return;
+  try {
+    const t = enableTrafficLog(args.trafficFile, {
+      maxBody: Number.isFinite(args.trafficMaxBody) ? args.trafficMaxBody : undefined,
+    });
+    console.error(`  [traffic] 原始流量落盘：${t.file}（单条 body 上限 ${t.maxBody || '不限'} 字节；文件含完整请求头，按凭据文件保管）`);
+  } catch (e) {
+    console.error(`  [traffic] 开启失败（继续扫描）：${args.trafficFile}（${e?.message || e}）`);
+  }
+}
+
 async function main() {
   // [D41 2026-10-11] --config 预扫：档案值作为参数底（argv 显式开关仍优先）。
   // 预扫必须在 parseArgs 之前 —— preset 要在 parseArgs 内部合并进 args 底。
@@ -715,7 +736,8 @@ async function main() {
     console.error(`[cli] ${e?.message || e}`);
     process.exit(2);
   }
-  const args = parseArgs(argvAll, preset);
+  // [D240] 原始流量落盘：判断放在 setupTrafficLog 内（不给 main 加分支），调用与上一句同行
+  const args = parseArgs(argvAll, preset); setupTrafficLog(args);
   // [D41] --save-config：把本次实际生效的参数增量（相对内置默认）落盘，然后照常继续扫描。
   if (args.saveConfigFile) {
     try {

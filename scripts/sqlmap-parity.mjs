@@ -368,7 +368,7 @@ export const STATUS = {
   '-o': 'ok:--predict-output',
   '-p': 'ok:--test-param',
   '-s': 'part:--session-file',
-  '-t': 'gap:P2',
+  '-t': 'ok:--traffic-file',
   '-v': 'gap:P3',
   '-z': 'out:sqlmap 助记符缩写语法；本仓要求显式长旗标（可读与可审计优先）',
   '-hh': 'out:本仓 --help 即全量清单，不分基础/高级两段',
@@ -419,7 +419,6 @@ export const NOTES = {
   '--unstable': '不稳定连接模式（弱网重试策略）未实现',
   '-c': '档案格式为 JSON（键=长旗标名）；不支持 sqlmap 的 INI(`sqlmap.conf`) 语法',
   '-s': '会话是 JSON 台账（断点续跑语义一致），不读写 sqlmap 的 SQLite 会话文件',
-  '-t': '原始 HTTP 流量全量落盘（复现与审计）未实现：当前只有结构化 ledger + 报告，无法回放原始报文',
   '-v': '日志详细度无 CLI 开关（级别走环境变量/配置），与 sqlmap -v 0-6 的逐级详细度不对位',
 };
 
@@ -444,7 +443,7 @@ export const PLAN = [
       '--abort-code', '--ignore-timeouts', '--safe-post', '--safe-req', '--csrf-data', '--csrf-retries',
       '--union-values', '--abort-on-empty', '--check-internet', '--csv-del', '--dump-file', '--table-prefix',
       '--unsafe-naming', '--web-root', '--no-logging', '--no-truncate', '--comments', '--pivot-column',
-      '--sql-file', '--common-files', '--binary-fields', '--proxy-file', '--proxy-freq', '--tor-type', '-t', '-v',
+      '--sql-file', '--common-files', '--binary-fields', '--proxy-file', '--proxy-freq', '--tor-type', '-v',
       '--dbms-cred',
       '--unstable',
     ],

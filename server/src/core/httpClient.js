@@ -36,6 +36,8 @@ import { defaults } from '../config/defaults.js';
 import { ErrorCode, AppError } from './errors.js';
 // [P1-2026-09-14] NTLM 三步握手（对标 sqlmap --auth-type=NTLM）：Type1 → Type2(challenge) → Type3
 import { NtlmHandshake } from './ntlmHandshake.js';
+// [D240 对标 sqlmap -t/--traffic-file] 原始流量落盘（旁路；未启用时只多一次布尔判断）
+import { recordTraffic } from './http/trafficLog.js';
 // [大文件二期拆分 2026-09-14] SSRF/代理/一次性日志已抽至 core/http/ 下独立模块；
 // 下方 re-export 保证既有 import 路径不变（外部模块与测试仍可从 httpClient.js 取到这些符号）。
 import {
@@ -122,6 +124,23 @@ import { _beforeAttempt, _onRequestError, _sleep } from './http/retry.js';
 import { compileRetryOn, shouldRetryOnStatus } from './http/retryOn.js';
 import { attachNetworkTiming } from './http/responseTiming.js';
 export { dnsCache, EXTRACT_MAX_BODY_BYTES, MAX_BODY_BYTES };
+
+/**
+ * 把出口语义写进响应元数据（非枚举，与 `__networkMs` 同款口径）。
+ * 抽成模块级函数的原因：`HttpClient.request` 已贴行数基线，原 5 行内联块
+ * 加上流量落盘钩子就会超（门禁要求「先拆」，不是抬基线）。
+ * @param {any} res 响应对象
+ * @param {{insecureTls: boolean, viaProxy: boolean, proxySource?: string|null}} egress 出口策略
+ * @returns {void}
+ */
+function attachEgressMeta(res, egress) {
+  if (!res || typeof res !== 'object') return;
+  attachResMeta(res, {
+    insecureTls: egress.insecureTls,
+    viaProxy: egress.viaProxy,
+    ...(egress.viaProxy ? { proxySource: egress.proxySource } : {}),
+  });
+}
 
 export class HttpClient {
   /**
@@ -281,13 +300,10 @@ export class HttpClient {
         attachNetworkTiming(res, t0Net);
         // [P1-FIX ④] 出口语义写进响应元数据（与 __networkMs 同样非枚举）：
         // 上层/报告据此标注「本次扫描未校验证书」「响应被截断」「流量经代理」，检测判定不变。
-        if (res && typeof res === 'object') {
-          attachResMeta(res, {
-            insecureTls: egress.insecureTls,
-            viaProxy: egress.viaProxy,
-            ...(egress.viaProxy ? { proxySource: egress.proxySource } : {}),
-          });
-        }
+        attachEgressMeta(res, egress);
+        // [D240] 原始流量落盘（旁路）：只记最终一次往返 —— 重定向中间跳与重试失败轮不在内，
+        // 口径与理由见 core/http/trafficLog.js 头注释。未启用时 recordTraffic 首行即返回。
+        recordTraffic(opts, res, headers);
         return res;
       } catch (err) {
         lastErr = err;

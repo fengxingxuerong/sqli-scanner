@@ -5,13 +5,13 @@
   "stats": {
     "total": 222,
     "ok": 123,
-    "alias": 30,
+    "alias": 31,
     "part": 9,
     "auto": 3,
-    "gap": 28,
+    "gap": 27,
     "out": 29,
     "gapP1": 0,
-    "gapP2": 1,
+    "gapP2": 0,
     "gapP3": 27
   },
   "groups": [
@@ -1844,11 +1844,11 @@
         },
         {
           "opt": "-t",
-          "kind": "gap",
-          "ours": null,
-          "priority": "P2",
+          "kind": "alias",
+          "ours": "--traffic-file",
+          "priority": null,
           "reason": null,
-          "note": "原始 HTTP 流量全量落盘（复现与审计）未实现：当前只有结构化 ledger + 报告，无法回放原始报文"
+          "note": null
         },
         {
           "opt": "-v",
@@ -1906,7 +1906,6 @@
         "--proxy-file",
         "--proxy-freq",
         "--tor-type",
-        "-t",
         "-v",
         "--dbms-cred",
         "--unstable"

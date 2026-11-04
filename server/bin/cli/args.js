@@ -148,6 +148,35 @@ const OPTIONAL_VALUE_FLAGS = new Map([
   ['--charset', 'charset'],
 ]);
 
+/**
+ * [D240] 旗标族统一入口：通道总开关（D87）+ 原始流量落盘（D240）。
+ * 为什么合成一个函数而不是在 parseArgs 里写 `a || b`：**`||` 在复杂度门禁里也算一个分支**，
+ * 并列两个族会让 parseArgs 的圈复杂度 +1（基线是棘轮，只许持平或变浅）。
+ * @param {string} a 当前 token
+ * @param {any} args 累积结果
+ * @param {() => string} next 取下一个参数
+ * @returns {boolean} 是否已被消费
+ */
+function applyFlagFamily(a, args, next) {
+  if (applyChannelFlag(a, args)) return true;
+  return parseTrafficArg(a, args, next);
+}
+
+/**
+ * [D240 对标 sqlmap -t/--traffic-file] 解析「原始流量落盘」两旗标。
+ * 抽成独立函数的原因：parseArgs 已贴行数与复杂度基线，直接加两条 `else if` 就超
+ * （门禁口径是「先拆，不许抬基线」）。本函数对不匹配的参数只做两次字符串比较。
+ * @param {string} a 当前参数
+ * @param {any} args 累积结果
+ * @param {() => string} next 取下一个参数
+ * @returns {boolean} 是否已消费该参数
+ */
+function parseTrafficArg(a, args, next) {
+  if (a === '-t' || a === '--traffic-file') { args.trafficFile = next(); return true; }
+  if (a === '--traffic-max-body') { args.trafficMaxBody = Number(next()); return true; }
+  return false;
+}
+
 export function parseArgs(argv, preset) {
   /** @type {any} */
   const args = {
@@ -204,10 +233,10 @@ export function parseArgs(argv, preset) {
     // [D42 2026-10-11 对标 sqlmap] --second-req：二阶触发页从抓包请求文件导入（整请求形态）
     secondReq: null,
     // [D42 2026-10-11 对标 sqlmap] --ignore-code / --randomize / --dump-format / --verify
-    ignoreCode: null, randomize: null, dumpFormat: null, extractVerify: null,
+    // [D240 2026-11-04 对标 sqlmap -t] 同组：原始 HTTP 流量落盘（trafficFile / trafficMaxBody）
+    ignoreCode: null, randomize: null, dumpFormat: null, extractVerify: null, trafficFile: null, trafficMaxBody: null,
     // [D50 2026-10-12] --fetch-using：盲注提取比较算子（gt|between，默认 gt）
-    fetchUsing: null,
-    dumpAll: false, identifyWaf: false, commonTables: null, commonColumns: null,
+    dumpAll: false, identifyWaf: false, commonTables: null, commonColumns: null, fetchUsing: null,
     randomAgent: false, where: null, paramDel: null,
     // [2026-10-12 优化空间勘查 §A2] NoSQL / OOB 两个**默认关的整通道**开关。
     // 缺口实录：这两个通道引擎早有（ScanManager._runNoSql / oobReceiver），UI（constants.ts
@@ -277,7 +306,9 @@ export function parseArgs(argv, preset) {
     // 与 --no-cast 同族命名（noSql → --no-sql）；oob 与 --technique oob 正交：
     // technique 只决定"测不测"，oob.enabled 决定"起不起接收端"（defaults.js:292-293 明写
     // 「即使 techniques 含 oob，也需此处开启接收端才启动」）——这正是此前 CLI 不可达的那半。
-    else if (applyChannelFlag(a, args)) { /* --no-sql / --oob / --oob-interactsh（D87） */ }
+    // [D240 对标 sqlmap -t] 原始流量落盘（-t/--traffic-file、--traffic-max-body）走同一入口：
+    // parseArgs 的复杂度基线是棘轮，`||` 也算一个分支，所以两个族收进一个函数而不是并列。
+    else if (applyFlagFamily(a, args, next)) { /* --no-sql/--oob（D87）+ traffic（D240） */ }
     // [P0 2026-09-09 实战批次] 失效值替换 + 已知注入点直通（对标 sqlmap --invalid-*）
     else if (a === '--invalid-bignum') args.invalidBignum = true;
     else if (a === '--invalid-logical') args.invalidLogical = true;

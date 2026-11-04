@@ -5,7 +5,7 @@
     "frontend.tests": "vitest 用例总数（含失败）",
     "server.tests": "node:test 用例总数（含 skip/fail）"
   },
-  "generatedAt": "2026-11-04T11:35:52+00:00",
+  "generatedAt": "2026-11-04T11:56:29+00:00",
   "coverageCollected": true,
   "frontend": {
     "files": 69,
@@ -27,8 +27,8 @@
     }
   },
   "server": {
-    "tests": 4128,
-    "pass": 4122,
+    "tests": 4135,
+    "pass": 4129,
     "fail": 0,
     "skip": 6,
     "coverage": {
@@ -43,6 +43,6 @@
     }
   },
   "badge": {
-    "testsPassing": 4701
+    "testsPassing": 4708
   }
 }

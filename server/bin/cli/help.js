@@ -120,6 +120,12 @@ export const HELP_TEXT = `sqli-scanner CLI（对标 sqlmap 的 Node 引擎命令
   --no-verify                关闭盲注提取复核（[D42]；默认开：每字节收敛后等值确认 + 完整值
                              整体复验，失败自动重测——弱网/限速目标的拖库假字符防线，开销约
                              +1 请求/字节）。--verify 显式开启（与默认一致，幂等）
+  -t, --traffic-file <file>  原始 HTTP 流量落盘（[D240] 对标 sqlmap -t）：每行一次最终往返
+                             （NDJSON：请求方法/URL/头/body + 响应状态/头/body），用于复现与审计。
+                             只记最终一次往返——重定向中间跳与重试失败轮不在内；body 默认截断 8KB。
+                             ⚠ 文件含完整请求头（Cookie/Authorization），按凭据文件保管
+  --traffic-max-body <n>     单条 body 截断上限（字节，0 = 不截断；默认 8192）[D240]
+                             不截断时「大页面 × 数千请求」会把盘写满，这不是能力而是事故
   --fetch-using <gt|between> 盲注提取比较算子（[D50]，默认 gt=历史行为）：> / < 被 WAF 过滤
                              而 BETWEEN 仍放行的目标上，between 把长度/字节二分换成
                              x BETWEEN lo AND mid 窄化（cls 字符类探测本就只用 BETWEEN）。
