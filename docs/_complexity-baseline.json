@@ -260,19 +260,19 @@
       "limitLines": 100,
       "limitComplexity": 15
     },
-    "server/src/api/scanRoutes.js::<arrow@487>": {
+    "server/src/api/scanRoutes.js::<arrow@503>": {
       "lines": 68,
       "complexity": 34,
       "limitLines": 100,
       "limitComplexity": 15
     },
-    "server/src/api/scanRoutes.js::<arrow@630>": {
+    "server/src/api/scanRoutes.js::<arrow@646>": {
       "lines": 65,
       "complexity": 30,
       "limitLines": 100,
       "limitComplexity": 15
     },
-    "server/src/api/scanRoutes.js::<arrow@826>": {
+    "server/src/api/scanRoutes.js::<arrow@844>": {
       "lines": 27,
       "complexity": 26,
       "limitLines": 100,

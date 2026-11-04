@@ -117,6 +117,9 @@ export const HELP_TEXT = `sqli-scanner CLI（对标 sqlmap 的 Node 引擎命令
   --dump-format <fmt>        拖库数据独立产物格式（[D42] 对标 sqlmap --dump-format，csv/sql/html/json）：
                              有拖库数据时产出 dump.<ext>（一键扫描目录内）。只影响独立产物，
                              报告内嵌的拖库区不变。非法格式拒绝启动
+  --no-truncate              导出时长字段不截断（[D243] 对标 sqlmap --no-truncate）：默认
+                             evidence/description 截到 4000 字符，取证时用它会丢掉长 payload /
+                             长响应。只影响导出渲染，内存报告与台账口径不变
   --no-verify                关闭盲注提取复核（[D42]；默认开：每字节收敛后等值确认 + 完整值
                              整体复验，失败自动重测——弱网/限速目标的拖库假字符防线，开销约
                              +1 请求/字节）。--verify 显式开启（与默认一致，幂等）

@@ -7,13 +7,14 @@
 > 下一批次起的条目写在这里。发版时把本节整体升为 `## [x.y.z] - YYYY-MM-DD` 并补汇总段。
 
 <!-- changelog-index:start -->
-**本段覆盖 32 个批次（D228–D242，2026-11-01 → 2026-11-04）**。正文按时间倒序排列；
+**本段覆盖 33 个批次（D228–D243，2026-11-01 → 2026-11-04）**。正文按时间倒序排列；
 下表是同一批次的索引，便于按编号或关键词定位。**索引只是导航，正文未做任何删改**
 （被推翻的旧结论原样保留，这是本仓的既定口径）。新增批次后跑
 `node scripts/changelog-index.mjs --write` 重生成，`--check` 校验是否过期。
 
 | 批次 | 日期 | 主题 |
 |---|---|---|
+| D243 | 11-04 | `--no-truncate` 导出不截断（缺口 25→24） |
 | D242 | 11-04 | `--check-internet` 本机联网自检（缺口 26→25） |
 | D241 | 11-04 | `--sql-file` 从文件读 SQL（缺口 27→26） |
 | D240 | 11-04 | `-t/--traffic-file` 原始流量落盘（对标最后一个 P2：缺口 28→27） |
@@ -47,6 +48,27 @@
 | D229 | 11-01 | 交付闸收口：P0-3 卡顿修复（haystack 先截后拼）+ ai-gateway 断言去模型依赖 |
 | D228 | 11-01 | AI 报告网关端到端验收（ai-gateway 套件）+ 本地网关 runbook + CI 靶场硬要求扩展 |
 <!-- changelog-index:end -->
+
+### 2026-11-04 批次 D243 · `--no-truncate` 导出不截断（缺口 25→24）
+
+**动机**：导出时 `evidence` / `description` 被截到 4000 字符（`truncateLong` 还会补
+「…[截断 N 字符]」）。取证场景要的是**完整 payload 与完整响应** —— 被截掉的那段往往正是判据。
+
+**交付**：
+
+- `ReportGenerator._truncate(report, noTruncate)`：开关开启时跳过截断，返回**浅拷贝**而非原对象
+  —— 终态报告是共享只读快照（P1-PERF），不能在上面 `delete` 标记。
+- `_forExport` 读 `report._noTruncate`，并在**两个 return 点**都把该标记从产物里删掉：
+  它是渲染开关，不是报告字段（否则下游 schema 校验与「两次渲染逐字节一致」都受影响）。
+- 注入点三处，统一走「浅拷贝 + 标记」口径（照抄 `_redactOpts` 的先例）：
+  CLI `--no-truncate` → `formatReport(..., { noTruncate })`；REST `?noTruncate=1`。
+- REST 侧把两个 query 判断抽成模块级 `exportOverride()`：`createRoutes` 贴基线，
+  直接写两个 `if` 会让它超（行数 296>295、圈 137>135）。
+
+**验证**：`reportNoTruncate.test.js` **3/3**（默认仍截断 / 开关后原样保留 / 标记不进产物）；
+`sqlmap-parity` 缺口 **25→24**；`gate:close` 49/49。
+
+**边界**：只影响**导出渲染**，内存报告与台账口径不变；默认行为零变化。
 
 ### 2026-11-04 批次 D242 · `--check-internet` 本机联网自检（缺口 26→25）
 

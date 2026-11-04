@@ -22,7 +22,10 @@ import { runAlert } from './alert.js';
 //      名为 report.db-json 的普通 JSON —— "传了没生效"正是本仓红线（宁可拒绝启动，
 //      也不让"以为设了"变成实际没设；与 --config 未知键硬拒同一条政策）。
 //   格式集与 REST FORMAT_EXT / MCP get_report enum 同源对齐（parity 有守卫）。
-export function formatReport(report, fmt = 'json') {
+export function formatReport(report, fmt = 'json', opts = {}) {
+  // [D243 对标 sqlmap --no-truncate] 取证场景：长 payload / 长响应不截断。
+  // 浅拷贝注入（不改调用方对象，终态快照是共享只读视图）。
+  if (opts.noTruncate) report = { ...report, _noTruncate: true };
   const f = String(fmt || 'json').toLowerCase();
   if (f === 'csv' || f === 'markdown' || f === 'md' || f === 'html') {
     const rg = new ReportGenerator();
@@ -96,11 +99,11 @@ function writeSingleReportFiles(report, args) {
   if (outIsDir) {
     mkdirSync(args.out, { recursive: true });
     const ext = fmt === 'markdown' || fmt === 'md' ? 'md' : fmt === 'db-json' ? 'db.json' : fmt;
-    writeFileSync(join(args.out, `report.${ext}`), formatReport(report, fmt), 'utf-8');
-    if (fmt === 'html') writeFileSync(join(args.out, 'report.md'), formatReport(report, 'markdown'), 'utf-8');
-    if (fmt === 'markdown' || fmt === 'md') writeFileSync(join(args.out, 'report.html'), formatReport(report, 'html'), 'utf-8');
+    writeFileSync(join(args.out, `report.${ext}`), formatReport(report, fmt, { noTruncate: args.noTruncate }), 'utf-8');
+    if (fmt === 'html') writeFileSync(join(args.out, 'report.md'), formatReport(report, 'markdown', { noTruncate: args.noTruncate }), 'utf-8');
+    if (fmt === 'markdown' || fmt === 'md') writeFileSync(join(args.out, 'report.html'), formatReport(report, 'html', { noTruncate: args.noTruncate }), 'utf-8');
   } else {
-    writeFileSync(args.out, formatReport(report, fmt), 'utf-8');
+    writeFileSync(args.out, formatReport(report, fmt, { noTruncate: args.noTruncate }), 'utf-8');
   }
   // [goal 批次 A-2] 扫描台账：单 URL 模式自动登记可追溯快照（meta/report/poc）
   // [FIX 2026-09-18] 同批量模式：必须传 attachPoc 的导出形态，否则 poc/ 恒为空

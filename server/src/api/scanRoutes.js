@@ -456,6 +456,22 @@ function makeReportWithFallback(sm) {
 }
 
 /**
+ * [D243] 报告导出的运行时覆盖项（query 驱动）。
+ * 抽成模块级函数的理由：`createRoutes` 的行数与圈复杂度都贴基线，两个 `?xxx=1` 判断
+ * 直接写在里面会让它超（门禁口径是「先拆，不许抬基线」）。
+ * @param {any} query Express 的 req.query
+ * @returns {{redactPasswords?: boolean, noTruncate?: boolean}} 覆盖项（无参数时为空对象）
+ */
+function exportOverride(query) {
+  /** @type {{redactPasswords?: boolean, noTruncate?: boolean}} */
+  const o = {};
+  if (String(query.redactPasswords || '') === '1') o.redactPasswords = true;
+  // 取证场景：长 payload / 长响应不截断（对标 sqlmap --no-truncate）
+  if (String(query.noTruncate || '') === '1') o.noTruncate = true;
+  return o;
+}
+
+/**
  * 创建扫描相关路由。
  * @param {object} [opts]
  * @param {import('../engine/ScanManager.js').ScanManager} [opts.scanManager] 不传则内部自建
@@ -775,7 +791,9 @@ export function createRoutes({ scanManager, eventBus: bus = eventBus, reportToke
     // [D125] 导出与查看/差异走同一个 reportWithFallback：内存优先、台账兜底，并统一合并
     // 人工裁决。此前导出自己再读一次台账，等于把「报告从哪来」复制成两份真相。
     // [D-REDACT 2026-10-12] ?redactPasswords=1 运行时覆盖（spec 5.3.1 规则 2）
-    const redactOverride = String(req.query.redactPasswords || '') === '1' ? { redactPasswords: true } : {};
+    // [D243] 导出覆盖项（脱敏 / 不截断）抽成模块级函数：createRoutes 的行数与圈复杂度都贴基线，
+    // 两个 `?xxx=1` 判断直接写在这里会让它超。
+    const redactOverride = exportOverride(req.query);
     const found = reportWithFallback(req.params.id);
     if (!found) {
       // 必须是 4xx：这是一条**文件下载**端点。历史上它返回 200 + `application/json` 且不带

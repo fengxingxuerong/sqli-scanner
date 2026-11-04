@@ -346,7 +346,7 @@ export const STATUS = {
   '--gui': 'out:交互形态不同：本仓为 Web GUI / 桌面壳 / MCP，不做 sqlmap 式 TUI',
   '--list-tampers': 'ok',
   '--no-logging': 'gap:P3',
-  '--no-truncate': 'gap:P3',
+  '--no-truncate': 'ok',
   '--offline': 'out:本仓会话是断点续跑缓存，不是「零请求离线数据源」，无对应语义',
   // [D250] --purge 已落地（cli.js 入口拦截；本地台账/日志清理），不再记缺口。
   '--purge': 'ok',
@@ -413,7 +413,6 @@ export const NOTES = {
   '--unsafe-naming': '拖库产物命名安全化开关未暴露（长尾）',
   '--web-root': '文件写用的 Web 根路径（写 webshell 落点）未暴露；当前要求绝对路径 --file-dest',
   '--no-logging': '关闭日志落盘开关未暴露（当前恒写 ledger）',
-  '--no-truncate': '报告长字段不截断开关未暴露（长 payload/长响应取证用）',
   '--unstable': '不稳定连接模式（弱网重试策略）未实现',
   '-c': '档案格式为 JSON（键=长旗标名）；不支持 sqlmap 的 INI(`sqlmap.conf`) 语法',
   '-s': '会话是 JSON 台账（断点续跑语义一致），不读写 sqlmap 的 SQLite 会话文件',
@@ -440,7 +439,7 @@ export const PLAN = [
     items: [
       '--abort-code', '--ignore-timeouts', '--safe-post', '--safe-req', '--csrf-data', '--csrf-retries',
       '--union-values', '--abort-on-empty', '--csv-del', '--dump-file', '--table-prefix',
-      '--unsafe-naming', '--web-root', '--no-logging', '--no-truncate', '--comments', '--pivot-column',
+      '--unsafe-naming', '--web-root', '--no-logging', '--comments', '--pivot-column',
       '--common-files', '--binary-fields', '--proxy-file', '--proxy-freq', '--tor-type', '-v',
       '--dbms-cred',
       '--unstable',

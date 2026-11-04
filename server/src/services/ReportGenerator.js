@@ -361,8 +361,13 @@ export class ReportGenerator {
     return countBy(arr, key);
   }
 
-  _truncate(report) {
+  _truncate(report, noTruncate = false) {
     if (!report || !Array.isArray(report.vulns)) return report;
+    // [D243 对标 sqlmap --no-truncate] 取证场景：长 payload / 长响应不该被 EVIDENCE_MAX 截掉。
+    // 只影响导出渲染，不改变内存里的报告（引擎与台账口径不变）。
+    // 返回浅拷贝而不是原对象：`_noTruncate` 是渲染开关，后续要能安全地从产物里剥掉，
+    // 而终态报告是共享只读快照（P1-PERF），不能在上面 delete。
+    if (noTruncate) return { ...report };
     const vulns = report.vulns.map((v) => {
       const out = { ...v };
       for (const key of ['evidence', 'description']) {
@@ -417,7 +422,10 @@ export class ReportGenerator {
   // 兜底对象：引擎产出的报告已由 finalize 回填，这里只为历史快照/外部构造的报告补齐
   // 「受影响参数 / 漏洞类型」字段，是幂等操作（已有字段不覆盖）。
   _forExport(report, redactOpts) {
-    const base = this._truncate(this._attachPoc(this._enrich(report)));
+    // [D243] `_noTruncate` 由 API/CLI 层以浅拷贝注入（同 `_redactOpts` 的口径），
+    // 读出来即从产物里删掉 —— 它是渲染开关，不该出现在导出报告里。
+    const noTruncate = report?._noTruncate === true;
+    const base = this._truncate(this._attachPoc(this._enrich(report)), noTruncate);
     // [D-REDACT 2026-10-12] 统一脱敏管道：opts 缺省时零行为变化（spec 5.3.1 规则 1）。
     // redactOpts 可由调用方显式传，或由 report._redactOpts 携带（API 层注入，不改 to* 签名）。
     const opts = redactOpts || report?._redactOpts;
@@ -426,8 +434,13 @@ export class ReportGenerator {
       r = redactReport(r, opts);
       delete r._redactOpts;
     }
-    if (!r.target) return r;
+    if (!r.target) {
+      const o = { ...r };
+      delete o._noTruncate;
+      return o;
+    }
     const out = { ...r, target: sanitizeTargetForExport(r.target) };
+    delete out._noTruncate;
     // Cookie/Header 注入点的 originalValue 是凭据，导出报告与台账同口径打码。
     if (Array.isArray(out.points)) out.points = redactPointsForDisk(out.points);
     return out;

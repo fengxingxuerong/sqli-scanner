@@ -4,15 +4,15 @@
   "sqlmapVersion": "1.10.7",
   "stats": {
     "total": 222,
-    "ok": 125,
+    "ok": 126,
     "alias": 31,
     "part": 9,
     "auto": 3,
-    "gap": 25,
+    "gap": 24,
     "out": 29,
     "gapP1": 0,
     "gapP2": 0,
-    "gapP3": 25
+    "gapP3": 24
   },
   "groups": [
     {
@@ -1687,11 +1687,11 @@
         },
         {
           "opt": "--no-truncate",
-          "kind": "gap",
+          "kind": "ok",
           "ours": null,
-          "priority": "P3",
+          "priority": null,
           "reason": null,
-          "note": "报告长字段不截断开关未暴露（长 payload/长响应取证用）"
+          "note": null
         },
         {
           "opt": "--offline",
@@ -1896,7 +1896,6 @@
         "--unsafe-naming",
         "--web-root",
         "--no-logging",
-        "--no-truncate",
         "--comments",
         "--pivot-column",
         "--common-files",

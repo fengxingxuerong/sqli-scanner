@@ -374,12 +374,15 @@ export class ScanManager {
       ((s && s.redactPasswords) || opts.redactPasswords) && !report._redactOpts
         ? { ...report, _redactOpts: { redactPasswords: true, redactAuth: true, redactTarget: true } }
         : report;
-    if (format === 'html') return this.reportGen.toHTML(exportReport);
-    if (format === 'csv') return this.reportGen.toCSV(exportReport);
-    if (format === 'markdown' || format === 'md') return this.reportGen.toMarkdown(exportReport);
-    if (format === 'sarif') return this.reportGen.toSARIF(exportReport); // [批次 9 2026-09-15] SARIF 2.1.0
-    if (format === 'db-json') return this.reportGen.toDBJSON(exportReport); // 仅拖库数据（库/表/列/行；[2026-10-12] 单源化到 ReportGenerator.toDBJSON）
-    return this.reportGen.toJSON(exportReport);
+    // [D243 对标 sqlmap --no-truncate] 取证场景：长 payload / 长响应不截断。同样走浅拷贝注入，
+    // 不往共享只读快照上写（P1-PERF 的教训）。
+    const finalReport = opts.noTruncate ? { ...exportReport, _noTruncate: true } : exportReport;
+    if (format === 'html') return this.reportGen.toHTML(finalReport);
+    if (format === 'csv') return this.reportGen.toCSV(finalReport);
+    if (format === 'markdown' || format === 'md') return this.reportGen.toMarkdown(finalReport);
+    if (format === 'sarif') return this.reportGen.toSARIF(finalReport); // [批次 9 2026-09-15] SARIF 2.1.0
+    if (format === 'db-json') return this.reportGen.toDBJSON(finalReport); // 仅拖库数据（库/表/列/行；[2026-10-12] 单源化到 ReportGenerator.toDBJSON）
+    return this.reportGen.toJSON(finalReport);
   }
 
   // 扫描流水线

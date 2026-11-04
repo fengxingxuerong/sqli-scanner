@@ -1,6 +1,6 @@
 # sqli-scanner
 
-[![Tests](https://img.shields.io/badge/tests-4715%20passing-brightgreen)](#测试)[![CI](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml/badge.svg)](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml)
+[![Tests](https://img.shields.io/badge/tests-4717%20passing-brightgreen)](#测试)[![CI](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml/badge.svg)](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml)
 [![Dependencies](https://img.shields.io/badge/prod%20deps-0%20known%20vulns-brightgreen)](SECURITY.md)
 
 > CI 徽章为真实状态（红绿以 GitHub Actions 实跑为准）。发布判定仍以 `CHANGELOG.md`
@@ -258,6 +258,7 @@ admin-only 触发页 `/admin/panel`（users.admin 角色门禁 403）+ admin 会
 | **忽略错误码 / 参数随机化** | `--ignore-code <c1,c2>`（对标 sqlmap 同名）：指定状态码不再计入「拦截/会话失效/服务器错误」可信度判定（内容照常比对）——注入点确实坐在 401/500 后面的目标不再被拖成 blocked/session_expired。`--randomize <p1,p2>`（对标 sqlmap 同名）：每条注入请求随机化指定参数值（URL query/Cookie/请求头/表单伴随字段），长枚举防反爆破锁定；注入点自身永不随机化 |
 | **原始流量落盘** | `-t <file>` / `--traffic-file <file>`（[D240] 对标 sqlmap `-t`）：每行一次**最终往返**（NDJSON：请求方法/URL/头/body + 响应状态/头/body），用于**离线复现与审计**——拿到文件就能重放，不必依赖「当时的目标还在不在」。只记最终一次往返（重定向中间跳与重试失败轮不在内）；body 默认截断 8KB（`--traffic-max-body 0` 不截断，但「大页面 × 数千请求」会把盘写满）。⚠ 文件含完整请求头（Cookie/Authorization），按凭据文件保管 |
 | **拖库独立产物格式** | `--dump-format <csv\|sql\|html\|json>`（对标 sqlmap 同名）：有拖库数据时一键扫描产出 `dump.<ext>`。只影响独立产物，报告内嵌拖库区不变。[D42] 四个格式化函数与 27 条既有单测同源复用 |
+| **导出不截断** | `--no-truncate`（[D243] 对标 sqlmap 同名）：导出时长字段（evidence / description）不再截到 4000 字符 —— 取证时要看完整 payload 与完整响应。**只影响导出渲染**，内存报告与台账口径不变；REST 侧对应 `?noTruncate=1` |
 | **提取比较算子** | `--fetch-using <gt\|between>`（[D50]，默认 gt=历史行为零回归）：`>`/`<` 被 WAF 过滤而 BETWEEN 仍放行的目标上，between 把长度/字节二分换成 `x BETWEEN lo AND mid` 窄化（cls 字符类探测本就只用 BETWEEN，该通道此前的静默失准正是本开关要堵的洞）。布尔与时间双通道同构；探测次数与 gt 同阶，提取值经等值复验。`in` 不支持（IN 为假时无法定位区间，TODO 留证）；非法值拒绝启动。⚠️ 上游归属更正：原登记为"对标 ghauri --fetch-using"，对 ghauri v1.0.5/dev 整包取证 0 命中——按技术本身价值落地 |
 | **响应解密脚本** | `--postprocess <file.js>`（[D52]，与 `--request-script` 对偶）：目标把响应体加密/编码后返回时（AES 信封、自定义 Base64 变体、自研 RPC 序列化），检测层拿到的全是密文 ⇒ 真/假条件的差异被加密抹平 ⇒ 报告写「未检出」——**而那不等于没有洞**。脚本导出 `transform(res)->res`，在 per-scan 客户端视图最内层对每条响应体解密/解码（含保活/CSRF 取页/登录；爬虫请求不经此层），只允许替换 `data`（status/headers 是可信度判账的输入，不可改）。硬约束与 request-script 对偶：脚本须位于 `RESPONSE_SCRIPT_DIR` 白名单目录内；加载失败**扫描不启动**；执行失败时该响应按失败处理（fail-closed，宁漏不误，绝不用密文继续比对） |
 | **配置档案** | `--config <file.json>` 预载参数（argv > 档案 > 内置默认；键=长参数名，如 `{"level":5,"tamper":"space2comment"}`；含未知键拒绝启动）+ `--save-config <file.json>` 把本次非默认参数增量落盘复扫（对标 sqlmap -c/--save + ffuf -config）。[D41] 配合上面的筛选三件套可把「复测配方」入库进 CI |
@@ -456,7 +457,7 @@ server/       ← Express + Node.js（后端，`server/index.js` 入口）
 # 前端测试（579 个用例）
 npm test
 
-# 服务端测试（4142 个用例）
+# 服务端测试（4145 个用例）
 cd server && npm test
 
 # 全部测试
@@ -482,7 +483,7 @@ npm run artifact:drift   # 入库的 e2e 基线产物必须等于当前代码跑
 
 - TypeScript: 零错误
 - 前端测试: 579/579 通过（覆盖率门禁 stmts 93.16 / branch 84.47 / func 80.63，阈值 88/77/67）
-- 服务端测试: 4142 用例（4136 pass / 0 fail / 6 skip，并发口径 2026-11-04 复测；6 skip 为环境依赖显式跳过。覆盖率 lines 90.89 / branch 79.29 / func 84.22，阈值 85/74/77）
+- 服务端测试: 4145 用例（4138 pass / 1 fail / 6 skip，并发口径 2026-11-04 复测；6 skip 为环境依赖显式跳过。覆盖率 lines 90.89 / branch 79.29 / func 84.22，阈值 85/74/77）
 - 一键扫描: `npm run scan -- -u <url>`（CLI 一条命令产出 HTML/JSON/Markdown 全套报告 + manifest，退出码可直接进 CI 门禁）
 - Tamper 插件: 234 个（含批次 D3 新增 scalarselectinline；含 v24 增量 20 个，对齐 sqlmap 官方 tamper 全集，含官方 CRS/libinjection 实测组合 uniontable+odbcbrace；含批次 D13 新增 5 件上游形态变体 *nospace/*open/*block，真机 A/B 判决前不进默认链）
 - WAF 绕过能力: 200+ 插件链式组合，覆盖 62 个 WAF 厂商指纹识别 + 推荐
