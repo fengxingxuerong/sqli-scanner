@@ -382,7 +382,7 @@ const README_RULES = [
       },
       {
         re: /(覆盖率门禁 stmts )[\d.]+( \/ branch )[\d.]+( \/ func )[\d.]+/,
-        tolerant: true,
+        numeric: true,
         repl: (m, f) =>
           m[1] + f.frontend.coverage.statements.toFixed(2) +
           m[2] + f.frontend.coverage.branches.toFixed(2) +
@@ -418,7 +418,7 @@ const README_RULES = [
       },
       {
         re: /(覆盖率 lines )[\d.]+( \/ branch )[\d.]+( \/ func )[\d.]+/,
-        tolerant: true,
+        numeric: true,
         repl: (m, f) =>
           m[1] + f.server.coverage.lines.toFixed(2) +
           m[2] + f.server.coverage.branches.toFixed(2) +
@@ -455,12 +455,8 @@ function rewriteLines(lines, facts) {
         }
         const expected = rw.repl(m, facts);
         if (expected === m[0]) continue;
-        let delta = null;
-        if (rw.tolerant) {
-          delta = maxNumericDelta(m[0], expected);
-          // 覆盖率抖动在容差内 → 视为一致，不改写、不报漂移
-          if (delta !== null && delta <= COVERAGE_TOLERANCE) continue;
-        }
+        // 覆盖率字段额外算一个偏差值，只用于报错时给人看，不抑制、不放行
+        const delta = rw.numeric ? maxNumericDelta(m[0], expected) : null;
         cur = cur.replace(rw.re, () => expected);
         drifts.push({ rule, line, from: m[0], to: expected, delta });
       }
@@ -482,13 +478,13 @@ function maxNumericDelta(a, b) {
   return max;
 }
 
-// 覆盖率是浮点，且实测有抖动：同一台机器连跑 3 次，branch 得 79.03 / 79.01 / 79.01
-// （最大 0.02pt；其余字段稳定）。逐位精确比对会把门禁变成 flake 源——正是本项目最反感的
-// 「假红」。故对覆盖率字段给 0.2pt 容差（实测抖动的 10×），既能吸收抖动，又能抓住任何
-// 真实回退（真回退远大于 0.2pt）。测试用例数/通过数/阈值是整数且确定，仍走精确比对。
-// 注意：这里放宽的是「文档与实测是否一致」，覆盖率本身的回退由 vitest.config.ts /
-// server package.json 的阈值门禁负责，职责不重叠。
-const COVERAGE_TOLERANCE = 0.2;
+// [FIX 2026-11-05] 覆盖率改为**精确比对**，取消原来的 0.2pt 容差。
+// 原容差的理由是「同一台机器连跑 3 次 branch 抖动 ≤0.02pt，怕门禁变 flake」，但这条判据比较的是
+// **两个静态文件**（README ↔ _facts.json）：`--check` 不重跑覆盖率，`facts:refresh` 又是
+// 「采集 → 回写 README → 重生成台账」三步一体，抖动根本进不了比对。
+// 实测代价：README 前端覆盖率停在 93.16/84.47/80.63，facts 已是 93.23/84.35/80.59，
+// 最大偏差 0.12pt 被容差吞掉 —— 门禁全绿，而对外数字是旧的，这正是容差在制造「假绿」。
+// 覆盖率本身的回退仍由 vitest.config.ts / server package.json 的阈值门禁负责，职责不重叠。
 
 // 报「采集源过期」时最多列几个文件名：本地排障够用，CI 日志不被刷屏
 const STALE_LIST_MAX = 8;
@@ -712,7 +708,7 @@ function main() {
       console.log(`      README 现状: ${d.from.trim()}`);
       console.log(`      _facts.json: ${d.to.trim()}`);
       if (d.delta !== null && d.delta !== undefined) {
-        console.log(`      偏差: ${d.delta.toFixed(2)}pt（容差 ${COVERAGE_TOLERANCE}）`);
+        console.log(`      偏差: ${d.delta.toFixed(2)}pt`);
       }
       console.log();
     }

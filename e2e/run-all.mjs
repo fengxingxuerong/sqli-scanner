@@ -265,6 +265,15 @@ const needsLocalPg = (lab) => lab.deps.includes('pg') && !pgLivePortOpen && pgSa
 // 超时按**失败**结算，不当"按设计跳过"——挂死不是跳过。
 const LAB_TIMEOUT_MS = Number(process.env.RUN_ALL_LAB_TIMEOUT_MS) || 300000;
 
+// [ADD 2026-11-05] 单靶场超时覆盖：只给「真在干活但慢」的个例放宽，**不动全局默认值** ——
+// 全局调大会让真正挂死的靶场白等更久（那才是这条超时存在的理由）。
+// detect-surface-lab：10 个用例 × 真 MariaDB，每条载体都配一个同形态安全对照，实测 32 个
+// 子用例累计 736.4s（单个 6~88s，logs/gate-detect-surface-final.log），加上起停沙箱与汇总
+// 约 1000s —— 默认 300s 必然被强杀。取实测 1.8 倍 = 1800s：留足抖动余量，又不至于让挂死
+// 拖到 CI job 上限。注：CI 的 run-all 步骤所在 job 无 mysqld，本靶场按缺依赖 SKIP，不受此值影响。
+const LAB_TIMEOUT_OVERRIDES_MS = { 'detect-surface-lab': 1800000 };
+const timeoutFor = (lab) => LAB_TIMEOUT_OVERRIDES_MS[lab.name] ?? LAB_TIMEOUT_MS;
+
 // ── 隔离沙箱的宿主：python 必须"真跑一次"才算可用 ────────────────────────────
 // 缺陷形状（2026-09-28 本机实测）：原先 runOne 里直接取 `process.env.PYTHON || <写死的本机绝对路径>`，
 // 而那个路径今天已经是死链 —— spawn 立刻失败，退出码 **3221225781**（0xC0000135 STATUS_DLL_NOT_FOUND），
@@ -364,7 +373,7 @@ const runOne = async (lab, useSandbox = false, useLocalPg = false) => {
       resolve({ code, skipped, ms: Date.now() - t0, hint, sandbox: useSandbox, localPg: useLocalPg, tail: out.split('\n').filter(Boolean).slice(-3).join('\n'), full: out });
     };
     const hardTimer = setTimeout(() => {
-      timeoutNote = `\n[TIMEOUT] ${lab.name} 超过 ${LAB_TIMEOUT_MS}ms 未完成，已由 run-all 强杀（下面是它截止时被收到的全部输出）\n`;
+      timeoutNote = `\n[TIMEOUT] ${lab.name} 超过 ${timeoutFor(lab)}ms 未完成，已由 run-all 强杀（下面是它截止时被收到的全部输出）\n`;
       try {
         // win32 上 spawn 走 shell 时 kill 只打死外壳、孙进程仍持有管道；这里 stdio 是 pipe 且
         // 不用 shell，但 python 包装层会再起 mysqld/node —— 连树杀才真能放掉端口。
@@ -375,7 +384,7 @@ const runOne = async (lab, useSandbox = false, useLocalPg = false) => {
         }
       } catch { /* 杀不掉也要结算，见下面的兜底 */ }
       setTimeout(() => finish(-2), 5000).unref();
-    }, LAB_TIMEOUT_MS);
+    }, timeoutFor(lab));
     p.stdout.on('data', (d) => { out += d; });
     p.stderr.on('data', (d) => { out += d; });
     p.on('exit', (code) => finish(code === null ? -3 : code));
