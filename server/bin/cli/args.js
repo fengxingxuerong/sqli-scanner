@@ -181,6 +181,10 @@ function parseMiscArg(a, args, next) {
   if (a === '--dump-file') { args.dumpFile = next(); return true; }
   // [D245 对标 sqlmap --csv-del] CSV 导出分隔符（默认逗号；Excel 本地化场景常用分号/制表符）
   if (a === '--csv-del') { args.csvDelimiter = next(); return true; }
+  // [DATADIR 2026-11-05] 台账目录显式指定（优先级高于 SQLI_LEDGER_DIR 与形态默认值）。
+  // 两种写法都收：`--data-dir <path>` 与 `--data-dir=<path>`；相对路径在 cli.js 里按 cwd 解析。
+  if (a === '--data-dir') { args.dataDir = next(); return true; }
+  if (a.startsWith('--data-dir=')) { args.dataDir = a.slice(11); return true; }
   return false;
 }
 

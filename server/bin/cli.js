@@ -762,6 +762,10 @@ async function checkInternet() {
  * @returns {Promise<void>}
  */
 async function prepareScan(args) {
+  // [DATADIR 2026-11-05] --data-dir 优先级最高，必须先于任何台账写入生效；
+  // 相对路径由 setter 按当前工作目录解析。无条件调用（setter 自己忽略 undefined），
+  // 以免给 main() 增加分支/行数（complexity 门禁按函数体行数与圈复杂度双重卡）。
+  scanLedger.setLedgerDirOverride(args.dataDir);
   setupTrafficLog(args);
   applySqlFile(args);
   if (args.checkInternet) await checkInternet();

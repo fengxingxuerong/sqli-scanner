@@ -8,7 +8,8 @@
 //   report.md     交付版 Markdown
 //   poc/          逐条可复放请求（*.txt，-r 可直接导入）
 // 追加写 meta.jsonl（全局索引行），供 `ledger list` / `ledger show <id>` 检索。
-// 目录默认 <repo>/data/ledger，可用 env SQLI_LEDGER_DIR 覆盖。
+// 目录默认：SEA 单文件引擎 → <exe 目录>/data/ledger；node 跑源码 → 模块上两级。
+// 优先级 --data-dir > SQLI_LEDGER_DIR > 形态默认值（见 ledgerDir()）。
 // ============================================================================
 import {
   mkdirSync, writeFileSync, appendFileSync, existsSync, readFileSync, readdirSync, rmSync, renameSync,
@@ -21,12 +22,61 @@ import { AppError, ErrorCode } from '../core/errors.js';
 // [P0-SEC 2026-11-02] 台账落盘统一脱敏：报告/文档/PoC 三处必须同源，
 // 否则「导出已打码、台账仍明文」会变成第二条凭据泄露路径。
 import { redactPersistedReport, redactPocText } from './reportRedaction.js';
+import { isSeaRuntime } from '../core/sqlJsLoader.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const DEFAULT_DIR = pathResolve(HERE, '../../data/ledger');
 
+/**
+ * [DATADIR 2026-11-05] 形态默认值（优先级链的最后一档）：
+ *   SEA 单文件引擎 → <exe 目录>/data/ledger（绿色包/桌面随包落盘，不再跑到 exe 上两级）；
+ *   node 跑源码     → 模块上两级（保持原口径，绝不能落到 node.exe 所在目录）。
+ * @param {{isSea?: boolean, execPath?: string, moduleDir?: string}} [opts] 测试注入缝
+ * @returns {string}
+ */
+export function defaultLedgerDir(opts = {}) {
+  const sea = opts.isSea ?? isSeaRuntime();
+  return sea
+    ? pathResolve(dirname(opts.execPath || process.execPath), 'data/ledger')
+    : pathResolve(opts.moduleDir || HERE, '../../data/ledger');
+}
+
+// CLI `--data-dir` 的显式值（最高优先级）。相对路径在 setter 内按当前工作目录解析。
+let cliDirOverride = '';
+/** @param {string} dir */
+export function setLedgerDirOverride(dir) {
+  cliDirOverride = dir ? pathResolve(dir) : '';
+}
+/** 测试用：清空显式覆盖，避免用例互相污染。 */
+export function _resetLedgerDirOverride() {
+  cliDirOverride = '';
+}
+
+let legacyWarned = false;
+/**
+ * [DATADIR 2026-11-05] 旧默认位置（exe 上两级）已有台账、新默认位置为空时，提示一次而不搬数据。
+ * 只在走"形态默认值"时检查——显式 --data-dir / SQLI_LEDGER_DIR 说明用户已经知道路径，不再打扰。
+ * @param {string} dir 当前生效目录
+ */
+function warnLegacyLedgerOnce(dir) {
+  if (legacyWarned || cliDirOverride || process.env.SQLI_LEDGER_DIR) return;
+  if (!isSeaRuntime()) return;
+  legacyWarned = true;
+  const legacy = pathResolve(dirname(process.execPath), '../../data/ledger');
+  if (legacy !== dir && existsSync(join(legacy, 'index.jsonl')) && !existsSync(join(dir, 'index.jsonl'))) {
+    console.warn(
+      `[ledger] 检测到旧位置有台账（${legacy}），新默认位置为空（${dir}）；` +
+      '不会自动迁移，请用 --data-dir 指回旧位置或手动搬运。',
+    );
+  }
+}
+
+/**
+ * 台账目录：`--data-dir`（CLI 显式） > `SQLI_LEDGER_DIR`（环境变量） > 形态默认值。
+ * @returns {string}
+ */
 function ledgerDir() {
-  const d = process.env.SQLI_LEDGER_DIR || DEFAULT_DIR;
+  const d = cliDirOverride || process.env.SQLI_LEDGER_DIR || defaultLedgerDir();
+  if (!cliDirOverride && !process.env.SQLI_LEDGER_DIR) warnLegacyLedgerOnce(d);
   mkdirSync(d, { recursive: true });
   return d;
 }

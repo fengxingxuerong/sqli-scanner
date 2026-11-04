@@ -121,6 +121,9 @@ export const HELP_TEXT = `sqli-scanner CLI（对标 sqlmap 的 Node 引擎命令
                              相对名落在 --out 目录内。缺省仍是 dump.<ext>
   --csv-del <ch>             CSV 导出分隔符（[D245] 对标 sqlmap --csv-del）：单字符，或 \t 表示制表符
                              （Excel 本地化场景常用分号）。只影响拼接字符，单元格内的逗号清洗不变
+  --data-dir <path>          台账（扫描索引 / 报告留痕 / 拖库产物）落盘目录：[DATADIR] 优先级高于
+                             SQLI_LEDGER_DIR 与形态默认值（SEA 单文件引擎默认 <exe 目录>/data/ledger）；
+                             相对路径按当前工作目录解析
   --no-truncate              导出时长字段不截断（[D243] 对标 sqlmap --no-truncate）：默认
                              evidence/description 截到 4000 字符，取证时用它会丢掉长 payload /
                              长响应。只影响导出渲染，内存报告与台账口径不变

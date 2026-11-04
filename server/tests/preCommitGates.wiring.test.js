@@ -82,7 +82,12 @@ test('接线-3) 钩子引用的每个脚本都真实存在（sh 找不到时行�
 });
 
 test('接线-4) lint-staged 仍在钩子里（不能被新增门禁挤掉）', () => {
-  assert.ok(/npx\s+lint-staged/.test(hookSrc), 'pre-commit 不再跑 lint-staged —— 原有行为被挤掉了');
+  // [2026-11-05] Windows 上 npx 经 cmd shim 派生会偶发中断（曾导致假红拦截真实提交），
+  // 钩子已改为直跑本地 bin；本断言的价值是"lint-staged 没被挤掉"，两种调用方式都算数。
+  assert.ok(
+    /npx\s+lint-staged|node\s+node_modules\/lint-staged\/bin\/lint-staged\.js/.test(hookSrc),
+    'pre-commit 不再跑 lint-staged —— 原有行为被挤掉了',
+  );
 });
 
 test('接线-5) 逃生阀存在、显式等于 1 才生效（不得放宽成任意真值）', () => {
