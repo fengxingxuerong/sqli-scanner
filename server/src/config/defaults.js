@@ -22,6 +22,13 @@ export const defaults = {
   // HTTP/2 支持（对标 sqlmap --http2）：开启后爬虫/页面取页路径走 undici（ALPN 协商 h2 优先，
   // 不支持则自动降级 HTTP/1.1）。默认关闭——盲注提取等主请求路径仍走 axios HTTP/1.1（零风险）。
   http2: false,
+  // [D202 2026-11-04 对标 sqlmap] 强制面四键默认值：null/false = 不强制（自动探测/不启用），
+  // 默认路径零行为变化。也是 configWhitelist 反向守卫「白名单键必须有落地方」的真源
+  // （CLI buildConfig / REST 严格校验 / 引擎消费三处同批接线）。
+  os: null, // windows | linux（覆盖 UDF 平台与指纹标注）
+  encoding: null, // 显式页面编码（覆盖 Content-Type/meta 探测）
+  charset: null, // 盲注字节提取的候选字符集
+  fingerprint: false, // 汇总已采集信号进 summary.fingerprint
   // 令牌桶限速（请求/秒）。历史演进：3（锁死并发收益）→ 50（对标 sqlmap --delay=0 无限速）
   // → 10（[P0-FIX 2026-09-12 保守化]）。为什么从 50 降到 10：sqlmap 敢默认不限速的前提是
   // 用户是会显式调参的老手；本项目的核心用户是「一键扫描」人群，50 req/s 对脆弱目标

@@ -173,7 +173,8 @@ export const STATUS = {
   '--param-filter': 'ok',
   '--dbms': 'ok',
   '--dbms-cred': 'gap:P3',
-  '--os': 'gap:P2',
+  // [D202 2026-11-04 已接线] 强制目标 OS（UDF 平台 + 指纹标注；命令模板边界见 CHANGELOG）
+  '--os': 'ok',
   '--invalid-bignum': 'ok',
   '--invalid-logical': 'ok',
   '--invalid-string': 'ok',
@@ -208,7 +209,8 @@ export const STATUS = {
   '--second-req': 'ok',
 
   // ── Fingerprint ────────────────────────────────────────────────────────────
-  '--fingerprint': 'part:--banner',
+  // [D202] 报告级指纹汇总（只汇总已采集信号，不主动探测；见 scan/summaryFingerprint.js）
+  '--fingerprint': 'ok',
 
   // ── Enumeration ────────────────────────────────────────────────────────────
   '--all': 'part:--dump-all',
@@ -294,10 +296,12 @@ export const STATUS = {
   '--crawl-exclude': 'ok',
   '--skip-waf': 'ok',
   '--csv-del': 'gap:P3',
-  '--charset': 'gap:P3',
+  // [D202] 盲注字节提取的候选字符类区间（charsetRanges.js）
+  '--charset': 'ok',
   '--dump-file': 'gap:P3',
   '--dump-format': 'ok',
-  '--encoding': 'gap:P2',
+  // [D202] 显式页面编码覆盖 header/meta（decodeResponseBody 第三参数）
+  '--encoding': 'ok',
   '--eta': 'out:进度行已给目标/点位/耗时；独立 ETA 显示无新信息',
   '--flush-session': 'ok',
   '--forms': 'ok',
@@ -390,10 +394,8 @@ export const NOTES = {
   // [D199 2026-11-04] 上四条缺口说明随实现落地作废（retry-on / skip-urlencode /
   // skip-xmlencode / chunked）；保留空缺而不是留着「当前无」的过期描述。
   '--dbms-cred': 'DBMS 侧凭据（UDF/注册表操作的 EXECUTE AS 等）无入口',
-  '--os': '强制目标 OS（影响文件路径与命令通道形态）；当前按 DBMS 推断，无显式覆盖',
   '--union-values': 'UNION 判真的自定义测试值未暴露（非常规字符集目标）',
   '--dns-domain': '带外 DNS 外带走 --oob + config.oob.dnsDomain / --oob-interactsh，无同名旗标',
-  '--fingerprint': '本仓产 DBMS 版本 + summary.dbmsEvidence 分级；OS / Web 服务器指纹未成体系',
   '--all': '--dump-all 覆盖全库拖库；sqlmap -a 还含 users/passwords/privileges 一次拉全',
   '--comments': '表/列注释枚举（MSSQL/MySQL 的 pg_description 类面）未实现',
   '--pivot-column': '关联表拖库时的主键列指定未实现',
@@ -404,9 +406,7 @@ export const NOTES = {
   '--binary-fields': '二进制列（图片/哈希）十六进制化导出未实现',
   '--check-internet': '开扫前连通性自检（区分「本机断网」与「目标不可达」）未实现',
   '--csv-del': 'CSV 导出分隔符不可配（Excel 本地化场景）',
-  '--charset': '注入值字符集约束（非 ASCII 目标）未暴露',
   '--dump-file': '拖库数据落盘路径不可单独指定（当前固定 dump.<ext>）',
-  '--encoding': '页面编码显式声明（GBK/Shift-JIS 目标）未暴露；比对与提取当前按 UTF-8/自动',
   '--skip-heuristics': '本仓启发式（prefilter）默认关、--smart 才开；sqlmap 默认开、本项关 —— 同一开关的另一默认值',
   '--table-prefix': 'Oracle/DB2 表前缀枚举参数未暴露',
   '--unsafe-naming': '拖库产物命名安全化开关未暴露（长尾）',
@@ -448,11 +448,7 @@ export const PLAN = [
       '--unstable',
     ],
   },
-  {
-    batch: 'D202',
-    title: '强制面与编码（把「推断错了就没救」的几项变成可显式指定）',
-    items: ['--os', '--encoding', '--charset', '--fingerprint'],
-  },
+  // [D202 2026-11-04 已落地] 强制面四项全部接线（STATUS 改 ok）；不留空组。
   {
     batch: 'D203',
     title: '非 SQL 通道补齐（LDAP / XPath 注入检测器）',

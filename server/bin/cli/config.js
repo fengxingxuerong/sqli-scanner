@@ -16,6 +16,8 @@
 import { parseHeaders, parseAuth } from './args.js';
 // [D199] --alert 启动期校验：命令只认 argv 字面量，不落 config（见 cli/alert.js 的安全边界）
 import { validateAlertCommand } from './alert.js';
+// [D202] 强制面四键单源校验（CLI ⇄ REST 同一份判定）
+import { FORCED_SURFACE_KEYS, normalizeForcedSurface } from '../../src/config/forcedSurfaces.js';
 // [D205] --ai-report 的开扫前预检（env 不全直接拒绝，不让用户扫完三分钟才发现没配上）
 import { assertAiReportUsable } from '../../src/services/aiReportCli.js';
 import { readFileSync, existsSync } from 'node:fs';
@@ -717,6 +719,25 @@ function applyProtocolAndMisc(config, args) {
  * @param {object} args CLI 参数
  * @returns {void}
  */
+/**
+ * [D202 2026-11-04 对标 sqlmap] 强制面四项：--os / --encoding / --charset / --fingerprint。
+ * 独立成函数：applyProtocolAndMisc 与 applyWireToggles 都贴复杂度软上限（只许持平或变浅）。
+ * 校验逻辑单源在 src/config/forcedSurfaces.js（与 REST 共用，防两处正则漂移）。
+ * 值型缺值/非法值一律硬拒（「收参数不生效」是红线）；fingerprint 是布尔总开关。
+ * @param {object} config 目标 config（原地写）
+ * @param {object} args CLI 参数
+ * @returns {void}
+ */
+function applyForcedSurfaces(config, args) {
+  for (const [k, label] of [['os', '--os'], ['encoding', '--encoding'], ['charset', '--charset']]) {
+    if (args[k] === true) throw new Error(`${label} 需要值（os=windows|linux / encoding=字符集标签 / charset=候选字符集）`);
+  }
+  for (const k of FORCED_SURFACE_KEYS) {
+    const v = normalizeForcedSurface(k, args[k]);
+    if (v !== undefined) config[k] = v;
+  }
+}
+
 function applyWireToggles(config, args) {
   if (args.retryOn === true) throw new Error('--retry-on 需要值：命中即重试的状态码正则（如 "408|429|50[23]"）');
   if (args.crawlExclude === true) throw new Error('--crawl-exclude 需要值：爬虫 URL 排除正则（如 "logout|admin"）');
@@ -743,6 +764,7 @@ function applyWireToggles(config, args) {
   if (args.skipXmlencode) config.skipXmlencode = true;
   if (args.skipWaf) config.skipWaf = true;
   if (args.chunked) config.chunked = true;
+  applyForcedSurfaces(config, args); // [D202] 强制面四项（独立函数，本函数复杂度不增）
 }
 
 /**

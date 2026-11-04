@@ -67,6 +67,8 @@ export function buildKnownArgKeys(parseArgsFn) {
     // ⚠️ `alert` 刻意**不在此表**：宿主动作只认命令行字面量，一份外来 JSON 不能
     // 触发本机命令（安全边界，见 cli/alert.js）。写进档案会被未知键硬拒。
     'chunked', 'skipUrlencode', 'skipXmlencode', 'skipWaf', 'retryOn', 'crawlExclude',
+    // [D202] 强制面四键（os / encoding / charset / fingerprint）；均经 buildConfig 严格校验。
+    'os', 'encoding', 'charset', 'fingerprint',
     // —— [D46] 运维侦察枚举（-b/--statements/--procs）+ -U/--exclude 过滤 ——
     'banner', 'statements', 'procs', 'user', 'exclude',
     // —— [2026-10-12 §A2] 默认关通道组：旗标只开总开关，整组子键经档案透传 ——

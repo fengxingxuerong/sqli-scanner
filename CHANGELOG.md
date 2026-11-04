@@ -7,13 +7,14 @@
 > 下一批次起的条目写在这里。发版时把本节整体升为 `## [x.y.z] - YYYY-MM-DD` 并补汇总段。
 
 <!-- changelog-index:start -->
-**本段覆盖 26 个批次（D228–D199，2026-11-01 → 2026-11-04）**。正文按时间倒序排列；
+**本段覆盖 27 个批次（D228–D202，2026-11-01 → 2026-11-04）**。正文按时间倒序排列；
 下表是同一批次的索引，便于按编号或关键词定位。**索引只是导航，正文未做任何删改**
 （被推翻的旧结论原样保留，这是本仓的既定口径）。新增批次后跑
 `node scripts/changelog-index.mjs --write` 重生成，`--check` 校验是否过期。
 
 | 批次 | 日期 | 主题 |
 |---|---|---|
+| D202 | 11-04 | 强制面与编码四项（缺口 33→30） |
 | D199 | 11-04 | 协议形态与宿主钩子七件（缺口 40→33） |
 | D201 | 11-04 | 传输形态收口：`--http2` 检测链路接通 + `--http1` 互斥 + `--null-connection` 快判相位（缺口 43→40） |
 | D250 | 11-04 | D198 收尾：利用后清理 `--cleanup` + 本地痕迹 `--purge`（缺口 45→43） |
@@ -41,6 +42,69 @@
 | D229 | 11-01 | 交付闸收口：P0-3 卡顿修复（haystack 先截后拼）+ ai-gateway 断言去模型依赖 |
 | D228 | 11-01 | AI 报告网关端到端验收（ai-gateway 套件）+ 本地网关 runbook + CI 靶场硬要求扩展 |
 <!-- changelog-index:end -->
+
+### 2026-11-04 批次 D202 · 强制面与编码四项（缺口 33→30）
+
+**动机**：底账 D202 组——`--os`（P2 gap）/ `--encoding`（P2 gap）/ `--charset`（P3 gap）
+零入口，`--fingerprint` 只是 `part:--banner`（部分覆盖）。共同点是「自动推断错了就没救」：
+目标声明错字符集、盲注提取字符集已知、OS 影响 UDF 平台、报告缺一等指纹字段时，
+使用者没有任何显式覆盖手段。
+
+**交付**：
+
+- **四旗标**：`--os <windows|linux>` / `--encoding <label>` / `--charset <chars>`（值型，
+  缺值硬拒）+ `--fingerprint`（布尔）。CLI / `--config` 档案 / REST 三入口齐备。
+- **单源校验**：新 `src/config/forcedSurfaces.js`（`normalizeForcedSurface`）由 CLI 与 REST
+  共用，避免两处正则/枚举静默分叉；REST 侧 `scanGuard/forcedSurfacesGuard.js` 只做
+  AppError 包装。**不进 `BACKFILL_SCALAR_KEYS`**（D199 实测过的坑：宽松兜底与 bespoke
+  严格校验语义冲突，会打破「兜底键带 1 全落地」不变式）。
+- **`--encoding` 真解码**：`decodeResponseBody(data, headers, opts)` 新增显式字符集，
+  优先于 Content-Type 与 HTML `<meta>`，`charsetSource='explicit'`；不支持的标签回退
+  utf-8 并标 `charsetUnsupported`。axios / undici 两条通道 + `finalizeAxiosResponse` 同源，
+  并经 `egressOpts` 受治清单透传（检测/提取/指纹/爬虫同一解码口径）。
+- **`--charset` 真改探测**：`charsetRanges.js` 把候选字符按码值合并成区间（≤8 段防请求放大），
+  `blindExtractor` 的类探测阶段由硬编码 `[0-9]`/`[a-z]` 改成按 `ctx.config.charset` 逐区间试，
+  全不中回退全区间二分；**默认区间与改动前逐值等价**。`classProbeStep` 抽成纯函数后主循环
+  行数 -7 / 圈 -5（未抬基线）。
+- **`--fingerprint` 真落盘**：`scan/summaryFingerprint.js` 把已采集信号（DBMS/版本/证据等级、
+  WAF 厂商、显式 OS、显式编码）汇总成 `summary.fingerprint`，写入放在
+  `finalizeSideEffects`（`finalizeReport` 贴行数/圈复杂度基线，新增一行判定就会顶破）。
+  **不主动探测、未显式指定时 OS 为 `null` + `osSource='unspecified'`**，不猜不编。
+- **`--os` 真消费**：CLI 的 `udfInstall` 传 `platform`（覆盖默认 linux → dll/so 选择），
+  并进指纹输出。命令模板仍按 DBMS 推断，边界见下。
+- **测试** `server/tests/d202ForcedSurfaces.test.js` 13 条：参数面/负向/档案键、单源校验、
+  REST 透传与严格类型、GBK 字节真解码 + header 覆盖 + 不支持标签回退、两条通道同源、
+  字符区间与状态推进、指纹不编造 OS、剔注释的源码接线守卫。
+
+**工程决策（门禁红后的修法，均未放宽判据）**：
+① duplication 首跑 3229 > 基线 3225（只减不增）——不是新增文件有重复对（JSON 详单里
+新文件零命中），而是 `scalarsCore` 的 8 行 `pickBool` 逐键链与 `scalarsEgress` 同形链
+在令牌窗口上重叠。把前者改成表驱动循环 → **3223 < 3225**，真删重复代码。
+② `applyForcedSurfacesGuarded` 圈 17 > 新代码软上限 15 → 拆成「每键一个小校验器」表。
+③ `finalizeReport` 行/圈顶破 → 指纹写入移进已抽出的 `finalizeSideEffects`。
+④ 提交前 pre-commit 专属的 `error-contract-guard` 抓出本批新文件 `forcedSurfaces.js`
+5 处裸 `Error`（非受限目录「只减不增」判成新增债）：改为统一 `AppError(INVALID_PARAM)`，
+REST 包装层保留同码值边界；**未抬基线、未跳过钩子**。该门禁不在收口清单 43 项内
+（只在 pre-commit / check:all 跑），与 D249 补 arch:guard 之前的形态同源，
+接入收口清单与自证留待单独批次。
+
+**旧口径作废**：底账 NOTES 里四条「未暴露/未实现」的缺口说明随本批实现落地清除
+（不是把数字改小，是能力已存在）；`--fingerprint` 从 `part:--banner` 升为 `ok`。
+**缺口 33→30，同名同义 121（55%）**，产物重生成（分母 222 不变）。
+
+**结果**：新增测试 13/13（`server/tests/d202ForcedSurfaces.test.js`）；底账 `--check` /
+`--selftest`、`npm run facts:check` 全绿；`npm run gate:close` **43/43**（2026-11-04 18:35
+本机实测，含 typecheck / lint / 七道门禁及各自证 / wiring / facts / refs / redos /
+stale-claims / changelog-index 等全部 43 项，未放宽任何判据）；上述 ④ 补修后复跑同为
+43/43。D202 单测 13/13、连带白名单回归 26/26、`typecheck:server` 零错误。facts 终值：
+服务端 4113 用例（4107 pass / 0 fail / 6 skip）、前端 579、徽章 4686；覆盖率 lines 90.93% /
+branches 79.29% / functions 84.32%（阈值 85 / 74 / 77）。
+
+**诚实边界**：`--os` 只覆盖 UDF 平台与指纹标注，**文件写/OS shell 命令模板仍按 DBMS 推断，
+未做跨平台切换**（无真机 A/B）；`--fingerprint` 不做 OS/Web 服务器主动探测；
+`--encoding` 只有单元级 GBK 字节解码验证，无真靶场 A/B；`--charset` 只作用于布尔/字节
+提取的类探测阶段（时间通道的数字收窄未改），提速幅度未实测；三项均无授权目标真机 e2e，
+结论不得外推为能力声明。
 
 ### 2026-11-04 批次 D199 · 协议形态与宿主钩子七件（缺口 40→33）
 

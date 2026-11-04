@@ -5,6 +5,36 @@
 
 ---
 
+## 2026-11-04 批次 D202 · 强制面与编码四项（缺口 33→30）（已完成，见 CHANGELOG）
+
+**起点**：底账 D202 组——`--os`(P2) / `--encoding`(P2) / `--charset`(P3) 零入口，
+`--fingerprint` 仅 `part:--banner`。共同点：自动推断错了使用者没有显式覆盖手段。
+
+**交付**：
+1. 四旗标（3 值型缺值硬拒 + 1 布尔），CLI / `--config` / REST 三入口齐备；
+   校验单源在 `src/config/forcedSurfaces.js`，REST 包装在 `scanGuard/forcedSurfacesGuard.js`，
+   **不进 `BACKFILL_SCALAR_KEYS`**（D199 实测的宽松兜底与严格校验冲突）。
+2. `--encoding`：`decodeResponseBody` 第三参数显式字符集，覆盖 header/meta；
+   axios/undici 两通道 + `finalizeAxiosResponse` 同源，经 `egressOpts` 透传。
+3. `--charset`：`charsetRanges.js` 把候选字符按码值合并成 ≤8 段，
+   `blindExtractor` 类探测逐段试（默认区间与旧行为逐值等价），全不中回退全区间二分。
+4. `--fingerprint`：`summary.fingerprint` 汇总已采集信号（不主动探测、不猜 OS），
+   写入放在 `finalizeSideEffects`（`finalizeReport` 贴复杂度基线）。
+5. `--os`：CLI `udfInstall` 传 `platform` 覆盖 UDF dll/so 选择 + 指纹标注；
+   命令模板仍按 DBMS 推断（边界见 CHANGELOG）。
+6. 测试 `server/tests/d202ForcedSurfaces.test.js` 13 条；底账 4 项改 ok、NOTES 清 4 条、
+   PLAN 的 D202 组撤编 ⇒ **缺口 33→30，同名同义 121**；help/README/api/user-guide 同步。
+
+**门禁红后的修法（未放宽任何判据）**：duplication 3229>3225 ⇒ 把 `scalarsCore` 的 8 行
+`pickBool` 链改表驱动 → 3223；新校验函数圈 17>15 ⇒ 拆表；`finalizeReport` 顶线 ⇒ 移到
+`finalizeSideEffects`。
+
+**诚实边界**：`--os` 未做跨平台命令模板切换；`--fingerprint` 不主动探测 OS/Web；
+`--encoding` 仅单元级 GBK 解码验证；`--charset` 只作用于字节/布尔提取类探测，提速未实测；
+四项均无真靶场 e2e，不得外推为能力声明。
+
+---
+
 ## 2026-11-04 批次 D199 · 协议形态与宿主钩子七件（缺口 40→33）（已完成，见 CHANGELOG）
 
 **起点不是空白**：工作区留着并发会话的 8 个未提交文件（07:14–07:18 半写），

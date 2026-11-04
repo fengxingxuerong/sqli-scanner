@@ -8,6 +8,8 @@ import { ErrorCode, AppError } from '../../core/errors.js';
 import { TECHNIQUE_TYPES } from '../../engine/payloads.js';
 import { pickBool } from '../scanConfigUtils.js';
 import { applyTuningKnobs } from '../scanConfigTuning.js';
+// [D202] 强制面四键的 REST 入口（实现在独立模块，理由见该文件头）
+import { applyForcedSurfacesGuarded } from './forcedSurfacesGuard.js';
 
 /**
  * [D201 2026-11-04] HTTP 传输形态三键（http2 / nullConnection / disableKeepAlive）：
@@ -27,7 +29,10 @@ function applyTransportBooleans(config, cfg) {
   // [D199] 同属「出口标量」职责，合并到本 helper 内调用：guardScalarsEgress 的函数体
   // 已贴复杂度基线（只许持平或变浅），再挂一行调用就会顶破。
   applyWireTogglesGuarded(config, cfg);
+  // [D202] 强制面四项同样在 helper 内落地（理由同上）
+  applyForcedSurfacesGuarded(config, cfg);
 }
+
 
 /**
  * [D199 2026-11-04 对标 sqlmap] 协议形态六键的 REST 入口严格校验。

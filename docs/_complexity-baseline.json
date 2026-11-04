@@ -260,19 +260,19 @@
       "limitLines": 100,
       "limitComplexity": 15
     },
-    "server/src/api/scanRoutes.js::<arrow@483>": {
+    "server/src/api/scanRoutes.js::<arrow@487>": {
       "lines": 68,
       "complexity": 34,
       "limitLines": 100,
       "limitComplexity": 15
     },
-    "server/src/api/scanRoutes.js::<arrow@626>": {
+    "server/src/api/scanRoutes.js::<arrow@630>": {
       "lines": 65,
       "complexity": 30,
       "limitLines": 100,
       "limitComplexity": 15
     },
-    "server/src/api/scanRoutes.js::<arrow@822>": {
+    "server/src/api/scanRoutes.js::<arrow@826>": {
       "lines": 27,
       "complexity": 26,
       "limitLines": 100,
@@ -693,8 +693,8 @@
       "limitComplexity": 15
     },
     "server/src/engine/blindExtractor.js::_extractBytesBisect": {
-      "lines": 106,
-      "complexity": 32,
+      "lines": 99,
+      "complexity": 27,
       "limitLines": 100,
       "limitComplexity": 15
     },

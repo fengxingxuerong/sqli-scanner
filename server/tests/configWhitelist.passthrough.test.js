@@ -79,6 +79,11 @@ const PROBE = {
   skipWaf: true,
   retryOn: '408|429',
   crawlExclude: 'logout',
+  // [D202] 强制面四键：严格枚举/形状校验，默认探针 1 被拒是正确行为，给合法值测透传。
+  os: 'linux',
+  encoding: 'gbk',
+  charset: '0123456789abcdef',
+  fingerprint: true,
   // [P0 2026-09-09 实战批次] 新键探针值（默认探针 1 过不了键自身校验）
   invalidValue: 'bignum',
   knownPoint: { param: 'id' },

@@ -237,22 +237,16 @@ function applyConcurrencyAndMine(config, cfg) {
   if (dumpConcurrency !== undefined) config.dumpConcurrency = dumpConcurrency;
   const dumpDatabaseConcurrency = pickInt(cfg, 'dumpDatabaseConcurrency', defaults.dumpDatabaseConcurrency, 1, 16);
   if (dumpDatabaseConcurrency !== undefined) config.dumpDatabaseConcurrency = dumpDatabaseConcurrency;
-  const crawlForms = pickBool(cfg, 'crawlForms');
-  if (crawlForms !== undefined) config.crawlForms = crawlForms;
-  const paramMine = pickBool(cfg, 'paramMine');
-  if (paramMine !== undefined) config.paramMine = paramMine;
-  const crawlBrowser = pickBool(cfg, 'crawlBrowser');
-  if (crawlBrowser !== undefined) config.crawlBrowser = crawlBrowser;
-  const skipStatic = pickBool(cfg, 'skipStatic');
-  if (skipStatic !== undefined) config.skipStatic = skipStatic;
-  const validationSkip = pickBool(cfg, 'validationSkip');
-  if (validationSkip !== undefined) config.validationSkip = validationSkip;
-  const pocRedactAuth = pickBool(cfg, 'pocRedactAuth');
-  if (pocRedactAuth !== undefined) config.pocRedactAuth = pocRedactAuth;
-  const confirmFormWrites = pickBool(cfg, 'confirmFormWrites');
-  if (confirmFormWrites !== undefined) config.confirmFormWrites = confirmFormWrites;
-  const prefilterSinglePoint = pickBool(cfg, 'prefilterSinglePoint');
-  if (prefilterSinglePoint !== undefined) config.prefilterSinglePoint = prefilterSinglePoint;
+  // [D202] 表驱动：原 8 行逐键 pickBool 链与 scalarsEgress 的同形链在令牌窗口上
+  // 反复重叠（duplication-guard 的 6 个重复块）。循环后逐键语义与顺序完全一致，
+  // 不是放宽判据，是把重复代码真的删掉。
+  for (const key of [
+    'crawlForms', 'paramMine', 'crawlBrowser', 'skipStatic', 'validationSkip',
+    'pocRedactAuth', 'confirmFormWrites', 'prefilterSinglePoint',
+  ]) {
+    const v = pickBool(cfg, key);
+    if (v !== undefined) config[key] = v;
+  }
 }
 
 /**

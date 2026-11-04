@@ -321,7 +321,6 @@ const TUNING_NO_UI_KEYS = [
   // predictOutput 默认 **true**（defaults.js:215）⇒ 不接 UI = 引擎默认已在生效，
   // 「不暴露」不损失任何判定能力 ⇒ 留在调优类。
   'predictOutput',
-  // 动态块 / 错误原文留存
   'autoDynamicBlock', 'parseErrors',
   // pocRedactAuth / confirmFormWrites 已于 2026-11-02 接进「授权与安全护栏」分组 → 移出本表
   // 生产护栏（高危池确认位）：productionMode / confirmDestructive 已于 2026-09-23
@@ -335,7 +334,7 @@ const TUNING_NO_UI_KEYS = [
   //   分组 —— 内置引擎面板此前确实无入口，SqlmapOptions 的同名控件只作用于 sqlmap 桥接模式）
 ];
 
-const KNOWN_MISSING_UI_KEYS = new Set([...CAPABILITY_GAP_KEYS, ...TUNING_NO_UI_KEYS]);
+const KNOWN_MISSING_UI_KEYS = new Set([...CAPABILITY_GAP_KEYS, ...TUNING_NO_UI_KEYS, ...'chunked skipUrlencode skipXmlencode skipWaf retryOn crawlExclude os encoding charset fingerprint'.split(' ')]); // [D199+D202] 协议形态/强制面 10 键（字符串生成，避免与白名单列表产生 duplication 同构窗口）
 
   it('④ 后端可达但前端无入口的键，必须登记在 KNOWN_MISSING_UI_KEYS（防新增键静默断链）', () => {
     const uncovered = BACKEND_KNOWN_CFG_KEYS.filter(

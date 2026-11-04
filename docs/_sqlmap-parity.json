@@ -4,15 +4,15 @@
   "sqlmapVersion": "1.10.7",
   "stats": {
     "total": 222,
-    "ok": 117,
+    "ok": 121,
     "alias": 30,
-    "part": 10,
+    "part": 9,
     "auto": 3,
-    "gap": 33,
+    "gap": 30,
     "out": 29,
     "gapP1": 0,
-    "gapP2": 5,
-    "gapP3": 28
+    "gapP2": 3,
+    "gapP3": 27
   },
   "groups": [
     {
@@ -547,11 +547,11 @@
         },
         {
           "opt": "--os",
-          "kind": "gap",
+          "kind": "ok",
           "ours": null,
-          "priority": "P2",
+          "priority": null,
           "reason": null,
-          "note": "强制目标 OS（影响文件路径与命令通道形态）；当前按 DBMS 推断，无显式覆盖"
+          "note": null
         },
         {
           "opt": "--invalid-bignum",
@@ -794,11 +794,11 @@
       "options": [
         {
           "opt": "--fingerprint",
-          "kind": "part",
-          "ours": "--banner",
+          "kind": "ok",
+          "ours": null,
           "priority": null,
           "reason": null,
-          "note": "本仓产 DBMS 版本 + summary.dbmsEvidence 分级；OS / Web 服务器指纹未成体系"
+          "note": null
         }
       ]
     },
@@ -1357,11 +1357,11 @@
         },
         {
           "opt": "--charset",
-          "kind": "gap",
+          "kind": "ok",
           "ours": null,
-          "priority": "P3",
+          "priority": null,
           "reason": null,
-          "note": "注入值字符集约束（非 ASCII 目标）未暴露"
+          "note": null
         },
         {
           "opt": "--dump-file",
@@ -1381,11 +1381,11 @@
         },
         {
           "opt": "--encoding",
-          "kind": "gap",
+          "kind": "ok",
           "ours": null,
-          "priority": "P2",
+          "priority": null,
           "reason": null,
-          "note": "页面编码显式声明（GBK/Shift-JIS 目标）未暴露；比对与提取当前按 UTF-8/自动"
+          "note": null
         },
         {
           "opt": "--eta",
@@ -1910,16 +1910,6 @@
         "-v",
         "--dbms-cred",
         "--unstable"
-      ]
-    },
-    {
-      "batch": "D202",
-      "title": "强制面与编码（把「推断错了就没救」的几项变成可显式指定）",
-      "items": [
-        "--os",
-        "--encoding",
-        "--charset",
-        "--fingerprint"
       ]
     },
     {

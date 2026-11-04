@@ -362,7 +362,8 @@ async function dispatchExploitAction(exploiter, ctx, args) {
   let result;
   if (args.udfInstall) {
     console.error(`[exploit] UDF 全链投递（hex=${args.udfHex || '未指定'}）`);
-    result = await exploiter.udfInstall(ctx, { hexPath: args.udfHex });
+    // [D202] --os 显式覆盖 UDF 平台（默认 linux 由 udfInstall 自己决定，传 undefined 不覆盖）
+    result = await exploiter.udfInstall(ctx, { hexPath: args.udfHex, platform: ctx.config?.os || args.os });
   } else if (args.osCmd) {
     console.error(`[exploit] 执行系统命令: ${args.osCmd}`);
     result = await exploiter.osShell(ctx, args.osCmd);

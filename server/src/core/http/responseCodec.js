@@ -125,9 +125,11 @@ export function detectResponseCharset(contentType, buf) {
  * Buffer.toString('utf-8')）逐字符一致 —— utf-8 走 Node 原生解码，不进 TextDecoder。
  * @param {*} data 原始响应体（Buffer/ArrayBuffer/Uint8Array/string/undefined）
  * @param {object} [headers] 响应头
+ * @param {{encoding?: string}} [opts] [D202] 显式页面编码（--encoding）：优先于
+ *   Content-Type header 与 HTML <meta>，charsetSource 标 'explicit'。未配置时逐字保持旧行为。
  * @returns {{text:string, charset:string, charsetSource:string, declaredCharset?:string, charsetUnsupported?:boolean}}
  */
-export function decodeResponseBody(data, headers) {
+export function decodeResponseBody(data, headers, opts = {}) {
   // 已是文本（HEAD 请求、被 mock 的传输层、历史调用方）→ 原样透传，绝不二次解码
   if (typeof data === 'string') {
     return { text: data, charset: 'utf-8', charsetSource: 'passthrough' };
@@ -136,7 +138,12 @@ export function decodeResponseBody(data, headers) {
   if (!buf || buf.length === 0) {
     return { text: '', charset: 'utf-8', charsetSource: data === undefined || data === null ? 'none' : 'empty' };
   }
-  const found = detectResponseCharset(getResponseHeader(headers, 'content-type'), buf);
+  // [D202] --encoding 显式声明：目标声明错了 / 压根不声明时，用户能覆盖自动探测。
+  // 走同一个 normalizeCharsetLabel 校验，非法标签当作没配（不静默改成别的字符集）。
+  const forced = normalizeCharsetLabel(opts && opts.encoding ? opts.encoding : '');
+  const found = forced
+    ? { label: forced, source: 'explicit' }
+    : detectResponseCharset(getResponseHeader(headers, 'content-type'), buf);
   if (!found || UTF8_LABELS.has(found.label)) {
     return {
       text: stripBom(buf.toString('utf8')),
@@ -218,7 +225,7 @@ export function finalizeAxiosResponse(res, opts) {
   if (raw === undefined || raw === null) return res; // 无响应体：不造数据
   const buf = toBuffer(raw);
   const bodyBytes = buf ? buf.length : Buffer.byteLength(String(raw), 'utf8');
-  const decoded = decodeResponseBody(raw, res.headers);
+  const decoded = decodeResponseBody(raw, res.headers, { encoding: opts && opts.encoding });
   res.data = decoded.text;
   attachResMeta(res, {
     bodyBytes,

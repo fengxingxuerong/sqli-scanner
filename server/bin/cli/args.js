@@ -67,6 +67,8 @@ export function applyChannelFlag(a, args) {
   if (a === '--poc-redact-auth') { args.pocRedactAuth = true; return true; }
   if (a === '--no-poc-redact-auth') { args.pocRedactAuth = false; return true; }
   if (a === '--confirm-form-writes') { args.confirmFormWrites = true; return true; }
+  // [D202 对标 sqlmap --fingerprint] 报告级指纹汇总（只汇总已采集信号，不做主动探测）
+  if (a === '--fingerprint') { args.fingerprint = true; return true; }
   return false;
 }
 
@@ -119,6 +121,12 @@ const OPTIONAL_VALUE_FLAGS = new Map([
   ['--retry-on', 'retryOn'],
   ['--crawl-exclude', 'crawlExclude'],
   ['--alert', 'alert'],
+  // [D202 对标 sqlmap --os/--encoding/--charset] 三个值型「强制面」：
+  //   os=windows|linux（覆盖 UDF 平台/指纹标注）、encoding=页面字符集标签、
+  //   charset=盲注字节提取的候选字符集。缺值落 true ⇒ buildConfig 硬拒。
+  ['--os', 'os'],
+  ['--encoding', 'encoding'],
+  ['--charset', 'charset'],
 ]);
 
 export function parseArgs(argv, preset) {

@@ -279,6 +279,10 @@ curl -X POST http://127.0.0.1:4567/api/scan/start \
 | `chunked` / `skipUrlencode` / `skipXmlencode` / `skipWaf` | bool（默认 false） | [D199] 协议形态四开关：分块发送 / 注入值不编码 / XML 值不转义 / 跳过 WAF 识别阶段。**只认真布尔**，`1`/`"true"` 会被入口拒绝（引擎按 `=== true` 判定，收下非布尔会造成「REST 收了却不生效」） |
 | `retryOn` | string，≤200，合法正则 | [D199] 状态码命中即重试（如 `"408\|429\|50[23]"`），复用 `retry` 余量；入口预编译，非法表达式拒绝启动 |
 | `crawlExclude` | string，≤500，合法正则 | [D199] 爬虫 URL 排除正则（如 `"logout\|admin"`）：命中的链接不入队、不取页 |
+| `os` | `windows` \| `linux` | [D202] 强制目标 OS：覆盖 UDF 平台与报告指纹标注（命令模板仍按 DBMS 推断） |
+| `encoding` | string，≤30，字符集标签 | [D202] 显式页面编码（如 `gbk` / `shift_jis`），覆盖 Content-Type 与 HTML meta 自动探测；解码在两条传输通道同源生效 |
+| `charset` | string，≤256，无换行/NUL | [D202] 盲注字节提取的候选字符集（字符按码值合并成区间，最多 8 段） |
+| `fingerprint` | bool（默认 false） | [D202] 开启后把已采集信号汇总进 `summary.fingerprint`；不做主动探测，未指定 OS 时字段为 `null` |
 | `prefilter` | bool（默认 true） | 参数预筛选（1-2 个廉价探测排除明显无注入点参数，省 50-75% 请求） |
 | `autoDynamicBlock` | bool（默认 true） | 对标 sqlmap 动态内容感知：基线两两分块比对标记高频差异块为动态块，后续相似度比对自动排除 |
 | `predictOutput` | bool（默认 true） | 对标 sqlmap `--predict-output`：同目标跨点复用常见值二分提取结果 |

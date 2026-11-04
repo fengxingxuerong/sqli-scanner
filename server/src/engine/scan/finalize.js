@@ -12,6 +12,8 @@ import { logger } from '../../core/logger.js';
 import { createVulnerability, countBy } from '../models.js';
 import { summarizeSkipped } from '../scanHelpers.js';
 import { dbmsEvidenceOf } from '../dbmsEvidence.js';
+// [D202] 报告级指纹汇总（只汇总已采集信号，不主动探测）
+import { buildFingerprint } from './summaryFingerprint.js';
 import { publicReport } from '../scanHelpers.js';
 // [D181] 只读安全配置审计（对标 sqlmap --audit）
 import { auditPhase } from './auditPhase.js';
@@ -26,7 +28,12 @@ import { attachVulnContext } from '../vulnEnrich.js';
  * @returns {Promise<void>}
  */
 async function finalizeSideEffects(run) {
-  const { sm, scanId, s, target, report, session, ctxBase } = run;
+  const { sm, scanId, s, target, report, session, ctxBase, pointsToScan, wafAgg, dbms } = run;
+  // [D202] --fingerprint：默认关，开启才把已采集信号汇总进 summary（零额外请求），
+  // 必须在 session.finalize 之前写，保证 report.json / SSE / 会话快照同一份事实。
+  if (target.config?.fingerprint === true) {
+    report.summary.fingerprint = buildFingerprint({ report, pointsToScan, wafAgg, config: target.config, dbms });
+  }
   // [D181] 只读安全配置审计（opt-in，仅直连）：赶在会话落盘之前，
   // 这样 report.json / manifest / 会话快照拿到的是同一份事实。
   // 直连模式下 ctxBase.httpClient 就是 DirectConnector，故统一从这里取。
@@ -174,6 +181,8 @@ export async function finalizeReport(run) {
   } catch (e) {
     logger.warn(`方言验证等级写入失败（不影响报告主体）：${e.message}`);
   }
+  // [D202] --fingerprint 的汇总在 finalizeSideEffects 内落地（finalizeReport 贴行数/圈复杂度基线，
+  // 新增一行判定就会顶破 —— 按职责放进已抽出的「可选附加阶段」）。
   // [P0-FIX 2026-09-10] 拦截处置策略落盘：前端/报告要能说清「本次被压制了什么、用了什么链重跑」
   report.summary.blockPolicy = {
     action: blockPolicy?.action ?? 'none',

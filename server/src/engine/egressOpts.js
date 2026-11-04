@@ -76,6 +76,9 @@ export const EGRESS_KEYS = Object.freeze([
   // [D199 2026-11-04 对标 sqlmap --chunked] Transfer-Encoding: chunked 发送请求体
   //（绕 IDS/WAF 的收发形态；仅 HTTP/1.1 axios 通道，带请求体的方法生效）。
   'chunked',
+  // [D202 对标 sqlmap --encoding] 显式页面编码：解码点在 httpClient 的 axios/undici 两条
+  // 通道（decodeResponseBody 第三参数），必须经受治出口同源透传，否则只有爬虫取页生效。
+  'encoding',
 ]);
 
 /**
@@ -121,6 +124,8 @@ export function buildEgressOpts(config, overrides = {}) {
     retryOn: cfg.retryOn ?? null,
     // [D199] --chunked：请求体分块发送（_rawRequest 消费；GET/无体方法无效果）
     chunked: cfg.chunked === true,
+    // [D202] --encoding：显式字符集标签（decodeResponseBody 消费；null = 自动探测）
+    encoding: cfg.encoding ?? null,
   };
   if (overrides && typeof overrides === 'object') Object.assign(o, overrides);
   return o;

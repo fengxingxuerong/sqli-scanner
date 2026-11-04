@@ -423,6 +423,14 @@ export const HELP_TEXT = `sqli-scanner CLI（对标 sqlmap 的 Node 引擎命令
   --alert <cmd>             [D199] 命中时执行宿主命令（仅单目标模式）。只认命令行字面量：
                             不进 --config/REST、不插值任何目标数据；命中条数/风险走
                             SQLI_ALERT_FINDINGS / SQLI_ALERT_RISK 环境变量；执行失败不改退出码
+  --os <windows|linux>      [D202] 强制目标 OS：覆盖 UDF 平台（dll/so）与报告指纹标注；
+                            命令模板仍按 DBMS 推断，未做跨平台命令切换（见 README 边界）
+  --encoding <label>        [D202] 显式页面编码（如 gbk / shift_jis）：覆盖 Content-Type 与
+                            HTML meta 的自动探测，检测/提取/指纹同一解码口径
+  --charset <chars>         [D202] 盲注字节提取的候选字符集（如 "0123456789abcdef"）：
+                            按码值合并成区间逐个做类探测，未命中回退全区间二分，默认行为不变
+  --fingerprint             [D202] 把本次已采集信号汇总成 summary.fingerprint（DBMS/版本/
+                            证据等级 / WAF 厂商 / 显式 OS / 编码）。不主动探测、不猜 OS
   --list-tampers            [D197] 只列出当前可用的 tamper 插件（名字/说明/dbms 限定/terminal/幂等）
                             并退出，不发起任何请求（对标 sqlmap --list-tampers）。总数是运行时真值，
                             文档里的数字会漂 —— 挑链前以本输出为准

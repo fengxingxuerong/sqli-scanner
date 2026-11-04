@@ -185,7 +185,7 @@ export async function _rawUndici(opts, headers, timeoutMs, pinnedLookup) {
         );
       }
     }
-    const decoded = decodeResponseBody(raw, resHeaders);
+    const decoded = decodeResponseBody(raw, resHeaders, { encoding: opts.encoding });
     let text = decoded.text;
     if (truncated) text += `[响应超限截断 ${total} 字节 > ${maxBody}]`;
     const res = { status: statusCode, data: text, headers: resHeaders, isHttp2: true };

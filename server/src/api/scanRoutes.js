@@ -110,6 +110,10 @@ const KNOWN_CFG_KEYS = new Set([
   // 透传与严格类型校验在 scanGuard/scalarsEgress.js（applyWireTogglesGuarded），
   // 仅登记白名单而不透传会重演「REST 收了、引擎收不到」的静默假阴性。
   'chunked', 'skipUrlencode', 'skipXmlencode', 'skipWaf', 'retryOn', 'crawlExclude',
+  // [D202 2026-11-04] 强制面四键：os / encoding / charset / fingerprint。
+  // 严格校验与透传在 scanGuard/scalarsEgress.js（applyForcedSurfacesGuarded），
+  // 不进 BACKFILL_SCALAR_KEYS —— 宽松兜底与 bespoke 校验语义冲突（D199 实测过的坑）。
+  'os', 'encoding', 'charset', 'fingerprint',
   // [P1-PERF 2026-09-08] 输入校验型目标的可证安全跳过开关 + PoC 凭据脱敏开关
   'validationSkip', 'pocRedactAuth',
   // [P0-FIX 2026-09-09] 生产护栏：高危池（RCE/写文件/DoS 类）投放必须显式确认。
