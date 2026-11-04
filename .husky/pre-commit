@@ -45,7 +45,10 @@ if [ "${SKIP_PRECOMMIT:-}" = "1" ]; then
 fi
 
 # 1. 暂存区的 lint（原有行为，放在最前：失败最快、反馈最直接）
-npx lint-staged
+# [FIX 2026-11-05] 不走 npx：Windows 上 npx 经 cmd shim 派生，本机实测会偶发中断，
+# 让整个钩子报 exit 1 —— 而下面 13 项门禁其实全绿（2026-11-04 提交就因此被误拦一次）。
+# 与 facts-sync 采集同根因。直跑本地 bin 绕开 shim；lint-staged 的任务配置与判定不变。
+node node_modules/lint-staged/bin/lint-staged.js
 
 # 2. 全仓库一致性门禁。任一失败即中止提交。
 #    每条都单独跑（不串成 npm run check:all）——后者含 cargo/clippy/coverage，
