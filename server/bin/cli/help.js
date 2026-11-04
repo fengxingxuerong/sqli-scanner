@@ -117,6 +117,10 @@ export const HELP_TEXT = `sqli-scanner CLI（对标 sqlmap 的 Node 引擎命令
   --dump-format <fmt>        拖库数据独立产物格式（[D42] 对标 sqlmap --dump-format，csv/sql/html/json）：
                              有拖库数据时产出 dump.<ext>（一键扫描目录内）。只影响独立产物，
                              报告内嵌的拖库区不变。非法格式拒绝启动
+  --dump-file <path>         拖库独立产物的落盘路径（[D245] 对标 sqlmap --dump-file）：绝对路径直接用，
+                             相对名落在 --out 目录内。缺省仍是 dump.<ext>
+  --csv-del <ch>             CSV 导出分隔符（[D245] 对标 sqlmap --csv-del）：单字符，或 \t 表示制表符
+                             （Excel 本地化场景常用分号）。只影响拼接字符，单元格内的逗号清洗不变
   --no-truncate              导出时长字段不截断（[D243] 对标 sqlmap --no-truncate）：默认
                              evidence/description 截到 4000 字符，取证时用它会丢掉长 payload /
                              长响应。只影响导出渲染，内存报告与台账口径不变

@@ -448,6 +448,25 @@ function applyDbmsAndSecondOrder(config, args) {
  * @param {object} config 目标 config（原地写）
  * @param {object} args CLI 参数
  */
+/**
+ * [D245 对标 sqlmap --dump-file / --csv-del] 导出层两个参数：产物落盘路径与 CSV 分隔符。
+ * 抽成独立函数的理由：`applyD42CodesAndFormats` 的圈复杂度已到软上限（15），内联会超。
+ * @param {Record<string, any>} config 目标配置（原地写入）
+ * @param {any} args CLI 参数
+ * @returns {void}
+ */
+function applyExportPaths(config, args) {
+  // --dump-file：绝对路径直接用，相对名落在 --out 目录内（落盘侧解析）
+  if (args.dumpFile != null && String(args.dumpFile).trim()) config.dumpFile = String(args.dumpFile).trim();
+  // --csv-del：单字符，或 `\t` 表示制表符（Excel 本地化场景）；多字符直接拒启动，不静默回落
+  if (args.csvDelimiter != null && String(args.csvDelimiter).trim()) {
+    const d = String(args.csvDelimiter);
+    if (d === '\\t') config.csvDelimiter = '\t';
+    else if (d.length === 1) config.csvDelimiter = d;
+    else throw new Error(`--csv-del 只认单个字符（或用 \\t 表示制表符），收到：${d}`);
+  }
+}
+
 function applyD42CodesAndFormats(config, args) {
   if (args.ignoreCode != null && String(args.ignoreCode).trim()) {
     const codes = String(args.ignoreCode)
@@ -469,6 +488,9 @@ function applyD42CodesAndFormats(config, args) {
     }
     config.dumpFormat = fmt;
   }
+  // [D245] --dump-file / --csv-del：两个导出层参数抽成独立函数 ——
+  // applyD42CodesAndFormats 的圈复杂度已到软上限，直接内联会超。
+  applyExportPaths(config, args);
   // [D50 2026-10-12] --fetch-using：盲注提取比较算子（非法直接拒启动，不静默回落）
   if (args.fetchUsing != null && String(args.fetchUsing).trim()) {
     const op = String(args.fetchUsing).trim().toLowerCase();

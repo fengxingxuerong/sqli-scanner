@@ -1021,7 +1021,7 @@ async function main() {
           // 同名目标（集合里同 URL 不同 method）会互相覆盖 ⇒ 名字里带上方法，避免"少一份报告"
           const nameBase = isCollection && r.url?.method ? `${urlOf(r.url)} ${r.url.method}` : urlOf(r.url);
           const safeName = nameBase.replace(/[^a-zA-Z0-9.-]/g, '_').slice(0, 100);
-          writeFileSync(join(args.out, `${safeName}.${ext}`), formatReport(r.report, fmt, { noTruncate: args.noTruncate }), 'utf-8');
+          writeFileSync(join(args.out, `${safeName}.${ext}`), formatReport(r.report, fmt, { noTruncate: args.noTruncate, csvDelimiter: args.csvDelimiter }), 'utf-8');
           // [goal 批次 A-2] 扫描台账：每次扫描自动登记可追溯快照（meta/report/poc）
           // [FIX 2026-09-18] PoC 落盘此前恒为空：ReportGenerator 的 poc 是**惰性且不可变**挂载
           // （_attachPoc 返回新对象、不回写入参），而此处把【原始】r.report 交给 recordScan，
@@ -1099,7 +1099,7 @@ async function main() {
       for (const r of results) {
         if (r.report) {
           const safeName = r.url.replace(/[^a-zA-Z0-9.-]/g, '_').slice(0, 100);
-          writeFileSync(join(args.out, `${safeName}.${ext}`), formatReport(r.report, fmt, { noTruncate: args.noTruncate }), 'utf-8');
+          writeFileSync(join(args.out, `${safeName}.${ext}`), formatReport(r.report, fmt, { noTruncate: args.noTruncate, csvDelimiter: args.csvDelimiter }), 'utf-8');
         }
       }
       console.error(`报告已写入 ${args.out}/（格式 ${fmt}${batchWriteHint(fmt)}）`);

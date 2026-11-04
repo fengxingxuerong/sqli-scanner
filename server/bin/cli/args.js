@@ -177,6 +177,10 @@ function parseMiscArg(a, args, next) {
   if (a === '--check-internet') { args.checkInternet = true; return true; }
   // [D243 对标 sqlmap --no-truncate] 导出时长字段不截断（取证：长 payload / 长响应）
   if (a === '--no-truncate') { args.noTruncate = true; return true; }
+  // [D245 对标 sqlmap --dump-file] 拖库独立产物的落盘路径（绝对路径或 --out 内相对名）
+  if (a === '--dump-file') { args.dumpFile = next(); return true; }
+  // [D245 对标 sqlmap --csv-del] CSV 导出分隔符（默认逗号；Excel 本地化场景常用分号/制表符）
+  if (a === '--csv-del') { args.csvDelimiter = next(); return true; }
   return false;
 }
 
@@ -252,9 +256,9 @@ export function parseArgs(argv, preset) {
     secondReq: null,
     // [D42 2026-10-11 对标 sqlmap] --ignore-code / --randomize / --dump-format / --verify
     // [D240 2026-11-04 对标 sqlmap -t] 同组：原始 HTTP 流量落盘（trafficFile / trafficMaxBody）
-    ignoreCode: null, randomize: null, dumpFormat: null, extractVerify: null, trafficFile: null, trafficMaxBody: null,
+    ignoreCode: null, randomize: null, dumpFormat: null, dumpFile: null, extractVerify: null, trafficFile: null, trafficMaxBody: null,
     // [D50 2026-10-12] --fetch-using：盲注提取比较算子（gt|between，默认 gt）
-    dumpAll: false, identifyWaf: false, commonTables: null, commonColumns: null, fetchUsing: null, noTruncate: false,
+    dumpAll: false, identifyWaf: false, commonTables: null, commonColumns: null, fetchUsing: null, noTruncate: false, csvDelimiter: null,
     randomAgent: false, where: null, paramDel: null,
     // [2026-10-12 优化空间勘查 §A2] NoSQL / OOB 两个**默认关的整通道**开关。
     // 缺口实录：这两个通道引擎早有（ScanManager._runNoSql / oobReceiver），UI（constants.ts

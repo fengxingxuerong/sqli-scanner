@@ -295,10 +295,10 @@ export const STATUS = {
   // 不跳检测中的拦截判定；--alert 见下方 Miscellaneous 的边界说明）。
   '--crawl-exclude': 'ok',
   '--skip-waf': 'ok',
-  '--csv-del': 'gap:P3',
+  '--csv-del': 'ok',
   // [D202] 盲注字节提取的候选字符类区间（charsetRanges.js）
   '--charset': 'ok',
-  '--dump-file': 'gap:P3',
+  '--dump-file': 'ok',
   '--dump-format': 'ok',
   // [D202] 显式页面编码覆盖 header/meta（decodeResponseBody 第三参数）
   '--encoding': 'ok',
@@ -406,8 +406,6 @@ export const NOTES = {
   '--udf-inject': '本仓要求自带 UDF 十六进制（--udf-hex）；不内置编译产物（GPLv2 与供应链边界）',
   '--abort-on-empty': '连续空结果即停（防无意义拖库）；当前只能靠 --max-requests 兜',
   '--binary-fields': '二进制列（图片/哈希）十六进制化导出未实现',
-  '--csv-del': 'CSV 导出分隔符不可配（Excel 本地化场景）',
-  '--dump-file': '拖库数据落盘路径不可单独指定（当前固定 dump.<ext>）',
   '--skip-heuristics': '本仓启发式（prefilter）默认关、--smart 才开；sqlmap 默认开、本项关 —— 同一开关的另一默认值',
   '--table-prefix': 'Oracle/DB2 表前缀枚举参数未暴露',
   '--unsafe-naming': '拖库产物命名安全化开关未暴露（长尾）',
@@ -438,7 +436,7 @@ export const PLAN = [
     title: '长尾 P3（按需；不与上面抢优先级，但都在底账里点名，不许「关起门来」）',
     items: [
       '--abort-code', '--ignore-timeouts', '--safe-post', '--safe-req', '--csrf-data', '--csrf-retries',
-      '--union-values', '--abort-on-empty', '--csv-del', '--dump-file', '--table-prefix',
+      '--union-values', '--abort-on-empty', '--table-prefix',
       '--unsafe-naming', '--web-root', '--no-logging', '--comments', '--pivot-column',
       '--common-files', '--binary-fields', '--proxy-file', '--proxy-freq', '--tor-type', '-v',
       '--dbms-cred',

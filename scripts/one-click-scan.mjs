@@ -26,7 +26,7 @@
 // ============================================================================
 
 import { writeFileSync, mkdirSync } from 'node:fs';
-import { join, resolve, dirname } from 'node:path';
+import { join, resolve, dirname, isAbsolute, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { ScanManager } from '../server/src/engine/ScanManager.js';
@@ -288,6 +288,23 @@ function exitBySeverityGate({ report, failSeverities }) {
   process.exit(report.riskLevel === 'Critical' || report.riskLevel === 'High' ? 2 : 0);
 }
 
+/**
+ * [D245 对标 sqlmap --dump-file] 解析拖库独立产物的落盘路径与清单名。
+ * 抽成函数的理由：`main` 的行数与圈复杂度都贴基线，三元嵌套直接写会超。
+ * @param {any} cfg 扫描配置（读 dumpFile / dumpFormat）
+ * @param {string} outDir 输出目录
+ * @returns {{path: string, name: string}} 绝对落盘路径 + 清单里记的名字
+ */
+function resolveDumpPath(cfg, outDir) {
+  if (!cfg.dumpFile) {
+    const p = join(outDir, `dump.${cfg.dumpFormat}`);
+    return { path: p, name: basename(p) };
+  }
+  // 绝对路径：清单记完整路径（用户要知道写哪去了）；相对名：落在 outDir 内
+  if (isAbsolute(cfg.dumpFile)) return { path: cfg.dumpFile, name: cfg.dumpFile };
+  return { path: join(outDir, cfg.dumpFile), name: cfg.dumpFile };
+}
+
 async function main() {
   const argv = process.argv.slice(2);
   const { opts, rest, error } = splitOwnArgs(argv);
@@ -394,9 +411,11 @@ async function main() {
       );
       let content = parts.join('\n');
       if (cfg.dumpFormat === 'csv') content = '\uFEFF' + content; // Excel BOM（与 report.csv 同口径）
-      const dumpName = `dump.${cfg.dumpFormat}`;
-      writeFileSync(join(outDir, dumpName), content, 'utf-8');
-      files.push(dumpName);
+      // [D245 对标 sqlmap --dump-file] 落盘路径可配：绝对路径直接用，相对名落在 --out 内；
+      // 缺省仍是 dump.<ext>（行为零变化）。解析抽成函数 —— main 的行数/圈复杂度都贴基线。
+      const dp = resolveDumpPath(cfg, outDir);
+      writeFileSync(dp.path, content, 'utf-8');
+      files.push(dp.name);
     }
   }
 

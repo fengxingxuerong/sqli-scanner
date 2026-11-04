@@ -81,7 +81,7 @@ function triageSarif(v) {
  * @param {Map<string, string[]>} remOf pointId|technique → 修复动作
  * @returns {string} 已转义并用逗号拼接的一行
  */
-function csvVulnRow(v, cvssOf, remOf) {
+function csvVulnRow(v, cvssOf, remOf, delim = ',') {
   const key = `${v.pointId}|${v.technique}`;
   const cvss = cvssOf.get(key);
   const rem = (remOf.get(key) || []).join(' / ');
@@ -105,7 +105,7 @@ function csvVulnRow(v, cvssOf, remOf) {
     (v.description || '').replace(/[\r\n,]/g, ' '),
   ]
     .map((c) => csvSafeCell(c))
-    .join(',');
+    .join(delim);
 }
 
 /**
@@ -437,10 +437,12 @@ export class ReportGenerator {
     if (!r.target) {
       const o = { ...r };
       delete o._noTruncate;
+      delete o._csvDelimiter;
       return o;
     }
     const out = { ...r, target: sanitizeTargetForExport(r.target) };
     delete out._noTruncate;
+    delete out._csvDelimiter;
     // Cookie/Header 注入点的 originalValue 是凭据，导出报告与台账同口径打码。
     if (Array.isArray(out.points)) out.points = redactPointsForDisk(out.points);
     return out;
@@ -455,14 +457,17 @@ export class ReportGenerator {
   // [2026-09-13] 交付化：补 CVSS 与修复建议列（口径与 markdown/html 同源）
   toCSV(report) {
     const r = this._forExport(report);
+    // [D245 对标 sqlmap --csv-del] 分隔符可配（Excel 本地化场景常用分号/制表符）。
+    // 只影响拼接字符；单元格内的逗号清洗保持不变（CSV 安全性优先于信息保真）。
+    const delim = report?._csvDelimiter || ',';
     const d = buildDelivery(this._enrich(report));
     const cvssOf = new Map(d.remediation.perVuln.map((it) => [`${it.pointId}|${it.technique}`, it.cvss]));
     const remOf = new Map(d.remediation.perVuln.map((it) => [`${it.pointId}|${it.technique}`, it.actions]));
     const lines = [];
     // [2026-09-17] 交付缺口修复：新增受影响参数/漏洞类型/CWE/OWASP/受影响请求五列，
     // 原列（漏洞ID/注入点/技术/数据库/风险/CVSS/修复建议/说明）全部保留且相对顺序不变。
-    lines.push('漏洞ID,注入点,受影响参数,漏洞类型,CWE,OWASP,技术,数据库,风险,CVSS,受影响请求,修复建议,裁决,裁决备注,说明');
-    for (const v of r.vulns || []) lines.push(csvVulnRow(v, cvssOf, remOf));
+    lines.push(['漏洞ID', '注入点', '受影响参数', '漏洞类型', 'CWE', 'OWASP', '技术', '数据库', '风险', 'CVSS', '受影响请求', '修复建议', '裁决', '裁决备注', '说明'].join(delim));
+    for (const v of r.vulns || []) lines.push(csvVulnRow(v, cvssOf, remOf, delim));
     const rows = r.data?.rows || {};
     if (Object.keys(rows).length) {
       lines.push('');
@@ -479,9 +484,9 @@ export class ReportGenerator {
         // 换行/回车先压成空格再判公式前缀：`csvSafeCell` 只在**行首**生效，
         // 被 \n 拆出来的后半段它管不到，必须由这里先把行结构钉住。
         lines.push(`## ${flattenCell(table)}`);
-        lines.push(cols.map((c) => csvSafeCell(c)).join(','));
+        lines.push(cols.map((c) => csvSafeCell(c)).join(delim));
         for (const obj of arr) {
-          lines.push(cols.map((c) => csvSafeCell(obj[c] ?? '')).join(','));
+          lines.push(cols.map((c) => csvSafeCell(obj[c] ?? '')).join(delim));
         }
       }
     }

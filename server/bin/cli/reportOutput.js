@@ -26,6 +26,12 @@ export function formatReport(report, fmt = 'json', opts = {}) {
   // [D243 对标 sqlmap --no-truncate] 取证场景：长 payload / 长响应不截断。
   // 浅拷贝注入（不改调用方对象，终态快照是共享只读视图）。
   if (opts.noTruncate) report = { ...report, _noTruncate: true };
+  // [D245 对标 sqlmap --csv-del] 分隔符：单字符，或 `\t` 字面量表示制表符。
+  // 非法值静默回落逗号（导出格式不该因为一个分隔符让整份报告写不出来）。
+  if (opts.csvDelimiter) {
+    const d = opts.csvDelimiter === '\\t' ? '\t' : String(opts.csvDelimiter);
+    if (d.length === 1) report = { ...report, _csvDelimiter: d };
+  }
   const f = String(fmt || 'json').toLowerCase();
   if (f === 'csv' || f === 'markdown' || f === 'md' || f === 'html') {
     const rg = new ReportGenerator();
@@ -99,11 +105,11 @@ function writeSingleReportFiles(report, args) {
   if (outIsDir) {
     mkdirSync(args.out, { recursive: true });
     const ext = fmt === 'markdown' || fmt === 'md' ? 'md' : fmt === 'db-json' ? 'db.json' : fmt;
-    writeFileSync(join(args.out, `report.${ext}`), formatReport(report, fmt, { noTruncate: args.noTruncate }), 'utf-8');
-    if (fmt === 'html') writeFileSync(join(args.out, 'report.md'), formatReport(report, 'markdown', { noTruncate: args.noTruncate }), 'utf-8');
-    if (fmt === 'markdown' || fmt === 'md') writeFileSync(join(args.out, 'report.html'), formatReport(report, 'html', { noTruncate: args.noTruncate }), 'utf-8');
+    writeFileSync(join(args.out, `report.${ext}`), formatReport(report, fmt, { noTruncate: args.noTruncate, csvDelimiter: args.csvDelimiter }), 'utf-8');
+    if (fmt === 'html') writeFileSync(join(args.out, 'report.md'), formatReport(report, 'markdown', { noTruncate: args.noTruncate, csvDelimiter: args.csvDelimiter }), 'utf-8');
+    if (fmt === 'markdown' || fmt === 'md') writeFileSync(join(args.out, 'report.html'), formatReport(report, 'html', { noTruncate: args.noTruncate, csvDelimiter: args.csvDelimiter }), 'utf-8');
   } else {
-    writeFileSync(args.out, formatReport(report, fmt, { noTruncate: args.noTruncate }), 'utf-8');
+    writeFileSync(args.out, formatReport(report, fmt, { noTruncate: args.noTruncate, csvDelimiter: args.csvDelimiter }), 'utf-8');
   }
   // [goal 批次 A-2] 扫描台账：单 URL 模式自动登记可追溯快照（meta/report/poc）
   // [FIX 2026-09-18] 同批量模式：必须传 attachPoc 的导出形态，否则 poc/ 恒为空
