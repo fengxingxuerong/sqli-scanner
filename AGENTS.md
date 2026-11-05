@@ -30,7 +30,9 @@ node scripts/one-click-scan.mjs -u "http://target/page?id=1"   # 一条命令出
   `--save-config <file>` 把本次非默认参数写回。argv > 档案 > 内置默认；档案含未知键会**拒绝启动**。
 - **定向复测**：`-p <param>` 只测指定参数、`--param-filter body` 只测某位置、
   `--param-exclude <regex>` 排除噪声参数（[D41] 对标 sqlmap）。筛选把点位删光时报错退出——
-  这说明参数写错了，不是目标没洞。
+  这说明参数写错了，不是目标没洞。[D253] 两条 CLI 入口（`cli.js` / `one-click-scan.mjs`）
+  都走 `server/src/services/scanExit.js` 的 `scanExitCode`：执行失败 **exit 1**，
+  不落「看起来正常」的 0 洞报告；`server/tests/scanExit.guard.test.js` 钉住判据与接线。
 - **修复回路**：`--fix-prompt [dir]`（[D176]）把命中项渲染成「为什么能注入 / 该怎么改 /
   改完怎么验（复测命令 + 期望 0 命中）」的 Markdown，落在 `<--out>/fix-prompts/` 或指定目录。
   它**不自动改代码**，也不替 agent 判断业务语义；`verdict=inconclusive` 时会先声明口径。

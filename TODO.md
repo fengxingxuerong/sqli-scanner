@@ -5,6 +5,30 @@
 
 ---
 
+## 2026-11-05 批次 D253 · CLI 外部靶场兼容性：执行失败不再判绿 + 阴性结论摘要补全（已完成，见 CHANGELOG）
+
+**起点**：用户授权跑外部裁判靶场后实测 6 场景（证据 `docs/cli-compat-external-labs-2026-11-05.txt`）。
+`--param-filter=path` 删光点位报错却 `exit 0` + 产出 0 洞报告；终端摘要不显示
+`verdict=inconclusive` 与 4 个 `uncoveredSurfaces`。
+
+**交付**：
+1. `server/src/services/scanExit.js`（新）：`scanExitCode` 执行失败 1 / Critical·High 2 / 其余 0，
+   两条 CLI 入口同源；`ScanManager` 异常分支把 `executionError` 写进 `report.summary`。
+2. `cli.js` 抽 `exitForSingleScan` 并在**输出前**拒绝失败扫描（不再打印 0 洞 JSON）；
+   `one-click-scan.mjs` 的 `rejectFailedScan` 跑在落盘/判红之前，
+   `printConclusionDisclosure` 补 verdict + 未覆盖注入面。
+3. 抽方法守住复杂度基线：`ScanManager.start` 66→63 行、`cli.js::main` 104→101、
+   `one-click::main` 63→62；**未上调任何基线**。
+4. `server/tests/scanExit.guard.test.js` 4 例（含缺陷注入复验 + 两入口接线同源）。
+
+**验证**：真靶场 4 场景（两入口 exit 1、P1 摘要、Juice 回归 1 命中）；
+`complexity:guard` 绿；`gate:close` 51/51。
+
+**边界**：不改检测判据、不放宽断言；`--test-path` 默认关闭（D154）保持。
+DVWA / Benchmark / 公网靶场仍未测。
+
+---
+
 ## 2026-11-05 批次 D252 · MCP 客户端连接兼容性（真 stdio 矩阵，11/14 → 14/14）（已完成，见 CHANGELOG）
 
 **起点**：`docs/agent-装载.md` §五 的「宿主矩阵未实测」。`agent:check` 只核清单/技能/`.mcp.json`

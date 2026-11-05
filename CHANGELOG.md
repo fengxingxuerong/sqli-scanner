@@ -7,13 +7,14 @@
 > 下一批次起的条目写在这里。发版时把本节整体升为 `## [x.y.z] - YYYY-MM-DD` 并补汇总段。
 
 <!-- changelog-index:start -->
-**本段覆盖 36 个批次（D228–D252，2026-11-01 → 2026-11-05）**。正文按时间倒序排列；
+**本段覆盖 37 个批次（D228–D253，2026-11-01 → 2026-11-05）**。正文按时间倒序排列；
 下表是同一批次的索引，便于按编号或关键词定位。**索引只是导航，正文未做任何删改**
 （被推翻的旧结论原样保留，这是本仓的既定口径）。新增批次后跑
 `node scripts/changelog-index.mjs --write` 重生成，`--check` 校验是否过期。
 
 | 批次 | 日期 | 主题 |
 |---|---|---|
+| D253 | 11-05 | CLI 外部靶场兼容性：执行失败不再判绿 + 阴性结论摘要补全 |
 | D252 | 11-05 | MCP 客户端连接兼容性（真 stdio 矩阵，11/14 → 14/14） |
 | D245 | 11-04 | `--csv-del` + `--dump-file`（缺口 24→22） |
 | D244 | 11-04 | 「行号漂移免疫」只在 guard 生效、测试没生效（D217 的半成品） |
@@ -51,6 +52,50 @@
 | D229 | 11-01 | 交付闸收口：P0-3 卡顿修复（haystack 先截后拼）+ ai-gateway 断言去模型依赖 |
 | D228 | 11-01 | AI 报告网关端到端验收（ai-gateway 套件）+ 本地网关 runbook + CI 靶场硬要求扩展 |
 <!-- changelog-index:end -->
+
+### 2026-11-05 批次 D253 · CLI 外部靶场兼容性：执行失败不再判绿 + 阴性结论摘要补全
+
+**起点**：用户授权跑外部裁判靶场后实测 6 场景（VAmPI vuln/safe A/B + Juice Shop；
+证据 `docs/cli-compat-external-labs-2026-11-05.txt`，提交 `274db64d`）。
+两处真实假绿，都不是猜的：
+
+- `--param-filter=path` 把注入点删光时，引擎日志打 `[错误]`，但 `cli.js` 与
+  `one-click-scan.mjs` **都 exit 0**，还产出 0 洞报告（一键那份连 `verdict`/`validity` 都缺）。
+  AGENTS §1.1 早已写明「筛选删光应报错退出」，实现没跟上 ⇒ CI 把配置错误判成「没漏洞」。
+- 未检出时终端摘要只打「结论可信度 ok / 未检出 ≠ 不存在」，不显示
+  `verdict=inconclusive` 与 4 个 `uncoveredSurfaces` —— 与 AGENTS §2 阴性结论口径不一致。
+  报告**本身**一直是诚实的（有 `noInjectionPoints` + `--test-path` 提示），坏在第一界面。
+
+**交付**：
+
+1. `server/src/services/scanExit.js`（新）：退出码唯一真源。`scanExitCode(report)` =
+   执行失败 1 / Critical·High 2 / 其余 0；执行失败**优先于**风险等级（错误报告 riskLevel 恒 Low）。
+   `scanExecutionError(report)` 取可读原因。两条入口同源，杜绝「只修一条」。
+2. `ScanManager`：异常分支把 `executionError` 写进 `report.summary`（此前只置 status=error）。
+   抽 `markScanFailed` / `summaryWithExecutionError` 两个模块级函数，
+   `ScanManager.start` 行数 66→63、复杂度保持 17（未抬基线）。
+3. `cli.js`：抽 `exitForSingleScan`，并在输出报告**之前**拒绝失败扫描 ——
+   stdout 不再出现误导性的 0 洞 JSON；`main` 复杂度 104→101、行数 273→269。
+4. `one-click-scan.mjs`：`rejectFailedScan` 跑在落盘与所有判红路径之前；
+   抽 `printConclusionDisclosure` 打印 verdict 与未覆盖注入面；`main` 复杂度 63→62。
+5. 判据 `server/tests/scanExit.guard.test.js`（4 例）：正常码、缺陷注入复验
+   （有 `executionError` → 1，移除 → 2）、错误形态兼容、**两条入口接线同源**（源码判据）。
+
+**验证**（真靶场，起测收同一条命令，`labs.mjs --stop` 收工）：
+
+| 场景 | 修前 | 修后 |
+|---|---|---|
+| `one-click --param-filter=path` 删光点位 | exit 0 + 0 洞报告 | **exit 1** + 失败原因，不落盘 |
+| `cli.js` 同场景 | exit 0 + 0 洞 JSON | **exit 1** + 失败原因，无报告 JSON |
+| VAmPI 默认（无 `--test-path`） | 只打「可信度 ok / 未检出」 | 增 `结论: inconclusive（不等于「未检出」）` + `未覆盖注入面: cookie, header, path, forms（4 类）` |
+| Juice Shop 回归 | 1 条命中 | 1 条命中，exit 0，结论 `vulnerability_detected` |
+
+`complexity:guard` 绿（未上调任何基线，多个函数反而下降）；`scanExit.guard.test.js` 4/4；
+`npm run gate:close` 51/51。
+
+**边界**：只修「执行失败判绿」与「终端摘要口径」，不改检测判据、不放宽任何断言；
+`--test-path` 默认关闭（D154）是既有设计，本次不动。DVWA / OWASP Benchmark / 公网靶场
+仍未实测（前置缺失 / 无明确目标 URL）。
 
 ### 2026-11-05 批次 D252 · MCP 客户端连接兼容性（真 stdio 矩阵，11/14 → 14/14）
 

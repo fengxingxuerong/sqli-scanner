@@ -30,6 +30,32 @@ import { parseScope, registerScanScope } from '../core/scopeGuard.js';
 import { ensureScanTransform } from '../core/requestTransform.js';
 // [D52] 自定义响应解密（--postprocess，与请求变换对偶）；回收同样挂在 lifecycle._disposeScan
 import { ensureResponseTransform } from '../core/responseTransform.js';
+
+/**
+ * [D253] 执行失败写进报告摘要（纯函数）。抽到模块级：ScanManager.start 的复杂度/行数
+ * 基线只许持平或下降，不能在 catch 里塞对象展开与 ?? 分支。
+ * @param {object} report 扫描报告
+ * @param {object} err 引擎异常
+ * @returns {object} 新的 summary
+ */
+function summaryWithExecutionError(report, err) {
+  return {
+    ...(report?.summary || {}),
+    executionError: { code: err?.code ?? null, message: String(err?.message || err) },
+  };
+}
+
+/**
+ * [D253] 标记扫描失败：状态 + 终态时间 + 报告里的失败原因（后者供 CLI 判 exit 1）。
+ * @param {object} s 扫描状态
+ * @param {object} err 引擎异常
+ */
+function markScanFailed(s, err) {
+  s.status = 'error';
+  s.report.finishedAt = new Date().toISOString();
+  s.report.summary = summaryWithExecutionError(s.report, err);
+}
+
 // [D36 实战 P0-2] Bearer/Token 自动续期（回收同样挂在 lifecycle._disposeScan）
 import { normalizeRefreshConfig, registerScanRefresh } from '../core/bearerKeeper.js';
 import { runScanLoop } from './scanRunner.js';
@@ -228,10 +254,8 @@ export class ScanManager {
       logger.error(`扫描 ${scanId} 异常：${err.message}`);
       eventBus.emit(scanId, 'scan_error', { code: err.code, message: err.message });
       const s = this.scans.get(scanId);
-      if (s) {
-        s.status = 'error';
-        s.report.finishedAt = new Date().toISOString();
-      }
+      // [D253] 失败原因必须进报告：CLI/一键扫描据此 exit 1，否则参数配置错误会变成 0 洞交付件
+      if (s) markScanFailed(s, err);
       // 错误路径同样回收扫描上下文（30s TTL）
       this._retire(scanId);
     });
