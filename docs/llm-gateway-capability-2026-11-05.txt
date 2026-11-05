@@ -50,3 +50,23 @@
 要跑通套件需 ① ReportAI 支持多网关/多 key 真分担（而非同 key 降级）
 ② 按推理模型调 MAX_TOKENS 与 per-step 超时 ③ 429 退避改成换网关而非 60s 冷却。
 
+## D254（同日）：多端点分担落地，端到端套件仍 FAIL（如实）
+
+改动：`resolveEndpoints` + `AI_REPORT_API_BASE_2/_3` + 429 冷却可配 +
+`run.mjs` 双网关注入 / `max_tokens=2048`。判据 `reportAi.endpoints.guard.test.js` 6/6、复杂度门禁绿。
+**生产单网关行为零变化**（未配 _2/_3 时三项全回落主端点，单测钉住）。
+
+双网关套件（A=127.0.0.1:8080 / B=192.168.151.151:18080，analyst→A、writer→B、reviewer→A）：
+**429 连环消失**，但三个角色各 140s 超时 → 仍 FAIL。
+
+决定性实验（30s 短超时，网关 A，`max_tokens=512`）：
+| 变体 | 结果 |
+|---|---|
+| ReportAI 形态长 system+user prompt（含 SQL payload） | 30s abort，无响应 |
+| 同结构、payload/evidence 全换中性文本 | 30s abort，无响应 |
+| 同网关短 prompt `Reply PONG` | HTTP 200，4.1s |
+
+⇒ 不是内容审核、不是并发/配额、不是项目侧超时参数，是**网关/上游模型对这类长报告
+prompt 不返回**。D254 的架构改进有效，但不能让该套件在这两个网关上 PASS；
+需网关侧排查或更换模型。未把 SKIP 写成 PASS、未放宽任何断言。
+

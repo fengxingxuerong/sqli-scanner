@@ -22,6 +22,9 @@
 | `AI_REPORT_API_BASE` | ✅ | **完整的 chat/completions 端点**（不是 host）。不设 = 功能关闭；只配 key 不设 base 会明确报错拒绝（opt-in 外发，防漏洞报告静默外发第三方） |
 | `AI_REPORT_KEY_1/2/3` | ✅ 至少 1 个 | 按 role 分工（analyst/writer/reviewer 各用 1/2/3）；同角色 429 自动在其余 key 降级，再跨角色降级 |
 | `AI_REPORT_MODEL_1/2/3` | 本地网关必填 | 覆盖默认模型名（`deepseek-v4-flash` / `glm-5.2` / `sensenova-6.8-flash-lite`）——**自建/本地网关常强制 provider/model 全名**（D192） |
+| `AI_REPORT_API_BASE_2/_3` | 可选 [D254] | 按 key 索引配对的备用端点。三个角色/429 降级路径可分到**不同网关**；未配时逐项回落主 `AI_REPORT_API_BASE`，单网关行为零变化。验收套件用 `AI_GATEWAY_URL_2` / `AI_GATEWAY_KEY_2` 注入 |
+| `AI_REPORT_429_COOLDOWN_MS` | 可选 [D254] | 429 冷却毫秒数，默认 60000（生产语义不变）。多网关分担时可设 3000，让降级立刻换端点而不是原地等 |
+| `AI_REPORT_MAX_TOKENS` | 可选 | 默认 8192。推理模型（带 `reasoning_content`）生成长输出会拖过 per-step 超时，本地网关建议 2048（验收套件默认注入） |
 | `AI_REPORT_MASK` | 默认 on | 默认脱敏（host → `<目标Host>`，路径 → `/***`）。**指向本机网关时建议 `=0`**：不脱敏 LLM 才能写出可直接复现的 PoC（D205 实测） |
 | `AI_REPORT_TIMEOUT_MS` | 可选 | 未接线；超时由路由硬编码 120s（REST）与 `generateAiReport(report, timeoutMs)` 三均分 |
 
@@ -71,6 +74,22 @@ node server/bin/cli.js -u "<目标URL>" --ai-report       # 扫描 + AI 报告�
 ```powershell
 node e2e/acceptance.mjs --only=ai-gateway
 ```
+
+[D254] 双网关分担（避免单网关 429 连环降级；`AI_GATEWAY_URL` 要 host，不带 `/v1`）：
+
+```powershell
+$env:AI_GATEWAY_URL = 'http://127.0.0.1:8080'
+$env:AI_GATEWAY_KEY = '<主网关 key>'
+$env:AI_GATEWAY_URL_2 = 'http://192.168.151.151:18080'
+$env:AI_GATEWAY_KEY_2 = '<备用网关 key>'
+$env:AI_GATEWAY_MODEL = 'glm-5.3-flash'
+node e2e/ai-gateway-lab/run.mjs
+```
+
+⚠️ 2026-11-05 实测边界：这两个网关上 `glm-5.3-flash` 对**短 prompt** 4s 返回，
+但 ReportAI 形态的长 system+user 报告 prompt 挂起不返回（30s abort，与是否含 SQL
+payload 无关）。因此该套件在这两个网关上仍 FAIL；详见
+`docs/llm-gateway-capability-2026-11-05.txt`。这是网关/上游侧限制，不是判据放宽的理由。
 
 - **PASS**：真实 HTTP 网关跑完三角色流水线，断言「网关实调回声（model 链）+ 元数据头 4/4 +
   数据脱敏 on + 落盘字节数 >0 + 审阅角色 ✅」；

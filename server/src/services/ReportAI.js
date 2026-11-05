@@ -18,6 +18,27 @@ import { AppError, ErrorCode } from '../core/errors.js';
 const API_BASE = process.env.AI_REPORT_API_BASE || '';
 const API_ENDPOINT_OPT_IN = Boolean(API_BASE);
 
+/**
+ * [D254] key → 端点配对。支持 AI_REPORT_API_BASE_2 / _3 把三个角色/降级路径
+ * 分到不同网关；未配置时逐项回落主端点，生产单网关行为零变化。
+ * 起因：ai-gateway 套件把 KEY_1/2/3 全设成同一个 key、且只有一个 base，
+ * 429 后「跨角色降级」等于原地等 60s，连环失败（实测见
+ * docs/llm-gateway-capability-2026-11-05.txt）。
+ * @param {object} env 环境变量表（测试可注入）
+ * @returns {string[]} 三个端点，索引与 API_KEYS 对齐
+ */
+export function resolveEndpoints(env = process.env) {
+  const base = env.AI_REPORT_API_BASE || '';
+  return [base, env.AI_REPORT_API_BASE_2 || base, env.AI_REPORT_API_BASE_3 || base];
+}
+
+const API_ENDPOINTS = resolveEndpoints();
+
+// [D254] 429 冷却可配：多网关分担时短冷却即可换端点，单网关仍保持 60s 生产语义
+const RATE_LIMIT_COOLDOWN_MS = Number(process.env.AI_REPORT_429_COOLDOWN_MS) > 0
+  ? Number(process.env.AI_REPORT_429_COOLDOWN_MS)
+  : 60000;
+
 const API_KEYS = [
   process.env.AI_REPORT_KEY_1,
   process.env.AI_REPORT_KEY_2,
@@ -45,8 +66,8 @@ function markKeyFail(idx, is429) {
   const h = getKeyHealth(idx);
   h.fails++;
   h.lastFail = Date.now();
-  // 429 冷却 60s，其他错误冷却 10s
-  h.cooldownUntil = Date.now() + (is429 ? 60000 : 10000);
+  // 429 冷却默认 60s（单网关生产语义），多网关可由 AI_REPORT_429_COOLDOWN_MS 调短
+  h.cooldownUntil = Date.now() + (is429 ? RATE_LIMIT_COOLDOWN_MS : 10000);
 }
 
 function isKeyAvailable(idx) {
@@ -73,6 +94,7 @@ function getRoleConfig(roleIdx) {
     if (idx < API_KEYS.length && isKeyAvailable(idx)) {
       return {
         apiKey: API_KEYS[idx],
+        apiBase: API_ENDPOINTS[idx] || API_BASE,
         model: role.model,
         label: `${role.model} (key${idx + 1}, role=${role.name})`,
         keyIdx: idx,
@@ -402,7 +424,7 @@ async function callLLM(cfg, systemPrompt, userPrompt, timeoutMs = 60000) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const res = await fetch(API_BASE, {
+    const res = await fetch(cfg.apiBase || API_BASE, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${cfg.apiKey}` },
       body: JSON.stringify({
@@ -418,7 +440,7 @@ async function callLLM(cfg, systemPrompt, userPrompt, timeoutMs = 60000) {
     });
     if (res.status === 429) {
       markKeyFail(cfg.keyIdx, true);
-      throw new AppError(ErrorCode.RATE_LIMITED, `角色 ${cfg.role} 的 key${cfg.keyIdx + 1} 触发 429 限流，已冷却 60s`);
+      throw new AppError(ErrorCode.RATE_LIMITED, `角色 ${cfg.role} 的 key${cfg.keyIdx + 1} 触发 429 限流，已冷却 ${RATE_LIMIT_COOLDOWN_MS / 1000}s`);
     }
     if (!res.ok) {
       const errText = await res.text().catch(() => '');

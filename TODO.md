@@ -5,6 +5,21 @@
 
 ---
 
+## 2026-11-05 批次 D254 · ReportAI 多网关真分担（套件端到端仍 FAIL，见 CHANGELOG）（部分完成）
+
+**已做**：`resolveEndpoints` + `AI_REPORT_API_BASE_2/_3`（key↔端点配对）、
+429 冷却可配、`run.mjs` 双网关注入与 2048 tokens、判据 6/6、生产单网关零变化。
+双网关套件实测 **429 连环消失**。
+
+**未解决（如实）**：三角色各 140s 超时。30s 短超时实验证明长 system+user 报告 prompt
+含/不含 SQL payload **都挂起**，短 prompt 4.1s 返回 ⇒ 网关/上游模型侧问题，
+不是项目代码。需网关侧排查或更换模型；`ai-gateway` 套件在这两个网关上仍 FAIL。
+
+**下一步候选**：① 换不受此限制的模型/网关 ② 网关侧查长 prompt 排队
+③ 让 ReportAI 支持「分步短 prompt」（把长报告拆成多轮短请求）。
+
+---
+
 ## 2026-11-05 批次 D253 · CLI 外部靶场兼容性：执行失败不再判绿 + 阴性结论摘要补全（已完成，见 CHANGELOG）
 
 **起点**：用户授权跑外部裁判靶场后实测 6 场景（证据 `docs/cli-compat-external-labs-2026-11-05.txt`）。

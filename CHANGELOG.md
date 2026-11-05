@@ -7,13 +7,14 @@
 > 下一批次起的条目写在这里。发版时把本节整体升为 `## [x.y.z] - YYYY-MM-DD` 并补汇总段。
 
 <!-- changelog-index:start -->
-**本段覆盖 37 个批次（D228–D253，2026-11-01 → 2026-11-05）**。正文按时间倒序排列；
+**本段覆盖 38 个批次（D228–D254，2026-11-01 → 2026-11-05）**。正文按时间倒序排列；
 下表是同一批次的索引，便于按编号或关键词定位。**索引只是导航，正文未做任何删改**
 （被推翻的旧结论原样保留，这是本仓的既定口径）。新增批次后跑
 `node scripts/changelog-index.mjs --write` 重生成，`--check` 校验是否过期。
 
 | 批次 | 日期 | 主题 |
 |---|---|---|
+| D254 | 11-05 | ReportAI 多网关真分担（D228 套件端到端仍 FAIL，如实登记） |
 | D253 | 11-05 | CLI 外部靶场兼容性：执行失败不再判绿 + 阴性结论摘要补全 |
 | D252 | 11-05 | MCP 客户端连接兼容性（真 stdio 矩阵，11/14 → 14/14） |
 | D245 | 11-04 | `--csv-del` + `--dump-file`（缺口 24→22） |
@@ -52,6 +53,33 @@
 | D229 | 11-01 | 交付闸收口：P0-3 卡顿修复（haystack 先截后拼）+ ai-gateway 断言去模型依赖 |
 | D228 | 11-01 | AI 报告网关端到端验收（ai-gateway 套件）+ 本地网关 runbook + CI 靶场硬要求扩展 |
 <!-- changelog-index:end -->
+
+### 2026-11-05 批次 D254 · ReportAI 多网关真分担（D228 套件端到端仍 FAIL，如实登记）
+
+**起点**：双网关真实 LLM 实测（`docs/llm-gateway-capability-2026-11-05.txt`，提交 `c63f7315`）
+发现 `ai-gateway` 套件两网关均 FAIL：429 后「跨角色降级」等于同一 key/同一网关原地等 60s。
+
+**交付**（生产单网关行为零变化）：
+
+1. `ReportAI.js` 新增导出纯函数 `resolveEndpoints(env)`：按 key 索引配对
+   `AI_REPORT_API_BASE` / `_2` / `_3`；未配 _2/_3 时逐项回落主端点（单测钉住）。
+   `getRoleConfig` 返回 `cfg.apiBase`，`callLLM` 用它发请求 —— 429 降级 = **真换网关**。
+2. `AI_REPORT_429_COOLDOWN_MS`：429 冷却可配（默认仍 60000，生产语义不变）；
+   `AI_REPORT_MAX_TOKENS` 已有，验收套件按推理模型设 2048。
+3. `e2e/ai-gateway-lab/run.mjs`：新增 `AI_GATEWAY_URL_2` / `AI_GATEWAY_KEY_2` /
+   `AI_GATEWAY_MAX_TOKENS` / `AI_GATEWAY_429_COOLDOWN_MS`；双网关探活、
+   analyst→主 / writer→备 / reviewer→主 分担；抽 `probeModels` 守住探活口径。
+4. 判据 `reportAi.endpoints.guard.test.js` 6 例：单网关回落、双网关配对、
+   缺陷注入复验、三端点对齐、opt-in 关闭、套件接线同源。
+
+**验证**：`reportAi.endpoints.guard.test.js` **6/6**；`complexity:guard` 绿（未抬基线）；
+`gate:close` **51/51**；facts 4166 用例 0 fail。
+
+**⚠️ 端到端未通过（不隐瞒）**：双网关跑 `ai-gateway` 套件时 429 连环消失，
+但三个角色各 140s 超时 → **仍 FAIL**。30s 短超时决定性实验：ReportAI 形态长
+system+user prompt 含 SQL payload / 全换中性文本**都挂起**，同一网关短 prompt 4.1s 返回
+⇒ 不是内容审核、不是并发配额、不是项目超时参数，是**网关/上游模型对这类长报告
+prompt 不返回**。需网关侧排查或更换模型。未把 SKIP 写成 PASS、未放宽任何断言。
 
 ### 2026-11-05 批次 D253 · CLI 外部靶场兼容性：执行失败不再判绿 + 阴性结论摘要补全
 
