@@ -1,0 +1,38 @@
+# CLI × 外部裁判靶场兼容性实测（2026-11-05）
+
+授权：用户明确授权跑外部靶场；目标全为本机 127.0.0.1 上的官方靶场源码，env SSRF_ALLOW_PRIVATE=1。
+起法：node scripts/labs.mjs --up=<names>（windowsHide + detached，日志落盘），--stop 只杀自己起的进程。
+环境纪实：detached 靶场在**单条 Bash 命令结束即被回收**（日志显示已监听、随后 ECONNREFUSED），
+          所以必须「起 → 测 → 收」写在同一条命令里；这也是本仓「靶场交 CI」约定的环境原因。
+本机 HTTP_PROXY=http://127.0.0.1:46006；httpClient 的 proxyBypassLocal 兜底生效，本地目标未被代理劫持。
+
+## 实测矩阵
+
+| 场景 | 命令要点 | 结果 | exit |
+|---|---|---|---|
+| Juice Shop query | one-click -u .../rest/products/search?q=apple --level 1 | 1 条 boolean @ q@url，CWE-89 / Medium / SQLite，verdict=vulnerability_detected | 0 |
+| VAmPI vuln 默认 | one-click -u .../users/v1/name1（无 --test-path） | 注入点 0、0 洞；报告 verdict=inconclusive、uncovered=[cookie,header,path,forms]、0 次请求 | 0 |
+| VAmPI vuln 显式 | 同上 --test-path --level 5 | 3 条（union/error/boolean @ name1@path）、High / SQLite、exit 2 | 2 |
+| VAmPI safe 显式 | 5001 同端点 --test-path --level 5 | 0 洞，终端如实标注「未测注入点 1 个」，verdict=no_vulnerability_detected | 0 |
+| 筛选删光（一键） | one-click ... --param-filter path（点位删光） | 日志 `[错误] --param-filter=path 没有匹配到任何注入点`；报告 verdict=undefined、validity=null、0 洞 | **0 ← 假绿** |
+| 筛选删光（主入口） | cli.js ... --param-filter path | stdout points=[] / vulns=[] / summary.constraints=[]，无错误提示 | **0 ← 假绿** |
+
+## 结论（真源 = 报告 JSON + 退出码）
+
+通过：
+- 代理环境下的本地授权目标不被劫持（proxyBypassLocal 兜底）。
+- --test-path（D154）A/B 干净：vuln 3 命中 / safe 0 命中且标注未测点。
+- 默认配置的覆盖缺口在**报告里**如实声明（uncoveredSurfaces + verdict=inconclusive）。
+
+缺陷（待修，按优先级）：
+- P0 契约违背：AGENTS §1.1 写明「--param-filter 把点位删光时报错退出——说明参数写错了，不是目标没洞」，
+  实测 cli.js 与 one-click-scan.mjs **都 exit 0**，且产出「看起来正常」的 0 洞报告
+  （one-click 那份连 verdict / validity 都没有）。CI 会把配置错误判绿。
+- P1 终端摘要口径：未检出时只打「结论可信度 ok / 未检出 ≠ 不存在」，
+  不显示 verdict=inconclusive，也不显示 4 个 uncoveredSurfaces —— 与 AGENTS §2
+  「引用阴性结论必须同时声明覆盖缺口」不一致。CLI 用户第一界面会误读成「扫过没洞」。
+- P2 报错可操作性：点位删光时提示「可用位置：无」，应直接指出「path 面需 --test-path」。
+
+## 未跑
+
+DVWA（需 MariaDB 常驻）、OWASP Benchmark（本机缺 JDK/Maven 前置）、外部公网靶场（无明确目标 URL）。
