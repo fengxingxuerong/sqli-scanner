@@ -7,13 +7,14 @@
 > 下一批次起的条目写在这里。发版时把本节整体升为 `## [x.y.z] - YYYY-MM-DD` 并补汇总段。
 
 <!-- changelog-index:start -->
-**本段覆盖 35 个批次（D228–D245，2026-11-01 → 2026-11-04）**。正文按时间倒序排列；
+**本段覆盖 36 个批次（D228–D252，2026-11-01 → 2026-11-05）**。正文按时间倒序排列；
 下表是同一批次的索引，便于按编号或关键词定位。**索引只是导航，正文未做任何删改**
 （被推翻的旧结论原样保留，这是本仓的既定口径）。新增批次后跑
 `node scripts/changelog-index.mjs --write` 重生成，`--check` 校验是否过期。
 
 | 批次 | 日期 | 主题 |
 |---|---|---|
+| D252 | 11-05 | MCP 客户端连接兼容性（真 stdio 矩阵，11/14 → 14/14） |
 | D245 | 11-04 | `--csv-del` + `--dump-file`（缺口 24→22） |
 | D244 | 11-04 | 「行号漂移免疫」只在 guard 生效、测试没生效（D217 的半成品） |
 | D243 | 11-04 | `--no-truncate` 导出不截断（缺口 25→24） |
@@ -50,6 +51,42 @@
 | D229 | 11-01 | 交付闸收口：P0-3 卡顿修复（haystack 先截后拼）+ ai-gateway 断言去模型依赖 |
 | D228 | 11-01 | AI 报告网关端到端验收（ai-gateway 套件）+ 本地网关 runbook + CI 靶场硬要求扩展 |
 <!-- changelog-index:end -->
+
+### 2026-11-05 批次 D252 · MCP 客户端连接兼容性（真 stdio 矩阵，11/14 → 14/14）
+
+**起点**：`docs/agent-装载.md` §五 一直挂着的缺口「宿主矩阵未实测」。D175 的 `agent:check`
+只核清单/技能/`.mcp.json` 的**静态**一致，`mcp.server.test.js` 只跑一条最规整的握手
+（initialize → initialized → tools/list）。但宿主在协议版本、id 形态、通知习惯、能力探测、
+行尾、坏输入后的存活上各不相同 —— **清单一致 ≠ 连得上**。
+
+**交付**：
+
+1. `scripts/mcp-client-compat.mjs`：14 个智能体宿主画像，每个**真 spawn**
+   `node server/bin/cli.js mcp`，按该宿主的真实字节序列写 stdin、逐行读 stdout；
+   挂住 = 超时 = FAIL，结果落 `logs/mcp-compat/compat-matrix.json`。
+   `--selftest` 用 4 个坏 server 夹具（混日志 / 缺 id / 提前退出 / 缺陷注入）自证判据有牙。
+2. **修前实测 11/14**（证据 `docs/mcp-compat-baseline-11of14.txt`），三处真实不兼容：
+   - `resources/list` / `prompts/list` 回 `-32601`：capabilities 未声明该能力却回 error，
+     宽容宿主会把它判成「服务端不支持 MCP」直接断连；
+   - `id: null` 的合法请求被按 falsy 当成通知吞掉 ⇒ **宿主等不到回复而挂死**
+     （`id: 0` 同族，此次侥幸未坏）；
+   - `notifications/*` 误带 id 时收到一条 error 响应 —— 通知不该有响应。
+3. `server/src/mcp/protocol.js`：通知判据改成「无 id 字段 或 method∈notifications/*」；
+   三个空能力面回空清单；`instructions` 按协商版本裁剪（2024-11-05 的 InitializeResult
+   没有这个字段，严格 schema 的旧宿主不该收到）。真正未知方法仍 `-32601` —— 放宽 ≠ 全放行。
+4. 回归判据：`mcp.server.test.js` 新增 D252 协议层用例（9→10）；矩阵补 `instructions`
+   双向断言；selftest 把修前行为注回夹具，5 条新判据各自变红才放行。
+5. 接线：`mcp:compat` / `mcp:compat:selftest` 接进 gate-list（**49→51 项**）、
+   gate-close must、ci.yml、ci-local.mjs、pre-commit —— 不让「门禁只活在别处」第 5 次重演。
+
+**验证**：矩阵 **14/14**（修前 11/14）；`mcp.server.test.js` **10/10**（含真 SQLite 靶场 e2e）；
+`mcp:compat:selftest` 通过；`npm run gate:close` **51/51**。
+
+**边界**：这是**客户端形态仿真**（真子进程 + 真协议字节），**不是** Claude Code / Cursor
+真机插件装载 —— 宿主 GUI 的插件发现、信任弹窗、配置解析不在覆盖内，该缺口仍在
+`docs/agent-装载.md` §五 如实保留。JSON-RPC batch 只保证「不挂住后续请求」，
+不承诺按 batch 语义处理（MCP 2025-06-18 已移除 batch）。未做响应串行化：
+JSON-RPC 允许乱序，强制顺序反而会让慢 `preflight` 阻塞宿主的心跳 ping。
 
 ### 2026-11-04 批次 D245 · `--csv-del` + `--dump-file`（缺口 24→22）
 

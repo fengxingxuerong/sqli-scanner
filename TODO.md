@@ -5,6 +5,32 @@
 
 ---
 
+## 2026-11-05 批次 D252 · MCP 客户端连接兼容性（真 stdio 矩阵，11/14 → 14/14）（已完成，见 CHANGELOG）
+
+**起点**：`docs/agent-装载.md` §五 的「宿主矩阵未实测」。`agent:check` 只核清单/技能/`.mcp.json`
+静态一致，`mcp.server.test.js` 只跑一条最规整的握手 —— **清单一致 ≠ 宿主连得上**。
+
+**交付**：
+1. `scripts/mcp-client-compat.mjs`：14 个宿主画像真 spawn `node server/bin/cli.js mcp`，
+   挂住 = 超时 = 红，结果落 `logs/mcp-compat/compat-matrix.json`；
+   `--selftest` 用 4 个坏 server 夹具 + 修前行为注入自证判据。
+2. **修前实测 11/14**（证据 `docs/mcp-compat-baseline-11of14.txt`），三处真实不兼容：
+   `resources/list`·`prompts/list` 回 error；`id:null` 请求被当通知吞掉 ⇒ 宿主挂死；
+   `notifications/*` 误带 id 时误回响应。
+3. `protocol.js`：通知按「无 id 字段 / method∈notifications/*」判定（不再按 falsy）；
+   三个空能力面回空清单；`instructions` 按协商版本裁剪（2024-11-05 不回该字段）。
+   真正未知方法仍 `-32601`。
+4. 接线：`mcp:compat` / `mcp:compat:selftest` 进 gate-list（**49→51 项**）、gate-close must、
+   ci.yml、ci-local.mjs、pre-commit，三向核对成立。
+
+**验证**：矩阵 **14/14**；`mcp.server.test.js` **10/10**（含真 SQLite 靶场 e2e）；
+selftest 5 条注入判据各自变红；`gate:close` **51/51**。
+
+**边界**：客户端形态仿真（真子进程 + 真协议字节），**非** Claude Code / Cursor 真机插件装载；
+真机缺口仍在 §五 如实保留。JSON-RPC batch 只保证不挂住，不承诺 batch 语义。
+
+---
+
 ## 2026-11-04 批次 D203 · 非 SQL 通道补齐（LDAP / XPath）（缺口 30→28）（已完成，见 CHANGELOG）
 
 **起点**：底账 D203 组两项 P2 gap（检测器 + payload 面零实现）；原有非 SQL 补充趟只有

@@ -10,8 +10,10 @@
   "scripts": {
     "acceptance": "node e2e/acceptance.mjs",
     "acceptance:sandbox": "python e2e/run-with-sandbox.py e2e/acceptance.mjs",
-    "agent:check": "node scripts/agent-manifest-check.mjs",
-    "agent:check:selftest": "node scripts/agent-manifest-check.mjs --selftest",
+ "agent:check": "node scripts/agent-manifest-check.mjs",
+ "agent:check:selftest": "node scripts/agent-manifest-check.mjs --selftest",
+ "mcp:compat": "node scripts/mcp-client-compat.mjs",
+ "mcp:compat:selftest": "node scripts/mcp-client-compat.mjs --selftest",
     "gate:close": "node scripts/gate-close.mjs",
     "quality:ledger": "node scripts/quality-ledger.mjs",
     "arch:baseline": "node scripts/arch-guard.mjs --update",

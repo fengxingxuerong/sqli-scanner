@@ -57,10 +57,16 @@ npm run agent:check
 
 # 3) 判据自己有牙（改坏任意一项必须红）
 npm run agent:check:selftest
+
+# 4) 连接兼容性（D252）：14 个宿主画像真连一次，挂住即红
+npm run mcp:compat && npm run mcp:compat:selftest
 ```
 
 第 1 步的 stdout 必须是**一行一个 JSON**（MCP stdio 分帧）；日志一律走 stderr——
 若你的宿主报「解析失败」，先确认没有别的东西往 stdout 打。
+第 4 步覆盖协议版本 / id 形态 / 通知习惯 / 资源与提示探测 / CRLF+BOM / 坏输入 / batch /
+并发流水，结果落 `logs/mcp-compat/compat-matrix.json`。它是**客户端形态仿真**，
+不能替代真机装载（见 §五）。
 
 ## 四、红线（装上也不变）
 
@@ -75,4 +81,5 @@ npm run agent:check:selftest
 |---|---|---|
 | 未发布 npm 包 | `package.json` / `server/package.json` 都是 `private: true`；`npx sqli-scanner` 现在拿不到 | **技术侧已就绪（[D182]）**：`files: ["bin/","src/","index.js"]` 让 tarball 从 **27.1 MB → 1.14 MB**，`node scripts/pack-check.mjs` 会打包并解包真跑（`--help` + 离线直连扫描命中 3 条）。剩下的是发版决策（改 `private: false` + `npm publish`） |
 | 无公共镜像 | 只有本地 `Dockerfile` / `docker-compose.yml`，没推 GHCR | 与 npm 发布同一批做，二者都属「分发通道」 |
-| 宿主矩阵未实测 | 只验了 `.mcp.json` 形态与 MCP 协议层（`tools/list` + 一次扫描） | 需要真机装一次 Claude Code 插件与 Cursor，把版本号记进本文件 |
+| 协议面宿主矩阵（**D252 已覆盖**） | `npm run mcp:compat` 真 spawn stdio 跑 14 个客户端画像，**14/14**；修前 11/14，实测抓出三处不兼容（空能力面回 error / `id:null` 挂死 / 通知误回响应）并已修 | 回归由收口清单、CI、ci-local、pre-commit 四处守着；证据 `docs/mcp-compat-baseline-11of14.txt` |
+| **真机宿主装载仍未实测** | **未做**：Claude Code 插件与 Cursor 的真机装载、宿主版本号、信任弹窗都没跑过 | 需要真机装一次，把宿主版本与结果记进本文件；本仓 14 画像是协议字节仿真，**不能替代**真机 |

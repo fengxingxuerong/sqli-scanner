@@ -1,0 +1,20 @@
+[mcp-compat] MCP 客户端连接兼容性矩阵（真 stdio，14 个宿主画像）
+  FAIL  claude-code/2024-11-05                 旧协议版本 + 三步握手 + 资源/提示无脑探测
+        · [resources-probe] resources/list 回 error；宽容宿主会把「不支持」当成握手失败
+        · [prompts-probe] prompts/list 回 error；同上
+  PASS  cursor/2025-03-26                      省略 notifications/initialized，直接列工具
+  PASS  vscode/2025-06-18                      字符串 id + ping + 一次真实 tools/call（list_scans，零网络副作用）
+  PASS  inspector/future-version               客户端请求服务端不认识的未来版本，应协商回落且不挂住
+  PASS  legacy/no-initialize-params            老客户端 initialize 不带 params
+  FAIL  jsonrpc/id-null                        id 为 null 的合法请求（JSON-RPC 2.0 允许但不推荐）——等不到回复就会挂死宿主
+        · [missing-id] 等不到响应（挂住）：id = [null]
+  PASS  jsonrpc/id-zero                        id 为 0（falsy，常被误判成「无 id」）
+  FAIL  notif/with-id                          把 initialized 通知误带 id 的宿主：通知不该收到响应
+        · [notif-replied] notifications/* 带了响应（宽容宿主会把它当失败响应）
+  PASS  windows/crlf-bom-blank                 CRLF 行尾 + 首行 UTF-8 BOM + keep-alive 空行
+  PASS  robust/malformed-then-valid            先送坏 JSON，服务必须继续活着
+  PASS  robust/jsonrpc-batch                   JSON-RPC batch（数组）：可不处理，但不得挂住后续请求
+  PASS  robust/lsp-framing                     误用 LSP Content-Length 分帧：每行都坏，但不能杀死 stdio 循环
+  PASS  robust/keepalive-and-unknown-notif     空行 + cancelled/logging 等未知通知，之后仍可列工具
+  PASS  concurrent/pipeline                    三条请求连发（tools/call 异步）：每个 id 都必须有响应
+[mcp-compat] 11/14 通过；结果：D:\projects\sqli-scanner\logs\mcp-compat\compat-matrix.json

@@ -73,6 +73,10 @@ export function closeGateList({ root, quick = false }) {
     // [D175 2026-10-26] agent 装载面（插件清单 / 技能说明 / .mcp.json）的一致性。
     { name: 'agent-manifest', cmd: ['node', 'scripts/agent-manifest-check.mjs'] },
     { name: 'agent-manifest:selftest', cmd: ['node', 'scripts/agent-manifest-check.mjs', '--selftest'] },
+    // [D252 2026-11-05] MCP 客户端连接兼容性：清单/技能是静态面，宿主连不连得上是运行时面。
+    // 真 spawn stdio 子进程跑 14 个宿主画像；只活在 CI 就是「门禁只活在别处」第 5 次重演。
+    { name: 'mcp-compat', cmd: ['node', 'scripts/mcp-client-compat.mjs'] },
+    { name: 'mcp-compat:selftest', cmd: ['node', 'scripts/mcp-client-compat.mjs', '--selftest'] },
     // [D178 2026-10-26] 质量台账：docs/质量台账.md 必须与脚本产出逐字一致（手改即红）。
     { name: 'quality-ledger', cmd: ['node', 'scripts/quality-ledger.mjs', '--check'] },
     { name: 'quality-ledger:selftest', cmd: ['node', 'scripts/quality-ledger.mjs', '--selftest'] },

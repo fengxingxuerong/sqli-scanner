@@ -30,7 +30,7 @@ function selftest() {
   const bad = [];
   const list = closeGateList({ root: ROOT });
   const names = list.map((g) => g.name);
-  const must = ['typecheck', 'lint', 'wiring', 'facts', 'refs', 'readme', 'complexity', 'nesting', 'duplication', 'deadcode', 'debt', 'typecoverage', 'arch', 'arch:selftest', 'e2e-wiring', 'e2e-wiring:selftest', 'portable-build:selftest', 'portable-smoke:selftest', 'labs:selftest', 'greenguard', 'greenguard:selftest', 'agent-manifest', 'agent-manifest:selftest', 'quality-ledger', 'quality-ledger:selftest', 'recipes', 'recipes:selftest', 'pack-check', 'pack-check:selftest', 'error-contract', 'error-contract:selftest', 'module-loadable', 'module-loadable:selftest', 'version-sync', 'version-sync:selftest'];
+  const must = ['typecheck', 'lint', 'wiring', 'facts', 'refs', 'readme', 'complexity', 'nesting', 'duplication', 'deadcode', 'debt', 'typecoverage', 'arch', 'arch:selftest', 'e2e-wiring', 'e2e-wiring:selftest', 'portable-build:selftest', 'portable-smoke:selftest', 'labs:selftest', 'greenguard', 'greenguard:selftest', 'agent-manifest', 'agent-manifest:selftest', 'quality-ledger', 'quality-ledger:selftest', 'recipes', 'recipes:selftest', 'pack-check', 'pack-check:selftest', 'error-contract', 'error-contract:selftest', 'module-loadable', 'module-loadable:selftest', 'version-sync', 'version-sync:selftest', 'mcp-compat', 'mcp-compat:selftest'];
   for (const m of must) if (!names.includes(m)) bad.push(`清单缺「${m}」（AGENTS.md §3 收口清单要求项）`);
   for (const g of ['complexity', 'nesting', 'duplication', 'deadcode', 'debt', 'typecoverage', 'error-contract', 'module-loadable', 'version-sync']) {
     if (!names.includes(`${g}:selftest`)) bad.push(`清单缺「${g}:selftest」（每道门禁都要自证）`);
