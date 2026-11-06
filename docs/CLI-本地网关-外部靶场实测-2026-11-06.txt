@@ -44,6 +44,11 @@ exit=0，输出：
 组 B · 本地网关 dsh 127.0.0.1:8326 / deepseek-auto/deepseek-v4-flash / security=low
   （额外 env：AI_REPORT_MAX_TOKENS=4096、STEPWISE_TIMEOUT_MS=90000、
     SHORT_RETRY_TIMEOUT_MS=90000；key 从 ~/.dsh/openai-gateway/api-key 读，不落文档）
+  ⚠️ [D263 更正，旧口径作废] 上面两个超时 env 名**无效**：源码
+     server/src/services/ReportAI.js 只认 AI_REPORT_STEPWISE_TIMEOUT_MS 与
+     AI_REPORT_SHORT_RETRY_TIMEOUT_MS（默认 20000ms）。本组实际仍是 20s 默认超时，
+     「加大到 90s 仍半成品」的归因不成立。D263 用正确名复跑并补上整场总闸
+     AI_REPORT_TOTAL_TIMEOUT_MS 后，dsh 依旧半成品 ⇒ 能力结论不变，归因按本注作废。
   exit=2，扫描结论与 A 逐字一致：3 条（union/error/boolean），113 次请求，validity ok
   AI 报告：89.5s / 1962B，但**是半成品**：
     stepwise={enabled:true, writerSteps:5, reviewedSections:0, partial:true,

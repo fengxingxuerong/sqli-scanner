@@ -7,13 +7,14 @@
 > 下一批次起的条目写在这里。发版时把本节整体升为 `## [x.y.z] - YYYY-MM-DD` 并补汇总段。
 
 <!-- changelog-index:start -->
-**本段覆盖 46 个批次（D228–D262，2026-11-01 → 2026-11-06）**。正文按时间倒序排列；
+**本段覆盖 47 个批次（D228–D263，2026-11-01 → 2026-11-07）**。正文按时间倒序排列；
 下表是同一批次的索引，便于按编号或关键词定位。**索引只是导航，正文未做任何删改**
 （被推翻的旧结论原样保留，这是本仓的既定口径）。新增批次后跑
 `node scripts/changelog-index.mjs --write` 重生成，`--check` 校验是否过期。
 
 | 批次 | 日期 | 主题 |
 |---|---|---|
+| D263 | 11-07 | AI 报告整场总闸 + 半成品口径修正 |
 | D262 | 11-06 | CLI × 本地网关 × 外部裁判靶场（docs only，非自建靶场） |
 | D261 | 11-06 | 本地 LLM 网关真 HTTP 复跑（docs only，如实登记 FAIL） |
 | D260 | 11-06 | 服务端覆盖率门禁确定性收口（gate:close 51 → 52 项） |
@@ -61,6 +62,56 @@
 | D229 | 11-01 | 交付闸收口：P0-3 卡顿修复（haystack 先截后拼）+ ai-gateway 断言去模型依赖 |
 | D228 | 11-01 | AI 报告网关端到端验收（ai-gateway 套件）+ 本地网关 runbook + CI 靶场硬要求扩展 |
 <!-- changelog-index:end -->
+
+### 2026-11-07 批次 D263 · AI 报告整场总闸 + 半成品口径修正
+
+**起点**：用户「开始修复吧 ai 报告超时怎么回事，说人话」。D262 实测里
+zcode-proxy `glm-5.3-flash` 的 CLI 整篇 AI 报告挂起 10m32s 无退出码，
+dsh 分步报告落盘 4595B 却是 `partial=true` 半成品、头部还写「✅ 已经过安全审阅」。
+
+**根因（源码级，非推测）**：`server/src/services/aiReportCli.js` 以 600000ms 调用
+`generateAiReport`；`ReportAI.js` 把该值 /3 当**每步**超时（200s）。流水线含
+analyst 三级降级、每级短重试、分步 5 章撰写 + 5 章审阅 ⇒ 十余步 × 200s
+远大于调用方以为的「整场上限」，**从来没有整场总闸**。
+另：`runStepwiseStages` 全章失败回退 `runLegacyStages` 后，legacy reviewer 成功时
+写「✅ 已经过安全审阅角色校验」，而 `stepwise.partial=true` ⇒ 头部与元数据互相矛盾。
+
+**改动**：
+- 新增 `AI_REPORT_TOTAL_TIMEOUT_MS`（默认 300000ms）与纯函数 `clampToBudget`；
+  `generateAiReport` 建立 deadline，所有 LLM 请求经 `budgetedCallLLM`，
+  单步超时取 `min(单步, 剩余预算)`；耗尽抛带 `budgetExhausted` 标记的
+  「AI 报告总预算耗尽」错误，三级降级 / 短重试 / 逐章空转立即停止，不再空耗。
+- `stepwise.partial=true` 时 `reviewNote` 统一为「⚠️ 报告不完整：分步流水线部分完成…」，
+  `ai-report.md` 头部与 `ai-report.json` 同源（复用既有渲染，无第二份实现）。
+- `server/bin/cli/help.js`、`docs/AI-网关-runbook.md` 补总闸与 env 前缀说明；
+  `docs/CLI-本地网关-外部靶场实测-2026-11-06.txt` 更正 D262 那两个**无效** env 名
+  （`STEPWISE_TIMEOUT_MS` / `SHORT_RETRY_TIMEOUT_MS` 源码不读），旧文保留并标注作废
+  —— 按 §3.5 推翻协议：能力结论不变，归因作废。
+
+**验证**：新 `server/tests/reportAi.budget.guard.test.js` 5/5（慢网关 607ms 收口、
+预算耗尽后请求数=1、半成品口径、非分步零回归）；既有 AI 相关单测 57/57 零回归；
+**缺陷注入复验**：把 `clampToBudget(ms, deadline)` 换成固定单步超时后判据 exit 1 判红，
+`cp` 备份还原（不用反向替换）后 5/5 复绿且 `cmp` 字节一致。
+
+**真网关复验（收口后）**：用 D262 里挂死的同一条链路（外部裁判 DVWA +
+CLI `--ai-report` + zcode-proxy 8080 `glm-5.3-flash`，整篇非分步），
+把 `AI_REPORT_TOTAL_TIMEOUT_MS` 压到 30000，实测 **42s 收工**：CLI 打印
+「AI 报告失败：AI 报告总预算耗尽（30s）…」，扫描仍 exit 2 / 3 命中 / High / 10.3s，
+靶场 `--stop` exit 0 收干净，失败时**不落半成品 ai-report 目录**。
+对照 D262 的 10m32s 无退出码 ⇒ 总闸在真网关上确实生效。
+证据 `.box-agent-scratch/d263/e2e/cli.log`（scratch 未入库）。
+
+**诚实边界**：总闸只解决「挂死无反馈」，不承诺慢网关能出完整报告；
+链路单测不替代真网关 e2e，出稿能力仍以 `node e2e/ai-gateway-lab/run.mjs` 退出码为准。
+
+**收口补记（2026-11-07）**：首轮**全量** `npm run gate:close` **51/52** —— `server-coverage`
+判据报「含 ?query 导入但未排除：`reportAi.budget.guard.test.js`」。新增 guard 用
+`?d263-budget` / `?d263-budget-stepwise` 动态 import 拿「import 期读 env」的隔离实例，
+按 D260 双向校验契约应登记进 `scripts/server-coverage-gate.mjs` 的 `EXCLUDED`
+（排除的是覆盖率测量，`cd server && npm test` 仍全量执行）。登记后排除名单 **5 → 6 个**、
+测量集 480 文件，`--selftest` 7/7 与 `--dry-run` 均 `exit 0`；`AGENTS.md` / `ci-local.mjs` /
+`facts-sync.mjs` / `docs/覆盖率门禁接线-D260.md` 同步口径。阈值 85/74/77 与 include 一字未改，
+未抬基线、未放宽断言、未跳钩子。最终 `npm run gate:close` **52/52 全绿**。
 
 ### 2026-11-06 批次 D262 · CLI × 本地网关 × 外部裁判靶场（docs only，非自建靶场）
 

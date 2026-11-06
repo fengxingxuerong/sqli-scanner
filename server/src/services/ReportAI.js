@@ -438,6 +438,67 @@ const MAX_TOKENS = Number(process.env.AI_REPORT_MAX_TOKENS) > 0
   ? Number(process.env.AI_REPORT_MAX_TOKENS)
   : 8192;
 
+// [D263] 整场总预算。调用方（aiReportCli.js）传进来的 timeoutMs 被 /3 当成「每步超时」，
+// 而流水线有「analyst 三级降级 + 每级短重试 + 分步 5 章撰写/5 章审阅」共十余步，
+// 最坏耗时 = 步数 × 每步超时，远大于调用方以为的整场上限（实测慢网关挂 10+ 分钟）。
+// 这里补一把真正的总闸：所有 LLM 请求共享同一 deadline，剩余预算裁剪单步超时，
+// 耗尽即抛明确错误并终止剩余降级/重试，不再空转。默认 5 分钟，可 env 覆盖。
+const TOTAL_TIMEOUT_MS = Number(process.env.AI_REPORT_TOTAL_TIMEOUT_MS) > 0
+  ? Number(process.env.AI_REPORT_TOTAL_TIMEOUT_MS)
+  : 300000;
+
+/**
+ * [D263] 把单步超时裁到整场剩余预算内（纯函数，便于判据单测）。
+ * @param {number} stepTimeoutMs 原本的单步超时
+ * @param {number} deadline 绝对截止时间戳（ms）
+ * @param {number} [now] 当前时间（注入便于确定性测试）
+ * @returns {{ok: boolean, timeoutMs: number, remainingMs: number}} ok=false 表示预算已耗尽
+ */
+export function clampToBudget(stepTimeoutMs, deadline, now = Date.now()) {
+  const remainingMs = deadline - now;
+  if (!Number.isFinite(remainingMs) || remainingMs <= 0) {
+    return { ok: false, timeoutMs: 0, remainingMs: Number.isFinite(remainingMs) ? Math.max(0, remainingMs) : 0 };
+  }
+  const step = Number(stepTimeoutMs) > 0 ? Number(stepTimeoutMs) : 60000;
+  return { ok: true, timeoutMs: Math.max(1, Math.min(step, remainingMs)), remainingMs };
+}
+
+/**
+ * [D263] 造一把整场总闸：返回共享 deadline 的请求包装（抽方法，避免 generateAiReport 分支膨胀）。
+ * @param {number} timeoutMs 调用方给的整场上限
+ * @returns {{totalBudgetMs:number, call:(cfg:object,systemPrompt:string,userPrompt:string,timeoutMs:number)=>Promise<string>}}
+ */
+function makeBudgetedCallLLM(timeoutMs) {
+  const callerBudget = Number(timeoutMs) > 0 ? Number(timeoutMs) : 120000;
+  const totalBudgetMs = Math.min(callerBudget, TOTAL_TIMEOUT_MS);
+  const deadline = Date.now() + totalBudgetMs;
+  const call = (cfg, systemPrompt, userPrompt, ms) => {
+    const budget = clampToBudget(ms, deadline);
+    if (!budget.ok) {
+      // Object.assign 让 TS 推出 AppError & {budgetExhausted:boolean}，不必往通用错误类塞专用字段
+      const err = Object.assign(new AppError(
+        ErrorCode.HTTP_TIMEOUT,
+        `AI 报告总预算耗尽（${Math.round(totalBudgetMs / 1000)}s）：已停止慢网关的剩余请求；可调 AI_REPORT_TOTAL_TIMEOUT_MS`,
+      ), { budgetExhausted: true });
+      throw err;
+    }
+    return callLLM(cfg, systemPrompt, userPrompt, budget.timeoutMs);
+  };
+  return { totalBudgetMs, call };
+}
+
+/**
+ * [D263] 半成品口径：partial=true 时不得沿用 legacy 的「✅ 已过审」。
+ * @param {{reviewNote?:string, stepwise?:{partial?:boolean,reviewedSections?:number,writerSteps?:number}}} stages
+ * @returns {string|undefined}
+ */
+function deriveReviewNote(stages) {
+  if (stages.stepwise?.partial) {
+    return `⚠️ 报告不完整：分步流水线部分完成（${stages.stepwise.reviewedSections}/${stages.stepwise.writerSteps} 章审阅），不得当作完整报告引用`;
+  }
+  return stages.reviewNote;
+}
+
 // ── 调用 LLM（带容灾重试）──────────────────────────────────────────────────
 async function callLLM(cfg, systemPrompt, userPrompt, timeoutMs = 60000) {
   const controller = new AbortController();
@@ -582,14 +643,16 @@ function isShortRetryable(e) {
  * @param {number} timeoutMs 首轮超时
  * @param {string} roleName 角色名（写进披露字段）
  * @param {string[]} retries 本次报告已发生短重试的角色名
+ * @param {(cfg:object, system:string, user:string, timeoutMs:number)=>Promise<string>} [call] [D263] 实际请求函数，默认 callLLM；总预算模式注入带 deadline 的包装
  * @returns {Promise<string>} LLM 返回的非空内容
  */
-async function callWithShortRetry(cfg, fullSystem, fullUser, shortSystem, shortUser, timeoutMs, roleName, retries) {
+async function callWithShortRetry(cfg, fullSystem, fullUser, shortSystem, shortUser, timeoutMs, roleName, retries, call = callLLM) {
   try {
-    return await callLLM(cfg, fullSystem, fullUser, timeoutMs);
+    return await call(cfg, fullSystem, fullUser, timeoutMs);
   } catch (e) {
+    if (e?.budgetExhausted) throw e; // [D263] 总闸耗尽不再补发短请求
     if (!SHORT_RETRY_ENABLED || !isShortRetryable(e)) throw e;
-    const content = await callLLM(cfg, shortSystem, shortUser, Math.min(timeoutMs, SHORT_RETRY_TIMEOUT_MS));
+    const content = await call(cfg, shortSystem, shortUser, Math.min(timeoutMs, SHORT_RETRY_TIMEOUT_MS));
     retries.push(roleName);
     clearKeyFail(cfg.keyIdx);
     return content;
@@ -611,9 +674,10 @@ async function callWithShortRetry(cfg, fullSystem, fullUser, shortSystem, shortU
  * @param {string[]} retries 本次报告已发生短重试的角色名（原地追加）
  * @param {(report: object) => string} [buildFull] 首轮 prompt 构造器；[D259] 分步模式传短版本，
  *   默认仍是原版 buildAnalystPrompt（非分步路径零变化）
+ * @param {(cfg:object, system:string, user:string, timeoutMs:number)=>Promise<string>} [call] [D263] 总预算包装后的请求函数
  * @returns {Promise<string>} analyst 输出（未校验 JSON）
  */
-async function runAnalystStage(report, timeoutMs, retries, buildFull = buildAnalystPrompt) {
+async function runAnalystStage(report, timeoutMs, retries, buildFull = buildAnalystPrompt, call = callLLM) {
   const attempts = [
     { idx: 0, system: ANALYST_SYSTEM, name: 'analyst' },
     { idx: 1, system: ANALYST_FALLBACK_SYSTEM, name: 'analyst-writer' },
@@ -626,9 +690,10 @@ async function runAnalystStage(report, timeoutMs, retries, buildFull = buildAnal
       return await callWithShortRetry(
         cfg, a.system, buildFull(report),
         a.system, buildShortAnalystPrompt(report),
-        timeoutMs, a.name, retries,
+        timeoutMs, a.name, retries, call,
       );
     } catch (e) {
+      if (e?.budgetExhausted) throw e; // [D263] 总闸耗尽立即停，不再三级降级
       errors.push(e);
     }
   }
@@ -679,9 +744,10 @@ function stepwiseDerived(report, analysis) {
  * @param {string} analysisValidated 已校验的分析结果
  * @param {number} timeoutMs 每阶段超时
  * @param {string[]} retries 短重试披露数组
+ * @param {(cfg:object, system:string, user:string, timeoutMs:number)=>Promise<string>} [call] [D263] 总预算包装后的请求函数
  * @returns {Promise<{draft:string,finalReport:string,reviewNote:string,stepwise:null}>} 三阶段结果
  */
-async function runLegacyStages(report, analysis, analysisValidated, timeoutMs, retries) {
+async function runLegacyStages(report, analysis, analysisValidated, timeoutMs, retries, call = callLLM) {
   let draft;
   try {
     const cfg = getRoleConfig(1); // writer
@@ -690,9 +756,10 @@ async function runLegacyStages(report, analysis, analysisValidated, timeoutMs, r
       buildWriterPrompt(report, analysisValidated),
       '你是渗透测试报告撰写专家，输出 Markdown 报告。',
       buildShortWriterPrompt(report, analysisValidated),
-      timeoutMs, 'writer', retries,
+      timeoutMs, 'writer', retries, call,
     );
   } catch (e) {
+    if (e?.budgetExhausted) throw e; // [D263] 总闸耗尽不再用 analyst 输出冒充报告
     draft = analysis + '\n\n（报告撰写角色暂不可用，以上为漏洞分析结果，建议手动完善报告格式）';
   }
   let finalReport = draft;
@@ -704,11 +771,12 @@ async function runLegacyStages(report, analysis, analysisValidated, timeoutMs, r
       buildReviewerPrompt(report, draft),
       '你是安全审计专家，输出修订后的 Markdown 报告。',
       buildShortReviewerPrompt(draft),
-      timeoutMs, 'reviewer', retries,
+      timeoutMs, 'reviewer', retries, call,
     );
     finalReport = reviewed;
     reviewNote = '✅ 已经过安全审阅角色校验';
   } catch (e) {
+    if (e?.budgetExhausted) throw e; // [D263] 总闸耗尽不再标「未审阅」继续
     reviewNote = '⚠️ 安全审阅角色暂不可用，报告未经审阅';
   }
   return { draft, finalReport, reviewNote, stepwise: null };
@@ -730,12 +798,15 @@ function reportFingerprint(report) {
 }
 
 export async function generateAiReport(report, timeoutMs = 120000) {
-  // 缓存命中
+  // 缓存命中（不消耗本次预算）
   const fp = reportFingerprint(report);
   const cached = reportCache.get(fp);
   if (cached && Date.now() - cached.ts < CACHE_TTL) {
     return { ...cached.result, cached: true };
   }
+
+  // [D263] 整场总闸：所有 LLM 请求共享同一 deadline，耗尽即停（实现见 makeBudgetedCallLLM）。
+  const { call: budgetedCallLLM } = makeBudgetedCallLLM(timeoutMs);
 
   const perStepTimeout = Math.floor(timeoutMs / 3);
   // [D255] 本次报告实际发生过短 prompt 重试的角色，随结果如实披露（不伪造审阅口径）
@@ -751,6 +822,7 @@ export async function generateAiReport(report, timeoutMs = 120000) {
   const analysis = await runAnalystStage(
     report, perStepTimeout, shortPromptRetries,
     STEPWISE_ENABLED ? () => shortAnalystPrompt : buildAnalystPrompt,
+    budgetedCallLLM,
   );
 
   // [B-11] 校验 analyst 返回的 JSON：LLM 可能返回非 JSON（markdown 包裹、错误消息、prompt injection 响应），
@@ -766,12 +838,14 @@ export async function generateAiReport(report, timeoutMs = 120000) {
       stepwiseTimeoutMs: STEPWISE_TIMEOUT_MS,
       maxPromptChars: STEPWISE_MAX_CHARS,
       sectionCount: WRITER_SECTIONS.length,
-      callLLM,
+      callLLM: budgetedCallLLM,
       getRoleConfig,
-      legacyFallback: () => runLegacyStages(report, analysis, analysisValidated, perStepTimeout, shortPromptRetries),
+      legacyFallback: () => runLegacyStages(report, analysis, analysisValidated, perStepTimeout, shortPromptRetries, budgetedCallLLM),
     })
-    : await runLegacyStages(report, analysis, analysisValidated, perStepTimeout, shortPromptRetries);
-  const { finalReport, reviewNote } = stages;
+    : await runLegacyStages(report, analysis, analysisValidated, perStepTimeout, shortPromptRetries, budgetedCallLLM);
+  const { finalReport } = stages;
+  // [D263] 半成品一律改成「报告不完整」，头部与 ai-report.json 同源（判定见 deriveReviewNote）。
+  const reviewNote = deriveReviewNote(stages);
 
   // [D205] 兜底：三角色都失败时 finalReport 仍可能是空串 —— 不能返回 success=true
   //（callLLM 已拦空响应，这里防的是"空串被当 draft 继续往下走"的残留路径）

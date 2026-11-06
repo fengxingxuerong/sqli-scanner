@@ -7,11 +7,11 @@
 //   · Node 22.22.2：最小样本连跑 5 次，同一文件 branch 在 66.67% / 57.14% 之间跳；
 //   · Node 24.22.1（CI 同款）：稳定取单快照（66.67% / funcs 33.33%），不再 union；
 //   · 去掉 `?query` 实例后，两个版本都稳定 union（57.14% / funcs 100%）。
-// 本仓 5 个测试文件用 `?tag` 动态 import 拿模块隔离实例（env 在 import 期读取），
+// 本仓 6 个测试文件用 `?tag` 动态 import 拿模块隔离实例（env 在 import 期读取），
 // 正是它们让 CI 的 `Server coverage gate` 从 77% 掉到 73.18% branch（< 74 阈值）。
 //
 // 修法（校准**合并口径**，不动阈值、不动 include、不放宽任何断言）：
-//   覆盖率测量排除这 5 个文件；它们仍在 `cd server && npm test` 全量执行。
+//   覆盖率测量排除这 6 个文件；它们仍在 `cd server && npm test` 全量执行。
 //   排除名单由静态扫描 + 双向校验钉死：新增 `?query` 导入而没进名单会当场判红，
 //   名单里的文件不再含 `?query` 也会判红（防名单静默腐烂）。
 //   Node 24 实测：479 个文件 / 4129 用例 / 0 fail，all files 95.08 / 81.75 / 88.93（exit 0）。
@@ -37,6 +37,7 @@ const REL_SCRIPT = 'scripts/server-coverage-gate.mjs';
 const EXCLUDED = Object.freeze([
   'exploitRoutes.edge.test.js',
   'reportAI.service.test.js',
+  'reportAi.budget.guard.test.js',
   'reportAi.shortRetry.guard.test.js',
   'reportAi.stepwise.guard.test.js',
   'ssrf.ipv6.test.js',

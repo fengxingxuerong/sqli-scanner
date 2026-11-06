@@ -239,7 +239,8 @@ async function runStepwiseCall(deps, cfg, step, timeoutMs) {
   try {
     const content = await deps.callLLM(cfg, step.system, step.user, Math.min(timeoutMs, deps.stepwiseTimeoutMs));
     return { ok: true, content };
-  } catch {
+  } catch (e) {
+    if (e?.budgetExhausted) throw e; // [D263] 总预算耗尽立即终止，不再逐章空转
     return { ok: false, content: '' };
   }
 }
@@ -301,7 +302,8 @@ export async function runStepwiseStages(deps) {
   let review = { sections, okCount: 0 };
   try {
     review = await reviewStepwiseSections(deps, sections, deps.timeoutMs, failedSteps);
-  } catch {
+  } catch (e) {
+    if (e?.budgetExhausted) throw e; // [D263] 总预算耗尽不再吞成「reviewer 不可用」
     failedSteps.push('reviewer:unavailable');
   }
   const total = sections.filter((s) => s.generated).length;

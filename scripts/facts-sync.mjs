@@ -145,11 +145,11 @@ function collectFrontend({ coverage }) {
 
 function collectServer({ coverage }) {
   // [D260 2026-11-06] 用例计数与覆盖率**分两次采集**，各有各的真源：
-  //   · 计数走 `npm test` 全量（485 个测试文件全跑，含 5 个用 `?query` 隔离实例的）；
-  //   · 覆盖率走 `test:coverage:report`（确定性合并口径，排除那 5 个文件，见
+  //   · 计数走 `npm test` 全量（485 个测试文件全跑，含 6 个用 `?query` 隔离实例的）；
+  //   · 覆盖率走 `test:coverage:report`（确定性合并口径，排除那 6 个文件，见
   //     scripts/server-coverage-gate.mjs）。
   // 旧实现用一次 report 变体同时取两者 ⇒ 排除后 README 的「服务端用例数」会凭空少掉
-  // 那 5 个文件里的用例，把「覆盖率测量集」误写成「全量用例数」。两个数字必须分开取。
+  // 那 6 个文件里的用例，把「覆盖率测量集」误写成「全量用例数」。两个数字必须分开取。
   // 覆盖率采集用 :report 变体（不带 --test-coverage-*=阈值）：阈值是门禁的职责，
   // 采集脚本不该因为它退出非零而拿不到数字。
   // [TOOL-FIX 2026-09-18] 显式钉 `--test-reporter=tap`。本脚本只认 `# tests N` 这种 TAP 汇总行，

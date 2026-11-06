@@ -337,6 +337,9 @@ export const HELP_TEXT = `sqli-scanner CLI（对标 sqlmap 的 Node 引擎命令
   --ai-report [dir]          扫描后用 LLM 生成自然语言报告（analyst→writer→reviewer 三角色流水线）。
                              需先配 AI_REPORT_API_BASE（完整 chat/completions 端点）+ AI_REPORT_KEY_1；
                              自建/本机网关常强制 provider/model 全名，另需 AI_REPORT_MODEL_1/2/3。
+                             [D263] 整场总闸 AI_REPORT_TOTAL_TIMEOUT_MS（默认 300s）：慢网关耗尽预算即明确报错，
+                             不再挂十几分钟；单步超时由 AI_REPORT_STEPWISE_TIMEOUT_MS /
+                             AI_REPORT_SHORT_RETRY_TIMEOUT_MS 控制（必须带 AI_REPORT_ 前缀）。
                              不带值 ⇒ 写 <--out 目录或当前目录>/ai-report/；带值 ⇒ 直接写该目录。
                              落盘 ai-report.md + ai-report.json（模型链/耗时/审阅状态）。
                              报告里的响应判据取自引擎实测布尔 trace（真/假响应长度差、差异片段），

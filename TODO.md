@@ -5,6 +5,43 @@
 
 ---
 
+## 2026-11-07 批次 D263 · AI 报告整场总闸 + 半成品口径修正（见 CHANGELOG）
+
+**要求**：用户「开始修复吧 ai 报告超时怎么回事，说人话」。
+
+**真因（源码级）**：`server/src/services/aiReportCli.js` 把 600000ms 传给
+`generateAiReport`，`ReportAI.js` 把它 **/3 当「每步」超时**（200s）；而流水线有
+analyst 三级降级 + 每级短重试 + 分步 5 章撰写/5 章审阅 ≈ 十余步 ⇒ **没有真正的整场上限**，
+慢推理网关实测挂 10m32s 无退出码（zcode-proxy `glm-5.3-flash`）。
+另：`stepwise.partial=true` 时回退整篇的 reviewer 成功仍写「✅ 已经过安全审阅」，
+与半成品事实矛盾（D262 落盘产物实证）。
+
+**改动**（未放宽任何检出判据）：
+- `ReportAI.js`：新增 `AI_REPORT_TOTAL_TIMEOUT_MS`（默认 300s）+ 纯函数 `clampToBudget`；
+  所有 LLM 请求共享 deadline，单步超时裁到剩余预算；耗尽抛带 `budgetExhausted` 的明确错误，
+  `runAnalystStage` / `runLegacyStages` / `reportAiStepwise.js` 立即停止降级、重试、逐章空转。
+- `partial=true` 时 `reviewNote` 统一改为「报告不完整」，`ai-report.md` 头部与
+  `ai-report.json` 同源，不再出现「✅ 已过审」的半成品。
+- `help.js` / `docs/AI-网关-runbook.md` / `docs/CLI-本地网关-外部靶场实测-2026-11-06.txt`：
+  补总闸说明，更正 D262 里**无效的** `STEPWISE_TIMEOUT_MS` / `SHORT_RETRY_TIMEOUT_MS`
+  （源码只认带 `AI_REPORT_` 前缀），旧文按推翻协议保留并标注作废。
+
+**验证**：新增 `server/tests/reportAi.budget.guard.test.js` 5 条（慢网关 607ms 收口、
+不再发降级请求、半成品口径、非分步零回归）；AI 单测合计 62/62；lint / typecheck /
+七道守卫及自证 / 预提交三道 / readme 双向核对全绿；`facts` 刷新后 `gate:close --quick` **49/49**。
+**缺陷注入复验**：剪掉总闸后判据 exit 1 判红，用备份还原后 5/5 复绿（`cmp` 字节一致）。
+**真网关 e2e**：同一条 zcode-proxy `glm-5.3-flash` 链路（D262 曾挂 10m32s），
+总闸压到 30s 后 **42s 明确报「AI 报告总预算耗尽」**，扫描结论不变、靶场收干净。
+
+**边界**：链路单测不替代真网关 e2e；真网关能否出完整报告仍以
+`node e2e/ai-gateway-lab/run.mjs` 退出码为准。总闸只管「不再挂死」，不承诺报告变完整。
+
+**收口补记（2026-11-07）**：全量 `gate:close` 首轮 51/52（`server-coverage` 判红：新增 guard
+含 `?query` 导入未登记排除名单），按 D260 契约把 `reportAi.budget.guard.test.js` 登记进
+`EXCLUDED`（5 → 6 个），文档口径同步后复跑 **52/52 全绿**。阈值与断言未动。
+
+---
+
 ## 2026-11-06 批次 D262 · CLI × 本地网关 × 外部裁判靶场（已完成，见 CHANGELOG）
 
 **要求**：用户「cli 操作这个项目，用本地网关打靶场，最后给结论；要外部靶场，

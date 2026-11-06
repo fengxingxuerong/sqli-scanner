@@ -31,7 +31,8 @@
 | `AI_REPORT_STEPWISE_TIMEOUT_MS` | 可选 [D259] | 分步单步超时上限，默认取 `AI_REPORT_SHORT_RETRY_TIMEOUT_MS`（20s）；实际 `min(每步超时, 该值)` |
 | `AI_REPORT_MAX_TOKENS` | 可选 | 默认 8192。推理模型（带 `reasoning_content`）生成长输出会拖过 per-step 超时，本地网关建议 2048（验收套件默认注入） |
 | `AI_REPORT_MASK` | 默认 on | 默认脱敏（host → `<目标Host>`，路径 → `/***`）。**指向本机网关时建议 `=0`**：不脱敏 LLM 才能写出可直接复现的 PoC（D205 实测） |
-| `AI_REPORT_TIMEOUT_MS` | 可选 | 未接线；超时由路由硬编码 120s（REST）与 `generateAiReport(report, timeoutMs)` 三均分 |
+| `AI_REPORT_TOTAL_TIMEOUT_MS` | 可选 [D263] | **整场总闸**，默认 300000ms（5 分钟）。CLI 传入的 `timeoutMs` 被 /3 当「每步超时」，而流水线有三级降级 + 短重试 + 分步 11 章共十余步 ⇒ 慢网关可挂 10+ 分钟。所有 LLM 请求共享同一 deadline，单步超时裁到剩余预算，耗尽即抛「AI 报告总预算耗尽」并停止剩余降级/重试。实际取 `min(调用方 timeoutMs, 该值)` |
+| `AI_REPORT_TIMEOUT_MS` | 可选 | 未接线；超时由路由硬编码 120s（REST）与 `generateAiReport(report, timeoutMs)` 三均分（[D263] 再受上面的整场总闸约束） |
 
 ## 2. 最小可用配置
 
@@ -237,3 +238,9 @@ env AI_GATEWAY_URL=http://127.0.0.1:8326 AI_GATEWAY_KEY=$DSH_KEY \
    （`e2e/ai-gateway-lab/run.mjs` 是标准写法）。
 4. `generateAiReport` 有**结果缓存**（按报告指纹 + TTL）：同内容短时间二次调用会命中缓存，
    链路测试类场景要让 fixture 的 `startedAt`/`scanId` 每次变化（套件已处理）。
+5. **超时 env 必须带 `AI_REPORT_` 前缀**（D263 实测）：写成 `STEPWISE_TIMEOUT_MS` /
+   `SHORT_RETRY_TIMEOUT_MS` 源码完全不读，实际仍走 20s 默认；D262 证据文档里那两个名字
+   已按推翻协议标注作废。正确名见 §1 矩阵。
+6. **半成品报告不得标「✅ 已过审」**（D263）：`stepwise.partial=true`（分步 writer 全章失败、
+   回退整篇）时头部与 `ai-report.json` 的 `reviewNote` 统一改为「报告不完整」；
+   引用 AI 报告必须同时看 `partial` / `fallback` / `reviewedSections`。
