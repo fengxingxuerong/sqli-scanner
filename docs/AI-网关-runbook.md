@@ -184,6 +184,42 @@ mock-hang 分步 **462ms PASS**、同配置非分步基线 **6160ms PASS**（与
 0.5B 是链路级模型，正文更长只说明章节齐全，**不判文风质量**。
 glm-5.3-flash 生产网关本轮仍无可用 key，**未复跑** —— 不能宣称 `ai-gateway` 套件
 在 D254/D255 那两个网关上已 PASS。
+> **[D261 2026-11-06 补注]** 上句是 D259 当时的口径，保留不删。本机 dsh 网关
+> （`127.0.0.1:8326`，250 模型）已用自带 key 复跑，结果见 §5.3：**仍 FAIL**。
+> A/B zcode-proxy（8080 / 18080）本轮探活不可达，两个生产网关依旧未复跑。
+
+### 5.3 [D261 2026-11-06] 本地网关复跑（真 HTTP，未改任何断言）
+
+两个本地网关都在线时直接跑官方套件，判据 = 退出码；完整输出见
+[`本地网关-真HTTP验证-2026-11-06.txt`](本地网关-真HTTP验证-2026-11-06.txt)。
+
+| 网关 / 模型 | 模式 | exit | 事实 |
+|---|---|---|---|
+| Ollama `qwen2.5:0.5b` | 非分步 | **0 PASS** | 11990ms，审阅 ✅，元数据 4/4，落盘 710B |
+| Ollama `qwen2.5:0.5b` | 分步 | **0 PASS** | 16838ms，writer 5 章 / 审阅 5 章 / `partial=false` |
+| dsh `trae/glm-5.3-flash` | 分步 / 非分步 | 1 FAIL | 三轮降级全在 analyst 阶段 20s 超时 |
+| dsh `deepseek-v4-flash` | 分步 2048 tok | 1 FAIL | `finish_reason=length` 空内容（推理占满预算） |
+| dsh `deepseek-v4-flash` | 分步 4096 tok / 90s | 1 FAIL | 流水线跑完但 `partial=true`、审阅 0 章、未过审 ⇒ 加严判据正确判红 |
+
+**真因（诊断探针实证）**：本地 dsh 网关 HTTP 链路与模型都可用——
+`trae/glm-5.3-flash` 对真实分步 analyst prompt（468 字符）39.95s 返回合法 JSON、
+`deepseek-v4-flash` 24.5s 返回合法 JSON；但默认单步 **20s** 对推理型档位不够，
+放宽到 60/90s 后仍有空内容或逐章审阅失败。属**模型档位 / token 预算 / 上游波动**，
+不是 ReportAI 链路缺陷，也不是判据该放宽的理由。
+
+**可复现命令**（key 从 `~/.dsh/openai-gateway/api-key` 读，不写进文档）：
+```bash
+# 本地 Ollama（默认即它）
+AI_REPORT_STEPWISE=1 AI_GATEWAY_TIMEOUT_MS=180000 node e2e/ai-gateway-lab/run.mjs
+# 本地 dsh
+DSH_KEY=$(node -p "require('fs').readFileSync(require('os').homedir()+'/.dsh/openai-gateway/api-key','utf8').trim()")
+env AI_GATEWAY_URL=http://127.0.0.1:8326 AI_GATEWAY_KEY=$DSH_KEY \
+  AI_GATEWAY_MODEL=trae/glm-5.3-flash AI_GATEWAY_TIMEOUT_MS=180000 \
+  AI_REPORT_STEPWISE=1 node e2e/ai-gateway-lab/run.mjs
+```
+
+**边界**：**不得宣称 ai-gateway 套件在 dsh / glm-5.3-flash 上已 PASS**；
+0.5B 只验链路不判文风；网关 `/v1/models` 列出 250 个 id 不等于 250 个可用档位。
 
 ## 6. 运维坑（实测记录）
 

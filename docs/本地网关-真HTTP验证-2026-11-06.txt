@@ -1,0 +1,75 @@
+D261 · 本地 LLM 网关 × AI 报告套件真 HTTP 实测（2026-11-06，判据一律退出码）
+================================================================================
+命令基准：node e2e/ai-gateway-lab/run.mjs（项目自带判据，未放宽任何断言）
+密钥：dsh 用 ~/.dsh/openai-gateway/api-key（本文件不记录明文）；Ollama 用 'local'。
+
+── 1. 网关探活（真实 HTTP，只读，未新起任何常驻进程） ──────────────────────
+Ollama      http://127.0.0.1:11434/v1/models  HTTP 200  models=2   [qwen2.5:0.5b, bge-m3:latest]
+dsh         http://127.0.0.1:8326/v1/models   HTTP 200  models=250 [glm-5.3-flash 变体 16 条]
+zcode A     http://127.0.0.1:8080            UNREACHABLE (fetch failed)
+zcode B     http://192.168.151.151:18080     UNREACHABLE (3s timeout)
+mock-hang   http://127.0.0.1:18326           HTTP 401（非本仓 mock 网关，未使用）
+
+短 prompt 探针（POST /v1/chat/completions, "Reply with exactly: PONG", max_tokens=64）：
+  glm/glm-5.3-flash                HTTP 502 131ms  TRANSPORT（同日早些时候曾 200 PONG，已漂移）
+  trae/glm-5.3-flash               HTTP 200 3537ms  PONG
+  deepseek-auto/glm-5.2            HTTP 200 2477ms  finish=length len=1 "P"
+  deepseek-auto/deepseek-v4-flash  HTTP 200 2447ms  PONG
+
+── 2. 官方套件 7 组（同一份 run.mjs，未改代码/阈值/断言） ────────────────────
+# 组 1  Ollama 非分步基线
+AI_GATEWAY_URL=http://127.0.0.1:11434 AI_GATEWAY_MODEL=qwen2.5:0.5b \
+AI_GATEWAY_TIMEOUT_MS=180000 node e2e/ai-gateway-lab/run.mjs
+  EXIT=0  11990ms  审阅 ✅ / 元数据 4/4 / 脱敏 on / 落盘 710B / 网关实调 true / PASS
+
+# 组 2  Ollama 分步短 prompt
+同上 + AI_REPORT_STEPWISE=1
+  EXIT=0  16838ms  审阅 ✅ / 元数据 4/4 / 落盘 5119B / writer 5 章 / 审阅 5 章 /
+  partial=false / fallback=none / PASS
+
+# 组 3  dsh · trae/glm-5.3-flash 分步（默认单步 20s）
+AI_GATEWAY_URL=http://127.0.0.1:8326 AI_GATEWAY_KEY=$DSH_KEY \
+AI_GATEWAY_MODEL=trae/glm-5.3-flash AI_GATEWAY_TIMEOUT_MS=180000 \
+AI_REPORT_STEPWISE=1 node e2e/ai-gateway-lab/run.mjs
+  EXIT=1  流水线失败：analyst→writer→reviewer 三轮降级均失败
+  「角色 reviewer 请求超时（20s）；首轮原因：角色 analyst 请求超时（20s）」
+
+# 组 4  dsh · trae/glm-5.3-flash 非分步基线（90s 总预算）
+同上，去掉 AI_REPORT_STEPWISE，AI_GATEWAY_TIMEOUT_MS=90000
+  EXIT=1  同样三轮 20s 超时（长 prompt 形态复现 11-05 结论）
+
+# 组 5  dsh · trae 放宽分步单步到 60s
++ AI_REPORT_STEPWISE_TIMEOUT_MS=60000（未同时放宽 SHORT_RETRY 的 20s）
+  EXIT=1  仍报 20s 超时 —— 短重试路径用的是 AI_REPORT_SHORT_RETRY_TIMEOUT_MS（默认 20000），
+          与本开关不是同一个变量（口径记录，未改代码）
+
+# 组 6  dsh · deepseek-auto/deepseek-v4-flash 分步（60s/60s, 2048 tokens）
++ AI_REPORT_STEPWISE_TIMEOUT_MS=60000 AI_REPORT_SHORT_RETRY_TIMEOUT_MS=60000
+  EXIT=1  「LLM 返回空内容（finish_reason=length，role=analyst）」—— 推理占满 token
+
+# 组 7  dsh · deepseek-v4-flash 分步（90s/90s, 4096 tokens, 270s 总预算）
++ AI_GATEWAY_TIMEOUT_MS=270000 AI_GATEWAY_MAX_TOKENS=4096 \
+  AI_REPORT_STEPWISE_TIMEOUT_MS=90000 AI_REPORT_SHORT_RETRY_TIMEOUT_MS=90000
+  EXIT=1  但流水线**跑完并落盘**：498555ms / 元数据 4/4 / 脱敏 on / 网关实调 true /
+  落盘 2434B / writer 5 章 / **审阅 0 章 / partial=true / 未过审**
+  ⇒ 套件 §5.2 的加严判据（partial=false、逐章审阅齐全）正确判红，没有把半成品当成 PASS。
+原始日志：.box-agent-scratch/d261/*.log（未入库，落盘证据以本文为准）。
+
+── 3. 真分步 prompt 诊断探针（同一份 buildStepwiseAnalystPrompt，468 字符） ──
+  trae/glm-5.3-flash               max=512   HTTP 200 39951ms  finish=stop  len=777（合法 JSON）
+  trae/glm-5.3-flash               max=512   复测 HTTP 70006ms 超时（上游波动，非确定性）
+  deepseek-auto/deepseek-v4-flash  max=2048  HTTP 200 24511ms  finish=stop  len=630（合法 JSON）
+  deepseek-auto/deepseek-v4-flash  max=512   HTTP 200  8622ms  finish=length len=0
+  deepseek-auto/glm-5.2            max=512   HTTP 200  8916ms  finish=length len=0
+⇒ 本地网关 HTTP 链路通、模型能产出内容；瓶颈是**推理型档位的首 token 延迟与 token 预算**，
+  不是 ReportAI 链路、也不是判据。默认单步 20s 对这些模型不够；放宽后仍有逐章审阅失败。
+
+── 4. 结论与边界 ──────────────────────────────────────────────────────────
+· 本地网关 Ollama：非分步 / 分步**两组都 PASS**（exit 0），D259 分步链路在最终代码上零回归。
+· 本地网关 dsh:8326：**未 PASS**，7 组里 5 组 dsh 全 exit 1；最宽松那组也只是 partial 半成品，
+  加严判据正确判红。**不得宣称 ai-gateway 套件在 dsh / glm-5.3-flash 上已通过**。
+· 未改任何生产代码、测试、阈值或套件断言；没有放宽判据换绿灯。
+· A/B zcode-proxy 8080/18080 本次探活不可达 ⇒ D254/D255 那两个生产网关仍未复跑；
+  §5.2 旧句「glm-5.3-flash 生产网关本轮仍无可用 key」按当时口径保留，D261 已就地补注。
+· 0.5B 是链路级模型，不判报告文风质量；dsh 的 250 模型清单只代表网关目录，不代表可用档位。
+· 结论受 AGENTS.md §3.5 永远质疑协议约束：本次只是「此刻本机实测」，上游模型随时可能漂移。
