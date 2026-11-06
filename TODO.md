@@ -5,6 +5,22 @@
 
 ---
 
+## 2026-11-07 批次 D264 · 死代码门禁自证 Linux 假红修复（已完成，见 CHANGELOG）
+
+**问题**：CI `lint` job 的「死代码门禁自证」在 ubuntu-latest 上长期红，本机 Windows 全绿。
+**根因**：判据把路径归一到 ROOT 之下，自证样本却放 `os.tmpdir()`（项目外绝对路径）。
+Linux 下 `dynTargets=tmp/dc-XXX/x.mjs` 与 `exp.file=/tmp/dc-XXX/x.mjs` 对不上 ⇒ ⑥⑦⑨ 判红；
+Windows 因盘符被拼进相对路径而歪打正着。用 `path.posix`/`path.win32` 双端最小复现钉死。
+
+**处置**：样本改到 ROOT 内 `.box-agent-scratch/`，以项目相对路径传参；新增第 ⑩ 条自证
+钉住「项目内 + 相对路径」。生产判据逻辑零变化，原 9 条断言一字未改。
+
+**验证**：Node 22 / Node 24 各 10/10 绿；posix 模拟匹配 true；缺陷注入（改回绝对路径）
+→ ⑩ 判红 exit 1，`cp` 还原字节一致后 10/10 复绿；`gate:close` 52/52 全绿。
+**边界**：本机 win32，Linux 结论还需 CI 复跑确认；macos-latest Server tests 红灯另案。
+
+---
+
 ## 2026-11-07 批次 D263 · AI 报告整场总闸 + 半成品口径修正（见 CHANGELOG）
 
 **要求**：用户「开始修复吧 ai 报告超时怎么回事，说人话」。

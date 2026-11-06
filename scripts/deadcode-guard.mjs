@@ -19,7 +19,6 @@
 //   node scripts/deadcode-guard.mjs --json        # 机器可读输出
 // ============================================================================
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -426,7 +425,16 @@ function selftestMain() {
 
   console.log('自证（判据不得空转）：');
 
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dc-selftest-'));
+  // [D264 2026-11-07] 自证样本必须落在 ROOT 内，并以「项目相对路径」传给判据。
+  // 原因（Linux CI 实测，非推测）：toProjectRelative() 把说明符归一到 ROOT 之下；
+  // 样本放在 os.tmpdir()（项目外绝对路径）时，Linux 下 dynTargets 得到
+  // `tmp/dc-XXX/x.mjs`，而 exp.file 是 `/tmp/dc-XXX/x.mjs` ⇒ ⑥⑦⑨ 动态 import
+  // 用例全部判红；Windows 因盘符被拼进相对路径而歪打正着匹配，故本机长期全绿。
+  // 放进项目内后两端路径形态一致，且与生产场景（被扫文件都在 ROOT 内）同构。
+  const scratch = path.join(ROOT, '.box-agent-scratch');
+  fs.mkdirSync(scratch, { recursive: true });
+  const dir = fs.mkdtempSync(path.join(scratch, 'dc-selftest-'));
+  const relDir = path.relative(ROOT, dir).split(path.sep).join('/');
   const write = (name, content) => {
     const p = path.join(dir, name);
     fs.writeFileSync(p, content, 'utf8');
@@ -437,7 +445,7 @@ function selftestMain() {
     write('mod.js', 'export function unusedFn() { return 1; }\nexport function usedFn() { return 2; }\n');
     write('user.js', 'import { usedFn } from "./mod.js";\n');
     t('① 导出无人引用 → 报出', () => {
-      const unused = findUnusedExports([dir], [dir]);
+      const unused = findUnusedExports([relDir], [relDir]);
       const names = unused.map((u) => u.name);
       ok(names.includes('unusedFn'), `应报出 unusedFn，实际 ${JSON.stringify(names)}`);
       ok(!names.includes('usedFn'), `不应报出 usedFn`);
@@ -446,7 +454,7 @@ function selftestMain() {
     // ② 加 @public 注释 → 转绿
     write('mod2.js', '/** @public */\nexport function publicFn() { return 1; }\n');
     t('② @public 标记 → 豁免不报', () => {
-      const unused = findUnusedExports([dir], [dir]);
+      const unused = findUnusedExports([relDir], [relDir]);
       const names = unused.map((u) => u.name);
       ok(!names.includes('publicFn'), `@public 标记不应报出，实际 ${JSON.stringify(names)}`);
     });
@@ -455,7 +463,7 @@ function selftestMain() {
     write('mod3.js', 'export function nsFn() { return 1; }\n');
     write('nsuser.js', 'import * as ns from "./mod3.js";\n');
     t('③ 命名空间导入 → 豁免不误报', () => {
-      const unused = findUnusedExports([dir], [dir]);
+      const unused = findUnusedExports([relDir], [relDir]);
       const nsEntry = unused.find((u) => u.name === 'nsFn');
       ok(nsEntry, 'nsFn 应在结果中');
       ok(nsEntry.reason && nsEntry.reason.includes('namespace'), `应标注 namespace 豁免，实际 ${nsEntry.reason}`);
@@ -486,11 +494,11 @@ function selftestMain() {
     write('dynTarget2.mjs', 'export function dynFn2() { return 1; }\n');
     write('dynCaller2.mjs', 'const m2 = await import(new URL("./dynTarget2.mjs", import.meta.url).href);\nvoid m2;\n');
     t('⑥ 相对路径动态 import 的目标不误报', () => {
-      const names = findUnusedExports([dir], [dir]).map((u) => u.name);
+      const names = findUnusedExports([relDir], [relDir]).map((u) => u.name);
       ok(!names.includes('dynFn'), `dynFn 被 await import 消费，不应报出；实际 ${JSON.stringify(names)}`);
     });
     t('⑦ new URL(...) 拼装的动态 import 目标不误报', () => {
-      const names = findUnusedExports([dir], [dir]).map((u) => u.name);
+      const names = findUnusedExports([relDir], [relDir]).map((u) => u.name);
       ok(!names.includes('dynFn2'), `dynFn2 被动态 import 消费，不应报出；实际 ${JSON.stringify(names)}`);
     });
 
@@ -498,7 +506,7 @@ function selftestMain() {
     write('reSrc.js', 'export function reExportedFn() { return 1; }\n');
     write('reBar.js', 'export { reExportedFn } from "./reSrc.js";\n');
     t('⑧ 再导出视为消费，不断链', () => {
-      const names = findUnusedExports([dir], [dir]).map((u) => u.name);
+      const names = findUnusedExports([relDir], [relDir]).map((u) => u.name);
       ok(!names.includes('reExportedFn'), `被再导出的符号不应报死代码；实际 ${JSON.stringify(names)}`);
     });
 
@@ -506,8 +514,16 @@ function selftestMain() {
     write('dynRel.mjs', 'export const DYN_KEY = 1;\n');
     write('dynCaller3.mjs', 'const REL = "dynRel.mjs";\nconst m3 = await import(new URL(`./${REL}`, import.meta.url));\nvoid m3;\n');
     t('⑨ 模板串 + 同文件常量的动态 import 目标不误报', () => {
-      const names = findUnusedExports([dir], [dir]).map((u) => u.name);
+      const names = findUnusedExports([relDir], [relDir]).map((u) => u.name);
       ok(!names.includes('DYN_KEY'), `DYN_KEY 被动态 import 消费，不应报出；实际 ${JSON.stringify(names)}`);
+    });
+
+    // ⑩ [D264] 钉住「样本必须在项目内且为相对路径」——改回 os.tmpdir() 会当场判红，
+    // 防止 Linux CI 上 ⑥⑦⑨ 再因路径形态不一致假红（Windows 本机歪打正着，看不出来）。
+    t('⑩ 自证样本位于项目内且为相对路径（跨平台形态一致）', () => {
+      ok(!path.isAbsolute(relDir), `样本目录不得是绝对路径，实际 ${relDir}`);
+      ok(!relDir.startsWith('..'), `样本目录不得越出项目根，实际 ${relDir}`);
+      ok(fs.existsSync(path.join(ROOT, relDir)), '样本目录应可由 ROOT 解析到');
     });
 
     console.log(failed ? `\n❌ selftest ${failed} 条失败` : '\n✅ selftest 全绿');

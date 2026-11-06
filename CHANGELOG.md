@@ -7,13 +7,14 @@
 > 下一批次起的条目写在这里。发版时把本节整体升为 `## [x.y.z] - YYYY-MM-DD` 并补汇总段。
 
 <!-- changelog-index:start -->
-**本段覆盖 47 个批次（D228–D263，2026-11-01 → 2026-11-07）**。正文按时间倒序排列；
+**本段覆盖 48 个批次（D228–D264，2026-11-01 → 2026-11-07）**。正文按时间倒序排列；
 下表是同一批次的索引，便于按编号或关键词定位。**索引只是导航，正文未做任何删改**
 （被推翻的旧结论原样保留，这是本仓的既定口径）。新增批次后跑
 `node scripts/changelog-index.mjs --write` 重生成，`--check` 校验是否过期。
 
 | 批次 | 日期 | 主题 |
 |---|---|---|
+| D264 | 11-07 | 死代码门禁自证的 Linux 假红修复（CI lint 常红） |
 | D263 | 11-07 | AI 报告整场总闸 + 半成品口径修正 |
 | D262 | 11-06 | CLI × 本地网关 × 外部裁判靶场（docs only，非自建靶场） |
 | D261 | 11-06 | 本地 LLM 网关真 HTTP 复跑（docs only，如实登记 FAIL） |
@@ -62,6 +63,38 @@
 | D229 | 11-01 | 交付闸收口：P0-3 卡顿修复（haystack 先截后拼）+ ai-gateway 断言去模型依赖 |
 | D228 | 11-01 | AI 报告网关端到端验收（ai-gateway 套件）+ 本地网关 runbook + CI 靶场硬要求扩展 |
 <!-- changelog-index:end -->
+
+### 2026-11-07 批次 D264 · 死代码门禁自证的 Linux 假红修复（CI lint 常红）
+
+**起点**：push `bedca29e` 后 CI run `42277074107` 的 `lint` job 仍挂在
+「死代码门禁自证（判据不空转）」；远端 D255-D262 三个提交的 CI 同样全红。
+本机 `node scripts/deadcode-guard.mjs --selftest` 9/9 绿、CI 同款 Node 24.22.1
+本机复跑也 9/9 绿 ⇒ 排除 Node 版本；GitHub job logs 需仓库 admin（403），改走源码定位。
+
+**根因（posix 最小复现，非推测）**：`toProjectRelative()` 把 import 说明符归一到
+ROOT 之下，而自证样本放在 `os.tmpdir()`（项目外绝对路径）。Linux 下
+`dynTargets` 得到 `tmp/dc-XXX/x.mjs`，`exp.file` 却是 `/tmp/dc-XXX/x.mjs`
+⇒ ⑥⑦⑨ 动态 import 用例全部判红；Windows 因盘符被拼进相对路径而歪打正着匹配，
+所以本机长期假绿。用 `path.posix` / `path.win32` 双端最小复现：
+Linux `匹配? false`、Windows `匹配? true`。
+
+**改动**（只动判据自证，生产判据逻辑零变化）：
+- `scripts/deadcode-guard.mjs`：样本目录改到 ROOT 内 `.box-agent-scratch/`
+  （`.gitignore` 已覆盖），以项目相对路径 `relDir` 传给 `findUnusedExports`；
+  删掉不再使用的 `node:os` import；新增第 ⑩ 条自证钉住「样本必须项目内 + 相对路径」，
+  防止改回临时目录后 Linux 再假红。原有 9 条断言一字未改，未放宽任何判据。
+
+**验证**：
+- Node 22.22.2 与 CI 同款 Node 24.22.1 各跑 `--selftest`：**10/10 全绿**；
+- posix 模拟 Linux：`dynTarget` 与 `exp.file` 同为
+  `.box-agent-scratch/dc-ABC/dynTarget.mjs`，**匹配 true**（修复前 false）；
+- 缺陷注入复验：`relDir` 改回绝对路径 → ⑩ 判红 `exit 1`；`cp` 备份还原
+  （`cmp` 字节一致）→ 10/10 复绿；
+- `npm run gate:close` **52/52 全绿**；facts 口径：前端 579 pass / 服务端
+  4224 用例（4218 pass / 0 fail / 6 skip）/ 徽章 4797。
+
+**诚实边界**：本机是 win32，Linux 行为由 posix 路径模拟与 CI 复跑共同确认；
+本批不碰 CI 的 `test-matrix (macos-latest)` Server tests 那处独立红灯。
 
 ### 2026-11-07 批次 D263 · AI 报告整场总闸 + 半成品口径修正
 
