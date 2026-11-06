@@ -1,0 +1,82 @@
+D262 · CLI × 本地 LLM 网关 × 外部裁判靶场 真 HTTP 实测（2026-11-06）
+================================================================================
+判据一律退出码 + 落盘报告 JSON；全程未使用本仓自建靶场、未用 mock 自证。
+
+── 0. 授权 / 靶场来源（先说清楚，防自证） ───────────────────────────────────
+目标：http://127.0.0.1:8099/vulnerabilities/sqli/?id=1&Submit=Submit
+靶场：digininja/DVWA（第三方官方源码，PHP 8.3 + MariaDB 10.11），本仓 `e2e/dvwa-lab/README.md`
+      定义为「外部裁判 3 号」，真值来自官方 source/low.php / high.php / impossible.php。
+      **不是本仓写的 mock / node:sqlite / mock-hang 网关**。
+授权：用户明确要求打外部靶场；目标全为本机 127.0.0.1，env SSRF_ALLOW_PRIVATE=1。
+起法：node scripts/labs.mjs --up=mariadb,dvwa（windowsHide + detached），
+      「起 → 测 → --stop」写在同一条 Bash 命令里（detached 进程随命令结束被回收）。
+      两次命令都以 labs --stop exit 0 收工，事后 `node scripts/labs.mjs` 体检全为 ⬜ 未起。
+
+── 1. 外部真值（官方 DVWA 脚本，非 CLI，交叉核对用） ───────────────────────
+命令：node e2e/dvwa-lab/run.mjs
+exit=0，输出：
+  真值漏洞端点：检出 5/5（漏检 0）
+  同源复检（同点换良性值 id=2）：检出 1/1
+  安全端点误报：0；安全端点证据不足（请求<30）：0
+  ✅ DVWA 外部裁判通过：PHP+MySQL 栈真漏洞可检出 且 同路径 impossible 档零误报
+  分档明细：low GET /vulnerabilities/sqli/ vulns=3；high cookie 点 vulns=1（boolean）；
+  medium POST 表单 vulns=3（union/error/boolean）；medium 盲注 POST vulns=1；
+  impossible 两端点各 vulns=0 / 请求 185、197。
+
+── 2. CLI 三次真扫（node server/bin/cli.js，不是只读代码） ─────────────────
+共同参数：
+  -u "http://127.0.0.1:8099/vulnerabilities/sqli/?id=1&Submit=Submit"
+  --cookie "security=<档位>; PHPSESSID=dvwa-lab-session"
+  -p id --level 3 --risk 2 --skip-static --retries 1 --http-timeout 5000 --timeout 180000
+  -o .box-agent-scratch/d262/<组>/  --ai-report .box-agent-scratch/d262/<组>/ai-report
+  env SSRF_ALLOW_PRIVATE=1 AI_REPORT_MASK=0 AI_REPORT_STEPWISE=1
+
+组 A · 本地网关 Ollama 127.0.0.1:11434 / qwen2.5:0.5b / security=low
+  exit=2（发现 High，属预期判红，非执行失败）
+  终端：检出 3 条漏洞 / 命中 union、error、boolean @ id@url / 耗时 10.3s
+  report.json：verdict=vulnerability_detected，vulns=3，points=1，
+    validity.status=ok / reliable=true / 累计 113 次请求，0 拦截 0 会话失效
+    uncoveredSurfaces=[path, forms]（如实声明，未测）
+  AI 报告：18s / 4877B，model 链 qwen2.5:0.5b×3，
+    stepwise={enabled:true, writerSteps:5, reviewedSections:5, partial:false,
+             failedSteps:[], fallback:null}，reviewNote「✅ 已过安全审阅（分章节短请求 5/5）」
+
+组 B · 本地网关 dsh 127.0.0.1:8326 / deepseek-auto/deepseek-v4-flash / security=low
+  （额外 env：AI_REPORT_MAX_TOKENS=4096、STEPWISE_TIMEOUT_MS=90000、
+    SHORT_RETRY_TIMEOUT_MS=90000；key 从 ~/.dsh/openai-gateway/api-key 读，不落文档）
+  exit=2，扫描结论与 A 逐字一致：3 条（union/error/boolean），113 次请求，validity ok
+  AI 报告：89.5s / 1962B，但**是半成品**：
+    stepwise={enabled:true, writerSteps:5, reviewedSections:0, partial:true,
+             failedSteps:[writer:overview, writer:description, writer:poc,
+                         writer:impact, writer:fix], fallback:'legacy'}
+    reviewNote「⚠️ 安全审阅角色暂不可用，报告未经审阅」
+    ⇒ 落盘了 analyst 的 JSON 分析（含引擎 payload / poc_verify），但 writer 全章失败、
+      回退整篇流水线且未过审。**不能当完整 AI 报告引用**，与 D261 的套件 FAIL 口径一致。
+
+组 C · 官方 impossible 安全档 A/B 对照（security=impossible，无 AI）
+  exit=0
+  终端：no_vulnerability_detected · 风险 Low / 0 漏洞 / 已测注入面 1 个 / 耗时 17.7s
+  report.json：verdict=no_vulnerability_detected，vulns=0，
+    validity.status=ok / reliable=true / **累计 187 次请求**，0 拦截 0 会话失效
+  ⇒ 不是「几个请求就跳过」的假阴性：打满预算后的零误报证据。
+
+── 3. AI 报告来源与凭据检查 ────────────────────────────────────────────────
+两份 ai-report.md 头部均写明 source report / pipeline / models / elapsed / 审阅状态 /
+「数据脱敏: 关闭（AI_REPORT_MASK=0，host/路径原样）」。
+grep 检查 `PHPSESSID|security=low` 在两份 AI 报告里 **0 命中**（本机目标，未把会话凭据喂给模型）。
+⚠️ dsh 那份 analyst JSON 里的 CVSS 9.8 / 8.8 / 7.5 是**模型自评**，不是引擎结论；
+   PoC 判据（SQLISCANNER0/1、z=2.83 等）来自引擎实测，引用时只认引擎字段。
+
+── 4. 结论（对外口径） ────────────────────────────────────────────────────
+1. 本项目 CLI 能在**第三方官方外部靶场 DVWA** 上真检出一个 id@url 注入点，
+   3 条技术命中、High、exit 2；官方真值脚本同场 5/5 真值端点全检出、0 误报。
+2. 同路径官方 impossible 安全档 CLI 0 命中（187 次请求，阴性可信度 ok）⇒ A/B 成立。
+3. 本地网关两条都接进 CLI `--ai-report` 并真实出稿：Ollama 完整（5/5 章审阅 ✅）；
+   dsh 只出半成品（未过审、partial=true），**不得宣称 dsh 上 AI 报告已通过**。
+   AI 报告成败不影响扫描结论（D205 语义），两次扫描结论逐字一致。
+4. 两次扫描都如实披露覆盖缺口：path / forms 两注入面**按当前配置没测**，
+   只测了 1 个注入面（id@url）。**不得把本次结果外推成「全局检出率」**。
+5. 没有自建靶场、没有 mock 自证、没有放宽任何判据；所有数字可复现（见上命令 + 落盘 JSON）。
+
+原始产物：.box-agent-scratch/d262/{truth.log,ollama,dsh,safe}/（scratch 未入库，
+          本文与 CHANGELOG D262 为落盘证据）。

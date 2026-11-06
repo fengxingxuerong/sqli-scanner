@@ -221,6 +221,13 @@ env AI_GATEWAY_URL=http://127.0.0.1:8326 AI_GATEWAY_KEY=$DSH_KEY \
 **边界**：**不得宣称 ai-gateway 套件在 dsh / glm-5.3-flash 上已 PASS**；
 0.5B 只验链路不判文风；网关 `/v1/models` 列出 250 个 id 不等于 250 个可用档位。
 
+**[D262 2026-11-06 补] CLI 真扫外部靶场时的本地网关表现**：用 `server/bin/cli.js --ai-report`
+打第三方官方 DVWA（外部裁判，非自建靶场），Ollama 组 AI 报告完整（5/5 章审阅 ✅、
+`partial=false`、18s / 4877B）；dsh `deepseek-v4-flash` 组虽落盘 1962B，但
+`partial=true` / `fallback=legacy` / 审阅 0 章 / **未过审**，是半成品，不能当完整报告引用。
+两次扫描结论（3 条命中、High、exit 2）逐字一致 —— AI 报告成败不改扫描结论（D205）。
+证据见 [`CLI-本地网关-外部靶场实测-2026-11-06.txt`](CLI-本地网关-外部靶场实测-2026-11-06.txt)。
+
 ## 6. 运维坑（实测记录）
 
 1. **ollama 0.40.12 拉取模型时 sha256 校验阶段可能挂死**（partial blob 已满 397MB 但

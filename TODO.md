@@ -5,6 +5,36 @@
 
 ---
 
+## 2026-11-06 批次 D262 · CLI × 本地网关 × 外部裁判靶场（已完成，见 CHANGELOG）
+
+**要求**：用户「cli 操作这个项目，用本地网关打靶场，最后给结论；要外部靶场，
+不能自己搭靶场自己验证」。本批只实测 + 落盘，不改代码/测试/阈值/断言。
+
+**靶场**：`digininja/DVWA` 第三方官方源码（PHP 8.3 + MariaDB 10.11，`e2e/dvwa-lab/README.md`
+定义的外部裁判 3 号），真值来自官方 low/high/impossible 源码。**非本仓 mock / node:sqlite /
+mock-hang**。`labs.mjs --up=mariadb,dvwa` 起，「起→测→--stop」同一条命令，两次都收干净。
+
+**外部真值**：`node e2e/dvwa-lab/run.mjs` exit 0 —— 真值漏洞 **5/5**、同源复检 **1/1**、
+安全端点误报 **0**、证据不足 **0**；impossible 两端点 185 / 197 请求后 0 检出。
+
+**CLI 三次真扫**（`node server/bin/cli.js`）：
+
+| 组 | 网关 / 档位 | exit | 事实 |
+|---|---|---|---|
+| A | Ollama `qwen2.5:0.5b` / low | 2 | 3 条（union/error/boolean）@ `id@url`，High，113 请求；AI 报告 18s / 4877B / **5/5 章审阅 ✅ / `partial=false`** |
+| B | dsh `deepseek-v4-flash` / low | 2 | 扫描结论与 A 逐字一致；AI 报告 89.5s / 1962B 但 **`partial=true` / `fallback=legacy` / 审阅 0 章 / 未过审** |
+| C | 官方 impossible 安全档（A/B，无 AI） | 0 | `no_vulnerability_detected` / 0 漏洞 / **187 请求** / validity ok |
+
+**结论**：CLI 在外部官方靶场上真检出真漏洞、同路径官方安全档零误报；本地两条网关都接进
+`--ai-report` 并真实出稿，但**只有 Ollama 出完整报告，dsh 是半成品不得当完整报告引用**。
+AI 成败不改扫描结论（D205）。三份报告均如实声明 `uncoveredSurfaces=[path, forms]`，
+**不得外推全局检出率**。凭据检查：AI 报告里 `PHPSESSID|security=low` 0 命中；
+dsh 那份 CVSS 是模型自评，PoC 判据才来自引擎。
+
+证据：`docs/CLI-本地网关-外部靶场实测-2026-11-06.txt`、runbook §5.3 补注、CHANGELOG D262。
+
+---
+
 ## 2026-11-06 批次 D261 · 本地 LLM 网关真 HTTP 复跑（已完成，如实登记 FAIL，见 CHANGELOG）
 
 **要求**：用户「用本地的网关测试」。本批只做实测与落盘，不改代码/测试/阈值/断言。

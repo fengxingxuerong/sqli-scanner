@@ -7,13 +7,14 @@
 > 下一批次起的条目写在这里。发版时把本节整体升为 `## [x.y.z] - YYYY-MM-DD` 并补汇总段。
 
 <!-- changelog-index:start -->
-**本段覆盖 45 个批次（D228–D261，2026-11-01 → 2026-11-06）**。正文按时间倒序排列；
+**本段覆盖 46 个批次（D228–D262，2026-11-01 → 2026-11-06）**。正文按时间倒序排列；
 下表是同一批次的索引，便于按编号或关键词定位。**索引只是导航，正文未做任何删改**
 （被推翻的旧结论原样保留，这是本仓的既定口径）。新增批次后跑
 `node scripts/changelog-index.mjs --write` 重生成，`--check` 校验是否过期。
 
 | 批次 | 日期 | 主题 |
 |---|---|---|
+| D262 | 11-06 | CLI × 本地网关 × 外部裁判靶场（docs only，非自建靶场） |
 | D261 | 11-06 | 本地 LLM 网关真 HTTP 复跑（docs only，如实登记 FAIL） |
 | D260 | 11-06 | 服务端覆盖率门禁确定性收口（gate:close 51 → 52 项） |
 | D259 | 11-06 | ReportAI 分步短 prompt（长报告拆成多轮短请求） |
@@ -60,6 +61,57 @@
 | D229 | 11-01 | 交付闸收口：P0-3 卡顿修复（haystack 先截后拼）+ ai-gateway 断言去模型依赖 |
 | D228 | 11-01 | AI 报告网关端到端验收（ai-gateway 套件）+ 本地网关 runbook + CI 靶场硬要求扩展 |
 <!-- changelog-index:end -->
+
+### 2026-11-06 批次 D262 · CLI × 本地网关 × 外部裁判靶场（docs only，非自建靶场）
+
+**起点**：用户要求「cli 操作这个项目，用本地网关打靶场，最后给结论；要外部靶场，
+不许自己搭靶场自己验证」。此前 D261 只跑了 `e2e/ai-gateway-lab` 套件（fixture 驱动），
+没有用 CLI 打真外部靶场、也没有把 AI 报告接进扫描链路。本批只做实测与落盘，
+不改生产代码 / 测试 / 阈值 / 断言。
+
+**靶场来源（先堵自证）**：`digininja/DVWA` 第三方官方源码（PHP 8.3 + MariaDB 10.11），
+本仓 `e2e/dvwa-lab/README.md` 定义的「外部裁判 3 号」，真值来自官方
+`source/low.php` / `high.php` / `impossible.php`。**不是本仓 mock / node:sqlite / mock-hang**。
+`node scripts/labs.mjs --up=mariadb,dvwa` 拉起，「起 → 测 → --stop」写在同一条命令里，
+两次都以 `labs --stop exit 0` 收工，事后体检全为未起。
+
+**外部真值（交叉核对）**：`node e2e/dvwa-lab/run.mjs` `exit 0` ——
+真值漏洞端点 **5/5**、同源复检 **1/1**、安全端点误报 **0**、证据不足 **0**；
+impossible 两端点各 185 / 197 次请求后 0 检出。
+
+**CLI 三次真扫**（`node server/bin/cli.js`，判据=退出码 + `report.json`）：
+
+| 组 | 本地网关 / 档位 | exit | 扫描事实 | AI 报告 |
+|---|---|---|---|---|
+| A | Ollama `qwen2.5:0.5b` / low | **2** | 3 条（union/error/boolean）@ `id@url`，High，10.3s，113 请求，validity ok | 18s / 4877B，**5/5 章审阅 ✅、`partial=false`、`fallback=null`** |
+| B | dsh `deepseek-v4-flash` / low | **2** | 与 A 逐字一致（3 条 / 113 请求 / validity ok） | 89.5s / 1962B，但 **`partial=true`、`fallback=legacy`、审阅 0 章、未过审** |
+| C | 官方 impossible 安全档（A/B，无 AI） | **0** | `no_vulnerability_detected` / 0 漏洞 / **187 请求** / validity ok | — |
+
+组 C 是「打满预算后的零误报」，不是几个请求被剪枝的假阴性。三份报告都如实声明
+`uncoveredSurfaces=[path, forms]`（本次只测 1 个注入面 `id@url`）。
+
+**凭据 / 事实保真**：两份 `ai-report.md` 头部写明 source report / model 链 / 审阅状态 /
+`AI_REPORT_MASK=0`；`grep PHPSESSID|security=low` 在 AI 报告里 **0 命中**。
+dsh 那份 analyst JSON 的 CVSS 9.8/8.8/7.5 是**模型自评**，不是引擎结论；
+PoC 判据（SQLISCANNER0/1、z=2.83）来自引擎实测，引用只认引擎字段。
+
+**交付**：`docs/CLI-本地网关-外部靶场实测-2026-11-06.txt`（新，命令 + 原始事实）、
+`docs/AI-网关-runbook.md` §5.3 补 CLI 表现、TODO / CHANGELOG D262、changelog-index 46 批次。
+
+**诚实边界**：
+- **不得宣称 dsh 上 AI 报告已通过**（半成品、未过审）；也不得把两次命中外推成「全局检出率」。
+- path / forms 两注入面按当前配置未测，引用阴性结论必须同时带覆盖缺口。
+- AI 报告成败不影响扫描结论（D205 语义），A/B 两组扫描结论逐字一致。
+- 0.5B 只验链路不判文风；`AI_REPORT_MASK=0` 仅因目标是本机 127.0.0.1。
+- 本批没有自建靶场、没有 mock 自证、没有放宽任何判据。
+- §3.5 待复核 claim 抽查 `waf-fingerprint-coverage` 仍无真源命令，维持 `unverified`。
+
+**收口结果（本地，2026-11-06）**：`npm run gate:close` **52/52 全绿**
+（typecheck 17.3s / lint 34.9s / `server-coverage` 240.0s）；本批 docs-only，
+代码 / 测试 / 阈值 / 断言一字未改，`facts:check` / `readme:check` / `quality-ledger` /
+`changelog-index`（46 批次）/ `stale-claims` / `refs` 均绿。
+
+---
 
 ### 2026-11-06 批次 D261 · 本地 LLM 网关真 HTTP 复跑（docs only，如实登记 FAIL）
 
