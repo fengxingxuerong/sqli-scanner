@@ -1,0 +1,72 @@
+# 双网关本地 LLM 真实能力实测（2026-11-05）
+# A=http://127.0.0.1:8080  B=http://192.168.151.151:18080  模型=glm-5.3-flash
+# 口径：全串行 + A/B 轮换分担；429 换网关重试。key 仅经 env 传入，未写入任何文件。
+# 首轮（单网关 + 11 路并发）实测 429 "user concurrency limit exceeded"，故本轮改为分担 + 串行。
+
+01_basic_A|gate=A|HTTP=200|1956ms|content=PONG|usage={"prompt_tokens":285,"completion_tokens":42,"total_tokens":327,"prompt_tokens_details":{"cached_tokens":0}}
+02_basic_B|gate=B|HTTP=200|1552ms|content=PONG|usage={"prompt_tokens":285,"completion_tokens":19,"total_tokens":304,"prompt_tokens_details":{"cached_tokens":0}}
+03_long_context|gate=A|HTTP=200|2917ms|content=ZEBRA42|usage={"prompt_tokens":1623,"completion_tokens":145,"total_tokens":1768,"prompt_tokens_details":{"cached_tokens":0}}
+04_json_output|gate=B|HTTP=200|10617ms|content={"verdict":"vulnerable","risk":"high","cwe":"CWE-89"}|usage={"prompt_tokens":312,"completion_tokens":362,"total_tokens":674,"prompt_tokens_details":{"cached_tokens":0}}
+04_json_output|parseable=true
+05_multi_turn|gate=A|HTTP=200|2202ms|content=BLUE-RAVEN-77|usage={"prompt_tokens":313,"completion_tokens":36,"total_tokens":349,"prompt_tokens_details":{"cached_tokens":0}}
+06_stream|gate=B|HTTP=200|6449ms|content=|usage=
+06_stream|sse_lines=59|has_DONE=true
+07_model_glm53|gate=A|HTTP=429 {"code":3009,"msg":"model concurrency limit exceeded","logid":"20261105153318996|retry->other
+07_model_glm53|gate=A|HTTP=502|218ms|content=|usage=
+08_bad_key|gate=B|HTTP=401|17ms|content=|usage=
+09_bad_model|gate=A|HTTP=400|232ms|content=|usage=
+10_empty_messages|gate=B|HTTP=400|287ms|content=|usage=
+11_security_reasoning|gate=A|HTTP=200|13072ms|content=该漏洞为 CWE-89 SQL 注入（SQLite 报错/布尔盲注），攻击者可通过 payload `1' AND '1'='1` 触发 sqlite3.OperationalError 并利用真/假响应长度差（1617|usage={"prompt_tokens":368,"completion_tokens":495,"total_tokens":863,"prompt_tokens_details":{"cached_tokens":0}}
+12_anthropic_messages|gate=B|HTTP=200|33050ms|content=PONG|usage={"input_tokens":29,"output_tokens":19,"cache_read_input_tokens":256,"server_tool_use":{"web_search_requests":0},"service_tier":"standard"}
+13_responses|gate=B|HTTP=200|5010ms|content=PONG|usage={"input_tokens":285,"output_tokens":19,"total_tokens":304,"input_tokens_details":{"cached_tokens":256}}
+14_shared_1|gate=B|HTTP=200|7236ms|content=1|usage={"prompt_tokens":286,"completion_tokens":41,"total_tokens":327,"prompt_tokens_details":{"cached_tokens":0}}
+14_shared_2|gate=A|HTTP=200|1228ms|content=2|usage={"prompt_tokens":286,"completion_tokens":16,"total_tokens":302,"prompt_tokens_details":{"cached_tokens":0}}
+14_shared_3|gate=B|HTTP=200|1149ms|content=3|usage={"prompt_tokens":286,"completion_tokens":16,"total_tokens":302,"prompt_tokens_details":{"cached_tokens":0}}
+14_shared_4|gate=A|HTTP=200|4786ms|content=4|usage={"prompt_tokens":286,"completion_tokens":3,"total_tokens":289,"prompt_tokens_details":{"cached_tokens":0}}
+14_shared_5|gate=B|HTTP=200|1549ms|content=5|usage={"prompt_tokens":286,"completion_tokens":22,"total_tokens":308,"prompt_tokens_details":{"cached_tokens":0}}
+14_shared_6|gate=A|HTTP=200|1250ms|content=6|usage={"prompt_tokens":286,"completion_tokens":16,"total_tokens":302,"prompt_tokens_details":{"cached_tokens":0}}
+14_shared|6_calls_serial_total=19317ms
+
+## 官方 AI 报告网关套件（ai-gateway / D228）实测：FAIL（如实，非 SKIP）
+
+单网关、全程无并发、无其他请求占用；同一 key 的三角色串行流水线：
+
+| 网关 | 参数 | 结果 |
+|---|---|---|
+| B 192.168.151.151:18080 | TIMEOUT=180000 / MAX_TOKENS=8192 | analyst 60s 超时 → writer → reviewer 429 冷却 60s，全挂 |
+| B | TIMEOUT=300000 / MAX_TOKENS=2048 | 首轮 analyst 即 429，三轮降级全挂 |
+| A 127.0.0.1:8080 | TIMEOUT=300000 / MAX_TOKENS=2048 | analyst 100s 超时 → 降级连环 429，全挂 |
+
+根因（读 server/src/services/ReportAI.js 坐实，不是推断）：
+- 三角色串行；callLLM 每步硬超时 = timeoutMs/3；MAX_TOKENS 默认 8192
+  （AI_REPORT_MAX_TOKENS 可覆盖），推理模型生成长输出 >60s。
+- 429 时 markKeyFail 冷却 60s；run.mjs 把 KEY_1/2/3 全设成同一个 key，
+  所以「跨角色降级」等于原地等待，连续请求又撞 "user/model concurrency limit exceeded"。
+- 网关侧硬约束：glm-5.3（非 flash）A=429 model concurrency limit exceeded、
+  B=502 upstream exceed quota limit；**只有 glm-5.3-flash 可用**。
+  短请求串行 + A/B 轮换则全部 200（见上 14 场景）。
+
+边界：本轮只做实测，未改 ReportAI、未放宽任何验收断言。
+要跑通套件需 ① ReportAI 支持多网关/多 key 真分担（而非同 key 降级）
+② 按推理模型调 MAX_TOKENS 与 per-step 超时 ③ 429 退避改成换网关而非 60s 冷却。
+
+## D254（同日）：多端点分担落地，端到端套件仍 FAIL（如实）
+
+改动：`resolveEndpoints` + `AI_REPORT_API_BASE_2/_3` + 429 冷却可配 +
+`run.mjs` 双网关注入 / `max_tokens=2048`。判据 `reportAi.endpoints.guard.test.js` 6/6、复杂度门禁绿。
+**生产单网关行为零变化**（未配 _2/_3 时三项全回落主端点，单测钉住）。
+
+双网关套件（A=127.0.0.1:8080 / B=192.168.151.151:18080，analyst→A、writer→B、reviewer→A）：
+**429 连环消失**，但三个角色各 140s 超时 → 仍 FAIL。
+
+决定性实验（30s 短超时，网关 A，`max_tokens=512`）：
+| 变体 | 结果 |
+|---|---|
+| ReportAI 形态长 system+user prompt（含 SQL payload） | 30s abort，无响应 |
+| 同结构、payload/evidence 全换中性文本 | 30s abort，无响应 |
+| 同网关短 prompt `Reply PONG` | HTTP 200，4.1s |
+
+⇒ 不是内容审核、不是并发/配额、不是项目侧超时参数，是**网关/上游模型对这类长报告
+prompt 不返回**。D254 的架构改进有效，但不能让该套件在这两个网关上 PASS；
+需网关侧排查或更换模型。未把 SKIP 写成 PASS、未放宽任何断言。
+

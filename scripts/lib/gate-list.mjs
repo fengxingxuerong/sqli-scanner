@@ -73,6 +73,10 @@ export function closeGateList({ root, quick = false }) {
     // [D175 2026-10-26] agent 装载面（插件清单 / 技能说明 / .mcp.json）的一致性。
     { name: 'agent-manifest', cmd: ['node', 'scripts/agent-manifest-check.mjs'] },
     { name: 'agent-manifest:selftest', cmd: ['node', 'scripts/agent-manifest-check.mjs', '--selftest'] },
+    // [D252 2026-11-05] MCP 客户端连接兼容性：清单/技能是静态面，宿主连不连得上是运行时面。
+    // 真 spawn stdio 子进程跑 14 个宿主画像；只活在 CI 就是「门禁只活在别处」第 5 次重演。
+    { name: 'mcp-compat', cmd: ['node', 'scripts/mcp-client-compat.mjs'] },
+    { name: 'mcp-compat:selftest', cmd: ['node', 'scripts/mcp-client-compat.mjs', '--selftest'] },
     // [D178 2026-10-26] 质量台账：docs/质量台账.md 必须与脚本产出逐字一致（手改即红）。
     { name: 'quality-ledger', cmd: ['node', 'scripts/quality-ledger.mjs', '--check'] },
     { name: 'quality-ledger:selftest', cmd: ['node', 'scripts/quality-ledger.mjs', '--selftest'] },
@@ -112,5 +116,15 @@ export function closeGateList({ root, quick = false }) {
     { name: 'stale-claims:selftest', cmd: ['node', 'scripts/stale-claim-check.mjs', '--selftest'] },
   ];
   if (quick) return list.filter((g) => !SLOW.has(g.name));
-  return [...list, { name: 'typecheck', cmd: ['npm', 'run', '--silent', 'typecheck'] }, { name: 'lint', cmd: ['npm', 'run', '--silent', 'lint'] }];
+  return [
+    ...list,
+    { name: 'typecheck', cmd: ['npm', 'run', '--silent', 'typecheck'] },
+    { name: 'lint', cmd: ['npm', 'run', '--silent', 'lint'] },
+    // [D260 2026-11-06] CI-only 的服务端覆盖率门禁：此前只在 ci.yml / ci-local 跑，
+    // gate:close 看不见 ⇒ D259 实测「本地 51/51 全绿、CI Server coverage gate 红」。
+    // 同一形态第 5 次重演。它由 server/package.json 的 test:coverage 委托给
+    // scripts/server-coverage-gate.mjs（排除 ?query 隔离实例，校准多进程合并口径）。
+    // 放最后：一次全量带覆盖率的服务端测试约 3~4 分钟，失败早停要省时间。
+    { name: 'server-coverage', cmd: ['npm', '--prefix', 'server', 'run', '--silent', 'test:coverage'] },
+  ];
 }

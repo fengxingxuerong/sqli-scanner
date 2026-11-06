@@ -1,14 +1,8 @@
 import { nanoid } from 'nanoid';
 import { TargetParser } from './TargetParser.js';
-import { UnionDetector } from './detectors/UnionDetector.js';
-import { ErrorDetector } from './detectors/ErrorDetector.js';
-import { BooleanBlindDetector } from './detectors/BooleanBlindDetector.js';
-import { TimeBlindDetector } from './detectors/TimeBlindDetector.js';
-import { StackedDetector } from './detectors/StackedDetector.js';
-import { OobDetector } from './detectors/OobDetector.js';
-import { SecondOrderDetector } from './detectors/SecondOrderDetector.js';
-import { NoSqlInjectionDetector } from './detectors/NoSqlInjectionDetector.js';
-import { InlineQueryDetector } from './detectors/InlineQueryDetector.js';
+// [编排总图] 检测器实例与顺序统一由 strategyOrder.js 生成（单一事实源）
+import { STRATEGY_ORDER } from './scan/strategyOrder.js';
+import { AppError, ErrorCode } from '../core/errors.js';
 import { DBFingerprinter } from './DBFingerprinter.js';
 import { Extractor } from './Extractor.js';
 import { Exploiter } from './Exploiter.js';
@@ -30,6 +24,32 @@ import { parseScope, registerScanScope } from '../core/scopeGuard.js';
 import { ensureScanTransform } from '../core/requestTransform.js';
 // [D52] 自定义响应解密（--postprocess，与请求变换对偶）；回收同样挂在 lifecycle._disposeScan
 import { ensureResponseTransform } from '../core/responseTransform.js';
+
+/**
+ * [D253] 执行失败写进报告摘要（纯函数）。抽到模块级：ScanManager.start 的复杂度/行数
+ * 基线只许持平或下降，不能在 catch 里塞对象展开与 ?? 分支。
+ * @param {object} report 扫描报告
+ * @param {object} err 引擎异常
+ * @returns {object} 新的 summary
+ */
+function summaryWithExecutionError(report, err) {
+  return {
+    ...(report?.summary || {}),
+    executionError: { code: err?.code ?? null, message: String(err?.message || err) },
+  };
+}
+
+/**
+ * [D253] 标记扫描失败：状态 + 终态时间 + 报告里的失败原因（后者供 CLI 判 exit 1）。
+ * @param {object} s 扫描状态
+ * @param {object} err 引擎异常
+ */
+function markScanFailed(s, err) {
+  s.status = 'error';
+  s.report.finishedAt = new Date().toISOString();
+  s.report.summary = summaryWithExecutionError(s.report, err);
+}
+
 // [D36 实战 P0-2] Bearer/Token 自动续期（回收同样挂在 lifecycle._disposeScan）
 import { normalizeRefreshConfig, registerScanRefresh } from '../core/bearerKeeper.js';
 import { runScanLoop } from './scanRunner.js';
@@ -113,23 +133,23 @@ export class ScanManager {
     this.retireTtlMs = retireTtlMs ?? _envRetireTtl();
     this.maxScans = maxScans ?? 100; // scans Map 上限，超限淘汰最旧扫描
     this._scanClients = new Map(); // scanId -> 扫描作用域 HttpClient 视图（按 scanId 独立限速桶）
-    // 检测器注册表：新增技术只加一个类并在此处登记（OobDetector 末位，作为盲注/无回显兜底）
-    this.detectors = [
-      new UnionDetector(),
-      new ErrorDetector(),
-      new BooleanBlindDetector(),
-      new TimeBlindDetector(),
-      new StackedDetector(),
-      new OobDetector(),
-    ];
-    // 二阶注入检测器：独立实例，不进 this.detectors 数组（不参与一阶 per-point 循环，
-    // 由 _runSecondOrder 在聚合之后作为补充趟调用，与一阶流水线正交）。
-    this.secondOrderDetector = new SecondOrderDetector();
-    // 非 SQL 注入检测器（NoSQL/GraphQL/SSTI）：同样独立实例，不进一阶循环，由 _runNoSql 补充趟调用（opt-in）。
-    this.noSqlDetector = new NoSqlInjectionDetector();
-    // 内联查询检测器（对标 sqlmap Q）：作为经典 SQLi 技术注册进一阶主调度（technique='inline'），
-    // 仅当用户显式勾选 'inline' 时运行（opt-in），默认 techniques 不含它，避免对无回显点目标产生噪音。
-    this.inlineDetector = new InlineQueryDetector();
+    // [编排总图] 实例与顺序全由 STRATEGY_ORDER 生成，不再手写 new 列表。
+    // 与改动前逐字等价：6 个 primary + 末尾 push 的 inline，另两个 supplemental 独立实例。
+    // `new (entry.Detector)()` 必须带括号：写成 `new byTech(t).Detector()` 会被解析成
+    // `(new byTech(t)).Detector()`，把查找函数当构造函数（探针实测 TypeError）。
+    // 表是常量，条目存在性由 arch-guard ④ 守住；兜底用 AppError 而非裸 Error，
+    // 既不顶破 error-contract 基线，也让 checkJs 收窄 find() 的 undefined。
+    const detectorOf = (t) => {
+      const entry = STRATEGY_ORDER.find((e) => e.technique === t);
+      if (!entry) throw new AppError(ErrorCode.UNKNOWN, `[编排总图] 缺少技术位 ${t}`);
+      return new (entry.Detector)();
+    };
+    this.detectors = STRATEGY_ORDER.filter((e) => e.phase === 'primary').map((e) => new (e.Detector)());
+    // 二阶注入 / 非 SQL：补充趟，不参与一阶 per-point 循环（phase: supplemental）。
+    this.secondOrderDetector = detectorOf('second_order');
+    this.noSqlDetector = detectorOf('nosql');
+    // 内联查询（对标 sqlmap Q）：opt-in，注册进一阶主调度但默认 techniques 不含它。
+    this.inlineDetector = detectorOf('inline');
     this.detectors.push(this.inlineDetector);
     this.fp = new DBFingerprinter();
     // WAF 指纹识别 + 推荐（可注入桩，默认使用真实实现；识别复用指纹基线，零额外发包）
@@ -228,10 +248,8 @@ export class ScanManager {
       logger.error(`扫描 ${scanId} 异常：${err.message}`);
       eventBus.emit(scanId, 'scan_error', { code: err.code, message: err.message });
       const s = this.scans.get(scanId);
-      if (s) {
-        s.status = 'error';
-        s.report.finishedAt = new Date().toISOString();
-      }
+      // [D253] 失败原因必须进报告：CLI/一键扫描据此 exit 1，否则参数配置错误会变成 0 洞交付件
+      if (s) markScanFailed(s, err);
       // 错误路径同样回收扫描上下文（30s TTL）
       this._retire(scanId);
     });

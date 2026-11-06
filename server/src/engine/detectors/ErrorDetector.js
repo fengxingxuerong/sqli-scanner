@@ -14,7 +14,7 @@ import { matchBounded } from '../../core/boundedMatch.js';
 // 思路：注入会触发数据库报错的 Payload，检测响应中是否出现数据库报错特征
 export class ErrorDetector extends Detector {
   constructor() {
-    super('error');
+    super('error', { match: 'signature', extract: ['dbms', 'error-context'] });
   }
 
   /**

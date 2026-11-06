@@ -21,40 +21,81 @@ import os from 'node:os';
 import path from 'node:path';
 
 const GATEWAY_URL = process.env.AI_GATEWAY_URL || 'http://127.0.0.1:11434';
+// [D254] 可选备用网关：三个角色/降级路径分到不同端点，429 时真换网关而非原地等 60s
+const GATEWAY_URL_2 = process.env.AI_GATEWAY_URL_2 || '';
 const GATEWAY_MODEL = process.env.AI_GATEWAY_MODEL || 'qwen2.5:0.5b';
 const GATEWAY_KEY = process.env.AI_GATEWAY_KEY || 'local';
+const GATEWAY_KEY_2 = process.env.AI_GATEWAY_KEY_2 || GATEWAY_KEY;
 const TIMEOUT_MS = Number(process.env.AI_GATEWAY_TIMEOUT_MS) || 420000; // 3 角色均分（140s/角色）：全量验收负载下 0.5B CPU 推理需余量
+// 推理模型（glm-5.3-flash 带 reasoning_content）生成 8192 tokens 会拖过 per-step 超时；
+// 验收套件按本地网关调小，生产默认 8192 不变。两者都可用 env 覆盖。
+const MAX_TOKENS = process.env.AI_GATEWAY_MAX_TOKENS || '2048';
+const RATE_COOLDOWN_MS = process.env.AI_GATEWAY_429_COOLDOWN_MS || '3000';
+// [D259] 分步短 prompt 为 opt-in（AI_REPORT_STEPWISE=1）；未开启时本套件判据零变化。
+const STEPWISE = process.env.AI_REPORT_STEPWISE === '1';
 
 function skip(reason) {
   console.log(`[SKIP] AI 网关不可用：${reason}`);
   process.exit(0);
 }
 
+/**
+ * 网关探活（真实 HTTP，非 stub）。失败抛带原因的 Error，由 main 转 SKIP。
+ * @param {string} url 网关根地址（不带 /v1）
+ * @param {string} key 该网关的 API key
+ * @returns {Promise<string[]>} /v1/models 返回的模型 id 列表
+ */
+async function probeModels(url, key) {
+  let r;
+  try {
+    r = await fetch(`${url}/v1/models`, { headers: { Authorization: `Bearer ${key}` } });
+  } catch (e) {
+    throw new Error(`/v1/models 不可达（${e.message}）`, { cause: e });
+  }
+  if (!r.ok) throw new Error(`/v1/models -> HTTP ${r.status}`);
+  const j = await r.json();
+  return (j?.data || []).map((m) => m.id);
+}
+
 async function main() {
   // ① 网关探活 + 模型就绪（真实 HTTP，非 stub）
-  let models;
+  let ids;
   try {
-    const r = await fetch(`${GATEWAY_URL}/v1/models`, {
-      headers: { Authorization: `Bearer ${GATEWAY_KEY}` },
-    });
-    if (!r.ok) skip(`/v1/models -> HTTP ${r.status}`);
-    models = await r.json();
+    ids = await probeModels(GATEWAY_URL, GATEWAY_KEY);
   } catch (e) {
-    skip(`/v1/models 不可达（${e.message}）`);
+    skip(e.message);
   }
-  const ids = (models?.data || []).map((m) => m.id);
   if (!ids.includes(GATEWAY_MODEL)) {
     skip(`模型 ${GATEWAY_MODEL} 未就绪（现有：${ids.slice(0, 5).join(', ') || '空'}）`);
   }
+  if (GATEWAY_URL_2) {
+    let ids2;
+    try {
+      ids2 = await probeModels(GATEWAY_URL_2, GATEWAY_KEY_2);
+    } catch (e) {
+      skip(`备用网关 ${GATEWAY_URL_2}：${e.message}`);
+    }
+    if (!ids2.includes(GATEWAY_MODEL)) {
+      skip(`备用网关模型 ${GATEWAY_MODEL} 未就绪（现有：${ids2.slice(0, 5).join(', ') || '空'}）`);
+    }
+  }
 
   // ② 注入 ReportAI 环境（必须在 import 之前：ReportAI 在模块加载时读取 env）
-  process.env.AI_REPORT_API_BASE = `${GATEWAY_URL}/v1/chat/completions`;
+  // [D254] key↔端点配对：analyst→主网关、writer→备用网关、reviewer→主网关；
+  // 429 降级会跳过冷却 key 选到**另一个端点**，不再是同一网关原地等 60s。
+  const base1 = `${GATEWAY_URL}/v1/chat/completions`;
+  const base2 = `${GATEWAY_URL_2 || GATEWAY_URL}/v1/chat/completions`;
+  process.env.AI_REPORT_API_BASE = base1;
+  process.env.AI_REPORT_API_BASE_2 = base2;
+  process.env.AI_REPORT_API_BASE_3 = base1;
   process.env.AI_REPORT_KEY_1 = GATEWAY_KEY;
-  process.env.AI_REPORT_KEY_2 = GATEWAY_KEY;
+  process.env.AI_REPORT_KEY_2 = GATEWAY_KEY_2;
   process.env.AI_REPORT_KEY_3 = GATEWAY_KEY;
   process.env.AI_REPORT_MODEL_1 = GATEWAY_MODEL;
   process.env.AI_REPORT_MODEL_2 = GATEWAY_MODEL;
   process.env.AI_REPORT_MODEL_3 = GATEWAY_MODEL;
+  process.env.AI_REPORT_MAX_TOKENS = MAX_TOKENS;
+  process.env.AI_REPORT_429_COOLDOWN_MS = RATE_COOLDOWN_MS;
   const { generateAiReport } = await import('../../server/src/services/ReportAI.js');
   const { writeAiReportFiles } = await import('../../server/src/services/aiReportCli.js');
 
@@ -108,15 +149,26 @@ async function main() {
   const modelChain = `${GATEWAY_MODEL}→${GATEWAY_MODEL}→${GATEWAY_MODEL}`;
   const realCall = result.success === true && result.model === modelChain;
 
-  console.log(`网关：${GATEWAY_URL}（模型 ${GATEWAY_MODEL}）`);
+  const gateways = [GATEWAY_URL, GATEWAY_URL_2].filter(Boolean).join(' + ');
+  console.log(`网关：${gateways}（模型 ${GATEWAY_MODEL}, max_tokens=${MAX_TOKENS}）`);
   console.log(`审阅角色校验：${reviewed ? '✅' : '⚠️ 未过审'}`);
   console.log(`元数据头：${metaCount}/4`);
   console.log(`数据脱敏：${masked ? 'on' : 'off'}`);
   console.log(`落盘：true (${Buffer.byteLength(md, 'utf8')} bytes, 内容 ${bytes}B)`);
   console.log(`网关实调：${realCall ? 'true' : 'false'} (${result.model || 'n/a'})`);
   console.log(`耗时：${elapsedMs}ms`);
+  // [D259] 分步模式专属判据（加严，不放宽原有任何一条）：所有短章节都成功产出并逐章审阅，
+  // 且不回退到整篇长流水线。非分步模式恒 true，原判据逐字不变。
+  const sw = result.stepwise;
+  const stepwiseOk = !STEPWISE || (
+    sw?.enabled === true && sw.partial === false && sw.fallback === null
+    && Number(sw.writerSteps) > 1 && sw.failedSteps?.length === 0
+  );
+  if (STEPWISE) {
+    console.log(`分步短 prompt：on（writer ${sw?.writerSteps ?? 'NA'} 章 / 审阅 ${sw?.reviewedSections ?? 'NA'} 章 / partial=${String(sw?.partial)} / fallback=${sw?.fallback ?? 'none'}）`);
+  }
 
-  const pass = reviewed && metaCount === 4 && masked && realCall && bytes > 0;
+  const pass = reviewed && metaCount === 4 && masked && realCall && bytes > 0 && stepwiseOk;
   if (!pass) {
     console.error('❌ AI 网关判据未通过（见上方事实数字）');
     process.exit(1);

@@ -95,7 +95,7 @@ function reportFacts(report) {
  * 模型侧事实（用了哪条链、耗时、是否脱敏）。
  * @param {object} result 模型返回
  * @param {{elapsedMs?: number, masked?: boolean}} meta 元信息
- * @returns {{model: string|null, pipeline: string|null, reviewNote: string|null, elapsedMs: number|null, masked: boolean, roles: object[]}} 模型事实
+ * @returns {{model: string|null, pipeline: string|null, reviewNote: string|null, elapsedMs: number|null, masked: boolean, roles: object[], shortPromptRetries?: string[], stepwise?: object}} 模型事实
  */
 function modelFacts(result, meta) {
   const m = result || {};
@@ -106,6 +106,15 @@ function modelFacts(result, meta) {
     elapsedMs: meta.elapsedMs || null,
     masked: meta.masked !== false,
     roles: listAiConfigs(),
+    // [D255] 只有「短重试真正产出内容」的角色才落盘，默认结构零变化；
+    // 失败的重试不改变产出，不计入。审阅基于截断节选时，引用方必须能从
+    // 这个字段看出口径，不能只信 reviewNote 的 ✅。
+    ...(Array.isArray(m.shortPromptRetries) && m.shortPromptRetries.length
+      ? { shortPromptRetries: m.shortPromptRetries }
+      : {}),
+    // [D259] 分步模式如实落盘：partial / failedSteps / reviewedSections 决定
+    // 「报告完整、已审阅」这些口径能不能引用，不能只看 reviewNote 的 ✅。
+    ...(m.stepwise ? { stepwise: m.stepwise } : {}),
   };
 }
 

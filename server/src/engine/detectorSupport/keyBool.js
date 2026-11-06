@@ -39,7 +39,7 @@ const rndTag = () => Math.random().toString(36).slice(2, 8);
 
 export class KeyBoolDetector extends Detector {
   constructor() {
-    super('boolean'); // 归属布尔差分族（报告/风险/统计沿用既有通道）
+    super('boolean', { match: 'bool-diff', extract: [] }); // 归属布尔差分族（报告/风险/统计沿用既有通道）
   }
 
   /**

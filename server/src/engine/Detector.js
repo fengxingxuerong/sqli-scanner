@@ -1,5 +1,8 @@
 import { obfuscateWithConfig } from '../core/tamper/applyTampers.js';
 import { buildInjectionRequest, buildParamNameRequest, buildJsonKeyRequest, buildXmlKeyRequest, buildFormNameRequest } from './injection.js';
+// [D257] 检测器统一「插头」：契约声明 + 结果不变量 + 统一执行器。
+// 子类只实现 detect(ctx)；调度层一律走 run(ctx)，不再各自解释结果字段。
+import { defineDetectorContract, executeDetector } from './detectorSupport/detectorContract.js';
 
 // [拆分 2026-10-01] 类体只剩构造器与三个轻量方法；响应相似度/闭合探测/匹配指标/
 // 出口发送四大簇物理搬移到 ./detectorSupport/*（函数体逐行原样，由 Detector.prototype
@@ -26,9 +29,24 @@ import { send, sendHead, matchNullConnection, _contentLength, sendConcurrent } f
 export class Detector {
   /**
    * @param {string} technique 检测技术名（union/error/boolean/time）
+   * @param {object} [contract] [D257] 判定/提取算子声明（见 detectorSupport/detectorContract.js）。
+   *   生产检测器必须声明；省略时按「未声明」占位，由 detectorContract.guard 拦住。
    */
-  constructor(technique) {
+  constructor(technique, contract) {
     this.technique = technique;
+    this.contract = contract
+      ? defineDetectorContract({ technique, ...contract })
+      : Object.freeze({ technique: technique ?? null, match: Object.freeze(['unspecified']), extract: Object.freeze([]), note: '未声明' });
+  }
+
+  /**
+   * 统一执行入口（[D257]，对标 nuclei Executer.Execute）。
+   * 子类**不要**覆盖：覆盖会绕过结果不变量校验，检测器之间的形状差异会重新长出来。
+   * @param {object} ctx { httpClient, target, point, dbms, config }
+   * @returns {Promise<{technique: string, result: any, vulnerable: boolean, unverified: boolean, reason: string}>}
+   */
+  async run(ctx) {
+    return executeDetector(this, ctx);
   }
 
   // 由子类实现具体检测逻辑

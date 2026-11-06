@@ -34,7 +34,7 @@ function isWsChar(ch) {
 // 思路：构造真假条件（AND 1=1 / AND 1=2），比对两次响应差异判定注入
 export class BooleanBlindDetector extends Detector {
   constructor() {
-    super('boolean');
+    super('boolean', { match: 'bool-diff', extract: ['dbms'] });
   }
 
   /**

@@ -179,6 +179,9 @@ const GATES = [
   ...[
     ['agent 装载面一致性（.mcp.json / 插件清单 / 技能说明）', 'node scripts/agent-manifest-check.mjs'],
     ['agent 装载面判据自证', 'node scripts/agent-manifest-check.mjs --selftest'],
+    // [D252 2026-11-05] 装载面静态一致 ≠ 宿主运行时连得上：真 stdio 子进程矩阵（14 画像）。
+    ['MCP 客户端连接兼容性矩阵（14 个宿主画像，真 stdio）', 'node scripts/mcp-client-compat.mjs'],
+    ['MCP 兼容性判据自证（混流/缺 id/提前退出/缺陷注入）', 'node scripts/mcp-client-compat.mjs --selftest'],
     ['质量台账与数据源逐字一致（手改或过期即红）', 'node scripts/quality-ledger.mjs --check'],
     ['质量台账判据自证', 'node scripts/quality-ledger.mjs --selftest'],
     ['配方包（无真机验证不许写 CVE 号 / 破坏性条目须 risk 3）', 'node scripts/recipe-pack.mjs --check'],
@@ -209,6 +212,8 @@ const GATES = [
   { id: 'test-frontend', name: '前端测试 + 覆盖率门禁', cmd: 'npx vitest run --coverage --reporter=dot', slow: true },
   { id: 'test-frontend', name: '前端构建', cmd: 'npm run build' },
   { id: 'test-server', name: '服务端单测', cmd: 'cd server && npm test' },
+  // [D260 2026-11-06] 与 ci.yml 同源：test:coverage 委托 scripts/server-coverage-gate.mjs，
+  // 排除 5 个含 ?query 隔离实例的测试文件以校准 Node 覆盖率多进程合并口径（阈值不变）。
   { id: 'test-server', name: '服务端覆盖率门禁', cmd: 'cd server && npm run test:coverage', slow: true },
   // 变异门禁（断言敏感度）：与 ci.yml 同名步骤对应（守卫见 server/tests/mutationGate.wiring.test.js）。
   // 本地默认快档（--limit=8），全量 `npm run mutation` 留给 CI 慢车道/手动。

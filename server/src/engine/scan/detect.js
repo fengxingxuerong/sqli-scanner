@@ -26,6 +26,10 @@ import { GENERIC_BLOCK_VENDOR } from '../../core/waf/blockSignatures.js';
 import { isNetworkFailureError } from '../../core/scanValidityGuard.js';
 import { emptyExtractedData } from '../models.js';
 import { PAUSE_POLL_MS } from './constants.js';
+// [D257] 一阶调度层由编排总图派生（唯一真源）：禁止在本文件另写 FAST/SLOW 数组。
+import { FAST_TECHNIQUES, SLOW_TECHNIQUES } from './strategyOrder.js';
+// [D257] 统一执行入口：生产检测器走 run()（契约校验），测试替身退回 detect()。
+import { runDetector } from '../detectorSupport/detectorContract.js';
 
 /**
  * [D105] XML body 元素名点的前置独立通道：专用算术位移验证器（NameChar 不承载通用载荷，
@@ -49,6 +53,28 @@ async function runXmlNamePrePass(points, deps) {
 }
 
 /**
+ * [D257] 把统一执行器（detector.run）的结论落到注入点与可信度守卫。
+ *
+ * 抽成单源的直接原因：XML 元素名 / ORDER BY 键名 / 多键拼接三条补充探针此前各写
+ * 一份「inconclusive ⇒ addNetworkErrorPoint + netErr + unverifiedReason」，与主循环
+ * 那份是同一语义的第 4 份拷贝。拷贝的代价不是重复，而是**漏改**：主循环补了
+ * 「未结论不得算阴性」，补充探针没补，报告里就会出现「测过且无洞」的假阴性面。
+ *
+ * @param {object} point 注入点（原地写 netErr / unverifiedReason）
+ * @param {{unverified: boolean, reason: string}} outcome executeDetector 返回值
+ * @param {object|null} validity 可信度守卫
+ * @param {boolean} validityEnabled 守卫是否启用
+ * @returns {object} outcome（便于链式使用）
+ */
+function applyOutcomeToPoint(point, outcome, validity, validityEnabled) {
+  if (!outcome.unverified) return outcome;
+  if (validityEnabled && validity) validity.addNetworkErrorPoint(point.id);
+  point.netErr = true;
+  point.unverifiedReason = outcome.reason || '响应不可用';
+  return outcome;
+}
+
+/**
  * 单个 XML 元素名点的验证与记账（与标准点同口径：未决/命中/落盘/完成集）。
  * @param {any} point
  * @param {object} deps
@@ -69,13 +95,9 @@ async function runOneXmlNamePoint(point, deps) {
  */
 async function detectXmlPoint(point, ctx, validity, validityEnabled) {
   try {
-    const r = await xmlParamNameDetector.detect(ctx);
-    if (r && r.inconclusive) {
-      if (validityEnabled) validity.addNetworkErrorPoint(point.id);
-      point.netErr = true;
-      point.unverifiedReason = String(r.inconclusiveReason || '响应不可用');
-    }
-    if (r && r.vulnerable) return [{ technique: 'boolean', result: r }];
+    const outcome = await runDetector(xmlParamNameDetector, ctx);
+    applyOutcomeToPoint(point, outcome, validity, validityEnabled);
+    if (outcome.vulnerable) return [{ technique: 'boolean', result: outcome.result }];
   } catch (e) {
     // 与检测器失败同口径：非网络异常按「该探针对本点不适用」处理（判负仍可接受）
     logger.warn(`XML 元素名探针失败（按未命中处理）：${e.message}`);
@@ -167,13 +189,9 @@ async function runOneOrderByKey(point, deps) {
  */
 async function detectOrderByKeyPoint(point, ctx, validity, validityEnabled) {
   try {
-    const r = await orderByKeyDetector.detect(ctx);
-    if (r && r.inconclusive) {
-      if (validityEnabled) validity.addNetworkErrorPoint(point.id);
-      point.netErr = true;
-      point.unverifiedReason = String(r.inconclusiveReason || '响应不可用');
-    }
-    if (r && r.vulnerable) return [{ technique: 'boolean', result: r }];
+    const outcome = await runDetector(orderByKeyDetector, ctx);
+    applyOutcomeToPoint(point, outcome, validity, validityEnabled);
+    if (outcome.vulnerable) return [{ technique: 'boolean', result: outcome.result }];
   } catch (e) {
     // 与检测器失败同口径：非网络异常按「该探针对本点不适用」处理（判负仍可接受）
     logger.warn(`ORDER BY 键名探针失败（按未命中处理）：${e.message}`);
@@ -196,13 +214,9 @@ async function detectOrderByKeyPoint(point, ctx, validity, validityEnabled) {
  */
 async function detectKeyBoolPoint(point, ctx, validity, validityEnabled) {
   try {
-    const r = await keyBoolDetector.detect(ctx);
-    if (r && r.inconclusive) {
-      if (validityEnabled) validity.addNetworkErrorPoint(point.id);
-      point.netErr = true;
-      point.unverifiedReason = String(r.inconclusiveReason || '响应不可用');
-    }
-    if (r && r.vulnerable) return [{ technique: 'boolean', result: r }];
+    const outcome = await runDetector(keyBoolDetector, ctx);
+    applyOutcomeToPoint(point, outcome, validity, validityEnabled);
+    if (outcome.vulnerable) return [{ technique: 'boolean', result: outcome.result }];
   } catch (e) {
     logger.warn(`多键拼接键名探针失败（按未命中处理）：${e.message}`);
   }
@@ -471,8 +485,8 @@ export async function detectPhase(run) {
       // 层2 慢速采样层：time / stacked / oob —— 各自需多次采样或独立确认，彼此无依赖，层内并行（墙钟≈单检测器耗时而非累加）。
       // 仅当 stacked 也被选中时，即使层1命中仍跑层2（确保末位 stacked 能独立确认）。
       // 注意：runLayer 仅执行 FAST/SLOW 数组内的技术；任何新加的 SQLi 技术必须加入二者之一，否则不会被调度（inline 即如此接入）。
-      const FAST = ['union', 'error', 'boolean', 'inline'];
-      const SLOW = ['time', 'stacked', 'oob'];
+      const FAST = FAST_TECHNIQUES;
+      const SLOW = SLOW_TECHNIQUES;
       const active = sm.activeDetectors(target.config);
       const runLayer = async (techniques) => {
         const inLayer = active.filter((d) => techniques.includes(d.technique));
@@ -480,7 +494,7 @@ export async function detectPhase(run) {
           inLayer.map(async (detector) => {
             eventBus.emit(scanId, 'point_testing', { pointId: point.id, technique: detector.technique, param: point.param, location: point.location });
             try {
-              const result = await detector.detect(ctx);
+              const result = (await runDetector(detector, ctx)).result; // [D257] 统一执行入口：契约与不变量在 run() 内校验
               // [P0-FIX 2026-09-09] 检测器自报「本点未得出有效结论」（对照对全部不可用）时，
               // 该点计入未决：reliable=false + 报告拒绝下「无漏洞」结论。
               if (result && result.inconclusive) {

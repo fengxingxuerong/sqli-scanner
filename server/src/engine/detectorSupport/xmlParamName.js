@@ -25,7 +25,7 @@ import { isXmlName } from '../../core/xmlBody.js';
 
 export class XmlParamNameDetector extends Detector {
   constructor() {
-    super('boolean'); // 归类布尔差分族（报告/风险/统计沿用既有通道，不新增技术类型）
+    super('boolean', { match: 'bool-diff', extract: [] }); // 归类布尔差分族（报告/风险/统计沿用既有通道，不新增技术类型）
   }
 
   /**

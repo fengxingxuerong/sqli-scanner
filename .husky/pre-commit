@@ -123,4 +123,8 @@ run_gate "e2e 靶场接线状态（已接线 ⇄ 已正名）" node scripts/e2e-
 #     版本号抄错、工具改名后技能教旧名字、技能写越界话术，此前都不会有任何报错。
 run_gate "agent 装载面（清单/技能/MCP 入口一致）" node scripts/agent-manifest-check.mjs || exit 1
 
+# 2g. MCP 客户端连接兼容性（D252）：清单一致是静态面，宿主连不连得上是运行时面。
+#     真 spawn stdio 子进程跑 14 个宿主画像；挂住/混流/提前退出一律判红。
+run_gate "MCP 客户端连接兼容性矩阵（真 stdio）" node scripts/mcp-client-compat.mjs || exit 1
+
 echo "✅ pre-commit 门禁通过"

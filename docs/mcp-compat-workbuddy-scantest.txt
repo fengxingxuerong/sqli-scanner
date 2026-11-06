@@ -1,0 +1,15 @@
+# WorkBuddy MCP stdio -> 本地真靶场端到端扫描实测
+# 复现：in-process node:sqlite + 127.0.0.1 HTTP 靶点（输入真拼进 SQL）
+#       spawn `node server/bin/cli.js mcp`，env SSRF_ALLOW_PRIVATE=1
+#       initialize -> preflight -> run_scan(error,level=1) -> 轮询 -> get_findings -> get_report(json)
+# 授权：用户 2026-11-05 明确授权本地靶场；未触 risk 3 / 利用面 / 外部目标
+
+target=http://127.0.0.1:44756/item?id=1
+initialize=2025-06-18 server=sqli-scanner
+preflight_reachable=true baseline=200 points=["url:id"] isError=undefined
+run_scan_scanId=MwsaiPQaVH6A isError=undefined
+polls=19 final_status={"scanId":"MwsaiPQaVH6A","status":"completed","paused":false,"retired":true,"startedAt":"2026-11-05T14:43:10.171Z","finishedAt":"2026-11-05T14:43:20.079Z","points":1,"vulns":1,"dbms":"SQLite","elapsedMs":9908}
+findings_total=1 verdict=vulnerability_detected
+finding0={"cwe":"CWE-89","param":"id","risk":"High","technique":"error"}
+report_vulns=1 summary_verdict=vulnerability_detected minified=true
+stdout_lines=25 stderr=[mcp] sqli-scanner MCP server ready（stdio，工具数 9）

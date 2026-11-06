@@ -54,8 +54,38 @@ test('协议：tools/call 未知工具 → -32602；工具层抛错 → isError 
   assert.ok(boomed.result.content[0].text.includes('boom'));
   const bad = JSON.parse(await proto.handle('{not json'));
   assert.equal(bad.error.code, -32700);
-  const unknownMethod = JSON.parse(await proto.handle(req(7, 'resources/list')));
+  const unknownMethod = JSON.parse(await proto.handle(req(7, 'foo/bar')));
   assert.equal(unknownMethod.error.code, -32601);
+});
+
+// [D252 2026-11-05] 连接兼容性：宿主形态差异不得把会话挂死。
+// 基线证据来自 scripts/mcp-client-compat.mjs（真 spawn stdio，14 个宿主画像，修前 11/14）。
+test('D252 协议：id=null/0 要回复；notifications/* 带 id 不回复；空能力面回空清单；instructions 按版本裁剪', async () => {
+  // 只有「没有 id 字段」才是通知。id=null / 0 是合法请求 id，按 falsy 吞掉会让宿主等超时。
+  const nullId = JSON.parse(await proto.handle(req(null, 'ping')));
+  assert.equal(nullId.id, null);
+  assert.deepEqual(nullId.result, {});
+  const zeroId = JSON.parse(await proto.handle(req(0, 'ping')));
+  assert.equal(zeroId.id, 0);
+  // 误带 id 的通知一律静默（回 error 会被宽容宿主当成握手失败）
+  assert.equal(await proto.handle(req('n1', 'notifications/initialized')), null);
+  // 未声明 resources/prompts 能力，但宿主会无脑探测：回空清单而不是 -32601
+  for (const [method, key] of [
+    ['resources/list', 'resources'],
+    ['resources/templates/list', 'resourceTemplates'],
+    ['prompts/list', 'prompts'],
+  ]) {
+    const out = JSON.parse(await proto.handle(req(method, method)));
+    assert.equal(out.error, undefined, `${method} 不应回 error`);
+    assert.deepEqual(out.result[key], []);
+  }
+  // 真正未知的方法仍然 -32601（放宽不等于全放行）
+  assert.equal(JSON.parse(await proto.handle(req('x', 'foo/bar'))).error.code, -32601);
+  // instructions 是 2025-03-26 才有的字段：严格 schema 的旧版宿主不该收到它
+  const old = JSON.parse(await proto.handle(req(1, 'initialize', { protocolVersion: '2024-11-05' })));
+  assert.equal(old.result.instructions, undefined);
+  const now = JSON.parse(await proto.handle(req(2, 'initialize', { protocolVersion: '2025-06-18' })));
+  assert.match(now.result.instructions, /inconclusive/);
 });
 
 // ===== 工具层（假 ScanManager）=====

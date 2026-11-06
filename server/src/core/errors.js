@@ -40,6 +40,9 @@ export const ErrorCode = {
   RESPONSE_SCRIPT_FAILED: 6010, // 脚本执行异常或产出非法形态 —— 该响应按失败处理（fail-closed）
   // [D186] 直连驱动不可用：依赖包未安装（提示 npm install）/ 连接未建立（先 connect 再 query）
   DIRECT_DRIVER_UNAVAILABLE: 6011,
+  // [D257] 检测器统一契约违规：未声明判定/提取算子、结果缺字段、命中无证据、
+  // 命中与未结论互斥被打破等。属**编程错误**，不应在正常扫描中出现。
+  DETECTOR_CONTRACT_INVALID: 6012,
 };
 
 // 统一错误：携带 code 便于路由层映射响应

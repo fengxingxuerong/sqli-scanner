@@ -22,6 +22,8 @@ import { probeInternet } from '../src/core/netProbe.js';
 // [P1-FIX 2026-09-05] --format 出口：原为死参数（解析后从未消费，-o 恒写 JSON）。
 // ReportGenerator 的 toCSV/toMarkdown/toHTML 与 REST /report/export 同源，直接复用。
 import { ReportGenerator } from '../src/services/ReportGenerator.js';
+// [D253] 退出码唯一真源：执行失败=1（不是「未检出」），与一键扫描同源
+import { scanExitCode, scanExecutionError } from '../src/services/scanExit.js';
 import { renderScanSummaryPanel, batchHitLines, batchNextLine, batchWriteHint, printBatchHitsAndNext, printBatchSummary, urlOfLogRequest } from './cli/summaryPanel.js';
 import { readFileSync } from 'node:fs';
 import * as scanLedger from '../src/services/scanLedger.js';
@@ -275,6 +277,17 @@ async function runSingleScanInner(sm, url, args) {
   if (scopeRules?.enabled) { try { releaseScanScope(scanId); } catch { /* ignore */ } }
   eventBus.dispose(scanId);
   return report;
+}
+
+/**
+ * [D253] 单目标扫描收尾：打印执行失败原因并按唯一真源判码。
+ * 抽成模块级函数，避免给 cli.js::main 的复杂度基线（104，只许持平/下降）再加分支。
+ * @param {object} report 扫描报告
+ */
+function exitForSingleScan(report) {
+  const why = scanExecutionError(report);
+  if (why) console.error(`[cli] 扫描执行失败（非「未检出」）：${why}`);
+  process.exit(scanExitCode(report));
 }
 
 // 攻击操作（对标 sqlmap --os-cmd / --sql-shell / --file-read / --file-write）：
@@ -1122,6 +1135,8 @@ async function main() {
     console.error('扫描超时或报告不存在');
     process.exit(1);
   }
+  // [D253] 执行失败不输出「看起来正常」的 0 洞报告 JSON（与一键扫描同口径）
+  if (scanExecutionError(report)) exitForSingleScan(report);
 
   const exploitMode = isPostScanMode(args);
   // [D177] 复现检查必须在出报告之前：判定要进 report.json / manifest，不能事后补
@@ -1130,14 +1145,9 @@ async function main() {
 
   // 攻击操作与清理（对标 sqlmap --os-cmd/--sql-shell/--file-read/--file-write/--reg-*/--cleanup）：
   // 需 EXPLOIT_ENABLED=1 + --authorized；对首个命中注入点执行并打印结果
-  if (exploitMode) {
-    await runPostScanActions(report, args);
-    const risk = report.riskLevel;
-    process.exit(risk === 'Critical' || risk === 'High' ? 2 : 0);
-  }
-
-  const risk = report.riskLevel;
-  process.exit(risk === 'Critical' || risk === 'High' ? 2 : 0);
+  if (exploitMode) await runPostScanActions(report, args);
+  // [D253] 两条收尾路径都走同一判据：执行失败优先于风险等级，且不留第二份 exit 表达式
+  exitForSingleScan(report);
 }
 
 // 仅在直接以脚本运行时启动 main（import 进测试时不触发）

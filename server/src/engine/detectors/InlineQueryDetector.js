@@ -2,6 +2,9 @@ import { Detector } from '../Detector.js';
 import { logger } from '../../core/logger.js';
 import { createDetectionResult } from '../models.js';
 import { INLINE_CONCAT, fromDummy } from '../DialectSqlBuilder.js';
+// [D257] 网络层失败必须落成「未结论」，不能折成「该点无内联通道」——
+// 后者会被报告记成「已测阴性」，正是统一契约第 ④ 条要拦的形态。
+import { isNetworkFailureError } from '../../core/scanValidityGuard.js';
 
 // 内联查询检测器（对标 sqlmap --technique=Q）
 //
@@ -18,7 +21,7 @@ import { INLINE_CONCAT, fromDummy } from '../DialectSqlBuilder.js';
 // 非破坏性：仅注入 `SELECT '<MARKER>'` 这类只读子查询，不改写、不命令执行。
 export class InlineQueryDetector extends Detector {
   constructor() {
-    super('inline'); // technique 标记 'inline'（对标 sqlmap 字母 Q）
+    super('inline', { match: 'echo', extract: [] }); // technique 标记 'inline'（对标 sqlmap 字母 Q）
   }
 
   /**
@@ -44,6 +47,8 @@ export class InlineQueryDetector extends Detector {
       const test = await this._sendUsable(httpClient, ctx, target, point, reqs.test);
       if (base === null || test === null) {
         result.evidence = '内联探测未结论：基线或测试响应不可用（网络失败，重发后仍失败）';
+        result.inconclusive = true;
+        result.inconclusiveReason = '内联探测基线或测试响应不可用（网络失败，重发后仍失败）';
         return result;
       }
 
@@ -68,6 +73,9 @@ export class InlineQueryDetector extends Detector {
         if (refl === null) {
           result.evidence =
             '内联探测未结论：反射门控探针不可用（网络失败，重发后仍失败），无法区分参数反射与子查询求值';
+          result.inconclusive = true;
+          result.inconclusiveReason =
+            '内联探测反射门控探针不可用（网络失败，重发后仍失败），无法区分参数反射与子查询求值';
           return result;
         }
         const reflBody = String(refl.data ?? '');
@@ -88,6 +96,12 @@ export class InlineQueryDetector extends Detector {
       // ⚠️ point 是个对象，直接插值会得到 `[object Object]`（注入验证时才发现），
       //   对定位毫无帮助 —— 必须打 point.id。
       logger.debug(`内联查询探测失败（按"该点无内联通道"处理）：point=${point?.id} err=${e?.message ?? e}`);
+      // [D257] 网络层失败 ≠ 目标不支持内联。前者是「没测成」，必须标未结论；
+      // 后者才是合法负结论。此前一律按后者处理，报告会把「请求全挂」读成「无内联通道」。
+      if (isNetworkFailureError(e)) {
+        result.inconclusive = true;
+        result.inconclusiveReason = `内联探测网络层失败：${e?.message ?? e}`;
+      }
       return result;
     }
   }

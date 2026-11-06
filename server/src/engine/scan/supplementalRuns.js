@@ -10,6 +10,8 @@ import { oobTunnel } from '../../core/oobTunnel.js';
 import { createVulnerability } from '../models.js';
 import { runOobSentinel } from './oobSentinel.js';
 import { LdapXpathInjectionDetector } from '../detectors/LdapXpathInjectionDetector.js';
+// [D257] 补充趟同样走统一执行入口（生产检测器经 run() 校验，测试替身退回 detect()）。
+import { runDetector } from '../detectorSupport/detectorContract.js';
 
 // [D203] LDAP/XPath 检测器无状态 ⇒ 模块级单例。不挂 ScanManager.prototype：
 // 原型挂载尾部与 httpClient/Detector 挂载行会形成 ≥80 tokens 的克隆窗口
@@ -78,7 +80,7 @@ export async function _runSecondOrder(scanId, target, points, dbms) {
           for (const triggerUrl of triggerSources) {
             const ctx = { ...ctxBase, target, point, dbms: pointDbms, triggerUrl, scanId };
             try {
-              const result = await this.secondOrderDetector.detect(ctx);
+              const { result } = await runDetector(this.secondOrderDetector, ctx);
               if (result.vulnerable) {
                 // 复用既有聚合/风险纳管通道：先经 ReportGenerator.riskOf 定级（second_order → High）
                 const risk = this.reportGen.riskOf([
@@ -129,7 +131,7 @@ export async function _runNoSql(scanId, target, points, dbms) {
             // [D203] ldap/xpath 走独立探测器（复用同一布尔判定骨架与误报防线）；
             // 其余三类仍走 noSqlDetector，默认 kinds 不变 ⇒ 默认行为零变化。
             const detector = (kind === 'ldap' || kind === 'xpath') ? ldapXpathDetector : this.noSqlDetector;
-            const result = await detector.detect(ctx);
+            const { result } = await runDetector(detector, ctx);
             if (result.vulnerable) {
               const risk = this.reportGen.riskOf([
                 createVulnerability(point.id, 'nosql', 'Medium', result.payloads, result.evidence),

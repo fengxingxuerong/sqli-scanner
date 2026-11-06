@@ -31,6 +31,8 @@ import { fileURLToPath } from 'node:url';
 
 import { ScanManager } from '../server/src/engine/ScanManager.js';
 import { ReportGenerator } from '../server/src/services/ReportGenerator.js';
+// [D253] 退出码唯一真源：执行失败=1（不是「未检出」），与 cli.js 同源
+import { scanExitCode, scanExecutionError } from '../server/src/services/scanExit.js';
 // [D42 2026-10-11 对标 sqlmap --dump-format] 拖库数据独立产物格式化（27 条既有单测钉行为）
 import { formatDumpData } from '../server/src/engine/dumpFormat.js';
 // [D45 2026-10-11] diff-aware CI 门禁：diff 计算与 REST /api/scan/:id/diff 同源（scanDiff），
@@ -198,6 +200,36 @@ function riskTag(level) {
   return '[--]';
 }
 
+/**
+ * [D253] 执行失败即刻拒绝：必须跑在**所有判红路径与报告落盘之前**。
+ * 参数配置错误（如 --param-filter 删光点位）不是「未检出」，不能生成 0 洞交付件让 CI 判绿。
+ * 抽成模块级函数，main() 只多一次调用，不给复杂度基线（63，只许持平/下降）加分支。
+ * @param {object} report 扫描报告
+ */
+function rejectFailedScan(report) {
+  if (!report) { console.error('扫描未产出报告（超时或引擎错误）'); process.exit(1); }
+  const why = scanExecutionError(report);
+  if (why) {
+    console.error(`[one-click] 扫描执行失败（非「未检出」）：${why}`);
+    process.exit(scanExitCode(report));
+  }
+}
+
+/**
+ * [D253] AGENTS §2 阴性结论披露：verdict 与未覆盖注入面。
+ * 报告里一直有这两个字段，但 CLI 第一界面只打「可信度 ok / 未检出」⇒ 被误读成「扫过没洞」。
+ * 抽成独立函数，避免给 printReportBrief 的圈复杂度（贴软上限 15）再加分支。
+ * @param {object} summary 报告摘要
+ */
+function printConclusionDisclosure(summary) {
+  const verdict = summary?.verdict;
+  if (verdict) console.log(`  结论      : ${verdict}${verdict === 'inconclusive' ? '（不等于「未检出」）' : ''}`);
+  const uncovered = summary?.uncoveredSurfaces;
+  if (Array.isArray(uncovered) && uncovered.length) {
+    console.log(`  未覆盖注入面: ${uncovered.map((u) => u.surface).join(', ')}（${uncovered.length} 类，引用阴性结论须同时声明）`);
+  }
+}
+
 function printReportBrief(report, files, outDir) {
   const vulns = Array.isArray(report.vulns) ? report.vulns : [];
   console.log('');
@@ -210,6 +242,8 @@ function printReportBrief(report, files, outDir) {
   console.log(`  注入点    : ${(report.points || []).length} 个    漏洞: ${vulns.length} 条`);
   const validity = report.summary?.validity;
   if (validity) console.log(`  结论可信度: ${validity.status}${validity.reliable === false ? '（不可信，请查阅报告）' : ''}`);
+  // [D253] AGENTS §2：引用阴性结论必须同时声明 verdict 与未覆盖注入面
+  printConclusionDisclosure(report.summary);
   const skipped = report.summary?.skippedPoints;
   if (skipped && skipped.total) console.log(`  未测注入点: ${skipped.total} 个（原因见报告「结论可信度」小节）`);
 
@@ -372,7 +406,7 @@ async function main() {
   const sm = new ScanManager();
   const t0 = Date.now();
   const report = await runSingleScan(sm, args.direct || args.url, args);
-  if (!report) { console.error('扫描未产出报告（超时或引擎错误）'); process.exit(1); }
+  rejectFailedScan(report);
 
   // ---- 报告落盘 ----
   const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);

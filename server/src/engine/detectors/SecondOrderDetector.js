@@ -38,7 +38,7 @@ import { matchBounded } from '../../core/boundedMatch.js';
 // 仅当「基线无报错 && 实验有报错 && 阴性无报错」判定为二阶注入。命中即确认，不做拖库（与 oob 一致）。
 export class SecondOrderDetector extends Detector {
   constructor() {
-    super('second_order');
+    super('second_order', { match: 'stored', extract: ['dbms'] });
   }
 
   /**

@@ -1,0 +1,15 @@
+server_exit=0
+stdout_lines=12 parsed=12 bad=0
+missing_ids=[]
+tools=9
+ping={}
+resources={"resources":[]}
+prompts={"prompts":[]}
+id_null_replied=yes
+list_scans_isError=undefined keys=inflight,recent
+get_scan_status={"scanId":"__compat_nonexistent__","status":"unknown"}
+get_findings_isError=true
+get_report_isError=true
+unknown_tool_code=-32602
+unknown_method_code=-32601
+stderr=[mcp] sqli-scanner MCP server ready（stdio，工具数 9）
