@@ -5,6 +5,19 @@
 
 ---
 
+## 2026-11-07 批次 D265 · v1.3.2 发版（已完成，见 CHANGELOG）
+
+**要求**：用户确认「发 v1.3.2」。
+**改动**：`npm run version:fix` 把 10 处版本号 1.3.1 → 1.3.2（含 Cargo.lock 本仓条目、
+`.claude-plugin/plugin.json`、`server/package.json`、两个 lock 顶层及 `packages[""]`），
+`version:check` 10/10 一致；CHANGELOG/TODO 补段 + `changelog-index --write`。
+**验证**：`gate:close` 52/52 全绿；`release:check` 干净工作区 + tag↔版本对齐通过；
+提交与 tag 推送后由 CI 发版链产出公开 Release。
+**边界**：本机 win32 未构建桌面包 / Docker 镜像；macos-latest Server tests 红灯另案；
+无真实公网目标与商业云 WAF 授权样本。
+
+---
+
 ## 2026-11-07 批次 D264 · 死代码门禁自证 Linux 假红修复（已完成，见 CHANGELOG）
 
 **问题**：CI `lint` job 的「死代码门禁自证」在 ubuntu-latest 上长期红，本机 Windows 全绿。

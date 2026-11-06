@@ -7,13 +7,14 @@
 > 下一批次起的条目写在这里。发版时把本节整体升为 `## [x.y.z] - YYYY-MM-DD` 并补汇总段。
 
 <!-- changelog-index:start -->
-**本段覆盖 48 个批次（D228–D264，2026-11-01 → 2026-11-07）**。正文按时间倒序排列；
+**本段覆盖 49 个批次（D228–D265，2026-11-01 → 2026-11-07）**。正文按时间倒序排列；
 下表是同一批次的索引，便于按编号或关键词定位。**索引只是导航，正文未做任何删改**
 （被推翻的旧结论原样保留，这是本仓的既定口径）。新增批次后跑
 `node scripts/changelog-index.mjs --write` 重生成，`--check` 校验是否过期。
 
 | 批次 | 日期 | 主题 |
 |---|---|---|
+| D265 | 11-07 | v1.3.2 发版（版本对齐 + 交付收口） |
 | D264 | 11-07 | 死代码门禁自证的 Linux 假红修复（CI lint 常红） |
 | D263 | 11-07 | AI 报告整场总闸 + 半成品口径修正 |
 | D262 | 11-06 | CLI × 本地网关 × 外部裁判靶场（docs only，非自建靶场） |
@@ -63,6 +64,27 @@
 | D229 | 11-01 | 交付闸收口：P0-3 卡顿修复（haystack 先截后拼）+ ai-gateway 断言去模型依赖 |
 | D228 | 11-01 | AI 报告网关端到端验收（ai-gateway 套件）+ 本地网关 runbook + CI 靶场硬要求扩展 |
 <!-- changelog-index:end -->
+
+### 2026-11-07 批次 D265 · v1.3.2 发版（版本对齐 + 交付收口）
+
+**起点**：用户确认按 `v1.3.2` 发版。D264 后 CI lint 的死代码自证在 Linux 转绿
+（run `42279642428` 第 20/21 步 `completed success`），本地全量 `gate:close` 52/52 绿；
+全量验收补跑合计 **23 PASS / 3 SKIP / 0 FAIL**（Benchmark 缺 JDK、OOB 带外缺 PG、
+ai-gateway 默认模型按用户要求不恢复、红队自起靶场缺 MySQL，均如实 SKIP 不假绿）。
+
+**改动**：
+- `npm run version:fix` 把 **10 处**版本号 1.3.1 → 1.3.2：`package.json`、
+  `src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock`（本仓包条目）、
+  `.claude-plugin/plugin.json`、`server/package.json`、两个 `package-lock.json`
+  顶层及其 `packages[""]`；`npm run version:check` 10/10 一致。
+- CHANGELOG / TODO 补 D265 段，`node scripts/changelog-index.mjs --write` 重生成索引。
+
+**验证**：`npm run gate:close` **52/52 全绿**（含 `version-sync` 与自证）；
+`npm run release:check` 通过（干净工作区 + tag `v1.3.2` ↔ 版本 1.3.2）。
+
+**诚实边界**：本机 win32，桌面安装包与 Docker 镜像由 CI 发版链产出，本机未构建；
+CI 的 `test-matrix (macos-latest)` Server tests 红灯另案；
+真实公网目标与商业云 WAF 授权样本仍缺，结论台账 `waf-fingerprint-coverage` 维持 unverified。
 
 ### 2026-11-07 批次 D264 · 死代码门禁自证的 Linux 假红修复（CI lint 常红）
 
