@@ -7,13 +7,14 @@
 > 下一批次起的条目写在这里。发版时把本节整体升为 `## [x.y.z] - YYYY-MM-DD` 并补汇总段。
 
 <!-- changelog-index:start -->
-**本段覆盖 44 个批次（D228–D260，2026-11-01 → 2026-11-06）**。正文按时间倒序排列；
+**本段覆盖 45 个批次（D228–D261，2026-11-01 → 2026-11-06）**。正文按时间倒序排列；
 下表是同一批次的索引，便于按编号或关键词定位。**索引只是导航，正文未做任何删改**
 （被推翻的旧结论原样保留，这是本仓的既定口径）。新增批次后跑
 `node scripts/changelog-index.mjs --write` 重生成，`--check` 校验是否过期。
 
 | 批次 | 日期 | 主题 |
 |---|---|---|
+| D261 | 11-06 | 本地 LLM 网关真 HTTP 复跑（docs only，如实登记 FAIL） |
 | D260 | 11-06 | 服务端覆盖率门禁确定性收口（gate:close 51 → 52 项） |
 | D259 | 11-06 | ReportAI 分步短 prompt（长报告拆成多轮短请求） |
 | D258 | 11-06 | analyst 阶段短 prompt 重试（D255 断点修正，真 HTTP 已验证） |
@@ -59,6 +60,55 @@
 | D229 | 11-01 | 交付闸收口：P0-3 卡顿修复（haystack 先截后拼）+ ai-gateway 断言去模型依赖 |
 | D228 | 11-01 | AI 报告网关端到端验收（ai-gateway 套件）+ 本地网关 runbook + CI 靶场硬要求扩展 |
 <!-- changelog-index:end -->
+
+### 2026-11-06 批次 D261 · 本地 LLM 网关真 HTTP 复跑（docs only，如实登记 FAIL）
+
+**起点**：D259/D260 收口后，用户要求「用本地的网关测试」。此前 D259 只在 Ollama
+`qwen2.5:0.5b` 与 mock-hang 上验过分步短 prompt；本机 dsh 网关（250 模型）与
+A/B zcode-proxy 的复跑状态停留在 11-05/11-06 的旧口径。本批**只做实测与落盘**，
+不改生产代码、测试、阈值或任何套件断言。
+
+**探活（真实 HTTP，未新起常驻进程）**：Ollama `:11434` 200（2 模型）、dsh `:8326`
+200（250 模型）；A `127.0.0.1:8080` 不可达、B `192.168.151.151:18080` 3s 超时。
+短 prompt 探针：`trae/glm-5.3-flash` 3.5s PONG、`deepseek-v4-flash` 2.4s PONG；
+`glm/glm-5.3-flash` 已漂移到 502 TRANSPORT（同日早些时候曾 200），
+`deepseek-auto/glm-5.2` 等 `finish=length` 空内容。
+
+**官方套件 `e2e/ai-gateway-lab/run.mjs` 7 组（判据=退出码）**：
+
+| 网关 / 模型 | 模式 | exit | 事实 |
+|---|---|---|---|
+| Ollama `qwen2.5:0.5b` | 非分步 | **0 PASS** | 11990ms，审阅 ✅，元数据 4/4，落盘 710B |
+| Ollama `qwen2.5:0.5b` | 分步 | **0 PASS** | 16838ms，writer 5 章 / 审阅 5 章 / `partial=false` |
+| dsh `trae/glm-5.3-flash` | 分步 | 1 FAIL | 三轮降级全在 analyst 阶段 20s 超时 |
+| dsh `trae/glm-5.3-flash` | 非分步 | 1 FAIL | 同上（长 prompt 形态复现 11-05 结论） |
+| dsh `trae` · 分步单步 60s | 分步 | 1 FAIL | 短重试仍走 20s（`AI_REPORT_SHORT_RETRY_TIMEOUT_MS` 是另一变量） |
+| dsh `deepseek-v4-flash` · 60s/2048tok | 分步 | 1 FAIL | `finish_reason=length` 空内容 |
+| dsh `deepseek-v4-flash` · 90s/4096tok | 分步 | 1 FAIL | 498555ms 跑完并落盘 2434B，但 `partial=true` / 审阅 0 章 / 未过审 ⇒ 加严判据正确判红 |
+
+**诊断探针**（真实 `buildStepwiseAnalystPrompt`，468 字符）：
+`trae/glm-5.3-flash` 39.95s 返回 777B 合法 JSON（复测一次 70s 超时，上游波动）、
+`deepseek-v4-flash` 24.5s 返回 630B 合法 JSON。⇒ 网关链路与模型都可用，
+瓶颈是**推理型档位的首 token 延迟与 token 预算**，不是 ReportAI 链路缺陷。
+
+**交付**：`docs/本地网关-真HTTP验证-2026-11-06.txt`（新，原始输出与命令）、
+`docs/AI-网关-runbook.md` §5.3（新）+ §5.2 旧口径就地补注（**不删历史**）、
+TODO / CHANGELOG D261、changelog-index 45 批次。
+
+**诚实边界**：
+- **不得宣称 `ai-gateway` 套件在 dsh / glm-5.3-flash 上已 PASS**；最宽松那组也只是
+  partial 半成品，套件加严判据正确判红，本批没有放宽任何断言换绿灯。
+- A/B zcode-proxy 本轮探活不可达 ⇒ D254/D255 那两个生产网关仍未复跑；
+  `glm-5.3-flash` 生产网关无可用 key 的旧结论按当时口径保留并补注。
+- 0.5B 只验链路不判文风；`/v1/models` 的 250 个 id 不等于 250 个可用档位。
+- §3.5 待复核 claim 抽查 `waf-fingerprint-coverage` 仍无真源命令，维持 `unverified`。
+
+**收口结果（本地，2026-11-06）**：`npm run gate:close` **52/52 全绿**
+（typecheck 14.5s / lint 27.9s / `server-coverage` 228.4s）；本批 docs-only，
+代码 / 测试 / 阈值 / 断言一字未改，`facts:check` / `readme:check` / `quality-ledger` /
+`changelog-index`（45 批次）/ `stale-claims` / `refs` 均绿。
+
+---
 
 ### 2026-11-06 批次 D260 · 服务端覆盖率门禁确定性收口（gate:close 51 → 52 项）
 

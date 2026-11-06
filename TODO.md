@@ -5,6 +5,32 @@
 
 ---
 
+## 2026-11-06 批次 D261 · 本地 LLM 网关真 HTTP 复跑（已完成，如实登记 FAIL，见 CHANGELOG）
+
+**要求**：用户「用本地的网关测试」。本批只做实测与落盘，不改代码/测试/阈值/断言。
+
+**探活**：Ollama `:11434` 200（2 模型）、dsh `:8326` 200（250 模型）在线；
+A/B zcode-proxy 8080 / 18080 不可达。属只读探活，未起任何常驻进程。
+
+**结果**：官方 `e2e/ai-gateway-lab/run.mjs` 7 组，判据=退出码。
+- Ollama `qwen2.5:0.5b`：非分步 **exit 0 / 11990ms**、分步 **exit 0 / 16838ms**
+  （writer 5 章 / 审阅 5 章 / `partial=false`）—— D259 分步链路在最终代码上零回归。
+- dsh `trae/glm-5.3-flash`：分步 / 非分步各 **exit 1**，三轮降级全在 analyst 20s 超时；
+  放宽分步单步到 60s 仍红（短重试的 20s 是另一个变量）。
+- dsh `deepseek-auto/deepseek-v4-flash`：2048 tok **exit 1**（`finish_reason=length` 空内容）；
+  4096 tok / 90s **exit 1** 但流水线跑完 498555ms、落盘 2434B、writer 5 章、
+  **审阅 0 章 / `partial=true` / 未过审** ⇒ §5.2 加严判据正确判红，没把半成品当 PASS。
+
+**真因**：诊断探针用真实 468 字符分步 prompt 实测 —— `trae` 39.95s 返回 777B 合法 JSON
+（复测 70s 超时，上游波动）、`deepseek-v4-flash` 24.5s 返回 630B 合法 JSON。
+网关链路与模型都可用，瓶颈是**推理型档位首 token 延迟 + token 预算**，不是链路缺陷。
+
+**边界**：**不得宣称 ai-gateway 在 dsh / glm-5.3-flash 上已 PASS**；
+A/B 生产网关仍未复跑；0.5B 不判文风；未放宽任何断言。
+证据：`docs/本地网关-真HTTP验证-2026-11-06.txt` + runbook §5.3。
+
+---
+
 ## 2026-11-06 批次 D260 · 服务端覆盖率门禁确定性收口（已完成，见 CHANGELOG）
 
 **起点**：D259 留「本地 `gate:close` 51/51 全绿、CI `Server coverage gate` 红」——第 5 次
