@@ -159,13 +159,15 @@ test('缓存容量上限 100：最旧条目被淘汰后重新生成', async () =
 });
 
 // ── [D205] 空响应不算成功（10-30 实测缺陷：reviewer 返回空 content 仍标「✅ 已审阅」，正文 0B）──
-test('[D205] reviewer 返回空内容 ≠ 审阅通过：正文回退到撰写稿并如实标注', async () => {
+// [D255] 场景修正：i>=3（reviewer 首轮 + 短 prompt 重试）都返回空，模拟「故障持续」。
+// 断言不放宽：即使短重试也失败，仍不得把空返回标成已审阅；同时钉住重试确实发生过。
+test('[D205/D255] reviewer 与短 prompt 重试均返回空 ≠ 审阅通过：正文回退到撰写稿并如实标注', async () => {
   const g = await import('../src/services/ReportAI.js?emptyreview'); // 独立实例（独立 keyHealth/cache）
   const fh = installFetch(async (i) => ({
     ok: true,
     status: 200,
     json: async () => ({
-      choices: [{ message: { content: i === 3 ? '' : `BODY-${i}` }, finish_reason: i === 3 ? 'length' : 'stop' }],
+      choices: [{ message: { content: i >= 3 ? '' : `BODY-${i}` }, finish_reason: i >= 3 ? 'length' : 'stop' }],
     }),
   }));
   try {
@@ -173,6 +175,7 @@ test('[D205] reviewer 返回空内容 ≠ 审阅通过：正文回退到撰写�
     assert.equal(r.success, true);
     assert.ok(!r.reviewNote.includes('已经过安全审阅'), '空返回不能被标成已审阅');
     assert.equal(r.content, 'BODY-2', '正文应回退到 writer 的产出，而不是空串');
+    assert.deepEqual(r.shortPromptRetries, [], '短重试未产出内容，不得计入生效重试（不得伪造成功）');
   } finally { fh.restore(); }
 });
 

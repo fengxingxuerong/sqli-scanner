@@ -144,31 +144,38 @@ function collectFrontend({ coverage }) {
 }
 
 function collectServer({ coverage }) {
-  // 覆盖率采集用 :report 变体（不带 --test-coverage-*=阈值）：
-  // 阈值是门禁的职责，采集脚本不该因为它退出非零而拿不到数字。
+  // [D260 2026-11-06] 用例计数与覆盖率**分两次采集**，各有各的真源：
+  //   · 计数走 `npm test` 全量（485 个测试文件全跑，含 5 个用 `?query` 隔离实例的）；
+  //   · 覆盖率走 `test:coverage:report`（确定性合并口径，排除那 5 个文件，见
+  //     scripts/server-coverage-gate.mjs）。
+  // 旧实现用一次 report 变体同时取两者 ⇒ 排除后 README 的「服务端用例数」会凭空少掉
+  // 那 5 个文件里的用例，把「覆盖率测量集」误写成「全量用例数」。两个数字必须分开取。
+  // 覆盖率采集用 :report 变体（不带 --test-coverage-*=阈值）：阈值是门禁的职责，
+  // 采集脚本不该因为它退出非零而拿不到数字。
   // [TOOL-FIX 2026-09-18] 显式钉 `--test-reporter=tap`。本脚本只认 `# tests N` 这种 TAP 汇总行，
   // 而 node:test 的 reporter 选型取决于 stdout 的 TTY 探测：在 Windows + Git Bash 下 `npm run test`
   // 走管道时输出的是 spec 格式（`ℹ tests 1885`）→ 本地跑 --refresh 必失败（数字采集器在自己
   // 机器上取不到数，等于没有）。同一台机器上「上一次能解析、下一次不能」的不确定性也一并消除。
-  const script = coverage ? 'test:coverage:report' : 'test';
   // [FIX 2026-11-04] 不走 npm run（同样经 cmd shim 派生；本机实测 npx/npm 派生的子进程会被中断）。
-  // 直接取 package.json 里的真实命令（`node --env-file… --test …`）执行，判定与阈值来源不变。
+  // 直接取 package.json 里的真实命令执行，判定与阈值来源不变。
   const serverPkg = JSON.parse(readFileSync(resolve(ROOT, 'server/package.json'), 'utf8'));
-  const baseCmd = serverPkg.scripts[script];
-  if (!baseCmd) throw new Error(`server/package.json 缺 ${script}`);
-  const runOnce = () => run(`${baseCmd} --test-reporter=tap`, resolve(ROOT, 'server'));
-  let out = runOnce();
-  const pick = (key) => {
-    const m = out.match(new RegExp(`^# ${key} (\\d+)$`, 'm'));
+  const runScript = (script) => {
+    const baseCmd = serverPkg.scripts[script];
+    if (!baseCmd) throw new Error(`server/package.json 缺 ${script}`);
+    return run(`${baseCmd} --test-reporter=tap`, resolve(ROOT, 'server'));
+  };
+  const pick = (text, key) => {
+    const m = text.match(new RegExp(`^# ${key} (\\d+)$`, 'm'));
     if (!m) throw new Error(`服务端测试输出里找不到 "# ${key}"`);
     return Number(m[1]);
   };
+  let out = runScript('test');
   // [D93 2026-10-17] 单次 fail>0 不直接写进对外口径：全量单测存在偶发 flaky（实测同一提交
   // 连跑 3 次：0/1/0 fail，失败项每次不同），而 README 的「N fail」是**对外事实**。
   // 采一次抖动就把它写成事实，等于让口径随机器负载漂移（本仓最反感的假数据形态）。
   // 判据：fail>0 时**重跑一次**；两次都 fail 才认账。重跑只影响采集，不放宽任何测试断言。
-  if (pick('fail') > 0) {
-    const first = pick('fail');
+  if (pick(out, 'fail') > 0) {
+    const first = pick(out, 'fail');
     console.warn(`[facts] ⚠ 服务端测试首次出现 ${first} fail —— 已重跑一次（flaky 不计入口径；连续失败才是真失败）`);
     // [D225] 失败取证：把 TAP 的 not ok 行打出来（D225 实测：连续两轮采集 fail=1 却拿不到
     // 用例名，日志里只有汇总数字，复现与定因全靠盲跑）。不改变任何判定，只补可见性。
@@ -184,18 +191,19 @@ function collectServer({ coverage }) {
       }
     };
     printFailures('首轮失败用例', out);
-    out = runOnce();
-    if (pick('fail') > 0) printFailures('复跑仍失败，用例', out);
+    out = runScript('test');
+    if (pick(out, 'fail') > 0) printFailures('复跑仍失败，用例', out);
   }
   const res = {
-    tests: pick('tests'), pass: pick('pass'), fail: pick('fail'), skip: pick('skipped'),
+    tests: pick(out, 'tests'), pass: pick(out, 'pass'), fail: pick(out, 'fail'), skip: pick(out, 'skipped'),
   };
   if (coverage) {
+    const covOut = runScript('test:coverage:report');
     // node:test 覆盖率报表总计行：# all files | 88.42 | 72.67 | 75.75 |
-    const row = out.match(/^#?\s*all files\s*\|\s*([\d.]+)\s*\|\s*([\d.]+)\s*\|\s*([\d.]+)/m);
+    const row = covOut.match(/^#?\s*all files\s*\|\s*([\d.]+)\s*\|\s*([\d.]+)\s*\|\s*([\d.]+)/m);
     if (!row) {
       console.error('── 服务端覆盖率报表原文（未能解析 all files 行）──');
-      console.error(out.split('\n').filter((l) => l.includes('|')).slice(-40).join('\n'));
+      console.error(covOut.split('\n').filter((l) => l.includes('|')).slice(-40).join('\n'));
       throw new Error('服务端覆盖率输出里找不到 all files 行');
     }
     res.coverage = { lines: Number(row[1]), branches: Number(row[2]), functions: Number(row[3]) };

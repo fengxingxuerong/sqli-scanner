@@ -2,11 +2,13 @@
 // ============================================================================
 // arch-guard.mjs —— 架构门禁（防止工程重新腐化）
 //
-// 三条规则：
+// 四条规则：
 //  ① 体积上限：单个文件超过 MAX_LINES 行 → 失败。已有超标文件记在基线里，
 //     基线内允许存在（技术债显式化），但**不允许再变长**——瘦身后需下调基线。
 //  ② 循环依赖：server/src 与 src 的 ESM import 图里出现环 → 失败。
 //  ③ console 回归：生产代码（排除 tests/scripts/e2e）不得出现 console.*。
+//  ④ 编排总图：检测器顺序 / 类存在性 / phase 标注 / 是否由表生成，
+//     防止「图写一份、代码另写一份」的漂移。
 //
 // 设计原则：**不留半开的闸门**。规则一旦启用就必须为 0 违规；
 // 历史债靠基线显式列出（可见、可追、可逐步清），而不是靠警告蒙混。
@@ -198,6 +200,54 @@ function checkConsole(files) {
   return hits;
 }
 
+// ---------- ④ 编排总图----------
+// 为什么用静态解析而不是 import 表：本门禁是「不执行项目代码」的架构判据，
+// 引入运行时模块会把门禁变成被测对象的一部分，且与 ①②③ 的口径不一致。
+const STRATEGY_REL = path.join('server', 'src', 'engine', 'scan', 'strategyOrder.js');
+const SM_REL = path.join('server', 'src', 'engine', 'ScanManager.js');
+const DETECTOR_DIR = path.join('server', 'src', 'engine', 'detectors');
+const EXPECTED_STRATEGY = ['union', 'error', 'boolean', 'time', 'stacked', 'oob', 'inline', 'second_order', 'nosql'];
+const VALID_PHASES = new Set(['primary', 'primary-optin', 'supplemental']);
+
+function checkStrategyOrder(opts = {}) {
+  const tablePath = opts.tablePath || path.join(ROOT, STRATEGY_REL);
+  const smPath = opts.smPath || path.join(ROOT, SM_REL);
+  const problems = [];
+  if (!fs.existsSync(tablePath)) return ['缺少编排总图 server/src/engine/scan/strategyOrder.js'];
+  const table = fs.readFileSync(tablePath, 'utf8');
+  const re = /\{\s*technique:\s*'([^']+)'\s*,\s*Detector:\s*(\w+)\s*,\s*phase:\s*'([^']+)'/g;
+  const entries = [];
+  let m;
+  while ((m = re.exec(table))) entries.push({ technique: m[1], cls: m[2], phase: m[3] });
+  if (entries.length !== EXPECTED_STRATEGY.length) {
+    problems.push(`编排总图条目 ${entries.length} 项，应为 ${EXPECTED_STRATEGY.length} 项（表与图漂移）`);
+  }
+  if (JSON.stringify(entries.map((e) => e.technique)) !== JSON.stringify(EXPECTED_STRATEGY)) {
+    problems.push(`编排顺序不符：${entries.map((e) => e.technique).join('→')}`);
+  }
+  for (const e of entries) {
+    if (!VALID_PHASES.has(e.phase)) {
+      problems.push(`${e.technique}：phase '${e.phase}' 非法（须 primary / primary-optin / supplemental）`);
+    }
+    const f = path.join(ROOT, DETECTOR_DIR, `${e.cls}.js`);
+    const exists = opts.detectorExists ? opts.detectorExists(e.cls) : fs.existsSync(f);
+    if (!exists) {
+      problems.push(`${e.technique}：Detector ${e.cls} 无对应文件`);
+    } else if (!opts.skipExportCheck) {
+      const t = fs.readFileSync(f, 'utf8');
+      if (!new RegExp(`export class ${e.cls}\\b`).test(t)) {
+        problems.push(`${e.technique}：${e.cls}.js 未导出 class ${e.cls}`);
+      }
+    }
+  }
+  // 防漂移：注册表必须走表，ScanManager 不得再手写 new XxxDetector()。
+  // `new e.Detector()` / `new byTech('x').Detector()` 不匹配 \w+Detector，故不误报。
+  const sm = fs.existsSync(smPath) ? fs.readFileSync(smPath, 'utf8') : '';
+  const hand = [...new Set([...sm.matchAll(/new\s+(\w+Detector)\s*\(/g)].map((x) => x[1]))];
+  if (hand.length) problems.push(`ScanManager 仍有手写实例 ${hand.join(', ')}；须由 STRATEGY_ORDER 生成`);
+  return problems;
+}
+
 // ---------- selftest ----------
 // [D249 2026-11-04] 判据自证：注入一次性 fixture 直接调用内部函数，断言「该红的红、
 // 该绿的绿」。fixture 写进 server/src 是因为 console 规则只对生产目录（server/src /
@@ -256,6 +306,28 @@ function selftestMain() {
       '⑨ console 判定：log 命中第 2 行；console.error（错误上报）/行注释不命中');
     ok(hits.some((h) => h.endsWith(':5')), '⑩ 已知盲区（显式钉住）：单行块注释 /* console.log */ 仍命中 —— 现行规则只剔除行注释（!startsWith("//")），块注释内被注释掉的调试代码靠基线吸收；未来若修此规则，此处会红提醒同步契约');
     ok(checkConsole(['scripts/arch-guard.mjs']).length === 0, '⑪ 非生产目录（scripts/）不命中');
+
+    // —— 编排总图：该绿的绿、该红的红 ——
+    const realTable = fs.readFileSync(path.join(ROOT, STRATEGY_REL), 'utf8');
+    const realSm = fs.readFileSync(path.join(ROOT, SM_REL), 'utf8');
+    writeFixture('strategy_ok.js', realTable);
+    writeFixture('strategy_badphase.js', realTable.replace(
+      "{ technique: 'union', Detector: UnionDetector, phase: 'primary'",
+      "{ technique: 'union', Detector: UnionDetector, phase: 'mystery'"));
+    writeFixture('strategy_swapped.js', realTable
+      .replace("{ technique: 'union', Detector: UnionDetector", "{ technique: 'error', Detector: UnionDetector")
+      .replace("{ technique: 'error', Detector: ErrorDetector", "{ technique: 'union', Detector: ErrorDetector"));
+    writeFixture('strategy_ghost.js', realTable.replace('Detector: UnionDetector', 'Detector: GhostDetector'));
+    writeFixture('sm_ok.js', realSm);
+    writeFixture('sm_hand.js', 'this.detectors = [new UnionDetector()];\n');
+    const probe = (table, sm) => checkStrategyOrder({
+      tablePath: path.join(dir, table), smPath: path.join(dir, sm),
+    });
+    ok(probe('strategy_ok.js', 'sm_ok.js').length === 0, '⑬ 真表 + 由表生成的 ScanManager → 绿');
+    ok(probe('strategy_badphase.js', 'sm_ok.js').some((p) => /phase/.test(p)), '⑭ 非法 phase → 红');
+    ok(probe('strategy_swapped.js', 'sm_ok.js').some((p) => /顺序不符/.test(p)), '⑮ 顺序颠倒 → 红');
+    ok(probe('strategy_ghost.js', 'sm_ok.js').some((p) => /无对应文件/.test(p)), '⑯ 类名无对应文件 → 红');
+    ok(probe('strategy_ok.js', 'sm_hand.js').some((p) => /手写实例/.test(p)), '⑰ ScanManager 手写 new 列表 → 红');
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -328,9 +400,11 @@ const baseline = loadBaseline();
 const size = checkSize(files, baseline.__size__, baseline.__size_bytes__);
 const cycles = findCycles(buildGraph(files));
 const consoleHits = checkConsole(files);
+const strategyProblems = checkStrategyOrder();
 
 const problems = [];
 if (size.violations.length) problems.push(['文件体积', size.violations]);
+if (strategyProblems.length) problems.push(['编排总图', strategyProblems]);
 
 // 循环依赖：基线外的环（新增债）才算失败
 const baseCycles = new Set(baseline.__cycles__ || []);
@@ -382,7 +456,7 @@ if (Object.keys(consoleByFile).length) {
 }
 
 if (problems.length === 0) {
-  console.log('架构门禁通过：无新增体积违规 / 无新增循环依赖 / 无新增 console');
+  console.log('架构门禁通过：无新增体积违规 / 无新增循环依赖 / 无新增 console / 编排总图无漂移');
   process.exit(0);
 }
 

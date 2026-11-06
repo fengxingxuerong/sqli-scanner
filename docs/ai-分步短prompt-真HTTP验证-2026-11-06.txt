@@ -1,0 +1,91 @@
+# D259 · 分步短 prompt：真 HTTP / 真模型链路验证（2026-11-06）
+
+> 本文件是**实测记录**，不是能力声明。四条命令都能在本机复现，输出为当日原样粘贴。
+> 目的：证明「把一份长报告拆成多轮短请求」在真 HTTP + 真模型下能跑完整条流水线，
+> 且**不再先挂长 prompt 再补救**。不证明报告输出质量，也不证明生产网关已可用。
+
+## 0. 被测开关与判据
+
+`AI_REPORT_STEPWISE=1`（opt-in，默认关闭 ⇒ D258 三角色链路逐字不变）。
+判据 = `node e2e/ai-gateway-lab/run.mjs` 的**退出码**；分步模式额外**加严**
+（`partial=false` / `fallback=null` / `failedSteps` 为空 / 章节数 >1），
+原有「审阅 ✅ / 元数据头 4/4 / 脱敏 on / 网关实调 / 落盘字节数」一条未放宽。
+
+## 1. mock-hang 网关（长 prompt 挂 5s，短 prompt 30ms）
+
+```bash
+# 终端 A
+MOCK_PORT=18326 MOCK_HANG_MS=5000 node e2e/ai-gateway-lab/mock-hang-gateway.mjs
+# 终端 B：per-step 超时 = 6000/3 = 2000ms
+AI_REPORT_STEPWISE=1 AI_GATEWAY_URL=http://127.0.0.1:18326 \
+AI_GATEWAY_MODEL=mock-hang AI_GATEWAY_TIMEOUT_MS=6000 node e2e/ai-gateway-lab/run.mjs
+```
+
+```
+网关：http://127.0.0.1:18326（模型 mock-hang, max_tokens=2048）
+审阅角色校验：✅
+元数据头：4/4
+数据脱敏：on
+落盘：true (912 bytes, 内容 536B)
+网关实调：true (mock-hang→mock-hang→mock-hang)
+耗时：462ms
+分步短 prompt：on（writer 5 章 / 审阅 5 章 / partial=false / fallback=none）
+AI 网关判据通过
+EXIT_A=0
+```
+
+同配置关掉开关（D258 基线对照）：
+
+```
+耗时：6160ms
+AI 网关判据通过
+EXIT_B=0
+```
+
+**读法**：462ms ≈ 11 个短请求 × 30ms + 本地开销（1 次分析 + 5 章撰写 + 5 章审阅）。
+分步链路里只要混进一个长 prompt，就会挂 5s 且在 2s per-step 超时触发 AbortError，
+耗时不可能低于 2s ⇒ **11 个请求全部是短请求**。基线 6160ms 与 D258 记录的 6172ms
+一致 ⇒ 非分步路径零回归（D258 的三级降级 + 短重试原样生效）。
+
+## 2. 真实 Ollama 模型（qwen2.5:0.5b，非 mock）
+
+```bash
+AI_REPORT_STEPWISE=1 node e2e/ai-gateway-lab/run.mjs   # 分步
+node e2e/ai-gateway-lab/run.mjs                         # 非分步基线
+```
+
+| 场景 | 耗时 | 正文 | 分步事实 | 退出码 |
+|---|---|---|---|---|
+| 分步 ON | 29966ms | 12354B | 5 章撰写 / 5 章审阅 / partial=false / fallback=none / ✅ | 0 |
+| 非分步 | 6246ms | 2105B | （无 stepwise 字段） | 0 |
+
+**读法**：真模型上 11 个短请求全部返回非空内容，五章齐全、逐章审阅完成。
+分步正文更长是「章节结构齐全」的结果，**不是质量结论**（0.5B 级模型输出不可交付，
+见 `docs/AI-网关-runbook.md` §3；套件判据也不判文风）。
+29966ms 是 11 次 CPU 推理的串行和 —— 分步的目标不是省时间，而是绕开
+「长 system+user 报告 prompt 在推理型网关 100s 不返回」；在这个场景下才有可比性。
+
+## 3. 能证明 / 不能证明
+
+**能证明**：① 分步模式下每个请求都短（mock-hang 的 462ms 是真 HTTP + 真超时判据）；
+② 章节缺失会显式标注且 `partial=true`，不冒充全文审阅（链路单测 13 条）；
+③ 非分步路径零回归；④ 真模型上链路能跑完并落盘。
+
+**不能证明**：
+- glm-5.3-flash 生产网关本轮**仍无可用 key，未复跑**；不能宣称 `ai-gateway` 套件
+  在 D254/D255 那两个网关上已 PASS。该网关「长 prompt 挂起、短 prompt 4.1s 返回」
+  的证据见 `docs/llm-gateway-capability-2026-11-05.txt`，本批只提供绕行路径。
+- mock-hang 是行为模拟、Ollama 0.5B 是链路级模型，都不证明 ≥7B 生产模型的输出质量。
+- 不证明「分步报告比整篇报告更好」；只证明章节齐全 + 缺章如实披露。
+
+## 4. 门禁与单测
+
+`server/tests/reportAi.stepwise.guard.test.js` 13/13（短请求预算、事实保真、
+缺章标注、全章失败回退、开关零变化、元数据披露 + 调度层直调 4 条）、
+`reportAi.stepwiseCoverage.guard.test.js` 5/5、既有 AI 报告相关测试 34/34；
+`npm run typecheck` 0、改动文件 `eslint` 0、`npm run gate:close` 51/51。
+单测不替代本文的真 HTTP 记录。
+
+⚠️ **不在本文件证明范围内**：CI-only 的 `cd server && npm run test:coverage`
+本批后仍 exit 1（全量 branch 73.18% < 阈值 74%），本地 gate:close 不含该项。
+本批未放宽阈值，归因与后续处置见 CHANGELOG D259「未收口」段。

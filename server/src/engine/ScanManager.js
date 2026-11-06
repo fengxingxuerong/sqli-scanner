@@ -1,14 +1,8 @@
 import { nanoid } from 'nanoid';
 import { TargetParser } from './TargetParser.js';
-import { UnionDetector } from './detectors/UnionDetector.js';
-import { ErrorDetector } from './detectors/ErrorDetector.js';
-import { BooleanBlindDetector } from './detectors/BooleanBlindDetector.js';
-import { TimeBlindDetector } from './detectors/TimeBlindDetector.js';
-import { StackedDetector } from './detectors/StackedDetector.js';
-import { OobDetector } from './detectors/OobDetector.js';
-import { SecondOrderDetector } from './detectors/SecondOrderDetector.js';
-import { NoSqlInjectionDetector } from './detectors/NoSqlInjectionDetector.js';
-import { InlineQueryDetector } from './detectors/InlineQueryDetector.js';
+// [编排总图] 检测器实例与顺序统一由 strategyOrder.js 生成（单一事实源）
+import { STRATEGY_ORDER } from './scan/strategyOrder.js';
+import { AppError, ErrorCode } from '../core/errors.js';
 import { DBFingerprinter } from './DBFingerprinter.js';
 import { Extractor } from './Extractor.js';
 import { Exploiter } from './Exploiter.js';
@@ -139,23 +133,23 @@ export class ScanManager {
     this.retireTtlMs = retireTtlMs ?? _envRetireTtl();
     this.maxScans = maxScans ?? 100; // scans Map 上限，超限淘汰最旧扫描
     this._scanClients = new Map(); // scanId -> 扫描作用域 HttpClient 视图（按 scanId 独立限速桶）
-    // 检测器注册表：新增技术只加一个类并在此处登记（OobDetector 末位，作为盲注/无回显兜底）
-    this.detectors = [
-      new UnionDetector(),
-      new ErrorDetector(),
-      new BooleanBlindDetector(),
-      new TimeBlindDetector(),
-      new StackedDetector(),
-      new OobDetector(),
-    ];
-    // 二阶注入检测器：独立实例，不进 this.detectors 数组（不参与一阶 per-point 循环，
-    // 由 _runSecondOrder 在聚合之后作为补充趟调用，与一阶流水线正交）。
-    this.secondOrderDetector = new SecondOrderDetector();
-    // 非 SQL 注入检测器（NoSQL/GraphQL/SSTI）：同样独立实例，不进一阶循环，由 _runNoSql 补充趟调用（opt-in）。
-    this.noSqlDetector = new NoSqlInjectionDetector();
-    // 内联查询检测器（对标 sqlmap Q）：作为经典 SQLi 技术注册进一阶主调度（technique='inline'），
-    // 仅当用户显式勾选 'inline' 时运行（opt-in），默认 techniques 不含它，避免对无回显点目标产生噪音。
-    this.inlineDetector = new InlineQueryDetector();
+    // [编排总图] 实例与顺序全由 STRATEGY_ORDER 生成，不再手写 new 列表。
+    // 与改动前逐字等价：6 个 primary + 末尾 push 的 inline，另两个 supplemental 独立实例。
+    // `new (entry.Detector)()` 必须带括号：写成 `new byTech(t).Detector()` 会被解析成
+    // `(new byTech(t)).Detector()`，把查找函数当构造函数（探针实测 TypeError）。
+    // 表是常量，条目存在性由 arch-guard ④ 守住；兜底用 AppError 而非裸 Error，
+    // 既不顶破 error-contract 基线，也让 checkJs 收窄 find() 的 undefined。
+    const detectorOf = (t) => {
+      const entry = STRATEGY_ORDER.find((e) => e.technique === t);
+      if (!entry) throw new AppError(ErrorCode.UNKNOWN, `[编排总图] 缺少技术位 ${t}`);
+      return new (entry.Detector)();
+    };
+    this.detectors = STRATEGY_ORDER.filter((e) => e.phase === 'primary').map((e) => new (e.Detector)());
+    // 二阶注入 / 非 SQL：补充趟，不参与一阶 per-point 循环（phase: supplemental）。
+    this.secondOrderDetector = detectorOf('second_order');
+    this.noSqlDetector = detectorOf('nosql');
+    // 内联查询（对标 sqlmap Q）：opt-in，注册进一阶主调度但默认 techniques 不含它。
+    this.inlineDetector = detectorOf('inline');
     this.detectors.push(this.inlineDetector);
     this.fp = new DBFingerprinter();
     // WAF 指纹识别 + 推荐（可注入桩，默认使用真实实现；识别复用指纹基线，零额外发包）

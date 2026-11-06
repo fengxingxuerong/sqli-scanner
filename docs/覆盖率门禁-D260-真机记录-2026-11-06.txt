@@ -1,0 +1,80 @@
+D260 · 服务端覆盖率门禁确定性收口 —— 真机记录（2026-11-06，判据一律退出码）
+================================================================================
+本机：Windows / Git Bash；默认 node v22.22.2（.workbuddy 自带）；CI 同款 node v24.22.1
+（C:\Program Files\nodejs\node.exe，ci.yml 全 job node-version: 24）。
+
+── 1. 起点：D259 留下的问题（改动前，全量含 ?query 隔离实例） ───────────────
+命令：cd server && npm run test:coverage            # 此时脚本仍是原始 node --test
+输出：EXIT=1
+      # fail 0
+      #   ReportAI.js          |  81.10 |    34.56 |   76.60 |
+      #   reportAiStepwise.js  |  99.39 |    95.83 |  100.00 |
+      # all files              |  89.11 |    73.18 |   81.83 |
+      # Error: 73.18% branch coverage does not meet threshold of 74%.
+原日志：/tmp/d260-coverage.log（本机留存，未入库）。
+
+── 2. D260 初版「同进程补测」实测无效（推翻链，不删历史） ──────────────────
+工作区曾把 5 条补测并入 reportAi.stepwise.guard.test.js 的同一无 query 实例，
+并删除独立的 stepwiseCoverage.guard.test.js。复跑同一命令：
+      EXIT=1，all files | 89.11 | 73.18 | 81.83，ReportAI.js branch 仍 34.56。
+⇒ 「补测位置不对」这一假设被实测推翻；初版注释已在两份测试文件里标注作废并保留。
+
+── 3. 最小样本定位真因（.box-agent-scratch/cov-exp/，临时样本未入库） ──────
+mod.mjs: f/g/h 三个带分支的函数；t1/t2 无 query import；t3 = `./mod.mjs?x=1`；
+t4 = `./mod.mjs#x=1`；t5 = 同进程同时 import 无 query + ?query。
+命令模板：node --experimental-test-coverage --test --test-coverage-include='mod.mjs*' \
+          --test-concurrency=1 t1.mjs t2.mjs t3.mjs       # 各跑 3~6 次
+
+  Node 22.22.2（无 query）：5/5 次均 57.14% branch / 100% funcs（union，稳定）
+  Node 22.22.2（含 ?query）：5 次里 3 次 66.67%/33.33%、2 次 57.14%/100%（随机跳）
+  Node 22.22.2（含 #fragment）：同样在 66.67% / 57.14% 之间跳
+  Node 24.22.1（无 query）：3/3 次 57.14% / 100%（union，稳定）
+  Node 24.22.1（含 ?query）：6/6 次 66.67% / 33.33%（单快照，稳定但退化）
+  Node 24.22.1（含 #fragment）：3 次里 2 次 66.67% / 33.33%
+  两版本 t1+t2+t5（同进程内既有普通也有 ?query 实例）：仍为 66.67% / 33.33%
+⇒ 只要任意进程加载了带后缀的模块 URL，同一源文件的多进程快照就不再 union。
+  与「补测放在哪个文件」无关，属 Node 覆盖率合并口径，不是本仓代码缺陷。
+
+── 4. 校准后（排除 5 个含 ?query 导入的测试文件，仍由 npm test 全量执行） ──
+排除名单（脚本内双向校验）：
+  exploitRoutes.edge.test.js / reportAI.service.test.js /
+  reportAi.shortRetry.guard.test.js / reportAi.stepwise.guard.test.js / ssrf.ipv6.test.js
+
+实验 A：node v24.22.1，479 文件（当时 stepwiseCoverage 文件处于删除态）
+  node --env-file=.env.test --import=./tests/_setup.mjs --experimental-test-coverage \
+    --test '--test-coverage-include=src/**/*.js' --test-coverage-lines=85 \
+    --test-coverage-branches=74 --test-coverage-functions=77 --test-concurrency=3 <files>
+  EXIT=0；pass 4129 / fail 0；all files | 95.08 | 81.75 | 88.93 |
+实验 B：node v22.22.2，同样命令
+  EXIT=0；pass 4129 / fail 0；all files | 95.08 | 81.81 | 88.93 |
+实验 C（最终代码，恢复 stepwiseCoverage 文件 → 480 个测量文件）：
+  npm --prefix server run --silent test:coverage       # 经 scripts/server-coverage-gate.mjs
+  EXIT=0；tests 4141 / pass 4135 / fail 0 / skip 6；all files | 95.43 | 81.78 | 89.62 |
+原日志：/tmp/d260-cov-excl24.log、/tmp/d260-cov-excl22.log、/tmp/d260-final-coverage24.log
+
+── 5. 首轮 gate:close 的第二个真问题（runner 缓冲） ────────────────────────
+npm run gate:close → 51/52，唯一红 server-coverage exit=1 / 222.8s，
+输出尾部停在 `# Subtest: ★ D19…` 且**没有覆盖率报表**（不是阈值红）。
+覆盖率 TAP 实测 1,111,521 B > spawnSync 默认 maxBuffer 1,048,576 B ⇒ 子进程被掐断。
+修法：scripts/gate-close.mjs 的 spawnSync 显式 maxBuffer: 64 * 1024 * 1024，
+并在 --selftest 里钉住 ≥8MB（第 ③ 条注入）。
+原日志：/tmp/d260-gate-close.log（本机留存，未入库）。
+
+── 6. 缺陷注入复验（备份还原，未用反向 replace_all） ──────────────────────
+备份：.box-agent-scratch/d260/gate-list.bak、.box-agent-scratch/d260/scanExit.bak、
+      .box-agent-scratch/d260/gate-close.bak
+A. 把 gate-list 的 `server-coverage` 改名 → `node scripts/gate-close.mjs --selftest` EXIT=1
+   报「清单缺「server-coverage」（AGENTS.md §3 收口清单要求项）」；还原后 EXIT=0。
+B. 给未排除的 scanExit.guard.test.js 追加一行 `import('../src/services/ReportAI.js?injected')`
+   → `node scripts/server-coverage-gate.mjs --dry-run` EXIT=1
+   报「含 ?query 导入但未排除（会破坏覆盖率合并）：scanExit.guard.test.js」；还原后 EXIT=0。
+C. 把 gate-close.mjs 的 maxBuffer 降回 1MB → `gate-close --selftest` EXIT=1
+   报「spawnSync 未设 ≥8MB 的 maxBuffer（大输出门禁会被 ENOBUFS 掐断）」；还原后 EXIT=0。
+
+── 7. 口径边界（对外引用必须同时声明） ───────────────────────────────────
+· 阈值 85/74/77 与 `--test-coverage-include=src/**/*.js` **一个字未改**；
+  改的是「哪些测试文件参与覆盖率测量」的合并口径校准。
+· 那 5 个文件仍在 `cd server && npm test` 与 ci.yml 的 `Server tests` 步骤全量执行；
+  只有它们的覆盖率贡献不计入测量集。README 用例数取自 npm test 全量（facts-sync 已拆开采集）。
+· 81.78% 是「校准后测量集」的 branch 覆盖率，不等于「全仓代码质量提升了 8.6 个百分点」；
+  能力结论仍受 §3.5 永远质疑协议约束。

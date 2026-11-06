@@ -22,9 +22,9 @@
     "cli": "node bin/cli.js",
     "test": "node --env-file=.env.test --import=./tests/_setup.mjs --test --test-concurrency=3",
     "test:fast": "node --env-file=.env.test --import=./tests/_setup.mjs --test --test-concurrency=8",
-    "test:coverage": "node --env-file=.env.test --import=./tests/_setup.mjs --experimental-test-coverage --test --test-coverage-include=src/**/*.js --test-coverage-lines=85 --test-coverage-branches=74 --test-coverage-functions=77 --test-concurrency=3",
+    "test:coverage": "node ../scripts/server-coverage-gate.mjs --test-coverage-lines=85 --test-coverage-branches=74 --test-coverage-functions=77",
     "test:coverage:core": "node --env-file=.env.test --import=./tests/_setup.mjs --experimental-test-coverage --test --test-coverage-include=src/core/httpClient.js --test-coverage-include=src/core/http/*.js --test-coverage-include=src/engine/Detector.js --test-coverage-include=src/engine/detectorSupport/*.js --test-coverage-include=src/engine/ScanManager.js --test-coverage-include=src/engine/scan/*.js --test-coverage-lines=84 --test-coverage-branches=68 --test-coverage-functions=75 --test-concurrency=3",
-    "test:coverage:report": "node --env-file=.env.test --import=./tests/_setup.mjs --experimental-test-coverage --test --test-coverage-include=src/**/*.js --test-concurrency=3"
+    "test:coverage:report": "node ../scripts/server-coverage-gate.mjs --report-only"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.11",

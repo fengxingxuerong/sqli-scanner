@@ -25,7 +25,7 @@ export { deriveUncPath } from '../../core/oobTunnel.js';
 // 命中即确认注入存在，但"只确认、不进拖库/二分提取"（扫描聚合阶段 oob 落空属预期）。
 export class OobDetector extends Detector {
   constructor() {
-    super('oob');
+    super('oob', { match: 'oob', extract: ['dbms'] });
   }
 
   /**

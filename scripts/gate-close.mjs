@@ -14,11 +14,12 @@
 //
 // 用法：
 //   node scripts/gate-close.mjs            # 跑全清单
-//   node scripts/gate-close.mjs --quick    # 跳过最慢的 lint/typecheck（自查用）
+//   node scripts/gate-close.mjs --quick    # 跳过最慢的 lint/typecheck/server-coverage（自查用）
 //   node scripts/gate-close.mjs --list     # 只打印清单
 //   node scripts/gate-close.mjs --selftest # 自证清单本身
 // ============================================================================
 import { spawnSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { closeGateList, wiringTestFiles } from './lib/gate-list.mjs';
@@ -30,7 +31,7 @@ function selftest() {
   const bad = [];
   const list = closeGateList({ root: ROOT });
   const names = list.map((g) => g.name);
-  const must = ['typecheck', 'lint', 'wiring', 'facts', 'refs', 'readme', 'complexity', 'nesting', 'duplication', 'deadcode', 'debt', 'typecoverage', 'arch', 'arch:selftest', 'e2e-wiring', 'e2e-wiring:selftest', 'portable-build:selftest', 'portable-smoke:selftest', 'labs:selftest', 'greenguard', 'greenguard:selftest', 'agent-manifest', 'agent-manifest:selftest', 'quality-ledger', 'quality-ledger:selftest', 'recipes', 'recipes:selftest', 'pack-check', 'pack-check:selftest', 'error-contract', 'error-contract:selftest', 'module-loadable', 'module-loadable:selftest', 'version-sync', 'version-sync:selftest', 'mcp-compat', 'mcp-compat:selftest'];
+  const must = ['typecheck', 'lint', 'wiring', 'facts', 'refs', 'readme', 'complexity', 'nesting', 'duplication', 'deadcode', 'debt', 'typecoverage', 'arch', 'arch:selftest', 'e2e-wiring', 'e2e-wiring:selftest', 'portable-build:selftest', 'portable-smoke:selftest', 'labs:selftest', 'greenguard', 'greenguard:selftest', 'agent-manifest', 'agent-manifest:selftest', 'quality-ledger', 'quality-ledger:selftest', 'recipes', 'recipes:selftest', 'pack-check', 'pack-check:selftest', 'error-contract', 'error-contract:selftest', 'module-loadable', 'module-loadable:selftest', 'version-sync', 'version-sync:selftest', 'mcp-compat', 'mcp-compat:selftest', 'server-coverage'];
   for (const m of must) if (!names.includes(m)) bad.push(`清单缺「${m}」（AGENTS.md §3 收口清单要求项）`);
   for (const g of ['complexity', 'nesting', 'duplication', 'deadcode', 'debt', 'typecoverage', 'error-contract', 'module-loadable', 'version-sync']) {
     if (!names.includes(`${g}:selftest`)) bad.push(`清单缺「${g}:selftest」（每道门禁都要自证）`);
@@ -43,6 +44,10 @@ function selftest() {
   if (iLint >= 0 && iWire >= 0 && iLint < iWire) bad.push('顺序错：最慢的 lint 应排在 wiring 之后（失败早停要省时间）');
   // D178：清单里不允许出现重名（台账与执行都以 name 为键）
   if (new Set(names).size !== names.length) bad.push('清单里有重名项（name 必须唯一）');
+  // [D260] runner 自身必须能承载大输出：覆盖率 TAP 约 1.1MB > spawnSync 默认 1MB。
+  const runnerSrc = readFileSync(fileURLToPath(import.meta.url), 'utf8');
+  const mb = /maxBuffer:\s*(\d+)\s*\*\s*1024\s*\*\s*1024/.exec(runnerSrc);
+  if (!mb || Number(mb[1]) < 8) bad.push('spawnSync 未设 ≥8MB 的 maxBuffer（大输出门禁会被 ENOBUFS 掐断）');
 
   if (bad.length) {
     console.error('[gate-close] ✗ 自证失败：');
@@ -70,7 +75,13 @@ const rows = [];
 let failed = 0;
 for (const g of list) {
   const t0 = Date.now();
-  const r = spawnSync(g.cmd[0], g.cmd.slice(1), { cwd: ROOT, stdio: 'pipe', encoding: 'utf8', shell: process.platform === 'win32' });
+  // [D260] 服务端覆盖率门禁的 TAP 输出约 1.1MB，超过 spawnSync 默认 1MB maxBuffer
+  // 会被 ENOBUFS 掐断（实测 gate:close 51/52，server-coverage exit 1 且没有覆盖率报表）。
+  // 显式放大缓冲，判据仍是子进程真实退出码。
+  const r = spawnSync(g.cmd[0], g.cmd.slice(1), {
+    cwd: ROOT, stdio: 'pipe', encoding: 'utf8', shell: process.platform === 'win32',
+    maxBuffer: 64 * 1024 * 1024,
+  });
   const code = r.status ?? 1;
   const ms = Date.now() - t0;
   rows.push({ name: g.name, code, ms });

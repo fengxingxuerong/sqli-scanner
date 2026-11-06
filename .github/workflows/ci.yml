@@ -427,6 +427,9 @@ jobs:
       - run: cd server && npm test
         name: Server tests
         timeout-minutes: 10
+      # [D260 2026-11-06] 两条覆盖率命令都委托 scripts/server-coverage-gate.mjs：
+      # 含 ?query 隔离实例的 5 个测试文件不参与覆盖率测量（仍由上面的 npm test 全量执行）。
+      # 否则 Node 22/24 的多进程快照合并退化成单快照，branch 假掉到 73.18%（<74 阈值）。
       - run: cd server && npm run test:coverage:report
         name: Server coverage baseline (report-only)
         timeout-minutes: 15

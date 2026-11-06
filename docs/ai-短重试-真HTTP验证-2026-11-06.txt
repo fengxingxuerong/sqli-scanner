@@ -1,0 +1,64 @@
+# D258 · analyst 短 prompt 重试：真 HTTP 链路验证（2026-11-06）
+
+> 本文件是**实测记录**，不是能力声明。两条命令都能在本机复现；输出为当日原样粘贴。
+> 目的：证明「长 prompt 挂起 → 短 prompt 成功」这条链在**真 HTTP + 真 AbortController**
+> 下成立，而不只是在 fetch stub 里成立。
+
+## 1. 基线：真实 Ollama 网关（qwen2.5:0.5b，短 prompt 本就不挂）
+
+```bash
+node e2e/ai-gateway-lab/run.mjs
+```
+
+```
+网关：http://127.0.0.1:11434（模型 qwen2.5:0.5b, max_tokens=2048）
+审阅角色校验：✅
+元数据头：4/4
+数据脱敏：on
+落盘：true (442 bytes, 内容 84B)
+网关实调：true (qwen2.5:0.5b→qwen2.5:0.5b→qwen2.5:0.5b)
+耗时：8166ms
+AI 网关判据通过
+```
+
+**能证明什么**：D258 重构（分析阶段抽 `runAnalystStage` + 三级都接短重试）没有破坏
+正常三阶流水线；三角色实调、审阅标记、元数据头、落盘都还在。
+**不能证明什么**：这条路径上首轮就成功了，短重试一次都没触发。
+
+## 2. 强制触发：mock-hang 网关（长 prompt 挂 5s，短 prompt 30ms）
+
+```bash
+node e2e/ai-gateway-lab/mock-hang-gateway.mjs   # 终端 A，默认 :18326
+AI_GATEWAY_URL=http://127.0.0.1:18326 \
+AI_GATEWAY_MODEL=mock-hang AI_GATEWAY_TIMEOUT_MS=6000 \
+node e2e/ai-gateway-lab/run.mjs                 # 终端 B
+```
+
+```
+网关：http://127.0.0.1:18326（模型 mock-hang, max_tokens=2048）
+审阅角色校验：✅
+元数据头：4/4
+数据脱敏：on
+落盘：true (529 bytes, 内容 180B)
+网关实调：true (mock-hang→mock-hang→mock-hang)
+耗时：6172ms
+AI 网关判据通过
+```
+
+**读法（关键）**：`AI_GATEWAY_TIMEOUT_MS=6000` ⇒ per-step 超时 2s。耗时 **6.17s**
+≈ 3 个阶段 ×（首轮 2s abort + 短重试 30ms）。若 analyst 阶段没有短重试，三级降级
+会各挂 2s（6s）后直接失败，套件不可能通过；若只有 writer/reviewer 有短重试，
+analyst 首轮 2s 后仍会走两级降级（再 4s）才成功，耗时会是 8s 量级。
+**6.17s + 审阅 ✅ = 三个阶段的首轮都被 abort、三次短重试都真正返回了内容。**
+
+网关判定口径（见 `mock-hang-gateway.mjs`）：按短 prompt 的**开头前缀**识别，
+短 prompt 文案一改，网关会把短重试也挂起（套件红）——失败方向是安全的，不会静默放行。
+
+## 3. 边界
+
+- mock-hang 是**行为模拟**，不是真模型：它证明链路与超时/重试语义，不证明任何真实
+  模型在短 prompt 上的输出质量。
+- 生产网关（glm-5.3-flash 型，D255 实测 100s 超时）当前无可用 key，未在本轮复跑；
+  该网关的短 prompt 4.1s 返回证据见 `docs/llm-gateway-capability-2026-11-05.txt`。
+- 单测（`server/tests/reportAi.shortRetry.guard.test.js`，11 条）钉住的是
+  「请求变短 + 不伪造成功 + 开关 + 披露」，与本文的真 HTTP 记录互补。

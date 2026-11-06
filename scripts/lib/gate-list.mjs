@@ -116,5 +116,15 @@ export function closeGateList({ root, quick = false }) {
     { name: 'stale-claims:selftest', cmd: ['node', 'scripts/stale-claim-check.mjs', '--selftest'] },
   ];
   if (quick) return list.filter((g) => !SLOW.has(g.name));
-  return [...list, { name: 'typecheck', cmd: ['npm', 'run', '--silent', 'typecheck'] }, { name: 'lint', cmd: ['npm', 'run', '--silent', 'lint'] }];
+  return [
+    ...list,
+    { name: 'typecheck', cmd: ['npm', 'run', '--silent', 'typecheck'] },
+    { name: 'lint', cmd: ['npm', 'run', '--silent', 'lint'] },
+    // [D260 2026-11-06] CI-only 的服务端覆盖率门禁：此前只在 ci.yml / ci-local 跑，
+    // gate:close 看不见 ⇒ D259 实测「本地 51/51 全绿、CI Server coverage gate 红」。
+    // 同一形态第 5 次重演。它由 server/package.json 的 test:coverage 委托给
+    // scripts/server-coverage-gate.mjs（排除 ?query 隔离实例，校准多进程合并口径）。
+    // 放最后：一次全量带覆盖率的服务端测试约 3~4 分钟，失败早停要省时间。
+    { name: 'server-coverage', cmd: ['npm', '--prefix', 'server', 'run', '--silent', 'test:coverage'] },
+  ];
 }

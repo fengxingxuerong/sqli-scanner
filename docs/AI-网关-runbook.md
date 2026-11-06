@@ -24,6 +24,11 @@
 | `AI_REPORT_MODEL_1/2/3` | 本地网关必填 | 覆盖默认模型名（`deepseek-v4-flash` / `glm-5.2` / `sensenova-6.8-flash-lite`）——**自建/本地网关常强制 provider/model 全名**（D192） |
 | `AI_REPORT_API_BASE_2/_3` | 可选 [D254] | 按 key 索引配对的备用端点。三个角色/429 降级路径可分到**不同网关**；未配时逐项回落主 `AI_REPORT_API_BASE`，单网关行为零变化。验收套件用 `AI_GATEWAY_URL_2` / `AI_GATEWAY_KEY_2` 注入 |
 | `AI_REPORT_429_COOLDOWN_MS` | 可选 [D254] | 429 冷却毫秒数，默认 60000（生产语义不变）。多网关分担时可设 3000，让降级立刻换端点而不是原地等 |
+| `AI_REPORT_SHORT_RETRY` | 可选 [D255] | **默认开启**，设 `0` 关闭。writer/reviewer 首次「空内容 / 超时」失败时，用压缩后的短 prompt 再试 **1 次**；429 / HTTP 错误不重试（仍走原有 key 降级）。成功路径零变化 |
+| `AI_REPORT_SHORT_RETRY_TIMEOUT_MS` | 可选 [D255] | 短重试单步超时上限，默认 20000；实际取 `min(每步超时, 该值)`。短 prompt 实测 4s 返回，20s 足够 |
+| `AI_REPORT_STEPWISE` | 可选 [D259] | **默认关闭**，设 `1` 启用分步短 prompt：analyst 首轮即短请求，writer/reviewer 按 5 个章节逐章短请求后拼装。绕开「推理型网关长报告 prompt 挂起」；未开启时 D258 链路逐字不变 |
+| `AI_REPORT_STEPWISE_MAX_CHARS` | 可选 [D259] | 单个短请求的用户消息字符上限，默认 1200（与 D255 短重试预算对齐） |
+| `AI_REPORT_STEPWISE_TIMEOUT_MS` | 可选 [D259] | 分步单步超时上限，默认取 `AI_REPORT_SHORT_RETRY_TIMEOUT_MS`（20s）；实际 `min(每步超时, 该值)` |
 | `AI_REPORT_MAX_TOKENS` | 可选 | 默认 8192。推理模型（带 `reasoning_content`）生成长输出会拖过 per-step 超时，本地网关建议 2048（验收套件默认注入） |
 | `AI_REPORT_MASK` | 默认 on | 默认脱敏（host → `<目标Host>`，路径 → `/***`）。**指向本机网关时建议 `=0`**：不脱敏 LLM 才能写出可直接复现的 PoC（D205 实测） |
 | `AI_REPORT_TIMEOUT_MS` | 可选 | 未接线；超时由路由硬编码 120s（REST）与 `generateAiReport(report, timeoutMs)` 三均分 |
@@ -97,6 +102,88 @@ payload 无关）。因此该套件在这两个网关上仍 FAIL；详见
   自建网关注入：`AI_GATEWAY_URL` / `AI_GATEWAY_KEY` / `AI_GATEWAY_MODEL`；
 - **FAIL**：流水线抛错（三角色全空）或断言事实不全。
 - 判据边界：**不判报告文风质量**——那是模型分档问题（§3），不是链路问题。
+
+### 5.1 [D255/D258 2026-11-06] 短 prompt 重试（失败路径的降级补救，不是「长 prompt 修好了」）
+
+**触发**：analyst / writer / reviewer 首次调用返回空 content 或超时。11-05 决定性实验证明
+长报告 prompt 挂起、短 prompt 4.1s 返回；11-06 双网关套件实测 analyst 出稿但
+writer/reviewer 空（落盘「角色暂不可用」）。**D258 修正**：D255 的短重试只挂在
+writer/reviewer，而三级降级实际全在 analyst 阶段就失败 —— 流水线走不到后两步。
+现 analyst 主角色与 writer/reviewer 两级降级**都带短重试**，且短 analyst prompt
+仍要求同一份 JSON 结构（`vulns` / `overall_risk`），否则重试成功也会被判非 JSON 降级。
+
+**行为**：丢掉大段 SRC 模板，只留「一句任务 + 截断到 1200 字的事实 JSON / 报告节选」
+再发一次；复用同一 cfg 与端点（不借重试偷偷换网关）；重试成功清掉首轮留下的 key
+冷却，避免后续角色被「无可用 key」误挡。**只接受真实非空内容**，重试也空则保留原降级
+文案，绝不把没产出记成 ✅ 已审阅。429 / 5xx 属于配额或故障，短 prompt 救不了，不重试 ——
+端点切换由 D254 在**下一次** `getRoleConfig` 完成（429 冷却该 key → keyOrder 选另一 idx
+→ `API_ENDPOINTS[idx]` 换网关）；writer/reviewer 单步 429 会直接降级，
+**不在同一步内换网关重发**。另：套件内三角色串行 ≠ 网关侧无并发，
+`user concurrency limit` 可由其它进程共用同一 key 触发。
+
+**诚实边界**：`result.shortPromptRetries` 与 `ai-report.json` 只记录**真正产出内容**的
+短重试角色。reviewer 走短重试成功时 `reviewNote` 仍是 ✅，但审阅基于**截断节选**而非
+全文——引用「已审阅」口径时必须同时看这个字段，别只信 ✅。失败的重试不改变产出，
+不落盘。默认关闭方式：`AI_REPORT_SHORT_RETRY=0`。
+
+**效果以真网关套件退出码为准**（`node e2e/ai-gateway-lab/run.mjs`）。链路单测只证明
+「请求确实变短、没有伪造成功」，不能证明模型会返回内容；未 PASS 就如实登记，
+不放宽 `ai-gateway` 任何断言。
+
+[D258] 没有可用真网关时，用 **mock-hang 网关**确定性复现「长 prompt 挂起、短 prompt 秒回」，
+验证真 HTTP + 真 abort + 真重试这条链（无需外部 key）：
+
+```powershell
+# 终端 A：长 prompt 挂 5s、短 prompt 30ms 返回
+node e2e/ai-gateway-lab/mock-hang-gateway.mjs
+# 终端 B：per-step 超时 2s ⇒ 三阶段首轮必 abort，短重试必成功
+$env:AI_GATEWAY_URL='http://127.0.0.1:18326'; $env:AI_GATEWAY_MODEL='mock-hang'
+$env:AI_GATEWAY_TIMEOUT_MS='6000'
+node e2e/ai-gateway-lab/run.mjs
+```
+
+判读：耗时 ≈ 3 ×（2s abort + 30ms 短重试）≈ **6.2s** 且审阅 ✅ ⇒ 三个阶段都真的
+走了短重试；若 analyst 没接短重试，三级降级会先挂 6s 再失败，套件不可能 PASS。
+2026-11-06 实测 6172ms，证据见 `docs/ai-短重试-真HTTP验证-2026-11-06.txt`。
+
+### 5.2 [D259 2026-11-06] 分步短 prompt（主动拆章，opt-in）
+
+**与 §5.1 的区别**：短重试是**失败之后**补一发短 prompt，仍要先挂 100s；
+分步模式让**每个请求本来就短** —— 1 次短分析 + 5 次逐章短撰写 + 5 次逐章短审阅，
+再按固定章节顺序拼装。开关 `AI_REPORT_STEPWISE=1`，默认关闭（D258 链路零变化）。
+
+**事实保真**：writer 事实包与整篇 `buildWriterPrompt` 同源（脱敏、参数名、提取数据、
+引擎实测判据 `formatBasis` 都随短请求发出）；PoC 章额外带原始 payload 与判据，
+不因拆章丢「参数名逐字一致 / poc_verify 引用实测数字」这两条 D205 约束。
+
+**失败语义**：单章空内容/超时 ⇒ 该章写「（本节生成失败，需人工补全；未由模型产出）」，
+`stepwise.partial=true` + `failedSteps` 记录，**不编造、不冒充全文审阅**；
+审阅按章进行，全部成功才写 ✅（标注 `n/n`）。5 章全失败 ⇒ 回退原整篇流水线并
+登记 `fallback='legacy'`。`result.stepwise` 与 `ai-report.json` 如实落盘 ——
+引用「报告完整 / 已审阅」口径时**必须同时看** `partial` / `failedSteps` / `reviewedSections`。
+
+**套件判据（加严，不放宽）**：分步模式下额外要求 `partial=false`、`fallback=null`、
+`failedSteps` 为空、章节数 >1；非分步模式该判据恒 true。
+
+```powershell
+# 无需外部 key：验证 11 个请求全短 + 真 HTTP 超时语义
+node e2e/ai-gateway-lab/mock-hang-gateway.mjs        # 终端 A
+$env:AI_REPORT_STEPWISE='1'; $env:AI_GATEWAY_URL='http://127.0.0.1:18326'
+$env:AI_GATEWAY_MODEL='mock-hang'; $env:AI_GATEWAY_TIMEOUT_MS='6000'
+node e2e/ai-gateway-lab/run.mjs                      # 终端 B
+# 真实模型（Ollama 已就绪时）：AI_REPORT_STEPWISE=1 node e2e/ai-gateway-lab/run.mjs
+```
+
+**2026-11-06 真 HTTP 结果**（原样记录见 `docs/ai-分步短prompt-真HTTP验证-2026-11-06.txt`）：
+mock-hang 分步 **462ms PASS**、同配置非分步基线 **6160ms PASS**（与 D258 的 6172ms 一致）；
+真实 Ollama `qwen2.5:0.5b` 分步 **29966ms PASS**（5/5 章审阅、正文 12354B）、
+非分步基线 **6246ms PASS**。462ms ≈ 11 × 30ms ⇒ 分步链路里没有长 prompt；
+若混进一个长 prompt，2s per-step 超时必触发 abort，耗时不可能低于 2s。
+
+**诚实边界**：分步**不省时间**（11 次推理串行和约 30s），它换的是「不再卡死在长 prompt」；
+0.5B 是链路级模型，正文更长只说明章节齐全，**不判文风质量**。
+glm-5.3-flash 生产网关本轮仍无可用 key，**未复跑** —— 不能宣称 `ai-gateway` 套件
+在 D254/D255 那两个网关上已 PASS。
 
 ## 6. 运维坑（实测记录）
 

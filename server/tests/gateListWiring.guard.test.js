@@ -145,6 +145,19 @@ test('①b wiring 测试集合本身必须在两侧都被执行（不能只跑 n
   }
 });
 
+test('①c [D260] 服务端覆盖率门禁三向接线：收口清单 / ci.yml / ci-local 指向同一条确定性命令', async () => {
+  const items = await loadGateList();
+  const cov = items.find((it) => it.name === 'server-coverage');
+  assert.ok(cov, '收口清单里找不到 server-coverage 项 —— D259 实测「本地 51/51 全绿、CI 覆盖率红」会重演');
+  assert.match(cov.cmd.join(' '), /test:coverage/, 'server-coverage 没有指向 test:coverage');
+  for (const [label, text] of [['ci.yml', stripLineComments(ciRaw)], ['ci-local.mjs', stripLineComments(ciLocalRaw)]]) {
+    assert.match(text, /cd server && npm run test:coverage/, `${label} 没有执行 test:coverage`);
+  }
+  const serverPkg = JSON.parse(readFileSync(path.join(REPO, 'server', 'package.json'), 'utf8'));
+  assert.match(serverPkg.scripts['test:coverage'] || '', /server-coverage-gate\.mjs/, 'test:coverage 没委托给确定性包装（合并口径未校准）');
+  assert.ok(existsSync(path.join(REPO, 'scripts', 'server-coverage-gate.mjs')), '确定性包装脚本不存在');
+});
+
 test('② 不空转：两处引用到的 scripts/*.mjs 必须真实存在', () => {
   const all = new Set([...ciRefs, ...localRefs]);
   const ghosts = [...all].filter((b) => !existsSync(path.join(REPO, 'scripts', b)));

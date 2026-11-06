@@ -18,7 +18,7 @@ import { commentSuffix as commentSuffixFor } from '../DialectSqlBuilder.js';
 // 与基线长度差超过容差 → 双双判定不相似 → 门控拒绝 → 不误报。
 export class UnionDetector extends Detector {
   constructor() {
-    super('union');
+    super('union', { match: 'echo', extract: ['dbms', 'echo-columns'] });
   }
 
   // 布尔探针相似判定（与 BooleanBlindDetector._similar 同套容差逻辑的轻量版）

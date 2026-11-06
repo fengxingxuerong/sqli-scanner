@@ -31,6 +31,8 @@ const TIMEOUT_MS = Number(process.env.AI_GATEWAY_TIMEOUT_MS) || 420000; // 3 角
 // 验收套件按本地网关调小，生产默认 8192 不变。两者都可用 env 覆盖。
 const MAX_TOKENS = process.env.AI_GATEWAY_MAX_TOKENS || '2048';
 const RATE_COOLDOWN_MS = process.env.AI_GATEWAY_429_COOLDOWN_MS || '3000';
+// [D259] 分步短 prompt 为 opt-in（AI_REPORT_STEPWISE=1）；未开启时本套件判据零变化。
+const STEPWISE = process.env.AI_REPORT_STEPWISE === '1';
 
 function skip(reason) {
   console.log(`[SKIP] AI 网关不可用：${reason}`);
@@ -155,8 +157,18 @@ async function main() {
   console.log(`落盘：true (${Buffer.byteLength(md, 'utf8')} bytes, 内容 ${bytes}B)`);
   console.log(`网关实调：${realCall ? 'true' : 'false'} (${result.model || 'n/a'})`);
   console.log(`耗时：${elapsedMs}ms`);
+  // [D259] 分步模式专属判据（加严，不放宽原有任何一条）：所有短章节都成功产出并逐章审阅，
+  // 且不回退到整篇长流水线。非分步模式恒 true，原判据逐字不变。
+  const sw = result.stepwise;
+  const stepwiseOk = !STEPWISE || (
+    sw?.enabled === true && sw.partial === false && sw.fallback === null
+    && Number(sw.writerSteps) > 1 && sw.failedSteps?.length === 0
+  );
+  if (STEPWISE) {
+    console.log(`分步短 prompt：on（writer ${sw?.writerSteps ?? 'NA'} 章 / 审阅 ${sw?.reviewedSections ?? 'NA'} 章 / partial=${String(sw?.partial)} / fallback=${sw?.fallback ?? 'none'}）`);
+  }
 
-  const pass = reviewed && metaCount === 4 && masked && realCall && bytes > 0;
+  const pass = reviewed && metaCount === 4 && masked && realCall && bytes > 0 && stepwiseOk;
   if (!pass) {
     console.error('❌ AI 网关判据未通过（见上方事实数字）');
     process.exit(1);

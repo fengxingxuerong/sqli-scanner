@@ -73,11 +73,39 @@ test('缺陷-1) 反射门控探针失败时不得放行（不得当作"未反射
   const { r } = await run([BASE_OK, TEST_HIT, FAIL, FAIL]);
   assert.equal(r.vulnerable, false,
     `反射门控探针超时被当成"未反射"从而放行（evidence=${(r.evidence || '').slice(0, 90)}）`);
+  // [D257] 「没测成」必须显式标记：否则调度层把它记成「已测阴性」，报告里
+  // 该点既不算漏洞、也不进未验证面 —— 网络故障被静默洗成安全结论。
+  assert.equal(r.inconclusive, true, '反射门控不可用必须标 inconclusive');
+  assert.match(r.inconclusiveReason || '', /反射门控探针不可用/, '未结论必须带可读原因');
 });
 
 test('缺陷-2) 反射门控探针持续失败同样不得放行', async () => {
   const { r } = await run([BASE_OK, TEST_HIT, FAIL, FAIL]);
   assert.equal(r.vulnerable, false, '反射门控探针持续失败时不得放行');
+  assert.equal(r.inconclusive, true, '持续失败同样必须标未结论（不得回落成阴性）');
+});
+
+test('缺陷-2b) 基线/测试响应不可用 → 未结论（不是"无内联通道"）', async () => {
+  const { r } = await run([FAIL, FAIL]);
+  assert.equal(r.vulnerable, false);
+  assert.equal(r.inconclusive, true, '基线或测试响应不可用必须标未结论');
+  assert.match(r.inconclusiveReason || '', /基线或测试响应不可用/);
+});
+
+test('缺陷-2c) 网络层抛错 → 未结论（catch 不得把异常折成"无内联通道"）', async () => {
+  const d = new InlineQueryDetector();
+  const c = {
+    request: async () => {
+      const e = new Error('timeout of 5000ms exceeded');
+      // 与 HttpClient 失败形态一致（ErrorCode.HTTP_TIMEOUT）
+      Object.assign(e, { code: 3001 });
+      throw e;
+    },
+  };
+  const r = await d.detect({ httpClient: c, target: TARGET, point: POINT, dbms: 'sqlite', config: {} });
+  assert.equal(r.vulnerable, false);
+  assert.equal(r.inconclusive, true, '网络层异常必须标未结论');
+  assert.match(r.inconclusiveReason || '', /网络层失败/);
 });
 
 test('契约-3) 反射门控探针正常回显时必须拒绝（门控原始职责不得退化）', async () => {

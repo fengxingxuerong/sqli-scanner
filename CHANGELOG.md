@@ -7,13 +7,19 @@
 > 下一批次起的条目写在这里。发版时把本节整体升为 `## [x.y.z] - YYYY-MM-DD` 并补汇总段。
 
 <!-- changelog-index:start -->
-**本段覆盖 38 个批次（D228–D254，2026-11-01 → 2026-11-05）**。正文按时间倒序排列；
+**本段覆盖 44 个批次（D228–D260，2026-11-01 → 2026-11-06）**。正文按时间倒序排列；
 下表是同一批次的索引，便于按编号或关键词定位。**索引只是导航，正文未做任何删改**
 （被推翻的旧结论原样保留，这是本仓的既定口径）。新增批次后跑
 `node scripts/changelog-index.mjs --write` 重生成，`--check` 校验是否过期。
 
 | 批次 | 日期 | 主题 |
 |---|---|---|
+| D260 | 11-06 | 服务端覆盖率门禁确定性收口（gate:close 51 → 52 项） |
+| D259 | 11-06 | ReportAI 分步短 prompt（长报告拆成多轮短请求） |
+| D258 | 11-06 | analyst 阶段短 prompt 重试（D255 断点修正，真 HTTP 已验证） |
+| D257 | 11-06 | 检测器统一契约（执行器 + 判定/提取算子，13 个检测器接入） |
+| D256 | 11-06 | 方言声明化（18 种 DBMS 知识外置为 JSON 真源） |
+| D255 | 11-06 | ReportAI 短 prompt 重试（真网关端到端仍 FAIL，如实登记） |
 | D254 | 11-05 | ReportAI 多网关真分担（D228 套件端到端仍 FAIL，如实登记） |
 | D253 | 11-05 | CLI 外部靶场兼容性：执行失败不再判绿 + 阴性结论摘要补全 |
 | D252 | 11-05 | MCP 客户端连接兼容性（真 stdio 矩阵，11/14 → 14/14） |
@@ -53,6 +59,410 @@
 | D229 | 11-01 | 交付闸收口：P0-3 卡顿修复（haystack 先截后拼）+ ai-gateway 断言去模型依赖 |
 | D228 | 11-01 | AI 报告网关端到端验收（ai-gateway 套件）+ 本地网关 runbook + CI 靶场硬要求扩展 |
 <!-- changelog-index:end -->
+
+### 2026-11-06 批次 D260 · 服务端覆盖率门禁确定性收口（gate:close 51 → 52 项）
+
+**起点**：D259 收口时 `npm run gate:close` **51/51 全绿**，但 CI 的 `Server coverage gate`
+仍 `exit 1`（`all files | 89.11 | 73.18 | 81.83`，`73.18% branch coverage does not meet
+threshold of 74%`）—— 本仓第 5 次「门禁只活在别处」（D94/D95/D145/D249/D251 之后）。
+D259 把根因写作「全量多进程 coverage 合并口径」，补测、纯函数化、归因实验三条修法均拉不回。
+
+**推翻链（旧结论保留，标注作废）**：D260 初版假设「带 `?query` 的隔离实例不被归因 ⇒
+把补测搬进同一进程即可」，实测**仍 `exit 1` / 73.18%**（ReportAI.js branch 仍 34.56%）
+⇒ 假设作废，初版注释在 `reportAi.stepwise.guard.test.js` 与
+`reportAi.stepwiseCoverage.guard.test.js` 里就地标注作废并保留。
+最小样本双版本复现真因：**只要任意进程加载了带后缀（`?query` / `#fragment`）的模块 URL，
+同一源文件的多进程快照合并就不再 union**（Node 22.22.2 5 次里 3 次 66.67%/33.33%、
+2 次 57.14%/100% 随机跳；CI 同款 Node 24.22.1 稳定取单快照 66.67%/33.33%）。
+去掉后缀实例后两个版本都稳定 union（57.14% / funcs 100%）。与补测位置无关。
+
+**交付**：
+
+1. `scripts/server-coverage-gate.mjs`（新）：静态扫描 `server/tests/*.test.js` 找出
+   `src/...js?<tag>` 导入；**双向校验**排除名单（新增未排除 / 名单过期 / 文件缺失 / 测量集
+   <400 一律判红）；用显式文件列表跑 `node --test`；`--report-only` 给 facts 采集、
+   `--selftest` 7 条自证、`--dry-run` 只验接线。阈值 85/74/77 与 include `src/**/*.js`
+   **一字未改**。
+2. `server/package.json`：`test:coverage` / `test:coverage:report` 委托该包装；
+   `scripts/coverage-calibration.mjs` 的阈值正则仍命中（flags 原样保留在脚本串里）。
+3. `scripts/lib/gate-list.mjs` 新增 `server-coverage`（**51 → 52 项**，放在最慢的末尾、
+   `--quick` 自动跳过）；`gate-close.mjs --selftest` 必备项清单补上它；
+   `AGENTS.md §3` 项数 / `--quick` 语义 / 手写清单同步。
+   **首轮 `gate:close` 51/52**（`server-coverage` exit 1、输出被截断且没有覆盖率报表）：
+   覆盖率 TAP 约 1.11MB > `spawnSync` 默认 1MB `maxBuffer` ⇒ 子进程被掐断，不是判据红。
+   已把 runner 缓冲显式放大到 64MB，并在 `--selftest` 里钉住 ≥8MB（第 ③ 条注入）。
+4. `server/tests/gateListWiring.guard.test.js` 新增 ①c：收口清单 / `ci.yml` /
+   `ci-local.mjs` / `server/package.json` 四处指向同一条确定性命令；
+   `ci.yml` 与 `ci-local.mjs` 覆盖率步骤补 D260 注释。
+5. `scripts/facts-sync.mjs`：用例计数取自 `npm test` 全量、覆盖率取自
+   `test:coverage:report`，**两者拆开采集** —— 否则排除 5 个文件会把 README 的
+   「服务端用例数」凭空少写 84 条，把「覆盖率测量集」误写成「全量用例数」。
+6. `docs/覆盖率门禁接线-D260.md`（新，含独立最小复现脚本与边界）+
+   `docs/覆盖率门禁-D260-真机记录-2026-11-06.txt`（新，原始输出与注入记录）。
+
+**排除名单（5 个，仍全量执行）**：`exploitRoutes.edge.test.js`、`reportAI.service.test.js`、
+`reportAi.shortRetry.guard.test.js`、`reportAi.stepwise.guard.test.js`、`ssrf.ipv6.test.js`。
+它们用 `?tag` 动态 import 拿「import 期读 env」的模块隔离实例；排除的是**覆盖率测量**，
+`cd server && npm test` 与 CI 的 `Server tests` 仍跑全部文件。
+
+**验证（判据一律退出码）**：
+
+| 场景 | 结果 |
+|---|---|
+| 校准前 `cd server && npm run test:coverage` | `exit 1`，73.18% branch < 74 |
+| 首轮 `npm run gate:close`（runner 缓冲修复前） | **51/52**，`server-coverage` exit 1，输出 1.11MB 被截断、无覆盖率报表 |
+| Node 24.22.1 · 479 测量文件 | `exit 0`，pass 4129 / fail 0，`95.08 / 81.75 / 88.93` |
+| Node 22.22.2 · 479 测量文件 | `exit 0`，pass 4129 / fail 0，`95.08 / 81.81 / 88.93` |
+| 最终代码 · 480 测量文件 | `exit 0`，tests 4141 / pass 4135 / fail 0 / skip 6，`95.43 / 81.78 / 89.62` |
+| `gate-close --selftest` / `server-coverage-gate --selftest` / `coverage-calibration` | 均 `exit 0` |
+| `node --test server/tests/gateListWiring.guard.test.js` | `exit 0` |
+
+**缺陷注入复验**（备份还原，未用反向 replace_all）：① 把 `gate-list` 的 `server-coverage`
+改名 ⇒ `gate-close --selftest` `exit 1`，报「清单缺 server-coverage」；② 给未排除的
+`scanExit.guard.test.js` 追加一行 `?query` 导入 ⇒ `server-coverage-gate --dry-run`
+`exit 1`，点名该文件；③ 把 `gate-close.mjs` 的 `maxBuffer` 降回 1MB ⇒
+`gate-close --selftest` `exit 1`，报「spawnSync 未设 ≥8MB 的 maxBuffer」。
+三次均用 `.box-agent-scratch/d260/*.bak` 还原，还原后全绿。
+
+**诚实边界**：81.78% 是**校准后测量集**的 branch 覆盖率，不是「代码质量提升 8.6pt」，
+也不是能力结论；测量集比全量少 5 个测试文件，对外引用覆盖率必须同时声明。
+本批未放宽阈值、未缩小 include、未改任何断言。§3.5 待复核 claim 抽查
+`waf-fingerprint-coverage`（62 个 WAF 指纹）仍无真源命令，维持 `unverified`，未改台账。
+
+**收口结果（本地，2026-11-06）**：`npm run gate:close` **52/52 全绿**
+（typecheck 17.2s / lint 36.4s / `server-coverage` 264.2s）；`facts:refresh` 本批只跑一次：
+服务端 **4219 用例（4213 pass / 0 fail / 6 skip）**、前端 579、徽章 **4792**；
+`docs/质量台账.md` / `_facts.json` 同批重生成（门禁 52 项、wiring/guard 测试文件 83）；
+`readme:check` / `facts:check` / `changelog-index`（44 批次）/ `quality-ledger` /
+`gate-close --selftest` 均绿。首轮 51/52 的 runner 缓冲问题按推翻链保留在上文，未从历史里删。
+
+---
+
+### 2026-11-06 批次 D259 · ReportAI 分步短 prompt（长报告拆成多轮短请求）
+
+**起点**：D254/D255 的真网关实测证明「长 system+user 报告 prompt 挂起、短 prompt 4.1s
+返回」（`docs/llm-gateway-capability-2026-11-05.txt`）。D258 是**失败之后**补一发短重试
+—— 仍要先挂 100s，且短重试只有一发、丢掉 SRC 模板与逐条判据。TODO D254 登记的
+下一步候选 ③「把长报告拆成多轮短请求」即本批。
+
+**交付**：
+
+1. `server/src/services/reportAiStepwise.js`（新，纯函数）：5 章章节表、短 prompt 构造
+   （统一 `【分步` 前缀 + 1200 字预算）、逐章短审阅、按序拼装、缺章占位。
+   只做拆章与文案，不读报告文件、不发 HTTP。
+2. `ReportAI.js`：`AI_REPORT_STEPWISE=1` **opt-in**。分步时 analyst **首轮即短 prompt**
+   （三级降级 / D258 短重试语义保留），writer 逐章 5 次、reviewer 逐章 5 次短请求；
+   原整篇流水线抽成 `runLegacyStages()`，非分步路径逐字不变。
+3. 事实保真：writer 事实包与 `buildWriterPrompt` 同源（脱敏、参数名、提取数据、
+   引擎实测判据 `formatBasis`），PoC 章额外带原始 payload 与 `poc_verify` ——
+   不因拆章丢掉 D205 的「参数名逐字一致 / 判据引用实测数字」两条约束。
+4. 失败语义：单章空内容/超时 ⇒ 该章写「（本节生成失败，需人工补全；未由模型产出）」，
+   `partial=true` + `failedSteps` 记录，**不编造、不冒充全文审阅**；审阅按章进行，
+   全部成功才写 ✅（标注 `n/n`）。5 章全失败 ⇒ 回退整篇流水线并登记 `fallback='legacy'`。
+   `result.stepwise` 与 `ai-report.json` 如实落盘，引用「报告完整/已审阅」口径必须同看
+   `partial` / `failedSteps` / `reviewedSections`。
+5. `e2e/ai-gateway-lab/mock-hang-gateway.mjs`：识别 `【分步` 前缀（识别不到就把分步请求
+   也挂起，**失败方向安全**）；`e2e/ai-gateway-lab/run.mjs` 加分步专属判据
+   （**加严**：`partial=false` / `fallback=null` / `failedSteps` 空 / 章节数 >1；
+   非分步模式恒 true，原有五条断言一条未放宽）。
+6. `server/tests/reportAi.stepwise.guard.test.js`（新，9 条）+ `docs/AI-网关-runbook.md`
+   §1/§5.2 + `docs/ai-分步短prompt-真HTTP验证-2026-11-06.txt`（真 HTTP 原样记录）。
+
+**验证（真 HTTP + 真模型，判据一律退出码）**：
+
+| 场景 | 网关 | 耗时 | 分步事实 | exit |
+|---|---|---|---|---|
+| 分步 ON | mock-hang :18326 | 462ms | 5 章撰写 / 5 章审阅 / partial=false / fallback=none | 0 |
+| 非分步基线 | mock-hang :18326 | 6160ms | （无 stepwise 字段） | 0 |
+| 分步 ON | Ollama `qwen2.5:0.5b` | 29966ms | 5/5 章审阅、正文 12354B、✅ | 0 |
+| 非分步基线 | Ollama `qwen2.5:0.5b` | 6246ms | 正文 2105B | 0 |
+
+462ms ≈ 11 个短请求 × 30ms；分步链路里只要混进一个长 prompt，2s per-step 超时
+必触发 abort，耗时不可能低于 2s ⇒ **11 个请求全短**。非分步基线 6160ms 与 D258
+记录的 6172ms 一致 ⇒ 非分步路径零回归。原样输出见 `docs/ai-分步短prompt-真HTTP验证-2026-11-06.txt`。
+
+单测：新 guard 9/9、既有 AI 报告相关 34/34、`npm run typecheck` 0、改动文件 `eslint` 0。
+
+**缺陷注入复验**：把 `reportAiStepwise.js` 的 `【分步·` 前缀整批换成 `注入态·`
+（让「短请求识别」这条路径真不可达）⇒ guard **4 条红**（9 → 5 pass / 4 fail）；
+mock-hang 真 HTTP 套件 **exit 1**（16225ms、`fallback=legacy`、审阅 0 章）——
+网关把分步请求当长 prompt 挂起，加严判据当场抓到，没有静默放行。
+用 `/tmp/d259-stepwise.bak` **备份还原**（未用反向 replace_all）后 guard 9/9、
+真 HTTP 454ms PASS。注入点、判红数字与还原复验全部落盘。
+
+**诚实边界**：分步**不省时间**（11 次推理串行和约 30s），换的是「不再卡死在长 prompt」；
+0.5B 是链路级模型，正文更长只说明章节齐全，**不判文风质量**。
+**glm-5.3-flash 生产网关本轮仍无可用 key，未复跑** —— 不能宣称 `ai-gateway` 套件
+在 D254/D255 那两个网关上已 PASS；本批只提供绕行路径与可复现的链路证据。
+
+**收口结果（本地）**：`npm run gate:close` **51/51**（typecheck 15.4s / lint 30.7s）；
+服务端 **4213 用例（4207 pass / 0 fail / 6 skip）**、前端 579、徽章 4786；
+`changelog-index`（43 批次）/ `readme:check` / `facts:check` / `e2e-wiring` /
+`stale-claims` / `pack-check` / `wiring` 均绿。本批 `facts:refresh` 跑了 3 次
+（新增 guard 文件、补覆盖率测试、补测文件入 git 索引各触发一次指纹变化），
+数字以最后一次采集为准，未手改 `_facts.json`。
+
+**⚠️ 未收口：CI-only 的 `server/test:coverage`**（本地 `gate:close` 不含这一项 ——
+「门禁只活在别处」形态再次出现）：本批后全量 branch **73.18% < 阈值 74%**，
+`cd server && npm run test:coverage` **exit 1**。**本批不放宽阈值、不改 CI 判据**，
+已做并如实排除的三条路径：
+1. 补无 query 链路测试（`reportAi.stepwiseCoverage.guard.test.js` 5/5）：
+   72.66 → 72.75。单跑该文件 ReportAI.js branch **48.72%**，全量合并后仍 33% 量级
+   ⇒ Node 多进程 coverage 合并对带 query 的隔离实例不归因，补单测拉不回；
+2. 把二十余处 `||` 收成 `orDefault`、事实组装与调度移进纯函数模块
+   （`reportAiStepwise.js` 99.39% lines / 95.83% branch，可被链路单测直接 import）：
+   73.18 → 73.20，收益 <0.1pt；
+3. 归因实验：临时移出补测文件 → 73.17，快照不随测试文件数变化 ⇒ 不是文件调度问题。
+结论：这是**全量多进程 coverage 合并口径**把新分支算进分母不进分子的项目级问题，
+不是本批功能缺陷。**D260 建议**：把 `test:coverage` 接进 `gate:close`（避免再次
+「本地全绿、CI 红」），再单独校准 include / 合并口径；在此之前 CI 的
+`Server coverage gate` 会红，引用本批「收口完成」时必须同时带上这一条。
+
+---
+
+### 2026-11-06 批次 D258 · analyst 阶段短 prompt 重试（D255 断点修正，真 HTTP 已验证）
+
+**起点**：D255 的短 prompt 重试只挂在 writer/reviewer，但双网关实测（exit 1 / 545s）
+证明三级降级**全在 analyst 阶段失败**（长报告 prompt 100s 超时，短 prompt 4.1s 返回）——
+流水线根本没走到后两步。D255 收尾时已如实登记「短重试挂错位置，需先给 analyst 也接」。
+
+**交付**：
+
+1. `ReportAI.js`：分析阶段抽 `runAnalystStage()` —— 原三层嵌套 try/catch 收敛为
+   「角色表 + 循环」，D205 的「漏洞分析角色全部失败（analyst→writer→reviewer
+   三轮降级均失败）」错误文案与 `cause` 逐字保留；主角色与 writer/reviewer 两级降级
+   **全部走 `callWithShortRetry`**。
+2. `buildShortAnalystPrompt()`（新）：只保留「参数 + 每漏洞关键事实」，仍要求
+   `vulns` / `overall_risk` 同一份 JSON 结构 —— 否则重试成功也会被
+   `validateAnalysisJson` 判非 JSON 而降级，等于白重试。
+3. `ANALYST_SYSTEM` / `ANALYST_FALLBACK_SYSTEM` 提为常量（原来三份字面量，
+   加短重试时要成对传 system + shortSystem，再抄会漂）。
+4. `server/tests/reportAi.shortRetry.guard.test.js` 扩 4 条：analyst 空内容 → 短重试
+   成功且流水线走完；短重试也失败 → 降级到 writer 角色；三级全失败 → 如实报错且
+   6 次调用不伪造；`AI_REPORT_SHORT_RETRY=0` → 走原降级（换模型，不是同角色短重试）。
+5. `e2e/ai-gateway-lab/mock-hang-gateway.mjs`（新）：长 prompt 挂 5s、短 prompt 30ms
+   的确定性网关，按短 prompt 前缀识别（文案一改就把短重试也挂起，失败方向安全）。
+   `docs/ai-短重试-真HTTP验证-2026-11-06.txt` 落盘两条真 HTTP 记录。
+
+**验证（真 HTTP，不只是 stub）**：
+
+- 正常路径：Ollama `qwen2.5:0.5b` 套件 **PASS / 8166ms**（三角色实调、审阅 ✅、
+  元数据 4/4、落盘 442B）—— D258 重构零回归。
+- 强制失败路径：mock-hang 网关 + `AI_GATEWAY_TIMEOUT_MS=6000` ⇒ **PASS / 6172ms**。
+  6.17s ≈ 3 阶段 ×（2s abort + 30ms 短重试）⇒ 三阶段首轮都被 abort、三次短重试都
+  真正返回；若 analyst 没接短重试，三级降级会先挂 6s 再失败，套件不可能 PASS。
+- 单测 11/11；缺陷注入（把 `runAnalystStage` 的 `callWithShortRetry` 换回 `callLLM`）
+  → 3 条红，备份还原后全绿（未用反向替换）。
+
+**诚实边界**：glm-5.3-flash 生产网关本轮无可用 key，未复跑；mock-hang 是行为模拟，
+只证明链路/超时/重试语义，不证明真实模型在短 prompt 上的输出质量。重试仍只接受
+真实非空内容；429 / 5xx 不重试（配额/故障问题，短 prompt 救不了）。
+
+**收口结果**：`npm run gate:close` **51/51**（typecheck 21.7s / lint 73.5s 全绿）；
+服务端 **4195 用例（4189 pass / 0 fail / 6 skip）**、前端 579、徽章 4768；
+wiring/guard 测试文件保持 81（本批扩的是既有文件，未新增 guard 文件）；
+`docs/质量台账.md` / `_facts.json` / `readme:check` / `changelog-index`（42 批次）/
+`e2e-wiring`（新增 mock 网关在已接线的 ai-gateway-lab 内）/ `pack-check` 均绿。
+
+---
+
+### 2026-11-06 批次 D257 · 检测器统一契约（执行器 + 判定/提取算子，13 个检测器接入）
+
+**起点**：`docs/架构对标-GitHub-SQLi-项目-2026-11-06.md` §6 第二条「执行器 / 匹配算子接口化」
+（nuclei `Executer` + `Operators`）。修前 13 个检测器只共享「detect 返回一个对象」的口头约定：
+字段形状无校验、`pointId` 串台无人拦、「没测成」与「测过且无洞」同形；调度层 FAST/SLOW
+与编排总图是两份真源，新加一阶检测器会实例化但永不调度。
+
+**交付**：
+
+1. `server/src/engine/detectorSupport/detectorContract.js`（新）：
+   - `MATCH_KINDS`：signature / echo / bool-diff / timing / oob / stored / marker / unspecified；
+     `EXTRACT_KINDS`：dbms / echo-columns / error-context / nosql-kind。
+   - `defineDetectorContract()` 在**构造期**校验并冻结（未知类别、空 match、缺 technique
+     一律抛 `AppError(6012)`）。
+   - `assertDetectionResult()`：pointId/technique 必须与上下文一致；vulnerable 布尔、
+     evidence 字符串、payloads 数组；**命中 ⇒ 证据非空 + 至少一条载荷**；
+     **未结论 ⇒ 与命中互斥 + 原因非空**。
+   - `executeDetector()`：`detect → 校验 → { technique, result, vulnerable, unverified, reason }`。
+2. `Detector` 基类：`constructor(technique, contract)` + `run(ctx)`；新增错误码
+   `DETECTOR_CONTRACT_INVALID=6012`。
+3. 13 个检测器接入契约：union(echo) / error(signature) / boolean(bool-diff) /
+   time·stacked(timing) / oob(oob) / inline(echo) / second_order(stored) /
+   nosql·ldap-xpath(bool-diff+marker) / xmlParamName·orderByKey·keyBool(bool-diff)。
+   `detect.js` 主循环、三条补充探针、`supplementalRuns` 二阶/非 SQL 全部改走
+   `runDetector()`（生产检测器经 `run()` 校验；只有 `detect` 的测试替身退回 `detect()`，
+   不把调度测试桩绑进契约；生产侧由守卫钉住每个类都 `instanceof Detector`）。
+4. `strategyOrder.js` 一阶条目补 `layer: fast|slow` 并导出 `FAST_TECHNIQUES` /
+   `SLOW_TECHNIQUES`；`detect.js` 只引用派生值，不再手写数组。守卫钉住派生值与历史常量
+   逐字等价、两层不重叠、一阶实例集合 == 两层并集。
+5. **真实缺陷修复**：`InlineQueryDetector` 三条失败路径（基线/测试不可用、反射门控不可用、
+   catch 到网络层异常）此前只写 evidence「未结论」，不置 `inconclusive` ⇒ 该点被记成
+   已测阴性，既不报洞也不进 `summary.unverifiedSurfaces`。现网络失败一律标未结论；
+   非网络异常仍按「该点无内联通道」处理（合法负结论）。
+6. `server/tests/detectorContract.guard.test.js`（新，10 条）+ `inlineReflectionGateUnusable.test.js`
+   扩 3 条断言 + 1 条新用例；`docs/检测器统一契约-D257.md`（新）。
+
+**缺陷注入复验**：把 union 的 `match` 改成未知类别 → 守卫 1 条变红；删掉反射门控路径的
+`result.inconclusive = true` → Inline 测试 2 条变红；两次均备份还原后全绿（未用反向替换）。
+
+**诚实边界**：算子声明是能力声明，不评价判定算法强弱；`NoSqlInjectionDetector.detect`
+的 `catch` 与 `KeyBoolDetector._bodyOf` 仍把网络失败折成「未命中」（补充面，改动会影响
+非 SQL/键名通道的记账口径，留独立批次）；主循环 `runLayer` 的 inconclusive 处理保留内联形态
+（该箭头在复杂度基线内是 162 行 / 圈 76 的存量条目，搬移会触发门禁）。
+
+**收口结果**：`npm run gate:close` **51/51**（含 typecheck 29.6s / lint 62.7s 全绿）；
+服务端 **4191 用例（4185 pass / 0 fail / 6 skip）**、前端 579、徽章 4764；
+wiring/guard 测试文件 80 → **81**（新增 `detectorContract.guard.test.js`）；
+`docs/质量台账.md` 与 `docs/_facts.json` 同批重生成；`readme:check` /
+`changelog-index`（41 批次）/ `facts:check` / `refs` 均绿。
+两次缺陷注入均先红后绿（未用反向替换，备份还原后复跑全绿）。
+
+---
+
+### 2026-11-06 批次 D256 · 方言声明化（18 种 DBMS 知识外置为 JSON 真源）
+
+**起点**：架构对标首条建议「新方言可声明化」。落码时读码发现该建议的**前提半错** ——
+`payloadRegistry.js` 头注释明确「声明式 Payload 注册表（对标 sqlmap XML `<test>` 元素）」，
+E5-2（2026-09-23）已把 681 条 payload 外置到 `payloads/registry.json`，加一条 payload
+**不需要改代码**；真正硬编码的是 `DialectSqlBuilder.js` 431 行里的方言知识。
+旧结论已在 `docs/架构对标-GitHub-SQLi-项目-2026-11-06.md` §8 保留并标注作废（推翻链）。
+
+**交付**：
+
+1. 新建 `server/src/engine/payloads/dialects.json` 作为**唯一真源**：18 个方言条目，
+   每条声明 `fromDummy` / `identifier{open,close}` / `quoteCol` / `tableRef` /
+   `nnExpr` / `nullSafeQuoteCol` / `wrap` / `wrapNoCast` / `inlineConcat` / `hashComment`；
+   另有 `aliasPatterns`（归一化正则）、`driverDialects`（驱动名映射）、`highFreq`、
+   `defaults`（缺字段回落）。模板占位符 `${s}` / `${id}` / `${tDq}` 等由解释器渲染。
+2. `DialectSqlBuilder.js` 由 431 行收敛为约 200 行的**纯解释器**：3 条正则、1 个映射
+   对象、7 个 switch、4 个字典全部改为查表/模板渲染；`WRAP` / `WRAP_NOCAST` 仍导出
+   同签名函数字典（`WRAP[dbms](s)` 接口零变化）。所有导出**签名与输出逐字符等价**，
+   下游 30 个引用文件零改动。输入清洗（转义 / `sanitizeUnionFrom`）保留在 JS。
+3. **未迁移 234 个 tamper 插件**：它们是每文件一个 `tamper()` 的变形函数，不是规则数据，
+   全量数据化既无收益也破坏插件契约。
+4. 新增 `server/tests/dialectRegistry.guard.test.js`（5 条）与
+   `docs/方言声明化-D256.md`（迁移对照 + 历史真引擎取证归档 + 边界）。
+
+**验证**：
+
+| 判据 | 结果 |
+|---|---|
+| 既有 6 份方言单测（846 行校准判据，未放宽任何断言） | **80/80** |
+| 新 guard 5 条（源码无 `case '`、无字面量方言字典、数据完整、字面量期望、加数据即生效） | **5/5** |
+| 缺陷注入复验（`Oracle.fromDummy` 注入 `FROM WRONG_INJECTED`） | 1 条判据变红；备份还原后 5/5 绿、注入痕迹 0 |
+| `lint` / `readme:check` / `node --check` | 绿 |
+
+**⚠️ 门禁阻塞记录（收口前实况，保留作推翻链；收口结果见下方）**：
+
+- `npm run typecheck` **红 3 条**：`server/src/engine/ScanManager.js:140/141/143`
+  TS2350 `Only a void function can be called with the 'new' keyword`。该文件**不是本批次改的**，
+  是**并发会话**正在写的 `[D256] 编排总图 / STRATEGY_ORDER` 半写状态（`git status` 显示
+  ` M`，`git show HEAD` 该处仍是旧的 `new UnionDetector()` 列表）。错误位置与本批次文件无关，
+  按并发纪律**不动对方文件**。
+- `npm run facts:refresh` **失败**：`前端测试输出里找不到 Tests 行`，根因是 `coverage/`
+  114 个文件触发 `vitest --coverage` 清理时的 safe-delete 批量守卫（本仓已知坑）。
+  **本批次主动不重试刷新**：并发会话有未暂存的新文件，refresh 会把磁盘上未入索引的
+  文件算进用例总数却不在指纹里（见本项目长期记忆的 D112 教训），须等对方稳定后统一刷。
+- 因此 `facts:check` 与 `gate:close` 本批次**未跑通**，不声称收口完成。
+- **未跑真靶场 e2e**：方言层等价性由 846 行既有单测覆盖；若要对外声称「检出率不变」，
+  仍需补真靶场复验。9 种「仅模板」DBMS 的能力等级不变，本批次**不构成能力提升声明**。
+
+> ⚠️ 上面第 1~3 条是**收口前**的实况，按「旧结论保留并标注作废、不删历史」的口径留档；
+> 用户确认另一边停止后已全部解除，见下方「收口结果」。
+
+**✅ 收口结果（2026-11-06，`gate:close` 51/51）**：
+
+| 项 | 收口动作 | 结果 |
+|---|---|---|
+| typecheck 3 条 TS2350 | 对方停止前已写完 `strategyOrder.js` + `ScanManager.js`，并给 `arch-guard` 补第 ④ 条编排总图判据（本体与自证均绿） | `typecheck` **绿** |
+| coverage 114 文件堵住采集 | 用 `mv` 把 `coverage/` 移出验收通道（不删，避开 safe-delete 批量守卫） | `facts:refresh` 成功 |
+| **1 个真失败用例** | 全量服务端单测定位到 `complexityGuard.wiring.test.js` 形态-7：基线里 `DialectSqlBuilder.js::<arrow@126>` / `escCols` / `nnExpr` 因本批瘦身已不存在 ⇒ 基线腐烂。用官方 `--fix-baseline` 重建：新增 0 / 删除 4 / 下调 7 / **上调 0**（只减不增，未放宽） | `wiring` + guard 自证转绿；服务端 **4178 用例 / 4172 pass / 0 fail / 6 skip** |
+| 口径过期 | 重刷 facts，README 由「1 fail」修正为「0 fail」 | `facts:check` **绿** |
+| 全量收口 | `npm run gate:close` | **51/51 全绿** |
+
+⚠️ 仍未跑真靶场 e2e，故**不声称检出率不变**；9 种「仅模板」DBMS 能力等级不变。
+这一轮也再次印证：门禁绿只保证判据没退化，基线腐烂这类「判据本身过期」要靠全量单测抓。
+
+**⚠️ 编号撞车**：开工时 `grep D256 TODO.md CHANGELOG.md` 为空；落码中检测到另一会话
+在 `scan/strategyOrder.js` 与 `ScanManager.js` 注释也用 `[D256]`（架构对标第三条
+「策略显式优先级」）。本批次已先落盘 TODO/CHANGELOG 占号，请对方顺延 D257。
+
+### 2026-11-06 批次 D255 · ReportAI 短 prompt 重试（真网关端到端仍 FAIL，如实登记）
+
+**起点**：11-06 A/B 双网关（`glm-5.3-flash`）`ai-gateway` 套件实测 `exit 1 / 665s`：
+analyst 出稿，writer/reviewer 空内容，落盘「报告撰写角色暂不可用 / 安全审阅角色
+暂不可用」。11-05 决定性实验（`docs/llm-gateway-capability-2026-11-05.txt`）证明
+长报告 prompt 挂起、短 prompt 4.1s 返回。
+
+**交付**（失败路径的降级补救，成功路径零变化）：
+
+1. `ReportAI.js`：`callWithShortRetry` —— writer/reviewer 首次「空内容 / 超时」失败时
+   用压缩短 prompt 再试 **1 次**（`buildShortWriterPrompt` / `buildShortReviewerPrompt`，
+   正文预算 1200 字）；429 / HTTP 错误不重试，仍走原有 key 降级；复用同一 cfg 与端点；
+   重试成功清掉首轮 key 冷却，避免后续角色被「无可用 key」误挡。
+   `AI_REPORT_SHORT_RETRY=0` 可关，`AI_REPORT_SHORT_RETRY_TIMEOUT_MS` 默认 20000。
+2. `result.shortPromptRetries` + `ai-report.json`：只记录**真正产出内容**的短重试角色；
+   reviewer 短重试的审阅基于截断节选，引用 ✅ 口径必须同看该字段，别只信 ✅。
+3. `server/tests/reportAi.shortRetry.guard.test.js` 7 条判据（短 prompt 长度、writer /
+   reviewer 重试成功、超时、重试也失败不伪造、429 不重试、开关、落盘披露）；
+   `reportAI.service.test.js` 的 D205 空审阅场景改成「短重试也空」并**加**断言，未放宽。
+4. 文档：`docs/AI-网关-runbook.md` §1 环境变量矩阵 + §5.1 行为与诚实边界。
+
+**验证**：
+
+| 判据 | 结果 |
+|---|---|
+| 三份 AI 报告单测（含 7 条新 guard） | **30/30 通过** |
+| 缺陷注入复验（`isShortRetryable` 恒 false） | 4 条判据变红；备份还原后全绿（未用反向替换） |
+| `lint` / `typecheck` / `readme:check` | 全绿 |
+| **真网关 B 单网关 `e2e/ai-gateway-lab/run.mjs`** | **exit 1 / 600s，仍未过审，FAIL** |
+
+**⚠️ 结论推翻（不留含糊）**：短重试**在真网关上一次都没生效** —— 套件落盘
+`ai-report.json` 的 `shortPromptRetries` 为 `undefined`，正文仍是「报告撰写角色暂
+不可用 / 安全审阅角色暂不可用」。观察层诊断（`.box-agent-scratch/d255-probe.mjs`，
+真 HTTP 包装 fetch，不改生产代码）给出真实时序：
+
+| # | 请求 | 结果 |
+|---|---|---|
+| 1 | analyst 长 prompt（918 字） | **60s AbortError 超时** |
+| 2 | 降级 writer 角色（同长 prompt） | **429 `user concurrency limit exceeded`**（250ms） |
+| 3 | 再降级 reviewer 角色 | **429 同上**（192ms） |
+
+⇒ 流水线在 **analyst 阶段就断了**，根本没走到 writer/reviewer，短重试自然没机会触发。
+**配置边界**：`d255-probe.mjs` 与 B 单网关套件都是 `AI_REPORT_API_BASE` 只有 B、
+`KEY_1/2/3` 全为同一个 B key —— **没有第二个端点可切**，429 连环是这个配置的
+必然结果，不能外推到双网关（见下方口径再修正）。
+
+**⚠️ 口径再修正（2026-11-06，用户质疑「两个网关不是串行吗，429 切换不就行了」）**：
+
+- **作废**：上段把「429 连环」写成新增根因的说法。D254 的 `getRoleConfig` 在
+  `markKeyFail(idx, true)` 冷却该 key 后，下一次调用按 keyOrder 选中另一 idx，
+  由 `API_ENDPOINTS[idx]` **换到另一个网关**；11-05 双网关实测已明确记录
+  「**429 连环消失**，但三角色各 140s 超时 → 仍 FAIL」。01:45 复探 A/B 短 prompt
+  均 **HTTP 200**（A 1755ms / B 9214ms），429 是**瞬时**并发状态而非网关永久限制。
+  旧结论保留在此并标注作废，不删历史（推翻链）。
+- **真实缺口**：本批次改完代码后**只跑了 B 单网关**，改代码后的双网关套件从未跑过 ——
+  用单网关样本断言「短重试没生效 / 假设被推翻」属**样本外推错误**，该结论同步作废。
+- **代码侧仍存在的独立问题**：429 只在**下一次** `getRoleConfig`（跨角色降级）时换端点；
+  writer/reviewer 单步 429 会直接 catch 降级，不在同一步内换网关重发。且套件内部串行
+  ≠ 网关侧无并发：`user concurrency limit` 可由其它进程共用同一 key 触发。
+- **补做结果（2026-11-06 真跑，非推断）**：
+  1. 改代码后的 A/B 双网关套件按 runbook §5 原参数重跑：**exit 1 / 545s**，
+     落盘 `ai-report.json` 的 `shortPromptRetries` 仍 `undefined`，正文仍是
+     「报告撰写/审阅角色暂不可用」⇒ **双网关下短重试同样没触发**。
+  2. 观察层诊断 `.box-agent-scratch/d255-probe-dual.mjs`（真 HTTP，双网关同参数）
+     真实时序：#1 A `127.0.0.1:8080` → **429** `user concurrency limit exceeded`
+     （209ms）；#2 切到 B `192.168.151.151:18080` → **100s AbortError 超时**
+     （长 prompt 918 字）；#3 再回 A → **100s 超时**。
+     ⇒ **用户质疑成立：429 确实被切换了**（D254 的 keyOrder + `API_ENDPOINTS[idx]` 生效）。
+     但切过去之后 B/A 对长报告 prompt 都超时，三级降级全在 analyst 阶段失败，
+     **流水线根本没走到 writer/reviewer**，短重试自然没有触发点。切换解决了 429，
+     没解决「长 prompt 不返回」——11-05 记录的根因未变。
+- **结论**：D255 的短重试**挂错了位置**（挂在 writer/reviewer，断点在 analyst）。
+  要验证它必须先给 analyst 也接短重试；本批次维持**部分完成**，不放宽任何断言。
+
+**下一步候选**：① 换非推理模型 ② **给 analyst 也接短重试**（唯一能验证 D255 的路）
+③ 单步 429 立即换网关重发 ④ 网关侧查并发配额与长 prompt 排队。
 
 ### 2026-11-05 批次 D254 · ReportAI 多网关真分担（D228 套件端到端仍 FAIL，如实登记）
 

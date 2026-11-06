@@ -5,6 +5,207 @@
 
 ---
 
+## 2026-11-06 批次 D260 · 服务端覆盖率门禁确定性收口（已完成，见 CHANGELOG）
+
+**起点**：D259 留「本地 `gate:close` 51/51 全绿、CI `Server coverage gate` 红」——第 5 次
+「门禁只活在别处」。D259 归因「多进程 coverage 合并口径」但三条修法都没拉回 73.18% < 74%。
+
+**推翻链**：D260 初版「把补测搬进同进程」实测**仍 exit 1 / 73.18%**，假设作废。
+最小样本双版本复现真因：**任意进程加载 `?query` / `#fragment` 模块实例 ⇒ 同一源文件的
+多进程快照不再 union**（Node 22 随机跳、CI 的 Node 24 稳定取单快照）；去掉后缀即稳定 union。
+
+**交付**：`scripts/server-coverage-gate.mjs`（排除名单双向校验 + 7 条自证 + dry-run）；
+`server/package.json` 两条覆盖率脚本委托该包装；`gate-list` **51 → 52 项** +
+`gate-close --selftest` 必备项；runner `spawnSync` 缓冲放大到 64MB 并加自证（首轮
+51/52 的 1.11MB TAP 被默认 1MB 掐断）；`gateListWiring` 新增 ①c 三向接线；`facts-sync`
+把「全量用例数」与「覆盖率测量集」拆开采集；AGENTS / ci.yml / ci-local / 两份测试注释同步。
+
+**验证**：`npm run gate:close` **52/52 全绿**；最终 `test:coverage` **exit 0**（480 文件 /
+4141 用例 / 0 fail / `95.43 · 81.78 · 89.62`）；Node 22 与 Node 24 两版各自 `exit 0`；
+三处缺陷注入（改门禁名 / 未排除文件加 `?query` / 降 runner maxBuffer）均先红、备份还原后全绿。
+证据：`docs/覆盖率门禁接线-D260.md` + `docs/覆盖率门禁-D260-真机记录-2026-11-06.txt`。
+
+**边界**：阈值 85/74/77 与 include `src/**/*.js` 一字未改；排除的 5 个文件仍在
+`npm test` 全量执行；81.78% 只代表校准后测量集，不是能力提升声明。
+
+---
+
+## 2026-11-06 批次 D259 · ReportAI 分步短 prompt（长报告拆成多轮短请求）（已完成，见 CHANGELOG）
+
+**起点**：D254/D255 真网关实测的长 system+user 报告 prompt 挂起是**输入长度**问题
+（短 prompt 4.1s 返回）。D258 的做法是「失败之后补一发短重试」——仍要先挂 100s，
+且短重试只有一发、丢掉 SRC 模板与逐条判据。TODO D254 的下一步候选 ③
+「让 ReportAI 支持分步短 prompt（把长报告拆成多轮短请求）」即本批。
+
+**交付**：
+
+1. `server/src/services/reportAiStepwise.js`（新，纯函数）：5 章章节表、短 prompt 构造
+   （统一 `【分步` 前缀 + 1200 字预算）、逐章短审阅、按序拼装、缺章占位。
+2. `ReportAI.js`：`AI_REPORT_STEPWISE=1` opt-in。分步时 analyst **首轮即短 prompt**
+   （三级降级 / D258 短重试语义保留），writer 逐章 5 次短请求、reviewer 逐章 5 次短请求；
+   原整篇流水线抽成 `runLegacyStages()`，非分步路径逐字不变。
+3. 事实保真：writer 事实包与 `buildWriterPrompt` 同源（脱敏、参数名、提取数据、
+   引擎实测判据），PoC 章额外带原始 payload 与 `poc_verify`，不因拆章丢 D205 约束。
+4. 失败语义：单章失败 ⇒ 显式「未由模型产出」占位 + `partial=true` + `failedSteps`，
+   **不编造、不冒充全文审阅**；全部章节失败 ⇒ 回退整篇流水线并登记 `fallback='legacy'`。
+   `result.stepwise` 与 `ai-report.json` 如实落盘。
+5. `e2e/ai-gateway-lab/mock-hang-gateway.mjs` 识别 `【分步` 前缀（识别不到就把分步请求
+   也挂起，失败方向安全）；`run.mjs` 加分步专属判据（**加严**，非分步恒 true）。
+6. `server/tests/reportAi.stepwise.guard.test.js`（新，9 条）+ `docs/AI-网关-runbook.md` §1/§5.2
+   + `docs/ai-分步短prompt-真HTTP验证-2026-11-06.txt`（真 HTTP 原样记录）。
+
+**验证**：新 guard 9/9、既有 AI 报告相关 34/34、`typecheck` 0、改动文件 `eslint` 0；
+**真 HTTP 四条**（判据=退出码）：mock-hang 分步 462ms PASS / 非分步基线 6160ms PASS
+（与 D258 的 6172ms 一致）、真实 Ollama `qwen2.5:0.5b` 分步 29966ms PASS
+（5/5 章审阅、partial=false、正文 12354B）/ 非分步基线 6246ms PASS。
+缺陷注入复验见 CHANGELOG 同批次。收口结果见 CHANGELOG。
+
+**边界**：分步**不省时间**（11 次推理串行和），换的是「不再卡死在长 prompt」；
+0.5B 是链路级模型，不判文风质量。**glm-5.3-flash 生产网关本轮仍无可用 key，未复跑**，
+不能宣称 `ai-gateway` 套件在 D254/D255 那两个网关上已 PASS。
+
+**⚠️ 遗留（D260）**：CI-only 的 `cd server && npm run test:coverage` 仍 **exit 1**
+（branch 73.18% < 阈值 74%）。本地 `gate:close` 51/51 但不含这一项。本批不放宽阈值，
+已补无 query 链路测试、把新增分支收进纯函数模块、做归因实验，均拉不回；
+根因是全量多进程 coverage 合并口径。详见 CHANGELOG 同批次「未收口」段。
+
+> **[D260 收口，旧口径作废]** 真因已由最小样本定位为「`?query` 模块实例让多进程快照
+> 合并退化成单快照」，不是「补测不足」；上面「补测 / 归因实验」两条路线均标记作废，
+> 原文保留不删（推翻链）。修法与证据见 `docs/覆盖率门禁接线-D260.md`。
+
+---
+
+## 2026-11-06 批次 D258 · analyst 阶段短 prompt 重试（D255 断点修正，真 HTTP 已验证）（已完成，见 CHANGELOG）
+
+**起点**：D255 把短 prompt 重试挂在 writer/reviewer，但双网关实测（545s）证明三级降级
+**全在 analyst 阶段失败** —— 流水线根本走不到后两步，重试等于没挂。D255 收尾时已登记
+「需先给 analyst 也接短重试」。
+
+**交付**：
+
+1. `ReportAI.js`：分析阶段抽 `runAnalystStage()`（原三层嵌套 try/catch 收敛为
+   角色表 + 循环，D205 的「分析角色全挂」错误文案逐字保留）；**主角色与两级降级
+   全部走 `callWithShortRetry`**。
+2. `buildShortAnalystPrompt()`（新）：只留「参数 + 每漏洞关键事实」，仍要求
+   `vulns` / `overall_risk` 同一份 JSON 结构 —— 否则重试成功也会被
+   `validateAnalysisJson` 判非 JSON 而降级，等于白重试。
+3. `ANALYST_SYSTEM` / `ANALYST_FALLBACK_SYSTEM` 提为常量（原来三份字面量）。
+4. `server/tests/reportAi.shortRetry.guard.test.js` 扩 4 条：analyst 短重试成功、
+   短重试也失败后降级、三级全失败如实报错、开关关闭时走原降级。
+5. `e2e/ai-gateway-lab/mock-hang-gateway.mjs`（新）+ `docs/ai-短重试-真HTTP验证-2026-11-06.txt`：
+   确定性复现「长 prompt 挂起、短 prompt 秒回」，无需外部 key。
+
+**验证**：单测 11/11；真 Ollama 网关套件 8.17s PASS（正常路径零回归）；
+mock-hang 网关 6.17s PASS（三阶段首轮全 abort、三次短重试全成功）；缺陷注入
+（去掉 analyst 短重试）→ 3 条红，还原后全绿。收口见 CHANGELOG。
+
+**边界**：glm-5.3-flash 生产网关本轮无可用 key，未复跑；mock-hang 是行为模拟，
+只证明链路/超时/重试语义，不证明真实模型的输出质量。
+
+---
+
+## 2026-11-06 批次 D257 · 检测器统一契约（执行器 + 判定/提取算子，13 个检测器接入）（已完成，见 CHANGELOG）
+
+**起点**：`docs/架构对标-GitHub-SQLi-项目-2026-11-06.md` §6 第二条「执行器 / 匹配算子接口化」
+（nuclei `Executer` + `Operators`），D256 收尾时已登记为「后续 D257」。
+
+**交付**：
+
+1. `server/src/engine/detectorSupport/detectorContract.js`（新）：`MATCH_KINDS`（8 类）/
+   `EXTRACT_KINDS`（4 类）、`defineDetectorContract()`（构造期校验 + 冻结）、
+   `assertDetectionResult()`（pointId/technique 一致、命中必须有证据+载荷、
+   未结论必须与命中互斥且带原因）、`executeDetector()`（统一出口 outcome）。
+2. `Detector` 基类：`constructor(technique, contract)` + `run(ctx)` 统一执行入口；
+   错误码 `DETECTOR_CONTRACT_INVALID=6012`。
+3. 13 个检测器声明契约（9 个编排总图条目 + xmlParamName/orderByKey/keyBool +
+   LDAP/XPath 子类继承）；`detect.js` 主循环、三条补充探针、二阶/非 SQL 补充趟
+   全部改走 `runDetector()`（生产检测器经 `run()` 校验，测试替身退回 `detect()`）。
+4. `strategyOrder.js` 每条一阶检测器补 `layer`，导出 `FAST_TECHNIQUES` /
+   `SLOW_TECHNIQUES`；`detect.js` 不再手写 FAST/SLOW 数组（修前「表里有、调度里没有」
+   会静默不跑）。
+5. **抓到并修掉真实缺陷**：`InlineQueryDetector` 两条「未结论」路径只写 evidence、
+   不置 `inconclusive` ⇒ 网络失败被记成已测阴性且不进 `unverifiedSurfaces`；
+   `catch` 到的网络层异常同病。现三条路径均标未结论（非网络异常仍按「无内联通道」）。
+6. `server/tests/detectorContract.guard.test.js`（新，10 条）+ Inline 守卫扩 3 条断言
+   + 1 条新用例；`docs/检测器统一契约-D257.md`（新）。
+
+**验证**：新 guard 10/10、Inline 9/9；缺陷注入两次（错误算子类别 → 1 红；
+删 `inconclusive` → 2 红），还原后全绿；七道结构门禁 + typecheck + lint 绿；
+收口结果见 CHANGELOG 同批次「收口结果」段。
+
+**边界**：算子声明是能力声明，不等于判定算法强度；NoSQL `catch` 与 KeyBool
+`_bodyOf` 仍把网络失败折成未命中（补充面，未在本批一并改），引用其阴性结论时需知道。
+
+---
+
+## 2026-11-06 批次 D256 · 方言声明化（已完成：gate:close 51/51，见 CHANGELOG）
+
+**起点**：`docs/架构对标-GitHub-SQLi-项目-2026-11-06.md` 第一条建议「新方言可声明化」。
+落码时读码发现原报告口径半错（已在该文档 §8 保留原文并标注作废）：
+**payload 早在 E5-2 就已声明化**（`payloads/registry.json` 681 条，对标 sqlmap `<test>`），
+真正硬编码的是 `DialectSqlBuilder.js` 431 行里的 18 种 DBMS 方言知识。
+
+**交付**：
+
+1. `server/src/engine/payloads/dialects.json`（新，真源）：18 个方言条目 +
+   `aliasPatterns` / `driverDialects` / `highFreq` / `defaults`；含别名、伪表、标识符
+   引号、NULL 安全表达式、UNION 包裹模板、串接符、尾注标记。
+2. `DialectSqlBuilder.js` 退化为纯解释器（约 200 行）：所有导出**签名与行为零变化**，
+   下游 30 个引用文件零改动；输入清洗函数保留在 JS。
+3. `server/tests/dialectRegistry.guard.test.js`（新，5 条）：源码无 `case '` /
+   无字面量方言字典、数据完整性、字面量期望等价性、**加一个 GuardDB 数据条目即
+   自动获得查表型能力**、未知方言安全回落。
+4. `docs/方言声明化-D256.md`（新）：迁移对照、历史真引擎取证归档、诚实边界。
+5. 缺陷注入复验：`Oracle.fromDummy` 注入错值 → 1 条判据变红；备份还原后 5/5 绿。
+
+**验证**：既有 6 份方言单测 **80/80**（846 行校准判据，未放宽）、新 guard **5/5**、
+`lint` / `readme:check` 绿；收口后 `typecheck` 绿、`facts:check` 绿、
+**`gate:close` 51/51**（详见 CHANGELOG 同批次「收口结果」段）。
+
+**⚠️ 并发撞车（用户需知）**：本批次开工时 `grep D256 TODO.md CHANGELOG.md` 为空，
+故按规则取 D256；落码过程中检测到**另一会话**新建
+`server/src/engine/scan/strategyOrder.js` 并改 `ScanManager.js`，注释也写 `[D256]`
+（正是架构对标的第三条「策略显式优先级」）。本批次已先落盘 TODO/CHANGELOG 占号，
+请对方顺延；两边都不要动对方文件。
+**✅ 已解决**：用户确认另一边停止；对方在停止前已把 `ScanManager.js` /
+`strategyOrder.js` 与 `arch-guard.mjs` 第 ④ 条编排总图判据写完（本体/自证均绿），
+typecheck 的 3 条 TS2350 随之消失。本批已统一暂存并收口。
+
+**后续**：D257 = 执行器/匹配算子接口化（nuclei `Executer` + `Operators`）；
+策略优先级已由并发会话在 D256 同名推进，勿重复实现。
+
+---
+
+## 2026-11-06 批次 D255 · ReportAI writer/reviewer 短 prompt 重试（部分完成：真网关端到端仍 FAIL，见 CHANGELOG）
+
+**起点**：A/B 双网关（glm-5.3-flash）`ai-gateway` 套件 11-06 实测 `exit 1 / 665s`——
+analyst 出稿，writer/reviewer 返回空内容，落盘「报告撰写角色暂不可用 /
+安全审阅角色暂不可用」。`docs/llm-gateway-capability-2026-11-05.txt` 的决定性实验
+证明长报告 prompt 挂起、短 prompt 4.1s 返回。
+
+**交付**：
+
+1. `ReportAI.js`：`callWithShortRetry` —— writer/reviewer 首次「空内容 / 超时」失败时
+   用压缩短 prompt 再试 1 次；429 / HTTP 错误仍走原降级；成功路径零变化；
+   `AI_REPORT_SHORT_RETRY=0` 可关。
+2. `result.shortPromptRetries` + `ai-report.json` 如实披露「哪些角色的短重试真正生效」；
+   reviewer 短重试的审阅基于截断节选，引用 ✅ 口径时必须同看该字段。
+3. `server/tests/reportAi.shortRetry.guard.test.js`（7 条判据：短 prompt 长度、
+   writer/reviewer 重试成功、超时、重试也失败不伪造、429 不重试、开关、
+   落盘披露）+ 缺陷注入复验（`isShortRetryable` 恒 false ⇒ 4 条判据变红，
+   备份还原后全绿，未用反向替换）。
+4. 真网关 e2e 结果见 CHANGELOG 同批次条目；**单测不代替真跑**。
+
+**边界**：这是失败路径的降级补救，不是「长 prompt 能用了」。B **单网关同 key** 诊断里
+短重试一次都没触发，但该配置没有第二个端点可切，**不能外推到双网关**。
+改代码后的 A/B 双网关套件已补跑：**exit 1 / 545s，短重试仍未触发**；
+双网关观察层真时序证明 **429 确实被切换到 B**（D254 生效），
+但 B/A 对长报告 prompt 均 100s 超时 ⇒ 三级降级全在 **analyst 阶段**失败，
+流水线没走到 writer/reviewer。**D255 的短重试挂错位置**，需先给 analyst 也接短重试。
+口径修正与推翻链见 CHANGELOG 同批次条目。未 PASS 就如实登记，不放宽任何断言。
+
+---
+
 ## 2026-11-05 批次 D254 · ReportAI 多网关真分担（套件端到端仍 FAIL，见 CHANGELOG）（部分完成）
 
 **已做**：`resolveEndpoints` + `AI_REPORT_API_BASE_2/_3`（key↔端点配对）、

@@ -212,6 +212,8 @@ const GATES = [
   { id: 'test-frontend', name: '前端测试 + 覆盖率门禁', cmd: 'npx vitest run --coverage --reporter=dot', slow: true },
   { id: 'test-frontend', name: '前端构建', cmd: 'npm run build' },
   { id: 'test-server', name: '服务端单测', cmd: 'cd server && npm test' },
+  // [D260 2026-11-06] 与 ci.yml 同源：test:coverage 委托 scripts/server-coverage-gate.mjs，
+  // 排除 5 个含 ?query 隔离实例的测试文件以校准 Node 覆盖率多进程合并口径（阈值不变）。
   { id: 'test-server', name: '服务端覆盖率门禁', cmd: 'cd server && npm run test:coverage', slow: true },
   // 变异门禁（断言敏感度）：与 ci.yml 同名步骤对应（守卫见 server/tests/mutationGate.wiring.test.js）。
   // 本地默认快档（--limit=8），全量 `npm run mutation` 留给 CI 慢车道/手动。

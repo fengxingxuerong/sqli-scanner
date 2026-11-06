@@ -33,7 +33,7 @@ function pickTemplate(tpls, quoted) {
 
 export class StackedDetector extends Detector {
   constructor() {
-    super('stacked');
+    super('stacked', { match: 'timing', extract: ['dbms'] });
     // 堆叠注入判定参数（与 TimeBlindDetector 保持一致，便于对齐行为）
     this.sleepSecs = 2; // 触发明显延迟（秒）
     this.timeThresholdMs = defaults.timeThresholdMs; // 时间盲注判定阈值（ms）

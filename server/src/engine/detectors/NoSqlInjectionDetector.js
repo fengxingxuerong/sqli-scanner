@@ -22,7 +22,7 @@ import { hasBoundedMatch } from '../../core/boundedMatch.js';
 //   - 二次确认：可疑命中换一组等价 payload 再测，两次一致才报，降低单次抖动误报
 export class NoSqlInjectionDetector extends Detector {
   constructor() {
-    super('nosql'); // technique 标记统一为 nosql（前端/报告维度归为一类"非SQL注入"）
+    super('nosql', { match: ['bool-diff', 'marker'], extract: ['nosql-kind'] }); // technique 标记统一为 nosql（前端/报告维度归为一类"非SQL注入"）
   }
 
   /**

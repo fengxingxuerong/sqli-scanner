@@ -69,6 +69,7 @@
 | 6003 | `TAMPER_INVALID_NAME` tamper 插件缺唯一 name |
 | 6004 | `SECOND_ORDER_DISABLED` 二阶注入未开启却调用 |
 | 6005 | `EXPLOIT_UNAUTHORIZED` 利用操作未声明 `authorized:true` |
+| 6012 | `DETECTOR_CONTRACT_INVALID` 检测器结果违反统一契约（编程错误，正常扫描不应出现） |
 | 9001 | `UNKNOWN` 服务器内部错误 / 未知错误 |
 
 ---

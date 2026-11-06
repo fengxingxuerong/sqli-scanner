@@ -15,7 +15,7 @@ const TIME_DBMS_ORDER = ['MySQL', 'PostgreSQL', 'SQL Server', 'Oracle', 'SQLite'
 
 export class TimeBlindDetector extends Detector {
   constructor() {
-    super('time');
+    super('time', { match: 'timing', extract: ['dbms'] });
   }
 
   /**
