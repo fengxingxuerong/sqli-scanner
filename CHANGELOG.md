@@ -7,13 +7,21 @@
 > 下一批次起的条目写在这里。发版时把本节整体升为 `## [x.y.z] - YYYY-MM-DD` 并补汇总段。
 
 <!-- changelog-index:start -->
-**本段覆盖 49 个批次（D228–D265，2026-11-01 → 2026-11-07）**。正文按时间倒序排列；
+**本段覆盖 57 个批次（D228–D273，2026-11-01 → 2026-11-08）**。正文按时间倒序排列；
 下表是同一批次的索引，便于按编号或关键词定位。**索引只是导航，正文未做任何删改**
 （被推翻的旧结论原样保留，这是本仓的既定口径）。新增批次后跑
 `node scripts/changelog-index.mjs --write` 重生成，`--check` 校验是否过期。
 
 | 批次 | 日期 | 主题 |
 |---|---|---|
+| D273 | 11-08 | CI 首跑 failure 归因与稳定性收口（D272 口径作废） |
+| D272 | 11-08 | VulnLab 接入 CI 验收（解锁第 3 个 SKIP） |
+| D271 | 11-08 | CI 首跑口径更新（24/27）+ PHP 版本注释作废 |
+| D270 | 11-07 | DVWA 接入 CI 验收（解锁 2 个长期 SKIP） |
+| D269 | 11-07 | 验收覆盖口径修正（27 套件 ≠ 全绿） |
+| D268 | 11-07 | 工作区产物归档 + 忽略规则防复发（chore，归档不删除） |
+| D267 | 11-07 | macos-latest Server tests 假红修复（/var → /private/var） |
+| D266 | 11-07 | AI 报告真网关闭环口径固化（docs + 台账） |
 | D265 | 11-07 | v1.3.2 发版（版本对齐 + 交付收口） |
 | D264 | 11-07 | 死代码门禁自证的 Linux 假红修复（CI lint 常红） |
 | D263 | 11-07 | AI 报告整场总闸 + 半成品口径修正 |
@@ -64,6 +72,278 @@
 | D229 | 11-01 | 交付闸收口：P0-3 卡顿修复（haystack 先截后拼）+ ai-gateway 断言去模型依赖 |
 | D228 | 11-01 | AI 报告网关端到端验收（ai-gateway 套件）+ 本地网关 runbook + CI 靶场硬要求扩展 |
 <!-- changelog-index:end -->
+
+### 2026-11-08 批次 D273 · CI 首跑 failure 归因与稳定性收口（D272 口径作废）
+
+**起点（推翻链，§3.5）**：[D272] 段写「CI 首跑尚未跑，预期 acceptance 24/27 → 25/27」。
+实测 run `42397466577`（head `dc8eec62`）于 2026-11-08 01:55 结束：**整体 failure**，
+16 个 job 里唯一红是 `acceptance`（`128480567920`），其余 15 个全绿 / 按设计 skipped。
+⇒ [D272] 段的「首跑尚未跑」与「预期 25/27」自本批起**停用**；旧文字原样保留作推翻链
+（归档 ≠ 删除）。**25/27 从未测成**，[D271] 的 24/27 仍是唯一现行口径。
+
+**根因（实证，非推断）**：红的不是 VulnLab —— 「启动 VulnLab」步骤全绿
+（PHP 8.5.4、pin 源码下载、真值探针 9334B → 10473B / +12.2%）。红的是它后面的
+`Recall-lab e2e` 前置步骤：`[FAIL] orderby … 检出=[time] miss=[boolean] 请求=122 耗时=5.1s`
++ 同轮 2 条 HTTP 超时 ⇒ `exit 1` ⇒ **「全方位验收门禁」根本没跑**，本轮连套件数都没产生。
+对照证据：D270 首跑同场景 `检出=[boolean] 请求=95 耗时=2.1s` PASS；本机 Windows 连跑
+3 次 `node e2e/recall-lab/recall.e2e.js` 均 exit 0、3/3 检出 boolean（同为 95 请求 / 2.1s），
+`git status` 干净。⇒ **runner 负载抖动，不是引擎回归**；D272 未改任何引擎 / 判据代码。
+
+**改动**：
+- `ci.yml` 的 Recall-lab 步骤加**有界重试**（最多 2 次；成功即 exit 0 并打印第几次；
+  连续 2 次未达标 `::error::` + exit 1）。`recall.e2e.js` 的 `must: ['boolean']` 判据
+  **一字未改**，不抬高也不放宽；真回归连跑 2 次必红。
+- `ci.yml` DVWA 步骤 apt 兜底包名 `php8.3-mysql` → 动态 `php${PHP_V}-mysql`
+  （`PHP_V` 由 `php -r` 取主次版本），收掉 [D271] 登记的遗留；CI 实测 PHP 8.5.4，
+  旧包名写死会装错包并显式红（fail-closed，不产生假绿）。
+- CHANGELOG / TODO / README 补本批段与作废链；索引由 `changelog-index --write` 重生成。
+
+**缺陷注入复验（判据敏感性）**：从 `ci.yml` 用 YAML 解析抽出 Recall-lab 的**真实 run 体**，
+仅把 `node e2e/recall-lab/recall.e2e.js` 换成合成命令，令目标路径真不可达：
+
+| 注入 | 期望 | 实测 |
+|---|---|---|
+| 首次成功 | exit 0 / 不重试 | exit 0，`第 1 次通过` |
+| 首次失败、第二次成功 | exit 0 / 打印重试 | exit 0，`第 2 次通过` |
+| 连续失败 | exit 1 | exit 1，`::error:: 连续 2 次未达标 ⇒ 判红` |
+
+证据 `.box-agent-scratch/d273-retry-injection.log`。
+
+**边界 / 诚实声明**：
+- 重试只吸收**同一 run 内**的环境抖动；引擎真回归两次都红 ⇒ 判红，不会被吞。
+- 本批仍未拿到 25/27：需重新推送后 CI 复跑、且验收门禁真跑完才算数。
+- `ai-gateway` 长期如实 SKIP、Benchmark 需 JDK + mvn 独立批次；AI 报告真网关端到端
+  仍 FAIL（[D255] / [D261] 如实登记），本批未碰。
+- 「187/187 真值」样本不均衡（Benchmark 占 178）⇒ 不得外推通用检出率，口径不变。
+
+**验证**：`npm run gate:close` 按退出码收口；CI 复跑结果另记。
+
+### 2026-11-08 批次 D272 · VulnLab 接入 CI 验收（解锁第 3 个 SKIP）
+
+**起点**：[D271] 后 CI 验收 24/27，3 个 SKIP 里 VulnLab（外部裁判 5 号）在 CI 长期
+SKIP，日志只给「环境不满足，未执行断言」通用兜底原因。`e2e/vulnlab-lab/run.mjs` 的
+[D162] 注释记录真实形态：CI 上靶场对任何输入无差分响应（SQLite 种子未生效）⇒
+自证探针失败 ⇒ 静默 SKIP；且它自拉自收时会自己 `git clone` 第三方仓库。
+
+**做法（不盲猜：先本机等价验证，再改 workflow）**：
+- 新增 `scripts/ci-vulnlab.mjs`（up / stop / check）：pin 上游 `34d3abb1`
+  （2026-10-25，与本机 `.verify-labs/vulnlab` 缓存同源，manifest 91 例）从 codeload
+  下载 → 备好 `html/data/` 目录（上游 tarball 不带 data/，config.php 首次访问自动
+  建库灌种子）→ 起 `php -S`（Linux 走正常 php.ini；Windows 本机共享 ini 被 DVWA 锁成
+  MySQL 形态，按 run.mjs 同款 `-n` + 显式 pdo_sqlite.dll）→ low.php 就绪探测 +
+  **官方真值最低形态探针**（`1 OR 1=1` 与基线差分 >3%）双确认。起不来、种子无差分
+  一律显式红，绝不静默 SKIP。
+- `ci.yml` acceptance 新增「启动 VulnLab」步骤（`php<ver>-sqlite3` 动态包名 apt 兜底，
+  timeout 8 分钟），`--require-labs` 加 `vulnlab`；`VULNLAB_DIR` 传给 acceptance，
+  让 run.mjs 复用已下载的 pin 源码与已起端口，**不再自己 clone / spawn**。
+- `scripts/lib/labs.mjs` 新增 `vulnlabSpec`（probeOnly，8135）供 `--require-labs` 判 id；
+  `scripts/labs.mjs --selftest` 补一条判据钉住「在线判 ok / 不在监听必须点名」。
+- 更新 ci.yml 中 [D270] 遗留注释（dvwa 已接、benchmark 的 Java 构建链仍未验证）。
+
+**本机等价验证（同一条命令起停，D270 同款口径）**：`ci-vulnlab up` exit 0
+（真值探针 9334B → 10473B，+12.2%）→ `e2e/vulnlab-lab/run.mjs` exit 0
+（明确「复用已跑实例」；真值档 low/medium **2/2 检出**、修复档 high **误报 0/1**；
+208 / 94 / 162 请求，三档真跑）→ `ci-vulnlab stop` exit 0、端口 8135 closed。
+`labs --selftest` 12 条判据绿、三份脚本 `node --check` 均 0。
+
+**边界 / 诚实声明**：
+- **CI 首跑尚未跑**（本条落地时），预期 acceptance 24/27 → **25/27**；
+  未拿到 CI 日志前不得把 25/27 写成现行口径，[D271] 的 24/27 仍是现行口径。
+- 剩余 2 个 SKIP：OWASP Benchmark（需 JDK17 + mvn + HSQLDB 常驻 + https 自签）、
+  AI 报告网关端到端（外部 LLM 网关，按 [D269] 建议长期如实 SKIP）。
+- 本机 win32 的 PHP 8.3 需显式 pdo_sqlite.dll；CI runner 实测 PHP 8.5.4（[D271]），
+  两条 PHP 路径不同但都靠真值探针收敛，跨平台结论以 CI 首跑为准。
+- 验收产物 `e2e/vulnlab-lab/results/external-judge-2026-11-07-d156.md` 被本轮覆盖，
+  按 [D268] 先例备份到 `.box-agent-scratch/archive-2026-11-08/` 后恢复，不进本批提交。
+
+**验证**：`node scripts/changelog-index.mjs --write` + `npm run gate:close` 按退出码
+收口；新脚本先 `git add` 再跑门禁（refs:check）。**CI 首跑结果另记**。
+
+### 2026-11-08 批次 D271 · CI 首跑口径更新（24/27）+ PHP 版本注释作废
+
+**起点**：[D270] 把 DVWA 接进 CI 验收后，首跑 run `42389845492`（head `50859eb7b`）
+于 2026-11-08 00:43 结束：整体 **success**、**0 个红 job**；acceptance job
+`128457549166` 的 step 20「启动 DVWA」与 step 22「全方位验收门禁」均 success，
+step 23「套件失败现场」按设计 skipped。
+
+**实测（现行口径）**：job 日志 `:811-812` = **24 PASS / 0 BLOCKED / 0 FAIL / 3 SKIP**、
+**套件范围 24/27 跑出断言**；`--expect=file-read,file-write` 全部兑现。
+DVWA 外部裁判真值 **5/5**、安全端点误报 0（cookie / POST / 盲注 POST / impossible）；
+数据泄露实证 **6 个真库名 / 238 请求 / 2 漏洞**（本机等价验证为 11 库名 / 209 请求，
+口径不同但均 PASS）。3 SKIP = OWASP Benchmark（缺 JDK + mvn 构建产物）、VulnLab
+（PHP 靶场未 provision）、AI 报告网关端到端（外部 LLM 网关）。
+
+**作废链（归档 ≠ 删除）**：[D269] 段与 README 的「CI 22 PASS / 5 SKIP」、[D270] 段的
+「CI 首跑尚未跑，预期 22/27 → 24/27」以及「依据：Ubuntu 24.04 runner 预装 PHP 8.3.6」
+均为当时的快照 / 预期 / 假设，自本批起**不再作为现行口径**；旧数字原样保留在各自段落。
+「不得宣称 27 套件全绿」仍成立 —— 24/27 ≠ 27/27。
+
+**改动**（只改文档与注释，不动判据 / 阈值 / 引擎 / 测试）：
+- README「验收门禁」段新增 **[D271] 现行口径表**（CI 24/27 + 3 SKIP 逐项原因；
+  本机 24/27 保留），[D269] 表降级为「历史口径快照」并保留原文。
+- TODO 顶部补本批段；`ci.yml:776` 注释把「预装 PHP 8.3.6」更正为 CI 实测
+  **PHP 8.5.4**（run `42389845492` 日志 `:678`），并注明 runner 预装版本随镜像滚动。
+- 索引由 `node scripts/changelog-index.mjs --write` 重生成（54 → 55 批次）。
+
+**诚实边界 / 遗留**：
+- CI 的 24/27 与本机两轮合计的 24/27 **缺口组成不同，不可相加或互证**；
+  也没有任何单次运行达到 27/27。
+- `ci.yml:785` 的 apt 兜底包名写死 `php8.3-mysql`：本轮 mysqli 已存在、兜底未触发；
+  若未来 runner 换 PHP 版本且缺 mysqli，装错包会让该步**显式红**（fail-closed，不产生假绿）。
+  **本批未改兜底逻辑**，动态包名属后续批次候选。
+- 剩余 3 个 SKIP 需 JDK+mvn / PHP 靶场 / 外部 LLM 网关才可能收；`ai-gateway` 按 [D269]
+  建议长期如实 SKIP，不得用 mock 冒充通过。
+- `README.en.md` 与 [D269] 一致未同步口径表；本批未扩大 CI 覆盖。
+
+**验证**：`node scripts/changelog-index.mjs --write` + `npm run gate:close` 按退出码收口；
+表中每个数字都对应 CI acceptance job 日志。
+**证据**：CI run `42389845492` / acceptance job `128457549166` 全日志
+（88KB / 1010 行，本地留档 `.box-agent-scratch/ci-acceptance.log`）；
+带 PAT 复现命令 `curl -sL https://api.github.com/repos/fengxingxuerong/sqli-scanner/actions/jobs/128457549166/logs`。
+
+### 2026-11-07 批次 D270 · DVWA 接入 CI 验收（解锁 2 个长期 SKIP）
+
+**起点**：[D269] 把 CI 覆盖口径写实后，5 个 SKIP 里 **DVWA 与「数据泄露实证」同源** ——
+`extract-proof` 的 SKIP 条件就是「DVWA 不可达」。`ci.yml` 原注释把 dvwa / benchmark 的
+CI 化列为「镜像内含 MySQL 启动链 / Java 构建链未验证，不盲猜」。
+
+**做法（不盲猜：先本机等价验证，再改 workflow）**：
+- 新增 `scripts/ci-dvwa.mjs`（`up` / `stop` / `check`）：按 **pin 的 commit**
+  （`a1978a2f`，2026-10-18）从 codeload 下载源码 → 建库 → `php -S` 起服务 →
+  GET `setup.php` 抠 `user_token`（**单引号属性**，按双引号 grep 会抠不到）→ POST 建表 →
+  sqli low 页面就绪探测。**配置全走 getenv**（`config.inc.php` 与 `.dist` 逐行相同，
+  与 `scripts/lib/labs.mjs` 的 dvwaSpec 同源，不改写配置文件）。
+- `ci.yml` acceptance job 新增「启动 DVWA（外部裁判 3 号）」：先 `php -v` 打印版本，
+  **mysqli 缺失先 apt 兜底、仍缺则显式红**；`timeout-minutes: 8`。
+- 验收步骤把 `dvwa` 加进 `--require-labs=juice,vampi-vuln,vampi-safe,dvwa`
+  ⇒ 起不来就红，不再有「静默 SKIP」的第三条路。`extract-proof` 不单独列 `--expect`：
+  它的前置就是 DVWA，DVWA 在跑时会自然真跑。
+- 依据：Ubuntu 24.04 runner **预装 PHP 8.3.6**（`actions/runner-images` 的
+  Ubuntu2404-Readme），不需要第三方 setup-php action（也就没有 pin 问题）。
+
+**验证**：
+- 本机等价全链（起 MariaDB → `ci-dvwa up` → 两套件 → 双 stop 同一条命令）：
+  `ci-dvwa up` **exit 0**；DVWA 外部裁判 **exit 0**（真值 5/5、同源复检 1/1、
+  impossible 零误报）；数据泄露实证 **exit 0**（11 个真库名 / 209 请求 / 3 条漏洞）；
+  `ci-dvwa stop` 与 `labs --stop` 均 exit 0，收干净。
+- YAML 解析通过（acceptance 27 步）、`ciWorkflows.guard` **5/5**、
+  七道守卫（arch/complexity/nesting/duplication/deadcode/debt/typecoverage）全 0、
+  `eslint scripts/ci-dvwa.mjs` 0。
+- CI 首跑结果以 run 结论为准（本条落地时尚未跑；预期 acceptance 从 22/27 → 24/27）。
+
+**边界**：本批只接 DVWA（PHP 栈）。VulnLab 需额外 clone 第三方仓库、Benchmark 需
+JDK + mvn 构建、ai-gateway 需外部 LLM 网关，均未纳入。CI 上若 runner 的 PHP 版本 /
+mysqli 扩展 / codeload 网络任一不符，该步骤会**显式红**（不是 SKIP）——首跑盯红。
+
+### 2026-11-07 批次 D269 · 验收覆盖口径修正（27 套件 ≠ 全绿）
+
+**问题**：README「验收门禁」段把 2026-10-25 的「26 PASS / 0 SKIP（26 套件全绿）」写成
+**现行基线**（原文「上句为现行基线」），但套件数已在 [D228] 增至 **27**，且当日实测
+**没有一次 27/27**：CI `acceptance` = **22 PASS / 0 BLOCKED / 0 FAIL / 5 SKIP**；
+本机两轮（首轮 9 PASS + 定向补跑 15 PASS）= **24/27 有断言、0 FAIL**。
+对外读者会把「26/26 全绿」读成当前覆盖 ⇒ 属 §3.5 要抓的过期口径。
+
+**改动**（只改文档表述，不动任何判据 / 阈值 / 代码）：
+- README「验收门禁」段新增 **[D269] 现行口径表**：CI 22/27（5 个 SKIP 逐项给原因）
+  + 本机 24/27（3 个残留 SKIP），并写死「**不得宣称 27 套件全绿**」。
+- 原 2026-10-25 段**降级为「历史全量结果（26 套件时代）」**，正文与明细表原样保留
+  （归档 ≠ 删除），并注明「不是 27 套件的现行口径」。
+- CHANGELOG / TODO 补本批段；索引由 `changelog-index.mjs --write` 重生成。
+
+**验证**：`npm run readme:check`、`gate:close --quick` 按退出码收口；表中每个数字都对应
+本轮实测（CI run `42384071091` 的 acceptance 日志 + 本机两轮 acceptance 输出）。
+
+**边界**：本批**只修正表述，不扩大 CI 覆盖**。要真正收掉 5 个 SKIP 需要给 CI 加环境
+provision（DVWA / VulnLab 需 PHP，Benchmark 需 JDK + mvn 构建，ai-gateway 需外部 LLM 网关），
+属独立批次；`ai-gateway` 在无网关的 CI 上应长期如实 SKIP，不得用 mock 冒充通过。
+
+### 2026-11-07 批次 D268 · 工作区产物归档 + 忽略规则防复发（chore，归档不删除）
+
+**起点**：用户要求「把工作区那 16 个脏产物归档/清理」。扫描后按性质分三类处理，**不删任何内容**。
+
+**处理**：
+- **12 个已跟踪的 `e2e/**/results/*` 波动**（1–69 行，时间戳 / 随机种子 / 环境差异）：
+  先把当前内容备份到 `.box-agent-scratch/archive-2026-11-07/`（12 个文件 + 36KB 统一 patch），
+  再 `git checkout --` 恢复成 HEAD 版本 —— 证据回到已提交状态，波动可随时用 patch 重放。
+- **未跟踪 `.dsh-vision-router/`（8 张截图缓存，428K）与 `data/`（引擎台账 71K）**：
+  移动到同一归档目录（`data/` 经 `git ls-files` 确认零跟踪文件，纯运行数据）。
+- **3 份 `external-judge-2026-11-0{4,6,7}-d156.md`**：与已入库的 11-01 / 11-03 同格式，
+  是 VulnLab 外部裁判的落盘证据 ⇒ **入库**（不是删）。
+- **`.gitignore` 新增 `/data/` 与 `.dsh-vision-router/`** 两条并写明原因，现场自检命中
+  （`git check-ignore` 报 `.gitignore:271` / `:272`），防下次再脏。
+
+**验证**：处理前 17 项脏（12 M + 5 未跟踪）→ 处理后只剩本批 4 个待提交文件；
+忽略规则自检命中；`gate:close --quick` 按退出码收口。
+
+**边界**：只整理产物与忽略规则，不改任何生产代码 / 测试 / 阈值 / 断言；
+归档目录位于 `.box-agent-scratch/`（gitignore），不随仓库分发，可随时取回；
+被恢复的 12 个产物若需重新入库，用归档里的 `results-dirty.patch` 重放。
+
+### 2026-11-07 批次 D267 · macos-latest Server tests 假红修复（/var → /private/var）
+
+**问题**：CI `test-matrix (macos-latest)` 自 D265 起长期红，整个 job 唯一失败用例是
+`--data-dir 相对路径按当前工作目录解析`；`windows-latest` 与 `test-server` 全绿。
+
+**根因（CI job 日志实证，非推断）**：断言 `actual: '/private/var/...' / expected: '/var/...'`。
+macOS 的 `/var` 是指向 `/private/var` 的符号链接：`process.chdir(tmpRoot)` 之后
+`process.cwd()` 返回**解析后的物理路径**，而测试用字面 `tmpRoot` 拼期望值 ⇒ `strictEqual` 必失败。
+Windows / Linux 没有这层链接，`cwd === 字面 tmpRoot`，所以本机长期假绿。
+
+**改动**（只动测试，生产实现零变化）：
+- `server/tests/scanLedger.dataDir.test.js`：期望值改用 `chdir` 之后的 `process.cwd()`，
+  并在注释里写明 macOS 链接语义。用例断言的语义就是「相对路径按**当前工作目录**解析」，
+  改成 cwd 是**校正断言语义**，不是放宽 —— 仍然精确相等，且仍要求目录被创建。
+- CHANGELOG/TODO 补本批段；索引由 `changelog-index.mjs --write` 重生成。
+
+**验证**：
+- 本机 Windows `node --test tests/scanLedger.dataDir.test.js` **4/4 绿**；
+- **判据敏感性复验**：用 Windows junction 造出「`process.cwd()` ≠ 字面路径」的等价环境，
+  旧断言**红**、新断言**绿**（`.box-agent-scratch/d267/sensitivity.mjs` exit 0）——
+  证明修复对 cwd 与字面路径的差异敏感，不是把断言改松；
+- 改测试文件后按纪律重采 facts（fingerprint 变化，用例数不变），`gate:close` 按退出码收口；
+- 推 CI 后以 `test-matrix (macos-latest)` 的 run 结论为准（本条落地时尚未复跑）。
+
+**[D267 补记 2026-11-07 23:30]** 推送后 CI run `42384071091` **全绿**：
+`test-matrix (macos-latest)` 的 step 12 **Server tests = success**、job = success、整个 run = **success**
+（11 个应跑 job 全 success；`modsec-live` / `tamper-waf-matrix` 是 schedule-only，
+`docker-publish` / `desktop-package` / `release` 是 tag-only，按设计 skipped）。
+这是 master push CI 首次全绿 —— D265 / D266 两轮都因本条 macos 红灯判 failure。
+
+**诚实边界**：本机 win32，macOS 结论由 CI 日志（actual `/private/var/...`）+
+junction 等价复现共同支撑，并已由 CI run `42384071091` 复跑确认；
+不碰任何生产代码 / 阈值 / 其他断言；macos 之外若还有平台差异，本批不覆盖。
+
+### 2026-11-07 批次 D266 · AI 报告真网关闭环口径固化（docs + 台账）
+
+**起点**：D265 发版后，D263/D264 留下的「慢网关上 AI 报告只能出半成品」仍无闭环口径；
+用户确认按 D266 批次收口。本批**未改任何生产代码 / 测试 / 阈值 / 断言**。
+
+**改动**：
+- `docs/AI-网关-runbook.md` 新增 §5.4：dsh `qodercn/dfmodel` + 单章 120s + 整场 600s 的
+  推荐配置、最小复现命令、`ReportAI.js:473` 的 `min(调用方, 总闸)` 源码依据与边界；
+  明确 §5.3「不得宣称 dsh / `glm-5.3-flash` 已 PASS」的边界仍成立（限定的是当时模型与配置）。
+- `e2e/ai-gateway-lab/results/` 落盘三份证据：实测记录 md、12 行逐请求 jsonl、
+  CLI × DVWA 的 11 条闭环检查 json（均已 `git add`，限定路径）。
+- `docs/_claims-ledger.json` 新增 `ai-report-d266-dsh-qodercn`（verified，证据指向上述入库产物）；
+  按 §3.5「每批至少复核 1 条」复核 `waf-fingerprint-coverage`（仍缺商业云 WAF 真机样本，
+  **维持 unverified**）。质量台账由 `quality-ledger.mjs` 重生成，索引由 `changelog-index.mjs --write` 重生成。
+- TODO 补本批段；当日工作日志记推翻链。
+
+**推翻链**：D264「分步 11 章 × ~30s > 默认 300s 总闸」作为 FAIL 根因**作废**——
+总闸抬到 600s 后 254s 就返回，真实失败是单章 60s 超时 ×2 + 上游 429 ×3。
+影响面 grep 确认只在 D264 一次性结论与工作日志（CHANGELOG/TODO 的 D264 段未复述）；
+旧数字原样保留，新根因见 `e2e/ai-gateway-lab/results/D266-真网关实测-2026-11-07.md`。
+
+**验证**（退出码 + 落盘产物，非自报）：`ai-gateway` 套件 exit 0（writer 5/5、审阅 5/5 ✅、
+`partial=false`、42700B / 484383ms）；`cli.js --ai-report` exit 2（3 命中 / High / 113 请求）
+且 AI 报告 44159B / 412505ms / `partial=false`；DVWA 官方真值 exit 0（5/5、同源 1/1、0 误报）；
+`labs --stop` exit 0 且 8099/3306 关闭；CLI 闭环 11/11 检查 true；`stale-claim-check` exit 0；
+全量 `npm run gate:close` 按退出码收口（不在此写死项数，避免未验证断言）。
+
+**诚实边界**：PASS 依赖显式 env，默认 60s/章 + 300s 总闸**仍不成立**（源码推断，未实跑复验）；
+`qodercn/dfmodel` 在 `/v1/models` 显示名为「DeepSeek-Flash · x0.1」，网关未标 v4.1，
+`trae/deepseek-v4.1-flash` 本轮未完成验收；套件只验链路事实不判文风；只测 DVWA low 档
+`id@url` 一个注入面，不外推全局检出率；模型响应波动（484s / 412s）不作性能结论。
 
 ### 2026-11-07 批次 D265 · v1.3.2 发版（版本对齐 + 交付收口）
 

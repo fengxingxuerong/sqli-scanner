@@ -490,7 +490,7 @@ npm run artifact:drift   # 入库的 e2e 基线产物必须等于当前代码跑
 
 - TypeScript: 零错误
 - 前端测试: 579/579 通过（覆盖率门禁 stmts 93.26 / branch 84.36 / func 80.59，阈值 88/77/67）
-- 服务端测试: 4224 用例（4218 pass / 0 fail / 6 skip，并发口径 2026-11-06 复测；6 skip 为环境依赖显式跳过。覆盖率 lines 95.42 / branch 81.77 / func 89.62，阈值 85/74/77）
+- 服务端测试: 4224 用例（4218 pass / 0 fail / 6 skip，并发口径 2026-11-07 复测；6 skip 为环境依赖显式跳过。覆盖率 lines 95.42 / branch 81.77 / func 89.62，阈值 85/74/77）
 - 一键扫描: `npm run scan -- -u <url>`（CLI 一条命令产出 HTML/JSON/Markdown 全套报告 + manifest，退出码可直接进 CI 门禁）
 - Tamper 插件: 234 个（含批次 D3 新增 scalarselectinline；含 v24 增量 20 个，对齐 sqlmap 官方 tamper 全集，含官方 CRS/libinjection 实测组合 uniontable+odbcbrace；含批次 D13 新增 5 件上游形态变体 *nospace/*open/*block，真机 A/B 判决前不进默认链）
 - WAF 绕过能力: 200+ 插件链式组合，覆盖 62 个 WAF 厂商指纹识别 + 推荐
@@ -766,14 +766,44 @@ node e2e/acceptance.mjs --require-labs=dvwa,juice   # 指定靶场变硬要求�
   经 `run-with-sandbox.py` 注入沙箱连接信息后 16/16 全绿（含 fileRead/fileWrite 真闭环，
   secure_file_priv 由沙箱放行）；直连宿主的旧口径在 3306 无 MySQL 时会把 6 个套件 BLOCKED。
 
-**最近一次全量结果（2026-10-25，[D156] 起 26 套件；原始报告 [e2e/results/acceptance-report.md](e2e/results/acceptance-report.md)；
+**[D271 2026-11-08 现行口径] 套件数 27**（[D228] 接入 `ai-gateway`；[D270] 把 DVWA 接进 CI）。
+截至本日实测，**没有任何一次运行达到 27/27 全断言**，真实口径如下：
+
+| 运行 | 结果 | 缺口 |
+|---|---|---|
+| CI `acceptance` job（[run 42389845492](https://github.com/fengxingxuerong/sqli-scanner/actions/runs/42389845492)，2026-11-08，head `50859eb7b`） | **24 PASS / 0 BLOCKED / 0 FAIL / 3 SKIP**（套件范围 **24/27**，exit 0） | OWASP Benchmark（缺 JDK + mvn 构建产物）、VulnLab（PHP 靶场未 provision）、AI 报告网关端到端（外部 LLM 网关）—— 均如实 SKIP |
+| 本机（2026-11-07，起 MariaDB+DVWA+Juice+VAmPI×2）分两轮 | 首轮 **9 PASS**、定向补跑 **15 PASS / 0 FAIL**；合计 **24/27 有断言、0 FAIL** | `oob-real`（缺 PG 5432）、`benchmark`（缺 JDK/构建产物）、`ai-gateway`（本机网关未注入验收 env；该套件已由 [D266] 用同一个 `e2e/ai-gateway-lab/run.mjs` 单独验 exit 0） |
+
+> ⇒ **不得宣称「27 套件全绿」**：CI 的 24/27 与本机两轮合计的 24/27 **缺口组成不同，
+> 不可相加或互证**。[D270] 起 CI 把 DVWA 与数据泄露实证纳入硬要求，解锁 2 个长期 SKIP。
+> 证据：CI acceptance job `128457549166` 日志 `24 PASS / 0 BLOCKED / 0 FAIL / 3 SKIP`
+> 与 `套件范围：24/27 跑出断言`；`--expect=file-read,file-write` 全部兑现。
+> 下面的 [D269] 表与 `26/26`、`25/25` 都是历史快照，保留原文是为了留证，不代表当前覆盖；
+> 引用前先看上面的 [D271] 现行口径表。
+>
+> **[D273 2026-11-08 补记]** [D272] 首跑 [run 42397466577](https://github.com/fengxingxuerong/sqli-scanner/actions/runs/42397466577)
+> 为 **failure**（唯一红 job = `acceptance`；Recall-lab 前置步骤未达标 ⇒ 验收门禁**未执行**），
+> **本轮未产生任何套件结论**；上表 24/27 仍是唯一现行口径。
+
+**历史口径快照（[D269] 2026-11-07；自 [D271] 起作废，原文保留作推翻链）**：
+套件数从 26 → 27（[D228] 接入 `ai-gateway`），当日没有任何一次运行达到 27/27 全断言：
+
+| 运行 | 结果 | 缺口 |
+|---|---|---|
+| CI `acceptance` job（[run 42384071091](https://github.com/fengxingxuerong/sqli-scanner/actions/runs/42384071091)，2026-11-07） | **22 PASS / 0 BLOCKED / 0 FAIL / 5 SKIP** | DVWA、OWASP Benchmark、VulnLab、数据泄露实证、AI 报告网关 —— 均因 CI 未 provision 对应环境（PHP/Java/LLM 网关），套件如实 SKIP |
+| 本机（2026-11-07，起 MariaDB+DVWA+Juice+VAmPI×2）分两轮 | 首轮 **9 PASS**、定向补跑 **15 PASS / 0 FAIL**；合计 **24/27 有断言、0 FAIL** | `oob-real`（缺 PG 5432）、`benchmark`（缺 JDK/构建产物）、`ai-gateway`（本机网关未注入验收 env；该套件已由 [D266] 用同一个 `e2e/ai-gateway-lab/run.mjs` 单独验 exit 0） |
+
+> ⇒ [D269] 当时写死「**不得宣称 27 套件全绿**」，本批沿用；下面的 `26/26` 与 `25/25`
+> 是历史套件数时代的快照，保留原文是为了留证，不代表当前覆盖；引用前先看上面的 [D271] 现行口径表。
+
+**历史全量结果（2026-10-25，26 套件时代；原始报告 [e2e/results/acceptance-report.md](e2e/results/acceptance-report.md)；
 10-23 的 25 套件时代全绿与四项旧未决复验见 [e2e/results/external-sweep-2026-10-23-v1.2.0.md](e2e/results/external-sweep-2026-10-23-v1.2.0.md)）**：
 **26 PASS / 0 BLOCKED / 0 FAIL / 0 SKIP（26 套件全绿；六个外部裁判全部在本机起真靶场，
 无 SKIP、无 BLOCKED；服务端单测 3773 用例 0 挂）**。
 （D156 接入当日的第一次全量复跑曾因环境性干扰出现 4 红/跳——外部 PG 与 Juice Shop 短暂
 下线、验收器随机端口基址与本机另一应用在 8326 巧合碰撞（`PORT_BASE=8200+pid%200`，约
 1/200 概率、非硬编码缺陷）、并发会话同时跑验收致 2 例单测相互干扰（隔离复跑绿）；同日
-环境恢复后复跑即 26/26 全绿，上句为现行基线。）
+环境恢复后复跑即 26/26 全绿。**该段是 26 套件时代的历史基线，不是 27 套件的现行口径**。）
 
 | 套件 | 本轮事实 | 状态 |
 |---|---|---|

@@ -263,3 +263,10 @@ bench/results/
 # [D228] --ai-report 默认落点（扫描产物的 AI 报告目录，不入库）
 ai-report/
 .zcode/
+
+# [D268] 运行期产物（2026-11-07 清理归档，防复发）：
+#   /data/              —— 引擎台账默认落点（node 跑源码形态是 server/data/ledger，
+#                          但从仓库根直接跑 CLI 会在根生成 data/ledger；属于运行数据）
+#   .dsh-vision-router/ —— 视觉路由工具的截图缓存（artifacts/*.png，非本仓产物）
+/data/
+.dsh-vision-router/

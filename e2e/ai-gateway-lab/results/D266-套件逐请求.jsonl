@@ -1,0 +1,12 @@
+{"n":1,"atMs":2,"tag":"","promptChars":0,"status":200,"ms":51,"finish":null,"contentLen":0,"reasoningLen":0,"err":null}
+{"n":2,"atMs":69,"tag":"qodercn/dfmodel|【分步·分析】分析下面的 SQL","promptChars":492,"status":200,"ms":17348,"finish":"stop","contentLen":1131,"reasoningLen":5507,"err":null}
+{"n":3,"atMs":17420,"tag":"qodercn/dfmodel|【分步·章节】写「一、漏洞概述」","promptChars":1040,"status":200,"ms":10950,"finish":"stop","contentLen":1021,"reasoningLen":2957,"err":null}
+{"n":4,"atMs":28372,"tag":"qodercn/dfmodel|【分步·章节】写「二、漏洞描述」","promptChars":1056,"status":200,"ms":15691,"finish":"stop","contentLen":1959,"reasoningLen":2189,"err":null}
+{"n":5,"atMs":44065,"tag":"qodercn/dfmodel|【分步·章节】写「三、漏洞证明（","promptChars":1102,"status":200,"ms":29311,"finish":"stop","contentLen":1231,"reasoningLen":11512,"err":null}
+{"n":6,"atMs":73378,"tag":"qodercn/dfmodel|【分步·章节】写「四、影响评估」","promptChars":1042,"status":200,"ms":26196,"finish":"stop","contentLen":2634,"reasoningLen":5314,"err":null}
+{"n":7,"atMs":99576,"tag":"qodercn/dfmodel|【分步·章节】写「五、修复方案」","promptChars":1053,"status":200,"ms":84089,"finish":"stop","contentLen":3656,"reasoningLen":15642,"err":null}
+{"n":8,"atMs":183668,"tag":"qodercn/dfmodel|【分步·章节】审阅并修订「一、漏","promptChars":1071,"status":200,"ms":48481,"finish":"stop","contentLen":1842,"reasoningLen":13667,"err":null}
+{"n":9,"atMs":232152,"tag":"qodercn/dfmodel|【分步·章节】审阅并修订「二、漏","promptChars":1071,"status":200,"ms":48151,"finish":"stop","contentLen":3972,"reasoningLen":10475,"err":null}
+{"n":10,"atMs":280305,"tag":"qodercn/dfmodel|【分步·章节】审阅并修订「三、漏","promptChars":1076,"status":200,"ms":48429,"finish":"stop","contentLen":2410,"reasoningLen":9740,"err":null}
+{"n":11,"atMs":328737,"tag":"qodercn/dfmodel|【分步·章节】审阅并修订「四、影","promptChars":1071,"status":200,"ms":80558,"finish":"stop","contentLen":5229,"reasoningLen":19074,"err":null}
+{"n":12,"atMs":409299,"tag":"qodercn/dfmodel|【分步·章节】审阅并修订「五、修","promptChars":1071,"status":200,"ms":75147,"finish":"stop","contentLen":4207,"reasoningLen":23783,"err":null}

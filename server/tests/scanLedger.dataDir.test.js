@@ -62,9 +62,14 @@ test('--data-dir 相对路径按当前工作目录解析', () => {
   const oldCwd = process.cwd();
   process.chdir(tmpRoot);
   try {
+    // [D267] macOS 的 /var 是指向 /private/var 的符号链接：chdir 之后 process.cwd()
+    // 返回解析后的物理路径，与字面 tmpRoot 不同（CI 实测 actual=/private/var/... vs
+    // expected=/var/...）。本用例的语义是「相对路径按**当前工作目录**解析」，
+    // 所以期望值必须以 chdir 后的 cwd 为准；Windows/Linux 上两者本来就相同。
+    const cwdNow = process.cwd();
     setLedgerDirOverride('relative-ledger');
     const got = ledgerRoot();
-    assert.equal(got, resolve(tmpRoot, 'relative-ledger'));
+    assert.equal(got, resolve(cwdNow, 'relative-ledger'));
     assert.ok(existsSync(got), '目录不存在时应按既有逻辑创建');
   } finally {
     process.chdir(oldCwd);

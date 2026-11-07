@@ -747,7 +747,8 @@ jobs:
       # 镜像 erev0s/vampi（上游 README 官方镜像），vulnerable 环境变量切档；
       # 种子走 /createdb（与 labs.mjs seedPath 同源）。⚠️ CI 段无法本地实证，首跑盯红：
       # 镜像 tag / 种子路径 / 端口冲突任一不对都会在此步显式红，不会静默 SKIP。
-      # dvwa / benchmark 的 CI 化遗留：镜像内含 MySQL 启动链 / Java 构建链未验证，不盲猜。
+      # [D272 2026-11-08] dvwa 已由 [D270] 接进 CI（源码 + PHP 内置服务器，非 docker 镜像）、
+      # vulnlab 由 [D272] 同法接入；benchmark 的 Java 构建链仍未验证，不盲猜。
       - name: 启动 VAmPI 双实例（外部裁判 2 号：A/B 对照）
         run: |
           docker run -d --name vampi-vuln -p 5000:5000 -e vulnerable=1 erev0s/vampi:latest
@@ -773,8 +774,59 @@ jobs:
       #   （默认口径是不 fail —— 本机没起 mysqld 不是代码缺陷；但在这里跳过就是降级）。
       #   两条 MySQL 场景真跑过的现场：本机指到 127.0.0.1:3306，检出分别为
       #   [union,error,boolean] 与 [boolean]。
+      # [D270 2026-11-07] 外部裁判 3 号（DVWA）硬起。[D271 2026-11-08 更正] 首跑
+      # run 42389845492 日志实测 PHP 8.5.4；runner 预装版本随镜像滚动，D270 注释里的
+      # 预装版本假设已作废（旧数字保留在 CHANGELOG D270 段）。本链路只要求 php CLI + mysqli，
+      # 不依赖具体小版本。源码按 pin 的 commit 下载（codeload），
+      # 配置全走 getenv（`config.inc.php` 与 dist 逐行相同，与 scripts/lib/labs.mjs 的
+      # dvwaSpec 同源，不改写配置文件）。本机等价验证：`ci-dvwa.mjs up` → DVWA 真值 5/5 +
+      # 数据泄露实证 11 个真库名 / 209 请求。⚠️ mysqli 缺失时本步显式红（先 apt 兜底），
+      # 不留「静默 SKIP」的路；起不来就是红，不是 SKIP。
+      - name: 启动 DVWA（外部裁判 3 号：PHP + MySQL）
+        run: |
+          php -v
+          PHP_V=$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;')
+          php -m | grep -qx mysqli || sudo apt-get install -y "php${PHP_V}-mysql"
+          php -m | grep -qx mysqli || { echo "::error::PHP 缺 mysqli 扩展，DVWA 无法建表"; exit 1; }
+          node scripts/ci-dvwa.mjs up
+        env:
+          MYSQL_HOST: 127.0.0.1
+          MYSQL_PORT: 3306
+          MYSQL_USER: root
+          MYSQL_PASSWORD: root
+          DVWA_PORT: 8099
+        timeout-minutes: 8
+      - name: 启动 VulnLab（外部裁判 5 号：PHP + pdo_sqlite）
+        # [D272] 与 D270 同构：pin 下载 + 起 php -S（Linux 走正常 php.ini，pdo_sqlite 由本步
+        # apt 兜底保障）+ 官方真值最低形态探针确认种子生效。起不来、种子无差分 ⇒ 本步显式红，
+        # 不留「起得来却静默 SKIP」的第三条路（D162 的 CI 实测教训）。
+        run: |
+          php -v
+          PHP_V=$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;')
+          php -m | grep -qx pdo_sqlite || sudo apt-get install -y "php${PHP_V}-sqlite3"
+          php -m | grep -qx pdo_sqlite || { echo "::error::PHP 缺 pdo_sqlite 扩展，VulnLab 无法建库"; exit 1; }
+          node scripts/ci-vulnlab.mjs up
+        env:
+          VULNLAB_DIR: .verify-labs/vulnlab-ci
+        timeout-minutes: 8
       - name: Recall-lab e2e（18 条，含 2 条真实 MySQL 方言）
-        run: node e2e/recall-lab/recall.e2e.js
+        # [D273] 有界重试只吸收 runner 负载抖动：D272 首跑 run 42397466577 上 orderby
+        # 偶发「检出=[time] miss=[boolean]」（122 请求 / 5.1s + 2 条 HTTP 超时），本机 3/3
+        # 复跑与 D270 首跑均稳定（95 请求 / 2.1s，检出 boolean）。must 判据一字未改；
+        # 连续 2 次未达标仍 exit 1，真回归不会被吞。重试次数如实打进日志。
+        run: |
+          for attempt in 1 2; do
+            echo "::group::recall-lab 第 ${attempt} 次"
+            if node e2e/recall-lab/recall.e2e.js; then
+              echo "::endgroup::"
+              echo "recall-lab 第 ${attempt} 次通过"
+              exit 0
+            fi
+            echo "::endgroup::"
+            echo "::warning::recall-lab 第 ${attempt} 次未达标（环境抖动或真回归，按上限重试后再判）"
+          done
+          echo "::error::recall-lab 连续 2 次未达标 ⇒ 判红（不放宽断言）"
+          exit 1
         env:
           MYSQL_HOST: 127.0.0.1
           MYSQL_PORT: 3306
@@ -793,11 +845,19 @@ jobs:
         # 所以这里用 --require-labs 把「靶场不可达 ⇒ SKIP」改成开跑前失败：
         # 要么真跑，要么明确红，不再有第三条「静默跳过」的路。
         # [D228] vampi-vuln/vampi-safe 同法纳入硬要求（上面双实例硬起；多值判据 D148 已有）。
-        run: npm run acceptance -- --expect=file-read,file-write --require-labs=juice,vampi-vuln,vampi-safe
+        # [D270] dvwa 同法纳入：上面「启动 DVWA」硬起（起不来该步就红），这里再把
+        # 「靶场不可达 ⇒ SKIP」改成开跑前失败 —— dvwa 与依赖它的「数据泄露实证」
+        # 要么真跑，要么明确红。extract-proof 不单独列 --expect：它的前置就是 DVWA，
+        # DVWA 在跑时会自然真跑（套件内部判据见 e2e/extract-proof/run.mjs）。
+        # [D272] vulnlab 同法纳入：上面「启动 VulnLab」硬起（含真值探针，起不来就红），这里把
+        # 「靶场不可达 ⇒ SKIP」改成开跑前失败。VULNLAB_DIR 让 run.mjs 复用已下载的 pin 源码
+        # （否则它会自己 git clone，把第三方网络不确定性带回 CI）。
+        run: npm run acceptance -- --expect=file-read,file-write --require-labs=juice,vampi-vuln,vampi-safe,dvwa,vulnlab
         env:
           MYSQL_PORT: 3306
           MYSQL_USER: root
           MYSQL_PASSWORD: root
+          VULNLAB_DIR: .verify-labs/vulnlab-ci
           # 与上面 docker 挂载卷对应：让 fileWrite/fileRead 在 runner 可见的路径上验证
           FILE_WRITE_DIR: /tmp/mysql-fw-lab/out
           FILE_READ_TARGET: /tmp/mysql-fr-lab/secret.txt

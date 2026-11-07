@@ -162,6 +162,22 @@ function postgresSpec() {
 }
 
 /**
+ * [D272] VulnLab：外部裁判 5 号（PHP + pdo_sqlite，三档真值）。
+ * CI 由 scripts/ci-vulnlab.mjs 硬起（pin 源码 + 种子库 + 真值探针），本仓体检只探测端口；
+ * 设成 probeOnly 是为了让 `--require-labs=vulnlab` 有可判的 id，又不让本机 labs --up 尝试
+ * 用一份不存在的 Windows 配方去拉它。
+ */
+function vulnlabSpec() {
+  return {
+    id: 'vulnlab',
+    title: 'VulnLab 8135（外部裁判 5 号：三档真值；CI 由 ci-vulnlab.mjs 硬起，仅探测）',
+    port: 8135,
+    probeOnly: true,
+    requires: [],
+  };
+}
+
+/**
  * 本机靶场清单（每项 = 一个可探测的端口 + 一组前置 + 一条启动配方）。
  * 所有路径都可用环境变量覆盖；默认值是本机实测过的那套（D134–D138 的配方）。
  * @param {{ env?: Record<string, string|undefined>, repoRoot: string }} ctx 环境与仓库根
@@ -183,6 +199,7 @@ export function labSpecs({ env = {}, repoRoot }) {
     benchmarkDbSpec(p, home, repoRoot),
     benchmarkAppSpec(p, repoRoot),
     postgresSpec(),
+    vulnlabSpec(),
   ];
 }
 
