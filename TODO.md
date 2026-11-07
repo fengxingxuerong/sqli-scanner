@@ -5,6 +5,94 @@
 
 ---
 
+## 2026-11-07 批次 D270 · DVWA 接入 CI 验收（已完成本机验证，待 CI 首跑）
+
+**起点**：5 个 SKIP 里 DVWA 与「数据泄露实证」同源（后者的 SKIP 条件就是「DVWA 不可达」）。
+
+**改动**：新增 `scripts/ci-dvwa.mjs`（up/stop/check；pin `a1978a2f` 下载 + 建库 +
+`php -S` + setup token 单引号抓取 + 就绪探测，配置全走 getenv）；`ci.yml` acceptance
+新增「启动 DVWA」步骤（mysqli 缺失先 apt 兜底再硬红，timeout 8 分钟），并把 `dvwa`
+加进 `--require-labs`。
+
+**验证（本机等价，同一条命令起停）**：`ci-dvwa up` exit 0；DVWA 真值 **5/5**、
+同源 1/1、impossible 零误报；数据泄露实证 exit 0（**11 个真库名 / 209 请求**）；
+双 stop exit 0 收干净；YAML 解析 + ciWorkflows.guard 5/5 + 七道守卫全 0 + eslint 0。
+
+**边界**：只接 DVWA；VulnLab / Benchmark / ai-gateway 未纳入（环境成本或不可行）。
+CI 首跑盯红，预期 acceptance 从 22/27 → 24/27；README 现行口径表待首跑后更新。
+
+---
+
+## 2026-11-07 批次 D269 · 验收覆盖口径修正（已完成，见 CHANGELOG）
+
+**问题**：README 把 26 套件时代的「26/26 全绿」写成现行基线，而套件数已 27，
+CI 实测 22/27、本机两轮合计 24/27，都不存在 27/27 全断言。
+
+**改动**：README「验收门禁」段新增现行口径表（CI 22/27 + 5 SKIP 原因；本机 24/27 +
+3 SKIP），明确「不得宣称 27 套件全绿」；原 26 套件段降级为历史快照（原文保留）；
+CHANGELOG/TODO 补段。
+
+**验证**：`readme:check` 与 `gate:close --quick` 按退出码收口；数字全部来自本轮实测
+（CI run 42384071091 日志 + 本机 9 PASS / 15 PASS 两轮）。
+
+**边界**：只修正表述，不扩大 CI 覆盖；收 5 个 SKIP 需给 CI 加 PHP/JDK/LLM 网关，属独立批次。
+
+---
+
+## 2026-11-07 批次 D268 · 工作区产物归档 + 忽略规则防复发（已完成，见 CHANGELOG）
+
+**要求**：用户「把工作区那 16 个脏产物归档/清理」。
+
+**处理（归档不删除）**：12 个已跟踪 results 波动 → 备份 12 文件 + 36KB patch 到
+`.box-agent-scratch/archive-2026-11-07/` 后 `git checkout --` 恢复；
+`.dsh-vision-router/`（428K，截图缓存）与 `data/`（71K，引擎台账，零跟踪文件）→ 移入同一归档目录；
+3 份 `external-judge-2026-11-0{4,6,7}-d156.md`（VulnLab 证据，与已入库同格式）→ 入库；
+`.gitignore` 新增 `/data/` 与 `.dsh-vision-router/`（自检命中 :271/:272）。
+
+**验证**：17 项脏 → 只剩本批 4 个文件；`gate:close --quick` 按退出码收口。
+
+---
+
+## 2026-11-07 批次 D267 · macos-latest Server tests 假红修复（已完成，CI run 42384071091 全绿）
+
+**问题**：CI `test-matrix (macos-latest)` 长期红，唯一失败用例
+`--data-dir 相对路径按当前工作目录解析`。
+
+**根因（CI 日志实证）**：actual `/private/var/...` vs expected `/var/...` —— macOS 的
+`/var` → `/private/var` 符号链接；`chdir` 后 `process.cwd()` 是物理路径，测试却用字面
+`tmpRoot` 拼期望值。Windows/Linux 无此差异 ⇒ 本机长期假绿。
+
+**改动**：只改 `server/tests/scanLedger.dataDir.test.js`，期望值改用 `chdir` 后的
+`process.cwd()`（用例语义即「按当前工作目录解析」）；生产实现零变化，断言未放宽。
+
+**验证**：本机 4/4 绿；junction 等价环境敏感性复验「旧断言红 / 新断言绿」；
+改测试文件后重采 facts；`gate:close` **52/52 全绿**；推 CI 后 **run 42384071091 全绿**
+（macos step 12 Server tests = success、整 run = success，11 个应跑 job 全绿）
+⇒ **master push CI 首次全绿**（D265/D266 两轮均因本条判 failure）。
+
+**边界**：本机 win32，macOS 结论已由 CI 复跑确认；不覆盖 macos 之外的未知平台差异。
+
+---
+
+## 2026-11-07 批次 D266 · AI 报告真网关闭环口径固化（已完成，见 CHANGELOG）
+
+**要求**：用户确认「开始」立 D266 批次，把 D266 实测出的推荐配置固化进现行文档与结论台账。
+
+**改动**（docs + 台账，未改生产代码/测试/阈值/断言）：`docs/AI-网关-runbook.md` §5.4
+（推荐配置 + 最小复现命令 + `min(调用方, 总闸)` 依据 + 边界）；`e2e/ai-gateway-lab/results/`
+三份入库证据；`docs/_claims-ledger.json` 新增 1 条 verified + 复核 1 条 unverified；
+`docs/质量台账.md` 与 CHANGELOG 索引由脚本重生成；TODO/CHANGELOG 补段。
+
+**验证**：`ai-gateway` 套件 exit 0（5/5 审阅、`partial=false`）；CLI × DVWA exit 2 且
+AI 报告 `partial=false`；DVWA 官方真值 exit 0（5/5、0 误报）；CLI 闭环 11/11 检查 true；
+`labs --stop` exit 0；`stale-claim-check` exit 0；全量 `gate:close` 按退出码收口。
+
+**边界**：默认配置仍不成立（需显式 env）；`qodercn/dfmodel` 网关显示名未标 v4.1；
+只测 DVWA low 档 `id@url` 一个注入面；未测公网目标与商业云 WAF 授权样本。
+推翻链（D264 旧归因作废）见 `e2e/ai-gateway-lab/results/D266-真网关实测-2026-11-07.md`。
+
+---
+
 ## 2026-11-07 批次 D265 · v1.3.2 发版（已完成，见 CHANGELOG）
 
 **要求**：用户确认「发 v1.3.2」。

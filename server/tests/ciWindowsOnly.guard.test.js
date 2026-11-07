@@ -157,6 +157,21 @@ const KNOWN_SAFE = new Map([
     '同上：仅 need() 全绿后 spawn'],
   ["scripts/lib/labs.mjs:drive:env: { JAVA_HOME: p('JAVA_HOME', 'D:/tools/jdk/jdk-17.0.2') ",
     '同上：启动 env 里的 JAVA_HOME 默认值，随 cmd 不可达'],
+  // ── [D270 2026-11-07] DVWA 接进 CI acceptance 后新进入扫描面的脚本 ───────────────
+  // 触发条件同 D223：`scripts/ci-dvwa.mjs` 一旦被 ci.yml 的 run 指向，就进入
+  // 「ubuntu 会执行的本仓脚本」集合 ⇒ 立刻暴露这几个 Windows-only 字面量。
+  // 逐条核过平台路径，理由写在各自锚点旁（不是照单登记）。
+  ['scripts/ci-dvwa.mjs:wincmd:// node scripts/ci-dvwa.mjs stop # 按 pid 文件收工（Windows 用 task',
+    '该行是**注释**（JSDoc 用法说明），不参与执行；`stop` 在 ubuntu 上走 `process.kill(pid, "SIGTERM")`'],
+  ["scripts/ci-dvwa.mjs:exe:const PHP = process.env.PHP_BIN || (process.platform === 'wi",
+    'PHP 默认值：只有三元表达式的 win32 分支取 `D:/tools/php83/php.exe`；ubuntu 上 '
+    + '`process.platform !== "win32"` ⇒ 取 PATH 上的 `php`（runner 预装 8.3.6，ci.yml 该步先 `php -v`）。'
+    + 'ci.yml 未设 PHP_BIN'],
+  ["scripts/ci-dvwa.mjs:drive:const PHP = process.env.PHP_BIN || (process.platform === 'wi",
+    '同上（同一行的盘符默认值，仅 win32 分支可达）'],
+  ["scripts/ci-dvwa.mjs:wincmd:if (process.platform === 'win32') execFileSync('taskkill', [",
+    '该 `taskkill` 就在同一行的 `if (process.platform === "win32")` 之内，ubuntu 走下方 '
+    + '`process.kill(pid, "SIGTERM")`；且只杀 pid 文件里记录的、本脚本自己起的那个进程'],
 ]);
 
 /**

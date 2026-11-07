@@ -773,6 +773,25 @@ jobs:
       #   （默认口径是不 fail —— 本机没起 mysqld 不是代码缺陷；但在这里跳过就是降级）。
       #   两条 MySQL 场景真跑过的现场：本机指到 127.0.0.1:3306，检出分别为
       #   [union,error,boolean] 与 [boolean]。
+      # [D270 2026-11-07] 外部裁判 3 号（DVWA）硬起。Ubuntu 24.04 runner 预装 PHP 8.3.6
+      # （actions/runner-images 的 Ubuntu2404-Readme），源码按 pin 的 commit 下载（codeload），
+      # 配置全走 getenv（`config.inc.php` 与 dist 逐行相同，与 scripts/lib/labs.mjs 的
+      # dvwaSpec 同源，不改写配置文件）。本机等价验证：`ci-dvwa.mjs up` → DVWA 真值 5/5 +
+      # 数据泄露实证 11 个真库名 / 209 请求。⚠️ mysqli 缺失时本步显式红（先 apt 兜底），
+      # 不留「静默 SKIP」的路；起不来就是红，不是 SKIP。
+      - name: 启动 DVWA（外部裁判 3 号：PHP + MySQL）
+        run: |
+          php -v
+          php -m | grep -qx mysqli || sudo apt-get install -y php8.3-mysql
+          php -m | grep -qx mysqli || { echo "::error::PHP 缺 mysqli 扩展，DVWA 无法建表"; exit 1; }
+          node scripts/ci-dvwa.mjs up
+        env:
+          MYSQL_HOST: 127.0.0.1
+          MYSQL_PORT: 3306
+          MYSQL_USER: root
+          MYSQL_PASSWORD: root
+          DVWA_PORT: 8099
+        timeout-minutes: 8
       - name: Recall-lab e2e（18 条，含 2 条真实 MySQL 方言）
         run: node e2e/recall-lab/recall.e2e.js
         env:
@@ -793,7 +812,11 @@ jobs:
         # 所以这里用 --require-labs 把「靶场不可达 ⇒ SKIP」改成开跑前失败：
         # 要么真跑，要么明确红，不再有第三条「静默跳过」的路。
         # [D228] vampi-vuln/vampi-safe 同法纳入硬要求（上面双实例硬起；多值判据 D148 已有）。
-        run: npm run acceptance -- --expect=file-read,file-write --require-labs=juice,vampi-vuln,vampi-safe
+        # [D270] dvwa 同法纳入：上面「启动 DVWA」硬起（起不来该步就红），这里再把
+        # 「靶场不可达 ⇒ SKIP」改成开跑前失败 —— dvwa 与依赖它的「数据泄露实证」
+        # 要么真跑，要么明确红。extract-proof 不单独列 --expect：它的前置就是 DVWA，
+        # DVWA 在跑时会自然真跑（套件内部判据见 e2e/extract-proof/run.mjs）。
+        run: npm run acceptance -- --expect=file-read,file-write --require-labs=juice,vampi-vuln,vampi-safe,dvwa
         env:
           MYSQL_PORT: 3306
           MYSQL_USER: root

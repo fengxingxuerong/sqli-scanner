@@ -1,0 +1,48 @@
+{
+  "codes": {
+    "truth": 0,
+    "cli": 2,
+    "up": 0,
+    "ready": 0
+  },
+  "scan": {
+    "verdict": "vulnerability_detected",
+    "vulns": 3,
+    "severities": [
+      "High",
+      "Medium"
+    ],
+    "requests": 113
+  },
+  "ai": {
+    "model": "qodercn/dfmodel→qodercn/dfmodel→qodercn/dfmodel",
+    "elapsedMs": 412505,
+    "reviewNote": "✅ 已经过安全审阅角色校验（分章节短请求 5/5）",
+    "stepwise": {
+      "enabled": true,
+      "mode": "sections",
+      "fallback": null,
+      "writerSteps": 5,
+      "reviewedSections": 5,
+      "maxPromptChars": 1200,
+      "failedSteps": [],
+      "partial": false
+    },
+    "contentBytes": 0
+  },
+  "mdBytes": 44159,
+  "checks": {
+    "truth_exit_0": true,
+    "cli_exit_2": true,
+    "scan_verdict": true,
+    "scan_vulns_ge_3": true,
+    "ai_report_json_landed": true,
+    "ai_md_landed": true,
+    "partial_false": true,
+    "reviewed_5_of_5": true,
+    "no_failed_steps": true,
+    "no_fallback": true,
+    "reviewed_mark": true
+  },
+  "verdict": "PASS"
+}

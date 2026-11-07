@@ -229,6 +229,53 @@ env AI_GATEWAY_URL=http://127.0.0.1:8326 AI_GATEWAY_KEY=$DSH_KEY \
 两次扫描结论（3 条命中、High、exit 2）逐字一致 —— AI 报告成败不改扫描结论（D205）。
 证据见 [`CLI-本地网关-外部靶场实测-2026-11-06.txt`](CLI-本地网关-外部靶场实测-2026-11-06.txt)。
 
+### 5.4 [D266 2026-11-07] 推理型网关的可用配置（真网关双链路 PASS）
+
+**结论**：dsh `127.0.0.1:8326` 的 `qodercn/dfmodel` 在「单章 120s + 整场 600s」下，
+① 官方 `ai-gateway` 套件 exit 0（writer 5/5、审阅 5/5 ✅、`partial=false`、落盘 42700B / 484383ms）；
+② `cli.js --ai-report` 打 DVWA 外部裁判，AI 报告完整落盘（44159B / 412505ms、5/5 审阅、`partial=false`）。
+扫描结论零退化（3 命中 / High / 113 请求 / exit 2），DVWA 官方真值 5/5、零误报。
+**默认配置（单章 60s + 总闸 300s）仍不成立**，下面是显式配置，不是默认值。
+
+| 变量 | 值 | 为什么 |
+|---|---|---|
+| `AI_GATEWAY_URL` / `_KEY` / `_MODEL` | `http://127.0.0.1:8326` / 网关 key / `qodercn/dfmodel` | 网关 `/v1/models` 返回的 id 为准 |
+| `AI_GATEWAY_TIMEOUT_MS` | `600000` | 调用方上限；`ReportAI.js:473` 取 `min(调用方, AI_REPORT_TOTAL_TIMEOUT_MS)`，只调总闸会被套件默认 420s 夹住 |
+| `AI_REPORT_TOTAL_TIMEOUT_MS` | `600000` | D263 整场总闸（默认 300000） |
+| `AI_REPORT_STEPWISE_TIMEOUT_MS` | `120000` | **瓶颈在这一项**：默认 60s 挡不住逐章变长的 reviewer（实测 41→53→57→60s 超时→60s 超时） |
+| `AI_REPORT_SHORT_RETRY_TIMEOUT_MS` | `120000` | 同上，保持 analyst 短重试额度一致 |
+| `AI_GATEWAY_MAX_TOKENS` / `AI_REPORT_MAX_TOKENS` | `4096` | 推理型档位 reasoning 可达 2.3 万字，token 太少会 `finish_reason=length` 空内容 |
+| `AI_REPORT_STEPWISE` | `1` | opt-in 分步短 prompt（D259） |
+
+最小复现（key 不落文档）：
+
+```bash
+DSH_KEY=$(node -p "require('fs').readFileSync(require('os').homedir()+'/.dsh/openai-gateway/api-key','utf8').trim()")
+env AI_GATEWAY_URL=http://127.0.0.1:8326 AI_GATEWAY_KEY="$DSH_KEY" \
+  AI_GATEWAY_MODEL=qodercn/dfmodel AI_GATEWAY_TIMEOUT_MS=600000 \
+  AI_GATEWAY_MAX_TOKENS=4096 AI_REPORT_STEPWISE=1 \
+  AI_REPORT_STEPWISE_TIMEOUT_MS=120000 AI_REPORT_SHORT_RETRY_TIMEOUT_MS=120000 \
+  AI_REPORT_TOTAL_TIMEOUT_MS=600000 \
+  node e2e/ai-gateway-lab/run.mjs > /tmp/ai.log 2>&1; echo "exit=$?"
+# 判据：exit=0 且日志含「AI 网关判据通过」+「审阅 5 章 / partial=false」
+```
+
+CLI × DVWA 的完整 env 与起停方式见[实测记录](../e2e/ai-gateway-lab/results/D266-真网关实测-2026-11-07.md)
+（含机器可读的逐请求 trace 与 11 条闭环检查）。
+
+**为什么是「换档位 + 抬单章额度」而不是继续调网关**：D254 已实证多端点分担只解决 429，
+救不了长报告 prompt 在推理档位上的空响应，方向应是换模型档位；D266 的逐请求取证进一步显示，
+在快档位上剩余瓶颈是**章节内容变长 → reasoning 变长 → 单章 60s 额度被击穿**，
+与并发无关（链路串行、并发 1），总闸只负责把挂死变成明确失败。
+
+**边界**：
+- §5.3「不得宣称套件在 dsh / `glm-5.3-flash` 上已 PASS」的边界**仍然成立**——
+  它限定的是当时测的模型与配置；D266 换成了 `qodercn/dfmodel` 并抬了单章额度，不是同一口径。
+- `/v1/models` 里 `qodercn/dfmodel` 显示名是「DeepSeek-Flash · x0.1」，**网关未标 v4.1**；
+  明确写 `deepseek-v4.1-flash` 的 `trae/` 等线路本轮未完成验收，不得外推。
+- 套件只验链路事实，不判文风质量；模型响应有波动（套件 484s / CLI 412s），不作性能结论。
+- 只测 DVWA low 档 `id@url` 一个注入面；未测真实公网目标与商业云 WAF 授权样本。
+
 ## 6. 运维坑（实测记录）
 
 1. **ollama 0.40.12 拉取模型时 sha256 校验阶段可能挂死**（partial blob 已满 397MB 但
