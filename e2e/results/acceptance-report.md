@@ -1,15 +1,15 @@
 # 全方位验收门禁报告
 
-> 生成：2026-11-03T15:20:06.738Z　｜　执行器：`node e2e/acceptance.mjs`　｜　Node v24.22.1
-> 代码版本：`8527822`　⚠️ **工作区 dirty**（跑验收前有 49 个未提交改动：README.md、docs/_complexity-baseline.json、docs/_facts.json 等）—— **本报告不对应任何提交**
-> 套件范围：**21/27 跑出断言**　｜　⚠️ **判定：不完整 —— 不得当作该代码版本的整体验收结论**
-> 前置：MySQL 8.0.28 @127.0.0.1:3306；secure_file_priv="NULL"
+> 生成：2026-11-08T17:48:30.472Z　｜　执行器：`node e2e/acceptance.mjs`　｜　Node v22.22.2
+> 代码版本：`74d8e78`　⚠️ **工作区 dirty**（跑验收前有 13 个未提交改动：CHANGELOG.md、README.md、TODO.md 等）—— **本报告不对应任何提交**
+> 套件范围：**20/27 跑出断言**　｜　⚠️ **判定：不完整 —— 不得当作该代码版本的整体验收结论**
+> 前置：MySQL 8.0.28 @127.0.0.1:3308；secure_file_priv="D:\\projects\\sqli-scanner\\e2e\\udf-lab\\.mysql-sandbox\\plugin\\"
 
 > **判定纪律**：不采信各套件自报的 PASS 字样，只解析可独立核对的事实数字并据此断言。
 
 | 结果 | 套件 | 事实 |
 |---|---|---|
-| ✅ PASS | 服务端单测 | tests=4047　pass=4041　fail=0　skipped=6 |
+| ✅ PASS | 服务端单测 | tests=4268　pass=4262　fail=0　skipped=6 |
 | ✅ PASS | 独立刁钻靶场（11 场景） | 漏洞场景=11/11　安全误报=0 |
 | ✅ PASS | 检测回归（19 场景） | PASS=19　FAIL=0 |
 | ✅ PASS | 真 MySQL 靶场 | PASS=11　FAIL=0 |
@@ -33,11 +33,11 @@
 | ✅ PASS | WAF 定向变异搜索（A2）端到端 | A档生成链=2　B档生成链=0　验证条数=6/6 |
 | ✅ PASS | WAF 通道降级编排（A3）端到端 | 画像双拦=and,or,union,select　画像单拦=and,or,union　决策双拦=error,boolean　决策单拦=union,error,boolean |
 | ✅ PASS | 红队实战评测（ground-truth 真值对照 + sqlmap 同题） | 检出=19/19　检出率=100%　安全点=7　误报=0 |
-| ✅ PASS | fileRead 真闭环 | PASS=true　SKIP=false　方式=隔离沙箱重试 |
-| ✅ PASS | fileWrite 真闭环（文件系统侧断言） | PASS=true　SKIP=false　文件落盘=true　方式=隔离沙箱重试 |
-| ✅ PASS | AI 报告网关端到端（opt-in：本地网关 × 真报告 → 元数据头+脱敏+审阅+落盘全链路） | AI网关=✅ 通过　网关实调=qwen2.5:0.5b→qwen2.5:0.5b→qwen2.5:0.5b　元数据头=4/4　数据脱敏=on　落盘=5497 bytes |
+| ✅ PASS | fileRead 真闭环 | PASS=true　SKIP=false　方式=宿主实例 |
+| ✅ PASS | fileWrite 真闭环（文件系统侧断言） | PASS=true　SKIP=false　文件落盘=true　方式=宿主实例 |
+| ⏭ SKIP | AI 报告网关端到端（opt-in：本地网关 × 真报告 → 元数据头+脱敏+审阅+落盘全链路） | 原因=环境不满足，未执行断言 |
 
-**汇总：21 PASS / 0 FAIL(含 BLOCKED) / 6 SKIP**
+**汇总：20 PASS / 0 FAIL(含 BLOCKED) / 7 SKIP**
 
 
 ## 跳过原因
@@ -47,3 +47,4 @@
 - **外部裁判 3 号（DVWA：PHP+MySQL 栈真漏洞须检出 + 同路径 impossible 档零误报）**：环境不满足，未执行断言
 - **外部裁判 4 号（OWASP Benchmark：官方标注真值须全检出 + 同族安全用例零误报）**：环境不满足，未执行断言
 - **数据泄露实证（提取到的必须是真库名，不得是 payload 残片）**：环境不满足，未执行断言
+- **AI 报告网关端到端（opt-in：本地网关 × 真报告 → 元数据头+脱敏+审阅+落盘全链路）**：环境不满足，未执行断言

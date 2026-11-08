@@ -320,12 +320,6 @@
       "limitLines": 100,
       "limitComplexity": 15
     },
-    "server/src/core/csrfKeeper.js::withCsrf": {
-      "lines": 56,
-      "complexity": 24,
-      "limitLines": 100,
-      "limitComplexity": 15
-    },
     "server/src/core/digestAuth.js::buildDigestHeader": {
       "lines": 49,
       "complexity": 17,

@@ -178,16 +178,29 @@ export function withLoginFlow(client, login) {
       return false;
     }
   }
+  // [D279] 挑战 → 重登（并发去重）→ 原样重试一次：GET 与 HEAD 共用同一套编排与去重闸
+  // （HEAD 与 GET 同时撞 401 时只登一次 —— inFlight 是两个通道共用的那把锁）。
+  const retryAfterRelogin = async (res, resend) => {
+    if (!isLoginChallenge(res)) return res;
+    if (!inFlight) inFlight = loginOnce().finally(() => { inFlight = null; });
+    const ok = await inFlight;
+    if (!ok) return res;
+    return resend();
+  };
   return {
-    request: async (opts = {}) => {
-      const res = await client.request(opts);
-      if (!isLoginChallenge(res)) return res;
-      // 会话过期 → 重登（并发去重）→ 重试原请求一次
-      if (!inFlight) inFlight = loginOnce().finally(() => { inFlight = null; });
-      const ok = await inFlight;
-      if (!ok) return res;
-      return client.request(opts);
-    },
+    ...client,
+    request: async (opts = {}) =>
+      retryAfterRelogin(await client.request(opts), () => client.request(opts)),
+    // [D279] 三包装丢 headRequest 的缺陷（D36 撞见、挂账 30 天，收口记录见 CHANGELOG D279 /
+    // 仓内待办清单 §10）：本层此前返回 { request } 把 headRequest 整个丢掉 —— 配了 --login-url
+    // 后 --null-connection 的 HEAD 遇 401/403 不会触发重登（HEAD 通道整个不存在，sendHead
+    // 静默回退 GET）。HEAD 与 GET 同一判定、同一去重、同样只重试一次（不死循环）。
+    ...(typeof client.headRequest === 'function'
+      ? {
+          headRequest: async (url, opts = {}) =>
+            retryAfterRelogin(await client.headRequest(url, opts), () => client.headRequest(url, opts)),
+        }
+      : {}),
   };
 }
 

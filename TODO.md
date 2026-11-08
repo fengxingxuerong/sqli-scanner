@@ -5,6 +5,52 @@
 
 ---
 
+## 2026-11-09 批次 D279 · 会话包装统一保留并加工 headRequest（TODO §10 静默降级收口）
+
+**起点**：TODO §10（D36 撞见、挂账 30 天）——`withSafeUrl` / `withCsrf` / `withLoginFlow`
+三个会话层 `return { request }` 把内层 `headRequest` 整个丢掉 ⇒ 配了任一会话开关后
+`--null-connection` 的 HEAD 通道在 `sendHead`（egress.js:49）里**静默回退 GET**：扫描照样
+出结论，但 HEAD 通道的省带宽语义失效、HEAD 不经任何会话加工，且没有任何东西变红——
+本仓最典型的「能力没了而没有任何东西变红」形状。`withBearerRefresh`（D36）与
+`withLiveCookies`（D198）已是正确形状，三个老包装是欠账。
+
+**改动**：
+- `safeUrlKeeper.js`：保活触发抽单缝 `maybeKeepAlive`，request 与 headRequest **共用同一
+  计数器**（修复前 null-connection 模式下保活按构造从不触发）。
+- `csrfKeeper.js`：headRequest 走同一套取页/挂 token/刷新计数；带 token 的 URL 作为
+  **第一个实参**传给内层（HttpClient.headRequest 用显式 url 覆盖 opts.url，与 D32 同一教训）。
+- `loginFlow.js`：HEAD 遇 401/403/登录跳转同样重登并重试一次；GET/HEAD 共享 inFlight 去重。
+- 三个包装统一 `{ ...client, request, headRequest }`——裸视图其余字段（scanId/rate）不再被丢。
+
+**验证**：
+- 新增 `server/tests/sessionWrappers.headRequest.wiring.test.js` **13 条**（模块级 ①②③ +
+  getScanClient 装配级，覆盖 TODO §10 验证口径①②）；缺陷注入复验：withCsrf 退回旧形状
+  ⇒ 4 条当场红，恢复回绿。
+- 口径③（真靶站）：`e2e/csrf-lab/e2e.mjs` 新增场景④（同靶复扫 + `nullConnection: true`），
+  靶站侧计数为准：**HEAD 有效 6 / 无效 0**（修复前恒为 0），检出 union/error/boolean 照常；
+  `python e2e/run-with-sandbox.py e2e/csrf-lab/e2e.mjs` 沙箱实测 exit 0。
+- 影响邻域 `node --test` **100 pass / 0 fail**（新增判据 + csrfKeeper/safeUrlKeeper/
+  loginFlow×3/bearerKeeper×2/scanClient×2）；行使同链的两个自足 e2e 复跑 PASS：
+  `login-lab`（登录 15/15、A 检出 2 / B 反例 0）与 `bearer-lab`（6 场景全过）。
+- 顺带修正 `scanClient.branches.test.js` 两条钉住缺陷副作用的实现耦合断言
+  （`notEqual(v1.scanId, 's1')` 钉的正是「包装丢字段」这个 bug；改为行为级：safeUrl 分支
+  断言保活 GET 经视图真实发出、csrf 分支断言首轮请求前先取 token 页）。
+- 门禁抓到一次重构副作用：`cfg.refreshFreq` 成员读取进了孤儿键判据分母（入口真键是
+  `csrfRefreshFreq`）——恢复解构后回绿；复杂度基线收紧（withCsrf 56→33 行 / 24→14，
+  基线条目整条删除）。全量 `npm test` 收官 **4268 用例（4262 pass / 0 fail / 6 skip）**。
+- `npm run gate:close` 全量 **54/54 通过**（首跑 53/54：server-coverage 里
+  `extractor.timeDrift` 失败探针用例在插桩噪声下翻面出 `8O36` 错值——TIGHT 档 25ms
+  余量贴边时序偶发，与本批模块无交集，复跑 0 fail；D242 三抽归因未盖「错值」形态，
+  如实登记留观）。
+
+**边界**：HEAD 与 GET 共用保活/刷新计数是**有意的行为变化**（「每 N 个扫描请求」本就含
+HEAD；纯 GET 扫描计数序列不变）。e2e 场景④里 null-connection 元数据判定在该靶场不可决
+（真假条件都改 CL ⇒ 对被弃用，D201 既定口径），结论落回 body 相位——本场景判据是
+「HEAD 抵达且带 token」，不是「元数据判定命中」。`sendHead` 的回退分支保留（无 HEAD
+通道的连接器兼容兜底）。
+
+---
+
 ## 2026-11-08 批次 D278 · 审阅硬上限 4000→16000（真网关默认值复跑：先反证后修复）
 
 **起点**：D275 把 D266 的显式配置采纳为默认值，但未用默认值重跑真网关。D278 第一轮按
@@ -4388,7 +4434,7 @@ scope/SSRF 逐跳校验。
    建议（未做）：给它加一条"逐键用 `defaults[key]` 再走一次 `sanitizeStart`"，
    这样任何"默认值与入口校验互相不认"在键写入当天就红，而不是等 e2e。
    已做的只是点状补测：`server/tests/requestScript.guard.test.js` 对这一个键钉了该性质。
-10. **包装链上的三个会话层会把 `headRequest` 整个丢掉**（D36 做 bearer 续期时撞见，未修）。
+10. **包装链上的三个会话层会把 `headRequest` 整个丢掉**（D36 做 bearer 续期时撞见；**✅ 已修，2026-11-09 D279**，见文末批次段）。
     `withSafeUrl` / `withCsrf` / `withLoginFlow` 都 `return { request }`，**不带 `headRequest`**。
     而 `engine/scan/scanClient.js` 里两处都按"有没有这个方法"决定行为：
     `const baseHead = typeof view.headRequest === 'function' ? … : null`（协议层包装）与
@@ -4411,10 +4457,18 @@ scope/SSRF 逐跳校验。
     把 `typeof client.headRequest === 'function'` 改成常量会当场红）。
     所以本条现在只剩**三个旧包装**，修法不变（一起改，别留一条不一致的路）。
 
+    ✅ **收口记录（2026-11-09 D279）**：三个包装统一 `{ ...client, request, headRequest }`
+    且 HEAD 走同一套加工（safeUrl 计保活 / csrf 挂 token / login 重登重试，GET/HEAD 共享
+    计数器与 inFlight 去重）。验证口径 ①②：`sessionWrappers.headRequest.wiring.test.js`
+    13 条（模块级 + getScanClient 装配级）+ 缺陷注入复验（withCsrf 退回旧形状当场红）；
+    口径③：`e2e/csrf-lab/e2e.mjs` 新增场景④，靶站侧计数 HEAD 有效 6 / 无效 0（修复前恒 0），
+    检出 union/error/boolean 照常，沙箱实测 exit 0。顺带修正 `scanClient.branches.test.js`
+    两条钉住缺陷副作用的实现耦合断言（`notEqual(scanId)` → 行为级判据）。
+
 ### D36 · Bearer/Token 自动续期（P0-2）做完之后剩下的账
 
-1. **`--login-url` / `--csrf-url` / `--safe-url` 三个包装仍丢 `headRequest`**（就是上面第 10 条，
-   本批只保证新增的那个不丢）。危害方向是"HEAD 静默退化成 GET"，不是漏测。
+1. ~~**`--login-url` / `--csrf-url` / `--safe-url` 三个包装仍丢 `headRequest`**~~（就是上面第 10 条，
+   本批只保证新增的那个不丢）。危害方向是"HEAD 静默退化成 GET"，不是漏测。**✅ 已修（2026-11-09 D279，三个包装与 bearer 同形状收口，见第 10 条收口记录）。**
 2. **面板只暴露三个子键**（`url` / `tokenField` / `refreshToken`）。`bodyFormat=form`、
    `body={client_id…}`、`headerName` / `headerTemplate`、`eager` 这五项目前只能走 REST/CLI。
    判据要不要接：`eager` 与 `bodyFormat` 是"目标形状"而不是"调优旋钮"，缺了它们那类目标配不上；

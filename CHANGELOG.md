@@ -7,13 +7,14 @@
 > 下一批次起的条目写在这里。发版时把本节整体升为 `## [x.y.z] - YYYY-MM-DD` 并补汇总段。
 
 <!-- changelog-index:start -->
-**本段覆盖 62 个批次（D228–D278，2026-11-01 → 2026-11-08）**。正文按时间倒序排列；
+**本段覆盖 63 个批次（D228–D279，2026-11-01 → 2026-11-09）**。正文按时间倒序排列；
 下表是同一批次的索引，便于按编号或关键词定位。**索引只是导航，正文未做任何删改**
 （被推翻的旧结论原样保留，这是本仓的既定口径）。新增批次后跑
 `node scripts/changelog-index.mjs --write` 重生成，`--check` 校验是否过期。
 
 | 批次 | 日期 | 主题 |
 |---|---|---|
+| D279 | 11-09 | 会话包装统一保留并加工 headRequest（TODO §10 静默降级收口） |
 | D278 | 11-08 | 审阅硬上限 4000→16000（真网关默认值复跑：先反证后修复） |
 | D277 | 11-08 | 分步链路有界并发（默认串行零行为变化，慢网关可 opt-in 2~4） |
 | D276 | 11-08 | AI 报告确定性 mock 网关 CI 套件（真网关套件长期 SKIP 的替代判据） |
@@ -77,6 +78,72 @@
 | D229 | 11-01 | 交付闸收口：P0-3 卡顿修复（haystack 先截后拼）+ ai-gateway 断言去模型依赖 |
 | D228 | 11-01 | AI 报告网关端到端验收（ai-gateway 套件）+ 本地网关 runbook + CI 靶场硬要求扩展 |
 <!-- changelog-index:end -->
+
+### 2026-11-09 批次 D279 · 会话包装统一保留并加工 headRequest（TODO §10 静默降级收口）
+
+**起点**：TODO §10（2026-10-10 立）的遗留缺陷——`withSafeUrl` / `withCsrf` / `withLoginFlow`
+三个会话层包装返回 `{ request }` 视图，把内层的 `headRequest` **整个丢掉**。后果：配了
+任一会话开关（--safe-url / --csrf-url / --login-url）后，`--null-connection` 的 HEAD 通道
+在 `sendHead`（egress.js:49）里**静默回退 GET**——扫描照样出结论（回退的 GET 会经会话层
+拿到 token），但 HEAD 通道的省带宽语义失效、HEAD 不经任何会话加工，且没有任何东西变红。
+同仓库的 `withBearerRefresh`（D36）与 `withLiveCookies`（D198）已是正确形状
+（`{...client, request, headRequest}` + 同一套加工），三个老包装是欠账。
+
+**改动**：
+- `safeUrlKeeper.js`：保活触发抽单缝 `maybeKeepAlive`，request 与 headRequest **共用同一
+  计数器**（HEAD 也是扫描请求；修复前 null-connection 模式下保活按构造从不触发）；
+  headRequest 与 GET 走同一套保活/同源剥 auth 语义。
+- `csrfKeeper.js`：headRequest 走同一套取页/挂 token/刷新计数（首次 HEAD 同样先取 token）；
+  带 token 的 URL 作为**第一个实参**传给内层（HttpClient.headRequest(url, opts) 用显式
+  url 覆盖 opts.url——与 D32 变换层同一教训，只改 opts 会被原 URL 顶掉）。
+- `loginFlow.js`：HEAD 遇 401/403/登录跳转同样触发重登并原样重试一次；GET/HEAD **共享
+  inFlight 去重闸**（并发挑战只登一次，不死循环）。
+- 三个包装统一 `{ ...client, request, headRequest }`——裸视图的其余字段不再被丢
+  （scanId/rate 等保留，与 bearerKeeper/wrapEgressLayer 同形状）。
+
+**验证**：
+- 新增 `server/tests/sessionWrappers.headRequest.wiring.test.js` **13 条**：模块级
+  （每包装 ①保留 ②HEAD 被真实加工 ③内层无 headRequest 时不凭空造）+ getScanClient
+  装配级（三个开关各配一个 view.headRequest 是函数 + 三层全配 HEAD 穿过整条链且带
+  token）。TODO §10 验证口径 ①② 由这两层覆盖。
+- **缺陷注入复验**：把 `withCsrf` 临时退回 `{ request }` 旧形状 ⇒ 新判据红
+  （`view.headRequest` undefined，装配级与模块级共 4 条当场失败）；恢复后回绿。
+- 顺带修正 `scanClient.branches.test.js` 两条**钉住缺陷本身**的断言
+  （`notEqual(v1.scanId, 's1')`——它钉的是「包装丢字段」这个 bug 的副作用；改为行为级：
+  safeUrl 分支断言保活 GET 真的经视图发出、csrf 分支断言首轮请求前先取 token 页）。
+- **门禁抓到一次重构副作用**：withCsrf 拆分时把 `refreshFreq` 从解构改成了 `cfg.refreshFreq`
+  成员读取，`configOrphanKeys.guard`（孤儿配置键判据）当场红——入口真键是
+  `csrfRefreshFreq`，`refreshFreq` 只是内部形参名，不该进孤儿分母；恢复解构形态后回绿。
+  复杂度基线同步收紧：withCsrf 拆分后 56→33 行 / 24→14 圈复杂度，基线条目整条删除
+  （`--fix-baseline` 判定 225 个函数）。
+- 全量 `npm test` 收官 **4268 用例（4262 pass / 0 fail / 6 skip）**；facts 刷新 + README
+  双向同步 + 质量台账再生完成。`npm run gate:close` 全量 **54/54 通过**（首跑 53/54：
+  server-coverage 里 `extractor.timeDrift` 失败探针用例翻面出 `8O36` 错值——TIGHT 档
+  25ms 余量在插桩噪声下的贴边时序偶发，与本批模块无交集，复跑 4158 pass / 0 fail；
+  D242 的三抽归因只盖了「deadline 超时」形态，「错值」形态仍单抽定生死，此处如实登记）。
+- 全项目验收 `npm run acceptance:sandbox` **20 PASS / 0 BLOCKED / 0 FAIL / 7 SKIP**
+  （SKIP 均为环境缺项：5 个容器外部裁判 Docker 未起 + OOB 真机要宿主 5432 的真 PG +
+  AI 网关端到端为 opt-in；登录编排 / bearer / 真 MySQL / 真 PG / VulnLab / 红队 19/19 /
+  fileops 等 20 套件真跑出断言）。
+- **e2e 口径③（真靶站）**：`e2e/csrf-lab/e2e.mjs` 新增场景④——同靶复扫加
+  `nullConnection: true`，靶站侧计数为准：**HEAD 有效 6 / 无效 0**（修复前恒为 0），
+  检出 union/error/boolean 照常。沙箱实测 exit 0（`python e2e/run-with-sandbox.py
+  e2e/csrf-lab/e2e.mjs`，隔离 MySQL 3308）。
+- 影响邻域全绿：`node --test` 新判据 + csrfKeeper/safeUrlKeeper/loginFlow×3/
+  bearerKeeper×2/scanClient×2 共 **100 pass / 0 fail**。
+- 行使同一条会话链的两个自足 e2e 复跑 PASS：`e2e/login-lab/run.mjs`（--login-url 编排
+  登录 15/15、A 场景检出 2 条 / B 反例 0 检出）与 `e2e/bearer-lab/run.mjs`（6 场景全过：
+  无续期 session_expired / 续期成功检出 2 条 / 端点 5xx 与无字段均 inconclusive /
+  cookie 形态续上 / 安全点 0 误报且 130 条真抵达 SQL）。
+
+**边界 / 诚实声明**：
+- HEAD 与 GET 现在共用保活/刷新计数器——这是**有意的行为变化**（「每 N 个扫描请求」
+  的语义本来就含 HEAD）；纯 GET 扫描的计数序列不变。
+- e2e 场景④ 里 null-connection 相位的元数据判定在该靶场不可决（真假条件都改 CL ⇒
+  对被弃用），结论落回 body 相位——这正是 D201「元数据不可决 ≠ 不可注入」的既定口径；
+  本场景的判据是「HEAD 抵达且带 token」，不是「元数据判定命中」。
+- 未动 `sendHead` 的回退分支：它仍是「视图没有 headRequest 时」的兼容兜底
+  （DirectConnector 等无 HEAD 通道的连接器）。
 
 ### 2026-11-08 批次 D278 · 审阅硬上限 4000→16000（真网关默认值复跑：先反证后修复）
 

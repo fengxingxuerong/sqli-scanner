@@ -79,19 +79,30 @@ test('getScanClient：reqRate>0 覆盖 ratePerSec；否则透传 ratePerSec', ()
   assert.equal(captured.forScanCalls[2].ratePerSec, 3, 'reqRate=0 回落 ratePerSec');
 });
 
-test('getScanClient：safeUrl 包装分支生效（view 被换出，且 per-scan 缓存复用同一视图）', () => {
-  const { self } = makeSelf();
-  const target = { config: { safeUrl: 'http://127.0.0.1:1/keepalive', safeFreq: 5 } };
+test('getScanClient：safeUrl 包装分支生效（保活语义经视图真实生效 + per-scan 缓存复用同一视图）', async () => {
+  const { self, captured } = makeSelf();
+  const target = { config: { safeUrl: 'http://t/keepalive', safeFreq: 1 } };
   const v1 = getScanClient.call(self, 's1', target);
-  assert.notEqual(v1.scanId, 's1', 'withSafeUrl 包装后的视图不再是 forScan 裸视图');
+  await v1.request({ url: 'http://t/?id=1' }); // freq=1 ⇒ count=1 ⇒ 保活 GET 必须发出
+  const ka = captured.requests.filter((r) => String(r.url).includes('/keepalive'));
+  assert.equal(
+    ka.length,
+    1,
+    'withSafeUrl 包装生效：保活 GET 经视图真实发出（[D279] 起包装保留裸视图字段，判据从「scanId 被换出」改为行为级）',
+  );
   const v2 = getScanClient.call(self, 's1', target);
   assert.equal(v1, v2, '同 scanId 命中缓存');
 });
 
-test('getScanClient：csrfUrl 包装分支生效（挂在 safeUrl 之上）', () => {
-  const { self } = makeSelf();
-  const view = getScanClient.call(self, 's1', { config: { csrfUrl: 'http://127.0.0.1:1/token' } });
-  assert.notEqual(view.scanId, 's1', 'withCsrf 包装后的视图应被换出');
+test('getScanClient：csrfUrl 包装分支生效（挂在 safeUrl 之上：首轮请求前先取 token 页）', async () => {
+  const { self, captured } = makeSelf();
+  const view = getScanClient.call(self, 's1', { config: { csrfUrl: 'http://t/token' } });
+  await view.request({ url: 'http://t/?id=1' });
+  const fetch = captured.requests.find((r) => String(r.url).includes('/token'));
+  assert.ok(
+    fetch,
+    'withCsrf 包装生效：首轮请求前必须先取 csrf 页（[D279] 起判据为行为级，原「scanId 被换出」钉的是丢字段的缺陷本身）',
+  );
 });
 
 test('getScanClient：egressPatch 分支——request 与 headRequest 双路注入协议/出口语义', async () => {
