@@ -514,24 +514,33 @@ curl -X POST http://127.0.0.1:4567/api/scan/abc123/report/ai
 环境变量（真实取数源 `server/src/services/ReportAI.js`）：`AI_REPORT_API_BASE`（OpenAI
 兼容 endpoint，数据外发 opt-in——未设置时返回 409，不会静默外发）+ `AI_REPORT_KEY_1..3`
 （至少 1 个即启用，失败/429 自动同角色降级再跨角色降级）。角色流水线固定为
-analyst→writer→reviewer；超时由路由硬编码 120s（`reportAiRoutes.js`）。
+analyst→writer→reviewer；超时由 `AI_REPORT_TIMEOUT_MS` 控制（默认 600s，REST 与 CLI 共用），
+整场另有 `AI_REPORT_TOTAL_TIMEOUT_MS`（默认 600s）总闸，分步模式单章 `AI_REPORT_STEPWISE_TIMEOUT_MS`
+（默认 120s）。生效值可直接查 `GET /scan/:id/report/ai/limits`，不要按旧文档的 120s 估算。
 `AI_REPORT_MODEL_1/2/3`（[D192]）可分别覆盖三个角色的模型名（不设即默认裸名）——自建/本地
 网关常强制 `provider/model` 全名（如本机 dsh 网关对裸名一律 400），覆盖后同款模型仍可用。
 `AI_REPORT_API_BASE` 须是**完整的 chat/completions URL**（服务端原样 POST，不拼路径）。
 
-`AI_REPORT_MASK`（[D205]）：默认 `1`/未设 = 脱敏（prompt 里 host 写成 `<目标Host>`、路径写成 `/***`，
-**PoC 因此不可直接复现**）；设 `0` 时 host 与路径原样进 prompt，适用于**本机/自建**网关。
-注意报告正文里同时会带引擎实测判据（真/假响应长度、长度差、差异偏移与差异片段，取自 `vuln.trace`），
-这不是模型编的——脱敏只影响 URL，不影响判据。
+`AI_REPORT_MASK`（[D205]/[D275]）：默认 `1`/未设 = 脱敏（prompt 里 host 写成 `<目标Host>`、路径写成 `/***`，
+query 值与注入点原始参数值也替换为 `***`，**PoC 因此不可直接复现**）；设 `0` 时 host 与路径原样进 prompt，
+适用于**本机/自建**网关。注意报告正文里同时会带引擎实测判据（真/假响应长度、长度差、差异偏移与差异片段，
+取自 `vuln.trace`），这不是模型编的——脱敏只影响 URL 与参数值，不影响判据。
 
 > CLI 侧同一能力用 `--ai-report [dir]`（[D205]，落 `ai-report.md` + `ai-report.json`），
-> 与 REST 共用同一 `ReportAI.js`；CLI 侧超时放宽到 600s（三模型串行，实测 90~180s）。
+> 与 REST 共用同一 `ReportAI.js` 和 `AI_REPORT_TIMEOUT_MS`（默认 600s）。
 
 ```json
-{ "code": 0, "data": { "success": true, "model": "deepseek-v4-flash→glm-5.2→sensenova-6.8-flash-lite", "content": "…", "reviewNote": "✅ 已经过安全审阅角色校验", "pipeline": "analyst→writer→reviewer", "usage": null }, "message": "ok" }
+{ "code": 0, "data": { "success": true, "model": "deepseek-v4-flash→glm-5.2→sensenova-6.8-flash-lite", "content": "…", "reviewNote": "✅ 已经过安全审阅角色校验", "pipeline": "analyst→writer→reviewer", "usage": { "prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0 }, "boundary": { "verdict": "vulnerability_detected", "reliable": true, "unverifiedSurfaces": [], "uncoveredSurfaces": [], "triage": { "open": 0, "confirmed": 0, "false_positive": 0, "accepted_risk": 0, "untagged": 0, "total": 0 } }, "trace": [ { "role": "analyst", "model": "…", "status": 200, "finish_reason": "stop", "ms": 1234 } ], "shortPromptRetries": [] }, "message": "ok" }
 ```
 
-> 命中报告缓存（TTL 内同指纹复扫）时返回体额外带 `"cached": true`。
+[D275] 正文末尾固定追加 `<!-- engine-boundary -->` 标记的「结论口径与覆盖边界」章节，由引擎
+报告字段确定性生成（不是模型生成）：引用报告时必须连同该章节一起引用。`boundary` 是同一份
+结构化事实；`usage` 在网关不返回用量时为 `null`（不伪造 0）；`trace` 逐请求记录
+role/model/status/finish_reason/ms（不含 prompt 与 key）。`finish_reason=length` 的非空截断
+响应按失败处理，不会写进正文冒充完整内容。
+
+> 命中报告缓存（TTL 内同指纹复扫）时返回体额外带 `"cached": true`。缓存键包含
+> `boundary` 指纹（verdict/未验证面/未覆盖面/triage），且**半成品/未过审结果不写缓存**。
 
 #### `GET /scan/:id/report/ai/configs`
 
@@ -539,6 +548,16 @@ analyst→writer→reviewer；超时由路由硬编码 120s（`reportAiRoutes.js
 
 ```json
 { "code": 0, "data": [ { "role": "analyst", "model": "deepseek-v4-flash", "desc": "漏洞分析+风险评估", "label": "deepseek-v4-flash (漏洞分析+风险评估)" }, … ], "message": "ok" }
+```
+
+#### `GET /scan/:id/report/ai/limits`
+
+[D275] 返回当前进程生效的超时矩阵（读 `AI_REPORT_TIMEOUT_MS` / `AI_REPORT_TOTAL_TIMEOUT_MS` /
+`AI_REPORT_STEPWISE_TIMEOUT_MS`，默认 600000 / 600000 / 120000 毫秒）。
+[D277] 同时回显分步并发度（`AI_REPORT_STEPWISE_CONCURRENCY`，默认 1 = 串行，上限 4）。
+
+```json
+{ "code": 0, "data": { "requestTimeoutMs": 600000, "totalTimeoutMs": 600000, "stepwiseTimeoutMs": 120000, "stepwiseConcurrency": 1 }, "message": "ok" }
 ```
 
 ---

@@ -15,9 +15,20 @@ import {
   buildStepwiseAnalystPrompt,
   buildStepwiseFacts,
   runStepwiseStages,
+  normalizeStepwiseConcurrency,
   STEPWISE_MAX_CHARS,
+  STEPWISE_REVIEW_MAX_CHARS,
   WRITER_SECTIONS,
 } from './reportAiStepwise.js';
+import {
+  buildBoundaryFacts,
+  renderBoundarySection,
+  boundaryPromptBlock,
+  boundaryFingerprint,
+  compactBoundary,
+  boundaryLine,
+  BOUNDARY_MARKER,
+} from './reportAiFacts.js';
 
 // [P2-FIX 2026-09-05] 默认外发 opt-in：旧实现 API_BASE 默认指向 https://token.sensenova.cn，
 // 只要用户配了 key 就会把漏洞报告（含脱敏目标 URL/参数/证据）发往第三方，属默认外发。
@@ -152,6 +163,7 @@ function formatBasis(b) {
 }
 
 function buildAnalystPrompt(report) {
+  const boundary = buildBoundaryFacts(report);
   const vulns = (report.vulns || []).map((v) => ({
     technique: v.technique,
     dbms: v.dbms || '未知',
@@ -160,14 +172,16 @@ function buildAnalystPrompt(report) {
     evidence: safeEvidence(v.evidence),
     // [D205] 真实判据（真/假样本长度、长度差、首个差异偏移、差异片段）——无 trace 时为 null
     basis: summarizeTrace(v),
+    // [D275] 引擎确定性 CVSS（vulnEnrich 已回填）；模型必须引用，不得自行编造
+    engineCvss: v.cvss || null,
     // 截断 payload（防 analyst JSON 输出过大导致 writer prompt 超 token）
     payloads: (v.payloads || []).map(p => shortPayload(p)),
   }));
-  // PoC 需要实际参数名 + HTTP 方法 + URL 路径（host 仍脱敏）
+  // PoC 需要实际参数名 + HTTP 方法 + URL 路径（host 与参数值在脱敏态替换为占位符）
   const points = (report.points || []).map(p => ({
     param: p.param,
     location: p.location,
-    originalValue: p.originalValue,
+    originalValue: valueForPrompt(p.originalValue),
     method: report.target?.method || 'GET',
   }));
   const safeUrl = maskUrl(report);
@@ -185,10 +199,13 @@ HTTP 方法: ${report.target?.method || 'GET'}
 ## 注入点信息
 ${points.map((p, i) => `${i + 1}. 参数: ${p.param}（${p.location}）原始值: ${p.originalValue} 方法: ${p.method}`).join('\n')}
 
+${boundaryPromptBlock(boundary)}
+
 ## 漏洞列表（含实际 payload，已截断过长 payload）
 ${vulns.map((v, i) => `${i + 1}. [${v.riskLevel}] ${v.technique} DB:${v.dbms}
    证据: ${v.evidence || '无'}
    响应判据（引擎实测）: ${formatBasis(v.basis)}
+   引擎 CVSS（必须引用）: ${v.engineCvss ? JSON.stringify(v.engineCvss) : '（引擎未评分，写「引擎未评分」，禁止自行编造分数）'}
    实际 Payload:
 ${(v.payloads || []).map((p, j) => `   ${j + 1}. ${p}`).join('\n')}`).join('\n')}
 
@@ -199,7 +216,7 @@ ${(v.payloads || []).map((p, j) => `   ${j + 1}. ${p}`).join('\n')}`).join('\n')
       "name": "漏洞名称",
       "type": "SQL注入子类型",
       "risk": "高危/中危/低危",
-      "cvss": "CVSS 3.1 参考分数 + 理由",
+      "cvss": "必须逐字引用上面「引擎 CVSS」的 score + vector + note；引擎未评分时写「引擎未评分」，禁止自行编造分数",
       "principle": "漏洞原理 2-3 句",
       "location": "注入参数名+HTTP方法+URL路径",
       "dbms": "数据库类型",
@@ -229,6 +246,7 @@ function compressAnalysisForWriter(analysis) {
         name: v.name || '',
         type: v.type || '',
         risk: v.risk || '',
+        cvss: v.cvss || '',
         location: v.location || '',
         dbms: v.dbms || '',
         poc_payload: shortPayload(v.poc_payload),
@@ -256,6 +274,7 @@ function hostForPrompt(report) {
 }
 
 function buildWriterPrompt(report, analysis) {
+  const boundary = buildBoundaryFacts(report);
   const safeUrl = maskUrl(report);
   const data = report.data;
   const extracted = data ? {
@@ -265,9 +284,9 @@ function buildWriterPrompt(report, analysis) {
     currentDb: data.currentDb || undefined,
     currentUser: data.currentUser || undefined,
   } : null;
-  // 注入点参数名（供 PoC 构造用）
-  const points = (report.points || []).map(p => `${p.param}（${p.location}，原始值 ${p.originalValue}）`).join(', ');
-  // URL 路径（含参数占位，供 PoC 构造用）—— query 值原样保留（writer 要拼 <POC>），路径按 AI_REPORT_MASK 决定
+  // 注入点参数名（供 PoC 构造用）；参数值在脱敏态替换为占位符
+  const points = (report.points || []).map(p => `${p.param}（${p.location}，原始值 ${valueForPrompt(p.originalValue)}）`).join(', ');
+  // URL 路径（含参数占位，供 PoC 构造用）—— query 值在脱敏态始终遮掉；路径按 AI_REPORT_MASK 决定
   const urlPath = urlPathForPrompt(report, { maskQueryValues: false });
   const pocHost = hostForPrompt(report);
   const httpMethod = report.target?.method || 'GET';
@@ -280,6 +299,8 @@ HTTP 方法: ${httpMethod}
 数据库类型: ${report.dbms || '未知'}（引擎指纹结果；写「未知」前先看这里有没有值）
 注入参数: ${points || '未知'}
 扫描时间: ${report.startedAt || ''}
+
+${boundaryPromptBlock(boundary)}
 
 ## 漏洞分析（来自分析师角色）
 ${compressAnalysisForWriter(analysis)}
@@ -323,10 +344,13 @@ ${extracted ? JSON.stringify(extracted, null, 2) : '未提取数据'}
 }
 
 function buildReviewerPrompt(report, draftReport) {
+  const boundary = buildBoundaryFacts(report);
   return `你是安全审计专家。审阅以下 AI 生成的漏洞报告，检查安全性和完整性，补充遗漏项。
 
 ## 待审阅报告
 ${draftReport}
+
+${boundaryPromptBlock(boundary)}
 
 ## 审阅要求
 1. 检查是否有夸大/编造的风险
@@ -335,7 +359,7 @@ ${draftReport}
 4. 补充合规建议（如等保 2.0 / 数据安全法相关条款）
 5. 输出审阅意见 + 最终修订版报告（Markdown）
 
-注意：保持原报告结构，仅补充和修正。`;
+注意：保持原报告结构，仅补充和修正；不得删掉「结论口径」里的边界声明。`;
 }
 
 // [D205] 脱敏开关：默认脱敏（内网路径/主机名不外发第三方）。
@@ -344,25 +368,46 @@ ${draftReport}
 // （默认态下 host 是 <目标Host> 占位、路径是 /***，PoC 天然不可复现——D205 实测过）。
 const MASK_ENABLED = process.env.AI_REPORT_MASK !== '0';
 
+/**
+ * [D275] 脱敏态下 prompt 里的目标地址：**连 host 一起遮掉**。
+ * 旧实现返回 `${protocol}//${u.host}/***`，只遮路径不遮 host —— 与文档承诺的
+ * 「host 写成 `<目标Host>`」不符，内网主机名/端口仍会外发。这里改成固定占位符。
+ * @param {object} report 引擎报告
+ * @returns {string} 目标地址（脱敏态为占位符）
+ */
 function maskUrl(report) {
+  if (MASK_ENABLED) return '<目标Host>/***';
   try {
     const u = new URL(report.target?.baseUrl || '');
-    if (!MASK_ENABLED) return `${u.protocol}//${u.host}${u.pathname}`;
-    return `${u.protocol}//${u.host}/***`;
+    return `${u.protocol}//${u.host}${u.pathname}`;
   } catch { return '***'; }
 }
 
 /**
- * [D205] 供 prompt 使用的 URL 路径：脱敏态给 `/***`，不脱敏态给真实 pathname。
- * analyst 与 writer 两处原先各写一份同样的逻辑（且行为不一致），这里收成一处。
+ * [D275] 脱敏态下参数值的占位符。旧实现把 `originalValue` 原样写进 analyst/writer
+ * prompt，query 里的 token/session 等敏感值会随报告外发；参数**名**保留（PoC 需要），
+ * 参数**值**在脱敏态一律替换。
+ * @param {unknown} value 原始参数值
+ * @returns {string} 可进 prompt 的值
+ */
+function valueForPrompt(value) {
+  if (MASK_ENABLED) return '***';
+  return String(value ?? '');
+}
+
+/**
+ * [D205/D275] 供 prompt 使用的 URL 路径：脱敏态给 `/***`，不脱敏态给真实 pathname。
+ * query 值在脱敏态**始终**替换为 `***`（参数名保留，PoC 仍能按名构造）；旧实现让
+ * writer 用 `maskQueryValues:false` 保留原值，导致 `?token=abc` 原样外发。
  * @param {object} report 引擎报告
- * @param {{maskQueryValues?: boolean}} [opts] maskQueryValues=true 时把 query 值替换为 ***
+ * @param {{maskQueryValues?: boolean}} [opts] maskQueryValues=true 时即使未脱敏也遮 query 值
  * @returns {string} 路径（含 query）
  */
 function urlPathForPrompt(report, opts = {}) {
   try {
     const u = new URL(report.target?.baseUrl || '');
-    const search = opts.maskQueryValues ? u.search.replace(/=[^&]*/g, '=***') : u.search;
+    const maskValues = MASK_ENABLED || opts.maskQueryValues === true;
+    const search = maskValues ? u.search.replace(/=[^&]*/g, '=***') : u.search;
     if (!MASK_ENABLED) return `${u.pathname}${search}`;
     const hasPath = u.pathname.split('/').filter(Boolean).length > 0;
     return `${hasPath ? '/***' : '/'}${search}`;
@@ -442,10 +487,45 @@ const MAX_TOKENS = Number(process.env.AI_REPORT_MAX_TOKENS) > 0
 // 而流水线有「analyst 三级降级 + 每级短重试 + 分步 5 章撰写/5 章审阅」共十余步，
 // 最坏耗时 = 步数 × 每步超时，远大于调用方以为的整场上限（实测慢网关挂 10+ 分钟）。
 // 这里补一把真正的总闸：所有 LLM 请求共享同一 deadline，剩余预算裁剪单步超时，
-// 耗尽即抛明确错误并终止剩余降级/重试，不再空转。默认 5 分钟，可 env 覆盖。
+// 耗尽即抛明确错误并终止剩余降级/重试，不再空转。
+//
+// [D275] 默认值与调用方契约对齐：CLI / REST 默认都传 600s，旧默认 300s 会把调用方的
+// 600s 静默夹成 300s（D266 实测单次 412~484s，300s 必失败）。600s 仍是有界总闸，
+// 不是「不设上限」；慢网关需要更长时显式调 AI_REPORT_TOTAL_TIMEOUT_MS。
 const TOTAL_TIMEOUT_MS = Number(process.env.AI_REPORT_TOTAL_TIMEOUT_MS) > 0
   ? Number(process.env.AI_REPORT_TOTAL_TIMEOUT_MS)
-  : 300000;
+  : 600000;
+
+/**
+ * [D275] REST / CLI 共用的「调用方整场上限」解析。此前 REST 路由硬编码 120s，
+ * 而 CLI 传 600s、前端 axios 全局 30s —— 三层各自为政，真实网关 412s 必然被前两层
+ * 提前掐断。现在服务端统一从 AI_REPORT_TIMEOUT_MS 取，默认 600s。
+ * @param {object} [env] 环境变量表（测试可注入）
+ * @returns {number} 调用方整场上限（毫秒）
+ */
+export function resolveRequestTimeoutMs(env = process.env) {
+  const v = Number(env.AI_REPORT_TIMEOUT_MS);
+  return v > 0 ? v : 600000;
+}
+
+/**
+ * [D275] 生效的超时矩阵（供 REST `/report/ai/limits` 与 UI/运维核对）。
+ * 纯函数，读传入的 env；不改变 generateAiReport 的模块级常量语义。
+ * [D277] 增加分步并发度（默认 1，上限 4）—— 与超时同属「生效配置」，一并回显。
+ * @param {object} [env] 环境变量表
+ * @returns {{requestTimeoutMs:number,totalTimeoutMs:number,stepwiseTimeoutMs:number,stepwiseConcurrency:number}} 超时/并发矩阵
+ */
+export function aiReportLimits(env = process.env) {
+  const total = Number(env.AI_REPORT_TOTAL_TIMEOUT_MS);
+  const stepwise = Number(env.AI_REPORT_STEPWISE_TIMEOUT_MS);
+  return {
+    requestTimeoutMs: resolveRequestTimeoutMs(env),
+    totalTimeoutMs: total > 0 ? total : 600000,
+    stepwiseTimeoutMs: stepwise > 0 ? stepwise : 120000,
+    stepwiseConcurrency: normalizeStepwiseConcurrency(env.AI_REPORT_STEPWISE_CONCURRENCY),
+  };
+}
+
 
 /**
  * [D263] 把单步超时裁到整场剩余预算内（纯函数，便于判据单测）。
@@ -465,13 +545,19 @@ export function clampToBudget(stepTimeoutMs, deadline, now = Date.now()) {
 
 /**
  * [D263] 造一把整场总闸：返回共享 deadline 的请求包装（抽方法，避免 generateAiReport 分支膨胀）。
+ * [D275] 同时返回本次报告的 trace / usage 累加器：每请求记 role/model/ms/status/finish_reason/usage，
+ * 不再让 `result.usage` 恒为 null。
  * @param {number} timeoutMs 调用方给的整场上限
- * @returns {{totalBudgetMs:number, call:(cfg:object,systemPrompt:string,userPrompt:string,timeoutMs:number)=>Promise<string>}}
+ * @returns {{totalBudgetMs:number, trace:{requests:Array<object>,usage:{prompt_tokens:number,completion_tokens:number,total_tokens:number}}, call:(cfg:object,systemPrompt:string,userPrompt:string,timeoutMs:number)=>Promise<string>}}
  */
 function makeBudgetedCallLLM(timeoutMs) {
   const callerBudget = Number(timeoutMs) > 0 ? Number(timeoutMs) : 120000;
   const totalBudgetMs = Math.min(callerBudget, TOTAL_TIMEOUT_MS);
   const deadline = Date.now() + totalBudgetMs;
+  const trace = {
+    requests: [],
+    usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+  };
   const call = (cfg, systemPrompt, userPrompt, ms) => {
     const budget = clampToBudget(ms, deadline);
     if (!budget.ok) {
@@ -482,9 +568,9 @@ function makeBudgetedCallLLM(timeoutMs) {
       ), { budgetExhausted: true });
       throw err;
     }
-    return callLLM(cfg, systemPrompt, userPrompt, budget.timeoutMs);
+    return callLLM({ ...cfg, trace }, systemPrompt, userPrompt, budget.timeoutMs);
   };
-  return { totalBudgetMs, call };
+  return { totalBudgetMs, trace, call };
 }
 
 /**
@@ -500,9 +586,94 @@ function deriveReviewNote(stages) {
 }
 
 // ── 调用 LLM（带容灾重试）──────────────────────────────────────────────────
+/**
+ * [D275] 把一次请求的事实写进 trace（成功/失败都记；不记 prompt/key 本身）。
+ * @param {object} cfg 角色配置（可带 trace）
+ * @param {object} entry 本次请求事实
+ * @returns {void}
+ */
+function recordTrace(cfg, entry) {
+  const trace = cfg?.trace;
+  if (!trace || !Array.isArray(trace.requests)) return;
+  trace.requests.push(entry);
+  const u = entry.usage;
+  if (u && Number.isFinite(u.total_tokens)) {
+    trace.usage.prompt_tokens += Number(u.prompt_tokens) || 0;
+    trace.usage.completion_tokens += Number(u.completion_tokens) || 0;
+    trace.usage.total_tokens += Number(u.total_tokens) || 0;
+  }
+}
+
+/**
+ * [D275] 非 2xx 的统一处理：429 冷却并标「可换 key」；5xx 也标可换 key（网关/上游故障）；
+ * 其余 4xx 是请求/鉴权问题，换 key 救不了，不重试。
+ * @param {Response} res fetch 响应
+ * @param {object} cfg 角色配置
+ * @param {object} entry trace 条目（原地写 error）
+ * @returns {Promise<never>} 总是抛错
+ */
+async function throwHttpFailure(res, cfg, entry) {
+  if (res.status === 429) {
+    entry.error = 'http:429';
+    markKeyFail(cfg.keyIdx, true);
+    throw Object.assign(
+      new AppError(ErrorCode.RATE_LIMITED, `角色 ${cfg.role} 的 key${cfg.keyIdx + 1} 触发 429 限流，已冷却 ${RATE_LIMIT_COOLDOWN_MS / 1000}s`),
+      { retryableWithAnotherKey: true },
+    );
+  }
+  const errText = await res.text().catch(() => '');
+  entry.error = `http:${res.status}`;
+  markKeyFail(cfg.keyIdx, false);
+  // [D275] 5xx 是网关/上游故障：换一个 key/端点重试一次有真实意义；
+  // 4xx（除 429）通常是请求/鉴权问题，换 key 也救不了，不重试。
+  throw Object.assign(
+    new AppError(ErrorCode.UNKNOWN, `LLM API ${res.status}: ${errText.slice(0, 200)}`),
+    { retryableWithAnotherKey: res.status >= 500 },
+  );
+}
+
+/**
+ * [D205/D275] 内容可用性判定：空内容与 finish_reason=length 的截断内容都不算成功。
+ * @param {any} content 模型正文
+ * @param {object} cfg 角色配置
+ * @param {object} entry trace 条目（原地写 error）
+ * @returns {void}
+ */
+function assertUsableContent(content, cfg, entry) {
+  // [D205] 空内容不算成功：网关在 max_tokens 耗尽 / reasoning 占满 / 上游截断时会返回
+  // 200 + 空 content，旧实现直接 `|| ''` 落成空串并继续标「✅ 已审阅」——正文被清空却
+  // 报告"审阅通过"（10-30 实测：4 条漏洞的报告下 reviewer 返回空，ai-report.md 只剩 381B 头部）。
+  // 这里抛错 → 上层降级并如实标注，绝不把"没产出"记成"已审阅"。
+  if (!content || !String(content).trim()) {
+    entry.error = `empty:${entry.finish_reason || 'unknown'}`;
+    markKeyFail(cfg.keyIdx, false);
+    throw new AppError(ErrorCode.UNKNOWN, `LLM 返回空内容（finish_reason=${entry.finish_reason || 'unknown'}，role=${cfg.role}）——空响应不当作成功`);
+  }
+  // [D275] 非空但 finish_reason=length = 输出被 max_tokens 截断。旧实现把它当成功，
+  // 于是 analyst 的 JSON 被截断、reviewer 的章节被截断后覆盖全文。这里改为失败，
+  // 交给短重试/降级；短重试也失败则如实标缺章/未过审。
+  if (entry.finish_reason === 'length') {
+    entry.error = 'length';
+    throw new AppError(ErrorCode.UNKNOWN, `LLM 输出被 max_tokens 截断（finish_reason=length，role=${cfg.role}）——截断内容不当作成功`);
+  }
+}
+
 async function callLLM(cfg, systemPrompt, userPrompt, timeoutMs = 60000) {
+  const t0 = Date.now();
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
+  /** @type {{role:string,model:string,keyIdx:number,ms:number,status:number|null,finish_reason:string|null,usage:object|null,error:string|null}} */
+  const entry = {
+    role: cfg.role, model: cfg.model, keyIdx: cfg.keyIdx,
+    ms: 0, status: null, finish_reason: null, usage: null, error: null,
+  };
+  let recorded = false;
+  const flush = () => {
+    if (recorded) return;
+    recorded = true;
+    entry.ms = Date.now() - t0;
+    recordTrace(cfg, entry);
+  };
   try {
     const res = await fetch(cfg.apiBase || API_BASE, {
       method: 'POST',
@@ -518,35 +689,26 @@ async function callLLM(cfg, systemPrompt, userPrompt, timeoutMs = 60000) {
       }),
       signal: controller.signal,
     });
-    if (res.status === 429) {
-      markKeyFail(cfg.keyIdx, true);
-      throw new AppError(ErrorCode.RATE_LIMITED, `角色 ${cfg.role} 的 key${cfg.keyIdx + 1} 触发 429 限流，已冷却 ${RATE_LIMIT_COOLDOWN_MS / 1000}s`);
-    }
-    if (!res.ok) {
-      const errText = await res.text().catch(() => '');
-      markKeyFail(cfg.keyIdx, false);
-      throw new AppError(ErrorCode.UNKNOWN, `LLM API ${res.status}: ${errText.slice(0, 200)}`);
-    }
+    entry.status = res.status;
+    if (!res.ok) await throwHttpFailure(res, cfg, entry);
     /** @type {any} */
     const data = await res.json(); // OpenAI 兼容响应：choices[0].message.content
-    const content = data.choices?.[0]?.message?.content;
-    // [D205] 空内容不算成功：网关在 max_tokens 耗尽 / reasoning 占满 / 上游截断时会返回
-    // 200 + 空 content，旧实现直接 `|| ''` 落成空串并继续标「✅ 已审阅」——正文被清空却
-    // 报告"审阅通过"（10-30 实测：4 条漏洞的报告下 reviewer 返回空，ai-report.md 只剩 381B 头部）。
-    // 这里抛错 → 上层降级并如实标注，绝不把"没产出"记成"已审阅"。
-    if (!content || !String(content).trim()) {
-      const finish = data.choices?.[0]?.finish_reason || 'unknown';
-      markKeyFail(cfg.keyIdx, false);
-      throw new AppError(ErrorCode.UNKNOWN, `LLM 返回空内容（finish_reason=${finish}，role=${cfg.role}）——空响应不当作成功`);
-    }
+    const choice = data.choices?.[0];
+    const content = choice?.message?.content;
+    entry.finish_reason = choice?.finish_reason || null;
+    entry.usage = data.usage || null;
+    assertUsableContent(content, cfg, entry);
     return content;
   } catch (e) {
     if (e.name === 'AbortError') {
+      entry.error = 'timeout';
       markKeyFail(cfg.keyIdx, false);
       throw new AppError(ErrorCode.HTTP_TIMEOUT, `角色 ${cfg.role} 请求超时（${timeoutMs / 1000}s）`, { cause: e });
     }
+    if (!entry.error) entry.error = String(e?.message || e).slice(0, 120);
     throw e;
   } finally {
+    flush();
     clearTimeout(timer);
   }
 }
@@ -574,16 +736,18 @@ const SHORT_RETRY_MAX_CHARS = 1200;
 function buildShortWriterPrompt(report, analysis) {
   const params = (report.points || []).map((p) => p.param).filter(Boolean).join(',') || '未知';
   const facts = compressAnalysisForWriter(analysis).slice(0, SHORT_RETRY_MAX_CHARS);
-  return `写一份简短的 SQL 注入漏洞报告（Markdown）：概述、PoC（参数 ${params}）、影响、修复。\n事实 JSON：${facts}`;
+  return `写一份简短的 SQL 注入漏洞报告（Markdown）：概述、PoC（参数 ${params}）、影响、修复。\n${boundaryLine(buildBoundaryFacts(report))}\n事实 JSON：${facts}`;
 }
 
 /**
  * [D255] reviewer 的短 prompt：draft 截断到固定预算，任务压成一句。
+ * [D275] 带上结论口径块：短审阅也不得把 inconclusive/未验证面写成未检出。
  * @param {string} draft 待审阅报告
+ * @param {object} [report] 引擎报告
  * @returns {string} 短 prompt
  */
-function buildShortReviewerPrompt(draft) {
-  return `审阅并修订下面这份漏洞报告，输出修订后的 Markdown 全文。\n报告节选：${String(draft || '').slice(0, SHORT_RETRY_MAX_CHARS)}`;
+function buildShortReviewerPrompt(draft, report) {
+  return `审阅并修订下面这份漏洞报告，输出修订后的 Markdown 全文。\n${boundaryLine(buildBoundaryFacts(report || {}))}\n报告节选：${String(draft || '').slice(0, SHORT_RETRY_MAX_CHARS)}`;
 }
 
 // [D258] analyst 阶段的 system prompt 提为常量：主角色与两级降级此前各写一份字面量，
@@ -610,12 +774,15 @@ function buildShortAnalystPrompt(report) {
     dbms: v.dbms || '未知',
     evidence: String(v.evidence || '').slice(0, 120),
     payload: shortPayload((v.payloads || [])[0] || ''),
+    engineCvss: v.cvss || null,
   }));
   const params = (report.points || []).map((p) => p.param).filter(Boolean).join(',') || '未知';
   const facts = JSON.stringify({ params, dbms: report.dbms || '未知', vulns }).slice(0, SHORT_RETRY_MAX_CHARS);
   return (
     '分析下面的 SQL 注入扫描结果，只输出 JSON（不要 markdown），字段：' +
     '{"vulns":[{"name":"","type":"","risk":"","cvss":"","principle":"","location":"","dbms":"","exploitability":"","poc_payload":"","poc_verify":""}],"overall_risk":"","impact_summary":""}' +
+    '\ncvss 必须逐字引用事实里的 engineCvss；缺失写「引擎未评分」，禁止自行编造分数。' +
+    `\n${boundaryLine(buildBoundaryFacts(report))}` +
     `\n事实：${facts}`
   );
 }
@@ -628,7 +795,9 @@ function buildShortAnalystPrompt(report) {
  */
 function isShortRetryable(e) {
   const msg = String(e?.message || '');
-  return /LLM 返回空内容（finish_reason=|请求超时/.test(msg);
+  // [D275] finish_reason=length（非空但被 max_tokens 截断）也走短重试：
+  // 截断的报告/JSON 不能当成功，短 prompt 至少有机会产出完整内容。
+  return /LLM 返回空内容（finish_reason=|LLM 输出被 max_tokens 截断|请求超时/.test(msg);
 }
 
 /**
@@ -712,9 +881,15 @@ async function runAnalystStage(report, timeoutMs, retries, buildFull = buildAnal
 // 这里只做调度与事实组装（复用已校准的脱敏 / 判据 / 压缩函数，不另立真源）。
 // opt-in：AI_REPORT_STEPWISE=1；未开启时完全不进本段，D258 链路逐字不变。
 const STEPWISE_ENABLED = stepwiseEnabled();
+// [D275] 单章默认 120s：D266 实测 reviewer 41s→84s，旧的「回落到短重试 20s」必超时；
+// 120s 与 D266 通过的显式配置一致。整场仍受 AI_REPORT_TOTAL_TIMEOUT_MS 约束。
 const STEPWISE_TIMEOUT_MS = Number(process.env.AI_REPORT_STEPWISE_TIMEOUT_MS) > 0
   ? Number(process.env.AI_REPORT_STEPWISE_TIMEOUT_MS)
-  : SHORT_RETRY_TIMEOUT_MS;
+  : 120000;
+// [D277] 分步章节有界并发（默认 1 = 串行；opt-in 1..4）。
+// 默认串行的理由：网关可能有 per-user concurrency limit（D255 实测 429），
+// 且串行路径与 D259/D275 行为逐字等价。
+const STEPWISE_CONCURRENCY = normalizeStepwiseConcurrency(process.env.AI_REPORT_STEPWISE_CONCURRENCY);
 
 /**
  * [D259] 事实包依赖：与 buildWriterPrompt 同源的脱敏/压缩结果 + 已校准的判据函数，
@@ -733,6 +908,10 @@ function stepwiseDerived(report, analysis) {
     shortPayload,
     formatBasis,
     summarizeTrace,
+    // [D275] 结论口径随事实包进入每个短请求；用紧凑形态避免挤掉分析正文，
+    // 最终正文另由确定性章节兜底（renderBoundarySection 使用完整事实）。
+    boundary: compactBoundary(buildBoundaryFacts(report)),
+    valueForPrompt,
   };
 }
 
@@ -770,7 +949,7 @@ async function runLegacyStages(report, analysis, analysisValidated, timeoutMs, r
       '你是安全审计专家，精通合规审计与修复方案评审。',
       buildReviewerPrompt(report, draft),
       '你是安全审计专家，输出修订后的 Markdown 报告。',
-      buildShortReviewerPrompt(draft),
+      buildShortReviewerPrompt(draft, report),
       timeoutMs, 'reviewer', retries, call,
     );
     finalReport = reviewed;
@@ -789,24 +968,108 @@ const reportCache = new Map(); // reportFingerprint -> { content, ts }
 const CACHE_TTL = 3600_000; // 1 小时
 const CACHE_MAX = 100; // 容量上限：长驻进程（Docker）下防 Map 无界增长
 
-function reportFingerprint(report) {
-  // 用 vulns 数量和 scanId+target 作为指纹（同扫描不同时间结果不变）
+function reportFingerprint(report, boundary) {
+  // 用 vulns 数量 + scanId+target + 结论口径指纹作为键：verdict/未验证面/triage 变化时
+  // 不得命中旧缓存（[D275]）。
   const safeUrl = (() => {
     try { const u = new URL(report.target?.baseUrl || ''); return `${u.host}${u.pathname}`; } catch { return '***'; }
   })();
-  return `${report.scanId || ''}:${safeUrl}:${(report.vulns || []).length}`;
+  return `${report.scanId || ''}:${safeUrl}:${(report.vulns || []).length}:${boundaryFingerprint(boundary)}`;
 }
 
-export async function generateAiReport(report, timeoutMs = 120000) {
-  // 缓存命中（不消耗本次预算）
-  const fp = reportFingerprint(report);
-  const cached = reportCache.get(fp);
-  if (cached && Date.now() - cached.ts < CACHE_TTL) {
-    return { ...cached.result, cached: true };
+/**
+ * [D275] 把确定性「结论口径与覆盖边界」章节追加到模型正文之后。
+ * 用 marker 做幂等：缓存/重复调用不会追加两次。
+ * @param {string} content 模型正文
+ * @param {object} facts 边界事实
+ * @returns {string} 最终正文
+ */
+function appendBoundarySection(content, facts) {
+  const body = String(content || '').trimEnd();
+  if (body.includes(BOUNDARY_MARKER)) return body;
+  return `${body}\n\n${renderBoundarySection(facts)}`;
+}
+
+/**
+ * [D275] 缓存命中（不消耗本次预算）。过期条目按未命中处理，删除留给写入时的统一淘汰。
+ * @param {string} fp 指纹
+ * @returns {object|null} 命中结果（带 cached 标记）或 null
+ */
+function readReportCache(fp) {
+  const hit = reportCache.get(fp);
+  if (!hit || Date.now() - hit.ts >= CACHE_TTL) return null;
+  return { ...hit.result, cached: true };
+}
+
+/**
+ * [D275] 写缓存并淘汰过期/超容量条目。Map 迭代序即插入序，超容量删最旧，
+ * 防长驻进程（Docker）下 Map 无界增长（历史问题：只有命中时检查 TTL，从不删除）。
+ * @param {string} fp 指纹
+ * @param {object} result 完整结果
+ * @returns {void}
+ */
+function storeReportCache(fp, result) {
+  reportCache.set(fp, { result, ts: Date.now() });
+  const now = Date.now();
+  for (const [k, v] of reportCache) {
+    if (now - v.ts >= CACHE_TTL) reportCache.delete(k);
   }
+  while (reportCache.size > CACHE_MAX) {
+    const oldest = reportCache.keys().next().value;
+    if (oldest === undefined) break;
+    reportCache.delete(oldest);
+  }
+}
+
+/**
+ * [D275] 只缓存完整结果：partial / ⚠️ 未审阅的产物下次应重新尝试，
+ * 不能被缓存成「同一份半成品」反复返回（旧实现无条件写缓存）。
+ * @param {{stepwise?:{partial?:boolean}}} stages 流水线结果
+ * @param {string|undefined} reviewNote 审阅口径
+ * @returns {boolean} 是否可缓存
+ */
+function isCompleteReport(stages, reviewNote) {
+  return !stages.stepwise?.partial && !String(reviewNote || '').includes('⚠️');
+}
+
+/**
+ * [D275] 步骤 2+3：分步模式走「逐章短撰写 + 逐章短审阅」；否则走原整篇流水线（D258 逐字等价）。
+ * @param {object} report 引擎报告
+ * @param {string} analysis analyst 原文
+ * @param {string} analysisValidated 校验后的分析 JSON
+ * @param {number} perStepTimeout 每步超时
+ * @param {string[]} shortPromptRetries 短重试披露（原地追加）
+ * @param {(cfg:object,system:string,user:string,timeoutMs:number)=>Promise<string>} budgetedCallLLM 带总闸的调用器
+ * @returns {Promise<object>} 流水线结果
+ */
+async function runReportStages(report, analysis, analysisValidated, perStepTimeout, shortPromptRetries, budgetedCallLLM) {
+  const legacyFallback = () =>
+    runLegacyStages(report, analysis, analysisValidated, perStepTimeout, shortPromptRetries, budgetedCallLLM);
+  if (!STEPWISE_ENABLED) return legacyFallback();
+  return runStepwiseStages({
+    facts: buildStepwiseFacts(report, stepwiseDerived(report, analysisValidated)),
+    timeoutMs: perStepTimeout,
+    stepwiseTimeoutMs: STEPWISE_TIMEOUT_MS,
+    maxPromptChars: STEPWISE_MAX_CHARS,
+    reviewMaxChars: STEPWISE_REVIEW_MAX_CHARS,
+    concurrency: STEPWISE_CONCURRENCY,
+    sectionCount: WRITER_SECTIONS.length,
+    callLLM: budgetedCallLLM,
+    getRoleConfig,
+    legacyFallback,
+  });
+}
+
+export async function generateAiReport(report, timeoutMs = resolveRequestTimeoutMs()) {
+  // [D275] 边界事实在缓存查询前算好：缓存键必须包含 verdict/覆盖面/triage 指纹。
+  const boundary = buildBoundaryFacts(report);
+  const fp = reportFingerprint(report, boundary);
+  const cached = readReportCache(fp);
+  if (cached) return cached;
 
   // [D263] 整场总闸：所有 LLM 请求共享同一 deadline，耗尽即停（实现见 makeBudgetedCallLLM）。
-  const { call: budgetedCallLLM } = makeBudgetedCallLLM(timeoutMs);
+  // [D275] trace/usage 与总闸同源，逐请求记录。
+  const { trace, call: budgetedCallLLM } = makeBudgetedCallLLM(timeoutMs);
 
   const perStepTimeout = Math.floor(timeoutMs / 3);
   // [D255] 本次报告实际发生过短 prompt 重试的角色，随结果如实披露（不伪造审阅口径）
@@ -830,19 +1093,9 @@ export async function generateAiReport(report, timeoutMs = 120000) {
   // 校验通过则提取结构化 JSON 传递；失败则降级为带警告标记的原始文本。
   const analysisValidated = validateAnalysisJson(analysis);
 
-  // 步骤 2 + 3：分步模式走「逐章短撰写 + 逐章短审阅」；否则走原整篇流水线（D258 逐字等价）
-  const stages = STEPWISE_ENABLED
-    ? await runStepwiseStages({
-      facts: buildStepwiseFacts(report, stepwiseDerived(report, analysisValidated)),
-      timeoutMs: perStepTimeout,
-      stepwiseTimeoutMs: STEPWISE_TIMEOUT_MS,
-      maxPromptChars: STEPWISE_MAX_CHARS,
-      sectionCount: WRITER_SECTIONS.length,
-      callLLM: budgetedCallLLM,
-      getRoleConfig,
-      legacyFallback: () => runLegacyStages(report, analysis, analysisValidated, perStepTimeout, shortPromptRetries, budgetedCallLLM),
-    })
-    : await runLegacyStages(report, analysis, analysisValidated, perStepTimeout, shortPromptRetries, budgetedCallLLM);
+  const stages = await runReportStages(
+    report, analysis, analysisValidated, perStepTimeout, shortPromptRetries, budgetedCallLLM,
+  );
   const { finalReport } = stages;
   // [D263] 半成品一律改成「报告不完整」，头部与 ai-report.json 同源（判定见 deriveReviewNote）。
   const reviewNote = deriveReviewNote(stages);
@@ -853,30 +1106,25 @@ export async function generateAiReport(report, timeoutMs = 120000) {
     throw new AppError(ErrorCode.UNKNOWN, 'AI 报告为空：三个角色均未返回有效内容（检查网关模型名 / 配额 / max_tokens）');
   }
 
+  // [D275] 确定性边界章节：无论模型是否照做，正文末尾一定有 verdict/未验证面/未覆盖面。
+  const contentWithBoundary = appendBoundarySection(finalReport, boundary);
   const result = {
     success: true,
     model: `${ROLES[0].model}→${ROLES[1].model}→${ROLES[2].model}`,
-    content: finalReport,
+    content: contentWithBoundary,
     reviewNote,
     pipeline: 'analyst→writer→reviewer',
-    usage: null,
+    // [D275] 逐请求 usage/trace（网关不返回 usage 时 usage=null，不伪造 0）
+    usage: trace.usage.total_tokens > 0 ? trace.usage : null,
+    ...(trace.requests.length ? { trace: trace.requests } : {}),
+    // [D275] 边界事实随结果返回，供 REST/UI/CLI 元数据直接引用
+    boundary,
     shortPromptRetries,
     // [D259] 只有分步模式才带此字段：引用「已审阅 / 报告完整」口径时必须同时看
     // stepwise.partial 与 failedSteps（分章节审阅 ≠ 全文审阅）。
     ...(stages.stepwise ? { stepwise: stages.stepwise } : {}),
   };
-  // 写缓存 + 淘汰：过期键顺手删除；超容量按插入序删最旧（Map 迭代序即插入序），
-  // 防长驻进程下 Map 无界增长（历史问题：只有命中时检查 TTL，从不删除）
-  reportCache.set(fp, { result, ts: Date.now() });
-  const now = Date.now();
-  for (const [k, v] of reportCache) {
-    if (now - v.ts >= CACHE_TTL) reportCache.delete(k);
-  }
-  while (reportCache.size > CACHE_MAX) {
-    const oldest = reportCache.keys().next().value;
-    if (oldest === undefined) break;
-    reportCache.delete(oldest);
-  }
+  if (isCompleteReport(stages, reviewNote)) storeReportCache(fp, result);
   return result;
 }
 
@@ -928,4 +1176,4 @@ export function listAiConfigs() {
   return out;
 }
 
-export default { generateAiReport, listAiConfigs, validateAnalysisJson, isAiReportEnabled };
+export default { generateAiReport, listAiConfigs, validateAnalysisJson, isAiReportEnabled, resolveRequestTimeoutMs, aiReportLimits };

@@ -99,6 +99,11 @@ export function closeGateList({ root, quick = false }) {
     { name: 'refs', cmd: ['node', 'scripts/ref-integrity.mjs'] },
     { name: 'e2e-wiring', cmd: ['node', 'scripts/e2e-wiring-check.mjs'] },
     { name: 'e2e-wiring:selftest', cmd: ['node', 'scripts/e2e-wiring-check.mjs', '--selftest'] },
+    // [D276 2026-11-08] AI 报告链路的确定性 CI 套件：真网关套件（acceptance ai-gateway）
+    // 在 CI 里长期 SKIP；本套件用 mock 网关跑真实 HTTP + 真实 ReportAI 代码，断言
+    // 脱敏 / 边界章节 / 分步 5+5 / usage。--selftest 用「reviewer 空响应」证明判据能红。
+    { name: 'ai-mock', cmd: ['node', 'e2e/ai-gateway-lab/run-mock.mjs'] },
+    { name: 'ai-mock:selftest', cmd: ['node', 'e2e/ai-gateway-lab/run-mock.mjs', '--selftest'] },
     // [D143 2026-10-23] 便携包两个脚本的自证（交付件链路判据不能空转；真冒烟属 CI）。
     { name: 'portable-build:selftest', cmd: ['node', 'scripts/build-portable.mjs', '--selftest'] },
     { name: 'portable-smoke:selftest', cmd: ['node', 'scripts/portable-smoke.mjs', '--selftest'] },

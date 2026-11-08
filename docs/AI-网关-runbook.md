@@ -24,15 +24,17 @@
 | `AI_REPORT_MODEL_1/2/3` | 本地网关必填 | 覆盖默认模型名（`deepseek-v4-flash` / `glm-5.2` / `sensenova-6.8-flash-lite`）——**自建/本地网关常强制 provider/model 全名**（D192） |
 | `AI_REPORT_API_BASE_2/_3` | 可选 [D254] | 按 key 索引配对的备用端点。三个角色/429 降级路径可分到**不同网关**；未配时逐项回落主 `AI_REPORT_API_BASE`，单网关行为零变化。验收套件用 `AI_GATEWAY_URL_2` / `AI_GATEWAY_KEY_2` 注入 |
 | `AI_REPORT_429_COOLDOWN_MS` | 可选 [D254] | 429 冷却毫秒数，默认 60000（生产语义不变）。多网关分担时可设 3000，让降级立刻换端点而不是原地等 |
-| `AI_REPORT_SHORT_RETRY` | 可选 [D255] | **默认开启**，设 `0` 关闭。writer/reviewer 首次「空内容 / 超时」失败时，用压缩后的短 prompt 再试 **1 次**；429 / HTTP 错误不重试（仍走原有 key 降级）。成功路径零变化 |
+| `AI_REPORT_SHORT_RETRY` | 可选 [D255] | **默认开启**，设 `0` 关闭。writer/reviewer 首次「空内容 / 超时 / `finish_reason=length` 截断」失败时，用压缩后的短 prompt 再试 **1 次**；429 / HTTP 错误不重试（仍走原有 key 降级）。成功路径零变化 |
 | `AI_REPORT_SHORT_RETRY_TIMEOUT_MS` | 可选 [D255] | 短重试单步超时上限，默认 20000；实际取 `min(每步超时, 该值)`。短 prompt 实测 4s 返回，20s 足够 |
 | `AI_REPORT_STEPWISE` | 可选 [D259] | **默认关闭**，设 `1` 启用分步短 prompt：analyst 首轮即短请求，writer/reviewer 按 5 个章节逐章短请求后拼装。绕开「推理型网关长报告 prompt 挂起」；未开启时 D258 链路逐字不变 |
 | `AI_REPORT_STEPWISE_MAX_CHARS` | 可选 [D259] | 单个短请求的用户消息字符上限，默认 1200（与 D255 短重试预算对齐） |
-| `AI_REPORT_STEPWISE_TIMEOUT_MS` | 可选 [D259] | 分步单步超时上限，默认取 `AI_REPORT_SHORT_RETRY_TIMEOUT_MS`（20s）；实际 `min(每步超时, 该值)` |
-| `AI_REPORT_MAX_TOKENS` | 可选 | 默认 8192。推理模型（带 `reasoning_content`）生成长输出会拖过 per-step 超时，本地网关建议 2048（验收套件默认注入） |
-| `AI_REPORT_MASK` | 默认 on | 默认脱敏（host → `<目标Host>`，路径 → `/***`）。**指向本机网关时建议 `=0`**：不脱敏 LLM 才能写出可直接复现的 PoC（D205 实测） |
-| `AI_REPORT_TOTAL_TIMEOUT_MS` | 可选 [D263] | **整场总闸**，默认 300000ms（5 分钟）。CLI 传入的 `timeoutMs` 被 /3 当「每步超时」，而流水线有三级降级 + 短重试 + 分步 11 章共十余步 ⇒ 慢网关可挂 10+ 分钟。所有 LLM 请求共享同一 deadline，单步超时裁到剩余预算，耗尽即抛「AI 报告总预算耗尽」并停止剩余降级/重试。实际取 `min(调用方 timeoutMs, 该值)` |
-| `AI_REPORT_TIMEOUT_MS` | 可选 | 未接线；超时由路由硬编码 120s（REST）与 `generateAiReport(report, timeoutMs)` 三均分（[D263] 再受上面的整场总闸约束） |
+| `AI_REPORT_STEPWISE_TIMEOUT_MS` | 可选 [D259] | 分步单步超时上限，默认 **120000ms**（[D275] 与 D266 通过配置对齐）；实际 `min(每步超时, 该值)` |
+| `AI_REPORT_STEPWISE_REVIEW_MAX_CHARS` | 可选 [D275/D278] | 单章**审阅内容**的硬上限，默认 **16000**（D275 原为 4000，[D278] 真网关反证后上调：`五、修复方案` 章 4696 字符被 4000 判成 `too-long` ⇒ 审阅 4/5 / `partial=true`）。超过硬上限的章节**不送审**（保留原章并标 `reviewer:<key>:too-long` / `partial=true`），绝不用节选审阅替换整章；正常章节必须完整送审 |
+| `AI_REPORT_STEPWISE_CONCURRENCY` | 可选 [D277] | 分步章节的有界并发，默认 **1 = 串行**（与 D259/D275 行为逐字等价），上限 4。章节互不依赖，慢网关可设 2 缩短整场时间；但网关若有 per-user 并发限制会触发 429，**先小步试**。并发下 429 换 key 是尽力而为，失败仍逐章披露、不冒充成功 |
+| `AI_REPORT_MAX_TOKENS` | 可选 | 默认 8192。推理模型（带 `reasoning_content`）生成长输出会拖过 per-step 超时，本地网关建议 2048（验收套件默认注入）。`finish_reason=length` 的非空截断按失败处理，不会冒充完整输出 |
+| `AI_REPORT_MASK` | 默认 on | 默认脱敏（host → `<目标Host>`，路径 → `/***`，query 值与参数值 → `***`）。**指向本机网关时建议 `=0`**：不脱敏 LLM 才能写出可直接复现的 PoC（D205 实测） |
+| `AI_REPORT_TOTAL_TIMEOUT_MS` | 可选 [D263] | **整场总闸**，默认 **600000ms**（[D275] 与调用方 600s 契约对齐；旧默认 300s 会把 600s 静默夹成 300s）。所有 LLM 请求共享同一 deadline，单步超时裁到剩余预算，耗尽即抛「AI 报告总预算耗尽」并停止剩余降级/重试。实际取 `min(调用方 timeoutMs, 该值)` |
+| `AI_REPORT_TIMEOUT_MS` | 可选 [D275] | REST / CLI 共用的调用方整场上限，默认 **600000ms**。REST 路由不再硬编码 120s；CLI 也不再单独写死。生效值查 `GET /api/scan/:id/report/ai/limits` |
 
 ## 2. 最小可用配置
 
@@ -69,10 +71,13 @@ node server/bin/cli.js -u "<目标URL>" --ai-report       # 扫描 + AI 报告�
 
 - **CLI**：`--ai-report [dir]`（D205）。落点：带值用该目录；不带值用 `<--out 目录或当前目录>/ai-report/`。
   扫描结论不受 AI 失败影响（内部 `{ok:false, error}` 不抛异常）。
-- **REST**：`POST /api/scan/:id/report/ai`（超时硬编码 120s）。
+- **REST**：`POST /api/scan/:id/report/ai`（与 CLI 共用 `AI_REPORT_TIMEOUT_MS`，默认 600s；生效矩阵查 `GET /api/scan/:id/report/ai/limits`）。
 - **产物**：`ai-report.md`（正文）+ `ai-report.json`（元数据）。md 头部注释可复核来源：
   `source report`（scanId）/ `pipeline: analyst→writer→reviewer` / `elapsed` /
   审阅状态（`✅ 已经过安全审阅角色校验` 或 `⚠️ 未过审`）/ 数据脱敏标记。
+  正文末尾固定追加 `<!-- engine-boundary -->`「结论口径与覆盖边界」章节（[D275]，
+  引擎字段确定性生成，不是模型生成）；`ai-report.json` 同时落 `boundary` / `usage` / `trace`，
+  复核人不必重跑就能看到 verdict、未验证面、未覆盖面与逐请求耗时/状态。
   ⚠️ `ai-report/` 默认落仓库根目录时记得入 .gitignore（D228 已加）或显式传 dir。
 
 ## 5. 验收（套件 ai-gateway，D228）
@@ -235,16 +240,27 @@ env AI_GATEWAY_URL=http://127.0.0.1:8326 AI_GATEWAY_KEY=$DSH_KEY \
 ① 官方 `ai-gateway` 套件 exit 0（writer 5/5、审阅 5/5 ✅、`partial=false`、落盘 42700B / 484383ms）；
 ② `cli.js --ai-report` 打 DVWA 外部裁判，AI 报告完整落盘（44159B / 412505ms、5/5 审阅、`partial=false`）。
 扫描结论零退化（3 命中 / High / 113 请求 / exit 2），DVWA 官方真值 5/5、零误报。
-**默认配置（单章 60s + 总闸 300s）仍不成立**，下面是显式配置，不是默认值。
+**默认配置（单章 60s + 总闸 300s）仍不成立**；D266 的显式配置是当时唯一的 PASS 证据。
+[D275] 已把这组值采纳为**代码默认**（单章 120s / 整场 600s / 调用方 600s），但**没有重新跑真网关
+验证默认值**——「默认配置在慢网关上可 PASS」仍是未验证结论，引用时请回到 D266 的显式配置复现命令。
+**[D278 2026-11-08] 已用 D275 默认值复跑并抓到真反证**：超时默认值本身没有超时（10 请求全
+200 / `finish=stop` / 266797ms），但 `五、修复方案` 章 **4696 字符** > D275 的 4000 审阅预算
+⇒ `reviewer:fix:too-long` ⇒ 审阅 **4/5** / `partial=true` / exit 1。4000 预算已上调为
+**16000**（正常章节必须完整送审；>16000 仍不送审并标 partial）。
+**修复后同一命令第二轮 PASS**：exit 0、writer 5/5、审阅 **5/5**、`partial=false`、
+`failedSteps=[]`、11 请求 / 63263 tokens / 348300ms / 报告 51805B；该轮 5 章
+（1629/4071/5411/5413/6847 字符）全部完整送审。两轮证据见
+`e2e/ai-gateway-lab/results/D278-真网关默认值-2026-11-08.md`（第一轮反证）与
+`D278-真网关默认值-16000-2026-11-08.json`（第二轮事实）。
 
 | 变量 | 值 | 为什么 |
 |---|---|---|
 | `AI_GATEWAY_URL` / `_KEY` / `_MODEL` | `http://127.0.0.1:8326` / 网关 key / `qodercn/dfmodel` | 网关 `/v1/models` 返回的 id 为准 |
-| `AI_GATEWAY_TIMEOUT_MS` | `600000` | 调用方上限；`ReportAI.js:473` 取 `min(调用方, AI_REPORT_TOTAL_TIMEOUT_MS)`，只调总闸会被套件默认 420s 夹住 |
-| `AI_REPORT_TOTAL_TIMEOUT_MS` | `600000` | D263 整场总闸（默认 300000） |
-| `AI_REPORT_STEPWISE_TIMEOUT_MS` | `120000` | **瓶颈在这一项**：默认 60s 挡不住逐章变长的 reviewer（实测 41→53→57→60s 超时→60s 超时） |
+| `AI_GATEWAY_TIMEOUT_MS` | `600000` | 调用方上限；`ReportAI.js` 取 `min(调用方, AI_REPORT_TOTAL_TIMEOUT_MS)`，只调总闸会被套件默认 420s 夹住 |
+| `AI_REPORT_TOTAL_TIMEOUT_MS` | `600000` | D263 整场总闸（[D275] 默认已改为 600000；显式写出便于复核） |
+| `AI_REPORT_STEPWISE_TIMEOUT_MS` | `120000` | **瓶颈在这一项**：旧默认 60s 挡不住逐章变长的 reviewer（实测 41→53→57→60s 超时→60s 超时）；[D275] 默认已改为 120000 |
 | `AI_REPORT_SHORT_RETRY_TIMEOUT_MS` | `120000` | 同上，保持 analyst 短重试额度一致 |
-| `AI_GATEWAY_MAX_TOKENS` / `AI_REPORT_MAX_TOKENS` | `4096` | 推理型档位 reasoning 可达 2.3 万字，token 太少会 `finish_reason=length` 空内容 |
+| `AI_GATEWAY_MAX_TOKENS` / `AI_REPORT_MAX_TOKENS` | `4096` | 推理型档位 reasoning 可达 2.3 万字，token 太少会 `finish_reason=length` 空内容；[D275] 起非空截断按失败处理 |
 | `AI_REPORT_STEPWISE` | `1` | opt-in 分步短 prompt（D259） |
 
 最小复现（key 不落文档）：
@@ -275,6 +291,43 @@ CLI × DVWA 的完整 env 与起停方式见[实测记录](../e2e/ai-gateway-lab
   明确写 `deepseek-v4.1-flash` 的 `trae/` 等线路本轮未完成验收，不得外推。
 - 套件只验链路事实，不判文风质量；模型响应有波动（套件 484s / CLI 412s），不作性能结论。
 - 只测 DVWA low 档 `id@url` 一个注入面；未测真实公网目标与商业云 WAF 授权样本。
+
+### 5.5 [D276 2026-11-08] 确定性 mock 网关（无真模型也能跑的 CI 判据）
+
+**为什么有它**：`ai-gateway` 套件（`run.mjs`）依赖真网关 + 真模型，CI 里长期 SKIP；
+D258 的 `mock-hang` 只模拟「长 prompt 挂起 / 短 prompt 秒回」一种形态。AI 报告链路的其余
+事实（三角色流水线、分步 5 章撰写 + 5 章审阅、D275 脱敏与确定性边界章节、usage/trace
+累加）此前在无真网关环境下**没有可执行判据**。
+
+**做法**：`e2e/ai-gateway-lab/mock-gateway.mjs` 用行为模拟替代模型（按 prompt **开头前缀**
+分类，返回确定性 JSON / Markdown / 审阅文本），`run-mock.mjs` 起临时端口，异步 spawn
+`run.mjs`（真 HTTP + 真 ReportAI 代码），对产物与 mock 侧记录做断言：
+
+```powershell
+node e2e/ai-gateway-lab/run-mock.mjs            # legacy + stepwise 串行 + stepwise 并发 2
+node e2e/ai-gateway-lab/run-mock.mjs --selftest # 判据自证（必须能红）
+```
+
+**断言**（数字来自 mock 侧记录，不采信套件自报）：
+- legacy 3 请求（analyst 1 / writer 1 / reviewer 1）、stepwise 11 请求（analyst 1 / writer 5 / reviewer 5）；
+- 所有 prompt 里 **0 处** fixture 原文泄漏（`127.0.0.1` / `vulnerabilities/sqli` / `id=1` / `Submit=Submit`），
+  且出现脱敏占位符 `<目标Host>`；
+- 正文含 `<!-- engine-boundary -->` 与「### 六、结论口径与覆盖边界」，`run.mjs` 输出
+  `结论口径：vulnerability_detected / 未验证面 1 类 / 未覆盖面 1 类 / marker=✅`；
+- stepwise 每个 user prompt ≤ 1200 字符、`partial=false`、usage/trace 被累加；
+- **并发判据（[D277]）**：legacy 与 stepwise 默认的并发峰值为 **1**（串行，行为等价）；
+  显式 `AI_REPORT_STEPWISE_CONCURRENCY=2` 时峰值为 **2**（证明并发真的生效，不是配置了没接线），
+  且章节顺序、失败披露顺序与串行时一致。
+
+**诚实边界**：
+- 这是**行为模拟**，只证明链路事实（请求分类、脱敏、章节数、边界章节、usage 累加），
+  **不证明模型输出质量或报告文风**；真网关结论仍以 §5 的 `run.mjs` 为准。
+- prompt 文案改了 ⇒ 分类落到 unknown ⇒ mock 返回 HTTP 500 ⇒ 套件红。失败方向安全，
+  不会把分类漂移静默放行；改文案时同步 `mock-gateway.mjs` 的 `classifyPrompt`。
+- `--selftest` 覆盖四条失败路径：构造泄漏必被抓、缺边界章节必被抓、未知 prompt 必 500、
+  reviewer 返回空内容时 `run.mjs` 必 exit 1 且标「⚠️ 未过审」。
+- 已接进 `gate:close`（54 项）、`ci-local.mjs` 与 ci.yml lint job；
+  `server/tests/gateListWiring.guard.test.js` 的 ①d 判据保证「清单里有、CI 不跑」会红。
 
 ## 6. 运维坑（实测记录）
 

@@ -105,15 +105,40 @@ describe('ReportExport · AI 报告', () => {
   it('生成成功：渲染内容与模型标签', async () => {
     vi.mocked(apiClient.report.ai).mockResolvedValueOnce({
       success: true, model: 'gpt-test', content: 'AI 分析结论',
-    } as any);
+    });
     render(<ReportExport />);
     fireEvent.click(screen.getByRole('button', { name: 'AI 分析' }));
     await waitFor(() => expect(screen.getByText('AI 分析结论')).toBeTruthy());
     expect(screen.getByText('AI 模型: gpt-test')).toBeTruthy();
   });
 
+  it('[D275] partial / ⚠️ 未过审：渲染不完整警告与审阅状态，不得只显示正文', async () => {
+    vi.mocked(apiClient.report.ai).mockResolvedValueOnce({
+      success: true,
+      model: 'gpt-test',
+      content: 'AI 分析结论',
+      reviewNote: '⚠️ 安全审阅角色部分完成（3/5 章节），其余未审阅',
+      stepwise: { enabled: true, partial: true, reviewedSections: 3, writerSteps: 5 },
+    });
+    render(<ReportExport />);
+    fireEvent.click(screen.getByRole('button', { name: 'AI 分析' }));
+    await waitFor(() => expect(screen.getByText('AI 分析结论')).toBeTruthy());
+    expect(screen.getByText(/本次 AI 报告不完整或未经全文审阅/)).toBeTruthy();
+    expect(screen.getByText(/安全审阅角色部分完成/)).toBeTruthy();
+  });
+
+  it('[D275] cached：显式标注缓存结果', async () => {
+    vi.mocked(apiClient.report.ai).mockResolvedValueOnce({
+      success: true, model: 'gpt-test', content: 'AI 分析结论', cached: true,
+    });
+    render(<ReportExport />);
+    fireEvent.click(screen.getByRole('button', { name: 'AI 分析' }));
+    await waitFor(() => expect(screen.getByText('AI 分析结论')).toBeTruthy());
+    expect(screen.getByText(/缓存结果/)).toBeTruthy();
+  });
+
   it('success=false 与请求异常均展示 aiFailed / 原始错误', async () => {
-    vi.mocked(apiClient.report.ai).mockResolvedValueOnce({ success: false } as any);
+    vi.mocked(apiClient.report.ai).mockResolvedValueOnce({ success: false, model: '', content: '' });
     render(<ReportExport />);
     fireEvent.click(screen.getByRole('button', { name: 'AI 分析' }));
     await waitFor(() => expect(screen.getByText('AI 报告生成失败')).toBeTruthy());

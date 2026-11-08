@@ -131,16 +131,20 @@ describe('apiClient 错误体系与端点封装', () => {
     expect(mocked.__instance.get).toHaveBeenCalledWith('/tampers', undefined);
   });
 
-  it('report.ai / report.aiConfigs 端点与默认空 config', async () => {
+  it('report.ai / report.aiConfigs / report.aiLimits 端点与参数', async () => {
     mocked.__instance.post.mockResolvedValue({
       data: { code: 0, data: { success: true, model: 'm', content: 'c' }, message: 'ok' },
     });
     mocked.__instance.get.mockResolvedValue({ data: { code: 0, data: [], message: 'ok' } });
 
     await apiClient.report.ai('scan-9');
-    expect(mocked.__instance.post).toHaveBeenCalledWith('/scan/scan-9/report/ai', {}, undefined);
+    // [D275] 客户端不设超时：服务端有 600s 预算，客户端先掐断会把慢网关误判成失败
+    expect(mocked.__instance.post).toHaveBeenCalledWith('/scan/scan-9/report/ai', {}, { timeout: 0 });
 
     await apiClient.report.aiConfigs('scan-9');
     expect(mocked.__instance.get).toHaveBeenCalledWith('/scan/scan-9/report/ai/configs', undefined);
+
+    await apiClient.report.aiLimits('scan-9');
+    expect(mocked.__instance.get).toHaveBeenCalledWith('/scan/scan-9/report/ai/limits', undefined);
   });
 });

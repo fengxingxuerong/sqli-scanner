@@ -72,6 +72,18 @@ function baseReport(scanId) {
 const userOf = (call) => call.body.messages[1].content;
 const systemOf = (call) => call.body.messages[0].content;
 
+/**
+ * [D275] 去掉引擎确定性追加的「结论口径」章节：本文件断言的是模型正文，
+ * 边界章节另有判据（reportAiFacts.guard.test.js）。这样不放松「正文必须来自模型产出」。
+ * @param {string} content 生成结果
+ * @returns {string} 模型正文
+ */
+function modelBody(content) {
+  const s = String(content || '');
+  const i = s.indexOf('<!-- engine-boundary -->');
+  return (i < 0 ? s : s.slice(0, i)).trimEnd();
+}
+
 // ── [D258] analyst 阶段的短重试 ─────────────────────────────────────────────
 // D255 把短重试挂在 writer/reviewer，双网关实测（545s）却显示三级降级全在 analyst
 // 阶段失败 —— 流水线根本没走到后两步。这组用例钉住：analyst 主角色与两级降级
@@ -87,7 +99,7 @@ test('[D258] analyst 空内容 → 短 prompt 重试成功，流水线继续走�
   });
   try {
     const r = await g.generateAiReport(baseReport('sr-analyst'));
-    assert.equal(r.content, 'FINAL', 'analyst 短重试成功后流水线应继续');
+    assert.equal(modelBody(r.content), 'FINAL', 'analyst 短重试成功后流水线应继续');
     assert.deepEqual(r.shortPromptRetries, ['analyst']);
     assert.equal(fh.calls.length, 4, 'analyst 失败只应多一次短重试');
     assert.ok(userOf(fh.calls[1]).length < userOf(fh.calls[0]).length * 0.5, '短 analyst prompt 必须显著更短');
@@ -109,7 +121,7 @@ test('[D258] analyst 短重试也失败 → 降级到 writer 角色，降级同�
   });
   try {
     const r = await g.generateAiReport(baseReport('sr-analyst-fallback'));
-    assert.equal(r.content, 'FINAL');
+    assert.equal(modelBody(r.content), 'FINAL');
     assert.deepEqual(r.shortPromptRetries, [], '未产出内容的重试不得计入「生效重试」');
     assert.equal(fh.calls.length, 5);
     assert.equal(JSON.parse(fh.calls[2].opts.body).model, 'glm-5.2', '第二级降级应换到 writer 模型');
@@ -136,7 +148,7 @@ test('[D258] AI_REPORT_SHORT_RETRY=0：analyst 不重试，直接走原有角色
   });
   try {
     const r = await genOff.generateAiReport(baseReport('sr-analyst-off'));
-    assert.equal(r.content, 'BODY');
+    assert.equal(modelBody(r.content), 'BODY');
     assert.deepEqual(r.shortPromptRetries, []);
     assert.equal(fh.calls.length, 4, 'analyst 空 → writer 角色 → writer 撰写 → reviewer');
     assert.equal(JSON.parse(fh.calls[1].opts.body).model, 'glm-5.2', '关闭短重试后走原降级，不是同角色短重试');
@@ -153,7 +165,7 @@ test('[D255] writer 空内容 → 短 prompt 重试：请求真的变短、内�
   });
   try {
     const r = await g.generateAiReport(baseReport('sr-writer'));
-    assert.equal(r.content, 'FINAL');
+    assert.equal(modelBody(r.content), 'FINAL');
     assert.deepEqual(r.shortPromptRetries, ['writer']);
     assert.equal(fh.calls.length, 4, 'writer 失败应只多一次短重试');
     assert.ok(userOf(fh.calls[2]).length < userOf(fh.calls[1]).length * 0.5, '短 prompt 必须显著短于原 prompt');
@@ -173,7 +185,7 @@ test('[D255] reviewer 空内容 → 短 prompt 重试成功才标已审阅', asy
   });
   try {
     const r = await g.generateAiReport(baseReport('sr-reviewer'));
-    assert.equal(r.content, 'FINAL');
+    assert.equal(modelBody(r.content), 'FINAL');
     assert.ok(r.reviewNote.includes('已经过安全审阅'));
     assert.deepEqual(r.shortPromptRetries, ['reviewer']);
     assert.ok(userOf(fh.calls[3]).length < userOf(fh.calls[2]).length * 0.8, 'reviewer 短 prompt 截断 draft');
@@ -192,7 +204,7 @@ test('[D255] 超时也触发短重试；重试成功清掉首轮冷却，后续�
   try {
     const r = await g.generateAiReport(baseReport('sr-timeout'));
     assert.deepEqual(r.shortPromptRetries, ['writer']);
-    assert.equal(r.content, 'FINAL', '单 key 冷却被清除后 reviewer 仍能跑完');
+    assert.equal(modelBody(r.content), 'FINAL', '单 key 冷却被清除后 reviewer 仍能跑完');
     assert.equal(fh.calls.length, 4);
   } finally { fh.restore(); }
 });

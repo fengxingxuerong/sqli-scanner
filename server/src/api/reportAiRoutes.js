@@ -7,7 +7,7 @@
 
 import { Router } from 'express';
 import { defaultScanManager } from './scanRoutes.js';
-import { generateAiReport, listAiConfigs, isAiReportEnabled } from '../services/ReportAI.js';
+import { generateAiReport, listAiConfigs, isAiReportEnabled, resolveRequestTimeoutMs, aiReportLimits } from '../services/ReportAI.js';
 import { AppError, ErrorCode } from '../core/errors.js';
 
 const router = Router();
@@ -64,7 +64,9 @@ router.post('/:id/report/ai', async (req, res, next) => {
 
     // 安全：key/model 组合仅由服务端环境变量控制，不允许请求方覆盖
     // （防他人通过 API 请求选择不同 key 烧配额）
-    const result = await generateAiReport(report, 120000); // 120s 超时（长报告）
+    // [D275] 不再硬编码 120s：与 CLI 共用 AI_REPORT_TIMEOUT_MS（默认 600s），
+    // 否则真实网关单次 412s 的调用会被 REST 提前掐断。
+    const result = await generateAiReport(report, resolveRequestTimeoutMs());
 
     res.json({
       code: 0,
@@ -93,6 +95,15 @@ router.get('/:id/report/ai/configs', (req, res) => {
   res.json({
     code: 0,
     data: listAiConfigs(),
+    message: 'ok',
+  });
+});
+
+// GET /api/scan/:id/report/ai/limits — 生效的超时矩阵（[D275] REST/CLI/UI 契约核对）
+router.get('/:id/report/ai/limits', (req, res) => {
+  res.json({
+    code: 0,
+    data: aiReportLimits(),
     message: 'ok',
   });
 });

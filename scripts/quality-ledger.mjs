@@ -95,6 +95,62 @@ function byStatus(claims) {
   return out;
 }
 
+/** 结论台账允许的状态枚举（§3.5）。 */
+const CLAIM_STATUSES = new Set(['verified', 'refuted', 'unverified']);
+
+/**
+ * 单条台账条目的规则表（每条一个纯判定，避免把四类分支堆进一个函数）。
+ * @type {Array<{bad: (c: object) => boolean, msg: (c: object) => string}>}
+ */
+const CLAIM_RULES = [
+  {
+    bad: (c) => !c?.id || !c.claim || !c.status || !c.evidence || !c.refute_cmd,
+    msg: () => '缺必需字段（id/claim/status/evidence/refute_cmd）',
+  },
+  {
+    bad: (c) => Boolean(c?.status) && !CLAIM_STATUSES.has(c.status),
+    msg: (c) => `status=${c.status} 不在枚举内`,
+  },
+  {
+    bad: (c) => c?.status === 'refuted' && !c.refuted_by,
+    msg: () => 'refuted 缺 refuted_by（推翻链）',
+  },
+  {
+    bad: (c) => c?.status === 'unverified' && (!c.lastReviewed || !(c.reviewNote || c.caveat)),
+    msg: () => 'unverified 缺 lastReviewed 或复核结论（§3.5 每批复核 1 条）',
+  },
+];
+
+/**
+ * 逐条跑规则表，产出该条目的违规说明。
+ * @param {object} c 条目
+ * @returns {string[]} 该条的违规说明
+ */
+function validateClaimShape(c) {
+  const at = c?.id || '(无 id)';
+  return CLAIM_RULES.filter((r) => r.bad(c)).map((r) => `${at}：${r.msg(c)}`);
+}
+
+/**
+ * 结论台账结构校验（§3.5）：逐条形状 + id 唯一。
+ * 判据落在 quality-ledger 的 --check 与生成路径，不新增收口项。
+ * @param {Array<object>} claims 台账条目
+ * @returns {string[]} 违规说明（空 = 通过）
+ */
+function validateClaims(claims) {
+  if (!Array.isArray(claims) || claims.length === 0) return ['结论台账为空或格式错误'];
+  const errors = [];
+  const seen = new Set();
+  for (const c of claims) {
+    errors.push(...validateClaimShape(c));
+    if (c?.id) {
+      if (seen.has(c.id)) errors.push(`${c.id}：id 重复`);
+      seen.add(c.id);
+    }
+  }
+  return errors;
+}
+
 /**
  * 渲染台账 Markdown（纯函数：同一份数据必然渲染出同一份文本）。
  * @param {LedgerSources} src 数据源
@@ -163,7 +219,15 @@ function buildLedger(src) {
 }
 
 function run(root, checkOnly) {
-  const md = buildLedger(readSources(root));
+  const sources = readSources(root);
+  const claimErrors = validateClaims(sources.claims);
+  if (claimErrors.length) {
+    console.error('[quality-ledger] ✗ 结论台账结构不合格：');
+    for (const e of claimErrors) console.error('  · ' + e);
+    process.exitCode = 1;
+    return;
+  }
+  const md = buildLedger(sources);
   const abs = join(root, OUT_REL);
   if (checkOnly) {
     let current = '';
@@ -180,7 +244,7 @@ function run(root, checkOnly) {
       process.exitCode = 1;
       return;
     }
-    console.log(`[quality-ledger] ✓ 台账与数据源一致（门禁 ${readSources(root).gateCount} 项、结论 ${md.length} 字符）`);
+    console.log(`[quality-ledger] ✓ 台账与数据源一致（门禁 ${sources.gateCount} 项、结论 ${sources.claims.length} 条、${md.length} 字符）`);
     process.exitCode = 0;
     return;
   }
@@ -198,9 +262,9 @@ function selftest() {
       frontend: { tests: 5 },
     },
     claims: [
-      { id: 'a', claim: 'claim A', status: 'verified' },
-      { id: 'b', claim: 'claim B', status: 'refuted' },
-      { id: 'c', claim: 'claim C', status: 'unverified' },
+      { id: 'a', claim: 'claim A', status: 'verified', evidence: 'e', refute_cmd: 'c' },
+      { id: 'b', claim: 'claim B', status: 'refuted', evidence: 'e', refute_cmd: 'c', refuted_by: '推翻链' },
+      { id: 'c', claim: 'claim C', status: 'unverified', evidence: 'e', refute_cmd: 'c', lastReviewed: '2026-01-01', reviewNote: '复核结论' },
     ],
     gateCount: 31,
     wiringCount: 68,
@@ -222,13 +286,26 @@ function selftest() {
   if (!low.includes('| lines | 80% | 85% | ❌ 低于阈值 |')) failures.push('覆盖率低于阈值未被标红');
   // 同一数据必须渲染同一文本（否则 --check 会天天假红）
   if (buildLedger(fixture) !== md) failures.push('同一份数据两次渲染结果不同（非确定性）');
+  // [D274] 缺陷注入：坏台账逐条必须被 validateClaims 抓到（判据空转 = 假绿）
+  const badCases = [
+    ['空台账', [], '结论台账为空'],
+    ['缺必需字段', [{ id: 'x' }], '缺必需字段'],
+    ['status 非法', [{ id: 'x', claim: 'X', status: 'checked', evidence: 'e', refute_cmd: 'c' }], '不在枚举内'],
+    ['refuted 缺推翻链', [{ id: 'x', claim: 'X', status: 'refuted', evidence: 'e', refute_cmd: 'c' }], 'refuted 缺 refuted_by'],
+    ['unverified 缺复核', [{ id: 'x', claim: 'X', status: 'unverified', evidence: 'e', refute_cmd: 'c' }], 'unverified 缺 lastReviewed'],
+    ['id 重复', [fixture.claims[0], fixture.claims[0]], 'id 重复'],
+  ];
+  for (const [name, claims, needle] of badCases) {
+    if (!validateClaims(claims).some((e) => e.includes(needle))) failures.push(`「${name}」未被 validateClaims 抓到（判据空转）`);
+  }
+  if (validateClaims(fixture.claims).length !== 0) failures.push('合法夹具被 validateClaims 误判');
   if (failures.length) {
     console.error('[quality-ledger] ✗ selftest 失败：');
     for (const f of failures) console.error('  · ' + f);
     process.exitCode = 1;
     return;
   }
-  console.log('[quality-ledger] ✓ selftest 通过（计数/明细/覆盖率标红/确定性 6 条判据均有效）');
+  console.log('[quality-ledger] ✓ selftest 通过（计数/明细/覆盖率标红/确定性/台账结构 12 条判据均有效）');
   process.exitCode = 0;
 }
 

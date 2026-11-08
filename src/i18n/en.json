@@ -769,7 +769,9 @@
     "aiGenerating": "Generating...",
     "aiAnalyze": "AI Analyze",
     "aiModelLabel": "AI Model: {{model}}",
-    "aiFailed": "AI report generation failed"
+    "aiFailed": "AI report generation failed",
+    "aiPartialWarning": "This AI report is incomplete or was not fully reviewed (see review status below); do not cite it as a complete report.",
+    "aiCached": "cached result"
   },
   "common": {
     "loading": "Loading...",

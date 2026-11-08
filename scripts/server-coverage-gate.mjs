@@ -37,8 +37,10 @@ const REL_SCRIPT = 'scripts/server-coverage-gate.mjs';
 const EXCLUDED = Object.freeze([
   'exploitRoutes.edge.test.js',
   'reportAI.service.test.js',
+  'reportAi.boundary.guard.test.js',
   'reportAi.budget.guard.test.js',
   'reportAi.shortRetry.guard.test.js',
+  'reportAi.stepwise.d275.guard.test.js',
   'reportAi.stepwise.guard.test.js',
   'ssrf.ipv6.test.js',
 ].sort());

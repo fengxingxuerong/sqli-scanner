@@ -14,10 +14,12 @@
 import { mkdirSync, writeFileSync, statSync } from 'node:fs';
 import { join, resolve, dirname } from 'node:path';
 import { AppError, ErrorCode } from '../core/errors.js';
-import { generateAiReport, isAiReportEnabled, listAiConfigs } from './ReportAI.js';
-
-/** AI 报告单次生成的默认超时（三模型串行，实测本机网关 117~180s，留足余量） */
-const AI_REPORT_TIMEOUT_MS = 600000;
+import {
+  generateAiReport,
+  isAiReportEnabled,
+  listAiConfigs,
+  resolveRequestTimeoutMs,
+} from './ReportAI.js';
 
 /**
  * [D205] 预检：`--ai-report` 已启用但 env 不全时**直接抛错**（在开扫前调用）。
@@ -95,7 +97,7 @@ function reportFacts(report) {
  * 模型侧事实（用了哪条链、耗时、是否脱敏）。
  * @param {object} result 模型返回
  * @param {{elapsedMs?: number, masked?: boolean}} meta 元信息
- * @returns {{model: string|null, pipeline: string|null, reviewNote: string|null, elapsedMs: number|null, masked: boolean, roles: object[], shortPromptRetries?: string[], stepwise?: object}} 模型事实
+ * @returns {{model: string|null, pipeline: string|null, reviewNote: string|null, elapsedMs: number|null, masked: boolean, roles: object[], shortPromptRetries?: string[], stepwise?: object, boundary?: object, usage?: object, trace?: object[]}} 模型事实
  */
 function modelFacts(result, meta) {
   const m = result || {};
@@ -115,6 +117,11 @@ function modelFacts(result, meta) {
     // [D259] 分步模式如实落盘：partial / failedSteps / reviewedSections 决定
     // 「报告完整、已审阅」这些口径能不能引用，不能只看 reviewNote 的 ✅。
     ...(m.stepwise ? { stepwise: m.stepwise } : {}),
+    // [D275] 结论口径 / 逐请求用量与 trace 落盘：复核人不必重跑就能看到
+    // verdict/未验证面/未覆盖面，以及每个请求的耗时/状态/是否截断。
+    ...(m.boundary ? { boundary: m.boundary } : {}),
+    ...(m.usage ? { usage: m.usage } : {}),
+    ...(Array.isArray(m.trace) && m.trace.length ? { trace: m.trace } : {}),
   };
 }
 
@@ -168,7 +175,7 @@ export async function writeAiReport(report, args) {
     if (!isAiReportEnabled()) return { ok: false, error: 'AI 网关未配置（AI_REPORT_API_BASE / AI_REPORT_KEY_1）' };
     const dir = resolveAiReportDir(args);
     const t0 = Date.now();
-    const result = await generateAiReport(report, AI_REPORT_TIMEOUT_MS);
+    const result = await generateAiReport(report, resolveRequestTimeoutMs());
     const elapsedMs = Date.now() - t0;
     const masked = process.env.AI_REPORT_MASK !== '0';
     const { file, metaFile, bytes } = writeAiReportFiles(dir, result, report, { elapsedMs, masked });

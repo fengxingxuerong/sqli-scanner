@@ -338,6 +338,15 @@ jobs:
       # 而不是「扫描该目录」。引号不可省：交给 Node 自己展开，避免各 shell 展开规则不一致。
       - run: node --test "e2e/lib/*.test.mjs"
         name: e2e 辅助模块单测（状态判定等）
+      # [D276 2026-11-08] AI 报告链路的确定性 CI 套件。acceptance 里的 ai-gateway 套件
+      # 需要真网关 + 真模型（CI 长期 SKIP）；本套件用 mock 网关（行为模拟）跑真实 HTTP +
+      # 真实 ReportAI 代码，断言：legacy/stepwise 两模式 exit 0、prompt 零脱敏泄漏、
+      # D275 确定性边界章节、stepwise 每请求 ≤1200 字符、usage/trace 累加。
+      # 诚实边界：mock 证明链路事实，不证明模型输出质量；真网关结论仍以 run.mjs 为准。
+      - run: node e2e/ai-gateway-lab/run-mock.mjs
+        name: AI 报告链路（确定性 mock 网关 × 真 HTTP，legacy + stepwise）
+      - run: node e2e/ai-gateway-lab/run-mock.mjs --selftest
+        name: AI mock 网关判据自证（泄漏/边界/分类/审阅失败必须判红）
       # [P0-FIX] Rust 门禁：Tauri 壳此前无任何 lint 检查。新增 cargo fmt --check + clippy
       # （eslint 的 ignores 排除 src-tauri/**，需独立门禁；cargo 缓存加速重复构建）
       # [B4 2026-09-18] 用 rust-toolchain@master 而非 @stable：@stable 每次都拉**最新** stable，
@@ -865,12 +874,22 @@ jobs:
       # CI 上就丢了）——失败时把现场直接打进日志，省一轮"重跑加调试"的往返。
       - name: 套件失败现场（last-failure-* 直接进日志）
         if: failure()
+        # [D274] 前置步骤（如 Recall-lab）红时**不产生** last-failure-*，D272 首跑的根因
+        # 只能手工拉整份 job 日志。这里把前置基线的 FAIL 行与验收报告尾部一起打进日志。
         run: |
           for f in e2e/results/last-failure-*.log; do
             [ -f "$f" ] || continue
             echo "════ $f ════"
             tail -60 "$f"
           done
+          if [ -f e2e/recall-lab/results/recall.md ]; then
+            echo "════ recall-lab 基线（前置步骤根因） ════"
+            grep -nE "\[FAIL\]|回归失败|must 未命中" e2e/recall-lab/results/recall.md | head -30 || true
+          fi
+          if [ -f e2e/results/acceptance-report.md ]; then
+            echo "════ acceptance 报告尾部 ════"
+            tail -30 e2e/results/acceptance-report.md
+          fi
       # [P1-ADD 2026-09-19] 随机化真值电池：案例按种子生成（一半注入、一半结构良性），
       # 报的是召回率的 **Wilson 95% 置信区间下界**，不是"13/13"那种小样本分数。
       # 它同时自带一道诚实闸：每个"注入案例"先用一对已知真假探针自证可观测，

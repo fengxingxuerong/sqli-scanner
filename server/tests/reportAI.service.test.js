@@ -106,9 +106,10 @@ test('三角色流水线成功：3 次 LLM 调用、按角色选 key/model、URL
     assert.equal(JSON.parse(fh.calls[0].opts.body).model, 'deepseek-v4-flash');
     assert.equal(fh.calls[1].opts.headers.Authorization, 'Bearer test-key-2');
     assert.equal(JSON.parse(fh.calls[1].opts.body).model, 'glm-5.2');
-    // 脱敏：prompt 只含 host+***，不含路径
+    // [D275] 脱敏：host 也遮掉（旧实现只遮路径，host 仍外发）
     const user0 = JSON.parse(fh.calls[0].opts.body).messages[1].content;
-    assert.ok(user0.includes('example.com/***'));
+    assert.ok(user0.includes('<目标Host>/***'));
+    assert.ok(!user0.includes('example.com'), '脱敏态不得把真实 host 写进 prompt');
     assert.ok(!user0.includes('/secret/login'));
   } finally { fh.restore(); }
 });
@@ -174,7 +175,8 @@ test('[D205/D255] reviewer 与短 prompt 重试均返回空 ≠ 审阅通过：�
     const r = await g.generateAiReport(baseReport('empty-review'));
     assert.equal(r.success, true);
     assert.ok(!r.reviewNote.includes('已经过安全审阅'), '空返回不能被标成已审阅');
-    assert.equal(r.content, 'BODY-2', '正文应回退到 writer 的产出，而不是空串');
+    assert.ok(r.content.startsWith('BODY-2'), '正文应回退到 writer 的产出，而不是空串');
+    assert.ok(r.content.includes('<!-- engine-boundary -->'), '[D275] 边界章节仍随报告返回');
     assert.deepEqual(r.shortPromptRetries, [], '短重试未产出内容，不得计入生效重试（不得伪造成功）');
   } finally { fh.restore(); }
 });

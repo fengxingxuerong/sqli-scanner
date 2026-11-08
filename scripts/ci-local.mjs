@@ -206,6 +206,10 @@ const GATES = [
     // 接进收口清单后会被 gateListWiring 的三向核对判红，补成两侧对称。
     ['版本号三处一致自证（构造样本必须反应）', 'node scripts/version-sync.mjs --selftest'],
     ['版本号三处一致', 'node scripts/version-sync.mjs'],
+    // [D276 2026-11-08] AI 报告链路确定性套件：真网关套件（acceptance ai-gateway）在 CI
+    // 里长期 SKIP；本套件用 mock 网关跑真实 HTTP + 真实 ReportAI 代码，不依赖外部模型。
+    ['AI 报告链路（确定性 mock 网关 × 真 HTTP，legacy + stepwise）', 'node e2e/ai-gateway-lab/run-mock.mjs'],
+    ['AI mock 网关判据自证（泄漏/边界/分类/审阅失败必须判红）', 'node e2e/ai-gateway-lab/run-mock.mjs --selftest'],
   ].map(([name, cmd]) => ({ id: 'lint', name, cmd })),
   { id: 'lint', name: 'cargo fmt --check', cmd: 'cd src-tauri && cargo fmt --check' },
   { id: 'lint', name: 'cargo clippy -D warnings', cmd: 'cd src-tauri && cargo clippy -- -D warnings' },
@@ -213,7 +217,7 @@ const GATES = [
   { id: 'test-frontend', name: '前端构建', cmd: 'npm run build' },
   { id: 'test-server', name: '服务端单测', cmd: 'cd server && npm test' },
   // [D260 2026-11-06] 与 ci.yml 同源：test:coverage 委托 scripts/server-coverage-gate.mjs，
-  // 排除 6 个含 ?query 隔离实例的测试文件以校准 Node 覆盖率多进程合并口径（阈值不变）。
+  // 排除 8 个含 ?query 隔离实例的测试文件（D275 新增 2 个 AI 链路 guard）以校准 Node 覆盖率多进程合并口径（阈值不变）。
   { id: 'test-server', name: '服务端覆盖率门禁', cmd: 'cd server && npm run test:coverage', slow: true },
   // 变异门禁（断言敏感度）：与 ci.yml 同名步骤对应（守卫见 server/tests/mutationGate.wiring.test.js）。
   // 本地默认快档（--limit=8），全量 `npm run mutation` 留给 CI 慢车道/手动。

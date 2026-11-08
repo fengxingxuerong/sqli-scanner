@@ -5,6 +5,169 @@
 
 ---
 
+## 2026-11-08 批次 D278 · 审阅硬上限 4000→16000（真网关默认值复跑：先反证后修复）
+
+**起点**：D275 把 D266 的显式配置采纳为默认值，但未用默认值重跑真网关。D278 第一轮按
+D275 默认值实跑（dsh `127.0.0.1:8326` / `qodercn/dfmodel`，只设
+`AI_GATEWAY_TIMEOUT_MS=600000`）：超时默认值未触发（10 请求全 200 / `finish=stop` /
+266797ms），但 `五、修复方案` 章 **4696 字符** > 4000 审阅预算 ⇒
+`reviewer:fix:too-long` ⇒ 审阅 **4/5** / `partial=true` / exit 1。
+按 §3.5 先停用 D275 结论（标 `refuted`、旧数字保留），再改实现并复跑。
+
+**改动**：
+- `reportAiStepwise.js` 的 `STEPWISE_REVIEW_MAX_CHARS` 默认 **4000 → 16000**；硬上限语义
+  不变（>16000 仍不送审、保留原章、标 `reviewer:<key>:too-long` + `partial=true`；
+  显式 env 仍优先）。
+- 新增 `server/tests/reportAi.stepwise.d278.guard.test.js` 4 条（默认值 / 4696 字章必须送审 /
+  >16000 仍拒绝 / 显式值优先）；`run-mock.mjs` 不再注入 4000，改走默认值。
+- runbook §5.4 + env 矩阵、user-guide、TODO/CHANGELOG 的 D275 段同步反证注记；
+  台账 `ai-report-d275-defaults-and-full-review` → `refuted`，新增
+  `ai-report-d278-review-cap-16000` → 复跑后 `verified`。
+
+**验证**：
+- 两轮同一命令，唯一变量 = 审阅硬上限：
+
+| 轮次 | 硬上限 | exit | 耗时 | writer | 审阅 | partial | failedSteps | 请求 | tokens | 报告 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | 4000 | **1** | 266797ms | 5/5 | **4/5** | true | `reviewer:fix:too-long` | 10 | 46937 | 35403B |
+| 2 | **16000** | **0** | 348300ms | 5/5 | **5/5** | false | `[]` | 11 | 63263 | 51805B |
+
+- 第二轮 5 章（1629/4071/5411/5413/6847 字符）全部完整送审；最慢单请求 96.3s，
+  仍在默认单章 120s 内。证据：`e2e/ai-gateway-lab/results/D278-真网关默认值-2026-11-08.md`
+  + 两份 JSON（第一轮反证 / 第二轮事实）。
+- 目标 AI 链路测试 35 pass / 0 fail；`run-mock` 三模式 + `--selftest` 通过；
+  `npm run gate:close` 按退出码收口。
+
+**边界**：只对 dsh `qodercn/dfmodel` 成立，不代表公网 / 商业云模型；单轮实测，模型输出有
+波动；16000 能覆盖本轮全部章节，不保证所有模型/目标都不超限，>16000 仍如实标 `partial`。
+套件只验链路事实，不判文风质量；扫描结论不变。
+
+---
+
+## 2026-11-08 批次 D277 · 分步链路有界并发（P1：慢网关整场耗时 / 默认串行零行为变化）
+
+**起点**：D266 真网关实测 12 个请求串行 **484s**，其中 writer/reviewer 各 5 章是主要耗时；
+章节之间互不依赖，但 D259 的实现是逐章 `await`，慢网关上整场时间线性叠加。
+另一方面，网关可能有 per-user 并发限制（D255 实测 429），不能默认并发。
+
+**改动**：
+- `reportAiStepwise.js` 新增 `normalizeStepwiseConcurrency()`（非法值→1，上限 4）与
+  内部 `mapPool()`（有界并发、结果按输入顺序返回；limit≤1 退化为串行）。
+- writer 5 章 / reviewer 5 章改走 `mapPool`；**默认 `concurrency=1` 与旧行为逐字等价**。
+  并发下失败披露（`failedSteps`）与拼装顺序仍按章节顺序，不随完成先后漂移。
+- `ReportAI.js` 读 `AI_REPORT_STEPWISE_CONCURRENCY`（默认 1）；`aiReportLimits()` 与
+  `GET /report/ai/limits` 回显 `stepwiseConcurrency`；`stepwise.concurrency` 随结果落盘。
+- 429/5xx 换 key 在并发下是「尽力而为」：可能多冷却一个 key，但失败仍逐章披露，
+  绝不把没产出记成成功。
+- 文档 / 前端类型：runbook 环境矩阵、user-guide、README、`docs/api.md`、
+  `src/shared/apiClient.ts` 同步。
+
+**验证**：
+- 新增 `server/tests/reportAi.stepwise.concurrency.guard.test.js` **5 pass / 0 fail**：
+  归一化边界、默认串行峰值=1、并发 2 峰值=2 且结果按序、失败披露按序、超预算不送审按序。
+- `e2e/ai-gateway-lab/run-mock.mjs` 增加 `stepwise-concurrent` 模式（mock 每请求延迟 25ms）：
+  legacy/stepwise 并发峰值 **1**、并发模式峰值 **2**，两模式均 11 请求（1/5/5）、
+  `partial=false`、0 泄漏；`--selftest` 仍通过。
+- `npm run gate:close` 按退出码收口（见 CHANGELOG）。
+
+**边界**：并发只改变**调度**，不改变「失败不冒充成功」；默认串行，未在真网关上验证
+并发 2 的收益与 429 风险（D266 的网关未重跑）。「有界并发/流式」中的**流式**本批未做：
+当前分步模式已把长 prompt 拆短，流式属于独立传输层改造，另立批次评估。
+
+---
+
+## 2026-11-08 批次 D276 · AI 报告确定性 mock 网关 CI 套件（P1：真网关套件长期 SKIP 的替代判据）
+
+**起点**：D275 把 P0 缺口收口后，AI 报告链路的可执行判据仍分两半：
+① `ai-gateway` 套件（`run.mjs`）依赖真网关 + 真模型，CI 里**长期 SKIP**；
+② D258 的 `mock-hang` 只模拟「长 prompt 挂起 / 短 prompt 秒回」一种形态。
+三角色流水线、分步 5 章撰写 + 5 章审阅、D275 脱敏与确定性边界章节、usage/trace
+累加，在无真网关环境下**没有可执行判据**——「代码写了」不等于「链路跑得通」。
+
+**改动**：
+- 新增 `e2e/ai-gateway-lab/mock-gateway.mjs`：按 prompt **开头前缀**分类的确定性网关
+  （analyst / writer / reviewer × legacy / short / stepwise），返回确定性 JSON / Markdown /
+  审阅文本 + usage；未知前缀 → HTTP 500（分类漂移不会被静默放行）；支持
+  `failRole` / `failMode` 注入失败路径。
+- 新增 `e2e/ai-gateway-lab/fixture.mjs`：`run.mjs` 与 `run-mock.mjs` 共用的报告 fixture
+  与泄漏词表（`FIXTURE_SECRETS`），避免两份各写一份导致泄漏判据静默失效。
+- 新增 `e2e/ai-gateway-lab/run-mock.mjs`：临时端口起 mock，**异步 spawn** `run.mjs`
+  （`spawnSync` 会阻塞父进程事件循环 ⇒ 子进程连不上 mock，实测 ETIMEDOUT 零请求），
+  断言 legacy 3 请求（1/1/1）、stepwise 11 请求（1/5/5）、prompt 零泄漏、
+  `<目标Host>` 存在、边界 marker + 标题 + `结论口径` 行、stepwise 每请求 ≤1200 字符、
+  `partial=false`、usage/trace 累加。`--selftest` 用构造泄漏 / 缺边界 / 未知 prompt /
+  reviewer 空响应四条失败路径自证判据能红。
+- `run.mjs` 同步加严：正文边界章节（marker + 标题 + verdict）恒断言；
+  usage/trace 仅在 `AI_GATEWAY_EXPECT_USAGE=1` 时断言（真网关可能不返回 usage）。
+- 接线：`gate-list.mjs` 增 `ai-mock` / `ai-mock:selftest`（52 → **54 项**）；
+  `ci-local.mjs` 与 ci.yml lint job 各加两条；`gateListWiring.guard.test.js` 新增 ①d
+  判据（e2e 入口型门禁必须在 ci.yml 与 ci-local 各被执行）+ 自证。
+
+**验证**：`node e2e/ai-gateway-lab/run-mock.mjs` 通过（legacy 3 请求 / stepwise 11 请求 /
+0 泄漏 / 最大 stepwise user prompt 1058B）；`--selftest` 通过；
+`gate-close.mjs --selftest` 54 项；`gateListWiring.guard.test.js` 6/6 pass。
+
+**边界**：mock 是**行为模拟**，只证明链路事实（请求分类、脱敏、章节数、边界章节、
+usage 累加），**不证明模型输出质量或报告文风**；真网关结论仍以 `run.mjs` 为准。
+D266 的「默认超时在慢网关上可 PASS」仍是 unverified，本批不改变该结论。
+
+---
+
+## 2026-11-08 批次 D275 · AI 报告链路 P0 收口（脱敏 / 超时 / 结论口径 / 完整性）（已完成本机验证，真网关待复跑）
+
+**起点**：D266 真网关 PASS 靠的是**显式配置**（单章 120s / 整场 600s），代码默认仍是
+单章 60s / 总闸 300s / REST 硬编码 120s；AI 报告链路另有四处 P0 缺口：
+① 脱敏只遮路径，host / query 值 / 注入点原始参数值仍原样外发；
+② `factsJson` 超预算时直接 `slice` 出**半截 JSON**，模型拿到的是坏输入；
+③ reviewer 只审**前 980 字符节选**却记「✅ 已审阅」；④ 报告缺 verdict / 未验证面 /
+未覆盖面时，AI 正文没有任何强制口径，容易被引用成「未检出」。
+
+**改动**：
+- **脱敏（[D275]）**：`AI_REPORT_MASK` 开启时 host → `<目标Host>`、路径 → `/***`、
+  query 值 → `***`、注入点 `originalValue` → `***`；分步模式共用同一套 `valueForPrompt()`。
+- **超时契约**：`resolveRequestTimeoutMs()` 统一 REST / CLI（默认 600s）；
+  `AI_REPORT_TOTAL_TIMEOUT_MS` 默认 600s、`AI_REPORT_STEPWISE_TIMEOUT_MS` 默认 120s；
+  新增 `GET /api/scan/:id/report/ai/limits` 回显生效矩阵；前端 AI 调用 `timeout: 0`
+  （不再由客户端先掐断服务端预算）。
+- **结论口径（引擎确定性章节）**：新增 `reportAiFacts.js` —— 从报告字段生成
+  verdict / validity / 未验证面 / 未覆盖面 / 爬取降级 / 定库告警 / triage 事实；
+  正文末尾固定追加 `<!-- engine-boundary -->`「结论口径与覆盖边界」章节（**不是模型生成**）；
+  三类 prompt 都带口径提示；缓存指纹包含边界事实。
+- **完整性**：`fitJson()` 任何预算下都返回**合法 JSON**；`finish_reason=length`
+  的非空截断按失败处理（进短重试）；`trace` / `usage` 逐请求落盘（网关不返回 usage 时为
+  `null`，不伪造 0）；**半成品 / 未过审结果不写缓存**；UI 对 `partial` / ⚠️ / `cached`
+  显示显式提示。
+- **分步链路**：审阅预算默认 4000 字符，**预算内送全文**，超预算章节不送审并标
+  `reviewer:<key>:too-long` + `partial=true`（绝不用节选审阅冒充全文）；
+  ⚠️ **[D278] 已反证**：真网关实测 `五、修复方案` 章 4696 字符 > 4000 ⇒ 审阅 4/5 /
+  `partial=true`；4000 预算已上调为 **16000**，详见 D278 段；
+  429/5xx 换 key/端点一次并把新 cfg 留给后续章节，空响应/超时不换 key。
+- **文档 / 台账**：README / `docs/api.md` / `docs/user-guide.md` /
+  `docs/AI-网关-runbook.md` 同步；D266 台账 caveat 更新（默认值已采纳但未真网关复跑）；
+  新增 `ai-report-d275-defaults-and-full-review`（**unverified**）。
+
+**验证**：服务端 AI 链路测试 **94 pass / 0 fail**（新增 `reportAi.boundary.guard`、
+`reportAi.stepwise.d275.guard`）；前端 `reportExport.test.tsx` **9 pass**；
+`gate:close` 按退出码收口（见 CHANGELOG）。
+
+**边界**：**没有重跑真网关**——默认值能否在 dsh `qodercn/dfmodel` 上 PASS 仍属
+unverified；本批只证明代码路径与判据有牙，不证明模型输出质量。P1/P2（mock 网关 CI 套件、
+有界并发 / 流式、外部靶场扩展）另立批次。
+
+---
+
+## 2026-11-08 批次 D274 · 全方面质量收口（已完成，见 CHANGELOG）
+
+**起点**：§3.5 结论台账待复核条目无机器判据；CI 前置步骤红时缺根因回显；TODO [D272] 段待办过期。
+
+**改动**：复核 `waf-fingerprint-coverage`（运行期 62 家 / 156 matcher、双源对拍 8/8 绿、真机仍 1 例 ⇒ **维持 unverified**）+ `lastReviewed` / `reviewNote`；`quality-ledger.mjs` 加 `validateClaims()` 与 6 组缺陷注入自证（首跑抓到 2 条真实台账缺口，补数据不放宽判据）；`ci.yml` 失败现场补 recall 基线 FAIL 行；TODO / CHANGELOG 补段 + [D272] 收口指引。
+
+**验证**：`--selftest` 12 条判据、`--check`、`gate:close` 按退出码收口；台账渲染未变。
+
+**边界**：**不推送**（D273 复跑 run `42405625629` 仍在进行）；不把构造样本 100% 当真机命中率；Benchmark CI 化 / AI 报告真网关 / 补独立真值形态属独立批次，不在本批硬修。
+
+---
+
 ## 2026-11-08 批次 D273 · CI 首跑 failure 归因与稳定性收口（已完成本机验证，待 CI 复跑）
 
 **起点**：D272 首跑 run `42397466577` = **failure**，唯一红 job = `acceptance`
@@ -25,6 +188,10 @@ Benchmark（JDK+mvn）与 ai-gateway（外部 LLM 网关）仍属独立 / 长期
 ---
 
 ## 2026-11-08 批次 D272 · VulnLab 接入 CI 验收（已完成本机验证，待 CI 首跑）
+
+> ⚠️ **本段待办已由 [D273] 收口**：CI 首跑 run `42397466577` 实测 **failure**
+> （Recall-lab 前置步骤红 ⇒ 验收门禁未执行），「预期 25/27」作废；详见 D273 段与 CHANGELOG。
+> 下方原文保留作推翻链（归档 ≠ 删除）。
 
 **起点**：[D271] 后 CI 24/27，VulnLab 长期 SKIP。根因不是「没起靶场」而是 [D162]
 记录的「CI 上 SQLite 种子未生效 ⇒ 自证探针无差分 ⇒ 静默 SKIP」，且 run.mjs 会自己

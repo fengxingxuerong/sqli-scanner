@@ -1,0 +1,148 @@
+{
+  "batch": "D278",
+  "date": "2026-11-08",
+  "gateway": "http://127.0.0.1:8326",
+  "model": "qodercn/dfmodel",
+  "config": {
+    "AI_REPORT_STEPWISE": "1",
+    "timeouts": "D275 defaults (no AI_REPORT_STEPWISE_TIMEOUT_MS / AI_REPORT_TOTAL_TIMEOUT_MS / AI_REPORT_TIMEOUT_MS)",
+    "caller": "AI_GATEWAY_TIMEOUT_MS=600000",
+    "maxTokens": "4096"
+  },
+  "run": {
+    "exit": 1,
+    "elapsedMs": 266797,
+    "writerSteps": 5,
+    "reviewedSections": 4,
+    "partial": true,
+    "concurrency": 1,
+    "reviewMaxChars": 4000,
+    "failedSteps": [
+      "reviewer:fix:too-long"
+    ],
+    "usage": {
+      "prompt_tokens": 6967,
+      "completion_tokens": 39970,
+      "total_tokens": 46937
+    },
+    "requests": 10
+  },
+  "sections": [
+    {
+      "heading": "(head)",
+      "chars": 333
+    },
+    {
+      "heading": "一、漏洞概述",
+      "chars": 2071
+    },
+    {
+      "heading": "二、漏洞描述",
+      "chars": 2761
+    },
+    {
+      "heading": "三、漏洞证明（PoC）",
+      "chars": 3475
+    },
+    {
+      "heading": "四、影响评估",
+      "chars": 3279
+    },
+    {
+      "heading": "五、修复方案",
+      "chars": 4696
+    }
+  ],
+  "trace": [
+    {
+      "role": "analyst",
+      "ms": 16809,
+      "status": 200,
+      "finish_reason": "stop",
+      "total_tokens": 2794,
+      "reasoning_tokens": 2123,
+      "error": null
+    },
+    {
+      "role": "writer",
+      "ms": 8290,
+      "status": 200,
+      "finish_reason": "stop",
+      "total_tokens": 1642,
+      "reasoning_tokens": 647,
+      "error": null
+    },
+    {
+      "role": "writer",
+      "ms": 9872,
+      "status": 200,
+      "finish_reason": "stop",
+      "total_tokens": 1768,
+      "reasoning_tokens": 603,
+      "error": null
+    },
+    {
+      "role": "writer",
+      "ms": 15213,
+      "status": 200,
+      "finish_reason": "stop",
+      "total_tokens": 2638,
+      "reasoning_tokens": 1099,
+      "error": null
+    },
+    {
+      "role": "writer",
+      "ms": 14142,
+      "status": 200,
+      "finish_reason": "stop",
+      "total_tokens": 2141,
+      "reasoning_tokens": 277,
+      "error": null
+    },
+    {
+      "role": "writer",
+      "ms": 25126,
+      "status": 200,
+      "finish_reason": "stop",
+      "total_tokens": 3722,
+      "reasoning_tokens": 976,
+      "error": null
+    },
+    {
+      "role": "reviewer",
+      "ms": 34432,
+      "status": 200,
+      "finish_reason": "stop",
+      "total_tokens": 5458,
+      "reasoning_tokens": 3711,
+      "error": null
+    },
+    {
+      "role": "reviewer",
+      "ms": 61059,
+      "status": 200,
+      "finish_reason": "stop",
+      "total_tokens": 10422,
+      "reasoning_tokens": 8077,
+      "error": null
+    },
+    {
+      "role": "reviewer",
+      "ms": 35549,
+      "status": 200,
+      "finish_reason": "stop",
+      "total_tokens": 6430,
+      "reasoning_tokens": 3312,
+      "error": null
+    },
+    {
+      "role": "reviewer",
+      "ms": 46301,
+      "status": 200,
+      "finish_reason": "stop",
+      "total_tokens": 9922,
+      "reasoning_tokens": 6549,
+      "error": null
+    }
+  ]
+}

@@ -162,14 +162,29 @@ export const apiClient = {
   // AI 报告生成
   report: {
     /** 生成 AI 漏洞分析报告（POST /api/scan/:id/report/ai）。
-     *  不接受 key/model 参数：组合仅由服务端环境变量控制（reportAiRoutes.js） */
+     *  不接受 key/model 参数：组合仅由服务端环境变量控制（reportAiRoutes.js）。
+     *  [D275] timeout:0 = 客户端不设超时：服务端已有整场总闸（默认 600s），
+     *  旧 axios 全局 30s 会在服务端仍工作时提前 abort（真实网关实测 412s）。 */
     ai: (scanId: string) =>
-      apiClient.post<{ success: boolean; model: string; content: string; usage?: object }>(
-        `/scan/${scanId}/report/ai`, {}),
+      apiClient.post<{
+        success: boolean;
+        model: string;
+        content: string;
+        reviewNote?: string;
+        pipeline?: string;
+        usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } | null;
+        shortPromptRetries?: string[];
+        stepwise?: { enabled?: boolean; partial?: boolean; reviewedSections?: number; writerSteps?: number; failedSteps?: string[]; fallback?: string | null; concurrency?: number };
+        cached?: boolean;
+      }>(`/scan/${scanId}/report/ai`, {}, { timeout: 0 }),
     /** 列出 3 个角色的固定配置（GET /api/scan/:id/report/ai/configs） */
     aiConfigs: (scanId: string) =>
       apiClient.get<{ role: string; model: string; desc: string; label: string }[]>(
         `/scan/${scanId}/report/ai/configs`),
+    /** 生效的超时/并发矩阵（GET /api/scan/:id/report/ai/limits） */
+    aiLimits: (scanId: string) =>
+      apiClient.get<{ requestTimeoutMs: number; totalTimeoutMs: number; stepwiseTimeoutMs: number; stepwiseConcurrency: number }>(
+        `/scan/${scanId}/report/ai/limits`),
   },
 };
 

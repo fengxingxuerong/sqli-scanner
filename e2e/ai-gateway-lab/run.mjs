@@ -10,15 +10,19 @@
 // 诚实边界：
 //   · 网关/模型未就绪 → `[SKIP] AI 网关不可用：…` + exit 0（未就绪不是失败，但必须写明原因，
 //     不得冒充通过 —— 与 vampi/juice 套件的 SKIP 口径一致）；
-//   · 断言的是「链路事实」（网关实调回声 / 脱敏 / 审阅标记 / 元数据头 / 落盘字节数），
-//     **不判报告文风质量** —— 0.5B 级链路验证模型输出极短是预期，不构成套件失败；
+//   · 断言的是「链路事实」（网关实调回声 / 脱敏 / 审阅标记 / 元数据头 / 落盘字节数 /
+//     D275 确定性边界章节），**不判报告文风质量** —— 0.5B 级链路验证模型输出极短是预期，
+//     不构成套件失败；
 //   · 默认探 Ollama(127.0.0.1:11434)；自建 OpenAI 兼容网关（如 dsh:8326）用
 //     AI_GATEWAY_URL / AI_GATEWAY_KEY / AI_GATEWAY_MODEL 注入。
+//   · [D276] 无真网关时用 run-mock.mjs（确定性 mock 网关）跑同一份判据；本文件的边界
+//     章节断言对真网关同样成立（章节由引擎追加，不是模型生成）。
 // ============================================================================
 
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { makeReport } from './fixture.mjs';
 
 const GATEWAY_URL = process.env.AI_GATEWAY_URL || 'http://127.0.0.1:11434';
 // [D254] 可选备用网关：三个角色/降级路径分到不同端点，429 时真换网关而非原地等 60s
@@ -100,26 +104,10 @@ async function main() {
   const { writeAiReportFiles } = await import('../../server/src/services/aiReportCli.js');
 
   // ③ 最小真形态 fixture：字段 = ReportAI 消费面（target/points/vulns 的
-  //    poc_payload / poc_verify / evidence）。startedAt 每次变化，防 reportFingerprint
-  //    缓存命中（命中会让「网关实调」事实失真）。
-  const report = {
-    scanId: `ai-gateway-fixture-${Date.now()}`,
-    startedAt: new Date().toISOString(),
-    dbms: 'MySQL',
-    target: { baseUrl: 'http://127.0.0.1:8099/vulnerabilities/sqli/?id=1&Submit=Submit', method: 'GET' },
-    points: [{ param: 'id', location: 'url', originalValue: '1' }],
-    vulns: [{
-      id: 'v1',
-      technique: 'boolean',
-      parameter: 'id',
-      severity: 'High',
-      risk: 'High',
-      evidence: '真/假探针响应长度差：真样本 1617B / 假样本 30B，首个差异偏移 214',
-      poc: { payload: "1' AND '1'='1" },
-      poc_payload: "1' AND '1'='1",
-      poc_verify: '真/假响应长度差 ≥ 10 倍；状态码 200',
-    }],
-  };
+  //    poc_payload / poc_verify / evidence）+ D275 边界事实（summary.*）。
+  //    scanId 每次变化，防 reportFingerprint 缓存命中（命中会让「网关实调」事实失真）。
+  //    [D276] fixture 外移到 fixture.mjs：run-mock 的泄漏词表与它同源，避免两份漂移。
+  const report = makeReport();
 
   // ④ 全流水线（真实 HTTP；三角色均空响应时 generateAiReport 会抛错）
   const t0 = Date.now();
@@ -148,6 +136,18 @@ async function main() {
   const reviewed = String(result.reviewNote || '').includes('✅');
   const modelChain = `${GATEWAY_MODEL}→${GATEWAY_MODEL}→${GATEWAY_MODEL}`;
   const realCall = result.success === true && result.model === modelChain;
+  // [D276] D275 确定性边界章节：引擎追加，不依赖模型是否照做。
+  const boundary = result.boundary || {};
+  const boundaryMarker = String(result.content || '').includes('<!-- engine-boundary -->');
+  const boundaryHeading = String(result.content || '').includes('### 六、结论口径与覆盖边界');
+  const boundaryVerdict = boundary.verdict === 'vulnerability_detected';
+  const boundaryOk = boundaryMarker && boundaryHeading && boundaryVerdict
+    && boundary.unverifiedSurfaces?.length === 1 && boundary.uncoveredSurfaces?.length === 1;
+  // [D276] usage/trace 只在显式要求时断言（真网关可能不返回 usage，不能把缺字段判成失败）。
+  const expectUsage = process.env.AI_GATEWAY_EXPECT_USAGE === '1';
+  const usageOk = !expectUsage || (
+    Number(result.usage?.total_tokens) > 0 && Array.isArray(result.trace) && result.trace.length >= 3
+  );
 
   const gateways = [GATEWAY_URL, GATEWAY_URL_2].filter(Boolean).join(' + ');
   console.log(`网关：${gateways}（模型 ${GATEWAY_MODEL}, max_tokens=${MAX_TOKENS}）`);
@@ -156,6 +156,8 @@ async function main() {
   console.log(`数据脱敏：${masked ? 'on' : 'off'}`);
   console.log(`落盘：true (${Buffer.byteLength(md, 'utf8')} bytes, 内容 ${bytes}B)`);
   console.log(`网关实调：${realCall ? 'true' : 'false'} (${result.model || 'n/a'})`);
+  console.log(`结论口径：${boundary.verdict || 'missing'} / 未验证面 ${boundary.unverifiedSurfaces?.length ?? 'NA'} 类 / 未覆盖面 ${boundary.uncoveredSurfaces?.length ?? 'NA'} 类 / marker=${boundaryMarker && boundaryHeading ? '✅' : '❌'}`);
+  console.log(`usage：total=${result.usage?.total_tokens ?? 'NA'} tokens（trace ${result.trace?.length ?? 0} 请求）`);
   console.log(`耗时：${elapsedMs}ms`);
   // [D259] 分步模式专属判据（加严，不放宽原有任何一条）：所有短章节都成功产出并逐章审阅，
   // 且不回退到整篇长流水线。非分步模式恒 true，原判据逐字不变。
@@ -165,10 +167,11 @@ async function main() {
     && Number(sw.writerSteps) > 1 && sw.failedSteps?.length === 0
   );
   if (STEPWISE) {
-    console.log(`分步短 prompt：on（writer ${sw?.writerSteps ?? 'NA'} 章 / 审阅 ${sw?.reviewedSections ?? 'NA'} 章 / partial=${String(sw?.partial)} / fallback=${sw?.fallback ?? 'none'}）`);
+    console.log(`分步短 prompt：on（writer ${sw?.writerSteps ?? 'NA'} 章 / 审阅 ${sw?.reviewedSections ?? 'NA'} 章 / 并发 ${sw?.concurrency ?? 'NA'} / partial=${String(sw?.partial)} / fallback=${sw?.fallback ?? 'none'}）`);
   }
 
-  const pass = reviewed && metaCount === 4 && masked && realCall && bytes > 0 && stepwiseOk;
+  const pass = reviewed && metaCount === 4 && masked && realCall && bytes > 0 && stepwiseOk
+    && boundaryOk && usageOk;
   if (!pass) {
     console.error('❌ AI 网关判据未通过（见上方事实数字）');
     process.exit(1);

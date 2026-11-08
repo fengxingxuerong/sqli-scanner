@@ -1,6 +1,6 @@
 # sqli-scanner
 
-[![Tests](https://img.shields.io/badge/tests-4797%20passing-brightgreen)](#测试)[![CI](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml/badge.svg)](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml)
+[![Tests](https://img.shields.io/badge/tests-4831%20passing-brightgreen)](#测试)[![CI](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml/badge.svg)](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml)
 [![Dependencies](https://img.shields.io/badge/prod%20deps-0%20known%20vulns-brightgreen)](SECURITY.md)
 
 > CI 徽章为真实状态（红绿以 GitHub Actions 实跑为准）。发布判定仍以 `CHANGELOG.md`
@@ -352,8 +352,9 @@ npm run quality:all     # 【门禁】一键全量质量校验（测试/覆盖�
 | `/api/scan/:id/report` | GET | 获取报告（与导出同源，含可复制的 PoC 与人工裁决；内存回收后读台账） |
 | `/api/scan/:id/findings/:findingId/triage` | PATCH | 人工裁决（body：`status=open/confirmed/false_positive/accepted_risk` + `note`；findingId 可用 vuln.id 或稳定 findingKey；不改变 verdict/退出码） |
 | `/api/scan/:id/report/export` | GET | 导出报告（json / html / csv / markdown / md / db-json / sarif；无拖库数据的 db-json → 400；`?redactPasswords=1` 运行时覆盖脱敏） |
-| `/api/scan/:id/report/ai` | POST | AI 报告生成（数据外发为 opt-in，未设端点即拒绝） |
+| `/api/scan/:id/report/ai` | POST | AI 报告生成（数据外发为 opt-in，未设端点即拒绝；超时矩阵见 `/report/ai/limits`） |
 | `/api/scan/:id/report/ai/configs` | GET | AI 可用配置清单（不回显 Key） |
+| `/api/scan/:id/report/ai/limits` | GET | [D275] 生效超时矩阵（request/total/stepwise，默认 600s/600s/120s） |
 | `/api/scan/:id/point/:pointId/retest` | POST | 单点复测（交付场景：修完要能证明确实修好了） |
 | `/api/scan/:id/diff` | GET | 两次扫描差异对比 |
 | `/api/payloads` | GET | payload 模板清单 |
@@ -461,10 +462,10 @@ server/       ← Express + Node.js（后端，`server/index.js` 入口）
 ## 测试
 
 ```bash
-# 前端测试（579 个用例）
+# 前端测试（581 个用例）
 npm test
 
-# 服务端测试（4224 个用例）
+# 服务端测试（4256 个用例）
 cd server && npm test
 
 # 全部测试
@@ -489,8 +490,8 @@ npm run artifact:drift   # 入库的 e2e 基线产物必须等于当前代码跑
 ## 项目状态
 
 - TypeScript: 零错误
-- 前端测试: 579/579 通过（覆盖率门禁 stmts 93.26 / branch 84.36 / func 80.59，阈值 88/77/67）
-- 服务端测试: 4224 用例（4218 pass / 0 fail / 6 skip，并发口径 2026-11-07 复测；6 skip 为环境依赖显式跳过。覆盖率 lines 95.42 / branch 81.77 / func 89.62，阈值 85/74/77）
+- 前端测试: 581/581 通过（覆盖率门禁 stmts 93.27 / branch 84.43 / func 80.68，阈值 88/77/67）
+- 服务端测试: 4256 用例（4250 pass / 0 fail / 6 skip，并发口径 2026-11-08 复测；6 skip 为环境依赖显式跳过。覆盖率 lines 95.25 / branch 81.31 / func 89.39，阈值 85/74/77）
 - 一键扫描: `npm run scan -- -u <url>`（CLI 一条命令产出 HTML/JSON/Markdown 全套报告 + manifest，退出码可直接进 CI 门禁）
 - Tamper 插件: 234 个（含批次 D3 新增 scalarselectinline；含 v24 增量 20 个，对齐 sqlmap 官方 tamper 全集，含官方 CRS/libinjection 实测组合 uniontable+odbcbrace；含批次 D13 新增 5 件上游形态变体 *nospace/*open/*block，真机 A/B 判决前不进默认链）
 - WAF 绕过能力: 200+ 插件链式组合，覆盖 62 个 WAF 厂商指纹识别 + 推荐
@@ -701,7 +702,12 @@ sqlmap --level 1 对等）。**强档对等对照自 [D194] 起可用**（`--pro
 真 MySQL 8.0.28（隔离沙箱）+ mysql2 直连靶站（url/body/cookie/header 四类注入位 + 会话依赖端点 +
 可"打补丁"开关）+ 本地 OpenAI 兼容假端点（AI 报告那条外发链路）。
 对接**真实**本地网关（Ollama / 自建代理）的运维手册见 [docs/AI-网关-runbook.md](docs/AI-网关-runbook.md)，
-链路级验收套件 `ai-gateway`（opt-in，网关未就绪诚实 SKIP）随 [D228] 入仓。
+链路级验收套件 `ai-gateway`（opt-in，网关未就绪诚实 SKIP）随 [D228] 入仓；
+[D276] 起另有确定性 mock 网关套件 `node e2e/ai-gateway-lab/run-mock.mjs`（真 HTTP + 真 ReportAI
+代码，断言三角色/分步 5+5、脱敏零泄漏、D275 边界章节与 usage 累加；进 `gate:close` 与 CI，
+不依赖外部模型，但只证链路事实、不证文风质量）。分步章节的有界并发（[D277]）默认串行，
+可显式 `AI_REPORT_STEPWISE_CONCURRENCY=2..4` 缩短慢网关整场耗时；单章审阅硬上限（[D278]）
+默认 16000，正常章节必须完整送审，超限章节如实标 `partial`、绝不用节选审阅冒充全文。
 
 44 条用例覆盖 26 个端点：扫描生命周期（含 SSE 断线重连回放、暂停/续跑、停止三态、单点复测、
 diff、7 种导出格式）、三条入参路径、枚举/拖库、直连模式、四条利用动作（真库回显 / 真文件读写 /

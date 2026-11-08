@@ -769,7 +769,9 @@
     "aiGenerating": "生成中...",
     "aiAnalyze": "AI 分析",
     "aiModelLabel": "AI 模型: {{model}}",
-    "aiFailed": "AI 报告生成失败"
+    "aiFailed": "AI 报告生成失败",
+    "aiPartialWarning": "本次 AI 报告不完整或未经全文审阅（见下方审阅状态）；不得当作完整报告对外引用。",
+    "aiCached": "缓存结果"
   },
   "common": {
     "loading": "加载中...",

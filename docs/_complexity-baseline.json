@@ -908,13 +908,13 @@
       "limitLines": 100,
       "limitComplexity": 15
     },
-    "server/src/engine/scan/detect.js::<arrow@299>": {
+    "server/src/engine/scan/detect.js::<arrow@313>": {
       "lines": 162,
       "complexity": 76,
       "limitLines": 100,
       "limitComplexity": 15
     },
-    "server/src/engine/scan/detect.js::<arrow@778>": {
+    "server/src/engine/scan/detect.js::<arrow@792>": {
       "lines": 79,
       "complexity": 28,
       "limitLines": 100,
@@ -1161,8 +1161,8 @@
       "limitComplexity": 15
     },
     "src/components/ReportExport.tsx::ReportExport": {
-      "lines": 157,
-      "complexity": 24,
+      "lines": 104,
+      "complexity": 15,
       "limitLines": 100,
       "limitComplexity": 15
     },

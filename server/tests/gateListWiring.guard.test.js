@@ -83,6 +83,23 @@ function collectScriptRefs(text) {
 const ciRefs = collectScriptRefs(stripLineComments(ciRaw));
 const localRefs = collectScriptRefs(stripLineComments(ciLocalRaw));
 
+/**
+ * 收集一段配置里**实际执行到**的 `e2e/*.mjs` 相对路径。
+ * 与 scripts/*.mjs 分开收集：两者根目录不同，混进同一个 Set 会让 existsSync 判错根。
+ * [D276] 起因：ai-mock 门禁的入口是 `e2e/ai-gateway-lab/run-mock.mjs`，旧的
+ * scriptBaseOf 只认 scripts/*.mjs ⇒ 这条门禁可以「在 gate-list 里、CI 不跑」而无人发现。
+ * @param {string} text 配置原文（已剥注释）
+ * @returns {Set<string>} 形如 `e2e/ai-gateway-lab/run-mock.mjs` 的相对路径集合
+ */
+function collectE2eRefs(text) {
+  const out = new Set();
+  for (const m of text.matchAll(/e2e\/([\w./-]+\.mjs)/g)) out.add(`e2e/${m[1]}`);
+  return out;
+}
+
+const ciE2eRefs = collectE2eRefs(stripLineComments(ciRaw));
+const localE2eRefs = collectE2eRefs(stripLineComments(ciLocalRaw));
+
 /** 从 gate-list.mjs 读出条目（源码扫描；该模块是纯 ES 模块，可直接 import）。 */
 async function loadGateList() {
   // Windows 上动态 import 绝对路径必须转成 file:// URL（否则 ERR_UNSUPPORTED_ESM_URL_SCHEME: 'd:'）
@@ -94,6 +111,12 @@ async function loadGateList() {
 function scriptBaseOf(cmd) {
   const hit = cmd.find((a) => /scripts[\\/][\w.-]+\.mjs$/.test(a));
   return hit ? hit.split(/[\\/]/).pop() : null;
+}
+
+/** gate 项的 cmd → 其对应的 e2e 入口相对路径（`node e2e/x/run.mjs` → `e2e/x/run.mjs`） */
+function e2eRefOf(cmd) {
+  const hit = cmd.find((a) => /e2e[\\/][\w./-]+\.mjs$/.test(a));
+  return hit ? hit.replace(/\\/g, '/') : null;
 }
 
 test('① 覆盖：收口清单每一项的脚本，必须在 ci.yml 与 ci-local 里各被执行', async () => {
@@ -145,8 +168,26 @@ test('①b wiring 测试集合本身必须在两侧都被执行（不能只跑 n
   }
 });
 
-test('①c [D260] 服务端覆盖率门禁三向接线：收口清单 / ci.yml / ci-local 指向同一条确定性命令', async () => {
+test('①d [D276] e2e 入口型门禁（ai-mock）必须在 ci.yml 与 ci-local 各被执行', async () => {
   const items = await loadGateList();
+  const e2eItems = items.filter((it) => e2eRefOf(it.cmd));
+  assert.ok(e2eItems.length >= 2, `e2e 入口型门禁异常偏少（${e2eItems.length}）—— 解析口径可能坏了`);
+  const missing = [];
+  for (const it of e2eItems) {
+    const ref = /** @type {string} */ (e2eRefOf(it.cmd));
+    if (!existsSync(path.join(REPO, ref))) missing.push(`${it.name}（${ref}）: 文件不存在`);
+    if (!ciE2eRefs.has(ref)) missing.push(`${it.name}（${ref}）: ci.yml ✗`);
+    if (!localE2eRefs.has(ref)) missing.push(`${it.name}（${ref}）: ci-local.mjs ✗`);
+  }
+  assert.deepEqual(
+    missing,
+    [],
+    '以下 e2e 入口型门禁没有被 CI 或本地门禁清单执行 —— 它们只存在于 gate:close 里，' +
+      `而那是手工动作（D276 的 ai-mock 就是按这个口径接进来的）：\n  ${missing.join('\n  ')}`
+  );
+});
+
+test('①c [D260] 服务端覆盖率门禁三向接线：收口清单 / ci.yml / ci-local 指向同一条确定性命令', async () => {  const items = await loadGateList();
   const cov = items.find((it) => it.name === 'server-coverage');
   assert.ok(cov, '收口清单里找不到 server-coverage 项 —— D259 实测「本地 51/51 全绿、CI 覆盖率红」会重演');
   assert.match(cov.cmd.join(' '), /test:coverage/, 'server-coverage 没有指向 test:coverage');
@@ -186,4 +227,15 @@ test('③ 自证：判据必须能红（少一处引用 / 引用幽灵脚本都�
     const refs4 = collectScriptRefs('npm run quality:ledger');
     assert.equal(refs4.has('quality-ledger.mjs'), true, 'npm 别名没被展开成真实脚本名');
   }
+
+  // 自证 4 [D276]：e2e 入口路径必须被收集；注释里的不算；gate 项能反解出路径。
+  const e2eRefs = collectE2eRefs('run: node e2e/ai-gateway-lab/run-mock.mjs --selftest\n');
+  assert.equal(e2eRefs.has('e2e/ai-gateway-lab/run-mock.mjs'), true, 'e2e 入口路径没被收集（D276 判据空转）');
+  const e2eCommented = collectE2eRefs(stripLineComments('# node e2e/ai-gateway-lab/run-mock.mjs\n'));
+  assert.equal(e2eCommented.size, 0, '注释里的 e2e 入口被当成了接线（判据假绿）');
+  assert.equal(
+    e2eRefOf(['node', 'e2e/ai-gateway-lab/run-mock.mjs', '--selftest']),
+    'e2e/ai-gateway-lab/run-mock.mjs',
+    'e2eRefOf 未能从 gate 项反解出入口路径'
+  );
 });

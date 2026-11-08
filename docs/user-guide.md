@@ -230,14 +230,38 @@ node server/bin/cli.js -u "https://target/login" --method POST --body '{"uid":"a
 ```
 
 流水线固定三角色：**analyst**（漏洞分析/风险）→ **writer**（报告撰写/PoC）→ **reviewer**（审计/修复/合规）。
-`ai-report.json` 记录用了哪条模型链、耗时、审阅状态、源扫描的 verdict，便于复核口径。
+`ai-report.json` 记录用了哪条模型链、耗时、审阅状态、源扫描的 verdict、**结论口径（`boundary`）与逐请求用量（`usage`/`trace`）**，
+便于复核口径。
 
-**两个必须知道的取舍**：
+**三个必须知道的取舍**：
 
 | 项 | 默认 | 说明 |
 |---|---|---|
-| 数据脱敏（`AI_REPORT_MASK`） | 开启 | host 写成 `<目标Host>`、路径写成 `/***`，**PoC 天然不可复现**（这是防外发的默认值）。指向本机/自建网关时设 `AI_REPORT_MASK=0`，host 与路径原样进 prompt，PoC 可直接复制执行 |
+| 数据脱敏（`AI_REPORT_MASK`） | 开启 | host 写成 `<目标Host>`、路径写成 `/***`，query 值与注入点原始参数值也替换为 `***`，**PoC 天然不可复现**（这是防外发的默认值）。指向本机/自建网关时设 `AI_REPORT_MASK=0`，host 与路径原样进 prompt，PoC 可直接复制执行 |
+| 超时（[D275]） | 单次/整场 600s，分步单章 120s | REST 与 CLI 共用 `AI_REPORT_TIMEOUT_MS`（默认 600s），整场总闸 `AI_REPORT_TOTAL_TIMEOUT_MS`（默认 600s），分步单章 `AI_REPORT_STEPWISE_TIMEOUT_MS`（默认 120s）。慢网关可显式调大，生效值查 `GET /api/scan/:id/report/ai/limits` |
 | 响应判据来源 | 引擎 trace | 报告里的「真条件 8356B / 假条件 8459B / 长度差 -103B / 首个差异偏移 5130」直接取自扫描器实测的布尔 trace，**不是模型编的**；没有 trace 时 prompt 明确要求写「判据需人工确认」 |
+
+> **结论口径章节（[D275]）**：正文末尾固定追加 `<!-- engine-boundary -->` 标记的
+> 「结论口径与覆盖边界」章节，由引擎报告字段确定性生成（不是模型生成）——包含 verdict、
+> validity、未验证面、按配置未覆盖面、爬取降级、定库告警与人工裁决计数。引用 AI 报告时
+> 必须连同该章节一起引用；`inconclusive` 不等于「未检出」，未验证面/未覆盖面的「未检出」
+> 也不等于「无漏洞」。分步模式下 `stepwise.partial=true` 或 `reviewNote` 带 ⚠️ 时，
+> 报告不完整/未全文审阅，UI 会显式提示。
+
+> **确定性链路判据（[D276]）**：没有真网关时跑 `node e2e/ai-gateway-lab/run-mock.mjs` ——
+> mock 网关 + 真实 HTTP + 真实 ReportAI 代码，断言三角色/分步 5+5、脱敏零泄漏、
+> 边界章节与 usage 累加；`--selftest` 用 reviewer 空响应证明判据能红。它证明**链路事实**，
+> 不证明模型输出质量（真网关结论仍以 `run.mjs` 为准），已进 `gate:close` 与 CI。
+
+> **分步并发（[D277]）**：`AI_REPORT_STEPWISE_CONCURRENCY` 默认 **1 = 串行**（行为与旧版逐字
+> 等价），可显式设 2~4 让互不依赖的章节并行，缩短慢网关的整场耗时。网关若有 per-user
+> 并发限制会触发 429；并发下换 key 是尽力而为，失败仍逐章披露、不冒充成功。
+
+> **审阅硬上限（[D278]）**：`AI_REPORT_STEPWISE_REVIEW_MAX_CHARS` 默认 **16000**。
+> D275 的 4000 已被真网关反证：真实 `五、修复方案` 章 4696 字符被 4000 判成 `too-long`
+> ⇒ 审阅 4/5 / `partial=true`。改为 16000 后同一命令复跑 **PASS**（exit 0 / 审阅 5/5 /
+> `partial=false`，11 请求 / 348300ms）。现在正常章节必须完整送审；只有真正超 16000
+> 的章节才不送审并标 `partial`，绝不用节选审阅冒充全文。
 
 **失败语义**：`--ai-report` 的 env 没配齐 → **开扫前**就报错退出（不会白扫三分钟）；
 生成阶段失败 → `exitCode=1`（执行失败），**不改**扫描结论与风险等级——AI 不可用既不等于有洞，也不等于没洞。

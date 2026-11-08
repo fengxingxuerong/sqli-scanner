@@ -40,6 +40,26 @@ test('GET /api/scan/:id/report/ai/configs：返回 3 角色配置', async () => 
   assert.equal(res.body.data.length, 3);
 });
 
+test('[D275] GET /api/scan/:id/report/ai/limits：默认 600s/600s/120s，env 覆盖生效', async () => {
+  const app = createApp();
+  const res = await request(app, 'GET', '/api/scan/whatever/report/ai/limits');
+  assert.equal(res.status, 200);
+  assert.equal(res.body.code, 0);
+  assert.deepEqual(res.body.data, {
+    requestTimeoutMs: 600000,
+    totalTimeoutMs: 600000,
+    stepwiseTimeoutMs: 120000,
+    stepwiseConcurrency: 1,
+  });
+  process.env.AI_REPORT_TIMEOUT_MS = '12345';
+  try {
+    const res2 = await request(app, 'GET', '/api/scan/whatever/report/ai/limits');
+    assert.equal(res2.body.data.requestTimeoutMs, 12345);
+  } finally {
+    delete process.env.AI_REPORT_TIMEOUT_MS;
+  }
+});
+
 test('POST AI 报告：扫描不存在 → 404（原误映射 500，已修）', async () => {
   const app = createApp();
   const res = await request(app, 'POST', '/api/scan/no-such-scan/report/ai');
@@ -80,7 +100,9 @@ test('POST AI 报告成功：fetch 打桩 → code 0 返回流水线结果', asy
     assert.equal(res.status, 200);
     assert.equal(res.body.code, 0);
     assert.equal(res.body.data.success, true);
-    assert.equal(res.body.data.content, '# AI 报告');
+    assert.ok(res.body.data.content.startsWith('# AI 报告'), '模型正文保留');
+    assert.ok(res.body.data.content.includes('<!-- engine-boundary -->'), '[D275] 确定性边界章节必须随报告返回');
+    assert.equal(res.body.data.boundary.verdict, null, '报告无 verdict 时不得兜底成「未检出」');
   } finally {
     globalThis.fetch = origFetch;
     defaultScanManager.scans.delete('rt-ok');

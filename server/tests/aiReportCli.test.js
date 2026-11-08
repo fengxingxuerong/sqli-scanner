@@ -77,7 +77,14 @@ test('writeAiReportFiles：落 ai-report.md + ai-report.json，元信息带模�
       summary: { verdict: 'vulnerability_detected' },
       vulns: [{ technique: 'boolean' }, { technique: 'error' }],
     };
-    const r = writeAiReportFiles(dir, { content: 'BODY', model: 'm1→m2→m3', reviewNote: 'ok' }, report, { elapsedMs: 42, masked: true });
+    const r = writeAiReportFiles(dir, {
+      content: 'BODY',
+      model: 'm1→m2→m3',
+      reviewNote: 'ok',
+      boundary: { verdict: 'vulnerability_detected', reliable: true },
+      usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+      trace: [{ role: 'analyst', status: 200, finish_reason: 'stop' }],
+    }, report, { elapsedMs: 42, masked: true });
     assert.ok(statSync(r.file).isFile());
     assert.ok(statSync(r.metaFile).isFile());
     assert.equal(readFileSync(r.file, 'utf-8').includes('BODY'), true);
@@ -89,6 +96,10 @@ test('writeAiReportFiles：落 ai-report.md + ai-report.json，元信息带模�
     assert.equal(meta.elapsedMs, 42);
     assert.equal(meta.masked, true);
     assert.equal(meta.roles.length, 3);
+    // [D275] 结论口径与逐请求用量必须随元信息落盘
+    assert.equal(meta.boundary.verdict, 'vulnerability_detected');
+    assert.equal(meta.usage.total_tokens, 15);
+    assert.equal(meta.trace[0].role, 'analyst');
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

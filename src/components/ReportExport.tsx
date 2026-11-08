@@ -8,13 +8,12 @@
 
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Button, Box, Typography, Alert, CircularProgress, Paper } from '@mui/material';
-import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
+import { Button, Box, Typography, Alert } from '@mui/material';
 import { useScan } from '../hooks/useScan';
 import { useScanStore } from '../store/scanStore';
 import { tauriBridge } from '../shared/tauriBridge';
 import { hasDumpData, dumpToCsv, dumpToJson } from '../shared/dumpExport';
-import { apiClient } from '../shared/apiClient';
+import AiReportSection from './AiReportSection';
 
 // 报告导出：JSON / HTML / CSV / Markdown / SARIF（整份报告）
 // SARIF 2.1.0 对接 GitHub Security / DefectDojo / 甲方安全平台；后端早已支持（ReportGenerator.toSARIF），
@@ -29,12 +28,6 @@ export default function ReportExport() {
   const report = useScanStore((s) => s.report);
   // P1-6：导出失败提示
   const [exportError, setExportError] = useState('');
-  // AI 报告生成状态
-  const [aiLoading, setAiLoading] = useState(false);
-  const [aiContent, setAiContent] = useState('');
-  const [aiModel, setAiModel] = useState('');
-  const [aiError, setAiError] = useState('');
-
   const handleExport = (format: ExportFormat) => {
     if (!scanId) return;
     setExportError('');
@@ -64,27 +57,6 @@ export default function ReportExport() {
       // P1-6：失败给出用户可见提示（原来仅 console.error）
       setExportError(t('reportExport.exportDumpFailed', { detail }));
     });
-  };
-
-  const handleAiReport = async () => {
-    if (!scanId) return;
-    setAiLoading(true);
-    setAiError('');
-    setAiContent('');
-    try {
-      // [P0-FIX] 不再传 keyIndex/modelIndex（后端忽略），走固定 3 角色流水线
-      const result = await apiClient.report.ai(scanId);
-      if (result.success) {
-        setAiContent(result.content);
-        setAiModel(result.model);
-      } else {
-        setAiError(t('reportExport.aiFailed'));
-      }
-    } catch (e: unknown) {
-      setAiError(e instanceof Error ? e.message : t('common.unknownError'));
-    } finally {
-      setAiLoading(false);
-    }
   };
 
   return (
@@ -159,38 +131,8 @@ export default function ReportExport() {
         </Alert>
       )}
 
-      {/* AI 漏洞报告生成 */}
-      <Typography variant="subtitle2" fontWeight={600} sx={{ mt: 2 }}>
-        {t('reportExport.aiTitle')}
-      </Typography>
-      <Box className="flex gap-2 items-center flex-wrap">
-        {/* [P0-FIX] 移除误导性 3×3 选择器：后端为固定 3 角色流水线（analyst→writer→reviewer），
-            无用户可选 key/model 组合；保留说明文案并直接生成。 */}
-        <Button
-          variant="contained"
-          size="small"
-          disabled={!scanId || aiLoading}
-          onClick={handleAiReport}
-          startIcon={aiLoading ? <CircularProgress size={16} /> : <AutoAwesomeIcon />}
-        >
-          {aiLoading ? t('reportExport.aiGenerating') : t('reportExport.aiAnalyze')}
-        </Button>
-      </Box>
-      {aiError && (
-        <Alert severity="error" variant="outlined" sx={{ mt: 1 }}>
-          {aiError}
-        </Alert>
-      )}
-      {aiContent && (
-        <Paper variant="outlined" sx={{ p: 2, mt: 1, maxHeight: 400, overflow: 'auto' }}>
-          <Typography variant="caption" color="text.secondary">
-            {t('reportExport.aiModelLabel', { model: aiModel })}
-          </Typography>
-          <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap', mt: 1 }}>
-            {aiContent}
-          </Typography>
-        </Paper>
-      )}
+      {/* AI 漏洞报告生成（[D275] 独立组件，见 AiReportSection） */}
+      <AiReportSection scanId={scanId} />
     </Box>
   );
 }
