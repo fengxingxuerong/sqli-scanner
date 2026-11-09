@@ -15,6 +15,7 @@
  "mcp:compat": "node scripts/mcp-client-compat.mjs",
  "mcp:compat:selftest": "node scripts/mcp-client-compat.mjs --selftest",
     "gate:close": "node scripts/gate-close.mjs",
+    "gate:fast": "node scripts/gate-fast.mjs",
     "quality:ledger": "node scripts/quality-ledger.mjs",
     "arch:baseline": "node scripts/arch-guard.mjs --update",
     "arch:guard": "node scripts/arch-guard.mjs",

@@ -5,6 +5,90 @@
 
 ---
 
+## 2026-11-09 批次 D280 · 批内快门禁 gate:fast（分层第一档）+ timeDrift 错值归因
+
+**起点**：全方面短板清单 P0 两条——A1 收口固定成本（一批到全绿 ≈1 小时：npm test
+~10min + coverage ~3.5min + gate:close ~25min，批内每改一行都要等全量）；A2 时间盲注
+校准用例的 flake 面（D242 三抽归因只盖「deadline 超时」形态，「错值」形态单抽定生死
+——D279 收口 gate:close 首跑实测覆盖率插桩下翻面出 `8O36`）。
+
+**改动**：
+- `scripts/lib/gateFastPlan.mjs`（新）：受影响面推导**纯函数**——恒跑组 14 项
+  （七道 guard + 预提交三道 + refs/greenguard/changelog-index/孤儿配置键，全部静态
+  ≤1.5min）+ 按改动文件映射受影响组（src→import/命名命中的测试 + typecheck:server、
+  scripts→自身 --selftest、前端→vitest + 前端类型、文档→facts/readme、清单→pack-check）。
+  不变式：恒跑组 ≥10 项**不空转**；无映射的 src 改动必须出警告（不许静默跳过）；
+  空改动集 = 全仓快检模式（恒跑 + 一致性检查，受影响组不能为空）。
+- `scripts/gate-fast.mjs`（新）：执行器（失败即停 + 尾部输出 + 预算打标不判红）+
+  8 组自证（映射行为 / 不空转 / 退出码传播 / 警告必出 / 自证入口反例活体判牙）。分层语义：pre-commit ≤1.2s
+  → **gate:fast 预算 150s（超预算只打标不判红）** → gate:close ~25min（收口 authority，不被替代）。
+- 接线三向：package.json `gate:fast`、gate-list.mjs 新增 `gate-fast:selftest`（**54→55 项**）、
+  ci.yml + ci-local.mjs 同步（gateListWiring.guard ① 的三向判据当场抓住缺接线——
+  gate:fast 还没上线就先抓了自己一次，判据有效性的活体证明）。
+- `extractor.timeDrift.test.js`（D242 用例扩展）：「错值」形态并入同一套三抽归因——
+  **请求数预算内**的错值先重抽，三抽有一抽真值 ⇒ 环境归因通过但**大声登记疑似翻面**；
+  三抽全错 = 确定性污染 ⇒ 带全部错值红；请求数发散的错值不归因、原样红。
+
+**验证**：
+- gate:fast 自证 8 组绿；**当时**工作区（5 个改动文件）20 步 / **29.4s**（对比全量
+  gate:close ~25min）——该数字只在那个改动集成立，不可外推（见本段末尾收口补记）。
+- 上线过程中被自家恒跑组连咬三口（complexity 26>25 → 拆函数；deadcode 抓多余 export；
+  refs 抓「本机有库里没有」）+ gateListWiring 抓缺接线——四连咬，判据有效性实测。
+- timeDrift 判牙（prove-it）：绿路径 13/13 → 注入（摘掉重试计时重置）⇒ 当场红且落在
+  更强分支「请求数发散 71>20 + 错值 8036\0\0\0\0」→ 恢复 13/13、extractor diff 干净。
+
+**边界**：
+- gate:fast 是**批内闸**不是收口闸：它红必须修，它绿不等于可以提交——提级仍以
+  gate:close 55 项为准（输出尾行显式声明）。
+- 错值归因的代价：真 bug 若恰好 1/3 概率翻面会被「疑似翻面」日志吞绿一次——与 D242
+  deadline 形态同一取舍，靠 CI 日志可见性 + 其余 12 条时间盲注判据兜底。
+- 预算 150s 只打标不判红：机器差异不该把「快」变成一道会红的门禁。
+
+**收口补记（2026-11-09，D280 判据缺陷修复）**：
+
+- **发现**：把改动集从 5 文件扩到 16 文件后实跑，`selftest:ci-local.mjs` 卡死 >240s。
+  根因 `planScriptStep` 用「文件内容含自证旗标字样」判定支持自证，而 `ci-local.mjs`
+  只是把一堆 `--selftest` 当 CI 命令字符串存着 ⇒ 整套 CI 被当成一步自证拉起
+  （单跑 `timeout 75 node scripts/ci-local.mjs --selftest` 复现 exit 124、「模式：全跑」、
+  typecheck 26.3s + lint 48.8s）。同形态第二例：`gateFastPlan.mjs` / `gate-list.mjs`
+  是库模块，同样没有入口 ⇒ 顶层零断言 exit 0，**恒绿假自证**。
+- **按 §3.5 停用旧口径**：分层预算硬承诺 / 自证组数 / 单轮步数耗时三处口径作废，
+  AGENTS、TODO、CHANGELOG 四处重写为「8 组自证 / 预算 150s 只打标不判红」；旧数字
+  保留并标注「当时、不可外推」，不删历史。
+- **修复**：
+  - `gateFastPlan.mjs`：`hasSelftestEntry` 逐行扫 + 跳过注释行 + 只认启动参数上的
+    `includes/has('--selftest')` 调用形态；无入口只警告不映射；受影响组按 cmd 去重
+    （原 docsLike + manifestLike 会把 `facts:check` 跑两遍）。
+  - `gate-fast.mjs`：新增第 ⑧ 组自证，用 `ci-local.mjs` / `gateFastPlan.mjs` 两个真实文件
+    做活体反例。复杂度守卫当场抓到 `selftest` 圈复杂度 17>15 ⇒ 按纪律抽
+    `checkNoFalseSelftest()`，**未上调基线**。
+  - `readme-flag-coverage.mjs`：快门禁又咬出 ⑯⑰ 假红——D281 注释里的
+    `` `a === '--xxx'` `` 被 `parseCliFlags` 当成真旗标（该判据注释早声明「注释里的
+    自证旗标示例一律不算」却没实现）。补注释行过滤 + 自证样本 `--phantom`；旗标数
+    190→189，README / --help 零缺失。**未改动 D281 的 `args.js`**。
+- **判牙（两处缺陷注入复验，均按备份还原 `cmp=0`）**：注入字符串包含判定 ⇒ gate-fast
+  自证 4 条红（两个反例误映射 + 缺警告）；注入去掉注释行过滤 ⇒ readme-flags 自证报
+  `["--alpha","--beta","--gamma","--phantom"]` 红。两处恢复后均绿。
+- **验证**：`npm run gate:fast` **21/21 绿 / 123.4s**（恒跑 14 + 受影响 7，含
+  `selftest:readme-flag-coverage.mjs`）；`readme-flag-coverage --selftest`、
+  `readme-consistency`、`complexity-guard` 均 exit 0。
+- **边界**：`tests:direct`（timeDrift 三抽归因）单步两次实跑 149.2s / 80.8s 波动，是
+  本批预算的主要变量 ⇒ 150s 只打标不判红是对的，别改成会红的门禁，也别靠调阈值掩盖。
+  工作区另有未登记的 D281（`server/bin/cli/args.js`），本批**不混提、不动它**。
+
+**收口口径（2026-11-09 补）**：混合工作区（含 D281）下 `gate:close` 是 **54/55**——
+`server-coverage` 里 `configNested.cliDefaults.test.js` 的 D21 判据报「flag 提取数异常
+（1，预期 >100）」，根因是 D281 把 parseArgs 主链拆成 12 族后，判据正则依赖的
+`else if (a === ...)` 形态消失 ⇒ 这是 **D281 的漏项**，不是本批缺陷。按「不混提、
+不动它」，把 D281 的 3 个文件（`server/bin/cli/args.js`、
+`docs/_complexity-baseline.json`、`docs/_dup-baseline.json`）备份到 /tmp 并恢复 HEAD 版，
+在**纯 D280 工作区**下重跑 ⇒ `npm run gate:close` **55/55 全绿**（server-coverage
+246.1s / lint 65.8s / typecheck 19.5s），验证后按 sha256 原样放回 D281。因此 55/55
+只对 D280 独立集成立，**不能外推到含 D281 的工作区**；D281 需自行补 D21 判据适配
+（同时认 `if (a === ...)` 与 `else if (a === ...)` 形态）后再收口。
+
+---
+
 ## 2026-11-09 批次 D279 · 会话包装统一保留并加工 headRequest（TODO §10 静默降级收口）
 
 **起点**：TODO §10（D36 撞见、挂账 30 天）——`withSafeUrl` / `withCsrf` / `withLoginFlow`
