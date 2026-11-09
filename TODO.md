@@ -5,6 +5,35 @@
 
 ---
 
+## 2026-11-09 批次 D282 · 布尔判据「OR 恒真」第三档（外部裁判漏检收口）
+
+**起点**：外部靶场全面测试（`reports/外部靶场全面测试-2026-11-09.md`）发现 Juice Shop
+`/rest/products/search?q=` 在 `q=test` 下 **4/4 确定性漏检**，`apple`/`orange`/`zzzz` 均检出。
+真机取证：查询是 `WHERE (name LIKE '%q%' OR description LIKE '%q%')`，`test` 的基线命中
+**只来自 description 支**；任何正确闭合都会注释掉那一支 ⇒ 真/假无差分且真侧必然不≈基线。
+
+**改动**：
+- `BooleanBlindDetector._orTruthHit` / `_orTruthHitSamples`：第三档「OR 恒真」判据，
+  仅 `boundary-or` 对生效（假侧 ≤200B、真侧 ≥5× 假侧、差值 ≥1000B、真侧 >2× 基线）。
+  **legacy 与鲁棒分支都要接**——CLI 默认 `rb=true`，只改 legacy 等于没修（本轮返工原因）。
+- 复杂度按纪律拆方法（`_applyBooleanHit` / `_robustTrace` / `_matchBaselineOracle` /
+  `_matchStatOracle` / `_orTruthEvidence*`），**未上调基线**（`_legacyDetect` 41→39、
+  `_probeBooleanPairs` 26→24）。
+- `e2e/juice-shop-lab/run.mjs`：新增同源复检点 `q=test`；通过条件收紧为
+  **同源复检也须全检出**（原来 homologous 漏检不判红，缺陷因此长期不可见）。
+
+**验证**：
+- 新测试 `server/tests/booleanBlind.orTruth.d282.test.js` **5/5 绿**（legacy 2 反例 + 鲁棒 1 反例）；
+  缺陷注入 4 处均恰一条红、按备份 `cp` 还原。
+- **端到端注入**：关 `_orTruthHitSamples` ⇒ Juice 套件红（同源 1/2）；还原后绿。
+- 真机四值全部检出；三外部裁判 3/3（误报 0 / 0/5 / 0，Juice 同源 2/2）。
+- `gate:fast` 18/18、`typecheck` 0、`facts:check` 0、`eslint` 0、`complexity` ✅。
+
+**边界**：只覆盖「OR 恒真→全表、恒假→近空」；小表（差值 <1000B）与非 OR 对 fail-closed 回退旧行为。
+**Benchmark 未跑**（缺 JDK17 + 源码）⇒ 4 裁判回归不完整，后续补环境后须重跑 12 真值端点。
+
+---
+
 ## 2026-11-09 批次 D281 · parseArgs 主链族拆分收口（D21 适配 + 接线守卫 + A/B 重新取证）
 
 **起点**：D280 收口补记留下的唯一红——混合工作区 `gate:close` 54/55，

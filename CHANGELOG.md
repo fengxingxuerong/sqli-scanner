@@ -7,13 +7,14 @@
 > 下一批次起的条目写在这里。发版时把本节整体升为 `## [x.y.z] - YYYY-MM-DD` 并补汇总段。
 
 <!-- changelog-index:start -->
-**本段覆盖 65 个批次（D228–D281，2026-11-01 → 2026-11-09）**。正文按时间倒序排列；
+**本段覆盖 66 个批次（D228–D282，2026-11-01 → 2026-11-09）**。正文按时间倒序排列；
 下表是同一批次的索引，便于按编号或关键词定位。**索引只是导航，正文未做任何删改**
 （被推翻的旧结论原样保留，这是本仓的既定口径）。新增批次后跑
 `node scripts/changelog-index.mjs --write` 重生成，`--check` 校验是否过期。
 
 | 批次 | 日期 | 主题 |
 |---|---|---|
+| D282 | 11-09 | 布尔判据「OR 恒真」第三档（外部裁判漏检 `q=test` 收口） |
 | D281 | 11-09 | parseArgs 主链族拆分收口（D21 判据适配 + 接线守卫 + A/B 重新取证） |
 | D280 | 11-09 | 批内快门禁 gate:fast（分层第一档）+ timeDrift 错值归因 |
 | D279 | 11-09 | 会话包装统一保留并加工 headRequest（TODO §10 静默降级收口） |
@@ -80,6 +81,53 @@
 | D229 | 11-01 | 交付闸收口：P0-3 卡顿修复（haystack 先截后拼）+ ai-gateway 断言去模型依赖 |
 | D228 | 11-01 | AI 报告网关端到端验收（ai-gateway 套件）+ 本地网关 runbook + CI 靶场硬要求扩展 |
 <!-- changelog-index:end -->
+
+### 2026-11-09 批次 D282 · 布尔判据「OR 恒真」第三档（外部裁判漏检 `q=test` 收口）
+
+**起点**：外部靶场全面测试发现 Juice Shop `/rest/products/search?q=` 在 `q=test` 下 **4/4 确定性漏检**，
+而 `apple` / `orange` / `zzzz` 均能检出（同一注入点）。真机取证：该查询是
+`WHERE (name LIKE '%q%' OR description LIKE '%q%')`，`test` 的基线命中**只来自 description 支**
+（O-Saft 描述含 "tests"）；任何正确闭合都会注释掉那一支 ⇒ `AND 1=1` 从 1 条变空（30B vs 基线 744B），
+真/假无差分；`OR 1=1` 是全表 34245B、`OR 1=2` 是 30B。
+
+根因：布尔判据（legacy 与鲁棒分支**两处**）都以「真侧≈基线」为前提——
+`_legacyDetect` 的 `similarToBaseline(tBody)`、`_robustDetect` 的 `trueRatio >= minRatio`。
+该形态下真侧必然不≈基线 ⇒ 整点拒判。**boundary 选档不是原因**（实测 `'))` 与 `%'))` 在
+OR / ORDER BY / 10 列 UNION 下完全等价，先前一版 boundary 修复已按证据回退）。
+
+**改动**：
+- `BooleanBlindDetector._orTruthHit`（legacy）与 `_orTruthHitSamples`（鲁棒，假侧**每个**样本都须近空、
+  真侧取中位）：「OR 恒真」第三档判据，**仅 `boundary-or` 对生效**，四条件同时成立才放行——
+  假侧 ≤200B、真侧 ≥5× 假侧、差值 ≥1000B、真侧 >2× 基线。常量 `OR_TRUTH_*` 集中在文件头。
+  只对 OR 对放行是刻意的：AND 对上的「真大假小」可能只是搜索/分页的正常结果集变化。
+- 按复杂度纪律拆方法（**未上调基线**）：`_applyBooleanHit`（四处命中落地）、`_robustTrace`、
+  `_matchBaselineOracle`、`_matchStatOracle`、`_orTruthEvidence(Samples)`；
+  门禁输出显示 `_legacyDetect` 圈复杂度 41→39、`_probeBooleanPairs` 26→24，可下调基线。
+- `e2e/juice-shop-lab/run.mjs`：新增同源复检点 `q=test`（`homologous`，不并入真值分母），
+  并把通过条件从「漏检=0 且误报=0」收紧为**同源复检也须全检出**——
+  否则「换个取值就漏」的回归不会被门禁看见（这正是本缺陷长期存在的原因）。
+
+**验证**：
+- 新增 `server/tests/booleanBlind.orTruth.d282.test.js` **5/5 绿**：legacy 正例 + 分页反例 + 小表反例，
+  鲁棒分支正例 + 分页反例。缺陷注入复验 4 处，均「恰一条红」后按备份 `cp` 还原（sha 一致）：
+  关判据 ⇒ 正例红；放宽三条阈值 ⇒ 分页反例红；差值归零 ⇒ 小表反例红。
+- **端到端缺陷注入**：临时关掉 `_orTruthHitSamples` ⇒ Juice 套件当场红（同源复检 1/2）；
+  还原后绿。这同时证明「CLI 默认 `rb=true`，只改 legacy 分支等于没修」——这是本轮返工的直接教训。
+- 真机：`q=test/apple/orange/zzzz` 四值全部 `vulnerability_detected`（各 1 条 Medium，无重复计数）。
+- 外部裁判：`juice-shop-lab` 16.4s / `vampi-lab` 7.1s / `dvwa-lab` 26.4s **3/3 通过**，
+  安全端点误报 0 / 0/5 / 0；Juice 同源复检 **2/2**。
+- 门禁：`gate:fast` **18/18**（64.4s，含 `tests:src-mapped` 34.2s、`typecheck:server` 4.9s）、
+  `npm run typecheck` exit 0、`facts:check` exit 0、`eslint` 改动文件 exit 0、
+  `complexity-guard` ✅（733 文件，225 个基线内函数）。
+
+**边界**：判据只覆盖「OR 恒真 → 全表、OR 恒假 → 近空」这一形态；小表（差值 <1000B）与非
+`boundary-or` 对一律 fail-closed 回退旧行为（不劣化）。**未跑 Benchmark**（本机缺 JDK17 + 源码），
+4 裁判回归不完整；`--level` 与 `--risk` 的交互未单独测。
+
+**教训**：`node --test` 单测绿 ≠ 端到端可用。本仓「检测器直调 OK、编排链路不触发」是重复形态
+（本轮首次修复只接 legacy，而 CLI 默认 `rb=true`），验收必须走 ScanManager / CLI 真靶场。
+
+---
 
 ### 2026-11-09 批次 D281 · parseArgs 主链族拆分收口（D21 判据适配 + 接线守卫 + A/B 重新取证）
 
