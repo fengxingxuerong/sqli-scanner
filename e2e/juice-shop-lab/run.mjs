@@ -59,6 +59,17 @@ const ENDPOINTS = [
     homologous: true,
     desc: '搜索点同源复检（同注入点换良性取值 banana）',
   },
+  {
+    // [D282 2026-11-09] 同源复检（第三个取值，钉住「基线命中来源」不变量）：
+    // 该查询是 `WHERE (name LIKE '%q%' OR description LIKE '%q%')`，`test` 的基线命中
+    // **只来自 description 支**（O-Saft 描述含 "tests"）⇒ 任何正确闭合都会注释掉那一支
+    // ⇒ 「真侧≈基线」类判据全部失效。D282 修复前该点 4/4 确定性漏检（boundary 在两个
+    // 等价前缀间摇摆，布尔/union 通道均拒判）。本点专门防止「只测 apple/banana 就宣称覆盖」。
+    path: '/rest/products/search?q=test',
+    kind: 'vuln',
+    homologous: true,
+    desc: '搜索点同源复检（基线只命中 description 支的取值 test，D282 漏检点）',
+  },
   // ⚠ 安全端点必须**带可测参数**：无参数的路径（如 /api/Products/1）不会产生任何请求，
   // 那种「0 检出」只是「没测过」，不构成零误报证据（本靶场首版即犯此错，已纠正）。
   // 下列端点均实测会产生数十至上百请求，零检出才有证明力。
@@ -164,10 +175,12 @@ for (const ep of ENDPOINTS) {
 const vulnTotal = ENDPOINTS.filter((e) => e.kind === 'vuln' && !e.homologous).length;
 console.log('\n=== 外部裁判汇总 ===');
 console.log(`真值漏洞端点：检出 ${truePositives}/${vulnTotal}（漏检 ${missed}）`);
-console.log(`同源复检（同点换良性值）：检出 ${homoHit}/${homoTotal}`);
+console.log(`同源复检（同点换良性值，须全检出）：检出 ${homoHit}/${homoTotal}`);
 console.log(`安全端点误报：${falsePositives}（须为 0）`);
-const pass = missed === 0 && falsePositives === 0;
+// [D282] 同源复检漏检同样判红：否则「换个取值就漏」的回归不会被门禁看见
+//（D282 前 test 点 4/4 漏检，而套件因只统计真值分母仍显示通过）。
+const pass = missed === 0 && falsePositives === 0 && homoHit === homoTotal;
 console.log(pass
-  ? '✅ Juice Shop 外部裁判通过：真漏洞可检出 且 安全端点零误报'
-  : '❌ 外部裁判未通过（漏检或误报，见上表）');
+  ? '✅ Juice Shop 外部裁判通过：真漏洞可检出、同源复检全检出 且 安全端点零误报'
+  : `❌ 外部裁判未通过（漏检 ${missed}、同源复检漏检 ${homoTotal - homoHit}、误报 ${falsePositives}，见上表）`);
 process.exit(pass ? 0 : 1);

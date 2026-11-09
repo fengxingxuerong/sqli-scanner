@@ -10,6 +10,21 @@ import { similarityRate, twoProportionZ, isSignificant, baselineNoiseRate, adapt
 // 改为 charCode 快速判定：ASCII 空白直判；罕见 Unicode 空白走 Set（与 /\s/ 完全一致）。
 const WS_RARE = new Set([0xa0, 0x1680, 0x2028, 0x2029, 0x202f, 0x205f, 0x3000, 0xfeff]);
 
+// ── [D282 2026-11-09] 「OR 恒真」第三档判据的阈值 ────────────────────────────
+// 触发场景（外部裁判 Juice Shop `/rest/products/search?q=test`，4/4 确定性漏检）：
+//   `WHERE (name LIKE '%q%' OR description LIKE '%q%')` 且基线命中**只来自第二支**
+//   （O-Saft 的 description 含 "tests"）。任何正确闭合都会把 second branch 注释掉
+//   ⇒ `AND 1=1` 从 1 条变空 ⇒ 真/假无差分（30B vs 30B）；
+//   而 `OR 1=1` 是全表（34245B）vs `OR 1=2` 空（30B）。
+//   旧判据硬要求「真侧≈基线」（744B）⇒ 整点拒判。
+// 判据只对 **boundary-or** 对生效（AND 对不放宽：搜索/分页类参数的正常大小变化会假阳）。
+// 阈值取整实测的量级：假侧 ≤200B（近空）、真侧 ≥ 假侧 5 倍且差值 ≥1000B。
+// 小表/小响应会落到 fail-closed（回退旧行为，不劣化）——差值下界已隐含真侧 ≥1000B，
+// 不再单设「真侧最小长度」（曾加过，实测被差值条件完全覆盖 = 无牙判据）。
+export const OR_TRUTH_MAX_FALSE_BYTES = 200;
+export const OR_TRUTH_MIN_RATIO = 5;
+export const OR_TRUTH_MIN_DELTA = 1000;
+
 // —— 动态数值归一化（[P1-FIX 2026-09-08] 安全点误报根治）——
 // 场景：页面含秒级时间戳/计数器（如 `<!-- generated at 1788758518 -->`）。基线 5 次采样
 // 通常落在同一秒内 → 动态块识别学到「无动态块」→ 回落默认比对；后续真/假采样跨秒时，
@@ -285,6 +300,160 @@ export class BooleanBlindDetector extends Detector {
     return pairs;
   }
 
+  /**
+   * [D282] 「OR 恒真」第三档命中判据（只在 `boundary-or` 对上生效）。
+   *
+   * 为什么需要：第一档判据要求「真侧≈基线」，在「基线命中来自 OR 另一支」的查询上必然失效
+   * （正确闭合会注释掉那一支 ⇒ 真侧是空集或全表，永远不≈基线）。实测 Juice `q=test`：
+   *   AND 1=1 → 30B / AND 1=2 → 30B（无差分）；OR 1=1 → 34245B / OR 1=2 → 30B。
+   * 判据语义：OR 恒真命中全表（真侧远大于基线），OR 恒假回到空集（假侧近空）。
+   * 只对 OR 对放行是刻意的：搜索/分页类参数在 AND 对上的正常大小变化不足以构成此形态
+   * （假侧近空 + 真侧 ≥5 倍 + ≥1000B 差 + 真侧 >2× 基线，四条同时成立）。
+   * @param {object} p 布尔对描述（需 id==='boundary-or'）
+   * @param {object} rTrue 真侧响应（用于状态码判定）
+   * @param {string} tBody 真侧正文（已剥回显）
+   * @param {string} fBody 假侧正文（已剥回显）
+   * @param {number} baseLen 基线正文长度（取基线样本最大值）
+   * @returns {boolean} 是否构成 OR 恒真命中
+   */
+  _orTruthHit(p, rTrue, tBody, fBody, baseLen) {
+    if (!p || p.id !== 'boundary-or') return false;
+    const st = Number(rTrue?.status);
+    if (!(st >= 200 && st < 300)) return false;
+    const tLen = tBody.length;
+    const fLen = fBody.length;
+    if (fLen > OR_TRUTH_MAX_FALSE_BYTES) return false;
+    if (tLen < fLen * OR_TRUTH_MIN_RATIO) return false;
+    if (tLen - fLen < OR_TRUTH_MIN_DELTA) return false;
+    // 全表必须显著大于基线；否则「参数被忽略、永远返回全表」的目标会被误判
+    return baseLen > 0 && tLen > baseLen * 2;
+  }
+
+  /**
+   * [D282] 「OR 恒真」第三档判据的**多样本**版本（鲁棒分支用）。
+   *
+   * 与 `_orTruthHit` 同判据，区别只在输入形态：鲁棒分支每侧采 `effSamples` 个样本，
+   * 这里要求**假侧每一个样本都近空**（不只中位数），真侧取中位数——避免单样本抖动
+   * 把「真侧偶发大页」当成全表证据。判据语义与常量见 `_orTruthHit` 上方注释。
+   * 为什么必须接在鲁棒分支：CLI / REST 默认开 `blindRobust`（实测 `rb=true`），
+   * 主判据是「真≈基线 trueRatio / 假≠基线 falseRatio」，对「基线命中来自 OR 另一支」
+   * 的目标 trueRatio 恒 0 ⇒ 只在 legacy 分支加判据等于没修。
+   * @param {object} p 布尔对描述（需 id==='boundary-or'）
+   * @param {string[]} tBodies 真侧样本（已剥回显）
+   * @param {string[]} fBodies 假侧样本（已剥回显）
+   * @param {string[]} baselines 基线样本
+   * @returns {boolean}
+   */
+  _orTruthHitSamples(p, tBodies, fBodies, baselines) {
+    if (!p || p.id !== 'boundary-or') return false;
+    if (!fBodies.length || !tBodies.length) return false;
+    if (!fBodies.every((b) => b.length <= OR_TRUTH_MAX_FALSE_BYTES)) return false;
+    const median = (arr) => {
+      const s = arr.map((b) => b.length).sort((a, b) => a - b);
+      return s[Math.floor(s.length / 2)] ?? 0;
+    };
+    const tLen = median(tBodies);
+    const fLen = median(fBodies);
+    if (tLen < fLen * OR_TRUTH_MIN_RATIO) return false;
+    if (tLen - fLen < OR_TRUTH_MIN_DELTA) return false;
+    const baseLen = Math.max(0, ...baselines.map((b) => b.length));
+    return baseLen > 0 && tLen > baseLen * 2;
+  }
+
+  /**
+   * [D282] 布尔命中落地（legacy/robust 四处判定共用）：写 result / point 的命中字段。
+   * 抽出原因：本轮新增第三档判据后 `_legacyDetect` 与 `_probeBooleanPairs` 双双破复杂度基线，
+   * 按仓库纪律拆方法而不是上调基线（基线是记录不是红线）。
+   * @param {object} result 检测结果
+   * @param {object} point 注入点
+   * @param {string} dbms 方言
+   * @param {string} evidence 证据文案
+   * @param {string[]} payloads 真/假 payload
+   * @param {object} [trace] 可选 trace（鲁棒分支用）
+   */
+  _applyBooleanHit(result, point, dbms, evidence, payloads, trace) {
+    result.vulnerable = true;
+    result.dbms = dbms;
+    result.evidence = evidence;
+    result.payloads = payloads;
+    if (trace) result.trace = trace;
+    point.confirmed = true;
+    point.technique = 'boolean';
+    point.dbms = dbms;
+  }
+
+  /**
+   * [D282] legacy 主判据（真≈基线 且 假≠基线 且 真/假有差异）——抽成方法降主函数圈复杂度。
+   * @param {string} tBody 真侧正文
+   * @param {string} fBody 假侧正文
+   * @param {boolean} quickDiff 状态/长度粗筛已判有差异
+   * @param {(b: string) => boolean} similarToBaseline 是否≈基线
+   * @param {(a: string, b: string) => boolean} meaningfulDiff 是否有意义差异
+   * @returns {boolean}
+   */
+  _matchBaselineOracle(tBody, fBody, quickDiff, similarToBaseline, meaningfulDiff) {
+    return (quickDiff || meaningfulDiff(tBody, fBody)) && similarToBaseline(tBody) && !similarToBaseline(fBody);
+  }
+
+  /**
+   * [D282] 鲁棒分支统计判据（真≈基线率 / 假≠基线率 / 差异率 均过门槛 且 显著）。抽法同 `_matchBaselineOracle`。
+   * @param {number} trueRatio 真侧≈基线比例
+   * @param {number} falseRatio 假侧≠基线比例
+   * @param {number} meaningfulRatio 真/假差异比例
+   * @param {boolean} significant 假侧偏离是否显著高于基线噪声
+   * @param {number} minRatio 一致率门槛
+   * @returns {boolean}
+   */
+  _matchStatOracle(trueRatio, falseRatio, meaningfulRatio, significant, minRatio) {
+    return trueRatio >= minRatio && falseRatio >= minRatio && meaningfulRatio >= minRatio && significant;
+  }
+
+  /**
+   * [D282] legacy 第三档证据文案。抽出仅为压行数（纪律：拆方法而非抬基线）。
+   * @param {number} tLen 真侧长度
+   * @param {number} fLen 假侧长度
+   * @param {number} baseLen 基线长度
+   * @returns {string}
+   */
+  _orTruthEvidence(tLen, fLen, baseLen) {
+    return `布尔注入确认(boundary-or·OR 恒真)：真侧 ${tLen}B ≫ 假侧 ${fLen}B（真侧不≈基线 ${baseLen}B：正确闭合注释了 OR 另一支）`;
+  }
+
+  /**
+   * [D282] 鲁棒分支第三档证据文案（多样本版）。抽出同 `_orTruthEvidence`。
+   * @param {string[]} tBodies 真侧样本
+   * @param {string[]} fBodies 假侧样本
+   * @returns {string}
+   */
+  _orTruthEvidenceSamples(tBodies, fBodies) {
+    const lens = (arr) => arr.map((b) => b.length);
+    return (
+      `布尔注入确认(boundary-or·OR 恒真/多样本)：真侧 ${Math.min(...lens(tBodies))}-${Math.max(...lens(tBodies))}B ≫ ` +
+      `假侧 ${Math.max(...lens(fBodies))}B（全部近空）；真侧不≈基线（正确闭合注释了 OR 另一支）`
+    );
+  }
+
+  /**
+   * [D282] 鲁棒分支的 trace 组装（两处命中共用）。抽出原因同 `_applyBooleanHit`：
+   * 新增第三档后 `_probeBooleanPairs` 破复杂度基线，按纪律拆方法而非抬基线。
+   * @param {object} rb 鲁棒配置
+   * @param {object} judges 判据集合（读 baselineNoiseRate/minRatio）
+   * @param {object[]} tracePairs 已累积的逐对 trace
+   * @param {string[]} baselines 基线样本
+   * @returns {object} trace 对象
+   */
+  _robustTrace(rb, judges, tracePairs, baselines) {
+    return {
+      technique: 'boolean',
+      adaptive: !!rb.adaptive,
+      baselineNoiseRate: judges.baselineNoiseRate,
+      minStable: judges.minRatio,
+      baselineSamples: baselines.map((b, i) => ({ idx: i, len: b.length, likeBaseline: true, excerpt: this._excerpt(b) })),
+      pairs: tracePairs,
+      decision: 'vulnerable',
+    };
+  }
+
   // 构造注入确认的证据描述（统一 boundary/index/registry 三种来源的证据格式）
   _boolEvidence(ctx, p, tLen, fLen) {
     const tag = p.isBoundary
@@ -488,18 +657,17 @@ export class BooleanBlindDetector extends Detector {
         this._statusDiffer(rTrue, rFalse) || this._lengthDiffer(rTrue, rFalse);
       // 真条件应≈原始页面（AND 1=1 等价正常业务）、假条件应偏离；
       // 三者同时满足才判定，避免随机动态内容（时间戳/anti-CSRF token）造成误报。
-      if (
-        (quickDiff || meaningfulDiff(tBody, fBody)) &&
-        similarToBaseline(tBody) &&
-        !similarToBaseline(fBody)
+      if (this._matchBaselineOracle(tBody, fBody, quickDiff, similarToBaseline, meaningfulDiff)) {
+        this._applyBooleanHit(result, point, dbms, this._boolEvidence(ctx, p, tBody.length, fBody.length), [truePayload, falsePayload]);
+        break;
+      } else if (
+        // [D282] 第三档：OR 恒真。真侧不≈基线也放行（基线命中来自 OR 另一支时必然如此），
+        // 仅 boundary-or 对 + 假侧近空 + 真侧显著大于基线/假侧四条同时成立。
+        this._orTruthHit(p, rTrue, tBody, fBody, Math.max(0, ...baselines.map((b) => b.length)))
       ) {
-        result.vulnerable = true;
-        result.dbms = dbms;
-        result.evidence = this._boolEvidence(ctx, p, tBody.length, fBody.length);
-        result.payloads = [truePayload, falsePayload];
-        point.confirmed = true;
-        point.technique = 'boolean';
-        point.dbms = dbms;
+        this._applyBooleanHit(result, point, dbms,
+          this._orTruthEvidence(tBody.length, fBody.length, Math.max(0, ...baselines.map((b) => b.length))),
+          [truePayload, falsePayload]);
         break;
       } else if (ctx.config?.boolStableDiff !== false && similarToBaseline(tBody) && similarToBaseline(fBody) && meaningfulDiff(tBody, fBody)) {
         // 二级判据：组间稳定差异。原判据因「假≈基线」失效时（现代页面差异占比小），
@@ -519,13 +687,13 @@ export class BooleanBlindDetector extends Detector {
           const sd = this._stableDiffJudge(tBodies, fBodies);
           // [P0-FIX 2026-09-11] 反射回显甄别：差异片段=payload 自身被页面回显 → 非注入信号
           if (sd && !this._isReflectedDiff(sd.tSpan, sd.fSpan, truePayload, falsePayload)) {
-            result.vulnerable = true;
-            result.dbms = dbms;
-            result.evidence = `布尔注入确认(组间稳定差异): 真/假响应在差异片段[${this._sdPreview(sd.tSpan)}]vs[${this._sdPreview(sd.fSpan)}]可复现（真组${n}样本一致、假组${n}样本一致；非数值噪声）`;
-            result.payloads = [truePayload, falsePayload];
-            point.confirmed = true;
-            point.technique = 'boolean';
-            point.dbms = dbms;
+            this._applyBooleanHit(
+              result,
+              point,
+              dbms,
+              `布尔注入确认(组间稳定差异): 真/假响应在差异片段[${this._sdPreview(sd.tSpan)}]vs[${this._sdPreview(sd.fSpan)}]可复现（真组${n}样本一致、假组${n}样本一致；非数值噪声）`,
+              [truePayload, falsePayload]
+            );
             break;
           }
         }
@@ -690,12 +858,7 @@ export class BooleanBlindDetector extends Detector {
         diffs,
       });
 
-      if (
-        trueRatio >= minRatio &&
-        falseRatio >= minRatio &&
-        meaningfulRatio >= minRatio &&
-        significant
-      ) {
+      if (this._matchStatOracle(trueRatio, falseRatio, meaningfulRatio, significant, minRatio)) {
         // [D206] 命中复核（跨轮一致性）：单轮判据在有状态/慢响应目标上会随采样窗口翻转
         //（实测同一目标连跑三次 5/2/1 条，btnSubmit 的重现率 1/3）。这里再采一轮，
         // 达不到 minRatio 就记进 trace.recheck 并跳过这一对 —— 宁可标「不稳」也不给假结论。
@@ -705,22 +868,28 @@ export class BooleanBlindDetector extends Detector {
         const lastTrace = tracePairs[tracePairs.length - 1];
         if (lastTrace) lastTrace.recheck = re;
         if (!re.ok) continue;
-        result.vulnerable = true;
-        result.dbms = dbms;
-        result.evidence = `布尔注入确认(统计${rb.adaptive ? '·自适应' : ''}): 真≈基线${trueRatio.toFixed(2)}、假≠基线${falseRatio.toFixed(2)}、差异${meaningfulRatio.toFixed(2)}、基线噪声${baselineNoiseRateVal.toFixed(2)}、门槛${minRatio.toFixed(2)}、z=${z === null ? 'NA' : z.toFixed(2)}(显著)；复核轮假≠基线${re.falseRatio.toFixed(2)}/差异${re.meaningfulRatio.toFixed(2)}`;
-        result.payloads = [truePayload, falsePayload];
-        point.confirmed = true;
-        point.technique = 'boolean';
-        point.dbms = dbms;
-        result.trace = {
-          technique: 'boolean',
-          adaptive: !!rb.adaptive,
-          baselineNoiseRate: baselineNoiseRateVal,
-          minStable: minRatio,
-          baselineSamples: baselines.map((b, i) => ({ idx: i, len: b.length, likeBaseline: true, excerpt: this._excerpt(b) })),
-          pairs: tracePairs,
-          decision: 'vulnerable',
-        };
+        this._applyBooleanHit(
+          result,
+          point,
+          dbms,
+          `布尔注入确认(统计${rb.adaptive ? '·自适应' : ''}): 真≈基线${trueRatio.toFixed(2)}、假≠基线${falseRatio.toFixed(2)}、差异${meaningfulRatio.toFixed(2)}、基线噪声${baselineNoiseRateVal.toFixed(2)}、门槛${minRatio.toFixed(2)}、z=${z === null ? 'NA' : z.toFixed(2)}(显著)；复核轮假≠基线${re.falseRatio.toFixed(2)}/差异${re.meaningfulRatio.toFixed(2)}`,
+          [truePayload, falsePayload],
+          this._robustTrace(rb, judges, tracePairs, baselines)
+        );
+        break;
+      } else if (
+        // [D282] 第三档（鲁棒分支）：OR 恒真。真≈基线（trueRatio）对「基线命中来自 OR 另一支」
+        // 的目标恒为 0，统计判据永远不成立 ⇒ 用真/假样本长度互比补足；仅 boundary-or 对生效。
+        this._orTruthHitSamples(p, tBodies, fBodies, baselines)
+      ) {
+        this._applyBooleanHit(
+          result,
+          point,
+          dbms,
+          this._orTruthEvidenceSamples(tBodies, fBodies),
+          [truePayload, falsePayload],
+          this._robustTrace(rb, judges, tracePairs, baselines)
+        );
         break;
       } else if (ctx.config?.boolStableDiff !== false && similarToBaseline(tBodies[0]) && similarToBaseline(fBodies[0])) {
         // 二级判据：组间稳定差异。仅当「真≈基线 且 假≈基线（但真≠假）」时进入——
