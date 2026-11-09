@@ -30,8 +30,14 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 function parseCliFlags(argsSource) {
   const out = [];
   const re = /(?:a\s*===\s*|case\s+)'(--[a-z0-9][a-z0-9-]*)'/g;
+  // 注释里写「真源扫描只认 `a === '--xxx'`」这类**说明文字**时，正则照样会命中；
+  // D281 的注释就让它凭空多出一个 `--xxx` 旗标，⑯⑰ 同时假红。口径注释早声明过
+  // 「注释里的 --xxx 一律不算」，这里补上实现：先滤掉注释行再扫。
+  const code = String(argsSource).split(/\r?\n/)
+    .filter((line) => !/^\s*(\/\/|\/\*|\*)/.test(line))
+    .join('\n');
   let m;
-  while ((m = re.exec(String(argsSource))) !== null) if (!out.includes(m[1])) out.push(m[1]);
+  while ((m = re.exec(code)) !== null) if (!out.includes(m[1])) out.push(m[1]);
   return out;
 }
 
@@ -99,6 +105,7 @@ function selftest() {
     "else if (a === '--beta') args.beta = 1;",
     "switch (x) { case '--gamma': break; }",
     "// 说明里提到 --not-a-flag 不算",
+    "// 真源扫描只认 `a === '--phantom'` 字面量（注释里的解析分支形态也不算）",
     "throw new Error('未知参数 --norway');",
   ].join('\n');
   const got = parseCliFlags(src);

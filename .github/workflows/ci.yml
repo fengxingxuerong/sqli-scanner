@@ -316,6 +316,10 @@ jobs:
         name: 便携包冒烟判据自证
       - run: node scripts/labs.mjs --selftest
         name: 本机靶场体检判据自证（纯函数，不探测不起进程）
+      # [D280 2026-11-09] 批内快门禁 gate:fast 的受影响面推导判据——映射口径坏了
+      # 没人知道就是「只活在别处」形态，自证进 CI 与 ci-local。
+      - run: node scripts/gate-fast.mjs --selftest
+        name: 批内快门禁（gate:fast）推导判据自证
       # [D232 2026-11-02] 正则 ReDoS 面：检测器正则跑在目标可控的响应体上
       - run: node scripts/redos-audit.mjs --selftest
         name: ReDoS 审计判据自证（危险样本必须判出/安全样本不得误报）

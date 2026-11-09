@@ -119,6 +119,11 @@ export function closeGateList({ root, quick = false }) {
     // 甚至已经记下这个矛盾却没落地 —— 光靠"记得改"不行，钉成判据。
     { name: 'stale-claims', cmd: ['node', 'scripts/stale-claim-check.mjs'] },
     { name: 'stale-claims:selftest', cmd: ['node', 'scripts/stale-claim-check.mjs', '--selftest'] },
+    // [D280 2026-11-09] 批内快门禁 gate:fast（分层第一档，pre-commit 1.2s 与 gate:close
+    // 25min 之间）：恒跑组 = 全仓静态判据 + 受影响组 = 按改动推导。它自己是编排器，
+    // 判据在受影响面推导——其自证必须进收口，否则映射口径坏了没人知道（「只活在
+    // 别处」形态第 N 次重演的预防位）。
+    { name: 'gate-fast:selftest', cmd: ['node', 'scripts/gate-fast.mjs', '--selftest'] },
   ];
   if (quick) return list.filter((g) => !SLOW.has(g.name));
   return [
