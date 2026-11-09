@@ -203,6 +203,377 @@ function parseTrafficArg(a, args, next) {
   return false;
 }
 
+// ============================================================================
+// [D281 2026-11-09 复杂度债 B3] parseArgs 主链族拆分（12 族，本仓既有模式：
+// 同 applyChannelFlag / parseTrafficArg / parseMiscArg）。
+//
+// 拆分依据（两条，都不是为了好看）：
+//   ① parseArgs 存量 212 圈 / 223 行是复杂度基线里最深的一格 —— 棘轮只许持平或变浅，
+//      此前每加一个旗标都要靠「三键合一行」这种手段保基线（D93 实测）；
+//   ② readme-flag-coverage ⑰ 的真源扫描只认 `a === '--xxx'` / `case '--xxx':` 字面量
+//      形态（正则钉死）—— **表驱动会全量失踪**，所以族内分支必须逐字保留字面量比较。
+//
+// 行为等价依据：全链 token 唯一（D21 曾实测出 --random-agent 重复分支且第二支永不执行，
+// 已删）⇒ 族间求值顺序无关；唯一顺序敏感点是 unknown 尾巴必须最后 —— 照旧留在链尾。
+// A/B：拆分前后各跑一次黄金快照（66 向量 × 默认对象全量 112 键）逐字节比对一致；
+// 判牙：族函数注释掉 ⇒ 对应旗标落 unknownFlags ⇒ actionYaml.wiring / golden 双红。
+//
+// ⚠️ [D281 收口 2026-11-09 · 按 §3.5 停用上述自述] 上面两行是拆分当时的口头结论，
+//    仓库内并无 golden 快照产物（glob **/*golden* 命中 0），「66 向量 × 112 键」
+//    与「golden 双红」均不可复现 ⇒ 停用，不得再对外引用；原文保留不删 = 留教训。
+//    本批重新取证（可复现）：HEAD 单链版与族拆分版 parseArgs 对 215 个长旗标 ×
+//    436 条向量（逐旗标带值/裸旗标 + 组合/短名/equals/preset/空向量）逐字节
+//    JSON 比对 diff=0；族函数漏接由常驻判据
+//    server/tests/cli.parseArgsFamily.wiring.test.js 钉住（注入复验：摘掉一个族调用
+//    ⇒ 该族 10 个旗标当场落 unknownFlags 报红）；重复旗标由 D21 判据钉住。
+// ============================================================================
+
+/** 攻击操作与利用面（对标 sqlmap --os-cmd/--sql-shell/--file-*；需 EXPLOIT_ENABLED=1） */
+function applyAttackAndTargetArgs(a, args, next) {
+  if (a === '--os-cmd') { args.osCmd = next(); return true; }
+  if (a === '--file-read') { args.fileRead = next(); return true; }
+  if (a === '--file-write') { args.fileWrite = next(); return true; }
+  if (a === '--file-dest') { args.fileDest = next(); return true; }
+  if (a === '--udf-hex') { args.udfHex = next(); return true; }
+  if (a === '--udf-install') { args.udfInstall = true; return true; }
+  // —— 强制 DBMS / 二阶触发页 / 授权声明 ——
+  if (a === '--dbms') { args.dbms = next(); return true; }
+  if (a === '--second-order') { args.secondOrderUrl = next(); return true; }
+  // [D42 2026-10-11 对标 sqlmap --second-req] 二阶触发页整请求文件（-r 同源解析器）：
+  // 触发页需要 POST + 头 + CSRF 时 --second-order <url> 表达不了，这里吃完整抓包。
+  if (a === '--second-req') { args.secondReq = next(); return true; }
+  if (a === '--authorized') { args.authorized = true; return true; }
+  return false;
+}
+
+/** 目标与载荷通道：URL/Direct/模板/驱动/批处理/方法体/XML 通道（子族见下） */
+function applyTransportArgs(a, args, next) {
+  if (applyTransportBaseArgs(a, args, next)) return true;
+  return applyChannelHeadersArgs(a, args, next);
+}
+function applyTransportBaseArgs(a, args, next) {
+  if (a === '-u' || a === '--url') { args.url = next(); return true; }
+  if (a === '-d' || a === '--direct') { args.direct = next(); return true; }
+  if (a === '--sql-template') { args.sqlTemplate = next(); return true; }
+  if (a === '--driver') { args.driverType = next(); return true; }
+  if (a === '-m' || a === '--batch') { args.batch = next(); return true; }
+  if (a === '--method') { args.method = next(); return true; }
+  if (a === '--body') { args.body = next(); return true; }
+  // [2026-10-01] XML / SOAP body 通道（对标 ghauri XML·SOAP）。--body 走 JSON 解析，
+  // XML 不是合法 JSON ⇒ 必须独立入口；--xml-body-file 便于多行 XML/SOAP 信封。
+  if (a === '--xml-body') { args.xmlBody = next(); return true; }
+  if (a === '--xml-body-file') { args.xmlBodyFile = next(); return true; }
+  return false;
+}
+function applyChannelHeadersArgs(a, args, next) {
+  if (a === '--cookie') { args.cookie = next(); return true; }
+  if (a === '--header' || a === '--headers') { args.headers = next(); return true; }
+  if (a === '--technique') { args.technique = next(); return true; }
+  return false;
+}
+
+/** 检测调参（子族：失效值/level/risk 与 注入点扩展/登录编排） */
+function applyTuningArgs(a, args, next) {
+  if (applyInvalidLevelArgs(a, args, next)) return true;
+  return applyInjectionPointArgs(a, args, next);
+}
+function applyInvalidLevelArgs(a, args, next) {
+  // [P0 2026-09-09 实战批次] 失效值替换 + 已知注入点直通（对标 sqlmap --invalid-*）
+  if (a === '--invalid-bignum') { args.invalidBignum = true; return true; }
+  if (a === '--invalid-logical') { args.invalidLogical = true; return true; }
+  if (a === '--invalid-string') { args.invalidString = true; return true; }
+  if (a === '--known-point') { args.knownPoint = next(); return true; }
+  if (a === '--level') { args.level = Number(next()) || null; return true; }
+  if (a === '--risk') { args.risk = Number(next()) || null; return true; }
+  if (a === '--test-filter') { args.testFilter = next(); return true; }
+  if (a === '--test-skip') { args.testSkip = next(); return true; }
+  return false;
+}
+function applyInjectionPointArgs(a, args, next) {
+  // —— 注入点扩展开关（本期新增，默认关闭，零回归）——（[D93] 曾三键合一行保基线）
+  if (a === '--test-headers') { args.testHeaders = true; return true; }
+  if (a === '--test-path') { args.testPath = true; return true; }
+  if (a === '--test-param-names') { args.testParamNames = true; return true; }
+  // [2026-10-02 竞品吸收] --param-mine：参数挖掘总开关（对标 Arjun 参数发现，默认关闭零回归）
+  if (a === '--param-mine') { args.paramMine = true; return true; }
+  // [2026-10-02 实战 P1-4] --crawl-browser：headless 浏览器爬取（SPA 目标 XHR 接口发现）
+  if (a === '--crawl-browser') { args.crawlBrowser = true; return true; }
+  // [批次14 实战 P1-6] 登录编排：--login-url（凭据复用 --auth user:pass）
+  if (a === '--login-url') { args.loginUrl = next(); return true; }
+  if (a === '--login-user-field') { args.loginUserField = next(); return true; }
+  if (a === '--login-pass-field') { args.loginPassField = next(); return true; }
+  return false;
+}
+
+/** 风险评估与 WAF 面（子族：--advise 确认链 与 字典/tamper/代理） */
+function applyAdvisoryAndWafArgs(a, args, next) {
+  if (applyAdvisoryArgs(a, args, next)) return true;
+  return applyWafDictArgs(a, args, next);
+}
+function applyAdvisoryArgs(a, args, next) {
+  // —— 扫描前风险评估（--advise）：只打印建议，不执行；配 --yes 才继续扫描 ——
+  if (a === '--advise') { args.advise = true; return true; }
+  if (a === '--yes') { args.yes = true; return true; }
+  // 极高危专用：`--yes` 不够，必须再加本开关（防把「我看过建议」当成「我接受后果」）
+  if (a === '--confirm-extreme') { args.confirmExtreme = true; return true; }
+  if (a === '--use-registry') { args.useRegistry = true; return true; }
+  if (a === '--dump') { args.dump = true; return true; }
+  // [对标 sqlmap --dump-all] 全库拖库（枚举所有库 → 逐库逐表拖）
+  if (a === '--dump-all') { args.dumpAll = true; return true; }
+  // [对标 sqlmap --identify-waf] 主动识别 WAF 厂商并给出推荐 tamper 链（不触发注入检测）
+  if (a === '--identify-waf') { args.identifyWaf = true; return true; }
+  // [D44 2026-10-11] --active-waf-probe：扫描期主动 WAF 探测（此前只有 REST 与 --identify-waf
+  // 能触发，CLI 侧不可达 —— configReachability 同族的「能力在、入口不在」）。
+  if (a === '--active-waf-probe') { args.activeWafProbe = true; return true; }
+  return false;
+}
+function applyWafDictArgs(a, args, next) {
+  // [对标 sqlmap --common-tables / --common-columns] 字典爆破表名/列名
+  //   （information_schema 被 WAF 拦 / 权限不足 / 非 MySQL 时的唯一出路）
+  if (a === '--common-tables') { args.commonTables = '1'; return true; }
+  if (a === '--common-columns') { args.commonColumns = '1'; return true; }
+  // [对标 sqlmap --random-agent] 每次请求从 UA 池随机取（含桌面 + 移动端）
+  if (a === '--random-agent') { args.randomAgent = true; return true; }
+  // [对标 sqlmap --where] 拖库条件过滤（仅 --dump / --dump-all 生效）
+  if (a === '--where') { args.where = next(); return true; }
+  // [对标 sqlmap --param-del] 自定义参数分隔符（默认 &，用于 a=1;b=2 这类非标准站点）
+  if (a === '--param-del') { args.paramDel = next(); return true; }
+  if (a === '--tamper') { args.tamper = next(); return true; }
+  // [D24 2026-10-09 扩展生态] 追加自定义检测条目（JSON 文件，与 registry.json 同 schema）。
+  // 只追加不覆盖；加载/校验失败一律硬失败（不静默忽略，否则用户以为自定义生效了）。
+  if (a === '--payload-file') { args.payloadFile = next(); return true; }
+  if (a === '--proxy') { args.proxy = next(); return true; }
+  return false;
+}
+
+/** 授权范围 / 传输安全 / 脚本变换 / Bearer 续期 / 生产护栏四开关 */
+function applyScopeAuthzArgs(a, args, next) {
+  if (a === '--scope') { args.scope = next(); return true; }
+  if (a === '--insecure') { args.insecureTls = true; return true; }
+  if (a === '--cert') { args.clientCert = next(); return true; } // mTLS 客户端证书 PEM（sqlmap --cert 语义）
+  // [D32 实战 P0-1] 自定义请求变换脚本（签名/加密接口）；须位于 REQUEST_SCRIPT_DIR 内
+  if (a === '--request-script') { args.requestScript = next(); return true; }
+  // [D52] 自定义响应解密脚本（加密/编码响应体）；须位于 RESPONSE_SCRIPT_DIR 内。
+  // 与 --request-script 对偶：那个治「发不出合法请求」，这个治「读不懂合法响应」。
+  if (a === '--postprocess') { args.postprocess = next(); return true; }
+  // [D53] 时间提取基线漂移重采样间隔（个探针，0=关闭跟踪）：健康提取靠判假探针的
+  // 免费 RTT 样本连续跟踪，连续 N 个探针没拿到干净样本时才补发一次基线请求。
+  if (a === '--time-baseline-every') { args.timeBaselineEvery = next(); return true; }
+  // [D36 实战 P0-2] Bearer/Token 自动续期（--refresh-url 为主开关，另两个是可选形状）
+  if (a === '--refresh-url') { args.refreshUrl = next(); return true; }
+  if (a === '--refresh-token') { args.refreshToken = next(); return true; }
+  if (a === '--refresh-field') { args.refreshField = next(); return true; }
+  if (a === '--no-validation-skip') { args.noValidationSkip = true; return true; }
+  if (a === '--confirm-destructive') { args.confirmDestructive = true; return true; }
+  if (a === '--no-production-mode') { args.noProductionMode = true; return true; }
+  if (a === '--allow-second-order-writes') { args.allowSecondOrderWrites = true; return true; }
+  if (a === '--no-xp-auto-enable') { args.noXpAutoEnable = true; return true; }
+  return false;
+}
+
+/** 认证与性能格式（子族：--auth/速率·格式 与 网络·性能·协议层/--help） */
+function applyPerfFormatArgs(a, args, next) {
+  if (applyAuthFormatArgs(a, args, next)) return true;
+  return applyNetPerfArgs(a, args, next);
+}
+function applyAuthFormatArgs(a, args, next) {
+  if (a === '--auth') { args.auth = next(); return true; }
+  if (a === '--auth-type') { args.authType = next(); return true; }
+  if (a === '--rate' || a === '--ratePerSec') { args.ratePerSec = Number(next()) || SHARED_SCAN_DEFAULTS.ratePerSec; return true; }
+  if (a === '--threads' || a === '--concurrency-det') { args.concurrencyDet = Number(next()) || SHARED_SCAN_DEFAULTS.concurrency; return true; }
+  if (a === '--format' || a === '-f') { args.format = next(); return true; }
+  if (a === '--out' || a === '-o') { args.out = next(); return true; }
+  return false;
+}
+function applyNetPerfArgs(a, args, next) {
+  if (a === '--timeout') { args.timeoutMs = Number(next()) || 0; return true; }
+  // [D41 2026-10-11] --retries / --http-timeout：单请求层的重试次数与超时（config.retry / config.timeoutMs，
+  //   引擎与 REST 白名单早已消费这两键，此前只有 REST 能配 —— CLI 侧一直缺入口）。
+  //   命名刻意避开既有 --timeout（那是整场扫描的轮询上限，cli.js:293 消费）。
+  if (a === '--retries') { args.retries = Number(next()); return true; }
+  if (a === '--http-timeout') { args.httpTimeoutMs = Number(next()); return true; }
+  if (a === '--concurrency' || a === '-c') { args.concurrency = Number(next()) || 1; return true; }
+  // —— HTTP 协议层（对标 sqlmap --force-ssl / --ignore-redirects / --hpp）——
+  if (a === '--force-ssl') { args.forceSsl = true; return true; }
+  if (a === '--ignore-redirects') { args.ignoreRedirects = true; return true; }
+  if (a === '--hpp') { args.hpp = true; return true; }
+  if (a === '--parse-errors') { args.parseErrors = true; return true; }
+  if (a === '-h' || a === '--help') { args.help = true; return true; }
+  return false;
+}
+
+/** 枚举主族（子族：枚举模式开关 与 目标选择 -D/-T/-C） */
+function applyEnumArgs(a, args, next) {
+  if (applyEnumModeArgs(a, args, next)) return true;
+  return applyEnumTargetArgs(a, args, next);
+}
+function applyEnumModeArgs(a, args, next) {
+  // —— 枚举模式（对标 sqlmap --dbs/--tables/--columns/--dump/-D/-T/-C/...）——
+  if (a === '--dbs') { args.dbs = true; return true; }
+  if (a === '--tables') { args.tables = true; return true; }
+  if (a === '--columns') { args.columns = true; return true; }
+  // [D46 对标 sqlmap] 运维侦察枚举 + 过滤
+  if (a === '-b' || a === '--banner') { args.banner = true; return true; }
+  if (a === '--statements') { args.statements = true; return true; }
+  if (a === '--procs') { args.procs = true; return true; }
+  if (a === '-U' || a === '--user') { args.user = next(); return true; }
+  if (a === '--exclude') { args.exclude = next(); return true; }
+  return false;
+}
+function applyEnumTargetArgs(a, args, next) {
+  if (a === '-D' || a === '--db') { args.db = next(); return true; }
+  if (a === '-T' || a === '--table') { args.table = next(); return true; }
+  if (a === '-C' || a === '--columns-list') { args.columnsList = next(); return true; }
+  if (a === '--current-db') { args.currentDb = true; return true; }
+  if (a === '--current-user') { args.currentUser = true; return true; }
+  return false;
+}
+
+/** 枚举扩展与过滤：用户口令主机 / 权限角色 / 系统库排除 / 代理旁路 / --search / --smart */
+function applyEnumMoreArgs(a, args, next) {
+  if (a === '--users') { args.users = true; return true; }
+  if (a === '--passwords') { args.passwords = true; return true; }
+  if (a === '--hostname') { args.hostname = true; return true; }
+  if (a === '--is-dba') { args.isDba = true; return true; }
+  if (a === '--schema') { args.schema = true; return true; }
+  if (a === '--privileges') { args.privileges = true; return true; }
+  if (a === '--roles') { args.roles = true; return true; }
+  if (a === '--count') { args.count = true; return true; }
+  if (a === '--exclude-sysdbs') { args.excludeSysdbs = true; return true; }
+  if (a === '--no-exclude-sysdbs') { args.excludeSysdbs = false; return true; }
+  if (a === '--proxy-bypass-local') { args.proxyBypassLocal = true; return true; }
+  if (a === '--no-proxy-bypass-local') { args.proxyBypassLocal = false; return true; }
+  if (a === '--search') { args.search = next(); return true; }
+  if (a === '--smart') { args.smart = true; return true; }
+  return false;
+}
+
+/** 高级检测参数（对标 sqlmap 页面匹配/注入上下文） */
+function applyMatchArgs(a, args, next) {
+  if (a === '--prefix') { args.prefix = next(); return true; }
+  if (a === '--suffix') { args.suffix = next(); return true; }
+  if (a === '--string') { args.string = next(); return true; }
+  if (a === '--not-string') { args.notString = next(); return true; }
+  if (a === '--code') { args.code = Number(next()) || null; return true; }
+  if (a === '--text-only') { args.textOnly = true; return true; }
+  if (a === '--titles') { args.titles = true; return true; }
+  if (a === '--regexp') { args.regexp = next(); return true; }
+  return false;
+}
+
+/** 爬虫/表单/会话/配置档案（对标 sqlmap --forms/--crawl/--session-file/-c/--save） */
+function applyCrawlSessionArgs(a, args, next) {
+  // —— 爬虫/表单/会话/延迟等高级参数（对标 sqlmap）——
+  if (a === '--forms') { args.forms = true; return true; }
+  if (a === '--crawl') { args.crawl = Number(next()) || 1; return true; }
+  if (a === '--session-file') { args.sessionFile = next(); return true; }
+  // [D41 2026-10-11 对标 sqlmap -c/--save + ffuf -config] 配置档案：--config 从 JSON 文件预载参数，
+  //   CLI 显式传入的开关优先生效；--save-config 把本次实际生效的参数增量写回 JSON（可复扫）。
+  if (a === '--config') { args.configFile = next(); return true; }
+  if (a === '--save-config') { args.saveConfigFile = next(); return true; }
+  if (a === '--time-sec') { args.timeSec = Number(next()) || null; return true; }
+  return false;
+}
+
+/** 延迟抖动/请求预算（子族）与行范围导出 + 保活探测（对标 sqlmap --delay/--start/--stop/--safe-*） */
+function applyDelayRangeArgs(a, args, next) {
+  if (applyDelayBudgetArgs(a, args, next)) return true;
+  return applyRangeArgs(a, args, next);
+}
+function applyDelayBudgetArgs(a, args, next) {
+  // 注意：--delay 是毫秒级随机抖动（wafEvasion.jitterMs，WAF 规避）；
+  // 固定请求间隔（秒）用 --delay-sec（对应 config.delay，对标 sqlmap --delay）。
+  if (a === '--delay') { args.delay = Number(next()) || 0; return true; }
+  if (a === '--delay-sec') { args.delaySec = Number(next()) || 0; return true; }
+  if (a === '--max-requests') { args.maxRequests = Number(next()) || 0; return true; }
+  if (a === '--req-rate') { args.reqRate = Number(next()) || 0; return true; }
+  if (a === '--predict-output') { args.predictOutput = true; return true; }
+  if (a === '--skip-static') { args.skipStatic = true; return true; }
+  return false;
+}
+function applyRangeArgs(a, args, next) {
+  // —— 行范围导出 + 保活探测（对标 sqlmap --start/--stop/--safe-url/--safe-freq）——
+  if (a === '--start') { args.startRow = Number(next()) || 0; return true; }
+  if (a === '--stop') { args.stopRow = Number(next()) || 0; return true; }
+  if (a === '--safe-url') { args.safeUrl = next(); return true; }
+  if (a === '--safe-freq') { args.safeFreq = Number(next()) || 0; return true; }
+  return false;
+}
+
+/** CSRF 会话层与参数选择（对标 sqlmap --csrf-* / -p / --param-exclude / --param-filter） */
+function applyCsrfParamArgs(a, args, next) {
+  // —— CSRF 会话层（对标 sqlmap --csrf-url/--csrf-token）——
+  if (a === '--csrf-url') { args.csrfUrl = next(); return true; }
+  if (a === '--csrf-token') { args.csrfTokenName = next(); return true; }
+  if (a === '--csrf-method') { args.csrfMethod = String(next()).toUpperCase(); return true; }
+  if (a === '--csrf-refresh') { args.csrfRefreshFreq = Number(next()) || 50; return true; }
+  if (a === '--skip') { args.skipParams = String(next()).split(',').map((s) => s.trim()).filter(Boolean); return true; }
+  // [D41 2026-10-11 对标 sqlmap -p] 只测指定参数（逗号分隔；config.js → config.testParameter）
+  if (a === '-p' || a === '--test-param') { args.testParam = next(); return true; }
+  // [D41 2026-10-11 对标 sqlmap --param-exclude] 按正则排除参数（paramSelection.js 消费）
+  if (a === '--param-exclude') { args.paramExclude = next(); return true; }
+  // [D41 2026-10-11 对标 sqlmap --param-filter] 按位置筛选（url/body/header/cookie/path 及 GET/POST 别名）
+  if (a === '--param-filter') { args.paramFilter = next(); return true; }
+  return false;
+}
+
+/** 输出杂项与提取复核（对标 sqlmap 四件 + --tor/--mobile + 增强参数） */
+function applyOutputMiscArgs(a, args, next) {
+  // —— [D42 2026-10-11 对标 sqlmap 四件] ——
+  // --ignore-code：忽略指定 HTTP 错误码（不再计入拦截/会话失效/服务器错误判定）
+  if (a === '--ignore-code') { args.ignoreCode = next(); return true; }
+  // --randomize：每条注入请求随机化指定参数的值（防反爆破/风控锁定）
+  if (a === '--randomize') { args.randomize = next(); return true; }
+  // --dump-format：拖库数据产物格式（csv/sql/html/json；产物层用，不影响内嵌报告）
+  if (a === '--dump-format') { args.dumpFormat = next(); return true; }
+  // [D50 2026-10-12] --fetch-using：盲注提取比较算子。`>`/`<` 被 WAF 过滤而 BETWEEN
+  // 仍放行的目标上，between 让长度/字节二分继续收敛（cls 类探测早已单方面依赖 BETWEEN
+  // 可用）。默认 gt（历史行为）；'in' 不实现（IN 为假时无法定位区间，TODO 已留证）。
+  if (a === '--fetch-using') { args.fetchUsing = next(); return true; }
+  // --verify / --no-verify：盲注提取复核开关（引擎默认开：每字节等值确认 + 完整值复验）
+  if (a === '--verify') { args.extractVerify = true; return true; }
+  if (a === '--no-verify') { args.extractVerify = false; return true; }
+  // —— 对标 sqlmap 最后两个参数（--tor/--mobile）——
+  if (a === '--tor') { args.tor = true; return true; }
+  if (a === '--mobile') { args.mobile = true; return true; }
+  // —— 对标 sqlmap 增强参数（不改变引擎行为，仅控制采样/编码）——
+  // [D21 2026-10-09] `--random-agent` 的解析只在 applyAdvisoryAndWafArgs 那处 —— 本族曾有
+  //   重复的一条 `else if (a === '--random-agent') args.randomUA = true;`：同一条 else-if
+  //   链里第二个分支**永不执行** ⇒ `args.randomUA` 恒为 undefined ⇒ config.js 里
+  //   `if (args.randomUA) config.randomUA = true` 是死代码（顶层 randomUA 在 server/src 内
+  //   0 个读取点）。真开关是 `wafEvasion.randomUA`，由 args.randomAgent 驱动。教训保留下：
+  //   族拆分后 token 唯一性是行为等价的前提，新旗标先查重复再落族。
+  if (a === '--flush-session') { args.flushSession = true; return true; }
+  if (a === '--fresh-queries') { args.freshQueries = true; return true; }
+  if (a === '--no-cast') { args.noCast = true; return true; }
+  if (a === '--hex') { args.hex = true; return true; }
+  if (a === '--union-cols') { args.unionCols = next(); return true; }
+  if (a === '--union-from') { args.unionFrom = next(); return true; }
+  return false;
+}
+
+/** 台账保留策略 + 已移除旗标的显式识别（不消费，但绝不能落 unknown —— 警告不能骗人） */
+function applyLegacyReservedArgs(a, args, next) {
+  // [2026-09-29] 这两个开关由 `cli.js ledger prune` 子命令自己解析（见 cli.js 的 argOf），
+  // 本文件不消费。但**必须显式识别**：否则它们落到最后那条 else 里被记成 unknownFlag，
+  // 打印「无法识别的参数（不会生效）」—— 而它其实是生效的。那条警告变成在骗人，
+  // 比"静默丢弃"更糟（用户会以为没传进去，再去配一遍）。同理：被排到尾部候选之前。
+  if (a === '--max' || a.startsWith('--max=') || a === '--days' || a.startsWith('--days=')) { void a; return true; }
+  // --no-escape / --union-char：已移除（详见 buildConfig 尾部注释）。
+  // 保留显式识别并给出可操作提示，避免用户以为"传了没生效"而反复排查。
+  if (a === '--no-escape' || a === '--union-char') {
+    const flag = a;
+    if (a === '--union-char') next(); // 吃掉它的值，避免被当成 URL
+    console.error(
+      `[warn] ${flag} 暂不支持（本项目未实现，原 help 标注的"保留接口"已移除）：` +
+        '--union-char 涉及 tamper 标记保护链改造，--no-escape 与本项目转义实现不同源。' +
+        '参数已被忽略，扫描继续。'
+    );
+    return true;
+  }
+  return false;
+}
+
 export function parseArgs(argv, preset) {
   /** @type {any} */
   const args = {
@@ -301,33 +672,10 @@ export function parseArgs(argv, preset) {
     //（对标 sqlmap 同名参数）。三者共用一张表，避免给 if 链再添分支（复杂度门禁盯 parseArgs）。
     const optionalKey = OPTIONAL_VALUE_FLAGS.get(a);
     if (optionalKey) args[optionalKey] = peekValue() ?? true;
-    else if (a === '--os-cmd') args.osCmd = next();
-    else if (a === '--file-read') args.fileRead = next();
-    else if (a === '--file-write') args.fileWrite = next();
-    else if (a === '--file-dest') args.fileDest = next();
-    else if (a === '--udf-hex') args.udfHex = next();
-    else if (a === '--udf-install') args.udfInstall = true;
-    // —— 强制 DBMS / 二阶触发页 / 授权声明 ——
-    else if (a === '--dbms') args.dbms = next();
-    else if (a === '--second-order') args.secondOrderUrl = next();
-    // [D42 2026-10-11 对标 sqlmap --second-req] 二阶触发页整请求文件（-r 同源解析器）：
-    // 触发页需要 POST + 头 + CSRF 时 --second-order <url> 表达不了，这里吃完整抓包。
-    else if (a === '--second-req') args.secondReq = next();
-    else if (a === '--authorized') args.authorized = true;
-    else if (a === '-u' || a === '--url') args.url = next();
-    else if (a === '-d' || a === '--direct') args.direct = next();
-    else if (a === '--sql-template') args.sqlTemplate = next();
-    else if (a === '--driver') args.driverType = next();
-    else if (a === '-m' || a === '--batch') args.batch = next();
-    else if (a === '--method') args.method = next();
-    else if (a === '--body') args.body = next();
-    // [2026-10-01] XML / SOAP body 通道（对标 ghauri XML·SOAP）。--body 走 JSON 解析，
-    // XML 不是合法 JSON ⇒ 必须独立入口；--xml-body-file 便于多行 XML/SOAP 信封。
-    else if (a === '--xml-body') args.xmlBody = next();
-    else if (a === '--xml-body-file') args.xmlBodyFile = next();
-    else if (a === '--cookie') args.cookie = next();
-    else if (a === '--header' || a === '--headers') args.headers = next();
-    else if (a === '--technique') args.technique = next();
+    // [D281 族拆分] 以下 13 族按既有族模式收编主链（依据与 A/B 见 applyAttackAndTargetArgs
+    // 头注）；token 全链唯一 ⇒ 族间求值顺序无关；unknown 尾巴仍必须最后。
+    else if (applyAttackAndTargetArgs(a, args, next)) { /* 攻击/利用/DBMS/二阶 */ }
+    else if (applyTransportArgs(a, args, next)) { /* url/direct/批量/方法体/xml/cookie 头/technique */ }
     // [2026-10-12 §A2] NoSQL / OOB 默认关通道总开关（子键走 --config 档案，见 help）。
     // 与 --no-cast 同族命名（noSql → --no-sql）；oob 与 --technique oob 正交：
     // technique 只决定"测不测"，oob.enabled 决定"起不起接收端"（defaults.js:292-293 明写
@@ -335,212 +683,18 @@ export function parseArgs(argv, preset) {
     // [D240 对标 sqlmap -t] 原始流量落盘（-t/--traffic-file、--traffic-max-body）走同一入口：
     // parseArgs 的复杂度基线是棘轮，`||` 也算一个分支，所以两个族收进一个函数而不是并列。
     else if (applyFlagFamily(a, args, next)) { /* --no-sql/--oob（D87）+ traffic（D240） */ }
-    // [P0 2026-09-09 实战批次] 失效值替换 + 已知注入点直通（对标 sqlmap --invalid-*）
-    else if (a === '--invalid-bignum') args.invalidBignum = true;
-    else if (a === '--invalid-logical') args.invalidLogical = true;
-    else if (a === '--invalid-string') args.invalidString = true;
-    else if (a === '--known-point') args.knownPoint = next();
-    else if (a === '--level') args.level = Number(next()) || null;
-    else if (a === '--risk') args.risk = Number(next()) || null;
-    else if (a === '--test-filter') args.testFilter = next();
-    else if (a === '--test-skip') args.testSkip = next();
-    // —— 注入点扩展开关（本期新增，默认关闭，零回归）——
-    else if (a === '--test-headers') args.testHeaders = true; else if (a === '--test-path') args.testPath = true; else if (a === '--test-param-names') args.testParamNames = true; // [D93] 三键同族，合一行保 parseArgs 基线（227 行只许持平）
-    // [2026-10-02 竞品吸收] --param-mine：参数挖掘总开关（对标 Arjun 参数发现，默认关闭零回归）
-    else if (a === '--param-mine') args.paramMine = true;
-    // [2026-10-02 实战 P1-4] --crawl-browser：headless 浏览器爬取（SPA 目标 XHR 接口发现）
-    else if (a === '--crawl-browser') args.crawlBrowser = true;
-    // [批次14 实战 P1-6] 登录编排：--login-url（凭据复用 --auth user:pass）
-    else if (a === '--login-url') args.loginUrl = next();
-    else if (a === '--login-user-field') args.loginUserField = next();
-    else if (a === '--login-pass-field') args.loginPassField = next();
-    // —— 扫描前风险评估（--advise）：只打印建议，不执行；配 --yes 才继续扫描 ——
-    else if (a === '--advise') args.advise = true;
-    else if (a === '--yes') args.yes = true;
-    // 极高危专用：`--yes` 不够，必须再加本开关（防把「我看过建议」当成「我接受后果」）
-    else if (a === '--confirm-extreme') args.confirmExtreme = true;
-    else if (a === '--use-registry') args.useRegistry = true;
-    else if (a === '--dump') args.dump = true;
-    // [对标 sqlmap --dump-all] 全库拖库（枚举所有库 → 逐库逐表拖）
-    else if (a === '--dump-all') args.dumpAll = true;
-    // [对标 sqlmap --identify-waf] 主动识别 WAF 厂商并给出推荐 tamper 链（不触发注入检测）
-    else if (a === '--identify-waf') args.identifyWaf = true;
-    // [D44 2026-10-11] --active-waf-probe：扫描期主动 WAF 探测（被动指纹未命中时发多向量
-    // 探针观察拦截行为）。此前只有 REST（config.activeWafProbe）与 --identify-waf 能触发，
-    // 扫描期在 CLI 侧不可达（configReachability 同族的「能力在、入口不在」）。
-    else if (a === '--active-waf-probe') args.activeWafProbe = true;
-    // [对标 sqlmap --common-tables / --common-columns] 字典爆破表名/列名
-    //   （information_schema 被 WAF 拦 / 权限不足 / 非 MySQL 时的唯一出路）
-    else if (a === '--common-tables') args.commonTables = '1';
-    else if (a === '--common-columns') args.commonColumns = '1';
-    // [对标 sqlmap --random-agent] 每次请求从 UA 池随机取（含桌面 + 移动端）
-    else if (a === '--random-agent') args.randomAgent = true;
-    // [对标 sqlmap --where] 拖库条件过滤（仅 --dump / --dump-all 生效）
-    else if (a === '--where') args.where = next();
-    // [对标 sqlmap --param-del] 自定义参数分隔符（默认 &，用于 a=1;b=2 这类非标准站点）
-    else if (a === '--param-del') args.paramDel = next();
-    else if (a === '--tamper') args.tamper = next();
-    // [D24 2026-10-09 扩展生态] 追加自定义检测条目（JSON 文件，与 registry.json 同 schema）。
-    // 只追加不覆盖；加载/校验失败一律硬失败（不静默忽略，否则用户以为自定义生效了）。
-    else if (a === '--payload-file') args.payloadFile = next();
-    else if (a === '--proxy') args.proxy = next();
-    else if (a === '--scope') args.scope = next();
-    else if (a === '--insecure') args.insecureTls = true;
-    else if (a === '--cert') args.clientCert = next(); // mTLS 客户端证书 PEM（sqlmap --cert 语义）
-    // [D32 实战 P0-1] 自定义请求变换脚本（签名/加密接口）；须位于 REQUEST_SCRIPT_DIR 内
-    else if (a === '--request-script') args.requestScript = next();
-    // [D52] 自定义响应解密脚本（加密/编码响应体）；须位于 RESPONSE_SCRIPT_DIR 内。
-    // 与 --request-script 对偶：那个治「发不出合法请求」，这个治「读不懂合法响应」。
-    else if (a === '--postprocess') args.postprocess = next();
-    // [D53] 时间提取基线漂移重采样间隔（个探针，0=关闭跟踪）：健康提取靠判假探针的
-    // 免费 RTT 样本连续跟踪，连续 N 个探针没拿到干净样本时才补发一次基线请求。
-    else if (a === '--time-baseline-every') args.timeBaselineEvery = next();
-    // [D36 实战 P0-2] Bearer/Token 自动续期（--refresh-url 为主开关，另两个是可选形状）
-    else if (a === '--refresh-url') args.refreshUrl = next();
-    else if (a === '--refresh-token') args.refreshToken = next();
-    else if (a === '--refresh-field') args.refreshField = next();
-    else if (a === '--no-validation-skip') args.noValidationSkip = true;
-    else if (a === '--confirm-destructive') args.confirmDestructive = true;
-    else if (a === '--no-production-mode') args.noProductionMode = true;
-    else if (a === '--allow-second-order-writes') args.allowSecondOrderWrites = true;
-    else if (a === '--no-xp-auto-enable') args.noXpAutoEnable = true;
-    else if (a === '--auth') args.auth = next();
-    else if (a === '--auth-type') args.authType = next();
-    else if (a === '--rate' || a === '--ratePerSec') args.ratePerSec = Number(next()) || SHARED_SCAN_DEFAULTS.ratePerSec;
-    else if (a === '--threads' || a === '--concurrency-det') args.concurrencyDet = Number(next()) || SHARED_SCAN_DEFAULTS.concurrency;
-    else if (a === '--format' || a === '-f') args.format = next();
-    else if (a === '--out' || a === '-o') args.out = next();
-    else if (a === '--timeout') args.timeoutMs = Number(next()) || 0;
-    // [D41 2026-10-11] --retries / --http-timeout：单请求层的重试次数与超时（config.retry / config.timeoutMs，
-    //   引擎与 REST 白名单早已消费这两键，此前只有 REST 能配 —— CLI 侧一直缺入口）。
-    //   命名刻意避开既有 --timeout（那是整场扫描的轮询上限，cli.js:293 消费）。
-    else if (a === '--retries') args.retries = Number(next());
-    else if (a === '--http-timeout') args.httpTimeoutMs = Number(next());
-    else if (a === '--concurrency' || a === '-c') args.concurrency = Number(next()) || 1;
-    // —— HTTP 协议层（对标 sqlmap --force-ssl / --ignore-redirects / --hpp）——
-    else if (a === '--force-ssl') args.forceSsl = true;
-    else if (a === '--ignore-redirects') args.ignoreRedirects = true;
-    else if (a === '--hpp') args.hpp = true;
-    else if (a === '--parse-errors') args.parseErrors = true;
-    else if (a === '-h' || a === '--help') args.help = true;
-    // —— 枚举模式（对标 sqlmap --dbs/--tables/--columns/--dump/-D/-T/-C/...）——
-    else if (a === '--dbs') args.dbs = true;
-    else if (a === '--tables') args.tables = true;
-    else if (a === '--columns') args.columns = true;
-    // [D46 对标 sqlmap] 运维侦察枚举 + 过滤
-    else if (a === '-b' || a === '--banner') args.banner = true;
-    else if (a === '--statements') args.statements = true;
-    else if (a === '--procs') args.procs = true;
-    else if (a === '-U' || a === '--user') args.user = next();
-    else if (a === '--exclude') args.exclude = next();
-    else if (a === '-D' || a === '--db') args.db = next();
-    else if (a === '-T' || a === '--table') args.table = next();
-    else if (a === '-C' || a === '--columns-list') args.columnsList = next();
-    else if (a === '--current-db') args.currentDb = true;
-    else if (a === '--current-user') args.currentUser = true;
-    else if (a === '--users') args.users = true;
-    else if (a === '--passwords') args.passwords = true;
-    else if (a === '--hostname') args.hostname = true;
-    else if (a === '--is-dba') args.isDba = true;
-    else if (a === '--schema') args.schema = true;
-    else if (a === '--privileges') args.privileges = true;
-    else if (a === '--roles') args.roles = true;
-    else if (a === '--count') args.count = true;
-    else if (a === '--exclude-sysdbs') args.excludeSysdbs = true;
-    else if (a === '--no-exclude-sysdbs') args.excludeSysdbs = false;
-    else if (a === '--proxy-bypass-local') args.proxyBypassLocal = true;
-    else if (a === '--no-proxy-bypass-local') args.proxyBypassLocal = false;
-    else if (a === '--search') args.search = next();
-    else if (a === '--smart') args.smart = true;
-    // —— 高级检测参数（对标 sqlmap 页面匹配/注入上下文）——
-    else if (a === '--prefix') args.prefix = next();
-    else if (a === '--suffix') args.suffix = next();
-    else if (a === '--string') args.string = next();
-    else if (a === '--not-string') args.notString = next();
-    else if (a === '--code') args.code = Number(next()) || null;
-    else if (a === '--text-only') args.textOnly = true;
-    else if (a === '--titles') args.titles = true;
-    else if (a === '--regexp') args.regexp = next();
-    // —— 爬虫/表单/会话/延迟等高级参数（对标 sqlmap）——
-    else if (a === '--forms') args.forms = true;
-    else if (a === '--crawl') args.crawl = Number(next()) || 1;
-    else if (a === '--session-file') args.sessionFile = next();
-    // [D41 2026-10-11 对标 sqlmap -c/--save + ffuf -config] 配置档案：--config 从 JSON 文件预载参数，
-    //   CLI 显式传入的开关优先生效；--save-config 把本次实际生效的参数增量写回 JSON（可复扫）。
-    else if (a === '--config') args.configFile = next();
-    else if (a === '--save-config') args.saveConfigFile = next();
-    else if (a === '--time-sec') args.timeSec = Number(next()) || null;
-    // 注意：--delay 是毫秒级随机抖动（wafEvasion.jitterMs，WAF 规避）；
-    // 固定请求间隔（秒）用 --delay-sec（对应 config.delay，对标 sqlmap --delay）。
-    else if (a === '--delay') args.delay = Number(next()) || 0;
-    else if (a === '--delay-sec') args.delaySec = Number(next()) || 0;
-    else if (a === '--max-requests') args.maxRequests = Number(next()) || 0;
-    else if (a === '--req-rate') args.reqRate = Number(next()) || 0;
-    else if (a === '--predict-output') args.predictOutput = true;
-    else if (a === '--skip-static') args.skipStatic = true;
-    // —— 行范围导出 + 保活探测（对标 sqlmap --start/--stop/--safe-url/--safe-freq）——
-    else if (a === '--start') args.startRow = Number(next()) || 0;
-    else if (a === '--stop') args.stopRow = Number(next()) || 0;
-    else if (a === '--safe-url') args.safeUrl = next();
-    else if (a === '--safe-freq') args.safeFreq = Number(next()) || 0;
-  // —— CSRF 会话层（对标 sqlmap --csrf-url/--csrf-token）——
-  else if (a === '--csrf-url') args.csrfUrl = next();
-  else if (a === '--csrf-token') args.csrfTokenName = next();
-  else if (a === '--csrf-method') args.csrfMethod = String(next()).toUpperCase();
-  else if (a === '--csrf-refresh') args.csrfRefreshFreq = Number(next()) || 50;
-  else if (a === '--skip') args.skipParams = String(next()).split(',').map((s) => s.trim()).filter(Boolean);
-  // [D41 2026-10-11 对标 sqlmap -p] 只测指定参数（逗号分隔；config.js → config.testParameter）
-  else if (a === '-p' || a === '--test-param') args.testParam = next();
-  // [D41 2026-10-11 对标 sqlmap --param-exclude] 按正则排除参数（paramSelection.js 消费）
-  else if (a === '--param-exclude') args.paramExclude = next();
-  // [D41 2026-10-11 对标 sqlmap --param-filter] 按位置筛选（url/body/header/cookie/path 及 GET/POST 别名）
-  else if (a === '--param-filter') args.paramFilter = next();
-  // —— [D42 2026-10-11 对标 sqlmap 四件] ——
-  // --ignore-code：忽略指定 HTTP 错误码（不再计入拦截/会话失效/服务器错误判定）
-  else if (a === '--ignore-code') args.ignoreCode = next();
-  // --randomize：每条注入请求随机化指定参数的值（防反爆破/风控锁定）
-  else if (a === '--randomize') args.randomize = next();
-  // --dump-format：拖库数据产物格式（csv/sql/html/json；产物层用，不影响内嵌报告）
-  else if (a === '--dump-format') args.dumpFormat = next();
-  // [D50 2026-10-12] --fetch-using：盲注提取比较算子。`>`/`<` 被 WAF 过滤而 BETWEEN
-  // 仍放行的目标上，between 让长度/字节二分继续收敛（cls 类探测早已单方面依赖 BETWEEN
-  // 可用）。默认 gt（历史行为）；'in' 不实现（IN 为假时无法定位区间，TODO 已留证）。
-  else if (a === '--fetch-using') args.fetchUsing = next();
-  // --verify / --no-verify：盲注提取复核开关（引擎默认开：每字节等值确认 + 完整值复验）
-  else if (a === '--verify') args.extractVerify = true;
-  else if (a === '--no-verify') args.extractVerify = false;
-    // —— 对标 sqlmap 最后两个参数（--tor/--mobile）——
-    else if (a === '--tor') args.tor = true;
-    else if (a === '--mobile') args.mobile = true;
-    // —— 对标 sqlmap 增强参数（不改变引擎行为，仅控制采样/编码）——
-    // [D21 2026-10-09] `--random-agent` 的解析**只在上面 [对标 sqlmap --random-agent] 那处**，
-    //   此处曾重复一条 `else if (a === '--random-agent') args.randomUA = true;` ——
-    //   同一条 else-if 链里第二个分支**永不执行** ⇒ `args.randomUA` 恒为 undefined ⇒
-    //   config.js 里 `if (args.randomUA) config.randomUA = true` 是死代码（顶层 randomUA 在
-    //   server/src 内 0 个读取点）。真开关是 `wafEvasion.randomUA`，由 args.randomAgent 驱动。
-    else if (a === '--flush-session') args.flushSession = true;
-    else if (a === '--fresh-queries') args.freshQueries = true;
-    else if (a === '--no-cast') args.noCast = true;
-    else if (a === '--hex') args.hex = true;
-    else if (a === '--union-cols') args.unionCols = next();
-    else if (a === '--union-from') args.unionFrom = next();
-    // —— 台账保留策略（SCAN_LEDGER_*）——
-    // [2026-09-29] 这两个开关由 `cli.js ledger prune` 子命令自己解析（见 cli.js 的 argOf），
-    // 本文件不消费。但**必须显式识别**：否则它们落到最后那条 else 里被记成 unknownFlag，
-    // 打印「无法识别的参数（不会生效）」—— 而它其实是生效的。那条警告变成在骗人，
-    // 比"静默丢弃"更糟（用户会以为没传进去，再去配一遍）。同理：被排到尾部候选之前。
-    else if (a === '--max' || a.startsWith('--max=') || a === '--days' || a.startsWith('--days=')) { void a; }
-    // --no-escape / --union-char：已移除（详见 buildConfig 尾部注释）。
-    // 保留显式识别并给出可操作提示，避免用户以为"传了没生效"而反复排查。
-    else if (a === '--no-escape' || a === '--union-char') {
-      const flag = a;
-      if (a === '--union-char') next(); // 吃掉它的值，避免被当成 URL
-      console.error(
-        `[warn] ${flag} 暂不支持（本项目未实现，原 help 标注的"保留接口"已移除）：` +
-          '--union-char 涉及 tamper 标记保护链改造，--no-escape 与本项目转义实现不同源。' +
-          '参数已被忽略，扫描继续。'
-      );
-    }
+    else if (applyTuningArgs(a, args, next)) { /* invalid 系列 / level / risk / test 系列 / param-mine / crawl-browser / login-* */ }
+    else if (applyAdvisoryAndWafArgs(a, args, next)) { /* advise/yes/dump/waf/字典/tamper/proxy */ }
+    else if (applyScopeAuthzArgs(a, args, next)) { /* scope/insecure/脚本变换/refresh/护栏 */ }
+    else if (applyPerfFormatArgs(a, args, next)) { /* auth/速率并发超时/format·out/http 协议/help */ }
+    else if (applyEnumArgs(a, args, next)) { /* dbs/tables/columns/-b/-U/--exclude/-D/-T/-C */ }
+    else if (applyEnumMoreArgs(a, args, next)) { /* users/passwords/schema/权限/排除/搜索/smart */ }
+    else if (applyMatchArgs(a, args, next)) { /* prefix/suffix/string/code/titles/regexp */ }
+    else if (applyCrawlSessionArgs(a, args, next)) { /* forms/crawl/session/config/time-sec */ }
+    else if (applyDelayRangeArgs(a, args, next)) { /* delay/max-requests/predict/skip-static/start-stop */ }
+    else if (applyCsrfParamArgs(a, args, next)) { /* csrf 系列 / skip / -p / param-exclude / param-filter */ }
+    else if (applyOutputMiscArgs(a, args, next)) { /* ignore-code/randomize/dump-format/fetch-using/verify/tor/mobile */ }
+    else if (applyLegacyReservedArgs(a, args, next)) { /* --max/--days void + --no-escape/--union-char 提示 */ }
     // [UNKNOWN-FLAG 2026-09-25] 这条必须接在同一条 if/else 链的**尾巴**上。
     //   原先这里是空的 else（拼错的开关被**静默丢弃**），而我第一版把它写成了链外的独立
     //   语句 —— 结果每个 token 都被记成未识别（`-u` 也中招），当场被自己的测试打回：

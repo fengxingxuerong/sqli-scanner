@@ -5,6 +5,50 @@
 
 ---
 
+## 2026-11-09 批次 D281 · parseArgs 主链族拆分收口（D21 适配 + 接线守卫 + A/B 重新取证）
+
+**起点**：D280 收口补记留下的唯一红——混合工作区 `gate:close` 54/55，
+`configNested.cliDefaults.test.js:129` 报「flag 提取数异常（1，预期 >100）」。
+D281（`server/bin/cli/args.js` +381/−236 把 parseArgs 主链拆 12 族，另带两个基线 JSON）
+当时零登记、未提交；族内分支改成 `if (a === '--x') { …; return true; }` 后，
+只认 `else if (a === '--x')` 的 D21 判据当场失效。本批单独收口，不混提。
+
+**改动**：
+- `server/tests/configNested.cliDefaults.test.js`：D21 改按「消费分支」取旗标——分支起始行
+  + 该行确有 `return true` / `continue`；`if`/`else if` 同权，复合条件里的长名也收；
+  行内去重、跨行保留（重复检测不失效）。实测 195 条消费分支 / **188 旗标 / 0 dup**。
+  排除 `if (a === '--union-char') next();` 这类分支内二次比较（否则假红）。
+- `server/tests/cli.parseArgsFamily.wiring.test.js`（新，3 条）：从源码取 **215 个长旗标**
+  （188 字面量 + OPTIONAL_VALUE_FLAGS 表驱动去重），逐个走真实 `parseArgs` 断言不落
+  `unknownFlags`；+ 分母守卫 + 「unknownFlags 收集本身有牙」的反例自证。
+  防的是「族函数少调一次 ⇒ 几十个旗标静默失效」，与 D21「一旗标被两分支抢」互补。
+- `server/bin/cli/args.js` 头注释：按 §3.5 **停用**「66 向量 × 112 键黄金快照逐字节一致」
+  「族函数注释掉 ⇒ actionYaml.wiring / golden 双红」两句自述——仓库 `**/*golden*` 命中 0，
+  无落盘产物、不可复现；原文保留并标注作废，另写本批替代取证口径。
+- `docs/_claims-ledger.json`：复核 `waf-fingerprint-coverage`（运行期 62 家 / 156 matcher、
+  双源对拍 8/8 绿、真机仍 ModSecurity 1 例）⇒ **维持 unverified**，`lastReviewed` → 11-09，
+  `recheck_batch` 追加 D281 链。**不升 verified**：缺合法授权的商业云 WAF 真机样本。
+
+**验证（可复现命令）**：
+- `node --test server/tests/configNested.cliDefaults.test.js` → 7/7 绿（修复前 6/7 红）。
+- `node --test server/tests/cli.parseArgsFamily.wiring.test.js` → 3/3 绿。
+- **A/B 重新取证**：临时脚本同目录加载 `git show HEAD:server/bin/cli/args.js`（单链版）
+  与当前族版，对 **215 旗标 × 436 向量**（逐旗标带值/裸旗标 + 组合/短名/equals/preset/
+  空向量）逐字节 JSON 比对 **diff=0**，脚本跑完即删（`_d281-ab-tmp.mjs`、
+  `server/bin/cli/_d281HeadArgs.js` 均已清理，`git status` 核对）。
+- **两处缺陷注入复验**（注入 ⇒ 红，按 `/tmp/d281-inject-args.js.backup` 用 `cp` 还原，
+  sha256 一致 ⇒ 绿，未反向 replace_all）：
+  ① 两个族各插 `--phantom-dup` 消费分支 ⇒ D21 报重复旗标红；
+  ② 一个族调用改 `else if (false)` ⇒ 接线守卫列出该族 10 个旗标落 `unknownFlags` 红。
+- `node scripts/readme-flag-coverage.mjs` exit 0；台账 JSON 解析通过。
+
+**边界**：A/B 只证明 `parseArgs` 纯函数级行为等价，不是真靶场 e2e，不外推到
+`buildConfig`/引擎语义；接线守卫只证明「旗标被消费」，不证明下游行为正确。
+D281 的 `gate:close` 必须在本批工作区（含新增测试）下取得，不得沿用 D280 纯工作区
+的 55/55 数字。
+
+---
+
 ## 2026-11-09 批次 D280 · 批内快门禁 gate:fast（分层第一档）+ timeDrift 错值归因
 
 **起点**：全方面短板清单 P0 两条——A1 收口固定成本（一批到全绿 ≈1 小时：npm test

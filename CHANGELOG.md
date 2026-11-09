@@ -7,13 +7,14 @@
 > 下一批次起的条目写在这里。发版时把本节整体升为 `## [x.y.z] - YYYY-MM-DD` 并补汇总段。
 
 <!-- changelog-index:start -->
-**本段覆盖 64 个批次（D228–D280，2026-11-01 → 2026-11-09）**。正文按时间倒序排列；
+**本段覆盖 65 个批次（D228–D281，2026-11-01 → 2026-11-09）**。正文按时间倒序排列；
 下表是同一批次的索引，便于按编号或关键词定位。**索引只是导航，正文未做任何删改**
 （被推翻的旧结论原样保留，这是本仓的既定口径）。新增批次后跑
 `node scripts/changelog-index.mjs --write` 重生成，`--check` 校验是否过期。
 
 | 批次 | 日期 | 主题 |
 |---|---|---|
+| D281 | 11-09 | parseArgs 主链族拆分收口（D21 判据适配 + 接线守卫 + A/B 重新取证） |
 | D280 | 11-09 | 批内快门禁 gate:fast（分层第一档）+ timeDrift 错值归因 |
 | D279 | 11-09 | 会话包装统一保留并加工 headRequest（TODO §10 静默降级收口） |
 | D278 | 11-08 | 审阅硬上限 4000→16000（真网关默认值复跑：先反证后修复） |
@@ -79,6 +80,46 @@
 | D229 | 11-01 | 交付闸收口：P0-3 卡顿修复（haystack 先截后拼）+ ai-gateway 断言去模型依赖 |
 | D228 | 11-01 | AI 报告网关端到端验收（ai-gateway 套件）+ 本地网关 runbook + CI 靶场硬要求扩展 |
 <!-- changelog-index:end -->
+
+### 2026-11-09 批次 D281 · parseArgs 主链族拆分收口（D21 判据适配 + 接线守卫 + A/B 重新取证）
+
+**起点**：D280 收口补记留下的唯一红——混合工作区 `gate:close` **54/55**，
+`server/tests/configNested.cliDefaults.test.js` 的 D21 判据报「flag 提取数异常（1，预期 >100）」。
+根因：D281 把 `parseArgs` 主链拆成 12 族后，族内分支变成 `if (a === '--x') { …; return true; }`，
+而 D21 正则只认 `else if (a === '--x')` ⇒ 旗标提取数从 127 掉到 1。这是 **D281 的漏项**，
+不是 D280 缺陷（D280 纯工作区已 55/55）。本批按「不混提」纪律单独收口 D281。
+
+**改动**：
+- **D21 判据适配**：改按「消费分支」取旗标（分支起始行 + 该行确有 `return true` / `continue`），
+  `if` 与 `else if` 同权、复合条件 `-u || --url` 里的长名也收；行内去重、跨行保留 ⇒ 重复
+  检测仍有牙。实测 195 条消费分支 / **188 个旗标 / 0 重复**。限定消费分支可避开
+  `if (a === '--union-char') next();` 这类分支内二次比较造成的假红。
+- **新增常驻判据** `server/tests/cli.parseArgsFamily.wiring.test.js`（3 条）：从源码取 215 个
+  长旗标（188 条字面量 + 表驱动去重），逐条走真实 `parseArgs` 断言不落 `unknownFlags`；
+  另钉分母守卫与「unknownFlags 收集本身有牙」的反例自证。它防的是族拆分后
+  「族函数少调一次 ⇒ 几十个旗标静默失效」，与 D21「一旗标被两分支抢」互补。
+- **按 §3.5 停用旧自述**：`args.js` 头注释原写「66 向量 × 默认对象全量 112 键黄金快照逐
+  字节一致」「族函数注释掉 ⇒ actionYaml.wiring / golden 双红」，仓库内 `**/*golden*` 命中
+  **0**，无落盘产物、不可复现 ⇒ 标注停用、不再对外引用，**原文保留不删 = 留教训**。
+  替代取证：临时 A/B 脚本把 `git show HEAD:server/bin/cli/args.js` 与族版同目录加载，
+  对 **215 个长旗标 × 436 条向量**（逐旗标带值/裸旗标 + 组合/短名/equals/preset/空向量）
+  逐字节 JSON 比对 **diff=0**；脚本跑完即删，口径与命令留在本段。
+- **结论台账复核 1 条**（§3.5 每批至少 1 条）：`waf-fingerprint-coverage` 运行期实测
+  `WAF_RULES` **62 家 / 156 matcher**、`wafExternalParity` + `wafSecondSourceParity`
+  复跑 **8/8 绿**、真机样本仍仅 ModSecurity 1 例 ⇒ **维持 unverified**，
+  `lastReviewed` 11-08 → 11-09，升 verified 的前置条件仍是「合法授权的商业云 WAF 真机样本」。
+
+**验证（判牙均按备份还原，sha256 一致）**：
+- 注入跨族重复旗标 `--phantom-dup` ⇒ D21 判据当场红（`重复的 flag 分支：--phantom-dup`）；
+  还原后 `configNested.cliDefaults.test.js` **7/7 绿**。
+- 注入把一个族调用改成 `else if (false)` ⇒ 新接线守卫红，列出该族 10 个旗标落
+  `unknownFlags`；还原后 **3/3 绿**、D21 仍 7/7 绿。
+- `node scripts/readme-flag-coverage.mjs` exit 0（头注释改动未污染旗标真源）；
+  台账 JSON 解析通过、`status` 仍为 `unverified`。
+
+**边界**：A/B 是 `parseArgs` 纯函数级行为等价，**不是真靶场 e2e**，不能外推到下游
+`buildConfig`/引擎语义；接线守卫只证明「旗标被消费」，不证明该旗标的下游行为正确。
+D281 的 55/55 必须在本批工作区（含新增测试）下取得，不得沿用 D280 纯工作区的数字。
 
 ### 2026-11-09 批次 D280 · 批内快门禁 gate:fast（分层第一档）+ timeDrift 错值归因
 

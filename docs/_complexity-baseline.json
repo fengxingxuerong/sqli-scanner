@@ -153,8 +153,8 @@
       "limitComplexity": 15
     },
     "server/bin/cli/args.js::parseArgs": {
-      "lines": 223,
-      "complexity": 212,
+      "lines": 73,
+      "complexity": 30,
       "limitLines": 100,
       "limitComplexity": 15
     },

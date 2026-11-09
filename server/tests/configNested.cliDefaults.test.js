@@ -108,14 +108,19 @@ test('分母守卫：defaults 里新增嵌套组必须进本清单（否则新�
   assert.deepEqual([...NESTED_GROUPS].sort(), actual.sort());
 });
 
-// [D21 2026-10-09] CLI flag 去重守卫。
+// [D21 2026-10-09] CLI flag 去重守卫；[D281 2026-11-09] 适配主链族拆分。
 // 起因（实测）：`--random-agent` 在 `args.js` 的**同一条 else-if 链**里出现两次
 //   ⇒ 第二个分支永不执行 ⇒ `args.randomUA` 恒 `undefined`
 //   ⇒ `config.js` 里 `if (args.randomUA) config.randomUA = true;` 是**死代码**
 //     （另证：顶层 `config.randomUA` 在 `server/src` 内 0 个读取点）。
 // 危害为 0 属侥幸 —— "重复分支静默吞掉后来者"这个**形状**才是要防的：
 // 下一个被重复的 flag 若正好是有效开关，改动会像"没接线"一样静默失效。
-test('★ D21：args.js 里同一 flag 不得出现在两条 else-if 分支（后者永不执行 = 死代码）', () => {
+//
+// [D281] 原判据只认 `else if (a === '--x')`。主链拆成 12 族后，族内分支变成
+//   `if (a === '--x') { ...; return true; }`，else-if 只剩调用族函数的空壳
+//   ⇒ 提取数掉到 1，分母守卫当场红（D280 收口补记实测）。族拆分让「同一 flag
+//   落进两个族」成为新的可达形状，判据必须跨族、跨 if/else-if 同权地看。
+test('★ D21：args.js 里同一 flag 不得出现在两个消费分支（后者永不执行 = 死代码）', () => {
   const raw = readFileSync(new URL('../bin/cli/args.js', import.meta.url), 'utf8');
   // ⚠️ 必须先剥掉整行注释：本判据第一次跑就抓到「注释里的示例代码」——
   //    上面那条 D21 说明注释本身写了 `else if (a === '--random-agent')...` 作为反面例子，
@@ -124,8 +129,25 @@ test('★ D21：args.js 里同一 flag 不得出现在两条 else-if 分支（�
     .split('\n')
     .filter((l) => !/^\s*\/\//.test(l))
     .join('\n');
-  const flags = [...src.matchAll(/else if \(a === '(--[A-Za-z0-9-]+)'\)/g)].map((m) => m[1]);
-  // 分母守卫：正则或源码结构变了会静默变空 ⇒ 断言恒绿。127 是 2026-10-09 实测值，取宽松下限。
+  // 只取「消费分支」：分支起始行 + 该行确实消费了 token（return true / continue）。
+  // 这样既覆盖 if 与 else-if、也覆盖 `-u || --url` 复合条件里的长名，又不会把
+  // `if (a === '--union-char') next();` 这种**分支内的二次比较**误计成第二个消费点
+  // （它不是新分支，计进去会假红）。行内去重、跨行保留 ⇒ 重复检测仍然有牙。
+  const consumingBranches = src
+    .split('\n')
+    .filter((l) => /^\s*(?:else\s+)?if\s*\(/.test(l))
+    .filter((l) => /\breturn true\b|\bcontinue\b/.test(l));
+  const flags = [];
+  for (const line of consumingBranches) {
+    const inLine = new Set();
+    for (const m of line.matchAll(/a === '(--[A-Za-z0-9-]+)'/g)) {
+      if (inLine.has(m[1])) continue;
+      inLine.add(m[1]);
+      flags.push(m[1]);
+    }
+  }
+  // 分母守卫：正则或源码结构变了会静默变空 ⇒ 断言恒绿。127 是 2026-10-09 单链实测值；
+  // D281 族拆分 + 本判据改按消费分支取字面量后实测 188（195 条消费分支，见 TODO D281），仍取宽松下限 100。
   assert.ok(flags.length > 100, `flag 提取数异常（${flags.length}，预期 >100）⇒ 正则或源码结构变了`);
   const seen = new Set();
   const dup = [];
