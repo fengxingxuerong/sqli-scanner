@@ -9,6 +9,8 @@
 //   另钉探针算子审计（between 模式比较位不得含 `>`）与非法配置值硬拒。
 //
 // 时间通道同构三连（gt 回归 / between 等价 / blockGt 下 between 独占）。
+// [D287] 三连改走批内三抽归因（D280 A2 语义）：JVM 预热噪声下单抽翻面的
+// 「错值」形态不再单抽定生死，但三抽全错照样红、挂死照样红——判据不许变宽。
 // ============================================================================
 
 import { test } from 'node:test';
@@ -230,20 +232,114 @@ function buildTimeCtx(oracle, extra = {}) {
   };
 }
 
-test('时间通道 gt（默认）：慢目标上正确提取（回归钉）', async () => {
+// ── [D287] 时间通道「错值」形态的批内三抽归因（D280 A2 语义移植） ──────────
+// 背景（D283 实测，reports/外部靶场复跑-2026-11-10.md）：五靶场 JVM 预热噪声下，
+// 单抽硬钉的 :233/:245 各翻面一次（提取出 `5.7/40` / 越过终止符拖乱码），
+// 单文件 ×3 复跑 33/33 ⇒ 非确定性缺陷，不是产品代码回归。D283 边界明说
+// 「加批内重抽属 [D280] 已知取舍，另立批次再做不迟」——本批即该批次。
+// 语义**照抄** D280 在 extractor.timeDrift.test.js 定下的三抽归因，不许另写宽口径：
+//   · 请求数预算内：错值先重抽，任一抽真值 ⇒ 环境归因通过，但 console.warn 大声登记疑似翻面；
+//   · 三抽全错且请求数稳定 ⇒ 确定性污染，带全部错值红；
+//   · 请求数发散（max > min×3）⇒ 环境本身不稳，不归因、原样红；
+//   · DEADLINE 截止（死循环探测器）触发 ⇒ 不是「错值」是挂死，不重抽、当场红（保住原语义）。
+// 绿抽零开销：命中即断，只有翻面时才付重抽成本（正常套件耗时不变）。
+function countingClient(oracle) {
+  const state = { requests: 0 };
+  return {
+    state,
+    async request(opts) {
+      state.requests++;
+      return oracle.request(opts);
+    },
+  };
+}
+
+/**
+ * 三抽提取 + 归因判定（提取值必须等于 secret；详见上方 D287 注释）。
+ * @param {object} ctx buildTimeCtx 产物
+ * @param {string} secret 期望真值
+ * @param {{requests:number}} clientState countingClient 的计数器
+ * @returns {Promise<{ok: boolean, attempts: Array<{value: string|null, requests: number}>, reason?: string, flipped?: boolean}>}
+ */
+async function extractTimeAttributed(ctx, secret, clientState) {
+  const attempts = [];
+  for (let i = 0; i < 3; i++) {
+    const before = clientState.requests;
+    let value;
+    try {
+      value = await extractWithDeadline(() => ex.extractTime(ctx, 'version()'), DEADLINE_MS);
+    } catch (e) {
+      attempts.push({ value: `<<deadline>>`, requests: clientState.requests - before });
+      return {
+        ok: false,
+        attempts,
+        reason: `第 ${i + 1}/3 抽超 ${DEADLINE_MS}ms 截止（死循环探测器触发，挂死不是错值，不归因）：${e.message}`,
+      };
+    }
+    attempts.push({ value, requests: clientState.requests - before });
+    if (value === secret) {
+      if (i > 0) {
+        console.warn(
+          `⚠️ [D287] 疑似环境翻面：第 ${i + 1}/3 抽才出真值，此前错值 ` +
+            `${attempts.slice(0, i).map((a) => JSON.stringify(a.value)).join('、')}，请求数 ` +
+            `${attempts.map((a) => a.requests).join('/')}——按 D280 A2 环境归因放行并大声登记`
+        );
+      }
+      return { ok: true, attempts, flipped: i > 0 };
+    }
+  }
+  const reqs = attempts.map((a) => a.requests);
+  const diverged = Math.max(...reqs) > Math.min(...reqs) * 3;
+  return {
+    ok: false,
+    attempts,
+    reason: diverged
+      ? `三抽全错且请求数发散（${reqs.join('/')}）——不归因，按确定性异常处理`
+      : `三抽全错且请求数稳定（${reqs.join('/')}）——确定性污染`,
+  };
+}
+
+test('时间通道 gt（默认）：慢目标上正确提取（回归钉；D287 三抽归因）', async () => {
   const secret = '5.7.40';
-  const ctx = buildTimeCtx(makeTimeOracle(secret));
-  assert.equal(await ex.extractTime(ctx, 'version()'), secret);
+  const client = countingClient(makeTimeOracle(secret));
+  const ctx = buildTimeCtx(client);
+  const r = await extractTimeAttributed(ctx, secret, client.state);
+  assert.equal(r.ok, true, `时间通道 gt 错值未归因：${r.reason}；各抽=${JSON.stringify(r.attempts)}`);
 });
 
-test('时间通道 between：同一 secret 提取结果与 gt 一致', async () => {
+test('时间通道 between：同一 secret 提取结果与 gt 一致（D287 三抽归因）', async () => {
   const secret = '5.7.40';
-  const ctx = buildTimeCtx(makeTimeOracle(secret), { fetchUsing: 'between' });
-  assert.equal(await extractWithDeadline(() => ex.extractTime(ctx, 'version()'), DEADLINE_MS), secret);
+  const client = countingClient(makeTimeOracle(secret));
+  const ctx = buildTimeCtx(client, { fetchUsing: 'between' });
+  const r = await extractTimeAttributed(ctx, secret, client.state);
+  assert.equal(r.ok, true, `时间通道 between 错值未归因：${r.reason}；各抽=${JSON.stringify(r.attempts)}`);
 });
 
-test('时间通道 WAF 过滤 `>`：between 模式仍可提取（gt 恒假失败）', async () => {
+test('时间通道 WAF 过滤 `>`：between 模式仍可提取（gt 恒假失败；D287 三抽归因）', async () => {
   const secret = '5.7.40';
-  const btCtx = buildTimeCtx(makeTimeOracle(secret, { blockGt: true }), { fetchUsing: 'between' });
-  assert.equal(await extractWithDeadline(() => ex.extractTime(btCtx, 'version()'), DEADLINE_MS), secret);
+  const client = countingClient(makeTimeOracle(secret, { blockGt: true }));
+  const ctx = buildTimeCtx(client, { fetchUsing: 'between' });
+  const r = await extractTimeAttributed(ctx, secret, client.state);
+  assert.equal(r.ok, true, `时间通道 blockGt 错值未归因：${r.reason}；各抽=${JSON.stringify(r.attempts)}`);
+});
+
+// [D287] 归因判据有牙的自钉：确定性污染形态（预言机恒答空 ⇒ 永远提不出真值）
+// 必须在三抽后判红并给出「确定性污染」归因，不许被三抽重抽洗成绿。
+test('[D287] 归因判据有牙：三抽全错且请求数稳定 ⇒ 确定性污染，必须红', async () => {
+  const secret = '5.7.40';
+  const deadOracle = {
+    async request() {
+      return { data: '', status: 200 }; // 恒空、恒瞬时：时间通道没有任何真值可提
+    },
+  };
+  const client = countingClient(deadOracle);
+  const ctx = buildTimeCtx(client);
+  const r = await extractTimeAttributed(ctx, secret, client.state);
+  assert.equal(r.ok, false, '恒空预言机在三抽重抽后仍被判绿 ⇒ 归因判据没牙（把污染洗成环境噪声）');
+  assert.match(r.reason, /三抽全错且请求数稳定（.*）——确定性污染/, `归因口径不符：${r.reason}`);
+  assert.equal(r.attempts.length, 3, `应恰三次抽取，实际 ${r.attempts.length}`);
+  assert.ok(
+    r.attempts.every((a) => a.value !== secret),
+    `三抽里出现了真值却没判 ok，判定自相矛盾：${JSON.stringify(r.attempts)}`
+  );
 });
