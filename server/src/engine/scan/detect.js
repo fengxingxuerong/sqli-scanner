@@ -16,6 +16,7 @@ import { dialectToDbms } from '../DialectSqlBuilder.js';
 import { xmlParamNameDetector } from '../detectorSupport/xmlParamName.js';
 import { orderByKeyDetector } from '../detectorSupport/orderByKey.js';
 import { keyBoolDetector } from '../detectorSupport/keyBool.js';
+import { callProcNameDetector } from '../detectorSupport/callProcName.js';
 import { verifyTamperChains } from '../../core/waf/chainVerify.js';
 import { decideBlockPolicy, isUntrustedVendor } from '../../core/waf/blockPolicy.js';
 // [A3-2026-09-25] 通道降级编排：把逐词拦截画像翻译成「哪些通道还值得跑」。
@@ -169,11 +170,8 @@ async function runOneOrderByKey(point, deps) {
   eventBus.emit(scanId, 'point_testing', { pointId: point.id, technique: 'boolean', param: point.param, location: point.location });
   const ctx = { ...ctxBase, target, point, dbms: point.dbms || null };
   const found = await detectOrderByKeyPoint(point, ctx, validity, validityEnabled);
-  // [D169/D173/D174] ORDER BY 位置无命中时，键名载体（form 字段名 / query 参数名 /
-  // JSON body 键名）再试一次「多键拼接」形态（键名进 WHERE 布尔位置）
-  if (!found.length && (point.carrier === 'form' || point.carrier === 'query' || point.carrier === 'json')) {
-    found.push(...(await detectKeyBoolPoint(point, ctx, validity, validityEnabled)));
-  }
+  // [D169/D173/D174→D284] 键名点零命中后的专用形态后链（多键拼接 → CALL 表达式位）
+  if (!found.length) found.push(...(await runParamNamePostChain(point, ctx, validity, validityEnabled)));
   if (!found.length) return;
   foundByPoint.set(point.id, { point, ctx, found });
   if (session) {
@@ -219,6 +217,48 @@ async function detectKeyBoolPoint(point, ctx, validity, validityEnabled) {
     if (outcome.vulnerable) return [{ technique: 'boolean', result: outcome.result }];
   } catch (e) {
     logger.warn(`多键拼接键名探针失败（按未命中处理）：${e.message}`);
+  }
+  return [];
+}
+
+/**
+ * 键名点零命中后的「专用形态」后链（[D169/D173/D174] 多键拼接 → [D284] CALL 表达式位）。
+ * 载体口径统一 form/query/json（XML 元素名受 NameChar 约束，两条判据都不接）；
+ * 命中即收口，后一步只在前面全部零命中时执行。
+ * @param {any} point
+ * @param {object} ctx
+ * @param {object} validity
+ * @param {boolean} validityEnabled
+ * @returns {Promise<Array<{technique:string,result:any}>>}
+ */
+async function runParamNamePostChain(point, ctx, validity, validityEnabled) {
+  const keyCarrier = point.carrier === 'form' || point.carrier === 'query' || point.carrier === 'json';
+  if (!keyCarrier) return [];
+  const found = await detectKeyBoolPoint(point, ctx, validity, validityEnabled);
+  if (found.length) return found;
+  return detectCallProcNamePoint(point, ctx, validity, validityEnabled);
+}
+
+/**
+ * [D284 2026-11-11] `{call <名>}` / CALL 表达式位形态（键名进过程名/求值位）的验证与记账。
+ *
+ * 与 orderByKey/keyBool 互补的第三步：Benchmark D116 单列的 4 条 callProcedure 真值
+ * 注入点是存储过程名（`{call " + param + "}`），值位载荷只会语法错误、与基线错误同形
+ * ⇒ 标准四通道全盲。判据走「表达式求值」专用通道（随机标记回显 + 1/0 求值错误差分），
+ * 详见 detectorSupport/callProcName.js（真机取证记录在其文件头）。
+ * @param {any} point
+ * @param {object} ctx
+ * @param {object} validity
+ * @param {boolean} validityEnabled
+ * @returns {Promise<Array<{technique:string,result:any}>>}
+ */
+async function detectCallProcNamePoint(point, ctx, validity, validityEnabled) {
+  try {
+    const outcome = await runDetector(callProcNameDetector, ctx);
+    applyOutcomeToPoint(point, outcome, validity, validityEnabled);
+    if (outcome.vulnerable) return [{ technique: 'error', result: outcome.result }];
+  } catch (e) {
+    logger.warn(`CALL 表达式位键名探针失败（按未命中处理）：${e.message}`);
   }
   return [];
 }

@@ -15,8 +15,13 @@
 // 除非同一行明确标注了「作废 / 已被推翻 / 历史」。
 //
 // 口径边界（别把判据写松）：
-//   · 只扫 **README 类当前文档**（`README*.md` / `AGENTS.md`），排除 `docs/archive/`；
+//   · 扫 **README 类当前文档**（`README*.md` / `AGENTS.md`）+ **根目录交付/审计报告**
+//     （[D285] `<主题>-YYYY-MM-DD.md` 家族，DELIVERY_REPORT_RE），排除 `docs/archive/`；
 //     `CHANGELOG.md`、`docs/*-2026-*.md`、`e2e/**/results/` 是**历史留痕**，刻意不扫。
+//     [D285] 为什么根目录交付报告必须扫：它们是「过期结论被上游顺口引用」的重灾区 ——
+//     11-01《交付状态报告》的「27/27 全断言」过期结论存活 11 天才被人工停用
+//     （2026-11-12 结项报告 §6-7/§9 实证缺口）。带 ⛔ 作废横幅的整份按历史留痕豁免
+//     （bannerExempt 规则），与「正文一字未删」的既定口径一致。
 //   · 规则是**显式清单**（不是"自动从台账推断"）：宁可少抓，也不要用脆弱的启发式
 //     把正常叙述判成错。新增一条被推翻的口径时，往 RULES 里加一行并写 why。
 //
@@ -31,6 +36,14 @@ import { dirname, join, resolve, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+
+// [D285] 根目录交付/审计报告的命名惯例：`<主题>-YYYY-MM-DD.md`，主题以「交付」或「全方面」开头。
+// 新的根目录交付报告沿用该命名即自动进扫描集合，无需改本文件。
+const DELIVERY_REPORT_RE = /(?:^|[\\/])(?:交付|全方面)[^\\/]*\d{4}-\d{2}-\d{2}\.md$/i;
+// [D285] 作废横幅：只认文档头部的显式声明（前 15 行内出现即整份按历史留痕豁免 bannerExempt 规则）。
+// 正文里的行级 allow 词不受横幅影响，照常生效。
+const BANNER_RE = /口径作废|已作废|时点快照|被取代|⛔/;
+const BANNER_SCAN_LINES = 15;
 
 /**
  * 规则表：每条 = 一个「已作废口径」的识别式 + 允许出现的上下文词 + 适用范围。
@@ -58,6 +71,27 @@ const RULES = [
     allow: /作废|已被推翻|历史|原结论|D114|D115|D234|已接|没测成|不是参考|与实际相反|不外推|只证明/,
     why: '同 benchmark-stale-in-lab：该靶场早已接 acceptance，旧的「参考/已知缺口、不接门禁」定性作废',
   },
+  {
+    id: 'delivery-acceptance-2727',
+    // [D285] 「27/27 全断言」是 D269 后的已作废口径：SKIP/BLOCKED 也算跑过 ⇒ 27 套件 ≠ 全绿；
+    // README:776 实测没有任何一次运行达到 27/27 全断言；现行口径 25/27 跑出断言 + 2 SKIP。
+    // 只限根目录交付报告家族 —— README 类文档用「25/27」等现行口径叙述不受影响。
+    scope: DELIVERY_REPORT_RE,
+    re: /27\s*\/\s*27|27\s*PASS\s*\/\s*0\s*SKIP|27\s*套件\s*全断言/,
+    allow: /作废|推翻|历史|不再成立|时点快照|过期|取代|现行|D269|没有任何一次|没有一次|未达成|≠\s*全绿|不对应/,
+    bannerExempt: true,
+    why: 'D269 验收覆盖口径修正：SKIP/BLOCKED 也算跑过 ⇒ 27 套件 ≠ 全绿；README:776「没有任何一次运行达到 27/27 全断言」；2026-11-12 结项报告 §9 已将 11-01《交付状态报告》的「27 PASS / 0 SKIP（27/27 全断言）」作废，现行口径 25/27 + 2 SKIP。将来若真出现 27/27 全断言的运行，须在本批同口径下更新本规则并留推翻链',
+  },
+  {
+    id: 'delivery-gate-count-stale',
+    // [D285] 收口清单条目自 D71 起随批次只增不减（37→49→51/52→55）；把旧条目数写成
+    // 「现行全绿」即过期口径。同数分母才判（54/55 这类「部分红」叙述不命中）。
+    scope: DELIVERY_REPORT_RE,
+    re: /gate[-:\s]?close[^0-9\n]{0,12}\b(37|39|41|43|49|51|52)\s*\/\s*\1\b/,
+    allow: /作废|推翻|历史|不再成立|时点快照|过期|取代|现行|D269|没有任何一次|没有一次|未达成/,
+    bannerExempt: true,
+    why: '收口清单条目只增不减：37（D145）→ 49（D251）→ 51/52（D252/D260）→ 55（D280 起，AGENTS.md 收口段落为现行真源）；把 37/39/41/43/49/51/52 写成现行全绿 = 过期口径（2026-11-12 结项报告 §9）',
+  },
 ];
 
 /** 只扫这些文件（README 类当前文档） */
@@ -81,21 +115,40 @@ function targetFiles() {
   };
   walk(join(ROOT, 'e2e'));
   walk(join(ROOT, 'docs'));
+  // [D285] 根目录交付/审计报告（`<主题>-YYYY-MM-DD.md` 命名惯例）也进扫描集合。
+  let rootEntries;
+  try { rootEntries = readdirSync(ROOT, { withFileTypes: true }); } catch { rootEntries = []; }
+  for (const ent of rootEntries) {
+    if (ent.isFile() && DELIVERY_REPORT_RE.test(ent.name)) out.push(join(ROOT, ent.name));
+  }
   return [...new Set(out)].filter((p) => {
     try { return statSync(p).isFile(); } catch { return false; }
   });
 }
 
 /**
+ * [D285] 文档头部是否带作废横幅（前 BANNER_SCAN_LINES 行内命中 BANNER_RE）。
+ * 带横幅的时点文档整份按历史留痕处理：bannerExempt 规则全部豁免（与 §9「原文一字未删」一致）。
+ * @param {string} text 文档正文
+ * @returns {boolean}
+ */
+function hasInvalidationBanner(text) {
+  return text.split(/\r?\n/).slice(0, BANNER_SCAN_LINES).some((l) => BANNER_RE.test(l));
+}
+
+/**
  * 扫一个文本，返回命中（行号 + 规则）。
  * @param {string} text 文档正文
  * @param {string} [filePath] 文档路径（用于 scope 判定；不传 = 全部规则生效）
+ * @param {{docInvalidated?: boolean}} [opts] docInvalidated=true 时豁免 bannerExempt 规则
  * @returns {Array<{line:number, rule:string, text:string}>}
  */
-function scanText(text, filePath = '') {
+function scanText(text, filePath = '', opts = {}) {
   const hits = [];
   const lines = text.split(/\r?\n/);
-  const active = RULES.filter((r) => !r.scope || r.scope.test(filePath));
+  const active = RULES.filter(
+    (r) => (!r.scope || r.scope.test(filePath)) && !(opts.docInvalidated && r.bannerExempt)
+  );
   for (let i = 0; i < lines.length; i++) {
     const l = lines[i];
     for (const r of active) {
@@ -142,9 +195,38 @@ function selftest() {
   for (const [f, s] of dvgaLines) {
     if (scanText(s, f).length) { console.log(`✖ 误报 [${f}]：${s}（scope 失效，误伤其他靶场）`); fail++; }
   }
+  // ── [D285] 根目录交付/审计报告家族 ──────────────────────────────────────────
+  const DELIVERY_OLD = '交付状态报告-2026-11-01.md';
+  const DELIVERY_NEW = '交付结项报告-2026-11-12.md';
+  const d285Bad = [
+    // 11-01 报告正文的两条死口径（无横幅上下文时必须红）
+    [DELIVERY_OLD, '| 判定 | **27 PASS / 0 BLOCKED / 0 FAIL / 0 SKIP**（27/27 跑出断言，EXIT=0） |'],
+    [DELIVERY_OLD, '| 收口清单 | `gate:close` **37/37**（含 typecheck/lint/wiring 71 文件/facts/refs/readme 双向核对） |'],
+    // 新报告同样在扫描集合内：把死口径当本轮结论复述（无 allow 词）必须红
+    [DELIVERY_NEW, '本轮全量验收 27/27 全断言，交付判定达成'],
+    [DELIVERY_NEW, '本轮收口 gate:close 39/39 全绿'],
+  ];
+  const d285Good = [
+    // 横幅豁免：同一行死口径，文档头部带 ⛔ 口径作废横幅 ⇒ 整份按历史留痕放过
+    [DELIVERY_OLD, '| 判定 | **27 PASS / 0 BLOCKED / 0 FAIL / 0 SKIP**（27/27 跑出断言，EXIT=0） |', { docInvalidated: true }],
+    [DELIVERY_OLD, '| 收口清单 | `gate:close` **37/37**（含 typecheck/lint/wiring 71 文件） |', { docInvalidated: true }],
+    // 行级 allow：引用旧口径的同时声明作废 / 现行口径
+    [DELIVERY_NEW, '「交付判定 ✅ 达成」「27 PASS / 0 SKIP（27/27 全断言）」不再成立'],
+    [DELIVERY_NEW, '✅ 已把「2026-11-01 全量验收 27/27 全 PASS」替换为现行 25/27 口径'],
+    [DELIVERY_NEW, '当前收口门禁 55 项，最近验收 25/27（2 SKIP 如实披露）'],
+    // scope 自证：同一死口径在非交付报告文档里不判（显式清单，宁可少抓）
+    ['docs/质量台账.md', '历史台账：2026-11-01 曾记录 27/27 全断言'],
+    ['TODO.md', 'D-old 批次曾用 27/27 全断言口径（后被 D269 推翻）'],
+  ];
+  for (const [f, s, o] of d285Bad) {
+    if (!scanText(s, f, o).length) { console.log(`✖ 漏报 [${f}]：${s}`); fail++; }
+  }
+  for (const [f, s, o] of d285Good) {
+    if (scanText(s, f, o).length) { console.log(`✖ 误报 [${f}]：${s}`); fail++; }
+  }
   console.log(fail
     ? `✖ 自证失败 ${fail} 例`
-    : `✔ 自证通过（漏报 ${bad.length} 例全抓、误报 ${good.length + dvgaLines.length} 例全放过）`);
+    : `✔ 自证通过（漏报 ${bad.length + d285Bad.length} 例全抓、误报 ${good.length + dvgaLines.length + d285Good.length} 例全放过）`);
   process.exit(fail ? 1 : 0);
 }
 
@@ -152,12 +234,18 @@ function main() {
   if (process.argv.includes('--selftest')) return selftest();
   const files = targetFiles();
   const all = [];
+  let bannerDocs = 0;
   for (const f of files) {
     let text;
     try { text = readFileSync(f, 'utf-8'); } catch { continue; }
+    // [D285] 头部作废横幅 ⇒ 整份按历史留痕豁免 bannerExempt 规则（11-01 报告口径）。
+    // 计数只统计真正适用 bannerExempt 规则的文档（现行只有根目录交付报告家族），
+    // README 家族的横幅不计数——否则日志会虚报豁免面。
+    const docInvalidated = hasInvalidationBanner(text);
     // ⚠️ 必须把相对路径传进去：规则带 scope，缺路径会让 active 规则集为空 ⇒ 判据恒绿（本批自证抓过）
     const rel = relative(ROOT, f);
-    for (const h of scanText(text, rel)) all.push({ file: rel, ...h });
+    if (docInvalidated && RULES.some((r) => r.bannerExempt && (!r.scope || r.scope.test(rel)))) bannerDocs++;
+    for (const h of scanText(text, rel, { docInvalidated })) all.push({ file: rel, ...h });
   }
   if (all.length) {
     console.error(`✖ 检出 ${all.length} 处已作废口径的复述（当前文档不得引用被推翻的数字）：`);
@@ -166,10 +254,14 @@ function main() {
       console.error(`  ${h.file}:${h.line}  [${h.rule}]  ${h.text}`);
       if (rule) console.error(`      为什么错：${rule.why}`);
     }
-    console.error('\n修法：改成本轮口径；若确实是在记历史，同一行要写「作废/已被推翻/历史」。');
+    console.error('\n修法：改成本轮口径；若确实是在记历史，同一行要写「作废/已被推翻/历史」，或给时点文档加 ⛔ 作废横幅。');
     return process.exit(1);
   }
-  console.log(`✔ 未检出已作废口径的复述（扫描 ${files.length} 个 README 类文档，${RULES.length} 条规则）`);
+  console.log(
+    `✔ 未检出已作废口径的复述（扫描 ${files.length} 个 README 类文档 + 根目录交付报告，${RULES.length} 条规则` +
+      (bannerDocs ? `；${bannerDocs} 份带作废横幅按历史留痕豁免` : '') +
+      '）'
+  );
 }
 
 main();

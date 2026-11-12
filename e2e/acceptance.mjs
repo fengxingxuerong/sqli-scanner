@@ -728,9 +728,11 @@ const SUITES = [
       const m = /真值漏洞用例：检出 (\d+)\/(\d+)（漏检 (\d+)/.exec(out);
       const fp = /安全对照误报：(\d+)\/(\d+)/.exec(out);
       const weak = /安全对照证据不足（请求<\d+）：(\d+)/.exec(out);
-      // [D116] `{call <过程名>}` 形态单列（已知能力边界）：真值不计入分母，
-      // 但其**安全侧误报必须为 0**（误报是真的缺陷，不是边界）。
+      // [D116 单列 → D284 起 run.mjs 内置判据] `{call <过程名>}` 形态：真值 N/N 必须
+      // 全检出（run.mjs 的 pass 行只有在其成立时才打「Benchmark 外部裁判通过」），
+      // 且**安全侧误报必须为 0**（误报是真的缺陷，不是边界）。这里解析两个数字只作披露。
       const callLine = /\{call <过程名>\} 形态.*?安全对照 (\d+)\/(\d+) 误报/.exec(out);
+      const callTruth = /\{call <过程名>\} 形态.*?真值 (\d+)\/(\d+)/.exec(out);
       const pn = /参数名注入面用例：(\d+)/.exec(out);
       // 分母防缩水：两种非默认注入面必须实际跑到——删掉后 10/10 仍会打印「通过」
       //   · header 形态（前三个外部裁判从未覆盖的注入面）
@@ -747,7 +749,7 @@ const SUITES = [
           安全对照误报: fp ? `${fp[1]}/${fp[2]}` : '取不到',
           证据不足: weak ? weak[1] : '取不到',
           形态覆盖: both ? `header+参数名（${pn ? pn[1] : '?'} 条）` : `缺失（header=${ranHeader} paramName=${ranParamName}）`,
-          call形态: callLine ? `安全侧误报 ${callLine[1]}/${callLine[2]}` : '取不到',
+          call形态: callLine ? `安全侧误报 ${callLine[1]}/${callLine[2]}；真值 ${callTruth ? `${callTruth[1]}/${callTruth[2]}` : '取不到'}` : '取不到',
         },
         pass,
         reason: pass ? null : !both

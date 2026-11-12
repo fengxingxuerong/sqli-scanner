@@ -5,6 +5,104 @@
 
 ---
 
+## 2026-11-13 批次 D285 · stale-claim-check 覆盖根目录交付报告（结项报告 §6-7 门禁缺口收口）
+
+**起点**：2026-11-12 结项报告 §9 实证缺口——`stale-claim-check` 自报「扫描 11 个 README 类文档，2 条规则」，
+根目录交付报告全部不在扫描集合内；11-01《交付状态报告》的过期结论（27/27 全断言 / gate:close 37/37）
+靠人工加横幅停用，门禁没牙。
+
+**改动**（`scripts/stale-claim-check.mjs`）：
+- 扫描集合加入**根目录交付/审计报告**：`<主题>-YYYY-MM-DD.md` 命名家族（`DELIVERY_REPORT_RE`），
+  11 → 15 个文档（现入 4 份：11-01 状态报告、11-12 结项报告、11-12 门禁实跑记录、11-01 审计报告）。
+- 新增 2 条显式规则：`delivery-acceptance-2727`（27/27 全断言 / 27 PASS / 0 SKIP 是 D269 后作废口径）、
+  `delivery-gate-count-stale`（37/39/41/43/49/51/52 写成现行全绿即过期；同数分母才判，54/55 不误伤）。
+  2 → 4 条规则。
+- **作废横幅豁免**：文档头 15 行内带「⛔/口径作废/已作废/时点快照/被取代」⇒ bannerExempt 规则整份豁免
+  （与 §9「原文一字未删」口径一致）；行级 allow 词照常生效。豁免计数只统计真正适用 bannerExempt 的文档。
+- 自证扩展：d285Bad 4 例 + d285Good 7 例；合计漏报 9 例全抓、误报 14 例全放过。
+
+**验证**：
+- `node scripts/stale-claim-check.mjs --selftest` EXIT=0；实扫 15 文档 / 4 规则 / 3 份横幅豁免，EXIT=0。
+- 11-12 结项报告在**无豁免**口径下实测 0 命中（豁免不是过门禁的拐杖）。
+- `npm run facts:check` EXIT=0；台账复核（本批 1 条）：`node scripts/verify-tamper-upstream-examples.mjs`
+  EXIT=0「无新增漂移」→ tamper 上游示例对齐结论维持 verified。
+- `gate:close --quick` 52/52（本批同工作区实测）。
+
+**边界**：显式清单宁可少抓——「交付判定 ✅ 达成」条件性表述未立规则；将来若真出现 27/27 全断言的运行，
+须同批更新规则并留推翻链（规则 why 已写明）。
+
+---
+
+## 2026-11-11 批次 D284 · `{call <名>}` 过程名位注入面（D116 能力缺口清零）
+
+**起点**：D116 单列的 4 条 callProcedure 真值（0/4，已知边界）。真机取证（2026-11-10，
+BenchmarkTest00590 @HSQLDB 2.7.4）：`{call X}` 交给 CALL 语句而 CALL 接受**任意值表达式**——
+名字位实际是表达式位。基线（标识符）报 `object not found`、`1/0` 报
+`SQLDataException: division by zero`（异常类不同）、`CONCAT(CHAR(90),CHAR(81))` **200 回显 ZQ**
+（`hideSQLErrors=false` + `printResults` 回显结果值 ⇒ 双通道成立）。
+
+**改动**：
+- 新增 `server/src/engine/detectorSupport/callProcName.js`（第 14 个检测器，D257 契约接入）：
+  **echo 通道**（6 位 [a-z0-9] 随机标记、右结合嵌套 CONCAT/CHR，两轮回显 + 对照无 ⇒ 命中；
+  载荷关键词全大写 ⇒ 反射造不出标记，构造性反射安全）+ **eval-err 通道**（`1/0` 除零签名
+  出现而未知标识符对照不出现；固定错误页由「签名也出现在对照页 ⇒ 压制」覆盖；刻意不做
+  页面相似度比较——模板化错误页 95% 同构会压死真阳性，开发中实测抓到该误设计）。
+- `scan/detect.js`：参数名点零命中后链第三步（orderByKey → keyBool → callProcName），
+  随 `testParamNames` 生效，预算 4 请求/点。
+- `run.mjs`：pass 判据升级 `callSafeFp===0 && callVulnHit===callVulnTotal`；acceptance.mjs
+  解析兼容 + call 真值披露字段；cases.json note 口径更新。
+- 守卫同步：detectorContract.guard SUPPORT_DETECTORS 3→4；测试 `server/tests/callProcName.test.js`
+  10 例（双通道命中 / 固定错误页 / 盲档 / 签名过松 / 复跑不稳 / 反射目标 / CHR 变体 / XML 与值位零请求）。
+
+**裁判证据**（`reports/过程名位注入-D284.md`）：
+- 全量基线 74 条：**43/43 + 0/24 + 证据不足 0 + `{call}` 4/4 + 0/3**，零回归（与 D283 逐位一致）。
+- 备案：嵌套 CONCAT 首版「整段再包层」产出 6 参形态，HSQLDB 真机报 unexpected token
+  后改右结合链——判据载荷必须真机验证后再进判定。
+
+**边界**：盲档不可见；无 CONCAT 方言（Derby）echo 闭合、error 通道不受影响；
+**值位** `{call <param>}`（真实世界更常见）不在本批（名字位后链只覆盖「名字进 CALL 位」），
+登记为后续项；4/4 不外推真实系统检出率。
+
+---
+
+## 2026-11-10 批次 D283 · Benchmark 环境复原 + 五裁判同轮全绿（11-09「缺环境」归因修正）
+
+**起点**：`reports/外部靶场全面测试-2026-11-09.md` 判 Benchmark「⛔ 缺 JDK17（无 `javac`）+
+源码目录不存在」，[D282] 边界留「补环境后须重跑 12 真值端点」。本轮实测：**查错了位置**——
+D138 配方的全部前置原位完好（`D:\tools\jdk\jdk-17.0.2` 含 javac.exe、`D:\tools\maven\apache-maven-3.9.11`、
+`.box-agent-scratch\BenchmarkJava-master` 含已构建 war、`~/.m2` hsqldb 2.7.4 + cargo Tomcat）。
+11-09 误判来源：`where javac` 查不到（JDK 不在 PATH），真缺口只是**靶场进程没起**。
+
+**改动**（无代码批次，证据 + 归因）：
+- `reports/外部靶场复跑-2026-11-10.md`（新）：复现命令、五裁判结果、瞬态归因全链。
+- `logs/unit-rerun-20261110.log`：全量单测复跑 TAP（4276/0 fail）。
+
+**复跑结果**（`node scripts/labs.mjs --up=…` 一键起 7 靶，D144 脚本化替代 D138 手工配方）：
+- Benchmark 三清单：子集 **43/43 + 0/24**、query **111/111 + 0/99**、header **33/33 + 0/34**
+  ⇒ **187/187、0/157**，与 D138（2026-10-23）逐位一致，零回归；`{call}` 0/4 仍为已知边界。
+  11-09 所指「12 真值端点」是 D115 子集，本轮 43 真值是其严格超集。
+- 全量 acceptance：**24 PASS / 0 BLOCKED / 2 SKIP / 1 FAIL**，五裁判同轮全绿
+  （Juice 2/2、VAmPI 2/2+0/5、DVWA 5/5、Benchmark 43/43+0/24、VulnLab 2/2+0/1）。
+
+**单测 2 条瞬态翻面归因**（acceptance 唯一 FAIL，现场 `e2e/results/last-failure-unit.log`）：
+`fetchUsing.test.js:233`（提取出 `5.7/40`）与 `:245`（越过终止符拖乱码）——单抽硬钉的时间
+通道用例在全场第一棒 + 五靶场 JVM 预热噪声下各翻面一次。复跑全量 **4276/0 fail**、
+单文件 ×3 **33/33** ⇒ 非确定性缺陷，与 [D280] 已登记 A2「错值单抽定生死」残余 flake 面同族
+（方向相反：好实现被噪声翻红）。不修产品代码。
+
+**台账复核**（§3.5 每批至少 1 条）：`benchmark-local-full-run-d138` ⇒ 维持 verified，
+`lastReviewed` 2026-10-23 → 2026-11-10，`recheck_batch` 追加 D283（本轮即其 refute_cmd
+原样复跑，数字逐位一致）。
+
+**验证（可复现命令）**：见报告 §二/§三/§四（labs.mjs 起靶 + benchmark-lab 三清单 +
+`node e2e/acceptance.mjs`）。
+
+**边界**：VulnLab 是本机外部依赖（labs.mjs probe-only），换机复跑需自起否则如实 SKIP；
+187/187 是合成靶场子集，不外推为通用检出率；首跑 2 条瞬态未改测试（加批内重抽属
+[D280] 已知取舍，另立批次再做不迟）。
+
+---
+
 ## 2026-11-09 批次 D282 · 布尔判据「OR 恒真」第三档（外部裁判漏检收口）
 
 **起点**：外部靶场全面测试（`reports/外部靶场全面测试-2026-11-09.md`）发现 Juice Shop

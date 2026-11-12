@@ -178,7 +178,7 @@
       "status": "verified",
       "evidence": "e2e/benchmark-lab/results/external-judge-2026-10-20-benchmark.md（D115 20 条 / D116 74 条 / D117 query 210 + header 67）+ results/run-2026-10-20-d117-query.log、-d117-header.log、-d116b.log；清单 cases.json / cases-query.json / cases-header.json；acceptance --only=benchmark（74 条基线）1 PASS/0 FAIL/0 SKIP。",
       "refute_cmd": "node e2e/acceptance.mjs --only=benchmark（需 Benchmark @https://127.0.0.1:8443 + HSQLDB @9001 在跑）",
-      "recheck_batch": "D115（2026-10-20）：推翻 D114 的 4/12；D116：扩到 74 条（参数名全量）；D117：query/header 两种形态全量（210 + 67），累计有效 327 条。",
+      "recheck_batch": "D115（2026-10-20）：推翻 D114 的 4/12；D116：扩到 74 条（参数名全量）；D117：query/header 两种形态全量（210 + 67），累计有效 327 条。D284（2026-11-11）：单列的 `{call}` 4 条真值由新检测器 callProcName 覆盖（求值差分 + 回显双通道，见 call-proc-name-injection-d284）——0/4 → 4/4，安全侧 0/3 不变；旧「0/4 已知边界」作废、保留数字。",
       "caveat": "Benchmark 是合成靶场：178/178 不能外推真实系统检出率（WAF / 参数签名 / JSON·XML body 未覆盖）；finding 数是同一注入点的多技术命中而非独立漏洞数；参数名形态依赖 testParamNames、header 形态依赖 testHeaders（opt-in）；`{call <过程名>}` 4 条真值未检出是明确能力缺口（存储过程名注入），不计入分母但其安全侧 0/3 已计入判据；113 条 prepared/其它形态未纳入；Benchmark 未就绪时套件 SKIP 不计通过。"
     },
     {
@@ -260,7 +260,8 @@
       "status": "verified",
       "evidence": "e2e/results/acceptance-report.md（全量 25/25 含 benchmark 套件）；CHANGELOG D138；TODO D138 复现配方",
       "refute_cmd": "$java -cp ~/.m2/.../hsqldb-2.7.4.jar org.hsqldb.Server --database.0 file:<scratch>/BenchmarkJava-master/target/db/benchmark.db --dbname.0 benchmarkDataBase --port 9001；JAVA_HOME=<jdk17> mvn cargo:run -Pdeploy -Dspotless.apply.skip=true；BENCHMARK_BASE=https://127.0.0.1:8443/benchmark BENCHMARK_CASES=e2e/benchmark-lab/cases-query.json node e2e/benchmark-lab/run.mjs（header 同法）",
-      "recheck_batch": "D138（2026-10-23）：最后一个 SKIP 关闭；全量 acceptance 25 PASS / 0 BLOCKED / 0 FAIL / 0 SKIP。",
+      "recheck_batch": "D138（2026-10-23）：最后一个 SKIP 关闭；全量 acceptance 25 PASS / 0 BLOCKED / 0 FAIL / 0 SKIP。D283（2026-11-10）：refute_cmd 原样复跑（labs.mjs 起靶，环境复原），三清单 187/187 + 0/157 与基线逐位一致、零回归；全量 acceptance 五裁判同轮全绿；复跑报告 reports/外部靶场复跑-2026-11-10.md。",
+      "lastReviewed": "2026-11-10",
       "caveat": "源码与构建产物来自本机 scratch 缓存（`.box-agent-scratch/BenchmarkJava-master`，gitignore 不入库）；换机器需按 TODO 配方重编（`mvn initialize clean package -Pdeploy -DskipTests`）。Benchmark 是合成靶场，187/187 不能外推为通用检出率。"
     },
     {
@@ -312,6 +313,16 @@
       "lastReviewed": "2026-11-08",
       "reviewNote": "D277 建立；并发峰值由 mock 侧真实 HTTP 并发计数，不采信套件自报",
       "caveat": "只证明调度行为；未在真网关上验证并发 2 的耗时收益与 429 风险；默认串行，不改变 D259/D275 的产出语义"
+    },
+    {
+      "id": "call-proc-name-injection-d284",
+      "claim": "`{call <名>}` / CALL 表达式位注入面（D284）：参数名进 JDBC call escape 的存储过程名位可检出——Benchmark 7 条 callProcedure 用例真值 4/4（D116 曾 0/4 已知边界）、安全对照 0/3 误报；全量基线 74 条零回归（43/43 + 0/24 + 证据不足 0，与 D283 逐位一致）。判据双通道：echo（6 位 [a-z0-9] 随机标记右结合嵌套 CONCAT/CHR 求值回显，两轮稳定 + 对照无）与 eval-err（1/0 除零签名出现而未知标识符对照不出现）；真机取证 HSQLDB 2.7.4（基线 object not found / 1/0 SQLDataException / CONCAT 200 回显）。",
+      "status": "verified",
+      "evidence": "reports/过程名位注入-D284.md（真机取证表 + 实现依据 + 判据变更 + 边界）；.box-agent-scratch/judge-full-d284.log（全量 74 条 exit 0，含「✅ Benchmark 外部裁判通过（含 {call} 过程名位）」）；server/tests/callProcName.test.js 10/10；detectorContract.guard.test.js SUPPORT_DETECTORS 4 条全绿。",
+      "refute_cmd": "node scripts/labs.mjs --up=benchmark-db,benchmark-app（就绪后）node e2e/benchmark-lab/run.mjs —— 74 条基线须 43/43 + 0/24 + {call} 4/4 + 0/3（pass 判据已含 call 真值全检出，exit≠0 即推翻）",
+      "lastReviewed": "2026-11-11",
+      "reviewNote": "D284 建立；真值数字由 run.mjs pass 判据强制（不全检出即 ❌），非套件自报；嵌套 CONCAT 首版 bug（整段再包层 → 6 参形态）被 HSQLDB 真机抓出后改右结合链，已备案",
+      "caveat": "盲档（错误被吞 + 无求值回显）不可见；无 CONCAT 方言（Derby 用 ||）echo 通道闭合、error 通道不受影响；值位 `{call <param>}`（真实世界更常见）不在本批，参数名点后链只覆盖「名字进 CALL 位」；分母仍单列不并入 43；4/4 是合成靶场子集，不外推真实系统检出率。"
     }
   ]
 }
