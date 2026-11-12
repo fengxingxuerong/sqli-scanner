@@ -29,6 +29,7 @@ import { STRATEGY_ORDER, FAST_TECHNIQUES, SLOW_TECHNIQUES } from '../src/engine/
 import { xmlParamNameDetector } from '../src/engine/detectorSupport/xmlParamName.js';
 import { orderByKeyDetector } from '../src/engine/detectorSupport/orderByKey.js';
 import { keyBoolDetector } from '../src/engine/detectorSupport/keyBool.js';
+import { callProcNameDetector } from '../src/engine/detectorSupport/callProcName.js';
 import { LdapXpathInjectionDetector } from '../src/engine/detectors/LdapXpathInjectionDetector.js';
 import { Detector } from '../src/engine/Detector.js';
 import { createDetectionResult } from '../src/engine/models.js';
@@ -41,6 +42,7 @@ const SUPPORT_DETECTORS = [
   ['xmlParamName', xmlParamNameDetector],
   ['orderByKey', orderByKeyDetector],
   ['keyBool', keyBoolDetector],
+  ['callProcName', callProcNameDetector],
   ['ldapXpath', new LdapXpathInjectionDetector()],
 ];
 

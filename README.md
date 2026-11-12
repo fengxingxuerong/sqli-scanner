@@ -1,6 +1,6 @@
 # sqli-scanner
 
-[![Tests](https://img.shields.io/badge/tests-4846%20passing-brightgreen)](#测试)[![CI](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml/badge.svg)](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml)
+[![Tests](https://img.shields.io/badge/tests-4861%20passing-brightgreen)](#测试)[![CI](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml/badge.svg)](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml)
 [![Dependencies](https://img.shields.io/badge/prod%20deps-0%20known%20vulns-brightgreen)](SECURITY.md)
 
 > CI 徽章为真实状态（红绿以 GitHub Actions 实跑为准）。发布判定仍以 `CHANGELOG.md`
@@ -465,7 +465,7 @@ server/       ← Express + Node.js（后端，`server/index.js` 入口）
 # 前端测试（581 个用例）
 npm test
 
-# 服务端测试（4271 个用例）
+# 服务端测试（4286 个用例）
 cd server && npm test
 
 # 全部测试
@@ -490,8 +490,8 @@ npm run artifact:drift   # 入库的 e2e 基线产物必须等于当前代码跑
 ## 项目状态
 
 - TypeScript: 零错误
-- 前端测试: 581/581 通过（覆盖率门禁 stmts 93.28 / branch 84.42 / func 80.72，阈值 88/77/67）
-- 服务端测试: 4271 用例（4265 pass / 0 fail / 6 skip，并发口径 2026-11-09 复测；6 skip 为环境依赖显式跳过。覆盖率 lines 95.31 / branch 81.53 / func 89.44，阈值 85/74/77）
+- 前端测试: 581/581 通过（覆盖率门禁 stmts 93.28 / branch 84.43 / func 80.72，阈值 88/77/67）
+- 服务端测试: 4286 用例（4280 pass / 0 fail / 6 skip，并发口径 2026-11-12 复测；6 skip 为环境依赖显式跳过。覆盖率 lines 95.27 / branch 81.43 / func 89.37，阈值 85/74/77）
 - 一键扫描: `npm run scan -- -u <url>`（CLI 一条命令产出 HTML/JSON/Markdown 全套报告 + manifest，退出码可直接进 CI 门禁）
 - Tamper 插件: 234 个（含批次 D3 新增 scalarselectinline；含 v24 增量 20 个，对齐 sqlmap 官方 tamper 全集，含官方 CRS/libinjection 实测组合 uniontable+odbcbrace；含批次 D13 新增 5 件上游形态变体 *nospace/*open/*block，真机 A/B 判决前不进默认链）
 - WAF 绕过能力: 200+ 插件链式组合，覆盖 62 个 WAF 厂商指纹识别 + 推荐
@@ -822,7 +822,7 @@ node e2e/acceptance.mjs --require-labs=dvwa,juice   # 指定靶场变硬要求�
 | 外部裁判 3 号（DVWA） | **5/5 真值、安全端点 0 误报、证据不足 0**（cookie / POST / 盲注 POST / impossible 四形态） | PASS（本机起真靶场） |
 | 数据泄露实证 | **成立**：`--dbs` 取回真库名（9 个）而非 payload 残片；139 请求、3 条漏洞 | PASS（本机起真靶场） |
 | 外部裁判 1 号（Juice Shop） | **2/2 真值（搜索 LIKE 双层括号 + 官方登录 JSON body）、安全端点 0/4 误报**；**[D137]** 此前记「本机不可复现」——三个真实根因已定位（源码树缺 `data/`、前端依赖需 `--shamefully-hoist`、必须跑 Node 22 而非 24），见台账 `juice-shop-runnable-local-d137` | PASS（本机起真靶场） |
-| 外部裁判 4 号（OWASP Benchmark） | **三清单本机全跑**：基线 74 → **43/43 + 0/24**；query 210 → **111/111 + 0/99**；header 67 → **33/33 + 0/34**；合计 **187/187 真值、0/157 安全零误报**；含 header 与参数名形态 50 条、`{call}` 安全侧 0/3。**[D138]** 本机已可运行（HSQLDB 9001 手动常驻 + `mvn cargo:run -Pdeploy`，JDK17/Maven 本机已有），此前记「需 GitHub 拉源码故不可用」——源码与构建产物在本机 scratch 缓存中 | PASS（本机起真靶场，三清单全跑） |
+| 外部裁判 4 号（OWASP Benchmark） | **三清单本机全跑**：基线 74 → **43/43 + 0/24**；query 210 → **111/111 + 0/99**；header 67 → **33/33 + 0/34**；合计 **187/187 真值、0/157 安全零误报**；含 header 与参数名形态 50 条；**`{call}` 过程名位真值 4/4 检出 + 安全 0/3（[D284] 起为引擎能力并纳入 pass 判据**——随机标记求值回显 + 1/0 求值错误差分，D116 曾 0/4 已知边界）。**[D138]** 本机已可运行（HSQLDB 9001 手动常驻 + `mvn cargo:run -Pdeploy`，JDK17/Maven 本机已有），此前记「需 GitHub 拉源码故不可用」——源码与构建产物在本机 scratch 缓存中 | PASS（本机起真靶场，三清单全跑） |
 | 外部裁判 5 号（VulnLab，[D156] 新增） | **三档真值**：low 直拼检出 3 条（union/error/boolean）· medium 可绕黑名单检出 1 条（error 通道）· **high 参数化修复档零误报**（127 请求，verdict=no_vulnerability_detected）；真值档 2/2 漏检 0、证据充分（92–127 请求/档）。真值来自对方 benchmark/manifest.yaml；自拉自收（自动 clone + php -S，CI 可真实执行） | PASS（2026-10-25 首测） |
 | 红队实战 | 19/19、安全点 7、误报 0 | PASS |
 | OOB 带外真机 / 外部隧道 | 真 PG `COPY TO PROGRAM` 真实回连 ✅；interactsh 回连 14 DNS + 14 HTTP | PASS |

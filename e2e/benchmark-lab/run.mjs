@@ -162,9 +162,9 @@ let weakEvidence = 0;
 const missedList = [];
 const fpList = [];
 
-// `{call <param>}` 形态（注入点是存储过程名）本引擎不支持 —— 单列、不并入真值分母。
-// 说明：这类 payload 空间是「过程名」而非「值位」，与 SQLi 值注入不是同一问题；
-// 保留在清单里是为了**证明它不会误报**（3 条 real=false 的 call 用例必须 0 检出）。
+// `{call <param>}` 形态（注入点是存储过程名）—— [D116] 单列统计；[D284] 起引擎支持
+// （detectorSupport/callProcName：随机标记求值回显 + 1/0 求值错误差分），真值 N/N
+// 检出**纳入 pass 判据**，安全对照 0 误报的要求不变。分母仍不并入 43（独立注入面独立判据）。
 let callVulnHit = 0;
 let callVulnTotal = 0;
 let callSafeFp = 0;
@@ -217,12 +217,18 @@ console.log(`安全对照证据不足（请求<${SAFE_MIN_REQUESTS}）：${weakE
 console.log(`header 注入面用例：${headerTotal}（前三个外部裁判未覆盖的形态）`);
 console.log(`参数名注入面用例：${paramNameTotal}（官方 param = name 变体）`);
 console.log(
-  `{call <过程名>} 形态（**已知能力边界，不计入分母**）：真值 ${callVulnHit}/${callVulnTotal} 检出；` +
+  `{call <过程名>} 形态（过程名位注入面，D284 起支持）：真值 ${callVulnHit}/${callVulnTotal} 检出（须全检出）；` +
   `安全对照 ${callSafeFp}/${callSafeTotal} 误报（须为 0）`
 );
 console.log(`用例总数：${CASES.length}（真值 ${vulnTotal} + 安全 ${safeTotal} + call 形态 ${callVulnTotal + callSafeTotal}）`);
-const pass = missed === 0 && falsePositives === 0 && weakEvidence === 0 && callSafeFp === 0;
+const pass =
+  missed === 0 &&
+  falsePositives === 0 &&
+  weakEvidence === 0 &&
+  callSafeFp === 0 &&
+  callVulnTotal > 0 &&
+  callVulnHit === callVulnTotal;
 console.log(pass
-  ? '✅ Benchmark 外部裁判通过：官方标注真值全部检出 且 官方标注安全用例零误报'
-  : '❌ 外部裁判未通过（漏检／误报／安全端点没真测，见上表）');
+  ? '✅ Benchmark 外部裁判通过：官方标注真值全部检出（含 {call} 过程名位）且 官方标注安全用例零误报'
+  : '❌ 外部裁判未通过（漏检／误报／安全端点没真测／{call} 真值未全检出，见上表）');
 process.exit(pass ? 0 : 1);

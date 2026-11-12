@@ -7,13 +7,16 @@
 > 下一批次起的条目写在这里。发版时把本节整体升为 `## [x.y.z] - YYYY-MM-DD` 并补汇总段。
 
 <!-- changelog-index:start -->
-**本段覆盖 66 个批次（D228–D282，2026-11-01 → 2026-11-09）**。正文按时间倒序排列；
+**本段覆盖 69 个批次（D228–D285，2026-11-01 → 2026-11-13）**。正文按时间倒序排列；
 下表是同一批次的索引，便于按编号或关键词定位。**索引只是导航，正文未做任何删改**
 （被推翻的旧结论原样保留，这是本仓的既定口径）。新增批次后跑
 `node scripts/changelog-index.mjs --write` 重生成，`--check` 校验是否过期。
 
 | 批次 | 日期 | 主题 |
 |---|---|---|
+| D285 | 11-13 | stale-claim-check 覆盖根目录交付报告（结项报告 §6-7 门禁缺口收口） |
+| D284 | 11-11 | `{call <名>}` 过程名位注入面（D116 能力缺口 0/4 → 4/4） |
+| D283 | 11-10 | Benchmark 环境复原 + 五裁判同轮全绿（11-09「缺环境」归因修正） |
 | D282 | 11-09 | 布尔判据「OR 恒真」第三档（外部裁判漏检 `q=test` 收口） |
 | D281 | 11-09 | parseArgs 主链族拆分收口（D21 判据适配 + 接线守卫 + A/B 重新取证） |
 | D280 | 11-09 | 批内快门禁 gate:fast（分层第一档）+ timeDrift 错值归因 |
@@ -81,6 +84,85 @@
 | D229 | 11-01 | 交付闸收口：P0-3 卡顿修复（haystack 先截后拼）+ ai-gateway 断言去模型依赖 |
 | D228 | 11-01 | AI 报告网关端到端验收（ai-gateway 套件）+ 本地网关 runbook + CI 靶场硬要求扩展 |
 <!-- changelog-index:end -->
+
+### 2026-11-13 批次 D285 · stale-claim-check 覆盖根目录交付报告（结项报告 §6-7 门禁缺口收口）
+
+**起点**：2026-11-12 结项报告 §9 实证缺口——`stale-claim-check` 自报「扫描 11 个 README 类文档，2 条规则」，
+根目录交付报告全部不在扫描集合内；11-01《交付状态报告》的「27/27 全断言 / gate:close 37/37」过期结论
+靠人工加横幅停用，门禁没牙（结项报告 §6-7 登记「另起批次补并做自证」）。
+
+**改动**（`scripts/stale-claim-check.mjs`）：
+- 扫描集合加入**根目录交付/审计报告**：`<主题>-YYYY-MM-DD.md` 命名家族（`DELIVERY_REPORT_RE`），
+  11 → 15 个文档（现入 4 份：11-01 状态报告、11-12 结项报告、11-12 门禁实跑记录、11-01 审计报告）。
+- 新增 2 条显式规则：`delivery-acceptance-2727`（「27/27 全断言 / 27 PASS / 0 SKIP」是 D269 后作废口径）、
+  `delivery-gate-count-stale`（把 37/39/41/43/49/51/52 写成现行全绿即过期；**同数分母才判**，54/55 不误伤）。
+- **作废横幅豁免**：文档头 15 行内带「⛔/口径作废/已作废/时点快照/被取代」⇒ bannerExempt 规则整份豁免
+  （与 §9「原文一字未删」口径一致）；行级 allow 词照常生效。豁免计数只统计真正适用 bannerExempt 的文档
+  （README 家族的横幅不虚报）。
+- 自证扩展：d285Bad 4 例（含「新交付报告复述死口径必须红」）+ d285Good 7 例（横幅豁免 / 行级 allow /
+  scope 不误伤 TODO 与 docs）；合计漏报 9 例全抓、误报 14 例全放过。
+
+**验证**：
+- `node scripts/stale-claim-check.mjs --selftest` EXIT=0；实扫 15 文档 / 4 规则 / 3 份横幅豁免，EXIT=0。
+- **11-12 结项报告在无豁免口径下实测 0 命中**——横幅豁免不是它过门禁的拐杖，判据有牙。
+- `npm run facts:check` EXIT=0（scripts 改动不影响采集源指纹）。
+- 台账复核（本批 1 条）：`node scripts/verify-tamper-upstream-examples.mjs` EXIT=0「无新增漂移（含复刻件比对）」
+  ⇒ tamper 上游示例对齐结论维持 verified。
+- `gate:close --quick` 52/52（本批同工作区实测）。
+
+**边界**：显式清单宁可少抓——「交付判定 ✅ 达成」这类条件性表述未立规则（未来合法结项报告会自然使用该措辞）；
+将来若真出现 27/27 全断言的运行，须同批更新规则并留推翻链（规则 why 已写明）。
+
+---
+
+### 2026-11-11 批次 D284 · `{call <名>}` 过程名位注入面（D116 能力缺口 0/4 → 4/4）
+
+**起点**：D116 单列的 4 条 callProcedure 真值（0/4，已知边界）。真机取证（HSQLDB 2.7.4）：
+`{call X}` 交给 CALL 语句而 CALL 接受任意值表达式——名字位实际是表达式位：
+基线标识符报 `object not found`、`1/0` 报 `SQLDataException: division by zero`（异常类不同）、
+`CONCAT(CHAR(90),CHAR(81))` 200 回显 ZQ ⇒ **求值差分 + 回显双判据通道成立**。
+
+**实现**：新增 `detectorSupport/callProcName.js`（第 14 个检测器，D257 契约接入，
+`technique='error'` / `match=['echo','signature']`）——echo 通道（6 位 [a-z0-9] 随机标记、
+右结合嵌套 CONCAT/CHR 按方言变体、两轮回显 + 对照无 ⇒ 命中；载荷关键词全大写 ⇒
+反射造不出标记）+ eval-err 通道（除零签名 vs 未知标识符对照；固定错误页由「签名也出现在
+对照页 ⇒ 压制」覆盖；刻意不做页面相似度比较——模板化错误页 95% 同构会压死真阳性）。
+`scan/detect.js` 参数名点零命中后链第三步（orderByKey → keyBool → callProcName），
+随 `testParamNames` 生效，预算 4 请求/点。
+
+**判据升级**：`run.mjs` pass 纳入 `{call}` 真值全检出（`callVulnHit===callVulnTotal`）；
+分母仍单列不并入 43（独立注入面独立判据）；acceptance.mjs 解析兼容 + 真值披露字段。
+测试 `callProcName.test.js` 10 例；SUPPORT_DETECTORS 守卫 3→4。
+
+**证据**（`reports/过程名位注入-D284.md`）：全量基线 74 条 **43/43 + 0/24 + 证据不足 0 +
+`{call}` 4/4 + 0/3**，零回归；备案：嵌套 CONCAT 首版「整段再包层」产出 6 参形态被
+HSQLDB 真机抓出（unexpected token），改右结合链后 200 回显——判据载荷必须真机验证后再进判定。
+
+**边界**：盲档不可见；无 CONCAT 方言（Derby）echo 闭合、error 通道不受影响；
+值位 `{call <param>}`（真实世界更常见）登记为后续项；4/4 不外推真实系统检出率。
+
+### 2026-11-10 批次 D283 · Benchmark 环境复原 + 五裁判同轮全绿（11-09「缺环境」归因修正）
+
+**起点**：11-09 外部靶场全面测试判 Benchmark「缺 JDK17（无 `javac`）+ 源码目录不存在」，
+[D282] 边界留「补环境后须重跑 12 真值端点」。
+
+**修正**：D138 配方前置（JDK17 含 javac、Maven 3.9.11、BenchmarkJava 源码 + war、hsqldb 2.7.4）
+**全部原位完好**——11-09 误判是「JDK 不在 PATH ⇒ `where javac` 查不到」+ 靶场进程没起，
+不是编译链缺失。
+
+**复跑**（无代码批次；`node scripts/labs.mjs --up=…` 一键起 7 靶）：
+- Benchmark 三清单 **187/187 真值、0/157 安全误报**，与 D138 基线逐位一致、零回归；
+  `{call}` 0/4 仍为已知能力边界；「12 真值端点」诉求由 43 真值严格超集覆盖。
+- 全量 acceptance **24 PASS / 0 BLOCKED / 2 SKIP / 1 FAIL**，**五裁判同轮全绿**
+  （Juice 2/2、VAmPI 2/2+0/5、DVWA 5/5、Benchmark 43/43+0/24、VulnLab 2/2+0/1）。
+- 唯一 FAIL 是单测两条时间通道用例瞬态翻面（`fetchUsing.test.js:233/:245`，单抽硬钉在
+  五靶场 JVM 预热噪声下各错一位/越过终止符）；复跑 4276/0 fail、单文件 ×3 33/33 ⇒
+  非确定性缺陷，与 [D280] A2 残余 flake 面同族（方向相反），不修产品代码。
+
+**台账复核 1 条**（§3.5）：`benchmark-local-full-run-d138` 维持 verified，
+`lastReviewed` → 2026-11-10，recheck_batch 追加 D283（本轮即其 refute_cmd 原样复跑）。
+
+**边界**：VulnLab 为本机外部依赖，换机复跑需自起；187/187 是合成靶场子集，不外推。
 
 ### 2026-11-09 批次 D282 · 布尔判据「OR 恒真」第三档（外部裁判漏检 `q=test` 收口）
 

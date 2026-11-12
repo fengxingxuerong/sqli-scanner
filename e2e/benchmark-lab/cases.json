@@ -1,5 +1,5 @@
 {
- "note": "Benchmark sqli 用例清单（D116 扩面）。source: OWASP-Benchmark/BenchmarkJava master 的 expectedresults-1.2.csv（真值）+ 各用例 @WebServlet 注解（URL）+ 源码判定注入面。\n字段：paramName=true 表示官方 `param = name` 变体（需 testParamNames 且 URL 用 ?<payload>=<类名>）；callProcedure=true 表示 SQL 是 `{call <param>}` ⇒ 注入点是**存储过程名**，本引擎不支持该类注入（已知能力边界，统计时单列、不并入真值分母）。\n本清单 = D115 的 20 条回归基线 ∪ 全部 57 条参数名形态用例（其中 4 条同时是 callProcedure）。",
+ "note": "Benchmark sqli 用例清单（D116 扩面）。source: OWASP-Benchmark/BenchmarkJava master 的 expectedresults-1.2.csv（真值）+ 各用例 @WebServlet 注解（URL）+ 源码判定注入面。\n字段：paramName=true 表示官方 `param = name` 变体（需 testParamNames 且 URL 用 ?<payload>=<类名>）；callProcedure=true 表示 SQL 是 `{call <param>}` ⇒ 注入点是**存储过程名**（D116 曾单列 0/4 能力边界；D284 起由 detectorSupport/callProcName 覆盖——随机标记求值回显 + 1/0 求值错误差分，真值 4/4 纳入 run.mjs pass 判据，统计仍单列不并入 43 分母）。\n本清单 = D115 的 20 条回归基线 ∪ 全部 57 条参数名形态用例（其中 4 条同时是 callProcedure）。",
  "cases": [
   {
    "name": "BenchmarkTest00018",
