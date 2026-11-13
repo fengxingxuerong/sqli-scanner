@@ -67,6 +67,11 @@ D283 边界明说「加批内重抽属 [D280] 已知取舍，另立批次再做�
 facts 全量刷新：服务端 4287 用例（4281 pass / 0 fail / 6 skip）、前端 581、徽章 4862、
 指纹 568 文件，README 4 处实时口径自动回写（覆盖率 95.28/81.50/89.34）；
 `gate:close --quick` 52/52 本树实测。
+> ⚠️ **2026-11-13 复核（口径边界，不改原数字）**：`--quick` 按设计跳过 lint / typecheck /
+> server-coverage 三项，**52/52 不等于全量 55/55**。D289 全量实跑 **54/55**（server-coverage 在
+> Windows + 插桩下 3 条时间通道用例 30s DEADLINE 超时；单文件绿、`--test-concurrency=1` 仍红、
+> CI 同代码绿）。**批次收口与发版必须跑全量**。见 `交付结项报告-2026-11-12.md` §12.2 与台账
+> `gate-close-quick-not-full`。
 
 **边界**：只覆盖时间通道「错值」形态；「第 2/3 抽才出真值」warn 分支无确定性触发样本，
 语义与 D280 逐字一致、恒空自钉背书；布尔通道不在本批。
@@ -97,6 +102,8 @@ facts 全量刷新：服务端 4287 用例（4281 pass / 0 fail / 6 skip）、�
 - 台账复核（本批 1 条）：`node scripts/verify-tamper-upstream-examples.mjs` EXIT=0「无新增漂移（含复刻件比对）」
   ⇒ tamper 上游示例对齐结论维持 verified。
 - `gate:close --quick` 52/52（本批同工作区实测）。
+  ⚠️ 2026-11-13 复核：quick 跳过 lint / typecheck / server-coverage 三项，52/52 **不外推为全量门禁绿**
+  （台账 `gate-close-quick-not-full`；D289 全量 54/55 见结项报告 §12.2）。
 
 **边界**：显式清单宁可少抓——「交付判定 ✅ 达成」这类条件性表述未立规则（未来合法结项报告会自然使用该措辞）；
 将来若真出现 27/27 全断言的运行，须同批更新规则并留推翻链（规则 why 已写明）。

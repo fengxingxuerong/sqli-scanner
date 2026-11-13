@@ -323,6 +323,17 @@
       "lastReviewed": "2026-11-11",
       "reviewNote": "D284 建立；真值数字由 run.mjs pass 判据强制（不全检出即 ❌），非套件自报；嵌套 CONCAT 首版 bug（整段再包层 → 6 参形态）被 HSQLDB 真机抓出后改右结合链，已备案",
       "caveat": "盲档（错误被吞 + 无求值回显）不可见；无 CONCAT 方言（Derby 用 ||）echo 通道闭合、error 通道不受影响；值位 `{call <param>}`（真实世界更常见）不在本批，参数名点后链只覆盖「名字进 CALL 位」；分母仍单列不并入 43；4/4 是合成靶场子集，不外推真实系统检出率。"
+    },
+    {
+      "id": "gate-close-quick-not-full",
+      "claim": "`gate:close --quick` 52/52 = 全量收口门禁绿（可据此收口/发版）",
+      "status": "refuted",
+      "refuted_by": "2026-11-13 D289 全量实跑 `gate:close` **54/55**，`server-coverage` EXIT=1：`extractor.timeDrift.test.js:448/:462` 与 `fetchUsing.test.js:318` 三条时间通道用例在 Windows + 覆盖率插桩下 30s DEADLINE 超时。`--quick` 按 `scripts/gate-close.mjs` 设计跳过 lint / typecheck / server-coverage 三项，52 项本就不含该项 ⇒ 52/52 不能外推 55/55。同代码 CI `Server coverage gate` success（run 43320399892 step 9、43433994040），本地红定性为环境性假红。",
+      "evidence": "CHANGELOG.md D287 段（`gate:close --quick` 52/52 本树实测）与 D285 段（同工作区实测）、TODO.md D287 段；`scripts/gate-close.mjs` 的 --quick 跳过清单；`交付结项报告-2026-11-12.md` §12.2（单文件 12/12 + 13/13 绿、`--test-concurrency=1` 仍红、CI 两次绿）。",
+      "refute_cmd": "npm run gate:close            # 全量 55 项\nnpm run gate:close -- --quick  # 对照 52 项（跳过 lint/typecheck/server-coverage）",
+      "lastReviewed": "2026-11-13",
+      "reviewNote": "本条 refuted 的是「quick=全量绿」这个推理，不是 D287 的代码或 flake 归因结论（后者仍成立）。批次收口与发版必须跑全量；quick 只作批内闸。",
+      "caveat": "54/55 的 1 项红是 Windows 本机 + 插桩的环境性假红，不是产品缺陷；但「本地门禁全绿」这句话在 Windows 本机仍不成立，对外只能写「CI 全量绿 + 本地 54/55（环境性假红）」。"
     }
   ]
 }
