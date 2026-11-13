@@ -5,6 +5,28 @@
 
 ---
 
+## 2026-11-13 批次 D289 · v1.3.3 发版（版本对齐 + D285-D288 优化收口）
+
+**起点**：CI run #426（7805a1a）全绿（lint 转绿，上轮 step 31 卡点解除）。按结项报告
+§6-5 版本对齐补发。
+
+**改动**：
+- `version:fix` 10 处版本号 1.3.2 → 1.3.3，`version:check` 10/10 一致。
+- CHANGELOG `[Unreleased]` 整体升 `## [1.3.3] - 2026-11-13` + 汇总段，新开空
+  `[Unreleased]`；`changelog-index --write` 重生成（71 批次）。
+- TODO 补本条；facts 指纹因版本面文件改动重采集（数字无变化）。
+
+**本版内容（自 v1.3.2 起，节选）**：D285 stale-claim-check 覆盖根目录交付报告；
+D287 时间通道三抽归因 flake 收口；D286 交付文档三份入库；facts 4287 用例 0 fail。
+
+**台账复核（本批 3 条，2026-11-13 复跑）**：verify-tamper（无新增漂移）、
+`unverified-surfaces-d123`（9/9）、`echo-strip-variants-coverage-d119`（16/16）。
+
+**边界**：tag v1.3.3 为轻量标签（与 v1.3.2 同形态）指向远端提交；desktop 安装包由
+tag 触发的 CI release 链产出，本机不再产 dist-portable（D288 已清理）。
+
+---
+
 ## 2026-11-13 批次 D287 · fetchUsing 时间通道「错值」批内三抽归因（D280 A2 同族收口）
 
 **起点**：D283 实测（`reports/外部靶场复跑-2026-11-10.md`）——五靶场 JVM 预热噪声下，
