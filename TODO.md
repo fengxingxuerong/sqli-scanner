@@ -5,6 +5,146 @@
 
 ---
 
+## 2026-11-15 批次 D294 · version-sync 缩进不敏感修复（PR #28 根因）
+
+**口径推翻**：D291/D293 与上一轮答复把 PR #27/#28 红点写成「PR 侧问题、master 无缺陷」
+⇒ **作废**。PR #28 实为**本仓判据缺陷**：Dependabot 把 `package-lock.json` 重写成
+**1 空格缩进**（master 2 空格），旧 `version-sync.mjs` 用固定 `\s{2}` / `\s{6}` 缩进正则
+读版本 ⇒ 合法 JSON 被读成「未找到版本号字段」，#443 lint step34 + test-server「接线-4」双红。
+PR #27 的 facts 指纹过期才是门禁正确工作（需 PR 分支重采），不是缺陷。
+
+- 修法：8 个 JSON 目标的 `pick` 改 `JSON.parse` 结构解析（坏 JSON / 缺字段 ⇒ null 判红），
+  `replace` 改按第 N 个 `"version"` 键定位的缩进无关替换；`--selftest` 补 8 条缩进自证。
+- 新增 `server/tests/versionSync.indent.guard.test.js`（4 例，真实文件副本 + 反向自证
+  + 静态反例自证）；**缺陷注入复验**：注回旧正则 ⇒ 守卫 EXIT=1（2 条红），备份还原 ⇒ 全绿。
+- facts 重采集：服务端 **4297（4291 pass / 0 fail / 6 skip）**、前端 581、徽章 4872。
+- 证据：`docs/ci-439-upload-evidence-2026-11-15.md` §三；台账新增
+  `version-sync-indent-fragility`（verified）。
+
+**边界（别当已完成推）**：修 master ≠ PR #28 转绿（PR CI 跑 PR 分支代码，需同步 master
+后重跑）；PR #27 仍需重采 facts；两个 PR 未合并 / 未关闭 / 未推送，外部动作待拍板。
+本地 54/55 假红、v1.3.3 发版事实不变。详见 CHANGELOG D294。
+
+---
+
+## 2026-11-15 批次 D293 · #439 上传根因 / #445 验收明细取证核销（零代码）
+
+本轮取到 40 位 `GH_TOKEN`，拉到 #439 / #445 的 job 原始日志并落盘
+`docs/ci-439-upload-evidence-2026-11-15.md`，推翻两条过期口径（按 §3.5 五步）：
+
+- **#439 根因已定性**：`actions/upload-artifact@v4` 的 `CreateArtifact` **5/5 次 Request timeout**
+  （GitHub ArtifactService 服务端），非本仓配置错 / 文件缺失 / build 失败 ⇒ D290 容错设计对症。
+  仍**不能**说「上传服务已修复」：服务端不在本仓可控范围，#445 只是本轮未复现。
+- **#445 验收明细已取到**：`25 PASS / 0 BLOCKED / 0 FAIL / 2 SKIP`，SKIP = Benchmark
+  （缺 JDK17/Maven）+ AI 网关（opt-in）⇒ **27/27 全断言仍不成立**，但「明细未知」升级为
+  「明细与 SKIP 项已定性」。CI 单测 `4293/4288/0/5` 与本地 facts `4293/4287/0/6` 是两套环境口径。
+- 作废面：本文件 / CHANGELOG 的 D290 起点、D291 边界、结项报告 §12.6 / §12.7，均已加作废指引；
+  README「从未有 27/27 全断言」与 §11 的 `25/2` 仍成立，不在作废面。
+- ⑤ 补门禁：台账新增 `ci-439-upload-rootcause` / `ci-445-acceptance-suites`（verified）；
+  本批复核 `ci-445-job-count`（重跑 API 逐 job 统计仍 `11/5`）。
+
+详见 CHANGELOG D293 与结项报告 §12.8。日志有保留期，过期须重新取证。
+
+---
+
+## 2026-11-15 批次 D292 · #445 job 计数自查更正（推翻链，零代码）
+
+D291 初稿写「#445 = 16 job / 12 success / 4 skipped」数错（漏 `desktop-package` 这个 skip，
+且 12+4≠16）。按 §3.5 ①停用 ②grep 影响面（CHANGELOG / TODO / 结项报告 §12.7 + 提交消息
+`11f0b61`）③作废重做 ④记推翻链 ⑤补门禁（进台账 + 本批复核 1 条）逐项执行。
+**正确口径：16 job / 11 success / 5 skipped**，`#445 completed success` 结论不变。
+细节与复现命令见 CHANGELOG D292；本段下方 D291 的计数已同步改对。
+
+---
+
+## 2026-11-15 批次 D291 · D290 远端裁判核销（收口，零产品代码）
+
+**起点**：D290 在 11-14 做完但留在工作区（8 M + 1 staged A），文档里写「未提交 / 推送、
+未重跑远端 CI」。本批把这条链补完并让远端裁判，同时把过期口径标作废（原文保留）。
+
+- 提交前判据全绿（11 项，逐项 EXIT=0）：新守卫 6/6、`ciWiring` 8/8、facts / readme /
+  stale-claim / changelog-index / greenguard / ref-integrity / typecheck / lint / `gate:fast`。
+  `git fsck` 0 ⇒ 允许动刀。
+- plumbing（禁 `git commit`，husky 曾删 `.git`）：`git add` 显式 9 路径 → `write-tree`
+  `f43462f5` → `commit-tree -p c0e658f -F -` → `update-ref` 带 old value ⇒ **`6d6de8b`**，
+  提交后工作区 0 处、对象库 0 坏链。
+- Git Data API 推送（显式 `--base f4cd9865` 取远端真值 + `--dry-run` 先行）：远端
+  **`82bcfffe`**，2135/2135 条目差异 0、根树一致、零失真。
+- **远端裁判**：push CI **#445** completed **success**（16 job / 11 success / 5 skipped，D292 更正），
+  `sidecar-build` 的 build、上传、复核三步全绿；CodeQL #130 同 sha 绿 ⇒ D290 设计闭环。
+
+**仍未竟**（D293 复核后，别当已完成推）：~~#439 根因未定性 / acceptance 明细需 token~~
+**两条已作废**（见本文件 D293 与 CHANGELOG D293）：根因 = ArtifactService `CreateArtifact` 超时，
+验收明细 `25 PASS / 0 FAIL / 2 SKIP`，SKIP 项已定性。**仍成立的不竟项**：27/27 全断言不成立；
+本地 `server-coverage` 假红维持（54/55）；Dependabot PR #27/#28 的 lint / test-server 红点未修未合；
+不写「上传服务已修复」。详见 CHANGELOG D293 与结项报告 §12.8。
+
+---
+
+## 2026-11-14 批次 D290 · 取证上传不得改写 sidecar 门禁结论（CI #439 红点收口）
+
+**起点**：远端 push CI run **#439**（`f4cd986`，11-13 22:18 触发的文档提交）整轮 **FAILURE**，
+而 16 个 job 里只有 `sidecar-build` 的 **step 8「上传构建诊断（成功也传）」** 失败；
+同 job 的 **step 7「Build sidecar (SEA) + smoke」SUCCESS**，其余 15 个 job（lint /
+test-server / test-frontend / acceptance / e2e-self-contained / docker / release-smoke /
+audit / test-matrix win+mac）全绿，5 个 skip 是周度或发版链。此前 6 次 push
+（#427/#429/#430/#431/#437/#438）同配置连续 SUCCESS ⇒ 非门禁的 artifact 上传可用性
+**绑架了整轮门禁结论**。本机无 `GH_TOKEN` / `gh`，拉不到该 step 日志 ⇒ 上传失败的根因
+（服务端偶发 / 配置）**未定性、未洗绿**，本批修的是「结论被取证通道改写」这个确定的设计缺陷。
+
+> ⚠ D293 补记：上两句是 11-14 当批的真实取证条件，**现已作废** —— 本轮取到 token 并落盘日志，
+> 根因定性为 GitHub ArtifactService `CreateArtifact` 5/5 超时。见本文件 D293 / CHANGELOG D293 /
+> `docs/ci-439-upload-evidence-2026-11-15.md`。原文按推翻链保留，不删。
+
+**改动**（纯 CI 接线 + 判据，零产品代码）：
+- `.github/workflows/ci.yml` `sidecar-build`：build 步加 `id: sidecar_build`；诊断上传步
+  加 `id: sidecar_diag_upload` + `continue-on-error: true`（**仅取证通道**）；新增
+  **「复核构建结论」**步（`if: always()`）显式读 `steps.sidecar_build.outcome`，
+  非 `success` 即 `exit 1`，上传非成功只打 `::warning::`。
+  两道保险：build 失败 ⇒ 自身判红 + 复核步判红；上传失败 ⇒ 不再拖红整轮，但取证降级可见。
+- 注释同步改写历史红线：旧的「不是 continue-on-error，别再犯」针对的是**门禁步骤**被吞成
+  恒绿；本批只对取证步骤容错，且用显式复核把结论拿回来，方向相反、语义不冲突。
+- 新增 `server/tests/sidecarDiagUpload.guard.test.js`（6 例）：静态配对判据钉住
+  build 绝不带 continue-on-error / 上传必须容错 / 复核必须 always、必须读两个 outcome、
+  必须能 `exit 1` / 读的 step id 必须真实存在（D22 同款）+ 分母守卫。
+  **有牙自证**：5 组从真实 ci.yml 片段变形的反例（删复核步、吞 build、复核不判红、
+  读幽灵 id、回退到 #439 形态）全部必须被判红。首跑自证抓到自己的假反例——
+  全局 `replace('exit 1')` 命中的是「前置门禁检查」步而非复核步，判据没被骗过；
+  已改为只在复核片段内替换。
+
+**验证**（本机，2026-11-14）：
+- `yaml` 解析 ci.yml：`sidecar-build` **8 个 step**，id / continue-on-error / if 逐项符合预期。
+- `node --test server/tests/sidecarDiagUpload.guard.test.js` **6/6**；既有
+  `ciWiring.guard.test.js` **8/8**；`ci-local --quick` 的 job 覆盖自检「15 个 job →
+  本地覆盖 8 / 显式排除 7 / **未声明 0**」。
+- 六道静态门禁逐条 EXIT=0：`facts:check`、`readme:check`、`stale-claim-check`、
+  `changelog-index --check`（含 `--write` 重生成索引）、`greenguard-check`、`ref-integrity`；
+  `changelog-index --selftest` EXIT=0。
+- **全量 `npm run gate:close`（非 `--quick`）：54/55**，唯一红 `server-coverage`
+  —— Windows + 覆盖率插桩下时间通道用例 30s DEADLINE 超时，与结项报告 §12.2 登记的
+  环境性假红**同族**（此前 11-13 三次覆盖率日志失败用例条数与名字各不相同 ⇒ 非确定性；
+  CI Linux 同代码 `Server coverage gate` 绿）。本批零产品代码改动，未改 deadline、
+  未降阈值、未跳过门禁；按口径如实保留 54/55，不外推 `--quick` 的 52/52。
+- **假红反证（本批实跑）**：单独复跑覆盖率门禁（`logs/d290-cov-verify.txt`，EXIT=1）
+  失败 **2** 条，均为时序 / 墙钟敏感用例 —— `eventLoopWatch.test.js:60`
+  「120ms 同步阻塞应被测到（实际 maxMs=0）」与 `extractor.timeDrift.test.js:524`
+  「失败探针导致请求数发散（53 > 20）」。与 11-13 三次覆盖率日志（分别 5 / 3 / 3 条、
+  用例名各异）**完全不同** ⇒ 非确定性；这两文件**带插桩单跑 20/20 全绿**
+  （`logs/d290-cov-single.txt`，EXIT=0），与 §12.2 反证 1 同款。本批零产品代码改动，
+  失败面与本批文件无交集（`sidecarDiagUpload` 在覆盖率日志中出现 0 次）。
+- **`npm run gate:fast` 17/17 EXIT=0**（42.5s，恒跑组 + 受影响组）；快门禁绿不外推全量。
+- **facts 重采集**：服务端 **4293 用例（4287 pass / 0 fail / 6 skip）**、前端 581、
+  徽章 4868、测试源 **569 文件**（指纹 `9a50cd21fd838f20`）。新守卫先 `git add`
+  再 refresh —— 首跑 facts 明确警告「在磁盘上但未入 git 索引」会污染指纹（D284 同形态），
+  按提示处置后重刷；`--fix` 回写 README 4 处实时口径、`quality-ledger` 重生成，
+  `facts:check` EXIT=0。
+
+**边界**：未放宽任何判据、未改 deadline、未降阈值、未跳门禁；build 失败仍 100% 让 job 红。
+无 token ⇒ 未下载 #439 日志、未重跑远端 CI；本批只保证「上传失败不再改写结论」，
+不宣称上传服务本身已修复。交付 / 发版事实仍以结项报告 §12 为准。
+
+---
+
 ## 2026-11-13 批次 D289 · v1.3.3 发版（版本对齐 + D285-D288 优化收口）
 
 **起点**：CI run #426（7805a1a）全绿（lint 转绿，上轮 step 31 卡点解除）。按结项报告
