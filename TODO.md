@@ -5,6 +5,26 @@
 
 ---
 
+## 2026-11-15 批次 D297 · macOS 时间通道假红入账（别再当缺陷修）
+
+**两个红点同族、与 D294 无关**：
+- #449 attempt1（master）：macos `extractor.timeBaseline.test.js:150` 报 `"8036\u0000"`
+  （错值）；本机三次单跑 3/3 绿；重跑 201 ⇒ attempt2 除 macos 外 15 job 全绿。
+- #450（PR #28）：macos `timeDrift`「慢漂移 + 极小余量」**30s DEADLINE / 138 请求**。
+  #446–#448 macos 全绿（462/536/479s）、#451 绿（515s）⇒ 跨分支跨用例非确定性。
+- **#452（PR #27 推 facts 后）lint 转绿、0 fail** ⇒ D295 重采链路被远端验证。
+
+**别做的事（已证伪/禁止）**：降并发、`TIME_TEST_WALL_SCALE=4` 放大外闸（3→5 fail）、
+改 deadline / 降阈值 / 排除时间通道测试 / 跳门禁。DEADLINE 按 D280 语义刻意当场红，
+保死循环探测器。`rerun-failed-jobs` 对 `in_progress` 的 #450 返回 **403**，须等整轮
+completed 后再重跑（#449 是 completed failure 才能 201）。
+
+**⑤ 补门禁**：台账新增 `macos-time-channel-flake`(verified)；本批复核
+`ci-445-job-count`（API 逐 job 统计仍 11/5）。
+**边界**：四轮 CI 整轮均未终判，只报已终判 job；PR 未合并 / 未关闭。详见 CHANGELOG D297。
+
+---
+
 ## 2026-11-15 批次 D296 · PR 分支同步执行核销（口径作废）
 
 **作废**：D294 边界「两个 PR 未合并 / 未关闭 / 未推送，外部动作待拍板」中的
