@@ -6,6 +6,41 @@
 
 > 下一批次起的条目写在这里。发版时把本节整体升为 `## [x.y.z] - YYYY-MM-DD` 并补汇总段。
 
+### 2026-11-15 批次 D293 · #439 上传根因与 #445 验收明细取证核销（推翻链，零代码）
+
+**触发**：本轮从 `git-credential-manager get` 取到 40 位 `GH_TOKEN`，拉到 #439 / #445 的
+job 原始日志并落盘 `docs/ci-439-upload-evidence-2026-11-15.md`。D290–D292 反复写的
+「无 `GH_TOKEN` / 拉不到日志 ⇒ 根因未定性」「acceptance 明细需 token ⇒ 不外推」两条口径
+**同时失效**，按 AGENTS.md §3.5 五步处理。
+
+- **① 停用**：上述两条作废，禁止再作为当前结论引用；历史正文保留并加作废指引。
+- **② 影响面**：`grep -nE "根因未定性|根因仍未定性|拉不到|无 .GH_TOKEN.|需 token|仍需 token|PASS/SKIP 明细"`
+  命中 CHANGELOG D290 起点 / D291 边界、TODO D290 起点 / D291 仍未竟、结项报告 §12.6 / §12.7；
+  README「从未有 27/27 全断言」与结项报告 §11 的 `25/2` 口径**仍成立**，不在作废面。
+- **③ 作废重做**（换结论，不是把措辞改小）：
+  - **#439 根因 = `actions/upload-artifact@v4` 的 `CreateArtifact` 请求超时**：日志 L234–L238
+    显示 5 次重试全部 `Request timeout: /twirp/github.actions.results.api.v1.ArtifactService/CreateArtifact`，
+    末行 `Failed to CreateArtifact: Failed to make request after 5 attempts`。属 GitHub
+    ArtifactService 服务端可用性问题，**不是本仓配置错、不是文件缺失、不是 build 失败**；
+    D290 的容错设计对症。⚠ 仍**不能**说「上传服务已修复」——服务端不在本仓可控范围，
+    #445 只是本轮未复现。
+  - **#445 acceptance 套件级明细已取到**：`25 PASS / 0 BLOCKED / 0 FAIL / 2 SKIP`
+    （§12.4「不说 27/27 全断言」结论不变，但从「明细未知」升级为「明细与 SKIP 项已定性」）：
+    SKIP = OWASP Benchmark（缺 JDK17 / Maven 前置）、AI 报告网关端到端（opt-in 环境不满足）。
+    CI 服务端单测 `4293 / 4288 pass / 0 fail / 5 skip`，本地 facts `4293 / 4287 / 0 / 6`
+    —— 总数一致、skip 分布随环境不同，两套口径不可互相覆盖。
+- **④ 记推翻链**：旧表述保留在 D290 / D291 正文并标注作废；原始日志摘录与复现命令见
+  `docs/ci-439-upload-evidence-2026-11-15.md`。
+- **⑤ 补门禁**：日志依赖远端 API 且有保留期，无法做本地恒真静态判据 ⇒ 台账新增
+  `ci-439-upload-rootcause` / `ci-445-acceptance-suites`（verified，带复现命令与 caveat）；
+  本批复核 `ci-445-job-count`（重跑 API 逐 job 统计仍是 `11/5`，写入 `lastReviewed`），
+  满足「每批至少复核 1 条」。
+
+**边界**：日志有保留期，过期须重新取证；Dependabot PR #27/#28 红点、本地 `gate:close`
+54/55 环境性假红、v1.3.3 发版事实均不受本批影响。
+
+---
+
 ### 2026-11-15 批次 D292 · #445 job 计数自查更正（推翻链，零代码）
 
 **触发**：D291 初稿把 push CI #445 写成「16 job / 12 success / 4 skipped」——漏计
@@ -52,8 +87,10 @@
   CI #443 / #442 failure，失败面是 `lint` step31 文档数字口径、step34 版本号三处一致、
   `test-server` Server tests 及前置门禁连锁，与 D290 无关；PR 未合并、未处理。
 
-**边界（不变）**：#439 上传服务根因仍未定性（无 `GH_TOKEN` 拉不到 step 日志），不写「偶发已自愈」；
-acceptance 套件级 PASS/SKIP 明细需 token 拉日志 ⇒ **不外推 27/27 全断言**；
+**边界（D293 复核后部分作废）**：原文「#439 根因未定性（无 `GH_TOKEN`）」「acceptance 明细需 token」
+**均已作废**，见 D293 与 `docs/ci-439-upload-evidence-2026-11-15.md`：根因已定性为 ArtifactService
+`CreateArtifact` 5/5 超时；acceptance 明细 `25 PASS / 0 BLOCKED / 0 FAIL / 2 SKIP`，SKIP 项已定性。
+**27/27 全断言仍不成立**；不写「上传服务已修复」「偶发已自愈」。
 本地 54/55 的环境性假红维持；v1.3.3 tag / Release / 6 assets 事实不受影响。
 
 ---
@@ -64,6 +101,10 @@ acceptance 套件级 PASS/SKIP 明细需 token 拉日志 ⇒ **不外推 27/27 �
 step 8「上传构建诊断」；同 job 的 step 7「Build sidecar (SEA) + smoke」SUCCESS，其余
 15 个 job 全绿，此前 6 次 push 同配置连续 SUCCESS ⇒ 非门禁的 artifact 上传可用性绑架了
 整轮结论。本机无 `GH_TOKEN` / `gh`，拉不到该 step 日志，**上传失败根因未定性、未洗绿**。
+
+> ⚠ D293 补记：上句是 11-14 当批的真实取证条件，**现已作废** —— 本轮取到 token 并落盘日志，
+> 根因定性为 GitHub ArtifactService `CreateArtifact` 5/5 超时。见 D293 / 报告 §12.8 /
+> `docs/ci-439-upload-evidence-2026-11-15.md`。原文按推翻链保留，不删。
 
 **改动**（纯 CI 接线 + 判据，零产品代码）：
 - `.github/workflows/ci.yml`：build 步加 `id: sidecar_build`；诊断上传步加
@@ -99,13 +140,14 @@ CI Linux 同代码绿）；零产品代码改动，未改 deadline / 阈值 / �
 ---
 
 <!-- changelog-index:start -->
-**本段覆盖 3 个批次（D290–D292，2026-11-14 → 2026-11-15）**。正文按时间倒序排列；
+**本段覆盖 4 个批次（D290–D293，2026-11-14 → 2026-11-15）**。正文按时间倒序排列；
 下表是同一批次的索引，便于按编号或关键词定位。**索引只是导航，正文未做任何删改**
 （被推翻的旧结论原样保留，这是本仓的既定口径）。新增批次后跑
 `node scripts/changelog-index.mjs --write` 重生成，`--check` 校验是否过期。
 
 | 批次 | 日期 | 主题 |
 |---|---|---|
+| D293 | 11-15 | #439 上传根因与 #445 验收明细取证核销（推翻链，零代码） |
 | D292 | 11-15 | #445 job 计数自查更正（推翻链，零代码） |
 | D291 | 11-15 | D290 远端裁判核销（提交 / 推送 / CI 复核） |
 | D290 | 11-14 | 取证上传不得改写 sidecar 门禁结论（CI #439 红点收口） |

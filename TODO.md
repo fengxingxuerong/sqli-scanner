@@ -5,6 +5,26 @@
 
 ---
 
+## 2026-11-15 批次 D293 · #439 上传根因 / #445 验收明细取证核销（零代码）
+
+本轮取到 40 位 `GH_TOKEN`，拉到 #439 / #445 的 job 原始日志并落盘
+`docs/ci-439-upload-evidence-2026-11-15.md`，推翻两条过期口径（按 §3.5 五步）：
+
+- **#439 根因已定性**：`actions/upload-artifact@v4` 的 `CreateArtifact` **5/5 次 Request timeout**
+  （GitHub ArtifactService 服务端），非本仓配置错 / 文件缺失 / build 失败 ⇒ D290 容错设计对症。
+  仍**不能**说「上传服务已修复」：服务端不在本仓可控范围，#445 只是本轮未复现。
+- **#445 验收明细已取到**：`25 PASS / 0 BLOCKED / 0 FAIL / 2 SKIP`，SKIP = Benchmark
+  （缺 JDK17/Maven）+ AI 网关（opt-in）⇒ **27/27 全断言仍不成立**，但「明细未知」升级为
+  「明细与 SKIP 项已定性」。CI 单测 `4293/4288/0/5` 与本地 facts `4293/4287/0/6` 是两套环境口径。
+- 作废面：本文件 / CHANGELOG 的 D290 起点、D291 边界、结项报告 §12.6 / §12.7，均已加作废指引；
+  README「从未有 27/27 全断言」与 §11 的 `25/2` 仍成立，不在作废面。
+- ⑤ 补门禁：台账新增 `ci-439-upload-rootcause` / `ci-445-acceptance-suites`（verified）；
+  本批复核 `ci-445-job-count`（重跑 API 逐 job 统计仍 `11/5`）。
+
+详见 CHANGELOG D293 与结项报告 §12.8。日志有保留期，过期须重新取证。
+
+---
+
 ## 2026-11-15 批次 D292 · #445 job 计数自查更正（推翻链，零代码）
 
 D291 初稿写「#445 = 16 job / 12 success / 4 skipped」数错（漏 `desktop-package` 这个 skip，
@@ -31,9 +51,11 @@ D291 初稿写「#445 = 16 job / 12 success / 4 skipped」数错（漏 `desktop-
 - **远端裁判**：push CI **#445** completed **success**（16 job / 11 success / 5 skipped，D292 更正），
   `sidecar-build` 的 build、上传、复核三步全绿；CodeQL #130 同 sha 绿 ⇒ D290 设计闭环。
 
-**仍未竟**（别当已完成推）：#439 上传服务根因未定性；acceptance 套件级明细仍需 token ⇒
-27/27 全断言不成立；本地 `server-coverage` 假红维持（54/55）；Dependabot PR #27/#28 的
-lint / test-server 红点未修未合。详见 CHANGELOG D291 与结项报告 §12.7。
+**仍未竟**（D293 复核后，别当已完成推）：~~#439 根因未定性 / acceptance 明细需 token~~
+**两条已作废**（见本文件 D293 与 CHANGELOG D293）：根因 = ArtifactService `CreateArtifact` 超时，
+验收明细 `25 PASS / 0 FAIL / 2 SKIP`，SKIP 项已定性。**仍成立的不竟项**：27/27 全断言不成立；
+本地 `server-coverage` 假红维持（54/55）；Dependabot PR #27/#28 的 lint / test-server 红点未修未合；
+不写「上传服务已修复」。详见 CHANGELOG D293 与结项报告 §12.8。
 
 ---
 
@@ -47,6 +69,10 @@ audit / test-matrix win+mac）全绿，5 个 skip 是周度或发版链。此前
 （#427/#429/#430/#431/#437/#438）同配置连续 SUCCESS ⇒ 非门禁的 artifact 上传可用性
 **绑架了整轮门禁结论**。本机无 `GH_TOKEN` / `gh`，拉不到该 step 日志 ⇒ 上传失败的根因
 （服务端偶发 / 配置）**未定性、未洗绿**，本批修的是「结论被取证通道改写」这个确定的设计缺陷。
+
+> ⚠ D293 补记：上两句是 11-14 当批的真实取证条件，**现已作废** —— 本轮取到 token 并落盘日志，
+> 根因定性为 GitHub ArtifactService `CreateArtifact` 5/5 超时。见本文件 D293 / CHANGELOG D293 /
+> `docs/ci-439-upload-evidence-2026-11-15.md`。原文按推翻链保留，不删。
 
 **改动**（纯 CI 接线 + 判据，零产品代码）：
 - `.github/workflows/ci.yml` `sidecar-build`：build 步加 `id: sidecar_build`；诊断上传步
