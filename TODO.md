@@ -5,6 +5,28 @@
 
 ---
 
+## 2026-11-15 批次 D296 · PR 分支同步执行核销（口径作废）
+
+**作废**：D294 边界「两个 PR 未合并 / 未关闭 / 未推送，外部动作待拍板」中的
+**「未推送 / 待拍板」已作废** —— 用户明确授权后已执行；「未合并 / 未关闭」仍成立。
+
+- Merges API 把 master 合进两个 PR 分支：#28 `f353b995`、#27 `7ea003e4`（201 无冲突），
+  新判据 `JSON.parse` / `indentSelfChecks` 已进 PR 分支（Contents API 实读）。
+- **#450（#28 重跑）**：lint / test-server / test-frontend / audit / release-smoke /
+  sidecar-build 全 success ⇒ 旧 #443 双红消失。
+- **#451（#27）**：lint step31 仍报 facts 采集源改动 ⇒ 本地用 PR 版 `server/package.json`
+  真跑 `facts:refresh` + `facts:fix` + `--check`（全 0），4 个产物一次 commit 推到
+  PR #27 ⇒ `b1bdb356`，触发 #452。数字 4297/4291/0/6、徽章 4872 不变。
+- 坑（已解）：后台 `rm -rf coverage` 被沙箱静默拦 ⇒ refresh 报「找不到 Tests 行」；
+  Git Data API header 嵌套写错 ⇒ POST 401。均详见当日流水。
+- 本批复核台账 `version-sync-indent-fragility` 的 refute_cmd。
+
+**边界**：#450 / #452 整轮 CI 仍 `in_progress`（GitHub 并发排队），只报已终判 job；
+PR 未合并 / 未关闭；master 未改动、工作区已还原干净；本地 54/55 假红维持。
+详见 CHANGELOG D296。
+
+---
+
 ## 2026-11-15 批次 D294 · version-sync 缩进不敏感修复（PR #28 根因）
 
 **口径推翻**：D291/D293 与上一轮答复把 PR #27/#28 红点写成「PR 侧问题、master 无缺陷」
@@ -24,6 +46,9 @@ PR #27 的 facts 指纹过期才是门禁正确工作（需 PR 分支重采）�
 **边界（别当已完成推）**：修 master ≠ PR #28 转绿（PR CI 跑 PR 分支代码，需同步 master
 后重跑）；PR #27 仍需重采 facts；两个 PR 未合并 / 未关闭 / 未推送，外部动作待拍板。
 本地 54/55 假红、v1.3.3 发版事实不变。详见 CHANGELOG D294。
+
+> ⚠ D296 补记：上段「未推送 / 外部动作待拍板」**已作废**（用户已授权且已执行）；
+> 「未合并 / 未关闭」仍成立。原文按推翻链保留，不删。
 
 ---
 
