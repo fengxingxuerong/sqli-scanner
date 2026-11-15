@@ -5,6 +5,26 @@
 
 ---
 
+## 2026-11-15 批次 D298 · 把外部裁判 4 号接进 CI（首次接线，待远端裁判）
+
+**目标**：消除 `acceptance` 里长期挂着的「外部裁判 4 号 SKIP（环境不满足）」，
+让当前版本代码第一次在 CI 上跑 OWASP Benchmark 官方逐条标注真值。
+
+- 新增 `scripts/ci-benchmark.mjs`（Linux CI 专用，win32 拒绝 `up`）：pin 源码 →
+  `-Pdeploy` 打包 → 手动常驻 HSQLDB @9001 → `cargo:run` https/8443 → 双探针，
+  失败显式红、不留静默 SKIP。本机只跑 `check`。
+- `ci.yml`：setup-java 17、硬起步骤（20min）、acceptance job 超时 25→45、
+  `--require-labs` 加 `benchmark-db,benchmark-app`。**不动** `scripts/lib/labs.mjs`
+  的 Windows 默认值（planLab 只看端口），`ciWindowsOnly.guard.test.js` 契约保持。
+- 新增 `server/tests/ciBenchmarkWiring.guard.test.js`（4 例 + 4 组反例自证）。
+- 台账新增 `benchmark-ci-wiring-d298` = **unverified**（等远端裁判），复核 1 条。
+
+**⚠ 别当已完成推**：这只是接线，Maven 冷构建 / codeload / cargo / 自签探针**均未经远端 CI
+实证**，首跑可能整轮红，需 1–2 轮调试；只有远端 acceptance 日志出现
+「外部裁判 4 号 … PASS」才可把 SKIP→PASS 与台账转 verified。详见 CHANGELOG D298。
+
+---
+
 ## 2026-11-15 批次 D297 · macOS 时间通道假红入账（别再当缺陷修）
 
 **两个红点同族、与 D294 无关**：
