@@ -6,6 +6,44 @@
 
 > 下一批次起的条目写在这里。发版时把本节整体升为 `## [x.y.z] - YYYY-MM-DD` 并补汇总段。
 
+### 2026-11-15 批次 D294 · version-sync 缩进不敏感修复（PR #28 红点根因，含推翻链）
+
+**起点**：D291 / D293 把 Dependabot PR #27 / #28 的 CI 红点归因为「PR 侧依赖升级、
+与 master 无关」——**该结论作废**（上一轮口头结论一并作废）。带 token 拉日志 +
+Contents API 读 PR head 原文后重新定性：
+- PR #28（`8502a7f8`）的 `package-lock.json` 被 Dependabot 重写成 **1 空格缩进**，
+  master 是 2 空格；head / base / merge-ref 三处 JSON 的 `version` 字段**都在**。
+  D294 前 `scripts/version-sync.mjs` 用 `/^\s{2}"version"/` 与 `/^\s{6}"version"/`
+  文本正则读版本 ⇒ 对合法 JSON 落空，CI #443 `lint` step34 报「版本号不一致（2 处）」，
+  `test-server`「接线-4」同源失败 ⇒ **本仓判据缺陷**，不是 PR 数据问题。
+- PR #27 的 #442 `lint` step31 = `facts-sync.mjs --check` 检出采集源
+  `server/package.json` 被改动（4 项依赖升级）⇒ 指纹过期，**门禁正确工作**，需在 PR
+  分支重采 facts，不是缺陷。
+
+**改动**（判据 + 守卫 + 文档，零产品代码）：
+- `scripts/version-sync.mjs`：JSON 类 8 个目标的 `pick` 改为 `JSON.parse` 结构解析
+  （`pickTop` / `pickRootPkg`），坏 JSON / 缺字段返回 `null` ⇒ fail-closed；
+  `replace` 改 `replaceNth`（按第 N 个 `"version"` 键定位，缩进无关且不重排文件）；
+  `--selftest` 补 8 条缩进自证（1 / 4 空格、压缩单行、缺字段、坏 JSON、`--fix` 改写可读）。
+- 新增 `server/tests/versionSync.indent.guard.test.js`（4 例）：用**仓库真实文件副本**
+  把两个 lock 重排成 1 空格 ⇒ 10 处版本全读到、0 mismatch；反向自证真删 `version`
+  字段必须判红；静态判据禁固定缩进正则 + 反例自证（旧形态片段必须被抓红）。
+- **缺陷注入复验**：把 `pickTop` 注回旧正则 ⇒ 守卫 EXIT=1（D294-1 / D294-3 两条红）；
+  用备份还原（不反向 replace_all）后 EXIT=0、selftest 0 ⇒ 注入有效、还原一致。
+- 证据落盘 `docs/ci-439-upload-evidence-2026-11-15.md` §三（含 PR head 原文摘录）。
+
+**验证**：`version-sync.mjs` / `--selftest` / `version:check` / 新守卫 4/4 /
+`versionSync.wiring` / `releaseWiring` 全 EXIT=0；facts 重采集：服务端 **4297 用例
+（4291 pass / 0 fail / 6 skip）**、前端 581、徽章 4872、覆盖率 95.29 / 81.63 / 89.34，
+README 6 处回写、质量台账重生成；全套收口门禁见本批记录。
+
+**边界**：修 master 判据**不等于** PR #28 已转绿 —— PR CI 跑的是 PR 分支代码，需
+rebase / merge master 后重跑；PR #27 仍需 `npm run facts:refresh`。两个 PR 均未合并、
+未关闭、未推送（外部动作待拍板）。本地 `gate:close` 54/55 环境性假红维持；
+v1.3.3 发版事实不变。
+
+---
+
 ### 2026-11-15 批次 D293 · #439 上传根因与 #445 验收明细取证核销（推翻链，零代码）
 
 **触发**：本轮从 `git-credential-manager get` 取到 40 位 `GH_TOKEN`，拉到 #439 / #445 的
@@ -140,13 +178,14 @@ CI Linux 同代码绿）；零产品代码改动，未改 deadline / 阈值 / �
 ---
 
 <!-- changelog-index:start -->
-**本段覆盖 4 个批次（D290–D293，2026-11-14 → 2026-11-15）**。正文按时间倒序排列；
+**本段覆盖 5 个批次（D290–D294，2026-11-14 → 2026-11-15）**。正文按时间倒序排列；
 下表是同一批次的索引，便于按编号或关键词定位。**索引只是导航，正文未做任何删改**
 （被推翻的旧结论原样保留，这是本仓的既定口径）。新增批次后跑
 `node scripts/changelog-index.mjs --write` 重生成，`--check` 校验是否过期。
 
 | 批次 | 日期 | 主题 |
 |---|---|---|
+| D294 | 11-15 | version-sync 缩进不敏感修复（PR #28 红点根因，含推翻链） |
 | D293 | 11-15 | #439 上传根因与 #445 验收明细取证核销（推翻链，零代码） |
 | D292 | 11-15 | #445 job 计数自查更正（推翻链，零代码） |
 | D291 | 11-15 | D290 远端裁判核销（提交 / 推送 / CI 复核） |

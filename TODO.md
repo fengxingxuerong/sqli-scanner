@@ -5,6 +5,28 @@
 
 ---
 
+## 2026-11-15 批次 D294 · version-sync 缩进不敏感修复（PR #28 根因）
+
+**口径推翻**：D291/D293 与上一轮答复把 PR #27/#28 红点写成「PR 侧问题、master 无缺陷」
+⇒ **作废**。PR #28 实为**本仓判据缺陷**：Dependabot 把 `package-lock.json` 重写成
+**1 空格缩进**（master 2 空格），旧 `version-sync.mjs` 用固定 `\s{2}` / `\s{6}` 缩进正则
+读版本 ⇒ 合法 JSON 被读成「未找到版本号字段」，#443 lint step34 + test-server「接线-4」双红。
+PR #27 的 facts 指纹过期才是门禁正确工作（需 PR 分支重采），不是缺陷。
+
+- 修法：8 个 JSON 目标的 `pick` 改 `JSON.parse` 结构解析（坏 JSON / 缺字段 ⇒ null 判红），
+  `replace` 改按第 N 个 `"version"` 键定位的缩进无关替换；`--selftest` 补 8 条缩进自证。
+- 新增 `server/tests/versionSync.indent.guard.test.js`（4 例，真实文件副本 + 反向自证
+  + 静态反例自证）；**缺陷注入复验**：注回旧正则 ⇒ 守卫 EXIT=1（2 条红），备份还原 ⇒ 全绿。
+- facts 重采集：服务端 **4297（4291 pass / 0 fail / 6 skip）**、前端 581、徽章 4872。
+- 证据：`docs/ci-439-upload-evidence-2026-11-15.md` §三；台账新增
+  `version-sync-indent-fragility`（verified）。
+
+**边界（别当已完成推）**：修 master ≠ PR #28 转绿（PR CI 跑 PR 分支代码，需同步 master
+后重跑）；PR #27 仍需重采 facts；两个 PR 未合并 / 未关闭 / 未推送，外部动作待拍板。
+本地 54/55 假红、v1.3.3 发版事实不变。详见 CHANGELOG D294。
+
+---
+
 ## 2026-11-15 批次 D293 · #439 上传根因 / #445 验收明细取证核销（零代码）
 
 本轮取到 40 位 `GH_TOKEN`，拉到 #439 / #445 的 job 原始日志并落盘
