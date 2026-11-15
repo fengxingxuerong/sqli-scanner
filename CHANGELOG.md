@@ -6,6 +6,29 @@
 
 > 下一批次起的条目写在这里。发版时把本节整体升为 `## [x.y.z] - YYYY-MM-DD` 并补汇总段。
 
+### 2026-11-15 批次 D292 · #445 job 计数自查更正（推翻链，零代码）
+
+**触发**：D291 初稿把 push CI #445 写成「16 job / 12 success / 4 skipped」——漏计
+`desktop-package` 这个 skipped job，且 12+4≠16。按 AGENTS.md §3.5 走推翻协议。
+
+- **① 停用**：D291 段（本段下方）、TODO D291、结项报告 §12.7 与提交消息 `11f0b61`
+  里的 `12 success / 4 skipped` 全部作废，禁止再引用；git 历史不改，以本段为准。
+- **② 影响面**：`grep -nE "12 success|4 skipped|12/4|16 job"` 命中 CHANGELOG:22-23、
+  TODO:21、结项报告:352；其余命中为无关历史批次。已逐处改对。
+- **③ 作废重做**：以 API 逐 job 统计为准 —— **16 job / 11 success / 5 skipped**；
+  skipped = modsec-live、tamper-waf-matrix、docker-publish、release、desktop-package。
+  **`#445 completed success` 结论不变**，D290 的远端裁判不受计数笔误影响。
+- **④ 记推翻链**：旧数字仅保留在本段作教训；`docs/_claims-ledger.json` 新增
+  `ci-445-job-count`（status=refuted，带 refute_cmd / caveat）。
+- **⑤ 补门禁**：该计数依赖远端 API，无法做本地恒真静态判据 ⇒ 进台账待复核队列；
+  本批复核 `tamper-versioned-parity`（`node scripts/verify-tamper-upstream-examples.mjs`
+  复跑，结果写入该条 `recheck_batch`），满足「每批至少复核 1 条」。
+
+复现（本机实跑 ⇒ `TOTAL=16 {"success":11,"skipped":5}`）：
+`node -e "fetch('https://api.github.com/repos/fengxingxuerong/sqli-scanner/actions/runs/43715975971/jobs?per_page=100',{headers:{'User-Agent':'x'}}).then(r=>r.json()).then(d=>{const c={};d.jobs.forEach(j=>c[j.conclusion]=(c[j.conclusion]||0)+1);console.log(d.jobs.length,JSON.stringify(c))})"`
+
+---
+
 ### 2026-11-15 批次 D291 · D290 远端裁判核销（提交 / 推送 / CI 复核）
 
 **口径推翻**：D290 段与结项报告 §12.6 写的「本批未提交 / 推送、未重跑远端 CI」现已执行完毕，
@@ -19,9 +42,9 @@
   （唯一红 `server-coverage` 为 Windows 插桩环境性假红，本批零产品代码改动）。
 - **推送**：Git Data API → 远端 `82bcfffea510c8b23ed1ec0752e7d9a0c3810274`，
   2135/2135 条目差异 0、根树 `f43462f5` 与本地一致（dry-run 先过再正式推）。
-- **远端裁判**：push CI **#445**（`82bcfffe`）`completed success`，16 job 中 **12 success /
-  4 skipped**（周度 modsec-live / tamper-waf-matrix 与发版链 release / desktop-package /
-  docker-publish）；`sidecar-build` 的 step7 build、step8 上传、step9 复核**全 success**；
+- **远端裁判**：push CI **#445**（`82bcfffe`）`completed success`，16 job 中
+  **11 success / 5 skipped**（周度 modsec-live / tamper-waf-matrix 与发版链
+  docker-publish / release / desktop-package）；`sidecar-build` 的 step7 build、step8 上传、step9 复核**全 success**；
   `acceptance` job success 且无「套件失败现场」；CodeQL #130 同 sha success。
   ⇒ D290「上传失败不再改写整轮结论」的成对设计**经远端 CI 裁判通过**。本轮上传本身未失败，
   **不是**「上传服务端已修复」的证据。
@@ -76,13 +99,14 @@ CI Linux 同代码绿）；零产品代码改动，未改 deadline / 阈值 / �
 ---
 
 <!-- changelog-index:start -->
-**本段覆盖 2 个批次（D290–D291，2026-11-14 → 2026-11-15）**。正文按时间倒序排列；
+**本段覆盖 3 个批次（D290–D292，2026-11-14 → 2026-11-15）**。正文按时间倒序排列；
 下表是同一批次的索引，便于按编号或关键词定位。**索引只是导航，正文未做任何删改**
 （被推翻的旧结论原样保留，这是本仓的既定口径）。新增批次后跑
 `node scripts/changelog-index.mjs --write` 重生成，`--check` 校验是否过期。
 
 | 批次 | 日期 | 主题 |
 |---|---|---|
+| D292 | 11-15 | #445 job 计数自查更正（推翻链，零代码） |
 | D291 | 11-15 | D290 远端裁判核销（提交 / 推送 / CI 复核） |
 | D290 | 11-14 | 取证上传不得改写 sidecar 门禁结论（CI #439 红点收口） |
 <!-- changelog-index:end -->

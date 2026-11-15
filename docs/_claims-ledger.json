@@ -55,7 +55,7 @@
       "status": "verified",
       "evidence": "上游 doctest 字面比对（115 条比对，一致 100）＋[D102 2026-10-18] 复刻件比对段（5 项比对，一致 5：4 条逐字 + modsecurityversioned 归一口径）；T-6（2026-10-14）已修 2 条真缺陷并收敛关键字表为单一真源 versionedKeywords.js；D102 把「上游形态有对应实现」从口头声明固化为 ALIAS 段机械判据（复刻件缺失/漂移直接判红，无豁免位），同时 5 条 drift 差异行逐一补记「覆盖口径关闭」（server/src/core/tamper/tamper-upstream-examples-baseline.json）",
       "refute_cmd": "node scripts/verify-tamper-upstream-examples.mjs（drift 字段；末尾「上游形态复刻件」段为 D102 新增的复刻件比对）",
-      "recheck_batch": "待真机 A/B（modsec-live job 加对照组）；D96 复核（2026-10-17）：refute_cmd 复跑「无新增漂移」（字面一致数 100/115，3 条形态差异未动）；D102（2026-10-18）：新增 ALIAS 复刻件比对段 5/5 一致 ⇒ 按覆盖口径转 verified（改写见 claim），默认件差异维持 drift 点名",
+      "recheck_batch": "待真机 A/B（modsec-live job 加对照组）；D96 复核（2026-10-17）：refute_cmd 复跑「无新增漂移」（字面一致数 100/115，3 条形态差异未动）；D102（2026-10-18）：新增 ALIAS 复刻件比对段 5/5 一致 ⇒ 按覆盖口径转 verified（改写见 claim），默认件差异维持 drift 点名；D292 复核（2026-11-15）：`node scripts/verify-tamper-upstream-examples.mjs` EXIT=0，「✅ 无新增漂移（含复刻件比对）」，本条维持 verified",
       "caveat": "★ 白历史：原表述「与上游 sqlmap 等价」对**默认件**成立性被推翻（3 条形态差异：/*! X */ 空格形态 ×2、halfversioned 版本号 50540 vs 0），D102 改写为覆盖口径并转 verified——覆盖的是「上游形态有对应实现且经比对」，不是「默认件=上游件」。形态取舍属行为变化，默认链切换仍须真机证据（2026-10-05 真机对拍该族 0 打穿 ⇒ 现状本身也不构成绕过承诺）。"
     },
     {
@@ -334,6 +334,17 @@
       "lastReviewed": "2026-11-13",
       "reviewNote": "本条 refuted 的是「quick=全量绿」这个推理，不是 D287 的代码或 flake 归因结论（后者仍成立）。批次收口与发版必须跑全量；quick 只作批内闸。",
       "caveat": "54/55 的 1 项红是 Windows 本机 + 插桩的环境性假红，不是产品缺陷；但「本地门禁全绿」这句话在 Windows 本机仍不成立，对外只能写「CI 全量绿 + 本地 54/55（环境性假红）」。"
+    },
+    {
+      "id": "ci-445-job-count",
+      "claim": "（已作废）D291 初稿对 push CI #445 的 success/skipped job 计数",
+      "status": "refuted",
+      "refuted_by": "2026-11-15 自查：漏计 desktop-package 这个 skipped job，且两数之和不等于总 job 数 16；API 逐 job 统计为 11 success / 5 skipped（skipped = modsec-live、tamper-waf-matrix、docker-publish、release、desktop-package）",
+      "evidence": "CHANGELOG D291 初稿 / TODO D291 / 交付结项报告 §12.7 / 提交 11f0b61；更正见 CHANGELOG D292",
+      "refute_cmd": "node -e \"fetch('https://api.github.com/repos/fengxingxuerong/sqli-scanner/actions/runs/43715975971/jobs?per_page=100',{headers:{'User-Agent':'x'}}).then(r=>r.json()).then(d=>{const c={};d.jobs.forEach(j=>c[j.conclusion]=(c[j.conclusion]||0)+1);console.log(d.jobs.length,JSON.stringify(c))})\"  ⇒ TOTAL=16 {\"success\":11,\"skipped\":5}",
+      "lastReviewed": "2026-11-15",
+      "reviewNote": "D292 自查更正；#445 completed success 的整轮结论不变，D290 远端裁判不受影响。计数依赖远端 API，无法做本地恒真静态判据 ⇒ 留台账待复核队列。",
+      "caveat": "正确口径 16 job / 11 success / 5 skipped；旧数字只在作废注记里出现，禁止引用。"
     }
   ]
 }
