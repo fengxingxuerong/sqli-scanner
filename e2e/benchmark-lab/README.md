@@ -5,6 +5,23 @@
 （`expectedresults-1.2.csv`），因此可以做「同族 A/B」——同一种写法、同一个注入面，
 官方说可注入的必须检出，官方说安全的必须零误报。
 
+## CI 起法（[D298] 2026-11-15，首次接线、待远端裁判）
+
+本机配方（下面 §「环境准备」）依赖 `D:/tools/jdk` 等 Windows 路径；CI 由
+`scripts/ci-benchmark.mjs` 独立承担，与 `ci-dvwa.mjs` / `ci-vulnlab.mjs` 同构：
+
+```bash
+node scripts/ci-benchmark.mjs up      # Linux CI only：pin 源码 → -Pdeploy 打包 → 常驻 HSQLDB → cargo:run → 探针
+node scripts/ci-benchmark.mjs check   # 本机可用：只查 java/mvn/源码，不拉进程
+node scripts/ci-benchmark.mjs stop    # 按 pid 文件收工
+```
+
+`ci.yml` 的 `acceptance` job 用 `actions/setup-java@v4`（temurin 17）钉 JDK，
+`--require-labs` 追加 `benchmark-db,benchmark-app`；`planLab` 只看 9001/8443 是否监听，
+因此 `scripts/lib/labs.mjs` 的 Windows 前置默认值无需改动。
+⚠ **本批只完成接线**：Maven 冷构建、codeload pin、cargo 启动与 8443 自签探针尚未在远端
+CI 实证，首跑可能整轮红；只有 acceptance 日志出现「外部裁判 4 号 … PASS」才算 SKIP→PASS。
+
 ## ✅ 当前状态：已接验收门禁（D114 的漏检缺口已由 D115–D117 修复）
 
 **最近一轮门禁证据**（`e2e/results/acceptance-report.md`）：⚠️ 原文引用的「2026-11-01 全量验收 27/27 全 PASS」已作废（D269 起 README 明示从未有单次 27/27 全断言）；现行口径为 **2026-11-10 全量验收 25/27 跑出断言 / 2 SKIP**，本裁判子集数据见下表。

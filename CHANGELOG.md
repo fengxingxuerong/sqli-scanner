@@ -6,6 +6,42 @@
 
 > 下一批次起的条目写在这里。发版时把本节整体升为 `## [x.y.z] - YYYY-MM-DD` 并补汇总段。
 
+### 2026-11-15 批次 D298 · 外部裁判 4 号（OWASP Benchmark）接进 CI acceptance（首次接线，待远端裁判）
+
+**起点**：4 号裁判在 CI 长期 `SKIP`（`ci.yml` 原注释「Java 构建链仍未验证，不盲猜」），
+`--require-labs` 也不带 benchmark ⇒ 即使起得来也会静默跳过。本机 11-10 的
+`187/187` 是 dirty 工作区快照，不对应任何提交，不能替代当前版本的 CI 真值。
+
+**改动**（CI 接线 + 判据，零产品代码）：
+- 新增 `scripts/ci-benchmark.mjs`：与 `ci-dvwa.mjs` / `ci-vulnlab.mjs` 同构的 Linux CI 起法 ——
+  pin 源码（`a452b3aa`）→ `mvn initialize clean package -Pdeploy -DskipTests
+  -Dspotless.check.skip=true -Dspotless.apply.skip=true` → **手动常驻** HSQLDB @9001
+  （官方 antrun 的 fork 子进程会随 mvn 退出被回收）→ `mvn cargo:run -Pdeploy` 起
+  https/8443 自签 → 9001 TCP + Benchmark 端点双探针；失败显式 `exit 1`，
+  **不留静默 SKIP**。`up` 在 win32 直接拒绝（本仓禁止本机起常驻靶场），本机只可跑 `check`。
+- `ci.yml` `acceptance`：`actions/setup-java@v4`（temurin 17）、新增「启动 Benchmark」硬起步骤
+  （`timeout-minutes: 20`）、job 总超时 `25 → 45`、
+  `--require-labs` 追加 `benchmark-db,benchmark-app`。`planLab` 只看端口是否监听，
+  不看 `scripts/lib/labs.mjs` 里的 Windows 前置默认值 ⇒ **未改本机契约**，
+  `ciWindowsOnly.guard.test.js` 的断言保持有效。
+- 新增 `server/tests/ciBenchmarkWiring.guard.test.js`（4 例）：只认 ci.yml 的 run/uses 指令体
+  （不认注释），钉住 JDK17 / 硬起 / require-labs 双端口 / 脚本的失败-closed 契约；
+  4 组变形反例（删 require-labs、`|| true` 吞失败、删就绪探针、改 JDK 版本）全部必须判红。
+- 更新 `ci.yml` 第 764 行旧注释「不盲猜」为作废指引；`e2e/benchmark-lab/README.md` 补 CI 起法。
+
+**验证（本树实跑）**：`node --check scripts/ci-benchmark.mjs` /
+新守卫 4/4 / `npm run lint` / `npm run typecheck` / error-contract / complexity / nesting /
+module-loadable / `yaml` 解析（acceptance 30 steps、timeout 45）全 EXIT=0；
+facts 重采集（新守卫纳入指纹）。
+
+**边界（重要）**：本批**只完成接线，未宣称 SKIP→PASS** —— Maven 冷构建、codeload pin 下载、
+cargo 启动、8443 自签探针均**未在远端 CI 实证**，首跑可能整轮红，需 1–2 轮调试。
+台账新增 `benchmark-ci-wiring-d298` 记 **unverified**（新结论先不转 verified），
+待远端 acceptance 日志出现 `外部裁判 4 号 ... PASS` 才升级。本地 `gate:close` 54/55
+环境性假红维持；v1.3.3 发版事实不受影响。
+
+---
+
 ### 2026-11-15 批次 D297 · macOS 时间通道假红入账（等 CI 终判期间）
 
 **背景**：D296 收口后复查远端 CI，两个红点均属**已知时间通道墙钟敏感族**，不是产品缺陷。
@@ -235,13 +271,14 @@ CI Linux 同代码绿）；零产品代码改动，未改 deadline / 阈值 / �
 ---
 
 <!-- changelog-index:start -->
-**本段覆盖 7 个批次（D290–D297，2026-11-14 → 2026-11-15）**。正文按时间倒序排列；
+**本段覆盖 8 个批次（D290–D298，2026-11-14 → 2026-11-15）**。正文按时间倒序排列；
 下表是同一批次的索引，便于按编号或关键词定位。**索引只是导航，正文未做任何删改**
 （被推翻的旧结论原样保留，这是本仓的既定口径）。新增批次后跑
 `node scripts/changelog-index.mjs --write` 重生成，`--check` 校验是否过期。
 
 | 批次 | 日期 | 主题 |
 |---|---|---|
+| D298 | 11-15 | 外部裁判 4 号（OWASP Benchmark）接进 CI acceptance（首次接线，待远端裁判） |
 | D297 | 11-15 | macOS 时间通道假红入账（等 CI 终判期间） |
 | D296 | 11-15 | PR 分支同步执行核销（口径作废 + 远端裁判） |
 | D294 | 11-15 | version-sync 缩进不敏感修复（PR #28 红点根因，含推翻链） |
