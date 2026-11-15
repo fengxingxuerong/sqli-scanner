@@ -6,6 +6,33 @@
 
 > 下一批次起的条目写在这里。发版时把本节整体升为 `## [x.y.z] - YYYY-MM-DD` 并补汇总段。
 
+### 2026-11-15 批次 D296 · PR 分支同步执行核销（口径作废 + 远端裁判）
+
+**起点**：D294 段边界写「两个 PR 均未合并、未关闭、未推送（外部动作待拍板）」。
+用户随后明确授权「同步 master 后重跑」⇒ **「未推送 / 待拍板」口径作废**（原文保留作历史）。
+
+- **执行**：GitHub Merges API `POST /merges {base:<PR ref>, head:"master"}` 两次 **201 无冲突**：
+  #28 → `f353b995`、#27 → `7ea003e4`；两分支都在本仓（非 fork）。Contents API 实读确认
+  合并后 `version-sync.mjs` 含 `JSON.parse` / `indentSelfChecks` ⇒ D294 新判据进了 PR 分支。
+  合并前 PR vs master：`diverged / behind_by=5 / ahead_by=1`。
+- **#450（PR #28 重跑）**：`lint` / `test-server` / `test-frontend` / `audit` /
+  `release-smoke` / `sidecar-build` **全 success** ⇒ 旧 #443 的 step34 + 接线-4 双红消失。
+- **#451（PR #27）**：`lint` step31 仍报 `facts-sync --check`「采集源已改动
+  （`server/package.json`）」——合并只带 master 指纹。本地按 PR 版采集源**真跑**
+  `facts:refresh`（11m59s）+ `facts:fix` + `--check`，三步全 0；数字仍
+  4297（4291/0/6）、徽章 4872，仅指纹与覆盖率小数位变。4 个产物经 Git Data API
+  一次 commit 推到 PR #27 ⇒ `b1bdb356`，触发 **#452**。
+- **⑤ 补门禁 / 复核**：本批复核 `version-sync-indent-fragility` 的 refute_cmd
+  （`node --test server/tests/versionSync.indent.guard.test.js` +
+  `version-sync.mjs --selftest`），满足「每批至少复核 1 条」。
+
+**边界**：#450 / #452 整轮 CI 当时仍 `in_progress`（GitHub 并发排队、job 级 queued），
+只报已终判 job，**不宣称整轮 success**；#452 的 step31 本地已验 `facts:check` 绿，
+远端未出结论前不外推。PR **仍未合并、未关闭**；master 未改动、工作区已用备份还原干净；
+本地 `gate:close` 54/55 环境性假红维持。
+
+---
+
 ### 2026-11-15 批次 D294 · version-sync 缩进不敏感修复（PR #28 红点根因，含推翻链）
 
 **起点**：D291 / D293 把 Dependabot PR #27 / #28 的 CI 红点归因为「PR 侧依赖升级、
@@ -41,6 +68,9 @@ README 6 处回写、质量台账重生成；全套收口门禁见本批记录�
 rebase / merge master 后重跑；PR #27 仍需 `npm run facts:refresh`。两个 PR 均未合并、
 未关闭、未推送（外部动作待拍板）。本地 `gate:close` 54/55 环境性假红维持；
 v1.3.3 发版事实不变。
+
+> ⚠ D296 补记：上段「未推送（外部动作待拍板）」**已作废** —— 用户授权后 PR 分支已同步并推送；
+> 「未合并 / 未关闭」仍成立。原文按推翻链保留，不删。
 
 ---
 
@@ -178,13 +208,14 @@ CI Linux 同代码绿）；零产品代码改动，未改 deadline / 阈值 / �
 ---
 
 <!-- changelog-index:start -->
-**本段覆盖 5 个批次（D290–D294，2026-11-14 → 2026-11-15）**。正文按时间倒序排列；
+**本段覆盖 6 个批次（D290–D296，2026-11-14 → 2026-11-15）**。正文按时间倒序排列；
 下表是同一批次的索引，便于按编号或关键词定位。**索引只是导航，正文未做任何删改**
 （被推翻的旧结论原样保留，这是本仓的既定口径）。新增批次后跑
 `node scripts/changelog-index.mjs --write` 重生成，`--check` 校验是否过期。
 
 | 批次 | 日期 | 主题 |
 |---|---|---|
+| D296 | 11-15 | PR 分支同步执行核销（口径作废 + 远端裁判） |
 | D294 | 11-15 | version-sync 缩进不敏感修复（PR #28 红点根因，含推翻链） |
 | D293 | 11-15 | #439 上传根因与 #445 验收明细取证核销（推翻链，零代码） |
 | D292 | 11-15 | #445 job 计数自查更正（推翻链，零代码） |

@@ -372,7 +372,8 @@
       "evidence": "docs/ci-439-upload-evidence-2026-11-15.md §三（PR head 原文 / #443 日志）；server/tests/versionSync.indent.guard.test.js 4/4 + 缺陷注入复验（注入红 2 条、备份还原绿）",
       "refute_cmd": "node --test server/tests/versionSync.indent.guard.test.js && node scripts/version-sync.mjs --selftest",
       "lastReviewed": "2026-11-15",
-      "caveat": "master 修复不自动让 PR #28 转绿（PR CI 跑 PR 分支代码，需同步 master 后重跑）；PR #27 的 facts 指纹过期属门禁正确工作，仍需重采"
+      "caveat": "master 修复不自动让 PR #28 转绿（PR CI 跑 PR 分支代码，需同步 master 后重跑）；PR #27 的 facts 指纹过期属门禁正确工作，仍需重采",
+      "reviewNote": "D296 复核（2026-11-15）：复跑 refute_cmd（`versionSync.indent.guard.test.js` 4/4 + `version-sync.mjs --selftest` 8 条缩进自证）全 EXIT=0；PR #28 分支同步 master 后 #450 lint/test-server 已转绿，本条维持 verified"
     }
   ]
 }
