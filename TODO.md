@@ -5,6 +5,28 @@
 
 ---
 
+## 2026-11-15 批次 D291 · D290 远端裁判核销（收口，零产品代码）
+
+**起点**：D290 在 11-14 做完但留在工作区（8 M + 1 staged A），文档里写「未提交 / 推送、
+未重跑远端 CI」。本批把这条链补完并让远端裁判，同时把过期口径标作废（原文保留）。
+
+- 提交前判据全绿（11 项，逐项 EXIT=0）：新守卫 6/6、`ciWiring` 8/8、facts / readme /
+  stale-claim / changelog-index / greenguard / ref-integrity / typecheck / lint / `gate:fast`。
+  `git fsck` 0 ⇒ 允许动刀。
+- plumbing（禁 `git commit`，husky 曾删 `.git`）：`git add` 显式 9 路径 → `write-tree`
+  `f43462f5` → `commit-tree -p c0e658f -F -` → `update-ref` 带 old value ⇒ **`6d6de8b`**，
+  提交后工作区 0 处、对象库 0 坏链。
+- Git Data API 推送（显式 `--base f4cd9865` 取远端真值 + `--dry-run` 先行）：远端
+  **`82bcfffe`**，2135/2135 条目差异 0、根树一致、零失真。
+- **远端裁判**：push CI **#445** completed **success**（16 job / 12 success / 4 skipped），
+  `sidecar-build` 的 build、上传、复核三步全绿；CodeQL #130 同 sha 绿 ⇒ D290 设计闭环。
+
+**仍未竟**（别当已完成推）：#439 上传服务根因未定性；acceptance 套件级明细仍需 token ⇒
+27/27 全断言不成立；本地 `server-coverage` 假红维持（54/55）；Dependabot PR #27/#28 的
+lint / test-server 红点未修未合。详见 CHANGELOG D291 与结项报告 §12.7。
+
+---
+
 ## 2026-11-14 批次 D290 · 取证上传不得改写 sidecar 门禁结论（CI #439 红点收口）
 
 **起点**：远端 push CI run **#439**（`f4cd986`，11-13 22:18 触发的文档提交）整轮 **FAILURE**，

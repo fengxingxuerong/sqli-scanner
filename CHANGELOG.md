@@ -6,6 +6,35 @@
 
 > 下一批次起的条目写在这里。发版时把本节整体升为 `## [x.y.z] - YYYY-MM-DD` 并补汇总段。
 
+### 2026-11-15 批次 D291 · D290 远端裁判核销（提交 / 推送 / CI 复核）
+
+**口径推翻**：D290 段与结项报告 §12.6 写的「本批未提交 / 推送、未重跑远端 CI」现已执行完毕，
+该表述作废（原文保留作历史，不删）。
+
+- **本地提交** `6d6de8b`（plumbing，9 文件：ci.yml / 新守卫 / CHANGELOG / TODO / README /
+  facts×2 / 质量台账 / 结项报告 §12.6），tree `f43462f5`；`git fsck` 0、工作区 0 处。
+  提交前逐项实跑：新守卫 6/6、`ciWiring` 8/8、`facts:check` / `readme:check` /
+  `stale-claim` / `changelog-index --check` / `greenguard` / `ref-integrity` /
+  `typecheck` / `lint` / `gate:fast` **全 EXIT=0**；全量 `gate:close` 仍是 D290 的 54/55
+  （唯一红 `server-coverage` 为 Windows 插桩环境性假红，本批零产品代码改动）。
+- **推送**：Git Data API → 远端 `82bcfffea510c8b23ed1ec0752e7d9a0c3810274`，
+  2135/2135 条目差异 0、根树 `f43462f5` 与本地一致（dry-run 先过再正式推）。
+- **远端裁判**：push CI **#445**（`82bcfffe`）`completed success`，16 job 中 **12 success /
+  4 skipped**（周度 modsec-live / tamper-waf-matrix 与发版链 release / desktop-package /
+  docker-publish）；`sidecar-build` 的 step7 build、step8 上传、step9 复核**全 success**；
+  `acceptance` job success 且无「套件失败现场」；CodeQL #130 同 sha success。
+  ⇒ D290「上传失败不再改写整轮结论」的成对设计**经远端 CI 裁判通过**。本轮上传本身未失败，
+  **不是**「上传服务端已修复」的证据。
+- **提交前归因本轮新红点**：11-14 Dependabot PR #27（引擎依赖）/ #28（前端依赖）触发的
+  CI #443 / #442 failure，失败面是 `lint` step31 文档数字口径、step34 版本号三处一致、
+  `test-server` Server tests 及前置门禁连锁，与 D290 无关；PR 未合并、未处理。
+
+**边界（不变）**：#439 上传服务根因仍未定性（无 `GH_TOKEN` 拉不到 step 日志），不写「偶发已自愈」；
+acceptance 套件级 PASS/SKIP 明细需 token 拉日志 ⇒ **不外推 27/27 全断言**；
+本地 54/55 的环境性假红维持；v1.3.3 tag / Release / 6 assets 事实不受影响。
+
+---
+
 ### 2026-11-14 批次 D290 · 取证上传不得改写 sidecar 门禁结论（CI #439 红点收口）
 
 **起点**：远端 push CI run #439（`f4cd986`）整轮 FAILURE，唯一红是 `sidecar-build` 的
@@ -47,13 +76,14 @@ CI Linux 同代码绿）；零产品代码改动，未改 deadline / 阈值 / �
 ---
 
 <!-- changelog-index:start -->
-**本段覆盖 1 个批次（D290–D290，2026-11-14 → 2026-11-14）**。正文按时间倒序排列；
+**本段覆盖 2 个批次（D290–D291，2026-11-14 → 2026-11-15）**。正文按时间倒序排列；
 下表是同一批次的索引，便于按编号或关键词定位。**索引只是导航，正文未做任何删改**
 （被推翻的旧结论原样保留，这是本仓的既定口径）。新增批次后跑
 `node scripts/changelog-index.mjs --write` 重生成，`--check` 校验是否过期。
 
 | 批次 | 日期 | 主题 |
 |---|---|---|
+| D291 | 11-15 | D290 远端裁判核销（提交 / 推送 / CI 复核） |
 | D290 | 11-14 | 取证上传不得改写 sidecar 门禁结论（CI #439 红点收口） |
 <!-- changelog-index:end -->
 
