@@ -5,6 +5,66 @@
 
 ---
 
+## 2026-11-14 批次 D290 · 取证上传不得改写 sidecar 门禁结论（CI #439 红点收口）
+
+**起点**：远端 push CI run **#439**（`f4cd986`，11-13 22:18 触发的文档提交）整轮 **FAILURE**，
+而 16 个 job 里只有 `sidecar-build` 的 **step 8「上传构建诊断（成功也传）」** 失败；
+同 job 的 **step 7「Build sidecar (SEA) + smoke」SUCCESS**，其余 15 个 job（lint /
+test-server / test-frontend / acceptance / e2e-self-contained / docker / release-smoke /
+audit / test-matrix win+mac）全绿，5 个 skip 是周度或发版链。此前 6 次 push
+（#427/#429/#430/#431/#437/#438）同配置连续 SUCCESS ⇒ 非门禁的 artifact 上传可用性
+**绑架了整轮门禁结论**。本机无 `GH_TOKEN` / `gh`，拉不到该 step 日志 ⇒ 上传失败的根因
+（服务端偶发 / 配置）**未定性、未洗绿**，本批修的是「结论被取证通道改写」这个确定的设计缺陷。
+
+**改动**（纯 CI 接线 + 判据，零产品代码）：
+- `.github/workflows/ci.yml` `sidecar-build`：build 步加 `id: sidecar_build`；诊断上传步
+  加 `id: sidecar_diag_upload` + `continue-on-error: true`（**仅取证通道**）；新增
+  **「复核构建结论」**步（`if: always()`）显式读 `steps.sidecar_build.outcome`，
+  非 `success` 即 `exit 1`，上传非成功只打 `::warning::`。
+  两道保险：build 失败 ⇒ 自身判红 + 复核步判红；上传失败 ⇒ 不再拖红整轮，但取证降级可见。
+- 注释同步改写历史红线：旧的「不是 continue-on-error，别再犯」针对的是**门禁步骤**被吞成
+  恒绿；本批只对取证步骤容错，且用显式复核把结论拿回来，方向相反、语义不冲突。
+- 新增 `server/tests/sidecarDiagUpload.guard.test.js`（6 例）：静态配对判据钉住
+  build 绝不带 continue-on-error / 上传必须容错 / 复核必须 always、必须读两个 outcome、
+  必须能 `exit 1` / 读的 step id 必须真实存在（D22 同款）+ 分母守卫。
+  **有牙自证**：5 组从真实 ci.yml 片段变形的反例（删复核步、吞 build、复核不判红、
+  读幽灵 id、回退到 #439 形态）全部必须被判红。首跑自证抓到自己的假反例——
+  全局 `replace('exit 1')` 命中的是「前置门禁检查」步而非复核步，判据没被骗过；
+  已改为只在复核片段内替换。
+
+**验证**（本机，2026-11-14）：
+- `yaml` 解析 ci.yml：`sidecar-build` **8 个 step**，id / continue-on-error / if 逐项符合预期。
+- `node --test server/tests/sidecarDiagUpload.guard.test.js` **6/6**；既有
+  `ciWiring.guard.test.js` **8/8**；`ci-local --quick` 的 job 覆盖自检「15 个 job →
+  本地覆盖 8 / 显式排除 7 / **未声明 0**」。
+- 六道静态门禁逐条 EXIT=0：`facts:check`、`readme:check`、`stale-claim-check`、
+  `changelog-index --check`（含 `--write` 重生成索引）、`greenguard-check`、`ref-integrity`；
+  `changelog-index --selftest` EXIT=0。
+- **全量 `npm run gate:close`（非 `--quick`）：54/55**，唯一红 `server-coverage`
+  —— Windows + 覆盖率插桩下时间通道用例 30s DEADLINE 超时，与结项报告 §12.2 登记的
+  环境性假红**同族**（此前 11-13 三次覆盖率日志失败用例条数与名字各不相同 ⇒ 非确定性；
+  CI Linux 同代码 `Server coverage gate` 绿）。本批零产品代码改动，未改 deadline、
+  未降阈值、未跳过门禁；按口径如实保留 54/55，不外推 `--quick` 的 52/52。
+- **假红反证（本批实跑）**：单独复跑覆盖率门禁（`logs/d290-cov-verify.txt`，EXIT=1）
+  失败 **2** 条，均为时序 / 墙钟敏感用例 —— `eventLoopWatch.test.js:60`
+  「120ms 同步阻塞应被测到（实际 maxMs=0）」与 `extractor.timeDrift.test.js:524`
+  「失败探针导致请求数发散（53 > 20）」。与 11-13 三次覆盖率日志（分别 5 / 3 / 3 条、
+  用例名各异）**完全不同** ⇒ 非确定性；这两文件**带插桩单跑 20/20 全绿**
+  （`logs/d290-cov-single.txt`，EXIT=0），与 §12.2 反证 1 同款。本批零产品代码改动，
+  失败面与本批文件无交集（`sidecarDiagUpload` 在覆盖率日志中出现 0 次）。
+- **`npm run gate:fast` 17/17 EXIT=0**（42.5s，恒跑组 + 受影响组）；快门禁绿不外推全量。
+- **facts 重采集**：服务端 **4293 用例（4287 pass / 0 fail / 6 skip）**、前端 581、
+  徽章 4868、测试源 **569 文件**（指纹 `9a50cd21fd838f20`）。新守卫先 `git add`
+  再 refresh —— 首跑 facts 明确警告「在磁盘上但未入 git 索引」会污染指纹（D284 同形态），
+  按提示处置后重刷；`--fix` 回写 README 4 处实时口径、`quality-ledger` 重生成，
+  `facts:check` EXIT=0。
+
+**边界**：未放宽任何判据、未改 deadline、未降阈值、未跳门禁；build 失败仍 100% 让 job 红。
+无 token ⇒ 未下载 #439 日志、未重跑远端 CI；本批只保证「上传失败不再改写结论」，
+不宣称上传服务本身已修复。交付 / 发版事实仍以结项报告 §12 为准。
+
+---
+
 ## 2026-11-13 批次 D289 · v1.3.3 发版（版本对齐 + D285-D288 优化收口）
 
 **起点**：CI run #426（7805a1a）全绿（lint 转绿，上轮 step 31 卡点解除）。按结项报告

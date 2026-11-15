@@ -6,8 +6,55 @@
 
 > 下一批次起的条目写在这里。发版时把本节整体升为 `## [x.y.z] - YYYY-MM-DD` 并补汇总段。
 
+### 2026-11-14 批次 D290 · 取证上传不得改写 sidecar 门禁结论（CI #439 红点收口）
+
+**起点**：远端 push CI run #439（`f4cd986`）整轮 FAILURE，唯一红是 `sidecar-build` 的
+step 8「上传构建诊断」；同 job 的 step 7「Build sidecar (SEA) + smoke」SUCCESS，其余
+15 个 job 全绿，此前 6 次 push 同配置连续 SUCCESS ⇒ 非门禁的 artifact 上传可用性绑架了
+整轮结论。本机无 `GH_TOKEN` / `gh`，拉不到该 step 日志，**上传失败根因未定性、未洗绿**。
+
+**改动**（纯 CI 接线 + 判据，零产品代码）：
+- `.github/workflows/ci.yml`：build 步加 `id: sidecar_build`；诊断上传步加
+  `id: sidecar_diag_upload` + `continue-on-error: true`（仅取证通道）；新增
+  「复核构建结论」步 `if: always()` 显式读两个 `outcome`，build 非 success 即 `exit 1`，
+  上传失败只打 `::warning::`。两道保险：build 失败 ⇒ 自身判红 + 复核判红；
+  上传失败 ⇒ 不拖红整轮但降级可见。注释同步澄清历史红线（禁的是**门禁步骤**被吞成恒绿）。
+- 新增 `server/tests/sidecarDiagUpload.guard.test.js`（6 例）：静态配对判据钉住
+  build 绝不带 continue-on-error / 上传必须容错 / 复核必须 always、读两个 outcome、
+  能 `exit 1`、读的 step id 真实存在（D22 同款）+ 分母守卫；5 组变形反例全须判红。
+  首跑自证抓到自身假反例（全局 `replace('exit 1')` 命中前置门禁步），已改为片段内替换。
+
+**验证**：`yaml` 解析 job 为 8 step 且字段逐项符合；新守卫 6/6、既有 ciWiring 8/8；
+`ci-local --quick` job 覆盖自检「15 job / 未声明 0」；六道静态门禁
+（facts / readme / stale-claim / changelog-index / greenguard / ref-integrity）逐条 EXIT=0。
+**全量 `npm run gate:close`（非 `--quick`）：54/55**，唯一红 `server-coverage`
+（Windows + 插桩下时间通道用例 30s DEADLINE 超时，与结项报告 §12.2 同族的环境性假红；
+CI Linux 同代码绿）；零产品代码改动，未改 deadline / 阈值 / 跳过门禁，如实保留不外推。
+`gate:fast` **17/17 EXIT=0**（42.5s）。**假红反证**：单独复跑覆盖率
+（`logs/d290-cov-verify.txt`）失败 2 条均为时序敏感用例（`eventLoopWatch.test.js:60`、
+`extractor.timeDrift.test.js:524`），与 11-13 三次日志（5/3/3 条、名字各异）不同 ⇒
+非确定性；两文件带插桩单跑 **20/20**（`logs/d290-cov-single.txt`），与 §12.2 反证 1 同款；
+失败面与本批文件无交集。
+**facts 重采集**：服务端 4293 用例（4287 pass / 0 fail / 6 skip）、前端 581、
+徽章 4868、测试源 569 文件（指纹 `9a50cd21fd838f20`）；新守卫先 `git add` 再 refresh
+（首跑 facts 警告「未入 git 索引会污染指纹」，按提示处置），README 4 处口径回写、
+质量台账重生成，`facts:check` EXIT=0。
+
+**边界**：未放宽判据、未改 deadline、未降阈值、未跳门禁；build 失败仍 100% 让 job 红。
+无 token ⇒ 未下载 #439 日志、未重跑远端 CI；只保证「上传失败不再改写结论」，
+**不宣称上传服务已修复**。交付 / 发版事实仍以 `交付结项报告-2026-11-12.md` §12 为准。
+
+---
+
 <!-- changelog-index:start -->
-当前没有未发布批次（最近一次发版见下方版本段落）。
+**本段覆盖 1 个批次（D290–D290，2026-11-14 → 2026-11-14）**。正文按时间倒序排列；
+下表是同一批次的索引，便于按编号或关键词定位。**索引只是导航，正文未做任何删改**
+（被推翻的旧结论原样保留，这是本仓的既定口径）。新增批次后跑
+`node scripts/changelog-index.mjs --write` 重生成，`--check` 校验是否过期。
+
+| 批次 | 日期 | 主题 |
+|---|---|---|
+| D290 | 11-14 | 取证上传不得改写 sidecar 门禁结论（CI #439 红点收口） |
 <!-- changelog-index:end -->
 
 ## [1.3.3] - 2026-11-13
