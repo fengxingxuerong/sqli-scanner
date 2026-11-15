@@ -490,8 +490,8 @@ npm run artifact:drift   # 入库的 e2e 基线产物必须等于当前代码跑
 ## 项目状态
 
 - TypeScript: 零错误
-- 前端测试: 581/581 通过（覆盖率门禁 stmts 93.28 / branch 84.44 / func 80.72，阈值 88/77/67）
-- 服务端测试: 4297 用例（4291 pass / 0 fail / 6 skip，并发口径 2026-11-15 复测；6 skip 为环境依赖显式跳过。覆盖率 lines 95.29 / branch 81.63 / func 89.34，阈值 85/74/77）
+- 前端测试: 581/581 通过（覆盖率门禁 stmts 93.28 / branch 84.43 / func 80.72，阈值 88/77/67）
+- 服务端测试: 4297 用例（4291 pass / 0 fail / 6 skip，并发口径 2026-11-15 复测；6 skip 为环境依赖显式跳过。覆盖率 lines 95.28 / branch 81.62 / func 89.34，阈值 85/74/77）
 - 一键扫描: `npm run scan -- -u <url>`（CLI 一条命令产出 HTML/JSON/Markdown 全套报告 + manifest，退出码可直接进 CI 门禁）
 - Tamper 插件: 234 个（含批次 D3 新增 scalarselectinline；含 v24 增量 20 个，对齐 sqlmap 官方 tamper 全集，含官方 CRS/libinjection 实测组合 uniontable+odbcbrace；含批次 D13 新增 5 件上游形态变体 *nospace/*open/*block，真机 A/B 判决前不进默认链）
 - WAF 绕过能力: 200+ 插件链式组合，覆盖 62 个 WAF 厂商指纹识别 + 推荐
