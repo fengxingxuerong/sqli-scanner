@@ -38,25 +38,41 @@ import path from 'node:path';
 
 const ROOT = process.cwd();
 
+/**
+ * [D294 2026-11-15] JSON 目标的版本读取改为**结构解析**，不再依赖文本缩进宽度。
+ * 真因：Dependabot PR #28 重写的 package-lock.json 用 1 空格缩进（master 是 2 空格），
+ * 旧判据 `/^\s{2}"version"/` 与 `/^\s{6}"version"/` 对合法 JSON 全部落空 ⇒
+ * CI 误报「未找到版本号字段」，连带 test-server「接线-4」失败。
+ * 证据：`docs/ci-439-upload-evidence-2026-11-15.md` §三。
+ * 结构解析同时覆盖 1/2/4 空格、tab、压缩单行 JSON；坏 JSON 返回 null ⇒ fail-closed 判红。
+ */
+function safeParseJson(text) {
+  try { return JSON.parse(text); } catch { return null; }
+}
+const pickTop = (text) => {
+  const v = safeParseJson(text)?.version;
+  return typeof v === 'string' ? v : null;
+};
+const pickRootPkg = (text) => {
+  const v = safeParseJson(text)?.packages?.['']?.version;
+  return typeof v === 'string' ? v : null;
+};
+/** 替换第 nth 个 `"version": "..."` 键（1=顶层，2=packages[""]）；缩进无关且不重排文件。 */
+function replaceNth(text, v, nth) {
+  const re = /^([ \t]*"version"[ \t]*:[ \t]*)"[^"]+"/gm;
+  let i = 0;
+  return text.replace(re, (m, p1) => (++i === nth ? `${p1}"${v}"` : m));
+}
+const repTop = (text, v) => replaceNth(text, v, 1);
+const repRoot = (text, v) => replaceNth(text, v, 2);
+
 const TARGETS = [
-  {
-    file: path.join('package.json'),
-    label: 'package.json',
-    pick: (text) => {
-      // 只取顶层 version：正则限定在第一个 "version" 键，避免命中 dependencies 里的嵌套版本
-      const m = text.match(/^\s{2}"version"\s*:\s*"([^"]+)"/m);
-      return m ? m[1] : null;
-    },
-    replace: (text, v) => text.replace(/^(\s{2}"version"\s*:\s*)"[^"]+"/m, `$1"${v}"`),
-  },
+  { file: path.join('package.json'), label: 'package.json', pick: pickTop, replace: repTop },
   {
     file: path.join('src-tauri', 'tauri.conf.json'),
     label: 'src-tauri/tauri.conf.json',
-    pick: (text) => {
-      const m = text.match(/^\s{2}"version"\s*:\s*"([^"]+)"/m);
-      return m ? m[1] : null;
-    },
-    replace: (text, v) => text.replace(/^(\s{2}"version"\s*:\s*)"[^"]+"/m, `$1"${v}"`),
+    pick: pickTop,
+    replace: repTop,
   },
   {
     file: path.join('src-tauri', 'Cargo.toml'),
@@ -74,60 +90,42 @@ const TARGETS = [
     // 这是「同一事实多份副本」的**第十处**，version-sync 此前只覆盖九处。
     file: path.join('.claude-plugin', 'plugin.json'),
     label: '.claude-plugin/plugin.json',
-    pick: (text) => {
-      const m = text.match(/^\s{2}"version"\s*:\s*"([^"]+)"/m);
-      return m ? m[1] : null;
-    },
-    replace: (text, v) => text.replace(/^(\s{2}"version"\s*:\s*)"[^"]+"/m, `$1"${v}"`),
+    pick: pickTop,
+    replace: repTop,
   },
   {
     // 引擎子包：`npm run server` / Dockerfile 里的 `npm --prefix server ci` 都读它，
     // 与根包长期不同步（D127 实测 1.1.0 vs 1.1.1）——旧判据看不见。
     file: path.join('server', 'package.json'),
     label: 'server/package.json',
-    pick: (text) => {
-      const m = text.match(/^\s{2}"version"\s*:\s*"([^"]+)"/m);
-      return m ? m[1] : null;
-    },
-    replace: (text, v) => text.replace(/^(\s{2}"version"\s*:\s*)"[^"]+"/m, `$1"${v}"`),
+    pick: pickTop,
+    replace: repTop,
   },
   {
     // 锁文件顶层 version：`npm ci` 用它，也是 `npm ls` 报版本的来源之一。
     file: 'package-lock.json',
     label: 'package-lock.json',
-    pick: (text) => {
-      const m = text.match(/^\s{2}"version"\s*:\s*"([^"]+)"/m);
-      return m ? m[1] : null;
-    },
-    replace: (text, v) => text.replace(/^(\s{2}"version"\s*:\s*)"[^"]+"/m, `$1"${v}"`),
+    pick: pickTop,
+    replace: repTop,
   },
   {
-    // 同一个 lock 里的第二份副本：packages[""].version（6 空格缩进，其余嵌套版本都在 10+ 空格）。
+    // 同一个 lock 里的第二份副本 packages[""].version（D294 起按结构取，不再数缩进空格）。
     file: 'package-lock.json',
     label: 'package-lock.json#packages[""]',
-    pick: (text) => {
-      const m = text.match(/^\s{6}"version"\s*:\s*"([^"]+)"/m);
-      return m ? m[1] : null;
-    },
-    replace: (text, v) => text.replace(/^(\s{6}"version"\s*:\s*)"[^"]+"/m, `$1"${v}"`),
+    pick: pickRootPkg,
+    replace: repRoot,
   },
   {
     file: path.join('server', 'package-lock.json'),
     label: 'server/package-lock.json',
-    pick: (text) => {
-      const m = text.match(/^\s{2}"version"\s*:\s*"([^"]+)"/m);
-      return m ? m[1] : null;
-    },
-    replace: (text, v) => text.replace(/^(\s{2}"version"\s*:\s*)"[^"]+"/m, `$1"${v}"`),
+    pick: pickTop,
+    replace: repTop,
   },
   {
     file: path.join('server', 'package-lock.json'),
     label: 'server/package-lock.json#packages[""]',
-    pick: (text) => {
-      const m = text.match(/^\s{6}"version"\s*:\s*"([^"]+)"/m);
-      return m ? m[1] : null;
-    },
-    replace: (text, v) => text.replace(/^(\s{6}"version"\s*:\s*)"[^"]+"/m, `$1"${v}"`),
+    pick: pickRootPkg,
+    replace: repRoot,
   },
   {
     // [D140 2026-10-23] Rust 锁文件里**本仓包自己**的版本条目。
@@ -168,6 +166,48 @@ export function findMismatches(entries) {
   return entries
     .filter((e) => e.label !== 'package.json' && e.version !== pkg.version)
     .map((e) => ({ label: e.label, detail: e.error || `期望 ${pkg.version}，实际 ${e.version}` }));
+}
+
+/**
+ * [D294] 缩进不敏感自证：直接测 TARGETS 的 pick / replace。
+ * findMismatches 的合成 entries 测不到「读文件」这一层 —— PR #28 正是栽在这里：
+ * lock 合法、版本齐全，只因 1 空格缩进被固定缩进判据读成「未找到版本号字段」。
+ * 抽成独立方法：main 不因新增自证超过复杂度守卫的 100 行软上限（D112 纪律：抽方法，不上调基线）。
+ */
+function indentSelfChecks() {
+  const oneSpaceLock = [
+    '{',
+    ' "name": "sqli-scanner",',
+    ' "version": "1.3.3",',
+    ' "lockfileVersion": 3,',
+    ' "packages": {',
+    '  "": {',
+    '   "name": "sqli-scanner",',
+    '   "version": "1.3.3",',
+    '   "dependencies": {}',
+    '  }',
+    ' }',
+    '}',
+  ].join('\n');
+  const topT = TARGETS.find((t) => t.label === 'package-lock.json');
+  const rootT = TARGETS.find((t) => t.label === 'package-lock.json#packages[""]');
+  const indentCases = [
+    { name: '1 空格 lock 顶层读得到（PR #28 形态）', got: topT.pick(oneSpaceLock), expect: '1.3.3' },
+    { name: '1 空格 lock packages[""] 读得到', got: rootT.pick(oneSpaceLock), expect: '1.3.3' },
+    { name: '4 空格 JSON 顶层读得到', got: topT.pick('{\n    "version": "2.0.0"\n}'), expect: '2.0.0' },
+    { name: '压缩单行 JSON 读得到', got: topT.pick('{"version":"3.0.0"}'), expect: '3.0.0' },
+    { name: '缺 version 字段 ⇒ null（fail-closed）', got: topT.pick('{"name":"x"}'), expect: null },
+    { name: '坏 JSON ⇒ null（不得静默判绿）', got: topT.pick('{ oops'), expect: null },
+    { name: '--fix 改 1 空格 lock 顶层后仍读得到', got: topT.pick(topT.replace(oneSpaceLock, '9.9.9')), expect: '9.9.9' },
+    { name: '--fix 改 1 空格 lock packages[""] 后仍读得到', got: rootT.pick(rootT.replace(oneSpaceLock, '9.9.9')), expect: '9.9.9' },
+  ];
+  let failed = 0;
+  for (const c of indentCases) {
+    const ok = c.got === c.expect;
+    if (!ok) failed++;
+    console.log(`${ok ? '✔' : '✖'} selftest[缩进]: ${c.name}（期望 ${JSON.stringify(c.expect)}，实际 ${JSON.stringify(c.got)}）`);
+  }
+  return failed;
 }
 
 // ── 主流程 ────────────────────────────────────────────────────────────────────
@@ -217,7 +257,7 @@ function main() {
         { label: 'src-tauri/Cargo.lock（本仓包）', version: '1.1.1' },
       ], expect: 1 },
     ];
-    let failed = 0;
+    let failed = indentSelfChecks();
     for (const c of cases) {
       const got = findMismatches(c.entries).length;
       const ok = got === c.expect;

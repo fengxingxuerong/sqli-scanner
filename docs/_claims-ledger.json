@@ -353,7 +353,8 @@
       "evidence": "docs/ci-439-upload-evidence-2026-11-15.md（run 43441490696 / job 131945353484 日志 L220–L238 原文摘录）；CHANGELOG D293 / 结项报告 §12.8",
       "refute_cmd": "curl -sL -H \"Authorization: Bearer $GH_TOKEN\" https://api.github.com/repos/fengxingxuerong/sqli-scanner/actions/jobs/131945353484/logs | grep -E \"CreateArtifact|Failed to CreateArtifact\"",
       "lastReviewed": "2026-11-15",
-      "caveat": "日志有保留期，过期须重新取证；根因定性不等于上传服务已修复（服务端不在本仓可控范围，#445 只是本轮未复现）"
+      "caveat": "日志有保留期，过期须重新取证；根因定性不等于上传服务已修复（服务端不在本仓可控范围，#445 只是本轮未复现）",
+      "reviewNote": "D294 复核（2026-11-15）：重跑 job 131945353484 日志仍命中 `Failed to CreateArtifact: Failed to make request after 5 attempts: Request timeout` 关键 error 行，本条维持 verified（满足每批至少复核 1 条）"
     },
     {
       "id": "ci-445-acceptance-suites",
@@ -363,6 +364,15 @@
       "refute_cmd": "curl -sL -H \"Authorization: Bearer $GH_TOKEN\" https://api.github.com/repos/fengxingxuerong/sqli-scanner/actions/jobs/132820105089/logs | grep -E \"25 PASS|SKIP  外部裁判|SKIP  AI 报告\"",
       "lastReviewed": "2026-11-15",
       "caveat": "27/27 全断言不成立；CI 服务端单测 4293/4288/0/5 与本地 facts 4293/4287/0/6 是两套环境口径，不可互相覆盖；日志有保留期"
+    },
+    {
+      "id": "version-sync-indent-fragility",
+      "claim": "Dependabot PR #28 的 CI 红源于本仓 version-sync.mjs 用固定缩进文本正则读 lock 版本（1 空格缩进的合法 JSON 被误判），非 PR 数据问题；D294 改为 JSON 结构解析后已修",
+      "status": "verified",
+      "evidence": "docs/ci-439-upload-evidence-2026-11-15.md §三（PR head 原文 / #443 日志）；server/tests/versionSync.indent.guard.test.js 4/4 + 缺陷注入复验（注入红 2 条、备份还原绿）",
+      "refute_cmd": "node --test server/tests/versionSync.indent.guard.test.js && node scripts/version-sync.mjs --selftest",
+      "lastReviewed": "2026-11-15",
+      "caveat": "master 修复不自动让 PR #28 转绿（PR CI 跑 PR 分支代码，需同步 master 后重跑）；PR #27 的 facts 指纹过期属门禁正确工作，仍需重采"
     }
   ]
 }

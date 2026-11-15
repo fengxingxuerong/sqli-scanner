@@ -53,3 +53,33 @@ D290 的「取证上传容错 + 显式复核构建结论」对该形态对症。
 - ⇒ **27/27 全断言不成立**（25 PASS / 2 SKIP），但「明细未知」升级为「明细与 SKIP 项已定性」。
 - 口径差异：CI 服务端单测 `4293 / 4288 pass / 0 fail / 5 skip`；本地 facts
   `4293 / 4287 pass / 0 fail / 6 skip`。总数一致，skip 分布随环境不同，**两套口径不可互相覆盖**。
+
+## 三、Dependabot PR #28 的 1 空格缩进 lock（D294 判据缺陷取证）
+
+Contents API 读 `package-lock.json?ref=8502a7f8`（PR #28 head）原文前 12 行：
+
+```
+1: "{"
+2: " \"name\": \"sqli-scanner\","
+3: " \"version\": \"1.3.3\","
+4: " \"lockfileVersion\": 3,"
+6: " \"packages\": {"
+7: "  \"\": {"
+9: "   \"version\": \"1.3.3\","
+```
+
+master（`2467d864`）同文件是 **2 空格 / 6 空格**缩进，两处 `version` 均为 `1.3.3`；
+PR head / base / merge-ref 三处的 JSON 里 `version` 字段**都存在**。
+D294 前 `scripts/version-sync.mjs` 用文本正则 `/^\s{2}"version"\s*:\s*"/`（顶层）与
+`/^\s{6}"version"\s*:\s*"/`（`packages[""]`）读版本 ⇒ 对 1 空格合法 JSON 全部落空，
+CI #443 `lint` step34 报「版本号不一致（2 处）」（job `132511999385` L502–L512），
+`test-server` 的「接线-4」因同一判据失败（job `132511999623` L5885）。
+⇒ **这是本仓判据缺陷，不是 PR 侧数据问题**（上一轮口头结论「两个 PR 红点都不是 master 缺陷」作废）。
+
+另：PR #27 的 #442 `lint` step31 是 `facts-sync.mjs --check` 检出采集源
+`server/package.json` 被 Dependabot 改动（pglite `0.5.11→0.5.16`、axios `1.20.0→1.21.1`、
+mssql `12.7.10→12.7.14`、sql.js `1.15.1→1.16.0`）⇒ 指纹过期，属**门禁正确工作**，
+需在 PR 分支重采 facts，不是缺陷。
+
+修复与有牙自证见 CHANGELOG D294、`scripts/version-sync.mjs`、
+`server/tests/versionSync.indent.guard.test.js`。
