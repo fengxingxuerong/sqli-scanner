@@ -5,6 +5,16 @@
 
 ---
 
+## 2026-11-15 批次 D292 · #445 job 计数自查更正（推翻链，零代码）
+
+D291 初稿写「#445 = 16 job / 12 success / 4 skipped」数错（漏 `desktop-package` 这个 skip，
+且 12+4≠16）。按 §3.5 ①停用 ②grep 影响面（CHANGELOG / TODO / 结项报告 §12.7 + 提交消息
+`11f0b61`）③作废重做 ④记推翻链 ⑤补门禁（进台账 + 本批复核 1 条）逐项执行。
+**正确口径：16 job / 11 success / 5 skipped**，`#445 completed success` 结论不变。
+细节与复现命令见 CHANGELOG D292；本段下方 D291 的计数已同步改对。
+
+---
+
 ## 2026-11-15 批次 D291 · D290 远端裁判核销（收口，零产品代码）
 
 **起点**：D290 在 11-14 做完但留在工作区（8 M + 1 staged A），文档里写「未提交 / 推送、
@@ -18,7 +28,7 @@
   提交后工作区 0 处、对象库 0 坏链。
 - Git Data API 推送（显式 `--base f4cd9865` 取远端真值 + `--dry-run` 先行）：远端
   **`82bcfffe`**，2135/2135 条目差异 0、根树一致、零失真。
-- **远端裁判**：push CI **#445** completed **success**（16 job / 12 success / 4 skipped），
+- **远端裁判**：push CI **#445** completed **success**（16 job / 11 success / 5 skipped，D292 更正），
   `sidecar-build` 的 build、上传、复核三步全绿；CodeQL #130 同 sha 绿 ⇒ D290 设计闭环。
 
 **仍未竟**（别当已完成推）：#439 上传服务根因未定性；acceptance 套件级明细仍需 token ⇒
