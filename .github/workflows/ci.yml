@@ -1294,20 +1294,42 @@ jobs:
       - run: cd server && npm ci
         name: Install server deps
       - run: npm run build:sidecar
+        id: sidecar_build
         name: Build sidecar (SEA) + smoke
       # [2026-10-03] 本 job 在 ubuntu 上红过（run #125）但 **job 日志不可下载**
       # （runs/{id}/jobs 一律 Not Found，annotations 只有 "Process completed with exit code 1"）
       # ⇒ 没有取证通道就只能靠猜。现在由 build-sidecar.mjs 自己把「环境事实 + 各阶段产物 +
       # 冒烟子进程输出」写进 sidecar-build-diag.txt（失败路径也会写），这里只负责上传。
-      # ⚠️ 与历史缺陷的区别：这是 if: always() 的**取证**步骤，不是 continue-on-error
-      # —— 结论不受影响（本仓曾因 continue-on-error 让门禁从未拦过人，别再犯）。
-      - name: 上传构建诊断（成功也传）
+      #
+      # [D290 2026-11-14] 取证通道不得改写门禁结论：CI run #439 里构建+冒烟已 success，
+      # 仅 artifact 上传失败就把整轮判红（此前 6 次 push 同配置全绿）⇒ 判据被非门禁的
+      # 上传可用性绑架。历史「别再犯」针对的是**门禁步骤**被 continue-on-error 吞成恒绿；
+      # 这里方向相反：只对取证步骤容错，并由下一步显式复核 build 的 outcome。
+      # 两道保险：build 失败 ⇒ 本步自身判红 + 复核步 exit 1；复核步读的 id 由
+      # server/tests/sidecarDiagUpload.guard.test.js 静态配对钉住，删任一处都会被抓。
+      - name: 上传构建诊断（成功也传；上传失败仅降级取证，不改结论）
+        id: sidecar_diag_upload
         if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: sidecar-build-diag
           path: sidecar-build-diag.txt
           if-no-files-found: warn
+      - name: 复核构建结论（取证失败不得洗绿构建失败）
+        if: always()
+        env:
+          BUILD_OUTCOME: ${{ steps.sidecar_build.outcome }}
+          UPLOAD_OUTCOME: ${{ steps.sidecar_diag_upload.outcome }}
+        run: |
+          echo "build=$BUILD_OUTCOME upload=$UPLOAD_OUTCOME"
+          if [ "$BUILD_OUTCOME" != "success" ]; then
+            echo "::error::sidecar 构建/冒烟未通过（build=$BUILD_OUTCOME），诊断上传结果不改变结论"
+            exit 1
+          fi
+          if [ "$UPLOAD_OUTCOME" != "success" ]; then
+            echo "::warning::诊断 artifact 上传失败（upload=$UPLOAD_OUTCOME）：仅取证通道降级，构建结论仍为绿"
+          fi
 
   # [D142 2026-10-23] 桌面交付件 job：官方安装包（NSIS）+ 免安装便携包 + 干净解压冒烟。
   # 为什么单独一个 job、且只在 tag / 手动触发时跑：
