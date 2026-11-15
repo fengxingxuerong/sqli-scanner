@@ -343,7 +343,7 @@
       "evidence": "CHANGELOG D291 初稿 / TODO D291 / 交付结项报告 §12.7 / 提交 11f0b61；更正见 CHANGELOG D292",
       "refute_cmd": "node -e \"fetch('https://api.github.com/repos/fengxingxuerong/sqli-scanner/actions/runs/43715975971/jobs?per_page=100',{headers:{'User-Agent':'x'}}).then(r=>r.json()).then(d=>{const c={};d.jobs.forEach(j=>c[j.conclusion]=(c[j.conclusion]||0)+1);console.log(d.jobs.length,JSON.stringify(c))})\"  ⇒ TOTAL=16 {\"success\":11,\"skipped\":5}",
       "lastReviewed": "2026-11-15",
-      "reviewNote": "D292 自查更正；#445 completed success 的整轮结论不变，D290 远端裁判不受影响。计数依赖远端 API，无法做本地恒真静态判据 ⇒ 留台账待复核队列；D293 复核（2026-11-15）：重跑 API 逐 job 统计仍 TOTAL=16 / 11 success / 5 skipped，本条维持 refuted",
+      "reviewNote": "D292 自查更正；#445 completed success 的整轮结论不变，D290 远端裁判不受影响。计数依赖远端 API，无法做本地恒真静态判据 ⇒ 留台账待复核队列；D293 复核（2026-11-15）：重跑 API 逐 job 统计仍 TOTAL=16 / 11 success / 5 skipped，本条维持 refuted；D297 复核（2026-11-15）：再跑同一命令 TOTAL=16 {\"success\":11,\"skipped\":5}，本条维持 refuted",
       "caveat": "正确口径 16 job / 11 success / 5 skipped；旧数字只在作废注记里出现，禁止引用。"
     },
     {
@@ -374,6 +374,15 @@
       "lastReviewed": "2026-11-15",
       "caveat": "master 修复不自动让 PR #28 转绿（PR CI 跑 PR 分支代码，需同步 master 后重跑）；PR #27 的 facts 指纹过期属门禁正确工作，仍需重采",
       "reviewNote": "D296 复核（2026-11-15）：复跑 refute_cmd（`versionSync.indent.guard.test.js` 4/4 + `version-sync.mjs --selftest` 8 条缩进自证）全 EXIT=0；PR #28 分支同步 master 后 #450 lint/test-server 已转绿，本条维持 verified"
+    },
+    {
+      "id": "macos-time-channel-flake",
+      "claim": "macOS runner 上的时间通道墙钟用例存在非确定性假红（#449 错值 8036\\u0000 / #450 30s DEADLINE 138 请求），与 D294 判据改动无因果关系",
+      "status": "verified",
+      "evidence": "#446/#447/#448 的 macos job 全 success（462/536/479s）；#451 macos success 515s；#450 macos failure 608s；本机三次单跑 extractor.timeBaseline.test.js 3/3 绿；D294 未改产品代码或时间通道用例；结项报告 §12.2 与 D280/D287 同族记录",
+      "refute_cmd": "GET https://api.github.com/repos/fengxingxuerong/sqli-scanner/actions/runs?event=push&per_page=10 逐 run 对比 test-matrix (macos-latest) 结论；node --test server/tests/extractor.timeBaseline.test.js",
+      "lastReviewed": "2026-11-15",
+      "caveat": "不得据此放宽 deadline / 降阈值 / 排除时间通道测试；已证伪降并发与 TIME_TEST_WALL_SCALE=4 放大外闸（后者 3→5 fail）。DEADLINE 形态按 D280 语义刻意当场红，保死循环探测器。#449 attempt2 与 #450 整轮当时未终判"
     }
   ]
 }
