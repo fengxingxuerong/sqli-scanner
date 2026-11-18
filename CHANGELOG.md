@@ -6,6 +6,169 @@
 
 > 下一批次起的条目写在这里。发版时把本节整体升为 `## [x.y.z] - YYYY-MM-DD` 并补汇总段。
 
+### 2026-11-19 批次 D301 · 全等级复验收口：--hex 提取链 + 二阶布尔差异判定（GAP①② 关闭）
+
+**起点**：D300 全等级复验（`e2e/dvwa-lab/all-levels-verify.mjs`）暴露两条显式缺口——GAP①
+real_escape_string 全站逃逸目标（DVWA sqli medium 形态）拖库静默全空；GAP② 报错抑制型触发页
+（DVWA sqli high 的 "Something went wrong." 形态）二阶检测静默漏报。本批两条全部修复并在同一
+靶场转硬判据（runner 移除容忍档，9 case 全 PASS 硬失败 0）。
+
+**GAP① --hex 提取链**（对标 sqlmap --hex，消费面扩到提取链）：
+- `hexLiteral.js` 新增 `hexifyStringLiterals(sql, edb)`：把引擎自有引号字面量（`'__S__'`/`'__E__'`
+  标记、`SEPARATOR ','`、`WHERE table_schema='…'`）整体 0x 化 ⇒ payload 零引号，转义无从作用；
+- **空字面量特判**（真机实证的第二个坑）：`''` → hex 化会产出裸 `0x`（无数字）＝语法错误——
+  DVWA medium 真机实测 `"Unknown column '0x'"` ⇒ 全部 data 查询报错 ⇒ 拖库 0 行。空串转
+  `REPEAT(0x30,0)`（语义等价 `''` 且零引号，守卫 HEX-6 钉住）；
+- 接线：`extractScalar` 末行平换 `hexifyExtractPayload`（extractScalar 在复杂度基线 19 行/17 圈
+  只许持平，分支放模块级新函数）；方言不支持 ⇒ warn 后保持普通形态（不产出错误 SQL、不静默
+  假装生效——与搜索路径同一降级口径）；
+- 入口：`--hex`（CLI）与 `config.hex`（REST）既有（搜索路径先行接线），本批消费面扩到
+  枚举 + 拖库全链。
+
+**GAP② 二阶布尔差异判定**：
+- `SecondOrderDetector._maybeDiffJudge`：签名判定（ERROR_SIG 报错回显）未命中且显式 opt-in
+  （`secondOrder.diffJudge: true`）时启用——探针页与阴性对照页各再复验（探针复验 1 读 +
+  阴性复验 2 读，阴性须自证稳定），「剔除易变内容后」两两一致且存在差异才命中。三重防误报
+  （稳定性×2 + 差异存在性），宁漏不误；
+- `detect()` 末行平换调用（detect 在复杂度基线 57 行/25 圈**硬上限**，行数与分支零变化）；
+- 归一器 `_normForDiff`：剔 HTML 注释/长数字/ISO 时间戳/空白（与 reproPack.stripVolatile 语义
+  对齐；引擎层不反向依赖服务层，本地 6 行实现）；
+- 入口：REST `guardSecondOrder` 收 `diffJudge`（压平单行——guardSecondOrder 基线 41 行/19 圈）、
+  CLI `--config` 档案 secondOrder 整组透传（configFile.js 登记 + `applySecondOrderGroup` 带底
+  合并，对齐 noSql/oob 的 §A2 先例）、`defaults.secondOrder.diffJudge=false`（默认关：内容差异
+  信号弱于报错签名）。
+
+**顺带真因修复（全等级复验挖出）**：sqli high 检测此前 11 请求 0.2s 的根因是**存储点从未被
+发现**（runner 未开 crawlForms ⇒ `storePoints=[]` ⇒ 检测器零执行，supplementalRuns.js:35 的
+filter）——补 crawlForms 后检测器真实执行；此前「签名判定盲」是叠加在其上的第二层问题。
+
+**验证**：
+- 守卫：`extractor.hexDump.guard.test.js` 6/6（HEX-6 钉 `''`→裸 0x 真因）+
+  `secondOrderDiffJudge.guard.test.js` 6/6（DIFF-1..6：命中/零回归三反例/归一）；
+- 真机：all-levels-verify **9 case 全 PASS 硬失败 0**——sqli low/medium 拖库种子对账 **5/5 ×2**
+  （medium 首次在 real_escape_string 目标上拖出全部种子用户）、sqli_blind low/medium/high 三标量
+  全中 ×3、impossible ×2 零检出零误报、**sqli high 二阶检测命中（diffJudge 路径，354 请求，证据
+  带 [D301] 标注）+ 直驱拖库 5/5**；
+- 复杂度/重复/死代码门禁全绿（extractScalar/detect/guardSecondOrder 三处基线函数平换零变化；
+  `applySecondOrderGroup`/`_maybeDiffJudge`/`hexifyStringLiterals` 新函数远低于上限）；
+- lint 0 error、typecheck 三件套全绿。
+
+**改动面**：`hexLiteral.js`（hexifyStringLiterals + 空串特判）、`Extractor.js`（hexifyExtractPayload
++ extractScalar 末行平换）、`SecondOrderDetector.js`（_maybeDiffJudge + _normForDiff + detect 末行
+平换）、`api/scanGuard/objectGroups.js`（diffJudge 压平单行）、`bin/cli/config.js`
+（applySecondOrderGroup）、`bin/cli/configFile.js`（secondOrder 档案登记）、`config/defaults.js`
+（secondOrder.diffJudge=false）、`e2e/dvwa-lab/all-levels-verify.mjs`（medium hex / high diffJudge
+转硬判据）、README / docs/api.md。
+
+**边界**：hex 提取链仅 **MySQL/MariaDB/TiDB** 家族（0x 字面量为字符串语义；SQL Server/PG/SQLite
+的 HEX_FNS 形态适用于 LIKE 场景、不适用于标记/CONCAT 场景，方言不支持时 warn + 普通形态诚实
+空结果）；diffJudge 默认关，开启后每存储点×触发页多 2 写 3 读；台账新增 `d301-hex-dump-escaped-target`
+与 `d301-second-order-diff-detection` 两条 verified（refute_cmd = all-levels runner）。
+
+### 2026-11-18 批次 D300 · 扩展拖库通道：二阶命中自动拖库 + 盲注 opt-in（接手续批收尾）
+
+**起点**：上一会话开了 D300（`scan/extractExtended.js` + 守卫 6 例 + `scanRunner`/`supplementalRuns`
+接线：二阶命中挂非枚举 `_d300{pointId,triggerUrl,param}`、提取阶段换成 `extractPhaseD300` 包装层）
+后中断，工作区 2 改 2 增、门禁零跑、文档零同步。本批接手：修正代码缺陷 + 补齐三端入口（CLI/REST/MCP）
++ 文档同步 + 守卫扩容到 13 例 + **真机靶场复验**（DVWA 外部裁判 + PGlite 拟真靶场，见「验证」）。
+
+**能力**（背景：无回显/存储型注入点此前进不了 `report.data`——一阶 union/error 之外的命中
+只出版本证明或根本无提取分支）：
+- **二阶拖库**：second_order 命中后，用「写 payload 到存储点 → 读触发页」传输适配器把 Extractor
+  的每个 UNION 请求改写为 store→trigger 读回，复用 `enumerateDatabases`/`dumpAllDatabases` 全链路
+  （枚举/分页/取行/断点语义全部不动基线函数体，复杂度门禁 GRACE=0 口径保持）。
+- **盲注 opt-in**：`extractScope.blindDump`（CLI `--blind-dump` / REST `extractScope.blindDump` /
+  MCP `run_scan blindDump:true`）开启后，boolean/time 命中逐字节提 `current_user()/database()/version()`
+  标量进拖库数据区。**默认关**——单值上百请求，不给目标施压；MCP 描述与 `confirmDestructive`
+  同款「须用户明确同意、代理不得代答」口径。允许无 `mode` 单传（引擎对无 mode 的 scope 走
+  `extractAll` 全量拖库分支，`extractScope.js:15`，不触碰模式 switch）。
+
+**接手修正五处（守卫用例 + 靶场复验钉住）**：
+- ① 适配器取 payload 补 URL query 一路：伪点 `location='url'` 时 `buildInjectionRequest` 把
+  payload 拼进 `req.url` 的 `?id=…`（URL 编码形态），data/params 全空——旧适配器只在 data/params
+  找注入值 ⇒ 每请求判 null ⇒ `{status:0}` ⇒ **拖库静默全空**（「能力在、收不到」，与 E2
+  「枚举动作族仅 CLI 可用」同形的入口缺一半）。现按 URL query 逐参数解码找 `/select/i`
+  （大小写 tamper 免疫），无注入值诚实失败不写不读。
+- ② 伪点列数尊重 `--union-cols`：触发页列数在检测期从未被 UNION 实测（检测跑在存储页），
+  默认 2 列是 DVWA 系触发页常见形态，其它目标用同一配置键覆盖（非法值自然回落 2）。
+- ③ 通道标记诚实化：拖库空结果（无库/无行/无标量）不写 `summary.d300Channels`
+  （「跑了通道」≠「拖到了数据」）；`dumpUnconfirmed` 照 extract.js 口径进 `summary.constraints`；
+  盲注 null 结果不写字段；单漏洞失败不阻断主扫描。
+- ④ **dbms 兜底链**（靶场复验发现）：二阶/盲注命中常不带 `vuln.dbms`（无回显指纹不出来，
+  DVWA blind high 实测 dbms=?）⇒ `resolveDbms(null)` → 方言表达式表全空 → 通道**静默空转**
+  （零日志、零请求、空数据）。现 `vuln.dbms → point.dbms → run.dbms → config.dbms（--dbms 强制）`
+  逐级回落；触发页回显列不再硬编第 1 列（走 `discoverEchoColumns` 现场定位，严格类型库友好）；
+  dump 并发强制串行（适配器共享「最新一条存储值」状态，并发会互相读到对方的探针 → 数据错位）。
+- ⑤ **适配器透传触发页真实状态码**（靶场复验发现）：PGlite 的 500 错误页把整条 SQL（含
+  `SQLISCANNER` 标记）回显出来，适配器恒回 200 会骗过 `_probeBody` 的「标记命中须在非错误响应」
+  判据 ⇒ 回显列探测把错误页当命中 ⇒ 全列"可回显" ⇒ 表达式落 INT 列 ⇒ 拖库全线 500 静默空转。
+  现经状态捕获 shim 透传 store/trigger 的真实 status（错误页 500 照实上报）。
+- ⑥ **banner 补进合并白名单**（靶场复验发现）：`banner` 早在 `emptyExtractedData`（D46）却漏在
+  `extractMerge.js` FIELD_TABLE 里——枚举模式自己装 data 不走 merge 所以从未暴露，盲注拖库走
+  `mergeExtracted` ⇒ banner 被静默丢弃。补一行 scalar 条目（extractMerge.test.js ③ 字段清单同步）。
+- ⑦ **盲注闭合人工兜底的实战口径**（靶场复验确认）：DVWA high 盲注的 SQL 是
+  `user_id = '<cookie>'`——无回显指纹推不出闭合（`boundary=''`），裸探针落引号内且 MariaDB 把
+  `'1 AND …'` 数值强转成 1 ⇒ 布尔判据死亡（真/假探针全 exists）。`--known-point`（`{param, quote}`
+  ）人工闭合后判据复活——这是引擎既有能力（CFG-REACH 九键）在盲注拖库上的关键配套，写进验证脚本。
+
+**改动面**：`server/src/engine/scan/extractExtended.js`（修正①-⑤ + runExtended 单漏洞容错）、
+`server/src/engine/scanRunner.js`（extractPhaseD300 透传 `dbms`）、
+`server/src/engine/extractMerge.js`（⑥ banner 入合并白名单）、
+`server/src/api/scanGuard/extractScope.js`（blindDump 形状闸；keyword/user 两处字面重复的形状闸
+收敛为 `sanitizeKeyword128` 助手以抵平复杂度基线，行为逐字不变）、`server/src/api/scanGuard/bespokeKeys.js`
+（隐含开 enableExtract 的日志文案兼容无 mode scope）、`server/bin/cli/{args,config,help}.js`
+（`--blind-dump` 旗标 + `isEnumMode` 联动 + `buildExtractScope` 叠加/单传）、`server/src/mcp/tools.js`
+（`run_scan` schema + `applyDumpIntent` 映射助手）、`src/shared/types.ts`（`ExtractScopeConfig.mode`
+可选 + `blindDump`）、`src/components/scanConfig/EnumerationSection.tsx`（`scopeFieldsFor` 接受
+缺省 mode）、`docs/_complexity-baseline.json`（isEnumMode 20→21 圈 / buildExtractScope 键改
+buildExtractScopeBase / buildTools 249→247 行 71→70 圈 / sanitizeExtractScope 24→22 行 19→15 圈）、
+`README.md` / `docs/api.md` 同步；**靶场复验脚本**：`e2e/dvwa-lab/d300-verify.mjs`（盲注 opt-in +
+一阶回归）、`e2e/real-world-lab/d300-so-dump.mjs`（二阶拖库端到端）。
+
+**验证**：
+- **守卫 13/13**（原 6 例 + 新 7：D300-7 URL payload 解码逐字一致 / D300-8 无注入值诚实失败
+  且零 store/trigger / D300-9 空结果不标记通道 / D300-10 banner-only 也算有效提取 / D300-11
+  sanitize 形状闸 / D300-12 二阶 dbms 回落 run.dbms / D300-13 盲注 dbms 回落 config.dbms）；
+  **缺陷注入复验**（`pickFromUrl` 恒 null）实测仅 D300-7 红、还原全绿；extractMerge 12/12；
+- **DVWA 外部裁判**（`e2e/dvwa-lab/run.mjs`，PHP 8.3 + MariaDB 10.11 真机）：真值漏洞 **5/5 检出**、
+  同源复检 1/1、impossible 档 0 误报、0 证据不足 ✅；
+- **盲注 opt-in 真机闭环**（`e2e/dvwa-lab/d300-verify.mjs` case A，DVWA high cookie 布尔 +
+  `blindDump` + `--dbms` + `--known-point` 闭合）：boolean 命中 → 逐字节提取
+  **`currentUser="root@localhost"`、`currentDb="dvwa"`、`banner="10.11.19-MariaDB"`** 全部命中 →
+  `summary.d300Channels=["extended-extract"]`（471 请求 / 132s）✅；
+- **一阶 union 拖库回归**（同脚本 case B，D300 包装层在位）：12 库 / 30 表有行 / 251 请求 8s，
+  `dvwa.users` 5 行逐行可对账 ✅；
+- **二阶拖库真机端到端**（`e2e/real-world-lab/d300-so-dump.mjs`，PGlite 拟真靶场 `/comment → /panel`
+  链路）：second_order 命中 → 适配器枚举出 `postgres` 库 → 5 表全拖（categories 3 / items 4 /
+  users 4 / orders 3 / reviews 19 行）→ **种子对账 4/4**（四条真实商品标题逐字命中）→
+  `summary.d300Channels=["extended-extract"]` ✅（结果落 `e2e/real-world-lab/results/d300-so-dump-*.json`）；
+- extractScope 族测试 48/48、cli.enum 34/34、config 守卫族 26/26、complexityGuard.wiring 8/8、
+  复杂度门禁 + selftest、gate:fast 22/22、覆盖率门禁 exit 0（95.27/81.51/89.43）、lint 0 error、
+  typecheck 三件套全绿。
+- **DVWA 全等级真机验证**（`e2e/dvwa-lab/all-levels-verify.mjs`，2026-11-19，官方源码 8 档真值 +
+  直驱拖库）：sqli low（union/error/boolean + 拖库**种子对账 5/5**）、sqli medium（检测 ✓，
+  拖库 = GAP①）、**sqli high（session 型二阶）检测 = GAP② + 直驱拖库对账 5/5（MySQL 触发页
+  首次真机闭环，LIMIT 1 哨兵破解）**、sqli_blind low/medium/high（布尔 + 盲注拖库三标量全中
+  ×3）、impossible ×2（0 检出 + 预算打满）——**硬失败 0，显式缺口 2 条点名**。守卫扩到
+  **14/14**（D300-14 哨兵原值）。
+- ⚠️ facts 指纹注意：新增守卫文件 `server/tests/extractExtended.guard.test.js` 未入 git 索引
+  （本批不提交），提交前需 `git add` 后重跑 `node scripts/facts-sync.mjs --refresh && node
+  scripts/facts-sync.mjs --fix`，否则 CI 的 `facts:check` 会判「采集源已改动」。
+
+**边界（不谎报，按 §3.5，2026-11-19 全等级复验后收窄）**：二阶拖库已**双库真机闭环**——PGlite
+拟真靶场（严格类型 5 列）+ **MySQL**（DVWA sqli high session 型触发页：`$_SESSION['id']` 原样拼进
+`user_id='$id' LIMIT 1`，直驱适配器拖库对账 **5/5**，哨兵原值破解 LIMIT 1，守卫 D300-14）。勘误：
+本仓 `.verify-labs/DVWA-master` **存在** session 型二阶模块（`vulnerabilities/sqli/session-input.php`），
+此前「官方发行版无此模块」的说法有误——作废的是上一会话声称的**检测验证**（无落盘产物，且本批
+实测确认当前引擎检不出该形态，见 GAP②）。全等级复验（`e2e/dvwa-lab/all-levels-verify.mjs`）显式
+缺口两条，均不伪装通过：**GAP①** sqli medium 形态拖库需提取链 `--hex` 化（`hexLiteral.js` 基建
+已在、只接了搜索 LIKE 路径，对标 sqlmap --hex）；**GAP②** 报错抑制型触发页的二阶检测需布尔差异
+判定路径（SecondOrderDetector 现只认 ERROR_SIG 报错回显签名）。另：无指纹可用的盲注/二阶目标需
+`--dbms` 强制方言；无闭合可推断的目标（引号型）需 `--known-point` 人工闭合（⑦ 实证：不闭合时
+MariaDB 数值强转让布尔判据恒真）；触发页列数默认值仍是启发式，错配时诚实空结果；tamper 把
+SELECT 字面量本身编码掉的链路（charunicodeencode 类）诚实跳过；二阶拖库**写放大**（每 UNION
+请求 = 一次真实写入），仅限授权目标；UI 面板暂未暴露 blindDump 开关（REST/CLI/MCP 可用）。
+
 ### 2026-11-18 批次 D299 · 修复 D298 首跑失败：Tomcat 9.0.122 下载 404
 
 **起点**：D298 接线的首次远端 CI run `#456`（11-16）失败，acceptance step20「启动 Benchmark」
@@ -317,13 +480,15 @@ CI Linux 同代码绿）；零产品代码改动，未改 deadline / 阈值 / �
 ---
 
 <!-- changelog-index:start -->
-**本段覆盖 9 个批次（D290–D299，2026-11-14 → 2026-11-18）**。正文按时间倒序排列；
+**本段覆盖 11 个批次（D290–D301，2026-11-14 → 2026-11-19）**。正文按时间倒序排列；
 下表是同一批次的索引，便于按编号或关键词定位。**索引只是导航，正文未做任何删改**
 （被推翻的旧结论原样保留，这是本仓的既定口径）。新增批次后跑
 `node scripts/changelog-index.mjs --write` 重生成，`--check` 校验是否过期。
 
 | 批次 | 日期 | 主题 |
 |---|---|---|
+| D301 | 11-19 | 全等级复验收口：--hex 提取链 + 二阶布尔差异判定（GAP①② 关闭） |
+| D300 | 11-18 | 扩展拖库通道：二阶命中自动拖库 + 盲注 opt-in（接手续批收尾） |
 | D299 | 11-18 | 修复 D298 首跑失败：Tomcat 9.0.122 下载 404 |
 | D298 | 11-15 | 外部裁判 4 号（OWASP Benchmark）接进 CI acceptance（首次接线，待远端裁判） |
 | D297 | 11-15 | macOS 时间通道假红入账（等 CI 终判期间） |

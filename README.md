@@ -1,6 +1,6 @@
 # sqli-scanner
 
-[![Tests](https://img.shields.io/badge/tests-4879%20passing-brightgreen)](#测试)[![CI](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml/badge.svg)](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml)
+[![Tests](https://img.shields.io/badge/tests-4905%20passing-brightgreen)](#测试)[![CI](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml/badge.svg)](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml)
 [![Dependencies](https://img.shields.io/badge/prod%20deps-0%20known%20vulns-brightgreen)](SECURITY.md)
 
 > CI 徽章为真实状态（红绿以 GitHub Actions 实跑为准）。发布判定仍以 `CHANGELOG.md`
@@ -243,6 +243,9 @@ admin-only 触发页 `/admin/panel`（users.admin 角色门禁 403）+ admin 会
 | **可视化报告** | 风险环形图 + 技术分布条形图 + 漏洞列表 + 数据提取树 + 检测摘要 |
 | **深度提取** | 分页聚合数据提取，绕过 UNION 限制 |
 | **全库拖库** | `--dump-all`：枚举所有库后逐库逐表拖（对标 sqlmap --dump-all） |
+| **二阶 / 盲注拖库（扩展通道）** | [D300] `scan/extractExtended.js`：① **二阶命中自动拖库**——用「写 payload 到存储点 → 读触发页」适配器复用 Extractor 全套枚举/分页/取行（此前二阶命中只进漏洞清单，`report.data` 恒空）；② **盲注 opt-in**——boolean/time 命中后逐字节提 `current_user()/database()/version()` 标量，`--blind-dump`（CLI）/ `extractScope.blindDump`（REST/MCP）/ `run_scan blindDump:true`（MCP）显式开启（单值上百请求，默认关，**须用户同意**）；通道与产物走既有 `dump.*` / `db-json` 出口。⚠️ 无指纹可用的目标需 `--dbms` 强制方言、引号闭合推不出的目标需 `--known-point` 人工闭合（不闭合时 MariaDB 数值强转让布尔判据恒真，2026-11-19 DVWA high 实证）；触发页列数不可检测期确认，默认 2 列可用 `--union-cols` 覆盖；二阶通道**写放大**（每 UNION 请求=一次真实写入）；tamper 编码到 SELECT 字面量本身的链路（charunicodeencode 类）诚实跳过 |
+| **--hex 提取链（逃逸目标拖库）** | [D301] `--hex` / `config.hex` 的消费面从搜索 LIKE 扩到**枚举+拖库全链**：提取标记与模板字面量全 0x 化 ⇒ payload 零引号，`real_escape_string` 全站逃逸目标（DVWA sqli medium 形态）拖库从静默全空变为**种子对账 5/5**（真机实证）。仅 MySQL/MariaDB/TiDB 家族（0x 字面量为字符串语义），方言不支持 warn + 普通形态诚实空结果；空字面量 `''` 特判 `REPEAT(0x30,0)`（裸 0x 是语法错误，真机实证根因） |
+| **二阶布尔差异判定（报错抑制触发页）** | [D301] `secondOrder.diffJudge`（REST/CLI 档案，默认关）：报错抑制型触发页（如 DVWA sqli high 把报错写成 "Something went wrong."，ERROR_SIG 签名不可见）上，签名判定未命中时启用——探针页/阴性页各复验、归一（剔注释/长数字/时间戳）后两两一致且存在差异才命中（三重防误报，宁漏不误）。真机实证：DVWA sqli high session 型二阶 354 请求命中。开启后每存储点×触发页多 2 写 3 读 |
 | **字典爆破**（information_schema 不可用时的出路） | `--common-tables` / `--common-columns`：WAF 拦 information_schema、账号权限不足、或目标库无该视图时，用内置常见表/列名字典逐个做存在性探针（130+ 表名 / 140+ 列名，含「通道自检 + 不存在对照名」防假阴性）。实测在 WAF 拦 information_schema 的目标上仍能定位表与列 |
 | **WAF 识别接口** | `--identify-waf`：仅识别 WAF 厂商并输出推荐 tamper 链，不发起注入检测（对标 sqlmap --identify-waf） |
 | **AI 漏洞报告** | 3 角色流水线（分析师→撰写→审阅），支持多 key 容灾，自动生成专业中文安全分析报告 |
@@ -311,7 +314,7 @@ npm run quality:all     # 【门禁】一键全量质量校验（测试/覆盖�
 | 检测控制 | `--test-filter` `--test-skip` `--no-verify` `--use-registry` `--smart` `--time-baseline-every` `--param-mine` `--crawl-browser` `--forms` `--crawl` |
 | 并发与调度 | `--concurrency` `--concurrency-det` |
 | sqlmap 兼容长名（短名的长形式，脚本可移植用） | `--user` `--db` `--table` `--skip` `--headers` `--concurrency-det` |
-| 枚举与拖库 | `--columns` `--columns-list` `--schema` `--privileges` `--roles` `--count` `--exclude-sysdbs` `--no-exclude-sysdbs` `--start` `--stop` `--dbms` `--union-cols` `--union-from` `--no-cast` `--sql-template` |
+| 枚举与拖库 | `--columns` `--columns-list` `--schema` `--privileges` `--roles` `--count` `--exclude-sysdbs` `--no-exclude-sysdbs` `--start` `--stop` `--dbms` `--union-cols` `--union-from` `--no-cast` `--sql-template` `--blind-dump` |
 | 提取与重放 | `--verify` `--flush-session` `--fresh-queries` `--days` |
 | 响应匹配（高级检测） | `--string` `--not-string` `--code` `--text-only` `--titles` `--regexp` `--invalid-bignum` `--invalid-logical` `--invalid-string` |
 | 利用通道（**需 `--authorized` + `EXPLOIT_ENABLED=1`**） | `--os-cmd` `--os-shell` `--sql-shell` `--sql-file`（[D241] 从文件读 SQL，长脚本不必挤命令行；执行路径与 `--sql-shell` 完全一致，读失败即退出不降级为空串） `--udf-hex` `--udf-install` `--file-read` `--file-write` `--file-dest` `--driver` `--reg-read` `--reg-add` `--reg-del` `--reg-key` `--reg-value` `--reg-data` `--reg-type` `--cleanup`（按写副作用台账撤销本次利用的残留；SQL 类走 sql-shell、文件/注册表走 os-shell） |
@@ -465,7 +468,7 @@ server/       ← Express + Node.js（后端，`server/index.js` 入口）
 # 前端测试（581 个用例）
 npm test
 
-# 服务端测试（4304 个用例）
+# 服务端测试（4330 个用例）
 cd server && npm test
 
 # 全部测试
@@ -491,7 +494,7 @@ npm run artifact:drift   # 入库的 e2e 基线产物必须等于当前代码跑
 
 - TypeScript: 零错误
 - 前端测试: 581/581 通过（覆盖率门禁 stmts 93.28 / branch 84.43 / func 80.72，阈值 88/77/67）
-- 服务端测试: 4304 用例（4298 pass / 0 fail / 6 skip，并发口径 2026-11-18 复测；6 skip 为环境依赖显式跳过。覆盖率 lines 95.30 / branch 81.60 / func 89.37，阈值 85/74/77）
+- 服务端测试: 4330 用例（4324 pass / 0 fail / 6 skip，并发口径 2026-11-18 复测；6 skip 为环境依赖显式跳过。覆盖率 lines 95.30 / branch 81.60 / func 89.37，阈值 85/74/77）
 - 一键扫描: `npm run scan -- -u <url>`（CLI 一条命令产出 HTML/JSON/Markdown 全套报告 + manifest，退出码可直接进 CI 门禁）
 - Tamper 插件: 234 个（含批次 D3 新增 scalarselectinline；含 v24 增量 20 个，对齐 sqlmap 官方 tamper 全集，含官方 CRS/libinjection 实测组合 uniontable+odbcbrace；含批次 D13 新增 5 件上游形态变体 *nospace/*open/*block，真机 A/B 判决前不进默认链）
 - WAF 绕过能力: 200+ 插件链式组合，覆盖 62 个 WAF 厂商指纹识别 + 推荐

@@ -295,7 +295,8 @@ curl -X POST http://127.0.0.1:4567/api/scan/start \
 | `trueRegexp` / `falseRegexp` | string，≤500 | 分别限定真/假侧需命中的正则 |
 | `matchTitle` | bool | 对标 sqlmap `--titles`：真假 `<title>` 不同即信号 |
 | `blindRobust` | object | 统计判定分支参数：`{enabled, booleanSamples(1-10), baselineSamples(1-20), timeConfidenceZ(0-5), minStableRatio(0-1), adaptive, concurrency(1-16)}`；详见 `defaults.js` |
-| `secondOrder` | object | 二阶注入参数：`{enabled, triggerUrls[], cookieParams}` |
+| `secondOrder` | object | 二阶注入参数：`{enabled, triggerUrls[], cookieParams, diffJudge}`；[D301] `diffJudge:true`（默认关）= 报错抑制型触发页（ERROR_SIG 签名不可见）的布尔差异判定兜底——探针页/阴性页各复验、归一后两两一致且存在差异才命中（三重防误报，每存储点×触发页多 2 写 3 读） |
+| `hex` | bool（默认 false） | [D301] 消费面含枚举+拖库全链：提取标记与模板字面量全 0x 化 ⇒ payload 零引号，`real_escape_string` 全站逃逸目标（如 DVWA sqli medium）拖库可用。仅 MySQL/MariaDB/TiDB 家族，方言不支持 warn + 普通形态诚实空结果 |
 | `noSql` | object | 非 SQL 注入补充趟：`{enabled, kinds, concurrency}`；[D203] `kinds` 白名单扩为 `['nosql','graphql','ssti','ldap','xpath']`，`ldap`/`xpath` 走独立探测器但复用同一布尔差异判定与结果聚合 |
 | `extractConcurrency` | 1-16（默认 4） | 盲注二分提取并发度 |
 | `dumpMaxRows` | 1-50000（默认 50000） | 全量拖库行数上限 |
@@ -322,10 +323,16 @@ SSRF 与 scope 是两条独立判据：`SSRF_ALLOW_PRIVATE=1`（打内网靶站�
 确需点名放行某段用 `SSRF_ALLOW_CIDRS`。
 
 **枚举/拖库（`config.extractScope`）**：对标 sqlmap `--dbs/--tables/--columns/--dump/--current-db/…`
-（REST 侧 2026-09-23 才收进白名单）。形状：`{ mode, dbs?, tables?, cols?, keyword?, excludeSysdbs? }`，
+（REST 侧 2026-09-23 才收进白名单）。形状：`{ mode, dbs?, tables?, cols?, keyword?, excludeSysdbs?, blindDump? }`，
 `mode` ∈ `dbs|tables|columns|dump|dumpAll|search|schema|users|passwords|currentDb|currentUser|hostname|isDba|privileges|roles|count|commonTables|commonColumns`。
 传了合法 `extractScope` 即隐含打开 `enableExtract`（与 CLI `enableExtract: args.dump || enumActive` 同一口径）——
 否则接口会回 200 + 空 `report.data`，把"没枚举"说成"库里没东西"。
+
+**[D300] 盲注 opt-in 拖库（`extractScope.blindDump`）**：`true` 时 boolean/time 命中会逐字节提
+`current_user()/database()/version()` 标量进拖库数据区。**默认关**——单值上百请求，只在用户明确
+同意后开启（与 CLI `--blind-dump`、MCP `run_scan blindDump:true` 同一口径）。允许无 `mode` 单传
+（`{ "extractScope": { "blindDump": true } }`）：引擎照走全量拖库分支，二阶命中则自动走
+「存储→触发页」拖库扩展通道（无需开关）。
 
 **参数级别与"给了没测"**：`cookieParams` 需 `level≥2`、`headerParams` 需 `level≥3`（或 `testHeaders:true`）
 才会被解析成注入点。低 level 下这些参数**不会**被测试，报告 `summary.constraints` 里必须出现

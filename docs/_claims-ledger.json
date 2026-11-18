@@ -401,6 +401,42 @@
       "refute_cmd": "curl -sI https://downloads.apache.org/tomcat/tomcat-9/v9.0.122/bin/apache-tomcat-9.0.122.zip | head -1（须 404 佐证）；修复后远端 acceptance 日志须出现「外部裁判 4 号 … PASS」",
       "lastReviewed": "2026-11-18",
       "caveat": "HSQLDB 的 'Network client is not a HSQLDB JDBC driver' 是 TCP 探针无害噪音，非根因。D299 修法 = -Dtomcat.url 覆盖到 archive（保留 pin 版本 9.0.122）；CI #461 已实证修好（step20 117s success + 外部裁判 4 号 43/43 PASS），见 benchmark-ci-wiring-d298。archive 是 Apache 的历史版本库，属可用但非首选源；若上游重发 9.0.122 或改 pin 版本需同步复核"
+    },
+    {
+      "id": "d301-second-order-diff-detection",
+      "claim": "D301 二阶布尔差异判定真机闭环：报错抑制型触发页（DVWA sqli high 把 mysqli 报错抑制为 \"Something went wrong.\"，ERROR_SIG 签名判定不可见）在 secondOrder.diffJudge=true 时命中 second_order——探针页/阴性页复验稳定且存在内容差异（三重防误报）",
+      "status": "verified",
+      "evidence": "e2e/dvwa-lab/results/all-levels-2026-11-19T*.json（sqli-high-detection：检出=[second_order]，354 请求，证据字符串带「布尔差异路径 [D301]」标注；runner 配置 crawlForms:true——存储点发现是真因第一层，diffJudge 是第二层）",
+      "refute_cmd": "node scripts/labs.mjs --up=dvwa,mariadb && node e2e/dvwa-lab/all-levels-verify.mjs（sqli-high-detection 判据：second_order 必须命中；守卫 secondOrderDiffJudge.guard 6/6 含不稳定/无差异/关闭零回归三反例）",
+      "lastReviewed": "2026-11-19",
+      "caveat": "diffJudge 默认关（内容差异信号弱于报错签名），开启后每存储点×触发页多 2 写 3 读；动态页面（两次读取不一致）诚实放弃判定；不外推通用检出率"
+    },
+    {
+      "id": "d301-hex-dump-escaped-target",
+      "claim": "D301 --hex 提取链真机闭环：real_escape_string 全站逃逸目标（DVWA sqli medium：数值上下文 + 全 payload 引号被转义）在 config.hex=true 时拖库种子对账 5/5——提取链标记与模板字面量全 0x 化，转义无从作用",
+      "status": "verified",
+      "evidence": "e2e/dvwa-lab/results/all-levels-2026-11-19T*.json（sqli-medium：检出 union/error/boolean + 拖库 12 库 + dvwa.users 种子 admin/gordonb/1337/pablo/smithy 全命中；修复前同 case 拖库 0/5）",
+      "refute_cmd": "node scripts/labs.mjs --up=dvwa,mariadb && node e2e/dvwa-lab/all-levels-verify.mjs（sqli-medium 判据：拖库种子 ≥4/5；守卫 extractor.hexDump.guard 6/6 含零引号/零回归/空字面量 REPEAT(0x30,0) 特判）",
+      "lastReviewed": "2026-11-19",
+      "caveat": "hex 提取链仅 MySQL/MariaDB/TiDB 家族（0x 字面量为字符串语义）；空字面量 '' 转裸 0x 是语法错误（真机实证 \"Unknown column '0x'\"），已特判 REPEAT(0x30,0)；方言不支持 warn + 普通形态诚实空结果。种子对账仅证明本靶场表数据可读，不外推通用检出率"
+    },
+    {
+      "id": "d300-second-order-dump-lab",
+      "claim": "D300 二阶拖库真机端到端（双库）：second_order 适配器（存储点写 payload → 触发页读回）完成全库枚举 + 拖表 + 种子数据逐字对账——① PGlite 拟真靶场 /comment→/panel（严格类型 5 列）种子对账 4/4；② MySQL（DVWA sqli high session 型触发页：$_SESSION[id] 原样拼进 user_id='$id' LIMIT 1）拖库对账 5/5",
+      "status": "verified",
+      "evidence": "① e2e/real-world-lab/results/d300-so-dump-2026-11-18T17-43-13.json（databases=[postgres]、5 表全拖、seedHits=九成新 iPad 9/机械键盘 87 键/人体工学椅/《深入浅出 PostgreSQL》、d300Channels=[extended-extract]）；② e2e/dvwa-lab/results/all-levels-2026-11-19T*.json（sqli-high-dump-direct：直驱适配器 store→trigger，dvwa.users 拖出 admin/gordonb/1337/pablo/smithy 全 5 种子、LIMIT 1 由哨兵原值 999999999 破解）",
+      "refute_cmd": "① node e2e/real-world-lab/d300-so-dump.mjs（PGlite 进程内自起）；② node scripts/labs.mjs --up=dvwa,mariadb && node e2e/dvwa-lab/all-levels-verify.mjs（sqli-high-dump-direct 判据：dvwa.users 种子 ≥4/5；任一转红即本条转 refuted）",
+      "lastReviewed": "2026-11-19",
+      "caveat": "双库均需显式配置：PGlite=unionCols 5 + dbms PostgreSQL；MySQL=unionCols 2（默认）+ dbms MySQL + 哨兵原值（LIMIT 1 截标记行，D300-14 守卫钉住）。串行强制（适配器共享可变存储状态：PGlite 最新评论 / PHP $_SESSION['id']）。写放大：每 UNION 请求 = 一次真实写入。配套缺口显式登记：报错抑制型触发页的二阶检测（布尔差异判定）与 real_escape_string 全站逃逸的拖库（--hex 提取链）未支持，见 all-levels-verify 输出的 GAP①②"
+    },
+    {
+      "id": "d300-blind-dump-dvwa",
+      "claim": "D300 盲注 opt-in 拖库真机闭环：DVWA high cookie 布尔盲注上逐字节提取 current_user/database/version 三标量全中（root@localhost / dvwa / 10.11.19-MariaDB），并随带验证一阶 union 拖库回归（12 库 30 表，dvwa.users 5 行）",
+      "status": "verified",
+      "evidence": "e2e/dvwa-lab/results/d300-verify-2026-11-18T17-55-42.json（2026-11-19 实跑：case A scalars 全非空 + summary.d300Channels=[extended-extract]，471 请求 132s；case B databases 12 库 30 表有行）；配套 DVWA 外部裁判 5/5 检出 + impossible 0 误报（e2e/dvwa-lab/run.mjs 同日实跑）",
+      "refute_cmd": "DVWA_BASE=http://127.0.0.1:8099 node e2e/dvwa-lab/d300-verify.mjs（需 dvwa+mariadb 靶场常驻：node scripts/labs.mjs --up=dvwa,mariadb；case A 标量任一为空或通道未标记即转 refuted）",
+      "lastReviewed": "2026-11-19",
+      "caveat": "依赖三项显式配置（无回显指纹推不出方言与闭合）：dbms=MySQL 强制方言、knownPoint{param:id,quote:'} 人工闭合（boundary='' 时 MariaDB 把 '1 AND …' 数值强转成 1 ⇒ 布尔判据恒真，真/假探针全 exists——2026-11-19 实证）、blindDump 显式 opt-in。耗时与请求数是复跑即失效类数字；不做通用检出率外推"
     }
   ]
 }
