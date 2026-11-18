@@ -35,6 +35,13 @@ const SCRATCH = path.join(ROOT, '.box-agent-scratch');
 
 /** OWASP-Benchmark/BenchmarkJava 的上游 pin（2026-11-12 master；换版本必须同步改 ci.yml 的 env） */
 const REF = process.env.BENCHMARK_REF || 'a452b3aafd232245d0753e54eb243d6651f8ef96';
+// [D299] pin 源码写死 version.tomcat=9.0.122，但 Apache 已把 9.0.122 从 downloads.apache.org
+// 撤下（实测 404，当前 downloads 只剩 9.0.123+）⇒ cargo:run 下载 Tomcat 失败 ⇒ 8443 永不就绪，
+// CI #456 step20 卡 240s 后红。archive.apache.org 仍保留 9.0.122（实测 200），且本项目 Maven
+// 下载源早已用 archive（见 e2e/benchmark-lab/README.md）。用 -Dtomcat.url 覆盖 pom property：
+// 保留 pin 版本不变（可复现），只把下载底座换到 archive。允许 env 覆盖以便日后上游改版。
+const TOMCAT_URL = process.env.BENCHMARK_TOMCAT_URL
+  || 'https://archive.apache.org/dist/tomcat/tomcat-9/v9.0.122/bin/apache-tomcat-9.0.122.zip';
 const DIR = path.resolve(ROOT, process.env.BENCHMARK_DIR || path.join('.verify-labs', 'benchmark-ci'));
 const MAVEN = process.env.MAVEN_CMD || 'mvn';
 const LOG = path.join(SCRATCH, 'ci-benchmark.log');
@@ -114,6 +121,7 @@ function build() {
   const out = run(MAVEN, [
     'initialize', 'clean', 'package', '-Pdeploy', '-DskipTests',
     '-Dspotless.check.skip=true', '-Dspotless.apply.skip=true',
+    `-Dtomcat.url=${TOMCAT_URL}`,
   ], { cwd: DIR, timeout: 20 * 60 * 1000 });
   fs.appendFileSync(LOG, `\n=== mvn package ===\n${out}\n`);
 }
@@ -156,7 +164,7 @@ function startServers() {
     '--database.0', `file:${dbFile}`, '--dbname.0', 'benchmarkDataBase', '--port', '9001',
   ], DIR));
   pids.push(startDetached('cargo', MAVEN, [
-    'cargo:run', '-Pdeploy', '-Dspotless.apply.skip=true',
+    'cargo:run', '-Pdeploy', '-Dspotless.apply.skip=true', `-Dtomcat.url=${TOMCAT_URL}`,
   ], DIR));
   fs.writeFileSync(PIDS, JSON.stringify(pids, null, 2));
   return pids;
@@ -189,7 +197,11 @@ async function waitReady(seconds = 240) {
     await sleep(5000);
   }
   const tail = fs.existsSync(LOG) ? fs.readFileSync(LOG, 'utf8').split('\n').slice(-40).join('\n') : '(无日志)';
-  fail(`${seconds}s 内未就绪（9001/8443）；日志尾部：\n${tail}`);
+  // [D299] HSQLDB 的 "Network client is not a HSQLDB JDBC driver" 只是 TCP 探针噪音，
+  // 常把 tail 刷满、盖住真正的 cargo 错误。显式提示优先排查 Tomcat 下载（#456 真因）。
+  fail(`${seconds}s 内未就绪（9001/8443）。优先排查：cargo 是否成功下载 Tomcat ` +
+    `（pin=9.0.122，downloads.apache.org 已 404，必须 -Dtomcat.url 指向 archive）；` +
+    `查看 ${DIR}/target/cargo.log。日志尾部：\n${tail}`);
 }
 
 /** stop：按 pid 文件 SIGTERM 收工（进程组，避免 cargo 的子 java 残留）。 */

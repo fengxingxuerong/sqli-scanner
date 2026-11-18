@@ -390,8 +390,17 @@
       "status": "unverified",
       "evidence": "scripts/ci-benchmark.mjs / ci.yml / server/tests/ciBenchmarkWiring.guard.test.js（本树静态判据全绿）；远端 CI 实证尚未取得",
       "refute_cmd": "GET https://api.github.com/repos/fengxingxuerong/sqli-scanner/actions/runs?event=push&per_page=5 → acceptance job 日志须出现「外部裁判 4 号 … PASS」而非 SKIP；否则本条维持 unverified",
-      "lastReviewed": "2026-11-15",
-      "caveat": "接线 ≠ 验证：Maven 冷构建 / codeload pin / cargo 启动 / 自签探针均未经远端 CI 实证，首跑可能整轮红；不得据此宣称 SKIP→PASS 或 27/27 全断言"
+      "lastReviewed": "2026-11-18",
+      "caveat": "接线 ≠ 验证：Maven 冷构建 / codeload pin / cargo 启动 / 自签探针均未经远端 CI 实证，首跑可能整轮红；不得据此宣称 SKIP→PASS 或 27/27 全断言。2026-11-18 首跑 #456 已实证失败（见 benchmark-ci-first-run-456-d299），本条维持 unverified 直至修复后远端日志出现 PASS"
+    },
+    {
+      "id": "benchmark-ci-first-run-456-d299",
+      "claim": "D298 接线的首次远端 CI（#456）失败根因 = pin 源码写死 Tomcat 9.0.122，该版本已从 downloads.apache.org 撤下（404），cargo:run 下载失败 ⇒ 8443 永不就绪、step20 卡 240s 后 exit 1",
+      "status": "verified",
+      "evidence": "#456 acceptance step20 日志（用户提供）：'hsqldb/cargo 已起' 后 '240s 内未就绪（9001/8443）'，尾部满是 HSQLDB TCP 探针噪音；本地 curl 实测 downloads.apache.org/tomcat/tomcat-9/v9.0.122/... = 404，archive.apache.org/dist/tomcat/...v9.0.122/... = 200，downloads 现仅存 9.0.123/9.0.124；诊断 docs/ci-456-benchmark-diagnosis-2026-11-18.md",
+      "refute_cmd": "curl -sI https://downloads.apache.org/tomcat/tomcat-9/v9.0.122/bin/apache-tomcat-9.0.122.zip | head -1（须 404 佐证）；修复后远端 acceptance 日志须出现「外部裁判 4 号 … PASS」",
+      "lastReviewed": "2026-11-18",
+      "caveat": "HSQLDB 的 'Network client is not a HSQLDB JDBC driver' 是 TCP 探针无害噪音，非根因。D299 修法 = -Dtomcat.url 覆盖到 archive（保留 pin 版本 9.0.122），尚未经远端 CI 重跑验证 ⇒ 不得宣称已修好或 SKIP→PASS"
     }
   ]
 }

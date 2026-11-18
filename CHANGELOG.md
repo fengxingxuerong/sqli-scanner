@@ -6,6 +6,41 @@
 
 > 下一批次起的条目写在这里。发版时把本节整体升为 `## [x.y.z] - YYYY-MM-DD` 并补汇总段。
 
+### 2026-11-18 批次 D299 · 修复 D298 首跑失败：Tomcat 9.0.122 下载 404
+
+**起点**：D298 接线的首次远端 CI run `#456`（11-16）失败，acceptance step20「启动 Benchmark」
+311s 后 exit 1，后续 15 个验收步骤 skipped。用户提供该步骤日志：
+`hsqldb/cargo 已起 pid=...` → `240s 内未就绪（9001/8443）`，tail 全是
+`org.hsqldb.HsqlException: Network client is not a HSQLDB JDBC driver`。
+
+**根因（实证）**：尾部 HSQLDB 异常只是 `tcpOpen(9001)` 裸探针触发的无害噪音（盖住了 cargo 真错）；
+真因是 pin 源码 `version.tomcat=9.0.122` 对应的
+`https://downloads.apache.org/tomcat/tomcat-9/v9.0.122/bin/apache-tomcat-9.0.122.zip`
+已 404（Apache 只保留最新 9.0.123/9.0.124），`cargo:run` 下不到 Tomcat ⇒ 8443 永不就绪。
+`curl -sI` 实测 downloads=404、archive=200。
+
+**改动**（脚本 + 守卫 + 文档，零产品代码 / 零门禁阈值）：
+- `scripts/ci-benchmark.mjs`：新增 `TOMCAT_URL`（archive 的 9.0.122，env `BENCHMARK_TOMCAT_URL` 可覆盖），
+  `mvn package` 与 `mvn cargo:run` 两处均注入 `-Dtomcat.url=${TOMCAT_URL}`（命令行属性覆盖 pom property，
+  **pin 版本 9.0.122 不变**，可复现）。`waitReady` 超时提示点名该坑 + 建议查 `target/cargo.log`。
+- `server/tests/ciBenchmarkWiring.guard.test.js`：+D299-1/2/3，钉住两处覆盖 / archive 域名 / 版本；
+  反例（删一处、换回 downloads）判红。全文件 **7/7**；缺陷注入（脚本换回 downloads）2 条红、还原 7/7。
+- `docs/_claims-ledger.json`：新增 `benchmark-ci-first-run-456-d299`（verified）；
+  `benchmark-ci-wiring-d298` 维持 unverified + 首跑失败交叉引用（42 条 = 30 verified / 10 refuted / 2 unverified）。
+- TODO / 诊断文档同步根因与边界。
+
+**验证**：`node --check scripts/ci-benchmark.mjs` EXIT=0；守卫 7/7 + 注入复验；
+archive/downloads 的 curl 实证；台账 JSON 解析通过；`facts:check` / `readme:check` /
+`stale-claim-check` 全 EXIT=0。新增 3 条守卫用例 ⇒ facts 重采集：服务端
+4301→**4304**（4298 pass / 0 fail / 6 skip），README / `_facts.json` / `_facts.sources.json`
+/ 质量台账同步。本机无 java/mvn，**未本地起靶场、未跑 gate:close**。
+
+**边界**：**未重跑远端 CI**；`-Dtomcat.url` 覆盖只在静态/curl 层验证，未经 Maven 实跑与远端裁判。
+**不得宣称已修好 / SKIP→PASS**。只有修复后 push CI 的 acceptance 出现「外部裁判 4 号 … PASS」
+才把 d298 转 verified。本地 `gate:close` 54/55 环境性假红、v1.3.3 发版事实均不变。
+
+---
+
 ### 2026-11-15 批次 D298 · 外部裁判 4 号（OWASP Benchmark）接进 CI acceptance（首次接线，待远端裁判）
 
 **起点**：4 号裁判在 CI 长期 `SKIP`（`ci.yml` 原注释「Java 构建链仍未验证，不盲猜」），

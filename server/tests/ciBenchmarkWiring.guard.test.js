@@ -40,6 +40,23 @@ function assertWiring(yaml, script) {
     "--port', '9001'", '8443/benchmark', "process.platform === 'win32'", 'process.exit(1)']) {
     assert.ok(script.includes(needle), `ci-benchmark.mjs 缺片段：${needle}`);
   }
+  assertTomcatArchiveOverride(script);
+}
+
+/**
+ * [D299] pin 的 Tomcat 9.0.122 已从 downloads.apache.org 撤下（实测 404，#456 真因）。
+ * 脚本必须在 **package 与 cargo:run 两处**用 -Dtomcat.url 覆盖到 archive.apache.org，
+ * 且版本仍是 9.0.122（保留 pin 可复现，只换下载底座）。只认指令片段，不认注释。
+ */
+function assertTomcatArchiveOverride(script) {
+  const code = script.split(/\r?\n/).filter((l) => !/^\s*\/\//.test(l)).join('\n');
+  const hits = [...code.matchAll(/-Dtomcat\.url=\$\{TOMCAT_URL\}/g)];
+  assert.ok(hits.length >= 2,
+    `缺 -Dtomcat.url 覆盖（build + cargo:run 两处都要；实测 ${hits.length} 处）`);
+  assert.match(code, /TOMCAT_URL[\s\S]{0,200}archive\.apache\.org\/dist\/tomcat\/tomcat-9\/v9\.0\.122/,
+    'TOMCAT_URL 未指向 archive 的 9.0.122（downloads 已 404）');
+  assert.ok(!/tomcat\.url=[^\n`]*downloads\.apache\.org/.test(code),
+    'tomcat.url 指回 downloads.apache.org（9.0.122 已 404）');
 }
 
 test('D298-1) 真实 ci.yml 与脚本必须四件接线齐备', () => {
@@ -61,6 +78,20 @@ test('D298-3) 反例自证：把硬起改成容错（|| true）必须判红', ()
 test('D298-4) 反例自证：删掉就绪探针 / 改 JDK 版本必须判红', () => {
   assert.throws(() => assertWiring(YAML, SCRIPT.replace('8443/benchmark', '8443/')), /8443\/benchmark/);
   assert.throws(() => assertWiring(YAML.replace("java-version: '17'", "java-version: '11'"), SCRIPT), /JDK 版本/);
+});
+
+test('D299-1) 真脚本的 Tomcat archive 覆盖（两处）必须齐备', () => {
+  assertTomcatArchiveOverride(SCRIPT);
+});
+
+test('D299-2) 反例自证：删掉任一处 -Dtomcat.url 覆盖必须判红', () => {
+  const oneGone = SCRIPT.replace('`-Dtomcat.url=${TOMCAT_URL}`,', '');
+  assert.throws(() => assertTomcatArchiveOverride(oneGone), /实测 1 处/);
+});
+
+test('D299-3) 反例自证：把 archive 换成 downloads（已 404）必须判红', () => {
+  const wrong = SCRIPT.replace('https://archive.apache.org/dist/tomcat', 'https://downloads.apache.org/tomcat');
+  assert.throws(() => assertTomcatArchiveOverride(wrong), /archive/);
 });
 
 /** 拒绝「起靶场失败被吞」：ci.yml 的 Benchmark 步骤不得带 continue-on-error 或 || true。 */

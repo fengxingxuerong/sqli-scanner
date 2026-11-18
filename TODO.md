@@ -5,6 +5,33 @@
 
 ---
 
+## 2026-11-18 批次 D299 · 修复 D298 接线首跑失败（Tomcat 9.0.122 下载 404）
+
+**根因（已实证，非猜测）**：D298 首跑 `#456`（11-16）acceptance step20「启动 Benchmark」
+在 311s 后 exit 1。用户提供的日志显示 `hsqldb/cargo 已起` 后卡在 `240s 内未就绪（9001/8443）`，
+尾部全是 HSQLDB 的 `Network client is not a HSQLDB JDBC driver`（**TCP 探针无害噪音，非根因**）。
+本地 curl 证实：pin 源码写死 `version.tomcat=9.0.122`，而
+`downloads.apache.org/tomcat/tomcat-9/v9.0.122/...` 返回 **404**（现仅存 9.0.123/9.0.124），
+`archive.apache.org/dist/tomcat/...v9.0.122/...` 返回 **200** ⇒ `cargo:run` 下载 Tomcat 失败，
+8443 永不就绪。
+
+- 修法：`scripts/ci-benchmark.mjs` 新增 `TOMCAT_URL`（默认 archive 的 9.0.122，可用
+  `BENCHMARK_TOMCAT_URL` 覆盖），在 **build 的 `mvn package` 与 `cargo:run` 两处**注入
+  `-Dtomcat.url=...`（Maven 命令行属性覆盖 pom property）。**保留 pin 版本不变**，只换下载底座。
+- 顺带在 `waitReady` 的超时提示里点名该坑（HSQLDB 噪音会刷满 tail、盖住 cargo 真错）。
+- 守卫：`ciBenchmarkWiring.guard.test.js` 新增 D299-1/2/3（7/7 绿）——钉住两处覆盖 +
+  archive 域名 + 9.0.122 版本，反例「删一处 / 换回 downloads」均判红；缺陷注入实测
+  （改回 downloads）2 条红、还原 7/7 绿。
+- 台账：新增 `benchmark-ci-first-run-456-d299`（verified，根因）；`benchmark-ci-wiring-d298`
+  维持 unverified 并加首跑失败交叉引用。诊断记录 `docs/ci-456-benchmark-diagnosis-2026-11-18.md`。
+
+**边界（别当已完成推）**：本批只改脚本 + 守卫 + 文档，**未重跑远端 CI**。`-Dtomcat.url`
+覆盖与 archive 下载仅在本地静态/curl 层面验证（本机无 java/mvn，无法本地起靶场）；
+**只有修复后 push CI 的 acceptance 日志出现「外部裁判 4 号 … PASS」才把 d298 转 verified、
+SKIP→PASS**。不得宣称已修好或 27/27 全断言。
+
+---
+
 ## 2026-11-15 批次 D298 · 把外部裁判 4 号接进 CI（首次接线，待远端裁判）
 
 **目标**：消除 `acceptance` 里长期挂着的「外部裁判 4 号 SKIP（环境不满足）」，

@@ -107,6 +107,13 @@ mvn cargo:run -Pdeploy -Dspotless.apply.skip=true
   `clean` 失败。改代码后要先停 java 进程再 clean。
 - **端口是 8443 https（自签）不是 8080**：deploy profile 里 `cargo.servlet.port=8443` +
   `cargo.protocol=https`；引擎侧要 `insecureTls: true`。
+- **[D299] Tomcat 版本要从 archive 拉**：pin 源码写死 `version.tomcat=9.0.122`，但 Apache 已把
+  9.0.122 从 `downloads.apache.org` 撤下（实测 404，downloads 现仅存 9.0.123+）⇒ `cargo:run`
+  下不到 Tomcat、8443 永不就绪（CI #456 首跑即此因）。CI 脚本 `scripts/ci-benchmark.mjs`
+  已在 `mvn package` 与 `cargo:run` 两处注入 `-Dtomcat.url=<archive 的 9.0.122>` 覆盖；
+  本机手动跑也须照做：`mvn cargo:run -Pdeploy -Dspotless.apply.skip=true \
+  -Dtomcat.url=https://archive.apache.org/dist/tomcat/tomcat-9/v9.0.122/bin/apache-tomcat-9.0.122.zip`
+  （archive 实测 200，版本仍 9.0.122 以保可复现）。
 - war 的 finalName 是 `benchmark` ⇒ URL 前缀 `/benchmark/`；参数名 = 用例类名（官方约定）。
 
 ## 注入面三种形态（runner 必须区别对待）
