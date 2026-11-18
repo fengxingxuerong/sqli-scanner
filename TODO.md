@@ -25,10 +25,14 @@
 - 台账：新增 `benchmark-ci-first-run-456-d299`（verified，根因）；`benchmark-ci-wiring-d298`
   维持 unverified 并加首跑失败交叉引用。诊断记录 `docs/ci-456-benchmark-diagnosis-2026-11-18.md`。
 
-**边界（别当已完成推）**：本批只改脚本 + 守卫 + 文档，**未重跑远端 CI**。`-Dtomcat.url`
-覆盖与 archive 下载仅在本地静态/curl 层面验证（本机无 java/mvn，无法本地起靶场）；
-**只有修复后 push CI 的 acceptance 日志出现「外部裁判 4 号 … PASS」才把 d298 转 verified、
-SKIP→PASS**。不得宣称已修好或 27/27 全断言。
+**✅ 远端核销（2026-11-18）**：D299 推送（`44552ce`）后 CI #461 acceptance success，
+step20「启动 Benchmark」117s success（首跑 311s 超时失败）；acceptance-report 实读
+「外部裁判 4 号 ✅ 真值 43/43、误报 0/24」，套件 **26 PASS / 0 FAIL / 1 SKIP**
+⇒ Benchmark 由长期 SKIP **转 PASS**，台账 d298 转 verified。#461 唯一红是 lint step59
+（CHANGELOG 索引漏更新，已补 `changelog-index --write`，随本核销二次推送）。
+
+**边界**：43/43 是官方标注子集，不得外推通用检出率；唯一 SKIP = AI 网关 opt-in，
+26/27 ≠ 27/27 全断言。archive 是 Apache 历史版本库（可用但非首选源），上游改版需同步复核。
 
 ---
 

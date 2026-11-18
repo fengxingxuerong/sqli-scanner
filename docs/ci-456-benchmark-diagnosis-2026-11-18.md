@@ -75,7 +75,22 @@ HSQLDB 异常被降级为噪音（不是第二个根因）。
 
 **已实施修复（D299）**：`scripts/ci-benchmark.mjs` 在 package 与 cargo:run 两处注入
 `-Dtomcat.url=<archive 的 9.0.122>`（保留 pin 版本），守卫 D299-1/2/3 钉住、缺陷注入复验通过。
-**未重跑远端 CI**，故修复效果待 #456 之后的 push CI 裁判，详见 TODO/CHANGELOG D299。
+
+## 5. 远端核销（2026-11-18，CI #461）
+
+D299 推送（远端 `44552ce`）触发 CI **#461 = run `44312225238`**：
+- acceptance **success**（27m21s）；step20「启动 Benchmark」**117s success** —— 对比 #456 的
+  311s 超时失败，archive 覆盖确实让 Tomcat 下载成功、8443 就绪。step21–23（VAmPI/DVWA/VulnLab）全 success。
+- `acceptance-report.md`（artifact `14434280900`，13:54:50Z）：「外部裁判 4 号 = ✅ 通过，
+  真值 43/43、误报 0/24、证据不足 0，形态 header+参数名 50 条，call 真值 4/4 + 安全 0/3」，
+  套件 **26 PASS / 0 FAIL / 1 SKIP**（唯一 SKIP = AI 网关 opt-in）。
+  ⇒ **Benchmark 由长期 SKIP 转 PASS**，台账 `benchmark-ci-wiring-d298` 转 verified。
+- #461 唯一红：lint step59「CHANGELOG 顶部索引等于正文批次」（D299 加批次段后漏跑
+  `changelog-index --write`）——本地已修、随核销二次推送，与 Benchmark 无关。
+
+**本案闭环**：诊断 → 根因（Tomcat 404）→ 修复（archive 覆盖 + 守卫）→ 远端裁判 PASS。
+边界：43/43 是官方标注子集非通用检出率；26/27 ≠ 27/27 全断言；archive 是历史版本库，
+上游改版需同步复核。
 
 ## 5. 对交付判定的影响（维持上一轮结论）
 

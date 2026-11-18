@@ -39,6 +39,17 @@ archive/downloads 的 curl 实证；台账 JSON 解析通过；`facts:check` / `
 **不得宣称已修好 / SKIP→PASS**。只有修复后 push CI 的 acceptance 出现「外部裁判 4 号 … PASS」
 才把 d298 转 verified。本地 `gate:close` 54/55 环境性假红、v1.3.3 发版事实均不变。
 
+**远端核销补记（2026-11-18，D299 推送后）**：commit `44552ce` 触发 CI **#461**
+（run `44312225238`）：acceptance **success**（27m21s），step20「启动 Benchmark」
+**117s success**（首跑 311s 超时失败）；`acceptance-report.md`（13:54:50Z，artifact
+`14434280900`）实读「外部裁判 4 号 = ✅ 通过，真值 **43/43**、误报 **0/24**、
+证据不足 0，形态 header+参数名 50 条，call 真值 4/4 + 安全 0/3」，套件汇总
+**26 PASS / 0 FAIL / 1 SKIP**（唯一 SKIP = AI 网关 opt-in）⇒ **Benchmark 由长期 SKIP
+转 PASS**。台账 `benchmark-ci-wiring-d298` 转 verified。#461 唯一红是
+`lint` step59「CHANGELOG 顶部索引等于正文批次」——D299 加批次段后漏跑
+`changelog-index --write`（本地已修，`--check`/`--selftest` 全绿），随本次补记二次推送。
+43/43 是官方标注子集，不得外推通用检出率；26/27 ≠ 27/27 全断言。
+
 ---
 
 ### 2026-11-15 批次 D298 · 外部裁判 4 号（OWASP Benchmark）接进 CI acceptance（首次接线，待远端裁判）
@@ -306,13 +317,14 @@ CI Linux 同代码绿）；零产品代码改动，未改 deadline / 阈值 / �
 ---
 
 <!-- changelog-index:start -->
-**本段覆盖 8 个批次（D290–D298，2026-11-14 → 2026-11-15）**。正文按时间倒序排列；
+**本段覆盖 9 个批次（D290–D299，2026-11-14 → 2026-11-18）**。正文按时间倒序排列；
 下表是同一批次的索引，便于按编号或关键词定位。**索引只是导航，正文未做任何删改**
 （被推翻的旧结论原样保留，这是本仓的既定口径）。新增批次后跑
 `node scripts/changelog-index.mjs --write` 重生成，`--check` 校验是否过期。
 
 | 批次 | 日期 | 主题 |
 |---|---|---|
+| D299 | 11-18 | 修复 D298 首跑失败：Tomcat 9.0.122 下载 404 |
 | D298 | 11-15 | 外部裁判 4 号（OWASP Benchmark）接进 CI acceptance（首次接线，待远端裁判） |
 | D297 | 11-15 | macOS 时间通道假红入账（等 CI 终判期间） |
 | D296 | 11-15 | PR 分支同步执行核销（口径作废 + 远端裁判） |
