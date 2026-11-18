@@ -1,0 +1,79 @@
+{
+  "base": "http://127.0.0.1:8099",
+  "at": "2026-11-18T17:31:23.456Z",
+  "pass": false,
+  "results": [
+    {
+      "case": "A-blind-dump",
+      "ok": false,
+      "status": "completed",
+      "elapsedMs": 11512,
+      "booleanHit": true,
+      "scalars": {
+        "currentUser": null,
+        "currentDb": null,
+        "banner": null
+      },
+      "channels": [],
+      "requests": 62,
+      "verdict": "vulnerability_detected"
+    },
+    {
+      "case": "B-union-dump-regression",
+      "ok": true,
+      "status": "completed",
+      "elapsedMs": 6536,
+      "unionHit": true,
+      "rowTables": [
+        "blackbox_lab.orders(2行)",
+        "blackbox_lab.products(6行)",
+        "blackbox_lab.secrets(3行)",
+        "blackbox_lab.sessions(2行)",
+        "blackbox_lab.users(5行)",
+        "ds_lab.users(3行)",
+        "dvwa.guestbook(1行)",
+        "dvwa.users(5行)",
+        "campus_library.borrows(4行)",
+        "campus_library.categories(8行)",
+        "campus_library.favorites(2行)",
+        "campus_library.reviews(3行)",
+        "campus_library.users(2行)",
+        "campus_library.books(26行)",
+        "parammine_lab.products(6行)",
+        "paramname_lab.products(6行)",
+        "redteam_lab.mixcols(3行)",
+        "redteam_lab.products(3行)",
+        "redteam_lab.users(5行)",
+        "netsec.alerts(6行)",
+        "netsec.users(1行)",
+        "netsec.assets(7行)",
+        "netsec.vulnerabilities(6行)",
+        "netsec.audit_logs(26行)",
+        "sqli_lab.products(4行)",
+        "sqli_lab.users(6行)",
+        "sqli_lab_bare.products(4行)",
+        "sqli_lab_bare.users(6行)",
+        "sqli_lab_bare2.products(4行)",
+        "sqli_lab_bare2.users(6行)"
+      ],
+      "databases": [
+        "blackbox_lab",
+        "campus_library",
+        "ds_lab",
+        "dvwa",
+        "netsec",
+        "parammine_lab",
+        "paramname_lab",
+        "redteam_lab",
+        "sqli_lab",
+        "sqli_lab_bare",
+        "sqli_lab_bare2",
+        "test"
+      ],
+      "constraints": [],
+      "channels": [],
+      "requests": 251,
+      "verdict": "vulnerability_detected"
+    }
+  ]
+}

@@ -1,0 +1,328 @@
+{
+  "base": "http://127.0.0.1:8099",
+  "at": "2026-11-18T22:45:11.617Z",
+  "passAll": true,
+  "results": [
+    {
+      "name": "sqli-low",
+      "desc": "GET id 直拼 + mysqli_error 回显（官方 low.php）",
+      "status": "completed",
+      "elapsedMs": 8572,
+      "requests": 268,
+      "found": [
+        "union",
+        "error",
+        "boolean"
+      ],
+      "must": [
+        "union",
+        "boolean"
+      ],
+      "detected": true,
+      "dump": {
+        "hits": [
+          "admin",
+          "gordonb",
+          "1337",
+          "pablo",
+          "smithy"
+        ],
+        "total": 5,
+        "rowTables": [
+          "blackbox_lab.orders(2行)",
+          "blackbox_lab.products(6行)",
+          "blackbox_lab.secrets(3行)",
+          "blackbox_lab.sessions(2行)",
+          "blackbox_lab.users(5行)",
+          "ds_lab.users(3行)",
+          "dvwa.guestbook(1行)",
+          "dvwa.users(5行)",
+          "campus_library.borrows(4行)",
+          "campus_library.categories(8行)",
+          "campus_library.favorites(2行)",
+          "campus_library.reviews(3行)",
+          "campus_library.users(2行)",
+          "campus_library.books(26行)",
+          "parammine_lab.products(6行)",
+          "paramname_lab.products(6行)",
+          "redteam_lab.mixcols(3行)",
+          "redteam_lab.products(3行)",
+          "redteam_lab.users(5行)",
+          "netsec.alerts(6行)",
+          "netsec.users(1行)",
+          "netsec.assets(7行)",
+          "netsec.vulnerabilities(6行)",
+          "netsec.audit_logs(26行)",
+          "sqli_lab.products(4行)",
+          "sqli_lab.users(6行)",
+          "sqli_lab_bare.products(4行)",
+          "sqli_lab_bare.users(6行)",
+          "sqli_lab_bare2.products(4行)",
+          "sqli_lab_bare2.users(6行)"
+        ],
+        "dbs": [
+          "blackbox_lab",
+          "campus_library",
+          "ds_lab",
+          "dvwa",
+          "netsec",
+          "parammine_lab",
+          "paramname_lab",
+          "redteam_lab",
+          "sqli_lab",
+          "sqli_lab_bare",
+          "sqli_lab_bare2",
+          "test"
+        ]
+      },
+      "ok": true
+    },
+    {
+      "name": "sqli-medium",
+      "desc": "POST id + real_escape_string 但数值型无引号（官方 medium.php）——检测 + --hex 拖库（[D301] 引号字面量全 0x 化，转义无从作用）",
+      "status": "completed",
+      "elapsedMs": 31941,
+      "requests": 1225,
+      "found": [
+        "union",
+        "error",
+        "boolean"
+      ],
+      "must": [
+        "union",
+        "boolean"
+      ],
+      "detected": true,
+      "dump": {
+        "hits": [
+          "admin",
+          "gordonb",
+          "1337",
+          "pablo",
+          "smithy"
+        ],
+        "total": 5,
+        "rowTables": [
+          "blackbox_lab.orders(2行)",
+          "blackbox_lab.products(6行)",
+          "blackbox_lab.secrets(3行)",
+          "blackbox_lab.sessions(2行)",
+          "blackbox_lab.users(5行)",
+          "ds_lab.users(3行)",
+          "dvwa.guestbook(1行)",
+          "dvwa.users(5行)",
+          "campus_library.borrows(4行)",
+          "campus_library.categories(8行)",
+          "campus_library.favorites(2行)",
+          "campus_library.reviews(3行)",
+          "campus_library.users(2行)",
+          "campus_library.books(26行)",
+          "parammine_lab.products(6行)",
+          "paramname_lab.products(6行)",
+          "redteam_lab.mixcols(3行)",
+          "redteam_lab.products(3行)",
+          "redteam_lab.users(5行)",
+          "netsec.alerts(6行)",
+          "netsec.users(1行)",
+          "netsec.assets(7行)",
+          "netsec.vulnerabilities(6行)",
+          "netsec.audit_logs(26行)",
+          "sqli_lab.products(4行)",
+          "sqli_lab.users(6行)",
+          "sqli_lab_bare.products(4行)",
+          "sqli_lab_bare.users(6行)",
+          "sqli_lab_bare2.products(4行)",
+          "sqli_lab_bare2.users(6行)"
+        ],
+        "dbs": [
+          "blackbox_lab",
+          "campus_library",
+          "ds_lab",
+          "dvwa",
+          "netsec",
+          "parammine_lab",
+          "paramname_lab",
+          "redteam_lab",
+          "sqli_lab",
+          "sqli_lab_bare",
+          "sqli_lab_bare2",
+          "test"
+        ]
+      },
+      "ok": true
+    },
+    {
+      "name": "sqli_blind-low",
+      "desc": "GET id 布尔 only（官方去 or die）+ 盲注 opt-in 拖库",
+      "status": "completed",
+      "elapsedMs": 11263,
+      "requests": 406,
+      "found": [
+        "boolean"
+      ],
+      "must": [
+        "boolean"
+      ],
+      "detected": true,
+      "scalars": {
+        "ok": true,
+        "scalars": {
+          "currentUser": "root@localhost",
+          "currentDb": "dvwa",
+          "banner": "10.11.19-MariaDB"
+        },
+        "channels": [
+          "extended-extract"
+        ]
+      },
+      "ok": true
+    },
+    {
+      "name": "sqli_blind-medium",
+      "desc": "POST id 数值型布尔（real_escape_string ⇒ 引号探针必死，不传 knownPoint）+ 盲注 opt-in",
+      "status": "completed",
+      "elapsedMs": 12622,
+      "requests": 435,
+      "found": [
+        "boolean"
+      ],
+      "must": [
+        "boolean"
+      ],
+      "detected": true,
+      "scalars": {
+        "ok": true,
+        "scalars": {
+          "currentUser": "root@localhost",
+          "currentDb": "dvwa",
+          "banner": "10.11.19-MariaDB"
+        },
+        "channels": [
+          "extended-extract"
+        ]
+      },
+      "ok": true
+    },
+    {
+      "name": "sqli_blind-high",
+      "desc": "COOKIE id 引号布尔（MISSING 404 + rand sleep）+ 盲注 opt-in（需 knownPoint 闭合）",
+      "status": "completed",
+      "elapsedMs": 131752,
+      "requests": 471,
+      "found": [
+        "boolean"
+      ],
+      "must": [
+        "boolean"
+      ],
+      "detected": true,
+      "scalars": {
+        "ok": true,
+        "scalars": {
+          "currentUser": "root@localhost",
+          "currentDb": "dvwa",
+          "banner": "10.11.19-MariaDB"
+        },
+        "channels": [
+          "extended-extract"
+        ]
+      },
+      "ok": true
+    },
+    {
+      "name": "sqli-impossible",
+      "desc": "PDO prepare + is_numeric ⇒ 官方「不可利用」档（0 检出 + 打满预算）",
+      "status": "completed",
+      "elapsedMs": 5306,
+      "requests": 185,
+      "found": [],
+      "must": [],
+      "safe": true,
+      "ok": true
+    },
+    {
+      "name": "sqli_blind-impossible",
+      "desc": "盲注 PDO 档（0 检出 + 打满预算）",
+      "status": "completed",
+      "elapsedMs": 5490,
+      "requests": 197,
+      "found": [],
+      "must": [],
+      "safe": true,
+      "ok": true
+    },
+    {
+      "name": "sqli-high-detection",
+      "desc": "session 型二阶检测（签名 + [D301] 布尔差异双路径）",
+      "status": "completed",
+      "elapsedMs": 1613,
+      "requests": 354,
+      "found": [
+        "second_order"
+      ],
+      "must": [
+        "second_order"
+      ],
+      "ok": true
+    },
+    {
+      "name": "sqli-high-dump-direct",
+      "desc": "直驱二阶拖库（MySQL 触发页：store→trigger、LIMIT 1 哨兵、串行）",
+      "ok": true,
+      "dbs": [
+        "blackbox_lab",
+        "campus_library",
+        "ds_lab",
+        "dvwa",
+        "netsec",
+        "parammine_lab",
+        "paramname_lab",
+        "redteam_lab",
+        "sqli_lab",
+        "sqli_lab_bare",
+        "sqli_lab_bare2",
+        "test"
+      ],
+      "rowTables": [
+        "blackbox_lab.orders(2行)",
+        "blackbox_lab.products(6行)",
+        "blackbox_lab.secrets(3行)",
+        "blackbox_lab.sessions(2行)",
+        "blackbox_lab.users(5行)",
+        "campus_library.books(26行)",
+        "campus_library.borrows(4行)",
+        "campus_library.categories(8行)",
+        "campus_library.favorites(2行)",
+        "campus_library.reviews(3行)",
+        "campus_library.users(2行)",
+        "ds_lab.users(3行)",
+        "dvwa.guestbook(1行)",
+        "dvwa.users(5行)",
+        "netsec.alerts(6行)",
+        "netsec.assets(7行)",
+        "netsec.audit_logs(26行)",
+        "netsec.users(1行)",
+        "netsec.vulnerabilities(6行)",
+        "parammine_lab.products(6行)",
+        "paramname_lab.products(6行)",
+        "redteam_lab.mixcols(3行)",
+        "redteam_lab.products(3行)",
+        "redteam_lab.users(5行)",
+        "sqli_lab.products(4行)",
+        "sqli_lab.users(6行)",
+        "sqli_lab_bare.products(4行)",
+        "sqli_lab_bare.users(6行)",
+        "sqli_lab_bare2.products(4行)",
+        "sqli_lab_bare2.users(6行)"
+      ],
+      "seedHits": [
+        "admin",
+        "gordonb",
+        "1337",
+        "pablo",
+        "smithy"
+      ],
+      "status": "completed"
+    }
+  ]
+}
