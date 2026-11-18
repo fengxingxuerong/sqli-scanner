@@ -13,7 +13,6 @@
     "server/src/engine/Detector.js": 1,
     "server/src/engine/detectors/TimeBlindDetector.js": 1,
     "server/src/engine/extractScope.js": 2,
-    "server/src/engine/hexLiteral.js": 1,
     "server/src/engine/payloadRegistry.js": 1,
     "server/src/engine/payloads/customPayloads.js": 1,
     "server/src/engine/payloads/destructive.js": 1,
