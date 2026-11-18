@@ -509,6 +509,10 @@ export const defaults = {
     // 默认 false 是**默认关闭（opt-in）**而非"未实现"：开启需 oob.enabled=true 且接收端
     // 已就绪，否则抛 OOB_DISABLED（见 SecondOrderDetector.js#_detectOob 的守卫）。
     oobTrigger: false,
+    // [D301 GAP②] 布尔差异判定：报错抑制型触发页（"Something went wrong." 形态）上，
+    // 签名判定不可见时的 opt-in 兜底路径。默认关——内容差异信号弱于报错签名，
+    // 三重防误报（探针页/阴性页稳定性×2 + 差异存在性）在 SecondOrderDetector._maybeDiffJudge。
+    diffJudge: false,
     // [sqlmap 对标] --second-url：写入与读取分离的二阶注入。secondUrl 非空时，
     // 触发阶段的读取请求发往 secondUrl 而非原始 triggerUrl（用于"注入存入 A 页面、
     // 回显在 B 页面"的场景）。secondMethod 默认 GET；secondData 为可选请求体。

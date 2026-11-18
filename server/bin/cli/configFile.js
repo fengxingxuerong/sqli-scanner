@@ -79,6 +79,10 @@ export function buildKnownArgKeys(parseArgsFn) {
     'ldap', 'xpath',
     // —— [D108] 背景 OOB 哨兵开关（--oob-background；组内子键走 --config 档案的 oob.background）——
     'oobBackground',
+    // —— [D301] secondOrder 整组档案透传（子键含 diffJudge/triggerUrls/secondUrl 等）——
+    // 缺登记的后果与 oob 同型：--config 写 {"secondOrder":{…}} 被未知键硬拒 ⇒ CLI 用户
+    // 对报错抑制型二阶检测（diffJudge）零可达。
+    'secondOrder',
   ];
   const known = new Set(Object.keys(parseArgsFn([])));
   for (const k of dyn) known.add(k);

@@ -17,8 +17,9 @@ const SCOPE_FIELDS: { key: ExtractScopeField; label: string }[] = [
   { key: 'keyword', label: 'scanConfig.extractScopeKeyword' },
 ];
 
-/** 该动作会用到哪些输入项 —— 用不到的置灰禁用，避免「填了但选了不看它的动作」这种白填。 */
-function scopeFieldsFor(mode: ExtractScopeMode): ExtractScopeField[] {
+/** 该动作会用到哪些输入项 —— 用不到的置灰禁用，避免「填了但选了不看它的动作」这种白填。
+ * mode 可缺省（[D300] {blindDump:true} 单传无 mode）：find 不中 → 空清单 = 无关联输入项。 */
+function scopeFieldsFor(mode: ExtractScopeMode | undefined): ExtractScopeField[] {
   return EXTRACT_SCOPE_OPTIONS.find((o) => o.value === mode)?.needs ?? [];
 }
 

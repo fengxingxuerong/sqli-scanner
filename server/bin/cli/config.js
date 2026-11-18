@@ -409,7 +409,25 @@ function applyTimeAndRefresh(config, args) {
  * @param {object} config 目标 config（原地写）
  * @param {object} args CLI 参数
  */
+/**
+ * [D301] secondOrder 整组档案透传（对齐 noSql/oob 的 §A2 先例）：--config 档案可写
+ * {"secondOrder":{"enabled":true,"triggerUrls":[…],"diffJudge":true,…}}，必须 patchGroup
+ * 带底合并（整体赋值会让组内其余子键在引擎侧变 undefined）。旗标派生字段
+ *（--second-order / --second-req / --allow-second-order-writes）在调用方后段覆盖同一组
+ *（argv > 档案的既定优先级）。缺这个口的后果：diffJudge 等子键 CLI/脚本用户零可达
+ *（与 extractScope/§A2 同型的「能力在、入口缺一半」病灶）。
+ * 独立成函数的原因：applyDbmsAndSecondOrder 贴着软上限，分支放新函数（远低于上限）。
+ * @param {object} config 目标 config（原地写）
+ * @param {object} args CLI 参数
+ */
+function applySecondOrderGroup(config, args) {
+  if (args.secondOrder && typeof args.secondOrder === 'object' && !Array.isArray(args.secondOrder)) {
+    patchGroup(config, 'secondOrder', args.secondOrder);
+  }
+}
+
 function applyDbmsAndSecondOrder(config, args) {
+  applySecondOrderGroup(config, args);
   if (args.dbms) config.dbms = String(args.dbms).trim();
   if (args.secondOrderUrl && /^https?:\/\//i.test(args.secondOrderUrl)) {
     const so = patchGroup(config, 'secondOrder', { enabled: true });
@@ -860,7 +878,7 @@ export function buildConfig(args) {
 // 是否处于枚举模式（任一枚举开关开启）
 export function isEnumMode(args) {
   return !!(args.dbs || args.tables || args.columns || args.currentDb || args.currentUser || args.count || args.users || args.passwords || args.hostname || args.isDba || args.schema || args.privileges || args.roles || !!args.search
-    || args.dumpAll || args.commonTables || args.commonColumns
+    || args.dumpAll || args.commonTables || args.commonColumns || args.blindDump // [D300] 盲注 opt-in 拖库也算枚举意图（enableExtract 联动）
     // [D46] 运维侦察三模式
     || args.banner || args.statements || args.procs);
 }
@@ -882,6 +900,14 @@ export function isEnumMode(args) {
 //   --count   -D db -T t → { mode:'count', dbs:[db], tables:[t] }
 // 无枚举开关返回 undefined（--dump 走既有全量拖库分支）
 export function buildExtractScope(args) {
+  const scope = buildExtractScopeBase(args);
+  // [D300] 盲注 opt-in 拖库：可与任一枚举模式叠加；单独传时无 mode（引擎对无 mode 的
+  // scope 走全量拖库分支 extractScope.js:15，扩展包装层 scan/extractExtended.js 读 blindDump）。
+  if (!scope) return args.blindDump ? { blindDump: true } : undefined;
+  return args.blindDump ? { ...scope, blindDump: true } : scope;
+}
+
+function buildExtractScopeBase(args) {
   // [D46] -U / --exclude 挂到任何枚举模式上（引擎按模式语义消费；不适用的模式由 extractScope 警告）
   const excludeDbs = args.exclude
     ? String(args.exclude).split(',').map((s) => s.trim()).filter(Boolean).slice(0, 16)

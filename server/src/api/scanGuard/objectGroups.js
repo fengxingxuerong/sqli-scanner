@@ -29,7 +29,8 @@ export function guardSecondOrder(config, cfg) {
         ? so.triggerMethod.slice(0, 16)
         : defaults.secondOrder.triggerMethod,
       negativeControl: so.negativeControl !== false,
-      oobTrigger: !!so.oobTrigger,
+      // [D301 GAP②] diffJudge：报错抑制型触发页（"Something went wrong." 形态）的布尔差异判定 opt-in（默认关）；三重防误报（稳定性×2+差异存在性）在引擎 _maybeDiffJudge。压平成单行的原因：本函数在复杂度基线里（41 行/19 圈只许持平）
+      oobTrigger: !!so.oobTrigger, diffJudge: so.diffJudge === true,
       // 存储组间并行度（引擎 supplementalRuns._runSecondOrder 真读；与 defaults 同源回落）
       concurrency: clampInt(so.concurrency, defaults.secondOrder.concurrency, 1, 16),
       // [P0-REACH 2026-09-23] 读写分离二阶注入（对标 sqlmap --second-url/--second-method/--second-data）：

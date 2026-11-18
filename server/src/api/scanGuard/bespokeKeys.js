@@ -102,8 +102,9 @@ export function guardBespokeKeys(config, cfg) {
       //   —— 这里与 CLI 对齐，而不是新发明一套语义。
       if (!config.enableExtract) {
         config.enableExtract = true;
+        // [D300] 无 mode 的 scope（如 {blindDump:true}）也算显式拖库意图，同样隐含开 enableExtract
         logger.info(
-          `extractScope(mode=${scope.mode}) 已隐含开启 enableExtract：提取阶段将向目标发出大量读请求（受限速与 dumpMaxRows 约束）`
+          `extractScope(mode=${scope.mode || '未指定（盲注/全量拖库）'}) 已隐含开启 enableExtract：提取阶段将向目标发出大量读请求（受限速与 dumpMaxRows 约束）`
         );
       }
     } else {

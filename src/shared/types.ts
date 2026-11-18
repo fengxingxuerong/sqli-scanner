@@ -203,7 +203,9 @@ export type ExtractScopeMode =
   | 'users' | 'passwords' | 'schema' | 'privileges' | 'roles' | 'count';
 
 export interface ExtractScopeConfig {
-  mode: ExtractScopeMode;
+  // [D300] mode 允许缺省：{blindDump:true} 单传时无 mode（引擎走全量拖库分支，
+  // scan/extractExtended.js 扩展包装层读 blindDump）
+  mode?: ExtractScopeMode;
   /** 目标数据库（多选）；留空 = 由引擎枚举 */
   dbs?: string[];
   /** 目标表（多选） */
@@ -214,6 +216,10 @@ export interface ExtractScopeConfig {
   keyword?: string;
   /** 过滤系统库（默认 true，与 CLI 一致） */
   excludeSysdbs?: boolean;
+  // [D300] 盲注 opt-in 拖库：boolean/time 命中后逐字节提 current_user()/database()/version()
+  // 标量（单值上百请求，默认关）。UI 暂未暴露开关（与 productionMode/confirmDestructive 同形态的
+  // 「UI 不可设」边界），REST `extractScope.blindDump` 与 CLI `--blind-dump` 可用。
+  blindDump?: boolean;
 }
 
 export interface ScanConfig {

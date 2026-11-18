@@ -96,6 +96,17 @@ function findingsPayload(report) {
  * @param {object} ctx createToolContext 产物
  * @returns {Array<{name,description,inputSchema,run}>}
  */
+/**
+ * [D300] run_scan 的拖库意图映射：dump → enableExtract；blindDump → extractScope.blindDump
+ * （与 CLI --blind-dump 同口径：后者走 sanitizeStart 的 extractScope 隐含开启 enableExtract 通道）。
+ * 抽成模块级函数的原因：run_scan 的 run 箭头在复杂度基线边缘（50 行/30 圈），任何新分支都会
+ * 把它顶爆硬上限——分支放这里（新函数远低于上限），箭头行数/复杂度零变化。
+ */
+function applyDumpIntent(cfg, args) {
+  if (args.dump === true) cfg.enableExtract = true;
+  if (args.blindDump === true) cfg.extractScope = { ...(cfg.extractScope || {}), blindDump: true };
+}
+
 function buildTools(ctx) {
   return [
     {
@@ -124,11 +135,9 @@ function buildTools(ctx) {
           paramExclude: { type: 'string', description: '按正则排除参数' },
           paramFilter: { type: 'string', description: '按位置筛选（url/body/header/cookie/path）' },
           dump: { type: 'boolean', description: '检测到注入后提取数据（拖库，显式 opt-in）' },
+          blindDump: { type: 'boolean', description: '[D300] 盲注 opt-in 拖库标量（逐字节提，默认关；' + '须用户明确同意，代理不得代答）' },
           scope: { type: 'string', description: '授权范围（逗号分隔域名/CIDR/URL 前缀；缺省按目标同源）' },
-          confirmDestructive: {
-            type: 'boolean',
-            description: '高危 payload 池确认（risk=3 必需）。**必须用户明确同意后才能设 true**——代理不得代答',
-          },
+          confirmDestructive: { type: 'boolean', description: '高危 payload 池确认（risk=3 必需）。**必须用户明确同意后才能设 true**——代理不得代答' },
         },
       },
       run: async (args) => {
@@ -170,7 +179,7 @@ function buildTools(ctx) {
         }
         if (typeof args.paramExclude === 'string' && args.paramExclude.trim()) cfg.paramExclude = args.paramExclude;
         if (typeof args.paramFilter === 'string' && args.paramFilter.trim()) cfg.paramFilter = args.paramFilter;
-        if (args.dump === true) cfg.enableExtract = true;
+        applyDumpIntent(cfg, args);
         if (typeof args.scope === 'string' && args.scope.trim()) cfg.scope = String(args.scope).split(',').map((s) => s.trim()).filter(Boolean);
         if (args.confirmDestructive === true) cfg.confirmDestructive = true;
 

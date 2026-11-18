@@ -194,6 +194,10 @@ export const HELP_TEXT = `sqli-scanner CLI（对标 sqlmap 的 Node 引擎命令
   --dump                     启用数据提取（拖库，默认关闭对标 sqlmap 显式 opt-in）
   --dump-all                 全库拖库（对标 sqlmap --dump-all）：枚举所有库后逐库逐表拖，
                              忽略 -D/-T；默认排除系统库（--no-exclude-sysdbs 关闭）
+  --blind-dump               盲注 opt-in 拖库（[D300]）：boolean/time 命中后逐字节提
+                             current_user()/database()/version() 标量，填进拖库数据区
+                             （单值上百请求，默认关；可与任一枚举模式叠加，也可单独传）。
+                             二阶命中自动走「存储→触发页」拖库，不受此开关约束
   --common-tables            字典爆破表名（对标 sqlmap --common-tables）：
                              information_schema 被 WAF 拦 / 权限不足 / 非 MySQL 时的枚举出路
   --common-columns           字典爆破列名（对标 sqlmap --common-columns）：配合 -D/-T 使用

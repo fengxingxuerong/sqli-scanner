@@ -21,6 +21,7 @@ const FIELD_TABLE = [
   { name: 'meta', kind: 'shallow' },
   { name: 'currentDb', kind: 'scalar' },
   { name: 'currentUser', kind: 'scalar' },
+  { name: 'banner', kind: 'scalar' }, // [D300 补] D46 起在 emptyExtractedData 却漏进白名单：枚举模式不走 merge 故未暴露；盲注拖库走 merge ⇒ 静默丢弃。statements/procs 仅枚举模式产出，仍不入表
   { name: 'users', kind: 'scalar' },
   { name: 'passwords', kind: 'scalar' },
   { name: 'passwordAnalysis', kind: 'scalar' },

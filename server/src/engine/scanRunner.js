@@ -22,7 +22,7 @@ import { finalizeReport } from './scan/finalize.js';
 // [D123 2026-10-21] 未验证注入面（按注入面摊开，进 verdictNote）
 import { summarizeUnverifiedSurfaces, unverifiedSentence } from './scan/unverifiedSurfaces.js';
 import { aggregateVulns } from './scan/aggregate.js';
-import { extractPhase } from './scan/extract.js';
+import { extractPhaseD300 } from './scan/extractExtended.js';
 import { detectPhase } from './scan/detect.js';
 import { discoverPoints } from './scan/discover.js';
 
@@ -348,8 +348,9 @@ export async function runScanLoop(sm, scanId) {
 
     // 3.5) 二阶补充趟 + 3.6) 非 SQL 补充趟（已抽至 scan/supplemental.js，纯搬移）
     await supplementalPasses({ sm, scanId, target, points, dbms, validity, finalVulns, fullyTestedPoints, guard, report });
-    // 4) 提取（已抽至 scan/extract.js，纯搬移）
-    await extractPhase({ sm, scanId, s, target, foundByPoint, finalVulns, extracted, report });
+    // 4) 提取（已抽至 scan/extract.js，纯搬移）；[D300] 额外透传 dbms——二阶/盲注命中
+    //    常不带 vuln.dbms（无回显指纹不出来），扩展拖库通道要靠扫描级/点位级 dbms 兜底
+    await extractPhaseD300({ sm, scanId, s, target, foundByPoint, finalVulns, extracted, report, points, dbms });
 
     // 5) 汇总报告并定级（已抽至 scan/finalize.js，纯搬移）
     await finalizeReport({

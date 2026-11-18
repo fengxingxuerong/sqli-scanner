@@ -94,7 +94,7 @@ export async function _runSecondOrder(scanId, target, points, dbms) {
                   result.evidence
                 );
                 vuln.dbms = result.dbms;
-                collected.push(vuln);
+                collected.push(Object.defineProperty(vuln, '_d300', { value: { pointId: point.id, triggerUrl, param: point.param }, enumerable: false }));
                 eventBus.emit(scanId, 'detection_found', { ...result, riskLevel: risk });
               }
             } catch (e) {

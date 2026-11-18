@@ -41,6 +41,14 @@ function sanitizeIdentList(v, maxItems) {
   return out.length ? out : undefined;
 }
 
+/** 短文本字段形状闸（search 的 keyword 与 [D46] 的 user 同一形状：字符串、trim 非空、≤128、无控制字符）。
+ * 抽成助手的原因：两处字面重复的形状闸占了基线余量，[D300] blindDump 入闸后以去重抵平（不放宽基线）。 */
+function sanitizeKeyword128(v) {
+  if (typeof v !== 'string') return undefined;
+  const s = v.trim();
+  return s && s.length <= 128 && !/[\u0000-\u001f\u007f]/.test(s) ? s : undefined;
+}
+
 /**
  * 校验 /scan/start 的 config.extractScope。返回 undefined = 不启用枚举（保持既有全量行为）。
  * mode 必须在白名单内：它是引擎 switch 的判据，传错会直接 throw（extractScope.js:436）。
@@ -48,24 +56,24 @@ function sanitizeIdentList(v, maxItems) {
 export function sanitizeExtractScope(raw) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
   const mode = typeof raw.mode === 'string' ? raw.mode.trim() : '';
-  if (!EXTRACT_SCOPE_MODES.has(mode)) return undefined;
+  // [D300] blindDump：盲注 opt-in 拖库（scan/extractExtended.js 读取的开关，默认关）。
+  // **允许无 mode 单传**：引擎对无 mode 的 scope 走全量拖库分支（engine/extractScope.js:15
+  // 的 `scope && scope.mode` 判据），该键不参与模式 switch，mode 缺省不会触碰 default 分支。
+  const blindDump = raw.blindDump === true;
+  if (!EXTRACT_SCOPE_MODES.has(mode)) return blindDump ? { blindDump: true } : undefined;
   const out = { mode };
+  if (blindDump) out.blindDump = true;
   const dbs = sanitizeIdentList(raw.dbs, 100);
   if (dbs) out.dbs = dbs;
   const tables = sanitizeIdentList(raw.tables, 500);
   if (tables) out.tables = tables;
   const cols = sanitizeIdentList(raw.cols, 500);
   if (cols) out.cols = cols;
-  // search 模式的匹配关键字（进 LIKE 模式，已由 escSql 转义）
-  if (typeof raw.keyword === 'string') {
-    const kw = raw.keyword.trim();
-    if (kw && kw.length <= 128 && !/[\u0000-\u001f\u007f]/.test(kw)) out.keyword = kw;
-  }
-  // [D46] -U 用户过滤（引擎 extractScope 客户端侧过滤 users/passwords 聚合串；形状同 keyword）
-  if (typeof raw.user === 'string') {
-    const u = raw.user.trim();
-    if (u && u.length <= 128 && !/[\u0000-\u001f\u007f]/.test(u)) out.user = u;
-  }
+  // search 的匹配关键字（进 LIKE 模式）与 [D46] -U 用户过滤：同一形状闸（引擎侧 escSql 转义）
+  const kw = sanitizeKeyword128(raw.keyword);
+  if (kw) out.keyword = kw;
+  const user = sanitizeKeyword128(raw.user);
+  if (user) out.user = user;
   // [D46] --exclude 库排除（标识符清单，与 dbs 同一 sanitize 闸）
   const excludeDbs = sanitizeIdentList(raw.excludeDbs, 16);
   if (excludeDbs) out.excludeDbs = excludeDbs;

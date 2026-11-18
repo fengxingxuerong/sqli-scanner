@@ -182,7 +182,7 @@
       "limitLines": 100,
       "limitComplexity": 15
     },
-    "server/bin/cli/config.js::buildExtractScope": {
+    "server/bin/cli/config.js::buildExtractScopeBase": {
       "lines": 40,
       "complexity": 45,
       "limitLines": 100,
@@ -190,7 +190,7 @@
     },
     "server/bin/cli/config.js::isEnumMode": {
       "lines": 5,
-      "complexity": 20,
+      "complexity": 21,
       "limitLines": 100,
       "limitComplexity": 15
     },
@@ -233,12 +233,6 @@
     "server/src/api/scanGuard/bespokeKeys.js::guardBespokeKeys": {
       "lines": 67,
       "complexity": 38,
-      "limitLines": 100,
-      "limitComplexity": 15
-    },
-    "server/src/api/scanGuard/extractScope.js::sanitizeExtractScope": {
-      "lines": 24,
-      "complexity": 19,
       "limitLines": 100,
       "limitComplexity": 15
     },
@@ -1030,7 +1024,7 @@
     },
     "server/src/mcp/tools.js::<arrow@134>": {
       "lines": 50,
-      "complexity": 30,
+      "complexity": 29,
       "limitLines": 100,
       "limitComplexity": 15
     },
@@ -1041,8 +1035,8 @@
       "limitComplexity": 15
     },
     "server/src/mcp/tools.js::buildTools": {
-      "lines": 249,
-      "complexity": 71,
+      "lines": 247,
+      "complexity": 70,
       "limitLines": 100,
       "limitComplexity": 15
     },

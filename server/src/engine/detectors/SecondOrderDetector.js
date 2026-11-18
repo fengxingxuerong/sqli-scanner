@@ -27,6 +27,23 @@ import { attrValue } from '../crawler.js';
 // [P1-PERF 2026-11-02] 大响应有界匹配
 import { matchBounded } from '../../core/boundedMatch.js';
 
+/**
+ * [D301 GAP②] 布尔差异判定的内容归一器：剥掉「同一请求两次读取本就会变」的易变内容，
+ * 只留稳定骨架。与 services/reproPack.js 的 stripVolatile 语义对齐（剔 10 位以上长数字 /
+ * ISO 时间戳），另加 HTML 注释剥离（DVWA/lab 页面的 `<!-- generated at … -->` 水印）与
+ * 空白折叠。刻意不内联进 _maybeDiffJudge：保持判定函数行数/复杂度远离硬上限。
+ * @param {string|undefined} body 触发页响应体
+ * @returns {string} 归一化文本（空体 → 空串，调用方以 !p1 视为「不稳定/无内容」）
+ */
+function _normForDiff(body) {
+  return String(body ?? '')
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/\d{10,}/g, '')
+    .replace(/\d{4}-\d{2}-\d{2}(T[\d:.]+Z?)?/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 // 二阶注入检测器（Second-order / Stored SQLi）
 // 策略模式与现有 Detector 子类一致：detect(ctx) 返回 createDetectionResult 形状。
 //
@@ -128,6 +145,63 @@ export class SecondOrderDetector extends Detector {
       point.technique = 'second_order';
       point.dbms = dbms || point.dbms;
     }
+    // [D301 GAP②] 签名判定未命中时，opt-in 布尔差异判定（报错抑制型触发页的唯一出路）。
+    // 平换末行的原因：detect 在复杂度基线里（57 行/25 圈 = 硬上限），行数与分支数零变化。
+    return this._maybeDiffJudge(httpClient, ctx, result, so, probe, expBody);
+  }
+
+  /**
+   * [D301 GAP②] 布尔差异判定（报错抑制型触发页）。
+   * 背景（DVWA sqli high 实证）：high.php 把 mysqli 报错抑制为 "Something went wrong."，
+   * ERROR_SIG 签名判定永远不可见 ⇒ 二阶检测静默漏报。本路径在签名未命中且显式
+   * opt-in（secondOrder.diffJudge === true）时启用：探针页与阴性对照页各再读一次，
+   * 「剔除易变内容后」两两必须稳定一致（动态页面噪声被第二次读取排除），且探针页
+   * 与阴性页必须存在内容差异——三重防误报（稳定性×2 + 差异存在性），宁漏不误。
+   * 为什么不复用 services/reproPack 的 normalizeForCompare：引擎层不反向依赖服务层
+   * （架构守卫口径），此处 6 行本地归一器与 stripVolatile 语义对齐（剔长数字/注释/空白）。
+   * @param {object} httpClient 统一 HttpClient
+   * @param {object} ctx 检测上下文（含 point / config / triggerUrl / dbms）
+   * @param {object} result 检测结果（可变；签名路径已命中时本方法直接返回）
+   * @param {object} so config.secondOrder（diffJudge/negativeControl 闸）
+   * @param {string} probe 已存储过的报错探针（本方法会原样再存一次做稳定性复验）
+   * @param {string} expBody 签名阶段探针存储后的触发页响应（第一次探针读）
+   * @returns {Promise<object>} result（可能被置 vulnerable=true）
+   */
+  async _maybeDiffJudge(httpClient, ctx, result, so, probe, expBody) {
+    if (result.vulnerable || !so || so.diffJudge !== true || !so.negativeControl) return result;
+    const benign = ctx.point?.originalValue && String(ctx.point.originalValue).trim()
+      ? String(ctx.point.originalValue)
+      : 'benign';
+    // 稳定性复验：探针页与阴性页**各再读两次**（4 个新请求：2 写 + 3 读），动态页面噪声
+    // 会被「同页两读必须一致」排除。阴性读两次的原因：它没有签名阶段的对照物，
+    // 必须自证稳定才有资格当基线（宁漏不误）。
+    await this._store(httpClient, ctx, probe);
+    const probe2 = await this._trigger(httpClient, ctx, ctx.triggerUrl);
+    await this._store(httpClient, ctx, benign);
+    const negA = await this._trigger(httpClient, ctx, ctx.triggerUrl);
+    await this._store(httpClient, ctx, benign);
+    const negB = await this._trigger(httpClient, ctx, ctx.triggerUrl);
+    const p1 = _normForDiff(expBody);
+    const p2 = _normForDiff(probe2);
+    const n1 = _normForDiff(negA);
+    const n2 = _normForDiff(negB);
+    if (!p1 || p1 !== p2) {
+      logger.info('[second-order] 布尔差异判定：探针页两次读取不一致（动态页面噪声），放弃判定（宁漏不误）');
+      return result;
+    }
+    if (!n1 || n1 !== n2) {
+      logger.info('[second-order] 布尔差异判定：阴性对照页两次读取不一致，放弃判定（宁漏不误）');
+      return result;
+    }
+    if (p1 === n1) return result; // 探针页与阴性页无内容差异：无注入信号
+    result.vulnerable = true;
+    result.dbms = ctx.dbms || null;
+    result.evidence = `二阶注入确认（布尔差异路径 [D301]）：存储点 ${ctx.point?.param}@${ctx.point?.actionUrl} 的探针值改写了触发页查询行为——` +
+      `探针页两次读取稳定一致且与阴性对照页存在内容差异（触发页 ${ctx.triggerUrl}；报错被目标抑制，签名判定不可见）`;
+    result.payloads = [probe];
+    ctx.point.confirmed = true;
+    ctx.point.technique = 'second_order';
+    ctx.point.dbms = ctx.dbms || ctx.point.dbms;
     return result;
   }
 

@@ -60,7 +60,7 @@ test('② keep 策略：mergeFields 与 mergeExtractedForResume 行为等价', (
 test('③ FIELD_TABLE 覆盖所有报告字段', () => {
   const expected = [
     'databases', 'tables', 'columns', 'rows', 'counts', 'schemas', 'meta',
-    'currentDb', 'currentUser', 'users', 'passwords', 'passwordAnalysis',
+    'currentDb', 'currentUser', 'banner', 'users', 'passwords', 'passwordAnalysis',
     'hostname', 'isDba', 'userPrivs', 'roles', 'search',
   ].sort();
   assert.deepEqual(ALL_FIELDS.slice().sort(), expected, '字段清单应覆盖所有报告字段');
