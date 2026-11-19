@@ -13,7 +13,9 @@ import { toHexLiteral, buildLikePattern, hexifyLikeInQuery, HEX_SUPPORTED_DBMS }
 test('toHexLiteral：MySQL/PostgreSQL/SQLite 各按其语法生成', () => {
   assert.equal(toHexLiteral('ab', 'MySQL'), '0x6162');
   assert.equal(toHexLiteral('ab', 'PostgreSQL'), "convert_from(decode('6162','hex'),'UTF8')");
-  assert.equal(toHexLiteral('ab', 'SQLite'), "x'6162'");
+  // [D304] SQLite 必须是 CAST(x'..' AS TEXT)：裸 x'..' 是 BLOB，等值上下文恒假
+  //（真引擎实证：`SELECT 'abc' = x'616263'` → 0）。语义守卫见 hexLiteral.dialect.guard.test.js
+  assert.equal(toHexLiteral('ab', 'SQLite'), "CAST(x'6162' AS TEXT)");
 });
 
 test('toHexLiteral：未支持方言显式抛错（不静默回退）', () => {

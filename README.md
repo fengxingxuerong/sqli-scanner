@@ -1,6 +1,6 @@
 # sqli-scanner
 
-[![Tests](https://img.shields.io/badge/tests-4909%20passing-brightgreen)](#测试)[![CI](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml/badge.svg)](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml)
+[![Tests](https://img.shields.io/badge/tests-4916%20passing-brightgreen)](#测试)[![CI](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml/badge.svg)](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml)
 [![Dependencies](https://img.shields.io/badge/prod%20deps-0%20known%20vulns-brightgreen)](SECURITY.md)
 
 > CI 徽章为真实状态（红绿以 GitHub Actions 实跑为准）。发布判定仍以 `CHANGELOG.md`
@@ -244,7 +244,7 @@ admin-only 触发页 `/admin/panel`（users.admin 角色门禁 403）+ admin 会
 | **深度提取** | 分页聚合数据提取，绕过 UNION 限制 |
 | **全库拖库** | `--dump-all`：枚举所有库后逐库逐表拖（对标 sqlmap --dump-all） |
 | **二阶 / 盲注拖库（扩展通道）** | [D300] `scan/extractExtended.js`：① **二阶命中自动拖库**——用「写 payload 到存储点 → 读触发页」适配器复用 Extractor 全套枚举/分页/取行（此前二阶命中只进漏洞清单，`report.data` 恒空）；② **盲注 opt-in**——boolean/time 命中后逐字节提 `current_user()/database()/version()` 标量，`--blind-dump`（CLI）/ `extractScope.blindDump`（REST/MCP）/ `run_scan blindDump:true`（MCP）显式开启（单值上百请求，默认关，**须用户同意**）；通道与产物走既有 `dump.*` / `db-json` 出口。⚠️ 无指纹可用的目标需 `--dbms` 强制方言、引号闭合推不出的目标需 `--known-point` 人工闭合（不闭合时 MariaDB 数值强转让布尔判据恒真，2026-11-19 DVWA high 实证）；触发页列数不可检测期确认，默认 2 列可用 `--union-cols` 覆盖；二阶通道**写放大**（每 UNION 请求=一次真实写入）；tamper 编码到 SELECT 字面量本身的链路（charunicodeencode 类）诚实跳过 |
-| **--hex 提取链（逃逸目标拖库）** | [D301] `--hex` / `config.hex` 的消费面从搜索 LIKE 扩到**枚举+拖库全链**：提取标记与模板字面量全 0x 化 ⇒ payload 零引号，`real_escape_string` 全站逃逸目标（DVWA sqli medium 形态）拖库从静默全空变为**种子对账 5/5**（真机实证）。仅 MySQL/MariaDB/TiDB 家族（0x 字面量为字符串语义），方言不支持 warn + 普通形态诚实空结果；空字面量 `''` 特判 `REPEAT(0x30,0)`（裸 0x 是语法错误，真机实证根因） |
+| **--hex 提取链（逃逸目标拖库）** | [D301] `--hex` / `config.hex` 的消费面从搜索 LIKE 扩到**枚举+拖库全链**：提取标记与模板字面量全 0x 化 ⇒ payload 零引号，`real_escape_string` 全站逃逸目标（DVWA sqli medium 形态）拖库从静默全空变为**种子对账 5/5**（真机实证）。方言覆盖 **6 种、证据分层**：MySQL/MariaDB/TiDB `0x…`（真机 HTTP）、PostgreSQL `convert_from(decode(…),'UTF8')`（PGlite 真引擎语义验证）、SQLite `CAST(x'…' AS TEXT)`（node:sqlite 真引擎验证；[D304] 修裸 `x'…'` 在等值上下文恒假）、SQL Server `0x…`（**未验证**，依赖 varbinary→varchar 隐式转换）；未实现方言（Oracle/DB2 等）warn + 普通形态诚实空结果；空字面量 `''` 仅在 MySQL 家族需特判 `REPEAT(0x30,0)`（裸 `0x` 是语法错误，真机实证根因），PG/SQLite 的形态天然合法 |
 | **二阶布尔差异判定（报错抑制触发页）** | [D301] `secondOrder.diffJudge`（REST/CLI 档案，默认关）：报错抑制型触发页（如 DVWA sqli high 把报错写成 "Something went wrong."，ERROR_SIG 签名不可见）上，签名判定未命中时启用——探针页/阴性页各复验、归一（剔注释/长数字/时间戳）后两两一致且存在差异才命中（三重防误报，宁漏不误）。真机实证：DVWA sqli high session 型二阶 354 请求命中。开启后每存储点×触发页多 2 写 3 读 |
 | **字典爆破**（information_schema 不可用时的出路） | `--common-tables` / `--common-columns`：WAF 拦 information_schema、账号权限不足、或目标库无该视图时，用内置常见表/列名字典逐个做存在性探针（130+ 表名 / 140+ 列名，含「通道自检 + 不存在对照名」防假阴性）。实测在 WAF 拦 information_schema 的目标上仍能定位表与列 |
 | **WAF 识别接口** | `--identify-waf`：仅识别 WAF 厂商并输出推荐 tamper 链，不发起注入检测（对标 sqlmap --identify-waf） |
@@ -469,7 +469,7 @@ server/       ← Express + Node.js（后端，`server/index.js` 入口）
 # 前端测试（581 个用例）
 npm test
 
-# 服务端测试（4334 个用例）
+# 服务端测试（4341 个用例）
 cd server && npm test
 
 # 全部测试
@@ -494,8 +494,8 @@ npm run artifact:drift   # 入库的 e2e 基线产物必须等于当前代码跑
 ## 项目状态
 
 - TypeScript: 零错误
-- 前端测试: 581/581 通过（覆盖率门禁 stmts 93.29 / branch 84.45 / func 80.72，阈值 88/77/67）
-- 服务端测试: 4334 用例（4328 pass / 0 fail / 6 skip，并发口径 2026-11-19 复测；6 skip 为环境依赖显式跳过。覆盖率 lines 95.32 / branch 81.62 / func 89.43，阈值 85/74/77）
+- 前端测试: 581/581 通过（覆盖率门禁 stmts 93.29 / branch 84.44 / func 80.72，阈值 88/77/67）
+- 服务端测试: 4341 用例（4335 pass / 0 fail / 6 skip，并发口径 2026-11-19 复测；6 skip 为环境依赖显式跳过。覆盖率 lines 95.33 / branch 81.61 / func 89.43，阈值 85/74/77）
 - 一键扫描: `npm run scan -- -u <url>`（CLI 一条命令产出 HTML/JSON/Markdown 全套报告 + manifest，退出码可直接进 CI 门禁）
 - Tamper 插件: 234 个（含批次 D3 新增 scalarselectinline；含 v24 增量 20 个，对齐 sqlmap 官方 tamper 全集，含官方 CRS/libinjection 实测组合 uniontable+odbcbrace；含批次 D13 新增 5 件上游形态变体 *nospace/*open/*block，真机 A/B 判决前不进默认链）
 - WAF 绕过能力: 200+ 插件链式组合，覆盖 62 个 WAF 厂商指纹识别 + 推荐

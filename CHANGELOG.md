@@ -6,6 +6,41 @@
 
 > 下一批次起的条目写在这里。发版时把本节整体升为 `## [x.y.z] - YYYY-MM-DD` 并补汇总段。
 
+### 2026-11-20 批次 D304 · `--hex` 方言语义修正：SQLite 裸 BLOB 在等值上下文恒假
+
+**起点**：上一轮对外口径把 `--hex` 写成「仅 MySQL/MariaDB/TiDB 家族」。核对代码发现
+`HEX_FNS` 实际已含 **6 个方言**（+PostgreSQL/SQLite/SQLServer）——那条边界是「已验证范围」，
+不是「代码范围」，表述需要纠正。用真引擎复核字面量语义时抓到真缺陷。
+
+**缺陷（真引擎实证）**：SQLite 的 `x'…'` 是 **BLOB**：
+```sql
+SELECT 'abc' = x'616263';                 -- 0   （BLOB ≠ TEXT，恒假）
+SELECT 'abc' = CAST(x'616263' AS TEXT);    -- 1
+SELECT 'abc' LIKE x'256125';              -- 1   （LIKE 会把 BLOB 当文本，旧形态只在等值坏）
+```
+D301 的提取链大量使用**等值**比较（标记定位 `BETWEEN __S__ AND __E__`、
+`WHERE table_schema='…'`、`SEPARATOR`）⇒ 该方言上 `--hex` 拖库会**静默空结果**，
+与 D301 的「空串裸 `0x`」同族（形态看起来对、语义恒假）。
+
+**修复**：`HEX_FNS.SQLite` → `CAST(x'${hex}' AS TEXT)`。LIKE 与等值两个上下文同时成立
+（真引擎双向验证），搜索路径零回归。
+
+**PG 侧同时复核**（PGlite，PostgreSQL 17 WASM）：
+- `'abc' = convert_from(decode('616263','hex'),'UTF8')` → **true**（现有形态正确）；
+- 裸 `0x616263` → 数字 **6382179**（PG 把 `0x…` 当数值字面量，故必须 `convert_from`）；
+- `'' = convert_from(decode('','hex'),'UTF8')` → **true** ⇒ PG 不需要 MySQL 那样的空串特判。
+
+**守卫**：`server/tests/hexLiteral.dialect.guard.test.js` 7 例——真引擎（node:sqlite）断言
+等值/LIKE/空串、形态钉住（PG/SQLServer/SQLite）、不支持方言抛错；**D304-4 用旧形态做反例**，
+证明 D304-1 不是空转。缺陷注入（改回 `x'…'`）⇒ D304-1/3/5/6 四例红；备份还原后 7/7。
+`hexLiteral.test.js` 的 SQLite 期望同步改为 CAST 形态（21/21 三组全绿）。
+
+**边界（不许外推）**：
+- SQL Server `0x…` **仍未验证**（本机无真引擎；varbinary→varchar 依赖隐式转换）；
+- PG 的「真引擎」是 **WASM 同源码编译**，不等于真 PG 服务的 HTTP 注入链路——`--hex` 提取链
+  在 PG/SQLite 上的**端到端**仍需可注入靶场真跑（本批未做）；
+- 提取链端到端真机证据仍只有 MySQL 家族（DVWA sqli medium 种子 5/5）。
+
 ### 2026-11-19 批次 D303 · `{call }` 值位盲区修复 + Benchmark runner 判据适配
 
 **起点**：D302 之外的独立缺口——Benchmark 官方 504 条 sqli 里三份清单只覆盖 336，剩 168 条
@@ -563,13 +598,14 @@ CI Linux 同代码绿）；零产品代码改动，未改 deadline / 阈值 / �
 ---
 
 <!-- changelog-index:start -->
-**本段覆盖 13 个批次（D290–D303，2026-11-14 → 2026-11-19）**。正文按时间倒序排列；
+**本段覆盖 14 个批次（D290–D304，2026-11-14 → 2026-11-20）**。正文按时间倒序排列；
 下表是同一批次的索引，便于按编号或关键词定位。**索引只是导航，正文未做任何删改**
 （被推翻的旧结论原样保留，这是本仓的既定口径）。新增批次后跑
 `node scripts/changelog-index.mjs --write` 重生成，`--check` 校验是否过期。
 
 | 批次 | 日期 | 主题 |
 |---|---|---|
+| D304 | 11-20 | `--hex` 方言语义修正：SQLite 裸 BLOB 在等值上下文恒假 |
 | D303 | 11-19 | `{call }` 值位盲区修复 + Benchmark runner 判据适配 |
 | D302 | 11-19 | 注入面与拖库的成本/留痕治理（4 项） |
 | D301 | 11-19 | 全等级复验收口：--hex 提取链 + 二阶布尔差异判定（GAP①② 关闭） |

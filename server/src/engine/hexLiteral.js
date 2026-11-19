@@ -13,8 +13,14 @@ import { AppError, ErrorCode } from '../core/errors.js';
 //   MySQL/MariaDB → 0x6162      PostgreSQL → decode('6162','hex')（没有 0x 字面量）
 //   SQL Server    → 0x6162      SQLite      → x'6162'
 //   Oracle        → HEXTORAW('6162')
-// 本项目只有 MySQL 8 与 PG 16.2 有真机验证环境，其余库**无法证明写法正确**。
-// 因此这里只实现已验证的方言，其余显式抛错（宁可说"不支持"，也不静默产出错误 SQL）。
+// 【各库写法与证据分层】
+//   方言            形态                                  证据
+//   MySQL/MariaDB   0x6162                                真机 HTTP（DVWA sqli medium 拖库种子 5/5）
+//   TiDB            0x6162                                同 MySQL 家族（未单库起服）
+//   PostgreSQL      convert_from(decode('6162','hex'),'UTF8')  PGlite（PostgreSQL 17 WASM）语义验证
+//   SQLite          CAST(x'6162' AS TEXT)                 node:sqlite 语义验证（等值/ LIKE /空串）
+//   SQL Server      0x6162                                **未验证**（varbinary 与 varchar 依赖隐式转换）
+// 未实现的方言（Oracle HEXTORAW / DB2 等）显式抛错：宁可说"不支持"，也不静默产出错误 SQL。
 // ============================================================================
 
 const HEX_FNS = {
@@ -26,8 +32,13 @@ const HEX_FNS = {
   // PostgreSQL：无 0x 字面量；decode(...,'hex') 返回 bytea，
   //   与 text 比较需要 convert_from → 但 LIKE 场景下用 `col LIKE convert_from(...)` 可行
   PostgreSQL: (hex) => `convert_from(decode('${hex}','hex'),'UTF8')`,
-  // SQLite：x'' 字面量（BLOB），LIKE 比较时按字节匹配，文本列可用
-  SQLite: (hex) => `x'${hex}'`,
+  // SQLite：`x''` 是 BLOB。**LIKE 场景可用，等值场景不成立**——真引擎实测（node:sqlite）：
+  //   `SELECT 'abc' = x'616263'` → 0        （BLOB 与 TEXT 类型不同，永不相等）
+  //   `SELECT 'abc' = CAST(x'616263' AS TEXT)` → 1
+  //   `SELECT 'abc' LIKE x'256125'` → 1 / LIKE CAST(...) → 1
+  // 提取链（[D301]）大量使用**等值**比较（标记定位 / WHERE table_schema='…' / SEPARATOR），
+  // 旧形态 `x'…'` 在这类上下文恒假 ⇒ 拖库静默空结果。统一 CAST 成 TEXT（LIKE 语义不变）。
+  SQLite: (hex) => `CAST(x'${hex}' AS TEXT)`,
 };
 
 /** 已支持 --hex 的方言（仅这些经过真机验证或语法确认） */
