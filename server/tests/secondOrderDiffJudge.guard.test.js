@@ -44,13 +44,13 @@ function makeCtx(secondOrder) {
 test('DIFF-1 diffJudge opt-in + 三重稳定 ⇒ 命中（报错抑制形态的唯一检出路径）', async () => {
   const { detector, ctx, readCount } = makeCtx({
     enabled: true, negativeControl: true, diffJudge: true, refreshCsrf: false,
-    __triggerBodies: ['<p>empty</p>', SUPPRESSED_ERR, NEG_PAGE, SUPPRESSED_ERR, NEG_PAGE, NEG_PAGE],
+    __triggerBodies: ['<p>empty</p>', SUPPRESSED_ERR, NEG_PAGE, SUPPRESSED_ERR, NEG_PAGE],
   });
   const r = await detector.detect(ctx);
   assert.equal(r.vulnerable, true, '报错抑制 + 探针/阴性稳定 + 差异存在 ⇒ 必须命中');
   assert.ok(String(r.evidence).includes('布尔差异路径'), '证据须标注判定路径（对外口径）');
   assert.equal(r.dbms, 'MySQL');
-  assert.ok(readCount() >= 6, 'diff 阶段必须真实复验（探针复验 1 读 + 阴性复验 2 读）');
+  assert.ok(readCount() >= 5, 'diff 阶段必须真实复验（探针复验 1 读 + 阴性复验 1 读，[D302] 复用签名阶段读）');
 });
 
 test('DIFF-2 反例：diffJudge 缺省（关闭）⇒ 不命中且不发起复验请求（零回归）', async () => {
@@ -75,7 +75,7 @@ test('DIFF-3 反例：探针页两次读取不一致（动态页面噪声）⇒ 
 test('DIFF-4 反例：阴性页两次读取不一致 ⇒ 放弃判定', async () => {
   const { detector, ctx } = makeCtx({
     enabled: true, negativeControl: true, diffJudge: true, refreshCsrf: false,
-    __triggerBodies: ['<p>empty</p>', SUPPRESSED_ERR, NEG_PAGE, SUPPRESSED_ERR, NEG_PAGE, '随机噪声页'],
+    __triggerBodies: ['<p>empty</p>', SUPPRESSED_ERR, NEG_PAGE, SUPPRESSED_ERR, '随机噪声页'],
   });
   const r = await detector.detect(ctx);
   assert.equal(r.vulnerable, false, '阴性页不稳定 ⇒ 无可信基线，宁漏不误');
@@ -84,7 +84,7 @@ test('DIFF-4 反例：阴性页两次读取不一致 ⇒ 放弃判定', async ()
 test('DIFF-5 反例：探针页与阴性页无内容差异 ⇒ 无注入信号', async () => {
   const { detector, ctx } = makeCtx({
     enabled: true, negativeControl: true, diffJudge: true, refreshCsrf: false,
-    __triggerBodies: ['<p>same</p>', '<p>same</p>', '<p>same</p>', '<p>same</p>', '<p>same</p>', '<p>same</p>'],
+    __triggerBodies: ['<p>same</p>', '<p>same</p>', '<p>same</p>', '<p>same</p>', '<p>same</p>'],
   });
   const r = await detector.detect(ctx);
   assert.equal(r.vulnerable, false, '探针=阴性 ⇒ 存储值没有改写查询行为');
@@ -94,7 +94,7 @@ test('DIFF-6 易变内容归一：长数字水印/HTML 注释被剥离（两次�
   const w = (n) => `<html><!-- generated at ${n} --><h1>点评面板错误</h1><pre>Something went wrong.</pre></html>`;
   const { detector, ctx } = makeCtx({
     enabled: true, negativeControl: true, diffJudge: true, refreshCsrf: false,
-    __triggerBodies: ['<p>empty</p>', w(1795023718), NEG_PAGE, w(1795099999), NEG_PAGE, NEG_PAGE],
+    __triggerBodies: ['<p>empty</p>', w(1795023718), NEG_PAGE, w(1795099999), NEG_PAGE],
   });
   const r = await detector.detect(ctx);
   assert.equal(r.vulnerable, true, '仅时间戳水印不同 ⇒ 归一后稳定 ⇒ 照常命中');

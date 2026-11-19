@@ -38,6 +38,19 @@ import { createDetectionResult } from '../models.js';
 const CALL_KEY_CARRIERS = new Set(['form', 'query', 'json']);
 
 /**
+ * [D303] 本判据适用的**值位**位置（值进过程名位形态）：`?id=<值>` → `{call <值>}`。
+ *
+ * 为什么需要：D284 只覆盖「键名进 `{call }`」（`getParameterNames()` 遍历，注入点是参数名位）。
+ * 但 Benchmark 大量官方真值用例走的是 `getParameterMap().get("类名")` / `getParameterValues("类名")`
+ * 取值 → `{call <值>}` —— 注入点在**值位**。这类点标准四通道对 `{call <语法错误>}` 全盲
+ * （与基线错误同形），而旧门控 `location!=='paramName'` 直接跳过 ⇒ 真机 0/12 检出。
+ * 2026-11-19 实测（BenchmarkTest00510/00760/01379 等，HSQLDB 2.7.4）。
+ */
+// 真实 location 取值见 TargetParser：url（query 参数）/ body / header / cookie / path。
+// 不含 direct（直连模式无 HTTP 探针语义）。
+const CALL_VALUE_LOCATIONS = new Set(['url', 'body', 'header', 'cookie', 'path']);
+
+/**
  * 求值类错误签名（1/0 的除零族）。覆盖实测四种引擎的文案形态：
  * HSQLDB「data exception: division by zero」、PG「division by zero」、
  * MySQL「Division by 0」、SQLServer「Divide by zero error」、Oracle「ORA-01476」。
@@ -99,19 +112,33 @@ export class CallProcNameDetector extends Detector {
   async detect(ctx) {
     const { target, point } = ctx;
     const result = createDetectionResult(point.id, 'error');
-    if (!point || point.location !== 'paramName') return result;
-    if (!CALL_KEY_CARRIERS.has(point.carrier)) return result;
-    const key = String(point.originalValue || '');
-    if (!key) return result;
+    if (!point) return result;
+    // [D303] 两种位置分流：paramName 位（键名进 CALL）与值位（值进 CALL）。
+    const isKeyPos = point.location === 'paramName';
+    if (isKeyPos) {
+      if (!CALL_KEY_CARRIERS.has(point.carrier)) return result;
+      if (!String(point.originalValue || '')) return result;
+    } else if (!CALL_VALUE_LOCATIONS.has(point.location)) {
+      return result; // 不支持的位置（如 xmlName / direct）零请求跳过
+    }
+    const key = String(isKeyPos ? point.originalValue || '' : point.param || '');
 
+    // 值位用 buildInjectionRequest（替换值）；键名位走 buildParamNameRequest（改名保值）——
+    // buildRequest 已按 point.location 分流，这里零分支。
     const send = (value) => this.send(ctx.httpClient, ctx, this.buildRequest(target, point, value));
-    const hit = await this._probeForCall(send, ctx.dbms);
+    const hit = await this._probeForCall(send, ctx.dbms, isKeyPos ? 'key' : 'value');
     if (!hit) return result;
 
     result.vulnerable = true;
     result.payloads = hit.payloads;
     result.evidence = hit.evidence;
-    result.trace = { kind: 'call-proc-name', carrier: point.carrier, key, channel: hit.channel };
+    result.trace = {
+      kind: 'call-proc-name',
+      carrier: point.carrier,
+      key,
+      channel: hit.channel,
+      position: isKeyPos ? 'key' : 'value',
+    };
     return result;
   }
 
@@ -120,9 +147,11 @@ export class CallProcNameDetector extends Detector {
    * 只在参数名点零命中后链到达时执行（不重复探测已命中的点）。
    * @param {(v: string) => Promise<any>} send 探针发送器（已绑定 target/point）
    * @param {string|null} dbms 指纹出的方言（选 CHAR/CHR 变体）
+   * @param {'key'|'value'} [position] 注入位（[D303]：key=键名进 CALL，value=值进 CALL）
    * @returns {Promise<{payloads: string[], evidence: string, channel: string}|null>}
    */
-  async _probeForCall(send, dbms) {
+  async _probeForCall(send, dbms, position = 'key') {
+    const where = position === 'value' ? '值进过程名位' : '键名进过程名位';
     const fn = charFnFor(dbms);
     const marker = randomMarker();
     const echoPayload = echoPayloadFor(fn, marker);
@@ -140,7 +169,7 @@ export class CallProcNameDetector extends Detector {
           payloads: [echoPayload],
           channel: 'echo',
           evidence:
-            `{call <名>} / CALL 表达式位（键名进过程名位）：\`${echoPayload}\` 求值结果「${marker}」` +
+            `{call <名>} / CALL 表达式位（${where}）：\`${echoPayload}\` 求值结果「${marker}」` +
             '在两轮响应中稳定回显，未知标识符对照无此回显 ⇒ 名字被拼进 CALL 位并被数据库求值。',
         };
       }
@@ -156,7 +185,7 @@ export class CallProcNameDetector extends Detector {
         payloads: [errPayload, ctrlPayload],
         channel: 'eval-err',
         evidence:
-          '{call <名>} / CALL 表达式位（键名进过程名位）：`1/0` 产生求值类错误（division by zero 族），' +
+          `{call <名>} / CALL 表达式位（${where}）：\`1/0\` 产生求值类错误（division by zero 族），` +
           '未知标识符对照无此签名（非固定错误页）⇒ 名字被拼进 CALL 位并被数据库求值。',
       };
     }

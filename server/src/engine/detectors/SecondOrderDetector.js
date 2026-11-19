@@ -32,7 +32,7 @@ import { matchBounded } from '../../core/boundedMatch.js';
  * 只留稳定骨架。与 services/reproPack.js 的 stripVolatile 语义对齐（剔 10 位以上长数字 /
  * ISO 时间戳），另加 HTML 注释剥离（DVWA/lab 页面的 `<!-- generated at … -->` 水印）与
  * 空白折叠。刻意不内联进 _maybeDiffJudge：保持判定函数行数/复杂度远离硬上限。
- * @param {string|undefined} body 触发页响应体
+ * @param {string|null|undefined} body 触发页响应体（D302 起 diffJudge 复用阴性读，未开阴性对照时为 null）
  * @returns {string} 归一化文本（空体 → 空串，调用方以 !p1 视为「不稳定/无内容」）
  */
 function _normForDiff(body) {
@@ -105,12 +105,13 @@ export class SecondOrderDetector extends Detector {
     const expErr = !!expMatch;
 
     // 4) 阴性对照（可选）：存良性值 → 读触发页应无报错（提高判定置信）
-    let negErr = false;
+    // [D302] negBody 提升到函数级：diffJudge 复验把它当第一次阴性读（省 1 写 1 读）
+    let negErr = false; let negBody = null;
     let negMatch = null;
     if (so.negativeControl) {
       const benign = point.originalValue && String(point.originalValue).trim() ? point.originalValue : 'benign';
       await this._store(httpClient, ctx, benign);
-      const negBody = await this._trigger(httpClient, ctx, triggerUrl);
+      negBody = await this._trigger(httpClient, ctx, triggerUrl);
       negMatch = matchBounded(negBody, ERROR_SIG);
       negErr = !!negMatch;
     }
@@ -147,7 +148,8 @@ export class SecondOrderDetector extends Detector {
     }
     // [D301 GAP②] 签名判定未命中时，opt-in 布尔差异判定（报错抑制型触发页的唯一出路）。
     // 平换末行的原因：detect 在复杂度基线里（57 行/25 圈 = 硬上限），行数与分支数零变化。
-    return this._maybeDiffJudge(httpClient, ctx, result, so, probe, expBody);
+    // [D302] 透传 negBody：签名阶段的阴性读即 diff 判定的第一次阴性读（省 1 写 1 读）。
+    return this._maybeDiffJudge(httpClient, ctx, result, so, probe, expBody, negBody);
   }
 
   /**
@@ -165,26 +167,24 @@ export class SecondOrderDetector extends Detector {
    * @param {object} so config.secondOrder（diffJudge/negativeControl 闸）
    * @param {string} probe 已存储过的报错探针（本方法会原样再存一次做稳定性复验）
    * @param {string} expBody 签名阶段探针存储后的触发页响应（第一次探针读）
+   * @param {string|null} negBody 签名阶段阴性存储后的触发页响应（第一次阴性读；未开阴性对照时为 null）
    * @returns {Promise<object>} result（可能被置 vulnerable=true）
    */
-  async _maybeDiffJudge(httpClient, ctx, result, so, probe, expBody) {
+  async _maybeDiffJudge(httpClient, ctx, result, so, probe, expBody, negBody) {
     if (result.vulnerable || !so || so.diffJudge !== true || !so.negativeControl) return result;
     const benign = ctx.point?.originalValue && String(ctx.point.originalValue).trim()
       ? String(ctx.point.originalValue)
       : 'benign';
-    // 稳定性复验：探针页与阴性页**各再读两次**（4 个新请求：2 写 + 3 读），动态页面噪声
-    // 会被「同页两读必须一致」排除。阴性读两次的原因：它没有签名阶段的对照物，
-    // 必须自证稳定才有资格当基线（宁漏不误）。
+    // [D302] 稳定性复验省请求：签名阶段的 expBody/negBody 即第一次读，这里各补一次
+    //（探针复验 1 写 1 读 + 阴性复验 1 写 1 读），比 D301 版省 1 写 1 读。
     await this._store(httpClient, ctx, probe);
     const probe2 = await this._trigger(httpClient, ctx, ctx.triggerUrl);
     await this._store(httpClient, ctx, benign);
-    const negA = await this._trigger(httpClient, ctx, ctx.triggerUrl);
-    await this._store(httpClient, ctx, benign);
-    const negB = await this._trigger(httpClient, ctx, ctx.triggerUrl);
+    const neg2 = await this._trigger(httpClient, ctx, ctx.triggerUrl);
     const p1 = _normForDiff(expBody);
     const p2 = _normForDiff(probe2);
-    const n1 = _normForDiff(negA);
-    const n2 = _normForDiff(negB);
+    const n1 = _normForDiff(negBody);
+    const n2 = _normForDiff(neg2);
     if (!p1 || p1 !== p2) {
       logger.info('[second-order] 布尔差异判定：探针页两次读取不一致（动态页面噪声），放弃判定（宁漏不误）');
       return result;

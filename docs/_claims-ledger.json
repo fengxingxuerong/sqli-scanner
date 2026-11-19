@@ -404,10 +404,10 @@
     },
     {
       "id": "d301-second-order-diff-detection",
-      "claim": "D301 二阶布尔差异判定真机闭环：报错抑制型触发页（DVWA sqli high 把 mysqli 报错抑制为 \"Something went wrong.\"，ERROR_SIG 签名判定不可见）在 secondOrder.diffJudge=true 时命中 second_order——探针页/阴性页复验稳定且存在内容差异（三重防误报）",
+      "claim": "D301 二阶布尔差异判定真机闭环 + sqli high 完整管线闭环：报错抑制型触发页（DVWA sqli high 把 mysqli 报错抑制为 \"Something went wrong.\"，ERROR_SIG 签名判定不可见）在 secondOrder.diffJudge=true 时命中 second_order（三重防误报）；且 enableExtract 同扫时「检测命中挂 _d300 → extractPhaseD300 自动二阶拖库 → 报告数据」在 DVWA high（MySQL 触发页）真机闭环",
       "status": "verified",
-      "evidence": "e2e/dvwa-lab/results/all-levels-2026-11-19T*.json（sqli-high-detection：检出=[second_order]，354 请求，证据字符串带「布尔差异路径 [D301]」标注；runner 配置 crawlForms:true——存储点发现是真因第一层，diffJudge 是第二层）",
-      "refute_cmd": "node scripts/labs.mjs --up=dvwa,mariadb && node e2e/dvwa-lab/all-levels-verify.mjs（sqli-high-detection 判据：second_order 必须命中；守卫 secondOrderDiffJudge.guard 6/6 含不稳定/无差异/关闭零回归三反例）",
+      "evidence": "e2e/dvwa-lab/results/all-levels-2026-11-19T*.json（sqli-high-detection：检出=[second_order]，354 请求，证据字符串带「布尔差异路径 [D301]」标注；runner 配置 crawlForms:true——存储点发现是真因第一层，diffJudge 是第二层）；完整管线另证：e2e/dvwa-lab/results/high-fullchain-2026-11-19T*.json（enableExtract 同扫：second_order 命中 → 自动拖库 12 库 + dvwa.users 种子 5/5 + d300Channels=[extended-extract] + dumpUnconfirmed=[]，209 请求 11.3s）",
+      "refute_cmd": "node scripts/labs.mjs --up=dvwa,mariadb && node e2e/dvwa-lab/all-levels-verify.mjs（sqli-high-detection 判据：second_order 必须命中；守卫 secondOrderDiffJudge.guard 6/6 含不稳定/无差异/关闭零回归三反例）；完整管线复跑 node e2e/dvwa-lab/high-fullchain.mjs（种子 ≥4/5 + 通道标记）",
       "lastReviewed": "2026-11-19",
       "caveat": "diffJudge 默认关（内容差异信号弱于报错签名），开启后每存储点×触发页多 2 写 3 读；动态页面（两次读取不一致）诚实放弃判定；不外推通用检出率"
     },

@@ -802,7 +802,7 @@ Windows 注册表面（对标 sqlmap `--reg-*`；仅 MSSQL `xp_reg*`，非 MSSQL
 | `point_testing` | 正在测试注入点 | `{ pointId, technique }` |
 | `point_skipped` | resume 跳过已完成点 | `{ pointId, reason }` |
 | `detection_found` | 检测命中 | `{ pointId, technique, result }` |
-| `extraction_progress` | 拖库进度 | `{ db?, table?, rows }` |
+| `extraction_progress` | 拖库进度 | `{ db?, table?, count?, totalTables?, doneTables?, note? }`（`count` = 当前表已取行数；[D302] `doneTables/totalTables` 给出表级 ETA，消费端结合事件 ts 估算剩余墙钟） |
 | `scan_completed` | 扫描完成 | `{ scanId, vulnCount?, logCount? }` |
 | `scan_stopped` | 已停止 | `{ scanId }` |
 | `scan_error` | 扫描失败 | `{ scanId, message }` |

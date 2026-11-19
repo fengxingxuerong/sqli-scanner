@@ -142,7 +142,34 @@ test('[D284] XML 载体（元素名）不在本判据范围，零请求跳过', 
   assert.equal(calls.length, 0);
 });
 
-test('[D284] 非参数名点（值位）不在本判据范围，零请求跳过', async () => {
+// ── [D303 2026-11-19] 值位 `{call <值>}` 形态 ────────────────────────────────
+// 背景：官方真值里 `getParameterMap().get("类名")` → `{call <值>}`，注入点在**值位**。
+// D284 门控 `location!=='paramName'` 直接跳过 ⇒ 真机 0/12。本组判据钉住值位已支持，
+// 且不支持的位置（xmlName/direct）仍零请求。
+
+/**
+ * 假 httpClient：按**注入后的值**交给 classify（值位形态；键名恒为参数名）。
+ * @param {(value: string) => string} classify
+ */
+function stubValueClient(classify) {
+  const calls = [];
+  return {
+    client: {
+      request: async (opts) => {
+        let val = '';
+        try {
+          const u = new URL(String(opts.url || ''));
+          val = [...u.searchParams.values()][0] ?? '';
+        } catch { /* 解析失败按空值 */ }
+        calls.push(val);
+        return { status: 200, data: classify(val) };
+      },
+    },
+    calls,
+  };
+}
+
+async function detectValueWith(classify, { location = 'url', dbms = null } = {}) {
   const target = createTarget({
     url: 'http://shop.example.com/api/page?id=1',
     method: 'GET',
@@ -150,9 +177,73 @@ test('[D284] 非参数名点（值位）不在本判据范围，零请求跳过'
     headerParams: {},
     config: { level: 3 },
   });
-  const point = createInjectionPoint('query', 'id', '1', {});
+  const point = createInjectionPoint(location, 'id', '1', { actionUrl: 'http://shop.example.com/api/page' });
   const detector = new CallProcNameDetector();
-  const { client, calls } = stubClient(echoTarget);
+  const { client, calls } = stubValueClient(classify);
+  const result = await detector.detect({ httpClient: client, target, point, config: target.config, dbms });
+  return { result, calls };
+}
+
+test('[D303] 值位 echo 通道：标记两轮稳定回显 + 对照无 ⇒ 判为注入，trace.position=value', async () => {
+  const { result, calls } = await detectValueWith(echoTarget);
+  assert.equal(result.vulnerable, true);
+  assert.equal(result.trace.channel, 'echo');
+  assert.equal(result.trace.position, 'value', '值位命中必须标注 position=value（与键名位可区分）');
+  assert.match(result.evidence, /值进过程名位/);
+  assert.equal(calls.length, 3, 'echo 命中即收口：e1+e2+对照');
+});
+
+test('[D303] 值位 eval-err 通道：1/0 除零签名 + 对照无 ⇒ 判为注入', async () => {
+  const { result } = await detectValueWith((v) => {
+    if (v.startsWith('CONCAT(')) return ERR_TOKEN;
+    if (v === '1/0') return ERR_DIV;
+    return ERR_NOTFOUND;
+  });
+  assert.equal(result.vulnerable, true);
+  assert.equal(result.trace.channel, 'eval-err');
+  assert.equal(result.trace.position, 'value');
+});
+
+test('[D303] 值位 header 载体同样支持', async () => {
+  const target = createTarget({
+    url: 'http://shop.example.com/api/page',
+    method: 'GET',
+    bodyParams: {},
+    headerParams: { 'X-Token': 'base' },
+    config: { level: 3 },
+  });
+  const point = createInjectionPoint('header', 'X-Token', 'base', {});
+  const detector = new CallProcNameDetector();
+  const sent = [];
+  const client = {
+    request: async (opts) => {
+      const v = String(opts.headers?.['X-Token'] ?? opts.headers?.['x-token'] ?? '');
+      sent.push(v);
+      return { status: 200, data: echoTarget(v) };
+    },
+  };
+  const result = await detector.detect({ httpClient: client, target, point, config: target.config, dbms: null });
+  assert.equal(result.vulnerable, true);
+  assert.equal(result.trace.position, 'value');
+  assert.ok(sent.length >= 3, `header 值位应发出探针，实际 ${sent.length} 条`);
+});
+
+test('[D303] 值位反射目标（把值原样回显）⇒ 不判（构造性反射安全）', async () => {
+  const { result } = await detectValueWith((v) => `<html><body>echoed: ${v}</body></html>`);
+  assert.equal(result.vulnerable, false);
+});
+
+test('[D303] 不支持的位置（XML 元素名 paramName+xml）仍零请求跳过', async () => {
+  const target = createTarget({
+    url: 'http://shop.example.com/api/page?id=1',
+    method: 'GET',
+    bodyParams: {},
+    headerParams: {},
+    config: { level: 3 },
+  });
+  const point = createInjectionPoint('paramName', 'id', '1', { carrier: 'xml' });
+  const detector = new CallProcNameDetector();
+  const { client, calls } = stubValueClient(echoTarget);
   const result = await detector.detect({ httpClient: client, target, point, config: target.config, dbms: null });
   assert.equal(result.vulnerable, false);
   assert.equal(calls.length, 0);

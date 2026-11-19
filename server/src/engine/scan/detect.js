@@ -163,6 +163,62 @@ async function runOrderByKeyPostPass(points, deps) {
  * @param {any} point
  * @param {object} deps
  */
+/**
+ * [D303 2026-11-19] 值位 `{call <值>}` 后链：标准四通道 + 参数名后链都零命中的**值位**点，
+ * 追加一次 CALL 表达式求值探针。
+ *
+ * 为什么：D284 的 callProcName 只覆盖「键名进 `{call }`」（paramName 位）。Benchmark 官方真值里
+ * 大量是 `getParameterMap().get("类名")` / `getParameterValues("类名")` 取值 → `{call <值>}`，
+ * 注入点在值位 ⇒ 标准四通道对 `{call <语法错误>}` 全盲（与基线同形）、旧门控又跳过值位 ⇒
+ * 真机 0/12 检出（2026-11-19 实测 BenchmarkTest00510/00760/01379 等）。
+ *
+ * 请求预算：只对零命中点 × 值位，每个候选 +3~4 请求（echo×2 + 对照，或 eval-err + 对照）。
+ * 受 `error` 技术位门控（本检测器归 error 族），与 orderByKey 的 `boolean` 门控同风格。
+ * @param {any[]} points 全量注入点
+ * @param {object} deps 检测依赖（与 runOrderByKeyPostPass 同构）
+ */
+async function runCallExprValuePostPass(points, deps) {
+  if (!deps.selectedTechs.includes('error')) return; // 报错/求值族未选中 ⇒ 该面不测
+  const cands = points.filter(
+    (p) => p.location !== 'paramName' && p.location !== 'xmlName' && !deps.foundByPoint.has(p.id)
+  );
+  if (!cands.length) return;
+  await deps.scheduler.run(cands, (point) => runOneCallExprValue(point, deps), 0);
+}
+
+/**
+ * [D303] 标准赛道零命中后的两段后链（保持 detectPhase 函数体行数不增）：
+ * ① 参数名点 ORDER BY 序数（D106）→ keyBool → CALL 键名位（D284）；
+ * ② 值位点 CALL 表达式位（D303）。
+ * @param {any[]} points 全量注入点
+ * @param {object} deps 检测依赖
+ */
+async function runDetectPostPasses(points, deps) {
+  await runOrderByKeyPostPass(points, deps);
+  await runCallExprValuePostPass(points, deps);
+}
+
+/**
+ * 单个值位点的 CALL 表达式探针与记账（只有零命中候选会走到这里，写入不覆盖既有条目）。
+ * @param {any} point 值位注入点
+ * @param {object} deps 检测依赖
+ */
+async function runOneCallExprValue(point, deps) {
+  const { ctxBase, target, s, guard, session, validity, validityEnabled, foundByPoint, scanId } = deps;
+  if (s.cancelled || guard.shouldAbort) return;
+  if (session && session.perPoint[point.id] && session.perPoint[point.id].status === 'done') return;
+  eventBus.emit(scanId, 'point_testing', { pointId: point.id, technique: 'error', param: point.param, location: point.location });
+  const ctx = { ...ctxBase, target, point, dbms: point.dbms || null };
+  const found = await detectCallProcNamePoint(point, ctx, validity, validityEnabled);
+  if (!found.length) return;
+  foundByPoint.set(point.id, { point, ctx, found });
+  if (session) {
+    await session
+      .savePointResult(point.id, { found: found.map((f) => ({ technique: f.technique, result: f.result })) })
+      .catch(() => null);
+  }
+}
+
 async function runOneOrderByKey(point, deps) {
   const { ctxBase, target, s, guard, session, validity, validityEnabled, foundByPoint, scanId } = deps;
   if (s.cancelled || guard.shouldAbort) return;
@@ -587,7 +643,7 @@ export async function detectPhase(run) {
 
     // [D106] 参数名点 ORDER BY 固定后缀形态补测（P1-2）：标准赛道零命中的**非 XML** 参数名
     // 点追加序数差分探针（`{k}, 1-- -` 有效 vs `{k}, 9999-- -` 序数越界）。
-    await runOrderByKeyPostPass(pointsToScan, { scheduler, ctxBase, target, selectedTechs, s, guard, session, validity, validityEnabled, foundByPoint, scanId });
+    await runDetectPostPasses(pointsToScan, { scheduler, ctxBase, target, selectedTechs, s, guard, session, validity, validityEnabled, foundByPoint, scanId });
 
     // 3.4) WAF 自动 tamper 重跑（P1-D5）：识别到高置信 WAF 且用户未显式配置 tamper 时，
     // 对「未命中点」套用 wafRecommend 推荐链重跑快速层（union/error/boolean），受节流控制。

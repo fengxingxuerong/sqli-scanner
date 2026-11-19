@@ -6,6 +6,85 @@
 
 > 下一批次起的条目写在这里。发版时把本节整体升为 `## [x.y.z] - YYYY-MM-DD` 并补汇总段。
 
+### 2026-11-19 批次 D303 · `{call }` 值位盲区修复 + Benchmark runner 判据适配
+
+**起点**：D302 之外的独立缺口——Benchmark 官方 504 条 sqli 里三份清单只覆盖 336，剩 168 条
+（cookie 自设值 48 + call 变体 ~44 + prepareStatement 混合 ~26 + 复杂取值链 ~34）。真机跑
+剩余清单暴露两件事：① 常规 query 值位 35/35 真值检出、0/48 误报（无回归）；② **`{call }` 值位
+形态真值 0/12 漏检**。
+
+**① `{call }` 值位盲区（引擎真缺陷）**：
+- 根因：`callProcName.js` 门控 `point.location !== 'paramName'` ⇒ 检测器只对**参数名位**生效。
+  D284 打通的 4 条是「键名进 `{call }`」（`getParameterNames()` 遍历）；而 Benchmark 大量真值走
+  `getParameterMap().get("类名")` / `getParameterValues("类名")` 取值 → **值进 `{call }`**
+  （location=url 值位）⇒ 检测器不适用，标准四通道对 `{call <语法错误>}` 又与基线同形全盲。
+- 修复：`CALL_VALUE_LOCATIONS` = url/body/header/cookie/path（不含 direct/xmlName），
+  `detect()` 分流 key/value 两路（值位走 `buildInjectionRequest` 替换值），`trace.position`
+  区分 `key`/`value`，evidence 如实写「值进过程名位」；`detect.js` 新增
+  `runCallExprValuePostPass`（与 orderByKey 后链并列，受 `error` 技术位门控，**只对标准四通道
+  零命中的值位点**跑，每候选 +3~4 请求）。
+- **真机证据**（Benchmark 8443，`results/d303-callvalue-2026-11-19.log`）：
+  `{call }` 真值 **23/23 检出**（修复前 0/12）、安全对照 **0/21 误报**、清单 45 条 exit 0。
+- 自证：`callProcName.test.js` 14 例（新增值位 echo/eval-err/header/反射/不支持位置 5 例）；
+  缺陷注入（清空 `CALL_VALUE_LOCATIONS`，模拟 D284 旧行为）⇒ 3 例当场红，备份还原后 14/14。
+
+**② Benchmark runner 判据适配（`e2e/benchmark-lab/run.mjs`）**：
+- 抽纯函数 `judgeCallDimension`：`{call}` 分母 0（深度子集清单按设计不含该形态）记 **N/A 不判红**，
+  分母 >0 仍强制全检出+零误报（保住 D284 防假绿意图）——修复「query 210 条真值 111/111、安全
+  0/99 却 exit 1」的假红。
+- 主流程加 `isDirectRun` 守卫包进 `main()`：原本顶层 await 让任何 `import` 都被 reachable()/SKIP
+  短路，纯函数无法被独立测试。
+- 自证：`run.mjs --selftest` 6/6；同一缺陷注入（分母 0 改判红）⇒ 5/6 exit 1。
+
+**顺带实证（口径留档）**：query 全量 210 条真值 **111/111**、安全 **0/99**；header 全量 67 条
+真值 **33/33**、安全 **0/34**；门禁基线 74 条真值 43/43 + `{call}` 4/4、安全 0/24（exit 0）。
+
+**③ 收口补漏（本批遗漏的两处门禁红）**：
+- `server/tests/scanValidity.test.js` 的「健康目标零行为变化」断言是等值口径
+  （`requests === 检测调用数 × 4`）——值位 CALL 后置探针给零命中值位点 +4~5 请求/点，
+  2 点健康目标 32→40 当场红。**不是把等值改成 ≥ 了事**：拆成双向口径——下界保守卫原意
+  （一条请求都不许少），上界钉后置探针预算（≤5/点），防止未来无界加测把整场请求数悄悄推高。
+  缺陷注入双向自证：下界注入（×8）⇒ `40 < 64` 红；上界注入（×0）⇒ `40 > 32 + 10` 红；还原 18/18。
+- `e2e/benchmark-lab/run.mjs::judgeCallDimension` 是同文件使用的导出（selftest + 主流程），
+  无跨文件 import ⇒ 死代码门禁按未使用导出判红。按仓库既有豁免机制补 `@used-by` 标记，
+  门禁回到 0 未使用导出；未上调基线、未删 export（保留 D303「纯函数可独立 import」的可测性）。
+
+**边界**：值位 CALL 探针仅在标准四通道零命中后启用，不是默认对所有点加测；`cookie` 自设值
+用例（`response.addCookie` 固定值→自读）官方标 true 但黑盒不可达，不计漏检。
+
+### 2026-11-19 批次 D302 · 注入面与拖库的成本/留痕治理（4 项）
+
+**起点**：D301 全等级复验后暴露四类「成本与可见性」问题——会话 cookie 被当注入点（顶会话 +
+浪费请求）、diffJudge 复验重复读、盲注三标量串行等待、二阶拖库写放大无账。本批不改判定判据，
+只改成本结构与交付可见性。
+
+**① 会话键不作 cookie 注入点**（`TargetParser.cookiePoints`）：`phpsessid` / `jsessionid` /
+`asp.net_sessionid` / `session_id` / `sessionid`（小写比对）默认跳过；`config.testParameter`
+（`-p/--test-param`）点名即恢复。独立成函数的原因：`discover` 在复杂度基线（144 行/79 圈）
+只许持平，分支不放进主链。边界：静态小名单，自定义会话键名（如 `SESSID`）仍生成点。
+
+**② diffJudge 复用签名阶段的阴性读**（`SecondOrderDetector`）：`negBody` 提升到函数级并透传给
+`_maybeDiffJudge`，阴性复验从 2 读降 1 读 ⇒ 每存储点省 1 写 1 读（D301 版 2 写 3 读 →
+2 写 2 读）。守卫同步调整：DIFF-1 读次数断言 ≥6→≥5，DIFF-1/4/5/6 的样本序列各减 1 项；
+DIFF-2/3 判据不变。⚠ 判定仍是「探针/阴性各两次读一致 + 存在差异」（稳定性未降级）。
+
+**③ 盲注三标量并行**（`extractExtended.extractBlindScalars`）：`Promise.all` + 每标量克隆 ctx
+（`extractConfidence` / `blindLenCapped` 是 per-extraction 可变字段，共享 ctx 会互踩）。
+只重叠等待，不放请求速率（HttpClient 令牌桶统一约束）；DVWA high 三标量串行 156s 的墙钟大头
+是 MISSING 随机 sleep 的串行等待。
+
+**④ 二阶写放大留痕 + 拖库 ETA**（`extractExtended` / `extractScope`）：
+- `buildStoreTriggerClient` 返回 `countStores()`，`collected.meta.storeWrites/storePoint` 如实记录
+  真实写次数与存储点；`absorb` 把它写进 `report.summary.constraints`
+  （「无自动清理，留痕见写副作用台账」——可审计 ≠ 可清理，引擎不假装能撤销表单 POST）；
+- `extraction_progress` 事件新增 `totalTables` / `doneTables`（`dumpEta` 独立函数，避开
+  `extractAll` 复杂度基线 62 行/28 圈）。语义是「已完成表数 / 总表数」，消费端结合事件时间戳
+  估算剩余墙钟，**不是引擎预测的精确剩余时间**。
+
+**验证**：`secondOrderDiffJudge.guard` 6/6、`scanValidity` 18/18、受影响批 **1451/1451**、
+typecheck 三件套绿、deadcode/complexity/nesting/duplication 绿。**未做真机复验**——写放大计数
+与 ETA 字段目前只有单测口径，DVWA 上未复跑（下一轮全等级复验时应补）。
+
 ### 2026-11-19 批次 D301 · 全等级复验收口：--hex 提取链 + 二阶布尔差异判定（GAP①② 关闭）
 
 **起点**：D300 全等级复验（`e2e/dvwa-lab/all-levels-verify.mjs`）暴露两条显式缺口——GAP①
@@ -49,6 +128,10 @@ filter）——补 crawlForms 后检测器真实执行；此前「签名判定�
   （medium 首次在 real_escape_string 目标上拖出全部种子用户）、sqli_blind low/medium/high 三标量
   全中 ×3、impossible ×2 零检出零误报、**sqli high 二阶检测命中（diffJudge 路径，354 请求，证据
   带 [D301] 标注）+ 直驱拖库 5/5**；
+- **DVWA sqli high 完整管线闭环**（`e2e/dvwa-lab/high-fullchain.mjs`）：enableExtract 同扫——
+  second_order 命中挂 _d300 → extractPhaseD300 自动二阶拖库 → 12 库 + dvwa.users **种子 5/5** +
+  `d300Channels=[extended-extract]` + dumpUnconfirmed=[]（209 请求 11.3s）——「检测命中 → 自动
+  拖库 → 报告数据」在 MySQL 触发页真机一次扫通（此前为检测/拖库分步验证）；
 - 复杂度/重复/死代码门禁全绿（extractScalar/detect/guardSecondOrder 三处基线函数平换零变化；
   `applySecondOrderGroup`/`_maybeDiffJudge`/`hexifyStringLiterals` 新函数远低于上限）；
 - lint 0 error、typecheck 三件套全绿。
@@ -480,13 +563,15 @@ CI Linux 同代码绿）；零产品代码改动，未改 deadline / 阈值 / �
 ---
 
 <!-- changelog-index:start -->
-**本段覆盖 11 个批次（D290–D301，2026-11-14 → 2026-11-19）**。正文按时间倒序排列；
+**本段覆盖 13 个批次（D290–D303，2026-11-14 → 2026-11-19）**。正文按时间倒序排列；
 下表是同一批次的索引，便于按编号或关键词定位。**索引只是导航，正文未做任何删改**
 （被推翻的旧结论原样保留，这是本仓的既定口径）。新增批次后跑
 `node scripts/changelog-index.mjs --write` 重生成，`--check` 校验是否过期。
 
 | 批次 | 日期 | 主题 |
 |---|---|---|
+| D303 | 11-19 | `{call }` 值位盲区修复 + Benchmark runner 判据适配 |
+| D302 | 11-19 | 注入面与拖库的成本/留痕治理（4 项） |
 | D301 | 11-19 | 全等级复验收口：--hex 提取链 + 二阶布尔差异判定（GAP①② 关闭） |
 | D300 | 11-18 | 扩展拖库通道：二阶命中自动拖库 + 盲注 opt-in（接手续批收尾） |
 | D299 | 11-18 | 修复 D298 首跑失败：Tomcat 9.0.122 下载 404 |

@@ -54,6 +54,26 @@ const PATH_STATIC_EXT = new Set([
   'js', 'mjs', 'css', 'map', 'png', 'jpg', 'jpeg', 'gif', 'svg', 'ico', 'webp', 'avif', 'bmp',
   'woff', 'woff2', 'ttf', 'eot', 'otf', 'mp4', 'webm', 'mp3', 'wav', 'ogg', 'wasm', 'pdf', 'zip', 'gz',
 ]);
+
+// [D302] 会话 Cookie 名单（小写比对）：纯会话键默认不作注入点候选——对它们注入只会
+// 顶掉会话（轻则自断登录态，重则检测基线被污染），且每点 100-300 请求是纯浪费。
+// 显式意图优先：config.testParameter 点名的会话键照常生成（用户点名 = 知道自己在测什么）。
+const SESSION_COOKIE_NAMES = new Set(['phpsessid', 'jsessionid', 'asp.net_sessionid', 'session_id', 'sessionid']);
+
+/**
+ * [D302] Cookie 参数 → 注入点（会话键默认跳过，testParameter 点名恢复）。
+ * 独立成函数的原因：discover 在复杂度基线里（144 行/79 圈只许持平），分支放这里。
+ * @param {string} k cookie 名 @param {string} v cookie 值
+ * @param {object|undefined} config 扫描配置（读 testParameter 点名）
+ * @returns {Array} 0 或 1 个注入点（spread 进 points，调用方零新增分支）
+ */
+export function cookiePoints(k, v, config) {
+  const named = String(k).toLowerCase();
+  const forced = [].concat(config?.testParameter || []).map((s) => String(s).toLowerCase()).includes(named);
+  if (SESSION_COOKIE_NAMES.has(named) && !forced) return [];
+  return [createInjectionPoint('cookie', k, String(v))];
+}
+
 // 数据后缀：Rails/Spring 常见的 `/users/5.json`。后缀必须保留（去掉就路由不到了），只替换前缀。
 const PATH_DATA_EXT = new Set(['json', 'xml', 'do', 'action', 'csv', 'yaml', 'yml']);
 // 路径点上限：每个点约 100-300 请求，--test-path 是显式 opt-in 也不能无界放大请求量
@@ -195,7 +215,7 @@ export class TargetParser {
     // 任意档位都生成。默认路径（不给 flag）零变化（仍是 level≥2）。
     if (level >= 2 || config.testHeaders) {
       for (const [k, v] of Object.entries(target.cookieParams || {})) {
-        points.push(createInjectionPoint('cookie', k, String(v)));
+        points.push(...cookiePoints(k, v, config));
       }
     }
 

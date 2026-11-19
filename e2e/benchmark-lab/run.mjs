@@ -35,6 +35,51 @@
 
 import { readFileSync } from 'node:fs';
 import { ScanManager } from '../../server/src/engine/ScanManager.js';
+import { isDirectRun } from '../../scripts/lib/portable.mjs';
+
+/**
+ * [D303] `{call <过程名>}` 维度判据（纯函数，供主流程与 selftest 共用）。
+ *
+ * 背景（缺陷来源）：原 pass 判据含 `callVulnTotal > 0`，硬性要求「清单必须含 call 真值用例」。
+ * 门禁基线 `cases.json` 含 7 条 call 形态（4 真值 + 3 安全）——该断言在基线口径下有效，
+ * 防止有人删光 call 用例让该注入面从此无人守护（假绿）。但深度子集清单
+ * `cases-query.json`（210 条）/ `cases-header.json`（67 条）按设计筛掉了 call 形态
+ * （它既非 query 也非 header 面），分母 0/0 ⇒ `0 > 0` 为假 ⇒ 整份清单判红，
+ * 尽管真值全检出、安全零误报。这是判据不适配子集清单，不是引擎漏检。
+ *
+ * 修正口径（分母 0 记 N/A，不判红；分母 >0 仍强制全检出+零误报）：
+ *   - 分母 0（清单无 call 形态）⇒ 本维度 N/A ⇒ 返回 true（不参与判红，也不谎称"通过"）
+ *   - 分母 >0 ⇒ 必须 callVulnHit===callVulnTotal 且 callSafeFp===0
+ * @used-by e2e/benchmark-lab/run.mjs（主流程判据 + `--selftest` 四态自证；同文件使用，无跨文件 import）
+ * @param {{callVulnHit:number, callVulnTotal:number, callSafeFp:number, callSafeTotal:number}} c
+ * @returns {boolean}
+ */
+export function judgeCallDimension(c) {
+  const total = (c.callVulnTotal || 0) + (c.callSafeTotal || 0);
+  if (total === 0) return true; // N/A：清单按设计不含该形态，不判红
+  return c.callVulnHit === c.callVulnTotal && c.callSafeFp === 0;
+}
+
+/** [D303] selftest：合成样本证明判据能红能绿（分母 0 / 全绿 / 漏检 / 误报四态） */
+function runSelftest() {
+  const T = 'benchmark:judgeCallDimension';
+  const cases = [
+    ['分母 0/0（子集清单无 call）判 N/A 不红', judgeCallDimension({ callVulnHit: 0, callVulnTotal: 0, callSafeFp: 0, callSafeTotal: 0 }) === true],
+    ['基线 4/4 真值 + 0/3 误报判绿', judgeCallDimension({ callVulnHit: 4, callVulnTotal: 4, callSafeFp: 0, callSafeTotal: 3 }) === true],
+    ['基线真值 3/4 漏检判红', judgeCallDimension({ callVulnHit: 3, callVulnTotal: 4, callSafeFp: 0, callSafeTotal: 3 }) === false],
+    ['基线安全 1/3 误报判红', judgeCallDimension({ callVulnHit: 4, callVulnTotal: 4, callSafeFp: 1, callSafeTotal: 3 }) === false],
+    ['仅安全 call 形态 0/2 误报判绿', judgeCallDimension({ callVulnHit: 0, callVulnTotal: 0, callSafeFp: 0, callSafeTotal: 2 }) === true],
+    ['仅安全 call 形态 1/2 误报判红', judgeCallDimension({ callVulnHit: 0, callVulnTotal: 0, callSafeFp: 1, callSafeTotal: 2 }) === false],
+  ];
+  let ok = 0;
+  for (const [name, pass] of cases) {
+    console.log(`[${pass ? 'PASS' : 'FAIL'}] ${T} :: ${name}`);
+    if (pass) ok += 1;
+  }
+  console.log(`\n[T] ${ok}/${cases.length} 判据自证`);
+  process.exit(ok === cases.length ? 0 : 1);
+}
+if (process.argv.includes('--selftest')) runSelftest();
 
 const BASE = process.env.BENCHMARK_BASE || 'https://127.0.0.1:8443/benchmark';
 const TIMEOUT_MS = Number(process.env.BENCHMARK_LAB_TIMEOUT_MS) || 200000;
@@ -144,6 +189,9 @@ async function scanOne(c) {
   }
 }
 
+// [D303] 主流程包进 main() + isDirectRun 守卫：让 judgeCallDimension 可被独立 import
+// 做单元测试，不会因顶层 await reachable() 被 SKIP 短路（否则任何 import 测试都拿不到纯函数）。
+async function main() {
 if (!(await reachable())) {
   console.log(`[SKIP] OWASP Benchmark 靶场不可达（${BASE}）—— 需先编译并部署，跳过（不计通过亦不计失败）`);
   console.log('       构建与启动见 e2e/benchmark-lab/README.md（JDK21 + Maven + cargo tomcat；');
@@ -216,19 +264,23 @@ console.log(`安全对照误报：${falsePositives}/${safeTotal}（须为 0${fpL
 console.log(`安全对照证据不足（请求<${SAFE_MIN_REQUESTS}）：${weakEvidence}（须为 0）`);
 console.log(`header 注入面用例：${headerTotal}（前三个外部裁判未覆盖的形态）`);
 console.log(`参数名注入面用例：${paramNameTotal}（官方 param = name 变体）`);
+const callNA = (callVulnTotal + callSafeTotal) === 0;
 console.log(
-  `{call <过程名>} 形态（过程名位注入面，D284 起支持）：真值 ${callVulnHit}/${callVulnTotal} 检出（须全检出）；` +
-  `安全对照 ${callSafeFp}/${callSafeTotal} 误报（须为 0）`
+  `{call <过程名>} 形态（过程名位注入面，D284 起支持）：${callNA
+    ? 'N/A（本清单按设计不含该形态，不判红）'
+    : `真值 ${callVulnHit}/${callVulnTotal} 检出（须全检出）；安全对照 ${callSafeFp}/${callSafeTotal} 误报（须为 0）`}`
 );
 console.log(`用例总数：${CASES.length}（真值 ${vulnTotal} + 安全 ${safeTotal} + call 形态 ${callVulnTotal + callSafeTotal}）`);
+const callOk = judgeCallDimension({ callVulnHit, callVulnTotal, callSafeFp, callSafeTotal });
 const pass =
   missed === 0 &&
   falsePositives === 0 &&
   weakEvidence === 0 &&
-  callSafeFp === 0 &&
-  callVulnTotal > 0 &&
-  callVulnHit === callVulnTotal;
+  callOk;
 console.log(pass
-  ? '✅ Benchmark 外部裁判通过：官方标注真值全部检出（含 {call} 过程名位）且 官方标注安全用例零误报'
+  ? `✅ Benchmark 外部裁判通过：官方标注真值全部检出${callNA ? '' : '（含 {call} 过程名位）'}且 官方标注安全用例零误报`
   : '❌ 外部裁判未通过（漏检／误报／安全端点没真测／{call} 真值未全检出，见上表）');
 process.exit(pass ? 0 : 1);
+}
+
+if (isDirectRun(import.meta.url)) await main();

@@ -346,8 +346,17 @@ test('集成：健康目标（全 200）→ 零行为变化，verdict=no_vulnera
   assert.equal(v.reliable, true);
   assert.deepEqual(v.inconclusivePoints, []);
   assert.equal(report.summary.verdict, 'no_vulnerability_detected');
-  // 守卫未跳过任何点、未减少任何请求：每个点都完整走完检测器调度（每技术 4 请求）
-  assert.equal(requests, sm._detectCalls.length * 4, '守卫不得改变正常目标的请求数');
+  // 守卫未跳过任何点、未减少任何请求：每个点都完整走完检测器调度（每技术 4 请求）。
+  // [D303] 值位 CALL 表达式后置探针在「标准四通道零命中的值位点」追加请求（echo 两轮 +
+  // eval-err + 对照，命中 echo 时再补一条对照）⇒ 等值断言会让「新增检测面」与「守卫回归」
+  // 混为一谈。改为双向口径：下界保守卫原意（一条都不许少），上界钉住后置探针预算（≤5/点），
+  // 防止未来无界加测把整场请求数悄悄推高。
+  const baseRequests = sm._detectCalls.length * 4;
+  assert.ok(requests >= baseRequests, `守卫不得减少正常目标的请求数：${requests} < ${baseRequests}`);
+  assert.ok(
+    requests <= baseRequests + points.length * 5,
+    `值位后置探针超出预算：${requests} > ${baseRequests} + ${points.length * 5}`
+  );
   assert.equal(sm._testedPoints.size, points.length, '健康目标每个点都应进入完整检测');
 });
 

@@ -54,6 +54,13 @@ async function extractSecondOrderDump(sm, scanId, ctx) {
   const collected = emptyExtractedData();
   try {
     await fillDumps(sm, scanId, dumpCtx, collected);
+    // [D302 残留治理] 写放大如实入 meta：真实写次数与存储点（可审计 ≠ 可清理——
+    // 表单 POST 的撤销需要目标删除接口，引擎不假装能清）。
+    collected.meta = {
+      ...(collected.meta || {}),
+      storeWrites: adapter.countStores(),
+      storePoint: `${ctx.point.param}@${ctx.point.actionUrl}`,
+    };
     eventBus.emit(scanId, 'extraction_progress', {
       db: ctx.dbms, table: null, count: Object.keys(collected.rows).length,
       note: `二阶拖库（存储点 ${ctx.point.param} → 触发页）`,
@@ -68,11 +75,13 @@ async function extractSecondOrderDump(sm, scanId, ctx) {
 /** 构造"写入存储点→读触发页"的 httpClient 适配器；Extractor 发的每个请求都被转成一次 store+trigger 读回。
  *  触发页真实状态码必须透传（[靶场复验 2026-11-19]）：_probeBody 的「标记命中须发生在非错误响应」
  *  判据靠 status——PGlite 的 500 错误页会把整条 SQL（含 SQLISCANNER 标记）回显出来，若适配器恒回
- *  200，回显列探测会把错误页当命中 ⇒ 全列"可回显" ⇒ 表达式落 INT 列 ⇒ 拖库全线 500 静默空转。 */
+ *  200，回显列探测会把错误页当命中 ⇒ 全列"可回显" ⇒ 表达式落 INT 列 ⇒ 拖库全线 500 静默空转。
+ *  返回值带 countStores()：真实写次数供报告写放大约束（[D302] 残留治理——可审计不等于可清理）。 */
 function buildStoreTriggerClient(sm, scanId, ctx, triggerUrl) {
   const detector = sm.secondOrderDetector;
   if (!detector || typeof detector._store !== 'function' || typeof detector._trigger !== 'function') return null;
   const soCtx = { ...ctx, triggerUrl };
+  let stores = 0;
   const triggerClient = {
     request: async (opts) => {
       // Extractor 把 SQL 探针放在 data/params/url（伪点 location='url' ⇒ 只在 url 的 query）里；
@@ -89,11 +98,12 @@ function buildStoreTriggerClient(sm, scanId, ctx, triggerUrl) {
         },
       };
       await detector._store(statusClient, soCtx, payload);
+      stores += 1;
       const body = await detector._trigger(statusClient, soCtx, triggerUrl);
       return { status: lastStatus ?? 200, data: body };
     },
   };
-  return { client: triggerClient };
+  return { client: triggerClient, countStores: () => stores };
 }
 
 /** 从 data/params 的键值集合里挑第一个含 SELECT 的注入值（跳过表单固定字段）。 */
@@ -192,16 +202,20 @@ async function extractBlindScalars(sm, ctx) {
     banner: VERSION_EXPR[db],
   };
   const out = emptyExtractedData();
-  for (const [field, expr] of Object.entries(table)) {
-    if (!expr) continue;
+  // [D302] 三标量互相独立（布尔探针无共享服务端状态，结果缓存按 expr 隔离），并行提取：
+  // 实测 DVWA high 三标量串行 156s 的墙钟大头是 MISSING 随机 sleep 的串行等待——并行只重叠
+  // 等待不放大请求速率（HttpClient 令牌桶统一约束）。每标量克隆 ctx：extractConfidence /
+  // blindLenCapped 是 per-extraction 可变字段，共享 ctx 会互踩（低置信标注/上界标注串位）。
+  await Promise.all(Object.entries(table).map(async ([field, expr]) => {
+    if (!expr) return;
     try {
       // 失败（null）不写字段：hasData/hasExtendedData 按「有值才算提取到」判
-      const v = await sm.extractor.extractBoolean(ctx, expr);
+      const v = await sm.extractor.extractBoolean({ ...ctx }, expr);
       if (v != null) out[field] = v;
     } catch (e) {
       logger.warn(`盲注标量提取 ${field} 失败：${e.message}`);
     }
-  }
+  }));
   return out;
 }
 
@@ -235,7 +249,8 @@ async function runExtended(run) {
 }
 
 /** 合并提取结果到 extracted。空结果不标记通道（诚实边界：「跑了通道」≠「拖到了数据」）；
- * dumpUnconfirmed 照 extract.js 口径进 constraints，交付前让人看见。 */
+ * dumpUnconfirmed 照 extract.js 口径进 constraints；[D302] 写放大约束——真实写次数与
+ * 存储点进报告约束区（残留治理：可审计不等于可清理，交付前人工核对台账）。 */
 async function absorb(sm, scanId, extracted, report, dataPromise) {
   const data = await dataPromise;
   if (!data || !hasExtendedData(data)) return;
@@ -246,6 +261,13 @@ async function absorb(sm, scanId, extracted, report, dataPromise) {
     report.summary.constraints = report.summary.constraints || [];
     report.summary.constraints.push(
       `拖库空结果未确认（非空表但提取 0 行，提取通路可能不稳）：${data.meta.dumpUnconfirmed.join('、')} —— 请人工复核`
+    );
+  }
+  const storeN = Number(data.meta?.storeWrites) || 0;
+  if (storeN) {
+    report.summary.constraints = report.summary.constraints || [];
+    report.summary.constraints.push(
+      `二阶拖库写放大：向存储点 ${data.meta.storePoint || '?'} 真实写入 ${storeN} 条探针/数据（无自动清理，留痕见写副作用台账）`
     );
   }
 }

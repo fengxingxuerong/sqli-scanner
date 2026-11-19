@@ -5,6 +5,53 @@
 
 ---
 
+## 2026-11-19 批次 D302 · 注入面与拖库的成本/留痕治理（4 项，不改判据）
+
+**起点**：D301 全等级复验后暴露四类成本与可见性问题：会话 cookie 被当注入点、diffJudge 复验
+重复读、盲注三标量串行等、二阶拖库写放大无账。
+
+**改动**：① `TargetParser.cookiePoints`——`phpsessid/jsessionid/asp.net_sessionid/session_id/
+sessionid` 默认不作 cookie 注入点，`-p` 点名恢复（静态小名单，自定义名仍生成）；②
+`SecondOrderDetector` negBody 透传复用阴性读（2 写 3 读 → 2 写 2 读，判定稳定性未降级）；③
+`extractBlindScalars` 三标量 `Promise.all` + 克隆 ctx（`extractConfidence`/`blindLenCapped`
+per-extraction 可变）；④ `extractExtended` 记 `storeWrites/storePoint` 并把写放大写进
+`summary.constraints`；`extraction_progress` 增 `totalTables/doneTables`。
+
+**验证**：diffJudge 守卫 6/6、scanValidity 18/18、受影响批 1451/1451、typecheck 绿、
+deadcode/complexity/nesting/duplication 绿。
+
+**边界**：写放大计数与 ETA 只有单测口径，**未做真机复验**（下轮 DVWA 全等级复验补）；
+ETA 是「已完成/总表数」，非精确剩余时间预测；会话键名单静态。
+
+---
+
+## 2026-11-19 批次 D303 · `{call }` 值位盲区修复 + Benchmark runner 判据适配
+
+**起点**：Benchmark 官方 504 条 sqli 里三份清单只覆盖 336，探剩余 168 条时暴露两件事——
+常规 query 值位 35/35 检出、0/48 误报（无回归）；**`{call }` 值位形态真值 0/12 漏检**。
+
+**修复**：`callProcName.js` 门控从 `point.location !== 'paramName'` 放宽到值位集合
+`{url,body,header,cookie,path}`（不含 direct/xmlName），`trace.position` 区分 key/value；
+`detect.js` 新增 `runCallExprValuePostPass`（与 orderByKey 并列，error 族门控，只对标准四通道
+零命中的值位点跑）；`e2e/benchmark-lab/run.mjs` 抽纯函数 `judgeCallDimension`（分母 0 记 N/A）。
+
+**真机证据**：Benchmark 8443 值位 call 清单 45 条 → `{call}` 真值 **23/23**（修复前 0/12）、
+安全 **0/21** 误报、exit 0 PASS。
+
+**收口补漏（上一会话遗漏的两处门禁红）**：① `scanValidity.test.js` 等值请求数断言改**双向口径**
+（下界保守卫「一条都不许少」+ 上界 ≤5 请求/点钉后置探针预算），缺陷注入双向自证（×8 红、×0 红）；
+② `judgeCallDimension` 同文件使用无跨文件 import ⇒ 死代码门禁判红，补 `@used-by` 标记（未上调基线、
+未删 export）。
+
+**验证**：callProcName.test.js 14/14（含 5 例值位）+ `run.mjs --selftest` 6/6 + 受影响批
+**1451/1451 绿**；typecheck 三件套绿；deadcode / changelog-index / complexity / nesting /
+duplication / arch 全绿。
+
+**边界**：`cookie` 自设值用例（`response.addCookie` 固定值→自读）官方标 true 但黑盒不可达，
+不计漏检；值位 CALL 探针每点 +4~5 请求，仅在标准四通道零命中后启用。
+
+---
+
 ## 2026-11-19 批次 D301 · 全等级复验收口：--hex 提取链 + 二阶布尔差异判定（GAP①② 关闭）
 
 **起点**：D300 全等级复验（all-levels-verify）的两条显式 GAP 转入本批修复，同靶场转硬判据。

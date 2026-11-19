@@ -1,6 +1,6 @@
 # sqli-scanner
 
-[![Tests](https://img.shields.io/badge/tests-4905%20passing-brightgreen)](#测试)[![CI](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml/badge.svg)](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml)
+[![Tests](https://img.shields.io/badge/tests-4909%20passing-brightgreen)](#测试)[![CI](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml/badge.svg)](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml)
 [![Dependencies](https://img.shields.io/badge/prod%20deps-0%20known%20vulns-brightgreen)](SECURITY.md)
 
 > CI 徽章为真实状态（红绿以 GitHub Actions 实跑为准）。发布判定仍以 `CHANGELOG.md`
@@ -257,6 +257,7 @@ admin-only 触发页 `/admin/panel`（users.admin 角色门禁 403）+ admin 会
 | **LDAP / XPath 注入通道（CLI）** | [D203] `--ldap` / `--xpath` 开启非 SQL 补充趟的两类检测（对标 sqlmap 1.10 同名开关，**默认关**）。复用 `noSql` 组的门控 / 并发 / 结果聚合，旗标只把 `noSql.kinds` 收窄到显式选中的类别（两个同给则两类都跑；与 `--no-sql` 同给时以显式选中为准）。档案形态 `{"noSql":{"enabled":true,"kinds":["ldap","xpath"]}}`，REST 侧 `config.noSql.kinds` 白名单已含两类。判定是**真/假条件对 + 二次确认**（与 NoSQL 通道同源的失败重发 / 内容差异 / 基线区分 / 确认一致四道误报防线），不做「解析报错即漏洞」的弱判据；命中技术记为 `nosql`、报告按 `noSqlKind` 细分 | **诚实边界**：仅单元级模拟靶场验证，无 LDAP 目录服务 / XPath 真机 A/B，不得外推检出率或覆盖度；启用后每个注入点每类多一组真/假探针，请求预算按此估算 |
 | **CLI 报告格式补齐 db-json** | `-f/--format` 现支持 `json|csv|markdown|md|html|sarif|**db-json**`（db-json = 仅拖库数据，扩展名 `db.json`，与 REST `/report/export` 同源；此前 REST/UI 有、CLI 与 MCP 枚举缺）。**未知格式改为拒绝启动**（旧行为静默回退 JSON ⇒「以为导了 db-json 实际是普通 JSON」） |
 | **注入点筛选三件套** | `-p/--test-param <p1,p2>`（只测指定参数）/ `--param-exclude <regex>`（正则排除噪声参数）/ `--param-filter <place,...>`（按位置筛选：url/get/query、body/post/form、header、cookie、path；对标 sqlmap 同名三参）。[D41] 复测与 CI 定向回归用：大 body 只测可疑参数不再全量投 payload。**筛光点位即报错退出并列出可用点位**——0 点扫描=「没测」，绝不伪装成「未检出」 |
+| **会话键默认不作 cookie 注入点** | [D302] 自动生成的 cookie 注入点跳过纯会话键（`phpsessid` / `jsessionid` / `asp.net_sessionid` / `session_id` / `sessionid`，小写比对）：对它们投 payload 只会顶掉登录态、污染后续点基线，且每点 100~300 请求是纯浪费。`-p/--test-param` 点名即恢复（显式意图优先）；名单是静态小名单，自定义会话键名（如 `SESSID`）仍会生成点 |
 | **二阶触发整请求** | `--second-req <file>`（对标 sqlmap --second-req）：触发页从 Burp/curl 抓包导入（URL/method/headers/body，与 `-r` 同一解析器）。认证触发页（POST + Cookie/CSRF）用 `--second-order <url>` 表达不了——不带会话必 401、二阶必漏。方法仍过幂等门（productionMode 下非幂等触发读取需 `--allow-second-order-writes`），SSRF/授权范围校验与 `secondUrl` 同级（不过即整体丢弃） |
 | **忽略错误码 / 参数随机化** | `--ignore-code <c1,c2>`（对标 sqlmap 同名）：指定状态码不再计入「拦截/会话失效/服务器错误」可信度判定（内容照常比对）——注入点确实坐在 401/500 后面的目标不再被拖成 blocked/session_expired。`--randomize <p1,p2>`（对标 sqlmap 同名）：每条注入请求随机化指定参数值（URL query/Cookie/请求头/表单伴随字段），长枚举防反爆破锁定；注入点自身永不随机化 |
 | **原始流量落盘** | `-t <file>` / `--traffic-file <file>`（[D240] 对标 sqlmap `-t`）：每行一次**最终往返**（NDJSON：请求方法/URL/头/body + 响应状态/头/body），用于**离线复现与审计**——拿到文件就能重放，不必依赖「当时的目标还在不在」。只记最终一次往返（重定向中间跳与重试失败轮不在内）；body 默认截断 8KB（`--traffic-max-body 0` 不截断，但「大页面 × 数千请求」会把盘写满）。⚠ 文件含完整请求头（Cookie/Authorization），按凭据文件保管 |
@@ -468,7 +469,7 @@ server/       ← Express + Node.js（后端，`server/index.js` 入口）
 # 前端测试（581 个用例）
 npm test
 
-# 服务端测试（4330 个用例）
+# 服务端测试（4334 个用例）
 cd server && npm test
 
 # 全部测试
@@ -493,8 +494,8 @@ npm run artifact:drift   # 入库的 e2e 基线产物必须等于当前代码跑
 ## 项目状态
 
 - TypeScript: 零错误
-- 前端测试: 581/581 通过（覆盖率门禁 stmts 93.28 / branch 84.43 / func 80.72，阈值 88/77/67）
-- 服务端测试: 4330 用例（4324 pass / 0 fail / 6 skip，并发口径 2026-11-18 复测；6 skip 为环境依赖显式跳过。覆盖率 lines 95.30 / branch 81.60 / func 89.37，阈值 85/74/77）
+- 前端测试: 581/581 通过（覆盖率门禁 stmts 93.29 / branch 84.45 / func 80.72，阈值 88/77/67）
+- 服务端测试: 4334 用例（4328 pass / 0 fail / 6 skip，并发口径 2026-11-19 复测；6 skip 为环境依赖显式跳过。覆盖率 lines 95.32 / branch 81.62 / func 89.43，阈值 85/74/77）
 - 一键扫描: `npm run scan -- -u <url>`（CLI 一条命令产出 HTML/JSON/Markdown 全套报告 + manifest，退出码可直接进 CI 门禁）
 - Tamper 插件: 234 个（含批次 D3 新增 scalarselectinline；含 v24 增量 20 个，对齐 sqlmap 官方 tamper 全集，含官方 CRS/libinjection 实测组合 uniontable+odbcbrace；含批次 D13 新增 5 件上游形态变体 *nospace/*open/*block，真机 A/B 判决前不进默认链）
 - WAF 绕过能力: 200+ 插件链式组合，覆盖 62 个 WAF 厂商指纹识别 + 推荐

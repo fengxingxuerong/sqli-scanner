@@ -5,6 +5,17 @@ import { SYS_DBS } from './scanHelpers.js';
 import { analyzePasswords } from './extraction/hashAnalysis.js';
 import * as eventBus from '../core/eventBus.js';
 
+/** [D302] 拖库 ETA 结构化字段：doneTables/totalTables（消费端结合事件 ts 估算剩余墙钟）。
+ * doneTables = data.rows 已写入键数（每表处理完成即落键，含 0 行表）——天然单调，无需计数器；
+ * 表级粒度（并发 _mapPool 内打点在 data 写入之后，天然按完成序）。独立成函数的原因：
+ * extractAll 在复杂度基线里（62 行/28 圈只许持平），字段放这里。 */
+function dumpEta(aggregated, data) {
+  return {
+    totalTables: Object.values(aggregated.tables).reduce((n, t) => n + t.length, 0),
+    doneTables: Object.keys(data.rows || {}).length,
+  };
+}
+
 /**
  * 完整拖库（库→表→列→数据）
  * extractScope 存在时（CLI --dbs/--tables/--columns/--dump/--current-db/--current-user/--count）
@@ -46,7 +57,8 @@ export async function extractAll(sm, scanId, ctx) {
     // 列类型枚举 + 进度推送（库数通常不多，保持串行遍历；类型枚举失败被吞）
     for (const db of dbs) {
       const tbls = aggregated.tables[db] || [];
-      eventBus.emit(scanId, 'extraction_progress', { db, table: null, count: tbls.length });
+      // [D302] 结构化 ETA：doneTables/totalTables 供消费端估算剩余墙钟
+      eventBus.emit(scanId, 'extraction_progress', { db, table: null, count: tbls.length, ...dumpEta(aggregated, data) });
       // [MERGED: perf] 表级并发（每表 1-N 个只读请求，受 extractConcurrency 约束；原为逐表串行 await）
       await sm._mapPool(
         tbls,
@@ -69,9 +81,9 @@ export async function extractAll(sm, scanId, ctx) {
           const rowsArr = aggregated.rows[`${db}.${table}`] || [];
           data.rows[`${db}.${table}`] = rowsArr;
           eventBus.emit(scanId, 'extraction_progress', {
-            db,
-            table,
-            count: rowsArr.length,
+            db, table, count: rowsArr.length,
+            // [D302] 结构化 ETA：doneTables/totalTables 供消费端估算剩余墙钟
+            ...dumpEta(aggregated, data),
           });
         },
         Math.max(1, Number(ctx.target?.config?.extractConcurrency) || defaults.extractConcurrency || 2)
