@@ -9,10 +9,12 @@ import { postgresPayloads, postgresClauses } from './postgres.js';
 import { sqlserverPayloads, sqlserverClauses } from './sqlserver.js';
 import { sqlitePayloads, sqliteClauses } from './sqlite.js';
 import { oraclePayloads, oracleClauses } from './oracle.js';
+// [D307] 末尾 4 个 import 是 sqlmap 官方测试集暴露的方言（静态移植，未经真机验证）
 import {
   clickhousePayload, db2Payload, sybasePayload, firebirdPayload,
   informixPayload, h2Payload, accessPayload, hsqldbPayload,
   derbyPayload, monetdbPayload,
+  sapMaxdbPayload, verticaPayload, cubridPayload, prestoPayload,
 } from './others.js';
 // 高危（risk 3）payload 隔离池：默认不投放，需 enableDestructivePayloads() 显式开启。
 // 详见 destructive.js 顶部说明（写文件 / RCE / 外连 / DoS 类向量的隔离原因）。
@@ -30,7 +32,8 @@ export const TECHNIQUE_TYPES = ['union', 'error', 'boolean', 'time', 'stacked', 
 
 // ==================== PAYLOADS 装配 ====================
 // 对象字面量顺序保持与原 payloads.js 一致：MySQL / PostgreSQL / SQL Server / SQLite / Oracle
-// 后续通过赋值追加 MariaDB / TiDB / DM8（深拷贝克隆）与 ClickHouse..MonetDB（10 库）。
+// 后续通过赋值追加 MariaDB / TiDB / DM8（深拷贝克隆）与 ClickHouse..MonetDB（10 库），
+// 以及 D307 的 Vertica/CUBRID/Presto（SAP MaxDB 因名带空格在上方字面量声明）。
 // 固定索引约束：boolean 数组 [0,2]/[1,3]/[4,5]/[6,7] 不可移动（BooleanBlindDetector 依赖）。
 export const PAYLOADS = {
   MySQL: mysqlPayloads,
@@ -38,6 +41,9 @@ export const PAYLOADS = {
   'SQL Server': sqlserverPayloads,
   SQLite: sqlitePayloads,
   Oracle: oraclePayloads,
+  // [D307] SAP MaxDB 名带空格，与 'SQL Server' 同形态在字面量声明（deadcode 守卫只识别
+  // PAYLOADS.X = var 与字面量键，不识别 PAYLOADS['X'] = var 方括号赋值）
+  'SAP MaxDB': sapMaxdbPayload,
 };
 
 // MariaDB 复用 MySQL 全部模板（协议互通，仅指纹层用版本串 'MariaDB' 关键字区分并独立上报）
@@ -68,6 +74,14 @@ PAYLOADS.Access = accessPayload;
 PAYLOADS.HSQLDB = hsqldbPayload;
 PAYLOADS.Derby = derbyPayload;
 PAYLOADS.MonetDB = monetdbPayload;
+
+// [D307] sqlmap 1.10.11 官方 payload 测试集暴露的 4 方言（18 条 <test>）。
+// 与 dialects.json 的兼容别名不冲突：别名供指纹归一（maxdb/cubrid→MySQL、vertica→PG），
+// 这里独立的 PAYLOADS key 供 --dbms 显式指定时命中（detect.js forcedDbms 原样流入，不经归一）。
+// ⚠ 模板静态移植，本机无这 4 种 DB，未经真机验证。
+PAYLOADS.Vertica = verticaPayload;
+PAYLOADS.CUBRID = cubridPayload;
+PAYLOADS.Presto = prestoPayload;
 
 // ==================== CLAUSE_PAYLOADS 装配 ====================
 // 背景：主模板均假设注入点在 WHERE 值位置；ORDER BY / GROUP BY / HAVING / LIMIT 位置的注入点

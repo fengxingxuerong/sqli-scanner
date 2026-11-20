@@ -5,6 +5,26 @@
 
 ---
 
+## 2026-11-20 批次 D307 · sqlmap 官方测试集暴露的 4 方言 payload 补齐（静态移植）
+
+**起点**：用 sqlmap 官方测试文件（tag 1.10.11，358 条 `<test>`）交叉验证本项目，
+静态对账发现 4 方言 18 条官方测试无 PAYLOADS 因子；用户 2026-11-20 选定 A 档
+（只补本次测试暴露的缺口，不做 22 项 P3 CLI 缺口 / GraphQL / mssql 端到端）。
+
+**改动**：`others.js` + `index.js` 补 SAP MaxDB / Vertica / CUBRID / Presto 4 个独立
+payload key（18→22）；守卫 7 例 + 缺陷注入复验；README 模板数 1761→1817 / 1912→1968；
+CHANGELOG 本段；facts 重采。
+
+**边界**：本机无这 4 种 DB，静态移植未经真机验证，不宣称检出能力；自动指纹仍按
+`dialects.json` 别名归一到 MySQL/PG，新因子仅 `--dbms` 显式指定命中。
+真机验证（需 4 种 DB 靶场）与 4 方言的 CLAUSE 子句形态（MaxDB ORDER BY CASE WHEN）
+留后续批次；本批不扩指纹识别面。
+
+**门禁**：typecheck / lint / payload+dialect 160/160 / dbmsEvidence 23/23 /
+readme:check / facts:check 全绿。
+
+---
+
 ## 2026-11-20 批次 D306 · v1.4.0 发版（版本对齐 + D290-D305 优化收口）
 
 **起点**：D305 推送（b8acf0e）后按 D289 先例执行版本对齐补发；CI #466 已证 lint / 双 OS

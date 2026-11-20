@@ -7,8 +7,45 @@
 > 下一批次起的条目写在这里。发版时把本节整体升为 `## [x.y.z] - YYYY-MM-DD` 并补汇总段。
 
 <!-- changelog-index:start -->
-当前没有未发布批次（最近一次发版见下方版本段落）。
+**本段覆盖 1 个批次（D307–D307，2026-11-20 → 2026-11-20）**。正文按时间倒序排列；
+下表是同一批次的索引，便于按编号或关键词定位。**索引只是导航，正文未做任何删改**
+（被推翻的旧结论原样保留，这是本仓的既定口径）。新增批次后跑
+`node scripts/changelog-index.mjs --write` 重生成，`--check` 校验是否过期。
+
+| 批次 | 日期 | 主题 |
+|---|---|---|
+| D307 | 11-20 | sqlmap 官方测试集暴露的 4 方言 payload 补齐（静态移植） |
 <!-- changelog-index:end -->
+
+### 2026-11-20 批次 D307 · sqlmap 官方测试集暴露的 4 方言 payload 补齐（静态移植）
+
+**起点**：用同类项目 sqlmap 的开源测试文件验证本项目（358 条官方 `<test>`），
+静态对账发现 SAP MaxDB / Vertica / CUBRID / Presto 4 方言的 18 条官方测试在本仓
+`PAYLOADS` 无因子（20 方言中唯一 4 个完全缺失；其余 16 种或有独立 key、或经
+`dialects.json` 兼容别名/others.js 最小适配覆盖）。
+
+**改动**：
+- `others.js` 新增 4 个方言 payload 对象，逐条映射 sqlmap 官方向量语法：
+  SAP MaxDB（`CASE WHEN … FROM DUAL` boolean + heavy-query stacked，time 因官方走大笛卡尔积、
+  无稳定延时阈值 ⇒ 留空不伪造 SLEEP）、Vertica（`ZEROIFNULL(CAST(… AS NUMERIC))` 报错）、
+  CUBRID（`INET_ATON` 报错 + `SLEEP(n) FROM db_root` 延时）、Presto（`PARSE_DATA_SIZE` 报错）。
+  `index.js` 装配 4 个独立 key，PAYLOADS 18→22。
+- 与 `dialects.json` 的兼容别名不冲突：别名供指纹归一（maxdb/cubrid→MySQL、vertica→PG），
+  独立 key 供 `--dbms` 显式指定时命中（`detect.js` forcedDbms 原样流入 `PAYLOADS[dbms]`，不经归一）。
+- README 模板数口径同步：主库 1761→1817、总数 1912→1968（+56 条）。
+- 守卫 `payloads.d307.dialect.guard.test.js` 7 例：key 存在 / boolean 索引契约
+  [0,2]/[1,3]/[4,5]/[6,7] / 各方言独门语法字面量 / 反例；缺陷注入（Vertica 报错改通用
+  extractvalue 2 处）→ D307-4 红，备份还原 7/7。
+
+**验证**：typecheck 绿；payload/方言相关测试 160/160；dbmsEvidence+enumSurface+expanded 23/23；
+lint 绿（1 既有 warning）；facts 重采（用例 4341→4348 +7，覆盖率 lines 95.32/branch 81.57/func 89.45），
+readme:check / facts:check 双绿。
+
+**边界**：本机无这 4 种数据库，模板是 sqlmap 官方语法的**静态移植、未经真机验证**——
+不宣称这些方言能被自动检出，也不宣称"支持 22 种方言"；自动指纹场景仍按既有别名归一到
+MySQL/PG，仅 `--dbms SAP MaxDB|Vertica|CUBRID|Presto` 显式指定时命中新因子。
+真机验证需对应 DB 靶场（未做）。此批只补"因子存在"，不扩展指纹识别面。
+
 
 ## [1.4.0] - 2026-11-20
 
