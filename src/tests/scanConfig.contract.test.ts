@@ -334,7 +334,7 @@ const TUNING_NO_UI_KEYS = [
   //   分组 —— 内置引擎面板此前确实无入口，SqlmapOptions 的同名控件只作用于 sqlmap 桥接模式）
 ];
 
-const KNOWN_MISSING_UI_KEYS = new Set([...CAPABILITY_GAP_KEYS, ...TUNING_NO_UI_KEYS, ...'chunked skipUrlencode skipXmlencode skipWaf retryOn crawlExclude os encoding charset fingerprint'.split(' ')]); // [D199+D202] 协议形态/强制面 10 键（字符串生成，避免与白名单列表产生 duplication 同构窗口）
+const KNOWN_MISSING_UI_KEYS = new Set([...CAPABILITY_GAP_KEYS, ...TUNING_NO_UI_KEYS, ...'chunked skipUrlencode skipXmlencode skipWaf retryOn crawlExclude os encoding charset fingerprint booleanXor'.split(' ')]); // [D199+D202] 协议形态/强制面 10 键 + [D308] booleanXor（字符串生成，避免与白名单列表产生 duplication 同构窗口）
 
   it('④ 后端可达但前端无入口的键，必须登记在 KNOWN_MISSING_UI_KEYS（防新增键静默断链）', () => {
     const uncovered = BACKEND_KNOWN_CFG_KEYS.filter(

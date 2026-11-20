@@ -177,6 +177,8 @@ const KNOWN_CFG_KEYS = new Set([
   // 但 X 在 defaults / 本白名单 / CLI / 面板**四处都没有** ⇒ 那承诺只有写单测的人能兑现。
   // 默认值逐个等于引擎内部兜底，故零行为变化；细节见 defaults.js 同批注释。
   'blindBitwise', 'blindMaxLen', 'booleanOrFallback', 'unionSkipGate',
+  // [D308] XOR 布尔对（WAF 过滤 AND/OR 时的替代运算符，默认关、opt-in）
+  'booleanXor',
   // [D50 2026-10-12] 盲注提取比较算子（--fetch-using）：gt|between。`>`/`<` 被 WAF
   // 过滤而 BETWEEN 仍放行的目标上，between 让长度/字节二分继续收敛（cls 类探测早已
   // 单方面依赖 BETWEEN 可用）。非法值在 scanConfigTuning 入口即丢弃并告警（不静默回落）。

@@ -7,15 +7,81 @@
 > 下一批次起的条目写在这里。发版时把本节整体升为 `## [x.y.z] - YYYY-MM-DD` 并补汇总段。
 
 <!-- changelog-index:start -->
-**本段覆盖 1 个批次（D307–D307，2026-11-20 → 2026-11-20）**。正文按时间倒序排列；
+**本段覆盖 5 个批次（D307–D310，2026-11-20 → 2026-11-20）**。正文按时间倒序排列；
 下表是同一批次的索引，便于按编号或关键词定位。**索引只是导航，正文未做任何删改**
 （被推翻的旧结论原样保留，这是本仓的既定口径）。新增批次后跑
 `node scripts/changelog-index.mjs --write` 重生成，`--check` 校验是否过期。
 
 | 批次 | 日期 | 主题 |
 |---|---|---|
+| D310 | 11-20 | 4 方言真机验证评估（环境不支持，边界写死） |
+| D311 | 11-20 | Juice login 请求成本测量（偶发不可复现，不改代码） |
+| D309 | 11-20 | DVWA high 档 time 噪声防线（per-endpoint 超时放宽） |
+| D308 | 11-20 | XOR 布尔形态补齐（社区 payload 对账唯一真缺口） |
 | D307 | 11-20 | sqlmap 官方测试集暴露的 4 方言 payload 补齐（静态移植） |
 <!-- changelog-index:end -->
+
+### 2026-11-20 批次 D310 · 4 方言真机验证评估（环境不支持，边界写死）
+
+用户选做的 D307 遗留项：对 SAP MaxDB / Vertica / CUBRID / Presto 的静态 payload 因子做真机验证。
+环境核查：本机 docker CLI 在但 daemon 未起（`npipe:////./pipe/dockerDesktopLinuxEngine` 连接失败），
+4 种 DB 端口全 down（1521/1433/8181 等），`labs.mjs --list` 无对应靶场定义 ⇒ **本机无法真机验证**。
+
+**处置**：按"做不到写做不到"，不改代码、不虚报能力；既有 D307 边界继续有效——
+这 4 个 key 是静态移植因子、仅 `--dbms` 显式指定命中、未经真机验证、不进指纹自动识别面。
+真验需 docker daemon + 对应 DB 靶场（另行安排）。
+
+### 2026-11-20 批次 D311 · Juice login 请求成本测量（偶发不可复现，不改代码）
+
+对上一轮实测的 `POST /rest/user/login` 247 请求 + 5 次超时 warn 做真机复测：
+本轮 `labs.mjs --up=juice && node e2e/juice-shop-lab/run.mjs` → login **117 请求 / 0 超时**，
+真值 2/2、同源 2/2、安全 0 误报全绿。证明上轮 247/5 是偶发目标侧抖动，非稳定成本缺陷。
+
+**处置**：按"先量再改"，不为不可复现的偶发改引擎核心（早停/预筛风险高）；
+成本口径如实保留在外部裁判报告，不虚构"优化到 N 请求"。
+
+### 2026-11-20 批次 D309 · DVWA high 档 time 噪声防线（per-endpoint 超时放宽）
+
+**起点**：10-20 外部裁判报告观察项——DVWA high 端点官方 `MISSING` 分支有
+`rand(0,5)==3` 时 `sleep(2~4)` 噪声，曾偶发打穿全局 15s 单请求超时（1 次，未影响判定，
+该点 boolean 已命中）。11-20 重跑 DVWA 5/5 零超时——当前不可复现，按"先量再改"
+不为偶发不可复现问题动引擎，只加一道预防性防线。
+
+**改动**：`e2e/dvwa-lab/run.mjs` high 端点加 `cfg: { timeoutMs: 30000 }`
+（走既有 per-endpoint cfg 合并机制，其他档位与全局默认零变化），desc 标注噪声来源。
+
+**验证**：真机复跑 `labs.mjs --up=dvwa && node e2e/dvwa-lab/run.mjs` →
+真值 5/5、同源 1/1、误报 0、证据不足 0，无回归。judge 判据未动。
+
+**边界**：这是 e2e runner 的噪声防线，不是引擎超时策略变更；全局 timeoutMs 仍 15s。
+
+### 2026-11-20 批次 D308 · XOR 布尔形态补齐（社区 payload 对账唯一真缺口）
+
+**起点**：第 2 轮用社区 payload 字典（PayloadsAllTheThings SQLi/Intruder 905 条）做特征覆盖
+对账，21 类语法特征 19 类本仓覆盖，唯一零命中 = XOR（出自同一条 MySQL polyglot）。
+真引擎验证：MariaDB 3306 `WHERE user_id='1' XOR 0-- -` → 1 行（≈基线）、`XOR 1-- -` → 4 行
+（补集），构成可分真假对；SQLite 真引擎报 `near "XOR" syntax error` ⇒ 仅 MySQL 家族。
+
+**改动**：
+- `detectors/xorPair.js` 新文件：`xorBooleanPair()` 纯函数，默认关（`config.booleanXor !== true`
+  直接返回空）、仅 boundary 存在 + MySQL/MariaDB/TiDB 投放、真假对 `XOR 0`（真≈基线）/
+  `XOR 1`（假=补集）、不带 AND/OR 关键字（WAF 过滤时的替代运算符）。
+- `BooleanBlindDetector` 新增 `_candidatePairs()` 统一 boundary 感知对 + XOR 对（原
+  `_getBooleanPairs` 里两段合并，避免函数复杂度上涨）；抽方法后 detector 1191 行（<1200 上限）。
+- 配置链四处同步：`defaults.booleanXor=false`、`scanRoutes.KNOWN_CFG_KEYS`、
+  `scanConfigTuning.applyBoolKnobs`（把 3 个布尔位循环化，净降 3 行/2 复杂度）、
+  REST/--config JSON 可达；无新 CLI flag（避免 flag 双向核对连锁，用 `--config` 档案启用）。
+- 守卫 `booleanBlind.xor.d308.guard.test.js` 6 例：默认关零行为 / 显式开产生唯一 XOR 对 /
+  真假语义正确且不含 AND/OR / 方言与 boundary 边界 / 反例 / **隔离验证**（mock client 让
+  AND/OR 族全无差分、仅 XOR 可分 ⇒ 开才检出、关则不发 XOR payload 也不检出）。
+  缺陷注入（XOR 真条件改 AND）→ D308-3 红、备份还原 6/6。
+
+**验证**：真靶场 DVWA A/B（XOR 关 107 请求 / 开 101 请求，两者都检出 boolean —— 标准点
+AND/OR 先命中早停；XOR 价值在过滤场景，由隔离验证单独证明）；配置守卫 15/15；
+gate:fast 17/17；typecheck / complexity / deadcode / arch 绿；facts 与 readme:check 绿（无需重采）。
+
+**边界**：XOR 仅 MySQL/MariaDB/TiDB，SQLite/PG/Oracle/MSSQL 不投放（未验证）；默认关，
+只在用户显式 opt-in 且目标 WAF 过滤 AND/OR 时才有意义；不宣称"XOR 绕过所有 WAF"。
 
 ### 2026-11-20 批次 D307 · sqlmap 官方测试集暴露的 4 方言 payload 补齐（静态移植）
 

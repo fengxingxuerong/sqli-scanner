@@ -19,6 +19,14 @@ import { logger } from '../core/logger.js';
 import { VALIDITY_DEFAULTS } from '../core/scanValidityGuard.js';
 import { clampNum, diffDroppedConfigKeys, pickBool, pickInt } from './scanConfigUtils.js';
 
+/** [D308] 一组「引擎按 === true / !== false 判定」的严格布尔位，统一透传 */
+function applyBoolKnobs(config, cfg, keys) {
+  for (const key of keys) {
+    const v = pickBool(cfg, key);
+    if (v !== undefined) config[key] = v;
+  }
+}
+
 /**
  * 把提取/统计层的调优键收敛进 config（就地写入）。
  * 每个键的**默认值逐个等于引擎内部兜底值** ⇒ 不发等于零行为变化；本批补的是"能发"。
@@ -77,12 +85,8 @@ export function applyTuningKnobs(config, cfg) {
     if (v === 'gt' || v === 'between') config.fetchUsing = v;
     else logger.warn(`fetchUsing 需为 'gt' | 'between'（收到 ${JSON.stringify(v)}），已丢弃——该键决定盲注提取的比较算子，非法值不静默回落`);
   }
-  // 布尔通道的「空基线」OR 型兜底对：关掉省 2 请求/点，代价是少一条漏报防线
-  const booleanOrFallback = pickBool(cfg, 'booleanOrFallback');
-  if (booleanOrFallback !== undefined) config.booleanOrFallback = booleanOrFallback;
-  // union 反射门控逃生口（true=跳过门控）。门控本身是误报防线，默认不跳。
-  const unionSkipGate = pickBool(cfg, 'unionSkipGate');
-  if (unionSkipGate !== undefined) config.unionSkipGate = unionSkipGate;
+  // 布尔通道 opt-in 位：OR 兜底（漏报防线）/ XOR 对（D308，WAF 过滤 AND/OR）/ union 门控逃生口
+  applyBoolKnobs(config, cfg, ['booleanOrFallback', 'booleanXor', 'unionSkipGate']);
 
   // ── 数值位 ──────────────────────────────────────────────────────────────
   // 盲注单字段长度上界。引擎判据是 `Number(x) > 255` 才采纳，否则回落 4096 ——

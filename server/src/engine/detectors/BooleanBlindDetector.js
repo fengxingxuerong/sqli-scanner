@@ -3,6 +3,7 @@ import { createDetectionResult } from '../models.js';
 import { PAYLOADS, fillPayload, buildClausePairs } from '../payloads.js';
 import { selectPayloads, orderEntriesByBoundary, registryMode } from '../payloadRegistry.js';
 import { similarityRate, twoProportionZ, isSignificant, baselineNoiseRate, adaptiveMinStable, chunkSimilarity } from '../../core/statsHelper.js';
+import { xorBooleanPair } from './xorPair.js'; // [D308] XOR 布尔对（opt-in，默认关）
 
 // 空白字符判定（对齐 JS /\s/ 语义，避免每次 new RegExp）：
 // 热路径 _isMeaningfulDiff 逐字符调用本判定，旧实现 `/\s/.test(ch)` 每次调用都走正则引擎
@@ -216,14 +217,25 @@ export class BooleanBlindDetector extends Detector {
     return [pair('AND'), pair('OR', 'boundary-or')];
   }
 
+  /** [D308] boundary 感知对 + XOR 对（opt-in）统一构造，避免在 _getBooleanPairs 里堆分支 */
+  _candidatePairs(ctx, orig) {
+    const { point, config } = ctx;
+    const out = point.boundary ? this._boundaryPairs(ctx, orig) : [];
+    out.push(...xorBooleanPair({
+      config, point, dbms: ctx.dbms, orig,
+      obfuscate: (s) => this.obfuscateValue(ctx, s),
+    }));
+    return out;
+  }
+
   _getBooleanPairs(ctx, templates) {
     const { point, config } = ctx;
     const orig = point.originalValue || '1';
     const risk = Number(config && config.risk) || 1;
     const pairs = [];
 
-    // boundary 感知对（两条路径共用）：探测到闭合前缀时优先尝试；先 AND 后 OR，见 _boundaryPairs
-    if (point.boundary) pairs.push(...this._boundaryPairs(ctx, orig));
+    // boundary 感知对 + [D308] XOR 对（opt-in，默认关），两条路径共用；见 _candidatePairs
+    pairs.push(...this._candidatePairs(ctx, orig));
 
     if (registryMode(config)) {
       // 注册表路径：按 level/risk/testFilter/testSkip 筛选声明式条目

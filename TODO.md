@@ -5,6 +5,44 @@
 
 ---
 
+## 2026-11-20 批次 D310 / D311 · 环境评估与偶发归因（不改代码）
+
+- **D310 4 方言真验**：docker daemon 未起、4 DB 端口全 down、无靶场定义 ⇒ 本机无法真验。
+  按诚实边界写死：4 个 key 静态移植、未真验、不进指纹面；真验待 docker + 靶场。
+- **D311 Juice login 成本**：上轮 247 请求/5 超时，本轮真机复测 117 请求/0 超时全绿 ⇒
+  偶发目标侧抖动不可复现；按"先量再改"不动引擎核心，成本口径如实保留。
+
+---
+
+## 2026-11-20 批次 D309 · DVWA high 档 time 噪声防线（per-endpoint 超时放宽）
+
+**起点**：10-20 报告观察项（high 档官方随机 sleep(2~4) 曾偶发打穿 15s 超时 1 次），
+11-20 重跑不可复现。按"先量再改"不动引擎，只在 e2e runner 给该档加预防性防线。
+
+**改动**：`e2e/dvwa-lab/run.mjs` high 端点 `cfg: { timeoutMs: 30000 }`；desc 标注噪声。
+
+**验证**：真机复跑 DVWA 5/5、误报 0，无回归；全局默认零变化。
+
+**边界**：e2e runner 噪声防线，非引擎超时策略变更。剩余：D310 4 方言真验、D311 Juice 成本。
+
+---
+
+## 2026-11-20 批次 D308 · XOR 布尔形态补齐（社区 payload 对账唯一真缺口）
+
+**起点**：第 2 轮社区 905 条 payload 特征对账唯一零命中项；用户 2026-11-20 全选四项优化
+（XOR / time 抖动 / 4 方言验证 / Juice 成本），本批先做风险最小的 XOR。
+
+**改动**：`detectors/xorPair.js` 新文件（XOR 真假对，默认关、仅 MySQL 系+boundary）；
+`BooleanBlindDetector` 抽 `_candidatePairs` 合并 boundary+XOR；配置四处同步（defaults/
+白名单/tuning/REST）；守卫 6 例含隔离验证 + 缺陷注入复验。
+
+**验证**：MariaDB 真引擎 XOR 语义 / DVWA A/B / 配置守卫 15/15 / gate:fast 17/17 / facts+readme 绿。
+
+**边界**：仅 MySQL 家族、默认关、opt-in；SQLite 等不投放；不宣称通用绕过能力。
+后续三批：D309 time 抖动、D310 4 方言真验、D311 Juice 成本。
+
+---
+
 ## 2026-11-20 批次 D307 · sqlmap 官方测试集暴露的 4 方言 payload 补齐（静态移植）
 
 **起点**：用 sqlmap 官方测试文件（tag 1.10.11，358 条 `<test>`）交叉验证本项目，

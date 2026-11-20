@@ -87,7 +87,11 @@ const ENDPOINTS = [
     kind: 'vuln',
     cookie: { id: '1' },
     test: ['id'],
-    desc: 'Cookie 位置注入（官方 high.php：`$_COOKIE[\'id\']` 直拼 + MISSING 随机 sleep 噪声）',
+    // [D309] 官方 high.php 的 MISSING 分支有 rand(0,5)==3 时 sleep(2~4) 噪声；
+    // 默认 15s 单请求超时曾被偶发打穿（10-20 报告观察项，非确定性失败）。
+    // 只对本档放宽到 30s，其他档位与全局默认零变化；judge 判据不变。
+    cfg: { timeoutMs: 30000 },
+    desc: 'Cookie 位置注入（官方 high.php：`$_COOKIE[\'id\']` 直拼 + MISSING 随机 sleep 噪声；D309 本档 timeoutMs=30s）',
   },
   {
     // medium：mysqli_real_escape_string 转义，但 SQL 是 **数值型无引号**

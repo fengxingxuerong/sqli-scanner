@@ -169,6 +169,11 @@ export const defaults = {
   // 布尔通道的「空基线」OR 型兜底对（参数原值查不到行时 AND 型真假同形 → 通道静默失效）。
   // 代价：主轮未命中的点 +2 请求。默认开（这是漏报防线，不是优化项）。
   booleanOrFallback: true,
+  // [D308] XOR 布尔对（社区 905 条 payload 对账唯一真缺口：本仓零 XOR 形态）。
+  // XOR 是 MySQL/MariaDB 有效布尔运算符（真引擎：'1' XOR 0=1 / XOR 1=0，SQLite 不支持），
+  // 在 WAF 过滤 AND/OR 时作替代运算符。`baseline XOR 0`≈基线、`baseline XOR 1`=补集 ⇒ 可分。
+  // 默认关：标准注入点 AND/OR 族已覆盖，开启多 +2 请求/点；仅 opt-in 用于绕过场景。
+  booleanXor: false,
   // union 存在性门控（防参数反射误报）的逃生口：true=跳过门控。
   // 门控本身是误报防线，默认关着跳；但反射型页面会把门控判成"无注入"从而漏报，
   // 现场需要能单独放开这一格，而不是整条 union 通道重跑。
