@@ -5,6 +5,22 @@
 
 ---
 
+## 2026-11-20 批次 D312 · v1.4.1 发版（版本对齐 + D307-D311 优化收口）
+
+**起点**：D306（v1.4.0）已提交，D307-D311 五个批次全部 gate:close 55/55 绿且已提交，
+按 D289/D306 先例执行版本对齐补发。
+
+**改动**：`npm run version:fix` 10 处 1.4.0 → 1.4.1（package.json / server/package.json /
+两个 lock / tauri.conf.json / Cargo.toml / Cargo.lock / plugin.json），version:check 10/10；
+CHANGELOG `[Unreleased]` 升 `## [1.4.1] - 2026-11-20` + 汇总段（D307-D311 共 5 批），
+新开空 Unreleased，changelog-index --write；facts 重采（server/package.json 改版本 ⇒ 指纹漂移）。
+
+**边界**：tag v1.4.1 轻量标签指向本提交，desktop / docker / SBOM / SHA256SUMS 由 tag 场
+CI release 链产出（与 v1.4.0 流程一致）。D307-D311 跨 3 个本地提交，推送按
+push-via-api.mjs 从旧到新依次推（一个 tree 一次推送）。
+
+---
+
 ## 2026-11-20 批次 D310 / D311 · 环境评估与偶发归因（不改代码）
 
 - **D310 4 方言真验**：docker daemon 未起、4 DB 端口全 down、无靶场定义 ⇒ 本机无法真验。
