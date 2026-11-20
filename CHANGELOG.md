@@ -6,6 +6,42 @@
 
 > 下一批次起的条目写在这里。发版时把本节整体升为 `## [x.y.z] - YYYY-MM-DD` 并补汇总段。
 
+<!-- changelog-index:start -->
+当前没有未发布批次（最近一次发版见下方版本段落）。
+<!-- changelog-index:end -->
+
+## [1.4.0] - 2026-11-20
+
+> 本节自 v1.3.3（11-13，D289）起累计 **D290–D306 共 16 个批次**（D295 空号）。亮点：
+> 拖库通道扩展——二阶命中自动拖库 + 盲注 opt-in（D300）与 `--hex` 提取链全等级收口
+> （D301，DVWA 9 case 全 PASS）；`{call }` 值位盲区修复 + Benchmark 值位清单全量核销
+> （D303，`{call}` 真值 23/23、安全 0/21 误报；query 全量 111/111）；`--hex` 六方言
+> 字面量语义修正（D304，SQLite 裸 BLOB 等值恒假 → CAST）；外部裁判 4 号（OWASP
+> Benchmark）接进 acceptance 并远端核销（D298/D299，43/43 真值、0/24 误报）；
+> 注入面成本/留痕治理（D302：会话键不作注入点、复验去重、盲注标量并行、写放大入账）；
+> 多引擎主档基线重采入账（D305，D303 值位后置探针在 CRS 档 num 形态的真值检出扩展，
+> off=on=3 持平口径）。台账复核：Benchmark CI 由 SKIP 转 PASS（D299）；macOS 时间通道
+> 假红终判成立（D297 立账 / D305 终判双绿）；sidecar 取证链收口（D290）。
+
+### 2026-11-20 批次 D306 · v1.4.0 发版（版本对齐 + D290-D305 优化收口）
+
+**起点**：D305 推送（b8acf0e）后按 D289 先例执行版本对齐补发：CI #466 已证明
+lint / 双 OS matrix / acceptance / docker / sidecar / release-smoke 全绿（唯 e2e
+artifact-drift 已由 D305 基线重采修复，待本版 tag 场 CI 终判）。
+
+**改动**：
+- `npm run version:fix` 把 **10 处**版本号 1.3.3 → 1.4.0：`package.json`、
+  `src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock`（本仓包条目）、
+  `.claude-plugin/plugin.json`、`server/package.json`、两个 `package-lock.json`
+  顶层及其 `packages[""]`；`npm run version:check` 10/10 一致。
+- CHANGELOG `[Unreleased]` 整体升 `## [1.4.0] - 2026-11-20` + 汇总段（v1.3.3 起累计
+  D290–D306，D295 空号），新开空 `[Unreleased]`；`changelog-index --write` 重生成索引。
+- facts 无需重采：D304 批次已重采（测试 4341/4335），本批只动版本串与文档，`facts:check` 复核。
+
+**边界**：tag v1.4.0 以轻量标签（与 v1.3.2/v1.3.3 同形态）指向本提交；desktop 安装包由
+tag 触发的 CI release 链产出（release + desktop-package + docker-publish + SBOM +
+SHA256SUMS，与 v1.3.3 流程一致），本机不产 dist-portable。
+
 ### 2026-11-20 批次 D305 · CI #464/#466 红点核销：multi-engine 基线重采（行为变化入账）
 
 **起点**：D302–D304 推送后 CI #466 终判 failure，唯一红点是 `e2e-self-contained` 的
@@ -627,31 +663,6 @@ CI Linux 同代码绿）；零产品代码改动，未改 deadline / 阈值 / �
 **不宣称上传服务已修复**。交付 / 发版事实仍以 `交付结项报告-2026-11-12.md` §12 为准。
 
 ---
-
-<!-- changelog-index:start -->
-**本段覆盖 15 个批次（D290–D305，2026-11-14 → 2026-11-20）**。正文按时间倒序排列；
-下表是同一批次的索引，便于按编号或关键词定位。**索引只是导航，正文未做任何删改**
-（被推翻的旧结论原样保留，这是本仓的既定口径）。新增批次后跑
-`node scripts/changelog-index.mjs --write` 重生成，`--check` 校验是否过期。
-
-| 批次 | 日期 | 主题 |
-|---|---|---|
-| D305 | 11-20 | CI #464/#466 红点核销：multi-engine 基线重采（行为变化入账） |
-| D304 | 11-20 | `--hex` 方言语义修正：SQLite 裸 BLOB 在等值上下文恒假 |
-| D303 | 11-19 | `{call }` 值位盲区修复 + Benchmark runner 判据适配 |
-| D302 | 11-19 | 注入面与拖库的成本/留痕治理（4 项） |
-| D301 | 11-19 | 全等级复验收口：--hex 提取链 + 二阶布尔差异判定（GAP①② 关闭） |
-| D300 | 11-18 | 扩展拖库通道：二阶命中自动拖库 + 盲注 opt-in（接手续批收尾） |
-| D299 | 11-18 | 修复 D298 首跑失败：Tomcat 9.0.122 下载 404 |
-| D298 | 11-15 | 外部裁判 4 号（OWASP Benchmark）接进 CI acceptance（首次接线，待远端裁判） |
-| D297 | 11-15 | macOS 时间通道假红入账（等 CI 终判期间） |
-| D296 | 11-15 | PR 分支同步执行核销（口径作废 + 远端裁判） |
-| D294 | 11-15 | version-sync 缩进不敏感修复（PR #28 红点根因，含推翻链） |
-| D293 | 11-15 | #439 上传根因与 #445 验收明细取证核销（推翻链，零代码） |
-| D292 | 11-15 | #445 job 计数自查更正（推翻链，零代码） |
-| D291 | 11-15 | D290 远端裁判核销（提交 / 推送 / CI 复核） |
-| D290 | 11-14 | 取证上传不得改写 sidecar 门禁结论（CI #439 红点收口） |
-<!-- changelog-index:end -->
 
 ## [1.3.3] - 2026-11-13
 

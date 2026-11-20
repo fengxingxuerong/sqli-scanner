@@ -5,6 +5,23 @@
 
 ---
 
+## 2026-11-20 批次 D306 · v1.4.0 发版（版本对齐 + D290-D305 优化收口）
+
+**起点**：D305 推送（b8acf0e）后按 D289 先例执行版本对齐补发；CI #466 已证 lint / 双 OS
+matrix / acceptance / docker / sidecar / release-smoke 全绿，唯 e2e artifact-drift 已由
+D305 基线重采修复。
+
+**改动**：`npm run version:fix` 10 处 1.3.3 → 1.4.0（package.json / server/package.json /
+两个 lock / tauri.conf.json / Cargo.toml / Cargo.lock / plugin.json），version:check 10/10；
+CHANGELOG `[Unreleased]` 升 `## [1.4.0] - 2026-11-20` + 汇总段（D290–D306 共 16 批，
+D295 空号），新开空 Unreleased，changelog-index --write；facts 无需重采（D304 已重采，
+本批只动版本串与文档，facts:check 复核）。
+
+**边界**：tag v1.4.0 轻量标签指向本提交，desktop / docker / SBOM / SHA256SUMS 由 tag 场
+CI release 链产出（与 v1.3.3 流程一致）；发版前置 = CI 对 D305 基线重采的实跑复核绿。
+
+---
+
 ## 2026-11-20 批次 D305 · CI #464/#466 红点核销：基线重采 + 行为变化入账
 
 **起点**：D302–D304 推送（6fe8a29）后 CI #466 终判：lint / test-server / test-frontend / audit /
