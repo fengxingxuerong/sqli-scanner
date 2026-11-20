@@ -6,6 +6,37 @@
 
 > 下一批次起的条目写在这里。发版时把本节整体升为 `## [x.y.z] - YYYY-MM-DD` 并补汇总段。
 
+### 2026-11-20 批次 D305 · CI #464/#466 红点核销：multi-engine 基线重采（行为变化入账）
+
+**起点**：D302–D304 推送后 CI #466 终判 failure，唯一红点是 `e2e-self-contained` 的
+**artifact-drift** 门禁；回溯 #464（0acde1c）的三处红逐一归因。labs 本体 **0 失败**
+（15 PASS / 7 SKIP）——红的全是「基线/口径/误报」层，不是检测能力层。
+
+**四条红的归属**：
+- **#464 lint「文档数字口径」**：`_facts.json` 生成于 11-18 22:58，D301 补漏守卫 23:18
+  才落库（服务端测试 4330→4341 指纹漂移）→ D304 重采顺带修复，#466 lint 绿。
+- **#464 macos「Server tests」**：台账 `macos-time-channel-flake`（D297）已入账假红 →
+  #466 macos+windows 双绿即终判，台账维持。
+- **#464 e2e `real-world-lab.search_like`**：boolean 通道误报（检出=[error]
+  mustMiss=[boolean]，PG LIKE 拼接）→ D302「会话键不作 cookie 注入点」顺带摘除误报源，
+  #466 run-all 0 失败复核。
+- **#466 e2e `artifact-drift`**：`multi-engine-report.md` 漂移 4 行——h2/hsqldb/derby 的
+  num 形态「两侧均未检出」→「error 检出」。根因是 **D303 值位后置探针**
+  （`runCallExprValuePostPass`）在 CRS 档 num 点上产生报错通道检出：`/num` 是数值拼接
+  真注入点，no-waf 档检测断言未漂移、safe 零误报 ⇒ **真值检出扩展（能力增强），
+  不是误报**——旧基线「未检出」反而是 CRS 档的保守漏记。
+
+**改动**：按 drift 门自己的规矩（「行为真的变了 → 更新基线并写明差异」）重采主档基线
+4 行：三行 num（`error | error | -/- | 技术位与 tamper 前一致`）+ 本档有效性段改
+`off 检出合计 3、on 检出合计 3 ⇒ 两侧持平` 口径（off=on ⇒ 不证 tamper 增益，只证
+探针可达）。本机无 JVM，内容按 CI #466 实跑输出（drift 门打印的 `+` 行）与
+`verify.mjs` 生成器模板逐字核对后重写，由下一场 CI 的 drift 门做实跑复核。
+
+**边界**：str/blind 行未漂移——`{call}` 在引号上下文是字面量、blind 无报错回显，
+后置探针只对未引用值位生效（与 D303 边界一致）；`results/*.json` 不入库、不在
+drift 清单；#464 的 facts 漂移属「采集时点早于批内末次入库」老形态（D289 同源），
+指纹判据已有，不另立门禁。
+
 ### 2026-11-20 批次 D304 · `--hex` 方言语义修正：SQLite 裸 BLOB 在等值上下文恒假
 
 **起点**：上一轮对外口径把 `--hex` 写成「仅 MySQL/MariaDB/TiDB 家族」。核对代码发现
@@ -598,13 +629,14 @@ CI Linux 同代码绿）；零产品代码改动，未改 deadline / 阈值 / �
 ---
 
 <!-- changelog-index:start -->
-**本段覆盖 14 个批次（D290–D304，2026-11-14 → 2026-11-20）**。正文按时间倒序排列；
+**本段覆盖 15 个批次（D290–D305，2026-11-14 → 2026-11-20）**。正文按时间倒序排列；
 下表是同一批次的索引，便于按编号或关键词定位。**索引只是导航，正文未做任何删改**
 （被推翻的旧结论原样保留，这是本仓的既定口径）。新增批次后跑
 `node scripts/changelog-index.mjs --write` 重生成，`--check` 校验是否过期。
 
 | 批次 | 日期 | 主题 |
 |---|---|---|
+| D305 | 11-20 | CI #464/#466 红点核销：multi-engine 基线重采（行为变化入账） |
 | D304 | 11-20 | `--hex` 方言语义修正：SQLite 裸 BLOB 在等值上下文恒假 |
 | D303 | 11-19 | `{call }` 值位盲区修复 + Benchmark runner 判据适配 |
 | D302 | 11-19 | 注入面与拖库的成本/留痕治理（4 项） |

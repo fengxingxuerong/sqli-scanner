@@ -5,6 +5,39 @@
 
 ---
 
+## 2026-11-20 批次 D305 · CI #464/#466 红点核销：基线重采 + 行为变化入账
+
+**起点**：D302–D304 推送（6fe8a29）后 CI #466 终判：lint / test-server / test-frontend / audit /
+docker / sidecar / release-smoke / **macos+windows matrix 双绿 / acceptance**，唯
+`e2e-self-contained` 红在 **artifact-drift** 门禁。回溯 #464（0acde1c）的三处红，逐一归因核销。
+
+**四条红的归属（两次 run，四个根因）**：
+① #464 lint「文档数字口径」——`_facts.json` 生成于 11-18 22:58，D301 补漏的守卫用例 23:18
+才落库（服务端测试 4330→4341，采集源指纹当场漂移）。D304 批次重采顺带修复；#466 lint 绿复核。
+② #464 test-matrix macos「Server tests」——台账 `macos-time-channel-flake`（D297）已入账
+非确定性假红；#466 macos+windows 双绿即终判，台账维持，不动。
+③ #464 e2e `real-world-lab` `search_like`——boolean 通道误报（检出=[error] mustMiss=[boolean]，
+PG LIKE 拼接）。D302「会话键不作 cookie 注入点」顺带摘除误报源；#466 run-all **0 失败**
+（15 PASS）复核通过，误报不再复现。
+④ #466 e2e `artifact-drift`——`multi-engine-report.md` 基线漂移 4 行：h2/hsqldb/derby 的
+num 形态从「两侧均未检出」→「error 检出」。根因是 **D303 的值位后置探针**
+（`runCallExprValuePostPass`，标准四通道零命中的值位点补发 `{call}` 探针）在 CRS 档
+num 点上产生报错通道检出——`/num` 是数值拼接真注入点，no-waf 档检测断言未漂移、
+labs 0 失败、safe 零误报 ⇒ **行为变化=真值检出扩展（能力增强），不是误报**。
+
+**改动**：按 drift 门自己的规矩（「行为真的变了 → 更新基线并写明差异」）重采主档基线
+`multi-engine-report.md` 4 行：三行 num（`error | error | -/- | 技术位与 tamper 前一致`）
++ 本档有效性段改为 `off 检出合计 3、on 检出合计 3 ⇒ 两侧持平` 口径。本机无 JVM，
+内容按 CI #466 实跑输出（drift 门打印的 `+` 行）与 `verify.mjs` 生成器模板逐字核对后重写；
+由 #467 的 drift 门（实跑 vs HEAD）做最终复核。
+
+**边界**：str/blind 行未漂移——`{call}` 在引号上下文是字面量、blind 无报错回显，
+语法差异不成立 ⇒ 后置探针只对未引用值位生效，与 D303 边界一致；`results/*.json`
+孪生不入库、不在 drift 清单，不受影响；#464 的 facts 漂移属「采集时点早于批内末次入库」
+老形态（D289 同源），facts 指纹判据已在、不另立门禁。
+
+---
+
 ## 2026-11-20 批次 D304 · `--hex` 方言语义修正（SQLite 裸 BLOB 等值恒假）
 
 **起点**：核对「`--hex` 仅 MySQL 家族」这条口径——代码里 `HEX_FNS` 已含 6 方言，

@@ -8,17 +8,17 @@
 
 | 引擎 | 场景 | tamper off | tamper on | 定库 off/on | 说明 |
 |---|---|---|---|---|---|
-| h2 | num | - | - | -/- | 两侧均未检出 |
+| h2 | num | error | error | -/- | 技术位与 tamper 前一致 |
 | h2 | str | - | - | -/- | 两侧均未检出 |
 | h2 | blind | - | - | -/- | 两侧均未检出 |
-| hsqldb | num | - | - | -/- | 两侧均未检出 |
+| hsqldb | num | error | error | -/- | 技术位与 tamper 前一致 |
 | hsqldb | str | - | - | -/- | 两侧均未检出 |
 | hsqldb | blind | - | - | -/- | 两侧均未检出 |
-| derby | num | - | - | -/- | 两侧均未检出 |
+| derby | num | error | error | -/- | 技术位与 tamper 前一致 |
 | derby | str | - | - | -/- | 两侧均未检出 |
 | derby | blind | - | - | -/- | 两侧均未检出 |
 
-> **本档有效性**：off 与 on 两侧都零检出 ⇒ 绕过收益**无从判定**（表头的 `on ≥ off` 是空转成立）。本档实际只验了一条红线：safe（参数化对照）零误报。"H2/HSQLDB/Derby 的布尔通道被检出过"这句结论，本档**不提供**证据。
+> **本档有效性**：off 检出合计 3、on 检出合计 3 ⇒ 两侧**持平**：本档证明"CRS 这一档下探针能送达并被检出"，但**不**证明 tamper 带来增益（MySQL 在 PL1 上也是同一形状：off=on=8，见 acceptance.mjs 里 waf-real 那段基线注释）。
 
 > **定库基线**：本档不适用 —— CRS 把带版本回显的 UNION 探针整条拦掉，所以那一档里的 `dbms=-` 只说明"没送达"，不说明"探不出来"。
 
