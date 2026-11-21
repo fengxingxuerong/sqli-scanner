@@ -96,10 +96,7 @@ function extractZip(zip, dest) {
   console.log(`${TAG} .NET 解压不可用（exit=${r.status}），回退 tar -xf`);
   fs.rmSync(dest, { recursive: true, force: true });
   fs.mkdirSync(dest, { recursive: true });
-  // 显式指向系统 bsdtar：Git Bash 的 PATH 里 msys tar 会把 D:\... 误当 host:path
-  const sysTar = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'tar.exe');
-  const tarBin = fs.existsSync(sysTar) ? sysTar : 'tar';
-  const t = spawnSync(tarBin, ['-xf', zip, '-C', dest], { stdio: 'inherit' });
+  const t = spawnSync('tar', ['-xf', zip, '-C', dest], { stdio: 'inherit' });
   if (t.status === 0 && nonEmptyDir(dest)) return;
 
   fail(`解压失败：${zip}（.NET exit=${r.status}, tar exit=${t.status}，目标目录仍为空或不存在）`);
