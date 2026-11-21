@@ -7,15 +7,46 @@
 > 下一批次起的条目写在这里。发版时把本节整体升为 `## [x.y.z] - YYYY-MM-DD` 并补汇总段。
 
 <!-- changelog-index:start -->
-**本段覆盖 1 个批次（D313–D313，2026-11-21 → 2026-11-21）**。正文按时间倒序排列；
+**本段覆盖 2 个批次（D313–D314，2026-11-21 → 2026-11-21）**。正文按时间倒序排列；
 下表是同一批次的索引，便于按编号或关键词定位。**索引只是导航，正文未做任何删改**
 （被推翻的旧结论原样保留，这是本仓的既定口径）。新增批次后跑
 `node scripts/changelog-index.mjs --write` 重生成，`--check` 校验是否过期。
 
 | 批次 | 日期 | 主题 |
 |---|---|---|
+| D314 | 11-21 | 四方言定库补齐 + 方言覆盖双向守卫（外部测试集第三轮） |
 | D313 | 11-21 | sqlmap 官方 tests / 报错语料对账（外部测试集第二轮） |
 <!-- changelog-index:end -->
+
+### 2026-11-21 批次 D314 · 四方言定库补齐 + 方言覆盖双向守卫（外部测试集第三轮）
+
+**起点**：D313 对账报告 §3.2 列的「26 方言覆盖缺口」。其中 SAP MaxDB / Vertica / CUBRID / Presto
+四方言的 **payload 已由 D307 装配**，但 `dbmsFromError` 认不出它们的报错 ⇒ 自动定库永远命中不到
+那四套 payload，只能靠显式 `--dbms` 手动指定，属「半截能力」。
+
+**改动**：
+- `server/src/engine/payloads/index.js`：`PRECISE_DBMS_FIRST` 从 2 条扩到 6 条，新增四方言签名
+  （逐条取自 sqlmap `errors.xml` 的驱动类名/独有句式，不含裸品牌词，避免 D118 同型误报），
+  并 `export` 该表供覆盖判据消费（单一真源，避免测试另抄一份）。
+- `server/src/core/errorSig.js`：补**检测门**——实施中实测发现「定库 8/8 中、检测门仅 3/8」：
+  ErrorDetector 先用 `SQL_ERROR_SIG` 判「这是不是报错页」，判不出就走不到定库，定库签名再准也无效。
+  只加异常类名 + 独有报错句式（`SQL error…POS(n)`、`, Sqlstate: 42xxx, Routine:`、`[CAS INFO`、
+  `UNION query has different number of fields`、`SapDBException`/`VerticaSQLException`/
+  `CUBRIDException`/`PrestoException`），**不加纯驱动包名**（会出现在依赖声明/技术文档）。
+- `server/tests/sqlmapDialectCoverage.d314.guard.test.js`（14 例）：
+  ① 8 条 sqlmap 官方报错语料必须定库到四方言；② 四方言 `PAYLOADS` 真实存在（防签名与 payload 脱节）；
+  ③ 检测门：同一批语料必须被 `SQL_ERROR_SIG` 判为报错页；④ 正常页/文档页不得误命中；
+  ⑤ 方言覆盖**双向**一致：sqlmap 42 方言 = 已支持 ∪ 显式登记的未支持（缺登记红、白名单腐烂红）；
+  ⑥ 登记项必须有非空理由。
+
+**验证**：守卫修前 10 红 2 绿 → 修后 14/14；双向自证——白名单加已支持项 ⇒ 第 11 条红、
+删一条登记 ⇒ 第 10 条红「静默缺口：Virtuoso」、移除四方言检测门特征 ⇒ 检测门判据红（1 fail），
+均备份还原；定库+高频+两批守卫 84/84 绿；`gate:fast` 17/17 绿。
+误伤扫描（`.box-agent-scratch/sqlmap-tests/{fp-scan,errsig-scan}.mjs`）13 条既有语料/正常页零误伤。
+
+**边界**：其余 20 个方言仍无签名，逐个在 `UNSUPPORTED` 登记理由（多数「本机无真库」，
+MySQL/PG 系 fork 走 `aliasPatterns` 归一）。Four 方言仍**未经真机验证**（沿用 D310 边界），
+本批只补「报错→定库」通道，不宣称检测能力已真验。
 
 ### 2026-11-21 批次 D313 · sqlmap 官方 tests / 报错语料对账（外部测试集第二轮）
 

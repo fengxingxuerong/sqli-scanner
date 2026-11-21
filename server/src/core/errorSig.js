@@ -26,6 +26,13 @@
 //   报出 3 条假漏洞）。现收紧为「SQLite3 后必须跟 `:` / `.` 或 error/exception」——
 //   真实报错形态（`SQLite3::SQLException` / `SQLite3.OperationalError` / `SQLite3 error`）全保留。
 // 收紧/新增形态时**只改这一处**。
+//
+// [D314 2026-11-21] 补 sqlmap errors.xml 暴露的 4 个「检测门缺口」方言——D307 已给
+// SAP MaxDB / Vertica / CUBRID / Presto 装配 payload，但本正则认不出它们的报错 ⇒
+// ErrorDetector 判不出「这是报错页」，定库签名再准也用不上（半截链路）。只加
+// **异常类名 + 独有报错句式**，不加纯驱动包名（`com.vertica.jdbc` 这类会出现在
+// 依赖声明/技术文档里，D118 裸词误报同型）；13 条既有语料/正常页误伤扫描零误伤
+// （.box-agent-scratch/sqlmap-tests/errsig-scan.mjs）。
 // ============================================================================
 
 /**
@@ -34,6 +41,6 @@
  * @type {RegExp}
  */
 export const SQL_ERROR_SIG =
-  /(SQL syntax|mysql_fetch|ORA-\d{5}|Microsoft SQL Server|PostgreSQL.*ERROR|SQLite3?(?:[:.]|[\s-]*(?:error|exception))|syntax error at or near|XPATH syntax error|Incorrect syntax near|near\s+["'][^\n]{0,80}?["']\s*:\s*syntax error|unterminated quoted string|Unclosed quotation|extractvalue|updatexml|conversion failed|unknown column|Division by zero|SQL\d{4}[NRT]|DB2 SQL Error|SQLSTATE\s*\[|PG::|unrecognized token|no such (?:table|column|function)|SQL logic error|Adaptive Server|Sybase\s*(?:error|message)|SQL error code|Firebird.*(?:error|exception)|isc_\d+|Informix\s+SQL|Informix.*(?:error|exception)|JdbcSQLException|org\.h2\.jdbc|org\.hsqldb|HSQLDB.*(?:error|exception)|org\.apache\.derby|Derby.*SQLException|Syntax error in SQL statement|Syntax error: Encountered|Cannot parse|Microsoft Access|ODBC|Jet.*Database|MonetDB.*(?:error|exception)|MonetDB\s+\d{5})/i;
+  /(SQL syntax|mysql_fetch|ORA-\d{5}|Microsoft SQL Server|PostgreSQL.*ERROR|SQLite3?(?:[:.]|[\s-]*(?:error|exception))|syntax error at or near|XPATH syntax error|Incorrect syntax near|near\s+["'][^\n]{0,80}?["']\s*:\s*syntax error|unterminated quoted string|Unclosed quotation|extractvalue|updatexml|conversion failed|unknown column|Division by zero|SQL\d{4}[NRT]|DB2 SQL Error|SQLSTATE\s*\[|PG::|unrecognized token|no such (?:table|column|function)|SQL logic error|Adaptive Server|Sybase\s*(?:error|message)|SQL error code|Firebird.*(?:error|exception)|isc_\d+|Informix\s+SQL|Informix.*(?:error|exception)|JdbcSQLException|org\.h2\.jdbc|org\.hsqldb|HSQLDB.*(?:error|exception)|org\.apache\.derby|Derby.*SQLException|Syntax error in SQL statement|Syntax error: Encountered|Cannot parse|Microsoft Access|ODBC|Jet.*Database|MonetDB.*(?:error|exception)|MonetDB\s+\d{5}|SQL[- ]error[^\n]{0,30}POS\(\d+\)|,\s*Sqlstate:\s*(?:3F|42).{3},\s*(?:Routine|Hint|Position):|\[CAS INFO|UNION query has different number of fields:\s*\d+,\s*\d+|SapDBException|VerticaSQLException|CUBRIDException|PrestoException)/i;
 
 export default SQL_ERROR_SIG;

@@ -53,29 +53,51 @@
 → 1 红，备份还原 → 4/4 绿；全量定库+高频+守卫相关测试 **70/70** 绿（含回归哨兵
 `errorDetector.highfreq.test.js`）。
 
-### 3.2 覆盖缺口（未修，诚实标注）
+### 3.2 覆盖缺口（D314 已补四方言，其余登记）
 
-sqlmap 报错指纹覆盖 42 方言/fork，本仓定库表 18 条。缺 26 个分支：Altibase, CockroachDB,
-CrateDB, Cubrid, Doris, Drizzle, DuckDB, FrontBase, Ingres, InterSystems Cache, Mckoi, MemSQL,
-MimerSQL, OpenGauss, Presto, Raima, SAP HANA, SAP MaxDB, Snowflake, Spanner, StarRocks,
-Trino, Vertica, Virtuoso, YugabyteDB（+ Microsoft Access 的独立分支，本仓以 `Access` 名收录）。
+sqlmap 报错指纹覆盖 42 方言/fork，本仓定库表 18 条。
 
-**为什么不补**：
+**D314 已补（4 个「payload 有、签名无」的方言）**：SAP MaxDB / Vertica / CUBRID / Presto。
+这四方言的 payload 由 D307 装配，但此前的 `dbmsFromError` 认不出其报错 ⇒ 自动定库永远命中不到
+那四套 payload，只能 `--dbms` 手动指定。
+
+实施中实测发现**只补定库是半截链路**：定库 8/8 中、检测门仅 3/8——ErrorDetector 先用
+`SQL_ERROR_SIG` 判「这是不是报错页」，判不出就走不到定库，签名再准也无效。故两处同补：
+
+| 层 | 文件 | 补什么 |
+|---|---|---|
+| 检测门 | `core/errorSig.js` | 异常类名 + 独有句式（`SQL error…POS(n)`、`, Sqlstate: 42xxx, Routine:`、`[CAS INFO`、`UNION query has different number of fields`、四个 `*Exception`） |
+| 定库 | `engine/payloads/index.js` 的 `PRECISE_DBMS_FIRST` | 驱动类名 + 独有句式（2→6 条） |
+
+**不加纯驱动包名**（`com.vertica.jdbc` 这类会出现在依赖声明/技术文档里，D118 裸词误报同型）。
+28 条既有语料/正常页误伤扫描零误伤。定库+高频+两批守卫 84/84 绿；
+守卫 `server/tests/sqlmapDialectCoverage.d314.guard.test.js`（14 例，含检测门判据）。
+
+**其余 20 个方言仍无签名**，在守卫的 `UNSUPPORTED` 表逐条登记理由（双向判据：缺登记红、
+白名单腐烂红）：Altibase, CockroachDB, CrateDB, Doris, Drizzle, DuckDB, FrontBase, Ingres,
+InterSystems Cache, Mckoi, MemSQL, MimerSQL, OpenGauss, Raima, SAP HANA, Snowflake, Spanner,
+StarRocks, Trino, Virtuoso, YugabyteDB。
+
+**为什么不全部补**：
 - 首版判据2 报的 14 条「报错原文未命中」经复核**大部分是假缺口**——样本截断所致：
   MariaDB/TiDB 完整报错含 `SQL syntax`、MSSQL jdbc 完整报错含 `Unclosed quotation`、
   Oracle jdbc 含 `ORA-00933`，实际全部命中。补裸品牌词反而会把技术文档页误判成报错页
   （D118「裸 SQLite3 误报」同型教训）。
-- 这 26 个方言本机**无真数据库**，D310 已明确其 payload 是「静态移植、未经真机验证」。
-  按真实性优先，不做无法验证的能力扩张。
+- 这些方言本机**无真数据库**，D310 已明确其 payload 是「静态移植、未经真机验证」。
+  按真实性优先，不做无法验证的能力扩张；MySQL/PG 系 fork 走 `dialects.json` 的
+  `aliasPatterns` 归一，不单列签名。
 
 ## 4. 结论
 
-- 外部测试集对账**抓到 1 个真缺陷并修复且有守卫**（D313），证明这条路有产出。
-- sqlmap 的检测黄金用例（`test_techniques.py` 等）是 mock-oracle 单测，不能直接跨语言跑；
-  其价值在于**报错语料与不变量思想**，本轮已用前者。
-- 26 方言定库覆盖缺口是**已知边界**，非本批可真验范围，写在这里供后续批次评估。
+- 外部测试集对账**抓到 2 个真缺陷并修复且有守卫**（D313 定库顺序、D314 四方言签名缺失）。
+- D314 补的不是"新能力"，而是**打通已付代价建成的能力**：D307 装配了四方言 payload，
+  但定库通道认不出它们的报错，等于四套 payload 只有手动 `--dbms` 才用得上。
+- 方言覆盖现由**双向判据**守护（缺登记红 + 白名单腐烂红），同类静默缺口不会再无声出现。
+- 其余 20 方言是**已知边界**（多为本机无真库），逐个登记理由，不做无法验证的能力扩张。
 
 ## 5. 改动文件
 
-- `server/src/engine/payloads/index.js`：Firebird/Informix 签名前移。
-- `server/tests/sqlmapCorpus.d313.guard.test.js`：新增守卫（4 例）。
+- `server/src/core/errorSig.js`：D314 补四方言检测门（异常类名 + 独有句式）。
+- `server/src/engine/payloads/index.js`：D313 精确优先表 + D314 扩到 6 条并 export。
+- `server/tests/sqlmapCorpus.d313.guard.test.js`：D313 守卫（4 例）。
+- `server/tests/sqlmapDialectCoverage.d314.guard.test.js`：D314 守卫（14 例，含检测门与双向覆盖判据）。

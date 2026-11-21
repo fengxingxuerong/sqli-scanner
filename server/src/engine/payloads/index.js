@@ -423,9 +423,28 @@ const BARE_DB_NAME_RE = /^(h2|dm8|mariadb|tidb|mysql|oracle|derby|informix|monet
 // Informix 的 `ODBC Informix driver` 会被 SQL Server 的宽泛 `ODBC` 抢先。
 // 不调整 ERROR_SIG_BY_DBMS 数组顺序（高频库探测顺序/性能测试依赖它），改为在遍历宽泛表
 // 之前先查这张精确表——只在精确强特征命中时短路，零顺序回归。
-const PRECISE_DBMS_FIRST = [
+export const PRECISE_DBMS_FIRST = [
   { dbms: 'Firebird', sig: /Dynamic SQL Error[^\n]{0,40}SQL error code/i },
   { dbms: 'Informix', sig: /(?:ODBC Informix driver|Informix ODBC Driver)/i },
+  // [D314 2026-11-21] D307 已为这四方言装配独立 payload（PAYLOADS['SAP MaxDB'] /
+  // .Vertica / .CUBRID / .Presto），但 dbmsFromError 认不出它们的报错 ⇒ 自动定库永远
+  // 命中不到那四套 payload，只能靠显式 --dbms 手动指定（半截能力）。
+  // 以下特征逐条取自 sqlmap errors.xml（驱动类名/独有句式，不含裸品牌词，
+  // 避免 D118「裸 SQLite3 误报」同型问题）；误伤扫描见
+  // .box-agent-scratch/sqlmap-tests/fp-scan.mjs（13 条既有语料/正常页零误伤）。
+  {
+    dbms: 'SAP MaxDB',
+    sig: /(?:DriverSapDB|com\.sap\.db(?:tech)?\.jdbc|SQL[- ]error[^\n]{0,30}POS\(\d+\)|-3014[^\n]{0,40}Invalid end of SQL statement|\[-3008\][^\n]{0,40}Invalid keyword)/i,
+  },
+  {
+    dbms: 'Vertica',
+    sig: /(?:com\.vertica\.jdbc|com\.vertica\.dsi\.dataengine|org\.jkiss\.dbeaver\.ext\.vertica|\/vertica\/Parser\/scan|,\s*Sqlstate:\s*(?:3F|42).{3},\s*(?:Routine|Hint|Position):)/i,
+  },
+  { dbms: 'CUBRID', sig: /(?:\[CAS INFO|cubrid\.jdbc\.driver)/i },
+  {
+    dbms: 'Presto',
+    sig: /(?:io\.trino\.(?:jdbc|spi)\.|com\.facebook\.presto\.jdbc|io\.prestosql\.jdbc|com\.simba\.presto\.jdbc|UNION query has different number of fields:\s*\d+,\s*\d+|line\s*\d+:\d+:\s*mismatched input '[^']+'\.\s*Expecting:)/i,
+  },
 ];
 
 export function dbmsFromError(text) {
