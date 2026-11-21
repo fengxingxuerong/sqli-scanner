@@ -5,6 +5,33 @@
 
 ---
 
+## 2026-11-21 批次 D313 · sqlmap 官方 tests / 报错语料对账（外部测试集第二轮）
+
+**起点**：用户要求「找同类开源项目的测试文件测试本项目」。v1.4.1（D307–D311）用过 sqlmap
+`data/xml/payloads/*.xml` 的 358 条 `<test>`；本批复用其**尚未用过的**资产：
+`data/xml/errors.xml`（187 条报错正则 / 42 方言 fork）+ `tests/*.py`（内部 mock 单测，
+跨语言不可直接跑）。报告：`docs/外部测试集对账-sqlmap官方tests-2026-11-21.md`。
+
+**改动**：
+- 对账脚本 `.box-agent-scratch/sqlmap-tests/reconcile2.mjs`（真代码 vs 真语料，非 mock）。
+- 真缺陷（已修）：`dbmsFromError` 顺序表里宽泛词 `ODBC`/`SQL error code` 抢在精确方言前
+  ⇒ sqlmap 官方 Firebird `Dynamic SQL Error SQL error code` 被误判 Sybase、
+  Informix `ODBC Informix driver` 被误判 SQL Server。修法：`dbmsFromError` 加精确方言优先表
+  （不调整数组顺序，避免高频库探测回归）。守卫 `sqlmapCorpus.d313.guard.test.js` 4 例。
+- 推翻记录：① 首版字面量提取报「6/153 命中 3.9%」因样本构造失真（`\d`→`d`）作废；
+  ② 初版把 Firebird/Informix 前移到数组高位触发 `errorDetector.highfreq.test.js` 回归
+  （前 8 高频位被挤占），撤销改优先表。两条均按推翻协议停用。
+
+**验证**：守卫修前 3 红 1 绿 → 修后 4/4；缺陷注入（精确表 Firebird 改 NEVER_MATCH）→ 1 红，
+备份还原 → 4/4；全量定库+高频+守卫测试 70/70 绿。
+
+**边界**：26 个方言分支（Doris/DuckDB/CockroachDB 等）定库表未覆盖——本机无真库、
+D310 已记 4 方言静态移植未真验，按真实性优先不补裸品牌词（误报风险，D118 同型）。
+报错语料复核证实首版 14 条「未命中」多为样本截断假缺口（完整报错含 `SQL syntax` 等已收特征）。
+Firebird/Informix 本机无真库 ⇒ 本批无法真 e2e，只做真函数级对账 + 单测守卫。
+
+---
+
 ## 2026-11-20 批次 D312 · v1.4.1 发版（版本对齐 + D307-D311 优化收口）
 
 **起点**：D306（v1.4.0）已提交，D307-D311 五个批次全部 gate:close 55/55 绿且已提交，

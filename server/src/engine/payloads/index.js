@@ -417,8 +417,23 @@ export const ERROR_SIG_BY_DBMS = [
 // 窗口内存在报错上下文关键词；强特征短语自带可信度直接放行（不影响真实报错页定库，零回归）。
 const ERR_CONTEXT_RE = /(error|exception|syntax|warning|jdbc|sqlstate|stack\s*trace|错误|异常|失败|ORA-)/i;
 const BARE_DB_NAME_RE = /^(h2|dm8|mariadb|tidb|mysql|oracle|derby|informix|monetdb|firebird|sybase|db2|access|clickhouse|postgresql|sqlite|sql server)$/i;
+
+// [D313 2026-11-21] 精确方言优先表：sqlmap 官方 errors.xml 语料里 Firebird 的
+// `Dynamic SQL Error.{1,10}SQL error code` 会被下方 Sybase 的宽泛 `SQL error code` 抢先，
+// Informix 的 `ODBC Informix driver` 会被 SQL Server 的宽泛 `ODBC` 抢先。
+// 不调整 ERROR_SIG_BY_DBMS 数组顺序（高频库探测顺序/性能测试依赖它），改为在遍历宽泛表
+// 之前先查这张精确表——只在精确强特征命中时短路，零顺序回归。
+const PRECISE_DBMS_FIRST = [
+  { dbms: 'Firebird', sig: /Dynamic SQL Error[^\n]{0,40}SQL error code/i },
+  { dbms: 'Informix', sig: /(?:ODBC Informix driver|Informix ODBC Driver)/i },
+];
+
 export function dbmsFromError(text) {
   let s = String(text ?? '');
+  // 精确表在剥 HTML 之前先查：这些强特征是纯文本短语，不会与标签干扰。
+  for (const { dbms, sig } of PRECISE_DBMS_FIRST) {
+    if (sig.test(s)) return dbms;
+  }
   if (/<[a-z!/[ ]/i.test(s)) {
     s = s
       .replace(/<script[\s\S]*?<\/script>/gi, ' ')

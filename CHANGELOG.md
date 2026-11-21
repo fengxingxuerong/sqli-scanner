@@ -7,8 +7,35 @@
 > 下一批次起的条目写在这里。发版时把本节整体升为 `## [x.y.z] - YYYY-MM-DD` 并补汇总段。
 
 <!-- changelog-index:start -->
-当前没有未发布批次（最近一次发版见下方版本段落）。
+**本段覆盖 1 个批次（D313–D313，2026-11-21 → 2026-11-21）**。正文按时间倒序排列；
+下表是同一批次的索引，便于按编号或关键词定位。**索引只是导航，正文未做任何删改**
+（被推翻的旧结论原样保留，这是本仓的既定口径）。新增批次后跑
+`node scripts/changelog-index.mjs --write` 重生成，`--check` 校验是否过期。
+
+| 批次 | 日期 | 主题 |
+|---|---|---|
+| D313 | 11-21 | sqlmap 官方 tests / 报错语料对账（外部测试集第二轮） |
 <!-- changelog-index:end -->
+
+### 2026-11-21 批次 D313 · sqlmap 官方 tests / 报错语料对账（外部测试集第二轮）
+
+**起点**：用户要求「找同类开源项目的测试文件测试本项目」。v1.4.1（D307–D311）用过 sqlmap
+`data/xml/payloads/*.xml` 的 358 条 `<test>`；本批复用其尚未用过的 `data/xml/errors.xml`
+（187 条报错正则 / 42 方言 fork）。sqlmap `tests/*.py` 是内部 mock 单测，跨语言不可直接跑。
+
+**改动**：
+- 真缺陷（已修）：`dbmsFromError` 顺序表里宽泛词 `ODBC` / `SQL error code` 抢在精确方言前，
+  sqlmap 官方 Firebird `Dynamic SQL Error SQL error code` 被误判 Sybase、Informix
+  `ODBC Informix driver` 被误判 SQL Server。修法：加精确方言优先表（不动数组顺序）。
+  守卫 `server/tests/sqlmapCorpus.d313.guard.test.js`（4 例）。
+- 推翻记录：① 首版字面量提取「6/153 命中 3.9%」因样本失真（`\d`→`d`）作废；
+  ② 初版数组前移触发 `errorDetector.highfreq.test.js` 回归（挤占前 8 高频位），撤销改优先表。
+
+**验证**：守卫修前 3 红 1 绿 → 修后 4/4；缺陷注入 → 1 红，备份还原 → 4/4；全量定库+高频+守卫 70/70 绿。
+
+**边界**：26 个方言分支定库表未覆盖，本机无真库且 D310 已记静态移植未真验，不补裸品牌词（误报风险，
+D118 同型）；首版 14 条「未命中」经复核多为样本截断假缺口。详见
+`docs/外部测试集对账-sqlmap官方tests-2026-11-21.md`。
 
 ## [1.4.1] - 2026-11-20
 
