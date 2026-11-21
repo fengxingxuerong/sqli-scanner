@@ -66,6 +66,42 @@ function newestPidOf(name) {
 /** 探 /api/health（实现与 sidecar 冒烟共用 scripts/lib/portable.mjs，避免两份实现漂移） */
 const fetchHealth = fetchHealthData;
 
+/** 目录非空判定：不采信命令自报的 exit 0（Expand-Archive 曾静默产出空目录） */
+function nonEmptyDir(d) {
+  try { return fs.existsSync(d) && fs.readdirSync(d).length > 0; } catch { return false; }
+}
+
+/**
+ * 解压 zip 到目标目录。
+ * 不用 Expand-Archive：2026-11-21 两个 tag 场实证 runner 的 PowerShell 7
+ * Microsoft.PowerShell.Archive 模块在 ExtractToDirectory 上报
+ * `MethodCountCouldNotFindBest`，且 Expand-Archive 未返回非 0 ⇒ 静默空目录，
+ * 冒烟把「解压没成功」误判成「壳/边车缺失」。
+ * 主路用 .NET ZipFile（PS 5.1 / 7 都有），回退系统 tar（Win10 自带 bsdtar）；
+ * 两条路都以「目标目录非空」为成功，最终关键文件由 main() 再核一遍。
+ * @param {string} zip zip 路径
+ * @param {string} dest 解压目标（不存在时由解压器创建）
+ * @returns {void} 两条路都失败时 exit 1
+ */
+function extractZip(zip, dest) {
+  const q = (p) => `'${String(p).replace(/'/g, "''")}'`;
+  fs.rmSync(dest, { recursive: true, force: true });
+
+  const psCmd =
+    'Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction SilentlyContinue; ' +
+    `[System.IO.Compression.ZipFile]::ExtractToDirectory(${q(zip)}, ${q(dest)})`;
+  const r = spawnSync('powershell', ['-NoProfile', '-Command', psCmd], { stdio: 'inherit' });
+  if (r.status === 0 && nonEmptyDir(dest)) return;
+
+  console.log(`${TAG} .NET 解压不可用（exit=${r.status}），回退 tar -xf`);
+  fs.rmSync(dest, { recursive: true, force: true });
+  fs.mkdirSync(dest, { recursive: true });
+  const t = spawnSync('tar', ['-xf', zip, '-C', dest], { stdio: 'inherit' });
+  if (t.status === 0 && nonEmptyDir(dest)) return;
+
+  fail(`解压失败：${zip}（.NET exit=${r.status}, tar exit=${t.status}，目标目录仍为空或不存在）`);
+}
+
 /** 解析输入：--dir 直用；否则找 zip 解压到临时目录 */
 function resolveWorkDir(argv) {
   const givenDir = readOpt(argv, '--dir');
@@ -89,9 +125,7 @@ function resolveWorkDir(argv) {
   }
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'sqli-portable-smoke-'));
   const workDir = path.join(tempRoot, 'extracted');
-  fs.mkdirSync(workDir, { recursive: true });
-  const r = spawnSync('powershell', ['-NoProfile', '-Command', `Expand-Archive -Path '${zip}' -DestinationPath '${workDir}' -Force`], { stdio: 'inherit' });
-  if (r.status !== 0) fail(`解压失败：${zip}`);
+  extractZip(zip, workDir);
   console.log(`${TAG} 干净解压：${workDir}`);
   return { workDir, tempRoot };
 }
