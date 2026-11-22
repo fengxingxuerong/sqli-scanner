@@ -183,7 +183,9 @@ async function scanOne(c) {
     }
     if (Date.now() - t0 > TIMEOUT_MS) {
       sm.stop(id);
-      return { vulns: -1, techniques: [], requests: 0, verdict: 'timeout' };
+      // [D315] 字段必须与正常分支同形：`detail` 缺失会让主循环的展示行直接 TypeError，
+      // 把「单条用例超时」放大成「整轮裁判无结论」（2026-11-22 query 全量实测：第 83 条超时即崩）。
+      return { vulns: -1, techniques: [], detail: [], requests: 0, verdict: 'timeout' };
     }
     await new Promise((r) => setTimeout(r, 200));
   }
@@ -251,7 +253,7 @@ for (const c of CASES) {
   const where = c.kind === 'header' ? `header ${c.name}` : `query ${c.name}`;
   console.log(`${mark} [${tag}/${c.kind}] vulns=${r.vulns} 请求=${r.requests} ${where}`);
   if (r.techniques.length) console.log(`     命中技术：${r.techniques.join(', ')}`);
-  if (r.detail.length) console.log(`     命中明细：${r.detail.join(' | ')}`);
+  if (r.detail?.length) console.log(`     命中明细：${r.detail.join(' | ')}`);
 }
 
 const vulnTotal = CASES.filter((c) => c.vuln && !c.callProcedure).length;
