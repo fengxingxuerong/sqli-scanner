@@ -282,6 +282,7 @@ const pass =
 console.log(pass
   ? `✅ Benchmark 外部裁判通过：官方标注真值全部检出${callNA ? '' : '（含 {call} 过程名位）'}且 官方标注安全用例零误报`
   : '❌ 外部裁判未通过（漏检／误报／安全端点没真测／{call} 真值未全检出，见上表）');
+console.log(`[exit] code=${pass ? 0 : 1} pass=${pass}（[D316] 退出码随 stdout 留痕，誊写报告必须带上本行）`);
 process.exit(pass ? 0 : 1);
 }
 

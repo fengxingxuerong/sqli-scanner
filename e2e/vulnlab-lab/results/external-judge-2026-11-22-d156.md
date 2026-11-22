@@ -1,4 +1,4 @@
-# 外部裁判 5 号 · VulnLab（2026-11-22T09:31:55.284Z）
+# 外部裁判 5 号 · VulnLab（2026-11-22T18:16:09.929Z）
 
 - 靶场：https://github.com/hediwen831-star/vulnlab（D:\projects\sqli-scanner\.verify-labs\vulnlab，php=D:/tools/php83/php.exe，http://127.0.0.1:8135）
 - 真值来源：对方 benchmark/manifest.yaml（三档映射 + high 档 52 条绕过断言守护）
@@ -9,4 +9,4 @@
 | medium | 黑名单非递归替换，官方标注双写可绕 | 检出 | error·id·High | 94 | vulnerability_detected |
 | high | :id 参数化预编译（修复对照档） | 零检出 | 未检出 | 166 | no_vulnerability_detected |
 
-结论：通过（真值档全检出 + 修复档零误报 + 证据充分）
+结论：通过（真值档全检出 + 修复档零误报 + 证据充分）（退出码 0，[D316] 起随报告留痕）

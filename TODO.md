@@ -5,6 +5,32 @@
 
 ---
 
+## 2026-11-23 批次 D316 · 测试优化：两条 CI flake 根修 + 裁判退出码留痕 + gate:fast 补台账检查
+
+**起点**：全面评价（2026-11-22）指出 v1.4.1 发版链被两条已知 flake 卡红（#486/#484 各
+1 条用例，同码 schedule 全绿）、quality-ledger --check 只活在 gate:close（D315 台账过期
+应验）、五裁判报告缺退出码。
+
+**改动**：
+- `eventLoopWatch.test.js` D236 集成：单采 → 有界轮询（40ms×5s）。根因（本机探针实测）：
+  观察回调在阻塞结束后 30~60ms 落账，单采 30ms 早于落账；断言维持 >0 标定口径，幅值断言
+  在 Windows/Node 24 不可跨平台成立（探针 A/B 实测），平台口径写入 eventLoopWatch.js 注释。修后 20/20。
+- `extractor.timeDrift.test.js` 修复③：纳入 D96补3/D240 stall 归因重抽（归因包装新增
+  deadlineMs 透传，默认 30000 不变，修复③ 传 45000）；干净腐蚀仍立即红。修后 3/3。
+  **批内 gate:fast 抓红修正**：classifyDraw 的「整体慢」20s 阈值是 TIGHT 标定，REALISTIC
+  正常墙钟 ~17-19s 被误归因 env ⇒ 兜底红；已按档参数化（slowWallMs，真值表 ⑧⑨ 钉住），
+  修复③ 传 100000（只采信 maxGap 非对称停顿证据）；合跑口径复验 3/3。
+- 五裁判 run.mjs 退出前打印 `[exit] code=N`（vulnlab 落盘报告同步留痕）。
+- gateFastPlan 恒跑组 +1（quality-ledger --check，14→15）；质量台账重生成；AGENTS.md 同步。
+
+**验证**：语法 9/9；gate-fast --selftest 绿；两文件修后 20/20、3/3；gate:fast / gate:close
+结果见本批门禁记录（logs/）。
+
+**边界**：产品代码零行为变更（eventLoopWatch.js 仅注释）；不碰标定常数；发版解卡
+（re-run #486/#484）仍需人工触发。
+
+---
+
 ## 2026-11-22 批次 D315 · 五裁判复跑（本机实测）+ 裁判脚本超时崩溃修复
 
 **起点**：用户要求「重起五裁判实测」。上一轮全量证据 D283（11-10）之后，

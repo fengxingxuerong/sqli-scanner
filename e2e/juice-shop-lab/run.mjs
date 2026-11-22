@@ -183,4 +183,5 @@ const pass = missed === 0 && falsePositives === 0 && homoHit === homoTotal;
 console.log(pass
   ? '✅ Juice Shop 外部裁判通过：真漏洞可检出、同源复检全检出 且 安全端点零误报'
   : `❌ 外部裁判未通过（漏检 ${missed}、同源复检漏检 ${homoTotal - homoHit}、误报 ${falsePositives}，见上表）`);
+console.log(`[exit] code=${pass ? 0 : 1} pass=${pass}（[D316] 退出码随 stdout 留痕，誊写报告必须带上本行）`);
 process.exit(pass ? 0 : 1);

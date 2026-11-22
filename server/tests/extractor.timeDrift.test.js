@@ -367,14 +367,21 @@ async function withStallProbe(fn) {
 /**
  * [D240] 归因判定（纯函数，真值表在下方 §归因判据 逐条钉死）。
  *
+ * [D316] 阈值参数化：SLOW_WALL_MS / NORMAL_REQ_CEIL 是按 TIGHT 档（正常墙钟 ~8s）标定的；
+ * REALISTIC 档正常墙钟就 ~17-19s（D64：17 请求 × ~1s），20s 阈值会把正常抽误判成「慢」
+ * ——实测 gate:fast 合跑环境下修复③ 三抽全被误归因 env ⇒ 兜底 assert.fail。
+ * 调用方按档传入 slowWallMs 覆盖；默认值不变，下方真值表继续钉住默认行为。
+ *
  * @param {{out:string, secret:string, maxGap:number, elapsed:number, reqs:number}} d
+ * @param {{slowWallMs?:number, normalReqCeil?:number}} [opts]
  * @returns {'pass'|'env'|'bug'} pass=拿到正解；env=有环境越界证据、应重抽；bug=无证据仍腐蚀
  */
-function classifyDraw({ out, secret, maxGap, elapsed, reqs }) {
+function classifyDraw(d, { slowWallMs = SLOW_WALL_MS, normalReqCeil = NORMAL_REQ_CEIL } = {}) {
+  const { out, secret, maxGap, elapsed, reqs } = d;
   if (out === secret) return 'pass';
   const stalled = maxGap > STALL_MS;
   // 慢且请求数正常 ⇒ 机器被抢占；请求数发散（真失效）不许走这条
-  const slowButHealthy = elapsed > SLOW_WALL_MS && reqs <= NORMAL_REQ_CEIL;
+  const slowButHealthy = elapsed > slowWallMs && reqs <= normalReqCeil;
   return stalled || slowButHealthy ? 'env' : 'bug';
 }
 
@@ -387,19 +394,25 @@ function classifyDraw({ out, secret, maxGap, elapsed, reqs }) {
  *
  * @param {{secret:string, label:string, draws:number,
  *          makeOracle:(draw:number)=>object,
- *          makeCtx:(draw:number, oracle:object)=>object}} spec
+ *          makeCtx:(draw:number, oracle:object)=>object,
+ *          deadlineMs?:number,
+ *          slowWallMs?:number}} spec
+ *        deadlineMs：透传给 extractWithDeadline 的提取截止（默认 30000 = 修复①② 原口径；
+ *        REALISTIC 档单请求 ~1s，需 45000，见 [D64] 故障③ 重标）。
+ *        slowWallMs：透传给 classifyDraw 的「整体慢」阈值（默认 SLOW_WALL_MS=20000，
+ *        TIGHT 标定；REALISTIC 档必须抬高，见 classifyDraw 的 D316 注）。
  * @returns {Promise<void>}
  */
 async function expectExtractionSurvivesDrift(spec) {
-  const { secret, label, draws, makeOracle, makeCtx } = spec;
+  const { secret, label, draws, makeOracle, makeCtx, deadlineMs = 30000, slowWallMs } = spec;
   for (let draw = 1; draw <= draws; draw++) {
     const oracle = makeOracle(draw);
     const ctx = makeCtx(draw, oracle);
     const { out, maxGap, elapsed } = await withStallProbe(() =>
-      extractWithDeadline(new Extractor(), ctx, oracle, 'version()')
+      extractWithDeadline(new Extractor(), ctx, oracle, 'version()', deadlineMs)
     );
     const reqs = Number(oracle?.stats?.total ?? NaN);
-    const verdict = classifyDraw({ out, secret, maxGap, elapsed, reqs });
+    const verdict = classifyDraw({ out, secret, maxGap, elapsed, reqs }, slowWallMs == null ? {} : { slowWallMs });
     if (verdict === 'pass') {
       if (draw > 1) console.log(`[${label}] 第 ${draw} 抽通过（前 ${draw - 1} 抽腐蚀被环境归因重抽）`);
       return;
@@ -443,6 +456,11 @@ test('§归因判据：环境越界才重抽，真·失效必须立即红（真�
   assert.equal(classifyDraw({ ...base, elapsed: 8000, reqs: 47 }), 'bug');
   // ⑦ 边界：恰好等于墙钟预算不算慢
   assert.equal(classifyDraw({ ...base, elapsed: SLOW_WALL_MS, reqs: 50 }), 'bug');
+  // ⑧ [D316] 阈值按档参数化：REALISTIC 档正常墙钟 ~17-19s，抬高 slowWallMs 后
+  //    25s+正常请求数 ⇒ bug（真失效照红，不许借档位参数洗绿）
+  assert.equal(classifyDraw({ ...base, elapsed: 25000 }, { slowWallMs: 100000 }), 'bug');
+  // ⑨ 同数据、默认阈值 ⇒ env（对照行：证明传参生效而非判据失效）
+  assert.equal(classifyDraw({ ...base, elapsed: 25000 }), 'env');
 });
 
 test('★修复①★ 慢漂移 + 极小余量：跟踪后提取正确（故障② 的同一组参数）', async () => {
@@ -477,11 +495,27 @@ test('★修复②★ 中等漂移 + 中等余量（4ms/探针 @ 60ms）：跟�
 
 test('★修复③★ 真实余量档（300ms @ 30ms/探针）：跟踪后提取正确（故障③ 同参数）', async () => {
   const secret = '8';
-  const oracle = makeDriftOracle(secret, { driftMs: 30, trueExtraMs: REALISTIC.trueExtraMs });
-  const ctx = buildCtx(oracle, 'real-on', { absMs: REALISTIC.absMs, timeBaselineEvery: 16 });
-  // [D64] 截止 20s→45s：同故障③——REALISTIC 档单请求 ~1s，原截止余量近零
-  const out = await extractWithDeadline(new Extractor(), ctx, oracle, 'version()', 45000);
-  assert.equal(out, secret, `真实余量档应正确提取，实际 ${JSON.stringify(out)}`);
+  // [D316] 改走与修复①② 同一套 stall 归因重抽（D96补3/D240）：CI #484（macos，2026-11-21）
+  // 实测本条单抽单字节腐蚀（13.8s 完成，out≠secret）——REALISTIC 档 300ms 余量被
+  // runner 停顿/调度延迟拉长淹没，与修复② 的 D132 形态同族，不是跟踪器判据失败。
+  // 本条是修复侧唯一没走归因包装的裸跑用例，正是这个不对称让它成为 CI 常客。
+  // 规则不降：污染抽 + 环境越界证据 ⇒ 重抽（≤3）；干净抽腐蚀 ⇒ 立即红；3 抽全污染 ⇒
+  // 显式失败（「量测不可能」，不计为绿）——真回归不可能被重抽洗绿。deadlineMs 45s
+  // 沿用 [D64] 故障③ 重标口径。
+  // [D316 补] slowWallMs 抬到 100000（等效关闭「整体慢」归因）：REALISTIC 档正常墙钟
+  // 就 ~17-19s（D64：17 请求 × ~1s），TIGHT 标定的 20s 阈值会把正常抽误判成「慢」
+  // ⇒ gate:fast 合跑负载下三抽全 env ⇒ 兕底红（D316 收口实测一次）。本档的腐蚀只能由
+  // 非对称停顿证据（maxGap > STALL_MS）归因：整体变慢对真假两侧对称、由跟踪器补偿，
+  // 不构成腐蚀证据；deadline 45s 仍是硬上界，失控照红。真值表 ⑧⑨ 钉住该参数。
+  await expectExtractionSurvivesDrift({
+    secret,
+    label: '修复③',
+    draws: 3,
+    deadlineMs: 45000,
+    slowWallMs: 100000,
+    makeOracle: () => makeDriftOracle(secret, { driftMs: 30, trueExtraMs: REALISTIC.trueExtraMs }),
+    makeCtx: (draw, oracle) => buildCtx(oracle, `real-on-${draw}`, { absMs: REALISTIC.absMs, timeBaselineEvery: 16 }),
+  });
 });
 
 // ── 回归与护栏 ──────────────────────────────────────────────────────────────

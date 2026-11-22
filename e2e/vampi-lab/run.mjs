@@ -370,4 +370,5 @@ const pass = missed === 0 && falsePositives === 0 && weakEvidence === 0 && untes
 console.log(pass
   ? '✅ VAmPI 外部裁判通过：真漏洞可检出、同形态参数化实例零误报、Bearer 认证端点零误报'
   : '❌ 外部裁判未通过（漏检／误报／安全端点没真测／认证链路不可用，见上表）');
+console.log(`[exit] code=${pass ? 0 : 1} pass=${pass}（[D316] 退出码随 stdout 留痕，誊写报告必须带上本行）`);
 process.exit(pass ? 0 : 1);

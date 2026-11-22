@@ -229,11 +229,12 @@ writeFileSync(
   `- 靶场：${REPO}（${LAB_DIR}，php=${PHP}，${BASE}）\n- 真值来源：对方 benchmark/manifest.yaml（三档映射 + high 档 52 条绕过断言守护）\n\n` +
   `| 档位 | 语义 | 预期 | 实测 | 请求 | verdict |\n|---|---|---|---|---|---|\n` +
   rows.map((r) => `| ${r.tier} | ${r.why} | ${r.expect === 'detect' ? '检出' : '零检出'} | ${r.detected ? r.vulns.join('、') || '检出' : '未检出'} | ${r.requests} | ${r.verdict} |`).join('\n') +
-  `\n\n结论：${pass ? '通过（真值档全检出 + 修复档零误报 + 证据充分）' : '未通过'}\n`,
+  `\n\n结论：${pass ? '通过（真值档全检出 + 修复档零误报 + 证据充分）' : '未通过'}（退出码 ${pass ? 0 : 1}，[D316] 起随报告留痕）\n`,
   'utf8'
 );
 
 if (spawned) {
   try { spawned.kill(); } catch { /* best effort */ }
 }
+console.log(`[exit] code=${pass ? 0 : 1} pass=${pass}（[D316] 退出码随 stdout 留痕，誊写报告必须带上本行）`);
 process.exit(pass ? 0 : 1);

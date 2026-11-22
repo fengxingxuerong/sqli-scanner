@@ -264,4 +264,5 @@ const pass = missed === 0 && falsePositives === 0 && weakEvidence === 0;
 console.log(pass
   ? '✅ DVWA 外部裁判通过：PHP+MySQL 栈真漏洞可检出 且 同路径 impossible 档零误报'
   : '❌ 外部裁判未通过（漏检／误报／安全端点没真测，见上表）');
+console.log(`[exit] code=${pass ? 0 : 1} pass=${pass}（[D316] 退出码随 stdout 留痕，誊写报告必须带上本行）`);
 process.exit(pass ? 0 : 1);

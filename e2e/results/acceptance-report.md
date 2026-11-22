@@ -1,7 +1,7 @@
 # 全方位验收门禁报告
 
-> 生成：2026-11-10T18:58:05.379Z　｜　执行器：`node e2e/acceptance.mjs`　｜　Node v24.22.1
-> 代码版本：`c410c10`　⚠️ **工作区 dirty**（跑验收前有 24 个未提交改动：AGENTS.md、CHANGELOG.md、README.md 等）—— **本报告不对应任何提交**
+> 生成：2026-11-22T18:22:26.320Z　｜　执行器：`node e2e/acceptance.mjs`　｜　Node v24.20.0
+> 代码版本：`13caf14`　⚠️ **工作区 dirty**（跑验收前有 16 个未提交改动：AGENTS.md、CHANGELOG.md、TODO.md 等）—— **本报告不对应任何提交**
 > 套件范围：**25/27 跑出断言**　｜　⚠️ **判定：不完整 —— 不得当作该代码版本的整体验收结论**
 > 前置：MySQL 10.11.19-MariaDB @127.0.0.1:3306；secure_file_priv="D:\\tools\\mariadb\\files\\"
 
@@ -9,7 +9,7 @@
 
 | 结果 | 套件 | 事实 |
 |---|---|---|
-| ✅ PASS | 服务端单测 | tests=4286　pass=4280　fail=0　skipped=6 |
+| ✅ PASS | 服务端单测 | tests=4376　pass=4370　fail=0　skipped=6 |
 | ✅ PASS | 独立刁钻靶场（11 场景） | 漏洞场景=11/11　安全误报=0 |
 | ✅ PASS | 检测回归（19 场景） | PASS=19　FAIL=0 |
 | ✅ PASS | 真 MySQL 靶场 | PASS=11　FAIL=0 |
@@ -25,7 +25,7 @@
 | ✅ PASS | 外部裁判 3 号（DVWA：PHP+MySQL 栈真漏洞须检出 + 同路径 impossible 档零误报） | 外部裁判3=✅ 通过　真值漏洞=5/5（漏检 0）　安全端点误报=0　证据不足=0　形态覆盖=cookie+POST+盲注POST+impossible |
 | ✅ PASS | 外部裁判 4 号（OWASP Benchmark：官方标注真值须全检出 + 同族安全用例零误报） | 外部裁判4=✅ 通过　真值漏洞=43/43（漏检 0）　安全对照误报=0/24　证据不足=0　形态覆盖=header+参数名（50 条）　call形态=安全侧误报 0/3；真值 4/4 |
 | ✅ PASS | 外部裁判 5 号（VulnLab：三档真值 low/medium 须检出 + high 参数化修复档零误报） | 外部裁判5=✅ 通过　真值档位=2/2（漏检 0）　修复档误报=0/1　证据不足=0　档位覆盖=low+medium+high（三档真跑） |
-| ✅ PASS | 数据泄露实证（提取到的必须是真库名，不得是 payload 残片） | 数据实证=✅ 成立　databases=["blackbox_lab","campus_library","ds_lab","dvwa","parammine_lab","paramname_lab","redteam_lab","sqli_lab","sqli_lab_bare","sqli_lab_bare2","test"]　残片=取不到　漏洞=3　请求=209 |
+| ✅ PASS | 数据泄露实证（提取到的必须是真库名，不得是 payload 残片） | 数据实证=✅ 成立　databases=["blackbox_lab","campus_library","ds_lab","dvwa","netsec","parammine_lab","paramname_lab","redteam_lab","sqli_lab","sqli_lab_bare","sqli_lab_bare2","test"]　残片=取不到　漏洞=3　请求=270 |
 | ✅ PASS | 报告契约（自报字段必须与真实状态一致） | 通过=8　不一致=0 |
 | ✅ PASS | CRS 人工挂链 A/B（PL1 档基线） | off=7　on=7　基线=off≥5 on≥5　安全对照误拦=false |
 | ✅ PASS | CRS 自动选链绕过（PL1 档基线） | 技术位=7　基线=≥7（mariadb）　安全误报=0 |

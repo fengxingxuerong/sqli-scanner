@@ -63,12 +63,30 @@ test('D236 集成：受控滞后诱导——同步阻塞落账后手动采样必
   // 的同相位竞态（该竞态在真实服务里只是让长条延迟一个窗口可见，见模块注释）。
   startEventLoopWatch({ sampleMs: 60000, thresholdMs: 10000 });
   blockEventLoop(120);
-  // 让出事件循环：monitorEventLoopDelay 的内部观察回调（阻塞期间到期）在循环恢复后
-  // 立即落账，30ms 的空转周期足够它跑完——之后直方图必有该次滞后记录。
-  await new Promise((r) => setTimeout(r, 30));
-  const s = sampleWindow();
-  assert.ok(s.samples >= 1, `手动采样应完成（实际 ${s.samples}）`);
-  assert.ok(s.maxMs > 0, `120ms 同步阻塞应被测到（实际 maxMs=${s.maxMs}）`);
+  // [D316] 落账时机的有界轮询（修 CI 两次单抽翻面：windows #486 / macos #484，均
+  // `120ms 同步阻塞应被测到（实际 maxMs=0）`，与本仓 11-13/11-14 三次日志同族）：
+  // 本机探针实测（Node 24/Windows，2026-11-23）：到期 tick 在阻塞结束后 30~60ms 才落账
+  // ——原写法 30ms 就采，CI 忙时首采早于落账 ⇒ 直方图空 ⇒ maxMs=0，且本测试 interval
+  // 是 60s，「下一个窗口」永远等不到。轮询成立的前提：sampleWindow 是「读后 reset」，
+  // 观察未落地前直方图为空，空 reset 无损，数据不会因轮询丢失；而到期 tick 只要循环
+  // 恢复必然落账，轮询必能等到（探针实测阻塞后首个观察 ≤2 个有效间隔内入账）。
+  // 断言维持 D236 标定口径 >0，不升到「长条幅值」：同批探针实测 Windows/Node 24 上
+  // 长条幅值是否如实入账**取决于上下文与时序**（同样 120ms，定时器回调里 138.7ms 入账、
+  // inline 续体里只剩 ~32ms 本底；300/500ms 也有吞记案例），闲置本底即 ~30ms
+  // （uv 定时器合并 ⇒ 有效间隔 ≈ 2×resolution）。跨平台稳定可断言的只有「观察恢复流动」。
+  const deadline = Date.now() + 5000;
+  let s = null;
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 40));
+    s = sampleWindow();
+    if (s.maxMs > 0) break;
+  }
+  assert.ok(s && s.samples >= 1, `手动采样应完成（实际 ${s?.samples ?? '无'}）`);
+  assert.ok(
+    s.maxMs > 0,
+    `120ms 同步阻塞后采样器应有非零滞后读数（轮询 5s 内每 40ms 采样一次，实际 maxMs=${s.maxMs}）—— ` +
+      '全程 0 说明观察回调从未落账（见上注释的落账时机与平台口径）'
+  );
 });
 
 test('D236 集成：stop 后统计量复位且采样停止', { timeout: 15000 }, async () => {

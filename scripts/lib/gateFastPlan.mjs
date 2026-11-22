@@ -4,9 +4,9 @@
 // 为什么要有这个模块：一批改动的收口全量 = gate:close ~25 分钟 + 验收 ~25 分钟，
 // 批内迭代时「每改一行等一小时」税太重。gate:fast 的取舍标准与 .husky/pre-commit
 // 同源（「每次都愿意付的代价」），但比 pre-commit 贵一点、比全量便宜两个数量级：
-//   · **恒跑组**：跨文件的全仓静态判据（七道 guard + 预提交三道 + 引用/索引完整性
-//     + 孤儿配置键）——它们不执行被测代码、不触网，实测合计 ≤1.5 分钟，且历史上
-//     抓的都是「改 A 坏 B」形态（D249 arch、D251 error-contract、D279 孤儿键）。
+//   · **恒跑组**：跨文件的全仓静态判据（七道 guard + 预提交三道 + 引用/索引/台账
+//     完整性 + 孤儿配置键）——它们不执行被测代码、不触网，实测合计 ≤1.5 分钟，且历史上
+//     抓的都是「改 A 坏 B」形态（D249 arch、D251 error-contract、D279 孤儿键、D316 台账过期）。
 //   · **受影响组**：按改动文件推导——src 改动映射到 import/命名命中它的测试，
 //     scripts 改动映射到它自己的 --selftest，前端改动映射到 vitest + 前端类型，
 //     文档/清单改动映射到三道一致性检查。
@@ -41,6 +41,11 @@ export function alwaysSteps(root) {
     { name: 'refs', cmd: ['node', 'scripts/ref-integrity.mjs'] },
     { name: 'greenguard', cmd: ['node', 'scripts/greenguard-check.mjs'] },
     { name: 'changelog-index', cmd: ['node', 'scripts/changelog-index.mjs', '--check'] },
+    // [D316] 结论/质量台账的真源一致性：D315 实测「改了 _claims-ledger.json/_facts.json
+    // 却未重生成 docs/质量台账.md 即提交」，--check 会抓红但它此前只活在 gate:close
+    // （~25 分钟）——批内快门禁看不见，正是 AGENTS.md「gate:fast 绿 ≠ 可以提交」的实例。
+    // 静态、无副作用、实测 ~1s，符合恒跑组准入标准。
+    { name: 'ledger', cmd: ['node', 'scripts/quality-ledger.mjs', '--check'] },
     // 孤儿配置键判据：D279 实测它抓得到「纯重构把解构改成成员读取」的副作用，
     // 且是 node --test 单文件 ~1s——是「跨文件判据放测试里」的最便宜一员。
     { name: 'orphan-keys', cmd: ['node', '--test', join('server', 'tests', 'configOrphanKeys.guard.test.js')] },
