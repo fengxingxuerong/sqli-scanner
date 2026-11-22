@@ -140,3 +140,43 @@ test('toSSE 终态事件单连接只推送一次且随后收尾', () => {
   // 收尾：清理首个连接的心跳定时器与监听器
   for (const fn of hooks) if (typeof fn === 'function') fn();
 });
+
+// [D317] 序列化单次化守卫：同一事件对 N 个订阅者只允许 stringify 一次。
+// 此前每个 SSE 写点各自 JSON.stringify(evt)：终态事件携带几 MB 报告 × 20 订阅者
+// ≈ 0.5-1s 单线程阻塞（11-01 卡死风险报告 P1-4 的序列化放大段）。判据：钩住
+// JSON.stringify 统计同一事件对象的序列化次数 —— 缓存实现下 2 个订阅者 = 恰 1 次；
+// 同时断言两个连接收到的帧逐字节一致（复用不能改变线格式）。
+test('toSSE 多订阅者共享同一 SSE 帧（同一事件只序列化一次）', () => {
+  eventBus.create('scanOneSerialize');
+  const writes1 = [];
+  const writes2 = [];
+  const hooks = [];
+  const mkRes = (writes) => ({
+    writeHead() {},
+    write: (s) => writes.push(s),
+    on: (_e, fn) => hooks.push(fn),
+  });
+  eventBus.toSSE('scanOneSerialize', { on: (_e, fn) => hooks.push(fn) }, mkRes(writes1));
+  eventBus.toSSE('scanOneSerialize', { on: (_e, fn) => hooks.push(fn) }, mkRes(writes2));
+
+  const seen = [];
+  const origStringify = JSON.stringify;
+  JSON.stringify = function (value, ...rest) {
+    if (value && typeof value === 'object' && value.scanId === 'scanOneSerialize' && value.type) {
+      seen.push(value);
+    }
+    return origStringify.call(JSON, value, ...rest);
+  };
+  try {
+    eventBus.emit('scanOneSerialize', 'point_discovered', { blob: 'x'.repeat(1024) });
+  } finally {
+    JSON.stringify = origStringify;
+  }
+  assert.equal(seen.length, 1, `同一事件应只序列化 1 次（2 个订阅者），实际 ${seen.length} 次`);
+  const frame1 = writes1.filter((w) => w.startsWith('id:')).at(-1);
+  const frame2 = writes2.filter((w) => w.startsWith('id:')).at(-1);
+  assert.ok(frame1 && frame2, '两个订阅者都应收到该事件帧');
+  assert.equal(frame1, frame2, '两个订阅者收到的帧字符串应逐字节一致（复用不得改变线格式）');
+  // 收尾：清理两个连接的心跳定时器与监听器
+  for (const fn of hooks) if (typeof fn === 'function') fn();
+});

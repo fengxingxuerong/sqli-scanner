@@ -5,6 +5,25 @@
 
 ---
 
+## 2026-11-23 批次 D317 · coverage 与真网解耦 + SSE 序列化单次化 + 平台时序行为表
+
+**起点**：路线图《下一步进步空间-2026-11-23》短期清账；同日 gate:close 的 server-coverage
+红定性为 exploitRoutes.validation 真 DNS 依赖（example.com 解析超时 11s）。
+
+**改动**：
+- exploitRoutes.validation.test.js：合法公网用例预置 dnsCache（模块级 DNS 缝），覆盖率跑批
+  与真网解耦；零生产改动，用完即清。
+- eventBus.js：SSE 帧单次序列化（WeakMap 缓存，不加字段）；守卫 =「2 订阅者恰 1 次序列化 +
+  帧逐字节一致」。
+- docs/平台时序行为表.md：D290/D315/D316 三批时序红点的定性依据固化 + 判据标定守则。
+
+**验证**：见本批门禁记录（logs/）。
+
+**边界**：终态 SSE 载荷瘦身留 D318（REST/SSE 脱敏语义差异需先做前端渲染审计）；O(n) 治理
+重写与 BooleanBlindDetector 拆分按路线图顺延。
+
+---
+
 ## 2026-11-23 批次 D316 · 测试优化：两条 CI flake 根修 + 裁判退出码留痕 + gate:fast 补台账检查
 
 **起点**：全面评价（2026-11-22）指出 v1.4.1 发版链被两条已知 flake 卡红（#486/#484 各

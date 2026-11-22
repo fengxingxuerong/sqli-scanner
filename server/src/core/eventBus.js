@@ -55,6 +55,21 @@ let seqCounter = 0;
 // ——后者在 emit 开头 `if (!em) return;` 已经拦掉了，故此处等价于必非空。
 const replayBuffers = new WeakMap();
 
+// [D317] SSE 帧字符串按事件对象**单次序列化**（WeakMap 缓存，不往事件对象上加字段——
+// 监听方与测试可能对 evt 做结构断言）。同一事件对 N 个订阅者各 stringify 一次是
+// O(N×size) 放大：终态事件此前携带几 MB 报告 × 20 订阅者 ≈ 0.5–1s 单线程阻塞
+// （11-01《卡死风险与优化短板》P1-4）。缓存后首个订阅者触发一次序列化，其余订阅者
+// 与断线回放复用同一帧字符串；线格式不变（id/data 两行照旧）。
+const sseFrameCache = new WeakMap();
+function sseFrameOf(evt) {
+  let frame = sseFrameCache.get(evt);
+  if (frame === undefined) {
+    frame = JSON.stringify(evt);
+    sseFrameCache.set(evt, frame);
+  }
+  return frame;
+}
+
 export function create(scanId) {
   if (!emitters.has(scanId)) {
     const em = new EventEmitter();
@@ -139,7 +154,7 @@ export function toSSE(scanId, req, res) {
   const terminalListener = (evt) => {
     if (evt && TERMINAL_TYPES.has(evt.type)) {
       try {
-        res.write(`id: ${evt.seq}\ndata: ${JSON.stringify(evt)}\n\n`);
+        res.write(`id: ${evt.seq}\ndata: ${sseFrameOf(evt)}\n\n`);
         res.end();
       } catch {
         /* 已关闭 */
@@ -152,7 +167,7 @@ export function toSSE(scanId, req, res) {
     // [MERGED: engine ★FIX-1] res 可能已关闭/已 end（客户端断开竞态），write 失败不得冒泡成未捕获异常
     try {
       // [P3-SSE] 携带 id 行，浏览器 EventSource 重连时自动回传 Last-Event-ID
-      res.write(`id: ${evt.seq}\ndata: ${JSON.stringify(evt)}\n\n`);
+      res.write(`id: ${evt.seq}\ndata: ${sseFrameOf(evt)}\n\n`);
     } catch {
       /* 连接已关闭，忽略 */
     }
@@ -169,7 +184,7 @@ export function toSSE(scanId, req, res) {
     try {
       replayed = (replayBuffers.get(em) || []).filter((e) => e.seq > lastSeq);
       for (const evt of replayed) {
-        res.write(`id: ${evt.seq}\ndata: ${JSON.stringify(evt)}\n\n`);
+        res.write(`id: ${evt.seq}\ndata: ${sseFrameOf(evt)}\n\n`);
       }
     } catch {
       /* 客户端已断开 */
