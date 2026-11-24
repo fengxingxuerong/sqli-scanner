@@ -5,6 +5,25 @@
 
 ---
 
+## 2026-11-25 批次 D320 · v1.4.2 发版（D313–D319 收口）
+
+**起点**：D318/D319 已提交并推送，push CI #494 与 CodeQL #166 均 success；v1.4.1 标签已存在，
+不移动旧标签，按补丁版本从当前已验证提交切 v1.4.2。
+
+**改动**：
+- `npm run version:fix` 同步 10 处 1.4.1 → 1.4.2（npm/Tauri/Rust/插件/双 lock）。
+- CHANGELOG `[Unreleased]` 升为 `[1.4.2] - 2026-11-25`，汇总 D313–D319 与便携包修复；
+  新开空 Unreleased，重建索引。
+- facts 重采（server/package.json 版本指纹漂移）；tag `v1.4.2` 由 CI 产出 Windows 安装包、
+  便携包、SBOM、SHA256SUMS。
+
+**验证**：version:check 10/10；前置提交 gate:close 55/55、CI #494 success。
+本批 facts 首轮 2 fail、复跑 1 fail（均为 extractor.timeDrift 时序敏感族，完整现场已落
+`logs/test-evidence/`）；该文件隔离 3/3 后独立全量重采 4385 pass / 0 fail / 4 skip，
+本批 gate:close 55/55 全绿。tag 推送后的 desktop-package/release job 与资产清单以远端 CI/Release 为准。
+
+---
+
 ## 2026-11-25 批次 D319 · 测试证据链与假绿收口
 
 **起点**：全方面测试优化审计。前次服务端 `2 fail` 快照没有保留用例名；进一步发现
