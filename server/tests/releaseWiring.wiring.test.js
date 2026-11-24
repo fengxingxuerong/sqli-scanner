@@ -18,15 +18,26 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { normalizeReleaseAssets } from '../../scripts/normalize-release-assets.mjs';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const SCRIPT = 'scripts/release-check.mjs';
 const pkg = JSON.parse(readFileSync(join(REPO, 'package.json'), 'utf8'));
 const ciYml = readFileSync(join(REPO, '.github/workflows/ci.yml'), 'utf8');
 const scriptSrc = readFileSync(join(REPO, SCRIPT), 'utf8');
+
+function releaseFixture(t) {
+  const root = mkdtempSync(join(tmpdir(), 'sqli-release-assets-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const nested = join(root, 'release-assets', 'bundle', 'nsis');
+  mkdirSync(nested, { recursive: true });
+  writeFileSync(join(root, 'release-assets', 'manifest.json'), '{}');
+  return { root, nested };
+}
 
 /** 与 versionSync/preCommitGates 同款的「只认 run 指令体」解析（注释假绿防护） */
 function collectRunBodies(yaml) {
@@ -102,4 +113,52 @@ test('接线-5) 对外暴露面仍由 ports 绑定 + token 控制（不能只顾
 test('接线-6) 判据复用了 version-sync 的实现（不得复制一份）', () => {
   assert.ok(/from '\.\/version-sync\.mjs'/.test(scriptSrc),
     'release-check 未复用 version-sync 的判据 —— 两份版本判据必然漂移');
+});
+
+test('Release 资产：中文安装包上传前规范为 ASCII 名，manifest 保持不动', (t) => {
+  const { root, nested } = releaseFixture(t);
+  const original = join(nested, 'SQL注入检测工具_1.4.2_x64-setup.exe');
+  writeFileSync(original, 'exe');
+  const rel = normalizeReleaseAssets(root, '1.4.2');
+  assert.equal(rel, 'release-assets/sqli-scanner-1.4.2-x64-setup.exe');
+  assert.equal(existsSync(join(root, rel)), true);
+  assert.equal(existsSync(original), false);
+  assert.equal(readFileSync(join(root, 'release-assets', 'manifest.json'), 'utf8'), '{}');
+});
+
+test('Release 资产：0 个或多个安装包都拒绝，禁止猜测目标文件', (t) => {
+  const { root, nested } = releaseFixture(t);
+  assert.throws(() => normalizeReleaseAssets(root, '1.4.2'), /数量应为 1/);
+  writeFileSync(join(nested, 'a.exe'), 'a');
+  writeFileSync(join(nested, 'b.exe'), 'b');
+  assert.throws(() => normalizeReleaseAssets(root, '1.4.2'), /数量应为 1/);
+});
+
+test('Release 资产：版本号不得穿越目录或注入路径', (t) => {
+  const { root } = releaseFixture(t);
+  assert.throws(() => normalizeReleaseAssets(root, '../1.4.2'), /非法 Release 版本号/);
+});
+
+test('CI 接线：Release job 必须在生成校验和之前规范安装包名，且 CLI 参数能定位产物', (t) => {
+  const bodies = collectRunBodies(ciYml);
+  const body = bodies.find((b) => b.includes('normalize-release-assets.mjs'));
+  assert.ok(body, 'ci.yml 未执行 Release 安装包名规范，中文名仍会在上传后失配');
+
+  // 只断言「脚本名出现过」会漏掉传参错误：root 若写成 release-assets，脚本会找
+  // release-assets/release-assets 并在真 runner 上必红（2026-11-25 实测 exit=1）。
+  const rootArg = body.match(/normalize-release-assets\.mjs\s+([^\s"']+)/)?.[1];
+  assert.ok(rootArg, '未能从 CI run body 解析出 normalize 步骤的 root 参数');
+  const { root, nested } = releaseFixture(t);
+  writeFileSync(join(nested, 'SQL注入检测工具_1.4.2_x64-setup.exe'), 'exe');
+  const effectiveRoot = rootArg === '.' ? root : join(root, rootArg);
+  const r = spawnSync(process.execPath, [
+    join(REPO, 'scripts/normalize-release-assets.mjs'), effectiveRoot, '1.4.2',
+  ], { encoding: 'utf8' });
+  assert.equal(r.status, 0,
+    `CI 参数 ${rootArg} 在真 fixture 上执行失败：${r.stderr || r.stdout}`);
+  assert.equal(existsSync(join(root, 'release-assets', 'sqli-scanner-1.4.2-x64-setup.exe')), true);
+
+  const normalizeAt = bodies.indexOf(body);
+  const shaAt = bodies.findIndex((b) => b.includes('sha256sum') || b.includes('SHA256SUMS'));
+  assert.ok(shaAt === -1 || normalizeAt < shaAt, '安装包名规范必须发生在生成 SHA256SUMS 之前');
 });

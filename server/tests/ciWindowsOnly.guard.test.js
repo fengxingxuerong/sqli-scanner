@@ -172,6 +172,10 @@ const KNOWN_SAFE = new Map([
   ["scripts/ci-dvwa.mjs:wincmd:if (process.platform === 'win32') execFileSync('taskkill', [",
     '该 `taskkill` 就在同一行的 `if (process.platform === "win32")` 之内，ubuntu 走下方 '
     + '`process.kill(pid, "SIGTERM")`；且只杀 pid 文件里记录的、本脚本自己起的那个进程'],
+  ['scripts/normalize-release-assets.mjs:exe:.filter((e) => e.isFile() && e.name.endsWith(\'.exe\'))',
+    '只枚举下载产物里的 .exe 文件并改名，不执行它；fs 操作跨平台，ubuntu 的 release job 同样可运行'],
+  ['scripts/normalize-release-assets.mjs:exe:const target = join(assets, `sqli-scanner-${version}-x64-set',
+    '目标名是纯 ASCII 字符串拼接，用于 renameSync；不 spawn、不依赖 Windows API，跨平台安全'],
 ]);
 
 /**

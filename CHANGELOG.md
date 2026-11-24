@@ -7,8 +7,63 @@
 > 下一批次起的条目写在这里。发版时把本节整体升为 `## [x.y.z] - YYYY-MM-DD` 并补汇总段。
 
 <!-- changelog-index:start -->
-当前没有未发布批次（最近一次发版见下方版本段落）。
+**本段覆盖 2 个批次（D321–D322，2026-11-25 → 2026-11-25）**。正文按时间倒序排列；
+下表是同一批次的索引，便于按编号或关键词定位。**索引只是导航，正文未做任何删改**
+（被推翻的旧结论原样保留，这是本仓的既定口径）。新增批次后跑
+`node scripts/changelog-index.mjs --write` 重生成，`--check` 校验是否过期。
+
+| 批次 | 日期 | 主题 |
+|---|---|---|
+| D322 | 11-25 | Benchmark 构建偶发依赖解析抖动的有限重试 |
+| D321 | 11-25 | Release 安装包名规范与校验清单失配修复 |
 <!-- changelog-index:end -->
+
+### 2026-11-25 批次 D322 · Benchmark 构建偶发依赖解析抖动的有限重试
+
+**起点**：tag CI #497 的 acceptance step21「启动 Benchmark」红。job 日志 718–725 行显示
+`mvn initialize clean package -Pdeploy` 解析 `co.leantechniques:maven-buildtime-extension:3.0.5`
+时 `Failed to read artifact descriptor`；artifact 当前在 Maven Central 返回 200（pom + jar），
+上一轮 #496 同 pin、同脚本该步骤 success ⇒ transient 仓库解析抖动，非本仓代码缺陷。
+
+**改动**：
+- 新增 `scripts/lib/buildRetry.mjs`：`isTransientBuildError()` 只认 artifact descriptor /
+  resolve / transfer / timeout 类错误；`withBuildRetry()` 有限重试（3 次、2s/4s 递增退避），
+  编译错误等确定性失败首次即抛，不洗绿。
+- `ci-benchmark.mjs` 的 `build()` 接入重试，`main()` 改 `await build()`（避免浮空 Promise）；
+  D298/D299 的 win32 拒绝、`-Pdeploy`、双处 `-Dtomcat.url`、就绪探针与显式非零退出契约保留。
+- `ciBenchmarkBuildRetry.guard.test.js` 6 条判据：真 #497 文本判 transient、确定性错误不重试、
+  两次 transient 后成功、次数用尽抛最后一次错误、真脚本接线 + 三条反例自证。
+
+**验证**：定向 13/13（含 D298/D299 原守卫）；缺陷注入（把 transient 判据恒 false）
+3 pass / 3 fail、备份还原后 6/6。
+
+**边界**：只改 CI 侧构建重试，不碰检测引擎与靶场真值；重试上限 3 次，失败仍显式判红。
+
+### 2026-11-25 批次 D321 · Release 安装包名规范与校验清单失配修复
+
+**起点**：v1.4.2 tag CI 已产出 6 个 Release 资产，desktop-package/release/docker-publish 均 success；
+资产复核发现 NSIS 中文安装包名被 GitHub 上传时改为 ASCII 名，而 `SHA256SUMS.txt` 仍记中文名，
+导致下载后 `sha256sum -c` 找不到安装包（哈希值本身正确）。
+
+**改动**：
+- 新增 `scripts/normalize-release-assets.mjs`：Release job 下载桌面产物后，要求恰有 1 个 `.exe`，
+  统一改为 `sqli-scanner-<version>-x64-setup.exe`，版本号做路径安全校验；0/多安装包直接失败。
+- CI 在生成 SBOM/SHA256SUMS 之前执行规范步骤，校验清单与最终上传名同源。
+- `releaseWiring.wiring.test.js` 新增 4 条判据：中文名规范化、manifest 不动、0/多包拒绝、
+  版本路径注入拒绝与 CI 接线，合并 10/10。
+- 已用认证 `gh` 修正 v1.4.2 的 `SHA256SUMS.txt` 资产；API 复核 5 条清单与 5 个非校验资产
+  的 SHA256 全部一致，manifest 版本为 1.4.2。
+
+**验证**：定向 10/10、ESLint/语法/CI YAML 解析通过；v1.4.2 Release 6 资产、0 哈希/文件名不匹配。
+tag CI #497 整体 failure 的唯一红点是 acceptance 的 Benchmark 启动步骤；产物构建与 Release 均 success。
+
+**自纠（同批收口前实测）**：上述 CI 接线最初传 root=`release-assets`，而脚本内部再
+`join(root, 'release-assets')` ⇒ 真 runner 会找 `release-assets/release-assets` 并 exit 1
+（本机 fixture 实测复现）。原 4 条接线判据只认「脚本名出现过」，没验参数 ⇒ 10/10 假绿。
+已改传 root=`.`，并把接线判据升级为「从 ci.yml run body 解析参数 → 在真 fixture 上执行 CLI
+→ 断言产物改名 + 在 SHA256SUMS 之前」；缺陷注入（改回旧参数）9 pass/1 fail、还原后 10/10。
+
+**边界**：本次只修发布资产命名与校验链，不改引擎检测行为；v1.4.2 标签未移动。
 
 ## [1.4.2] - 2026-11-25
 

@@ -28,6 +28,7 @@ import net from 'node:net';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
+import { withBuildRetry } from './lib/buildRetry.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..');
@@ -112,17 +113,26 @@ async function ensureSource() {
 }
 
 /** `-Pdeploy` 打包：不带 deploy 时 HSQLDB 的 database-server/database-init 不会跑。 */
-function build() {
+async function build() {
   if (fs.existsSync(path.join(DIR, 'target', 'benchmark.war'))) {
     log('已打包（target/benchmark.war 存在），跳过 mvn package');
     return;
   }
   log('mvn package -Pdeploy（首次约 5-10 分钟）');
-  const out = run(MAVEN, [
+  const args = [
     'initialize', 'clean', 'package', '-Pdeploy', '-DskipTests',
     '-Dspotless.check.skip=true', '-Dspotless.apply.skip=true',
     `-Dtomcat.url=${TOMCAT_URL}`,
-  ], { cwd: DIR, timeout: 20 * 60 * 1000 });
+  ];
+  // [D322] 仅对 artifact 解析 / 网络抖动重试；编译错误等确定性失败首次即抛。
+  const out = await withBuildRetry((attempt) => {
+    if (attempt > 1) log(`mvn package 重试 ${attempt}/3（可恢复的依赖解析/网络错误）`);
+    return run(MAVEN, args, { cwd: DIR, timeout: 20 * 60 * 1000 });
+  }, {
+    attempts: 3,
+    backoffMs: 2000,
+    onRetry: ({ attempt, delay }) => log(`第 ${attempt} 次失败，${delay}ms 后重试`),
+  });
   fs.appendFileSync(LOG, `\n=== mvn package ===\n${out}\n`);
 }
 
@@ -220,7 +230,7 @@ async function main() {
   if (cmd !== 'up') fail(`未知命令 ${cmd}（可用 up / stop / check）`);
   preflightLinux();
   await ensureSource();
-  build();
+  await build();
   startServers();
   await waitReady();
   log('外部裁判 4 号已在 CI 就绪');

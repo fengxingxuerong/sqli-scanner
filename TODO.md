@@ -5,6 +5,43 @@
 
 ---
 
+## 2026-11-25 批次 D322 · Benchmark 构建偶发依赖解析抖动的有限重试
+
+**起点**：tag CI #497「启动 Benchmark」红，根因为 `maven-buildtime-extension:3.0.5`
+偶发 `Failed to read artifact descriptor`（central 200、上轮 #496 success ⇒ transient）。
+
+**改动**：新增 `scripts/lib/buildRetry.mjs`（transient 判据 + 3 次有限重试 + 递增退避）；
+`ci-benchmark.mjs` 的 `build()` 接入且 `main()` 改 `await build()`；新增 6 条守卫判据
+（真 #497 文本、确定性错误不重试、两次后成功、次数用尽、接线 + 反例）。
+
+**验证**：定向 13/13；注入 transient 判据恒 false → 3 pass/3 fail，还原 6/6。
+
+**边界**：不碰引擎与靶场真值，失败仍判红；重试只覆盖可恢复的依赖解析/网络错误。
+
+---
+
+## 2026-11-25 批次 D321 · Release 安装包名规范与校验清单修复
+
+**起点**：v1.4.2 Release 已生成 6 资产，但 NSIS 中文安装包上传后被 GitHub 改为 ASCII 名，
+`SHA256SUMS.txt` 仍记中文名，下载校验会找不到文件（哈希本身正确）。
+
+**改动**：
+- 新增 `scripts/normalize-release-assets.mjs`，Release job 在哈希/上传前将唯一 exe 统一为
+  `sqli-scanner-<version>-x64-setup.exe`；0/多包与非法版本 fail-closed。
+- CI 接在 download-artifact 之后、SBOM/SHA256 之前；releaseWiring 新增 4 判据，合计 10/10。
+- 认证 gh 修正 v1.4.2 的 SHA256SUMS 资产，API 复核 0 哈希/文件名不匹配。
+
+**验证**：定向 10/10、lint/语法/YAML 解析通过；v1.4.2 manifest=1.4.2、6 资产。
+tag CI #497 仅 acceptance 的 Benchmark 启动红，desktop-package/release/docker-publish 均 success。
+
+**自纠**：首版 CI 传 root=`release-assets`（脚本内部还会 join `release-assets`），真 runner 必红；
+接线判据只认脚本名出现过 ⇒ 10/10 假绿。已改传 `.` 并补「解析 CI 参数 → 真 fixture 跑 CLI →
+断言改名与顺序」判据；注入复验 9/10 红、还原 10/10 绿。
+
+**边界**：标签未移动，不改检测行为；后续 tag 自动走新规范步骤。
+
+---
+
 ## 2026-11-25 批次 D320 · v1.4.2 发版（D313–D319 收口）
 
 **起点**：D318/D319 已提交并推送，push CI #494 与 CodeQL #166 均 success；v1.4.1 标签已存在，
