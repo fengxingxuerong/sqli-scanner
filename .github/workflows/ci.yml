@@ -649,6 +649,9 @@ jobs:
           MYSQL_PORT: 3306
           MYSQL_USER: root
           MYSQL_PASSWORD: root
+      # 前置步骤失败时，acceptance 还没机会重写报告；不清理就会上传上一轮的旧结论。
+      - name: 清理旧验收报告（防失败现场张冠李戴）
+        run: rm -f e2e/results/acceptance-report.md
       # [2026-09-25] WAF A/B 真 MySQL 实验**从周度矩阵挪到这里**（原来只在 schedule /
       #   workflow_dispatch 上跑 ⇒ 每次 push 都不验，一周一次的门禁对改动等于没有）。
       #   它是真断言门禁：退出码 0=通过 / 1=判据失败 / 2=连不上 MySQL（显式失败，不静默降级），
@@ -698,6 +701,7 @@ jobs:
           MYSQL_USER: root
           MYSQL_PASSWORD: root
           MYSQL_DATABASE: sqli_lab
+          MYSQL_SECURE_FILE_DIR: /tmp/mysql-fw-lab
         timeout-minutes: 8
       # 红队评测靶场（ground-truth 真值对照 + sqlmap 同题对比）：独立常驻进程，
       # CI 环境可能缺 PostgreSQL（D:/pg-smoke 类本地路径），故失败不阻塞——
@@ -910,6 +914,14 @@ jobs:
             echo "════ recall-lab 基线（前置步骤根因） ════"
             grep -nE "\[FAIL\]|回归失败|must 未命中" e2e/recall-lab/results/recall.md | head -30 || true
           fi
+          if [ -f e2e/api-range-lab/out/api-range-report.json ]; then
+            echo "════ api-range 失败/跳过明细 ════"
+            node -e 'const r=require("./e2e/api-range-lab/out/api-range-report.json"); for (const x of r.results.filter(x=>x.status!=="PASS")) console.log(`${x.status} [${x.group}] ${x.name} — ${x.reason||x.error||""}`)'
+          fi
+          if [ -f logs/engine-api-range.log ]; then
+            echo "════ api-range 引擎日志尾部 ════"
+            tail -80 logs/engine-api-range.log
+          fi
           if [ -f e2e/results/acceptance-report.md ]; then
             echo "════ acceptance 报告尾部 ════"
             tail -30 e2e/results/acceptance-report.md
@@ -976,6 +988,8 @@ jobs:
           path: |
             e2e/results/acceptance-report.md
             e2e/results/last-failure-*.log
+            e2e/api-range-lab/out/api-range-report.json
+            logs/engine-api-range.log
           if-no-files-found: warn
 
   # [真机 WAF 2026-09-27] 唯一能救回「对外 WAF 可信度」的一步。

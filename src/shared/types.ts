@@ -663,7 +663,7 @@ interface ScanEventPayloads {
   point_skipped: { pointId: string; reason: string; note?: string };
   detection_found: DetectionResult & { riskLevel: RiskLevel };
   extraction_progress: { db: string; table: string | null; count: number };
-  scan_completed: ReportModel;
+  scan_completed: { scanId: string; engine: 'builtin' | 'sqlmap'; status: string; finishedAt: string; riskLevel: RiskLevel; vulnCount: number };
   scan_stopped: { scanId: string };
   scan_paused: { scanId: string };
   scan_resumed: { scanId: string };

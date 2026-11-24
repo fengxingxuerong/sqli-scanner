@@ -78,6 +78,23 @@ test('classifySuite：断言通过 → PASS', () => {
   assert.equal(classifySuite({ pass: true }, 'whatever', 0).status, 'PASS');
 });
 
+test('classifySuite：断言通过但子进程非零 → FAIL（退出码不能被文本断言洗绿）', () => {
+  const r = classifySuite({ pass: true }, '漏洞场景检出 11/11；安全场景误报 0', 1);
+  assert.equal(r.status, 'FAIL');
+  assert.match(r.reason, /退出码 1/);
+});
+
+test('classifySuite：断言通过但子进程非零且沙箱未就绪 → BLOCKED', () => {
+  const r = classifySuite({ pass: true }, SHAPE_NO_TRACEBACK, 1);
+  assert.equal(r.status, 'BLOCKED');
+  assert.match(r.reason, /不是被测代码失败/);
+});
+
+test('classifySuite：显式 SKIP 即使子进程非零也保持 SKIP', () => {
+  const r = classifySuite({ pass: true, skipped: true, skipReason: '环境不满足' }, '[SKIP]', 1);
+  assert.equal(r.status, 'SKIP');
+});
+
 test('classifySuite：只跳过未执行断言 → SKIP（不是 PASS，也不进 failed）', () => {
   const r = classifySuite({ pass: true, skipped: true, skipReason: 'secure_file_priv 未放行' }, '[SKIP]', 0);
   assert.equal(r.status, 'SKIP');

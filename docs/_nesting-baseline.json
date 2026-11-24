@@ -15,6 +15,6 @@
     "src/components/DbTree.tsx": 8,
     "src/components/home/HomeRecent.tsx": 7,
     "src/components/scanConfig/EnumerationSection.tsx": 7,
-    "src/hooks/useEvents.ts": 10
+    "src/hooks/useEvents.ts": 8
   }
 }

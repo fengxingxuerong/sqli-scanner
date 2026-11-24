@@ -14,7 +14,8 @@ import { summarizeSkipped } from '../scanHelpers.js';
 import { dbmsEvidenceOf } from '../dbmsEvidence.js';
 // [D202] 报告级指纹汇总（只汇总已采集信号，不主动探测）
 import { buildFingerprint } from './summaryFingerprint.js';
-import { publicReport } from '../scanHelpers.js';
+// [D318] publicReport 导入已移除：终态事件瘦身后不再携带报告本体，
+// 报告改走 GET /scan/:id/report（与重连对账同端点）；⑭ 断言同步收窄。
 // [D181] 只读安全配置审计（对标 sqlmap --audit）
 import { auditPhase } from './auditPhase.js';
 // [2026-09-17] 漏洞条目上下文回填（受影响参数 / 规范化漏洞类型）
@@ -42,8 +43,19 @@ async function finalizeSideEffects(run) {
   // 避免 resume 端在 status=completed 后、落盘前抢读到一个 vulns 为空的半成品会话。
   if (session) await session.finalize(report).catch(() => {});
   s.status = 'completed';
-  // [MERGED: security] scan_completed 事件脱敏：SSE 不再携带 target 凭据
-  eventBus.emit(scanId, 'scan_completed', publicReport(report));
+  // [D318] 终态事件瘦身（P1-4 载荷段）：此前整个 publicReport(report)（可达几 MB）进
+  // SSE 事件 ⇒ 每订阅者序列化 + 500 条回放缓冲持有全报告引用 + 前端 300 条滑窗重复持有。
+  // 瘦身后只带终态元数据，报告本体走 GET /scan/:id/report（与 P1-3 重连对账路径同一端点，
+  // 两条路径数据源统一）。脱敏语义反而升级：事件结构上不再携带任何 target 字段，
+  // 凭据无法进入 SSE 通道（此前是「置空脱敏」，现在是「结构不带」）。
+  eventBus.emit(scanId, 'scan_completed', {
+    scanId,
+    engine: 'builtin',
+    status: 'completed',
+    finishedAt: report.finishedAt,
+    riskLevel: report.riskLevel,
+    vulnCount: Array.isArray(report.vulns) ? report.vulns.length : 0,
+  });
   await sm._maybeClose(ctxBase.httpClient);
   // completed 路径回收扫描上下文（TTL 到期清 scans + eventBus + 限速桶）
   sm._retire(scanId);

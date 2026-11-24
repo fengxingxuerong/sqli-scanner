@@ -327,7 +327,7 @@ test('⑬ 会话 finalize 必须先于 status=completed（顺序反了 resume �
 });
 
 // ⑭ SSE 脱敏：scan_completed 事件不得带 target 凭据
-test('⑭ scan_completed 事件必须脱敏（SSE 不得携带凭据 / 代理 / 连接串）', async () => {
+test('⑭ scan_completed 事件必须脱敏（D318 瘦身后：结构上不携带 target/报告本体）', async () => {
   const h = build();
   try {
     await finalizeReport(h.run);
@@ -337,9 +337,14 @@ test('⑭ scan_completed 事件必须脱敏（SSE 不得携带凭据 / 代理 / 
     for (const secret of ['p@ssw0rd', 'secretcookie', 'secretkey', 'mysql://root:pw@']) {
       assert.ok(!serialized.includes(secret), `凭据泄漏进 SSE：${secret}`);
     }
-    // 脱敏是「置空」不是「删字段」：结构还在，调用方不会因为缺字段崩
-    assert.equal(ev.payload.target.config.auth, null);
-    assert.equal(ev.payload.target.config.proxy, null);
+    // [D318] 瘦身形态：载荷只含终态元数据 —— 「脱敏」从「置空脱敏」升级为「结构不带」，
+    // 凭据连进入 SSE 通道的载体都不存在；报告本体走 GET /scan/:id/report。
+    assert.equal(ev.payload.target, undefined, '瘦身事件不得携带 target 结构');
+    assert.equal(ev.payload.engine, 'builtin');
+    assert.equal(ev.payload.status, 'completed');
+    assert.equal(ev.payload.scanId, h.scanId);
+    assert.equal(ev.payload.finishedAt, h.run.report.finishedAt);
+    assert.equal(ev.payload.vulnCount, 0);
   } finally { h.done(); }
 });
 

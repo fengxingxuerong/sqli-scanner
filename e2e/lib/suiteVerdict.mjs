@@ -59,6 +59,15 @@ export function classifySuite(verdict, out, code) {
   if (skippedOnly) {
     return { status: 'SKIP', reason: verdict.skipReason || verdict.reason || '环境不满足，未执行断言' };
   }
+  if (code !== 0) {
+    if (isSandboxDead(out)) {
+      return {
+        status: 'BLOCKED',
+        reason: '隔离 MySQL 沙箱未能启动（环境条件不满足，本套件一条断言都没执行；不是被测代码失败）',
+      };
+    }
+    return { status: 'FAIL', reason: verdict.reason || `子进程退出码 ${code}，文本断言通过也不能洗绿` };
+  }
   if (verdict.pass) return { status: 'PASS', reason: null };
   if (isSandboxDead(out)) {
     return {

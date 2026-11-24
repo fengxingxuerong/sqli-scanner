@@ -26,6 +26,7 @@ import { dirname, resolve, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 // [D243] 失败取证：从 TAP 里取「用例名 + 断言消息」（not ok 行只有用例名，看不到判据输入量）
 import { extractFailureDetails } from './lib/failureDetail.mjs';
+import { writeTestEvidence } from './lib/testEvidence.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, '..');
@@ -82,7 +83,7 @@ const stripAnsi = (s) => String(s).replace(ANSI_RE, '');
 // execFileSync **只返回 stdout**，stderr 拿不到；而 vitest 在 TTY 探测不确定时会换输出流，
 // 导致「同一条命令上一次拿得到 Tests 行、这一次拿不到」（实测踩到，非确定性）。
 // spawnSync 无论退出码如何都同时给出 stdout + stderr，两个流合并后再解析才稳。
-function run(cmd, cwd) {
+function runDetailed(cmd, cwd) {
   const r = spawnSync(cmd, {
     cwd, shell: true, encoding: 'utf8', windowsHide: true,
     maxBuffer: 64 * 1024 * 1024,
@@ -90,16 +91,25 @@ function run(cmd, cwd) {
   if (r.error) throw r.error;
   // 非零退出（覆盖率低于阈值 / 有用例失败）也照常解析：阈值与用例是否通过由各自原有门禁负责，
   // 本脚本只负责把真实数字取出来。
-  return stripAnsi(`${r.stdout || ''}${r.stderr || ''}`);
+  return {
+    out: stripAnsi(`${r.stdout || ''}${r.stderr || ''}`),
+    code: r.status ?? null,
+  };
 }
 
-function collectFrontend({ coverage }) {
+export function collectFrontend({ coverage, root = ROOT, run = runDetailed }) {
   // [FIX 2026-11-04] 不走 npx：Windows 上 npx 经 cmd shim 派生，实测本机导致 esbuild 服务被中断
   //（"The service is no longer running" / vitest worker "Zone Allocation failed"）——同一套测试
   // 用 node 直跑本地 bin 则 69 files / 579 tests 稳定通过。采集语义不变，只是不再经过 shim。
   // --no-file-parallelism 同步显式传入：覆盖率 + 文件并行在本机会让单 worker 内存爆掉。
-  const vitestBin = resolve(ROOT, 'node_modules/vitest/vitest.mjs');
-  const out = run(`node "${vitestBin}" run${coverage ? ' --coverage' : ''} --no-file-parallelism`, ROOT);
+  const vitestBin = resolve(root, 'node_modules/vitest/vitest.mjs');
+  const command = `node "${vitestBin}" run${coverage ? ' --coverage' : ''} --no-file-parallelism`;
+  const executed = run(command, root);
+  const out = executed.out;
+  if (executed.code !== 0) {
+    const ev = writeTestEvidence({ root, suite: 'frontend', attempt: 'first', command, exitCode: executed.code, output: out });
+    console.warn(`[facts]   前端失败现场：${ev.outputFile}`);
+  }
   const files = out.match(/Test Files\s+(\d+)\s+passed/);
   // vitest 的汇总行有两种词序，且**失败数排在前面**：
   //   全绿：  Tests  452 passed (452)
@@ -109,6 +119,8 @@ function collectFrontend({ coverage }) {
   // 现在两种词序都取，并把 failed 如实带进 pass/tests —— 采集器不许把红洗成"读不到"。
   const line = out.match(/Tests\s+(.+?)\s*\((\d+)\)/);
   if (!line) {
+    const ev = writeTestEvidence({ root, suite: 'frontend', attempt: 'first-unparsed', command, exitCode: executed.code, output: out });
+    console.warn(`[facts]   前端无法解析汇总，现场：${ev.outputFile}`);
     console.error('── 前端测试输出尾部（未能解析 Tests 行）──');
     console.error(out.split('\n').slice(-40).join('\n'));
     throw new Error('前端测试输出里找不到 Tests 行');
@@ -120,6 +132,10 @@ function collectFrontend({ coverage }) {
   const fail = numOf('failed');
   const skipped = numOf('skipped');
   const total = Number(line[2]);
+  if (fail > 0 && executed.code === 0) {
+    const ev = writeTestEvidence({ root, suite: 'frontend', attempt: 'first', command, exitCode: executed.code, output: out });
+    console.warn(`[facts]   前端失败现场：${ev.outputFile}`);
+  }
   const res = {
     files: files ? Number(files[1]) : null,
     tests: total,
@@ -131,6 +147,8 @@ function collectFrontend({ coverage }) {
     // v8 text 报表的总计行：All files | 90.01 | 79.01 | 70.64 | 90.01 |
     const row = out.match(/^All files\s*\|\s*([\d.]+)\s*\|\s*([\d.]+)\s*\|\s*([\d.]+)\s*\|\s*([\d.]+)/m);
     if (!row) {
+      const ev = writeTestEvidence({ root, suite: 'frontend-coverage', attempt: 'first', command, exitCode: executed.code, output: out });
+      console.warn(`[facts]   前端覆盖率失败/无法解析现场：${ev.outputFile}`);
       console.error('── 前端覆盖率报表原文（未能解析 All files 行）──');
       console.error(out.split('\n').filter((l) => l.includes('|') || l.includes('All files')).slice(-40).join('\n'));
       throw new Error('前端覆盖率输出里找不到 All files 行');
@@ -143,7 +161,7 @@ function collectFrontend({ coverage }) {
   return res;
 }
 
-function collectServer({ coverage }) {
+export function collectServer({ coverage, root = ROOT, run = runDetailed }) {
   // [D260 2026-11-06] 用例计数与覆盖率**分两次采集**，各有各的真源：
   //   · 计数走 `npm test` 全量（485 个测试文件全跑，含 6 个用 `?query` 隔离实例的）；
   //   · 覆盖率走 `test:coverage:report`（确定性合并口径，排除那 6 个文件，见
@@ -158,25 +176,34 @@ function collectServer({ coverage }) {
   // 机器上取不到数，等于没有）。同一台机器上「上一次能解析、下一次不能」的不确定性也一并消除。
   // [FIX 2026-11-04] 不走 npm run（同样经 cmd shim 派生；本机实测 npx/npm 派生的子进程会被中断）。
   // 直接取 package.json 里的真实命令执行，判定与阈值来源不变。
-  const serverPkg = JSON.parse(readFileSync(resolve(ROOT, 'server/package.json'), 'utf8'));
+  const serverPkg = JSON.parse(readFileSync(resolve(root, 'server/package.json'), 'utf8'));
   const runScript = (script) => {
     const baseCmd = serverPkg.scripts[script];
     if (!baseCmd) throw new Error(`server/package.json 缺 ${script}`);
-    return run(`${baseCmd} --test-reporter=tap`, resolve(ROOT, 'server'));
+    const command = `${baseCmd} --test-reporter=tap`;
+    const executed = run(command, resolve(root, 'server'));
+    return { ...executed, command };
   };
   const pick = (text, key) => {
     const m = text.match(new RegExp(`^# ${key} (\\d+)$`, 'm'));
     if (!m) throw new Error(`服务端测试输出里找不到 "# ${key}"`);
     return Number(m[1]);
   };
-  let out = runScript('test');
+  const firstRun = runScript('test');
+  let out = firstRun.out;
+  if (!/^# tests \d+$/m.test(out)) {
+    const ev = writeTestEvidence({ root, suite: 'server', attempt: 'first-unparsed', command: firstRun.command, exitCode: firstRun.code, output: out });
+    console.warn(`[facts]   服务端首轮无法解析汇总，现场：${ev.outputFile}`);
+  }
   // [D93 2026-10-17] 单次 fail>0 不直接写进对外口径：全量单测存在偶发 flaky（实测同一提交
   // 连跑 3 次：0/1/0 fail，失败项每次不同），而 README 的「N fail」是**对外事实**。
   // 采一次抖动就把它写成事实，等于让口径随机器负载漂移（本仓最反感的假数据形态）。
   // 判据：fail>0 时**重跑一次**；两次都 fail 才认账。重跑只影响采集，不放宽任何测试断言。
   if (pick(out, 'fail') > 0) {
     const first = pick(out, 'fail');
+    const firstEvidence = writeTestEvidence({ root, suite: 'server', attempt: 'first', command: firstRun.command, exitCode: firstRun.code, output: out });
     console.warn(`[facts] ⚠ 服务端测试首次出现 ${first} fail —— 已重跑一次（flaky 不计入口径；连续失败才是真失败）`);
+    console.warn(`[facts]   首轮完整现场：${firstEvidence.outputFile}`);
     // [D225] 失败取证：把 TAP 的 not ok 行打出来（D225 实测：连续两轮采集 fail=1 却拿不到
     // 用例名，日志里只有汇总数字，复现与定因全靠盲跑）。不改变任何判定，只补可见性。
     // [D243] 追加断言消息：not ok 行**只有用例名**，看不到判据输入量（D242 实测：修 flaky
@@ -191,16 +218,27 @@ function collectServer({ coverage }) {
       }
     };
     printFailures('首轮失败用例', out);
-    out = runScript('test');
+    const retryRun = runScript('test');
+    out = retryRun.out;
+    const retryEvidence = writeTestEvidence({ root, suite: 'server', attempt: 'retry', command: retryRun.command, exitCode: retryRun.code, output: out });
+    console.warn(`[facts]   复跑完整现场：${retryEvidence.outputFile}`);
+    if (!/^# tests \d+$/m.test(out)) {
+      console.warn('[facts]   复跑输出缺 TAP 汇总，后续解析将失败；完整现场已保存');
+    }
     if (pick(out, 'fail') > 0) printFailures('复跑仍失败，用例', out);
   }
   const res = {
     tests: pick(out, 'tests'), pass: pick(out, 'pass'), fail: pick(out, 'fail'), skip: pick(out, 'skipped'),
   };
   if (coverage) {
-    const covOut = runScript('test:coverage:report');
+    const covRun = runScript('test:coverage:report');
+    const covOut = covRun.out;
     // node:test 覆盖率报表总计行：# all files | 88.42 | 72.67 | 75.75 |
     const row = covOut.match(/^#?\s*all files\s*\|\s*([\d.]+)\s*\|\s*([\d.]+)\s*\|\s*([\d.]+)/m);
+    if (covRun.code !== 0 || !row) {
+      const ev = writeTestEvidence({ root, suite: 'server-coverage', attempt: 'first', command: covRun.command, exitCode: covRun.code, output: covOut });
+      console.warn(`[facts]   覆盖率失败/无法解析现场：${ev.outputFile}`);
+    }
     if (!row) {
       console.error('── 服务端覆盖率报表原文（未能解析 all files 行）──');
       console.error(covOut.split('\n').filter((l) => l.includes('|')).slice(-40).join('\n'));
@@ -743,4 +781,6 @@ function main() {
   return failed ? 1 : 0;
 }
 
-process.exit(main());
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  process.exit(main());
+}

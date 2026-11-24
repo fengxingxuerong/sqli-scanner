@@ -1244,33 +1244,9 @@
       "limitLines": 100,
       "limitComplexity": 15
     },
-    "src/hooks/useEvents.ts::<arrow@101>": {
+    "src/hooks/useEvents.ts::<arrow@175>": {
       "lines": 39,
       "complexity": 25,
-      "limitLines": 100,
-      "limitComplexity": 15
-    },
-    "src/hooks/useEvents.ts::<arrow@142>": {
-      "lines": 117,
-      "complexity": 43,
-      "limitLines": 100,
-      "limitComplexity": 15
-    },
-    "src/hooks/useEvents.ts::<arrow@176>": {
-      "lines": 66,
-      "complexity": 28,
-      "limitLines": 100,
-      "limitComplexity": 15
-    },
-    "src/hooks/useEvents.ts::<arrow@55>": {
-      "lines": 199,
-      "complexity": 82,
-      "limitLines": 100,
-      "limitComplexity": 15
-    },
-    "src/hooks/useEvents.ts::useEvents": {
-      "lines": 208,
-      "complexity": 82,
       "limitLines": 100,
       "limitComplexity": 15
     },

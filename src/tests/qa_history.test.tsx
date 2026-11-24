@@ -3,12 +3,13 @@
 // localStorage 容错（损坏 JSON 不崩）、useEvents(scan_completed) 自动落库、
 // 以及 HistoryPage UI 列出/回溯/删除。
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { render, screen, fireEvent, act } from '@testing-library/react';
+import { render, screen, fireEvent, act, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { renderHook } from '@testing-library/react';
 import HistoryPage from '../pages/HistoryPage';
 import { useScanStore } from '../store/scanStore';
 import { useEvents } from '../hooks/useEvents';
+import { apiClient } from '../shared/apiClient';
 import type { ReportModel } from '../shared/types';
 
 function makeReport(scanId: string, target = `http://${scanId}`): ReportModel {
@@ -97,20 +98,30 @@ describe('F-17 useEvents 触发落库', () => {
     vi.unstubAllGlobals();
   });
 
-  it('收到 scan_completed 事件 → saveScanToHistory + status=completed', () => {
+  it('收到 scan_completed 事件 → saveScanToHistory + status=completed', async () => {
     vi.stubGlobal('EventSource', FakeEventSource as any);
     useScanStore.setState({ history: [], status: 'pending', report: null });
     renderHook(() => useEvents('s1'));
 
     const report = makeReport('s1', 'http://s1');
+    // [D318] 终态事件瘦身：事件不再携带报告本体，前端改从 REST 拉取（与重连对账同端点）
+    const getSpy = vi.spyOn(apiClient, 'get').mockResolvedValueOnce(report);
     act(() => {
       FakeEventSource.last.onmessage({
-        data: JSON.stringify({ type: 'scan_completed', scanId: 's1', ts: String(Date.now()), payload: report }),
+        data: JSON.stringify({
+          type: 'scan_completed',
+          scanId: 's1',
+          ts: String(Date.now()),
+          payload: { scanId: 's1', engine: 'builtin', status: 'completed', finishedAt: '', riskLevel: 'Low', vulnCount: 0 },
+        }),
       });
     });
 
-    const h = useScanStore.getState().history;
-    expect(h.find((r) => r.scanId === 's1')).toBeDefined();
+    await waitFor(() => {
+      const h = useScanStore.getState().history;
+      expect(h.find((r) => r.scanId === 's1')).toBeDefined();
+    });
+    expect(getSpy).toHaveBeenCalledWith('/scan/s1/report');
     expect(useScanStore.getState().status).toBe('completed');
     expect(useScanStore.getState().report?.scanId).toBe('s1');
   });

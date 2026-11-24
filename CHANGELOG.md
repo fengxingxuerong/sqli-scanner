@@ -7,19 +7,79 @@
 > 下一批次起的条目写在这里。发版时把本节整体升为 `## [x.y.z] - YYYY-MM-DD` 并补汇总段。
 
 <!-- changelog-index:start -->
-**本段覆盖 5 个批次（D313–D317，2026-11-21 → 2026-11-23）**。正文按时间倒序排列；
+**本段覆盖 7 个批次（D313–D319，2026-11-21 → 2026-11-25）**。正文按时间倒序排列；
 下表是同一批次的索引，便于按编号或关键词定位。**索引只是导航，正文未做任何删改**
 （被推翻的旧结论原样保留，这是本仓的既定口径）。新增批次后跑
 `node scripts/changelog-index.mjs --write` 重生成，`--check` 校验是否过期。
 
 | 批次 | 日期 | 主题 |
 |---|---|---|
+| D319 | 11-25 | 测试证据链与假绿收口 |
+| D318 | 11-23 | 终态 SSE 事件瘦身（P1-4 载荷段收口） |
 | D317 | 11-23 | coverage 与真网解耦 + SSE 序列化单次化 + 平台时序行为表 |
 | D316 | 11-23 | 测试优化：两条 CI flake 根修 + 裁判退出码留痕 + gate:fast 恒跑组补台账检查 |
 | D315 | 11-22 | 五裁判复跑 + 裁判脚本超时崩溃修复 |
 | D314 | 11-21 | 四方言定库补齐 + 方言覆盖双向守卫（外部测试集第三轮） |
 | D313 | 11-21 | sqlmap 官方 tests / 报错语料对账（外部测试集第二轮） |
 <!-- changelog-index:end -->
+
+### 2026-11-25 批次 D319 · 测试证据链与假绿收口
+
+**起点**：全方面测试优化。前次 `2 fail` 只有计数、无用例名；审计进一步定位到三处
+可证实的假绿/取证缺口：acceptance 文本断言可覆盖非零退出码、api-range 前置缺失静默 PASS、
+CI api-range 未放行文件读写且失败 artifact 不完整。
+
+**改动**：
+1. `e2e/lib/suiteVerdict.mjs`：非零退出码不再被 `verdict.pass` 覆盖；沙箱未就绪归 BLOCKED，
+   其余归 FAIL，显式 SKIP 保持最高优先级。新增 3 条回归判据。
+2. `e2e/api-range-lab/cases.mjs`：sqlmap fileWrite/export 缺前置时返回 `__skip` Error，
+   两条从静默 PASS 改为显式 SKIP。CI 为 api-range 注入 `MYSQL_SECURE_FILE_DIR`。
+3. CI acceptance：开跑前删除旧验收报告，避免前置失败时上传上一轮结论；失败回显并上传
+   `api-range-report.json` 与 `logs/engine-api-range.log`。
+4. `facts-sync.mjs`：前端/服务端首轮、服务端复跑、前后端覆盖率失败或无法解析时，
+   通过新模块 `scripts/lib/testEvidence.mjs` 保存完整输出与 JSON 摘要（计数、全部失败用例、
+   断言消息、退出码、命令）。路径 `logs/test-evidence/`，本地忽略、不进入仓库。
+5. `collectFrontend/collectServer` 支持注入 runner，合成 TAP 的集成测试覆盖“首轮红复跑绿”、
+   “两轮红”、“覆盖率红”、“前端红/解析红”，不再只靠静态 wiring。
+
+**验证**：
+- 修前红证：suiteVerdict 20/22、apiRange guard 0/4；修后 22/22，新 guard 合并 12/12。
+- 全量 `npm run test:all`：前端 583/583；服务端 4389（4383 pass / 0 fail / 6 skip）。
+- acceptance 本机 MySQL 8：21 PASS / 3 FAIL / 3 SKIP；三处环境失败在隔离 MariaDB
+  复跑 3/3（pentest 11/11、fileRead、fileWrite）。合并 24 套通过、3 套环境 SKIP、0 未解释失败。
+- api-range 隔离 MySQL 8 + secure_file_priv：**47 PASS / 0 FAIL / 2 SKIP**；两条 SKIP
+  是未安装 sqlmap 的正向用例，已证明不会再记 PASS。
+- 定向 ESLint、语法、facts selftest/check、CI YAML 解析通过；`gate:fast` 24/24，
+  `gate:close` 55/55（含 lint/typecheck/server-coverage）全绿。
+
+**边界**：不放宽检测/覆盖率断言，不改引擎检测行为；acceptance 的 3 套 SKIP 为
+interactsh 外网、Benchmark 未起、AI 真网关未配。测试生成的跟踪报告已还原，临时靶场已收摊。
+
+### 2026-11-23 批次 D318 · 终态 SSE 事件瘦身（P1-4 载荷段收口）
+
+**起点**：路线图短期清账项（11-01 P1-4 的载荷段）；D317 已收掉序列化放大段（WeakMap 单次
+序列化），本批收载荷段——终态事件不再携带报告本体。
+
+**前置调研（安全语义）**：REST `/scan/:id/report` 返回未脱敏内部报告而 SSE 通道脱敏——但
+实测发现 **P1-3 重连对账路径早已在用 REST 全量报告落库**（useEvents reconcile），即「历史
+只存脱敏载荷」的前提本就不成立，两条路径今天就不一致（收到事件=脱敏、错过事件重连=全量）。
+因此本批不新增脱敏面，而是**统一两条路径**：都走 REST 报告；SSE 通道脱敏语义反而升级
+（事件结构上不再携带任何 target 字段，凭据连进入通道的载体都不存在）。
+
+**改动**：
+1. `finalize.js`：scan_completed 载荷从整个 publicReport(report) 改为终态元数据
+   `{scanId, engine, status, finishedAt, riskLevel, vulnCount}`；publicReport 导入移除。
+2. `useEvents.ts`：builtin 终态分支改为拉取 `/scan/:id/report` 后 setReport + saveScanToHistory
+   （照搬 sqlmap 分支与重连对账的既有模式，含会话闸门与拉取失败容错；状态先行置 completed）。
+3. `types.ts`：scan_completed 载荷类型同步瘦身。
+4. 判据：finalize ⑭ 从「置空脱敏」收窄为「结构不带」断言（target 字段不存在 + 终态元数据形态）；
+   useEvents / qa_history 两处落库用例改瘦负载荷 + 拉取 mock。
+
+**验证**：服务端受影响 5 文件 57/57；前端 useEvents+qa_history 20/20；两端 typecheck 零错。
+**收益**：500 条回放缓冲不再持有全报告引用；前端 300 条滑窗不再重复持有报告；
+多订阅者序列化成本随 D317 归零后，载荷本身也不再是大对象。
+**边界**：历史落库数据源统一为 REST 报告（与重连对账/历史详情同源），
+localStorage 凭据面与既有重连路径一致、无新增面；gate:close/acceptance 见本批门禁记录。
 
 ### 2026-11-23 批次 D317 · coverage 与真网解耦 + SSE 序列化单次化 + 平台时序行为表
 

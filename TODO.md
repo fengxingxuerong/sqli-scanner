@@ -5,6 +5,54 @@
 
 ---
 
+## 2026-11-25 批次 D319 · 测试证据链与假绿收口
+
+**起点**：全方面测试优化审计。前次服务端 `2 fail` 快照没有保留用例名；进一步发现
+acceptance 可被子进程非零退出覆盖、api-range 两处环境跳过被记 PASS、CI 的 api-range
+文件读写未注入 secure_file_priv 且失败现场不完整。
+
+**改动**：
+- `suiteVerdict.mjs`：显式 SKIP 仍优先；非零退出码一律 FAIL，沙箱未就绪则 BLOCKED，
+  文本断言通过不再洗绿退出码。
+- `api-range-lab/cases.mjs`：sqlmap fileWrite 与 export 的前置缺失改返回 `__skip` Error，
+   runner 如实记 SKIP；CI 注入 `MYSQL_SECURE_FILE_DIR`，文件读写两条真跑。
+- CI：api-range 开跑前清理旧验收报告；失败回显并上传 api-range JSON 与引擎日志。
+- `facts-sync.mjs` + `testEvidence.mjs`：前端/服务端首轮、服务端复跑、前后端覆盖率
+  失败或无法解析时，完整输出与结构化摘要落 `logs/test-evidence/`；采集函数可注入 runner，
+  用合成 TAP 做真实集成测试。
+
+**验证**：
+- 修前红证：suiteVerdict 20/22（2 条假绿红）、apiRange guard 0/4；修后 22/22、guard 12/12。
+- 全量：前端 583/583；服务端 4389 用例（4383 pass / 0 fail / 6 skip）。
+- acceptance：本机 MySQL 8 环境 21 PASS / 3 FAIL / 3 SKIP；三处失败在隔离 MariaDB 复跑
+  3/3（pentest 11/11、fileRead、fileWrite）。两轮合并 24 套通过、3 套环境 SKIP、0 未解释失败。
+- api-range：隔离 MySQL 8 + secure_file_priv 真跑 **47 PASS / 0 FAIL / 2 SKIP**；
+  SKIP 为未安装 sqlmap 的两条正向用例，旧行为会记 PASS。
+- 语法、定向 ESLint、facts selftest/check、CI YAML 解析通过；`gate:fast` 24/24、
+  `gate:close` 55/55（含 lint/typecheck/server-coverage）全绿。
+
+**边界**：未放宽任何检测/覆盖率断言，未改引擎检测行为；测试生成的跟踪报告已还原，
+  本机靶场与临时数据库已收摊。
+
+---
+
+## 2026-11-23 批次 D318 · 终态 SSE 事件瘦身（P1-4 载荷段收口）
+
+**起点**：路线图短期清账项；D317 已收序列化放大段，本批收载荷段。
+**前置调研**：REST 报告未脱敏、SSE 脱敏——但重连对账路径早已在用 REST 全量落库，
+两条路径本就不一致；本批统一为都走 REST，SSE 脱敏语义升级为「结构不带 target」。
+
+**改动**：
+- finalize.js：scan_completed 载荷改终态元数据（scanId/engine/status/finishedAt/riskLevel/
+  vulnCount）；报告本体走 GET /scan/:id/report（与重连对账同端点）。
+- useEvents.ts：builtin 终态分支照搬 sqlmap/对账模式拉取后落库（含会话闸门与容错）。
+- types.ts 载荷类型瘦身；finalize ⑭ 收窄为「结构不带」断言；useEvents/qa_history 落库用例改瘦负载荷。
+
+**验证**：服务端受影响 5 文件 57/57；前端 20/20；两端 typecheck 零错；门禁见本批记录。
+**边界**：历史落库数据源与既有重连路径同源，无新增脱敏面。
+
+---
+
 ## 2026-11-23 批次 D317 · coverage 与真网解耦 + SSE 序列化单次化 + 平台时序行为表
 
 **起点**：路线图《下一步进步空间-2026-11-23》短期清账；同日 gate:close 的 server-coverage

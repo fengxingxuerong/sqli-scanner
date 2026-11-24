@@ -1037,8 +1037,9 @@ test('sqlmap', 'POST /api/sqlmap/start：环境缺 sqlmap 时如实失败（不�
 test('sqlmap', 'POST /api/sqlmap/start --file-write：真写文件到 secure_file_priv 目录（文件系统侧断言）', async (ctx) => {
   const st = await ctx.get('/api/sqlmap/status');
   if (st.json?.data?.available !== true || !SECURE_DIR) {
-    ctx.note('sqlmap.fileWrite', 'SKIP:缺 sqlmap 或 MYSQL_SECURE_FILE_DIR');
-    return;
+    const reason = 'SKIP:缺 sqlmap 或 MYSQL_SECURE_FILE_DIR';
+    ctx.note('sqlmap.fileWrite', reason);
+    return Object.assign(new Error(reason), { __skip: true });
   }
   const fs = await import('node:fs');
   const path = await import('node:path');
@@ -1101,8 +1102,9 @@ test('sqlmap', 'POST /api/sqlmap/start --file-write：真写文件到 secure_fil
 test('sqlmap', 'GET /api/sqlmap/:id/report/export 与 /diff：真实报告的导出与自比对（交付面对齐内置引擎）', async (ctx) => {
   const scan = ctx.state.sqlmapScan;
   if (!scan) {
-    ctx.note('sqlmap.export', 'SKIP:前置 fileWrite 用例未产出真实扫描（环境缺 sqlmap 或沙箱）');
-    return;
+    const reason = 'SKIP:前置 fileWrite 用例未产出真实扫描（环境缺 sqlmap 或沙箱）';
+    ctx.note('sqlmap.export', reason);
+    return Object.assign(new Error(reason), { __skip: true });
   }
   const id = scan.scanId;
   const md = await ctx.get(`/api/sqlmap/${id}/report/export?format=md`);

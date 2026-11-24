@@ -125,14 +125,20 @@ describe('useEvents · 事件流处理', () => {
     expect(useScanStore.getState().wafSuggestion).toEqual({ vendor: 'cloudflare', plugins: ['space2comment'] });
   });
 
-  it('scan_completed（builtin）：报告快照落库 + 状态 completed', async () => {
+  it('scan_completed（builtin）：事件瘦身 → 拉取报告落库 + 状态 completed', async () => {
     startSessionBuiltin();
+    mockedGet.mockResolvedValueOnce(REPORT); // [D318] 终态事件不再携带报告，前端拉取
     renderHook(() => useEvents('s1'));
-    act(() => MockEventSource.latest.onmessage!({ data: JSON.stringify({ type: 'scan_completed', payload: REPORT }) }));
+    act(() => MockEventSource.latest.onmessage!({
+      data: JSON.stringify({
+        type: 'scan_completed',
+        payload: { scanId: 's1', engine: 'builtin', status: 'completed', finishedAt: '2026-01-01T00:00:30Z', riskLevel: 'Low', vulnCount: 0 },
+      }),
+    }));
     await waitFor(() => expect(useScanStore.getState().status).toBe('completed'));
-    const st = useScanStore.getState();
-    expect(st.report!.scanId).toBe('s1');
-    expect(st.history).toHaveLength(1);
+    expect(mockedGet).toHaveBeenCalledWith('/scan/s1/report');
+    await waitFor(() => expect(useScanStore.getState().report!.scanId).toBe('s1'));
+    await waitFor(() => expect(useScanStore.getState().history).toHaveLength(1));
   });
 
   it('scan_error(SCAN_NOT_FOUND)：报告对账后置 completed，不误标 error', async () => {
@@ -198,7 +204,11 @@ describe('useEvents · 断线重连', () => {
     act(() => vi.advanceTimersByTime(10000));
     expect(MockEventSource.instances).toHaveLength(1); // 定时器已清，无新连接
   });
+});
 
+// [D318] 完成态处理独立成块：终态报告拉取/落库与断线重连是两类职责，
+// 拆开后断线重连块回到软上限内，完成态边界自成一组（非为降指标机械搬移）。
+describe('useEvents · 完成态报告处理', () => {
   it('scan_completed（sqlmap）：拉取最终报告包装落库（P0-U1 闭环）', async () => {
     act(() => useScanStore.getState().startSession('s1', 'sqlmap'));
     renderHook(() => useEvents('s1'));
@@ -228,5 +238,48 @@ describe('useEvents · 断线重连', () => {
     // 不崩溃、状态仍为 completed（由 scan_completed 事件本身置位）
     await waitFor(() => expect(useScanStore.getState().status).toBe('completed'));
     expect(useScanStore.getState().report).toBeNull();
+  });
+
+  it('builtin 完成态拉报告失败：不阻塞收尾、连接关闭、不写空报告与历史', async () => {
+    startSessionBuiltin();
+    renderHook(() => useEvents('s1'));
+    const es = MockEventSource.latest;
+    mockedGet.mockRejectedValueOnce(new Error('gone'));
+    act(() => es.onmessage!({
+      data: JSON.stringify({
+        type: 'scan_completed',
+        payload: { scanId: 's1', engine: 'builtin', status: 'completed', finishedAt: '2026-01-01T00:00:30Z', riskLevel: 'Low', vulnCount: 0 },
+      }),
+    }));
+    // 状态由事件同步置位（不依赖报告请求成败）
+    expect(useScanStore.getState().status).toBe('completed');
+    expect(es.close).toHaveBeenCalled();
+    await waitFor(() => expect(mockedGet).toHaveBeenCalledWith('/scan/s1/report'));
+    // 微任务排空后：失败静默，不写空报告、不写历史
+    await act(async () => { await Promise.resolve(); });
+    expect(useScanStore.getState().report).toBeNull();
+    expect(useScanStore.getState().history).toHaveLength(0);
+  });
+
+  it('builtin 报告返回前会话已切换：丢弃迟到写入，不污染新会话与历史', async () => {
+    startSessionBuiltin();
+    renderHook(() => useEvents('s1'));
+    // deferred Promise：让 /scan/s1/report 挂起，先切走会话再放行旧请求
+    let resolveReport!: (r: any) => void;
+    mockedGet.mockReturnValueOnce(new Promise((resolve) => { resolveReport = resolve; }) as any);
+    act(() => MockEventSource.latest.onmessage!({
+      data: JSON.stringify({
+        type: 'scan_completed',
+        payload: { scanId: 's1', engine: 'builtin', status: 'completed', finishedAt: '2026-01-01T00:00:30Z', riskLevel: 'Low', vulnCount: 0 },
+      }),
+    }));
+    // 报告未返回时启动新扫描会话 s2
+    act(() => useScanStore.getState().startSession('s2', 'builtin'));
+    // 放行 s1 的迟到报告
+    await act(async () => { resolveReport(REPORT); await Promise.resolve(); });
+    // 会话闸门丢弃旧报告：report 不覆盖、history 不写入
+    expect(useScanStore.getState().scanId).toBe('s2');
+    expect(useScanStore.getState().report).toBeNull();
+    expect(useScanStore.getState().history).toHaveLength(0);
   });
 });

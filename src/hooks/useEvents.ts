@@ -41,6 +41,64 @@ const MAX_RETRIES = 5;
 // 被误判为失败（扫描进度事件持续流入，不存在 3s 静默）。
 const STABLE_OPEN_MS = 3000;
 
+// [D318] 终态报告处理提升到模块顶层：此前 builtin/sqlmap 两条异步闭包内联在 onmessage 中，
+// 其 token 被逐层计入外层函数（complexity-guard 按范围统计嵌套闭包），
+// 使 useEvents/useEffect/open/onmessage 四层同时超基线（8 项违规）。
+// 提升后 onmessage 只负责分发，报告拉取/会话闸门/落库各自成函数。
+type ReportActions = Pick<
+  ReturnType<typeof useScanStore.getState>,
+  'setReport' | 'saveScanToHistory'
+>;
+
+// 会话闸门：store.scanId 为空（无会话/测试直呼）视为放行；非空且不等于本次 scanId
+// （已启动新扫描）则丢弃旧扫描的迟到写入，避免旧报告污染新会话。
+function isCurrentScan(scanId: string): boolean {
+  const cur = useScanStore.getState().scanId;
+  return !cur || cur === scanId;
+}
+
+// builtin 终态：[D318] SSE 事件已瘦身（不再携带报告本体），报告本体经 REST 拉取，
+// 与 P1-3 重连对账同一端点、同一数据源；拉取失败不阻塞收尾（状态已由事件置 completed）。
+async function fetchAndStoreBuiltinReport(scanId: string, { setReport, saveScanToHistory }: ReportActions): Promise<void> {
+  try {
+    const report = await apiClient.get<ReportModel>(`/scan/${scanId}/report`);
+    if (!isCurrentScan(scanId)) return;
+    setReport(report);
+    // 扫描完成：持久化完整报告快照到本地历史库（支持离线回溯）
+    saveScanToHistory(report);
+  } catch {
+    // 报告拉取失败：不阻塞收尾，前端仍保有实时事件流视图
+  }
+}
+
+// sqlmap 终态：拉取最终报告（日志 + 命中漏洞）包装落库，使高级模式可回溯/可导出。
+// sqlmap 报告不含目标信息，从 scan_started 事件载荷里取目标 URL/方法。
+async function fetchAndStoreSqlmapReport(scanId: string, { setReport, saveScanToHistory }: ReportActions): Promise<void> {
+  try {
+    const raw = await apiClient.get<Partial<SqlmapReportData>>(`/sqlmap/${scanId}/report`);
+    const started = useScanStore.getState().events.find((e) => e.type === 'scan_started');
+    const t = (started?.payload as { target?: { url?: string; method?: MethodType } } | undefined)?.target;
+    const wrapped = wrapSqlmapReport(scanId, raw, { targetUrl: t?.url, method: t?.method });
+    if (!isCurrentScan(scanId)) return;
+    setReport(wrapped);
+    saveScanToHistory(wrapped);
+  } catch {
+    // 报告拉取失败：不阻塞收尾，前端仍保有实时日志视图
+  }
+}
+
+// 订阅会话依赖的 store 稳定 action 引用（zustand create() 创建一次后引用恒定）。
+// 集中成一个对象传入顶层 subscribeScanEvents：避免 Hook 主体为取闭包而内联整个会话状态机。
+interface EventsActions {
+  addEvent: ReturnType<typeof useScanStore.getState>['addEvent'];
+  setStatus: ReturnType<typeof useScanStore.getState>['setStatus'];
+  setReport: ReturnType<typeof useScanStore.getState>['setReport'];
+  clearEvents: ReturnType<typeof useScanStore.getState>['clearEvents'];
+  setWafSuggestion: ReturnType<typeof useScanStore.getState>['setWafSuggestion'];
+  clearWafSuggestion: ReturnType<typeof useScanStore.getState>['clearWafSuggestion'];
+  saveScanToHistory: ReturnType<typeof useScanStore.getState>['saveScanToHistory'];
+}
+
 // SSE 订阅 Hook：订阅指定扫描的实时进度事件并写入 store
 export function useEvents(scanId: string | null) {
   // P1-4：仅订阅稳定 action 引用（zustand create() 创建一次后引用恒定，选择器不触发重渲染）
@@ -52,8 +110,24 @@ export function useEvents(scanId: string | null) {
   const clearWafSuggestion = useScanStore((s) => s.clearWafSuggestion);
   const saveScanToHistory = useScanStore((s) => s.saveScanToHistory);
 
+  // [D318] 会话状态机整体移到顶层 subscribeScanEvents：
+  // complexity-guard 按「有效行数+圈复杂度」特征把匿名函数认回基线（非行号），
+  // 内联巨型 effect 会让 reconcile/open/onmessage 被外层吞并、无法认领基线 → 误报超硬上限。
+  // Hook 主体只负责取 action 引用 + 挂载/卸载，会话逻辑独立成可测函数。
   useEffect(() => {
     if (!scanId) return;
+    return subscribeScanEvents(scanId, {
+      addEvent, setStatus, setReport, clearEvents,
+      setWafSuggestion, clearWafSuggestion, saveScanToHistory,
+    });
+  }, [scanId, addEvent, setStatus, setReport, clearEvents, saveScanToHistory, setWafSuggestion, clearWafSuggestion]);
+}
+
+// 建立 SSE 订阅会话（独立于 React 生命周期，便于单测与复杂度拆分）。
+// 返回清理函数：关闭连接、清退避/稳定定时器。
+function subscribeScanEvents(scanId: string, actions: EventsActions): () => void {
+  const { addEvent, setStatus, setReport, clearEvents, setWafSuggestion, clearWafSuggestion, saveScanToHistory } = actions;
+  {
     // [P0-FIX] 同会话重挂载（扫描进行中切走页面再返回，路由懒加载卸载→重挂载）不清空进度：
     // 原实现无条件 clearEvents() + clearWafSuggestion()，返回后进度条归零、已测点数丢失，
     // 且重连从 lastSeq=0 重放造成时间线重复行。仅当「新会话 / 无事件 / 事件属于其它会话」才清空
@@ -139,6 +213,69 @@ export function useEvents(scanId: string | null) {
       }
     };
 
+    // [D318] 消息处理提升为具名函数（subscribeScanEvents 作用域）：
+    // 不再内联在 open 里，避免 open 把 onmessage 的分支全吞进自身复杂度。
+    function handleMessage(current: EventSource, ev: MessageEvent) {
+      let data: ScanEvent;
+      try {
+        data = JSON.parse(ev.data) as ScanEvent;
+      } catch {
+        return; // 坏载荷跳过，不中断连接
+      }
+      // P2-SSE：推进重连游标（服务端为每条事件附带单调递增 seq）
+      if (typeof (data as { seq?: number }).seq === 'number' && Number.isFinite((data as { seq?: number }).seq)) {
+        lastSeq = Math.max(lastSeq, (data as { seq?: number }).seq as number);
+      }
+      addEvent(data);
+
+      // WAF 指纹识别结果（识别到 WAF 时）：写入 store 供扫描页展示推荐组合（仅推荐，不自动套用）
+      if (data.type === 'waf_detected' && data.payload) {
+        setWafSuggestion(data.payload);
+      }
+
+      if (data.type === 'scan_completed') {
+        setStatus('completed');
+        // [D318] 报告拉取/落库已提升到顶层 fetchAndStore*Report（会话闸门同款）；
+        // 拉取失败不阻塞收尾（状态已置 completed），重连对账/历史详情仍可补。
+        if (nsEngine === 'builtin') {
+          void fetchAndStoreBuiltinReport(scanId, { setReport, saveScanToHistory });
+        } else if (nsEngine === 'sqlmap') {
+          void fetchAndStoreSqlmapReport(scanId, { setReport, saveScanToHistory });
+        }
+        current.close();
+      } else if (data.type === 'scan_stopped') {
+        setStatus('stopped');
+        current.close();
+      } else if (data.type === 'scan_paused') {
+        // [P0-FIX] 扫描暂停：更新状态但不关闭 SSE（等待恢复）
+        setStatus('paused');
+      } else if (data.type === 'scan_resumed') {
+        setStatus('running');
+      } else if (data.type === 'scan_error') {
+        handleScanError(current, data);
+      }
+    }
+
+    // scan_error：P2-SSE（M9）命名空间被回收（终态 TTL 后 dispose）时后端推「扫描不存在或已结束」，
+    // 已完成的扫描不应显示为错误态 —— 先拉报告对账，仅当报告不可得且仍处 running 时才置 error。
+    // 优先用后端携带的 code 判断（SCAN_NOT_FOUND=2001），兼容旧后端无 code 时回退字符串匹配。
+    function handleScanError(current: EventSource, data: ScanEvent) {
+      const payload = data.payload as { message?: string; code?: number };
+      const isNotFound =
+        payload.code === ErrorCode.SCAN_NOT_FOUND ||
+        (!payload.code && /不存在|已结束/.test(payload.message ?? ''));
+      if (isNotFound) {
+        void reconcile().then(() => {
+          const cur = useScanStore.getState();
+          if (cur.scanId && cur.scanId !== scanId) return;
+          if (cur.status === 'running') setStatus('error');
+        });
+      } else {
+        setStatus('error');
+      }
+      current.close();
+    }
+
     const open = () => {
       if (disposed) return;
       // P2-SSE：每次（重）开连接按当前游标构建 URL ——
@@ -173,122 +310,43 @@ export function useEvents(scanId: string | null) {
         firstOpen = false;
       };
 
-      current.onmessage = (ev) => {
-        let data: ScanEvent;
-        try {
-          data = JSON.parse(ev.data) as ScanEvent;
-        } catch {
-          return; // 坏载荷跳过，不中断连接
-        }
-        // P2-SSE：推进重连游标（服务端为每条事件附带单调递增 seq）
-        if (typeof (data as { seq?: number }).seq === 'number' && Number.isFinite((data as { seq?: number }).seq)) {
-          lastSeq = Math.max(lastSeq, (data as { seq?: number }).seq as number);
-        }
-        addEvent(data);
+      current.onmessage = (ev) => handleMessage(current, ev);
 
-        // WAF 指纹识别结果（识别到 WAF 时）：写入 store 供扫描页展示推荐组合（仅推荐，不自动套用）
-        if (data.type === 'waf_detected' && data.payload) {
-          setWafSuggestion(data.payload);
-        }
-
-        if (data.type === 'scan_completed') {
-          setStatus('completed');
-          if (nsEngine === 'builtin' && data.payload) {
-            setReport(data.payload);
-            // 扫描完成：持久化完整报告快照到本地历史库（支持离线回溯）
-            saveScanToHistory(data.payload);
-          } else if (nsEngine === 'sqlmap') {
-            // P0-U1 闭环：sqlmap 模式拉取最终报告（日志 + 命中漏洞），
-            // 包装为前端可渲染视图并落库，使高级模式从「只能看实时日志」变为可回溯/可导出。
-            // P1-5：写入前校验仍处于同一扫描会话，避免旧扫描报告污染新会话。
-            void (async () => {
-              try {
-                const raw = await apiClient.get<Partial<SqlmapReportData>>(
-                  `/sqlmap/${scanId}/report`
-                );
-                // sqlmap 报告不含目标信息，从 scan_started 事件载荷里取目标 URL/方法
-                const started = useScanStore
-                  .getState()
-                  .events.find((e) => e.type === 'scan_started');
-                const t = (started?.payload as { target?: { url?: string; method?: MethodType } } | undefined)?.target;
-                const wrapped = wrapSqlmapReport(scanId, raw, {
-                  targetUrl: t?.url,
-                  method: t?.method,
-                });
-                // P1-5：store.scanId 为空（无会话 / 测试直呼）视为放行；
-                // 非空且不等于本次 scanId（已启动新扫描）则丢弃。
-                const cur = useScanStore.getState();
-                if (cur.scanId && cur.scanId !== scanId) return;
-                setReport(wrapped);
-                saveScanToHistory(wrapped);
-              } catch {
-                // 报告拉取失败：不阻塞收尾，前端仍保有实时日志视图
-              }
-            })();
-          }
-          current.close();
-        } else if (data.type === 'scan_stopped') {
-          setStatus('stopped');
-          current.close();
-        } else if (data.type === 'scan_paused') {
-          // [P0-FIX] 扫描暂停：更新状态但不关闭 SSE（等待恢复）
-          setStatus('paused');
-        } else if (data.type === 'scan_resumed') {
-          setStatus('running');
-        } else if (data.type === 'scan_error') {
-          // P2-SSE（M9）：命名空间被回收（终态 TTL 后 dispose）时后端推「扫描不存在或已结束」，
-          // 已完成的扫描不应显示为错误态 —— 先拉报告对账，仅当报告不可得且仍处 running 时才置 error。
-          // 优先用后端携带的 code 判断（SCAN_NOT_FOUND=2001），兼容旧后端无 code 时回退字符串匹配。
-          const payload = data.payload as { message?: string; code?: number };
-          const isNotFound =
-            payload.code === ErrorCode.SCAN_NOT_FOUND ||
-            (!payload.code && /不存在|已结束/.test(payload.message ?? ''));
-          if (isNotFound) {
-            void reconcile().then(() => {
-              const cur = useScanStore.getState();
-              if (cur.scanId && cur.scanId !== scanId) return;
-              if (cur.status === 'running') setStatus('error');
-            });
-          } else {
-            setStatus('error');
-          }
-          current.close();
-        }
-      };
-
-      // P1-3：手动接管重连（浏览器默认自动重连无次数上限、无退避控制）。
-      // 收到错误即关闭当前连接（阻止浏览器内置重连），指数退避后重开；
-      // 连续失败超过 MAX_RETRIES 次 → 置 status=error 并追加提示事件。
-      current.onerror = () => {
-        if (es !== current) return; // 旧实例的迟到回调（当前连接已被替换/关闭），忽略
-        es?.close();
-        es = null;
-        // [P0-FIX] 这次连接没能稳定存活 ⇒ 取消待归零的定时器，让 retryCount 继续累加
-        if (stableTimer !== null) {
-          window.clearTimeout(stableTimer);
-          stableTimer = null;
-        }
-        retryCount += 1;
-        if (retryCount > MAX_RETRIES) {
-          const cur = useScanStore.getState();
-          if (cur.scanId && cur.scanId !== scanId) return; // 会话已切换，不再兜底
-          if (cur.status === 'running') {
-            setStatus('error');
-            addEvent({
-              type: 'scan_error',
-              scanId,
-              ts: new Date().toISOString(),
-              payload: {
-                message: i18n.t('common.sseReconnectFailed', { max: MAX_RETRIES }),
-              },
-            } as ScanEvent);
-          }
-          return;
-        }
-        const delay = Math.min(1000 * 2 ** (retryCount - 1), 8000); // 1s/2s/4s/8s/8s
-        backoffTimer = window.setTimeout(open, delay);
-      };
+      current.onerror = () => handleError(current);
     };
+
+    // P1-3：手动接管重连（浏览器默认自动重连无次数上限、无退避控制）。
+    // 收到错误即关闭当前连接（阻止浏览器内置重连），指数退避后重开；
+    // 连续失败超过 MAX_RETRIES 次 → 置 status=error 并追加提示事件。
+    function handleError(current: EventSource) {
+      if (es !== current) return; // 旧实例的迟到回调（当前连接已被替换/关闭），忽略
+      es?.close();
+      es = null;
+      // [P0-FIX] 这次连接没能稳定存活 ⇒ 取消待归零的定时器，让 retryCount 继续累加
+      if (stableTimer !== null) {
+        window.clearTimeout(stableTimer);
+        stableTimer = null;
+      }
+      retryCount += 1;
+      if (retryCount > MAX_RETRIES) {
+        const cur = useScanStore.getState();
+        if (cur.scanId && cur.scanId !== scanId) return; // 会话已切换，不再兜底
+        if (cur.status === 'running') {
+          setStatus('error');
+          addEvent({
+            type: 'scan_error',
+            scanId,
+            ts: new Date().toISOString(),
+            payload: {
+              message: i18n.t('common.sseReconnectFailed', { max: MAX_RETRIES }),
+            },
+          } as ScanEvent);
+        }
+        return;
+      }
+      const delay = Math.min(1000 * 2 ** (retryCount - 1), 8000); // 1s/2s/4s/8s/8s
+      backoffTimer = window.setTimeout(open, delay);
+    }
 
     open();
 
@@ -305,5 +363,5 @@ export function useEvents(scanId: string | null) {
         stableTimer = null;
       }
     };
-  }, [scanId, addEvent, setStatus, setReport, clearEvents, saveScanToHistory, setWafSuggestion, clearWafSuggestion]);
+  }
 }

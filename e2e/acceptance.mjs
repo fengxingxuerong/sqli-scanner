@@ -1207,7 +1207,8 @@ for (const s of selected) {
   }
   process.stdout.write(`▶  运行  ${s.title} ... `);
   const r = await s.run();
-  // 断言只吃事实数字；子进程非零退出但断言通过（如脚本用退出码表达 SKIP）不判失败
+  // 文本断言与子进程退出码必须同时成立；非零退出不能被“数字看起来通过”覆盖。
+  // 显式 SKIP 仍优先，由 classifySuite 保留第三态。
   const verdict = s.assert(r.out);
   // [SKIP-FIX 2026-09-19] 第三态：断言根本没执行就是 SKIP，不是 PASS。
   // 原实现 `pass: passed || skipped` 让 fileRead / fileWrite 在 secure_file_priv=NULL 时以
