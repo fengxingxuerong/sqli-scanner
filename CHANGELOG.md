@@ -7,18 +7,43 @@
 > 下一批次起的条目写在这里。发版时把本节整体升为 `## [x.y.z] - YYYY-MM-DD` 并补汇总段。
 
 <!-- changelog-index:start -->
-**本段覆盖 4 个批次（D321–D324，2026-11-25 → 2026-11-26）**。正文按时间倒序排列；
+**本段覆盖 5 个批次（D321–D325，2026-11-25 → 2026-11-26）**。正文按时间倒序排列；
 下表是同一批次的索引，便于按编号或关键词定位。**索引只是导航，正文未做任何删改**
 （被推翻的旧结论原样保留，这是本仓的既定口径）。新增批次后跑
 `node scripts/changelog-index.mjs --write` 重生成，`--check` 校验是否过期。
 
 | 批次 | 日期 | 主题 |
 |---|---|---|
+| D325 | 11-26 | BooleanBlindDetector 贴线大文件主动拆分 |
 | D324 | 11-26 | Dependabot 依赖债清账（绿组合并 + engine 组 rebase） |
 | D323 | 11-25 | 测试失败证据有界保留 |
 | D322 | 11-25 | Benchmark 构建偶发依赖解析抖动的有限重试 |
 | D321 | 11-25 | Release 安装包名规范与校验清单失配修复 |
 <!-- changelog-index:end -->
+
+### 2026-11-26 批次 D325 · BooleanBlindDetector 贴线大文件主动拆分
+
+**起点**：11-23 路线图优先级 7。拆分前 `BooleanBlindDetector.js` 1196 行，距 arch 1200
+硬上限仅 4 行——下一批 detector 改动即逼出基线豁免（「豁免一次锚就松一次」）。
+
+**改动**：
+- 新建 `server/src/engine/detectorSupport/booleanResponse.js`（229 行）：14 个无实例状态依赖的
+  响应比对纯函数（`_similar` / `_stableDiffJudge` / `_diffSpan` / `_isMeaningfulDiff` /
+  `_contentLengthOf` / `_lengthDiffer` / `_isWs` 等）连同 `numericNormalized` / `isWsChar` /
+  `WS_RARE` 完整搬入；**判据注释按原文保留**，不因搬移丢失误报根因。
+- 原类 14 处改为单行薄委托（`_bodyOf(r) { return bodyOf(r); }`），类内与测试侧
+  `det._similar(...)` 调用点零改动；原文件 1196 → **1055 行**（留 145 行改动余量）。
+- 纯搬移对拍：临时 harness 用 2800 组随机输入（空串 / 大 body / 空白 / Unicode / 动态数字 /
+  状态码组合）比对旧类原型方法与新模块导出，**MISMATCH=0**；harness 用完即删。
+
+**验证**：`server npm test` 4402 / 4396 pass / 0 fail / 6 skip；缺陷注入（`similar(a,a)→false`）
+后 29 用例中 2 个真红、备份恢复后 29/29 回绿（证明委托路径可达）；complexity / arch / deadcode /
+lint（0 error / 4 既存 warning）/ typecheck / facts:check / gate:fast 17/17 全绿。未改测试文件与
+README 数字，facts 指纹无漂移，不重采 coverage（避开 D324 登记的本机假数据陷阱）。
+
+**边界**：TargetParser（1190）/ ReportAI（1178）仍贴线，留后续批次按同样职责线拆；本批无能力面变化，不带靶场检出数字。
+
+---
 
 ### 2026-11-26 批次 D324 · Dependabot 依赖债清账（绿组合并 + engine 组 rebase）
 

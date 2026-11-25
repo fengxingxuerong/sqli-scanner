@@ -5,6 +5,37 @@
 
 ---
 
+## 2026-11-26 批次 D325 · BooleanBlindDetector 贴线大文件主动拆分
+
+**起点**：11-23 路线图优先级 7「贴线大文件主动拆分」。拆分前 `BooleanBlindDetector.js`
+**1196 行，距 arch 1200 硬上限仅 4 行**；下一批 detector 改动即触发基线豁免决策
+（「豁免一次锚就松一次」）。本批只做结构搬移，不改变任何检测判据。
+
+**改动**：
+- 新建 `server/src/engine/detectorSupport/booleanResponse.js`（229 行）：把 14 个无实例状态依赖的
+  响应比对/相似度纯函数（`_similar` / `_stableDiffJudge` / `_diffSpan` / `_isMeaningfulDiff` /
+  `_contentLengthOf` / `_lengthDiffer` / `_isWs` 等）连同顶部 `numericNormalized` / `isWsChar` /
+  `WS_RARE` 完整搬入，**判据注释按原文保留**（每次误报根因不因搬移丢失）。
+- 原类 14 个方法改为单行薄委托（`_bodyOf(r) { return bodyOf(r); }` 形态），**类内与测试侧
+  `det._similar(...)` 等调用点零改动**；原文件 1196 → **1055 行**（留 145 行改动余量）。
+- 纯搬移证据：临时 harness 对旧类原型方法与新模块导出的 14 个函数做 2800 组随机输入对拍
+  （含空串 / 大 body / 空白 / Unicode / 动态数字 / 状态码组合），**MISMATCH=0**；harness 用完即删。
+
+**验证**：
+- `server npm test` 4402 用例 / 4396 pass / 0 fail / 6 skip。
+- 缺陷注入复验：注入 `similar(a,a) → false` 后 `booleanStability` / `a-class-hardening` 等
+  29 用例中 **2 个真红**，证明委托路径可达；用备份恢复后 29/29 回绿。
+- `complexity-guard` / `arch-guard` / `deadcode-guard` / `lint`（0 error / 4 既存 warning）/
+  `typecheck` / `facts:check` / `gate:fast` 17/17 全绿。本批未改测试文件与 README 数字，
+  facts 指纹无漂移，故不重采 coverage（避开 D324 已登记的本机假数据陷阱）。
+
+**边界**：
+- 目标 Parser（1190）与 ReportAI（1178）仍贴线；本报告只处置评价点名的
+  BooleanBlindDetector，其余留后续批次按同样「纯函数/职责线」拆法。
+- 本批纯结构重构，无能力面变化；不带靶场检出率数字。
+
+---
+
 ## 2026-11-26 批次 D324 · Dependabot 依赖债清账（绿组合并 + engine 组 rebase）
 
 **起点**：11-23 路线图优先级 2「Dependabot 10 PR 清账」。远端实读发现已涨到 16 个开放 PR
