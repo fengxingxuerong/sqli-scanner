@@ -5,6 +5,34 @@
 
 ---
 
+## 2026-11-26 批次 D326 · TargetParser 表单解析族主动拆分
+
+**起点**：11-23 路线图优先级 7 的第二块。D325 拆 BooleanBlindDetector 后，
+`TargetParser.js` 以 **1190 行**（距 1200 硬上限 10 行）成为最贴线文件。
+沿用 D325 的「无状态纯函数族整体搬移 + 原类薄委托」套路，避免基线豁免。
+
+**改动**：
+- 新建 `server/src/engine/formParse.js`（169 行）：`_parseForms` / `_collectInputs` /
+  `_collectTextareas` / `_collectSelects` / `_urlWithValues` 五个方法 + 模块级 `CSRF_RE` /
+  `pickSelectValue` 完整搬入；内部 `this._attr` 改为直接调共享 `attrValue`（D247 已收敛的单一真源），
+  **D120/D171/D168 判据注释按原文保留**。
+- TargetParser 1190 → **1088 行**（留 112 行余量）；5 处改单行薄委托，类内
+  `this._parseForms` 与类外 `parser._parseForms` / `parser._urlWithValues` 调用点零改动。
+
+**验证**：
+- 对拍：临时 harness 2000 组随机表单 HTML（input/textarea/select/option 各形态、属性引号变化、
+  非法 base URL）比对旧类原型 vs 新模块导出，**MISMATCH=0**；harness 用完即删。
+- `server npm test` 4402 用例 / 4396 pass / 0 fail / 6 skip。
+- 缺陷注入复验：注入 `enctype → ''` 后 D168 的「enctype=multipart 被记录」**真红**（9 用例 1 fail），
+  备份恢复后 9/9 回绿，证明委托路径可达。（首轮注入 `buttonNames` 拼后缀 9/9 全绿 = 判据不可达，
+  已换到被断言字段重做——注入点必须让目标路径真不可达。）
+- complexity / arch / deadcode / lint（0 error / 4 既存 warning）/ typecheck / facts:check /
+  gate:fast 17/17 全绿。
+
+**边界**：`ReportAI.js`（1178 行）仍贴线，留后续批次；本批纯结构重构，无能力面变化。
+
+---
+
 ## 2026-11-26 批次 D325 · BooleanBlindDetector 贴线大文件主动拆分
 
 **起点**：11-23 路线图优先级 7「贴线大文件主动拆分」。拆分前 `BooleanBlindDetector.js`

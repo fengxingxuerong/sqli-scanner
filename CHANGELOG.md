@@ -7,19 +7,41 @@
 > 下一批次起的条目写在这里。发版时把本节整体升为 `## [x.y.z] - YYYY-MM-DD` 并补汇总段。
 
 <!-- changelog-index:start -->
-**本段覆盖 5 个批次（D321–D325，2026-11-25 → 2026-11-26）**。正文按时间倒序排列；
+**本段覆盖 6 个批次（D321–D326，2026-11-25 → 2026-11-26）**。正文按时间倒序排列；
 下表是同一批次的索引，便于按编号或关键词定位。**索引只是导航，正文未做任何删改**
 （被推翻的旧结论原样保留，这是本仓的既定口径）。新增批次后跑
 `node scripts/changelog-index.mjs --write` 重生成，`--check` 校验是否过期。
 
 | 批次 | 日期 | 主题 |
 |---|---|---|
+| D326 | 11-26 | TargetParser 表单解析族主动拆分 |
 | D325 | 11-26 | BooleanBlindDetector 贴线大文件主动拆分 |
 | D324 | 11-26 | Dependabot 依赖债清账（绿组合并 + engine 组 rebase） |
 | D323 | 11-25 | 测试失败证据有界保留 |
 | D322 | 11-25 | Benchmark 构建偶发依赖解析抖动的有限重试 |
 | D321 | 11-25 | Release 安装包名规范与校验清单失配修复 |
 <!-- changelog-index:end -->
+
+### 2026-11-26 批次 D326 · TargetParser 表单解析族主动拆分
+
+**起点**：路线图 #7 的第二块。D325 后 `TargetParser.js` 1190 行距 1200 硬上限仅 10 行
+——沿用「纯函数族整体搬移 + 原类薄委托」，不走到基线豁免。
+
+**改动**：
+- 新建 `server/src/engine/formParse.js`（169 行）：5 个表单解析方法 + `CSRF_RE` + `pickSelectValue`
+  完整搬入；内部 `this._attr` 改为共享 `attrValue`（D247 单一真源）；D120/D171/D168 判据注释原文保留。
+- TargetParser 1190 → **1088 行**（留 112 行余量），5 处单行薄委托；类内与类外
+  `parser._parseForms` / `parser._urlWithValues` 调用点零改动。
+
+**验证**：2000 组随机表单 HTML 对拍旧类原型 vs 新模块导出 MISMATCH=0；server npm test
+4402 / 4396 pass / 0 fail / 6 skip；缺陷注入（`enctype → ''`）令 D168 判据真红（9 中 1 fail），
+备份恢复后 9/9 回绿。首轮注入点选在未被断言的 `buttonNames`（9/9 全绿=不可达），按纪律换到
+被断言字段重做。complexity / arch / deadcode / lint（0 error / 4 既存 warning）/ typecheck /
+facts:check / gate:fast 17/17 全绿。
+
+**边界**：ReportAI（1178 行）仍贴线，留后续；纯结构重构，无能力面变化。
+
+---
 
 ### 2026-11-26 批次 D325 · BooleanBlindDetector 贴线大文件主动拆分
 
