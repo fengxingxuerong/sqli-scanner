@@ -7,17 +7,45 @@
 > 下一批次起的条目写在这里。发版时把本节整体升为 `## [x.y.z] - YYYY-MM-DD` 并补汇总段。
 
 <!-- changelog-index:start -->
-**本段覆盖 3 个批次（D321–D323，2026-11-25 → 2026-11-25）**。正文按时间倒序排列；
+**本段覆盖 4 个批次（D321–D324，2026-11-25 → 2026-11-26）**。正文按时间倒序排列；
 下表是同一批次的索引，便于按编号或关键词定位。**索引只是导航，正文未做任何删改**
 （被推翻的旧结论原样保留，这是本仓的既定口径）。新增批次后跑
 `node scripts/changelog-index.mjs --write` 重生成，`--check` 校验是否过期。
 
 | 批次 | 日期 | 主题 |
 |---|---|---|
+| D324 | 11-26 | Dependabot 依赖债清账（绿组合并 + engine 组 rebase） |
 | D323 | 11-25 | 测试失败证据有界保留 |
 | D322 | 11-25 | Benchmark 构建偶发依赖解析抖动的有限重试 |
 | D321 | 11-25 | Release 安装包名规范与校验清单失配修复 |
 <!-- changelog-index:end -->
+
+### 2026-11-26 批次 D324 · Dependabot 依赖债清账（绿组合并 + engine 组 rebase）
+
+**起点**：11-23 路线图优先级 2「Dependabot 10 PR 清账」，远端实读已达 16 个开放 PR。
+四个 CI 全绿：#29 rust / #31 frontend / #27 engine / #22 actions/cache。
+
+**改动**：
+- 经 GitHub API squash 合并 #29（571628d）、#22（6a6549）、#31（baa8e8a）。三组 push CI 的
+  lint / test-frontend / audit 均 success；最终含全部合并的 CI #45681802626 **success**。
+- #27 分支基于 v1.3.3，56 文件 diff 含历史倒退，合并 API 返回 405；改在本地 master 上
+  `npm install --package-lock-only` 精确 pin 四依赖（pglite 0.5.16 / axios 1.21.1 /
+  mssql 12.7.14 / sql.js 1.16.0）重做，仅动 `server/package.json` + lock（24+/24-）。
+- 验证：server npm test 4402 用例 / 4396 pass / 0 fail / 6 skip；gate:fast 18/18；facts:check 绿。
+
+**自纠（推翻链，保留旧数字）**：facts:refresh 两轮采到前端覆盖率 **38.30 / 79.93 / 56.13**
+（旧真值 93.31 / 84.53 / 81.02，来自 2026-11-25 17:31 那轮）。假值已被写进 README。
+根因：vitest `coverage/.tmp` 的 worker 退出空快照合并进报告——日志里每个源文件出现
+「正常覆盖率 + 0%」两行，stmts 阈值 88 当场红。首轮误判 safe-delete 批量守卫，清空 coverage/
+后复现；次轮 `CODEBUDDY_SAFE_DELETE_ENABLED=0` 关守卫后**仍复现**，证明是本机 coverage 采集
+本身不稳定，与沙箱无关。处置：停用假值 → README 与 _facts.json 恢复旧真值（generatedAt 仍为
+11-25 17:31，本轮仅更新测试数指纹）→ facts:check 绿。**本轮覆盖率数字作废，不对外引用。**
+
+**边界**：#27 PR 保留开放（base 过期无法直合，本会话未做外部关闭）；其余 12 个 PR 未合并，
+其中 macOS test-matrix 失败为 `extractor.timeDrift` 已知时序族（30s 超时 / 448 请求），
+与依赖无关；major 升级（#13/#14/#15/#16/#3/#2 等）各需单独批次带前端回归。
+
+---
 
 ### 2026-11-25 批次 D323 · 测试失败证据有界保留
 

@@ -5,6 +5,35 @@
 
 ---
 
+## 2026-11-26 批次 D324 · Dependabot 依赖债清账（绿组合并 + engine 组 rebase）
+
+**起点**：11-23 路线图优先级 2「Dependabot 10 PR 清账」。远端实读发现已涨到 16 个开放 PR
+（11-24 批量刷新），其中 4 个 CI 全绿（#29 rust / #31 frontend / #27 engine / #22 actions/cache）。
+
+**改动**：
+- 合并 #29（rust-minor，571628d）、#22（actions/cache 4→6，6a6549）、#31（frontend-minor 9 项，baa8e8a）。
+  三组 push CI 的 lint / test-frontend / audit 全 success；最终含全部合并的 CI #45681802626 **success**。
+- #27（engine-minor：pglite 0.5.16 / axios 1.21.1 / mssql 12.7.14 / sql.js 1.16.0）分支基于 v1.3.3，
+  56 文件 diff 含大量历史倒退，405 无法直合。改在本地当前 master 上 `npm install --package-lock-only`
+  精确 pin 四依赖重做，改动仅 `server/package.json` + `server/package-lock.json`（24+/24-）。
+- `server npm test` 4402 用例 / 4396 pass / 0 fail / 6 skip；gate:fast 18/18；facts:check 绿。
+
+**自纠（假数据推翻链）**：facts:refresh 两轮采到前端覆盖率 **38.30 / 79.93 / 56.13**，
+并把假值写进 README。根因：vitest `coverage/.tmp` 的 worker 退出空快照被合并进报告
+（日志里每个源文件出现「正常 + 0%」两行，阈值 stmts 88 当场红）。`CODEBUDDY_SAFE_DELETE_ENABLED=0`
+关守卫后仍复现两轮 ⇒ 不是沙箱守卫，是本机 coverage 采集本身不稳定。
+处置：停用假值 → 恢复 HEAD 真值 **93.31 / 84.53 / 81.02**（generatedAt 沿用 11-25 17:31 那轮，
+本轮只更新测试数指纹）→ facts:check 绿。**本轮覆盖率数字不采信，不对外引用。**
+
+**边界**：
+- #27 PR 保留开放（base 过期，无法直合），依赖升级以本批次本地提交为准；
+  后续需在 GitHub 侧关闭 #27 或 rebase 分支（本会话未做外部关闭动作）。
+- 其余 12 个 PR（#23/#21/#11/#7 major、#16/#15/#14/#13 major、#6/#5/#3/#2 major）未合并，
+  失败 job 多为同一 `extractor.timeDrift` 时序族（macOS run #45681745484 的 30s 超时 / 448 请求），
+  与依赖无关；major 升级各需单独批次带前端回归。
+
+---
+
 ## 2026-11-25 批次 D323 · 测试失败证据有界保留
 
 **起点**：D319 的 `logs/test-evidence/` 单轮 TAP 可超 1MB，长期会形成新的无界日志面。
