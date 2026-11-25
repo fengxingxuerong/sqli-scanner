@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { writeTestEvidence } from '../../scripts/lib/testEvidence.mjs';
+import { pruneTestEvidence, TEST_EVIDENCE_KEEP, writeTestEvidence } from '../../scripts/lib/testEvidence.mjs';
 import { collectFrontend, collectServer } from '../../scripts/facts-sync.mjs';
 
 function tempRoot(t) {
@@ -141,4 +141,53 @@ test('失败证据：超过十条也保留全部失败用例名', (t) => {
   const meta = JSON.parse(readFileSync(ev.metaPath, 'utf8'));
   assert.equal(meta.failures.length, 12);
   assert.match(meta.failures[11].title, /用例12/);
+});
+
+function seedEvidenceGroup(root, index) {
+  const dir = join(root, 'logs', 'test-evidence');
+  mkdirSync(dir, { recursive: true });
+  const base = `seed-${index}`;
+  const log = join(dir, `${base}.log`);
+  const json = join(dir, `${base}.json`);
+  writeFileSync(log, `log-${index}`);
+  writeFileSync(json, '{}');
+  const mtime = new Date(Date.UTC(2026, 0, 1) + index * 1000);
+  utimesSync(log, mtime, mtime);
+  utimesSync(json, mtime, mtime);
+  return { log, json };
+}
+
+test('失败证据：按运行组有界保留，最旧 log/json 成对删除且不碰其它文件', (t) => {
+  const root = tempRoot(t);
+  const groups = Array.from({ length: 5 }, (_, i) => seedEvidenceGroup(root, i));
+  const unrelated = join(root, 'logs', 'test-evidence', 'README.txt');
+  writeFileSync(unrelated, 'keep');
+  const removed = pruneTestEvidence(root, 3);
+  assert.equal(removed.length, 4);
+  for (const group of groups.slice(0, 2)) {
+    assert.equal(existsSync(group.log), false);
+    assert.equal(existsSync(group.json), false);
+  }
+  for (const group of groups.slice(2)) {
+    assert.equal(existsSync(group.log), true);
+    assert.equal(existsSync(group.json), true);
+  }
+  assert.equal(readFileSync(unrelated, 'utf8'), 'keep');
+});
+
+test('失败证据：每次写入自动修剪到默认 8 组，新现场永远保留', (t) => {
+  const root = tempRoot(t);
+  for (let i = 0; i < TEST_EVIDENCE_KEEP; i++) seedEvidenceGroup(root, i);
+  const ev = writeTestEvidence({ root, suite: 'server', attempt: 'first', command: 'node --test', exitCode: 1, output: tap(true) });
+  assert.equal(existsSync(ev.outputPath), true);
+  assert.equal(existsSync(ev.metaPath), true);
+  assert.equal(metadata(root).length, TEST_EVIDENCE_KEEP);
+  assert.equal(existsSync(join(root, 'logs', 'test-evidence', 'seed-0.log')), false);
+});
+
+test('失败证据：保留数非法必须拒绝，不能退化成无限增长', (t) => {
+  const root = tempRoot(t);
+  for (const keep of [0, -1, 1.5, Number.NaN]) {
+    assert.throws(() => pruneTestEvidence(root, keep), /正整数/);
+  }
 });

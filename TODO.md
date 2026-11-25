@@ -5,6 +5,22 @@
 
 ---
 
+## 2026-11-25 批次 D323 · 测试失败证据有界保留
+
+**起点**：D319 的 `logs/test-evidence/` 单轮 TAP 可超 1MB，长期会形成新的无界日志面。
+
+**改动**：
+- `testEvidence.mjs` 新增按运行组修剪：默认保留最新 8 组，`.log`/`.json` 成对删除，
+  目录内其它文件不动；每次写入自动执行，非法保留数 fail-closed。
+- `testEvidence.guard.test.js` 新增 3 判据（最旧组删除、自动修剪、非法参数），合并 11/11。
+
+**验证**：定向 11/11、ESLint/语法通过；facts 重采 4402 用例（4396 pass / 0 fail / 6 skip）；
+gate:fast 与 gate:close 55/55 全绿。
+
+**边界**：只治理 `logs/test-evidence/`，不删除其它业务日志；8 组约覆盖 4 次失败采集。
+
+---
+
 ## 2026-11-25 批次 D322 · Benchmark 构建偶发依赖解析抖动的有限重试
 
 **起点**：tag CI #497「启动 Benchmark」红，根因为 `maven-buildtime-extension:3.0.5`
