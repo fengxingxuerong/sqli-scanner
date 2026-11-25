@@ -50,11 +50,13 @@
   统一改为 `sqli-scanner-<version>-x64-setup.exe`，版本号做路径安全校验；0/多安装包直接失败。
 - CI 在生成 SBOM/SHA256SUMS 之前执行规范步骤，校验清单与最终上传名同源。
 - `releaseWiring.wiring.test.js` 新增 4 条判据：中文名规范化、manifest 不动、0/多包拒绝、
-  版本路径注入拒绝与 CI 接线，合并 10/10。
+  版本路径注入拒绝与 CI 接线，合并 10/10；`ciWindowsOnly.guard` 为两处纯文件改名登记安全例外，
+  合并定向 17/17。
 - 已用认证 `gh` 修正 v1.4.2 的 `SHA256SUMS.txt` 资产；API 复核 5 条清单与 5 个非校验资产
   的 SHA256 全部一致，manifest 版本为 1.4.2。
 
-**验证**：定向 10/10、ESLint/语法/CI YAML 解析通过；v1.4.2 Release 6 资产、0 哈希/文件名不匹配。
+**验证**：定向 17/17、ESLint/语法/CI YAML 解析通过；facts 重采 4399 用例（4393 pass / 0 fail /
+6 skip）；gate:fast 17/17、gate:close 55/55；v1.4.2 Release 6 资产、0 哈希/文件名不匹配。
 tag CI #497 整体 failure 的唯一红点是 acceptance 的 Benchmark 启动步骤；产物构建与 Release 均 success。
 
 **自纠（同批收口前实测）**：上述 CI 接线最初传 root=`release-assets`，而脚本内部再

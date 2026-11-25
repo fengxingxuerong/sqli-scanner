@@ -1,6 +1,6 @@
 # sqli-scanner
 
-[![Tests](https://img.shields.io/badge/tests-4978%20passing-brightgreen)](#测试)[![CI](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml/badge.svg)](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml)
+[![Tests](https://img.shields.io/badge/tests-4976%20passing-brightgreen)](#测试)[![CI](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml/badge.svg)](https://github.com/fengxingxuerong/sqli-scanner/actions/workflows/ci.yml)
 [![Dependencies](https://img.shields.io/badge/prod%20deps-0%20known%20vulns-brightgreen)](SECURITY.md)
 
 > CI 徽章为真实状态（红绿以 GitHub Actions 实跑为准）。发布判定仍以 `CHANGELOG.md`
@@ -494,8 +494,8 @@ npm run artifact:drift   # 入库的 e2e 基线产物必须等于当前代码跑
 ## 项目状态
 
 - TypeScript: 零错误
-- 前端测试: 583/583 通过（覆盖率门禁 stmts 93.31 / branch 84.54 / func 81.02，阈值 88/77/67）
-- 服务端测试: 4399 用例（4395 pass / 0 fail / 4 skip，并发口径 2026-11-24 复测；4 skip 为环境依赖显式跳过。覆盖率 lines 95.37 / branch 81.68 / func 89.44，阈值 85/74/77）
+- 前端测试: 583/583 通过（覆盖率门禁 stmts 93.31 / branch 84.51 / func 81.02，阈值 88/77/67）
+- 服务端测试: 4399 用例（4393 pass / 0 fail / 6 skip，并发口径 2026-11-25 复测；6 skip 为环境依赖显式跳过。覆盖率 lines 95.35 / branch 81.55 / func 89.44，阈值 85/74/77）
 - 一键扫描: `npm run scan -- -u <url>`（CLI 一条命令产出 HTML/JSON/Markdown 全套报告 + manifest，退出码可直接进 CI 门禁）
 - Tamper 插件: 234 个（含批次 D3 新增 scalarselectinline；含 v24 增量 20 个，对齐 sqlmap 官方 tamper 全集，含官方 CRS/libinjection 实测组合 uniontable+odbcbrace；含批次 D13 新增 5 件上游形态变体 *nospace/*open/*block，真机 A/B 判决前不进默认链）
 - WAF 绕过能力: 200+ 插件链式组合，覆盖 62 个 WAF 厂商指纹识别 + 推荐

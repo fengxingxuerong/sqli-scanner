@@ -28,10 +28,12 @@
 **改动**：
 - 新增 `scripts/normalize-release-assets.mjs`，Release job 在哈希/上传前将唯一 exe 统一为
   `sqli-scanner-<version>-x64-setup.exe`；0/多包与非法版本 fail-closed。
-- CI 接在 download-artifact 之后、SBOM/SHA256 之前；releaseWiring 新增 4 判据，合计 10/10。
+- CI 接在 download-artifact 之后、SBOM/SHA256 之前；releaseWiring 新增 4 判据，合计 10/10；
+  ciWindowsOnly 为两处纯文件改名登记安全例外，合并定向 17/17。
 - 认证 gh 修正 v1.4.2 的 SHA256SUMS 资产，API 复核 0 哈希/文件名不匹配。
 
-**验证**：定向 10/10、lint/语法/YAML 解析通过；v1.4.2 manifest=1.4.2、6 资产。
+**验证**：定向 17/17、lint/语法/YAML 解析通过；facts 重采 4399 用例（4393 pass / 0 fail /
+6 skip）；gate:fast 17/17、gate:close 55/55；v1.4.2 manifest=1.4.2、6 资产、0 校验不匹配。
 tag CI #497 仅 acceptance 的 Benchmark 启动红，desktop-package/release/docker-publish 均 success。
 
 **自纠**：首版 CI 传 root=`release-assets`（脚本内部还会 join `release-assets`），真 runner 必红；
