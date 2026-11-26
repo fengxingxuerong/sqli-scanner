@@ -5,6 +5,42 @@
 
 ---
 
+## 2026-11-26 批次 D327 · ReportAI prompt 族主动拆分（贴线三连收官）
+
+**起点**：11-23 路线图 #7 最后一块。D325/D326 之后 `ReportAI.js` 1178 行、
+距 1200 硬上限 22 行，是最后一个贴线文件。本批完成后路线图 #7 收官。
+
+**改动**：
+- 新建 `server/src/services/reportAiPrompt.js`（358 行）：prompt 构建 / 脱敏 / trace 判据族
+  （`safeEvidence` / `formatBasis` / `buildAnalystPrompt` / `shortPayload` /
+  `compressAnalysisForWriter` / `hostForPrompt` / `buildWriterPrompt` / `buildReviewerPrompt` /
+  `maskUrl` / `valueForPrompt` / `urlPathForPrompt` / `summarizeTrace` 及内部辅助
+  `numOrNull` / `sampleLens` / `pickDiffer`）完整搬入。**判据注释原文保留**（D205/D275
+  的脱敏外发教训不因搬移丢失）。
+- `MASK_ENABLED` 仍在**模块加载时求值**（与原文件一致）——测试通过
+  `delete process.env.AI_REPORT_MASK` + 动态 import 控制脱敏，求值时机不得改。
+- `ReportAI.js` 1178 → **847 行**；改为 import 新模块 + `export { summarizeTrace }`
+  保持对外 API 兼容（测试与外部调用点零改动）。
+
+**验证**：
+- 对拍：旧段源码（`new Function` 注入 `buildBoundaryFacts`/`boundaryPromptBlock`）vs 新模块导出，
+  **脱敏态与未脱敏态各 29 组全一致（MISMATCH=0）**。
+- `server npm test` 4402 用例 / 4396 pass / 0 fail / 6 skip。
+- 缺陷注入复验：注入 `maskUrl → 'INJECT-DEFFECT-HOST'` 后 D275 脱敏断言真红
+  （`reportAI.service.test.js` 11 中 1 fail），备份恢复后 11/11 回绿。
+- complexity / arch / deadcode / lint（0 error / 4 既存 warning）/ typecheck / facts:check /
+  gate:fast 17/17 全绿。
+
+**D326 CI 结论**：首跑 macOS `fetchUsing.test.js` 时间通道用例红（三抽错值 `5-7.40`、
+耗时 12.8s，本地同用例 4.5s 通过、无 TargetParser/formParse 依赖链）。按纪律用
+`rerun-failed-jobs` 端点重跑同一 sha：**attempt 2 success** —— 同 sha 一红一绿，
+证实为 macOS 时序 flake，与 D326 改动无关。
+
+**边界**：路线图 #7 三个贴线文件全部主动拆分完毕（均留 100+ 行改动余量），
+本批无能力面变化、不带检出数字。
+
+---
+
 ## 2026-11-26 批次 D326 · TargetParser 表单解析族主动拆分
 
 **起点**：11-23 路线图优先级 7 的第二块。D325 拆 BooleanBlindDetector 后，

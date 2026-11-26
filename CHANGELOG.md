@@ -7,13 +7,14 @@
 > 下一批次起的条目写在这里。发版时把本节整体升为 `## [x.y.z] - YYYY-MM-DD` 并补汇总段。
 
 <!-- changelog-index:start -->
-**本段覆盖 6 个批次（D321–D326，2026-11-25 → 2026-11-26）**。正文按时间倒序排列；
+**本段覆盖 7 个批次（D321–D327，2026-11-25 → 2026-11-26）**。正文按时间倒序排列；
 下表是同一批次的索引，便于按编号或关键词定位。**索引只是导航，正文未做任何删改**
 （被推翻的旧结论原样保留，这是本仓的既定口径）。新增批次后跑
 `node scripts/changelog-index.mjs --write` 重生成，`--check` 校验是否过期。
 
 | 批次 | 日期 | 主题 |
 |---|---|---|
+| D327 | 11-26 | ReportAI prompt 族主动拆分（贴线三连收官） |
 | D326 | 11-26 | TargetParser 表单解析族主动拆分 |
 | D325 | 11-26 | BooleanBlindDetector 贴线大文件主动拆分 |
 | D324 | 11-26 | Dependabot 依赖债清账（绿组合并 + engine 组 rebase） |
@@ -21,6 +22,26 @@
 | D322 | 11-25 | Benchmark 构建偶发依赖解析抖动的有限重试 |
 | D321 | 11-25 | Release 安装包名规范与校验清单失配修复 |
 <!-- changelog-index:end -->
+
+### 2026-11-26 批次 D327 · ReportAI prompt 族主动拆分（贴线三连收官）
+
+**起点**：路线图 #7 最后一块。D325/D326 后 `ReportAI.js` 1178 行距 1200 上限 22 行。
+
+**改动**：新建 `services/reportAiPrompt.js`（358 行）承载 prompt 构建 / 脱敏 / trace 判据族，
+判据注释原文保留；`MASK_ENABLED` 保持模块加载时求值（测试靠动态 import 控脱敏，时机不可改）；
+ReportAI 1178 → **847 行**，import 新模块并 `export { summarizeTrace }` 保持 API 兼容。
+
+**验证**：脱敏态/未脱敏态各 29 组源码对拍 MISMATCH=0；server npm test
+4402 / 4396 pass / 0 fail / 6 skip；缺陷注入 `maskUrl → 'INJECT-DEFFECT-HOST'` 令 D275
+脱敏断言真红（11 中 1 fail）、备份恢复后 11/11 回绿；complexity / arch / deadcode /
+lint（0 error / 4 既存 warning）/ typecheck / facts:check / gate:fast 17/17 全绿。
+
+**D326 CI 结论**：首跑 macOS `fetchUsing.test.js` 时间通道红（12.8s、本地 4.5s 通过、
+无依赖链），同 sha `rerun-failed-jobs` 重跑 **attempt 2 success** ⇒ macOS 时序 flake，与 D326 无关。
+
+**边界**：路线图 #7 三文件全部主动拆分完毕（各留 100+ 行余量），无能力面变化。
+
+---
 
 ### 2026-11-26 批次 D326 · TargetParser 表单解析族主动拆分
 
