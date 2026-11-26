@@ -7,13 +7,14 @@
 > 下一批次起的条目写在这里。发版时把本节整体升为 `## [x.y.z] - YYYY-MM-DD` 并补汇总段。
 
 <!-- changelog-index:start -->
-**本段覆盖 7 个批次（D321–D327，2026-11-25 → 2026-11-26）**。正文按时间倒序排列；
+**本段覆盖 8 个批次（D321–D328，2026-11-25 → 2026-11-26）**。正文按时间倒序排列；
 下表是同一批次的索引，便于按编号或关键词定位。**索引只是导航，正文未做任何删改**
 （被推翻的旧结论原样保留，这是本仓的既定口径）。新增批次后跑
 `node scripts/changelog-index.mjs --write` 重生成，`--check` 校验是否过期。
 
 | 批次 | 日期 | 主题 |
 |---|---|---|
+| D328 | 11-26 | Dependabot 清账第二轮 + CodeQL v4 迁移 |
 | D327 | 11-26 | ReportAI prompt 族主动拆分（贴线三连收官） |
 | D326 | 11-26 | TargetParser 表单解析族主动拆分 |
 | D325 | 11-26 | BooleanBlindDetector 贴线大文件主动拆分 |
@@ -22,6 +23,24 @@
 | D322 | 11-25 | Benchmark 构建偶发依赖解析抖动的有限重试 |
 | D321 | 11-25 | Release 安装包名规范与校验清单失配修复 |
 <!-- changelog-index:end -->
+
+### 2026-11-26 批次 D328 · Dependabot 清账第二轮 + CodeQL v4 迁移
+
+**PR 处置**（13 → 10 开放）：关闭 #11（setup-node v7 已在 master 9 处）、
+#27（四依赖已在 D324 pin 到目标版）、#7（本批应用其全部 3 处 codeql v4 改动）。
+#21/#23 仅 tag/release 路径生效、当前 CI 不触发，**未验证不盲升**；
+8 个 major（dotenv/express/nanoid/socks + MUI/TS/React/Vite）各留单独批次带回归。
+
+**改动**：`.github/workflows/codeql.yml` init/analyze + `action.yml` upload-sarif，
+3 处 `@v3 → @v4`。官方：v3 于 2026-12 弃用，v4 是当前唯一支持版本；本仓用法无需额外改造。
+
+**验证**：gate:fast 15/15（只动 workflow，受影响面推导），readme:check / facts:check /
+greenguard 全绿。代码测试面未动，不跑 server 全量与 coverage。
+
+**边界**：D327 CI 首跑 Windows `browserCrawler` 27s 超时（本地 6.8s 通过、无依赖链），
+同 sha 重跑 Windows attempt 2 success —— 证实 headless 时序 flake，与 D327 无关。
+
+---
 
 ### 2026-11-26 批次 D327 · ReportAI prompt 族主动拆分（贴线三连收官）
 

@@ -5,6 +5,38 @@
 
 ---
 
+## 2026-11-26 批次 D328 · Dependabot PR 清账（第二轮）+ CodeQL v4 迁移
+
+**起点**：11-23 路线图 #2 续。用户选定「Dependabot PR 清账」方向；开工时 13 个开放 PR。
+
+**PR 对账与处置**（远端 API 实读 2026-11-26）：
+
+| PR | 目标 | 处置 | 依据 |
+|---|---|---|---|
+| #11 | setup-node 4→7 | **关闭** | master 9 处 workflow 引用均已是 `@v7`；分支 59 文件 diff 含旧历史倒退 |
+| #27 | engine 四依赖 | **关闭** | pglite 0.5.16 / axios 1.21.1 / mssql 12.7.14 / sql.js 1.16.0 已在 D324 精确 pin |
+| #7 | codeql-action 3→4 | **关闭** | 本批本地应用全部 3 处（见下）；v3 将于 2026-12 弃用 |
+| #21 | login-action 3→4 | 保留开放 | 仅 tag/release 路径生效，当前 CI 不触发，需发版轮验证 |
+| #23 | download-artifact 4→8 | 保留开放 | 同上；v8 为 2026 新版，不在无验证条件下盲升 |
+| #2/#3/#5/#6 | dotenv 18 / express 5 / nanoid 6 / socks 10 | 保留开放 | server major，各需带回归 |
+| #13/#14/#15/#16 | MUI 9 / TS 7 / React major / Vite 8 | 保留开放 | frontend major，各需带前端回归 + 截图对比 |
+
+**改动**：`.github/workflows/codeql.yml` 的 `init` / `analyze` 与 `action.yml` 的 `upload-sarif`
+共 3 处 `@v3` → `@v4`。官方迁移要求（2026-11 实查）：v3 于 **2026-12 弃用**、
+v4 运行 Node 24 是当前唯一支持版本；本仓用法（init/analyze 子路径 + languages/build-mode，
+upload-sarif 子路径）无需额外改造。全仓 `codeql-action` 引用已 grep 确认仅这 3 处。
+
+**验证**：`gate:fast` 15/15（受影响面推导，本批只动 workflow，
+恒跑组照跑、测试面不空转）、`readme:check` 绿、`facts:check` 绿、`greenguard` 绿。
+代码与测试面未动，故不跑 server 全量与 coverage。
+
+**边界**：#21/#23 虽是标准单行升级，但只在 tag/release job 生效，
+本仓 CI 在 push/PR 轮不执行这两处——**未验证即不盲升**，留待发版轮或专门验证后处置。
+D327 的 CI 首跑 Windows `browserCrawler` 时间通道红（27s 超时、本地 6.8s 通过、无依赖链），
+同 sha 重跑 **Windows attempt 2 success** —— 一红一绿证实为 headless 浏览器时序 flake，与 D327 无关。
+
+---
+
 ## 2026-11-26 批次 D327 · ReportAI prompt 族主动拆分（贴线三连收官）
 
 **起点**：11-23 路线图 #7 最后一块。D325/D326 之后 `ReportAI.js` 1178 行、
